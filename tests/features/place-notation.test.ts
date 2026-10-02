@@ -21,6 +21,7 @@ import {
   connectPlaces,
   addPlace,
   isPlaceOpen,
+  placeEntryLids,
   movePlace,
   NEW_PLACE_H,
   NEW_PLACE_W,
@@ -101,6 +102,47 @@ describe('板の開き行の受理(isPlaceOpen)── 描画と同じ形だけ',
     for (const at of opens) {
       expect(isPlaceOpen(lines[at]!), `line ${at}: ${lines[at]}`).toBe(true);
     }
+  });
+});
+
+describe('板が置いているノート(placeEntryLids)── 描画と同じ読み方(#1266)', () => {
+  const body = [
+    '---',
+    'title: 板',
+    '---',
+    ':::format{#a .pkc-place entry=n1 x=0 y=0}',
+    ':::',
+    '::: {.pkc-place entry=n2 x=1 y=1}',
+    ':::',
+    ':::format{.pkc-place x=2 y=2}', // entry が無い(付箋)
+    ':::',
+    ':::format{.pkc-other entry=n9}', // 板ではない
+    ':::',
+    '::::format{.pkc-place entry=n8 x=9}', // 4 コロンは描画されない
+    '::::',
+    '```',
+    ':::format{.pkc-place entry=n7 x=3 y=3}', // fence の中は原文
+    ':::',
+    '```',
+    ':::format{.pkc-place entry=n3 x=4 y=4}',
+    ':::',
+  ].join('\n');
+
+  it('🔴 板として描かれる塊の entry だけを、書いた順に返す(付箋・別の塊・4 コロン・fence の中は数えない)', () => {
+    expect(placeEntryLids(body)).toEqual(['n1', 'n2', 'n3']);
+    expect(placeEntryLids('板ではない本文\n\n- [ ] x')).toEqual([]);
+  });
+
+  it('🔴 描画との合意: 実物の描画が板として描いた塊の `entry` と、同じ集合・同じ順', () => {
+    const html = renderMarkdown(body, { sourceLineAnchors: true } as never);
+    const rendered = [
+      ...html.matchAll(
+        /<div[^>]*class="[^"]*pkc-format-block[^"]*pkc-place[^"]*"[^>]*data-pkc-entry="([^"]*)"/g,
+      ),
+    ].map((m) => m[1]!);
+    // ⚠ 空振り防止 ── 描画が entry を焼いていない世界なら、この比較は 0 件 = 0 件で緑になる
+    expect(rendered.length, '台の前提:描画が entry つきの塊を描いていない').toBe(3);
+    expect(placeEntryLids(body)).toEqual(rendered);
   });
 });
 

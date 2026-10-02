@@ -1477,6 +1477,32 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     .toBe(2);
   expect(page.url(), 'Escape で替わった').toBe(urlBefore);
 
+  // 🔴 暗い背景を押すと焦点が body へ落ちる ── それでも Escape は「やめる」(箱の中だけで受けていると LO へ流れる。#1266)
+  await request('b.docx');
+  await expect(unsaved).toBeVisible();
+  const bgHit = await page.evaluate(() => document.elementFromPoint(8, 200)?.id);
+  expect(bgHit, '台の前提:(8,200)が確認の暗い背景に当たっていない').toBe('unsaved');
+  await page.mouse.click(8, 200);
+  expect(
+    await page.evaluate(() => document.activeElement?.id),
+    '背景を押したら焦点が「やめる」へ戻るはず(body へ落ちている)',
+  ).toBe('unsaved-cancel');
+  await expect(unsaved, '背景を押しただけで閉じた(閉じるのは「やめる」「開く」「Escape」だけ)').toBeVisible();
+  // 対照群を兼ねる ── 焦点を箱の外へ**強制的に**落としても Escape が効く(document の capture)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  expect(await page.evaluate(() => document.activeElement === document.body), '台の前提:焦点が body に落ちていない').toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(unsaved, '焦点が箱の外でも Escape で閉じるはず').toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __declined: number }).__declined), { message: '背景 → Escape で「やめた」が返っていない' })
+    .toBe(3);
+  expect(page.url(), '背景 → Escape で替わった').toBe(urlBefore);
+  // 🔴 閉じた後の Escape は奪わない(箱の鍵が外れている)── 外れていないと、LO の Escape が黙って潰れる
+  expect(
+    await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))),
+    '確認を閉じた後も Escape を止めている(LO へ届かない)',
+  ).toBe(true);
+
   // 「開く」── 最後に頼まれた文書へ替わる(確認が出ている間に 2 件続けて頼んでも箱は 1 つ)
   await request('c.docx');
   await expect(unsaved).toBeVisible();

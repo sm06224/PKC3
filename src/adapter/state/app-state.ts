@@ -88,7 +88,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
-import { isLineOpen, isPlaceOpen } from '@features/markdown/place-notation';
+import { isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
 import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
@@ -9005,7 +9005,10 @@ function reduceCore(
       const next = excerptOf(action.body, state.entryMetas.get(action.lid)?.archetype);
       const prev = have.get(action.lid);
       if (prev !== undefined && sameExcerpt(prev, next)) return { state, events: [] };
-      return { state: { ...state, placeBodies: withPlaceBody(have, action.lid, next) }, events: [] };
+      return {
+        state: { ...state, placeBodies: withPlaceBody(have, action.lid, next, () => placeLidsOnScreen(state)) },
+        events: [],
+      };
     }
     case 'SPLIT_RESTORED': {
       const restored = normalizeSplitLids(action.lids);
@@ -9803,21 +9806,45 @@ export function placeBodiesOf(state: AppState): ReadonlyMap<string, PlaceExcerpt
 /**
  * 板のための本文を 1 件入れる。⚠ **入れ直した物を「いちばん新しい」へ**(Map は挿入順)し、
  * 上限(`PLACE_BODY_CAP`)を超えたら**いちばん古い物から**手放す。
+ *
+ * 🔴 **ただし、いま画面に出ている板が置いているノートの分は手放さない**(`onScreen`)。
+ * ⚠ 手放す相手を「古い順」だけで決めると、板を 2 つ並べた(主の枠 + 横に留めた枠)とき、
+ *   **片方の板の読み込みがもう片方の抜粋を手放し、手放された側が頼み直し、今度は相手が手放される**
+ *   ── 静まらない(150 枠 + 150 枠で 30 周 = 3,300 件を読み続けた)。
+ * 🔑 手放さないのは「いま要る物」だけなので、**上限は「要る物より多いときだけ」効く**
+ *   (板を離れれば、その板の分は次の読み込みから古い順で手放せる)。
+ *   ⚠ 1 つの板が頼める数は `PLACE_BODIES_WANTED` が `PLACE_BODY_CAP` で切る(上限を超える板は先頭から)。
+ * ⚠ `onScreen` は**超えたときだけ**呼ぶ(板の本文を数える ── 毎回は数えない)。
  */
 function withPlaceBody(
   bodies: ReadonlyMap<string, PlaceExcerpt>,
   lid: string,
   excerpt: PlaceExcerpt,
+  onScreen: () => ReadonlySet<string>,
 ): ReadonlyMap<string, PlaceExcerpt> {
   const next = new Map(bodies);
   next.delete(lid);
   next.set(lid, excerpt);
-  while (next.size > PLACE_BODY_CAP) {
-    const oldest = next.keys().next().value;
-    if (oldest === undefined) break;
-    next.delete(oldest);
+  if (next.size <= PLACE_BODY_CAP) return next;
+  const keep = onScreen();
+  for (const old of [...next.keys()]) {
+    if (next.size <= PLACE_BODY_CAP) break;
+    // ⚠ 入れたばかりの物は、画面に出ている板が置いていなくても残す(手放すのは古い物)
+    if (old === lid || keep.has(old)) continue;
+    next.delete(old);
   }
   return next;
+}
+
+/**
+ * いま画面に出ている板(主の枠 / 横に留めた枠 ── `screenBodyOf` と同じ 2 つの入れ物)が置いている lid。
+ * ⚠ 板の置き先は本文の `entry=` が正本 ── 板が描くときに頼む lid(`PlaceEmbeds`)と同じ読み方。
+ */
+function placeLidsOnScreen(state: AppState): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (state.openBody) for (const l of placeEntryLids(state.openBody.body)) out.add(l);
+  for (const body of state.splitBodies.values()) for (const l of placeEntryLids(body)) out.add(l);
+  return out;
 }
 
 /**

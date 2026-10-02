@@ -238,12 +238,16 @@ export class OfficeWindow {
    */
   private heldSent: SentDocument | null = null;
   /**
-   * `open({ expectDocument })` で宣言した文書が、まだ `provideDocument` に届いていない間。
+   * `open({ expectDocument })` で宣言した文書のうち、まだ `provideDocument` に届いていない**数**。
    * ⚠ 「やめた」がその**前に**届いたとき、後から来る文書を**受け取らず捨てる**ために要る
    * (添付の bytes は非同期に読むので、確認の答えのほうが先に着くことがある)。
+   * 🔴 **真偽 1 つにしない**(#1266)── 2 件続けて頼むと、先の 1 件が届いた時点で「無い」になり、
+   *   後の 1 件が「やめた」の**後**に届いて窓へ送られる(窓には元の文書が出たままなのに別の文書が入る)。
+   *   届く順は問わない(どちらが先でも、数が 1 つ残っていれば 1 つ捨てる)。
    */
-  private awaitingProvide = false;
-  private discardNextProvide = false;
+  private awaitingProvide = 0;
+  /** 「やめた」の後に届くはずの文書を、受け取らず捨てる**残りの数**(`awaitingProvide` の持ち越し)。 */
+  private discardNextProvide = 0;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
@@ -291,8 +295,9 @@ export class OfficeWindow {
     this.askedForDoc = false;
     const wantsDoc = opts.bytes !== undefined || opts.expectDocument === true;
     // 🔴 「やめた」が来る前の文書は受け取らない、の印は新しい依頼ごとに引き直す(#1228 穴②)
-    this.discardNextProvide = false;
-    this.awaitingProvide = opts.bytes === undefined && opts.expectDocument === true;
+    this.discardNextProvide = 0;
+    this.awaitingProvide =
+      opts.bytes === undefined && opts.expectDocument === true ? this.awaitingProvide + 1 : 0;
     // 🔴 別の文書が来る(or 窓を新しく作る)ので、前の文書の控えは**送り直しの対象から外す**。⚠ 残すと
     //    「次の文書がまだ届いていない間に窓が ready と言った」とき**前の文書を送る**。
     //    ⚠ 生きている窓へ `open({})`(Start Center だけ)と頼むときは窓の中身が変わらないので残す
@@ -342,10 +347,10 @@ export class OfficeWindow {
   ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
-    this.awaitingProvide = false;
+    if (this.awaitingProvide > 0) this.awaitingProvide -= 1;
     // 🔴 窓が「やめた」と言った**後**に届いた文書は受け取らない(窓はもう替わらない)
-    if (this.discardNextProvide) {
-      this.discardNextProvide = false;
+    if (this.discardNextProvide > 0) {
+      this.discardNextProvide -= 1;
       return;
     }
     this.pendingDoc = { name, bytes, token, images, refresh };
@@ -490,8 +495,9 @@ export class OfficeWindow {
   private onDeclined(): void {
     this.pendingDoc = null;
     this.askedForDoc = false;
-    if (this.awaitingProvide) this.discardNextProvide = true;
-    this.awaitingProvide = false;
+    // ⚠ まだ届いていない**数だけ**捨てる印を立てる(1 つ届いた後でも、残りの分は捨てる)
+    this.discardNextProvide += this.awaitingProvide;
+    this.awaitingProvide = 0;
     if (this.heldSent) {
       this.lastSent = this.heldSent;
       this.heldSent = null;

@@ -30,7 +30,7 @@ import {
 } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { sanitizeEmbedded } from '../../src/adapter/ui/render/place-embed';
+import { PlaceEmbeds, sanitizeEmbedded, type PlaceEmbedDeps } from '../../src/adapter/ui/render/place-embed';
 import type { AssetLender } from '../../src/adapter/ui/render/detail';
 import { cacheKey, renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
@@ -309,6 +309,71 @@ describe('state: 板のための本文', () => {
     expect(have.size).toBe(PLACE_BODY_CAP);
     expect(have.has('k0'), '最古が残っている').toBe(false);
     expect(have.has(`k${String(PLACE_BODY_CAP + 4)}`), '最新が無い').toBe(true);
+  });
+
+  /**
+   * 🔴 **いま画面に出ている板が置いている分は、上限でも手放さない**(#1266)。
+   * ⚠ 古い順だけで手放すと、板を 2 つ並べたとき(150 + 150)に**片方の読み込みがもう片方の抜粋を手放し**、
+   *   手放された側が頼み直し、今度は相手が手放される ── 静まらない(下の「板 2 つ」の描画の台で通しで見る)。
+   */
+  describe('上限と、画面に出ている板', () => {
+    const boardOf = (prefix: string, n: number): string =>
+      Array.from({ length: n }, (_, i) => `:::format{.pkc-place entry=${prefix}${String(i)} x=0 y=${String(i * 10)}}\n:::`).join('\n');
+    const withBoard = (n: number): AppState => {
+      const metas = [meta('bd'), ...Array.from({ length: n }, (_, i) => meta(`x${String(i)}`))];
+      let s = booted(metas);
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'bd' }).state;
+      return reduce(s, { type: 'BODY_LOADED', lid: 'bd', body: boardOf('x', n) }).state;
+    };
+    const load = (s: AppState, lid: string): AppState =>
+      reduce(s, { type: 'PLACE_BODY_LOADED', lid, body: 'b' }).state;
+
+    it('🔴 開いている板が置いている抜粋は、上限を超えても古い順に手放されない(板と関係の無い古い物から手放す)', () => {
+      let s = withBoard(150);
+      for (let i = 0; i < 150; i += 1) s = load(s, `x${String(i)}`); // 板の分(いちばん古い側)
+      for (let i = 0; i < 100; i += 1) s = load(s, `z${String(i)}`); // 板と関係の無い物(新しい側)
+      const have = placeBodiesOf(s);
+      expect(have.size, '上限は「要る物より多いとき」に効く').toBe(PLACE_BODY_CAP);
+      for (let i = 0; i < 150; i += 1) expect(have.has(`x${String(i)}`), `板の x${String(i)} が手放された`).toBe(true);
+      expect(have.has('z99'), '最新が無い').toBe(true);
+      expect(have.has('z0'), '板と関係の無い古い物が残っている').toBe(false);
+    });
+
+    it('🔴 横に留めた枠の板が置いている分も同じ(主の枠 + 留めた枠で 2 つの板)', () => {
+      let s = withBoard(120);
+      s = reduce(s, { type: 'SPLIT_RESTORED', lids: ['bs'] }).state;
+      s = reduce(s, { type: 'SPLIT_BODY_LOADED', lid: 'bs', body: boardOf('y', 120) }).state;
+      for (let i = 0; i < 120; i += 1) s = load(s, `x${String(i)}`);
+      for (let i = 0; i < 120; i += 1) s = load(s, `y${String(i)}`);
+      expect(placeBodiesOf(s).size, '2 つの板の分(240)は要る物なので手放さない').toBe(240);
+    });
+
+    it('対照群: 板を離れれば(開いている本文が板でなくなれば)、その分は古い順で手放される', () => {
+      let s = withBoard(150);
+      for (let i = 0; i < 150; i += 1) s = load(s, `x${String(i)}`);
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'x0' }).state;
+      s = reduce(s, { type: 'BODY_LOADED', lid: 'x0', body: '板ではない' }).state;
+      for (let i = 0; i < 100; i += 1) s = load(s, `z${String(i)}`);
+      const have = placeBodiesOf(s);
+      expect(have.size).toBe(PLACE_BODY_CAP);
+      expect(have.has('x0'), '板を離れたのに古い順で手放されない').toBe(false);
+    });
+
+    it('🔑 入れたばかりの物は、要る物で埋まっていても手放さない(届いた抜粋が消えない)', () => {
+      let s = withBoard(PLACE_BODY_CAP);
+      for (let i = 0; i < PLACE_BODY_CAP; i += 1) s = load(s, `x${String(i)}`);
+      s = load(s, 'late');
+      expect(placeBodiesOf(s).has('late')).toBe(true);
+    });
+
+    it('🔴 1 つの板が 1 度に頼める数は上限まで(250 枠の板でも、持つのは先頭の 200 枠だけ)', () => {
+      const s = withBoard(250);
+      const lids = Array.from({ length: 250 }, (_, i) => `x${String(i)}`);
+      const asked = requests(reduce(s, { type: 'PLACE_BODIES_WANTED', lids }).events);
+      expect(asked, '上限を超えて頼んでいる(要る物として手放せなくなる)').toHaveLength(PLACE_BODY_CAP);
+      expect(asked[0]).toBe('x0');
+      expect(asked[PLACE_BODY_CAP - 1]).toBe(`x${String(PLACE_BODY_CAP - 1)}`);
+    });
   });
 
   it('同じ内容が届き直しても state を差し替えない(指紋を動かさない)', () => {
@@ -817,6 +882,22 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
     expect(revoked, '編集に入っても板の図の URL が残っている').toBe(1);
   });
 
+  it('🔴 置いたノートの画像を消すと(画像 0 枚の内容へ描き直す)、前の画像の貸出が返る', async () => {
+    const f = fakeLender();
+    const r = await rig({ ...BODIES, n1: '前\n\n![写真](asset:abc)\n\n後' }, undefined, true, f.lender);
+    await settle();
+    expect(f.live(), '台の前提:画像が借りられていない').toBe(1);
+    await r.apply({ type: 'REMOTE_BODY_CHANGED', lid: 'n1', body: '画像を消した本文' });
+    await settle();
+    expect(slotOf(r, 'p1')!.textContent, '台の前提:描き直されていない').toContain('画像を消した本文');
+    expect(slotOf(r, 'p1')!.querySelector('img'), '台の前提:画像が残っている').toBeNull();
+    expect(f.live(), '画像の無い内容へ描き直したのに、前の貸出(ObjectURL)が板を離れるまで残る').toBe(0);
+    // 対照群 ── 画像 1 枚のままの描き直しでは、貸出は 1 本のまま(返しすぎない)
+    await r.apply({ type: 'REMOTE_BODY_CHANGED', lid: 'n1', body: '![写真](asset:abc)\n\n新しい文' });
+    await settle();
+    expect(f.live(), '画像が戻ったのに借りていない').toBe(1);
+  });
+
   it('🔴 板から枠を消す(本文の板を削る)と、その枠の図の URL も返る / 残した枠のは生きている', async () => {
     const two = [
       ':::format{#p1 .pkc-place entry=n1 x=0 y=0}',
@@ -1006,6 +1087,21 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
       expect(slotOf(r, 'pw')!.querySelector('img')!.getAttribute('data-pkc-asset-key')).toBe('img2');
     });
 
+    it('🔴 画像の添付を PDF に差し替えると、前の画像の貸出が返る(PDF の枠は絵を借りない)', async () => {
+      const f = fakeLender();
+      const r = await rig(bodies, metas, true, f.lender);
+      await settle();
+      expect(f.live(), '台の前提:画像 2 枚(写真・資料)が借りられていない').toBe(2);
+      await r.apply({ type: 'REMOTE_BODY_CHANGED', lid: 'ai', body: ATT('application/pdf', 'pdf9') });
+      await settle();
+      const slot = slotOf(r, 'pi')!;
+      expect(slot.getAttribute('data-pkc-place-attachment'), '台の前提:PDF に替わっていない').toBe('pdf');
+      expect(slot.querySelector('img'), '台の前提:前の画像が残っている').toBeNull();
+      expect(f.live(), 'PDF に替えたのに、前の画像の貸出が板を離れるまで残る').toBe(1);
+      // 対照群 ── 触っていない画像の枠(資料)の貸出は生きている
+      expect(slotOf(r, 'pw')!.querySelector('img')!.getAttribute('src')).toMatch(/^blob:fake\/img2\//);
+    });
+
     it('🔴 Office・zip・その他は題名の帯だけ(W3-① のまま)', async () => {
       const r = await rig(bodies, metas, true, fakeLender().lender);
       await settle();
@@ -1049,6 +1145,37 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
       // ⚠ 空振り防止:id が実際に出ている(見出し 2 枚ぶん)
       expect(ids.filter((i) => i.includes('はじめに')).length, '台の前提:id が出ていない').toBe(2);
       expect(new Set(ids).size, `id が重複している: ${ids.join(' / ')}`).toBe(ids.length);
+    });
+
+    /**
+     * 🔴 **板を 2 つ並べる**(主の枠 + 横に留めた枠は別の `DetailRenderer` = 別の `PlaceEmbeds`)(#1266)。
+     * ⚠ 接頭辞の連番を `PlaceEmbeds` ごとに 0 から数えると、2 つの板の `place-1-…` が重複し、
+     *   脚注・目次が document 順で**最初の相手(別の板)**へ飛ぶ。上の 2 件は 1 つの板の中の話。
+     */
+    it('🔴 板を 2 つ並べても(別々の描画器)、id は文書の中で 1 つも重複せず、リンクは自分の板の中を指す', async () => {
+      const bodies = { ...BODIES, b: SAME, n1: NOTE };
+      const r1 = await rig(bodies);
+      const r2 = await rig(bodies);
+      // ⚠ 数えるのは枠の中の id(板の塊自身の `#p1` は 2 つの板が同じ本文なので重なるが、枠の接頭辞の話ではない)
+      const idsOf = (r: Rig): string[] =>
+        [...r.host().querySelectorAll('[data-pkc-field="place-body"] [id]')].map((e) => e.id);
+      const all = [...idsOf(r1), ...idsOf(r2)];
+      // ⚠ 空振り防止:id が 2 つの板の 4 枠ぶん出ている(はじめに が 4 つ)
+      expect(all.filter((i) => i.includes('はじめに')).length, '台の前提:id が出ていない').toBe(4);
+      expect(new Set(all).size, `板をまたいで id が重複している: ${all.join(' / ')}`).toBe(all.length);
+      const nss = ['p1', 'p2'].flatMap((id) => [r1, r2].map((r) => slotOf(r, id)!.getAttribute('data-pkc-place-ns')));
+      expect(new Set(nss).size, '枠の接頭辞が板をまたいで重なっている').toBe(4);
+      // 🔑 リンクは自分の板の中の相手を指す(document 順で最初の相手へ飛ばない)
+      for (const r of [r1, r2]) {
+        const links = [...r.host().querySelectorAll<HTMLAnchorElement>('[data-pkc-field="place-body"] a[href^="#"]')];
+        expect(links.length, '台の前提:文書内リンクが無い').toBeGreaterThanOrEqual(6);
+        for (const a of links) {
+          const target = (a.getAttribute('href') ?? '').slice(1);
+          const hit = [...document.querySelectorAll('[id]')].filter((e) => e.id === target);
+          expect(hit, `${target} の行き先が document で 1 つに決まらない`).toHaveLength(1);
+          expect(r.host().contains(hit[0]!), `${target} が別の板を指している`).toBe(true);
+        }
+      }
     });
 
     it('🔴 目次と脚注のリンクは、同じ枠の中の相手を指す(別の枠・読む面の id へ飛ばない)', async () => {
@@ -1283,5 +1410,138 @@ describe('掃除(sanitizeEmbedded)', () => {
     sanitizeEmbedded(b, () => null, 'place-1-');
     expect(b.querySelector('.pkc-place, .pkc-line')).toBeNull();
     expect(b.textContent).toBe('中身');
+  });
+});
+
+/**
+ * 🔴 **板を 2 つ並べても、抜粋の読み込みが静まる**(#1266。主の枠 + 横に留めた枠 = 別の `PlaceEmbeds`)。
+ *
+ * ⚠ 実物の reducer と実物の `PlaceEmbeds` 2 つを繋ぐ(片側だけの台では「奪い合い」が起きない)。
+ * 状態が変わるたびに**両方の板を描き直す**(本物の `render` と同じ ── 抜粋が届いたら `asked` が消える)。
+ * 🔑 観測点は **`REQUEST_PLACE_BODY` の累計**(静まれば周回しても増えない)と、**持っている数**。
+ */
+describe('板を 2 つ並べたときの抜粋の読み込み(LRU の奪い合い)', () => {
+  const RUNAWAY = 2000;
+  beforeEach(() => {
+    // 観測器を使わない環境 = 全部の枠に出す(近さの話ではない)
+    vi.stubGlobal('IntersectionObserver', undefined);
+  });
+
+  function boards(sizes: readonly number[]) {
+    const lidsOf = (b: number): string[] => Array.from({ length: sizes[b]! }, (_, i) => `b${String(b)}x${String(i)}`);
+    const boardLid = (b: number): string => `board${String(b)}`;
+    const metas = [
+      ...sizes.map((_, b) => meta(boardLid(b))),
+      ...sizes.flatMap((_, b) => lidsOf(b).map((l) => meta(l))),
+    ];
+    const bodyOf = (b: number): string =>
+      lidsOf(b)
+        .map((l, i) => `:::format{.pkc-place entry=${l} x=0 y=${String(i * 10)}}\n:::`)
+        .join('\n');
+    let s = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] }).state;
+    s = reduce(s, { type: 'SELECT_ENTRY', lid: boardLid(0) }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid: boardLid(0), body: bodyOf(0) }).state;
+    if (sizes.length > 1) {
+      s = reduce(s, { type: 'SPLIT_RESTORED', lids: [boardLid(1)] }).state;
+      s = reduce(s, { type: 'SPLIT_BODY_LOADED', lid: boardLid(1), body: bodyOf(1) }).state;
+    }
+    const embeds = sizes.map(() => new PlaceEmbeds());
+    const hosts = sizes.map((_, b) => {
+      const h = document.createElement('div');
+      for (const l of lidsOf(b)) {
+        const blk = document.createElement('div');
+        blk.className = 'pkc-format-block pkc-place';
+        blk.setAttribute('data-pkc-place-entry', l);
+        h.append(blk);
+      }
+      document.body.append(h);
+      return h;
+    });
+    const queue: string[][] = [];
+    let requested = 0;
+    const syncAll = (): void => {
+      embeds.forEach((e, b) => {
+        const deps: PlaceEmbedDeps = {
+          selfLid: boardLid(b),
+          excerptOf: (l) => placeBodiesOf(s).get(l),
+          metaOf: (l) => s.entryMetas.get(l),
+          render: (t) => Promise.resolve(t),
+          wanted: (lids) => queue.push([...lids]),
+          lender: null,
+          figures: () => [],
+          viewRoot: null,
+        };
+        e.sync(hosts[b]!, deps);
+      });
+    };
+    /** 頼まれた分を読んで届け、届くたびに両方の板を描き直す(本物の描画と同じ)。 */
+    const drain = (): void => {
+      while (queue.length > 0) {
+        const lids = queue.shift()!;
+        const asked = reduce(s, { type: 'PLACE_BODIES_WANTED', lids });
+        for (const lid of requests(asked.events)) {
+          // ⚠ 静まらない実装でも**固まらずに落ちる**ように、読み込みの総数に天井を置く(正しい台は 300 件)
+          if (requested >= RUNAWAY) {
+            queue.length = 0;
+            return;
+          }
+          requested += 1;
+          s = reduce(s, { type: 'PLACE_BODY_LOADED', lid, body: 'b' }).state;
+          syncAll();
+        }
+      }
+    };
+    return {
+      /** 1 周 = 両方の板を描く → 頼まれた分を全部届ける。周ごとの累計を返す。 */
+      run: (rounds: number): number[] => {
+        const log: number[] = [];
+        for (let i = 0; i < rounds; i += 1) {
+          syncAll();
+          drain();
+          log.push(requested);
+        }
+        return log;
+      },
+      held: (): number => placeBodiesOf(s).size,
+      release: (): void => {
+        for (const e of embeds) e.release();
+        for (const h of hosts) h.remove();
+      },
+    };
+  }
+
+  it('🔴 150 枠の板 2 つ(合わせて 300 > 上限 200):読むのは 300 件で、2 周目以降は 1 件も読み直さない', () => {
+    const t = boards([150, 150]);
+    try {
+      const log = t.run(30);
+      expect(log[0], '台の前提:最初の周で 300 件(板 2 つの全部)を読んでいない').toBe(300);
+      expect(log[29], '2 周目以降も読み続けている(奪い合い)').toBe(300);
+      expect(t.held(), '要る物(300)を手放している').toBe(300);
+    } finally {
+      t.release();
+    }
+  });
+
+  it('⚠ 対照群: 250 枠の板 1 つ(上限を超える)でも静まる ── 持つのは先頭の 200 枠まで・読み直さない', () => {
+    const t = boards([250]);
+    try {
+      const log = t.run(30);
+      expect(log[0], '1 度に頼める数は上限まで').toBe(PLACE_BODY_CAP);
+      expect(log[29], '上限を超える板が読み続けている').toBe(PLACE_BODY_CAP);
+      expect(t.held()).toBe(PLACE_BODY_CAP);
+    } finally {
+      t.release();
+    }
+  });
+
+  it('⚠ 対照群: 100 枠の板 2 つ(合わせて上限以内)── 手放しも読み直しも無い', () => {
+    const t = boards([100, 100]);
+    try {
+      const log = t.run(5);
+      expect(log).toEqual([200, 200, 200, 200, 200]);
+      expect(t.held()).toBe(200);
+    } finally {
+      t.release();
+    }
   });
 });

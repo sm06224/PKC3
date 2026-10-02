@@ -705,8 +705,60 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await clickReal(page, page.locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: '板2' }).first());
   await expect(body2.locator('#at > [data-pkc-field="place-card"]')).toHaveText('ねこ.png');
 
+  /**
+   * 🔴 ⑦ **同じ板を、主の枠と横に留めた枠の 2 つに出す**(#1266)。
+   *
+   * ⚠ 主の枠と留めた枠は**別の描画器**(= 別の `PlaceEmbeds`)で、同じ document に居る。枠の `id` の
+   *   接頭辞(`place-<n>-`)の連番を描画器ごとに数えると、**2 つの板で `place-1-…` が重複**し、
+   *   脚注・目次の押しが document 順で最初の相手(別の板)へ飛ぶ。上の ② は 1 つの板の中の話。
+   * 🔑 **新しい起動は増やさない**(#820)── この道中の続きで通す。
+   * ⚠ 留めると同じ `#at` などが 2 つになるので、下の ⑥ は主の枠(`[data-pkc-region="detail"]`)へ絞ってある。
+   */
+  // ⚠ 横に並べる機能は窓が狭いと自動で畳む(`split-frames.smoke.spec.ts` と同じ作法で広げる)
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const blank = await body2.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="detail"] [data-pkc-field="detail-body"]') as HTMLElement;
+    const r = host.getBoundingClientRect();
+    for (let y = Math.max(r.top, 0) + 20; y < Math.min(r.bottom, innerHeight) - 20; y += 20)
+      for (let x = r.left + 20; x < Math.min(r.right, innerWidth) - 20; x += 20)
+        if (document.elementFromPoint(x, y) === host) return { x: Math.floor(x), y: Math.floor(y) };
+    return null;
+  });
+  expect(blank, '台の前提:板の空き地(右クリックで押せる場所)が見つからない').not.toBeNull();
+  await page.mouse.click(blank!.x, blank!.y, { button: 'right' });
+  const pinMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(pinMenu, '板の空き地を右クリックしてもメニューが出ない').toBeVisible();
+  await pinMenu.locator('button[data-pkc-action="pin-split"]').click();
+  await expect(page.locator('[data-pkc-split-lid]'), '板が横に留まっていない').toHaveCount(1);
+  await expect
+    .poll(() => page.locator('[data-pkc-split-lid] [data-pkc-field="place-body"]').count(), {
+      message: '留めた枠の板に置いたノートの中身が出ていない',
+      timeout: 30_000,
+    })
+    .toBeGreaterThan(0);
+  const twoBoards = await page.evaluate(() => {
+    const ids = [...document.querySelectorAll('[data-pkc-field="place-body"] [id]')].map((e) => e.id);
+    // 🔑 枠の接頭辞そのもの(`place-<n>-`)も数える ── id を持つ枠の番号が**たまたま**重ならなかった回でも、
+    //   描画器ごとに 0 から数え直している実装は、番号が重なる枠(id を持たない枠も含む)で見つかる
+    const nss = [...document.querySelectorAll('[data-pkc-field="place-body"]')].map(
+      (e) => e.getAttribute('data-pkc-place-ns') ?? '',
+    );
+    return {
+      ids: ids.length,
+      nsDup: nss.filter((v, i) => nss.indexOf(v) !== i),
+      dup: ids.filter((v, i) => ids.indexOf(v) !== i),
+      inPinned: [...document.querySelectorAll('[data-pkc-split-lid] [data-pkc-field="place-body"] [id]')].length,
+      inMain: [...document.querySelectorAll('[data-pkc-region="detail"] [data-pkc-field="place-body"] [id]')].length,
+    };
+  });
+  // ⚠ 空振り防止:id が 2 つの板の両方に在る(片方の板が 0 件なら「重複 0」は何も言っていない)
+  expect(twoBoards.inPinned, '台の前提:留めた枠の板に id が出ていない').toBeGreaterThan(0);
+  expect(twoBoards.inMain, '台の前提:主の枠の板に id が出ていない').toBeGreaterThan(0);
+  expect(twoBoards.dup, `主の枠と留めた枠で id が重複している: ${twoBoards.dup.join(' / ')}`).toEqual([]);
+  expect(twoBoards.nsDup, `主の枠と留めた枠で枠の接頭辞が重なっている: ${twoBoards.nsDup.join(' / ')}`).toEqual([]);
+
   // 🔴 ⑥ 押すと元のノートが開く(帯)── 添付ノート側も今までどおり
-  await clickReal(page, '#at > [data-pkc-field="place-card"]');
+  await clickReal(page, '[data-pkc-region="detail"] #at > [data-pkc-field="place-card"]');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
     '添付ノートの帯を押しても開かない',
