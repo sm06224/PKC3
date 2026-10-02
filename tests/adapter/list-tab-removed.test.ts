@@ -43,7 +43,7 @@ const code = (src: string): string =>
     .replace(/([^:'"`])\/\/.*$/gm, '$1');
 
 describe('「一覧」タブは外してある(#813 段③)', () => {
-  it('🔴 タブは 6 枚で、「一覧」が無い(6 枚目は「パソコン」── #215 段①)', () => {
+  it('🔴 タブは 6 枚で、「一覧」が無い(6 枚目は「PC」── #215 段①)', () => {
     expect(BROWSE_TABS.map((t) => t.mode)).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc']);
     expect(BROWSE_TABS.map((t) => t.label)).not.toContain('一覧');
     // 型・判定・図案・種類の札の面が、表と同じ数で揃っている(1 つだけ残ると、押せないタブか知らない面になる)

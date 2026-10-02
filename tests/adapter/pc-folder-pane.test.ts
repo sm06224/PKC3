@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **左の列のタブ「パソコン」の画面**(#215 段①②。🟣 Gemini 裁定 2026-10-01)。
+ * 🔴 **左の列のタブ「PC」の画面**(#215 段①②。🟣 Gemini 裁定 2026-10-01)。
  *
  * ⚠ 見るのは **user が何を見て、何を押せるか** ──
  *   ①タブが 6 枚目に在る(API の無いブラウザでも出たまま)②字 ③行の目印(書き戻せる / 書き戻せない)
@@ -67,10 +67,10 @@ function setup(picker: (() => Promise<DirectoryHandleLike>) | null): {
 const text = (p: HTMLElement): string => p.textContent ?? '';
 const q = (p: HTMLElement, sel: string): HTMLElement | null => p.querySelector<HTMLElement>(sel);
 
-describe('タブ「パソコン」', () => {
+describe('タブ「PC」', () => {
   it('🔴 6 枚目(末尾)で、図案が「フォルダ」のタブと違う', () => {
     expect(BROWSE_TABS).toHaveLength(6);
-    expect(BROWSE_TABS[5]).toEqual({ mode: 'pc', label: 'パソコン' });
+    expect(BROWSE_TABS[5]).toEqual({ mode: 'pc', label: 'PC' });
     expect(BROWSE_ICONS.pc, '図案が無い').toBeTruthy();
     expect(BROWSE_ICONS.pc, 'フォルダのタブと同じ絵').not.toBe(BROWSE_ICONS.filer);
     expect(isBrowseMode('pc')).toBe(true);
@@ -81,7 +81,7 @@ describe('タブ「パソコン」', () => {
     const { root } = setup(null);
     const tab = root.querySelector('[data-pkc-action="set-browse"][data-pkc-browse="pc"]');
     expect(tab, 'タブが出ていない').not.toBeNull();
-    expect(tab!.textContent).toContain('パソコン');
+    expect(tab!.textContent).toContain('PC');
   });
 
   it('🔴 開いたときに集め直す頼みは無く、別窓の面も無い(左だけ)', () => {

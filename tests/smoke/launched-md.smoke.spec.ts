@@ -121,7 +121,7 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
 });
 
 /**
- * 🔴 **左の「パソコン」タブ → フォルダを選ぶ → 一覧 → 行を押すと取り込んで開く**(#215 段①②。
+ * 🔴 **左の「PC」タブ → フォルダを選ぶ → 一覧 → 行を押すと取り込んで開く**(#215 段①②。
  * 🟣 Gemini 裁定 2026-10-01)。
  *
  * ⚠ `showDirectoryPicker` を**アプリが読む前に**差す(本物の選択画面は headless で出せない)。
@@ -130,9 +130,9 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
  * 🔑 既存の道中(OS から開く)と**同じ取り込みの口**を通るので、ここで見るのは
  *   「**押した先が本当にそこへ繋がっている**」こと(`main.ts` の配線 ── unit は届かない):
  *   ① md は取り込まれて中央に開き、**元ファイルへ書き戻す**が出る ② 画像は添付として開き、**書き戻すは出ない**
- *   ③ **同じ md をもう一度押しても増えない** ④ 開いても左の列は「パソコン」のまま。
+ *   ③ **同じ md をもう一度押しても増えない** ④ 開いても左の列は「PC」のまま。
  */
-test('🔴 パソコンのタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md は書き戻せる / 画像は添付)', async ({ page }) => {
+test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md は書き戻せる / 画像は添付)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.addInitScript(() => {
@@ -208,7 +208,7 @@ test('🔴 パソコンのタブ: 選ぶ → 並ぶ → 押すと取り込んで
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('本文です。');
   await expect(page.locator('[data-pkc-field="inspector-linked-file"]')).toHaveText('メモ.md');
   await expect(page.locator('[data-pkc-action="write-back-file"]').first()).toBeVisible();
-  // ④ 🔴 開いても、左の列は「パソコン」のまま(別の場所を守る)
+  // ④ 🔴 開いても、左の列は「PC」のまま(別の場所を守る)
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   await expect(pane).toBeVisible();
 
