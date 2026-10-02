@@ -23,6 +23,7 @@ import {
   svgViewBox,
   type DiagramPalette,
 } from '../../src/adapter/ui/render/mermaid-raster';
+import { MERMAID_VERSION } from '../../src/runtime/mermaid-version';
 
 const PALETTE: DiagramPalette = {
   bg: '#fff',
@@ -51,6 +52,33 @@ describe('鍵の作り方', () => {
     expect(cacheKey({ ...base, dpr: 2 })).not.toBe(k);
     // ⚠ 同じ 4 次元なら同じ鍵(色の実体は鍵に混ぜない ── テーマ名で足りる)
     expect(cacheKey({ ...base, palette: { ...PALETTE, fg: '#111' } })).toBe(k);
+  });
+
+  /**
+   * 🔴 mermaid の**版**が鍵に入る(#1003)。11 → 12 で既定の配置が `dagre` → `elk` になり、
+   * 同じ原文でも図の寸法が全種類で変わった。鍵に版が無いと、上げた日から古い図は 11 の配置・
+   * 新しく焼く図だけ 12 になり、**同じ文書の中で混ざる**。
+   */
+  it('🔴 mermaid の版が変われば別の鍵になり、同じ版なら同じ鍵になる', () => {
+    expect(cacheKey({ ...base, engine: '11.17.2' })).not.toBe(cacheKey({ ...base, engine: '12.0.0' }));
+    expect(cacheKey({ ...base, engine: '12.0.0' })).toBe(cacheKey({ ...base, engine: '12.0.0' }));
+    // 版を渡さない既定は「同梱の mermaid の版」── 渡し忘れても版が抜けない
+    expect(cacheKey(base)).toBe(cacheKey({ ...base, engine: MERMAID_VERSION }));
+    expect(cacheKey(base)).toContain(MERMAID_VERSION);
+  });
+
+  it('🔴 同梱の版は、入れた node_modules/mermaid の版そのもの(手書きではない・unknown に落ちていない)', () => {
+    const installed = (
+      JSON.parse(readFileSync('node_modules/mermaid/package.json', 'utf8')) as { version: string }
+    ).version;
+    expect(MERMAID_VERSION).not.toBe('unknown');
+    expect(MERMAID_VERSION).toBe(installed);
+  });
+
+  it('chart の鍵は mermaid の版で動かない(chart.js の焼きを巻き込まない)', () => {
+    const chart = cacheKey({ ...base, kind: 'chart' });
+    expect(chart).not.toContain(MERMAID_VERSION);
+    expect(cacheKey({ ...base, kind: 'chart', engine: undefined })).toBe(chart);
   });
 });
 

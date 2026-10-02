@@ -24,6 +24,8 @@
  * **打鍵を邪魔しない**ようにする。
  */
 
+import { MERMAID_VERSION } from '@runtime/mermaid-version';
+
 /** 焼いた PNG の置き場(添付とは別の DB ── 捨ててよいものを混ぜない)。 */
 const DB_NAME = 'pkc3-diagram-cache';
 const STORE = 'png';
@@ -88,6 +90,14 @@ export interface RasterKey {
    * 産出器が違えば同じ原文でも別の絵になるので、鍵の一部である。
    */
   kind?: string;
+  /**
+   * 🔴 **焼いた器の版**(#1003)。⚠ 省略時は、種類が `mermaid` なら**同梱の mermaid の版**
+   * (`MERMAID_VERSION`)、それ以外は版なし(chart の鍵は変えない)。
+   * mermaid は版が変わると同じ原文でも配置・寸法が変わる(11 → 12 で既定の配置が `elk` になった)。
+   * 版が鍵に無いと、上げた日から**同じ文書の中で古い図は 11・新しい図は 12** と混ざる。
+   * 引数で上書きできるのは、**版が変わると鍵が変わること**を test が見るためだけである。
+   */
+  engine?: string;
 }
 
 /**
@@ -202,7 +212,9 @@ export function cacheKey(k: RasterKey): string {
    *   型である。産出器が 3 つ目(別倍率の書き出し / 版の違う chart.js)になった瞬間に
    *   **古い PNG を返す**。1 語混ぜれば起こりえなくなる。
    */
-  return [k.kind ?? 'mermaid', k.theme, k.width, k.dpr, k.source].join(SEP);
+  const kind = k.kind ?? 'mermaid';
+  const engine = k.engine ?? (kind === 'mermaid' ? MERMAID_VERSION : undefined);
+  return [kind, ...(engine === undefined ? [] : [engine]), k.theme, k.width, k.dpr, k.source].join(SEP);
 }
 
 /**
