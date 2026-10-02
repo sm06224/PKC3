@@ -1343,7 +1343,7 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
   /**
    * 🔴 `⚠` で始まる status は **1 種類ではない**。マニュアルは「⚠ だけの警告 =
    * 保存先を確保できていない」と 1 行で括っていたが、`main.ts` を grep すると
-   * ⚠ で始まる文は 5 つ(⚠ だけが 4 つ + 「⚠ エラー:」)── 種類の数だけ行を持つ。
+   * ⚠ で始まる文は 6 つ(⚠ だけが 5 つ + 「⚠ エラー:」)── 種類の数だけ行を持つ。
    */
   it('🔴 ⚠ で始まる status の種類の数だけ、§9 に行がある', () => {
     /**
@@ -1357,12 +1357,13 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
     const kinds = ['src/main.ts', 'src/features/storage/storage-notice.ts']
       .map((f) => codeOnly(readFileSync(f, 'utf-8')))
       .flatMap((t) => [...t.matchAll(/[`'"]⚠ /g)]).length;
-    expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
+    expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(6);
     for (const needle of [
       '保存先が使えません',
       '⚠ 本体への切り替えに失敗しました',
       '⚠ 添付 N 件を読み込めませんでした',
       '⚠ この端末に保存できませんでした',
+      '⚠ この 1 枚に焼き込まれた中身が',
       '⚠ エラー: …',
     ]) {
       expect(section, `§9 に「${needle}」の行が無い`).toContain(needle);
@@ -2468,6 +2469,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-10-02(996)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-01 の節に原本
+     */
+    '「SQL で調べる」の画面を 4 か所整えました',
     /**
      * ⚠ **2026-10-02(1272)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-01 の節に原本

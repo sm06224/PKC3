@@ -1225,9 +1225,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let portableAssetNote = '';
   if (portable !== null) {
+    /**
+     * 🔴 **焼き込みが読み戻せなかったことを、黙らせない**(#996)。⚠ 直す前は
+     *   `choice.why` を**画面のどこへも出していなかった** ── 空の PKC が開いても、user は
+     *   理由を知らず、バックアップが壊れたとも気づけない。
+     * 🔑 字は `portable-boot.ts` が組む(`choice.why`。この file はどの test からも走らない)。
+     *   出すのは**読めなかったときだけ**(ふだんの「新しい保存領域を作ります」等は出さない)。
+     *   状態の行(消えやすい)と、メッセージ(残る)の両方へ。
+     */
+    if (portable.embeddedFailure !== null) {
+      portableAssetNote = `⚠ ${portable.choice.why}`;
+      appMessagePost.post({ kind: 'problem', source: 'portable-boot', text: portable.choice.why });
+    }
     const r = await restoreEmbeddedAssets(document, cid, blobs);
     if (r.failed > 0)
-      portableAssetNote = `⚠ 添付 ${r.failed} 件を読み込めませんでした(その分は画像が出ません)`;
+      portableAssetNote = [
+        portableAssetNote,
+        `⚠ 添付 ${r.failed} 件を読み込めませんでした(その分は画像が出ません)`,
+      ]
+        .filter((t) => t !== '')
+        .join(' — ');
   }
   /**
    * 🔴 **Office(LibreOffice wasm)の別窓**(#88 / O3-c)。

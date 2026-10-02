@@ -66,7 +66,7 @@ describe('#400 段④ ── 書き出したものが、そのまま起動で読
     expect(readBundle(doc)).toEqual(NEW);
 
     // ② DB 画像(⚠ 取り出したら DOM から外れる)
-    expect(Array.from(takeEmbeddedImage(doc)!)).toEqual(Array.from(image));
+    expect(Array.from(takeEmbeddedImage(doc).image!)).toEqual(Array.from(image));
     expect(doc.querySelector('script[data-pkc-db-image]')).toBeNull();
 
     // ③ 添付
@@ -123,6 +123,6 @@ describe('#400 段④ ── 書き出したものが、そのまま起動で読
       skipped: 0,
       failed: 0,
     });
-    expect(Array.from(takeEmbeddedImage(doc)!)).toEqual([1, 2]);
+    expect(Array.from(takeEmbeddedImage(doc).image!)).toEqual([1, 2]);
   });
 });
