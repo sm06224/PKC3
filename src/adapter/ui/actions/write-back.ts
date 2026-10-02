@@ -20,7 +20,9 @@
  */
 
 import { isBlankBody } from '@features/markdown/frontmatter';
+import { diffCounts, diffRows } from '@features/revision/diff-view';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '@adapter/platform/launched-files';
+import type { ConfirmDiff } from '../render/app-dialog';
 
 /**
  * 🔴 **本文が空のときの断り文**(#215 段③)。⚠ 画面に出る字なので 1 か所に置く。
@@ -42,6 +44,38 @@ export function writeBackConfirmMessage(name: string, changedOutside: boolean): 
   );
 }
 
+/** 差分を出す行数の上限(#1231 段②)。超えたぶんは「…ほか N 行」にする。 */
+export const WRITE_BACK_DIFF_MAX_ROWS = 500;
+
+/** 違いが無いときの 1 行。⚠ 押せるが**意味が無い**ことまで言う(#1231 段②)。 */
+export const WRITE_BACK_SAME_NOTE =
+  '違いはありません(ファイルとノートは同じ中身です。書き戻しても何も変わりません)';
+
+/**
+ * 🔴 **書き戻す前の差分**(#1231 段②)。`from` = **いまのファイルの中身**、`to` = **これから書く本文**。
+ * 行の差し引きは履歴の面と同じ `diffRows`(新しい描画器・比較器を作らない)── `+` が書き込まれる行、
+ * `−` が消える行。
+ *
+ * ⚠ `fileText` が `null`(読めない / 大きすぎる)なら **`null` を返す** ── 差分なしで今までどおりの確認。
+ *   「違いはありません」と**言わない**(読めなかったのに「同じ」と言うのは嘘である)。
+ * ⚠ 長いときは**先頭から** `WRITE_BACK_DIFF_MAX_ROWS` 行で切る。切った行数は畳み(`gap`)の
+ *   `skipped` を含めて**行数で**数える(畳みを 1 と数えると「ほか N 行」が少なく言える)。
+ */
+export function buildWriteBackDiff(fileText: string | null, body: string): ConfirmDiff | null {
+  if (fileText === null) return null;
+  if (fileText === body) return { summary: WRITE_BACK_SAME_NOTE, rows: [], more: null };
+  const { added, removed } = diffCounts(fileText, body);
+  const all = diffRows(fileText, body);
+  const shown = all.slice(0, WRITE_BACK_DIFF_MAX_ROWS);
+  let hidden = 0;
+  for (const row of all.slice(WRITE_BACK_DIFF_MAX_ROWS)) hidden += row.kind === 'gap' ? (row.skipped ?? 0) : 1;
+  return {
+    summary: `いまのファイルとのちがい: +${added} −${removed}(+ が書き込まれる行、− が消える行)`,
+    rows: shown,
+    more: hidden > 0 ? `…ほか ${hidden} 行` : null,
+  };
+}
+
 /** 書き戻しの結果(`platform/launched-files.ts` の `WriteBackResult` と同じ形)。 */
 export type WriteBackOutcome = { ok: true } | { ok: false; reason: string };
 
@@ -55,13 +89,18 @@ export interface WriteBackDeps {
   readonly getBody: () => Promise<string | null>;
   /** user のファイルへ書く。 */
   readonly write: (body: string) => Promise<WriteBackOutcome>;
-  /** 上書きの確認(取り消せない操作なので必ず通す)。⚠ 字は `writeBackConfirmMessage` が組んで渡す。 */
-  readonly confirm: (message: string) => Promise<boolean>;
   /**
-   * 🔴 **取り込んだ後にパソコン側で変わったか**(#1264 §2 欠陥 1)。⚠ **必須**(渡し忘れても
-   * tsc が黙る形にすると、外での直しを**黙って消す**元の欠陥が戻る)。読めない・比べられないときは `false`。
+   * 上書きの確認(取り消せない操作なので必ず通す)。⚠ 字は `writeBackConfirmMessage` が組んで渡す。
+   * `diff` = 本文の上に出す行ごとのちがい(#1231 段②)。`null` = 出さない(ファイルを読めなかった)。
    */
-  readonly changedOutside: () => Promise<boolean>;
+  readonly confirm: (message: string, diff: ConfirmDiff | null) => Promise<boolean>;
+  /**
+   * 🔴 **書き戻す直前の、ファイルの今の姿**(#1264 §2 欠陥 1 / #1231 段②)。
+   * `changed` = 取り込んだ後にパソコン側で変わったか / `text` = 今の中身(差分の相手)。
+   * ⚠ **必須**(渡し忘れても tsc が黙る形にすると、外での直しを**黙って消す**元の欠陥が戻る)。
+   * 読めない・比べられないときは `{ changed: false, text: null }`。⚠ **1 回だけ**読む(押した 1 件の、書く直前)。
+   */
+  readonly inspectFile: () => Promise<{ changed: boolean; text: string | null }>;
   /** 済んだことを画面へ出す。 */
   readonly done: (message: string) => void;
   /** 理由つきで断る / 失敗を出す。 */
@@ -86,6 +125,9 @@ export interface WriteBackDeps {
  * ⚠ 門の判定は `isBlankBody` の 1 本(空白だけ。⚠ 設定行だけは空ではない = #1266)。
  * 🔴 **確認の前に、パソコン側で変わっていないかを読む**(#1264 §2 欠陥 1)── 変わっていたら
  *   確認の字へ 1 行足す(書き戻すと、外での直しが消える)。⚠ 止めはしない(user が選ぶ)。
+ * 🔴 **同じ読みで、ファイルの今の中身も採って、確認の本文の上に差分を出す**(#1231 段②)。
+ *   「取り消せない」操作の前に、**何が消えて何が書かれるか**を見せる ── 外で変わったという
+ *   1 行だけでは、user は**消える変更が何か**を知れない。
  */
 export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   const readForWrite = async (): Promise<string | null> => {
@@ -101,9 +143,11 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
     }
     return body;
   };
-  if ((await readForWrite()) === null) return;
-  const changed = await deps.changedOutside();
-  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, changed)))) return;
+  const first = await readForWrite();
+  if (first === null) return;
+  const file = await deps.inspectFile();
+  // ⚠ 見せるのは**確認の前に読んだ本文**との差 ── 確認の間に変わったら、書くのは読み直した本文(下)
+  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, file.changed), buildWriteBackDiff(file.text, first)))) return;
   const body = await readForWrite();
   if (body === null) return;
   const result = await deps.write(body);

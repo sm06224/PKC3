@@ -51,7 +51,7 @@ function harness(over: Partial<WriteBackDeps> = {}) {
       return { ok: true };
     },
     confirm: async () => true,
-    changedOutside: async () => false,
+    inspectFile: async () => ({ changed: false, text: null }),
     done: (m) => said.push(`done:${m}`),
     fail: (m) => said.push(`fail:${m}`),
     ...over,
@@ -85,7 +85,7 @@ describe('元のファイルへ書き戻す', () => {
         return { ok: true };
       },
       confirm: async () => true,
-      changedOutside: async () => false,
+      inspectFile: async () => ({ changed: false, text: null }),
       done: () => {},
       fail: () => {},
     });
@@ -107,7 +107,7 @@ describe('元のファイルへ書き戻す', () => {
   it('🔴 外で変わっていたら、確認の字に「パソコン側で変わっています」が 1 行足される', async () => {
     const asked: string[] = [];
     const { deps, written } = harness({
-      changedOutside: async () => true,
+      inspectFile: async () => ({ changed: true, text: null }),
       confirm: async (message) => {
         asked.push(message);
         return true;
@@ -123,7 +123,7 @@ describe('元のファイルへ書き戻す', () => {
   it('🔴 対照群: 変わっていなければ足さない(毎回脅さない)', async () => {
     const asked: string[] = [];
     const { deps } = harness({
-      changedOutside: async () => false,
+      inspectFile: async () => ({ changed: false, text: null }),
       confirm: async (message) => {
         asked.push(message);
         return true;
@@ -149,9 +149,9 @@ describe('元のファイルへ書き戻す', () => {
     let read = 0;
     const { deps } = harness({
       getBody: async () => '  ',
-      changedOutside: async () => {
+      inspectFile: async () => {
         read += 1;
-        return true;
+        return { changed: true, text: null };
       },
     });
     await writeBackEntry(deps);
@@ -360,9 +360,27 @@ describe('main.ts の配線(原文 pin)', () => {
   });
 
   /**
+   * 🔴 **差分を確認の小窓へ渡す配線**(#1231 段②)。⚠ `main.ts` は unit から実行されないので原文 pin。
+   * 差分の組み立て・小窓の描き方は `write-back-diff.test.ts` が**本物どうし**で見る ── ここは
+   * 「自前の小窓(`ask` = `confirmInApp`)へ**差分を渡してあるか**」と「受けるボタンの字」だけ。
+   */
+  it('🔴 確認の小窓へ差分を渡し、受けるボタンは「書き戻す」・取り消しは「やめる」', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('src/main.ts', 'utf-8');
+    const at = src.indexOf('writeBackFile: (lid) => {');
+    const block = src.slice(at, src.indexOf('\n    },\n', at));
+    expect(block.length, 'writeBackFile の block が読めない(空振り)').toBeGreaterThan(500);
+    expect(block, '差分を小窓へ渡していない').toContain('diff: diff ?? undefined');
+    expect(block, '受けるボタンの字').toContain("okLabel: '書き戻す'");
+    expect(block, '取り消しの字').toContain("cancelLabel: 'やめる'");
+    expect(block, '危険色が外れた').toContain('danger: true');
+    expect(block, 'window.confirm へ戻っている').not.toMatch(/\bwindow\.confirm\(/);
+  });
+
+  /**
    * 🔴 **外で変わったことを言う配線**(#1264 §2 欠陥 1)。⚠ `main.ts` は unit から実行されないので原文 pin。
    * 判断(比べる・憶え直す)は `launched-files.ts` に在り、ここは「**渡してあるか**」だけを見る ──
-   * ①取り込んだ時の `lastModified` を憶える ②書き戻す直前の比較を `changedOutside` へ渡す
+   * ①取り込んだ時の `lastModified` を憶える ②書き戻す直前の比較を `inspectFile` へ渡す
    * ③書いた後に憶え直す(自分の書込を外の変更と言わない)④押し直しで `changed` を言う。
    */
   it('🔴 取り込み時の時刻を憶え、書き戻す直前に比べ、書いた後に憶え直し、押し直しで言う', async () => {
@@ -375,7 +393,7 @@ describe('main.ts の配線(原文 pin)', () => {
     );
     const at = src.indexOf('writeBackFile: (lid) => {');
     const block = src.slice(at, src.indexOf('\n    },\n', at));
-    expect(block, '書き戻す直前の比較を渡していない').toContain('changedOutside: () => launched.changedSince(lid)');
+    expect(block, '書き戻す直前の比較を渡していない').toContain('launched.readCurrent(lid)');
     expect(block, '書き込んだ後に憶え直していない(次の書き戻しが自分の書込を外の変更と言う)').toContain(
       'launched.refreshModified(lid)',
     );

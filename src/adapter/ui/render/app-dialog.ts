@@ -39,9 +39,27 @@ import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
+import type { DiffRow } from '@features/revision/diff-view';
 import { buildIconPalette, isTableIcon } from './icon-palette';
+import { diffLineEl } from './diff-line';
 
 export type DialogAnswer = 'ok' | 'cancel';
+
+/**
+ * 🔴 **確認の本文の上に出す、行ごとのちがい**(#1231 段②。元ファイルへ書き戻す前)。
+ *
+ * ⚠ 字(`summary` / `more`)は**呼び側が組む** ── ここは並べるだけ(何と何を比べているかを
+ *   知っているのは呼び側である)。行の描き方は履歴の面と同じ `diffLineEl`(新しい描画器を作らない)。
+ * ⚠ `rows` が空でも**描く**(「違いはありません」という言い切りが `summary` に出る)。
+ */
+export interface ConfirmDiff {
+  /** 1 行目 ── 何のちがいか / 違いが無いこと。 */
+  readonly summary: string;
+  /** 見せる行(畳み `gap` を含む)。 */
+  readonly rows: readonly DiffRow[];
+  /** 長くて切ったときの末尾の 1 行(「…ほか N 行」)。切っていなければ `null`。 */
+  readonly more: string | null;
+}
 
 export interface ConfirmOptions {
   /** 受ける側のボタンの字。⚠ **何が起きるか**を書く(「はい」にしない)。 */
@@ -53,6 +71,8 @@ export interface ConfirmOptions {
    * ⚠ 既定は `false` ── 色は情報にだけ使う(不可侵指示「地は無彩色」)。
    */
   danger?: boolean;
+  /** 本文の上に行ごとのちがいを出す(#1231 段②)。 */
+  diff?: ConfirmDiff | undefined;
 }
 
 /** この器が使う region 名。⚠ **test / smoke はここだけを見る**。 */
@@ -167,6 +187,29 @@ function ensureFrame(host: HTMLElement): Frame {
   return frame;
 }
 
+/** 差分の塊(`ConfirmDiff` の見た目)。⚠ 読むだけ ── 押せる物を置かない。 */
+function diffBlock(diff: ConfirmDiff): HTMLElement {
+  const box = document.createElement('div');
+  box.setAttribute('data-pkc-field', 'dialog-diff');
+  const summary = document.createElement('div');
+  summary.setAttribute('data-pkc-field', 'dialog-diff-summary');
+  summary.textContent = diff.summary;
+  box.append(summary);
+  if (diff.rows.length > 0) {
+    const list = document.createElement('ul');
+    list.setAttribute('data-pkc-field', 'dialog-diff-rows');
+    for (const row of diff.rows) list.append(diffLineEl(row));
+    box.append(list);
+  }
+  if (diff.more !== null) {
+    const more = document.createElement('div');
+    more.setAttribute('data-pkc-field', 'dialog-diff-more');
+    more.textContent = diff.more;
+    box.append(more);
+  }
+  return box;
+}
+
 /**
  * 確認を出して、答えを返す。
  *
@@ -181,7 +224,12 @@ export function confirmInApp(
   return enqueue(() => {
     const f = ensureFrame(host);
     f.title.textContent = '確認';
+    // ⚠ 差分が無いときは今までと**同じ 1 行**(`textContent` だけ)── 他の確認の描き方を変えない
     f.body.textContent = message;
+    if (opts.diff !== undefined) {
+      f.body.textContent = '';
+      f.body.append(diffBlock(opts.diff), document.createTextNode(message));
+    }
     f.ok.textContent = opts.okLabel ?? 'はい';
     f.cancel.textContent = opts.cancelLabel ?? 'やめる';
     if (opts.danger === true) f.ok.setAttribute('data-pkc-danger', '');
