@@ -36,6 +36,14 @@ export const SQL_EMBED_SRC_ATTR = 'data-pkc-sql-embed-src';
 export const SQL_EMBED_MORE_FIELD = 'sql-embed-more';
 /** 答えの下の注記(行が無い / 打ち切り / 引けなかった)の `data-pkc-field`。 */
 export const SQL_EMBED_NOTE_FIELD = 'sql-embed-note';
+/**
+ * 🔴 **2 列の下見の答えに添える 1 行**(#1254 §1)。下見は**編集に入った時点の保存済みの本文**で
+ * 引くので、打っている最中の SQL の答えではない ── 画面に在る SQL の字と食い違って見えるのを、
+ * 「保存したときの答え」と言って先に断る。⚠ 読む面(保存済みを見ている)には添えない。
+ * ⚠ 引けなかった 1 行(`sql-embed-note`)とは**別の field** ── 注記を数える検査に混ざらない。
+ */
+export const SQL_EMBED_SAVED_FIELD = 'sql-embed-saved';
+export const SQL_EMBED_SAVED_TEXT = '保存したときの答え';
 
 /**
  * 🔴 **閲覧用の上限は、SQL を打つ面と別に、小さく持つ**(Q4 = 200 行)。
@@ -159,6 +167,16 @@ export function sqlEmbedAnswerHtml(
     out += note(`先頭の ${String(answer.rows.length)} 行までです(これより先は出していません)`);
   }
   return out;
+}
+
+/**
+ * 🔴 **答えを引いている間の 1 行**(#1254 §1)。引き終わると表が出て下の本文が押し下がるので、
+ * 引いている間も「何かが来る」と分かるようにする。⚠ 器は**引けなかったときの 1 行と同じ**
+ * (`sql-embed-note`)── 見た目の規則を 2 つ持たない。
+ */
+export const SQL_EMBED_PENDING_TEXT = '答えを引いています…';
+export function sqlEmbedPendingHtml(): string {
+  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(SQL_EMBED_PENDING_TEXT)}</p>`;
 }
 
 /** 引けなかったときの 1 行(原文のコード枠はそのまま残る)。 */

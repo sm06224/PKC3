@@ -504,6 +504,106 @@ describe('寿命 ── 手放した後の答えは画面に当てない', () =>
     expect(hostsOf()[0]!.querySelector('table'), '手放した後に表を入れた').toBeNull();
   });
 
+  /**
+   * 🔴 **引いている間は 1 行出す**(#1254 §1)。⚠ 空振り防止: **引いている瞬間に字が在る**ことを見る
+   * (答えが来た後だけ見る検査は、1 行を出す実装を丸ごと消しても緑になる)。
+   */
+  it('🔴 引いている間は「答えを引いています…」が出て、答えが来たら消えて表になる', async () => {
+    let finish: (() => void) | null = null;
+    setSqlEmbedRunner(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ columns: ['x'], rows: [[1]], truncated: false, ms: 0 });
+        }),
+    );
+    const body = embedBody('SELECT 1');
+    mount(body);
+    const hydrator = new SqlEmbedHydrator();
+    hydrator.sync(root, body);
+    // 見える前は何も出さない(引いていない)
+    expect(noteOf(hostsOf()[0]!), '引いていないのに出た').toBe('');
+    seeAll();
+    await vi.waitFor(() => expect(finish).not.toBeNull());
+    const host = hostsOf()[0]!;
+    expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('pending');
+    expect(noteOf(host), '引いている間に 1 行も出ていない').toBe('答えを引いています…');
+    expect(host.querySelector('table')).toBeNull();
+    finish!();
+    await vi.waitFor(() => expect(rowsOf(host)).toBe(1));
+    expect(host.textContent, '答えが来ても「引いています」が残っている').not.toContain('引いています');
+    hydrator.release();
+  });
+
+  it('🔴 引けなかったら「引いています」は消えて、失敗の 1 行に替わる', async () => {
+    let fail: (() => void) | null = null;
+    setSqlEmbedRunner(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = () => reject(new Error('no such table: nope'));
+        }),
+    );
+    const body = embedBody('SELECT 1 FROM nope');
+    mount(body);
+    const hydrator = new SqlEmbedHydrator();
+    hydrator.sync(root, body);
+    seeAll();
+    await vi.waitFor(() => expect(fail).not.toBeNull());
+    expect(noteOf(hostsOf()[0]!)).toBe('答えを引いています…');
+    fail!();
+    await vi.waitFor(() => expect(noteOf(hostsOf()[0]!)).toContain('答えを引けませんでした'));
+    expect(hostsOf()[0]!.textContent).not.toContain('引いています');
+    hydrator.release();
+  });
+
+  it('🔴 引いている最中に手放したら、「引いています」を居座らせない(嘘になる)', async () => {
+    let finish: (() => void) | null = null;
+    setSqlEmbedRunner(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ columns: ['x'], rows: [[1]], truncated: false, ms: 0 });
+        }),
+    );
+    const body = embedBody('SELECT 1');
+    mount(body);
+    const hydrator = new SqlEmbedHydrator();
+    hydrator.sync(root, body);
+    seeAll();
+    await vi.waitFor(() => expect(finish).not.toBeNull());
+    expect(noteOf(hostsOf()[0]!)).toBe('答えを引いています…');
+    hydrator.release();
+    finish!();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(hostsOf()[0]!.childElementCount, '手放したのに「引いています」が残っている').toBe(0);
+  });
+
+  it('🔴 前の答えの表が残っている器は、引き直している間もその表を見せたまま(1 行に縮めない)', async () => {
+    const { run } = realRunner();
+    setSqlEmbedRunner(run);
+    const body = embedBody('SELECT 1 AS x');
+    mount(body);
+    const hydrator = new SqlEmbedHydrator();
+    hydrator.sync(root, body);
+    seeAll();
+    await vi.waitFor(() => expect(rowsOf(hostsOf()[0]!)).toBe(1));
+    // 本文が変わって引き直す(同じ器が残る)── 答えが来るまで、古い表のまま
+    let finish: (() => void) | null = null;
+    setSqlEmbedRunner(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ columns: ['x'], rows: [[2]], truncated: false, ms: 0 });
+        }),
+    );
+    hydrator.sync(root, body + '\n');
+    seeAll();
+    await vi.waitFor(() => expect(finish).not.toBeNull());
+    const host = hostsOf()[0]!;
+    expect(rowsOf(host), '引き直している間に表が消えた').toBe(1);
+    expect(host.textContent).not.toContain('引いています');
+    finish!();
+    await vi.waitFor(() => expect(host.querySelector('td')?.textContent).toBe('2'));
+    hydrator.release();
+  });
+
   it('🔴 手放した後、まだ走っていなかった SQL は引かない', async () => {
     const started: string[] = [];
     let finish: (() => void) | null = null;

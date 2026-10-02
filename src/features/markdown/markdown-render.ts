@@ -2779,6 +2779,10 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
   return true;
 });
 
+/** 🔴 押せない綴りの見本のホバー(#1254 §1)。⚠ 字は `color-code.ts` の「押して直せる形」(6 桁小文字)の裏返し。 */
+const COLOR_SWATCH_FIXED_NOTE =
+  'この書き方(大文字・3 桁・8 桁)は綴りを変えないので、押しても直せません';
+
 /**
  * 🔴 **本文のバッククォートで囲んだ色コードの左に、色の見本を置く**(#1224)。
  *
@@ -2862,10 +2866,18 @@ md.core.ruler.after('inline', 'pkc-color-swatch', function (state) {
         }
         if (inLink === 0) {
           const tok = new state.Token('html_inline', '', 0);
+          /**
+           * 🔴 **押せない綴りの見本には、ホバーで理由を出す**(#1254 §1)。
+           * 押して直せない見本は飾りのまま(`aria-hidden`)で、押しても何も起きなかった ──
+           * 理由が画面のどこにも無かった。⚠ 出すのは**綴りのせいで押せない**ときだけ
+           * (`isEditableColor` が偽)。6 桁小文字なのに押せない物(原文と食い違う行)は
+           * 綴りの話ではないので、嘘の理由を言わない(付けない)。
+           */
+          const why = isEditableColor(t.content) ? '' : ` title="${COLOR_SWATCH_FIXED_NOTE}"`;
           tok.content =
             `<span class="pkc-color-swatch" data-pkc-color-swatch${wire}` +
             ` style="--pkc-swatch: ${escapeHtmlAttr(t.content)}"` +
-            (wire === '' ? ' aria-hidden="true"' : '') +
+            (wire === '' ? ` aria-hidden="true"${why}` : '') +
             `></span>`;
           out.push(tok);
           changed = true;

@@ -2069,6 +2069,12 @@ button[data-pkc-primary] [data-pkc-icon] {
   margin: var(--s2) 0 0;
   color: var(--muted);
 }
+/* 🔴 2 列の下見の答えに添える「保存したときの答え」(#1254 §1)。注記より小さく、控えめに。 */
+[data-pkc-sql-embed] [data-pkc-field='sql-embed-saved'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 [data-pkc-sql-embed] [data-pkc-field='sql-embed-more'] {
   margin-top: var(--s2);
   font-size: var(--btn-fs-bar);

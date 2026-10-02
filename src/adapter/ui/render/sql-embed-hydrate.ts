@@ -34,9 +34,12 @@ import {
   SQL_EMBED_MAX_STEPS,
   SQL_EMBED_MORE_FIELD,
   SQL_EMBED_PAGE_ROWS,
+  SQL_EMBED_SAVED_FIELD,
+  SQL_EMBED_SAVED_TEXT,
   SQL_EMBED_SRC_ATTR,
   sqlEmbedAnswerHtml,
   sqlEmbedFailureHtml,
+  sqlEmbedPendingHtml,
   type SqlEmbedAnswer,
 } from '@features/markdown/sql-embed';
 import { watchVisible, type VisibleWatch } from './visible-watch';
@@ -129,14 +132,20 @@ export class SqlEmbedHydrator {
   private readonly answers = new WeakMap<HTMLElement, SqlEmbedAnswer>();
   private readonly shown = new WeakMap<HTMLElement, number>();
   private readonly bound = new WeakSet<HTMLElement>();
+  /** 🔴 答えに「保存したときの答え」を添える器(2 列の下見。#1254 §1)。⚠ `sync` のたびに根ごと決まる。 */
+  private readonly savedNote = new WeakSet<HTMLElement>();
+  /** 器 → 「引いています」の 1 行を書いた世代。⚠ 手放した後も居座らせないための印。 */
+  private readonly pendingLine = new WeakMap<HTMLElement, number>();
 
   /**
    * `root` の中の器を面倒みる。**描くたびに呼んでよい**(冪等)。
    *
    * @param epoch 答えの鮮度を決める鍵。⚠ **本文そのもの**を渡す(同じ本文のうちは同じ答え、
    *   変われば引き直す)。別の本文と衝突させない。
+   * @param savedNote 🔴 答えに「保存したときの答え」を添える(2 列の下見だけが立てる。#1254 §1)。
+   *   ⚠ 下見の鍵は**編集に入った時点の保存済みの本文**なので、打っている最中の SQL の答えではない。
    */
-  sync(root: Element, epoch: string): void {
+  sync(root: Element, epoch: string, savedNote = false): void {
     if (epoch !== this.epoch) {
       this.epoch = epoch;
       this.gen += 1;
@@ -149,6 +158,9 @@ export class SqlEmbedHydrator {
       this.watching.delete(h);
     }
     for (const host of root.querySelectorAll<HTMLElement>(`[${SQL_EMBED_ATTR}]`)) {
+      // ⚠ 予約済みでも毎回決める(器はどちらか 1 つの根にしか居ない ── 面ごとに答えが変わる)
+      if (savedNote) this.savedNote.add(host);
+      else this.savedNote.delete(host);
       if (this.scheduled.get(host) === epoch) continue;
       this.scheduled.set(host, epoch);
       this.observe(host);
@@ -190,16 +202,38 @@ export class SqlEmbedHydrator {
       this.cache.set(sql, answer);
     }
     host.setAttribute('data-pkc-sql-embed-state', 'pending');
+    /**
+     * 🔴 **引いている間は 1 行出す**(#1254 §1)。⚠ **器が空のときだけ** ── 前の答えの表が
+     * 残っている器(同じ器を引き直すとき)は、新しい答えが来るまでその表を見せたままにする
+     * (一瞬 1 行に縮めると、下の本文が上下に揺れる)。
+     */
+    if (this.pendingLine.has(host) || !host.hasChildNodes()) {
+      host.innerHTML = sqlEmbedPendingHtml();
+      this.pendingLine.set(host, at);
+    }
+    /** 手放した / 世代が変わったとき、**自分が書いた**「引いています」だけを消す(嘘にしない)。 */
+    const dropPending = (): void => {
+      if (this.pendingLine.get(host) !== at) return;
+      this.pendingLine.delete(host);
+      host.textContent = '';
+    };
     answer.then(
       (a) => {
-        if (stale()) return;
+        if (stale()) {
+          dropPending();
+          return;
+        }
         this.answers.set(host, a);
         this.shown.set(host, SQL_EMBED_PAGE_ROWS);
         this.bind(host);
         this.draw(host);
       },
       (e: unknown) => {
-        if (stale() || e instanceof SqlEmbedCancelled) return;
+        if (stale() || e instanceof SqlEmbedCancelled) {
+          dropPending();
+          return;
+        }
+        this.pendingLine.delete(host);
         host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e));
         host.setAttribute('data-pkc-sql-embed-state', 'failed');
       },
@@ -209,7 +243,14 @@ export class SqlEmbedHydrator {
   private draw(host: HTMLElement): void {
     const a = this.answers.get(host);
     if (a === undefined) return;
+    this.pendingLine.delete(host);
     host.innerHTML = sqlEmbedAnswerHtml(a, this.shown.get(host) ?? SQL_EMBED_PAGE_ROWS, true);
+    if (this.savedNote.has(host)) {
+      const note = host.ownerDocument.createElement('p');
+      note.setAttribute('data-pkc-field', SQL_EMBED_SAVED_FIELD);
+      note.textContent = SQL_EMBED_SAVED_TEXT;
+      host.append(note);
+    }
     host.setAttribute('data-pkc-sql-embed-state', 'ready');
     /**
      * ⚠ **列の並べ替えは付けない** ── `applyTableSort` は描くたびに本文の表へ付けるが、
