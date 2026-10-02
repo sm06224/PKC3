@@ -16,7 +16,11 @@
  *   呼んだ後に読み直していなければ何の意味も無い。
  */
 import { describe, expect, it } from 'vitest';
-import { writeBackEntry, type WriteBackDeps } from '../../src/adapter/ui/actions/write-back';
+import {
+  writeBackEntry,
+  WRITE_BACK_EMPTY_NOTE,
+  type WriteBackDeps,
+} from '../../src/adapter/ui/actions/write-back';
 
 /**
  * 🔑 **書込が飛んでいる状態**を作る台。
@@ -84,18 +88,103 @@ describe('元のファイルへ書き戻す', () => {
     expect(written).toEqual(['保存前の本文']);
   });
 
-  it('🔴 「やめる」を選んだら、待ちもしないし 1 バイトも書かない', async () => {
-    let settled = 0;
+  it('🔴 「やめる」を選んだら、1 バイトも書かないし何も言わない', async () => {
+    const { deps, written, said } = harness({ confirm: async () => false });
+    await writeBackEntry(deps);
+    expect(written, '断ったのに書いた').toEqual([]);
+    expect(said, '断っただけなのに何か言っている').toEqual([]);
+  });
+
+  /**
+   * 🔴 **空の本文では書かない**(#215 段③)── 元のファイルが空で上書きされる。
+   * 観測点は**ファイルへ書かれた中身**と**確認の窓が出たか**の 2 つ。
+   * ⚠ 台は `getBody` を差し替えるだけ(門は `settle` の後の本文を見る)。
+   */
+  describe.each([
+    ['空文字', ''],
+    ['空白と改行だけ', '  \n\n\t \n'],
+    ['全角空白だけ(日本語入力のまま打った)', '　　\n　'],
+    ['設定行(frontmatter)だけ', '---\ntitle: メモ\ntags: [a]\n---\n'],
+    ['設定行の後が空白だけ', '---\ntitle: メモ\n---\n\n  \n'],
+    ['CRLF の設定行だけ', '---\r\ntitle: メモ\r\n---\r\n'],
+  ])('本文が空(%s)', (_label, empty) => {
+    it('🔴 確認の窓も出さず、書かず、理由を言う', async () => {
+      let asked = 0;
+      const { deps, written, said } = harness({
+        getBody: async () => empty,
+        confirm: async () => {
+          asked += 1;
+          return true;
+        },
+      });
+      await writeBackEntry(deps);
+      expect(written, '空の本文でファイルを上書きした').toEqual([]);
+      expect(asked, '空なのに確認の窓を出した').toBe(0);
+      expect(said).toEqual([`fail:${WRITE_BACK_EMPTY_NOTE}`]);
+    });
+  });
+
+  it('🔴 断り文の字(画面に出る物)', () => {
+    expect(WRITE_BACK_EMPTY_NOTE).toBe(
+      '本文が空なので、元ファイルへは書き戻しません(消したいときはパソコン側で消してください)',
+    );
+  });
+
+  /**
+   * 🔴 **対照群**(空振り防止)── 上の門が「何でも断る」門ではないこと。
+   * 設定行の**後に本文が在る** / 本文が 1 字だけ / 設定行ではない `---` で始まる文書は
+   * 今までどおり確認 → 書く。
+   */
+  it.each([
+    ['設定行 + 本文', '---\ntitle: メモ\n---\n本文'],
+    ['1 字だけ', 'a'],
+    ['先頭が水平線の普通の文書', '---\n本文\n'],
+    ['前後に空白の在る本文', '\n  本文  \n'],
+  ])('対照群: 本文が在れば書く(%s)', async (_l, text) => {
+    let asked = 0;
     const { deps, written, said } = harness({
-      confirm: async () => false,
-      settle: async () => {
-        settled += 1;
+      getBody: async () => text,
+      confirm: async () => {
+        asked += 1;
+        return true;
       },
     });
     await writeBackEntry(deps);
-    expect(written, '断ったのに書いた').toEqual([]);
-    expect(settled, '断った人にまで書込の着地を待たせている').toBe(0);
-    expect(said, '断っただけなのに何か言っている').toEqual([]);
+    expect(asked).toBe(1);
+    expect(written).toEqual([text]);
+    expect(said).toEqual(['done:書き戻しました: メモ.md']);
+  });
+
+  /**
+   * 🔴 **確認の窓が開いている間に空にされても、書かない**。
+   * ⚠ 確認の前に読んだ物を書く実装だと、ここで「空」ではなく古い本文を書いてしまう
+   *   ── 門は**書く物そのもの**に掛かっていなければならない。
+   */
+  it('🔴 確認の間に本文が空になったら、書かない(書く物を読み直している)', async () => {
+    let body = '確認の前の本文';
+    const { deps, written, said } = harness({
+      getBody: async () => body,
+      confirm: async () => {
+        body = '';
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(written, '確認の間に空になったのに書いた').toEqual([]);
+    expect(said).toEqual([`fail:${WRITE_BACK_EMPTY_NOTE}`]);
+  });
+
+  it('🔴 確認の間に本文が変わったら、確認の後の本文を書く(巻き戻さない)', async () => {
+    let body = '確認の前の本文';
+    const { deps, written } = harness({
+      getBody: async () => body,
+      confirm: async () => {
+        body = '確認の間に書いた本文';
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(written).toEqual(['確認の間に書いた本文']);
   });
 
   it('⚠ 本文が見つからないときは、理由を出して書かない', async () => {

@@ -131,6 +131,19 @@ export function bodyBelowFrontmatter(body: string): string {
 }
 
 /**
+ * 🔴 **本文が「空」か**(#215 段③)。空白・改行だけ、または**先頭の設定行
+ * (frontmatter)だけで本文が無い**ものを空と数える。
+ *
+ * ⚠ 見るのは**画面に描かれる本文**(`bodyBelowFrontmatter`)である ── 設定行は
+ *   user から見て本文ではないので、設定行だけのノートは「何も書いていない」。
+ *   描く側と同じ 1 本を通すので、規則が 2 つに割れない(§7)。
+ * ⚠ `trim()` は全角空白・NBSP・BOM も落とす(日本語入力の空白だけも空)。
+ */
+export function isBlankBody(body: string): boolean {
+  return bodyBelowFrontmatter(body).trim() === '';
+}
+
+/**
  * 閉じの `---` が無いとき、**frontmatter として読める行が先頭から何行続くか**を返す
  * (#284 / #318)。`0` なら「ただの水平線で始まる普通の文書」。
  *
