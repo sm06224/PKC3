@@ -169,6 +169,13 @@ const UNBRIDGED: readonly string[] = [
  *   なぜ名前で呼べないままにするのかを 1 行添えること。
  */
 const UNREGISTERED_NAMEABLE: readonly string[] = [
+  /**
+   * ⚠ **2026-10-02(#772 段②)で 3 件増やした** ── 音声認識の部品を入れる / 消す / 途中でやめる。
+   * 🔑 **名前で呼べないままにする理由**:`install-office-pack` / `remove-office-pack` と同じ ──
+   *   押し口は設定の「音声認識」の中の 1 か所だけで、部品を取る(数十〜数百 MB)操作を
+   *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
+   */
+  'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
   'add-place', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
   'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove',
@@ -341,7 +348,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
  *   ② 受け手が増えたとき、**どちらの箱に入れたか**を書かせる
  */
 const UNREGISTERED_POINT: readonly string[] = [
-  'append-at-heading', 'browse-archive', 'capture-play', 'copy-asset-ref', 'copy-md-block',
+  // ⚠ 2026-10-02(#772 段②): `capture-transcribe`(「音/動画」の行の「文字にする」── 押した行が要る。`capture-play` と同じ)
+  'append-at-heading', 'browse-archive', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
   'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset',
   'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
   /**
@@ -661,12 +669,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   鍵も持たない(`set-relative-days` と同じ形)。
       // ⚠ 2026-10-02(#1224 段②): 色の見本を押して色を選び直す(`pick-color`)で受け手 +1 / `total` +1 /
       //   `unregistered` +1。登記は増えない ── 押し口は本文の見本にしか無く、押した 1 つでしか対象が決まらない。
-      total: 363,
-      receivers: 304,
+      // ⚠ 2026-10-02(#772 段②): 録った音を文字にする(`capture-transcribe`。「音/動画」の行の押し所)と、
+      //   設定の「音声認識」の 3 つ(`install-asr-part` / `remove-asr-part` / `cancel-asr-install`)で
+      //   受け手 +4 ── 登記は増えない(押し口は行の中・設定の中にしか無く、鍵も持たない)。
+      //   `receivers` +4 / `total` +4 / `unregistered` +4。
+      total: 367,
+      receivers: 308,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 265,
+      unregistered: 269,
     });
   });
 

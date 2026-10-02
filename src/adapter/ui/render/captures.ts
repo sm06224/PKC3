@@ -36,6 +36,7 @@ import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
 import { appVoiceBoostRouter } from './voice-boost';
+import { ASR_TRANSCRIBE_LABEL, ASR_TRANSCRIBING_LABEL } from '@features/asr/asr-text';
 
 /**
  * 借りている 1 件(押した行)。⚠ **同時に 1 つだけ**。
@@ -67,6 +68,8 @@ export class CapturesRenderer {
   private shown: readonly CaptureItem[] = [];
   /** ⚠ 切り出している最中か(#683 段②a)。**state の写し**。 */
   private trimBusy = false;
+  /** 🔴 文字にしている録音の lid(#772 段②)。**state の写し**(`null` = 走っていない)。 */
+  private transcribeLid: string | null = null;
   /**
    * ⚠ **借りの世代**。押してから bytes が届くまでの間に別の行を押されたら、
    *   届いた側は**借りた瞬間に返す**(古い音が後から鳴らない)。
@@ -110,6 +113,7 @@ export class CapturesRenderer {
     // ⚠ 描く直前に写す(`row` は state を受け取らない)
     this.trim = state.captureTrim;
     this.trimBusy = state.captureTrimBusy;
+    this.transcribeLid = state.captureTranscribeLid;
     /**
      * ⚠ **指紋に「失敗」を先に入れる**(`contacts.ts` の 2 巡目レビューで判明した形)
      *   ── 入れないと、初回の走査が失敗した回(`captureItems` は `null` のまま)が
@@ -138,6 +142,7 @@ export class CapturesRenderer {
     if (print === this.last) {
       // ⚠ 組み直さない回でも**印は追う**(state だけ動いて画面が変わらない、を作らない)
       this.syncTrimBar();
+      this.syncTranscribe();
       return;
     }
     this.last = print;
@@ -168,6 +173,30 @@ export class CapturesRenderer {
     list.setAttribute('data-pkc-field', 'captures-list');
     for (const item of shown) list.append(this.row(item));
     this.host.append(list);
+    this.syncTranscribe();
+  }
+
+  /**
+   * 🔴 **「文字にする」の字と押せるかだけを差し替える**(#772 段②)。
+   *
+   * ⚠ **指紋に入れない** ── 入れると、押した瞬間(と終わった瞬間)に一覧ごと組み直され、
+   *   中の `<audio>` が作り直されて**聞いている音が止まって頭へ戻る**
+   *   (`syncTrimBar` と同じ理由。文字にするのは**聞きながら**でも押される)。
+   * 🔑 走っている行だけ「文字にしています…」にし、**ほかの行は押せなくする**
+   *   (2 本同時に走らせない ── 1.65〜3.6GB を重ねない)。
+   */
+  private syncTranscribe(): void {
+    for (const b of this.host.querySelectorAll<HTMLButtonElement>('[data-pkc-field="capture-transcribe"]')) {
+      const lid = b.getAttribute('data-pkc-entry');
+      const mine = this.transcribeLid !== null && lid === this.transcribeLid;
+      b.textContent = mine ? ASR_TRANSCRIBING_LABEL : ASR_TRANSCRIBE_LABEL;
+      b.disabled = this.transcribeLid !== null;
+      b.title = mine
+        ? 'いま文字にしています。終わるまでお待ちください。'
+        : this.transcribeLid !== null
+          ? 'いま別の録音を文字にしています。終わってから押してください。'
+          : '録った音を、この端末の中だけで文字にして、このノートの末尾に足します。';
+    }
   }
 
   /**
@@ -406,6 +435,21 @@ export class CapturesRenderer {
         play.textContent = item.kind === 'audio' ? '音を聞く' : '動画を見る';
         li.append(play);
       }
+    }
+    /**
+     * 🔴 **文字にする**(#772 段②。裁定 2026-10-01 ② = 「聞く」「切り出す」と同じ並び)。
+     * ⚠ **中身が分からない添付には出さない**(`assetKey` が無い行は押しても何も起きない)。
+     * ⚠ 部品が無くても**出す** ── 押すと「システム → 音声認識 で取り込んでください」と
+     *   案内する(出さないと、機能があることが分からない)。
+     */
+    if (item.assetKey !== null) {
+      const t = document.createElement('button');
+      t.type = 'button';
+      t.setAttribute('data-pkc-action', 'capture-transcribe');
+      t.setAttribute('data-pkc-entry', item.lid);
+      t.setAttribute('data-pkc-field', 'capture-transcribe');
+      t.textContent = ASR_TRANSCRIBE_LABEL;
+      li.append(t);
     }
     return li;
   }

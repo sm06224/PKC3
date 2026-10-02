@@ -70,6 +70,7 @@ import { appJobMonitor, type JobMonitor } from '@adapter/platform/job-monitor';
 import { appNoticeStore, type NoticeStore } from '@adapter/platform/notice-store';
 import { appTooNarrowOk, TooNarrowOkStore } from './too-narrow';
 import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel';
+import { buildAsrPackPanel, type AsrPackPanel } from './asr-pack-panel';
 import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
@@ -93,6 +94,7 @@ export class SettingsRenderer {
   private built = false;
   /** Office 一式の節(#88 / O6-a)。⚠ 器と同じ寿命 ── 自分で変化を購読する。 */
   private officePack: OfficePackPanel | null = null;
+  private asrPack: AsrPackPanel | null = null;
   /**
    * ショートカットキーの節(#256)。⚠ 器と同じ寿命 ── 自分で割当の変化を購読する。
    * ⚠ 組み直しは 1 度だけ(`built`)なので、購読も capture も 1 組しか生きない。
@@ -1025,6 +1027,12 @@ export class SettingsRenderer {
      */
     this.officePack = buildOfficePackPanel();
     storageSection.append(this.officePack.root);
+    /**
+     * 🔴 **音声認識の部品**(#772 段②)── Office 一式と同じく「この端末に大きな部品を
+     * 置くかどうか」という保存領域の判断なので、**その隣**に置く。
+     */
+    this.asrPack = buildAsrPackPanel();
+    storageSection.append(this.asrPack.root);
     body.append(storageSection);
 
     /**

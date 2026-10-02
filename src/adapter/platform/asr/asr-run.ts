@@ -95,6 +95,20 @@ function textOf(out: unknown): string {
   return '';
 }
 
+/**
+ * 🔴 **種類を付け直す**(実ブラウザの smoke が拾った)。
+ *
+ * ⚠ ES module を `import()` する blob: の URL は、**種類が JavaScript の物でなければ読めない**
+ *   (`Failed to fetch dynamically imported module`)。ところが端末の保管の Blob は、
+ *   **取ってきたときの `Content-Type` をそのまま持つ** ── 配る側が `.mjs` を
+ *   `application/octet-stream` で返したり、種類を付けなかったりすれば、**取り込みは成功するのに
+ *   文字にする所で初めて落ちる**。配る側の設定に依らないよう、**ここで決める**。
+ * 🔑 `new Blob([blob], { type })` は**中身を写さない**(参照を継ぐだけ ── ゼロコピー)。
+ */
+export function typed(blob: Blob, type: string): Blob {
+  return new Blob([blob], { type });
+}
+
 export class AsrRunner {
   private readonly deps: AsrRunnerDeps;
   private readonly now: () => number;
@@ -124,7 +138,7 @@ export class AsrRunner {
     if (js === undefined || loader === undefined || wasm === undefined) {
       throw new Error('音声認識の実行の部品が揃っていません(入れ直してください)');
     }
-    const rt = await this.deps.importModule(this.deps.createObjectURL(js));
+    const rt = await this.deps.importModule(this.deps.createObjectURL(typed(js, 'text/javascript')));
     const env = rt.env;
     // ⚠ 取りに行く先を**端末の中だけ**にする(どれか 1 つでも欠けると外へ出る)
     env.allowRemoteModels = false;
@@ -133,8 +147,8 @@ export class AsrRunner {
     env.useBrowserCache = false;
     env.useWasmCache = false;
     env.backends.onnx.wasm.wasmPaths = {
-      mjs: this.deps.createObjectURL(loader),
-      wasm: this.deps.createObjectURL(wasm),
+      mjs: this.deps.createObjectURL(typed(loader, 'text/javascript')),
+      wasm: this.deps.createObjectURL(typed(wasm, 'application/wasm')),
     };
     env.fetch = (input) => this.serve(input);
     this.runtime = rt;

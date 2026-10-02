@@ -7412,6 +7412,34 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   margin-top: var(--s3);
 }
 
+/* 🔴 音声認識の節(#772 段②)── 部品 2 択の 1 行 = ボタン(か「取り込み済み」+ 消す)。
+   ⚠ **メモリの案内は、ボタンの下の行に出す**(押す前に読める位置)── 横に並べると
+   狭い窓でボタンの字と混ざる。`flex-basis: 100%` で、必ず次の行へ折る。
+   ⚠ **色は情報にだけ**(Office 一式と同じ作法)── 案内も無彩色の小さい字で、
+   赤くしない(押せるままの「見込み」であって、禁止ではない)。 */
+[data-pkc-field='asr-part'] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+[data-pkc-field='asr-memory-note'] {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='asr-progress'] {
+  margin: var(--s2) 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='asr-installed'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* 設定へ逃がした操作の並び(#239、user 指示 2026-08-17)。
    ⚠ **Office 一式の導線と同じ体裁**にする ── 場所が違うだけで読み方は同じ、
    という業務画面の作法(すぐ上の規則と揃えてある)。 */

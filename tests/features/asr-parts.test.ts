@@ -15,6 +15,7 @@ import { codeOnly } from '../helpers/code-only';
 import {
   ASR_PACK_BASE,
   ASR_PARTS,
+  ASR_WORKER_IDLE_MS,
   ASR_RUNTIME_FILES,
   ASR_RUNTIME_MB,
   asrAssetUrl,
@@ -88,6 +89,12 @@ describe('定数は 1 か所(#772 段②)', () => {
       }
     }
     expect(hits).toEqual([]);
+  });
+
+  it('🔴 アイドルで畳むまでの時間は短い(推論の常駐は 1.65〜3.6GB ── 長く置くほど他の作業を圧迫する)', () => {
+    // ⚠ 定数を使う側の test は「その定数どおり」にしか見られないので、**定数そのもの**をここで押さえる
+    expect(ASR_WORKER_IDLE_MS).toBeGreaterThan(1_000);
+    expect(ASR_WORKER_IDLE_MS, '長すぎる(既定の貸し出しの 30 秒を超えている)').toBeLessThanOrEqual(30_000);
   });
 
   it('取り先は同一オリジンの絶対 path(別 origin は取れない)', () => {

@@ -138,6 +138,32 @@ describe('AsrRunner', () => {
     expect(await urls.get(wp.wasm)!.text()).toBe('wasm');
   });
 
+  /**
+   * 🔴 **種類は配る側に依らず、こちらで決める**(実ブラウザの smoke が拾った欠陥)。
+   * ES module を import する blob: の URL は、種類が JavaScript でなければ読めない ──
+   * 保管の Blob は取ってきたときの Content-Type を持つので、配る側が種類を付けない / 別の種類で
+   * 返すと、**取り込みは成功して、文字にする所で初めて落ちる**。
+   */
+  it('🔴 import する物には JavaScript の種類を、wasm には wasm の種類を付けて渡す(元の Blob の種類に依らない)', async () => {
+    const { runner, urls } = setup();
+    // 元の Blob は種類を持たない(= 配る側が Content-Type を付けなかった形)
+    await runner.run(job());
+    const types = new Map([...urls].map(([u, b]) => [u, b.type]));
+    const vals = [...types.values()];
+    expect(vals.filter((t) => t === 'text/javascript'), 'import する js / loader に種類が付いていない').toHaveLength(2);
+    expect(vals.filter((t) => t === 'application/wasm')).toHaveLength(1);
+    // 別の種類で渡されても直す(octet-stream で返す配り方)
+    const odd = setup();
+    const j = job();
+    await odd.runner.run({
+      ...j,
+      files: j.files.map(([p, b]) => [p, new Blob([b], { type: 'application/octet-stream' })] as const),
+    });
+    expect([...odd.urls.values()].map((b) => b.type).sort()).toEqual(
+      ['application/wasm', 'text/javascript', 'text/javascript'],
+    );
+  });
+
   it('② 実行の部品の import は blob: の URL で、渡した js の Blob である', async () => {
     const { runner, seen, urls } = setup();
     await runner.run(job());

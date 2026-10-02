@@ -48,7 +48,7 @@ download-asset browse-archive view-asset open-office copy-asset-ref navigate-ass
 preview-revision restore-revision restore-trash stop-timer discard-timer open-alarm dismiss-alarm
 open-tile deliver-to-extension navigate-entry-ref navigate-card-ref
 dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb
-stack-link-up stack-link-down capture-play move-tile-up move-tile-down
+stack-link-up stack-link-down capture-play capture-transcribe move-tile-up move-tile-down
 open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon sql-history-pick
 move-app-group-up move-app-group-down open-tile-as
 sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use open-date-note
