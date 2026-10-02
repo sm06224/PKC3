@@ -113,6 +113,39 @@ describe('見本は字を持たない(#1224。CLAUDE.md §10)', () => {
     }
   });
 
+  /**
+   * 🔴 **押せない綴りの見本は、ホバーで理由を言う**(#1254 §1)。押せる見本(6 桁小文字)は
+   * 今までの「押して色を選び直す」のまま(対照群)。⚠ 綴りごとに 1 件ずつ見る。
+   */
+  it.each([
+    ['大文字', '#3B82F6'],
+    ['3 桁', '#fff'],
+    ['8 桁', '#3b82f680'],
+  ])('🔴 押せない綴り(%s)の見本にはホバーの理由が付き、飾りのまま(押せる属性は付かない)', (_n, code) => {
+    const found = swatches(on(`\`${code}\`\n`));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.getAttribute('title')).toBe(
+      'この書き方(大文字・3 桁・8 桁)は綴りを変えないので、押しても直せません',
+    );
+    expect(found[0]!.getAttribute('aria-hidden')).toBe('true');
+    expect(found[0]!.hasAttribute('data-pkc-action'), '押せない物が押せる形になった').toBe(false);
+  });
+
+  it('対照群(#1254 §1): 押せる見本(6 桁小文字)は「押して色を選び直す」のまま / 理由の字は出ない', () => {
+    const [s] = swatches(on('`#3b82f6`\n'));
+    expect(s!.getAttribute('title')).toBe('押して色を選び直す');
+    expect(s!.outerHTML).not.toContain('押しても直せません');
+  });
+
+  it('見本の title は字ではない(textContent は変わらない)', () => {
+    const md = '`#FFF` `#abc`\n';
+    const a = document.createElement('div');
+    a.innerHTML = on(md);
+    const b = document.createElement('div');
+    b.innerHTML = renderMarkdown(md);
+    expect(a.textContent).toBe(b.textContent);
+  });
+
   it('🔴 色の字は escape される(コードの中身は 16 進だけだが、属性に書く字は必ず escape)', () => {
     // 判定が通るのは 16 進だけ ── 属性を突き破る字を書いた形は、そもそも見本にならない
     expect(swatches(on('`#fff"><script>`\n'))).toHaveLength(0);

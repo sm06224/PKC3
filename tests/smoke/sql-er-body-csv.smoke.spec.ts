@@ -139,6 +139,42 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   ).toHaveCount(0);
 
   /**
+   * 🔴 **答えを引き終えた後は「引いています」が残らず、読む面に「保存したときの答え」は出ない**
+   * (#1254 §1)。⚠ 引いている最中の 1 行は一瞬で消えるので実ブラウザでは**消えたこと**を見る
+   * (在るときの検査は unit の `sql-embed-hydrate.test.ts`)。
+   * 🔴 そして**編集に入り直すと、2 列の下見の答えの下にだけ「保存したときの答え」が出る**
+   * (小さく・薄い字で、表の下)。⚠ 新しい起動は足さない ── この道中で編集に入り直す。
+   */
+  await expect(embedHost.locator('[data-pkc-field="sql-embed-saved"]'), '読む面に添え書きが出た').toHaveCount(0);
+  await expect(embedHost, '引き終えたのに「引いています」が残っている').not.toContainText('引いています');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const previewHost = page.locator('[data-pkc-region="editor-preview"] [data-pkc-sql-embed]');
+  await expect(previewHost.locator('tbody tr'), '下見に答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
+  const savedNote = previewHost.locator('[data-pkc-field="sql-embed-saved"]');
+  await expect(savedNote, '下見の答えに「保存したときの答え」が無い').toHaveText('保存したときの答え');
+  const savedLook = await savedNote.evaluate((el) => {
+    const probe = document.createElement('div');
+    probe.style.color = 'var(--muted)';
+    document.body.append(probe);
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    const tableBottom = el.parentElement!.querySelector('table')!.getBoundingClientRect().bottom;
+    return {
+      color: getComputedStyle(el).color,
+      muted,
+      fontSize: parseFloat(getComputedStyle(el).fontSize),
+      bodySize: parseFloat(getComputedStyle(document.body).fontSize),
+      top: el.getBoundingClientRect().top,
+      tableBottom,
+    };
+  });
+  expect(savedLook.top, '添え書きが答えの表の下に出ていない').toBeGreaterThanOrEqual(savedLook.tableBottom - 1);
+  expect(savedLook.color, '添え書きが薄い字(--muted)でない').toBe(savedLook.muted);
+  expect(savedLook.fontSize, '添え書きが本文より小さくない').toBeLessThan(savedLook.bodySize);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-preview"]'), '編集を抜けられていない').toHaveCount(0);
+
+  /**
    * ── ① SQL で調べる を開く(この PKC のノートが既定 ── 何も選ばない)。
    * ⚠ この面は押しボタンを持たない(binder.ts「SQL の面も押しボタンを持たない」)
    *   ので、`attach.smoke.spec.ts` と同じくアドレスで開く。

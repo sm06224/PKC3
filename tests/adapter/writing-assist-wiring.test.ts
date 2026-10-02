@@ -446,9 +446,12 @@ describe('行の入れ替え(Alt+↑ / Alt+↓)が編集欄に繋がっている
 
   /** ⚠ 取り消しの履歴が切れない書き方(`execCommand('insertText')`)を通ったかを見る。 */
   const inserted: string[] = [];
+  /** 🔴 動かせなかったときに出る 1 行(#1254 §1)。 */
+  const status: string[] = [];
   let lastTa!: HTMLTextAreaElement;
   beforeEach(() => {
     inserted.length = 0;
+    status.length = 0;
     // happy-dom に `execCommand` は無い ── 選択を置き換える本物の意味論を真似る
     (document as unknown as { execCommand: unknown }).execCommand = vi.fn(
       (cmd: string, _ui?: boolean, value?: string) => {
@@ -471,7 +474,7 @@ describe('行の入れ替え(Alt+↑ / Alt+↓)が編集欄に繋がっている
     caret: number,
     field: 'editor-body' | 'row-source' = 'editor-body',
   ): HTMLTextAreaElement => {
-    const { root } = setup();
+    const { root } = setup({ showStatus: (t: string) => status.push(t) });
     lastTa = editor(root, value, caret, field);
     return lastTa;
   };
@@ -514,6 +517,35 @@ describe('行の入れ替え(Alt+↑ / Alt+↓)が編集欄に繋がっている
     expect(bottom.value).toBe('あ\nい');
     expect(evDown.defaultPrevented).toBe(true);
     expect(inserted).toEqual([]);
+  });
+
+  it('🔴 #1254 §1: 全文編集の端で動かせないときは「これ以上は動かせません」と言う(押した場所と対)', () => {
+    const top = open('あ\nい', 0);
+    alt(top, 'ArrowUp');
+    expect(status, '先頭行で ↑ が無言だった').toEqual(['これ以上は動かせません']);
+    status.length = 0;
+    const bottom = open('あ\nい', 3);
+    alt(bottom, 'ArrowDown');
+    expect(status, '末尾行で ↓ が無言だった').toEqual(['これ以上は動かせません']);
+  });
+
+  it('🔴 #1254 §1: 1 画面編集の行の欄では「ここでは隣の行とは入れ替えません」(全文編集の字とは別)', () => {
+    for (const k of ['ArrowUp', 'ArrowDown'] as const) {
+      status.length = 0;
+      const ta = open('# 見出し', 3, 'row-source');
+      alt(ta, k);
+      expect(status, `${k}`).toEqual(['ここでは隣の行とは入れ替えません(「全文を編集」なら動かせます)']);
+    }
+    // 複数行の塊でも、欄の端なら同じ字(全文編集の字ではない)
+    status.length = 0;
+    alt(open('- a\n- b', 0, 'row-source'), 'ArrowUp');
+    expect(status).toEqual(['ここでは隣の行とは入れ替えません(「全文を編集」なら動かせます)']);
+  });
+
+  it('対照群(#1254 §1): 動かせたときは何も知らせない(全文編集も 1 画面編集の複数行の塊も)', () => {
+    alt(open('あ\nい\nう', 3), 'ArrowDown');
+    alt(open('- a\n- b\n- c', 5, 'row-source'), 'ArrowDown');
+    expect(status).toEqual([]);
   });
 
   it('🔴 1 面のライブの行の欄(複数行の塊)でも効く', () => {

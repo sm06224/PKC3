@@ -403,6 +403,18 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   ).toContainText('はこ');
   await expect(page.locator(`${noteRow}[data-pkc-selected]`), 'ノートが開いていない').toHaveCount(1);
   await expect(overview, 'ノートを開いたのに、フォルダの概要が残っている').toHaveCount(0);
+  /**
+   * 🔴 **いま居るフォルダ(パンくずの最後の段)を押すと、そのフォルダを選ぶ**(#1254 §1)。
+   * 直す前は入る先がいまの場所で、押しても何も起きなかった。⚠ 行を押したときと同じ概要が出て、
+   * 左の列の場所は動かない(パンくずは「はこ」のまま)。
+   */
+  await clickReal(
+    page,
+    '[data-pkc-region="filer-breadcrumb"] [data-pkc-action="enter-folder"][data-pkc-entry]',
+  );
+  await expect(overview, 'パンくずの現在地を押しても、フォルダが選ばれない').toBeVisible();
+  await expect(summary).toHaveText('直下 ノート 1 件 / フォルダ 0 件');
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).toContainText('はこ');
   // 戻す(次の手は「ルートでフォルダの行を 2 回押す」)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   await expect(rows).toHaveCount(1);

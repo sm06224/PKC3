@@ -7555,9 +7555,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ルート表示 = 選択解除しか書きようが無かった)。現在地を state に持った今は、
    * **選択に触らずに現在地だけ**動かす。
    * ⚠ 押した要素が `data-pkc-entry` を持たなければ**ルート**(パンくずの先頭)。
+   *
+   * 🔴 **いま居るフォルダ(パンくずの最後の段)を押したら、そのフォルダを選ぶ**(#1254 §1)。
+   * 入る先がいまの場所なので `SET_SCOPE` は何も変えず、押しても何も起きなかった。
+   * 🔑 選び方は**行を押したときと同じ 1 本**(`select-entry` を呼ぶ ── 編集中の断りも、
+   *   中央に出る概要も同じ)。⚠ 左の列の場所は動かさない(`SET_SCOPE` を撃たない)。
+   * ⚠ 別名の action にしない ── 焼く側(`filer.ts`)は全段を同じ名前で焼いていて、
+   *   「いま居る段か」は**ここで state から判る**(判定を焼く側と受ける側の 2 か所に持たない)。
    */
-  'enter-folder': (dispatcher, target) => {
+  'enter-folder': (dispatcher, target, services, root) => {
     const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? null;
+    if (lid !== null && lid === dispatcher.getState().scopeLid) {
+      ACTIONS['select-entry']!(dispatcher, target, services, root);
+      return;
+    }
     dispatcher.dispatch({ type: 'SET_SCOPE', lid });
   },
   /**
@@ -11033,12 +11044,13 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
   /**
    * 🔴 行を前後の行と入れ替える(#1213、`Alt+↑` / `Alt+↓`)── 当て方は `runSwap` 1 か所。
    * 端では何も書かない(キーは握る ── mac の `Option+↑↓`(段落の頭 / 末へ)を出さない)。
+   * 🔴 ただし**黙らない**(#1254 §1)── 動かせなかった理由を 1 行で言う(`swapRefusedNote`)。
    */
-  'move-line-up': (ta) => {
-    runSwap(ta, -1);
+  'move-line-up': (ta, notify) => {
+    if (!runSwap(ta, -1)) notify(swapRefusedNote(ta));
   },
-  'move-line-down': (ta) => {
-    runSwap(ta, 1);
+  'move-line-down': (ta, notify) => {
+    if (!runSwap(ta, 1)) notify(swapRefusedNote(ta));
   },
   /**
    * 🔴 **カーソルの在る表の列幅を揃える**(#1171)。
@@ -11100,6 +11112,19 @@ function runSwap(ta: HTMLTextAreaElement, dir: 1 | -1): boolean {
   insertText(ta, res.insert);
   ta.setSelectionRange(res.start, res.end);
   return true;
+}
+
+/**
+ * 🔴 **行を動かせなかったときの 1 行**(#1254 §1。無言の止まりを無くす)。
+ * ⚠ **押した場所で字を分ける** ── 1 画面編集の行の欄は 1 つの塊の原文だけが入っていて、
+ *   端に居るのは「隣の塊が在る」場合でも起きる(欄の端 = 塊の端)。全文編集の端とは
+ *   言うべき行き先が違う(前者は全文編集へ、後者はもう動かせない)。
+ */
+const SWAP_LIVE_NOTE = 'ここでは隣の行とは入れ替えません(「全文を編集」なら動かせます)';
+const SWAP_EDGE_NOTE = 'これ以上は動かせません';
+
+function swapRefusedNote(ta: HTMLTextAreaElement): string {
+  return ta.getAttribute('data-pkc-field') === 'row-source' ? SWAP_LIVE_NOTE : SWAP_EDGE_NOTE;
 }
 
 /** 字下げの 2 命令(`keymap.ts` の id)。1 面の行の欄はこの 2 つだけ `EDITOR_RUN` を通す。 */
@@ -12176,7 +12201,9 @@ export function bindActions(
       //   行の入れ替え(#1213 `Alt+↑↓`)も同じ門 ── 欄の中の行だけ動かす(塊はまたがない)
       if (rowCmd !== null && (INDENT_COMMANDS.has(rowCmd) || SWAP_COMMANDS.has(rowCmd))) {
         ke.preventDefault();
-        EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, () => undefined);
+        // 🔴 動かせなかったとき(#1254 §1)は `align-table` と同じ口で 1 行言う。
+        //   ⚠ 字下げは何も変わらなければ静かでよい(`notify` を持たない)ので、渡しても鳴らない
+        EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;
       }
       /**

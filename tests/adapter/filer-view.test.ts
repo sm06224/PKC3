@@ -147,6 +147,51 @@ describe('filer view (P3-7b)', () => {
     expect(d.getState().scopeLid).toBe('f1');
   });
 
+  /**
+   * 🔴 **いま居るフォルダ(パンくずの最後の段)を押したら、そのフォルダを選ぶ**(#1254 §1)。
+   * 直す前は入る先がいまの場所なので、押しても何も起きなかった(中央の概要へ行く道が無かった)。
+   * ⚠ 左の列の場所は動かさない / 途中の段は今までどおり「入る」(対照群)。
+   */
+  it('🔴 パンくずの現在地を押すと、そのフォルダを選ぶ(場所は動かさず、途中の段は入る)', async () => {
+    const { root, d, q, rows } = setup(METAS, RELS);
+    root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+    const enter = (lid: string) => {
+      const row = q<HTMLElement>(`tbody [data-pkc-entry="${lid}"]`)!;
+      row.click();
+      row.click();
+    };
+    enter('f1');
+    await tick();
+    enter('f2');
+    await tick();
+    // いまは f1 > f2 の中。選んでいるのは f2 の中の b ではなく、別のノート a を選んでおく
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(d.getState().selectedLid).toBe('a');
+
+    // 対照群: 途中の段(f1)は今までどおり「入る」── 選ばない
+    q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry="f1"]')!.click();
+    await tick();
+    expect(d.getState().scopeLid, '途中の段が入らなくなった').toBe('f1');
+    expect(d.getState().selectedLid, '途中の段を押したのに選んでしまった').toBe('a');
+    enter('f2');
+    await tick();
+    expect(d.getState().scopeLid).toBe('f2');
+    // ⚠ 行を押して入ると f2 を選んでしまうので、選びを別の物へ戻してから現在地を押す
+    //   (戻さないと「選ばれている」が前から成り立っていて、押した効果を見分けられない)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(d.getState().selectedLid, '前提:現在地を押す前は f2 を選んでいない').toBe('a');
+
+    // 本体: いま居る f2 を押す → f2 が選ばれる。左の列の場所はそのまま
+    const here = q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] [data-pkc-entry="f2"]')!;
+    here.click();
+    await tick();
+    expect(d.getState().selectedLid, '現在地を押しても選ばれない').toBe('f2');
+    expect(d.getState().scopeLid, '現在地を押したら場所が動いた').toBe('f2');
+    expect(rows()).toEqual(['b']);
+  });
+
   it('🔴 ノートは 2 回押しても「入る」先にならない ── 別のウィンドウ(付箋)で開く(#1042 C14)', () => {
     // ⚠ 変異試験 O3 が生き延びて判明 ── 種別の門を外しても誰も落ちなかった。
     //    外すと、ノートを 2 回押しただけで**中身が空の面**に迷い込む
