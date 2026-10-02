@@ -22,6 +22,7 @@ import {
 import { confirmInApp, DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import {
   CHANGED_OUTSIDE_WRITE_BACK_NOTE,
+  DIFF_READ_LIMIT_BYTES,
   LaunchedFiles,
   type LaunchedHandle,
 } from '../../src/adapter/platform/launched-files';
@@ -134,10 +135,33 @@ describe('書き戻す前の差分(#1231 段②)', () => {
       document.querySelector('[data-pkc-field="dialog-diff"]'),
       '読めないのに差分(または「同じ」)を出した',
     ).toBeNull();
-    expect(q('[data-pkc-field="dialog-body"]').textContent).toBe(writeBackConfirmMessage('議事録.md', false));
+    // 🔴 黙って素の確認にしない ── 差分を出せない理由が 1 行足される(「違いはありません」とは言わない)
+    const text = q('[data-pkc-field="dialog-body"]').textContent;
+    expect(text).toBe(writeBackConfirmMessage('議事録.md', false, true));
+    expect(text).toContain('ファイルが大きい(または読めない)ため、ちがいは出せません');
+    expect(text).not.toContain('違いはありません');
     okBtn().click();
     await done;
     expect(written).toEqual(['本文\n']);
+  });
+
+  it('🔴 2MB を超える大きいファイルも、差分は出ないが理由が出る(書き戻しは止めない)', async () => {
+    const { done, written } = run(linked('a'.repeat(DIFF_READ_LIMIT_BYTES + 1)), '本文\n');
+    await tick();
+    expect(dialog().open).toBe(true);
+    expect(document.querySelector('[data-pkc-field="dialog-diff"]'), '大きいのに差分を出した').toBeNull();
+    expect(q('[data-pkc-field="dialog-body"]').textContent).toContain('ちがいは出せません');
+    okBtn().click();
+    await done;
+    expect(written).toEqual(['本文\n']);
+  });
+
+  it('⚠ 対照群: 読めて差分が出る確認には「ちがいは出せません」を足さない', async () => {
+    const { done } = run(linked('古い\n'), '新しい\n');
+    await tick();
+    expect(q('[data-pkc-field="dialog-body"]').textContent).not.toContain('ちがいは出せません');
+    cancelBtn().click();
+    await done;
   });
 
   it('🔴 外で変わっている段落と差分が、両方出る(ファイルの今の中身との差を見せる)', async () => {
@@ -175,6 +199,10 @@ describe('差分の組み立て(buildWriteBackDiff)', () => {
   it('🔴 字: 何の差か(+ が書き込まれる行、− が消える行)', () => {
     expect(buildWriteBackDiff('a\n', 'b\n')?.summary).toBe(
       'いまのファイルとのちがい: +1 −1(+ が書き込まれる行、− が消える行)',
+    );
+    // 🔑 非対称: ファイルに 3 行(消える)・ノートに 1 行(書かれる)── 対称では向きの裏返しが見えない
+    expect(buildWriteBackDiff('a\nb\nc\n', 'x\n')?.summary).toBe(
+      'いまのファイルとのちがい: +1 −3(+ が書き込まれる行、− が消える行)',
     );
   });
 

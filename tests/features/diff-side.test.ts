@@ -1,7 +1,8 @@
 /**
  * #1231 段①: 差分を**左右に並べる**対応付け(`sideRows`)。左 = 相手 / 右 = この版。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as charDiffMod from '../../src/features/revision/char-diff';
 import { diffRows, type DiffRow } from '../../src/features/revision/diff-view';
 import {
   CHAR_DIFF_TOTAL_BUDGET,
@@ -9,6 +10,12 @@ import {
   type SideRow,
 } from '../../src/features/revision/diff-side';
 import { CHAR_DIFF_MAX_CHARS } from '../../src/features/revision/char-diff';
+
+// ⚠ 実物をそのまま呼ぶ薄い spy(呼ばれた回数だけを見る。挙動は変えない)
+vi.mock('../../src/features/revision/char-diff', async (orig) => {
+  const actual = await orig<typeof import('../../src/features/revision/char-diff')>();
+  return { ...actual, charDiffCost: vi.fn(actual.charDiffCost) };
+});
 
 const row = (kind: DiffRow['kind'], text = ''): DiffRow => ({ kind, text });
 
@@ -116,6 +123,32 @@ describe('#1231 sideRows: 字単位の強調', () => {
     const withParts = out.filter((r) => pair(r).left?.parts != null).length;
     expect(withParts, '予算の分だけ字単位で比べている').toBe(fit);
     expect(withParts).toBeLessThan(pairs);
+  });
+
+  it('🔴 予算を使い切った後は、見積もり(charDiffCost)を計算しない(コードポイントの展開が無駄になる)', () => {
+    const mid = 1000;
+    const a = 'あ'.repeat(mid);
+    const b = 'い'.repeat(mid);
+    const fit = Math.floor(CHAR_DIFF_TOTAL_BUDGET / (mid * mid));
+    expect(fit * mid * mid, '前提: 予算ちょうどで使い切る形').toBe(CHAR_DIFF_TOTAL_BUDGET);
+    const pairs = fit + 3;
+    const rows: DiffRow[] = [];
+    for (let i = 0; i < pairs; i++) rows.push(row('del', a));
+    for (let i = 0; i < pairs; i++) rows.push(row('add', b));
+    const spy = vi.mocked(charDiffMod.charDiffCost);
+    spy.mockClear();
+    sideRows(rows);
+    // 使い切るまでの `fit` 対だけ見積もる。残りの 3 対は計算しない(外すと pairs 回になる)
+    expect(spy.mock.calls.length, '使い切った後も見積もりを計算している').toBe(fit);
+  });
+
+  it('⚠ 対照群: 予算が残っている間は、すべての対を見積もる', () => {
+    const rows: DiffRow[] = [row('del', 'ab'), row('del', 'cd'), row('add', 'ax'), row('add', 'cy')];
+    const spy = vi.mocked(charDiffMod.charDiffCost);
+    spy.mockClear();
+    const out = sideRows(rows);
+    expect(spy.mock.calls.length).toBe(2);
+    expect(pair(out[0]).left?.parts, '予算が残っているのに字単位でない').not.toBeNull();
   });
 
   it('本物の diffRows(相手, この版)から: 左右の字が往復する', () => {

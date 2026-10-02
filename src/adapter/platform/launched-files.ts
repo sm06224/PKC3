@@ -39,6 +39,11 @@ export const CHANGED_OUTSIDE_REOPEN_NOTE =
  */
 export const DIFF_READ_LIMIT_BYTES = 2 * 1024 * 1024;
 
+/** 大きすぎて読まなかった(`readForCompare` の返り)。⚠ `null`(読めなかった)と**分ける** ── 言う字が違う。 */
+export interface LinkedFileTooLarge {
+  readonly tooLarge: true;
+}
+
 /** `launchQueue` から来る handle(必要な部分だけ)。 */
 export interface LaunchedHandle {
   /** `'file'` / `'directory'`。実装によっては未定義。 */
@@ -130,16 +135,20 @@ export class LaunchedFiles {
    * ⚠ 呼んでよいのは `changedSince` と同じく**書き戻す直前だけ**(一覧では呼ばない = #1271)。
    * ⚠ 読めない・`getFile` が無い・大きすぎる(`DIFF_READ_LIMIT_BYTES` 超)ときは `text: null`
    *   (差分なしで今までどおりの確認)。`changed` は `changedSince` と同じ規則。
+   * 🔴 大きすぎて読まなかったときだけ **`tooLarge: true`** が付く(読めなかったのと分ける ── 履歴の面が言う字を変える)。
    * @returns link が無ければ `null`
    */
-  async readCurrent(lid: string): Promise<{ changed: boolean; text: string | null } | null> {
+  async readCurrent(
+    lid: string,
+  ): Promise<{ changed: boolean; text: string | null; tooLarge?: true } | null> {
     const link = this.byLid.get(lid);
     if (link === undefined || typeof link.handle.getFile !== 'function') return null;
     try {
       const file = await link.handle.getFile();
       const changed = link.modifiedAt !== null && file.lastModified !== link.modifiedAt;
       let text: string | null = null;
-      if (typeof file.size === 'number' && file.size > DIFF_READ_LIMIT_BYTES) return { changed, text };
+      if (typeof file.size === 'number' && file.size > DIFF_READ_LIMIT_BYTES)
+        return { changed, text, tooLarge: true };
       try {
         text = await file.text();
       } catch {
@@ -149,6 +158,17 @@ export class LaunchedFiles {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 🔴 **履歴の面の「くらべる相手 = PC のファイル」の読み口**(#1231 着地後レビュー)。`readCurrent` と同じ読み(新しい読み方を作らない)。
+   * 本文 = 読めた / `{ tooLarge: true }` = 大きすぎて読まなかった / `null` = 読めなかった・結びついていない。
+   */
+  async readForCompare(lid: string): Promise<string | LinkedFileTooLarge | null> {
+    const r = await this.readCurrent(lid);
+    if (r === null) return null;
+    if (r.tooLarge === true) return { tooLarge: true };
+    return r.text;
   }
 
   nameOf(lid: string): string | null {

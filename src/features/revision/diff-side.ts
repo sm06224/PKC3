@@ -69,7 +69,9 @@ export function sideRows(rows: readonly DiffRow[]): SideRow[] {
         const b = adds[n];
         let left: SideCell | null = a === undefined ? null : { kind: 'del', text: a, parts: null };
         let right: SideCell | null = b === undefined ? null : { kind: 'add', text: b, parts: null };
-        if (replaced && left !== null && right !== null) {
+        // 🔴 予算を使い切った後は**見積もりも計算しない**(`charDiffCost` は両方の行をコードポイントへ展開する ──
+        //    20,000 対 × 100 字で 330 ms。使い切った後の対は行ごと塗るだけなので、数える意味が無い)
+        if (replaced && budget > 0 && left !== null && right !== null) {
           const cost = charDiffCost(a!, b!);
           if (cost <= budget) {
             const segs = charDiff(a!, b!);

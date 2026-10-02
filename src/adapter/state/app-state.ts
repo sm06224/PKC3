@@ -1334,7 +1334,8 @@ export type RevisionCompare =
 /** 相手の中身を読む進み具合。⚠ `failed` を `loaded` + 空の字と**潰さない**(読めなかったのに「同じ」と言わない)。 */
 export type RevisionCompareLoad =
   | { state: 'loading' }
-  | { state: 'failed' }
+  /** `tooLarge` = PC のファイルが大きすぎて読まなかった(読めなかったのと字を分ける)。 */
+  | { state: 'failed'; tooLarge?: true }
   | { state: 'loaded'; text: string };
 
 export interface AppState {
@@ -2965,6 +2966,8 @@ export type UserAction =
       previewRevId: string;
       against: string;
       text: string | null;
+      /** PC のファイルが大きすぎて読まなかったとき(`text: null` と一緒に)。 */
+      tooLarge?: true;
     }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
@@ -8557,7 +8560,11 @@ function reduceCore(
       const now = c.kind === 'rev' ? `rev:${c.revId}` : 'file';
       if (now !== action.against || c.load.state !== 'loading') return { state, events: [] };
       const load: RevisionCompareLoad =
-        action.text === null ? { state: 'failed' } : { state: 'loaded', text: action.text };
+        action.text === null
+          ? action.tooLarge === true
+            ? { state: 'failed', tooLarge: true }
+            : { state: 'failed' }
+          : { state: 'loaded', text: action.text };
       return {
         state: { ...state, revisionPreview: { ...pv, compare: { ...c, load } } },
         events: [],

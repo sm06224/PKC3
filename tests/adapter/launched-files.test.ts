@@ -209,12 +209,23 @@ describe('取り込んだ後に外で変わったか', () => {
       },
     } as unknown as File;
     l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
-    expect(await l.readCurrent('n1')).toEqual({ changed: true, text: null });
+    // 🔴 大きすぎるときだけ `tooLarge: true`(読めなかったのと分ける。履歴の面が言う字を変える)
+    expect(await l.readCurrent('n1')).toEqual({ changed: true, text: null, tooLarge: true });
+    expect(await l.readForCompare('n1'), '大きすぎるのに null(読めなかった)と同じ扱い').toEqual({ tooLarge: true });
     expect(texted, '上限を超えるのに中身を読んだ').toBe(0);
     // 対照群: ちょうど上限なら読む
     const edge = { ...file, size: DIFF_READ_LIMIT_BYTES, text: () => Promise.resolve('y') } as unknown as File;
     l.remember('n2', fakeHandle('b', { getFile: () => Promise.resolve(edge) }), 'b.md', 1000);
     expect((await l.readCurrent('n2'))?.text).toBe('y');
+    expect((await l.readCurrent('n2'))?.tooLarge, 'ちょうど上限なのに tooLarge').toBeUndefined();
+    expect(await l.readForCompare('n2')).toBe('y');
+  });
+
+  it('🔴 readForCompare: 読めなかった / 結びついていない は null(tooLarge と分ける)', async () => {
+    const l = new LaunchedFiles();
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.reject(new Error('gone')) }), 'a.md', 1000);
+    expect(await l.readForCompare('n1')).toBeNull();
+    expect(await l.readForCompare('nope')).toBeNull();
   });
 
   it('🔴 書き戻した後は、自分の書込を外の変更と読まない(憶え直す)', async () => {

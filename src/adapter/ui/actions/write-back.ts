@@ -20,7 +20,7 @@
  */
 
 import { isBlankBody } from '@features/markdown/frontmatter';
-import { diffCounts, diffRows } from '@features/revision/diff-view';
+import { DIFF_FILE_UNAVAILABLE_NOTE, diffCounts, diffRows } from '@features/revision/diff-view';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '@adapter/platform/launched-files';
 import type { ConfirmDiff } from '../render/app-dialog';
 
@@ -36,13 +36,27 @@ export const WRITE_BACK_EMPTY_NOTE =
  * 🔴 **上書きの確認の字**(#1264 §2 欠陥 1)。⚠ `main.ts` に直書きしない(`main.ts` は
  * どの unit からも実行されない)。取り込んだ後にパソコン側で変わっていたら、**1 行足す**。
  */
-export function writeBackConfirmMessage(name: string, changedOutside: boolean): string {
+export function writeBackConfirmMessage(
+  name: string,
+  changedOutside: boolean,
+  /** 🔴 ファイルの中身を読めず、差分を出せないとき(「違いはありません」と言わず、理由を 1 行足す)。 */
+  diffUnavailable = false,
+): string {
   return (
     `「${name}」を、いまのノートの内容で上書きします。\n\n` +
     (changedOutside ? `${CHANGED_OUTSIDE_WRITE_BACK_NOTE}\n\n` : '') +
+    (diffUnavailable ? `${DIFF_FILE_UNAVAILABLE_NOTE}\n\n` : '') +
     'ファイルの元の内容は失われます(取り消せません)。よろしいですか?'
   );
 }
+
+/**
+ * 🔴 **確認している間にノートが変わったときの断り文**(#1231 着地後レビュー)。⚠ 画面に出る字なので 1 か所に置く。
+ * 確認の小窓に出した差分は**確認の前の本文**との差で、書くのは**確認の後に読み直した本文**。
+ * 録音の文字起こし・タイマー・別窓の追記が間に入ると、**差分に出ていない物を取り消せないファイルへ書く**
+ * ことになる ── だから書かず、押し直してもらう(押し直せば、変わった後の差分が出る)。
+ */
+export const WRITE_BACK_CHANGED_NOTE = '確認している間にノートが変わりました。もう一度押してください';
 
 /** 差分を出す行数の上限(#1231 段②)。超えたぶんは「…ほか N 行」にする。 */
 export const WRITE_BACK_DIFF_MAX_ROWS = 500;
@@ -122,6 +136,9 @@ export interface WriteBackDeps {
  * 🔴 **確認の後にもう一度待って読む** ── 確認の窓が開いている間に本文が変わりうる
  *   ので、**書く物そのもの**を読み直し、それにも同じ門を通す
  *   (確認の前に読んだ物を書くと、確認の間の変更を巻き戻す)。
+ * 🔴 **読み直した本文が、確認の前に読んで差分を見せた本文と違えば、書かずに断る**(`WRITE_BACK_CHANGED_NOTE`)。
+ *   ⚠ 以前は「確認の後の本文を書く」だったが、差分に出ていない追記(録音の文字起こし・別窓)を
+ *   **取り消せないファイルへ**書いてしまう。見せた物と書く物を同じに保つ。
  * ⚠ 門の判定は `isBlankBody` の 1 本(空白だけ。⚠ 設定行だけは空ではない = #1266)。
  * 🔴 **確認の前に、パソコン側で変わっていないかを読む**(#1264 §2 欠陥 1)── 変わっていたら
  *   確認の字へ 1 行足す(書き戻すと、外での直しが消える)。⚠ 止めはしない(user が選ぶ)。
@@ -146,10 +163,17 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   const first = await readForWrite();
   if (first === null) return;
   const file = await deps.inspectFile();
-  // ⚠ 見せるのは**確認の前に読んだ本文**との差 ── 確認の間に変わったら、書くのは読み直した本文(下)
-  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, file.changed), buildWriteBackDiff(file.text, first)))) return;
+  // ⚠ 見せるのは**確認の前に読んだ本文**との差 ── 確認の間に変わったら、書かずに断る(下)
+  const diff = buildWriteBackDiff(file.text, first);
+  // ⚠ 差分を出せない(`diff === null` = 大きすぎる / 読めない)ときは、そう言う(黙って素の確認にしない)
+  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, file.changed, diff === null), diff))) return;
   const body = await readForWrite();
   if (body === null) return;
+  // 🔴 見せた差分と書く本文を**同じ物**に保つ ── 違えば書かない(差分に無い変更を取り消せない形で書かない)
+  if (body !== first) {
+    deps.fail(WRITE_BACK_CHANGED_NOTE);
+    return;
+  }
   const result = await deps.write(body);
   if (result.ok) deps.done(`書き戻しました: 「${deps.name}」`);
   else deps.fail(`${deps.name}: ${result.reason}`);
