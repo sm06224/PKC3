@@ -103,7 +103,9 @@ export function applyTableSort(root: ParentNode = document): void {
       const icon = document.createElement('span');
       icon.className = 'pkc-table-sort-icon';
       icon.setAttribute('aria-hidden', 'true');
-      icon.textContent = '↕';
+      // 🔴 印の字(↕ ▲ ▼)は**ここでは持たない** ── CSS の `::after` が
+      //   `data-pkc-sort-direction` から出す(`app.css`)。字を要素に入れると
+      //   `textContent` / 範囲選択 / ⧉ のコピーに `名前↕` と混ざる(#1150 / #1151)。
       th.appendChild(icon);
 
       const triggerSort = (): void => {
@@ -115,21 +117,16 @@ export function applyTableSort(root: ParentNode = document): void {
         headers.forEach((otherTh) => {
           otherTh.setAttribute('data-pkc-sort-direction', 'none');
           otherTh.setAttribute('aria-sort', 'none');
-          const otherIcon = otherTh.querySelector('.pkc-table-sort-icon');
-          if (otherIcon) otherIcon.textContent = '↕';
         });
 
         // 対象ヘッダーの状態を更新
         th.setAttribute('data-pkc-sort-direction', next);
         if (next === 'asc') {
           th.setAttribute('aria-sort', 'ascending');
-          icon.textContent = '▲';
         } else if (next === 'desc') {
           th.setAttribute('aria-sort', 'descending');
-          icon.textContent = '▼';
         } else {
           th.setAttribute('aria-sort', 'none');
-          icon.textContent = '↕';
         }
 
         // 行の並び替え

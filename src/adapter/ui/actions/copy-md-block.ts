@@ -82,6 +82,8 @@ const TABLE_CHROME_SELECTOR = [
   '.pkc-md-table-filter-row',
   '.pkc-md-table-sort',
   '.pkc-md-table-filter-toggle',
+  // 並べ替えの印(#1150)。字は CSS の `::after` へ移したので空だが、貼り先には要らない
+  '.pkc-table-sort-icon',
 ].join(', ');
 
 /**
