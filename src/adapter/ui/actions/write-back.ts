@@ -19,6 +19,15 @@
  * (2026-08-17 に書き出しで踏んだ形と同じ)。
  */
 
+import { isBlankBody } from '@features/markdown/frontmatter';
+
+/**
+ * 🔴 **本文が空のときの断り文**(#215 段③)。⚠ 画面に出る字なので 1 か所に置く。
+ * 「消したいときは」まで言う ── 押して何も起きない dead click にしない。
+ */
+export const WRITE_BACK_EMPTY_NOTE =
+  '本文が空なので、元ファイルへは書き戻しません(消したいときはパソコン側で消してください)';
+
 /** 書き戻しの結果(`platform/launched-files.ts` の `WriteBackResult` と同じ形)。 */
 export type WriteBackOutcome = { ok: true } | { ok: false; reason: string };
 
@@ -43,21 +52,38 @@ export interface WriteBackDeps {
 }
 
 /**
- * 確認 → **飛んでいる書込を待つ** → disk の本文を読む → ファイルへ書く。
+ * **飛んでいる書込を待つ** → disk の本文を読む → 空なら断る → 確認 →
+ * (もう一度待って読み直す)→ ファイルへ書く。
  *
- * ⚠ **待つのは確認の後**である ── 確認で「やめる」を選ぶ人にまで走査や書込の
- *   着地を待たせない(押した瞬間に閉じるのが正しい)。
- * ⚠ そして**待つのは読む前**でなければならない ── 逆にすると、待っている間に
- *   着地した書込を読み落とす。
+ * 🔴 **空の門は確認の前**に置く(#215 段③)── 空の本文を書くと元のファイルが
+ *   空で上書きされる(取り消せない)。user は「空にしたまま押した」だけなので、
+ *   確認の窓を出して「よろしいですか?」と聞くのではなく、**押せて、理由を言って、
+ *   書かない**(ボタンを隠すと無言の dead click になる)。
+ * ⚠ 門を確認の前へ置くには disk の本文が要る ── だから**待ちも確認の前に 1 回**要る
+ *   (保存の直後に押しても、保存した本文で判定するため。#732 の順番と同じ向き)。
+ * 🔴 **確認の後にもう一度待って読む** ── 確認の窓が開いている間に本文が変わりうる
+ *   ので、**書く物そのもの**を読み直し、それにも同じ門を通す
+ *   (確認の前に読んだ物を書くと、確認の間の変更を巻き戻す)。
+ * ⚠ 門の判定は `isBlankBody` の 1 本(空白だけ・設定行だけも空)。
  */
 export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
+  const readForWrite = async (): Promise<string | null> => {
+    await deps.settle();
+    const body = await deps.getBody();
+    if (body === null) {
+      deps.fail('本文が見つかりません(整理された可能性)');
+      return null;
+    }
+    if (isBlankBody(body)) {
+      deps.fail(WRITE_BACK_EMPTY_NOTE);
+      return null;
+    }
+    return body;
+  };
+  if ((await readForWrite()) === null) return;
   if (!(await deps.confirm())) return;
-  await deps.settle();
-  const body = await deps.getBody();
-  if (body === null) {
-    deps.fail('本文が見つかりません(整理された可能性)');
-    return;
-  }
+  const body = await readForWrite();
+  if (body === null) return;
   const result = await deps.write(body);
   if (result.ok) deps.done(`書き戻しました: ${deps.name}`);
   else deps.fail(`${deps.name}: ${result.reason}`);

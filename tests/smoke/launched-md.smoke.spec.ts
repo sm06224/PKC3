@@ -101,6 +101,22 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
     .poll(() => page.evaluate(() => (window as unknown as { __written: Record<string, string> }).__written['議事録.md']))
     .toBe('# 議事録\n\n直しました。\n');
 
+  // ④-2 🔴 **本文を空にして書き戻しても、元ファイルは空にならない**(#215 段③)。
+  //   確認の窓は出ず(押せて、理由を言う)、ファイルは ④ で書いた中身のまま。
+  //   ⚠ 空白だけ・設定行だけも同じ(判定は unit が全形を見る ── ここは実画面を通す 1 本)。
+  const writtenOf = () =>
+    page.evaluate(() => (window as unknown as { __written: Record<string, string> }).__written['議事録.md']);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await page.fill('[data-pkc-field="editor-body"]', '  \n\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="write-back-file"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '空の本文なのに、書かない理由を言っていない(無言の dead click)',
+  ).toContainText('本文が空なので、元ファイルへは書き戻しません');
+  await expect(page.locator('[data-pkc-field="dialog-body"]'), '空なのに確認の窓が出た').toBeHidden();
+  expect(await writtenOf(), '空の本文で元ファイルが上書きされた').toBe('# 議事録\n\n直しました。\n');
+
   // ⑤ 🔴 **同じファイルをもう一度開いても増えない**(前のノートを出す)
   const count = () => page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count();
   const before = await count();
