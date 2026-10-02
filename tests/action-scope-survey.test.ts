@@ -286,7 +286,11 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   押し口自身が運ぶので、押した所からは何も要らない。`remove-place-line` と同じ仕分け)。
     // ⚠ 2026-10-02(#1224): N +1(`set-color-swatch`。checkbox の `checked` を渡すだけ ── `set-relative-days` と同じ仕分け)。
     // ⚠ 2026-10-02(#1224 段②): P1 +1(`pick-color`。押した見本の行・何番目・色が要る ── `edit-cell` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 67, P2: 34, E: 25, V: 10, N: 168 });
+    // ⚠ 2026-10-02(#772 段②): P1 +1(`capture-transcribe`。「音/動画」の行の「文字にする」── 押した行が要る。
+    //   `capture-play` と同じ仕分け)/ N +3(`install-asr-part` / `remove-asr-part` / `cancel-asr-install`。
+    //   設定の「音声認識」の押し所 ── どの部品かは押したボタン自身が運ぶので、押した所からは何も要らない。
+    //   `remove-sql-source` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 68, P2: 34, E: 25, V: 10, N: 171 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

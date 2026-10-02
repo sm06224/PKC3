@@ -241,6 +241,13 @@ import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
+import { AsrClient } from '@adapter/platform/asr/asr-client';
+import { decodeToMono16k } from '@adapter/platform/asr/asr-decode';
+import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
+import { AsrPackStore } from '@adapter/platform/asr/asr-pack-store';
+import { ASR_PACK_BASE, asrPartOf } from '@features/asr/asr-parts';
+import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
+import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
@@ -2584,6 +2591,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
+   * 🔴 **音声認識(録った音を文字にする)**(#772 段②。裁定 2026-10-01 = 端末の中だけ)。
+   * 段取りは `capture-transcribe.ts` が持ち、ここは口を渡すだけ(CLAUDE.md §2:この file は
+   * どの test からも実行されない)。
+   *
+   * ⚠ **部品は押した人にだけ取らせる** ── 取り込みは設定の面の「音声認識」から
+   *   (`asrInstaller`)。取った後は端末の保管(IDB の Blob)へ置き、2 回目からは取らない。
+   * ⚠ **重い所はワーカー**(`AsrClient`)── 使い捨て(遅延起動 / アイドルで kill)。
+   *   ここで作るのは**取っ手だけ**で、worker も部品の読み込みも、最初に押されるまで起きない。
+   */
+  const asrStore = new AsrPackStore();
+  const asrInstaller = new AsrPackInstaller({ store: asrStore, base: ASR_PACK_BASE });
+  const asrClient = new AsrClient();
+  const captureTranscriber = createCaptureTranscriber({
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    decode: (blob) => decodeToMono16k(blob),
+    ready: asrReadyFrom(asrStore),
+    transcribe: (job) => asrClient.transcribe(job),
+    notify: showStatus,
+  });
+  const finishAsrPack = (result: Parameters<typeof applyAsrResult>[1]): void =>
+    applyAsrResult(appAsrPack, result, { notify: showStatus });
+
+  /**
    * 🔴 **タイマー**(#279)。段取りは `timer.ts` が持ち、ここは口を渡すだけ。
    * ⚠ 帯は**走っている間だけ**描き直される(`timer.ts` が刻みを張り外しする)──
    *   ここで `setInterval` を張らない(常駐を作らない ── 不可侵指示 2026-08-03)。
@@ -2739,6 +2770,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     stopCapture: () => captureService.stop(),
     discardCapture: () => captureService.discard(),
     trimCapture: (lid, startMs, endMs) => void captureTrimmer.run(lid, startMs, endMs),
+    // 🔴 録った音を文字にする(#772 段②)── 押す口は「音/動画」の行に在る
+    transcribeCapture: (lid) => void captureTranscriber.run(lid),
+    // 🔴 音声認識の部品を入れる / やめる / 消す(#772 段②)── 判断も文言も実体が持つ
+    installAsrPart: (id) => {
+      const part = asrPartOf(id);
+      if (part === undefined) return;
+      void asrInstaller
+        .install(part.id, (text) => appAsrPack.setProgress(text))
+        .then(finishAsrPack);
+    },
+    cancelAsrInstall: () => asrInstaller.cancel(),
+    removeAsrPart: (id) => {
+      const part = asrPartOf(id);
+      if (part === undefined) return;
+      void asrInstaller.remove(part.id).then(finishAsrPack);
+    },
     // 🔴 タイマー(#279)── 押す口は左の列の「画面」の隣に在る
     startTimer: () => timerService.start(),
     stopTimer: (lid) => timerService.stop(lid),
@@ -4430,6 +4477,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
     })
     .catch(() => {});
+
+  /**
+   * 🔴 **入れてある音声認識の部品を 1 度だけ読み、控えに写す**(#772 段②)。
+   * ⚠ 読めなくても黙って「入っていない」へ倒す(`readInstalled` が受ける)── 使わない user の
+   *   起動を、ここで止めない。⚠ 部品そのもの(数十〜数百 MB)は**ここでは読まない**。
+   */
+  void asrInstaller.readInstalled().then((v) => appAsrPack.setInstalled(v));
 
   dispatcher.dispatch({
     type: 'SYS_BOOTED',

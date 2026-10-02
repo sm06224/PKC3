@@ -1074,6 +1074,20 @@ export interface BinderServices {
    */
   trimCapture?(lid: string, startMs: number, endMs: number): void;
   /**
+   * 🔴 **録った音を文字にする**(#772 段②。裁定 2026-10-01 = 端末の中だけ / 「音/動画」の行に 1 つ /
+   * そのノートの本文の末尾に追記)。⚠ **省略可**(無い配線では「この版では文字にできません」と断る)。
+   * ⚠ 段取りは `capture-transcribe.ts` が持つ ── binder は押した行の lid を渡すだけ。
+   */
+  transcribeCapture?(lid: string): void;
+  /**
+   * 🔴 **音声認識の部品を入れる / 途中でやめる / 消す**(#772 段②)。
+   * ⚠ **勝手に取りに行かない** ── 押した人にだけ取らせる(Office 一式と同じ作法)。
+   * ⚠ 判断も文言も `AsrPackInstaller` が持つ(投げてこない)。
+   */
+  installAsrPart?(id: string): void;
+  cancelAsrInstall?(): void;
+  removeAsrPart?(id: string): void;
+  /**
    * 🔴 **タイマー**(#279。user 指示 2026-08-19「…タイマー…は組み込みアプリで
    * リリースしたい」)。⚠ **省略可**(収録と同じ規律)。
    * ⚠ 止める / 捨てるは**どの計測か**を渡す ── 複数同時に走るので、
@@ -5043,6 +5057,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.trimCapture(trim.lid, trim.startMs, trim.endMs);
+  },
+  /**
+   * 🔴 **録った音を文字にする**(#772 段②)。⚠ **対象は押した行が持つ**(`data-pkc-entry`)──
+   *   選択中のノートから採らない(一覧のどの行からも押せる。別のノートを開いたまま押せる)。
+   * ⚠ 段取り(部品の有無・同時 1 本・編集中の預かり)は `capture-transcribe.ts` が持つ。
+   */
+  'capture-transcribe': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    if (!lid) return;
+    if (!services.transcribeCapture) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では文字にできません。' });
+      return;
+    }
+    services.transcribeCapture(lid);
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。
@@ -9636,6 +9664,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'remove-office-pack': (_dispatcher, _target, services) => {
     services.removeOfficePack?.();
+  },
+  /**
+   * 🔴 **音声認識の部品を入れる / やめる / 消す**(#772 段②)。⚠ **どの部品かは押した
+   *   ボタンが持つ**(`data-pkc-part`)── 2 択を 1 つの受け手で扱う。
+   * ⚠ 判断も文言も `AsrPackInstaller` が持つ(binder は渡すだけ)。
+   */
+  'install-asr-part': (_dispatcher, target, services) => {
+    const id = target.getAttribute('data-pkc-part');
+    if (id) services.installAsrPart?.(id);
+  },
+  'cancel-asr-install': (_dispatcher, _target, services) => {
+    services.cancelAsrInstall?.();
+  },
+  'remove-asr-part': (_dispatcher, target, services) => {
+    const id = target.getAttribute('data-pkc-part');
+    if (id) services.removeAsrPart?.(id);
   },
   /**
    * 🔴 **Office の設定を初期状態に戻す**(#634)。⚠ 引数を採らない ──

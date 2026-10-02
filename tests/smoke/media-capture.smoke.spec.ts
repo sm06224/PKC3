@@ -5,6 +5,16 @@ import { chromiumLaunch } from './playwright.config';
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
 //   両方そのままで緑にならないよう、実装の出力を直に引く。
 import { trimMarkText } from '../../src/features/audio/trim-text';
+// ⚠ 音声認識の部品の名前・大きさの下限は**実装の定数から引く**(手で並べると、定数を差し替えた日に
+//   この偽の部品だけが古い構成のまま緑になる)。alias を持たない pure な定数だけを引く。
+import {
+  ASR_PARTS,
+  ASR_RUNTIME_FILES,
+  asrMemoryNote,
+  asrModelDir,
+  asrModelFloorBytes,
+} from '../../src/features/asr/asr-parts';
+import { createHash } from 'node:crypto';
 
 /**
  * 🔴 **録音して止めると、開いていたノートに入る**(#413。user 要望 2026-07-16
@@ -66,6 +76,14 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
         };
       }
     } as unknown as typeof AudioContext;
+  });
+  /**
+   * 🔴 **端末のメモリを小さく見せる**(#772 段② の台)── 実機の値は箱で変わるので、
+   * 「押す前に出る案内」を**どの箱でも**見られるよう、読ませる値を固定する。
+   * ⚠ `navigator.deviceMemory` を差すだけで、ほかの動きは変えない(音声認識の節だけが読む)。
+   */
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'deviceMemory', { value: 2, configurable: true });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -555,5 +573,197 @@ ${(e as Error).message}`,
   // ⚠ 切に戻しても**器は捨てない**(捨てると、通している音が無音になる)
   expect(await counts(), '切に戻したときに器を作り直している').toEqual({ ...on, src: on.src });
 
+  /**
+   * ## 段⑦ ── **音声認識(文字にする)**(#772 段②)
+   *
+   * 🔴 **unit では原理的に届かない層**:
+   *  ① **本物のワーカー** ── 部品(blob: の ESM)を `import()` して、結果を返す
+   *  ② **本物の `AudioContext`** ── 録った webm を復号して、16kHz の PCM にできるか
+   *  ③ **本物の IndexedDB** ── 取り込んだ部品を Blob のまま置き、読み戻して worker へ渡せるか
+   *  ④ 押す前のメモリの案内が**ボタンの下**に実際に出る(DOM の順だけでは位置は言えない)
+   *
+   * 🔴 **本物の重みは CI に無い**(81MB / 254MB)ので、**偽の部品**を `page.route` で返す:
+   *   実行の部品は「`pipeline` が決まった字を返す」だけの小さな ESM、重みは**ゼロ詰め**(目録の
+   *   下限を満たす大きさだけ)。⚠ だからここが言えるのは**仕組みの配線**であって、
+   *   **認識の当たり具合・本物の重みでの動作は言えない**(本物の transformers + ORT + whisper-base を
+   *   blob 経由で実走した結果は別 ── 報告に書く)。
+   * ⚠ **起動は増やさない** ── 同じ窓の続きで、システムと「音/動画」を行き来するだけである。
+   */
+  const sha = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
+  const light = ASR_PARTS[0]!;
+  const FAKE_TEXT = '偽の文字起こし';
+  const jsText = [
+    'export const env = { backends: { onnx: { wasm: {} } } };',
+    `export async function pipeline() { return async (pcm) => ({ text: '${FAKE_TEXT}:' + pcm.length }); }`,
+    // ⚠ 目録の下限(約 100KB)を満たす大きさまで、注釈で埋める
+    ...Array.from({ length: 2500 }, (_, i) => `// padding ${i} ${'x'.repeat(40)}`),
+  ].join('\n');
+  /** 偽の部品 1 件。⚠ 中身は**ページの中で作る**(46MB を引数で渡さない)── `text` か `zeros`(ゼロ詰めの長さ)。 */
+  type FakeFile = { path: string; text?: string; zeros?: number };
+  const fakeSpec: FakeFile[] = [
+    { path: ASR_RUNTIME_FILES[0]!, text: jsText },
+    { path: ASR_RUNTIME_FILES[1]!, text: '// loader\n'.repeat(1000) },
+    { path: ASR_RUNTIME_FILES[2]!, zeros: 5_100_000 },
+    { path: `${asrModelDir(light)}config.json`, text: '{"fake":true}' },
+    // 重みは「目録の下限(定数の半分)」を満たす大きさだけのゼロ詰め
+    {
+      path: `${asrModelDir(light)}onnx/model_quantized.onnx`,
+      zeros: asrModelFloorBytes(light) + 1000,
+    },
+  ];
+  const entryOf = (f: FakeFile): { path: string; bytes: number; sha256: string } => {
+    const bytes = f.text !== undefined ? Buffer.byteLength(f.text) : f.zeros!;
+    // ⚠ 32MB を超える物は sha256 を照合しない(実装の作り)── ここは形が合う値を入れるだけ
+    const sha256 =
+      bytes > 32 * 1024 * 1024 ? 'f'.repeat(64) : sha(f.text !== undefined ? Buffer.from(f.text) : Buffer.alloc(f.zeros!));
+    return { path: f.path, bytes, sha256 };
+  };
+  const manifest = JSON.stringify({
+    version: 'smoke-1',
+    runtime: fakeSpec.filter((f) => ASR_RUNTIME_FILES.includes(f.path)).map(entryOf),
+    models: { light: fakeSpec.filter((f) => f.path.startsWith('models/')).map(entryOf) },
+  });
+  /**
+   * 🔴 **`page.route` ではなく、ページの `fetch` を差す**。⚠ PKC3 は service worker を登録しており、
+   * その `respondWith` が要求を受けるので **`page.route` は当たらない**(`external-images.smoke.spec.ts`
+   * の 404 の注記と同じ ── 当てると SPA の index.html が 200 で返って「目録として読めません」になる)。
+   * 🔑 差すのは**この 1 か所だけ**(`/asr-pack/` を含む URL)で、ほかの要求は素の `fetch` へ通す。
+   * ⚠ 取りに行った path を数える(同一オリジンの `/asr-pack/` だけから取った / 2 回目は取らない、を見るため)。
+   */
+  await page.evaluate(
+    ({ spec, manifestText }) => {
+      const w = window as unknown as { __asrRequests?: string[] };
+      w.__asrRequests = [];
+      const real = window.fetch.bind(window);
+      const enc = new TextEncoder();
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const u = new URL(raw, location.href);
+        if (!u.pathname.includes('/asr-pack/')) return real(input, init);
+        w.__asrRequests!.push(u.pathname);
+        const rel = decodeURIComponent(u.pathname.replace(/^.*\/asr-pack\//, ''));
+        if (rel === 'pack.json') return new Response(manifestText, { status: 200 });
+        const f = spec.find((x) => x.path === rel);
+        if (f === undefined) return new Response('nf', { status: 404 });
+        return new Response(f.text !== undefined ? enc.encode(f.text) : new Uint8Array(f.zeros ?? 0), { status: 200 });
+      };
+    },
+    { spec: fakeSpec, manifestText: manifest },
+  );
+  const asrRequests = (): Promise<string[]> =>
+    page.evaluate(() => (window as unknown as { __asrRequests: string[] }).__asrRequests);
+
+  const statusLine = page.locator('[data-pkc-region="status"]');
+  const originalRow = page.locator('[data-pkc-capture]:not(:has-text("(0:01〜0:03)"))').first();
+
+  // 入口と節の字は**画面から読む**(案内の字がこれと一致することを見る ── 手で「システム → 音声認識」と書かない)
+  const settingsTab = '[data-pkc-action="set-view"][data-pkc-view="settings"]';
+  await clickReal(page, settingsTab);
+  const navLabel = ((await page.locator(settingsTab).first().textContent()) ?? '').trim();
+  const asrSection = page.locator('[data-pkc-region="settings-asr"]');
+  await asrSection.scrollIntoViewIfNeeded();
+  const sectionLabel = ((await asrSection.locator('h4').textContent()) ?? '').trim();
+  expect(navLabel.length, '入口の名前を読めていない').toBeGreaterThan(0);
+  expect(sectionLabel.length, '節の見出しを読めていない').toBeGreaterThan(0);
+
+  // ④ 🔴 押す前に、メモリの案内が**ボタンの下**に出る。ボタンは押せるまま
+  const installLight = asrSection.locator(
+    '[data-pkc-action="install-asr-part"][data-pkc-part="light"]',
+  );
+  const memoryNote = asrSection.locator('[data-pkc-part="light"] [data-pkc-field="asr-memory-note"]');
+  await expect(installLight, '取り込むボタンが出ていない').toBeVisible();
+  await expect(memoryNote, 'メモリが足りない見込みの端末なのに、案内が出ていない').toBeVisible();
+  expect(await memoryNote.textContent(), '案内の字が実装の出力と違う').toBe(asrMemoryNote(light, 2));
+  const btnBox = (await installLight.boundingBox())!;
+  const noteBox = (await memoryNote.boundingBox())!;
+  expect(noteBox.y, '案内がボタンの下に出ていない(同じ高さか上)').toBeGreaterThanOrEqual(
+    btnBox.y + btnBox.height - 1,
+  );
+  await expect(installLight, '案内を出した端末でボタンを塞いだ').toBeEnabled();
+  expect(await installLight.textContent(), 'ボタンの字に大きさと説明が無い').toMatch(
+    /約 [\d.]+ MB、1 分の音に約 \d+ 秒/,
+  );
+  expect(await asrRequests(), '押す前に部品を取りに行った(勝手に取りに行かない)').toEqual([]);
+
+  // ① 部品が無いまま「文字にする」→ 取り込みへ案内する(押して無言にしない)
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
+  await expect(statusLine, '部品が無いのに案内が出ない').toContainText(
+    `${navLabel} → ${sectionLabel}`,
+  );
+  expect(await asrRequests(), '部品が無いのに取りに行った').toEqual([]);
+
+  // ③ 取り込む → 「取り込み済み」(取り込むボタンは隠れ、消すボタンが出る)
+  await clickReal(page, settingsTab);
+  await clickReal(page, installLight);
+  const installed = asrSection.locator('[data-pkc-part="light"] [data-pkc-field="asr-installed"]');
+  await expect(installed, '取り込んだのに「取り込み済み」が出ない')
+    .toBeVisible({ timeout: 60_000 })
+    .catch(async (e: unknown) => {
+      // ⚠ 落ちた回に「画面が何と言っていたか / 何を取りに行ったか」を残す(「hidden」だけでは原因に近づけない)
+      const said = ((await statusLine.textContent().catch(() => null)) ?? '(読めない)').trim().slice(0, 200);
+      const progress = ((await asrSection.locator('[data-pkc-field="asr-progress"]').textContent().catch(() => null)) ?? '').trim();
+      throw new Error(
+        `${(e as Error).message}\n  状態の行: ${said}\n  進み: ${progress}\n  取りに行った: ${(await asrRequests().catch(() => [])).join(', ')}\n  page error: ${errors.join(' / ')}`,
+        { cause: e },
+      );
+    });
+  await expect(installed).toContainText('取り込み済み');
+  await expect(installLight, '取り込み済みなのに取り込むボタンが残っている').toBeHidden();
+  await expect(
+    asrSection.locator('[data-pkc-action="remove-asr-part"][data-pkc-part="light"]'),
+  ).toBeVisible();
+  // ⚠ もう一方(当たりやすい)は影響を受けない
+  await expect(
+    asrSection.locator('[data-pkc-action="install-asr-part"][data-pkc-part="accurate"]'),
+  ).toBeVisible();
+  // 🔴 部品は同一オリジンの /asr-pack/ だけから取った(目録 1 + 実行の部品と重みの全部)
+  const afterInstall = await asrRequests();
+  expect(
+    afterInstall.length,
+    `取った file の数が目録と合わない: ${afterInstall.join(', ')}`,
+  ).toBe(1 + fakeSpec.length);
+  const firstRound = afterInstall.length;
+
+  // ① 取り込んだ後に「文字にする」→ 録音のノートの末尾に、見出しつきで足される
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const transcribe = originalRow.locator('[data-pkc-field="capture-transcribe"]');
+  await clickReal(page, transcribe);
+  await expect(statusLine, '文字を足したと言っていない').toContainText('文字起こしを足しました', {
+    timeout: 60_000,
+  });
+  // 終わったらボタンは元の字・押せる状態に戻る(「文字にしています…」で止まらない)
+  await expect(transcribe).toHaveText('文字にする');
+  await expect(transcribe).toBeEnabled();
+  // 🔴 2 回目は取りに行かない(部品は端末の保管から読む)
+  expect((await asrRequests()).length, '文字にするたびに部品を取りに行っている').toBe(firstRound);
+
+  // 足された本文を、そのノートを開いて**目で読む**(状態ではなく画面)
+  await clickReal(page, originalRow.locator('[data-pkc-field="capture-name"]'));
+  const body = page.locator('[data-pkc-view-pane="detail"]');
+  await expect(body, 'ノートの末尾に日時の見出しが足されていない').toContainText(
+    /文字起こし \d{4}-\d{2}-\d{2} \d{2}:\d{2}/,
+  );
+  const m = new RegExp(`${FAKE_TEXT}:(\\d+)`).exec((await body.textContent()) ?? '');
+  expect(m, '偽の部品が返した字が本文に入っていない').not.toBeNull();
+  // 🔑 本物の録音を本物の AudioContext で 16kHz に復号した長さ(録音は 4 秒以上)
+  expect(Number(m![1]), '復号した音の長さが短すぎる(16kHz で 2 秒未満)').toBeGreaterThan(16_000 * 2);
+  expect(Number(m![1]), '復号した音の長さが長すぎる(16kHz で 60 秒超)').toBeLessThan(16_000 * 60);
+  // 🔴 元の録音は残っている(添付の情報も、その場で聞ける器も)── 足しただけで、上書きしていない
+  await expect(body.locator('[data-pkc-field="attachment-info"]'), '追記したのに添付の情報が消えた').toBeVisible();
+  await expect(body.locator('[data-pkc-field="attachment-media"]'), '追記したのに録音の器が消えた').toHaveCount(1);
+
+  // ⑤ 消す → 取り込むボタンが戻り(双方向)、「文字にする」は再び案内になる
+  await clickReal(page, settingsTab);
+  await clickReal(page, asrSection.locator('[data-pkc-action="remove-asr-part"][data-pkc-part="light"]'));
+  await expect(installLight, '消したのに取り込むボタンが戻らない').toBeVisible({ timeout: 15_000 });
+  await expect(installed).toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
+  await expect(statusLine, '消したのに文字にできてしまう').toContainText(
+    `${navLabel} → ${sectionLabel}`,
+  );
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+

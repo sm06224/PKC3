@@ -69,6 +69,15 @@ const OUTSIDE_ONLY: readonly string[] = ['format-bold', 'open-settings', 'toggle
  *   ── この表が、その向きの計器である。
  */
 const UNRESOLVED: readonly string[] = [
+  /**
+   * ⚠ **2026-10-02(#772 段②)で 3 件増えた** ── 音声認識の部品を入れる / やめる / 消す。
+   * 🔑 押し所は設定の節が `button(action, label, field)` の**ヘルパーで組む**ので、静的な
+   *   `data-pkc-action="install-asr-part"` が source のどこにも無い(`install-office-pack` と同じ ──
+   *   出口は在るが、字では追えない)。
+   */
+  'cancel-asr-install',
+  'install-asr-part',
+  'remove-asr-part',
   'choose-office-pack',
   'dual-back',
   'dual-bookmark',
@@ -150,6 +159,9 @@ const OBJECT_LONE: readonly string[] = [
    *   「体系の外で足した 1 つ」と読む(`browse-archive` と同じ扱い)。
    */
   'capture-play',
+  // ⚠ 2026-10-02(#772 段②): 「音/動画」の行の「文字にする」。出口は行の中の 1 か所だけ
+  //   (`capture-play` と同じ ── 押した行の lid が要る)。名前で呼べない理由も同じ。
+  'capture-transcribe',
   'clear-entry-date',
   'deliver-to-extension',
   'dual-bookmark-open',
