@@ -45,6 +45,8 @@ permissions:
   # 赤い夜を issue に出す(下の `ledger` job。#221 の 3 つ目 ──
   # 「夜が赤いまま放置される導線」を直すのが目的で、書くのは issue 1 本だけ)
   issues: write
+  # `pages_deployed_check`(下の product job)が `gh run list` で Deploy Pages の run を引く(#1039)
+  actions: read
 jobs:
   # 🔴 **全量 smoke は、ここには無い**(user 指示 2026-09-11。不可侵)
   #
@@ -115,6 +117,28 @@ jobs:
       #   `smoke.yml` の `kind: product` で**押したときだけ**回す。
       # ⚠ この job が今も夜に居てよいのは、**全量 smoke ではないから**である
       #   (焼いて、検品する ── 1 分で終わり、毎ターンの負荷にならない)。
+      # 🔴 **`/dev/` が main の HEAD を配っているか**(#1039)── GITHUB_TOKEN の push
+      #   (dependabot の auto-merge)は `pages.yml` の on: push を起こさないので、
+      #   引き金が外れた日は **main は進んだのに `/dev/` は古いまま**になり、こちらの
+      #   計器は 1 つも鳴らない(2026-09-24 に実測: main より 1 commit 古い物を配っていた)。
+      #   夜に「この sha の Deploy Pages の run が在るか(緑か、まだ走っているか)」を引く。
+      # ⚠ 上の 3 つと違い、焼きに依存しないので `!cancelled()` で回す。
+      - name: /dev/ が main の HEAD を配っているか(Deploy Pages の run。#1039)
+        id: pages_deployed_check
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          found=$(gh run list --repo "$REPO" --workflow pages.yml --branch main --limit 30 \
+            --json headSha,status,conclusion \
+            --jq "[.[] | select(.headSha == \"$SHA\" and (.conclusion == \"success\" or .status != \"completed\"))] | length")
+          if [ "$found" -eq 0 ]; then
+            echo "::error::main の HEAD $SHA に Deploy Pages の run が無い ── /dev/ が古い(#1039。手で起こすなら Actions → Deploy Pages → Run workflow)"
+            exit 1
+          fi
+          echo "Deploy Pages の run が在る($found 件)"
 
   rust_and_probes:
     runs-on: ubuntu-latest

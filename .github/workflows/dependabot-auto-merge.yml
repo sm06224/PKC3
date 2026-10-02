@@ -1,19 +1,69 @@
-# Dependabot PR の minor/patch を CI green 条件で auto-merge(設計 doc §7・§12-5)。
-# 前提: repo 設定で "Allow auto-merge" が有効であること。major は何もしない(手動 review)。
+# Dependabot PR の minor/patch を **CI 緑を待ってから** merge し、`/dev/` を配り直す(#1039)。
+# 前提: major は何もしない(手動 review)。
+#
+# 🔴 直す前(2026-09-24 に実測)は `gh pr merge --auto` の 1 行だった ── 2 つの穴があった:
+#   ① **CI を待っていなかった**: main に必須の検査が無いので `--auto` はその場で merge し、
+#      `verify` が終わる 4 分前に main が進んでいた(6 件とも緑だったのは偶然)。
+#   ② **`/dev/` が配り直されない**: `GITHUB_TOKEN` による push は workflow を起こさない
+#      (GitHub の仕様)ので、`pages.yml` の `on: push` が発火せず main と `/dev/` が食い違う。
+# 🔑 直し: ①検査の完了を待つ → ②緑なら merge → ③`gh workflow run pages.yml`
+#   (`workflow_dispatch` だけは GITHUB_TOKEN からでも起こせる、という同じ仕様の例外)。
+#   repo の設定(branch 保護)は触らない ── workflow の中で閉じる。
+# ⚠ 夜の `pages_deployed_check`(nightly.yml)が「main の HEAD を配ったか」を見る ──
+#   次に引き金が外れた日に、また静かに止まらないための門。
 name: Dependabot auto-merge
 on: pull_request
 permissions:
   contents: write
   pull-requests: write
+  # ③ `gh workflow run` に要る
+  actions: write
 jobs:
   auto-merge:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    # ⚠ 待つ上限(下の PKC3_WAIT_SECONDS = 12 分)より長く、15 分を超えない
+    timeout-minutes: 15
     steps:
       - uses: dependabot/fetch-metadata@v3
         id: meta
-      - if: steps.meta.outputs.update-type == 'version-update:semver-minor' || steps.meta.outputs.update-type == 'version-update:semver-patch'
-        run: gh pr merge --auto --squash "$PR_URL"
+      - name: 検査の完了を待ち、緑なら merge して /dev/ を配り直す
+        id: merge
+        if: steps.meta.outputs.update-type == 'version-update:semver-minor' || steps.meta.outputs.update-type == 'version-update:semver-patch'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ⚠ test(`tests/workflow-steps.test.ts`)が短い値で差し替えて実際に走らせる
+          PKC3_WAIT_SECONDS: 720
+          PKC3_POLL_SECONDS: 20
+        # 🔴 **自分(この job = check run 名 `auto-merge`)は数えない** ── 数えると
+        #   自分の完了を自分で待つことになり、上限まで止まる。
+        # ⚠ 「検査が 0 件」を緑と読まない ── PR を開いた直後は登録前のことがある。
+        #   0 件のまま上限に達したら赤(merge しない)。
+        run: |
+          deadline=$((SECONDS + PKC3_WAIT_SECONDS))
+          while :; do
+            json=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name != "auto-merge") | {name, status, conclusion}]')
+            n=$(printf '%s' "$json" | jq 'length')
+            pending=$(printf '%s' "$json" | jq '[.[] | select(.status != "completed")] | length')
+            bad=$(printf '%s' "$json" | jq -r '[.[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral"))] | map(.name) | join(", ")')
+            if [ -n "$bad" ]; then
+              echo "::error::検査が赤なので merge しない: $bad"
+              exit 1
+            fi
+            if [ "$n" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::検査が揃わないので merge しない(登録 $n 件 / 未完 $pending 件)"
+              exit 1
+            fi
+            sleep "$PKC3_POLL_SECONDS"
+          done
+          echo "検査 $n 件が緑 ── merge する"
+          gh pr merge --squash "$PR_URL"
+          # 🔴 GITHUB_TOKEN の push は `pages.yml` の on: push を起こさない ── 手で起こす
+          gh workflow run pages.yml --ref main
