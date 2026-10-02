@@ -32,9 +32,12 @@ import {
 } from '../../src/adapter/platform/message-post';
 import {
   EDIT_ELSEWHERE_ERROR,
+  RESERVED_LOCK_CAUTION_TEXT,
   messageKindForOpError,
   quotaCaution,
+  reservedLockCaution,
 } from '../../src/features/message/caution-events';
+import { BANNED_TERMS } from '../../src/features/ui-terms';
 import {
   JOB_CAP,
   MESSAGE_CAP_DEFAULT,
@@ -98,6 +101,34 @@ describe('保存先の空きが少ない → 「注意」', () => {
     expect(req.cap).not.toBe(JOB_CAP);
     expect(countUnread(req.section, null)).toBe(1);
     expect(unread).toEqual([1]);
+  });
+});
+
+describe('書込の途中で閉じても元へ戻す仕組みが働いていない → 「注意」(#1218 F1)', () => {
+  const OPFS = 'opfs-sahpool' as const;
+
+  it('OPFS で開けて、差し替えも当たらず、上流も直っていない回だけ積む', () => {
+    const c = reservedLockCaution({
+      vfs: OPFS,
+      reservedLockPatched: false,
+      reservedLockUpstreamFixed: false,
+    });
+    expect(c?.kind).toBe('caution');
+    expect(c?.text).toBe(RESERVED_LOCK_CAUTION_TEXT);
+    expect(c?.text.length).toBeGreaterThan(20);
+  });
+
+  it('対照群:差し替えが当たった / 上流が直った / :memory: の回は黙る(嘘の警告を積まない)', () => {
+    const base = { reservedLockPatched: false, reservedLockUpstreamFixed: false };
+    expect(reservedLockCaution({ vfs: OPFS, ...base, reservedLockPatched: true })).toBeNull();
+    expect(reservedLockCaution({ vfs: OPFS, ...base, reservedLockUpstreamFixed: true })).toBeNull();
+    expect(reservedLockCaution({ vfs: 'memory', ...base })).toBeNull();
+  });
+
+  it('字は「使わない語」(ui-terms)を含まない', () => {
+    for (const t of BANNED_TERMS) {
+      expect(RESERVED_LOCK_CAUTION_TEXT, t.banned).not.toMatch(t.pattern());
+    }
   });
 });
 
@@ -201,6 +232,13 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
     expect(main).toContain('const caution = quotaCaution(est);');
     expect(main).toContain('appMessagePost.post(caution);');
     expect(main).toContain('showStatus(caution.text);');
+  });
+
+  it('main.ts: 書込の途中の巻き戻しが働いていないとき、本体のタブだけが積み、画面下の 1 行も出す(#1218)', () => {
+    expect(main).toMatch(/if \(followerConn === null\) \{\s*const lockCaution = reservedLockCaution\(init\);/);
+    expect(main).toMatch(
+      /if \(lockCaution !== null\) \{\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text\);/,
+    );
   });
 
   it('binder.ts: 断り文は正本の定数から出し、字を 2 か所に書かない', () => {

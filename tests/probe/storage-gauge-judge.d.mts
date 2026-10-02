@@ -47,3 +47,18 @@ export declare function compareFingerprints(
   a: Fingerprint,
   b: Fingerprint,
 ): { same: boolean; diffs: string[] };
+export interface KillRecord {
+  killAtMs: number;
+  patched?: boolean;
+  reopen?: string;
+  quickCheck?: string[];
+  total?: number;
+  touched?: number;
+}
+export declare function stateOfKill(
+  k: Omit<KillRecord, 'killAtMs' | 'patched'>,
+): 'init-failed' | 'unreadable' | 'completed' | 'rolled-back' | 'half';
+export declare function problemsOfReservedLock(
+  kills: KillRecord[] | undefined,
+  expect: 'patched' | 'unpatched',
+): string[];

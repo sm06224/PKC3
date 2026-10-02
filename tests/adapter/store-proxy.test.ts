@@ -49,6 +49,8 @@ const INIT: InitResult = {
   libVersion: 'test',
   crossOriginIsolated: true,
   journalMode: 'wal',
+  reservedLockPatched: true,
+  reservedLockUpstreamFixed: false,
 };
 
 /** 実 worker の fake。要求を記録して canned 結果を返す。 */

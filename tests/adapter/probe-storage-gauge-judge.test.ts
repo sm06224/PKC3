@@ -13,6 +13,8 @@ import {
   perOp,
   problemsOfOptimizeOp,
   problemsOfPhaseA,
+  problemsOfReservedLock,
+  stateOfKill,
   type GaugeLike,
 } from '../probe/storage-gauge-judge.mjs';
 
@@ -135,5 +137,57 @@ describe('problemsOfOptimizeOp(#999 段③)', () => {
     expect(problemsOfOptimizeOp(lessFree).join()).toContain('空きが減った');
     const shrunk = { ...ok, result: { ...ok.result, after: g({ ftsSegments: 1, freeBytes: 12288, fileBytes: 300000 }) } };
     expect(problemsOfOptimizeOp(shrunk).join()).toContain('file が縮んだ');
+  });
+});
+
+describe('problemsOfReservedLock / stateOfKill(#1218 F1)', () => {
+  const good = (killAtMs: number) => ({
+    killAtMs,
+    patched: true,
+    reopen: 'ok',
+    quickCheck: ['ok'],
+    total: 100,
+    touched: 0,
+  });
+  const failed = (killAtMs: number) => ({ killAtMs, patched: false, reopen: 'FAIL' });
+
+  it('結末は 5 通りに分かれる(巻き戻し / 終わっていた / 途中 / 読めない / 開けない)', () => {
+    expect(stateOfKill(good(1))).toBe('rolled-back');
+    expect(stateOfKill({ ...good(1), touched: 100 })).toBe('completed');
+    expect(stateOfKill({ ...good(1), touched: 40 })).toBe('half');
+    expect(stateOfKill({ ...good(1), quickCheck: ['page 3: bad'] })).toBe('unreadable');
+    expect(stateOfKill({ reopen: 'ok', total: 100, touched: 0 })).toBe('unreadable'); // quick_check を読めていない
+    expect(stateOfKill({ ...good(1), total: 0 })).toBe('unreadable'); // 件数が読めていない = 空に満たされない
+    expect(stateOfKill(failed(1))).toBe('init-failed');
+  });
+
+  it('patched: 全部が巻き戻っていれば空', () => {
+    expect(problemsOfReservedLock([good(1500), good(3000), good(4500)], 'patched')).toEqual([]);
+  });
+
+  it('🔴 patched: 差し替わっていない / 終わっていた / 開けない / 途中 は、それぞれ別の理由で返る', () => {
+    expect(problemsOfReservedLock([{ ...good(1500), patched: false }], 'patched').join()).toContain('差し替えが当たっていない');
+    expect(problemsOfReservedLock([{ ...good(1500), patched: undefined }], 'patched').join()).toContain('差し替えが当たっていない');
+    expect(problemsOfReservedLock([{ ...good(1500), touched: 100 }], 'patched').join()).toContain('測れていない');
+    expect(problemsOfReservedLock([{ ...failed(1500), patched: true }], 'patched').join()).toContain('init-failed');
+    expect(problemsOfReservedLock([{ ...good(1500), touched: 3 }], 'patched').join()).toContain('half');
+    expect(problemsOfReservedLock([], 'patched').join()).toContain('1 つも無い');
+  });
+
+  it('unpatched(対照群): 差し替わっておらず、1 件以上が壊れていれば空', () => {
+    expect(problemsOfReservedLock([failed(1500), { ...good(3000), patched: false }], 'unpatched')).toEqual([]);
+  });
+
+  it('🔴 unpatched: 1 件も壊れない / 差し替わっている は「対照群として成り立たない」と返る', () => {
+    const intact = { ...good(1500), patched: false };
+    expect(problemsOfReservedLock([intact, intact], 'unpatched').join()).toContain('1 件も壊れなかった');
+    expect(problemsOfReservedLock([{ ...failed(1500), patched: true }], 'unpatched').join()).toContain('対照群なのに差し替わっている');
+    // 「終わっていた」は壊れに数えない(終わった回は巻き戻しの話に入らない)
+    expect(problemsOfReservedLock([{ ...good(1500), patched: false, touched: 100 }], 'unpatched').join()).toContain('1 件も壊れなかった');
+  });
+
+  it('expect が不明なら読ませない', () => {
+    // @ts-expect-error 不正な expect を渡す
+    expect(problemsOfReservedLock([good(1)], 'x').join()).toContain('不明');
   });
 });

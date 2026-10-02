@@ -23,6 +23,7 @@ import {
 const SEARCH_LIMIT = 200;
 import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
+import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } from './reserved-lock';
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
 import { trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
@@ -334,6 +335,11 @@ async function init(
   let vfs: InitResult['vfs'] = 'opfs-sahpool';
   let fallbackReason: string | undefined;
   let fallbackDetail: string[] | undefined;
+  // :memory: には journal の巻き戻しの話が無い ── 差し替えない(2 つとも false)
+  let reservedLock: ReservedLockOutcome = {
+    reservedLockPatched: false,
+    reservedLockUpstreamFixed: false,
+  };
   if (opts?.memory === true) {
     /**
      * 🔴 **頼まれて `:memory:` にした回は「落ちた」と言わない**(#400 段③)。
@@ -354,6 +360,15 @@ async function init(
       // 🔑 **捨てる口を持っておく**(上の `sahPool` の注記)── ここでしか手に入らない。
       sahPool = poolUtil as unknown as { wipeFiles(): Promise<void> };
       opened = new poolUtil.OpfsSAHPoolDb(`/${dbName}.db`);
+      /**
+       * 🔴 **開いた直後、`applySchema` より前に差し替える**(#1218 F1。`reserved-lock.ts` に理由)。
+       * ⚠ 結果は**黙って捨てない** ── 当たらなかったら `reservedLockPatched: false` が
+       *   `InitResult` に載り、main が user に言う。
+       */
+      reservedLock = fixReservedLock(
+        sqlite3 as unknown as ReservedLockSqlite,
+        (opened as unknown as { pointer: number }).pointer,
+      );
       endOpeningStorage(true); // 開けた ── 控えは捨てる
     } catch (e) {
       fallbackDetail = endOpeningStorage(false); // 開けなかった ── 診断として残す
@@ -421,7 +436,7 @@ async function init(
   }
 
   db = opened;
-  const base = { ...meta, vfs, journalMode: actualJournalMode };
+  const base = { ...meta, vfs, journalMode: actualJournalMode, ...reservedLock };
   const withReason = fallbackReason ? { ...base, fallbackReason } : base;
   // 🔴 診断として載せるのは開けなかった回だけ(#1073)。console には出さない。
   const withDetail =

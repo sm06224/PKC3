@@ -149,7 +149,11 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
-import { messageKindForOpError, quotaCaution } from '@features/message/caution-events';
+import {
+  messageKindForOpError,
+  quotaCaution,
+  reservedLockCaution,
+} from '@features/message/caution-events';
 import { versionText, MANUAL_TEXT } from '@adapter/ui/render/help';
 import { manualSections } from '@features/help/manual-find';
 import { MANUAL_PAGE_FILE, manualBuildTag } from '@features/help/manual-page';
@@ -2529,6 +2533,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       .catch(() => {
         /* 読めないだけ ── 何も言わない(嘘の安心も、嘘の警告も出さない) */
       });
+  }
+
+  /**
+   * 🔴 **書込の途中でタブが閉じても元へ戻す仕組みが働いていないとき、起動のとき 1 度だけ言う**
+   * (#1218 F1)。⚠ 判断は `reservedLockCaution` が持つ(この file はどの test からも走らない)。
+   * ⚠ **本体のタブだけ**が言う ── 2 枚目のタブ(`followerConn`)の `init` は本体の写しなので、
+   *   言うと同じ注意が 2 度積まれる。
+   */
+  if (followerConn === null) {
+    const lockCaution = reservedLockCaution(init);
+    if (lockCaution !== null) {
+      appMessagePost.post(lockCaution);
+      showStatus(lockCaution.text);
+    }
   }
 
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */

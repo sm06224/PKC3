@@ -5,7 +5,11 @@
  *
  * 自動で打つのは **索引の片づけ(FTS5 の `optimize`)だけ**。VACUUM(file を縮める)は
  * **自動では打たない** ── 途中でタブが殺されると DB が開けなくなる(#1218)。
- * 覆る条件:#1218 が塞がったら「200 MiB 以下なら VACUUM も」を改めて聞く。
+ * 🔑 **#1218 の原因は塞いだ**(F1。`xCheckReservedLock` の差し替え ──
+ * `adapter/platform/storage/reserved-lock.ts` / 実測は
+ * `docs/development/storage-reserved-lock-2026-10.md`)。それでも**ここで VACUUM を
+ * 打ち始めない** ── 打つかどうかは**別の裁定**(「200 MiB 以下なら VACUUM も」を
+ * 改めて聞く)で、塞いだ事実はその材料であって許可ではない。
  *
  * ## ここで決めること(⚠ pure module ── 時計もブラウザも読まない)
  *
