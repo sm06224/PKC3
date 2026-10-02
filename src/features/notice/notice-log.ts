@@ -168,6 +168,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-02-table-copy-sort-icon',
+    title: '表をコピーしても、並べ替えの矢印が貼り付けに混ざらなくなりました',
+    items: [
+      '表の ⧉ でコピーしたり、表の見出しを選んで Ctrl+C を押したりしても、並べ替えの矢印(↕ ▲ ▼)が貼り付け先に混ざらなくなりました(9 月末の並べ替えの追加から混ざっていました)。',
+      '並べ替えの矢印の見た目と動きは変わりません。',
+    ],
+  },
+  {
     id: '2026-10-02-selection-stats',
     title: '編集中、選んだ範囲の文字数と行数が帯の右端に出るようになりました',
     items: [
