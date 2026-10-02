@@ -315,3 +315,41 @@ describe('普通のバックアップも、「入れ物を捨てる」画面の�
     expect(lastRescueWritten(), '失敗したのに済んだ顔をしている').toBeNull();
   });
 });
+
+/**
+ * 🔴 **失敗したら、進行中の字(「書き出しています…」)を消す**(#1017 C5)。
+ *
+ * ⚠ 直す前は、失敗しても進行中の字が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
+ * ⚠ **出す前の断り**(編集中)は進行中の字を出していないので、消す `notify('')` も撃たない。
+ */
+describe('exportArchive ── 失敗したら進行中の字を消す(#1017 C5)', () => {
+  it('🔴 失敗した回は、進行中の字のあとに空の字(消す)が来て、完了の字は出ない', async () => {
+    const { deps, notices } = baseDeps({
+      source: fakeSource({ fail: 'RangeError: Invalid array buffer length' }),
+    });
+    const d = readyDispatcher();
+    expect(await exportArchive(d, deps, 'archive'), '前提が崩れた(失敗していない)').toBeNull();
+    expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('書き出しています…');
+    expect(notices.at(-1), '失敗したのに進行中の字が残る').toBe('');
+    expect(notices.some((n) => n.startsWith('書き出しました')), '失敗なのに完了と言った').toBe(false);
+  });
+
+  it('対照群:成功した回は、最後が完了の字で、消す字は撃たない', async () => {
+    const { deps, notices } = baseDeps();
+    expect(await exportArchive(readyDispatcher(), deps, 'archive')).not.toBeNull();
+    expect(notices.at(-1)).toContain('書き出しました');
+    expect(notices, '成功なのに消す字を撃った').not.toContain('');
+  });
+
+  it('🔴 出す前の断り(編集中)は、消す字も撃たない(別の知らせを巻き込まない)', async () => {
+    const { deps, notices } = baseDeps();
+    const sent: unknown[] = [];
+    const editing = {
+      getState: () => ({ phase: 'editing' }),
+      dispatch: (a: unknown) => sent.push(a),
+    } as unknown as Dispatcher;
+    expect(await exportArchive(editing, deps, 'archive')).toBeNull();
+    expect(sent[0], '前提が崩れた(断っていない)').toMatchObject({ type: 'OP_FAILED' });
+    expect(notices, '出していない進行中の字を消す字を撃った').toEqual([]);
+  });
+});

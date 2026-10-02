@@ -193,7 +193,7 @@ test('🔴 表の ▾ から形を選んでコピーでき、⧉ の 1 押しは
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '保存したのに何も言っていない / ノートの題名から名前を作っていない',
-  ).toContainText(/買い物メモ-\d{4}-\d{2}-\d{2}\.csv を保存しました/);
+  ).toContainText(/「買い物メモ-\d{4}-\d{2}-\d{2}\.csv」を保存しました/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

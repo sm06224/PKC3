@@ -15,6 +15,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { captureItemsFrom } from '../../src/features/capture/capture-item';
 import type { AudioTrimResult } from '../../src/adapter/platform/audio/audio-codec';
 import type { AttachItem } from '../../src/adapter/ui/actions/attach';
+import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 const body = (name: string, mime: string): string =>
   ['---', `attachment.name: ${name}`, `attachment.mime: ${mime}`, 'attachment.size: 2048', 'attachment.asset_key: k-1', '---', ''].join('\n');
@@ -120,6 +121,8 @@ describe('切り出す(成功する道)', () => {
     expect(h.notes[0]).toContain('切り出しています');
     expect(h.notes[1]).toContain('切り出しました');
     expect(h.notes[1]).toContain('(0:53)');
+    // 🔴 切り出したファイルの名前は引用符で囲んである ── メッセージへ積むとき残らない(#1017 C5)
+    expect(sanitizeMessageText(h.notes[1]!), '名前がメッセージに残る').toBe('切り出しました:「…」(0:53)');
   });
 
   it('🔴 範囲はそのままワーカーへ渡る(丸めていない)', async () => {
@@ -385,5 +388,49 @@ describe('レビューで出た 4 件(#683 段②a)', () => {
     });
     await h.trimmer.run('a', 0, 1000);
     expect(h.dispatcher.getState().captureTrimBusy).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **失敗したら、進行中の字(「切り出しています…」)を消す**(#1017 C5)。
+ *
+ * ⚠ 直す前は、どの失敗の枝でも進行中の字が画面下に**残った**(エラーの行と並んで「まだ続いている」と
+ *   読める)。失敗の出口は `return` が複数なので、個々の枝ではなく `finally` で 1 度だけ消す ──
+ *   だから**出口ごと**に見る(枝を足した人が消し忘れても、ここで 1 つずつ鳴る)。
+ */
+describe('進行中の字の後始末(#1017 C5)', () => {
+  const failing: Array<[string, () => Parameters<typeof harness>[0]]> = [
+    ['切り出せない形', () => ({ trim: vi.fn(async () => ({ ok: false as const, reason: 'lacing' as const })) })],
+    ['中身が消えている', () => ({ readBlob: vi.fn(async () => null) })],
+    ['保存できなかった', () => ({ attach: vi.fn(async () => null) })],
+    [
+      '例外',
+      () => ({
+        trim: vi.fn(async () => {
+          throw new Error('boom');
+        }),
+      }),
+    ],
+  ];
+
+  it.each(failing)('🔴 %s: 失敗したら最後は消す字で、完了の字は出ない', async (_label, over) => {
+    const h = harness(over());
+    await h.trimmer.run('a', 0, 1000);
+    expect(h.notes[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('切り出しています');
+    expect(h.notes.at(-1), '失敗したのに進行中の字が残る').toBe('');
+    expect(h.notes.join(), '失敗なのに完了と言った').not.toContain('切り出しました');
+  });
+
+  it('対照群:成功した回は最後が完了の字で、消す字は撃たない', async () => {
+    const h = harness();
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.notes.at(-1)).toContain('切り出しました');
+    expect(h.notes, '成功なのに消す字を撃った').not.toContain('');
+  });
+
+  it('🔴 進行中の字を出す前の断り(範囲が決まっていない)は、消す字も撃たない', async () => {
+    const h = harness();
+    await h.trimmer.run('a', 1000, 1000);
+    expect(h.notes, '出していない進行中の字を消す字を撃った').toEqual([]);
   });
 });

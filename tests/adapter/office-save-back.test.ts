@@ -19,6 +19,7 @@ import {
   type SaveBackDeps,
 } from '@adapter/platform/office/office-save-back';
 import type { StageDir, StagedSave } from '@adapter/platform/office/office-stage';
+import { sanitizeMessageText } from '@features/message/message-log';
 
 interface FakeStage {
   dir: StageDir;
@@ -648,6 +649,8 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     expect(h.created, '🔴 ノートを増やしている').toEqual([]);
     expect(h.replaced, '添付を差し替えている').toEqual([]);
     expect(h.notices.join(' ')).toContain('元のファイルへ保存しました');
+    // 🔴 ファイル名は引用符で囲んである ── メッセージへ積むとき名前が残らない(#1017 C5)
+    expect(sanitizeMessageText(h.notices.join(' ')), 'ファイル名がメッセージに残る').not.toContain('報告書');
     expect(h.stage.keys(), '棚から片付いていない').toEqual([]);
   });
 

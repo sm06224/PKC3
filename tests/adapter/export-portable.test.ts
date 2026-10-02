@@ -183,3 +183,36 @@ describe('書き出す', () => {
     expect(dp.notes, '注意が無いのに報告している').toHaveLength(0);
   });
 });
+
+/**
+ * 🔴 **失敗したら、進行中の字(「可搬 HTML を書き出しています…」)を消す**(#1017 C5)。
+ * ⚠ 出す前の断り(配られた 1 枚の中 / 編集中)は進行中の字を出していないので、消す字も撃たない。
+ */
+describe('進行中の字の後始末(#1017 C5)', () => {
+  it.each([
+    ['雛形が取れない', { fetchTemplate: async () => Promise.reject(new Error('HTTP 404')) }],
+    ['中身が空', { exportImage: async () => new Uint8Array(0) }],
+  ] as const)('🔴 失敗(%s)したら、最後は消す字で、完了の字は出ない', async (_label, over) => {
+    const { d } = booted();
+    const dp = deps(over);
+    expect(await exportPortable(d, dp), '前提が崩れた(失敗していない)').toBeNull();
+    expect(dp.said[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('書き出しています…');
+    expect(dp.said.at(-1), '失敗したのに進行中の字が残る').toBe('');
+    expect(dp.said.join(), '失敗なのに完了と言った').not.toContain('書き出しました');
+  });
+
+  it('対照群:成功した回は最後が完了の字で、消す字は撃たない', async () => {
+    const { d } = booted();
+    const dp = deps();
+    await exportPortable(d, dp);
+    expect(dp.said.at(-1)).toContain('書き出しました');
+    expect(dp.said, '成功なのに消す字を撃った').not.toContain('');
+  });
+
+  it('🔴 出す前の断り(配られた 1 枚の中)は、消す字も撃たない(別の知らせを巻き込まない)', async () => {
+    const { d } = booted();
+    const dp = deps({ insideBundle: () => true });
+    expect(await exportPortable(d, dp)).toBeNull();
+    expect(dp.said, '出していない進行中の字を消す字を撃った').toEqual([]);
+  });
+});

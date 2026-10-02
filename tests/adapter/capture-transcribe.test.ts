@@ -310,3 +310,46 @@ describe('部品の選び方', () => {
     expect(await asrReadyFrom(unreadable)()).toBeNull();
   });
 });
+
+/**
+ * 🔴 **失敗したら、進行中の字(「文字にしています…」)を消す**(#1017 C5)。
+ *
+ * ⚠ 直す前は、音を読めなかった・メモリが足りなかった等の失敗で進行中の字が画面下に**残った**。
+ *   進行中の字を出す**前**に断る枝(部品が無い / 中身が消えた / 一覧に無い)は、出していない字を
+ *   消す字も撃たない(別の知らせを巻き込まない)。進行中のあとに**言う字**(字にならなかった / 預かった)は
+ *   それが進行中の字を置き換えるので、消す字は撃たない。
+ */
+describe('進行中の字の後始末(#1017 C5)', () => {
+  it.each([
+    ['読めない音', { decode: vi.fn(async () => Promise.reject(new Error('EncodingError'))) }],
+    ['音が入っていない', { decode: vi.fn(async () => new Float32Array(0)) }],
+    ['メモリ不足', { transcribe: vi.fn(async () => Promise.reject(new RangeError('Array buffer allocation failed'))) }],
+    ['別の例外', { transcribe: vi.fn(async () => Promise.reject(new Error('boom'))) }],
+  ] as const)('🔴 %s: 失敗したら最後は消す字になる', async (_label, over) => {
+    const h = harness(over);
+    await h.tr.run('a');
+    expect(h.notes[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('文字にしています');
+    expect(h.notes.at(-1), '失敗したのに進行中の字が残る').toBe('');
+  });
+
+  it.each([
+    ['部品が無い', { ready: vi.fn(async () => null) }],
+    ['中身が消えた録音', { readBlob: vi.fn(async () => null) }],
+  ] as const)('🔴 進行中の字を出す前の断り(%s)は、消す字も撃たない', async (_label, over) => {
+    const h = harness(over);
+    await h.tr.run('a');
+    expect(h.notes, '出していない進行中の字を消す字を撃った').toEqual([]);
+  });
+
+  it('対照群:成功 / 字にならなかった / 預かった は、最後がそれぞれの字で、消す字は撃たない', async () => {
+    const ok = harness();
+    await ok.tr.run('a');
+    expect(ok.notes.at(-1)).toContain('文字起こしを足しました');
+    expect(ok.notes).not.toContain('');
+
+    const empty = harness({ transcribe: vi.fn(async () => ({ text: '  ', loadMs: 0, runMs: 0 })) });
+    await empty.tr.run('a');
+    expect(empty.notes.at(-1)).toMatch(/字になりませんでした/);
+    expect(empty.notes).not.toContain('');
+  });
+});

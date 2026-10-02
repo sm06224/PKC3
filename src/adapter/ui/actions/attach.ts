@@ -435,15 +435,15 @@ export async function attachFiles(
      */
     if (elsewhere) {
       notify(
-        `${why}${tally.put} 件を『${dropped!.title}』の本文に入れました(${tally.last} ほか)`,
+        `${why}${tally.put} 件を『${dropped!.title}』の本文に入れました(「${tally.last}」ほか)`,
         at!.lid,
       );
       return;
     }
     notify(
       namedTitle === undefined
-        ? `${why}${tally.put} 件を本文に入れました(${tally.last} ほか)`
-        : `${why}${tally.put} 件を『${namedTitle}』の本文に入れました(${tally.last} ほか)`,
+        ? `${why}${tally.put} 件を本文に入れました(「${tally.last}」ほか)`
+        : `${why}${tally.put} 件を『${namedTitle}』の本文に入れました(「${tally.last}」ほか)`,
     );
   };
 

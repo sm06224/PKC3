@@ -124,6 +124,7 @@ import {
   opensOnSinglePress,
 } from '@adapter/ui/render/cell-input';
 import { resetTableSort } from '@adapter/ui/render/table-sort';
+import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import {
   resolveAppendAt,
   sectionAt,
@@ -533,7 +534,7 @@ async function browseArchive(
     try {
       out.push(new File([await readZipEntry(blob, e)], outName));
     } catch (err) {
-      bad.push(`${outName}(${why(err)})`);
+      bad.push(`「${outName}」(${why(err)})`);
     }
   }
   if (out.length > 0) services.attachFiles?.(out, `「${name}」から取り出しました`, undefined, intoLid);
@@ -1180,7 +1181,11 @@ export interface BinderServices {
    * **別の行**である ── `main.ts` が優先順位(エラー > 知らせ > 常設)を持っているので、
    * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
    */
-  showStatus?(text: string): void;
+  /**
+   * ⚠ 第 2 引数は**メッセージへ積むときの扱い**(#1017 C5 段 b1、`status-notice.ts`)── 既定は
+   *   「結果」で積む。**既に積んだ字**は `{ post: false }`(二重にしない)。
+   */
+  showStatus?(text: string, opts?: StatusOptions): void;
   /**
    * 🔴 **何が容量を食っているか**(#415)── worker に数えさせる。
    * ⚠ **数字だけ**返ってくる(本文も bytes も境界を越えない)。
@@ -3849,7 +3854,8 @@ function openDateNote(
    *   state の `notice` は動かず再掲されない(`main.ts` の `noticeShown`)。押したのに
    *   「作る」が出ない dead click になるので、字は `showStatus` でも必ず出す。
    */
-  services.showStatus?.(message);
+  // ⚠ 積むのは上の `OP_NOTICE`(`main.ts` が結果として積む)── こちらは積まない(1 件にする)
+  services.showStatus?.(message, { post: false });
 }
 
 /**
@@ -7069,8 +7075,10 @@ const ACTIONS: Record<string, ActionHandler> = {
           source: 'force-release',
           text: `${noun}の書き込みを強制的に打ち切りました`,
         });
+        // ⚠ 上で固定文を積んだので、こちらは積まない(`what` に題名が入るので、積むと中身が漏れる)
         services.showStatus?.(
           `${noun}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
+          { post: false },
         );
         dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
       },
@@ -9349,6 +9357,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     services.showStatus?.(`外部の画像 ${urls.length} 枚を取りに行っています…`);
     void adopt(urls, ADOPTED_IMAGE_PREFIX).then(({ adopted, failures }) => {
+      /**
+       * 🔴 **進行中の字を、まず消す**(#1017 C5)。⚠ 直す前は、1 枚も取れなかった回(下の
+       *   `OP_FAILED` だけ)と本文へ当てられなかった回(`blocked`)で「取りに行っています…」が
+       *   画面下に**残った**。結果の字が出る回はそれが置き換える(同じ行)ので、先に消して構わない。
+       */
+      services.showStatus?.('');
       if (adopted.size > 0) {
         /**
          * 🔴 **本文へ当てられないなら「取り込みました」と言わない**(#1051)。

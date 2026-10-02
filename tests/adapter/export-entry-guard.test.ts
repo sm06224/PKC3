@@ -962,3 +962,56 @@ describe('Word / PowerPoint — 読めなかった添付の注意(#636)', () => 
     expect(notes[0]!.some((n) => n.includes('ast-miss'))).toBe(true);
   });
 });
+
+/**
+ * 🔴 **失敗したら、進行中の字(「Word で書き出しています…」)を消す**(#1017 C5)。
+ *
+ * ⚠ 直す前は、失敗しても進行中の字が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
+ * 🔑 失敗の出口は 1 つではない(読めない / 本文が組めない / zip が組めない)── どの出口でも
+ *   最後の `notify` は `''` になる。⚠ **出す前の断り**(編集中)は進行中の字を出していないので、
+ *   消す `notify('')` も撃たない(別の知らせを巻き込まない)。
+ */
+describe('Office 書出し ── 失敗したら進行中の字を消す(#1017 C5)', () => {
+  const run = async (
+    kind: 'docx' | 'pptx',
+    over: Partial<ArchiveSource>,
+    phase = 'ready',
+  ): Promise<{ ok: boolean; said: string[] }> => {
+    const said: string[] = [];
+    const d = {
+      ...deps(source(over)),
+      notify: (m: string) => said.push(m),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher(phase);
+    const ok =
+      kind === 'docx'
+        ? await exportEntryDocx(dispatcher, d, 'n1')
+        : await exportEntryPptx(dispatcher, d, 'n1');
+    return { ok, said };
+  };
+
+  it.each(['docx', 'pptx'] as const)('🔴 %s: 本文が読めなくて失敗したら、進行中の字で終わらない', async (kind) => {
+    const r = await run(kind, {
+      getBody: async () => {
+        throw new Error('読めません');
+      },
+    });
+    expect(r.ok, '前提が崩れた(失敗していない)').toBe(false);
+    expect(r.said[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('書き出しています…');
+    expect(r.said.at(-1), '失敗したのに進行中の字が残る').toBe('');
+  });
+
+  it.each(['docx', 'pptx'] as const)('対照群: %s 成功なら、最後は完了の字(消す字ではない)', async (kind) => {
+    const r = await run(kind, { getBody: async () => '# 扉\n\n### 節\n\n本文\n' });
+    expect(r.ok, '前提が崩れた(成功していない)').toBe(true);
+    expect(r.said.at(-1)).toContain('書き出しました');
+    expect(r.said, '成功なのに消す字を撃った').not.toContain('');
+  });
+
+  it('🔴 出す前の断り(編集中)は、進行中の字を出していないので消す字も撃たない', async () => {
+    const r = await run('docx', { getBody: async () => '本文' }, 'editing');
+    expect(r.ok).toBe(false);
+    expect(r.said, '出していない進行中の字を消す字を撃った(別の知らせを巻き込む)').toEqual([]);
+  });
+});

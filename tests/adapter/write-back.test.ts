@@ -23,6 +23,7 @@ import {
   type WriteBackDeps,
 } from '../../src/adapter/ui/actions/write-back';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '../../src/adapter/platform/launched-files';
+import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 /**
  * 🔑 **書込が飛んでいる状態**を作る台。
@@ -64,7 +65,9 @@ describe('元のファイルへ書き戻す', () => {
     const { deps, written, said } = harness();
     await writeBackEntry(deps);
     expect(written, '保存前の本文がファイルへ書かれた(取り消せない)').toEqual(['保存した本文']);
-    expect(said).toEqual(['done:書き戻しました: メモ.md']);
+    expect(said).toEqual(['done:書き戻しました: 「メモ.md」']);
+    // 🔴 ファイル名は引用符で囲んである ── メッセージへ積むとき名前が残らない(#1017 C5。囲まないと素通りする)
+    expect(sanitizeMessageText(said[0]!), 'ファイル名がメッセージに残る').not.toContain('メモ');
   });
 
   /**
@@ -216,7 +219,7 @@ describe('元のファイルへ書き戻す', () => {
     await writeBackEntry(deps);
     expect(asked).toBe(1);
     expect(written).toEqual([text]);
-    expect(said).toEqual(['done:書き戻しました: メモ.md']);
+    expect(said).toEqual(['done:書き戻しました: 「メモ.md」']);
   });
 
   /**
@@ -300,7 +303,7 @@ describe('settle は確認の前と後の両方で待つ', () => {
     store.post('打った字'); // 保存の書込が飛んでいる
     const { deps, written, said } = harness({ settle: store.settle, getBody: store.getBody });
     await writeBackEntry(deps);
-    expect(said, '待たずに空を読んで断った').toEqual(['done:書き戻しました: メモ.md']);
+    expect(said, '待たずに空を読んで断った').toEqual(['done:書き戻しました: 「メモ.md」']);
     expect(written).toEqual(['打った字']);
   });
 

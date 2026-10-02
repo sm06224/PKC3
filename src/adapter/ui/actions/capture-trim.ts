@@ -107,6 +107,12 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
       running = true;
       mark(true);
       deps.notify('切り出しています…');
+      /**
+       * 🔴 **完了の字を出したら true**(#1017 C5)。⚠ 直す前は、どの失敗の枝でも
+       *   「切り出しています…」が画面下に**残った**。失敗の出口は `return` が 6 本あるので、
+       *   個々の枝ではなく **`finally` で 1 度だけ**消す(新しい枝を足しても漏れない)。
+       */
+      let finished = false;
       try {
         const blob = await deps.readBlob(item.assetKey);
         if (blob === null) {
@@ -174,10 +180,12 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
          * ⚠ `SYS_BOOTED` の枝は集め直すが、あれが飛ぶのは**別タブが書いたとき**である。
          */
         deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
-        deps.notify(`切り出しました:${name}(${elapsedText(cut.durationMs)})`);
+        finished = true;
+        deps.notify(`切り出しました:「${name}」(${elapsedText(cut.durationMs)})`);
       } catch (e: unknown) {
         fail(`切り出せませんでした(${String(e)})`);
       } finally {
+        if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
         mark(false);

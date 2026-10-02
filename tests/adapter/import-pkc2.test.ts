@@ -206,7 +206,7 @@ function harness(opts: HarnessOptions = {}) {
 
 describe('importPkc2File (P6b 実行部)', () => {
   it('HTML full export: entries / relations が書かれ、state に現れる', async () => {
-    const { d, deps, written, relations, reloadCount } = harness();
+    const { d, deps, written, relations, reloadCount, notices } = harness();
     const file = htmlFile({
       container: {
         meta: { entry_order: ['b', 'a'] },
@@ -243,6 +243,9 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(s.phase).toBe('ready');
     expect([...s.entryMetas.keys()].sort()).toEqual(['a', 'b']);
     expect(s.error).toBeNull(); // 警告なしなら可視エラーを出さない
+    // 対照群(#1017 C5):成功した回は最後が完了の字で、進行中を消す字は撃たない
+    expect(notices.at(-1)).toContain('取込完了');
+    expect(notices, '成功なのに消す字を撃った').not.toContain('');
   });
 
   it('gzip+base64 の添付を復号して Blob + meta で書く', async () => {
@@ -431,18 +434,24 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('PKC2 でない入力は可視で断る(読めたつもりで 0 件にしない)', async () => {
-    const { d, deps, written } = harness();
+    const { d, deps, written, notices } = harness();
     const stray = new File(['<html><body>ただの HTML</body></html>'], 'x.html', {
       type: 'text/html',
     });
     expect(await importPkc2File(d, deps, stray)).toBeNull();
     expect(d.getState().error).toMatch(/取込に失敗しました/);
     expect(written).toHaveLength(0);
+    // 🔴 「取込中…」を出した後で落ちたので、進行中の字を消す(#1017 C5)。⚠ 残ると「まだ続いている」と読める
+    expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取込中…');
+    expect(notices.at(-1), '失敗したのに「取込中…」が残る').toBe('');
+    const before = notices.length;
 
     const binary = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'photo.html');
     expect(await importPkc2File(d, deps, binary)).toBeNull();
     expect(d.getState().error).toMatch(/取り込めない形式/);
     expect(written).toHaveLength(0);
+    // 🔴 進行中の字を出す前の断りは、消す字を撃たない(別の知らせを巻き込まない)
+    expect(notices.length, '出していない進行中の字を消す字を撃った').toBe(before);
   });
 
   it('編集中は読む前に可視ブロック ── draft は無傷', async () => {
@@ -595,7 +604,7 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   it('[H-3] entries を書いた後で失敗したら「書けた事実」を隠さない + 画面へ出す', async () => {
-    const { d, deps, written, reloadCount } = harness({ failRelations: true });
+    const { d, deps, written, reloadCount, notices } = harness({ failRelations: true });
     const file = htmlFile({
       container: {
         meta: {},
@@ -615,6 +624,9 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(d.getState().error).toMatch(/二重になります/);
     expect(reloadCount()).toBe(1); // 書けた分は必ず画面へ出す
     expect(d.getState().entryMetas.size).toBe(2);
+    // 🔴 書込の途中で落ちたとき、「取込中…(N 件を書き込んでいます)」を消す(#1017 C5)
+    expect(notices.some((n) => n.includes('件を書き込んでいます')), '前提が崩れた(書込の進行中を出していない)').toBe(true);
+    expect(notices.at(-1), '失敗したのに進行中の字が残る').toBe('');
   });
 
   it('[H-4] 取込中に編集が始まったら draft を殺さない(再読込を延期する)', async () => {
@@ -1295,6 +1307,9 @@ describe('importPkc2File (P6b 実行部)', () => {
       // ⚠ やめるのは失敗ではない ── OP_FAILED 相当の notify(取込に失敗…)は出ない
       expect(notices.some((n) => n.includes('失敗'))).toBe(false);
       expect(d.getState().error).toBeNull();
+      // 🔴 やめたら「取込中…」を消す(#1017 C5)── もう進まないのに残ると「まだ続いている」と読める
+      expect(notices[0], '前提が崩れた(確認の前に進行中の字を出していない)').toContain('取込中…');
+      expect(notices.at(-1), 'やめたのに進行中の字が残る').toBe('');
     });
 
     it('🔑 `confirmArchiveImport` に渡る中身が、書いた archive と一致する', async () => {

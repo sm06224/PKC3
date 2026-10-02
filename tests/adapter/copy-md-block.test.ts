@@ -12,6 +12,7 @@ import {
 } from '../../src/adapter/ui/actions/copy-md-block';
 import { applyTableSort } from '../../src/adapter/ui/render/table-sort';
 import * as clipboard from '../../src/adapter/platform/clipboard';
+import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 function el(html: string): HTMLElement {
   const div = document.createElement('div');
@@ -452,8 +453,10 @@ describe('形を選ぶ口(▾)', () => {
      *   見えない(触れたときだけ出る)ので、光っても気づけない。
      */
     expect(sink.said, '保存したのに何も言っていない').toEqual([
-      `saved:${sink.name} を保存しました`,
+      `saved:「${sink.name}」を保存しました`,
     ]);
+    // 🔴 ファイル名(= ノートの題名)は引用符で囲んである ── メッセージへ積むとき残らない(#1017 C5)
+    expect(sanitizeMessageText(sink.said![0]!), 'ノートの題名がメッセージに残る').toBe('saved:「…」を保存しました');
   });
 
   /**

@@ -151,6 +151,6 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   const body = await readForWrite();
   if (body === null) return;
   const result = await deps.write(body);
-  if (result.ok) deps.done(`書き戻しました: ${deps.name}`);
+  if (result.ok) deps.done(`書き戻しました: 「${deps.name}」`);
   else deps.fail(`${deps.name}: ${result.reason}`);
 }
