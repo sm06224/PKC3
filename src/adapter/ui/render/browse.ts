@@ -27,6 +27,8 @@ import { LauncherRenderer } from './launcher';
 import { ScheduleRenderer } from './schedule';
 import { ContactsRenderer } from './contacts';
 import { CapturesRenderer } from './captures';
+import { PcFolderRenderer } from './pc-folder';
+import { LocalFolder } from '@adapter/platform/local-folder';
 import type { AssetLender } from './detail';
 
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
@@ -63,6 +65,15 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
    *   録ったものは**添付ノート**なので、閉じても失う物が無い(#292 段⑤ の見分け方)。
    */
   { mode: 'captures', label: '音/動画' },
+  /**
+   * 🔴 **PC**(#215 段①。🟣 Gemini 裁定 2026-10-01「別のタブに並べ、押すと取り込んで開く」。
+   *   タブの字は 2026-10-02 の裁定 A で「パソコン」→「PC」)。⚠ 「パソコン」(4 文字)だと
+   *   1366 / 1440px で 2 段へ折り返したが、「PC」なら 1101px から 1 段に収まる。
+   * ⚠ 中身は**パソコンのフォルダの直下**で、ノートではない ── それでも左に置くのは、
+   *   中央(本文)を退かさずに眺められるからである(#300)。押して開くのは**取り込んだノート**で、
+   *   このタブは開いたまま残る。
+   */
+  { mode: 'pc', label: 'PC' },
 ] as const;
 
 /**
@@ -118,6 +129,8 @@ export class BrowseRouter {
   private readonly contacts: ContactsRenderer;
   /** 🔴 録ったもの(#683 段①)。⚠ **中身を借りる**ので、面を捨てるとき返す。 */
   private readonly captures: CapturesRenderer;
+  /** 🔴 パソコンのフォルダ(#215 段①)。⚠ handle は持たない(`LocalFolder` が持ち主)。 */
+  private readonly pc: PcFolderRenderer;
   /**
    * 🔑 **面ごとに位置を覚える**(P8 段⑫。user 指示「サイドバーも同じ、
    * スクロールが発生するすべての画面が対象だよ」)。3 つの面が**同じ器**を
@@ -168,6 +181,17 @@ export class BrowseRouter {
     assets: AssetLender | null = null,
     /** 🔴 借り終えたことを外へ知らせる口(#683 段①)。⚠ 渡さないと器が出ない。 */
     onCaptureReady: () => void = () => {},
+    /**
+     * 🔴 **パソコンのフォルダ**(#215 段①)。⚠ 持ち主は `main.ts` ── binder の押し口と
+     *   **同じ 1 つ**を渡す(2 つ作ると、押した先と描いている先が別になる)。
+     *   省略 = このブラウザでは使えない扱い(test 用)。
+     */
+    pcFolder: LocalFolder = new LocalFolder({
+      picker: null,
+      open: async () => {},
+      fail: () => {},
+      onChange: () => {},
+    }),
   ) {
     this.last = initial;
     this.host = host;
@@ -193,6 +217,7 @@ export class BrowseRouter {
       schedule: pane('schedule'),
       contacts: pane('contacts'),
       captures: pane('captures'),
+      pc: pane('pc'),
     };
     this.scroll = new ScrollMemory(host);
     /**
@@ -223,6 +248,7 @@ export class BrowseRouter {
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
+    this.pc = new PcFolderRenderer(this.panes.pc, pcFolder);
   }
 
   /**
@@ -347,6 +373,7 @@ export class BrowseRouter {
     else if (mode === 'schedule') this.schedule.render(state);
     else if (mode === 'contacts') this.contacts.render(state);
     else if (mode === 'captures') this.captures.render(state);
+    else if (mode === 'pc') this.pc.render();
     else this.launcher.render(state);
     /*
      * 🔴 **面を描き終えてから理由を添える**(#791 ②)── 「1 件も無い一覧の作る」は

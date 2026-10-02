@@ -591,8 +591,14 @@ describe('holder の門(main.ts の配線)', () => {
      * ⚠ `launchQueue` は **user の操作ではない**ので、そこから `window.open` を
      *   呼ぶと遮断される。控えて、user が押したときに渡す形でなければならない。
      */
-    const intake = code.slice(code.indexOf('importLaunchFiles: async (items)'));
-    const body = intake.slice(0, intake.indexOf('presentUpdate:'));
+    // ⚠ 2026-10-02(#215 段②): 受け口を `return { … }` の中から**手前の const へ移した**
+    //   (パソコンのフォルダの行を押したときも同じ口へ渡すため)。切り出す始点と終点だけ追随させた ──
+    //   見ている物(窓を開かず、控える)は変えていない。
+    const from = code.indexOf("importLaunchFiles: AppHandle['importLaunchFiles'] = async (items)");
+    expect(from, '受け口の宣言が見つからない(切り出しが壊れた)').toBeGreaterThan(-1);
+    const intake = code.slice(from);
+    const body = intake.slice(0, intake.indexOf('openLocalFile = createLocalFileOpener'));
+    expect(body.length, '受け口の本体が空(終点が見つからない)').toBeGreaterThan(500);
     expect(body, '起動の受け口で窓を開いている(遮断されて消える)').not.toContain(
       'officeWindow.open(',
     );

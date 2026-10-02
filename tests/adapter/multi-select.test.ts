@@ -335,7 +335,7 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     expect(others.filter((p) => !p.hidden).map((p) => p.getAttribute('data-pkc-browse-pane')), 'ほかの面が重なって出ている').toEqual([]);
   });
 
-  it('🔴 「一覧」タブは外してある(タブは 5 枚)/ 器にも「一覧」の面が無い', () => {
+  it('🔴 「一覧」タブは外してある(タブは 6 枚)/ 器にも「一覧」の面が無い', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const regions = buildShell(root);
@@ -343,7 +343,7 @@ describe('探し方の既定と記憶(#240 段⑤)', () => {
     const tabs = [...root.querySelectorAll('[data-pkc-action="set-browse"]')].map((b) =>
       b.getAttribute('data-pkc-browse'),
     );
-    expect(tabs).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures']);
+    expect(tabs).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc']);
     expect(regions.browseHost.querySelector('[data-pkc-region="entry-list"]'), '一覧の器が残っている').toBeNull();
   });
 

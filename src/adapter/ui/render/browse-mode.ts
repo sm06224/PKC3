@@ -34,6 +34,8 @@ export const BROWSE_MODES = [
   'contacts',
   // 🔴 **録ったもの**(#683 段①)── 音と動画の添付だけを集める面
   'captures',
+  // 🔴 **PC**(パソコンのフォルダ。#215 段①。🟣 Gemini 裁定 2026-10-01)── 繋いだフォルダの直下を並べる面
+  'pc',
 ] as const;
 
 export type BrowseMode = (typeof BROWSE_MODES)[number];

@@ -281,6 +281,8 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
+import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import { formatArchivePreviewMessage } from '@features/import/archive-preview';
 import {
@@ -1170,6 +1172,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   にしておく(`repaintStatus` / `repaintOnLayout` と同じ形)。
    */
   let repaintPanes: () => void = () => undefined;
+  /**
+   * 🔴 **パソコンのフォルダ**(#215 段①②。🟣 Gemini 裁定 2026-10-01)。
+   * ⚠ **handle の持ち主はこの 1 つだけ**(state にも IndexedDB にも置かない ── `local-folder.ts`)。
+   *   描画(`browse`)と押し口(`services.localFolder`)に**同じ物**を渡す。
+   * ⚠ 取り込みの口(`openLocalFile`)は boot の終わりで繋がる(それまで押されても何も起きない)。
+   */
+  let openLocalFile: (item: LocalFileItem) => Promise<void> = async () => undefined;
+  const localFolder = new LocalFolder({
+    picker: windowDirectoryPicker(),
+    open: (item) => openLocalFile(item),
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    onChange: () => repaintPanes(),
+  });
   const browse = new BrowseRouter(
     regions.sidebar,
     regions.browseHost,
@@ -1177,6 +1192,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     undefined,
     assetLender,
     () => repaintPanes(),
+    localFolder,
   );
   const inspector = new InspectorRenderer(regions.inspector);
   /**
@@ -2761,6 +2777,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   const services: BinderServices = {
+    // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
+    localFolder,
     /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     attachFiles: (files, why, at, intoLid) =>
@@ -4605,82 +4623,116 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * のは、これが boot を遅らせてよい仕事ではないからである。
    */
   void officeSaveBack.drainAll().catch(() => 0);
+  /**
+   * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
+   *
+   * 🔴 **断らない**。user のクリック起点の取込は「編集中です」「整理中です」で
+   * 断ってよい(選び直せる)が、OS の launch は**一発限り**で picker が出ない
+   * ── 断った時点でファイルは失われる(review H2 で実証)。
+   * ready になるまで待ち、gate は順番待ちする版を使う。
+   * ⚠ 取込の**本体は binder と同じ** `runImport`(2 経路にしない)
+   */
+  const importLaunchFiles: AppHandle['importLaunchFiles'] = async (items) => {
+    /**
+     * 🔴 **Office の文書は Office へ回す**(#432)。⚠ 回さないと、OS が
+     *   PKC3 を起動するのに**誰も受け取らない** ── `import-file.ts` が
+     *   markdown 以外を濾すので、user には「開けるファイルがありませんでした」
+     *   としか出ない(関連付けを奪ったうえで何もしない、いちばん失礼な形)。
+     * ⚠ 振り分けの規則は `office-launch.ts`(manifest と集合で突き合わせてある)。
+     * ⚠ ここで窓は開かない ── OS からの起動は user の操作ではないので
+     *   **ポップアップ遮断で消える**。控えて、押されたときに渡す。
+     */
+    const office = items.filter((i) => isOfficeLaunchFile(i.file.name));
+    for (const i of office) {
+      const buf = new Uint8Array(await i.file.arrayBuffer());
+      localOffice.stage(i.handle, i.file.name, buf);
+    }
+    if (office.length > 0) {
+      const last = office[office.length - 1]!;
+      const writable = typeof last.handle.createWritable === 'function';
+      await whenPhaseReady(dispatcher, () => {});
+      showStatus(
+        writable
+          ? `${last.file.name} を開けます ── アプリの「Office」を押してください`
+          : cannotWriteBackNotice(last.file.name),
+      );
+    }
+    items = items.filter((i) => !isOfficeLaunchFile(i.file.name));
+    if (items.length === 0) return;
+    /**
+     * 🔴 **`phase` だけでなく、章の欄が開いていないことも待つ**
+     *   (#1044 段2 4巡目の修理、T3)。
+     *
+     * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
+     *   `whenPhaseReady`(= `isFullyReady`。`reloadSnapshot` の先送り判定と
+     *   共有)だと**章の欄が開いている間も即座に進む** ── その先の
+     *   `importMarkdownFiles` / `importVcfFiles` は `hasUnsavedTyping` で
+     *   断る(S3)ので、断れない経路(OS の `launchQueue`)なのに
+     *   **ファイルを失う**。`whenAcceptingUnrefusedImport` は章の欄が
+     *   閉じるまで待つ(`wait-for-ready.ts` 参照)。
+     */
+    await whenAcceptingUnrefusedImport(dispatcher, () =>
+      showStatus('編集を終えると、開いたファイルを取り込みます'),
+    );
+    // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
+    //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
+    const { fresh, reopened } = await splitAlreadyOpen(items, launched, (lid) =>
+      dispatcher.getState().entryMetas.has(lid),
+    );
+    for (const lid of reopened) selectWhenPresent(dispatcher, lid);
+    if (fresh.length === 0) {
+      // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
+      showStatus(
+        reopened.length > 0
+          ? 'すでに開いているノートを表示しました'
+          : '開けるファイルがありませんでした',
+      );
+      return;
+    }
+    await withAssetGate.queued(() =>
+      runImport(
+        fresh.map((i) => i.file),
+        fresh.map((i) => i.handle),
+      ),
+    );
+  };
+  /**
+   * 🔴 **パソコンのフォルダの行を押したときの取り込み**(#215 段②)。
+   * ⚠ 取り込みの本体は**全部既存の口**(Markdown は上の `importLaunchFiles`、添付は `attachOne`、
+   *   連絡先は `runImport`)── ここは渡す先を決める `open-local-file.ts` に口を渡すだけ。
+   *   ⚠ `main.ts` はどの unit からも実行されないので、判断は置かない(配線は
+   *   `tests/adapter/bootstrap-wiring.test.ts` が原文で pin する)。
+   */
+  openLocalFile = createLocalFileOpener({
+    openNote: importLaunchFiles,
+    importContact: (file) => withAssetGate(() => runImport([file])),
+    wait: () =>
+      whenAcceptingUnrefusedImport(dispatcher, () =>
+        showStatus('編集を終えると、開いたファイルを取り込みます'),
+      ),
+    isPresent: (lid) => dispatcher.getState().entryMetas.has(lid),
+    select: (lid) => void selectWhenPresent(dispatcher, lid),
+    attach: async (file) => {
+      let lid: string | null = null;
+      // ⚠ 待つ側の gate(押した後に選び直せない ── `launchQueue` と同じ判断)
+      await withAssetGate.queued(async () => {
+        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
+        const attached = await attachOne(
+          dispatcher,
+          attachDeps,
+          { name: file.name, type: file.type, size: file.size, blob: file },
+          known,
+        );
+        lid = attached?.lid ?? null;
+      });
+      return lid;
+    },
+    say: showStatus,
+  });
   return {
     dispatcher,
     storageVfs: init.vfs,
-    /**
-     * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
-     *
-     * 🔴 **断らない**。user のクリック起点の取込は「編集中です」「整理中です」で
-     * 断ってよい(選び直せる)が、OS の launch は**一発限り**で picker が出ない
-     * ── 断った時点でファイルは失われる(review H2 で実証)。
-     * ready になるまで待ち、gate は順番待ちする版を使う。
-     * ⚠ 取込の**本体は binder と同じ** `runImport`(2 経路にしない)
-     */
-    importLaunchFiles: async (items) => {
-      /**
-       * 🔴 **Office の文書は Office へ回す**(#432)。⚠ 回さないと、OS が
-       *   PKC3 を起動するのに**誰も受け取らない** ── `import-file.ts` が
-       *   markdown 以外を濾すので、user には「開けるファイルがありませんでした」
-       *   としか出ない(関連付けを奪ったうえで何もしない、いちばん失礼な形)。
-       * ⚠ 振り分けの規則は `office-launch.ts`(manifest と集合で突き合わせてある)。
-       * ⚠ ここで窓は開かない ── OS からの起動は user の操作ではないので
-       *   **ポップアップ遮断で消える**。控えて、押されたときに渡す。
-       */
-      const office = items.filter((i) => isOfficeLaunchFile(i.file.name));
-      for (const i of office) {
-        const buf = new Uint8Array(await i.file.arrayBuffer());
-        localOffice.stage(i.handle, i.file.name, buf);
-      }
-      if (office.length > 0) {
-        const last = office[office.length - 1]!;
-        const writable = typeof last.handle.createWritable === 'function';
-        await whenPhaseReady(dispatcher, () => {});
-        showStatus(
-          writable
-            ? `${last.file.name} を開けます ── アプリの「Office」を押してください`
-            : cannotWriteBackNotice(last.file.name),
-        );
-      }
-      items = items.filter((i) => !isOfficeLaunchFile(i.file.name));
-      if (items.length === 0) return;
-      /**
-       * 🔴 **`phase` だけでなく、章の欄が開いていないことも待つ**
-       *   (#1044 段2 4巡目の修理、T3)。
-       *
-       * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
-       *   `whenPhaseReady`(= `isFullyReady`。`reloadSnapshot` の先送り判定と
-       *   共有)だと**章の欄が開いている間も即座に進む** ── その先の
-       *   `importMarkdownFiles` / `importVcfFiles` は `hasUnsavedTyping` で
-       *   断る(S3)ので、断れない経路(OS の `launchQueue`)なのに
-       *   **ファイルを失う**。`whenAcceptingUnrefusedImport` は章の欄が
-       *   閉じるまで待つ(`wait-for-ready.ts` 参照)。
-       */
-      await whenAcceptingUnrefusedImport(dispatcher, () =>
-        showStatus('編集を終えると、開いたファイルを取り込みます'),
-      );
-      // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
-      //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
-      const { fresh, reopened } = await splitAlreadyOpen(items, launched, (lid) =>
-        dispatcher.getState().entryMetas.has(lid),
-      );
-      for (const lid of reopened) selectWhenPresent(dispatcher, lid);
-      if (fresh.length === 0) {
-        // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
-        showStatus(
-          reopened.length > 0
-            ? 'すでに開いているノートを表示しました'
-            : '開けるファイルがありませんでした',
-        );
-        return;
-      }
-      await withAssetGate.queued(() =>
-        runImport(
-          fresh.map((i) => i.file),
-          fresh.map((i) => i.handle),
-        ),
-      );
-    },
+    importLaunchFiles,
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
     // 🔴 起動のたびに軽く検める(#1007 段①)── 実体は `showStatus` の下
