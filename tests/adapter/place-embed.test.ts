@@ -40,6 +40,7 @@ import {
   PLACE_BODY_CLIP,
   PLACE_ENTRY_DEFAULT_H,
   PLACE_ENTRY_DEFAULT_W,
+  PLACE_NEAR_MARGIN,
   placeEmbeddable,
   placeFramed,
   sameExcerpt,
@@ -118,6 +119,10 @@ class FakeIO {
     this.observed.clear();
   }
 }
+/** 板の塊の「近さ」を観測器の答えとして返す(近づいた / 離れた)。 */
+function reportNear(block: Element, near: boolean): void {
+  for (const io of FakeIO.place) if (!io.disconnected && io.observed.has(block)) io.cb([{ target: block, isIntersecting: near }]);
+}
 beforeEach(() => {
   seen.clear();
   farLids.clear();
@@ -132,11 +137,12 @@ afterEach(() => {
 // ─────────────────────────── 規則(features)
 
 describe('切り出し(excerptOf)', () => {
-  it('🔑 定数を pin する(暫定の量・既定の大きさ・持つ数。動かすときは理由を書いて直す)', () => {
-    // ⚠ 4000 は**測った値ではない**(W3-③ で測って決める)── 勝手に動かさないための pin
+  it('🔑 定数を pin する(量・既定の大きさ・持つ数・近づく余白。動かすときは実測と理由を書いて直す)', () => {
+    // ⚠ 根拠は `docs/development/place-embed-measure-2026-10.md`(W3-③)── 勝手に動かさないための pin
     expect(PLACE_BODY_CLIP).toBe(4000);
     expect([PLACE_ENTRY_DEFAULT_W, PLACE_ENTRY_DEFAULT_H]).toEqual([320, 240]);
-    expect(PLACE_BODY_CAP).toBe(40);
+    expect(PLACE_BODY_CAP).toBe(200);
+    expect(PLACE_NEAR_MARGIN).toBe(800);
   });
 
   it('量以内ならそのまま・切ったと言わない', () => {
@@ -1055,6 +1061,148 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
         }
       }
     });
+  });
+});
+
+describe('描画: 近づいた枠から中身を出す(W3-③)', () => {
+  let made = 0;
+  let revoked = 0;
+  beforeEach(() => {
+    made = 0;
+    revoked = 0;
+    vi.mocked(renderToPng).mockClear();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+    vi.stubGlobal('requestIdleCallback', undefined);
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:png/${String((made += 1))}`);
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {
+      revoked += 1;
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('🔴 離れた枠は帯だけ(中身を作らない)/ 抜粋は離れた枠の分も頼む / 近づいたら中身が出る', async () => {
+    farLids.add('n2');
+    const r = await rig();
+    expect(slotOf(r, 'p1'), '近い枠に中身が出ていない').not.toBeNull();
+    expect(slotOf(r, 'p2'), '離れた枠に中身がある').toBeNull();
+    expect(block(r, 'p2').hasAttribute('data-pkc-place-embedded')).toBe(false);
+    // 🔑 抜粋は離れた枠の分も届いている(添付は読むまで「画像か」= 大きさが決まらない)
+    expect(placeBodiesOf(r.state()).has('n2'), '離れた枠の抜粋を頼んでいない').toBe(true);
+    // 帯は今までどおり出ている
+    expect(block(r, 'p2').querySelector('[data-pkc-field="place-card"]')!.textContent).toBe('短いノート帳');
+    // 近づいたら描く
+    reportNear(block(r, 'p2'), true);
+    await settle();
+    expect(slotOf(r, 'p2')!.textContent, '近づいたのに描いていない').toContain('短いノート');
+  });
+
+  it('🔴 離れた枠の元のノートを直しても描き直さず、近づいたら新しい本文が出る', async () => {
+    farLids.add('n2');
+    const r = await rig();
+    await r.apply({ type: 'BODY_PERSISTED', lid: 'n2', body: '直したあとの本文' });
+    expect(slotOf(r, 'p2'), '離れた枠を描いている').toBeNull();
+    reportNear(block(r, 'p2'), true);
+    await settle();
+    expect(slotOf(r, 'p2')!.textContent).toContain('直したあとの本文');
+  });
+
+  it('🔴 一度近づいた枠は、離れても捨てない(時間がたっても貸出・図の URL は生きたまま)/ 面を捨てると全部返る', async () => {
+    const f = fakeLender();
+    const r = await rig({ ...BODIES, n1: `前\n\n![写真](asset:abc)\n\n${'```mermaid\ngraph TD; A-->B\n```'}` }, undefined, true, f.lender);
+    await settle();
+    const fig = slotOf(r, 'p1')!.querySelector<HTMLElement>('[data-pkc-mermaid-src]')!;
+    seen.get(fig)!(fig);
+    await settle();
+    expect(made, '台の前提:図が焼かれていない').toBe(1);
+    expect(f.live(), '台の前提:画像が借りられていない').toBe(1);
+    // 離れた(観測は 1 度だけ答える物 ── 離れた通知は無視される)
+    reportNear(block(r, 'p1'), false);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    expect(slotOf(r, 'p1'), '離れて時間がたつと捨てている(捨てると、作り直すたびに画像を読み直して控えが積もる)').not.toBeNull();
+    expect(revoked, '離れただけで図の URL を返している').toBe(0);
+    expect(f.live(), '離れただけで貸出を返している').toBe(1);
+    vi.useRealTimers();
+    // 寿命の終端(別のノートへ移る)で返る
+    await r.leave();
+    expect(f.live(), '面を捨てても貸出が残っている').toBe(0);
+    expect(revoked, '面を捨てても図の URL が残っている').toBe(1);
+  });
+
+  it('🔴 塊が作り直されても(板の本文を直す)、近かった枠は空にならない(答えが来る前から引き継ぐ)', async () => {
+    manualNear = true;
+    const r = await rig();
+    expect(slotOf(r, 'p1'), '台の前提:答えが来ていないのに描いている').toBeNull();
+    for (const id of ['p1', 'p2']) reportNear(block(r, id), true);
+    await settle();
+    expect(slotOf(r, 'p1')).not.toBeNull();
+    const old = block(r, 'p1');
+    // 先頭に空行を足す = 全部の塊の行番号が動き、塊そのものが作り直される
+    await r.apply({ type: 'BODY_LOADED', lid: 'b', body: `\n\n${BODIES.b!}` });
+    expect(block(r, 'p1'), '台の前提:塊が作り直されていない').not.toBe(old);
+    expect(slotOf(r, 'p1'), '作り直された塊が空になっている').not.toBeNull();
+    expect(slotOf(r, 'p2')).not.toBeNull();
+  });
+
+  it('🔴 観測できない環境では今までどおり全部の枠に出す', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    farLids.add('n2');
+    const r = await rig();
+    expect(slotOf(r, 'p1')).not.toBeNull();
+    expect(slotOf(r, 'p2'), '観測できないのに枠を空にしている').not.toBeNull();
+  });
+
+  it('🔴 観測器は板に 1 つだけ(枠ごとに作らない)/ 板を送る器を基準にして、余白を持つ', async () => {
+    const r = await rig();
+    expect(FakeIO.place, '観測器が枠の数だけできている').toHaveLength(1);
+    const io = FakeIO.place[0]!;
+    expect(io.opts?.rootMargin).toBe(`${String(PLACE_NEAR_MARGIN)}px`);
+    const root = io.opts?.root;
+    expect(root, '送る器を基準にしていない(器が枠を切るので、離れた枠が近くても「見えない」と読まれる)').toBeInstanceOf(HTMLElement);
+    expect((root as Element).contains(r.host())).toBe(true);
+    // 中身を出さない塊(消えたノート / フォルダ / 自分)も観測に載る(数の取り違えを見張る)。
+    // ⚠ 既定の偽物は観測を始めた瞬間に答えて(1 度答えたら観測を外す)数が減るので、答えない設定で数える
+    expect(io.observed.size, '台の前提:答えが来る前の数').toBe(0);
+  });
+
+  it('🔴 板でない本文(塊が 1 つも無い)では観測器を作らない', async () => {
+    await rig({ ...BODIES, b: 'ただの本文です\n' });
+    expect(FakeIO.place, '板でない本文で観測器を作っている(本文を描くたびに積もる)').toHaveLength(0);
+  });
+
+  it('🔴 板の塊は全部観測に載る(答えが来るまで)/ 1 度近づいた塊は観測を外す', async () => {
+    manualNear = true;
+    const r = await rig();
+    const io = FakeIO.place[0]!;
+    expect(io.observed.size, '板の塊が全部は観測に載っていない').toBe(5);
+    const p1 = block(r, 'p1');
+    reportNear(p1, true);
+    await settle();
+    expect(io.observed.has(p1), '近づいた塊を観測し続けている').toBe(false);
+    expect(io.observed.size).toBe(4);
+  });
+
+  it('🔴 板から消えた塊は観測から外れる / 面を捨てると観測器を畳む', async () => {
+    manualNear = true; // 答えを返さない ── 観測に載ったままの塊を数える
+    const r = await rig();
+    const io = FakeIO.place[0]!;
+    const gone = block(r, 'p1');
+    expect(io.observed.has(gone)).toBe(true);
+    const one = BODIES.b!.replace('entry=n1 ', '');
+    await r.apply({ type: 'BODY_LOADED', lid: 'b', body: one });
+    expect(io.observed.has(gone), '消えた塊を観測し続けている').toBe(false);
+    await r.leave();
+    expect(io.disconnected, '面を捨てても観測器が生きている').toBe(true);
   });
 });
 

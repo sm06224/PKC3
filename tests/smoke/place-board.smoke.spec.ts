@@ -565,7 +565,9 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     `:::format{#f1 .pkc-place entry=${figLid} x=10 y=10}\n:::\n\n` +
       `:::format{#f2 .pkc-place entry=${figLid} x=350 y=10}\n:::\n\n` +
       `:::format{#ph .pkc-place entry=${photoLid} x=10 y=270}\n:::\n\n` +
-      `:::format{#at .pkc-place entry=${attLid} x=350 y=270}\n:::\n`,
+      `:::format{#at .pkc-place entry=${attLid} x=350 y=270}\n:::\n\n` +
+      // 🔴 遠い枠(画面から 2,000px 以上下)── 近づくまで中身を作らない(W3-③)
+      `:::format{#far .pkc-place entry=${figLid} x=10 y=2600}\n:::\n`,
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -646,7 +648,42 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   expect(fit.fillH, '画像が枠の高さいっぱいに出ていない').toBeGreaterThan(0.6);
   expect(fit.block, '画像の添付に既定の大きさが当たっていない').toEqual([320, 240]);
 
-  // 🔴 ⑤ 押すと元のノートが開く(帯)── 添付ノート側も今までどおり
+  /**
+   * 🔴 ⑤ **近づいた枠から中身を出す**(W3-③)。
+   *
+   * ⚠ ここは**実ブラウザでしか見られない所**である ── IntersectionObserver が実際の座標と
+   *   スクロールの器(余白つき)で答える。unit は答えを偽物が返す。
+   * 🔑 筋書き:遠い枠は帯だけ → 下へ送って近づくと中身が出て図が焼かれる → **上の枠は離れても捨てない**
+   *   (捨てる版は画像を読み直して控えが積もった ── 測った結果。doc 参照)→ 上へ戻っても描き直さずそのまま。
+   */
+  const far = body2.locator('#far');
+  await expect(far.locator(':scope > [data-pkc-field="place-card"]'), '遠い枠の帯が出ていない').toHaveText('図のノート');
+  await expect(far.locator(':scope > [data-pkc-field="place-body"]'), '離れた枠に最初から中身がある').toHaveCount(0);
+  const scroller = page.locator('[data-pkc-region="detail"]');
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(
+    far.locator('img[data-pkc-field="mermaid-image"]'),
+    '近づいた枠の図が PNG で出ていない',
+  ).toHaveCount(1, { timeout: 30_000 });
+  // 🔑 上の枠は離れても捨てない:器も図の PNG も、そのまま残っている(猶予ぶん待ってから見る)
+  const f1Slot = body2.locator('#f1 > [data-pkc-field="place-body"]');
+  const f1Node = await f1Slot.elementHandle();
+  await page.waitForTimeout(2_000);
+  await expect(f1Slot, '離れた枠の中身を捨てている').toHaveCount(1);
+  await expect(body2.locator('#f1 img[data-pkc-field="mermaid-image"]'), '離れた枠の図が消えた').toHaveCount(1);
+  // 上へ戻っても描き直されない(同じ要素のまま)
+  await scroller.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  expect(
+    await f1Slot.evaluate((el, prev) => el === prev, f1Node),
+    '戻ってきたら中身を作り直している',
+  ).toBe(true);
+  await expectImageRendered(page, '#at > [data-pkc-field="place-body"] img[data-pkc-field="place-attachment-image"]');
+
+  // 🔴 ⑥ 押すと元のノートが開く(帯)── 添付ノート側も今までどおり
   await clickReal(page, '#at > [data-pkc-field="place-card"]');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),

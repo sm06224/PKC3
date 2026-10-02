@@ -18,7 +18,15 @@ export interface VisibleWatch {
  * @param seen 見えた要素ごとに**1 度だけ**呼ぶ(呼ぶ前に観測を外す)。
  *   ⚠ 見えなくなっても呼ばない(`isIntersecting` のときだけ)。
  */
-export function watchVisible(seen: (host: HTMLElement) => void): VisibleWatch {
+export function watchVisible(
+  seen: (host: HTMLElement) => void,
+  /**
+   * 「見えた」の基準。🔴 既定は画面そのもの。**スクロールする器の中の要素を、画面の外の手前から
+   * 描き始めたい**ときは、`root`(その器)と `rootMargin`(手前の余白)を渡す ── 板の枠(#529 W3-③)。
+   * ⚠ 余白は `root` が決まって初めて効く(器の外へ伸びる余白は、器が切るので「見えない」ままになる)。
+   */
+  options?: IntersectionObserverInit,
+): VisibleWatch {
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
@@ -26,7 +34,7 @@ export function watchVisible(seen: (host: HTMLElement) => void): VisibleWatch {
       io.unobserve(host);
       seen(host);
     }
-  });
+  }, options);
   return {
     observe: (host) => io.observe(host),
     unobserve: (host) => io.unobserve(host),

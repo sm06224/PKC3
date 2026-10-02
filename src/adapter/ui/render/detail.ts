@@ -825,6 +825,8 @@ export class DetailRenderer {
       // 🔴 図と添付画像は**読む面と同じ口**(`hydrateFigures` / 貸出)に乗せる(#529 W3-②)
       lender: this.assets,
       figures: (roots) => hydrateFigures(roots),
+      // 🔴 「見えそうな枠」の基準 = 板を送る器(W3-③)
+      viewRoot: this.scroller,
     });
     // 🔴 添付ノートは「絵を出せる画像か」が**読んだ後**に分かる ── 既定の大きさを当て直す
     const body = this.lastBody;

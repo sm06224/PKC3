@@ -48,10 +48,11 @@
  * 図の塊・貸出は**枠(slot)が画面から外れたとき**と**別のノートへ移るとき**に返す
  * (`release`)。新しい常駐は作らない ── 描くのは既存の markdown 描画口(ワーカー。使い捨て)である。
  */
-import { placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
+import { PLACE_NEAR_MARGIN, placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { markViewBig } from './view-big';
+import { watchVisible, type VisibleWatch } from './visible-watch';
 
 /** 塊の中の、置いたノートの本文の器。 */
 export const PLACE_BODY_FIELD = 'place-body';
@@ -92,6 +93,12 @@ export interface PlaceEmbedDeps {
    * ⚠ 必須にしてある ── 配線を落としても tsc が黙ると、板の中でだけ図が原文のまま残る。
    */
   readonly figures: (roots: readonly ParentNode[]) => MermaidScope[];
+  /**
+   * 🔴 **板を送る器**(スクロールする要素)。「見えそうな枠」はこの器からの距離で決める。
+   * ⚠ `null` = 決められない(器の外の画面を基準にする)── 器が枠を切るので、離れた枠が
+   *   余白の内側でも「見えていない」と読まれ、**スクロールに追従して描けなくなる**。
+   */
+  readonly viewRoot: Element | null;
 }
 
 /** 器を持つ塊の lid を全部返す(板が展開してよい塊だけ)。 */
@@ -215,6 +222,21 @@ function keyOf(ex: PlaceExcerpt): string {
  * 呼ぶのは 2 つの場面:本文の板が描き直されたとき(`applyPlaceLayout` の後)と、
  * 抜粋が届いた / 書込で変わったとき(本文は描き直さず、この面だけ)。
  *
+ * ## 🔴 中身を描くのは「近づいた枠」から(W3-③)
+ *
+ * 全部の枠に最初から中身を出すと、板を開く時間が枠の数に比例して伸びた(N = 200 で初回 6〜9 秒、
+ * 開き直しで主スレッドが 0.4〜0.7 秒固まる。実測 `docs/development/place-embed-measure-2026-10.md`)。だから:
+ * - **画面から `PLACE_NEAR_MARGIN` までに近づいた枠から**器を作って中身を入れる(離れた枠は帯だけ)
+ * - 「近づいたか」は `watchVisible`(図の「見えたとき」と**同じ 1 本**)に余白と基準の器を渡して問う。
+ *   観測器は板 1 つにつき 1 つ(枠ごとに作らない)
+ * - 🔴 **一度描いた枠は、離れても捨てない。** 捨てる版(離れて 1.5 秒で器ごと返す)も作って測ったが、
+ *   枠を作り直すたびに画像を新しい URL で読み直し、**ブラウザの控えが積もって**、板を何往復もすると
+ *   常駐が捨てない版より増えた(N = 200 で 14 往復後に 760〜840MB の鋸歯 ── 捨てない版は 640〜650MB で止まる)。
+ *   捨てて得られる分(圧迫の通知で控えを返させた後で 30〜45MB)は、その測り方のぶれ(捨てない版の 3 回が
+ *   501〜610MB)に埋もれる。**捨てない**。
+ * ⚠ 本文の抜粋(`placeBodies`)は**離れた枠の分も頼む** ── 切った文字列で小さく、添付ノートは
+ *   読むまで「画像か」が分からず、大きさ(既定の 320 × 240 を当てるか)が決まらないため。
+ * ⚠ 観測できない環境(`IntersectionObserver` が無い)では**今までどおり全部の枠に出す**。
  */
 export class PlaceEmbeds {
   /** 描いた HTML の控え(`lid` → 鍵と HTML)。⚠ 板に在る lid の分だけ残す。 */
@@ -234,12 +256,34 @@ export class PlaceEmbeds {
   /** 枠の接頭辞の連番。⚠ `reset` でも戻さない(古い `href` が別の枠を指さない)。 */
   private nsSeq = 0;
 
+  /** 近づいたかの観測(板に 1 つ)。`null` = まだ作っていない / 観測できない環境。 */
+  private watcher: VisibleWatch | null = null;
+  /** 観測に載せた塊。 */
+  private readonly watched = new Set<HTMLElement>();
+  /** 近づいた塊。⚠ 一度入れたら離れても外さない(`release` まで)。 */
+  private readonly near = new Set<HTMLElement>();
+  /**
+   * 近づいた塊の lid。⚠ 描き直しで**塊そのものが作り直された**とき、近づいていた lid は引き継ぐ ──
+   * 引き継がないと、板の本文を 1 行直すたびに、描いてあった枠が全部 1 回空になる。
+   */
+  private readonly nearLids = new Set<string>();
+  /** 観測の通知から `sync` を呼ぶための控え。 */
+  private host: HTMLElement | null = null;
+  private deps: PlaceEmbedDeps | null = null;
+
   /** 器を手放す(別のノートへ移る / 面を畳む)。⚠ 図の URL と貸出をここで返す(不可侵の規律)。 */
   release(): void {
     for (const lends of this.lends.values()) lends.disposeAll();
     this.lends.clear();
     for (const sc of this.scopes.splice(0)) sc.dispose();
     this.fresh = [];
+    this.watcher?.disconnect();
+    this.watcher = null;
+    this.watched.clear();
+    this.near.clear();
+    this.nearLids.clear();
+    this.host = null;
+    this.deps = null;
   }
 
   /** 別のノートへ移るとき。⚠ 頼んだ控えも手放す(読めなかった lid を次の板でも頼み直せる)。 */
@@ -249,7 +293,40 @@ export class PlaceEmbeds {
     this.asked.clear();
   }
 
+  /** 塊を観測に載せる(離れた塊の中身を作らない)。 */
+  private watch(blocks: readonly HTMLElement[], root: Element | null): void {
+    if (typeof IntersectionObserver !== 'function') return;
+    // 🔑 板でない本文では観測器を作らない(`syncPlaceEmbeds` は本文を描くたびに呼ばれる)
+    if (this.watcher === null && blocks.length === 0) return;
+    this.watcher ??= watchVisible((b) => this.onNear(b), {
+      root,
+      rootMargin: `${String(PLACE_NEAR_MARGIN)}px`,
+    });
+    for (const b of [...this.watched]) {
+      if (b.isConnected) continue;
+      this.watcher.unobserve(b);
+      this.watched.delete(b);
+      this.near.delete(b);
+    }
+    for (const b of blocks) {
+      if (this.watched.has(b)) continue;
+      this.watched.add(b);
+      // 🔑 前の塊が近づいていた lid なら、作り直された塊も近づいたことにする(観測の答えを待たない)
+      if (this.nearLids.has(b.getAttribute('data-pkc-place-entry') ?? '')) this.near.add(b);
+      else this.watcher.observe(b);
+    }
+  }
+
+  /** 塊が近づいた(1 度だけ呼ばれる)。中身を作る。 */
+  private onNear(b: HTMLElement): void {
+    this.near.add(b);
+    this.nearLids.add(b.getAttribute('data-pkc-place-entry') ?? '');
+    if (this.host !== null && this.deps !== null) this.sync(this.host, this.deps);
+  }
+
   sync(host: HTMLElement, deps: PlaceEmbedDeps): void {
+    this.host = host;
+    this.deps = deps;
     // 🔴 画面から外れた枠の貸出・図を先に返す(差し替えで消えた塊は通知が来ない)
     for (const [slot, lends] of [...this.lends]) {
       if (slot.isConnected) continue;
@@ -258,6 +335,7 @@ export class PlaceEmbeds {
     }
     pruneScopes(this.scopes);
     const blocks = [...host.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)];
+    this.watch(blocks, deps.viewRoot);
     const seen = new Set<string>();
     const need: string[] = [];
     for (const block of blocks) {
@@ -284,6 +362,8 @@ export class PlaceEmbeds {
         dropSlot(block);
         continue;
       }
+      // 🔴 近づいていない枠は中身を作らない(帯だけ)
+      if (this.watcher !== null && !this.near.has(block)) continue;
       const key = keyOf(ex);
       const slot = ensureSlot(block, () => `place-${String(++this.nsSeq)}-`);
       if (slot.getAttribute(KEY_ATTR) === key) continue;
