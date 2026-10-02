@@ -277,8 +277,10 @@ describe('編集セッションの寿命(#950 ①)', () => {
     const addedBefore = added.length;
     q('[data-pkc-action="start-edit"]')!.click();
     const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
-    expect(added.length - addedBefore, '編集を始めても購読が 1 つ増えていない').toBe(1);
-    const mine = added[added.length - 1]!;
+    // 編集の面は selectionchange を 2 つ購読する(この件 + #1215 の選んだ範囲の字数)。
+    // ⚠ 数が変わったら、足した購読を外す手順(`disposeLends`)も同じ数であることを見直す
+    expect(added.length - addedBefore, '編集を始めても購読が 2 つ(説明の切替 + 字数)になっていない').toBe(2);
+    const mine = added[addedBefore]!; // 先に購読するのが説明の切替
     expect(removed, '編集中に外れている').not.toContain(mine);
 
     // 実際の編集の中で効く(帯は detail.ts が組んだ本物)

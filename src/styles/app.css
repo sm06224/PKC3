@@ -1752,6 +1752,19 @@ select:focus-visible {
 [data-pkc-field='detail-toolbar'] {
   margin-bottom: var(--s3);
 }
+/* 🔴 選んだ範囲の文字数と行数(#1215)。帯の右端に**常設**する枠 ── 選んでいないときは
+ * 字が空なだけで枠は残る(高さは `align-self: center` で帯に任せ、出入りで版面が動かない)。
+ * ⚠ 折り返す帯の中の 1 つなので、1 行を丸ごと使わない(`flex: none` + `white-space: nowrap`)。 */
+[data-pkc-field='detail-toolbar'] [data-pkc-field='selection-stats'] {
+  margin-left: auto;
+  align-self: center;
+  flex: none;
+  padding: 0 var(--s3);
+  font-size: var(--btn-fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 [data-pkc-field='detail-toolbar'] button {
   border: none;
   border-radius: 0;

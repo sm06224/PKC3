@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { formatBodyStats, formatTaskProgress } from '../../src/features/stats/body-stats';
+import {
+  formatBodyStats,
+  formatSelectionStats,
+  formatTaskProgress,
+  selectionLineCount,
+} from '../../src/features/stats/body-stats';
 
 /**
  * 🔴 右の列の読了目安は、題名の下と**同じ 1 本の算出**(#1087、裁定 2026-10-01)。
@@ -78,5 +83,47 @@ describe('formatTaskProgress ── チェック項目の進み具合(#1216)', (
 
   it('全部より多い済みは全部に丸める(100% を超えない)', () => {
     expect(formatTaskProgress(2, 5)).toBe('2 / 2 完了 (100%)');
+  });
+});
+
+/**
+ * 🔴 選んだ範囲の行数と整形(#1215)。
+ *
+ * ⚠ 期待値は**手で数えた値**(実装の `indexOf` 式を写さない)。
+ */
+describe('selectionLineCount ── 選んだ範囲の行数(#1215)', () => {
+  const t = 'abc\ndef\nghi';
+  it('選んでいなければ 0', () => {
+    expect(selectionLineCount(t, 2, 2)).toBe(0);
+    expect(selectionLineCount(t, 5, 3)).toBe(0);
+  });
+  it('区切りの数 + 1', () => {
+    expect(selectionLineCount(t, 0, 2)).toBe(1);
+    expect(selectionLineCount(t, 2, 5)).toBe(2); // c ⏎ d
+    expect(selectionLineCount(t, 0, t.length)).toBe(3);
+  });
+  it('🔴 末尾の改行で選択が終わるときは、次の行を数えない', () => {
+    expect(selectionLineCount(t, 0, 4)).toBe(1); // 'abc\n'
+    expect(selectionLineCount(t, 0, 8)).toBe(2); // 'abc\ndef\n'
+    // 対照群: 改行の次の 1 字まで選べば次の行に入る
+    expect(selectionLineCount(t, 0, 5)).toBe(2);
+    expect(selectionLineCount(t, 0, 9)).toBe(3);
+  });
+  it('改行だけを選んでも 1 行 / 空行をまたぐ改行 2 つは 2 行', () => {
+    expect(selectionLineCount('a\n\nb', 1, 2)).toBe(1);
+    expect(selectionLineCount('a\n\nb', 1, 3)).toBe(2);
+  });
+});
+
+describe('formatSelectionStats ── 帯に出す字(#1215)', () => {
+  it('「選択: N 文字(M 行)」。桁区切りは formatBodyStats と同じ ja-JP', () => {
+    expect(formatSelectionStats(142, 3)).toBe('選択: 142 文字(3 行)');
+    expect(formatSelectionStats(12345, 1200)).toBe('選択: 12,345 文字(1,200 行)');
+    // 単位の字は右の列と同じ「文字」
+    expect(formatBodyStats(12345)).toContain('12,345 文字');
+  });
+  it('選んでいない(0 以下)は空 ── 枠は残るが字は無い', () => {
+    expect(formatSelectionStats(0, 0)).toBe('');
+    expect(formatSelectionStats(-3, 2)).toBe('');
   });
 });
