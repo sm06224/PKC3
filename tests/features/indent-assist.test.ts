@@ -164,3 +164,34 @@ describe('往復と選択', () => {
     expect(show(ok(indentLines(sel('|- a\n- b|c'), 1)))).toBe('|  - a\n  - b|c');
   });
 });
+
+/**
+ * 🔴 **先頭が空行の本文で、行頭を取り違えない**(#1213 の調査で見つけた)。
+ *
+ * `text.lastIndexOf('\n', sel.start - 1)` は `sel.start === 0` で第 2 引数が -1 になり、
+ * **JS は負の位置を 0 に丸めて 0 番目を見る** ── 本文が `\n` で始まると行頭が 1 と読まれ、
+ * ⚠ 字は壊れないが、**選んだ範囲の頭が字下げの幅ぶん内側へずれた**
+ * (`\nあ\nい` を頭から選んで Ctrl+] → 選択の頭が 0 でなく 2。続けて押すと 1 行目の空行が選びから外れる)。
+ */
+describe('先頭が空行の本文(行頭の取り違え)', () => {
+  it('🔴 先頭の空行から選んで字下げすると、選びの頭は 0 のまま(1 行目の空行も選びに残る)', () => {
+    const before = sel('|\nあ\nい|');
+    const r = ok(indentLines(before, 1, { explicit: true }));
+    expect(r.text).toBe('\n  あ\n  い');
+    expect(r.start, '選びの頭が内側へずれた(先頭の空行が欄の外へ落ちた)').toBe(0);
+    expect(r.from, '置き換える範囲が 1 行目の空行を飛ばしている').toBe(0);
+    expect(r.insert).toBe('\n  あ\n  い');
+    // 往復: 続けて戻しても本文・選びが同じ
+    const back = ok(indentLines(r, -1));
+    expect([back.text, back.start, back.end]).toEqual([before.text, 0, before.text.length]);
+  });
+
+  it('対照群: 先頭の行が空でなければ、同じ形で素直に動く', () => {
+    const r = ok(indentLines(sel('|あ\nい|'), 1, { explicit: true }));
+    expect([r.text, r.start, r.from]).toEqual(['  あ\n  い', 0, 0]);
+  });
+
+  it('先頭の空行に caret があるだけなら何も起きない(空行は触らない)', () => {
+    expect(indentLines(sel('|\nあ'), 1, { explicit: true })).toBeNull();
+  });
+});

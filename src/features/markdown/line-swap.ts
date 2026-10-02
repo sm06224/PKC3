@@ -23,6 +23,7 @@
  * `insertText`(取り消しの履歴を切らない)で `from`〜`to` を `insert` へ置き換える。
  * ⚠ `line-move.ts` の `moveLines` は**読む面のブロック移動**で別物(名前を分けてある)。
  */
+import { lineStart } from './line-start';
 import type { TextSelection } from './text-ops';
 
 /** 入れ替えの結果。⚠ `TextSelection`(新しい本文と選択)に、置き換える範囲を足したもの。 */
@@ -32,15 +33,6 @@ export interface SwapEdit extends TextSelection {
   readonly to: number;
   /** その範囲へ入れる字(改行を含む)。 */
   readonly insert: string;
-}
-
-/**
- * `pos` を含む行の頭。
- * ⚠ `lastIndexOf('\n', -1)` は**負の位置を 0 に丸めて 0 番目を見る** ── 先頭が空行の本文で
- *   行頭を 1 と読み違えるので、`pos === 0` は自前で返す。
- */
-function lineStart(text: string, pos: number): number {
-  return pos <= 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
 }
 
 /**

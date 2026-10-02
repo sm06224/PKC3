@@ -42,6 +42,7 @@
  * 🔑 **pure module**。textarea も DOM も知らない ── 書き込みは呼び側が
  * `insertText`(取り消しの履歴を切らない)で `from`〜`to` を `insert` へ置き換える。
  */
+import { lineStart } from './line-start';
 import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import type { TextSelection } from './text-ops';
 
@@ -102,7 +103,8 @@ export function indentLines(
   opts: IndentOptions = {},
 ): IndentEdit | null {
   const { text } = sel;
-  const from = text.lastIndexOf('\n', sel.start - 1) + 1;
+  // ⚠ `lastIndexOf('\n', -1)` は 0 番目を見る ── 先頭が空行の本文で行頭を取り違えるので共有の口を通す
+  const from = lineStart(text, sel.start);
   const collapsed = sel.start === sel.end;
   // ⚠ 下の行の頭まで選んでいるときは、その行を巻き込まない
   const lastPos = !collapsed && text[sel.end - 1] === '\n' ? sel.end - 1 : sel.end;
