@@ -3,13 +3,12 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -63,7 +62,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
 
   // sidebar にも行が見えている(タイトルは既定命名)
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(1);
 
   // ── P5b: 2 回目の編集 → 履歴 → 復元(前進変異)が画面に反映される ──
@@ -122,7 +121,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await clickReal(page, '[data-pkc-action="delete-entry"]');
   await answerAppDialog(page, 'ok');
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(0);
 
   await clickReal(page, '[data-pkc-browse="filer"]');
@@ -131,9 +130,8 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await expect(trash.locator('li')).toHaveCount(1);
   await clickReal(page, '[data-pkc-action="restore-trash"]');
   // ⚠ 一覧は**別のタブ**にある(P8 段⑤)── 戻ってから数える
-  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(1); // 復元で一覧に戻る
   // ⚠ ゴミ箱は**フォルダのタブへ戻ってから**数える ── 隠れている面は描き直されない
   // ので、一覧を出したまま数えると「前に描いた古い DOM」を見ることになる

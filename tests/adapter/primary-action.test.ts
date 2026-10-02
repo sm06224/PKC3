@@ -86,7 +86,7 @@ function mount(metas: EntryMeta[] = [meta('n1', 'あ')]): { root: HTMLElement; d
   d.onState((s) => {
     detail.render(s);
     box.render(s);
-    browse.render(s, 'list');
+    browse.render(s, 'filer');
     inspector.render(s);
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
@@ -610,7 +610,7 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     const d = new Dispatcher();
     const regions = buildShell(root);
     const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-    d.onState((s) => browse.render(s, 'list'));
+    d.onState((s) => browse.render(s, 'filer'));
     // ⚠ **まだ SYS_BOOTED を撃たない** ── そこが `initializing` の唯一の窓である
     d.dispatch({ type: 'OP_FAILED', error: 'probe' }); // phase を動かさずに 1 度描かせる
     expect(d.getState().phase, '前提が崩れている').toBe('initializing');

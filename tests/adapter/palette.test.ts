@@ -609,7 +609,7 @@ describe('パレットの「押せない理由」は、ボタンが持ってい�
     const d = new Dispatcher();
     // 🔑 理由を置くのはこの器である(これが無いと `data-pkc-blocked` は誰も書かない)
     const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-    d.onState((st) => browse.render(st, 'list'));
+    d.onState((st) => browse.render(st, 'filer'));
     bindActions(root, d);
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

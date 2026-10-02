@@ -67,7 +67,7 @@ function setup() {
   }) as typeof d.dispatch;
   // 🔑 描く器が先、読む側が後(本番の `main.ts` と同じ順 ── 押せるかは描き終えた画面で決まる)
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  d.onState((st) => browse.render(st, 'list'));
+  d.onState((st) => browse.render(st, 'filer'));
   // 🔑 本番(`main.ts` の描画の最後)と同じ位置・同じ呼び方。⚠ ここを外すと、下の
   //   「状態が動いたら描き直す」が落ちる(配線を落とした日に静かに壊れない)
   d.onState(() => repaintCommandList(root, d, appKeymap));

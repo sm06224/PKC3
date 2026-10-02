@@ -1,8 +1,6 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from 'vitest';
 import { paintRowMark } from '../../src/adapter/ui/render/selection-mark';
-import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
 import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
@@ -52,44 +50,6 @@ describe('🔴 複数選択の読み上げ対応 (Issue #1064)', () => {
     });
   });
 
-  describe('一覧タブ (SidebarRenderer) の aria-multiselectable と aria-selected', () => {
-    it('一覧の器(entry-list)に aria-multiselectable="true" が付いている', () => {
-      const root = document.createElement('div');
-      const regions = buildShell(root);
-      const list = regions.sidebar.querySelector('[data-pkc-region="entry-list"]');
-      expect(list).not.toBeNull();
-      expect(list?.getAttribute('aria-multiselectable')).toBe('true');
-    });
-
-    it('複数選択された行に data-pkc-marked と aria-selected="true" が付き、外れると消える', () => {
-      const root = document.createElement('div');
-      const regions = buildShell(root);
-      const sidebar = new SidebarRenderer(regions.sidebar);
-      const metas = [meta('a1', 1), meta('a2', 2)];
-      let st = bootedState(metas);
-
-      // selection に a1 を追加
-      st = { ...st, selection: ['a1'] };
-      sidebar.render(st);
-
-      const rowA1 = regions.sidebar.querySelector('[data-pkc-entry="a1"]');
-      const rowA2 = regions.sidebar.querySelector('[data-pkc-entry="a2"]');
-      expect(rowA1?.getAttribute('data-pkc-marked')).toBe('');
-      expect(rowA1?.getAttribute('aria-selected')).toBe('true');
-      expect(rowA2?.hasAttribute('data-pkc-marked')).toBe(false);
-      expect(rowA2?.hasAttribute('aria-selected')).toBe(false);
-
-      // selection を a2 に切り替え
-      st = { ...st, selection: ['a2'] };
-      sidebar.render(st);
-
-      expect(rowA1?.hasAttribute('data-pkc-marked')).toBe(false);
-      expect(rowA1?.hasAttribute('aria-selected')).toBe(false);
-      expect(rowA2?.getAttribute('data-pkc-marked')).toBe('');
-      expect(rowA2?.getAttribute('aria-selected')).toBe('true');
-    });
-  });
-
   describe('フォルダの表 (FilerRenderer) の aria-multiselectable と aria-selected', () => {
     it('フォルダの表の器(filer-table)に aria-multiselectable="true" が付き、選択行に aria-selected="true" が付く', () => {
       document.body.textContent = '';
@@ -111,6 +71,32 @@ describe('🔴 複数選択の読み上げ対応 (Issue #1064)', () => {
       expect(trN1?.getAttribute('aria-selected')).toBe('true');
       expect(trF1?.hasAttribute('data-pkc-marked')).toBe(false);
       expect(trF1?.hasAttribute('aria-selected')).toBe(false);
+    });
+
+    // 🔴 かつて一覧タブ(#813 段③ で外した)が持っていた「印が移ると外れる」もここで守る
+    it('印が別の行へ移ると、前の行の data-pkc-marked と aria-selected が消える', () => {
+      document.body.textContent = '';
+      const region = document.createElement('div');
+      document.body.append(region);
+      const filer = new FilerRenderer(region);
+      let st = bootedState([meta('a1', 1), meta('a2', 2)]);
+      st = { ...st, selection: ['a1'] };
+      filer.render(st);
+      const rowA1 = region.querySelector('tr[data-pkc-entry="a1"]');
+      const rowA2 = region.querySelector('tr[data-pkc-entry="a2"]');
+      expect(rowA1?.getAttribute('data-pkc-marked')).toBe('');
+      expect(rowA1?.getAttribute('aria-selected')).toBe('true');
+      expect(rowA2?.hasAttribute('data-pkc-marked')).toBe(false);
+
+      st = { ...st, selection: ['a2'] };
+      filer.render(st);
+      // ⚠ 行が作り直されても見られるよう、引き直して見る
+      const nowA1 = region.querySelector('tr[data-pkc-entry="a1"]');
+      const nowA2 = region.querySelector('tr[data-pkc-entry="a2"]');
+      expect(nowA1?.hasAttribute('data-pkc-marked')).toBe(false);
+      expect(nowA1?.hasAttribute('aria-selected')).toBe(false);
+      expect(nowA2?.getAttribute('data-pkc-marked')).toBe('');
+      expect(nowA2?.getAttribute('aria-selected')).toBe('true');
     });
   });
 

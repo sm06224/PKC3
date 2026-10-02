@@ -1043,7 +1043,7 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
     expect(target.getAttribute('data-pkc-drop-edge'), '前提: 線が出ていない(空振り)').toBe('before');
     // ① 面の外へ動かしたら消える
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     s.root.append(outside);
     outside.dispatchEvent(dragEv('dragover', dt, 5));
     expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '面の外へ出ても線が残る').toHaveLength(0);
@@ -1073,7 +1073,7 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
     const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
     teardown = s.unbind;
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     s.root.append(outside);
     const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
     const over = dragEv('dragover', dt, 5);
@@ -1118,14 +1118,14 @@ describe('外から落とした file は落とした所へ入る(#684 段④)', 
     expect(at0!.toBefore, 'その枠のいちばん下ではない').toBe(body2.split('\n').length - 1);
   });
 
-  /** 🔴 **対照群 ── 面の外(一覧)は今までどおり受けない**(何でも受けるようにしていない)。 */
-  it('🔴 面の外(一覧)は、これまでどおり位置を渡さない', () => {
+  /** 🔴 **対照群 ── 面の外(別の面)は今までどおり受けない**(何でも受けるようにしていない)。 */
+  it('🔴 面の外(別の面)は、これまでどおり位置を渡さない', () => {
     const got = at();
     const s = setup({ attachFiles: (...a) => void got.calls.push(a) });
     teardown = s.unbind;
     pinned(s);
     const outside = document.createElement('div');
-    outside.setAttribute('data-pkc-region', 'entry-list');
+    outside.setAttribute('data-pkc-region', 'kanban-cards');
     s.root.append(outside);
     const dt = filesDt([new File(['x'], 'a.png', { type: 'image/png' })]);
     outside.dispatchEvent(dragEv('drop', dt, 5));
@@ -1183,7 +1183,7 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
   function listRow(
     s: ReturnType<typeof setup>,
     lid: string,
-    region: 'filer-table' | 'entry-list' | 'dual-table' = 'filer-table',
+    region: 'filer-table' | 'dual-table' = 'filer-table',
   ): HTMLElement {
     let table = s.root.querySelector<HTMLElement>(`[data-pkc-region="${region}"]`);
     if (table === null) {
@@ -1281,13 +1281,13 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
   });
 
   /**
-   * 🔴 **左の列はタブで中身が変わる**(「フォルダ」/「一覧」/ 2 ペイン)。
+   * 🔴 **行を持つ面は 2 つ**(「フォルダ」/ 2 ペイン。「一覧」は #813 段③ で外した)。
    * ⚠ 1 稿目は「一覧」タブ(`entry-list`)を落としており、**その名前のタブでだけ
    *   無言で落とせなかった** ── マニュアルは「左の列のノートの行」と書いているので、
-   *   いちばん外しやすい形だった(変異 R7)。
+   *   いちばん外しやすい形だった(変異 R7)。**いまも、面を 1 つ落とすと同じ形になる**。
    */
-  it('🔴 「一覧」タブ・2 ペインの行でも落とせる(タブで効かなくならない)', () => {
-    for (const region of ['entry-list', 'dual-table'] as const) {
+  it('🔴 フォルダのタブ・2 ペインの行でも落とせる(面で効かなくならない)', () => {
+    for (const region of ['filer-table', 'dual-table'] as const) {
       const s = setup();
       teardown = s.unbind;
       const row = listRow(s, 'n2', region);

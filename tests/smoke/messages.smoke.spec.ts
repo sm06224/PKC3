@@ -27,7 +27,7 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   await dismissAnnounce(page);
 
   // ① 🔴 左の一覧に「メッセージ」という行は無い(system 領域は user の一覧に混ざらない)
-  const sidebarRows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const sidebarRows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const sidebarTexts = await sidebarRows.allTextContents();
   expect(
     sidebarTexts.some((t) => t.includes('メッセージ')),

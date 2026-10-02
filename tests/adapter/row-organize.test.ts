@@ -90,14 +90,14 @@ const METAS = [
   meta('n4', 6),
 ];
 
-function setup(metas: EntryMeta[] = METAS, relations: Relation[] = [], mode: 'list' | 'filer' = 'filer') {
+function setup(metas: EntryMeta[] = METAS, relations: Relation[] = []) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  let cur: 'list' | 'filer' | 'launcher' = 'list';
+  let cur: 'filer' | 'launcher' = 'filer';
   d.onState((s) => browse.render(s, cur));
   const status: string[] = [];
   const errors: string[] = [];
@@ -133,12 +133,8 @@ function setup(metas: EntryMeta[] = METAS, relations: Relation[] = [], mode: 'li
     },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
-  root.querySelector<HTMLElement>(`[data-pkc-browse="${mode}"]`)!.click();
-  // ⚠ 一覧だけは既存の region(`entry-list`)を器にする(`browse.ts` の作り)
-  const pane =
-    mode === 'list'
-      ? root.querySelector<HTMLElement>('[data-pkc-region="entry-list"]')!
-      : root.querySelector<HTMLElement>(`[data-pkc-browse-pane="${mode}"]`)!;
+  root.querySelector<HTMLElement>('[data-pkc-browse="filer"]')!.click();
+  const pane = root.querySelector<HTMLElement>('[data-pkc-browse-pane="filer"]')!;
   const row = (lid: string): HTMLElement => {
     const el = pane.querySelector<HTMLElement>(`[data-pkc-entry="${lid}"]`);
     expect(el, `前提が崩れている: 台に ${lid} の行が無い`).not.toBeNull();
@@ -273,31 +269,6 @@ describe('名前を変える ── 行の題名の所で打ち替える(#215)',
     expect(r.renameInput()).toBeNull();
   });
 
-  /**
-   * 🔴 **一覧タブの行でも同じ**(#215)── 面が違っても口は 1 つ(`row-rename`)。
-   * ⚠ この面は行を**使い回す**ので、やめた後に題名の字へ戻ることも見る
-   *   (戻さないと、次にその行を使ったとき欄が残る)。
-   */
-  it('🔴 一覧タブの行でも、その場で打ち替えられる(やめたら字に戻る)', () => {
-    const r = setup(METAS, [], 'list');
-    rightClick(r.row('n3'));
-    r.press('rename-entry-begin');
-    const input = r.renameInput();
-    expect(input, '一覧タブの行に入力欄が出ていない').not.toBeNull();
-    expect(input!.closest('[data-pkc-entry="n3"]')).not.toBeNull();
-    key(input!, 'Escape');
-    expect(r.renameInput()).toBeNull();
-    expect(r.row('n3').textContent, 'やめた後に題名の字が戻っていない').toContain('t-n3');
-    // 確定の側も通す
-    rightClick(r.row('n3'));
-    r.press('rename-entry-begin');
-    const again = r.renameInput()!;
-    again.value = '一覧から';
-    key(again, 'Enter');
-    expect(r.d.getState().entryMetas.get('n3')?.title).toBe('一覧から');
-    expect(r.row('n3').textContent).toContain('一覧から');
-  });
-
   it('🔴 編集中は断る(理由を出す)', async () => {
     const r = setup();
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
@@ -348,45 +319,17 @@ describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
   });
 
   /**
-   * 🔴 **一覧タブでも同じ**(#1038 台帳③ 段 G、C13)── 一覧タブで選び足せる
-   * ようになったので、右クリックの「移す…」も**フォルダの表と同じ規則**
-   * (scope=selection)で効くことを見る。
+   * 🔴 **trap 1(#1038 台帳③ 段 G-2)── 別々のフォルダに居る行を選んでも、黙って外されない**。
+   *
+   * ⚠ 平らな並び(かつての「一覧」タブ、いまは**「中まで全部出す」**)では、選んだ行が
+   *   **別々のフォルダの中**に居ても選べる。右クリックすると、`visibleFilerRows` が
+   *   平らな並びを見ていないとき(現在地はルート)n1 / n2 のどちらも載らず、
+   *   `visibleSelection` が印を**両方とも**削って「押した行 1 件だけ」に化ける(n2 が黙って外れる)。
+   * ⚠ 一覧タブを外した(#813 段③)ので、同じ形を**中まで全部出す**で作って守る。
    */
-  it('🔴 一覧タブでも、印が複数あればその全部が選んだフォルダへ入る', async () => {
-    const r = setup(METAS, [], 'list');
-    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
-    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
-    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n3' });
-    expect(r.d.getState().selection.length, '前提が崩れている(印が 3 件ではない)').toBe(3);
-    rightClick(r.row('n1'));
-    r.press('move-to-folder');
-    await tick();
-    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open);
-    expect(dialog, '入れ先を選ぶ画面が出ていない').toBeDefined();
-    expect(dialog!.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('3 件を移す');
-    const rows = [...dialog!.querySelectorAll<HTMLElement>('[data-pkc-field="entry-pick-row"]')];
-    rows.find((x) => x.getAttribute('data-pkc-lid') === 'f1')!.click();
-    await tick();
-    expect(
-      getStructuralChildren('f1', r.d.getState().entryMetas, r.d.getState().relations)
-        .map((m) => m.lid)
-        .sort(),
-      '一覧タブから移した先で全件が子になっていない',
-    ).toEqual(['n1', 'n2', 'n3']);
-  });
-
-  /**
-   * 🔴 **trap 1(#1038 台帳③ 段 G-2、段 G の実装者が自己申告)** ── 直前の test は
-   * 選んだ 3 件が**たまたま全部ルート直下**だったので、`visibleFilerRows`
-   * (フォルダの表専用のスコープ = `st.scopeLid` の直下だけ)でも**たまたま**
-   * 通っていた。⚠ 一覧は `scopeLid` の概念が無い flat な並びなので、
-   * 選んだ行が**別々のフォルダの中**に居ても選べる ── その形で右クリックすると、
-   * 直す前は `visibleFilerRows(st)`(現在地はルート)に n1 / n2 のどちらも
-   * 載らないので `visibleSelection` が印を**両方とも**削り、`marked` が空になって
-   * 「押した行 1 件だけ」に化けていた(n2 が黙って外れる)。
-   */
-  it('🔴 一覧タブで、別々のフォルダに居るノートを選んでも黙って外されない', async () => {
-    const r = setup(METAS, [rel('r1', 'f1', 'n1'), rel('r2', 'f2', 'n2')], 'list');
+  it('🔴 「中まで全部出す」で、別々のフォルダに居るノートを選んでも黙って外されない', async () => {
+    const r = setup(METAS, [rel('r1', 'f1', 'n1'), rel('r2', 'f2', 'n2')]);
+    r.d.dispatch({ type: 'SET_FILER_FLATTEN', on: true });
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
     expect(r.d.getState().selection.length, '前提が崩れている(印が 2 件ではない)').toBe(2);
@@ -410,14 +353,12 @@ describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
       'n2 が別のフォルダから動いていない(黙って外れた)',
     ).toEqual(['n1', 'n2']);
   });
-
   /**
-   * ⚠ **フォルダの表は直す前と同じ**(段 G-2、上の trap 1 の対照群)── 一覧タブへ
-   * `visibleLeftColumnRows` を足しても、フォルダの表を見ているときは
-   * `listTabShowing(root)` が偽なので `visibleFilerRows(st)` のまま。
-   * いまの現在地(`scopeLid`)の外に居る印は、直す前と同じく黙って除外される。
+   * ⚠ **平らに出していないフォルダの表は直す前と同じ**(上の trap 1 の対照群)── 平らでなければ
+   * `visibleFilerRows(st)` は現在地(`scopeLid`)の直下だけを見る。その外に居る印は、
+   * 直す前と同じく黙って除外される。
    */
-  it('⚠ フォルダの表は変わらない ── 現在地の外に居る印は、その表を見ているときは除外される', async () => {
+  it('⚠ 平らでないフォルダの表は変わらない ── 現在地の外に居る印は除外される', async () => {
     const r = setup(METAS, [rel('r1', 'f1', 'n1'), rel('r2', 'f2', 'n2')]);
     r.d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

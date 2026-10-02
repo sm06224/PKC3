@@ -20,7 +20,7 @@ import {
 } from '../../src/features/filter/entry-sort';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 
@@ -223,7 +223,9 @@ describe('並び順の配線(選ぶ → 画面が変わる)', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
     d.onState((s) => sidebar.render(s));
     bindActions(root, d);
     d.dispatch({
@@ -237,7 +239,7 @@ describe('並び順の配線(選ぶ → 画面が変わる)', () => {
     });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     const rows = () =>
-      [...root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')].map((e) =>
+      [...root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]')].map((e) =>
         e.getAttribute('data-pkc-entry'),
       );
     expect(rows()).toEqual(['n1', 'n2']); // 手動の順

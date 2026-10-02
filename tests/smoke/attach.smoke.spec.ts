@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, useListBrowse, expectMainGapUnderBudget,
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRendered, createEntry, useSplitEditor, expectMainGapUnderBudget,
   gotoCollectionPane,
 } from './helpers';
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
@@ -17,7 +17,6 @@ import { buildParquet } from '../features/parquet-fixture';
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -141,7 +140,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
   ).toContainText('「ねこ.png」を本文のいちばん下に入れました');
 
   // ⚠ 対照群 ── 添付そのものは 1 件できている(ノートと合わせて 2 行)
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(2);
 
   /**
    * ── ⑤ 🔴 **zip の中を見て、選んだ物だけ取り出す**(#818 段②③)。
@@ -166,15 +165,15 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
       { name: '大きい.bin', data: Buffer.alloc(8 * 1024 * 1024, 7) },
     ]),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(3);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(3);
   // ⚠ **対照群** ── 画像の添付には出ない(押せるのに必ず失敗する口を作らない)
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("ねこ.png")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("ねこ.png")');
   await expect(
     page.locator('[data-pkc-action="browse-archive"]'),
     '画像の添付にも「中を見る」が出ている',
   ).toHaveCount(0);
 
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("書庫.zip")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("書庫.zip")');
   /**
    * 🔴 **既定は「別の窓」**(#826。user 指摘 2026-09-09「**別窓にはできないの？**」)。
    *
@@ -261,7 +260,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     .toBe(true);
   // 🔴 取り出した物が添付になる(ノート + png + zip + 3 = 6 行)
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
     '取り出した物が添付になっていない',
   ).toHaveCount(6, { timeout: 20_000 });
   const load = await page.evaluate(() => {
@@ -299,8 +298,8 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
     topAt: load.topAt,
     longtasks: load.longtasks,
   });
-  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('海.jpg');
-  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('山.jpg');
+  await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('海.jpg');
+  await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('山.jpg');
 
   /**
    * ── ⑥ 🔴 **「この画面」を選ぶと、今までどおりその場の器で開く**(#826)。
@@ -311,7 +310,7 @@ test('🔴 ノートを開いたまま添付すると、そのノートの本文
    *   止めている user は、ここしか通らない。
    */
   await page.evaluate(() => localStorage.setItem('pkc3.open-place', 'here'));
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("書庫.zip")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("書庫.zip")');
   await clickReal(page, '[data-pkc-action="browse-archive"]');
   const box = page.locator('[data-pkc-region="app-dialog"]');
   await expect(box, 'この画面を選んだのに器が出ない').toBeVisible();
@@ -379,7 +378,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   });
 
   // sidebar に添付 entry が生え、選択されている
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(row).toHaveCount(1);
   await expect(row.first()).toContainText('dot.png');
 
@@ -425,7 +424,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
     });
     // ⚠ 取り込みは非同期 ── 行が出てから、その行を開いて鍵を読む
     //   (添付を開いたまま足しても、開いている物は最初の 1 枚のまま)
-    const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: name });
+    const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: name });
     await expect(row).toHaveCount(1);
     await row.click();
     const key = await page
@@ -501,10 +500,10 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
    *   `loading="lazy"` のまま(読み込むまで高さが無い)── 実際に使うときの姿になる。
    */
   const noteLid = await page
-    .locator('[data-pkc-region="entry-list"] [data-pkc-entry][data-pkc-selected]')
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry][data-pkc-selected]')
     .getAttribute('data-pkc-entry');
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]', { hasText: 'dot.png' }).click();
-  await page.locator(`[data-pkc-region="entry-list"] [data-pkc-entry="${noteLid}"]`).click();
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: 'dot.png' }).click();
+  await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${noteLid}"]`).click();
   await expect(img3).toHaveAttribute('src', /^blob:/, { timeout: 10_000 });
   // ⚠ 先頭から読み始めた姿にする(遠くの画像は読み込まれていない)
   await page.locator('[data-pkc-region="detail"]').evaluate((e) => {
@@ -644,7 +643,7 @@ test('🔴 大きい添付を貼ってもメインスレッドが固まらない
 
     const run = beat();
     const rows = (): number =>
-      document.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]').length;
+      document.querySelectorAll('[data-pkc-region="filer-table"] [data-pkc-entry]').length;
     const before = rows();
     const input = document.querySelector<HTMLInputElement>('[data-pkc-field="attach-input"]')!;
     const dt = new DataTransfer();
@@ -1136,7 +1135,7 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
    */
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');
   await expect(dialog).toBeHidden();
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows, '断ったら取り込まれなかった').toHaveCount(1);
   /**
    * 🔑 **user に見える字で測る**(`detail.ts:1951` が `2.4 MB` の形で出す)。
@@ -1178,7 +1177,7 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
    * 🔑 だから**中身の行そのもの**(`もう一枚.jpg — image/jpeg`)を待つ ──
    *   題名だけ待つと、本文が「読み込んでいます…」の間に測ってしまう。
    */
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("もう一枚.jpg")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("もう一枚.jpg")');
   await expect(
     page.locator('[data-pkc-region="detail"]'),
     '2 枚目の本文が出ない',

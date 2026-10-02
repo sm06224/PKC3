@@ -41,7 +41,7 @@ function setup(
   const root = document.createElement('div');
   root.innerHTML =
     '<div data-pkc-region="detail"><textarea data-pkc-field="row-source"></textarea></div>' +
-    '<div data-pkc-region="entry-list"><input data-pkc-field="find" /></div>';
+    '<div data-pkc-region="filer-table"><input data-pkc-field="find" /></div>';
   document.body.append(root);
   const calls = { attach: [] as File[][], imported: [] as File[][] };
   const services: BinderServices = {

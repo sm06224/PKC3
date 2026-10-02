@@ -17,7 +17,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { matchesEntry, NO_KINDS } from '../../src/features/filter/title-filter';
@@ -51,7 +51,9 @@ function setup(
   document.body.append(root);
   const d = new Dispatcher();
   const regions = buildShell(root);
-  const sidebar = new SidebarRenderer(regions.sidebar);
+  // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
   d.onState((s) => sidebar.render(s));
   const searchEntries = vi.fn(async (q: string) => ({ lids: hitsFor(q), truncated: truncatedFor(q) }));
   connectStoreEffects(d, {
@@ -77,12 +79,12 @@ function setup(
     relations: [],
   });
   const rows = () =>
-    [...root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')].map(
+    [...root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]')].map(
       (e) => e.getAttribute('data-pkc-entry'),
     );
   // 「ほかにもあります」の字(#680)。⚠ 左の列(sidebar の器)に絞って読む
   const more = () =>
-    regions.sidebar.querySelector('[data-pkc-field="entry-list-more"]')?.textContent ?? null;
+    regions.sidebar.querySelector('[data-pkc-field="filer-more"]')?.textContent ?? null;
   return { d, rows, searchEntries, more };
 }
 
@@ -170,7 +172,9 @@ describe('全文検索の配線(#181)', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
+    // 🔴 左の列の行はフォルダの表が描く(「一覧」の描画器は #813 段③ で外した)
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    const sidebar = { render: (s: Parameters<BrowseRouter['render']>[0]): void => browse.render(s, 'filer') };
     d.onState((s) => sidebar.render(s));
     connectStoreEffects(d, {
       ...stubRevisionOps(),
@@ -194,7 +198,7 @@ describe('全文検索の配線(#181)', () => {
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '会議' });
     await tick();
     expect(
-      [...root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')].length,
+      [...root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]')].length,
     ).toBe(1);
     expect(d.getState().error, '検索の失敗で帯を出している').toBeNull();
   });
@@ -204,7 +208,7 @@ describe('全文検索の配線(#181)', () => {
    * 1 面でも `matchesTitle` のままだと、その面でだけ「探しても出ない」。
    * ⚠ launcher は **タイル**(entry ではない)ので対象外 ── 意図的に除く。
    */
-  it('🔴 絞り込みを描く 3 面が全部、本文の当たりも見る規則を通っている', () => {
+  it('🔴 絞り込みを描く面が全部、本文の当たりも見る規則を通っている(予定・フォルダの表)', () => {
     // ⚠ **カレンダー / かんばんは落とし、予定を足した**(#292 段⑤、2026-08-23)
     //    ── 面が入れ替わっても「1 面でも漏れるとその面でだけ探せない」は同じ
     for (const face of ['schedule']) {
@@ -213,10 +217,10 @@ describe('全文検索の配線(#181)', () => {
       expect(src, `${face} に matchesTitle が残っている`).not.toMatch(/matchesTitle\(/);
     }
     /**
-     * ⚠ **フォルダ面・一覧タブは経路が変わった**(#240 段② / #1038 台帳③ 段 G、
-     * C13)── 行を決める規則は `features/relation/filer-list.ts` の
-     * `filerRows` / `listRows` 1 か所へ寄せた(描く側と**範囲選択の reducer** が
-     * 別の並びを持たないようにするため)。
+     * ⚠ **フォルダ面は経路が変わった**(#240 段②)── 行を決める規則は
+     * `features/relation/filer-list.ts` の `filerRows` 1 か所へ寄せた(描く側と
+     * **範囲選択の reducer** が別の並びを持たないようにするため。「一覧」の `listRows` は
+     * #813 段③ で消えた)。
      * 🔑 だから見るのは 2 つ: ①面がその関数を通ること ②**本文の当たりを渡すこと**
      *   ③その関数自身が `matchesEntry` を使うこと。
      */
@@ -237,12 +241,6 @@ describe('全文検索の配線(#181)', () => {
       'searchHits: state.searchHits',
     );
     expect(filer, 'フォルダ面に題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
-    const sidebar = readFileSync('src/adapter/ui/render/sidebar.ts', 'utf8');
-    expect(sidebar, '一覧タブが共通の規則を通っていない').toContain('listRows(');
-    expect(sidebar, '一覧タブが本文の当たりを渡していない').toContain(
-      'searchHits: state.searchHits',
-    );
-    expect(sidebar, '一覧タブに題名だけの絞り込みが残っている').not.toMatch(/matchesTitle\(/);
     const rows = readFileSync('src/features/relation/filer-list.ts', 'utf8');
     expect(rows, '共通の規則が題名だけになっている').toContain('matchesEntry(');
   });

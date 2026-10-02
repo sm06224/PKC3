@@ -42,13 +42,9 @@ export interface Chord {
  *   user に同じ操作を 2 回割り当て直させない(#273 で確立した規律)。
  */
 /**
- * 🔴 **`list` を分けている理由**(#1042 C2)── 一覧タブはフォルダの表と違い
- * `scopeLid`(現在地)を持たない **flat な行の並び**である。「開く」は同じ意味
- * (`filer-open` を共有)だが、フォルダの行でも「中へ入る」は起こさない
- * (`tests/adapter/multi-select.test.ts` が pin する「見えない現在地が動かない」を
- * 一覧では守る)。`filer-parent` / `filer-select-all` / `filer-rename` などの
- * フォルダ固有の操作(親フォルダ・移す・複数選択)は一覧には無いので、
- * `filer` へ混ぜず**必要な 3 つだけ**(次の行へ / 前の行へ / 開く)を共有する。
+ * 🔴 **文脈 `list` は #813 段③ で消えた**(左の列の「一覧」タブを外したため)。
+ * 行送り / 開く / 横の枠へ開く(`filer-row-down` / `filer-row-up` / `filer-open` /
+ * `filer-open-stack`)は、**`filer`(フォルダの表と 2 ペイン)だけ**が名乗る。
  */
 /**
  * 🔴 **`reading` / `window` を分けている理由**(#1042 C3。裁定 2026-09-25 Q3 = A)。
@@ -72,7 +68,6 @@ export type KeyContext =
   | 'live'
   | 'filer'
   | 'dual'
-  | 'list'
   | 'reading'
   | 'window';
 
@@ -100,8 +95,6 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   filer: 'フォルダの一覧と 2 ペイン(行を選んでいるとき)',
   /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
   dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
-  /** ⚠ こちらは**一覧タブにしか存在しない面**(フォルダの表とは違う flat な行)。 */
-  list: '一覧タブ(ノートの行を選んでいるとき)',
   /** ⚠ 何も編集していないときだけ効く(#1042 C3)。 */
   reading: 'ノートを読んでいるとき',
   /** ⚠ 予定表・連絡先の別ウィンドウ、および中央の面(query/settings/help など)。 */
@@ -128,11 +121,6 @@ export const CONTEXT_ORDER: readonly KeyContext[] = [
   //   `dual` しか名乗らないコマンドが `primaryContext` の既定で
   //   **「画面のどこでも」の下へ落ちる**(嘘の見出し。test が全数で突き合わせる)。
   'dual',
-  // ⚠ 同じ理由で `list` も `filer` の隣に置く(#1042 C2)── いまは
-  //   `filer-row-down` / `filer-row-up` / `filer-open` が `filer` も名乗っているので
-  //   足し忘れても直ちには壊れないが、`list` **だけ**を名乗るコマンドが将来足されたとき
-  //   ここに無いと「画面のどこでも」へ落ちる(同じ罠を先回りしておく)。
-  'list',
   'editor',
   'append',
   'row',
@@ -365,9 +353,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-open',
     label: '行を開く(フォルダなら中へ)',
-    // 🔑 一覧タブも共有(#1042 C2)── 一覧に「中へ入る」先は無いので、
-    //   フォルダの行でも普通のノートと同じく開く(そのまま select-entry)
-    contexts: ['filer', 'dual', 'list'],
+    contexts: ['filer', 'dual'],
     // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
     defaults: ['Enter', 'F3'],
     note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
@@ -376,12 +362,12 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    * 🔴 **選んだノートを横の枠(スタック)へ開く**(#1092)。
    *
    * ⚠ 中央のノートは開いたまま、横の枠にポンと追加して並べる(Alt+Enter / Option+Enter)。
-   * 🔑 一覧・フォルダ・2 ペインで共通の鍵。
+   * 🔑 フォルダ・2 ペインで共通の鍵。
    */
   {
     id: 'filer-open-stack',
     label: '横の枠(スタック)へ開く',
-    contexts: ['filer', 'dual', 'list'],
+    contexts: ['filer', 'dual'],
     defaults: ['Alt+Enter'],
     note: '中央のノートはそのまま、選んだノートを横の枠(スタック)に並べます',
   },
@@ -418,15 +404,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'filer-row-down',
     label: '次の行へ移る',
-    // 🔑 一覧タブも共有(#1042 C2)── 行が焦点を持つ点はフォルダの表と同じ
-    contexts: ['filer', 'dual', 'list'],
+    contexts: ['filer', 'dual'],
     defaults: ['ArrowDown'],
     note: '2 ペインではカーソルだけが動きます(選択は Space)',
   },
   {
     id: 'filer-row-up',
     label: '前の行へ移る',
-    contexts: ['filer', 'dual', 'list'],
+    contexts: ['filer', 'dual'],
     defaults: ['ArrowUp'],
   },
   {
@@ -1337,11 +1322,7 @@ const BARE_ALLOWED = new Set(['Escape', 'Tab']);
  * 🔑 `Enter` / `Delete` / `Backspace` は **OS のファイラの標準**であり、
  * ここを許さないと「平仄を合わせる」(user 裁定 2026-08-18)が実行できない。
  */
-/**
- * 🔴 `list`(#1042 C2)も同じ理由で足す ── 一覧タブの行(`<li>`)も文字を打つ
- * 相手ではない(焦点は行そのもの、入力欄は名前の打ち替え中だけ別に受ける)。
- */
-const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual', 'list']);
+const NON_TYPING_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['filer', 'dual']);
 
 function bareAllowed(key: string, commandId?: string): boolean {
   if (BARE_ALLOWED.has(key) || /^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return true;

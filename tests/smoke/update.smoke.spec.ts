@@ -1,13 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -97,7 +96,7 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     // 全緑だった。再読込は open editor の本文を捨てる(本文は AppState にしか
     // 無く `beforeunload` も無い)ので、ここが死ぬと**黙って下書きが消える**
     // ⚠ 再読込後は何も選択されていない ── 先に開かないと編集導線が出ない
-    await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]');
+    await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]');
     await clickReal(page, '[data-pkc-action="start-edit"]');
     await expect(page.locator('[data-pkc-field="editor-body"]')).toBeVisible();
     await page.evaluate(() => {
@@ -159,7 +158,7 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     expect(active.entries, '更新後の precache が痩せている').toBe(precacheCount);
 
     // ④ **中身は消えていない**(更新はデータを飛ばさない)
-    const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+    const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
     await expect(rows).toHaveCount(1);
 
     // ⑤ 🔴 **更新後もオフラインで読める**。①〜④ は「cache が在る」までしか
@@ -170,7 +169,7 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached({
       timeout: 30_000,
     });
-    await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+    await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
     await context.unroute('**/*');
   } finally {
     // ⚠ 生成物を書き換えたまま終えると、後続の spec と検品が別物を見る

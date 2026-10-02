@@ -8,7 +8,6 @@ import {
   dismissAnnounce,
   expectReachable,
   gotoApp,
-  useListBrowse,
   useSplitEditor,
 } from './helpers';
 
@@ -16,7 +15,6 @@ import {
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -104,13 +102,13 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   // ④ サイドバーの行が**覆われていない**(実際にその点に居るのが自分の子孫か)
   await createEntry(page, 'text');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   const box = await row.boundingBox();
   expect(box, '一覧の行が画面に無い').not.toBeNull();
   const covered = await page.evaluate(
     ({ x, y }) => {
       const at = document.elementFromPoint(x, y);
-      const row2 = document.querySelector('[data-pkc-region="entry-list"] [data-pkc-entry]');
+      const row2 = document.querySelector('[data-pkc-region="filer-table"] [data-pkc-entry]');
       return !(at && row2 && (row2 === at || row2.contains(at)));
     },
     { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 },
@@ -580,21 +578,22 @@ test('🔴 まとめ操作の帯は 2 段に収まり、ボタンは 1 つも消
 
 /**
  * 🔴 **ここから上は 1 段**。
- * ⚠ **1280 → 1366 に上げた**(2026-09-09、#683 段① で 6 枚目「音/動画」が加わった)。
- *   実測(手元・`chromium`・左の列 = `minmax(200px, 18vw)`。⚠ 2026-09-25 の C16 で下限を 242px へ上げた ── 1280 は 242px になる):
+ * ⚠ **1366 → 1280 へ戻した**(2026-10-01、#813 段③ で「一覧」を外してタブが 5 枚になった)。
+ *   1280 → 1366 に上げたのは 2026-09-09 の #683 段①(6 枚目「音/動画」)で、その行の
+ *   「🔑 これが分かったら覆る:タブが 5 枚以下に戻ったら 1280 へ下げてよい」の条件が成立した。
+ *   実測(手元・`chromium`・左の列 = `minmax(200px, 18vw)`、下限 242px。5 枚):
  *
- *   | 幅 | 左の列 | 6 枚の段数 |
+ *   | 幅 | 左の列 | 5 枚の段数 |
  *   |---|---|---|
  *   | 1440 | 259px | 1 |
- *   | 1366 | 246px | **1**(タブの詰めを 2px → 1px にして戻した) |
- *   | 1280 | 230px | 2 |
+ *   | 1366 | 246px | 1 |
+ *   | 1280 〜 1101 | 242px | 1 |
  *
- * 🔑 **これが分かったら覆る**:タブが 5 枚以下に戻ったら 1280 へ下げてよい
- *   ── 6 枚目を足す前は 1280 で 1 段だった。
- * ⚠ **上げ続けない** ── 7 枚目を足すときは、上げるのではなく
+ *   (6 枚のときは 1366 で 1 段・1280 で 2 段だった)
+ * ⚠ **上げ続けない** ── 6 枚目を足すときは、上げるのではなく
  *   **タブの並べ方そのもの**を見直す(語を縮めるか、置き場を変えるか)。
  */
-const TAB_ONE_ROW_FROM = 1366;
+const TAB_ONE_ROW_FROM = 1280;
 
 test('🔴 どの幅でも探し方のタブの語が隣に重ならない', async ({ page }) => {
   const seen: { w: number; rows: number; worst: number }[] = [];
@@ -782,7 +781,7 @@ test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
     await page.locator('[data-pkc-field="editor-title"]').fill(name);
     await clickReal(page, '[data-pkc-action="commit-edit"]');
   }
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(3);
 
   // 絞り込むと**行が減る**(隠すのではなく外す)
@@ -808,48 +807,6 @@ test('🔴 一覧を絞り込める(探す導線)', async ({ page }) => {
 });
 
 /**
- * P7b review M-4: 絞り込みの**戻り**で行を作り直さない。
- *
- * 🔴 15,000 件で実測すると、絞り込みを消すたびに 0.2〜0.75 秒メインスレッドが
- * 止まっていた ── 外した行を捨てて `createRow` からやり直していたためで、
- * CLAUDE.md が PKC2 の体感悪化の主因として名指しした
- * 「5000 行のサイドバーを作り直す」と同型である。
- * ⚠ 「速くなった」は結果に出ないので、**同じノードが戻ってくるか**で見る
- * (作り直す実装ではここが落ちる)。
- */
-test('🔴 絞り込みを戻したとき、行は作り直されない', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await gotoApp(page);
-  for (const name of ['りんご', 'みかん']) {
-    await createEntry(page, 'text');
-    await page.locator('[data-pkc-field="editor-title"]').fill(name);
-    await clickReal(page, '[data-pkc-action="commit-edit"]');
-  }
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
-  await expect(rows).toHaveCount(2);
-
-  // 印を付ける ── 同じ DOM ノードが戻れば印も残る
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll(
-      '[data-pkc-region="entry-list"] [data-pkc-entry]',
-    ))
-      (el as HTMLElement).dataset.probe = 'kept';
-  });
-  const box = page.locator('[data-pkc-field="entry-filter"]');
-  await box.fill('りんご');
-  await expect(rows).toHaveCount(1);
-  await box.fill('');
-  await expect(rows).toHaveCount(2);
-  const kept = await page.evaluate(
-    () =>
-      document.querySelectorAll(
-        '[data-pkc-region="entry-list"] [data-pkc-entry][data-probe="kept"]',
-      ).length,
-  );
-  expect(kept).toBe(2);
-});
-
-/**
  * P8: 種別は**チップ**で出す(裸の単漢字を地の文の前に置かない)。
  * ⚠ 旧実装は CSS の `::before` で「文 」を生やしており、`<tr>` に当たると
  * **匿名セルができてファイラの表が 1 列ずれ、全ヘッダが嘘になっていた**。
@@ -861,7 +818,7 @@ test('🔴 種別はチップで出る(地の文に裸の記号を混ぜない)'
   await page.locator('[data-pkc-field="editor-title"]').fill('印の確認');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first();
   // ① チップが**要素として**在る(CSS の生成文字ではない)
   await expect(row.locator('[data-pkc-chip]')).toBeVisible();
   // ② 題名は題名だけ ── 記号が混ざっていない
@@ -1010,7 +967,7 @@ test('🔴 面の境界が 1 本になっている(2 重線を作らない)', as
  * ⚠ 面の中を playwright でクリックしない ── `scrollIntoViewIfNeeded` が走って
  * **計器が自分でスクロールを潰す**(この罠で 1 度誤診した)。操作は面の外から。
  */
-test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
+test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを往復しても位置が残る', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 700 });
   await gotoApp(page);
@@ -1027,7 +984,7 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
 
   const host = page.locator('[data-pkc-region="browse-host"]');
   // ⚠ フォルダの面も同じ器の中に居る(隠れているだけ)── 行は一覧に絞って数える
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const shape = await host.evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
   expect(shape.sh, '一覧が溢れていない(観測の前提が崩れている)').toBeGreaterThan(shape.ch + 50);
 
@@ -1051,13 +1008,13 @@ test('🔴 一覧のスクロール: 絞り込みを戻しても、タブを往�
     '絞り込みを戻したら先頭へ飛んだ',
   ).toBeLessThan(30);
 
-  // ② 🔴 タブを往復する(3 つの面が**同じ器**を使い回している)
-  await clickReal(page, '[data-pkc-browse="filer"]');
-  // ⚠ **フォルダ側を別の位置にしてから**戻る ── 同じ位置のままだと、
+  // ② 🔴 タブを往復する(面が**同じ器**を使い回している)── 予定へ出て、フォルダへ戻る
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  // ⚠ **予定側を別の位置にしてから**戻る ── 同じ位置のままだと、
   //    面ごとに覚えていない実装(器の位置を持ち回すだけ)でも通ってしまう
   //    (変異試験で実際に素通りした)
   await host.evaluate((el) => (el.scrollTop = 0));
-  await clickReal(page, '[data-pkc-browse="list"]');
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await expect(rows).toHaveCount(32);
   expect(
     Math.abs((await host.evaluate((el) => el.scrollTop)) - parked),
@@ -1523,7 +1480,7 @@ test('🔴 本文に読み幅の上限が効き、表と図は対象外である
   expect(errors).toEqual([]);
 });
 
-test('🔴 一覧の行に更新日が出て、行の高さは増えていない', async ({ page }) => {
+test('🔴 左の列の行に更新日が出て、行の高さは増えていない', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1920, height: 1080 });
   await gotoApp(page);
@@ -1531,8 +1488,10 @@ test('🔴 一覧の行に更新日が出て、行の高さは増えていない
   await page.fill('[data-pkc-field="editor-title"]', '日付の出る行');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
 
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first();
-  const when = row.locator('[data-pkc-field="when"]');
+  const row = page.locator('[data-pkc-region="filer-table"] tbody [data-pkc-entry]', {
+    hasText: '日付の出る行',
+  });
+  const when = row.locator('[data-pkc-field="updated"]');
   // ⚠ 「要素が在る」で止めない ── **日付として読める**ことまで見る
   await expect(when).toHaveText(/^\d{2}\/\d{2}$|^\d{4}\/\d{2}\/\d{2}$/);
   const box = await row.boundingBox();

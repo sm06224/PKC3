@@ -107,8 +107,7 @@ test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', 
    * 🔑 素で `[data-pkc-entry]` を数えると**情報ペインのボタン**に満たされる
    *   ── #180 で nightly を 13 晩赤にしたのと同じ罠である(§1「別の面の文字」)。
    */
-  await clickReal(page, '[data-pkc-browse="list"]');
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   /**
    * ⚠ **前提を assert する。** ここが 0 でないなら、前の走りの器が残っている
    *   (playwright は走りごとに profile を捨てるが、それは**前提であって観測では
@@ -135,11 +134,10 @@ test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', 
 
   await page.reload();
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(rows, '🔴 再読込で消えた(段③ が効いていない)').toHaveCount(1, {
     timeout: 15_000,
   });
-  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText('可搬に残るノート');
+  await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText('可搬に残るノート');
 });
 
 /**
@@ -163,8 +161,7 @@ test('🔴 別の id のバンドルは、互いのノートを見ない (#400 �
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(pathToFileURL(HTML).href);
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await clickReal(page, '[data-pkc-browse="list"]');
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(0);
   await createEntry(page, 'text');
   await expect(page.locator('[data-pkc-field="editor-title"]')).toBeVisible({ timeout: 10_000 });
@@ -180,7 +177,6 @@ test('🔴 別の id のバンドルは、互いのノートを見ない (#400 �
   // ② 別の id のバンドルを開く ── 🔴 **見えてはいけない**
   await page.goto(pathToFileURL(other).href);
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(
     rows,
     '🔴 別のバンドルのノートが見えている(器の名前空間が切れていない)',
@@ -190,7 +186,6 @@ test('🔴 別の id のバンドルは、互いのノートを見ない (#400 �
   //    (②が 0 件なのは「どちらも保存できていない」からではない)
   await page.goto(pathToFileURL(HTML).href);
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(rows, '雛形の側まで消えている(保存そのものが効いていない)').toHaveCount(1, {
     timeout: 15_000,
   });
@@ -214,13 +209,12 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
 
   // ⚠ 既定で開いている面は一覧とは限らない(既定はフォルダ)── 先に開く
-  await clickReal(page, '[data-pkc-browse="list"]');
   const title = `持ち出す本文 ${process.pid}`;
   await createEntry(page, 'text');
   await expect(page.locator('[data-pkc-field="editor-title"]')).toBeVisible({ timeout: 10_000 });
   await page.locator('[data-pkc-field="editor-title"]').fill(title);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(page.locator('[data-pkc-region="entry-list"]')).toContainText(title, {
+  await expect(page.locator('[data-pkc-region="filer-table"]')).toContainText(title, {
     timeout: 10_000,
   });
 
@@ -311,9 +305,8 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
       ` exportedAt=${exportedAt} imageScripts=${imagePayloads.length} imagePayloadLen=[${imagePayloads.join(',')}]` +
       ` domImageAfterBoot=${boot.domImage} stored={${boot.stored}} bootChoice=n/a(not-exposed)`,
   );
-  await clickReal(carried, '[data-pkc-browse="list"]');
   await expect(
-    carried.locator('[data-pkc-region="entry-list"]'),
+    carried.locator('[data-pkc-region="filer-table"]'),
     '🔴 書き出した 1 枚に中身が入っていない',
   ).toContainText(title, { timeout: 15_000 });
 
@@ -324,7 +317,7 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   });
   await carried.locator('[data-pkc-field="editor-title"]').fill('持ち出した先で足した');
   await clickReal(carried, '[data-pkc-action="commit-edit"]');
-  await expect(carried.locator('[data-pkc-region="entry-list"]')).toContainText(
+  await expect(carried.locator('[data-pkc-region="filer-table"]')).toContainText(
     '持ち出した先で足した',
     { timeout: 10_000 },
   );

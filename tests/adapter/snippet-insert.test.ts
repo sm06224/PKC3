@@ -20,7 +20,7 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { snippetItemOf, SNIPPET_ARCHETYPE } from '../../src/features/snippet/snippet-table';
-import { archetypeLabel } from '../../src/adapter/ui/render/sidebar';
+import { archetypeLabel } from '../../src/features/flavor/archetype-label';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { openDialog } from './dialog-helper';
 import { afterEach } from 'vitest';

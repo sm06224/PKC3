@@ -718,12 +718,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
   impInput.setAttribute('data-pkc-field', 'import-input');
   collectionBar.append(impInput);
 
-  const list = document.createElement('ul');
-  list.setAttribute('data-pkc-region', 'entry-list');
-  list.setAttribute('aria-multiselectable', 'true');
+  // 🔑 面(フォルダ / アプリ / 予定 / …)は `BrowseRouter` が**この器の中に**建てる
+  //   (「一覧」の面は #813 段③ で外した ── 器に最初から入れておく面は無い)
   const browseHost = document.createElement('div');
   browseHost.setAttribute('data-pkc-region', 'browse-host');
-  browseHost.append(list);
   /**
    * 🔴 **一覧の上の「ノートへ →(題名)」**(user 裁定 2026-09-02)。
    *

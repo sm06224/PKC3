@@ -25,7 +25,7 @@ import {
 } from '../../src/features/nav/selection-history';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { SidebarRenderer } from '../../src/adapter/ui/render/sidebar';
+import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 
@@ -194,8 +194,10 @@ describe('履歴の配線(画面)', () => {
     document.body.append(root);
     const d = new Dispatcher();
     const regions = buildShell(root);
-    const sidebar = new SidebarRenderer(regions.sidebar);
-    d.onState((s) => sidebar.render(s));
+    // 🔴 既定のフォルダのタブで回す(#813 段③-a)── 直す前は一覧の描画器だけが
+    //    `disabled` を動かしており、**既定の面ではボタンが死んだまま**だった
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost, 'filer');
+    d.onState((s) => browse.render(s, 'filer'));
     bindActions(root, d);
     d.dispatch({
       type: 'SYS_BOOTED',

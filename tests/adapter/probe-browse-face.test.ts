@@ -36,33 +36,51 @@ function layout(present: readonly string[], visible: readonly string[]): void {
   }
 }
 
+/**
+ * ⚠ 「一覧」タブを外した(#813 段③)ので、本物の面は `filer-table` の 1 つになった。
+ *   「ちょうど 1 つ見えている」の**判断そのもの**は、面が複数のときのために残してあり
+ *   (`faces` 引数)、ここでは**身代わりの 2 面**で見る(判断が壊れたら落ちる)。
+ */
+const TWO = ['face-a', 'face-b'];
+
 describe('probe の一覧の面を解く(#265)', () => {
-  it('🔴 既定が入れ替わっても、見えている面に追随する', async () => {
+  it('🔴 本物の面(いま 1 つ)が見えていれば、それを解く', async () => {
+    layout(LIST_FACES, [LIST_FACES[0]!]);
+    expect((await resolveListFace(fakePage())).region).toBe('filer-table');
+  });
+
+  it('🔴 面が複数のとき、既定が入れ替わっても、見えている面に追随する(両方向)', async () => {
     // ⚠ **両方向**を通す ── 片側だけだと「たまたま今の既定と一致しているだけ」の
     //   名指しが素通りする(それがこの issue の原因そのもの)
-    layout(LIST_FACES, ['filer-table']);
-    expect((await resolveListFace(fakePage())).region).toBe('filer-table');
-    layout(LIST_FACES, ['entry-list']);
-    expect((await resolveListFace(fakePage())).region).toBe('entry-list');
+    layout(TWO, ['face-a']);
+    expect((await resolveListFace(fakePage(), TWO)).region).toBe('face-a');
+    layout(TWO, ['face-b']);
+    expect((await resolveListFace(fakePage(), TWO)).region).toBe('face-b');
   });
 
   it('🔴 面が DOM から消えたら、名前を言って落ちる(残った方に救われない)', async () => {
     // 🔑 「どれか 1 つが見えている」だけを条件にすると、面が 1 つ消えても
     //    残った方に満たされて**気づけない**(CLAUDE.md §1「救い手が変わっただけ」)
-    layout(['filer-table'], ['filer-table']);
-    await expect(resolveListFace(fakePage())).rejects.toThrow('entry-list');
+    layout(['face-a'], ['face-a']);
+    await expect(resolveListFace(fakePage(), TWO)).rejects.toThrow('face-b');
+    // 本物の面が消えた(名前が変わった)ときも同じ
+    layout(['entry-list'], ['entry-list']);
+    await expect(resolveListFace(fakePage())).rejects.toThrow('filer-table');
   });
 
   it('🔴 見えている面が 1 つでないときは測らない(0 個 / 2 個とも)', async () => {
+    layout(TWO, []);
+    await expect(resolveListFace(fakePage(), TWO)).rejects.toThrow('0 個');
+    layout(TWO, TWO);
+    await expect(resolveListFace(fakePage(), TWO)).rejects.toThrow('2 個');
+    // 本物の面が隠れているときも測らない
     layout(LIST_FACES, []);
     await expect(resolveListFace(fakePage())).rejects.toThrow('0 個');
-    layout(LIST_FACES, LIST_FACES);
-    await expect(resolveListFace(fakePage())).rejects.toThrow('2 個');
   });
 
-  it('面の一覧は 2 つ以上ある(1 つに減ったら上の全数検査が意味を失う)', () => {
-    // ⚠ 空振り防止 ── `LIST_FACES` が 1 件になると「ちょうど 1 つ見えている」は
-    //   常に真になり、この file の test が全部**別の理由で緑**になる
-    expect(LIST_FACES.length).toBeGreaterThan(1);
+  it('面の一覧は 1 つ以上ある(空になったら上の判断が何も見なくなる)', () => {
+    // ⚠ 空振り防止 ── `LIST_FACES` が空になると「ちょうど 1 つ見えている」は常に偽で
+    //   probe が全部止まる(止まるのは正しいが、理由が読めない)
+    expect(LIST_FACES.length).toBeGreaterThan(0);
   });
 });

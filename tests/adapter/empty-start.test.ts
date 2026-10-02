@@ -9,7 +9,7 @@
  *
  * | 主張 | なぜ |
  * |---|---|
- * | 0 件のとき、一覧タブ / フォルダの面の**両方**に 2 つの口が出る | 面によって出たり出なかったりしたら、それは動線ではない |
+ * | 0 件のとき、フォルダの面に 2 つの口が出る(「一覧」タブは #813 段③ で外した) | 出たり出なかったりしたら、それは動線ではない |
  * | 絞り込みで 0 件のときは**出さない** | ノートは在る ── 要るのは「作る」ではなく「絞りを外す」 |
  * | 押すと**本当にノートができる** | 出しただけの口は dead click(#722 が直そうとしている当のもの) |
  * | 「取り込む」が**既存の受け手**に届く | 同じ仕事の受け手を 2 つ作らない(CLAUDE.md §7) |
@@ -36,9 +36,9 @@ function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'
   };
 }
 
-type Mode = 'list' | 'filer';
+type Mode = 'filer';
 
-function setup(metas: EntryMeta[], relations: Relation[] = [], mode: Mode = 'list') {
+function setup(metas: EntryMeta[], relations: Relation[] = [], mode: Mode = 'filer') {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -54,11 +54,6 @@ function setup(metas: EntryMeta[], relations: Relation[] = [], mode: Mode = 'lis
 const box = (root: HTMLElement, mode: Mode): HTMLElement | null =>
   root.querySelector<HTMLElement>(
     `[data-pkc-browse-pane="${mode}"] [data-pkc-field="empty-start"]`,
-  ) ??
-  // ⚠ 一覧タブの器は `entry-list` の**すぐ後ろ**に置かれる(器を作り替えないため
-  //    `browse-pane` に包まれていない)── その形も受ける
-  root.querySelector<HTMLElement>(
-    '[data-pkc-region="sidebar"] [data-pkc-field="entry-list-empty"] [data-pkc-field="empty-start"]',
   );
 
 const labels = (el: HTMLElement | null): string[] =>
@@ -69,7 +64,7 @@ beforeEach(() => {
 });
 
 describe('🔴 一覧が空のとき、次の一手を出す(#722 P2-13)', () => {
-  for (const mode of ['list', 'filer'] as const) {
+  for (const mode of ['filer'] as const) {
     it(`🔴 ${mode}: 0 件なら「作る」と「取り込む」が出る`, () => {
       const { root } = setup([], [], mode);
       const el = box(root, mode);
@@ -90,8 +85,7 @@ describe('🔴 一覧が空のとき、次の一手を出す(#722 P2-13)', () =>
       d.dispatch({ type: 'SET_ENTRY_FILTER', query: '存在しない語' });
       // ⚠ **前提**:絞りで 0 件になっている(ここが崩れると何も見ていない)
       expect(
-        root.querySelectorAll(`[data-pkc-browse-pane="${mode}"] [data-pkc-entry]`).length +
-          root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]').length,
+        root.querySelectorAll(`[data-pkc-browse-pane="${mode}"] [data-pkc-entry]`).length,
         '前提が崩れている(絞っても行が残っている)',
       ).toBe(0);
       expect(box(root, mode), `${mode}: ノートは在るのに「作る」を勧めた`).toBeNull();
@@ -149,18 +143,5 @@ describe('🔴 一覧が空のとき、次の一手を出す(#722 P2-13)', () =>
       ?.querySelector<HTMLElement>('[data-pkc-field="empty-start-import"]')!
       .click();
     expect(spy, '押しても file 選択が開かない').toHaveBeenCalledTimes(1);
-  });
-
-  /**
-   * 🔴 **一覧タブとフォルダの面で、同じ物が出る**(部品を 2 か所で組まない)。
-   * ⚠ 片方だけ直す事故は CLAUDE.md §7 の常連なので、**並べて**見る。
-   */
-  it('🔴 2 つの面で、出る口の綴りが揃っている', () => {
-    const a = setup([], [], 'list');
-    const listLabels = labels(box(a.root, 'list'));
-    document.body.textContent = '';
-    const b = setup([], [], 'filer');
-    expect(labels(box(b.root, 'filer')), '面によって口の字が違う').toEqual(listLabels);
-    expect(listLabels.length, '空振り(どちらの面にも口が無い)').toBe(2);
   });
 });

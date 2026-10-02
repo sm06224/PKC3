@@ -43,7 +43,6 @@ test('🔴 予定タブで札を押すと、その場で押された印と「解
   await gotoApp(page);
   await seedTwoKinds(page);
 
-  await clickReal(page, '[data-pkc-browse="list"]');
   const chips = page.locator(CHIP);
   expect(await chips.count(), '前提: 一覧で札が 2 つ以上出ている').toBeGreaterThanOrEqual(2);
 
@@ -71,7 +70,6 @@ test('🔴 絞りが効かないタブ(連絡先)では、札を出さない', a
   await gotoApp(page);
   await seedTwoKinds(page);
 
-  await clickReal(page, '[data-pkc-browse="list"]');
   await expect(page.locator(BAR), '前提: 一覧では札が出ている').toBeVisible();
 
   await clickReal(page, '[data-pkc-browse="contacts"]');
@@ -86,8 +84,8 @@ test('🔴 絞りが効かないタブ(連絡先)では、札を出さない', a
   ).toBeHidden();
 
   // ⚠ **戻れば出る**(畳んだだけで、絞りの口を失っていない)
-  await clickReal(page, '[data-pkc-browse="list"]');
-  await expect(page.locator(BAR), '一覧へ戻っても札が出ない(口を失った)').toBeVisible();
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await expect(page.locator(BAR), 'フォルダへ戻っても札が出ない(口を失った)').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

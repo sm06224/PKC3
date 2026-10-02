@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { archetypeLabel } from '../../src/adapter/ui/render/sidebar';
+import { archetypeLabel } from '../../src/features/flavor/archetype-label';
 
 // ⚠ 2026-09-05(#633 段③): 保存したスタック `stack` を足した
 const ARCHETYPES = ['text', 'textlog', 'spreadsheet', 'folder', 'stack', 'attachment', 'todo', 'form'];

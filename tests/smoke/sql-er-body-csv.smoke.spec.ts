@@ -21,10 +21,9 @@
  *   同じ SQL の面・同じ図の道中で確かめる(`gotoApp` を 2 度呼ばない)。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useListBrowse, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 

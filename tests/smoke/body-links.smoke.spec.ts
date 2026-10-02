@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, useListBrowse, answerAppDialog } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, answerAppDialog } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -38,7 +37,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
   await page.locator('[data-pkc-field="editor-body"]').fill('着いた先の本文。\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const targetLid = await page
-    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
     .first()
     .getAttribute('data-pkc-entry');
   expect(targetLid, 'リンク先の lid を採れていない(fixture の空振り)').toBeTruthy();
@@ -73,7 +72,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    *   ② 実ブラウザのクリックで開く。無い日は**作らずに聞き**、押したときだけ作る
    *   ③ 描いた字が `@2026-10-15` のまま(勝手に書き換えていない)
    */
-  const rows = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   const backToSource = async (): Promise<void> => {
     await rows.filter({ hasText: 'リンク元' }).first().click();
     await expect(
@@ -183,7 +182,7 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    */
   await clickReal(page, '[data-pkc-action="delete-entry"]');
   await answerAppDialog(page, 'ok');
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("リンク元")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("リンク元")');
   const missing = page.locator('[data-pkc-field="detail-body"] a[data-pkc-link-missing]');
   await expect(missing, '先のノートを捨てたのに、リンクに印が付いていない').toHaveCount(1);
   await expect(missing).toHaveAttribute('title', /このノートは見つかりません/);
@@ -307,7 +306,7 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
   await page.locator('[data-pkc-field="editor-body"]').fill('携帯参照で着いた本文。\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const targetLid = await page
-    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
     .first()
     .getAttribute('data-pkc-entry');
   expect(targetLid, 'リンク先の lid を採れていない(fixture の空振り)').toBeTruthy();
@@ -372,7 +371,7 @@ test('🔴 @card の札にフォーカスが乗り、Enter で開く', async ({ 
   await page.locator('[data-pkc-field="editor-body"]').fill('カードで着いた本文。\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const targetLid = await page
-    .locator('[data-pkc-region="entry-list"] [data-pkc-entry]')
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
     .first()
     .getAttribute('data-pkc-entry');
 
@@ -467,7 +466,7 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
    * ⚠ 「待ちが増えていない」とは書かない ── `.click()` 自身も
    *   actionability を待つので、**測らずに比べられない**。
    */
-  const row = page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').last();
+  const row = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').last();
   const { x, y } = await expectReachable(page, row);
   await page.mouse.click(x, y);
 
@@ -483,7 +482,7 @@ test('🔴 編集中に一覧の行を押すと、理由が画面に出る', asy
     page,
     '無言で断った(押しても何も起きない)',
     async () => ({
-      rows: await peek(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')),
+      rows: await peek(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')),
       statusText: await peek(status, 1),
       pageErrors: errors,
     }),

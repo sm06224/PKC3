@@ -72,7 +72,7 @@ function setup(state: AppState) {
   const root = document.createElement('div');
   root.setAttribute('data-pkc-slot', 'root');
   root.innerHTML =
-    '<div data-pkc-region="entry-list">' +
+    '<div data-pkc-region="filer-table">' +
     '<li data-pkc-entry="writing">書いている行</li>' +
     '<li data-pkc-entry="other">別の行</li>' +
     '<li data-pkc-entry="ghost">居ない行</li>' +

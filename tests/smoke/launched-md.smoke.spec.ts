@@ -13,13 +13,12 @@
  * (`isSameEntry` は同じファイルにだけ true / `createWritable` は書いた文字を貯める)。
  */
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor, useListBrowse } from './helpers';
+import { answerAppDialog, gotoApp, clickReal, collectPageErrors, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -103,7 +102,7 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
     .toBe('# 議事録\n\n直しました。\n');
 
   // ⑤ 🔴 **同じファイルをもう一度開いても増えない**(前のノートを出す)
-  const count = () => page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').count();
+  const count = () => page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').count();
   const before = await count();
   await page.evaluate(() => (window as unknown as { __fire: (w: number[]) => void }).__fire([0]));
   // ⚠ 「増えなかった」だけでは**何も起きなくても通る** ── 経路が走った証拠を見る

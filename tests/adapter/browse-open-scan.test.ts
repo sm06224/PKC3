@@ -49,7 +49,7 @@ describe('開いたときに集めるタブ(2026-09-09)', () => {
     expect(browseScanOf('contacts')).toBe('REFRESH_CONTACT_SCAN');
     expect(browseScanOf('captures')).toBe('REFRESH_CAPTURE_SCAN');
     // ⚠ 対照群 ── 集めないタブは `null`(押すたびに無駄な走査を撃たない)
-    expect(browseScanOf('list'), '集める必要の無いタブが走査を撃っている').toBeNull();
+    expect(browseScanOf('filer'), '集める必要の無いタブが走査を撃っている').toBeNull();
   });
 
   /**

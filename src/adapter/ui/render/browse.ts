@@ -20,8 +20,7 @@
  * ⚠ 描画器は使い回す(`FilerRenderer` / `LauncherRenderer`)── 置き場所が
  * 変わっただけで、中身の意味論は変えていない。
  */
-import { blockedActionNote, type AppState } from '@adapter/state/app-state';
-import { SidebarRenderer } from './sidebar';
+import { blockedActionNote, canNavBack, canNavForward, type AppState } from '@adapter/state/app-state';
 import { ScrollMemory } from './scroll-memory';
 import { FilerRenderer } from './filer';
 import { LauncherRenderer } from './launcher';
@@ -44,7 +43,6 @@ import { commandQueryOf } from '@features/palette/command-query';
  * (P9 段③。絵文字の表が 3 か所に散っていたのを 1 つに寄せた)。
  */
 export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
-  { mode: 'list', label: '一覧' },
   { mode: 'filer', label: 'フォルダ' },
   { mode: 'launcher', label: 'アプリ' },
   /**
@@ -109,7 +107,6 @@ const BLOCKABLE_FIELDS: readonly string[] = [
 
 export class BrowseRouter {
   private readonly panes: Record<BrowseMode, HTMLElement>;
-  private readonly list: SidebarRenderer;
   /**
    * 🔴 **種類の札は面ではなく器が描く**(#478)── 帯は左の列(shell)に在り、
    *   面をまたいで居座るので、**開いている面に関係なく毎回**描き直す。
@@ -137,6 +134,14 @@ export class BrowseRouter {
    * ⚠ 隠す物は**この 3 つだけ**(探す欄・戻る進む・種類の札 `kind-bar` は別の作法で動く)。
    */
   private readonly hideWhileCommand: readonly HTMLElement[];
+  /**
+   * 🔴 **戻る「‹」/ 進む「›」**(#190)。⚠ **面に関係なく**ここが合わせる(#813 段③-a)。
+   * 直す前は一覧の描画器だけが `disabled` を動かしていたので、**既定のフォルダのタブでは
+   * 履歴が積まれてもボタンが死んだまま**だった(押せないので近道の `Alt+←` しか無かった)。
+   */
+  private readonly navBack: HTMLButtonElement | null;
+  private readonly navForward: HTMLButtonElement | null;
+  private lastHistory: AppState['selectionHistory'] | null = null;
   /** 左の列の「+ ノート」(主の操作の印を phase で付け外しする)。 */
   private readonly createRun: HTMLElement | null;
   /** 🔴 指で触る端末へ理由を届ける 1 行(#791 ③)。⚠ CSS が出し分ける。 */
@@ -182,19 +187,13 @@ export class BrowseRouter {
       host.append(el);
       return el;
     };
-    // ⚠ 一覧だけは既存の region(`entry-list`)をそのまま使う ── 行の再利用と
-    // 絞り込みの指紋がそこに載っているので、器を作り替えない
     this.panes = {
-      list: host.querySelector<HTMLElement>('[data-pkc-region="entry-list"]') ?? pane('list'),
       filer: pane('filer'),
       launcher: pane('launcher'),
       schedule: pane('schedule'),
       contacts: pane('contacts'),
       captures: pane('captures'),
     };
-    // ⚠ 一覧は既存の region を使い回すので、`pane()` の hidden 制御を通らない ──
-    //    初期が一覧でないときは**ここで隠す**(隠し忘れると 2 面が重なって出る)
-    if (initial !== 'list') this.panes.list.hidden = true;
     this.scroll = new ScrollMemory(host);
     /**
      * 🔴 **探す欄は面の外にある**(2026-08-29、#536 ②)。⚠ 面の中の renderer に
@@ -210,12 +209,13 @@ export class BrowseRouter {
      *   (どの面を開いていても左の列に出ているボタンである)。
      */
     this.createRun = sidebar.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
+    this.navBack = sidebar.querySelector<HTMLButtonElement>('[data-pkc-action="nav-back"]');
+    this.navForward = sidebar.querySelector<HTMLButtonElement>('[data-pkc-action="nav-forward"]');
     this.createBlockedNote = sidebar.querySelector<HTMLElement>(
       '[data-pkc-field="create-blocked-note"]',
     );
     // 押せない理由を添える先を探す範囲 ── 左の列(帯 + 一覧)と、面の器(ファイラ)
     this.roots = [sidebar, host];
-    this.list = new SidebarRenderer(sidebar);
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
@@ -275,6 +275,16 @@ export class BrowseRouter {
     //    その面を開いていない間は**古い DOM のまま**になり、押しても嘘をつく。
     this.kindBar.render(state, mode);
     /**
+     * 🔴 **戻る・進むの生死も面に関係なく合わせる**(#190 → #813 段③-a)。
+     * ⚠ 選択と連動して動くことが多いが、掃除(`pruneHistory`)だけが動く回もあるので、
+     *   **履歴そのもの**を指紋にする(押せないのに生きている = dead click を作らない)。
+     */
+    if (state.selectionHistory !== this.lastHistory) {
+      if (this.navBack) this.navBack.disabled = !canNavBack(state);
+      if (this.navForward) this.navForward.disabled = !canNavForward(state);
+      this.lastHistory = state.selectionHistory;
+    }
+    /**
      * 🔴 **編集中は「+ ノート」を押せない形にする**(#722 P2-10 → #761)。
      *
      * ⚠ `CREATE_ENTRY` は `phase !== 'ready'` を**黙って捨てる**ので、直す前の
@@ -304,7 +314,7 @@ export class BrowseRouter {
      * 🔑 だから**名指しの一覧**で持つ ── 「帯のボタン全部」にすると、
      *   動く物まで薄くなる(この差は phase では表せない)。
      * ⚠ 「1 件も無い一覧の作る」は**描き直されるたびに別の要素**なので、
-     *   構築時ではなく**毎回引き直す**(`empty-start` は list / filer が render 中に作る)。
+     *   構築時ではなく**毎回引き直す**(`empty-start` は filer が render 中に作る)。
      */
     /**
      * 🔴 **絞りの字も面に関係なく合わせる**(#536 ②)。
@@ -333,8 +343,7 @@ export class BrowseRouter {
      */
     for (const el of this.hideWhileCommand) if (el.hidden !== commandMode) el.hidden = commandMode;
     // ⚠ 非 active な面には render を呼ばない(裏で毎 state 仕事をしない)
-    if (mode === 'list') this.list.render(state);
-    else if (mode === 'filer') this.filer.render(state);
+    if (mode === 'filer') this.filer.render(state);
     else if (mode === 'schedule') this.schedule.render(state);
     else if (mode === 'contacts') this.contacts.render(state);
     else if (mode === 'captures') this.captures.render(state);

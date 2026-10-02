@@ -18,7 +18,7 @@
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
-import { filerRowOptions } from '@adapter/state/list-view-options';
+import { filerFlattenNow, filerRowOptions } from '@adapter/state/list-view-options';
 // ⚠ `resolveCanonicalParents` / `listMoveTargets` は #813(2026-09-09)で
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
@@ -31,16 +31,15 @@ import {
   smartFieldValue,
   type SmartField,
 } from '@features/smart/smart-spec';
-import { ARCHETYPE_LABELS } from '@features/flavor/archetype-label';
+import { ARCHETYPE_LABELS, archetypeLabel } from '@features/flavor/archetype-label';
 import { normalizeQuery } from '@features/filter/title-filter';
 // 🔑 種別の呼び名は **1 本**(P8 段⑲)── かつてここだけ独自表を持ち、
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
-import { archetypeLabel } from './sidebar';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
-// 🔑 空のときの「次の一手」は一覧タブと**同じ部品**(#722 P2-13)── 2 か所で組まない
+// 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';
@@ -528,7 +527,7 @@ export class FilerRenderer {
         if (b.disabled) b.title = dir === 'up' ? 'すでに先頭です' : 'すでに末尾です';
         nudge.append(b);
       }
-      if (!state.filerFlatten) host.append(nudge);
+      if (!filerFlattenNow(state)) host.append(nudge);
     }
 
     if (scope) {
@@ -797,7 +796,8 @@ export class FilerRenderer {
       list,
       state.entryMetas,
       state.relations,
-      state.filerFlatten,
+      // 🔴 語を打っている間も平らである(`filerFlattenNow`)── 行を決める側と同じ答えを見る
+      filerFlattenNow(state),
     );
 
     /**
@@ -1059,6 +1059,22 @@ export class FilerRenderer {
     }
     table.append(thead, tbody);
     this.region.append(table);
+    /**
+     * 🔴 **本文の当たりを 200 件で切ったら、そう言う**(#813 段③-a。一覧タブの
+     *   `entry-list-more` をここへ移した)。
+     *
+     * ⚠ worker は最初から `truncated` を返しているのに、**フォルダの表は読んでいなかった**
+     *   ── 201 件目からのノートは user から見て「無い」に読める(§1「無言の欠落」)。
+     *   一覧を外すと、この知らせを言える面が**1 つも無くなる**ので、先に移す。
+     * 🔑 数は出さない(worker は真偽しか返さない)。「200 件より多く」で止め、次に
+     *   何をすればよいか(語を足す)を書く。⚠ 表の**後ろ**に置く(行を探す目線の手前に置かない)。
+     */
+    if (state.searchHitsTruncated) {
+      const more = document.createElement('p');
+      more.setAttribute('data-pkc-field', 'filer-more');
+      more.textContent = '200 件より多く当たりました。語を足して絞ってください';
+      this.region.append(more);
+    }
     // ⚠ 帯は**表の後**(上の注記)── 選んだ瞬間に行が動かないようにする
     this.region.append(this.moveBar);
     this.renderMoveBar(state, scope);
@@ -1067,13 +1083,31 @@ export class FilerRenderer {
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'filer-empty');
       // ⚠ 「空」と「絞り込みで消えた」を混ぜない(ランチャーと同じ理由)
+      // ⚠ 種類の札だけで 0 件のときも「絞り込み」と言う(「空です」では外す口と食い違う)
+      const filtering = q !== '' || state.kindFilter.size > 0;
       empty.textContent =
-        q !== ''
+        filtering
           ? '絞り込みに一致するものがありません'
           : scope
             ? 'このフォルダは空です'
             : 'まだ何もありません';
       this.region.append(empty);
+      /**
+       * 🔴 **絞りで 0 件になったときは、その場で外せる**(#813 段③-a。一覧タブの
+       *   「絞りを外す」をここへ移した ── 連絡先・音/動画の面と同じ受け手)。
+       * ⚠ 自分が打っていない語(タグの札を押した直後)が探す欄に入っていることがあり、
+       *   戻し方が画面から読み取れないので、**行き止まりに説明だけを貼らない**。
+       * ⚠ 出すのは「語か種類の札が在る」ときだけ(外す物が無いのに出すと dead click)。
+       */
+      if (filtering) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.setAttribute('data-pkc-action', 'clear-entry-filter');
+        clear.setAttribute('data-pkc-field', 'filer-clear-filter');
+        clear.textContent = '絞りを外す';
+        clear.title = '絞り込みを空にして、ノートを全部出します。';
+        this.region.append(clear);
+      }
       /**
        * 🔴 **本当に 1 件も無いときだけ、次の一手を出す**(#722 P2-13)。
        *
@@ -1082,7 +1116,7 @@ export class FilerRenderer {
        * ⚠ フォルダの中(`scope`)でも出さない ── 空なのはこのフォルダだけで、
        *   「取り込む」の行き先はここではない(既存の字がその 2 つを見分けている)。
        */
-      if (q === '' && !scope) this.region.append(emptyStartActions());
+      if (!filtering && !scope) this.region.append(emptyStartActions());
     }
 
     // ── ゴミ箱(P5b)── filer の常設導線。一覧は明示ロード(SHOW_TRASH)

@@ -319,7 +319,7 @@ function setup(metas: EntryMeta[], relations: Relation[]) {
   const d = new Dispatcher();
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  let mode: 'filer' | 'launcher' = 'filer';
   d.onState((s) => browse.render(s, mode));
   const status: string[] = [];
   bindActions(root, d, {

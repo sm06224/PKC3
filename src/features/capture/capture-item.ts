@@ -68,7 +68,7 @@ export function captureKindOf(mime: string): 'audio' | 'video' | null {
 /**
  * 添付ノートの本文から、録ったものだけを拾う。
  * ⚠ **並びは渡された順のまま**(呼び側 = `state.order` が並びの正本)──
- *   ここで並べ替えると、一覧タブと録ったものの面で**別の順**になる。
+ *   ここで並べ替えると、フォルダの表と録ったものの面で**別の順**になる。
  */
 export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem[] {
   const out: CaptureItem[] = [];
@@ -104,7 +104,7 @@ export function captureItemLabel(item: CaptureItem): string {
 }
 
 /**
- * 絞り込み。⚠ **一覧タブの絞りと同じ字**を使う(`state.filterQuery`)──
+ * 絞り込み。⚠ **左の列の探す欄と同じ字**を使う(`state.filterQuery`)──
  *   別の欄を作ると、user は「どちらが効いているか」を毎回考えることになる。
  * ⚠ 大文字小文字を無視する(題名の絞りと同じ規則)。
  */

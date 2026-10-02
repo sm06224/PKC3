@@ -119,8 +119,8 @@ describe('一覧の何も無い所を押すと、開いているノートが閉�
    * 🔑 だから**正本の配列そのもの**を見る ── 行を掴む判定も、この直しも、
    *   同じ配列を読む(§7)。
    */
-  it('🔴 行を掴む器は 3 つ(等値。1 つ落としたら落ちる)', () => {
-    expect([...ROW_HOST_REGIONS]).toEqual(['filer-table', 'dual-table', 'entry-list']);
+  it('🔴 行を掴む器は 2 つ(等値。1 つ落としたら落ちる。「一覧」の器は #813 段③ で外した)', () => {
+    expect([...ROW_HOST_REGIONS]).toEqual(['filer-table', 'dual-table']);
     for (const r of ROW_HOST_REGIONS) {
       expect(ROW_HOST_SELECTOR, `${r} が選択子に入っていない`).toContain(
         `[data-pkc-region="${r}"]`,
@@ -272,7 +272,7 @@ describe('🔴 Escape で閉じる(#1042 C3)', () => {
 
   /**
    * 🔴 **行の名前を打ち替えている間の Escape は、打ち替えをやめるだけ**。
-   * ⚠ フォルダの表の `row-rename` 入力は `onShortcut` の**先頭**(`filer`/`entry-list`
+   * ⚠ フォルダの表の `row-rename` 入力は `onShortcut` の**先頭**(`filer` の鍵
    * より前)で受けるので、`deselect-entry` へは届かない。
    */
   it('⚠ 行の名前を打ち替えている間の Escape は、打ち替えをやめるだけでノートは残る', () => {

@@ -29,10 +29,9 @@ import {
 
 /**
  * 探し方 → その面を描く file。
- * ⚠ **`list` は 2 本**(行は `sidebar`、並びの規則は `filer` が持つ)。
+ * ⚠ 「一覧」(`list`。行は `sidebar`、並びの規則は `filer`)は #813 段③ で外した。
  */
 const PANE_FILES: Readonly<Record<BrowseMode, readonly string[]>> = {
-  list: ['sidebar.ts', 'filer.ts'],
   filer: ['filer.ts'],
   launcher: ['launcher.ts'],
   schedule: ['schedule.ts'],
@@ -80,6 +79,6 @@ describe('種類の札を出す面', () => {
   });
 
   it('🔑 いまの答え(変えるときは理由ごと変える)', () => {
-    expect([...KIND_FILTER_MODES].sort()).toEqual(['filer', 'list', 'schedule']);
+    expect([...KIND_FILTER_MODES].sort()).toEqual(['filer', 'schedule']);
   });
 });

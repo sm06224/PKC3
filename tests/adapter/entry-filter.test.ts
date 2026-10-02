@@ -49,7 +49,7 @@ function setup(metas: EntryMeta[]) {
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
   const center = new CenterRouter(regions.detail, () => new Date(2026, 7, 15));
-  let mode: BrowseMode = 'list';
+  let mode: BrowseMode = 'filer';
   const setBrowse = (m: typeof mode): void => {
     mode = m;
     browse.render(d.getState(), mode);
@@ -78,7 +78,7 @@ function setup(metas: EntryMeta[]) {
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const rows = (): string[] =>
-    [...root.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')].map(
+    [...root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]')].map(
       (el) => el.getAttribute('data-pkc-entry') ?? '',
     );
   const filterInput = root.querySelector<HTMLInputElement>(

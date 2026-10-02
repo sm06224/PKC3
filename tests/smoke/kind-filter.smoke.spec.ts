@@ -7,7 +7,7 @@ import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
  * 🔴 **unit では原理的に届かない層だけ**を見る:
  * 1. **札が実際に押せる**(重なり・`pointer-events`・帯の高さ)── happy-dom は
  *    版面を組まないので、**在るのに押せない**を 1 度も見られない
- * 2. **一覧タブとフォルダタブをまたいで効き続ける** ── 面の切替は実際の
+ * 2. **予定タブとフォルダタブをまたいで効き続ける** ── 面の切替は実際の
  *    描画順で起きる(unit は面を 1 つずつしか組んでいない)
  * 3. **絞ったまま作る**と絞りが外れて、作った物が**画面に出る**
  */
@@ -22,8 +22,7 @@ test('🔴 種類の札で絞れる ── 面をまたいでも効き、作れ�
   await createEntry(page, 'folder');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
-  await clickReal(page, '[data-pkc-browse="list"]');
-  const rows = page.locator('[data-pkc-region="entry-list"] li');
+  const rows = page.locator('[data-pkc-region="filer-table"] tbody tr');
   await expect(rows).toHaveCount(2);
 
   const bar = page.locator('[data-pkc-region="kind-bar"]');
@@ -39,7 +38,9 @@ test('🔴 種類の札で絞れる ── 面をまたいでも効き、作れ�
   await expect(rows, '札を押したのに行が減っていない').toHaveCount(1);
   await expect(folderChip).toHaveAttribute('aria-pressed', 'true');
 
-  // ② 面をまたいでも効き続ける(帯はタブの外に在る)
+  // ② 面をまたいでも効き続ける(帯はタブの外に在る)── 予定へ出て、フォルダへ戻る
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await expect(bar, '予定タブで札の帯が消えた(そこでも絞りは効く)').toBeVisible();
   await clickReal(page, '[data-pkc-browse="filer"]');
   await expect(
     page.locator('[data-pkc-region="filer-table"] tbody tr'),
@@ -56,7 +57,6 @@ test('🔴 種類の札で絞れる ── 面をまたいでも効き、作れ�
    * ⚠ 外れないと、作った物は一生一覧に出ない ── user は「効かなかった」と
    *   思って Esc を押し、**新規未編集 cancel の掃除で entry ごと消える**。
    */
-  await clickReal(page, '[data-pkc-browse="list"]');
   await clickReal(page, '[data-pkc-action="toggle-kind-filter"][data-pkc-kind="folder"]');
   await expect(rows).toHaveCount(1);
   await createEntry(page, 'text');

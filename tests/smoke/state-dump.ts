@@ -29,7 +29,7 @@ export async function baseSnapshot(page: Page): Promise<Record<string, unknown>>
       const text = (sel: string): string =>
         (document.querySelector(sel)?.textContent ?? '').replace(/\s+/g, ' ').slice(0, 200);
       return {
-        entries: [...document.querySelectorAll('[data-pkc-region="entry-list"] [data-pkc-entry]')]
+        entries: [...document.querySelectorAll('[data-pkc-region="filer-table"] [data-pkc-entry]')]
           .map((el) => el.getAttribute('data-pkc-entry'))
           .slice(0, 20),
         status: text('[data-pkc-region="status"]'),

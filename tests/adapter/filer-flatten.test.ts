@@ -94,7 +94,7 @@ function setup(metas: EntryMeta[] = METAS, relations: Relation[] = RELS) {
   const d = new Dispatcher();
   const regions = buildShell(root);
   const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
-  let mode: 'list' | 'filer' | 'launcher' = 'list';
+  let mode: 'filer' | 'launcher' = 'filer';
   d.onState((s) => browse.render(s, mode));
   // ⚠ 憶えるのは端末の保存(本物の store を **null の保存**で包んで観測する)
   const store = new FilerFlattenStore(null);
@@ -469,6 +469,57 @@ describe('🔴 平らに出している間の、掴んで落とす・右クリ�
     (pick as HTMLElement).click();
     await tick();
     expect(parentCalls).toEqual([{ lid: 'b', parentLid: 'f3' }]);
+  });
+});
+
+describe('🔴 語を打っている間も「平ら」として扱う(#813 段③-a)', () => {
+  // 題名は全部 `t-…` なので、`t-` を打つと全件が当たる(= 平らに出る行は入り切りのときと同じ)
+  const typing = async () => {
+    const t = setup();
+    t.d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-' });
+    await tick();
+    return t;
+  };
+
+  it('🔴 入り切りを押していなくても、語を打つと階層をまたいで全件が並ぶ(切のままである)', async () => {
+    const { rows, toggle, d } = await typing();
+    expect([...rows()].sort()).toEqual(['a', 'b', 'c', 'f1', 'f2', 'f3', 'x']);
+    expect(d.getState().filerFlatten, '語を打っただけで入り切りが入った').toBe(false);
+    expect(toggle()!.getAttribute('aria-pressed'), '押していないのに押された見た目').toBe('false');
+  });
+
+  it('🔴 語を消すと直下だけへ戻る(双方向)', async () => {
+    const { rows, d } = await typing();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    await tick();
+    expect(rows()).toEqual(['f1', 'f3', 'x']);
+  });
+
+  it('🔴 ノートの行の上下端には、並べ替えの線も落とし先も出さない(階層をまたぐ並びで「隣」を作らない)', async () => {
+    const { q, reordered } = await typing();
+    const note = q<HTMLElement>('tbody [data-pkc-entry="a"]')!;
+    dragEvent('dragover', dataTransfer({ [PKC_DRAG]: 'x' }), note, 102);
+    expect(note.hasAttribute('data-pkc-drop-edge'), '語を打っている間に並べ替えの線が出ている').toBe(false);
+    dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'x' }), note, 102);
+    await tick();
+    expect(reordered).toEqual([]);
+  });
+
+  it('🔴 上へ / 下へ動かすは出ない(語を消せば出る ── 対照群)', async () => {
+    const { q, d } = await typing();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(q('[data-pkc-field="order-nudge"]'), '語を打っている間に「上へ / 下へ」が出ている').toBeNull();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'x' });
+    await tick();
+    expect(q('[data-pkc-field="order-nudge"]'), '語を消しても出ない').not.toBeNull();
+  });
+
+  it('🔴 全選択は、語に当たった平らな行を全部選ぶ(見えている範囲 = 選ばれる範囲)', async () => {
+    const { d } = await typing();
+    d.dispatch({ type: 'SELECT_ALL' });
+    expect([...d.getState().selection].sort()).toEqual(['a', 'b', 'c', 'f1', 'f2', 'f3', 'x']);
   });
 });
 

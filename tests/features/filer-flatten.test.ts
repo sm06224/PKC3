@@ -15,7 +15,6 @@ import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import {
   filerRows,
   flatParentNames,
-  listRows,
   type FilerRowsOptions,
 } from '@features/relation/filer-list';
 import { getFlatDescendants } from '@features/relation/tree';
@@ -91,14 +90,17 @@ describe('🔴 「中まで全部出す」── 行の決め方(#813 段②)', 
     expect(all, '全件が出ていない').toEqual(['f1', 'f2', 'b', 'a', 'f3', 'c', 'x']);
     // 空振り防止 ── 直下だけ(3 件)とは**別物**であること
     expect(all.length).toBeGreaterThan(rows(null).length);
-    // フォルダ自身も行(いまの一覧タブと同じ)
+    // フォルダ自身も行(かつての一覧タブと同じ)
     for (const f of ['f1', 'f2', 'f3']) expect(all).toContain(f);
   });
 
-  it('🔴 ルートで入れた行は、一覧タブ(`listRows`)と同じ集合・同じ並び', () => {
-    // ⚠ 「一覧タブを外す前に全件を平らに見る道を作る」が出どころ ── 食い違うと道が足りていない
-    const order = [...METAS.values()].sort((p, q) => p.entryOrder - q.entryOrder).map((m) => m.lid);
-    expect(rows(null, { flatten: true })).toEqual(lids(listRows(order, METAS, OPTS)));
+  it('🔴 ルートで入れた行は、全ノートが entryOrder の順(階層を見ない)', () => {
+    // ⚠ 出どころは「一覧タブを外す前に全件を平らに見る道を作る」── かつては一覧タブの
+    //   `listRows` と突き合わせていた。一覧タブを外した(#813 段③)ので、**全件 × 手動の順**を
+    //   実装を参照せずに組んで比べる(別の観測 ── 同じ関数どうしを比べない)
+    const expected = [...METAS.values()].sort((p, q) => p.entryOrder - q.entryOrder).map((m) => m.lid);
+    expect(expected.length, '前提が崩れている(全ノートが空)').toBe(METAS.size);
+    expect(rows(null, { flatten: true })).toEqual(expected);
   });
 
   it('🔴 フォルダの中で入れると**そのフォルダの配下だけ**(別の枝・自分自身は出ない)', () => {

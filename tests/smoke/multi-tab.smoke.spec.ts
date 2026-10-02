@@ -9,13 +9,7 @@
  *   origin + profile 単位 ── context を分けると別世界になり、何も検証しない)。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, useListBrowse } from './helpers';
-
-// 🔑 #240 段⑤ で左の列の既定は**フォルダ**になった ── この file は一覧の行を
-// 掴むので、一覧タブで開く仕込みを入れる(既定の顔は organize.smoke が守る)。
-test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
-});
+import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 test('2 枚目のタブが本体経由で開き、別ノートは編集でき、同じノートは断られる', async ({
   page,
@@ -43,7 +37,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
     '保存は本体タブ経由',
   );
   // A で作ったノートが B の一覧に見える(boot 時の読取が proxy 越しに通った)
-  const rowB = pageB.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rowB = pageB.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rowB).toHaveCount(1);
 
   // B: 同じノートを A が編集中 → B の編集は断られる
@@ -81,7 +75,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await clickReal(pageB, '[data-pkc-action="commit-edit"]');
   await expect(rowB).toHaveCount(2);
   await expect(
-    page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]'),
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(2, { timeout: 10_000 });
 
   expect(errorsA).toEqual([]);
@@ -107,7 +101,7 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   );
 
   // B は**編集中のまま**本体の死を迎える(編集ロックの昇格引き継ぎを実路で踏む)
-  const rowB = pageB.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rowB = pageB.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await rowB.first().click();
   await clickReal(pageB, '[data-pkc-action="start-edit"]');
   const taB = pageB.locator('[data-pkc-field="editor-body"]');
@@ -131,7 +125,7 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
     '保存は本体タブ経由',
   );
   // 🔴 B が編集中のノートは C から取れない(heldLocks が新台帳へ引き継がれている)
-  const rowC = pageC.locator('[data-pkc-region="entry-list"] [data-pkc-entry]');
+  const rowC = pageC.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rowC).toHaveCount(1);
   await rowC.first().click();
   await clickReal(pageC, '[data-pkc-action="start-edit"]');

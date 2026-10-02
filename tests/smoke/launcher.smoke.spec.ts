@@ -10,7 +10,7 @@ import {
   createEntry,
   expectReachable,
   useSplitEditor,
-  useListBrowse, openTile,} from './helpers';
+  openTile,} from './helpers';
 
 /**
  * 🔴 **並べ替え中の案内の字は、実装と同じ引き方で作る**(#1046 追跡調査)。
@@ -24,7 +24,6 @@ const TILE_DOWN_LABEL = TILE_MENU_ACTIONS.find((a) => a.action === 'move-tile-do
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
 // 既定(live)の顔は live-editor.smoke.spec.ts が守る。
 test.beforeEach(async ({ page }) => {
-  await useListBrowse(page);
   await useSplitEditor(page);
 });
 
@@ -223,7 +222,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     mimeType: 'text/html',
     buffer: Buffer.from(pkc2WithTiles(baseURL ?? 'http://localhost'), 'utf-8'),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(4);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(4);
 
   // ランチャーへ
   await clickReal(page, '[data-pkc-browse="launcher"]');
@@ -1108,7 +1107,7 @@ test('🔴 グループを実際に動かすと並びが入れ替わり、初回
     mimeType: 'text/html',
     buffer: Buffer.from(pkc2WithTwoGroups(), 'utf-8'),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(2);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(2);
 
   await clickReal(page, '[data-pkc-browse="launcher"]');
   const groups = page.locator('[data-pkc-field="launcher-group"]');
@@ -1232,7 +1231,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
     mimeType: 'text/html',
     buffer: Buffer.from(pkc2WithTiles(baseURL ?? 'http://localhost'), 'utf-8'),
   });
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(4);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(4);
   await clickReal(page, '[data-pkc-browse="launcher"]');
 
   // 🔑 題名だけを読む(`[data-pkc-field="title"]`)── タイル丸ごとの textContent は
@@ -1346,11 +1345,12 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await page.locator(mainTile).dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
   await expect(done, '2 度目の長押しで並べ替えモードに入らない').toBeVisible();
 
-  await clickReal(page, '[data-pkc-browse="list"]');
+  // 🔑 いったん別のタブ(フォルダ)へ移ってから戻る(#813 段③ で「一覧」は外した)
+  await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-browse="launcher"]');
   await expect(
     done,
-    '一覧タブへ移ってアプリタブへ戻っても、並べ替えモードが終わっていない',
+    'フォルダのタブへ移ってアプリタブへ戻っても、並べ替えモードが終わっていない',
   ).toHaveCount(0);
   await expect(
     lead,
@@ -1773,8 +1773,8 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   await attackTab.close();
 
   // ⑥ 登録を外すとタイルは消える(片道にしない)
-  await clickReal(page, '[data-pkc-browse="list"]');
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await page.locator('[data-pkc-field="app-register"]').uncheck();
   await clickReal(page, '[data-pkc-browse="launcher"]');
   await expect(tile).toHaveCount(0, { timeout: 15000 });
@@ -1906,29 +1906,28 @@ test('🔴 行儀の悪いアプリが保管庫を占有できない(上限は�
     page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pkc3.app.')).length);
   expect(await appKeys(), 'アプリのデータが入っていない(この次元を測れていない)').toBeGreaterThan(0);
 
-  await clickReal(page, '[data-pkc-browse="list"]');
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await clickReal(page, '[data-pkc-browse="filer"]');
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
   // 確認は**アプリの中**の口を押す(#299 段② ── native は 1 度も開かない)
   await answerAppDialog(page, 'ok');
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   expect(await appKeys(), '戻せる削除でアプリのデータまで消している').toBeGreaterThan(0);
 
   // 🔴 **戻すと使える状態で戻る**(確認文「ゴミ箱から戻せます」が嘘でない)
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="restore-trash"]');
-  // ⚠ 一覧は「一覧」タブにしか無い ── フォルダのまま数えると常に 0 件になる
-  await clickReal(page, '[data-pkc-browse="list"]');
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(1);
+  // ⚠ 戻したノートはルート直下に出る(フォルダの表で数える)
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(1);
   expect(await appKeys(), '戻したのにアプリのデータが無い').toBeGreaterThan(0);
 
   // 🔴 **ゴミ箱を空にすると消える**(唯一の不可逆点)。
   //    ここで消さないと、消したノートのデータが origin に永久に残る
-  await page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]').first().click();
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().click();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
   await answerAppDialog(page, 'ok');
-  await expect(page.locator('[data-pkc-region="entry-list"] [data-pkc-entry]')).toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]')).toHaveCount(0);
   await clickReal(page, '[data-pkc-browse="filer"]');
   await clickReal(page, '[data-pkc-action="show-trash"]');
   await clickReal(page, '[data-pkc-action="purge-trash"]');
@@ -2008,7 +2007,7 @@ test('🔴 左のタブを変えても、中央の追記欄は消えない', asy
 
   const box = page.locator('[data-pkc-field="append-input"]');
   await expect(box).toBeVisible();
-  for (const tab of ['filer', 'launcher', 'list']) {
+  for (const tab of ['filer', 'launcher', 'schedule']) {
     await clickReal(page, `[data-pkc-browse="${tab}"]`);
     await expect(box, `${tab} タブで追記欄が消えた`).toBeVisible();
   }
@@ -2295,7 +2294,7 @@ test('🔴 一度許した素のまま起動は、読み込み直しても聞か
 
   const attach = async (name: string): Promise<void> => {
     // ⚠ 添付は**本文の面**から ── タイルの面に居ると導線が無い
-    await clickReal(page, '[data-pkc-browse="list"]');
+    await clickReal(page, '[data-pkc-browse="filer"]');
     await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="attach-file"]');
     await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
       name: `${name}.html`,
@@ -2582,7 +2581,7 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
    *   開いたまま**で、本文の末尾に参照が 1 行入るだけである ── 開き直さないと
    *   詳細画面はノートのままなので、起動の口はどこにも出ない。
    */
-  await clickReal(page, '[data-pkc-region="entry-list"] [data-pkc-entry]:has-text("toc.html")');
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("toc.html")');
   const extBtn = page.locator('[data-pkc-action="launch-asset-extension"]');
   await expect(extBtn, '「目次を見せて起動」が詳細画面に無い').toBeVisible({ timeout: 15000 });
 
