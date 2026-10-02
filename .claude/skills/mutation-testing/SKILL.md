@@ -47,6 +47,16 @@ python3 /tmp/mut-<主題>.py M1 M3      # id を指定
    🔑 backup は **target の隣(`<file>.mutbak`。雛形 `templates/mutate.py` の作法)か
    `mktemp -d`** に置く。共有 dir に置くなら名前に主題を前置する ──
    ⚠ そして**変異試験の後に `git diff --stat` を読む**(行数が想定の桁か)
+5. 🔴 **`ROOT` は自分の作業ツリーから取り、作業 file は `scratchpad/<issue 番号>/` に置く**
+   (2026-10-01、worktree の implementer **2 本**が踏んだ)。雛形 `templates/mutate.py` の
+   `ROOT` は昔 `/home/user/PKC3` 固定で、worktree の agent がそのまま写すと
+   **自分の tree ではなく本体の tree を変異させかけた**。また scratchpad は**全 agent で共用**なので、
+   `mutate.mjs` / `edit1.py` のような同名 file が**別の agent に上書きされた**。
+   目的:**他人の tree を壊さない / 他人の道具を消さない**。
+   🔑 手順:①`ROOT` は **`git rev-parse --show-toplevel`** から取る(雛形は直してある)。
+   ハーネスの先頭で **`ROOT` を印字**し、自分の worktree の path と一致することを 1 行見る
+   ②ハーネスも作業 file も **`scratchpad/<issue 番号>/`** の下に置く(`mkdir -p` してから。
+   上の 1 と同じ「階層で分ける」)。
 
 ⚠ サブエージェントが `read-only` の型でも `Bash` は持つ。**規律を守るのは tools の
 一覧であって、相手の善意ではない**(CLAUDE.md「規律を守るのは tools の一覧」)。
@@ -212,6 +222,15 @@ killed = r.returncode != 0 or '"diagram": 0' in out    # 中身も見る
 - 行の lid 解決を `selectedLid` 固定にする変異が **smoke では生き延びた** ──
   情報ペインでは「行の lid」と「選択中の lid」が**必ず一致する**ので差が出ない。
   **差が出る入力**(行の lid ≠ 選択)を unit で作ったら殺せた
+- 🔴 **`null` 同士の `toBe` は緑になる**(2026-10-02、#1222)。「同じノードを指す」を
+  `expect(a.querySelector(x)).toBe(b.querySelector(x))` で見たら、**両方が `null`** でも通った
+  (どちらの selector も当たっていなかった)。目的:**比べる 2 つが両方とも「無い」で救われない**こと。
+  🔑 比べる前に **`expect(a.querySelector(x)).not.toBeNull()` を置く**(片側だけでよい)。
+- 🔴 **fixture が、その変異で差の出る形か**を回す前に 1 行で言う(2026-10-02、#1222)。
+  留めた枠が**何も選んでいない** / 孫が**無い**fixture で、初回の変異 **4 件が SURVIVED**
+  (差が出ない入力なので、壊しても同じ結果になる)。目的:SURVIVED を「検査が弱い」と
+  読み違えて assert を足しに行かないこと。🔑 手順:変異ごとに
+  「**この変異で結果が変わる入力は、fixture のどの要素か**」を書き、書けなければ fixture を足す。
 
 🔑 生き延びたら「assert が弱い」の前に **「この入力で差が出るのか」**を問う。
 ⚠ 本当に差が出ないなら、それは**冗長なコード**である ── test を足すのではなく
@@ -702,6 +721,22 @@ run() {                      # 🔑 出力は file へ。$( ) で受けない
 ### ⚠ build が落ちたら、それは `KILLED` である
 
 下限 tripwire(検品)が効いた形。テンプレートはそう扱う。
+
+### 🔴 smoke が `EADDRINUSE` で落ちた回を、`KILLED` と読まない(2026-10-02)
+
+変異ごとに smoke を回す(build + preview)ハーネスで、**同じ port を続けて使う**と、
+前の回の接続が `TIME_WAIT` に残り、**自分の preview が port を取れず `EADDRINUSE`** で落ちる。
+落ちた smoke は「test が落ちた = `KILLED`」と読まれ、**変異が効いていないのに緑の側(守られている)に数えられる**。
+目的:**変異の結果を、port の事故と混ぜない**。
+
+🔑 手順:
+1. agent ごとに **`PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT` を固有の値**にする
+   (例:`4799x` の帯で、agent ごとに 1 桁ずつずらす)── 他の worktree とも被らないこと
+   (`smoke-testing`「並行に回すときは、ポートを必ず分ける」)。
+2. **落ちた回の log に `EADDRINUSE` が無い**ことを見てから 3 値を書く(grep 1 回)。
+   在れば `KILLED` ではなく**判定不能**として、port を替えて回し直す。
+3. 🔑 **変異が効いて落ちた**ことの確かめは、落ちた理由の 1 行が**狙った assert の文言**であること
+   (`first_reason` を結果行に出す)。「何かで落ちた」は KILLED の根拠にならない。
 
 ### 🔴 同じ行が 2 か所に在ると、「1 件だけ当たった」でも**別の場所**に当たる(2026-09-25、#1054)
 

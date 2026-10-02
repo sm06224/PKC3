@@ -487,6 +487,27 @@ expect(ops, '2 手に割れている').not.toContain('setEntryParent');
 `display: none` を併せると**改頁は消える**のに、計算後の `break-after` は `'page'` の
 まま残る。**`getClientRects().length > 0`(箱が在る)と対にする**。
 
+### 🔴 ④-c `::after` / `::before` の `text-decoration` は、親の下線を**映さない**(2026-10-02、#1225 / #1239)
+
+「下線が消えた」を見る変異が、`getComputedStyle(el, '::after').textDecorationLine` では
+**SURVIVED に見えた**。疑似要素の `text-decoration` の計算値は、**親から伝播した下線を反映しない**
+(自分に宣言した分しか出ない)ので、親の下線を消しても消さなくても同じ値になる。
+目的:**器の字では見られない物の観測点を、取り違えない**こと。
+🔑 疑似要素を見るときは **`display` / `content` / 画素**で見る
+(`getComputedStyle(el, '::after').display` / `.content`、または `page.screenshot` の clip の画素)。
+⚠ 親の下線そのものを見たいなら、**親**の `textDecorationLine` を見る(疑似要素ではなく)。
+
+### 🔴 ④-d 飾りを**字として**足さない ── `textContent` に乗ると、コピーに混ざる(2026-10-02、#1150)
+
+表の見出しの並べ替えの矢印 `↕` を、**見出しの字として**足した。user がセルをコピーすると
+**「題名↕」が貼られる**。CI は smoke を回さないので **2 週間気づかれず**、
+2 本の implementer の**全量 smoke が独立に**拾った。
+(CLAUDE.md §10「器を替えても、**読み取れる値**が変わる」の実例である。)
+目的:**見た目の飾りが、データ(`textContent` / コピー / 検索)へ入らない**こと。
+🔑 手順:飾りは **CSS の `::before` / `::after` の `content`** で足す。
+🔑 検算:飾りを足したら、**`th.textContent` が足す前と同じ**であることを unit で見る
+(ついでに「`::after` の `content` に矢印が在る」を 1 本 ―― 上の ④-c の観測点で)。
+
 ### 🔴 ④-b DOM の消滅を見るなら、**枝ごと消える形**を数える(2026-08-22、#270)
 
 `MutationObserver` の `removedNodes` に載るのは、**観測している node の直下の子**である。
@@ -742,6 +763,12 @@ PKC3_SMOKE_PORT=<他と被らない番号> CI=1 npx playwright test -c tests/smo
 ⚠ `CI=1` を付けるのは、既に上がっている preview を**使い回させない**ため。
 ⚠ 投げる相手にも**番号を指定して渡す**(任せると既定に戻る)。
 
+🔴 **同じ port を続けて使うと、`EADDRINUSE` になる**(2026-10-02)。前の回の接続が
+`TIME_WAIT` に残り(自己接続)、次の preview が port を取れずに落ちる ── 落ちた smoke は
+**変異試験では `KILLED` と読まれる**(偽の KILLED。`mutation-testing`「`EADDRINUSE` で落ちた回を…」)。
+🔑 agent ごとに **`PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT` の 3 つ**を固有の値にする
+(例:`4799x` の帯)。落ちた log に **`EADDRINUSE` が無い**ことを見てから、赤緑を書く。
+
 ## 🔴 押す前と押した後で見た目を比べると、`:hover` が答えてしまう(2026-09-25、#1054)
 
 「押すと地の色が変わる」を `clickReal()` の前後の `backgroundColor` で見たら、
@@ -772,6 +799,14 @@ PKC3_SMOKE_PORT=<他と被らない番号> CI=1 npx playwright test -c tests/smo
     ⚠ **間欠にしか見えない**(打鍵の速さは環境で変わる)。
     ⚠ 直すのは**入れ方**であって検査ではない ── 名指しで外すと、
     「箱の中で本当に絵が壊れた」をもう見られなくなる
+  - 🔴 **SQL の面を触る spec は、DuckDB の worker が出す既知の 1 行で `errors` が落ちる**
+    (2026-10-02)。製品の不具合ではなく**worker 由来のノイズ**で、上の `toEqual([])` が
+    **製品と無関係に**落ちる。目的:本物の error を黙らせないまま、既知の 1 行だけを外す。
+    🔑 手順:落ちた log の行を**そのまま**(要約せず)写し、`tests/smoke/helpers.ts` の
+    **`KNOWN_CONSOLE_NOISE` の形**で**等値で名指し**して外す(部分一致にしない)。
+    ⚠ **外した後に飾る**(`consoleOrigin` を付ける前の素の行に当てる ── CLAUDE.md §4 の順番)。
+    ⚠ 外すのは**SQL の面を触る spec だけで足りるか**を先に見る(全 spec の一覧へ足すと、
+    他の面に出た同じ文言まで黙る)。
   - 🔑 **赤には出所が付く**(`consoleOrigin`)── ` @ about:srcdoc` なら**箱の中**、
     ` @ /assets/….js:118` なら**アプリ本体**である。⚠ `page.on('console')` は
     **子 frame の分も上がる**ので、これが無いと 2 つが同じ顔になる

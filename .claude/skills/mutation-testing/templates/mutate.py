@@ -24,7 +24,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path("/home/user/PKC3")
+# 🔴 **自分の作業ツリーから取る**(2026-10-01)。ここは昔 `/home/user/PKC3`(本体)固定で、
+#    worktree の agent が写すと**本体の tree を変異させかけた**(2 本)。
+#    ⚠ 作業ツリーの中を cwd にして走らせること(外から走らせると、その外の tree を指す)。
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+print(f"ROOT={ROOT}", flush=True)  # 自分の worktree の path と一致するかを 1 行見る
 
 # 🔴 **殺されても戻す**(2026-08-22、#178 で実際に踏んだ)。timeout で `SIGTERM` を
 #    受けると `finally` は走らない ── **変異が作業ツリーに残る**。しかも次の走りは

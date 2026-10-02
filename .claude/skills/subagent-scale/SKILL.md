@@ -89,6 +89,20 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 ⚠ 気づけた手掛かりは 3 つとも「**数字が想定の桁と違う**」だった(`git diff --stat` の行数 / build したのに出ない要素 / 空振りの変異)
 ── 依頼文で**返す物に数を入れさせる**と、相手が自分で気づける。
 
+### 🔴 worktree の作法 3 つ ── 依頼文の頭に写す(2026-10-02)
+
+隔離した worktree は**まっさらな checkout** なので、本体では起きない形で 3 つ止まる。
+目的は「agent が最初の 1 手で詰まって、原因を探す往復を払うのを無くす」こと。
+
+| 起きること | 手順 |
+|---|---|
+| **`node_modules` が無い** → `npx vitest` / `tsc` が動かない | `ln -s /home/user/PKC3/node_modules node_modules`(🔴 **commit しない**。`git add` は file 名を指す)。vite の `fs.allow` は symlink を辿る。⚠ 副作用は `node_modules/.vite` 等への書込が本体へ戻ること(ディスクの枠が厳しければ実コピーにする ── `sandbox-hygiene`) |
+| 🔴 **`git` を含む複合コマンド / heredoc + パイプを断られる**(`too complex to verify that it stays inside the worktree`) | 命令を**素の 1 本ずつ**に割る。割れない物は **script file に書いて `sh <file>`**(`Write` で書く。heredoc で書かない) |
+| 🔴 **依頼者の cwd が `/home/user` に戻っていると `isolation: "worktree"` が `not in a git repository` で落ちる**(2026-10-02 にも 1 度踏んだ) | **`Agent` を投げる直前の Bash で `cd /home/user/PKC3 && pwd`** を打つ(下の「まず自分の cwd を見る」の実例) |
+
+⚠ 1 行目は**依頼文に書いておく**(agent が `npm ci` を始めると、ディスクの枠と時間を使う)。
+2 行目の検査は agent 側で外せない ── 迂回を探さず、割る。
+
 ### ⚠ worktree 隔離が起動できない箱がある(2026-08-14 実測)
 
 ```
@@ -330,6 +344,9 @@ CLAUDE.md の「**済んだと書くときは観測点を挙げる**」の**発�
 ⚠ ②を選ぶときは **`node_modules` を symlink にさせない** ── `node_modules/.vite` 等の
 書き込みが**依頼者のツリーへ戻る**(今日 1 回目の agent は symlink、2 回目は実コピーにした。
 327MB だが、ディスクの枠は `.claude/skills/sandbox-hygiene/SKILL.md` を見て判断する)。
+⚠ **2026-10-02 の依頼では、worktree 隔離の implementer に symlink を指示した**(§1「worktree の作法 3 つ」の表)。
+両者は同じ害(書込が本体へ戻る)を**別の重さで**天秤にかけた結果である ── 禁止の目的は「依頼者のツリーを
+書き換えさせない」ことなので、**害を許容できるか(ディスクの枠が厳しいか)で選ぶ**。
 
 ### 🔴 再開した agent は、worktree を持っていないことがある(2026-09-05)
 
@@ -557,6 +574,11 @@ runner の全量 `npm test`(d80601a)を、smoke(build + playwright)と変異ス�
 ⚠ 同じ turn に smoke や変異スイープを投げるなら、全量はその**後**にする。
 ⚠ それでも時間切れが出たら、**触っていない file は単独で回し直してから**判断する
 (時間切れを「flake」と呼んで捨てない ── 単独でも落ちるなら本物である)。
+🔑 **2026-10-02 にも同じ形**:implementer を並べた箱(load average 13〜21)で全量を回すと
+`tests/adapter/help-pane.test.ts` の 1〜3 件が 5 秒の時間切れで落ち、**その file だけ単独で回すと緑**だった。
+手順:**全量で時間切れが出たら、その file だけ単独で回し直してから**赤緑を書く。
+⚠ `--testTimeout` を上げて通さない(負荷でだけ出る遅さを、検査の側で消すことになる)。
+単独でも落ちる物だけを「落ちた」と報告する(`.claude/agents/pkc3-runner.md` にも写してある)。
 
 ### 🔴 3.4. **並行に走らせた記録は、ラベルと中身がずれる**(2026-09-18、#1007)
 
@@ -629,6 +651,24 @@ scratchpad の作業ツリーは残っていて、G は実装・検証まで、J
 ⚠ **読み直した報告から、そのまま本物の穴が出た**(G の実装担当が「未検証の穴」として
 自己申告していた 1 件 ── 検証の段は「既知の限界」として通していた)。
 取り戻しは、**止まる前の報告を読み直す機会**でもある。
+
+### 🔴 3.9. **同時に走らせる implementer は 3 本まで**(2026-10-01)
+
+implementer(worktree 隔離で build / vitest / smoke を回す書き込み担当)を **8 本同時**に投げたら、
+load average が **23** に達して**箱が再起動した**(4 core)。⚠ 消えたのは**走っていた process だけ**で、
+**file と worktree は残った**(`git worktree list` で全部見えた)── つまり「失われた」ではなく
+「**途中で止まった**」である(3.8 と同じ形で、原因は**こちらの本数**だった)。
+目的は箱を落とさないこと(落ちると、変異試験の途中なら**変異が file に残る**)。
+
+🔑 **投げる前の検算は 1 つ**:`uptime` の load average が **core 数(4)の 3 倍(12)を超えていたら、
+増やさない**。投げ終えた agent の完了通知を待ってから次を投げる(`sleep` で待たない)。
+読むだけの agent(surveyor / reviewer)は軽いので本数に数えない ── 数えるのは **build / test を回す物**。
+(同じ数字は上の「`Workflow` が同時に走らせるのは 2 本」と同じ向き:**本数は箱から逆算する**。)
+
+🔑 **再開のしかた**(process だけ消えたとき):`SendMessage` で
+「**まず `git status` と字面で、変異の残りが無いことを確かめてから続きを**」と送る
+(変異試験の最中に止まった agent は、**変異入りの版を `orig` と読む**ので ── `mutation-testing` §
+「殺されたときにも戻す」)。再開の依頼文には「再開した agent は、worktree を持っていないことがある」の 3 行も写す。
 
 ## 4. 何を並列に投げるか(実績のある形)
 
