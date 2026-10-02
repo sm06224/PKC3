@@ -119,6 +119,14 @@ import {
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import {
+  ATTACHMENT_FOLD_FIELD,
+  ATTACHMENT_FOLD_NOTE,
+  HIDDEN_HEAD_ATTR,
+  foldAttachmentHead,
+  joinHiddenHead,
+  type AttachmentFold,
+} from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
 import { buildOfficeEntry } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
@@ -1977,8 +1985,19 @@ export class DetailRenderer {
        */
       currentContainerId: selfContainerId(state),
     };
+    /**
+     * 🔴 **添付ノートは、設定の行を畳んで説明だけ編集させる**(#1220 穴②)。
+     *
+     * ⚠ **判定はここ 1 か所**で、1 面(ライブ)にも 2 列にも同じ値を渡す
+     *   (片方だけ畳むと、畳んでいない側から設定を壊せる ── CLAUDE.md §7)。
+     * ⚠ 畳むのは**添付だけ**(普通のノートの情報の塊は今までどおり出る)。
+     */
+    const folded =
+      state.entryMetas.get(open.lid)?.archetype === 'attachment'
+        ? foldAttachmentHead(open.body)
+        : null;
     if (liveEditorEnabled()) {
-      this.renderLiveEditor(open.body, previewOpts, state.editOpenAt);
+      this.renderLiveEditor(open.body, previewOpts, state.editOpenAt, folded);
       if (focusTitle) settleTitle();
       return;
     }
@@ -1987,7 +2006,16 @@ export class DetailRenderer {
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'editor-body');
     ta.setAttribute('aria-label', '本文(原文)');
-    ta.value = open.body;
+    /**
+     * 🔴 **畳んだ設定の行は、欄の属性に持たせる**(#1220)。出すのは説明だけ。
+     * ⚠ 書き戻す側(`binder.ts` の `input`)が `HIDDEN_HEAD_ATTR` を読んで、
+     *   **畳んだ行を 1 byte も変えずに前へ戻す**。
+     */
+    ta.value = folded === null ? open.body : folded.rest;
+    if (folded !== null) ta.setAttribute(HIDDEN_HEAD_ATTR, folded.head);
+    /** 欄の字を**原文(設定の行込み)へ戻した**もの ── プレビューの材料は常にこちら。 */
+    const fullText = (): string =>
+      folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
     // 🔴 空のとき薄い字で書き始めを案内する(#1221)。書けば消えるのは placeholder の仕様
     ta.placeholder = emptyBodyHint();
     this.enterBody = () => {
@@ -2003,6 +2031,7 @@ export class DetailRenderer {
     //    書いている最中と保存後で行の折り返しが変わる
     preview.setAttribute('data-pkc-prose', '');
     split.append(ta, preview);
+    if (folded !== null) this.region.append(foldNote());
     this.region.append(split);
     /**
      * 🔴 **2 ペインでも「ここから」を守る**(#596 C)。
@@ -2017,7 +2046,8 @@ export class DetailRenderer {
      *   **frontmatter を剥がした側**の行だが、`ta.value` は**剥がしていない本文**である。
      *   ずらさないと、frontmatter を持つノートで**その行数だけ手前**が開く。
      */
-    if (state.editOpenAt !== null) this.openSplitAt(ta, open.body, state.editOpenAt);
+    if (state.editOpenAt !== null)
+      this.openSplitAt(ta, open.body, state.editOpenAt, folded === null ? undefined : 0);
 
     /**
      * 🔑 **描くのはワーカー**(P8 段⑨。user 指示 2026-08-03「基本的に重い処理は
@@ -2046,7 +2076,7 @@ export class DetailRenderer {
          * ⚠ 材料は **`ta.value`(frontmatter 込み)** ── 描くのに渡しているのは
          *   frontmatter を剥がした側なので、そちらからでは globals が見えない。
          */
-        applyDocumentGlobals(preview, extractDocumentGlobals(ta.value));
+        applyDocumentGlobals(preview, extractDocumentGlobals(fullText()));
         // 🔑 **新しく入った所だけ**図を面倒みる(触っていない図はそのまま)
         if (applied.inserted.length > 0) {
           // 🔴 **添付の画像もここで差す**(#250 で判明)。⚠ 読む面(`paint`)には
@@ -2082,12 +2112,12 @@ export class DetailRenderer {
      *   (直す理由が出たら、そのときに 1 本の切り方へ寄せる)。
      */
     // 編集に入った直後は待たせない(**その場で 1 回**)
-    follow.push(parseFrontmatter(ta.value).body, previewOpts);
+    follow.push(parseFrontmatter(fullText()).body, previewOpts);
     follow.flush();
     ta.addEventListener('input', () => {
       // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
       //    2 か所で畳むと、どちらが効いているか分からなくなる
-      follow.push(parseFrontmatter(ta.value).body, previewOpts);
+      follow.push(parseFrontmatter(fullText()).body, previewOpts);
     });
     // ⚠ 編集を抜けるときに予約と図を畳む(detached なノードへ描かない)
     this.cancelPreview = () => {
@@ -2119,9 +2149,15 @@ export class DetailRenderer {
    * ⚠ 折り返しのぶんは見積もれないので、**1/3 上**に置いて画面の中に残す
    *   ({@link scrollTopForLine} の注記)。
    */
-  private openSplitAt(ta: HTMLTextAreaElement, body: string, at: number): void {
+  private openSplitAt(
+    ta: HTMLTextAreaElement,
+    body: string,
+    at: number,
+    /** 欄に出ている frontmatter の行数。⚠ 添付は**畳んで欄に出さない**ので 0 を渡す(#1220)。 */
+    fmLines: number = frontmatterLineCount(body),
+  ): void {
     // ⚠ frontmatter のぶんを足して、`ta.value` と同じ基準へ揃える
-    const line = at + frontmatterLineCount(body);
+    const line = at + fmLines;
     const off = lineStartOffset(ta.value, line);
     // ⚠ 範囲外は `setSelectionRange` が丸める(組み直しで短くなっていても落ちない)
     ta.setSelectionRange(off, off);
@@ -2149,6 +2185,11 @@ export class DetailRenderer {
      * ⚠ 座標は frontmatter を外した側(`RowSwap` と同じ基準)。
      */
     openAt: number | null,
+    /**
+     * 🔴 **畳んだ設定の行**(#1220 穴②)。`null` = 畳まない(普通のノート)。
+     * ⚠ 畳むときは、情報の札の**編集口を出さない**(札から設定の行を壊せてしまう)。
+     */
+    folded: AttachmentFold | null = null,
   ): void {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
@@ -2231,6 +2272,15 @@ export class DetailRenderer {
     const renderFmCard = (): void => {
       if (fmEditing) return;
       fmCard.textContent = '';
+      /**
+       * 🔴 **畳んだ添付は、札を出さず 1 行だけ言う**(#1220)。要約も編集の口も置かない ──
+       * 札の「情報を編集」は設定の行を**原文のまま**開くので、そこが穴になる。
+       */
+      if (folded !== null) {
+        fmCard.setAttribute('data-pkc-has-frontmatter', '');
+        fmCard.append(foldNote());
+        return;
+      }
       /**
        * 🔴 **読めていないときは、札が「読めている」顔をしない**(#284 / #318、
        * 着地前レビュー G)。
@@ -2521,10 +2571,20 @@ export class DetailRenderer {
       const ta = document.createElement('textarea');
       ta.setAttribute('data-pkc-field', 'editor-body');
       ta.setAttribute('aria-label', '本文(原文)');
-      ta.value = body;
+      /**
+       * ⚠ **退避先でも畳む**(#1220)── ここだけ原文を丸ごと出すと、**この道から設定を壊せる**。
+       *   繋ぎ直しは binder の 2 列と同じ `joinHiddenHead` 1 本。
+       */
+      ta.value = folded === null ? body : folded.rest;
+      /**
+       * ⚠ **印も付ける**(同じ `editor-body` の欄なので、binder の `input` も本文を書く)──
+       *   付けないと、**そちらは畳んだ行を戻さずに state を説明だけで上書きする**
+       *   (この test が最初に落ちた形)。
+       */
+      if (folded !== null) ta.setAttribute(HIDDEN_HEAD_ATTR, folded.head);
       ta.addEventListener('input', () => {
         // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)
-        body = ta.value;
+        body = folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
         this.onBodyChange?.(body);
       });
       note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
@@ -2533,8 +2593,10 @@ export class DetailRenderer {
        *   札を出したままにすると、同じ情報を編集する口が 2 つになり、
        *   どちらの編集が残るか分からなくなる(§7「同じ問いに答える口が 2 つ」)。
        */
-      fmCard.textContent = '';
-      fmCard.removeAttribute('data-pkc-has-frontmatter');
+      if (folded === null) {
+        fmCard.textContent = '';
+        fmCard.removeAttribute('data-pkc-has-frontmatter');
+      }
       pane.append(ta);
       // 退避先は**すでに原文全体**の編集 ── 押せない理由ごと可視にする
       editAll.disabled = true;
@@ -3335,6 +3397,17 @@ export class DetailRenderer {
       if (token === this.hydrateToken) missing();
     }
   }
+}
+
+/**
+ * 畳んだことを言う 1 行(#1220)。⚠ 1 面にも 2 列にも**同じ要素**を置く(字は 1 か所)。
+ * 押せる物は置かない ── 畳んだ行へ戻る道は無く、説明だけが書けることを伝える。
+ */
+function foldNote(): HTMLElement {
+  const p = document.createElement('p');
+  p.setAttribute('data-pkc-field', ATTACHMENT_FOLD_FIELD);
+  p.textContent = ATTACHMENT_FOLD_NOTE;
+  return p;
 }
 
 /**

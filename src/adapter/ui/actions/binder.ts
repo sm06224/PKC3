@@ -92,6 +92,7 @@ import {
   visibleSelection,
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
+import { HIDDEN_HEAD_ATTR, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
@@ -11623,7 +11624,18 @@ export function bindActions(
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
-      dispatcher.dispatch({ type: 'UPDATE_OPEN_BODY', body: ev.target.value });
+      /**
+       * 🔴 **畳んだ設定の行を、打った字の前へ 1 byte も変えずに戻す**(#1220 穴②)。
+       *
+       * ⚠ 添付ノートの 2 列の編集欄は**説明だけ**を持つ(設定の行は欄の属性)。
+       *   ここで繋がないと、state の本文が説明だけになり、**保存すると設定の行が消える**。
+       * ⚠ 属性が無い欄(普通のノート)は今までどおり**欄の字そのまま**。
+       */
+      const head = ev.target.getAttribute(HIDDEN_HEAD_ATTR);
+      dispatcher.dispatch({
+        type: 'UPDATE_OPEN_BODY',
+        body: head === null ? ev.target.value : joinHiddenHead(head, ev.target.value),
+      });
       return;
     }
     const el = ev.target;
