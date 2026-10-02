@@ -16,6 +16,7 @@ import {
   evaluateCalcExpression,
   explainCalcMiss,
   formatCalcResult,
+  resolveInlineCalc,
 } from '../../src/features/markdown/inline-calc';
 
 /**
@@ -389,5 +390,242 @@ describe('行を計算する(#766 D-2)', () => {
 
   it('🔴 桁区切りも読む(打ったときと同じ規則)', () => {
     expect(act('1,200+800')).toEqual({ kind: 'insert', at: 9, text: '=2000' });
+  });
+});
+
+/**
+ * 🔴 **上の行の数を使う**(#1230。書き込み型のまま ── 追従しない)。
+ *
+ * ⚠ 見るのは `resolveInlineCalc`(Enter とパレットが通る唯一の口)を通した形である。
+ * 🔑 主役は 2 つ:**①今までの答えが 1 バイトも変わらないこと**(下の「回帰」)
+ *   **②見つからないものでは何も書き込まないこと**(0 や切れ端を出さない)。
+ */
+describe('🔴 上の行の `名前 = 数` を引く(#1230)', () => {
+  /** 打った形を通し、本文へ足される字を返す(発火しなければ `null`)。 */
+  const r = (text: string, caret = text.length): string | null => {
+    const res = resolveInlineCalc(text, caret);
+    return res === null ? null : formatCalcResult(res.value);
+  };
+
+  it('🔴 上の行に定義があれば引ける', () => {
+    expect(r('基本単価 = 3200\n基本単価*8=')).toBe('25600');
+    // ⚠ 空白なしの定義も、間に別の行が挟まっても
+    expect(r('単価=100\nメモ\nまた別の行\n単価*3=')).toBe('300');
+    // ⚠ 名前は式の途中でも引ける / 2 回使える
+    expect(r('x = 5\n1+x*2=')).toBe('11');
+    expect(r('x = 5\nx*x=')).toBe('25');
+  });
+
+  it('🔴 定義が下に在るときは引けない(読むのは上だけ)', () => {
+    const below = '基本単価*8=\n基本単価 = 3200';
+    expect(r(below, '基本単価*8='.length)).toBeNull();
+    // ⚠ 対照群 ── 同じ定義が上に在れば引ける(引けない理由が「位置」であること)
+    expect(r('基本単価 = 3200\n基本単価*8=')).toBe('25600');
+  });
+
+  it('🔴 同じ名前が 2 つ在れば、近いほうが勝つ', () => {
+    expect(r('単価 = 100\n単価 = 200\n単価*2=')).toBe('400');
+    // ⚠ 向きを裏返しても近いほう(= 下の定義)が勝つ ── 「先に書いた」が勝っているのではない
+    expect(r('単価 = 200\n単価 = 100\n単価*2=')).toBe('200');
+    // ⚠ 間に空行や別の行が在っても、遠い定義が近い定義に勝たない
+    expect(r('単価 = 1\n\nメモ\n単価 = 10\n\n単価*2=')).toBe('20');
+  });
+
+  it('🔴 全角の `＝` と名前・数でも読む(日本語入力のまま打つ)', () => {
+    const text = '基本単価＝３２００\n基本単価＊８＝';
+    expect(r(text)).toBe('25600');
+    // ⚠ 半角に直すのは式と `＝` だけ(名前は user の字のまま)
+    expect(resolveInlineCalc(text, text.length)?.halfWidth?.text).toBe('基本単価*8=');
+  });
+
+  it('🔴 名前の中の数字を読み違えない(`単価2` と `単価` は別の名前)', () => {
+    expect(r('単価2 = 100\n単価2*3=')).toBe('300');
+    // ⚠ 長い名前が勝つ / 短い名前も別に引ける
+    expect(r('単価 = 5\n単価2 = 100\n単価2*3=')).toBe('300');
+    expect(r('単価 = 5\n単価2 = 100\n単価*3=')).toBe('15');
+  });
+
+  it('🔴 定義の無い名前は何もしない(0 で計算しない)', () => {
+    expect(r('単価 = 100\n仕入*8=')).toBeNull();
+    expect(r('メモ\n基本単価*8=')).toBeNull();
+    // ⚠ 1 つでも未定義が混ざれば、式ごと何もしない(`単価 +` に切り詰めない)
+    expect(r('単価 = 100\n単価+仕入=')).toBeNull();
+    // ⚠ 対照群 ── 定義が在れば同じ形が通る
+    expect(r('単価 = 100\n仕入 = 7\n単価+仕入=')).toBe('107');
+  });
+
+  it('🔴 名前が数だけの行は定義と見なさない', () => {
+    // ⚠ `12 = 3` が定義なら `12*2=` は 6 になる。数は数のまま読む(従来どおり 24)
+    expect(r('12 = 3\n12*2=')).toBe('24');
+    // ⚠ 式が数と記号だけだと名前を探さないので、**言葉が混ざる行**でも見る(ここで初めて門が効く)
+    expect(r('12 = 3\n結果 12*2=')).toBe('24');
+  });
+
+  it('🔴 定義の形でない行は定義ではない', () => {
+    // 答えの行(名前に `*` が入る)
+    expect(r('単価*2=200\n単価*3=')).toBeNull();
+    // 数の後ろに字が続く行
+    expect(r('単価 = 100円\n単価*3=')).toBeNull();
+    // ⚠ 対照群 ── 箇条書きの定義は読む
+    expect(r('- 単価 = 100\n単価*3=')).toBe('300');
+  });
+
+  it('🔴 桁区切りの定義も読む / 負の数も読む', () => {
+    expect(r('家賃 = 1,200\n家賃*2=')).toBe('2400');
+    expect(r('差 = -5\n差*3=')).toBe('-15');
+  });
+
+  it('🔴 前に文があっても、箇条書き・引用の中でも引ける', () => {
+    expect(r('単価 = 100\n結果は 単価*8=')).toBe('800');
+    expect(r('単価 = 100\n- 単価*8=')).toBe('800');
+    expect(r('単価 = 100\n> 単価*8=')).toBe('800');
+  });
+
+  it('⚠ ASCII の語の途中の名前は読まない(`foo+1=` と同じ向き)', () => {
+    expect(r('a = 5\ndata+1=')).toBeNull();
+    expect(r('a = 5\ndata*a=')).toBeNull();
+    // ⚠ 対照群 ── 空白で切れていれば読む
+    expect(r('a = 5\ndata a+1=')).toBe('6');
+  });
+
+  it('🔴 本文が空行で始まっていても止まらず、先頭の定義も読む', () => {
+    // ⚠ 素の `lastIndexOf('\\n', -1)` は先頭の空行で行頭を取り違え、読み戻しが止まらなくなる
+    expect(r('\n単価 = 100\n単価*3=')).toBe('300');
+    expect(r('\n\n単価 = 100\n単価*3=')).toBe('300');
+    expect(r('単価 = 100\n単価*3=')).toBe('300');
+    expect(r('\n仕入*3=')).toBeNull();
+  });
+
+  it('⚠ 名前だけの行は計算する所が無い(`1200=` と同じ)', () => {
+    expect(r('単価 = 100\n単価=')).toBeNull();
+  });
+
+  it('⚠ 0 で割る名前は何もしない', () => {
+    expect(r('ゼロ = 0\n1/ゼロ=')).toBeNull();
+  });
+});
+
+describe('🔴 `合計=` で、上の塊の末尾の数を足す(#1230)', () => {
+  const r = (text: string): string | null => {
+    const res = resolveInlineCalc(text, text.length);
+    return res === null ? null : formatCalcResult(res.value);
+  };
+
+  it('🔴 塊の各行の末尾の数を足す(答えも、行末の数字も)', () => {
+    expect(r('りんご 300\nみかん 450\n合計=')).toBe('750');
+    // ⚠ `… = 25600` の答えの行も、末尾の数として足す
+    expect(r('基本単価*8=25600\n追加 2+3=5\n合計=')).toBe('25605');
+    expect(r('- りんご 300\n- みかん 450\n- 合計=')).toBe('750');
+  });
+
+  it('🔴 空行で塊が切れる(その上は足さない)', () => {
+    expect(r('先月 1000\n先月 2000\n\n今月 300\n今月 400\n合計=')).toBe('700');
+    // ⚠ 空白だけの行(全角の空白を含む)も切れ目
+    expect(r('先月 1000\n　\n今月 300\n合計=')).toBe('300');
+  });
+
+  it('🔴 数が 1 つも無い塊では何もしない', () => {
+    expect(r('メモだけ\nもう 1 行\n合計=')).toBeNull();
+    expect(r('合計=')).toBeNull();
+    // ⚠ 数は空行の向こうに在る(塊の外)
+    expect(r('1000\n\n合計=')).toBeNull();
+  });
+
+  it('🔴 `sum=` も全角も読む', () => {
+    expect(r('a 10\nb 20\nsum=')).toBe('30');
+    expect(r('a 10\nb 20\nSUM=')).toBe('30');
+    expect(r('a 10\nb 20\nｓｕｍ＝')).toBe('30');
+    expect(r('a 10\nb 20\n合計＝')).toBe('30');
+    // ⚠ 全角の `＝` だけ半角に直す(`合計` / `ｓｕｍ` は user の字)
+    const t = 'a 10\n合計＝';
+    expect(resolveInlineCalc(t, t.length)?.halfWidth).toEqual({
+      from: t.length - 1,
+      to: t.length,
+      text: '=',
+    });
+    // ⚠ 対照群 ── 半角で打っていれば直さない
+    const h = 'a 10\n合計=';
+    expect(resolveInlineCalc(h, h.length)?.halfWidth).toBeNull();
+  });
+
+  it('🔴 桁区切り・小数・負の数の末尾も拾う', () => {
+    expect(r('家賃 1,200\n光熱 800\n合計=')).toBe('2000');
+    expect(r('a 0.1\nb 0.2\n合計=')).toBe('0.3');
+    expect(r('入金 500\n返金 -200\n合計=')).toBe('300');
+  });
+
+  it('⚠ 式や語の切れ端は数にしない(`3-5` の `5` / `md5` の `5`)', () => {
+    expect(r('3-5\n合計=')).toBeNull();
+    expect(r('md5\nv1.2\n合計=')).toBeNull();
+    // ⚠ 対照群 ── 日本語の直後は拾う
+    expect(r('りんご300\nみかん450\n合計=')).toBe('750');
+  });
+
+  it('⚠ 行の中ほどの数や、数で終わらない行は足さない', () => {
+    expect(r('300 円\n450 円\n合計=')).toBeNull();
+    expect(r('300 円\nみかん 450\n合計=')).toBe('450');
+  });
+
+  it('🔴 本文が空行で始まっていても止まらない', () => {
+    expect(r('\nりんご 300\n合計=')).toBe('300');
+    expect(r('\n\n合計=')).toBeNull();
+  });
+
+  it('⚠ 下の行は読まない(合計の後ろの行を足さない)', () => {
+    const text = 'a 10\n合計=\nb 99';
+    const res = resolveInlineCalc(text, 'a 10\n合計='.length);
+    expect(res === null ? null : formatCalcResult(res.value)).toBe('10');
+  });
+
+  it('⚠ 合図は `合計` / `sum` だけ(他の名前は合計にしない)', () => {
+    expect(r('a 10\n小計=')).toBeNull();
+    expect(r('a 10\nsummary=')).toBeNull();
+  });
+
+  it('⚠ 行の終わりでなければ撃たない', () => {
+    expect(resolveInlineCalc('a 10\n合計=99', 'a 10\n合計='.length)).toBeNull();
+  });
+});
+
+describe('🔴 今までの答えは 1 バイトも変わらない(#1230 の回帰)', () => {
+  /**
+   * ⚠ 定義の在るノートでも、無いノートでも、`resolveInlineCalc` の答えが従来の
+   *   `detect + evaluate` と一致すること。⚠ 定義の名前は式に現れない物にする。
+   */
+  const corpus = [
+    '2+3=', '2+3*4=', '(2+3)*4=', '50*1.08=', '10%3=', '-3+10=', '0.1+0.2=',
+    'Total: 1+2=', '結果は 3*4=', '結果は3*4=', '- 1+2=', '* 1+2=', '1. 2+3=', '  - 10/4=',
+    '買い物メモ\n2+3=', '見積 10\n2+3=', 'foo=', '10px=', 'a =', '=', '2+3',
+    '1/0=', '1%0=', '1/(1/0)=', '1/(1/2)=', '(1+2=', '1+2)=',
+    '1,000=', '1,200+800=', '1,234,567+1=', '1,2+3=', '1,000 と 2+3=',
+    'foo+1=', 'foo +1=', '{{vars.a}}+1=', '$' + '{HOME}+1=',
+    'md5=', 'A1+B1=', 'v1.2=', '2^3=', '第2=', '第2+3=', '1200=',
+    '２＋３＝', '合計　２＋３＝', '（２＋３）＊４＝', '１，２＋３＝',
+  ];
+
+  for (const defs of ['', '仕入 = 7\nzz = 1\nqq = 2\n']) {
+    it(`🔴 corpus 全件が従来と同じ答え(定義 ${defs === '' ? 'なし' : 'あり'})`, () => {
+      expect(corpus.length).toBeGreaterThan(40);
+      for (const c of corpus) {
+        const text = defs + c;
+        const req = detectInlineCalcRequest(text, text.length);
+        const v = req === null ? null : evaluateCalcExpression(req.expression);
+        const res = resolveInlineCalc(text, text.length);
+        expect(res === null ? null : res.value, JSON.stringify(c)).toBe(v);
+        if (res !== null) expect(res.halfWidth, JSON.stringify(c)).toEqual(req!.halfWidth);
+      }
+    });
+  }
+
+  it('🔴 「この行を計算する」(パレット)も同じ口を通る', () => {
+    const v = '基本単価 = 3200\n基本単価*8';
+    expect(calcLineAction(v, v.length)).toEqual({ kind: 'insert', at: v.length, text: '=25600' });
+    const s = 'a 10\nb 20\n合計';
+    expect(calcLineAction(s, s.length)).toEqual({ kind: 'insert', at: s.length, text: '=30' });
+  });
+
+  it('🔴 計算できた行では理由を出さない(変数の成功は黙る)', () => {
+    const t = '単価 = 100\n単価*3=';
+    expect(explainCalcMiss(t, t.length)).toBeNull();
   });
 });

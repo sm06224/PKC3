@@ -207,6 +207,31 @@ describe('本文で Enter を押すと計算される(#764)', () => {
     expect(ta.value).toBe('１，０００＝');
   });
 
+  /**
+   * 🔴 **上の行の `名前 = 数` を引く / `合計=` で足す**(#1230)── 規則は
+   * `tests/features/inline-calc.test.ts` が見る。ここが見るのは**配線**:欄と state に届くか。
+   * ⚠ 配線が `detectInlineCalcRequest` のままだと、規則の test は緑でも**押して何も起きない**。
+   */
+  it('🔴 上の行の定義を引いた答えが、欄と state に届く', async () => {
+    const body = '基本単価 = 3200\n基本単価*8=';
+    const { ta, d } = await pressEnter(body);
+    expect(ta.value).toBe(body + '25600');
+    expect(d.getState().openBody?.body).toBe(body + '25600');
+  });
+
+  it('🔴 `合計=` の答えが、欄と state に届く', async () => {
+    const body = 'りんご 300\nみかん 450\n合計=';
+    const { ta, d } = await pressEnter(body);
+    expect(ta.value).toBe(body + '750');
+    expect(d.getState().openBody?.body).toBe(body + '750');
+  });
+
+  it('⚠ 定義の無い名前では何も足さない(Enter は通る)', async () => {
+    const { ta, prevented } = await pressEnter('仕入*8=');
+    expect(ta.value).toBe('仕入*8=');
+    expect(prevented).toBe(false);
+  });
+
   it('🔴 改行は止めない(Enter の意味を奪わない)', async () => {
     const { prevented } = await pressEnter('2+3=');
     expect(prevented, '計算のために Enter を食べてはいけない').toBe(false);

@@ -49,10 +49,9 @@ import {
 } from '../render/block-grip';
 import {
   calcLineAction,
-  detectInlineCalcRequest,
-  evaluateCalcExpression,
   explainCalcMiss,
   formatCalcResult,
+  resolveInlineCalc,
 } from '@features/markdown/inline-calc';
 import { alignMdTable } from '@features/markdown/table-align';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
@@ -12156,9 +12155,13 @@ export function bindActions(
       ke.target.selectionStart === ke.target.selectionEnd
     ) {
       const ta = ke.target;
-      const req = detectInlineCalcRequest(ta.value, ta.selectionStart);
-      const v = req === null ? null : evaluateCalcExpression(req.expression);
-      if (v !== null) {
+      /**
+       * 🔴 **計算の入口は `resolveInlineCalc` 1 つ**(#1230)── 上の行の `名前 = 数` を
+       * 引く式と `合計=` も、今までの `2+3=` と同じ口を通る(別の判定を作ると、
+       * `Enter` で計算できる行とパレットで計算できる行が食い違う ── §7)。
+       */
+      const res = resolveInlineCalc(ta.value, ta.selectionStart);
+      if (res !== null) {
         /**
          * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
          *
@@ -12179,11 +12182,11 @@ export function bindActions(
          * ⚠ 全角と半角は**1 字 → 1 字**なので、差し替えてもカーソルは `＝` の
          *   直後(= 元の位置)のままである ── だから次の 1 手がそのまま使える。
          */
-        if (req !== null && req.halfWidth !== null) {
-          ta.setSelectionRange(req.halfWidth.from, req.halfWidth.to);
-          insertText(ta, req.halfWidth.text);
+        if (res.halfWidth !== null) {
+          ta.setSelectionRange(res.halfWidth.from, res.halfWidth.to);
+          insertText(ta, res.halfWidth.text);
         }
-        insertText(ta, formatCalcResult(v));
+        insertText(ta, formatCalcResult(res.value));
       } else {
         /**
          * 🔴 **計算にならなかったら、理由を 1 行だけ出す**(#766 A-2、2026-09-08)。
