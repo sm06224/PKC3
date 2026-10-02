@@ -361,6 +361,52 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(flatNote, '切なのに「全部出しています」が残っている').toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten'))).toBe('0');
 
+  /**
+   * 🔴 **フォルダを 1 回押すと、中央に概要が出る**(#1222。🟣 Gemini 裁定 2026-10-01 = A)。
+   *
+   * ⚠ **新しい起動は足さない**(smoke-budget)── いま「ノートがフォルダの中に居る」木がある
+   *   この道中に載せる。unit は属性と並びを見る。ここで見るのは unit が持てない 3 つ:
+   *   ① **実ブラウザで見える**(説明の下に出て、押せる大きさがある)② 件数の行が**薄い字
+   *   (`--muted`)**③ **行を押すと、中央にそのノートが開き、左の列がそのフォルダの中へ移る**
+   *   (押す前は左の列がルートで、フォルダの行だけが見えている ── 動いたことを見分けられる)。
+   */
+  await clickReal(page, folderRow);
+  const overview = page.locator('[data-pkc-region="folder-overview"]');
+  await expect(overview, 'フォルダを押しても概要が出ない').toBeVisible();
+  const summary = overview.locator('[data-pkc-field="overview-summary"]');
+  await expect(summary).toHaveText('直下 ノート 1 件 / フォルダ 0 件');
+  const overviewLook = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('[data-pkc-field="overview-summary"]')!;
+    const probe = document.createElement('div');
+    probe.style.color = 'var(--muted)';
+    document.body.append(probe);
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    return { color: getComputedStyle(el).color, muted, body: getComputedStyle(document.body).color };
+  });
+  expect(overviewLook.color, '件数の行が薄い字(--muted)でない').toBe(overviewLook.muted);
+  expect(overviewLook.color, '件数の行が本文と同じ濃さ').not.toBe(overviewLook.body);
+  await expect(rows, '前提:左の列はルートのまま(フォルダの行だけ)').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="filer-breadcrumb"]')).not.toContainText('はこ');
+  // 🔴 画面の外の行は組まない(直下が多いフォルダで long task を作らない ── app.css の注記)。
+  //    ⚠ 規則が外れると、見た目は 1 ドットも変わらないまま応答だけが 50ms を超える
+  await expect(
+    overview.locator('[data-pkc-field="overview-list"] > li').first(),
+    '概要の行が content-visibility: auto でない(応答が重くなる)',
+  ).toHaveCSS('content-visibility', 'auto');
+  const overviewNote = overview.locator('[data-pkc-action="select-entry"]');
+  await expect(overviewNote, '概要に直下のノートの行が 1 つ出ていない').toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="folder-overview"] [data-pkc-action="select-entry"]');
+  await expect(
+    page.locator('[data-pkc-region="filer-breadcrumb"]'),
+    '行を押しても左の列がそのフォルダの中へ移らない',
+  ).toContainText('はこ');
+  await expect(page.locator(`${noteRow}[data-pkc-selected]`), 'ノートが開いていない').toHaveCount(1);
+  await expect(overview, 'ノートを開いたのに、フォルダの概要が残っている').toHaveCount(0);
+  // 戻す(次の手は「ルートでフォルダの行を 2 回押す」)
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
+  await expect(rows).toHaveCount(1);
+
   // ② 中に入れば居る(2 クリック)
   await page.locator(folderRow).dblclick();
   await expect(rows, 'フォルダへ入っていない').toHaveCount(1);

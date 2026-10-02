@@ -39,6 +39,9 @@ import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
 import { placeEmbeddable } from '@features/markdown/place-embed';
 import { placeBodiesOf } from '@adapter/state/app-state';
+import { folderOverview, hasFolderOverview } from '@features/relation/folder-overview';
+import { buildFolderOverview } from './folder-overview';
+import { DEFAULT_ENTRY_SORT } from '@features/filter/entry-sort';
 import { installBlockGrip } from './block-grip';
 import { applyStackControls } from './stack-controls';
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
@@ -403,6 +406,17 @@ export class DetailRenderer {
   /** 外部画像の確認の帯(2026-08-06)。⚠ 本文の器の**外**。 */
   private noticeSlot: HTMLElement | null = null;
   /**
+   * 🔴 **フォルダの概要の器**(#1222)。⚠ 本文の器の**外**(`applyBlocks` の差分に消されない)。
+   * 主の枠だけが持つ(留めた枠は `null` ── 横に並べる枠には出さない)。
+   */
+  private overviewSlot: HTMLElement | null = null;
+  /**
+   * 🔴 **概要の指紋**(#1222)。⚠ 本文の指紋(`lastSelected` / `lastBody` …)には**混ぜない**
+   * ── 本文を描き直すと送り位置と図が壊れるので、概要の材料(`entryMetas` / `relations` /
+   * 並び)が動いたときは**概要の器だけ**作り直す。`null` = いま何も出していない。
+   */
+  private overviewFp: readonly unknown[] | null = null;
+  /**
    * 🔴 **箱の中で止まった「画像以外」の種別**(#528 段③)。lid ごとに畳む。
    * ⚠ **同意とは別物**(あちらは開けられる / こちらは開けられない)なので、
    *   `externalImages` に混ぜない ── 混ぜると「答えたら消える」形に引き寄せられる。
@@ -680,6 +694,8 @@ export class DetailRenderer {
     this.barSlot = null;
     this.panelSlot = null;
     this.noticeSlot = null;
+    this.overviewSlot = null;
+    this.overviewFp = null;
     this.bodyHost = null;
     this.bodyKind = null;
     this.bodyView = EMPTY_VIEW;
@@ -802,6 +818,52 @@ export class DetailRenderer {
     this.jump = jump;
     this.renderCore(state);
     if (jumpChanged) this.syncSearchJump();
+    this.syncOverview(state);
+  }
+
+  /**
+   * 🔴 **フォルダの概要を、いまの材料へ当てる**(#1222)。
+   *
+   * ⚠ 本文を描く側(`renderCore`)には早期 return が何本も在り、**一覧(`entryMetas`)や関係だけが
+   *   変わった回は必ずそこで止まる**(中のノートを足した / 消した / 動かした、更新日が変わった)。
+   *   だから外側に置き、**自前の指紋**(いま選んでいるフォルダ / `entryMetas` / `relations` /
+   *   並び)で比べる ── 「古い一覧が残る」型を避ける。
+   * ⚠ 出すのは**読む面で主の枠が `folder` を開いているときだけ**(編集中・留めた枠・
+   *   スマートフォルダ・他の種類は出さない)。出さない回は器を空にして指紋も忘れる。
+   */
+  private syncOverview(state: AppState): void {
+    const slot = this.overviewSlot;
+    if (slot === null) return;
+    const lid = state.selectedLid;
+    const show =
+      lid !== null &&
+      this.mode === 'view' &&
+      state.phase !== 'editing' &&
+      this.skeletonLid === lid &&
+      slot.isConnected &&
+      hasFolderOverview(state.entryMetas.get(lid)?.archetype);
+    if (!show) {
+      if (this.overviewFp !== null) {
+        slot.textContent = '';
+        this.overviewFp = null;
+      }
+      return;
+    }
+    // ⚠ 手組みの state fixture は並びの field を持たない(`?? ` で既定へ)
+    const sort = state.entrySort ?? DEFAULT_ENTRY_SORT;
+    const sortDesc = state.entrySortDesc ?? false;
+    const openedAt = state.openedAt ?? new Map<string, number>();
+    const fp = [lid, state.entryMetas, state.relations, sort, sortDesc, openedAt] as const;
+    const prev = this.overviewFp;
+    if (prev !== null && fp.every((v, i) => v === prev[i])) return;
+    this.overviewFp = fp;
+    slot.replaceChildren(
+      buildFolderOverview(
+        lid,
+        folderOverview(lid, state.entryMetas, state.relations, { sort, sortDesc, openedAt }),
+        new Date().getFullYear(),
+      ),
+    );
   }
 
   /**
@@ -1071,6 +1133,15 @@ export class DetailRenderer {
         this.noticeSlot,
         this.bodyHost,
       );
+      // 🔴 フォルダの概要は本文の**下**(説明が先、概要が後 ── #1222)。留めた枠には持たない
+      this.overviewFp = null;
+      if (this.pinnedLid === null) {
+        this.overviewSlot = document.createElement('div');
+        this.overviewSlot.setAttribute('data-pkc-field', 'detail-overview-slot');
+        this.region.append(this.overviewSlot);
+      } else {
+        this.overviewSlot = null;
+      }
       this.backToTopHandle?.dispose();
       this.backToTopHandle = installBackToTop(this.scroller, this.region);
       this.readingProgressHandle?.dispose();
