@@ -41,7 +41,7 @@
 import { receivers } from './action-outlets.mjs';
 
 /** 🔴 同時に見えている兄弟のうち「押した 1 つ」が要る ── 名前だけでは呼べない。 */
-export const P1 = `edit-cell shape-cell toggle-task unschedule-task schedule-pick-day schedule-quick-here
+export const P1 = `edit-cell edit-header-cell shape-cell toggle-task unschedule-task schedule-pick-day schedule-quick-here
 toc-jump toggle-heading-fold toggle-code-collapse append-at-heading edit-from-heading edit-section edit-code-block open-chapter-window copy-md-block view-big export-diagram
 remove-relation untag-entry smart-cond-remove filter-by-tag
 download-asset browse-archive view-asset open-office copy-asset-ref navigate-asset-ref revoke-same-origin revoke-extension

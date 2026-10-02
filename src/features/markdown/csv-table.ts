@@ -271,6 +271,29 @@ export interface CsvCellEditing {
   readonly lineOf: (row: number) => number | null;
 }
 
+/**
+ * 🔴 **見出しの升の ✎ ── 見出しを編集する入口**(#1240)。
+ *
+ * > 見出しの升は**1 回押すと並べ替え**(#1150)なので、同じ 1 回で編集欄も開くと、
+ * > 並べ替えと編集が同じ押しを奪い合う。見出しは**2 回押す**か、この ✎ から開く。
+ * > 本文の升は今までどおり 1 回押しで開く(並べ替えが無いので奪い合いが起きない)。
+ *
+ * ⚠ **出すのは見出しの升だけ**(本文の升には出さない ── 1 回押しで開ける)。
+ *   csv の表と markdown の表(`markdown-render.ts` の `th_close`)が**この 1 つ**を使う。
+ * ⚠ **action は `edit-cell` ではなく `edit-header-cell`** ── `[data-pkc-action="edit-cell"]` は
+ *   「升そのもの」を数える選択子として使われている(隣の升へ移る / コピー / 検査)ので、
+ *   ✎ を同じ名前にすると**升が 1 つ増えて数える**。どの升かは**入っている `th` が持つ**。
+ * 🔴 **印(✎)は CSS で出す。ボタンに字を入れない** ── 升の中に置くので、字を入れると
+ *   `textContent` に混ざり、コピーした表の見出しに `✎` が入る(`＋×` と同じ理由)。
+ *   意味は `aria-label` / `title` が持つ。
+ */
+export function cellEditButtonHtml(): string {
+  return (
+    `<button type="button" class="pkc-cell-edit-btn" data-pkc-action="edit-header-cell"` +
+    ` aria-label="この見出しを編集する" title="この見出しを編集する"></button>`
+  );
+}
+
 export function rowsToHtml(
   rows: string[][],
   withHeader: boolean,
@@ -380,8 +403,11 @@ export function rowsToHtml(
     parts.push('<thead><tr>');
     pad(rows[0]!).forEach((cell, col) => {
       const c = cellHtml(cell);
+      const attrs = cellAttrs(0, col, cell);
       parts.push(
-        `<th${cellAttrs(0, col, cell)}${c.title}>${c.body}` +
+        `<th${attrs}${c.title}>${c.body}` +
+          // 🔴 見出しは 1 回押すと並べ替えなので、編集の入口は ✎(と 2 回押し)に分ける(#1240)
+          (attrs === '' ? '' : cellEditButtonHtml()) +
           shapeBtn(0, col, 'col', 'add', 'この列の右に列を足す') +
           shapeBtn(0, col, 'col', 'remove', 'この列を消す') +
           `</th>`,

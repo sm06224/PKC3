@@ -20,9 +20,17 @@ test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
-const BODY = ['# 買い物', '', '| 品名 | 数 |', '|---|---|', '| りんご | 3 |', '', '以上。'].join(
-  '\n',
-);
+// ⚠ 本文は 2 行(#1240)── 並べ替えで並び順が変わることを見るには、行が 2 つ要る
+const BODY = [
+  '# 買い物',
+  '',
+  '| 品名 | 数 |',
+  '|---|---|',
+  '| りんご | 3 |',
+  '| みかん | 1 |',
+  '',
+  '以上。',
+].join('\n');
 
 const MENU = '[data-pkc-region="context-menu"]';
 /** 押せる升(⚠ #708 段④ で **markdown の表にも出る**ので、これは形の証拠ではない)。 */
@@ -59,9 +67,9 @@ test('🔴 表を右クリックして形を変えると、保存された本文
    * 🔴 **印の字は要素ではなく CSS の `::after` が出す**(読む面の選択・⧉ に混ざらないため)。
    * ⚠ `toBeVisible` は空の `span` でも通る ── 観測点は**計算後の `::after` の `content`**と、
    *   見出しの `textContent` が字を持たないこと。
-   * ⚠ 3 態は**属性を直に書き換えて**見る(CSS の受け皿だけを見る)。見出しを押すと
-   *   並べ替えと同時に升の編集も始まって見出しが作り直されるので、押す道は使わない
-   *   (押したときの 3 態は unit が見ている)。
+   * ⚠ 3 態は**属性を直に書き換えて**見る(CSS の受け皿だけを見る)。押す道は下の
+   *   「見出しを押す」で通す(#1240 まで、見出しの 1 回押しは並べ替えと同時に升の編集も
+   *   始めていたので、この観測点は押す道を使えなかった)。
    */
   const afterContent = (): Promise<string> =>
     th.locator('.pkc-table-sort-icon').evaluate((n) => getComputedStyle(n, '::after').content);
@@ -71,6 +79,63 @@ test('🔴 表を右クリックして形を変えると、保存された本文
     await th.evaluate((n, d) => n.setAttribute('data-pkc-sort-direction', d), dir);
     expect(await afterContent(), `${dir} の印(${mark})が CSS から出ていない`).toBe(`"${mark}"`);
   }
+
+  /**
+   * ── 🔴 **見出しを押す(#1240。裁定 A)**:1 回押しは並べ替えだけ、編集は 2 回押しか ✎。
+   *
+   * ⚠ 並べ替えと編集が**同じ 1 回押しを奪い合っていた**(開いたばかりの欄が壊れる)。
+   *   本物の押しでないと、ブラウザが出す `click` / `dblclick` の並びも、✎ が押せる所に出ているかも
+   *   見えない。⚠ 新しく起動しない ── この道中に足す。
+   */
+  const INPUT = '[data-pkc-field="detail-body"] [data-pkc-field="cell-input"]';
+  const bodyFirstCol = (): Promise<string[]> =>
+    table.locator('tbody tr').evaluateAll((rows) => rows.map((r) => r.children[0]!.textContent ?? ''));
+  expect(await bodyFirstCol(), '前提: 描いたままの並び').toEqual(['りんご', 'みかん']);
+  // ① 見出し(品名)を 1 回押す → 並び順が変わり、編集欄は出ない
+  //    ⚠ 右端の見出しは表の右上の ⧉ / ▾ が重なる(実測)ので、押すのは左の見出し
+  await clickReal(page, th);
+  await expect.poll(bodyFirstCol, '見出しを押しても並べ替わらない').toEqual(['みかん', 'りんご']);
+  await expect(page.locator(INPUT), '見出しの 1 回押しで編集欄が開いた').toHaveCount(0);
+  // ⚠ 対照群 ── 本文の升は今までどおり 1 回押しで開く(台が「何も開かない」だけではない)
+  await clickReal(page, table.locator('td').first());
+  await expect(page.locator(INPUT), '対照群が鳴っていない ── 本文の升が 1 回押しで開かない').toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(INPUT)).toHaveCount(0);
+  // ② 見出し(品名)を 2 回押す → 編集欄が開く(その升の字で)
+  await th.dblclick();
+  await expect(page.locator(INPUT), '見出しの 2 回押しで編集欄が開かない').toHaveCount(1);
+  await expect(page.locator(INPUT)).toHaveValue('品名');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(INPUT)).toHaveCount(0);
+  // ③ 見出しに触れると右に ✎ が出る → 押すと編集欄が開く(並べ替えは起きない)
+  const pencil = th.locator('.pkc-cell-edit-btn');
+  expect(
+    await pencil.evaluate((n) => getComputedStyle(n, '::before').content),
+    '✎ の字が CSS から出ていない',
+  ).toBe('"✎"');
+  expect(await th.evaluate((n) => n.textContent), '✎ が見出しの字に混ざった').toBe('品名');
+  await th.hover();
+  await expect(pencil, '見出しに触れても ✎ が出ない').toBeVisible();
+  const orderBefore = await bodyFirstCol();
+  await clickReal(page, pencil);
+  await expect(page.locator(INPUT), '✎ で編集欄が開かない').toHaveCount(1);
+  await expect(page.locator(INPUT)).toHaveValue('品名');
+  expect(await bodyFirstCol(), '✎ を押したのに並べ替わった').toEqual(orderBefore);
+  await page.keyboard.press('Escape');
+  await expect(page.locator(INPUT)).toHaveCount(0);
+  // ④ 🔴 いちばん右の見出しの ✎ は、表の右上の ⧉ / ▾ の下に隠れない(押せる所に出ている)
+  //    ⚠ 実測で踏んだ ── 右端に置くと ⧉ / ▾ が重なり、押しても ⧉ / ▾ が受けていた
+  const lastHead = table.locator('th').last();
+  await lastHead.hover();
+  const lastPencil = lastHead.locator('.pkc-cell-edit-btn');
+  await expect(lastPencil, '右端の見出しに触れても ✎ が出ない').toBeVisible();
+  expect(
+    await lastPencil.evaluate((n) => {
+      const r = n.getBoundingClientRect();
+      return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === n;
+    }),
+    '右端の見出しの ✎ が ⧉ / ▾ の下に隠れて押せない',
+  ).toBe(true);
 
   // ── ① 表を右クリックすると「CSV の表にする」が出る
   await table.locator('td').first().click({ button: 'right' });
@@ -89,7 +154,7 @@ test('🔴 表を右クリックして形を変えると、保存された本文
     page.locator(CSV_ONLY),
     'csv の表になっていない(行・列の ＋ × が焼かれていない)',
   ).not.toHaveCount(0, { timeout: 15_000 });
-  await expect(page.locator(CELL), '升の数が変わった(表が組み替わった)').toHaveCount(4);
+  await expect(page.locator(CELL), '升の数が変わった(表が組み替わった)').toHaveCount(6);
   await expect(table, '表が消えた / 増えた').toHaveCount(1);
   await expect(
     page.locator('[data-pkc-field="detail-body"]'),
@@ -120,7 +185,7 @@ test('🔴 表を右クリックして形を変えると、保存された本文
     { timeout: 15_000 },
   );
   // 🔑 戻っても**升は押せるまま**(#708 段④)── 形は戻り、打ちやすさは残る
-  await expect(page.locator(CELL), '戻したら升が押せなくなった').toHaveCount(4);
+  await expect(page.locator(CELL), '戻したら升が押せなくなった').toHaveCount(6);
   await expect(
     page.locator('[data-pkc-field="detail-body"] table'),
     '戻したら表が消えた',

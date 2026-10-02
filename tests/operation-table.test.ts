@@ -361,6 +361,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   'append-at-heading', 'browse-archive', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
   'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset',
   'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
+  // ⚠ 2026-10-02(#1240): `edit-header-cell`(見出しの ✎ ── 押した見出しが要る。`edit-cell` と同じ)
+  'edit-header-cell',
   /**
    * ⚠ **2026-09-26(#1044 段2)で 1 件増やした** ── 章だけ編集。`edit-from-heading` と
    *   同じ仕分け(押した見出しの行を `menuCarriedLine` が運ぶ ── パレットから
@@ -444,6 +446,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-02(#1240): 見出しの ✎(`edit-header-cell`)で受け手 +1 ── 登記は増えない(押し口は
+      //   表の見出しの升の中にしか無く、鍵も持たない)。押した見出しが要る P1(`edit-cell` と同じ仕分け)
       // ⚠ 2026-10-02(#215 段①②): パソコンのフォルダの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` /
       //   `pc-more` / `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `pc-open-file` だけ押した行が要る P1(`toc-jump` と同じ仕分け)、残り 3 つは名前だけで呼べる側
@@ -690,12 +694,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 371,
-      receivers: 312,
+      total: 372,
+      receivers: 313,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 273,
+      unregistered: 274,
     });
   });
 

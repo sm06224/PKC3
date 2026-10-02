@@ -733,7 +733,7 @@ test('🔴 見出しの「この章を編集する」→ 打つ → 別のノー
   // ⚠ 読むだけ ── 本文を書き換える口が 1 つも無い(⧉ も取り除かれている)
   await expect(
     chapterWin.locator(
-      '[data-pkc-action="toggle-task"], [data-pkc-action="edit-cell"], [data-pkc-action="edit-code-block"], [data-pkc-action="copy-md-block"], [data-pkc-action="edit-section"]',
+      '[data-pkc-action="toggle-task"], [data-pkc-action="edit-cell"], [data-pkc-action="edit-header-cell"], [data-pkc-action="edit-code-block"], [data-pkc-action="copy-md-block"], [data-pkc-action="edit-section"]',
     ),
     '読むだけの窓に書く口が出た',
   ).toHaveCount(0);

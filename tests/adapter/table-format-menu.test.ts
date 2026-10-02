@@ -303,7 +303,8 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
      *   区別できない(消す口を足すより、台を 2 つ作るほうが読める)。
      */
     const ctrl = setup(body, 'ready', { busy: () => true });
-    const cell = ctrl.host.querySelector<HTMLElement>('[data-pkc-action="edit-cell"]');
+    // ⚠ 本文の升(`td`)── 見出しの升は 1 回押しでは開かない(#1240)
+    const cell = ctrl.host.querySelector<HTMLElement>('td[data-pkc-action="edit-cell"]');
     expect(cell, '前提が崩れている: 升に押し所が焼かれていない').not.toBeNull();
     cell!.click();
     expect(ctrl.d.getState().error, '対照群が鳴っていない ── 台が busy を渡せていない').toContain(
@@ -473,7 +474,8 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
  *   **そこだけリンクが死ぬ**(しかも開かない理由はどこにも出ない)。
  */
 describe('表の升の中のリンク(#708 段④)', () => {
-  const LINKED = '| 参考 | [公式](https://example.com) |\n|---|---|\n| 次 | ふつうの字 |\n';
+  // ⚠ リンクは**本文の升**に置く(見出しの升は 1 回押しで開かないので、そこでは何も見えない ── #1240)
+  const LINKED = '| 参考 | 内容 |\n|---|---|\n| [公式](https://example.com) | ふつうの字 |\n';
 
   it('🔴 升の中のリンクを押しても、入力欄が開かない', () => {
     setup(LINKED, 'ready');
@@ -489,7 +491,7 @@ describe('表の升の中のリンク(#708 段④)', () => {
   it('⚠ 対照群 ── リンクでない升を押せば、いままでどおり欄が開く', () => {
     setup(LINKED, 'ready');
     const cells = [
-      ...document.querySelectorAll<HTMLElement>('[data-pkc-action="edit-cell"]'),
+      ...document.querySelectorAll<HTMLElement>('td[data-pkc-action="edit-cell"]'),
     ];
     const plain = cells.find((c) => c.querySelector('a[href]') === null);
     expect(plain, '前提: リンクの無い升が無い').toBeDefined();
@@ -524,7 +526,11 @@ describe('表の升で Tab / Enter を押す(#750 I1)', () => {
     key: string,
     mods: { shift?: boolean; ctrl?: boolean; composing?: boolean } = {},
   ): KeyboardEvent {
-    cells(host)[nth]!.click();
+    // ⚠ 見出しの升は 2 回押しで開く(1 回押しは並べ替え ── #1240)。本文の升は 1 回押し
+    const target = cells(host)[nth]!;
+    if (target.tagName === 'TH')
+      target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    else target.click();
     const input = openInput(host);
     if (input === null) throw new Error('前提が崩れている: 欄が開いていない');
     if (value !== null) input.value = value;

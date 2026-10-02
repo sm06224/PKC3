@@ -155,8 +155,8 @@ export function reopenCellInput(host: HTMLElement, keep: OpenCell): void {
    *   (下で字が変わった升へ、打った字を移さない)。
    */
   if (raw !== keep.raw && keep.value !== keep.raw) return;
-  // 🔑 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7)
-  cell.click();
+  // 🔑 開くのは `binder.ts` の `edit-cell` ── ここは押すだけ(§7)。⚠ `click()` は見出しで開かない
+  pressCellToEdit(cell);
   const input = host.querySelector<HTMLInputElement>(INPUT);
   if (input === null) return;
   /**
@@ -211,8 +211,37 @@ export interface CellMove {
 export function openCellAt(host: HTMLElement, move: CellMove): boolean {
   const cell = host.querySelector<HTMLElement>(cellSelector(move.line, move.col));
   if (cell === null) return false;
-  cell.click();
+  pressCellToEdit(cell);
   return host.querySelector(INPUT) !== null;
+}
+
+/**
+ * 🔴 **1 回の押し(クリック / Enter / Space)で、その要素の `edit-cell` が働いてよいか**
+ * (#1240。**判定はこの 1 か所**)。
+ *
+ * > 見出しの升は 1 回押すと**並べ替え**(#1150)なので、同じ押しで編集欄まで開くと
+ * > 2 つの受け手が 1 つの押しを奪い合う(開いたばかりの欄が壊れる / 意図しない並べ替えが走る)。
+ * > 見出しは**2 回押す**か升の右の ✎ から開く。本文の升は並べ替えが無いので 1 回押しで開く。
+ *
+ * 🔑 **どちらが受けるかを「升の種類」で決める**(`th` か否か)── 受け手同士の
+ *   `stopPropagation` の順番には頼らない(別の受け手を足した日に戻る)。
+ * ⚠ **押し方は 2 本とも通る**:マウスの `click`(`binder.ts` の `onClick`)と、
+ *   `tabindex="0"` の要素へ Enter / Space を押す鍵(`onKeydown`)。見出しの升は並べ替えのために
+ *   `tabindex="0"` を持つので、後者を忘れると **Enter で並べ替えと編集が同時に起きる**。
+ */
+export function opensOnSinglePress(el: Element): boolean {
+  return !(el.getAttribute('data-pkc-action') === 'edit-cell' && el.tagName === 'TH');
+}
+
+/**
+ * 🔴 **その升の編集欄を、プログラムから開く**(確定後の隣の升 / 描き直し後の開き直し)。
+ *
+ * ⚠ **`click()` ではなく `dblclick`** ── `click()` は**見出しの升だと並べ替えの押し**になり、
+ *   編集欄は開かない(上の {@link opensOnSinglePress})。`binder.ts` は `dblclick` を
+ *   「編集欄を開く」意思として受けるので、見出しでも本文でも同じ 1 本で開く。
+ */
+export function pressCellToEdit(cell: HTMLElement): void {
+  cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
 }
 
 /**

@@ -36,7 +36,7 @@ import { allFences, splitLines } from './source-blocks';
 import footnotePlugin from 'markdown-it-footnote';
 import { makeSlugCounter } from './markdown-toc';
 import { highlightCode, isHighlightable } from './code-highlight';
-import { detectCsvLang, renderCsvFence } from './csv-table';
+import { cellEditButtonHtml, detectCsvLang, renderCsvFence } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { buildHtmlSandboxIframe } from './html-sandbox';
 import {
@@ -1022,7 +1022,25 @@ const defaultThOpen =
 md.renderer.rules.th_open = function (tokens, idx, options, env, self) {
   const base = defaultThOpen(tokens, idx, options, env, self);
   const attrs = cellEditAttrs(tokens, idx, env);
+  // 🔑 閉じるときに ✎ を足すか(#1240)── 開きで印を焼いた升だけ。判定を 2 回書かない
+  tokens[idx]!.meta = { ...(tokens[idx]!.meta as object | null), cellEditable: attrs !== '' };
   return attrs === '' ? base : base.replace(/>$/, `${attrs}>`);
+};
+
+const defaultThClose =
+  md.renderer.rules.th_close ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+/**
+ * 🔴 **見出しの升の ✎**(#1240)。⚠ 見出しは 1 回押すと並べ替えなので、編集は 2 回押しか
+ *   この ✎ から ── 出す条件は「開きで編集の印を焼いたか」の 1 つ(`th_open` の `meta`)。
+ *   `th_open` / `inline` / `th_close` は常にこの順で 3 つ並ぶ(markdown-it の表の規則)。
+ */
+md.renderer.rules.th_close = function (tokens, idx, options, env, self) {
+  const base = defaultThClose(tokens, idx, options, env, self);
+  const open = tokens[idx - 2];
+  const editable =
+    open?.type === 'th_open' && (open.meta as { cellEditable?: boolean } | null)?.cellEditable === true;
+  return editable ? cellEditButtonHtml() + base : base;
 };
 
 /**
