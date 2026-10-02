@@ -29,6 +29,8 @@
  *   書き方は日本語の user の普通である。門②が「切れ端」だけを落とす。
  */
 
+import { lineStart } from './line-start';
+
 /**
  * 計算に使える字(この whitelist の外が 1 つでも入ったら式ではない)。
  *
@@ -398,8 +400,7 @@ export function explainCalcMiss(fullText: string, caretPos: number): string | nu
   const req = detectInlineCalcRequest(fullText, caretPos);
   if (req !== null && evaluateCalcExpression(req.expression) !== null) return null;
 
-  const nl = fullText.lastIndexOf('\n', caretPos - 1);
-  const head = toHalfWidth(fullText.slice(nl + 1, caretPos - 1));
+  const head = toHalfWidth(fullText.slice(lineStart(fullText, caretPos), caretPos - 1));
   const body = head.replace(LIST_MARKER, '').trim();
   if (body === '') return null;
   // ⚠ **数が 1 つも無い行**は普通の文(`(=` のような打ち間違いに口を出さない)
@@ -447,7 +448,7 @@ export type CalcLineAction =
 export function calcLineAction(fullText: string, caretPos: number): CalcLineAction | null {
   if (typeof fullText !== 'string') return null;
   if (caretPos < 0 || caretPos > fullText.length) return null;
-  const start = fullText.lastIndexOf('\n', Math.max(0, caretPos - 1)) + 1;
+  const start = lineStart(fullText, caretPos);
   const nl = fullText.indexOf('\n', caretPos);
   const end = nl === -1 ? fullText.length : nl;
   const line = fullText.slice(start, end);

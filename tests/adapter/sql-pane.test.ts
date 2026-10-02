@@ -1751,6 +1751,19 @@ describe('打つ所(#918 段②a)', () => {
     expect(d.getState().sqlPage.sql, '1 行目でも握っていない').toBe('select 1');
   });
 
+  it('🔴 先頭が空行でも、その空行(= 1 行目)で ↑ を押せば履歴が戻る(#1241)', async () => {
+    const { d, type, key, runBtn, box } = setup();
+    type('select 1');
+    runBtn.click();
+    await settle();
+    // ⚠ 先頭が空行の本文。caret 0 は 1 行目(空行)にある。
+    //   `lastIndexOf('\n', 0)` は 0 番目の `\n` を見て「前に行がある」と読んでいた。
+    type('\nselect 2');
+    caret(box, 0);
+    key({ key: 'ArrowUp' });
+    expect(d.getState().sqlPage.sql, '1 行目の空行なのに握らなかった').toBe('select 1');
+  });
+
   it('⚠ 走った字だけを憶える / 同じ字を 2 つ並べない', async () => {
     const { d, type, key, runBtn, box } = setup();
     type('select 1');

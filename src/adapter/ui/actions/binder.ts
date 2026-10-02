@@ -28,6 +28,7 @@ import {
 } from '../render/heading-fold';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
+import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import {
   tableAt,
@@ -11891,7 +11892,7 @@ export function bindActions(
         const to = ta.selectionEnd ?? 0;
         if (at !== to) return;
         const back = ke.key === 'ArrowUp';
-        const onFirst = ta.value.lastIndexOf('\n', Math.max(0, at - 1)) === -1;
+        const onFirst = lineStart(ta.value, at) === 0;
         const onLast = ta.value.indexOf('\n', at) === -1;
         if (back ? !onFirst : !onLast) return;
         ke.preventDefault();

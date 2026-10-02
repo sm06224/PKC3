@@ -14,6 +14,8 @@
  * 🔑 **pure module**。DOM も textarea も知らず、本文の値と caret / shift だけを見る。
  */
 
+import { lineStart } from './line-start';
+
 export type TableTabAction =
   /** セル間の移動のみ(選択範囲を start〜end に設定) */
   | { readonly kind: 'navigate'; readonly start: number; readonly end: number }
@@ -128,7 +130,7 @@ function parseTableLine(value: string, lineStart: number, lineEnd: number): Tabl
 }
 
 function getLineRange(value: string, pos: number): { start: number; end: number } {
-  const start = value.lastIndexOf('\n', Math.max(0, pos - 1)) + 1;
+  const start = lineStart(value, pos);
   const nl = value.indexOf('\n', pos);
   const end = nl === -1 ? value.length : nl;
   return { start, end };

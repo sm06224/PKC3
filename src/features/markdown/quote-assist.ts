@@ -1,3 +1,4 @@
+import { lineStart } from './line-start';
 import { LIST_LEAD, THEMATIC_BREAK, advanceFence } from './list-renumber';
 
 /**
@@ -56,7 +57,7 @@ export type QuoteAssist =
 
 /** caret が居る行の範囲(終端は含まない)。 */
 function lineRange(value: string, caret: number): { start: number; end: number } {
-  const start = value.lastIndexOf('\n', caret - 1) + 1;
+  const start = lineStart(value, caret);
   const nl = value.indexOf('\n', caret);
   return { start, end: nl === -1 ? value.length : nl };
 }
