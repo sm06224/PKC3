@@ -14,6 +14,7 @@ import { buildShell } from '@adapter/ui/render/shell';
 import { initialState } from '@adapter/state/app-state';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
+import { isIconName } from '@features/icon/symbols';
 import { bindActions } from '@adapter/ui/actions/binder';
 import {
   LocalFolder,
@@ -263,6 +264,76 @@ describe('繋ぐ前 / 繋いだ後', () => {
     const before = q(pane, '[data-pkc-pc-row]');
     router.render(initialState, 'pc');
     expect(q(pane, '[data-pkc-pc-row]'), '同じ版で行が作り直された').toBe(before);
+  });
+});
+
+describe('🔴 行頭の種類の絵(#1272)', () => {
+  // ⚠ 期待は**手で書いた表**(`iconFor` の表を種にしない ── 実装の配列から 1 つ落とすと
+  //   描く側も見る側も同時に縮んで緑になる)。ここが user に見える対応の正本。
+  const EXPECTED: ReadonlyArray<readonly [name: string, kind: 'file' | 'directory', symbol: string]> = [
+    ['下', 'directory', 'folder'],
+    ['メモ.md', 'file', 'note'],
+    ['長い.markdown', 'file', 'note'],
+    ['猫.png', 'file', 'camera'],
+    ['猫.JPG', 'file', 'camera'],
+    ['図.svg', 'file', 'camera'],
+    ['報告.pdf', 'file', 'page'],
+    ['曲.mp3', 'file', 'music'],
+    ['曲.wav', 'file', 'music'],
+    ['映像.mp4', 'file', 'movie'],
+    ['映像.webm', 'file', 'movie'],
+    ['資料.pptx', 'file', 'presentation'],
+    ['表.xlsx', 'file', 'presentation'],
+    ['文書.docx', 'file', 'presentation'],
+    ['名刺.vcf', 'file', 'person'],
+    ['メモ.txt', 'file', 'clip'],
+    ['何か.zip', 'file', 'clip'],
+    ['拡張子なし', 'file', 'clip'],
+  ];
+
+  async function listed(): Promise<HTMLElement> {
+    const handles: FolderEntryHandle[] = EXPECTED.map(([name, kind]) =>
+      kind === 'directory' ? { kind: 'directory', name } : file(name),
+    );
+    const { pane, folder } = setup(async () => dir(handles));
+    await folder.pick();
+    await settle();
+    return pane;
+  }
+
+  it('🔴 全部の種類で、行の先頭に正しい絵が在る(全数)', async () => {
+    const pane = await listed();
+    const rows = [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')];
+    expect(rows, '行の数(全部並んでいる)').toHaveLength(EXPECTED.length);
+    const bySymbol = new Map<string, string>();
+    for (const r of rows) {
+      const name = q(r, '[data-pkc-field="pc-name"]')?.textContent ?? '';
+      const head = q(r, '[data-pkc-field="pc-head"]')!;
+      const icon = head.firstElementChild as HTMLElement | null;
+      expect(icon?.hasAttribute('data-pkc-icon'), `${name}: 名前の前に絵が無い`).toBe(true);
+      bySymbol.set(name, icon!.getAttribute('data-pkc-symbol') ?? '');
+    }
+    for (const [name, , symbol] of EXPECTED) {
+      expect(bySymbol.get(name), `${name} の絵`).toBe(symbol);
+    }
+  });
+
+  it('🔴 絵は名前の外に在る ── 名前の textContent に字が混ざらない / 絵は読み上げない', async () => {
+    const pane = await listed();
+    for (const r of pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')) {
+      const name = q(r, '[data-pkc-field="pc-name"]')!;
+      expect(name.querySelector('[data-pkc-icon]'), '絵が名前の中に入っている').toBeNull();
+      const icon = q(r, '[data-pkc-icon]')!;
+      expect(icon.textContent, '絵の器に字が入っている(ボタンの textContent に混ざる)').toBe('');
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('🔴 書体に在る名前だけを使っている(無い名前は豆腐になる)', async () => {
+    const pane = await listed();
+    for (const el of pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row] [data-pkc-icon]')) {
+      expect(isIconName(el.getAttribute('data-pkc-symbol') ?? ''), el.getAttribute('data-pkc-symbol') ?? '').toBe(true);
+    }
   });
 });
 
