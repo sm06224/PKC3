@@ -955,6 +955,91 @@ test('🔴 コード枠の ✎ → 打つ → 保存で disk・履歴が動く�
     '履歴 2 件',
   );
 
+  /**
+   * 🔴 **履歴の版を開くと、くらべる相手を選べて、左右に並び、変わった字だけ濃くなる**(#1231 段①)。
+   *   ⚠ 新しい起動は足さない(#820)── 履歴が 2 件ある**この道中の続き**で見る。
+   *   実 CSS・実 sqlite の読み(版の本文)・実レイアウトは unit(happy-dom)に無い。
+   */
+  await page
+    .locator('[data-pkc-rev-order="2"] [data-pkc-action="preview-revision"]')
+    .click();
+  const sideList = page.locator('[data-pkc-field="revision-diff"] ul[data-pkc-diff-layout="side"]');
+  await expect(sideList, '版を開いても左右の差分が出ない').toBeVisible();
+  const compare = page.locator('[data-pkc-field="revision-compare"]');
+  expect(
+    await compare.locator('option').allTextContents(),
+    'くらべる相手が「いまの本文」+ 履歴の別の版になっていない(PC のファイルは結びついていないので出ない)',
+  ).toEqual(['いまの本文', expect.stringMatching(/^版 1/)]);
+  // 実レイアウト: 2 列の grid で、同じ行の左右の升は同じ高さ・左が先
+  const grid = await sideList.evaluate((el) => ({
+    display: getComputedStyle(el).display,
+    tracks: getComputedStyle(el).gridTemplateColumns.split(' ').length,
+  }));
+  expect(grid, '左右の差分が 2 列の grid になっていない').toEqual({ display: 'grid', tracks: 2 });
+  const delCell = sideList.locator('li[data-pkc-diff="del"]').first();
+  const addCell = sideList.locator('li[data-pkc-diff="add"]').first();
+  const delBox = await delCell.boundingBox();
+  const addBox = await addCell.boundingBox();
+  expect(delBox, '消えた行の升の座標が読めない').not.toBeNull();
+  expect(addBox, '足した行の升の座標が読めない').not.toBeNull();
+  expect(Math.abs(delBox!.y - addBox!.y), '入れ替わった行の左右が同じ行に並んでいない').toBeLessThan(1);
+  expect(Math.abs(delBox!.height - addBox!.height), '左右の升の高さが揃っていない').toBeLessThan(1);
+  expect(addBox!.x, '右(この版)が左(相手)より右に在る').toBeGreaterThan(delBox!.x + delBox!.width - 1);
+  // 変わった字だけが濃い: mark の下地が透明でなく、同じ行の mark の外の字には下地が無い
+  const markBg = await delCell
+    .locator('mark[data-pkc-diff-char]')
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(markBg, '変わった字の下地が透明(CSS の受け皿が無い)').not.toBe('rgba(0, 0, 0, 0)');
+  expect(
+    await delCell.evaluate((el) => getComputedStyle(el).backgroundColor),
+    '行ごと塗られている(変わった字だけのはず)',
+  ).toBe('rgba(0, 0, 0, 0)');
+  // 相手を別の版へ変える → 見出しの字が変わる(読み込みは実 sqlite の読み)
+  await compare.selectOption({ index: 1 });
+  await expect(
+    page.locator('[data-pkc-field="revision-diff-summary"]'),
+    '別の版を選んでも見出しが変わらない',
+  ).toContainText(/^版 1.*とのちがい|^その版と同じです/);
+  // 狭い版面(48rem 未満)では 1 列に戻る: 器の外に同じ形を置き、幅だけ変えて計算後の規則を見る
+  await page.evaluate(() => {
+    const box = document.createElement('div');
+    box.setAttribute('data-pkc-field', 'revision-diff');
+    box.id = 'narrow-fixture';
+    box.innerHTML =
+      '<div data-pkc-field="revision-diff-cols"><span>a</span><span>b</span></div>' +
+      '<ul data-pkc-diff-layout="side"><li data-pkc-diff="gap">⋯ 変わっていない 3 行</li>' +
+      '<li data-pkc-diff="same" data-pkc-diff-side="left">x</li>' +
+      '<li data-pkc-diff="same" data-pkc-diff-side="right">x</li>' +
+      '<li data-pkc-diff="empty" data-pkc-diff-side="left"></li><li data-pkc-diff="add" data-pkc-diff-side="right">y</li></ul>';
+    document.body.append(box);
+  });
+  // 広い版面では、畳み(gap)は両列にまたがる(器いっぱいの幅)
+  const gapWide = await page.evaluate(() => {
+    const ul = document.querySelector('#narrow-fixture ul')!.getBoundingClientRect();
+    const gap = document.querySelector('#narrow-fixture li[data-pkc-diff="gap"]')!.getBoundingClientRect();
+    return { ul: ul.width, gap: gap.width };
+  });
+  expect(gapWide.gap, '畳みが両列にまたがっていない(片側の幅しか無い)').toBeGreaterThan(gapWide.ul * 0.95);
+  await page.setViewportSize({ width: 600, height: 900 });
+  const narrow = await page.evaluate(() => {
+    const q = (s: string): Element => document.querySelector(`#narrow-fixture ${s}`)!;
+    return {
+      tracks: getComputedStyle(q('ul')).gridTemplateColumns.split(' ').length,
+      cols: getComputedStyle(q('[data-pkc-field="revision-diff-cols"]')).display,
+      empty: getComputedStyle(q('li[data-pkc-diff="empty"]')).display,
+      sameRight: getComputedStyle(q('li[data-pkc-diff="same"][data-pkc-diff-side="right"]')).display,
+      sameLeft: getComputedStyle(q('li[data-pkc-diff="same"][data-pkc-diff-side="left"]')).display,
+    };
+  });
+  expect(narrow, '狭い版面で 1 列に戻っていない(左右の重複・空の升が残る)').toEqual({
+    tracks: 1,
+    cols: 'none',
+    empty: 'none',
+    sameRight: 'none',
+    sameLeft: 'block',
+  });
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

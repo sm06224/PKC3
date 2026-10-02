@@ -80,8 +80,9 @@ import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
 import { isTouchOnly } from './touch-device';
-import { diffCounts, diffRows } from '@features/revision/diff-view';
-import { diffLineEl } from './diff-line';
+import { diffCounts, diffRows, shortStamp } from '@features/revision/diff-view';
+import { sideRows } from '@features/revision/diff-side';
+import { sideRowEls } from './diff-line';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
 import {
   EMPTY_JOURNAL,
@@ -333,6 +334,11 @@ export class DetailRenderer {
   private lastPhase: AppPhase | null = null;
   /** 履歴 panel の断面(参照比較 ── P5b で view 指紋に加わった次元)。 */
   private lastPanel: AppState['revisionPanel'] = null;
+  /** 履歴を開いているときの、選んでいるノートの PC のファイルとの結びつき(#1231 段①。指紋の一部)。 */
+  private lastPanelLinked = false;
+  private panelLinked(state: AppState): boolean {
+    return state.revisionPanel !== null && state.selectedLid !== null && state.linkedFiles.has(state.selectedLid);
+  }
   /** 見ている版(#398 段②)。⚠ **指紋の一部**(上の注記)。 */
   private lastPreview: AppState['revisionPreview'] = null;
   /**
@@ -1112,7 +1118,9 @@ export class DetailRenderer {
       body === this.lastBody &&
       state.phase === this.lastPhase &&
       state.revisionPanel === this.lastPanel &&
-      state.revisionPreview === this.lastPreview
+      state.revisionPreview === this.lastPreview &&
+      // 🔑 履歴を開いている間だけ、PC のファイルとの結びつきも見る(「くらべる相手」の選択肢が変わる。#1231 段①)
+      this.panelLinked(state) === this.lastPanelLinked
     )
       return;
     this.renderView(state, body);
@@ -1136,6 +1144,7 @@ export class DetailRenderer {
     this.lastPhase = state.phase;
     this.lastPanel = state.revisionPanel;
     this.lastPreview = state.revisionPreview;
+    this.lastPanelLinked = this.panelLinked(state);
 
     const lid = this.pinnedLid ?? state.selectedLid;
     if (!lid) {
@@ -1915,19 +1924,33 @@ export class DetailRenderer {
      */
     const preview =
       shown && state.revisionPreview?.lid === lid ? state.revisionPreview : null;
-    if (shown === this.shownPanel && preview === this.shownPreview) return;
+    // 🔑 PC のファイルと結びついたかどうかも指紋に入れる(履歴を開いている間に結びつくと、選択肢が古いまま)
+    const linked = shown !== null && state.linkedFiles.has(lid);
+    if (shown === this.shownPanel && preview === this.shownPreview && linked === this.shownLinked) return;
     this.shownPanel = shown;
     this.shownPreview = preview;
+    this.shownLinked = linked;
+    // 🔑 相手を選んだ直後は箱ごと作り直す ── 選んだ `<select>` へ焦点を返す(キーボードで続けて選べる)
+    const refocus = slot.contains(document.activeElement) &&
+      document.activeElement?.getAttribute('data-pkc-field') === 'revision-compare';
     slot.textContent = '';
     if (shown) {
       slot.append(
-        renderHistoryPanel(shown.items, preview, state.openBody?.persisted ?? null),
+        renderHistoryPanel(
+          shown.items,
+          preview,
+          state.openBody?.persisted ?? null,
+          linked,
+        ),
       );
+      if (refocus) slot.querySelector<HTMLElement>('[data-pkc-field="revision-compare"]')?.focus();
     }
   }
 
   /** いま出している差分(#398 段②)。⚠ 指紋の一部(上の注記)。 */
   private shownPreview: AppState['revisionPreview'] = null;
+  /** 「くらべる相手」に PC のファイルを出していたか(#1231 段①)。⚠ 指紋の一部。 */
+  private shownLinked = false;
 
   private renderEditor(state: AppState): void {
     const open = state.openBody!;
@@ -3545,33 +3568,137 @@ function diffBadge(added: number | null, removed: number | null): HTMLElement | 
   return span;
 }
 
+/** 履歴の版 1 件(見出し・選択肢の字に使う分だけ)。 */
+interface HistoryItemLike {
+  id: string;
+  revOrder: number;
+  createdAt: string | null;
+}
+
+/** 版を名指しする字: `版 7(2026-08-22 10:31)`。日時が無ければ `版 7`。 */
+function revName(it: HistoryItemLike): string {
+  const st = shortStamp(it.createdAt);
+  return st === null ? `版 ${it.revOrder}` : `版 ${it.revOrder}(${st})`;
+}
+
 /**
- * 🔴 **戻す前に中身を見る**(#398 段②)。
+ * 🔴 **戻す前に中身を見る**(#398 段②)。🔴 **くらべる相手を選べる + 左右に並べる**(#1231 段①)。
  *
  * ⚠ **読み取り専用**である ── ここに編集の口を作ると、保存したのがどちらの
- *   本文なのか user から見えなくなる。
- * ⚠ 比べる相手は **disk で確認できている本文**(`persisted`)── 画面の draft と
+ *   本文なのか user から見えなくなる(行ごとの → ← も作らない。🟣 Gemini 裁定 2026-10-02 Q1 = 見るだけ)。
+ * ⚠ 既定の相手は **disk で確認できている本文**(`persisted`)── 画面の draft と
  *   比べると「保存していない字」がちがいとして出る。
+ * 🔑 左 = 相手 / 右 = **この版**(主役)。`diffRows(相手, この版)` なので、`−` = 相手にだけ在る行(左)、
+ *   `+` = この版にだけ在る行(右)。
+ *
+ * @param currentBody 既定の相手(`null` = 読めていない → `current` のときは何も出さない)
+ * @param items 履歴の全件(相手に選べる版の一覧と、相手の名前に使う)
+ * @param linked そのノートが PC のファイルと結びついているか(`file` の選択肢を出すか)
  */
-function renderRevisionDiff(revBody: string, currentBody: string): HTMLElement {
+function renderRevisionDiff(
+  preview: NonNullable<AppState['revisionPreview']>,
+  currentBody: string | null,
+  items: readonly HistoryItemLike[],
+  linked: boolean,
+): HTMLElement | null {
+  const compare = preview.compare;
   const box = document.createElement('div');
   box.setAttribute('data-pkc-field', 'revision-diff');
+
+  // ── 相手の名前 / 中身(読めていなければ `text: null` と、その理由の字)
+  let other: { name: string; same: string; text: string | null; note: string | null };
+  if (compare.kind === 'current') {
+    if (currentBody === null) return null;
+    other = { name: 'いまの本文', same: 'いまの本文と同じです', text: currentBody, note: null };
+  } else if (compare.kind === 'rev') {
+    const it = items.find((x) => x.id === compare.revId);
+    const name = it === undefined ? 'その版' : revName(it);
+    const load = compare.load;
+    other = {
+      name,
+      same: 'その版と同じです',
+      text: load.state === 'loaded' ? load.text : null,
+      note:
+        load.state === 'loading'
+          ? '読んでいます…'
+          : load.state === 'failed'
+            ? 'その版の本文を読めませんでした(履歴が整理された可能性があります)'
+            : null,
+    };
+  } else {
+    const load = compare.load;
+    other = {
+      name: 'PC のファイル',
+      same: 'PC のファイルと同じです',
+      text: load.state === 'loaded' ? load.text : null,
+      // ⚠ 読めなかったのを「同じ」「違いはありません」と言わない
+      note:
+        load.state === 'loading'
+          ? '読んでいます…'
+          : load.state === 'failed'
+            ? 'ファイルを読めませんでした'
+            : null,
+    };
+  }
+
   const head = document.createElement('div');
-  const counts = diffCounts(revBody, currentBody);
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'revision-diff-summary');
-  label.textContent =
-    counts.added === 0 && counts.removed === 0
-      ? 'いまの本文と同じです'
-      : `いまの本文とのちがい: +${counts.added} −${counts.removed}`;
+  if (other.text !== null) {
+    // ⚠ 左 = 相手 → 右 = この版
+    const counts = diffCounts(other.text, preview.body);
+    label.textContent =
+      counts.added === 0 && counts.removed === 0
+        ? other.same
+        : `${other.name}とのちがい: +${counts.added} −${counts.removed}`;
+  } else {
+    label.textContent = other.note ?? '';
+  }
   const close = document.createElement('button');
   close.type = 'button';
   close.setAttribute('data-pkc-action', 'hide-revision-preview');
   close.textContent = 'この版を閉じる';
   head.append(label, close);
   box.append(head);
+
+  // ── くらべる相手(E の仕分け: 閉じた選択肢を 1 つ選ぶ。値 = current / rev:<id> / file)
+  const pick = document.createElement('div');
+  const pickLabel = document.createElement('label');
+  pickLabel.append('くらべる相手 ');
+  const select = document.createElement('select');
+  select.setAttribute('data-pkc-action', 'set-revision-compare');
+  select.setAttribute('data-pkc-field', 'revision-compare');
+  const addOption = (value: string, text: string): void => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = text;
+    select.append(o);
+  };
+  addOption('current', 'いまの本文');
+  // ⚠ 見ている版そのものとは比べない(同じ物どうしで「同じです」と出るだけ)
+  for (const it of items) if (it.id !== preview.revId) addOption(`rev:${it.id}`, revName(it));
+  // ⚠ PC のファイルは**結びついているノートだけ**(無いのに出すと、押しても読めない dead click)
+  if (linked) addOption('file', 'PC のファイル');
+  select.value =
+    compare.kind === 'current' ? 'current' : compare.kind === 'rev' ? `rev:${compare.revId}` : 'file';
+  pickLabel.append(select);
+  pick.append(pickLabel);
+  box.append(pick);
+
+  if (other.text === null) return box;
+
+  // ── 左右に並べた差分(同じ行は同じ高さ。狭いときは CSS が 1 列へ戻す)
+  const cols = document.createElement('div');
+  cols.setAttribute('data-pkc-field', 'revision-diff-cols');
+  const left = document.createElement('span');
+  left.textContent = other.name;
+  const right = document.createElement('span');
+  right.textContent = 'この版';
+  cols.append(left, right);
+  box.append(cols);
   const list = document.createElement('ul');
-  for (const row of diffRows(revBody, currentBody)) list.append(diffLineEl(row));
+  list.setAttribute('data-pkc-diff-layout', 'side');
+  for (const row of sideRows(diffRows(other.text, preview.body))) list.append(...sideRowEls(row));
   box.append(list);
   return box;
 }
@@ -3587,9 +3714,11 @@ function renderHistoryPanel(
     removed: number | null;
   }[],
   /** 開いている版(#398 段②)。⚠ その行の下にだけ差分を置く。 */
-  preview: { revId: string; body: string } | null,
-  /** 比べる相手 ── **disk で確認できている本文**(draft ではない)。 */
+  preview: NonNullable<AppState['revisionPreview']> | null,
+  /** 既定の相手 ── **disk で確認できている本文**(draft ではない)。 */
   currentBody: string | null,
+  /** そのノートが PC のファイルと結びついているか(`くらべる相手` に PC のファイルを出すか。#1231 段①)。 */
+  linked: boolean,
 ): HTMLElement {
   const panel = document.createElement('div');
   panel.setAttribute('data-pkc-field', 'history-panel');
@@ -3635,8 +3764,9 @@ function renderHistoryPanel(
     restore.textContent = 'この版に戻す';
     li.append(open, restore);
     // ⚠ **その行の下に置く** ── 一覧の外に出すと、どの版の差分か分からなくなる
-    if (preview?.revId === item.id && currentBody !== null) {
-      li.append(renderRevisionDiff(preview.body, currentBody));
+    if (preview?.revId === item.id) {
+      const diff = renderRevisionDiff(preview, currentBody, items, linked);
+      if (diff !== null) li.append(diff);
     }
     list.append(li);
   }

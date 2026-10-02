@@ -167,8 +167,10 @@ describe('#398 段② 戻す前に中身を見る', () => {
     const diff = s.q('[data-pkc-field="revision-diff"]');
     expect(diff, '押しても差分が出ない').not.toBeNull();
     const texts = [...diff!.querySelectorAll('li')].map((li) => li.textContent);
-    expect(texts, '消えた行が出ていない').toContain('− むかしの本文');
-    expect(texts, '足した行が出ていない').toContain('+ いまの本文');
+    // 🔴 #1231 段①: 左 = 相手(いまの本文)/ 右 = この版。`−` = 相手にだけ在る行、`+` = この版にだけ在る行
+    //    (段①の前は向きが逆だった ── 相手を選べるようになったので「この版」を右に置く向きへ揃えた)
+    expect(texts, '相手にだけ在る行が出ていない').toContain('− いまの本文');
+    expect(texts, 'この版にだけ在る行が出ていない').toContain('+ むかしの本文');
   });
 
   it('🔴 総量が出る(「いまの本文との」ちがいだと分かる)', async () => {

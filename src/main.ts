@@ -3381,6 +3381,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         });
       }
     },
+    // 🔴 履歴の面の「くらべる相手 = PC のファイル」(#1231 段①)。書き戻しの確認と同じ読み口(`readCurrent`)を使う。
+    //    ⚠ 読めない・大きすぎる・結びついていない = `null`(「同じ」と言わない)。1 バイトも書かない
+    readLinkedFile: async (lid) => (await launched.readCurrent(lid))?.text ?? null,
     /**
      * 🔴 **元の md へ書き戻す**(2026-08-05、user 報告
      * 「マークダウンファイルに紐付けれるけど、取り込みもスポットの編集プレビュー導線も

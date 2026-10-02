@@ -1321,6 +1321,22 @@ export interface TrashItem {
   archetype: string | null;
 }
 
+/**
+ * 🔴 **履歴の面で、見ている版をくらべる相手**(#1231 段①。🟣 Gemini 裁定 2026-10-02 Q2 = A + C)。
+ * `current` = いまの本文(既定)/ `rev` = 履歴の別の版 / `file` = そのノートが結びついている PC のファイル。
+ * ⚠ **見るだけ** ── どれを選んでも 1 バイトも書かない。
+ */
+export type RevisionCompare =
+  | { kind: 'current' }
+  | { kind: 'rev'; revId: string; load: RevisionCompareLoad }
+  | { kind: 'file'; load: RevisionCompareLoad };
+
+/** 相手の中身を読む進み具合。⚠ `failed` を `loaded` + 空の字と**潰さない**(読めなかったのに「同じ」と言わない)。 */
+export type RevisionCompareLoad =
+  | { state: 'loading' }
+  | { state: 'failed' }
+  | { state: 'loaded'; text: string };
+
 export interface AppState {
   phase: AppPhase;
   cid: string | null;
@@ -1482,7 +1498,17 @@ export interface AppState {
    * ⚠ 本文を持つのは**開いている 1 件だけ** ── 一覧の全件を持つと、
    *   履歴を開くだけで本文が N 本 heap に載る(常駐ゼロの規律に反する)。
    */
-  revisionPreview: { lid: string; revId: string; body: string } | null;
+  revisionPreview: {
+    lid: string;
+    revId: string;
+    body: string;
+    /**
+     * 🔴 **くらべる相手**(#1231 段①)。⚠ **見ている版と一緒に持つ** ── 版を閉じる・別のノートを選ぶ・
+     *   別の版を開くと `revisionPreview` ごと入れ替わるので、相手も**自然に `current` へ戻る**
+     *   (別に持つと、閉じたのに相手だけ残る)。
+     */
+    compare: RevisionCompare;
+  } | null;
   /**
    * 🔴 **一時の知らせ**(#402 ①)。`null` = 何も出していない。
    *
@@ -2923,6 +2949,23 @@ export type UserAction =
   | { type: 'PREVIEW_REVISION'; revId: string }
   | { type: 'HIDE_REVISION_PREVIEW' }
   | { type: 'REVISION_PREVIEW_LOADED'; lid: string; revId: string; body: string }
+  /**
+   * 🔴 **くらべる相手を選ぶ**(#1231 段①)。`value` = `current` / `rev:<版の id>` / `file`(`<select>` の値そのまま)。
+   * ⚠ 読むだけ(1 バイトも書かない)。見ている版が無いときは何もしない。
+   */
+  | { type: 'SET_REVISION_COMPARE'; value: string }
+  /**
+   * 相手の中身が届いた。`against` = 何を読んだか(`rev:<id>` / `file`)、`text` = `null` なら読めなかった。
+   * ⚠ **`lid` / `previewRevId` / `against` が今の選びと食い違うなら捨てる**(遅れて着いた分が
+   *   別のノート・別の版・選び直した後の相手の画面を上書きしない)。
+   */
+  | {
+      type: 'REVISION_COMPARE_LOADED';
+      lid: string;
+      previewRevId: string;
+      against: string;
+      text: string | null;
+    }
   | { type: 'HIDE_HISTORY' }
   | { type: 'RESTORE_REVISION'; revId: string }
   | { type: 'SHOW_TRASH' }
@@ -3729,7 +3772,13 @@ export type DomainEvent =
     }
   | { type: 'REQUEST_REVISION_LIST'; lid: string }
   /** その版の本文を読む(#398 段②)。⚠ **読むだけ**(書込は 1 バイトも無い)。 */
-  | { type: 'REQUEST_REVISION_BODY'; lid: string; revId: string }
+  | {
+      type: 'REQUEST_REVISION_BODY';
+      lid: string;
+      revId: string;
+      /** 🔴 くらべる相手として読む(#1231 段①)。値 = **見ている版の id**。省くと見る版そのものを読む。 */
+      forCompareOf?: string;
+    }
   | {
       /** 履歴からの復元(前進変異): effect が「現状を addRevision → revision
        *  内容で persist」の順に行う。meta snapshot は発火時捕獲。 */
@@ -8463,8 +8512,54 @@ function reduceCore(
       return {
         state: {
           ...state,
-          revisionPreview: { lid: action.lid, revId: action.revId, body: action.body },
+          // ⚠ 相手は**必ず `current` から**(版を開き直したら、前の相手を持ち越さない)
+          revisionPreview: {
+            lid: action.lid,
+            revId: action.revId,
+            body: action.body,
+            compare: { kind: 'current' },
+          },
         },
+        events: [],
+      };
+    }
+    case 'SET_REVISION_COMPARE': {
+      const pv = state.revisionPreview;
+      if (state.phase !== 'ready' || pv === null || state.selectedLid !== pv.lid)
+        return { state, events: [] };
+      const set = (compare: RevisionCompare, events: DomainEvent[] = []) => ({
+        state: { ...state, revisionPreview: { ...pv, compare } },
+        events,
+      });
+      if (action.value === 'current') return set({ kind: 'current' });
+      // ⚠ PC のファイルは**結びついているノートだけ**(選択肢を出していない相手を、値の直撃で選ばせない)
+      if (action.value === 'file') {
+        if (!state.linkedFiles.has(pv.lid)) return { state, events: [] };
+        return set({ kind: 'file', load: { state: 'loading' } });
+      }
+      if (action.value.startsWith('rev:')) {
+        const revId = action.value.slice('rev:'.length);
+        // ⚠ 見ている版そのものとの比較は意味が無い(選択肢にも出さない)/ 履歴に並んでいない版は読まない
+        const items = state.revisionPanel?.lid === pv.lid ? state.revisionPanel.items : [];
+        if (revId === pv.revId || !items.some((it) => it.id === revId)) return { state, events: [] };
+        return set({ kind: 'rev', revId, load: { state: 'loading' } }, [
+          { type: 'REQUEST_REVISION_BODY', lid: pv.lid, revId, forCompareOf: pv.revId },
+        ]);
+      }
+      return { state, events: [] };
+    }
+    case 'REVISION_COMPARE_LOADED': {
+      const pv = state.revisionPreview;
+      if (pv === null || pv.lid !== action.lid || pv.revId !== action.previewRevId)
+        return { state, events: [] };
+      const c = pv.compare;
+      if (c.kind === 'current') return { state, events: [] };
+      const now = c.kind === 'rev' ? `rev:${c.revId}` : 'file';
+      if (now !== action.against || c.load.state !== 'loading') return { state, events: [] };
+      const load: RevisionCompareLoad =
+        action.text === null ? { state: 'failed' } : { state: 'loaded', text: action.text };
+      return {
+        state: { ...state, revisionPreview: { ...pv, compare: { ...c, load } } },
         events: [],
       };
     }
