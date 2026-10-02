@@ -323,11 +323,18 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
    * 🔴 **語を本文の「奥」に 2 回書く**(#1102 段①)── 開いた窓で、送った位置が画面の中に在ることを
    *   見るには、**送らなければ見えない所**に当たりが要る(短い本文だと、送らなくても見えて通る)。
    *   ⚠ 2 回の間は 40 字より離す ── 一覧の抜粋に印が 1 つだけ出る前提(下の `row.locator('mark')`)を保つ。
+   * 🔴 **「奥」は字体に依らない距離で取る**(2026-10-02)── 以前は 700 字(開いた窓は幅 420px で 1 つ目が
+   *   本文の 534px 付近)で、「送った後の scrollTop > 300」を要求していた。送る先は画面の上から 35% の所
+   *   (`scrollToHit` の `LAND_RATIO`)なので scrollTop = 位置 − 210px で、**余裕は 24px しか無かった**。
+   *   CJK の字体が変わる(行の高さが数 % 動く)と 286px になり、**送れているのに「送っていない」と落ちた**
+   *   (CI のフル Chromium で実際に落ちた。手元で字体を IPA ゴシックへ替えると同じ値で再現する)。
+   *   1500 字にして、1 つ目が**窓の高さより十分下**に在るようにする。
    */
   const filler = (n: number): string => `ここは長い文です${'あ'.repeat(n)}。`;
+  const FILLER_LEN = 1500;
   await live
     .locator('[data-pkc-field="row-source"]')
-    .fill(`探す面の本文に書いた ${filler(700)} けんさくご という語 ${filler(700)} けんさくご の 2 つ目`);
+    .fill(`探す面の本文に書いた ${filler(FILLER_LEN)} けんさくご という語 ${filler(FILLER_LEN)} けんさくご の 2 つ目`);
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // ⚠ 追記の入り先(`append-target`)は見出しの無い本文では畳まれる ── 描けた印で待つ
@@ -414,8 +421,20 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     .poll(async () => win.evaluate(() => document.querySelector('[data-pkc-region="detail"]')!.scrollTop), {
       message: '送っていない(scrollTop が 0 のまま)',
     })
-    .toBeGreaterThan(300);
+    .toBeGreaterThan(0);
   const first = await inView('1 件目');
+  // 🔑 前提を assert する ── 1 つ目は**送らなければ見えない所**(本文の先頭から窓の高さより下)に在る。
+  //   崩れたら「送っていない」ではなく「前提が崩れている」と読める文言で落とす(字体で行の高さが動いても)
+  const premise = await win.evaluate(() => {
+    const d = document.querySelector('[data-pkc-region="detail"]') as HTMLElement;
+    const css = (window as unknown as { CSS: { highlights: Map<string, Set<Range>> } }).CSS;
+    const r = [...css.highlights.get('pkc-search-hit-current')!][0]!.getBoundingClientRect();
+    return { docTop: r.top - d.getBoundingClientRect().top + d.scrollTop, clientHeight: d.clientHeight };
+  });
+  expect(
+    premise.docTop,
+    `前提が崩れている: 1 つ目の当たりが本文の先頭から窓の高さ(${premise.clientHeight}px)の内に在る = 送らなくても見える`,
+  ).toBeGreaterThan(premise.clientHeight);
   // ③ 塗りが画素として見える ── 塗りを消す前後で、その位置の画素が変わる
   const clip = { x: Math.max(0, first.left), y: Math.max(0, first.top), width: Math.max(1, first.right - first.left), height: Math.max(1, first.bottom - first.top) };
   const painted = await win.screenshot({ clip });
