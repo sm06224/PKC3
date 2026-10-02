@@ -3437,6 +3437,36 @@ li[data-pkc-row-slot] {
   white-space: nowrap;
 }
 
+/**
+ * 🔴 **色コードの左に置く色の見本**(#1224)。
+ *
+ * 色は **`--pkc-swatch`**(描くときに焼く)から塗る ── 要素は**字を持たない**ので、選べず・コピーに入らない。
+ * 文字の高さに合わせた小さな角丸の四角で、縁は無彩色(白や黒の見本も地に溶けない)。
+ * 🔴 **`[data-pkc-prose]` を起点にする**(日付の添え字と同じ理由 ── `.pkc-md-rendered` 起点は書き出しへ焼かれる。
+ *   書き出しには見本の要素そのものが出ない)。
+ */
+[data-pkc-prose] .pkc-color-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  vertical-align: -0.1em;
+  margin-right: 0.3em;
+  border: 1px solid var(--border);
+  border-radius: 0.2em;
+  background: var(--pkc-swatch, transparent);
+  box-sizing: border-box;
+}
+/* 🔴 押して色を直せる見本(6 桁小文字。#1224 段②)だけ、押せる形に見せる。
+   ⚠ 押せない見本(3 桁・大文字・8 桁)は飾りのまま ── ポインタも枠も変えない。 */
+[data-pkc-prose] .pkc-color-swatch[role='button'] {
+  cursor: pointer;
+}
+[data-pkc-prose] .pkc-color-swatch[role='button']:hover,
+[data-pkc-prose] .pkc-color-swatch[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* 取り込み待ちの器(まだ実体が入っていないことが分かる形にする) */
 .pkc-md-rendered .pkc-transclusion-placeholder,
 .pkc-md-rendered .pkc-card-placeholder {

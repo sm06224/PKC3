@@ -40,6 +40,7 @@ import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { RelativeDaysStore } from '@adapter/ui/render/relative-days';
+import { ColorSwatchStore } from '@adapter/ui/render/color-swatch';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
@@ -111,6 +112,16 @@ const CASES: readonly {
     name: 'RelativeDaysStore',
     make: () => {
       const s = new RelativeDaysStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)
+    a: false,
+    b: true,
+  },
+  {
+    name: 'ColorSwatchStore',
+    make: () => {
+      const s = new ColorSwatchStore(null);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)

@@ -95,6 +95,21 @@ describe('markdown worker', () => {
   });
 
   /**
+   * 🔴 **色コードの見本を出す旗も落とさない**(#1224)。読む面はワーカー経由で描くので、
+   * 素通しでないと「同期では出るのに、ワーカーが立っていると出ない」という環境で割れる形になる。
+   */
+  it('🔴 opts の colorSwatches を落とさない(色の見本が worker でも出る)', () => {
+    const text = '主色は `#3b82f6`\n';
+    const on = send(1, text, { colorSwatches: true }) as { result: string };
+    const off = send(2, text) as { result: string };
+    // ⚠ **違いが出ること**を先に確かめる ── 同じなら opts を見ていない実装でも通る
+    expect(on.result).not.toBe(off.result);
+    expect(on.result).toContain('data-pkc-color-swatch');
+    expect(off.result).not.toContain('color-swatch');
+    expect(on.result).toBe(renderMarkdown(text, { colorSwatches: true }));
+  });
+
+  /**
    * 🔴 **囲みの中身(添付)も落とさない**(#444 段②)。
    *
    * 書き出しは `renderBody` 経由で**ワーカーへ行くことがある** ── ここが素通しで

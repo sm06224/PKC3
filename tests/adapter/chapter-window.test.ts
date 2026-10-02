@@ -170,7 +170,7 @@ describe('🔴 読むだけ ── 押して書く口を残さない', () => {
   });
 
   it('⚠ 送れる口の一覧は、本文を書き換える口を 1 つも持たない', () => {
-    for (const w of ['toggle-task', 'edit-cell', 'shape-cell', 'edit-code-block', 'filter-by-tag', 'copy-md-block']) {
+    for (const w of ['toggle-task', 'edit-cell', 'shape-cell', 'edit-code-block', 'filter-by-tag', 'copy-md-block', 'pick-color']) {
       expect(CHAPTER_WINDOW_ACTIONS.has(w), `${w} が送れる口に入っている`).toBe(false);
     }
   });

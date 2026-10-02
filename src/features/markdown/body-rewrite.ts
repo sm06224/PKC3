@@ -17,6 +17,7 @@ import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
 import { removeInsertedLines } from './append-target';
+import { replaceColorSpan } from './color-code';
 import {
   addPlace,
   connectPlaces,
@@ -117,6 +118,28 @@ export type BodyRewrite =
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
       kind: 'task';
       line: number;
+    }
+  | {
+      /**
+       * 🔴 **本文の `` `#3b82f6` `` の色コードを 1 つ書き換える**(#1224。Gemini 裁定 2026-10-01 Q2 = B)。
+       *
+       * > user の物語:色の見本を押して、違う色を選んだ。**そのコードの字だけ**が変わる。
+       *
+       * ⚠ **行の途中の 1 つの字**を書き換える(これまでは行ごと / 印の 1 文字 / 日付の範囲)。だから
+       *   **何行目の何番目か**で指す ── `line` は**原文の行番号**(0 始まり。`task` と同じ座標系)、
+       *   `nth` は**その行の何番目の色コードか**(0 始まり)。数え方は `color-code.ts` の
+       *   `colorSpansOfLine` の 1 本(描く側と同じ。§7)。
+       * ⚠ `from` は**押した時点の字** ── disk 側の同じ所と byte 一致しなければ書かない
+       *   (別の窓の書込で行がずれた形。当てずっぽうで別の色を書き換えない)。
+       * ⚠ `from` も `to` も **6 桁小文字(`#rrggbb`)** ── 3 桁・大文字・8 桁は**書いた綴りを
+       *   変えない**ので書き換えない(見本だけ出る)。
+       * ⚠ コード囲み(```)の中は数えない(インラインコードではない)。
+       */
+      kind: 'color';
+      line: number;
+      nth: number;
+      from: string;
+      to: string;
     }
   | {
       /**
@@ -664,6 +687,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     const valid = new Set(rewrite.lines).size - r.skipped.invalid;
     return valid <= 0 ? null : r.body;
   }
+  if (rewrite.kind === 'color') return rewriteColor(body, rewrite);
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   if (rewrite.kind === 'repeat-move') return moveRepeatOccurrence(body, rewrite);
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
@@ -725,6 +749,33 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   lines[rewrite.line] = line.slice(0, at) + (checked ? ' ' : 'x') + line.slice(at + 1);
   const eol = detectEol(body);
   return lines.join(eol);
+}
+
+/**
+ * 🔴 **色コードを 1 つ書き換える**(#1224)。
+ *
+ * ⚠ **その色コードの字(6 桁)だけ**を入れ替える ── 行を組み直さず、**本文の前後は 1 バイトも動かさない**
+ *   (改行の種類・同じ行の別の色・別の行はそのまま)。同じ字に変えるなら本文をそのまま返す(= 書かない)。
+ * ⚠ 当たらなければ `null`(断る): 行が無い / 囲みの中 / `nth` 番目が無い / 字が `from` と違う。
+ */
+function rewriteColor(
+  body: string,
+  rewrite: { line: number; nth: number; from: string; to: string },
+): string | null {
+  const lines = splitLines(body);
+  const line = lines[rewrite.line];
+  if (line === undefined) return null;
+  // コード囲みの中の字はインラインコードではない(描く側も数えない)
+  for (const f of fencesBelowFrontmatter(body)) {
+    if (f.start <= rewrite.line && rewrite.line <= f.end) return null;
+  }
+  const next = replaceColorSpan(line, rewrite.nth, rewrite.from, rewrite.to);
+  if (next === null) return null;
+  if (next === line) return body;
+  // その行の先頭の位置(`splitLines` は `\n` で割って `\r` を落とす ── k 行目は k 個目の `\n` の次)
+  let at = 0;
+  for (let i = 0; i < rewrite.line; i += 1) at = body.indexOf('\n', at) + 1;
+  return body.slice(0, at) + next + body.slice(at + line.length);
 }
 
 /**

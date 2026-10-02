@@ -134,6 +134,7 @@ import { appEditorMode } from './editor-mode';
 import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
 import { appDateLinks } from './date-links';
+import { appColorSwatch } from './color-swatch';
 import { syncRelativeDays } from './relative-days';
 import { appVoiceBoostRouter } from './voice-boost';
 import {
@@ -1350,6 +1351,16 @@ export class DetailRenderer {
          * ⚠ 決めているのは**設定**(既定は入)。描くのはワーカーなので素の真偽値で渡す。
          */
         interactiveDates: appDateLinks.enabled(),
+        /**
+         * 🔴 **バッククォートで囲んだ色コードの左に、色の見本を出す**(#1224)。
+         *
+         * > user の物語:`#3b82f6` と書いた覚え書きを読んで、どんな色かを**隣の小さな四角で見たい**。
+         *
+         * ⚠ **この面だけ**である ── 書き出した HTML・Word・印刷・章の別ウィンドウ・プレビューは
+         *   見本を出さない(空の要素が Word で落ち、紙にも載せたくない)。
+         * ⚠ 決めているのは**設定**(既定は入)。描くのはワーカーなので素の真偽値で渡す。
+         */
+        colorSwatches: appColorSwatch.enabled(),
         /**
          * 🔴 **押した行を原文の行で焼く**(N1)。この面は `fm.body`(frontmatter を
          * 剥がした本文)を描くが、受け手(`body-rewrite.ts`)は**原文**を splice する。

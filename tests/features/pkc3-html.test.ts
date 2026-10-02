@@ -209,6 +209,25 @@ describe('可搬 HTML', () => {
     expect(text, '「あとN日」の添え字の属性が書き出しに載っている').not.toContain('data-pkc-rel');
   });
 
+  /**
+   * 🔴 **色コードの見本(#1224)は、書き出す HTML に出ない**。
+   * 空の `<span>` は Word で落ち、紙にも載せたくない ── 色は `<code>` の字で足りる。
+   * ⚠ 描く側の旗(`colorSwatches`)は既定で切、見た目の規則は `[data-pkc-prose]` 起点で
+   *   焼かれる CSS に入らない ── どちらが外れても、ここが落ちる。
+   */
+  it('🔴 本文の色コードには、書き出した HTML で見本が出ない(要素も規則も載らない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '主色は `#3b82f6` です\n' }] }),
+      NOW,
+    );
+    const text = await out.blob.text();
+    // ⚠ 空振り防止 ── 色コードそのものは字として在る(本文が消えていない)
+    expect(text, '本文の色コードが消えている').toContain('#3b82f6');
+    expect(text, '見本の要素が書き出しに載っている').not.toContain('data-pkc-color-swatch');
+    expect(text, '見本の class が書き出しに載っている').not.toContain('pkc-color-swatch');
+    expect(text, '見本の色の変数が書き出しに載っている').not.toContain('--pkc-swatch');
+  });
+
   it('escapeForScriptData は `<` を退避し、値は変えない', () => {
     expect(escapeForScriptData('a</script>b<!--c')).toBe('a\\u003c/script>b\\u003c!--c');
     expect(escapeForScriptData('x > y')).toBe('x > y'); // それ以外は触らない

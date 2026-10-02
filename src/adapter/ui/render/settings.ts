@@ -54,6 +54,7 @@ import { appInlineCodeCopy, InlineCodeCopyStore } from './inline-code-copy';
 import { appPhoneLinks, PhoneLinksStore } from './phone-links';
 import { appDateLinks, DateLinksStore } from './date-links';
 import { appRelativeDays, RelativeDaysStore } from './relative-days';
+import { appColorSwatch, ColorSwatchStore } from './color-swatch';
 import { EXTERNAL_IMAGE_MODES } from '@features/markdown/external-images';
 import {
   NOTICE_READABLE_TEXT,
@@ -189,6 +190,11 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly relativeDays: RelativeDaysStore = appRelativeDays,
+    /**
+     * 🔴 **本文の色コードの左に色の見本を出すか**(#1224)。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly colorSwatch: ColorSwatchStore = appColorSwatch,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -213,6 +219,7 @@ export class SettingsRenderer {
       this.syncPhoneLinks();
       this.syncDateLinks();
       this.syncRelativeDays();
+      this.syncColorSwatch();
       this.syncMissingLinks();
       this.syncCodeCollapse();
       this.syncInlineCodeCopy();
@@ -778,6 +785,26 @@ export class SettingsRenderer {
     rdd.append(rdlabel);
     editDl.append(rdt, rdd);
     /**
+     * 🔴 **バッククォートで囲んだ色コードの左に、色の見本を出すか**(#1224)。
+     *
+     * ⚠ **既定は入**(`relative-days` と同じ ── 見え方が変わるので切れる)。
+     * ⚠ 説明は hover に置く(visible の note を足すと `settings-notes.test.ts` の段落数を動かす)。
+     */
+    const cst = document.createElement('dt');
+    cst.textContent = '色コードの見本';
+    const csd = document.createElement('dd');
+    const cslabel = document.createElement('label');
+    const cscheck = document.createElement('input');
+    cscheck.type = 'checkbox';
+    cscheck.setAttribute('data-pkc-action', 'set-color-swatch');
+    cscheck.setAttribute('data-pkc-field', 'color-swatch');
+    cslabel.append(cscheck, document.createTextNode(' 本文の `#3b82f6` のような色コードの左に、色の見本を出す'));
+    cslabel.title =
+      'バッククォート(`)で囲んだ色コードの左に、その色の小さな四角が出ます(コードの字は変わらず、コピーにも入りません)。' +
+      '囲んでいない字、書き出した HTML・Word・印刷には出ません。';
+    csd.append(cslabel);
+    editDl.append(cst, csd);
+    /**
      * 🔴 **リンク先のノートが無いリンクを、点線で見せるか**(#1174 段①)。
      *
      * ⚠ **既定は入**(`phone-links` と逆)── 変わるのは下線の種類だけで、字の色は
@@ -1035,6 +1062,7 @@ export class SettingsRenderer {
     this.syncPhoneLinks();
     this.syncDateLinks();
     this.syncRelativeDays();
+    this.syncColorSwatch();
     this.syncMissingLinks();
     this.syncCodeCollapse();
     this.syncInlineCodeCopy();
@@ -1665,6 +1693,11 @@ export class SettingsRenderer {
   private syncRelativeDays(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="relative-days"]');
     if (box) box.checked = this.relativeDays.enabled();
+  }
+
+  private syncColorSwatch(): void {
+    const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="color-swatch"]');
+    if (box) box.checked = this.colorSwatch.enabled();
   }
 
   private syncNotices(): void {
