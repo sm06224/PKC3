@@ -151,6 +151,15 @@ status = e && e.signal === 'SIGTERM' && !overflow ? 'TIMEOUT(判定不能)' : 'K
 
 🔑 **大きな生成物は `cat` しない** ── `grep -c` に数えさせて数字だけ受け取る。
 
+#### 🔴 5 つ目の値: `INFRA`(計器が立たなかった)── 2026-10-02、#1231 段①の CSS 変異で踏んだ
+
+smoke に変異を当てるハーネスは `build` + `playwright` の対で回る。**playwright の `webServer` が立たなければ
+test は全部落ちる**ので、7 件の変異が**全部 KILLED に見えた**(偽の KILLED)。原因は port の衝突
+(`EADDRINUSE`。playwright は `PKC3_SMOKE_PORT` から **3 つ**握る ── `subagent-scale` の注意書き)。
+🔑 ハーネスは**落ちた理由の字**を見る:出力に `webServer` / `EADDRINUSE` / `Error: Process from config.webServer`
+が在れば **`INFRA`** として出し、**結果を読まない**。KILLED は「変異を当てた test が、その assert の文言で落ちた」
+ときだけ ── ⚠ 「落ちた」だけでは KILLED と言えない(§4 の「対照群が届かない回は判定不能」の、ハーネス版)。
+
 ### 2.5. 🔴 生き延びたら、「差が user に見えるか」を先に問う(2026-08-08)
 
 `SURVIVED` の 3 つ目の顔: **実装としては違うのに、user から見た結果が同じ**。

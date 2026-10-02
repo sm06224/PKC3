@@ -75,6 +75,7 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 | **`data-pkc-action`** | `action-outlets.test.ts`(`OBJECT_LONE` など受け手の仕分け)/ `operation-table.test.ts`(件数)/ `action-scope-survey.test.ts` + `scripts/action-scope-survey.mjs` / `docs/development/operation-model-2026-08.md` §7.1 の表 | 件数と表を**事実が動いた分だけ**直す |
 | **ノードから lid を引く新しい口** | `adapter/lid-of-node.test.ts`(寄せた呼び出しの**件数**を pin) | 件数を直す(寄せずに手書きすると落ちる ── 寄せるのが正しい向き) |
 | **設定 1 つ**(localStorage に持つ store) | `adapter/store-fallback.test.ts`(控えを持つ store の**全数走査**)/ 設定の持ち出し(`features/settings-file.test.ts` 周辺)の key の件数 | store は fallback を持たせる。持ち出しの件数は直す |
+| **reducer の action を 1 つ足す**(`type: 'XXX'`) | `adapter/body-write-block-lid.test.ts`(**編集中に無言で捨てる case の全数 pin**。2026-10-02、#1231 段①の `SET_REVISION_COMPARE` で全量で初めて落ちた) | 読むだけの action なら「無言で捨ててよい側」に名指しで足し、件数を +1。書く action なら `BODY_WRITE_ACTIONS` の側 |
 
 🔑 **手順は 2 つ**:①**触った層だけでなく `npx vitest run tests/` を 1 回**(grep では見つからない ──
 上の 5 つの教訓と同じ。件数しか持たない検査は、足した名前を 1 つも書いていない)。
@@ -242,6 +243,14 @@ git stash pop
 ```
 
 ### 🔑 1 本の branch で主題を 2 つ以上並行させる ── **local branch に停めて、merge 後に載せ直す**(2026-09-02)
+
+#### 🔴 検査が落ちたまま `git checkout <別 branch>` しない(2026-10-02)
+
+お知らせを足して全数検査を回し、**1 件落ちたので commit せずに**元の branch へ `git checkout` した ──
+git は未 commit の変更を**黙って持ち越す**ので、お知らせの編集が**別の branch の作業ツリーに乗った**
+(気づいたのは次の `git status`)。落ちた検査が負荷の timeout だったので、戻って単独で回し直して commit した。
+🔑 branch を替える前に **`git status --short | grep -v '^??'` が空**であることを見る。空でないなら
+commit(WIP でよい)してから替える。⚠ `git stash` は箱の中で共有される(worktree の注意書き)── 使わない。
 
 PR #649(hotfix)の CI を待つ間に Q5 / Q6 を実装した日の形。**designated branch には
 open PR の commit しか置かない**(混ぜると PR の差分が別主題を抱える):
