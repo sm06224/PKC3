@@ -5195,11 +5195,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='pc-band'] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
 }
+/* 🔴 名前は 1 行目をいっぱいに取り、押し口(更新 / 別のフォルダ… / 切る)は次の行へ回る
+ *   (#1264 §2 欠陥 4-a ── 200px の列で押し口 3 つと名前を 1 行に並べると、名前が消える) */
 [data-pkc-field='pc-folder-name'] {
-  flex: 1;
+  flex: 1 1 100%;
   min-width: 0;
   font-weight: 600;
   overflow: hidden;
@@ -5263,7 +5266,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-size: 12px;
 }
-[data-pkc-field='pc-readonly'],
+[data-pkc-field='pc-link-note'],
 [data-pkc-field='pc-contact-note'] {
   color: var(--muted);
   font-size: 12px;

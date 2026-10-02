@@ -7,7 +7,7 @@
  * > マニュアルにしか書いていなかった。全部を平らに出している人の目の前で教える。
  *
  * ⚠ 守る主張:
- *  ① 入れている間の一言(「全部出しています(N 件)」)の隣に「最近開いたノートは <鍵>」が出る
+ *  ① 入れている間の一言(「全部出しています(N 件)」)の隣に「最近開いたノートへは <鍵>(または ◷)」が出る
  *  ② 鍵の綴りは**割当の表から引く**(期待値は `chordLabel(keymap の第 1 割当)` ── 手で書かない)
  *  ③ 割当を外した state では添えない(嘘の鍵を書かない)── 一言そのもの(件数)は残る
  *  ④ 割当を変えたら、**組み直しを待たずに**いま出ている字が書き変わる
@@ -76,7 +76,7 @@ afterEach(() => {
 });
 
 describe('「全部出しています」に最近開いたノートの近道を添える(#1254 §3 改善 B)', () => {
-  it('🔴 入れている間は、一言の隣に「最近開いたノートは <割当の第 1 鍵>」が出る', () => {
+  it('🔴 入れている間は、一言の隣に「最近開いたノートへは <割当の第 1 鍵>(または ◷)」が出る', () => {
     const keymap = new KeymapStore(memoryStorage());
     const { filer, note, recent } = mount(keymap);
     filer.render(flatState(true));
@@ -85,7 +85,7 @@ describe('「全部出しています」に最近開いたノートの近道を�
     const first = keymap.getBindings()['open-recent']?.[0];
     expect(first, '前提:最近開いたノートへ移る に割当が無い').toBeDefined();
     expect(recent(), '近道が添えられていない').not.toBeNull();
-    expect(recent()!.textContent).toBe(`最近開いたノートは ${chordLabel(first!)}`);
+    expect(recent()!.textContent).toBe(`最近開いたノートへは ${chordLabel(first!)}(または ◷)`);
     // 件数の一言は壊していない(別の要素で添える)
     expect(note()!.textContent).toMatch(/^全部出しています\(\d+ 件\)$/);
     // 一言と同じ塊の中(列が狭いとき、押し口だけが離れて落ちない)
@@ -119,7 +119,7 @@ describe('「全部出しています」に最近開いたノートの近道を�
     }
     // 第 1 割当が変わった ── 組み直し(render)を待たずに字が変わる
     expect(recent()!.textContent, '鍵を変えたのに古い綴りが残っている').toBe(
-      `最近開いたノートは ${chordLabel('Alt+Shift+J')}`,
+      `最近開いたノートへは ${chordLabel('Alt+Shift+J')}(または ◷)`,
     );
     keymap.removeBinding('open-recent', 'Alt+Shift+J');
     expect(recent(), '割当が無くなったのに鍵が残っている').toBeNull();

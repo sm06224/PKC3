@@ -12,6 +12,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CHANGED_OUTSIDE_REOPEN_NOTE,
+  CHANGED_OUTSIDE_WRITE_BACK_NOTE,
   LaunchedFiles,
   splitAlreadyOpen,
   writeBackFile,
@@ -104,6 +106,105 @@ describe('splitAlreadyOpen', () => {
     );
     expect(r.fresh).toHaveLength(2);
     expect(r.reopened).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **取り込んだ後にパソコン側で変わったことを、比べて言う**(#1264 §2 欠陥 1)。
+ *
+ * ⚠ 観測点は **偽 handle の `lastModified`** ── 進めたら「変わった」、進めなければ「変わっていない」
+ *   (対照群を同じ場面に置く。置かないと「常に変わった」でも緑)。
+ * ⚠ `getFile` を呼ぶのは**書き戻す直前**(`changedSince`)だけ。押し直しは、押した 1 件を呼び側が読み済み
+ *   (`item.file`)なので、**ここでは足さない**(#1271)。
+ */
+describe('取り込んだ後に外で変わったか', () => {
+  /** `lastModified` を後から進められる handle(本物の「外のエディタが直した」を真似る)。 */
+  function movable(id: string, initial: number) {
+    const state = { at: initial, gets: 0 };
+    const h = fakeHandle(id, {
+      getFile: () => {
+        state.gets += 1;
+        return Promise.resolve(new File(['x'], 'a.md', { lastModified: state.at }));
+      },
+    });
+    return { h, state };
+  }
+
+  it('🔴 書き戻す直前: 時刻が進んでいれば true、進んでいなければ false(対照群)', async () => {
+    const l = new LaunchedFiles();
+    const { h, state } = movable('a', 1000);
+    l.remember('n1', h, 'a.md', 1000);
+    expect(await l.changedSince('n1'), '何も触っていないのに「変わった」').toBe(false);
+    state.at = 2000; // 外のエディタが直した
+    expect(await l.changedSince('n1'), '外で変わったのに言わない(書き戻すと消える)').toBe(true);
+  });
+
+  it('🔴 取り込み時の時刻を持たない記憶(添付・連絡先)は比べない ── getFile も呼ばない', async () => {
+    const l = new LaunchedFiles();
+    const { h, state } = movable('a', 1000);
+    l.remember('n1', h, 'a.png'); // 時刻を渡さない
+    state.at = 2000;
+    expect(await l.changedSince('n1')).toBe(false);
+    expect(state.gets, '時刻が無いのに getFile を呼んだ').toBe(0);
+    expect(await l.changedSince('nope'), '記憶に無い lid').toBe(false);
+  });
+
+  it('🔴 読めない(getFile が投げる / 無い)ときは false ── 毎回脅さない', async () => {
+    const l = new LaunchedFiles();
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.reject(new Error('gone')) }), 'a.md', 1000);
+    l.remember('n2', fakeHandle('b'), 'b.md', 1000); // getFile を持たない
+    expect(await l.changedSince('n1')).toBe(false);
+    expect(await l.changedSince('n2')).toBe(false);
+  });
+
+  it('🔴 書き戻した後は、自分の書込を外の変更と読まない(憶え直す)', async () => {
+    const l = new LaunchedFiles();
+    const { h, state } = movable('a', 1000);
+    l.remember('n1', h, 'a.md', 1000);
+    state.at = 3000; // 自分の書込で時刻が動いた
+    await l.refreshModified('n1');
+    expect(l.modifiedOf('n1')).toBe(3000);
+    expect(await l.changedSince('n1'), '自分の書込を「外で変わった」と言っている').toBe(false);
+    state.at = 4000; // その後、本当に外で変わった
+    expect(await l.changedSince('n1')).toBe(true);
+  });
+
+  it('🔴 押し直し: 取り込んだ時の時刻と違えば changed に入る。同じなら入らない(対照群)。getFile は呼ばない', async () => {
+    const l = new LaunchedFiles();
+    const { h, state } = movable('a', 1000);
+    l.remember('n1', h, 'a.md', 1000);
+    const press = (modified: number) => ({
+      handle: fakeHandle('a'),
+      file: new File(['x'], 'a.md', { lastModified: modified }),
+    });
+    const same = await splitAlreadyOpen([press(1000)], l, () => true);
+    expect(same.reopened).toEqual(['n1']);
+    expect(same.changed, '変わっていないのに changed').toEqual([]);
+    const moved = await splitAlreadyOpen([press(2000)], l, () => true);
+    expect(moved.reopened, '変わっていても前のノートを指す(取り込み直さない)').toEqual(['n1']);
+    expect(moved.fresh).toEqual([]);
+    expect(moved.changed, '外で変わったのに言わない').toEqual(['n1']);
+    expect(state.gets, '押し直しの判定で getFile を呼んだ').toBe(0);
+  });
+
+  it('⚠ 取り込み時の時刻を持たない記憶は、押し直しでも changed にしない', async () => {
+    const l = new LaunchedFiles();
+    l.remember('n1', fakeHandle('a'), 'a.md');
+    const r = await splitAlreadyOpen(
+      [{ handle: fakeHandle('a'), file: new File(['x'], 'a.md', { lastModified: 9 }) }],
+      l,
+      () => true,
+    );
+    expect(r.changed).toEqual([]);
+  });
+
+  it('🔴 画面に出す字', () => {
+    expect(CHANGED_OUTSIDE_WRITE_BACK_NOTE).toBe(
+      'このファイルは取り込んだ後にパソコン側で変わっています。書き戻すと、その変更は消えます',
+    );
+    expect(CHANGED_OUTSIDE_REOPEN_NOTE).toBe(
+      'このファイルは取り込んだ後にパソコン側で変わっています(PKC のノートは取り込んだ時の中身です)',
+    );
   });
 });
 

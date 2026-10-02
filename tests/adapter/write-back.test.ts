@@ -17,10 +17,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  writeBackConfirmMessage,
   writeBackEntry,
   WRITE_BACK_EMPTY_NOTE,
   type WriteBackDeps,
 } from '../../src/adapter/ui/actions/write-back';
+import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '../../src/adapter/platform/launched-files';
 
 /**
  * 🔑 **書込が飛んでいる状態**を作る台。
@@ -49,6 +51,7 @@ function harness(over: Partial<WriteBackDeps> = {}) {
       return { ok: true };
     },
     confirm: async () => true,
+    changedOutside: async () => false,
     done: (m) => said.push(`done:${m}`),
     fail: (m) => said.push(`fail:${m}`),
     ...over,
@@ -82,6 +85,7 @@ describe('元のファイルへ書き戻す', () => {
         return { ok: true };
       },
       confirm: async () => true,
+      changedOutside: async () => false,
       done: () => {},
       fail: () => {},
     });
@@ -96,6 +100,65 @@ describe('元のファイルへ書き戻す', () => {
   });
 
   /**
+   * 🔴 **取り込んだ後にパソコン側で変わっていたら、確認の字に 1 行足す**(#1264 §2 欠陥 1)。
+   * ⚠ 書き戻しは止めない(user が確認で選ぶ)── 観測点は**確認の窓へ渡った字**と**書かれたか**。
+   * 対照群(変わっていない)を同じ場面に置く ── 置かないと「常に足す」でも緑になる。
+   */
+  it('🔴 外で変わっていたら、確認の字に「パソコン側で変わっています」が 1 行足される', async () => {
+    const asked: string[] = [];
+    const { deps, written } = harness({
+      changedOutside: async () => true,
+      confirm: async (message) => {
+        asked.push(message);
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(asked).toHaveLength(1);
+    expect(asked[0], '外で変わったのに確認の字が何も言わない').toContain(CHANGED_OUTSIDE_WRITE_BACK_NOTE);
+    expect(asked[0]).toContain('ファイルの元の内容は失われます(取り消せません)');
+    expect(written, '警告を出しても、user が OK なら書く').toEqual(['保存した本文']);
+  });
+
+  it('🔴 対照群: 変わっていなければ足さない(毎回脅さない)', async () => {
+    const asked: string[] = [];
+    const { deps } = harness({
+      changedOutside: async () => false,
+      confirm: async (message) => {
+        asked.push(message);
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(asked[0]).not.toContain('パソコン側で変わっています');
+    expect(asked[0]).toBe(writeBackConfirmMessage('メモ.md', false));
+  });
+
+  it('🔴 確認の字(画面に出る物)', () => {
+    expect(writeBackConfirmMessage('メモ.md', false)).toBe(
+      '「メモ.md」を、いまのノートの内容で上書きします。\n\nファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+    );
+    expect(writeBackConfirmMessage('メモ.md', true)).toBe(
+      '「メモ.md」を、いまのノートの内容で上書きします。\n\n' +
+        'このファイルは取り込んだ後にパソコン側で変わっています。書き戻すと、その変更は消えます\n\n' +
+        'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+    );
+  });
+
+  it('⚠ 空の本文で断るときは、外の変更を読みにいかない(確認の前の門が先)', async () => {
+    let read = 0;
+    const { deps } = harness({
+      getBody: async () => '  ',
+      changedOutside: async () => {
+        read += 1;
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(read).toBe(0);
+  });
+
+  /**
    * 🔴 **空の本文では書かない**(#215 段③)── 元のファイルが空で上書きされる。
    * 観測点は**ファイルへ書かれた中身**と**確認の窓が出たか**の 2 つ。
    * ⚠ 台は `getBody` を差し替えるだけ(門は `settle` の後の本文を見る)。
@@ -104,9 +167,6 @@ describe('元のファイルへ書き戻す', () => {
     ['空文字', ''],
     ['空白と改行だけ', '  \n\n\t \n'],
     ['全角空白だけ(日本語入力のまま打った)', '　　\n　'],
-    ['設定行(frontmatter)だけ', '---\ntitle: メモ\ntags: [a]\n---\n'],
-    ['設定行の後が空白だけ', '---\ntitle: メモ\n---\n\n  \n'],
-    ['CRLF の設定行だけ', '---\r\ntitle: メモ\r\n---\r\n'],
   ])('本文が空(%s)', (_label, empty) => {
     it('🔴 確認の窓も出さず、書かず、理由を言う', async () => {
       let asked = 0;
@@ -126,7 +186,7 @@ describe('元のファイルへ書き戻す', () => {
 
   it('🔴 断り文の字(画面に出る物)', () => {
     expect(WRITE_BACK_EMPTY_NOTE).toBe(
-      '本文が空なので、元ファイルへは書き戻しません(消したいときはパソコン側で消してください)',
+      '本文が空なので、元ファイルへは書き戻しません(空にしたいときはパソコン側で空にしてください)',
     );
   });
 
@@ -136,6 +196,10 @@ describe('元のファイルへ書き戻す', () => {
    * 今までどおり確認 → 書く。
    */
   it.each([
+    // 🔴 #1266: 設定行(frontmatter)だけのノートは空ではない ── 書き戻す(空と数えて断らない)
+    ['設定行(frontmatter)だけ', '---\ntitle: メモ\ntags: [a]\n---\n'],
+    ['設定行の後が空白だけ', '---\ntitle: メモ\n---\n\n  \n'],
+    ['CRLF の設定行だけ', '---\r\ntitle: メモ\r\n---\r\n'],
     ['設定行 + 本文', '---\ntitle: メモ\n---\n本文'],
     ['1 字だけ', 'a'],
     ['先頭が水平線の普通の文書', '---\n本文\n'],
@@ -293,6 +357,32 @@ describe('main.ts の配線(原文 pin)', () => {
      *   ここが見るのは「**その口へ渡してあるか**」だけである。
      */
     expect(block, 'settled() を渡していない').toContain('storeEffects?.settled()');
+  });
+
+  /**
+   * 🔴 **外で変わったことを言う配線**(#1264 §2 欠陥 1)。⚠ `main.ts` は unit から実行されないので原文 pin。
+   * 判断(比べる・憶え直す)は `launched-files.ts` に在り、ここは「**渡してあるか**」だけを見る ──
+   * ①取り込んだ時の `lastModified` を憶える ②書き戻す直前の比較を `changedOutside` へ渡す
+   * ③書いた後に憶え直す(自分の書込を外の変更と言わない)④押し直しで `changed` を言う。
+   */
+  it('🔴 取り込み時の時刻を憶え、書き戻す直前に比べ、書いた後に憶え直し、押し直しで言う', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync('src/main.ts', 'utf-8');
+    const run = src.slice(src.indexOf('const runImport = ('), src.indexOf('📣 起動したときのお知らせ'));
+    expect(run.length, 'runImport の block が読めない(空振り)').toBeGreaterThan(200);
+    expect(run, '取り込んだときの更新時刻を憶えていない').toContain(
+      'launched.remember(lid, handle, file.name, file.lastModified)',
+    );
+    const at = src.indexOf('writeBackFile: (lid) => {');
+    const block = src.slice(at, src.indexOf('\n    },\n', at));
+    expect(block, '書き戻す直前の比較を渡していない').toContain('changedOutside: () => launched.changedSince(lid)');
+    expect(block, '書き込んだ後に憶え直していない(次の書き戻しが自分の書込を外の変更と言う)').toContain(
+      'launched.refreshModified(lid)',
+    );
+    const reopen = src.slice(src.indexOf('const importLaunchFiles:'), src.indexOf('openLocalFile = createLocalFileOpener'));
+    expect(reopen.length, 'importLaunchFiles の block が読めない(空振り)').toBeGreaterThan(500);
+    expect(reopen, '押し直しで changed を受けていない').toContain('const { fresh, reopened, changed }');
+    expect(reopen, '外で変わったときの字を出していない').toContain('CHANGED_OUTSIDE_REOPEN_NOTE');
   });
 
   /**

@@ -20,13 +20,27 @@
  */
 
 import { isBlankBody } from '@features/markdown/frontmatter';
+import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '@adapter/platform/launched-files';
 
 /**
  * 🔴 **本文が空のときの断り文**(#215 段③)。⚠ 画面に出る字なので 1 か所に置く。
- * 「消したいときは」まで言う ── 押して何も起きない dead click にしない。
+ * 「空にしたいときは」まで言う ── 押して何も起きない dead click にしない。
+ * ⚠ 「消したいとき」と書くと**ファイルを消す**と読める(#1264 末尾)── 言っているのは中身を空にすること。
  */
 export const WRITE_BACK_EMPTY_NOTE =
-  '本文が空なので、元ファイルへは書き戻しません(消したいときはパソコン側で消してください)';
+  '本文が空なので、元ファイルへは書き戻しません(空にしたいときはパソコン側で空にしてください)';
+
+/**
+ * 🔴 **上書きの確認の字**(#1264 §2 欠陥 1)。⚠ `main.ts` に直書きしない(`main.ts` は
+ * どの unit からも実行されない)。取り込んだ後にパソコン側で変わっていたら、**1 行足す**。
+ */
+export function writeBackConfirmMessage(name: string, changedOutside: boolean): string {
+  return (
+    `「${name}」を、いまのノートの内容で上書きします。\n\n` +
+    (changedOutside ? `${CHANGED_OUTSIDE_WRITE_BACK_NOTE}\n\n` : '') +
+    'ファイルの元の内容は失われます(取り消せません)。よろしいですか?'
+  );
+}
 
 /** 書き戻しの結果(`platform/launched-files.ts` の `WriteBackResult` と同じ形)。 */
 export type WriteBackOutcome = { ok: true } | { ok: false; reason: string };
@@ -41,8 +55,13 @@ export interface WriteBackDeps {
   readonly getBody: () => Promise<string | null>;
   /** user のファイルへ書く。 */
   readonly write: (body: string) => Promise<WriteBackOutcome>;
-  /** 上書きの確認(取り消せない操作なので必ず通す)。 */
-  readonly confirm: () => Promise<boolean>;
+  /** 上書きの確認(取り消せない操作なので必ず通す)。⚠ 字は `writeBackConfirmMessage` が組んで渡す。 */
+  readonly confirm: (message: string) => Promise<boolean>;
+  /**
+   * 🔴 **取り込んだ後にパソコン側で変わったか**(#1264 §2 欠陥 1)。⚠ **必須**(渡し忘れても
+   * tsc が黙る形にすると、外での直しを**黙って消す**元の欠陥が戻る)。読めない・比べられないときは `false`。
+   */
+  readonly changedOutside: () => Promise<boolean>;
   /** 済んだことを画面へ出す。 */
   readonly done: (message: string) => void;
   /** 理由つきで断る / 失敗を出す。 */
@@ -64,7 +83,9 @@ export interface WriteBackDeps {
  * 🔴 **確認の後にもう一度待って読む** ── 確認の窓が開いている間に本文が変わりうる
  *   ので、**書く物そのもの**を読み直し、それにも同じ門を通す
  *   (確認の前に読んだ物を書くと、確認の間の変更を巻き戻す)。
- * ⚠ 門の判定は `isBlankBody` の 1 本(空白だけ・設定行だけも空)。
+ * ⚠ 門の判定は `isBlankBody` の 1 本(空白だけ。⚠ 設定行だけは空ではない = #1266)。
+ * 🔴 **確認の前に、パソコン側で変わっていないかを読む**(#1264 §2 欠陥 1)── 変わっていたら
+ *   確認の字へ 1 行足す(書き戻すと、外での直しが消える)。⚠ 止めはしない(user が選ぶ)。
  */
 export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   const readForWrite = async (): Promise<string | null> => {
@@ -81,7 +102,8 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
     return body;
   };
   if ((await readForWrite()) === null) return;
-  if (!(await deps.confirm())) return;
+  const changed = await deps.changedOutside();
+  if (!(await deps.confirm(writeBackConfirmMessage(deps.name, changed)))) return;
   const body = await readForWrite();
   if (body === null) return;
   const result = await deps.write(body);

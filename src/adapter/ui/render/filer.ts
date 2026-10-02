@@ -119,13 +119,13 @@ export class FilerRenderer {
   }
 
   /**
-   * 🔴 **「最近開いたノートは <鍵>」の字**(#1254 §3 改善 B)。⚠ 鍵の綴りは**割当の表から引く**
+   * 🔴 **「最近開いたノートへは <鍵>(または ◷)」の字**(#1254 §3 改善 B)。⚠ 鍵の綴りは**割当の表から引く**
    *   (`chordHint`。直書きすると、user が鍵を変えた日に嘘になる)。割当が 1 つも無ければ `null`
    *   ── 呼び手は**一言ごと出さない**(嘘の鍵を書かない)。
    */
   private recentHintText(): string | null {
     const chord = chordHint('open-recent', this.keymap);
-    return chord === null ? null : `最近開いたノートは ${chord}`;
+    return chord === null ? null : `最近開いたノートへは ${chord}(または ◷)`;
   }
 
   /** いま出ている一言の鍵を、いまの割当へ書き直す(無ければ一言ごと外す)。 */

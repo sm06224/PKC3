@@ -1646,7 +1646,7 @@ export interface BinderServices {
    *   選ぶ・列挙・許可の確かめ・取り込みの振り分けは全部実体側。
    *   ⚠ **消す・改名・移動の口は持たない**(パソコンのファイルは取り消せない)。
    */
-  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open'>;
+  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open' | 'refresh'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -10877,6 +10877,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'pc-pick-folder': (_dispatcher, _target, services) => void services.localFolder?.pick(),
   'pc-cut-folder': (_dispatcher, _target, services) => services.localFolder?.cut(),
+  // 🔴 「更新」(#1264 §2 欠陥 4-a)── 同じ handle で一覧を読み直す。名前と種類だけ(`getFile()` は呼ばない)
+  'pc-refresh-folder': (_dispatcher, _target, services) => void services.localFolder?.refresh(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
   // 🔴 フォルダの行は押しても中へ入らない ── 無言にせず理由を状態の行へ(場所は動かさない)
   'pc-dir-note': (dispatcher) => dispatcher.dispatch({ type: 'OP_NOTICE', message: PC_DIRECTORY_NOTE }),

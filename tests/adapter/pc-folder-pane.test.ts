@@ -13,7 +13,7 @@ import { BROWSE_ICONS } from '@adapter/ui/render/icons';
 import { buildShell } from '@adapter/ui/render/shell';
 import { initialState } from '@adapter/state/app-state';
 import { Dispatcher } from '@adapter/state/dispatcher';
-import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
+import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE, PC_LINK_NOTE, PC_STATS_NOTE } from '@features/local-folder/folder-entries';
 import { isIconName } from '@features/icon/symbols';
 import { bindActions } from '@adapter/ui/actions/binder';
 import {
@@ -134,7 +134,7 @@ describe('繋ぐ前 / 繋いだ後', () => {
     expect(getFileCalls, '一覧を出しただけで getFile が呼ばれた(クラウド同期のフォルダで実体を一斉に取りに行く)').toBe(0);
   });
 
-  it('🔴 書き戻せない種類(画像)の行にだけ「書き戻せません」── Markdown には出さない', async () => {
+  it('🔴 Markdown の行にだけ「元ファイルと結びつきます」── 画像・PDF には何も添えない(「書き戻せません」を全行に繰り返さない)', async () => {
     const { pane, folder } = setup(async () => dir([file('メモ.md'), file('猫.png'), file('報告.pdf')]));
     await folder.pick();
     await settle();
@@ -142,9 +142,13 @@ describe('繋ぐ前 / 繋いだ後', () => {
       [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')].find(
         (r) => q(r, '[data-pkc-field="pc-name"]')?.textContent === n,
       )!;
-    expect(q(byName('メモ.md'), '[data-pkc-field="pc-readonly"]'), '書き戻せる Markdown に目印が出ている').toBeNull();
-    expect(q(byName('猫.png'), '[data-pkc-field="pc-readonly"]')?.textContent).toBe('書き戻せません');
-    expect(q(byName('報告.pdf'), '[data-pkc-field="pc-readonly"]')?.textContent).toBe('書き戻せません');
+    expect(PC_LINK_NOTE).toBe('元ファイルと結びつきます');
+    expect(q(byName('メモ.md'), '[data-pkc-field="pc-link-note"]')?.textContent).toBe(PC_LINK_NOTE);
+    expect(q(byName('猫.png'), '[data-pkc-field="pc-link-note"]'), '画像に「結びつきます」が出ている').toBeNull();
+    expect(q(byName('報告.pdf'), '[data-pkc-field="pc-link-note"]'), 'PDF に「結びつきます」が出ている').toBeNull();
+    // 🔴 古い「書き戻せません」はどの行にも出ない(200 行あれば 200 回出ていた)
+    expect(pane.textContent, '「書き戻せません」が行に戻っている').not.toContain('書き戻せません');
+    expect(pane.querySelectorAll('[data-pkc-field="pc-readonly"]')).toHaveLength(0);
   });
 
   it('🔴 行のボタンは pc-open-file で、並べた中での位置を持つ(フォルダの行は押せない)', async () => {
@@ -337,8 +341,61 @@ describe('🔴 行頭の種類の絵(#1272)', () => {
   });
 });
 
+describe('帯の「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)', () => {
+  it('🔴 一覧が出たら、帯に 更新 / 別のフォルダ… / 切る が並ぶ。「別のフォルダ…」は「フォルダを選ぶ…」と同じ口', async () => {
+    const { pane, folder } = setup(async () => dir([file('a.md')]));
+    await folder.pick();
+    await settle();
+    const band = q(pane, '[data-pkc-field="pc-band"]')!;
+    expect(q(band, '[data-pkc-field="pc-refresh"]')?.textContent).toBe('更新');
+    expect(q(band, '[data-pkc-field="pc-refresh"]')?.getAttribute('data-pkc-action')).toBe('pc-refresh-folder');
+    expect(q(band, '[data-pkc-field="pc-repick"]')?.textContent).toBe('別のフォルダ…');
+    // ⚠ 選び直しの入り口を 2 つ作らない ── 繋ぐ前の「フォルダを選ぶ…」と同じ action
+    expect(q(band, '[data-pkc-field="pc-repick"]')?.getAttribute('data-pkc-action')).toBe('pc-pick-folder');
+    expect(q(band, '[data-pkc-field="pc-cut"]')?.textContent).toBe('切る');
+    expect(q(band, '[data-pkc-field="pc-cut"]')?.title, '「切る」の説明').toBe(
+      '繋ぎを外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+    );
+  });
+
+  it('🔴 読み込み中は「切る」だけ(更新・選び直しは一覧が出た後)', async () => {
+    let release: () => void = () => {};
+    const wait = new Promise<void>((r) => (release = r));
+    const slow: DirectoryHandleLike = {
+      name: '資料',
+      values: async function* () {
+        await wait;
+        yield file('a.md');
+      },
+      queryPermission: async () => 'granted',
+    };
+    const { pane, folder } = setup(async () => slow);
+    const picking = folder.pick();
+    await settle();
+    expect(q(pane, '[data-pkc-field="pc-cut"]'), '読み込み中に「切る」が無い').not.toBeNull();
+    expect(q(pane, '[data-pkc-field="pc-refresh"]'), '読み込み中に更新が出ている').toBeNull();
+    release();
+    await picking;
+  });
+
+  it('🔴 「更新」を押すと一覧が読み直される(押した先が LocalFolder.refresh へ届く。getFile は呼ばない)', async () => {
+    getFileCalls = 0;
+    const entries: FolderEntryHandle[] = [file('a.md')];
+    const { pane, folder } = setup(async () => dir(entries));
+    await folder.pick();
+    await settle();
+    const off = bindActions(document.body, new Dispatcher(), { localFolder: folder });
+    entries.push(file('b.md'));
+    q(pane, '[data-pkc-field="pc-refresh"]')!.click();
+    await settle();
+    off();
+    expect([...pane.querySelectorAll('[data-pkc-field="pc-name"]')].map((e) => e.textContent)).toEqual(['a.md', 'b.md']);
+    expect(getFileCalls).toBe(0);
+  });
+});
+
 describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () => {
-  it('どの状態でも、押し口は 選ぶ / 切る / さらに表示 / 開く / フォルダの行の返事 の 5 種だけ', async () => {
+  it('どの状態でも、押し口は 選ぶ / 更新 / 切る / さらに表示 / 開く / フォルダの行の返事 の 6 種だけ', async () => {
     const seen = new Set<string>();
     const many = Array.from({ length: 230 }, (_, i) => file(`f${i}.md`));
     const states: Array<() => Promise<HTMLElement>> = [
@@ -361,9 +418,10 @@ describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () 
       'pc-more',
       'pc-open-file',
       'pc-pick-folder',
+      'pc-refresh-folder',
     ]);
-    // ⚠ 空振り防止 ── 5 種とも実際に出ている(消す・改名・移動は 1 つも無い)
-    expect(seen.size).toBe(5);
+    // ⚠ 空振り防止 ── 6 種とも実際に出ている(消す・改名・移動は 1 つも無い)
+    expect(seen.size).toBe(6);
   });
 });
 
@@ -375,6 +433,7 @@ describe('押した先が届く(binder)', () => {
       cut: () => void calls.push('cut'),
       more: async () => void calls.push('more'),
       open: async (i: number) => void calls.push(`open:${i}`),
+      refresh: async () => void calls.push('refresh'),
     };
     const root = document.createElement('div');
     document.body.append(root);
@@ -382,6 +441,7 @@ describe('押した先が届く(binder)', () => {
       '<button data-pkc-action="pc-pick-folder">a</button>',
       '<button data-pkc-action="pc-cut-folder">b</button>',
       '<button data-pkc-action="pc-more">c</button>',
+      '<button data-pkc-action="pc-refresh-folder">r</button>',
       '<button data-pkc-action="pc-open-file" data-pkc-pc-index="7">d</button>',
       '<button data-pkc-action="pc-open-file">e</button>',
     ].join('');
@@ -389,7 +449,7 @@ describe('押した先が届く(binder)', () => {
     for (const b of root.querySelectorAll<HTMLElement>('button')) b.click();
     off();
     // ⚠ 添字の無い行(壊れた DOM)は何も呼ばない
-    expect(calls).toEqual(['pick', 'cut', 'more', 'open:7']);
+    expect(calls).toEqual(['pick', 'cut', 'more', 'refresh', 'open:7']);
   });
 
   it('🔴 取り込みの最中は行を押せない(他の取込と同じ門)', async () => {
@@ -398,6 +458,7 @@ describe('押した先が届く(binder)', () => {
       pick: async () => {},
       cut: () => {},
       more: async () => {},
+      refresh: async () => {},
       open: async (i: number) => void calls.push(`open:${i}`),
     };
     const root = document.createElement('div');

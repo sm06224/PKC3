@@ -265,6 +265,7 @@ import {
   type LaunchedItem,
 } from '@adapter/platform/launch-queue';
 import {
+  CHANGED_OUTSIDE_REOPEN_NOTE,
   LaunchedFiles,
   splitAlreadyOpen,
   writeBackFile,
@@ -2535,7 +2536,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 const handle = handles[i];
                 const file = files[i];
                 if (!handle || !file) return;
-                launched.remember(lid, handle, file.name);
+                // 🔴 取り込んだときの更新時刻も憶える(#1264 §2 欠陥 1。外で変わったかを後で比べる)
+                launched.remember(lid, handle, file.name, file.lastModified);
                 dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
               });
             },
@@ -3378,14 +3380,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         settle: async () => {
           await storeEffects?.settled();
         },
-        confirm: () =>
-          ask(
-            `「${name}」を、いまのノートの内容で上書きします。\n\n` +
-              'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-            { okLabel: 'ファイルを上書きする', danger: true },
-          ),
+        // 🔴 取り込んだ後にパソコン側で変わったか(#1264 §2 欠陥 1)── 判断は `launched-files.ts`
+        changedOutside: () => launched.changedSince(lid),
+        confirm: (message) => ask(message, { okLabel: 'ファイルを上書きする', danger: true }),
         getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
-        write: (body) => writeBackFile(handle, body),
+        write: async (body) => {
+          const result = await writeBackFile(handle, body);
+          // 🔴 書いた自分の更新時刻を取り込み時の時刻へ入れ直す ── 入れ直さないと、次の書き戻しと押し直しが
+          //    「パソコン側で変わっています」と**自分の書込を外の変更として**言う
+          if (result.ok) await launched.refreshModified(lid);
+          return result;
+        },
         done: showStatus,
         fail,
       });
@@ -4737,16 +4742,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     );
     // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
     //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
-    const { fresh, reopened } = await splitAlreadyOpen(items, launched, (lid) =>
+    const { fresh, reopened, changed } = await splitAlreadyOpen(items, launched, (lid) =>
       dispatcher.getState().entryMetas.has(lid),
     );
     for (const lid of reopened) selectWhenPresent(dispatcher, lid);
     if (fresh.length === 0) {
       // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
+      // 🔴 取り込んだ後に file が変わっていたら、それを言う(PKC のノートは古いまま ── #1264 §2 欠陥 1)
       showStatus(
-        reopened.length > 0
-          ? 'すでに開いているノートを表示しました'
-          : '開けるファイルがありませんでした',
+        changed.length > 0
+          ? CHANGED_OUTSIDE_REOPEN_NOTE
+          : reopened.length > 0
+            ? 'すでに開いているノートを表示しました'
+            : '開けるファイルがありませんでした',
       );
       return;
     }
