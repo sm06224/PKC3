@@ -234,7 +234,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         return 'deferred';
       }
       await discardStaged(dir, save.key);
-      deps.notify(`元のファイルへ保存しました: ${save.name}`);
+      deps.notify(`元のファイルへ保存しました: 「${save.name}」`);
       return 'replaced';
     }
 
@@ -265,7 +265,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       }
       if (!windowKnew) announce(save.key, token);
       await discardStaged(dir, save.key);
-      deps.notify(`Office で保存した内容を取り込みました: ${save.name}`);
+      deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
       return 'replaced';
     }
     const lid = await deps.createNote(save, bytes);
@@ -280,7 +280,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
     announce(save.key, lid);
     await discardStaged(dir, save.key);
-    deps.notify(`Office で保存した内容を取り込みました: ${save.name}`);
+    deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
     return 'created';
   }
 

@@ -231,13 +231,14 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
   it('main.ts: 空きが少ないとき、メッセージへ積み、画面下の 1 行も今までどおり出す', () => {
     expect(main).toContain('const caution = quotaCaution(est);');
     expect(main).toContain('appMessagePost.post(caution);');
-    expect(main).toContain('showStatus(caution.text);');
+    // 🔴 積むのは上の `appMessagePost.post` ── 画面下は `post: false`(二重に積まない。#1017 C5)
+    expect(main).toContain('showStatus(caution.text, { post: false });');
   });
 
   it('main.ts: 書込の途中の巻き戻しが働いていないとき、本体のタブだけが積み、画面下の 1 行も出す(#1218)', () => {
     expect(main).toMatch(/if \(followerConn === null\) announceReservedLock\(init\);/);
     expect(main).toMatch(
-      /const announceReservedLock = \(i: InitResult\): void => \{\s*const lockCaution = reservedLockCaution\(i\);\s*if \(lockCaution === null\) return;\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text\);/,
+      /const announceReservedLock = \(i: InitResult\): void => \{\s*const lockCaution = reservedLockCaution\(i\);\s*if \(lockCaution === null\) return;\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text, \{ post: false \}\);/,
     );
     // 🔴 昇格したタブも、自分の worker を開いた直後に 1 回言う(2 枚目のまま = followerConn は言わない)
     expect(main).toMatch(/armPersist\(r\.client\);\s*announceReservedLock\(r\.init\);\s*const host = new StoreProxyHost/);

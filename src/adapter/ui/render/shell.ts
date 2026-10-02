@@ -944,6 +944,19 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
+  /**
+   * 🔴 **画面下の知らせを、読み上げにも届ける**(#1017 C5 段 a)。⚠ 直す前は何も付いておらず、
+   *   「コピーしました」等は**目で見る人にしか届かなかった**(`aria-live` は検索・右クリック・
+   *   リンクの先の 3 か所だけ)。
+   * ⚠ `role="status"` は `aria-atomic="true"` を含意する ── 放っておくと、知らせが変わるたびに
+   *   **隣の「そのノートを開く」「未読 N 件」まで毎回読み直す**。字が変わった所だけ読ませたいので
+   *   `aria-atomic="false"` を明示する。
+   * ⚠ `hidden` で畳んでいる間は読まれない(`main.ts` の `paint`)── 畳んだままの知らせは
+   *   メッセージ(未読 / 結果)の側で読める。今回はこの限界を受け入れる。
+   */
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.setAttribute('aria-atomic', 'false');
   status.hidden = true;
   /**
    * 🔴 **字は子の `<span>` に書く**(#671 の裁定 3)。

@@ -362,7 +362,10 @@ describe('#135 ハング検知の配線', () => {
     // 呼び出しの引数だけを見る(他所の一致に救われない)
     const args = MAIN.slice(at, MAIN.indexOf('});', at));
     expect(args, '放送を購読していない').toContain('officeWindow.onEvent');
-    expect(args, '出口が status につながっていない').toContain('notify: showStatus');
+    // 🔴 固まった知らせは「注意」で積む(#1017 C5)── 画面下へ出す口は変わらず `showStatus`
+    expect(args, '出口が status につながっていない').toContain(
+      "notify: (text) => showStatus(text, { kind: 'caution' })",
+    );
     expect(args, 'visibilitychange を張る先を渡していない').toContain('doc: document');
   });
 

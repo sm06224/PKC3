@@ -17,6 +17,7 @@ import {
   localOpenNotice,
 } from '../../src/features/office/office-launch';
 import { isOfficeAttachment } from '../../src/features/office/office-entry';
+import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 describe('振り分け', () => {
   it('Office の拡張子は Office へ回す', () => {
@@ -137,12 +138,15 @@ describe('文言', () => {
   it('🔴 どこへ保存されるかを、開く前に言う', () => {
     const s = localOpenNotice('報告書.docx');
     expect(s).toContain('報告書.docx');
+    // 🔴 ファイル名は引用符で囲んである ── メッセージへ積むとき名前が残らない(#1017 C5)
+    expect(sanitizeMessageText(s), 'ファイル名がメッセージに残る').not.toContain('報告書');
     expect(s, 'どこへ保存されるか書いていない').toContain('元のファイル');
   });
 
   it('🔴 書き戻せないときは、開く前に断る(黙って落とさない)', () => {
     const s = cannotWriteBackNotice('報告書.docx');
     expect(s).toContain('報告書.docx');
+    expect(sanitizeMessageText(s), 'ファイル名がメッセージに残る').not.toContain('報告書');
     expect(s).toContain('書き戻せません');
   });
 });

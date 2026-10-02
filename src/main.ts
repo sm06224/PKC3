@@ -43,8 +43,19 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
-import { paintStatusCreate, paintStatusOpen, paintStatusRescue, paintStatusUndo } from '@adapter/ui/render/status-open';
+import {
+  paintStatusCreate,
+  paintStatusMessages,
+  paintStatusOpen,
+  paintStatusRescue,
+  paintStatusUndo,
+} from '@adapter/ui/render/status-open';
 import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
+import {
+  createStatusPoster,
+  shouldPostNotice,
+  type StatusOptions,
+} from '@adapter/ui/render/status-notice';
 import { openStorageWithRetry } from '@adapter/platform/storage/open-with-retry';
 import {
   storageStatusLine,
@@ -1625,12 +1636,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。「開く」「元に戻す」と
      * 同じ作法 ── 常設で置いて、未読が 1 件以上あるときだけ出す。
      */
-    const unread = dispatcher.getState().messagesUnread;
-    regions.statusMessages.hidden = unread <= 0;
-    regions.statusMessages.textContent = unread > 0 ? `未読 ${String(unread)} 件` : '';
+    // ⚠ 字の組み方は `status-open.ts`(test が届く所)── ここは渡すだけ
+    paintStatusMessages(regions.statusMessages, dispatcher.getState().messagesUnread);
   };
-  /** 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。 */
-  const showStatus = (text: string) => {
+  /**
+   * 🔴 **画面下の知らせを、メッセージにも残す**(#1017 C5 段 b1)。判断は `status-notice.ts`。
+   * ⚠ 既定は「結果」(未読は増えない)。断り・エラーだけ `kind` を渡す。
+   * ⚠ 呼び側が既に積んだ字は `{ post: false }`(二重に積まない)。
+   */
+  const postStatus = createStatusPoster((m) => appMessagePost.post(m));
+  /**
+   * 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。
+   * ⚠ **画面下の出し方は直す前と同じ**(居座り方・寿命・色は変えていない)── 増えたのは
+   *   メッセージへ積むことだけ。
+   */
+  const showStatus = (text: string, opts?: StatusOptions) => {
+    postStatus(text, opts);
     noticeLine = text;
     paint();
     paintOpen();
@@ -1647,7 +1668,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
       onFellBack: (session) =>
-        showStatus(`「${session.name}」は PKC の画面で読めなかったため、ブラウザの表示で開きました`),
+        showStatus(`「${session.name}」は PKC の画面で読めなかったため、ブラウザの表示で開きました`, {
+          kind: 'caution',
+        }),
       onLoadFailed: (session) =>
         dispatcher.dispatch({ type: 'OP_FAILED', error: `PDF を開けませんでした: ${session.name}` }),
       onOpenFailed: () =>
@@ -1662,9 +1685,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **起動のたびに、軽く検める**(#1007 段①)。
    * ⚠ `client` は昇格で実体が替わるので**呼ぶたびに読む**(閉じ込めない)。
    * ⚠ 見つけたら**一時の知らせ**(`showStatus`)へ ── `OP_FAILED` にしない。
-   *   あちらは `SELECT_ENTRY` が `error: null` で**消す**ので、ノートを 1 件選んだ瞬間に
-   *   壊れの知らせが跡形もなく消える(user 目線レビュー 2026-09-20)。こちらは
-   *   状態変化では消えない(次の一時の知らせが来るまで残る)。
+   *   あちらは**エラーの行**(赤い意味の欄)で、壊れの知らせは「失敗」ではなく
+   *   「検めて見つけた」なので別の行に置く。⚠ 2026-09-20 の目線レビュー時点は
+   *   `SELECT_ENTRY` が `error: null` で消していたが、**いまは消さない**
+   *   (`app-state.ts` の `SELECT_ENTRY`)── 理由は上の「別の行」だけである。
+   *   こちらは次の一時の知らせが来るまで残り、同じ字を「問題」としてメッセージにも積む。
    *   字は `integritySummary` が持つ(ボタン名の門もそちら)。
    * ⚠ タブが隠れたら次の表へ進まず**待つ**(裏で数 GB を読み続けない / 止めもしない)。
    * 🔑 boot の刻印の後(`bootstrap`)と、**follower が本体へ昇格した直後**の 2 か所から呼ぶ
@@ -1687,7 +1712,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           };
           document.addEventListener('visibilitychange', onVisible);
         }),
-      onBroken: (text) => showStatus(text),
+      // 🔴 壊れの知らせは「問題」(未読に数える)。⚠ 同じ字は 1 セッションに 1 回だけ積む(`status-notice.ts`)
+      onBroken: (text) => showStatus(text, { kind: 'problem' }),
     });
   /** タブを閉じる合図 ── 検めは次の表を出さない(出した 1 表は worker が読み切る)。 */
   let unloading = false;
@@ -1721,7 +1747,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         builtAt: BUILT_AT,
       },
     }).catch((e: unknown) => {
-      showStatus(`一式を組めませんでした: ${e instanceof Error ? e.message : String(e)}`);
+      showStatus(`一式を組めませんでした: ${e instanceof Error ? e.message : String(e)}`, {
+        kind: 'problem',
+      });
     });
   };
   /**
@@ -1817,8 +1845,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       showStatus(
         via === 'capture'
-          ? `${origin} から取り込みました。保存すると残ります:${input.title}`
-          : `${origin} から 1 件取り込みました:${input.title}`,
+          ? `${origin} から取り込みました。保存すると残ります:『${input.title}』`
+          : `${origin} から 1 件取り込みました:『${input.title}』`,
       );
       return lid;
     },
@@ -1845,7 +1873,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       officeWindow.provideDocument(staged.name, staged.bytes, staged.token);
       showStatus(
         r.kind === 'already-open'
-          ? `${staged.name} を開いています(Office のタブをご覧ください)`
+          ? `「${staged.name}」を開いています(Office のタブをご覧ください)`
           : localOpenNotice(staged.name),
       );
       return;
@@ -1869,7 +1897,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   watchOfficeHang({
     onEvent: (fn) => officeWindow.onEvent(fn),
     doc: document,
-    notify: showStatus,
+    // 🔴 固まった知らせは「注意」(#1017 C5)
+    notify: (text) => showStatus(text, { kind: 'caution' }),
   });
   /**
    * Office 一式の設置 / 削除の後始末(#88 / O6-a)。
@@ -1914,8 +1943,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (state.notice !== null && state.notice !== noticeShown) {
       noticeShown = state.notice;
       // 🔴 **`OP_NOTICE` → メッセージ「結果」**(設計 doc §7、段②a)。
-      appMessagePost.post({ kind: 'result', source: 'app', text: state.notice });
-      showStatus(state.notice);
+      // ⚠ **空の字と進行中の字は積まない**(#1017 C5)── 進行中を消す `notify('')` や
+      //   「別のウィンドウを開いています…」が結果として残っていた。判定は `status-notice.ts`。
+      if (shouldPostNotice(state.notice))
+        appMessagePost.post({ kind: 'result', source: 'app', text: state.notice });
+      // ⚠ 上で積んだので、`showStatus` は積まない(二重にしない)
+      showStatus(state.notice, { post: false });
       return; // `showStatus` が `paint` を呼ぶ
     }
     paint();
@@ -1965,7 +1998,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const lockCaution = reservedLockCaution(i);
     if (lockCaution === null) return;
     appMessagePost.post(lockCaution);
-    showStatus(lockCaution.text);
+    showStatus(lockCaution.text, { post: false });
   };
   let unbindChanged = sync.onChanged(onRemoteChanged);
   // 解放は遷移 1 か所で束ねる(実体と test は edit-lock-release.ts)
@@ -2386,7 +2419,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
       //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**
-      showStatus('Office が不安定になりました。保存が効きません ── ウィンドウを読み込み直してください');
+      showStatus('Office が不安定になりました。保存が効きません ── ウィンドウを読み込み直してください', {
+        kind: 'problem',
+      });
     }
   });
   /**
@@ -2604,7 +2639,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         if (caution !== null) {
           // 🔴 画面下の 1 行は今までどおり出し、同じ字をメッセージへ「注意」で積む(#1017)
           appMessagePost.post(caution);
-          showStatus(caution.text);
+          showStatus(caution.text, { post: false });
         }
       })
       .catch(() => {
@@ -4804,7 +4839,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       await whenPhaseReady(dispatcher, () => {});
       showStatus(
         writable
-          ? `${last.file.name} を開けます ── アプリの「Office」を押してください`
+          ? `「${last.file.name}」を開けます ── アプリの「Office」を押してください`
           : cannotWriteBackNotice(last.file.name),
       );
     }

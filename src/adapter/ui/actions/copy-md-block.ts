@@ -298,7 +298,7 @@ async function putTable(
       const name = csvFileName(deps.noteTitle());
       deps.download(name, new Blob([CSV_BOM + tableToCsv(rows)], { type: 'text/csv;charset=utf-8' }));
       // ⚠ 名前を持っているのはここだけ ── 呼び側で組み直さない(§7)
-      deps.saved(`${name} を保存しました`);
+      deps.saved(`「${name}」を保存しました`);
       return true;
     }
   }

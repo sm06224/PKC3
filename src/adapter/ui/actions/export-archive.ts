@@ -314,7 +314,16 @@ export async function exportArchive(
    */
   archiveScope: ArchiveScope = 'full',
 ): Promise<number | null> {
+  /**
+   * 🔴 **進行中の字を出している間だけ true**(#1017 C5)。⚠ 直す前は、失敗しても
+   *   「書き出しています…」が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
+   *   失敗の出口は全部この `fail` を通るので、**ここで 1 度だけ**消す。
+   * ⚠ 進行中の字を出す前の断り(編集中など)は消さない ── 別の知らせを巻き込まない。
+   */
+  let progressShown = false;
   const fail = (msg: string): null => {
+    if (progressShown) deps.notify?.('');
+    progressShown = false;
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
@@ -330,6 +339,7 @@ export async function exportArchive(
     markdown: 'Markdown を書き出しています…',
   };
   deps.notify?.(STARTING[kind]);
+  progressShown = true;
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
@@ -427,6 +437,7 @@ export async function exportArchive(
     deps.download(name, out.blob);
     const notes = [...extraWarnings, ...out.warnings];
     deps.report(notes);
+    progressShown = false; // ⚠ 次の「書き出しました」が進行中の字を置き換える
     deps.notify?.(
       notes.length > 0
         ? `書き出しました: ${detail} ⚠ 注意 ${notes.length} 件`
@@ -704,7 +715,11 @@ async function exportEntryOffice(
   lid: string,
   target: OfficeTarget,
 ): Promise<boolean> {
+  // 🔴 進行中の字を失敗のときに消す(#1017 C5。`exportArchive` の `fail` と同じ理由)
+  let progressShown = false;
   const fail = (msg: string): false => {
+    if (progressShown) deps.notify?.('');
+    progressShown = false;
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return false;
   };
@@ -716,6 +731,7 @@ async function exportEntryOffice(
   const renderBody = deps.renderBody;
   if (!renderBody) return fail('本文を組み立てられませんでした(描画する機能が渡っていません)');
   deps.notify?.(`${target.app} で書き出しています…`);
+  progressShown = true;
   try {
     const got = await collectOfficeBlocks(deps, renderBody, lid, target, fail);
     if (got === null) return false;
@@ -750,6 +766,7 @@ async function exportEntryOffice(
       'slides' in built.counts
         ? `${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚`
         : `${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚`;
+    progressShown = false;
     deps.notify?.(`${target.app} で書き出しました(${how})`);
     return true;
   } catch (e) {

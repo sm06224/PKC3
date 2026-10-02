@@ -68,7 +68,11 @@ export async function exportPortable(
   dispatcher: Dispatcher,
   deps: PortableExportDeps,
 ): Promise<number | null> {
+  // 🔴 進行中の字を失敗のときに消す(#1017 C5)── 出す前の断りは消さない(別の知らせを巻き込まない)
+  let progressShown = false;
   const fail = (msg: string): null => {
+    if (progressShown) deps.notify('');
+    progressShown = false;
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
@@ -87,6 +91,7 @@ export async function exportPortable(
     );
 
   deps.notify('可搬 HTML を書き出しています…');
+  progressShown = true;
   try {
     // 🔴 直前の保存が disk に着いてから読む
     await deps.settle();
@@ -124,6 +129,7 @@ export async function exportPortable(
 
     const notes = [...missing, ...out.warnings];
     if (notes.length > 0) deps.report(notes);
+    progressShown = false;
     deps.notify(
       `可搬 HTML を書き出しました(添付 ${out.assets} 件` +
         (notes.length > 0 ? ` / ⚠ 注意 ${notes.length} 件` : '') +

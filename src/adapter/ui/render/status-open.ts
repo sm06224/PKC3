@@ -195,3 +195,20 @@ export function paintStatusCreate(
   } else btn.removeAttribute('data-pkc-date');
   if (btn.hidden !== !show) btn.hidden = !show;
 }
+
+/**
+ * 🔴 **未読のメッセージへの入口を出し入れする**(設計 doc §7、段②a。#1017 C5 で `main.ts` から取り出した)。
+ *
+ * ⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて、**未読が 1 件以上あるときだけ**出す。
+ *   0 件のときは字も空にする(畳んだ物の字が、状態の行を見る検査に拾われない)。
+ * 🔑 押した先は `open-messages` の受け手(`binder.ts`)── 実行の口を新しく作らない(§7)。
+ *   ここが書くのは `hidden` と字だけである。
+ * ⚠ 取り出した理由:`main.ts` は**どの test からも実行されない**ので、字の組み方を
+ *   `main.ts` に置くと「未読 2 件」と出ているかを誰も見られない(CLAUDE.md §2)。
+ */
+export function paintStatusMessages(btn: HTMLElement, unread: number): void {
+  const label = unread > 0 ? `未読 ${String(unread)} 件` : '';
+  const hide = unread <= 0;
+  if (btn.hidden !== hide) btn.hidden = hide;
+  if (btn.textContent !== label) btn.textContent = label;
+}

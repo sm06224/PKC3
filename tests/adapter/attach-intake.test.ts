@@ -12,6 +12,7 @@ import { createWritableQueue } from '../../src/adapter/ui/actions/writable-queue
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import { removeInsertedLines } from '../../src/features/markdown/append-target';
 import { stubRevisionOps } from '../helpers/revision-stub';
+import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 /** ⚠ 実物の効果層を差し替える口(遅い `getBody` で錠を握らせる等)。 */
 type StoreOver = {
@@ -506,7 +507,9 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     ]);
     await new Promise((r) => setTimeout(r, 400));
     expect(bodyNow(), '前提が崩れた: 3 枚とも入っていない').toContain('![c.png](asset:');
-    expect(notices.at(-1), '件数で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
+    expect(notices.at(-1), '件数で締まっていない').toBe('3 件を本文に入れました(「c.png」ほか)');
+    // 🔴 ファイル名は引用符で囲んである ── メッセージへ積むとき名前が残らない(#1017 C5)
+    expect(sanitizeMessageText(notices.at(-1)!), 'ファイル名がメッセージに残る').not.toContain('c.png');
     // ⚠ 1 枚ずつの知らせも出ている(締めが**上書き**した ── 黙らせたのではない)
     expect(notices, '1 枚ずつの知らせが消えている').toContain('「a.png」を本文のいちばん下に入れました');
   });
@@ -537,8 +540,8 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['333'], 'c.png', { type: 'image/png' }),
     ]);
     await new Promise((r) => setTimeout(r, 300));
-    expect(notices.at(-1), '前提が崩れた: 3 枚で締まっていない').toBe('3 件を本文に入れました(c.png ほか)');
-    expect(notices, '数え終わる前に 2 件で締めた').not.toContain('2 件を本文に入れました(b.png ほか)');
+    expect(notices.at(-1), '前提が崩れた: 3 枚で締まっていない').toBe('3 件を本文に入れました(「c.png」ほか)');
+    expect(notices, '数え終わる前に 2 件で締めた').not.toContain('2 件を本文に入れました(「b.png」ほか)');
   });
 
   it('⚠ E 対照群 ── 1 枚なら件数で締めない(場所を言う 1 行のまま)', async () => {

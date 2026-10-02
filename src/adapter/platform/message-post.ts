@@ -229,6 +229,12 @@ export class MessagePost {
    *   `sanitizeMessageText` を通す(呼び側に任せない。判断を 1 か所に置く)。
    */
   post(input: { kind: MessageKind; source: string; text: string }): void {
+    /**
+     * 🔴 **空の字は積まない**(#1017 C5)。⚠ 直す前は、進行中の字を消すための `notify('')` が
+     *   `OP_NOTICE` 経由で**「結果」の空の節を 1 件**積んでいた(見出しと種類だけの行)。
+     *   ここに置くのは、呼び側が増えても**書く口の 1 か所**で止めるため(§7)。
+     */
+    if (input.text.trim() === '') return;
     const lid = lidForMessageKind(input.kind);
     const title = titleForMessageLid(lid);
     const cap = capForMessageLid(lid, currentMessageCap());

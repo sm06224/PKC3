@@ -59,8 +59,8 @@ function setup(metas: EntryMeta[], services: BinderServices = {}) {
   });
   bindActions(root, d, {
     ...services,
-    showStatus: (t) => {
-      showStatus(t);
+    showStatus: (t, o) => {
+      showStatus(t, o);
       line = t;
       repaint();
     },
@@ -113,7 +113,8 @@ describe('日付を押す(open-date-note)', () => {
       message: '2026-10-15 のノートはまだありません',
       createDate: '2026-10-15',
     });
-    expect(showStatus).toHaveBeenCalledWith('2026-10-15 のノートはまだありません');
+    // 🔴 積むのは上の `OP_NOTICE`(`main.ts` が結果として積む)── 画面下の直書きは積まない(1 件にする。#1017 C5)
+    expect(showStatus).toHaveBeenCalledWith('2026-10-15 のノートはまだありません', { post: false });
     expect(d.getState().noticeCreate).toBe('2026-10-15');
     const btn = regions.statusCreate;
     expect(btn.hidden, '「作る」が出ていない').toBe(false);

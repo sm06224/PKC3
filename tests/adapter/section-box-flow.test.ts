@@ -24,6 +24,8 @@ import type { RenderMarkdownOptions } from '../../src/features/markdown/markdown
 import { bindEditLockRelease } from '../../src/adapter/state/edit-lock-release';
 import type { SectionDraft } from '../../src/adapter/state/app-state';
 import { answerDialog, dialogMessage } from './dialog-helper';
+import { appMessagePost } from '../../src/adapter/platform/message-post';
+import { createStatusPoster } from '../../src/adapter/ui/render/status-notice';
 
 const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -392,6 +394,50 @@ describe('force-release は「押した箱」で対象を決める(#1044 段2 5�
     expect(s.statuses.at(-1), '画面の 1 行が追記の対象(n2)を名乗っていない').toContain('t-n2');
     expect(s.statuses.at(-1), '画面の 1 行が「追記」と言っていない').toContain('追記の書き込み');
     s.gate.pass();
+  });
+});
+
+/**
+ * 🔴 **打ち切りは、メッセージへ「問題」を 1 件だけ積む**(#1017 C5)。
+ *
+ * ⚠ 打ち切りは**固定の文を先に積み**(題名を含めない)、画面下には題名つきの文を出す。
+ *   画面下の字を `showStatus` の既定で積むと、題名が**メッセージへ漏れる**うえ 2 件になる ──
+ *   だから画面下は `{ post: false }`。ここは `main.ts` と同じ形(積む口を通す)で繋いで、
+ *   binder の呼び方が正しいかを見る。
+ */
+describe('force-release は、メッセージへ 1 件だけ積む(#1017 C5)', () => {
+  it('🔴 「問題」が 1 件で、題名は含まない(画面下の題名つきの文は積まない)', async () => {
+    const posted: Array<{ kind: string; text: string }> = [];
+    const spy = vi.spyOn(appMessagePost, 'post').mockImplementation((m) => void posted.push(m));
+    try {
+      const poster = createStatusPoster((m) => appMessagePost.post(m));
+      const shown: string[] = [];
+      const s = setup({
+        showStatus: (t, o) => {
+          shown.push(t);
+          poster(t, o);
+        },
+      });
+      await openDraftOnHead2(s.root, s.d);
+      sectionInput(s.root)!.value = '## 決定事項\n\n打ちかけ';
+      const gate = s.holdSave();
+      s.root.querySelector<HTMLElement>('[data-pkc-action="save-section-draft"]')!.click();
+      await tick();
+      s.root
+        .querySelector<HTMLElement>(
+          '[data-pkc-region="section-draft-buttons"] [data-pkc-action="force-release"]',
+        )!
+        .click();
+      await answerDialog('ok');
+      await tick();
+      expect(shown.some((t) => t.includes('t-n1')), '前提が崩れた(画面下に題名つきの文が出ていない)').toBe(true);
+      expect(posted, '「問題」が 1 件ではない').toHaveLength(1);
+      expect(posted[0]!.kind).toBe('problem');
+      expect(posted[0]!.text, '題名がメッセージへ漏れる').not.toContain('t-n1');
+      gate.pass();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

@@ -96,7 +96,7 @@ export const localFileId = (token: string): string | null =>
  *   **気づくのが数日後**になる種類の事故である。
  */
 export const localOpenNotice = (fileName: string): string =>
-  `${fileName} を Office で開きます。保存すると、この元のファイルへ書き戻します。`;
+  `「${fileName}」を Office で開きます。保存すると、この元のファイルへ書き戻します。`;
 
 /**
  * 書き戻せないときの断り。
@@ -105,4 +105,4 @@ export const localOpenNotice = (fileName: string): string =>
  *   開くと、user は直したものを**行方不明**にする。
  */
 export const cannotWriteBackNotice = (fileName: string): string =>
-  `${fileName} は開けますが、元のファイルへは書き戻せません(この環境が対応していません)。`;
+  `「${fileName}」は開けますが、元のファイルへは書き戻せません(この環境が対応していません)。`;

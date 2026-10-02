@@ -337,7 +337,19 @@ export async function importPkc2File(
   deps: ImportDeps,
   file: File,
 ): Promise<number | null> {
+  /**
+   * 🔴 **進行中の字(「取込中…」)を出している間だけ true**(#1017 C5)。⚠ 直す前は、失敗しても
+   *   やめても「取込中…」が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
+   *   失敗の出口は全部この `fail` を通るので、**ここで 1 度だけ**消す。やめたとき(下の
+   *   `proceed` が偽)も同じ。⚠ 出す前の断りは消さない ── 別の知らせを巻き込まない。
+   */
+  let progressShown = false;
+  const clearProgress = (): void => {
+    if (progressShown) deps.notify?.('');
+    progressShown = false;
+  };
   const fail = (msg: string): null => {
+    clearProgress();
     dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
     return null;
   };
@@ -368,6 +380,7 @@ export async function importPkc2File(
     }
 
     deps.notify?.('取込中…(ファイルを読んでいます)');
+    progressShown = true;
 
     // ── 入力の違いは「container をどう得るか」と「bytes をどこから取るか」だけ。
     // それ以降(変換 → asset → entries → 履歴 → 再読込)は **1 本の経路**に合流する
@@ -395,7 +408,11 @@ export async function importPkc2File(
         const preview = await peekArchivePreview(file);
         if (preview && deps.confirmArchiveImport) {
           const proceed = await deps.confirmArchiveImport(preview);
-          if (!proceed) return null; // やめるのは失敗ではない ── OP_FAILED は出さない
+          if (!proceed) {
+            // やめるのは失敗ではない ── OP_FAILED は出さない。⚠ 進行中の字は消す(もう進まない)
+            clearProgress();
+            return null;
+          }
         }
         const archive = await readArchive(file);
         restored = restoreArchive(archive, {
@@ -713,6 +730,7 @@ export async function importPkc2File(
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);
+    progressShown = false; // ⚠ 次の「取込完了」が進行中の字を置き換える
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)

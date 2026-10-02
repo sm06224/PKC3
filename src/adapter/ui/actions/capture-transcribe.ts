@@ -125,6 +125,17 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
       }
       running = true;
       mark(lid);
+      /**
+       * 🔴 **進行中の字を出している間だけ true**(#1017 C5)。⚠ 直す前は、音を読めなかった・
+       *   メモリが足りなかった等の失敗で「文字にしています…」が画面下に**残った**。
+       *   失敗の出口は多いので、個々の枝ではなく **`finally` で 1 度だけ**消す。
+       *   進行中のあとに言う字(結果・預かった)は `say` を通す ── それが進行中の字を置き換える。
+       */
+      let progressShown = false;
+      const say = (text: string): void => {
+        progressShown = false;
+        deps.notify(text);
+      };
       try {
         const ready = await deps.ready();
         if (ready === null) {
@@ -138,6 +149,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           return;
         }
         deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の部品)`);
+        progressShown = true;
         const startedAt = Date.now();
         let pcm: Float32Array;
         try {
@@ -158,7 +170,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         });
         const text = transcriptText(out.text);
         if (text === null) {
-          deps.notify(`「${item.name}」からは字になりませんでした(声が小さい・無音かもしれません)。ノートは変えていません`);
+          say(`「${item.name}」からは字になりませんでした(声が小さい・無音かもしれません)。ノートは変えていません`);
           return;
         }
         const took = elapsedText(Date.now() - startedAt);
@@ -175,10 +187,10 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             heading,
             target: null,
           });
-          deps.notify(`「${item.name}」に文字起こしを足しました(${took})`);
+          say(`「${item.name}」に文字起こしを足しました(${took})`);
         }, lid);
         if (held) {
-          deps.notify(`「${item.name}」の文字起こしを預かりました(編集を終えると、ノートの末尾に足します)`);
+          say(`「${item.name}」の文字起こしを預かりました(編集を終えると、ノートの末尾に足します)`);
         }
       } catch (e) {
         if (looksOutOfMemory(e)) {
@@ -189,6 +201,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           fail(`文字にできませんでした(${e instanceof Error ? e.message : String(e)})`);
         }
       } finally {
+        if (progressShown) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
         mark(null);

@@ -282,7 +282,10 @@ describe('main.ts の配線(原文 pin ── あの file はどの test から�
      * ⚠ `OP_FAILED` は `SELECT_ENTRY` が `error: null` で消すので、ノートを 1 件選んだ
      *   瞬間に壊れの知らせが消える(user 目線レビュー 2026-09-20)。
      */
-    expect(block, '壊れの字を一時の知らせへ出していない').toContain('onBroken: (text) => showStatus(text)');
+    expect(block, '壊れの字を一時の知らせへ出していない').toContain(
+      // 🔴 壊れの知らせは「問題」で積む(#1017 C5。未読に数える)
+      "onBroken: (text) => showStatus(text, { kind: 'problem' })",
+    );
     expect(block, 'ノートを選ぶと消える口(OP_FAILED)へ出している').not.toContain('OP_FAILED');
   });
 
