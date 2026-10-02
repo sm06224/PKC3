@@ -4,7 +4,7 @@
  * 終端での即破棄 ── user 指示 2026-07-27)の pin。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
@@ -551,5 +551,134 @@ describe('preview を持たない添付', () => {
     await tick(20);
     expect(q('[data-pkc-field="attachment-media"]'), '画像が出ていない').not.toBeNull();
     expect(q('[data-pkc-field="attachment-no-preview"]'), '出せているのに案内が出た').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **種類は信じられない値** ── 字として出す前に中身を見る(#1220)。
+ *
+ * 報告:添付の画面に PDF の生の bytes(`%PDF-1.7 %äüöß …`)が字で出た。経緯は、
+ * 自動操作が PDF に `type: 'text/plain'` と渡して取り込んだこと。登録の種類が
+ * `text/*` だと、先頭 200KB を無条件に `<pre>` へ出していた。
+ * 期待値は**実 DOM の字**から読む(判定関数を import して組み立てない)。
+ */
+describe('🔴 text/* と登録された添付の中身を見る(#1220)', () => {
+  const enc = new TextEncoder();
+  const bodyOf = (mime: string, name: string): string =>
+    attachmentBody({ name, mime, size: 100, assetKey: 'ast-s' });
+  const pdfBytes = enc.encode(
+    '%PDF-1.7\n%äüöß\n2 0 obj\n<</Length 3 0 R/Filter/FlateDecode>>\nstream\nxxxx',
+  );
+  const lenderOf = (blob: Blob): AssetLender => ({
+    lend: async () => {
+      throw new Error('字として登録された添付は URL を借りない(付け替えは自前の Blob)');
+    },
+    getBlob: async () => blob,
+  });
+
+  const made: { blob: Blob; url: string }[] = [];
+  const revoked: string[] = [];
+  beforeEach(() => {
+    made.length = 0;
+    revoked.length = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b: Blob | MediaSource) => {
+      const url = `blob:retyped-${made.length}`;
+      made.push({ blob: b as Blob, url });
+      return url;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u: string) => void revoked.push(u));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('🔴 text/plain と登録された PDF の bytes は、画面に字で出ない(代わりに PDF の枝へ)', async () => {
+    const blob = new Blob([pdfBytes], { type: 'text/plain' });
+    const { d, q } = setup({ a1: bodyOf('text/plain', 'x.pdf'), a2: '# text' }, lenderOf(blob));
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(30);
+
+    expect(q('[data-pkc-field="attachment-text"]'), 'PDF の bytes が <pre> に出た').toBeNull();
+    expect(document.body.textContent).not.toContain('%PDF');
+    const obj = q<HTMLObjectElement>('object[data-pkc-preview="pdf"]');
+    expect(obj, 'PDF の枝へ回っていない').not.toBeNull();
+    // 付け替えた Blob:種類は PDF、中身は 1 byte も変わらない
+    expect(made).toHaveLength(1);
+    expect(made[0]!.blob.type).toBe('application/pdf');
+    expect(new Uint8Array(await made[0]!.blob.arrayBuffer())).toEqual(pdfBytes);
+    expect(obj!.getAttribute('data')).toBe(made[0]!.url);
+
+    // 表示の寿命の終わりで返す(付け替えた URL も同じ規律)
+    expect(revoked).toEqual([]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a2' });
+    await tick(30);
+    expect(revoked).toEqual([made[0]!.url]);
+  });
+
+  it('🔴 PNG の bytes は <img> の枝へ(種類は image/png に付け替える)', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const { d, q } = setup(
+      { a1: bodyOf('text/plain', 'x.png') },
+      lenderOf(new Blob([png], { type: 'text/plain' })),
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(30);
+    expect(q('[data-pkc-field="attachment-text"]')).toBeNull();
+    expect(q<HTMLImageElement>('img[data-pkc-field="attachment-media"]')?.getAttribute('src')).toBe(
+      made[0]?.url,
+    );
+    expect(made[0]!.blob.type).toBe('image/png');
+  });
+
+  it.each([
+    ['zip(docx)', Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00])],
+    ['NUL を含む', Uint8Array.from([0x61, 0x62, 0x00, 0x63, 0x64])],
+    [
+      'UTF-8 として壊れている(Shift_JIS)',
+      Uint8Array.from([0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x58, 0x83, 0x67]),
+    ],
+  ])('字でない(%s)は <pre> に出さず、既存の断り文へ落ちる', async (_name, bytes) => {
+    const { d, q } = setup(
+      { a1: bodyOf('text/plain', 'x.bin') },
+      lenderOf(new Blob([bytes], { type: 'text/plain' })),
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(30);
+    expect(q('[data-pkc-field="attachment-text"]'), '字でない物が <pre> に出た').toBeNull();
+    const note = q('[data-pkc-field="attachment-no-preview"]');
+    expect(note, '断り文が出ていない').not.toBeNull();
+    // 既存の断り文(新しい字を作らない)── 次にすることが書いてある
+    expect(note!.textContent).toBe(
+      'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください',
+    );
+    expect(made, '回せない物で URL を作った').toHaveLength(0);
+  });
+
+  it('対照群:本物のテキスト(日本語・BOM・CRLF)は今までどおり <pre> に出る', async () => {
+    const text = 'こんにちは\r\n二行目 hello\r\n';
+    const withBom = Uint8Array.from([0xef, 0xbb, 0xbf, ...enc.encode(text)]);
+    const { d, q } = setup(
+      { a1: bodyOf('text/plain', 'a.txt') },
+      lenderOf(new Blob([withBom], { type: 'text/plain' })),
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(30);
+    expect(q('[data-pkc-field="attachment-text"]')?.textContent).toBe(text);
+    expect(q('[data-pkc-field="attachment-no-preview"]')).toBeNull();
+    expect(made).toHaveLength(0);
+  });
+
+  it('対照群:200KB を超える日本語の文書は、途中で切れても字のまま(切れ目は壊れにしない)', async () => {
+    // 「あ」は 3 byte ── 200_000 は 3 で割り切れないので、境目で字が途切れる
+    const big = 'あ'.repeat(70_000);
+    const { d, q } = setup(
+      { a1: bodyOf('text/plain', 'big.txt') },
+      lenderOf(new Blob([big], { type: 'text/plain' })),
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(60);
+    const shown = q('[data-pkc-field="attachment-text"]')?.textContent ?? '';
+    expect(shown).toContain('(先頭 200KB のみ表示)');
+    expect(shown).not.toContain('�');
   });
 });

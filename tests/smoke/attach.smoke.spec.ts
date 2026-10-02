@@ -784,6 +784,73 @@ test('🔴 PDF の添付は器いっぱいに出て、別の窓でも開ける',
   expect(shown.h, '別窓の PDF が窓いっぱいでない').toBeGreaterThan(shown.innerH * 0.9);
   await popup.close();
 
+  /**
+   * 🔴 **種類を `text/plain` と名乗らせた PDF / 画像は、字として出ない**(#1220)。
+   *
+   * ⚠ 報告の経緯 ── 自動操作が `type: 'text/plain'` で渡した PDF の bytes
+   *   (`%PDF-1.7 …`)が、添付の画面に字で出た。⚠ 同じ道中に足す(`gotoApp` を足さない)。
+   * 🔑 観測点は**実ブラウザが受け取る値**:付け替えた URL を `fetch` して、
+   *   種類が PDF で、先頭が `%PDF-` のままであること(中身は 1 byte も変えない)。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '偽の種類.txt',
+    mimeType: 'text/plain',
+    buffer: PDF_MIN,
+  });
+  // ⚠ 開いているのが添付のときは、増えた添付に**選択が移らない** ── 押して開く
+  //   (開かないと、手前に開いている本物の PDF を見て緑になる)
+  await page
+    .locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '偽の種類.txt' })
+    .first()
+    .click();
+  const retyped = page.locator('object[data-pkc-preview="pdf"]');
+  await expect(retyped).toHaveCount(1);
+  await expect(page.locator('[data-pkc-field="attachment-info"]')).toContainText('偽の種類.txt');
+  await expect(page.locator('[data-pkc-field="attachment-text"]')).toHaveCount(0);
+  expect(await page.locator('[data-pkc-region="detail"]').innerText()).not.toContain('%PDF');
+  const fetched = await retyped.evaluate(async (el) => {
+    const r = await fetch(el.getAttribute('data') ?? '');
+    return { type: r.headers.get('content-type'), head: (await r.text()).slice(0, 5) };
+  });
+  expect(fetched).toEqual({ type: 'application/pdf', head: '%PDF-' });
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '偽の画像.txt',
+    mimeType: 'text/plain',
+    buffer: PNG_1X1,
+  });
+  await page
+    .locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '偽の画像.txt' })
+    .first()
+    .click();
+  await expect(page.locator('[data-pkc-field="attachment-info"]')).toContainText('偽の画像.txt');
+  const retypedImg = page.locator('img[data-pkc-field="attachment-media"]');
+  await expect(retypedImg).toHaveCount(1);
+  await expect
+    .poll(() => retypedImg.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+    .toBe(1);
+  await expect(page.locator('[data-pkc-field="attachment-text"]')).toHaveCount(0);
+
+  /**
+   * 🔴 **添付の編集では、設定の行(`attachment.*`)が欄に出ず、説明だけ書ける**(#1220 穴②)。
+   *
+   * ⚠ 同じ道中の続き(`gotoApp` を足さない)。この画面の添付は上で開いた**画像**。
+   * 🔑 観測点は 2 つ:欄の字(`attachment.` が無い)と、**保存したあとも添付が画像のまま**
+   *   (設定の行が 1 byte でも変われば、名前・大きさ・鍵が崩れて画面が変わる)。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const folded = page.locator('[data-pkc-field="editor-body"]');
+  await expect(folded).toHaveCount(1);
+  expect(await folded.inputValue(), '設定の行が編集欄に出ている').not.toContain('attachment.');
+  await expect(page.locator('[data-pkc-field="attachment-fold-note"]')).toContainText('説明だけ');
+  await folded.fill('これは説明です');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="attachment-info"]')).toContainText('偽の画像.txt');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('これは説明です');
+  await expect
+    .poll(() => retypedImg.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+    .toBe(1);
+
   expect(errors).toEqual([]);
 });
 
