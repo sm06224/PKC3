@@ -20,6 +20,7 @@ import {
 } from '@features/message/message-log';
 import type { AppState } from '@adapter/state/app-state';
 import type { PersistState } from '@adapter/platform/storage-persist';
+import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
 import { PROSE_ALIGNS } from '@features/prose-align';
@@ -197,6 +198,11 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly colorSwatch: ColorSwatchStore = appColorSwatch,
+    /**
+     * 🔴 **保存領域を縮める**(#999)。⚠ 画面は**この係が組んだ表示を映すだけ**
+     *   (見込みも押せるかも判断しない)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly vacuum: StorageVacuum = appStorageVacuum,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
@@ -233,6 +239,8 @@ export class SettingsRenderer {
       this.syncNotices();
       this.syncTooNarrow();
       this.syncCopyHistory();
+      // 🔴 開いている間に大きさが動きうる ── 測り直す(間隔は係が持つ)
+      this.vacuum.refresh();
       return;
     }
     this.built = true;
@@ -1091,6 +1099,24 @@ export class SettingsRenderer {
     this.syncNotices();
     this.syncTooNarrow();
     this.syncCopyHistory();
+    // 🔴 保存領域を縮める(#999)── 係の表示が変わるたびに映す(購読は 1 組しか生きない)
+    this.vacuum.subscribe(() => this.syncVacuum());
+    this.syncVacuum();
+    this.vacuum.refresh();
+  }
+
+  /**
+   * 🔴 **保存領域を縮める**の表示を映す(#999)。⚠ 判断は `StorageVacuum` が持つ ──
+   * ここは**字と押せるかを置くだけ**(2 か所で判断すると、片方だけ直した日に食い違う)。
+   */
+  private syncVacuum(): void {
+    const note = this.region.querySelector<HTMLElement>('[data-pkc-field="vacuum-note"]');
+    const btn = this.region.querySelector<HTMLButtonElement>('[data-pkc-field="vacuum-run"]');
+    if (note === null || btn === null) return;
+    const v = this.vacuum.view();
+    if (note.textContent !== v.text) note.textContent = v.text;
+    if (btn.disabled !== !v.canRun) btn.disabled = !v.canRun;
+    btn.setAttribute('aria-busy', v.busy ? 'true' : 'false');
   }
 
   /**

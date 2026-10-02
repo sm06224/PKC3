@@ -537,6 +537,20 @@ export type StorageRequest =
    */
   | { op: 'optimizeIndexes' }
   /**
+   * 🔴 **保存領域を縮める**(#999。Gemini 裁定 A)── `VACUUM` を 1 回打つ。
+   *
+   * ⚠ **押した user だけが打つ**(設定の「保存領域の大きさ」の「縮める」)。
+   *   🚫 **自動では打たない**(`optimizeIndexes` にも足さない ── 途中で止まると
+   *   DB が開けなくなった、#1218。原因は塞いだが、自動で打つかは別の裁定)。
+   * ⚠ 作業中に**いまの大きさと同じだけ**一時的に増える ── 押せるかの判断
+   *   (空きが足りるか)は押す前に `features/storage/vacuum.ts` が見る。
+   *   worker が断るのは床(`QUOTA_BLOCKED_OPS`)と壊れの門だけ。
+   * ⚠ 同期の 1 本なので**終わるまで他の op は待つ**(= 保存できない時間)。
+   *   呼び側は書込の列にも載せる(`StorageVacuum`)。
+   * 🔑 前後の `storageGauge` と所要を返す(`optimizeIndexes` と同じ形)。
+   */
+  | { op: 'vacuum' }
+  /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    *
    * ⚠ **時間の上限を掛けない** ── SQL の面は 8 秒で切るので救出には使えない
@@ -827,6 +841,9 @@ export interface OptimizeIndexesResult {
   after: StorageGauge;
 }
 
+/** 🔴 **縮める 1 回の結果**(#999)── 形は `OptimizeIndexesResult` と同じ(前後 + 所要)。 */
+export type VacuumResult = OptimizeIndexesResult;
+
 export interface CountsResult {
   entries: number;
   relations: number;
@@ -1042,6 +1059,7 @@ export interface ResultMap {
   counts: CountsResult;
   storageGauge: StorageGauge;
   optimizeIndexes: OptimizeIndexesResult;
+  vacuum: VacuumResult;
   checkIntegrity: IntegrityCheckResult;
   integrityPlan: IntegrityPlan;
   integrityStamp: null;

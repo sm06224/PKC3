@@ -133,6 +133,7 @@ import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedu
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, messagesReadAt } from '@adapter/platform/message-post';
+import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { countUnread, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
@@ -4526,6 +4527,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
       run: (job) => (storeEffects ? storeEffects.run(job) : job()),
       optimize: () => client.request({ op: 'optimizeIndexes' }),
+      post: (m) => appMessagePost.post(m),
+    });
+    /**
+     * 🔴 **保存領域を縮める**(#999。Gemini 裁定 A)── 押した user だけが打つ。
+     *
+     * ⚠ **判断は `features/storage/vacuum.ts` と `StorageVacuum`** ── この file はどの test からも
+     *   実行されない(CLAUDE.md §2)ので、ここは**口を渡すだけ**にする。
+     * ⚠ 自動の係(`autoOptimizer`)からは呼ばない ── 縮める(VACUUM)は自動では打たない。
+     * ⚠ 可搬の単一 HTML では渡さない(DB は器の中の写しで、保存の単位が違う)。
+     */
+    appStorageVacuum.attach({
+      holdsWriterLease: () => writerHolder,
+      // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
+      run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+      gauge: () => client.request({ op: 'storageGauge' }),
+      quota: async () => (navigator.storage?.estimate ? await navigator.storage.estimate() : {}),
+      vacuum: () => client.request({ op: 'vacuum' }),
       post: (m) => appMessagePost.post(m),
     });
   }

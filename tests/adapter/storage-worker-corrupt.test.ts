@@ -192,6 +192,10 @@ describe('起動の検めは、壊れた DB で壊れを名指しし、印を残
     await expect(request({ op: 'optimizeIndexes' })).rejects.toThrow(CORRUPT_REFUSAL);
   });
 
+  it('🔴 旗が立った後は、保存領域を縮める(押した user だけが打つ書き込み)も断られる(#999)', async () => {
+    await expect(request({ op: 'vacuum' })).rejects.toThrow(CORRUPT_REFUSAL);
+  });
+
   it('🔴 旗が立った後は、印を残す書き込みだけ断られる', async () => {
     await expect(request({ op: 'integrityStamp', at: '2026-09-20T00:00:00.000Z' })).rejects.toThrow(
       CORRUPT_REFUSAL,

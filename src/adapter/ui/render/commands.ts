@@ -32,6 +32,7 @@
  * 同じハンドラで、`root` への委譲で拾うのでどの面に描いても効く(§7 と同じ形)。
  */
 import { iconButton } from './icons';
+import { VACUUM_HEADING, VACUUM_LABEL } from '@features/storage/vacuum';
 /**
  * 🔴 **壊れたときの 4 つの字は features が持つ**(#986 段③)── 断り文
  * (`db-corruption.ts`)と捨てる窓(`container-reset.ts`)も同じ字を指すので、
@@ -197,6 +198,8 @@ export function buildSettingsCommands(): DocumentFragment {
   //   「使っていない添付を消す」を押す前に、まずどれが重いかを知りたい
   frag.append(buildStorageProfile());
   frag.append(buildPurgeOrphanAssets());
+  // 🔴 縮める(#999)── 片づけの**隣**に置く(どちらも「保存領域を軽くする」用事)
+  frag.append(buildVacuumPanel());
   // 🔴 壊れの調べは片づけの**隣**に置く ── 「壊れた」と言われた人が最初に探す並び
   frag.append(buildDbRescue());
   return frag;
@@ -224,6 +227,36 @@ function buildPurgeOrphanAssets(): HTMLElement {
     row.append(btn);
   }
   box.append(row);
+  return box;
+}
+
+/**
+ * 🔴 **保存領域を縮める**(#999。Gemini 裁定 A)。
+ *
+ * ⚠ **ここには判断も数も 1 つも置かない** ── 押す前の字(見込み / 押せない理由)も
+ *   押せるかも、`StorageVacuum`(`adapter/platform/storage/vacuum-run.ts`)が組み、
+ *   `SettingsRenderer.syncVacuum` が**この器へ映す**。ここは器と押し口だけである。
+ * ⚠ 既定は `disabled` ── 測り終わる前から押せる形にしない(dead click を作らない)。
+ * 🚫 **自動では打たない**(押した user だけが打つ ── `src/features/storage/vacuum.ts`)。
+ */
+function buildVacuumPanel(): HTMLElement {
+  const box = document.createElement('section');
+  box.setAttribute('data-pkc-region', 'storage-vacuum');
+  const h = document.createElement('h4');
+  h.textContent = VACUUM_HEADING;
+  box.append(h);
+
+  /** 押す前に読ませる字(見込み / 押せない理由)。⚠ ボタンの `title` は触れないと読めない。 */
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'vacuum-note');
+  note.className = 'settings-note';
+  box.append(note);
+
+  const btn = iconButton('storage-vacuum', VACUUM_LABEL);
+  btn.setAttribute('data-pkc-field', 'vacuum-run');
+  btn.title = '空いたまま抱えている分を返して、保存領域の大きさを小さくします';
+  btn.disabled = true;
+  box.append(btn);
   return box;
 }
 

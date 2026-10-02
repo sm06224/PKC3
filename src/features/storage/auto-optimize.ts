@@ -99,6 +99,15 @@ export function planAutoOptimize(i: AutoOptimizeInput): AutoOptimizePlan {
 }
 
 /**
+ * 🔴 **処理の所要の字**(「0.4 秒」)。⚠ 0.05 秒未満は「0.0 秒」と書かず「0.1 秒未満」と書く
+ * (掛かっていないように読めるため)。
+ * 🔑 索引の片づけ(ここ)と保存領域を縮める(`vacuum.ts`)が**同じ 1 本**を使う。
+ */
+export function secondsText(elapsedMs: number): string {
+  return elapsedMs < 50 ? '0.1 秒未満' : `${(elapsedMs / 1000).toFixed(1)} 秒`;
+}
+
+/**
  * 🔴 **処理の記録に積む字**(1 回の片づけにつき 1 件)。
  *
  * ⚠ 数字しか入れない(本文・題名は 1 つも入らない ── メッセージは中身を漏らさない)。
@@ -106,7 +115,7 @@ export function planAutoOptimize(i: AutoOptimizeInput): AutoOptimizePlan {
  * 🔑 空きは**片づけた後の値**(「片づけて何が空いたか」= file は縮まない代わりに増える側)。
  */
 export function optimizeDoneText(elapsedMs: number, freeBytesAfter: number): string {
-  const secs = elapsedMs < 50 ? '0.1 秒未満' : `${(elapsedMs / 1000).toFixed(1)} 秒`;
+  const secs = secondsText(elapsedMs);
   const mib = (freeBytesAfter / (1024 * 1024)).toFixed(1);
   return `索引を片づけました(${secs}、空き ${mib} MiB)`;
 }

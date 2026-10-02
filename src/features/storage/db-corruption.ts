@@ -84,6 +84,8 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'appendMessage',
   // 🔴 索引の片づけ(#999 段③)── 索引の段を書き直すので書き込み。壊れた DB には打たない
   'optimizeIndexes',
+  // 🔴 保存領域を縮める(#999)── file を丸ごと書き直す書き込み。問題が見つかっている DB には打たない
+  'vacuum',
 ];
 
 /**
