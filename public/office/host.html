@@ -134,6 +134,7 @@
 <script src="office-format.js"></script>
 <script src="office-images.js"></script>
 <script src="office-unsaved.js"></script>
+<script src="office-shadow.js"></script>
 <script>
 (function () {
   'use strict';
@@ -143,6 +144,18 @@
   var nameEl = document.getElementById('name');
   var screenEl = document.getElementById('screen');
   function setStatus(s) { statusEl.textContent = s; }
+
+  // ── 🔴 影(編集中の文書の写し)を書く間だけ `fd_sync` を同期の no-op にする口(#1228 段 1)──────
+  //
+  // ⚠ 判断は `office-shadow.js` ── ここは起動の import へ**1 度だけ**差し込む。import は instantiate の時に
+  //    決まる(`WebAssembly.Suspending` の object なので後から替えられない)ので、`instantiateWasm` の中で包む。
+  //    `begin()` 〜 `end()` の間だけ 0 を返す。**それ以外は元の `fd_sync` と同じ**(理由は `office-shadow.js` の冒頭)。
+  var shadowGate = window.PKC3OfficeShadow
+    ? window.PKC3OfficeShadow.createSyncGate(function () { return window.__lo && window.__lo.FS; })
+    : null;
+  window.__loShadowGate = shadowGate;
+  /** 差し替えが当たった import の名前(空 = 当たっていない)。 */
+  var shadowPatched = [];
   function fail(s) {
     msgEl.textContent = s;
     msgEl.hidden = false;
@@ -1588,6 +1601,10 @@
         },
         getPreloadedPackage: function () { return dataBuf; },
         instantiateWasm: function (imports, ok) {
+          // 🔴 影を書く口(#1228 段 1)。⚠ 当たらなくても起動は続ける ── 影が書けないだけ
+          if (shadowGate) {
+            try { shadowPatched = shadowGate.wrapImports(imports); } catch (e) { shadowPatched = []; }
+          }
           WebAssembly.instantiateStreaming(
             gunzipResponse(blobs['soffice.wasm.gz'], 'application/wasm'), imports,
           ).then(function (r) { ok(r.instance, r.module); }, function (e) {
