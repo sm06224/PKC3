@@ -54,6 +54,7 @@ const WATCHED = [
   'open-doc-probe.mjs',
   'options-pane-probe.mjs',
   'save-existing-probe.mjs',
+  'shadow-store-probe.mjs',
   'sidebar-deadclick-probe.mjs',
   'steady-probe.mjs',
   'window-reclaim-probe.mjs',
