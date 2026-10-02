@@ -362,6 +362,33 @@ async function seedFakePack(
             },
           },
           callMain: function (a) { window.__args = a; window.__order.push('callMain'); },
+          // 🔴 **UNO 橋の偽物**(#1228 穴②)。⚠ 形は実物(lo-0c031979e70b)で測ったもの:
+          //   Desktop の components を列挙 → XModifiable.query(el)(Start Center は null)→ isModified()(0 / 1)。
+          //   中身は test が window.__fakeDocs(0 / 1 / 'sc')で決める。既定は空 = 何も聞かれても「無い」。
+          //   (この中は template literal ── バッククォートを書かない)
+          uno_init: Promise.resolve(),
+          getUnoComponentContext: function () {
+            var w = function (o) { o.delete = function () {}; return o; };
+            return w({ getValueByName: function () { return w({ get: function () { return w({}); } }); } });
+          },
+          uno: { com: { sun: { star: {
+            frame: { XDesktop: { query: function () {
+              var w = function (o) { o.delete = function () {}; return o; };
+              return w({ getComponents: function () { return w({ createEnumeration: function () {
+                var i = 0; var docs = window.__fakeDocs || [];
+                // ⚠ sessionStorage へも数える ── 「聞いた上で替えた」は替えた後の窓から読む
+                try { sessionStorage.setItem('__unoAsked', String(Number(sessionStorage.getItem('__unoAsked') || '0') + 1)); } catch (e) {}
+                return w({
+                  hasMoreElements: function () { return i < docs.length; },
+                  nextElement: function () { var d = docs[i]; i += 1; return w({ get: function () { return w({ doc: d }); } }); },
+                });
+              } }); } });
+            } } },
+            util: { XModifiable: { query: function (el) {
+              if (el.doc === 'sc') return null;
+              return { isModified: function () { return el.doc; }, delete: function () {} };
+            } } },
+          } } } },
         };
       };
     `;
@@ -1344,6 +1371,168 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     metas.map(([, t]) => (JSON.parse(t) as { name: string }).name),
     'LO の temp を保存として拾っている',
   ).not.toContain('lu42.tmp');
+
+  /**
+   * 🔴 **別の文書を開く放送(#1228 穴②)── 窓の中に保存していない変更が在るときだけ、窓の中で確認する。**
+   *
+   * 症状:LO の中で打った分は、本体で別の添付を「Office で開く」と**確認なしで消えた**
+   * (`reload-request` → `location.replace`。`beforeunload` は渡している最中の保存しか見ない)。
+   * ⚠ 本体の代役は**同じページの別の放送口**(`new BroadcastChannel`)── 封筒は `OfficeWindow.open()` が
+   * 生きている窓へ送る `reload-request` と同じ。⚠ LO の中は**偽の UNO 橋**(`seedFakePack`)で、
+   * 形は実物(lo-0c031979e70b)で測ったもの。本物の LO での通し(A を編集 → 開く → 確認 → …)は
+   * 手元の probe で 1 回通してある(PR に値を書く)── ここは**窓の DOM と配線**を見る。
+   * 🔑 新しく起動する test を足さない(`scripts/smoke-budget.mjs`)── 上の道中の続きで見る。
+   */
+  const unsaved = page.locator('#unsaved');
+  const docPath = (): Promise<string | undefined> =>
+    page.evaluate(() => (window as unknown as { __loDocPath?: string }).__loDocPath);
+  const urlBefore = page.url();
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__fakeDocs = [1];                       // 窓の中に保存していない変更が在る
+    w.__declined = 0;
+    const l = new BroadcastChannel('pkc3-office');
+    l.onmessage = (ev: MessageEvent): void => {
+      if ((ev.data as { pkc3Office?: string })?.pkc3Office === 'reload-declined') (w.__declined as number) += 1;
+    };
+    w.__listener = l;
+    w.__sender = new BroadcastChannel('pkc3-office');
+  });
+  const request = (name: string): Promise<void> =>
+    page.evaluate((n) => {
+      ((window as unknown as { __sender: BroadcastChannel }).__sender).postMessage({
+        pkc3Office: 'reload-request', payload: { name: n, awaitDoc: true },
+      });
+    }, name);
+
+  // 🔑 押す前に焦点が在った所(版面の入力欄の代わり)── 確認を閉じたら**そこへ戻る**(置き換えの作法)
+  await page.evaluate(() => {
+    const i = document.createElement('input');
+    i.id = 'focus-probe';
+    document.body.appendChild(i);
+    i.focus();
+  });
+  await request('b.docx');
+  await expect(unsaved, '未保存が在るのに確認が出ない').toBeVisible();
+  await expect(unsaved).toContainText('保存していない変更があります。別の文書を開くと消えます。開きますか?');
+  await expect(page.locator('#unsaved-open')).toHaveText('開く');
+  await expect(page.locator('#unsaved-cancel')).toHaveText('やめる');
+  // 🔑 既定の焦点は「やめる」(うっかり Enter で消さない)
+  expect(await page.evaluate(() => document.activeElement?.id), '既定の焦点が「やめる」でない').toBe('unsaved-cancel');
+  // 🔴 **見える**こと(属性ではなく画面で): 版面を覆い、箱は地と違う色で、押し所が箱の中に在る
+  const look = await page.evaluate(() => {
+    const box = document.querySelector('#unsaved .box') as HTMLElement;
+    const ov = document.getElementById('unsaved') as HTMLElement;
+    const screen = document.getElementById('screen') as HTMLElement;
+    const r = (e: Element): { x: number; y: number; w: number; h: number } => {
+      const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height };
+    };
+    const open = r(document.getElementById('unsaved-open') as HTMLElement);
+    const cancel = r(document.getElementById('unsaved-cancel') as HTMLElement);
+    // 押し所の中心で、いちばん手前に居るのが当の button か(版面に覆われていない)
+    const top = (b: { x: number; y: number; w: number; h: number }): string | undefined =>
+      document.elementFromPoint(b.x + b.w / 2, b.y + b.h / 2)?.id;
+    return {
+      pos: getComputedStyle(ov).position,
+      cover: { ov: r(ov), screen: r(screen) },
+      boxBg: getComputedStyle(box).backgroundColor,
+      overlayBg: getComputedStyle(ov).backgroundColor,
+      topOpen: top(open), topCancel: top(cancel),
+    };
+  });
+  expect(look.pos).toBe('fixed');
+  expect(look.cover.ov.w, '版面を覆っていない').toBeGreaterThanOrEqual(look.cover.screen.w);
+  expect(look.cover.ov.h).toBeGreaterThanOrEqual(look.cover.screen.h);
+  expect(look.boxBg, '箱に地が無い(透けて読めない)').not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(look.overlayBg, '覆いに色が無い(背後の版面が操作できてしまう)').not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  expect(look.topOpen, '「開く」が版面に覆われて押せない').toBe('unsaved-open');
+  expect(look.topCancel, '「やめる」が版面に覆われて押せない').toBe('unsaved-cancel');
+  // 答えを待つ間は替えない(替わっていれば URL か文書の path が変わる)
+  await page.waitForTimeout(700);
+  expect(page.url(), '確認の答えを待たずに替えた').toBe(urlBefore);
+  expect(await docPath()).toBe('/work/報告書.odt');
+  expect(await page.evaluate(() => (window as unknown as { __declined: number }).__declined), 'まだ「やめた」は返していない').toBe(0);
+
+  // 「やめる」── 替わらず、確認が畳まれ、本体へ「やめた」が 1 度だけ返る
+  await page.locator('#unsaved-cancel').click();
+  await expect(unsaved).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __declined: number }).__declined), { message: '本体へ「やめた」が返っていない' })
+    .toBe(1);
+  await page.waitForTimeout(500);
+  expect(page.url(), '「やめる」で替わった').toBe(urlBefore);
+  expect(await docPath(), '元の文書が消えた').toBe('/work/報告書.odt');
+  expect(
+    await page.evaluate(() => document.activeElement?.id),
+    '確認を閉じたのに焦点が戻っていない(以後の鍵が全部死ぬ)',
+  ).toBe('focus-probe');
+
+  // Escape も「やめる」(マウスだけで完結し、キーボードは近道)
+  await request('b.docx');
+  await expect(unsaved).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(unsaved).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __declined: number }).__declined), { message: 'Escape で「やめた」が返っていない' })
+    .toBe(2);
+  expect(page.url(), 'Escape で替わった').toBe(urlBefore);
+
+  // 「開く」── 最後に頼まれた文書へ替わる(確認が出ている間に 2 件続けて頼んでも箱は 1 つ)
+  await request('c.docx');
+  await expect(unsaved).toBeVisible();
+  await request('d.docx');
+  await page.waitForTimeout(300);
+  await page.locator('#unsaved-open').click();
+  await page.waitForURL(/name=d\.docx&await-doc=1/, { timeout: 15_000 });
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+
+  // 🔴 対照群: 保存していない変更が**無い**窓へは、確認なしで替わる(手数を増やさない)
+  //    ⚠ 替わった窓は `__fakeDocs` を持たない = 「無い」。聞かれたことは sessionStorage の数で読む
+  const askedBefore = await page.evaluate(() => Number(sessionStorage.getItem('__unoAsked') || '0'));
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const ov = document.getElementById('unsaved') as HTMLElement;
+    sessionStorage.removeItem('__unsavedShown');
+    new MutationObserver(() => { if (!ov.hidden) sessionStorage.setItem('__unsavedShown', '1'); })
+      .observe(ov, { attributes: true, attributeFilter: ['hidden'] });
+    w.__sender = new BroadcastChannel('pkc3-office');
+  });
+  await request('e.docx');
+  await page.waitForURL(/name=e\.docx&await-doc=1/, { timeout: 15_000 });
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('__unsavedShown')),
+    '保存していない変更が無いのに確認を出した',
+  ).toBeNull();
+  expect(
+    await page.evaluate(() => Number(sessionStorage.getItem('__unoAsked') || '0')),
+    '聞かずに替えた(LO に聞いた上で「無い」と分かって替えている)',
+  ).toBe(askedBefore + 1);
+
+  /**
+   * 🔴 **停止した窓は、聞かずに替える**(停止の帯の動線を確認で塞がない)。⚠ 確認が出ている最中に
+   * 停止したら確認は畳まれる(死んだ窓に「開きますか」を残さない)。
+   */
+  // ⚠ 替わった窓が LO(偽)を持つまで待つ ── 持つ前は「LO が無い」で聞かずに替わる(別の分岐)
+  await expect(page.locator('#status')).toContainText('表示中', { timeout: 15_000 });
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__fakeDocs = [1];
+    w.__sender = new BroadcastChannel('pkc3-office');
+  });
+  await request('f.docx');
+  await expect(unsaved).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(
+    new ErrorEvent('error', { message: 'RuntimeError: function signature mismatch' }),
+  ));
+  await expect(page.locator('#status')).toHaveText('停止');
+  await expect(unsaved, '停止した窓に確認が残っている').toBeHidden();
+  const askedStopped = await page.evaluate(() => Number(sessionStorage.getItem('__unoAsked') || '0'));
+  await request('g.docx');
+  await page.waitForURL(/name=g\.docx&await-doc=1/, { timeout: 15_000 });
+  expect(
+    await page.evaluate(() => Number(sessionStorage.getItem('__unoAsked') || '0')),
+    '停止している窓へ LO に聞いた(聞いても答えられない)',
+  ).toBe(askedStopped);
 });
 
 /**
