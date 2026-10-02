@@ -17,9 +17,10 @@ import {
   ASR_PARTS,
   ASR_WORKER_IDLE_MS,
   ASR_RUNTIME_FILES,
-  ASR_RUNTIME_MB,
+  ASR_RUNTIME_BYTES,
   asrAssetUrl,
-  asrDownloadMb,
+  asrDownloadBytes,
+  asrModelFloorBytes,
   asrMemoryNote,
   asrModelDir,
   asrPartLabel,
@@ -29,6 +30,7 @@ import {
   type AsrPackFile,
 } from '../../src/features/asr/asr-parts';
 import { mixToMono } from '../../src/features/asr/asr-pcm';
+import { humanBytes } from '../../src/features/human-bytes';
 import {
   ASR_SECTION_LABEL,
   transcriptHeading,
@@ -45,7 +47,7 @@ function manifest(over: Partial<{ runtime: unknown; models: unknown; version: un
   for (const p of ASR_PARTS) {
     models[p.id] = [
       file(`${asrModelDir(p)}config.json`, 800),
-      file(`${asrModelDir(p)}onnx/model_quantized.onnx`, p.modelMb * 1_000_000),
+      file(`${asrModelDir(p)}onnx/model_quantized.onnx`, p.modelBytes),
     ];
   }
   return JSON.stringify({
@@ -109,9 +111,10 @@ describe('ボタンの字(大きさと 1 行の説明つき)', () => {
     for (const p of ASR_PARTS) {
       const label = asrPartLabel(p);
       expect(label.startsWith(p.label)).toBe(true);
-      expect(label).toContain(`${p.modelMb + ASR_RUNTIME_MB}MB`);
+      expect(label).toContain(humanBytes(p.modelBytes + ASR_RUNTIME_BYTES));
       expect(label).toContain(`1 分の音に約 ${p.secondsPerMinute} 秒`);
-      expect(asrDownloadMb(p)).toBe(p.modelMb + ASR_RUNTIME_MB);
+      expect(asrDownloadBytes(p)).toBe(p.modelBytes + ASR_RUNTIME_BYTES);
+      expect(asrModelFloorBytes(p)).toBe(Math.floor(p.modelBytes / 2));
     }
   });
 
@@ -134,7 +137,9 @@ describe('メモリの案内(押す前に出る)', () => {
 
   it('足りない端末には、メモリの大きさつきで「動かない見込み」と出す', () => {
     const note = asrMemoryNote(light, light.needMemoryGb / 2);
-    expect(note).toBe(`この端末のメモリ(${light.needMemoryGb / 2} GB)では動かない見込みです`);
+    expect(note).toBe(`この端末のメモリ(${humanBytes((light.needMemoryGb / 2) * 1024 ** 3)})では動かない見込みです`);
+    // 🔑 大きさは普段の綴り(`humanBytes`)で出る ── 0.5 GB の端末は MB で言う
+    expect(asrMemoryNote(light, 0.5)).toContain('512.0 MB');
   });
 
   it('足りる端末には出さない(境目は「以上」)', () => {

@@ -164,9 +164,11 @@ export function buildAsrPackPanel(
 
   const intro = document.createElement('p');
   intro.setAttribute('data-pkc-field', 'settings-note');
-  intro.textContent =
-    '録った音を、この端末の中だけで文字にします(音はインターネットへ出ません)。'
-    + '部品を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、当たりやすいほうは時間がかかります。';
+  // 🔑 説明は **1 行 + hover**(#1017 §6.1 規則 3 ── `tests/adapter/settings-notes.test.ts` が 55 字で止める)。
+  //    詳しくはマニュアル(「音声を文字にする」)。
+  intro.textContent = '録った音を、この端末の中だけで文字にします(音は外へ出ません)。';
+  intro.title =
+    '部品を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、当たりやすいほうは時間がかかります。';
   root.append(intro);
 
   interface Row {

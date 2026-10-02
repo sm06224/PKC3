@@ -13,13 +13,14 @@
  *
  * | | 重み(ONNX q8) | 1 分の音 | 推論中の常駐(プロセス木) |
  * |---|---|---|---|
- * | 軽い = base | **81MB** | 24〜34 秒(約 25 秒) | **1.65GB** |
- * | 当たりやすい = small | **254MB** | 60〜82 秒(約 60 秒) | **3.6GB** |
+ * | 軽い = base | **81,270,976 byte** | 24〜34 秒(約 25 秒) | **1.65GB** |
+ * | 当たりやすい = small | **253,468,391 byte** | 60〜82 秒(約 60 秒) | **3.6GB** |
  *
  * ⚠ 秒は**混んだ 4 コアの箱**で測った向きと桁である。実機で変わる ──
  *   だから字は「約」と書く。⚠ **日本語の当たり具合はまだ測っていない**(その箱では測れない)。
  *   実機の結果が出たら、この表の 2 行を差し替える(仕組みは変わらない)。
  */
+import { humanBytes } from '../human-bytes';
 
 /** 2 択の id。⚠ 画面の字ではない(画面の字は `label`)。 */
 export type AsrPartId = 'light' | 'accurate';
@@ -30,8 +31,11 @@ export interface AsrPart {
   readonly label: string;
   /** transformers が引くモデルの名前(`env.localModelPath` の下の相対)。 */
   readonly modelId: string;
-  /** 重みの大きさ(MB)。⚠ 画面の字はここから作る。 */
-  readonly modelMb: number;
+  /**
+   * 重みの大きさ(byte)。⚠ 画面の字はここから作る(`humanBytes` を通す ── 大きさの綴りは 1 本 #454)。
+   * 🔑 実測の byte 数そのもの(`asr-measure-2026-10.md` §2-1)。「81MB」と丸めて持たない。
+   */
+  readonly modelBytes: number;
   /** 1 分の音を字にする秒の目安。 */
   readonly secondsPerMinute: number;
   /**
@@ -50,7 +54,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
     id: 'light',
     label: '軽い',
     modelId: 'Xenova/whisper-base',
-    modelMb: 81,
+    modelBytes: 81_270_976,
     secondsPerMinute: 25,
     needMemoryGb: 4,
   },
@@ -58,7 +62,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
     id: 'accurate',
     label: '当たりやすい',
     modelId: 'Xenova/whisper-small',
-    modelMb: 254,
+    modelBytes: 253_468_391,
     secondsPerMinute: 60,
     needMemoryGb: 8,
   },
@@ -115,26 +119,30 @@ export const ASR_RUNTIME_FILES: readonly string[] = [
   ASR_RUNTIME_WASM,
 ];
 
-/** 実行の部品の大きさの目安(MB。wasm 14.3 + js 約 1.3 + 余裕)。⚠ 画面の字にだけ使う。 */
-export const ASR_RUNTIME_MB = 16;
+/**
+ * 実行の部品の大きさ(byte)。実測 = `transformers.mjs` 567,126 + `ort-wasm.mjs` 24,381 + `ort-wasm.wasm` 14,264,838。
+ * ⚠ 画面の字にだけ使う(判定には使わない ── 目録の下限は `RUNTIME_FLOOR`)。
+ */
+export const ASR_RUNTIME_BYTES = 14_856_345;
 
 /** 部品の中の model の置き場(pack 内の相対)。 */
 export function asrModelDir(part: AsrPart): string {
   return `models/${part.modelId}/`;
 }
 
-/** 取るものの大きさの目安(MB)。⚠ 画面の字にだけ使う(判定には使わない)。 */
-export function asrDownloadMb(part: AsrPart): number {
-  return part.modelMb + ASR_RUNTIME_MB;
+/** 取るものの大きさの目安(byte)。⚠ 画面の字にだけ使う(判定には使わない)。 */
+export function asrDownloadBytes(part: AsrPart): number {
+  return part.modelBytes + ASR_RUNTIME_BYTES;
 }
 
 /**
  * ボタンの字(大きさと 1 行の説明つき)。
- * 例: `軽い(約 97MB、1 分の音に約 25 秒)`。
+ * 例: `軽い(約 91.7 MB、1 分の音に約 25 秒)`。
  * ⚠ 数は**全部定数から出す** ── 手で書くと、実機の結果で差し替えた日に食い違う。
+ * ⚠ 大きさは `humanBytes`(画面の大きさの綴りはあの 1 本 ── `tests/features/human-bytes.test.ts`)。
  */
 export function asrPartLabel(part: AsrPart): string {
-  return `${part.label}(約 ${asrDownloadMb(part)}MB、1 分の音に約 ${part.secondsPerMinute} 秒)`;
+  return `${part.label}(約 ${humanBytes(asrDownloadBytes(part))}、1 分の音に約 ${part.secondsPerMinute} 秒)`;
 }
 
 /**
@@ -149,7 +157,8 @@ export function asrMemoryNote(part: AsrPart, deviceMemoryGb: number | undefined)
     return null;
   }
   if (deviceMemoryGb >= part.needMemoryGb) return null;
-  return `この端末のメモリ(${deviceMemoryGb} GB)では動かない見込みです`;
+  // ⚠ 大きさの綴りは `humanBytes` の 1 本(`deviceMemory` は GiB 単位。0.25 なら「256.0 MB」と出る)
+  return `この端末のメモリ(${humanBytes(deviceMemoryGb * 1024 ** 3)})では動かない見込みです`;
 }
 
 // ── 目録(`pack.json`)を読む ────────────────────────────────────────────
@@ -184,8 +193,8 @@ const RUNTIME_FLOOR: Readonly<Record<string, number>> = {
 };
 
 /** 重みの下限 = 定数の半分(別の model を取り違えた・途中で切れた、の桁を止める)。 */
-function modelFloor(part: AsrPart): number {
-  return Math.floor((part.modelMb * 1_000_000) / 2);
+export function asrModelFloorBytes(part: AsrPart): number {
+  return Math.floor(part.modelBytes / 2);
 }
 
 /** pack 内の相対 path として安全か(`..` / 絶対 / backslash を断る)。 */
@@ -256,7 +265,7 @@ export function readAsrPack(text: string): AsrPackRead {
     const onnx = files.filter((f) => f.path.endsWith('.onnx'));
     if (onnx.length === 0) return { ok: false, why: `${part.label}の部品に重み(.onnx)がありません` };
     const total = onnx.reduce((s, f) => s + f.bytes, 0);
-    if (total < modelFloor(part)) {
+    if (total < asrModelFloorBytes(part)) {
       return { ok: false, why: `${part.label}の重みが小さすぎます(別の物か、途中で切れた可能性があります)` };
     }
     models[part.id] = files;

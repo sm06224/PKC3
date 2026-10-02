@@ -7,7 +7,13 @@ import { chromiumLaunch } from './playwright.config';
 import { trimMarkText } from '../../src/features/audio/trim-text';
 // ⚠ 音声認識の部品の名前・大きさの下限は**実装の定数から引く**(手で並べると、定数を差し替えた日に
 //   この偽の部品だけが古い構成のまま緑になる)。alias を持たない pure な定数だけを引く。
-import { ASR_PARTS, ASR_RUNTIME_FILES, asrMemoryNote, asrModelDir } from '../../src/features/asr/asr-parts';
+import {
+  ASR_PARTS,
+  ASR_RUNTIME_FILES,
+  asrMemoryNote,
+  asrModelDir,
+  asrModelFloorBytes,
+} from '../../src/features/asr/asr-parts';
 import { createHash } from 'node:crypto';
 
 /**
@@ -602,7 +608,7 @@ ${(e as Error).message}`,
     // 重みは「目録の下限(定数の半分)」を満たす大きさだけのゼロ詰め
     {
       path: `${asrModelDir(light)}onnx/model_quantized.onnx`,
-      zeros: Math.ceil((light.modelMb * 1_000_000) / 2) + 1000,
+      zeros: asrModelFloorBytes(light) + 1000,
     },
   ];
   const entryOf = (f: FakeFile): { path: string; bytes: number; sha256: string } => {
@@ -675,7 +681,7 @@ ${(e as Error).message}`,
   );
   await expect(installLight, '案内を出した端末でボタンを塞いだ').toBeEnabled();
   expect(await installLight.textContent(), 'ボタンの字に大きさと説明が無い').toMatch(
-    /約 \d+MB、1 分の音に約 \d+ 秒/,
+    /約 [\d.]+ MB、1 分の音に約 \d+ 秒/,
   );
   expect(await asrRequests(), '押す前に部品を取りに行った(勝手に取りに行かない)').toEqual([]);
 

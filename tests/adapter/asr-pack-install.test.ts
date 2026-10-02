@@ -19,6 +19,7 @@ import {
   ASR_PARTS,
   ASR_RUNTIME_FILES,
   asrModelDir,
+  asrModelFloorBytes,
   type AsrPackFile,
   type AsrPartId,
 } from '../../src/features/asr/asr-parts';
@@ -53,7 +54,7 @@ async function world(version = 'v1', only: readonly AsrPartId[] = ['light']): Pr
     if (!only.includes(p.id)) continue;
     models[p.id] = [
       await put(`${asrModelDir(p)}config.json`, 700, 4),
-      await put(`${asrModelDir(p)}onnx/m.onnx`, Math.ceil((p.modelMb * 1_000_000) / 2) + 10, 5),
+      await put(`${asrModelDir(p)}onnx/m.onnx`, asrModelFloorBytes(p) + 10, 5),
     ];
   }
   const manifest = JSON.stringify({ version, runtime, models });

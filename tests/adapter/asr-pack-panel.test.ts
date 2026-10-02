@@ -69,7 +69,7 @@ describe('部品 2 択の見え方', () => {
       const b = q<HTMLButtonElement>(r, 'asr-install');
       expect(note.hidden).toBe(false);
       expect(note.textContent).toBe(asrMemoryNote(part, 2));
-      expect(note.textContent).toContain('2 GB');
+      expect(note.textContent).toContain('2.0 GB');
       // 「下」= 文書の順でボタンの後ろ
       expect(b.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING, '案内がボタンの上に出ている').toBeTruthy();
       expect(b.disabled, '案内が出た端末でボタンを塞いだ').toBe(false);
@@ -96,7 +96,7 @@ describe('部品 2 択の見え方', () => {
     vi.stubGlobal('navigator', { ...navigator, deviceMemory: 1 });
     try {
       const p = buildAsrPackPanel(new AsrPackState());
-      expect(q(row(p.root, 'light'), 'asr-memory-note').textContent).toContain('1 GB');
+      expect(q(row(p.root, 'light'), 'asr-memory-note').textContent).toContain('1.0 GB');
     } finally {
       vi.unstubAllGlobals();
     }

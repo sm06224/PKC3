@@ -196,3 +196,53 @@ PKC3_CHROMIUM=/opt/pw-browsers/chromium node tests/probe/asr-probe.mjs \
 ⚠ 上の表は probe の**初稿**(`--lang` 引数と `URLSearchParams` の import を足す前)で回した。足した後の版で `tiny` / COI あり を 1 回だけ再走し、動くことを確かめた(表の「再走」)。
 ⚠ probe は `tests/probe/*.mjs` の型(`@playwright/test` の `chromium` + `tests/helpers/proc-memory.mjs`)。**CI には載せていない**(重い・外から取る物がある)。
 ⚠ `--variant plain` は ORT の素の wasm(14.3MB)、`asyncify` は transformers の既定(26.9MB)。
+
+## 8. 段②(2026-10-02): 部品を端末へ取り込む仕組みと、配る側の組み方
+
+⚠ 実装は `src/adapter/platform/asr/`・画面は `src/adapter/ui/render/asr-pack-panel.ts`。ここは**配る側が組むときの契約**と、
+実際に通した結果だけを書く(設計の根拠は #772 のコメント)。
+
+### 取り先の判断
+
+**同一オリジンの `/asr-pack/`**(Office の一式と同じ形)。npm の CDN から端末が直に取る道は採らなかった ──
+音そのものは出ないが、**端末が第三者へ出る**(IP と「この人が音声認識を使った」が相手に残る)ので、
+「中身を端末の外へ出さない」「依存を静的に」と合わない。置かれるまでは `pack.json` が 404 で、画面は
+「まだ配っていません」と言う。取った物は IndexedDB の Blob に置き、2 回目からは取らない。
+
+### pack の構成(`pack.json` が全部を列挙する。`src/features/asr/asr-parts.ts` が検める)
+
+```
+/asr-pack/pack.json                         { version, runtime: [{path,bytes,sha256}], models: { light: [...], accurate: [...] } }
+/asr-pack/runtime/transformers.mjs          transformers.js(web 版)+ onnxruntime-web を 1 枚の ESM に束ねた物(bare import を残さない)
+/asr-pack/runtime/ort-wasm.mjs              onnxruntime-web の ort-wasm-simd-threaded.mjs
+/asr-pack/runtime/ort-wasm.wasm             onnxruntime-web の ort-wasm-simd-threaded.wasm(14.3MB)
+/asr-pack/models/Xenova/whisper-base/…      軽い = whisper-base の q8(config / tokenizer 一式 + onnx/encoder・decoder_merged の *_quantized.onnx)
+/asr-pack/models/Xenova/whisper-small/…     当たりやすい = whisper-small の q8
+```
+
+束ね方(2026-10-02 に実走した形。esbuild):
+
+```js
+await build({
+  entryPoints: ['node_modules/@huggingface/transformers/dist/transformers.web.js'],
+  outfile: 'runtime/transformers.mjs', bundle: true, format: 'esm', platform: 'browser', minify: true,
+  alias: {
+    'onnxruntime-web/webgpu': 'node_modules/onnxruntime-web/dist/ort.webgpu.bundle.min.mjs',
+    'onnxruntime-common':     'node_modules/onnxruntime-web/dist/ort.webgpu.bundle.min.mjs',
+  },
+});
+```
+
+⚠ 版は transformers が名指しする onnxruntime-web(`@huggingface/transformers@4.3.0` → ORT-web `1.31.0-dev.20260914-8d85527a0`)に**揃える**。
+⚠ `sha256` は file ごとに出す(32MB 以下の file は取り込み時に照合する。それより大きい物は大きさだけ見る)。
+
+### 通したこと / 通していないこと
+
+- 本物の `transformers.mjs` + ORT + `whisper-base` / `whisper-small`(q8)を、**ビルドしたアプリの画面から**
+  (システム → 音声認識 → 取り込む → 音/動画 → 文字にする)通した(loopback 配信。英語の合成音声 6.5 秒)。
+  base: 取り込み 2.1 秒 / 文字にする 7.4 秒、small: 取り込み 3.5 秒(242MB)/ 18.6 秒。網への要求は pack の 18 本だけ。
+- ⚠ **日本語の当たり具合は未測定**(`ASR_LANGUAGE = 'japanese'` のまま英語の音を通したので、base は音を日本語の字で
+  なぞった。small は英語のまま出た)。
+- ⚠ **GitHub Pages の 1 file 100MB の制限**: small の `decoder_model_merged_quantized.onnx` は **157MB** の 1 file。
+  git で配る Pages だと当たる。Actions から直接配る Pages の制限は**実測していない**。当たるなら、
+  分割(`*.part1` …)を取り込みの側へ足す必要がある(いまは未実装)。
