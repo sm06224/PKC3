@@ -195,7 +195,9 @@ describe('割当の検め', () => {
   // (専用の文脈 `reading` を作って `global` の重なりを避けた。定義の docstring)
   'format-table', 'format-codeblock', 'format-math',
   // 🔴 #1171: 表の列幅を揃える ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'align-table'];
+  'align-table',
+  // 🔴 #1233: 選んだ字を整える 5 つ ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる(既定を置くと割当と重なる)
+  'tidy-join-lines', 'tidy-to-halfwidth', 'tidy-kana-to-fullwidth', 'tidy-squeeze-blank-lines', 'tidy-strip-bullets'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));
