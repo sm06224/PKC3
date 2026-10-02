@@ -14,6 +14,7 @@
  *   それが node でも通ることをここで見ておく)。
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type {
   ResultMap,
   StorageRequest,
@@ -106,6 +107,8 @@ describe('storageGauge(#999 段①)', () => {
     // ⚠ `:memory:` の journal は `memory`(実値を読んでいる ── 要求値の既定 `truncate` ではない)
     expect(g.journalMode).toBe('memory');
     expect([0, 1, 2]).toContain(g.tempStore);
+    // 🔴 `synchronous` は FULL と決めた(#1007 段③)── 読み戻しが 2 でなければ耐久性が落ちている
+    expect(g.synchronous, 'synchronous が FULL(2)でない').toBe(2);
     expect(Number.isFinite(g.elapsedMs)).toBe(true);
     for (const v of [g.pageCount, g.pageSize, g.freelistCount, g.fileBytes, g.freeBytes]) {
       expect(Number.isInteger(v)).toBe(true);
@@ -175,5 +178,25 @@ describe('storageGauge(#999 段①)', () => {
   it('🔴 壊れの門にも空きの門にも入っていない(読むだけ)', () => {
     expect(CORRUPT_BLOCKED_OPS).not.toContain('storageGauge');
     expect(QUOTA_BLOCKED_OPS).not.toContain('storageGauge');
+  });
+});
+
+/**
+ * 🔴 **`synchronous = FULL` を字で置いていること**(#1007 段③)。
+ *
+ * ⚠ sqlite の既定が FULL(2)なので、上の読み戻しの pin は**その行を消しても緑**になる
+ *   (CLAUDE.md §1「強制する規則は、強制しなければ false になる場面で見る」── ここは
+ *   既定が同じ値なので、その場面を作れない)。だから**原文**で 1 行を pin する。
+ * ⚠ 見るのは**実行する行**(注釈を剥いでから)── docstring にも同じ字が在る。
+ */
+describe('#1007 段③ ── synchronous を FULL と決めて、字で置いている', () => {
+  it('🔴 storage-worker.ts の実行する行に PRAGMA synchronous = FULL が在る', () => {
+    const src = readFileSync('src/adapter/platform/storage/storage-worker.ts', 'utf-8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const hits = src.match(/PRAGMA synchronous = FULL/g) ?? [];
+    expect(hits, 'synchronous を既定に任せている(上流が変えた日に黙って落ちる)').toHaveLength(1);
+    // 空振り防止 ── 剥いだ後も、読み戻しの行(gauge)は残っている
+    expect(src).toContain("num('PRAGMA synchronous')");
   });
 });
