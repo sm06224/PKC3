@@ -13,6 +13,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CHANGED_OUTSIDE_REOPEN_NOTE,
+  DIFF_READ_LIMIT_BYTES,
   CHANGED_OUTSIDE_WRITE_BACK_NOTE,
   LaunchedFiles,
   splitAlreadyOpen,
@@ -155,6 +156,65 @@ describe('取り込んだ後に外で変わったか', () => {
     l.remember('n2', fakeHandle('b'), 'b.md', 1000); // getFile を持たない
     expect(await l.changedSince('n1')).toBe(false);
     expect(await l.changedSince('n2')).toBe(false);
+  });
+
+  /**
+   * 🔴 **書き戻す直前の読みは 1 回**(#1231 段②)── 「外で変わったか」と「今の中身」(差分の相手)を
+   * **同じ `getFile()`** から採る。⚠ 2 回読むと、間に外で書かれたとき**時刻と中身が別の版**になる。
+   */
+  it('🔴 readCurrent: getFile 1 回で、変わったかと今の中身を返す', async () => {
+    const l = new LaunchedFiles();
+    const { h, state } = movable('a', 1000);
+    l.remember('n1', h, 'a.md', 1000);
+    const same = await l.readCurrent('n1');
+    expect(same).toEqual({ changed: false, text: 'x' });
+    expect(state.gets, 'getFile を 2 回以上呼んだ').toBe(1);
+    state.at = 2000;
+    expect(await l.readCurrent('n1'), '外で変わったのに changed が立たない').toEqual({ changed: true, text: 'x' });
+    expect(state.gets).toBe(2);
+  });
+
+  it('🔴 readCurrent: 取り込み時の時刻が無い記憶は changed にしない(今の中身は返す)', async () => {
+    const l = new LaunchedFiles();
+    const { h } = movable('a', 1000);
+    l.remember('n1', h, 'a.md'); // 時刻を渡さない
+    expect(await l.readCurrent('n1')).toEqual({ changed: false, text: 'x' });
+  });
+
+  it('🔴 readCurrent: 読めない / getFile が無い / 記憶に無いなら null(差分なしで進める)', async () => {
+    const l = new LaunchedFiles();
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.reject(new Error('gone')) }), 'a.md', 1000);
+    l.remember('n2', fakeHandle('b'), 'b.md', 1000);
+    expect(await l.readCurrent('n1')).toBeNull();
+    expect(await l.readCurrent('n2')).toBeNull();
+    expect(await l.readCurrent('nope')).toBeNull();
+  });
+
+  it('⚠ readCurrent: 時刻は読めたが中身だけ読めないとき、changed は返し text は null', async () => {
+    const l = new LaunchedFiles();
+    const file = { lastModified: 2000, size: 1, text: () => Promise.reject(new Error('io')) } as unknown as File;
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
+    expect(await l.readCurrent('n1')).toEqual({ changed: true, text: null });
+  });
+
+  it('🔴 readCurrent: 大きすぎる file の中身は読まない(text を呼ばない。changed は返す)', async () => {
+    const l = new LaunchedFiles();
+    let texted = 0;
+    const file = {
+      lastModified: 2000,
+      size: DIFF_READ_LIMIT_BYTES + 1,
+      text: () => {
+        texted += 1;
+        return Promise.resolve('x');
+      },
+    } as unknown as File;
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
+    expect(await l.readCurrent('n1')).toEqual({ changed: true, text: null });
+    expect(texted, '上限を超えるのに中身を読んだ').toBe(0);
+    // 対照群: ちょうど上限なら読む
+    const edge = { ...file, size: DIFF_READ_LIMIT_BYTES, text: () => Promise.resolve('y') } as unknown as File;
+    l.remember('n2', fakeHandle('b', { getFile: () => Promise.resolve(edge) }), 'b.md', 1000);
+    expect((await l.readCurrent('n2'))?.text).toBe('y');
   });
 
   it('🔴 書き戻した後は、自分の書込を外の変更と読まない(憶え直す)', async () => {

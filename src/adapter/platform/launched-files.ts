@@ -32,6 +32,13 @@ export const CHANGED_OUTSIDE_WRITE_BACK_NOTE =
 export const CHANGED_OUTSIDE_REOPEN_NOTE =
   'このファイルは取り込んだ後にパソコン側で変わっています(PKC のノートは取り込んだ時の中身です)';
 
+/**
+ * 🔴 **差分のために読む file の上限**(#1231 段②)。⚠ 超えたら**差分を出さない**だけ ── 書き戻しは止めない。
+ * 理由は「読む量」ではなく**主スレッドで行を比べる量**(`diffLines` は編集距離に予算があるが、
+ * 分割そのものは長さに比例する)。取り込み側(`file.text()`)は上限が無いので、これは**差分の門**である。
+ */
+export const DIFF_READ_LIMIT_BYTES = 2 * 1024 * 1024;
+
 /** `launchQueue` から来る handle(必要な部分だけ)。 */
 export interface LaunchedHandle {
   /** `'file'` / `'directory'`。実装によっては未定義。 */
@@ -114,6 +121,33 @@ export class LaunchedFiles {
       return file.lastModified !== link.modifiedAt;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * 🔴 **書き戻す直前に、file の今の姿を 1 回だけ読む**(#1231 段②)── 「外で変わったか」と
+   * 「今の中身」(確認の小窓に出す差分の相手)を**同じ `getFile()` 1 回**から採る。
+   * ⚠ 呼んでよいのは `changedSince` と同じく**書き戻す直前だけ**(一覧では呼ばない = #1271)。
+   * ⚠ 読めない・`getFile` が無い・大きすぎる(`DIFF_READ_LIMIT_BYTES` 超)ときは `text: null`
+   *   (差分なしで今までどおりの確認)。`changed` は `changedSince` と同じ規則。
+   * @returns link が無ければ `null`
+   */
+  async readCurrent(lid: string): Promise<{ changed: boolean; text: string | null } | null> {
+    const link = this.byLid.get(lid);
+    if (link === undefined || typeof link.handle.getFile !== 'function') return null;
+    try {
+      const file = await link.handle.getFile();
+      const changed = link.modifiedAt !== null && file.lastModified !== link.modifiedAt;
+      let text: string | null = null;
+      if (typeof file.size === 'number' && file.size > DIFF_READ_LIMIT_BYTES) return { changed, text };
+      try {
+        text = await file.text();
+      } catch {
+        /* 中身だけ読めなかった ── 差分なしで進める */
+      }
+      return { changed, text };
+    } catch {
+      return null;
     }
   }
 

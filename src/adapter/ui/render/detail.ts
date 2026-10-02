@@ -80,7 +80,8 @@ import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
 import { isTouchOnly } from './touch-device';
-import { diffCounts, diffRows, type DiffRow } from '@features/revision/diff-view';
+import { diffCounts, diffRows } from '@features/revision/diff-view';
+import { diffLineEl } from './diff-line';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
 import {
   EMPTY_JOURNAL,
@@ -3542,20 +3543,6 @@ function diffBadge(added: number | null, removed: number | null): HTMLElement | 
   // ⚠ **何との比較かを書く**(数字だけだと、今の本文との差だと読まれる)
   span.title = '1 つ新しい版とくらべて、行がこれだけ増えて / 減っています';
   return span;
-}
-
-/** 差分の 1 行(#398 段②)。⚠ **読むだけ**の器 ── 押せる物を置かない。 */
-function diffLineEl(row: DiffRow): HTMLElement {
-  const li = document.createElement('li');
-  li.setAttribute('data-pkc-diff', row.kind);
-  if (row.kind === 'gap') {
-    li.textContent = `⋯ 変わっていない ${row.skipped ?? 0} 行`;
-    return li;
-  }
-  // ⚠ 印は**字で置く**(色だけにしない ── 色が見えない人に届かない)
-  const mark = row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' ';
-  li.textContent = `${mark} ${row.text}`;
-  return li;
 }
 
 /**

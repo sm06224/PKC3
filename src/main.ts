@@ -3428,9 +3428,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         settle: async () => {
           await storeEffects?.settled();
         },
-        // 🔴 取り込んだ後にパソコン側で変わったか(#1264 §2 欠陥 1)── 判断は `launched-files.ts`
-        changedOutside: () => launched.changedSince(lid),
-        confirm: (message) => ask(message, { okLabel: 'ファイルを上書きする', danger: true }),
+        // 🔴 書く直前のファイルの今の姿(#1264 §2 欠陥 1 / #1231 段②)── 「外で変わったか」と「今の中身」を
+        //    同じ 1 回の読みから採る。判断は `launched-files.ts`。読めなければ差分なし・脅しなし
+        inspectFile: async () => (await launched.readCurrent(lid)) ?? { changed: false, text: null },
+        // 🔴 確認の小窓は自前の `<dialog>`(`confirmInApp`)── 本文の上に行ごとの差分を出す(#1231 段②)
+        confirm: (message, diff) =>
+          ask(message, {
+            okLabel: '書き戻す',
+            cancelLabel: 'やめる',
+            danger: true,
+            diff: diff ?? undefined,
+          }),
         getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
         write: async (body) => {
           const result = await writeBackFile(handle, body);

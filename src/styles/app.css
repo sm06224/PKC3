@@ -8061,6 +8061,42 @@ h3[data-pkc-section] {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+/* 🔴 **書き戻す前の差分**(#1231 段②)。行の色は履歴の面と同じ `[data-pkc-diff]` の規則に乗る
+ * (新しい色を作らない)。⚠ 差分があるときだけ窓を広げる(行が折り返すと足し引きが追えない)。 */
+[data-pkc-region='app-dialog']:has([data-pkc-field='dialog-diff']) {
+  width: min(48rem, calc(100vw - 2 * var(--s4)));
+  max-width: min(48rem, calc(100vw - 2 * var(--s4)));
+}
+[data-pkc-field='dialog-diff'] {
+  margin: 0 0 var(--s3);
+}
+[data-pkc-field='dialog-diff-summary'] {
+  margin-bottom: var(--s2);
+  font-weight: 600;
+}
+[data-pkc-field='dialog-diff-rows'] {
+  /* ⚠ 差分は**等幅**で読む(桁が揃わないと足し引きが追えない) */
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: var(--s2);
+  list-style: none;
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+[data-pkc-field='dialog-diff-rows'] li {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='dialog-diff-more'] {
+  margin-top: var(--s1);
+  color: var(--muted);
+  font-style: italic;
+}
 /* ⚠ **取り消しが先、受けるのが後**(macOS / GNOME の並び)。
  *   右端が「進む」側になるので、押し間違えても戻しにくい方へ手が伸びない。 */
 [data-pkc-region='dialog-buttons'] {

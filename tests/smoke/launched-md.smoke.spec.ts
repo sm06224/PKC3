@@ -100,6 +100,16 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
 
   // ④ **元ファイルへ書き戻す**(確認は出る ── user のファイルを上書きするので)
   await clickReal(page, '[data-pkc-action="write-back-file"]');
+  // 🔴 #1231 段②: 確認の小窓に**ファイルとのちがい**が出る(− が消える行、+ が書かれる行)。
+  //    ⚠ 色は**画面の計算後の色**で見る(印の字だけでは「見分けられる」を言えない)
+  const addRow = page.locator('[data-pkc-field="dialog-diff-rows"] [data-pkc-diff="add"]');
+  const delRow = page.locator('[data-pkc-field="dialog-diff-rows"] [data-pkc-diff="del"]');
+  await expect(addRow, '書かれる行が + で出ていない').toHaveText('+ 直しました。');
+  await expect(delRow, '消える行が − で出ていない').toHaveText('− 本文です。');
+  const colorOf = (loc: typeof addRow) => loc.evaluate((el) => getComputedStyle(el).color);
+  const [addColor, delColor] = [await colorOf(addRow), await colorOf(delRow)];
+  expect(addColor, '+ の行と − の行が同じ色(色の規則が当たっていない)').not.toBe(delColor);
+  await expect(page.locator('[data-pkc-field="dialog-ok"]')).toHaveText('書き戻す');
   await answerAppDialog(page, 'ok');
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __written: Record<string, string> }).__written['議事録.md']))
