@@ -38,7 +38,7 @@ user 指示 2026-08-07:
 
 ## 🔴 上限に達しているときは、**落とす分を CHANGELOG へ移す**
 
-登記表は `NOTICE_KEEP_MAX`(**30 件** = `NOTICE_SHOW_MAX` と同じ)で頭打ちで、
+登記表は `NOTICE_KEEP_MAX`(= `NOTICE_SHOW_MAX` と同じ。**値は定数を読む** ── 2026-10-02 の実測で **50** で、この file は 30 のまま腐っていた)で頭打ちで、
 **古い方から静かに落ちる**。
 ⚠ 受け皿を作る前は、**配った 42 件のうち 22 件が既に消えていた**
 (git の履歴からしか読めない状態だった。2026-08-18 に復元して `CHANGELOG.md` にした)。
@@ -60,7 +60,7 @@ user 指示 2026-08-07:
 **足すときの手順は 3 つで 1 組**:
 
 1. `NOTICES` の**先頭**に 1 件足す
-2. **30 件を超えるなら、いちばん古い 1 件を削る**(⚠ 超えたまま置くと、
+2. **`NOTICE_KEEP_MAX` を超えるなら、いちばん古い 1 件を削る**(⚠ 超えたまま置くと、
    その 1 件は**アプリのどこからも読めない**ので test が落ちる)
 3. 🔴 **削った 1 件を `CHANGELOG.md` に残す** ── 日付の節に `### 題名` +
    items を箇条書きで。**同時に `tests/docs-parity.test.ts` の `DROPPED` へ題名を 1 行足す**
@@ -70,6 +70,33 @@ user 指示 2026-08-07:
 `DROPPED` は**身元の既知リスト**にしてある(`announce.test.ts` の `KNOWN` と同じ作法)。
 ⚠ 新しく足した 1 件も CHANGELOG に要る(**落ちる前から**入れておく ──
 落ちてから足す運用にすると、落とした人が気づかない)。
+
+### 🔴 手でやらずに **helper で足す**(2026-10-02)
+
+上の 3 つ(+ `KNOWN` の digest + smoke の pin)を**手で 5 か所**直すと、1 か所落とすたびに CI が赤くなる。
+`.claude/skills/notice-writing/` に 3 つ置いた(repo の根で、`python3 -B` で走らせる):
+
+| file | 何をするか |
+|---|---|
+| `add-notice.py` | `<id> <題名> '<items の JSON>' <issue 番号> [<落とす id>]` で **登記表の先頭 / CHANGELOG / `announce.test.ts` の `KNOWN`(digest 計算)/ 枠超えの drop(`DROPPED` と注釈)/ `tests/smoke/system-toc.smoke.spec.ts` の「最新のお知らせの題名」pin の張り替え**を 1 回で書く。`--check` を付けると**検査だけ**で何も書かない |
+| `fix-notice-items.py` | **まだ main に入っていない** id の items だけを差し替える(登記表 + CHANGELOG + digest)。⚠ 配布済みの id へ使わない(帯に出ない ── 下の「もう配ったか」) |
+| `notice_check.py` | 上の 2 つが**書く前に**呼ぶ検査(単独では走らせない) |
+
+🔴 **書く前に断る**(`notice_check.py`)。目的:**書いた後に別の門で落ちる往復を無くす**
+(2026-10-02 に 1 日で 3 回、書いた後に `ui-terms` / `help-pane` の門で落ちた)。断るのは 3 つ:
+①**使わない語**(`src/features/ui-terms.ts` の `BANNED_TERMS` ── 「印」「面」「札」「小窓」…。
+「画面」「印刷」のような**除外の複合語は通す**)②**項目数と 1 項目の字数**(`NOTICE_ITEMS_MAX` /
+`NOTICE_ITEM_CHARS_MIN/MAX`)③ TS の文字列を壊す字(`'` / `\` / バッククォート ── 「」で書く)。
+値は**定数を読む**(写さない)。通らなければ **1 file も書かずに止まる**。
+
+🔴 **5 つ目の `system-toc.smoke.spec.ts` の pin は、2026-09-26 から古いままだった** ──
+`最新のお知らせ` の題名を等値で持つので、**以後のお知らせ全部で落ちるはず**だったが、
+CI は smoke を回さないので鳴らず、2026-10-02 に直した。helper が張り替える(手で足すときも忘れない)。
+
+⚠ 走らせた後は `npx vitest run tests/adapter/announce.test.ts tests/adapter/help-pane.test.ts
+tests/docs-parity.test.ts tests/features/ui-terms.test.ts`(マニュアルも触ったなら
+`tests/features/manual-refs.test.ts` も)。⚠ helper は**書く file を固定の形で探す**ので、
+登記表や `KNOWN` の書き方を変えたら、helper の `assert`(「見つからない」)が先に落ちる ── 直すのは helper 側である。
 
 ### 🔴 4 つ目の場所 ── **落とした 1 件に「使わない語」が入っていた**(2026-09-21、#1032)
 
@@ -146,8 +173,8 @@ feature branch だけを持っていることがあり、そこで `git log main
 
 | 決まり | 値 | 定数 |
 |---|---|---|
-| 帯・ヘルプに出す件数 | 30 件 | `NOTICE_SHOW_MAX` |
-| 登記表に残す件数 | **30 件**(= 表示件数) | `NOTICE_KEEP_MAX` |
+| 帯・ヘルプに出す件数 | 定数を読む(2026-10-02 で 50) | `NOTICE_SHOW_MAX` |
+| 登記表に残す件数 | 表示件数と同じ | `NOTICE_KEEP_MAX` |
 | 1 件の項目数 | 6 まで | `NOTICE_ITEMS_MAX` |
 | 1 項目の字数 | 4〜120 | `NOTICE_ITEM_CHARS_MIN/MAX` |
 

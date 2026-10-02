@@ -80,6 +80,16 @@ pwd && git worktree list && git log --oneline -1
   (issue の本文・コメント、CLAUDE.md の行、依頼文)を示せるときだけ。** 示せないなら出どころ
   (設計 doc の行 id など)を書く。⚠ **発言を作らない** ── この repo ではその字が不可侵の印として
   読まれる(2026-09-25、#1045 C15 で段 0 の発見を「user 報告」として発言まで作って書いた)
+- 🔴 **UI の口(新しい `data-pkc-action` / class / 設定)を足したら、`npx vitest run tests/` を 1 回**
+  (2026-10-02)。触った層だけ回して push すると、**件数や名指しの一覧で pin している全数検査**が CI で赤くなる
+  (`css-vars` / `markdown-css-parity` / `action-outlets` / `lid-of-node` / `operation-table` /
+  `action-scope-survey` + 設計 doc §7.1 / `store-fallback` / 設定の持ち出しの件数)。
+  一覧は `.claude/skills/pr-landing/SKILL.md` の「UI の口を 1 つ足すと動く全数検査の一覧」。
+  ⚠ 数を直すのは**事実が動いた分だけ**(「何が動いたか」を 1 行添えられないなら、緩めている)。
+- 🔴 **worktree の作法 3 つ**(`.claude/skills/subagent-scale/SKILL.md` §1):`node_modules` は
+  `ln -s /home/user/PKC3/node_modules node_modules`(commit しない)/ 複合コマンド・heredoc + パイプは
+  断られるので script file に書いて `sh <file>` / 変異ハーネスの `ROOT` は自分の tree、
+  作業 file は `scratchpad/<issue 番号>/`、smoke の port 3 つは固有の値に。
 - **不可侵指示に抵触しそうなら、実装せずに報告する** ── 判断は user のものである:
   重い処理はワーカーへ・使い捨て / 図は描いたら焼く / ゼロコピーと即破棄 /
   配る量は理由にしない / 業務画面の作法 / flags は最大 15 個

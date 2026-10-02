@@ -62,6 +62,26 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 🔑 **手順:`data-pkc-action` を足したら、`npx vitest run tests/` を 1 回**
 (`tests/adapter` / `tests/features` の下だけでは、この 5 つのうち 2 つに届かない)。
 
+### 🔴 UI の口を 1 つ足すと動く**全数検査の一覧** ── 依頼文に写す(2026-10-02)
+
+上の 5 つは 2026-09-16 の実測で、その後も **「触った層だけ回して push → CI 赤」** が続いた
+(目的:この往復を無くす。implementer へ頼むときは**この表を依頼文へ貼る** ──
+相手は依頼文の範囲でしか test を回さない)。口 = 新しい `data-pkc-action` / 新しい class / 新しい設定 1 つ。
+
+| 足した物 | 動く検査(全部 `tests/` の下) | 何を直すか |
+|---|---|---|
+| **JS がインラインで差す CSS 変数**(CSS 側に定義が無い) | `features/css-vars.test.ts`(**既定値の無い** `var(--x)` だけを「定義が無い」と数える) | 使う側を**既定値つき** `var(--x, fallback)` にする(定義の無い変数は宣言ごと捨てられる) |
+| **動的に付ける class**(`.pkc-*`) | `features/markdown-css-parity.test.ts` | `STYLED_ELSEWHERE` へ名指しで登録(上の節) |
+| **`data-pkc-action`** | `action-outlets.test.ts`(`OBJECT_LONE` など受け手の仕分け)/ `operation-table.test.ts`(件数)/ `action-scope-survey.test.ts` + `scripts/action-scope-survey.mjs` / `docs/development/operation-model-2026-08.md` §7.1 の表 | 件数と表を**事実が動いた分だけ**直す |
+| **ノードから lid を引く新しい口** | `adapter/lid-of-node.test.ts`(寄せた呼び出しの**件数**を pin) | 件数を直す(寄せずに手書きすると落ちる ── 寄せるのが正しい向き) |
+| **設定 1 つ**(localStorage に持つ store) | `adapter/store-fallback.test.ts`(控えを持つ store の**全数走査**)/ 設定の持ち出し(`features/settings-file.test.ts` 周辺)の key の件数 | store は fallback を持たせる。持ち出しの件数は直す |
+
+🔑 **手順は 2 つ**:①**触った層だけでなく `npx vitest run tests/` を 1 回**(grep では見つからない ──
+上の 5 つの教訓と同じ。件数しか持たない検査は、足した名前を 1 つも書いていない)。
+②🔴 **数を直すのは「事実が動いた分だけ」**(CLAUDE.md 2026-09-21 の見分け方):
+「口を 1 つ足したので 325 → 326」は直す / 「通したいので上限だけ外す」は直さない
+(直すとき**何が動いたかを 1 行**添えられないなら、それは緩めている)。
+
 ### 🔴 Markdown 本文の動的装飾・CSS クラス（`.pkc-*`）を足したら、`markdown-css-parity` と `body-css` を検める(2026-09-29)
 
 ⚠ `app.css` に `.pkc-*` クラスの規則を足した際、**CI/verify で parity 検査に引っかかる**:
@@ -191,8 +211,16 @@ git fetch origin main && git log --oneline -3 origin/main
 ### 🔴 merge したら、**次の作業に入る前に**必ず branch を作り直す
 
 ```bash
-git fetch origin main && git checkout -B <branch> origin/main
+git fetch --prune origin && git checkout -B <branch> origin/main && git branch --unset-upstream
 ```
+
+🔑 **1 息で打つ形(2026-10-02)**。3 つの理由(目的:main に立つ時間と、main へ押す経路を作らない):
+① **`--prune` に refspec を付けない**(`origin main` と書くと `origin/main` しか掃除せず、
+merge 済みの `origin/<branch>` が生きて次の push が `(stale info)` になる ── 下の節)。
+② `checkout -B <branch> origin/main` は **upstream を `origin/main` にする**(実際に
+`branch '…' set up to track 'origin/main'` と出る)ので、素の `git push` は **main を指す**。
+`--unset-upstream` で外し、push は**必ず `git push -u origin <branch>` と branch 名を明示**する。
+③ `fetch` と `checkout` を分けると、その間に main に立つ時間ができる(上の「merge の直後」の事故)。
 
 ⚠ **これを飛ばすと、branch に「squash 前の commit」が残る。** そこへ次の作業を
 積むと PR がこうなる:
@@ -260,6 +288,15 @@ npm run typecheck && npm run lint && npm test                              # 載
     worktree に残る)── 戻すときは `git commit --amend -F` で。
     ⚠ **4 回目が起きたら、文言ではなく `commit-msg` の hook で止める**
     (`.githooks/` と `scripts/install-hooks.mjs` の形に倣う)
+- 🔴 **cherry-pick の衝突は、「どちらかを選ぶ」ではなく「両方の事実を足す」**(2026-10-02。
+  並行した PR の変更は、**台帳の件数や追記の列など同じ行**で衝突しやすい)。
+  目的:**片方の事実を黙って落とさない**こと(落とすと、件数や追記が実装と食い違う)。
+  🔑 手順:①**件数**(`operation-table` / `action-scope-survey` / `lid-of-node` など)は
+  **加算**する(両方の変更ぶんが足された数にする ── どちらか一方の数を採らない)
+  ②**追記どうし**(CHANGELOG / 登記表 / `KNOWN` / 注釈の列)は**両方残す**(順序だけ決める)
+  ③解いたら `git -c core.editor=true cherry-pick --continue`(題名が `#` 始まりなら
+  上の `core.commentChar` を併せる)、直後に `git log --format='%h %s' -3` で目で見る
+  ④**衝突を解いた後に件数を数え直す**(加算が合っているかは、全量の unit が教える)。
 
 ### ⚠ **remote 追跡 ref も掃除する** ── `--force-with-lease` は**効かない**
 
