@@ -135,6 +135,16 @@ describe('出る / 消える(#1215)', () => {
 });
 
 describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', () => {
+  // 途中で落ちても購読が document に残らないよう、積んで必ず外す(残ると後続の it が連鎖して落ちる)
+  const live: Array<() => void> = [];
+  const watch = (region: HTMLElement): (() => void) => {
+    const un = watchSelectionStats(region);
+    live.push(un);
+    return un;
+  };
+  afterEach(() => {
+    for (const un of live.splice(0)) un();
+  });
   /** 題名の欄(別の入力欄)と書式のボタンを足した面。 */
   function withNeighbors() {
     const s = surface();
@@ -153,7 +163,7 @@ describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', 
 
   it('本文で選ぶ → 題名の欄へ移る → 空 / 本文へ戻る → また出る / 書式ボタンへ移る間は残る(対照群)', () => {
     const { region, slot, ta, title, bold } = withNeighbors();
-    const un = watchSelectionStats(region);
+    const un = watch(region);
     focusTo(ta);
     select(ta, 0, 3);
     expect(slot.textContent, '前提:選んだら出ている').toBe('選択: 3 文字(1 行)');
@@ -168,7 +178,7 @@ describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', 
 
   it('別の textarea(追記欄)・contenteditable へ移っても空になる', () => {
     const { region, slot, ta } = withNeighbors();
-    const un = watchSelectionStats(region);
+    const un = watch(region);
     select(ta, 0, 3);
     const other = document.createElement('textarea');
     region.append(other);
@@ -185,9 +195,33 @@ describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', 
     un();
   });
 
+  it('字を打たない <input>(checkbox / range)へ移っても数は残る ── テキストの input だけが別の欄', () => {
+    const { region, slot, ta, title } = withNeighbors();
+    const un = watch(region);
+    focusTo(ta);
+    select(ta, 0, 3);
+    for (const type of ['checkbox', 'range', 'radio']) {
+      const el = document.createElement('input');
+      el.type = type;
+      region.append(el);
+      focusTo(el);
+      expect(slot.textContent, `${type} へ移ったら消えた`).toBe('選択: 3 文字(1 行)');
+    }
+    // 対照群:テキストの input(type=text / 既定)へ移れば空になる(分岐が両方通っている)
+    focusTo(title);
+    expect(slot.textContent, '前提:テキストの欄へ移ったら空').toBe('');
+    const search = document.createElement('input');
+    search.type = 'search';
+    region.append(search);
+    focusTo(ta);
+    focusTo(search);
+    expect(slot.textContent, 'type=search も字を打つ欄').toBe('');
+    un();
+  });
+
   it('どこにも焦点が無くなったとき(題名の欄から外れて何も掴まない)も合わせ直す ── 書式ボタンへ移るのと同じ向きで、また出る', () => {
     const { region, slot, ta, title } = withNeighbors();
-    const un = watchSelectionStats(region);
+    const un = watch(region);
     focusTo(ta);
     select(ta, 0, 3);
     focusTo(title);
@@ -200,7 +234,7 @@ describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', 
 
   it('編集を終えたら焦点の購読も外れる(外した後に焦点が動いても枠を書かない)', () => {
     const { region, slot, ta, title } = withNeighbors();
-    const un = watchSelectionStats(region);
+    const un = watch(region);
     focusTo(ta);
     select(ta, 0, 3);
     focusTo(title);

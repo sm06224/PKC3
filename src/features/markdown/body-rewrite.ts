@@ -649,6 +649,20 @@ export function colorRewriteNotice(from: string, to: string): string {
   return `${from} → ${to} に書き換えました`;
 }
 
+/**
+ * 🔴 **ファイル名を揃えた回の知らせ**(#1264 §1)。
+ *
+ * > user の物語:題名の欄に 1 回焦点を入れて離れただけ(打っていない)でも、題名と食い違っている
+ * >   添付はファイル名が書き換わる。**黙って変わると、ダウンロードしたときに初めて気づく**。
+ * >   だから**元と新しい名前をそのまま**言う(戻したければ、題名を直せば同じ道で揃う)。
+ *
+ * ⚠ 名前は**加工しない**。⚠ **名前が変わらなかった回はここへ来ない** ── 本文が 1 byte も動かないので
+ *   呼び側(`store-effects.ts`)が書く前に返る(`colorRewriteNotice` と同じ。ここで二重に守らない)。
+ */
+export function attachmentNameRewriteNotice(from: string, to: string): string {
+  return `ファイル名を ${from} → ${to} にしました`;
+}
+
 /** タグ 1 つに何が起きたか(#640)。⚠ `wrote` 以外は**本文が変わっていない**。 */
 export type TagOutcome = 'wrote' | 'unchanged' | 'limit' | 'invalid';
 

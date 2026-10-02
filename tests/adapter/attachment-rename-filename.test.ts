@@ -255,6 +255,23 @@ describe('🔴 字が同じでも、欄を確定すればファイル名が題�
     expect(r.renames).toEqual([{ lid: 'a', title: '請求書' }]);
   });
 
+  it('🔴 日本語入力の変換を確定する Enter では撃たない(変換中は isComposing)── 確定後の Enter だけが確定', async () => {
+    const r = setup(ATT, { title: '請求書' });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(20);
+    const spy = spySetName(r);
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }));
+    await tick(30);
+    expect(spy.count(), '変換の確定の Enter でファイル名を書いた').toBe(0);
+    expect(r.persists).toHaveLength(0);
+    // 対照群:同じ欄で、変換中でない Enter は撃つ(前提が空振りでない)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: false, bubbles: true }));
+    await tick(30);
+    expect(spy.count()).toBe(1);
+    expect(r.persists).toHaveLength(1);
+  });
+
   it('🔴 取り込み・書き出しの最中でも、揃っている欄を離れただけでは「実行中です」と言わない(食い違うときだけ断る)', async () => {
     // 揃っている ── 門を通さない(通すと、何も書かないのに断りの知らせが出る)
     const aligned = setup(ATT, { title: 'scan', busy: true });
@@ -272,6 +289,30 @@ describe('🔴 字が同じでも、欄を確定すればファイル名が題�
     const r = setup(tile, { title: 'リンク集' });
     await commitUntouched(r, 'blur');
     expect(r.persists).toHaveLength(0);
+  });
+});
+
+describe('🔴 ファイル名が変わった回は、元と新しい名前を状態の行へ言う(#1264 §1)', () => {
+  it('食い違いを揃えた回: 「ファイル名を scan.pdf → 請求書.pdf にしました」(打っていなくても無言にしない)', async () => {
+    const r = setup(ATT, { title: '請求書' });
+    await commitUntouched(r, 'blur');
+    expect(r.persists).toHaveLength(1);
+    expect(r.d.getState().notice).toBe('ファイル名を scan.pdf → 請求書.pdf にしました');
+  });
+
+  it('対照群:すでに揃っていて名前が変わらない回は何も言わない', async () => {
+    const r = setup(ATT, { title: 'scan' });
+    await commitUntouched(r, 'blur');
+    expect(r.persists).toHaveLength(0);
+    expect(r.d.getState().notice ?? null, '変わっていないのに知らせた').toBeNull();
+  });
+
+  it('対照群:書けなかった回(別の窓が先に書いていた)に「にしました」と言わない', async () => {
+    const r = setup(ATT, { title: '請求書', conflict: true });
+    await commitUntouched(r, 'blur');
+    expect(r.persists).toHaveLength(1);
+    expect(r.d.getState().notice ?? null).toBeNull();
+    expect(r.d.getState().error ?? '').toContain('ファイル名は変えられませんでした');
   });
 });
 

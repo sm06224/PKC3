@@ -37,6 +37,7 @@ import {
   applyTaskRun,
   taskRunNotice,
   colorRewriteNotice,
+  attachmentNameRewriteNotice,
 } from '@features/markdown/body-rewrite';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
@@ -3497,6 +3498,19 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_NOTICE',
                 message: colorRewriteNotice(ev.rewrite.from, ev.rewrite.to),
+              });
+            /**
+             * 🔴 **ファイル名が実際に変わった回は、元と新しい名前を言う**(#1264 §1)。
+             * ⚠ 欄に触れて離れただけでも書き換わるので、黙らない。本文へ入った後にだけ言う
+             *   (競合・失敗の枝は上で返っている)。変わらなかった回は上の `newBody === body` で返っている。
+             */
+            if (ev.rewrite.kind === 'attachment-name' && !disposed)
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: attachmentNameRewriteNotice(
+                  readAttachmentMeta(body).name,
+                  readAttachmentMeta(newBody).name,
+                ),
               });
             if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
               dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
