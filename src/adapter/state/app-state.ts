@@ -1721,6 +1721,14 @@ export interface AppState {
    */
   captureTrimBusy: boolean;
   /**
+   * 🔴 **いま文字にしている録音の lid**(#772 段②)。`null` = 走っていない。
+   *
+   * ⚠ **押した行に手がかりを出すため**に state へ置く(`captureTrimBusy` と同じ理由 ──
+   *   描画器は同じ document に 2 つ生きうる)。⚠ 真偽ではなく **lid** で持つ:
+   *   どの行が走っているかで、その行だけ「文字にしています…」にし、ほかの行は押せなくする。
+   */
+  captureTranscribeLid: string | null;
+  /**
    * 🔴 **保存が「消えない扱い」か**(#347、user 裁定 2026-08-23)。
    *
    * ⚠ 出すのは**設定の面だけ**である ── 帯にもダイアログにもしない
@@ -2046,6 +2054,7 @@ export const initialState: AppState = {
   capturePlayingLid: null,
   captureTrim: null,
   captureTrimBusy: false,
+  captureTranscribeLid: null,
   snippetScan: null,
   persistState: 'unknown',
   backlinks: null,
@@ -2339,6 +2348,8 @@ export type UserAction =
   | { type: 'CLEAR_CAPTURE_TRIM' }
   /** 切り出しが走っているか(#683 段②a)。⚠ 押した所に「切り出しています…」を出すため。 */
   | { type: 'SET_CAPTURE_TRIM_BUSY'; busy: boolean }
+  /** 文字にしている録音を知らせる(#772 段②)。`null` = 終わった。 */
+  | { type: 'SET_CAPTURE_TRANSCRIBE'; lid: string | null }
   /** 🔴 雛形を集め終えた(#196 / B-2)。⚠ `null` は失敗 ── **帯は出さず静かに畳む**。 */
   | { type: 'SET_SNIPPET_SCAN'; scan: SnippetScan | null }
   /** 札が集められなかった(#277 段②-b)。⚠ 「まだ」と区別する ── 文言が違う。 */
@@ -4506,6 +4517,8 @@ function reduceCore(
       return { state: { ...state, captureTrim: null }, events: [] };
     case 'SET_CAPTURE_TRIM_BUSY':
       return { state: { ...state, captureTrimBusy: action.busy }, events: [] };
+    case 'SET_CAPTURE_TRANSCRIBE':
+      return { state: { ...state, captureTranscribeLid: action.lid }, events: [] };
     /**
      * 🔴 **雛形は「集められなかった」を帯に出さない**(#196 / B-2)。
      *
