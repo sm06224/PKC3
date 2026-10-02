@@ -125,6 +125,16 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 `EADDRINUSE` で smoke が立たず、**変異が全部 KILLED に見える**(偽の KILLED。`mutation-testing` §2.1)。
 🔑 依頼文に「port は N 固定(3 つ使う)。立たなかったら INFRA として読む」と書く。
 
+#### 🔴 scratchpad は**兄弟の agent と共有**される ── script は固有の dir に、短い名前で置かない(2026-10-02、#275 の直し)
+
+implementer が `edit4.py` を heredoc で書こうとして**断られ**(worktree の検閲は `git` を含む複合コマンドや
+heredoc + パイプを弾く ── 書かれていないまま先へ進む)、後続の `python3 edit4.py` が**別の agent が同じ名前で
+置いていた script を実行**した。cwd は自分の worktree なので、**他の主題の編集(`write-back.ts`)が自分の
+worktree に混入**した(`git status` で気づき `git restore` で戻した。commit には入っていない)。
+🔑 依頼文に書く:**作業 file は `scratchpad/<issue 番号>/` の固有 dir に置く / `edit1.py` のような短い名前を
+使わない / 実行の前に `cat` して自分が書いた物だと確かめる**。⚠ 断られた heredoc は**何も書かない**ので、
+「書いたつもりの file」を次の命令が読む形(古い file・他人の file)が必ず起きる。
+
 ### ⚠ worktree 隔離が起動できない箱がある(2026-08-14 実測)
 
 ```
