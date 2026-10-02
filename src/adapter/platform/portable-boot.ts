@@ -89,7 +89,7 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
     }
     return {
       image: null,
-      failure: `この 1 枚に焼き込まれた中身が壊れていて読めません(${String(e)})`,
+      failure: `この 1 枚に焼き込まれた中身が読み取れない形になっています(${String(e)})`,
     };
   } finally {
     el.remove();

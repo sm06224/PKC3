@@ -74,7 +74,7 @@ describe('焼き込まれた画像', () => {
       '<script type="application/octet-stream;base64" data-pkc-db-image>@@@</script>';
     const r = takeEmbeddedImage(document);
     expect(r.image).toBeNull();
-    expect(r.failure).toContain('壊れていて');
+    expect(r.failure).toContain('読み取れない形');
     expect(document.querySelector(IMAGE_SELECTOR)).toBeNull();
   });
 
@@ -137,11 +137,11 @@ describe('🔴 焼き込みが読み戻せないとき(#996)', () => {
     expect(takeEmbeddedImage(document).failure).toContain('約 250.0 MB');
   });
 
-  it('壊れた base64 → 「壊れていて」(大きさの文ではない)', () => {
+  it('壊れた base64 → 「読み取れない形」(大きさの文ではない)', () => {
     document.body.innerHTML =
       '<script type="application/octet-stream;base64" data-pkc-db-image>@@@</script>';
     const r = takeEmbeddedImage(document);
-    expect(r.failure).toContain('壊れていて');
+    expect(r.failure).toContain('読み取れない形');
     expect(r.failure).not.toContain('大きすぎて');
   });
 
@@ -171,12 +171,12 @@ describe('🔴 焼き込みが読み戻せないとき(#996)', () => {
       expect(start.choice.why).toContain('この端末に保存された中身を開きます');
     });
 
-    it('壊れた base64 でも why に「壊れていて」が出る', async () => {
+    it('壊れた base64 でも why に「読み取れない形」が出る', async () => {
       document.head.innerHTML = tag({ id: ID, exportedAt: 5 });
       document.body.innerHTML =
         '<script type="application/octet-stream;base64" data-pkc-db-image>@@@</script>';
       const start = (await resolvePortableStart(document, () => fakeStore(null)))!;
-      expect(start.choice.why).toContain('壊れていて');
+      expect(start.choice.why).toContain('読み取れない形');
       expect(start.choice.use).toBe('fresh');
     });
 
