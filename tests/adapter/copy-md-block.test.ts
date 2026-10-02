@@ -10,6 +10,7 @@ import {
   handleCopyMdBlock,
   type CopyMdBlockDeps,
 } from '../../src/adapter/ui/actions/copy-md-block';
+import { applyTableSort } from '../../src/adapter/ui/render/table-sort';
 import * as clipboard from '../../src/adapter/platform/clipboard';
 
 function el(html: string): HTMLElement {
@@ -156,6 +157,20 @@ describe('extractMdBlockPlainText / stripTableChromeForCopy', () => {
     expect(stripped).not.toBe(table); // clone
     expect(extractMdBlockPlainText(stripped)).toBe('名前');
     expect(table.querySelector('.pkc-md-table-sort')).not.toBeNull(); // 原本は無傷
+  });
+
+  it('applyTableSort が付けた並べ替えの印(.pkc-table-sort-icon)は clone から除かれる', () => {
+    // 期待値は手で書かず、実際に印を付けた表から読む。
+    // ⚠ 印が空でも貼り先には要らない(字を持たせる形へ戻されたときの 2 段目の門)
+    const table = el('<div class="pkc-md-rendered"><table><thead><tr><th>名前</th><th>メモ</th></tr></thead><tbody><tr><td>a</td><td>b</td></tr></tbody></table></div>')
+      .querySelector('table') as HTMLElement;
+    applyTableSort(table.parentElement!);
+    expect(table.querySelectorAll('.pkc-table-sort-icon').length, '台が古い(印が付いていない)').toBe(2);
+    const stripped = stripTableChromeForCopy(table);
+    expect(stripped).not.toBe(table);
+    expect(stripped.querySelectorAll('.pkc-table-sort-icon').length, '印が貼り先へ残る').toBe(0);
+    expect(extractMdBlockPlainText(stripped)).toBe('名前\tメモ\na\tb');
+    expect(table.querySelectorAll('.pkc-table-sort-icon').length, '原本は無傷').toBe(2);
   });
 });
 

@@ -108,7 +108,7 @@ describe('table-sort: applyTableSort', () => {
       expect(th.getAttribute('tabindex')).toBe('0');
       const icon = th.querySelector('.pkc-table-sort-icon');
       expect(icon).not.toBeNull();
-      expect(icon?.textContent).toBe('↕');
+      expect(icon?.textContent, '印の字は CSS の ::after が出す(要素は空)').toBe('');
     }
   });
 
@@ -123,7 +123,7 @@ describe('table-sort: applyTableSort', () => {
     priceTh.click();
     expect(priceTh.getAttribute('data-pkc-sort-direction')).toBe('asc');
     expect(priceTh.getAttribute('aria-sort')).toBe('ascending');
-    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('▲');
+    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('');
     let names = Array.from(tbody.querySelectorAll('tr')).map(
       (r) => r.children[0]?.textContent,
     );
@@ -133,7 +133,7 @@ describe('table-sort: applyTableSort', () => {
     priceTh.click();
     expect(priceTh.getAttribute('data-pkc-sort-direction')).toBe('desc');
     expect(priceTh.getAttribute('aria-sort')).toBe('descending');
-    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('▼');
+    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('');
     names = Array.from(tbody.querySelectorAll('tr')).map(
       (r) => r.children[0]?.textContent,
     );
@@ -143,7 +143,7 @@ describe('table-sort: applyTableSort', () => {
     priceTh.click();
     expect(priceTh.getAttribute('data-pkc-sort-direction')).toBe('none');
     expect(priceTh.getAttribute('aria-sort')).toBe('none');
-    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('↕');
+    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('');
     names = Array.from(tbody.querySelectorAll('tr')).map(
       (r) => r.children[0]?.textContent,
     );
@@ -167,7 +167,7 @@ describe('table-sort: applyTableSort', () => {
     expect(nameTh.getAttribute('data-pkc-sort-direction')).toBe('asc');
     expect(priceTh.getAttribute('data-pkc-sort-direction')).toBe('none');
     expect(priceTh.getAttribute('aria-sort')).toBe('none');
-    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('↕');
+    expect(priceTh.querySelector('.pkc-table-sort-icon')?.textContent).toBe('');
   });
 
   it('キーボード操作(Enter / Space)でソートがトリガーされる', () => {
@@ -190,5 +190,23 @@ describe('table-sort: applyTableSort', () => {
     const th = container.querySelector('th')!;
     const icons = th.querySelectorAll('.pkc-table-sort-icon');
     expect(icons.length).toBe(1);
+  });
+
+  it('並べ替えの印の字(↕ ▲ ▼)は見出しの textContent に混ざらない(3 態とも)', () => {
+    // 🔴 印を文字で足すと、範囲選択のコピーや ⧉ の貼り付けに `名前↕` と混ざった(#1150)
+    const container = createSampleTable();
+    applyTableSort(container);
+    const th = container.querySelectorAll('th')[1]!;
+    const labels: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      labels.push(th.textContent ?? '');
+      th.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
+    expect(labels).toEqual(['価格', '価格', '価格']);
+    // 方向は属性だけで決まる(CSS の受け皿はここを読む)
+    expect(th.getAttribute('data-pkc-sort-direction')).toBe('none');
+    for (const t of container.querySelectorAll('th')) {
+      expect(t.textContent).not.toMatch(/[↕▲▼]/);
+    }
   });
 });

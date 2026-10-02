@@ -2965,6 +2965,18 @@ li[data-pkc-row-slot] {
   opacity: 1;
   color: var(--accent);
 }
+/* 🔴 **印の字は要素に持たせず、ここで出す**(#1150 の直し)。
+ * ⚠ 字を `span` の中に入れると `textContent` / 範囲選択 / 表の ⧉ に `名前↕` と混ざる。
+ *   `::after` の生成字は選択にもコピーにも入らない。方向は `data-pkc-sort-direction` だけで決まる。 */
+.pkc-md-rendered table th[data-pkc-sort-direction='none'] .pkc-table-sort-icon::after {
+  content: '↕';
+}
+.pkc-md-rendered table th[data-pkc-sort-direction='asc'] .pkc-table-sort-icon::after {
+  content: '▲';
+}
+.pkc-md-rendered table th[data-pkc-sort-direction='desc'] .pkc-table-sort-icon::after {
+  content: '▼';
+}
 /* 🔴 **Markdown プレビュー内の外部リンクインジケータ**(#1152)。
  * ⚠ 外部リンク（http/https）の末尾に控えめな ↗ アイコンを表示。
  * 🔑 デザインシステムトークン `--s1` を使用。 */

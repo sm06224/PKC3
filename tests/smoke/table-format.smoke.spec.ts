@@ -55,6 +55,22 @@ test('🔴 表を右クリックして形を変えると、保存された本文
   const th = table.locator('th').first();
   await expect(th, '表ヘッダーにソート属性が付与されていない').toHaveAttribute('data-pkc-sort-direction', 'none');
   await expect(th.locator('.pkc-table-sort-icon'), 'ソートインジケータが出ていない').toBeVisible();
+  /**
+   * 🔴 **印の字は要素ではなく CSS の `::after` が出す**(読む面の選択・⧉ に混ざらないため)。
+   * ⚠ `toBeVisible` は空の `span` でも通る ── 観測点は**計算後の `::after` の `content`**と、
+   *   見出しの `textContent` が字を持たないこと。
+   * ⚠ 3 態は**属性を直に書き換えて**見る(CSS の受け皿だけを見る)。見出しを押すと
+   *   並べ替えと同時に升の編集も始まって見出しが作り直されるので、押す道は使わない
+   *   (押したときの 3 態は unit が見ている)。
+   */
+  const afterContent = (): Promise<string> =>
+    th.locator('.pkc-table-sort-icon').evaluate((n) => getComputedStyle(n, '::after').content);
+  expect(await th.evaluate((n) => n.textContent), '印の字が textContent に混ざっている').toBe('品名');
+  expect(await afterContent(), '並べ替え前の印(↕)が CSS から出ていない').toBe('"↕"');
+  for (const [dir, mark] of [['asc', '▲'], ['desc', '▼'], ['none', '↕']] as const) {
+    await th.evaluate((n, d) => n.setAttribute('data-pkc-sort-direction', d), dir);
+    expect(await afterContent(), `${dir} の印(${mark})が CSS から出ていない`).toBe(`"${mark}"`);
+  }
 
   // ── ① 表を右クリックすると「CSV の表にする」が出る
   await table.locator('td').first().click({ button: 'right' });
