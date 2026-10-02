@@ -981,6 +981,18 @@ describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
     }
   });
 
+  it('🔴 画像の復号 wasm 3 つが要る file に入っている(1 つずつ落とすと、量ではなく集合の門が鳴る)', () => {
+    const wasm = ['wasm/jbig2.wasm', 'wasm/openjpeg.wasm', 'wasm/qcms_bg.wasm'];
+    for (const w of wasm) {
+      expect(PDF_REQUIRED as string[], `${w} を要求していない`).toContain(w);
+      const errs = run(withPdf(TOTAL, w)).join('\n');
+      expect(errs, `${w} が無いのに通った`).toContain(w);
+      expect(errs, `${w}: 量の門で止まっている(集合の門が 1 度も通っていない)`).not.toContain('下限を');
+    }
+    // 対照群: 3 つとも在れば、この門は鳴らない
+    expect(run(withPdf()).join('\n')).not.toContain('wasm/');
+  });
+
   it('🔴 日本語の cmap が要る file に入っている(落ちると日本語の PDF が読めない)', () => {
     const jp = (PDF_REQUIRED as string[]).filter((n) => n.includes('cmaps/'));
     expect(jp.length, '日本語の cmap を要求していない').toBeGreaterThanOrEqual(2);

@@ -1678,6 +1678,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           type: 'OP_FAILED',
           error: '別のウィンドウを開けませんでした(ポップアップが止められています)',
         }),
+      /**
+       * 🔴 **遅れて名乗られた**(上の断りは「止められた」と言い切ったが、**遅いだけ**だった)。
+       * ⚠ `noopener` では両者を見分けられない ── 後から分かった側を、**誤った理由のまま残さず**言い直す。
+       */
+      onLateHello: () =>
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: '窓を開くのに時間がかかりすぎました。もう一度押してください',
+        }),
     });
     return pdfHost;
   };

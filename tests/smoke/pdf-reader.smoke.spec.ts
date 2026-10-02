@@ -7,6 +7,8 @@
  *   ② 設定の「PDF」を入にする
  *   ③ もう一度押す ── 別窓が **PKC の画面**で開き、見えている頁の前後だけが PNG の `<img>` で出て、字が選べる層がある
  *   ④ 末尾へ送ると、**外れた頁の ObjectURL が revoke される**(描いたら焼き、外れたら即返す)/ 文書内を探せる
+ *     🔴 そして**「作った ObjectURL の数 − 返した数 ≤ 窓の中の絵の数」**(**描いている最中に窓から外れた頁**の
+ *     返し忘れ ── 外れた頁の revoke が 1 度でも出れば「返した数 > 0」は満たされるので、数では見えない)
  *   ⑤ 3 頁目の字を選んで「ノートへ引く」── 本体のノートの末尾に**頁番号(p.3)と添付名つき**の引用が入る
  *   ⑥ 読めない PDF ── **断り文を出さず**ブラウザ内蔵の表示へ退避し、状態の行に 1 行出る
  *
@@ -53,12 +55,18 @@ const PAGES = 10;
 test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける(設定で選んだ人だけ)', async ({ page, context }) => {
   // ⚠ 窓の中の revoke を数える(描いた頁の ObjectURL を、外れたときに返しているか)。本体の側は数えない
   await context.addInitScript(() => {
-    const w = window as unknown as { __revoked: string[] };
+    const w = window as unknown as { __revoked: string[]; __created: number };
     w.__revoked = [];
+    w.__created = 0;
     const orig = URL.revokeObjectURL.bind(URL);
     URL.revokeObjectURL = (u: string): void => {
       w.__revoked.push(u);
       orig(u);
+    };
+    const origCreate = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (o: Blob | MediaSource): string => {
+      w.__created += 1;
+      return origCreate(o);
     };
   });
   const errors = collectPageErrors(page);
@@ -149,6 +157,44 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   await expect
     .poll(revoked, { message: '外れた頁の ObjectURL を返していない(閉じるまで積もる)', timeout: 10_000 })
     .toBeGreaterThan(0);
+
+  // 🔴 描いている最中に窓から外れた頁も、絵を持ち越さない ──
+  //    先頭 ⇄ 末尾を**待たずに**往復して、描画の途中で窓から外れる頁を作る(いま持っている絵だけが生きている)
+  await win.evaluate(async () => {
+    const sc = document.getElementById('scroller');
+    if (sc === null) throw new Error('scroller が無い');
+    const frames = (): Promise<void> =>
+      new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => res())));
+    for (let i = 0; i < 4; i += 1) {
+      sc.scrollTop = sc.scrollHeight;
+      await frames();
+      sc.scrollTop = 0;
+      await frames();
+    }
+    // 描画が落ち着くまで(作った数 + 返した数が 3 回続けて動かない)
+    let last = -1;
+    let same = 0;
+    while (same < 3) {
+      await new Promise((r) => setTimeout(r, 250));
+      const w = window as unknown as { __revoked: string[]; __created: number };
+      const now = w.__created + w.__revoked.length;
+      same = now === last ? same + 1 : 0;
+      last = now;
+    }
+  });
+  const held = await win.evaluate(() => {
+    const w = window as unknown as { __revoked: string[]; __created: number };
+    return {
+      created: w.__created,
+      revoked: w.__revoked.length,
+      imgs: document.querySelectorAll('img[data-pkc-field="pdf-page-image"]').length,
+    };
+  });
+  expect(held.created, '往復しても 1 枚も焼いていない(観測が空振り)').toBeGreaterThan(held.imgs);
+  expect(
+    held.created - held.revoked,
+    `作った ObjectURL(${String(held.created)})のうち返していない数が、窓の中の絵の数(${String(held.imgs)})を超えている ── 描画中に外れた頁の絵を返し忘れている`,
+  ).toBeLessThanOrEqual(held.imgs);
 
   // 文書内を探す
   await win.fill('#query', 'marker3');

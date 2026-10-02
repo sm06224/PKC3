@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { openInPdfReader } from '../../src/adapter/platform/pdf/open-in-reader';
 import { PdfReaderHost, type PdfLent } from '../../src/adapter/platform/pdf/pdf-window';
 
-function rig(enabled: boolean, lendable = true) {
+function rig(enabled: boolean, lendable = true, delayed = false) {
   const opened: string[] = [];
   const lends: string[] = [];
   const disposed: string[] = [];
@@ -17,11 +17,13 @@ function rig(enabled: boolean, lendable = true) {
   const notes: string[] = [];
   const posted: unknown[] = [];
   let alive = false;
+  const releases: Array<() => void> = [];
   const host = new PdfReaderHost({
-    onQuote: () => ({ ok: true, message: '' }),
+    onQuote: () => Promise.resolve({ ok: true, message: '' }),
     onFellBack: () => undefined,
     onLoadFailed: () => undefined,
     onOpenFailed: () => undefined,
+    onLateHello: () => undefined,
     makeChannel: () => ({
       postMessage: (d) => posted.push(d),
       close: () => undefined,
@@ -37,12 +39,15 @@ function rig(enabled: boolean, lendable = true) {
     host: () => host,
     lend: (key: string): Promise<PdfLent | null> => {
       lends.push(key);
-      return Promise.resolve(lendable ? { url: `blob:${key}`, dispose: () => disposed.push(key) } : null);
+      const lent = lendable ? { url: `blob:${key}`, dispose: () => disposed.push(key) } : null;
+      // `delayed`: 貸している最中(`await` の間)を test が握る
+      if (delayed) return new Promise((res) => releases.push(() => res(lent)));
+      return Promise.resolve(lent);
     },
     fail: (m: string) => fails.push(m),
     note: (t: string) => notes.push(t),
   };
-  return { deps, opened, lends, disposed, fails, notes, posted, host, setAlive: (v: boolean) => (alive = v) };
+  return { deps, opened, lends, disposed, fails, notes, posted, host, releases, setAlive: (v: boolean) => (alive = v) };
 }
 const pdf = { kind: 'pdf', assetKey: 'k1', name: 'a.pdf', lid: 'att1' };
 
@@ -84,6 +89,42 @@ describe('openInPdfReader', () => {
     expect(g.lends).toEqual(['k1']); // 借り直さない
     expect(g.notes).toEqual(['「a.pdf」はもう開いています']);
     expect(JSON.stringify(g.posted)).toContain('focus-request');
+  });
+
+  it('🔴 貸している最中の 2 回目の押しは、窓を 2 枚にしない(「もう開いています」で断る)', async () => {
+    const g = rig(true, true, true);
+    const first = openInPdfReader(g.deps, pdf);
+    // 1 回目は貸している最中(まだ窓が無い)── 2 回目が来る
+    const second = await openInPdfReader(g.deps, pdf);
+    expect(second).toBe(true);
+    expect(g.lends, '貸している最中に 2 回目が借りている').toEqual(['k1']);
+    expect(g.notes).toEqual(['「a.pdf」はもう開いています']);
+    g.releases[0]?.();
+    expect(await first).toBe(true);
+    expect(g.opened, '窓が 2 枚開いた').toHaveLength(1);
+  });
+
+  it('対照群: 別の添付は同時に貸せる / 貸し終われば同じ添付も押し直せる(印は残らない)', async () => {
+    const g = rig(true, true, true);
+    const a = openInPdfReader(g.deps, pdf);
+    const b = openInPdfReader(g.deps, { ...pdf, assetKey: 'k2', name: 'b.pdf' });
+    expect(g.lends).toEqual(['k1', 'k2']);
+    g.releases.forEach((r) => r());
+    await Promise.all([a, b]);
+    expect(g.opened).toHaveLength(2);
+  });
+
+  it('貸せなかった / 貸すのが落ちた回でも、印は外れる(次の押しが「もう開いています」で塞がれない)', async () => {
+    const g = rig(true, false);
+    await openInPdfReader(g.deps, pdf);
+    expect(g.fails).toEqual(['添付が見つかりません: a.pdf']);
+    await openInPdfReader(g.deps, pdf);
+    expect(g.fails).toHaveLength(2); // 2 回目も「借りに行った」(印で塞がれていない)
+    expect(g.notes).toEqual([]);
+    const throwing = { ...g.deps, lend: (): Promise<PdfLent | null> => Promise.reject(new Error('x')) };
+    await expect(openInPdfReader(throwing, pdf)).rejects.toThrow('x');
+    await openInPdfReader(g.deps, pdf);
+    expect(g.fails).toHaveLength(3);
   });
 
   it('設定は押すたびに引く(切り替えが次の押しから効く)', async () => {

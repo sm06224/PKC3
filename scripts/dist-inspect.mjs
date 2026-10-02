@@ -165,6 +165,12 @@ export const PDF_REQUIRED = [
   'cmaps/90ms-RKSJ-H.bcmap',
   'cmaps/UniJIS-UTF16-H.bcmap',
   'standard_fonts/LiberationSans-Regular.ttf',
+  // 🔴 画像の復号(スキャンした PDF)。⚠ 落ちても総量は 443 KB しか動かず、下限(2000 KB)との差
+  //   (2100 KB)に収まるので**量では止まらない** ── そして落ちた日は、スキャンの PDF を開いた user の
+  //   画面が白いままになる(窓が内蔵の表示へ退避するので、気づきにくい)。
+  'wasm/jbig2.wasm',
+  'wasm/openjpeg.wasm',
+  'wasm/qcms_bg.wasm',
 ];
 
 /**
@@ -625,7 +631,7 @@ export function inspectDist({
     if (missingPdf.length > 0) {
       errors.push(
         `${PDF_DIR} に要る file が無い: ${missingPdf.join(' / ')} ── ` +
-          'PDF を PKC の画面で読む設定にしても、開けない(または日本語が出ない)一式が配られる',
+          'PDF を PKC の画面で読む設定にしても、開けない(または日本語・スキャンの PDF が出ない)一式が配られる',
       );
     }
   } else if (requirePdf) {

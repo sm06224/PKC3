@@ -80,6 +80,7 @@ interface Rig {
   fellBack: PdfSession[];
   loadFailed: { session: PdfSession; reason: string }[];
   openFailed: PdfSession[];
+  lateHello: PdfSession[];
   clock: { t: number };
   /** 窓の側の端(実物の `reader-wire.js` で組む / 読む)。 */
   win: {
@@ -102,16 +103,18 @@ function rig(quoteResult: PdfQuoteResult = { ok: true, message: '引きました
     fellBack: [] as PdfSession[],
     loadFailed: [] as Rig['loadFailed'],
     openFailed: [] as PdfSession[],
+    lateHello: [] as PdfSession[],
     clock,
   };
   const host = new PdfReaderHost({
     onQuote: (session, text, page) => {
       r.quotes.push({ session, text, page });
-      return quoteResult;
+      return Promise.resolve(quoteResult);
     },
     onFellBack: (s) => r.fellBack.push(s),
     onLoadFailed: (session, reason) => r.loadFailed.push({ session, reason }),
     onOpenFailed: (s) => r.openFailed.push(s),
+    onLateHello: (s) => r.lateHello.push(s),
     makeChannel: (name) => {
       expect(name).toBe(PDF_CHANNEL);
       return hub.end();
@@ -152,6 +155,11 @@ function rig(quoteResult: PdfQuoteResult = { ok: true, message: '引きました
   };
 }
 
+/** 非同期の返事(`onQuote` の Promise)が窓へ届くまで進める。 */
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+};
+
 /** 窓を開き、窓が名乗るところまで進める。 */
 function openAndHello(g: Rig, assetKey = 'k1', name = '報告書.pdf', lid: string | null = 'att1'): PdfSession {
   const session = g.host.open({ assetKey, name, lid, lent: g.lent(`blob:${assetKey}`) });
@@ -187,6 +195,62 @@ describe('開く', () => {
     expect(PDF_QUOTE_TOO_LONG).toBe(wire.QUOTE_TOO_LONG);
   });
 
+  it('🔴 名乗りが遅れて届いたら(窓は開いていた)、黙らず答え、誤った断りを 1 度だけ言い直させる', () => {
+    const g = rig();
+    const s = g.host.open({ assetKey: 'k1', name: 'a.pdf', lid: null, lent: g.lent('blob:1') });
+    g.win.token = (g.opened[0]?.url ?? '').split('#')[1] ?? '';
+    g.timers.find((x) => x.ms === HELLO_TIMEOUT_MS)?.fn();
+    expect(g.openFailed).toEqual([s]);
+    expect(g.lateHello).toEqual([]);
+    // 5 秒より遅い名乗り
+    g.win.send('hello');
+    // 貸した URL は捨てた後 ── 渡さず、空で答える(窓が自分で「もう一度」と言う。待たせ続けない)
+    expect(g.win.received.find((m) => m.kind === 'doc')?.payload).toEqual({ url: null, name: 'a.pdf' });
+    expect(g.lateHello).toEqual([s]);
+    // 名乗り直しを何度されても、言い直しは 1 度(画面の知らせを重ねない)
+    g.win.send('hello');
+    expect(g.lateHello).toEqual([s]);
+    expect(g.disposed).toEqual(['blob:1']); // 二重に返さない
+  });
+
+  it('🔴 窓の F5(閉じた token の名乗り直し)も、黙らず空で答える ── ただし誤りの言い直しは出さない', () => {
+    const g = rig();
+    openAndHello(g);
+    g.win.send('closed');
+    g.win.received.length = 0;
+    g.win.send('hello');
+    expect(g.win.received.find((m) => m.kind === 'doc')?.payload).toEqual({ url: null, name: '報告書.pdf' });
+    expect(g.lateHello).toEqual([]);
+    expect(g.openFailed).toEqual([]);
+  });
+
+  it('対照群: 一度も開いていない token の名乗りには答えない(他のタブの窓)', () => {
+    const g = rig();
+    openAndHello(g);
+    const other = g.hub.end();
+    const got: unknown[] = [];
+    other.onmessage = (ev): void => {
+      got.push(ev.data);
+    };
+    other.postMessage(wire.envelope('hello', 'never-seen', {}));
+    expect(got).toEqual([]);
+  });
+
+  it('控えは新しい順に 16 件まで(古い token は忘れる ── 控えが積もり続けない)', () => {
+    const g = rig();
+    const first = openAndHello(g, 'k0');
+    const firstToken = first.token;
+    g.win.send('closed');
+    for (let i = 1; i <= 16; i += 1) {
+      openAndHello(g, `k${String(i)}`);
+      g.win.send('closed');
+    }
+    g.win.token = firstToken;
+    g.win.received.length = 0;
+    g.win.send('hello');
+    expect(g.win.received.find((m) => m.kind === 'doc'), '17 件目で押し出された token に答えている').toBeUndefined();
+  });
+
   it('🔴 窓が名乗らなければ(ポップアップが止められた等)、貸した URL を捨てて知らせる', () => {
     const g = rig();
     const s = g.host.open({ assetKey: 'k1', name: 'a.pdf', lid: null, lent: g.lent('blob:1') });
@@ -210,10 +274,11 @@ describe('開く', () => {
   it('開く途中で落ちても、貸した URL を漏らさない', () => {
     const g = rig();
     const bad = new PdfReaderHost({
-      onQuote: () => ({ ok: true, message: '' }),
+      onQuote: () => Promise.resolve({ ok: true, message: '' }),
       onFellBack: () => undefined,
       onLoadFailed: () => undefined,
       onOpenFailed: () => undefined,
+      onLateHello: () => undefined,
       makeChannel: () => g.hub.end(),
       openWindow: () => {
         throw new Error('blocked');
@@ -269,13 +334,70 @@ describe('貸した URL の寿命 ── 窓が Blob を握った瞬間が終端
 });
 
 describe('ノートへ引く', () => {
-  it('窓が選んだ字と頁番号を送ると、本体が受け、結果を窓へ返す', () => {
+  it('窓が選んだ字と頁番号を送ると、本体が受け、結果を窓へ返す', async () => {
     const g = rig({ ok: true, message: '「メモ」の末尾へ引きました(3 頁)' });
     const s = openAndHello(g);
     g.win.send('quote', { text: '結論', page: 3 });
+    await flush();
     expect(g.quotes).toEqual([{ session: s, text: '結論', page: 3 }]);
     const res = g.win.received.find((m) => m.kind === 'quote-result');
     expect(res?.payload).toEqual({ ok: true, message: '「メモ」の末尾へ引きました(3 頁)' });
+  });
+
+  it('🔴 結果は本体の返事(Promise)が出てから窓へ返る ── 先には返さない / 落ちても理由を返す', async () => {
+    const g = rig();
+    let resolveIt: (r: PdfQuoteResult) => void = () => undefined;
+    const pending = new Promise<PdfQuoteResult>((res) => {
+      resolveIt = res;
+    });
+    const host = new PdfReaderHost({
+      onQuote: () => pending,
+      onFellBack: () => undefined,
+      onLoadFailed: () => undefined,
+      onOpenFailed: () => undefined,
+      onLateHello: () => undefined,
+      makeChannel: () => g.hub.end(),
+      openWindow: (url) => {
+        g.opened.push({ url, features: '' });
+      },
+      baseUrl: 'https://example.test/',
+      newToken: () => 'late',
+    });
+    host.open({ assetKey: 'k', name: 'a', lid: 'l', lent: g.lent('blob:late') });
+    g.win.token = 'late';
+    g.win.send('hello');
+    g.win.received.length = 0;
+    g.win.send('quote', { text: 'x', page: 1 });
+    await flush();
+    expect(g.win.received.find((m) => m.kind === 'quote-result'), '結末の前に返事をしている').toBeUndefined();
+    resolveIt({ ok: false, message: '別のウィンドウが書き替えたため、追記できませんでした' });
+    await flush();
+    expect(g.win.received.find((m) => m.kind === 'quote-result')?.payload).toEqual({
+      ok: false,
+      message: '別のウィンドウが書き替えたため、追記できませんでした',
+    });
+
+    // onQuote が reject しても、窓へ理由を返す(窓の「引いています…」を残さない)
+    const g2 = rig();
+    const host2 = new PdfReaderHost({
+      onQuote: () => Promise.reject(new Error('boom')),
+      onFellBack: () => undefined,
+      onLoadFailed: () => undefined,
+      onOpenFailed: () => undefined,
+      onLateHello: () => undefined,
+      makeChannel: () => g2.hub.end(),
+      openWindow: () => undefined,
+      baseUrl: 'https://example.test/',
+      newToken: () => 'rej',
+    });
+    host2.open({ assetKey: 'k', name: 'a', lid: 'l', lent: g2.lent('blob:rej') });
+    g2.win.token = 'rej';
+    g2.win.send('hello');
+    g2.win.send('quote', { text: 'x', page: 1 });
+    await flush();
+    const res = g2.win.received.find((m) => m.kind === 'quote-result');
+    expect(res?.payload['ok']).toBe(false);
+    expect(String(res?.payload['message']).length).toBeGreaterThan(0);
   });
 
   it('🔴 64KB を超える字は、本体が受けない(窓の検めに頼らない最後の門)', () => {
@@ -400,12 +522,13 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
     );
   });
 
-  it('窓が待つ種類は、本体が送る 3 つと同じ(doc / focus-request / quote-result)', () => {
+  it('窓が待つ種類は、本体が送る 3 つと同じ(doc / focus-request / quote-result)', async () => {
     expect([...new Set(awaited)].sort()).toEqual(['doc', 'focus-request', 'quote-result']);
     const g = rig();
     const s = openAndHello(g);
     g.host.focus(s.token);
     g.win.send('quote', { text: 'a', page: 1 });
+    await flush();
     expect(new Set(g.win.received.map((m) => m.kind))).toEqual(new Set(awaited));
   });
 
