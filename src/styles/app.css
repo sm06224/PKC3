@@ -5068,7 +5068,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* ══ パソコン(#215 段①②、2026-10-02)═══════════════════════════════
  * 🔴 **左の列だけ**(別窓は無い)。作法は録ったものと同じ縦積み ── 名前・種類・
  *   大きさ・更新日を横に並べると 200px で名前が切れる。
- * ⚠ 段①の行は押せない(読むだけ)。 */
+ * ⚠ 行は**行いっぱいが押せる場所**(字だけを的にしない ── マウスだけで完結する)。 */
 [data-pkc-browse-pane='pc'] {
   display: flex;
   flex-direction: column;
@@ -5114,16 +5114,37 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: 2px;
   background: var(--surface);
 }
-/* 段①は読むだけ ── 行は押せない(押して取り込む道は段②) */
+[data-pkc-field='pc-open'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  padding: var(--s2);
+  border: none;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+}
+[data-pkc-field='pc-open']:hover {
+  background: var(--surface-2);
+}
+/* フォルダの行は押せない ── 余白だけ同じにして、字は一段うすく */
 [data-pkc-field='pc-list'] > li > [data-pkc-field='pc-name'],
 [data-pkc-field='pc-list'] > li > [data-pkc-field='pc-meta'] {
   padding: 0 var(--s2);
+  color: var(--muted);
 }
 [data-pkc-field='pc-name'] {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 [data-pkc-field='pc-meta'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='pc-readonly'] {
   color: var(--muted);
   font-size: 12px;
 }

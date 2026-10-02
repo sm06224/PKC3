@@ -7,10 +7,12 @@
  * 1. 「フォルダを選ぶ…」を押す → OS のフォルダ選択が出る
  * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(名前 / 種類 / 大きさ / 更新日)。
  *    200 件で切れて「さらに表示」
- * 3. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
+ * 3. ファイルの行を押すと、**PKC に取り込んで中央に開く**(このタブは開いたまま)
+ * 4. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
  *
  * 🔴 **消す口・改名・移動は置かない**(裁定)── パソコンのファイルは取り消せない。
- * ⚠ 段①では行を**押せない**(読むだけ)。押して取り込む道は段②。
+ * ⚠ **書き戻せない種類**(画像・PDF・Office…)の行には「書き戻せません」を出す
+ *   (Markdown だけが、取り込んだあと元のファイルへ書き戻せる)。
  *
  * ⚠ **描画器は handle を持たない** ── `LocalFolder`(`platform/local-folder.ts`)の
  *   `view()` を映すだけで、押された先は `data-pkc-action` を通って binder が呼ぶ
@@ -61,7 +63,7 @@ export class PcFolderRenderer {
         return;
       case 'none':
         this.host.append(
-          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。'),
+          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC に取り込んで開きます。'),
           this.pickButton(),
         );
         return;
@@ -137,17 +139,41 @@ export class PcFolderRenderer {
   private row(row: LocalFolderRow): HTMLLIElement {
     const li = document.createElement('li');
     li.setAttribute('data-pkc-pc-row', String(row.index));
-    // ⚠ フォルダも file も押せない(直下だけ・読むだけ)。押せる見た目にしない
+    const meta = [row.label, folderSizeText(row.size), folderModifiedText(row.modified)].join(' · ');
+    if (row.kind === 'directory') {
+      // ⚠ フォルダは押せない(直下だけ ── 中へは入らない)。押せる見た目にしない
+      const name = document.createElement('span');
+      field(name, 'pc-name');
+      name.textContent = row.name;
+      const about = document.createElement('span');
+      field(about, 'pc-meta');
+      about.textContent = row.label;
+      li.append(name, about);
+      return li;
+    }
+    const open = button(
+      'pc-open-file',
+      'pc-open',
+      '',
+      row.writeBack
+        ? '取り込んで開きます。直して保存したあと、情報ペインの「元ファイルへ書き戻す」でパソコンのファイルも書き換えられます'
+        : '取り込んで開きます(PKC の添付や連絡先になります)。元のファイルへは書き戻せません',
+    );
+    open.setAttribute('data-pkc-pc-index', String(row.index));
     const name = document.createElement('span');
     field(name, 'pc-name');
     name.textContent = row.name;
     const about = document.createElement('span');
     field(about, 'pc-meta');
-    about.textContent =
-      row.kind === 'directory'
-        ? row.label
-        : [row.label, folderSizeText(row.size), folderModifiedText(row.modified)].join(' · ');
-    li.append(name, about);
+    about.textContent = meta;
+    open.append(name, about);
+    if (!row.writeBack) {
+      const note = document.createElement('span');
+      field(note, 'pc-readonly');
+      note.textContent = '書き戻せません';
+      open.append(note);
+    }
+    li.append(open);
     return li;
   }
 }

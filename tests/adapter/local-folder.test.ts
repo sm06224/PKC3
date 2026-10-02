@@ -4,7 +4,8 @@
  *
  * ⚠ 見るのは **user が何を見て、押すと何が起きるか** ──
  *   ①選ぶと直下が名前順に並び、200 件で切れる ②「切る」は列挙の途中でも効き、handle を手放す
- *   ③許可が `granted` 以外なら「切れた」と読む ④**消す・改名・移動の口は 1 つも無い**。
+ *   ③許可が `granted` 以外なら「切れた」と読む ④行を押すと取り込みの口が**1 回だけ**呼ばれる
+ *   ⑤**消す・改名・移動の口は 1 つも無い**。
  *
  * ⚠ **fake は本物の意味論を真似る**: `values()` は非同期の列挙、`queryPermission` は
  *   `'granted' | 'prompt' | 'denied'`、`isSameEntry` は同じ file かどうか、`getFile` は読めなければ投げる。
@@ -16,6 +17,7 @@ import {
   windowDirectoryPicker,
   type DirectoryHandleLike,
   type FolderEntryHandle,
+  type LocalFileItem,
 } from '@adapter/platform/local-folder';
 import { FOLDER_PAGE } from '@features/local-folder/folder-entries';
 import { codeOnly } from '../helpers/code-only';
@@ -67,9 +69,13 @@ function dirHandle(
 
 function make(dir: DirectoryHandleLike | (() => Promise<DirectoryHandleLike>)): {
   folder: LocalFolder;
+  opened: LocalFileItem[];
+  failed: string[];
   changes: () => number;
   picks: { mode: string }[];
 } {
+  const opened: LocalFileItem[] = [];
+  const failed: string[] = [];
   const picks: { mode: string }[] = [];
   let changes = 0;
   const folder = new LocalFolder({
@@ -77,9 +83,11 @@ function make(dir: DirectoryHandleLike | (() => Promise<DirectoryHandleLike>)): 
       picks.push(o);
       return typeof dir === 'function' ? dir() : dir;
     },
+    open: async (item) => void opened.push(item),
+    fail: (m) => void failed.push(m),
     onChange: () => void (changes += 1),
   });
-  return { folder, changes: () => changes, picks };
+  return { folder, opened, failed, changes: () => changes, picks };
 }
 
 /** 非同期の連なり(列挙・大きさの読み込み)が落ち着くまで待つ。⚠ 数えた回数ではなく時間で待つ。 */
@@ -214,6 +222,8 @@ describe('繋いで一覧する(段①)', () => {
   it('🔴 API の無いブラウザ ── タブは出たまま、押しても何も起きない', async () => {
     const folder = new LocalFolder({
       picker: null,
+      open: async () => {},
+      fail: () => {},
       onChange: () => {},
     });
     expect(folder.view().phase).toBe('unsupported');
@@ -254,6 +264,17 @@ describe('許可が切れたとき(読む側)', () => {
     }
   });
 
+  it('🔴 押した時点で切れていたら、取り込まずに「切れた」と言う', async () => {
+    const perm = { state: 'granted' };
+    const a = fileHandle('a.md');
+    const { folder, opened } = make(dirHandle([a], perm));
+    await folder.pick();
+    perm.state = 'prompt';
+    await folder.open(0);
+    expect(folder.view().phase).toBe('lost');
+    expect(opened, '切れているのに取り込みの口を呼んだ').toEqual([]);
+  });
+
   it('🔴 列挙の途中で投げられ、許可も無ければ「切れた」(読めなかったではない)', async () => {
     const perm = { state: 'granted' };
     const dir: DirectoryHandleLike = {
@@ -271,13 +292,91 @@ describe('許可が切れたとき(読む側)', () => {
   });
 });
 
+describe('行を押すと取り込む(段②)', () => {
+  it('🔴 取り込みの口が 1 回だけ、一覧の handle そのものを持って呼ばれる', async () => {
+    const a = fileHandle('メモ.md', { size: 11 });
+    const { folder, opened } = make(dirHandle([a]));
+    await folder.pick();
+    await folder.open(0);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.file.name).toBe('メモ.md');
+    expect(opened[0]!.file.size).toBe(11);
+    // ⚠ 同じ file の判定(isSameEntry)に使うので、写しではなく**一覧の handle そのもの**
+    expect(opened[0]!.handle).toBe(a);
+  });
+
+  it('🔴 取り込みの最中の 2 度押しは、2 回目を呼ばない(記憶が付く前に両方が「新しい」になる)', async () => {
+    let finish: () => void = () => {};
+    const hold = new Promise<void>((r) => (finish = r));
+    const calls: string[] = [];
+    const a = fileHandle('a.md');
+    const folder = new LocalFolder({
+      picker: async () => dirHandle([a]),
+      open: async (i) => {
+        calls.push(i.file.name);
+        await hold;
+      },
+      fail: () => {},
+      onChange: () => {},
+    });
+    await folder.pick();
+    const first = folder.open(0);
+    const second = folder.open(0);
+    await flush();
+    finish();
+    await Promise.all([first, second]);
+    expect(calls, '同時に 2 回取り込んだ').toEqual(['a.md']);
+    // ⚠ 終わった後は、また押せる(記憶が「増やさない」を担う)
+    await folder.open(0);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('🔴 フォルダの行・範囲外の添字は何も起こさない', async () => {
+    const { folder, opened, failed } = make(dirHandle([dirEntry('資料'), fileHandle('a.md')]));
+    await folder.pick();
+    await folder.open(0); // フォルダ
+    await folder.open(99);
+    await folder.open(-1);
+    expect(opened).toEqual([]);
+    expect(failed).toEqual([]);
+  });
+
+  it('🔴 読めなかった file は、名前と理由を言う(黙って終えない)', async () => {
+    const { folder, opened, failed } = make(dirHandle([fileHandle('消えた.md', { fail: true })]));
+    await folder.pick();
+    await folder.open(0);
+    expect(opened).toEqual([]);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain('消えた.md');
+  });
+
+  it('🔴 読んでいる間に「切る」が押されたら、取り込まない', async () => {
+    let release: () => void = () => {};
+    const wait = new Promise<void>((r) => (release = r));
+    const slow = fileHandle('a.md');
+    const realGet = slow.getFile!;
+    slow.getFile = async () => {
+      await wait;
+      return realGet.call(slow);
+    };
+    const { folder, opened } = make(dirHandle([slow]));
+    await folder.pick();
+    const pressing = folder.open(0);
+    await flush();
+    folder.cut();
+    release();
+    await pressing;
+    expect(opened, '切ったのに開いた').toEqual([]);
+  });
+});
+
 describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
-  it('公開面は 選ぶ / 切る / さらに / 見る だけ', () => {
+  it('公開面は 選ぶ / 切る / さらに / 開く / 見る だけ', () => {
     const names = Object.getOwnPropertyNames(LocalFolder.prototype)
       .filter((n) => n !== 'constructor')
       .sort();
     // ⚠ private の補助(readable / lose / changed / fillStats)は TS の private で、実行時には見える
-    expect(names).toEqual(['changed', 'cut', 'fillStats', 'heldHandle', 'lose', 'more', 'pick', 'readable', 'view'].sort());
+    expect(names).toEqual(['changed', 'cut', 'fillStats', 'heldHandle', 'lose', 'more', 'open', 'pick', 'readable', 'view'].sort());
     expect(names.filter((n) => /remove|delete|rename|move|unlink|write|trash/i.test(n))).toEqual([]);
   });
 

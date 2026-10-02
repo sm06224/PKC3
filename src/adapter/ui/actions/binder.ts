@@ -1637,7 +1637,7 @@ export interface BinderServices {
    *   選ぶ・列挙・許可の確かめ・取り込みの振り分けは全部実体側。
    *   ⚠ **消す・改名・移動の口は持たない**(パソコンのファイルは取り消せない)。
    */
-  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more'>;
+  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -2077,6 +2077,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'move-to-folder',
   // ⚠ user の**ファイル**を上書きする ── 取込・書出しの最中に走らせない
   'write-back-file',
+  // 🔴 パソコンのフォルダの行を押すと取り込む(`CREATE_ENTRY` / 取込)── 取込・書出しの最中は断る(#215 段②)
+  'pc-open-file',
 ]);
 
 /**
@@ -10819,13 +10821,18 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid) services.writeBackFile?.(lid);
   },
   /**
-   * 🔴 **パソコンのフォルダ**(#215 段①)。⚠ 3 つとも**押された先を伝えるだけ**。
+   * 🔴 **パソコンのフォルダ**(#215 段①②)。⚠ 4 つとも**押された先を伝えるだけ**。
    * ⚠ 「フォルダを選ぶ…」は **user の操作の流れの中で**呼ぶ(OS の選択は gesture が要る ──
    *   `await` を挟まずに `pick()` へ渡す)。
    */
   'pc-pick-folder': (_dispatcher, _target, services) => void services.localFolder?.pick(),
   'pc-cut-folder': (_dispatcher, _target, services) => services.localFolder?.cut(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
+  'pc-open-file': (_dispatcher, target, services) => {
+    const raw = target.getAttribute('data-pkc-pc-index');
+    const index = raw === null ? NaN : Number(raw);
+    if (Number.isInteger(index)) void services.localFolder?.open(index);
+  },
   'show-trash': (dispatcher) => dispatcher.dispatch({ type: 'SHOW_TRASH' }),
   'hide-trash': (dispatcher) => dispatcher.dispatch({ type: 'HIDE_TRASH' }),
   /**

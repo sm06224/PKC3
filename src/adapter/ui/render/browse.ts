@@ -68,7 +68,8 @@ export const BROWSE_TABS: readonly { mode: BrowseMode; label: string }[] = [
   /**
    * 🔴 **パソコン**(#215 段①。🟣 Gemini 裁定 2026-10-01「別のタブに並べ、押すと取り込んで開く」)。
    * ⚠ 中身は**パソコンのフォルダの直下**で、ノートではない ── それでも左に置くのは、
-   *   中央(本文)を退かさずに眺められるからである(#300)。
+   *   中央(本文)を退かさずに眺められるからである(#300)。押して開くのは**取り込んだノート**で、
+   *   このタブは開いたまま残る。
    */
   { mode: 'pc', label: 'パソコン' },
 ] as const;
@@ -183,7 +184,12 @@ export class BrowseRouter {
      *   **同じ 1 つ**を渡す(2 つ作ると、押した先と描いている先が別になる)。
      *   省略 = このブラウザでは使えない扱い(test 用)。
      */
-    pcFolder: LocalFolder = new LocalFolder({ picker: null, onChange: () => {} }),
+    pcFolder: LocalFolder = new LocalFolder({
+      picker: null,
+      open: async () => {},
+      fail: () => {},
+      onChange: () => {},
+    }),
   ) {
     this.last = initial;
     this.host = host;

@@ -17,7 +17,8 @@
  * ## 何をするか(読むだけ)
  *
  * ① `pick()` ── OS のフォルダ選択 → **直下だけ**を列挙 → 名前順 ② 見える分(200 件ずつ)の
- * 大きさ・更新日を読む ③ `cut()` ── handle を捨てる。
+ * 大きさ・更新日を読む ③ `open(i)` ── 行の file を読んで `deps.open` へ渡す(取り込みは
+ * 既存の口 ── ここは取り込みの規則を持たない)④ `cut()` ── handle を捨てる。
  *
  * 🔴 **消す口・改名・移動は 1 つも作らない**(裁定。`tests/adapter/local-folder.test.ts` が
  * 公開面を全数で見る)。⚠ 書き戻しは**既存の「元ファイルへ書き戻す」**(`launched-files.ts`)が担う。
@@ -61,9 +62,22 @@ export function windowDirectoryPicker(win: object = window): DirectoryPicker | n
   return (options) => (fn as (o: { mode: string }) => Promise<DirectoryHandleLike>).call(win, options);
 }
 
+/** 取り込みの口へ渡す 1 件。⚠ `handle` は**一覧の handle そのもの**(同じ file の判定に使う)。 */
+export interface LocalFileItem {
+  file: File;
+  handle: LaunchedHandle;
+}
+
 export interface LocalFolderDeps {
   /** `null` = このブラウザには無い。 */
   picker: DirectoryPicker | null;
+  /**
+   * 行を押したときの取り込み。⚠ **終わるまで待つ** ── 待つ間は同じ行を押しても
+   * もう一度は呼ばない(同時に 2 回入ると、記憶が付く前に両方が「新しい」と読まれて増える)。
+   */
+  open(item: LocalFileItem): Promise<void>;
+  /** 読めなかったことを画面へ言う口(黙って終えない)。 */
+  fail(message: string): void;
   /** 見え方が変わったときに呼ぶ(面を描き直す)。 */
   onChange(): void;
 }
@@ -126,6 +140,8 @@ export class LocalFolder {
   private version = 0;
   /** 「切る」「選び直し」で増える。古い列挙・読み込みの続きを捨てる札。 */
   private generation = 0;
+  /** 取り込み中の行(同じ行を同時に 2 度取り込まない)。 */
+  private readonly opening = new Set<number>();
 
   constructor(private readonly deps: LocalFolderDeps) {
     this.phase = deps.picker === null ? 'unsupported' : 'none';
@@ -305,5 +321,47 @@ export class LocalFolder {
     this.message = null;
     this.phase = this.deps.picker === null ? 'unsupported' : 'none';
     this.changed();
+  }
+
+  /**
+   * 行を押す。file を読んで取り込みの口へ渡す(1 回だけ)。
+   * ⚠ フォルダの行・範囲外・取り込み中の行は**何もしない**(押せる見た目にもしていない)。
+   */
+  async open(index: number): Promise<void> {
+    const dir = this.dir;
+    const slot = this.slots[index];
+    if (dir === null || slot === undefined || slot.kind !== 'file') return;
+    if (this.opening.has(index)) return;
+    const gen = this.generation;
+    this.opening.add(index);
+    try {
+      if (!(await this.readable(dir))) {
+        if (gen === this.generation) this.lose();
+        return;
+      }
+      if (typeof slot.handle.getFile !== 'function') {
+        this.deps.fail(`「${slot.name}」を読めませんでした`);
+        return;
+      }
+      let file: File;
+      try {
+        file = await slot.handle.getFile();
+      } catch (e) {
+        // ⚠ 消された・名前が変わった・許可が切れた ── 理由を添えて言う(黙って終えない)
+        if (!(await this.readable(dir))) {
+          if (gen === this.generation) this.lose();
+          return;
+        }
+        this.deps.fail(
+          `「${slot.name}」を読めませんでした(消されたか、名前が変わったかもしれません): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+      // ⚠ 読んでいる間に「切る」が押されていたら、取り込まない(切ったのに開く、を作らない)
+      if (gen !== this.generation) return;
+      await this.deps.open({ file, handle: slot.handle });
+    } finally {
+      this.opening.delete(index);
+    }
   }
 }
