@@ -7,6 +7,7 @@ import { bodyCssPlugin } from './build/body-css-plugin.ts';
 import { duckdbAssetsPlugin } from './build/duckdb-assets-plugin.ts';
 import { katexWoff2Plugin } from './build/katex-woff2-plugin.ts';
 import { manualPagePlugin } from './build/manual-page-plugin.ts';
+import { mermaidVersionDefine } from './build/mermaid-version.ts';
 import { ossNoticesPlugin } from './build/oss-notices-plugin.ts';
 import { COI_HEADERS as SHARED_COI_HEADERS } from './src/adapter/platform/sw/coi-headers.ts';
 
@@ -49,7 +50,11 @@ export default defineConfig({
    * ⚠ **本番では使わない**(`versionLine` が `product` を素通しする)── そちらは
    *   tag が版を名乗るので足りる。
    */
-  define: { __PKC_BUILT_AT__: JSON.stringify(Date.now()) },
+  define: {
+    __PKC_BUILT_AT__: JSON.stringify(Date.now()),
+    // 🔴 焼いた図のキャッシュの鍵に入れる mermaid の版(#1003)。手書きせず、入れた物から読む
+    ...mermaidVersionDefine(),
+  },
   base: './',
   // ⚠ bodyCssPlugin / ossNoticesPlugin は `apply` を付けない ── dev / build /
   //    **vitest** の 3 つで同じものを配る必要がある(test だけ virtual module が

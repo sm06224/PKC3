@@ -105,3 +105,24 @@ describe('🔴 SW の cache id は**配る物から**決まる(P7 段④ review 
     expect(a).toBe(b);
   });
 });
+
+/**
+ * 🔴 焼いた図のキャッシュの鍵に入れる mermaid の版(#1003)は、**配る 2 つのビルドの両方**で
+ * 焼かれる。可搬版(`build/portable.config.ts`)だけ `'unknown'` のままだと、版を上げても
+ * 可搬版で焼いた図の鍵が変わらない。
+ */
+describe('mermaid の版を define で焼く(#1003)', () => {
+  it('通常のビルドと可搬版の両方が、入れた mermaid の版を焼く', async () => {
+    const { readFileSync } = await import('node:fs');
+    const installed = (
+      JSON.parse(readFileSync('node_modules/mermaid/package.json', 'utf8')) as { version: string }
+    ).version;
+    const main = (await loadModule(undefined)).default as { define?: Record<string, string> };
+    const portable = (await import('../build/portable.config')).default as {
+      define?: Record<string, string>;
+    };
+    expect(installed).toMatch(/^\d+\.\d+\.\d+/);
+    expect(main.define?.__PKC_MERMAID_VERSION__).toBe(JSON.stringify(installed));
+    expect(portable.define?.__PKC_MERMAID_VERSION__).toBe(JSON.stringify(installed));
+  });
+});
