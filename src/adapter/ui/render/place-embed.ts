@@ -48,7 +48,12 @@
  * 図の塊・貸出は**枠(slot)が画面から外れたとき**と**別のノートへ移るとき**に返す
  * (`release`)。新しい常駐は作らない ── 描くのは既存の markdown 描画口(ワーカー。使い捨て)である。
  */
-import { PLACE_NEAR_MARGIN, placeEmbeddable, type PlaceExcerpt } from '@features/markdown/place-embed';
+import {
+  PLACE_BODY_CAP,
+  PLACE_NEAR_MARGIN,
+  placeEmbeddable,
+  type PlaceExcerpt,
+} from '@features/markdown/place-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { markViewBig } from './view-big';
@@ -74,6 +79,17 @@ const BLOCK_SELECTOR = '.pkc-format-block.pkc-place[data-pkc-place-entry]';
 /** 画面の字(続き・PDF)── ⚠ 使わない語(`ui-terms.ts`)を避けている。 */
 export const PLACE_MORE_NOTE = '続きは元のノートで';
 export const PLACE_PDF_NOTE = 'PDF は元のノートで';
+
+/**
+ * 🔴 **板の上限(`PLACE_BODY_CAP` 枚)を超えた枠の前に出す 1 行**(#1264 欠陥 8-b)。
+ * ⚠ 数は**定数から引く**(手で 200 と書かない ── 上限を動かした日に嘘になる)。
+ * 🔑 理由を言わないと、近づいても題名の帯だけの枠は「読み込みが遅い / 壊れた」に見える。
+ */
+export function placeLimitNote(cap: number = PLACE_BODY_CAP): string {
+  return `ここから先の枠は題名だけ(${String(cap)} 枚まで)`;
+}
+/** 上の 1 行の器(題名の帯の下に 1 つだけ)。 */
+export const PLACE_LIMIT_FIELD = 'place-limit-note';
 
 export interface PlaceEmbedDeps {
   /** いま描いているノート自身の lid(自分を置いた塊は展開しない)。 */
@@ -105,6 +121,43 @@ export interface PlaceEmbedDeps {
 function embeddable(deps: PlaceEmbedDeps, lid: string): boolean {
   const meta = deps.metaOf(lid);
   return meta !== undefined && lid !== deps.selfLid && placeEmbeddable(meta.archetype);
+}
+
+/**
+ * 🔴 **上限を超えた最初の枠に 1 行を出す**(#1264 欠陥 8-b)。他の枠からは外す。
+ *
+ * 上限は「中身を頼む lid の数」(`PLACE_BODIES_WANTED` が `PLACE_BODY_CAP` で切る ── 先頭から)。
+ * 数え方は**頼む側と同じ**:居るノートで、型が読めるもの(フォルダを除く)を、**置いた順に lid ごとに 1 回**。
+ * ⚠ **中身がまだ無い枠にだけ**出す ── 並びが変わって、読み終えている枠が上限の外に出ることがある
+ *   (そこは中身が出ているので「題名だけ」と言うと嘘になる)。⚠ 上限の内側で読み込み中の枠にも出さない
+ *   (位置で見る)。🔑 描き直しで枠が作り直されても、毎回この 1 本が引き直す(古い 1 行を残さない)。
+ */
+function markLimit(blocks: readonly HTMLElement[], deps: PlaceEmbedDeps): void {
+  const counted = new Set<string>();
+  let target: HTMLElement | null = null;
+  for (const block of blocks) {
+    const lid = block.getAttribute('data-pkc-place-entry') ?? '';
+    if (lid === '') continue;
+    const meta = deps.metaOf(lid);
+    if (meta === undefined || !placeEmbeddable(meta.archetype)) continue;
+    const overLimit = counted.size >= PLACE_BODY_CAP && !counted.has(lid);
+    counted.add(lid);
+    if (target === null && overLimit && embeddable(deps, lid) && deps.excerptOf(lid) === undefined) target = block;
+  }
+  for (const block of blocks) {
+    const note = block.querySelector(`:scope > [data-pkc-field="${PLACE_LIMIT_FIELD}"]`);
+    if (block === target) {
+      if (note !== null) continue;
+      const doc = block.ownerDocument;
+      const el = doc.createElement('div');
+      el.setAttribute('data-pkc-field', PLACE_LIMIT_FIELD);
+      el.textContent = placeLimitNote();
+      // 🔑 題名の帯の直後へ(帯が無ければ末尾)── 掴む口・大きさの持ち手は動かさない
+      const card = block.querySelector(':scope > [data-pkc-field="place-card"]');
+      if (card !== null) card.after(el);
+      else block.append(el);
+    } else note?.remove();
+  }
 }
 
 function ensureSlot(block: HTMLElement, newNs: () => string): HTMLElement {
@@ -342,6 +395,7 @@ export class PlaceEmbeds {
     pruneScopes(this.scopes);
     const blocks = [...host.querySelectorAll<HTMLElement>(BLOCK_SELECTOR)];
     this.watch(blocks, deps.viewRoot);
+    markLimit(blocks, deps);
     const seen = new Set<string>();
     const need: string[] = [];
     for (const block of blocks) {

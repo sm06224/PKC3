@@ -22,6 +22,7 @@ import {
   ALIVE_TTL_MS,
   OFFICE_ADOPTED,
   OFFICE_CHANNEL,
+  OFFICE_CONFIRMING_NOTICE,
   OFFICE_DECLINED_NOTICE,
   OfficeWindow,
   RESEND_GRACE_MS,
@@ -750,7 +751,22 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('🔴 窓の側(素の HTML)が、本体と同じ綴りで「やめた」を返し、字が仕様どおり', () => {
+  it('🔴 窓が確認を出した合図(`reload-confirming`)を受けると購読者へ届く。受け渡しは何も変えない(#1264 欠陥 3)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.sent.length = 0;
+    h.ch.deliver('reload-confirming');
+    expect(h.seen.some((e) => e.type === 'reload-confirming'), '購読者(状態の行を出す口)へ届いていない').toBe(true);
+    expect(h.seen.some((e) => e.type === 'reload-declined'), '「やめた」と取り違えている').toBe(false);
+    expect(h.ch.sent, '合図を受けて本体が何かを送り返している(確認のための往復を足さない)').toEqual([]);
+    // 確認の後で「開く」(= 窓が作り直されて求めてくる)と、頼んだ b が届く ── 合図で何も変わっていない
+    h.ch.deliver('ready-for-document');
+    expect(docs(h)[0]!.payload.name).toBe('b.docx');
+  });
+
+  it('🔴 窓の側(素の HTML)が、本体と同じ綴りで「やめた」「確認が出た」を返し、字が仕様どおり', () => {
+    expect(OFFICE_CONFIRMING_NOTICE).toBe('Office のウィンドウで確認が出ています(保存していない変更があります)');
     // 本体の字(状態の行)は仕様の字そのもの。⚠ 定数から期待値を作らず、literal で pin する
     expect(OFFICE_DECLINED_NOTICE).toBe('Office のウィンドウに保存していない変更があるため開きませんでした');
     // ⚠ 実行行だけ(解説コメントに満たされない)
@@ -761,8 +777,15 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     expect(host.length, '抜き出せていない').toBeGreaterThan(1000);
     expect(host, '窓が「やめた」を放送していない').toContain("say('reload-declined')");
     expect(host, '窓が確認の字を出していない').toContain('保存していない変更があります。別の文書を開くと消えます。開きますか?');
-    expect(host).toContain('id="unsaved-open">開く</button>');
+    // 🔴 「開く」は**変更を捨てる**操作 ── 字から読めること(#1264 欠陥 3)。説明に「先に保存する道」を添える
+    expect(host).toContain('id="unsaved-open">変更を捨てて開く</button>');
     expect(host).toContain('id="unsaved-cancel">やめる</button>');
+    expect(host, '先に保存する道が説明に無い').toContain('id="unsaved-hint">先に保存するなら、やめてから Ctrl+S</div>');
+    // 🔴 確認を出した(`show`)ときに本体へ返す ── 確認の箱を出す経路の中で放送する
+    const show = host.slice(host.indexOf('show: function ()'), host.indexOf('hide: function ()'));
+    expect(show.length, 'show を抜き出せていない').toBeGreaterThan(50);
+    expect(show, '確認を出したのに本体へ返していない').toContain("say('reload-confirming')");
+    expect(show.indexOf("say('reload-confirming')"), '箱を出す前に放送している').toBeGreaterThan(show.indexOf('unsavedEl.hidden = false'));
     expect(host, '判断の script を読んでいない').toContain('<script src="office-unsaved.js"></script>');
     // 🔴 別の文書を頼む放送は、**確認の門を通ってから**替える ── 直に `location.replace` しない
     const branch = host.slice(host.indexOf("d.pkc3Office === 'reload-request'"), host.indexOf('var unsavedEl'));
@@ -774,5 +797,8 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     const i = main.indexOf("ev.type === 'reload-declined'");
     expect(i, '本体が「やめた」を受けていない').toBeGreaterThan(0);
     expect(main.slice(i, i + 700)).toContain('showStatus(OFFICE_DECLINED_NOTICE)');
+    const j = main.indexOf("ev.type === 'reload-confirming'");
+    expect(j, '本体が「確認が出た」を受けていない').toBeGreaterThan(0);
+    expect(main.slice(j, j + 700)).toContain('showStatus(OFFICE_CONFIRMING_NOTICE)');
   });
 });

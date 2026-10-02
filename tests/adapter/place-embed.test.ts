@@ -1545,3 +1545,149 @@ describe('板を 2 つ並べたときの抜粋の読み込み(LRU の奪い合�
     }
   });
 });
+
+/**
+ * 🔴 **上限(200 枚)を超えた最初の枠の前に 1 行**(#1264 欠陥 8-b)。
+ *
+ * 画面で起きていたこと: 1 枚の板で中身が出るのは先頭から 200 枚まで。超えた枠は近づいても題名の帯だけで、
+ * **理由がどこにも出なかった**(「読み込みが遅い / 壊れた」に見える)。
+ * 🔑 数え方は頼む側(`PLACE_BODIES_WANTED`)と同じ ── 居るノートで、フォルダを除き、lid ごとに 1 回。
+ */
+describe('描画: 板の上限を超えた枠の 1 行(#1264 欠陥 8-b)', () => {
+  const NOTE = 'ここから先の枠は題名だけ(200 枚まで)';
+  const noteOf = (b: HTMLElement): HTMLElement | null =>
+    b.querySelector<HTMLElement>(':scope > [data-pkc-field="place-limit-note"]');
+
+  /** `lids` を置いた順に並べた板を作る。`withExcerpt` が真の枠だけ抜粋を持つ(既定は先頭から上限まで)。 */
+  function mount(
+    lids: readonly string[],
+    opts: { folders?: ReadonlySet<string>; withExcerpt?: (i: number) => boolean } = {},
+  ) {
+    const host = document.createElement('div');
+    for (const l of lids) {
+      const blk = document.createElement('div');
+      blk.className = 'pkc-format-block pkc-place';
+      blk.setAttribute('data-pkc-place-entry', l);
+      const card = document.createElement('button');
+      card.setAttribute('data-pkc-field', 'place-card');
+      blk.append(card);
+      host.append(blk);
+    }
+    document.body.append(host);
+    const order = [...new Set(lids)];
+    const deps: PlaceEmbedDeps = {
+      selfLid: 'board',
+      excerptOf: (l) =>
+        (opts.withExcerpt ?? ((i) => i < PLACE_BODY_CAP))(order.indexOf(l)) ? { text: 'x', cut: false } : undefined,
+      metaOf: (l) => meta(l, opts.folders?.has(l) === true ? 'folder' : 'text'),
+      render: (t) => Promise.resolve(t),
+      wanted: () => undefined,
+      lender: null,
+      figures: () => [],
+      viewRoot: null,
+    };
+    const embeds = new PlaceEmbeds();
+    return {
+      host,
+      blocks: () => [...host.querySelectorAll<HTMLElement>('.pkc-place')],
+      sync: () => embeds.sync(host, deps),
+      done: () => {
+        embeds.release();
+        host.remove();
+      },
+    };
+  }
+  const lids = (n: number): string[] => Array.from({ length: n }, (_, i) => `k${String(i)}`);
+  const notes = (host: HTMLElement): number => host.querySelectorAll('[data-pkc-field="place-limit-note"]').length;
+
+  it('🔴 201 枚目にだけ出て、200 枚目には出ない(1 枚の板に 1 行だけ)', () => {
+    const t = mount(lids(PLACE_BODY_CAP + 3));
+    try {
+      t.sync();
+      const b = t.blocks();
+      expect(b.length, '台の前提:枠が足りない').toBe(PLACE_BODY_CAP + 3);
+      const n = noteOf(b[PLACE_BODY_CAP]!);
+      expect(n, '上限を超えた最初の枠(201 枚目)に 1 行が出ない').not.toBeNull();
+      expect(n!.textContent).toBe(NOTE);
+      expect(noteOf(b[PLACE_BODY_CAP - 1]!), '200 枚目(上限の内側)に出ている').toBeNull();
+      expect(noteOf(b[PLACE_BODY_CAP - 2]!), '199 枚目に出ている').toBeNull();
+      expect(noteOf(b[PLACE_BODY_CAP + 1]!), '2 枚目以降の超えた枠にも出ている(1 行だけでよい)').toBeNull();
+      expect(notes(t.host), '1 行を超えている').toBe(1);
+      // 🔑 題名の帯の直後(帯 → 1 行の順。掴む口・持ち手の前へ割り込まない)
+      expect(b[PLACE_BODY_CAP]!.querySelector('[data-pkc-field="place-card"]')!.nextElementSibling).toBe(n);
+      // 🔑 数は定数から引いている(字に上限の数が入っている)
+      expect(n!.textContent).toContain(String(PLACE_BODY_CAP));
+    } finally {
+      t.done();
+    }
+  });
+
+  it('⚠ 対照群: ちょうど 200 枚なら出ない', () => {
+    const t = mount(lids(PLACE_BODY_CAP));
+    try {
+      t.sync();
+      expect(notes(t.host)).toBe(0);
+    } finally {
+      t.done();
+    }
+  });
+
+  it('🔴 数え方は頼む側と同じ:フォルダは数えず、同じノートを 2 枚置いても 1 回', () => {
+    // 199 枚 + フォルダ 5 つ(数えない)+ 200 枚目 + 同じノートの 2 枚目(数えない)→ 出ない
+    const names = [...lids(PLACE_BODY_CAP - 1), 'f0', 'f1', 'f2', 'f3', 'f4', 'k199', 'k0'];
+    const folders = new Set(['f0', 'f1', 'f2', 'f3', 'f4']);
+    const a = mount(names, { folders });
+    try {
+      a.sync();
+      expect(notes(a.host), '数えてはいけない物を数えている').toBe(0);
+    } finally {
+      a.done();
+    }
+    // 対照群: さらに 1 つ別のノートを置くと、その 201 番目の枠に出る(台が壊れて何も出ない回ではない)
+    const b = mount([...names, 'k200'], { folders });
+    try {
+      b.sync();
+      expect(noteOf(b.blocks().at(-1)!), '対照群が鳴っていない').not.toBeNull();
+      expect(notes(b.host)).toBe(1);
+    } finally {
+      b.done();
+    }
+  });
+
+  it('🔴 上限の内側のノートを、板の終わりにもう 1 枚置いても出さない(読み込み中の枠が 201 枚目に化けない)', () => {
+    // 先頭の k0 はまだ読めていない(= 中身が無い)。その k0 をもう 1 枚、200 枚の後ろへ置く
+    const t = mount([...lids(PLACE_BODY_CAP), 'k0'], { withExcerpt: (i) => i !== 0 });
+    try {
+      t.sync();
+      expect(notes(t.host), '上限の内側の lid を 2 枚目として数えて、上限超えの 1 行を出した').toBe(0);
+    } finally {
+      t.done();
+    }
+  });
+
+  it('🔴 中身が出ている枠には出さない(「題名だけ」と言って嘘にしない)── 次の中身の無い枠へ回る', () => {
+    const t = mount(lids(PLACE_BODY_CAP + 2), { withExcerpt: (i) => i <= PLACE_BODY_CAP });
+    try {
+      t.sync();
+      const b = t.blocks();
+      expect(noteOf(b[PLACE_BODY_CAP]!), '中身が出ている 201 枚目に「題名だけ」と出ている').toBeNull();
+      expect(noteOf(b[PLACE_BODY_CAP + 1]!), '中身の無い最初の枠(202 枚目)に出ない').not.toBeNull();
+    } finally {
+      t.done();
+    }
+  });
+
+  it('⚠ 描き直しても 1 行は増えず、枠が減って上限の内側に入れば消える', () => {
+    const t = mount(lids(PLACE_BODY_CAP + 1));
+    try {
+      t.sync();
+      t.sync();
+      expect(notes(t.host), '描き直すたびに増えている').toBe(1);
+      t.blocks()[0]!.remove();
+      t.sync();
+      expect(notes(t.host), '上限の内側に戻ったのに残っている').toBe(0);
+    } finally {
+      t.done();
+    }
+  });
+});

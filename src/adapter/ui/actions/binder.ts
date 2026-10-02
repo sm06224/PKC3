@@ -122,6 +122,7 @@ import {
   openCellAt,
   opensOnSinglePress,
 } from '@adapter/ui/render/cell-input';
+import { resetTableSort } from '@adapter/ui/render/table-sort';
 import {
   resolveAppendAt,
   sectionAt,
@@ -14656,6 +14657,17 @@ export function bindActions(
     const link = t.closest<HTMLElement>('a[href]');
     if (link !== null && el.contains(link)) return;
     el.ownerDocument.getSelection()?.removeAllRanges();
+    /**
+     * 🔴 **見出しの 2 回押しは、欄を開く前に並べ替えを元へ戻す**(#1264 欠陥 5)。
+     * ⚠ 見出しの 1 回押しは並べ替えなので、2 回押しの 1 回目・2 回目で行が 2 回動いてから欄が開く
+     *   (Esc でやめると降順の ▼ が残る)。**編集したいだけ**の user には余計な動きなので、欄を開く
+     *   **前**に none へ戻す(1 回目の ▲▼ も消える)。本文の升(`td`)は並べ替えを持たないので触らない。
+     * 🔑 判定は `opensOnSinglePress` の裏返し(= 見出しの升)1 か所 ── `th` かどうかを別に書かない。
+     */
+    if (!opensOnSinglePress(el)) {
+      const table = el.closest('table');
+      if (table !== null) resetTableSort(table);
+    }
     run('edit-cell', el);
   };
   listen(root, 'dblclick', onDblClick);

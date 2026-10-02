@@ -4185,6 +4185,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-body'] [data-pkc-embedded-heading='3'] {
   font-size: 1.05em;
 }
+/* 板の上限(200 枚)を超えた最初の枠の 1 行(#1264 欠陥 8-b)── 押せない説明の字。地は無彩色 */
+[data-pkc-field='place-limit-note'] {
+  margin: 2px 0;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 0.85em;
+}
 /* PDF の添付(「PDF は元のノートで」)── 絵を出せない物は字で言う */
 [data-pkc-field='place-body-skip'] {
   color: var(--muted);
@@ -4413,6 +4420,20 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 .pkc-md-rendered .pkc-md-block th:last-child > .pkc-cell-edit-btn {
   right: 50px;
+}
+/* 🔴 **右揃えの列(`---:`)の見出しだけ、✎ の空きを字の左へ回す**(#1264 欠陥 6)。
+ *    右へ空けたままだと、見出しの字だけが ✎ のぶん左へずれて**真下の数字と右端が合わない**。
+ *    列の寄せは markdown-it が inline style `text-align:right` で出す(`data-pkc-align` ではない)ので
+ *    その属性で拾う。⚠ 選択子は上の `th:last-child` の規則と**同じ重み** ── 重みが同じなので
+ *    **後ろに置く**ことで勝たせている(前へ動かすと、いちばん右の列だけ元へ戻る)。
+ *    他の列(左揃え・中央)は上の規則のまま。 */
+.pkc-md-rendered .pkc-md-block th[style*='text-align:right']:has(> .pkc-cell-edit-btn) {
+  padding-inline-start: calc(var(--s3) + 24px);
+  padding-inline-end: var(--s3);
+}
+.pkc-md-rendered .pkc-md-block th[style*='text-align:right'] > .pkc-cell-edit-btn {
+  left: var(--s2);
+  right: auto;
 }
 .pkc-md-rendered .pkc-cell-edit-btn::before {
   content: '✎';
