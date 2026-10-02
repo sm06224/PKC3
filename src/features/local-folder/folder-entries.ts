@@ -28,6 +28,17 @@ import { formatDate } from '@features/datetime/datetime-format';
 /** 1 回に出す件数の上限(「さらに表示」で同じだけ足す)。 */
 export const FOLDER_PAGE = 200;
 
+/**
+ * 🔴 **フォルダの行を押したときの返事**(#1264 §1)。⚠ 押せる見た目ではないが、押す user は居る ──
+ * 何も起きずに理由も出ないと「壊れている」に見える。行の `title` と、押した後の状態の行で**同じ字**を使う。
+ * ⚠ 「切る」は帯の押し口の字(`pc-folder.ts` の `band`)と揃える。
+ */
+export const PC_DIRECTORY_NOTE =
+  '中へは入りません。このフォルダの中を見るには、切ってからそのフォルダを選んでください';
+
+/** vCard の行に見える字で添える(ホバーだけにしない)。 */
+export const PC_CONTACT_NOTE = '連絡先として取り込みます';
+
 /** 取り込まれ方。 */
 export type FolderFileRoute = 'note' | 'contact' | 'attachment';
 

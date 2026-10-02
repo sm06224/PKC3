@@ -52,6 +52,13 @@ export function readAttachmentMeta(body: string): {
 }
 
 /**
+ * 🔴 **改名欄が「いまのファイル名」を持つ印**(#1264 §1)。⚠ 欄の字(題名)とファイル名が
+ * 食い違っているかを、**欄を離れたとき / Enter のとき**に判定するために描く。
+ * 判定は `attachmentFileName(題名, いまの名前) !== いまの名前` の 1 本(規則を 2 本持たない)。
+ */
+export const ATTACHMENT_NAME_ATTR = 'data-pkc-attachment-name';
+
+/**
  * 🔴 **添付の改名欄で打った字から、ダウンロードのファイル名を作る**(#1220 穴②、裁定 A)。
  *
  * > user の物語:添付の名前の欄に「請求書」と打った。ノートの題名が「請求書」になり、

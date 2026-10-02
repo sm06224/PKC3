@@ -4711,7 +4711,26 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   openLocalFile = createLocalFileOpener({
     openNote: importLaunchFiles,
-    importContact: (file) => withAssetGate(() => runImport([file])),
+    // 🔴 作れた 1 枚目の lid を返す(同じ file の記憶用)。⚠ **handle は渡さない** ── 渡すと
+    //    連絡先が「元ファイルへ書き戻す」の相手になり、vCard へ本文を書いて壊す
+    importContact: async (file) => {
+      const got: { first: string | null } = { first: null };
+      await withAssetGate(() =>
+        importFiles(
+          dispatcher,
+          {
+            ...importDeps,
+            imported: (lids) => {
+              importUndo.remember(lids);
+              got.first = lids[0] ?? null;
+            },
+          },
+          [file],
+        ).then(() => {}),
+      );
+      return got.first;
+    },
+    openContacts: () => services.setBrowse?.('contacts'),
     wait: () =>
       whenAcceptingUnrefusedImport(dispatcher, () =>
         showStatus('編集を終えると、開いたファイルを取り込みます'),

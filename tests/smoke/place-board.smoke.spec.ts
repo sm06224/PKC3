@@ -554,9 +554,16 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     buffer: PNG_1X1,
   });
   await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  // 🔴 PDF の添付も 1 件(板の「PDF は元のノートで」の帯が押せることを見る ── #1264 §1)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '書類.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
+  });
   const figLid = await lidOfTitle('図のノート');
   const photoLid = await lidOfTitle('写真のノート');
   const attLid = await lidOfTitle('ねこ.png');
+  const pdfLid = await lidOfTitle('書類.pdf');
 
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '板2');
@@ -566,6 +573,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
       `:::format{#f2 .pkc-place entry=${figLid} x=350 y=10}\n:::\n\n` +
       `:::format{#ph .pkc-place entry=${photoLid} x=10 y=270}\n:::\n\n` +
       `:::format{#at .pkc-place entry=${attLid} x=350 y=270}\n:::\n\n` +
+      `:::format{#pd .pkc-place entry=${pdfLid} x=700 y=270}\n:::\n\n` +
       // 🔴 遠い枠(画面から 2,000px 以上下)── 近づくまで中身を作らない(W3-③)
       `:::format{#far .pkc-place entry=${figLid} x=10 y=2600}\n:::\n`,
   );
@@ -682,6 +690,20 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     '戻ってきたら中身を作り直している',
   ).toBe(true);
   await expectImageRendered(page, '#at > [data-pkc-field="place-body"] img[data-pkc-field="place-attachment-image"]');
+
+  // 🔴 ⑥-b PDF の枠の「PDF は元のノートで」も押せる(#1264 §1)── 字だけの行ではなく、帯と同じ口で元のノートを開く
+  const pdfSkip = slotIn('pd').locator('[data-pkc-field="place-body-skip"]');
+  await expect(pdfSkip, 'PDF の枠に「元のノートで」の押し所が無い').toHaveText('PDF は元のノートで');
+  await expect(pdfSkip).toHaveAttribute('data-pkc-action', 'select-entry');
+  await clickReal(page, '#pd [data-pkc-field="place-body-skip"]');
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
+    'PDF の「元のノートで」を押しても開かない',
+  ).toHaveText('書類.pdf');
+
+  // 板へ戻る(次の確かめが板の帯を押すため)
+  await clickReal(page, page.locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: '板2' }).first());
+  await expect(body2.locator('#at > [data-pkc-field="place-card"]')).toHaveText('ねこ.png');
 
   // 🔴 ⑥ 押すと元のノートが開く(帯)── 添付ノート側も今までどおり
   await clickReal(page, '#at > [data-pkc-field="place-card"]');

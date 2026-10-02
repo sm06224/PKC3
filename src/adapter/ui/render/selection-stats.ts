@@ -10,7 +10,8 @@
  *
  * ## 作り(`format-wrap-hint.ts` と同じ形)
  *
- * - 観測は `document` の `selectionchange`。⚠ **編集中だけ**購読し、`watch…` が返す
+ * - 観測は `document` の `selectionchange` と `focusin` / `focusout`(別の入力欄へ焦点が移ったら空にする。
+ *   書式ボタンへ移る間は残す ── #1264 §1)。⚠ **編集中だけ**購読し、`watch…` が返す
  *   unsubscribe を**編集を終えるとき必ず呼ぶ**(`detail.ts` の `disposeLends`)。
  * - **どの欄か**は `formatTarget`(押したときに効く欄)に聞く ── 別の欄を見ると、数えた欄と
  *   書式が効く欄が食い違う(§7)。
@@ -38,6 +39,37 @@ export const SELECTION_STATS_DELAY_MS = 120;
 /** 枠の `data-pkc-field`(描くのは `detail.ts`、書くのはここ)。 */
 export const SELECTION_STATS_FIELD = 'selection-stats';
 
+/** 字を打つ欄ではない `<input>`(ここへ焦点が在っても、選んだ字の数は残してよい)。 */
+const NON_TEXT_INPUT = new Set([
+  'button',
+  'checkbox',
+  'radio',
+  'submit',
+  'reset',
+  'image',
+  'file',
+  'color',
+  'range',
+]);
+
+/**
+ * 🔴 **焦点が「別の入力欄」に移っているか**(#1264 §1)。
+ *
+ * ⚠ 直す前は本文の欄の選びだけを読み、焦点を見なかった ── 本文で字を選んでから題名の欄へ
+ *   移っても「選択: N 文字」が残り、**いま選んでいない字の数**を言い続けた。
+ * ⚠ **書式のボタン(`<button>`)へ移るときは残す**(意図どおり。`format-target.ts` の
+ *   「押したときに効く欄」── 書式を押す間も選びは本文の欄に在る)。
+ * ⚠ 本文の欄そのもの(`ta`)は別の欄ではない。
+ */
+function focusOnOtherField(region: HTMLElement, ta: HTMLTextAreaElement | null): boolean {
+  const active = region.ownerDocument.activeElement;
+  if (!(active instanceof HTMLElement) || active === ta) return false;
+  if (active instanceof HTMLTextAreaElement) return true;
+  if (active instanceof HTMLInputElement) return !NON_TEXT_INPUT.has(active.type);
+  const ce = active.getAttribute('contenteditable');
+  return active.isContentEditable === true || (ce !== null && ce !== 'false');
+}
+
 /**
  * 枠へ**いまの選び**を合わせる。⚠ すでに同じ字なら書かない。
  * @returns 書いたら `true`(test の空振り防止 ── 書かなかったのか枠が無いのか区別する)
@@ -47,7 +79,7 @@ export function syncSelectionStats(region: HTMLElement): boolean {
   if (slot === null) return false;
   const ta = formatTarget(region);
   let text = '';
-  if (ta !== null) {
+  if (ta !== null && !focusOnOtherField(region, ta)) {
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
     // 🔑 caret だけのときは本文(`ta.value`)に触らない
@@ -87,11 +119,17 @@ export function watchSelectionStats(region: HTMLElement): () => void {
   };
 
   doc.addEventListener('selectionchange', schedule);
+  // 🔴 焦点が動いたときも合わせ直す(#1264 §1)── 本文の欄の選びは、焦点が移っても動かない
+  //    (selectionchange が来ない)ので、題名の欄へ移ったときに数が残っていた
+  doc.addEventListener('focusin', schedule);
+  doc.addEventListener('focusout', schedule);
   // composition は bubble する ── 編集の面(region)で受ければ 3 つの欄を全部拾える
   region.addEventListener('compositionstart', onStart, true);
   region.addEventListener('compositionend', onEnd, true);
   return () => {
     doc.removeEventListener('selectionchange', schedule);
+    doc.removeEventListener('focusin', schedule);
+    doc.removeEventListener('focusout', schedule);
     region.removeEventListener('compositionstart', onStart, true);
     region.removeEventListener('compositionend', onEnd, true);
     if (timer !== null) clearTimeout(timer);

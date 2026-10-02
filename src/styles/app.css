@@ -4207,7 +4207,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 /* 入れ子の置いたノート(題名だけの行)と「続きは元のノートで」── どちらも押すと元のノートを開く */
 [data-pkc-field='place-body-link'],
-[data-pkc-field='place-body-more'] {
+[data-pkc-field='place-body-more'],
+[data-pkc-field='place-body-skip'] {
   display: block;
   margin: 2px 0;
   padding: 2px 4px;
@@ -4221,7 +4222,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-body-link']:hover,
 [data-pkc-field='place-body-link']:focus-visible,
 [data-pkc-field='place-body-more']:hover,
-[data-pkc-field='place-body-more']:focus-visible {
+[data-pkc-field='place-body-more']:focus-visible,
+[data-pkc-field='place-body-skip']:hover,
+[data-pkc-field='place-body-skip']:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
@@ -5206,7 +5209,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-size: 12px;
 }
-[data-pkc-field='pc-readonly'] {
+[data-pkc-field='pc-readonly'],
+[data-pkc-field='pc-contact-note'] {
   color: var(--muted);
   font-size: 12px;
 }

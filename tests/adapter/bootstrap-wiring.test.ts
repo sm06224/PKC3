@@ -640,4 +640,29 @@ describe('横に留めた並びの憶え方(#505 段②)', () => {
     // ④ 頼まれた窓も、前に出すだけで終わらず、塗って送る
     expect(body, '頼まれた窓が語を受けていない').toContain('jumpFromRaise?.(find)');
   });
+
+  /**
+   * 🔴 **PC タブの vCard の配線 3 つ**(#1264 §1)。
+   * ⚠ **弱い pin だと自覚して使う** ── `main.ts` は unit から実行されない。3 つとも外しても
+   *   画面は動いて見える(戻せない / 2 回目に別の枚を見る / 2 回目に面へ送らない)。
+   *   実ブラウザの動きは `launched-md.smoke.spec.ts` が見る。
+   * 🔑 **`importContact` の塊だけ**を切って見る(file 全体の `toContain` は別の配線に救われる)。
+   */
+  it('🔴 vCard の取込: 取り消しの記憶 / 最初の 1 枚の lid / 2 回目に連絡先へ送る', () => {
+    const body = codeOnly(MAIN);
+    const at = body.indexOf('importContact: async (file) => {');
+    expect(at, 'importContact の配線が無い').toBeGreaterThan(-1);
+    const end = body.indexOf('return got.first;', at);
+    expect(end, 'importContact の塊を切り出せない').toBeGreaterThan(at);
+    const block = body.slice(at, end);
+    expect(block, '取り込んだ分を「取り込みを戻す」の対象に積んでいない').toContain('importUndo.remember(lids)');
+    expect(block, '憶える lid が最初の 1 枚でない').toContain('lids[0]');
+    expect(block, 'handle を渡すと vCard が書き戻しの相手になる').not.toContain('launched.remember');
+    // 連絡先へ送る口は塊のすぐ後ろ(`wait:` の前)に在る
+    const next = body.indexOf('wait:', end);
+    expect(next, 'openContacts の続きを切り出せない').toBeGreaterThan(end);
+    expect(body.slice(end, next), '2 回目に連絡先のタブへ送っていない').toContain(
+      "openContacts: () => services.setBrowse?.('contacts')",
+    );
+  });
 });

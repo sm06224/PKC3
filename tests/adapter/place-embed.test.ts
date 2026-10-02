@@ -979,6 +979,11 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
       await settle();
       const slot = slotOf(r, 'pp')!;
       expect(slot.textContent).toBe('PDF は元のノートで');
+      // 🔴 字だけの行ではなく、押すと元のノートが開く(#1264 §1 ── 隣の「続きは元のノートで」と同じ口)
+      const skip = slot.querySelector<HTMLElement>('[data-pkc-field="place-body-skip"]')!;
+      expect(skip.tagName, '押せる物が button でない').toBe('BUTTON');
+      expect(skip.getAttribute('data-pkc-action')).toBe('select-entry');
+      expect(skip.getAttribute('data-pkc-entry'), '置いた PDF のノートを指していない').toBe('ap');
       expect(slot.querySelector('img, object, iframe'), 'PDF を絵や埋め込みで出している').toBeNull();
       expect(f.lent, 'PDF まで借りている').not.toContain('pdf1');
       expect(block(r, 'pp').style.height, 'PDF に既定の高さが当たっている').toBe('');

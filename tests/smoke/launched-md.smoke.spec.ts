@@ -174,6 +174,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
       mk('メモ.md', ['# パソコンのメモ\n\n本文です。\n'], 'text/markdown'),
       mk('猫.png', [png], 'image/png'),
       { kind: 'directory', name: '下の階層' },
+      mk('名刺.vcf', ['BEGIN:VCARD\nVERSION:3.0\nFN:山田 太郎\nTEL:090-1234-5678\nEND:VCARD\n'], 'text/vcard'),
     ];
     const dir = {
       kind: 'directory',
@@ -208,7 +209,12 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   // ② 選ぶ → 直下が並ぶ(フォルダ・名前順)。読むだけの許可で選ばせている
   await clickReal(page, '[data-pkc-action="pc-pick-folder"]');
   await expect(pane.locator('[data-pkc-field="pc-folder-name"]')).toHaveText('資料');
-  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveText(['下の階層', 'メモ.md', '猫.png']);
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveText([
+    '下の階層',
+    'メモ.md',
+    '猫.png',
+    '名刺.vcf',
+  ]);
   expect(
     await page.evaluate(() => (window as unknown as { __picked: unknown[] }).__picked),
     '書く許可でフォルダを選ばせている',
@@ -218,6 +224,17 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   await expect(row('メモ.md').locator('[data-pkc-field="pc-readonly"]')).toHaveCount(0);
   await expect(row('猫.png').locator('[data-pkc-field="pc-readonly"]')).toHaveText('書き戻せません');
   await expect(row('下の階層').locator('button')).toHaveCount(0);
+  // 🔴 vCard は連絡先になることが見える字で出る(ホバーだけにしない)/ サブフォルダは押しても無言にならない(#1264 §1)
+  await expect(row('名刺.vcf').locator('[data-pkc-field="pc-contact-note"]')).toHaveText('連絡先として取り込みます');
+  await expect(row('メモ.md').locator('[data-pkc-field="pc-contact-note"]')).toHaveCount(0);
+  await expect(row('下の階層')).toHaveAttribute('title', /中へは入りません/);
+  await clickReal(page, row('下の階層'));
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    'サブフォルダの行を押したのに、理由が出ない(無言)',
+  ).toContainText('中へは入りません');
+  await expect(tab, '押したら場所が動いた').toHaveAttribute('aria-selected', 'true');
+  await expect(pane.locator('[data-pkc-field="pc-folder-name"]')).toHaveText('資料');
 
   // ③ md の行を押す → 取り込まれて中央に開き、元ファイルの名前が出て、書き戻す押し所が在る
   await clickReal(page, row('メモ.md').locator('button'));
@@ -243,14 +260,32 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   await clickReal(page, row('猫.png').locator('button'));
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('すでに取り込んである');
 
+  // ⑥-b 🔴 vCard も同じ(#1264 §1)── 1 回目は連絡先が 1 枚入り、2 回目は増やさず連絡先の一覧へ送って言う
+  await clickReal(page, row('名刺.vcf').locator('button'));
+  const contacts = page.locator('[data-pkc-browse-pane="contacts"] [data-pkc-contact]');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('取込完了');
+  await clickReal(page, row('名刺.vcf').locator('button'));
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '同じ vCard を弾いたことを言っていない(黙って終えている)',
+  ).toContainText('すでに取り込んであります');
+  await expect(
+    page.locator('[data-pkc-action="set-browse"][data-pkc-browse="contacts"]'),
+    '連絡先の面へ送っていない',
+  ).toHaveAttribute('aria-selected', 'true');
+  await expect(contacts, '同じ vCard で連絡先が増えた(または入っていない)').toHaveCount(1);
+  // PC のタブへ戻る(繋ぎは残っている)
+  await clickReal(page, tab);
+  await expect(pane).toBeVisible();
+
   // ⑦ 切る → 繋ぐ前へ戻る
   await clickReal(page, '[data-pkc-action="pc-cut-folder"]');
   await expect(pane.locator('[data-pkc-action="pc-pick-folder"]')).toBeVisible();
   await expect(pane.locator('[data-pkc-pc-row]')).toHaveCount(0);
 
-  // ⑧ 増えたのは md と画像の 2 件だけ(2 回目の押しでは増えていない)
+  // ⑧ 増えたのは md と画像と vCard の 3 件だけ(2 回目の押しでは増えていない)
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="filer"]');
-  await expect.poll(filerRows, { message: '取り込みが 2 件ではない(押し直しで増えた / 入っていない)' }).toBe(base + 2);
+  await expect.poll(filerRows, { message: '取り込みが 3 件ではない(押し直しで増えた / 入っていない)' }).toBe(base + 3);
 
   expect(errors).toEqual([]);
 });

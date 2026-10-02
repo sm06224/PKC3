@@ -27,14 +27,24 @@ function harness(): {
   log: string[];
   present: Set<string>;
   failAttach: { on: boolean };
+  failContact: { on: boolean };
 } {
   const log: string[] = [];
   const present = new Set<string>();
   const failAttach = { on: false };
+  const failContact = { on: false };
   let n = 0;
   const deps: OpenLocalFileDeps = {
     openNote: async (items) => void log.push(`note:${items.map((i) => i.file.name).join(',')}`),
-    importContact: async (f) => void log.push(`contact:${f.name}`),
+    importContact: async (f) => {
+      log.push(`contact:${f.name}`);
+      if (failContact.on) return null;
+      n += 1;
+      const lid = `ct-${n}`;
+      present.add(lid);
+      return lid;
+    },
+    openContacts: () => void log.push('open-contacts'),
     wait: async () => void log.push('wait'),
     isPresent: (lid) => present.has(lid),
     select: (lid) => void log.push(`select:${lid}`),
@@ -48,7 +58,7 @@ function harness(): {
     },
     say: (t) => void log.push(`say:${t}`),
   };
-  return { deps, log, present, failAttach };
+  return { deps, log, present, failAttach, failContact };
 }
 
 const item = (name: string, handle = handleOf(name)): { file: File; handle: LaunchedHandle } => ({
@@ -84,6 +94,62 @@ describe('どの口へ渡すか', () => {
     const { deps, log } = harness();
     await createLocalFileOpener(deps)(item('名刺.vcf'));
     expect(log).toEqual(['contact:名刺.vcf']);
+  });
+});
+
+describe('🔴 同じ vCard を 2 回押しても連絡先は増えない(#1264 §1)', () => {
+  it('2 回目は取り込まず、連絡先の面へ送って理由を言う', async () => {
+    const { deps, log } = harness();
+    const open = createLocalFileOpener(deps);
+    const vcf = item('名刺.vcf');
+    await open(vcf);
+    await open(vcf);
+    expect(log.filter((l) => l.startsWith('contact:')), '2 回取り込んだ').toHaveLength(1);
+    expect(log, '連絡先の面へ送っていない').toContain('open-contacts');
+    expect(log.filter((l) => l.startsWith('say:')).join(), '黙って開き直した').toContain('すでに取り込んであります');
+  });
+
+  it('対照群:別の vCard(同じ名前でも別の file)は別に取り込む / 1 回目は面へ送らない', async () => {
+    const { deps, log } = harness();
+    const open = createLocalFileOpener(deps);
+    await open(item('名刺.vcf', handleOf('名刺.vcf')));
+    expect(log, '1 回目から面へ送っている').not.toContain('open-contacts');
+    await open(item('名刺.vcf', handleOf('名刺.vcf')));
+    expect(log.filter((l) => l.startsWith('contact:'))).toHaveLength(2);
+  });
+
+  it('断られた / 読めなかった回は憶えない ── 次の 1 回で取り込み直せる', async () => {
+    const { deps, log, failContact } = harness();
+    const open = createLocalFileOpener(deps);
+    const vcf = item('名刺.vcf');
+    failContact.on = true;
+    await open(vcf);
+    failContact.on = false;
+    await open(vcf);
+    expect(log.filter((l) => l.startsWith('contact:'))).toHaveLength(2);
+    expect(log).not.toContain('open-contacts');
+  });
+
+  it('ごみ箱へ入れた後に押したら、取り込み直す', async () => {
+    const { deps, log, present } = harness();
+    const open = createLocalFileOpener(deps);
+    const vcf = item('名刺.vcf');
+    await open(vcf);
+    present.clear();
+    await open(vcf);
+    expect(log.filter((l) => l.startsWith('contact:'))).toHaveLength(2);
+  });
+
+  it('🔴 vCard の記憶は添付と同じ入れ物(opener の記憶は 1 つ)── 書き戻しの記憶には入れない', async () => {
+    const mod = codeOnly(readFileSync('src/adapter/ui/actions/open-local-file.ts', 'utf-8'));
+    expect(mod.match(/new LaunchedFiles\(\)/g)).toHaveLength(1);
+    // main の importContact は handle を渡さない(渡すと FILE_LINKED で書き戻しの相手になる)
+    const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
+    const at = main.indexOf('importContact: async');
+    expect(at).toBeGreaterThan(-1);
+    const block = main.slice(at, at + 700);
+    expect(block).not.toContain('FILE_LINKED');
+    expect(block).not.toContain('launched.remember');
   });
 });
 

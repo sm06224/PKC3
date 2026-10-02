@@ -119,7 +119,7 @@ import {
   extractHeadingNumberConfig,
   applyDocumentGlobals,
 } from '@features/markdown/document-globals';
-import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { ATTACHMENT_NAME_ATTR, readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import {
   ATTACHMENT_FOLD_FIELD,
   ATTACHMENT_FOLD_NOTE,
@@ -2931,6 +2931,8 @@ export class DetailRenderer {
       // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートに効く
       markTargetLid(rename, lid);
       rename.value = entryTitle;
+      // 🔴 いまのファイル名(欄を離れたとき、題名と食い違っていれば揃える ── #1264 §1)
+      if (meta.name) rename.setAttribute(ATTACHMENT_NAME_ATTR, meta.name);
       // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
       // 🔴 題名とダウンロードのファイル名が一緒に変わる(拡張子は元のまま足される。#1220 裁定 A)
       rename.title =
