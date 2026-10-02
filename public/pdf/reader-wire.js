@@ -21,6 +21,19 @@
   /** 超過の断り。⚠ 本体の `PDF_QUOTE_TOO_LONG` と同じ字。 */
   var QUOTE_TOO_LONG = '選んだ字が長すぎます(64KB まで)。短く選び直してください';
 
+  /**
+   * 🔴 **本体の返事を待つ上限(ms)**(#275 着地後レビュー)。⚠ 本体は別のタブで、リロード / 閉じ /
+   * 窓の token の忘却のどれでも**返事をしなくなる**(放送は片道 ── 届かなかったと知る手段が無い)。
+   * 上限が無いと「読み込んでいます…」「ノートへ引いています…」のまま**永久に固まる**。
+   * ⚠ 本体側の `QUOTE_SETTLE_TIMEOUT_MS`(8 秒)より**長く**する(本体が先に理由つきで断れる)。
+   */
+  var DOC_TIMEOUT_MS = 8000;
+  var QUOTE_TIMEOUT_MS = 10000;
+  /** 文書が来なかった / 来ても読めなかったときの字。⚠ 窓の中で 3 か所が同じ字を言う。 */
+  var DOC_FAILED = '文書を受け取れませんでした。PKC の画面から、もう一度開いてください';
+  /** ノートへ引く返事が来なかったときの字。 */
+  var QUOTE_NO_REPLY = 'ノートへ引けたか確かめられませんでした。PKC の画面から、もう一度開いてください';
+
   /** 窓 → 本体の封筒を組む(唯一の口)。 */
   function envelope(kind, token, payload) {
     var m = {};
@@ -70,6 +83,10 @@
     TAG: TAG,
     QUOTE_MAX_BYTES: QUOTE_MAX_BYTES,
     QUOTE_TOO_LONG: QUOTE_TOO_LONG,
+    DOC_TIMEOUT_MS: DOC_TIMEOUT_MS,
+    QUOTE_TIMEOUT_MS: QUOTE_TIMEOUT_MS,
+    DOC_FAILED: DOC_FAILED,
+    QUOTE_NO_REPLY: QUOTE_NO_REPLY,
     envelope: envelope,
     parse: parse,
     utf8Length: utf8Length,

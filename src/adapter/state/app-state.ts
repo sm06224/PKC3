@@ -3690,6 +3690,23 @@ export type DomainEvent =
     }
   | {
       /**
+       * 🔴 **追記の結末**(#275 段① 着地後レビュー)。⚠ `REQUEST_APPEND` の**対**である。
+       *
+       * 追記は錠を掛けた時点では**まだ disk に着いていない**(結末は `ENTRY_APPENDED` /
+       * `APPEND_FAILED` の ack)。⚠ 「書けた」と user に言いたい呼び側(PDF の窓の「ノートへ引く」)は、
+       * 錠が掛かったことではなく**この結末**を見る。
+       * ⚠ **世代(`gen`)の合わない ack からは出さない**(強制解放の後着 ── 画面を動かさない ack は
+       *   結末としても数えない。呼び側の時間切れが受ける)。
+       */
+      type: 'APPEND_SETTLED';
+      lid: string;
+      gen: number;
+      ok: boolean;
+      /** 失敗の理由(`ok` のとき `null`)。 */
+      error: string | null;
+    }
+  | {
+      /**
        * 🔴 **章の欄の保存要求**(#1044 段2 3巡目の修理、S1)。⚠ **本文は載せない**
        *   ── effect が disk から読み直し、`heading` + `original` で章を探し直して
        *   `text` へ差し替える(`REQUEST_APPEND` と同じ「画面の古い本文を基底に
@@ -6911,7 +6928,20 @@ function reduceCore(
       if (action.gen !== state.lockGen) return { state, events: [] };
       const meta = state.entryMetas.get(action.lid);
       // 再 boot 済み(entry が消えた)でも**ロックは必ず解く**
-      if (!meta) return { state: { ...state, writeLock: null }, events: [] };
+      if (!meta) {
+        return {
+          state: { ...state, writeLock: null },
+          events: [
+            {
+              type: 'APPEND_SETTLED',
+              lid: action.lid,
+              gen: action.gen,
+              ok: false,
+              error: 'ノートの状態を確かめられませんでした',
+            },
+          ],
+        };
+      }
       const entryMetas = new Map(state.entryMetas).set(action.lid, {
         ...meta,
         status: action.status,
@@ -6977,7 +7007,9 @@ function reduceCore(
            */
           lastAppend: nextLastAppend(state.lastAppend, action),
         },
-        events: [],
+        events: [
+          { type: 'APPEND_SETTLED', lid: action.lid, gen: action.gen, ok: true, error: null },
+        ],
       };
     }
     /**
@@ -7024,7 +7056,12 @@ function reduceCore(
       // 巻き戻しの危険があるのは**本文を採る**ときだけで、解放は常に安全
       if (action.gen !== state.lockGen) return { state, events: [] };
       // 失敗は非致命。理由は effect が OP_FAILED で別に出す(phase は落とさない)
-      return { state: { ...state, writeLock: null, error: action.error }, events: [] };
+      return {
+        state: { ...state, writeLock: null, error: action.error },
+        events: [
+          { type: 'APPEND_SETTLED', lid: action.lid, gen: action.gen, ok: false, error: action.error },
+        ],
+      };
     }
     /**
      * 🔴 **面から予定を動かす**(user 指示 2026-08-23「なんで双方向にする発想が

@@ -34,11 +34,25 @@ export async function openInPdfReader(
     deps.note(`「${args.name}」はもう開いています`);
     return true;
   }
-  const lent = await deps.lend(args.assetKey);
-  if (!lent) {
-    deps.fail(`添付が見つかりません: ${args.name}`);
+  /**
+   * 🔴 **貸している最中の 2 回目の押しも、窓を 2 枚にしない**(#275 着地後レビュー)。
+   * ⚠ 上の `openTokenFor` は**開いた窓**しか見ない ── 下の `await deps.lend` の間はまだ窓が無く、
+   *   続けて押した 2 回目も `null` を見て 2 枚目を借りて開いていた。貸す**前**に印を付ける。
+   */
+  if (!host.markLending(args.assetKey)) {
+    deps.note(`「${args.name}」はもう開いています`);
     return true;
   }
-  host.open({ assetKey: args.assetKey, name: args.name, lid: args.lid, lent });
-  return true;
+  try {
+    const lent = await deps.lend(args.assetKey);
+    if (!lent) {
+      deps.fail(`添付が見つかりません: ${args.name}`);
+      return true;
+    }
+    host.open({ assetKey: args.assetKey, name: args.name, lid: args.lid, lent });
+    return true;
+  } finally {
+    // 開けた回は `open` が「生きている」窓として控えるので、印はここで外してよい
+    host.unmarkLending(args.assetKey);
+  }
 }

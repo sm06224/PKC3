@@ -69,14 +69,24 @@ interface Broadcaster {
 }
 
 export interface PdfReaderDeps {
-  /** 引く(本体のノートへ書く)。⚠ 判断も書き込みも呼び側(`main.ts`)が持つ。 */
-  readonly onQuote: (session: PdfSession, text: string, page: number) => PdfQuoteResult;
+  /**
+   * 引く(本体のノートへ書く)。⚠ 判断も書き込みも呼び側(`main.ts`)が持つ。
+   * 🔴 **Promise** ── 「引けた」は disk に着いてから言う(錠を掛けた時点で返さない)。
+   */
+  readonly onQuote: (session: PdfSession, text: string, page: number) => Promise<PdfQuoteResult>;
   /** 窓が読めず、内蔵の表示へ退避した(断り文は出さない。状態の行へ 1 行)。 */
   readonly onFellBack: (session: PdfSession) => void;
   /** 窓が文書を取れなかった(貸した URL が既に無い等)。 */
   readonly onLoadFailed: (session: PdfSession, reason: string) => void;
   /** 窓が `HELLO_TIMEOUT_MS` のうちに現れなかった(ポップアップが止められた等)。 */
   readonly onOpenFailed: (session: PdfSession) => void;
+  /**
+   * 🔴 **名乗りが遅れて届いた**(`HELLO_TIMEOUT_MS` で「開かなかった」と読んで捨てた token から)。
+   * ⚠ `noopener` では「止められた」と「遅いだけ」を区別できないので、先の断り
+   * (`onOpenFailed`)は**誤った理由**だったことになる ── 呼び側が言い直す。
+   * ⚠ 貸した URL は捨てた後なので、窓へは渡せない(窓は自分で「もう一度」と言う)。
+   */
+  readonly onLateHello: (session: PdfSession) => void;
   readonly makeChannel?: (name: string) => Broadcaster;
   /** 窓を開く(既定 `window.open`)。⚠ `noopener` は features に入っている。 */
   readonly openWindow?: (url: string, features: string) => void;
@@ -85,6 +95,15 @@ export interface PdfReaderDeps {
   readonly setTimer?: (fn: () => void, ms: number) => unknown;
   readonly clearTimer?: (h: unknown) => void;
   readonly newToken?: () => string;
+}
+
+/** 捨てた token の控えの数(新しい順に残す)。⚠ 窓の F5 / 遅い名乗りだけが引く ── 数は小さくてよい。 */
+const GONE_KEEP = 16;
+
+interface Gone {
+  readonly session: PdfSession;
+  /** 「開かなかった」と読んで捨てた回(まだ言い直していない)なら `true`。 */
+  openFailed: boolean;
 }
 
 interface Live {
@@ -98,6 +117,10 @@ interface Live {
 export class PdfReaderHost {
   private readonly ch: Broadcaster;
   private readonly lives = new Map<string, Live>();
+  /** 捨てた(時間切れ / 閉じた)token の控え。⚠ 窓が名乗り直したとき、黙らず答えるために引く。 */
+  private readonly gone = new Map<string, Gone>();
+  /** 貸している最中の添付(`lend` の await の間に 2 回目の押しが 2 枚目を開かないための印)。 */
+  private readonly lending = new Set<string>();
   private readonly openWindow: (url: string, features: string) => void;
   private readonly baseUrl: string;
   private readonly now: () => number;
@@ -145,6 +168,20 @@ export class PdfReaderHost {
     return null;
   }
 
+  /**
+   * 貸し始める印を付ける。@returns 付けられたら `true` / 既に貸している最中なら `false`
+   * (呼び側は「もう開いています」で断る)。⚠ 付けたら**必ず** `unmarkLending` する。
+   */
+  markLending(assetKey: string): boolean {
+    if (this.lending.has(assetKey)) return false;
+    this.lending.add(assetKey);
+    return true;
+  }
+
+  unmarkLending(assetKey: string): void {
+    this.lending.delete(assetKey);
+  }
+
   /** 開いている窓へ「前に出して」と頼む(⚠ ブラウザが断ることがある)。 */
   focus(token: string): void {
     this.send('focus-request', token, {});
@@ -177,6 +214,7 @@ export class PdfReaderHost {
       if (this.lives.get(token) !== live) return;
       this.release(live);
       this.lives.delete(token);
+      this.remember(token, { session, openFailed: true });
       this.deps.onOpenFailed(session);
     }, HELLO_TIMEOUT_MS);
     let url: string;
@@ -199,6 +237,8 @@ export class PdfReaderHost {
       this.release(l);
     }
     this.lives.clear();
+    this.gone.clear();
+    this.lending.clear();
     this.ch.onmessage = null;
     this.ch.close();
   }
@@ -214,6 +254,16 @@ export class PdfReaderHost {
     }
   }
 
+  private remember(token: string, g: Gone): void {
+    this.gone.delete(token);
+    this.gone.set(token, g);
+    while (this.gone.size > GONE_KEEP) {
+      const oldest = this.gone.keys().next();
+      if (oldest.done) break;
+      this.gone.delete(oldest.value);
+    }
+  }
+
   private send(kind: string, token: string, payload: unknown): void {
     this.ch.postMessage({ [PDF_TAG]: kind, token, payload });
   }
@@ -226,7 +276,22 @@ export class PdfReaderHost {
     if (typeof kind !== 'string' || typeof token !== 'string') return;
     // ⚠ 自分が開いた窓だけ受ける(他のタブの窓の合図は、そのタブが受ける)
     const live = this.lives.get(token);
-    if (live === undefined) return;
+    if (live === undefined) {
+      /**
+       * 🔴 **捨てた token が名乗り直した**(窓の F5 / 5 秒より遅い名乗り)。⚠ 直す前は**黙って捨て**て
+       * いたので、窓は「読み込んでいます…」のまま固まった。貸した URL は返した後なので渡せない ──
+       * **空で答えて窓に言わせる**(窓は「PKC の画面から、もう一度開いてください」と出す)。
+       */
+      const g = this.gone.get(token);
+      if (g !== undefined && kind === 'hello') {
+        this.send('doc', token, { url: null, name: g.session.name });
+        if (g.openFailed) {
+          g.openFailed = false;
+          this.deps.onLateHello(g.session);
+        }
+      }
+      return;
+    }
     const payload =
       typeof m['payload'] === 'object' && m['payload'] !== null
         ? (m['payload'] as Record<string, unknown>)
@@ -271,14 +336,25 @@ export class PdfReaderHost {
           this.send('quote-result', token, { ok: false, message: PDF_QUOTE_TOO_LONG });
           return;
         }
-        const r = this.deps.onQuote(live.session, text, page);
-        this.send('quote-result', token, { ok: r.ok, message: r.message });
+        // 🔴 結末を待って返す(失敗しても窓へ理由を返す ── 窓を待たせ続けない)
+        const reply = (r: PdfQuoteResult): void => {
+          try {
+            this.send('quote-result', token, { ok: r.ok, message: r.message });
+          } catch {
+            // 待っている間に放送を閉じた(本体の入れ替わり)── 返す先が無いだけ
+          }
+        };
+        void this.deps.onQuote(live.session, text, page).then(reply, () =>
+          reply({ ok: false, message: 'ノートへ引けませんでした。もう一度押してください' }),
+        );
         return;
       }
       case 'closed':
         if (live.helloTimer !== null) this.clearTimer(live.helloTimer);
         this.release(live);
         this.lives.delete(token);
+        // 窓の F5 は同じ token で名乗り直す ── 控えておき、黙らず答える
+        this.remember(token, { session: live.session, openFailed: false });
         return;
       default:
         return;

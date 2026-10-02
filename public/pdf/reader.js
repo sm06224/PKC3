@@ -62,6 +62,13 @@ const inflight = new Map();
 let wanted = new Set();
 let current = 1;
 
+/** 本体の返事を待つ時計(`wire.DOC_TIMEOUT_MS` / `wire.QUOTE_TIMEOUT_MS`)。 */
+let docTimer = null;
+let quoteTimer = null;
+const clearTimer = (h) => {
+  if (h !== null) clearTimeout(h);
+};
+
 const cache = new PageCache(MAX_LIVE, (url) => URL.revokeObjectURL(url));
 
 // ───────── 文書を受け取る
@@ -69,9 +76,15 @@ const cache = new PageCache(MAX_LIVE, (url) => URL.revokeObjectURL(url));
 ch.onmessage = (ev) => {
   const m = wire.parse(ev.data, token);
   if (m === null) return;
-  if (m.kind === 'doc') void onDoc(m.payload);
+  if (m.kind === 'doc') {
+    clearTimer(docTimer);
+    docTimer = null;
+    void onDoc(m.payload);
+  }
   else if (m.kind === 'focus-request') window.focus();
   else if (m.kind === 'quote-result') {
+    clearTimer(quoteTimer);
+    quoteTimer = null;
     setStatus(typeof m.payload.message === 'string' ? m.payload.message : '');
   }
 };
@@ -82,7 +95,7 @@ async function onDoc(payload) {
   if (typeof payload.name === 'string' && payload.name !== '') document.title = payload.name;
   if (typeof payload.url !== 'string') {
     state('failed');
-    msgEl.textContent = '文書を受け取れませんでした。PKC の画面から、もう一度開いてください';
+    msgEl.textContent = wire.DOC_FAILED;
     send('load-failed', { reason: 'no-url' });
     return;
   }
@@ -92,7 +105,7 @@ async function onDoc(payload) {
     blob = await res.blob();
   } catch (e) {
     state('failed');
-    msgEl.textContent = '文書を受け取れませんでした。PKC の画面から、もう一度開いてください';
+    msgEl.textContent = wire.DOC_FAILED;
     send('load-failed', { reason: String(e) });
     return;
   }
@@ -459,12 +472,25 @@ quoteBtn.addEventListener('click', () => {
     return;
   }
   setStatus('ノートへ引いています…');
+  // 🔴 返事が来なければ、「引いています…」のまま固まらず断る(本体のリロード / 閉じ)
+  clearTimer(quoteTimer);
+  quoteTimer = setTimeout(() => {
+    quoteTimer = null;
+    setStatus(wire.QUOTE_NO_REPLY);
+  }, wire.QUOTE_TIMEOUT_MS);
   send('quote', { text: lastSel.text, page: lastSel.page });
 });
 
 // ───────── 生死
 
 send('hello', {});
+// 🔴 本体が文書を渡してこなければ、「読み込んでいます…」のまま固まらず断る(窓の F5 / 本体の不在)
+docTimer = setTimeout(() => {
+  docTimer = null;
+  if (started) return;
+  state('failed');
+  msgEl.textContent = wire.DOC_FAILED;
+}, wire.DOC_TIMEOUT_MS);
 setInterval(() => send('alive', {}), HEARTBEAT_MS);
 window.addEventListener('pagehide', () => {
   send('closed', {});
