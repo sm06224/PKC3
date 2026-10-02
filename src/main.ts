@@ -191,7 +191,7 @@ import {
   isOfficeLaunchFile,
   localOpenNotice,
 } from '@features/office/office-launch';
-import { OfficeWindow } from '@adapter/platform/office/office-window';
+import { OFFICE_DECLINED_NOTICE, OfficeWindow } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
@@ -2297,6 +2297,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (ev.type === 'saved') void officeSaveBack.receive(ev.key);
     else if (ev.type === 'save-failed') officeSaveBack.reportWindowFailure(ev.reason);
     else if (ev.type === 'closed') void officeSaveBack.drainAll();
+    else if (ev.type === 'reload-declined') {
+      // 🔴 **窓の中に保存していない変更が在り、user が「やめる」を選んだ**(#1228 穴②)。
+      //    ⚠ 本体は「開いている Office のウィンドウに表示します」と先に言っているので、**取り消す一言**を出す
+      //    (言わないと、押したのに何も起きない)。⚠ 字は `office-window.ts` の定数 ── 手書きしない
+      showStatus(OFFICE_DECLINED_NOTICE);
+    }
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
       //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**

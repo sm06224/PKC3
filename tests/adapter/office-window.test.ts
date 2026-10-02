@@ -22,6 +22,7 @@ import {
   ALIVE_TTL_MS,
   OFFICE_ADOPTED,
   OFFICE_CHANNEL,
+  OFFICE_DECLINED_NOTICE,
   OfficeWindow,
   RESEND_GRACE_MS,
   type OfficeWindowEvent,
@@ -550,5 +551,176 @@ describe('OfficeWindow', () => {
     expect(h.ch.closed).toBe(1);
     h.ch.deliver('painted', { ms: 1 });
     expect(h.seen).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **窓の中に保存していない変更が在るとき、別の文書を開く前に確認する**(#1228 穴②)。
+ *
+ * 未保存かどうかを見るのは**窓の中の 1 か所**(`host.html` → `office-unsaved.js`)。本体はその結果
+ * `reload-declined`(「やめた」)だけを受ける ── 本体は LO の中を知らない。
+ * 🔑 期待値は**本物が組んだ封筒**から読む(手で綴りを書かない)。
+ */
+describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
+  const docs = (h: Harness) => h.ch.sent.filter((x) => x.type === 'document');
+  /** a を送り済みの、生きている窓。 */
+  function windowShowing(a = 'a.docx') {
+    const h = harness();
+    h.ow.open({ name: a, expectDocument: true });
+    h.ow.provideDocument(a, new Uint8Array([1, 1]), 'lid-A');
+    h.ch.deliver('ready-for-document');
+    h.ch.deliver('alive');
+    h.ch.sent.length = 0;      // 以後の放送だけを見る
+    return h;
+  }
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('🔴 「開く」(= 窓から何も返らず作り直される): 次の文書が届く。対照群', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.deliver('ready-for-document');     // 窓が作り直されて求めてきた
+    expect(docs(h).length).toBe(1);
+    expect(docs(h)[0]!.payload.name).toBe('b.docx');
+    expect(docs(h)[0]!.payload.token).toBe('lid-B');
+  });
+
+  it('🔴 対照群: 未保存が無いときの本体の往復は、今まで通り 2 通だけ(確認のための通信を足していない)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    expect(h.ch.sent.map((x) => x.type)).toEqual(['focus-request', 'reload-request']);
+  });
+
+  it('🔴 「やめる」: 渡すつもりだった文書は送られず、元の文書が(作り直しの求めに)送り直される', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.deliver('reload-declined');
+    expect(h.seen.some((e) => e.type === 'reload-declined'), '購読者へ届く(状態の行を出す口)').toBe(true);
+    h.ch.deliver('ready-for-document');     // 停止の帯の「読み込み直す」など、あとで作り直された
+    expect(docs(h).length).toBe(1);
+    expect(docs(h)[0]!.payload.name, 'b ではなく元の a').toBe('a.docx');
+    expect(docs(h)[0]!.payload.token).toBe('lid-A');
+    expect(docs(h)[0]!.payload.bytes).toEqual(new Uint8Array([1, 1]));
+  });
+
+  it('🔴 「やめた」が文書(bytes の読み込み)より先に届いても、後から来た文書を受け取らない', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ch.deliver('reload-declined');                       // 添付の bytes はまだ読んでいる最中
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name), 'b は送られない').toEqual(['a.docx']);
+  });
+
+  it('捨てる印は 1 回きり: 「やめた」の後に頼んだ次の文書は受け取る', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ch.deliver('reload-declined');
+    h.ow.provideDocument('b.docx', new Uint8Array([2]));       // 捨てる
+    h.ow.open({ name: 'c.docx', expectDocument: true });       // 新しい依頼 ── 印は引き直される
+    h.ow.provideDocument('c.docx', new Uint8Array([3]), 'lid-C');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name)).toEqual(['c.docx']);
+  });
+
+  it('🔴 「やめた」が先に届き、文書が結局来なかった(読めなかった)あとでも、次の依頼の文書は受け取る', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ch.deliver('reload-declined');                       // b は bytes を読めず、provideDocument は呼ばれない
+    h.ow.open({ name: 'c.docx', expectDocument: true });   // 次の依頼 ── 前の「捨てる印」を持ち越さない
+    h.ow.provideDocument('c.docx', new Uint8Array([3]), 'lid-C');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name), '捨てる印が残って c まで捨てた').toEqual(['c.docx']);
+  });
+
+  it('🔴 続けて 2 件頼んだ後の「やめた」でも、元の文書へ戻る(どちらの新しい文書も送らない)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]));
+    h.ow.open({ name: 'c.docx', expectDocument: true });
+    h.ow.provideDocument('c.docx', new Uint8Array([3]));
+    h.ch.deliver('reload-declined');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).map((d) => d.payload.name)).toEqual(['a.docx']);
+  });
+
+  it('refresh を持つ元の文書は、「やめた」の後の送り直しでも「いま」の中身を引き直す', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    let current = new Uint8Array([5]);
+    h.ow.open({ name: 'a.docx', expectDocument: true });
+    h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-A', [], async () => ({ bytes: current }));
+    h.ch.deliver('ready-for-document');
+    h.ch.deliver('alive');
+    h.ch.sent.length = 0;
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]));
+    h.ch.deliver('reload-declined');
+    current = new Uint8Array([6]);
+    h.ch.deliver('ready-for-document');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(docs(h).length).toBe(1);
+    expect(docs(h)[0]!.payload.name).toBe('a.docx');
+    expect(docs(h)[0]!.payload.bytes).toEqual(new Uint8Array([6]));
+  });
+
+  it('「開く」が選ばれたら、元の文書の控えは新しい文書に置き換わる(「やめた」が来ても元へは戻らない)', () => {
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ow.provideDocument('b.docx', new Uint8Array([2]), 'lid-B');
+    h.ch.deliver('ready-for-document');                  // 開いた = b を送った
+    h.ch.deliver('reload-declined');                     // 遅れて来た(窓の食い違い)── 戻さない
+    h.ch.sent.length = 0;
+    h.ch.deliver('ready-for-document');
+    expect(docs(h)[0]!.payload.name, 'b を送り直す').toBe('b.docx');
+  });
+
+  it('頼んだ後に窓が閉じて猶予が過ぎたら、取り除いておいた元の文書の控えも手放す', () => {
+    vi.useFakeTimers();
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ch.deliver('closed');
+    expect(vi.getTimerCount(), '控え(元の文書)があるので猶予が掛かる').toBe(1);
+    vi.advanceTimersByTime(RESEND_GRACE_MS + 1);
+    h.ch.deliver('reload-declined');
+    h.ch.deliver('ready-for-document');
+    expect(docs(h).length, '閉じた窓の元の文書を、後から現れた窓へ送らない').toBe(0);
+  });
+
+  it('dispose すると、取り除いておいた控えの猶予 timer も残さない', () => {
+    vi.useFakeTimers();
+    const h = windowShowing();
+    h.ow.open({ name: 'b.docx', expectDocument: true });
+    h.ch.deliver('closed');
+    expect(vi.getTimerCount()).toBe(1);
+    h.ow.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('🔴 窓の側(素の HTML)が、本体と同じ綴りで「やめた」を返し、字が仕様どおり', () => {
+    // 本体の字(状態の行)は仕様の字そのもの。⚠ 定数から期待値を作らず、literal で pin する
+    expect(OFFICE_DECLINED_NOTICE).toBe('Office のウィンドウに保存していない変更があるため開きませんでした');
+    // ⚠ 実行行だけ(解説コメントに満たされない)
+    const host = readFileSync('public/office/host.html', 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|<!--)/.test(l))
+      .join('\n');
+    expect(host.length, '抜き出せていない').toBeGreaterThan(1000);
+    expect(host, '窓が「やめた」を放送していない').toContain("say('reload-declined')");
+    expect(host, '窓が確認の字を出していない').toContain('保存していない変更があります。別の文書を開くと消えます。開きますか?');
+    expect(host).toContain('id="unsaved-open">開く</button>');
+    expect(host).toContain('id="unsaved-cancel">やめる</button>');
+    expect(host, '判断の script を読んでいない').toContain('<script src="office-unsaved.js"></script>');
+    // 🔴 別の文書を頼む放送は、**確認の門を通ってから**替える ── 直に `location.replace` しない
+    const branch = host.slice(host.indexOf("d.pkc3Office === 'reload-request'"), host.indexOf('var unsavedEl'));
+    expect(branch.length, '分岐を抜き出せていない').toBeGreaterThan(50);
+    expect(branch).toContain('replaceDocument(');
+    expect(branch, '確認なしで替えている').not.toContain('location.replace');
+    // 本体側: 受けたら状態の行へ出す配線(main.ts は原文 pin)
+    const main = readFileSync('src/main.ts', 'utf-8');
+    const i = main.indexOf("ev.type === 'reload-declined'");
+    expect(i, '本体が「やめた」を受けていない').toBeGreaterThan(0);
+    expect(main.slice(i, i + 700)).toContain('showStatus(OFFICE_DECLINED_NOTICE)');
   });
 });

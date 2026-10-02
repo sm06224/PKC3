@@ -85,6 +85,22 @@
   #nosave[hidden] { display:none }
   #nosave button { font:inherit; border:1px solid #fff8; background:transparent;
     color:#fff; padding:2px 10px; border-radius:6px; cursor:pointer }
+  /* 別の文書を開く前の確認(#1228 穴②)。
+     🔴 **native の `confirm()` を使わない** ── あれは**このページの event loop ごと止める**。
+     LO の main はこのページの main thread(`PROXY_TO_PTHREAD = 0`)なので、止まっている間は
+     生存通知が途切れ、本体が「閉じた」と判断して **2 つ目の窓を開く**(1 窓 約 750MB)。
+     自前の箱なら LO も生存通知も動いたまま、答えを待てる。
+     ⚠ 版面の上に被せる(`#screen` の大きさは変えない ── 器が変わると Qt に resize が飛ぶ)。
+     地は無彩色、色は付けない(押し所は 2 つとも同じ重さ ── 既定は「やめる」の焦点)。 */
+  #unsaved { position:fixed; inset:34px 0 0 0; z-index:30; display:grid; place-content:center;
+    background:#0006 }
+  #unsaved[hidden] { display:none }
+  #unsaved .box { background:#fff; color:#111; border:1px solid #8886; border-radius:8px;
+    padding:18px 22px; max-width:46ch; line-height:1.8; font-size:14px }
+  @media (prefers-color-scheme: dark) { #unsaved .box { background:#222; color:#e8e8e8 } }
+  #unsaved .row { display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
+  #unsaved button { font:inherit; padding:6px 14px; border-radius:6px;
+    border:1px solid #8886; background:transparent; color:inherit; cursor:pointer }
 </style>
 </head>
 <body>
@@ -93,6 +109,15 @@
 <div id="warn" hidden></div>
 <div id="restart" hidden></div>
 <div id="nosave" hidden></div>
+<div id="unsaved" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-text" hidden>
+  <div class="box">
+    <div id="unsaved-text">保存していない変更があります。別の文書を開くと消えます。開きますか?</div>
+    <div class="row">
+      <button type="button" id="unsaved-open">開く</button>
+      <button type="button" id="unsaved-cancel">やめる</button>
+    </div>
+  </div>
+</div>
 <div id="screen" hidden></div>
 <!--
   🔴 **判断は素の JS へ出す**(#205 段 A)。この HTML は bundle されないので、
@@ -106,6 +131,7 @@
 <script src="office-macros.js"></script>
 <script src="office-format.js"></script>
 <script src="office-images.js"></script>
+<script src="office-unsaved.js"></script>
 <script>
 (function () {
   'use strict';
@@ -171,9 +197,54 @@
     if (d.pkc3Office === 'reload-request') {
       var q = d.payload && d.payload.name
         ? '?name=' + encodeURIComponent(d.payload.name) + '&await-doc=1' : '?await-doc=1';
-      location.replace('host.html' + q);
+      replaceDocument('host.html' + q);
     }
   };
+
+  // ── 🔴 別の文書へ替える前に、保存していない変更を確かめる(#1228 穴②)──────────
+  //
+  // `location.replace` は LO ごと作り直すので、打った分は**確認なしで消える**
+  // (`beforeunload` は「PKC へ渡している最中の保存」しか見ない)。
+  // 🔑 **聞くのはこの 1 か所** ── 本体は文書を送るだけで、保存していないかは見ない
+  //    (本体は LO の中を知らない。返ってくる「やめた」だけを見る)。
+  // ⚠ 判断(Desktop の全文書を LO に聞く)は `office-unsaved.js`。ここは出し入れだけ。
+  //
+  // ⚠ **聞けなかった / 停止している** ときは、今まで通り**そのまま替える**
+  //    (停止の帯の「読み込み直す」の動線を、確認で塞がない)。
+  var unsavedEl = document.getElementById('unsaved');
+  var unsavedOpenBtn = document.getElementById('unsaved-open');
+  var unsavedCancelBtn = document.getElementById('unsaved-cancel');
+  var focusBeforeUnsaved = null;
+  var unsavedGate = window.PKC3OfficeUnsaved && window.PKC3OfficeUnsaved.createGate({
+    getLo: function () { return window.__lo; },
+    isDead: function () { return dead; },
+    replace: function (url) { location.replace(url); },
+    show: function () {
+      focusBeforeUnsaved = document.activeElement;
+      unsavedEl.hidden = false;
+      // ⚠ 既定の焦点は「やめる」(うっかり Enter で消さない)
+      try { unsavedCancelBtn.focus(); } catch (e) { /* 無視 */ }
+    },
+    hide: function () {
+      unsavedEl.hidden = true;
+      // 🔑 **閉じたら焦点を返す**(置き換えの作法。自前の箱は native と違い焦点を戻さない)
+      var f = focusBeforeUnsaved; focusBeforeUnsaved = null;
+      try { if (f && document.contains(f) && typeof f.focus === 'function') f.focus(); } catch (e) { /* 戻せない */ }
+    },
+    // 🔴 **本体へ「替えなかった」を返す**(同じ放送の路)── 本体は渡すつもりだった文書を手放し、
+    //    元の文書の控えを戻して、状態の行で user へ言う
+    declined: function () { say('reload-declined'); },
+  });
+  function replaceDocument(url) {
+    // ⚠ script が読めていない版でも、今まで通り替える(確認の門が無いだけで窓を塞がない)
+    if (!unsavedGate) { location.replace(url); return; }
+    unsavedGate.request(url);
+  }
+  unsavedOpenBtn.addEventListener('click', function () { if (unsavedGate) unsavedGate.accept(); });
+  unsavedCancelBtn.addEventListener('click', function () { if (unsavedGate) unsavedGate.cancel(); });
+  unsavedEl.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') { ev.preventDefault(); unsavedCancelBtn.click(); }
+  });
 
   // ── 異常終了を**見える形にする**(#117)──────────────────────────────
   //
@@ -195,6 +266,8 @@
     //    止めないと、死んだ窓で 500ms の見張りが回り続ける
     if (flushSaves) { try { flushSaves(); } catch (e) { /* 助けられなかった */ } }
     stopSaveWatch();
+    // 確認が出ていたら畳む(死んだ窓に「開きますか」を残さない)。⚠ 答えは返さない ── 停止の帯の側が出口
+    if (unsavedGate) unsavedGate.abort();
     // 死んでいることを**見せる**(生きている版面と区別が付かないのが問題だった)
     screenEl.style.filter = 'grayscale(1) brightness(.45)';
     screenEl.style.pointerEvents = 'none';

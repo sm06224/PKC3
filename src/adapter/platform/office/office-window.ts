@@ -51,6 +51,16 @@ export const OFFICE_HOST_PATH = 'office/host.html';
  */
 export const OFFICE_ADOPTED = 'adopted';
 
+/**
+ * 🔴 **窓が「やめる」を選んだときに本体の状態の行へ出す一言**(#1228 穴②)。
+ * ⚠ 本体は文書を渡す前に「開いている Office のウィンドウに表示します」と言っているので、
+ * これは**その取り消し**である ── user には「押したのに何も起きない」ではなく理由が見える。
+ * 🔑 窓の中の確認の字(「保存していない変更があります。…」)は `public/office/host.html` に在り、
+ * `tests/adapter/office-window.test.ts` が原文で突き合わせる。
+ */
+export const OFFICE_DECLINED_NOTICE =
+  'Office のウィンドウに保存していない変更があるため開きませんでした';
+
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 /**
@@ -95,6 +105,13 @@ export type OfficeWindowEvent =
    */
   | { readonly type: 'degraded'; readonly reason: string }
   | { readonly type: 'ready-for-document' }
+  /**
+   * 🔴 **窓が別の文書へ替えるのをやめた**(#1228 穴②)。窓の中に**保存していない変更**があり、
+   * user が確認で「やめる」を選んだ。⚠ 未保存かどうかを見るのは**窓の中の 1 か所**(`host.html`)で、
+   * 本体はこの結果だけを受ける(本体は LO の中を知らない)。
+   * 受けたとき、`OfficeWindow` は渡すつもりだった文書を手放し、元の文書の控えを戻す。
+   */
+  | { readonly type: 'reload-declined' }
   | { readonly type: 'painted'; readonly ms: number }
   /**
    * 🔴 **保存された**(#205)。⚠ **bytes は載っていない ── 鍵だけ**である。
@@ -162,6 +179,15 @@ export type OpenOutcome =
   /** 既に開いていそうなので、開かずに放送で頼んだ。 */
   | { readonly kind: 'already-open' };
 
+/** 窓へ送った文書の控え(送り直し用)。⚠ `bytes` は `refresh` が無いときだけ持つ。 */
+interface SentDocument {
+  name: string;
+  token: string;
+  bytes: Uint8Array | null;
+  images: readonly OfficeImagePayload[];
+  refresh: OfficeDocumentRefresh | null;
+}
+
 interface Broadcaster {
   postMessage(data: unknown): void;
   close(): void;
@@ -203,13 +229,21 @@ export class OfficeWindow {
    * ⚠ `refresh` を持つ文書は **bytes / images を抱えない**(読み直すときに引く)。
    * ⚠ 窓が閉じて `RESEND_GRACE_MS` 戻らなければ捨てる / 新しい文書を頼む `open()` でも捨てる。
    */
-  private lastSent: {
-    name: string;
-    token: string;
-    bytes: Uint8Array | null;
-    images: readonly OfficeImagePayload[];
-    refresh: OfficeDocumentRefresh | null;
-  } | null = null;
+  private lastSent: SentDocument | null = null;
+  /**
+   * 🔴 **別の文書を頼んだときに、取り除いておいた元の文書の控え**(#1228 穴②)。
+   * 窓は確認で「やめる」を選びうる ── そのとき元の文書(窓に出たまま)の控えが無いと、
+   * 後で窓が作り直されたとき(停止の帯の「読み込み直す」)に**文書を送り直せない**。
+   * ⚠ 窓が「開く」を選べば `sendDocument` が新しい控えで置き換えるので、ここは手放す。
+   */
+  private heldSent: SentDocument | null = null;
+  /**
+   * `open({ expectDocument })` で宣言した文書が、まだ `provideDocument` に届いていない間。
+   * ⚠ 「やめた」がその**前に**届いたとき、後から来る文書を**受け取らず捨てる**ために要る
+   * (添付の bytes は非同期に読むので、確認の答えのほうが先に着くことがある)。
+   */
+  private awaitingProvide = false;
+  private discardNextProvide = false;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   /** 窓が先に「ちょうだい」と言ってきたが、まだ bytes が無い状態。 */
   private askedForDoc = false;
@@ -256,10 +290,19 @@ export class OfficeWindow {
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
     const wantsDoc = opts.bytes !== undefined || opts.expectDocument === true;
-    // 🔴 別の文書が来る(or 窓を新しく作る)ので、前の文書の控えは捨てる。⚠ 残すと
+    // 🔴 「やめた」が来る前の文書は受け取らない、の印は新しい依頼ごとに引き直す(#1228 穴②)
+    this.discardNextProvide = false;
+    this.awaitingProvide = opts.bytes === undefined && opts.expectDocument === true;
+    // 🔴 別の文書が来る(or 窓を新しく作る)ので、前の文書の控えは**送り直しの対象から外す**。⚠ 残すと
     //    「次の文書がまだ届いていない間に窓が ready と言った」とき**前の文書を送る**。
     //    ⚠ 生きている窓へ `open({})`(Start Center だけ)と頼むときは窓の中身が変わらないので残す
-    if (wantsDoc || !this.isProbablyOpen()) this.dropLastSent();
+    if (wantsDoc || !this.isProbablyOpen()) {
+      // 🔑 ただし**生きている窓へ別の文書を頼む**ときは、窓が確認で「やめる」を選びうる(#1228 穴②)
+      //    ── 窓には元の文書が出たままなので、控えは取っておく(2 件続けて頼んでも元の 1 件を保つ)
+      const keep = wantsDoc && this.isProbablyOpen() ? (this.lastSent ?? this.heldSent) : null;
+      this.dropLastSent();
+      this.heldSent = keep;
+    }
 
     if (this.isProbablyOpen()) {
       // ⚠ 2 つ立てると常駐が倍になる(1 窓 約 750MB 実測)。開かずに頼む
@@ -299,6 +342,12 @@ export class OfficeWindow {
   ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
+    this.awaitingProvide = false;
+    // 🔴 窓が「やめた」と言った**後**に届いた文書は受け取らない(窓はもう替わらない)
+    if (this.discardNextProvide) {
+      this.discardNextProvide = false;
+      return;
+    }
     this.pendingDoc = { name, bytes, token, images, refresh };
     if (this.askedForDoc) this.sendDocument();
   }
@@ -336,6 +385,7 @@ export class OfficeWindow {
 
   dispose(): void {
     this.dropLastSent();
+    this.heldSent = null;
     this.listeners.clear();
     this.ch.onmessage = null;
     this.ch.close();
@@ -375,6 +425,7 @@ export class OfficeWindow {
       // ⚠ 読み直しでも `closed` は来る(上の `RESEND_GRACE_MS`)── すぐには捨てず、戻らなければ捨てる
       this.armGrace();
     }
+    if (ev.type === 'reload-declined') this.onDeclined();
     if (ev.type === 'ready-for-document') {
       // ⚠ **bytes がまだ無いこともある**(添付を IDB から読んでいる最中)。
       //    その時は覚えておき、届いたら送る ── 取りこぼすと窓が 15 秒待って諦める
@@ -395,6 +446,8 @@ export class OfficeWindow {
     }
     this.pendingDoc = null;
     this.askedForDoc = false;
+    // 🔑 窓が替わって新しい文書を求めた ── 元の文書の控えはもう要らない(新しい控えで置き換わる)
+    this.heldSent = null;
     // ⚠ 窓が戻ってきた ── 閉じる猶予は解く(次に閉じたとき、また掛ける)
     this.clearGrace();
     // ⚠ 控えは `refresh` が無いときだけ bytes を持つ(在るなら読み直すので抱えない)
@@ -428,6 +481,23 @@ export class OfficeWindow {
     if (last.bytes) this.post(last.name, last.bytes, last.token, last.images);
   }
 
+  /**
+   * 🔴 **窓が「替えない」と言った**(#1228 穴②)。窓には元の文書が出たままである。
+   * - 渡すつもりだった文書(まだ送っていない分)は手放す
+   * - まだ `provideDocument` に届いていないなら、届いたとき受け取らない
+   * - 取り除いておいた元の文書の控えを戻す(あとで窓が作り直されても元の文書を送り直せる)
+   */
+  private onDeclined(): void {
+    this.pendingDoc = null;
+    this.askedForDoc = false;
+    if (this.awaitingProvide) this.discardNextProvide = true;
+    this.awaitingProvide = false;
+    if (this.heldSent) {
+      this.lastSent = this.heldSent;
+      this.heldSent = null;
+    }
+  }
+
   /** 文書の封筒を組む口(**ここ 1 か所** ── §7)。 */
   private post(
     name: string,
@@ -454,10 +524,11 @@ export class OfficeWindow {
 
   private armGrace(): void {
     this.clearGrace();
-    if (!this.lastSent) return;
+    if (!this.lastSent && !this.heldSent) return;
     this.graceTimer = setTimeout(() => {
       this.graceTimer = null;
       this.lastSent = null;
+      this.heldSent = null;
     }, RESEND_GRACE_MS);
   }
 
@@ -489,6 +560,8 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
       return { type: 'degraded', reason: typeof p.reason === 'string' ? p.reason : '' };
     case 'ready-for-document':
       return { type: 'ready-for-document' };
+    case 'reload-declined':
+      return { type: 'reload-declined' };
     case 'painted':
       return { type: 'painted', ms: typeof p.ms === 'number' ? p.ms : 0 };
     case 'not-installed':
