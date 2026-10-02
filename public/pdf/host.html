@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF — PKC3</title>
+<link rel="icon" href="data:,">
+<!--
+  PDF を **PKC の画面で読む別窓**(#275 段①。裁定: 設定で選んだ人だけ。既定はブラウザ内蔵の表示)。
+
+  ## この file は bundle しない
+  `public/` に置いた素の HTML である(Office の `public/office/host.html` と同じ作り)。
+  ⚠ 窓の URL を固定したい(本体の hash 付き chunk 名に引きずられない)/ pdf.js の実体は
+  `pdf/lib/` に**ビルド時に写される**(`build/pdf-assets-plugin.ts`。precache には載らない ──
+  押したときだけ取りに行く)。
+  ⚠ したがってここに書く JS は素の DOM API だけ(TypeScript も bundler の import も無し)。
+
+  ## 窓の中の約束
+  - **窓の生死 = 計算の生死**。解析は pdf.js の worker が窓の中で行い、窓を閉じれば worker も消える。
+  - **頁は PNG の `<img>` 1 枚**(描いたら焼く)。見えている頁の前後 2 頁だけ持ち、外れたら即 revoke。
+  - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
+  - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
+
+  textLayer の規則は pdf.js の `web/pdf_viewer.css`(Apache-2.0)から必要な分だけ写した。
+-->
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ddd;
+    font: 13px system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; }
+  #bar { position: fixed; inset: 0 0 auto 0; height: 38px; display: flex; gap: 6px; align-items: center;
+    padding: 0 10px; background: #000c; z-index: 10; white-space: nowrap; overflow: hidden }
+  #bar .sp { flex: 1 }
+  #bar button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
+    border-radius: 3px; padding: 3px 9px }
+  #bar button:disabled { opacity: .45; cursor: default }
+  #bar input { font: inherit; background: #222; color: #eee; border: 1px solid #555; border-radius: 3px;
+    padding: 3px 6px }
+  #pageno { width: 3.4em; text-align: right }
+  #query { width: 11em }
+  /* 結果の一言は窓の下に出す(帯に置くと字が切れて「何頁へ引いたか」が読めない) */
+  #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
+    max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee }
+  #status:empty { display: none }
+  #scroller { position: fixed; inset: 38px 0 0 0; overflow: auto }
+  #pages { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0 40px }
+  .page { position: relative; background: #fff; box-shadow: 0 0 0 1px #0006; flex: none }
+  .page img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
+    pointer-events: none }
+  #msg { position: fixed; inset: 38px 0 0 0; display: grid; place-content: center; text-align: center;
+    padding: 24px; line-height: 1.8; opacity: .85 }
+  #msg[hidden] { display: none }
+  object { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #1b1b1b }
+
+  /* pdf.js の textLayer(`web/pdf_viewer.css` から必要な分)。字は透明で、選べるだけにする */
+  .textLayer { color-scheme: only light; position: absolute; text-align: initial; inset: 0;
+    overflow: clip; opacity: 1; line-height: 1; letter-spacing: normal; word-spacing: normal;
+    forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 0;
+    --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+    --min-font-size-inv: calc(1 / var(--min-font-size)); --scale-round-x: 1px; --scale-round-y: 1px }
+  .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text;
+    transform-origin: 0% 0%; user-select: text; -webkit-user-select: text }
+  .textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) {
+    z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+    --scale-x: 1; --rotate: 0deg;
+    transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)) }
+  .textLayer .markedContent { display: contents }
+  .textLayer ::selection { background: rgba(80, 140, 255, .4) }
+  .textLayer span.hit { background: rgba(255, 210, 0, .45) }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="zoom-out" type="button" title="小さくする">−</button>
+  <button id="zoom-in" type="button" title="大きくする">＋</button>
+  <button id="zoom-fit" type="button" title="窓の幅に合わせる">幅に合わせる</button>
+  <button id="prev" type="button" title="前の頁へ">前の頁</button>
+  <input id="pageno" type="text" inputmode="numeric" aria-label="頁">
+  <span id="pagecount"></span>
+  <button id="next" type="button" title="次の頁へ">次の頁</button>
+  <input id="query" type="search" placeholder="文書内を検索" aria-label="文書内を検索">
+  <button id="hit-prev" type="button" title="前の一致へ">前の一致</button>
+  <button id="hit-next" type="button" title="次の一致へ">次の一致</button>
+  <span id="hits"></span>
+  <span class="sp"></span>
+  <button id="quote" type="button" disabled title="選んだ字を、ノートの末尾へ頁番号つきで引きます">ノートへ引く</button>
+</div>
+<div id="scroller"><div id="pages"></div></div>
+<div id="status" role="status"></div>
+<div id="msg">読み込んでいます…</div>
+<script src="./reader-wire.js"></script>
+<script src="./page-cache.js"></script>
+<script type="module" src="./reader.js"></script>
+</body>
+</html>
