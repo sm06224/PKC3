@@ -1208,6 +1208,42 @@ describe('#400 段④ ── 雛形を置く順番', () => {
   }
 
   /**
+   * 🔴 **夜は雛形を焼いて、同じ検品に通す**(#1157)。
+   *
+   * ⚠ 雛形の cap(`PORTABLE_CAP_KB`)が鳴る場所は、release の zip を展開する
+   *   `pages.yml` の product 側**しか無かった** ── 通常増加で cap に触れたことに
+   *   気づくのが本番配布の日で、`/dev/` の更新まで巻き添えで止まった
+   *   (v3.2.0 run 33256868235 / v3.3.0 run 36519233180)。
+   * 🔑 上の 2 経路と**向きが逆**である ── 夜は「検品の**前**」に焼く(夜の dist は
+   *   誰も展開しないので、検品の後に置く理由が無く、前に置かないと検品が見ない)。
+   *   ただし `npm run build` より**後**(前に焼くと precache 一覧に載り、
+   *   検品が「precache に雛形が載っている」で落とす)。
+   * ⚠ **見るのは実行する行** ── 注釈に `build:portable` も書いてあるので、
+   *   コメントごと数えると step を消しても緑になる(§1 の 5 度目)。
+   */
+  it('🔴 nightly.yml: 本体の build の後・検品の前に雛形を焼いて置く(#1157)', () => {
+    const code = readFileSync(join(DIR, 'nightly.yml'), 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join('\n');
+    const build = code.search(/VITE_PKC_KIND=product npm run build$/m);
+    const portable = code.indexOf('VITE_PKC_KIND=product npm run build:portable');
+    const copy = code.indexOf('cp dist-portable/pkc3.html dist/portable-template.html');
+    const check = code.indexOf('check-dist.mjs product');
+    // 空振り防止 ── 4 つとも実在する(消えたら -1 で落ちる)
+    expect(build, 'product の build が無い').toBeGreaterThanOrEqual(0);
+    expect(portable, '🔴 夜に雛形を焼く step が無い(cap が鳴るのが配る日に戻る)').toBeGreaterThanOrEqual(0);
+    expect(copy, '雛形を dist へ置く行が無い(焼いても検品が見ない)').toBeGreaterThanOrEqual(0);
+    expect(check, 'product の検品が無い').toBeGreaterThanOrEqual(0);
+    expect(portable, '🔴 本体の build より前に焼いている(precache に載る)').toBeGreaterThan(build);
+    expect(copy, '焼く前に置こうとしている').toBeGreaterThan(portable);
+    expect(check, '🔴 検品の後に置いている(夜の検品が雛形を 1 度も見ない)').toBeGreaterThan(copy);
+    // ⚠ product の検品が 1 本であること ── 2 本に割ると #648 💭 の節(`toHaveLength(1)`)が
+    //    落ちるので、雛形の検品は**同じ 1 行**で済ませる(別 step を足さない)
+    expect(code.split('check-dist.mjs product').length - 1).toBe(1);
+  });
+
+  /**
    * 🔴 **雛形が焼けなくても、アプリ本体の配信は止めない**(#1014)。
    *
    * ⚠ 2026-09-18 にここで踏んだ:`build/portable/fold.mjs` が上流(vite 8.3.0 が
