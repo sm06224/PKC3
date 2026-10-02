@@ -47,6 +47,14 @@ def rd(p): return io.open(p, encoding='utf-8').read()
 def wr(p, s): io.open(p, 'w', encoding='utf-8').write(s)
 # 1. notice-log.ts
 p = 'src/features/notice/notice-log.ts'; s = rd(p)
+# 0b. 枠(NOTICE_SHOW_MAX)を超えるなら、書く前に止める ── 2026-10-02 に 51 件目を書いてしまい、
+#     announce / help-pane の 4 件が落ちて初めて気づいた(「dropped title None」は合図にならない)。
+cap = int(re.search(r'export const NOTICE_SHOW_MAX = (\d+);', s).group(1))
+ids = re.findall(r"^    id: '([^']+)',$", s, re.M)
+if not DROP_ID and len(ids) + 1 > cap:
+    print('✗ 登記表が %d 件で枠(%d)に達している(1 file も書いていない)。' % (len(ids), cap))
+    print('  いちばん古い entry を 5 番目の引数で落とす: %s' % ids[-1])
+    sys.exit(1)
 entry = "  {\n    id: '%s',\n    title: '%s',\n    items: [\n%s    ],\n  },\n" % (NEW_ID, TITLE, ''.join("      '%s',\n" % i for i in ITEMS))
 head = 'export const NOTICES: readonly Notice[] = [\n'
 assert s.count(head) == 1
