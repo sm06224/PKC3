@@ -13,6 +13,7 @@ import { BROWSE_ICONS } from '@adapter/ui/render/icons';
 import { buildShell } from '@adapter/ui/render/shell';
 import { initialState } from '@adapter/state/app-state';
 import { Dispatcher } from '@adapter/state/dispatcher';
+import { PC_CONTACT_NOTE, PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import { bindActions } from '@adapter/ui/actions/binder';
 import {
   LocalFolder,
@@ -149,6 +150,42 @@ describe('繋ぐ前 / 繋いだ後', () => {
     expect(btn.getAttribute('data-pkc-pc-index')).toBe('1');
   });
 
+  it('🔴 vCard の行には「連絡先として取り込みます」が見える字で出る(ホバーだけにしない)/ 他の種類には出ない', async () => {
+    const { pane, folder } = setup(async () => dir([file('名刺.vcf'), file('メモ.md'), file('猫.png')]));
+    await folder.pick();
+    await settle();
+    const rowOf = (n: string): HTMLElement =>
+      [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')].find(
+        (r) => q(r, '[data-pkc-field="pc-name"]')?.textContent === n,
+      )!;
+    const note = q(rowOf('名刺.vcf'), '[data-pkc-field="pc-contact-note"]');
+    expect(note?.textContent, 'vCard の行に字が出ていない').toBe(PC_CONTACT_NOTE);
+    expect(PC_CONTACT_NOTE).toBe('連絡先として取り込みます');
+    expect(q(rowOf('メモ.md'), '[data-pkc-field="pc-contact-note"]')).toBeNull();
+    expect(q(rowOf('猫.png'), '[data-pkc-field="pc-contact-note"]')).toBeNull();
+  });
+
+  it('🔴 サブフォルダの行は、ホバーに理由と行き先が在り、押すと同じ字が状態の行へ出る(場所は動かない)', async () => {
+    const { pane, folder } = setup(async () => dir([{ kind: 'directory', name: '下' }, file('a.md')]));
+    await folder.pick();
+    await settle();
+    const row = pane.querySelector<HTMLElement>('[data-pkc-pc-row="0"]')!;
+    expect(row.title).toBe(PC_DIRECTORY_NOTE);
+    expect(PC_DIRECTORY_NOTE).toContain('中へは入りません');
+    expect(PC_DIRECTORY_NOTE, '次にすること(切ってから選ぶ)が無い').toContain('切ってから');
+    expect(row.getAttribute('data-pkc-action')).toBe('pc-dir-note');
+    // 押す(binder を通す)
+    const d = new Dispatcher();
+    const off = bindActions(document.body, d, { localFolder: folder });
+    const before = folder.view().folderName;
+    row.click();
+    off();
+    expect(d.getState().notice, '押しても無言').toBe(PC_DIRECTORY_NOTE);
+    expect(folder.view().folderName, '場所が動いた').toBe(before);
+    // 対照群:ファイルの行には付かない
+    expect(pane.querySelector('[data-pkc-pc-row="1"]')!.hasAttribute('data-pkc-action')).toBe(false);
+  });
+
   it('🔴 200 件で切れて「さらに表示」── 押すと足される', async () => {
     const many = Array.from({ length: 230 }, (_, i) => file(`f${String(i).padStart(3, '0')}.md`));
     const { pane, folder } = setup(async () => dir(many));
@@ -223,7 +260,7 @@ describe('繋ぐ前 / 繋いだ後', () => {
 });
 
 describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () => {
-  it('どの状態でも、押し口は 選ぶ / 切る / さらに表示 / 開く の 4 種だけ', async () => {
+  it('どの状態でも、押し口は 選ぶ / 切る / さらに表示 / 開く / フォルダの行の返事 の 5 種だけ', async () => {
     const seen = new Set<string>();
     const many = Array.from({ length: 230 }, (_, i) => file(`f${i}.md`));
     const states: Array<() => Promise<HTMLElement>> = [
@@ -240,9 +277,15 @@ describe('🔴 消す・改名・移動のボタンを置かない(裁定)', () 
       const pane = await make();
       for (const el of pane.querySelectorAll('[data-pkc-action]')) seen.add(el.getAttribute('data-pkc-action')!);
     }
-    expect([...seen].sort()).toEqual(['pc-cut-folder', 'pc-more', 'pc-open-file', 'pc-pick-folder']);
-    // ⚠ 空振り防止 ── 4 種とも実際に出ている
-    expect(seen.size).toBe(4);
+    expect([...seen].sort()).toEqual([
+      'pc-cut-folder',
+      'pc-dir-note',
+      'pc-more',
+      'pc-open-file',
+      'pc-pick-folder',
+    ]);
+    // ⚠ 空振り防止 ── 5 種とも実際に出ている(消す・改名・移動は 1 つも無い)
+    expect(seen.size).toBe(5);
   });
 });
 

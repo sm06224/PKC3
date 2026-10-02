@@ -63,7 +63,7 @@ interface Persist {
 
 function setup(
   initial: string,
-  o: { archetype?: EntryMeta['archetype']; conflict?: boolean } = {},
+  o: { archetype?: EntryMeta['archetype']; conflict?: boolean; title?: string; busy?: boolean } = {},
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -73,7 +73,7 @@ function setup(
     d.dispatch({ type: 'UPDATE_OPEN_BODY', body: b }),
   );
   d.onState((s) => detail.render(s));
-  bindActions(root, d);
+  bindActions(root, d, { busy: () => o.busy === true });
   const disk = { body: initial };
   const renames: { lid: string; title: string }[] = [];
   const persists: Persist[] = [];
@@ -98,7 +98,7 @@ function setup(
   d.dispatch({
     type: 'SYS_BOOTED',
     cid: 'c1',
-    metas: [meta('a', o.archetype ?? 'attachment', 'scan.pdf')],
+    metas: [meta('a', o.archetype ?? 'attachment', o.title ?? 'scan.pdf')],
     relations: [],
   });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
@@ -163,6 +163,115 @@ describe('題名と一緒にファイル名が変わる', () => {
     await typeName(r, '請求書.txt');
     expect(r.persists[0]!.entry.body).toContain('attachment.name: 請求書.txt.pdf\n');
     expect(r.renames[0]!.title).toBe('請求書.txt');
+  });
+});
+
+/** 撃たれた SET_ATTACHMENT_NAME を数える(効果層は同じ本文を書かないので、**撃ったか**はここでしか見えない)。 */
+function spySetName(r: ReturnType<typeof setup>): { count: () => number } {
+  let n = 0;
+  const orig = r.d.dispatch.bind(r.d);
+  r.d.dispatch = ((a: Parameters<typeof orig>[0]) => {
+    if (a.type === 'SET_ATTACHMENT_NAME') n += 1;
+    return orig(a);
+  }) as typeof r.d.dispatch;
+  return { count: () => n };
+}
+
+/** 欄を開いて(打たずに)確定する。`how` = 欄を離れる(blur)/ Enter。 */
+async function commitUntouched(r: ReturnType<typeof setup>, how: 'blur' | 'enter'): Promise<HTMLInputElement> {
+  r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+  await tick(20);
+  const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]');
+  expect(input, '改名欄が出ていない(前提が崩れている)').not.toBeNull();
+  if (how === 'blur') input!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  else input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await tick(30);
+  return input!;
+}
+
+describe('🔴 字が同じでも、欄を確定すればファイル名が題名に揃う(#1264 §1)', () => {
+  // 前提:一覧の F2 で題名だけ「請求書」に変えた後(ファイル名は scan.pdf のまま)
+  it.each(['blur', 'enter'] as const)('食い違っていれば揃える(%s)── 題名は変えず、ファイル名の 1 行だけ', async (how) => {
+    const r = setup(ATT, { title: '請求書' });
+    await commitUntouched(r, how);
+    expect(r.renames, '題名は動かしていない').toEqual([]);
+    expect(r.persists, 'ファイル名の書込が 1 回でない').toHaveLength(1);
+    expect(r.persists[0]!.entry.body).toBe(
+      ATT.replace('attachment.name: scan.pdf', 'attachment.name: 請求書.pdf'),
+    );
+  });
+
+  it.each(['blur', 'enter'] as const)('🔴 対照群:すでに揃っていれば何も書かない(%s)', async (how) => {
+    // 題名 `scan` / ファイル名 `scan.pdf` は揃っている(拡張子を除いた部分が同じ)
+    const r = setup(ATT, { title: 'scan' });
+    const spy = spySetName(r);
+    await commitUntouched(r, how);
+    expect(spy.count(), '揃っているのにファイル名の書換を撃った').toBe(0);
+    expect(r.persists, '揃っているのに書いた(欄を離れるたびに書いている)').toHaveLength(0);
+    expect(r.renames).toEqual([]);
+  });
+
+  it('🔴 冪等:続けて何度離れても書くのは 1 回(描き直しが来る前でも)', async () => {
+    const r = setup(ATT, { title: '請求書' });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(20);
+    const spy = spySetName(r);
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!;
+    // ⚠ 描き直しが来る前に続けて撃つ(Enter → 欄を離れる → もう一度 Enter)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(spy.count(), '描き直しが来る前に離れるたび撃っている').toBe(1);
+    await tick(40);
+    expect(r.persists).toHaveLength(1);
+    // 描き直しの後でも、もう一度離れて 1 回のまま
+    r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!.dispatchEvent(
+      new FocusEvent('focusout', { bubbles: true }),
+    );
+    await tick(30);
+    expect(r.persists).toHaveLength(1);
+  });
+
+  it('🔴 揃っている欄に、字が変わらない change が来ても書かない(門は受け口の側にも在る)', async () => {
+    const r = setup(ATT, { title: 'scan' });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(20);
+    const spy = spySetName(r);
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick(30);
+    expect(spy.count(), '揃っているのにファイル名の書換を撃った').toBe(0);
+    expect(r.persists, '揃っているのに書いた').toHaveLength(0);
+    expect(r.renames).toEqual([]);
+  });
+
+  it('🔴 字を打ち替えた回は、change と blur が続いても 1 回だけ(二重に書かない)', async () => {
+    const r = setup(ATT);
+    await typeName(r, '請求書');
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!;
+    input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    await tick(30);
+    expect(r.persists).toHaveLength(1);
+    expect(r.renames).toEqual([{ lid: 'a', title: '請求書' }]);
+  });
+
+  it('🔴 取り込み・書き出しの最中でも、揃っている欄を離れただけでは「実行中です」と言わない(食い違うときだけ断る)', async () => {
+    // 揃っている ── 門を通さない(通すと、何も書かないのに断りの知らせが出る)
+    const aligned = setup(ATT, { title: 'scan', busy: true });
+    await commitUntouched(aligned, 'blur');
+    expect(aligned.d.getState().error ?? '', '揃っているのに断りが出た').toBe('');
+    // 対照群:食い違っていれば、他の書込と同じ門で断る(書込は走らない)
+    const differs = setup(ATT, { title: '請求書', busy: true });
+    await commitUntouched(differs, 'blur');
+    expect(differs.d.getState().error ?? '').toContain('実行中');
+    expect(differs.persists).toHaveLength(0);
+  });
+
+  it('ファイルを持たないタイル(いまのファイル名が無い)は、離れても何も書かない', async () => {
+    const tile = '---\nattachment.launcher_url: https://example.com\n---\n';
+    const r = setup(tile, { title: 'リンク集' });
+    await commitUntouched(r, 'blur');
+    expect(r.persists).toHaveLength(0);
   });
 });
 

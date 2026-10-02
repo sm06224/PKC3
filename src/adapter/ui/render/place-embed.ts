@@ -368,7 +368,7 @@ export class PlaceEmbeds {
       const slot = ensureSlot(block, () => `place-${String(++this.nsSeq)}-`);
       if (slot.getAttribute(KEY_ATTR) === key) continue;
       if (ex.att !== undefined) {
-        this.fillAttachment(slot, key, ex.att, meta.title, deps);
+        this.fillAttachment(slot, key, ex.att, meta.title, lid, deps);
         continue;
       }
       const cached = this.cache.get(lid);
@@ -433,6 +433,7 @@ export class PlaceEmbeds {
     key: string,
     att: NonNullable<PlaceExcerpt['att']>,
     title: string,
+    lid: string,
     deps: PlaceEmbedDeps,
   ): void {
     const doc = slot.ownerDocument;
@@ -447,8 +448,13 @@ export class PlaceEmbeds {
       slot.append(img);
       this.hydrateImages(slot, deps);
     } else {
-      const note = doc.createElement('div');
+      // 🔴 字だけの行にしない(#1264 §1)── 隣の「続きは元のノートで」と同じ押し所(`select-entry`)。
+      //    直す前は `<div>` で、「元のノートで」と言うのに**押しても何も起きなかった**
+      const note = doc.createElement('button');
+      note.type = 'button';
       note.setAttribute('data-pkc-field', 'place-body-skip');
+      note.setAttribute('data-pkc-action', 'select-entry');
+      note.setAttribute('data-pkc-entry', lid);
       note.textContent = PLACE_PDF_NOTE;
       slot.append(note);
     }

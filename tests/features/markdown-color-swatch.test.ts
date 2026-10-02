@@ -125,7 +125,7 @@ describe('見本は字を持たない(#1224。CLAUDE.md §10)', () => {
     const found = swatches(on(`\`${code}\`\n`));
     expect(found).toHaveLength(1);
     expect(found[0]!.getAttribute('title')).toBe(
-      'この書き方(大文字・3 桁・8 桁)は綴りを変えないので、押しても直せません',
+      'この書き方(大文字・3 桁・8 桁)は綴りを変えないので、押しても直せません。6 桁の小文字(例 #3b82f6)に書き直すと、押して選べます',
     );
     expect(found[0]!.getAttribute('aria-hidden')).toBe('true');
     expect(found[0]!.hasAttribute('data-pkc-action'), '押せない物が押せる形になった').toBe(false);

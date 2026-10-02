@@ -134,6 +134,87 @@ describe('出る / 消える(#1215)', () => {
   });
 });
 
+describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', () => {
+  /** 題名の欄(別の入力欄)と書式のボタンを足した面。 */
+  function withNeighbors() {
+    const s = surface();
+    const title = document.createElement('input');
+    title.setAttribute('data-pkc-field', 'editor-title');
+    const bold = document.createElement('button');
+    bold.setAttribute('data-pkc-action', 'format-bold');
+    s.region.append(title, bold);
+    return { ...s, title, bold };
+  }
+  /** 焦点を動かして focusin を撃ち、止まるまで時間を進める(happy-dom は focus() で撃つ)。 */
+  const focusTo = (el: HTMLElement): void => {
+    el.focus();
+    flush();
+  };
+
+  it('本文で選ぶ → 題名の欄へ移る → 空 / 本文へ戻る → また出る / 書式ボタンへ移る間は残る(対照群)', () => {
+    const { region, slot, ta, title, bold } = withNeighbors();
+    const un = watchSelectionStats(region);
+    focusTo(ta);
+    select(ta, 0, 3);
+    expect(slot.textContent, '前提:選んだら出ている').toBe('選択: 3 文字(1 行)');
+    focusTo(title);
+    expect(slot.textContent, '題名の欄へ移ったのに、選んでいない字の数が残っている').toBe('');
+    focusTo(ta);
+    expect(slot.textContent, '本文へ戻ったのに出ない(選びは残っている)').toBe('選択: 3 文字(1 行)');
+    focusTo(bold);
+    expect(slot.textContent, '書式ボタンへ移ったら消えた(意図は「残す」)').toBe('選択: 3 文字(1 行)');
+    un();
+  });
+
+  it('別の textarea(追記欄)・contenteditable へ移っても空になる', () => {
+    const { region, slot, ta } = withNeighbors();
+    const un = watchSelectionStats(region);
+    select(ta, 0, 3);
+    const other = document.createElement('textarea');
+    region.append(other);
+    focusTo(other);
+    expect(slot.textContent, '別の textarea').toBe('');
+    focusTo(ta);
+    expect(slot.textContent).toBe('選択: 3 文字(1 行)');
+    const ce = document.createElement('div');
+    ce.setAttribute('contenteditable', 'true');
+    ce.tabIndex = 0;
+    region.append(ce);
+    focusTo(ce);
+    expect(slot.textContent, 'contenteditable').toBe('');
+    un();
+  });
+
+  it('どこにも焦点が無くなったとき(題名の欄から外れて何も掴まない)も合わせ直す ── 書式ボタンへ移るのと同じ向きで、また出る', () => {
+    const { region, slot, ta, title } = withNeighbors();
+    const un = watchSelectionStats(region);
+    focusTo(ta);
+    select(ta, 0, 3);
+    focusTo(title);
+    expect(slot.textContent, '前提:題名の欄の間は空').toBe('');
+    title.blur();
+    flush();
+    expect(slot.textContent, '焦点が外れたのに空のまま(focusout を見ていない)').toBe('選択: 3 文字(1 行)');
+    un();
+  });
+
+  it('編集を終えたら焦点の購読も外れる(外した後に焦点が動いても枠を書かない)', () => {
+    const { region, slot, ta, title } = withNeighbors();
+    const un = watchSelectionStats(region);
+    focusTo(ta);
+    select(ta, 0, 3);
+    focusTo(title);
+    expect(slot.textContent, '前提:題名の欄の間は空').toBe('');
+    un();
+    title.blur();
+    flush();
+    expect(slot.textContent, 'focusout の購読が残っている').toBe('');
+    focusTo(ta);
+    expect(slot.textContent, 'focusin の購読が残っている').toBe('');
+    expect(pending(), '待っている読みが残っている').toBe(0);
+  });
+});
+
 describe('書き込みを減らす(#1215)', () => {
   it('🔑 字が同じなら書かない(setter を数える)', () => {
     const { region, slot, ta } = surface();

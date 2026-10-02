@@ -9,15 +9,17 @@
  * | 種類 | 渡す先 | 元の file |
  * |---|---|---|
  * | Markdown | OS から開いたときと同じ口(`importLaunchFiles`) | 🟢 結ぶ(「元ファイルへ書き戻す」が効く)。同じ file は増えない |
- * | vCard | いつもの取込(連絡先になる) | 結ばない |
+ * | vCard | いつもの取込(連絡先になる)。**同じ file は増えない**(下の記憶) | 結ばない |
  * | それ以外 | 添付のノートを 1 件作る(`attachOne`) | 結ばない(⚠ 書き戻しの記憶には入れない) |
  *
- * ## ⚠ 添付の「同じ file を 2 回押しても増えない」
+ * ## ⚠ 添付・vCard の「同じ file を 2 回押しても増えない」
  *
- * Markdown は既存の記憶(`LaunchedFiles`)が増やさない。添付は**別の記憶**を持つ ──
+ * Markdown は既存の記憶(`LaunchedFiles`)が増やさない。添付と vCard は**別の記憶**を持つ ──
  * ⚠ **書き戻しの記憶と混ぜない**: 記憶に入れた lid は `write-back-file` の相手になり、
  * 添付(画像など)へノートの本文を書いて**元のファイルを壊す**。
- * 🔑 同じ file の判定は既存の `splitAlreadyOpen`(`isSameEntry`)。⚠ 持たないブラウザでは
+ * 🔑 同じ file の判定は既存の `splitAlreadyOpen`(`isSameEntry`)。⚠ **vCard も添付と同じ 1 つの記憶**
+ * (判定を 2 か所に作らない)── vCard は 1 file から複数枚のノートが出るので、**最初の 1 枚の lid** で憶える。
+ * 2 回目は取り込まず、連絡先の面へ送る(直す前は毎回 `genLid()` で**もう 1 組**入っていた)。⚠ 持たないブラウザでは
  * 増える側へ倒れる(別の file を取り違えるより安全 ── `launched-files.ts` と同じ)。
  *
  * ⚠ **断る側の gate を使わない** ── user は押した後に選び直せないので、**待つ側**
@@ -31,8 +33,13 @@ import { fileKindOf } from '@features/local-folder/folder-entries';
 export interface OpenLocalFileDeps {
   /** Markdown ── OS から開いたときと同じ口。⚠ 元の file との結びも同じ口がする。 */
   openNote(items: LaunchedItem[]): Promise<void>;
-  /** vCard ── いつもの取込(押した流れの中で断られうる = 理由は取込が言う)。 */
-  importContact(file: File): Promise<void>;
+  /**
+   * vCard ── いつもの取込(押した流れの中で断られうる = 理由は取込が言う)。
+   * 作れたら**最初の 1 枚の lid**、断られた / 読めなかったら `null`(憶えない = 次の 1 回で取り込み直せる)。
+   */
+  importContact(file: File): Promise<string | null>;
+  /** 連絡先の面(左の列のタブ)を開く ── 「同じ file をもう一度」の行き先。 */
+  openContacts(): void;
   /** 編集中などは、終わるまで待つ(`whenAcceptingUnrefusedImport`)。 */
   wait(): Promise<void>;
   /** その lid はいま一覧に居るか(ごみ箱へ入れた後は取り込み直す)。 */
@@ -55,7 +62,16 @@ export function createLocalFileOpener(deps: OpenLocalFileDeps): (item: LocalFile
       return;
     }
     if (kind.route === 'contact') {
-      await deps.importContact(item.file);
+      const { fresh, reopened } = await splitAlreadyOpen([item], attached, (lid) => deps.isPresent(lid));
+      if (reopened.length > 0) {
+        // ⚠ 黙って開き直さない ── 「押したのに何も増えない」を理由つきで言う
+        deps.openContacts();
+        deps.say('すでに取り込んであります。連絡先を表示しました');
+        return;
+      }
+      if (fresh.length === 0) return;
+      const lid = await deps.importContact(item.file);
+      if (lid !== null) attached.remember(lid, item.handle, item.file.name);
       return;
     }
     await deps.wait();

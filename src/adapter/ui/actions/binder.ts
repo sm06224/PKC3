@@ -601,6 +601,8 @@ import {
 } from '@features/query/sql-local-file';
 import { duckDbNetworkNoteOf } from '@features/query/sql-guest-source';
 import { sqlMenuLabel } from '@features/query/sql-tip';
+import { ATTACHMENT_NAME_ATTR, attachmentFileName } from '@features/flavor/attachment-flavor';
+import { PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import {
   asSqlExportKind,
   SQL_EXPORT_KINDS,
@@ -8403,14 +8405,30 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = targetLid(dispatcher, target);
     if (!lid || !(target instanceof HTMLInputElement)) return;
     const title = target.value.trim();
+    const before = dispatcher.getState().entryMetas.get(lid)?.title ?? '';
     // ⚠ 空にはしない(無題の添付を作らない)── 元の字へ戻す
     if (title === '') {
-      target.value = dispatcher.getState().entryMetas.get(lid)?.title ?? '';
+      target.value = before;
       return;
     }
+    /**
+     * 🔴 **字が同じでも、ファイル名が題名と食い違っていれば揃える**(#1264 §1)。
+     *
+     * ⚠ 直す前は `change`(= 字が変わったとき)だけで動いたので、**一覧の `F2` で題名だけ変えた後**に
+     *   この欄を確定しても何も起きず、ファイル名は旧いまま ── 題名とファイル名を揃える道が無かった。
+     * 🔑 食い違いの判定は `attachmentFileName` の 1 本(書く規則と同じ)。**揃っていれば何も撃たない**
+     *   (欄を離れるたびに書かない = 冪等)。⚠ いまの名前を持たない欄(ファイルを持たないタイル)は
+     *   従来どおり題名が変わったときだけ撃つ。
+     */
+    const known = target.getAttribute(ATTACHMENT_NAME_ATTR) ?? '';
+    const want = known === '' ? null : attachmentFileName(title, known);
+    const nameDiffers = want !== null && want !== known;
+    if (title === before && !nameDiffers) return;
     dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
     // ⚠ 題名を先に撃つ ── 後ろの書換は更新済みの題名を持って本文を書く(古い題名で戻さない)
     dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
+    // 🔑 描き直しが来るまでの間に欄を離れても、もう一度撃たない(印を先に進める)
+    if (want !== null) target.setAttribute(ATTACHMENT_NAME_ATTR, want);
   },
   /**
    * ランチャーのタイル設定(P8 段⑭)。
@@ -10859,6 +10877,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'pc-pick-folder': (_dispatcher, _target, services) => void services.localFolder?.pick(),
   'pc-cut-folder': (_dispatcher, _target, services) => services.localFolder?.cut(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
+  // 🔴 フォルダの行は押しても中へ入らない ── 無言にせず理由を状態の行へ(場所は動かさない)
+  'pc-dir-note': (dispatcher) => dispatcher.dispatch({ type: 'OP_NOTICE', message: PC_DIRECTORY_NOTE }),
   'pc-open-file': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-pc-index');
     const index = raw === null ? NaN : Number(raw);
@@ -11961,6 +11981,11 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    // 🔴 添付の改名欄の Enter = 確定(#1264 §1)── 字が同じでもファイル名を揃える
+    if (ke.key === 'Enter' && field === 'attachment-rename') {
+      commitAttachmentName(ke.target);
+      return;
+    }
     /**
      * 🔴 **SQL は `Ctrl`(mac は Command)+ `Enter` で走る**(#681 段②)。
      *
@@ -14681,6 +14706,21 @@ export function bindActions(
   listen(root, 'mousedown', onMousedown);
   listen(root, 'input', onInput);
   listen(root, 'change', onChange);
+  /**
+   * 🔴 **添付の改名欄は、欄を離れたときも確定する**(#1264 §1)。⚠ `change` は字が変わらないと
+   *   撃たれないので、**題名だけ別の所で変えた後**にファイル名を揃える道が無かった。
+   *   食い違いの判定は `rename-attachment` の 1 本 ── ここは**食い違っているときだけ**呼ぶ
+   *   (揃っているのに呼ぶと、書込が走っている最中に「実行中です」と言わせてしまう)。
+   */
+  const commitAttachmentName = (el: EventTarget | null): void => {
+    if (!(el instanceof HTMLInputElement)) return;
+    if (el.getAttribute('data-pkc-action') !== 'rename-attachment') return;
+    const known = el.getAttribute(ATTACHMENT_NAME_ATTR) ?? '';
+    const typed = el.value.trim();
+    if (known === '' || typed === '' || attachmentFileName(typed, known) === known) return;
+    run('rename-attachment', el);
+  };
+  listen(root, 'focusout', (ev) => commitAttachmentName(ev.target));
   /**
    * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。
    *

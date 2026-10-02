@@ -19,7 +19,14 @@
  *   (描画器は state を読まず、DOM から状態を引かない)。
  */
 import type { LocalFolder, LocalFolderRow, LocalFolderView } from '@adapter/platform/local-folder';
-import { FOLDER_PAGE, folderModifiedText, folderSizeText } from '@features/local-folder/folder-entries';
+import {
+  FOLDER_PAGE,
+  PC_CONTACT_NOTE,
+  PC_DIRECTORY_NOTE,
+  fileKindOf,
+  folderModifiedText,
+  folderSizeText,
+} from '@features/local-folder/folder-entries';
 
 const field = (el: HTMLElement, name: string): void => el.setAttribute('data-pkc-field', name);
 
@@ -142,6 +149,9 @@ export class PcFolderRenderer {
     const meta = [row.label, folderSizeText(row.size), folderModifiedText(row.modified)].join(' · ');
     if (row.kind === 'directory') {
       // ⚠ フォルダは押せない(直下だけ ── 中へは入らない)。押せる見た目にしない
+      // 🔴 ただし押されても**無言にしない**(#1264 §1)── ホバーと、押した後の状態の行に同じ字
+      li.setAttribute('data-pkc-action', 'pc-dir-note');
+      li.title = PC_DIRECTORY_NOTE;
       const name = document.createElement('span');
       field(name, 'pc-name');
       name.textContent = row.name;
@@ -167,6 +177,13 @@ export class PcFolderRenderer {
     field(about, 'pc-meta');
     about.textContent = meta;
     open.append(name, about);
+    // 🔴 連絡先になることを、ホバーに頼らず見える字で言う(#1264 §1)
+    if (fileKindOf(row.name).route === 'contact') {
+      const contact = document.createElement('span');
+      field(contact, 'pc-contact-note');
+      contact.textContent = PC_CONTACT_NOTE;
+      open.append(contact);
+    }
     if (!row.writeBack) {
       const note = document.createElement('span');
       field(note, 'pc-readonly');
