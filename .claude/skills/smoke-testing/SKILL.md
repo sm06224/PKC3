@@ -769,6 +769,12 @@ PKC3_SMOKE_PORT=<他と被らない番号> CI=1 npx playwright test -c tests/smo
 🔑 agent ごとに **`PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT` の 3 つ**を固有の値にする
 (例:`4799x` の帯)。落ちた log に **`EADDRINUSE` が無い**ことを見てから、赤緑を書く。
 
+🔴 **番号は 10 刻みで割り当てる**(2026-10-02)。`tests/smoke/playwright.config.ts` は
+`PLAIN_PORT = PORT + 1` / `SUB_PORT = PORT + 2` を既定にするので、`PKC3_SMOKE_PORT=48252` と
+渡すと **webserver が 48253 / 48254 も使う** ── 別の agent に 48253 を渡していたので
+**衝突して初回が落ちた**(再実行で緑)。🔑 agent ごとに **10 刻み**(4825x / 4826x …)で
+帯ごと渡し、3 つとも明示する。落ちた log の `EADDRINUSE` を見てから赤緑を書く(上と同じ)。
+
 ## 🔴 押す前と押した後で見た目を比べると、`:hover` が答えてしまう(2026-09-25、#1054)
 
 「押すと地の色が変わる」を `clickReal()` の前後の `backgroundColor` で見たら、

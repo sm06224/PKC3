@@ -286,6 +286,12 @@ npm run typecheck && npm run lint && npm test                              # 載
     直後に `git log --format='%h %s' -3` で**題名を目で見る**。
     ⚠ 消えた題名は `git log -1 --format=%B <元の sha>` から戻せる(元の commit は reflog と
     worktree に残る)── 戻すときは `git commit --amend -F` で。
+    🔴 **2026-10-02 にも cherry-pick で再発**(下の「4 回目が起きたら」の条件は既に満ちている ── hook 化は依頼者の判断に返す):smoke spec の衝突を「両方残す」で解き、
+    `git -c core.editor=true cherry-pick --continue` と打った ── **`core.commentChar` を落としていた**ので、
+    件名が消えて本文の箇条書き(`- place-embed.ts: …`)が件名になった(`git log --oneline` で発覚)。
+    🔑 打つ形は**上の 1 本に固定**(`-c core.commentChar=';' -c core.editor=true`)し、直後に
+    `git log -1 --format=%s` を見る。落ちていたら push 前に `commit --amend -F` で戻す
+    (自分の branch・push 前なので amend してよい)。
     ⚠ **4 回目が起きたら、文言ではなく `commit-msg` の hook で止める**
     (`.githooks/` と `scripts/install-hooks.mjs` の形に倣う)
 - 🔴 **cherry-pick の衝突は、「どちらかを選ぶ」ではなく「両方の事実を足す」**(2026-10-02。
