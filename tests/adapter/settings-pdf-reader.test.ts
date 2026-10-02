@@ -30,8 +30,8 @@ function setup(stored?: string) {
   const storage = fakeStorage();
   if (stored !== undefined) storage.map.set('pkc3.pdf-reader', stored);
   const store = new PdfReaderStore(storage);
-  // ⚠ 末尾の位置引数(`settings.ts` の constructor の戒め)── `colorSwatch`(19 番目)の次
-  const args: unknown[] = Array<undefined>(19).fill(undefined);
+  // ⚠ 末尾の位置引数(`settings.ts` の constructor の戒め)── `vacuum`(20 番目、#999)の次
+  const args: unknown[] = Array<undefined>(20).fill(undefined);
   args.push(store);
   const r = new (SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer)(host, ...args);
   r.render(initialState);
