@@ -96,6 +96,7 @@ import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
 import { markTargetLid } from './target-lid';
 import { buildFormatBar } from './format-bar';
 import { watchWrapHint } from './format-wrap-hint';
+import { SELECTION_STATS_FIELD, watchSelectionStats } from './selection-stats';
 import { hasSourceSelection } from '../actions/copy-source';
 import {
   appExternalImages,
@@ -622,6 +623,8 @@ export class DetailRenderer {
    * ⚠ **編集を抜けるとき必ず外す**(`disposeLends`)── 編集セッションと同じ寿命。
    */
   private unwatchWrapHint: (() => void) | null = null;
+  /** 選んだ範囲の文字数と行数(#1215)の購読。⚠ 同じく編集を抜けるとき必ず外す。 */
+  private unwatchSelectionStats: (() => void) | null = null;
   /** 図の後始末(ObjectURL の revoke と観測の解除)。 */
   private disposeMermaid: (() => void) | null = null;
 
@@ -635,6 +638,8 @@ export class DetailRenderer {
     this.cancelPreview = null;
     this.unwatchWrapHint?.();
     this.unwatchWrapHint = null;
+    this.unwatchSelectionStats?.();
+    this.unwatchSelectionStats = null;
     this.disposeMermaid?.();
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
@@ -1837,12 +1842,21 @@ export class DetailRenderer {
     commit.title = COMMIT_EDIT_HINT;
     cancel.title = CANCEL_EDIT_HINT;
     bar.append(commit, cancel);
+    /**
+     * 🔴 **選んだ範囲の文字数と行数の枠**(#1215)。帯の右端に**常設**(選んでいないときは空 ──
+     * 枠が出入りして帯が動かない)。書くのは `selection-stats.ts`。
+     * ⚠ 置き場に「画面下の状態の行」(既定で隠れる)も「右の列」(選択では描き直されない)も使わない。
+     */
+    const stats = document.createElement('span');
+    stats.setAttribute('data-pkc-field', SELECTION_STATS_FIELD);
+    bar.append(stats);
     this.region.append(bar);
     // 🔑 **書式パネル**(P8 段⑥)。編集欄のすぐ上 ── 押す物と効く先を離さない
     this.region.append(buildFormatBar());
     // 🔴 選んでいるあいだだけ、帯の 4 つの説明を「選んだ範囲を囲みます」にする(#950 ①)。
     //    ⚠ 外すのは `disposeLends`(編集を抜ける / 別のノートへ移るとき)
     this.unwatchWrapHint = watchWrapHint(this.region);
+    this.unwatchSelectionStats = watchSelectionStats(this.region);
 
     /**
      * 🔑 **書きながら見える**(P8 段②)。3 列にしたので、中央を 2 分割すれば

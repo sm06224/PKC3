@@ -63,3 +63,32 @@ export function formatTaskProgress(total: number, done: number): string | null {
   const pct = Math.floor((d * 100) / total);
   return `${d} / ${total} 完了 (${pct}%)`;
 }
+
+/**
+ * 🔴 **選んだ範囲の行数**(#1215)── 区切り(`\n`)の数 + 1。
+ *
+ * - 選んでいない(`end <= start`)→ `0`
+ * - 🔑 **末尾の改行で選択が終わるときは次の行を数えない**(`indent-assist.ts` の `lastPos` と同じ判断
+ *   ── 下の行の頭まで選んでいても、その行は巻き込まれていない)
+ * - ⚠ **本文を切り出さない**(`slice` / `split` で O(n) のコピーを作らない)。`indexOf` で
+ *   選んだ範囲の中だけを走る ── 5,000 行の全文編集でも、選択が動くたびに本文を複製しない。
+ */
+export function selectionLineCount(text: string, start: number, end: number): number {
+  if (end <= start) return 0;
+  const last = text.charCodeAt(end - 1) === 10 ? end - 1 : end;
+  let n = 1;
+  for (let i = text.indexOf('\n', start); i !== -1 && i < last; i = text.indexOf('\n', i + 1)) n += 1;
+  return n;
+}
+
+/**
+ * 🔴 **選んだ範囲の文字数と行数の整形**(#1215)。編集の帯の右端の枠に出す。
+ *
+ * - 字の単位は `formatBodyStats` と同じ「文字」(`toLocaleString('ja-JP')` も同じ)。
+ *   数えるのは UTF-16 の長さ(`selectionEnd - selectionStart`)── 右の列の文字数と同じ規則。
+ * - `chars <= 0`(選んでいない)は**空文字** ── 枠は残るが字は無い(版面が動かない)。
+ */
+export function formatSelectionStats(chars: number, lines: number): string {
+  if (chars <= 0) return '';
+  return `選択: ${chars.toLocaleString('ja-JP')} 文字(${Math.max(1, lines).toLocaleString('ja-JP')} 行)`;
+}

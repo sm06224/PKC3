@@ -126,7 +126,11 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await expect.poll(wrapTitles, '選んだのに説明が切り替わらない').toEqual(Array(4).fill('選んだ範囲を囲みます'));
   expect(await bar.evaluate((e) => (e as HTMLElement).offsetHeight), '帯の高さが動いた').toBe(barHeight);
   expect(await wraps.locator('[data-pkc-field="label"]').allTextContents(), '帯の字が変わった').toEqual(labelsBefore);
+  // 🔴 #1215 ── 同じ選びで、編集の帯の右端の枠に「選択: 3 文字(1 行)」(1 画面の行の欄でも出る)
+  const stats = page.locator('[data-pkc-field="detail-toolbar"] [data-pkc-field="selection-stats"]');
+  await expect(stats, '行の欄で選んだのに字が出ない').toHaveText('選択: 3 文字(1 行)');
   await row.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(2, 2));
+  await expect(stats, '選びを外しても消えない').toHaveText('');
   await expect
     .poll(async () => (await wrapTitles()).some((t) => t === '選んだ範囲を囲みます'), '選びを外しても戻らない')
     .toBe(false);
@@ -491,6 +495,14 @@ test('🔴 Ctrl+A で全文が 1 つの入力欄になる(S6。今日の編集�
   // 描画の塊は 1 つも残っていない(2 つの画面が同居しない)
   await expect(live.locator('p')).toHaveCount(0);
   await expect(live.locator('h1')).toHaveCount(0);
+
+  // 🔴 #1215 ── 「全文を編集」の欄でも、選んだ範囲の字数と行数が帯の右端に出る
+  //    (全文 = 18 字・5 行。最後の行は改行で終わらない)
+  await row.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, (el as HTMLTextAreaElement).value.length));
+  await expect(
+    page.locator('[data-pkc-field="detail-toolbar"] [data-pkc-field="selection-stats"]'),
+    '全文の欄で選んだのに字が出ない',
+  ).toHaveText('選択: 18 文字(5 行)');
 
   // 丸ごと書き換えて確定 ── 今日の編集画面と同じことができる
   await row.fill('# 作り直した\n\n本文も入れ替えた。');

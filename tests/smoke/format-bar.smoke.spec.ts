@@ -74,6 +74,40 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
     .toBe(false);
   expect((await bar.boundingBox())!.height, '戻したあと帯の高さが動いた').toBe(barBox.height);
 
+  // ④'' 🔴 #1215 ── 選んでいるあいだ、編集の帯(`detail-toolbar`)の右端の**常設の枠**に
+  //     「選択: N 文字(M 行)」。選びを外すと空(枠は残る)。⚠ 帯の高さは 1px も動かない。
+  //     幅が足りないとき(1024)に**折り返して帯が 2 段にならない**ことまで実機で見る(#300)。
+  const toolbar = page.locator('[data-pkc-field="detail-toolbar"]');
+  const stats = toolbar.locator('[data-pkc-field="selection-stats"]');
+  await expect(stats, '枠が帯の中に常設されていない').toHaveCount(1);
+  await expect(stats, '選んでいないのに字が出ている').toHaveText('');
+  const toolbarH = (await toolbar.boundingBox())!.height;
+  await ta.fill('あ\n'.repeat(1200)); // 2,400 字 = 1,200 行(プレビューを描き直すのは 1 回だけ)
+  for (const width of [1440, 1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 2400));
+    await expect(stats, `${width}: 選んだ範囲の字が出ない`).toHaveText('選択: 2,400 文字(1,200 行)');
+    const on = (await stats.boundingBox())!;
+    const tb = (await toolbar.boundingBox())!;
+    expect(tb.height, `${width}: 字が出たら帯の高さが動いた`).toBe(toolbarH);
+    expect(on.y + on.height, `${width}: 枠が帯からはみ出した(折り返した)`).toBeLessThanOrEqual(tb.y + tb.height + 0.5);
+    expect(tb.x + tb.width - (on.x + on.width), `${width}: 枠が右端に寄っていない`).toBeLessThan(2);
+    // 字は読める大きさと、地と区別できる色(色の規則が実際に当たっている)
+    const look = await stats.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      return { size: parseFloat(cs.fontSize), color: cs.color, bg: getComputedStyle(e.parentElement!).backgroundColor };
+    });
+    expect(look.size, `${width}: 字が小さすぎる`).toBeGreaterThanOrEqual(11);
+    expect(look.color, `${width}: 字の色が地と同じ`).not.toBe(look.bg);
+    await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
+    await expect(stats, `${width}: 選びを外しても消えない`).toHaveText('');
+    const off = (await stats.boundingBox())!;
+    const tbOff = (await toolbar.boundingBox())!;
+    expect(tbOff.x + tbOff.width - (off.x + off.width), `${width}: 空の枠が右端にいない(出入りで動く)`).toBeLessThan(2);
+    expect((await toolbar.boundingBox())!.height, `${width}: 外したら帯の高さが動いた`).toBe(toolbarH);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   // ⑤ 雛形も入る(表 = 2 列。⚠ プレビューまで見る ── 記号だけ入って
   // markdown として壊れている、を落とす)
   await ta.fill('');
