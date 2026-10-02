@@ -71,6 +71,16 @@ export const OFFICE_DECLINED_NOTICE =
 export const OFFICE_CONFIRMING_NOTICE =
   'Office のウィンドウで確認が出ています(保存していない変更があります)';
 
+/**
+ * 🔴 **窓が編集の控え(影)を書けなかったときに、本体の状態の行へ出す一言**(#1228 段 1)。
+ * ⚠ 理由(`reason`)は**窓が user の字で書いて送る**(内部の語を出さない)── 本体は括弧に入れて運ぶだけ。
+ * 空なら括弧を付けない。⚠ 成功は言わない(うるさい)── 書けた時刻は `shadowAt()` に静かに残る。
+ */
+export function shadowFailedNotice(reason: string): string {
+  const r = reason.trim();
+  return r === '' ? '編集の控えを書けませんでした' : `編集の控えを書けませんでした(${r})`;
+}
+
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 /**
@@ -128,6 +138,17 @@ export type OfficeWindowEvent =
    * どちらでも今まで通り)── 状態の行で user へ教えるだけの合図である。
    */
   | { readonly type: 'reload-confirming' }
+  /**
+   * 🔴 **窓が編集の控え(影)を 1 つ書いた**(#1228 段 1)。`at` は書き終えた時刻(ms)。
+   * ⚠ **user へは言わない**(打って止まるたびに出ては、うるさい)── `OfficeWindow.shadowAt()` が覚えるだけで、
+   * 「次に開くとき訊く」(段 2)がこれを読む。
+   */
+  | { readonly type: 'shadow-written'; readonly at: number }
+  /**
+   * 🔴 **窓が編集の控えを書けなかった**(#1228 段 1)。⚠ **黙らない** ── user は控えがあるつもりでいる。
+   * `reason` は窓が user の字で書いた理由(同じ理由が続く間は 1 度しか来ない)。
+   */
+  | { readonly type: 'shadow-failed'; readonly reason: string }
   | { readonly type: 'painted'; readonly ms: number }
   /**
    * 🔴 **保存された**(#205)。⚠ **bytes は載っていない ── 鍵だけ**である。
@@ -231,6 +252,11 @@ export class OfficeWindow {
   private readonly baseUrl: string;
   private readonly inputLog: () => boolean;
   private lastAliveAt = 0;
+  /**
+   * 🔴 **窓が最後に編集の控え(影)を書き終えた時刻**(#1228 段 1)。⚠ 窓が閉じても**捨てない** ──
+   * 棚の影は窓が閉じた後も残り、「次に開くとき訊く」(段 2)がこれを材料に使う。無ければ `null`。
+   */
+  private lastShadowAt: number | null = null;
   private pendingDoc: {
     name: string;
     bytes: Uint8Array;
@@ -287,6 +313,11 @@ export class OfficeWindow {
   onEvent(fn: (ev: OfficeWindowEvent) => void): () => void {
     this.listeners.add(fn);
     return () => { this.listeners.delete(fn); };
+  }
+
+  /** 窓が最後に編集の控え(影)を書き終えた時刻(ms)。まだ書いていなければ `null`。 */
+  shadowAt(): number | null {
+    return this.lastShadowAt;
   }
 
   /**
@@ -441,6 +472,7 @@ export class OfficeWindow {
     const ev = parseEvent(data);
     if (!ev) return;
     if (ev.type === 'alive') this.lastAliveAt = this.now();
+    if (ev.type === 'shadow-written') this.lastShadowAt = ev.at;
     if (ev.type === 'closed') {
       this.lastAliveAt = 0;
       // ⚠ 読み直しでも `closed` は来る(上の `RESEND_GRACE_MS`)── すぐには捨てず、戻らなければ捨てる
@@ -570,7 +602,7 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
   const d = data as { pkc3Office?: unknown; payload?: unknown };
   const p = (d.payload ?? {}) as {
     ms?: unknown; missing?: unknown; name?: unknown; key?: unknown; size?: unknown;
-    visible?: unknown; reason?: unknown;
+    visible?: unknown; reason?: unknown; at?: unknown;
   };
   switch (d.pkc3Office) {
     case 'alive':
@@ -586,6 +618,12 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
       return { type: 'reload-declined' };
     case 'reload-confirming':
       return { type: 'reload-confirming' };
+    case 'shadow-written':
+      // ⚠ 時刻が無い / 壊れている通知は捨てる(「いつ書いたか」を偽らない)
+      if (typeof p.at !== 'number' || !Number.isFinite(p.at) || !(p.at > 0)) return null;
+      return { type: 'shadow-written', at: p.at };
+    case 'shadow-failed':
+      return { type: 'shadow-failed', reason: typeof p.reason === 'string' ? p.reason : '' };
     case 'painted':
       return { type: 'painted', ms: typeof p.ms === 'number' ? p.ms : 0 };
     case 'not-installed':
