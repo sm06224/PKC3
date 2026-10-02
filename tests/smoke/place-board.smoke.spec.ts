@@ -560,7 +560,27 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     mimeType: 'application/pdf',
     buffer: Buffer.from('%PDF-1.4\n%%EOF\n'),
   });
+  // 🔴 #529 A-1 ── 図だけのノート / 図 4 種(chart・html・svg・csv)のノート。枠の中で**原文が見えない**ことを見る
+  //    (新しい起動は増やさない。同じ道中の板 2 に置く)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '図だけのノート');
+  await page.fill('[data-pkc-field="editor-body"]', '```mermaid\ngraph TD\n  A["始め"] --> B["終わり"]\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '図の四種のノート');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    '```chart\n{"type":"bar","labels":["a","b"],"datasets":[{"data":[1,2]}]}\n```\n\n' +
+      '```html\n<p>こんにちは</p>\n```\n\n' +
+      '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20"/></svg>\n```\n\n' +
+      '```csv\n品,数\n牛乳,2\n```\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
   const figLid = await lidOfTitle('図のノート');
+  const onlyLid = await lidOfTitle('図だけのノート');
+  const fourLid = await lidOfTitle('図の四種のノート');
   const photoLid = await lidOfTitle('写真のノート');
   const attLid = await lidOfTitle('ねこ.png');
   const pdfLid = await lidOfTitle('書類.pdf');
@@ -574,6 +594,8 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
       `:::format{#ph .pkc-place entry=${photoLid} x=10 y=270}\n:::\n\n` +
       `:::format{#at .pkc-place entry=${attLid} x=350 y=270}\n:::\n\n` +
       `:::format{#pd .pkc-place entry=${pdfLid} x=700 y=270}\n:::\n\n` +
+      `:::format{#mm .pkc-place entry=${onlyLid} x=10 y=540}\n:::\n\n` +
+      `:::format{#fx .pkc-place entry=${fourLid} x=350 y=540}\n:::\n\n` +
       // 🔴 遠い枠(画面から 2,000px 以上下)── 近づくまで中身を作らない(W3-③)
       `:::format{#far .pkc-place entry=${figLid} x=10 y=2600}\n:::\n`,
   );
@@ -603,8 +625,24 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     expect(m.imgW, `${id}:図が枠からはみ出している`).toBeLessThanOrEqual(m.slotW + 1);
     expect(m.skipNote, `${id}:図が 1 行に降ろされている`).toBe(false);
   }
-  // 🔴 板のノート自身は図を持たない ── 焼かれた PNG は置いた 2 枚ぶんだけ
-  await expect(body2.locator('img[data-pkc-field="mermaid-image"]')).toHaveCount(2);
+  // 🔴 板のノート自身は図を持たない ── 焼かれた PNG は置いた 3 枚ぶんだけ(f1 / f2 / 図だけの mm)
+  await expect(body2.locator('img[data-pkc-field="mermaid-image"]')).toHaveCount(3);
+
+  /**
+   * 🔴 ①-b **枠に差し込んだ図の下に原文が出ない**(#529 A-1)。
+   *
+   * ⚠ 直す前は、掃除が切替の `<input>` を外して**原文を隠す CSS の条件が崩れ**、図の下に原文
+   *   (`<pre class="pkc-render-source">`)が見えていた(mermaid 52 px / chart・html・svg 35 px / csv 69 px)。
+   *   mermaid と chart は**原文のせいだけで枠にスクロールバーが付いた**(原文を隠すと枠に収まる)。
+   * 🔑 観測点は 2 つ:DOM に原文の面が無いこと / **図だけのノートの枠が溢れていない**こと
+   *   (`scrollHeight <= clientHeight`)── 後者は「見えているか」を実寸で見る。
+   */
+  await expect(slotIn('mm').locator('img[data-pkc-field="mermaid-image"]'), '台の前提:図だけの枠の図が焼けていない').toHaveCount(1, { timeout: 30_000 });
+  await expect(slotIn('fx').locator('.pkc-render-slot'), '台の前提:図 4 種の枠が描けていない').toHaveCount(4);
+  await expect(body2.locator('.pkc-render-source'), '枠の中に原文の面が残っている').toHaveCount(0);
+  const overflow = await slotIn('mm').evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  expect(overflow.ch, '台の前提:枠の高さが読めていない').toBeGreaterThan(100);
+  expect(overflow.sh, `図だけの枠が溢れている(scrollHeight ${String(overflow.sh)} > clientHeight ${String(overflow.ch)}。原文が見えていないか)`).toBeLessThanOrEqual(overflow.ch + 1);
 
   // 🔴 ② 同じノート 2 枚:実 DOM の id が重複せず、脚注・目次の押しが同じ枠の中を指す
   const idReport = await body2.evaluate((root) => {
