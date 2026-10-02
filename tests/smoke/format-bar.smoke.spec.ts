@@ -107,6 +107,21 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // ④''' 🔴 行の入れ替え(#1213)── 2 列の欄で Alt+↓ / Alt+↑。caret が行に付いていき、
+  //     端では動かず、Ctrl+Z で 1 回で戻る(⚠ `insertText` を通っていないと戻らない)
+  await ta.fill('あ\nい\nう');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(3, 3));
+  await ta.press('Alt+ArrowDown');
+  await expect(ta, 'Alt+↓ で行が入れ替わらない').toHaveValue('あ\nう\nい');
+  expect(await ta.evaluate((el) => (el as HTMLTextAreaElement).selectionStart), 'caret が行に付いていかない').toBe(5);
+  await ta.press('Alt+ArrowDown');
+  await expect(ta, '末尾の行で Alt+↓ が動いた').toHaveValue('あ\nう\nい');
+  await ta.press('Control+z');
+  await expect(ta, 'Ctrl+Z で 1 回で戻らない(取り消しの履歴が切れている)').toHaveValue('あ\nい\nう');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 0));
+  await ta.press('Alt+ArrowUp');
+  await expect(ta, '先頭の行で Alt+↑ が動いた').toHaveValue('あ\nい\nう');
+
   // ⑤ 雛形も入る(表 = 2 列。⚠ プレビューまで見る ── 記号だけ入って
   // markdown として壊れている、を落とす)
   await ta.fill('');

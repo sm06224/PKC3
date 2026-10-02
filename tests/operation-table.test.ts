@@ -115,6 +115,12 @@ const UNBRIDGED: readonly string[] = [
   'indent',
   'outdent',
   /**
+   * ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`、`Alt+↑` / `Alt+↓`)。
+   *   **押しボタンを持たない** ── `indent` と同じ「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける。
+   */
+  'move-line-up',
+  'move-line-down',
+  /**
    * ⚠ 2026-09-08(#766 D-2): その場で計算する。**押しボタンを持たない** ──
    *   書式の帯は 14 個で横に長く、これ以上増やせない(D-3 を退けた理由)ので、
    *   記法(`FORMAT_OF`)と同じ「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受ける。
@@ -645,11 +651,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `remove-place` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-01(#918 段⑦): SQL の面で足した相手を外す(`remove-sql-source`)で受け手 +1 ── 登記は
       //   増えない(押し口は足した相手の行の中にしか無い)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 359,
+      // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)を `KEY_COMMANDS` へ
+      //   登記。押しボタンを持たない(`Alt+↑` / `Alt+↓`)ので受け手は増えない。
+      //   `registered` +2 / `total` +2 / `outsideActionsTable` +2。
+      total: 361,
       receivers: 302,
-      registered: 96,
+      registered: 98,
       both: 39,
-      outsideActionsTable: 57,
+      outsideActionsTable: 59,
       unregistered: 263,
     });
   });
@@ -692,8 +701,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-09-28(#1107): 「最近開いたノートへ移る」(`open-recent`)で `key` 68 → 69
     // ⚠ 2026-10-01(#1166): 字下げ / 字下げを戻す(`indent` / `outdent`)で `key` 69 → 71
     // ⚠ 2026-10-01(#1171): 「表の列幅を揃える」(`align-table`)で `key` 71 → 72(鍵の既定は持たない)
+    // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)で `key` 72 → 74
     expect(s().perBook).toEqual({
-      key: 72,
+      key: 74,
       entry: 17,
       body: 3,
       collection: 2,

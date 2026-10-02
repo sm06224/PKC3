@@ -430,6 +430,139 @@ describe('字下げ(Tab / Shift+Tab / Ctrl+] / Ctrl+[)が編集欄に繋がっ�
   });
 });
 
+describe('行の入れ替え(Alt+↑ / Alt+↓)が編集欄に繋がっている #1213', () => {
+  const alt = (ta: HTMLTextAreaElement, k: 'ArrowUp' | 'ArrowDown', over: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', {
+      key: k,
+      code: k,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+      ...over,
+    });
+    ta.dispatchEvent(ev);
+    return ev;
+  };
+
+  /** ⚠ 取り消しの履歴が切れない書き方(`execCommand('insertText')`)を通ったかを見る。 */
+  const inserted: string[] = [];
+  let lastTa!: HTMLTextAreaElement;
+  beforeEach(() => {
+    inserted.length = 0;
+    // happy-dom に `execCommand` は無い ── 選択を置き換える本物の意味論を真似る
+    (document as unknown as { execCommand: unknown }).execCommand = vi.fn(
+      (cmd: string, _ui?: boolean, value?: string) => {
+        if (cmd !== 'insertText') return false;
+        inserted.push(value ?? '');
+        const { selectionStart: s, selectionEnd: e, value: v } = lastTa;
+        const at = s + (value ?? '').length;
+        lastTa.value = v.slice(0, s) + (value ?? '') + v.slice(e);
+        lastTa.setSelectionRange(at, at);
+        lastTa.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      },
+    );
+  });
+  afterEach(() => {
+    delete (document as unknown as { execCommand?: unknown }).execCommand;
+  });
+  const open = (
+    value: string,
+    caret: number,
+    field: 'editor-body' | 'row-source' = 'editor-body',
+  ): HTMLTextAreaElement => {
+    const { root } = setup();
+    lastTa = editor(root, value, caret, field);
+    return lastTa;
+  };
+
+  it('🔴 2 列の欄: Alt+↓ で行が下と入れ替わり、caret が付いていく', () => {
+    const ta = open('あ\nいう\nえ', 3);
+    const ev = alt(ta, 'ArrowDown');
+    expect(ta.value).toBe('あ\nえ\nいう');
+    expect(ev.defaultPrevented, '動かしたのにキーを握っていない').toBe(true);
+    expect(ta.selectionStart, 'caret が行に付いていない').toBe(5);
+    // 続けて Alt+↑ で戻る
+    alt(ta, 'ArrowUp');
+    expect(ta.value).toBe('あ\nいう\nえ');
+    expect(ta.selectionStart).toBe(3);
+  });
+
+  it('🔴 書くのは insertText(取り消しの履歴を切らない)で、入れ替えた 2 行だけ', () => {
+    const ta = open('A\nB\nC\nD', 4);
+    alt(ta, 'ArrowUp');
+    expect(ta.value).toBe('A\nC\nB\nD');
+    expect(inserted, 'insertText を通っていない(ta.value 直代入は取り消しを切る)').toEqual(['C\nB']);
+  });
+
+  it('複数行を選べば、選んだ行の塊ごと動く(選択は残る)', () => {
+    const ta = open('あ\nい\nう\nえ', 0);
+    ta.setSelectionRange(2, 5);
+    alt(ta, 'ArrowDown');
+    expect(ta.value).toBe('あ\nえ\nい\nう');
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([4, 7]);
+  });
+
+  it('🔴 欄の端では何も書かない ── ただしキーは握る(mac の Option+↑↓ を出さない)', () => {
+    const top = open('あ\nい', 0);
+    const evUp = alt(top, 'ArrowUp');
+    expect(top.value).toBe('あ\nい');
+    expect(evUp.defaultPrevented, '端でキーを握っていない').toBe(true);
+    expect(inserted).toEqual([]);
+    const bottom = open('あ\nい', 3);
+    const evDown = alt(bottom, 'ArrowDown');
+    expect(bottom.value).toBe('あ\nい');
+    expect(evDown.defaultPrevented).toBe(true);
+    expect(inserted).toEqual([]);
+  });
+
+  it('🔴 1 面のライブの行の欄(複数行の塊)でも効く', () => {
+    const ta = open('- a\n- b\n- c', 5, 'row-source');
+    const ev = alt(ta, 'ArrowDown');
+    expect(ta.value).toBe('- a\n- c\n- b');
+    expect(ev.defaultPrevented).toBe(true);
+    expect(inserted).toEqual(['- c\n- b']);
+    alt(ta, 'ArrowUp');
+    expect(ta.value).toBe('- a\n- b\n- c');
+  });
+
+  it('🔴 1 行だけの塊の行の欄では何も起きない(隣の塊とは入れ替えない)', () => {
+    for (const k of ['ArrowUp', 'ArrowDown'] as const) {
+      const ta = open('# 見出し', 3, 'row-source');
+      const ev = alt(ta, k);
+      expect(ta.value, `${k} で 1 行の塊が動いた`).toBe('# 見出し');
+      expect(ev.defaultPrevented).toBe(true);
+    }
+    expect(inserted).toEqual([]);
+  });
+
+  it('🔴 変換中(isComposing)は横取りしない', () => {
+    for (const field of ['editor-body', 'row-source'] as const) {
+      const ta = open('あ\nい', 3, field);
+      const ev = alt(ta, 'ArrowUp', { isComposing: true });
+      expect(ta.value, `${field}: 変換中に行を動かした`).toBe('あ\nい');
+      expect(ev.defaultPrevented, `${field}: 変換中のキーを握った`).toBe(false);
+    }
+    expect(inserted).toEqual([]);
+  });
+
+  it('対照群: Alt を押さない ↑ / ↓ は何もしない(欄の既定のカーソル移動に任せる)', () => {
+    const ta = open('あ\nい\nう', 3);
+    const ev = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+    ta.dispatchEvent(ev);
+    expect(ta.value).toBe('あ\nい\nう');
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it('Shift / Ctrl を重ねた Alt+↓ は別の鍵 ── 行を動かさない', () => {
+    for (const over of [{ shiftKey: true }, { ctrlKey: true }]) {
+      const ta = open('あ\nい', 0);
+      alt(ta, 'ArrowDown', over);
+      expect(ta.value, JSON.stringify(over)).toBe('あ\nい');
+    }
+  });
+});
+
 describe('チェックリストの完了項目整理が押せる #1108', () => {
   it('🔴 押すと本文の完了タスクが末尾へ移動する', () => {
     const status: string[] = [];
