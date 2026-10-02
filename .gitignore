@@ -36,3 +36,7 @@ dist-office-pages/
 # 🔑 守りは `tests/repo-hygiene.test.ts` の「生成物を追跡しない」= 等値で 0 件を pin する。
 __pycache__/
 *.pyc
+
+# 音声認識の部品(asr-pack)の組み立ての出力(build/asr-pack/make-pack.mjs。重み・runtime・LICENSES を含む生成物 ── 追わない)。
+# ⚠ build/asr-pack/node_modules は上の `node_modules/`(深さを問わない)が既に拾う
+dist-asr-pack/

@@ -1,0 +1,14 @@
+{
+  "name": "pkc3-asr-pack-build",
+  "private": true,
+  "description": "音声認識の部品(asr-pack)を組むための依存。PKC3 本体の package.json に混ぜない(build/oss-notices-plugin.ts が本体の dependencies を『使っている OSS』として数えるため)。",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@huggingface/transformers": "4.3.0",
+    "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
