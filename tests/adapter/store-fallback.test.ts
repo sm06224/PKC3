@@ -37,6 +37,7 @@ import { VoiceBoostStore } from '@adapter/ui/render/voice-boost';
 import { MissingLinksStore } from '@adapter/ui/render/missing-links';
 import { CodeCollapseStore } from '@adapter/ui/render/code-collapse';
 import { InlineCodeCopyStore } from '@adapter/ui/render/inline-code-copy';
+import { PdfReaderStore } from '@adapter/ui/render/pdf-reader-setting';
 import { PhoneLinksStore } from '@adapter/ui/render/phone-links';
 import { DateLinksStore } from '@adapter/ui/render/date-links';
 import { RelativeDaysStore } from '@adapter/ui/render/relative-days';
@@ -157,6 +158,16 @@ const CASES: readonly {
     },
     a: false,
     b: true,
+  },
+  {
+    // ⚠ 既定が「切」の store(#275)── a を入(true)にして、控えが死んで既定(切)へ戻る実装を捕まえる
+    name: 'PdfReaderStore',
+    make: () => {
+      const s = new PdfReaderStore(null);
+      return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: true,
+    b: false,
   },
   {
     name: 'TooNarrowOkStore',

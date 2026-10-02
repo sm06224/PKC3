@@ -57,8 +57,13 @@ import { join } from 'node:path';
  *   ✎ の**触る端末での見え方**(opacity / reachable)は既存の
  *   `touch.smoke.spec.ts` の 1 本目に相乗りさせたので、そちらは起動を
  *   増やしていない。
+ * - 2026-10-02(#275 段①、PDF を PKC の画面で読む): **505**(そのときの実数 505)。
+ *   「設定を切 → 入にした**前後**で、同じ添付の別窓の中身が替わる / 字を選んで本体のノートへ引ける /
+ *   読めない PDF は内蔵の表示へ退避する」を 1 本足した。⚠ **既存の道中には載せられない** ── 添付の smoke は
+ *   内蔵の窓(`<object>`)の見え方を守る側で、設定を入にした後の窓は**別の外殻**(別 HTML・別 worker)であり、
+ *   同じ起動の中で**切 → 入の切り替えを続けて**見ないと「設定が効いている」ことにならない(対照群が本命と同居する)。
  */
-export const BOOT_BUDGET = 504;
+export const BOOT_BUDGET = 505;
 
 /** 実測の 1 起動あたり秒(手元・headless_shell・`workers: 1`)。 */
 export const SECONDS_PER_BOOT = 1.63;

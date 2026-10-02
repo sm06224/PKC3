@@ -48,7 +48,8 @@
     "katex": "^0.18.9",
     "markdown-it": "15.0.2",
     "markdown-it-footnote": "4.0.0",
-    "mermaid": "^12.0.0"
+    "mermaid": "^12.0.0",
+    "pdfjs-dist": "6.3.289"
   },
   "overrides": {
     "lodash-es": "^4.18.1"

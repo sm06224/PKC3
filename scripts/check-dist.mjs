@@ -20,7 +20,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectDist, MANUAL_PAGE, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
+import { inspectDist, MANUAL_PAGE, PDF_DIR, PORTABLE_TEMPLATE } from './dist-inspect.mjs';
 
 /**
  * 🔴 **旗は名指しで受け、知らない旗は使い方を出して落とす**(#648 💭)。
@@ -31,6 +31,7 @@ const KNOWN_FLAGS = new Set([
   '--require-manual',
   '--require-precache-list',
   '--require-duckdb',
+  '--require-pdf',
 ]);
 const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -204,6 +205,25 @@ const DUCKDB_CAP_KB = 46000;
 const DUCKDB_FLOOR_KB = 20000;
 
 /**
+ * 🔴 **PDF を PKC の画面で読む窓の一式だけの予算**(#275 段①。裁定: 設定で選んだ人だけ)。
+ *
+ * ⚠ これも**アプリの配る量ではない** ── 訪問者は落とさない(設定を入にして PDF の別窓を押したときだけ
+ *   取りに行く)。だから上の cap には数えず、precache にも載せない。
+ * 🔴 だが**数えないことと見ないことは別**である ── 外した瞬間、この中身は 0 バイトでも 100 MB でも
+ *   通るようになるので、ここで別に見る。
+ * 🔑 実測 **4183.6 KB**(2026-10-02、dev の build。`pdf/lib/` だけ):pdf.js 本体(legacy 版)+ 解析 worker +
+ *   日本語を含む cmap(168 本)+ 標準書体 + 画像の復号 wasm 3 つ。窓の小さな HTML / JS(約 28 KB)は
+ *   precache に載る**ふつうの配る物**で、上の cap の内で数える。
+ *   ⚠ 余裕は約 3800 KB ── pdf.js の版上げ(+数百 KB)は吸うが、**別の一式(`legacy/` の 16 MB や
+ *   `*.map` の 10 MB)を誤って取り込む**のは止まる。
+ * ⚠ **配る量は判断理由にしない**(不可侵指示 2026-08-03)── ここは手違いの検出である。
+ * ⚠ 下限は「空 / 途中で切れた一式」だけを狙う(実測の半分弱)。🔴 **日本語の cmap が 1 つ落ちる**のは
+ *   量では止まらない ── そちらは `dist-inspect.mjs` の `PDF_REQUIRED` が**集合で**見る。
+ */
+const PDF_CAP_KB = 8000;
+const PDF_FLOOR_KB = 2000;
+
+/**
  * 🔴 **焼いたマニュアル(`manual.html`)の下限**(#645 段②)。
  * ⚠ 上限は要らない(アプリの cap の内で数える)。下限だけ ── 描画が空振りして
  *   見出し 0 本の page を配ろうとしたとき、plugin の門(見出しの本数)が**外された日**にも
@@ -232,7 +252,7 @@ if ((kind !== 'product' && kind !== 'dev') || unknownFlags.length > 0) {
   if (unknownFlags.length > 0) console.error(`知らない旗: ${unknownFlags.join(' ')}`);
   console.error(
     'usage: node scripts/check-dist.mjs <product|dev> [dir] ' +
-      '[--require-manual] [--require-precache-list] [--require-duckdb]',
+      '[--require-manual] [--require-precache-list] [--require-duckdb] [--require-pdf]',
   );
   process.exit(2);
 }
@@ -256,6 +276,10 @@ for (const f of files) {
   // ⚠ **雛形は読まない**(7 MB の 1 枚)── 規則はこの file の中身を 1 つも見ないので、
   //    読むのは丸ごと無駄である(そして inline map の走査が誤検知しうる)
   if (f.path === PORTABLE_TEMPLATE || f.path === MANUAL_PAGE) continue; // 規則は中身を 1 つも見ない
+  // ⚠ pdf.js の実体(`pdf/lib/`)は読まない ── 規則は中身を 1 つも見ない(別立ての予算と集合だけ)。
+  //    読むと pdf.js の minified に在る `import(…)` の組み立てを「参照」と誤読して落ちる。
+  //    🔑 窓の小さな JS(`pdf/reader.js` など)は読む ── 参照の突合に載る(`dist-inspect.mjs` の `pdfPaths`)
+  if (f.path.startsWith(PDF_DIR)) continue;
   if (!f.path.endsWith('.map') && TEXTUAL.test(f.path)) {
     text.set(f.path, readFileSync(join(DIST, f.path), 'utf-8'));
   }
@@ -285,6 +309,14 @@ const { lines, errors } = inspectDist({
    *   (2026-09-09 に `precache.json` で**実際に 2 回止めた**形である)。
    */
   requireDuckdb: flags.includes('--require-duckdb'),
+  pdfCapKb: PDF_CAP_KB,
+  pdfFloorKb: PDF_FLOOR_KB,
+  /**
+   * 🔴 **焼きたての一式だけ PDF の窓の実在を要求する**(#275 段①)。
+   * ⚠ `pages.yml` の product の検品は**過去の zip** なので付けない ── 付けると PDF の窓より前に切った
+   *   release(v3.3.0)が落ちて `/dev/` が止まる(DuckDB で**実際に止めた**形である)。
+   */
+  requirePdf: flags.includes('--require-pdf'),
   files,
   text,
 });

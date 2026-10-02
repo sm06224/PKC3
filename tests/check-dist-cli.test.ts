@@ -72,6 +72,24 @@ describe('検品 CLI', () => {
     }
   });
 
+  /**
+   * 🔴 **`--require-pdf` が届く**(#275 段①)。観測点は**その門の文言** ── 旗を無視する変異は、
+   *   同じ dir で「無い」の文言が出ないことで分かる。
+   */
+  it('🔴 --require-pdf を渡すと、pdf/ が無い dist で鳴る(旗が届いている)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-check-'));
+    try {
+      writeFileSync(join(dir, 'index.html'), '<!doctype html>');
+      const withFlag = run(['dev', dir, '--require-pdf']);
+      expect(withFlag.code).toBe(1);
+      expect(withFlag.out).toContain('焼きたてなのに dist に pdf/lib/ が無い');
+      // 対照群 ── 旗が無ければその門は鳴らない(他の理由では落ちるが、この文言は出ない)
+      expect(run(['dev', dir]).out).not.toContain('焼きたてなのに dist に pdf/lib/');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('🔴 知らない旗は使い方を出して落ちる(綴りを間違えた旗で門が消えない)', () => {
     const r = run(['product', '--require-manaul']);
     expect(r.code).toBe(2);

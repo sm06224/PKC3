@@ -1154,7 +1154,9 @@ describe('過去の zip を、新しい要求で落とさない(旗の名前に�
    * 🔴 **焼きたてのどの経路にも要る旗。** ⚠ 1 本でも忘れると、そこだけ検品が緩む
    *   (「覆いを狭めない」)。⚠ `--require-manual` は product だけなのでここには入れない。
    */
-  const EVERY_FRESH = ['--require-precache-list', '--require-duckdb'];
+  // 🔑 `--require-pdf`(#275 段①)を足した ── PDF を PKC の画面で読む窓の一式は設定で選んだ人だけが取りに行く物で、
+  //    emit が止まった版をそのまま配ると、入にした人の窓が開かない
+  const EVERY_FRESH = ['--require-precache-list', '--require-duckdb', '--require-pdf'];
 
   for (const c of FRESH) {
     it(`${c.file}(${c.mode}): 焼きたての検品に、要る旗が全部付いている`, () => {
