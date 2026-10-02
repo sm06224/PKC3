@@ -21,8 +21,14 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
-import { inspectDist, PRECACHE_LIST_FILE, DUCKDB_DIR } from '../scripts/dist-inspect.mjs';
+import {
+  inspectDist,
+  PRECACHE_LIST_FILE,
+  DUCKDB_DIR,
+  PDF_DIR,
+  PDF_REQUIRED,
+  // @ts-expect-error -- 検品規則は素の .mjs(ビルド対象外の CI script 群)
+} from '../scripts/dist-inspect.mjs';
 
 type File = { path: string; bytes: number };
 type Input = {
@@ -43,6 +49,11 @@ type Input = {
   duckdbFloorKb?: number;
   /** 焼きたての一式で DuckDB の実在を要求する(#682)。 */
   requireDuckdb?: boolean;
+  /** PDF を PKC の画面で読む窓の一式だけの予算(#275 段①)。⚠ 一式が在るのに欠けたら鳴る。 */
+  pdfCapKb?: number;
+  pdfFloorKb?: number;
+  /** 焼きたての一式で PDF の窓の実在を要求する(#275 段①)。 */
+  requirePdf?: boolean;
   files: File[];
   text: Map<string, string>;
 };
@@ -908,5 +919,100 @@ describe('🔴 DuckDB の一式(#682)', () => {
   it('🟢 旗が無ければ、無くても通る ── 過去の zip を今の規則で落とさない', () => {
     // ⚠ ここが `/dev/` の配信を守っている唯一の行である(2026-09-09 に 2 回止めた形)
     expect(run(healthy('dev'))).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **PDF を PKC の画面で読む窓の一式は「precache に載せず、別立てで見る」**(#275 段①)。
+ *
+ * ⚠ DuckDB と同じ理屈 ── アプリの cap から外した瞬間、この中身は **0 バイトでも 100 MB でも通る**ようになる
+ *   ので、外したぶんの門(上限・下限・集合)を置き直した。**その門が鳴ること**をここで見る。
+ * 🔑 いちばん大事なのは最後の 2 本 ── 旗を立てた回だけ実在を要求し、**旗なしなら無くても通る**
+ *   (`pages.yml` が検品する**過去の zip** には PDF の窓が無い。無条件にすると `/dev/` の配信ごと止まる)。
+ */
+describe('🔴 PDF を PKC の画面で読む窓の一式(#275 段①)', () => {
+  const CAP = 8000;
+  const FLOOR = 2000;
+  /** 一式の総量(実測 4101 KB 相当)。 */
+  const TOTAL = 4_200_000;
+
+  /** 健全な形に PDF の窓を足す。⚠ precache には**載せない**。`PDF_REQUIRED` を 1 つ残らず置く。 */
+  const withPdf = (total = TOTAL, drop: string | null = null): Input => {
+    const i = healthy('dev');
+    const names = PDF_REQUIRED.filter((n: string) => n !== drop);
+    const each = Math.floor(total / PDF_REQUIRED.length);
+    return {
+      ...i,
+      pdfCapKb: CAP,
+      pdfFloorKb: FLOOR,
+      files: [...i.files, ...names.map((n: string) => ({ path: `${PDF_DIR}${n}`, bytes: each }))],
+    };
+  };
+
+  it('🟢 予算の内で必要な file が揃っていれば通り、配る量には数えない', () => {
+    const out = inspect(withPdf());
+    expect(out.errors).toEqual([]);
+    // ⚠ 空振り防止 ── 「別立て」の行が実際に出ていること
+    expect(out.lines.join('\n')).toContain(`別立て: ${PDF_DIR}`);
+    const before = inspect(healthy('dev')).lines.find((l) => l.startsWith('  配る量:'));
+    expect(out.lines.find((l) => l.startsWith('  配る量:'))).toBe(before);
+  });
+
+  it('🔴 予算が渡っていなければ鳴る(optional にすると門ごと消える)', () => {
+    const errs = run({ ...withPdf(), pdfCapKb: undefined, pdfFloorKb: undefined });
+    expect(errs.join('\n')).toContain('予算が渡っていない');
+  });
+
+  it('🔴 cap を超えたら鳴る(別の一式 ── legacy や map ── を誤って取り込んだ形)', () => {
+    expect(run(withPdf(30_000_000)).join('\n')).toContain('cap を');
+  });
+
+  it('🔴 下限を割ったら鳴る(空 / 途中で切れた一式)', () => {
+    expect(run(withPdf(PDF_REQUIRED.length * 10)).join('\n')).toContain('下限を');
+  });
+
+  it('🔴 要る file が 1 つでも無ければ鳴る(量では止まらない ── 1 つずつ抜いて全部当てる)', () => {
+    for (const missing of PDF_REQUIRED as string[]) {
+      const errs = run(withPdf(TOTAL, missing));
+      expect(errs.join('\n'), `${missing} が無いのに通った`).toContain(missing);
+      // ⚠ 量の門は鳴っていない(集合の門を足した理由そのもの。鳴っていたら、この門は 1 度も通っていない)
+      expect(errs.join('\n'), `${missing}: 量の門で止まっている`).not.toContain('下限を');
+    }
+  });
+
+  it('🔴 日本語の cmap が要る file に入っている(落ちると日本語の PDF が読めない)', () => {
+    const jp = (PDF_REQUIRED as string[]).filter((n) => n.includes('cmaps/'));
+    expect(jp.length, '日本語の cmap を要求していない').toBeGreaterThanOrEqual(2);
+    expect(jp.some((n) => n.includes('Japan1'))).toBe(true);
+  });
+
+  it('🔴 precache に載っていたら鳴る(install で数 MB 落とさせない)', () => {
+    const i = withPdf();
+    // ⚠ 二重帳簿を両方書き換える(片方だけ足すと「食い違い」の門が先に鳴って、ここの門が通らない)
+    const listed = JSON.parse(i.text.get(LIST) as string) as string[];
+    const withIt = [...listed, `./${PDF_DIR}reader.js`];
+    const text = new Map(i.text);
+    text.set(LIST, JSON.stringify(withIt));
+    text.set(
+      'sw.js',
+      `const PRECACHE = ${JSON.stringify(withIt)};\nself.addEventListener("fetch", () => {});`,
+    );
+    expect(run({ ...i, text }).join('\n')).toContain(`precache に ${PDF_DIR}`);
+  });
+
+  it('🔴 旗を立てたのに無ければ鳴る(plugin が外れた版を配らせない)', () => {
+    expect(run({ ...healthy('dev'), requirePdf: true }).join('\n')).toContain(`dist に ${PDF_DIR} が無い`);
+  });
+
+  it('🟢 旗が無ければ、無くても通る ── 過去の zip を今の規則で落とさない', () => {
+    expect(run(healthy('dev'))).toEqual([]);
+  });
+
+  it('綴りの正本(plugin の PDF_DIR / precache 除外の接頭辞)と突き合わせる', () => {
+    const plugin = readFileSync('build/pdf-assets-plugin.ts', 'utf-8');
+    expect(plugin).toContain(`export const PDF_DIR = '${PDF_DIR}';`);
+    expect(readFileSync('src/adapter/platform/sw/sw-source.ts', 'utf-8')).toContain(
+      `export const PDF_PRECACHE_SKIP = '${PDF_DIR}';`,
+    );
   });
 });

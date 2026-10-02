@@ -135,6 +135,33 @@ export const DUCKDB_REQUIRED = [
 ];
 
 /**
+ * 🔴 **PDF を PKC の画面で読む窓の一式を置く所**(#275 段①)。
+ *
+ * ⚠ DuckDB と**同じ扱い** ── 設定で選んだ人が押したときだけ取りに行く物なので、precache にも
+ *   アプリの配る量にも数えない。🔴 そのぶん**別立ての予算**(上限と下限)を下に置く。
+ * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/dist-inspect.test.ts` が突き合わせる)。
+ */
+export const PDF_DIR = 'pdf/';
+
+/**
+ * 🔴 **一式に必ず在る file**(#275 段①)。⚠ 量ではなく**集合**で見る ── 下限(KB)は
+ * 「空 / 途中で切れた」しか止められず、**日本語の cmap が 1 つ落ちた**日は総量がほとんど動かない
+ * (そして落ちた日本語は、user が日本語の PDF を開いた日まで誰も気づかない)。
+ */
+export const PDF_REQUIRED = [
+  'host.html',
+  'reader.js',
+  'reader-wire.js',
+  'page-cache.js',
+  'lib/pdf.min.mjs',
+  'lib/pdf.worker.min.mjs',
+  'lib/cmaps/Adobe-Japan1-UCS2.bcmap',
+  'lib/cmaps/90ms-RKSJ-H.bcmap',
+  'lib/cmaps/UniJIS-UTF16-H.bcmap',
+  'lib/standard_fonts/LiberationSans-Regular.ttf',
+];
+
+/**
  * 配る物の一覧を data でも置く file(#532 段 B)。⚠ 綴りの正本は
  * `src/features/selfhost/precache-list.ts` の `PRECACHE_LIST_FILE`
  * (`tests/dist-inspect.test.ts` が突き合わせる)。
@@ -160,6 +187,9 @@ export function inspectDist({
   duckdbCapKb,
   duckdbFloorKb,
   requireDuckdb = false,
+  pdfCapKb,
+  pdfFloorKb,
+  requirePdf = false,
   files,
   text,
 }) {
@@ -187,8 +217,13 @@ export function inspectDist({
    */
   const sidecar = files.filter((f) => f.path === PORTABLE_TEMPLATE);
   const duckdb = files.filter((f) => f.path.startsWith(DUCKDB_DIR));
+  const pdf = files.filter((f) => f.path.startsWith(PDF_DIR));
   const shipped = files.filter(
-    (f) => !f.path.endsWith('.map') && f.path !== PORTABLE_TEMPLATE && !f.path.startsWith(DUCKDB_DIR),
+    (f) =>
+      !f.path.endsWith('.map') &&
+      f.path !== PORTABLE_TEMPLATE &&
+      !f.path.startsWith(DUCKDB_DIR) &&
+      !f.path.startsWith(PDF_DIR),
   );
   const kb = (b) => (b / 1024).toFixed(1);
   const shippedBytes = shipped.reduce((a, f) => a + f.bytes, 0);
@@ -325,6 +360,13 @@ export function inspectDist({
         errors.push(
           `precache に ${DUCKDB_DIR} が ${duckdbInPrecache.length} 件載っている ── ` +
             'これは押したときだけ取りに行く物で、install で 35MB 落とす物ではない',
+        );
+      }
+      const pdfInPrecache = [...have].filter((f) => f.startsWith(PDF_DIR));
+      if (pdfInPrecache.length > 0) {
+        errors.push(
+          `precache に ${PDF_DIR} が ${pdfInPrecache.length} 件載っている ── ` +
+            'これは PDF を PKC の画面で読む人が押したときだけ取りに行く物で、install で落とす物ではない',
         );
       }
       if (have.has(PORTABLE_TEMPLATE)) {
@@ -536,6 +578,51 @@ export function inspectDist({
     errors.push(
       `焼きたてなのに dist に ${DUCKDB_DIR} が無い ── DuckDB を選んでも` +
         '「取ってきて入れる」が空振りする(plugin が emit していない)',
+    );
+  }
+
+  /**
+   * 🔴 **PDF の窓の一式だけの予算**(#275 段①)。⚠ DuckDB と同じ理屈 ── アプリの cap から外した以上、
+   *   外したぶんの門をここに置き直す(外した瞬間、この中身は 0 バイトでも 100 MB でも通る)。
+   * 🔴 **下限と「在ること」は旗が立った回だけ**見る ── `pages.yml` は**過去の release の zip**を検品する
+   *   ので、PDF の窓を持たない版(v3.3.0 など)が落ちて当然になる(DuckDB で 2026-09-09 に踏んだ形)。
+   *   🔑 だから「焼きたてを見る経路」だけが `--require-pdf` を立てる。
+   * ⚠ 予算が**渡っていない**ときは黙って通さない(optional にすると門ごと消える)。
+   */
+  if (pdf.length > 0) {
+    const bytes = pdf.reduce((a2, f) => a2 + f.bytes, 0);
+    lines.push(
+      `  別立て: ${PDF_DIR} ${pdf.length} 件 / ${kb(bytes)} KB(precache しない / cap の外)`,
+    );
+    if (pdfCapKb === undefined || pdfFloorKb === undefined) {
+      errors.push(
+        `${PDF_DIR} が在るのに、その予算が渡っていない ── ` +
+          '呼び側が `pdfCapKb` / `pdfFloorKb` を渡していない(門が消えている)',
+      );
+    } else if (bytes > pdfCapKb * 1024) {
+      errors.push(
+        `${PDF_DIR} が cap を ${kb(bytes - pdfCapKb * 1024)} KB 超過` +
+          `(cap ${pdfCapKb} KB)。取り違えでなければ引き上げてよい`,
+      );
+    } else if (bytes < pdfFloorKb * 1024) {
+      errors.push(
+        `${PDF_DIR} が下限を ${kb(pdfFloorKb * 1024 - bytes)} KB 下回る` +
+          `(下限 ${pdfFloorKb} KB)── 空 / 途中で切れた一式を配ろうとしている`,
+      );
+    }
+    // 🔑 量とは別に集合で見る(日本語の cmap が 1 つ落ちても総量はほとんど動かない)
+    const havePdf = new Set(pdf.map((f) => f.path.slice(PDF_DIR.length)));
+    const missingPdf = PDF_REQUIRED.filter((n) => !havePdf.has(n));
+    if (missingPdf.length > 0) {
+      errors.push(
+        `${PDF_DIR} に要る file が無い: ${missingPdf.join(' / ')} ── ` +
+          'PDF を PKC の画面で読む設定にしても、開けない(または日本語が出ない)一式が配られる',
+      );
+    }
+  } else if (requirePdf) {
+    errors.push(
+      `焼きたてなのに dist に ${PDF_DIR} が無い ── PDF を PKC の画面で読む設定にしても` +
+        '窓が開かない(plugin が emit していないか、public/pdf が消えた)',
     );
   }
 

@@ -336,6 +336,13 @@ describe('規則(純関数)', () => {
     ['assets/sqlite3-BBBBBBBB.wasm', true],
     ['assets/index-AAAAAAAA.js.map', false], // ⚠ dev では 3.2MB ある
     ['sw.js', false], // SW 自身は SW が配らない
+    // 🔴 PDF を PKC の画面で読む窓の一式は、設定で選んだ人が押したときだけ取りに行く物(#275 段①)
+    ['pdf/host.html', false],
+    ['pdf/lib/pdf.min.mjs', false],
+    ['pdf/lib/cmaps/Adobe-Japan1-UCS2.bcmap', false],
+    // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/` だけを外す)
+    ['assets/pdf-viewer-AAAAAAAA.js', true],
+    ['pdf.js', true],
   ])('precache 対象: %s → %s', (path, expected) => {
     expect(shouldPrecache(path)).toBe(expected);
   });
