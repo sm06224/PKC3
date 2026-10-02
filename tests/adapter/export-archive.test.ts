@@ -99,6 +99,10 @@ function baseDeps(overrides: Partial<ExportDeps> = {}): {
     settle: async () => {},
     renderFigure: async () => null,
     renderFigureVector: async () => null,
+    // ⚠ この file は SQL の埋め込みを通らない(`sql-embed-export.test.ts` が見る)
+    askSql: async () => {
+      throw new Error('この test では引かない');
+    },
     notify: (m) => notices.push(m),
     now: () => new Date('2026-09-21T00:00:00.000Z'),
     ...overrides,

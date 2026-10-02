@@ -30,6 +30,7 @@ import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
 import type { DocxBlock } from '@features/export/docx';
 import { svgToEmf } from '@features/export/svg-emf';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
+import { bakeSqlEmbeds, type SqlEmbedAnswer } from '@features/markdown/sql-embed';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { DEFAULT_PROSE_ALIGN, type ProseAlign } from '@features/prose-align';
 import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
@@ -111,6 +112,17 @@ export interface ExportDeps {
    * (user 指示 2026-08-03「基本的に重い処理はワーカーにしてください」)。
    */
   renderBody?(text: string, opts?: RenderMarkdownOptions): Promise<string>;
+  /**
+   * 🔴 **本文に埋め込んだ SQL(` ```sql embed `)の答えを引く**(#1223 Q3 = B)。
+   * 書き出した**その時点の答え**を表にして焼く(原文の SQL も残る)。
+   *
+   * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、戻ってくる症状は
+   *   「書き出した HTML / Word だけ、答えの表が無い」という**いちばん気づけない形**になる
+   *   (画面では出ているので、書き出した後に初めて分かる)。
+   * 🔑 実体は画面の埋め込みと**同じ入口**(`askSqlEmbed` ── 字の門・上限・直列)。
+   * ⚠ 引けないときは**投げてよい** ── 焼く側が 1 行の注記にする(書き出しは止めない)。
+   */
+  askSql(sql: string): Promise<SqlEmbedAnswer>;
   /**
    * 書き出す HTML に外部画像を焼くか(2026-08-06、user 裁定)。
    * ⚠ **設定が「常にオン」のときだけ true** ── 判断は `main.ts` が持つ。
@@ -336,6 +348,7 @@ export async function exportArchive(
         deps.allowExternalImages === true,
         deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
         deps.proseAlign ?? DEFAULT_PROSE_ALIGN,
+        deps.askSql,
       );
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
@@ -531,7 +544,7 @@ async function collectOfficeBlocks(
     (k, why) =>
       warnings.push(`コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`),
   );
-  const html = await renderBody(body.slice(skip), {
+  const rendered = await renderBody(body.slice(skip), {
     vars: extractVars(body),
     headingNumber: extractHeadingNumberConfig(body),
     ...(Object.keys(fenceAssets).length > 0 ? { fenceAssets } : {}),
@@ -542,6 +555,12 @@ async function collectOfficeBlocks(
      */
     format: target.format,
   });
+  /**
+   * 🔴 **本文に埋め込んだ SQL の答えを、書き出した時点の表にして入れる**(#1223 Q3 = B)。
+   * ⚠ ここも**画面の DOM を読んでいない**(もう一度描いている)ので、画面で埋めた答えは
+   *   来ない ── 焼かないと Word / PowerPoint だけ答えの表が無い。原文の SQL は枠として残る。
+   */
+  const html = await bakeSqlEmbeds(rendered, deps.askSql);
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   const { blocks, images, figures } = htmlToDocxBlocks(doc);

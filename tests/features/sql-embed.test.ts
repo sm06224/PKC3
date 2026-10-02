@@ -1,22 +1,24 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **本文に SQL の答えを埋め込む ── 綴り・器・答えの表**(#1223)。
+ * 🔴 **本文に SQL の答えを埋め込む ── 綴り・器・書き出しの焼き込み**(#1223)。
  *
  * 守る主張:
  * 1. ` ```sql embed ` だけが器を置く(`sql` だけ / `sql:embed` / 語順違いは**置かない**)
  * 2. 器を置いても、**コード枠は素の ` ```sql ` と 1 バイトも違わない**(差は末尾の 1 要素)
  * 3. 器を置かない面(クリップボード)でも、**原文の SQL はコード枠として残る**
- * 4. `sql` を fence の登録(`RENDERABLE_FENCE_LANGS`)へ足していない
+ * 4. 書き出した HTML には**その時点の答えが表で焼かれ**、原文も残る
+ * 5. `sql` を fence の登録(`RENDERABLE_FENCE_LANGS`)へ足していない
  *
  * ⚠ 期待値は実 DOM / 実原文から読む(字を手で書き写さない)。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   RENDERABLE_FENCE_LANGS,
   renderFenceFromAsset,
   renderMarkdown,
 } from '../../src/features/markdown/markdown-render';
 import {
+  bakeSqlEmbeds,
   isSqlEmbedInfo,
   SQL_EMBED_ATTR,
   SQL_EMBED_FETCH_ROWS,
@@ -225,5 +227,82 @@ describe('答えの表(sqlEmbedAnswerHtml)', () => {
     const d = parse(sqlEmbedAnswerHtml(answer(0), 200, true));
     expect(d.querySelector('table')).toBeNull();
     expect(d.textContent).toContain('該当する行はありません');
+  });
+});
+
+describe('書き出しの焼き込み(bakeSqlEmbeds)', () => {
+  const ans: SqlEmbedAnswer = { columns: ['n'], rows: [[1], [2]], truncated: false };
+
+  it('🔴 答えを表にして器へ入れ、原文のコード枠も残る', async () => {
+    const html = renderMarkdown(fence('sql embed', 'SELECT n FROM t'));
+    const ask = vi.fn(async () => ans);
+    const out = await bakeSqlEmbeds(html, ask);
+    const d = document.createElement('div');
+    d.innerHTML = out;
+    expect(d.querySelectorAll(`[${SQL_EMBED_ATTR}] table tbody tr`)).toHaveLength(2);
+    expect(d.querySelector('pre code.language-sql')!.textContent).toContain('SELECT n FROM t');
+    // 引いた字は**描かれた SQL そのもの**(末尾の改行まで)
+    expect(ask).toHaveBeenCalledWith('SELECT n FROM t\n');
+  });
+
+  it('🔴 器が 0 個なら 1 度も引かず、HTML は 1 バイトも変わらない', async () => {
+    const html = renderMarkdown('ふつうの本文\n\n' + fence('sql', 'SELECT 1'));
+    const ask = vi.fn(async () => ans);
+    expect(await bakeSqlEmbeds(html, ask)).toBe(html);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('同じ SQL は 1 回しか引かない(2 つの器に同じ答え)', async () => {
+    const html = renderMarkdown(
+      fence('sql embed', 'SELECT 1') + '\n' + fence('sql embed', 'SELECT 1') + '\n' + fence('sql embed', 'SELECT 2'),
+    );
+    const ask = vi.fn(async () => ans);
+    const out = await bakeSqlEmbeds(html, ask);
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(out.match(/<table/g)).toHaveLength(3);
+  });
+
+  it('🔴 引けなかったら 1 行の注記(原文は残り、他の SQL は続ける)', async () => {
+    const html = renderMarkdown(
+      fence('sql embed', 'SELECT bad') + '\n' + fence('sql embed', 'SELECT 1'),
+    );
+    const ask = vi.fn(async (sql: string) => {
+      if (sql.includes('bad')) throw new Error('no such column: bad');
+      return ans;
+    });
+    const out = await bakeSqlEmbeds(html, ask);
+    const d = document.createElement('div');
+    d.innerHTML = out;
+    const hosts = [...d.querySelectorAll<HTMLElement>(`[${SQL_EMBED_ATTR}]`)];
+    expect(hosts[0]!.textContent).toContain('答えを引けませんでした: no such column: bad');
+    expect(hosts[0]!.querySelector('table')).toBeNull();
+    expect(hosts[1]!.querySelector('table')).not.toBeNull();
+    expect(d.querySelectorAll('pre code.language-sql')).toHaveLength(2);
+  });
+
+  it('焼いた物をもう一度焼かない(冪等)', async () => {
+    const html = renderMarkdown(fence('sql embed', 'SELECT 1'));
+    const ask = vi.fn(async () => ans);
+    const once = await bakeSqlEmbeds(html, ask);
+    ask.mockClear();
+    expect(await bakeSqlEmbeds(once, ask)).toBe(once);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('🔴 引いて並べるのは直列(同時に 2 件走らせない)', async () => {
+    const html = renderMarkdown(
+      fence('sql embed', 'SELECT 1') + '\n' + fence('sql embed', 'SELECT 2'),
+    );
+    let running = 0;
+    let peak = 0;
+    const ask = async (): Promise<SqlEmbedAnswer> => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((r) => setTimeout(r, 1));
+      running -= 1;
+      return ans;
+    };
+    await bakeSqlEmbeds(html, ask);
+    expect(peak).toBe(1);
   });
 });

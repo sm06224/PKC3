@@ -25,7 +25,7 @@
  * ## ⚠ ここは features 層 ── 引かない
  *
  * ここが持つのは**綴りの判定・上限の数・答えの表の組み立て**だけ。引くのは adapter
- * (`sql-embed-hydrate.ts`)。
+ * (`sql-embed-hydrate.ts`)で、書き出しの焼き込み(`bakeSqlEmbeds`)も同じ答えの形を使う。
  */
 
 /** 器の印。⚠ 描く側(`markdown-render.ts`)・埋める側・書き出し・コピーが**同じ綴りを読む**。 */
@@ -95,6 +95,15 @@ export function escapeSqlEmbedHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** 上の逆。⚠ 器の属性から原文を戻すときだけ使う(この 4 つ以外は出てこない)。 */
+export function unescapeSqlEmbedHtml(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
 /** 表の値を字にする。⚠ `null` と空文字を**見分けられる**ようにする(SQL を打つ面と同じ)。 */
 export function sqlCellText(v: string | number | null): string {
   return v === null ? '(なし)' : String(v);
@@ -155,4 +164,48 @@ export function sqlEmbedAnswerHtml(
 /** 引けなかったときの 1 行(原文のコード枠はそのまま残る)。 */
 export function sqlEmbedFailureHtml(why: string): string {
   return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`答えを引けませんでした: ${why}`)}</p>`;
+}
+
+/** 器の HTML を取り出す正規表現。⚠ `sqlEmbedHostHtml` が組む形と**同じ綴り**(門は test)。 */
+const HOST_RE = new RegExp(
+  `<div ${SQL_EMBED_ATTR} ${SQL_EMBED_SRC_ATTR}="([^"]*)"></div>`,
+  'g',
+);
+
+/**
+ * 🔴 **書き出す HTML へ、書き出した時点の答えを焼く**(Q3 = B)。
+ *
+ * 描いた**後の HTML** の器(`sqlEmbedHostHtml` の形)を見つけ、答えを引いて中へ入れる。
+ * 原文のコード枠は**そのまま残る**(器の外にある)。
+ *
+ * 🔑 **描いた後の HTML から読む**(`collectFenceAssetKeys` のように本文を読み直さない)── 前処理
+ *   (`{{vars}}` の展開など)の後の字が、**実際に描かれた SQL** だからである。本文を別の
+ *   経路で読むと、描いた字と引く字がずれうる。
+ * ⚠ **同じ SQL は 1 回しか引かない**。⚠ 引くのは**直列**(1 本ずつ待つ ── 保存を待たせない)。
+ * ⚠ **引けなかったら 1 行の注記**(黙って空にしない)。他の SQL は続ける。
+ * ⚠ 器が 0 個なら**何も呼ばない**(`ask` を 1 度も呼ばない = 本文に埋め込みの無いノートの
+ *   書き出しは 1 バイトも変わらない)。
+ */
+export async function bakeSqlEmbeds(
+  html: string,
+  ask: (sql: string) => Promise<SqlEmbedAnswer>,
+): Promise<string> {
+  if (!html.includes(SQL_EMBED_ATTR)) return html;
+  const answers = new Map<string, string>();
+  const matches = [...html.matchAll(HOST_RE)];
+  for (const m of matches) {
+    const sql = unescapeSqlEmbedHtml(m[1] ?? '');
+    if (answers.has(sql)) continue;
+    try {
+      const a = await ask(sql);
+      answers.set(sql, sqlEmbedAnswerHtml(a, SQL_EMBED_PAGE_ROWS, false));
+    } catch (e) {
+      answers.set(sql, sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e)));
+    }
+  }
+  return html.replace(HOST_RE, (whole, src: string) => {
+    const inner = answers.get(unescapeSqlEmbedHtml(src));
+    if (inner === undefined) return whole;
+    return `<div ${SQL_EMBED_ATTR} ${SQL_EMBED_SRC_ATTR}="${src}" data-pkc-sql-embed-state="baked">${inner}</div>`;
+  });
 }

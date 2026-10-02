@@ -300,7 +300,7 @@ import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
-import { setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
+import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
@@ -2093,6 +2093,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    件数ぶんメインスレッドで描くことになる
         // ⚠ opts を素通しする(vars / 見出し番号 ── user 報告 2-7)
         renderBody: (text, opts) => markdown.render(text, opts),
+        /**
+         * 🔴 **書き出した時点の SQL の答えを表にして焼く**(#1223 Q3 = B)。⚠ 閲覧と**同じ入口**
+         * (`askSqlEmbed` ── 字の門・上限・直列)。引けなかった SQL は 1 行の注記になる。
+         */
+        askSql: (sql) => askSqlEmbed(sql),
         /**
          * 🔴 **書き出す HTML に外部画像を焼くのは「常にオン」のときだけ**
          * (2026-08-06、user 裁定)。⚠ ノートごとの同意(`allows(lid)`)は

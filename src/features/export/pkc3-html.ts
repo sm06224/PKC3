@@ -32,6 +32,7 @@
 import BODY_CSS from 'virtual:pkc-body-css';
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown-render';
+import { bakeSqlEmbeds, type SqlEmbedAnswer } from '../markdown/sql-embed';
 import { extractVars } from '../markdown/frontmatter';
 import { createWarnCollector } from './warn-cap';
 import {
@@ -757,6 +758,14 @@ export async function writePortableHtml(
    * ⚠ 渡さないと既定(中央)── 呼び手が忘れても「いままでと同じ」に倒れる。
    */
   proseAlign: ProseAlign = DEFAULT_PROSE_ALIGN,
+  /**
+   * 🔴 **本文に埋め込んだ SQL の答えを引く口**(#1223 Q3 = B)。
+   *
+   * 渡すと、書き出した**その時点の答え**を表にして焼く(原文の SQL もコード枠として残る)。
+   * ⚠ 渡さない(test 等)と器は**空のまま**出る ── 引けないときは 1 行の注記が焼かれる。
+   * ⚠ アプリからは必ず渡す(`ExportDeps.askSql` は optional にしていない)。
+   */
+  askSql?: (sql: string) => Promise<SqlEmbedAnswer>,
 ): Promise<HtmlResult> {
   const warnings: string[] = [];
   /**
@@ -858,12 +867,18 @@ export async function writePortableHtml(
             `コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`,
           ),
       );
-      const html = await render(r.body.slice(skip), {
+      const rendered = await render(r.body.slice(skip), {
         vars: extractVars(r.body),
         headingNumber: extractHeadingNumberConfig(r.body),
         allowExternalImages,
         ...(Object.keys(fenceAssets).length > 0 ? { fenceAssets } : {}),
       });
+      /**
+       * 🔴 **本文に埋め込んだ SQL の答えを、書き出した時点の表にして焼く**(#1223 Q3 = B)。
+       * ⚠ 閲覧側には引く相手(sqlite)が居ない ── 焼かないと「持ち出したら答えが消える」。
+       *   原文の SQL はコード枠として残る。⚠ 器が 0 個なら 1 度も引かない(1 バイトも変わらない)。
+       */
+      const html = askSql ? await bakeSqlEmbeds(rendered, askSql) : rendered;
       /**
        * 🔴 **書字方向などの文書属性も一緒に配る**(同 2-7)。画面では
        * `applyDocumentGlobals` が DOM 属性として当てているので、配る側でも
