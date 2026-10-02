@@ -54,6 +54,7 @@ import {
 import { alignMdTable } from '@features/markdown/table-align';
 import { quoteOnEnter } from '@features/markdown/quote-assist';
 import { indentLines } from '@features/markdown/indent-assist';
+import { swapLines } from '@features/markdown/line-swap';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { renumberLists } from '@features/markdown/list-renumber';
 import { sortTasksByStatus } from '@features/markdown/task-sort';
@@ -10890,6 +10891,16 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
     runIndent(ta, -1, true);
   },
   /**
+   * 🔴 行を前後の行と入れ替える(#1213、`Alt+↑` / `Alt+↓`)── 当て方は `runSwap` 1 か所。
+   * 端では何も書かない(キーは握る ── mac の `Option+↑↓`(段落の頭 / 末へ)を出さない)。
+   */
+  'move-line-up': (ta) => {
+    runSwap(ta, -1);
+  },
+  'move-line-down': (ta) => {
+    runSwap(ta, 1);
+  },
+  /**
    * 🔴 **カーソルの在る表の列幅を揃える**(#1171)。
    * ⚠ 書くのは `insertText`(取り消しの履歴を切らない ── #765)。表の行だけを
    *   選んで差し替え、**カーソルは同じ升へ戻す**(`alignMdTable` が位置を返す)。
@@ -10934,11 +10945,31 @@ function runIndent(ta: HTMLTextAreaElement, dir: 1 | -1, explicit: boolean): boo
   return true;
 }
 
+/**
+ * 🔴 **行の入れ替えを欄へ当てる、唯一の口**(#1213)── 鍵(`Alt+↑` / `Alt+↓`)・
+ * 「操作を探す」の両方が同じ関数を通る(§7)。
+ *
+ * ⚠ 書くのは **`insertText`(= `execCommand`)で入れ替える行の範囲だけ**を置き換える ──
+ *   `ta.value =` で全文を代入すると**取り消しの履歴が切れる**(#765)。字下げ(`runIndent`)と同じ作法。
+ * @returns 何か書いたら `true`。`false` は端で動かせなかった(何も触っていない)
+ */
+function runSwap(ta: HTMLTextAreaElement, dir: 1 | -1): boolean {
+  const res = swapLines({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, dir);
+  if (res === null) return false;
+  ta.setSelectionRange(res.from, res.to);
+  insertText(ta, res.insert);
+  ta.setSelectionRange(res.start, res.end);
+  return true;
+}
+
 /** 字下げの 2 命令(`keymap.ts` の id)。1 面の行の欄はこの 2 つだけ `EDITOR_RUN` を通す。 */
 const INDENT_COMMANDS: ReadonlyMap<string, 1 | -1> = new Map([
   ['indent', 1],
   ['outdent', -1],
 ]);
+
+/** 行の入れ替えの 2 命令(#1213)。字下げと同じく、1 面の行の欄はこの 2 つも `EDITOR_RUN` を通す。 */
+const SWAP_COMMANDS: ReadonlySet<string> = new Set(['move-line-up', 'move-line-down']);
 
 /** 🔑 画面のボタンの字(「全文を編集」)を引いて書く ── `detail.ts` の編集ボタンと同じ字。 */
 const ALIGN_TABLE_LIVE_NOTE = '表の列幅を揃えるには、「全文を編集」に切り替えてください';
@@ -11990,8 +12021,9 @@ export function bindActions(
      */
     if (field === 'row-source') {
       const rowCmd = keymap.match(ke, 'row');
-      // 🔴 字下げ(#1166)は `Tab` が行の保存なので、鍵(`Ctrl+]` / `Ctrl+[`)で受ける
-      if (rowCmd !== null && INDENT_COMMANDS.has(rowCmd)) {
+      // 🔴 字下げ(#1166)は `Tab` が行の保存なので、鍵(`Ctrl+]` / `Ctrl+[`)で受ける。
+      //   行の入れ替え(#1213 `Alt+↑↓`)も同じ門 ── 欄の中の行だけ動かす(塊はまたがない)
+      if (rowCmd !== null && (INDENT_COMMANDS.has(rowCmd) || SWAP_COMMANDS.has(rowCmd))) {
         ke.preventDefault();
         EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, () => undefined);
         return;

@@ -114,6 +114,14 @@ test('🔴 1 面で、クリックした行だけが原文になる(周りは描
   await row.press('Control+[');
   await expect(row, 'Ctrl+[ で戻らない').toHaveValue('最初の段落です。');
 
+  // ②'-b 🔴 行の入れ替え(#1213)── 1 行だけの塊の欄では何も起きない(隣の塊とは入れ替えない)。
+  //    ⚠ 行の欄は開いたまま・値も変わらない(上下の段落の描画も動かない)
+  await row.press('Alt+ArrowDown');
+  await expect(row, '1 行の塊で Alt+↓ が効いた').toHaveValue('最初の段落です。');
+  await row.press('Alt+ArrowUp');
+  await expect(row, '1 行の塊で Alt+↑ が効いた').toHaveValue('最初の段落です。');
+  await expect(live.locator('p'), 'Alt+↓ で隣の塊が動いた').toContainText(['次の段落です。']);
+
   // ②'' 🔴 #950 ① ── 行の欄で字を選ぶと、帯の 4 つ(表 / 図 / コードブロック / 数式)の
   //    説明が「選んだ範囲を囲みます」になり、選びを外すと戻る。⚠ 字と帯の高さは動かない
   const bar = page.locator('[data-pkc-region="format-bar"]');
