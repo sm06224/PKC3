@@ -37,6 +37,9 @@
   async function anyModified(lo) {
     if (!lo || !lo.uno || typeof lo.getUnoComponentContext !== 'function') return null;
     var modified = false;
+    // ⚠ 作った wrapper は**投げた経路でも**解放する(`finally`)。`rel` は解放して null を返す(二重に解放しない)
+    var ctx = null, any = null, ifc = null, desktop = null, comps = null, en = null;
+    function rel(o) { del(o); return null; }
     try {
       // 橋の初期化待ち(起動中ならここで解決する)。⚠ 解決しない相手を待ち続けない
       if (lo.uno_init && typeof lo.uno_init.then === 'function') {
@@ -51,33 +54,37 @@
         }
       }
       var S = lo.uno.com.sun.star;
-      var ctx = lo.getUnoComponentContext();
-      var any = ctx.getValueByName('/singletons/com.sun.star.frame.theDesktop');
-      var ifc = any.get();
-      del(any); del(ctx);
-      var desktop = S.frame.XDesktop.query(ifc);
-      del(ifc);
-      var comps = desktop.getComponents();
-      del(desktop);
-      var en = comps.createEnumeration();
-      del(comps);
+      ctx = lo.getUnoComponentContext();
+      any = ctx.getValueByName('/singletons/com.sun.star.frame.theDesktop');
+      ifc = any.get();
+      any = rel(any); ctx = rel(ctx);
+      desktop = S.frame.XDesktop.query(ifc);
+      ifc = rel(ifc);
+      comps = desktop.getComponents();
+      desktop = rel(desktop);
+      en = comps.createEnumeration();
+      comps = rel(comps);
       while (en.hasMoreElements()) {
         var a = en.nextElement();
-        var el = a.get();
-        del(a);
+        var el = null;
+        var mod = null;
         try {
-          var mod = S.util.XModifiable.query(el);
+          el = a.get();
+          a = rel(a);
+          mod = S.util.XModifiable.query(el);
           // ⚠ 戻りは 0 / 1(boolean ではない)。Start Center は query が null
           if (mod && mod.isModified()) modified = true;
-          del(mod);
-        } catch (e) { /* この 1 件は聞けなかった ── 他の文書は見る */ }
-        del(el);
+        } catch (e) { /* この 1 件は聞けなかった ── 他の文書は見る */
+        } finally {
+          del(mod); del(el); del(a);
+        }
       }
-      del(en);
       return modified;
     } catch (e) {
       // ⚠ 数え途中で例外でも、**在ると分かった分は捨てない**(消す側へ倒さない)
       return modified ? true : null;
+    } finally {
+      del(en); del(comps); del(desktop); del(ifc); del(any); del(ctx);
     }
   }
 

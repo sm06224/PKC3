@@ -590,14 +590,13 @@
   //    `docs/development/office-shadow-measure-2026-10.md`)。keydown などの**印を立てるだけ**で、書くのは止まってから。
   // ⚠ **先に登録する** ── 下の Ctrl 英字の握り潰し(`stopImmediatePropagation`)より前に印を見る。
   var shadowQuiet = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createQuiet() : null;
-  var SHADOW_INPUTS = ['keydown', 'beforeinput', 'compositionend', 'paste', 'cut', 'drop'];
-  var SHADOW_MODIFIER_KEYS = { Shift: 1, Control: 1, Alt: 1, Meta: 1, CapsLock: 1 };
+  // ⚠ `compositionstart` / `compositionend` は変換中の出入り(変換中は書かない)。修飾キーだけの押下・Ctrl+S の直後の
+  //    扱いも `feedInput`(office-shadow.js)が決める ── ここは種類を渡すだけ。
+  var SHADOW_INPUTS = ['keydown', 'beforeinput', 'compositionstart', 'compositionend', 'paste', 'cut', 'drop'];
   SHADOW_INPUTS.forEach(function (t) {
     window.addEventListener(t, function (e) {
       if (!shadowQuiet) return;
-      // 修飾キーだけの押下は編集ではない(Ctrl を押しただけで「打った」にしない)
-      if (t === 'keydown' && e && SHADOW_MODIFIER_KEYS[e.key] === 1) return;
-      shadowQuiet.typed(Date.now());
+      window.PKC3OfficeShadow.feedInput(shadowQuiet, t, e, Date.now());
     }, true);
   });
   var shadowTimer = null;
@@ -607,8 +606,9 @@
   /**
    * 1 秒ごとに「止まったか」を見る(静止していなければ何もしない軽い比較)。
    * @param getToken そのノートの合言葉を返す(⚠ 値で受けない ── 起動後に決まる)
+   * @param getDoc 開いた文書の `{ name, size }` を返す(棚の `meta.json` へ書き添える。⚠ 本文は渡さない)
    */
-  function armShadow(FS, getToken) {
+  function armShadow(FS, getToken, getDoc) {
     var SH = window.PKC3OfficeShadow;
     var U = window.PKC3OfficeUnsaved;
     if (!SH || !shadowQuiet || !U) {
@@ -641,6 +641,7 @@
           id: SH.safeId(getToken(), winKey),
           ext: info.ext,
           size: info.size,
+          origin: typeof getDoc === 'function' ? getDoc() : null,
           now: function () { return Date.now(); },
           read: function (into, wanted, position) { return FS.read(stream, into, 0, wanted, position); },
         }).then(function (r) { done(); return r; }, function (e) { done(); throw e; });
@@ -1791,7 +1792,7 @@
       //    ⚠ 文書が無いとき(Start Center)も積む ── 新規作成の保存がここから来る
       armSaveWatch(FS, docToken);
       // 🔴 影(編集中の文書の写し)の見張り(#1228 段 1)。⚠ 保存の見張りと**別の timer**(1 timer = 1 仕事)
-      armShadow(FS, function () { return docToken; });
+      armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0 }; });
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
       //
       // ⚠ **上限を置く。** 版面が出なければ `clearInterval` に到達せず、

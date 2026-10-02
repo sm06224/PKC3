@@ -15,8 +15,9 @@
  * 6. 失敗は黙らない(理由は user の字・同じ理由は 1 度)/ 成功は言わない
  * 7. 放送の parity ── 実物の窓(host.html の行)が撃つ放送を、実物の `OfficeWindow` が受ける
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { localFileToken } from '../../src/features/office/office-launch';
 import { OfficeWindow, shadowFailedNotice, type OfficeWindowEvent } from '../../src/adapter/platform/office/office-window';
 
 interface Gate {
@@ -29,6 +30,12 @@ interface Gate {
 }
 interface Api {
   QUIET_MS: number;
+  SAVE_DEFER_MS: number;
+  COMPOSING_MAX_MS: number;
+  RETRY_BACKOFF_MS: number[];
+  META_NAME: string;
+  LOCAL_TOKEN_PREFIX: string;
+  feedInput(q: Quiet, type: string, e: unknown, at: number): void;
   SHADOW_FILTERS: Record<string, string>;
   extOfName(name: string): string;
   filterFor(ext: string): string | null;
@@ -37,18 +44,23 @@ interface Api {
   storeShadowSync(lo: unknown, gate: Gate, opts?: { docPath?: string }): StoreResult;
   discardLocal(FS: unknown): number;
   safeId(token: string, fallback: string): string;
-  shelve(d: ShelveDeps): Promise<{ at: number; name: string }>;
+  shelve(d: ShelveDeps): Promise<{ at: number; name: string; meta: boolean }>;
   reasonOf(e: unknown): string;
   createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean };
   SHADOW_DIR: string;
   SHELF_DIR: string;
   CHUNK: number;
 }
-interface Quiet { typed(at: number): void; take(at: number): boolean; isDirty(): boolean }
+interface Quiet {
+  typed(at: number): void; take(at: number): boolean; isDirty(): boolean;
+  compositionStart(at: number): void; compositionEnd(at: number): void; isComposing(): boolean;
+  defer(at: number, ms: number): void; retry(at: number, delayMs: number): void;
+}
 type StoreResult = { skipped: 'unmodified' | 'format'; ext?: string } | { ext: string; path: string; size: number };
 interface ShelveDeps {
   storage: unknown; id: string; ext: string; size: number; now(): number;
   read(into: Uint8Array, wanted: number, position: number): number;
+  origin?: { name: string; size: number } | null;
 }
 interface WriterDeps {
   now(): number; quiet: Quiet; isDead(): boolean; isModified(): Promise<boolean | null>;
@@ -212,6 +224,102 @@ describe('🔴 静止の判定(打ち続けている間は書かない / 止ま�
   });
 });
 
+describe('🔴 変換中(IME)は書かない / Ctrl+S の直後は待つ', () => {
+  it('変換中(compositionstart 〜 compositionend)は、3 秒止まっても書かない。確定してから 3 秒で 1 回', () => {
+    const q = api.createQuiet();
+    q.typed(0);
+    q.compositionStart(100);
+    expect(q.isComposing()).toBe(true);
+    expect(q.take(10000), '変換の途中を書こうとしている').toBe(false);
+    expect(q.take(50000), '変換が続いている間はいつまでも書かない').toBe(false);
+    q.compositionEnd(60000);
+    expect(q.isComposing()).toBe(false);
+    expect(q.take(62999), '確定から 3 秒に 1ms 足りない').toBe(false);
+    expect(q.take(63000)).toBe(true);
+    expect(q.take(70000), '下ろした後は打つまで書かない').toBe(false);
+  });
+
+  it('compositionend が来ないまま(取りこぼし)でも、上限(COMPOSING_MAX_MS)で諦めて書く ── 永久に止めない', () => {
+    const q = api.createQuiet();
+    q.typed(0);
+    q.compositionStart(1000);
+    expect(q.take(1000 + api.COMPOSING_MAX_MS - 1)).toBe(false);
+    expect(q.take(1000 + api.COMPOSING_MAX_MS)).toBe(true);
+    expect(q.isComposing()).toBe(false);
+  });
+
+  it('feedInput: 変換の出入りで印が動く(compositionstart で変換中 / compositionend で確定 + 打った印)', () => {
+    const q = api.createQuiet();
+    api.feedInput(q, 'compositionstart', {}, 100);
+    expect(q.isComposing()).toBe(true);
+    expect(q.isDirty(), 'まだ何も打っていない').toBe(false);
+    api.feedInput(q, 'keydown', { key: 'Process' }, 200);       // 変換中の keydown
+    expect(q.take(9000), '変換中の keydown で書こうとしている').toBe(false);
+    api.feedInput(q, 'compositionend', {}, 10000);
+    expect(q.isComposing()).toBe(false);
+    expect(q.isDirty()).toBe(true);
+    expect(q.take(13000)).toBe(true);
+  });
+
+  it('🔴 Ctrl / Meta + S の keydown は打った印にせず、静止の起点を SAVE_DEFER_MS 後ろへ送る', () => {
+    expect(api.SAVE_DEFER_MS).toBe(10000);
+    const q = api.createQuiet();
+    q.typed(1000);
+    api.feedInput(q, 'keydown', { key: 's', ctrlKey: true }, 2000);
+    expect(q.take(5000), '保存の確認が出ている間に書こうとしている').toBe(false);
+    expect(q.take(14999)).toBe(false);
+    expect(q.take(15000), '起点 + 10 秒 + 静止 3 秒').toBe(true);
+    // Meta(mac)/ 大文字 S も同じ
+    for (const ev of [{ key: 's', metaKey: true }, { key: 'S', ctrlKey: true }]) {
+      const m = api.createQuiet();
+      m.typed(0);
+      api.feedInput(m, 'keydown', ev, 1000);
+      expect(m.take(8000), JSON.stringify(ev)).toBe(false);
+      expect(m.take(14000), JSON.stringify(ev)).toBe(true);
+    }
+    // 対照群: 修飾なしの `s` は普通の字(打った印)
+    const plain = api.createQuiet();
+    api.feedInput(plain, 'keydown', { key: 's' }, 1000);
+    expect(plain.isDirty()).toBe(true);
+    expect(plain.take(4000)).toBe(true);
+    // 打っていないなら、Ctrl+S だけで印は立たない
+    const idle = api.createQuiet();
+    api.feedInput(idle, 'keydown', { key: 's', ctrlKey: true }, 1000);
+    expect(idle.isDirty(), '押しただけで書こうとしている').toBe(false);
+    // 送った起点を、その後の打鍵が縮めない(確認の「Enter」で 3 秒後に書き出さない)
+    const k = api.createQuiet();
+    k.typed(0);
+    api.feedInput(k, 'keydown', { key: 's', ctrlKey: true }, 1000);
+    api.feedInput(k, 'keydown', { key: 'Enter' }, 2000);
+    expect(k.take(6000), '確認の Enter で起点が戻った').toBe(false);
+    expect(k.take(14000)).toBe(true);
+  });
+
+  it('修飾キーだけの押下は印を立てない(Ctrl を押しただけで「打った」にしない)', () => {
+    const q = api.createQuiet();
+    for (const key of ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock']) api.feedInput(q, 'keydown', { key }, 1000);
+    expect(q.isDirty()).toBe(false);
+    api.feedInput(q, 'paste', {}, 1000);
+    expect(q.isDirty(), '対照群: 貼り付けは打った印').toBe(true);
+  });
+
+  it('retry: 印を戻し、delayMs 後に take が通る。その間に打たれていれば打った時刻のほうが後ならそちらを採る', () => {
+    const q = api.createQuiet();
+    q.typed(0);
+    expect(q.take(3000)).toBe(true);
+    q.retry(3000, 0);
+    expect(q.isDirty()).toBe(true);
+    expect(q.take(3000), '間 0 は直ちに').toBe(true);
+    q.retry(3000, 30000);
+    expect(q.take(32999)).toBe(false);
+    expect(q.take(33000)).toBe(true);
+    q.retry(33000, 0);
+    q.typed(40000);
+    expect(q.take(42999), '再試行が、後から打った分の静止を縮めた').toBe(false);
+    expect(q.take(43000)).toBe(true);
+  });
+});
+
 /** 時計と部品を持つ writer の台。`modified` を差し替えて保存済み / 聞けなかったを作る。 */
 function writerRig(opts: {
   modified?: boolean | null;
@@ -273,9 +381,12 @@ describe('🔴 書く流れ(静止 → 保存済みか確かめる → 書く �
 
   it('LO に聞けなかった(null)は黙らない。理由は user の字で、同じ理由は続けて 1 度しか言わない', async () => {
     const r = writerRig({ modified: null });
-    for (const t of [5000, 10000, 15000]) {
-      r.quiet.typed(t - 4000); r.clock.t = t;
-      expect(await r.writer.tick()).toBe('failed');
+    r.quiet.typed(1000);
+    // 失敗のたびに印が戻るので、打ち直さなくても再試行される(間は伸びる ── 下の「再試行」)
+    const at = [5000, 6000, 40000, 110000];
+    for (const t of at) {
+      r.clock.t = t;
+      expect(await r.writer.tick(), `t=${t}`).toBe('failed');
     }
     expect(r.calls.failed, '同じ理由を毎回出している / 黙っている').toEqual(['編集の状態を Office に聞けませんでした']);
     expect(r.calls.write).toBe(0);
@@ -291,18 +402,58 @@ describe('🔴 書く流れ(静止 → 保存済みか確かめる → 書く �
     expect(r.calls.written, '失敗なのに成功の時刻を渡した').toEqual([]);
     // 画面の字に内部の語を出さない
     expect(r.calls.failed[0]).not.toMatch(/fd_sync|storeToURL|OPFS|Suspend|UNO/);
-    // 同じ失敗がもう一度 → 言い直さない
-    r.quiet.typed(5000); r.clock.t = 9000;
+    // 同じ失敗がもう一度(次の見張りでの再試行)→ 言い直さない
+    r.clock.t = 5000;
     expect(await r.writer.tick()).toBe('failed');
     expect(r.calls.failed).toHaveLength(1);
-    // 成功すると言い直せる
+    // 成功すると言い直せる(2 回目の失敗の後は 30 秒あけて再試行 ── 打ち直さなくても書ける)
     boom = false;
-    r.quiet.typed(10000); r.clock.t = 14000;
+    r.clock.t = 35000;
     expect(await r.writer.tick()).toBe('written');
     boom = true;
-    r.quiet.typed(15000); r.clock.t = 19000;
+    r.quiet.typed(36000); r.clock.t = 40000;
     expect(await r.writer.tick()).toBe('failed');
     expect(r.calls.failed, '成功の後の失敗を言っていない').toHaveLength(2);
+  });
+
+  it('🔴 書けなかったら印を戻す: 打ち直さなくても次の見張りで再試行し、続けて失敗するほど間を伸ばす(上限つき)', async () => {
+    const r = writerRig({ write: () => { throw new Error('boom'); } });
+    r.quiet.typed(0);
+    const attempts: number[] = [];
+    for (let t = 3000; t <= 600000; t += 1000) {
+      r.clock.t = t;
+      const before = r.calls.write;
+      await r.writer.tick();
+      if (r.calls.write > before) attempts.push(t);
+    }
+    const gaps = attempts.slice(1).map((t, i) => t - attempts[i]!);
+    expect(attempts[0], '最初は静止 3 秒の後').toBe(3000);
+    expect(gaps.slice(0, 4), '1 秒後に 1 度 → 30 秒 → 60 秒 → 120 秒').toEqual([1000, 30000, 60000, 120000]);
+    expect(gaps.slice(3), '上限(最後の間)で止まる').toEqual(gaps.slice(3).map(() => 120000));
+    expect(api.RETRY_BACKOFF_MS).toEqual([0, 30000, 60000, 120000]);
+  });
+
+  it('再試行は、保存済み / 測っていない形式 / 成功 のあとは続けない(打つまで書かない)/ 間は成功で最初へ戻る', async () => {
+    // 保存済み(clean)になったら、もう再試行しない
+    const r = writerRig({ write: () => { throw new Error('boom'); } });
+    r.quiet.typed(0); r.clock.t = 3000;
+    expect(await r.writer.tick()).toBe('failed');
+    r.state.modified = false;       // その間に user が保存した
+    r.clock.t = 4000;
+    expect(await r.writer.tick()).toBe('clean');
+    r.clock.t = 100000;
+    expect(await r.writer.tick(), '保存済みなのに再試行を続けている').toBe('wait');
+    // 成功で間は最初へ戻る(失敗を挟んでも「30 秒」が引き継がれない)
+    let boom = true;
+    const r2 = writerRig({ write: () => { if (boom) throw new Error('boom'); return { ext: 'odt', path: '/p', size: 1 }; } });
+    r2.quiet.typed(0); r2.clock.t = 3000; await r2.writer.tick();     // 失敗 1(間 0)
+    r2.clock.t = 4000; await r2.writer.tick();                         // 失敗 2(間 30 秒)
+    boom = false; r2.clock.t = 34000;
+    expect(await r2.writer.tick()).toBe('written');
+    boom = true; r2.quiet.typed(35000); r2.clock.t = 38000;
+    expect(await r2.writer.tick()).toBe('failed');                     // 失敗 1 に戻る
+    r2.clock.t = 39000;
+    expect(await r2.writer.tick(), '成功の後なのに前の間が残っている').toBe('failed');
   });
 
   it('棚へ置けなかったときも黙らない(失敗は理由つき・writer は動き続ける)', async () => {
@@ -547,6 +698,36 @@ describe('🔴 LO に影を書かせる(差し替えは storeToURL の間だけ)
     expect(f2.stores[0]!.doc).toBe('file:///work/first.odt');
   });
 
+  it('🔴 書けない形式が先に来ても、後ろの書ける文書の影を取りこぼさない(書ける形式を先に選ぶ)', () => {
+    const g = api.createSyncGate(() => null);
+    // 窓の文書(.xlsx。書けない)が最初 / 2 つ目は別の .docx
+    const f = fakeShadowLo([
+      { loc: 'file:///work/book.xlsx', modified: true },
+      { loc: 'file:///work/other.docx', modified: true },
+    ], g);
+    expect(api.storeShadowSync(f.lo, g, { docPath: '/work/book.xlsx' })).toMatchObject({ ext: 'docx' });
+    expect(f.stores.map((x) => x.doc), '書けない形式を選んで .docx の影が出ない').toEqual(['file:///work/other.docx']);
+    // 場所の無い新規文書が先でも同じ
+    const g2 = api.createSyncGate(() => null);
+    const f2 = fakeShadowLo([
+      { loc: '', modified: true },
+      { loc: 'file:///work/note.odt', modified: true },
+    ], g2);
+    expect(api.storeShadowSync(f2.lo, g2, {})).toMatchObject({ ext: 'odt' });
+    // 書ける同士なら、窓の文書と同じ場所を優先(順番に依らない)
+    const g3 = api.createSyncGate(() => null);
+    const f3 = fakeShadowLo([
+      { loc: 'file:///work/a.docx', modified: true },
+      { loc: 'file:///work/b.docx', modified: true },
+    ], g3);
+    api.storeShadowSync(f3.lo, g3, { docPath: '/work/b.docx' });
+    expect(f3.stores[0]!.doc).toBe('file:///work/b.docx');
+    // 書ける文書が 1 つも無ければ従来どおり skipped(format)
+    const g4 = api.createSyncGate(() => null);
+    const f4 = fakeShadowLo([{ loc: 'file:///work/a.xlsx', modified: true }, { loc: 'file:///work/b.pptx', modified: true }], g4);
+    expect(api.storeShadowSync(f4.lo, g4, {})).toMatchObject({ skipped: 'format' });
+  });
+
   it('書く前に置き場の古い物(LO が横に残す lu*.tmp を含む)を捨てる。空の影は成功にしない', () => {
     const g = api.createSyncGate(() => null);
     const f = fakeShadowLo([{ loc: 'file:///work/seed.odt', modified: true }], g, {
@@ -641,6 +822,8 @@ function shelveDeps(root: FakeDir, over: Partial<ShelveDeps> & { reads?: number[
   };
 }
 const shelfOf = (root: FakeDir, id = 'lid-1') => root.dirs.get('pkc3-office-shadow')?.dirs.get(id);
+/** 棚の影の名前だけ(`meta.json` は影ではない)。 */
+const shadowsOf = (root: FakeDir, id = 'lid-1'): string[] => [...(shelfOf(root, id)?.files.keys() ?? [])].filter((k) => k !== 'meta.json');
 
 describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
   it('<棚>/<id>/<13桁の時刻>.<拡張子> へ置く。⚠ 取り込みの棚(pkc3-office-stage)とは別の名前', async () => {
@@ -650,7 +833,7 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     expect(api.SHELF_DIR).not.toBe('pkc3-office-stage');
     expect(r.name).toBe('1000000000000.docx');
     const dir = shelfOf(root)!;
-    expect([...dir.files.keys()]).toEqual(['1000000000000.docx']);
+    expect(shadowsOf(root)).toEqual(['1000000000000.docx']);
     expect([...dir.files.get(r.name)!.data]).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 
@@ -659,7 +842,7 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_000_000, ext: 'odt' }));
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_005_000, ext: 'docx' }));
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_009_000, ext: 'docx' }));
-    expect([...shelfOf(root)!.files.keys()], '古い影が残っている').toEqual(['1000000009000.docx']);
+    expect(shadowsOf(root), '古い影が残っている').toEqual(['1000000009000.docx']);
   });
 
   it('自分より新しい名前(別の窓が同じ asset へ書いた分)は消さない。別の asset の棚も触らない', async () => {
@@ -667,8 +850,8 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_009_000 }));
     await api.shelve(shelveDeps(root, { id: 'lid-2', now: () => 1_000_000_001_000 }));
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_001_000 }));   // 時計の遅れた窓
-    expect([...shelfOf(root, 'lid-1')!.files.keys()].sort(), '新しい影を消した').toEqual(['1000000001000.odt', '1000000009000.odt']);
-    expect([...shelfOf(root, 'lid-2')!.files.keys()], '別の asset の影を消した').toEqual(['1000000001000.odt']);
+    expect(shadowsOf(root, 'lid-1').sort(), '新しい影を消した').toEqual(['1000000001000.odt', '1000000009000.odt']);
+    expect(shadowsOf(root, 'lid-2'), '別の asset の影を消した').toEqual(['1000000001000.odt']);
   });
 
   it('刻んで書く(1MiB ずつ)。丸ごと 1 本の複製を作らず、中身が欠けない', async () => {
@@ -689,7 +872,7 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     await api.shelve(shelveDeps(root, { now: () => 1_000_000_000_000 }));
     root.failWriteAt = 0;
     await expect(api.shelve(shelveDeps(root, { now: () => 1_000_000_005_000 }))).rejects.toThrow(/disk/);
-    expect([...shelfOf(root)!.files.keys()], '書きかけの名前が残った / 前の影が消えた').toEqual(['1000000000000.odt']);
+    expect(shadowsOf(root), '書きかけの名前が残った / 前の影が消えた').toEqual(['1000000000000.odt']);
   });
 
   it('読めなくなったら(read が 0)置かずに失敗する / 空は置かない / OPFS が無い環境は理由つきで落とす', async () => {
@@ -709,18 +892,87 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     expect(api.safeId('', '')).toBe('unnamed');
     expect(api.safeId('x'.repeat(200), 'w').length).toBe(80);
   });
+
+  it('🔴 手元の file の合言葉(local:N)は棚の名前にしない ── 窓ごとの名前を使う(別の file の唯一の影を消さない)', () => {
+    // 前置きは本体(localFileToken)と同じ字(食い違うと local: が素通りして別の file の棚と衝突する)
+    expect(api.LOCAL_TOKEN_PREFIX).toBe(localFileToken(''));
+    const t1 = localFileToken('1');
+    const t2 = localFileToken('2');
+    expect(api.safeId(t1, 'w-A'), 'local: がそのまま棚の名前になっている').toBe('w-A');
+    expect(api.safeId(t1, 'w-A')).not.toBe(api.safeId(t1, 'w-B'));
+    expect(api.safeId(t2, 'w-A')).toBe('w-A');
+    // 対照群: ノートの lid は従来どおり(ノートごとの棚)
+    expect(api.safeId('lid-9', 'w-A')).toBe('lid-9');
+    // 'local:' に似ているだけの lid は巻き込まない
+    expect(api.safeId('localnote', 'w-A')).toBe('localnote');
+  });
+
+  it('🔴 同じ local:1 を持つ 2 つの窓の棚が、消し合わない。同じ窓の 2 回目は古い影を消す(対照群)', async () => {
+    const root = new FakeDir();
+    const id = (win: string) => api.safeId(localFileToken('1'), win);
+    await api.shelve(shelveDeps(root, { id: id('w-A'), now: () => 1_000_000_000_000 }));
+    await api.shelve(shelveDeps(root, { id: id('w-B'), now: () => 1_000_000_005_000 }));
+    expect(shadowsOf(root, 'w-A'), 'B が A の影を消した').toEqual(['1000000000000.odt']);
+    expect(shadowsOf(root, 'w-B')).toEqual(['1000000005000.odt']);
+    await api.shelve(shelveDeps(root, { id: id('w-A'), now: () => 1_000_000_009_000 }));
+    expect(shadowsOf(root, 'w-A'), '同じ窓の古い影が残っている').toEqual(['1000000009000.odt']);
+    expect(shadowsOf(root, 'w-B'), 'A の 2 回目が B を消した').toEqual(['1000000005000.odt']);
+  });
+
+  it('棚へ元の文書の記録(meta.json)を添える: 名前・大きさ・時刻・拡張子だけ。本文は入れない。影の整理で消えない', async () => {
+    const root = new FakeDir();
+    const dec = (d: FakeDir) => JSON.parse(new TextDecoder().decode(d.files.get('meta.json')!.data)) as Record<string, unknown>;
+    const r1 = await api.shelve(shelveDeps(root, { ext: 'docx', origin: { name: '報告 書.docx', size: 4321 }, now: () => 1_000_000_000_000 }));
+    expect(r1.meta).toBe(true);
+    expect(api.META_NAME).toBe('meta.json');
+    expect(dec(shelfOf(root)!)).toEqual({ v: 1, name: '報告 書.docx', size: 4321, at: 1_000_000_000_000, ext: 'docx' });
+    // 2 回目(古い影が消える回)でも meta.json は残り、最新の記録になる
+    await api.shelve(shelveDeps(root, { ext: 'docx', origin: { name: '報告 書.docx', size: 4400 }, now: () => 1_000_000_005_000 }));
+    expect(shelfOf(root)!.files.has('meta.json'), '影の整理が meta.json を消した').toBe(true);
+    expect(dec(shelfOf(root)!).size).toBe(4400);
+    expect(shadowsOf(root)).toEqual(['1000000005000.docx']);
+    // 元の文書が分からなくても影は置く(名前は空・大きさは null)
+    const root2 = new FakeDir();
+    await api.shelve(shelveDeps(root2));
+    expect(dec(shelfOf(root2)!)).toMatchObject({ name: '', size: null });
+  });
+
+  it('影の整理は影の名前(13 桁の時刻 + 拡張子)だけを消す ── 棚に居る別の物(名前が影より前に並ぶ物)は消さない', async () => {
+    const root = new FakeDir();
+    await api.shelve(shelveDeps(root, { now: () => 1_000_000_000_000 }));
+    const dir = shelfOf(root)!;
+    dir.files.set('0-keep.txt', new FakeFile());
+    dir.files.set('.keep', new FakeFile());
+    await api.shelve(shelveDeps(root, { now: () => 1_000_000_005_000 }));
+    expect([...dir.files.keys()].sort(), '影でない物を消した / 古い影が残った').toEqual(['.keep', '0-keep.txt', '1000000005000.odt', 'meta.json']);
+  });
+
+  it('記録(meta.json)を書けなくても影は成功(meta: false)── 影が本体', async () => {
+    const root = new FakeDir();
+    const dir0 = await ((await root.getDirectoryHandle('pkc3-office-shadow', { create: true })).getDirectoryHandle('lid-1', { create: true }));
+    // meta.json の書き込みだけ失敗させる
+    const orig = dir0.getFileHandle.bind(dir0);
+    dir0.getFileHandle = (async (n: string, o?: { create?: boolean }) => {
+      if (n === 'meta.json') throw new Error('quota');
+      return orig(n, o);
+    }) as typeof dir0.getFileHandle;
+    const r = await api.shelve(shelveDeps(root, { origin: { name: 'a.odt', size: 1 } }));
+    expect(r.meta).toBe(false);
+    expect(shadowsOf(root)).toEqual(['1000000000000.odt']);
+  });
 });
 
 // ───────────────────────── host.html の配線(実行行の原文 pin)+ 放送の parity ─────────────────────────
 
 describe('🔴 host.html の影の配線', () => {
   const host = hostCode();
-  it('打った印は keydown など 6 種で立て、修飾キーだけの押下は数えず、Ctrl 英字の握り潰しより前に登録する', () => {
-    for (const t of ['keydown', 'beforeinput', 'compositionend', 'paste', 'cut', 'drop']) {
-      expect(host, `${t} で印を立てていない`).toContain(`'${t}'`);
-    }
-    expect(host).toContain('shadowQuiet.typed(Date.now())');
-    expect(host).toContain("t === 'keydown' && e && SHADOW_MODIFIER_KEYS[e.key] === 1");
+  it('打った印の種類(変換の出入りを含む)を feedInput へ渡し、Ctrl 英字の握り潰しより前に登録する', () => {
+    // 種類の一覧は**実行行の配列そのもの**を評価して見る(別の行の同じ字に満たされない)
+    const m = /var SHADOW_INPUTS = (\[[^\]]*\]);/.exec(host);
+    expect(m, 'SHADOW_INPUTS を抜き出せていない').not.toBeNull();
+    const kinds = new Function(`return ${m![1]}`)() as string[];
+    expect([...kinds].sort()).toEqual(['beforeinput', 'compositionend', 'compositionstart', 'cut', 'drop', 'keydown', 'paste']);
+    expect(host).toContain('window.PKC3OfficeShadow.feedInput(shadowQuiet, t, e, Date.now());');
     const reg = host.indexOf('SHADOW_INPUTS.forEach(');
     const mac = host.indexOf('e.stopImmediatePropagation()');
     expect(reg, '登録を抜き出せていない').toBeGreaterThan(0);
@@ -729,7 +981,7 @@ describe('🔴 host.html の影の配線', () => {
 
   it('保存の見張りの直後に積み、1 秒ごとに tick する。閉じるとき止める', () => {
     const a = host.indexOf('armSaveWatch(FS, docToken);');
-    const b = host.indexOf('armShadow(FS, function () { return docToken; });');
+    const b = host.indexOf('armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0 }; });');
     expect(a).toBeGreaterThan(0);
     expect(b, '影の見張りを積んでいない').toBeGreaterThan(a);
     expect(host).toContain('shadowTimer = setInterval(function () { void writer.tick(); }, 1000);');
@@ -748,6 +1000,153 @@ describe('🔴 host.html の影の配線', () => {
     expect(sh.length, 'shelve を抜き出せていない').toBeGreaterThan(100);
     expect(sh).toContain('FS.read(stream, into, 0, wanted, position)');
     expect(sh).not.toContain('readFile');
+  });
+});
+
+/**
+ * 🔴 **host.html の影の配線を、実行する行そのままで動かす**(`var shadowQuiet` 〜 `armShadow` の塊を切り出して評価)。
+ * 窓(`window`)・LO・FS・OPFS は偽だが、**配線(どの印をどう渡すか / 棚の名前 / 門)は host.html の行**で、
+ * 判断は**実物の office-shadow.js**。⚠ 字面の `toContain` は、別の行の同じ字に満たされる(`SHADOW_INPUTS` の件)。
+ */
+function bootHostShadow(o: {
+  uuid: string;
+  token: string;
+  patched: string[];
+  storage: FakeDir;
+  docs?: readonly FakeDocSpec[];
+  storeThrows?: boolean;
+  doc?: { name: string; size: number };
+}) {
+  const raw = readFileSync('public/office/host.html', 'utf-8');
+  const a = raw.indexOf('var shadowQuiet = ');
+  const b = raw.indexOf('// ── Ctrl + 英字が本文に混入');
+  expect(a, '塊の始まりを抜き出せていない').toBeGreaterThan(0);
+  expect(b, '塊の終わりを抜き出せていない').toBeGreaterThan(a);
+  const gate = api.createSyncGate(() => null);
+  const f = fakeShadowLo(o.docs ?? [{ loc: 'file:///work/a.docx', modified: true }], gate, { storeThrows: o.storeThrows });
+  // 影の MEMFS を読む口(shelve が FS.open / read / close で刻んで読む)
+  Object.assign(f.lo.FS, {
+    open: (path: string) => ({ path }),
+    read: (_st: unknown, into: Uint8Array, _off: number, wanted: number, pos: number) => {
+      for (let i = 0; i < wanted; i += 1) into[i] = (pos + i) % 251;
+      return wanted;
+    },
+    close: () => undefined,
+  });
+  const handlers: Record<string, (e: unknown) => void> = {};
+  const intervals: (() => void)[] = [];
+  const said: { type: string; payload: Record<string, unknown> }[] = [];
+  const win = {
+    PKC3OfficeShadow: (api as unknown),
+    PKC3OfficeUnsaved: { anyModified: async () => true },
+    __lo: f.lo,
+    __loDocPath: '/work/a.docx',
+    addEventListener: (t: string, fn: (e: unknown) => void) => { handlers[t] = fn; },
+  };
+  const self = { crypto: { randomUUID: () => o.uuid } };
+  const boot = new Function(
+    'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console',
+    `${raw.slice(a, b)}\n;return { armShadow: armShadow, shadowQuiet: shadowQuiet };`,
+  );
+  const host = boot(
+    win, self,
+    (type: string, payload: Record<string, unknown>) => { said.push({ type, payload }); },
+    false, o.patched, gate, { storage: o.storage },
+    (fn: () => void) => { intervals.push(fn); return 1; }, () => undefined, { warn: () => undefined },
+  ) as { armShadow(FS: unknown, getToken: () => string, getDoc: () => unknown): void; shadowQuiet: Quiet };
+  host.armShadow(f.lo.FS, () => o.token, () => o.doc ?? { name: 'a.docx', size: 1234 });
+  expect(intervals, '1 秒ごとの見張りを積んでいない').toHaveLength(1);
+  return {
+    f, said, handlers, quiet: host.shadowQuiet,
+    /** 1 回見張って、書き出し・棚への置き込みが終わるまで待つ。 */
+    async tick(): Promise<void> { intervals[0]!(); await new Promise((r) => setTimeout(r, 0)); },
+  };
+}
+
+describe('🔴 host.html の影の配線を実行する行のまま動かす(印 / 棚の名前 / 差し替えの門)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const at = (ms: number) => { vi.setSystemTime(ms); };
+  const T0 = 1_700_000_000_000;
+
+  it('keydown を撃つと印が立ち、3 秒止まると 1 回書く(印の種類から keydown を外すと窓の打鍵が届かない)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-1', patched: ['env'], storage: root });
+    at(T0);
+    expect(h.handlers.keydown, 'keydown の listener が登録されていない').toBeTypeOf('function');
+    h.handlers.keydown!({ key: 'a' });
+    expect(h.quiet.isDirty(), 'keydown で印が立たない').toBe(true);
+    at(T0 + 3000);
+    await h.tick();
+    expect(h.f.stores).toHaveLength(1);
+    expect(shadowsOf(root, 'lid-1')).toHaveLength(1);
+    expect(h.said.map((x) => x.type)).toEqual(['shadow-written']);
+  });
+
+  it('変換中は書かず、確定してから 3 秒で書く / Ctrl+S の直後は待つ(host の listener を通して)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-1', patched: ['env'], storage: root });
+    at(T0);
+    h.handlers.keydown!({ key: 'a' });
+    h.handlers.compositionstart!({});
+    at(T0 + 20000);
+    await h.tick();
+    expect(h.f.stores, '変換の途中を書いた').toHaveLength(0);
+    h.handlers.compositionend!({});
+    at(T0 + 23000);
+    await h.tick();
+    expect(h.f.stores, '確定から 3 秒で書いていない').toHaveLength(1);
+    // Ctrl+S の直後
+    at(T0 + 30000);
+    h.handlers.keydown!({ key: 'a' });
+    at(T0 + 31000);
+    h.handlers.keydown!({ key: 's', ctrlKey: true });
+    at(T0 + 36000);
+    await h.tick();
+    expect(h.f.stores, '保存の確認が出ている間に書いた').toHaveLength(1);
+    at(T0 + 44000);
+    await h.tick();
+    expect(h.f.stores, 'Ctrl+S の 10 秒後 + 3 秒には書く').toHaveLength(2);
+  });
+
+  it('🔴 同じ local:1 の 2 つの窓は別の棚へ書く(窓ごとの名前)。棚へ元の file 名を書き添える', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    const tok = localFileToken('1');
+    const A = bootHostShadow({ uuid: 'A', token: tok, patched: ['env'], storage: root, doc: { name: '請求書.docx', size: 111 } });
+    const B = bootHostShadow({ uuid: 'B', token: tok, patched: ['env'], storage: root, doc: { name: '議事録.docx', size: 222 } });
+    at(T0); A.handlers.keydown!({ key: 'a' }); at(T0 + 3000); await A.tick();
+    at(T0 + 4000); B.handlers.keydown!({ key: 'a' }); at(T0 + 7000); await B.tick();
+    expect(shadowsOf(root, 'w-A'), 'B が A の影を消した').toHaveLength(1);
+    expect(shadowsOf(root, 'w-B')).toHaveLength(1);
+    const meta = (id: string) => JSON.parse(new TextDecoder().decode(shelfOf(root, id)!.files.get('meta.json')!.data)) as { name: string; size: number };
+    expect(meta('w-A')).toMatchObject({ name: '請求書.docx', size: 111 });
+    expect(meta('w-B')).toMatchObject({ name: '議事録.docx', size: 222 });
+    // 同じ窓の 2 回目は古い影を消す(対照群)
+    at(T0 + 10000); A.handlers.keydown!({ key: 'b' }); at(T0 + 13000); await A.tick();
+    expect(shadowsOf(root, 'w-A'), '同じ窓の古い影が残っている').toHaveLength(1);
+    expect(shadowsOf(root, 'w-B')).toHaveLength(1);
+    // 対照群: ノートの lid が在る窓はその lid の棚(段 2 がノートから探せる)
+    const C = bootHostShadow({ uuid: 'C', token: 'lid-note', patched: ['env'], storage: root });
+    at(T0 + 20000); C.handlers.keydown!({ key: 'a' }); at(T0 + 23000); await C.tick();
+    expect(shadowsOf(root, 'lid-note')).toHaveLength(1);
+  });
+
+  it('🔴 差し替えが当たっていない一式(patched が空)は、書き出しを打たず「この版の Office では書けません」を言う', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    // 門が無いと storeToURL が SuspendError で落ちる(本物と同じ)── 偽の LO にそれを再現させる
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-1', patched: [], storage: root, storeThrows: true });
+    at(T0); h.handlers.keydown!({ key: 'a' }); at(T0 + 3000);
+    await h.tick();
+    expect(h.f.stores, '門が無いので storeToURL まで行った(SuspendError の生の失敗)').toHaveLength(0);
+    expect(h.said).toEqual([{ type: 'shadow-failed', payload: { reason: 'この版の Office では書けません' } }]);
+    // 対照群: 当たっている一式は書く
+    const ok = bootHostShadow({ uuid: 'B', token: 'lid-2', patched: ['env'], storage: new FakeDir() });
+    at(T0 + 10000); ok.handlers.keydown!({ key: 'a' }); at(T0 + 13000);
+    await ok.tick();
+    expect(ok.f.stores).toHaveLength(1);
   });
 });
 

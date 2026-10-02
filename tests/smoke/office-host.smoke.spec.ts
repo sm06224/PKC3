@@ -1251,6 +1251,9 @@ test('🔴 裏に居るときは、そう名乗る(値がべた書きでない)'
 test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 = close / 上書き = rename)', async ({
   page,
 }) => {
+  // 影の「3 秒止まったら書く」は**実時間で待つ**(静止 3 秒 + 1 秒刻み)。変換中に書かない確認(+4.6 秒)を足して
+  // 30 秒を超えた ── flake を隠すための引き上げではなく、**待ちが増えた分**(`workers: 1` の実測で足りる上限)
+  test.setTimeout(45_000);
   await page.goto('/office/host.html');
   await seedFakePack(page);
   // ⚠ **前の test の残骸を消す**(棚は origin 共有 ── 残っていると数が合わない)
@@ -1512,19 +1515,30 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
   expect(st.local, 'MEMFS の写しを捨てていない(ゼロコピー・即破棄)').toBe(false);
   expect(st.saved, '影を書いたのを「保存された」と取り違えて放送した').toBe(0);
   // 棚: <棚>/<合言葉>/<時刻>.odt に、書き出した bytes そのまま
-  const shelved = await shelf();
+  const shelvedAll = await shelf();
+  // ⚠ 棚には影のほかに、元の文書の記録(meta.json)が 1 つ添う(段 2 が「どの file の影か」を探すため)
+  const shelved = shelvedAll.filter((f) => f.name !== 'meta.json');
   expect(shelved.map((f) => f.dir), '棚の名前が合言葉でない').toEqual(['lid-TEST']);
+  const metaFile = shelvedAll.find((f) => f.name === 'meta.json');
+  expect(metaFile?.dir, '棚へ元の文書の記録を添えていない').toBe('lid-TEST');
+  expect(JSON.parse(metaFile!.text), '記録は元の file 名と大きさだけ(本文は入れない)').toMatchObject({ v: 1, name: '報告書.odt', size: 8, ext: 'odt' });
+  expect(Object.keys(JSON.parse(metaFile!.text) as object).sort()).toEqual(['at', 'ext', 'name', 'size', 'v']);
   expect(shelved[0]!.name).toMatch(/^\d{13}\.odt$/);
   expect(shelved[0]!.text, '棚の中身が書き出した影でない').toBe('SHADOW-BYTES');
   // 止まったままなら、もう書かない(3 秒ごとに書き続けない)
   await page.waitForTimeout(3500);
   expect((await shadowState()).stores, '打っていないのに続けて書いた').toHaveLength(1);
-  // ── もう 1 度打って止まると、棚は最新 1 つのまま ──────────────────────
+  // ── 変換中(IME)は止まっても書かない。確定すると書く(実ブラウザで window の capture が効いている)──
   await key();
+  await page.evaluate(() => { window.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })); });
+  await page.waitForTimeout(4600);
+  expect((await shadowState()).stores, '変換の途中を書いた').toHaveLength(1);
+  await page.evaluate(() => { window.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })); });
+  // ── もう 1 度打って止まる(上の確定)と、棚は最新 1 つのまま ──────────────
   await expect
     .poll(async () => (await shadowState()).stores.length, { message: '2 回目の影が書かれない', timeout: 8000 })
     .toBe(2);
-  await expect.poll(async () => (await shelf()).length, { message: '古い影が残っている(最新 1 つだけ残す)' }).toBe(1);
+  await expect.poll(async () => (await shelf()).filter((f) => f.name !== 'meta.json').length, { message: '古い影が残っている(最新 1 つだけ残す)' }).toBe(1);
   // ── 棚に置けなかったら黙らない(理由つきで放送する)────────────────────
   await page.evaluate(() => {
     const s = navigator.storage as unknown as { getDirectory: () => Promise<unknown>; __orig?: () => Promise<unknown> };

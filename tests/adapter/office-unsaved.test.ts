@@ -185,6 +185,20 @@ describe('anyModified ── LO に聞く', () => {
     }
   });
 
+  it('🔴 例外の経路でも wrapper を全部解放する(isModified が投げる / 列挙が途中で投げる ── tick ごとに呼ばれるので積むと効く)', async () => {
+    const cases: [string, FakeDoc[], { enumThrowsAfter?: number }][] = [
+      ['isModified が投げる', [{ modified: 'throws' }, { modified: 0 }], {}],
+      ['列挙が途中で投げる(在ると分かった後)', [{ modified: 1 }, { modified: 0 }], { enumThrowsAfter: 1 }],
+      ['列挙が途中で投げる(分かる前)', [{ modified: 0 }, { modified: 1 }], { enumThrowsAfter: 1 }],
+    ];
+    for (const [label, docs, opts] of cases) {
+      const f = fakeLo(docs, opts);
+      await api.anyModified(f.lo);
+      expect(f.live.state.created, `空振り防止(${label})`).toBeGreaterThan(3);
+      expect(f.live.state.deleted, `${label}: 作った ${f.live.state.created} 個を全部 delete する`).toBe(f.live.state.created);
+    }
+  });
+
   it('橋の初期化(uno_init)が解決しない相手は 3 秒で諦める(null)── 永久に待たない', async () => {
     vi.useFakeTimers();
     try {
