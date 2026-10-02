@@ -26,7 +26,7 @@ import {
   skippedImagesNotice,
   type OfficeImageCandidate,
 } from '../../../features/office/office-images';
-import type { OfficeImagePayload, OfficeWindow } from './office-window';
+import type { OfficeDocumentSource, OfficeImagePayload, OfficeWindow } from './office-window';
 
 /** 添付 1 件ぶんの、開くのに要る情報。 */
 export interface OfficeTarget {
@@ -70,6 +70,13 @@ export interface OfficeOpenerDeps {
    * 一覧が**空のまま**になる。⚠ 投げない / 上限は呼び側(数件で切る)。
    */
   readonly usersOfAsset?: (assetKey: string) => Promise<readonly string[]>;
+  /**
+   * 🔴 **そのノートの「いま」の添付 key**(#1228 穴①)。窓の中で保存すると添付は
+   * **別の key に差し替わる**ので、停止の帯の「読み込み直す」で窓が作り直されたとき、
+   * 最初に開いた key のままだと**保存前の版**を渡してしまう(その版へ上書き保存すると
+   * 先の保存が消える)。⚠ 省くか `null` なら開いた時の key で読む。⚠ 投げない。
+   */
+  readonly currentAssetKey?: (lid: string) => Promise<string | null>;
   /** 並べなかった件数を user へ言う 1 行の出口(`showStatus`)。 */
   readonly notify?: (text: string) => void;
 }
@@ -81,6 +88,18 @@ export interface OfficeOpener {
 
 export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
   const capability = deps.capability ?? ((): OfficeCapability => readOfficeCapability(globalThis));
+  /**
+   * 文書の bytes と画像の候補は**並べて**引く(画像のせいで文書が遅れない)。
+   * 🔑 最初に開くときと、窓が作り直されて読み直すときの**同じ 1 本**(§7)。
+   */
+  const load = async (target: OfficeTarget): Promise<OfficeDocumentSource | null> => {
+    const [bytes, images] = await Promise.all([
+      deps.readAsset(target.assetKey).catch(() => null),
+      collectImages(deps, target),
+    ]);
+    if (bytes === null || bytes.byteLength === 0) return null;
+    return { bytes, images };
+  };
   return {
     open(target: OfficeTarget): OpenOfficeResult {
       const entry = officeEntry({
@@ -105,19 +124,20 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       //    宣言してから `provideDocument()` で後渡しする。
       const outcome = deps.officeWindow.open({ name: target.name, expectDocument: true });
       void (async () => {
-        // 🔑 文書の bytes と画像の候補は**並べて**引く(画像のせいで文書が遅れない)
-        const [bytes, images] = await Promise.all([
-          deps.readAsset(target.assetKey).catch(() => null),
-          collectImages(deps, target),
-        ]);
-        if (bytes === null || bytes.byteLength === 0) return;
+        const loaded = await load(target);
+        if (loaded === null) return;
+        const { bytes, images } = loaded;
         // 🔴 **合言葉(= このノートの lid)を預ける**(#205)── 保存が戻って
         //    きたとき、**このノートを更新する**ために要る。
         //    ⚠ 無ければ空文字 = 窓は「新規作成」として返す(新しい添付ノートになる)。
         //    🔑 **key ではなく lid を預ける** ── 2 回目の保存の時点で key は既に
         //    変わっている(1 回目で差し替わる)ので、key を預けると迷子になる。
         //    どの asset を差し替えるかは、**そのノートの現在の frontmatter**が決める
-        deps.officeWindow.provideDocument(target.name, bytes, target.lid ?? '', images);
+        // 🔴 作り直された窓が文書を求め直したとき(#1228 穴①)、**いま**の添付を引き直す口を添える
+        deps.officeWindow.provideDocument(target.name, bytes, target.lid ?? '', images, async () => {
+          const key = target.lid ? await deps.currentAssetKey?.(target.lid).catch(() => null) : null;
+          return load(key ? { ...target, assetKey: key } : target);
+        });
       })();
       return { ok: true, reused: outcome.kind === 'already-open' };
     },

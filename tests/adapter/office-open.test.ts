@@ -9,9 +9,10 @@
  *  ③ 窓を開くのは**同期のうち**(user gesture を切らない)
  *  ④ bytes の取得に失敗しても落ちない(窓は Start Center を出す)
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createOfficeOpener, type OfficeTarget } from '../../src/adapter/platform/office/office-open';
-import type { OfficeWindow } from '../../src/adapter/platform/office/office-window';
+import { OfficeWindow } from '../../src/adapter/platform/office/office-window';
 import type { OfficeCapability } from '../../src/features/office/office-entry';
 
 const OK: OfficeCapability = {
@@ -177,5 +178,93 @@ describe('createOfficeOpener', () => {
     await readAsset.mock.results[0]!.value;
     await Promise.resolve();
     expect(officeWindow.provided, '空は渡さない').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **窓を「読み込み直す」と、保存済みの最新が開く**(#1228 穴①)。
+ *
+ * 🔑 **本物どうしを繋ぐ**(§7)── `OfficeWindow` の実物が組んだ封筒を読み、
+ * 相手の窓役は何も組まない。上の `fakeWindow` は `provideDocument` の第 5 引数を捨てるので、
+ * この繋ぎは別に要る。
+ */
+describe('窓が作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+  function wired(opts: { lid?: string; current: (lid: string) => Promise<string | null> }) {
+    const sent: { type: string; payload: Record<string, unknown> }[] = [];
+    let handler: ((ev: MessageEvent) => void) | null = null;
+    const ow = new OfficeWindow({
+      openWindow: () => {},
+      makeChannel: () => ({
+        postMessage(d: unknown) {
+          const m = d as { pkc3Office: string; payload?: Record<string, unknown> };
+          sent.push({ type: m.pkc3Office, payload: m.payload ?? {} });
+        },
+        close() {},
+        get onmessage() { return handler; },
+        set onmessage(fn) { handler = fn; },
+      }),
+      baseUrl: 'https://app.example/',
+    });
+    const assets: Record<string, number[]> = { a1: [1], a2: [2] };
+    const currentAssetKey = vi.fn((lid: string) => opts.current(lid));
+    const opener = createOfficeOpener({
+      officeWindow: ow,
+      isPackInstalled: () => true,
+      readAsset: async (k) => (assets[k] ? new Uint8Array(assets[k]!) : null),
+      capability: () => OK,
+      currentAssetKey,
+    });
+    const ready = (): void => {
+      handler?.({ data: { pkc3Office: 'ready-for-document', payload: {} } } as MessageEvent);
+    };
+    const docs = () => sent.filter((x) => x.type === 'document');
+    return { opener, ready, docs, currentAssetKey, target: { ...DOCX, ...(opts.lid ? { lid: opts.lid } : {}) } };
+  }
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('🔴 2 回目の ready には、そのノートの「いま」の添付を送る(最初の key の古い版ではない)', async () => {
+    const w = wired({ lid: 'L1', current: async () => 'a2' });
+    w.opener.open(w.target);
+    await tick();
+    w.ready();
+    expect(w.docs().length, '対照群: 1 回目は 1 通').toBe(1);
+    expect(w.docs()[0]!.payload.bytes, '1 回目は開いた key').toEqual(new Uint8Array([1]));
+    w.ready();
+    await vi.waitFor(() => expect(w.docs().length).toBe(2));
+    expect(w.docs()[1]!.payload.bytes, '保存で差し替わった key の版').toEqual(new Uint8Array([2]));
+    expect(w.docs()[1]!.payload.token).toBe('L1');
+    expect(w.currentAssetKey).toHaveBeenCalledWith('L1');
+  });
+
+  it('いまの key が引けなければ、開いた key で送り直す', async () => {
+    const w = wired({ lid: 'L1', current: async () => null });
+    w.opener.open(w.target);
+    await tick();
+    w.ready();
+    w.ready();
+    await vi.waitFor(() => expect(w.docs().length).toBe(2));
+    expect(w.docs()[1]!.payload.bytes).toEqual(new Uint8Array([1]));
+  });
+
+  it('lid の無い添付(新規扱い)は、いまの key を聞かず、開いた key で送り直す', async () => {
+    const w = wired({ current: async () => 'a2' });
+    w.opener.open(w.target);
+    await tick();
+    w.ready();
+    w.ready();
+    await vi.waitFor(() => expect(w.docs().length).toBe(2));
+    expect(w.currentAssetKey).not.toHaveBeenCalled();
+    expect(w.docs()[1]!.payload.bytes).toEqual(new Uint8Array([1]));
+  });
+});
+
+describe('main.ts の配線(#1228 原文 pin)', () => {
+  const main = readFileSync('src/main.ts', 'utf-8');
+  const start = main.indexOf('createOfficeOpener({');
+  const call = main.slice(start, main.indexOf('  });\n', start));
+  it('🔴 窓を読み直すための「いまの key」を渡し、保存の引き取りと同じ 1 本を使う', () => {
+    expect(call).toContain('currentAssetKey: currentAttachmentKey');
+    const sb = main.indexOf('createOfficeSaveBack({');
+    expect(main.slice(sb, sb + 6000)).toContain('await currentAttachmentKey(lid)');
   });
 });

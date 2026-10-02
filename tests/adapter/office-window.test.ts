@@ -23,6 +23,7 @@ import {
   OFFICE_ADOPTED,
   OFFICE_CHANNEL,
   OfficeWindow,
+  RESEND_GRACE_MS,
   type OfficeWindowEvent,
 } from '../../src/adapter/platform/office/office-window';
 
@@ -195,8 +196,12 @@ describe('OfficeWindow', () => {
     const docs = h.ch.sent.filter((s) => s.type === 'document');
     expect(docs.length).toBe(1);
     expect(docs[0]!.payload.bytes).toEqual(new Uint8Array([9, 8, 7]));
-    h.ch.deliver('ready-for-document');
-    expect(h.ch.sent.filter((s) => s.type === 'document').length, '2 度目は送らない').toBe(1);
+    // ⚠ 「同じ求めに 2 通送らない」は、求めが 1 回のあいだ成り立つ(`provideDocument` で
+    //    もう 1 度送り込まれない)。**作り直された窓の 2 回目の求め**には、#1228 で送り直す
+    //    ようにした(下の「作り直された窓へ送り直す」が守る)── 以前ここは「2 度目は送らない」と
+    //    pin していたが、それが「読み込み直すと Start Center になる」症状そのものだった
+    h.ow.provideDocument('x.docx', new Uint8Array([1]));
+    expect(h.ch.sent.filter((s) => s.type === 'document').length, '求められていないので送らない').toBe(1);
   });
 
   it('文書を渡していないときは、準備完了と言われても何も送らない', () => {
@@ -329,6 +334,149 @@ describe('OfficeWindow', () => {
     h.ow.open({ name: 'b.docx', expectDocument: true });   // 別の文書で開き直す
     h.ow.provideDocument('b.docx', new Uint8Array([9]));
     expect(h.ch.sent.filter((x) => x.type === 'document').length, 'まだ要求されていない').toBe(0);
+  });
+
+  /**
+   * 🔴 **作り直された窓にも文書を送り直す**(#1228 穴①)。
+   *
+   * 症状:停止の帯の「読み込み直す」(`location.reload()`)で窓は `?await-doc=1` のまま
+   * 作り直されるが、本体は 1 回目の `ready-for-document` で控えを手放していたので
+   * **2 回目には何も送らず**、窓は 15 秒待って Start Center になった。
+   * 🔑 期待値は**1 回目に本物が組んだ封筒**から読む(手で綴りを書かない)。
+   */
+  describe('作り直された窓へ送り直す(#1228 穴①)', () => {
+    const docs = (h: Harness) => h.ch.sent.filter((x) => x.type === 'document');
+    const flush = async (): Promise<void> => { await vi.advanceTimersByTimeAsync(0); };
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('🔴 2 回目の ready-for-document に、同じ文書が届く(1 回目は 1 通だけ)', () => {
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([4, 5]), 'lid-1', [
+        { name: 'p.png', bytes: new Uint8Array([9]) },
+      ]);
+      h.ch.deliver('ready-for-document');
+      expect(docs(h).length, '対照群: 1 回目は 1 通だけ').toBe(1);
+      const first = docs(h)[0]!;
+      h.ch.deliver('ready-for-document');
+      expect(docs(h).length, '作り直された窓には送り直す').toBe(2);
+      expect(docs(h)[1]!.payload).toEqual(first.payload);
+      expect(docs(h)[1]!.payload.token, '合言葉も同じ').toBe('lid-1');
+      expect(docs(h)[1]!.payload.images, '画像も同じ').toEqual(first.payload.images);
+    });
+
+    it('🔴 窓が「閉じた」と言った直後(= 読み直しの pagehide)でも送り直す', () => {
+      vi.useFakeTimers();
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([4, 5]), 'lid-1');
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('closed');   // 読み込み直しでも pagehide で来る
+      vi.advanceTimersByTime(1000);
+      h.ch.deliver('ready-for-document');
+      expect(docs(h).length).toBe(2);
+      expect(docs(h)[1]!.payload.bytes).toEqual(new Uint8Array([4, 5]));
+    });
+
+    it('🔴 閉じたまま猶予を過ぎたら捨てる(閉じた後の ready には送らない)', () => {
+      vi.useFakeTimers();
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([4, 5]), 'lid-1');
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('closed');
+      vi.advanceTimersByTime(RESEND_GRACE_MS + 1);
+      h.ch.deliver('ready-for-document');
+      expect(docs(h).length, '閉じた窓の文書を、後から現れた窓へ送らない').toBe(1);
+    });
+
+    it('dispose すると、閉じる猶予の待ち(timer)を残さない', () => {
+      vi.useFakeTimers();
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]));
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('closed');
+      expect(vi.getTimerCount(), '対照群: closed で猶予が掛かる').toBe(1);
+      h.ow.dispose();
+      expect(vi.getTimerCount(), '捨てた後に timer が bytes を握り続けない').toBe(0);
+    });
+
+    it('🔴 別の文書を頼んだら、前の文書は送り直さない(次の文書が届く前に ready が来ても)', () => {
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]));
+      h.ch.deliver('ready-for-document');
+      h.ow.open({ name: 'b.docx', expectDocument: true });   // 生きている窓へ読み直しを頼む
+      h.ch.deliver('ready-for-document');                     // b の bytes はまだ無い
+      expect(docs(h).length, 'a を b の窓へ送ってはいけない').toBe(1);
+      h.ow.provideDocument('b.docx', new Uint8Array([2]));
+      expect(docs(h).length).toBe(2);
+      expect(docs(h)[1]!.payload.name).toBe('b.docx');
+    });
+
+    it('Start Center だけを頼む open() では、開いている窓の文書の控えを捨てない', () => {
+      const h = harness();
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]));
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('alive');            // 窓は生きている
+      h.ow.open({});                    // フォーカスだけ頼む
+      h.ch.deliver('ready-for-document');
+      expect(docs(h).length).toBe(2);
+    });
+
+    it('🔴 refresh を持つ文書は、送り直すとき「いま」の中身を引き直す(古い bytes を送らない)', async () => {
+      vi.useFakeTimers();
+      const h = harness();
+      let current = new Uint8Array([7, 7]);
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-1', [], async () => ({ bytes: current }));
+      h.ch.deliver('ready-for-document');
+      expect(docs(h)[0]!.payload.bytes, '1 回目は渡した bytes').toEqual(new Uint8Array([1]));
+      h.ch.deliver('ready-for-document');
+      await flush();
+      expect(docs(h).length).toBe(2);
+      expect(docs(h)[1]!.payload.bytes, '保存済みの最新').toEqual(new Uint8Array([7, 7]));
+      expect(docs(h)[1]!.payload.token).toBe('lid-1');
+      current = new Uint8Array([8]);
+      h.ch.deliver('ready-for-document');
+      await flush();
+      expect(docs(h)[2]!.payload.bytes, '毎回引き直す').toEqual(new Uint8Array([8]));
+    });
+
+    it('refresh が読めなかった(null / 例外)なら、何も送らない(古い版へ戻さない)', async () => {
+      vi.useFakeTimers();
+      const h = harness();
+      let mode: 'null' | 'throw' = 'null';
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-1', [], async () => {
+        if (mode === 'throw') throw new Error('x');
+        return null;
+      });
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('ready-for-document');
+      await flush();
+      mode = 'throw';
+      h.ch.deliver('ready-for-document');
+      await flush();
+      expect(docs(h).length).toBe(1);
+    });
+
+    it('🔴 引き直している間に別の文書へ替わったら、引き直した古い文書は送らない', async () => {
+      vi.useFakeTimers();
+      const h = harness();
+      let release: (v: { bytes: Uint8Array }) => void = () => {};
+      h.ow.open({ name: 'a.docx', expectDocument: true });
+      h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-1', [], () =>
+        new Promise((r) => { release = r; }));
+      h.ch.deliver('ready-for-document');
+      h.ch.deliver('ready-for-document');          // 引き直し中
+      h.ow.open({ name: 'b.docx', expectDocument: true });
+      release({ bytes: new Uint8Array([5]) });
+      await flush();
+      expect(docs(h).length, 'a の引き直しは b の窓へ送らない').toBe(1);
+    });
   });
 
   /**
