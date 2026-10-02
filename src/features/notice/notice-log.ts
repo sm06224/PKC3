@@ -168,6 +168,15 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-02-sql-embed',
+    title: '本文に SQL の答えを表で埋め込めるようになりました',
+    items: [
+      'コード枠の言語名を sql embed と書くと(sql の後ろに半角の空白と embed)、そのコード枠の下に SQL の答えが表で出ます。相手はこの PKC のノートだけ、読むだけです。',
+      '答えはノートを開いたときに 1 回引き、編集して保存すると引き直します。200 行を超えたら「さらに N 行」で広げられます。',
+      '書き出した閲覧用 HTML と Word にも、書き出したときの答えが表で入ります(元の SQL も残ります)。言語名が sql だけのコード枠はこれまでどおり色づけだけです。',
+    ],
+  },
+  {
     id: '2026-10-02-attachment-guard',
     title: '添付の画面で PDF や画像が文字の羅列で出なくなり、添付ノートの編集は説明だけ書く形になりました',
     items: [
