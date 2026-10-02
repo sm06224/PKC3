@@ -17,6 +17,7 @@ import { cacheKey, renderToPng, readPalette, type Raster, type RasterKey } from 
 import { ACTION_ICONS, iconSpan } from './icons';
 import { markViewBig } from './view-big';
 import { watchDevicePixelRatio } from './dpr-watch';
+import { watchVisible } from './visible-watch';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -368,15 +369,11 @@ export function hydrateDiagrams(
    */
   const unwatchDpr = watchDevicePixelRatio(schedule);
 
-  // 🔑 見えたら描く
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const host = e.target as HTMLElement;
-      io.unobserve(host);
-      const source = host.getAttribute(kind.attr) ?? '';
-      void paint({ host, source });
-    }
+  // 🔑 見えたら描く(「見えたか」の判定は `visible-watch.ts` の 1 本 ── 本文に埋め込んだ
+  //    SQL の答えも同じ口を使う。#1223)
+  const io = watchVisible((host) => {
+    const source = host.getAttribute(kind.attr) ?? '';
+    void paint({ host, source });
   });
   for (const host of hosts) {
     io.observe(host);

@@ -80,6 +80,7 @@ import {
 } from '@features/query/sql-guest-source';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
+import { sqlRunFailureText } from '@features/query/sql-guard';
 import {
   captureItemsFrom,
   type CaptureSource,
@@ -1251,11 +1252,8 @@ export function connectStoreEffects(
              *   ただし**消しもしない**(何が起きたかの手がかりは要る)。
              */
             const raw = e instanceof Error ? e.message : String(e);
-            const why = /readonly/i.test(raw)
-              ? '書き込みはできません(この面は読むだけです)'
-              : /interrupt/i.test(raw)
-                ? '時間がかかりすぎたので止めました(条件を絞ってください)'
-                : raw;
+            // 🔑 断り文は 1 か所(本文に埋め込んだ SQL も同じ字を出す ── #1223)
+            const why = sqlRunFailureText(raw);
             dispatcher.dispatch({ type: 'SQL_RUN_FAILED', token, sql, error: why });
           },
         );

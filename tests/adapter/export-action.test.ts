@@ -87,6 +87,10 @@ function deps(over: Partial<ExportDeps> = {}): ExportDeps & {
     // ⚠ ベクタは使わない腕(ラスタ経路を通す)
     renderFigureVector: async () => null,
     renderFigure: async () => null,
+    // ⚠ この file は SQL の埋め込みを通らない(`sql-embed-export.test.ts` が見る)
+    askSql: async () => {
+      throw new Error('この test では引かない');
+    },
     now: () => NOW,
     files,
     notes,

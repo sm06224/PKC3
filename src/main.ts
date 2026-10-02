@@ -300,6 +300,7 @@ import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
 import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
+import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
@@ -2092,6 +2093,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    件数ぶんメインスレッドで描くことになる
         // ⚠ opts を素通しする(vars / 見出し番号 ── user 報告 2-7)
         renderBody: (text, opts) => markdown.render(text, opts),
+        /**
+         * 🔴 **書き出した時点の SQL の答えを表にして焼く**(#1223 Q3 = B)。⚠ 閲覧と**同じ入口**
+         * (`askSqlEmbed` ── 字の門・上限・直列)。引けなかった SQL は 1 行の注記になる。
+         */
+        askSql: (sql) => askSqlEmbed(sql),
         /**
          * 🔴 **書き出す HTML に外部画像を焼くのは「常にオン」のときだけ**
          * (2026-08-06、user 裁定)。⚠ ノートごとの同意(`allows(lid)`)は
@@ -4292,7 +4298,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     open: (urls) => openDuckDb(urls),
     lendInstalled: () => duckDbPackStore.lendInstalledPack(),
   });
-  storeEffects = connectStoreEffects(dispatcher, createStorePort(client, cid), {
+  const storePort = createStorePort(client, cid);
+  /**
+   * 🔴 **本文に埋め込んだ SQL(` ```sql embed `)を引く口を差す**(#1223)。
+   *
+   * ⚠ 判断は `sql-embed-hydrate.ts` が持つ(字の門・上限・直列・断り文)── ここは**繋ぐだけ**
+   *   (この file はどの test からも実行されない ── CLAUDE.md §2)。
+   * 🔴 **書込の後ろへ並んでから引く**(`settled()`)── 保存した直後に引くと、worker は
+   *   まだ新しい本文(csv の表)を書き終えておらず、**古い答えが出て、同じ本文のうちは
+   *   そのまま残る**(鮮度は本文で決まる)。⚠ 待つのは書き出し・バックリンクと**同じ 1 本**。
+   */
+  setSqlEmbedRunner(async (sql, limits) => {
+    await storeEffects?.settled();
+    const ask = storePort.runReadOnlySql;
+    if (!ask) throw new Error('この版では引けません(アプリを読み直すと直ることがあります)');
+    return ask(sql, limits);
+  });
+  storeEffects = connectStoreEffects(dispatcher, storePort, {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
     officeInstalled: () => appOfficePack.isInstalled(),

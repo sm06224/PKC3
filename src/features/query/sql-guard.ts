@@ -298,3 +298,17 @@ export function checkReadOnlySql(input: string): SqlCheck {
   }
   return { ok: true, why: '', sql };
 }
+
+/**
+ * 🔴 **engine の失敗を、画面に出せる字へ直す**(#1223 で `store-effects.ts` から取り出した)。
+ *
+ * ⚠ **engine の字をそのまま出さない**(`SQLITE_READONLY` では読めない)── ただし
+ *   **消しもしない**(何が起きたかの手がかりは要る)。
+ * 🔑 SQL を打つ面と、本文に埋め込んだ SQL(` ```sql embed `)が**同じ断り文**を出す
+ *   ために 1 か所へ寄せた(CLAUDE.md §7 ── 2 か所に書くと、片方だけ直る日が来る)。
+ */
+export function sqlRunFailureText(raw: string): string {
+  if (/readonly/i.test(raw)) return '書き込みはできません(ここは読むだけです)';
+  if (/interrupt/i.test(raw)) return '時間がかかりすぎたので止めました(条件を絞ってください)';
+  return raw;
+}

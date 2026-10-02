@@ -64,6 +64,12 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    * ⚠ **空白を入れない** ── 入れた時点で、そこから先は名前ではなくなる。
    */
   await page.keyboard.type('```csv name=だめ!\na,b\n1,2\n```\n');
+  /**
+   * 🔴 **本文に SQL の答えを埋め込む**(#1223)。⚠ 新しい起動を増やさない ── この道中に足す
+   * (同じノート・同じ csv の表を引く)。`sql embed` は答えの表が出て、素の `sql` は色づけだけ。
+   */
+  await page.keyboard.type('```sql embed\nSELECT 品名, 数 FROM 棚卸 ORDER BY 品名\n```\n');
+  await page.keyboard.type('```sql\nSELECT 1\n```\n');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   /**
@@ -80,7 +86,9 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    *   SQL から名前で引けること**である ── だから理由は
    *   `csv_tables.why`(= SQL の目録)に出る。
    */
-  const bodyTable = page.locator('[data-pkc-field="detail-body"] table');
+  // ⚠ csv の囲みだけを数える(下の埋め込みの答えも `<table>` で、描くのは見えたあと ──
+  //   「本文の table」全部を数えると、答えが出たかどうかで数が変わる)
+  const bodyTable = page.locator('[data-pkc-field="detail-body"] [data-pkc-render-lang="csv"] table');
   await expect(bodyTable, '本文の csv が 2 つとも表になっていない(前提が崩れている)').toHaveCount(
     2,
     { timeout: 10_000 },
@@ -98,6 +106,37 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   );
   expect(headerTexts, '見出しが a / b になっていない').toEqual(['a', 'b']);
   await expect(badNameTable.locator('tbody td')).toHaveText(['1', '2']);
+
+  /**
+   * 🔴 **` ```sql embed ` の答えが、コード枠の下に表で出る**(#1223)。
+   * ⚠ 引くのは**見えたとき**・保存と同じ worker なので、出るまで待つ(15 秒)。
+   * 🔑 見るのは**画面の値**(`tbody td` の字)── 「器が在る」ではなく「答えが出ている」。
+   */
+  const embedHost = page.locator('[data-pkc-field="detail-body"] [data-pkc-sql-embed]');
+  await expect(embedHost, '` ```sql embed ` の器が 1 つだけ在る').toHaveCount(1);
+  await expect(embedHost.locator('tbody tr'), '答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
+  await expect(embedHost.locator('tbody td')).toHaveText(['みかん', '5', 'りんご', '3']);
+  await expect(embedHost.locator('thead th')).toHaveText(['品名', '数']);
+  // 🔴 コード枠の**下**にあり、見えている(0px の箱は「出ている」と言えない)
+  const frame = embedHost.locator('xpath=..');
+  const codeBox = (await frame.locator('pre').boundingBox())!;
+  const tableBox = (await embedHost.locator('table').boundingBox())!;
+  expect(tableBox.width, '答えの表に幅が無い').toBeGreaterThan(40);
+  expect(tableBox.y, '答えの表がコード枠の下に出ていない').toBeGreaterThanOrEqual(
+    codeBox.y + codeBox.height - 1,
+  );
+  // 原文の SQL もコード枠として残る
+  await expect(frame.locator('pre code.language-sql')).toContainText('SELECT 品名, 数 FROM 棚卸');
+  // 🔴 対照群: 素の ` ```sql ` は器が無く、色づけだけ
+  const plainSql = page
+    .locator('[data-pkc-field="detail-body"] pre code.language-sql')
+    .filter({ hasText: 'SELECT 1' });
+  await expect(plainSql, '素の sql の枠が無い').toHaveCount(1);
+  await expect(plainSql.locator('.pkc-tok-keyword').first()).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] pre:has(code.language-sql)').filter({ hasText: 'SELECT 1' }).locator('xpath=..').locator('[data-pkc-sql-embed]'),
+    '素の sql にまで答えの器が付いた',
+  ).toHaveCount(0);
 
   /**
    * ── ① SQL で調べる を開く(この PKC のノートが既定 ── 何も選ばない)。
