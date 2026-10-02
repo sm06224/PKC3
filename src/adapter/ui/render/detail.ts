@@ -128,6 +128,7 @@ import {
   BODY_MEDIA_FIELD,
   BODY_MEDIA_CLASS,
 } from '@features/asset/asset-preview-kind';
+import { sniffText, sniffedPreview } from '@features/asset/sniff-text';
 import { isCodeDraft } from '@adapter/state/app-state';
 import type { AppState, AppPhase, PartialDraft, SearchJump } from '@adapter/state/app-state';
 import { appEditorMode } from './editor-mode';
@@ -3208,21 +3209,36 @@ export class DetailRenderer {
     try {
       // ⚠ 見せ方の判定は `features/asset/asset-preview-kind.ts` の 1 本だけを使う
       //    (別窓の側と同じ規則 ── 片方だけ PDF を知っている状態を作らない)
-      const kind = assetPreviewKind(mime);
+      let kind = assetPreviewKind(mime);
+      /** 🔴 中身で言い当てた種類(#1220)。`null` = 登録された種類のまま。 */
+      let retype: { kind: 'image' | 'pdf'; mime: string; blob: Blob } | null = null;
       if (kind === 'text') {
         const blob = await assets.getBlob(assetKey);
         if (token !== this.hydrateToken) return; // stale ── DOM は既に破棄済み
         if (!blob) return missing();
-        // 全量を heap に読まない ── preview に要る分だけ slice して decode
-        // (multibyte の端欠けは preview 用途で許容。review #2)
+        /**
+         * 🔴 **字として出す前に、中身を見る**(#1220)。
+         *
+         * ⚠ 種類(mime)は**取り込む側が名乗らせた値**で、bytes の持ち主が言った物ではない
+         *   (自動操作が PDF に `text/plain` と渡すと、`%PDF-1.7 %äüöß …` が画面に出ていた)。
+         *   見るのは先頭の塊だけ(全量を heap に読まない)。判定は
+         *   `features/asset/sniff-text.ts` の 1 本。
+         */
         const truncated = blob.size > 200_000;
-        const text = await blob.slice(0, 200_000).text();
+        const head = new Uint8Array(await blob.slice(0, 200_000).arrayBuffer());
         if (token !== this.hydrateToken) return;
-        const pre = document.createElement('pre');
-        pre.setAttribute('data-pkc-field', 'attachment-text');
-        pre.textContent = truncated ? `${text}\n…(先頭 200KB のみ表示)` : text;
-        host.append(pre);
-        return;
+        const sniff = sniffText(head, truncated);
+        if (sniff.kind === 'text') {
+          const pre = document.createElement('pre');
+          pre.setAttribute('data-pkc-field', 'attachment-text');
+          pre.textContent = truncated ? `${sniff.text}\n…(先頭 200KB のみ表示)` : sniff.text;
+          host.append(pre);
+          return;
+        }
+        // 字ではなかった ── 印で分かった種類は**本来の枝**へ回す(回せなければ断り)
+        const route = sniffedPreview(sniff.guess);
+        kind = route === null ? null : route.kind;
+        if (route !== null) retype = { ...route, blob };
       }
       if (!kind) {
         /**
@@ -3234,6 +3250,7 @@ export class DetailRenderer {
          * 区別できなかった**(「壊れている」と読まれる)。
          * ⚠ 次にどうすればよいかを書く ── この種類は上の**ダウンロード**で開く。
          * ⚠ `isAppMime`(HTML)はここへ来る ── そちらは**起動**があるので言い方を分ける。
+         * 🔑 **字でなかった `text/*` もここへ落ちる**(#1220)── 同じ断り文を使う。
          */
         const p = document.createElement('p');
         p.setAttribute('data-pkc-field', 'attachment-no-preview');
@@ -3243,7 +3260,22 @@ export class DetailRenderer {
         host.append(p);
         return;
       }
-      const lent = await assets.lend(assetKey);
+      /**
+       * 🔴 **登録の種類が違っていた添付は、言い当てた種類で借り直す**(#1220)。
+       *
+       * ⚠ `lend` が作る URL は**登録された種類**(`text/plain`)を持つので、そのまま
+       *   `<object type="application/pdf">` へ渡しても、ブラウザは**文字として開く**
+       *   (resource の種類が type 属性に勝つ)。Blob を**種類だけ付け替えて**新しい URL にする
+       *   (`new Blob([blob])` は中身を複製しない ── ゼロコピー)。
+       * ⚠ revoke は表示の寿命終端(`lends.track` の dispose)── 他の借りと同じ規律。
+       */
+      let lent: { url: string; dispose: () => void } | null;
+      if (retype !== null) {
+        const url = URL.createObjectURL(new Blob([retype.blob], { type: retype.mime }));
+        lent = { url, dispose: () => URL.revokeObjectURL(url) };
+      } else {
+        lent = await assets.lend(assetKey);
+      }
       if (token !== this.hydrateToken) {
         lent?.dispose(); // stale ── 借りた瞬間に返す
         return;
