@@ -21,7 +21,7 @@ import {
 } from '@features/markdown/frontmatter';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { isZipAttachment } from '@features/archive/zip-browse';
-import { hydrateMermaid, type MermaidScope } from './mermaid-hydrate';
+import { hydrateMermaid, pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
@@ -38,7 +38,7 @@ import { applyMissingLinks, clearMissingLinks } from './link-missing';
 import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
-import { placeEmbeddable } from '@features/markdown/place-embed';
+import { placeFramed } from '@features/markdown/place-embed';
 import { placeBodiesOf } from '@adapter/state/app-state';
 import { folderOverview, hasFolderOverview } from '@features/relation/folder-overview';
 import { buildFolderOverview } from './folder-overview';
@@ -676,6 +676,8 @@ export class DetailRenderer {
     this.disposeMermaid = null;
     for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
     this.sqlEmbeds.release();
+    // 🔴 板に置いたノートの図・画像も返す(#529 W3-②)── 面を捨てるとき ObjectURL を残さない
+    this.placeEmbeds.release();
     this.backToTopHandle?.dispose();
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
@@ -820,7 +822,57 @@ export class DetailRenderer {
         return this.markdown.render(text, opts).catch(() => renderMarkdown(text, opts));
       },
       wanted: (lids) => wanted?.(lids),
+      // 🔴 図と添付画像は**読む面と同じ口**(`hydrateFigures` / 貸出)に乗せる(#529 W3-②)
+      lender: this.assets,
+      figures: (roots) => hydrateFigures(roots),
+      // 🔴 「見えそうな枠」の基準 = 板を送る器(W3-③)
+      viewRoot: this.scroller,
     });
+    // 🔴 添付ノートは「絵を出せる画像か」が**読んだ後**に分かる ── 既定の大きさを当て直す
+    const body = this.lastBody;
+    if (body !== null && this.placeFramedChanged(host, metas, bodies, self)) this.layoutPlace(host, body);
+  }
+
+  /**
+   * 🔴 **板の置き直しが要るか**(#529 W3-②)。塊が持つ「既定の大きさを当てた」印
+   * (`data-pkc-place-framed`)と、いま当てるべきかが食い違う塊が 1 つでも在れば真。
+   * ⚠ 食い違うのは**添付ノートの抜粋が届いた / 差し替わった回**だけ(本文のノートは最初から当たる)。
+   */
+  private placeFramedChanged(
+    host: HTMLElement,
+    metas: NonNullable<DetailRenderer['metasRef']>,
+    bodies: NonNullable<DetailRenderer['placeRef']>,
+    self: string,
+  ): boolean {
+    for (const block of host.querySelectorAll<HTMLElement>('.pkc-place[data-pkc-place-entry]')) {
+      const lid = block.getAttribute('data-pkc-place-entry') ?? '';
+      const m = metas.get(lid);
+      const want = lid !== '' && m !== undefined && lid !== self && placeFramed(m.archetype, bodies.get(lid));
+      if (want !== block.hasAttribute('data-pkc-place-framed')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 🔴 **板の置き(位置・大きさ・線)を、いま描いてある本文へ当てる**(冪等)。
+   * ⚠ 描画の後(`paint`)と、添付ノートの抜粋が届いた回(`syncPlaceEmbeds`)の**2 か所が通る 1 本**
+   *   ── 別々に書くと、「中身を出す塊」の判定が割れる(§7)。
+   */
+  private layoutPlace(host: HTMLElement, body: string): void {
+    const metas = this.metasRef;
+    const self = this.skeletonLid;
+    if (metas === null || self === null) return;
+    const bodies = this.placeRef;
+    applyPlaceLayout(
+      host,
+      (l) => metas.get(l)?.title ?? null,
+      frontmatterLineCount(body),
+      // 🔑 中身を出す塊(= 既定の大きさで固定する塊)の判定は 1 本(`placeFramed`)
+      (l) => {
+        const m = metas.get(l);
+        return m !== undefined && l !== self && placeFramed(m.archetype, bodies?.get(l));
+      },
+    );
   }
 
   render(state: AppState): void {
@@ -1523,16 +1575,7 @@ export class DetailRenderer {
          * ⚠ 描画のたびに呼ぶ(冪等)── 塊が差し替わると掴む口と題名の札が
          *   消えるため(見出しの畳みと同じ理由)。
          */
-        applyPlaceLayout(
-          host,
-          (l) => state.entryMetas.get(l)?.title ?? null,
-          frontmatterLineCount(body),
-          // 🔑 中身を出す塊(= 既定の大きさで固定する塊)の判定は、描く側(`PlaceEmbeds`)と同じ 1 本
-          (l) => {
-            const m = state.entryMetas.get(l);
-            return m !== undefined && l !== lid && placeEmbeddable(m.archetype);
-          },
-        );
+        this.layoutPlace(host, body);
         /**
          * 🔴 **置いたノートの中身**(#529 W3-①)── 題名の帯の下に、読み取り専用で描く。
          * ⚠ 板を置いた**後**に呼ぶ(塊に帯が在って初めて、その直後へ器を置ける)。
@@ -3745,15 +3788,3 @@ function appIconPalette(current: unknown, lid: string): HTMLElement {
   });
 }
 
-/**
- * 器が全部 DOM から外れた塊を畳む(P8 段⑰)。
- * ⚠ **その場で配列を縮める** ── 畳んだ塊を残すと、次の tick でまた数えることになる。
- */
-function pruneScopes(scopes: MermaidScope[]): void {
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    if (scopes[i]!.prune() === 0) {
-      scopes[i]!.dispose();
-      scopes.splice(i, 1);
-    }
-  }
-}

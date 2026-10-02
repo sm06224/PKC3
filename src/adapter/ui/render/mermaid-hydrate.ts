@@ -155,6 +155,21 @@ export const MERMAID_KIND: DiagramKind = {
   savable: true,
 };
 
+/**
+ * 器が全部 DOM から外れた塊を畳む(P8 段⑰)。
+ * ⚠ **その場で配列を縮める** ── 畳んだ塊を残すと、次の tick でまた数えることになる。
+ * 🔑 板の中の図(`place-embed.ts`、#529 W3-②)も同じ 1 本を使う ── 面ごとに写すと、
+ *   片方だけ直した日に塊が積もる(§7)。
+ */
+export function pruneScopes(scopes: MermaidScope[]): void {
+  for (let i = scopes.length - 1; i >= 0; i--) {
+    if (scopes[i]!.prune() === 0) {
+      scopes[i]!.dispose();
+      scopes.splice(i, 1);
+    }
+  }
+}
+
 export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): MermaidScope {
   return hydrateDiagrams(root, MERMAID_KIND);
 }
