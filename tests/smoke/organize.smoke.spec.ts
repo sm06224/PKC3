@@ -343,6 +343,33 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
     probe.remove();
     return c;
   });
+  /**
+   * 🔴 **一言の隣に最近開いたノートの近道**(#1254 §3 改善 B)。⚠ 道中に載せる(新しい起動は足さない)。
+   * 実ブラウザで見るのは unit が持てない 2 つ:**薄い字**(一言と同じ `--muted`)と、**押し口が
+   * 同じ塊の右に居る**(近道が増えても、押し口だけが左の行へ落ちない)。字は割当の表から出る
+   * (既定の第 1 鍵)── 手で書かず、**画面の字が「最近開いたノートは 」で始まる**ことだけ見る。
+   */
+  const recentHint = page.locator(
+    '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten-recent"]',
+  );
+  await expect(recentHint, '入れたのに最近開いたノートの近道が出ない').toHaveText(/^最近開いたノートは .+/);
+  const hintLook = await page.evaluate(() => {
+    const h = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-recent"]')!;
+    const n = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-note"]')!;
+    const b = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten"]')!;
+    const nb = n.getBoundingClientRect();
+    const bb = b.getBoundingClientRect();
+    return {
+      hint: getComputedStyle(h).color,
+      note: getComputedStyle(n).color,
+      // 押し口は一言と同じ行(縦の中心が揃う)で、一言の右に居る
+      sameRow: Math.abs(nb.top + nb.height / 2 - (bb.top + bb.height / 2)) < 6,
+      right: bb.left >= nb.right - 1,
+    };
+  });
+  expect(hintLook.hint, '近道が一言と同じ薄い字でない').toBe(hintLook.note);
+  expect(hintLook.sameRow, '近道が増えて、押し口だけが別の行へ落ちた').toBe(true);
+  expect(hintLook.right, '押し口が一言の左にある').toBe(true);
   await page.mouse.move(0, 0);
   const bgOn = await bgOf();
   expect(bgOn, `押された見た目の色が切のときと同じ(${bgOn})`).not.toBe(bgOff);
@@ -359,6 +386,7 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(rows, '切に戻したのに平らなまま').toHaveCount(1);
   await expect(page.locator('[data-pkc-field="parent-name"]'), '切なのに親の名前が残っている').toHaveCount(0);
   await expect(flatNote, '切なのに「全部出しています」が残っている').toHaveCount(0);
+  await expect(recentHint, '切なのに近道が残っている').toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('pkc3.filer-flatten'))).toBe('0');
 
   /**
@@ -375,6 +403,11 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(overview, 'フォルダを押しても概要が出ない').toBeVisible();
   const summary = overview.locator('[data-pkc-field="overview-summary"]');
   await expect(summary).toHaveText('直下 ノート 1 件 / フォルダ 0 件');
+  // 🔴 1 件でも入っていれば「この中に新しいノートを作る」は出ない(空のフォルダだけ。#1254 §3 改善 A)
+  await expect(
+    overview.locator('[data-pkc-field="overview-create"]'),
+    '1 件入っているフォルダに作る入口が出ている',
+  ).toHaveCount(0);
   const overviewLook = await page.evaluate(() => {
     const el = document.querySelector<HTMLElement>('[data-pkc-field="overview-summary"]')!;
     const probe = document.createElement('div');
@@ -429,6 +462,25 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   await expect(rows, 'ルートへ出せていない').toHaveCount(0);
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   await expect(rows, 'ルートに戻っていない').toHaveCount(2);
+
+  /**
+   * 🔴 **空のフォルダには「この中に新しいノートを作る」が出る**(#1254 §3 改善 A。Gemini 裁定 = a)。
+   * ⚠ 道中に載せる(新しい起動は足さない)── 上でノートをルートへ出したので、フォルダはいま空。
+   * 押すと、**行の右クリックの同じ名前の操作と同じ動き**(その中にノートができて編集に入る)で、
+   * 概要は編集に入ると外れる(編集中は出さない)。
+   */
+  await clickReal(page, folderRow);
+  await expect(overview, '空のフォルダを押しても概要が出ない').toBeVisible();
+  await expect(summary).toHaveText('直下 ノート 0 件 / フォルダ 0 件');
+  const createIn = overview.locator('[data-pkc-field="overview-create"]');
+  await expect(createIn, '空のフォルダに作る入口が出ない').toBeVisible();
+  await expect(createIn).toHaveText('この中に新しいノートを作る');
+  await clickReal(page, '[data-pkc-region="folder-overview"] [data-pkc-field="overview-create"]');
+  await expect(overview, '作る入口を押しても編集に入らない(概要が残っている)').toHaveCount(0);
+  await expect(
+    page.locator('[data-pkc-action="commit-edit"]').first(),
+    '作る入口を押しても編集に入れない(保存の押し所が出ない)',
+  ).toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

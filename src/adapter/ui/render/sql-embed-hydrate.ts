@@ -42,6 +42,7 @@ import {
   sqlEmbedPendingHtml,
   type SqlEmbedAnswer,
 } from '@features/markdown/sql-embed';
+import { copyButtonHtml } from '@features/markdown/markdown-render';
 import { watchVisible, type VisibleWatch } from './visible-watch';
 
 /** 引く口(`runReadOnlySql` と同じ形)。⚠ `guest` は無い ── 相手はこの PKC だけ。 */
@@ -257,7 +258,32 @@ export class SqlEmbedHydrator {
      *   ここは「さらに N 行」で行を足すので、並べ替えると**足した行の位置が食い違う**。
      *   付与済みの印を先に置いておけば、あちらは触らない(冪等の門が読む印)。
      */
-    host.querySelector('table')?.setAttribute('data-pkc-table-sort-ready', 'true');
+    const table = host.querySelector('table');
+    table?.setAttribute('data-pkc-table-sort-ready', 'true');
+    /**
+     * 🔴 **答えの表にも、本文の表と同じ ⧉(コピー)を付ける**(#1254 §3 改善 E。Gemini 裁定 = a)。
+     *
+     * > user の物語:本文の表は右上の ⧉ で表計算に貼れる。**SQL の答えの表だけ**は ⧉ が無く、
+     * > 選択して貼るしかなかった。
+     *
+     * ⚠ **別の実装を作らない** ── 器は本文の表と同じ(`.pkc-md-block` + `kind="table"` + 同じ
+     *   `copyButtonHtml`)で、押した結果は `copy-md-block` の 1 本(読むのは `readTableRows`、
+     *   並べ替えの矢印を字に混ぜない #1150 の直しもそこに在る)。
+     * ⚠ **コピーされるのは、いま画面に出ている行**(`shown` ぶんだけ描いた表をそのまま読む。
+     *   「さらに N 行」を押す前は 200 行まで)。**表だけを包む** ── 「さらに N 行」・注記・
+     *   「保存したときの答え」・「答えを引いています…」は器の外なので、コピーに混ざらない。
+     * ⚠ **▾(形を選ぶ口)は付けない** ── あれは本文の表を書き換える口を含み、答えの表には
+     *   書き換える本文が無い。⚠ 並べ替えも付けない(上の註記)。
+     * ⚠ 書き出し(`bakeSqlEmbeds`)は ⧉ を持たない(閲覧側に受け手が居ない)── 画面の器だけ。
+     */
+    if (table !== null) {
+      const block = host.ownerDocument.createElement('div');
+      block.className = 'pkc-md-block';
+      block.setAttribute('data-pkc-md-block-kind', 'table');
+      block.insertAdjacentHTML('beforeend', copyButtonHtml('table'));
+      table.replaceWith(block);
+      block.append(table);
+    }
   }
 
   /** 「さらに N 行」を受ける(器ごとに 1 回だけ付ける ── 描き直しても積まない)。 */

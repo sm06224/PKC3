@@ -43,6 +43,8 @@ import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 import { emptyStartActions } from './empty-start';
 import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';
+import { chordHint } from './shortcut-hint';
+import { appKeymap, type KeymapStore } from './keymap';
 
 
 
@@ -99,8 +101,55 @@ export class FilerRenderer {
    */
   private paintedRefused: Record<TagInputField, string> = { 'smart-cond': '', 'bulk-tag': '' };
 
-  constructor(region: HTMLElement) {
+  constructor(
+    region: HTMLElement,
+    /**
+     * 🔴 **近道の鍵を引く割当**(#1254 §3 改善 B)。⚠ **末尾に足す**(位置引数で渡している呼び手を
+     *   動かさない)。
+     */
+    private readonly keymap: KeymapStore = appKeymap,
+  ) {
     this.region = region;
+    /**
+     * 🔴 **割当を変えたら、いま出ている一言の鍵も書き直す**(組み直しを待たない)。
+     * ⚠ 一言は「中まで全部出す」を入れている間だけ在る ── 帯は指紋が動くまで組み直されないので、
+     *   ここで直さないと、鍵を変えた直後だけ**古い鍵の綴り**が残る(画面が嘘をつく)。
+     */
+    this.keymap.onChange(() => this.paintRecentHint());
+  }
+
+  /**
+   * 🔴 **「最近開いたノートは <鍵>」の字**(#1254 §3 改善 B)。⚠ 鍵の綴りは**割当の表から引く**
+   *   (`chordHint`。直書きすると、user が鍵を変えた日に嘘になる)。割当が 1 つも無ければ `null`
+   *   ── 呼び手は**一言ごと出さない**(嘘の鍵を書かない)。
+   */
+  private recentHintText(): string | null {
+    const chord = chordHint('open-recent', this.keymap);
+    return chord === null ? null : `最近開いたノートは ${chord}`;
+  }
+
+  /** いま出ている一言の鍵を、いまの割当へ書き直す(無ければ一言ごと外す)。 */
+  private paintRecentHint(): void {
+    const group = this.region.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-group"]');
+    if (group === null) return;
+    const text = this.recentHintText();
+    const cur = group.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-recent"]');
+    if (text === null) {
+      cur?.remove();
+      return;
+    }
+    if (cur !== null) {
+      if (cur.textContent !== text) cur.textContent = text;
+      return;
+    }
+    group.insertBefore(this.buildRecentHint(text), group.firstElementChild);
+  }
+
+  private buildRecentHint(text: string): HTMLElement {
+    const recent = document.createElement('span');
+    recent.setAttribute('data-pkc-field', 'filer-flatten-recent');
+    recent.textContent = text;
+    return recent;
   }
 
   /**
@@ -920,7 +969,22 @@ export class FilerRenderer {
         const note = document.createElement('span');
         note.setAttribute('data-pkc-field', 'filer-flatten-note');
         note.textContent = `全部出しています(${list.length} 件)`;
-        group.append(note, flat);
+        /**
+         * 🔴 **最近開いたノートへの近道を添える**(#1254 §3 改善 B。Gemini 裁定 = a)。
+         *
+         * > user の物語:一覧のタブが無くなった後、最近開いた順に全部を見るには フォルダ → ルート →
+         * > 「中まで全部出す」→ 並び順 の 3 手かかる。**近道の鍵**(最近開いたノートへ移る)は
+         * > マニュアルにしか書いていなかった。いま全部を平らに出している人は、まさにその近道が
+         * > 欲しい場面なので、この一言の隣で教える。
+         * ⚠ 鍵が無ければ添えない({@link recentHintText})。
+         */
+        const recentText = this.recentHintText();
+        /**
+         * ⚠ **近道は一言の前**(押下表示の左隣は件数の一言のまま ── `filer-flatten.test.ts` が守る
+         *   「一言と押し口は同じ塊の左右」)。列が狭いときは、折り返しで近道が上の行へ回る。
+         */
+        if (recentText === null) group.append(note, flat);
+        else group.append(this.buildRecentHint(recentText), note, flat);
         crumb.append(group);
       } else {
         crumb.append(flat);
