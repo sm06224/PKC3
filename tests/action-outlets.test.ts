@@ -85,6 +85,15 @@ const UNRESOLVED: readonly string[] = [
   'install-office-pack',
   'move-order-down',
   'move-order-up',
+  /**
+   * ⚠ **2026-10-02(#215 段①)で 3 件増えた** ── パソコンのフォルダの押し口(選ぶ / 切る /
+   *   さらに表示)。🔑 押し所は `pc-folder.ts` が `button(action, …)` という
+   *   **変数の引数**で組むので、静的な `data-pkc-action="pc-…"` が source のどこにも無い
+   *   (`set-app-icon` と同じ ── 出口は在るが、字では追えない)。
+   */
+  'pc-cut-folder',
+  'pc-more',
+  'pc-pick-folder',
   'remove-office-pack',
   'reset-office-profile',
   'set-app-group',

@@ -5065,6 +5065,69 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   max-width: 100%;
 }
 
+/* ══ パソコン(#215 段①②、2026-10-02)═══════════════════════════════
+ * 🔴 **左の列だけ**(別窓は無い)。作法は録ったものと同じ縦積み ── 名前・種類・
+ *   大きさ・更新日を横に並べると 200px で名前が切れる。
+ * ⚠ 段①の行は押せない(読むだけ)。 */
+[data-pkc-browse-pane='pc'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s2);
+  min-height: 0;
+  overflow: auto;
+}
+[data-pkc-field='pc-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+[data-pkc-field='pc-pick'],
+[data-pkc-field='pc-more'] {
+  align-self: flex-start;
+}
+[data-pkc-field='pc-band'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='pc-folder-name'] {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='pc-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--border);
+}
+[data-pkc-field='pc-list'] > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+}
+/* 段①は読むだけ ── 行は押せない(押して取り込む道は段②) */
+[data-pkc-field='pc-list'] > li > [data-pkc-field='pc-name'],
+[data-pkc-field='pc-list'] > li > [data-pkc-field='pc-meta'] {
+  padding: 0 var(--s2);
+}
+[data-pkc-field='pc-name'] {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='pc-meta'] {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* ══ 探す面(#680、2026-09-05)═════════════════════════════════════
  * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い。作法は連絡先と同じ縦積み。
  * 地は無彩色、色は当たった語(`<mark>`)にだけ使う(業務画面の作法)。 */

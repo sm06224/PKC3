@@ -1001,6 +1001,12 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     '2 番目が「別のウィンドウで開く」になっていない',
   ).toHaveText('別のウィンドウで開く');
 
+  // ⚠ 開いているメニューを**閉じてから**設定へ行く(2026-10-02、#215 段①)。左の列のタブが 6 枚になり
+  //   1280px では 2 段へ折り返す(`layout.smoke.spec.ts` の `TAB_ONE_ROW_FROM`)ので、タイルが下がり、
+  //   開いたままのメニューが「システム」のボタンの真上に重なった(実測 `elementFromPoint` =
+  //   「タイルを並べ替える」)。user も押す前にメニューを閉じるので、道中のほうを実際の手順に揃えた。
+  await page.keyboard.press('Escape');
+  await expect(tileMenu, 'Esc でメニューが閉じない').toBeHidden();
   // 🔑 対照群 ── 選ぶ前の設定を、設定画面そのもので控える(押す前の基準)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const openTargetSelect = page.locator('[data-pkc-field="app-open-target-select"]');

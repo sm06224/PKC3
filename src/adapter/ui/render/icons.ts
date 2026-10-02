@@ -325,6 +325,8 @@ export const BROWSE_ICONS: Readonly<Record<string, IconName>> = {
   contacts: 'person',
   // 🔴 録ったもの(#683 段①)── 録る口(左下の「録音」)と同じ図案にする
   captures: 'mic',
+  // 🔴 パソコン(#215 段①)── 「フォルダ」のタブ(`folder`)と取り違えない別の図案
+  pc: 'computer',
 };
 
 /**

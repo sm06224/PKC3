@@ -234,7 +234,16 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   行き先は固定で、鍵も持たない)。
    */
   'open-storage-check', 'open-system-notices', 'open-today',
-  'paste-many-copied', 'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
+  'paste-many-copied',
+  /**
+   * ⚠ **2026-10-02(#215 段①)で 3 件増やした** ── パソコンのフォルダを選ぶ / 切る / さらに表示。
+   * 🔑 **名前で呼べないままにする理由**:押し口は「パソコン」のタブの中の 1 個所だけで、
+   *   タブを開いていないと意味が無い(`sql-er-toggle` と同じ ── 出す先が無い)。
+   *   ⚠ 「フォルダを選ぶ…」は user の操作の流れの中で呼ぶ必要があり、パレットの Enter は
+   *   その流れに乗らない可能性がある(実測していない)ので、登記は見送る。
+   */
+  'pc-cut-folder', 'pc-more', 'pc-pick-folder',
+  'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
   /**
    * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
    *   ひし形 / 矢印)。⚠ **名前で呼べないままにする理由**:押し口は
@@ -433,6 +442,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-02(#215 段①): パソコンのフォルダの押し口 3 つ(`pc-pick-folder` / `pc-cut-folder` /
+      //   `pc-more`)で受け手 +3 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
+      //   3 つとも名前だけで呼べる側(`sql-er-toggle` と同じ仕分け)
       // ⚠ 2026-10-01(#1102 段①): 「探す」から送った本文の帯の 3 つ(`search-jump-prev` /
       //   `search-jump-next` / `search-jump-end`)で受け手 +3 ── 登記は増えない(押し口は帯の中にしか
       //   無く、鍵も持たない。`Esc` は `deselect-entry` の 1 段目で、登記の数は動かない)。
@@ -673,12 +685,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   設定の「音声認識」の 3 つ(`install-asr-part` / `remove-asr-part` / `cancel-asr-install`)で
       //   受け手 +4 ── 登記は増えない(押し口は行の中・設定の中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 367,
-      receivers: 308,
+      total: 370,
+      receivers: 311,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 269,
+      unregistered: 272,
     });
   });
 

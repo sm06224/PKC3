@@ -5,7 +5,7 @@
  * 段③-a で「一覧でしかできなかった物」をフォルダへ移したうえで外した(その pin は
  * `folder-moved-from-list.test.ts` / `folder-left-column.test.ts`)。ここは**外したこと自体**を守る:
  *
- * - タブは 5 枚で、「一覧」が無い(表・型・既定・退避先・種類の札の面の 5 か所が揃っている)
+ * - タブは 6 枚で、「一覧」が無い(表・型・既定・退避先・種類の札の面の 5 か所が揃っている)
  * - 動線(退避先 / 別窓が塞がれたとき / 深いリンク)が「一覧」へ向いていない
  * - 消した描画器・器・規則・文脈への参照が、`src` に 1 件も残っていない
  *
@@ -43,8 +43,8 @@ const code = (src: string): string =>
     .replace(/([^:'"`])\/\/.*$/gm, '$1');
 
 describe('「一覧」タブは外してある(#813 段③)', () => {
-  it('🔴 タブは 5 枚で、「一覧」が無い', () => {
-    expect(BROWSE_TABS.map((t) => t.mode)).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures']);
+  it('🔴 タブは 6 枚で、「一覧」が無い(6 枚目は「パソコン」── #215 段①)', () => {
+    expect(BROWSE_TABS.map((t) => t.mode)).toEqual(['filer', 'launcher', 'schedule', 'contacts', 'captures', 'pc']);
     expect(BROWSE_TABS.map((t) => t.label)).not.toContain('一覧');
     // 型・判定・図案・種類の札の面が、表と同じ数で揃っている(1 つだけ残ると、押せないタブか知らない面になる)
     expect([...BROWSE_MODES].sort()).toEqual(BROWSE_TABS.map((t) => t.mode).sort());

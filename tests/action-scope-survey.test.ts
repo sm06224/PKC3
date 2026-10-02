@@ -290,7 +290,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `capture-play` と同じ仕分け)/ N +3(`install-asr-part` / `remove-asr-part` / `cancel-asr-install`。
     //   設定の「音声認識」の押し所 ── どの部品かは押したボタン自身が運ぶので、押した所からは何も要らない。
     //   `remove-sql-source` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 68, P2: 34, E: 25, V: 10, N: 171 });
+    // ⚠ 2026-10-02(#215 段①): N +3(`pc-pick-folder` / `pc-cut-folder` / `pc-more`。パソコンのタブの中の
+    //   押し口 ── 押した所から何も要らない)。
+    expect(counts()).toEqual({ P1: 68, P2: 34, E: 25, V: 10, N: 174 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

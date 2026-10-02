@@ -281,6 +281,7 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import { LocalFolder, windowDirectoryPicker } from '@adapter/platform/local-folder';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
 import { formatArchivePreviewMessage } from '@features/import/archive-preview';
 import {
@@ -1170,6 +1171,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   にしておく(`repaintStatus` / `repaintOnLayout` と同じ形)。
    */
   let repaintPanes: () => void = () => undefined;
+  /**
+   * 🔴 **パソコンのフォルダ**(#215 段①。🟣 Gemini 裁定 2026-10-01)。
+   * ⚠ **handle の持ち主はこの 1 つだけ**(state にも IndexedDB にも置かない ── `local-folder.ts`)。
+   *   描画(`browse`)と押し口(`services.localFolder`)に**同じ物**を渡す。
+   */
+  const localFolder = new LocalFolder({
+    picker: windowDirectoryPicker(),
+    onChange: () => repaintPanes(),
+  });
   const browse = new BrowseRouter(
     regions.sidebar,
     regions.browseHost,
@@ -1177,6 +1187,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     undefined,
     assetLender,
     () => repaintPanes(),
+    localFolder,
   );
   const inspector = new InspectorRenderer(regions.inspector);
   /**
@@ -2761,6 +2772,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   const services: BinderServices = {
+    // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
+    localFolder,
     /** 🔴 章を読むだけの別のウィンドウで(#1044 段4)── 窓は**同期で**掴む。 */
     openChapterWindow: (lid, line) => void chapterWindows.open(lid, line),
     attachFiles: (files, why, at, intoLid) =>

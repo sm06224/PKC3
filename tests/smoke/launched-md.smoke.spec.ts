@@ -119,3 +119,71 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **左の「パソコン」タブ → フォルダを選ぶ → 一覧 → 切る**(#215 段①。🟣 Gemini 裁定 2026-10-01)。
+ *
+ * ⚠ `showDirectoryPicker` を**アプリが読む前に**差す(本物の選択画面は headless で出せない)。
+ *   handle の fake は本物の意味論を真似る(`values()` は非同期の列挙 / `queryPermission` は
+ *   `'granted'` を返す)。
+ * 🔑 見るのは「**押した先が本当にそこへ繋がっている**」こと(`main.ts` の配線 ── unit は届かない):
+ *   ① タブが 6 枚目に出て押せる ② 選ぶと直下が名前順(フォルダが先)に並び、**読むだけの許可**で選ばせている
+ *   ③ 行は押せない ④ 切ると繋ぐ前へ戻る。
+ */
+test('🔴 パソコンのタブ: 選ぶ → 並ぶ → 切る(読むだけ)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.addInitScript(() => {
+    const w = window as unknown as { __picked?: unknown[] };
+    w.__picked = [];
+    const mk = (name: string, text: string) => ({
+      kind: 'file',
+      name,
+      getFile: () => Promise.resolve(new File([text], name, { lastModified: Date.UTC(2026, 8, 30) })),
+    });
+    const entries = [mk('メモ.md', '# メモ\n'), mk('猫.png', 'x'), { kind: 'directory', name: '下の階層' }];
+    const dir = {
+      kind: 'directory',
+      name: '資料',
+      queryPermission: () => Promise.resolve('granted'),
+      values: async function* () {
+        for (const e of entries) yield e;
+      },
+    };
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: (o: unknown) => {
+        w.__picked!.push(o);
+        return Promise.resolve(dir);
+      },
+    });
+  });
+  await gotoApp(page);
+
+  // ① タブを押す → 説明と「フォルダを選ぶ…」だけが出る
+  const tab = page.locator('[data-pkc-action="set-browse"][data-pkc-browse="pc"]');
+  await clickReal(page, tab);
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  const pane = page.locator('[data-pkc-browse-pane="pc"]');
+  await expect(pane).toBeVisible();
+  await expect(pane.locator('button')).toHaveCount(1);
+
+  // ② 選ぶ → 直下が並ぶ(フォルダ・名前順)。読むだけの許可で選ばせている
+  await clickReal(page, '[data-pkc-action="pc-pick-folder"]');
+  await expect(pane.locator('[data-pkc-field="pc-folder-name"]')).toHaveText('資料');
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveText(['下の階層', 'メモ.md', '猫.png']);
+  expect(
+    await page.evaluate(() => (window as unknown as { __picked: unknown[] }).__picked),
+    '書く許可でフォルダを選ばせている',
+  ).toEqual([{ mode: 'read' }]);
+
+  // ③ 行は押せない(読むだけ)
+  await expect(pane.locator('[data-pkc-pc-row] button')).toHaveCount(0);
+
+  // ④ 切る → 繋ぐ前へ戻る
+  await clickReal(page, '[data-pkc-action="pc-cut-folder"]');
+  await expect(pane.locator('[data-pkc-action="pc-pick-folder"]')).toBeVisible();
+  await expect(pane.locator('[data-pkc-pc-row]')).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
