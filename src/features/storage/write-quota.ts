@@ -83,6 +83,9 @@ export const QUOTA_BLOCKED_OPS: readonly string[] = [
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 本文を伸ばす書き込みなので増える側。
   //    断られた分は adapter 側の控え(IndexedDB)へ積む(`message-post.ts`)。
   'appendMessage',
+  // 🔴 索引の片づけ(#999 段③)── 畳む途中で新しい段を先に書くので**一時的に増える**。
+  //    user が押した操作ではなく自動で打つので、空きが無い端末には打たない側へ倒す
+  'optimizeIndexes',
 ];
 
 /**

@@ -35,6 +35,14 @@ export declare function controlMoved(idle: PathRun | undefined | null): {
   why: string | null;
 };
 export declare function problemsOfPhaseA(a: { runs: PathRun[] } | undefined): string[];
+export declare function problemsOfOptimizeOp(
+  g:
+    | {
+        roundTripMs: number;
+        result: { before: GaugeLike; after: GaugeLike };
+      }
+    | undefined,
+): string[];
 export declare function compareFingerprints(
   a: Fingerprint,
   b: Fingerprint,

@@ -526,6 +526,17 @@ export type StorageRequest =
    */
   | { op: 'storageGauge' }
   /**
+   * 🔴 **索引の片づけを 1 回打つ**(#999 段③、Gemini 裁定 A 2026-10-01)。
+   *
+   * ⚠ 打つのは **FTS5 の `optimize` だけ**(段①が測ったのはこれ ── 0.4 秒、file は
+   *   縮まず空きに変わる)。⚠ **VACUUM は打たない**(途中で止まると DB が開けなくなる ──
+   *   #1218。この op に VACUUM を足さない)。
+   * ⚠ **書き込みなので** 壊れている間は断り(`CORRUPT_BLOCKED_OPS`)、空きが無いときも
+   *   断る(`QUOTA_BLOCKED_OPS` ── 畳む途中で一時的に増える)。
+   * 🔑 前後の `storageGauge` と所要を返す(「何が起きたか」を呼び側が 1 行で言える)。
+   */
+  | { op: 'optimizeIndexes' }
+  /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。
    *
    * ⚠ **時間の上限を掛けない** ── SQL の面は 8 秒で切るので救出には使えない
@@ -791,6 +802,18 @@ export interface StorageGauge {
   elapsedMs: number;
 }
 
+/**
+ * 🔴 **索引の片づけ 1 回の結果**(#999 段③)── `optimizeIndexes` の返り値。
+ *
+ * ⚠ `elapsedMs` は **片づけそのもの**(前後の計測は含まない)。
+ */
+export interface OptimizeIndexesResult {
+  /** 片づけに掛かった時間(ms)。 */
+  elapsedMs: number;
+  before: StorageGauge;
+  after: StorageGauge;
+}
+
 export interface CountsResult {
   entries: number;
   relations: number;
@@ -1005,6 +1028,7 @@ export interface ResultMap {
   storageProfile: StorageProfileResult;
   counts: CountsResult;
   storageGauge: StorageGauge;
+  optimizeIndexes: OptimizeIndexesResult;
   checkIntegrity: IntegrityCheckResult;
   integrityPlan: IntegrityPlan;
   integrityStamp: null;

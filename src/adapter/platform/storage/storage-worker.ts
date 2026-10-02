@@ -114,6 +114,7 @@ import {
   type ResultMap,
   type ImportRevisionsResult,
   type EncodedChainInput,
+  type StorageGauge,
 } from './protocol';
 
 let db: Database | null = null;
@@ -824,6 +825,45 @@ export function applySchema(database: Database): void {
 function need(): Database {
   if (!db) throw new Error('storage worker not initialized');
   return db;
+}
+
+/**
+ * 🔴 **保存領域の太り具合を測る**(#999 段①)── `storageGauge` と `optimizeIndexes`
+ * (前後の計器)が**同じ 1 本**を通る(判断を 2 か所に書かない)。読むだけ。
+ *
+ * ⚠ `PRAGMA` は `exportImage` が `page_count` を読む形に倣う(`selectValue`)。
+ * ⚠ **索引の段数だけは「読めないかもしれない」** ── 索引の表が無い / 壊れていると
+ *   `null` で返す(0 と嘘を言わない。⚠ 壊れた DB でも他の数は返す ── 壊れていても
+ *   通す門に置いたので、ここで落とすと「測れない」しか返せなくなる)。
+ * ⚠ `count(*) FROM entries_fts` は使わない(外部内容の表は内容表を数える。
+ *   `entriesFtsRowCount` の註記)── 数えるのは影の表 `entries_fts_idx` の `segid`。
+ */
+function measureGauge(database: Database): StorageGauge {
+  const started = Date.now();
+  const num = (sql: string): number => {
+    const v = database.selectValue(sql);
+    return typeof v === 'number' ? v : Number(v ?? 0);
+  };
+  const pageCount = num('PRAGMA page_count');
+  const pageSize = num('PRAGMA page_size');
+  const freelistCount = num('PRAGMA freelist_count');
+  let ftsSegments: number | null = null;
+  try {
+    ftsSegments = num('SELECT count(DISTINCT segid) FROM entries_fts_idx');
+  } catch {
+    /* 索引の表が無い / 読めない = null(下限を 0 と読ませない) */
+  }
+  return {
+    pageCount,
+    pageSize,
+    freelistCount,
+    fileBytes: pageCount * pageSize,
+    freeBytes: freelistCount * pageSize,
+    ftsSegments,
+    journalMode: String(database.selectValue('PRAGMA journal_mode')),
+    tempStore: num('PRAGMA temp_store'),
+    elapsedMs: Date.now() - started,
+  };
 }
 
 /**
@@ -3797,43 +3837,24 @@ const handlers: Handlers = {
       assets: one('SELECT COUNT(*) AS n FROM assets WHERE cid = ?'),
     };
   },
+  /** 🔴 **保存領域の太り具合を測る**(#999 段①)── 読むだけ。実体は `measureGauge`。 */
+  storageGauge: () => measureGauge(need()),
   /**
-   * 🔴 **保存領域の太り具合を測る**(#999 段①)── 読むだけ。
+   * 🔴 **索引の片づけを 1 回打つ**(#999 段①の計測 → 段③)。
    *
-   * ⚠ `PRAGMA` は `exportImage` が `page_count` を読む形に倣う(`selectValue`)。
-   * ⚠ **索引の段数だけは「読めないかもしれない」** ── 索引の表が無い / 壊れていると
-   *   `null` で返す(0 と嘘を言わない。⚠ 壊れた DB でも他の数は返す ── 壊れていても
-   *   通す門に置いたので、ここで落とすと「測れない」しか返せなくなる)。
-   * ⚠ `count(*) FROM entries_fts` は使わない(外部内容の表は内容表を数える。
-   *   `entriesFtsRowCount` の註記)── 数えるのは影の表 `entries_fts_idx` の `segid`。
+   * ⚠ 打つのは FTS5 の `optimize` **だけ**。🔴 **VACUUM をここへ足さない**
+   *   (#1218: 途中でタブが殺されると DB が開けなくなる ── 自動で打ってはいけない)。
+   * ⚠ 同期の handler なので、**他の op と交わらない**(worker は 1 本で、
+   *   書込の途中に割り込まない)。呼び側は書込の列にも載せる(`StoreEffects.run`)。
+   * 🔑 前後の計器を同じ口(`measureGauge`)で採る ── 判断を 2 か所に書かない。
    */
-  storageGauge: () => {
+  optimizeIndexes: () => {
     const database = need();
+    const before = measureGauge(database);
     const started = Date.now();
-    const num = (sql: string): number => {
-      const v = database.selectValue(sql);
-      return typeof v === 'number' ? v : Number(v ?? 0);
-    };
-    const pageCount = num('PRAGMA page_count');
-    const pageSize = num('PRAGMA page_size');
-    const freelistCount = num('PRAGMA freelist_count');
-    let ftsSegments: number | null = null;
-    try {
-      ftsSegments = num('SELECT count(DISTINCT segid) FROM entries_fts_idx');
-    } catch {
-      /* 索引の表が無い / 読めない = null(下限を 0 と読ませない) */
-    }
-    return {
-      pageCount,
-      pageSize,
-      freelistCount,
-      fileBytes: pageCount * pageSize,
-      freeBytes: freelistCount * pageSize,
-      ftsSegments,
-      journalMode: String(database.selectValue('PRAGMA journal_mode')),
-      tempStore: num('PRAGMA temp_store'),
-      elapsedMs: Date.now() - started,
-    };
+    database.exec(`INSERT INTO entries_fts(entries_fts) VALUES ('optimize')`);
+    const elapsedMs = Date.now() - started;
+    return { elapsedMs, before, after: measureGauge(database) };
   },
   /**
    * 🔴 **中身が壊れていないかを調べる**(#971 段③)。

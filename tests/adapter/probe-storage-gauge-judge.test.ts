@@ -11,6 +11,7 @@ import {
   controlMoved,
   gaugeDelta,
   perOp,
+  problemsOfOptimizeOp,
   problemsOfPhaseA,
   type GaugeLike,
 } from '../probe/storage-gauge-judge.mjs';
@@ -106,5 +107,33 @@ describe('compareFingerprints', () => {
     expect(moved.diffs).toEqual(['検索「a」の当たりが違う']);
     // ⚠ 片側にしか無い問いも違いとして数える
     expect(compareFingerprints(base, { ...fp(), sets: { a: ['e1', 'e2'] } }).same).toBe(false);
+  });
+});
+
+describe('problemsOfOptimizeOp(#999 段③)', () => {
+  const ok = {
+    roundTripMs: 400,
+    result: {
+      before: g({ ftsSegments: 14, freeBytes: 4096, fileBytes: 409600 }),
+      after: g({ ftsSegments: 1, freeBytes: 12288, fileBytes: 409600 }),
+    },
+  };
+  it('揃っていれば空', () => {
+    expect(problemsOfOptimizeOp(ok)).toEqual([]);
+  });
+  it('🔴 1 秒に 1ms 超えた / 打てていない / 畳む前が 1 段 / 畳まれていない は、それぞれ別の理由で返る', () => {
+    expect(problemsOfOptimizeOp({ ...ok, roundTripMs: 1000 })).toEqual([]);
+    expect(problemsOfOptimizeOp({ ...ok, roundTripMs: 1001 }).join()).toContain('1 秒を超えた');
+    expect(problemsOfOptimizeOp(undefined).join()).toContain('打てていない');
+    const flat = { ...ok, result: { ...ok.result, before: g({ ftsSegments: 1, freeBytes: 4096 }) } };
+    expect(problemsOfOptimizeOp(flat).join()).toContain('前提が崩れている');
+    const unmerged = { ...ok, result: { ...ok.result, after: g({ ftsSegments: 3, freeBytes: 12288 }) } };
+    expect(problemsOfOptimizeOp(unmerged).join()).toContain('畳まれていない');
+  });
+  it('🔴 空きが減った / file が縮んだ = VACUUM を打っている、は別々に返る', () => {
+    const lessFree = { ...ok, result: { ...ok.result, after: g({ ftsSegments: 1, freeBytes: 0, fileBytes: 409600 }) } };
+    expect(problemsOfOptimizeOp(lessFree).join()).toContain('空きが減った');
+    const shrunk = { ...ok, result: { ...ok.result, after: g({ ftsSegments: 1, freeBytes: 12288, fileBytes: 300000 }) } };
+    expect(problemsOfOptimizeOp(shrunk).join()).toContain('file が縮んだ');
   });
 });

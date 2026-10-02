@@ -11,6 +11,7 @@
  *   b  FTS の `optimize` の前後(file / 空き / 段)
  *   c  VACUUM の所要・前後・一時的な増え方・worker の常駐(プロセス木の Pss)・検索の指紋(rowid)
  *   e  VACUUM の途中で worker を殺す → 開き直して無傷か
+ *   g  製品の op `optimizeIndexes` を直に 1 回(1 秒以内に返り、空きが増えるか同じ ── #999 段③)
  *   (f 空きが足りないときの挙動は、箱の OPFS を埋めるのが危険なので**測らない**)
  *
  * ⚠ 出力は **file に落としてから読む**(`| tail` に通さない ── 落ちたことが消える)。
@@ -23,6 +24,7 @@ import {
   compareFingerprints,
   gaugeDelta,
   perOp,
+  problemsOfOptimizeOp,
   problemsOfPhaseA,
 } from './storage-gauge-judge.mjs';
 
@@ -239,6 +241,33 @@ try {
       quickCheck: qc.rows,
     };
     log('b', out.b);
+    await G('close');
+    save();
+  }
+
+  // ─────────────── g: 製品の op `optimizeIndexes` を直に 1 回(#999 段③)
+  /**
+   * 編集セッション後の DB(b と同じ作り)で、**製品の op**を 1 回打つ。⚠ b は `raw` の迂回だが、
+   * こちらは自動で打つ口そのもの。判定規則は `problemsOfOptimizeOp`(結果を見る前に置いた)。
+   * ⚠ 続けてもう 1 回打つ(2 回目は何もしない = 速く、空きも段も動かない)。
+   */
+  if (PHASES.includes('g')) {
+    await G('openDb', dbName('g'));
+    await G('seed', 0, BASE, KB);
+    const ctx = { base: BASE, kb: KB };
+    for (const name of ['save', 'saveCheckpoint']) {
+      await page.evaluate(([name, N, ctx]) => window.__GAUGE__.runPath(name, N, ctx, N), [name, N, ctx]);
+    }
+    const first = await G('optimizeOnce');
+    const second = await G('optimizeOnce');
+    const quick = await G('quickCheck');
+    out.g = { first, second, quickCheck: quick.rows };
+    const problems = problemsOfOptimizeOp(first);
+    if (second.result.after.ftsSegments !== 1) problems.push('2 回目で段が 1 でなくなった');
+    if (second.result.after.freeBytes !== second.result.before.freeBytes) problems.push('2 回目で空きが動いた(1 回目で畳み切れていない)');
+    if (quick.rows.join() !== 'ok') problems.push('quick_check が ok でない: ' + quick.rows.join());
+    out.problems.push(...problems.map((p) => 'g: ' + p));
+    log('g', out.g);
     await G('close');
     save();
   }

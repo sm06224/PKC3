@@ -337,8 +337,19 @@
         return true;
       }
 
+      /**
+       * 🔴 **索引の片づけ(`optimizeIndexes`)を製品の op で直に 1 回打つ**(#999 段③)。
+       * ⚠ 上の `raw` の迂回ではない ── 製品が自動で打つ口そのもの(往復の所要も測る)。
+       */
+      async function optimizeOnce() {
+        const t0 = performance.now();
+        const result = await req({ op: 'optimizeIndexes' });
+        return { roundTripMs: Math.round(performance.now() - t0), result };
+      }
+
       window.__GAUGE__ = {
         openDb,
+        optimizeOnce,
         async close() {
           try {
             await req({ op: 'close' });

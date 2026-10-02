@@ -127,4 +127,17 @@ describe('空きが無いときの書き込み(#971 段②)', () => {
       '消した直後なのに書けてしまった(門が消えている)',
     ).rejects.toThrow(WRITE_QUOTA_REFUSAL);
   }, 30_000);
+
+  /**
+   * 🔴 **自動で打つ索引の片づけは、一杯の端末には打たない**(#999 段③)。
+   * ⚠ 前の test が「一杯」の状態を残している(`fake` が差し替わったまま)── 前提として
+   *   upsert が断られることを先に見る(でないと「片づけが断られた」が別の理由になる)。
+   */
+  it('🔴 一杯のとき、索引の片づけは断られる(畳む途中で一時的に増えるため)', async () => {
+    await expect(
+      request({ op: 'upsertEntry', cid: 'c1', entry: entry('k-pre') }),
+      '前提: 一杯の状態が続いていない',
+    ).rejects.toThrow(WRITE_QUOTA_REFUSAL);
+    await expect(request({ op: 'optimizeIndexes' })).rejects.toThrow(WRITE_QUOTA_REFUSAL);
+  });
 });

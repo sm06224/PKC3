@@ -82,6 +82,8 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
   //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
   'appendMessage',
+  // 🔴 索引の片づけ(#999 段③)── 索引の段を書き直すので書き込み。壊れた DB には打たない
+  'optimizeIndexes',
 ];
 
 /**
