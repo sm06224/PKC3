@@ -101,3 +101,57 @@ export function compareFingerprints(a, b) {
   }
   return { same: diffs.length === 0, diffs };
 }
+
+/**
+ * 🔴 **長い更新の途中で殺して開き直した回の「結末」を 1 つに分ける**(#1218 F1)。
+ *
+ * - `init-failed`   … 開き直せなかった(製品の `init` が落ちた)
+ * - `unreadable`    … 開けたが `quick_check` が ok でない / 読めなかった
+ * - `completed`     … 全件書き換わっていた(殺す前に終わっていた = 測れていない)
+ * - `rolled-back`   … 変更行 0(殺す前と同じ)
+ * - `half`          … 途中の状態が見えている(巻き戻されも終わりもしていない)
+ * @param {{ reopen?: string, quickCheck?: string[], total?: number, touched?: number }} k
+ */
+export function stateOfKill(k) {
+  if (k.reopen !== 'ok') return 'init-failed';
+  if (!Array.isArray(k.quickCheck) || k.quickCheck.join() !== 'ok') return 'unreadable';
+  if (!(k.total > 0)) return 'unreadable';
+  if (k.touched === k.total) return 'completed';
+  if (!k.touched) return 'rolled-back';
+  return 'half';
+}
+
+/**
+ * 🔴 **殺して開き直す probe を読んでよいか**(#1218 F1)。判定規則は結果を見る前に置いた。
+ *
+ * - `expect = 'patched'`(製品のまま):**全部**が `rolled-back`。差し替えが当たっていない回・
+ *   殺す前に終わっていた回(= 測れていない)・壊れた回は、それぞれ別の理由で返る
+ * - `expect = 'unpatched'`(対照群 = 差し替えを外した build):差し替わっていないこと、そして
+ *   **1 件以上が壊れる**(`init-failed` / `unreadable`)こと。1 件も壊れなければ
+ *   「差し替えが効いて救っている」と言えない(= 同じ殺し方で壊れる事実が無い)
+ * @param {Array<{ killAtMs: number, patched?: boolean, reopen?: string, quickCheck?: string[], total?: number, touched?: number }>} kills
+ * @param {'patched' | 'unpatched'} expect
+ * @returns {string[]} 読めない / 満たさない理由(空なら読んでよい)
+ */
+export function problemsOfReservedLock(kills, expect) {
+  const out = [];
+  if (!Array.isArray(kills) || kills.length === 0) return ['殺した回が 1 つも無い'];
+  if (expect !== 'patched' && expect !== 'unpatched') return [`expect が不明: ${String(expect)}`];
+  let broken = 0;
+  for (const k of kills) {
+    const at = `${k.killAtMs}ms`;
+    const state = stateOfKill(k);
+    if (state === 'init-failed' || state === 'unreadable') broken++;
+    if (expect === 'patched') {
+      if (k.patched !== true) out.push(`${at}: 差し替えが当たっていない(patched = ${String(k.patched)})`);
+      if (state === 'completed') out.push(`${at}: 殺す前に更新が終わっていた(測れていない。殺す時点を早める)`);
+      else if (state !== 'rolled-back') out.push(`${at}: 巻き戻っていない(${state})`);
+    } else if (k.patched !== false) {
+      out.push(`${at}: 対照群なのに差し替わっている(patched = ${String(k.patched)})`);
+    }
+  }
+  if (expect === 'unpatched' && broken === 0) {
+    out.push('対照群が 1 件も壊れなかった(同じ殺し方で壊れる事実が無い ── 差し替えが効いたとは言えない)');
+  }
+  return out;
+}

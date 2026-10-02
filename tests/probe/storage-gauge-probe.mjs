@@ -12,6 +12,9 @@
  *   c  VACUUM の所要・前後・一時的な増え方・worker の常駐(プロセス木の Pss)・検索の指紋(rowid)
  *   e  VACUUM の途中で worker を殺す → 開き直して無傷か
  *   g  製品の op `optimizeIndexes` を直に 1 回(1 秒以内に返り、空きが増えるか同じ ── #999 段③)
+ *   h  長い更新(全ノートの本文の書き換え)の途中で SIGKILL → 開き直して `quick_check` ok・変更行 0 か
+ *      (#1218 F1 ── `xCheckReservedLock` の差し替えが効いているか。`--hkills=1500,3000,4500` /
+ *      `--hsize=200`(MB)/ `--hexpect=patched|unpatched`(対照群は差し替えを外した build で回す))
  *   (f 空きが足りないときの挙動は、箱の OPFS を埋めるのが危険なので**測らない**)
  *
  * ⚠ 出力は **file に落としてから読む**(`| tail` に通さない ── 落ちたことが消える)。
@@ -26,6 +29,8 @@ import {
   perOp,
   problemsOfOptimizeOp,
   problemsOfPhaseA,
+  problemsOfReservedLock,
+  stateOfKill,
 } from './storage-gauge-judge.mjs';
 
 const args = Object.fromEntries(
@@ -99,6 +104,23 @@ function treePssMb(rootPid) {
     for (const k of kids.get(pid) ?? []) queue.push(k);
   }
   return +(pss / 1024).toFixed(1);
+}
+
+/** ⚠ 本体 → 子のうち `--type=renderer` を、Pss の大きい順に(page と worker はここに居る)。e / h が殺す相手。 */
+function renderers() {
+  const list = [];
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const cmd = readFileSync(`/proc/${name}/cmdline`, 'utf8');
+      if (cmd.includes(`--user-data-dir=${PROFILE}`) && cmd.includes('--type=renderer')) {
+        list.push({ pid: Number(name), pss: memKb(Number(name)) ?? 0 });
+      }
+    } catch {
+      /* 消えた */
+    }
+  }
+  return list.sort((a, b) => b.pss - a.pss);
 }
 
 const mb = (b) => (b === null || b === undefined ? null : +(b / 1048576).toFixed(2));
@@ -383,22 +405,6 @@ try {
         }
         return { what: 'vacuum', how: head, at: Math.round(T * Number(what)), frac: Number(what) };
       });
-    const renderers = () => {
-      // ⚠ 本体 → 子のうち `--type=renderer` を、Pss の大きい順に(page と worker はここに居る)
-      const list = [];
-      for (const name of readdirSync('/proc')) {
-        if (!/^\d+$/.test(name)) continue;
-        try {
-          const cmd = readFileSync(`/proc/${name}/cmdline`, 'utf8');
-          if (cmd.includes(`--user-data-dir=${PROFILE}`) && cmd.includes('--type=renderer')) {
-            list.push({ pid: Number(name), pss: memKb(Number(name)) ?? 0 });
-          }
-        } catch {
-          /* 消えた */
-        }
-      }
-      return list.sort((a, b) => b.pss - a.pss);
-    };
     for (const { what, how, frac, at } of plan) {
       const tag = `e-${sizeMb}-${what}-${how}-${frac ?? at}`;
       const name = dbName(tag);
@@ -492,6 +498,87 @@ try {
       await G('close').catch(() => {});
       save();
     }
+  }
+
+  // ─────────────── h: 長い更新の途中で殺す → 開き直して巻き戻っているか(#1218 F1)
+  /**
+   * 🔴 **`xCheckReservedLock` の差し替えが効いているかを、実ブラウザで殺して見る**。
+   *
+   * 1 回ごとに DB を作り直し(`--hsize` MB)、**全ノートの本文を書き換える大きな 1 トランザクション**を
+   * 投げっぱなしにして、`--hkills` の ms 後に renderer を SIGKILL → 同じ profile で開き直す。
+   * 見るのは「開き直せる / `quick_check` ok / 変更行 0(= 巻き戻った)」の 3 つ。
+   * 判定は `problemsOfReservedLock`(結果を見る前に置いた)。
+   *
+   * 🔑 **対の回し方**(`--hexpect`):
+   * - 既定 `patched` … 製品のまま。**全部**が巻き戻っていること
+   * - `unpatched` … 対照群。⚠ **製品に切り替える口は無い**ので、`reserved-lock.ts` の
+   *   `fixReservedLock` を**当てずに返す**形へ**手で書き換えた build** で回す
+   *   (変異試験 M1 と兼ねる)。1 件以上が壊れること、差し替わっていないこと
+   * ⚠ 殺す時点は DB の大きさに依存する(更新が終わっていたら `completed` と読んで測れていない扱い)。
+   * ⚠ 製品の journal は既定(truncate)のまま ── `--journal` で変えない。
+   */
+  if (PHASES.includes('h')) {
+    const expect = args.hexpect ?? 'patched';
+    const sizeMb = Number(args.hsize ?? 200);
+    const times = (args.hkills ?? '1500,3000,4500').split(',').map(Number);
+    const h = { expect, sizeMb, kills: [] };
+    out.h = h;
+    for (const killAtMs of times) {
+      const name = dbName(`h-${killAtMs}`);
+      const k = { killAtMs };
+      h.kills.push(k);
+      const opened = await G('openDb', name, 20, JOURNAL);
+      k.patched = opened.reservedLockPatched;
+      k.upstreamFixed = opened.reservedLockUpstreamFixed;
+      const seeded = await G('seedToBytes', sizeMb * 1048576, SEED_KB);
+      k.seededEntries = seeded.entries;
+      k.fileBytesBefore = (await G('gauge')).fileBytes;
+      await G('startKillTarget', 'update');
+      await new Promise((r) => setTimeout(r, killAtMs));
+      const killedAt = Date.now();
+      const victims = renderers();
+      for (const { pid } of victims) process.kill(pid, 'SIGKILL');
+      k.renderersKilled = victims.length;
+      await Promise.race([
+        page.close({ runBeforeUnload: false }).catch(() => {}),
+        new Promise((r) => setTimeout(r, 5000)),
+      ]);
+      page = await context.newPage();
+      await page.goto(`http://localhost:${PORT}/tests/probe/storage-gauge-probe.html`);
+      await page.waitForFunction(() => window.__GAUGE_READY__ === true, null, { timeout: 60_000 });
+      rootPid = findBrowserPid(PROFILE) ?? rootPid;
+      try {
+        const reopened = await G('openDb', name, 1, JOURNAL);
+        k.reopen = 'ok';
+        k.reopenPatched = reopened.reservedLockPatched;
+        k.reopenMs = Date.now() - killedAt;
+        try {
+          const qc = (await G('quickCheck')).rows;
+          // 全文検索の索引も見る(`invalid fts5 file format` はここで出る)
+          try {
+            await G('raw', "INSERT INTO entries_fts(entries_fts) VALUES ('integrity-check')");
+            k.quickCheck = qc;
+          } catch (err) {
+            k.quickCheck = [...qc, 'fts: ' + String(err).slice(0, 120)];
+          }
+          const [[total, touched]] = await G('rows', "SELECT count(*), sum(substr(body, -1) = ' ') FROM entries WHERE cid = 'g'");
+          k.total = total;
+          k.touched = touched ?? 0;
+        } catch (err) {
+          k.verifyError = String(err).slice(0, 200);
+        }
+      } catch (err) {
+        k.reopen = 'FAIL';
+        k.reopenError = String(err).slice(0, 200);
+      }
+      k.state = stateOfKill(k);
+      log('h', k);
+      await G('close').catch(() => {});
+      save();
+    }
+    h.problems = problemsOfReservedLock(h.kills, expect);
+    out.problems.push(...h.problems.map((p) => 'h: ' + p));
+    save();
   }
 
   out.meta.consoleErrors = consoleErrors;

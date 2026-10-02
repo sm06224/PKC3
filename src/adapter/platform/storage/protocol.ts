@@ -745,6 +745,17 @@ export interface InitResult {
   crossOriginIsolated: boolean;
   /** PRAGMA journal_mode の読み戻し値(要求と違う値になりうる ── 非対応時)。 */
   journalMode: string;
+  /**
+   * 🔴 **SAHPool の `xCheckReservedLock` を 0 を返す関数に差し替えられたか**(#1218 F1)。
+   *
+   * ⚠ これが `false` の OPFS 接続は、大きな書込の途中でタブが殺されると
+   * **次に開けなくなりうる**(journal が巻き戻されない)。main が user に言う
+   * (`caution-events.ts` の `reservedLockCaution`)── **黙って素通りさせない**。
+   * `:memory:` の回も `false`(巻き戻しの話が無い)なので、**判断は `vfs` と併せて**する。
+   */
+  reservedLockPatched: boolean;
+  /** 上流が既に 0 を返していたので差し替えなかった(上流が直した日に二重にしない)。 */
+  reservedLockUpstreamFixed: boolean;
   /** memory fallback したときだけ入る、落ちた理由(観測可能性 ── review #1)。 */
   fallbackReason?: string;
   /**

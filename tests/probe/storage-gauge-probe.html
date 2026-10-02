@@ -87,7 +87,14 @@
               throw new Error(last);
             }
             await store.request({ op: 'openContainer', cid: CID, title: 'gauge' });
-            return { attempts, vfs: init.vfs, journalMode: init.journalMode };
+            // 🔑 差し替えの結果も返す(#1218 F1 ── 殺す probe が「差し替わっていた回」を名指しで読む)
+            return {
+              attempts,
+              vfs: init.vfs,
+              journalMode: init.journalMode,
+              reservedLockPatched: init.reservedLockPatched,
+              reservedLockUpstreamFixed: init.reservedLockUpstreamFixed,
+            };
           } catch (e) {
             last = String(e);
             store.terminate();

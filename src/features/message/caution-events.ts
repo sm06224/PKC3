@@ -52,3 +52,28 @@ export function quotaCaution(est: QuotaEstimate): CautionPost | null {
   const text = quotaBootNotice(est);
   return text === '' ? null : { kind: 'caution', source: 'quota', text };
 }
+
+/**
+ * 🔴 **書込の途中でタブが閉じても元へ戻す仕組みが、働いていない**(#1218 F1)。
+ *
+ * 保存先(OPFS)の接続で `xCheckReservedLock` の差し替え(`reserved-lock.ts`)が
+ * 当たらなかったとき、大きな書込の途中でタブが殺されると**次に開けなくなりうる**。
+ * ⚠ **黙って素通りさせない** ── 備えが効いていないことを user が知らないと、
+ *   「大きな取り込みの最中にタブを閉じない」という自衛の手がかりが無い。
+ *
+ * ⚠ 言うのは **OPFS で開けた回の、差し替えが当たらず、上流も直っていない**ときだけ。
+ *   `:memory:`(持ち歩ける 1 枚の HTML / 退避した回)は巻き戻しの話が無いので黙る
+ *   (退避した回は別の 1 行が既に言っている)。
+ */
+export const RESERVED_LOCK_CAUTION_TEXT =
+  '書き込みの途中でタブが閉じたときに元へ戻す仕組みが、このブラウザでは働いていません ── 大きな取り込みや片づけの最中は、タブを閉じないでください';
+
+export function reservedLockCaution(init: {
+  vfs: 'opfs-sahpool' | 'memory';
+  reservedLockPatched: boolean;
+  reservedLockUpstreamFixed: boolean;
+}): CautionPost | null {
+  if (init.vfs !== 'opfs-sahpool') return null;
+  if (init.reservedLockPatched || init.reservedLockUpstreamFixed) return null;
+  return { kind: 'caution', source: 'storage', text: RESERVED_LOCK_CAUTION_TEXT };
+}

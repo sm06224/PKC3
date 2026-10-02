@@ -7,6 +7,8 @@
  * OPFS SAHPool 固有面(VFS / journal / 永続化)は nightly の probe が担保する。
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 import type {
   ResultMap,
   StorageRequest,
@@ -3762,5 +3764,85 @@ describe('入れ物ごと捨てる(#986 段③)', () => {
     await request({ op: 'wipeStorage' });
     const metas = await request({ op: 'listEntryMetas', cid: CID });
     expect(Array.isArray(metas), 'この後 DB が読めなくなった').toBe(true);
+  });
+});
+
+describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
+  /** `src` の ts を全部(下の階層も)。⚠ storage/ だけだと、別の層に 2 か所目を書かれて素通りする。 */
+  const storageSources = (): Array<{ path: string; code: string }> => {
+    const root = 'src';
+    const out: Array<{ path: string; code: string }> = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = `${dir}/${e.name}`;
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith('.ts')) out.push({ path: p, code: codeOnly(readFileSync(p, 'utf8')) });
+      }
+    };
+    walk(root);
+    return out;
+  };
+
+  /**
+   * 🔴 **接続を作る箇所は 1 つだけ** ── 差し替えは「開いた直後」に 1 度当てる作りなので、
+   *   2 か所目で `OpfsSAHPoolDb` を作ると、**そこだけ差し替えが当たらない**接続になる
+   *   (大きな書込の途中で殺されたときだけ開けなくなる ── いちばん気づけない形)。
+   * ⚠ 注釈を落としてから数える(解説に綴りを書くと、自分の説明に満たされる)。
+   *   空振り防止に「1 か所は在る」を併せて見る(0 件で緑にならない)。
+   */
+  it('🔴 OpfsSAHPoolDb を作る箇所が src に 1 つだけ(worker の init)', () => {
+    // ⚠ `new` の綴り(`new (x).y.OpfsSAHPoolDb(` など)に頼らず、名前の出現そのもので数える
+    const hits = storageSources().filter((f) => /OpfsSAHPoolDb/.test(f.code));
+    expect(hits.map((h) => h.path)).toEqual(['src/adapter/platform/storage/storage-worker.ts']);
+    const n = (hits[0]!.code.match(/OpfsSAHPoolDb/g) ?? []).length;
+    expect(n, '接続を作る new が 2 つ以上ある').toBe(1);
+  });
+
+  /**
+   * ⚠ `oo1.DB('file:…?vfs=opfs-sahpool')` のような**別の綴りで OPFS の接続を作る道**も塞ぐ ──
+   *   そこで開いた接続は差し替えが当たらない。`:memory:` だけが他の作り方を許される。
+   */
+  it('🔴 oo1.DB / OpfsDb は :memory: だけ(vfs= の綴りで別の接続を作らない)', () => {
+    const all = storageSources();
+    expect(all.length, '走査が空振りしている').toBeGreaterThan(100);
+    const odd: string[] = [];
+    for (const f of all) {
+      for (const m of f.code.matchAll(/\boo1\.(?:DB|OpfsDb)\s*\(\s*([^)]*)\)/g)) {
+        if (m[1]!.trim() !== "':memory:'") odd.push(`${f.path}: ${m[0]}`);
+      }
+      if (/[?&]vfs=/.test(f.code)) odd.push(`${f.path}: vfs= の綴り`);
+    }
+    expect(odd).toEqual([]);
+  });
+
+  it('🔴 差し替えは「開いた直後・applySchema より前」に、開いた接続を渡して呼ぶ', () => {
+    const code = codeOnly(
+      readFileSync('src/adapter/platform/storage/storage-worker.ts', 'utf8'),
+    );
+    const open = code.search(/new\s+poolUtil\.OpfsSAHPoolDb\s*\(/);
+    const fix = code.search(/=\s*fixReservedLock\s*\(/);
+    const schema = code.search(/applySchema\(opened\)/);
+    expect(open, '接続を作る行が見つからない').toBeGreaterThan(0);
+    expect(fix, '差し替えを呼ぶ行が見つからない').toBeGreaterThan(open);
+    expect(schema, 'applySchema が見つからない').toBeGreaterThan(fix);
+    // 🔴 引数は「sqlite3 の口」→「いま開いた接続(opened)」の順 ── この経路は node で通らない
+    //   (OPFS が無い)ので、取り違え(別の変数・0)は実ブラウザの probe まで見えない
+    expect(code).toMatch(
+      /=\s*fixReservedLock\(\s*sqlite3\s+as\s+unknown\s+as\s+ReservedLockSqlite\s*,\s*opened\s+as\s+unknown\s+as\s*\{\s*pointer:\s*number\s*\}\s*,?\s*\)/,
+    );
+    // 結果を init の返事へ載せている(捨てていない)
+    expect(code).toMatch(/\.\.\.reservedLock\b/);
+  });
+
+  /**
+   * node は OPFS を持たない(`:memory:` に退避)── 差し替えが「当たっていない」と
+   * **決定的に**返ることを見る。⚠ 欠けた field が `undefined` のままだと
+   * `toBe(false)` で落ちる(返事に載せ忘れた変異を殺す)。
+   */
+  it(':memory: の回は両方 false を返事に載せる(巻き戻しの話が無い回を「差し替えた」と言わない)', async () => {
+    const init = await request({ op: 'init', dbName: 'unit-test' }); // 冪等 ── 最初の返事
+    expect(init.vfs).toBe('memory');
+    expect(init.reservedLockPatched).toBe(false);
+    expect(init.reservedLockUpstreamFixed).toBe(false);
   });
 });
