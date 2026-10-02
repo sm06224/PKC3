@@ -40,6 +40,35 @@
   /** 「静止」と見なす間(ms)。裁定 A「打ってから 3 秒止まった」。 */
   var QUIET_MS = 3000;
 
+  /**
+   * Ctrl / Meta + S を押したとき、静止の起点を**後ろへ送る間**(ms)。
+   * 🔴 保存の確認(「Keep format」)が開いている間は、同じ文書が**保存の途中**にある ── そこへ `storeToURL` を
+   * 打たない。保存が通れば `isModified` が偽になるので、その後は書かない(待つだけで足りる)。
+   */
+  var SAVE_DEFER_MS = 10000;
+
+  /**
+   * 変換中(`compositionstart` 〜 `compositionend`)が**終わらないまま**でも、書くのを止め続けない上限(ms)。
+   * ⚠ `compositionend` が来ない窓(取りこぼし)で影が**永久に**書かれなくなるのを避ける。
+   */
+  var COMPOSING_MAX_MS = 60000;
+
+  /**
+   * 書けなかったときの再試行の間(ms)。失敗が続くたびに 1 つずつ進み、最後の値で止まる。
+   * 先頭の 0 = 次の見張り(1 秒後)で 1 度やり直す。⚠ 同じ理由で書けない窓が、書き出しで main thread を
+   * 200〜700ms 塞ぐのを毎秒繰り返さないために、2 回目からは間をあける。
+   */
+  var RETRY_BACKOFF_MS = [0, 30000, 60000, 120000];
+
+  /** 棚の中の影の名前(13 桁の時刻 + 拡張子)。⚠ `meta.json` などを影と取り違えない。 */
+  var SHADOW_NAME_RE = /^[0-9]{13}\.[A-Za-z0-9]+$/;
+
+  /** 棚へ添える元の文書の記録の名前(⚠ 影ではない)。 */
+  var META_NAME = 'meta.json';
+
+  /** 合言葉の前置き(`src/features/office/office-launch.ts` の `LOCAL_PREFIX` と同じ。test が突き合わせる)。 */
+  var LOCAL_TOKEN_PREFIX = 'local:';
+
   /** EBADF(開いていない fd)。元の `fd_sync` が `ErrnoError(8)` から返していた値。 */
   var EBADF = 8;
 
@@ -134,16 +163,62 @@
     var quietMs = (opts && opts.quietMs) || QUIET_MS;
     var dirty = false;
     var last = 0;
+    // 変換中(IME)。⚠ 変換中の字は確定していない ── 書くと**変換途中**が影になる
+    var composing = false;
+    var composeAt = 0;
     return {
-      typed: function (at) { dirty = true; last = at; },
+      /** 打った印。⚠ 起点を**後ろへ送ってあるとき(Ctrl+S の直後)は縮めない**。 */
+      typed: function (at) { dirty = true; if (at > last) last = at; },
       take: function (at) {
         if (!dirty) return false;
+        // 変換中は書かない(終わらない変換の取りこぼしだけ、上限で諦める)
+        if (composing) {
+          if (at - composeAt < COMPOSING_MAX_MS) return false;
+          composing = false;
+        }
         if (at - last < quietMs) return false;
         dirty = false;
         return true;
       },
       isDirty: function () { return dirty; },
+      compositionStart: function (at) { composing = true; composeAt = at; if (dirty && at > last) last = at; },
+      compositionEnd: function (at) { composing = false; dirty = true; if (at > last) last = at; },
+      isComposing: function () { return composing; },
+      /**
+       * 静止の起点を `ms` だけ**後ろへ送る**(Ctrl+S の直後など)。⚠ 印は立てない ── 打っていないなら書かない。
+       * 立っている印があるときだけ、`at + ms` から `quietMs` 経ってから書く。
+       */
+      defer: function (at, ms) { if (at + ms > last) last = at + ms; },
+      /**
+       * 書けなかったので**印を戻す**。`delayMs` 後(`take` が通る時刻)にもう一度書く。
+       * ⚠ その間に打たれていれば、打った時刻のほうが後なのでそちらを採る。
+       */
+      retry: function (at, delayMs) {
+        dirty = true;
+        var due = at + delayMs - quietMs;
+        if (due > last) last = due;
+      },
     };
+  }
+
+  /**
+   * 窓の入力 1 件を、静止の判定へ渡す(`host.html` の listener が呼ぶ。判断はここ ── host.html は unit が届かない)。
+   *   - 修飾キーだけの押下 → 何もしない(Ctrl を押しただけで「打った」にしない)
+   *   - Ctrl / Meta + S の keydown → 打った印は立てず、静止の起点を `SAVE_DEFER_MS` 後ろへ送る
+   *   - compositionstart / compositionend → 変換中の出入り(終わるまで書かない)
+   *   - それ以外 → 打った印
+   * @param type イベントの種類 / @param e イベント(`key` / `ctrlKey` / `metaKey` を読む)/ @param at 時刻(ms)
+   */
+  var MODIFIER_KEYS = { Shift: 1, Control: 1, Alt: 1, Meta: 1, CapsLock: 1 };
+  function feedInput(quiet, type, e, at) {
+    if (!quiet) return;
+    if (type === 'compositionstart') { quiet.compositionStart(at); return; }
+    if (type === 'compositionend') { quiet.compositionEnd(at); return; }
+    if (type === 'keydown' && e) {
+      if (MODIFIER_KEYS[e.key] === 1) return;
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 's') { quiet.defer(at, SAVE_DEFER_MS); return; }
+    }
+    quiet.typed(at);
   }
 
   // ───────────────────────── LO に影を書かせる(JS → LO の同期呼び) ─────────────────────────
@@ -187,8 +262,9 @@
   /**
    * 保存していない文書を 1 つ選び、`storeToURL` で MEMFS の影の置き場へ書く。**同期**(塞ぐ ── 書き出しの間)。
    *
-   * - 選ぶ: 保存していない変更が在る文書のうち、窓が開いた文書(`opts.docPath`。MEMFS の path)と同じ場所の物を優先。
-   *   無ければ最初の 1 件(窓の中で別の文書へ替えた場合)
+   * - 選ぶ: 保存していない変更が在る文書のうち、**書ける形式(`.odt` / `.docx`)を先に**、同じ書ける形式の中では
+   *   窓が開いた文書(`opts.docPath`。MEMFS の path)と同じ場所の物を優先。同順位なら最初の 1 件。
+   *   ⚠ 書けない形式(`.xlsx` など / 場所の無い新規文書)が先に来ても、後ろの書ける文書の影を**取りこぼさない**
    * - 書く: `fd_sync` の差し替え(`gate.begin()`)の**間だけ**。⚠ `end()` は必ず `finally` で呼ぶ
    * - 書けない形式(`.xlsx` など測っていない物)は書かずに `{ skipped: 'format' }`
    * @returns `{ skipped: 'unmodified' | 'format', ext? }` か `{ ext, path, size }`。書けなければ**投げる**
@@ -209,7 +285,7 @@
     del(comps);
     var chosen = null;
     var chosenLoc = '';
-    var chosenMatches = false;
+    var chosenRank = -1;
     try {
       while (en.hasMoreElements()) {
         var a = en.nextElement();
@@ -225,9 +301,11 @@
             st = S.frame.XStorable.query(el);
             var loc = st ? decoded(String(st.getLocation())) : '';
             var matches = hint !== '' && loc === hint;
-            if (chosen === null || (matches && !chosenMatches)) {
+            // 書ける形式(2)> 同じ場所(1)。⚠ 書けない文書しか無ければ最初の 1 件(`skipped: 'format'` を返す)
+            var rank = (filterFor(extOfName(loc)) !== null ? 2 : 0) + (matches ? 1 : 0);
+            if (chosen === null || rank > chosenRank) {
               del(chosen);
-              chosen = el; chosenLoc = loc; chosenMatches = matches;
+              chosen = el; chosenLoc = loc; chosenRank = rank;
               keep = true;
             }
           }
@@ -271,9 +349,16 @@
   /** 1 回に運ぶ量。⚠ 山の高さそのもの(`office-save-stage.js` と同じ 1MiB)。 */
   var CHUNK = 1024 * 1024;
 
-  /** 棚の中の名前にできる形へ。⚠ 空なら呼び側が代わりの id を渡す。 */
+  /**
+   * 棚の中の名前にできる形へ。⚠ 空なら呼び側が代わりの id(窓ごとの `winKey`)を渡す。
+   * 🔴 **`local:` で始まる合言葉は使わない**(手元の file。`local-office-files.ts` の連番はページを読み込むたびに
+   * 1 から数え直す)── `local:1` が**別の file・別の窓・別のタブで同じ棚**になり、`shelve` が古い名前を消して
+   * **別の file の唯一の影を消す**。窓ごとの名前を使い、元の file 名は `meta.json` に書き添える。
+   */
   function safeId(token, fallback) {
-    var t = String(token || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+    var raw = String(token || '');
+    if (raw.indexOf(LOCAL_TOKEN_PREFIX) === 0) raw = '';
+    var t = raw.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
     if (t === '') t = String(fallback || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
     return t === '' ? 'unnamed' : t;
   }
@@ -290,12 +375,38 @@
     return e;
   }
 
+  /** 棚の記録(`meta.json`)を書く。⚠ 書けなくても投げない(影は既に置けている)。 */
+  async function writeMeta(dir, d, at) {
+    var o = d.origin || {};
+    var text = JSON.stringify({
+      v: 1,
+      name: typeof o.name === 'string' ? o.name : '',
+      size: typeof o.size === 'number' && o.size >= 0 ? o.size : null,
+      at: at,
+      ext: d.ext,
+    });
+    var w = null;
+    try {
+      var fh = await dir.getFileHandle(META_NAME, { create: true });
+      w = await fh.createWritable();
+      await w.write(new TextEncoder().encode(text));
+      await w.close();
+      return true;
+    } catch (e) {
+      if (w) { try { await w.abort(); } catch (e2) { /* 既に閉じている */ } }
+      return false;
+    }
+  }
+
   /**
    * 影を OPFS の棚 `<SHELF_DIR>/<id>/<時刻>.<拡張子>` へ**刻んで**置く(丸ごと複製しない)。
    * 置けたら、**同じ棚の古い影を消す**(最新 1 つだけ残す)。⚠ 自分より新しい名前は消さない(別の窓の分)。
    * ⚠ 書きかけは残さない(`createWritable` は close で確定する。失敗したら `abort`)。
-   * @param d `storage`(`navigator.storage`)/ `id` / `ext` / `size` / `read(into, wanted, position)` / `now`
-   * @returns `{ at, name }`
+   * 棚には**元の文書の記録**(`meta.json`)も 1 つ置く(段 2 が「どの file の影か」を探せるように)。
+   * 中身は `{ v, name, size, at, ext }` だけ ── ⚠ **本文は入れない**。書けなくても影は成功とする(影が本体)。
+   * @param d `storage`(`navigator.storage`)/ `id` / `ext` / `size` / `read(into, wanted, position)` / `now` /
+   *   `origin`(任意。`{ name, size }` ── 元の文書の名前と大きさ)
+   * @returns `{ at, name, meta }`(`meta` は記録を書けたか)
    */
   async function shelve(d) {
     var s = d.storage;
@@ -327,11 +438,13 @@
     }
     // 古い影を消す(名前は時刻の固定長なので、文字列比較が時刻順になる)
     var olds = [];
-    for await (var k of dir.keys()) { if (k < name) olds.push(k); }
+    // ⚠ 影の名前だけを数える(`meta.json` など別の物は消さない)
+    for await (var k of dir.keys()) { if (SHADOW_NAME_RE.test(k) && k < name) olds.push(k); }
     for (var i = 0; i < olds.length; i += 1) {
       try { await dir.removeEntry(olds[i]); } catch (e) { /* 消せなくても次回消える */ }
     }
-    return { at: at, name: name };
+    var metaOk = await writeMeta(dir, d, at);
+    return { at: at, name: name, meta: metaOk };
   }
 
   // ───────────────────────── 画面に出す理由(内部の語を出さない) ─────────────────────────
@@ -358,6 +471,14 @@
   function createWriter(d) {
     var busy = false;
     var lastReason = null;
+    var failures = 0;
+    /** 書けなかった。印を戻して間をあけて再試行する(続くほど間を伸ばす)。 */
+    function again() {
+      var q = d.quiet;
+      var wait = RETRY_BACKOFF_MS[Math.min(failures, RETRY_BACKOFF_MS.length - 1)];
+      failures += 1;
+      if (q && typeof q.retry === 'function') q.retry(d.now(), wait);
+    }
     function fail(reason) {
       // 同じ理由が続くとき 1 度だけ言う(打つたびに同じ 1 行を出さない)。成功したら言い直せる
       if (reason !== lastReason) { lastReason = reason; d.onFailed(reason); }
@@ -370,19 +491,21 @@
         busy = true;
         try {
           var mod = await d.isModified();
-          if (mod === null) { fail(reasonOf({ shadowReason: 'no-uno' })); return 'failed'; }
+          if (mod === null) { fail(reasonOf({ shadowReason: 'no-uno' })); again(); return 'failed'; }
           // 保存済み(変更なし)は書かない
-          if (mod !== true) return 'clean';
+          if (mod !== true) { failures = 0; return 'clean'; }
           var info = d.write();
-          if (info && info.skipped) return 'skipped';
+          if (info && info.skipped) { failures = 0; return 'skipped'; }
           await d.shelve(info);
           lastReason = null;
+          failures = 0;
           d.onWritten(d.now());
           return 'written';
         } catch (e) {
           // 画面には字を出し、原因は console へ(内部の語はここだけ)
           if (typeof d.log === 'function') { try { d.log(e); } catch (e2) { /* 記録に失敗しても続ける */ } }
           fail(reasonOf(e));
+          again();
           return 'failed';
         } finally {
           busy = false;
@@ -395,6 +518,12 @@
 
   root.PKC3OfficeShadow = {
     QUIET_MS: QUIET_MS,
+    SAVE_DEFER_MS: SAVE_DEFER_MS,
+    COMPOSING_MAX_MS: COMPOSING_MAX_MS,
+    RETRY_BACKOFF_MS: RETRY_BACKOFF_MS,
+    META_NAME: META_NAME,
+    LOCAL_TOKEN_PREFIX: LOCAL_TOKEN_PREFIX,
+    feedInput: feedInput,
     CHUNK: CHUNK,
     SHADOW_FILTERS: SHADOW_FILTERS,
     SHADOW_DIR: SHADOW_DIR,
