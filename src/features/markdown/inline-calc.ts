@@ -370,6 +370,262 @@ export function detectInlineCalcRequest(
 }
 
 /**
+ * 🔴 **上の行の数を使う**(#1230。書き込み型のまま伸ばす ── 別アプリは作らない)。
+ *
+ * ## 何をするか
+ *
+ * 1. **変数 1 つ引き**: 上の行に `基本単価 = 3200`(名前 `=` 数)が在れば、下の行の
+ *    `基本単価*8=` + `Enter` が `基本単価*8=25600` になる。
+ * 2. **合計**: `合計=` / `sum=` + `Enter` で、**その行より上の、空行で区切られた塊**の
+ *    各行の**末尾の数**を足す。
+ *
+ * ## 守ること
+ *
+ * ⚠ **追従しない** ── 答えは本文へ書き込まれ、定義の値を後から直しても変わらない
+ *   (`2+3=5` と同じ。表の升の式とは向きが逆である)。
+ * ⚠ **読むのは Enter した行と、その上の行だけ** ── 下は 1 バイトも読まない
+ *   (大きなノートで重くしない。定義が下に在っても引かない)。
+ * ⚠ **今までの `2+3=5` は 1 バイトも変えない** ── 変数は「定義された名前が式の中で
+ *   実際に使われた」ときだけ働き、そうでなければ従来の経路へ落ちる。
+ * ⚠ 見つからない名前・数の無い塊は**何もしない**(鳴らない ── `foo=` と同じ)。
+ */
+
+/** 計算の答えと、全角で打っていたときの半角への直し。 */
+export interface InlineCalcResult {
+  value: number;
+  halfWidth: InlineCalcRequest['halfWidth'];
+}
+
+/** 数 1 つ(桁区切りと小数を含む)。⚠ 符号は別に見る。 */
+const NUMBER_SRC = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`;
+
+/**
+ * 変数の定義の行 ── `名前 = 数`(半角に読み替えた後の形に当てる)。
+ *
+ * ⚠ 名前は**空白・`=`・演算子・括弧・`.`・`,` を含まない**字の並びで、**数字だけの名前は
+ *   定義と見なさない**(`12 = 3` を `12` の再定義にしない ── 下の `isVariableName`)。
+ * ⚠ 行全体が `名前 = 数` でなければ定義ではない(`基本単価*8=25600` は定義ではない)。
+ */
+const DEFINITION_LINE = new RegExp(
+  String.raw`^(?:[\t ]*(?:[-*+]|\d+\.)\s+)?\s*([^\s=+\-*/%().,]+)\s*=\s*(-?${NUMBER_SRC})\s*$`,
+  'u',
+);
+
+/** 名前として使える字の並びか(数字だけは名前ではない)。 */
+function isVariableName(name: string): boolean {
+  return name !== '' && /\D/u.test(name);
+}
+
+/** 全角の英字を半角へ(`ｓｕｍ` → `sum`)。⚠ 合計の合図を見るときだけ使う。 */
+function foldLetters(s: string): string {
+  return s.replace(/[Ａ-Ｚａ-ｚ]/gu, (c) =>
+    String.fromCharCode(c.charCodeAt(0) - 0xfee0),
+  );
+}
+
+/**
+ * `lineStartIdx`(その行の頭)より**上**の行から、`名前 = 数` を集める。
+ * ⚠ **いちばん近い物が勝つ**(下から上へ読み、先に見つけた名前を上書きしない)。
+ * @returns 名前 → 数の字(桁区切りは落としてある。符号付き)
+ */
+function collectDefinitions(fullText: string, lineStartIdx: number): Map<string, string> {
+  const defs = new Map<string, string>();
+  let end = lineStartIdx - 1; // 直前の行の終わり(`\n` の位置)
+  while (end >= 0) {
+    const start = lineStart(fullText, end); // ⚠ 素の lastIndexOf は先頭の空行で行頭を取り違える
+    const raw = fullText.slice(start, end);
+    // ⚠ `=` を含まない行は定義ではない(大半の行はここで落とす)
+    if (raw.includes('=') || raw.includes('＝')) {
+      const m = DEFINITION_LINE.exec(toHalfWidth(raw).replace(/\r$/u, ''));
+      if (m !== null && isVariableName(m[1]!) && !defs.has(m[1]!)) {
+        defs.set(m[1]!, m[2]!.replace(/,/gu, ''));
+      }
+    }
+    end = start - 1;
+  }
+  return defs;
+}
+
+/**
+ * 行末の数を読む(半角に読み替えた行を渡す)。無ければ `null`。
+ *
+ * ⚠ **語や式の切れ端は数にしない** ── `md5` の `5` / `v1.2` の `1.2` /
+ *   `3-5`(引き算)の `5` / `3+5` の `5` は拾わない(`startsMidToken` と同じ向き)。
+ * ⚠ 日本語の直後は拾う(`りんご300` の `300`)。負の数は `-` の前が語や数でないときだけ。
+ */
+function trailingNumber(line: string): number | null {
+  const t = line.trim();
+  const m = new RegExp(`${NUMBER_SRC}$`, 'u').exec(t);
+  if (m === null) return null;
+  const before = m.index > 0 ? t[m.index - 1]! : undefined;
+  let negative = false;
+  if (before !== undefined) {
+    if (/[0-9A-Za-z_,.+*/%]/u.test(before)) return null;
+    if (before === '-') {
+      const beforeSign = m.index > 1 ? t[m.index - 2]! : undefined;
+      if (beforeSign !== undefined && /[0-9A-Za-z_)]/u.test(beforeSign)) return null;
+      negative = true;
+    }
+  }
+  const n = Number(m[0].replace(/,/gu, ''));
+  return negative ? -n : n;
+}
+
+/**
+ * `合計=` の合計。上へ、**空行(空白だけの行)に当たるまで**の各行の末尾の数を足す。
+ * 数が 1 つも無ければ `null`。
+ */
+function sumAbove(fullText: string, lineStartIdx: number): number | null {
+  let total = 0;
+  let found = false;
+  let end = lineStartIdx - 1;
+  while (end >= 0) {
+    const start = lineStart(fullText, end); // ⚠ 素の lastIndexOf は先頭の空行で行頭を取り違える
+    const raw = fullText.slice(start, end);
+    if (raw.trim() === '') break; // ⚠ 空行で塊が切れる
+    const n = trailingNumber(toHalfWidth(raw));
+    if (n !== null) {
+      total += n;
+      found = true;
+    }
+    end = start - 1;
+  }
+  return found ? total : null;
+}
+
+/** 合図(`=` / `＝`)の直前で、行の終わりに在るか。⚠ `detectInlineCalcRequest` と同じ門。 */
+function atCalcSignal(fullText: string, caretPos: number): boolean {
+  if (toHalf(fullText[caretPos - 1] ?? '') !== '=') return false;
+  const after = fullText[caretPos];
+  return after === undefined || after === '\n';
+}
+
+/**
+ * 名前が、ASCII の語の**途中**に当たっていないか(`data` の `a` を名前 `a` と読まない)。
+ * ⚠ 日本語は語の切れ目が無いので見ない(`お名前*2` の `名前` は読む ── `結果は3*4=` と同じ向き)。
+ * @param text  読んでいる字(半角に読み替え済み)
+ * @param from  名前の始まり
+ */
+function insideAsciiWord(text: string, from: number, name: string): boolean {
+  const prev = from > 0 ? text[from - 1]! : '';
+  return /[0-9A-Za-z_]/u.test(prev) && /[0-9A-Za-z_]/u.test(name[0]!);
+}
+
+/**
+ * 定義された名前を使った式を読む。使っていなければ `null`(従来の経路へ落とす)。
+ *
+ * 🔑 **名前を数に差し替えてから、従来の評価器へ渡す**(`基本単価*8` → `(3200)*8`)。
+ *   文法も 0 割りの門も 1 か所のまま ── 変数のために評価器を 2 つ持たない。
+ * ⚠ 式の始まりを探すとき、**定義された名前だけ**を「式の字」と見なす
+ *   (地の文の `結果は` を式に巻き込まない)。⚠ 切れ端の門(`startsMidToken`)も
+ *   「計算する所が無い」門(`hasNoOperation`)も、従来と同じ物を通す。
+ */
+function resolveWithVariables(fullText: string, caretPos: number): InlineCalcResult | null {
+  const ls = lineStart(fullText, caretPos);
+  const hw = toHalfWidth(fullText.slice(ls, caretPos)); // 1 字 → 1 字なので位置は同じ
+  const head = hw.slice(0, -1);
+  // ⚠ 数と記号だけの行(`2+3=`)に名前は居ない ── 上を読まずに落とす
+  if (!/[^0-9+\-*/%().,\s]/u.test(head)) return null;
+
+  const defs = collectDefinitions(fullText, ls);
+  if (defs.size === 0) return null;
+  const names = [...defs.keys()].sort((a, b) => b.length - a.length);
+
+  // `=` から後ろへ、計算に使える字と定義された名前の間だけ戻る
+  let start = head.length;
+  while (start > 0) {
+    const name = names.find(
+      (n) => start >= n.length && head.endsWith(n, start) && !insideAsciiWord(head, start - n.length, n),
+    );
+    if (name !== undefined) {
+      start -= name.length;
+    } else if (CALC_CHARS.test(head[start - 1]!)) {
+      start -= 1;
+    } else {
+      break;
+    }
+  }
+  // 行頭なら、箇条書きの印を式から外す
+  if (start === 0) {
+    const m = LIST_MARKER.exec(head);
+    if (m !== null) start += m[0].length;
+  }
+
+  const raw = head.slice(start);
+  const expression = raw.trim();
+  if (expression === '') return null;
+  const lead = raw.length - raw.trimStart().length;
+  const before = start + lead > 0 ? head[start + lead - 1] : undefined;
+  if (startsMidToken(before, expression)) return null;
+  if (hasNoOperation(expression)) return null;
+
+  // 名前を数へ(長い名前から合わせる)
+  let used = false;
+  let substituted = '';
+  for (let i = 0; i < expression.length; ) {
+    const name = names.find((n) => expression.startsWith(n, i) && !insideAsciiWord(expression, i, n));
+    if (name !== undefined) {
+      substituted += `(${defs.get(name)!})`;
+      used = true;
+      i += name.length;
+    } else {
+      substituted += expression[i]!;
+      i += 1;
+    }
+  }
+  if (!used) return null;
+  const value = evaluateCalcExpression(substituted);
+  if (value === null) return null;
+
+  const from = ls + start + lead;
+  const typed = fullText.slice(from, caretPos);
+  const half = toHalfWidth(typed);
+  return { value, halfWidth: half === typed ? null : { from, to: caretPos, text: half } };
+}
+
+/**
+ * 🔴 **Enter / 「この行を計算する」が通る唯一の口**(#1230)。
+ *
+ * 順番は ① `合計=` ② 定義された名前を使う式 ③ 従来の式(`detectInlineCalcRequest` +
+ * `evaluateCalcExpression`)。⚠ ③は**1 バイトも変えていない** ── ①②が当たらなければ
+ * 今までと同じ答えが出る。
+ *
+ * @returns 答えと半角への直し / `null`(何もしない)
+ */
+export function resolveInlineCalc(fullText: string, caretPos: number): InlineCalcResult | null {
+  if (typeof fullText !== 'string') return null;
+  if (caretPos < 0 || caretPos > fullText.length) return null;
+  if (!atCalcSignal(fullText, caretPos)) return null;
+
+  const ls = lineStart(fullText, caretPos);
+  // ① 合計(⚠ 合図は行の頭から `合計` / `sum` だけ。箇条書きの印は外す)
+  const label = foldLetters(toHalfWidth(fullText.slice(ls, caretPos - 1)))
+    .replace(LIST_MARKER, '')
+    .trim()
+    .toLowerCase();
+  if (label === '合計' || label === 'sum') {
+    const total = sumAbove(fullText, ls);
+    if (total === null) return null;
+    // ⚠ 直すのは合図の `＝` だけ(`合計` / `ｓｕｍ` は user の字)
+    const sign = fullText[caretPos - 1]!;
+    return {
+      value: total,
+      halfWidth: sign === '=' ? null : { from: caretPos - 1, to: caretPos, text: '=' },
+    };
+  }
+
+  // ② 名前を使った式
+  const withVars = resolveWithVariables(fullText, caretPos);
+  if (withVars !== null) return withVars;
+
+  // ③ 従来の式
+  const req = detectInlineCalcRequest(fullText, caretPos);
+  if (req === null) return null;
+  const value = evaluateCalcExpression(req.expression);
+  return value === null ? null : { value, halfWidth: req.halfWidth };
+}
+
+/**
  * 🔴 **計算にならなかったとき、理由を 1 行で返す**(2026-09-08、#766 A-2)。
  *
  * ## なぜ要るか
@@ -397,8 +653,7 @@ export function explainCalcMiss(fullText: string, caretPos: number): string | nu
   const after = fullText[caretPos];
   if (after !== undefined && after !== '\n') return null;
   // 🔴 計算できたなら黙る(成功に口を出さない)
-  const req = detectInlineCalcRequest(fullText, caretPos);
-  if (req !== null && evaluateCalcExpression(req.expression) !== null) return null;
+  if (resolveInlineCalc(fullText, caretPos) !== null) return null;
 
   const head = toHalfWidth(fullText.slice(lineStart(fullText, caretPos), caretPos - 1));
   const body = head.replace(LIST_MARKER, '').trim();
@@ -462,8 +717,7 @@ export function calcLineAction(fullText: string, caretPos: number): CalcLineActi
   const hasEq = toHalf(line.at(-1) ?? '') === '=';
   const probe = hasEq ? fullText : `${fullText.slice(0, end)}=${fullText.slice(end)}`;
   const at = hasEq ? end : end + 1;
-  const req = detectInlineCalcRequest(probe, at);
-  const v = req === null ? null : evaluateCalcExpression(req.expression);
+  const v = resolveInlineCalc(probe, at)?.value ?? null;
   if (v !== null) {
     // ⚠ `=` を足す回は、答えの前に `=` も入れる(1 回の挿入にまとめる)
     return { kind: 'insert', at: end, text: `${hasEq ? '' : '='}${formatCalcResult(v)}` };
