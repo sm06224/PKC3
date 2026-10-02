@@ -45,7 +45,14 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(opts: { stats?: { id: string; added: number | null; removed: number | null }[] } = {}) {
+function setup(
+  opts: {
+    stats?: { id: string; added: number | null; removed: number | null }[];
+    /** いまの本文 / 見ている版 r7 の本文(省略 = `NOW` / `OLD`)。非対称の見出しを見るときに差す。 */
+    now?: string;
+    old?: string;
+  } = {},
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -56,7 +63,7 @@ function setup(opts: { stats?: { id: string; added: number | null; removed: numb
   let bodyReads = 0;
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async () => NOW,
+    getBody: async () => opts.now ?? NOW,
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),
@@ -81,13 +88,14 @@ function setup(opts: { stats?: { id: string; added: number | null; removed: numb
     ],
     revisionDiffStats: async () =>
       opts.stats ?? [
+        // ⚠ ここは worker が返す数の**素通し**(向きの検査は storage-worker.test.ts が実物で見る)
         { id: 'r7', added: 12, removed: 3 },
         // ⚠ 全文で持っている版 ── 数えられない(0 と潰さない)
         { id: 'r6', added: null, removed: null },
       ],
     getRevision: async (revId) => {
       bodyReads++;
-      return revId === 'r7' ? { body: OLD, title: '会議メモ', archetype: 'text' } : null;
+      return revId === 'r7' ? { body: opts.old ?? OLD, title: '会議メモ', archetype: 'text' } : null;
     },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
@@ -122,7 +130,11 @@ describe('#398 段① 見分けがつく', () => {
   it('⚠ 何との比較かが書いてある(数字だけだと今の本文との差だと読まれる)', async () => {
     const s = setup();
     await openHistory(s);
-    expect(s.q('[data-pkc-field="revision-delta"]')!.title).toContain('1 つ新しい版');
+    const title = s.q('[data-pkc-field="revision-delta"]')!.title;
+    expect(title).toContain('1 つ新しい版');
+    // 🔴 向きの説明は見出しと同じ規則(`+` = この版にだけある行 = 戻すと戻る行)
+    expect(title, '+ の意味が書いていない').toContain('+ はこの版にだけある行');
+    expect(title, '− の意味が書いていない').toContain('− は 1 つ新しい版にだけある行');
   });
 
   it('⚠ 増減が引けなくても履歴は開ける(片方の失敗でもう片方を殺さない)', async () => {
@@ -181,6 +193,15 @@ describe('#398 段② 戻す前に中身を見る', () => {
     const sum = s.q('[data-pkc-field="revision-diff-summary"]')!.textContent;
     expect(sum).toContain('いまの本文とのちがい');
     expect(sum).toContain('+1 −1');
+  });
+
+  it('🔴 非対称: 見出しの `+` = この版にだけある行(3)/ `−` = いまの本文にだけある行(1)(対称の +1 −1 では向きの裏返しが見えない)', async () => {
+    // いまの本文には「新1」が 1 行だけ。この版(r7)には「旧1〜旧3」の 3 行がある
+    const s = setup({ now: '共通\n新1\n', old: '共通\n旧1\n旧2\n旧3\n' });
+    await openHistory(s);
+    s.q('[data-pkc-action="preview-revision"]')!.click();
+    await tick();
+    expect(s.q('[data-pkc-field="revision-diff-summary"]')!.textContent).toBe('いまの本文とのちがい: +3 −1');
   });
 
   it('🔴 本文は押したときだけ読む(履歴を開いただけでは 1 件も読まない)', async () => {

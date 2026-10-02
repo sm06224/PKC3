@@ -80,7 +80,7 @@ import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
 import { isTouchOnly } from './touch-device';
-import { diffCounts, diffRows, shortStamp } from '@features/revision/diff-view';
+import { DIFF_FILE_TOO_LARGE_NOTE, diffCounts, diffRows, shortStamp } from '@features/revision/diff-view';
 import { sideRows } from '@features/revision/diff-side';
 import { sideRowEls } from './diff-line';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -3551,7 +3551,7 @@ function foldNote(): HTMLElement {
 }
 
 /**
- * その版と 1 つ新しい版のちがいを短く出す(#398 段①)。
+ * その版と 1 つ新しい版のちがいを短く出す(#398 段①)。`+` = この版にだけある行 / `−` = 1 つ新しい版にだけある行。
  *
  * > user の物語: 履歴に**同じ題名が 3 つ**並び、日時しか手がかりが無い。
  *
@@ -3564,7 +3564,8 @@ function diffBadge(added: number | null, removed: number | null): HTMLElement | 
   span.setAttribute('data-pkc-field', 'revision-delta');
   span.textContent = `+${added} −${removed}`;
   // ⚠ **何との比較かを書く**(数字だけだと、今の本文との差だと読まれる)
-  span.title = '1 つ新しい版とくらべて、行がこれだけ増えて / 減っています';
+  // ⚠ **向きは開いた見出しと同じ**(`+` = この版にだけある行 = 戻すと戻る行)
+  span.title = '1 つ新しい版とくらべて ─ + はこの版にだけある行 / − は 1 つ新しい版にだけある行';
   return span;
 }
 
@@ -3636,7 +3637,10 @@ function renderRevisionDiff(
         load.state === 'loading'
           ? '読んでいます…'
           : load.state === 'failed'
-            ? 'ファイルを読めませんでした'
+            ? // 🔴 大きすぎて読まなかったときは、そう言う(「読めませんでした」だと壊れたように聞こえる)
+              load.tooLarge === true
+              ? DIFF_FILE_TOO_LARGE_NOTE
+              : 'ファイルを読めませんでした'
             : null,
     };
   }

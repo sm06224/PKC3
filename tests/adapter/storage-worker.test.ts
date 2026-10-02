@@ -21,6 +21,7 @@ import {
 } from '../../src/features/snippet/snippet-table';
 import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { diffCounts } from '../../src/features/revision/diff-view';
 import { FRONTMATTER_SCAN_CHARS } from '../../src/features/query/group-by';
 import { createSmartScan, EMPTY_SMART } from '../../src/features/smart/smart-spec';
 import { CSV_TABLE_CELLS_MAX } from '../../src/features/query/csv-tables';
@@ -2261,7 +2262,9 @@ describe('雛形を集める (#196 / B-2)', () => {
  * > user の物語: 履歴に**同じ題名が 3 つ**並び、日時しか手がかりが無い。
  *
  * ⚠ ここでいちばん危ないのは **向き**である ── 保存形は「1 つ新しい版 → この版」の
- *   **逆向き**パッチなので、裏返し忘れると `+` と `−` が**そっくり入れ替わる**。
+ *   **逆向き**パッチなので、読み替え忘れると `+` と `−` が**そっくり入れ替わる**。
+ * 🔴 向きは**開いた見出し**(`diffCounts(相手, この版)` の `+` = この版にだけある行)と同じ
+ *   (#1231 着地後レビュー: 札と見出しが逆向きだった)。
  *   🔴 **しかも数字は出る**ので、画面を見ても誰も気づけない
  *   (CLAUDE.md §4「出た値は本物、測っている対象だけが違う」の向き違い版)。
  * 🔑 だから **足した数と消した数を非対称にした本文**で見る ── 対称だと
@@ -2275,9 +2278,10 @@ describe('#398 版ごとの増減行数', () => {
   const base = (): string[] =>
     Array.from({ length: 200 }, (_, i) => `行 ${i}`);
 
-  it('🔴 向きは「この版 → 1 つ新しい版」(裏返っていない)', async () => {
+  it('🔴 向きは見出しと同じ(`+` = この版にだけある行 / `−` = 1 つ新しい版にだけある行)', async () => {
     const old = base();
-    // 🔑 **非対称**にする ── 3 行足して 1 行消す(裏返すと 1 / 3 になる)
+    // 🔑 **非対称**にする ── 新しい版は 3 行足して 1 行消した(= この版にだけある行 1 / 新しい版にだけある行 3。
+    //    裏返すと 3 / 1 になる)
     const next = [...old.slice(0, 100), '足1', '足2', '足3', ...old.slice(101)];
     await request({
       op: 'upsertEntry',
@@ -2296,11 +2300,16 @@ describe('#398 版ごとの増減行数', () => {
     expect(metas[0]!.kind, 'パッチで持っていない(前提が崩れた)').toBe('patch');
     const stats = await statsOf('d1');
     expect(stats.map((s) => s.id)).toEqual([metas[0]!.id]);
-    // 🔴 古い版から見て **3 行足されて 1 行消えた**
+    // 🔴 `+` = この版にだけある行(消された 1 行)/ `−` = 1 つ新しい版にだけある行(足された 3 行)
     expect(
       { added: stats[0]!.added, removed: stats[0]!.removed },
       '+ と − が入れ替わっている',
-    ).toEqual({ added: 3, removed: 1 });
+    ).toEqual({ added: 1, removed: 3 });
+    // 🔴 **開いた見出しと同じ数**(見出しは `diffCounts(いまの本文, この版)` ── 札だけ逆向きだった)
+    expect(
+      { added: stats[0]!.added, removed: stats[0]!.removed },
+      '行の札が、開いた見出しと逆向き',
+    ).toEqual(diffCounts(next.join('\n') + '\n', old.join('\n') + '\n'));
   });
 
   it('🔴 本文は 1 バイトも返らない(数だけ)', async () => {

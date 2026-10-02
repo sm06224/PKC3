@@ -21,6 +21,15 @@ export interface DiffRow {
   skipped?: number;
 }
 
+/**
+ * 🔴 **PC のファイルとのちがいを出せないときの字**(#1231 着地後レビュー)。⚠ 画面に出る字なので 1 か所に置く。
+ * 「違いはありません」とは**言わない**(読めなかったのに「同じ」と言うのは嘘)── 理由を言う。
+ * - `DIFF_FILE_UNAVAILABLE_NOTE` … 書き戻しの確認(大きいのか読めないのかを分けずに言う)
+ * - `DIFF_FILE_TOO_LARGE_NOTE` … 履歴の面(大きすぎると分かっているとき)
+ */
+export const DIFF_FILE_UNAVAILABLE_NOTE = 'ファイルが大きい(または読めない)ため、ちがいは出せません';
+export const DIFF_FILE_TOO_LARGE_NOTE = 'ファイルが大きいため、ちがいは出せません';
+
 /** 行末を落とす(表示用)。⚠ 原文の `\r` も落とす(画面に出さない)。 */
 const bare = (line: string): string => line.replace(/\r?\n$/, '');
 

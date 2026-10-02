@@ -85,6 +85,7 @@ import { isMovableTile } from '@features/launcher/tile-order';
 import { filerFlattenNow, filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
 import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
+import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
@@ -1655,10 +1656,11 @@ export interface BinderServices {
   writeBackFile?(lid: string): void;
   /**
    * 🔴 **結びついている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
-   * `null` = 読めなかった / 大きすぎる(**「同じ」と言わない**)。⚠ 読むだけ ── 書かない。
+   * `null` = 読めなかった / `{ tooLarge: true }` = 大きすぎて読まなかった(どちらも**「同じ」と言わない**。言う字は分ける)。
+   * ⚠ 読むだけ ── 書かない。
    * ⚠ 呼んでよいのは**相手に選んだ瞬間**だけ(一覧では呼ばない = #1271)。
    */
-  readLinkedFile?(lid: string): Promise<string | null>;
+  readLinkedFile?(lid: string): Promise<string | LinkedFileTooLarge | null>;
   /**
    * 🔴 **パソコンのフォルダ**(#215 段①②。🟣 Gemini 裁定 2026-10-01)。
    * ⚠ handle は `LocalFolder` が持つ ── binder は「押された」を伝えるだけで、
@@ -10911,8 +10913,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (value !== 'file' || pv === null || pv.compare.kind !== 'file' || pv.compare.load.state !== 'loading')
       return;
     const { lid, revId } = pv;
-    const done = (text: string | null): void =>
-      dispatcher.dispatch({ type: 'REVISION_COMPARE_LOADED', lid, previewRevId: revId, against: 'file', text });
+    const done = (r: string | LinkedFileTooLarge | null): void =>
+      dispatcher.dispatch({
+        type: 'REVISION_COMPARE_LOADED',
+        lid,
+        previewRevId: revId,
+        against: 'file',
+        text: typeof r === 'string' ? r : null,
+        // 🔴 大きすぎて読まなかったときだけ理由を載せる(「ファイルを読めませんでした」と言い分ける)
+        ...(r !== null && typeof r === 'object' ? { tooLarge: true as const } : {}),
+      });
     const read = services.readLinkedFile;
     // ⚠ 読む口が無い環境では「読めませんでした」で終える(「読んでいます…」のまま止めない)
     if (read === undefined) {

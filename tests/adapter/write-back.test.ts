@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import {
   writeBackConfirmMessage,
   writeBackEntry,
+  WRITE_BACK_CHANGED_NOTE,
   WRITE_BACK_EMPTY_NOTE,
   type WriteBackDeps,
 } from '../../src/adapter/ui/actions/write-back';
@@ -126,7 +127,8 @@ describe('元のファイルへ書き戻す', () => {
   it('🔴 対照群: 変わっていなければ足さない(毎回脅さない)', async () => {
     const asked: string[] = [];
     const { deps } = harness({
-      inspectFile: async () => ({ changed: false, text: null }),
+      // ⚠ 中身は読めている(`text` が在る)── 読めないと「差分を出せません」の 1 行が足される(下の test)
+      inspectFile: async () => ({ changed: false, text: 'ファイル側の本文' }),
       confirm: async (message) => {
         asked.push(message);
         return true;
@@ -134,12 +136,34 @@ describe('元のファイルへ書き戻す', () => {
     });
     await writeBackEntry(deps);
     expect(asked[0]).not.toContain('パソコン側で変わっています');
+    expect(asked[0]).not.toContain('ちがいは出せません');
     expect(asked[0]).toBe(writeBackConfirmMessage('メモ.md', false));
+  });
+
+  it('🔴 ファイルの中身を読めなかった(text が null)なら、確認に「ちがいは出せません」の 1 行が足される', async () => {
+    const asked: string[] = [];
+    const { deps } = harness({
+      inspectFile: async () => ({ changed: false, text: null }),
+      confirm: async (message) => {
+        asked.push(message);
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(asked[0]).toBe(writeBackConfirmMessage('メモ.md', false, true));
+    expect(asked[0]).toContain('ファイルが大きい(または読めない)ため、ちがいは出せません');
+    // 「違いはありません」(= 同じ)とは言わない
+    expect(asked[0]).not.toContain('違いはありません');
   });
 
   it('🔴 確認の字(画面に出る物)', () => {
     expect(writeBackConfirmMessage('メモ.md', false)).toBe(
       '「メモ.md」を、いまのノートの内容で上書きします。\n\nファイルの元の内容は失われます(取り消せません)。よろしいですか?',
+    );
+    expect(writeBackConfirmMessage('メモ.md', false, true)).toBe(
+      '「メモ.md」を、いまのノートの内容で上書きします。\n\n' +
+        'ファイルが大きい(または読めない)ため、ちがいは出せません\n\n' +
+        'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
     );
     expect(writeBackConfirmMessage('メモ.md', true)).toBe(
       '「メモ.md」を、いまのノートの内容で上書きします。\n\n' +
@@ -241,17 +265,26 @@ describe('元のファイルへ書き戻す', () => {
     expect(said).toEqual([`fail:${WRITE_BACK_EMPTY_NOTE}`]);
   });
 
-  it('🔴 確認の間に本文が変わったら、確認の後の本文を書く(巻き戻さない)', async () => {
+  it('🔴 確認の間に本文が変わったら、書かずに断る(見せた差分に無い追記を、取り消せないファイルへ書かない)', async () => {
     let body = '確認の前の本文';
-    const { deps, written } = harness({
+    const { deps, written, said } = harness({
       getBody: async () => body,
       confirm: async () => {
-        body = '確認の間に書いた本文';
+        body = '確認の前の本文\n確認の間に追記した行'; // 録音の文字起こし・別窓の追記など
         return true;
       },
     });
     await writeBackEntry(deps);
-    expect(written).toEqual(['確認の間に書いた本文']);
+    expect(written, '見せていない追記を書いた').toEqual([]);
+    expect(said).toEqual([`fail:${WRITE_BACK_CHANGED_NOTE}`]);
+    expect(WRITE_BACK_CHANGED_NOTE).toBe('確認している間にノートが変わりました。もう一度押してください');
+  });
+
+  it('⚠ 対照群: 確認の間に何も変わらなければ書く(同じ本文を読み直しても断らない)', async () => {
+    const { deps, written, said } = harness({ getBody: async () => '確認の前の本文' });
+    await writeBackEntry(deps);
+    expect(written).toEqual(['確認の前の本文']);
+    expect(said).toEqual(['done:書き戻しました: 「メモ.md」']);
   });
 
   it('⚠ 本文が見つからないときは、理由を出して書かない', async () => {
@@ -307,9 +340,9 @@ describe('settle は確認の前と後の両方で待つ', () => {
     expect(written).toEqual(['打った字']);
   });
 
-  it('🔴 確認の間に飛んでくる書込も、2 回目の待ちで着地してから読む(書く物は確認の後の本文)', async () => {
+  it('🔴 確認の間に飛んでくる書込も、2 回目の待ちで着地してから読む(着地を待たないと、変わったことに気づけず古い本文を書く)', async () => {
     const store = inFlight('確認の前の本文');
-    const { deps, written } = harness({
+    const { deps, written, said } = harness({
       settle: store.settle,
       getBody: store.getBody,
       confirm: async () => {
@@ -318,7 +351,9 @@ describe('settle は確認の前と後の両方で待つ', () => {
       },
     });
     await writeBackEntry(deps);
-    expect(written, '確認の間の保存を待たず、古い本文を書いた(巻き戻し)').toEqual(['確認の間に飛んで来た本文']);
+    // 2 回目の待ちが着地させるので「変わった」と気づき、書かずに断る(待たなければ古い本文を書いてしまう)
+    expect(written, '確認の間の保存を待たず、古い本文を書いた(巻き戻し)').toEqual([]);
+    expect(said).toEqual([`fail:${WRITE_BACK_CHANGED_NOTE}`]);
     expect(store.settleCalls, '待つのは確認の前と後で 2 回').toBe(2);
   });
 

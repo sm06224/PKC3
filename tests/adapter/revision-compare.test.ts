@@ -59,7 +59,7 @@ interface Opts {
   /** 版の本文を返すのを、この promise が解けるまで待つ(「読んでいます…」を観測する)。 */
   hold?: Record<string, Deferred>;
   /** PC のファイルの読み(省略 = 読む口が無い環境)。 */
-  readLinkedFile?: (lid: string) => Promise<string | null>;
+  readLinkedFile?: (lid: string) => Promise<string | { tooLarge: true } | null>;
   bodies?: Record<string, string | null>;
 }
 
@@ -192,6 +192,16 @@ describe('#1231 段① くらべる相手', () => {
     expect(s.writes, '1 バイトも書かない').toEqual([]);
   });
 
+  it('🔴 非対称: 見出しの `+` = この版にだけある行(2)/ `−` = 相手にだけある行(3)(対称の +1 −1 では向きの裏返しが見えない)', async () => {
+    // この版 r7 = むかしの本文 / 2 行目 / 3 行目。相手 r6 = ろく1〜3 / 2 行目 ── この版にだけ 2 行・相手にだけ 3 行
+    const s = setup({ bodies: { r6: 'ろく1\nろく2\nろく3\n2 行目\n' } });
+    await openPreview(s);
+    await choose(s, 'rev:r6');
+    expect(summary(s)).toBe('版 6(2026-08-22 09:02)とのちがい: +2 −3');
+    expect(texts(cells(s, 'right')).filter((t) => t.startsWith('+ '))).toHaveLength(2);
+    expect(texts(cells(s, 'left')).filter((t) => t.startsWith('− '))).toHaveLength(3);
+  });
+
   it('🔴 見出しの字: 同じなら「その版と同じです」/ 相手の版が履歴から消えていたら理由を言う', async () => {
     const same = setup({ bodies: { r6: R7 } });
     await openPreview(same);
@@ -251,6 +261,17 @@ describe('#1231 段① くらべる相手', () => {
       expect(summary(s)).toBe('ファイルを読めませんでした');
       expect(s.qa('[data-pkc-field="revision-diff"] ul'), '読めなかったのに差分を出している').toHaveLength(0);
     }
+  });
+
+  it('🔴 ④ 大きすぎて読まなかったなら、「読めませんでした」ではなく大きいからと言う(「同じ」とも言わない)', async () => {
+    const s = setup({ readLinkedFile: async () => ({ tooLarge: true }) });
+    await openPreview(s);
+    s.d.dispatch({ type: 'FILE_LINKED', lid: 'n1', name: 'memo.md' });
+    await tick();
+    await choose(s, 'file');
+    expect(summary(s)).toBe('ファイルが大きいため、ちがいは出せません');
+    expect(summary(s)).not.toContain('読めませんでした');
+    expect(s.qa('[data-pkc-field="revision-diff"] ul'), '読まなかったのに差分を出している').toHaveLength(0);
   });
 
   it('⚠ 読む口が配線されていない環境でも「読んでいます…」のまま止まらない', async () => {
