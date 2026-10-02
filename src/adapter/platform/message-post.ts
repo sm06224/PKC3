@@ -327,26 +327,47 @@ export class MessagePost {
   }
 
   /**
+   * 🔴 **走っている流しは 1 本だけ**(着地後レビュー 💭)。⚠ 1 稿目は重ねて走れたので、控えが空でない
+   *   間に近い 2 つの `post`(それぞれが `deliver` から流す)が**同じ控えを両方読んで、二重に
+   *   `appendMessage`** していた(同じ節がメッセージに 2 件並ぶ)。いま走っているなら**その Promise を返す**
+   *   (呼び側は完了を待つだけなので、同じものを待たせて困らない)。
+   */
+  private spoolRun: Promise<void> | null = null;
+  private flushSpool(): Promise<void> {
+    if (!this.deps) return Promise.resolve();
+    // ⚠ `drainSpool` は必ず 1 度 await してから終わる ── 同期で終わると、下の代入が
+    //   `finally` の `null` の後に走って「走っている」印が残りっぱなしになる
+    this.spoolRun ??= this.drainSpool();
+    return this.spoolRun;
+  }
+
+  /**
    * 控えを disk へ流し込む。⚠ **先頭から順に** ── 途中で失敗したら止める
    * (順序を守る。あとの節を先に書くと節の日時が前後する)。
+   * ⚠ どの出口でも走っている印(`spoolRun`)を下ろす ── 下ろさないと以後の流しが全部止まる。
    */
-  private async flushSpool(): Promise<void> {
-    if (!this.deps) return;
-    let items: ReadonlyArray<{ id: IDBValidKey; item: SpoolItem }>;
+  private async drainSpool(): Promise<void> {
+    const deps = this.deps;
     try {
-      items = await this.spool.list();
-    } catch {
-      return; // 控えそのものが読めない ── 諦める(次の post でまた試す)
-    }
-    for (const { id, item } of items) {
-      // ⚠ boot 前に積んだ分は cid が未確定(空文字)のまま控えている ── いまの cid で書き直す
-      const fixed = item.cid === '' ? { ...item, cid: this.deps.cid } : item;
+      if (!deps) return;
+      let items: ReadonlyArray<{ id: IDBValidKey; item: SpoolItem }>;
       try {
-        await this.deps.appendMessage(fixed);
-        await this.spool.remove(id).catch(() => {});
+        items = await this.spool.list();
       } catch {
-        return;
+        return; // 控えそのものが読めない ── 諦める(次の post でまた試す)
       }
+      for (const { id, item } of items) {
+        // ⚠ boot 前に積んだ分は cid が未確定(空文字)のまま控えている ── いまの cid で書き直す
+        const fixed = item.cid === '' ? { ...item, cid: deps.cid } : item;
+        try {
+          await deps.appendMessage(fixed);
+          await this.spool.remove(id).catch(() => {});
+        } catch {
+          return;
+        }
+      }
+    } finally {
+      this.spoolRun = null;
     }
   }
 }

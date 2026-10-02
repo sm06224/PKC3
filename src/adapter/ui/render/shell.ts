@@ -33,6 +33,7 @@ import {
 } from '@features/alarm/alarm-due';
 // 🔑 lid の綴りは 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { SYSTEM_MESSAGE_LID } from '@features/message/message-log';
+import { createStatusLive } from './status-line';
 
 export interface ShellRegions {
   /** 左の列の中身(探し方で切り替わる)。 */
@@ -948,15 +949,13 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * 🔴 **画面下の知らせを、読み上げにも届ける**(#1017 C5 段 a)。⚠ 直す前は何も付いておらず、
    *   「コピーしました」等は**目で見る人にしか届かなかった**(`aria-live` は検索・右クリック・
    *   リンクの先の 3 か所だけ)。
-   * ⚠ `role="status"` は `aria-atomic="true"` を含意する ── 放っておくと、知らせが変わるたびに
-   *   **隣の「そのノートを開く」「未読 N 件」まで毎回読み直す**。字が変わった所だけ読ませたいので
-   *   `aria-atomic="false"` を明示する。
+   * 🔴 **`aria-live` は footer 全体には付けない**(着地後レビュー ⚠1)── 1 稿目は footer に
+   *   `role="status"` を付けたので、状態語・保存先の注意・`⏳ 保存中…` の出入りのたびに読み上げが
+   *   起き、footer の暗黙の役割(contentinfo)も消えた。付けるのは**知らせとエラーを写す子 1 つ**
+   *   (下の `status-live`。`status-line.ts` の `paintStatusText` が書く)だけ。
    * ⚠ `hidden` で畳んでいる間は読まれない(`main.ts` の `paint`)── 畳んだままの知らせは
    *   メッセージ(未読 / 結果)の側で読める。今回はこの限界を受け入れる。
    */
-  status.setAttribute('role', 'status');
-  status.setAttribute('aria-live', 'polite');
-  status.setAttribute('aria-atomic', 'false');
   status.hidden = true;
   /**
    * 🔴 **字は子の `<span>` に書く**(#671 の裁定 3)。
@@ -968,6 +967,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const statusText = document.createElement('span');
   statusText.setAttribute('data-pkc-field', 'status-text');
+  // 🔴 読み上げの子(知らせとエラーだけを写す)。⚠ 起動の時点で在る ── 字が入る前から登録しておく
+  statusText.append(createStatusLive(document));
   /**
    * 🔴 **知らせの隣の押し口「開く」**(#668 A)。
    *

@@ -1223,7 +1223,7 @@ describe('🔴 放送の parity ── 実物の窓(host.html の行)が撃つ�
     const main = readFileSync('src/main.ts', 'utf-8');
     const i = main.indexOf("ev.type === 'shadow-failed'");
     expect(i, '本体が失敗を受けていない').toBeGreaterThan(0);
-    expect(main.slice(i, i + 600)).toContain('showStatus(shadowFailedNotice(ev.reason))');
+    expect(main.slice(i, i + 600)).toContain("showStatus(shadowFailedNotice(ev.reason), { kind: 'caution' })");
     // 成功は言わない: shadow-written で showStatus を呼ぶ枝が無い
     const officeBlock = main.slice(main.indexOf('officeWindow.onEvent('), main.indexOf('officeWindow.onEvent(') + 4000);
     expect(officeBlock, '成功を user へ言っている(うるさい)').not.toContain("'shadow-written'");

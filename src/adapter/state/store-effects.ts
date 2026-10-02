@@ -2596,7 +2596,9 @@ export function connectStoreEffects(
            *   読めない(「0 件に付けました」が、付いた側の話に見えてしまう)。
            */
           const one = ev.tags.length === 1;
-          const label = (tag: string): string => (one ? '' : `${tag}:`);
+          // ⚠ タグ名は「」で囲む ── メッセージへ積むとき `sanitizeMessageText` が「」の中身を潰すので、
+          //   素のままだと**タグ名が積まれた記録に残る**(着地後レビュー ⚠4)
+          const label = (tag: string): string => (one ? '' : `「${tag}」:`);
           const parts: string[] = [];
           // ⚠ **打った順に並べる**(数の多い順に並べ替えない ── 打った字と読み合わせる)
           for (const tag of ev.tags) {

@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { MessagePost, type MessageSpool, type SpoolItem } from '../../src/adapter/platform/message-post';
+import { EXPORT_STARTING } from '../../src/adapter/ui/actions/export-archive';
 import { VIEW_WINDOW_OPENING } from '../../src/adapter/platform/view-window';
 import {
   createStatusPoster,
@@ -22,11 +23,13 @@ import {
   shouldPostNotice,
 } from '../../src/adapter/ui/render/status-notice';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { paintStatusText, type StatusLineParts } from '../../src/adapter/ui/render/status-line';
 import { paintStatusMessages } from '../../src/adapter/ui/render/status-open';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
-import { SYSTEM_MESSAGE_LID } from '../../src/features/message/message-log';
+import { SYSTEM_MESSAGE_LID, sanitizeMessageText } from '../../src/features/message/message-log';
+import { attachmentNameRewriteNotice } from '../../src/features/markdown/body-rewrite';
 
 class FakeSpool implements MessageSpool {
   async list(): Promise<ReadonlyArray<{ id: number; item: SpoolItem }>> {
@@ -45,9 +48,8 @@ const collect = (): { posted: Posted[]; poster: ReturnType<typeof createStatusPo
 /** 実際に進行中として出している字(全部)。⚠ 足したらここへも足す(下の走査が漏れを見つける)。 */
 const REAL_PROGRESS_TEXTS = [
   VIEW_WINDOW_OPENING, // view-window.ts(`OP_NOTICE` 経由で結果として積まれていた)
-  '書き出しています…',
-  '閲覧用 HTML を書き出しています…',
-  'Markdown を書き出しています…',
+  // ⚠ 書き出しの開始の字は**実装の定数**を読む(`EXPORT_STARTING`)── 手で写すと、実装から `…` を落としても動かない
+  ...Object.values(EXPORT_STARTING),
   'Word で書き出しています…',
   '可搬 HTML を書き出しています…',
   '取込中…(ファイルを読んでいます)',
@@ -66,12 +68,28 @@ const RESULT_TEXTS = [
   '「録音.wav」に文字起こしを足しました(3 秒)',
   '可搬 HTML を書き出しました(添付 2 件)',
   '一式を組めませんでした: 失敗',
+  // 🔴 `…` を**途中に**含む結果(題名の中の `…`)── 進行中の形(末尾の `…` / `…(補足)`)ではない。
+  //    ⚠ 結果の字に `…` が 1 件も無いと、進行中の見分けを `/…/` に広げても対照群が鳴らない
+  '「どうしよう…」を保存しました',
+  '「あとで…」に 3 件入れました(5 秒)',
 ];
 
 describe('進行中の字を見分ける(結果として積まない)', () => {
   it.each(REAL_PROGRESS_TEXTS)('🔴 進行中: %s', (t) => {
     expect(isProgressNotice(t), `進行中と読めていない: ${t}`).toBe(true);
     expect(shouldPostNotice(t)).toBe(false);
+  });
+
+  it('🔴 書き出しの開始の字(実装の定数)は 3 種とも在り、全部が進行中と読める', () => {
+    // ⚠ 手で写した一覧ではなく定数そのものを見る ── 実装から `…` を落とすと、ここが落ちる
+    expect(Object.keys(EXPORT_STARTING).sort()).toEqual(['archive', 'html', 'markdown']);
+    for (const t of Object.values(EXPORT_STARTING)) {
+      expect(isProgressNotice(t), `進行中と読めていない: ${t}`).toBe(true);
+    }
+  });
+
+  it('🔴 結果の対照群に、`…` を途中に含む字が 1 件以上在る(進行中の見分けを広げすぎたら鳴る)', () => {
+    expect(RESULT_TEXTS.some((t) => t.includes('…') && !t.endsWith('…')), '対照群に途中の … が無い').toBe(true);
   });
 
   it.each(RESULT_TEXTS)('対照群(結果は積む): %s', (t) => {
@@ -151,6 +169,26 @@ describe('積む / 積まないの判断(createStatusPoster)', () => {
     expect(posted.filter((p) => p.kind === 'result'), '結果まで 1 回に潰した').toHaveLength(2);
   });
 
+  it('🔴 既読にしたら憶えた字を忘れる(読んだ後の再発は新しい出来事 ── 2 回目も積む)', () => {
+    const posted: Posted[] = [];
+    let read: () => void = () => {};
+    const poster = createStatusPoster(
+      (m) => void posted.push(m),
+      (onRead) => {
+        read = onRead;
+      },
+    );
+    poster('Office が不安定になりました', { kind: 'problem' });
+    poster('Office が不安定になりました', { kind: 'problem' });
+    expect(posted, '前提: 既読の前は 1 回だけ').toHaveLength(1);
+    read();
+    poster('Office が不安定になりました', { kind: 'problem' });
+    expect(posted, '既読の後の同じ警告が積まれていない').toHaveLength(2);
+    // 対照:既読にしなければ(もう一度同じ字を言っても)増えない
+    poster('Office が不安定になりました', { kind: 'problem' });
+    expect(posted, '既読にしていないのに重ねて積んだ').toHaveLength(2);
+  });
+
   it('🔴 憶える数には上限が在り、古いものから忘れる(積み続けてもメモリを食わない)', () => {
     const { posted, poster } = collect();
     poster('最初の警告', { kind: 'caution' });
@@ -197,6 +235,25 @@ describe('本物の MessagePost に繋ぐ', () => {
     expect(w.sections()).toHaveLength(1);
     expect(w.sections()[0]).toContain('**問題**');
     expect(w.unread).toEqual([1]);
+  });
+
+  it('🔴 ②b 既読にしたあと同じ警告がもう一度来たら、積まれて未読も増える(本物の MessagePost)', async () => {
+    const post = new MessagePost(new FakeSpool());
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage });
+    const unread: number[] = [];
+    post.onUnreadChanged((n) => unread.push(n));
+    // main.ts と同じ繋ぎ:未読が 0 になったら憶えを空にする
+    const poster = createStatusPoster(
+      (m) => post.post(m),
+      (onRead) => post.onUnreadChanged((n) => { if (n === 0) onRead(); }),
+    );
+    poster('Office が不安定になりました', { kind: 'problem' });
+    post.markRead();
+    poster('Office が不安定になりました', { kind: 'problem' });
+    await settle();
+    expect(appendMessage, '2 回目が積まれていない').toHaveBeenCalledTimes(2);
+    expect(unread).toEqual([1, 0, 1]);
   });
 
   it('🔴 ③ 空の字は 1 件も書かれない(進行中を消す `notify("")` が結果として残らない)', async () => {
@@ -252,8 +309,59 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
 
   it('🔴 断り・エラーの直呼びは kind を渡している(5 か所)', () => {
     expect(code).toMatch(/onBroken: \(text\) => showStatus\(text, \{ kind: 'problem' \}\)/);
-    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 2 つ(PDF が読めなかった / Office が固まった)').toBe(2);
+    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 4 つ(PDF が読めなかった / Office が固まった / コピーできなかった / 控えを書けなかった)').toBe(4);
     expect(code.match(/kind: 'problem'/g)?.length, 'problem の渡し先が 3 つ(壊れ / 一式 / Office)').toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('🔴 失敗・断りの字は「注意」で積む(原文 pin ── 弱い。着地後レビュー ⚠3)', () => {
+  const strip = (f: string): string =>
+    readFileSync(f, 'utf8')
+      .split('\n')
+      .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+      .join('\n');
+
+  it('🔴 main.ts: コピーできなかった / 控えを書けなかったは caution', () => {
+    const code = strip('src/main.ts');
+    expect(code).toContain("showStatus('コピーできませんでした', { kind: 'caution' })");
+    expect(code).toContain("showStatus(shadowFailedNotice(ev.reason), { kind: 'caution' })");
+  });
+
+  it('🔴 対照:user が「やめる」を選んだ結果(OFFICE_DECLINED_NOTICE)は結果のまま(kind を渡さない)', () => {
+    const code = strip('src/main.ts');
+    expect(code).toContain('showStatus(OFFICE_DECLINED_NOTICE);');
+  });
+
+  it('🔴 capture.ts / timer.ts: 取り込めなかった / 本文に入れていないは caution', () => {
+    expect(strip('src/adapter/ui/actions/capture.ts')).toMatch(
+      /を取り込めませんでした`, \{ kind: 'caution' \}\)/,
+    );
+    expect(strip('src/adapter/ui/actions/timer.ts')).toMatch(
+      /が見つからないので本文に入れていません\(\$\{what\}\)`, \{ kind: 'caution' \}\)/,
+    );
+  });
+
+  it('🔴 main.ts: 状態の行の字の器へ textContent で書かない(読み上げの子 status-live ごと消える)', () => {
+    expect(strip('src/main.ts')).not.toMatch(/regions\.statusText\.textContent\s*=/);
+  });
+
+  it('🔴 既読の合図を createStatusPoster へ渡している(未読が 0 になったら憶えを空にする)', () => {
+    expect(strip('src/main.ts')).toMatch(
+      /createStatusPoster\(\s*\(m\) => appMessagePost\.post\(m\),\s*\(onRead\) => appMessagePost\.onUnreadChanged\(\(n\) => \{ if \(n === 0\) onRead\(\); \}\)/,
+    );
+  });
+});
+
+describe('添付名は「」で囲んで積む(積むとき中身が潰れる)', () => {
+  it('🔴 添付名の書き換えの知らせは、素の名前を残さずに積まれる', () => {
+    const text = attachmentNameRewriteNotice('scan.pdf', '請求書.pdf');
+    const posted = sanitizeMessageText(text);
+    expect(posted, '添付名が積まれた記録に残った').not.toContain('scan.pdf');
+    expect(posted).not.toContain('請求書');
+    // 対照:何が起きたかの字は残る
+    expect(posted).toBe('ファイル名を「…」→「…」にしました');
+    // 画面に出る字は名前を言う(元と新しい名前を見せる)
+    expect(text).toBe('ファイル名を「scan.pdf」→「請求書.pdf」にしました');
   });
 });
 
@@ -323,14 +431,67 @@ describe('「未読 N 件」の押し口', () => {
   });
 });
 
-describe('画面下の帯は読み上げに届く', () => {
-  it('🔴 role=status / aria-live=polite / aria-atomic=false(隣の押し口まで読み直さない)', () => {
+describe('画面下の帯は読み上げに届く(知らせとエラーだけ)', () => {
+  function shell() {
     const root = document.createElement('div');
     document.body.append(root);
-    const regions = buildShell(root);
-    expect(regions.status.getAttribute('role')).toBe('status');
-    expect(regions.status.getAttribute('aria-live')).toBe('polite');
-    // ⚠ role=status は atomic=true を含意する ── 明示しないと、変わるたびに「そのノートを開く」等まで読む
-    expect(regions.status.getAttribute('aria-atomic')).toBe('false');
+    return buildShell(root);
+  }
+  const parts = (extra: Partial<StatusLineParts> = {}): StatusLineParts => ({
+    phase: 'ready',
+    statusBase: '',
+    sync: '',
+    portableAssetNote: '',
+    persistState: '',
+    savingLine: '',
+    noticeLine: '',
+    errorLine: '',
+    ...extra,
+  });
+
+  it('🔴 footer 全体には role / aria-live を付けない(暗黙の contentinfo を残す)', () => {
+    const regions = shell();
+    expect(regions.status.tagName).toBe('FOOTER');
+    expect(regions.status.hasAttribute('role'), 'footer に role を付けた(contentinfo が消える)').toBe(false);
+    expect(regions.status.hasAttribute('aria-live'), 'footer 全体が読み上げ対象になっている').toBe(false);
+  });
+
+  it('🔴 読み上げの子(status-live)は 1 つだけ在り、polite で、起動の時点で存在する', () => {
+    const regions = shell();
+    const lives = regions.status.querySelectorAll('[aria-live]');
+    expect(lives, '読み上げの要素が 1 つではない').toHaveLength(1);
+    const live = lives[0]!;
+    expect(live.getAttribute('data-pkc-field')).toBe('status-live');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(regions.statusText.contains(live)).toBe(true);
+  });
+
+  it('🔴 保存中・状態語・保存先の注意の出入りでは、読み上げの子の字は変わらない / 知らせが来ると変わる', () => {
+    const regions = shell();
+    const live = regions.status.querySelector('[data-pkc-field="status-live"]') as HTMLElement;
+    const records: MutationRecord[] = [];
+    const mo = new MutationObserver((r) => records.push(...r));
+    mo.observe(live, { childList: true, characterData: true, subtree: true });
+    // 保存中 / 編集中 / 保存先の注意 が出入りする
+    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…' }));
+    paintStatusText(regions.statusText, parts({ phase: 'editing', statusBase: '保存先の注意' }));
+    paintStatusText(regions.statusText, parts({ phase: 'editing', savingLine: '⏳ 保存中…' }));
+    paintStatusText(regions.statusText, parts());
+    records.push(...mo.takeRecords());
+    expect(records, '状態語・保存中の出入りで読み上げの子が書き換わった').toHaveLength(0);
+    expect(live.textContent).toBe('');
+    // 知らせが来ると、その字が入る
+    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…', noticeLine: 'コピーしました' }));
+    expect(live.textContent, '知らせが読み上げの子に入っていない').toBe('コピーしました');
+    // 同じ知らせのまま保存中だけ出入りしても、読み上げの子は書き換わらない(同じ要素を使い続ける)
+    mo.takeRecords();
+    paintStatusText(regions.statusText, parts({ noticeLine: 'コピーしました' }));
+    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…', noticeLine: 'コピーしました' }));
+    expect(mo.takeRecords(), '知らせが同じなのに読み上げの子が書き換わった').toHaveLength(0);
+    expect(regions.statusText.querySelector('[data-pkc-field="status-live"]'), '読み上げの子が作り直された').toBe(live);
+    // エラーも読み上げの子へ
+    paintStatusText(regions.statusText, parts({ errorLine: '⚠ エラー: 失敗' }));
+    expect(live.textContent).toBe('⚠ エラー: 失敗');
+    mo.disconnect();
   });
 });

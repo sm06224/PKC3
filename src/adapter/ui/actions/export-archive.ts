@@ -150,6 +150,17 @@ const stamp = (d: Date): string => dayStamp(d, '');
 export type ExportKind = 'archive' | 'html' | 'markdown';
 
 /**
+ * 書き出しを始めたときに画面下へ出す字。⚠ **進行中の字なので `…` で終わる**(`status-notice.ts` の
+ * `isProgressNotice` が見分ける ── 外れると結果として積まれる)。🔑 test が**この定数そのもの**を
+ * 読んで見る(手で写した一覧は、ここを直しても動かない ── 着地後レビュー)。
+ */
+export const EXPORT_STARTING: Record<ExportKind, string> = {
+  archive: '書き出しています…',
+  html: '閲覧用 HTML を書き出しています…',
+  markdown: 'Markdown を書き出しています…',
+};
+
+/**
  * 🔴 **アーカイブの出発点の広さ**(#1017 段④b)。⚠ `'part'`(読めた分だけ)は
  * **自動フォールバック専用**で、呼び出し元からは選べない(下の `exportArchive` の
  * 中でしか作らない) ── 押した人が意図して選ぶ物ではなく、保存領域に問題が
@@ -333,12 +344,7 @@ export async function exportArchive(
     return fail(`${phaseBlockReason(phase)}書き出してください`);
   }
 
-  const STARTING: Record<ExportKind, string> = {
-    archive: '書き出しています…',
-    html: '閲覧用 HTML を書き出しています…',
-    markdown: 'Markdown を書き出しています…',
-  };
-  deps.notify?.(STARTING[kind]);
+  deps.notify?.(EXPORT_STARTING[kind]);
   progressShown = true;
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)

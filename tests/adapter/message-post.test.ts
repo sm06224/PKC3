@@ -111,6 +111,43 @@ describe('MessagePost ── 書けないときは控えへ積み、書けたら
     expect(order.some((s) => s.includes('新しい件'))).toBe(true);
   });
 
+  it('🔴 控えに 1 件ある間に post を 2 回重ねても、その 1 件は 1 回しか書かれない(流しは重ならない)', async () => {
+    const spool = new FakeSpool();
+    await spool.push({ cid: 'c1', lid: SYSTEM_MESSAGE_LID, title: 'メッセージ', section: '## old\n古い節\n\n', cap: 500 });
+    const post = new MessagePost(spool);
+    const written: string[] = [];
+    const appendMessage = vi.fn().mockImplementation(async (req: { section: string }) => {
+      // ⚠ 書き終わるまでに時間をかける ── 流しが重なれるなら、その間に別の流しが同じ控えを読む
+      await Promise.resolve();
+      await Promise.resolve();
+      written.push(req.section);
+    });
+    // attach 自体が流しを 1 本起こす(まだ終わっていない)。そこへ 2 つの post が重なる
+    post.attach({ cid: 'c1', appendMessage });
+    post.post({ kind: 'result', source: 'app', text: '一つ目' });
+    post.post({ kind: 'result', source: 'app', text: '二つ目' });
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    expect(written.filter((x) => x.includes('古い節')), '控えの 1 件が二重に書かれた').toHaveLength(1);
+    // 対照:新しい 2 件は両方書かれる(流しを 1 本にして、post を落としていない)
+    expect(written.filter((x) => x.includes('一つ目'))).toHaveLength(1);
+    expect(written.filter((x) => x.includes('二つ目'))).toHaveLength(1);
+    expect(spool.size()).toBe(0);
+  });
+
+  it('🔴 流しが終わったあとに控えへ積まれた分は、次の post でちゃんと流れる(「走っている」印が残りっぱなしにならない)', async () => {
+    const spool = new FakeSpool();
+    const post = new MessagePost(spool);
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage }); // 空の控えを 1 度流して終わる
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    await spool.push({ cid: 'c1', lid: SYSTEM_MESSAGE_LID, title: 'メッセージ', section: '## old\n後から控えた節\n\n', cap: 500 });
+    post.post({ kind: 'result', source: 'app', text: '新しい件' });
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    const sections = appendMessage.mock.calls.map((c) => (c[0] as { section: string }).section);
+    expect(sections.some((x) => x.includes('後から控えた節')), '2 度目の流しが走っていない').toBe(true);
+    expect(spool.size()).toBe(0);
+  });
+
   it('boot 前(attach されていない)に post しても、控えへ積んで捨てない', async () => {
     const spool = new FakeSpool();
     const post = new MessagePost(spool);

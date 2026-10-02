@@ -25,6 +25,7 @@
  *   不可侵指示 2026-08-03)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { isAppendable } from '@features/flavor/append-spec';
 import { workLogLine, workLogText, type TimerRun } from '@features/timer/timer-run';
 import { createWritableQueue } from './writable-queue';
@@ -34,7 +35,7 @@ export interface TimerServiceDeps {
   /** 帯を描き直す合図。⚠ 空 = 何も計っていない(帯を畳む)。 */
   readonly onChange: (runs: readonly TimerRun[]) => void;
   /** 一時の知らせ(エラーの行とは別)。 */
-  readonly notify: (text: string) => void;
+  readonly notify: (text: string, opts?: StatusOptions) => void;
   /** いまの時刻。⚠ `features/` と同じ約束で**外から渡す**(test は手で進める)。 */
   readonly now?: () => number;
   /** 1 秒ごとの合図。返り値は**外す関数**。⚠ test は手で撃つ。 */
@@ -92,7 +93,8 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
      *   user は「計っていた時間」を失ったことにすら気づかない。
      */
     if (!deps.dispatcher.getState().entryMetas.has(lid)) {
-      deps.notify(`「${run.title}」が見つからないので本文に入れていません(${what})`);
+      // 🔴 種類は「注意」(計った時間が失われる ── 着地後レビュー ⚠3)
+      deps.notify(`「${run.title}」が見つからないので本文に入れていません(${what})`, { kind: 'caution' });
       return;
     }
     /**

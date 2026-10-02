@@ -1505,7 +1505,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
-  regions.statusText.textContent = statusBase;
+  // ⚠ `textContent` で書かない ── 読み上げの子(`status-live`)ごと消える(着地後レビュー ⚠1)
+  paintStatusText(regions.statusText, {
+    phase: 'initializing',
+    statusBase,
+    sync: '',
+    portableAssetNote: '',
+    persistState: '',
+    savingLine: '',
+    noticeLine: '',
+    errorLine: '',
+  });
   // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
   regions.status.hidden = statusBase === '';
   /**
@@ -1644,7 +1654,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 既定は「結果」(未読は増えない)。断り・エラーだけ `kind` を渡す。
    * ⚠ 呼び側が既に積んだ字は `{ post: false }`(二重に積まない)。
    */
-  const postStatus = createStatusPoster((m) => appMessagePost.post(m));
+  const postStatus = createStatusPoster(
+    (m) => appMessagePost.post(m),
+    // 🔴 既読(未読が 0 になった)で重複の記憶を空にする ── 読んだ後の再発は新しい出来事(着地後レビュー ⚠2)
+    (onRead) => appMessagePost.onUnreadChanged((n) => { if (n === 0) onRead(); }),
+  );
   /**
    * 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。
    * ⚠ **画面下の出し方は直す前と同じ**(居座り方・寿命・色は変えていない)── 増えたのは
@@ -2413,6 +2427,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 **窓の中に保存していない変更が在り、user が「やめる」を選んだ**(#1228 穴②)。
       //    ⚠ 本体は「開いている Office のウィンドウに表示します」と先に言っているので、**取り消す一言**を出す
       //    (言わないと、押したのに何も起きない)。⚠ 字は `office-window.ts` の定数 ── 手書きしない
+      // ⚠ **種類は結果のまま**(`caution` にしない)── user 自身が確認で「やめる」を選んだ**結果**で、
+      //    こちらが断ったのでも失敗したのでもない(未読に数えると、自分で選んだ結果が「要確認」に化ける)
       showStatus(OFFICE_DECLINED_NOTICE);
     }
     else if (ev.type === 'reload-confirming') {
@@ -2423,7 +2439,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     else if (ev.type === 'shadow-failed') {
       // 🔴 **窓が編集の控え(影)を書けなかった**(#1228 段 1)── 黙らない(user は控えがあるつもりでいる)。
       //    ⚠ 字は `office-window.ts` の関数 ── 手書きしない。成功(`shadow-written`)は言わない(うるさい)
-      showStatus(shadowFailedNotice(ev.reason));
+      // 🔴 種類は「注意」(未読に数える)── 控えが無いのに user は有るつもりでいる(着地後レビュー ⚠3)
+      showStatus(shadowFailedNotice(ev.reason), { kind: 'caution' });
     }
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
@@ -3557,7 +3574,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          *   本文を全部写す `copy-plain-markdown` でもそう出ており、**字が嘘**だった。
          * ⚠ 既定は**参照と言わない**汎用にする(渡し忘れても嘘にならない側へ倒す)。
          */
-        showStatus(ok ? (done ?? 'コピーしました') : 'コピーできませんでした');
+        // 🔴 失敗は「注意」(未読に数える。着地後レビュー ⚠3)── 成功は結果のまま
+        if (ok) showStatus(done ?? 'コピーしました');
+        else showStatus('コピーできませんでした', { kind: 'caution' });
       });
     },
     /**

@@ -486,8 +486,8 @@ describe('2 つ打ったときの知らせ(#637)', () => {
       '買い物',
     ]);
     const msg = noticesOf(s);
-    expect(msg, '付いた側が画面から消えている').toContain('買い物:1 件に付けました');
-    expect(msg, 'もう片方の話が消えている').toContain('家事:1 件は既に付いていました');
+    expect(msg, '付いた側が画面から消えている').toContain('「買い物」:1 件に付けました');
+    expect(msg, 'もう片方の話が消えている').toContain('「家事」:1 件は既に付いていました');
   });
 
   /**

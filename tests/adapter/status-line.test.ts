@@ -102,6 +102,22 @@ describe('paintStatusText ── 状態の 1 語を別の器に入れる', () =>
     );
   });
 
+  it('🔴 知らせ + エラー + 状態語が全部在っても、行の字は 1 字も変わらず、読み上げの子には尾(知らせ + エラー)だけが入る', () => {
+    const el = document.createElement('span');
+    const parts = partsFor('editing', {
+      statusBase: '保存先の注意',
+      savingLine: '⏳ 保存中…',
+      noticeLine: 'コピーしました',
+      errorLine: '⚠ エラー: 失敗',
+    });
+    paintStatusText(el, parts);
+    expect(el.textContent).toBe(composeStatusLine(parts));
+    const live = el.querySelector('[data-pkc-field="status-live"]');
+    expect(live?.textContent, '尾以外が読み上げの子に入った').toBe('コピーしました — ⚠ エラー: 失敗');
+    // 区切りの ' — ' は読み上げの外(頭の側)に置く
+    expect(el.lastChild).toBe(live);
+  });
+
   it('⚠ ready に戻ったら器は残らない(前の描画の「編集中」を消す)', () => {
     const el = document.createElement('span');
     paintStatusText(el, partsFor('editing'));

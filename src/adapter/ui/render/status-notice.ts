@@ -66,14 +66,22 @@ const REMEMBER_CAP = 64;
  *   注意 / 問題だけが増やすので、同じ警告が繰り返し来るたびに「未読 N 件」が増え続けて
  *   **本当に新しい警告が埋もれる**。`main.ts` の `lastPostedError`(`state.error` の枝)と
  *   同じ向きである。⚠ 結果は積み直す(操作 1 回 = 出来事 1 件。同じ「コピーしました」でも別の操作)。
+ * 🔴 **既読にしたら、憶えた字を空にする**(着地後レビュー ⚠2)。⚠ 1 稿目は「同じセッションの間ずっと」
+ *   憶えていたので、**Office が固まった 10:00 の警告を読んだ後、14:00 にもう一度固まっても積まれず**、
+ *   未読も増えなかった(2 回目は**新しい出来事**なのに、画面にも記録にも出ない)。
+ *   🔑 重複を防ぎたいのは「読む前に同じ警告が積み重なる」ことだけなので、**読んだ後は忘れる**。
+ *   読んだ合図は呼び側が渡す(`subscribeRead`。`main.ts` は未読が 0 になったとき撃つ)。
  * ⚠ 起動をまたぐ重複(同じ警告が毎回の起動で出る)は**ここでは数えない** ── 起動のたびに
  *   新しく起きた出来事なので 1 件ずつ積む(disk の本文を読んで比べると、押すたびに本文全体を
  *   読むことになる)。
  */
 export function createStatusPoster(
   post: (input: { kind: MessageKind; source: string; text: string }) => void,
+  /** 「既読になった」を聞く口(`appMessagePost.onUnreadChanged` で 0 のとき撃つ)。省けば憶えたまま。 */
+  subscribeRead?: (onRead: () => void) => void,
 ): (text: string, opts?: StatusOptions) => void {
   const remembered = new Set<string>();
+  subscribeRead?.(() => remembered.clear());
   return (text, opts) => {
     if (opts?.post === false) return;
     if (!shouldPostNotice(text)) return;

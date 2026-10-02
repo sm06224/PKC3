@@ -176,7 +176,7 @@ describe('🔴 左の列の改名(右クリック / F2)で、添付はファイ�
     // 古い題名で戻さない
     expect(r.persists[0]!.title).toBe('請求書');
     // 知らせは添付の画面の改名欄と同じ字
-    expect(r.d.getState().notice).toBe('ファイル名を scan.pdf → 請求書.pdf にしました');
+    expect(r.d.getState().notice).toBe('ファイル名を「scan.pdf」→「請求書.pdf」にしました');
   });
 
   it('🔴 対照群:添付でないノートは題名だけ(本文を 1 回も書かない)', async () => {
