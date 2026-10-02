@@ -23,6 +23,7 @@ import { FOLDER_OVERVIEW_LIMIT } from '../../src/features/relation/folder-overvi
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { ENTRY_MENU_ACTIONS } from '../../src/features/entry-actions';
 
 const meta = (
   lid: string,
@@ -390,5 +391,73 @@ describe('フォルダの概要の行を押す(binder)', () => {
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(d.getState().selectedLid, '消えたノートへ移った').toBe('F');
     expect(d.getState().scopeLid, '開けなかったのに左の列だけ動いた').toBeNull();
+  });
+});
+
+/**
+ * 🔴 **空のフォルダに、作る入口が出る**(#1254 §3 改善 A。Gemini 裁定 = a)。
+ *
+ * > user の物語:空のフォルダを押した。件数が 0 と出るだけで、**何をすればよいか**が画面に無かった
+ * > (作る入口は行の右クリックか Shift+F4 だけ)。
+ *
+ * ⚠ 押したときの動きは**行の右クリックの「この中に新しいノートを作る」と同じ 1 本**(新しい action を
+ *   作らない)。期待値の綴りは**右クリックの表(`ENTRY_MENU_ACTIONS`)から引く**(手で書かない)。
+ */
+describe('空のフォルダの「この中に新しいノートを作る」(#1254 §3 改善 A)', () => {
+  const CREATE = '[data-pkc-region="folder-overview"] [data-pkc-field="overview-create"]';
+  const menuItem = ENTRY_MENU_ACTIONS.find((a) => a.action === 'create-in-folder')!;
+
+  function wiredEmpty(metas: EntryMeta[], relations: Relation[]) {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const d = new Dispatcher();
+    bindActions(root, d);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations });
+    const detail = new DetailRenderer(regions.detail);
+    d.onState((st) => detail.render(st));
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'F' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'F', body: '説明' });
+    return { root, d };
+  }
+
+  it('🔴 0 件(ノートもフォルダも)のときだけ在る ── 字と action は右クリックの表から引いた物と同じ', async () => {
+    const { root } = wiredEmpty([meta('F', 1, '空', 'folder')], []);
+    await settle();
+    // ⚠ 空振り防止 ── 概要の器そのものが描かれている
+    expect(overviewOf(root), '前提:概要が出ていない').not.toBeNull();
+    const btn = root.querySelector<HTMLElement>(CREATE);
+    expect(btn, '空のフォルダに作る入口が出ていない').not.toBeNull();
+    expect(btn!.textContent).toBe(menuItem.label);
+    expect(btn!.textContent).toBe('この中に新しいノートを作る');
+    expect(btn!.getAttribute('data-pkc-action'), '右クリックと別の action を撃っている').toBe(menuItem.action);
+  });
+
+  it('🔴 1 件でも在れば出さない(ノート 1 件 / フォルダ 1 件のどちらでも)', async () => {
+    for (const child of [meta('c', 2, '子'), meta('g', 2, '孫', 'folder')]) {
+      document.body.innerHTML = '';
+      const { root } = wiredEmpty([meta('F', 1, '資料', 'folder'), child], [rel('r1', 'F', child.lid)]);
+      await settle();
+      expect(overviewOf(root), '前提:概要が出ていない').not.toBeNull();
+      expect(root.querySelector(CREATE), `${child.archetype} が 1 件在るのに入口が出ている`).toBeNull();
+    }
+  });
+
+  it('🔴 押すと、このフォルダの中にノートが 1 件でき、そのまま編集に入る(右クリックと同じ動き)', async () => {
+    const { root, d } = wiredEmpty([meta('F', 1, '空', 'folder')], []);
+    await settle();
+    expect(d.getState().entryMetas.size, '前提:最初から子が居る').toBe(1);
+    root.querySelector<HTMLElement>(CREATE)!.click();
+    const st = d.getState();
+    expect(st.entryMetas.size, '押してもノートが増えない(dead click)').toBe(2);
+    const made = [...st.entryMetas.values()].find((m) => m.lid !== 'F')!;
+    expect(made.archetype, '種類が text でない').toBe('text');
+    expect(
+      st.relations.some((r) => r.kind === 'structural' && r.fromLid === 'F' && r.toLid === made.lid),
+      '作ったノートがこのフォルダの中に入っていない',
+    ).toBe(true);
+    expect(st.selectedLid).toBe(made.lid);
+    expect(st.phase, '作ったのに編集に入らない').toBe('editing');
   });
 });

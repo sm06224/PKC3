@@ -36,6 +36,7 @@ import {
   applyTagsToBody,
   applyTaskRun,
   taskRunNotice,
+  colorRewriteNotice,
 } from '@features/markdown/body-rewrite';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
@@ -3483,6 +3484,17 @@ export function connectStoreEffects(
                 archived: ext.archived,
               });
             stamp(ev.lid, stamps);
+            /**
+             * 🔴 **色を選び直した回は、元と新しい綴りを言う**(#1254 §2 欠陥 5)。
+             * ⚠ **本文へ入った後**にだけ言う(ここは `persistEntry` が通り、競合でも落ちてもいない
+             *   枝)── 書けなかった回に「書き換えました」と言わない。同じ色を選んだ回は上の
+             *   `newBody === body` で既に返っている(言う物が無い)。
+             */
+            if (ev.rewrite.kind === 'color' && !disposed)
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message: colorRewriteNotice(ev.rewrite.from, ev.rewrite.to),
+              });
             if (run !== null && runTo !== null && run.skipped.repeat > 0 && !disposed)
               dispatcher.dispatch({ type: 'OP_NOTICE', message: taskRunNotice(run, runTo) });
           } catch (e) {

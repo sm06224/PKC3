@@ -6370,7 +6370,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-group'] [data-pkc-field='filer-flatten'] {
   margin-inline-start: 0;
 }
-[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-note'] {
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-note'],
+[data-pkc-region='filer-breadcrumb'] [data-pkc-field='filer-flatten-recent'] {
   color: var(--muted);
 }
 [data-pkc-region='filer-table'] {

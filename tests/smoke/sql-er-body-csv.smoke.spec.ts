@@ -117,6 +117,55 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await expect(embedHost.locator('tbody tr'), '答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
   await expect(embedHost.locator('tbody td')).toHaveText(['みかん', '5', 'りんご', '3']);
   await expect(embedHost.locator('thead th')).toHaveText(['品名', '数']);
+  /**
+   * 🔴 **答えの表にも ⧉(コピー)が付く。並べ替えは付かない**(#1254 §3 改善 E)。
+   * ⚠ 新しい起動は足さない ── この道中で見る。実ブラウザで見るのは unit が持てない 3 つ:
+   * ① 触れたときに ⧉ が**見えて**、表の右上に在る(隠れたまま・離れた所に浮かない)
+   * ② **本物の clipboard** に、いま画面に出ている行が表計算に貼れる形(TSV)で入る
+   *    (⧉ の字・「引いています」・並べ替えの印は混ざらない)
+   * ③ 対照群: 本文の csv の表には並べ替えの押し所が在り、答えの表には無い
+   */
+  const answerTable = embedHost.locator('table');
+  const answerCopy = embedHost.locator('[data-pkc-action="copy-md-block"][data-pkc-copy-kind="table"]');
+  await expect(answerCopy, '答えの表に ⧉ が無い').toHaveCount(1);
+  await expect(embedHost.locator('th[role="button"]'), '答えの表に並べ替えの押し所が付いた').toHaveCount(0);
+  await expect(embedHost.locator('[data-pkc-copy-menu]'), '答えの表に ▾ が付いた').toHaveCount(0);
+  expect(
+    await bodyTable.first().locator('th[role="button"]').count(),
+    '対照群:本文の csv の表に並べ替えの押し所が無い(前提が崩れている)',
+  ).toBeGreaterThan(0);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await answerTable.hover();
+  await expect(answerCopy, '触れても ⧉ が見えない').toHaveCSS('opacity', '1');
+  /**
+   * ⧉ の位置は**本文の表(csv の表)の ⧉ と同じ作法**(表の右上の隅に重なる)。⚠ 絶対値でなく
+   * **表の右上の隅からの差**を、本文の表と比べる(表の余白は面で違うが、器の規則は同じ 1 組)。
+   */
+  const copyPos = await page.evaluate(() => {
+    const off = (table: Element | null, btn: Element | null) => {
+      const t = table!.getBoundingClientRect();
+      const b = btn!.getBoundingClientRect();
+      return { dx: Math.round(t.right - b.right), dy: Math.round(b.top - t.top) };
+    };
+    return {
+      answer: off(
+        document.querySelector('[data-pkc-sql-embed] table'),
+        document.querySelector('[data-pkc-sql-embed] [data-pkc-action="copy-md-block"]'),
+      ),
+      body: off(
+        document.querySelector('[data-pkc-render-lang="csv"] table'),
+        document.querySelector('[data-pkc-render-lang="csv"] [data-pkc-action="copy-md-block"]'),
+      ),
+    };
+  });
+  expect(
+    Math.abs(copyPos.answer.dx - copyPos.body.dx) <= 3 && Math.abs(copyPos.answer.dy - copyPos.body.dy) <= 6,
+    `⧉ が答えの表の隅に無い(本文の表と違う: ${JSON.stringify(copyPos)})`,
+  ).toBe(true);
+  await answerCopy.click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()), { message: '答えの表が clipboard に入らない' })
+    .toBe('品名\t数\nみかん\t5\nりんご\t3');
   // 🔴 コード枠の**下**にあり、見えている(0px の箱は「出ている」と言えない)
   const frame = embedHost.locator('xpath=..');
   const codeBox = (await frame.locator('pre').boundingBox())!;

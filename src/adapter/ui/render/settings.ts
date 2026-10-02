@@ -767,6 +767,15 @@ export class SettingsRenderer {
     dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
     editDl.append(dlt, dld);
     /**
+     * 🔴 **この設定を切ると、すぐ下の「日付までの日数」も出なくなる**(#1254 §2 欠陥 7。
+     *   Gemini 裁定 = A)。⚠ 添え字は押せる日付(`.pkc-date-link`)にしか差さない
+     *   (`relative-days.ts`)ので、**日数が入のままでも、日付が押せなければ何も出ない**。
+     * 🔑 切り替えた瞬間に、日数の欄の説明が出入りする(`syncRelativeDaysPrereq`)。
+     *   ⚠ checkbox の**押した後の値**を直に読む(binder が保存へ書くより先に来るため、
+     *   保存を読むと 1 手遅れる)。
+     */
+    dlcheck.addEventListener('change', () => this.syncRelativeDaysPrereq());
+    /**
      * 🔴 **日付の右に「あと3日」「5日前」を薄く添えるか**(#1225)。
      *
      * ⚠ **既定は入**(`date-links` と同じ ── 見え方が変わるので切れる)。
@@ -1701,6 +1710,30 @@ export class SettingsRenderer {
   private syncRelativeDays(): void {
     const box = this.region.querySelector<HTMLInputElement>('[data-pkc-field="relative-days"]');
     if (box) box.checked = this.relativeDays.enabled();
+    this.syncRelativeDaysPrereq();
+  }
+
+  /**
+   * 🔴 **日付を押せる設定が切のときだけ、日数の欄に前提を添える**(#1254 §2 欠陥 7)。
+   * ⚠ 入のときは**説明ごと取り除く**(出し入れは要素の有無 ── 隠すだけだと、字を読む検査が
+   *   常に満たされる)。⚠ 日数の checkbox の入切は見ない(裁定は「日付を押せる設定が切のとき」の
+   *   1 条件。日数を入にし直した瞬間に読み返しても分かるよう、前提は常に添える)。
+   */
+  private syncRelativeDaysPrereq(): void {
+    const rd = this.region.querySelector<HTMLInputElement>('[data-pkc-field="relative-days"]');
+    const dl = this.region.querySelector<HTMLInputElement>('[data-pkc-field="date-links"]');
+    const dd = rd?.closest('dd') ?? null;
+    if (dd === null || dl === null) return;
+    const mark = '[data-pkc-region="relative-days-prereq"]';
+    const existing = dd.querySelector(mark);
+    if (dl.checked) {
+      existing?.remove();
+      return;
+    }
+    if (existing !== null) return;
+    const note = buildSettingsNote('日付を押せるようにすると出ます(上の「本文の日付」を入にしてください)');
+    note.setAttribute('data-pkc-region', 'relative-days-prereq');
+    dd.append(note);
   }
 
   private syncColorSwatch(): void {

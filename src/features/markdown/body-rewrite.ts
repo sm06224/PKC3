@@ -607,6 +607,22 @@ export function taskRunNotice(run: TaskRunApplied, to: 'done' | 'open'): string 
   return parts.join(' / ');
 }
 
+/**
+ * 🔴 **色を選び直した回の知らせ**(#1254 §2 欠陥 5)。
+ *
+ * > user の物語:見本を押して色を選んだ。本文の字が上書きされたが、**元の色を覚えていなければ
+ * >   戻せない**(履歴に積まない書換 = 印の 1 件と同じ amend)。だから**元と新しい綴りを
+ * >   そのまま**言う ── これを見れば、同じ見本を押して元の色を選び直せる。
+ *
+ * ⚠ 綴りは**加工しない**(`from` / `to` は 6 桁小文字だが、将来綴りが広がっても大文字小文字を
+ *   変えない)。⚠ **同じ色を選んだ回はここへ来ない** ── 本文が 1 byte も変わらないので、呼び側
+ *   (`store-effects.ts`)が書く前に返る(言う物が無い)。ここで二重に守らない(守ると、
+ *   呼び側の「色の書換だけが言う」の門を外しても同じ結果になり、その門を誰も守れなくなる)。
+ */
+export function colorRewriteNotice(from: string, to: string): string {
+  return `${from} → ${to} に書き換えました`;
+}
+
 /** タグ 1 つに何が起きたか(#640)。⚠ `wrote` 以外は**本文が変わっていない**。 */
 export type TagOutcome = 'wrote' | 'unchanged' | 'limit' | 'invalid';
 

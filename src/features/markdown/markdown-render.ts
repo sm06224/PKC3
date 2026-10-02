@@ -498,7 +498,7 @@ function buildRenderableBlockHtml(
   }
   const sourceHtml = `<pre class="pkc-render-source"><code class="language-${fence.lang}">${highlightCode(content, fence.lang)}</code></pre>`;
   return `<div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="${fence.lang}" data-pkc-render-mode="${fence.mode}"${sourceLineAttrs}>` +
-    `<button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="code" type="button" aria-label="コピー" title="コピー">⧉</button>` +
+    copyButtonHtml('code') +
     // ⚠ 表を出す囲み(csv / tsv / psv)だけ ── 図や HTML には選べる形が無い
     (detectCsvLang(fence.lang) !== null ? copyMenuButtonHtml() : '') +
     toggleHtml +
@@ -882,7 +882,7 @@ md.renderer.rules.table_open = function (tokens, idx, options, env, self) {
   const sourceLineAttrs = collectSourceLineAttrs(token);
   // 🔴 **csv の表と同じ口を出す**(#708 段①)── 直す前は csv の囲みにしか
   //    形を選ぶ道が無く、同じ「表」なのに持ち出し方が違っていた
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="table" type="button" aria-label="コピー" title="コピー">⧉</button>${copyMenuButtonHtml()}${cellTapHintHtml(env)}${self.renderToken(tokens, idx, options)}`;
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="table"${sourceLineAttrs}>${copyButtonHtml('table')}${copyMenuButtonHtml()}${cellTapHintHtml(env)}${self.renderToken(tokens, idx, options)}`;
 };
 md.renderer.rules.table_close = function (tokens, idx, options, _env, self) {
   return `${self.renderToken(tokens, idx, options)}</div>`;
@@ -1067,6 +1067,17 @@ function editCodeBlockButtonHtml(): string {
 }
 
 /**
+ * 🔴 **⧉(コピー)のボタン 1 つ**(#1254 §3 改善 E で 1 本へ寄せた)。
+ *
+ * ⚠ コード枠・本文の表・**SQL の答えの表**(`sql-embed-hydrate.ts`)が**同じ 1 つ**を使う ──
+ *   押した結果は `copy-md-block`(`copy-md-block.ts`)の 1 本で、ここで綴りを 3 か所に書くと
+ *   片方だけ `aria-label` や印が食い違う(§7)。⚠ 出力は寄せる前と 1 バイトも違わない。
+ */
+export function copyButtonHtml(kind: 'code' | 'table'): string {
+  return `<button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>`;
+}
+
+/**
  * PR #196: wrap a code block's HTML in a copy-button host. The button
  * carries `data-pkc-action="copy-md-block"` so the existing
  * `action-binder` event delegation picks it up. The host element is
@@ -1094,7 +1105,7 @@ function wrapWithCopyButton(
   trailHtml: string = '',
 ): string {
   const editBtn = kind === 'code' && interactiveCodeBlocks ? editCodeBlockButtonHtml() : '';
-  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}><button class="pkc-md-copy-btn" data-pkc-action="copy-md-block" data-pkc-copy-kind="${kind}" type="button" aria-label="コピー" title="コピー">⧉</button>${editBtn}${innerHtml}${trailHtml}</div>`;
+  return `<div class="pkc-md-block" data-pkc-md-block-kind="${kind}"${extraAttrs}>${copyButtonHtml(kind)}${editBtn}${innerHtml}${trailHtml}</div>`;
 }
 
 /**

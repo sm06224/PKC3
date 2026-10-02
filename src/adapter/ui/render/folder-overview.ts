@@ -14,6 +14,7 @@
 import type { EntryMeta } from '@core/model/entry-meta';
 import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
 import { archetypeLabel } from '@features/flavor/archetype-label';
+import { ENTRY_ACTION_LABELS } from '@features/entry-actions';
 import { overviewMore, overviewSummary, type FolderOverview } from '@features/relation/folder-overview';
 import { ARCHETYPE_ICONS, iconSpan } from './icons';
 
@@ -34,6 +35,27 @@ export function buildFolderOverview(
   summary.setAttribute('data-pkc-field', 'overview-summary');
   summary.textContent = overviewSummary(overview);
   box.append(summary);
+
+  /**
+   * 🔴 **空のフォルダには、作る入口を 1 つ置く**(#1254 §3 改善 A。Gemini 裁定 = a)。
+   *
+   * > user の物語:空のフォルダを押した。「直下 ノート 0 件 / フォルダ 0 件」と出るだけで、
+   * > **何をすればよいか**が画面に無かった(作る入口は行の右クリックか Shift+F4 だけ)。
+   *
+   * ⚠ **押したときの動きは行の右クリックの「この中に新しいノートを作る」と同じ 1 本**
+   *   (`create-in-folder`。新しい action を作らない ── 字も `ENTRY_ACTION_LABELS` から引く。§7)。
+   *   受け手は押した所から lid を引き、無ければ**いま選んでいるフォルダ**(= この概要の持ち主)。
+   * ⚠ 出すのは**ノートもフォルダも 0 件のときだけ**(1 件でも在れば、左の列の「+ ノート」と
+   *   右クリックがあり、概要の行を押す邪魔にしない)。
+   */
+  if (overview.notes === 0 && overview.folders === 0) {
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.setAttribute('data-pkc-action', 'create-in-folder');
+    create.setAttribute('data-pkc-field', 'overview-create');
+    create.textContent = ENTRY_ACTION_LABELS['create-in-folder'] ?? '';
+    box.append(create);
+  }
 
   if (overview.rows.length === 0) return box;
 
