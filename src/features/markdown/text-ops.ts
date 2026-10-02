@@ -19,6 +19,7 @@
 
 import { parseCsv } from './csv-table';
 import { formatMarkdownLink } from './link-format';
+import { lineStart } from './line-start';
 import { tableToMarkdown } from './table-copy';
 
 export interface TextSelection {
@@ -63,7 +64,7 @@ function stripMark(line: string): string {
 
 /** 選択が触れている行の範囲(行頭・行末まで広げる)。 */
 function lineRange(text: string, start: number, end: number): [number, number] {
-  const from = text.lastIndexOf('\n', start - 1) + 1;
+  const from = lineStart(text, start);
   const nl = text.indexOf('\n', end);
   return [from, nl === -1 ? text.length : nl];
 }
@@ -458,7 +459,7 @@ function tryUnwrapBlock(
   // ② 選択は中身だけ(直前の行が開き・直後の行がその直後の閉じ)
   if (a > 0 && text[a - 1] === '\n' && b < text.length && text[b] === '\n') {
     const prevEnd = a - 1;
-    const prevStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+    const prevStart = lineStart(text, prevEnd);
     const nextStart = b + 1;
     if (isAdjacentPair(roleAt(prevStart), roleAt(nextStart))) {
       const nlAfter = text.indexOf('\n', nextStart);
@@ -955,8 +956,8 @@ const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
  */
 export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   const { text, start, end } = sel;
-  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
-  const prefix = text.slice(lineStart, start);
+  const lineHead = lineStart(text, start);
+  const prefix = text.slice(lineHead, start);
   const nl = text.indexOf('\n', end);
   const rest = text.slice(end, nl === -1 ? text.length : nl);
   const block = BLOCK_MARKERS[key];

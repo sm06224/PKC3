@@ -168,6 +168,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-02-leading-blank-line',
+    title: '本文が空行で始まるとき、先頭の行を取り違える 3 つの操作を直しました',
+    items: [
+      '本文が空行で始まるとき、行頭記号(見出し・箇条書きなど)の付け外し、コードブロックで囲む・外す、SQL 欄の ↑ での履歴の呼び出しが、先頭の行を取り違えて動いていたのを直しました。',
+      '括弧の自動閉じ・引用・表・行の計算は影響がありませんでした。',
+    ],
+  },
+  {
     id: '2026-10-02-sql-embed',
     title: '本文に SQL の答えを表で埋め込めるようになりました',
     items: [
