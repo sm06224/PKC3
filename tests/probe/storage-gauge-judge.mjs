@@ -64,6 +64,29 @@ export function problemsOfPhaseA(a) {
 }
 
 /**
+ * 🔴 **索引の片づけ(`optimizeIndexes`)を製品の op で打った回を、読んでよいか**(#999 段③)。
+ *
+ * 守っているのは 4 つ(判定規則は結果を見る前に置いた ── 後から緩めない):
+ * - **1 秒以内に返る**(往復。裁定の根拠は「0.4 秒で害が無い」)
+ * - **畳む前に複数段が在った**(1 段なら「畳んだ」と言えない = 空振り)→ 畳んだ後は 1 段
+ * - **空きは増えるか同じ**(縮めていない ── VACUUM を打っていない)
+ * - **file は縮まない**
+ * @param {{ roundTripMs: number, result: { before: object, after: object } } | undefined} g
+ * @returns {string[]} 読めない / 満たさない理由(空なら読んでよい)
+ */
+export function problemsOfOptimizeOp(g) {
+  const out = [];
+  if (!g || !g.result) return ['optimizeIndexes を打てていない'];
+  const { before, after } = g.result;
+  if (!(g.roundTripMs <= 1000)) out.push(`往復が 1 秒を超えた: ${g.roundTripMs} ms`);
+  if (!(before.ftsSegments >= 2)) out.push(`前提が崩れている(畳む前の段が ${before.ftsSegments}。複数段が要る)`);
+  if (after.ftsSegments !== 1) out.push(`畳まれていない(畳んだ後の段が ${after.ftsSegments})`);
+  if (!(after.freeBytes >= before.freeBytes)) out.push('空きが減った(VACUUM を打っている)');
+  if (!(after.fileBytes >= before.fileBytes)) out.push('file が縮んだ(VACUUM を打っている)');
+  return out;
+}
+
+/**
  * 検索の指紋(rowid が動いていないか)を比べる。
  * @returns {{ same: boolean, diffs: string[] }}
  */

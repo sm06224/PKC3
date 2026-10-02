@@ -188,6 +188,10 @@ describe('起動の検めは、壊れた DB で壊れを名指しし、印を残
     }
   });
 
+  it('🔴 旗が立った後は、索引の片づけ(自動で打つ書き込み)も断られる(#999 段③)', async () => {
+    await expect(request({ op: 'optimizeIndexes' })).rejects.toThrow(CORRUPT_REFUSAL);
+  });
+
   it('🔴 旗が立った後は、印を残す書き込みだけ断られる', async () => {
     await expect(request({ op: 'integrityStamp', at: '2026-09-20T00:00:00.000Z' })).rejects.toThrow(
       CORRUPT_REFUSAL,

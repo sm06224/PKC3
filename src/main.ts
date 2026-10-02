@@ -101,6 +101,7 @@ import {
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
 import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+import { AutoOptimizer } from '@adapter/platform/storage/auto-optimize';
 // 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
 import {
   readSqlLocalFileBytes,
@@ -798,7 +799,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
     window.addEventListener('pagehide', flush);
   };
-  const persistHook = portable ? { onMutation: (): void => persist?.touch() } : {};
+  /**
+   * 🔴 **索引の片づけの係**(#999 段③)。⚠ 組むのは effect 層ができた後(`storeEffects` の下)── ここは
+   *   **書込の通知を渡す口だけ**を先に置く(host は何度か作られる: 起動 / 待機からの昇格)。
+   * ⚠ 数える場所は `StoreProxyHost.onMutation` の 1 か所(自タブの書込も follower の書込も通る)。
+   */
+  let autoOptimizer: AutoOptimizer | null = null;
+  const persistHook = {
+    onMutation: (): void => {
+      persist?.touch();
+      autoOptimizer?.noteWrite();
+    },
+  };
   const immediateHeld = await lease.immediate;
 
   /**
@@ -4369,6 +4381,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     runDuckDbSql: (input) => duckDbRunner.run(input),
   });
+  /**
+   * 🔴 **索引の片づけを、書込が落ち着いたときに自動で打つ**(#999 段③。Gemini 裁定 A)。
+   *
+   * ⚠ **判断は `features/storage/auto-optimize.ts` と `AutoOptimizer`** ── この file は
+   *   どの test からも実行されない(CLAUDE.md §2)ので、ここは**繋ぐだけ**。
+   * ⚠ 可搬の単一 HTML(`portable`)では組まない ── DB は器の中の写しで、保存の単位が違う。
+   * ⚠ **VACUUM は打たない**(#1218)。切る口も作らない(0.4 秒で害が無い)。
+   */
+  if (portable === null) {
+    autoOptimizer = new AutoOptimizer({
+      holdsWriterLease: () => writerHolder,
+      // 🔑 書込と同じ 1 本の列に載せる(storeEffects が無い間は直に打つ ── 起きない想定)
+      run: (job) => (storeEffects ? storeEffects.run(job) : job()),
+      optimize: () => client.request({ op: 'optimizeIndexes' }),
+      post: (m) => appMessagePost.post(m),
+    });
+  }
   /**
    * 🔴 **一式が入っているかを 1 度だけ読み、控えに写す**(#88 / O3-c)。
    *
