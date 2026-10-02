@@ -235,10 +235,13 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
   });
 
   it('main.ts: 書込の途中の巻き戻しが働いていないとき、本体のタブだけが積み、画面下の 1 行も出す(#1218)', () => {
-    expect(main).toMatch(/if \(followerConn === null\) \{\s*const lockCaution = reservedLockCaution\(init\);/);
+    expect(main).toMatch(/if \(followerConn === null\) announceReservedLock\(init\);/);
     expect(main).toMatch(
-      /if \(lockCaution !== null\) \{\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text\);/,
+      /const announceReservedLock = \(i: InitResult\): void => \{\s*const lockCaution = reservedLockCaution\(i\);\s*if \(lockCaution === null\) return;\s*appMessagePost\.post\(lockCaution\);\s*showStatus\(lockCaution\.text\);/,
     );
+    // 🔴 昇格したタブも、自分の worker を開いた直後に 1 回言う(2 枚目のまま = followerConn は言わない)
+    expect(main).toMatch(/armPersist\(r\.client\);\s*announceReservedLock\(r\.init\);\s*const host = new StoreProxyHost/);
+    expect((main.match(/announceReservedLock\(/g) ?? []).length, '呼び口は 起動 / 昇格 の 2 つだけ').toBe(2);
   });
 
   it('binder.ts: 断り文は正本の定数から出し、字を 2 か所に書かない', () => {

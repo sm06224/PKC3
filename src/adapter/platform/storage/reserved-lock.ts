@@ -52,7 +52,7 @@ export interface ReservedLockSqlite {
     peek32(p: number): number;
     poke32(p: number, v: number): void;
     installFunction(sig: string, fn: (pFile: number, pRes: number) => number): number;
-    functionEntry(p: number): ((pFile: number, pRes: number) => number) | undefined;
+    functionEntry(p: number): ((pFile: number, pRes: number) => number) | null | undefined;
   };
 }
 
@@ -74,14 +74,16 @@ export function reservedLockInstallCount(): number {
 
 /**
  * 開いたばかりの SAHPool の接続について、`xCheckReservedLock` を 0 を返す関数にする。
- * @param dbPointer `db.pointer`(`OpfsSAHPoolDb` の接続)
+ * @param db 開いたばかりの接続(`OpfsSAHPoolDb`)。⚠ `.pointer` はここで読む ── 呼び側に取らせると、
+ *   取り違え(0 など)が node の unit に届かない(OPFS が無く、この経路は実ブラウザでしか通らない)
  */
-export function fixReservedLock(sqlite3: ReservedLockSqlite, dbPointer: number): ReservedLockOutcome {
+export function fixReservedLock(sqlite3: ReservedLockSqlite, db: { pointer: number }): ReservedLockOutcome {
   const { capi, wasm } = sqlite3;
   const failed: ReservedLockOutcome = { reservedLockPatched: false, reservedLockUpstreamFixed: false };
-  const pOut = wasm.alloc(8);
+  let pOut = 0;
   try {
-    const rc = capi.sqlite3_file_control(dbPointer, 'main', capi.SQLITE_FCNTL_FILE_POINTER, pOut);
+    pOut = wasm.alloc(8);
+    const rc = capi.sqlite3_file_control(db.pointer, 'main', capi.SQLITE_FCNTL_FILE_POINTER, pOut);
     if (rc !== 0) return failed;
     const pFile = wasm.peekPtr(pOut);
     if (!pFile) return failed;
@@ -98,7 +100,8 @@ export function fixReservedLock(sqlite3: ReservedLockSqlite, dbPointer: number):
 
     // 🔑 いまの関数が本当に 1 を返すか、1 度呼んで確かめる(上流が直した日に二重にしない)
     const current = wasm.functionEntry(methods.$xCheckReservedLock);
-    if (current === undefined) return failed;
+    // ⚠ 上流は「範囲内で枠が空なら `null`」を返す(`undefined` だけ弾くと `null` を呼んで落ちる)
+    if (typeof current !== 'function') return failed;
     wasm.poke32(pOut, 7); // 呼ぶ前の値と区別する
     current(pFile, pOut);
     if (wasm.peek32(pOut) === 0) {
@@ -109,6 +112,7 @@ export function fixReservedLock(sqlite3: ReservedLockSqlite, dbPointer: number):
     if (fn === undefined) {
       fn = wasm.installFunction('i(pp)', (_pFile: number, pRes: number) => {
         wasm.poke32(pRes, 0);
+        // 🔴 戻り値の 0 は SQLITE_OK(答えの 0 とは別物)。1 = SQLITE_ERROR は hot journal の検査を失敗にする
         return 0;
       });
       installed.set(wasm, fn);
@@ -116,7 +120,19 @@ export function fixReservedLock(sqlite3: ReservedLockSqlite, dbPointer: number):
     }
     methods.$xCheckReservedLock = fn;
     return { reservedLockPatched: true, reservedLockUpstreamFixed: false };
+  } catch {
+    /**
+     * 🔴 **差し替えの失敗で、保存先を落とさない**。ここから例外が出ると、呼び側(worker の `init`)の
+     * OPFS を開く `try` の `catch` が `:memory:` へ退避してしまい、**保存が永続しなくなる**
+     * (しかも開いた接続は閉じられない)。当たらなかったことは `failed`(両方 false)で返し、
+     * main が「注意」として user に言う。
+     */
+    return failed;
   } finally {
-    wasm.dealloc(pOut);
+    try {
+      if (pOut) wasm.dealloc(pOut);
+    } catch {
+      /* 返せなかっただけ ── 8 byte。保存先を落とす理由にならない */
+    }
   }
 }

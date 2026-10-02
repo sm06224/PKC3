@@ -3768,9 +3768,9 @@ describe('入れ物ごと捨てる(#986 段③)', () => {
 });
 
 describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
-  /** `src/adapter/platform/storage/` の ts を全部(下の階層も)。 */
+  /** `src` の ts を全部(下の階層も)。⚠ storage/ だけだと、別の層に 2 か所目を書かれて素通りする。 */
   const storageSources = (): Array<{ path: string; code: string }> => {
-    const root = 'src/adapter/platform/storage';
+    const root = 'src';
     const out: Array<{ path: string; code: string }> = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -3790,14 +3790,32 @@ describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
    * ⚠ 注釈を落としてから数える(解説に綴りを書くと、自分の説明に満たされる)。
    *   空振り防止に「1 か所は在る」を併せて見る(0 件で緑にならない)。
    */
-  it('🔴 OpfsSAHPoolDb を作る箇所が storage/ に 1 つだけ(worker の init)', () => {
-    const hits = storageSources().filter((f) => /new\s+[\w.]*OpfsSAHPoolDb\s*\(/.test(f.code));
+  it('🔴 OpfsSAHPoolDb を作る箇所が src に 1 つだけ(worker の init)', () => {
+    // ⚠ `new` の綴り(`new (x).y.OpfsSAHPoolDb(` など)に頼らず、名前の出現そのもので数える
+    const hits = storageSources().filter((f) => /OpfsSAHPoolDb/.test(f.code));
     expect(hits.map((h) => h.path)).toEqual(['src/adapter/platform/storage/storage-worker.ts']);
-    const n = (hits[0]!.code.match(/new\s+[\w.]*OpfsSAHPoolDb\s*\(/g) ?? []).length;
+    const n = (hits[0]!.code.match(/OpfsSAHPoolDb/g) ?? []).length;
     expect(n, '接続を作る new が 2 つ以上ある').toBe(1);
   });
 
-  it('🔴 差し替えは「開いた直後・applySchema より前」に呼ぶ', () => {
+  /**
+   * ⚠ `oo1.DB('file:…?vfs=opfs-sahpool')` のような**別の綴りで OPFS の接続を作る道**も塞ぐ ──
+   *   そこで開いた接続は差し替えが当たらない。`:memory:` だけが他の作り方を許される。
+   */
+  it('🔴 oo1.DB / OpfsDb は :memory: だけ(vfs= の綴りで別の接続を作らない)', () => {
+    const all = storageSources();
+    expect(all.length, '走査が空振りしている').toBeGreaterThan(100);
+    const odd: string[] = [];
+    for (const f of all) {
+      for (const m of f.code.matchAll(/\boo1\.(?:DB|OpfsDb)\s*\(\s*([^)]*)\)/g)) {
+        if (m[1]!.trim() !== "':memory:'") odd.push(`${f.path}: ${m[0]}`);
+      }
+      if (/[?&]vfs=/.test(f.code)) odd.push(`${f.path}: vfs= の綴り`);
+    }
+    expect(odd).toEqual([]);
+  });
+
+  it('🔴 差し替えは「開いた直後・applySchema より前」に、開いた接続を渡して呼ぶ', () => {
     const code = codeOnly(
       readFileSync('src/adapter/platform/storage/storage-worker.ts', 'utf8'),
     );
@@ -3807,6 +3825,11 @@ describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
     expect(open, '接続を作る行が見つからない').toBeGreaterThan(0);
     expect(fix, '差し替えを呼ぶ行が見つからない').toBeGreaterThan(open);
     expect(schema, 'applySchema が見つからない').toBeGreaterThan(fix);
+    // 🔴 引数は「sqlite3 の口」→「いま開いた接続(opened)」の順 ── この経路は node で通らない
+    //   (OPFS が無い)ので、取り違え(別の変数・0)は実ブラウザの probe まで見えない
+    expect(code).toMatch(
+      /=\s*fixReservedLock\(\s*sqlite3\s+as\s+unknown\s+as\s+ReservedLockSqlite\s*,\s*opened\s+as\s+unknown\s+as\s*\{\s*pointer:\s*number\s*\}\s*,?\s*\)/,
+    );
     // 結果を init の返事へ載せている(捨てていない)
     expect(code).toMatch(/\.\.\.reservedLock\b/);
   });

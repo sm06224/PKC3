@@ -367,7 +367,7 @@ async function init(
        */
       reservedLock = fixReservedLock(
         sqlite3 as unknown as ReservedLockSqlite,
-        (opened as unknown as { pointer: number }).pointer,
+        opened as unknown as { pointer: number },
       );
       endOpeningStorage(true); // 開けた ── 控えは捨てる
     } catch (e) {

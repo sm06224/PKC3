@@ -25,8 +25,9 @@ import {
 interface Rig {
   sqlite3: ReservedLockSqlite;
   /** 接続(db pointer)→ file pointer → 表。 */
-  connect(opts?: { rc?: number; noFile?: boolean; noMethods?: boolean; shared?: Table }): number;
-  newTable(upstreamAnswer: 0 | 1): Table;
+  connect(opts?: { rc?: number; noFile?: boolean; noMethods?: boolean; shared?: Table }): { pointer: number };
+  /** `silent` = pOut に何も書かない上流の関数(実機の alloc は 0 埋めではない)。 */
+  newTable(upstreamAnswer: 0 | 1 | 'silent'): Table;
   allocated: () => number;
   /** 最後に current が受け取った pFile。 */
   lastCalledWith: () => number | null;
@@ -36,8 +37,10 @@ interface Table {
   $xCheckReservedLock: number;
 }
 
-function makeRig(): Rig {
+function makeRig(opts: { entry?: 'null'; installThrows?: boolean } = {}): Rig {
   const heap = new Map<number, number>();
+  // file ポインタの置き場は 32 bit の窓(`peek32`)とは別 ── 窓が 0 のまま残る形を作る
+  const ptrs = new Map<number, number>();
   const fns = new Map<number, (pFile: number, pRes: number) => number>();
   const tables = new Map<number, Table>();
   const dbs = new Map<number, { rc: number; file: number }>();
@@ -54,7 +57,7 @@ function makeRig(): Rig {
         const d = dbs.get(pDb);
         if (d === undefined || name !== 'main' || op !== 7) return 1;
         if (d.rc !== 0) return d.rc;
-        heap.set(pArg, d.file);
+        ptrs.set(pArg, d.file);
         return 0;
       },
       sqlite3_file: class {
@@ -90,17 +93,19 @@ function makeRig(): Rig {
       dealloc: () => {
         live--;
       },
-      peekPtr: (p) => heap.get(p) ?? 0,
+      peekPtr: (p) => ptrs.get(p) ?? 0,
       peek32: (p) => heap.get(p) ?? 0,
       poke32: (p, v) => {
         heap.set(p, v);
       },
       installFunction: (_sig, fn) => {
+        // 最初の 1 本(上流の関数を置く newTable)は通し、差し替えの install だけ投げさせる
+        if (opts.installThrows && fns.size >= 1) throw new Error('install できない');
         const p = fresh();
         fns.set(p, fn);
         return p;
       },
-      functionEntry: (p) => fns.get(p),
+      functionEntry: (p) => (opts.entry === 'null' ? null : fns.get(p)),
     },
   };
 
@@ -110,7 +115,7 @@ function makeRig(): Rig {
       const ptr = fresh();
       const fp = sqlite3.wasm.installFunction('i(pp)', (pFile, pRes) => {
         lastFile = pFile;
-        sqlite3.wasm.poke32(pRes, upstreamAnswer);
+        if (upstreamAnswer !== 'silent') sqlite3.wasm.poke32(pRes, upstreamAnswer);
         return 0;
       });
       const t: Table = { ptr, $xCheckReservedLock: fp };
@@ -123,7 +128,7 @@ function makeRig(): Rig {
       const table = opts.shared ?? this.newTable(1);
       files.set(filePtr, { pMethods: opts.noMethods ? 0 : table.ptr });
       dbs.set(dbPtr, { rc: opts.rc ?? 0, file: opts.noFile ? 0 : filePtr });
-      return dbPtr;
+      return { pointer: dbPtr };
     },
     allocated: () => live,
     lastCalledWith: () => lastFile,
@@ -141,7 +146,8 @@ describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
     // 替わった関数を実際に呼び、答えが 0 であること(「替えた」だけでは別の関数かもしれない)
     const fn = rig.sqlite3.wasm.functionEntry(table.$xCheckReservedLock)!;
     rig.sqlite3.wasm.poke32(5, 9);
-    fn(1, 5);
+    // ⚠ 戻り値の 0 は SQLITE_OK(答えの 0 とは別)。1 = SQLITE_ERROR は hot journal の検査を失敗にする
+    expect(fn(1, 5), '戻り値が SQLITE_OK ではない').toBe(0);
     expect(rig.sqlite3.wasm.peek32(5)).toBe(0);
     // 確かめに呼んだ上流の関数は、空の pFile ではなく本物の file ポインタを受けた
     expect(rig.lastCalledWith(), '上流の関数に file ポインタを渡していない').toBeGreaterThan(0);
@@ -184,6 +190,53 @@ describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
     expect(table.$xCheckReservedLock, '直っている関数を差し替えた').toBe(before);
     expect(reservedLockInstallCount() - n0).toBe(0);
     expect(rig.allocated()).toBe(0);
+  });
+
+  it('🔴 上流の関数が pOut に何も書かなくても、「上流が直した」と読まない(0 の取り残しを答えにしない)', () => {
+    const rig = makeRig();
+    const table = rig.newTable('silent');
+    const out = fixReservedLock(rig.sqlite3, rig.connect({ shared: table }));
+    // poke32(7) を消すと、未初期化の 0 を「上流が 0 を返した」と読んで UpstreamFixed になる
+    expect(out).toEqual({ reservedLockPatched: true, reservedLockUpstreamFixed: false });
+  });
+
+  describe('🔴 例外を投げない(投げると worker の init が :memory: へ退避し、保存が永続しなくなる)', () => {
+    it('functionEntry が null を返す(上流は「枠が空なら null」)', () => {
+      const rig = makeRig({ entry: 'null' });
+      const table = rig.newTable(1);
+      const before = table.$xCheckReservedLock;
+      let out: ReturnType<typeof fixReservedLock> | undefined;
+      expect(() => {
+        out = fixReservedLock(rig.sqlite3, rig.connect({ shared: table }));
+      }).not.toThrow();
+      expect(out).toEqual({ reservedLockPatched: false, reservedLockUpstreamFixed: false });
+      expect(table.$xCheckReservedLock, '確かめられないのに差し替えた').toBe(before);
+      expect(rig.allocated()).toBe(0);
+    });
+
+    it('installFunction が投げる(差し替えの途中の失敗)', () => {
+      const rig = makeRig({ installThrows: true });
+      const table = rig.newTable(1);
+      const before = table.$xCheckReservedLock;
+      let out: ReturnType<typeof fixReservedLock> | undefined;
+      expect(() => {
+        out = fixReservedLock(rig.sqlite3, rig.connect({ shared: table }));
+      }).not.toThrow();
+      expect(out).toEqual({ reservedLockPatched: false, reservedLockUpstreamFixed: false });
+      expect(table.$xCheckReservedLock).toBe(before);
+      expect(rig.allocated(), '例外でも確保した 8 byte を返す').toBe(0);
+    });
+
+    it('接続の .pointer を file_control へ渡す(0 や別の値を渡さない)', () => {
+      const rig = makeRig();
+      const db = rig.connect();
+      // 取り違えた pointer では file が引けず、失敗(両方 false)になる
+      expect(fixReservedLock(rig.sqlite3, { pointer: 0 })).toEqual({
+        reservedLockPatched: false,
+        reservedLockUpstreamFixed: false,
+      });
+      expect(fixReservedLock(rig.sqlite3, db).reservedLockPatched).toBe(true);
+    });
   });
 
   describe('🔴 当たらなかった枝は、両方 false で返す(黙って patched とは言わない)', () => {

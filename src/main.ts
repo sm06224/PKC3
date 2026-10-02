@@ -1903,6 +1903,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null });
     }, 300);
   };
+  /**
+   * 🔴 **書込の途中の巻き戻しが働いていないとき、注意を積む**(#1218 F1)。⚠ 判断は
+   * `reservedLockCaution` が持つ ── ここは積む・出すだけ(この file はどの test からも走らない)。
+   * 呼ぶのは **自分の worker を開いた直後の 1 回**だけ(起動したタブ / 2 枚目から本体に昇格したタブ)。
+   * ⚠ 2 枚目のまま(`followerConn`)の `init` は本体の写しなので呼ばない ── 二重に積まれる。
+   */
+  const announceReservedLock = (i: InitResult): void => {
+    const lockCaution = reservedLockCaution(i);
+    if (lockCaution === null) return;
+    appMessagePost.post(lockCaution);
+    showStatus(lockCaution.text);
+  };
   let unbindChanged = sync.onChanged(onRemoteChanged);
   // 解放は遷移 1 か所で束ねる(実体と test は edit-lock-release.ts)
   bindEditLockRelease(dispatcher, () => sync, cid);
@@ -1931,6 +1943,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           const r = await initStorage(portable);
           // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
           armPersist(r.client);
+          // 🔴 昇格したタブは自分の worker を開いた当事者 ── 起動のときの注意は通っていないのでここで 1 回
+          announceReservedLock(r.init);
           const host = new StoreProxyHost({
             client: r.client,
             init: r.init,
@@ -2541,13 +2555,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ **本体のタブだけ**が言う ── 2 枚目のタブ(`followerConn`)の `init` は本体の写しなので、
    *   言うと同じ注意が 2 度積まれる。
    */
-  if (followerConn === null) {
-    const lockCaution = reservedLockCaution(init);
-    if (lockCaution !== null) {
-      appMessagePost.post(lockCaution);
-      showStatus(lockCaution.text);
-    }
-  }
+  if (followerConn === null) announceReservedLock(init);
 
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
