@@ -463,6 +463,79 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await page.bringToFront();
 
   /**
+   * 🔴 **左の列の欄に語を打ってから行を押しても、本文の当たりへ送られて塗られる**(#1102 段②)。
+   *
+   * ⚠ **起動は足していない**(同じ道中の本体の窓。「探す」の面を出したまま、左の列を使う)。
+   * ⚠ 見るのは**押す経路から画面まで**:欄に打つ → 本文の語で行が残る → 行を押す → 本文の面へ戻り、
+   *   塗りの表・帯・送った位置が出る。→ 欄を空にすると**塗りも帯も消える**(欄の語の持ち物なので)。
+   *   ⚠ 「探す」の行から来た塗りが欄を空にしても残る側は unit(`search-jump-state.test.ts`)が持つ
+   *   ── 本体の窓では、探す窓の行は別の窓を開くだけで、本体の塗りにならない。
+   */
+  // 🔑 本体の窓は広い(1440x900)ので、1 つ目の当たり(本文の 674px 付近)が**送らなくても見える**。
+  //   窓の高さを縮めて、送らなければ見えない所に置く(前提は下で assert する)
+  await page.setViewportSize({ width: 1440, height: 520 });
+  // 探す面は「本文を畳んで中央を占める面」── 行を押しても中央はその面に留まるので、本文へ戻してから使う
+  await clickReal(page, '[data-pkc-action="close-pane"]');
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '× パネルを閉じるで本文へ戻らない').toBeVisible();
+  const field = page.locator('[data-pkc-field="entry-filter"]');
+  await field.fill('けんさくご');
+  const sideRow = page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]');
+  await expect(sideRow, '本文の語で左の列が絞られていない(本文の索引が返っていない)').toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await clickReal(page, '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]');
+  const mainHits = () =>
+    page.evaluate(() => {
+      const css = (window as unknown as { CSS: { highlights?: Map<string, Set<Range>> } }).CSS;
+      return {
+        all: css.highlights?.get('pkc-search-hit')?.size ?? 0,
+        current: css.highlights?.get('pkc-search-hit-current')?.size ?? 0,
+      };
+    });
+  await expect
+    .poll(async () => (await mainHits()).all, {
+      message: '左の列の欄の語で行を押したのに、本文が塗られていない',
+      timeout: 15_000,
+    })
+    .toBe(2);
+  expect((await mainHits()).current, 'いまの 1 つが強く塗られていない').toBe(1);
+  await expect(
+    page.locator('[data-pkc-field="search-jump-count"]'),
+    '本文の右上に「1/2 件」が出ていない',
+  ).toHaveText('1/2 件');
+  // 🔑 前提:1 つ目の当たりは**送らなければ見えない所**に在る。崩れたら「前提が崩れている」と読める文言で落とす
+  const mainPos = () =>
+    page.evaluate(() => {
+      const d = document.querySelector('[data-pkc-region="detail"]') as HTMLElement;
+      const css = (window as unknown as { CSS: { highlights: Map<string, Set<Range>> } }).CSS;
+      const r = [...css.highlights.get('pkc-search-hit-current')!][0]!.getBoundingClientRect();
+      const d0 = d.getBoundingClientRect();
+      return {
+        scrollTop: d.scrollTop,
+        clientHeight: d.clientHeight,
+        docTop: r.top - d0.top + d.scrollTop,
+        inTop: r.top - d0.top,
+        inBottom: r.bottom - d0.top,
+        h: r.bottom - r.top,
+      };
+    });
+  const mp = await mainPos();
+  expect(mp.h, '当たりの箱が無い').toBeGreaterThan(0);
+  expect(
+    mp.docTop,
+    `前提が崩れている: 1 つ目の当たりが本文の先頭から窓の高さ(${mp.clientHeight}px)の内に在る = 送らなくても見える`,
+  ).toBeGreaterThan(mp.clientHeight);
+  expect(mp.scrollTop, '送っていない(scrollTop が 0 のまま)').toBeGreaterThan(0);
+  expect(mp.inTop, `当たりが本文の面の上へはみ出している(${mp.inTop})`).toBeGreaterThanOrEqual(0);
+  expect(mp.inBottom, `当たりが本文の面の下へはみ出している(${mp.inBottom} / 面 ${mp.clientHeight})`).toBeLessThanOrEqual(mp.clientHeight);
+  // 欄を空にすると、塗りも帯も消える
+  await field.fill('');
+  await expect
+    .poll(async () => (await mainHits()).all, { message: '欄の語を消したのに、塗りが残っている' })
+    .toBe(0);
+  await expect(page.locator('[data-pkc-field="search-jump-count"]'), '欄の語を消したのに、帯が残っている').toBeHidden();
+
+  /**
    * 🔴 **同じ道中で SQL の面まで見る**(#681 段②)。
    *
    * ⚠ **起動を足さない**(`location.hash` を書き換えるだけ ── 読み直しは要らない、と

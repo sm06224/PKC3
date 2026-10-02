@@ -51,7 +51,7 @@ const start = (s: AppState, lid = 'a', query = '会議'): AppState =>
 describe('SEARCH_JUMP_START: 始まる条件', () => {
   it('🔴 選んでいるノートで始まる(語は整える・世代 1・送り 0)', () => {
     const s = start(opened(), 'a', '  会議  ');
-    expect(s.searchJump).toEqual({ lid: 'a', query: '会議', step: 0, gen: 1 });
+    expect(s.searchJump).toEqual({ lid: 'a', query: '会議', step: 0, gen: 1, origin: 'find' });
   });
 
   it('🔴 選んでいないノートには塗らない(対照群: 選んでいる a は始まる)', () => {
@@ -159,5 +159,103 @@ describe('🔴 控えは「結果の形」で消える(どの経路でも)', () 
     // 別の action(控えに無関係)を 1 つ通すだけで、結果の形を見て消える
     const r = reduce(withDraft, { type: 'SEARCH_JUMP_STEP', by: 1 });
     expect(r.state.searchJump).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **左の列の欄に語が入っている間に行を押す = もう 1 つの起点**(#1102 段②。Gemini 裁定 = A)
+ *
+ * user から見た物語:左の列の欄に語を打って絞る → 当たったノートの行を押す → 本文が「探す」から
+ * 開いたときと同じように、当たった語の所へ送られて塗られる。**欄の語を消すと塗りも消える**。
+ * 「探す」から来た塗りは、欄を触っても消えない(欄は持ち主ではない)。
+ *
+ * ⚠ 段①の部品(`searchJump` / 帯 / 描画)をそのまま使う ── ここで見るのは「起点が増えた」ことと
+ *   「消え方が起点で違う」ことだけ。
+ */
+describe('🔴 左の列の欄の語で始まる(段②)', () => {
+  const typed = (s: AppState, q: string): AppState =>
+    reduce(s, { type: 'SET_ENTRY_FILTER', query: q }).state;
+  const press = (s: AppState, lid: string): AppState =>
+    reduce(s, { type: 'SELECT_ENTRY', lid }).state;
+
+  it('欄に語がある間に別のノートの行を押すと、「探す」と同じ形の控えができる(語は整える・起点は filter)', () => {
+    const s = press(typed(opened(), '  議事録  '), 'b');
+    expect(s.selectedLid, '前提: 押した行が開いている').toBe('b');
+    expect(s.searchJump).toEqual({ lid: 'b', query: '議事録', step: 0, gen: 1, origin: 'filter' });
+  });
+
+  it('🔴 対照群: 欄が空 / 空白だけなら撃たない(「探す」から来た塗りにも触らない)', () => {
+    expect(press(opened(), 'b').searchJump).toBeNull();
+    expect(press(typed(opened(), '   '), 'b').searchJump).toBeNull();
+    const found = start(opened()); // 探す起点で a を塗っている
+    expect(press(found, 'a').searchJump, '空の欄で同じ行を押しても、探す起点の塗りは残る').toBe(
+      found.searchJump,
+    );
+  });
+
+  it('`>` で始まる欄は操作を探している ── 本文の語ではないので塗らない', () => {
+    expect(press(typed(opened(), '>保存'), 'b').searchJump).toBeNull();
+    expect(press(typed(opened(), '＞保存'), 'b').searchJump).toBeNull();
+  });
+
+  it('🔴 欄に打っただけでは塗らない(開いているノートがあっても、「行を押す」が起点)', () => {
+    const s = typed(opened(), '会議');
+    expect(s.selectedLid, '前提: ノートは開いている').toBe('a');
+    expect(s.searchJump).toBeNull();
+  });
+
+  it('🔴 本文が畳まれている面(探す面)では撃たない / 本文へ戻る面(設定)では撃つ', () => {
+    const inSearch = { ...typed(opened(), '会議'), viewMode: 'search' as const };
+    const stay = press(inSearch, 'b');
+    expect(stay.viewMode, '前提: 探す面は行を押しても中央に留まる').toBe('search');
+    expect(stay.searchJump, '見えない本文には塗らない').toBeNull();
+    const inSettings = { ...typed(opened(), '会議'), viewMode: 'settings' as const };
+    const back = press(inSettings, 'b');
+    expect(back.viewMode, '前提: 設定は行を押すと本文へ戻る').toBe('detail');
+    expect(back.searchJump).toMatchObject({ lid: 'b', origin: 'filter' });
+  });
+
+  it('断られた選択では撃たない(編集中は行を押しても動かない / 塗らない)', () => {
+    const editing = reduce(typed(opened(), '会議'), { type: 'START_EDIT' }).state;
+    const r = reduce(editing, { type: 'SELECT_ENTRY', lid: 'b' });
+    expect(r.state.selectedLid, '前提: 断られて動いていない').toBe('a');
+    expect(r.state, '断られた押しは state を参照ごと動かさない').toBe(editing);
+    expect(r.state.searchJump).toBeNull();
+    expect(r.state.notice, '行を押しただけで「編集を終えると…」を出さない').toBeNull();
+  });
+
+  it('すでに開いている行をもう一度押すと、世代が進む(同じ語でも送り直せる)', () => {
+    const once = press(typed(opened(), '会議'), 'a');
+    expect(once.searchJump).toMatchObject({ origin: 'filter', gen: 1 });
+    expect(press(once, 'a').searchJump).toMatchObject({ origin: 'filter', gen: 2 });
+  });
+
+  it('🔴 欄の語を消すと塗りも消える(語を消す / 空白だけにする、どちらでも)', () => {
+    const s = press(typed(opened(), '会議'), 'a');
+    expect(s.searchJump, '前提: 塗っている').not.toBeNull();
+    expect(typed(s, '').searchJump).toBeNull();
+    expect(typed(s, '   ').searchJump, '空白だけも「空」').toBeNull();
+    expect(typed(s, '会').searchJump, '対照群: 別の語に変えただけなら消えない').not.toBeNull();
+  });
+
+  it('🔴 「探す」起点の塗りは、欄の語を消しても残る(欄は持ち主ではない)', () => {
+    const found = start(typed(opened(), '会議')); // 欄に語が在るまま、探すから塗る
+    expect(found.searchJump?.origin).toBe('find');
+    expect(typed(found, '').searchJump, '欄を空にしても残る').toMatchObject({ origin: 'find' });
+  });
+
+  it('🔴 後に押した起点が勝つ(塗りは 1 つ)', () => {
+    const byField = press(typed(opened(), '会議'), 'a');
+    const byFind = start(byField, 'a', '議事録');
+    expect(byFind.searchJump).toMatchObject({ origin: 'find', query: '議事録', gen: 2 });
+    // 逆順:探す起点の塗りの上で、欄の語で行を押すと欄が勝つ
+    const back = press(byFind, 'a');
+    expect(back.searchJump).toMatchObject({ origin: 'filter', query: '会議', gen: 3 });
+  });
+
+  it('送り(‹ ›)は起点を保つ(欄起点の塗りは、送っても欄起点のまま)', () => {
+    const s = reduce(press(typed(opened(), '会議'), 'a'), { type: 'SEARCH_JUMP_STEP', by: 1 }).state;
+    expect(s.searchJump).toMatchObject({ origin: 'filter', step: 1 });
+    expect(typed(s, '').searchJump).toBeNull();
   });
 });

@@ -1303,6 +1303,13 @@ export interface SearchJump {
   readonly step: number;
   /** START / 送りのたびに進む。 */
   readonly gen: number;
+  /**
+   * 🔴 **何から始めた塗りか**(#1102 段②)。`find` = 「探す」の行から / `filter` = 左の列の欄に語が
+   *   入っている間に行を押して。⚠ 違いは**消え方だけ** ── `filter` は欄の語が空になったら一緒に消え、
+   *   `find` は欄を触っても残る(欄は「探す」から来た塗りの持ち主ではない)。後から始めた側が勝つ
+   *   (塗りは 1 つしか持たない)。
+   */
+  readonly origin: 'find' | 'filter';
 }
 
 /** ゴミ箱一覧の 1 行(= entries に居ない entry_lid の最新 revision)。 */
@@ -2101,8 +2108,10 @@ export type UserAction =
    *   塗れない理由は画面に既に出ている)。
    *   ⚠ **ただし「そのノートを編集中」のときだけは、`notice` に 1 行置く**(#1206 D9。
    *   窓が前に出るのに何も起きないのを、壊れたと読ませない)。
+   * ⚠ `origin`(#1102 段②)は**何から始めたか**。省くと `find`(「探す」の行)。`filter` は左の列の欄の
+   *   語で塗るとき ── `SELECT_ENTRY` の後に reducer が自分で撃つので、呼び側は渡さない。
    */
-  | { type: 'SEARCH_JUMP_START'; lid: string; query: string }
+  | { type: 'SEARCH_JUMP_START'; lid: string; query: string; origin?: 'find' | 'filter' }
   /** 🔴 **次 / 前の当たりへ送る**(#1102 段①)。⚠ 端で回る(数で畳むのは描く側)。 */
   | { type: 'SEARCH_JUMP_STEP'; by: 1 | -1 }
   /** 🔴 **塗りと送りの帯を消す**(#1102 段①。帯の × / `Esc`)。 */
@@ -3959,13 +3968,59 @@ export function dropStaleSearchJump(result: ReduceResult): ReduceResult {
   const j = result.state.searchJump ?? null;
   if (j === null) return result;
   const st = result.state;
-  if (st.selectedLid === j.lid && st.phase === 'ready' && st.sectionDraft == null) return result;
+  /**
+   * 🔴 **欄の語で塗った塗りは、欄の語が空になったら消える**(#1102 段②)。⚠ 「探す」から来た塗り
+   *   (`origin: 'find'`)は欄を触っても消えない。⚠ 見るのは**結果の形**(いまの `filterQuery`)── 欄を
+   *   空にする case(語を消す / 絞りを解く)を 1 つずつ見張らない。
+   */
+  const orphanedByField = j.origin === 'filter' && normalizeFindQuery(st.filterQuery) === '';
+  if (
+    !orphanedByField &&
+    st.selectedLid === j.lid &&
+    st.phase === 'ready' &&
+    st.sectionDraft == null
+  )
+    return result;
   return { ...result, state: { ...st, searchJump: null } };
+}
+
+/**
+ * 🔴 **左の列の欄に語が入っている間にノートの行を押したら、その語で塗り始める**(#1102 段②。
+ * Gemini 裁定 = A)。
+ *
+ * 🔑 起点を 1 つ増やすだけ ── 塗る / 送る / 帯 / 消える、は段①の `SEARCH_JUMP_START` がそのまま持つ
+ *   (**新しい部品を作らない**)。ここは「行を押した」結果を見て、同じ action を欄の語で撃つだけで、
+ *   判断を binder に散らさない(`reduce()` の外側 1 か所 ── 選ぶ経路が増えても忘れられない)。
+ * 🔑 **断る条件を書き写さない**(二重帳簿にしない)── 欄が空 / 押した行が選ばれていない(編集中・章の欄の
+ *   確認で戻された)/ 読む画面でない、は `SEARCH_JUMP_START` が断る。断られたら控えは**動かない**
+ *   (「探す」から来た塗りにも触らない)。
+ * ⚠ ここが持つのは START が知らない 2 つだけ:**`>` で始まる欄は操作を探している**(`commandQueryOf`)
+ *   ので本文の語ではない / **本文が画面に出ているときだけ**。
+ */
+function startSearchJumpFromField(action: Dispatchable, result: ReduceResult): ReduceResult {
+  if (action.type !== 'SELECT_ENTRY') return result;
+  const st = result.state;
+  if (commandQueryOf(st.filterQuery) !== null) return result;
+  // ⚠ 探す面 / 集計 / SQL などの面は、行を押しても中央がその面に留まる(本文は畳まれている)。
+  //   そこで塗ると、見えない本文へ送って、戻った所で位置がずれている
+  if (st.viewMode !== 'detail') return result;
+  const started = reduceCore(st, {
+    type: 'SEARCH_JUMP_START',
+    lid: action.lid,
+    query: st.filterQuery,
+    origin: 'filter',
+  });
+  // ⚠ 断られたら**参照ごと同じ**を返す(`error` phase の選択の断りは「完全 no-op」と pin されている)
+  if (started.state.searchJump === st.searchJump) return result;
+  return { ...result, state: { ...st, searchJump: started.state.searchJump } };
 }
 
 export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   return dropStaleSearchJump(
-    guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+    startSearchJumpFromField(
+      action,
+      guardSectionDraftTransition(state, action, reduceWithHistory(state, action)),
+    ),
   );
 }
 
@@ -9187,7 +9242,13 @@ function reduceCore(
       return {
         state: {
           ...state,
-          searchJump: { lid: action.lid, query, step: 0, gen: (state.searchJump?.gen ?? 0) + 1 },
+          searchJump: {
+            lid: action.lid,
+            query,
+            step: 0,
+            gen: (state.searchJump?.gen ?? 0) + 1,
+            origin: action.origin ?? 'find',
+          },
         },
         events: [],
       };
