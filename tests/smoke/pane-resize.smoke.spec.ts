@@ -550,6 +550,8 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
    */
   const lock = append.locator('[data-pkc-field="append-lock"]');
   await expect(lock, '前提: 編集中なのに出口の帯が出ていない').toBeVisible();
+  // 🔴 #1221: 作った直後は題名の欄に焦点が在り、打鍵中は近道を受けない ── 外してから押す
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Alt+Backslash');
   await expect(shell, '鍵で畳めていない').toHaveAttribute('data-pkc-hidden-panes', /append/);
   await expect(
