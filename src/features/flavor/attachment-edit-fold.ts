@@ -28,14 +28,23 @@ export const HIDDEN_HEAD_ATTR = 'data-pkc-hidden-head';
 export const ATTACHMENT_FOLD_FIELD = 'attachment-fold-note';
 
 /**
+ * 添付の画面の**改名欄**の名前(`aria-label`)。
+ *
+ * 🔑 畳みの 1 行(下)が**この字で**欄を指す ── 実在しない押し所を案内しない
+ *   (`tests/adapter/attachment-edit-fold.test.ts` が描いた欄の `aria-label` と突き合わせる)。
+ */
+export const ATTACHMENT_RENAME_LABEL = 'この添付の名前';
+
+/**
  * 畳んだことを言う 1 行。
  *
  * ⚠ 言い方は**起きること**で書く ── 「設定」は画面では「この端末の好み」の名前なので
- *   使わない(`ui-terms.ts`)。名前・種類・大きさは**ここでは変えられない**ことと、
- *   書けるのは**説明**であることを言う。
+ *   使わない(`ui-terms.ts`)。🔴 ファイル名は**ここでは変えられないが、変えられる場所は在る**
+ *   (添付の画面の改名欄 ── 題名と一緒に変わる。#1220 裁定 A)ので、そこを指す。
+ *   種類と大きさは中身から決まる(どこからも変えられない)ことと、ここで書けるのは
+ *   **説明**であることを言う。
  */
-export const ATTACHMENT_FOLD_NOTE =
-  '添付の名前・種類・大きさは、ここでは編集できません。説明だけ書けます';
+export const ATTACHMENT_FOLD_NOTE = `ファイル名は、添付の画面の「${ATTACHMENT_RENAME_LABEL}」の欄で変えられます。種類と大きさは変わりません。ここでは説明だけ書けます`;
 
 export interface AttachmentFold {
   /** 畳んだ側(先頭の情報の塊)。**原文のまま**(CRLF・空行・順番を含む)。 */

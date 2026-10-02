@@ -12,7 +12,12 @@
  * 🔑 **pure module**。ここは「どう書き換えるか」だけを決め、いつ・誰が書くかは
  *   effect 層が持つ。⚠ 純関数なので unit で全部試せる。
  */
-import { frontmatterLineCount, spliceFrontmatterKeys, type FrontmatterValue } from './frontmatter';
+import {
+  frontmatterLineCount,
+  parseFrontmatter,
+  spliceFrontmatterKeys,
+  type FrontmatterValue,
+} from './frontmatter';
 import { formatLineDate, insertionForLineDate, readLineDate } from '../schedule/line-date';
 import { isScheduleDate } from '../schedule/schedule-date';
 import type { RepeatUnit } from '../schedule/repeat';
@@ -32,6 +37,7 @@ import {
 } from './place-notation';
 import type { PlaceShape } from './place-shape';
 import { readTags, withTagResult } from '../flavor/tags';
+import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
@@ -442,6 +448,26 @@ export type BodyRewrite =
       kind: 'table-format';
       line: number;
       to: TableFormat;
+    }
+  | {
+      /**
+       * 🔴 **添付のダウンロードのファイル名(`attachment.name:` の 1 行)だけを書き換える**
+       * (#1220 穴②、裁定 A)。
+       *
+       * > user の物語:添付の名前の欄を書き換えた。ノートの題名と一緒に、ダウンロードの
+       * > ファイル名も変わってほしい。
+       *
+       * ⚠ **持つのは打たれた字(`typed`)で、出来上がりの名前ではない** ── 拡張子の規則は
+       *   **元の名前**(= 書く直前に disk から読んだ `attachment.name`)に依るので、画面が
+       *   持つ古い名前で組むと、別の窓が先に変えた名前の拡張子を取り違える。
+       * ⚠ **`attachment.name` を持たない本文には何も書かない**(同じ本文を返す = 書かず・言わない)
+       *   ── 添付でないノートや、ファイルを持たないリンクのタイルに設定の行を生やさない。
+       *   `kind: 'frontmatter'` は鍵が無ければ**足す**ので使えない。
+       * ⚠ 書き換えるのは **その 1 行だけ**(`spliceFrontmatterKeys`)── mime / size / asset_key の行と
+       *   説明は 1 byte も動かない。
+       */
+      kind: 'attachment-name';
+      typed: string;
     };
 
 /**
@@ -674,6 +700,16 @@ export function applyTagsToBody(
 }
 
 /**
+ * 添付のファイル名の 1 行を書き換える(#1220)。⚠ `attachment.name` が文字列で無ければ**何もしない**。
+ * 鍵の有無の見方は `readAttachmentMeta`(= `parseFrontmatter`)と同じ。
+ */
+function rewriteAttachmentName(body: string, typed: string): string {
+  const current = parseFrontmatter(body).meta['attachment.name'];
+  if (typeof current !== 'string') return body;
+  return spliceFrontmatterKeys(body, { 'attachment.name': attachmentFileName(typed, current) });
+}
+
+/**
  * 書き換える。⚠ **できなければ `null`**(呼び側が「何も起きなかった」を
  * user に言えるようにする ── 黙って別の行を書き換えない)。
  */
@@ -725,6 +761,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'csv-cell') return rewriteCsvCell(body, rewrite);
   if (rewrite.kind === 'csv-shape') return rewriteCsvShape(body, rewrite);
   if (rewrite.kind === 'table-format') return rewriteTableFormat(body, rewrite);
+  if (rewrite.kind === 'attachment-name') return rewriteAttachmentName(body, rewrite.typed);
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
   if (rewrite.kind === 'insert-lines')
