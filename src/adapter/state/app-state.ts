@@ -8979,8 +8979,9 @@ function reduceCore(
     case 'PLACE_BODIES_WANTED': {
       /**
        * ⚠ **居ないノートは頼まない**(消えた lid を読んでも何も無い。板は題名の行で断る)。
-       * ⚠ **フォルダ・添付は頼まない**(フォルダは本文が無く、添付は自前の見せ方を持つ ──
-       *   描く側も同じ判定で札だけにする)。
+       * ⚠ **フォルダは頼まない**(本文が無い ── 描く側も同じ判定で札だけにする)。
+       *   🔑 添付は**頼む**(#529 W3-②)── 本文は frontmatter だけで小さく、絵を出せる種類か
+       *   (画像 / PDF)はそこから分かる。
        * 🔑 持っている物も頼まない。⚠ 1 度に頼める数は `PLACE_BODY_CAP` まで
        *   (それ以上は持てないので、頼んでも手放すだけになる)。
        */
@@ -9000,7 +9001,8 @@ function reduceCore(
     }
     case 'PLACE_BODY_LOADED': {
       const have = placeBodiesOf(state);
-      const next = excerptOf(action.body);
+      // 🔑 添付は絵を出せるかを**本文(frontmatter)から**読む ── 型は一覧(entryMetas)が知っている
+      const next = excerptOf(action.body, state.entryMetas.get(action.lid)?.archetype);
       const prev = have.get(action.lid);
       if (prev !== undefined && sameExcerpt(prev, next)) return { state, events: [] };
       return { state: { ...state, placeBodies: withPlaceBody(have, action.lid, next) }, events: [] };
@@ -9836,7 +9838,7 @@ function syncShownBodies(
   const have = placeBodiesOf(state);
   const prev = have.get(lid);
   if (prev === undefined) return { splitBodies, placeBodies: state.placeBodies };
-  const next = excerptOf(body);
+  const next = excerptOf(body, state.entryMetas.get(lid)?.archetype);
   if (sameExcerpt(prev, next)) return { splitBodies, placeBodies: state.placeBodies };
   const bodies = new Map(have);
   bodies.set(lid, next); // ⚠ 並びは動かさない(書込は「最近読んだ」ではない)

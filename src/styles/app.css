@@ -4185,10 +4185,25 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-body'] [data-pkc-embedded-heading='3'] {
   font-size: 1.05em;
 }
-/* 図・画像は描かない(W3-②)── 1 行で「元のノートで」と言う */
+/* PDF の添付(「PDF は元のノートで」)── 絵を出せない物は字で言う */
 [data-pkc-field='place-body-skip'] {
   color: var(--muted);
   font-size: 0.85em;
+}
+/* 🔴 置いた添付ノートの画像(#529 W3-②)── 枠いっぱいに、縦横比を保って収める。
+ *   余白を持たせない(絵が主役)。⚠ 枠の高さは固定なので、絵のほうが縮む(`object-fit: contain`)。
+ * ⚠ `min-width: 0` / `min-height: 0` は足していない ── 外しても変わらなかった(実ブラウザの変異試験 S2 が
+ *   生き延びた。枠の器が `overflow: hidden` で、`width` / `height: 100%` が絵の大きさを決めるため)。 */
+.pkc-place > [data-pkc-field='place-body'][data-pkc-place-attachment='image'] {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+[data-pkc-field='place-attachment-image'] {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 /* 入れ子の置いたノート(題名だけの行)と「続きは元のノートで」── どちらも押すと元のノートを開く */
 [data-pkc-field='place-body-link'],

@@ -12,11 +12,24 @@
  *   「見た目は動いたが本文に書けていない」を素通りする(#513 の「成功と同じ見た目」の型)。
  */
 import { test, expect, type Locator } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import {
+  gotoApp,
+  clickReal,
+  createEntry,
+  collectPageErrors,
+  useSplitEditor,
+  expectImageRendered,
+} from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
+
+// 1x1 PNG(67 bytes)── 添付(画像)の台。絵の中身ではなく「出る / 枠に収まる / 返る」を見る
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 /**
  * 🔴 **線の宣言を末尾に持つ**(#530 段③a)。
@@ -473,8 +486,11 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   // 対照群 ── 短いノートには出ない
   await expect(dflt.locator('[data-pkc-field="place-body-more"]')).toHaveCount(0);
 
-  // 🔴 見出しは見出しでない(板のノートの目次に混ざらない)/ id は無い
-  await expect(bigBody.locator('h1, h2, h3, [id]')).toHaveCount(0);
+  // 🔴 見出しは見出しでない(板のノートの目次に混ざらない)/ id は枠の接頭辞つき(素の id は無い)
+  await expect(bigBody.locator('h1, h2, h3')).toHaveCount(0);
+  const bigIds = await bigBody.locator('[id]').evaluateAll((els) => els.map((e) => e.id));
+  expect(bigIds.length, '台の前提:見出しの id が出ていない').toBeGreaterThan(0);
+  for (const id of bigIds) expect(id, `素の id が残っている: ${id}`).toMatch(/^place-\d+-/);
 
   // 🔴 中身の上で右クリックしても、出るのは**板のメニュー**(置いたノートの行メニューではない)
   //    ── 中身に行番号を焼いていないので、押した所が板のノートの別の行に化けない
@@ -499,6 +515,143 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] input.pkc-task-checkbox'),
     '板から押したチェックが相手に書かれた',
   ).not.toBeChecked();
+
+  /**
+   * ── 🔴 **図・画像・添付ノート・同じノート 2 枚**(#529 W3-②)。
+   *
+   * ⚠ **実ブラウザでしか見られない所**:①図は枠(320px)の中で**見えたときに実際に焼かれて PNG の
+   *   `<img>` になる**(IntersectionObserver・IDB・mermaid の読み込みの本物)②画像の添付ノートが
+   *   **枠いっぱい**(`object-fit: contain` の CSS が効く)③同じノートを 2 枚置いた**実 DOM の
+   *   `id` が重複しない**。
+   * 🔑 **新しい起動は増やさない**(#820)── この test の続きで通す。
+   */
+  const lidOfTitle = async (title: string): Promise<string> => {
+    const lid = await page
+      .locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: title })
+      .first()
+      .getAttribute('data-pkc-entry');
+    expect(lid, `前提が崩れている(${title} の lid が読めない)`).not.toBeNull();
+    return lid!;
+  };
+  // 図と見出しと脚注を持つノート(同じノートを 2 枚置く相手)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '図のノート');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ':::toc\n:::\n\n# 図の見出し\n\n```mermaid\ngraph TD\n  A["始め"] --> B["終わり"]\n```\n\n注があります[^1]\n\n[^1]: 脚注の本文\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // 画像を本文に貼るノート(添付も 1 件できる)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '写真のノート');
+  await page.fill('[data-pkc-field="editor-body"]', '写真の前の文');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'ねこ.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  const figLid = await lidOfTitle('図のノート');
+  const photoLid = await lidOfTitle('写真のノート');
+  const attLid = await lidOfTitle('ねこ.png');
+
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '板2');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    `:::format{#f1 .pkc-place entry=${figLid} x=10 y=10}\n:::\n\n` +
+      `:::format{#f2 .pkc-place entry=${figLid} x=350 y=10}\n:::\n\n` +
+      `:::format{#ph .pkc-place entry=${photoLid} x=10 y=270}\n:::\n\n` +
+      `:::format{#at .pkc-place entry=${attLid} x=350 y=270}\n:::\n`,
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const body2 = page.locator('[data-pkc-region="detail"]');
+  const slotIn = (id: string): Locator =>
+    body2.locator(`#${id} > [data-pkc-field="place-body"]`);
+
+  // 🔴 ① 図:枠の中で実際に焼かれて PNG の <img> になる(2 枚とも)。枠の幅に収まる
+  for (const id of ['f1', 'f2']) {
+    const png = slotIn(id).locator('img[data-pkc-field="mermaid-image"]');
+    await expect(png, `${id}:枠の中の図が PNG で出ていない`).toHaveCount(1, { timeout: 30_000 });
+    await expect(png).toHaveAttribute('src', /^blob:/);
+    const m = await png.evaluate((el) => {
+      const img = el as HTMLImageElement;
+      const slot = img.closest('[data-pkc-field="place-body"]') as HTMLElement;
+      return {
+        decoded: img.complete && img.naturalWidth > 0,
+        imgW: img.getBoundingClientRect().width,
+        slotW: slot.clientWidth,
+        // 原文の囲みが 1 行へ降ろされていない(= 図の器が器のまま残っている)
+        skipNote: slot.querySelector('[data-pkc-field="place-body-skip"]') !== null,
+      };
+    });
+    expect(m.decoded, `${id}:PNG が decode されていない`).toBe(true);
+    expect(m.imgW, `${id}:図が枠からはみ出している`).toBeLessThanOrEqual(m.slotW + 1);
+    expect(m.skipNote, `${id}:図が 1 行に降ろされている`).toBe(false);
+  }
+  // 🔴 板のノート自身は図を持たない ── 焼かれた PNG は置いた 2 枚ぶんだけ
+  await expect(body2.locator('img[data-pkc-field="mermaid-image"]')).toHaveCount(2);
+
+  // 🔴 ② 同じノート 2 枚:実 DOM の id が重複せず、脚注・目次の押しが同じ枠の中を指す
+  const idReport = await body2.evaluate((root) => {
+    const ids = [...root.querySelectorAll('[id]')].map((e) => e.id);
+    const dup = ids.filter((v, i) => ids.indexOf(v) !== i);
+    const links = (sel: string): { ok: number; bad: string[] } => {
+      const out = { ok: 0, bad: [] as string[] };
+      for (const a of root.querySelectorAll<HTMLAnchorElement>(`${sel} a[href^="#"]`)) {
+        const target = (a.getAttribute('href') ?? '').slice(1);
+        const hits = [...root.querySelectorAll('[id]')].filter((e) => e.id === target);
+        const box = a.closest('[data-pkc-field="place-body"]');
+        if (hits.length === 1 && box !== null && box.contains(hits[0]!)) out.ok += 1;
+        else out.bad.push(target);
+      }
+      return out;
+    };
+    return { dup, f1: links('#f1'), f2: links('#f2') };
+  });
+  expect(idReport.dup, `id が重複している: ${idReport.dup.join(' / ')}`).toEqual([]);
+  for (const k of ['f1', 'f2'] as const) {
+    expect(idReport[k].bad, `${k}:枠の外を指すリンクがある`).toEqual([]);
+    // 空振り防止:目次(1 件)と脚注(参照 + 戻り)が実際に在る
+    expect(idReport[k].ok, `${k}:台の前提 ― 文書内リンクが無い`).toBeGreaterThanOrEqual(3);
+  }
+
+  // 🔴 ③ 本文に貼った画像:枠の中に絵が出る(借りて src が差さる)
+  await expectImageRendered(page, '#ph > [data-pkc-field="place-body"] img[data-pkc-asset-key]');
+
+  // 🔴 ④ 添付ノート(画像)は絵そのものが枠いっぱいに出る(縦横比を保って収める = contain)
+  const att = slotIn('at').locator('img[data-pkc-field="place-attachment-image"]');
+  await expect(att, '画像の添付ノートが絵で出ていない').toHaveCount(1);
+  await expectImageRendered(page, '#at > [data-pkc-field="place-body"] img[data-pkc-field="place-attachment-image"]');
+  const fit = await att.evaluate((el) => {
+    const slot = el.closest('[data-pkc-field="place-body"]') as HTMLElement;
+    const sb = slot.getBoundingClientRect();
+    const ib = el.getBoundingClientRect();
+    return {
+      objectFit: getComputedStyle(el).objectFit,
+      fillW: ib.width / sb.width,
+      fillH: ib.height / sb.height,
+      block: [
+        Math.round((slot.parentElement as HTMLElement).getBoundingClientRect().width),
+        Math.round((slot.parentElement as HTMLElement).getBoundingClientRect().height),
+      ],
+    };
+  });
+  expect(fit.objectFit, '縦横比を保って収める規則が効いていない').toBe('contain');
+  expect(fit.fillW, '画像が枠の幅いっぱいに出ていない').toBeGreaterThan(0.95);
+  expect(fit.fillH, '画像が枠の高さいっぱいに出ていない').toBeGreaterThan(0.6);
+  expect(fit.block, '画像の添付に既定の大きさが当たっていない').toEqual([320, 240]);
+
+  // 🔴 ⑤ 押すと元のノートが開く(帯)── 添付ノート側も今までどおり
+  await clickReal(page, '#at > [data-pkc-field="place-card"]');
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
+    '添付ノートの帯を押しても開かない',
+  ).toHaveText('ねこ.png');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

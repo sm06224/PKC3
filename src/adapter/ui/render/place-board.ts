@@ -460,6 +460,10 @@ export function applyPlaceLayout(
     const sized = placed !== '' && embeds(placed);
     const useW = w ?? (sized ? PLACE_ENTRY_DEFAULT_W : null);
     const useH = h ?? (sized ? PLACE_ENTRY_DEFAULT_H : null);
+    // 🔑 「既定の大きさを当てるべきと判断した」印 ── 添付ノートは**読んだ後**に答えが変わるので、
+    //   detail が「いまの答え」と見比べて置き直す(`placeFramedChanged`)
+    if (sized) el.setAttribute('data-pkc-place-framed', '');
+    else el.removeAttribute('data-pkc-place-framed');
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
     if (useW !== null) el.style.width = `${useW}px`;
