@@ -98,6 +98,7 @@
   #unsaved .box { background:#fff; color:#111; border:1px solid #8886; border-radius:8px;
     padding:18px 22px; max-width:46ch; line-height:1.8; font-size:14px }
   @media (prefers-color-scheme: dark) { #unsaved .box { background:#222; color:#e8e8e8 } }
+  #unsaved #unsaved-hint { margin-top:6px; font-size:12px; opacity:.75 }
   #unsaved .row { display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
   #unsaved button { font:inherit; padding:6px 14px; border-radius:6px;
     border:1px solid #8886; background:transparent; color:inherit; cursor:pointer }
@@ -112,8 +113,9 @@
 <div id="unsaved" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-text" hidden>
   <div class="box">
     <div id="unsaved-text">保存していない変更があります。別の文書を開くと消えます。開きますか?</div>
+    <div id="unsaved-hint">先に保存するなら、やめてから Ctrl+S</div>
     <div class="row">
-      <button type="button" id="unsaved-open">開く</button>
+      <button type="button" id="unsaved-open">変更を捨てて開く</button>
       <button type="button" id="unsaved-cancel">やめる</button>
     </div>
   </div>
@@ -225,6 +227,8 @@
       focusBeforeUnsaved = document.activeElement;
       unsavedEl.hidden = false;
       if (unsavedKeys) unsavedKeys.arm();
+      // 🔴 **確認が出たことを本体へ返す**(#1264 欠陥 3)── 本体の状態の行が「確認が出ています」に替わる
+      say('reload-confirming');
       // ⚠ 既定の焦点は「やめる」(うっかり Enter で消さない)
       try { unsavedCancelBtn.focus(); } catch (e) { /* 無視 */ }
     },

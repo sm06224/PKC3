@@ -13,6 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
@@ -122,6 +123,7 @@ import {
   openCellAt,
   opensOnSinglePress,
 } from '@adapter/ui/render/cell-input';
+import { resetTableSort } from '@adapter/ui/render/table-sort';
 import {
   resolveAppendAt,
   sectionAt,
@@ -1644,7 +1646,7 @@ export interface BinderServices {
    *   選ぶ・列挙・許可の確かめ・取り込みの振り分けは全部実体側。
    *   ⚠ **消す・改名・移動の口は持たない**(パソコンのファイルは取り消せない)。
    */
-  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open'>;
+  localFolder?: Pick<LocalFolder, 'pick' | 'cut' | 'more' | 'open' | 'refresh'>;
   /** PKC2 ファイルの取込(P6b)。判別・変換・書込は実体側の責務。 */
   /** 取込(PKC2 の書出し / 素の Markdown)。振り分けは import-file.ts が持つ。 */
   importFiles?(files: File[]): void;
@@ -8398,7 +8400,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   ファイル名を変えられる唯一の場所**になる。題名は `RENAME_ENTRY_TITLE`(本文に触らない)、
    *   ファイル名は `SET_ATTACHMENT_NAME`(書く直前に disk から読み直し、その 1 行だけを差し替える)
    *   の **2 本を順に撃つ** ── 1 本にまとめると、題名の改名が本文の書込の衝突に巻き込まれる。
-   * ⚠ 範囲はこの欄だけ。一覧の `F2` / 右クリックの改名は題名だけを変える(ファイル名は変わらない)。
+   * 🔑 一覧の `F2` / 右クリックの改名も**同じ関数**(`attachment-rename.ts`)で揃える(#1220 F2)。
    */
   'rename-attachment': (dispatcher, target) => {
     // 🔴 **押した欄が対象を持つ**(#848)── 留めた枠でも、その枠のノートを改名する
@@ -8424,9 +8426,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const want = known === '' ? null : attachmentFileName(title, known);
     const nameDiffers = want !== null && want !== known;
     if (title === before && !nameDiffers) return;
-    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
-    // ⚠ 題名を先に撃つ ── 後ろの書換は更新済みの題名を持って本文を書く(古い題名で戻さない)
-    dispatcher.dispatch({ type: 'SET_ATTACHMENT_NAME', lid, name: title });
+    // 🔴 **一覧の `F2` / 右クリックと同じ 1 本**(#1220 F2)── 題名を先に、ファイル名を後に撃つ
+    renameAttachmentAndFile(dispatcher, lid, title);
     // 🔑 描き直しが来るまでの間に欄を離れても、もう一度撃たない(印を先に進める)
     if (want !== null) target.setAttribute(ATTACHMENT_NAME_ATTR, want);
   },
@@ -10876,6 +10877,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'pc-pick-folder': (_dispatcher, _target, services) => void services.localFolder?.pick(),
   'pc-cut-folder': (_dispatcher, _target, services) => services.localFolder?.cut(),
+  // 🔴 「更新」(#1264 §2 欠陥 4-a)── 同じ handle で一覧を読み直す。名前と種類だけ(`getFile()` は呼ばない)
+  'pc-refresh-folder': (_dispatcher, _target, services) => void services.localFolder?.refresh(),
   'pc-more': (_dispatcher, _target, services) => void services.localFolder?.more(),
   // 🔴 フォルダの行は押しても中へ入らない ── 無言にせず理由を状態の行へ(場所は動かさない)
   'pc-dir-note': (dispatcher) => dispatcher.dispatch({ type: 'OP_NOTICE', message: PC_DIRECTORY_NOTE }),
@@ -14656,6 +14659,17 @@ export function bindActions(
     const link = t.closest<HTMLElement>('a[href]');
     if (link !== null && el.contains(link)) return;
     el.ownerDocument.getSelection()?.removeAllRanges();
+    /**
+     * 🔴 **見出しの 2 回押しは、欄を開く前に並べ替えを元へ戻す**(#1264 欠陥 5)。
+     * ⚠ 見出しの 1 回押しは並べ替えなので、2 回押しの 1 回目・2 回目で行が 2 回動いてから欄が開く
+     *   (Esc でやめると降順の ▼ が残る)。**編集したいだけ**の user には余計な動きなので、欄を開く
+     *   **前**に none へ戻す(1 回目の ▲▼ も消える)。本文の升(`td`)は並べ替えを持たないので触らない。
+     * 🔑 判定は `opensOnSinglePress` の裏返し(= 見出しの升)1 か所 ── `th` かどうかを別に書かない。
+     */
+    if (!opensOnSinglePress(el)) {
+      const table = el.closest('table');
+      if (table !== null) resetTableSort(table);
+    }
     run('edit-cell', el);
   };
   listen(root, 'dblclick', onDblClick);
@@ -15368,12 +15382,13 @@ export function bindActions(
    *   **同じ問いに答える口が 2 つ**になり、片方だけ直したときに食い違う(CLAUDE.md §7)。
    */
   const commitDualRename = (lid: string, value: string): void => {
-    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    // 🔴 添付ならファイル名も揃える(#1220 F2)── 添付の改名欄と同じ関数(`attachment-rename.ts`)
+    renameEntryFromRow(dispatcher, lid, value);
     dispatcher.dispatch({ type: 'DUAL_RENAME_END' });
   };
   /** 左の列の行の版(#215)。⚠ 空白だけ / 変わっていない、の判定は reducer が持つ(上と同じ)。 */
   const commitRowRename = (lid: string, value: string): void => {
-    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: value });
+    renameEntryFromRow(dispatcher, lid, value);
     dispatcher.dispatch({ type: 'ROW_RENAME_END' });
   };
 

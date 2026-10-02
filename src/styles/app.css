@@ -4185,6 +4185,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-body'] [data-pkc-embedded-heading='3'] {
   font-size: 1.05em;
 }
+/* 板の上限(200 枚)を超えた最初の枠の 1 行(#1264 欠陥 8-b)── 押せない説明の字。地は無彩色 */
+[data-pkc-field='place-limit-note'] {
+  margin: 2px 0;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 0.85em;
+}
 /* PDF の添付(「PDF は元のノートで」)── 絵を出せない物は字で言う */
 [data-pkc-field='place-body-skip'] {
   color: var(--muted);
@@ -4413,6 +4420,20 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 .pkc-md-rendered .pkc-md-block th:last-child > .pkc-cell-edit-btn {
   right: 50px;
+}
+/* 🔴 **右揃えの列(`---:`)の見出しだけ、✎ の空きを字の左へ回す**(#1264 欠陥 6)。
+ *    右へ空けたままだと、見出しの字だけが ✎ のぶん左へずれて**真下の数字と右端が合わない**。
+ *    列の寄せは markdown-it が inline style `text-align:right` で出す(`data-pkc-align` ではない)ので
+ *    その属性で拾う。⚠ 選択子は上の `th:last-child` の規則と**同じ重み** ── 重みが同じなので
+ *    **後ろに置く**ことで勝たせている(前へ動かすと、いちばん右の列だけ元へ戻る)。
+ *    他の列(左揃え・中央)は上の規則のまま。 */
+.pkc-md-rendered .pkc-md-block th[style*='text-align:right']:has(> .pkc-cell-edit-btn) {
+  padding-inline-start: calc(var(--s3) + 24px);
+  padding-inline-end: var(--s3);
+}
+.pkc-md-rendered .pkc-md-block th[style*='text-align:right'] > .pkc-cell-edit-btn {
+  left: var(--s2);
+  right: auto;
 }
 .pkc-md-rendered .pkc-cell-edit-btn::before {
   content: '✎';
@@ -4664,6 +4685,27 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-size: 12px;
   margin-bottom: var(--s3);
+}
+/* 🔴 **改名欄の左の「名前」と、下の薄い 1 行**(#1264 欠陥 7-b)。⚠ 欄だけだと、どちらが何の名前か
+ *   字で分からなかった。色は情報にだけ(1 行は `--muted`)。 */
+[data-pkc-field='attachment-rename-row'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='attachment-rename-row'] > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-pkc-field='attachment-rename-label'] {
+  color: var(--muted);
+  font-size: 12px;
+  flex: none;
+}
+[data-pkc-field='attachment-rename-hint'] {
+  color: var(--muted);
+  font-size: 12px;
+  margin: var(--s1) 0 var(--s3);
 }
 [data-pkc-field='attachment-media'] {
   max-width: 100%;
@@ -5153,11 +5195,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='pc-band'] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
 }
+/* 🔴 名前は 1 行目をいっぱいに取り、押し口(更新 / 別のフォルダ… / 切る)は次の行へ回る
+ *   (#1264 §2 欠陥 4-a ── 200px の列で押し口 3 つと名前を 1 行に並べると、名前が消える) */
 [data-pkc-field='pc-folder-name'] {
-  flex: 1;
+  flex: 1 1 100%;
   min-width: 0;
   font-weight: 600;
   overflow: hidden;
@@ -5221,7 +5266,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-size: 12px;
 }
-[data-pkc-field='pc-readonly'],
+[data-pkc-field='pc-link-note'],
 [data-pkc-field='pc-contact-note'] {
   color: var(--muted);
   font-size: 12px;

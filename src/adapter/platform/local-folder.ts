@@ -18,7 +18,7 @@
  *
  * ① `pick()` ── OS のフォルダ選択 → **直下だけ**を列挙 → 名前順(見せるのは 200 件ずつ)
  * ② `open(i)` ── 行の file を読んで `deps.open` へ渡す(取り込みは既存の口 ──
- * ここは取り込みの規則を持たない)③ `cut()` ── handle を捨てる。
+ * ここは取り込みの規則を持たない)③ `cut()` ── handle を捨てる ④ `refresh()` ── 同じ handle で列挙し直す。
  *
  * ## 🔴 一覧を出すとき、`getFile()` を 1 件も呼ばない(#1271)
  *
@@ -233,6 +233,29 @@ export class LocalFolder {
       this.changed();
       return;
     }
+    await this.load(dir);
+  }
+
+  /**
+   * 「更新」(#1264 §2 欠陥 4-a)。**同じ handle** で一覧を読み直す ── 外で足した・消した・
+   * 名前を変えたファイルが一覧に出る(取り込んだ時点の写しのままだった)。
+   * ⚠ **名前と種類だけ**を読む(`getFile()` を呼ばない = #1271)。⚠ 権限が切れていたら
+   * 読み直さずに「切れた」と言う(`more` と同じ)。⚠ 繋いでいないときは何もしない。
+   */
+  async refresh(): Promise<void> {
+    const dir = this.dir;
+    if (dir === null || (this.phase !== 'listed' && this.phase !== 'failed')) return;
+    const gen = this.generation;
+    if (!(await this.readable(dir))) {
+      if (gen === this.generation) this.lose();
+      return;
+    }
+    if (gen !== this.generation) return;
+    await this.load(dir);
+  }
+
+  /** 直下を列挙して並べる(`pick` と `refresh` の共通の本体)。 */
+  private async load(dir: DirectoryHandleLike): Promise<void> {
     const gen = ++this.generation;
     this.dir = dir;
     this.slots = [];

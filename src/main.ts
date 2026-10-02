@@ -13,6 +13,7 @@ import 'katex/dist/katex.min.css';
 
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
+import { createUnloadGuard } from '@adapter/platform/unload-guard';
 import {
   hasUnsavedTyping,
   isAsidePane,
@@ -195,7 +196,7 @@ import {
   isOfficeLaunchFile,
   localOpenNotice,
 } from '@features/office/office-launch';
-import { OFFICE_DECLINED_NOTICE, OfficeWindow } from '@adapter/platform/office/office-window';
+import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
@@ -264,6 +265,7 @@ import {
   type LaunchedItem,
 } from '@adapter/platform/launch-queue';
 import {
+  CHANGED_OUTSIDE_REOPEN_NOTE,
   LaunchedFiles,
   splitAlreadyOpen,
   writeBackFile,
@@ -783,6 +785,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   実行されない(CLAUDE.md §2)。ここは**繋ぐだけ**。
    */
   const saving = new SavingIndicator(() => repaintStatus());
+  /**
+   * 🔴 **書き込みの最中にタブを閉じる・読み直すときだけ「離れますか」**(#1056)。
+   * ⚠ 判断は `unload-guard.ts` ── ここは**繋ぐだけ**(0 件のときは何も出さない)。
+   */
+  const unloadGuard = createUnloadGuard(window);
   /** ⚠ `paint` はずっと後で組まれるので、繋がるまでは何もしない口にしておく。 */
   let repaintStatus: () => void = () => undefined;
   const armPersist = (real: StoreClient): void => {
@@ -2338,6 +2345,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    (言わないと、押したのに何も起きない)。⚠ 字は `office-window.ts` の定数 ── 手書きしない
       showStatus(OFFICE_DECLINED_NOTICE);
     }
+    else if (ev.type === 'reload-confirming') {
+      // 🔴 **窓が「開く / やめる」の確認を出した**(#1264 欠陥 3)。確認は**裏の窓にだけ**出るので、
+      //    先に言った「開いている Office のウィンドウに表示します」を**置き換えて**、確認が出ていることを教える
+      showStatus(OFFICE_CONFIRMING_NOTICE);
+    }
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
       //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**
@@ -2524,7 +2536,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 const handle = handles[i];
                 const file = files[i];
                 if (!handle || !file) return;
-                launched.remember(lid, handle, file.name);
+                // 🔴 取り込んだときの更新時刻も憶える(#1264 §2 欠陥 1。外で変わったかを後で比べる)
+                launched.remember(lid, handle, file.name, file.lastModified);
                 dispatcher.dispatch({ type: 'FILE_LINKED', lid, name: file.name });
               });
             },
@@ -3367,14 +3380,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         settle: async () => {
           await storeEffects?.settled();
         },
-        confirm: () =>
-          ask(
-            `「${name}」を、いまのノートの内容で上書きします。\n\n` +
-              'ファイルの元の内容は失われます(取り消せません)。よろしいですか?',
-            { okLabel: 'ファイルを上書きする', danger: true },
-          ),
+        // 🔴 取り込んだ後にパソコン側で変わったか(#1264 §2 欠陥 1)── 判断は `launched-files.ts`
+        changedOutside: () => launched.changedSince(lid),
+        confirm: (message) => ask(message, { okLabel: 'ファイルを上書きする', danger: true }),
         getBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
-        write: (body) => writeBackFile(handle, body),
+        write: async (body) => {
+          const result = await writeBackFile(handle, body);
+          // 🔴 書いた自分の更新時刻を取り込み時の時刻へ入れ直す ── 入れ直さないと、次の書き戻しと押し直しが
+          //    「パソコン側で変わっています」と**自分の書込を外の変更として**言う
+          if (result.ok) await launched.refreshModified(lid);
+          return result;
+        },
         done: showStatus,
         fail,
       });
@@ -4457,6 +4473,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onWriting: (writing) => {
       root.toggleAttribute('data-pkc-saving', writing);
       saving.setWriting(writing);
+      unloadGuard.setWriting(writing);
     },
     /**
      * 🔴 **添付の bytes を読む口**(#681 段③ の 2 つ目)。
@@ -4725,16 +4742,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     );
     // 🔴 **同じファイルを 2 回開いても増やさない**(2026-08-05)。
     //    判定の中身は `launched-files.ts`(ここに書くと test が写しを見るだけになる)
-    const { fresh, reopened } = await splitAlreadyOpen(items, launched, (lid) =>
+    const { fresh, reopened, changed } = await splitAlreadyOpen(items, launched, (lid) =>
       dispatcher.getState().entryMetas.has(lid),
     );
     for (const lid of reopened) selectWhenPresent(dispatcher, lid);
     if (fresh.length === 0) {
       // ⚠ **黙って終えない** ── 「開いたのに何も起きない」に見える
+      // 🔴 取り込んだ後に file が変わっていたら、それを言う(PKC のノートは古いまま ── #1264 §2 欠陥 1)
       showStatus(
-        reopened.length > 0
-          ? 'すでに開いているノートを表示しました'
-          : '開けるファイルがありませんでした',
+        changed.length > 0
+          ? CHANGED_OUTSIDE_REOPEN_NOTE
+          : reopened.length > 0
+            ? 'すでに開いているノートを表示しました'
+            : '開けるファイルがありませんでした',
       );
       return;
     }

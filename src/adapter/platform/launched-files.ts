@@ -23,6 +23,15 @@
  * ブラウザ objects で、比較も複製もできない ── 純粋な reducer に混ぜない。
  */
 
+/**
+ * 🔴 **取り込んだ後にパソコン側で変わっていたときの字**(#1264 §2 欠陥 1。🟣 Gemini 裁定 2026-10-02)。
+ * 同じ字を 2 か所で出す(書き戻す前の確認 / 同じ行を押し直したときの下の 1 行)ので 1 か所に置く。
+ */
+export const CHANGED_OUTSIDE_WRITE_BACK_NOTE =
+  'このファイルは取り込んだ後にパソコン側で変わっています。書き戻すと、その変更は消えます';
+export const CHANGED_OUTSIDE_REOPEN_NOTE =
+  'このファイルは取り込んだ後にパソコン側で変わっています(PKC のノートは取り込んだ時の中身です)';
+
 /** `launchQueue` から来る handle(必要な部分だけ)。 */
 export interface LaunchedHandle {
   /** `'file'` / `'directory'`。実装によっては未定義。 */
@@ -45,14 +54,67 @@ export interface WritableLike {
 interface Link {
   handle: LaunchedHandle;
   name: string;
+  /**
+   * 🔴 **取り込んだときの file の `lastModified`**(#1264 §2 欠陥 1)。⚠ 無ければ `null`
+   * (添付・連絡先の記憶は書き戻さないので持たない = 比べない)。
+   * 外のエディタで直されたかを、**押し直したとき**と**書き戻す直前**に比べる材料である。
+   */
+  modifiedAt: number | null;
+}
+
+/** 取り込み時の `lastModified` を持つ file(必要な部分だけ)。 */
+interface HasModified {
+  lastModified: number;
 }
 
 export class LaunchedFiles {
   private readonly byLid = new Map<string, Link>();
 
-  /** lid ↔ ファイルを結ぶ。同じ lid への再登録は上書き(開き直しで handle が変わる)。 */
-  remember(lid: string, handle: LaunchedHandle, name: string): void {
-    this.byLid.set(lid, { handle, name });
+  /**
+   * lid ↔ ファイルを結ぶ。同じ lid への再登録は上書き(開き直しで handle が変わる)。
+   * `modifiedAt` = 取り込んだ file の `lastModified`(渡さなければ「比べない」)。
+   */
+  remember(lid: string, handle: LaunchedHandle, name: string, modifiedAt: number | null = null): void {
+    this.byLid.set(lid, { handle, name, modifiedAt });
+  }
+
+  /** 取り込んだときの `lastModified`(無ければ `null`)。 */
+  modifiedOf(lid: string): number | null {
+    return this.byLid.get(lid)?.modifiedAt ?? null;
+  }
+
+  /**
+   * 書き戻した直後に、**いまの `lastModified`** を取り込み時の時刻として憶え直す(#1264 §2 欠陥 1)。
+   * ⚠ 憶え直さないと、自分が書いた時刻を**外での変更**と読んで、次の書き戻し・押し直しで言ってしまう。
+   * 読めなければ**憶えたまま**にする(=「変わっています」が出る側。黙って消すより安全)。
+   */
+  async refreshModified(lid: string): Promise<void> {
+    const link = this.byLid.get(lid);
+    if (link === undefined || typeof link.handle.getFile !== 'function') return;
+    try {
+      link.modifiedAt = (await link.handle.getFile()).lastModified;
+    } catch {
+      /* 読めなかった ── 古い時刻のまま(次に言う側へ倒れる) */
+    }
+  }
+
+  /**
+   * 🔴 **取り込んだ後に、パソコン側で変わったか**(#1264 §2 欠陥 1)。
+   * ⚠ **`getFile()` を呼ぶ**(いまの `lastModified` を読むため)── 呼んでよいのは
+   * **書き戻す直前**だけ(一覧では呼ばない = #1271)。
+   * ⚠ **読めない・比べられないときは `false`** ── 「変わったかもしれない」と言って
+   * 毎回脅さない(確認の窓は元から出る)。取り込み時の時刻を持たない lid も `false`。
+   */
+  async changedSince(lid: string): Promise<boolean> {
+    const link = this.byLid.get(lid);
+    if (link === undefined || link.modifiedAt === null) return false;
+    if (typeof link.handle.getFile !== 'function') return false;
+    try {
+      const file = await link.handle.getFile();
+      return file.lastModified !== link.modifiedAt;
+    } catch {
+      return false;
+    }
   }
 
   nameOf(lid: string): string | null {
@@ -101,24 +163,29 @@ export class LaunchedFiles {
  * @param isPresent その lid がいま一覧に居るか(消したノートに戻さないため)
  * @returns `fresh` = 取り込む物 / `reopened` = すでに開いていた lid(表示するだけ)
  */
-export async function splitAlreadyOpen<T extends { handle: LaunchedHandle }>(
+export async function splitAlreadyOpen<T extends { handle: LaunchedHandle; file?: HasModified }>(
   items: readonly T[],
   launched: LaunchedFiles,
   isPresent: (lid: string) => boolean,
-): Promise<{ fresh: T[]; reopened: string[] }> {
+): Promise<{ fresh: T[]; reopened: string[]; changed: string[] }> {
   const fresh: T[] = [];
   const reopened: string[] = [];
+  /** 🔴 `reopened` のうち、**取り込んだ後に file の更新時刻が動いている**もの(#1264 §2 欠陥 1)。 */
+  const changed: string[] = [];
   for (const item of items) {
     const known = await launched.findLid(item.handle);
     // ⚠ 紐づけが残っていても **entry が消えていれば取り込み直す**
     //    (ゴミ箱へ入れた後に同じ md を開いたら、また開けるべき)
     if (known !== null && isPresent(known)) {
       reopened.push(known);
+      // ⚠ 押した 1 件の file は呼び側が読み済み(`getFile()` を足さない)。取り込み時の時刻が無ければ比べない
+      const was = launched.modifiedOf(known);
+      if (was !== null && item.file !== undefined && item.file.lastModified !== was) changed.push(known);
       continue;
     }
     fresh.push(item);
   }
-  return { fresh, reopened };
+  return { fresh, reopened, changed };
 }
 
 /** 書き戻しの結果。⚠ 失敗の**理由を持って**返る(黙って終えない)。 */

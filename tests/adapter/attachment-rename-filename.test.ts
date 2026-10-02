@@ -377,17 +377,80 @@ describe('ファイル名だけ書けなかったとき', () => {
 });
 
 describe('畳みの 1 行は、実在する欄を指す', () => {
-  it('🔴 1 行の中の「…」を、描いた改名欄の字(aria-label)から引いて突き合わせる', async () => {
+  it('🔴 1 行の中の「…」を、描いた改名欄の左の見える字(label)から引いて突き合わせる', async () => {
     const r = setup(ATT);
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick(20);
-    const label = r
-      .q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!
-      .getAttribute('aria-label');
-    expect(label, '改名欄に字が無い').toBeTruthy();
-    // 期待値を手で書かない ── 1 行から「…」を全部抜き、どれかが欄の字と一致すること
+    const label = r.q<HTMLLabelElement>('[data-pkc-field="attachment-rename-label"]');
+    expect(label, '改名欄の左に見える字が無い').not.toBeNull();
+    const shown = label!.textContent;
+    // 期待値を手で書かない ── 1 行から「…」を全部抜き、どれかが画面の字と一致すること
     const quoted = [...ATTACHMENT_FOLD_NOTE.matchAll(/「([^」]+)」/g)].map((m) => m[1]);
     expect(quoted.length, '畳みの 1 行が欄を名指ししていない').toBeGreaterThan(0);
-    expect(quoted, `画面に無い欄を指している: ${quoted.join(' / ')}`).toContain(label);
+    expect(quoted, `画面に無い欄を指している: ${quoted.join(' / ')}`).toContain(shown);
+  });
+});
+
+describe('🔴 改名欄に、見える label と、下にダウンロードのファイル名(#1264 欠陥 7-b)', () => {
+  async function shown(initial = ATT, title = 'scan') {
+    const r = setup(initial, { title });
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(20);
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]');
+    expect(input, '改名欄が出ていない(前提が崩れている)').not.toBeNull();
+    const label = r.q<HTMLLabelElement>('[data-pkc-field="attachment-rename-label"]');
+    const hint = r.q<HTMLElement>('[data-pkc-field="attachment-rename-hint"]');
+    return { r, input: input!, label, hint };
+  }
+
+  it('欄の左に見える字「名前」が在り、label の for が欄の id に結ばれている', async () => {
+    const { r, input, label } = await shown();
+    expect(label, 'label 要素が無い').not.toBeNull();
+    expect(label!.tagName).toBe('LABEL');
+    expect(label!.textContent).toBe('名前');
+    // 結び ── for が指す id が、欄そのもの(別の要素ではない)
+    expect(label!.htmlFor, 'label の for が空').not.toBe('');
+    expect(input.id).toBe(label!.htmlFor);
+    expect(r.root.querySelector(`#${CSS.escape(label!.htmlFor)}`)).toBe(input);
+    // label は欄と同じ行(欄の直前の兄弟)に在る ── 欄の下や別の所ではない
+    expect(label!.nextElementSibling).toBe(input);
+    // 欄の名前は label から決まる(見える字と聞こえる字が割れない)
+    expect(input.hasAttribute('aria-label'), 'aria-label が見える字を上書きしている').toBe(false);
+  });
+
+  it('欄の下に「ダウンロードのファイル名: 請求書.pdf」(いまの値から組む)', async () => {
+    const { hint } = await shown(ATT, '請求書');
+    expect(hint, '下の 1 行が無い').not.toBeNull();
+    expect(hint!.textContent).toBe('ダウンロードのファイル名: 請求書.pdf');
+  });
+
+  it('🔴 欄を打ち替えると追従する(拡張子は元のまま足される / 使えない字は _)', async () => {
+    const { input, hint } = await shown();
+    expect(hint!.textContent).toBe('ダウンロードのファイル名: scan.pdf');
+    input.value = '見積書';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(hint!.textContent).toBe('ダウンロードのファイル名: 見積書.pdf');
+    input.value = '年度/末';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(hint!.textContent).toBe('ダウンロードのファイル名: 年度_末.pdf');
+    // 空にすると元の名前のまま(書く側と同じ規則 ── 空の名前を出さない)
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(hint!.textContent).toBe('ダウンロードのファイル名: scan.pdf');
+  });
+
+  it('欄は下の 1 行を説明として指す / ファイルを持たないタイルには下の 1 行を出さない(組む元が無い)', async () => {
+    const { input, hint } = await shown();
+    expect(input.getAttribute('aria-describedby')).toBe(hint!.id);
+    const tile = await shown('---\nattachment.launcher_url: https://example.com\n---\n', 'リンク集');
+    expect(tile.hint, '組む元の無いタイルに出ている').toBeNull();
+    // 対照群:欄と label は出る(前提が空振りでない)
+    expect(tile.label).not.toBeNull();
+  });
+
+  it('同じ添付を 2 枚描いても id が重ならない(留めた枠)', async () => {
+    const a = await shown();
+    const b = await shown();
+    expect(a.input.id).not.toBe(b.input.id);
   });
 });

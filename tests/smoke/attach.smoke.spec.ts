@@ -2732,6 +2732,22 @@ test('🔴 添付の HTML が、本文に書いたのと同じ箱で描かれる
     pinned.locator('[data-pkc-action="download-asset"]'),
     '改名したのにダウンロードのファイル名が変わっていない(拡張子は元のまま足される)',
   ).toHaveAttribute('data-pkc-asset-name', '留めた枠から改名した添付.html');
+  /**
+   * 🔴 **欄の左に見える「名前」と、下にダウンロードのファイル名**(#1264 欠陥 7-b。同じ道中の続き ──
+   *   新しい起動を足さない)。⚠ 属性ではなく**画面に出ていること**(見えている / 欄と同じ行 / 下の 1 行が
+   *   書き込まれたファイル名を言う)を、実ブラウザの寸法で見る。
+   */
+  const nameLabel = pinned.locator('[data-pkc-field="attachment-rename-label"]');
+  await expect(nameLabel, '改名欄の左に「名前」が見えていない').toBeVisible();
+  await expect(nameLabel).toHaveText('名前');
+  await expect(
+    pinned.locator('[data-pkc-field="attachment-rename-hint"]'),
+    '欄の下にダウンロードのファイル名が出ていない',
+  ).toHaveText('ダウンロードのファイル名: 留めた枠から改名した添付.html');
+  const labelBox = await nameLabel.boundingBox();
+  const fieldBox = await rename.boundingBox();
+  expect(labelBox!.x + labelBox!.width, '「名前」が欄の左に居ない').toBeLessThanOrEqual(fieldBox!.x + 1);
+  expect(Math.abs(labelBox!.y + labelBox!.height / 2 - (fieldBox!.y + fieldBox!.height / 2)), '「名前」と欄が別の行に居る').toBeLessThan(fieldBox!.height);
 
   /**
    * 🔴 対照群 ── 主の枠(いま開いている別のノート)は 1 バイトも変わっていない。

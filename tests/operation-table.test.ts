@@ -242,7 +242,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   ⚠ 「フォルダを選ぶ…」は user の操作の流れの中で呼ぶ必要があり、パレットの Enter は
    *   その流れに乗らない可能性がある(実測していない)ので、登記は見送る。
    */
-  'pc-cut-folder', 'pc-dir-note', 'pc-more', 'pc-pick-folder',
+  'pc-cut-folder', 'pc-dir-note', 'pc-more', 'pc-pick-folder', 'pc-refresh-folder',
   'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
   /**
    * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
@@ -446,6 +446,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-02(#1264 §2 欠陥 4-a): PC の帯の「更新」(`pc-refresh-folder`)で受け手 +1 ── 登記は増えない
+      //   (押し口は PC のタブの帯にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      //   「別のフォルダ…」は既に在る `pc-pick-folder` を呼ぶので数は動かない。
       // ⚠ 2026-10-02(#1264 §1): サブフォルダの行を押したときの返事(`pc-dir-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は PC のタブの行にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-02(#1240): 見出しの ✎(`edit-header-cell`)で受け手 +1 ── 登記は増えない(押し口は
@@ -696,12 +699,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 373,
-      receivers: 314,
+      total: 374,
+      receivers: 315,
       registered: 98,
       both: 39,
       outsideActionsTable: 59,
-      unregistered: 275,
+      unregistered: 276,
     });
   });
 

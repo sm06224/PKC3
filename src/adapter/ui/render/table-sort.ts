@@ -66,6 +66,34 @@ export function compareRows(
 }
 
 /**
+ * 🔴 **その表の並べ替えを、元の並び(none)へ戻す**(#1264 欠陥 5)。
+ *
+ * 見出しを 2 回押して欄を開くとき、1 回目・2 回目の押しで**行が 2 回並べ替わってから欄が開く**
+ * (Esc でやめると降順の ▼ が残る)。欄を開く**前**にここを通せば、並びも ▲▼ も元へ戻る。
+ * ⚠ 状態は見出しの `data-pkc-sort-direction` が持つ(`applyTableSort` の押し手はそれを読む)ので、
+ *   **属性と行の並びを両方戻す** ── 片方だけだと次の 1 回押しが「降順の次の none」と読まれて食い違う。
+ * ⚠ 並べ替えを付けていない表(`data-pkc-orig-index` が無い)では何もしない。
+ * @returns 戻したか(元から並べ替えが無ければ `false` ── 何も動かさない)
+ */
+export function resetTableSort(table: Element): boolean {
+  const headers = Array.from(table.querySelectorAll<HTMLElement>('th[data-pkc-sort-direction]'));
+  if (!headers.some((th) => (th.getAttribute('data-pkc-sort-direction') ?? 'none') !== 'none')) return false;
+  for (const th of headers) {
+    th.setAttribute('data-pkc-sort-direction', 'none');
+    th.setAttribute('aria-sort', 'none');
+  }
+  const tbody = table.querySelector('tbody');
+  if (tbody === null) return true;
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort(
+    (a, b) =>
+      Number(a.getAttribute('data-pkc-orig-index') ?? 0) - Number(b.getAttribute('data-pkc-orig-index') ?? 0),
+  );
+  tbody.append(...rows);
+  return true;
+}
+
+/**
  * ホスト要素配下の Markdown 表に列ソート機能を付与する。
  * 冪等に動作し、既に付与済みの表は二重処理しない。
  */

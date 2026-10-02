@@ -384,12 +384,14 @@ describe('行を押すと取り込む(段②)', () => {
 });
 
 describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
-  it('公開面は 選ぶ / 切る / さらに / 開く / 見る だけ', () => {
+  it('公開面は 選ぶ / 更新 / 切る / さらに / 開く / 見る だけ', () => {
     const names = Object.getOwnPropertyNames(LocalFolder.prototype)
       .filter((n) => n !== 'constructor')
       .sort();
-    // ⚠ private の補助(readable / lose / changed)は TS の private で、実行時には見える
-    expect(names).toEqual(['changed', 'cut', 'heldHandle', 'lose', 'more', 'open', 'pick', 'readable', 'view'].sort());
+    // ⚠ private の補助(readable / lose / changed / load)は TS の private で、実行時には見える
+    expect(names).toEqual(
+      ['changed', 'cut', 'heldHandle', 'load', 'lose', 'more', 'open', 'pick', 'readable', 'refresh', 'view'].sort(),
+    );
     expect(names.filter((n) => /remove|delete|rename|move|unlink|write|trash/i.test(n))).toEqual([]);
   });
 
@@ -409,6 +411,54 @@ describe('🔴 消す口・改名・移動を作らない(裁定)', () => {
     const state = codeOnly(readFileSync('src/adapter/state/app-state.ts', 'utf-8'));
     expect(state.includes('DirectoryHandle'), 'state が handle を持っている').toBe(false);
     expect(state.includes('local-folder'), 'state が local-folder を知っている').toBe(false);
+  });
+});
+
+/**
+ * 🔴 **「更新」── 同じ handle で一覧を読み直す**(#1264 §2 欠陥 4-a)。
+ * ⚠ 観測点は 3 つ:①外で足した・消したファイルが一覧に出入りする ②**`getFile` を 1 件も呼ばない**(#1271)
+ * ③選び直し(`picker`)を呼ばない = 同じ handle のまま。
+ */
+describe('更新(同じフォルダの一覧を読み直す)', () => {
+  it('🔴 外で足した file が出て、消した file が消える。picker は呼び直さず、getFile も呼ばない', async () => {
+    const a = fileHandle('a.md');
+    const b = fileHandle('b.md');
+    const entries: FolderEntryHandle[] = [a, b];
+    const { folder, picks } = make(dirHandle(entries));
+    await folder.pick();
+    expect(folder.view().rows.map((r) => r.name)).toEqual(['a.md', 'b.md']);
+    // 外で変わった: b を消し、c を足す
+    entries.splice(1, 1, fileHandle('c.md'));
+    await folder.refresh();
+    expect(folder.view().phase).toBe('listed');
+    expect(folder.view().rows.map((r) => r.name), '外の変更が一覧へ出ない').toEqual(['a.md', 'c.md']);
+    expect(picks, '更新が選び直し(OS の窓)を呼んだ').toHaveLength(1);
+    expect(a.gets, '更新で getFile を呼んだ(#1271)').toBe(0);
+  });
+
+  it('🔴 更新しなければ古い写しのまま(対照群 ── 更新が効いていることの裏)', async () => {
+    const entries: FolderEntryHandle[] = [fileHandle('a.md')];
+    const { folder } = make(dirHandle(entries));
+    await folder.pick();
+    entries.push(fileHandle('z.md'));
+    expect(folder.view().rows.map((r) => r.name)).toEqual(['a.md']);
+  });
+
+  it('🔴 権限が切れていたら、読み直さずに「切れた」と言う', async () => {
+    const perm = { state: 'granted' };
+    const { folder } = make(dirHandle([fileHandle('a.md')], perm));
+    await folder.pick();
+    perm.state = 'prompt';
+    await folder.refresh();
+    expect(folder.view().phase).toBe('lost');
+  });
+
+  it('⚠ 繋いでいないときは何も起きない', async () => {
+    const { folder, changes } = make(dirHandle([]));
+    const before = changes();
+    await folder.refresh();
+    expect(folder.view().phase).toBe('none');
+    expect(changes()).toBe(before);
   });
 });
 

@@ -8,11 +8,13 @@
  * 2. 選ぶと、**そのフォルダの直下**が名前順に並ぶ(名前 / 種類。大きさ・更新日は「—」── 一覧では file を読まない、#1271)。
  *    200 件で切れて「さらに表示」
  * 3. ファイルの行を押すと、**PKC に取り込んで中央に開く**(このタブは開いたまま)
- * 4. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
+ * 4. 「更新」で同じフォルダの一覧を読み直す / 「別のフォルダ…」で選び直す(切らずに済む。#1264 §2)
+ * 5. 「切る」で繋ぎを外す(次に開いたときは繋がっていない)
  *
  * 🔴 **消す口・改名・移動は置かない**(裁定)── パソコンのファイルは取り消せない。
- * ⚠ **書き戻せない種類**(画像・PDF・Office…)の行には「書き戻せません」を出す
- *   (Markdown だけが、取り込んだあと元のファイルへ書き戻せる)。
+ * ⚠ **Markdown の行にだけ**「元ファイルと結びつきます」を出す(取り込んだあと元のファイルへ
+ *   書き戻せるのは Markdown だけ)。画像・PDF・Office などの行には**何も添えない**(#1264 §2 改善 1 ──
+ *   200 行あれば 200 回「書き戻せません」が出ていた)。
  *
  * ⚠ **描画器は handle を持たない** ── `LocalFolder`(`platform/local-folder.ts`)の
  *   `view()` を映すだけで、押された先は `data-pkc-action` を通って binder が呼ぶ
@@ -23,6 +25,7 @@ import {
   FOLDER_PAGE,
   PC_CONTACT_NOTE,
   PC_DIRECTORY_NOTE,
+  PC_LINK_NOTE,
   PC_STATS_NOTE,
   fileKindOf,
   iconFor,
@@ -114,7 +117,11 @@ export class PcFolderRenderer {
     );
   }
 
-  /** 選んでいるフォルダの名前と「切る」。 */
+  /**
+   * 選んでいるフォルダの名前と「更新」「別のフォルダ…」「切る」(#1264 §2 欠陥 4-a)。
+   * ⚠ 読み込み中(`listing`)は「切る」だけ ── 更新・選び直しは**一覧が出た後**の操作
+   *   (読んでいる最中に読み直すと、数が巻き戻って見える)。
+   */
   private band(view: LocalFolderView): HTMLElement {
     const band = document.createElement('div');
     field(band, 'pc-band');
@@ -122,9 +129,31 @@ export class PcFolderRenderer {
     field(name, 'pc-folder-name');
     name.textContent = view.folderName ?? '';
     name.title = view.folderName ?? '';
+    band.append(name);
+    if (view.phase === 'listed') {
+      band.append(
+        button(
+          'pc-refresh-folder',
+          'pc-refresh',
+          '更新',
+          '同じフォルダの一覧を読み直します(ファイルの中身は読みません)',
+        ),
+        // ⚠ 「フォルダを選ぶ…」と**同じ口**(`pc-pick-folder`)── 選び直しの入り口を 2 つ作らない
+        button(
+          'pc-pick-folder',
+          'pc-repick',
+          '別のフォルダ…',
+          '別のフォルダを選びます(選ばずに閉じれば、いまのフォルダのままです)',
+        ),
+      );
+    }
     band.append(
-      name,
-      button('pc-cut-folder', 'pc-cut', '切る', '繋ぎを外します(パソコンのファイルには何もしません)'),
+      button(
+        'pc-cut-folder',
+        'pc-cut',
+        '切る',
+        '繋ぎを外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+      ),
     );
     return band;
   }
@@ -198,10 +227,11 @@ export class PcFolderRenderer {
       contact.textContent = PC_CONTACT_NOTE;
       open.append(contact);
     }
-    if (!row.writeBack) {
+    // 🔴 結びつく(= 書き戻せる)行にだけ言う。書き戻せない行には何も添えない(#1264 §2 改善 1)
+    if (row.writeBack) {
       const note = document.createElement('span');
-      field(note, 'pc-readonly');
-      note.textContent = '書き戻せません';
+      field(note, 'pc-link-note');
+      note.textContent = PC_LINK_NOTE;
       open.append(note);
     }
     li.append(open);

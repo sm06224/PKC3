@@ -61,6 +61,16 @@ export const OFFICE_ADOPTED = 'adopted';
 export const OFFICE_DECLINED_NOTICE =
   'Office のウィンドウに保存していない変更があるため開きませんでした';
 
+/**
+ * 🔴 **窓が確認を出している間に、本体の状態の行へ出す一言**(#1264 欠陥 3)。
+ * ⚠ 本体は文書を渡す前に「開いている Office のウィンドウに表示します」と言うが、未保存の確認は
+ * **裏の Office の窓にだけ**出る ── PKC を前に出したままだと「押したのに何も起きない」に見える。
+ * 🔑 窓が確認を出した時点で `reload-confirming` を返し、本体がこの一言で**先の一言を置き換える**
+ * (新しい経路は作らない ── `reload-declined` と同じ放送)。字は `public/office/host.html` の確認の字と別物。
+ */
+export const OFFICE_CONFIRMING_NOTICE =
+  'Office のウィンドウで確認が出ています(保存していない変更があります)';
+
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 /**
@@ -112,6 +122,12 @@ export type OfficeWindowEvent =
    * 受けたとき、`OfficeWindow` は渡すつもりだった文書を手放し、元の文書の控えを戻す。
    */
   | { readonly type: 'reload-declined' }
+  /**
+   * 🔴 **窓が確認を出した**(#1264 欠陥 3)。窓の中に保存していない変更が在り、「開く / やめる」の答えを待っている。
+   * ⚠ 本体は文書の受け渡しを**何も変えない**(答えが `reload-declined` で返る / 窓が作り直されて求めてくる、の
+   * どちらでも今まで通り)── 状態の行で user へ教えるだけの合図である。
+   */
+  | { readonly type: 'reload-confirming' }
   | { readonly type: 'painted'; readonly ms: number }
   /**
    * 🔴 **保存された**(#205)。⚠ **bytes は載っていない ── 鍵だけ**である。
@@ -568,6 +584,8 @@ function parseEvent(data: unknown): OfficeWindowEvent | null {
       return { type: 'ready-for-document' };
     case 'reload-declined':
       return { type: 'reload-declined' };
+    case 'reload-confirming':
+      return { type: 'reload-confirming' };
     case 'painted':
       return { type: 'painted', ms: typeof p.ms === 'number' ? p.ms : 0 };
     case 'not-installed':

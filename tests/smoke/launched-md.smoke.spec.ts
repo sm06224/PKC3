@@ -37,7 +37,11 @@ async function stubLaunch(
       id: spec.id,
       kind: 'file',
       getFile: () =>
-        Promise.resolve(new File([spec.text], spec.name, { type: 'text/markdown' })),
+        // ⚠ `lastModified` を**固定**する ── 既定は呼ぶたびに「いま」で、押し直し・書き戻しの前に
+        //    「パソコン側で変わっています」(#1264 §2 欠陥 1)が出てしまう(本物は触っていない file なら同じ値)
+        Promise.resolve(
+          new File([spec.text], spec.name, { type: 'text/markdown', lastModified: Date.UTC(2026, 9, 1) }),
+        ),
       // ⚠ 本物は「同じファイルを指すか」を答える(名前ではなく実体)
       isSameEntry: (other: { id?: string }) => Promise.resolve(other.id === spec.id),
       queryPermission: () => Promise.resolve('granted'),
@@ -103,7 +107,7 @@ test('🔴 OS から開いた md が画面に出て、直して元ファイル�
 
   // ④-2 🔴 **本文を空にして書き戻しても、元ファイルは空にならない**(#215 段③)。
   //   確認の窓は出ず(押せて、理由を言う)、ファイルは ④ で書いた中身のまま。
-  //   ⚠ 空白だけ・設定行だけも同じ(判定は unit が全形を見る ── ここは実画面を通す 1 本)。
+  //   ⚠ 空白だけが空(設定行だけは空ではない = #1266。判定は unit が全形を見る ── ここは実画面を通す 1 本)。
   const writtenOf = () =>
     page.evaluate(() => (window as unknown as { __written: Record<string, string> }).__written['議事録.md']);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
@@ -231,10 +235,21 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
     await page.evaluate(() => (window as unknown as { __getFile: string[] }).__getFile),
     '一覧を出しただけで getFile が呼ばれた',
   ).toEqual([]);
-  // 目印: 書き戻せる Markdown には出ず、画像にだけ出る / フォルダの行は押せない
+  // 目印: **Markdown の行にだけ**「元ファイルと結びつきます」(#1264 §2 改善 1)/ 画像には何も添えない / フォルダの行は押せない
   const row = (name: string) => pane.locator('[data-pkc-pc-row]').filter({ hasText: name });
-  await expect(row('メモ.md').locator('[data-pkc-field="pc-readonly"]')).toHaveCount(0);
-  await expect(row('猫.png').locator('[data-pkc-field="pc-readonly"]')).toHaveText('書き戻せません');
+  await expect(row('メモ.md').locator('[data-pkc-field="pc-link-note"]')).toHaveText('元ファイルと結びつきます');
+  await expect(row('猫.png').locator('[data-pkc-field="pc-link-note"]')).toHaveCount(0);
+  await expect(pane.locator('[data-pkc-field="pc-link-note"]'), '結びつく行は md の 1 行だけ').toHaveCount(1);
+  await expect(pane.locator('[data-pkc-field="pc-readonly"]'), '「書き戻せません」が全行に戻っている').toHaveCount(0);
+  // 🔴 帯に「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)── 更新は名前と種類だけ読み直す(getFile を呼ばない)
+  await clickReal(page, '[data-pkc-action="pc-refresh-folder"]');
+  await expect(pane.locator('[data-pkc-pc-row] [data-pkc-field="pc-name"]')).toHaveCount(4);
+  expect(
+    await page.evaluate(() => (window as unknown as { __getFile: string[] }).__getFile),
+    '更新で getFile が呼ばれた',
+  ).toEqual([]);
+  await expect(pane.locator('[data-pkc-field="pc-repick"]')).toHaveText('別のフォルダ…');
+  await expect(pane.locator('[data-pkc-field="pc-refresh"]')).toHaveText('更新');
   await expect(row('下の階層').locator('button')).toHaveCount(0);
   // 🔴 vCard は連絡先になることが見える字で出る(ホバーだけにしない)/ サブフォルダは押しても無言にならない(#1264 §1)
   await expect(row('名刺.vcf').locator('[data-pkc-field="pc-contact-note"]')).toHaveText('連絡先として取り込みます');

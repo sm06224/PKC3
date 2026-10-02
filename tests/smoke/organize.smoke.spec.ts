@@ -347,12 +347,12 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
    * 🔴 **一言の隣に最近開いたノートの近道**(#1254 §3 改善 B)。⚠ 道中に載せる(新しい起動は足さない)。
    * 実ブラウザで見るのは unit が持てない 2 つ:**薄い字**(一言と同じ `--muted`)と、**押し口が
    * 同じ塊の右に居る**(近道が増えても、押し口だけが左の行へ落ちない)。字は割当の表から出る
-   * (既定の第 1 鍵)── 手で書かず、**画面の字が「最近開いたノートは 」で始まる**ことだけ見る。
+   * (既定の第 1 鍵)── 手で書かず、**画面の字が「最近開いたノートへは 」で始まる**ことだけ見る。
    */
   const recentHint = page.locator(
     '[data-pkc-region="filer-breadcrumb"] [data-pkc-field="filer-flatten-recent"]',
   );
-  await expect(recentHint, '入れたのに最近開いたノートの近道が出ない').toHaveText(/^最近開いたノートは .+/);
+  await expect(recentHint, '入れたのに最近開いたノートの近道が出ない').toHaveText(/^最近開いたノートへは .+/);
   const hintLook = await page.evaluate(() => {
     const h = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-recent"]')!;
     const n = document.querySelector<HTMLElement>('[data-pkc-field="filer-flatten-note"]')!;

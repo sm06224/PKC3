@@ -124,6 +124,53 @@ describe.each([
     expect(head.contains(input), '開いたのが別の升').toBe(true);
   });
 
+  it('🔴 見出しを 2 回押す(= click, click, dblclick)→ 欄を開く前に並びが元へ戻り、▲▼ も消える(#1264 欠陥 5)', () => {
+    const { host } = setup(body);
+    const head = ths(host)[1]!;
+    // 本物の 2 回押しは click が 2 回 → dblclick(ブラウザの順)。1 回目で昇順、2 回目で降順になる
+    click(head);
+    expect(firstCol(host), '前提: 1 回目の押しで並べ替わっていない').toEqual(['みかん', 'りんご']);
+    click(head);
+    expect(head.getAttribute('data-pkc-sort-direction'), '前提: 2 回目の押しで降順になっていない').toBe('desc');
+    expect(firstCol(host), '前提: 降順になっていない').toEqual(['りんご', 'みかん']);
+    // 降順は描いたままの並びと同じになってしまうので、1 回目の昇順の途中でも戻ることを下で見る
+    dblclick(head);
+    expect(openInput(host), '2 回押しで欄が開かない').not.toBeNull();
+    expect(firstCol(host), '欄が開いたのに並びが元へ戻っていない').toEqual(['りんご', 'みかん']);
+    for (const th of ths(host)) {
+      expect(th.getAttribute('data-pkc-sort-direction'), '▲▼ が残っている').toBe('none');
+      expect(th.getAttribute('aria-sort')).toBe('none');
+    }
+    // 戻した後の 1 回押しは「最初の 1 回目」(昇順)から数え直す
+    click(head);
+    expect(head.getAttribute('data-pkc-sort-direction'), '戻した後の次の押しが昇順でない').toBe('asc');
+  });
+
+  it('🔴 昇順の途中(1 回だけ押して、すぐ 2 回押しになる形)でも元へ戻る。Esc でやめても並びは元のまま', () => {
+    const { host } = setup(body);
+    const head = ths(host)[1]!;
+    click(head);
+    expect(firstCol(host), '前提: 昇順になっていない').toEqual(['みかん', 'りんご']);
+    dblclick(head);
+    expect(firstCol(host), '2 回押しで元の並びへ戻っていない').toEqual(['りんご', 'みかん']);
+    const input = openInput(host)!;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(firstCol(host), 'Esc でやめたら並びが動いた').toEqual(['りんご', 'みかん']);
+    expect(head.getAttribute('data-pkc-sort-direction'), 'Esc でやめた後に ▲▼ が残っている').toBe('none');
+  });
+
+  it('⚠ 対照群: 本文の升の 2 回押しは、並べ替えを触らない(並べ替えは見出しだけの物)', () => {
+    const { host } = setup(body);
+    click(ths(host)[1]!);
+    expect(firstCol(host)).toEqual(['みかん', 'りんご']);
+    dblclick(tds(host)[0]!);
+    expect(ths(host)[1]!.getAttribute('data-pkc-sort-direction'), '本文の升の 2 回押しで並べ替えを戻した').toBe('asc');
+    // ⚠ 本文の升は欄が開く(その升の字は欄の中へ移る)── 台が壊れて何も起きない回ではないこと
+    expect(openInput(host), '対照群が鳴っていない ── 本文の升の欄が開かない').not.toBeNull();
+    openInput(host)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(firstCol(host), '本文の升の 2 回押しで並びが元へ戻った').toEqual(['みかん', 'りんご']);
+  });
+
   it('🔴 見出しの ✎ を押す → 編集欄が開く。⚠ 並べ替えは走らない', () => {
     const { host } = setup(body);
     const head = ths(host)[1]!;
