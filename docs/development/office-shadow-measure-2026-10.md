@@ -1,6 +1,6 @@
 # Office(LO wasm)の「影」を JS → LO の `storeToURL` で書けるか ── #1228 段 1'
 
-数字と手順だけを書く(判断は書かない)。製品コード(`src/` / `public/`)は 1 行も変えていない。
+数字と手順だけを書く(判断は書かない)。製品コード(`src/` / `public/`)は 1 行も変えていない(⚠ **この節〜「再現手順」までは段 1' の時点**。製品の窓で測った段 1 は末尾の「段 1」)。
 probe は `build/office-wasm/shadow-store-probe.mjs`(段 0 の `autorecovery-probe.mjs` と同じ作法)。
 ここで言う「影」は、**保存していない編集中の文書の状態を、保存とは別の path へ書いた控え**のこと。
 
@@ -142,3 +142,112 @@ probe は `build/office-wasm/shadow-store-probe.mjs`(段 0 の `autorecovery-pro
 1. 一式を `curl -sSL --cacert /root/.ccr/ca-bundle.crt -o lo.zip https://github.com/sm06224/PKC3/releases/download/lo-wasm-dev/lo-wasm-qt6.zip` → 展開 → `inject/ipag.ttf` を足す → `node build/office-wasm/make-pages-bundle.mjs <展開先> <出力>`
 2. native `soffice`(`libreoffice-writer`)を入れる(fixture の変換に使う)
 3. `node build/office-wasm/shadow-store-probe.mjs <出力> <out.json>`(全量 12 case ≒ 12 分)。絞るときは `PKC3_SS_CASES=small-odt:asis,small-odt:patched`、連打の回数は `PKC3_SS_REPEAT`、影の実物を落とすのは `PKC3_SS_KEEP=<dir>`(自作 fixture のみ)
+
+---
+
+# 段 1 ── 製品の窓(`host.html`)で測った(着手の条件)
+
+> 段 1' の probe は `host.html` の**外から** `instantiateStreaming` を包んだだけで、製品の窓では確かめていなかった。
+> 裁定 A の着手の条件は「製品の窓で ① 差し替えが Ctrl+S(`.odt` / `.docx`)を壊さない ② `.odt` の塞ぎが打鍵の体感に出ない」を**先に実測**すること。
+> 数字と手順だけを書く(判断は書かない)。probe は同じ `build/office-wasm/shadow-store-probe.mjs` に腕を足した。
+
+## どの版で測ったか(段 1)
+
+| 項目 | 値 |
+|---|---|
+| 土台 | main `f24c69e2`(段 0 の sha)。差し替えの口を足した版 = commit `d84181da`(①)/ 影の書き出しまで入れた作業ツリー(②。commit 前の版を `public/` ごと写して配った) |
+| 一式・ブラウザ | 段 1' と同じ(`lo-0c031979e70b-run34848755531` / Chromium 141 フル版・headless) |
+| 文書 | 自作 fixture(段 1' と同じ small `.odt` 9,07x B / `.docx` 4,89x B)。⚠ **small だけ**(large は測っていない) |
+| 対照群 | **元の窓**(`f24c69e2` の `public/` をそのまま `/base/` で配る。差し替えの口も影のコードも無い) |
+| 箱 | 4 コア。1 分平均 load は①の間 **7.8〜11.6**・②の間 **2.1〜10**(他の作業と同居)── 時間の値は荒い |
+
+## 差し替えの口の作り(製品側)
+
+- 起動の `instantiateWasm(imports, ok)` に渡る `imports` の `fd_sync` を、**1 度だけ**普通の関数へ差し替える(`public/office/office-shadow.js` の `createSyncGate().wrapImports`)。
+  `begin()` 〜 `end()` の間だけ 0 を返し、それ以外は「元の `fd_sync` が MEMFS に対してやっていたこと」と同じ(開いていない fd は EBADF = 8、それ以外は 0。`syncfs` を持つ mount が来たら数える)。
+- 実測した事実(`WebAssembly.instantiateStreaming` に渡る `imports` を採った): `env.fd_sync` も `wasi_snapshot_preview1.fd_sync` も **`[object WebAssembly.Suspending]`**(呼べない object)。
+  → 起動の後から入れ替えられず、**同じ import で suspend する / しないを切り替えることもできない**。だから「既定は素の `fd_sync`」は**字義どおりには作れない** ── 既定側は「同じ結果を返す普通の関数」である(suspend の 1 回分の待ちが無い)。
+- ⚠ 素の側の関数は、この表のどの Ctrl+S でも **1 度も呼ばれなかった**(下の `passed` = 0。LO 自身の保存の `fd_sync` はこの import を通らない)。素の側の分岐(EBADF 判定)を実機で通した記録は無い。
+
+## ① 製品の窓で、差し替えが Ctrl+S を壊さないか
+
+腕: `control` = 元の窓 / `gate` = 製品の窓(口は入っている・影は書かない)/ `shadow` = 製品の窓(打つ → 口を通して影を 1 回 → Ctrl+S)。各 **2 回**(run1 / run2)。
+手順: 窓を立てて 12 秒 → `SHADOWTYPED` を打つ → (`shadow` のみ)影を `/tmp/pkc3-shadow/shadow.<拡張子>` へ書く → `Ctrl+S`(`.docx` は 3 秒後に `Alt+e` =「Word 2007 形式を使用する」)→ 保存の放送を最大 40 秒待つ。
+観測: 保存の放送 / `isModified` / `/work/seed.*` の mtime と大きさ / 保存された file を FS から読んで zip の中身 / **native `soffice --convert-to txt` で開いて打った字が入っているか**。
+
+| 形式 | 腕 | 回 | 影(書いた時間 / 大きさ) | 保存の放送 | Ctrl+S 後の isModified | 保存前 → 後の大きさ | 保存された file | native soffice | 口(gated / passed) |
+|---|---|---|---|---|---|---|---|---|---|
+| .odt | control | 1 | ─ | 1 | 0 | 9071 → 10161 B | ODF ・ 字入り ○ | 開けた・字入り | ─ |
+| .odt | gate | 1 | ─ | 1 | 0 | 9071 → 10161 B | ODF ・ 字入り ○ | 開けた・字入り | gated 0 / passed 0 |
+| .odt | shadow | 1 | 481.6 ms / 10164 B | 1 | 0 | 9071 → 10162 B | ODF ・ 字入り ○ | 開けた・字入り | gated 2 / passed 0 |
+| .odt | control | 2 | ─ | 1 | 0 | 9071 → 10163 B | ODF ・ 字入り ○ | 開けた・字入り | ─ |
+| .odt | gate | 2 | ─ | 1 | 0 | 9071 → 10163 B | ODF ・ 字入り ○ | 開けた・字入り | gated 0 / passed 0 |
+| .odt | shadow | 2 | 485.35 ms / 10162 B | 1 | 0 | 9071 → 10161 B | ODF ・ 字入り ○ | 開けた・字入り | gated 2 / passed 0 |
+| .docx | control | 1 | ─ | 1 | 0 | 4899 → 5444 B | ooxml ・ 字入り ○ | 開けた・字入り | ─ |
+| .docx | gate | 1 | ─ | 1 | 0 | 4899 → 5444 B | ooxml ・ 字入り ○ | 開けた・字入り | gated 0 / passed 0 |
+| .docx | shadow | 1 | 61.02 ms / 5441 B | 1 | 0 | 4899 → 5444 B | ooxml ・ 字入り ○ | 開けた・字入り | gated 1 / passed 0 |
+| .docx | control | 2 | ─ | 1 | 0 | 4899 → 5443 B | ooxml ・ 字入り ○ | 開けた・字入り | ─ |
+| .docx | gate | 2 | ─ | 1 | 0 | 4899 → 5444 B | ooxml ・ 字入り ○ | 開けた・字入り | gated 0 / passed 0 |
+| .docx | shadow | 2 | 97.65 ms / 5441 B | 1 | 0 | 4899 → 5444 B | ooxml ・ 字入り ○ | 開けた・字入り | gated 1 / passed 0 |
+
+- 12 組すべてで、保存の放送が 1 件・`isModified` 0・mtime が動き・保存された file が完結した zip(`.odt` = ODF / `.docx` = OOXML)・native `soffice` で開けて先頭が `SHADOWTYPED…`
+- `gate`(口は入っているが影は書かない)は `control` と同じ大きさ(`.odt` 10,161〜10,163 B / `.docx` 5,443〜5,444 B)。口を入れただけでは何も変わらなかった
+- `shadow` の影そのもの: `.odt` は ODF(481.6 / 485.4 ms)、`.docx` は OOXML(61.0 / 97.7 ms)、どちらも打った字入り。影の後も `isModified` は 1
+- 口のカウンタ(`gated` = 書く間に呼ばれた数 / `passed` = 外で呼ばれた数): `shadow` の `.odt` は gated 2・`.docx` は gated 1、**passed は全 12 組で 0**
+- 起動直後の落ち(`RuntimeError`)で測り直した回: `small-odt:ctrls-shadow` の run2 が 1 回(影を書く前。`attempts` に残る)
+
+## ② 打鍵の体感(`.odt` small・3 回)
+
+2 つの測り方を分けた。**自動の契機**(製品の窓の `armShadow` が実際に動く。打ち続ける間は書かない → 3 秒止まると 1 回)と、**書き出しの最中に打ったキー**(probe が書き出しを起こし、80 ms 後にキーを打つ ── 最悪の重なり)。
+キーの届き方 = `keydown` の `event.timeStamp`(入力が窓へ着いた時刻。塞がれている間も進む)から、本文(UNO の `getString().length`)が増えたのを 5 ms 刻みで読むまで。対照群 = 元の窓で同じ手順。
+
+### 自動の契機(`e2e`。各 3 回。窓ごとの値)
+
+手順: `SHADOWTYPED` を打つ → 6 秒待つ(最初の影ができる)→ **`a` を 200 ms 間隔で 40 回(約 8.5 秒)** → 止まる → 影の放送を 250 ms 刻みで 6 秒まで待つ → さらに 6 秒待つ → 1.5 秒おきに `x` を 1 つ × 3(書いた後の最初の打鍵)→ 「`z` を打つ → Δ 待つ → `y`」を Δ = 2950 / 3100 / 3400 / 3800 ms で 4 組。
+
+| | 打ち続けた約 8.5 秒の間 | 止まってから影の放送まで | 影の数(棚) | 書き出しの塞ぎ(口の begin 〜 end) | 影の大きさ |
+|---|---|---|---|---|---|
+| 製品の窓 run1 / run2 / run3 | 書き出し 0 回・口 0 回・放送 0 件(3 回とも) | **3,489 / 3,923 / 3,802 ms** | 放送 1 件・棚 1 file(古い影は消えている) | **198.9 / 274.9 / 201.9 ms** | 10,441 / 10,441 / 10,442 B |
+| 元の窓(対照) | ─ | ─(影の口が無い) | ─ | ─ | ─ |
+
+| キーが本文に届くまで(ms) | 書いた後の最初の打鍵(1.5 秒おき × 3) | `z` の Δ 後の `y`(Δ = 2950 / 3100 / 3400 / 3800) |
+|---|---|---|
+| 元の窓 run1 | 6.7 / 4.8 / 16.4 | 6.6 / 5.1 / 5.1 / 5.3 |
+| 元の窓 run2 | 8.0 / 4.5 / 7.6 | 9.8 / 6.2 / 4.9 / 12.7 |
+| 元の窓 run3 | 18.3 / 18.9 / 7.7 | 6.1 / 4.7 / 7.7 / 8.4 |
+| 製品の窓 run1 | 5.9 / 8.4 / 9.6 | 5.6 / 10.8 / 10.4 / 20.9 |
+| 製品の窓 run2 | 22.1 / 7.9 / 7.9 | 11.7 / 13.7 / 8.5 / 6.3(書き出しの区間と重なったと判定された 1 組) |
+| 製品の窓 run3 | 9.9 / 5.8 / 8.0 | 6.9 / 5.7 / 8.3 / 4.9 |
+
+- 書いた後の最初の打鍵の中央値: 元の窓 **7.7 ms**(9 値)/ 製品の窓 **8.0 ms**(9 値)。`y` の 12 組ずつ: 元 4.7〜12.7 ms / 製品 4.9〜20.9 ms
+- 打ち続けた約 8.5 秒(`a` を 40 回)の間は、口の呼び出し(`gated`)・書き出しの区間・影の放送がどれも **0 件**(3 回とも)。止まってから影の放送まで **3.5〜3.9 秒**(= 静止 3 秒 + 1 秒刻みの見張りの位相 + 書き出し約 0.2〜0.3 秒 + 棚へ置く時間。内訳は分けて測っていない)
+- ⚠ 自然な進み方では「`y` が書き出しの最中に当たる」組は 12 組中 1 組(それも書き出しの終わり際)── 重なりの最悪は次の表で別に測った
+
+### 書き出しの最中に打ったキー(`lat`。各 3 回 × 3 打鍵)
+
+影の書き出しを probe が起こし(30 ms 後に始まる)、その 80 ms 後にキーを打つ。キーは塞がれている間は届かず、書き出しが終わってから処理される。
+
+| 腕 | キーが届くまで(ms。9 打鍵) | 書き出し(塞ぎ)(ms。9 回) |
+|---|---|---|
+| 元の窓(影を書かない) | 14.5 / 10.2 / 4.9 ・ 8.1 / 7.0 / 5.8 ・ 6.1 / 8.7 / 12.3 | ─ |
+| 製品の窓(影を書く) | **243.4 / 191.0 / 178.7 ・ 364.2 / 142.1 / 151.2 ・ 406.3 / 201.8 / 323.0** | 292.7 / 228.4 / 234.3 ・ 406.6 / 188.2 / 190.5 ・ 453.1 / 228.8 / 360.9 |
+
+- 9 打鍵すべてが届いた(取りこぼし 0)。遅れは**書き出しの残り時間**で、書き出しの長さ(188〜453 ms)より短かった
+- 1 窓の中では **1 回目の書き出しが最長**(3 窓とも: 292.7 → 228.4 / 234.3、406.6 → 188.2 / 190.5、453.1 → 228.8 / 360.9。3 窓目だけ 3 回目が 2 回目より長い)── 段 1' の「初回は遅い」と同じ向き
+- 箱の 1 分平均 load は ② の間 **2.1〜10**(他の作業と同居)。時間の値は荒い
+
+## 分からなかったこと(段 1)
+
+- `.docx` の自動の契機 / 打鍵の体感は測っていない(②は `.odt` のみ。`.docx` の塞ぎは段 1' で 17〜160 ms)。large 文書(段落 200 + 表 + 画像)は ①② とも測っていない
+- 素の側の関数(EBADF 判定)は、どの Ctrl+S でも呼ばれなかったので**実機で通っていない**。`syncfs` を持つ mount が来たら数えるだけで 0 を返す ── この窓にそんな mount は無い(段 1')が、他の一式で変わるかは見ていない
+- LO 自身の保存が `fd_sync` を呼んだかどうか(import を通らないのか、呼ばないのか)は区別していない。分かっているのは**この import 経由では 1 度も呼ばれなかった**こと
+- LO が**自分で保存している最中**に影の書き出しが重なったとき(大きい文書の Ctrl+S が 3 秒を超えて続く間に別のキーで静止が成立する等)は測っていない。製品側に「LO の保存の最中を避ける」門は無い
+- 打った印は keydown / beforeinput / compositionend / paste / cut / drop。**マウスだけの編集**(ツールバーの太字など)は静止の契機にならない(測っていない)
+- 起動直後の落ち(`RuntimeError`)は、元の窓(`ctrls-control`)でも 1 回出た(初回の試走。差し替えの口とは無関係に見えるが、原因は調べていない)
+
+## 再現手順(段 1)
+
+1. 段 1' と同じ一式を `pages` 形式にして `<pack>` に置く。元の窓は `git archive f24c69e2 public` の展開先を `PKC3_SS_BASE_PUBLIC` に渡す(`/base/` で配られる)
+2. `PKC3_SS_BASE_PUBLIC=<元の public> PKC3_SS_CASES=small-odt:ctrls-control,small-odt:ctrls-gate,small-odt:ctrls-shadow,… node build/office-wasm/shadow-store-probe.mjs <pack> <out.json>`(①は `small-odt` / `small-docx` × `ctrls-*`、②は `small-odt:e2e-control` / `e2e-shadow` と `lat-control` / `lat-shadow`)
+3. ⚠ 走らせている間に `PKC3_PUBLIC` の中身を書き換えない(製品の窓はその場で配られる)── 測る版は先に写してから配る
+

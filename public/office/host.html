@@ -134,6 +134,7 @@
 <script src="office-format.js"></script>
 <script src="office-images.js"></script>
 <script src="office-unsaved.js"></script>
+<script src="office-shadow.js"></script>
 <script>
 (function () {
   'use strict';
@@ -143,6 +144,18 @@
   var nameEl = document.getElementById('name');
   var screenEl = document.getElementById('screen');
   function setStatus(s) { statusEl.textContent = s; }
+
+  // ── 🔴 影(編集中の文書の写し)を書く間だけ `fd_sync` を同期の no-op にする口(#1228 段 1)──────
+  //
+  // ⚠ 判断は `office-shadow.js` ── ここは起動の import へ**1 度だけ**差し込む。import は instantiate の時に
+  //    決まる(`WebAssembly.Suspending` の object なので後から替えられない)ので、`instantiateWasm` の中で包む。
+  //    `begin()` 〜 `end()` の間だけ 0 を返す。**それ以外は元の `fd_sync` と同じ**(理由は `office-shadow.js` の冒頭)。
+  var shadowGate = window.PKC3OfficeShadow
+    ? window.PKC3OfficeShadow.createSyncGate(function () { return window.__lo && window.__lo.FS; })
+    : null;
+  window.__loShadowGate = shadowGate;
+  /** 差し替えが当たった import の名前(空 = 当たっていない)。 */
+  var shadowPatched = [];
   function fail(s) {
     msgEl.textContent = s;
     msgEl.hidden = false;
@@ -565,6 +578,81 @@
       e.preventDefault();
       e.returnValue = '';   // 旧い browser 向け(文面は browser が決める)
     });
+  }
+
+  // ── 🔴 影(編集中の文書の写し)を、**打ってから 3 秒止まったら**書く(#1228 段 1)────────────
+  //
+  // LO が固まる / 窓が落ちても、打った分を失わないための控え。保存(Ctrl+S)とは別の物で、書く先も別
+  // (窓の MEMFS → OPFS の棚 `pkc3-office-shadow/<ノート>/<時刻>.<拡張子>`。同じノートは最新 1 つだけ)。
+  // ⚠ 判断は全部 `office-shadow.js`(静止の判定 / 書く流れ / 棚の整理)── ここは配線だけ
+  //    (host.html は bundle されず、判断を置くと unit が届かない)。
+  // ⚠ **打っている間は書かない** ── 書き出しは main thread を 200〜700ms 塞ぐ(`.odt`。実測は
+  //    `docs/development/office-shadow-measure-2026-10.md`)。keydown などの**印を立てるだけ**で、書くのは止まってから。
+  // ⚠ **先に登録する** ── 下の Ctrl 英字の握り潰し(`stopImmediatePropagation`)より前に印を見る。
+  var shadowQuiet = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createQuiet() : null;
+  var SHADOW_INPUTS = ['keydown', 'beforeinput', 'compositionend', 'paste', 'cut', 'drop'];
+  var SHADOW_MODIFIER_KEYS = { Shift: 1, Control: 1, Alt: 1, Meta: 1, CapsLock: 1 };
+  SHADOW_INPUTS.forEach(function (t) {
+    window.addEventListener(t, function (e) {
+      if (!shadowQuiet) return;
+      // 修飾キーだけの押下は編集ではない(Ctrl を押しただけで「打った」にしない)
+      if (t === 'keydown' && e && SHADOW_MODIFIER_KEYS[e.key] === 1) return;
+      shadowQuiet.typed(Date.now());
+    }, true);
+  });
+  var shadowTimer = null;
+  function stopShadow() {
+    if (shadowTimer) { clearInterval(shadowTimer); shadowTimer = null; }
+  }
+  /**
+   * 1 秒ごとに「止まったか」を見る(静止していなければ何もしない軽い比較)。
+   * @param getToken そのノートの合言葉を返す(⚠ 値で受けない ── 起動後に決まる)
+   */
+  function armShadow(FS, getToken) {
+    var SH = window.PKC3OfficeShadow;
+    var U = window.PKC3OfficeUnsaved;
+    if (!SH || !shadowQuiet || !U) {
+      // 🔴 **黙らない**(`armSaveWatch` と同じ作法)。⚠ console だけだと、窓は正常に見えたまま控えが 1 つも書かれない
+      console.warn('影の見張りを積めません(script が読めていない)');
+      say('shadow-failed', { reason: SH ? SH.reasonOf({ shadowReason: 'no-gate' }) : 'この版の Office では書けません' });
+      return;
+    }
+    // 合言葉が無い文書(窓の中で作った物)の棚の名前。⚠ 窓ごとに別にする(別の窓の影を消さない)
+    var winKey = 'w-' + ((self.crypto && self.crypto.randomUUID) ? self.crypto.randomUUID() : String(Date.now()));
+    var writer = SH.createWriter({
+      now: function () { return Date.now(); },
+      quiet: shadowQuiet,
+      isDead: function () { return dead; },
+      isModified: function () { return U.anyModified(window.__lo); },
+      write: function () {
+        if (!shadowPatched.length) {
+          // 差し替えが当たっていない一式では、書き出しは必ず失敗する ── 書こうとせず理由を言う
+          var e = new Error('shadow: fd_sync の差し替えが当たっていない');
+          e.shadowReason = 'no-gate';
+          throw e;
+        }
+        return SH.storeShadowSync(window.__lo, shadowGate, { docPath: window.__loDocPath });
+      },
+      shelve: function (info) {
+        var stream = FS.open(info.path, 'r');
+        var done = function () { try { FS.close(stream); } catch (e) { /* 既に閉じている */ } };
+        return SH.shelve({
+          storage: navigator.storage,
+          id: SH.safeId(getToken(), winKey),
+          ext: info.ext,
+          size: info.size,
+          now: function () { return Date.now(); },
+          read: function (into, wanted, position) { return FS.read(stream, into, 0, wanted, position); },
+        }).then(function (r) { done(); return r; }, function (e) { done(); throw e; });
+      },
+      // ⚠ 置けたら MEMFS の写しは**すぐ捨てる**(ゼロコピー・生成物はライフサイクル終端で破棄)
+      discard: function () { SH.discardLocal(FS); },
+      // 成功は user へ言わない(うるさい)。本体が「最後に書いた時刻」だけ覚える静かな放送
+      onWritten: function (at) { say('shadow-written', { at: at }); },
+      onFailed: function (reason) { say('shadow-failed', { reason: reason }); },
+      log: function (e) { console.warn('編集の控えを書けませんでした', e); },
+    });
+    shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
   }
 
   // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
@@ -1588,6 +1676,10 @@
         },
         getPreloadedPackage: function () { return dataBuf; },
         instantiateWasm: function (imports, ok) {
+          // 🔴 影を書く口(#1228 段 1)。⚠ 当たらなくても起動は続ける ── 影が書けないだけ
+          if (shadowGate) {
+            try { shadowPatched = shadowGate.wrapImports(imports); } catch (e) { shadowPatched = []; }
+          }
           WebAssembly.instantiateStreaming(
             gunzipResponse(blobs['soffice.wasm.gz'], 'application/wasm'), imports,
           ).then(function (r) { ok(r.instance, r.module); }, function (e) {
@@ -1698,6 +1790,8 @@
       //    ことがある ── 後ろに置くと**一生積まれない**。
       //    ⚠ 文書が無いとき(Start Center)も積む ── 新規作成の保存がここから来る
       armSaveWatch(FS, docToken);
+      // 🔴 影(編集中の文書の写し)の見張り(#1228 段 1)。⚠ 保存の見張りと**別の timer**(1 timer = 1 仕事)
+      armShadow(FS, function () { return docToken; });
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
       //
       // ⚠ **上限を置く。** 版面が出なければ `clearInterval` に到達せず、
@@ -1827,6 +1921,7 @@
     //    棚に残るのは `.json` まで書けたものだけで、静穏待ちの分は消える。
     //    塞いだのは `beforeunload`(上)── **閉じる前に user に止まってもらう**
     stopSaveWatch();
+    stopShadow();
     say('closed');
   });
   main();

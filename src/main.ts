@@ -201,7 +201,7 @@ import {
   isOfficeLaunchFile,
   localOpenNotice,
 } from '@features/office/office-launch';
-import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow } from '@adapter/platform/office/office-window';
+import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener } from '@adapter/platform/office/office-open';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
@@ -2377,6 +2377,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 **窓が「開く / やめる」の確認を出した**(#1264 欠陥 3)。確認は**裏の窓にだけ**出るので、
       //    先に言った「開いている Office のウィンドウに表示します」を**置き換えて**、確認が出ていることを教える
       showStatus(OFFICE_CONFIRMING_NOTICE);
+    }
+    else if (ev.type === 'shadow-failed') {
+      // 🔴 **窓が編集の控え(影)を書けなかった**(#1228 段 1)── 黙らない(user は控えがあるつもりでいる)。
+      //    ⚠ 字は `office-window.ts` の関数 ── 手書きしない。成功(`shadow-written`)は言わない(うるさい)
+      showStatus(shadowFailedNotice(ev.reason));
     }
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この

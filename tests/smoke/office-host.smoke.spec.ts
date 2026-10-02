@@ -270,6 +270,14 @@ async function seedFakePack(
           cfg.instantiateWasm({}, function () { window.__okCalled = true; });
           return new Promise(function () {});   // ⚠ 本物同様、解決も棄却もしない
         }
+        // 🔴 影の口(#1228 段 1)は instantiateWasm の中で起動の import の fd_sync を包む。偽の import を渡して
+        //   **本物の経路**を通す(instantiateStreaming は本物の wasm を作れないので、呼ばれる間だけ偽の結果を返す)。
+        //   (この中は template literal ── バッククォートを書かない)
+        window.__fakeImports = { env: { fd_sync: {} }, wasi_snapshot_preview1: { fd_sync: {} } };
+        var realIS = WebAssembly.instantiateStreaming;
+        WebAssembly.instantiateStreaming = function () { return Promise.resolve({ instance: {}, module: {} }); };
+        try { cfg.instantiateWasm(window.__fakeImports, function () {}); }
+        finally { WebAssembly.instantiateStreaming = realIS; }
         var c = document.createElement('canvas');
         c.width = 320; c.height = 200;
         cfg.qt.containerElements[0].appendChild(c);
@@ -360,6 +368,12 @@ async function seedFakePack(
               window.__files[b] = window.__files[a];
               delete window.__files[a];
             },
+            // 影(#1228 段 1)を棚へ置いた後に MEMFS の写しを捨てる経路が使う
+            unlink: function (p) {
+              window.__files = window.__files || {};
+              if (!(p in window.__files)) throw new Error('ENOENT: ' + p);
+              delete window.__files[p];
+            },
           },
           callMain: function (a) { window.__args = a; window.__order.push('callMain'); },
           // 🔴 **UNO 橋の偽物**(#1228 穴②)。⚠ 形は実物(lo-0c031979e70b)で測ったもの:
@@ -372,7 +386,23 @@ async function seedFakePack(
             return w({ getValueByName: function () { return w({ get: function () { return w({}); } }); } });
           },
           uno: { com: { sun: { star: {
-            frame: { XDesktop: { query: function () {
+            frame: {
+              XStorable: { query: function () {
+                return {
+                  getLocation: function () { return window.__fakeLoc || ''; },
+                  storeToURL: function (url, seq) {
+                    window.__stores = window.__stores || [];
+                    window.__stores.push({
+                      url: url, filter: seq.items[0] && seq.items[0].Value.v,
+                      gateDuring: window.__loShadowGate ? window.__loShadowGate.isActive() : null,
+                    });
+                    window.__files = window.__files || {};
+                    window.__files[url.replace('file://', '')] = 'SHADOW-BYTES';
+                  },
+                  delete: function () {},
+                };
+              } },
+              XDesktop: { query: function () {
               var w = function (o) { o.delete = function () {}; return o; };
               return w({ getComponents: function () { return w({ createEnumeration: function () {
                 var i = 0; var docs = window.__fakeDocs || [];
@@ -389,6 +419,19 @@ async function seedFakePack(
               return { isModified: function () { return el.doc; }, delete: function () {} };
             } } },
           } } } },
+          // 🔴 影(#1228 段 1)を書く XStorable.storeToURL の偽物。⚠ 形は実物(lo-0c031979e70b)で測ったもの。
+          //   書いた url / FilterName / **書いている間の差し替えの口の状態**を window.__stores へ残す。
+          //   場所は window.__fakeLoc(既定は無し = まだ保存していない新規)。
+          //   (この中は template literal ── バッククォートを書かない)
+          'uno_Type_com$sun$star$beans$PropertyState': { DIRECT_VALUE: 0 },
+          'uno_Sequence_com$sun$star$beans$PropertyValue': function (n, from) {
+            this.items = [];
+            this.set = function (i, v) { this.items[i] = v; };
+            this.delete = function () {};
+          },
+          uno_Sequence: { FromSize: 1 },
+          uno_Any: function (t, v) { this.v = v; this.delete = function () {}; },
+          uno_Type: { String: function () { return 'String'; }, Boolean: function () { return 'Boolean'; } },
         };
       };
     `;
@@ -1371,6 +1414,137 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     metas.map(([, t]) => (JSON.parse(t) as { name: string }).name),
     'LO の temp を保存として拾っている',
   ).not.toContain('lu42.tmp');
+
+  /**
+   * 🔴 **影(編集中の文書の写し)は、打ってから 3 秒止まったら 1 回だけ書かれる(#1228 段 1)。**
+   *
+   * ⚠ 本物の LO は無い ── 偽の UNO 橋(`seedFakePack` の `XStorable`)は**書いた url / FilterName / 書いている間の
+   * 差し替えの口の状態**を残す。ここが見るのは**窓の配線**(打った印 → 静止 → 保存済みか聞く → 書く → 棚へ刻んで置く →
+   * MEMFS の写しを捨てる → 放送)。本物の LO で書けること・Ctrl+S を壊さないことは手元の probe で測った
+   * (`docs/development/office-shadow-measure-2026-10.md`)。
+   * 🔑 新しく起動する test を足さない(`scripts/smoke-budget.mjs`)── 上の道中の続きで見る。
+   */
+  const shadowProbe = await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__fakeLoc = 'file://' + encodeURI('/work/報告書.odt');
+    w.__stores = [];
+    w.__shadowSeen = [];
+    w.__savedDuringShadow = 0;
+    const l = new BroadcastChannel('pkc3-office');
+    l.onmessage = (ev: MessageEvent): void => {
+      const d = ev.data as { pkc3Office?: string; payload?: unknown };
+      if (d?.pkc3Office === 'shadow-written' || d?.pkc3Office === 'shadow-failed') (w.__shadowSeen as unknown[]).push(d);
+      if (d?.pkc3Office === 'saved') (w.__savedDuringShadow as number) += 1;
+    };
+    w.__shadowListener = l;
+    return {
+      gate: Boolean(w.__loShadowGate),
+      imports: w.__cfg !== undefined,
+    };
+  });
+  expect(shadowProbe.gate, '差し替えの口が窓に無い').toBe(true);
+  // 起動の import の fd_sync が、本物の経路で口の関数へ差し替わっている(他の import は触らない)
+  const wrapped = await page.evaluate(() => {
+    const w = window as unknown as { __fakeImports: { env: { fd_sync: unknown }; wasi_snapshot_preview1: { fd_sync: unknown } }; __loShadowGate: { fdSync: unknown } };
+    return [w.__fakeImports.env.fd_sync === w.__loShadowGate.fdSync, w.__fakeImports.wasi_snapshot_preview1.fd_sync === w.__loShadowGate.fdSync];
+  });
+  expect(wrapped, '起動の import の fd_sync が口へ差し替わっていない(env / wasi_snapshot_preview1)').toEqual([true, true]);
+  const key = (): Promise<void> => page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  });
+  const shadowState = (): Promise<{ stores: { url: string; filter: string; gateDuring: boolean | null }[]; seen: { pkc3Office: string; payload: { at?: number; reason?: string } }[]; local: boolean; gateActive: boolean; saved: number }> =>
+    page.evaluate(() => {
+      const w = window as unknown as {
+        __stores: { url: string; filter: string; gateDuring: boolean | null }[];
+        __shadowSeen: { pkc3Office: string; payload: { at?: number; reason?: string } }[];
+        __files: Record<string, string>;
+        __loShadowGate: { isActive(): boolean };
+        __savedDuringShadow: number;
+      };
+      return {
+        stores: w.__stores.slice(), seen: w.__shadowSeen.slice(),
+        local: '/tmp/pkc3-shadow/shadow.odt' in (w.__files ?? {}),
+        gateActive: w.__loShadowGate.isActive(),
+        saved: w.__savedDuringShadow,
+      };
+    });
+  const shelf = (): Promise<{ dir: string; name: string; text: string }[]> => page.evaluate(async () => {
+    const out: { dir: string; name: string; text: string }[] = [];
+    const root = await navigator.storage.getDirectory();
+    let top: FileSystemDirectoryHandle;
+    try { top = await root.getDirectoryHandle('pkc3-office-shadow'); } catch { return out; }
+    type Iter = { entries(): AsyncIterable<[string, FileSystemHandle]> };
+    for await (const [dn, dh] of (top as unknown as Iter).entries()) {
+      if (dh.kind !== 'directory') continue;
+      for await (const [fn, fh] of (dh as unknown as Iter).entries()) {
+        out.push({ dir: dn, name: fn, text: await (await (fh as FileSystemFileHandle).getFile()).text() });
+      }
+    }
+    return out;
+  });
+  // ── 対照群 1: 保存済み(isModified が 0)なら、止まっても書かない ──────────
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fakeDocs = [0]; });
+  await key();
+  await page.waitForTimeout(4600);   // 3 秒の静止 + 1 秒刻みの見張り + 余裕
+  expect((await shadowState()).stores, '保存済みなのに影を書いた').toEqual([]);
+  expect(await shelf(), '保存済みなのに棚へ置いた').toEqual([]);
+  // ── 打ち続けている間(200ms 間隔・約 3 秒)は書かない ──────────────────
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fakeDocs = [1]; });
+  for (let i = 0; i < 16; i += 1) {
+    await key();
+    await page.waitForTimeout(200);
+  }
+  expect((await shadowState()).stores, '打ち続けているのに影を書いた(打鍵を塞ぐ)').toEqual([]);
+  // ── 止まると 1 回だけ書く ─────────────────────────────────────────────
+  await expect
+    .poll(async () => (await shadowState()).seen.length, { message: '3 秒止まっても影が書かれない / 放送が来ない', timeout: 8000 })
+    .toBe(1);
+  // ⚠ 数えたのは「成功 / 失敗」のどちらでもよい放送 ── 失敗(理由つき)で満たされていないことを先に確かめる
+  expect((await shadowState()).seen.map((e) => `${e.pkc3Office}:${e.payload.reason ?? ''}`), '成功の放送でなく失敗が来た').toEqual(['shadow-written:']);
+  const st = await shadowState();
+  expect(st.stores, '書き出しが 1 回でない').toHaveLength(1);
+  expect(st.stores[0]!.url).toBe('file:///tmp/pkc3-shadow/shadow.odt');
+  expect(st.stores[0]!.filter, '.odt の FilterName').toBe('writer8');
+  expect(st.stores[0]!.gateDuring, '書いている間に差し替えの口が開いていない').toBe(true);
+  expect(st.gateActive, '書き終えたのに差し替えが残っている').toBe(false);
+  expect(st.seen[0]!.pkc3Office).toBe('shadow-written');
+  expect(typeof st.seen[0]!.payload.at, '書いた時刻が放送に載っていない').toBe('number');
+  expect(st.local, 'MEMFS の写しを捨てていない(ゼロコピー・即破棄)').toBe(false);
+  expect(st.saved, '影を書いたのを「保存された」と取り違えて放送した').toBe(0);
+  // 棚: <棚>/<合言葉>/<時刻>.odt に、書き出した bytes そのまま
+  const shelved = await shelf();
+  expect(shelved.map((f) => f.dir), '棚の名前が合言葉でない').toEqual(['lid-TEST']);
+  expect(shelved[0]!.name).toMatch(/^\d{13}\.odt$/);
+  expect(shelved[0]!.text, '棚の中身が書き出した影でない').toBe('SHADOW-BYTES');
+  // 止まったままなら、もう書かない(3 秒ごとに書き続けない)
+  await page.waitForTimeout(3500);
+  expect((await shadowState()).stores, '打っていないのに続けて書いた').toHaveLength(1);
+  // ── もう 1 度打って止まると、棚は最新 1 つのまま ──────────────────────
+  await key();
+  await expect
+    .poll(async () => (await shadowState()).stores.length, { message: '2 回目の影が書かれない', timeout: 8000 })
+    .toBe(2);
+  await expect.poll(async () => (await shelf()).length, { message: '古い影が残っている(最新 1 つだけ残す)' }).toBe(1);
+  // ── 棚に置けなかったら黙らない(理由つきで放送する)────────────────────
+  await page.evaluate(() => {
+    const s = navigator.storage as unknown as { getDirectory: () => Promise<unknown>; __orig?: () => Promise<unknown> };
+    s.__orig = s.getDirectory.bind(navigator.storage);
+    s.getDirectory = (): Promise<unknown> => Promise.reject(new DOMException('full', 'QuotaExceededError'));
+  });
+  await key();
+  await expect
+    .poll(async () => (await shadowState()).seen.filter((e) => e.pkc3Office === 'shadow-failed').length, {
+      message: '棚に置けなかったのに黙っている', timeout: 8000,
+    })
+    .toBe(1);
+  const failed = (await shadowState()).seen.find((e) => e.pkc3Office === 'shadow-failed')!;
+  expect(failed.payload.reason, '理由は user の字で').toBe('保存領域の空きが足りません');
+  await page.evaluate(() => {
+    const s = navigator.storage as unknown as { getDirectory: () => Promise<unknown>; __orig?: () => Promise<unknown> };
+    if (s.__orig) s.getDirectory = s.__orig;
+    (window as unknown as { __shadowListener: BroadcastChannel }).__shadowListener.close();
+    (window as unknown as Record<string, unknown>).__fakeDocs = [];
+  });
 
   /**
    * 🔴 **別の文書を開く放送(#1228 穴②)── 窓の中に保存していない変更が在るときだけ、窓の中で確認する。**
