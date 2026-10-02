@@ -249,6 +249,38 @@ describe('🔴 焦点が別の入力欄へ移ったら空にする(#1264 §1)', 
   });
 });
 
+describe('🔴 後始末の後に走っても落ちない ── global の型の名前を読まない(2026-10-02)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  it('global の HTMLElement が無くても、読みは例外を投げずに数を出す(対照: 判定は同じ)', () => {
+    const { region, slot, ta } = surface();
+    ta.focus();
+    ta.setSelectionRange(0, 3);
+    // 🔴 happy-dom の teardown を模す ── vitest は環境を畳むとき global を外す(`document.defaultView` も
+    //    globalThis なので、窓から引いても同じく消える)。型の名前を読む書き方だと、ここで落ちる
+    vi.stubGlobal('HTMLElement', undefined);
+    vi.stubGlobal('HTMLTextAreaElement', undefined);
+    vi.stubGlobal('HTMLInputElement', undefined);
+    expect(() => syncSelectionStats(region)).not.toThrow();
+    expect(slot.textContent, '前提: 本文の選びが数に出る').not.toBe('');
+  });
+  it('対照: 題名の欄に焦点が在れば、global が無くても空にする(判定そのものが生きている)', () => {
+    const { region, slot, ta } = surface();
+    const title = document.createElement('input');
+    title.setAttribute('data-pkc-field', 'editor-title');
+    region.append(title);
+    ta.setSelectionRange(0, 3);
+    syncSelectionStats(region);
+    expect(slot.textContent, '前提').not.toBe('');
+    title.focus();
+    vi.stubGlobal('HTMLElement', undefined);
+    vi.stubGlobal('HTMLInputElement', undefined);
+    expect(() => syncSelectionStats(region)).not.toThrow();
+    expect(slot.textContent).toBe('');
+  });
+});
+
 describe('書き込みを減らす(#1215)', () => {
   it('🔑 字が同じなら書かない(setter を数える)', () => {
     const { region, slot, ta } = surface();

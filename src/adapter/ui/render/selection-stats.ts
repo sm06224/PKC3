@@ -62,12 +62,18 @@ const NON_TEXT_INPUT = new Set([
  * ⚠ 本文の欄そのもの(`ta`)は別の欄ではない。
  */
 function focusOnOtherField(region: HTMLElement, ta: HTMLTextAreaElement | null): boolean {
+  // 🔴 global の `HTMLElement` / `HTMLInputElement` を **読まない**(2026-10-02)── `tagName` で見る。
+  //    trailing debounce の読みは test の後始末(happy-dom の teardown)の**後**に走ることがあり、
+  //    `instanceof HTMLElement` だと `ReferenceError: HTMLElement is not defined` が unhandled で出て、
+  //    負荷しだいで全量 unit が赤くなっていた(#1268 で足した直後に 2 度観測)。
+  //    ⚠ vitest の happy-dom では `document.defaultView === globalThis` なので「窓から引く」でも同じ ──
+  //    型の名前に依らない判定にするのが唯一の形である。
   const active = region.ownerDocument.activeElement;
-  if (!(active instanceof HTMLElement) || active === ta) return false;
-  if (active instanceof HTMLTextAreaElement) return true;
-  if (active instanceof HTMLInputElement) return !NON_TEXT_INPUT.has(active.type);
+  if (active === null || active === ta) return false;
+  if (active.tagName === 'TEXTAREA') return true;
+  if (active.tagName === 'INPUT') return !NON_TEXT_INPUT.has((active as HTMLInputElement).type);
   const ce = active.getAttribute('contenteditable');
-  return active.isContentEditable === true || (ce !== null && ce !== 'false');
+  return (active as HTMLElement).isContentEditable === true || (ce !== null && ce !== 'false');
 }
 
 /**
