@@ -109,7 +109,7 @@ beforeAll(async () => {
    * ⚠ 塞いだ後の器で書き込みが動くことが、この file の主張である。
    */
   const src = duckDbReadableSourceOf('lid-1', '売上.csv');
-  if (src === null) throw new Error('前提が崩れている(売上.csv が DuckDB へ渡せる形にならない)');
+  if (src === null || src.kind === 'sqlite') throw new Error('前提が崩れている(売上.csv が DuckDB へ渡せる形にならない)');
   const file = duckDbFileNameOf(src);
   db.registerFileBuffer(file, new TextEncoder().encode('id,品名\n1,牛乳\n2,パン\n3,卵\n'));
   c.query(duckDbLoadSql(src, file));
@@ -216,7 +216,7 @@ describe('🔴 2 つの file を並べて、JOIN で突き合わせられる(実
     ];
     const sources = files.map((f) => {
       const s = duckDbReadableSourceOf(f.lid, f.name);
-      if (s === null) throw new Error(`前提が崩れている(${f.name})`);
+      if (s === null || s.kind === 'sqlite') throw new Error(`前提が崩れている(${f.name})`);
       return s;
     });
     const tables = duckDbTableNamesOf(sources);

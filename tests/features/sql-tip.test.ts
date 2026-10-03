@@ -185,8 +185,62 @@ describe('🔴 DuckDB の案内・手本は相手ごとに変わる(#682 段④c
 
   it('⚠ 相手を選ぶ前の案内は、DuckDB で選べる相手を全部知らせる', () => {
     const first = sqlTipText(null, 'sqlite');
-    for (const ext of ['.csv', '.parquet', '.json']) {
+    for (const ext of ['.csv', '.parquet', '.json', '.sqlite']) {
       expect(first, `${ext} を知らせていない`).toContain(ext);
     }
+  });
+});
+
+/**
+ * 🔴 **`.sqlite` を DuckDB で引くときの案内・手本**(#682 段④d)。
+ *
+ * ⚠ 表の名前は**元のまま**で、何枚在るかは中身次第 ── `guestTableNameOf`(1 file = 1 表)へは
+ *   渡せない(型で外してある)ので、案内も手本も**開いてある客の表**(`target.tables`)から作る。
+ */
+describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d)', () => {
+  const sq = (tables: string[]) => ({ name: '家計.sqlite', tables });
+
+  it('🔴 案内に、中の表の名前を元のまま並べる(csv などへ潰さない)', () => {
+    const t = sqlTipText(sq(['売上', '客']), 'duckdb');
+    expect(t).toContain('家計.sqlite を DuckDB へ写した表です');
+    expect(t, '表の名前が出ていない').toContain('売上, 客');
+    expect(t, '元のままと言っていない').toContain('元のまま');
+    expect(t, 'BLOB の扱いを言っていない').toContain('base64');
+    // ⚠ csv / parquet の案内の字が混ざらない
+    expect(t).not.toContain('写した表 csv');
+    expect(t).not.toContain('_note');
+  });
+
+  it('🔴 手本は 1 つ目の表を元の名前で引く(引用して、そのまま打てる)', () => {
+    const ex = sqlPlaceholder(sq(['売上', '客']), 'duckdb');
+    expect(ex).toBe('FROM "売上" SELECT * LIMIT 20');
+    expect(checkDuckDbSql(ex).ok, '画面の手本が門に断られる').toBe(true);
+    // 空白や記号が入った表の名前でも、引用で打てる
+    expect(sqlPlaceholder(sq(['my table']), 'duckdb')).toBe('FROM "my table" SELECT * LIMIT 20');
+    expect(sqlPlaceholder(sq(['a"b']), 'duckdb')).toBe('FROM "a""b" SELECT * LIMIT 20');
+  });
+
+  it('表が 1 枚も無い DB の手本は表の一覧(SHOW は門が断るので information_schema)', () => {
+    const ex = sqlPlaceholder(sq([]), 'duckdb');
+    expect(ex).toBe('SELECT table_name FROM information_schema.tables');
+    expect(checkDuckDbSql(ex).ok).toBe(true);
+  });
+
+  it('🔴 2 つ以上並べるときは「ファイル名_表名」で手本を出す(1 つ目が .sqlite)', () => {
+    const ex = sqlPlaceholder(sq(['売上', '客']), 'duckdb', ['在庫.csv']);
+    expect(ex).toBe('FROM 家計_売上 SELECT * LIMIT 20');
+    expect(checkDuckDbSql(ex).ok).toBe(true);
+    const tip = sqlTipText(sq(['売上', '客']), 'duckdb', ['在庫.csv']);
+    // 🔴 表の数は言わない(中に何枚在るか、足した側は分からない)
+    expect(tip).not.toContain('2 つの表');
+    expect(tip).toContain('ファイル名_表の名前');
+    expect(tip).toContain('家計.sqlite → 家計_表の名前');
+    expect(tip).toContain('在庫.csv → 在庫');
+  });
+
+  it('⚠ 内蔵の sqlite で引くときの案内は今までどおり(表の一覧と、二重引用符の手本)', () => {
+    const t = sqlTipText(sq(['売上', '客']), 'sqlite');
+    expect(t).toContain('この file に在る表: 売上, 客');
+    expect(sqlPlaceholder(sq(['売上', '客']), 'sqlite')).toBe('SELECT * FROM "売上" LIMIT 20');
   });
 });

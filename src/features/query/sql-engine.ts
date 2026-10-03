@@ -24,7 +24,7 @@
  * | この PKC のノート | sqlite だけ | 正本が sqlite の中に在る。DuckDB へ渡すには**写す**しかなく、写す量も時間も**まだ測っていない**(設計 doc §10) |
  * | 添付 / 手持ちの `.csv` `.tsv` | 🟢 **両方** | bytes は**どちらの道でも読む**ので、DuckDB へ渡すのに写しが 1 バイトも増えない |
  * | 🔴 添付 / 手持ちの `.parquet` `.json` `.ndjson` `.jsonl` | **DuckDB だけ** | 内蔵の sqlite は中身を解釈できない(#682 段④c) |
- * | 添付の `.sqlite` | sqlite だけ | DuckDB から読むには `sqlite_scanner` を**器の中で**当てる段がまだ無い(#682 の次の段) |
+ * | 🔴 添付 / 手持ちの `.sqlite` | 🟢 **両方**(#682 段④d) | DuckDB へは**表を NDJSON に写して**渡す(`ATTACH` は器の中で bytes を読めない ── 実測)。内蔵の sqlite は今までどおり画像をそのまま開く |
  * | 添付の `.xlsx` | sqlite だけ | DuckDB から読むには `excel` 拡張が要る(同梱していない ── `DUCKDB_EXTENSIONS`) |
  * | 🔴 **2 つ以上を並べているとき**(#918 段⑦) | **DuckDB だけ** | 内蔵の sqlite は 1 度に 1 つの file しか開けない。並べられるのは DuckDB で読める種類だけなので、この行は上の表と矛盾しない |
  *
@@ -124,14 +124,14 @@ export function sqlEngineHint(engine: SqlEngine, name: string | null, multi = fa
      */
     return isDuckDbOnlySource(src) ? 'この形式は DuckDB でだけ引けます' : null;
   }
-  if (name === null) return '取り込んだ .csv / .parquet / .json などを選ぶと使えます';
+  if (name === null) return '取り込んだ .csv / .parquet / .json / .sqlite などを選ぶと使えます';
   /**
    * 🔑 **読めるかどうかは `DUCKDB_READABLE_KINDS` 1 か所**(#682 段④c)──
    *   ここで種類を並べ直すと、走らせる側(`duckdb-runner.ts`)と食い違った日に
    *   「**選べるのに、押すと組み方が分からない**」が生まれる。
    */
   if (isDuckDbReadableSource(src)) return null;
-  return '.csv / .tsv / .parquet / .json のときだけ使えます';
+  return '.csv / .tsv / .parquet / .json / .sqlite のときだけ使えます';
 }
 
 /**

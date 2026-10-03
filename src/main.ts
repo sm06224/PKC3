@@ -4582,6 +4582,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   `duckdb-pack-store.ts` の `lendInstalledPack()` に寄せてある。
    */
   const duckDbPackStore = new DuckDbPackStore();
+  const storePort = createStorePort(client, cid);
+  const exportSqliteForDuckDb = storePort.exportSqliteForDuckDb;
   const duckDbRunner = new DuckDbRunner({
     fetchText: async (url) => {
       const res = await fetch(url);
@@ -4590,8 +4592,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     open: (urls) => openDuckDb(urls),
     lendInstalled: () => duckDbPackStore.lendInstalledPack(),
+    /**
+     * 🔴 **`.sqlite` を DuckDB で引くとき、行を読むのは storage worker**(#682 段④d)。
+     * ⚠ DuckDB の器の中では `ATTACH` が bytes を読めない(実測)── 表を NDJSON に写して渡す。
+     *   判断(天井・BLOB・型)は `sqlite-ndjson.ts` と `duckdb-runner.ts` が持つ ── この file は渡すだけ
+     *   (どの test からも実行されない ── CLAUDE.md §2)。
+     * ⚠ 口が無い worker(古い版が残った端末)では、渡さない版と同じく runner が理由を言って断る。
+     */
+    ...(exportSqliteForDuckDb === undefined
+      ? {}
+      : { exportSqlite: (image, max) => exportSqliteForDuckDb(image, max) }),
   });
-  const storePort = createStorePort(client, cid);
   /**
    * 🔴 **本文に埋め込んだ SQL(` ```sql embed `)を引く口を差す**(#1223)。
    *

@@ -42,6 +42,7 @@ function handle(): DuckDbHandle & { terminated: number; asked: string[]; put: Re
     terminated: 0,
     asked: [] as string[],
     put: vi.fn(() => Promise.resolve()),
+    drop: () => Promise.resolve(),
     query: (sql: string) => {
       h.asked.push(sql);
       return Promise.resolve(ANSWER);
@@ -106,6 +107,7 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
     const h: DuckDbHandle & { terminated: number } = {
       terminated: 0,
       put: () => Promise.resolve(),
+      drop: () => Promise.resolve(),
       query: () =>
         new Promise<DuckDbRaw>((res) => {
           settle = res;
@@ -157,6 +159,7 @@ describe('🔴 DuckDB は常駐しない(#682)', () => {
   it('⚠ 畳む側が例外を投げても、状態は「畳んだ」に揃う', async () => {
     const h: DuckDbHandle = {
       put: () => Promise.resolve(),
+      drop: () => Promise.resolve(),
       query: () => Promise.resolve(ANSWER),
       terminate: () => Promise.reject(new Error('畳めない')),
     };
@@ -208,6 +211,7 @@ describe('🔴 時間で切る(#682 段②)', () => {
     const h = {
       terminated: 0,
       put: () => Promise.resolve(),
+      drop: () => Promise.resolve(),
       query: () => new Promise<DuckDbRaw>(() => undefined),
       terminate: () => {
         h.terminated += 1;
@@ -345,6 +349,7 @@ describe('🔴 書き込みで作った物は、アイドルで畳まない(#918
     const h: DuckDbHandle & { terminated: number } = {
       terminated: 0,
       put: () => Promise.resolve(),
+      drop: () => Promise.resolve(),
       query: () => (stuckNext ? new Promise<DuckDbRaw>(() => undefined) : Promise.resolve(ANSWER)),
       terminate: () => {
         h.terminated += 1;
@@ -377,6 +382,7 @@ describe('🔴 書き込みで作った物は、アイドルで畳まない(#918
       const h: DuckDbHandle & { terminated: number } = {
         terminated: 0,
         put: () => Promise.resolve(),
+        drop: () => Promise.resolve(),
         query: (sql: string) =>
           sql === 'A'
             ? new Promise<DuckDbRaw>((res) => {

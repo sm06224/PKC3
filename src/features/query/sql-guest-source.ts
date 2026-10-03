@@ -13,7 +13,7 @@
  *   user から見て理由の分からない形になる。
  */
 import { CSV_ATTACHMENT_TABLE_NAME, looksLikeCsvAttachmentName } from './csv-attachment';
-import { SQLITE_EXTS, type SqlSource } from './sqlite-attachment';
+import { SQLITE_EXTS, looksLikeSqliteName, type SqlSource } from './sqlite-attachment';
 import { looksLikeXlsxAttachmentName } from './xlsx-attachment';
 
 /**
@@ -38,6 +38,12 @@ export type SqlGuestSource = {
    */
   | { readonly kind: 'parquet' }
   | { readonly kind: 'json'; readonly lang: 'json' | 'ndjson' }
+  /**
+   * 🔴 **取り込んだ `.sqlite`**(#682 段④d)。⚠ 内蔵の sqlite は画像をそのまま開く(変換しない)ので
+   *   `SqliteConvertGuestSource` には入らない。DuckDB は**表を NDJSON に写して**引く
+   *   (`ATTACH` は器の中で bytes を読めない ── 実測)。⚠ 表の名前は**中身を読むまで分からない**。
+   */
+  | { readonly kind: 'sqlite' }
 );
 
 /**
@@ -50,13 +56,35 @@ export type SqlGuestSource = {
  * ⚠ 「渡ってきたら投げる」枝を書くのではない ── その枝は**誰も通らない死んだ枝**になり、
  *   鳴らない検査が 1 つ増えるだけである。
  */
-export const SQLITE_READABLE_KINDS = ['csv', 'xlsx'] as const;
+export const SQLITE_READABLE_KINDS = ['csv', 'xlsx', 'sqlite'] as const;
 
-/** sqlite worker が受け取れる相手(上の一覧で切り出した形)。 */
+/** 内蔵の sqlite が読める相手(上の一覧で切り出した形)。 */
 export type SqliteReadableGuestSource = Extract<
   SqlGuestSource,
   { readonly kind: (typeof SQLITE_READABLE_KINDS)[number] }
 >;
+
+/**
+ * 🔴 **sqlite worker へ「変換して開け」と渡す相手**(`.csv` / `.xlsx`)。
+ *
+ * ⚠ **`.sqlite` は入らない** ── 画像そのものなので、worker へは `source` を**渡さない**
+ *   (省略 = 画像として開く。後方互換の既定)。🔑 型から外してあるので、
+ *   worker の `switch` に「`sqlite` が来たら…」という誰も通らない枝が要らない。
+ */
+export type SqliteConvertGuestSource = Exclude<
+  SqliteReadableGuestSource,
+  { readonly kind: 'sqlite' }
+>;
+
+/**
+ * worker へ渡す `source` を決める。⚠ `undefined` = **画像として開く**(`.sqlite` / 判定なし)。
+ * 🔑 判定は**ここ 1 か所**(`store-effects.ts` が呼ぶ)── 呼び側で `kind` を見直さない。
+ */
+export function sqliteConvertSourceOf(
+  src: SqliteReadableGuestSource | null,
+): SqliteConvertGuestSource | undefined {
+  return src === null || src.kind === 'sqlite' ? undefined : src;
+}
 
 /**
  * 🔴 **DuckDB が中身を読める種類**(#682 段④c)。
@@ -65,16 +93,27 @@ export type SqliteReadableGuestSource = Extract<
  *   ②走らせる側が組む `FROM …`(`duckdb-runner.ts`)が、**同じ一覧から派生する**。
  * ⚠ 2 か所に書くと「**選び所は DuckDB を出すのに、押すと組み方が分からない**」
  *   (あるいはその逆で、読めるのに選べない)が生まれる ── CLAUDE.md §7。
- * ⚠ `.xlsx` は入れない(`excel` 拡張を同梱していない)/ `.sqlite` も入れない
- *   (`sqlite_scanner` を器の中で当てる段がまだ無い ── #682 の次の段)。
+ * ⚠ `.xlsx` は入れない(`excel` 拡張を同梱していない)。
+ * 🔴 `.sqlite` は入れた(#682 段④d)── ただし `sqlite_scanner` の `ATTACH` では**なく**、
+ *   表を NDJSON に写して引く(`sqlite-ndjson.ts`。`ATTACH` は器の中で bytes を読めない ── 実測)。
  */
-export const DUCKDB_READABLE_KINDS = ['csv', 'parquet', 'json'] as const;
+export const DUCKDB_READABLE_KINDS = ['csv', 'parquet', 'json', 'sqlite'] as const;
 
 /** DuckDB へ渡せる相手(上の一覧で切り出した形)。 */
 export type DuckDbReadableGuestSource = Extract<
   SqlGuestSource,
   { readonly kind: (typeof DUCKDB_READABLE_KINDS)[number] }
 >;
+
+/**
+ * 🔴 **「1 つの file = 1 つの表」で DuckDB が読む相手**(`.csv` / `.parquet` / `.json`)。
+ *
+ * 🔑 `.sqlite` は**何枚の表になるか中身を読むまで分からない**ので、表の名前を 1 つ答える関数
+ *   (`guestTableNameOf` / `duckDbReadFrom` / `duckDbLoadSql`)の引数には**入れない**
+ *   (`xlsx` が `guestTableNameOf` に入っていないのと同じ作法)。型で外してあるので、
+ *   「`sqlite` が来たら null を返す」という誰も通らない枝が要らない。
+ */
+export type DuckDbFileGuestSource = Exclude<DuckDbReadableGuestSource, { readonly kind: 'sqlite' }>;
 
 /** その相手は DuckDB で読めるか。 */
 export function isDuckDbReadableSource(src: SqlGuestSource | null): src is DuckDbReadableGuestSource {
@@ -152,7 +191,7 @@ export type DuckDbOnlyGuestSource = Exclude<SqlGuestSource, SqliteReadableGuestS
  *   1 度も呼んでいなかった(`.parquet` を選ぶと**手本をそのまま打って英語で断られる**)。
  *   着地前レビューと動線レビューが、独立に同じ 1 件を挙げた。
  */
-export function guestTableNameOf(src: DuckDbReadableGuestSource): string {
+export function guestTableNameOf(src: DuckDbFileGuestSource): string {
   switch (src.kind) {
     case 'csv':
       return CSV_ATTACHMENT_TABLE_NAME;
@@ -189,9 +228,12 @@ export function looksLikeJsonName(name: string): 'json' | 'ndjson' | null {
 /**
  * 題名から、開き方を決める。
  *
- * @returns `null` = **`.sqlite` の image としてそのまま開く**(今までどおり)。
- *   ⚠ `.sqlite` を名指しで判定しない ── 判定するのは「ほかの読み方が要る物」だけで、
- *   それ以外は既定の道へ落ちる(拡張子の一覧を 2 か所で持たずに済む)。
+ * @returns `null` = **どれでもない**(取り込めない題名)。
+ * 🔴 **2026-10-02(#682 段④d)に変わった**:以前は `.sqlite` も `null`(「画像としてそのまま開く」
+ *   既定の道)だったが、DuckDB が `.sqlite` を読めるようになり、**選び所が `null` と
+ *   「取り込めない題名」を見分けられない**のが障害になった。いまは `.sqlite` は
+ *   `{ kind: 'sqlite' }` を返す(⚠ 内蔵の sqlite へ渡すときは `sqliteConvertSourceOf` が
+ *   `undefined` = 画像として開く、へ畳む)。
  */
 export function sqlGuestSourceOf(lid: string, name: string): SqlGuestSource | null {
   const lang = looksLikeCsvAttachmentName(name);
@@ -200,6 +242,8 @@ export function sqlGuestSourceOf(lid: string, name: string): SqlGuestSource | nu
   if (looksLikeParquetName(name)) return { kind: 'parquet', lid, name };
   const json = looksLikeJsonName(name);
   if (json !== null) return { kind: 'json', lang: json, lid, name };
+  // 🔴 最後に当てる ── 拡張子の見分けが上の 4 つと重ならない順(`.db` は他と重ならないが、念のため末尾)
+  if (looksLikeSqliteName(name)) return { kind: 'sqlite', lid, name };
   return null;
 }
 

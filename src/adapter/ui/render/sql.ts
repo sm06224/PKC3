@@ -599,7 +599,8 @@ export class SqlRenderer {
        * 🔴 **一覧の末尾に「もう 1 つ足す…」**(#918 段⑦。設問 1 = A)。
        * ⚠ **足せない形の添付は薄い字で理由つきに並べる**(`engine` の選び所と同じ作法)──
        *   消すと「在るのに出てこない」になる。`value` が `add:` で始まるので、
-       *   `.sqlite` / `.xlsx` を押しても**置き換わらない**(`binder.ts` が足す口へ通す)。
+       *   読めない形(`.xlsx`)を押しても**置き換わらない**(`binder.ts` が足す口へ通す)。
+       *   🔴 `.sqlite` は足せる相手(#682 段④d)── 薄い字にならない。
        */
       if (canAdd) {
         const addGroup = group(SQL_SOURCE_GROUP_ADD);
@@ -1192,7 +1193,18 @@ function noteLine(p: AppState['sqlPage']): string {
       ? ''
       : p.extraGuests.length > 0
         ? // 🔴 並べているとき(#918 段⑦)── 大きさは 1 件目だけしか持っていないので言わない
-          `${everyName} を並べて調べています(表 ${String(1 + p.extraGuests.length)} 個)${truncNote}`
+          /**
+           * 🔴 **`.sqlite` を含むときは、表の数を言わない**(#682 段④d)。⚠ ここの「表 N 個」は
+           *   **file の数**を表の数として言っていた(1 file = 1 表だった頃の近道)── `.sqlite` は
+           *   中の表の数だけ在るので、足した側は走らせるまで数が分からない。
+           */
+          `${everyName} を並べて調べています${
+            [p.guest.name, ...p.extraGuests.map((g) => g.name)].some(
+              (n) => sqlGuestSourceOf('', n)?.kind === 'sqlite',
+            )
+              ? ''
+              : `(表 ${String(1 + p.extraGuests.length)} 個)`
+          }${truncNote}`
         : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;

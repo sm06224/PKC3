@@ -50,7 +50,7 @@ import {
 import {
   duckDbReadableSourceOf,
   guestTableNameOf,
-  type DuckDbReadableGuestSource,
+  type DuckDbFileGuestSource,
 } from '../src/features/query/sql-guest-source';
 import { buildParquet } from './features/parquet-fixture';
 
@@ -151,16 +151,16 @@ const rows = (sql: string): Record<string, unknown>[] =>
     );
 
 /** 製品と同じ手で 1 件読み込み、表の中身を返す。 */
-function load(src: DuckDbReadableGuestSource, bytes: Uint8Array): Record<string, unknown>[] {
+function load(src: DuckDbFileGuestSource, bytes: Uint8Array): Record<string, unknown>[] {
   const file = duckDbFileNameOf(src);
   put(file, bytes);
   rows(duckDbLoadSql(src, file));
   return rows(`SELECT * FROM ${guestTableNameOf(src)} ORDER BY id`);
 }
 
-const src = (name: string): DuckDbReadableGuestSource => {
+const src = (name: string): DuckDbFileGuestSource => {
   const s = duckDbReadableSourceOf('lid-1', name);
-  if (s === null) throw new Error(`${name} が DuckDB へ渡せる形にならない`);
+  if (s === null || s.kind === 'sqlite') throw new Error(`${name} が DuckDB へ渡せる形にならない`);
   return s;
 };
 
