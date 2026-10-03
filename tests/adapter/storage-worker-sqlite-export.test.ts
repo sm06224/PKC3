@@ -1,5 +1,5 @@
 /**
- * 🔴 **storage worker の `exportSqliteForDuckDb`**(#682 段④d)。
+ * 🔴 **storage worker の `.sqlite` の写し(`openSqliteExport` / `exportSqliteTable` / `closeSqliteExport`)**(#682 段④d)。
  *
  * `self` / `postMessage` を差してから**実物の storage-worker**を dynamic import する
  * (`storage-worker.test.ts` と同じ作法)。客の `.sqlite` は **sqlite-wasm で自作**する ──
@@ -86,8 +86,24 @@ const run = (db: Db, sql: string, bind: unknown[] = []): void => {
 };
 
 const MAX = 1024 * 1024;
-const exportOf = (img: Uint8Array, maxTableBytes = MAX) =>
-  request({ op: 'exportSqliteForDuckDb', image: img, maxTableBytes });
+/**
+ * 🔴 **開く → 表を 1 つずつ頼む → 閉じる**(`DuckDbRunner` と同じ順)。⚠ 落ちた回も閉じる。
+ * 戻りは「表ごとの写し」の一覧(名前順)── 1 回で全部返していた頃の形に揃えてある。
+ */
+const exportOf = async (img: Uint8Array, maxTableBytes = MAX) => {
+  const opened = await request({ op: 'openSqliteExport', image: img });
+  try {
+    const tables = [];
+    for (const table of opened.tables) {
+      tables.push(
+        await request({ op: 'exportSqliteTable', session: opened.session, table, maxTableBytes }),
+      );
+    }
+    return { tables };
+  } finally {
+    await request({ op: 'closeSqliteExport', session: opened.session });
+  }
+};
 
 /** NDJSON の bytes → 行ごとの object。 */
 const rowsOf = (u: Uint8Array | null): Array<Record<string, unknown>> =>
@@ -211,6 +227,27 @@ describe('🔴 表の一覧・列・行', () => {
     expect(rowsOf(t.ndjson)).toEqual([{ a: 21, b: 42 }]);
   });
 
+  /**
+   * 🔴 **STORED の生成列も出る**(`table_xinfo` の `hidden = 3`。VIRTUAL は 2)。
+   * ⚠ 上の test は VIRTUAL だけで、`hidden === 3` を外す変異が SURVIVED だった ──
+   *   STORED が抜けると**列も値も黙って消える**(`SELECT *` には出ているのに写しだけ欠ける)。
+   */
+  it('🔴 STORED の生成列も、列と値の両方が出る', async () => {
+    const img = await image((db) => {
+      run(
+        db,
+        'CREATE TABLE s (a INTEGER, v INTEGER GENERATED ALWAYS AS (a + 1) VIRTUAL, st INTEGER GENERATED ALWAYS AS (a * 10) STORED)',
+      );
+      run(db, 'INSERT INTO s (a) VALUES (4), (5)');
+    });
+    const t = (await exportOf(img)).tables[0]!;
+    expect(t.columns.map((c) => c.name)).toEqual(['a', 'v', 'st']);
+    expect(rowsOf(t.ndjson)).toEqual([
+      { a: 4, v: 5, st: 40 },
+      { a: 5, v: 6, st: 50 },
+    ]);
+  });
+
   it('内部の表(sqlite_ で始まる)と view は出さない', async () => {
     const img = await image((db) => {
       run(db, 'CREATE TABLE seq (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)');
@@ -222,6 +259,31 @@ describe('🔴 表の一覧・列・行', () => {
     expect(names).toEqual(['seq']);
   });
 
+  /**
+   * 🔴 **`sqlite_` で始まらない名前を、内部の表と取り違えない**。`LIKE` の `_` は任意の 1 字なので、
+   *   `NOT LIKE 'sqlite_%'` は `sqlitedata` / `sqlite1` のような **user の表を黙って外していた**
+   *   (引くと「そんな表は無い」としか出ない)。
+   */
+  it('🔴 `sqlitedata` のような user の表は出る / `sqlite_sequence` は出ない(`_` は任意の 1 字ではない)', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE sqlitedata (n INTEGER)');
+      run(db, 'INSERT INTO sqlitedata VALUES (1)');
+      run(db, 'CREATE TABLE sqlite1 (n INTEGER)');
+      run(db, 'CREATE TABLE seq (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)');
+      run(db, "INSERT INTO seq (v) VALUES ('x')");
+    });
+    const names = (await exportOf(img)).tables.map((t) => t.name);
+    expect(names, 'sqlitedata / sqlite1 が黙って外れた').toEqual(['seq', 'sqlite1', 'sqlitedata']);
+    expect(names).not.toContain('sqlite_sequence');
+    // 客を開く口(`openSqlGuest`)も同じ文 ── 片方だけ直すと、写しと客で表の一覧が食い違う
+    const opened = await request({ op: 'openSqlGuest', image: img, guest: 'esc' });
+    try {
+      expect(opened.tables).toEqual(['seq', 'sqlite1', 'sqlitedata']);
+    } finally {
+      await request({ op: 'closeSqlGuest', guest: 'esc' });
+    }
+  });
+
   it('🔴 名前に二重引用符や空白が在る表・列も読める', async () => {
     const img = await image((db) => {
       run(db, 'CREATE TABLE "we""ird name" ("a b" INTEGER, "c""d" TEXT)');
@@ -230,6 +292,58 @@ describe('🔴 表の一覧・列・行', () => {
     const t = (await exportOf(img)).tables[0]!;
     expect(t.name).toBe('we"ird name');
     expect(rowsOf(t.ndjson)).toEqual([{ 'a b': 1, 'c"d': 'x' }]);
+  });
+});
+
+describe('🔴 型へ写すと値が黙って変わる表は、最初から全列 VARCHAR にする旗(asText)', () => {
+  /**
+   * ⚠ DuckDB は INTEGER 親和性の列の小数を BIGINT へ**丸めて**入れ(19.99 → 20)、DOUBLE へ `Infinity` を
+   *   **NULL** で入れる。**落ちない**ので既存の「型が合わなければ作り直す」では救えない ── 読む側(worker)が
+   *   旗を立てる。`tests/duckdb-sqlite-ndjson.test.ts` が実物の DuckDB で「値が変わらない」まで見る。
+   */
+  it('🔴 INTEGER の列に小数が在れば旗が立つ(sqlite の INTEGER 親和性は小数を REAL のまま保つ)', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE price (name TEXT, p INTEGER)');
+      run(db, "INSERT INTO price VALUES ('a', 3), ('b', 19.99)");
+      run(db, 'CREATE TABLE plain (p INTEGER)');
+      run(db, 'INSERT INTO plain VALUES (1), (2)');
+    });
+    const { tables } = await exportOf(img);
+    expect(tables.find((t) => t.name === 'price')!.asText).toBe(true);
+    // 対照群:整数だけの表は旗が立たない(型どおり BIGINT で写す)
+    expect(tables.find((t) => t.name === 'plain')!.asText).toBe(false);
+  });
+
+  it('🔴 REAL の列の Infinity / NUMERIC の列の 2^53 超の整数でも旗が立つ。ふつうの小数・整数では立たない', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE inf (x REAL)');
+      run(db, 'INSERT INTO inf VALUES (1.5), (9e999)');
+      run(db, 'CREATE TABLE big (x NUMERIC)');
+      run(db, 'INSERT INTO big VALUES (9007199254740993)');
+      run(db, 'CREATE TABLE ok (x REAL, n NUMERIC)');
+      run(db, 'INSERT INTO ok VALUES (1.5, 2), (2, 3.25)');
+    });
+    const { tables } = await exportOf(img);
+    const flag = (n: string) => tables.find((t) => t.name === n)!.asText;
+    expect(flag('inf'), 'Infinity が DuckDB で NULL になる').toBe(true);
+    expect(flag('big'), '2^53 超の整数が倍精度へ丸まる').toBe(true);
+    expect(flag('ok')).toBe(false);
+  });
+
+  it('🔴 旗が立っても、行の写しは今までどおり(値は字のまま運ぶ)/ 断った表・空の表には旗が立たない', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE price (p INTEGER)');
+      run(db, 'INSERT INTO price VALUES (19.99), (3)');
+      run(db, 'CREATE TABLE empty (p INTEGER)');
+    });
+    const { tables } = await exportOf(img);
+    const price = tables.find((t) => t.name === 'price')!;
+    expect(rowsOf(price.ndjson)).toEqual([{ p: 19.99 }, { p: 3 }]);
+    expect(tables.find((t) => t.name === 'empty')!.asText).toBe(false);
+    // 天井で断った表は、読むのを途中でやめるので旗は意味を持たない(false で返す)
+    const refusedOne = (await exportOf(img, 4)).tables.find((t) => t.name === 'price')!;
+    expect(refusedOne.refused).not.toBeNull();
+    expect(refusedOne.asText).toBe(false);
   });
 });
 
@@ -327,14 +441,24 @@ describe('🔴 応答の bytes は transfer で渡る(ゼロコピー)', () => {
       run(db, 'INSERT INTO b VALUES (2)');
       run(db, 'CREATE TABLE c (n INTEGER)');
     });
-    const before = seq;
-    const r = await exportOf(img);
-    const list = transferOf(before + 1);
-    const withBytes = r.tables.filter((t) => t.ndjson !== null);
-    expect(withBytes).toHaveLength(2);
-    expect(list, 'transfer の一覧が空 ── bytes を複製して運んでいる').toHaveLength(2);
-    for (const t of withBytes) {
-      expect(list, `${t.name} の buffer が transfer に無い`).toContain(t.ndjson!.buffer);
+    const opened = await request({ op: 'openSqliteExport', image: img });
+    try {
+      const got: Array<{ name: string; bytes: Uint8Array | null; list: readonly ArrayBuffer[] }> = [];
+      for (const table of opened.tables) {
+        const before = seq;
+        const t = await request({ op: 'exportSqliteTable', session: opened.session, table, maxTableBytes: MAX });
+        got.push({ name: t.name, bytes: t.ndjson, list: transferOf(before + 1) });
+      }
+      const withBytes = got.filter((g) => g.bytes !== null);
+      expect(withBytes).toHaveLength(2);
+      for (const g of withBytes) {
+        expect(g.list, `${g.name}: transfer の一覧が空 ── bytes を複製して運んでいる`).toHaveLength(1);
+        expect(g.list, `${g.name} の buffer が transfer に無い`).toContain(g.bytes!.buffer);
+      }
+      // 空の表は運ぶ物が無い
+      expect(got.find((g) => g.name === 'c')!.list).toEqual([]);
+    } finally {
+      await request({ op: 'closeSqliteExport', session: opened.session });
     }
   });
 
@@ -343,4 +467,150 @@ describe('🔴 応答の bytes は transfer で渡る(ゼロコピー)', () => {
     await request({ op: 'listContainerIds' });
     expect(transferOf(before + 1)).toEqual([]);
   });
+});
+
+describe('🔴 開いた写しの寿命(表ごとに頼むので、開いたまま待つ)', () => {
+  const tiny = () =>
+    image((db) => {
+      run(db, 'CREATE TABLE t (n INTEGER)');
+      run(db, 'INSERT INTO t VALUES (1)');
+    });
+
+  it('🔴 閉じた後は頼めない(別の file の表を黙って返さない)/ 二度閉じても落ちない', async () => {
+    const opened = await request({ op: 'openSqliteExport', image: await tiny() });
+    expect(opened.tables).toEqual(['t']);
+    await request({ op: 'closeSqliteExport', session: opened.session });
+    await expect(
+      request({ op: 'exportSqliteTable', session: opened.session, table: 't', maxTableBytes: MAX }),
+    ).rejects.toThrow(/写しが開かれていません/);
+    await expect(request({ op: 'closeSqliteExport', session: opened.session })).resolves.toBeNull();
+    // 知らない合言葉も同じ
+    await expect(
+      request({ op: 'exportSqliteTable', session: 'nope', table: 't', maxTableBytes: MAX }),
+    ).rejects.toThrow(/写しが開かれていません/);
+  });
+
+  it('🔴 2 つ開いても取り違えない(それぞれ自分の file の表を返す)', async () => {
+    const a = await request({ op: 'openSqliteExport', image: await image((db) => run(db, 'CREATE TABLE ta (n INTEGER)')) });
+    const b = await request({ op: 'openSqliteExport', image: await image((db) => run(db, 'CREATE TABLE tb (n INTEGER)')) });
+    try {
+      expect(a.tables).toEqual(['ta']);
+      expect(b.tables).toEqual(['tb']);
+      // 他方の表は引けない(同じ名前の別の file を引く取り違えの対照)
+      const t = await request({ op: 'exportSqliteTable', session: a.session, table: 'tb', maxTableBytes: MAX });
+      expect(t.refused, 'a の写しから b の表を読めてしまった').not.toBeNull();
+    } finally {
+      await request({ op: 'closeSqliteExport', session: a.session });
+      await request({ op: 'closeSqliteExport', session: b.session });
+    }
+  });
+
+  it('🔴 読めなかった file は、写しの枠を使わない(開けなかった器を残さない)', async () => {
+    const live = await request({ op: 'openSqliteExport', image: await tiny() });
+    try {
+      // 上限(8)を超える回数、でたらめな bytes で断られる ── 器が残るなら、live が押し出される
+      for (let i = 0; i < 12; i += 1) {
+        await expect(
+          request({ op: 'openSqliteExport', image: new Uint8Array(4096).fill(7) }),
+        ).rejects.toThrow(/DB として読めませんでした/);
+      }
+      const t = await request({ op: 'exportSqliteTable', session: live.session, table: 't', maxTableBytes: MAX });
+      expect(t.refused, '断られた回の器が枠を食って、先に開いた写しが押し出された').toBeNull();
+    } finally {
+      await request({ op: 'closeSqliteExport', session: live.session });
+    }
+  });
+
+  it('🔴 閉じ忘れても溜まり続けない ── 上限を超えたら古い物から畳む(畳まれた物には断る)', async () => {
+    const img = await tiny();
+    const sessions: string[] = [];
+    for (let i = 0; i < 9; i += 1) sessions.push((await request({ op: 'openSqliteExport', image: img })).session);
+    try {
+      await expect(
+        request({ op: 'exportSqliteTable', session: sessions[0]!, table: 't', maxTableBytes: MAX }),
+      ).rejects.toThrow(/写しが開かれていません/);
+      const last = await request({ op: 'exportSqliteTable', session: sessions[8]!, table: 't', maxTableBytes: MAX });
+      expect(last.refused).toBeNull();
+    } finally {
+      for (const s of sessions) await request({ op: 'closeSqliteExport', session: s });
+    }
+  });
+});
+
+/**
+ * 🔴 **大きい表を写している間も、この worker の他の依頼が待たされない**(着地後の測定)。
+ *
+ * 実測(2026-10-03、100k 行 = 30.7MB の表):読み切るまで **約 0.75〜0.8 秒**、その間に投げた別の依頼
+ * (`listContainerIds`)は **同じだけ待たされた**。写しを取る間は DB の錠を握る worker が 1 本の同期の処理で
+ * 塞がるので、ノートの保存・検索が全部待つ ── 区切って譲るようにしたら、別の依頼は **約 27 ms** で返った
+ * (写しそのものは約 1〜2 割遅い)。
+ * 🔑 見るのは時間ではなく**順番**(時間は環境で動く):写しを頼んだ**後**に投げた軽い依頼が、
+ * 写しの**前**に返ること。譲らない実装(`exec` の callback で一気に読む)では、必ず写しが先に返る。
+ */
+describe('🔴 大きい表の途中でも、他の依頼に順番を譲る', () => {
+  const bigImage = () =>
+    image((db) => {
+      run(db, 'CREATE TABLE big (id INTEGER, body TEXT)');
+      run(db, 'BEGIN');
+      const body = 'abcdefghij'.repeat(25);
+      for (let i = 0; i < 30_000; i += 1) run(db, 'INSERT INTO big VALUES (?, ?)', [i, body]);
+      run(db, 'COMMIT');
+    });
+
+  it('🔴 写しを頼んだ後に投げた別の依頼が、写しより先に返る(写しの結果は欠けない)', async () => {
+    const img = await bigImage();
+    const opened = await request({ op: 'openSqliteExport', image: img });
+    try {
+      const order: string[] = [];
+      const heavy = request({
+        op: 'exportSqliteTable',
+        session: opened.session,
+        table: 'big',
+        maxTableBytes: 64 * 1024 * 1024,
+      }).then((r) => {
+        order.push('heavy');
+        return r;
+      });
+      // 🔑 本物の worker では依頼は**別々のメッセージ(別の回)**で届く ── ここでは次の回に投げて真似る
+      //   (同じ回に続けて投げると、写しの返事が待つ数手の間に軽い依頼が先に済んでしまい、譲らなくても順番が付く)
+      const light = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          request({ op: 'listContainerIds' }).then(() => {
+            order.push('light');
+            resolve();
+          }, reject);
+        }, 0);
+      });
+      const [r] = await Promise.all([heavy, light]);
+      expect(order, '写しが終わるまで別の依頼が待たされた(順番を譲っていない)').toEqual(['light', 'heavy']);
+      // 🔑 譲っても、写しは 1 行も欠けない
+      expect(r.refused).toBeNull();
+      expect(r.rows).toBe(30_000);
+      expect(rowsOf(r.ndjson)).toHaveLength(30_000);
+      expect(rowsOf(r.ndjson)[29_999]).toMatchObject({ id: 29_999 });
+    } finally {
+      await request({ op: 'closeSqliteExport', session: opened.session });
+    }
+  }, 60_000);
+
+  it('🔴 譲っている間に写しが閉じられたら、閉じた器を読み続けず、その表だけ断る', async () => {
+    const img = await bigImage();
+    const opened = await request({ op: 'openSqliteExport', image: img });
+    const heavy = request({
+      op: 'exportSqliteTable',
+      session: opened.session,
+      table: 'big',
+      maxTableBytes: 64 * 1024 * 1024,
+    });
+    // 写しの途中(最初に譲った所)で閉じる ── 投げた順に、写し → 閉じる
+    const closed = request({ op: 'closeSqliteExport', session: opened.session });
+    const r = await heavy;
+    await closed;
+    expect(r.ndjson, '閉じられた写しの bytes を返している').toBeNull();
+    expect(r.refused).toContain('閉じられました');
+    // 後始末:同じ合言葉で頼んでも断られる(閉じた器は残っていない)
+    await expect(
+      request({ op: 'exportSqliteTable', session: opened.session, table: 'big', maxTableBytes: MAX }),
+    ).rejects.toThrow(/写しが開かれていません/);
+  }, 60_000);
 });

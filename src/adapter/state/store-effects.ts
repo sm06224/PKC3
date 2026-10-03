@@ -162,16 +162,20 @@ export interface StorePort {
   ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
   closeSqlGuest?(): Promise<null>;
   /**
-   * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする**(#682 段④d)。⚠ 省略可(古い worker では
-   *   機能が減るだけ ── DuckDB で `.sqlite` を引くときに理由を言って断る)。
+   * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする 3 つの口**(#682 段④d。開く / 表を 1 つ写す / 閉じる)。
+   *   ⚠ 省略可(古い worker では機能が減るだけ ── DuckDB で `.sqlite` を引くときに理由を言って断る)。
+   *   ⚠ **3 つそろって在るときだけ**使う(1 つでも欠ければ「口が無い」扱い)。
    * ⚠ 呼ぶのは **DuckDB の器**(`duckdb-runner.ts`)で、effect 層は呼ばない ──
    *   DuckDB は storage worker を通さない設計(`runDuckDbSql`)だが、**行を読むのだけは
    *   sqlite を持つ storage worker の仕事**である。
    */
-  exportSqliteForDuckDb?(
-    image: Uint8Array,
+  openSqliteExport?(image: Uint8Array): Promise<{ session: string; tables: string[] }>;
+  exportSqliteTable?(
+    session: string,
+    table: string,
     maxTableBytes: number,
-  ): Promise<{ tables: SqliteExportedTable[] }>;
+  ): Promise<SqliteExportedTable>;
+  closeSqliteExport?(session: string): Promise<null>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。

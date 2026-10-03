@@ -111,11 +111,13 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
       }),
     closeSqlGuest: () => client.request({ op: 'closeSqlGuest', guest: guestKey }),
     /**
-     * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする**(#682 段④d)。⚠ ここも**渡すだけ** ──
-     *   開く・読む・天井で断る・閉じるは worker が持つ(窓の合言葉は要らない: 常駐させない)。
+     * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする 3 つの口**(#682 段④d。開く / 表を 1 つ写す / 閉じる)。
+     *   ⚠ ここも**渡すだけ** ── 開く・読む・天井で断る・閉じるは worker が持つ(窓の合言葉は要らない)。
      */
-    exportSqliteForDuckDb: (image, maxTableBytes) =>
-      client.request({ op: 'exportSqliteForDuckDb', image, maxTableBytes }),
+    openSqliteExport: (image) => client.request({ op: 'openSqliteExport', image }),
+    exportSqliteTable: (session, table, maxTableBytes) =>
+      client.request({ op: 'exportSqliteTable', session, table, maxTableBytes }),
+    closeSqliteExport: (session) => client.request({ op: 'closeSqliteExport', session }),
     /**
      * 🔴 **このノートを参照しているのはどれか**(#348)。⚠ ここも**渡すだけ** ──
      * 探し方(`entry:<lid>` を LIKE で当てる)の規則は worker が 1 か所で持つ。
