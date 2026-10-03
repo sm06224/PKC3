@@ -19,6 +19,7 @@
  * ⚠ PKC2 は失敗を `console.warn` にしか書かず、user から見ると
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
+import { parsePlaceColor, parsePlaceWidth } from '@features/markdown/place-color';
 import { placeShapeOf } from '@features/markdown/place-shape';
 import {
   anchorSpell,
@@ -427,6 +428,8 @@ export function htmlToDocxBlocks(doc: Document): {
           // ⚠ 読めない綴りは運ばない(`null` = 既定のまっすぐ)── 画面は理由を出すが、
           //    配った先では出せないので、こちらで決めた形になる
           const r = parseRouteSpell(el.getAttribute('data-pkc-route'));
+          const lineStroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
+          const lineWidth = parsePlaceWidth(el.getAttribute('data-pkc-width'));
           blocks.push({
             kind: 'place-line',
             from,
@@ -434,6 +437,10 @@ export function htmlToDocxBlocks(doc: Document): {
             fromAnchor: spell(rawFrom),
             toAnchor: spell(rawTo),
             route: r.kind === 'ok' ? r.route : null,
+            // 🔴 色・太さ(#530 段④)── 読む規則は画面と同じ 1 本(`place-color.ts`)。
+            // ⚠ **読めた物だけ運ぶ**(色なしの線の印は今までと 1 キーも変わらない)
+            ...(lineStroke !== null ? { stroke: lineStroke } : {}),
+            ...(lineWidth !== null ? { width: lineWidth } : {}),
           });
         }
         continue;
@@ -445,6 +452,8 @@ export function htmlToDocxBlocks(doc: Document): {
           kind: 'place', x: 0, y: 0, w: null, h: null, shape: 'rect', name: null, span: 0,
         });
         walkBlocks(el);
+        const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
+        const stroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
         blocks[at] = {
           kind: 'place',
           x: pxAttr(el, 'data-pkc-x') ?? 0,
@@ -453,6 +462,9 @@ export function htmlToDocxBlocks(doc: Document): {
           h: pxAttr(el, 'data-pkc-h'),
           // 🔑 形の既定(札が無い / 知らない字 = 四角)は `placeShapeOf` の 1 か所(§7)
           shape: placeShapeOf(el.getAttribute('data-pkc-shape')),
+          // 🔴 色(#530 段④)── 読む規則は画面と同じ 1 本。⚠ 読めた物だけ運ぶ(色なしは 1 キーも変わらない)
+          ...(fill !== null ? { fill } : {}),
+          ...(stroke !== null ? { stroke } : {}),
           /**
            * 🔴 **板の名前**(#530 段③e)── 線の繋ぎ先はこれで引く。
            * ⚠ 名前の無い板は `null`(`id=""` は「書いていない」と同じ)。

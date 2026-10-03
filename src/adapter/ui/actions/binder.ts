@@ -37,7 +37,12 @@ import {
   tsvFenceFromPlain,
   type TableFormat,
 } from '@features/markdown/table-convert';
-import { isPlaceOpen, placeShapeAt } from '@features/markdown/place-notation';
+import { isPlaceOpen, placeShapeAt, placeStyleAt } from '@features/markdown/place-notation';
+import {
+  parsePlaceColor,
+  parsePlaceWidth,
+  type PlaceStyle,
+} from '@features/markdown/place-color';
 import type { PlaceShape } from '@features/markdown/place-shape';
 import { insertionBlocked } from '@features/markdown/line-move';
 import {
@@ -248,7 +253,9 @@ import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
   ADD_PLACE_ACTION,
-  REMOVE_PLACE_LINE_ACTION,
+  placeLineMenuActions,
+  PLACE_STYLE_KEYS_ATTR,
+  PLACE_STYLE_WIDTH_ATTR,
   bodyMenuActions,
   editingRowMenuActions,
   entryMenuActions,
@@ -3481,14 +3488,20 @@ function directiveBlockAt(
   host: HTMLElement,
   target: Element,
   fmBody: string,
-): { line: number; board: boolean; shape: PlaceShape | null } | null {
+): { line: number; board: boolean; shape: PlaceShape | null; styled: boolean } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
     const line = Number(el.getAttribute('data-pkc-source-line'));
     if (Number.isInteger(line) && line >= 0 && blockSpanAt(fmBody, line) !== null) {
       const open = fmBody.split('\n')[line] ?? '';
       // 🔑 形も**原文**から読む(#530)── 板かどうかと同じ 1 本(`place-notation.ts`)
-      return { line, board: isPlaceOpen(open), shape: placeShapeAt(open) };
+      return {
+        line,
+        board: isPlaceOpen(open),
+        shape: placeShapeAt(open),
+        // 🔑 色の札も**原文**から読む(#530 段④)── 描画・書き出しと同じ 1 本(`placeStyleAt`)
+        styled: placeStyleAt(open)?.any === true,
+      };
     }
     el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
   }
@@ -4928,6 +4941,78 @@ function moveAppGroup(
   void services.confirmAppGroupNotes(need).then((ok) => {
     if (ok) go();
   });
+}
+
+/**
+ * 🔴 **色を選ぶ窓を 1 つ開く**(#1224 で書いた物を、#530 段④で付箋・線の色と**共有**する)。
+ *
+ * 🔑 色を選ぶ部品は**これ 1 つ**(`<input type="color">` ── 画面の外の使い捨て 1 つ)。付箋・線の色の
+ *   ために別の部品を作らない(Gemini 裁定 A「新しい色の部品は作らない」)。本文の色コードの見本を
+ *   押したときと**同じ窓**が開き、同じ作法で撃つ。
+ * ⚠ **`change` で 1 回だけ**呼ぶ(`input` のたびに書かない ── 色を探して動かす間は何も書かない)。
+ *   窓を閉じただけなら `change` が来ないので呼ばない。選んだ値は `#rrggbb`(ブラウザが返す形)。
+ * 🔑 開くたびに前の窓を外して作り直す(使い捨て 1 つ)。押した物の位置に開く(見えず・触れず・場所を取らない)。
+ */
+function openColorPicker(target: Element, from: string, onPick: (to: string) => void): void {
+  const doc = target.ownerDocument;
+  doc.querySelector('input[data-pkc-field="color-pick"]')?.remove();
+  const input = doc.createElement('input');
+  input.type = 'color';
+  input.value = from;
+  input.setAttribute('data-pkc-field', 'color-pick');
+  input.setAttribute('aria-hidden', 'true');
+  input.tabIndex = -1;
+  // 押した物の位置に(窓がそこへ開く)。見えず・触れず・場所を取らない
+  const rect = target.getBoundingClientRect();
+  input.style.cssText =
+    `position:fixed;left:${rect.left}px;top:${rect.top}px;width:1px;height:1px;` +
+    'opacity:0;pointer-events:none;border:0;padding:0;';
+  input.addEventListener('change', () => {
+    const to = input.value;
+    input.remove();
+    onPick(to);
+  });
+  doc.body.append(input);
+  try {
+    input.showPicker();
+  } catch {
+    // `showPicker` が無い / 断られる環境は、`click` で開く(どちらも押した直後の動作)
+    input.click();
+  }
+}
+
+/**
+ * 🔴 **付箋・線の色と太さを書く受け手の共通部**(#530 段④)。
+ *
+ * ⚠ 行の座標は `raise-place` と同じ(メニューが運んだ刻印 + frontmatter ぶん)。
+ * ⚠ 断るのは **身元(ノートが替わっていないか)と相(編集中でないか)**。編集中は**声に出して断る**
+ *   (他の本文の書換と同じ 1 本 ── `phaseBlockReason`)。⚠ 2 重に見る: ここと reducer の門。
+ * 🔑 色の窓を開く前に断る(開いても書けない窓を出さない)ので、窓を開く受け手もここを通る。
+ */
+function placeStyleWrite(
+  dispatcher: Dispatcher,
+  target: Element,
+  doWrite: (lid: string, line: number) => void,
+  what: string,
+): void {
+  const line = menuCarriedBlock(target);
+  if (line === null || refuseStaleMenu(dispatcher, target)) return;
+  const st = dispatcher.getState();
+  if (st.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、${what}` });
+    return;
+  }
+  const ob = st.openBody;
+  if (ob === null) return;
+  doWrite(ob.lid, line + frontmatterLineCount(ob.body));
+}
+
+/** 運ばれた札の名前(`fill stroke`)。⚠ 知らない名前は捨てる(受け手が書く札を閉じておく)。 */
+function styleKeysOf(target: Element): Array<'fill' | 'stroke'> {
+  const raw = target.getAttribute(PLACE_STYLE_KEYS_ATTR) ?? '';
+  return raw
+    .split(/\s+/)
+    .filter((k): k is 'fill' | 'stroke' => k === 'fill' || k === 'stroke');
 }
 
 /**
@@ -7444,32 +7529,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}色を直してください` });
       return;
     }
-    const doc = target.ownerDocument;
-    doc.querySelector('input[data-pkc-field="color-pick"]')?.remove();
-    const input = doc.createElement('input');
-    input.type = 'color';
-    input.value = from;
-    input.setAttribute('data-pkc-field', 'color-pick');
-    input.setAttribute('aria-hidden', 'true');
-    input.tabIndex = -1;
-    // 押した見本の位置に(窓がそこへ開く)。見えず・触れず・場所を取らない
-    const rect = target.getBoundingClientRect();
-    input.style.cssText =
-      `position:fixed;left:${rect.left}px;top:${rect.top}px;width:1px;height:1px;` +
-      'opacity:0;pointer-events:none;border:0;padding:0;';
-    input.addEventListener('change', () => {
-      const to = input.value;
-      input.remove();
+    openColorPicker(target, from, (to) => {
       if (!isEditableColor(to) || to === from) return;
       dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to });
     });
-    doc.body.append(input);
-    try {
-      input.showPicker();
-    } catch {
-      // `showPicker` が無い / 断られる環境は、`click` で開く(どちらも押した直後の動作)
-      input.click();
-    }
   },
   'toggle-task': (dispatcher, target) => {
     const raw = target.getAttribute('data-pkc-task-line');
@@ -8320,6 +8383,67 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'task-run-open': (dispatcher, target) => setTaskRun(dispatcher, target, 'open'),
   'task-run-done': (dispatcher, target) => setTaskRun(dispatcher, target, 'done'),
+  /**
+   * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「色…」「枠の色…」。
+   *
+   * 🔑 選ぶ窓は**本文の色コードの見本と同じ 1 つ**(`openColorPicker`)── 新しい部品を作らない。
+   *   窓を開く前に断る(編集中・別のノートへ替わった後)。`change` で 1 回だけ書く。
+   * ⚠ どの札(`fill` / `stroke`)かは**項目が運ぶ**(`PLACE_STYLE_KEYS_ATTR`)── ちょうど 1 つ。
+   *   窓の初期値は**いまの色**(無ければ地に近い無彩色)。⚠ 同じ色を選んだときは書かない。
+   */
+  'place-color': (dispatcher, target) => {
+    const keys = styleKeysOf(target);
+    if (keys.length !== 1) return;
+    const key = keys[0]!;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) => {
+        const ob = dispatcher.getState().openBody;
+        const open = ob === null ? '' : (ob.body.split('\n')[line] ?? '');
+        const cur = placeStyleAt(open)?.[key] ?? null;
+        openColorPicker(target, cur ?? (key === 'fill' ? '#ffffff' : '#808080'), (to) => {
+          // ⚠ 窓が閉じるまでに本文が動いたかもしれない ── reducer が byte 一致で見直す
+          if (parsePlaceColor(to) === null || to === cur) return;
+          dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } });
+        });
+      },
+      '色を直してください',
+    );
+  },
+  /**
+   * 🔴 **色を外す**(#530 段④。置けるなら外せる)── 札を**消す**(`null`)。付箋は塗りと枠の両方、
+   * 線は線の色。⚠ 太さは触らない(線の太さを標準に戻す口は別: `place-line-width`)。
+   */
+  'place-color-clear': (dispatcher, target) => {
+    const keys = styleKeysOf(target);
+    if (keys.length === 0) return;
+    const style: Record<string, null> = {};
+    for (const k of keys) style[k] = null;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) =>
+        dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: style as PlaceStyle }),
+      '色を直してください',
+    );
+  },
+  /**
+   * 🔴 **線の太さを選ぶ**(#530 段④)── 項目が運ぶ太さ(整数)を書く。空なら標準へ戻す(`width=` を消す)。
+   * ⚠ 読めない太さは**書かない**(属性を書き換えられた形)。
+   */
+  'place-line-width': (dispatcher, target) => {
+    const raw = target.getAttribute(PLACE_STYLE_WIDTH_ATTR);
+    if (raw === null) return;
+    const width = raw === '' ? null : parsePlaceWidth(raw);
+    if (raw !== '' && width === null) return;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) => dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { width } }),
+      '線の太さを直してください',
+    );
+  },
   /**
    * 🔴 **線を消す**(#530 段③d)── 右クリックした線の開き行を消す。
    * 🔑 門は `remove-place` と同じ(身元 / phase)。確認は挟まない ── 線は 2 行の宣言で、
@@ -14119,10 +14243,16 @@ export function bindActions(
       const rel = decl - frontmatterLineCount(lineOb.body);
       if (Number.isInteger(decl) && rel >= 0) {
         ev.preventDefault();
+        // 🔑 色・太さの項目は**線の開き行そのもの**から決める(いまの太さと同じ物を出さない)
+        const lineStyle = placeStyleAt(lineOb.body.split('\n')[decl] ?? '');
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          [REMOVE_PLACE_LINE_ACTION],
+          placeLineMenuActions({
+            stroke: lineStyle?.written.stroke === true,
+            width: lineStyle?.width ?? null,
+            widthWritten: lineStyle?.written.width === true,
+          }),
           root.ownerDocument.activeElement,
           { [MENU_LID_ATTR]: lineOb.lid, [MENU_BLOCK_ATTR]: String(rel) },
         );
@@ -14293,7 +14423,7 @@ export function bindActions(
               chapterWindow: chapterable,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
-        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape })),
+        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape, styled: block.styled })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
          *   (`attrs`)── `carry` に混ぜると、表と関係の無い項目まで同じ属性を持ち、

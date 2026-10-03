@@ -298,6 +298,16 @@ function declsFor(src: ReadonlyMap<string, string>, want: ReadonlySet<string>): 
   return out.length === 0 ? '' : `${out.join(';')};`;
 }
 
+/** 板・線の色と太さ(`place-board.ts` が要素へ置く)。⚠ トークンではないので焼かない。 */
+const PLACE_INLINE_VARS: readonly string[] = [
+  '--pkc-place-fill',
+  '--pkc-place-stroke',
+  '--pkc-place-ink',
+  '--pkc-line-stroke',
+  '--pkc-line-width',
+  '--pkc-hit-width',
+];
+
 /**
  * 本文の規則と、それが要求するトークンを抜く。
  *
@@ -310,6 +320,12 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
   const vars = new Set<string>();
   for (const r of kept) for (const v of varsIn(r.body)) vars.add(v);
   vars.delete('--pkc-blank-count');
+  /**
+   * 🔴 **板の色・線の色と太さも、描く側が inline style で置く**(#530 段④)── `--pkc-blank-count` と
+   * 同じ型(トークンではなく、要素ごとの値)。焼くと**全部の付箋がその値で固定**される。
+   * ⚠ 規則側は `var(--x, 既定)` で書いてあるので、置かなければ今までの色(既定)で出る。
+   */
+  for (const v of PLACE_INLINE_VARS) vars.delete(v);
   closeOver(vars, tokens);
 
   // `@media` の文脈ごとにまとめ直す(同じ文脈の規則は 1 つの `@media` に入れる)

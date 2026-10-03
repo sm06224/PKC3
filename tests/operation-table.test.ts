@@ -261,6 +261,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 同じ理由で `raise-place` / `remove-place` も未登記である(並びを揃えた)。
    *   ⚠ 2026-10-01(#530 段③d)で `remove-place-line`(右クリックした線を消す)も同じ理由で足した。
    */
+  'place-color', 'place-color-clear', 'place-line-width',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
@@ -718,15 +719,18 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   設定の「音声認識」の 3 つ(`install-asr-part` / `remove-asr-part` / `cancel-asr-install`)で
       //   受け手 +4 ── 登記は増えない(押し口は行の中・設定の中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
+      // ⚠ 2026-10-03(#530 段④): 付箋・線の右クリックの色と太さ(`place-color` / `place-color-clear` / `place-line-width`)で
+      //   受け手 +3 ── 登記は増えない(押し口は付箋・線の右クリックの中にしか無く、押した行をメニューが運ぶので名前だけでは呼べない。
+      //   `place-shape-*` と同じ置き場)。`receivers` +3 / `total` +3 / `unregistered` +3。
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 382,
-      receivers: 318,
+      total: 385,
+      receivers: 321,
       registered: 103,
       both: 39,
       outsideActionsTable: 64,
-      unregistered: 279,
+      unregistered: 282,
     });
   });
 

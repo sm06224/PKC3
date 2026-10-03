@@ -14,6 +14,12 @@
  * (docx と同じ形。不可侵指示 2026-07-27「ゼロコピー」)。
  */
 
+import {
+  parsePlaceColor,
+  parsePlaceWidth,
+  placeInkOf,
+  PLACE_LINE_WIDTH_DEFAULT,
+} from '../markdown/place-color';
 import type { PlaceShape } from '../markdown/place-shape';
 import {
   anchorOf,
@@ -116,6 +122,13 @@ export interface BoardItem {
   readonly shape: PlaceShape;
   /** 🔴 板の名前(#530 段③e)── 線の繋ぎ先はこれで引く。無ければ `null`。 */
   readonly name: string | null;
+  /**
+   * 🔴 **塗り / 枠の色**(`#rrggbb`。#530 段④)。⚠ 書いていなければ省く(**色なしの付箋は
+   *   今までと 1 byte も変わらない**)。書いてあっても `rgbOf` を通ってから XML へ出る
+   *   (呼び側が組んだ字を素通ししない)。
+   */
+  readonly fill?: string | null;
+  readonly stroke?: string | null;
   readonly lines: readonly SlideLine[];
 }
 
@@ -147,6 +160,22 @@ export interface BoardLink {
    *   PowerPoint の曲線は自前の制御点を使う(実測: 2 点が別々の x に出た)。
    */
   readonly route: string | null;
+  /**
+   * 🔴 **線の色 / 太さ**(#530 段④)。`#rrggbb` / px の整数。⚠ 書いていなければ省く
+   *   (**色なしの線は今までと 1 byte も変わらない**)。太さは PowerPoint では EMU(1px = 9525)。
+   */
+  readonly stroke?: string | null;
+  readonly width?: number | null;
+}
+
+/**
+ * 🔴 **色の綴り → `<a:srgbClr val="…">` の値**(#530 段④)。⚠ 読めない字は `null`。
+ * 🔑 XML へ出る色は**必ずここを通る** ── 画面と同じ `parsePlaceColor`(§7)。呼び側(書き出しの塊)が
+ *   検めてあっても、ここでもう一度通す(知らない字が壊れた `.pptx` を作らない)。
+ */
+function rgbOf(color: string | null | undefined): string | null {
+  const c = parsePlaceColor(color);
+  return c === null ? null : c.slice(1).toUpperCase();
 }
 
 /**
@@ -315,6 +344,8 @@ export function splitIntoSlides(
             fromAnchor: p.fromAnchor,
             toAnchor: p.toAnchor,
             route: p.route,
+            ...(p.stroke != null ? { stroke: p.stroke } : {}),
+            ...(p.width != null ? { width: p.width } : {}),
           });
           i += 1;
           continue;
@@ -323,6 +354,9 @@ export function splitIntoSlides(
         const inner = blocks.slice(i + 1, i + 1 + p.span);
         items.push({
           x: p.x, y: p.y, w: p.w, h: p.h, shape: p.shape, name: p.name,
+          // 🔴 色は書いてあるときだけ運ぶ(#530 段④。色なしは今までと同じ形)
+          ...(p.fill != null ? { fill: p.fill } : {}),
+          ...(p.stroke != null ? { stroke: p.stroke } : {}),
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -435,7 +469,7 @@ function blockToLines(b: ExportBlock): SlideLine[] {
  * だから id を配るのは呼び側で、ここは**渡された id を書くだけ**にする。
  * ⚠ id が渡されていないリンクは**素の文字として出す**(消さない)。
  */
-function runXml(r: ExportRun, sz: number, linkId?: string): string {
+function runXml(r: ExportRun, sz: number, linkId?: string, ink?: string | null): string {
   const props: string[] = [`lang="ja-JP"`, `sz="${sz}"`];
   if (r.bold === true) props.push('b="1"');
   if (r.italic === true) props.push('i="1"');
@@ -444,7 +478,9 @@ function runXml(r: ExportRun, sz: number, linkId?: string): string {
     ? '<a:latin typeface="Consolas"/><a:ea typeface="Consolas"/>'
     : '';
   const link = linkId === undefined ? '' : `<a:hlinkClick r:id="${linkId}"/>`;
-  return `<a:r><a:rPr ${props.join(' ')} dirty="0">${face}${link}</a:rPr>`
+  // 🔴 塗りの上の字の色(#530 段④)── 塗りが付いた付箋だけ。⚠ 順序は `fill → latin → hlinkClick`
+  const color = ink == null ? '' : `<a:solidFill><a:srgbClr val="${ink}"/></a:solidFill>`;
+  return `<a:r><a:rPr ${props.join(' ')} dirty="0">${color}${face}${link}</a:rPr>`
     + `<a:t>${xmlEscape(r.text)}</a:t></a:r>`;
 }
 
@@ -455,7 +491,12 @@ function runXml(r: ExportRun, sz: number, linkId?: string): string {
  * 型紙の既定に従う(= 見た目が揃わない)。
  * ⚠ 箇条書きでない行には **`buNone`** を明示する ── 書かないと点が勝手に付く。
  */
-function lineXml(line: SlideLine, sz: number, linkOf?: (r: ExportRun) => string | undefined): string {
+function lineXml(
+  line: SlideLine,
+  sz: number,
+  linkOf?: (r: ExportRun) => string | undefined,
+  ink?: string | null,
+): string {
   const runs = line.runs.length === 0 ? [{ text: '' } as ExportRun] : line.runs;
   const pPr = line.bullet === null
     ? '<a:pPr><a:buNone/></a:pPr>'
@@ -465,7 +506,7 @@ function lineXml(line: SlideLine, sz: number, linkOf?: (r: ExportRun) => string 
         : '<a:buChar char="\u2022"/>')
       + '</a:pPr>';
   const eff = line.mono === true ? runs.map((r) => ({ ...r, mono: true })) : runs;
-  return `<a:p>${pPr}${eff.map((r) => runXml(r, sz, linkOf?.(r))).join('')}</a:p>`;
+  return `<a:p>${pPr}${eff.map((r) => runXml(r, sz, linkOf?.(r), ink)).join('')}</a:p>`;
 }
 
 /** 文字の箱 1 つ。⚠ `<a:normAutofit/>` で **PowerPoint に縮めさせる**(設計 doc §4)。 */
@@ -485,16 +526,29 @@ function textBox(
    *   「何も無い所に字が浮いている」ようにしか見えない(`noFill` のままなので)。
    */
   shape: PlaceShape,
+  /**
+   * 🔴 **塗り / 枠の色**(#530 段④)。⚠ **省いてよい**(既定 = 色なし)── 題名・副題・本文の箱は
+   *   色を持たないので、ここは**板からしか渡されない**(`shape` と違って書き忘れの事故が起きない向き)。
+   * 🔑 塗りは `<a:noFill/>` の**置き換え**、枠は `rect` でも**書いてあれば引く**(`rect` の既定は
+   *   縁なし ── 色を付けた人は縁も見たい)。
+   */
+  paint?: { readonly fill?: string | null; readonly stroke?: string | null },
 ): string {
+  const fillRgb = rgbOf(paint?.fill);
+  const strokeRgb = rgbOf(paint?.stroke);
   const line =
-    shape === 'rect'
-      ? ''
-      : `<a:ln w="9525"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>`;
+    strokeRgb !== null
+      ? `<a:ln w="9525"><a:solidFill><a:srgbClr val="${strokeRgb}"/></a:solidFill></a:ln>`
+      : shape === 'rect'
+        ? ''
+        : `<a:ln w="9525"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>`;
+  const fill =
+    fillRgb === null ? '<a:noFill/>' : `<a:solidFill><a:srgbClr val="${fillRgb}"/></a:solidFill>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
     + `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`
     + `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/>`
     + `<a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>`
-    + `<a:prstGeom prst="${PRST_OF[shape]}"><a:avLst/></a:prstGeom><a:noFill/>${line}</p:spPr>`
+    + `<a:prstGeom prst="${PRST_OF[shape]}"><a:avLst/></a:prstGeom>${fill}${line}</p:spPr>`
     + `<p:txBody><a:bodyPr wrap="square" anchor="${anchor}"><a:normAutofit/></a:bodyPr>`
     + `<a:lstStyle/>${body}</p:txBody></p:sp>`;
 }
@@ -792,7 +846,18 @@ function connectorXml(
    * 🔑 必須にすれば、口を後から足す人が書き忘れたとき **tsc が落とす**。
    */
   route: PlaceRoute,
+  /**
+   * 🔴 **線の色 / 太さ**(#530 段④)。⚠ 既定を置かない(`route` と同じ理由 ── 呼ぶ所は 1 か所で、
+   *   書き忘れたら tsc が落ちる)。`null` の側は**今までの色と太さ**(808080 / 1.5pt)。
+   */
+  look: { readonly stroke: string | null; readonly width: number | null },
 ): string {
+  const rgb = rgbOf(look.stroke) ?? '808080';
+  // 太さは px → EMU。⚠ 標準(2px)= 19050 は今までの値と同じ(`PLACE_LINE_WIDTH_DEFAULT` × 9525)
+  // ⚠ 太さも画面と同じ `parsePlaceWidth` を通す(1〜16 の整数だけ。外れた値は標準へ倒す)
+  const w =
+    (look.width === null ? null : parsePlaceWidth(String(look.width))) ?? PLACE_LINE_WIDTH_DEFAULT;
+  const wEmu = w * EMU_PER_PX;
   const flip = (p2.x < p1.x ? ' flipH="1"' : '') + (p2.y < p1.y ? ' flipV="1"' : '');
   return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
     + `<p:cNvCxnSpPr><a:stCxn id="${st.id}" idx="${st.idx}"/>`
@@ -801,7 +866,7 @@ function connectorXml(
     + `<a:ext cx="${Math.max(1, Math.abs(p2.x - p1.x))}" `
     + `cy="${Math.max(1, Math.abs(p2.y - p1.y))}"/></a:xfrm>`
     + `<a:prstGeom prst="${CXN_PRST[route]}"><a:avLst/></a:prstGeom>`
-    + '<a:ln w="19050"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>'
+    + `<a:ln w="${wEmu}"><a:solidFill><a:srgbClr val="${rgb}"/></a:solidFill></a:ln>`
     + '</p:spPr></p:cxnSp>';
 }
 
@@ -826,6 +891,8 @@ function boardShapes(
   items.forEach((it, n) => {
     const w = it.w ?? box.card.w;
     const h = it.h ?? box.card.h;
+    // 🔴 塗りが付いた付箋だけ、字の色も塗りに合わせる(`placeInkOf`)── 色なしは字に何も足さない
+    const fillColor = parsePlaceColor(it.fill);
     out.push(
       textBox(
         // ⚠ 番号は離す ── 題名(2)/ 本文(3)と衝突させない
@@ -837,9 +904,12 @@ function boardShapes(
           w: Math.max(1, Math.round(w * EMU_PER_PX * k)),
           h: Math.max(1, Math.round(h * EMU_PER_PX * k)),
         },
-        it.lines.map((l) => lineXml(l, SZ.body, linkOf)).join(''),
+        it.lines
+          .map((l) => lineXml(l, SZ.body, linkOf, fillColor === null ? null : rgbOf(placeInkOf(fillColor))))
+          .join(''),
         't',
         it.shape,
+        { fill: it.fill, stroke: it.stroke },
       ),
     );
   });
@@ -909,6 +979,7 @@ function boardShapes(
           const r = parseRouteSpell(link.route);
           return r.kind === 'ok' ? r.route : 'straight';
         })(),
+        { stroke: link.stroke ?? null, width: link.width ?? null },
       ),
     );
   }

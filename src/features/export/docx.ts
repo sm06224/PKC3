@@ -96,6 +96,13 @@ export type DocxBlock =
        */
       readonly shape: PlaceShape;
       /**
+       * 🔴 **塗り / 枠の色**(`fill=` / `stroke=`。#530 段④)。`#rrggbb`(読めない綴りは `null`)。
+       * ⚠ Word は読まない(位置・形と同じ ── 使うのは PowerPoint 側だけ)。書いていなければ
+       *   省いてよい(= 色なし。**既存の板の組み方を 1 byte も変えない**ための optional)。
+       */
+      readonly fill?: string | null;
+      readonly stroke?: string | null;
+      /**
        * 🔴 **その板の名前**(`:::format{#今日 .pkc-place …}` の `#今日`。#530 段③e)。
        * ⚠ 名前は**線の繋ぎ先**にしか使わない ── 無い板は指せないので `null`。
        * ⚠ Word は読まない(位置・形と同じで、使うのは PowerPoint 側だけ)。
@@ -131,6 +138,12 @@ export type DocxBlock =
        *   自分で決める(実測: 2 点の真ん中)ので、運んでも使えない。
        */
       readonly route: string | null;
+      /**
+       * 🔴 **線の色 / 太さ**(`stroke=` / `width=`。#530 段④)。`#rrggbb` / 1〜16 の整数。
+       * 読めない綴りは `null`(省いてよい)。⚠ Word は読まない。
+       */
+      readonly stroke?: string | null;
+      readonly width?: number | null;
     }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**

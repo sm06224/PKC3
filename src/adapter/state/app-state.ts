@@ -89,6 +89,7 @@ import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
 import { isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
+import { isPlaceStyle, type PlaceStyle } from '@features/markdown/place-color';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
 import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
@@ -2533,6 +2534,12 @@ export type UserAction =
    * ⚠ 綴りは `PlaceShape` に閉じる ── 知らない字は reducer で断る(下の case)。
    */
   | { type: 'SET_PLACE_SHAPE'; lid: string; line: number; shape: PlaceShape }
+  /**
+   * 🔴 **付箋の色・線の色と太さを書く**(#530 段④。Gemini 裁定 A、2026-10-02)── 開き行の
+   * `fill=` / `stroke=` / `width=` を書く(`null` の札は**消す**)。同じ門。
+   * ⚠ 綴りは `PlaceStyle` に閉じる ── 読めない値・持てない札は reducer で断る(下の case)。
+   */
+  | { type: 'SET_PLACE_STYLE'; lid: string; line: number; style: PlaceStyle }
   /**
    * 🔴 **本文の塊を、本文の中で掴んで並べ替える**(#684 段①。user 要望 2026-09-03)。
    * `start..end` の行(**生の body** の行番号 = 描画の刻印 + frontmatter)を `toBefore` の
@@ -7524,6 +7531,16 @@ function reduceCore(
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-shape', line: action.line, openLine, shape: action.shape };
+      });
+    case 'SET_PLACE_STYLE':
+      return bodyRewriteGate(state, action.lid, '、色や太さを変えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        // ⚠ 綴りは**ここでも**検める ── 型は境界(postMessage / test の手組み)では効かない
+        if (!isPlaceStyle(action.style)) return null;
+        // 🔑 受ける開き行は付箋と線の両方(どちらの札が書けるかは `setPlaceStyle` が決める)
+        const openLine = placeOpenLineOf(shown, action.line) ?? lineOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-style', line: action.line, openLine, style: action.style };
       });
     /**
      * 🔴 **本文の塊を掴んで並べ替える**(#684 段①)── 板と**同じ門**。

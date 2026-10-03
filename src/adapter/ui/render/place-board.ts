@@ -39,6 +39,7 @@ import {
   type PlaceRect,
   type PlaceRoute,
 } from '@features/markdown/place-line';
+import { parsePlaceColor, parsePlaceWidth, placeInkOf } from '@features/markdown/place-color';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
 import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown/place-embed';
@@ -89,6 +90,23 @@ function restoreGripFocus(host: HTMLElement): void {
       `${PLACE_SELECTOR}[data-pkc-place-line="${line}"] > [data-pkc-field="place-grip"]`,
     )
     ?.focus();
+}
+
+/**
+ * 🔴 **色・太さは CSS 変数で要素に置く**(#530 段④。Gemini 裁定 A)。
+ *
+ * 🔑 inline の `background` / `border-color` を直に当てない理由は 2 つ:
+ *   ① 形(`diamond` / `arrow` …)は **`::before` / `::after` の層**で描くので、要素の inline style では
+ *     届かない ── 変数なら層の側が `var(--pkc-place-fill, …)` で読める(層は親の変数を継ぐ)。
+ *   ② **無いときの既定は CSS 側の `var()` の第 2 引数**に在る ── 色を外す(= 変数を消す)だけで
+ *     今までの見え方へ戻る。JS が既定の色を知らない。
+ * ⚠ **入れるのは `parsePlaceColor` を通った `#rrggbb` だけ** ── 読めない綴り(`javascript:` / `url(…)` など)は
+ *   **何も置かない**(= 札が無いのと同じ見た目)。CSS へ素通ししない。
+ */
+function setStyleVar(el: Element, name: string, value: string | null): void {
+  const st = (el as HTMLElement | SVGElement).style;
+  if (value === null) st.removeProperty(name);
+  else st.setProperty(name, value);
 }
 
 /** 属性の整数(0 以上)。⚠ 読めない値は「無い」扱い(黙って 0 にしない)。 */
@@ -326,6 +344,8 @@ function applyPlaceLines(
     readonly pinTo: PlaceAnchor | null;
     readonly route: PlaceRoute;
     readonly bend: PlaceBend | null;
+    readonly stroke: string | null;
+    readonly width: number | null;
     readonly pair: string;
   }> = [];
   for (const d of decls) {
@@ -364,6 +384,9 @@ function applyPlaceLines(
       // ⚠ 省いたときは **まっすぐ** ── 書かなくても必ず届く形である
       route: r.kind === 'ok' ? r.route : 'straight',
       bend: bn.kind === 'ok' ? bn.bend : null,
+      // 🔴 色・太さ(#530 段④)── 読めない綴りは `null`(無視して既定で描く。本文は消さない)
+      stroke: parsePlaceColor(d.getAttribute('data-pkc-stroke')),
+      width: parsePlaceWidth(d.getAttribute('data-pkc-width')),
       // 🔑 向きに依らず同じ組として数える ── a→b と b→a は「同じ 2 枚の間」である
       pair: idFrom < idTo ? `${idFrom}\u0000${idTo}` : `${idTo}\u0000${idFrom}`,
     });
@@ -392,6 +415,8 @@ function applyPlaceLines(
     el.setAttribute('data-pkc-line-from', anchorSpell(ln.from));
     el.setAttribute('data-pkc-line-to', anchorSpell(ln.to));
     el.setAttribute('data-pkc-line-route', r.route);
+    setStyleVar(el, '--pkc-line-stroke', r.stroke);
+    setStyleVar(el, '--pkc-line-width', r.width === null ? null : String(r.width));
     svg.append(el);
     /**
      * 🔑 **押さえる層には、その線の開き行の行番号を焼く**(生の body 基準。`data-pkc-place-line`
@@ -403,6 +428,8 @@ function applyPlaceLines(
       const hit = document.createElementNS(SVG_NS, 'path');
       hit.setAttribute('d', el.getAttribute('d')!);
       hit.setAttribute('data-pkc-line-decl', String(src + lineOffset));
+      // 🔑 太い線は当たりも太くする(見える線より当たりが細いと、端が押せない)
+      setStyleVar(hit, '--pkc-hit-width', r.width === null ? null : String(Math.max(12, r.width + 8)));
       hits.append(hit);
     }
     drawn += 1;
@@ -472,6 +499,11 @@ export function applyPlaceLayout(
     else el.style.removeProperty('height');
     if (z !== null) el.style.zIndex = String(z);
     else el.style.removeProperty('z-index');
+    // 🔴 色(#530 段④)── 塗りの上の字は、塗りの明るさに合わせて読める色にする(`placeInkOf`)
+    const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
+    setStyleVar(el, '--pkc-place-fill', fill);
+    setStyleVar(el, '--pkc-place-ink', fill === null ? null : placeInkOf(fill));
+    setStyleVar(el, '--pkc-place-stroke', parsePlaceColor(el.getAttribute('data-pkc-stroke')));
     /**
      * 🔑 **開き行の行番号**(生の body 基準)を焼く ── 掴んで離したとき、
      * この行番号で本文の開き行を指す。描画が焼いた `data-pkc-source-line` に

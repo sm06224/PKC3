@@ -3836,8 +3836,13 @@ li[data-pkc-row-slot] {
   min-width: 120px;
   min-height: 40px;
   padding: 6px 8px 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  /* 🔴 **色は変数で受ける**(#530 段④)── `place-board.ts` が本文の `fill=` / `stroke=` を読んで
+   *   `--pkc-place-fill` / `-stroke` / `-ink` を置く。⚠ **変数が無ければ今までの色**(第 2 引数が既定)
+   *   なので、色を付けていない付箋は 1 ドットも変わらない。⚠ 地の色だけ変えると字が読めなくなるので、
+   *   字の色(`-ink`)も塗りに合わせて置かれる。 */
+  border: 1px solid var(--pkc-place-stroke, var(--border));
+  background: var(--pkc-place-fill, var(--surface));
+  color: var(--pkc-place-ink, inherit);
   overflow: auto;
 }
 /* 🔴 **板どうしを繋ぐ線**(#530 段③a)。
@@ -3871,8 +3876,10 @@ li[data-pkc-row-slot] {
  *   🔑 だから「これが無いと壊れる」を、**曲がる線で**確かめること。 */
 [data-pkc-field='place-lines'] path {
   fill: none;
-  stroke: var(--muted);
-  stroke-width: 2;
+  /* 🔴 色・太さは変数で受ける(#530 段④)── 無ければ今までの色と 2px(`PLACE_LINE_WIDTH_DEFAULT`)。
+   *   ⚠ `fill: none` は変数にしない(外すと曲線が塗り潰される ── 上の注記)。 */
+  stroke: var(--pkc-line-stroke, var(--muted));
+  stroke-width: var(--pkc-line-width, 2);
 }
 /* 🔴 **線を押さえる当たり**(#530 段③d)── 右クリックで「この線を消す」を出す相手。
  *
@@ -3891,7 +3898,7 @@ li[data-pkc-row-slot] {
 [data-pkc-field='place-line-hits'] path {
   fill: none;
   stroke: transparent;
-  stroke-width: 12;
+  stroke-width: var(--pkc-hit-width, 12);
   pointer-events: stroke;
 }
 /* ⚠ 線の宣言そのものは**中身を持たない** ── 出すと空の枠が流れに並ぶ。
@@ -3968,8 +3975,8 @@ li[data-pkc-row-slot] {
 /* 角丸・丸 ── 枠線がそのまま引けるので 1 層でよい */
 .pkc-place[data-pkc-shape='round']::before,
 .pkc-place[data-pkc-shape='ellipse']::before {
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--pkc-place-stroke, var(--border));
+  background: var(--pkc-place-fill, var(--surface));
 }
 .pkc-place[data-pkc-shape='round']::before {
   border-radius: 12px;
@@ -3981,12 +3988,12 @@ li[data-pkc-row-slot] {
  * 内(地の色)の **2 層**で縁を作る。`inset: 1px` が縁の太さである。 */
 .pkc-place[data-pkc-shape='diamond']::before,
 .pkc-place[data-pkc-shape='arrow']::before {
-  background: var(--border);
+  background: var(--pkc-place-stroke, var(--border));
 }
 .pkc-place[data-pkc-shape='diamond']::after,
 .pkc-place[data-pkc-shape='arrow']::after {
   inset: 1px;
-  background: var(--surface);
+  background: var(--pkc-place-fill, var(--surface));
 }
 .pkc-place[data-pkc-shape='diamond']::before,
 .pkc-place[data-pkc-shape='diamond']::after {

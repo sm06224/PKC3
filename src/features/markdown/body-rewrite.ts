@@ -34,7 +34,9 @@ import {
   removePlaceLine,
   resizePlace,
   setPlaceShape,
+  setPlaceStyle,
 } from './place-notation';
+import type { PlaceStyle } from './place-color';
 import type { PlaceShape } from './place-shape';
 import { readTags, withTagResult } from '../flavor/tags';
 import { attachmentFileName } from '../flavor/attachment-flavor';
@@ -203,6 +205,18 @@ export type BodyRewrite =
       line: number;
       openLine: string;
       shape: PlaceShape;
+    }
+  | {
+      /**
+       * 🔴 **付箋の色(`fill=` / `stroke=`)・線の色と太さ(`stroke=` / `width=`)を書く**
+       * (#530 段④)── 開き行の札だけ。`null` の札は**消す**(置けるなら外せる)。
+       * `line` / `openLine` の意味と門は `place-move` と同じ(`place-notation.ts` の 1 本)。
+       * ⚠ 受ける開き行は付箋と線の**両方** ── 渡した行の種類が持てない札は書かない。
+       */
+      kind: 'place-style';
+      line: number;
+      openLine: string;
+      style: PlaceStyle;
     }
   | {
       /**
@@ -763,6 +777,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);
   if (rewrite.kind === 'place-line-remove') return removePlaceLine(body, rewrite);
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
+  if (rewrite.kind === 'place-style') return setPlaceStyle(body, rewrite, rewrite.style);
   if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
   if (rewrite.kind === 'place-connect') {
     return connectPlaces(body, {
