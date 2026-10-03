@@ -23,6 +23,8 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const MENU = '[data-pkc-region="context-menu"]';
+/** 色の変数 3 つ。⚠ `--pkc-place` の前方一致で見ない ── 位置の変数 `--pkc-place-x`(#529 Q3)は色ではない。 */
+const COLOR_VARS = /--pkc-place-(?:fill|stroke|ink)/;
 const PICK = 'input[data-pkc-field="color-pick"]';
 
 const meta = (lid: string): never =>
@@ -122,7 +124,7 @@ describe('描画 ── 本文の札が CSS 変数として置かれる', () => 
     expect(a.style.getPropertyValue('--pkc-place-stroke')).toBe('#b45309');
     // 明るい塗りには暗い字
     expect(a.style.getPropertyValue('--pkc-place-ink')).toBe('#1a1a1a');
-    expect(b.getAttribute('style') ?? '', '色なしの付箋に色の変数が置かれた').not.toContain('--pkc-place');
+    expect(b.getAttribute('style') ?? '', '色なしの付箋に色の変数が置かれた').not.toMatch(COLOR_VARS);
   });
 
   it('🔴 線: 色と太さが道に置かれる。当たりの太さは見える線より太い', () => {
@@ -158,7 +160,7 @@ describe('描画 ── 本文の札が CSS 変数として置かれる', () => 
     ].join('\n');
     const { host } = rig(body);
     for (const el of host.querySelectorAll<HTMLElement>('.pkc-place')) {
-      expect(el.getAttribute('style') ?? '', '読めない色が CSS へ入った').not.toContain('--pkc-place');
+      expect(el.getAttribute('style') ?? '', '読めない色が CSS へ入った').not.toMatch(COLOR_VARS);
       expect(el.getAttribute('style') ?? '').not.toMatch(/javascript|url|red/);
     }
     const path = host.querySelector<SVGElement>('[data-pkc-field="place-lines"] path')!;
@@ -171,7 +173,7 @@ describe('描画 ── 本文の札が CSS 変数として置かれる', () => 
     host.innerHTML = renderMarkdown(bodyBelowFrontmatter(BOARD), { sourceLineAnchors: true });
     applyPlaceLayout(host, () => null, 0);
     for (const el of host.querySelectorAll<HTMLElement>('.pkc-place')) {
-      expect(el.getAttribute('style') ?? '').not.toContain('--pkc-place');
+      expect(el.getAttribute('style') ?? '').not.toMatch(COLOR_VARS);
     }
   });
 });

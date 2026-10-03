@@ -3928,6 +3928,19 @@ li[data-pkc-row-slot] {
   margin: 0;
   max-width: none;
 }
+/* 🔴 **`w=` を書いていない塊は、読む面の幅で頭打ちにする**(#529 Q3 = A。Gemini 裁定 2026-10-02)。
+ *
+ * ⚠ 直す前は上の `max-width: none` が `w=` の無い塊にも効き、折り返せない長い数式の塊が
+ *   **1,614px に広がって読む面全体が横に 734px 溢れた**(`w=` を書けば避けられた)。
+ * 🔑 頭打ちの幅は**塊の置き場(`left`)を引いた残り**(`--pkc-place-x` は `place-board.ts` が `x=` から当てる)
+ *   ── 単に `100%` と書くと、右へ寄せた塊が `x` ぶんだけ面から出る。
+ *   `100%` は絶対配置の塊では**板の器**(`position: relative`)の幅を指す。
+ * ⚠ `w=` を書いた塊(`data-pkc-w`)と、中身を出す枠の既定の大きさ(`data-pkc-place-framed` = 幅を当てている)は
+ *   **上の `none` のまま** ── 書いた幅・既定の幅を勝手に縮めない。
+ * 🔑 式そのものは塊の中で横に送る ── 塊の `overflow: auto`(上の付箋の見た目)がそのまま効く。 */
+.pkc-board-host .pkc-format-block.pkc-place:not([data-pkc-w]):not([data-pkc-place-framed]) {
+  max-width: calc(100% - var(--pkc-place-x, 0px));
+}
 /* 🔴 **板の形**(#530 案 A。user 裁定 2026-09-14)── 札が無いときは四角(既定)。
  *
  * ⚠ **板そのものを丸めたり切り抜いたりしない。** 掴む口(`place-grip` = 右上)と
@@ -4192,8 +4205,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-body'] [data-pkc-embedded-heading='3'] {
   font-size: 1.05em;
 }
-/* 板の上限(200 枚)を超えた最初の枠の 1 行(#1264 欠陥 8-b)── 押せない説明の字。地は無彩色 */
-[data-pkc-field='place-limit-note'] {
+/* 板の上限(200 枚)を超えた最初の枠の 1 行(#1264 欠陥 8-b)/ 枠の中の SQL の「ここでは答えを出しません」(#529 Q2)
+ * ── どちらも押せない説明の字。地は無彩色 */
+[data-pkc-field='place-limit-note'],
+[data-pkc-field='place-sql-note'] {
   margin: 2px 0;
   padding: 2px 6px;
   color: var(--muted);

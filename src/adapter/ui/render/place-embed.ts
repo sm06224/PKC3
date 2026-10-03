@@ -51,9 +51,12 @@
 import {
   PLACE_BODY_CAP,
   PLACE_NEAR_MARGIN,
+  PLACE_SQL_FIELD,
+  PLACE_SQL_NOTE,
   placeEmbeddable,
   type PlaceExcerpt,
 } from '@features/markdown/place-embed';
+import { SQL_EMBED_ATTR } from '@features/markdown/sql-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
 import { markViewBig } from './view-big';
@@ -222,6 +225,17 @@ export function sanitizeEmbedded(
     const plain = doc.createElement('span');
     plain.append(...a.childNodes);
     a.replaceWith(plain);
+  }
+
+  // ②-b 本文に埋め込んだ SQL(` ```sql embed `)の器は**答えを引かない** ── 1 行の案内へ差し替える。
+  //    🔴 器の印(`data-pkc-sql-embed`)ごと外す:本文の描画(`SqlEmbedHydrator.sync`)は
+  //    根の中の印を**全部**掴むので、残すと本文を書き直した回に枠の中の器まで引いてしまう。
+  //    SQL の字(コードの囲み)は器の外なので、そのまま残る(案内は字の直下に出る)
+  for (const host of [...box.querySelectorAll<HTMLElement>(`[${SQL_EMBED_ATTR}]`)]) {
+    const note = doc.createElement('div');
+    note.setAttribute('data-pkc-field', PLACE_SQL_FIELD);
+    note.textContent = PLACE_SQL_NOTE;
+    host.replaceWith(note);
   }
 
   // ③ 見出しは見出しでなくす(目次・章の右クリックが板のノートの章を指さない)

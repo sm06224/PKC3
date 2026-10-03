@@ -1169,6 +1169,37 @@ describe('板の CSS ── 位置は board-host 起点だけ', () => {
     );
   });
 
+  /**
+   * 🔴 **`w=` 無しの塊は読む面の幅で頭打ち / `w=` 付きは書いた幅のまま**(#529 Q3 = A)。
+   * ⚠ 選択子は構文で拾う(`blocksFor` = 選択子リストを割って丸ごと一致)。注釈は剥がしてある。
+   */
+  const AUTO = '.pkc-board-host .pkc-format-block.pkc-place:not([data-pkc-w]):not([data-pkc-place-framed])';
+
+  it('🔴 w= 無し(幅を当てていない塊)にだけ、置き場(left)を引いた残りの幅で頭打ちを掛ける', () => {
+    const cap = blocksFor(APP, AUTO).join(';');
+    expect(cap, 'w= 無しの塊の頭打ちが無い(選択子を変えたならこの test も追随する)').toMatch(
+      /(?:^|;)\s*max-width:\s*calc\(100% - var\(--pkc-place-x, 0px\)\)/,
+    );
+    // 🔑 対照群:w= 付き / 既定の大きさを当てた塊は、上の `none` のまま(`AUTO` の選択子が `:not(...)` 2 つで除外している。
+    //   選択子を丸ごと一致で探すので、`:not` を外すとこの検査が落ちる)
+    const base = blocksFor(APP, '.pkc-board-host .pkc-format-block.pkc-place').join(';');
+    expect(base, 'w= 付きの塊は max-width: none のまま(読み幅で黙って切らない)').toMatch(/(?:^|;)\s*max-width:\s*none/);
+  });
+
+  it('🔴 頭打ちの幅が引く値(--pkc-place-x)は、塊の x= がそのまま入る(置き直しても追随する)', () => {
+    const host = document.createElement('div');
+    host.innerHTML = RENDERED;
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0);
+    expect(host.querySelector<HTMLElement>('#p1')!.style.getPropertyValue('--pkc-place-x')).toBe('120px');
+    expect(host.querySelector<HTMLElement>('#p2')!.style.getPropertyValue('--pkc-place-x')).toBe('460px');
+    // x= を書き換えた描き直し(別の値)でも古い値が残らない
+    host.innerHTML = RENDERED.replace('data-pkc-x="120"', 'data-pkc-x="30"');
+    applyPlaceLayout(host, () => null, 0);
+    expect(host.querySelector<HTMLElement>('#p1')!.style.getPropertyValue('--pkc-place-x')).toBe('30px');
+    host.remove();
+  });
+
   it('🔴 見た目の規則(.pkc-md-rendered 起点)に位置を混ぜない', () => {
     const look = blocksFor(APP, '.pkc-md-rendered .pkc-format-block.pkc-place').join(';');
     expect(look, '見た目の規則が無い(選択子を変えたならこの test も追随する)').toContain('border');

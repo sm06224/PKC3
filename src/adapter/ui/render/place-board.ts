@@ -492,6 +492,8 @@ export function applyPlaceLayout(
     if (sized) el.setAttribute('data-pkc-place-framed', '');
     else el.removeAttribute('data-pkc-place-framed');
     el.style.left = `${x}px`;
+    // 🔑 `w=` 無しの塊が頭打ちになる幅(器の幅 − `left`)を CSS が引くための値(`app.css` の `--pkc-place-x`)
+    el.style.setProperty('--pkc-place-x', `${x}px`);
     el.style.top = `${y}px`;
     if (useW !== null) el.style.width = `${useW}px`;
     else el.style.removeProperty('width');

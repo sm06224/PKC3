@@ -70,6 +70,16 @@ export const PLACE_BODY_CAP = 200;
 export const PLACE_NEAR_MARGIN = 800;
 
 /**
+ * 🔴 **枠の中の SQL の囲み(` ```sql embed `)の答えの代わりに出す 1 行**(#529 Q2 = B。Gemini 裁定 2026-10-02)。
+ * ⚠ 枠は読み取り専用の抜粋で、**答えを引かない**(保存と同じ worker を叩くので、200 枚の板が
+ *   開くたびに 200 回走ると保存を待たせる)。理由を言わないと、**SQL の字だけが出て答えが無い**ので
+ *   「壊れた」に見える ── だから黙って空にせず、開けば出ることを言う。
+ */
+export const PLACE_SQL_NOTE = 'ここでは答えを出しません(ノートを開くと出ます)';
+/** 上の 1 行の器。⚠ 本文の `data-pkc-sql-embed` は**付けない**(付けると本文の描画が掴んで答えを引く)。 */
+export const PLACE_SQL_FIELD = 'place-sql-note';
+
+/**
  * 🔴 **置いた添付ノートのうち、板に絵を出せる物**(#529 W3-②。Gemini 裁定 2026-10-01 Q2 = A)。
  *
  * - `image` = 画像そのものを枠いっぱいに描く(`object-fit: contain`)
