@@ -73,6 +73,14 @@ function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
 const appendsSeen: Array<{ lid: string; text: string }> = [];
 
 const tick = () => new Promise((r) => setTimeout(r, 10));
+/**
+ * 🔴 **状態が変わるまで待つ**(上限つき)── 固定の `setTimeout(100)` は、箱が混んでいるとき(runner 2 本 + レビュー 2 本)
+ *   だけ間に合わず落ちた(#1319、2026-10-03。単独では 3/3 緑)。待ちきれなくても投げない ── 下の assert が落ちて理由を言う。
+ */
+const until = async (pred: () => boolean, ms = 3000): Promise<void> => {
+  const t0 = Date.now();
+  while (!pred() && Date.now() - t0 < ms) await tick();
+};
 
 /**
  * 🔴 **添付は、開いていたノートの本文へ入る**(user 裁定 2026-09-02、#666)。
@@ -451,7 +459,7 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
 
     // ② 実物の効果層で戻す ── user が「元に戻す」を押したのと同じ
     h.d.dispatch({ type: 'UNDO_APPEND' });
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => bodyNow() === '# 買い物メモ'); // 固定待ちではなく、本文が戻るまで(#1319)
     expect(bodyNow(), '「元に戻す」で 3 行とも消えていない').toBe('# 買い物メモ');
     expect(h.d.getState().lastAppend, '1 手で使い切っていない').toBeNull();
   });
