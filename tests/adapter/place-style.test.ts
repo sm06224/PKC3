@@ -4,7 +4,7 @@
  *
  * 守る主張:
  * 1. 本文の `fill=` / `stroke=` / `width=` が CSS 変数として要素に置かれる(読めない値は**置かない**)
- * 2. 付箋 / 線を右クリックすると「色…」が出る。選ぶと**本文が書き換わる**(窓は既存の色の窓 1 つ)
+ * 2. 付箋(「塗りの色…」「枠の色…」)/ 線(「色…」)を右クリックすると色の項目が出る。選ぶと**本文が書き換わる**(窓は既存の色の窓 1 つ)
  * 3. 外せる ── 色が付いているときだけ「色を外す」が出て、押すと札が消える(片道にしない)
  * 4. 編集中は書かず、理由を言う
  *
@@ -195,12 +195,14 @@ describe('描画 ── 本文の札が CSS 変数として置かれる', () => 
   });
 });
 
-describe('付箋の右クリック ── 色…', () => {
-  it('🔴 「色…」「枠の色…」が出る。色が無いときは「色を外す」は出ない(押しても何も起きない口を作らない)', () => {
+describe('付箋の右クリック ── 塗りの色…', () => {
+  it('🔴 「塗りの色…」「枠の色…」が出る。色が無いときは「色を外す」は出ない(押しても何も起きない口を作らない)', () => {
     const { root, host } = rig(BOARD);
     rightClick(host.querySelector('.pkc-place')!);
-    expect(labels(root)).toContain('色…');
+    expect(labels(root)).toContain('塗りの色…');
     expect(labels(root)).toContain('枠の色…');
+    // 🔴 字を分けた(#530 Gemini 裁定 A、2026-10-03)── 付箋に素の「色…」は無い(どちらの色か読めない)。線の「色…」はそのまま
+    expect(labels(root), '付箋の項目が素の「色…」のまま').not.toContain('色…');
     expect(acts(root)).not.toContain('place-color-clear');
     // 「消す」は色の項目より後ろ(確認を挟む物を真ん中に置かない)
     expect(acts(root).indexOf('remove-place')).toBeGreaterThan(acts(root).lastIndexOf('place-color'));
@@ -218,10 +220,10 @@ describe('付箋の右クリック ── 色…', () => {
     }
   });
 
-  it('🔴 「色…」を押すと既存の色の窓が開き、選ぶと本文の `fill=` が書き換わる', () => {
+  it('🔴 「塗りの色…」を押すと既存の色の窓が開き、選ぶと本文の `fill=` が書き換わる', () => {
     const { root, host, asks } = rig(BOARD);
     rightClick(host.querySelector('.pkc-place')!);
-    items(root).find((b) => b.textContent === '色…')!.click();
+    items(root).find((b) => b.textContent === '塗りの色…')!.click();
     const p = pick();
     expect(p, '押しても色の窓が開かない(dead click)').not.toBeNull();
     expect(p!.type).toBe('color');
@@ -259,7 +261,7 @@ describe('付箋の右クリック ── 色…', () => {
     const body = `${open}\n左\n:::\n`;
     const { root, host, asks } = rig(body);
     rightClick(host.querySelector('.pkc-place')!);
-    items(root).find((b) => b.textContent === '色…')!.click();
+    items(root).find((b) => b.textContent === '塗りの色…')!.click();
     const p = pick()!;
     expect(p.value).toBe('#ffe08a');
     fire(p, 'change'); // 値は元のまま
@@ -276,7 +278,7 @@ describe('付箋の右クリック ── 色…', () => {
   it('🔴 色が無い付箋の窓の初めの色は、白(#ffffff)ではない ── 白を選んでも値が変わり、本文へ入る', () => {
     const { root, host, asks } = rig(BOARD);
     rightClick(host.querySelector('.pkc-place')!);
-    items(root).find((b) => b.textContent === '色…')!.click();
+    items(root).find((b) => b.textContent === '塗りの色…')!.click();
     const p = pick()!;
     expect(p.value, '初めの色が本物の白だと、白を選んでも change が来ない').not.toBe('#ffffff');
     expect(p.value, '見た目が白から離れた').toBe('#fffffe');
@@ -322,7 +324,7 @@ describe('付箋の右クリック ── 色…', () => {
     const { root, host, d, asks } = rig(BOARD);
     rightClick(host.querySelector('.pkc-place')!);
     d.dispatch({ type: 'START_EDIT' });
-    items(root).find((b) => b.textContent === '色…')!.click();
+    items(root).find((b) => b.textContent === '塗りの色…')!.click();
     expect(pick(), '書けないのに窓が開いた').toBeNull();
     expect(asks).toHaveLength(0);
     expect(d.getState().error ?? '', '理由が出ていない').toContain('色');

@@ -8265,9 +8265,10 @@ h3[data-pkc-section] {
   color: var(--muted);
   font-size: 11px;
 }
-/* 🔑 `>` だけのとき、一覧の先頭に出る「最近使った操作」の見出し(#274)── 1 行だけ。
+/* 🔑 `>` だけのとき・「操作を探す」を開いたとき、一覧の先頭に出る「最近使った操作」の見出し(#274)── 1 行だけ。
  * 色は**既存の控えめな字**(`--muted`)、寸法は行の左右の余白に揃える(新しい色・寸法は足さない)。 */
-[data-pkc-field='command-recent-heading'] {
+[data-pkc-field='command-recent-heading'],
+[data-pkc-field='palette-recent-heading'] {
   margin: 0;
   padding: var(--s2) var(--s3) var(--s1);
   color: var(--muted);

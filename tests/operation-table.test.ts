@@ -353,8 +353,10 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
    *   節の中にしか無く、鍵も持たない(`system-jump` / `set-prose-align` と同じ仕分け)。
+   * ⚠ **2026-10-03(#1017 C5)で `open-messages` を外した** ── 「メッセージを開く」を
+   *   KEY_COMMANDS へ登記したので、未登記ではなくなった(登記の側の `both` に数える)。
    */
-  'export-messages', 'open-messages', 'set-message-cap',
+  'export-messages', 'set-message-cap',
 ];
 
 /**
@@ -456,6 +458,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-03(#1017 C5。Gemini 裁定 B): 「メッセージを開く」(`open-messages`)を KEY_COMMANDS へ登記した ──
+      //   受け手は既に在った(押し口は状態の行と「システム」の節)ので `both` +1 / `registered` +1 /
+      //   `unregistered` −1(`total` / `receivers` は動かない)。`close-pane`(#1042 C3)と同じ仕分け。
       // ⚠ 2026-10-02(#999): システム → 保存領域の「縮める」(`storage-vacuum`)で受け手 +1 ── 登記は増えない
       //   (押し口は設定の欄にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       //   押した所から何も要らない N(`storage-profile` と同じ仕分け)
@@ -727,10 +732,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
       total: 385,
       receivers: 321,
-      registered: 103,
-      both: 39,
+      registered: 104,
+      both: 40,
       outsideActionsTable: 64,
-      unregistered: 282,
+      unregistered: 281,
     });
   });
 
@@ -774,8 +779,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-01(#1171): 「表の列幅を揃える」(`align-table`)で `key` 71 → 72(鍵の既定は持たない)
     // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)で `key` 72 → 74
     // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
+    // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 79,
+      key: 80,
       entry: 17,
       body: 3,
       collection: 2,

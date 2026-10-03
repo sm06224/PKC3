@@ -23,6 +23,7 @@
  *   面を閉じて戻っても消えない。
  */
 import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/app-state';
+import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { paintSqlEr } from './sql-er';
@@ -1184,13 +1185,23 @@ export function historyNoteLine(p: AppState['sqlPage']): string {
 /**
  * 🔴 **進捗の字**(#682 段④d の着地後レビュー D1)。⚠ 直す前は「走らせています…」だけで、DuckDB が `.sqlite` を写している
  *   最中(100k 行の表で数秒)は**何が起きているか**が 1 字も出なかった。
- * ⚠ 「最初の 1 回だけ」とは言わない ── DuckDB は使わないまま置くと**自分で片づける**ので、**しばらく使わなかったあとの
+ * ⚠ 「最初の 1 回だけ」とは言わない ── DuckDB は使わないまま置くと**自分で片づける**ので、**使わなかったあとの
  *   最初の 1 回**も写し直す(実装の事実)。⚠ 内蔵の sqlite のときは何も足さない(写さない)。
+ * 🔴 **字は裁定の字**(#682 Gemini 裁定 A、2026-10-03)「初回と、30 秒使わなかったあとは DuckDB に表を写すので
+ *   時間がかかります」。⚠ 30 秒は**片づけるまでの間隔**(`DEFAULT_IDLE_MS`)から導く ── 直書きすると、
+ *   間隔を変えた日に字が嘘になる。
  */
 function runningNote(p: AppState['sqlPage']): string {
-  return sqlEngineOf(p) === 'duckdb'
-    ? '(初めて引くときと、しばらく使わなかったあとは、file を DuckDB へ写すので時間がかかります)'
-    : '';
+  return sqlEngineOf(p) === 'duckdb' ? duckdbWarmupNote(DEFAULT_IDLE_SEC) : '';
+}
+
+/**
+ * 🔴 **進捗の字そのもの**(`runningNote` の中身)。⚠ 秒数は**引数**で受ける ── 呼び側は片づける間隔
+ *   (`DEFAULT_IDLE_SEC`)を渡す。引数にしておくと、test が別の秒数を渡して「字が間隔に従う」を見られる
+ *   (字へ直書きした変異が、間隔を変えない限り生き延びる、を防ぐ)。
+ */
+export function duckdbWarmupNote(idleSec: number): string {
+  return `(初回と、${String(idleSec)} 秒使わなかったあとは DuckDB に表を写すので時間がかかります)`;
 }
 
 /**

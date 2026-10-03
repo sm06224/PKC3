@@ -36,6 +36,7 @@ import {
   viewModeLabel,
 } from '../../src/adapter/state/app-state';
 import {
+  duckdbWarmupNote,
   fitSqlInput,
   SQL_SOURCE_GROUP_ADD,
   SQL_SOURCE_GROUP_ATTACHED,
@@ -50,7 +51,11 @@ import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { DUCKDB_NETWORK_NOTE } from '../../src/features/query/sql-guest-source';
 import type { DuckDbCopyReport } from '../../src/features/query/duckdb-copy-report';
-import { DUCKDB_LOAD_TOO_LONG, DUCKDB_TOO_LONG } from '../../src/adapter/platform/duckdb/duckdb-lease';
+import {
+  DEFAULT_IDLE_MS,
+  DUCKDB_LOAD_TOO_LONG,
+  DUCKDB_TOO_LONG,
+} from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type {
   DuckDbReadableGuestSource,
   SqliteConvertGuestSource,
@@ -4947,10 +4952,24 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     await settle();
     const running = s.note();
     expect(running).toContain('走らせています…');
-    expect(running, '写していることを言っていない').toContain('file を DuckDB へ写すので時間がかかります');
+    expect(running, '写していることを言っていない').toContain('DuckDB に表を写すので時間がかかります');
     // 🔴 「最初の 1 回だけ」とは言わない ── 使わないまま置くと片づけて、次に写し直す(実装の事実)
-    expect(running).toContain('しばらく使わなかったあと');
+    expect(running).toContain('初回と、');
     expect(running).not.toContain('最初の 1 回だけ');
+    /**
+     * 🔴 **字の秒数は、片づける間隔そのもの**(#682 Gemini 裁定 A)。⚠ 字に `30` を直書きすると、
+     *   間隔(`DEFAULT_IDLE_MS`)を変えた日に字が嘘になる。
+     * ① 画面に出た字が、定数から導いた字と一致する ② 字を作る関数は渡された間隔に従う(別の秒数で試す ──
+     *   直書きしていれば、ここで落ちる)③ マニュアルの秒数も同じ定数に揃っている。
+     */
+    expect(DEFAULT_IDLE_MS, '片づける間隔が変わった(字・マニュアルの「30 秒」を見直す)').toBe(30_000);
+    expect(running).toContain(duckdbWarmupNote(DEFAULT_IDLE_MS / 1000));
+    expect(duckdbWarmupNote(45), '字が渡された秒数に従っていない').toContain('45 秒使わなかったあとは');
+    const manual = readFileSync('docs/manual.md', 'utf-8');
+    expect(
+      manual.includes(`${String(DEFAULT_IDLE_MS / 1000)} 秒使わなかったあとの最初の 1 回`),
+      'マニュアルの秒数が、片づける間隔と食い違っている',
+    ).toBe(true);
     release();
     await settle();
     expect(s.note(), '答えが出たのに進捗の字が残っている').not.toContain('写すので時間がかかります');

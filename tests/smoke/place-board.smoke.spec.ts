@@ -410,7 +410,7 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
     });
   const before = await paintOf(p2);
   const p1Before = await paintOf(p1);
-  await pickColor('色…', '#ff0000');
+  await pickColor('塗りの色…', '#ff0000');
   await expect(p2, '塗りが本文に書き戻されていない').toHaveAttribute('data-pkc-fill', '#ff0000', { timeout: 5000 });
   await pickColor('枠の色…', '#0000ff');
   await expect(p2, '枠の色が本文に書き戻されていない').toHaveAttribute('data-pkc-stroke', '#0000ff', { timeout: 5000 });

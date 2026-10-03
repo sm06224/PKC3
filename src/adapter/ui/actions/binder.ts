@@ -4308,6 +4308,27 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **メッセージを開く**(#1017 C5)── 押しボタンを持たない(状態の行の押し口は未読のときだけ
+   *   出る)ので、特例で直に開く。⚠ **編集中 / 失敗の画面では開かない**(reducer が断る遷移 ──
+   *   `MESSAGES_READ`)。押せるふりをして黙って何も起きない行にしない:`dry` では偽(= 一覧は
+   *   「いまは押せません ── <理由>」と言う)、実行では理由を出す。理由は `blockedActionNote` の 1 か所。
+   */
+  if (cmd === 'open-messages') {
+    // 🔴 押せない理由も判定も `blockedActionNote` の 1 か所から(#791 ④ / #516 ── 保存に失敗している
+    //   保護中に「編集中」と言わない)。⚠ ここで phase を読み替えて字を直書きしない(§7)
+    const why = blockedActionNote(dispatcher.getState().phase);
+    if (why !== null) {
+      if (dry) return false;
+      prevent();
+      notify(`いまはメッセージを開けません ── ${why}`, CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    openMessagesNote(dispatcher, SYSTEM_MESSAGE_LID);
+    return true;
+  }
+  /**
    * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
    *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
    *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
@@ -4422,6 +4443,18 @@ export function runGlobalCommand(
 }
 
 /**
+ * 🔴 **メッセージのノートを開く実体は 1 本**(設計 doc §7、段②a / #1017 C5)。
+ *
+ * ⚠ 押しボタン(`open-messages` の受け手)と、「操作を探す」・左の `>` の一覧の「メッセージを開く」
+ *   (`runGlobalCommand`)の**両方がここを通る** ── 開く + 既読の 2 手を 2 か所に書くと、片方だけ
+ *   既読にしない日が来る(§7)。
+ */
+function openMessagesNote(dispatcher: Dispatcher, lid: string): void {
+  dispatcher.dispatch({ type: 'MESSAGES_READ', lid });
+  appMessagePost.markRead();
+}
+
+/**
  * 🔴 **操作の一覧の行を組む口は 1 つ**(#274 段①)。
  *
  * ⚠ 操作のパレット(`openPaletteFor`)と、左の列の探す欄に `>` を打ったときの一覧が
@@ -4479,6 +4512,9 @@ export function commandRowsFor(
    *   `data-pkc-blocked` を読む ── ここで phase を読み直すと**判定が 2 か所**になる(§7)。
    */
   const blockedReason = (id: string): string | null => {
+    // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
+    //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
+    if (id === 'open-messages') return blockedActionNote(dispatcher.getState().phase);
     const sel = SHORTCUT_BUTTON[id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
@@ -4543,7 +4579,11 @@ export function openPaletteFor(
   const range =
     target === null ? null : { start: target.selectionStart, end: target.selectionEnd };
   const rows = (query: string) => commandRowsFor(root, dispatcher, keymap, query, target);
-  void pickCommandInApp(root, rows).then((picked) => {
+  /**
+   * 🔴 **「操作を探す」も、左の `>` と同じ「最近使った操作」を使う**(#274 Q3 = A)。⚠ 記録は 1 つ
+   *   (`appRecentCommands`)── 開くたびに保存を引く(別のタブで使った物も出る)。
+   */
+  void pickCommandInApp(root, rows, () => appRecentCommands.list()).then((picked) => {
     if (picked === null) return;
     // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
     /**
@@ -4558,7 +4598,11 @@ export function openPaletteFor(
      *   「**全域が先、記法は後**」という順番を字面で見せるためである
      *   (CLAUDE.md「これが無いと壊れる、と書く前に外して壊れるのを見る」)。
      */
-    if (runGlobalCommand(picked, root, dispatcher, keymap, noop, notify)) return;
+    if (runGlobalCommand(picked, root, dispatcher, keymap, noop, notify)) {
+      // 🔴 実行が**済んだ**ときだけ憶える(左の `>` の一覧と同じ記録。鍵は label ではなく id)
+      appRecentCommands.push(picked);
+      return;
+    }
     if (!editorCommand(picked)) return;
     /**
      * 🔴 **記法を、開いたときの欄へ当てる**(#425 段②-b)。
@@ -4588,9 +4632,10 @@ export function openPaletteFor(
       target.focus();
       if (range !== null) target.setSelectionRange(range.start, range.end);
       runEditor(target, notify);
+      appRecentCommands.push(picked);
       return;
     }
-    applyFormatTo(target, picked, range ?? undefined, notify);
+    if (applyFormatTo(target, picked, range ?? undefined, notify)) appRecentCommands.push(picked);
   });
 }
 
@@ -8405,7 +8450,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'task-run-open': (dispatcher, target) => setTaskRun(dispatcher, target, 'open'),
   'task-run-done': (dispatcher, target) => setTaskRun(dispatcher, target, 'done'),
   /**
-   * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「色…」「枠の色…」。
+   * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「塗りの色…」「枠の色…」(線は「色…」)。
    *
    * 🔑 選ぶ窓は**本文の色コードの見本と同じ 1 つ**(`openColorPicker`)── 新しい部品を作らない。
    *   窓を開く前に断る(編集中・別のノートへ替わった後)。`change` で 1 回だけ書く。
@@ -10060,8 +10105,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-messages': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-message-lid');
     if (lid === null || lid === '') return;
-    dispatcher.dispatch({ type: 'MESSAGES_READ', lid });
-    appMessagePost.markRead();
+    openMessagesNote(dispatcher, lid);
   },
   /**
    * 🔴 **メッセージの保管件数を選ぶ**(設計 doc §7、段②a)。
@@ -15197,11 +15241,19 @@ export function bindActions(
           );
         if (ke.key === 'Enter' && !ke.isComposing) {
           /**
-           * 🔴 **`>` だけのときの `Enter` は何もしない**(#1206 D8)。⚠ 直す前は先頭の行
-           *   (空の探し語では「ノートを作る」)が走り、**打った覚えのない新しいノートの編集に入った**。
-           *   行の一覧は出したまま ── 名前を 1 字でも打てば、そこから実行できる。
+           * 🔴 **`>` だけのときの `Enter` は実行しない。先頭の行へ焦点を移す**(#1206 D8 →
+           *   #274 Q2 = C。2026-10-03)。⚠ 直す前の D8 は先頭の行(空の探し語では「ノートを作る」)が
+           *   走り、**打った覚えのない新しいノートの編集に入った**ので「何も起きない」にしたが、
+           *   今度は**押しても何も起きない**ように見えた ── `↓` と同じく先頭の押せる行へ降りる
+           *   (次の `Enter` は、その行(ボタン)の既定が実行する)。⚠ ここでは**実行しない**(D8 は守る)。
            */
-          if ((commandQueryOf(el.value) ?? '').trim() === '') return;
+          if ((commandQueryOf(el.value) ?? '').trim() === '') {
+            const top = rows().find((b) => !b.disabled);
+            if (top === undefined) return;
+            ke.preventDefault();
+            top.focus();
+            return;
+          }
           const first = rows().find((b) => !b.disabled);
           if (first === undefined) return;
           ke.preventDefault();

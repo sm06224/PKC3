@@ -12,7 +12,7 @@
  * ⚠ **溢れても黙って捨てる**(ただし控えには積む)。⚠ **読むたびに保存を引く**
  *   (別のタブで使った操作も、次に `>` を打ったとき出る)。
  */
-import { pushRecentCommand, RECENT_COMMANDS_MAX } from '@features/palette/recent-commands';
+import { pushRecentCommand, RECENT_COMMANDS_KEEP } from '@features/palette/recent-commands';
 
 const KEY = 'pkc3.recent-commands';
 
@@ -69,7 +69,7 @@ function parse(raw: string | null): string[] {
   for (const t of v) {
     if (typeof t === 'string' && t !== '' && !out.includes(t)) out.push(t);
   }
-  return out.slice(0, RECENT_COMMANDS_MAX);
+  return out.slice(0, RECENT_COMMANDS_KEEP);
 }
 
 /**

@@ -19,6 +19,8 @@ import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/rende
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { EDITING_NOTE } from '../../src/adapter/state/app-state';
+import { appRecentCommands } from '../../src/adapter/platform/recent-commands-store';
+import { SYSTEM_MESSAGE_LID } from '../../src/features/message/message-log';
 
 function meta(lid: string, title: string): EntryMeta {
   return {
@@ -356,6 +358,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     await tick();
     expect(ta.value, '答えが入っていない').toBe('2+3=5');
+    // 🔴 本文欄の命令(`EDITOR_RUN`)の経路も憶える(push 3 か所のうちの 1 つ)
+    expect(appRecentCommands.list(), '本文欄の命令を実行したのに憶えていない').toContain('inline-calc');
   });
 
   /**
@@ -377,8 +381,9 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
    * 🔴 **選んだら、控えた欄の選んだ範囲に入る**(段②-b の本体)。
    * ⚠ 器が閉じるとき焦点はこの欄へ返る(`app-dialog` の後始末)── その上で当てる。
    */
-  it('🔴 選ぶと、控えた欄の選んだ範囲へ記法が入る', async () => {
+  it('🔴 選ぶと、控えた欄の選んだ範囲へ記法が入る(実行した記法は「最近使った操作」に積む)', async () => {
     const { root } = setup();
+    appRecentCommands.clear();
     const ta = editing(root, 'あいうえお', 1, 4);
     root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
     await tick();
@@ -386,6 +391,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     await tick();
     expect(ta.value, '選んだ範囲に入っていない').toBe('あ==いうえ==お');
+    // 🔴 記録の push は 3 か所(全域 / 本文欄の命令 / 記法)── 記法の経路も憶える(#274 Q3。レビュー 2026-10-03)
+    expect(appRecentCommands.list(), '記法を入れたのに憶えていない').toEqual(['format-highlight']);
   });
 
   /**
@@ -427,6 +434,7 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     ta.remove(); // 待っている間に面ごと組み直された形
     sent.length = 0;
+    appRecentCommands.clear();
     rowOf('format-highlight')!.click();
     await tick();
     await tick();
@@ -441,6 +449,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     expect(msg, '断り文が空(画面には何も出ない)').not.toBe('');
     expect(msg, 'なぜ入らなかったのかが書いていない').toContain('欄');
     expect(ta.value, '消えた欄へ書き込んだ').toBe('あいうえお');
+    // 対照群: 当てられなかった回は憶えない(`applyFormatTo` が偽を返す側)
+    expect(appRecentCommands.list(), '入らなかったのに憶えた').toEqual([]);
   });
 
   /**
@@ -650,6 +660,39 @@ describe('パレットの「押せない理由」は、ボタンが持ってい�
     expect(why, 'いまの理由を言っていない').toContain('保存に失敗');
   });
 
+  /**
+   * 🔴 **「メッセージを開く」も同じ 1 か所から理由を引く**(#1017 C5。レビュー 2026-10-03)。
+   * ⚠ 直す前は `binder` が phase を読み替えて「編集中は、保存するか…」を直書きしていたので、
+   *   保存に失敗している保護中にも「編集中」と言った(#516 の形の再発)。行の理由も静的な
+   *   `note`(出口を言わない)だった。
+   */
+  it('🔴 「メッセージを開く」── 保存に失敗している保護中は、その理由(出口つき)を言い、「編集中」と言わない', async () => {
+    const { d } = setupWithBrowse();
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    expect(d.getState().phase, '前提が崩れている').toBe('error');
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    expect(rowOf('open-messages')?.disabled, '保護中なのに押せることになっている').toBe(true);
+    const why = whyOf('open-messages');
+    expect(why, '編集していないのに「編集中」と言った').not.toContain('編集中');
+    expect(why, 'いまの理由を言っていない').toContain('保存に失敗');
+    expect(why, '出口(何を押せば戻るか)を言っていない').toContain('押してから');
+  });
+
+  it('🔴 「メッセージを開く」── 編集中は、出口(保存 / やめる)まで言う', async () => {
+    const { d } = setupWithBrowse();
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    const why = whyOf('open-messages');
+    expect(why).toContain(NOT_READY_PREFIX);
+    expect(why, '出口(保存 / やめる)を言っていない').toContain('編集をやめる');
+  });
+
   it('⚠ 対照群 ── 理由を持たない行は、今までどおり登記簿の字を出す', async () => {
     setupWithBrowse();
     key({ key: 'p', ctrlKey: true, shiftKey: true });
@@ -658,5 +701,120 @@ describe('パレットの「押せない理由」は、ボタンが持ってい�
     const why = whyOf('nav-back');
     expect(why, '押せない行なのに理由が空').toContain(NOT_READY_PREFIX);
     expect(why, 'phase の理由が漏れている').not.toContain('編集中は使えません');
+  });
+});
+
+/**
+ * 🔴 **「操作を探す」も、「最近使った操作」を先頭に出す**(#274 Q3 = A。🟣 Gemini 裁定、2026-10-03)。
+ *
+ * user から見た物語:Ctrl+Shift+P で開く → 前に使った操作が上に並んでいる → 押す。左の列の `>` と
+ * **同じ記録**(`pkc3.recent-commands`)なので、どちらの面で使っても、どちらの面でも出る。
+ */
+describe('操作を探す ── 最近使った操作(#274 Q3)', () => {
+  const heading = (): NodeListOf<Element> =>
+    document.querySelectorAll('[data-pkc-field="palette-recent-heading"]');
+  const order = (): (string | null)[] => rows().map((b) => b.getAttribute('data-pkc-command'));
+  const open = async (root: HTMLElement): Promise<void> => {
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+  };
+  beforeEach(() => {
+    appRecentCommands.clear();
+  });
+
+  it('🔴 実行すると憶え、次に開くと先頭に出る(対照群: 使うまでは節が無い)', async () => {
+    const { root } = setup();
+    await open(root);
+    expect(heading().length, '前提が崩れている(使っていないのに節が出ている)').toBe(0);
+    const before = order();
+    rowOf('view-query')!.click();
+    await tick();
+    expect(appRecentCommands.list(), '操作を探すから実行したのに憶えていない').toEqual(['view-query']);
+    await open(root);
+    expect(heading().length, '見出しが 1 行でない').toBe(1);
+    expect(heading()[0]!.textContent).toBe('最近使った操作');
+    expect(order()[0], '最近使った操作が先頭に出ていない').toBe('view-query');
+    expect(order().filter((id) => id === 'view-query').length, '同じ操作が 2 行並んでいる').toBe(1);
+    expect([...order()].sort(), '普通の一覧が下に続いていない').toEqual([...before].sort());
+    // 打ち始めたら節は出ない(左の `>` と同じ規則)
+    filter().value = 'ヘルプ';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    expect(heading().length, '打ち始めたのに節が出ている').toBe(0);
+    // 消せば戻る
+    filter().value = '';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    expect(heading().length).toBe(1);
+  });
+
+  it('🔴 記録は 1 つ ── 左の列で憶えた物が、操作を探すにも出る(逆向きは上の it)', async () => {
+    const { root } = setup();
+    appRecentCommands.push('open-help');
+    await open(root);
+    expect(order()[0], '別の面で使った操作が出ていない').toBe('open-help');
+  });
+
+  it('🔴 いま押せない操作は節に出さない(記録は消えない)。押せる物は出る(対照群)', async () => {
+    const { root } = setup();
+    // 本文の欄に居ないので `format-ruby` は押せない
+    appRecentCommands.push('format-ruby');
+    appRecentCommands.push('open-help');
+    await open(root);
+    expect(order()[0], '押せる操作が先頭に出ていない').toBe('open-help');
+    expect(rowOf('format-ruby')!.disabled, '前提が崩れている(押せる行だった)').toBe(true);
+    expect(order().indexOf('format-ruby'), '押せない操作が節に居る').toBeGreaterThan(1);
+    expect(appRecentCommands.list()).toEqual(['open-help', 'format-ruby']);
+  });
+
+  it('🔴 断られた(押せなかった)回は憶えない', async () => {
+    const { root } = setup();
+    await open(root);
+    const row = rowOf('format-ruby')!;
+    expect(row.disabled, '前提が崩れている').toBe(true);
+    row.disabled = false; // 描いた後に状態が動いた形
+    row.click();
+    await tick();
+    expect(appRecentCommands.list(), '実行できなかったのに憶えた').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **「メッセージを開く」が、操作を探す / `>` の一覧に出る**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
+ * ⚠ 新しい画面は作らない ── 開くのは「システム → メッセージ」の押しボタンと同じ実体(`openMessagesNote`)。
+ */
+describe('メッセージを開く(#1017 C5)', () => {
+  it('🔴 操作を探すの一覧に出て、押すとメッセージのノートが開く(既読にする)', async () => {
+    const { root, sent } = setup();
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'メッセージ';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    const row = rowOf('open-messages');
+    expect(row, '「メッセージを開く」が一覧に出ていない').toBeDefined();
+    expect(row!.querySelector('[data-pkc-field="palette-label"]')!.textContent).toBe('メッセージを開く');
+    expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+    row!.click();
+    await tick();
+    expect(
+      sent.some((a) => a.type === 'MESSAGES_READ' && a.lid === SYSTEM_MESSAGE_LID),
+      '押してもメッセージのノートが開かない',
+    ).toBe(true);
+  });
+
+  it('🔴 編集中は押せず、理由が出る(reducer が断る遷移を、押せるふりで出さない)', async () => {
+    const { root, d, sent } = setup();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集中でない)').toBe('editing');
+    sent.length = 0;
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'メッセージを開く';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    const row = rowOf('open-messages');
+    expect(row, '行が出ていない').toBeDefined();
+    expect(row!.disabled, '編集中なのに押せることになっている').toBe(true);
+    expect(whyOf('open-messages')).toContain(NOT_READY_PREFIX);
+    expect(sent.some((a) => a.type === 'MESSAGES_READ')).toBe(false);
   });
 });

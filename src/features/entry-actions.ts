@@ -901,9 +901,11 @@ export function blockMenuActions(ctx: {
      * 🔴 **「色を外す」は色の札が在るときだけ**(片道にしない ── 置けるなら外せる)。⚠ 在るのに
      *   出さないと、間違えて付けた色を本文まで開かないと戻せない。⚠ 無いのに出すと、押しても
      *   何も起きない(無言の dead click)。
-     * ⚠ 字の「色…」は塗り、枠は「枠の色…」── 押す物と効く先を字で分ける。
+     * ⚠ 塗りは「塗りの色…」、枠は「枠の色…」── 押す物と効く先を字で分ける(#530 Gemini 裁定 A、
+     *   2026-10-03。直す前は塗りが「色…」で、枠の色と並ぶと**どちらが何の色か**読めなかった)。
+     *   ⚠ **線の右クリックの「色…」はそのまま**(線には色が 1 つしか無く、分ける相手がいない)。
      */
-    { action: 'place-color', label: '色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'fill' } },
+    { action: 'place-color', label: '塗りの色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'fill' } },
     { action: 'place-color', label: '枠の色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'stroke' } },
     ...(ctx.styled === true
       ? [
