@@ -24,7 +24,7 @@
  * 目次・折りたたみ・コピーの帯)を含む。そのまま入れると:
  * - 見出しの `id` が板のノートの目次・`#章` へのジャンプと**衝突**する(設計 doc §6 の制約)
  * - 見出しの右クリックが**板のノートの章**を指してしまう
- * だから見出しは**見出しでない行**へ降ろし、コピーの帯・ソース切替は外す。
+ * だから見出しは**見出しでない行**へ降ろし、コピーの帯・ソース切替・囲みの原文(`.pkc-render-source`)は外す。
  * 🔴 **`id` は剥がさず、枠ごとの接頭辞(`place-<n>-`)を付ける**(W3-②。Gemini 裁定 Q3 = A)──
  *   同じノートを 2 枚置くと、見出し・脚注・図の `id` が**同じ文書の中で重複する**。接頭辞なら
  *   重複が無く、目次(`#章`)と脚注(`#fn1`)の押しが**同じ枠の中**の相手へ飛ぶ(別の枠・読む面の
@@ -236,8 +236,16 @@ export function sanitizeEmbedded(
   }
 
   // ④ コピーの帯・ソース切替は外す(受け手が行番号を前提にする)
+  //    🔴 **原文の面(`.pkc-render-source`)も外す**(#529 A-1)。読む面で原文を隠しているのは
+  //    切替の `<input>` の兄弟条件(`:not(:checked) ~ .pkc-render-source`)で、上で `<input>` を
+  //    外すと**条件が崩れて原文が図の下に出ていた**(mermaid 52 px / chart・html・svg 35 px / csv 69 px)。
+  //    枠の中には「原文を見る」切替が無い ── 原文を持つ理由が無いので、描いた物だけ残す。
+  //    ⚠ 描画に失敗した囲み(csv の parse 失敗など)は、読む面と同じく**原文だけを `<pre>`
+  //    (この class を持たない)で出す**ので、ここでは落ちない(= 何も出なくなる事故は起きない)。
   for (const el of [
-    ...box.querySelectorAll('.pkc-md-copy-btn, .pkc-render-toggle-input, .pkc-render-toggle'),
+    ...box.querySelectorAll(
+      '.pkc-md-copy-btn, .pkc-render-toggle-input, .pkc-render-toggle, .pkc-render-source',
+    ),
   ])
     el.remove();
   /**

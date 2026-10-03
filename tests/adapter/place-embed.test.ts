@@ -45,6 +45,7 @@ import {
   placeFramed,
   sameExcerpt,
 } from '../../src/features/markdown/place-embed';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { codeOnly } from '../helpers/code-only';
 
 /**
@@ -1410,6 +1411,83 @@ describe('掃除(sanitizeEmbedded)', () => {
     sanitizeEmbedded(b, () => null, 'place-1-');
     expect(b.querySelector('.pkc-place, .pkc-line')).toBeNull();
     expect(b.textContent).toBe('中身');
+  });
+});
+
+/**
+ * 🔴 **枠に差し込んだ図の下に、原文が残らない**(#529 A-1)。
+ *
+ * ⚠ 読む面は原文の `<pre class="pkc-render-source">` を、切替の `<input>` の兄弟条件で隠している。
+ * 枠の掃除は `<input>` を外すので、**条件が崩れて原文が図の下に見えていた**(実ブラウザで mermaid 52 px /
+ * chart・html・svg 35 px / csv 69 px)。直しは**掃除で原文も外す**(枠の中に「原文を見る」切替は無い)。
+ * 🔑 観測点は `.pkc-render-source` の有無(CSS の効き具合ではなく DOM)── 外したことが実ブラウザの
+ * 見え方に届くかは `place-board.smoke.spec.ts` が見る。
+ */
+describe('枠に差し込んだ図の下に原文が残らない(#529 A-1)', () => {
+  const FENCES: Record<string, string> = {
+    mermaid: '```mermaid\ngraph TD; A-->B\n```',
+    chart: '```chart\n{"type":"bar","labels":["a","b"],"datasets":[{"data":[1,2]}]}\n```',
+    html: '```html\n<p>こんにちは</p>\n```',
+    svg: '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20"/></svg>\n```',
+    csv: '```csv\n品,数\n牛乳,2\n```',
+  };
+
+  for (const [lang, fence] of Object.entries(FENCES)) {
+    it(`🔴 ${lang}: 描画器は原文の面を持つが、枠には残らない(図そのものは残る)`, async () => {
+      // 空振り防止:同じ本文を読む面と同じ口で描くと、原文の面が実在する(掃除する前の姿)
+      const raw = document.createElement('div');
+      raw.innerHTML = renderMarkdown(`前\n\n${fence}\n\n後`);
+      expect(raw.querySelectorAll('.pkc-render-source'), `台の前提:${lang} の囲みが原文の面を持たない`).toHaveLength(1);
+      expect(raw.querySelector('.pkc-render-toggle-input'), '台の前提:切替の <input> を持たない').not.toBeNull();
+
+      const r = await rig({ ...BODIES, n1: `前\n\n${fence}\n\n後` });
+      const slot = slotOf(r, 'p1')!;
+      expect(slot.textContent, '枠が描けていない').toContain('前');
+      expect(slot.querySelectorAll('.pkc-render-source'), `${lang} の原文が枠の中に残っている`).toHaveLength(0);
+      // 🔑 描いた物は残る(原文と一緒に図まで外していない)
+      const rendered = slot.querySelector('.pkc-render-slot');
+      expect(rendered, '描いた図の器まで外している').not.toBeNull();
+      expect(rendered!.childElementCount + rendered!.textContent!.length, `${lang} の器が空`).toBeGreaterThan(0);
+      // 板のノート自身の面(= 読む面)は原文の面を持たない本文なので、板全体でも 0 件
+      expect(r.host().querySelectorAll('.pkc-render-source')).toHaveLength(0);
+    });
+  }
+
+  it('🔴 1 つのノートに図が何個あっても、全部の原文が外れる(1 個目だけ外して満足していない)', async () => {
+    const body = Object.values(FENCES).join('\n\n');
+    const raw = document.createElement('div');
+    raw.innerHTML = renderMarkdown(body);
+    expect(raw.querySelectorAll('.pkc-render-source'), '台の前提:5 つの囲みが原文の面を持たない').toHaveLength(5);
+    const r = await rig({ ...BODIES, n1: body });
+    const slot = slotOf(r, 'p1')!;
+    expect(slot.querySelectorAll('.pkc-render-slot'), '描いた器が 5 つ残っていない').toHaveLength(5);
+    expect(slot.querySelectorAll('.pkc-render-source')).toHaveLength(0);
+  });
+
+  it('🔴 csv の描画に失敗した囲み(中身が空白だけ = 表にならない)は、枠でも囲みが残る(何も出なくならない)', async () => {
+    // 読む面は表にできないとき**原文の `<pre>`(`.pkc-render-source` を持たない)だけ**を出す
+    const bad = '```csv\n   \n```';
+    const raw = document.createElement('div');
+    raw.innerHTML = renderMarkdown(bad);
+    // 空振り防止:台の前提 ── 失敗の枝は描画の器を持たず、`<pre><code class="language-csv">` だけを出す
+    expect(raw.querySelector('.pkc-render-slot'), '台の前提:この csv は失敗していない(表になっている)').toBeNull();
+    expect(raw.querySelector('.pkc-render-source'), '台の前提:失敗の枝が原文の面を持っている').toBeNull();
+    expect(raw.querySelector('pre code.language-csv'), '台の前提:失敗の枝が原文を出していない').not.toBeNull();
+    const r = await rig({ ...BODIES, n1: bad });
+    const slot = slotOf(r, 'p1')!;
+    expect(slot.querySelector('pre code.language-csv'), '失敗した囲みまで消えている').not.toBeNull();
+  });
+
+  it('🔴 掃除そのものも原文の面を外し、図の器・原文でない <pre> は外さない', () => {
+    const b = document.createElement('div');
+    b.innerHTML =
+      '<div class="pkc-md-block"><input class="pkc-render-toggle-input" id="t"><label class="pkc-render-toggle" for="t">‹/›</label>' +
+      '<div class="pkc-render-slot"><div class="pkc-mermaid-placeholder" data-pkc-mermaid-src="g"></div></div>' +
+      '<pre class="pkc-render-source"><code>graph TD</code></pre></div><pre><code>そのままのコード</code></pre>';
+    sanitizeEmbedded(b, () => null, 'place-1-');
+    expect(b.querySelector('.pkc-render-source')).toBeNull();
+    expect(b.querySelector('[data-pkc-mermaid-src]'), '図の器まで外している').not.toBeNull();
+    expect(b.textContent, '原文でない <pre> まで外している').toContain('そのままのコード');
   });
 });
 
