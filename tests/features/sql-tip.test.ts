@@ -205,7 +205,11 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
     expect(t).toContain('家計.sqlite を DuckDB へ写した表です');
     expect(t, '表の名前が出ていない').toContain('売上, 客');
     expect(t, '元のままと言っていない').toContain('元のまま');
-    expect(t, 'BLOB の扱いを言っていない').toContain('base64');
+    // 🔴 BLOB の注記は、BLOB の列を持つ表を写した後だけ(無いのに書くと、無い物の注意になる)
+    expect(t, 'BLOB の列が無いのに注記を出している').not.toContain('base64');
+    const withBlob = sqlTipText(sq(['売上', '客']), 'duckdb', [], { refused: [], asText: [], sqlite: true, blob: true });
+    expect(withBlob, 'BLOB の扱いを言っていない').toContain('base64');
+    expect(withBlob, '長い字を切ることを言っていない').toContain('2000 字');
     // ⚠ csv / parquet の案内の字が混ざらない
     expect(t).not.toContain('写した表 csv');
     expect(t).not.toContain('_note');
@@ -234,8 +238,16 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
     // 🔴 表の数は言わない(中に何枚在るか、足した側は分からない)
     expect(tip).not.toContain('2 つの表');
     expect(tip).toContain('ファイル名_表の名前');
-    expect(tip).toContain('家計.sqlite → 家計_表の名前');
+    // 🔴 1 つ目はもう開いてあるので実名で言う / 実名のように読める「家計_表の名前」は出さない(#682 段④d の着地後レビュー D4)
+    expect(tip).toContain('家計.sqlite → 家計_売上 / 家計_客');
+    expect(tip).not.toContain('家計_表の名前');
     expect(tip).toContain('在庫.csv → 在庫');
+    // 🔴 名前の引き方(一覧)を 1 行
+    expect(tip).toContain('SELECT table_name FROM information_schema.tables');
+    // 🔴 2 つ目以降の .sqlite は読んでいないので、実名ではなく形だけ
+    const second = sqlTipText({ name: '在庫.csv', tables: ['csv'] }, 'duckdb', ['別.sqlite']);
+    expect(second).toContain('別.sqlite → ファイル名_表名 の形');
+    expect(second).not.toContain('別_表の名前');
   });
 
   it('⚠ 内蔵の sqlite で引くときの案内は今までどおり(表の一覧と、二重引用符の手本)', () => {

@@ -11,6 +11,7 @@ import type { DuckDbHandle } from '../../src/adapter/platform/duckdb/duckdb-leas
 import type { DuckDbRaw } from '../../src/features/query/duckdb-rows';
 import { DUCKDB_REQUIRED_FILES, duckDbExtensionPath } from '../../src/features/query/duckdb-pack';
 import {
+  DUCKDB_LOAD_MAX_MS,
   DUCKDB_SEAL_SQL,
   DuckDbRunner,
   duckDbFileNameOf,
@@ -109,6 +110,8 @@ function make(
   tablesOf: Record<string, SqliteExportedTable[]>,
   failOn: (sql: string) => Error | undefined = () => undefined,
   over: Partial<DuckDbRunnerDeps> = {},
+  /** 画像の大きさ(= 何件目か)→ 写さないビューの名前(既定は無し)。 */
+  viewsOf: Record<string, string[]> = {},
 ) {
   const made: Array<ReturnType<typeof fakeHandle>> = [];
   /** 器の側と storage worker の口の**時系列**(`worker:open` / `worker:table:名前` / `worker:close`)。 */
@@ -124,6 +127,7 @@ function make(
     open += 1;
     const session: SqliteExportSession = {
       tables: tables.map((t) => t.name),
+      views: viewsOf[String(image.byteLength)] ?? [],
       table: (name, max) => {
         log.push('worker:table:' + name);
         tableCalls.push({ name, max });
@@ -490,6 +494,7 @@ describe('🔴 表ごとに「頼む → 入れる → 手放す」(同時に載
       exportSqlite: () =>
         Promise.resolve({
           tables: ['a', 'b'],
+          views: [],
           table: (name: string) =>
             name === 'a'
               ? Promise.reject(new Error('取り込んだ .sqlite の写しが開かれていません'))
@@ -626,5 +631,216 @@ describe('🔴 表を作れない / 型へ写すと値が変わる ── その
     expect(steps.filter((s) => s.startsWith('INSERT INTO "価格"'))).toHaveLength(1);
     expect(steps).toContain('DROP TABLE "価格"');
     expect(steps).toContain('drop:source_t1.ndjson');
+  });
+});
+
+/**
+ * 🔴 **着地後レビューで出た直し**(#682 段④d / #918)── 写せなかった物を画面で言う(D3)・逃げ道の字(D7)・
+ *   表が無いと言われたときの案内(D5)・全列を文字で写した表(D6)・写す所の時計(R5)。
+ */
+describe('🔴 写した報告(copy)── 写せなかった表・ビュー・全列を文字で写した表', () => {
+  const why = tooBigReason(SQLITE_NDJSON_TABLE_MAX_BYTES);
+
+  it('🔴 引いた回の答えと、構造を採った回の答えの両方に、同じ報告が載る(表もビューも)', async () => {
+    const { runner } = make(
+      { '1': [withRows('小さい'), refused('大きい', why)] },
+      () => undefined,
+      {},
+      { '1': ['見出し'] },
+    );
+    const s = [input(src('l1', '家計.sqlite'), 1)];
+    const ran = await runner.run({ sql: 'SELECT 1', sources: s });
+    expect(ran.copy.refused).toEqual([
+      { name: '大きい', view: false, why },
+      // 🔴 ビューは写さない ── 写さなかったと言う(直す前は、どこにも出なかった)
+      { name: '見出し', view: true, why: 'ビューは写しません' },
+    ]);
+    expect(ran.copy.sqlite, '.sqlite を写したと言っていない').toBe(true);
+    // 構造を採る回(つながり図・構造ノート)も同じ報告を返す(同じ器の控え)
+    const got = await runner.schema(s);
+    expect(got.copy.refused).toEqual(ran.copy.refused);
+    // ⚠ 返した物を書き換えても、器の控えは動かない(複製)
+    (ran.copy.refused as unknown[]).length = 0;
+    expect((await runner.schema(s)).copy.refused, '返した配列と控えが同じ物').toHaveLength(2);
+  });
+
+  it('対照群:写せなかった物が無ければ空 / csv だけなら .sqlite を写したとは言わない', async () => {
+    const { runner } = make({ '1': [withRows('小さい')] });
+    const ran = await runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
+    expect(ran.copy).toEqual({ refused: [], asText: [], sqlite: true, blob: false });
+    const csv = make({});
+    const r2 = await csv.runner.run({ sql: 'SELECT 1', sources: [input(src('l2', '在庫.csv'), 9)] });
+    expect(r2.copy).toEqual({ refused: [], asText: [], sqlite: false, blob: false });
+  });
+
+  it('🔴 2 件以上のときは、ビューの名前も「ファイル名_名前」(画面で「無い」と言うとき、打つ名前と同じ)', async () => {
+    const { runner } = make({ '1': [withRows('売上')] }, () => undefined, {}, { '1': ['月別'] });
+    const ran = await runner.run({
+      sql: 'SELECT 1',
+      sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
+    });
+    expect(ran.copy.refused).toEqual([{ name: '家計_月別', view: true, why: 'ビューは写しません' }]);
+  });
+
+  it('🔴 全列を文字で写した表の名前が載る(最初から旗が立っていた表 / 型が合わず作り直した表。入らず断った表は載らない)', async () => {
+    const { runner } = make(
+      { '1': [{ ...withRows('価格'), asText: true }, withRows('混在'), withRows('普通'), withRows('壊れ')] },
+      (() => {
+        let mixedFirst = true;
+        return (sql: string) => {
+          if (mixedFirst && sql.startsWith('INSERT INTO "混在"')) {
+            mixedFirst = false;
+            return new Error('Failed to cast value');
+          }
+          if (sql.startsWith('INSERT INTO "壊れ"')) return new Error('broken');
+          return undefined;
+        };
+      })(),
+    );
+    const ran = await runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
+    expect(ran.copy.asText, '文字で写した表が報告されていない').toEqual(['価格', '混在']);
+    // 🔴 断った表(作った表を DROP した)は「文字で写した」ではなく「写せなかった」
+    expect(ran.copy.refused.map((r) => r.name)).toEqual(['壊れ']);
+  });
+
+  it('🔴 BLOB の列を持つ表を写したときだけ blob が立つ(案内の注記を、在るときだけ出すため)', async () => {
+    const blobCols = [
+      { name: 'id', type: 'INTEGER', notNull: false, primaryKey: true },
+      { name: '記録', type: 'blob', notNull: false, primaryKey: false },
+    ];
+    const withBlob = make({ '1': [{ ...withRows('写真'), columns: blobCols }] });
+    const a = await withBlob.runner.run({ sql: 'SELECT 1', sources: [input(src('l1', 'a.sqlite'), 1)] });
+    expect(a.copy.blob).toBe(true);
+    const without = make({ '1': [withRows('普通')] });
+    const b = await without.runner.run({ sql: 'SELECT 1', sources: [input(src('l1', 'a.sqlite'), 1)] });
+    expect(b.copy.blob).toBe(false);
+  });
+
+  it('🔴 相手を替えたら報告も作り直す(別の相手に前の相手の「写せなかった表」を付けない)', async () => {
+    const { runner } = make({ '1': [refused('大きい', why)] });
+    const ran = await runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
+    expect(ran.copy.refused).toHaveLength(1);
+    const other = await runner.run({ sql: 'SELECT 1', sources: [input(src('l2', '在庫.csv'), 9)] });
+    expect(other.copy).toEqual({ refused: [], asText: [], sqlite: false, blob: false });
+  });
+});
+
+describe('🔴 逃げ道の字は、並べているかで変わる(D7)', () => {
+  const why = tooBigReason(SQLITE_NDJSON_TABLE_MAX_BYTES);
+  const fails = (sql: string): Error | undefined => (sql === 'SELECT 9' ? new Error('x') : undefined);
+  const msgOf = (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => '',
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+
+  it('🔴 1 件だけなら「内蔵の sqlite なら引けます」', async () => {
+    const { runner } = make({ '1': [refused('大きい', why)] }, fails);
+    const msg = await msgOf(runner.run({ sql: 'SELECT 9', sources: [input(src('l1', '家計.sqlite'), 1)] }));
+    expect(msg).toContain('内蔵の sqlite なら引けます');
+    expect(msg).not.toContain('1 つに戻す');
+  });
+
+  it('🔴 並べているときは、押せない道(engine は DuckDB に固定)を指さず「file を 1 つに戻すと」と言う', async () => {
+    const { runner } = make({ '1': [refused('大きい', why)] }, fails);
+    const msg = await msgOf(
+      runner.run({
+        sql: 'SELECT 9',
+        sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
+      }),
+    );
+    expect(msg).toContain('file を 1 つに戻すと内蔵の sqlite で引けます');
+    expect(msg, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら引けます');
+  });
+
+  it('🔴 超えた理由の字は file の大きさではなく「写した行」の大きさ(35 MB の file でも出るので)', async () => {
+    const { runner } = make({ '1': [refused('大きい', why)] }, fails);
+    const msg = await msgOf(runner.run({ sql: 'SELECT 9', sources: [input(src('l1', '家計.sqlite'), 1)] }));
+    expect(msg).toContain('写した行が 64.0 MB を超えました');
+    expect(msg).toContain('元の file より大きくなることがあります');
+  });
+});
+
+describe('🔴 並べた後の「表が無い」に、名前の決め方を添える(D5)', () => {
+  const missing = (sql: string): Error | undefined =>
+    sql === 'SELECT * FROM csv'
+      ? new Error('Catalog Error: Table with name csv does not exist!\nDid you mean "在庫"?')
+      : undefined;
+  const two = () => [input(src('l1', '売上.csv'), 4), input(src('l2', '在庫.csv'), 9)];
+  const msgOf = (p: Promise<unknown>): Promise<string> =>
+    p.then(
+      () => '',
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+
+  it('🔴 2 件以上で表が無いと言われたら、「ファイル名_表名」の案内と表の一覧の引き方を添える', async () => {
+    const { runner } = make({}, missing);
+    const msg = await msgOf(runner.run({ sql: 'SELECT * FROM csv', sources: two() }));
+    expect(msg, 'DuckDB の断りが消えている').toContain('Table with name csv does not exist');
+    expect(msg, '名前の決め方を言っていない').toContain('表の名前は ファイル名_表名 になっています');
+    expect(msg, '一覧の引き方を言っていない').toContain('SELECT table_name FROM information_schema.tables');
+  });
+
+  it('対照群:1 件のとき(名前は変わらない)/ 表の話ではない失敗には添えない', async () => {
+    const one = make({}, missing);
+    const msg1 = await msgOf(
+      one.runner.run({ sql: 'SELECT * FROM csv', sources: [input(src('l1', '売上.csv'), 4)] }),
+    );
+    expect(msg1).toContain('does not exist');
+    expect(msg1, '1 件のときに言う必要は無い').not.toContain('ファイル名_表名');
+    const other = make({}, (sql) => (sql === 'SELEKT 1' ? new Error('Parser Error: syntax error') : undefined));
+    const msg2 = await msgOf(other.runner.run({ sql: 'SELEKT 1', sources: two() }));
+    expect(msg2).toBe('Parser Error: syntax error');
+  });
+});
+
+describe('🔴 器へ写す所にも時計を置く(R5 ── 止まった写しが、後ろの仕事を永久に塞がない)', () => {
+  it('🔴 写しが止まったら時間で断り、器を畳む。次の仕事は最初から写し直して通る', async () => {
+    vi.useFakeTimers();
+    try {
+      let opened = 0;
+      const { runner, made } = make({ '1': [withRows('t')] }, () => undefined, {
+        // 1 回目の `.sqlite` の写しは**永久に返らない**(storage worker が応えない)
+        exportSqlite: () => {
+          opened += 1;
+          if (opened === 1) return new Promise<SqliteExportSession>(() => undefined);
+          return Promise.resolve({
+            tables: ['t'],
+            views: [],
+            table: () => Promise.resolve(withRows('t')),
+            close: () => Promise.resolve(),
+          });
+        },
+      });
+      const stuck = runner
+        .run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] })
+        .then(
+          () => '',
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
+      // 後ろに並んだ仕事(つながり図を開く等)── 列が詰まっていたら、これも永久に返らない
+      const queued = runner.run({ sql: 'SELECT 2', sources: [input(src('l1', '家計.sqlite'), 1)] });
+      await vi.advanceTimersByTimeAsync(DUCKDB_LOAD_MAX_MS);
+      expect(await stuck, '時間で断っていない').toContain('時間がかかりすぎたので止めました');
+      // 後ろの仕事は、畳んだ器を起こし直して、最初から写し直して通る
+      const r = await queued;
+      expect(r.rows).toEqual([[1]]);
+      expect(made.length, '器を起こし直していない').toBe(2);
+      expect(made[0]?.steps, '止まった器を畳んでいない').toContain('terminate');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('対照群:時間内に終わる写しは切らない(重い写しを殺さない)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runner } = make({ '1': [withRows('t')] });
+      const p = runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect((await p).rows).toEqual([[1]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

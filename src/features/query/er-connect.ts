@@ -16,6 +16,7 @@
  */
 
 import type { SchemaLink, SchemaModel } from './schema-digest';
+import { looksLikeSqliteName } from './sqlite-attachment';
 
 /** 「ここから」の 1 列。 */
 export interface ErPendingFrom {
@@ -90,6 +91,27 @@ export function pickErConnection(
   return { kind: 'linked', link };
 }
 
+/** 図の主語。⚠ 字は 3 つとも**ここ 1 か所**(`erSubjectOf`)。 */
+export const ER_SUBJECT_DB = 'この DB';
+export const ER_SUBJECT_FILE = 'この file';
+export const ER_SUBJECT_FILES = 'これらの file';
+
+/**
+ * 🔴 **図が何を指しているかの呼び名**(D8)。
+ *
+ * - 何も選んでいない / `.sqlite` を 1 件 → 「この DB」(DB の外部キーの話)
+ * - 2 つ以上を並べている → 「これらの file」
+ * - それ以外の 1 件(`.csv` / `.parquet` / `.json` …)→ 「この file」(DB ではない)
+ *
+ * @param names 選んでいる file の名前(1 件目 + 足した相手)。⚠ 空 = この PKC のノート。
+ */
+export function erSubjectOf(names: readonly string[]): string {
+  if (names.length === 0) return ER_SUBJECT_DB;
+  if (names.length > 1) return ER_SUBJECT_FILES;
+  // 🔑 `.sqlite` かの判定は `looksLikeSqliteName` 1 本(拡張子の一覧を 2 か所に持たない)
+  return looksLikeSqliteName(names[0] ?? '') ? ER_SUBJECT_DB : ER_SUBJECT_FILE;
+}
+
 /**
  * 🔴 **線が 1 本も無い画面で、理由と次の一手を言う**(#918 段⑤d-3)。**pure**。
  *
@@ -116,8 +138,15 @@ export function erZeroLinesWhy(input: {
   readonly dropped: number;
   /** 「繋ぐ」が入か。 */
   readonly connecting: boolean;
+  /**
+   * 🔴 **何の繋がりを言っているか**(#682 段④d の着地後レビュー D8)。⚠ 省けば「この DB」。
+   * 直す前は**いつも「この DB は」**で、csv / parquet / json の 1 件や、2 つ以上を並べた図でも「DB」と言っていた
+   * (user は DB を選んでいない)。呼び側が**選んでいる相手**で決める(`erSubjectOf`)。
+   */
+  readonly subject?: string;
 }): string {
   const { boxes, declared, mine, dropped, connecting } = input;
+  const subject = input.subject ?? ER_SUBJECT_DB;
   if (boxes === 0) return '';
   // ⚠ 相手が 1 つしかないなら「繋ぐ」を勧めてはいけない ── 同じ表の中は繋げない
   //   (`pickErConnection` が断る)ので、勧めると**押せない道**へ誘うことになる。
@@ -127,7 +156,7 @@ export function erZeroLinesWhy(input: {
     return `繋がりはありますが、1 本も線にできませんでした(理由はこの下に出ています)。${next}`;
   }
   if (declared === 0 && mine === 0) {
-    return `この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。${next}`;
+    return `${subject} は、表どうしの繋がり(外部キー)を 1 つも宣言していません。${next}`;
   }
   // ⚠ ここへは来ない(繋がりが在って落ちてもいないなら、線は引かれている)。
   //   ⚠ **それらしい字を返さない** ── 起きない形に文言を置くと、

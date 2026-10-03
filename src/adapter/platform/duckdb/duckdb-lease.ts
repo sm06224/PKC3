@@ -49,6 +49,13 @@ import type { DuckDbRaw } from '@features/query/duckdb-rows';
  */
 export const DUCKDB_TOO_LONG = '時間がかかりすぎたので止めました(条件を絞ってください)';
 
+/**
+ * 🔴 **器へ写す所が時間の門に掛かったときの断り**(#682 段④d の着地後レビュー R5)。
+ * ⚠ 字を 1 か所で持つ(`DUCKDB_TOO_LONG` と同じ理由)。
+ */
+export const DUCKDB_LOAD_TOO_LONG =
+  '表を DuckDB へ写すのに時間がかかりすぎたので止めました(もう一度押すと、最初から写し直します)';
+
 /** 1 件の依頼。 */
 export interface DuckDbJob {
   readonly sql: string;
@@ -59,6 +66,15 @@ export interface DuckDbJob {
    *   走らせないので、いまは起きない)。省くと**永久に待つ**形が作れてしまう。
    */
   readonly maxMs?: number;
+  /**
+   * 🔴 **器へ写す所(`data.load`)の時間の門(ms)**(#682 段④d の着地後レビュー R5)。
+   *
+   * ⚠ 直す前は**写す所に時計が無かった**。呼び側が仕事を**直列の列**で通す(`DuckDbRunner.serial`)ので、
+   *   写しの途中で止まると**後ろの仕事が全部永久に待つ**(下の `forget(stale)` は、次の仕事が走り出して初めて効く)。
+   * ⚠ 超えたら**ワーカーごと畳んで**止める(`maxMs` と同じ ── 上流に中断の口が無い)。畳んだ器は控えから外すので、
+   *   次の仕事は**最初から写し直す**。省くと**永久に待つ**形が作れてしまう。
+   */
+  readonly loadMaxMs?: number;
   /**
    * 打つ前に差し込む相手。⚠ **`key` が同じ間は差し直さない** ── 同じ csv を
    *   打鍵のたびに読み直すと、大きい file で毎回待たされる。
@@ -144,11 +160,16 @@ export class DuckDbLease {
       }
       const h = await this.ensure();
       /**
-       * ⚠ **差し込みも時間の門の内側に置かない** ── 相手を読むのは呼び側の仕事で、
-       *   ここでやるのは器へ入れることだけ。入れる所で止まる形は作らない。
+       * ⚠ **差し込みは打つ字の門(`maxMs`)の内側に置かない** ── 相手を読むのは呼び側の仕事で、
+       *   重い写し(100k 行の表を NDJSON にして入れる)を 30 秒の門で切ると**正しく動いている写しを殺す**。
+       * 🔴 ただし**時計はもう 1 つ**(`loadMaxMs`。#682 段④d の着地後レビュー)── 呼び側が仕事を**直列の列**で
+       *   通すので、写す所に時計が無いと、止まった写しが**後ろの仕事を全部永久に塞ぐ**。
        */
       if (job.data !== undefined && this.loadedKey !== job.data.key) {
-        await job.data.load(h);
+        const loading = job.data.load(h);
+        // 🔴 写す所にも時計を置く(`loadMaxMs`)── 置かないと、止まった写しが呼び側の列を永久に塞ぐ
+        if (job.loadMaxMs === undefined) await loading;
+        else await this.race(h, loading, job.loadMaxMs, DUCKDB_LOAD_TOO_LONG);
         // ⚠ **入れ終わってから控える** ── 先に控えると、落ちた回に「入っている」と嘘をつく
         this.loadedKey = job.data.key;
       }
@@ -175,15 +196,23 @@ export class DuckDbLease {
    * ⚠ 畳んだ取っ手を**控えから外す**(外さないと、死んだ器へ次の問い合わせが飛ぶ)。
    */
   private raceQuery(h: DuckDbHandle, sql: string, maxMs: number): Promise<DuckDbRaw> {
-    return new Promise<DuckDbRaw>((resolve, reject) => {
+    return this.race(h, h.query(sql), maxMs, DUCKDB_TOO_LONG);
+  }
+
+  /**
+   * 🔴 **どんな仕事でも、時計と競わせる**(問い合わせも、器へ写す所も同じ 1 本 ── §7)。
+   * ⚠ 時計が先に鳴ったら**器を畳み**(`forget`)、遅れて届いた答えは**捨てる**(`settled`)。
+   */
+  private race<T>(h: DuckDbHandle, work: Promise<T>, maxMs: number, tooLong: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       let settled = false;
       const timer = this.setTimer(() => {
         if (settled) return;
         settled = true;
         this.forget(h);
-        reject(new Error(DUCKDB_TOO_LONG));
+        reject(new Error(tooLong));
       }, maxMs);
-      h.query(sql).then(
+      work.then(
         (v) => {
           if (settled) return;
           settled = true;

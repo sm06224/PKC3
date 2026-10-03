@@ -4610,6 +4610,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             const opened = await openSqliteExport(image);
             return {
               tables: opened.tables,
+              views: opened.views,
               table: (name, max) => exportSqliteTable(opened.session, name, max),
               close: async () => {
                 await closeSqliteExport(opened.session);

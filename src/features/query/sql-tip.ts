@@ -19,13 +19,15 @@ import { DUCKDB_TABLE_LIFETIME, DUCKDB_TABLE_RESET, DUCKDB_WRITE_FORMS } from '.
 import { duckDbTableNamesOfNames, sqlMultiNote } from './sql-multi-source';
 import { tableNameFromFileTable } from './sql-table-name';
 import { quoteIdent } from './sqlite-ndjson';
+import type { DuckDbCopyReport } from './duckdb-copy-report';
+import { MAX_CELL_CHARS } from './sql-cell';
 
 /**
  * 表が 1 枚も無い `.sqlite` を DuckDB で開いたときの手本(表の一覧)。
  * ⚠ `SHOW TABLES` ではない ── 字の門(`duckdb-guard.ts`)が先頭の語を `SELECT` / `WITH` / `FROM` …
  *   に絞っているので断られる(手本が打てないのは、いちばん悪い形の dead click)。
  */
-const DUCKDB_TABLE_LIST_SQL = 'SELECT table_name FROM information_schema.tables';
+export const DUCKDB_TABLE_LIST_SQL = 'SELECT table_name FROM information_schema.tables';
 
 /** 名前を並べる上限。⚠ 表が何十個も在る DB で、案内文が画面を埋めない。 */
 export const TIP_TABLES_MAX = 8;
@@ -84,8 +86,13 @@ export function sqlTipText(
   engine: SqlEngine = 'sqlite',
   /** 🔴 足した相手の file 名(#918 段⑦)。1 件でも在れば**並べている**。 */
   more: readonly string[] = [],
+  /**
+   * 🔴 **いまの器へ写した報告**(#682 段④d の着地後レビュー D2)。⚠ `.sqlite` の案内に「BLOB の列は base64 の文字」と
+   *   書くのは、**BLOB の列を持つ表を写した後だけ**(まだ写していない / 無いときに書くと、無い物の注意になる)。
+   */
+  copy: DuckDbCopyReport | null = null,
 ): string {
-  if (target !== null && more.length > 0) return multiTipText([target.name, ...more]);
+  if (target !== null && more.length > 0) return multiTipText([target.name, ...more], target.tables);
   if (target === null) {
     return (
       '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
@@ -126,7 +133,10 @@ export function sqlTipText(
     if (src?.kind === 'sqlite') {
       return (
         `いま調べているのは ${target.name} を DuckDB へ写した表です。この file に在る表: ${tableList(target.tables)}。` +
-        '表の名前は元のままです。BLOB の列は base64 の文字として入ります。' +
+        '表の名前は元のままです。' +
+        (copy?.blob === true
+          ? `BLOB の列は base64 の文字として入ります(長い字は ${String(MAX_CELL_CHARS)} 字までで切って出します)。`
+          : '') +
         'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
       );
     }
@@ -154,17 +164,39 @@ export function sqlTipText(
  * 🔑 **file 名 → 表の名前**の対応も添える(`2024-sales.csv` → `_2024_sales` は、
  *   file 名からは想像が付かない ── 引けない名前を打たせない)。
  */
-function multiTipText(names: readonly string[]): string {
+function multiTipText(names: readonly string[], firstTables: readonly string[]): string {
   const tables = duckDbTableNamesOfNames(names);
+  const isSqlite = (n: string): boolean => duckDbReadableSourceOf('', n)?.kind === 'sqlite';
+  /**
+   * 🔴 **`.sqlite` は、実名が分かる物だけ実名で言う**(#682 段④d の着地後レビュー D4)。
+   * ⚠ 直す前は 2 つ目以降も `在庫_表の名前` と書き、**実際にそういう名前の表が在るように読めた**
+   *   (表の名前は、中に在る表の名前で決まる ── 走らせるまで分からない)。
+   * 🔑 1 つ目は**もう開いてある**(`firstTables` = 中の表の実名)ので、`ファイル名_表名` の実名を並べる。
+   *   2 つ目以降は読んでいないので、**形**だけを言う。
+   */
+  const real = (n: string, i: number): string[] =>
+    i === 0 && isSqlite(n) ? firstTables.map((t) => tableNameFromFileTable(n, t, new Set())) : [];
   const pairs = names
-    .map((n, i) => `${n} → ${tables[i] ?? ''}`)
+    .map((n, i) => {
+      if (!isSqlite(n)) return `${n} → ${tables[i] ?? ''}`;
+      const r = real(n, i);
+      return r.length > 0 ? `${n} → ${r.join(' / ')}` : `${n} → ファイル名_表名 の形`;
+    })
     .join('、');
   const anyCsv = names.some((n) => duckDbReadableSourceOf('', n)?.kind === 'csv');
   // 🔴 `.sqlite` を含むときは表の数を言わない(中に何枚在るかは走らせるまで分からない)
-  const sqliteNames = names.filter((n) => duckDbReadableSourceOf('', n)?.kind === 'sqlite');
+  const sqliteNames = names.filter(isSqlite);
+  // 🔑 1 文目に並べる名前も同じ規則(実名が分かる物は実名 / 分からない `.sqlite` は「の中の表」)
+  const shownTables = names.flatMap((n, i) => {
+    if (!isSqlite(n)) return [tables[i] ?? ''];
+    const r = real(n, i);
+    return r.length > 0 ? r : [`${n} の中の表`];
+  });
   return (
-    sqlMultiNote(tables, sqliteNames) +
+    sqlMultiNote(shownTables, sqliteNames) +
     `表の名前は file の名前から付けています(${pairs})。` +
+    // 🔑 名前の引き方(D4)── 実名が分からなくても、一覧は DuckDB に聞ける
+    (sqliteNames.length > 0 ? `表の名前の一覧は ${DUCKDB_TABLE_LIST_SQL} で引けます。` : '') +
     'JOIN で突き合わせられます。' +
     (anyCsv ? '.csv / .tsv の表には、先頭に _note と _lid の列が付きます。' : '') +
     'これらの file を調べている間、この PKC のノートの表(entries など)は出てきません。'

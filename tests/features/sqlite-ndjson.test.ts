@@ -280,10 +280,13 @@ describe('🔴 DDL と読み込みの字', () => {
 });
 
 describe('断る理由の字', () => {
-  it('天井を超えた理由は MB で言い、内蔵の sqlite なら引けると案内する', () => {
+  it('天井を超えた理由は MB で言う ── file ではなく「写した行」の大きさだと言い、逃げ道は添えない(並べているかを worker は知らない)', () => {
     const why = tooBigReason(SQLITE_NDJSON_TABLE_MAX_BYTES);
     expect(why).toContain('64.0 MB');
-    expect(why).toContain('内蔵の sqlite');
+    // 🔴 直す前は「行の写しが … を超えました」で、35 MB の file にも出るので「file は小さいのに」と読まれた
+    expect(why).toContain('写した行が');
+    expect(why).toContain('元の file より大きくなることがあります');
+    expect(why, '逃げ道は呼び側(runner)が並べているかで言い分ける').not.toContain('内蔵の sqlite');
   });
 
   it('1MB に満たない天井は KB で言う(「0 MB」と書かない)', () => {
@@ -296,5 +299,9 @@ describe('断る理由の字', () => {
     expect(refusedNote('売上', '理由')).toBe('売上 は DuckDB へ写せませんでした(理由)');
     // 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
     expect(refusedNote('', '理由')).toBe('(名前の無い表) は DuckDB へ写せませんでした(理由)');
+    // 逃げ道を渡せば、理由のあとに 1 度だけ添える
+    expect(refusedNote('売上', '理由', '内蔵の sqlite なら引けます')).toBe(
+      '売上 は DuckDB へ写せませんでした(理由。内蔵の sqlite なら引けます)',
+    );
   });
 });

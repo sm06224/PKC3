@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { duckDbTable, limbsToBigInt, normalizeDuckDbValue } from '@features/query/duckdb-rows';
+import { MAX_CELL_CHARS } from '@features/query/sql-cell';
 
 /** 実測どおりの多倍長の器 ── `[object Uint32Array]` だが `toString()` が 10 進を返す。 */
 function bignum(decimal: string, limbs: number[]): Uint32Array {
@@ -102,5 +103,39 @@ describe('DuckDB の返り値を揃える', () => {
   it('行の長さは列に揃う(足りない升は null)', () => {
     const t = duckDbTable({ columns: ['a', 'b', 'c'], types: [], rows: [[1]] });
     expect(t.rows[0]).toEqual([1, null, null]);
+  });
+});
+
+/**
+ * 🔴 **長い字は畳む**(#682 段④d の着地後レビュー D2)── 内蔵の sqlite の道(storage worker の `cellForWire`)と
+ *   **同じ上限・同じ書き方**。直す前は素通しで、同じ `.sqlite` の同じ 1 行が engine を替えただけで画面を埋めた。
+ */
+describe('🔴 DuckDB の答えの升は、内蔵の sqlite と同じ上限で畳む', () => {
+  it('🔴 上限を超えた字は 2000 字で切り、全部で何字あったかを言う', () => {
+    const long = 'あ'.repeat(5000);
+    const t = duckDbTable({ columns: ['t'], types: ['Utf8'], rows: [[long]] });
+    expect(t.rows[0]?.[0]).toBe(`${'あ'.repeat(MAX_CELL_CHARS)}…(全 5000 字)`);
+    expect(MAX_CELL_CHARS, '内蔵の sqlite と同じ上限').toBe(2000);
+  });
+
+  it('🔴 BLOB(base64 の字で入る)も同じ。1 MB の BLOB が 1.3 MB の字のまま画面へ渡らない', () => {
+    const base64 = 'QUJD'.repeat(350_000);
+    const t = duckDbTable({ columns: ['b'], types: ['Utf8'], rows: [[base64]] });
+    const cell = String(t.rows[0]?.[0]);
+    expect(cell.length, '畳まれていない').toBeLessThan(2100);
+    expect(cell).toContain(`…(全 ${String(base64.length)} 字)`);
+  });
+
+  it('対照群:ちょうど上限は切らない / 数や null は触らない / 器が組んだ長い字(LIST)も畳む', () => {
+    const exact = 'x'.repeat(MAX_CELL_CHARS);
+    const t = duckDbTable({
+      columns: ['a', 'b', 'c', 'd'],
+      types: ['Utf8', 'Int32', 'Utf8', ''],
+      rows: [[exact, 5, null, { toString: () => `[${'1,'.repeat(3000)}]` }]],
+    });
+    expect(t.rows[0]?.[0]).toBe(exact);
+    expect(t.rows[0]?.[1]).toBe(5);
+    expect(t.rows[0]?.[2]).toBeNull();
+    expect(String(t.rows[0]?.[3]), '器が組んだ字が畳まれていない').toContain('…(全 ');
   });
 });

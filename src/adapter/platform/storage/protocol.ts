@@ -1027,8 +1027,12 @@ export interface ResultMap {
     truncated: boolean;
   };
   closeSqlGuest: null;
-  /** 取り込んだ `.sqlite` を写しのために開いた結果(#682 段④d)。`tables` = 元の名前の一覧(名前順)。 */
-  openSqliteExport: { session: string; tables: string[] };
+  /**
+   * 取り込んだ `.sqlite` を写しのために開いた結果(#682 段④d)。`tables` = 元の名前の一覧(名前順)。
+   * 🔴 `views` = **写さない**ビューの名前(名前順)。⚠ 必須の field(省ける形にすると、worker が書き忘れても tsc が黙る ──
+   *   書き忘れは「ビューが黙って無い」側へ倒れる)。
+   */
+  openSqliteExport: { session: string; tables: string[]; views: string[] };
   /** 表 1 つ分の NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
   exportSqliteTable: SqliteExportedTable;
   closeSqliteExport: null;

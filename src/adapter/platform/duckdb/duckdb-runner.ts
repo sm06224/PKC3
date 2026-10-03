@@ -70,9 +70,17 @@ import { duckDbWriteKind } from '@features/query/duckdb-write';
 import {
   DUCKDB_SCHEMA_COLUMNS_SQL,
   DUCKDB_SCHEMA_FK_SQL,
+  duckDbMetaOf,
   mergeDuckDbSchema,
   type DuckDbTableMeta,
 } from '@features/query/duckdb-schema';
+import {
+  sqliteFallbackHint,
+  type DuckDbCopyReport,
+  type DuckDbRefusedItem,
+} from '@features/query/duckdb-copy-report';
+import { DUCKDB_TABLE_LIST_SQL } from '@features/query/sql-tip';
+import { tableNameFromFileTable } from '@features/query/sql-table-name';
 import { countsSql, schemaTableNames, type Grid } from '@features/query/schema-digest';
 import {
   DUCKDB_EXTENSIONS,
@@ -117,6 +125,19 @@ export interface DuckDbOpenUrls {
  *   **待ち手を解くのは呼び側の時計だけ**である(`duckdb-lease.ts` の `raceQuery`)。
  */
 export const DUCKDB_MAX_MS = 30_000;
+
+/**
+ * 🔴 **器へ写す所の時間の門**(ms。#682 段④d の着地後レビュー R5)。
+ *
+ * ⚠ 器へ写す仕事(`load`)は**直列の列**(`serial`)の中で走る。直す前は**この仕事に時間の門が無かった** ──
+ *   写しの途中で止まる(storage worker が応えない / 器が固まる)と、**後ろの仕事が全部永久に待つ**
+ *   (つながり図も「走らせる」も無反応)。⚠ 同じ種の救い(`DuckDbLease` の `forget(stale)`)は、
+ *   **次の仕事が走り出して初めて**効くので、列が詰まっていると**届かない**。
+ * 🔑 だから**写す所にも**時計を置く(`DuckDbJob.loadMaxMs`)── 超えたら器ごと畳んで断る(次に押せば最初から写し直す)。
+ * ⚠ 長めに取る(120 秒):表が多い `.sqlite` は 1 表あたり最大 64 MB を **1 表ずつ**写す ── 正しく動いている重い写しを
+ *   切らない。⚠ 上流には中断の口が無いので、**待ち手を解くのは時計だけ**(`DUCKDB_MAX_MS` と同じ事情)。
+ */
+export const DUCKDB_LOAD_MAX_MS = 120_000;
 
 /** 返す行の上限(sqlite 側と揃える)。⚠ 切ったら**必ず言う**。 */
 export const DUCKDB_MAX_ROWS = 200_000;
@@ -200,6 +221,11 @@ export interface DuckDbRunResult {
   readonly rows: Array<Array<string | number | null>>;
   readonly truncated: boolean;
   readonly ms: number;
+  /**
+   * 🔴 **いまの器へ写したときの報告**(写せなかった表・ビュー / 全列を文字で写した表。#682 段④d の着地後レビュー)。
+   * ⚠ 必須の field(省ける形にすると、返す側が書き忘れても tsc が黙る ── 書き忘れは「写せなかった表が画面に出ない」側へ倒れる)。
+   */
+  readonly copy: DuckDbCopyReport;
 }
 
 /**
@@ -210,6 +236,8 @@ export interface DuckDbSchemaResult {
   readonly columns: Grid;
   readonly fks: Grid;
   readonly counts: Grid | null;
+  /** 🔴 写せなかった表・ビュー / 全列を文字で写した表(構造ノート・つながり図が言う。`DuckDbRunResult.copy` と同じ物)。 */
+  readonly copy: DuckDbCopyReport;
 }
 
 /** SQL の文字列に埋める。⚠ 題名は user の字なので**必ず**通す。 */
@@ -344,7 +372,12 @@ export class DuckDbRunner {
    * 🔴 **器と同じ寿命**(`dropStaleRefused`)── 器が畳まれた後に別の理由で落ちた回へ、**もう無い器の理由**を
    *   添えない。
    */
-  private refused: string[] = [];
+  private refused: DuckDbRefusedItem[] = [];
+  /** 🔴 全列 VARCHAR で写した表の名前(`refused` と同じ寿命)。 */
+  private asText: string[] = [];
+  /** `.sqlite` を写したか / BLOB の列を持つ表を写したか(`refused` と同じ寿命)。 */
+  private copiedSqlite = false;
+  private copiedBlob = false;
   /**
    * 🔴 **いまの器へ写した `.sqlite` の表の「元の姿」**(型 / 主キー / 外部キー。#918)。
    * ⚠ `load` が入れ直すたびに作り直す(器と同じ寿命 ── 器が畳まれれば次の `load` で組み直す)。
@@ -358,6 +391,16 @@ export class DuckDbRunner {
    *   前の仕事が落ちても次は走る(`then(fn, fn)`)。
    */
   private tail: Promise<unknown> = Promise.resolve();
+
+  /** いまの器へ写したときの報告(写した時点の控えを**複製**して渡す ── 呼び側が書き換えても器の控えは動かない)。 */
+  private report(): DuckDbCopyReport {
+    return {
+      refused: [...this.refused],
+      asText: [...this.asText],
+      sqlite: this.copiedSqlite,
+      blob: this.copiedBlob,
+    };
+  }
 
   private serial<T>(job: () => Promise<T>): Promise<T> {
     const next = this.tail.then(job, job);
@@ -430,7 +473,7 @@ export class DuckDbRunner {
       if (sources.length === 0) throw new Error('調べる相手がありません');
       const data = this.dataOf(sources);
       const ask = async (sql: string): Promise<Grid> => {
-        const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, data });
+        const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, loadMaxMs: DUCKDB_LOAD_MAX_MS, data });
         return duckDbTable(raw);
       };
       const columns = await ask(DUCKDB_SCHEMA_COLUMNS_SQL);
@@ -438,7 +481,7 @@ export class DuckDbRunner {
       const merged = mergeDuckDbSchema({ columns, fks }, this.meta);
       const sql = countsSql(schemaTableNames(merged.columns));
       const counts = sql === null ? null : await ask(sql).catch(() => null);
-      return { columns: merged.columns, fks: merged.fks, counts };
+      return { columns: merged.columns, fks: merged.fks, counts, copy: this.report() };
     });
   }
 
@@ -459,15 +502,24 @@ export class DuckDbRunner {
    *   (写し直さないので、ここで空にすると**最初の 1 回だけ**理由が出る)。
    */
   private dropStaleRefused(): void {
-    if (!this.lease.awake) this.refused = [];
+    if (!this.lease.awake) this.clearCopy();
+  }
+
+  private clearCopy(): void {
+    this.refused = [];
+    this.asText = [];
+    this.copiedSqlite = false;
+    this.copiedBlob = false;
   }
 
   private async runNow(input: DuckDbRunInput): Promise<DuckDbRunResult> {
     const started = Date.now();
     if (input.sources.length === 0) throw new Error('調べる相手がありません');
+    const multi = input.sources.length > 1;
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
+      loadMaxMs: DUCKDB_LOAD_MAX_MS,
       /**
        * 🔴 **書き込みが通ったら、アイドルで畳まない**(#918 段⑧)。
        * ⚠ 作った表は器の中にしか無い ── 30 秒で畳むと、user が作った表が
@@ -478,7 +530,7 @@ export class DuckDbRunner {
       data: this.dataOf(input.sources),
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときは、**どの失敗にも**写せなかった表の理由を添える(`withRefused`)
-      throw this.withRefused(e);
+      throw this.withRefused(e, multi);
     });
     const table = duckDbTable(raw);
     const truncated = table.rows.length > DUCKDB_MAX_ROWS;
@@ -487,6 +539,7 @@ export class DuckDbRunner {
       rows: truncated ? table.rows.slice(0, DUCKDB_MAX_ROWS) : table.rows,
       truncated,
       ms: Date.now() - started,
+      copy: this.report(),
     };
   }
 
@@ -498,8 +551,9 @@ export class DuckDbRunner {
    *   2 件目を差し込めない(塞いだ後は file を読めない)。
    */
   private async load(h: DuckDbHandle, sources: readonly DuckDbInputSource[]): Promise<void> {
-    this.refused = [];
+    this.clearCopy();
     this.meta = new Map();
+    this.copiedSqlite = sources.some((s) => s.source.kind === 'sqlite');
     /**
      * 🔴 **`.sqlite` だけ、先に開いて表の名前を知る**(#682 段④d)── 表の名前が**中の表の名前**で決まる
      *   (1 件なら元の名前のまま / 2 件以上は `ファイル名_表名`)ので、名前を決める前に要る。
@@ -527,7 +581,7 @@ export class DuckDbRunner {
           const session = sessions.get(i);
           // ⚠ 上の頭で、`.sqlite` の全部に開いてある(崩れたら黙って飛ばさず落とす)
           if (session === undefined) throw new Error('前提が崩れている(.sqlite の写しが開いていない)');
-          await this.loadSqlite(h, source, i, session, groups[i] ?? []);
+          await this.loadSqlite(h, source, i, session, groups[i] ?? [], sources.length > 1);
           // ⚠ 写し終えた file はすぐ手放す(次の file を写す間、worker に開いたまま残さない)
           sessions.delete(i);
           await session.close().catch(() => undefined);
@@ -568,9 +622,14 @@ export class DuckDbRunner {
     slot: number,
     session: SqliteExportSession,
     names: readonly string[],
+    multi: boolean,
   ): Promise<void> {
-    // 外部キーの相手は元の名前で来る ── 器での名前へ直す(2 件以上なら `ファイル名_表名`)
-    const finalOf = new Map(session.tables.map((n, k) => [n, names[k] ?? n] as const));
+    /**
+     * 外部キーの相手は元の名前で来る ── 器での名前へ直す(2 件以上なら `ファイル名_表名`)。
+     * 🔴 **小文字で引く**(sqlite の表の名前は大小を区別しない)/ **この file の表に無い相手の線は捨てる**
+     *   (`duckDbMetaOf`。⚠ 元の名前へ落とすと、並べた別の file に同名の表が在るとき**偽の線**になる)。
+     */
+    const finalOf = new Map(session.tables.map((n, k) => [n.toLowerCase(), names[k] ?? n] as const));
     const firstLine = (e: unknown): string =>
       (e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '';
     for (const [k, original] of session.tables.entries()) {
@@ -580,11 +639,11 @@ export class DuckDbRunner {
         t = await session.table(original, SQLITE_NDJSON_TABLE_MAX_BYTES);
       } catch (e) {
         // ⚠ 頼めなかった(写しが閉じられた等)表も、その表だけ断る
-        this.refused.push(refusedNote(name, `読めませんでした: ${firstLine(e)}`));
+        this.refused.push({ name, view: false, why: `読めませんでした: ${firstLine(e)}` });
         continue;
       }
       if (t.refused !== null) {
-        this.refused.push(refusedNote(name, t.refused));
+        this.refused.push({ name, view: false, why: t.refused });
         continue;
       }
       /**
@@ -595,7 +654,7 @@ export class DuckDbRunner {
       try {
         await h.query(createTableSql(name, t.columns, t.asText));
       } catch (e) {
-        this.refused.push(refusedNote(name, `DuckDB が表を作れませんでした: ${firstLine(e)}`));
+        this.refused.push({ name, view: false, why: `DuckDB が表を作れませんでした: ${firstLine(e)}` });
         continue;
       }
       /**
@@ -603,18 +662,15 @@ export class DuckDbRunner {
        * ⚠ **表を作った直後に控える**(行を入れる所で断られても、列は器に在る)。引けなくなった表
        *   (下で `DROP` する)は、構造を採るとき器に無いので `mergeDuckDbSchema` が出さない。
        */
-      this.meta.set(name, {
-        columns: t.columns,
-        fks: t.fks.map((f) => ({
-          fromColumn: f.fromColumn,
-          toTable: finalOf.get(f.toTable) ?? f.toTable,
-          toColumn: f.toColumn,
-        })),
-      });
+      this.meta.set(name, duckDbMetaOf(t.columns, t.fks, finalOf));
+      // 🔴 BLOB の列が在る表を写した(案内の BLOB の注記は、在るときだけ出す)
+      if (t.columns.some((c) => /BLOB/i.test(c.type))) this.copiedBlob = true;
       // ⚠ 行が 0 件の表は file を作らない(列は上で作った ── `read_json_auto` は空だと列を失う)
       if (t.ndjson === null) continue;
       const file = duckDbFileNameOf(source, slot, k);
       await h.put(file, t.ndjson);
+      /** 🔴 全列 VARCHAR で入れたか(最初から / 型が合わなくて作り直した)── 帯でその表の名前を言う。 */
+      let asText = t.asText;
       try {
         try {
           // 🔑 旗が立っていれば作り直しではなく、最初から全列 VARCHAR で入れる(上で作ってある)
@@ -623,21 +679,42 @@ export class DuckDbRunner {
           if (t.asText) throw first;
           await h.query(createTableSql(name, t.columns, true));
           await h.query(insertFromNdjsonSql(name, file, t.columns, true));
+          asText = true;
         }
+        if (asText) this.asText.push(name);
       } catch (e) {
         await h.query('DROP TABLE ' + quoteIdent(name));
-        this.refused.push(refusedNote(name, `DuckDB が読めませんでした: ${firstLine(e)}`));
+        this.refused.push({ name, view: false, why: `DuckDB が読めませんでした: ${firstLine(e)}` });
       } finally {
         await h.drop(file);
       }
     }
+    /**
+     * 🔴 **ビューは写さない ── 写さなかったと言う**(着地後レビュー D3)。⚠ 直す前は、ビューがあることすら
+     *   どこにも出ず、`SELECT * FROM 在庫ビュー` が英語の「そんな表は無い」で返るだけだった。
+     * 🔑 名前は表と同じ決め方(2 件以上なら `ファイル名_名前`)── 画面で「無い」と言うとき、user が打った名前と同じにする。
+     */
+    for (const v of session.views) {
+      const name = multi ? tableNameFromFileTable(source.name, v, new Set()) : v;
+      this.refused.push({ name, view: true, why: 'ビューは写しません' });
+    }
   }
 
-  /** 引いた回が落ちたとき、写せなかった表の理由を添える(引いていない回は何も言わない)。 */
-  private withRefused(e: unknown): Error {
+  /**
+   * 引いた回が落ちたとき、写せなかった表の理由を添える(引いていない回は何も言わない)。
+   *
+   * 🔴 **並べているとき、表が無いと言われたら名前の決め方を添える**(着地後レビュー D5)── file を足すと
+   *   表の名前が `csv` → `売上` / `ファイル名_表名` へ変わるので、前の名前で引いた user は DuckDB の英語の
+   *   「Table with name … does not exist」だけを見る。⚠ 1 つだけのときは言わない(名前は変わらない)。
+   */
+  private withRefused(e: unknown, multi: boolean): Error {
     const err = e instanceof Error ? e : new Error(String(e));
-    if (this.refused.length === 0) return err;
-    return new Error(`${err.message} ── ${this.refused.join(' / ')}`, { cause: err });
+    const notes = this.refused.map((r) => refusedNote(r.name, r.why, sqliteFallbackHint(multi)));
+    if (multi && /Table with name .+ does not exist/i.test(err.message)) {
+      notes.push(`表の名前は ファイル名_表名 になっています(一覧は ${DUCKDB_TABLE_LIST_SQL} で引けます)`);
+    }
+    if (notes.length === 0) return err;
+    return new Error(`${err.message} ── ${notes.join(' / ')}`, { cause: err });
   }
 
   /**

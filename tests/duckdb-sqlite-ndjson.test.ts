@@ -233,6 +233,7 @@ function makeRunner(maxTableBytes?: number): DuckDbRunner {
       const opened = await request({ op: 'openSqliteExport', image: img });
       return {
         tables: opened.tables,
+        views: opened.views,
         table: (name, max) =>
           request({ op: 'exportSqliteTable', session: opened.session, table: name, maxTableBytes: maxTableBytes ?? max }),
         close: async () => {
@@ -589,6 +590,16 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
         'CREATE TABLE 明細 (売上id INTEGER, 行 INTEGER, 品名 TEXT, PRIMARY KEY (売上id, 行), FOREIGN KEY (売上id) REFERENCES 売上(id))',
       );
       run(db, 'CREATE TABLE 空 (a INTEGER)');
+      /**
+       * 🔴 **view / FTS5 / 生成列を持つ**(#682 段④d の着地後レビュー R6)。⚠ 直す前の fixture はどれも持たず、
+       *   「表だけの DB」でしか parity を見ていなかった ── view は写さず、FTS5 の影の表は構造にも出さず、
+       *   生成列は写す、という 3 つの振る舞いを**誰も通っていなかった**。
+       */
+      run(db, 'CREATE VIEW 客名簿 AS SELECT 名前 FROM 客');
+      run(db, 'CREATE VIRTUAL TABLE 検索 USING fts5(本文)');
+      run(db, "INSERT INTO 検索 VALUES ('あいう')");
+      run(db, 'CREATE TABLE 税 (金額 INTEGER, 税込 INTEGER GENERATED ALWAYS AS (金額 * 11 / 10) STORED)');
+      run(db, 'INSERT INTO 税 (金額) VALUES (100), (200)');
       run(db, "INSERT INTO 客 VALUES (1, 'A', NULL), (2, 'B', 'x')");
       run(db, 'INSERT INTO 売上 VALUES (10, 1, 1.5), (11, 2, 2.5), (12, 2, 3)');
       run(db, "INSERT INTO 明細 VALUES (10, 1, 'りんご'), (10, 2, 'みかん')");
@@ -605,12 +616,54 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
       const a = schemaModel(want);
       const b = schemaModel(have);
       // 🔑 前提:比べる中身が空でない(空どうしの一致で緑にしない)
-      expect(a.tables.map((t) => t.name), '前提が崩れている(表が採れていない)').toEqual(['売上', '客', '明細', '空']);
+      expect(a.tables.map((t) => t.name), '前提が崩れている(表が採れていない)').toEqual([
+        '売上',
+        '客',
+        '明細',
+        '税',
+        '空',
+        // 🔴 内蔵の sqlite の道は view も採る(`order by m.type` で表の後ろ)
+        '客名簿',
+      ]);
       expect(a.links.length, '前提が崩れている(外部キーが採れていない)').toBe(2);
       expect(a.tables.find((t) => t.name === '明細')?.columns.filter((c) => c.primaryKey).length).toBe(2);
       expect(a.tables.find((t) => t.name === '客')?.columns.find((c) => c.name === '備考')?.type).toBe('');
-      expect(b, '描く側へ渡る構造が、内蔵の sqlite の道と違う').toEqual(a);
-      expect(renderSchemaDigest(have), '構造ノートの字が違う').toBe(renderSchemaDigest(want));
+      /**
+       * 🔴 **違うと分かっている 2 点を名指しして、残りは 1 字も違わない**(#682 段④d の着地後レビュー R6)。
+       *   ① **view は写さない**(行を持たない ── 写すと元の表が変わっても古い行の偽物になる)。
+       *   ② **生成列は写す**(`税込`)。⚠ 内蔵の sqlite の道は `pragma_table_info` で採るので**生成列を出さない**
+       *      (`table_xinfo` だけが出す)── 写し側は `table_xinfo` から列を採るので出る。
+       *   ③ **FTS5 の仮想表と影の表は、どちらの道にも出ない**(`検索` / `検索_data` …)。
+       */
+      expect(b.tables.some((t) => t.kind === 'view'), 'view を写している').toBe(false);
+      expect(
+        b.tables.filter((t) => t.name.startsWith('検索')).map((t) => t.name),
+        'FTS5 の裏方が構造に出ている',
+      ).toEqual([]);
+      expect(a.tables.some((t) => t.name.startsWith('検索')), '前提:内蔵の sqlite の道も外している').toBe(false);
+      expect(a.tables.find((t) => t.name === '税')?.columns.map((c) => c.name)).toEqual(['金額']);
+      expect(b.tables.find((t) => t.name === '税')?.columns.map((c) => c.name), '生成列を写していない').toEqual([
+        '金額',
+        '税込',
+      ]);
+      expect(b.tables.find((t) => t.name === '税')?.rows, '生成列の表の行数が採れていない').toBe(2);
+      const same = (m: typeof a) => ({ ...m, tables: m.tables.filter((t) => t.kind !== 'view' && t.name !== '税') });
+      expect(same(b), '描く側へ渡る構造が、内蔵の sqlite の道と違う').toEqual(same(a));
+      // 構造ノートの字も、違うと分かっている 2 点(view / 生成列の表)を外した行で 1 字も違わない
+      const keep = (g: Grid, col: string): Grid => ({
+        columns: g.columns,
+        rows: g.rows.filter((r) => !['税', '客名簿'].includes(String(r[g.columns.indexOf(col)]))),
+      });
+      const md = (x: { columns: Grid; fks: Grid; counts: Grid }) =>
+        renderSchemaDigest({
+          source: '家計.sqlite',
+          columns: keep(x.columns, 'tbl'),
+          fks: x.fks,
+          counts: keep(x.counts, 'tbl'),
+        });
+      expect(md(have), '構造ノートの字が違う').toBe(md(want));
+      // 🔴 写さなかった view は、報告に載る(どこにも出ないままにしない)
+      expect(got.copy.refused).toEqual([{ name: '客名簿', view: true, why: 'ビューは写しません' }]);
     } finally {
       await runner.release();
     }
@@ -674,7 +727,7 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
       ]);
       const m = schemaModel({ source: 'x', columns: got.columns, fks: got.fks, counts: got.counts! });
       expect(m.tables.map((t) => t.name).sort()).toEqual(
-        ['在庫', '家計_売上', '家計_客', '家計_明細', '家計_空'].sort(),
+        ['在庫', '家計_売上', '家計_客', '家計_明細', '家計_税', '家計_空'].sort(),
       );
       // 🔴 線の両端は、図に出ている四角の名前と同じ(元の名前のままだと、箱の無い線になる)
       expect(m.links).toEqual([
@@ -686,6 +739,72 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
         expect(names.has(l.from) && names.has(l.to), `箱の無い線: ${l.from} → ${l.to}`).toBe(true);
       }
       expect(m.tables.find((t) => t.name === '在庫')?.rows).toBe(2);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  /**
+   * 🔴 **外部キーの相手の名前(#682 段④d の着地後レビュー R3)**。
+   * ① sqlite の表の名前は大小を区別しない(`REFERENCES Customers` と `CREATE TABLE customers` は同じ表)── 直す前は
+   *   完全一致で引くので、この線は**黙って落ちた**。
+   * ② sqlite は**存在しない表を指す外部キー**を持てる。直す前は元の名前へ落とすので、並べた別の file に**同じ名前の表**が在れば
+   *   **偽の線**が引かれた。
+   */
+  it('🔴 REFERENCES customers は表 Customers へ繋がる / 無い表を指す線は、同名の別 file の表へ落ちない', async () => {
+    const img = await image((db) => {
+      // ⚠ 表の名前は大文字で作り、外部キーは小文字で書く(sqlite は同じ表として扱う)
+      run(db, 'CREATE TABLE Customers (id INTEGER PRIMARY KEY, n TEXT)');
+      run(db, 'CREATE TABLE sale (id INTEGER PRIMARY KEY, cid INTEGER REFERENCES customers(id), oid INTEGER REFERENCES orders(id))');
+    });
+    const runner = makeRunner();
+    try {
+      // 1 件:大小違いの線が出る / 無い表 orders を指す線は出ない
+      const one = await runner.schema([{ source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) }]);
+      const m1 = schemaModel({ source: 'x', columns: one.columns, fks: one.fks });
+      expect(m1.links, '大小の違いで線が落ちている / 無い表への線が出ている').toEqual([
+        { from: 'sale', fromColumn: 'cid', to: 'Customers', toColumn: 'id' },
+      ]);
+    } finally {
+      await runner.release();
+    }
+    const runner2 = makeRunner();
+    try {
+      // 2 件:並べた csv に `orders` が在る ── .sqlite の外部キーは「この file に無い orders」を指していた
+      const two = await runner2.schema([
+        { source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) },
+        { source: sqliteSource('l2', 'orders.csv'), readBytes: csvBytes('id\n1\n') },
+      ]);
+      const m2 = schemaModel({ source: 'x', columns: two.columns, fks: two.fks });
+      expect(m2.tables.map((t) => t.name), '前提:別の file の orders が器に在る').toContain('orders');
+      expect(m2.links, '別の file の orders へ偽の線が引かれている').toEqual([
+        { from: '家計_sale', fromColumn: 'cid', to: '家計_Customers', toColumn: 'id' },
+      ]);
+    } finally {
+      await runner2.release();
+    }
+  }, 60_000);
+
+  it('🔴 DROP して同じ名前で作り直した表には、元の .sqlite の主キー・外部キーを重ねない(R2)', async () => {
+    const img = await richImage();
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) }];
+    try {
+      const before = await runner.schema(sources);
+      const pkOf = (g: Grid, tbl: string, col: string): unknown =>
+        g.rows.find((r) => r[g.columns.indexOf('tbl')] === tbl && r[g.columns.indexOf('col')] === col)?.[
+          g.columns.indexOf('pk')
+        ];
+      expect(pkOf(before.columns, '売上', 'id'), '前提:写した表には元の主キーが重なる').toBe(1);
+      await runner.run({ sql: 'DROP TABLE 売上', sources });
+      await runner.run({ sql: 'CREATE TABLE 売上 (x VARCHAR)', sources });
+      const after = await runner.schema(sources);
+      const m = schemaModel({ source: 'x', columns: after.columns, fks: after.fks, counts: after.counts! });
+      expect(m.tables.find((t) => t.name === '売上')?.columns.map((c) => c.name)).toEqual(['x']);
+      // 🔴 作り直した表を指す元の線(明細.売上id → 売上.id)は、列が無いので出ない / 売上の元の線(売上.客id → 客)も復活しない
+      expect(m.links.filter((l) => l.from === '売上'), '作り直した表に、元の外部キーが復活している').toEqual([]);
+      // 対照群:作り直していない表(客)は、元の姿のまま
+      expect(m.tables.find((t) => t.name === '客')?.columns.find((c) => c.name === 'id')?.primaryKey).toBe(true);
     } finally {
       await runner.release();
     }

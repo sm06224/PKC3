@@ -5644,6 +5644,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='sql-er-note'],
 [data-pkc-field='sql-er-zero'],
+[data-pkc-field='sql-er-copy'],
 [data-pkc-field='sql-er-dropped'] {
   margin: 0;
   color: var(--muted);

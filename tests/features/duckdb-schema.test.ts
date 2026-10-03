@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DUCKDB_SCHEMA_COLUMNS_SQL,
   DUCKDB_SCHEMA_FK_SQL,
+  duckDbMetaOf,
   mergeDuckDbSchema,
   type DuckDbTableMeta,
 } from '../../src/features/query/duckdb-schema';
@@ -113,7 +114,14 @@ describe('🔴 器の答えに、写す前の .sqlite の姿を重ねる(mergeDu
     // 並び:表の名前順(内蔵の sqlite の道の `order by m.name` と同じ)
     const two = new Map<string, DuckDbTableMeta>([
       ['子', meta.get('子')!],
-      ['親', { columns: [], fks: [{ fromColumn: 'id', toTable: '子', toColumn: 'id' }] }],
+      // ⚠ 列の形は器の `親`(id 1 列)と同じにする ── 形が違う表には重ねない(下の R2)
+      [
+        '親',
+        {
+          columns: [{ name: 'id', type: 'INTEGER', notNull: true, primaryKey: true }],
+          fks: [{ fromColumn: 'id', toTable: '子', toColumn: 'id' }],
+        },
+      ],
     ]);
     expect(mergeDuckDbSchema(raw(), two).fks.rows.map((x) => x[0])).toEqual(['子', '親']);
   });
@@ -123,5 +131,97 @@ describe('🔴 器の答えに、写す前の .sqlite の姿を重ねる(mergeDu
     const out = mergeDuckDbSchema(r, new Map());
     expect(out.columns.rows).toEqual(r.columns.rows);
     expect(out.fks.rows).toEqual([]);
+  });
+});
+
+describe('🔴 DROP して同じ名前で作り直した表には、元の .sqlite の姿を重ねない(R2)', () => {
+  const meta = new Map<string, DuckDbTableMeta>([
+    [
+      '子',
+      {
+        columns: [
+          { name: 'id', type: 'INTEGER', notNull: true, primaryKey: true },
+          { name: '親id', type: 'INT', notNull: false, primaryKey: false },
+        ],
+        fks: [{ fromColumn: '親id', toTable: '親', toColumn: 'id' }],
+      },
+    ],
+  ]);
+  const parent = col('親', 0, 'id', 'BIGINT');
+
+  it('🔴 列の名前が違う表(user が作り直した)へ、型・主キー・外部キーを重ねない', () => {
+    const raw = {
+      columns: { columns: COLS, rows: [col('子', 0, 'id', 'INTEGER'), col('子', 1, '別の列', 'VARCHAR'), parent] },
+      fks: { columns: FKS, rows: [] },
+    };
+    const out = mergeDuckDbSchema(raw, meta);
+    // 器の答えのまま(元の .sqlite の「主キー」「空を許さない」を、user が作っていない表に付けない)
+    expect(out.columns.rows).toEqual(raw.columns.rows);
+    expect(out.fks.rows, '作り直した表に、元の外部キーが復活している').toEqual([]);
+  });
+
+  it('🔴 列の数が違う / 並びが違う表にも重ねない(集合ではなく並びで見る)', () => {
+    const fewer = {
+      columns: { columns: COLS, rows: [col('子', 0, 'id'), parent] },
+      fks: { columns: FKS, rows: [] },
+    };
+    expect(mergeDuckDbSchema(fewer, meta).fks.rows).toEqual([]);
+    expect(mergeDuckDbSchema(fewer, meta).columns.rows).toEqual(fewer.columns.rows);
+    const swapped = {
+      columns: { columns: COLS, rows: [col('子', 0, '親id', 'BIGINT'), col('子', 1, 'id', 'BIGINT'), parent] },
+      fks: { columns: FKS, rows: [] },
+    };
+    expect(mergeDuckDbSchema(swapped, meta).fks.rows, '並びが逆なのに重ねている').toEqual([]);
+  });
+
+  it('対照群:列の形が同じなら重なる(写した表そのもの)', () => {
+    const same = {
+      columns: { columns: COLS, rows: [col('子', 0, 'id', 'BIGINT'), col('子', 1, '親id', 'BIGINT'), parent] },
+      fks: { columns: FKS, rows: [] },
+    };
+    const out = mergeDuckDbSchema(same, meta);
+    expect(out.columns.rows[0]).toEqual(col('子', 0, 'id', 'INTEGER', 1, 1));
+    expect(out.fks.rows).toEqual([['子', '親', '親id', 'id']]);
+  });
+});
+
+describe('🔴 外部キーの相手の名前を、器での名前へ直す(R3)', () => {
+  const shape = (n: string) => ({ name: n, type: 'INTEGER', notNull: false, primaryKey: false });
+
+  it('🔴 大小文字を区別せずに引く(REFERENCES Customers と CREATE TABLE customers は同じ表)', () => {
+    const finalOf = new Map([['customers', 'customers']]);
+    const m = duckDbMetaOf([shape('cid')], [{ fromColumn: 'cid', toTable: 'Customers', toColumn: 'id' }], finalOf);
+    // ⚠ 直す前は完全一致で引いたので、この線は黙って落ちていた
+    expect(m.fks, '大小の違いで線が落ちている').toEqual([{ fromColumn: 'cid', toTable: 'customers', toColumn: 'id' }]);
+  });
+
+  it('🔴 2 件以上のときは「ファイル名_表名」へ直る', () => {
+    const finalOf = new Map([['客', '家計_客']]);
+    const m = duckDbMetaOf([shape('客id')], [{ fromColumn: '客id', toTable: '客', toColumn: 'id' }], finalOf);
+    expect(m.fks).toEqual([{ fromColumn: '客id', toTable: '家計_客', toColumn: 'id' }]);
+  });
+
+  it('🔴 この file に無い表を指す外部キーは捨てる(元の名前へ落とさない)', () => {
+    const m = duckDbMetaOf(
+      [shape('x')],
+      [{ fromColumn: 'x', toTable: 'orders', toColumn: 'id' }],
+      new Map([['customers', 'customers']]),
+    );
+    expect(m.fks, '無い表を指す線を元の名前のまま残している').toEqual([]);
+  });
+
+  it('🔴 同じ名前の別の表が器に在っても、偽の線にならない(並べた csv の表 orders)', () => {
+    // 器には csv 由来の `orders` が在る。.sqlite は `orders` を持たず、その外部キーだけが `orders` を指していた
+    const meta = new Map<string, DuckDbTableMeta>([
+      ['子', duckDbMetaOf([shape('id'), shape('oid')], [{ fromColumn: 'oid', toTable: 'orders', toColumn: 'id' }], new Map())],
+    ]);
+    const raw = {
+      columns: {
+        columns: COLS,
+        rows: [col('子', 0, 'id', 'BIGINT'), col('子', 1, 'oid', 'BIGINT'), col('orders', 0, 'id', 'VARCHAR')],
+      },
+      fks: { columns: FKS, rows: [] },
+    };
+    expect(mergeDuckDbSchema(raw, meta).fks.rows, '別の file の orders へ偽の線が引かれている').toEqual([]);
   });
 });

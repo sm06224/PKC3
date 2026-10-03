@@ -5,7 +5,12 @@
  * 「動くか」ではなく「**呼ばれるまで起こさないか / 使い終わったら畳むか**」である。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { DuckDbLease, DUCKDB_TOO_LONG, type DuckDbHandle } from '../../src/adapter/platform/duckdb/duckdb-lease';
+import {
+  DuckDbLease,
+  DUCKDB_LOAD_TOO_LONG,
+  DUCKDB_TOO_LONG,
+  type DuckDbHandle,
+} from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type { DuckDbRaw } from '../../src/features/query/duckdb-rows';
 
 /** 手で進められる時計。⚠ 実時間を待たない(30 秒の既定を待つ test は書けない)。 */
@@ -412,5 +417,82 @@ describe('🔴 書き込みで作った物は、アイドルで畳まない(#918
     // 起こし直した新しい器へ、読むだけの回
     await lease.run({ sql: 'select 1' });
     expect(t.armed, '畳まれた器の書き込みが、新しい器を畳めなくしている').toBe(1);
+  });
+});
+
+/**
+ * 🔴 **器へ写す所にも時間の門を置く**(#682 段④d の着地後レビュー R5)。
+ *
+ * ## ① 何が起きていたか(直す前)
+ *
+ * 時間の門(`maxMs`)は**打つ字**にしか掛かっておらず、`data.load`(`.sqlite` を表ごとに器へ写す所)は
+ * **無期限**だった。呼び側(`DuckDbRunner`)は仕事を**直列の列**で通すので、写しの途中で止まると
+ * **後ろの仕事(つながり図・次の SQL)が全部永久に待つ**。`forget(stale)` は「次の仕事が走り出して初めて」
+ * 効くので、列が詰まっていると届かなかった。
+ */
+describe('🔴 器へ写す所の時間の門(R5)', () => {
+  const hangingLoad = (): Promise<void> => new Promise<void>(() => undefined);
+
+  it('🔴 止まった写しを、ワーカーごと畳んで時間で断る(次の仕事は起こし直す)', async () => {
+    const h = handle();
+    const h2 = handle();
+    const hs = [h, h2];
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(hs.shift() as DuckDbHandle), ...t });
+    const stuck = lease.run({
+      sql: 'select 1',
+      loadMaxMs: 10,
+      data: { key: 'a', load: hangingLoad },
+    });
+    const failed = expect(stuck).rejects.toThrow(DUCKDB_LOAD_TOO_LONG);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(t.armed, '写す所に時計が張られていない').toBeGreaterThan(0);
+    t.fire();
+    await failed;
+    expect(h.terminated, '止めるには畳むしかないのに、畳んでいない').toBe(1);
+    expect(lease.awake, '死んだ器を握ったまま').toBe(false);
+    // 🔴 同じ鍵でも「入っている」と嘘をつかない ── 次は最初から写し直す
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'select 2', loadMaxMs: 10, data: { key: 'a', load } });
+    expect(load, '畳んだ器へ写し直していない').toHaveBeenCalledTimes(1);
+    expect(h2.asked).toEqual(['select 2']);
+  });
+
+  it('🔴 断りの字は 1 つの定数(呼び側がそれで見分ける)で、打つ字の時間切れとは別の字', () => {
+    expect(DUCKDB_LOAD_TOO_LONG).toContain('写す');
+    expect(DUCKDB_LOAD_TOO_LONG).not.toBe(DUCKDB_TOO_LONG);
+  });
+
+  it('対照群:時間内に写し終われば畳まない / `loadMaxMs` を渡さなければ時計を張らない(今までどおり)', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    const load = vi.fn(() => Promise.resolve());
+    await lease.run({ sql: 'select 1', loadMaxMs: 10_000, data: { key: 'a', load } });
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(h.terminated).toBe(0);
+    // 門は外れ、畳む時計だけが張ってある
+    expect(t.armed).toBe(1);
+    const h2 = handle();
+    const t2 = fakeTimers();
+    const lease2 = new DuckDbLease({ open: () => Promise.resolve(h2), ...t2 });
+    await lease2.run({ sql: 'select 1', data: { key: 'a', load: () => Promise.resolve() } });
+    // 打つ字にも写す所にも門が無い回は、畳む時計だけ(1 本)
+    expect(t2.armed).toBe(1);
+  });
+
+  it('🔴 写しが失敗で終わったときは、門の時計を残さない(次の回の時計と混ざらない)', async () => {
+    const h = handle();
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(h), ...t });
+    await expect(
+      lease.run({
+        sql: 'select 1',
+        loadMaxMs: 10_000,
+        data: { key: 'a', load: () => Promise.reject(new Error('写せません')) },
+      }),
+    ).rejects.toThrow('写せません');
+    // 門の時計は外れ、畳む時計だけが張ってある
+    expect(t.armed, '落ちた回の門の時計が残っている').toBe(1);
   });
 });
