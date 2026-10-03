@@ -378,7 +378,7 @@ function openCopyHistory(root: HTMLElement, notify: (text: string) => void): voi
 function openRecentEntries(
   root: HTMLElement,
   dispatcher: Dispatcher,
-  notify: (text: string) => void,
+  notify: (text: string, opts?: StatusOptions) => void,
 ): void {
   const st = dispatcher.getState();
   const initialLids = recentNavLids(
@@ -389,7 +389,7 @@ function openRecentEntries(
     (lid) => st.entryMetas.has(lid),
   );
   if (initialLids.length === 0) {
-    notify('最近開いた他のノートがありません');
+    notify('最近開いた他のノートがありません', CAUTION);
     return;
   }
   void pickEntryInApp(
@@ -4103,6 +4103,13 @@ function readSetting(key: string): string | null {
 }
 
 const noop = (): void => {};
+/**
+ * 🔴 **断り・失敗の知らせに付ける種類**(#1305 の着地後レビュー)。
+ * ⚠ 種類を付けずに `showStatus` へ渡すと「結果」として **6 秒で消え、未読にもならない** ──
+ *   「ブラウザが断った」「いまは実行できない」を読む前に消える。判定は**出す側で宣言する**
+ *   (sink が字の末尾から推定すると、字が変わった日に黙って外れる)。
+ */
+const CAUTION: StatusOptions = { kind: 'caution' };
 
 /**
  * 🔴 **行を持つ 2 つの器**(#1032 で 1 か所へ寄せた。「一覧」の器は #813 段③ で外した)。
@@ -4128,8 +4135,9 @@ export function runGlobalCommand(
    * 🔴 **画面へ 1 行出す口**(#522)。⚠ **optional にしない** ── 渡し忘れても
    * tsc が黙る形にすると、戻ってくる症状は「**押しても何も言わない**」という、
    * まさにこの変更が直そうとしているもの(CLAUDE.md「待ちの口は optional にしない」)。
+   * 🔑 断りは `CAUTION` を渡す(結果のまま渡すと 6 秒で消えて未読にもならない)。
    */
-  notify: (text: string) => void,
+  notify: (text: string, opts?: StatusOptions) => void,
   dry = false,
 ): boolean {
   if (cmd === 'view-detail') {
@@ -4312,7 +4320,7 @@ export function runGlobalCommand(
     if (lid === null) {
       if (dry) return false;
       prevent();
-      notify('スタックに載せるノートがありません(先にノートを開いてください)');
+      notify('スタックに載せるノートがありません(先にノートを開いてください)', CAUTION);
       return true;
     }
     if (dry) return true;
@@ -4327,7 +4335,7 @@ export function runGlobalCommand(
     if (stack.length === 0) {
       if (dry) return false;
       prevent();
-      notify('スタックに載せてあるノートがありません');
+      notify('スタックに載せてあるノートがありません', CAUTION);
       return true;
     }
     if (dry) return true;
@@ -4505,7 +4513,7 @@ export function openPaletteFor(
   dispatcher: Dispatcher,
   keymap: KeymapStore,
   /** 🔴 画面へ 1 行出す口(#522)。⚠ optional にしない ── 落とすと「押しても何も言わない」に戻る。 */
-  notify: (text: string) => void,
+  notify: (text: string, opts?: StatusOptions) => void,
 ): void {
   /**
    * 🔴 **開いた瞬間の欄を控える**(#425 段②-b)。
@@ -4600,7 +4608,7 @@ export interface CommandEnv {
   readonly dispatcher: Dispatcher;
   readonly keymap: KeymapStore;
   /** 🔴 画面へ 1 行出す口(#522)。⚠ optional にしない。 */
-  readonly notify: (text: string) => void;
+  readonly notify: (text: string, opts?: StatusOptions) => void;
 }
 
 /** 相手のノートが決まったあとに走る実体。 */
@@ -4637,7 +4645,7 @@ export function runCommandRow(
   if (cmd.needs === 'entry') {
     const exec = (opts.withEntry ?? COMMAND_WITH_ENTRY)[id];
     if (exec === undefined) {
-      env.notify('この操作はいま実行できません');
+      env.notify('この操作はいま実行できません', CAUTION);
       return false;
     }
     void pickEntryInApp(
@@ -4660,7 +4668,7 @@ export function runCommandRow(
   }
   if (!runGlobalCommand(id, env.root, env.dispatcher, env.keymap, noop, env.notify)) {
     // ⚠ 描いてから状態が動いて押せなくなった回 ── 黙らない(dead click にしない)
-    env.notify('この操作はいま実行できません');
+    env.notify('この操作はいま実行できません', CAUTION);
     return false;
   }
   opts.onDone?.();
@@ -4942,6 +4950,18 @@ function moveAppGroup(
     if (ok) go();
   });
 }
+
+/**
+ * 🔴 **色がまだ無い付箋の、色の窓の初めの色**(白 / 灰色に**見える**が、わざと 1 だけずらした値)。
+ *
+ * ⚠ `<input type="color">` は**値が開いたときから変わらなければ `change` を撃たない**(仕様)。
+ *   初めの色を本物の白(`#ffffff`)・灰色(`#808080`)にすると、**白い付箋・灰色の枠を選んでも
+ *   何も起きず**、その 2 色だけ付けられない。1 だけずらせば見た目は同じで、**同じ白を選んでも
+ *   値が変わる**ので `change` が来る。
+ * ⚠ `input` を拾う案は採らない ── 窓の中で色を動かす間に本文を何度も書いてしまう。
+ */
+const PLACE_FILL_SEED = '#fffffe';
+const PLACE_STROKE_SEED = '#7f7f7f';
 
 /**
  * 🔴 **色を選ぶ窓を 1 つ開く**(#1224 で書いた物を、#530 段④で付箋・線の色と**共有**する)。
@@ -5631,7 +5651,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   'open-palette': (dispatcher, _target, services, root) =>
-    openPaletteFor(root, dispatcher, appKeymap, (t) => services.showStatus?.(t)),
+    openPaletteFor(root, dispatcher, appKeymap, (t, o) => services.showStatus?.(t, o)),
   /**
    * 🔴 **左の列に出た操作の一覧の行を押した**(#274 段①。姿 = D)。
    * ⚠ 実行は `runCommandRow` ── 鍵・パレットと同じ `runGlobalCommand` の道(2 本目を作らない)。
@@ -5644,7 +5664,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const from = dispatcher.getState().filterQuery;
     runCommandRow(
       id,
-      { root, dispatcher, keymap: appKeymap, notify: (t) => services.showStatus?.(t) },
+      { root, dispatcher, keymap: appKeymap, notify: (t, o) => services.showStatus?.(t, o) },
       {
         onDone: () => {
           // 🔴 実行が**済んだ**ときだけ憶える(相手を選ぶ小窓をやめた回は呼ばれない)。
@@ -5672,7 +5692,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     openCopyHistory(root, (t) => services.showStatus?.(t));
   },
   'open-recent': (dispatcher, _target, services, root) => {
-    openRecentEntries(root, dispatcher, (t) => services.showStatus?.(t));
+    openRecentEntries(root, dispatcher, (t, o) => services.showStatus?.(t, o));
   },
   'use-copied': (_dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-copied');
@@ -5685,6 +5705,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           ok
             ? `「${copyLabel(item.text, 24)}」をコピーしました(そのまま貼れます)`
             : 'コピーできませんでした(ブラウザが断りました)',
+          ok ? undefined : CAUTION,
         );
       });
   },
@@ -5716,7 +5737,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       const opened = revealAppendPane(root);
       const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
       if (input === null) {
-        services.showStatus?.('追記の欄が見つかりません(ノートを開いてから押してください)');
+        services.showStatus?.('追記の欄が見つかりません(ノートを開いてから押してください)', CAUTION);
         return;
       }
       const prev = input.value.replace(/\s+$/, '');
@@ -5863,12 +5884,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st0 = dispatcher.getState();
     const body = st0.openBody?.body ?? null;
     if (body === null) {
-      services.showStatus?.('本文が開いていません(ノートを開いてから押してください)');
+      services.showStatus?.('本文が開いていません(ノートを開いてから押してください)', CAUTION);
       return;
     }
     const rawLine = tableLineAt(target, body);
     if (rawLine === null) {
-      services.showStatus?.('このコードの枠が見つかりません(本文を開き直してください)');
+      services.showStatus?.('このコードの枠が見つかりません(本文を開き直してください)', CAUTION);
       return;
     }
     startCodeEditAt(dispatcher, services, root, rawLine - frontmatterLineCount(body));
@@ -8402,7 +8423,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         const ob = dispatcher.getState().openBody;
         const open = ob === null ? '' : (ob.body.split('\n')[line] ?? '');
         const cur = placeStyleAt(open)?.[key] ?? null;
-        openColorPicker(target, cur ?? (key === 'fill' ? '#ffffff' : '#808080'), (to) => {
+        openColorPicker(target, cur ?? (key === 'fill' ? PLACE_FILL_SEED : PLACE_STROKE_SEED), (to) => {
           // ⚠ 窓が閉じるまでに本文が動いたかもしれない ── reducer が byte 一致で見直す
           if (parsePlaceColor(to) === null || to === cur) return;
           dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } });
@@ -9579,7 +9600,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       // 🔴 **押した瞬間の選択**を控える(別の窓で選んでいる間に動きうる)
       dispatcher.getState().selectedLid,
       // ⚠ 組めずに投げた回も**黙って終わらせない**(押して無反応にしない)
-    ).catch(() => services.showStatus?.('書庫の一覧を組めませんでした'));
+    ).catch(() => services.showStatus?.('書庫の一覧を組めませんでした', CAUTION));
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
@@ -11626,7 +11647,9 @@ export function bindActions(
    * 成功の一報を `OP_FAILED` に載せない(載せると赤い意味の欄に出る)。
    * ⚠ 配線が無い環境(test)では黙る ── 押しても落ちない。
    */
-  const tellUser = (text: string): void => services.showStatus?.(text);
+  const tellUser = (text: string, opts?: StatusOptions): void =>
+    // ⚠ 種類が無いときは字だけを渡す(呼び出しの形を変えない ── 受け口を偽物にした test が引数の組で見ている)
+    opts === undefined ? services.showStatus?.(text) : services.showStatus?.(text, opts);
   /**
    * action を 1 本の口から回す。⚠ **ここを通さない呼び方をしない** ──
    * 実行中(書出し / 取込)のガードはここに 1 回だけ置く(P8 段㉑)。

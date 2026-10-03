@@ -16,6 +16,7 @@ import {
   PLACE_LINE_WIDTH_DEFAULT,
   placeInkOf,
 } from '../../src/features/markdown/place-color';
+import { placeLineMenuActions } from '../../src/features/entry-actions';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
   placeStyleAt,
@@ -74,6 +75,60 @@ describe('塗りの上の字の色(placeInkOf)', () => {
     expect(placeInkOf('#ffffff')).toBe('#1a1a1a');
     expect(placeInkOf('#1e3a8a')).toBe('#ffffff');
     expect(placeInkOf('#000000')).toBe('#ffffff');
+  });
+});
+
+/**
+ * 🔴 **白黒の境目の両側**(着地後レビューの変異 D: `lum > 0.5` の境目が生き延びた)。
+ * ⚠ 上の 4 色は**境目から遠い**(輝度 0.0 / 0.19 / 0.86 / 1.0)ので、境目を 0.4 や 0.6 へ動かしても緑だった。
+ *   選んだのは**実際に輝度を計算した中間の色**(sRGB の係数 0.2126 / 0.7152 / 0.0722 ÷ 255):
+ *   境目を上へ(0.55 以上)動かすと暗い側の 3 つが、下へ(0.45 以下)動かすと明るい側の 3 つが落ちる。
+ */
+describe('塗りの上の字の色(placeInkOf)── 境目の両側', () => {
+  const lumOf = (c: string): number => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) as [number, number, number];
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  };
+  // 輝度 0.5 より**わずかに下**〜0.41 ── 白い字
+  const WHITE_INK = ['#7f7f7f', '#3b82f6', '#ef4444'];
+  // 輝度 0.5 より**わずかに上**〜0.76 ── 暗い字
+  const DARK_INK = ['#808080', '#22c55e', '#fbbf24'];
+
+  it.each(WHITE_INK)('🔴 %s(輝度 0.5 の下)は白い字', (c) => {
+    expect(lumOf(c), '前提が崩れた(この色が境目の下に無い)').toBeLessThan(0.5);
+    expect(lumOf(c)).toBeGreaterThan(0.4);
+    expect(placeInkOf(c)).toBe('#ffffff');
+  });
+
+  it.each(DARK_INK)('🔴 %s(輝度 0.5 の上)は暗い字', (c) => {
+    expect(lumOf(c), '前提が崩れた(この色が境目の上に無い)').toBeGreaterThan(0.5);
+    expect(lumOf(c)).toBeLessThan(0.8);
+    expect(placeInkOf(c)).toBe('#1a1a1a');
+  });
+
+  it('🔴 読めない色は暗い字(地が無いのと同じ)', () => {
+    expect(placeInkOf('red')).toBe('#1a1a1a');
+  });
+});
+
+/**
+ * 🔴 **線の太さが 1 のとき「線を細くする」は出ない**(着地後レビューの変異 F)。
+ * ⚠ 押しても変わらない口を作らない。上の画面側の test は太さ `null` / 4 しか通らず、`1` を通らなかった。
+ */
+describe('線の右クリックの太さの口(placeLineMenuActions)', () => {
+  const labelsAt = (width: number | null): string[] =>
+    placeLineMenuActions({ stroke: false, width, widthWritten: width !== null }).map((a) => a.label);
+
+  it('🔴 太さ 1 では「線を細くする」が出ない(対照:出るはずの 2 つの太さでは出る)', () => {
+    expect(labelsAt(1), '押しても変わらない口が出た').not.toContain('線を細くする');
+    expect(labelsAt(1)).toContain('線を太くする'); // 対照:消えたのは「細く」だけ
+    expect(labelsAt(null)).toContain('線を細くする');
+    expect(labelsAt(4)).toContain('線を細くする');
+  });
+
+  it('🔴 太さ 4 では「線を太くする」が出ない', () => {
+    expect(labelsAt(4)).not.toContain('線を太くする');
+    expect(labelsAt(1)).toContain('線を太くする');
   });
 });
 

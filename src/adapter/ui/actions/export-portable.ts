@@ -129,7 +129,7 @@ export async function exportPortable(
 
     const notes = [...missing, ...out.warnings];
     if (notes.length > 0) deps.report(notes);
-    progressShown = false;
+    progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     deps.notify(
       `可搬 HTML を書き出しました(添付 ${out.assets} 件` +
         (notes.length > 0 ? ` / ⚠ 注意 ${notes.length} 件` : '') +

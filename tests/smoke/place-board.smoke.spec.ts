@@ -499,7 +499,8 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await page.fill(
     '[data-pkc-field="editor-body"]',
     `:::format{#big .pkc-place entry=${lid} x=60 y=30 w=240 h=100}\n:::\n\n` +
-      `:::format{#dflt .pkc-place entry=${shortLid} x=60 y=200}\n:::\n`,
+      // 🔴 暗い塗りを付けた `entry=` の付箋(題名の帯の字が塗りに追従するかを下で見る)
+      `:::format{#dflt .pkc-place entry=${shortLid} x=60 y=200 fill=#1e3a8a}\n:::\n`,
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -518,6 +519,30 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await expect(cb, '台の前提:チェックが出ていない').toHaveCount(1);
   await expect(cb, 'チェックが押せる形で出ている').toBeDisabled();
   await expect(dflt.locator(':scope > [data-pkc-field="place-body"]')).toContainText('みじかい本文');
+
+  /**
+   * 🔴 **塗りを付けた `entry=` の付箋は、題名の帯の字も塗りの上の字になる**(#1304 の着地後レビュー)。
+   * ⚠ 直す前は帯が `color: var(--fg)` 固定で、暗い塗りの上に**地の字(暗いテーマでは明るい字)がそのまま載った**。
+   * 🔑 計算後の色を見る(属性・変数だけでは「受け皿が無い」を素通りする)。対照群:色の無い付箋の帯は
+   *   `--fg` のまま(= 今までの色を 1 ドットも変えていない)。
+   */
+  const cardInk = (loc: Locator): Promise<{ card: string; own: string }> =>
+    loc.evaluate((el) => {
+      const card = el.querySelector(':scope > [data-pkc-field="place-card"]')!;
+      return { card: getComputedStyle(card).color, own: getComputedStyle(el).color };
+    });
+  const filled = await cardInk(dflt);
+  expect(filled.own, '台の前提:暗い塗りの上の字が白になっていない').toBe('rgb(255, 255, 255)');
+  expect(filled.card, '塗りを付けた付箋の題名の字が、塗りの上の字に追従していない').toBe(filled.own);
+  const plainCard = await big.evaluate((el) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--fg)';
+    el.append(probe);
+    const fg = getComputedStyle(probe).color;
+    probe.remove();
+    return { fg, card: getComputedStyle(el.querySelector(':scope > [data-pkc-field="place-card"]')!).color };
+  });
+  expect(plainCard.card, '色の無い付箋の題名の字の色が変わった(対照群)').toBe(plainCard.fg);
 
   // 🔴 大きさ:w= h= は固定、省略は既定(320 × 240)── 中身(長い本文)で伸びない
   const bb = (await big.boundingBox())!;

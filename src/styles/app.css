@@ -4155,7 +4155,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: 4px 6px;
   border: none;
   background: transparent;
-  color: var(--fg);
+  /* 🔑 塗りを付けた付箋では題名も塗りの上の字(`-ink`)に合わせる ── 暗い地に `--fg` のままだと読めない。
+   *   変数が無い(色を付けていない)付箋は今までの `--fg` のまま */
+  color: var(--pkc-place-ink, var(--fg));
   text-align: start;
   cursor: pointer;
   overflow-wrap: anywhere;
@@ -4211,12 +4213,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='place-sql-note'] {
   margin: 2px 0;
   padding: 2px 6px;
-  color: var(--muted);
+  color: var(--pkc-place-ink, var(--muted));
   font-size: 0.85em;
 }
 /* PDF の添付(「PDF は元のノートで」)── 絵を出せない物は字で言う */
 [data-pkc-field='place-body-skip'] {
-  color: var(--muted);
+  color: var(--pkc-place-ink, var(--muted));
   font-size: 0.85em;
 }
 /* 🔴 置いた添付ノートの画像(#529 W3-②)── 枠いっぱいに、縦横比を保って収める。
@@ -4243,7 +4245,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: 2px 4px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--pkc-place-ink, var(--muted));
   text-align: start;
   cursor: pointer;
   text-decoration: underline;
@@ -9221,6 +9223,14 @@ h3[data-pkc-section] {
    *   要らない(画面では畳まれた分を知らせる働きがある)。 */
   [data-pkc-region='calendar-grid'] [data-pkc-field='day-count'] {
     display: none;
+  }
+  /* 🔴 **色を付けた付箋は、紙にも画面と同じ色で出す**(#1304 の着地後レビュー)。
+   * ⚠ ブラウザの既定は印刷で**背景を刷らない** ── 暗い塗りの付箋は、字だけ(塗りの上の白)が
+   *   白紙に残って**読めなくなる**。塗りを落として字を既定へ戻す案は採らない:
+   *   色で仲間分けした図面の意味が、紙で消える。 */
+  .pkc-md-rendered .pkc-format-block.pkc-place {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
 

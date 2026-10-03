@@ -5,7 +5,7 @@
  * 守るのは:
  * ① 結果の知らせは**数秒で消え**、注意・問題と**押す口を持つ知らせ**は消えない(Q1 / Q2)
  * ② 新しい知らせが来たら前の時計は捨てる(古い時計が新しい字を消さない / 寿命を縮めない)
- * ③ 進行中(`…`)は**別の欄**へ出て、結果の知らせに置き換わらず、終わりの合図で空になる(Q3)
+ * ③ 進行中(`…`)は**別の欄**へ出て、知らせを消さず、終わりの合図か結果の知らせで空になる(Q3)
  * ④ 進行中は行の中で知らせより**先**に出て、読み上げの対象にならない
  * ⑤ 全体の処理を出す側の**全数**(下の表)が、終わりの合図を持っている
  *
@@ -223,32 +223,63 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
 
   it('🔴 終わりの合図(空の字)で進行中だけが空になる。知らせは巻き込まない', () => {
     const r = rig();
+    r.n.show('コピーしました');
     r.n.show('書き出しています…');
-    r.n.show('コピーしました'); // 進行中の間に別の結果が来る
-    expect(r.n.progressLine(), '別の知らせが進行中を置き換えた').toBe('書き出しています…');
     r.n.show('');
     expect(r.n.progressLine(), '終わりの合図で消えていない').toBe('');
     expect(r.n.noticeLine(), '終わりの合図が結果を巻き込んだ').toBe('コピーしました');
     expect(r.posted.map((p) => p.text), '空の字を積んだ').toEqual(['コピーしました']);
   });
 
-  it('🔴 進行中の間に結果の時計が鳴っても、進行中は残る', () => {
+  /**
+   * 🔴 **結果 / 注意 / 問題の知らせは、進行中の終わりでもある**(#1305 の着地後レビュー)。
+   * ⚠ 直す前は、成功の枝が `notify('')` を撃たない出す側(書き出し・取り込み・切り出し・文字起こし)で
+   *   「…しています…」が「…しました」の隣に**居座った**。守るのは sink の側(出す側が撃ち忘れても)。
+   */
+  it.each([
+    ['結果', undefined],
+    ['注意', { kind: 'caution' as const }],
+    ['問題', { kind: 'problem' as const }],
+  ])('🔴 %s の知らせが来たら、進行中の欄も空になる(処理の終わりは結果で告げられる)', (_n, opts) => {
     const r = rig();
-    r.n.show('コピーしました');
-    r.n.show('取り込んでいます…'); // 進行中は前の知らせを置き換える
-    expect(r.n.noticeLine(), '進行中が前の知らせを置き換えていない').toBe('');
-    r.n.show('もう 1 つの結果');
-    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS);
-    expect(r.n.noticeLine()).toBe('');
-    expect(r.n.progressLine(), '結果の時計が進行中まで消した').toBe('取り込んでいます…');
+    r.n.show('可搬 HTML を書き出しています…');
+    expect(r.n.progressLine()).toBe('可搬 HTML を書き出しています…'); // 前提(対照群)
+    r.n.show('書き出しました', opts);
+    expect(r.n.progressLine(), '終わりを告げる知らせが来ても進行中が居座った').toBe('');
+    expect(r.n.noticeLine()).toBe('書き出しました');
   });
 
-  it('🔴 進行中が前の結果を置き換えたら、その結果の時計は止まる(後で何も消さない)', () => {
+  /**
+   * 🔴 **進行中が始まっても、残るはずの知らせは消えない**(別の欄)。
+   * ⚠ 直す前は進行中の枝が `notice = ''` で消していた ── 「元に戻す」のボタンも注意も黙って消えた。
+   */
+  it('🔴 「移動を元に戻す」が出ている間に進行中が来ても、知らせもボタンも残る', () => {
+    const r = rig();
+    r.setAction(true);
+    r.n.show('塊を動かしました');
+    r.n.show('書き出しています…');
+    expect(r.n.noticeLine(), '進行中が残るはずの知らせを消した').toBe('塊を動かしました');
+    expect(r.n.progressLine()).toBe('書き出しています…');
+    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 10);
+    expect(r.n.noticeLine(), '押す口を持つ知らせが時間で消えた').toBe('塊を動かしました');
+  });
+
+  it('🔴 注意の知らせも、進行中が始まっても消えない', () => {
+    const r = rig();
+    r.n.show('コピーできませんでした', { kind: 'caution' });
+    r.n.show('取り込んでいます…');
+    expect(r.n.noticeLine(), '進行中が注意を消した').toBe('コピーできませんでした');
+  });
+
+  it('🔴 進行中が始まっても、結果の知らせは自分の寿命で消え、進行中は残る', () => {
     const r = rig();
     r.n.show('コピーしました');
-    r.n.show('書き出しています…');
+    r.n.show('取り込んでいます…');
+    expect(r.n.noticeLine(), '進行中が前の知らせを置き換えた').toBe('コピーしました');
     vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS);
-    expect(r.expired, '置き換えられた結果の時計が鳴った').toEqual([]);
+    expect(r.n.noticeLine()).toBe('');
+    expect(r.expired, '結果の時計が止められた').toEqual(['コピーしました']);
+    expect(r.n.progressLine(), '結果の時計が進行中まで消した').toBe('取り込んでいます…');
   });
 
   it('🔴 終わりの合図は何も進行中でなくても害が無い', () => {

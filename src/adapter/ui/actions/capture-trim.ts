@@ -180,7 +180,7 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
          * ⚠ `SYS_BOOTED` の枝は集め直すが、あれが飛ぶのは**別タブが書いたとき**である。
          */
         deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
-        finished = true;
+        finished = true; // ⚠ 次の「切り出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
         deps.notify(`切り出しました:「${name}」(${elapsedText(cut.durationMs)})`);
       } catch (e: unknown) {
         fail(`切り出せませんでした(${String(e)})`);

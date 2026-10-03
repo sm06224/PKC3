@@ -129,7 +129,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
        * 🔴 **進行中の字を出している間だけ true**(#1017 C5)。⚠ 直す前は、音を読めなかった・
        *   メモリが足りなかった等の失敗で「文字にしています…」が画面下に**残った**。
        *   失敗の出口は多いので、個々の枝ではなく **`finally` で 1 度だけ**消す。
-       *   進行中のあとに言う字(結果・預かった)は `say` を通す ── それが進行中の字を置き換える。
+       *   進行中のあとに言う字(結果・預かった)は `say` を通す ── 結果の知らせが進行中の欄を空にする
+       *   (`status-lifetime.ts`。結果は進行中の終わりでもある)。
        */
       let progressShown = false;
       const say = (text: string): void => {
