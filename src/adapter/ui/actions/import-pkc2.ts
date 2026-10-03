@@ -730,7 +730,7 @@ export async function importPkc2File(
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);
-    progressShown = false; // ⚠ 次の「取込完了」が進行中の字を置き換える
+    progressShown = false; // ⚠ 次の「取込完了」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)

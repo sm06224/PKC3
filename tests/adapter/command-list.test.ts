@@ -509,6 +509,31 @@ describe('最近使った操作(`>` だけのとき)', () => {
     expect(orderOf(root).includes('no-such-operation')).toBe(false);
   });
 
+  /**
+   * 🔴 **断られた回は憶えない**(着地後レビューの変異 B2)。
+   * ⚠ `onDone` の契約(済んだときだけ呼ぶ)の test はあるが、**binder の押しから記録まで**は通っていなかった ──
+   *   押した行が実行を断ったとき(描いた後に状態が動いて押せなくなった回)に `appRecentCommands.push` が
+   *   `onDone` の外へ出ても気づけない。押せない行は `disabled` なので、**描いた後に状態が動いた形**を
+   *   `disabled` を外して作る(対照:押せる行の実行は憶える)。
+   */
+  it('🔴 実行を断られた行は、押しても憶えず、欄の `>` も残す(対照:押せる行は憶える)', async () => {
+    const { root } = setup();
+    type(root, '>ルビ');
+    const refused = rowOf(root, 'format-ruby');
+    expect(refused, '前提が崩れている(行が無い)').toBeDefined();
+    expect(refused!.disabled, '前提が崩れている(押せる行だった)').toBe(true);
+    refused!.disabled = false; // 描いた後に状態が動いた形
+    refused!.click();
+    await tick();
+    expect(appRecentCommands.list(), '断られたのに憶えた').toEqual([]);
+    expect(field(root).value, '断られたのに欄が空に戻った').toBe('>ルビ');
+    // 対照:押せる行は憶える(= 憶える道そのものは生きている)
+    type(root, '>集計');
+    rowOf(root, 'view-query')!.click();
+    await tick();
+    expect(appRecentCommands.list()).toEqual(['view-query']);
+  });
+
   it('🔴 `>` だけの Enter は、最近使った操作が先頭にあっても何もしない(打った覚えのない実行をしない)', async () => {
     const { root, sent } = setup();
     appRecentCommands.push('view-query');

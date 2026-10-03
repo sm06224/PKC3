@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { exportPortable, type PortableExportDeps } from '../../src/adapter/ui/actions/export-portable';
+import { createStatusNotices } from '../../src/adapter/ui/render/status-lifetime';
 import { parseBundleTag } from '../../src/features/portable/bundle';
 
 const TEMPLATE =
@@ -207,6 +208,33 @@ describe('進行中の字の後始末(#1017 C5)', () => {
     await exportPortable(d, dp);
     expect(dp.said.at(-1)).toContain('書き出しました');
     expect(dp.said, '成功なのに消す字を撃った').not.toContain('');
+  });
+
+  /**
+   * 🔴 **成功の枝は消す字を撃たない ── それでも「…しています…」が居座らない**(#1305 の着地後レビュー)。
+   * ⚠ 上の「対照群」は出す側が撃たないことしか見ない。ここは**本物の知らせの置き場**
+   *   (`createStatusNotices`)を出す側の `notify` へ繋ぎ、**画面に残る進行中の欄**まで通す。
+   *   直す前は成功しても `progressLine()` が「…しています…」のまま残った。
+   */
+  it('🔴 成功したら、結果の知らせが出た時点で進行中の欄は空(実物の置き場を通す)', async () => {
+    const { d } = booted();
+    const sink = createStatusNotices({
+      post: () => {},
+      paint: () => {},
+      paintActions: () => false,
+      expire: () => {},
+    });
+    const seen: string[] = [];
+    const dp = deps({
+      notify: (m) => {
+        sink.show(m);
+        seen.push(sink.progressLine());
+      },
+    });
+    expect(await exportPortable(d, dp)).toBe(0);
+    expect(seen[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('書き出しています…');
+    expect(sink.noticeLine()).toContain('書き出しました');
+    expect(sink.progressLine(), '成功したのに「…しています…」が居座った').toBe('');
   });
 
   it('🔴 出す前の断り(配られた 1 枚の中)は、消す字も撃たない(別の知らせを巻き込まない)', async () => {

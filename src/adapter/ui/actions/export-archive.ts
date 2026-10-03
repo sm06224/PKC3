@@ -443,7 +443,7 @@ export async function exportArchive(
     deps.download(name, out.blob);
     const notes = [...extraWarnings, ...out.warnings];
     deps.report(notes);
-    progressShown = false; // ⚠ 次の「書き出しました」が進行中の字を置き換える
+    progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     deps.notify?.(
       notes.length > 0
         ? `書き出しました: ${detail} ⚠ 注意 ${notes.length} 件`
@@ -772,7 +772,7 @@ async function exportEntryOffice(
       'slides' in built.counts
         ? `${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚`
         : `${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚`;
-    progressShown = false;
+    progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(結果は進行中の終わりでもある)
     deps.notify?.(`${target.app} で書き出しました(${how})`);
     return true;
   } catch (e) {

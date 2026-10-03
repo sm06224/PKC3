@@ -64,6 +64,31 @@ describe('最近使った操作の置き場(#274)', () => {
     expect(store.list(), '消したのに控えが残っている').toEqual([]);
   });
 
+  /**
+   * 🔴 **保存は在るが、書込だけ失敗する端末**(容量いっぱい / 私用ウィンドウ)。
+   * ⚠ 上の `null` の test は**この枝を通らない**(`storage === null` で先に返る)── 実際の口
+   *   (`browserStorage.set`)は投げずに**黙って捨てる**ので、保存は空のまま・控えだけが積まれる。
+   *   直す前は `list()` が保存の空を返し、**積んだ操作が 1 度も出なかった**。
+   * 🔑 偽の保存は書込を**捨てる**(実物と同じ意味論。投げる偽物だと push ごと落ちて別の主張になる)。
+   */
+  it('🔴 書込だけ失敗する保存でも、積んだ操作がその session の中で読める', () => {
+    const dropped: RecentCommandsStorage = { get: () => null, set: () => {}, remove: () => {} };
+    const store = new RecentCommandsStore(dropped);
+    store.push('a');
+    store.push('b');
+    expect(store.list(), '書込が失敗した回の控えが読まれていない').toEqual(['b', 'a']);
+    store.clear();
+    expect(store.list(), '消したのに控えが残っている').toEqual([]);
+  });
+
+  it('🔴 保存に 1 件でも在れば保存が正(別のタブの書込が控えに負けない。対照群)', () => {
+    const s = fake();
+    const store = new RecentCommandsStore(s);
+    store.push('mine');
+    s.set(KEY, JSON.stringify(['other']));
+    expect(store.list()).toEqual(['other']);
+  });
+
   it('🔴 上限 5 ・同じ操作は 1 つ', () => {
     const s = fake();
     const store = new RecentCommandsStore(s);

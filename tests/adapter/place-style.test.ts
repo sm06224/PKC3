@@ -20,7 +20,7 @@ import { applyPlaceLayout } from '../../src/adapter/ui/render/place-board';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { blocksFor, decl, stripComments, withoutMedia } from '../helpers/css-blocks';
+import { blocksFor, decl, mediaBlock, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const MENU = '[data-pkc-region="context-menu"]';
 /** 色の変数 3 つ。⚠ `--pkc-place` の前方一致で見ない ── 位置の変数 `--pkc-place-x`(#529 Q3)は色ではない。 */
@@ -136,6 +136,23 @@ describe('描画 ── 本文の札が CSS 変数として置かれる', () => 
     expect(Number(hit.style.getPropertyValue('--pkc-hit-width'))).toBeGreaterThanOrEqual(12);
   });
 
+  /**
+   * 🔴 **当たりの太さの下限と余白**(着地後レビューの変異 A: `Math.max(12, r.width + 8)`)。
+   * ⚠ 上の `width=4` だけでは `12` も `+8` も区別できない(4 + 8 = 12 = 下限)。
+   *   細い線(1)は**下限 12**で、いちばん太い線(16)は**見える線 + 8 = 24**(見える線より太い)。
+   */
+  it.each([
+    [1, 12],
+    [16, 24],
+  ])('🔴 width=%i の線の当たりの太さは %i(細くても 12 以上 / 太くても見える線より太い)', (w, hitW) => {
+    const body = BOARD.replace('to=b:left}', `to=b:left width=${w}}`);
+    const { host } = rig(body);
+    const hit = host.querySelector<SVGElement>('[data-pkc-field="place-line-hits"] path')!;
+    const got = Number(hit.style.getPropertyValue('--pkc-hit-width'));
+    expect(got).toBe(hitW);
+    expect(got, '当たりが見える線より細い').toBeGreaterThan(w);
+  });
+
   it('🔴 色も太さも無い線には 1 つも置かれない(今までと同じ)', () => {
     const { host } = rig(BOARD);
     const path = host.querySelector<SVGElement>('[data-pkc-field="place-lines"] path')!;
@@ -247,6 +264,45 @@ describe('付箋の右クリック ── 色…', () => {
     expect(p.value).toBe('#ffe08a');
     fire(p, 'change'); // 値は元のまま
     expect(asks, '同じ色なのに書いた').toHaveLength(0);
+  });
+
+  /**
+   * 🔴 **白い付箋・灰色の枠が付けられた**(着地後レビュー)。`<input type="color">` は値が**開いたときから
+   * 変わらなければ `change` を撃たない**(仕様)── 初めの色が本物の白 / 灰色だと、その色を選んでも何も起きない。
+   * ⚠ happy-dom は窓を開かないので「選んだら change が来ない」は**再現できない**。守れるのは
+   *   「初めの色が、user が選びうる白 / 灰色と**値で違う**」(= 選べば値が変わる)ことと、
+   *   その白 / 灰色が**本文へ書かれる**こと。
+   */
+  it('🔴 色が無い付箋の窓の初めの色は、白(#ffffff)ではない ── 白を選んでも値が変わり、本文へ入る', () => {
+    const { root, host, asks } = rig(BOARD);
+    rightClick(host.querySelector('.pkc-place')!);
+    items(root).find((b) => b.textContent === '色…')!.click();
+    const p = pick()!;
+    expect(p.value, '初めの色が本物の白だと、白を選んでも change が来ない').not.toBe('#ffffff');
+    expect(p.value, '見た目が白から離れた').toBe('#fffffe');
+    p.value = '#ffffff';
+    fire(p, 'change');
+    expect(rewriteOf(asks, 0)).toMatchObject({ style: { fill: '#ffffff' } });
+    expect(applyBodyRewrite(BOARD, rewriteOf(asks, 0))!.split('\n')[0]).toContain('fill=#ffffff');
+  });
+
+  it('🔴 色が無い付箋の「枠の色…」も、灰色(#808080)を選べば値が変わり、本文へ入る', () => {
+    const { root, host, asks } = rig(BOARD);
+    rightClick(host.querySelector('.pkc-place')!);
+    items(root).find((b) => b.textContent === '枠の色…')!.click();
+    const p = pick()!;
+    expect(p.value, '初めの色が本物の灰色だと、灰色を選んでも change が来ない').not.toBe('#808080');
+    expect(p.value).toBe('#7f7f7f');
+    p.value = '#808080';
+    fire(p, 'change');
+    expect(applyBodyRewrite(BOARD, rewriteOf(asks, 0))!.split('\n')[0]).toContain('stroke=#808080');
+  });
+
+  it('🔴 色が無い線の窓の初めの色も、灰色(#808080)ではない', () => {
+    const { root, host } = rig(BOARD);
+    rightClick(host.querySelector('[data-pkc-field="place-line-hits"] path')!);
+    items(root).find((b) => b.textContent === '色…')!.click();
+    expect(pick()!.value).not.toBe('#808080');
   });
 
   it('🔴 「色を外す」を押すと fill= / stroke= が消え、元の行へ戻る(片道にしない)', () => {
@@ -385,6 +441,47 @@ describe('色の受け皿(app.css)', () => {
     expect(b).toMatch(decl('background', 'var\\(--pkc-place-fill, var\\(--surface\\)\\)'));
     expect(b).toMatch(decl('border', '1px solid var\\(--pkc-place-stroke, var\\(--border\\)\\)'));
     expect(b).toMatch(decl('color', 'var\\(--pkc-place-ink, inherit\\)'));
+  });
+
+  /**
+   * 🔴 **塗りを付けた付箋では、題名の帯・注記の字も塗りの上の字(`-ink`)に追従する**(着地後レビュー)。
+   * ⚠ 直す前は `color: var(--fg)` / `var(--muted)` 固定で、暗いテーマ × 明るい塗りで題名が明るい字のまま読めなかった。
+   * 🔑 第 2 引数(既定)は今までの色のまま ── 色の無い付箋の計算後の色は 1 ドットも変わらない(対照群は smoke)。
+   */
+  it('🔴 題名の帯(place-card)の字は `-ink` に追従し、既定は `--fg`', () => {
+    const b = one(".pkc-place > [data-pkc-field='place-card']");
+    expect(b).toMatch(decl('color', 'var\\(--pkc-place-ink, var\\(--fg\\)\\)'));
+  });
+
+  it.each(['place-limit-note', 'place-body-skip', 'place-body-link', 'place-body-more'])(
+    '🔴 %s の字は `-ink` に追従し、既定は `--muted`(素の `--muted` の宣言が残っていない)',
+    (field) => {
+      const sel = `[data-pkc-field='${field}']`;
+      const withColor = blocksFor(APP, sel).filter((b) => /(^|[;\s])color\s*:/.test(b));
+      expect(withColor.length, `${sel} の字の色の宣言が見つからない`).toBeGreaterThan(0);
+      for (const b of withColor) {
+        expect(b).toMatch(decl('color', 'var\\(--pkc-place-ink, var\\(--muted\\)\\)'));
+      }
+    },
+  );
+
+  /**
+   * 🔴 **印刷でも塗りを刷る**(着地後レビュー)。ブラウザの既定は印刷で背景を**刷らない** ──
+   * 暗い塗りの付箋は、塗りの上の白い字だけが白紙に残って読めない。塗りを落として字を既定へ戻す案は採らない
+   * (色で仲間分けした図面の意味が、紙で消える)。
+   * ⚠ 実ブラウザの印刷は見られない ── 守れるのは**規則が `@media print` の中に在る**ことだけ(紙の見え方は未確認)。
+   * ⚠ 画面の規則(`withoutMedia` 済み)には**入れない**(画面の付箋に効かせる理由が無い)。
+   */
+  it('🔴 `@media print` の中に、付箋の `print-color-adjust: exact`(接頭辞つきも)が在る', () => {
+    const print = mediaBlock(stripComments(readFileSync('src/styles/app.css', 'utf-8')), 'print').body;
+    const hit = blocksFor(print, '.pkc-md-rendered .pkc-format-block.pkc-place');
+    expect(hit.length, '印刷の節に付箋の規則が無い').toBe(1);
+    expect(hit[0]).toMatch(decl('print-color-adjust', 'exact'));
+    expect(hit[0]).toMatch(decl('-webkit-print-color-adjust', 'exact'));
+    expect(
+      blocksFor(APP, '.pkc-md-rendered .pkc-format-block.pkc-place').some((b) => /print-color-adjust/.test(b)),
+      '画面の規則へ入っている',
+    ).toBe(false);
   });
 
   it('🔴 角丸・丸は層(::before)が、ひし形・矢印は 2 層(外 = 枠 / 内 = 塗り)が変数から', () => {

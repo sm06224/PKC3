@@ -88,7 +88,11 @@ export class RecentCommandsStore {
   list(): readonly string[] {
     // ⚠ **`?.` で書かない**(上の戒め)── `null` のときは控えを返す
     if (this.storage === null) return this.fallback;
-    return parse(this.storage.get(KEY));
+    const stored = parse(this.storage.get(KEY));
+    // 🔴 **保存は在るが書込だけ失敗する端末**(`setItem` が投げる = 容量・私用ウィンドウ)── 保存は
+    //   空のままなので、控えが非空ならそちらを返す。⚠ 返さないと、積んだ物が**1 度も出ない**。
+    //   ⚠ 保存に 1 件でも在れば保存を正とする(別のタブが積んだ物を拾う ── 上の「読むたびに保存を引く」)。
+    return stored.length === 0 && this.fallback.length > 0 ? this.fallback : stored;
   }
 
   /** 実行した操作の id を憶える。**新しい順**の一覧を返す。⚠ 変わらないとき(先頭と同じ)は書かない。 */

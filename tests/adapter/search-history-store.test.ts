@@ -65,6 +65,30 @@ describe('最近探した語の置き場(#1172)', () => {
     expect(store.list(), '消したのに控えが残っている').toEqual([]);
   });
 
+  /**
+   * 🔴 **保存は在るが、書込だけ失敗する端末**(容量いっぱい / 私用ウィンドウ)。
+   * ⚠ 上の `null` の test は**この枝を通らない**。実際の口は投げずに**黙って捨てる**ので、
+   *   保存は空のまま・控えだけが積まれる(直す前は候補が 1 度も出なかった)。
+   * 🔑 偽の保存は書込を**捨てる**(実物と同じ意味論)。
+   */
+  it('🔴 書込だけ失敗する保存でも、積んだ語がその session の中で読める', () => {
+    const dropped: SearchHistoryStorage = { get: () => null, set: () => {}, remove: () => {} };
+    const store = new SearchHistoryStore(dropped);
+    store.push('あいう');
+    store.push('かきく');
+    expect(store.list(), '書込が失敗した回の控えが読まれていない').toEqual(['かきく', 'あいう']);
+    store.clear();
+    expect(store.list(), '消したのに控えが残っている').toEqual([]);
+  });
+
+  it('🔴 保存に 1 件でも在れば保存が正(別のタブの書込が控えに負けない。対照群)', () => {
+    const s = fake();
+    const store = new SearchHistoryStore(s);
+    store.push('あいう');
+    s.set('pkc3.search-history', JSON.stringify(['other']));
+    expect(store.list()).toEqual(['other']);
+  });
+
   it('🔴 短すぎる語・先頭と同じ語は書かない(毎回の書込を作らない)', () => {
     const s = fake();
     const store = new SearchHistoryStore(s);
