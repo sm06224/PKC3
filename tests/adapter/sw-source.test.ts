@@ -730,6 +730,29 @@ describe('fetch ── 経路ごとの戦略', () => {
     expect(await h.fetch(url, { network: 'fail', destination })).toBe(`net:${url}`);
   });
 
+  /**
+   * 🔴 **DuckDB の本体と拡張(`duckdb/`)も precache に無いが、初めて取れた後は電波なしでも返る**(#682 段③c)。
+   *
+   * ⚠ `DUCKDB_PRECACHE_SKIP` が precache から外している(35MB を起動のたびに配らない)── だから 2 回目以降
+   *   オフラインで引けるかは、**この「hash 無しは network-first で cache に落ちる」に乗っているか**だけで決まる。
+   *   拡張 3 つは worker の中から HTTP GET される(`duckdb-open.ts` の `SET custom_extension_repository`)──
+   *   worker からの fetch も同じ scope の SW を通る。
+   * ⚠ ここで言えるのは **SW の層が応答を控えること**まで。DuckDB 側が Range(206)で取る経路は cache に入らない
+   *   (下の「206 は cache に入れない」)── 実機で「2 回目オフラインで INSTALL が通る」は別に測る。
+   */
+  it.each([
+    ['https://pkc3.example/duckdb/duckdb-eh.wasm', ''],
+    ['https://pkc3.example/duckdb/duckdb-browser-eh.worker.js', 'worker'],
+    ['https://pkc3.example/duckdb/ext/v1.5.4/wasm_eh/parquet.duckdb_extension.wasm', ''],
+    ['https://pkc3.example/duckdb/ext/v1.5.4/wasm_eh/json.duckdb_extension.wasm', ''],
+    ['https://pkc3.example/duckdb/ext/v1.5.4/wasm_eh/sqlite_scanner.duckdb_extension.wasm', ''],
+  ])('🔴 duckdb/ は precache に無いが、取れた後はオフラインでも返る: %s', async (url, destination) => {
+    const h = await seeded();
+    await expect(h.fetch(url, { network: 'fail', destination })).rejects.toThrow('offline');
+    expect(await h.fetch(url, { destination })).toBe(`net:${url}`);
+    expect(await h.fetch(url, { network: 'fail', destination })).toBe(`net:${url}`);
+  });
+
   it('🔴 206(Partial)は cache に入れない(Cache.put が投げる)', async () => {
     // ⚠ `res.ok` は 206 でも true ── `status === 200` で絞らないと
     // `TypeError: Partial response is unsupported` が SW の unhandled rejection になる
