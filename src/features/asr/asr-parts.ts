@@ -53,7 +53,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
   {
     id: 'light',
     label: '軽い',
-    modelId: 'Xenova/whisper-base',
+    modelId: 'openai/whisper-base',
     modelBytes: 81_270_976,
     secondsPerMinute: 25,
     needMemoryGb: 4,
@@ -61,7 +61,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
   {
     id: 'accurate',
     label: '当たりやすい',
-    modelId: 'Xenova/whisper-small',
+    modelId: 'openai/whisper-small',
     modelBytes: 253_468_391,
     secondsPerMinute: 60,
     needMemoryGb: 8,

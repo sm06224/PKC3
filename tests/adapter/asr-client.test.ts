@@ -46,7 +46,7 @@ class FakeWorker {
 
 const job = (): AsrJob => ({
   files: [['a', new Blob(['x'])]],
-  modelId: 'Xenova/whisper-base',
+  modelId: 'openai/whisper-base',
   language: 'japanese',
   pcm: new Float32Array([0.1, 0.2, 0.3]),
 });

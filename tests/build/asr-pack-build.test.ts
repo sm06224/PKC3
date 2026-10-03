@@ -66,7 +66,7 @@ function tmp(): string {
 
 const MIT_TEXT = 'MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\n';
 const APACHE_TEXT = '                                 Apache License\n                           Version 2.0, January 2004\n';
-const MODEL_DIR = 'models/Xenova/whisper-base';
+const MODEL_DIR = 'models/openai/whisper-base';
 const ONNX = `${MODEL_DIR}/onnx/encoder_model_quantized.onnx`;
 
 function put(root: string, path: string, content: string | number): void {
@@ -127,8 +127,8 @@ describe('make-pack ── 目録を作る', () => {
   it('2 択を両方置けば、目録の light / accurate に**別々に**入る(model ごとの dir で振り分ける)', async () => {
     const root = fakePack();
     // small の下限は 253,468,391 の半分 = 126,734,195 ── 超える疎な file
-    put(root, 'models/Xenova/whisper-small/onnx/decoder_model_merged_quantized.onnx', 127_000_000);
-    put(root, 'models/Xenova/whisper-small/config.json', '{"small":true}');
+    put(root, 'models/openai/whisper-small/onnx/decoder_model_merged_quantized.onnx', 127_000_000);
+    put(root, 'models/openai/whisper-small/config.json', '{"small":true}');
     await make({ outDir: root, now: NOW });
     const r = readAsrPack(readFileSync(join(root, 'pack.json'), 'utf8'));
     expect(r.ok).toBe(true);
@@ -136,8 +136,8 @@ describe('make-pack ── 目録を作る', () => {
     expect(Object.keys(r.pack.models).sort()).toEqual(['accurate', 'light']);
     expect(r.pack.models.light?.map((f) => f.path)).toEqual([`${MODEL_DIR}/config.json`, ONNX]);
     expect(r.pack.models.accurate?.map((f) => f.path)).toEqual([
-      'models/Xenova/whisper-small/config.json',
-      'models/Xenova/whisper-small/onnx/decoder_model_merged_quantized.onnx',
+      'models/openai/whisper-small/config.json',
+      'models/openai/whisper-small/onnx/decoder_model_merged_quantized.onnx',
     ]);
     expect((await check({ outDir: root })).problems).toEqual([]);
   });
@@ -156,7 +156,7 @@ describe('make-pack ── 目録を作る', () => {
     expect(pb.build['builtAt']).not.toBe(pa.build['builtAt']);
     // 既知の値(算法の取り違え ── path を落とす / 先頭 12 桁でなくなる ── を殺す錨)
     expect(pa.version).toMatch(/^[0-9a-f]{12}$/);
-    expect(pa.version).toBe('70645450eddb');
+    expect(pa.version).toBe('bfc4d0451a19'); // 2026-10-03: models/Xenova/… → models/openai/… へ path が動いたので値も動いた(算法は同じ)
 
     // 1 byte 違う(大きさも同じ)
     const c = fakePack();
@@ -233,13 +233,13 @@ describe('check-pack ── 門ごとに別の文言で落ちる', () => {
       name: '0 byte の file',
       gate: ['zero-byte'],
       spoil: (r) => writeFileSync(join(r, `${MODEL_DIR}/config.json`), ''),
-      text: '0 byte の file があります: models/Xenova/whisper-base/config.json',
+      text: '0 byte の file があります: models/openai/whisper-base/config.json',
     },
     {
       name: '目録に無い file',
       gate: ['unlisted'],
       spoil: (r) => put(r, `${MODEL_DIR}/tokenizer.json`, '{}'),
-      text: '目録に載っていない file があります: models/Xenova/whisper-base/tokenizer.json',
+      text: '目録に載っていない file があります: models/openai/whisper-base/tokenizer.json',
     },
     {
       name: '目録に無い file(runtime の下)',
@@ -251,19 +251,19 @@ describe('check-pack ── 門ごとに別の文言で落ちる', () => {
       name: '実在しない file',
       gate: ['missing'],
       spoil: (r) => rmSync(join(r, `${MODEL_DIR}/config.json`)),
-      text: '目録が指す file が実在しません: models/Xenova/whisper-base/config.json',
+      text: '目録が指す file が実在しません: models/openai/whisper-base/config.json',
     },
     {
       name: '大きさが違う(0 ではない)',
       gate: ['sha256', 'size', 'version'],
       spoil: (r) => writeFileSync(join(r, `${MODEL_DIR}/config.json`), '{}'),
-      text: 'models/Xenova/whisper-base/config.json の大きさが目録と合いません(目録 14 / 実 2)',
+      text: 'models/openai/whisper-base/config.json の大きさが目録と合いません(目録 14 / 実 2)',
     },
     {
       name: '大きさは同じで中身が違う',
       gate: ['sha256', 'version'],
       spoil: (r) => writeFileSync(join(r, `${MODEL_DIR}/config.json`), '{"dummy":fals}'),
-      text: 'models/Xenova/whisper-base/config.json の sha256 が目録と合いません',
+      text: 'models/openai/whisper-base/config.json の sha256 が目録と合いません',
     },
     {
       name: 'version だけ内容と合わない',

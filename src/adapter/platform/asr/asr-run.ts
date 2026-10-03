@@ -42,7 +42,7 @@ export const ASR_LOCAL_MODEL_PATH = `${ASR_FETCH_PREFIX}models/`;
 export interface AsrJob {
   /** pack 内の相対 path → Blob。 */
   readonly files: ReadonlyArray<readonly [string, Blob]>;
-  /** 例: `Xenova/whisper-base`。 */
+  /** 例: `openai/whisper-base`。 */
   readonly modelId: string;
   /** whisper の言語名。`null` = 自動判定。 */
   readonly language: string | null;
