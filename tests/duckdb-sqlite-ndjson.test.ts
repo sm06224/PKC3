@@ -28,6 +28,16 @@ import { DuckDbRunner } from '../src/adapter/platform/duckdb/duckdb-runner';
 import type { DuckDbHandle } from '../src/adapter/platform/duckdb/duckdb-lease';
 import type { DuckDbRaw } from '../src/features/query/duckdb-rows';
 import { duckDbReadableSourceOf } from '../src/features/query/sql-guest-source';
+import {
+  SCHEMA_COLUMNS_SQL,
+  SCHEMA_FK_SQL,
+  countsSql,
+  renderSchemaDigest,
+  schemaModel,
+  schemaTableNames,
+  type Grid,
+} from '../src/features/query/schema-digest';
+import { buildParquet } from './features/parquet-fixture';
 import type {
   ResultMap,
   StorageRequest,
@@ -87,6 +97,9 @@ async function openReal(): Promise<DuckDbHandle> {
   conn.query(`SET custom_extension_repository='http://127.0.0.1:${String(port)}'`);
   conn.query('INSTALL json');
   conn.query('LOAD json');
+  // 🔴 構造を採る test(#918)が `.parquet` を持ち込む ── 製品も同梱の拡張を全部読む
+  conn.query('INSTALL parquet');
+  conn.query('LOAD parquet');
   const files = new Set<string>();
   return {
     put: (name, bytes) => {
@@ -202,13 +215,17 @@ const PACK = JSON.stringify({
 });
 
 /** 製品と同じ `DuckDbRunner`(器を起こす所と、storage worker の口だけを差す)。 */
+/** 🔴 storage worker へ「`.sqlite` を写して」と頼んだ回数(#918:構造を採った後の SQL が差し込み直さないことを見る)。 */
+let exportCalls = 0;
 function makeRunner(maxTableBytes?: number): DuckDbRunner {
   return new DuckDbRunner({
     fetchText: () => Promise.resolve(PACK),
     open: () => openReal(),
     baseUrl: 'https://example.test/app/',
-    exportSqlite: (img, max) =>
-      request({ op: 'exportSqliteForDuckDb', image: img, maxTableBytes: maxTableBytes ?? max }),
+    exportSqlite: (img, max) => {
+      exportCalls += 1;
+      return request({ op: 'exportSqliteForDuckDb', image: img, maxTableBytes: maxTableBytes ?? max });
+    },
   });
 }
 
@@ -392,6 +409,218 @@ describe('🔴 .sqlite を DuckDB で引く(実物の engine / 実物の storage
       expect(msg, 'DuckDB の断り(表が無い)が消えている').toMatch(/大/);
       expect(msg, '理由が添わない').toContain('大 は DuckDB へ写せませんでした');
       expect(msg).toContain('内蔵の sqlite');
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+});
+
+/**
+ * 🔴 **DuckDB の器の中の構造 ── 構造ノート・つながり図が、DuckDB で引く相手でも出る**(#918。
+ * 🟣 Gemini 裁定 2026-10-02 = A)。
+ *
+ * ⚠ 字を pin する test は「その SQL が出ていること」しか言えない ── ここは**実物の DuckDB に打たせ、
+ *   描く側(`schemaModel` / `renderSchemaDigest`)が読む形になっているか**を見る。
+ * 🔑 いちばん強い主張は **parity**:**同じ `.sqlite` を、内蔵の sqlite の道と DuckDB の道で採って
+ *   markdown が 1 字も違わない**(描く側は触っていない ── 入力の形が同じであることの検査)。
+ */
+describe('🔴 DuckDB の器の構造(#918)', () => {
+  /** 内蔵の sqlite の道(実物の storage worker に客として開かせ、構造を採る 3 本を打つ)。 */
+  const sqliteSide = async (img: Uint8Array, guest: string) => {
+    await request({ op: 'openSqlGuest', image: img, guest });
+    try {
+      const ask = async (sql: string): Promise<Grid> => {
+        const r = await request({
+          op: 'runReadOnlySql',
+          sql,
+          maxRows: 10_000,
+          maxSteps: 1_000_000,
+          maxMs: 60_000,
+          guest,
+        });
+        return { columns: r.columns, rows: r.rows };
+      };
+      const columns = await ask(SCHEMA_COLUMNS_SQL);
+      const fks = await ask(SCHEMA_FK_SQL);
+      const sql = countsSql(schemaTableNames(columns));
+      return { columns, fks, counts: sql === null ? null : await ask(sql) };
+    } finally {
+      await request({ op: 'closeSqlGuest', guest });
+    }
+  };
+
+  /** 外部キー・主キー(複合も)・NOT NULL・型なしの列・日本語の名前、を一通り持つ `.sqlite`。 */
+  const richImage = () =>
+    image((db) => {
+      run(db, 'CREATE TABLE 客 (id INTEGER PRIMARY KEY, 名前 TEXT NOT NULL, 備考)');
+      run(db, 'CREATE TABLE 売上 (id INTEGER PRIMARY KEY, 客id INTEGER REFERENCES 客(id), 金額 REAL)');
+      run(
+        db,
+        'CREATE TABLE 明細 (売上id INTEGER, 行 INTEGER, 品名 TEXT, PRIMARY KEY (売上id, 行), FOREIGN KEY (売上id) REFERENCES 売上(id))',
+      );
+      run(db, 'CREATE TABLE 空 (a INTEGER)');
+      run(db, "INSERT INTO 客 VALUES (1, 'A', NULL), (2, 'B', 'x')");
+      run(db, 'INSERT INTO 売上 VALUES (10, 1, 1.5), (11, 2, 2.5), (12, 2, 3)');
+      run(db, "INSERT INTO 明細 VALUES (10, 1, 'りんご'), (10, 2, 'みかん')");
+    });
+
+  it('🔴 parity:同じ .sqlite を、内蔵の sqlite の道と DuckDB の道で採って、構造が 1 字も違わない', async () => {
+    const img = await richImage();
+    const expected = await sqliteSide(img, 'parity');
+    const runner = makeRunner();
+    try {
+      const got = await runner.schema([{ source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) }]);
+      const want = { source: '家計.sqlite', columns: expected.columns, fks: expected.fks, counts: expected.counts! };
+      const have = { source: '家計.sqlite', columns: got.columns, fks: got.fks, counts: got.counts! };
+      const a = schemaModel(want);
+      const b = schemaModel(have);
+      // 🔑 前提:比べる中身が空でない(空どうしの一致で緑にしない)
+      expect(a.tables.map((t) => t.name), '前提が崩れている(表が採れていない)').toEqual(['売上', '客', '明細', '空']);
+      expect(a.links.length, '前提が崩れている(外部キーが採れていない)').toBe(2);
+      expect(a.tables.find((t) => t.name === '明細')?.columns.filter((c) => c.primaryKey).length).toBe(2);
+      expect(a.tables.find((t) => t.name === '客')?.columns.find((c) => c.name === '備考')?.type).toBe('');
+      expect(b, '描く側へ渡る構造が、内蔵の sqlite の道と違う').toEqual(a);
+      expect(renderSchemaDigest(have), '構造ノートの字が違う').toBe(renderSchemaDigest(want));
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 .sqlite の外部キーが線になる(列ごと / 器の表そのものには外部キーを作らない)', async () => {
+    const img = await richImage();
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) }];
+    try {
+      const got = await runner.schema(sources);
+      expect(schemaModel({ source: 'x', columns: got.columns, fks: got.fks }).links).toEqual([
+        { from: '売上', fromColumn: '客id', to: '客', toColumn: 'id' },
+        { from: '明細', fromColumn: '売上id', to: '売上', toColumn: 'id' },
+      ]);
+      // ⚠ 器の表そのものには外部キーを作っていない(作ると、sqlite では通った行の INSERT が落ちる)
+      const inDb = await runner.run({
+        sql: "SELECT count(*) FROM duckdb_constraints() WHERE constraint_type = 'FOREIGN KEY'",
+        sources,
+      });
+      expect(inDb.rows).toEqual([[0]]);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 .parquet 1 件:列と型と行数が採れ、外部キーは 0 本(四角だけの図)', async () => {
+    const bytes = buildParquet([
+      { name: 'id', type: 'int32', values: [1, 2, 3] },
+      { name: '品名', type: 'utf8', values: ['a', 'b', 'c'] },
+    ]);
+    const runner = makeRunner();
+    try {
+      const got = await runner.schema([{ source: sqliteSource('p1', '売上.parquet'), readBytes: asFile(bytes) }]);
+      const m = schemaModel({ source: '売上.parquet', columns: got.columns, fks: got.fks, counts: got.counts! });
+      expect(m.tables).toEqual([
+        {
+          name: 'parquet',
+          kind: 'table',
+          rows: 3,
+          columns: [
+            { name: 'id', type: 'INTEGER', notNull: false, primaryKey: false },
+            { name: '品名', type: 'VARCHAR', notNull: false, primaryKey: false },
+          ],
+        },
+      ]);
+      expect(m.links, '持ち込んだ file に外部キーは無い').toEqual([]);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 2 件並べると表は「ファイル名_表名」/ .sqlite の外部キーの相手も同じ名前へ直る', async () => {
+    const img = await richImage();
+    const csv = 'id,在庫\n1,5\n2,7\n';
+    const runner = makeRunner();
+    try {
+      const got = await runner.schema([
+        { source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) },
+        { source: sqliteSource('l2', '在庫.csv'), readBytes: csvBytes(csv) },
+      ]);
+      const m = schemaModel({ source: 'x', columns: got.columns, fks: got.fks, counts: got.counts! });
+      expect(m.tables.map((t) => t.name).sort()).toEqual(
+        ['在庫', '家計_売上', '家計_客', '家計_明細', '家計_空'].sort(),
+      );
+      // 🔴 線の両端は、図に出ている四角の名前と同じ(元の名前のままだと、箱の無い線になる)
+      expect(m.links).toEqual([
+        { from: '家計_売上', fromColumn: '客id', to: '家計_客', toColumn: 'id' },
+        { from: '家計_明細', fromColumn: '売上id', to: '家計_売上', toColumn: 'id' },
+      ]);
+      const names = new Set(m.tables.map((t) => t.name));
+      for (const l of m.links) {
+        expect(names.has(l.from) && names.has(l.to), `箱の無い線: ${l.from} → ${l.to}`).toBe(true);
+      }
+      expect(m.tables.find((t) => t.name === '在庫')?.rows).toBe(2);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 器へ user が作った表の主キー / 外部キー / ビューも、duckdb_constraints() から採れる', async () => {
+    const sources = [{ source: sqliteSource('l1', '在庫.csv'), readBytes: csvBytes('id\n1\n') }];
+    const runner = makeRunner();
+    try {
+      await runner.run({ sql: 'CREATE TABLE p (id BIGINT PRIMARY KEY, n VARCHAR NOT NULL)', sources });
+      await runner.run({ sql: 'CREATE TABLE c (pid BIGINT, FOREIGN KEY (pid) REFERENCES p(id))', sources });
+      await runner.run({ sql: 'CREATE VIEW v AS SELECT * FROM p', sources });
+      const got = await runner.schema(sources);
+      const m = schemaModel({ source: 'x', columns: got.columns, fks: got.fks, counts: got.counts! });
+      expect(m.links).toEqual([{ from: 'c', fromColumn: 'pid', to: 'p', toColumn: 'id' }]);
+      const p = m.tables.find((t) => t.name === 'p');
+      expect(p?.columns.map((c) => [c.name, c.primaryKey, c.notNull])).toEqual([
+        ['id', true, true],
+        ['n', false, true],
+      ]);
+      const v = m.tables.find((t) => t.name === 'v');
+      expect(v?.kind, 'ビューが表として出ている').toBe('view');
+      expect(v?.rows, 'ビューを数えている(その場でビューが走る)').toBeNull();
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 写せなかった表は図に出さず、その表を指す線も出さない(箱の無い線を作らない)', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE 大 (id INTEGER PRIMARY KEY, t TEXT)');
+      run(db, 'BEGIN');
+      for (let i = 0; i < 200; i += 1) run(db, 'INSERT INTO 大 VALUES (?, ?)', [i, 'x'.repeat(200)]);
+      run(db, 'COMMIT');
+      run(db, 'CREATE TABLE 小 (id INTEGER, 大id INTEGER REFERENCES 大(id))');
+      run(db, 'INSERT INTO 小 VALUES (1, 1)');
+    });
+    const runner = makeRunner(4096);
+    try {
+      const got = await runner.schema([{ source: sqliteSource('l1', 'x.sqlite'), readBytes: asFile(img) }]);
+      const m = schemaModel({ source: 'x', columns: got.columns, fks: got.fks });
+      expect(m.tables.map((t) => t.name), '断った表が出ている').toEqual(['小']);
+      expect(m.links, '箱の無い線が出ている').toEqual([]);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  it('🔴 構造を採った後の SQL は器を作り直さない / 同時に飛んでも二重に差し込まない', async () => {
+    const img = await richImage();
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', '家計.sqlite'), readBytes: asFile(img) }];
+    try {
+      exportCalls = 0;
+      // 図を開いた直後に SQL を走らせる(同時)── 器へ触る仕事は 1 本ずつ通る
+      const [got, ran] = await Promise.all([
+        runner.schema(sources),
+        runner.run({ sql: 'SELECT count(*) FROM 客', sources }),
+      ]);
+      expect(got.columns.rows.length).toBeGreaterThan(0);
+      expect(ran.rows).toEqual([[2]]);
+      expect(exportCalls, '同じ相手の組なのに差し込み直している').toBe(1);
+      await runner.schema(sources);
+      await runner.run({ sql: 'SELECT 1', sources });
+      expect(exportCalls, '2 回目以降も差し込み直している').toBe(1);
     } finally {
       await runner.release();
     }

@@ -2107,32 +2107,44 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '.parquet へ戻せていない').toContainText('uriage.parquet を調べています');
 
   /**
-   * 🔴 **`.parquet` では「つながり図」も「構造をノートへ」も、理由を出して断る**
-   *   (#682 段④c。⚠ 着地前 smoke が「この 2 つは実ブラウザで 1 度も通っていない」と
-   *   指摘したので足した)。
+   * 🔴 **`.parquet` でも「つながり図」と「構造をノートへ」が出る**(#918。🟣 Gemini 裁定 2026-10-02 = A。
+   *   以前は #682 段④c で「まだ出せません」と断っていた)。
    *
-   * ⚠ 直す前は worker が **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と
-   *   返していた ── user は `.parquet` を選んだのに別の形式の話をされ、
-   *   **いまやったばかりの操作をもう一度やれ**と言われる。
-   * 🔑 **新しい起動は増やさない** ── この筋書きの続きで確かめる。
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「DuckDB の器から採る口へ頼んだ」までで、**実ブラウザの DuckDB が `duckdb_columns()` /
+   *   `duckdb_constraints()` に答え、外を塞いだ後の器で構造が採れる**ことは言えない。
+   * 🔴 そして **sqlite の worker へは聞きに行かない**(そこに `.parquet` は無い ── 聞くと
+   *   「取り込んだ .sqlite が開かれていません(先に選んでください)」と別の形式の話をされる)。
+   * 🔑 **新しい起動は増やさない** ── この筋書きの続きで確かめる(器は上で起こした物がそのまま使える)。
    */
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
   const erHost = page.locator('[data-pkc-region="sql-er"]');
-  await expect(erHost, '図に採れない理由が出ていない').toContainText('まだ出せません');
+  // 🔴 四角が出る(表の名前 `parquet` / 行数 3)── 持ち込んだ file に外部キーは無いので線は 0 本
+  const parquetBox = erHost.locator('[data-pkc-field="sql-er-table"][data-pkc-name="parquet"]');
+  await expect(parquetBox, 'DuckDB の器から採った四角が出ない').toBeVisible({ timeout: 60_000 });
+  await expect(parquetBox, '行数が出ていない').toContainText('3 行');
+  await expect(erHost, '断りの字が残っている').not.toContainText('まだ出せません');
   await expect(erHost, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
     '先に選んで',
   );
-  // ⚠ 「採っています」のまま止まっていないこと(永久に空の図を作らない)
   await expect(erHost, '採っています、のまま止まっている').not.toContainText('採っています');
+  await expect(erHost.locator('[data-pkc-field="sql-er-lines"] line'), '線が出ている(外部キーは無い)').toHaveCount(0);
+  // 🔴 列を押すと、打つ欄に SELECT が入る(図を見ながら組める)
+  // ⚠ 欄を**空にしてから**押す ── 打ちかけの字が在ると図は足さない(「いま打っている字は、この図からは足せません」)
+  await page.fill('[data-pkc-field="sql-input"]', '');
+  await clickReal(page, '[data-pkc-field="sql-er-table"][data-pkc-name="parquet"]');
+  await expect(page.locator('[data-pkc-field="sql-input"]'), '表を押しても SELECT が入らない').toHaveValue(
+    /select\s+\*\s+from\s+parquet/iu,
+  );
+  await clickReal(
+    page,
+    '[data-pkc-field="sql-er-column"][data-pkc-name="parquet"][data-pkc-col="id"]',
+  );
+  await expect(page.locator('[data-pkc-field="sql-input"]'), '列を押しても SELECT が入らない').toHaveValue(
+    /select\s+id\s+from\s+parquet/iu,
+  );
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
-
-  await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
-  await expect(note, '「構造をノートへ」が .sqlite の話で断っている').toContainText(
-    'まだ出せません',
-  );
-  await expect(note, '選んだばかりなのに「先に選んでください」と言っている').not.toContainText(
-    '先に選んで',
-  );
 
   /**
    * ⑤-b 🔴 **調べている最中にノートを押しても、SQL の面は残る**(#906。user 裁定 2026-09-14)。
@@ -2585,8 +2597,13 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   page.on('request', watchSqlite);
   try {
     const sqliteBytes = buildSqlite((db) => {
-      db.exec('CREATE TABLE 売上 (id INTEGER, 品名 TEXT, 記録 BLOB)');
-      db.exec("INSERT INTO 売上 VALUES (1, 'りんご', x'000102'), (2, 'みかん', NULL), (3, 'ぶどう', x'ff')");
+      // 🔴 外部キーが 1 本在る(#918:DuckDB の器の写しは外部キーを作らない ── 図の線は宣言のまま運ぶ)
+      db.exec('CREATE TABLE 客 (id INTEGER PRIMARY KEY, 名 TEXT)');
+      db.exec("INSERT INTO 客 VALUES (1, '佐藤')");
+      db.exec('CREATE TABLE 売上 (id INTEGER, 品名 TEXT, 記録 BLOB, 客id INTEGER REFERENCES 客(id))');
+      db.exec(
+        "INSERT INTO 売上 (id, 品名, 記録) VALUES (1, 'りんご', x'000102'), (2, 'みかん', NULL), (3, 'ぶどう', x'ff')",
+      );
       // 🔑 空の表も在る(列が残ることは unit が見る ── ここでは「写せない表が混ざっても引ける」を兼ねる)
       db.exec('CREATE TABLE 空 (a INTEGER)');
     });
@@ -2631,6 +2648,80 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     await clickReal(page, '[data-pkc-action="run-sql"]');
     await expect(sqlTable.locator('thead th'), '空の表の列が出ない').toHaveText(['a'], { timeout: 60_000 });
     await expect(sqlTable.locator('tbody td'), '空の表なのに行が出ている').toHaveCount(0);
+
+    /**
+     * ⑬ 🔴 **`.sqlite` を含めて 2 つ並べたとき、つながり図が DuckDB の器から出る**(#918。🟣 Gemini 裁定 2026-10-02 = A)。
+     *
+     * ## 🔑 ここでしか言えないこと
+     *
+     * ⚠ 1 件だけの `.sqlite` は、構造を**元の file から**内蔵の sqlite で採る(今までどおり)── DuckDB の器の
+     *   構造は **2 件以上並べたとき**にだけ通る。🔴 だから足して見る:
+     *   ①表の名前が **`ファイル名_表名`**(`kakei_売上`)で四角になる ②**`.sqlite` の外部キーが線になる**
+     *   (器の表には外部キーを作っていない ── storage worker が宣言のまま運んだ物を重ねている)
+     *   ③**図の列を押して SELECT を組み、走らせると引ける**(四角の名前 = 実際に引ける名前)。
+     * 🔑 **新しい起動は増やさない**(#820)── ⑫ の続き。⚠ 足すと器を作り直す(同じ相手の組でも読み直す)。
+     */
+    const addCsvValue = await addGroup
+      .locator('option', { hasText: 'uriage.csv' })
+      .first()
+      .getAttribute('value');
+    expect(addCsvValue, '足す口に uriage.csv が無い').toMatch(/^add:/u);
+    await source.selectOption({ value: addCsvValue ?? '' });
+    await expect(page.locator('[data-pkc-field="sql-extra"]'), '足した相手の行が出ない').toHaveCount(1);
+    await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+    const erMulti = page.locator('[data-pkc-region="sql-er"]');
+    for (const name of ['kakei_売上', 'kakei_客', 'kakei_空', 'uriage']) {
+      await expect(
+        erMulti.locator(`[data-pkc-field="sql-er-table"][data-pkc-name="${name}"]`),
+        `${name} の四角が出ない(DuckDB の器の構造が出ていない)`,
+      ).toBeVisible({ timeout: 60_000 });
+    }
+    await expect(erMulti, '断りの字が残っている').not.toContainText('まだ出せません');
+    await expect(erMulti.locator('[data-pkc-field="sql-er-lines"] line'), '.sqlite の外部キーが線になっていない').toHaveCount(1);
+    await expect(
+      erMulti.locator('[data-pkc-field="sql-er-link"]'),
+      '線の札に「どの列どうしか」が(器での名前で)書かれていない',
+    ).toHaveText('kakei_売上.客id → kakei_客.id');
+    // ⚠ 欄を空にしてから押す(打ちかけの字が在ると図は足さない)
+    await page.fill('[data-pkc-field="sql-input"]', '');
+    await clickReal(page, '[data-pkc-field="sql-er-table"][data-pkc-name="kakei_売上"]');
+    await clickReal(
+      page,
+      '[data-pkc-field="sql-er-column"][data-pkc-name="kakei_売上"][data-pkc-col="品名"]',
+    );
+    await expect(page.locator('[data-pkc-field="sql-input"]'), '列を押しても SELECT が入らない').toHaveValue(
+      /select\s+品名\s+from\s+kakei_売上/iu,
+    );
+    await clickReal(page, '[data-pkc-action="run-sql"]');
+    await expect(sqlTable.locator('thead th'), '図から組んだ SELECT が引けない').toHaveText(['品名'], {
+      timeout: 60_000,
+    });
+    await expect(sqlTable.locator('tbody td'), '図から組んだ SELECT の中身が合わない').toHaveText([
+      'りんご',
+      'みかん',
+      'ぶどう',
+    ]);
+    await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+
+    /**
+     * ⑭ 🔴 **並べた全部の構造が、1 枚のノートになる**(#918。「構造をノートへ書き出す」も断らない)。
+     *
+     * ⚠ **筋書きの最後に置く** ── ノートを作ると**そのノートが開く**ので、続きの「ノートを押す」「添付する」の
+     *   前提(開いている物)が変わる。🔑 新しい起動は増やさない(#820)。
+     * 🔴 本文は**構造だけ**(行の中身は 1 行も入らない)── 開いたノートの目次に「表名(表・N 行)」が並ぶ。
+     */
+    await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
+    await expect(note, '「構造をノートへ」が書き出していない').toContainText('というノートに書き出しました', {
+      timeout: 60_000,
+    });
+    await expect(note, '断りの字が残っている').not.toContainText('まだ出せません');
+    await expect(
+      note,
+      '題名に並べた全部の名前が入っていない(1 件目だけだと、足した相手の構造が読めない)',
+    ).toContainText('kakei.sqlite + uriage.csv');
+    const infoToc = page.locator('aside[aria-label="情報"]');
+    await expect(infoToc, '書き出したノートに「kakei_売上(表・3 行)」の見出しが無い').toContainText('kakei_売上(表・3 行)');
+    await expect(infoToc, '2 件目(csv)の表が書かれていない').toContainText('uriage(表・2 行)');
   } finally {
     page.off('request', watchSqlite);
   }

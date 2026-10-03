@@ -4673,6 +4673,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   黙って sqlite で引かない(選んだ物と違う所で引くのが、いちばん気づけない外し方)。
      */
     runDuckDbSql: (input) => duckDbRunner.run(input),
+    /**
+     * 🔴 **DuckDB の器の中の構造を採る口**(#918)。⚠ 判断(どの SQL で採る / 元の `.sqlite` の型・外部キーを
+     *   重ねる)は `duckdb-runner.ts` と `duckdb-schema.ts` が持つ ── この file は繋ぐだけ
+     *   (どの test からも実行されない ── CLAUDE.md §2)。上の `runDuckDbSql` と**同じ器**。
+     */
+    schemaDuckDb: (input) => duckDbRunner.schema(input.sources),
   });
   /**
    * 🔴 **索引の片づけを、書込が落ち着いたときに自動で打つ**(#999 段③。Gemini 裁定 A)。

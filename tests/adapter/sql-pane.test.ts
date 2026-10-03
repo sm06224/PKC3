@@ -158,6 +158,42 @@ function setup(
       return { columns: ['g'], rows: [['duck']] as Array<Array<string | number | null>>, truncated: false, ms: 2 };
     },
   );
+  /**
+   * 🔴 **DuckDB の器の構造を採る口**(#918)。⚠ 実物は DuckDB の器へ聞く ── ここは
+   *   「**どの相手の組で、中身を読みに行ける形で頼まれたか**」を控える fake。返す形は**実物と同じ 3 枚**
+   *   (`DUCKDB_SCHEMA_*` の列名)で、内容は 2 つの表(売上 → 客 の外部キー 1 本)。
+   */
+  const schemaSeen: Array<{ sources: DuckDbReadableGuestSource[]; bytes: Array<number | null> }> = [];
+  const schemaDuckDb = vi.fn(
+    async (input: {
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
+    }) => {
+      const read = await Promise.all(input.sources.map((x) => x.readBytes()));
+      schemaSeen.push({ sources: input.sources.map((x) => x.source), bytes: read.map((b) => b?.byteLength ?? null) });
+      return {
+        columns: {
+          columns: ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+          rows: [
+            ['table', '客', 0, 'id', 'BIGINT', 1, 1],
+            ['table', '客', 1, '名前', 'VARCHAR', 0, 0],
+            ['table', '売上', 0, 'id', 'BIGINT', 1, 1],
+            ['table', '売上', 1, '客id', 'BIGINT', 0, 0],
+          ] as Array<Array<string | number | null>>,
+        },
+        fks: {
+          columns: ['tbl', 'ref', 'col', 'refcol'],
+          rows: [['売上', '客', '客id', 'id']] as Array<Array<string | number | null>>,
+        },
+        counts: {
+          columns: ['tbl', 'n'],
+          rows: [['客', 2], ['売上', 3]] as Array<Array<string | number | null>>,
+        },
+      };
+    },
+  );
   /** 取り込んだ `.sqlite` / `.csv` / `.tsv` の口(#681 段③ の 2 つ目、#854 段①)。
    *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
@@ -243,7 +279,7 @@ function setup(
               localSqlFileSize: (lid: string) => sqlLocalFileSize(lid),
             }),
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
-        ...(opts.withDuck === false ? {} : { runDuckDbSql }),
+        ...(opts.withDuck === false ? {} : { runDuckDbSql, schemaDuckDb }),
       });
   // 🔑 帯の下の 1 行に出す知らせを控える(#992 ①)
   const said: string[] = [];
@@ -355,6 +391,8 @@ function setup(
     tipText,
     runDuckDbSql,
     duckSeen,
+    schemaDuckDb,
+    schemaSeen,
     saveBtn,
     type,
     key,
@@ -3788,51 +3826,58 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
   });
 
   /**
-   * 🔴 **つながり図は「採れない理由」を出す**(#682 段④c)。
-   * ⚠ 頼むと、構造を採る 3 本は**内蔵の sqlite へ**飛ぶ ── そこに客の DB は無いので
-   *   生の断り文が図の所に出る。⚠ 頼まないと「採っています」で永久に止まる。
-   *   🔑 だから**頼まずに、理由を書く**。
+   * 🔴 **つながり図は、`.parquet` / `.json` でも出る**(#918。🟣 Gemini 裁定 2026-10-02 = A。
+   *   以前は「まだ出せません(DuckDB で引く相手です)」と断っていた)。
+   * ⚠ 採るのは **DuckDB の器**(`schemaDuckDb`)で、内蔵の sqlite へは**聞きに行かない**
+   *   (そこに客の DB は無い ── 聞くと「先に選んでください」と言われる)。
+   * 🔴 **物語の順で押しても出る**(#682 段④c の着地前レビュー F2 の続き)── user は
+   *   「相手を選ぶ → 図を開く」の順に押す。下にもう 1 本「図を先に開く」順を置く
+   *   (§2「経路が一度も通っていない」)。
    */
-  /**
-   * 🔴 **物語の順で押しても、理由が出る**(#682 段④c。着地前レビュー F2)。
-   *
-   * ⚠ user は「相手を選ぶ → 図を開く」の順に押す。⚠ ところが直す前の
-   *   `SQL_ER_TOGGLE` は **`note` を空に潰してから** sqlite へ頼んでいたので、
-   *   `SQL_GUEST_OPENED` が書いた親切な字は**この順では 1 度も読めなかった**
-   *   (図が閉じている間は画面に出ないので)。
-   * 🔑 下の test は「図を先に開く」順なので、**この口を 1 度も通らない** ──
-   *   だから**両方の順**を置く(§2「経路が一度も通っていない」)。
-   */
-  it('🔴 相手を選んでから図を開いても、採れない理由が出る(.sqlite の話をしない)', async () => {
-    const { pick, pane, runReadOnlySql } = setup();
+  it('🔴 相手を選んでから図を開くと、DuckDB の器から採った図が出る(断りの字は出ない)', async () => {
+    const { pick, pane, runReadOnlySql, schemaDuckDb, schemaSeen } = setup();
     pick('db7');
     await settle();
     runReadOnlySql.mockClear();
-    pane.querySelector<HTMLButtonElement>('[data-pkc-action="sql-er-toggle"]')?.click();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
-    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '断りの字が残っている').not.toContain('まだ出せません');
     expect(er, '選んだばかりなのに「先に選んでください」と言っている').not.toContain('先に選んで');
-    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(schemaDuckDb, 'DuckDB の器へ採りに行っていない').toHaveBeenCalledTimes(1);
+    expect(schemaSeen[0]?.sources.map((x) => x.kind), '種類が渡っていない').toEqual(['parquet']);
+    // 🔴 中身を読める形で頼まれている(選んだ時点では読まず、採るときに読む)
+    expect(schemaSeen[0]?.bytes, '相手の中身を読めない形で頼んでいる').toEqual([4]);
+    expect(runReadOnlySql, '採れるのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    // 四角(表)と線が出る ── 描くのは sqlite のときと同じ描画器
+    expect(
+      [...pane.querySelectorAll('[data-pkc-field="sql-er-table"]')].map((e) => e.textContent),
+    ).toEqual(['客(表・2 行)', '売上(表・3 行)']);
+    expect(pane.querySelectorAll('[data-pkc-field="sql-er-lines"] line').length, '線が無い').toBe(1);
   });
 
   /**
-   * 🔴 **「構造をノートへ」も同じ門を通る**(着地前レビュー F2 の 2 つ目)。
-   * ⚠ この押し所は**答えが無くても押せる**ので、`.parquet` を選んだまま押せてしまう。
+   * 🔴 **「構造をノートへ」も同じ道を通る**(着地前レビュー F2 の 2 つ目の続き)。
+   * ⚠ この押し所は**答えが無くても押せる**ので、`.parquet` を選んだまま押せる ── 押したらノートができる。
    */
-  it('🔴 「構造をノートへ」も、.sqlite の話で断らない', async () => {
-    const { pick, pane, schemaBtn, runReadOnlySql, persisted } = setup();
+  it('🔴 「構造をノートへ」も、DuckDB の器から採ったノートを作る(断らない)', async () => {
+    const { pick, pane, schemaBtn, runReadOnlySql, schemaDuckDb, persisted } = setup();
     pick('db7');
     await settle();
     runReadOnlySql.mockClear();
     schemaBtn.click();
     await settle();
-    expect(pane.textContent, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(pane.textContent, '断りの字が残っている').not.toContain('まだ出せません');
     expect(pane.textContent, '選んだばかりなのに「先に選んでください」と言っている').not.toContain(
       '先に選んで',
     );
-    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
-    expect(persisted, '採れないのにノートを作っている').toHaveLength(0);
+    expect(schemaDuckDb, 'DuckDB の器へ採りに行っていない').toHaveBeenCalledTimes(1);
+    expect(runReadOnlySql, '採れるのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(persisted, 'ノートが 1 件できていない').toHaveLength(1);
+    const body = persisted[0]?.body ?? '';
+    expect(body, 'どこの構造かが書かれていない').toContain('# 売上.parquet の構造');
+    expect(body).toContain('## 売上(表・3 行)');
+    expect(body).toContain('- 売上.客id → 客.id');
     // ⚠ **押せなくなっていない**(`running` を立てたまま止めていない)
     expect(schemaBtn.disabled, '押したきり、二度と押せなくなっている').toBe(false);
   });
@@ -3852,8 +3897,8 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     expect(engineSel.value, '手持ちの .parquet で sqlite を選んでいる').toBe('duckdb');
   });
 
-  it('🔴 つながり図は、採れない理由をその場に出す(永久に「採っています」にしない)', async () => {
-    const { pick, pane, runReadOnlySql } = setup();
+  it('🔴 図を先に開いてから相手を選んでも、採れた図が出る(永久に「採っています」にしない)', async () => {
+    const { pick, pane, runReadOnlySql, schemaDuckDb } = setup();
     // 図を開いてから相手を選ぶ(開いているときだけ採りに行く作り)
     pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')?.click();
     await settle();
@@ -3861,9 +3906,35 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     pick('db7');
     await settle();
     const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
-    expect(er, '採れない理由が出ていない').toContain('まだ出せません');
+    expect(er, '断りの字が残っている').not.toContain('まだ出せません');
     expect(er, '採っています、のまま止まっている').not.toContain('採っています');
-    expect(runReadOnlySql, '採れないのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(schemaDuckDb, 'DuckDB の器へ採りに行っていない').toHaveBeenCalledTimes(1);
+    expect(runReadOnlySql, '採れるのに内蔵の sqlite へ聞きに行っている').toHaveBeenCalledTimes(0);
+    expect(pane.querySelectorAll('[data-pkc-field="sql-er-table"]').length).toBe(2);
+  });
+
+  it('🔴 DuckDB の器が採れなかったら、図の所に理由が出る(「採っています」のまま止めない)', async () => {
+    const { pick, pane, schemaDuckDb } = setup();
+    schemaDuckDb.mockRejectedValueOnce(new Error('DuckDB の一式を取ってこられませんでした'));
+    pick('db7');
+    await settle();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
+    await settle();
+    const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
+    expect(er).toContain('構造を採れませんでした');
+    expect(er, '落ちた理由が消えている').toContain('一式を取ってこられません');
+    expect(er, '採っています、のまま止まっている').not.toContain('採っています');
+  });
+
+  it('🔴 DuckDB の口が無い版では、図の所に理由が出る(黙って空の図を出さない)', async () => {
+    const { pick, pane } = setup(undefined, { withDuck: false });
+    pick('db7');
+    await settle();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
+    await settle();
+    expect(pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain(
+      'この版では構造を採れません',
+    );
   });
 });
 
@@ -4302,7 +4373,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     expect(s.note()).toContain('足したり外したりすると、作った表は消えます');
   });
 
-  it('🔴 2 件以上のとき、構造をノートへ / つながり図は「まだ出せません」(頼まない)', async () => {
+  it('🔴 2 件以上のとき、構造をノートへ / つながり図は、並べた全部を DuckDB の器から採る(断らない)', async () => {
     const s = setup();
     s.pick('db4');
     await settle();
@@ -4311,13 +4382,39 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     s.runReadOnlySql.mockClear();
     s.schemaBtn.click();
     await settle();
-    expect(s.note()).toContain('まだ出せません');
-    expect(s.runReadOnlySql, '採れないのに sqlite へ頼んでいる').toHaveBeenCalledTimes(0);
-    expect(s.persisted, '構造のノートが書かれている').toEqual([]);
+    expect(s.note(), '断りの字が残っている').not.toContain('まだ出せません');
+    expect(s.runReadOnlySql, '2 件以上なのに sqlite へ頼んでいる').toHaveBeenCalledTimes(0);
+    // 🔴 並べた全部(1 件目 + 足した相手)が、並べた順で器へ渡る
+    expect(s.schemaSeen[0]?.sources.map((x) => x.kind)).toEqual(['csv', 'parquet']);
+    expect(s.persisted, '構造のノートが 1 件できていない').toHaveLength(1);
+    // 🔑 題名・見出しに並べた全部の名前が出る(1 件目だけだと、足した相手の構造が読めない)
+    expect(s.persisted[0]?.body).toContain('# 売上.csv + 売上.parquet の構造');
     // 図を開く
     s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
-    expect(s.pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain('まだ出せません');
+    expect(s.pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).not.toContain('まだ出せません');
+    expect(s.pane.querySelectorAll('[data-pkc-field="sql-er-table"]').length, '四角が出ていない').toBe(2);
+  });
+
+  /**
+   * 🔴 **足した / 外したら、図は採り直す**(名札は同じ lid でも、組が変われば別の図)。
+   * ⚠ 採り直さないと「1 件目だけの図」が「2 件の図」として残る(名札は新しいのに中身は前の組)。
+   */
+  it('🔴 図を開いたまま相手を足す / 外すと、その組の構造を採り直す', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
+    await settle();
+    expect(s.schemaDuckDb, '1 件のとき(.csv)は内蔵の sqlite で採る(今までどおり)').toHaveBeenCalledTimes(0);
+    addAttached(s, 'db7');
+    await settle();
+    expect(s.schemaDuckDb, '足したのに採り直していない').toHaveBeenCalledTimes(1);
+    expect(s.schemaSeen[0]?.sources.map((x) => x.kind)).toEqual(['csv', 'parquet']);
+    dropBtn(s.pane, 'db7')!.click();
+    await settle();
+    // 1 件へ戻ったら内蔵の sqlite へ戻る(DuckDB は呼ばれない)
+    expect(s.schemaDuckDb, '外したのに DuckDB へ採りに行っている').toHaveBeenCalledTimes(1);
   });
 
   it('🔴 足した相手の名前(日本語)が、× の読み上げ名と答えの上の行に出る(画面と実体が同じ名前)', async () => {

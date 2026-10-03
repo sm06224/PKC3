@@ -82,6 +82,25 @@ export const SCHEMA_CSV_SQL = [
 ].join('\n');
 
 /**
+ * 🔴 **行数を数える表の名前**(`columns` の答えから)。
+ *
+ * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると**その場でビューが走る**ので、重い相手で刺さる。
+ * 🔑 sqlite の道(`store-effects.ts`)も DuckDB の道(`duckdb-runner.ts`)も**ここ 1 か所**で決める
+ *   (§7「同じ問いに答える口を 2 つ作らない」)。
+ */
+export function schemaTableNames(columns: Grid): string[] {
+  const kindAt = columns.columns.indexOf('kind');
+  const tblAt = columns.columns.indexOf('tbl');
+  return [
+    ...new Set(
+      columns.rows
+        .filter((r) => r[kindAt] === 'table')
+        .map((r) => (r[tblAt] === null || r[tblAt] === undefined ? '' : String(r[tblAt]))),
+    ),
+  ].filter((n) => n !== '');
+}
+
+/**
  * 行数を 1 回で採る問い合わせを組む。⚠ 表が 0 件なら `null`
  * (**空の `select` を打たない** ── 構文エラーになる)。
  */

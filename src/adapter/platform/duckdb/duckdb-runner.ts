@@ -67,6 +67,13 @@ import {
 } from '@features/query/sqlite-ndjson';
 import { duckDbWriteKind } from '@features/query/duckdb-write';
 import {
+  DUCKDB_SCHEMA_COLUMNS_SQL,
+  DUCKDB_SCHEMA_FK_SQL,
+  mergeDuckDbSchema,
+  type DuckDbTableMeta,
+} from '@features/query/duckdb-schema';
+import { countsSql, schemaTableNames, type Grid } from '@features/query/schema-digest';
+import {
   DUCKDB_EXTENSIONS,
   DUCKDB_EXT_DIR,
   DUCKDB_WASM,
@@ -192,6 +199,16 @@ export interface DuckDbRunResult {
   readonly rows: Array<Array<string | number | null>>;
   readonly truncated: boolean;
   readonly ms: number;
+}
+
+/**
+ * 🔴 **器の中の構造 1 枚ぶん**(#918。構造ノート・つながり図が読む形 = `SchemaDigestInput` の 3 枚)。
+ * ⚠ `counts` は**落ちても進む**(行数が採れなくても構造は出せる ── `null` なら「行数は採れませんでした」)。
+ */
+export interface DuckDbSchemaResult {
+  readonly columns: Grid;
+  readonly fks: Grid;
+  readonly counts: Grid | null;
 }
 
 /** SQL の文字列に埋める。⚠ 題名は user の字なので**必ず**通す。 */
@@ -324,6 +341,25 @@ export class DuckDbRunner {
    *   添える(`withRefused`)。引いていない回には何も言わない。
    */
   private refused: string[] = [];
+  /**
+   * 🔴 **いまの器へ写した `.sqlite` の表の「元の姿」**(型 / 主キー / 外部キー。#918)。
+   * ⚠ `load` が入れ直すたびに作り直す(器と同じ寿命 ── 器が畳まれれば次の `load` で組み直す)。
+   * 🔑 器の `duckdb_columns()` には元の型・主キー・外部キーが残らないので、構造を採るとき重ねる。
+   */
+  private meta = new Map<string, DuckDbTableMeta>();
+  /**
+   * 🔴 **器へ触る仕事を 1 本ずつ通す**(#918)。⚠ つながり図を開く(構造を採る)と SQL を走らせるが
+   *   **同じ器へ同時に飛ぶ** ── どちらも「まだ入っていなければ差し込む」ので、2 つ目が差し込みの
+   *   最中に入ると**二重に差し込もうとして**(塞いだ後は file を読めない)落ちる。
+   *   前の仕事が落ちても次は走る(`then(fn, fn)`)。
+   */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  private serial<T>(job: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(job, job);
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
 
   constructor(private readonly deps: DuckDbRunnerDeps) {
     this.lease = new DuckDbLease({
@@ -356,7 +392,56 @@ export class DuckDbRunner {
     await this.lease.release();
   }
 
-  async run(input: DuckDbRunInput): Promise<DuckDbRunResult> {
+  /**
+   * 器へ差し込む相手の組(鍵と入れ方)。
+   * ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)。
+   * 🔴 **N 件の全部を鍵に入れる**(#918 段⑦)── 足す / 外す / 順番が変わるたびに
+   *   鍵が変わるので、`DuckDbLease` が**器を作り直す**(`hold` も解ける ──
+   *   作った表は消える。画面は「足したり外したりすると、作った表は消えます」と言う)。
+   * 🔑 `run`(SQL を走らせる)と `schema`(構造を採る)が**同じ鍵**を使う ── 構造を採った後の
+   *   SQL は器を作り直さない(同じ file を 2 度読まない)。
+   */
+  private dataOf(sources: readonly DuckDbInputSource[]): {
+    key: string;
+    load: (h: DuckDbHandle) => Promise<void>;
+  } {
+    return {
+      key: sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
+      load: (h) => this.load(h, sources),
+    };
+  }
+
+  /**
+   * 🔴 **器の中の構造を採る**(#918。🟣 Gemini 裁定 2026-10-02 = A)。
+   *
+   * ⚠ 打つのは**構造を採る SQL だけ**(`DUCKDB_SCHEMA_*` と `countsSql`)で、user の字ではない ──
+   *   書き込みの門(`duckDbWriteKind`)は通らず、`hold` も立てない(読むだけ)。
+   * 🔑 器へ**まだ差し込んでいなければ差し込む**(`run` と同じ鍵)── 構造を見るだけで相手を全部読み込む
+   *   ことになるが、行を数えるのに必要で、その後の SQL は同じ器をそのまま使える。
+   * ⚠ 行数が採れなくても**構造は返す**(`counts: null`)。他の落ち方(器を起こせない等)は投げる。
+   */
+  schema(sources: readonly DuckDbInputSource[]): Promise<DuckDbSchemaResult> {
+    return this.serial(async () => {
+      if (sources.length === 0) throw new Error('調べる相手がありません');
+      const data = this.dataOf(sources);
+      const ask = async (sql: string): Promise<Grid> => {
+        const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, data });
+        return duckDbTable(raw);
+      };
+      const columns = await ask(DUCKDB_SCHEMA_COLUMNS_SQL);
+      const fks = await ask(DUCKDB_SCHEMA_FK_SQL);
+      const merged = mergeDuckDbSchema({ columns, fks }, this.meta);
+      const sql = countsSql(schemaTableNames(merged.columns));
+      const counts = sql === null ? null : await ask(sql).catch(() => null);
+      return { columns: merged.columns, fks: merged.fks, counts };
+    });
+  }
+
+  run(input: DuckDbRunInput): Promise<DuckDbRunResult> {
+    return this.serial(() => this.runNow(input));
+  }
+
+  private async runNow(input: DuckDbRunInput): Promise<DuckDbRunResult> {
     const started = Date.now();
     if (input.sources.length === 0) throw new Error('調べる相手がありません');
     const raw = await this.lease.run({
@@ -369,16 +454,7 @@ export class DuckDbRunner {
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      /**
-       * ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)。
-       * 🔴 **N 件の全部を鍵に入れる**(#918 段⑦)── 足す / 外す / 順番が変わるたびに
-       *   鍵が変わるので、`DuckDbLease` が**器を作り直す**(`hold` も解ける ──
-       *   作った表は消える。画面は「足したり外したりすると、作った表は消えます」と言う)。
-       */
-      data: {
-        key: input.sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
-        load: (h) => this.load(h, input.sources),
-      },
+      data: this.dataOf(input.sources),
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときだけ、写せなかった表の理由を添える(`withRefused`)
       throw this.withRefused(e);
@@ -402,6 +478,7 @@ export class DuckDbRunner {
    */
   private async load(h: DuckDbHandle, sources: readonly DuckDbInputSource[]): Promise<void> {
     this.refused = [];
+    this.meta = new Map();
     /**
      * 🔴 **`.sqlite` だけ、先に中身を読む**(#682 段④d)── 表の名前が**中の表の名前**で決まる
      *   (1 件なら元の名前のまま / 2 件以上は `ファイル名_表名`)ので、名前を決める前に要る。
@@ -456,6 +533,8 @@ export class DuckDbRunner {
     tables: readonly SqliteExportedTable[],
     names: readonly string[],
   ): Promise<void> {
+    // 外部キーの相手は元の名前で来る ── 器での名前へ直す(2 件以上なら `ファイル名_表名`)
+    const finalOf = new Map(tables.map((t, k) => [t.name, names[k] ?? t.name] as const));
     for (const [k, t] of tables.entries()) {
       const name = names[k] ?? t.name;
       if (t.refused !== null) {
@@ -463,6 +542,19 @@ export class DuckDbRunner {
         continue;
       }
       await h.query(createTableSql(name, t.columns));
+      /**
+       * 🔴 **元の姿を控える**(#918)── 器の表は型を 3 つへ潰し、主キーも外部キーも持たない。
+       * ⚠ **表を作った直後に控える**(行を入れる所で断られても、列は器に在る)。引けなくなった表
+       *   (下で `DROP` する)は、構造を採るとき器に無いので `mergeDuckDbSchema` が出さない。
+       */
+      this.meta.set(name, {
+        columns: t.columns,
+        fks: t.fks.map((f) => ({
+          fromColumn: f.fromColumn,
+          toTable: finalOf.get(f.toTable) ?? f.toTable,
+          toColumn: f.toColumn,
+        })),
+      });
       // ⚠ 行が 0 件の表は file を作らない(列は上で作った ── `read_json_auto` は空だと列を失う)
       if (t.ndjson === null) continue;
       const file = duckDbFileNameOf(source, slot, k);
