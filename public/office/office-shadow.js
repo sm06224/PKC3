@@ -60,6 +60,14 @@
    */
   var RETRY_BACKOFF_MS = [0, 30000, 60000, 120000];
 
+  /**
+   * 「保存していない変更が在るか」を窓の中から聞く間隔(ms)(#1228 段 2)。
+   * 🔴 打鍵の契機(`QUIET_MS`)は**打たない編集**(表の挿入・図の移動 = マウスだけ)を拾えない。`isModified` は
+   * 1 回 0.5〜1.6 ms(段 1 の実測)なので、2〜3 秒ごとに聞けば足りる。⚠ 書くのは**これまでと同じ 1 本の口**
+   * (`take` → `write`)── 聞いて「変わった」と分かったら静止の印を立てるだけで、別の書き口を作らない。
+   */
+  var MODIFIED_POLL_MS = 2500;
+
   /** 棚の中の影の名前(13 桁の時刻 + 拡張子)。⚠ `meta.json` などを影と取り違えない。 */
   var SHADOW_NAME_RE = /^[0-9]{13}\.[A-Za-z0-9]+$/;
 
@@ -166,6 +174,8 @@
     // 変換中(IME)。⚠ 変換中の字は確定していない ── 書くと**変換途中**が影になる
     var composing = false;
     var composeAt = 0;
+    // 窓に聞いた「保存していない変更が在るか」の最後の答え(`observeModified` が据える)。⚠ 聞く前は false
+    var knownModified = false;
     return {
       /** 打った印。⚠ 起点を**後ろへ送ってあるとき(Ctrl+S の直後)は縮めない**。 */
       typed: function (at) { dirty = true; if (at > last) last = at; },
@@ -181,6 +191,24 @@
         return true;
       },
       isDirty: function () { return dirty; },
+      /**
+       * 🔴 **マウスだけの編集を拾う**(#1228 段 2)。窓に聞いた答え(`isModified`)を渡す。
+       *   - 「変更なし」→「変更あり」へ**変わった**とき → 打った印を立てる(表の挿入・図の移動の最初の 1 手)
+       *   - 変更ありのまま(2 手目以降)→ 何もしない(毎回書かない)。2 手目以降は `pointed` が拾う
+       *   - 聞けなかった(`null`)→ 前の答えのまま
+       */
+      observeModified: function (mod, at) {
+        // ⚠ すでに打った印が立っているときは**起点を動かさない**(打ち続けた分の静止を、聞いた時刻で延ばさない)
+        if (mod === true) { if (!knownModified) { knownModified = true; if (!dirty) { dirty = true; if (at > last) last = at; } } }
+        else if (mod === false) { knownModified = false; }
+      },
+      /**
+       * マウスを離した。⚠ **変更ありと分かっている間だけ**打った印にする(変更なしの文書でクリックしても書かない)。
+       * 🔑 マウスだけの 2 手目以降(変更ありのまま図を動かす)を拾う唯一の信号 ── 動かしていない単なるクリックでも
+       * 立つので、書くのは「止まって 3 秒」の 1 回だけ(打鍵と同じ間隔で、毎クリックには書かない)。
+       */
+      pointed: function (at) { if (knownModified) { dirty = true; if (at > last) last = at; } },
+      isKnownModified: function () { return knownModified; },
       compositionStart: function (at) { composing = true; composeAt = at; if (dirty && at > last) last = at; },
       compositionEnd: function (at) { composing = false; dirty = true; if (at > last) last = at; },
       isComposing: function () { return composing; },
@@ -204,6 +232,7 @@
   /**
    * 窓の入力 1 件を、静止の判定へ渡す(`host.html` の listener が呼ぶ。判断はここ ── host.html は unit が届かない)。
    *   - 修飾キーだけの押下 → 何もしない(Ctrl を押しただけで「打った」にしない)
+   *   - pointerup / mouseup → 変更ありと分かっているときだけ打った印(#1228 段 2。マウスだけの編集)
    *   - Ctrl / Meta + S の keydown → 打った印は立てず、静止の起点を `SAVE_DEFER_MS` 後ろへ送る
    *   - compositionstart / compositionend → 変換中の出入り(終わるまで書かない)
    *   - それ以外 → 打った印
@@ -214,6 +243,8 @@
     if (!quiet) return;
     if (type === 'compositionstart') { quiet.compositionStart(at); return; }
     if (type === 'compositionend') { quiet.compositionEnd(at); return; }
+    // マウスを離した ── 変更ありと分かっているときだけ印(`createQuiet().pointed`)
+    if (type === 'pointerup' || type === 'mouseup') { quiet.pointed(at); return; }
     if (type === 'keydown' && e) {
       if (MODIFIER_KEYS[e.key] === 1) return;
       if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 's') { quiet.defer(at, SAVE_DEFER_MS); return; }
@@ -384,6 +415,8 @@
       size: typeof o.size === 'number' && o.size >= 0 ? o.size : null,
       at: at,
       ext: d.ext,
+      // どのノートの添付か(#1228 段 2。本体が「この添付の影」を引く)。⚠ 手元の file(`local:`)・窓の中で作った文書は空
+      lid: typeof o.lid === 'string' && o.lid.indexOf(LOCAL_TOKEN_PREFIX) !== 0 ? o.lid : '',
     });
     var w = null;
     try {
@@ -403,9 +436,9 @@
    * 置けたら、**同じ棚の古い影を消す**(最新 1 つだけ残す)。⚠ 自分より新しい名前は消さない(別の窓の分)。
    * ⚠ 書きかけは残さない(`createWritable` は close で確定する。失敗したら `abort`)。
    * 棚には**元の文書の記録**(`meta.json`)も 1 つ置く(段 2 が「どの file の影か」を探せるように)。
-   * 中身は `{ v, name, size, at, ext }` だけ ── ⚠ **本文は入れない**。書けなくても影は成功とする(影が本体)。
+   * 中身は `{ v, name, size, at, ext, lid }` だけ ── ⚠ **本文は入れない**。書けなくても影は成功とする(影が本体)。
    * @param d `storage`(`navigator.storage`)/ `id` / `ext` / `size` / `read(into, wanted, position)` / `now` /
-   *   `origin`(任意。`{ name, size }` ── 元の文書の名前と大きさ)
+   *   `origin`(任意。`{ name, size, lid }` ── 元の文書の名前と大きさ・どのノートの添付か)
    * @returns `{ at, name, meta }`(`meta` は記録を書けたか)
    */
   async function shelve(d) {
@@ -447,6 +480,24 @@
     return { at: at, name: name, meta: metaOk };
   }
 
+  /**
+   * 棚(`<SHELF_DIR>/<id>`)を**丸ごと消す**(#1228 段 2)。保存が通った窓が、その文書の影を片付けるのに使う。
+   * ⚠ **冪等** ── 棚が無くても投げない(`false` を返す)。⚠ 他の `id` の棚は触らない。
+   * @returns 消したか
+   */
+  async function unshelve(d) {
+    var s = d.storage;
+    if (!s || typeof s.getDirectory !== 'function') return false;
+    try {
+      var rootDir = await s.getDirectory();
+      var top = await rootDir.getDirectoryHandle(SHELF_DIR, { create: false });
+      await top.removeEntry(d.id, { recursive: true });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ───────────────────────── 画面に出す理由(内部の語を出さない) ─────────────────────────
 
   /** 失敗の理由を、user が読める短い字へ。⚠ `fd_sync` / `storeToURL` / OPFS などの内部語を出さない。 */
@@ -465,13 +516,25 @@
    * 1 回の `tick` が、静止していれば影を 1 つ書く。
    * @param d `now()` / `quiet`(`createQuiet`)/ `isDead()` / `isModified()`(Promise。`true` / `false` / `null` = 聞けなかった)/
    *   `write()`(同期。`storeShadowSync`)/ `shelve(info)`(Promise)/ `discard()` / `onWritten(at)` / `onFailed(reason)` /
-   *   `log(e)`(任意。原因を console へ)
+   *   `log(e)`(任意)/ `pollMs`(任意。`MODIFIED_POLL_MS` ── 聞く間隔。省けば聞かない = 打鍵の契機だけ)/
+   *   `unshelve()`(任意。Promise ── `afterSaved` が棚を消す)
    * @returns `'dead' | 'busy' | 'wait' | 'clean' | 'skipped' | 'written' | 'failed'`(test の観測点)
    */
   function createWriter(d) {
     var busy = false;
     var lastReason = null;
     var failures = 0;
+    var lastPoll = null;
+    // 書いている最中に保存が通った。⚠ その場で棚を消すと書きかけの `createWritable` が転ぶ ── 終わってから消す
+    var clearPending = false;
+    async function clearShelf() {
+      // 🔴 **消してよいのは「保存した後に変更が無い」と窓が答えたときだけ**。⚠ 聞けなかった(`null`)/ 変更あり
+      //    は消さない ── 保存の後に打った分は、これから書く影が持つ(消すと、その分を守れない)
+      var mod = await d.isModified();
+      if (mod !== false) return false;
+      if (typeof d.unshelve !== 'function') return false;
+      try { return !!(await d.unshelve()); } catch (e) { return false; }
+    }
     /** 書けなかった。印を戻して間をあけて再試行する(続くほど間を伸ばす)。 */
     function again() {
       var q = d.quiet;
@@ -487,6 +550,20 @@
       tick: async function () {
         if (d.isDead()) return 'dead';
         if (busy) return 'busy';
+        // 🔴 マウスだけの編集(#1228 段 2): 一定の間隔で窓に聞き、変わったら静止の印を立てる(書くのは下の同じ 1 本)
+        if (typeof d.pollMs === 'number' && typeof d.quiet.observeModified === 'function') {
+          var t = d.now();
+          if (lastPoll === null || t - lastPoll >= d.pollMs) {
+            lastPoll = t;
+            busy = true;
+            try { d.quiet.observeModified(await d.isModified(), d.now()); }
+            catch (e) { /* 聞けなかった ── 次の回に聞く */ }
+            finally {
+              busy = false;
+              if (clearPending) { clearPending = false; void clearShelf(); }
+            }
+          }
+        }
         if (!d.quiet.take(d.now())) return 'wait';
         busy = true;
         try {
@@ -510,7 +587,19 @@
         } finally {
           busy = false;
           try { d.discard(); } catch (e) { /* 片付けに失敗しても次の回がある */ }
+          if (clearPending) { clearPending = false; void clearShelf(); }
         }
+      },
+      /**
+       * 🔴 **保存が通った**(#1228 段 2)。保存した後に変更が無ければ、この文書の影を消す
+       * (影が残ると、次に「Office で開く」を押したとき保存済みの版と取り違えて訊いてしまう)。
+       * ⚠ 影を書いている最中なら、終わってから消す。
+       * @returns 消したなら true(書いている最中で後回しにしたときは false)
+       */
+      afterSaved: async function () {
+        if (d.isDead()) return false;
+        if (busy) { clearPending = true; return false; }
+        return clearShelf();
       },
       isBusy: function () { return busy; },
     };
@@ -521,6 +610,7 @@
     SAVE_DEFER_MS: SAVE_DEFER_MS,
     COMPOSING_MAX_MS: COMPOSING_MAX_MS,
     RETRY_BACKOFF_MS: RETRY_BACKOFF_MS,
+    MODIFIED_POLL_MS: MODIFIED_POLL_MS,
     META_NAME: META_NAME,
     LOCAL_TOKEN_PREFIX: LOCAL_TOKEN_PREFIX,
     feedInput: feedInput,
@@ -536,6 +626,7 @@
     discardLocal: discardLocal,
     safeId: safeId,
     shelve: shelve,
+    unshelve: unshelve,
     reasonOf: reasonOf,
     createWriter: createWriter,
   };

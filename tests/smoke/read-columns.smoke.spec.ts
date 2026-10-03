@@ -730,6 +730,19 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
     false,
   );
   await win.waitForLoadState('domcontentloaded');
+  // ⚠ `domcontentloaded` は**絵の読み込みを待たない** ── 箱が混んでいると `naturalHeight` が 0 のまま読んで
+  //   「別窓の絵が読めていない」で落ちた(2026-10-03、全量 smoke で 1/519。単独では緑 ── #1066 の族)。
+  //   観測点は「絵が読めた」そのもの(`complete` かつ `naturalHeight > 0`)にし、上限つきで待つ
+  await win
+    .waitForFunction(
+      () => {
+        const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement | null;
+        return i !== null && i.complete && i.naturalHeight > 0;
+      },
+      undefined,
+      { timeout: 10_000 },
+    )
+    .catch(() => undefined); // 下の assert が「読めていない」を言う(ここで黙って通さない)
   const big = await win.evaluate(() => {
     const i = document.querySelector('[data-pkc-field="asset-window-image"]') as HTMLImageElement;
     return { natural: i?.naturalHeight ?? 0, shown: Math.round(i?.getBoundingClientRect().height ?? 0) };

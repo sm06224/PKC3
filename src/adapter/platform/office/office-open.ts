@@ -26,6 +26,7 @@ import {
   skippedImagesNotice,
   type OfficeImageCandidate,
 } from '../../../features/office/office-images';
+import { SHADOW_GONE_NOTICE, SHADOW_OPENED_NOTICE } from '../../../features/office/office-shadow';
 import type { OfficeDocumentSource, OfficeImagePayload, OfficeWindow } from './office-window';
 
 /** 添付 1 件ぶんの、開くのに要る情報。 */
@@ -43,11 +44,40 @@ export interface OfficeTarget {
 }
 
 export type OpenOfficeResult =
-  | { readonly ok: true; readonly reused: boolean }
+  /**
+   * 開いた / 開く指示を出した。
+   * 🔴 `settled` が在るとき(#1228 段 2)は、**まだ決まっていない**(控えの確認を出している)── 本当の結果は
+   * `settled` が返す。⚠ 即答の `reused` は当てにしない(確認の後で決まる)。`cancelled` は user が確認で
+   * 「やめる」を選んだ(何も開かない)。
+   */
+  | {
+      readonly ok: true;
+      readonly reused: boolean;
+      readonly settled?: Promise<OpenOfficeResult>;
+      readonly cancelled?: boolean;
+    }
   /** 開けなかった ── `message` はそのまま user へ出せる文にする。 */
   | { readonly ok: false; readonly reason: 'not-office' | 'unsupported' | 'not-installed' | 'no-bytes'; readonly message: string };
 
+/**
+ * 🔴 **保存していない編集の控え(影)の口**(#1228 段 2)。`office-shadow-shelf.ts` の `OfficeShadows` に
+ * 「訊く」(`ask`)を足した形 ── 画面の確認は呼び側(`main.ts`)が持つ。⚠ 全部**投げない**こと。
+ */
+export interface OfficeShadowPort {
+  /** **同期で**答える: 控えが在るかもしれないか。偽なら今までどおり**同期で窓を開ける**。 */
+  readonly mayHave: (lid: string) => boolean;
+  /** 訊くべき控え(正本より新しい物だけ)。無ければ `null`。 */
+  readonly find: (lid: string) => Promise<{ readonly at: number; readonly ext: string } | null>;
+  readonly readBytes: (lid: string) => Promise<Uint8Array | null>;
+  /** 控えを消す(「保存済みの版で開く」)。 */
+  readonly discard: (lid: string) => Promise<void>;
+  /** 確認を出す。`null` = やめる(何も開かない)。 */
+  readonly ask: (offer: { readonly at: number; readonly ext: string }) => Promise<'shadow' | 'saved' | null>;
+}
+
 export interface OfficeOpenerDeps {
+  /** 🔴 編集の控えの口(#1228 段 2)。⚠ 省けば訊かない(今までと同じ)。 */
+  readonly shadow?: OfficeShadowPort;
   readonly officeWindow: OfficeWindow;
   /** 一式が入っているか。⚠ **同期で答えられる値**(起動時と設置後に更新した控え)。 */
   readonly isPackInstalled: () => boolean;
@@ -100,6 +130,91 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
     if (bytes === null || bytes.byteLength === 0) return null;
     return { bytes, images };
   };
+  /**
+   * 🔴 **保存していない編集の控えの版を読む**(#1228 段 2)。⚠ 読めなければ `null`(消えた / 空)──
+   * 呼び側は**保存済みの版へ戻る**(控えが消えたからといって、開けなくしない)。
+   */
+  const loadShadow = async (target: OfficeTarget): Promise<OfficeDocumentSource | null> => {
+    const lid = target.lid ?? '';
+    if (deps.shadow === undefined || lid === '') return null;
+    const bytes = await deps.shadow.readBytes(lid).catch(() => null);
+    if (bytes === null || bytes.byteLength === 0) return null;
+    return { bytes, images: await collectImages(deps, target), fromShadow: true };
+  };
+  /** 控えで開いた窓が読み直すとき、まだ控えが在れば**控えを**、無ければ保存済みの最新を渡す(`refresh`)。 */
+  const reload = async (target: OfficeTarget, fromShadow: boolean): Promise<OfficeDocumentSource | null> => {
+    if (fromShadow) {
+      const s = await loadShadow(target);
+      if (s !== null) return s;
+    }
+    const key = target.lid ? await deps.currentAssetKey?.(target.lid).catch(() => null) : null;
+    return load(key ? { ...target, assetKey: key } : target);
+  };
+  /** 窓を開き、文書を後渡しする。⚠ **同期のうちに窓を開く**(user gesture を切らない)。 */
+  const openNow = (target: OfficeTarget, wantShadow: boolean): OpenOfficeResult => {
+    // 🔑 **ここで開く**(同期 ── user gesture を切らない)。
+    //    ⚠ `open()` を 2 回呼んではいけない。1 回目の時点では生存通知が
+    //    まだ届いておらず `isProbablyOpen()` が false なので、**窓が 2 つ開く**。
+    //    宣言してから `provideDocument()` で後渡しする。
+    const outcome = deps.officeWindow.open({ name: target.name, expectDocument: true });
+    void (async () => {
+      // 🔴 控えの版を頼まれたら先に読む。読めなければ保存済みの版へ戻る(開けなくしない)
+      const shadowSrc = wantShadow ? await loadShadow(target) : null;
+      const loaded = shadowSrc ?? (await load(target));
+      if (loaded === null) return;
+      const { bytes, images } = loaded;
+      const fromShadow = shadowSrc !== null;
+      // 🔴 何で開くかを言う(#1228 段 2)。⚠ **開けた版**を言う ── 控えを頼まれて読めなかったときは、保存済みの版で開くと言う
+      if (wantShadow) deps.notify?.(fromShadow ? SHADOW_OPENED_NOTICE : SHADOW_GONE_NOTICE);
+      // 🔴 **合言葉(= このノートの lid)を預ける**(#205)── 保存が戻って
+      //    きたとき、**このノートを更新する**ために要る。
+      //    ⚠ 無ければ空文字 = 窓は「新規作成」として返す(新しい添付ノートになる)。
+      //    🔑 **key ではなく lid を預ける** ── 2 回目の保存の時点で key は既に
+      //    変わっている(1 回目で差し替わる)ので、key を預けると迷子になる。
+      //    どの asset を差し替えるかは、**そのノートの現在の frontmatter**が決める
+      // 🔴 作り直された窓が文書を求め直したとき(#1228 穴①)、**いま**の添付を引き直す口を添える
+      deps.officeWindow.provideDocument(
+        target.name,
+        bytes,
+        target.lid ?? '',
+        images,
+        () => reload(target, fromShadow),
+        fromShadow,
+      );
+    })();
+    return { ok: true, reused: outcome.kind === 'already-open' };
+  };
+
+  /** いま控えを訊いているノート。⚠ 同じノートの 2 回目の押しで確認を重ねない。 */
+  const asking = new Set<string>();
+  /**
+   * 🔴 **控えが在れば訊いてから開く**(#1228 段 2、裁定 Q1 = A)。
+   * ⚠ ここへ来るのは `mayHave` が真のときだけ(= 控えが在るかもしれない)。**確認の答えを押した click の続き**で窓を開く
+   * (確認自体が user の操作なので、ポップアップ遮断に当たらない)。控えが無かったときは同期ではなくなる(1 回の非同期の後)。
+   */
+  const askThenOpen = async (target: OfficeTarget, lid: string): Promise<OpenOfficeResult> => {
+    const sh = deps.shadow!;
+    try {
+      const offer = await sh.find(lid);
+      if (offer === null) return openNow(target, false);
+      let answer: 'shadow' | 'saved' | null;
+      try {
+        answer = await sh.ask(offer);
+      } catch {
+        // 確認を出せなかった ── 控えは触らず、今までどおり保存済みの版で開く(開けなくしない。控えは残る)
+        return openNow(target, false);
+      }
+      if (answer === null) return { ok: true, reused: false, cancelled: true };
+      if (answer === 'saved') {
+        await sh.discard(lid);
+        return openNow(target, false);
+      }
+      return openNow(target, true);
+    } finally {
+      asking.delete(lid);
+    }
+  };
+
   return {
     open(target: OfficeTarget): OpenOfficeResult {
       const entry = officeEntry({
@@ -118,28 +233,22 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
         return { ok: false, reason: 'not-installed', message: entry.reason };
       }
 
-      // 🔑 **ここで開く**(同期 ── user gesture を切らない)。
-      //    ⚠ `open()` を 2 回呼んではいけない。1 回目の時点では生存通知が
-      //    まだ届いておらず `isProbablyOpen()` が false なので、**窓が 2 つ開く**。
-      //    宣言してから `provideDocument()` で後渡しする。
-      const outcome = deps.officeWindow.open({ name: target.name, expectDocument: true });
-      void (async () => {
-        const loaded = await load(target);
-        if (loaded === null) return;
-        const { bytes, images } = loaded;
-        // 🔴 **合言葉(= このノートの lid)を預ける**(#205)── 保存が戻って
-        //    きたとき、**このノートを更新する**ために要る。
-        //    ⚠ 無ければ空文字 = 窓は「新規作成」として返す(新しい添付ノートになる)。
-        //    🔑 **key ではなく lid を預ける** ── 2 回目の保存の時点で key は既に
-        //    変わっている(1 回目で差し替わる)ので、key を預けると迷子になる。
-        //    どの asset を差し替えるかは、**そのノートの現在の frontmatter**が決める
-        // 🔴 作り直された窓が文書を求め直したとき(#1228 穴①)、**いま**の添付を引き直す口を添える
-        deps.officeWindow.provideDocument(target.name, bytes, target.lid ?? '', images, async () => {
-          const key = target.lid ? await deps.currentAssetKey?.(target.lid).catch(() => null) : null;
-          return load(key ? { ...target, assetKey: key } : target);
-        });
-      })();
-      return { ok: true, reused: outcome.kind === 'already-open' };
+      // 🔴 **保存していない編集の控えが在るかもしれないときだけ**、訊いてから開く(#1228 段 2)。
+      //    ⚠ 開いている窓へ頼むとき(`isProbablyOpen`)は訊かない ── 控えはその窓が書いた物で、窓は
+      //    自分の保存していない変更を自分で確かめて訊く(穴②)。ここでも訊くと**同じ文書を 2 度訊く**
+      const lid = target.lid ?? '';
+      if (
+        deps.shadow !== undefined &&
+        lid !== '' &&
+        !deps.officeWindow.isProbablyOpen() &&
+        deps.shadow.mayHave(lid)
+      ) {
+        // 同じノートの確認が出ている間の 2 回目の押しは、重ねずに畳む(1 つ目の答えが開く)
+        if (asking.has(lid)) return { ok: true, reused: false, cancelled: true };
+        asking.add(lid);
+        return { ok: true, reused: false, settled: askThenOpen(target, lid) };
+      }
+      return openNow(target, false);
     },
   };
 }

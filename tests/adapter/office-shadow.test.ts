@@ -46,7 +46,9 @@ interface Api {
   safeId(token: string, fallback: string): string;
   shelve(d: ShelveDeps): Promise<{ at: number; name: string; meta: boolean }>;
   reasonOf(e: unknown): string;
-  createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean };
+  createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean; afterSaved(): Promise<boolean> };
+  MODIFIED_POLL_MS: number;
+  unshelve(d: { storage: unknown; id: string }): Promise<boolean>;
   SHADOW_DIR: string;
   SHELF_DIR: string;
   CHUNK: number;
@@ -55,17 +57,19 @@ interface Quiet {
   typed(at: number): void; take(at: number): boolean; isDirty(): boolean;
   compositionStart(at: number): void; compositionEnd(at: number): void; isComposing(): boolean;
   defer(at: number, ms: number): void; retry(at: number, delayMs: number): void;
+  observeModified(mod: boolean | null, at: number): void; pointed(at: number): void; isKnownModified(): boolean;
 }
 type StoreResult = { skipped: 'unmodified' | 'format'; ext?: string } | { ext: string; path: string; size: number };
 interface ShelveDeps {
   storage: unknown; id: string; ext: string; size: number; now(): number;
   read(into: Uint8Array, wanted: number, position: number): number;
-  origin?: { name: string; size: number } | null;
+  origin?: { name: string; size: number; lid?: string } | null;
 }
 interface WriterDeps {
   now(): number; quiet: Quiet; isDead(): boolean; isModified(): Promise<boolean | null>;
   write(): StoreResult; shelve(info: StoreResult): Promise<unknown>; discard(): void;
   onWritten(at: number): void; onFailed(reason: string): void; log?(e: unknown): void;
+  pollMs?: number; unshelve?(): Promise<boolean>;
 }
 
 function load(): Api {
@@ -925,7 +929,7 @@ describe('🔴 OPFS の棚(同じ asset は最新 1 つだけ)', () => {
     const r1 = await api.shelve(shelveDeps(root, { ext: 'docx', origin: { name: '報告 書.docx', size: 4321 }, now: () => 1_000_000_000_000 }));
     expect(r1.meta).toBe(true);
     expect(api.META_NAME).toBe('meta.json');
-    expect(dec(shelfOf(root)!)).toEqual({ v: 1, name: '報告 書.docx', size: 4321, at: 1_000_000_000_000, ext: 'docx' });
+    expect(dec(shelfOf(root)!)).toEqual({ v: 1, name: '報告 書.docx', size: 4321, at: 1_000_000_000_000, ext: 'docx', lid: '' });
     // 2 回目(古い影が消える回)でも meta.json は残り、最新の記録になる
     await api.shelve(shelveDeps(root, { ext: 'docx', origin: { name: '報告 書.docx', size: 4400 }, now: () => 1_000_000_005_000 }));
     expect(shelfOf(root)!.files.has('meta.json'), '影の整理が meta.json を消した').toBe(true);
@@ -971,7 +975,7 @@ describe('🔴 host.html の影の配線', () => {
     const m = /var SHADOW_INPUTS = (\[[^\]]*\]);/.exec(host);
     expect(m, 'SHADOW_INPUTS を抜き出せていない').not.toBeNull();
     const kinds = new Function(`return ${m![1]}`)() as string[];
-    expect([...kinds].sort()).toEqual(['beforeinput', 'compositionend', 'compositionstart', 'cut', 'drop', 'keydown', 'paste']);
+    expect([...kinds].sort()).toEqual(['beforeinput', 'compositionend', 'compositionstart', 'cut', 'drop', 'keydown', 'paste', 'pointerup']);
     expect(host).toContain('window.PKC3OfficeShadow.feedInput(shadowQuiet, t, e, Date.now());');
     const reg = host.indexOf('SHADOW_INPUTS.forEach(');
     const mac = host.indexOf('e.stopImmediatePropagation()');
@@ -981,7 +985,7 @@ describe('🔴 host.html の影の配線', () => {
 
   it('保存の見張りの直後に積み、1 秒ごとに tick する。閉じるとき止める', () => {
     const a = host.indexOf('armSaveWatch(FS, docToken);');
-    const b = host.indexOf('armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0 }; });');
+    const b = host.indexOf('armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0, lid: docToken }; });');
     expect(a).toBeGreaterThan(0);
     expect(b, '影の見張りを積んでいない').toBeGreaterThan(a);
     expect(host).toContain('shadowTimer = setInterval(function () { void writer.tick(); }, 1000);');
@@ -1015,7 +1019,9 @@ function bootHostShadow(o: {
   storage: FakeDir;
   docs?: readonly FakeDocSpec[];
   storeThrows?: boolean;
-  doc?: { name: string; size: number };
+  doc?: { name: string; size: number; lid?: string };
+  /** 窓に「保存していない変更が在るか」を聞かれたときの答え(既定は在る)。 */
+  modified?: () => boolean | null;
 }) {
   const raw = readFileSync('public/office/host.html', 'utf-8');
   const a = raw.indexOf('var shadowQuiet = ');
@@ -1038,7 +1044,7 @@ function bootHostShadow(o: {
   const said: { type: string; payload: Record<string, unknown> }[] = [];
   const win = {
     PKC3OfficeShadow: (api as unknown),
-    PKC3OfficeUnsaved: { anyModified: async () => true },
+    PKC3OfficeUnsaved: { anyModified: async () => (o.modified ? o.modified() : true) },
     __lo: f.lo,
     __loDocPath: '/work/a.docx',
     addEventListener: (t: string, fn: (e: unknown) => void) => { handlers[t] = fn; },
@@ -1046,18 +1052,18 @@ function bootHostShadow(o: {
   const self = { crypto: { randomUUID: () => o.uuid } };
   const boot = new Function(
     'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console',
-    `${raw.slice(a, b)}\n;return { armShadow: armShadow, shadowQuiet: shadowQuiet };`,
+    `${raw.slice(a, b)}\n;return { armShadow: armShadow, shadowQuiet: shadowQuiet, afterSaved: function () { return shadowAfterSaved ? shadowAfterSaved() : null; } };`,
   );
   const host = boot(
     win, self,
     (type: string, payload: Record<string, unknown>) => { said.push({ type, payload }); },
     false, o.patched, gate, { storage: o.storage },
     (fn: () => void) => { intervals.push(fn); return 1; }, () => undefined, { warn: () => undefined },
-  ) as { armShadow(FS: unknown, getToken: () => string, getDoc: () => unknown): void; shadowQuiet: Quiet };
+  ) as { armShadow(FS: unknown, getToken: () => string, getDoc: () => unknown): void; shadowQuiet: Quiet; afterSaved(): Promise<boolean> | null };
   host.armShadow(f.lo.FS, () => o.token, () => o.doc ?? { name: 'a.docx', size: 1234 });
   expect(intervals, '1 秒ごとの見張りを積んでいない').toHaveLength(1);
   return {
-    f, said, handlers, quiet: host.shadowQuiet,
+    f, said, handlers, quiet: host.shadowQuiet, afterSaved: host.afterSaved,
     /** 1 回見張って、書き出し・棚への置き込みが終わるまで待つ。 */
     async tick(): Promise<void> { intervals[0]!(); await new Promise((r) => setTimeout(r, 0)); },
   };
@@ -1225,7 +1231,271 @@ describe('🔴 放送の parity ── 実物の窓(host.html の行)が撃つ�
     expect(i, '本体が失敗を受けていない').toBeGreaterThan(0);
     expect(main.slice(i, i + 600)).toContain("showStatus(shadowFailedNotice(ev.reason), { kind: 'caution' })");
     // 成功は言わない: shadow-written で showStatus を呼ぶ枝が無い
-    const officeBlock = main.slice(main.indexOf('officeWindow.onEvent('), main.indexOf('officeWindow.onEvent(') + 4000);
-    expect(officeBlock, '成功を user へ言っている(うるさい)').not.toContain("'shadow-written'");
+    // 🔴 `shadow-written` を名指しする行(棚の読み直し)は、**状態の行へ言わない**(うるさい)
+    const loud = main.split('\n').filter((l) => l.includes("'shadow-written'") && l.includes('showStatus'));
+    expect(loud, '成功を user へ言っている(うるさい)').toEqual([]);
+    expect(main.split('\n').filter((l) => l.includes("'shadow-written'")).length, '棚の読み直しの行が無い(空振り防止)').toBeGreaterThan(0);
+  });
+});
+
+// ───────────────────────── 段 2: マウスだけの編集 / 保存後の掃除 / 棚の記録 ─────────────────────────
+
+describe('🔴 マウスだけの編集を拾う(isModified の変化 + 変更ありの間のマウスアップ)', () => {
+  it('「変更なし」→「変更あり」へ変わったとき 1 回だけ印が立つ。変更ありのままでは立てない。戻って変わればまた立つ', () => {
+    const q = api.createQuiet();
+    q.observeModified(false, 0);
+    expect(q.isDirty(), '変更なしで印が立った').toBe(false);
+    q.observeModified(true, 1000);
+    expect(q.isDirty(), '変更ありに変わったのに印が立たない(マウスだけの編集を拾えない)').toBe(true);
+    expect(q.take(3999), '静止の起点は聞いた時刻').toBe(false);
+    expect(q.take(4000)).toBe(true);
+    q.observeModified(true, 6000);
+    expect(q.isDirty(), '変更ありのまま聞くたびに印を立てた(毎回書く)').toBe(false);
+    q.observeModified(false, 7000);
+    q.observeModified(true, 8000);
+    expect(q.isDirty(), '保存して戻った後の次の編集を拾えない').toBe(true);
+  });
+
+  it('聞けなかった(null)は前の答えのまま。打った印が立っているときは静止の起点を聞いた時刻で延ばさない', () => {
+    const q = api.createQuiet();
+    q.observeModified(true, 0);
+    q.take(3000);
+    q.observeModified(null, 4000);
+    expect(q.isKnownModified(), 'null で答えが変わった').toBe(true);
+    const q2 = api.createQuiet();
+    q2.typed(0);
+    q2.observeModified(true, 2500);
+    expect(q2.take(3000), '打ち続けた分の静止を、聞いた時刻で延ばした').toBe(true);
+  });
+
+  it('マウスアップは「変更あり」と分かっている間だけ印にする(変更なしの文書でクリックしても書かない)', () => {
+    const q = api.createQuiet();
+    q.pointed(100);
+    expect(q.isDirty(), '変更なしでマウスアップが印を立てた').toBe(false);
+    q.observeModified(true, 200);
+    q.take(3300);
+    expect(q.isDirty()).toBe(false);
+    q.pointed(9000);
+    expect(q.isDirty(), '変更ありの間のマウスアップ(図の 2 回目の移動)を拾えない').toBe(true);
+    expect(q.take(11999)).toBe(false);
+    expect(q.take(12000)).toBe(true);
+  });
+
+  it('feedInput: pointerup / mouseup は pointed へ。修飾キーだけ・Ctrl+S は今までどおり', () => {
+    const q = api.createQuiet();
+    q.observeModified(true, 0);
+    q.take(3000);
+    api.feedInput(q, 'pointerup', {}, 5000);
+    expect(q.isDirty(), 'pointerup が印にならない').toBe(true);
+    q.take(8000);
+    api.feedInput(q, 'mouseup', {}, 9000);
+    expect(q.isDirty(), 'mouseup が印にならない').toBe(true);
+    q.take(12000);
+    api.feedInput(q, 'keydown', { key: 'Shift' }, 13000);
+    expect(q.isDirty(), '修飾キーだけで印が立った').toBe(false);
+    api.feedInput(q, 'keydown', { key: 'a' }, 13000);
+    expect(q.isDirty(), 'keydown の印が壊れた').toBe(true);
+  });
+
+  it('writer: 打たない編集(isModified だけ変わる)も、同じ 1 本の書き口で 1 回書く。pollMs を渡さなければ従来どおり書かない(対照群)', async () => {
+    const clock = { t: 1_000_000 };
+    let modified = false;
+    const polls: number[] = [];
+    const written: number[] = [];
+    const mk = (pollMs?: number) => {
+      const quiet = api.createQuiet();
+      const writer = api.createWriter({
+        now: () => clock.t, quiet, isDead: () => false,
+        isModified: async () => { polls.push(clock.t); return modified; },
+        write: () => ({ ext: 'odt', path: '/p', size: 1 }),
+        shelve: async () => { written.push(clock.t); },
+        discard: () => undefined, onWritten: () => undefined, onFailed: () => undefined,
+        ...(pollMs === undefined ? {} : { pollMs }),
+      });
+      return { quiet, writer };
+    };
+    // 対照群: 聞かない writer は、マウスだけの編集では何も書かない(現状の限界を固定)
+    const off = mk();
+    modified = true;
+    for (let i = 0; i < 10; i += 1) { clock.t += 1000; await off.writer.tick(); }
+    expect(written, 'pollMs が無いのに書いた').toEqual([]);
+    expect(polls, 'pollMs が無いのに聞いた').toEqual([]);
+
+    // 本体: 聞く間隔ごとに聞き、変わったら静止の後に 1 回書く
+    modified = false;
+    const on = mk(api.MODIFIED_POLL_MS);
+    const t0 = clock.t;
+    for (let i = 0; i < 4; i += 1) { clock.t += 1000; expect(await on.writer.tick()).toBe('wait'); }
+    expect(written, '変更が無いのに書いた').toEqual([]);
+    modified = true;                                  // マウスだけで表を挿入した
+    const outcomes: string[] = [];
+    for (let i = 0; i < 10; i += 1) { clock.t += 1000; outcomes.push(await on.writer.tick()); }
+    expect(outcomes.filter((o) => o === 'written'), `マウスだけの編集が書かれない / 何度も書く: ${outcomes.join(',')}`).toHaveLength(1);
+    expect(written).toHaveLength(1);
+    // 聞く回数は毎秒ではない(0.5〜1.6ms の問いでも毎秒は聞かない)
+    const asked = polls.filter((p) => p > t0);
+    expect(asked.length, '毎秒聞いている').toBeLessThanOrEqual(7);
+    expect(asked.length, '聞いていない').toBeGreaterThanOrEqual(3);
+    // 変更ありのまま図を動かす(2 手目): マウスアップが印になる
+    api.feedInput(on.quiet, 'pointerup', {}, clock.t);
+    for (let i = 0; i < 5; i += 1) { clock.t += 1000; await on.writer.tick(); }
+    expect(written, '変更ありのまま 2 手目のマウス操作が書かれない').toHaveLength(2);
+  });
+});
+
+describe('🔴 保存が通ったら、その窓の影を消す(保存した後に変更が無いときだけ)', () => {
+  const mkWriter = (o: { mod: () => boolean | null; unshelve?: () => Promise<boolean>; dead?: () => boolean; write?: () => StoreResult; shelve?: () => Promise<unknown> }) => {
+    const clock = { t: 5_000 };
+    const quiet = api.createQuiet();
+    const calls = { unshelve: 0 };
+    const writer = api.createWriter({
+      now: () => clock.t, quiet, isDead: o.dead ?? (() => false), isModified: async () => o.mod(),
+      write: o.write ?? (() => ({ ext: 'odt', path: '/p', size: 1 })), shelve: o.shelve ?? (async () => undefined),
+      discard: () => undefined, onWritten: () => undefined, onFailed: () => undefined,
+      unshelve: async () => { calls.unshelve += 1; return (o.unshelve ? o.unshelve() : true); },
+    });
+    return { writer, quiet, clock, calls };
+  };
+
+  it('変更なし(false)→ 消す。変更あり(true)/ 聞けなかった(null)→ 消さない(保存の後に打った分は次の影が持つ)', async () => {
+    const a = mkWriter({ mod: () => false });
+    expect(await a.writer.afterSaved()).toBe(true);
+    expect(a.calls.unshelve, '保存した後に変更が無いのに影を消さない').toBe(1);
+    const b = mkWriter({ mod: () => true });
+    expect(await b.writer.afterSaved()).toBe(false);
+    expect(b.calls.unshelve, '保存の後に打った分の影を消した').toBe(0);
+    const c = mkWriter({ mod: () => null });
+    expect(await c.writer.afterSaved()).toBe(false);
+    expect(c.calls.unshelve, '聞けないのに消した').toBe(0);
+  });
+
+  it('止まった窓では消さない / 消す口が投げても保存は成功のまま(投げ返さない)', async () => {
+    const dead = mkWriter({ mod: () => false, dead: () => true });
+    expect(await dead.writer.afterSaved()).toBe(false);
+    expect(dead.calls.unshelve).toBe(0);
+    const bad = mkWriter({ mod: () => false, unshelve: async () => { throw new Error('quota'); } });
+    expect(await bad.writer.afterSaved()).toBe(false);
+  });
+
+  it('影を書いている最中に保存が通ったら、書き終えてから消す(書きかけの棚を消さない)', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    // 保存の後に変更が無かった窓(= 書き終えたら消してよい)
+    const w = mkWriter({ mod: () => false, shelve: () => gate, write: () => ({ ext: 'odt', path: '/p', size: 1 }) });
+    w.quiet.typed(0);
+    w.clock.t = 9_000;
+    // 窓は保存済みと答えるので tick は 'clean' で終わる ── 書いている最中を作るため、いったん変更ありと答える窓を使う
+    let mod = true;
+    const w2 = mkWriter({ mod: () => mod, shelve: () => gate });
+    w2.quiet.typed(0);
+    w2.clock.t = 9_000;
+    const ticking = w2.writer.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w2.writer.isBusy(), '前提: 書いている最中').toBe(true);
+    mod = false;                                          // 保存が通った(以後の窓の答えは「変更なし」)
+    expect(await w2.writer.afterSaved()).toBe(false);
+    expect(w2.calls.unshelve, '書いている最中に棚を消した').toBe(0);
+    release();
+    await ticking;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w2.calls.unshelve, '書き終えた後に消していない(影が残って次に訊く)').toBe(1);
+    void w;
+  });
+});
+
+describe('🔴 棚: どのノートの添付か(lid)を記録する / 棚ごと消す', () => {
+  const dec = (d: FakeDir) => JSON.parse(new TextDecoder().decode(d.files.get('meta.json')!.data)) as Record<string, unknown>;
+
+  it('meta.json に lid を書く。手元の file(local:)・窓の中で作った文書は空', async () => {
+    const root = new FakeDir();
+    await api.shelve(shelveDeps(root, { id: 'lid-1', origin: { name: 'a.docx', size: 1, lid: 'lid-1' } }));
+    expect(dec(shelfOf(root, 'lid-1')!).lid).toBe('lid-1');
+    await api.shelve(shelveDeps(root, { id: 'w-A', origin: { name: 'b.docx', size: 1, lid: localFileToken('1') } }));
+    expect(dec(shelfOf(root, 'w-A')!).lid, '手元の file の合言葉をノートの lid として書いた').toBe('');
+    await api.shelve(shelveDeps(root, { id: 'w-B', origin: { name: 'c.docx', size: 1 } }));
+    expect(dec(shelfOf(root, 'w-B')!).lid).toBe('');
+  });
+
+  it('unshelve は指した棚だけ丸ごと消す。無くても落ちない / OPFS が無ければ false', async () => {
+    const root = new FakeDir();
+    await api.shelve(shelveDeps(root, { id: 'lid-1' }));
+    await api.shelve(shelveDeps(root, { id: 'lid-2' }));
+    expect(await api.unshelve({ storage: root, id: 'lid-1' })).toBe(true);
+    expect(shelfOf(root, 'lid-1'), '棚が残った').toBeUndefined();
+    expect(shelfOf(root, 'lid-2'), '別のノートの棚を消した').toBeTruthy();
+    expect(await api.unshelve({ storage: root, id: 'lid-1' }), '冪等でない').toBe(false);
+    expect(await api.unshelve({ storage: new FakeDir(), id: 'x' })).toBe(false);
+    expect(await api.unshelve({ storage: null, id: 'x' })).toBe(false);
+  });
+});
+
+describe('🔴 host.html の段 2 の配線(実行する行のまま)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const at = (ms: number) => { vi.setSystemTime(ms); };
+  const T0 = 1_700_000_000_000;
+
+  it('マウスアップは変更ありの窓でだけ書かれる。打たずに isModified が変わった編集も書かれる(host の listener / timer を通して)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    let modified = false;
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-1', patched: ['env'], storage: root, modified: () => modified });
+    expect(h.handlers.pointerup, 'pointerup の listener が登録されていない').toBeTypeOf('function');
+    at(T0); await h.tick();                               // 最初に聞く(変更なし)
+    h.handlers.pointerup!({});
+    at(T0 + 4000); await h.tick();
+    expect(h.f.stores, '変更なしの窓でクリックしただけで書いた').toHaveLength(0);
+    modified = true;                                      // 表を挿入した(キーは打っていない)
+    at(T0 + 7000); await h.tick();                        // 聞いて変化を知る(前に聞いたのは T0+4000)
+    at(T0 + 10500); await h.tick();
+    expect(h.f.stores, 'マウスだけの編集が書かれない').toHaveLength(1);
+    expect(shadowsOf(root, 'lid-1')).toHaveLength(1);
+  });
+
+  it('保存が通ったら(afterSaved)その窓の棚が消える。変更が残っていれば消えない', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    let modified: boolean | null = true;
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-1', patched: ['env'], storage: root, modified: () => modified });
+    at(T0); h.handlers.keydown!({ key: 'a' }); at(T0 + 3000); await h.tick();
+    expect(shadowsOf(root, 'lid-1'), '前提: 影が書かれている').toHaveLength(1);
+    expect(await h.afterSaved(), '保存の後に変更があるのに消した').toBe(false);
+    expect(shadowsOf(root, 'lid-1')).toHaveLength(1);
+    modified = false;                                     // 保存して、その後は触っていない
+    expect(await h.afterSaved()).toBe(true);
+    expect(shelfOf(root, 'lid-1'), '保存が通ったのに影が残っている').toBeUndefined();
+  });
+
+  it('棚の名前は合言葉(lid)、meta.json にも lid を書く。保存の放送の直後に afterSaved を呼ぶ(原文)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    const h = bootHostShadow({ uuid: 'A', token: 'lid-9', patched: ['env'], storage: root, doc: { name: 'a.docx', size: 5, lid: 'lid-9' } });
+    at(T0); h.handlers.keydown!({ key: 'a' }); at(T0 + 3000); await h.tick();
+    const meta = JSON.parse(new TextDecoder().decode(shelfOf(root, 'lid-9')!.files.get('meta.json')!.data)) as { lid: string };
+    expect(meta.lid).toBe('lid-9');
+    // 保存の放送(`say('saved'`)の直後に影を消す口を呼ぶ
+    const host = hostCode();
+    const sayIdx = host.indexOf("say('saved', { key: put.key");
+    // ⚠ 呼ぶ**行そのもの**(条件を `false` に替えても字が残る変異に満たされない)
+    const callIdx = host.indexOf('if (shadowAfterSaved) { try { shadowAfterSaved().catch(', sayIdx);
+    expect(sayIdx, '保存の放送の行を抜き出せていない').toBeGreaterThan(0);
+    expect(callIdx, '保存の放送の後に影を消す口を呼んでいない(条件が常に偽でもこの行は残らない)').toBeGreaterThan(sayIdx);
+    expect(callIdx - sayIdx, '別の場所の呼びに満たされている').toBeLessThan(400);
+    // 窓が起動するときの合言葉を、棚の記録へ渡す
+    expect(host).toContain('lid: docToken');
+  });
+
+  it('控えの版で開いたことを窓の中で 1 度だけ言う(document の封筒の fromShadow を読み、開けた後の枝から呼ぶ)', () => {
+    const host = hostCode();
+    expect(host).toContain('docFromShadow = !!(d.payload && d.payload.fromShadow === true);');
+    const fn = host.indexOf('function markOpenedFromShadow() {');
+    expect(fn, '控えの版で開いたと言う関数が無い').toBeGreaterThan(0);
+    expect(host.slice(fn, fn + 400)).toContain('保存していない編集の控えを開いています。保存すると添付に入ります');
+    // 開けた後(doc-open の枝)の中、見張りを畳んだ後から呼ぶ ── 開く前に呼ぶと、LO がまだ文書を持っていない
+    const call = host.indexOf('if (docFromShadow) markOpenedFromShadow();');
+    expect(call, '開けた後の枝から呼んでいない').toBeGreaterThan(0);
+    const open = host.lastIndexOf("say('doc-open'", call);
+    expect(open, '開く前に呼んでいる').toBeGreaterThan(0);
+    expect(host.lastIndexOf('clearInterval(tick);', call), '見張りを畳む前に呼んでいる').toBeGreaterThan(open);
+    expect(call - open, '別の枝に満たされている').toBeLessThan(900);
   });
 });

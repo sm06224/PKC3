@@ -143,3 +143,178 @@ test('🔴 設定に Office 一式の状態と、入れる 2 つの導線が出�
 
   expect(errors).toEqual([]);
 });
+
+/**
+ * 🔴 **保存していない編集の控え(影)が残っていれば、Office で開く前に 2 択を訊く**(#1228 段 2、裁定 Q1 = A / Q2 = A)。
+ *
+ * ⚠ unit は happy-dom で `window.open` も OPFS の実体も無い ── **押す → 確認が出る(窓はまだ開かない)→ 選ぶ →
+ * 窓が開く / 控えが消える**という 1 本の線は実ブラウザでしか通らない。
+ * 🔑 控えは**実物の窓の書き手**(`public/office/office-shadow.js` の `shelve`)で置く ── 棚の綴りを test が手で組むと、
+ *    書く側と読む側の食い違いが両側緑のまま通る。窓の役(「文書をちょうだい」)だけは放送で演じる(本物の LO は要らない)。
+ * 🔑 見るのは 5 つ: ①確認が出ている間は窓が開かない(ポップアップ遮断の折り合い)②やめる → 何も開かず控えも残る
+ *    ③「直前の未保存版で開く」→ 窓が開き、渡る bytes は**控えの版**(`fromShadow`)④「保存済みの版で開く」→ 控えが消え、
+ *    渡る bytes は保存済みの版 ⑤控えが無くなれば、次は訊かずに窓が開く(対照群)。
+ */
+test('🔴 保存していない編集の控えがあれば、開く前に 2 択を訊く(やめる / 控えの版 / 保存済みの版)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await gotoApp(page);
+  // Office 一式の meta を仕込む(`launcher.smoke.spec.ts` の Office タイルと同じ ── 入っているかの判定は meta の有無)。
+  // ⚠ 控え(appOfficePack)は boot で読む ── 仕込んだ後にもう一度起動する(1 回目の起動では仕込めない)
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('pkc3-office-pack', 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('files')) req.result.createObjectStore('files');
+        if (!req.result.objectStoreNames.contains('meta')) req.result.createObjectStore('meta');
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const t = db.transaction('meta', 'readwrite');
+        t.objectStore('meta').put(
+          { version: 'smoke-pack', installedAt: Date.now(), source: 'url', totalBytes: 1, files: [] },
+          'pack',
+        );
+        t.oncomplete = () => { db.close(); resolve(); };
+        t.onerror = () => reject(t.error ?? new Error('idb write failed'));
+      };
+      req.onerror = () => reject(req.error ?? new Error('idb open failed'));
+    });
+  });
+  await gotoApp(page);
+
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '報告書.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    buffer: FAKE_DOCX,
+  });
+  const open = page.locator('[data-pkc-action="open-office"]');
+  await expect(open, 'Office で開くが出ていない(一式の meta を読めていない)').toHaveCount(1, { timeout: 15000 });
+  const lid = await open.getAttribute('data-pkc-office-lid');
+  expect(lid, '保存の戻り先(lid)が載っていない').toBeTruthy();
+
+  // 窓の役を演じる口: 本体が窓へ送る文書の封筒を拾い、「ちょうだい」を送る
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const docs: { bytes: number[]; token: string; fromShadow: boolean | null }[] = [];
+    w.__docs = docs;
+    const listen = new BroadcastChannel('pkc3-office');
+    listen.onmessage = (e) => {
+      const d = e.data as { pkc3Office?: string; payload?: { bytes?: Uint8Array; token?: string; fromShadow?: boolean } };
+      if (d?.pkc3Office === 'document' && d.payload?.bytes) {
+        docs.push({
+          bytes: Array.from(d.payload.bytes),
+          token: String(d.payload.token ?? ''),
+          fromShadow: 'fromShadow' in d.payload ? d.payload.fromShadow ?? null : null,
+        });
+      }
+    };
+    w.__listen = listen;
+    w.__ask = new BroadcastChannel('pkc3-office');
+  });
+  const docs = (): Promise<{ bytes: number[]; token: string; fromShadow: boolean | null }[]> =>
+    page.evaluate(() => (window as unknown as { __docs: never[] }).__docs);
+  const windowAsks = (): Promise<void> =>
+    page.evaluate(() => {
+      (window as unknown as { __ask: BroadcastChannel }).__ask.postMessage({ pkc3Office: 'ready-for-document', payload: {} });
+    });
+  const shelf = (): Promise<string[]> =>
+    page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      try {
+        const top = await root.getDirectoryHandle('pkc3-office-shadow');
+        const out: string[] = [];
+        for await (const [name] of (top as unknown as { entries(): AsyncIterable<[string, unknown]> }).entries()) out.push(name);
+        return out;
+      } catch {
+        return [];
+      }
+    });
+
+  // 控えを置く: 実物の窓の書き手(`office-shadow.js`)で、このノートの棚へ
+  await page.addScriptTag({ url: '/office/office-shadow.js' });
+  await page.evaluate(
+    async ({ lid: id }) => {
+      const SH = (window as unknown as { PKC3OfficeShadow: { safeId(t: string, f: string): string; shelve(d: unknown): Promise<unknown> } }).PKC3OfficeShadow;
+      const bytes = new Uint8Array([7, 7, 7]);
+      // ⚠ 正本(いま取り込んだ添付)より**新しい**時刻で置く(古い控えは訊かない)
+      await SH.shelve({
+        storage: navigator.storage,
+        id: SH.safeId(id, 'w-smoke'),
+        ext: 'docx',
+        size: bytes.length,
+        now: () => Date.now() + 2000,
+        read: (into: Uint8Array, wanted: number, pos: number) => { into.set(bytes.subarray(pos, pos + wanted)); return wanted; },
+        origin: { name: '報告書.docx', size: 1, lid: id },
+      });
+      // 窓の放送で、本体が「在るかもしれない」を読み直す(本物の窓が書いたときと同じ経路)
+      new BroadcastChannel('pkc3-office').postMessage({ pkc3Office: 'shadow-written', payload: { at: Date.now() } });
+    },
+    { lid: lid! },
+  );
+  expect(await shelf(), '前提: 控えが棚に在る').toHaveLength(1);
+  // 放送で本体が棚を読み直すのを待つ。⚠ 押した瞬間に間に合わないと「在るかもしれない」が偽のまま**同期で窓が開く**
+  //    (その回は 1 つ目の確認の assert が窓の数で落ちる ── 気づける)。読み直しは棚の一覧と meta の数件だけ(数 ms)
+  await page.waitForTimeout(500);
+  const popups: import('@playwright/test').Page[] = [];
+  context.on('page', (p) => popups.push(p));
+  await clickReal(page, open);
+
+  // ① 確認が出ている間は、窓を開いていない(押した click の続きで開くのは、答えを押したとき)
+  const rows = page.locator('[data-pkc-field="pick-office-shadow"]');
+  await expect(rows).toHaveText(['直前の未保存版で開く', '保存済みの版で開く']);
+  await expect(rows.first(), '既定の押し所が控えの版でない').toBeFocused();
+  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('保存していない編集の控えが');
+  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('保存済みの版で開くと、この控えは消えます');
+  expect(popups, '確認を出している間に窓を開いた').toHaveLength(0);
+
+  // ② やめる: 何も開かず、控えも残る
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  // ⚠ 閉じても中身は器に残る(器は使い回す)── 見るのは器が閉じたこと
+  await expect(rows.first(), '確認が閉じていない').toBeHidden();
+  await page.waitForTimeout(300);
+  expect(popups, 'やめたのに窓が開いた').toHaveLength(0);
+  expect(await shelf(), 'やめたのに控えを消した').toHaveLength(1);
+
+  // ③ 直前の未保存版で開く: 窓が開き、渡る bytes は控えの版
+  await clickReal(page, open);
+  await expect(rows.first()).toBeVisible();
+  const first = context.waitForEvent('page');
+  await clickReal(page, rows.nth(0));
+  const win1 = await first;
+  expect(win1.url()).toContain('office/host.html');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText(
+    '保存していない編集の控えを Office で開きます。保存すると添付に入ります',
+  );
+  await windowAsks();
+  await expect.poll(async () => (await docs()).length, { message: '文書が窓へ送られない' }).toBe(1);
+  expect((await docs())[0], '控えの版が渡っていない').toEqual({ bytes: [7, 7, 7], token: lid, fromShadow: true });
+  expect(await shelf(), '控えの版で開いただけで控えを消した(保存するまで残す)').toHaveLength(1);
+  await win1.close();
+
+  // ④ 保存済みの版で開く: 控えが消え、渡る bytes は保存済みの版
+  await clickReal(page, open);
+  await expect(rows.first()).toBeVisible();
+  const second = context.waitForEvent('page');
+  await clickReal(page, rows.nth(1));
+  const win2 = await second;
+  await windowAsks();
+  await expect.poll(async () => (await docs()).length, { message: '2 回目の文書が窓へ送られない' }).toBe(2);
+  const saved = (await docs())[1]!;
+  expect(saved.bytes, '保存済みの版が渡っていない').toEqual(Array.from(FAKE_DOCX));
+  expect(saved.fromShadow, '保存済みの版に fromShadow が載った').toBeNull();
+  expect(await shelf(), '保存済みの版で開いたのに控えが残っている').toEqual([]);
+  await win2.close();
+
+  // ⑤ 対照群: 控えが無ければ、訊かずに窓が開く
+  const third = context.waitForEvent('page');
+  await clickReal(page, open);
+  const win3 = await third;
+  expect(win3.url()).toContain('office/host.html');
+  await expect(rows.first(), '控えが無いのに訊いた').toBeHidden();
+  await win3.close();
+
+  expect(errors).toEqual([]);
+});

@@ -41,6 +41,12 @@ import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
 import { toggleArchiveMark } from '@features/archive/zip-browse';
 import type { DiffRow } from '@features/revision/diff-view';
+import {
+  SHADOW_DIALOG_TITLE,
+  SHADOW_OPEN_SAVED_LABEL,
+  SHADOW_OPEN_SHADOW_LABEL,
+  shadowDialogNote,
+} from '@features/office/office-shadow';
 import { buildIconPalette, isTableIcon } from './icon-palette';
 import { diffLineEl } from './diff-line';
 
@@ -948,6 +954,33 @@ export function pickSectionLeaveInApp(
       { label: '移らない', value: 'stay' },
     ],
   }).then((v) => v ?? 'stay');
+}
+
+/**
+ * 🔴 **「Office で開く」を押したとき、保存していない編集の控えがあれば聞く**(#1228 段 2、裁定 Q1 = A)。
+ *
+ * ⚠ **既定の押し所は「直前の未保存版で開く」**(先頭の行に焦点が当たる)── 失う側を既定にしない。
+ * ⚠ **`Escape` / 外を押す / 「やめる」は何も開かない**(`null`)── どちらの版で開くかを決めていない人に、
+ *   片方を選ばせない(「保存済みの版で開く」は控えが消えるので、押し損ねの `Escape` で選ばれては困る)。
+ * ⚠ 字は `features/office/office-shadow.ts`(裁定の字)── ここは並べるだけ。
+ *
+ * @returns `'shadow'` = 控えの版で開く / `'saved'` = 保存済みの版で開く(控えは消える)/ `null` = やめる
+ */
+export function pickOfficeShadowInApp(
+  host: HTMLElement,
+  at: number,
+  now: number = Date.now(),
+): Promise<'shadow' | 'saved' | null> {
+  return pickRowInApp<'shadow' | 'saved'>(host, {
+    title: SHADOW_DIALOG_TITLE,
+    field: 'pick-office-shadow',
+    indexAttr: 'data-pkc-office-shadow-index',
+    note: shadowDialogNote(at, now),
+    rows: [
+      { label: SHADOW_OPEN_SHADOW_LABEL, value: 'shadow' },
+      { label: SHADOW_OPEN_SAVED_LABEL, value: 'saved' },
+    ],
+  });
 }
 
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */

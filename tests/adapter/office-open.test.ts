@@ -30,11 +30,11 @@ const DOCX: OfficeTarget = {
 
 function fakeWindow(): OfficeWindow & {
   opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[];
-  provided: { name: string; bytes: Uint8Array; token: string }[];
+  provided: { name: string; bytes: Uint8Array; token: string; fromShadow: boolean }[];
   alreadyOpen: boolean;
 } {
   const opens: { name?: string; expectDocument?: boolean; bytes?: Uint8Array }[] = [];
-  const provided: { name: string; bytes: Uint8Array; token: string }[] = [];
+  const provided: { name: string; bytes: Uint8Array; token: string; fromShadow: boolean }[] = [];
   const w = {
     opens,
     provided,
@@ -46,8 +46,15 @@ function fakeWindow(): OfficeWindow & {
     // ⚠ **合言葉まで控える。** 2026-08-16 まで第 3 引数を捨てていたので、
     //    「lid を渡すのをやめる」変異が**全緑のまま通った**(= #205 が直した当の
     //    症状「上書き保存が新しいノートを増やす」が、誰にも守られていなかった)
-    provideDocument(name: string, bytes: Uint8Array, token = '') {
-      provided.push({ name, bytes, token });
+    provideDocument(
+      name: string,
+      bytes: Uint8Array,
+      token = '',
+      _images?: unknown,
+      _refresh?: unknown,
+      fromShadow = false,
+    ) {
+      provided.push({ name, bytes, token, fromShadow });
     },
     requestClose() {},
     dispose() {},
@@ -266,5 +273,272 @@ describe('main.ts の配線(#1228 原文 pin)', () => {
     expect(call).toContain('currentAssetKey: currentAttachmentKey');
     const sb = main.indexOf('createOfficeSaveBack({');
     expect(main.slice(sb, sb + 6000)).toContain('await currentAttachmentKey(lid)');
+  });
+});
+
+/**
+ * 🔴 **保存していない編集の控え(影)が在れば、開く前に訊く**(#1228 段 2、裁定 Q1 = A / Q2 = A)。
+ *
+ * 守る主張:
+ * ① 控えが無い(`mayHave` が偽)ときは**今までどおり同期で開く**(ポップアップ遮断に当たらない・訊かない)
+ * ② 在るときは**答えが出るまで窓を開かない**。「直前の未保存版で開く」→ 控えの bytes を `fromShadow` つきで渡す /
+ *    「保存済みの版で開く」→ **控えを消してから**開く / やめる → 何も開かず何も消さない
+ * ③ 開いている窓へ頼むときは訊かない(その窓が自分で訊く)/ lid の無い添付は訊かない
+ * ④ 確認が出せない・控えが消えた、でも開けなくしない
+ */
+describe('編集の控え(影)の確認(#1228 段 2)', () => {
+  const SAVED = new Uint8Array([1, 2, 3]);
+  const SHADOW = new Uint8Array([9, 9]);
+  const NOTE = { ...DOCX, lid: 'L1' };
+
+  function makeShadow(over: {
+    mayHave?: boolean;
+    offer?: { at: number; ext: string } | null;
+    answer?: 'shadow' | 'saved' | null | 'throw' | 'wait';
+    bytes?: Uint8Array | null;
+  } = {}) {
+    const log: string[] = [];
+    let release: (v: 'shadow' | 'saved' | null) => void = () => undefined;
+    const port = {
+      mayHave: vi.fn(() => over.mayHave ?? true),
+      find: vi.fn(async () => {
+        log.push('find');
+        return over.offer === undefined ? { at: 1000, ext: 'docx' } : over.offer;
+      }),
+      readBytes: vi.fn(async () => (over.bytes === undefined ? SHADOW : over.bytes)),
+      discard: vi.fn(async () => { log.push('discard'); }),
+      ask: vi.fn(() => {
+        log.push('ask');
+        if (over.answer === 'throw') return Promise.reject(new Error('dialog'));
+        if (over.answer === 'wait') return new Promise<'shadow' | 'saved' | null>((r) => { release = r; });
+        return Promise.resolve(over.answer === undefined ? 'shadow' : over.answer);
+      }),
+    };
+    const officeWindow = fakeWindow();
+    const origOpen = officeWindow.open.bind(officeWindow);
+    officeWindow.open = ((o: { name?: string; expectDocument?: boolean }) => { log.push('open'); return origOpen(o); }) as typeof officeWindow.open;
+    const notes: string[] = [];
+    const opener = createOfficeOpener({
+      officeWindow,
+      isPackInstalled: () => true,
+      readAsset: async () => SAVED,
+      capability: () => OK,
+      shadow: port,
+      notify: (t) => notes.push(t),
+    });
+    return { opener, officeWindow, port, log, notes, release: (v: 'shadow' | 'saved' | null) => release(v) };
+  }
+  const settle = async (r: ReturnType<ReturnType<typeof makeShadow>['opener']['open']>) => {
+    expect(r.ok && r.settled, '訊く経路なのに settled が無い').toBeTruthy();
+    return r.ok ? r.settled! : r;
+  };
+
+  it('🔴 ① 控えが無ければ今までどおり: 同期で開き、訊かず、探しもしない(対照群)', async () => {
+    const m = makeShadow({ mayHave: false });
+    const r = m.opener.open(NOTE);
+    expect(m.officeWindow.opens, '同期のうちに開いていない').toHaveLength(1);
+    expect(r).toEqual({ ok: true, reused: false });
+    expect(m.port.find).not.toHaveBeenCalled();
+    expect(m.port.ask).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SAVED, token: 'L1', fromShadow: false });
+    expect(m.notes).toEqual([]);
+  });
+
+  it('🔴 ② 在るかもしれないが探したら無かった: 訊かずに開く(1 回の非同期の後)', async () => {
+    const m = makeShadow({ offer: null });
+    const r = m.opener.open(NOTE);
+    expect(m.officeWindow.opens, '探している間に開いた(この経路は見つけてから開く)').toHaveLength(0);
+    expect(await settle(r)).toEqual({ ok: true, reused: false });
+    expect(m.officeWindow.opens).toHaveLength(1);
+    expect(m.port.ask).not.toHaveBeenCalled();
+  });
+
+  it('🔴 ② 「直前の未保存版で開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
+    const m = makeShadow({ answer: 'wait' });
+    const done = settle(m.opener.open(NOTE));
+    await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(1));
+    expect(m.port.ask).toHaveBeenCalledWith({ at: 1000, ext: 'docx' });
+    expect(m.officeWindow.opens, '答えが出る前に窓を開いた').toHaveLength(0);
+    m.release('shadow');
+    await done;
+    expect(m.officeWindow.opens).toHaveLength(1);
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SHADOW, token: 'L1', fromShadow: true });
+    expect(m.port.discard, '控えの版で開くのに控えを消した').not.toHaveBeenCalled();
+    expect(m.notes).toEqual(['保存していない編集の控えを Office で開きます。保存すると添付に入ります']);
+  });
+
+  it('🔴 ② 「保存済みの版で開く」: 控えを消してから開く(順番)/ 保存済みの bytes・fromShadow なし', async () => {
+    const m = makeShadow({ answer: 'saved' });
+    await settle(m.opener.open(NOTE));
+    expect(m.log, '消してから開く').toEqual(['find', 'ask', 'discard', 'open']);
+    expect(m.port.discard).toHaveBeenCalledWith('L1');
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SAVED, token: 'L1', fromShadow: false });
+    expect(m.notes).toEqual([]);
+  });
+
+  it('🔴 ② やめる: 何も開かず、何も消さず、cancelled を返す', async () => {
+    const m = makeShadow({ answer: null });
+    const res = await settle(m.opener.open(NOTE));
+    expect(res).toEqual({ ok: true, reused: false, cancelled: true });
+    expect(m.officeWindow.opens).toHaveLength(0);
+    expect(m.port.discard, 'やめたのに控えを消した').not.toHaveBeenCalled();
+    expect(m.port.readBytes).not.toHaveBeenCalled();
+  });
+
+  it('🔴 ③ 開いている窓へ頼むときは訊かない(窓が自分の未保存を訊く)/ lid の無い添付も訊かない', async () => {
+    const a = makeShadow();
+    a.officeWindow.alreadyOpen = true;
+    const r = a.opener.open(NOTE);
+    expect(r).toEqual({ ok: true, reused: true });
+    expect(a.port.mayHave).not.toHaveBeenCalled();
+    expect(a.port.ask).not.toHaveBeenCalled();
+    const b = makeShadow();
+    expect(b.opener.open(DOCX)).toEqual({ ok: true, reused: false });
+    expect(b.port.mayHave).not.toHaveBeenCalled();
+    expect(b.officeWindow.opens, '同期で開いていない').toHaveLength(1);
+  });
+
+  it('③ 開けない添付(Office でない / 使えない環境)は訊く前に理由を返す', () => {
+    const m = makeShadow();
+    const r = m.opener.open({ name: 'a.png', mime: 'image/png', assetKey: 'x', lid: 'L1' });
+    expect(r.ok).toBe(false);
+    expect(m.port.mayHave).not.toHaveBeenCalled();
+  });
+
+  it('同じノートの確認が出ている間の 2 回目の押しは、確認を重ねない(1 つ目の答えが開く)。答えが出たらまた訊ける', async () => {
+    const m = makeShadow({ answer: 'wait' });
+    const first = settle(m.opener.open(NOTE));
+    await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(1));
+    const second = m.opener.open(NOTE);
+    expect(second).toEqual({ ok: true, reused: false, cancelled: true });
+    expect(m.port.ask, '確認を重ねた').toHaveBeenCalledTimes(1);
+    m.release('shadow');
+    await first;
+    expect(m.officeWindow.opens, '窓が 2 つ開いた').toHaveLength(1);
+    // 答えが出た後は、また訊ける
+    const third = m.opener.open(NOTE);
+    expect(third.ok && third.settled, '答えの後に訊けない').toBeTruthy();
+    await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(2));
+    m.release('shadow');
+  });
+
+  it('🔴 ④ 確認を出せなかったら、控えには触れず保存済みの版で開く(開けなくしない)', async () => {
+    const m = makeShadow({ answer: 'throw' });
+    const res = await settle(m.opener.open(NOTE));
+    expect(res).toEqual({ ok: true, reused: false });
+    expect(m.port.discard, '確認を出せなかったのに控えを消した').not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SAVED, fromShadow: false });
+  });
+
+  it('🔴 ④ 控えの版を選んだ後で控えが読めなくなっていたら、保存済みの版で開き、そう言う(黙って別の版にしない)', async () => {
+    const m = makeShadow({ answer: 'shadow', bytes: null });
+    await settle(m.opener.open(NOTE));
+    await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
+    expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SAVED, fromShadow: false });
+    expect(m.notes).toEqual(['保存していない編集の控えを読めませんでした。保存済みの版で開きます']);
+  });
+
+  it('確認のために探す・訊く口を省いた呼び側(deps.shadow なし)は今までと 1 バイトも変わらない', () => {
+    const { opener, officeWindow } = make();
+    expect(opener.open({ ...DOCX, lid: 'L1' })).toEqual({ ok: true, reused: false });
+    expect(officeWindow.opens).toHaveLength(1);
+  });
+});
+
+/**
+ * 🔴 **本物の OfficeWindow と繋ぐ**(§7)── 封筒に `fromShadow` が載り、窓が作り直されて文書を求め直したときも
+ * **控えの版**が(控えがまだ在れば)送られる。偽の窓は第 6 引数を覚えているだけなので、この繋ぎは別に要る。
+ */
+describe('編集の控えの版で開いた窓が、作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+  function wired(shadow: { bytes: () => Uint8Array | null }) {
+    const sent: { type: string; payload: Record<string, unknown> }[] = [];
+    let handler: ((ev: MessageEvent) => void) | null = null;
+    const ow = new OfficeWindow({
+      openWindow: () => {},
+      makeChannel: () => ({
+        postMessage(d: unknown) {
+          const m = d as { pkc3Office: string; payload?: Record<string, unknown> };
+          sent.push({ type: m.pkc3Office, payload: m.payload ?? {} });
+        },
+        close() {},
+        get onmessage() { return handler; },
+        set onmessage(fn) { handler = fn; },
+      }),
+      baseUrl: 'https://app.example/',
+    });
+    const opener = createOfficeOpener({
+      officeWindow: ow,
+      isPackInstalled: () => true,
+      readAsset: async () => new Uint8Array([1]),
+      capability: () => OK,
+      currentAssetKey: async () => null,
+      shadow: {
+        mayHave: () => true,
+        find: async () => ({ at: 1, ext: 'docx' }),
+        readBytes: async () => shadow.bytes(),
+        discard: async () => undefined,
+        ask: async () => 'shadow',
+      },
+    });
+    const ready = (): void => { handler?.({ data: { pkc3Office: 'ready-for-document', payload: {} } } as MessageEvent); };
+    const docs = () => sent.filter((x) => x.type === 'document');
+    return { opener, ready, docs };
+  }
+
+  it('🔴 封筒に fromShadow が載る(控えの版のときだけ)。保存済みの版の封筒には載せない', async () => {
+    const w = wired({ bytes: () => new Uint8Array([7]) });
+    const r = w.opener.open({ ...DOCX, lid: 'L1' });
+    await (r.ok ? r.settled! : Promise.resolve());
+    await new Promise((res) => setTimeout(res, 0));
+    w.ready();
+    expect(w.docs()).toHaveLength(1);
+    expect(w.docs()[0]!.payload).toMatchObject({ token: 'L1', bytes: new Uint8Array([7]), fromShadow: true });
+  });
+
+  it('🔴 読み込み直しの 2 回目の求めには、控えがまだ在れば控え(最新)を fromShadow つきで送る', async () => {
+    let cur: Uint8Array | null = new Uint8Array([7]);
+    const w = wired({ bytes: () => cur });
+    const r = w.opener.open({ ...DOCX, lid: 'L1' });
+    await (r.ok ? r.settled! : Promise.resolve());
+    await new Promise((res) => setTimeout(res, 0));
+    w.ready();
+    cur = new Uint8Array([8]);                  // 窓が控えを書き直した(最新)
+    w.ready();
+    await vi.waitFor(() => expect(w.docs()).toHaveLength(2));
+    expect(w.docs()[1]!.payload).toMatchObject({ bytes: new Uint8Array([8]), fromShadow: true });
+  });
+
+  it('控えが消えていたら、読み込み直しは保存済みの最新を送る(fromShadow なし)', async () => {
+    let cur: Uint8Array | null = new Uint8Array([7]);
+    const w = wired({ bytes: () => cur });
+    const r = w.opener.open({ ...DOCX, lid: 'L1' });
+    await (r.ok ? r.settled! : Promise.resolve());
+    await new Promise((res) => setTimeout(res, 0));
+    w.ready();
+    cur = null;
+    w.ready();
+    await vi.waitFor(() => expect(w.docs()).toHaveLength(2));
+    expect(w.docs()[1]!.payload.bytes).toEqual(new Uint8Array([1]));
+    expect('fromShadow' in w.docs()[1]!.payload, '保存済みの版に fromShadow が載った').toBe(false);
+  });
+});
+
+describe('main.ts の配線(#1228 段 2 の原文 pin)', () => {
+  const main = readFileSync('src/main.ts', 'utf-8');
+  it('🔴 控えの口を opener へ渡し、確認は app-dialog の 1 本。「在るかもしれない」を窓の放送で保つ。起動時に掃除する', () => {
+    const start = main.indexOf('createOfficeOpener({');
+    const call = main.slice(start, main.indexOf('    currentAssetKey', start));
+    expect(call).toContain('shadow: { ...officeShadows, ask: (offer) => pickOfficeShadowInApp(root, offer.at) }');
+    // 窓の放送のたびに読み直す(3 種類とも)── 偽陰性は控えを黙って見逃す
+    const ev = main.split('\n').find((l) => l.includes("ev.type === 'shadow-written'") && l.includes('refresh'));
+    expect(ev, '放送で棚を読み直していない').toBeTruthy();
+    for (const t of ["'shadow-written'", "'saved'", "'closed'"]) expect(ev).toContain(t);
+    expect(main).toContain('void officeShadows.sweep();');
+    // 結果の受け方: settled を待って、もう一度同じ報告に通す(失敗の理由・開いている窓への一言を落とさない)
+    expect(main).toContain('else if (r.settled !== undefined) void r.settled.then(report);');
   });
 });
