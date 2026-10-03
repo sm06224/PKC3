@@ -118,6 +118,19 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 ⚠ 「触った file の spec」では引けない ── 読み手は「ステータスバーが見えていない」を
 **前提**として持っているだけで、変えた file の名前も字も含んでいない。
 
+#### 🔴 **お知らせを 1 件足すだけでも「共有面」である**(2026-10-03、PR #1313)
+
+⚠ 起動直後のお知らせのカードは shell の下の行に出て、**読む面の器の高さを食う**(上限 30vh)。
+5 項目のお知らせ(1280 幅で 30vh まで伸びる)を足した commit **だけ**で、全量 smoke の
+「45 行の章は見出しもボタンも画面に収まる(1280x800)」が落ちた ── 章の箱の上限 `100vh − 300px` が
+「読む面の高さは常に viewport − 206px」を前提にしており、**カードが出ている間は偽**だった
+(器 560px、見える 526px、箱 530px。見出しが帯の下へ 8px)。bisect:main 緑 / 直しの commit 緑 / お知らせの commit 赤。
+🔑 **お知らせは文字列の追加ではなく、起動直後の版面の変更**である ── 字数が増えれば読む面が縮む。
+着地前の全量 smoke は**お知らせを足した後の sha**で回す(足す前の sha の緑は、この壊れ方を見ていない)。
+🔑 そして直すのは test でもお知らせの字数でもなく**製品**(`100vh` を器の高さと `min()` で結ぶ ──
+`read-columns.ts` の `exposePaneHeight` / `--pkc-pane-h`)。CSS で `100vh` から引く規則を書くときは
+**「shell の下の行(お知らせ / 注意 / 収録中 / タイマー)が出ている間も成り立つか」**を 1 度問う。
+
 **そのあとに**:
 
 ```bash
@@ -241,6 +254,22 @@ git rebase --onto origin/main <残っている squash 前の commit>
 git push --force-with-lease origin <branch>
 git stash pop
 ```
+
+### 🔴 commit と push の前に `git status -sb` を読む ── HEAD が detached なら push は何も運ばない(2026-10-03)
+
+⚠ 全量 smoke を頼んだ runner に「`git checkout <sha>` してから回せ」と書いたら、runner は
+**依頼者の作業ツリーで**それを打った(worktree ではなく)── 私の HEAD は detached になり、
+その上に積んだ直しの commit は branch に乗らず、`git push -u origin <branch>` は
+**「Everything up-to-date」で成功した顔**をした(`| tail -1` で切っていたので読まなかった)。
+PR の head は古い sha のまま、CI もその sha で緑 ── **安全網の check-in で PR の head を引いて初めて気づいた**。
+🔑 **手順**:
+1. commit の前に **`git status -sb` の 1 行目**を読む ── `## HEAD (no branch)` なら、まず
+   `git branch -f <branch> HEAD && git checkout <branch>`(直しは捨てない)
+2. push の出力は **`tail -1` で切らない** ── `<old>..<new>  <branch> -> <branch>` の行が無い push は何も運んでいない
+3. push したら **PR の `head.sha`** を引いて、自分の `git log -1` と同じかを見る(CI の緑は head の緑でしかない)
+4. サブエージェントに `git checkout` を頼むときは、**worktree の path を命令に書く**
+   (`cd <worktree> && git checkout …`)── cwd は `/home/user` へ戻ることがあり、戻った先から
+   `cd /home/user/PKC3` されると依頼者のツリーが動く(`.claude/agents/pkc3-runner.md` 段 0)
 
 ### 🔑 1 本の branch で主題を 2 つ以上並行させる ── **local branch に停めて、merge 後に載せ直す**(2026-09-02)
 
