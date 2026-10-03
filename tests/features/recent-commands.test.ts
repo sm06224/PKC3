@@ -11,8 +11,8 @@ import {
   splitRecentRows,
 } from '../../src/features/palette/recent-commands';
 
-const row = (id: string) => ({ id, label: `名前-${id}` });
-const ROWS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(row);
+const row = (id: string, ready = true) => ({ id, label: `名前-${id}`, ready });
+const ROWS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((id) => row(id));
 
 describe('pushRecentCommand', () => {
   it('新しい物が先頭に来る', () => {
@@ -74,6 +74,34 @@ describe('splitRecentRows', () => {
     expect(none.recent).toEqual([]);
     expect(none.rest).toBe(ROWS);
     expect(splitRecentRows('', ROWS, []).recent).toEqual([]);
+  });
+
+  /**
+   * 🔴 **いま押せない操作は節に出さない**(#274 Q1 = A。2026-10-03)。⚠ 記録は消さない ── 押せるように
+   * なれば戻る。節の先頭が押せない行だと、そこで `Enter` / `↓` が空振りする。
+   */
+  it('🔴 押せない操作は節から外れ、残りに残る(記録を消さない・押せるようになれば戻る)', () => {
+    const rows = [row('a'), row('b', false), row('c'), row('d')];
+    const { recent, rest } = splitRecentRows('', rows, ['b', 'c', 'a']);
+    expect(recent.map((r) => r.id), '押せない b が節に出ている').toEqual(['c', 'a']);
+    expect(rest.map((r) => r.id), '節から外した b は普通の一覧に残る(理由つきで並ぶ)').toEqual(['b', 'd']);
+    // 対照群: 同じ記録でも、押せるようになれば節の先頭へ戻る(記録は消えていない)
+    const back = splitRecentRows('', [row('a'), row('b'), row('c'), row('d')], ['b', 'c', 'a']);
+    expect(back.recent.map((r) => r.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('🔴 5 件は「押せる物だけ」で数える(押せない行が枠を食わない)', () => {
+    const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => row(id, id !== 'g' && id !== 'f'));
+    // 新しい順に g, f(押せない 2 件)→ e, d, c, b, a(押せる 5 件)
+    const { recent } = splitRecentRows('', rows, ['g', 'f', 'e', 'd', 'c', 'b', 'a']);
+    expect(recent.map((r) => r.id), '押せない 2 件が 5 枠を食った').toEqual(['e', 'd', 'c', 'b', 'a']);
+  });
+
+  it('押せる物が 1 つも無ければ、節は空(見出しも出ない)', () => {
+    const rows = [row('a', false), row('b', false)];
+    const none = splitRecentRows('', rows, ['a', 'b']);
+    expect(none.recent).toEqual([]);
+    expect(none.rest).toBe(rows);
   });
 
   it('同じ id が重ねて入っていても 1 行', () => {

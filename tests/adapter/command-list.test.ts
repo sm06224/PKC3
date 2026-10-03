@@ -10,7 +10,7 @@
  *   同じ画面に立てる。⚠ 片方を stub にすると、出し入れの食い違いが両方緑のまま通る。
  */
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -28,6 +28,8 @@ import { paintCommandList } from '../../src/adapter/ui/render/command-list';
 import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { appSearchHistory } from '../../src/adapter/platform/search-history-store';
 import { appRecentCommands } from '../../src/adapter/platform/recent-commands-store';
+import { appMessagePost } from '../../src/adapter/platform/message-post';
+import { SYSTEM_MESSAGE_LID } from '../../src/features/message/message-log';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
 import { KEY_COMMANDS, type KeyCommand } from '../../src/features/keymap';
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
@@ -534,18 +536,84 @@ describe('最近使った操作(`>` だけのとき)', () => {
     expect(appRecentCommands.list()).toEqual(['view-query']);
   });
 
-  it('🔴 `>` だけの Enter は、最近使った操作が先頭にあっても何もしない(打った覚えのない実行をしない)', async () => {
+  /**
+   * 🔴 **`>` だけの `Enter` は、実行せずに先頭の行へ焦点を移す**(#1206 D8 は守る → #274 Q2 = C、2026-10-03)。
+   * user から見た物語:`>` だけ打って Enter → 何も起きないように見えていた → 先頭の行(最近使った操作が
+   * あればその先頭)に焦点が移る → もう一度 Enter(行はボタンなので既定が実行する)。
+   */
+  it('🔴 `>` だけの Enter は、最近使った操作が先頭にあっても実行せず、その行へ焦点を移す(`↓` と同じ)', async () => {
     const { root, sent } = setup();
     appRecentCommands.push('view-query');
     type(root, '>');
     expect(orderOf(root)[0], '前提が崩れている').toBe('view-query');
+    field(root).focus();
     sent.length = 0;
     keydown(field(root), { key: 'Enter' });
     await tick();
     expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '`>` だけの Enter で走った').toEqual([]);
-    // `↓` は節の先頭の行へ降りる(同じ行のボタン)
+    expect(document.activeElement, 'Enter で先頭の行へ焦点が移っていない').toBe(rowOf(root, 'view-query'));
+    expect(field(root).value, '焦点を移しただけなのに欄が変わった').toBe('>');
+    // 次の Enter = 行(ボタン)の既定の実行。⚠ 実ブラウザでは Enter が click を起こす ── ここでは click で代える
+    (document.activeElement as HTMLButtonElement).click();
+    await tick();
+    expect(sent.some((a) => a.type === 'SET_VIEW_MODE'), '焦点が移った行を押しても実行されない').toBe(true);
+    // 対照群 `↓` も同じ行へ降りる(Enter はそれと同じ動きになった)
+    type(root, '>');
+    field(root).focus();
     keydown(field(root), { key: 'ArrowDown' });
     expect(document.activeElement).toBe(rowOf(root, 'view-query'));
+  });
+
+  it('🔴 `>` だけ(空白だけ含む)の Enter も同じ。記録が無ければ「押せる先頭の行」へ(押せない行は飛ばす)', async () => {
+    const { root, sent } = setup();
+    type(root, '>  ');
+    const firstReady = rows(root).find((b) => !b.disabled);
+    expect(firstReady, '前提が崩れている(押せる行が無い)').toBeDefined();
+    field(root).focus();
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    expect(document.activeElement).toBe(firstReady);
+    expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '空白だけの Enter で走った').toEqual([]);
+  });
+
+  it('🔴 変換確定の Enter では焦点を動かさない(日本語入力のまま `＞` を打つ人)', () => {
+    const { root } = setup();
+    type(root, '＞');
+    field(root).focus();
+    keydown(field(root), { key: 'Enter', isComposing: true });
+    expect(document.activeElement, '変換確定の Enter で焦点が動いた').toBe(field(root));
+  });
+
+  it('🔴 名前を 1 字でも打った後の Enter は、今までどおり先頭の押せる行を実行する(対照群)', async () => {
+    const { root, sent } = setup();
+    type(root, '>集計');
+    field(root).focus();
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    await tick();
+    expect(sent.some((a) => a.type === 'SET_VIEW_MODE'), '名前を打った後の Enter が実行しなくなった').toBe(true);
+  });
+
+  /**
+   * 🔴 **いま押せない操作は「最近使った操作」の節から外す**(#274 Q1 = A、2026-10-03)。
+   * ⚠ 記録は消さない(押せるようになれば戻る)。⚠ 押せる物だけで 5 件まで。
+   */
+  it('🔴 押せない操作は節に出ず、普通の一覧に灰色で残る。記録は消えない(押せる物は出る = 対照群)', () => {
+    const { root } = setup();
+    // `format-ruby` は本文の欄が要る操作 ── 左の欄からは押せない(上の「断られた回」の test と同じ前提)
+    appRecentCommands.push('format-ruby');
+    appRecentCommands.push('view-query');
+    type(root, '>');
+    expect(orderOf(root)[0], '押せる操作が節の先頭に出ていない').toBe('view-query');
+    expect(orderOf(root).indexOf('format-ruby'), '押せない操作が節に居る').toBeGreaterThan(1);
+    expect(rowOf(root, 'format-ruby')!.disabled, '前提が崩れている(押せる行だった)').toBe(true);
+    expect(appRecentCommands.list(), '押せないからといって記録まで消した').toEqual(['view-query', 'format-ruby']);
+    // 押せない物しか憶えていなければ、見出しごと出ない
+    appRecentCommands.clear();
+    appRecentCommands.push('format-ruby');
+    type(root, '');
+    type(root, '>');
+    expect(headingOf(root).length, '押せない物だけなのに見出しが出ている').toBe(0);
   });
 
   it('🔴 描き直しの指紋に節が入っている(同じ行が節へ動いたら組み直す)', () => {
@@ -735,6 +803,33 @@ describe('main.ts の配線(#274 段①)', () => {
     for (const painted of ['browse.render(', 'center.render(', 'inspector.render(', 'appPhone.render(']) {
       expect(block.indexOf(painted), `${painted} が無い`).toBeGreaterThanOrEqual(0);
       expect(block.indexOf(painted), `${painted} より前に呼んでいる`).toBeLessThan(at);
+    }
+  });
+});
+
+/**
+ * 🔴 **左の `>` の一覧にも「メッセージを開く」が出る**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
+ * ⚠ 開く実体は「システム → メッセージ」の押しボタンと同じ 1 本(開く + 既読の 2 手)。
+ */
+describe('メッセージを開く(`>` の一覧)', () => {
+  it('🔴 `>メッセージ` で出て、押すとメッセージのノートが開き、既読にする(押しボタンと同じ 2 手)', async () => {
+    const { root, sent } = setup();
+    const mark = vi.spyOn(appMessagePost, 'markRead').mockImplementation(() => undefined);
+    try {
+      type(root, '>メッセージ');
+      const row = rowOf(root, 'open-messages');
+      expect(row, '「メッセージを開く」が `>` の一覧に出ていない').toBeDefined();
+      expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+      row!.click();
+      await tick();
+      expect(
+        sent.some((a) => a.type === 'MESSAGES_READ' && a.lid === SYSTEM_MESSAGE_LID),
+        'メッセージのノートが開かない',
+      ).toBe(true);
+      expect(mark, '開いたのに既読にしていない(押しボタンと食い違う)').toHaveBeenCalledTimes(1);
+      expect(appRecentCommands.list(), '実行したのに「最近使った操作」へ積んでいない').toEqual(['open-messages']);
+    } finally {
+      mark.mockRestore();
     }
   });
 });

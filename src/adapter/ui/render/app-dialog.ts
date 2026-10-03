@@ -35,6 +35,7 @@
 
 /** 押した結果。⚠ `Escape` と「やめる」は**同じ**(取り消し)。 */
 import type { PaletteRow } from '@features/palette/palette-rows';
+import { RECENT_COMMANDS_HEADING, splitRecentRows } from '@features/palette/recent-commands';
 import type { EntryPickRow } from '@features/entry-ref/entry-pick';
 import type { SnippetChoice } from '@features/snippet/snippet-menu';
 import { moveMark, toggleMark } from '@features/clipboard/scrap';
@@ -1069,11 +1070,15 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
  *
  * @param rows 探し語を受けて一覧を返す関数。⚠ **打つたびに呼ぶ**ので、
  *   「いま押せるか」も**そのときの画面**で決まる(開いた瞬間で固めない)
+ * @param recentIds 🔴 **最近使った操作の id**(新しい順。#274 Q3 = A)。⚠ **打つたびに呼ぶ**
+ *   (別のタブで使った物も出る)。探し語が空のときだけ、一覧の先頭に「最近使った操作」の節を出す
+ *   (判定は `splitRecentRows` 1 か所 ── 左の列の `>` と同じ)。省けば節は出ない。
  * @returns 選んだコマンドの id。`Escape` / 「やめる」なら `null`
  */
 export function pickCommandInApp(
   host: HTMLElement,
   rows: (query: string) => readonly PaletteRow[],
+  recentIds: () => readonly string[] = () => [],
 ): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
@@ -1118,7 +1123,14 @@ export function pickCommandInApp(
         list.append(none);
         return;
       }
-      for (const r of found) {
+      const { recent, rest } = splitRecentRows(input.value, found, recentIds());
+      if (recent.length > 0) {
+        const heading = document.createElement('p');
+        heading.setAttribute('data-pkc-field', 'palette-recent-heading');
+        heading.textContent = RECENT_COMMANDS_HEADING;
+        list.append(heading);
+      }
+      for (const r of [...recent, ...rest]) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.setAttribute('data-pkc-field', 'palette-row');

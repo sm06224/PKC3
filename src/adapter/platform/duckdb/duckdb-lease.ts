@@ -109,7 +109,14 @@ export interface DuckDbLeaseOptions {
   clearTimer?: (h: unknown) => void;
 }
 
-const DEFAULT_IDLE_MS = 30_000;
+/**
+ * 🔴 export している理由:**進捗の字が秒数を言う**(`render/sql.ts` の `runningNote`。#682 Gemini 裁定 A、
+ * 2026-10-03「30 秒使わなかったあとは…」)。⚠ 字に `30` を直書きすると、ここを変えた日に**字が嘘になる** ──
+ * 字はこの定数から導く。⚠ **秒を正本にして、ミリ秒はそこから作る**(字の側で `/ 1000` を書かせない ──
+ * `tests/features/elapsed-text.test.ts` が「ミリ秒を割って時刻を組む場所」を `elapsed-text.ts` だけに保っている)。
+ */
+export const DEFAULT_IDLE_SEC = 30;
+export const DEFAULT_IDLE_MS = DEFAULT_IDLE_SEC * 1000;
 
 export class DuckDbLease {
   private handle: DuckDbHandle | null = null;
