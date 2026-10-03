@@ -242,6 +242,8 @@ import {
 } from '@features/keymap';
 import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
 import { commandQueryOf } from '@features/palette/command-query';
+import { splitRecentRows } from '@features/palette/recent-commands';
+import { appRecentCommands } from '@adapter/platform/recent-commands-store';
 import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
@@ -4669,7 +4671,17 @@ export function repaintCommandList(
   if (q === null) return;
   const host = root.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
   if (host === null) return;
-  paintCommandList(host, commandRowsFor(root, dispatcher, keymap, q, null));
+  /**
+   * 🔴 **`>` だけのとき、先頭に「最近使った操作」を出す**(#274)。⚠ 「名前がまだ無いか」の
+   *   判定は `splitRecentRows` 1 か所(ここでは見ない)。⚠ 読むたびに保存を引く
+   *   (別のタブで使った操作も出る)。
+   */
+  const { recent, rest } = splitRecentRows(
+    q,
+    commandRowsFor(root, dispatcher, keymap, q, null),
+    appRecentCommands.list(),
+  );
+  paintCommandList(host, rest, recent);
 }
 
 
@@ -5550,6 +5562,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       { root, dispatcher, keymap: appKeymap, notify: (t) => services.showStatus?.(t) },
       {
         onDone: () => {
+          // 🔴 実行が**済んだ**ときだけ憶える(相手を選ぶ小窓をやめた回は呼ばれない)。
+          //   ⚠ 鍵は label ではなく id(改名で変わらない)
+          appRecentCommands.push(id);
           if (dispatcher.getState().filterQuery === from)
             dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
         },

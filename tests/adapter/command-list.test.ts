@@ -27,6 +27,7 @@ import {
 import { paintCommandList } from '../../src/adapter/ui/render/command-list';
 import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { appSearchHistory } from '../../src/adapter/platform/search-history-store';
+import { appRecentCommands } from '../../src/adapter/platform/recent-commands-store';
 import { appKeymap } from '../../src/adapter/ui/render/keymap';
 import { KEY_COMMANDS, type KeyCommand } from '../../src/features/keymap';
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
@@ -55,6 +56,8 @@ function setup() {
   document.body.innerHTML = '';
   resetAppDialogForTest();
   appSearchHistory.clear();
+  // ⚠ 端末の記録(localStorage)は test をまたぐ ── 空から始める
+  appRecentCommands.clear();
   const root = document.createElement('div');
   document.body.append(root);
   const regions = buildShell(root);
@@ -402,6 +405,137 @@ describe('操作の一覧の描き直し', () => {
     // 対照群 ── 押せるかが変われば組み直す
     expect(paintCommandList(host, mk(false))).toBe(true);
     expect(host.querySelector('button')!.disabled).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **`>` だけのとき、先頭に「最近使った操作」が出る**(#274。🟣 Gemini 裁定 A)。
+ *
+ * user から見た物語:探す欄に `>` を打つ → 前に使った操作が上に並んでいる → 押す。
+ * 名前を打ち始めたら、いつもの絞り込みだけ。
+ */
+describe('最近使った操作(`>` だけのとき)', () => {
+  const headingOf = (root: HTMLElement) =>
+    listOf(root).querySelectorAll('[data-pkc-field="command-recent-heading"]');
+  const orderOf = (root: HTMLElement) => rows(root).map((b) => b.getAttribute('data-pkc-command'));
+  /** 押せる行の id を上から n 個(空の記録での並び)。 */
+  function readyIds(root: HTMLElement, n: number): string[] {
+    type(root, '>');
+    const ids = rows(root)
+      .filter((b) => !b.disabled)
+      .map((b) => b.getAttribute('data-pkc-command')!);
+    type(root, '');
+    expect(ids.length, '前提が崩れている(押せる操作が足りない)').toBeGreaterThanOrEqual(n);
+    return ids.slice(0, n);
+  }
+
+  it('🔴 この一覧から実行すると憶え、次に `>` だけを打つと先頭に出る(同じ操作は 1 行)', async () => {
+    const { root } = setup();
+    // 対照群 ── 何も使っていないうちは節が無い
+    type(root, '>');
+    expect(headingOf(root).length, '前提が崩れている(使っていないのに節が出ている)').toBe(0);
+    const before = orderOf(root);
+    type(root, '>集計');
+    rowOf(root, 'view-query')!.click();
+    await tick();
+    expect(appRecentCommands.list(), '実行したのに憶えていない').toEqual(['view-query']);
+    expect(field(root).value, '前提が崩れている(実行したのに `>` が残っている)').toBe('');
+    type(root, '>');
+    expect(headingOf(root).length, '見出しが 1 行でない').toBe(1);
+    expect(headingOf(root)[0]!.textContent).toBe('最近使った操作');
+    expect(orderOf(root)[0], '最近使った操作が先頭に出ていない').toBe('view-query');
+    expect(
+      orderOf(root).filter((id) => id === 'view-query').length,
+      '同じ操作が 2 行並んでいる',
+    ).toBe(1);
+    // 普通の一覧がその下に続く(全部の操作が 1 行ずつ残っている)。
+    // ⚠ 並びは比べない ── 実行で画面の状態が動き、「いま押せるか」が変わる操作が在る
+    expect([...orderOf(root)].sort(), '普通の一覧が下に続いていない').toEqual([...before].sort());
+  });
+
+  it('🔴 5 件まで・新しい順(6 件目を憶えると最古が落ちる)', () => {
+    const { root } = setup();
+    const ids = readyIds(root, 6);
+    for (const id of ids) appRecentCommands.push(id); // 最後に push した = 6 番目が最新
+    type(root, '>');
+    const shown = orderOf(root).slice(0, 5);
+    expect(shown, '新しい順に 5 件').toEqual([ids[5], ids[4], ids[3], ids[2], ids[1]]);
+    // 最古は節から落ちる(普通の一覧には残る)
+    expect(orderOf(root).slice(5).includes(ids[0]!), '最古の操作が一覧から消えた').toBe(true);
+    expect(headingOf(root).length).toBe(1);
+  });
+
+  it('🔴 名前を 1 字でも打ち始めたら、節は出ず、いつもの絞り込みだけ', () => {
+    const { root } = setup();
+    appRecentCommands.push('view-query');
+    type(root, '>');
+    expect(headingOf(root).length, '前提が崩れている(`>` だけで節が出ていない)').toBe(1);
+    type(root, '>ヘ');
+    expect(headingOf(root).length, '打ち始めたのに節が出ている').toBe(0);
+    const typed = orderOf(root);
+    appRecentCommands.clear();
+    type(root, '>ヘ');
+    expect(typed, '記録の有無で絞り込みの結果が変わった').toEqual(orderOf(root));
+    // 空白だけは「名前が無い」のまま
+    appRecentCommands.push('view-query');
+    type(root, '>  ');
+    expect(headingOf(root).length, '空白だけでは節が出るはず').toBe(1);
+  });
+
+  it('🔴 行の形は普通の行と同じ(部品を作り足していない)', () => {
+    const { root } = setup();
+    type(root, '>');
+    const normal = rowOf(root, 'view-query')!.outerHTML;
+    appRecentCommands.push('view-query');
+    type(root, '');
+    type(root, '>');
+    expect(orderOf(root)[0], '前提が崩れている').toBe('view-query');
+    expect(rows(root)[0]!.outerHTML, '節の行が普通の行と違う形で描かれている').toBe(normal);
+  });
+
+  it('🔴 消えた操作の id は出さない(出す物が 1 つも無ければ見出しも出さない)', () => {
+    const { root } = setup();
+    appRecentCommands.push('no-such-operation');
+    type(root, '>');
+    expect(headingOf(root).length, '無い操作だけなのに見出しが出ている').toBe(0);
+    expect(
+      orderOf(root).includes('no-such-operation'),
+      '消えた操作が行として出ている',
+    ).toBe(false);
+    appRecentCommands.push('view-query');
+    type(root, '');
+    type(root, '>');
+    expect(orderOf(root)[0]).toBe('view-query');
+    expect(orderOf(root).includes('no-such-operation')).toBe(false);
+  });
+
+  it('🔴 `>` だけの Enter は、最近使った操作が先頭にあっても何もしない(打った覚えのない実行をしない)', async () => {
+    const { root, sent } = setup();
+    appRecentCommands.push('view-query');
+    type(root, '>');
+    expect(orderOf(root)[0], '前提が崩れている').toBe('view-query');
+    sent.length = 0;
+    keydown(field(root), { key: 'Enter' });
+    await tick();
+    expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '`>` だけの Enter で走った').toEqual([]);
+    // `↓` は節の先頭の行へ降りる(同じ行のボタン)
+    keydown(field(root), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rowOf(root, 'view-query'));
+  });
+
+  it('🔴 描き直しの指紋に節が入っている(同じ行が節へ動いたら組み直す)', () => {
+    const host = document.createElement('div');
+    const row = (id: string) => ({ id, label: id, keys: [], ready: true, why: '' });
+    expect(paintCommandList(host, [row('a'), row('b')])).toBe(true);
+    expect(paintCommandList(host, [row('a'), row('b')])).toBe(false);
+    // 残りの行は変えずに、節だけが変わる回 ── 残りの指紋だけ見ていると組み直されない
+    expect(paintCommandList(host, [row('a')])).toBe(true);
+    expect(paintCommandList(host, [row('a')], [row('b')]), '節だけ変わったのに組み直さない').toBe(true);
+    expect(host.querySelector('[data-pkc-field="command-recent-heading"]')).not.toBeNull();
+    expect(paintCommandList(host, [row('a')], [row('b')]), '同じなのに組み直した').toBe(false);
+    // 節が空に戻ると見出しも消える
+    expect(paintCommandList(host, [row('b'), row('a')])).toBe(true);
+    expect(host.querySelector('[data-pkc-field="command-recent-heading"]')).toBeNull();
   });
 });
 
