@@ -275,6 +275,28 @@ describe('OfficeWindow', () => {
     expect(h2.ch.sent.filter((s) => s.type === 'document')[0]!.payload.token).toBe('');
   });
 
+  /**
+   * 🔴 **編集の控え(影)の版か**(#1228 段 2)。⚠ 載るのは**控えの版のときだけ**(保存済みの版の封筒は 1 バイトも変わらない)。
+   * 窓が作り直されて求め直したときの**送り直し**にも載る(載せないと、控えの版を読み直した窓が保存済みの版のように振る舞う)。
+   */
+  it('🔴 fromShadow は控えの版の封筒にだけ載る。送り直しにも引き継ぐ', () => {
+    const h = harness();
+    h.ow.open({ expectDocument: true });
+    h.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-9', [], null, true);
+    h.ch.deliver('ready-for-document');
+    h.ch.deliver('ready-for-document');                   // 作り直された窓が求め直した
+    const docs = h.ch.sent.filter((s) => s.type === 'document');
+    expect(docs).toHaveLength(2);
+    expect(docs[0]!.payload.fromShadow, '控えの版の封筒に載っていない').toBe(true);
+    expect(docs[1]!.payload.fromShadow, '送り直しに引き継いでいない').toBe(true);
+
+    const h2 = harness();
+    h2.ow.open({ expectDocument: true });
+    h2.ow.provideDocument('a.docx', new Uint8Array([1]), 'lid-9');
+    h2.ch.deliver('ready-for-document');
+    expect('fromShadow' in h2.ch.sent.filter((s) => s.type === 'document')[0]!.payload, '保存済みの版に載った').toBe(false);
+  });
+
   it('対応外・未配備・描画完了は、そのまま呼び出し側へ伝える', () => {
     const h = harness();
     h.ch.deliver('unsupported', { missing: ['JSPI'] });

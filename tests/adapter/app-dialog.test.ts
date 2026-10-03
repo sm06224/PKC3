@@ -15,6 +15,7 @@ import {
   DIALOG_REGION,
   pickArchiveInApp,
   pickDateInApp,
+  pickOfficeShadowInApp,
   pickScrapInApp,
   pickSnippetInApp,
   resetAppDialogForTest,
@@ -652,5 +653,58 @@ describe('日付の小窓の時刻欄(#865)', () => {
     expect(document.querySelector('[data-pkc-field="pick-date"]')).not.toBeNull();
     okBtn().click();
     expect(await p, '時刻を `null` で返していない').toEqual({ date: '2026-08-23', time: null });
+  });
+});
+
+/**
+ * 🔴 **「Office で開く」で、保存していない編集の控えがあるとき**(#1228 段 2、裁定 Q1 = A)。
+ *
+ * ⚠ 字は裁定どおり(「直前の未保存版で開く」/「保存済みの版で開く」)。見るのは 4 つ:
+ * ①2 つの行がこの字・この順で並ぶ(先頭 = 既定 = 失う側ではない)②押した行がそのまま答え
+ * ③`Escape` / 「やめる」は **どちらも選ばない**(`null`)④説明に「何分前」と「保存済みで開くと控えが消える」がある
+ */
+describe('Office の編集の控えの確認(#1228 段 2)', () => {
+  const NOW = 1_800_000_000_000;
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+  });
+  const rows = (): HTMLButtonElement[] =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-office-shadow"]'));
+
+  it('🔴 2 つの行が裁定の字・この順で並び、先頭(控えの版)に焦点が当たる', async () => {
+    const answered = pickOfficeShadowInApp(document.body, NOW - 12 * 60_000, NOW);
+    expect(rows().map((b) => b.textContent)).toEqual(['直前の未保存版で開く', '保存済みの版で開く']);
+    expect(document.activeElement, '既定の押し所が控えの版でない(失う側が既定)').toBe(rows()[0]);
+    expect(q('[data-pkc-field="dialog-title"]').textContent).toBe('保存していない編集の控えがあります');
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('説明は 1 行: 何分前に残っているか / 保存済みで開くと控えが消えること(先に言う)', async () => {
+    const answered = pickOfficeShadowInApp(document.body, NOW - 12 * 60_000, NOW);
+    const note = q('[data-pkc-field="pick-office-shadow-note"]').textContent ?? '';
+    expect(note).toBe('保存していない編集の控えが 12 分前に残っています。保存済みの版で開くと、この控えは消えます。');
+    cancelBtn().click();
+    await answered;
+  });
+
+  it('押した行がそのまま答え: 控えの版 → shadow / 保存済みの版 → saved', async () => {
+    const a = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
+    rows()[0]!.click();
+    expect(await a).toBe('shadow');
+    const b = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
+    rows()[1]!.click();
+    expect(await b).toBe('saved');
+  });
+
+  it('🔴 「やめる」も外(暗い地)も Escape と同じ ── どちらの版も選ばない(null)。押し損ねで控えが消えない', async () => {
+    const a = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
+    cancelBtn().click();
+    expect(await a).toBeNull();
+    const b = pickOfficeShadowInApp(document.body, NOW - 60_000, NOW);
+    // 暗い地を押す = `target` が <dialog> 自身
+    dialog().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(await b).toBeNull();
   });
 });

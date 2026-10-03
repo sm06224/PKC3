@@ -1252,8 +1252,10 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
   page,
 }) => {
   // 影の「3 秒止まったら書く」は**実時間で待つ**(静止 3 秒 + 1 秒刻み)。変換中に書かない確認(+4.6 秒)を足して
-  // 30 秒を超えた ── flake を隠すための引き上げではなく、**待ちが増えた分**(`workers: 1` の実測で足りる上限)
-  test.setTimeout(45_000);
+  // 30 秒を超えた ── flake を隠すための引き上げではなく、**待ちが増えた分**(`workers: 1` の実測で足りる上限)。
+  // 段 2(#1228)でマウスだけの編集(聞く間隔 2.5 秒 + 静止 3 秒 + 見張り 1 秒を 2 回 + 対照群の待ち)と
+  // 保存後の掃除の待ちが約 30 秒増えた ── これも実時間の待ちで、別の test へ分けると起動が 1 つ増える(予算)。
+  test.setTimeout(90_000);
   await page.goto('/office/host.html');
   await seedFakePack(page);
   // ⚠ **前の test の残骸を消す**(棚は origin 共有 ── 残っていると数が合わない)
@@ -1521,8 +1523,9 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
   expect(shelved.map((f) => f.dir), '棚の名前が合言葉でない').toEqual(['lid-TEST']);
   const metaFile = shelvedAll.find((f) => f.name === 'meta.json');
   expect(metaFile?.dir, '棚へ元の文書の記録を添えていない').toBe('lid-TEST');
-  expect(JSON.parse(metaFile!.text), '記録は元の file 名と大きさだけ(本文は入れない)').toMatchObject({ v: 1, name: '報告書.odt', size: 8, ext: 'odt' });
-  expect(Object.keys(JSON.parse(metaFile!.text) as object).sort()).toEqual(['at', 'ext', 'name', 'size', 'v']);
+  // 🔴 `lid` = どのノートの添付か(#1228 段 2。本体が「この添付の控え」を引く)。⚠ 本文は入れない
+  expect(JSON.parse(metaFile!.text), '記録は元の file 名と大きさ・ノートの合言葉だけ(本文は入れない)').toMatchObject({ v: 1, name: '報告書.odt', size: 8, ext: 'odt', lid: 'lid-TEST' });
+  expect(Object.keys(JSON.parse(metaFile!.text) as object).sort()).toEqual(['at', 'ext', 'lid', 'name', 'size', 'v']);
   expect(shelved[0]!.name).toMatch(/^\d{13}\.odt$/);
   expect(shelved[0]!.text, '棚の中身が書き出した影でない').toBe('SHADOW-BYTES');
   // 止まったままなら、もう書かない(3 秒ごとに書き続けない)
@@ -1539,6 +1542,45 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
     .poll(async () => (await shadowState()).stores.length, { message: '2 回目の影が書かれない', timeout: 8000 })
     .toBe(2);
   await expect.poll(async () => (await shelf()).filter((f) => f.name !== 'meta.json').length, { message: '古い影が残っている(最新 1 つだけ残す)' }).toBe(1);
+  /**
+   * ── 🔴 **マウスだけの編集(#1228 段 2)** ──────────────────────────────────
+   * 打鍵が無いので、窓に「保存していない変更が在るか」を聞いて**変わったとき**が契機になる(2〜3 秒ごと)。
+   * ① 変更なしの窓でクリックしても書かない(対照群)② 変更ありに変わったら書く ③ 変更ありのままでは毎回書かない
+   * ④ 変更ありのままマウスを離すと(図を 2 回目に動かす)書く。
+   */
+  const pointerUp = (): Promise<void> => page.evaluate(() => {
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  });
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fakeDocs = [0]; });
+  await page.waitForTimeout(3600);   // 聞く間隔(2.5 秒)+ 見張り(1 秒)で「変更なし」を知る
+  await pointerUp();
+  await page.waitForTimeout(4600);
+  expect((await shadowState()).stores, '変更なしの窓でクリックしただけで影を書いた').toHaveLength(2);
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fakeDocs = [1]; });   // 表を挿入した(キーは打っていない)
+  await expect
+    .poll(async () => (await shadowState()).stores.length, { message: 'マウスだけの編集で影が書かれない', timeout: 12_000 })
+    .toBe(3);
+  await page.waitForTimeout(4000);
+  expect((await shadowState()).stores, '変更ありのままなのに聞くたびに書いた').toHaveLength(3);
+  await pointerUp();                                                     // 図を動かして離した
+  await expect
+    .poll(async () => (await shadowState()).stores.length, { message: '変更ありのままのマウス操作で影が書かれない', timeout: 12_000 })
+    .toBe(4);
+  /**
+   * ── 🔴 **保存が通ったら、その文書の影が消える(#1228 段 2)** ───────────────
+   * 本体で「Office で開く」を押したとき、保存済みの版と取り違えて訊かないため。⚠ 保存した後に変更が無いときだけ。
+   */
+  expect((await shelf()).filter((f) => f.name !== 'meta.json'), '前提: 棚に影が在る').toHaveLength(1);
+  await page.evaluate(() => {
+    const w = window as unknown as { __fakeDocs: number[]; __lo: { FS: { writeFile(p: string, d: string): void; rename(a: string, b: string): void } } };
+    w.__fakeDocs = [0];                                                  // 保存した後は変更なし
+    w.__lo.FS.writeFile('/work/lu43.tmp', 'SAVED-AGAIN-BYTES');
+    w.__lo.FS.rename('/work/lu43.tmp', '/work/報告書.odt');
+  });
+  await expect
+    .poll(async () => (await shelf()).length, { message: '保存が通ったのに影が残っている', timeout: 12_000 })
+    .toBe(0);
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__fakeDocs = [1]; });
   // ── 棚に置けなかったら黙らない(理由つきで放送する)────────────────────
   await page.evaluate(() => {
     const s = navigator.storage as unknown as { getDirectory: () => Promise<unknown>; __orig?: () => Promise<unknown> };

@@ -42,6 +42,7 @@ interface Gate {
 }
 interface Api {
   anyModified(lo: unknown): Promise<boolean | null>;
+  markModified(lo: unknown): Promise<boolean | null>;
   createGate(h: Hooks): Gate;
   createDialogKeys(
     doc: FakeTarget,
@@ -85,7 +86,7 @@ function makeLive() {
   return { state, wrap };
 }
 
-interface FakeDoc { modified: 0 | 1 | 'throws' | 'not-modifiable' }
+interface FakeDoc { modified: 0 | 1 | 'throws' | 'not-modifiable'; ignoresSet?: true; setThrows?: true }
 
 /** 実測した橋の形の fake。`docs` が Desktop の components(Start Center は 'not-modifiable')。 */
 function fakeLo(docs: readonly FakeDoc[], opts: { ctxThrows?: boolean; enumThrowsAfter?: number } = {}) {
@@ -131,6 +132,11 @@ function fakeLo(docs: readonly FakeDoc[], opts: { ctxThrows?: boolean; enumThrow
                     isModified: () => {
                       if (el.doc.modified === 'throws') throw new Error('isModified');
                       return el.doc.modified;
+                    },
+                    // 実測: `setModified(true)` の後 `isModified()` = 1(戻りは 0 / 1)
+                    setModified: (v: boolean) => {
+                      if (el.doc.setThrows) throw new Error('setModified');
+                      if (!el.doc.ignoresSet) el.doc.modified = v ? 1 : 0;
                     },
                   });
                 },
@@ -400,5 +406,46 @@ describe('確認の箱の「やめる」の近道(#1266)', () => {
     const ev = r.key('Escape');
     expect(r.log).toEqual([]);
     expect(ev.prevented || ev.stopped, '閉じた後の Escape を止めている').toBe(false);
+  });
+});
+
+describe('markModified ── 控えの版で開いた窓を「保存していない変更あり」にする(#1228 段 2)', () => {
+  it('🔴 変更なしの文書を変更ありにし、読み戻して true を返す(以後 anyModified が true)', async () => {
+    const f = fakeLo([{ modified: 0 }]);
+    expect(await api.anyModified(f.lo), '前提: 変更なし').toBe(false);
+    expect(await api.markModified(f.lo)).toBe(true);
+    expect(await api.anyModified(f.lo), '印を付けたのに別の文書へ替える前の確認が出ない').toBe(true);
+  });
+
+  it('Start Center だけ(文書が無い)は false。呼んだだけで効かない文書も false(読み戻して確かめる)', async () => {
+    expect(await api.markModified(fakeLo([{ modified: 'not-modifiable' }]).lo)).toBe(false);
+    expect(await api.markModified(fakeLo([{ modified: 0, ignoresSet: true }]).lo), '効いていないのに true').toBe(false);
+  });
+
+  it('1 件が投げても他の文書へ印を付ける。聞けなかったときは null(橋が無い / 例外)', async () => {
+    const f = fakeLo([{ modified: 0, setThrows: true }, { modified: 0 }]);
+    expect(await api.markModified(f.lo)).toBe(true);
+    expect(await api.markModified(null)).toBeNull();
+    expect(await api.markModified({})).toBeNull();
+    expect(await api.markModified(fakeLo([{ modified: 0 }], { ctxThrows: true }).lo)).toBeNull();
+  });
+
+  it('🔴 wrapper を全部解放する(印を付ける経路でも。⚠ 列挙は anyModified と同じ 1 か所)', async () => {
+    for (const docs of [[{ modified: 0 }], [{ modified: 'not-modifiable' }], [{ modified: 0, setThrows: true }]] as FakeDoc[][]) {
+      const f = fakeLo(docs);
+      await api.markModified(f.lo);
+      expect(f.live.state.created, '空振り防止: 何かは作っている').toBeGreaterThan(3);
+      expect(f.live.state.deleted, `作った ${f.live.state.created} 個を全部 delete する`).toBe(f.live.state.created);
+    }
+  });
+
+  it('host.html: 控えの版で開いたときだけ、開けた後に印を付ける(原文)', () => {
+    const host = readFileSync('public/office/host.html', 'utf-8');
+    const fn = host.indexOf('function markOpenedFromShadow() {');
+    expect(fn, '控えの版で開いたときの関数が無い').toBeGreaterThan(0);
+    expect(host.slice(fn, fn + 900)).toContain('window.PKC3OfficeUnsaved.markModified(window.__lo)');
+    // 呼ぶのは控えの版のときだけ(定義 + 呼び 1 か所)
+    expect(host).toContain('if (docFromShadow) markOpenedFromShadow();');
+    expect(host.split('markOpenedFromShadow()').length - 1, '呼び元が 1 か所でない').toBe(2);
   });
 });

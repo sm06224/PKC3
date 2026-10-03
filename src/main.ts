@@ -215,7 +215,8 @@ import {
 } from '@features/office/office-launch';
 import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
-import { createOfficeOpener } from '@adapter/platform/office/office-open';
+import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
+import { createOfficeShadows } from '@adapter/platform/office/office-shadow-shelf';
 import { watchOfficeHang } from '@adapter/platform/office/office-hang-watch';
 import {
   checkPackUpdate,
@@ -366,6 +367,7 @@ import {
 import {
   alertInApp,
   confirmInApp,
+  pickOfficeShadowInApp,
   pickAppGroupIconInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -1313,8 +1315,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (body === null) return null;
     return readAttachmentMeta(body).assetKey;
   };
+  /**
+   * 🔴 **保存していない編集の控え(影)**(#1228 段 2)。⚠ 書くのは窓(`public/office/office-shadow.js`)── ここは
+   * 「Office で開く」を押したとき**読む**側。判断は `office-shadow-shelf.ts` / `features/office/office-shadow.ts` が持つ。
+   * 🔑 正本の更新時刻はノートの `updatedAt`(`entryMetas`)── 呼ぶたびに読む(値を固めない)。
+   */
+  const officeShadows = createOfficeShadows({
+    updatedAt: (lid) => {
+      const t = Date.parse(dispatcher.getState().entryMetas.get(lid)?.updatedAt ?? '');
+      return Number.isFinite(t) ? t : null;
+    },
+  });
   const officeOpener = createOfficeOpener({
     officeWindow,
+    // 🔴 控えが在るなら、開く前に訊く(#1228 段 2)。⚠ 確認の字は `features/office/office-shadow.ts`
+    shadow: { ...officeShadows, ask: (offer) => pickOfficeShadowInApp(root, offer.at) },
     // 🔴 窓を「読み込み直す」とき、保存済みの最新を渡す(#1228 穴①)
     currentAssetKey: currentAttachmentKey,
     isPackInstalled: () => appOfficePack.isInstalled(),
@@ -2438,6 +2453,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     adopt: (key, lid) => { officeWindow.adoptSave(key, lid); },
     notify: showStatus,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+  });
+  // 🔴 控えの「在るかもしれない」を窓の放送で保つ(#1228 段 2)。⚠ 偽陰性は控えを黙って見逃す ──
+  //    書かれた / 保存された / 閉じた のたびに棚を読み直す(棚の読み取りは数件の meta だけ)
+  officeWindow.onEvent((ev) => {
+    if (ev.type === 'shadow-written' || ev.type === 'saved' || ev.type === 'closed') void officeShadows.refresh();
   });
   officeWindow.onEvent((ev) => {
     if (ev.type === 'saved') void officeSaveBack.receive(ev.key);
@@ -3843,9 +3863,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ことがあり、「押したのに何も起きない」に見える(窓は既に開いている)。
      */
     openOffice: (target) => {
-      const r = officeOpener.open(target);
-      if (!r.ok) dispatcher.dispatch({ type: 'OP_FAILED', error: r.message });
-      else if (r.reused) showStatus('開いている Office のウィンドウに表示します');
+      const report = (r: OpenOfficeResult): void => {
+        if (!r.ok) dispatcher.dispatch({ type: 'OP_FAILED', error: r.message });
+        else if (r.settled !== undefined) void r.settled.then(report);
+        else if (r.reused) showStatus('開いている Office のウィンドウに表示します');
+      };
+      report(officeOpener.open(target));
     },
     /**
      * 🔴 **Office 一式の設置 / 削除**(#88 / O6-a)。⚠ ここは**渡すだけ** ──
@@ -4891,6 +4914,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * のは、これが boot を遅らせてよい仕事ではないからである。
    */
   void officeSaveBack.drainAll().catch(() => 0);
+  /**
+   * 🔴 **編集の控え(影)を掃除して、在るかを控える**(#1228 段 2)。7 日を過ぎた棚を消す(裁定 Q2 = A)。
+   * ⚠ boot を遅らせない(投げっぱなし。`sweep` は投げない)。
+   */
+  void officeShadows.sweep();
   /**
    * OS の `launchQueue` から来たファイルを取り込む(P7 段③)。
    *

@@ -532,6 +532,8 @@
         //    引き取るのは writer リースを持つタブだけ
         tokens.remember(put.key, hit.path);
         say('saved', { key: put.key, name: put.name, size: put.size });
+        // 🔴 保存が通った ── 保存した後に変更が無ければ、この文書の影を消す(#1228 段 2。⚠ 失敗しても保存は成功のまま)
+        if (shadowAfterSaved) { try { shadowAfterSaved().catch(function () { /* 次の起動の掃除が消す */ }); } catch (e) { /* 同上 */ } }
       } finally {
         mine = true;
         try { FS.close(stream); } catch (e) { /* 既に閉じている */ }
@@ -592,21 +594,37 @@
   var shadowQuiet = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createQuiet() : null;
   // ⚠ `compositionstart` / `compositionend` は変換中の出入り(変換中は書かない)。修飾キーだけの押下・Ctrl+S の直後の
   //    扱いも `feedInput`(office-shadow.js)が決める ── ここは種類を渡すだけ。
-  var SHADOW_INPUTS = ['keydown', 'beforeinput', 'compositionstart', 'compositionend', 'paste', 'cut', 'drop'];
+  // ⚠ `pointerup` はマウスだけの編集(表の挿入・図の移動)の 2 手目以降を拾う(#1228 段 2)── 印にするかは `feedInput` が決める
+  var SHADOW_INPUTS = ['keydown', 'beforeinput', 'compositionstart', 'compositionend', 'paste', 'cut', 'drop', 'pointerup'];
   SHADOW_INPUTS.forEach(function (t) {
     window.addEventListener(t, function (e) {
       if (!shadowQuiet) return;
       window.PKC3OfficeShadow.feedInput(shadowQuiet, t, e, Date.now());
     }, true);
   });
+  /**
+   * 🔴 **控えの版で開いた窓**(#1228 段 2)。開けた後に 1 度だけ呼ぶ(`docFromShadow` が真のとき)。
+   * 言う: 開いた文書は LO にとって保存済みだが、**添付にはまだ入っていない**。⚠ 「表示中 (N 秒)」の後 ── 上書きされない側。
+   * 印を付ける: LO には「保存していない変更あり」にしておく。別の文書へ替える前の確認(穴②)が出て、控えの版を黙って捨てない。
+   * ⚠ 効かなくても開いた文書は使える(言うだけ)。判断は `office-unsaved.js` の `markModified`。
+   */
+  function markOpenedFromShadow() {
+    setStatus('保存していない編集の控えを開いています。保存すると添付に入ります');
+    if (!window.PKC3OfficeUnsaved) return;
+    window.PKC3OfficeUnsaved.markModified(window.__lo).then(function (ok) {
+      if (ok !== true) console.warn('控えの版を「保存していない変更あり」にできませんでした');
+    }, function () { /* 聞けなかった ── 開いた文書はそのまま使える */ });
+  }
   var shadowTimer = null;
+  // 🔴 保存が通ったら、その文書の影を消す(#1228 段 2)。⚠ 保存の見張り(上)から呼ぶので、積むのは `armShadow`
+  var shadowAfterSaved = null;
   function stopShadow() {
     if (shadowTimer) { clearInterval(shadowTimer); shadowTimer = null; }
   }
   /**
    * 1 秒ごとに「止まったか」を見る(静止していなければ何もしない軽い比較)。
    * @param getToken そのノートの合言葉を返す(⚠ 値で受けない ── 起動後に決まる)
-   * @param getDoc 開いた文書の `{ name, size }` を返す(棚の `meta.json` へ書き添える。⚠ 本文は渡さない)
+   * @param getDoc 開いた文書の `{ name, size, lid }` を返す(棚の `meta.json` へ書き添える。⚠ 本文は渡さない)
    */
   function armShadow(FS, getToken, getDoc) {
     var SH = window.PKC3OfficeShadow;
@@ -624,6 +642,12 @@
       quiet: shadowQuiet,
       isDead: function () { return dead; },
       isModified: function () { return U.anyModified(window.__lo); },
+      // 🔴 マウスだけの編集を拾うために、一定の間隔で「保存していない変更が在るか」を聞く(#1228 段 2。判断は `office-shadow.js`)
+      pollMs: SH.MODIFIED_POLL_MS,
+      // 保存が通ったら棚を消す(同じ棚の名前 = `safeId`)。⚠ 判断(変更が無いときだけ消す)は `createWriter().afterSaved`
+      unshelve: function () {
+        return SH.unshelve({ storage: navigator.storage, id: SH.safeId(getToken(), winKey) });
+      },
       write: function () {
         if (!shadowPatched.length) {
           // 差し替えが当たっていない一式では、書き出しは必ず失敗する ── 書こうとせず理由を言う
@@ -654,6 +678,7 @@
       log: function (e) { console.warn('編集の控えを書けませんでした', e); },
     });
     shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
+    shadowAfterSaved = function () { return writer.afterSaved(); };
   }
 
   // ── Ctrl + 英字が本文に混入するのを止める(#117)────────────────────
@@ -1619,6 +1644,9 @@
     //    (窓は別 process なので生き残る)。だから**窓に預けて返させる**。
     //    ⚠ 空のまま保存が来たら「新規作成」として扱う(新しい添付ノートになる)。
     var docToken = '';
+    // 🔴 **保存していない編集の控え(影)から開いたか**(#1228 段 2)。本体が「直前の未保存版で開く」を選んだときだけ true。
+    //    ⚠ 開いた文書は LO にとって「保存済み」(`isModified` = 0)── 控えの版であることを user へ 1 度だけ言う
+    var docFromShadow = false;
     // 🔴 **「挿入 → 画像」に並べる添付**(#146)。文書と**同じ封筒**で届く ──
     //    新しい経路は作らない。⚠ 置き終えたら手放す(MEMFS が持っている ── こちらは二重持ち)
     var docImages = null;
@@ -1635,6 +1663,7 @@
           clearTimeout(timer);
           ch.onmessage = prev;
           docToken = String((d.payload && d.payload.token) || '');
+          docFromShadow = !!(d.payload && d.payload.fromShadow === true);
           docImages = (d.payload && d.payload.images) || null;
           resolve(new Uint8Array(d.payload.bytes));
           return;
@@ -1792,7 +1821,7 @@
       //    ⚠ 文書が無いとき(Start Center)も積む ── 新規作成の保存がここから来る
       armSaveWatch(FS, docToken);
       // 🔴 影(編集中の文書の写し)の見張り(#1228 段 1)。⚠ 保存の見張りと**別の timer**(1 timer = 1 仕事)
-      armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0 }; });
+      armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0, lid: docToken }; });
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
       //
       // ⚠ **上限を置く。** 版面が出なければ `clearInterval` に到達せず、
@@ -1867,6 +1896,9 @@
            */
           clearInterval(tick);
           tick = null;
+          // 🔴 控えの版で開いたなら、そう言って「保存していない変更あり」にする(#1228 段 2)。⚠ 畳んだ後に呼ぶ
+          //    (判断は上の `markOpenedFromShadow`。ここに足すと、上の見張りを畳む窓の外へ溢れる)
+          if (docFromShadow) markOpenedFromShadow();
           return;
         }
         if (launched && !wantDoc) {

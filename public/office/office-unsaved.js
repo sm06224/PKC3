@@ -29,14 +29,12 @@
   }
 
   /**
-   * 開いている文書のどれかに保存していない変更が在るか。
-   * @returns `true`(在る)/ `false`(無い)/ `null`(**聞けなかった**: 橋が無い・LO がまだ起動中・例外)
-   * ⚠ `null` は「無い」と同じに扱ってよい(呼び側は今まで通り開く)── ただし区別して返す
-   *   (test が「聞けなかった」を「無かった」と取り違えないため)。
+   * 開いている文書(`XModifiable` を持つ物)を 1 件ずつ `visit(mod)` へ渡す。**列挙・解放はここ 1 か所**(§7)。
+   * - 1 件の `visit` が投げても、他の文書を見る(その 1 件は聞けなかった扱い)
+   * - 橋が使えない / 列挙が投げる → **投げる**(呼び側が「聞けなかった」へ畳む)。⚠ 作った wrapper は投げた経路でも解放する
+   * ⚠ 呼ぶ前に橋の有無(`lo.uno` / `getUnoComponentContext`)を呼び側が確かめる。
    */
-  async function anyModified(lo) {
-    if (!lo || !lo.uno || typeof lo.getUnoComponentContext !== 'function') return null;
-    var modified = false;
+  async function eachModifiable(lo, visit) {
     // ⚠ 作った wrapper は**投げた経路でも**解放する(`finally`)。`rel` は解放して null を返す(二重に解放しない)
     var ctx = null, any = null, ifc = null, desktop = null, comps = null, en = null;
     function rel(o) { del(o); return null; }
@@ -71,20 +69,62 @@
         try {
           el = a.get();
           a = rel(a);
+          // ⚠ Start Center は query が null(= 文書ではない)
           mod = S.util.XModifiable.query(el);
-          // ⚠ 戻りは 0 / 1(boolean ではない)。Start Center は query が null
-          if (mod && mod.isModified()) modified = true;
+          if (mod) visit(mod);
         } catch (e) { /* この 1 件は聞けなかった ── 他の文書は見る */
         } finally {
           del(mod); del(el); del(a);
         }
       }
+    } finally {
+      del(en); del(comps); del(desktop); del(ifc); del(any); del(ctx);
+    }
+  }
+
+  function hasBridge(lo) {
+    return !!(lo && lo.uno && typeof lo.getUnoComponentContext === 'function');
+  }
+
+  /**
+   * 開いている文書のどれかに保存していない変更が在るか。
+   * @returns `true`(在る)/ `false`(無い)/ `null`(**聞けなかった**: 橋が無い・LO がまだ起動中・例外)
+   * ⚠ `null` は「無い」と同じに扱ってよい(呼び側は今まで通り開く)── ただし区別して返す
+   *   (test が「聞けなかった」を「無かった」と取り違えないため)。
+   */
+  async function anyModified(lo) {
+    if (!hasBridge(lo)) return null;
+    var modified = false;
+    try {
+      // ⚠ 戻りは 0 / 1(boolean ではない)
+      await eachModifiable(lo, function (mod) { if (mod.isModified()) modified = true; });
       return modified;
     } catch (e) {
       // ⚠ 数え途中で例外でも、**在ると分かった分は捨てない**(消す側へ倒さない)
       return modified ? true : null;
-    } finally {
-      del(en); del(comps); del(desktop); del(ifc); del(any); del(ctx);
+    }
+  }
+
+  /**
+   * 🔴 **開いている文書を「保存していない変更あり」にする**(#1228 段 2)。控えの版で開いた窓が使う ──
+   * 開いた文書は LO にとって保存済みだが、**添付にはまだ入っていない**。変更ありにしておけば、
+   * 別の文書へ替える前の確認(`createGate`)が出て、控えの版を黙って消さない。
+   * ⚠ 実測(2026-10-03、`lo-0c031979e70b-run34848755531`、`.odt`): `setModified(true)` の後 `isModified()` = 1 /
+   * その状態の Ctrl+S は通り(保存の放送が来る)、保存後は 0 に戻る。
+   * @returns `true`(1 件以上が変更ありになった)/ `false`(変更ありにできた文書が無い)/ `null`(橋が使えない・例外)
+   */
+  async function markModified(lo) {
+    if (!hasBridge(lo)) return null;
+    var marked = 0;
+    try {
+      await eachModifiable(lo, function (mod) {
+        mod.setModified(true);
+        // ⚠ 効いたことを読み戻して確かめる(呼んだだけで「変更あり」と言わない)
+        if (mod.isModified()) marked += 1;
+      });
+      return marked > 0;
+    } catch (e) {
+      return marked > 0 ? true : null;
     }
   }
 
@@ -191,6 +231,7 @@
 
   root.PKC3OfficeUnsaved = {
     anyModified: anyModified,
+    markModified: markModified,
     createGate: createGate,
     createDialogKeys: createDialogKeys,
   };

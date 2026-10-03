@@ -180,6 +180,12 @@ export interface OfficeImagePayload {
 export interface OfficeDocumentSource {
   readonly bytes: Uint8Array;
   readonly images?: readonly OfficeImagePayload[];
+  /**
+   * 🔴 **保存していない編集の控え(影)の版か**(#1228 段 2)。窓は開いた後で 1 度だけ「控えを開いています。
+   * 保存すると添付に入ります」と言う。⚠ 読み直し(`refresh`)の結果にも載せる ── 載せないと、
+   * 控えの版を読み直した窓が保存済みの版のように振る舞う。
+   */
+  readonly fromShadow?: boolean;
 }
 
 /**
@@ -223,6 +229,7 @@ interface SentDocument {
   bytes: Uint8Array | null;
   images: readonly OfficeImagePayload[];
   refresh: OfficeDocumentRefresh | null;
+  fromShadow: boolean;
 }
 
 interface Broadcaster {
@@ -263,6 +270,7 @@ export class OfficeWindow {
     token: string;
     images: readonly OfficeImagePayload[];
     refresh: OfficeDocumentRefresh | null;
+    fromShadow: boolean;
   } | null = null;
   /**
    * 🔴 **最後に窓へ送った文書の控え**(#1228 穴①)。窓が**作り直されて**もう一度
@@ -336,7 +344,7 @@ export class OfficeWindow {
    */
   open(opts: OpenOptions = {}): OpenOutcome {
     this.pendingDoc = opts.bytes
-      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null }
+      ? { name: opts.name ?? 'document', bytes: opts.bytes, token: '', images: [], refresh: null, fromShadow: false }
       : null;
     // ⚠ 新しく開く / 読み直させるので、前の「ちょうだい」は無効にする
     this.askedForDoc = false;
@@ -384,6 +392,7 @@ export class OfficeWindow {
    *   ⚠ 省くと、その窓の保存は**新しい添付ノート**になる。
    * @param images 🔴 **「挿入 → 画像」に並べる添付**(#146)。窓が文書を書く**同じ口**で
    *   `/home/web_user` へ置く。⚠ 空なら封筒に `images` を**載せない**(今までと 1 バイトも変わらない)
+   * @param fromShadow 🔴 **保存していない編集の控えの版か**(#1228 段 2)。⚠ 偽なら封筒に**載せない**(今までと 1 バイトも変わらない)
    */
   provideDocument(
     name: string,
@@ -391,6 +400,7 @@ export class OfficeWindow {
     token = '',
     images: readonly OfficeImagePayload[] = [],
     refresh: OfficeDocumentRefresh | null = null,
+    fromShadow = false,
   ): void {
     // ⚠ 空を渡して Start Center を上書きしない
     if (bytes.byteLength === 0) return;
@@ -400,7 +410,7 @@ export class OfficeWindow {
       this.discardNextProvide -= 1;
       return;
     }
-    this.pendingDoc = { name, bytes, token, images, refresh };
+    this.pendingDoc = { name, bytes, token, images, refresh, fromShadow };
     if (this.askedForDoc) this.sendDocument();
   }
 
@@ -510,8 +520,9 @@ export class OfficeWindow {
       bytes: doc.refresh ? null : doc.bytes,
       images: doc.refresh ? [] : doc.images,
       refresh: doc.refresh,
+      fromShadow: doc.fromShadow,
     };
-    this.post(doc.name, doc.bytes, doc.token, doc.images);
+    this.post(doc.name, doc.bytes, doc.token, doc.images, doc.fromShadow);
   }
 
   private resendLast(): void {
@@ -525,13 +536,13 @@ export class OfficeWindow {
         (src) => {
           // 待つ間に別の文書へ替わった / 閉じた なら送らない(古い文書を出さない)
           if (this.lastSent !== last || src === null || src.bytes.byteLength === 0) return;
-          this.post(last.name, src.bytes, last.token, src.images ?? []);
+          this.post(last.name, src.bytes, last.token, src.images ?? [], src.fromShadow === true);
         },
         () => { /* 読めなかった ── 窓は 15 秒で Start Center になる */ },
       );
       return;
     }
-    if (last.bytes) this.post(last.name, last.bytes, last.token, last.images);
+    if (last.bytes) this.post(last.name, last.bytes, last.token, last.images, last.fromShadow);
   }
 
   /**
@@ -558,6 +569,7 @@ export class OfficeWindow {
     bytes: Uint8Array,
     token: string,
     images: readonly OfficeImagePayload[],
+    fromShadow: boolean,
   ): void {
     // ⚠ BroadcastChannel は **transfer できない**(structured clone のみ)ので、
     //    ここだけはコピーになる。大きい文書で効くなら IDB 経由の受け渡しへ替える。
@@ -572,6 +584,8 @@ export class OfficeWindow {
         token,
         // ⚠ 0 件なら載せない(封筒を組むのはここ 1 か所 ── §7)
         ...(images.length > 0 ? { images } : {}),
+        // ⚠ 控えの版のときだけ載せる(封筒を組むのはここ 1 か所 ── §7)
+        ...(fromShadow ? { fromShadow: true } : {}),
       },
     });
   }
