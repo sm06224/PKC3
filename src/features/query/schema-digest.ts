@@ -34,17 +34,41 @@
  * ⚠ `like` の `_` は 1 字ワイルドカードなので、**名前の比較は `=` で**行う(`like` は固定の語だけ)。
  */
 const FTS_SHADOW_SUFFIXES = ['_data', '_idx', '_content', '_docsize', '_config'] as const;
+
+/** FTS5 の仮想表を探す `sql` の形(`sqlite_master` の `sql` 列に使う)。⚠ **綴りはここ 1 か所**(§7)。 */
+const FTS_VIRTUAL_SQL_LIKE = "like 'create virtual table%using fts5%'";
+
+/**
+ * 🔴 **FTS5 の仮想表の、影の表だけを外す条件**(別名は `m`。仮想表本体は**残す**)。
+ *
+ * 🔑 **内蔵の sqlite は仮想表本体(`docs`)を `select` で引ける**ので、客を開く口(案内に並ぶ表の名前)は
+ *   本体を残し、影(`docs_data` など)だけ外す ── 影は打っても意味が無い裏方で、DuckDB へ写す表の名前とも食い違っていた
+ *   (着地後レビュー ⚠2。FTS5 入りの `.sqlite` で、案内どおりに打つと DuckDB では `no such table`)。
+ * ⚠ 影の名前の導き方は {@link NOT_FTS_BACKSTAGE} と**同じ 1 本**(`ftsMatch`)。
+ */
+const ftsMatch = (names: string): string =>
+  [
+    ' and not exists (',
+    "   select 1 from sqlite_master v where v.type = 'table'",
+    `      and v.sql ${FTS_VIRTUAL_SQL_LIKE}`,
+    `      and m.name in (${names}))`,
+  ].join('\n');
+const SHADOW_NAMES = FTS_SHADOW_SUFFIXES.map((x) => `v.name || '${x}'`).join(', ');
+export const NOT_FTS_SHADOW = ftsMatch(SHADOW_NAMES);
+
 /**
  * ⚠ 別名は **`m`**(`sqlite_master m` / `sqlite_schema m`)。🔑 **`.sqlite` を DuckDB へ写す側**
  *   (storage worker の `EXPORT_TABLE_NAMES_SQL`)も**この 1 本**を使う(§7。#682 段④d の着地後レビュー:
  *   写しだけ「裏方を外す」判定を持たず、本文検索の影の表が全部 DuckDB へ写っていた)。
+ * 🔑 影の表に**仮想表本体も足して**外す(図・DuckDB へ写す側。内蔵の sqlite で引く案内は {@link NOT_FTS_SHADOW})。
  */
-export const NOT_FTS_BACKSTAGE = [
-  ' and not exists (',
-  "   select 1 from sqlite_master v where v.type = 'table'",
-  "      and v.sql like 'create virtual table%using fts5%'",
-  `      and m.name in (v.name, ${FTS_SHADOW_SUFFIXES.map((x) => `v.name || '${x}'`).join(', ')}))`,
-].join('\n');
+export const NOT_FTS_BACKSTAGE = ftsMatch(`v.name, ${SHADOW_NAMES}`);
+
+/**
+ * 🔴 **FTS5 の仮想表本体の名前を引く 1 文**(DuckDB へは写さない ── 写さなかったと言うために要る。着地後レビュー 💭8)。
+ * ⚠ 綴りは {@link NOT_FTS_BACKSTAGE} と同じ `FTS_VIRTUAL_SQL_LIKE`(判定が 2 本に割れない)。
+ */
+export const FTS_VIRTUAL_NAMES_SQL = `select m.name as name from sqlite_schema m where m.type = 'table' and m.sql ${FTS_VIRTUAL_SQL_LIKE} order by m.name`;
 
 /**
  * 🔴 **`sqlite_` で始まる内部の表を外す条件**(別名は `m`)。

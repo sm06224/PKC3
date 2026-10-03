@@ -13,10 +13,15 @@
  * ⚠ 「隠れない」こと自体は実ブラウザの smoke が結果で守る ── ここは規則の在処だけ。
  */
 /** @vitest-environment happy-dom */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
-import { PANE_H_VAR, exposePaneHeight, fitColumnHeight } from '../../src/adapter/ui/render/read-columns';
+import {
+  PANE_H_VAR,
+  exposePaneHeight,
+  fitColumnHeight,
+  installColumnFit,
+} from '../../src/adapter/ui/render/read-columns';
 
 const css = (): string => withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
 
@@ -90,10 +95,45 @@ describe('器の高さを CSS へ下ろす(exposePaneHeight)', () => {
     root.remove();
   });
 
-  it('🔴 見張りは面だけでなく器(面の親)も観る ── 長いノートでは器が縮んでも面は動かない(原文 pin)', () => {
-    const rc = readFileSync('src/adapter/ui/render/read-columns.ts', 'utf8');
-    expect(rc).toContain('exposePaneHeight(root);');
-    expect(rc, '器を ResizeObserver で観ていない').toMatch(/watchedRegion = region;/);
-    expect(rc, '変数名が CSS と食い違っている').toContain("PANE_H_VAR = '--pkc-pane-h'");
+  /**
+   * 🔴 **見張りは面だけでなく器(面の親)も観る**(着地後レビュー ⚠5。直す前は原文の字面を pin していた)。
+   * ⚠ 長いノートでは面が器より高く、**お知らせのカードが出て器が縮んでも面は 1px も動かない** ──
+   *   面だけ観ていると `--pkc-pane-h` が古いまま残り、箱が見える範囲からはみ出す。
+   * 🔑 見るのは**結果**:fake の `ResizeObserver` で①器が観られていること ②**器の高さだけ**が変わって
+   *   callback が撃たれたとき `--pkc-pane-h` が更新されること(面は動かさない)。
+   */
+  it('🔴 見張りは面だけでなく器(面の親)も観る ── 器の高さだけが変わっても --pkc-pane-h が追随する', () => {
+    const observed: Element[] = [];
+    const fires: Array<() => void> = [];
+    class FakeRO {
+      constructor(cb: () => void) {
+        fires.push(cb);
+      }
+      observe(el: Element): void {
+        observed.push(el);
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeRO);
+    const { root, region, pane } = shell();
+    let dispose: (() => void) | null = null;
+    try {
+      Object.defineProperty(region, 'clientHeight', { value: 560, configurable: true });
+      dispose = installColumnFit(root, document);
+      expect(observed, '器(面の親)を観ていない').toContain(region);
+      // 対照群:面も観ている(器だけ観る形に置き換えても、面の追随は残る)
+      expect(observed, '面を観ていない').toContain(pane);
+      expect(region.style.getPropertyValue(PANE_H_VAR), '前提:起動直後に器の高さを下ろしている').toBe('560px');
+      // 器だけが縮む(面は動かさない)── お知らせのカードが出た日
+      Object.defineProperty(region, 'clientHeight', { value: 300, configurable: true });
+      expect(fires.length, '前提:ResizeObserver を作っていない').toBeGreaterThan(0);
+      for (const f of fires) f();
+      expect(region.style.getPropertyValue(PANE_H_VAR), '器が縮んだのに --pkc-pane-h が古いまま').toBe('300px');
+    } finally {
+      dispose?.();
+      vi.unstubAllGlobals();
+      root.remove();
+    }
   });
 });

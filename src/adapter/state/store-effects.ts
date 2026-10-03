@@ -170,7 +170,9 @@ export interface StorePort {
    *   DuckDB は storage worker を通さない設計(`runDuckDbSql`)だが、**行を読むのだけは
    *   sqlite を持つ storage worker の仕事**である。
    */
-  openSqliteExport?(image: Uint8Array): Promise<{ session: string; tables: string[]; views: string[] }>;
+  openSqliteExport?(
+    image: Uint8Array,
+  ): Promise<{ session: string; tables: string[]; views: string[]; ftsTables: string[] }>;
   exportSqliteTable?(
     session: string,
     table: string,

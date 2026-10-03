@@ -50,6 +50,7 @@ import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { DUCKDB_NETWORK_NOTE } from '../../src/features/query/sql-guest-source';
 import type { DuckDbCopyReport } from '../../src/features/query/duckdb-copy-report';
+import { DUCKDB_LOAD_TOO_LONG, DUCKDB_TOO_LONG } from '../../src/adapter/platform/duckdb/duckdb-lease';
 import type {
   DuckDbReadableGuestSource,
   SqliteConvertGuestSource,
@@ -4522,6 +4523,69 @@ describe('🔴 DuckDB で書いた後のつながり図(R1)', () => {
     expect(s.schemaDuckDb, '読むだけの文で図を採り直している').toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * 🔴 **時計で器が畳まれた回も、開いたままの図を採り直す**(着地後レビュー 💭10)。
+   * ⚠ 30 秒の門・写す所の 120 秒の門が鳴ると器は畳まれ、写した表も作った表も消える ── 直す前は
+   *   図に**もう無い表の四角が残り**、押すと `no such table` だった(R1 と同じ症状の、失敗の側)。
+   */
+  describe('時計で畳まれた回(💭10)', () => {
+    const open = async (): Promise<ReturnType<typeof setup>> => {
+      const s = setup();
+      s.pick('db4');
+      await settle();
+      addAttached(s, 'db7');
+      await settle();
+      erToggle(s.pane).click();
+      await settle();
+      expect(s.schemaDuckDb, '前提:図は DuckDB の器から採っている').toHaveBeenCalledTimes(1);
+      return s;
+    };
+    const failWith = async (s: ReturnType<typeof setup>, msg: string): Promise<void> => {
+      s.runDuckDbSql.mockRejectedValueOnce(new Error(msg));
+      s.type('SELECT 1');
+      s.runBtn.click();
+      await settle();
+    };
+
+    it.each([
+      ['打つ文が 30 秒の門に掛かった', DUCKDB_TOO_LONG],
+      ['器へ写す所が 120 秒の門に掛かった', DUCKDB_LOAD_TOO_LONG],
+      ['断りの後ろに「写せなかった表」の理由が付いた', `${DUCKDB_TOO_LONG} ── 大きい は DuckDB へ写せませんでした(x)`],
+    ])('🔴 %s → 図を採り直す(札を進め、古い模型を捨てる)', async (_name, msg) => {
+      const s = await open();
+      const before = s.d.getState().sqlPage.er;
+      await failWith(s, msg);
+      expect(s.d.getState().sqlPage.error, '前提:失敗が画面に出ている').toContain(msg);
+      expect(s.schemaDuckDb, '器が畳まれたのに、図を採り直していない').toHaveBeenCalledTimes(2);
+      expect(s.d.getState().sqlPage.er.token, '札を進めていない').toBe(before.token + 1);
+      expect(s.pane.querySelectorAll('[data-pkc-field="sql-er-table"]').length, '採り直した図が出ていない').toBe(2);
+    });
+
+    it('対照群:器が畳まれていない失敗(字の誤り・表が無い)では採り直さない', async () => {
+      const s = await open();
+      await failWith(s, 'Catalog Error: Table with name x does not exist!');
+      expect(s.schemaDuckDb, '畳まれていないのに図を採り直している').toHaveBeenCalledTimes(1);
+    });
+
+    it('対照群:閉じている図は採り直さない(開くとき採る)/ 内蔵の sqlite から採る図は触らない', async () => {
+      const s = await open();
+      erToggle(s.pane).click(); // 畳む
+      await failWith(s, DUCKDB_TOO_LONG);
+      expect(s.schemaDuckDb, '閉じている間は採りに行かない').toHaveBeenCalledTimes(1);
+      // 1 件の .csv の図は内蔵の sqlite から採る ── DuckDB の器とは関係が無い
+      const t = setup();
+      t.pick('db4');
+      await settle();
+      t.pickEngine('duckdb');
+      erToggle(t.pane).click();
+      await settle();
+      t.runReadOnlySql.mockClear();
+      await failWith(t, DUCKDB_TOO_LONG);
+      expect(t.schemaDuckDb, 'sqlite から採る図なのに DuckDB へ採りに行っている').toHaveBeenCalledTimes(0);
+      expect(t.runReadOnlySql, 'sqlite の図まで採り直している').toHaveBeenCalledTimes(0);
+    });
+  });
+
   it('🔴 閉じているうちに書いたら、開いたときに採り直す(古い物を使い回さない)', async () => {
     const s = setup();
     s.pick('db4');
@@ -4705,6 +4769,158 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     expect(body, '写せなかった表が書かれていない').toContain('⚠ 写せなかった表: 大きい');
     expect(body, '型の丸めが書かれていない').toContain('BIGINT / DOUBLE / VARCHAR の 3 つに丸めています');
     expect(body, '元の宣言の型は残る').toContain('DECIMAL(10,2)');
+  });
+});
+
+/**
+ * 🔴 **逃げ道の字の「並べているか」が、つながり図と構造ノートの行にも届いている**(着地後レビュー ⚠4)。
+ * ⚠ 帯(`copyBandNote`)の 2 つの字は上の describe が見ているが、図の下の行(`erCopyLine`)と構造ノート
+ *   (`copyDigestNotes`)へ渡す第 2 引数(並べているか)は**どちらも未 pin**で、`false` に固定しても緑だった。
+ *   並べているときの engine は DuckDB 固定なので、「内蔵の sqlite なら引けます」は**押せない道を指す**。
+ * 🔴 **全文検索の仮想表を写さなかったこと**(💭8)も、帯・図の下・構造ノートの 3 か所に名前つきで出る。
+ */
+describe('🔴 逃げ道の字は図の下と構造ノートでも「並べているか」で変わる / 全文検索の表を写さなかったと言う', () => {
+  const FTS_WHY = '全文検索の表は写しません';
+  const copy = {
+    refused: [
+      { name: '大きい', view: false, why: '写した行が 64.0 MB を超えました' },
+      { name: 'docs', view: false, why: FTS_WHY },
+    ],
+    asText: [],
+    sqlite: true,
+    blob: false,
+  };
+  const oneTable = {
+    columns: {
+      columns: ['kind', 'tbl', 'cid', 'col', 'typ', 'nn', 'pk'],
+      rows: [['table', '小さい', 0, 'id', 'INTEGER', 0, 0]] as Array<Array<string | number | null>>,
+    },
+    fks: { columns: ['tbl', 'ref', 'col', 'refcol'], rows: [] as Array<Array<string | number | null>> },
+    counts: { columns: ['tbl', 'n'], rows: [['小さい', 2]] as Array<Array<string | number | null>> },
+    copy,
+  };
+  const addAttached = (s: ReturnType<typeof setup>, lid: string): void => {
+    s.sourceSel.selectedIndex = [...s.sourceSel.options].findIndex((o) => o.value === `add:${lid}`);
+    s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const erLine = (s: ReturnType<typeof setup>): string =>
+    s.pane.querySelector('[data-pkc-field="sql-er-copy"]')?.textContent ?? '';
+  const openEr = async (s: ReturnType<typeof setup>): Promise<void> => {
+    s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
+    await settle();
+  };
+
+  it('🔴 並べたつながり図の下は「file を 1 つに戻すと」/ 1 件の図の下は「内蔵の sqlite なら引けます」', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    await openEr(s);
+    s.schemaDuckDb.mockResolvedValueOnce(oneTable);
+    addAttached(s, 'db7');
+    await settle();
+    const line = erLine(s);
+    expect(line, '前提:図の下に出ている').toContain('写せなかった表: 大きい、docs');
+    expect(line).toContain('file を 1 つに戻すと内蔵の sqlite で引けます');
+    expect(line, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら引けます');
+    // 対照群:1 件のとき(.parquet を 1 件だけ選ぶ = 図は DuckDB の器から採る)は、押せる道を言う
+    const one = setup();
+    one.schemaDuckDb.mockResolvedValueOnce(oneTable);
+    one.pick('db7');
+    await settle();
+    await openEr(one);
+    expect(erLine(one)).toContain('(内蔵の sqlite なら引けます)');
+    expect(erLine(one), '1 件なのに「1 つに戻す」と言っている').not.toContain('1 つに戻す');
+  });
+
+  it('🔴 並べて採った構造ノートも「file を 1 つに戻すと」/ 1 件のノートは「内蔵の sqlite なら引けます」', async () => {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    addAttached(s, 'db7');
+    await settle();
+    s.schemaDuckDb.mockResolvedValueOnce(oneTable);
+    s.schemaBtn.click();
+    await settle();
+    const body = s.persisted[0]?.body ?? '';
+    expect(body, '前提:ノートに書かれている').toContain('写せなかった表: 大きい、docs');
+    expect(body).toContain('file を 1 つに戻すと内蔵の sqlite で引けます');
+    expect(body, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら引けます');
+    // 対照群:1 件のノート
+    const one = setup();
+    one.schemaDuckDb.mockResolvedValueOnce(oneTable);
+    one.pick('db7');
+    await settle();
+    one.schemaBtn.click();
+    await settle();
+    const oneBody = one.persisted[0]?.body ?? '';
+    expect(oneBody).toContain('内蔵の sqlite なら引けます');
+    expect(oneBody, '1 件なのに「1 つに戻す」と言っている').not.toContain('1 つに戻す');
+  });
+
+  /**
+   * 🔴 **DuckDB で引くとき、案内と手本に並べるのは「写した表」だけ**(着地後レビュー ⚠2)。
+   * ⚠ 開いてある客の表は内蔵の sqlite で引ける物で、写さなかった表(全文検索の仮想表・大きすぎる表)を含む ──
+   *   並べると、書いてあるとおり打つと DuckDB では `no such table`(手本が 1 つ目の表なら、手本そのものが打てない)。
+   */
+  it('🔴 DuckDB で写さなかった表は、案内にも手本にも並べない(内蔵の sqlite に戻せば並ぶ)', async () => {
+    const s = setup();
+    s.pick('db1'); // 表は 売上 / 客(名前順で 1 つ目が 売上)
+    await settle();
+    s.pickEngine('duckdb');
+    const example = (): string => s.pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
+    // 前提(対照群):まだ写していない回は、開いてある客の表をそのまま並べる
+    expect(s.tipText()).toContain('売上, 客');
+    expect(example()).toContain('FROM "売上"');
+    s.runDuckDbSql.mockResolvedValueOnce({
+      columns: ['g'],
+      rows: [['x']],
+      truncated: false,
+      ms: 2,
+      ...({ copy: { refused: [{ name: '売上', view: false, why: FTS_WHY }], asText: [], sqlite: true, blob: false } } as Record<
+        string,
+        unknown
+      >),
+    });
+    s.type('SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.tipText(), '写さなかった表が案内に並んでいる').not.toContain('在る表: 売上');
+    expect(s.tipText()).toContain('この file に在る表: 客。');
+    expect(example(), '写さなかった表が手本になっている').toContain('FROM "客"');
+    expect(example()).not.toContain('売上');
+    // 内蔵の sqlite は写さないので、全部引ける
+    s.pickEngine('sqlite');
+    expect(s.tipText()).toContain('売上, 客');
+  });
+
+  it('🔴 全文検索の表を写さなかったことが、帯・図の下・構造ノートに名前つきで出る', async () => {
+    const only = { ...copy, refused: [{ name: 'docs', view: false, why: FTS_WHY }] };
+    // 帯
+    const a = setup();
+    a.pick('db1');
+    await settle();
+    a.pickEngine('duckdb');
+    a.runDuckDbSql.mockResolvedValueOnce({
+      columns: ['g'],
+      rows: [['x']],
+      truncated: false,
+      ms: 2,
+      ...({ copy: only } as Record<string, unknown>),
+    });
+    a.type('SELECT 1');
+    a.runBtn.click();
+    await settle();
+    expect(a.note(), '帯に出ていない').toContain('写せなかった表: docs(内蔵の sqlite なら引けます)');
+    // 図の下 + 構造ノート(同じ報告)
+    const b = setup();
+    b.schemaDuckDb.mockResolvedValue({ ...oneTable, copy: only });
+    b.pick('db7');
+    await settle();
+    await openEr(b);
+    expect(erLine(b), '図の下に出ていない').toContain('写せなかった表: docs');
+    b.schemaBtn.click();
+    await settle();
+    expect(b.persisted[0]?.body, '構造ノートに出ていない').toContain('⚠ 写せなかった表: docs');
   });
 });
 

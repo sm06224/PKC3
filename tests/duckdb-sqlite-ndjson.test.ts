@@ -234,6 +234,7 @@ function makeRunner(maxTableBytes?: number): DuckDbRunner {
       return {
         tables: opened.tables,
         views: opened.views,
+        ftsTables: opened.ftsTables,
         table: (name, max) =>
           request({ op: 'exportSqliteTable', session: opened.session, table: name, maxTableBytes: maxTableBytes ?? max }),
         close: async () => {
@@ -662,8 +663,12 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
           counts: keep(x.counts, 'tbl'),
         });
       expect(md(have), '構造ノートの字が違う').toBe(md(want));
-      // 🔴 写さなかった view は、報告に載る(どこにも出ないままにしない)
-      expect(got.copy.refused).toEqual([{ name: '客名簿', view: true, why: 'ビューは写しません' }]);
+      // 🔴 写さなかった view と、全文検索の仮想表(`検索`。着地後レビュー 💭8)は、報告に載る(どこにも出ないままにしない)。
+      //   ⚠ 影の表(`検索_data` など)は載らない ── user の表ではないので、黙って外す
+      expect(got.copy.refused).toEqual([
+        { name: '客名簿', view: true, why: 'ビューは写しません' },
+        { name: '検索', view: false, why: '全文検索の表は写しません' },
+      ]);
     } finally {
       await runner.release();
     }

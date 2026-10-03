@@ -108,7 +108,14 @@ export function duckDbMetaOf(
 
 const cellText = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v));
 
-/** 器の列の名前の並びが、写した表の列の並びと同じか(⚠ 集合ではなく**並びも**見る ── 写しは宣言の順に作る)。 */
+/**
+ * 器の列の名前の並びが、写した表の列の並びと同じか(⚠ 集合ではなく**並びも**見る ── 写しは宣言の順に作る)。
+ *
+ * ⚠ **既知の穴(直していない)**:見るのは**名前の並びだけ**で、型は見ない。user が写した表を
+ *   `CREATE OR REPLACE … AS SELECT` で**列名はそのまま・型だけ変えて**作り直すと、同じ名前の並びなので
+ *   **元の `.sqlite` の型・鍵を重ねてしまう**(構造には元の宣言が出て、器の中の実際の型とは違う)。
+ *   型まで比べるには器の型を元の宣言へ引き直す必要があり、いまは採っていない。
+ */
 function sameColumnNames(raw: readonly string[], meta: readonly SqliteColumnShape[]): boolean {
   return raw.length === meta.length && raw.every((n, i) => n === meta[i]?.name);
 }

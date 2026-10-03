@@ -68,6 +68,28 @@ export function sqlMenuLabel(sql: string): string {
   return one.length <= SQL_MENU_LABEL_MAX ? one : `${one.slice(0, SQL_MENU_LABEL_MAX)}…`;
 }
 
+/**
+ * 🔴 **DuckDB で引くときに案内・手本へ並べる表の名前 = 写した表**(着地後レビュー ⚠2)。
+ *
+ * ⚠ 開いてある客(`target.tables`)は**内蔵の sqlite で引ける表**で、DuckDB へ写さなかった表
+ *   (全文検索の仮想表・大きすぎる表。`copy.refused`)を含む ── そのまま並べると、**書いてあるとおり打つと
+ *   DuckDB では `no such table`** になる(手本が 1 つ目の表なら、手本そのものが打てない)。
+ *   写さなかった表は帯・つながり図の下・構造ノートが名前つきで言う。
+ * ⚠ **まだ写していない回**(`copy === null`)は何を写さないかを知らない ── 開いてある客の表をそのまま返す。
+ * 🔑 並べているとき(`multi`)の器での名前は `ファイル名_表名`(`duckdb-runner.ts` の `refused` と同じ規則)。
+ */
+export function copiedTableNames(
+  target: SqlTipTarget,
+  copy: DuckDbCopyReport | null,
+  multi: boolean,
+): string[] {
+  if (copy === null) return [...target.tables];
+  const refused = new Set(copy.refused.filter((r) => !r.view).map((r) => r.name));
+  return target.tables.filter(
+    (t) => !refused.has(multi ? tableNameFromFileTable(target.name, t, new Set()) : t),
+  );
+}
+
 /** 表の名前を、上限まで並べる。 */
 function tableList(tables: readonly string[]): string {
   if (tables.length === 0) return '(表が 1 つもありません)';

@@ -18,6 +18,7 @@ import { erSql, type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
 import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-source';
 import type { DuckDbCopyReport } from '@features/query/duckdb-copy-report';
+import { DUCKDB_LOAD_TOO_LONG, DUCKDB_TOO_LONG } from '@adapter/platform/duckdb/duckdb-lease';
 
 /**
  * 🔴 **構造(つながり図・構造ノート)を、どこへ頼むか**(#682 段④c → #918 で「断る」から「頼み先を変える」へ)。
@@ -5442,10 +5443,31 @@ function reduceCore(
        *   (`SEARCH_DETAIL_FAILED` と同じ作法)。
        */
       if (state.sqlPage.runToken !== action.token) return { state, events: [] };
-      return {
-        state: { ...state, sqlPage: { ...state.sqlPage, running: false, error: action.error } },
-        events: [],
-      };
+      {
+        /**
+         * 🔴 **時計で器が畳まれた回は、開いたままのつながり図を採り直す**(着地後レビュー 💭10)。
+         * ⚠ 30 秒の門(`DUCKDB_TOO_LONG`)・写す所の 120 秒の門(`DUCKDB_LOAD_TOO_LONG`)が鳴ると器は**畳まれる** ──
+         *   写した表も、`CREATE` で作った表も消える。直す前は図に**もう無い表の四角が残り**、押すと `no such table` だった
+         *   (`SET_SQL_RESULT` の書き込み後 R1 と同じ症状)。
+         * 🔑 作法も R1 と同じ `erAfterDuckWrite`(user が引いた線 `mine` は残す)。⚠ 図の構造を **DuckDB の器から採る相手**
+         *   (`schemaRouteOf(...).duck`)のときだけ ── 内蔵の sqlite から採る図は器と関係が無い。
+         * 🔑 判定は断りの**字**(`DUCKDB_TOO_LONG` / `DUCKDB_LOAD_TOO_LONG`。字を 1 か所で持つ ── 後ろに写せなかった表の
+         *   理由が付いても拾えるよう `includes`)。それ以外の失敗(字の誤り・表が無い)では器は畳まれていないので触らない。
+         */
+        const p = state.sqlPage;
+        const route = schemaRouteOf(p.guest, p.extraGuests);
+        const folded =
+          route.duck !== undefined &&
+          (action.error.includes(DUCKDB_TOO_LONG) || action.error.includes(DUCKDB_LOAD_TOO_LONG));
+        const redraw = folded ? erAfterDuckWrite(p.er, erSourceKey(p.guest, p.extraGuests), route) : null;
+        return {
+          state: {
+            ...state,
+            sqlPage: { ...p, running: false, error: action.error, ...(redraw === null ? {} : { er: redraw.er }) },
+          },
+          events: redraw === null ? [] : redraw.events,
+        };
+      }
     case 'SET_SEARCH_DETAIL':
       // ⚠ **遅れて返った古い結果を捨てる**(`SET_SEARCH_HITS` と同じ)
       if (action.query !== state.searchPage.query) return { state, events: [] };
