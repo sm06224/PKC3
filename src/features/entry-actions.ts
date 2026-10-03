@@ -25,6 +25,7 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
+import { PLACE_LINE_WIDTH_THICK, PLACE_LINE_WIDTH_THIN } from './markdown/place-color';
 import {
   PLACE_SHAPES,
   PLACE_SHAPE_LABELS,
@@ -76,7 +77,23 @@ export interface EntryAction {
    *   伝える印**である(検査は「塊を持つ物は全部描かれる」を全数で見ているため)。
    */
   readonly menuOnly?: boolean;
+  /**
+   * 🔴 **その項目だけに付ける属性**(#530 段④)── 同じ受け手(`place-color`)を、
+   *   「塗りの色」と「枠の色」で 2 項目に分けるときの**違い**を運ぶ。
+   * ⚠ 右クリックの器(`context-menu.ts` の `attrs`)がそのまま写す。受け手が読む名前は
+   *   `PLACE_STYLE_KEYS_ATTR` / `PLACE_STYLE_WIDTH_ATTR` の 1 本(綴りを写して増やさない)。
+   */
+  readonly attrs?: Readonly<Record<string, string>>;
 }
+
+/**
+ * 🔴 **色・太さの項目が運ぶ属性の名前**(#530 段④)。⚠ 項目を組む側(ここ)と読む側
+ *   (`binder.ts`)が**同じ字**を使う ── 片方だけ変えると、押しても何も書かれない(無言の dead click)。
+ * - `…keys` は書く札の名前(空白区切り。`fill` / `stroke`)
+ * - `…width` は書く太さ(整数。空なら**標準へ戻す** = 札を消す)
+ */
+export const PLACE_STYLE_KEYS_ATTR = 'data-pkc-style-keys';
+export const PLACE_STYLE_WIDTH_ATTR = 'data-pkc-style-width';
 
 
 /**
@@ -854,6 +871,8 @@ const SHAPE_ACTION: Record<PlaceShape, EntryAction> = {
 export function blockMenuActions(ctx: {
   readonly board: boolean;
   readonly shape?: PlaceShape | null;
+  /** 🔴 色の札(`fill=` / `stroke=`)が書かれているか(#530 段④。読めない値も数える)。 */
+  readonly styled?: boolean;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'この塊をコピー' }];
   /**
@@ -876,6 +895,25 @@ export function blockMenuActions(ctx: {
      *   本文の右クリック(いつも出る方)は 1 項目も増えない。
      */
     ...PLACE_SHAPES.filter((sh) => sh !== (ctx.shape ?? 'rect')).map((sh) => SHAPE_ACTION[sh]),
+    /**
+     * 🔴 **色を選ぶ**(#530 段④。Gemini 裁定 A)── 塗りと枠の 2 つ。選ぶ窓は**既存の色の窓**
+     *   (`<input type="color">`。本文の色コードの見本を押したときと同じ物)で、新しい部品は作らない。
+     * 🔴 **「色を外す」は色の札が在るときだけ**(片道にしない ── 置けるなら外せる)。⚠ 在るのに
+     *   出さないと、間違えて付けた色を本文まで開かないと戻せない。⚠ 無いのに出すと、押しても
+     *   何も起きない(無言の dead click)。
+     * ⚠ 字の「色…」は塗り、枠は「枠の色…」── 押す物と効く先を字で分ける。
+     */
+    { action: 'place-color', label: '色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'fill' } },
+    { action: 'place-color', label: '枠の色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'stroke' } },
+    ...(ctx.styled === true
+      ? [
+          {
+            action: 'place-color-clear',
+            label: '色を外す',
+            attrs: { [PLACE_STYLE_KEYS_ATTR]: 'fill stroke' },
+          },
+        ]
+      : []),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }
@@ -892,6 +930,44 @@ export const REMOVE_PLACE_LINE_ACTION: EntryAction = {
   action: 'remove-place-line',
   label: 'この線を消す',
 };
+
+/**
+ * 🔴 **線の上で出す物**(#530 段④。Gemini 裁定 A)── 色と太さ。「この線を消す」はいつも最後。
+ *
+ * ⚠ **いまの太さと同じ物は出さない**(押しても 1 ドットも変わらない口を作らない)。
+ * ⚠ **標準の太さ(札が無い)へ戻す口は、太さが書かれているときだけ**(置けるなら外せる)。
+ *   🔑 標準は「札を消す」で作る ── `width=2` と書き足すと、標準の太さを変えた日に
+ *   書いた線だけ置き去りになる。
+ * ⚠ 「色を外す」は**色が書かれているときだけ**(同じ理由)。
+ * 🔑 色の窓は付箋と同じ 1 本(`place-color`)── 付箋は `fill`、線は `stroke` を運ぶだけの違い。
+ *
+ * @param ctx.stroke 線の色の札が書かれているか(読めない値も数える)
+ * @param ctx.width いまの太さ(札が無い / 読めないは `null`)
+ * @param ctx.widthWritten 太さの札が書かれているか(読めない値も数える)
+ */
+export function placeLineMenuActions(ctx: {
+  readonly stroke: boolean;
+  readonly width: number | null;
+  readonly widthWritten: boolean;
+}): readonly EntryAction[] {
+  const w = (n: number): Readonly<Record<string, string>> => ({ [PLACE_STYLE_WIDTH_ATTR]: String(n) });
+  return [
+    { action: 'place-color', label: '色…', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'stroke' } },
+    ...(ctx.stroke
+      ? [{ action: 'place-color-clear', label: '色を外す', attrs: { [PLACE_STYLE_KEYS_ATTR]: 'stroke' } }]
+      : []),
+    ...(ctx.width !== PLACE_LINE_WIDTH_THIN
+      ? [{ action: 'place-line-width', label: '線を細くする', attrs: w(PLACE_LINE_WIDTH_THIN) }]
+      : []),
+    ...(ctx.width !== PLACE_LINE_WIDTH_THICK
+      ? [{ action: 'place-line-width', label: '線を太くする', attrs: w(PLACE_LINE_WIDTH_THICK) }]
+      : []),
+    ...(ctx.widthWritten
+      ? [{ action: 'place-line-width', label: '線の太さを標準に戻す', attrs: { [PLACE_STYLE_WIDTH_ATTR]: '' } }]
+      : []),
+    REMOVE_PLACE_LINE_ACTION,
+  ];
+}
 
 /**
  * 🔴 **右クリックした場所に板を置く**(#676。user 裁定 2026-09-04)。

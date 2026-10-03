@@ -381,6 +381,70 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await blockMenu.locator('[data-pkc-action="place-shape-rect"]').click();
   await expect(p2, '四角へ戻せない').toHaveAttribute('data-pkc-shape', 'rect', { timeout: 5000 });
 
+  /**
+   * 🔴 **付箋に色を付けて、外す**(#530 段④。Gemini 裁定 A)。
+   *
+   * ⚠ **計算後の色を見る**(属性だけ見ると「変数は置いたが、受け皿の規則が無く画面は 1 ドットも変わらない」を
+   *   素通りする ── #1038 段 J で踏んだ形)。⚠ 形のある付箋は塗りが `::after`(層)に在る ── 要素の背景は透明のまま
+   *   なので、**層の色**を見る(unit の DOM は擬似要素を持たない)。
+   * 🔑 色を選ぶ窓は OS の窓で実ブラウザからは操作できない ── 窓の入力へ `change` を**合成して撃つ**
+   *   (本物の窓を閉じたときと同じ出来事。`body-links.smoke.spec.ts` の色の見本と同じ作法)。
+   * 🔑 **新しい起動は増やさない**(#820)── この筋書きの続きで確かめる。
+   */
+  const pickColor = async (label: string, value: string): Promise<void> => {
+    await p2.click({ button: 'right' });
+    await blockMenu.locator('button', { hasText: new RegExp(`^${label}$`) }).click();
+    await expect(page.locator('input[data-pkc-field="color-pick"]'), `「${label}」を押しても色の窓が出ない`).toHaveCount(1);
+    await page.evaluate((v) => {
+      const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+      input.value = v;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+  };
+  const paintOf = (loc: Locator): Promise<{ bg: string; border: string; ink: string }> =>
+    loc.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, border: cs.borderTopColor, ink: cs.color };
+    });
+  const before = await paintOf(p2);
+  const p1Before = await paintOf(p1);
+  await pickColor('色…', '#ff0000');
+  await expect(p2, '塗りが本文に書き戻されていない').toHaveAttribute('data-pkc-fill', '#ff0000', { timeout: 5000 });
+  await pickColor('枠の色…', '#0000ff');
+  await expect(p2, '枠の色が本文に書き戻されていない').toHaveAttribute('data-pkc-stroke', '#0000ff', { timeout: 5000 });
+  const colored = await paintOf(p2);
+  expect(colored.bg, '塗りが画面の色に出ていない(受け皿の規則が効いていない)').toBe('rgb(255, 0, 0)');
+  expect(colored.border, '枠の色が画面の色に出ていない').toBe('rgb(0, 0, 255)');
+  // 🔴 暗い塗りの上の字は白(暗いテーマの明るい字が明るい塗りの上で消える逆の形を防ぐ)
+  expect(colored.ink, '赤い塗りの上の字の色が塗りに合っていない').toBe('rgb(255, 255, 255)');
+  // ⚠ 対照群: 隣の付箋は色なしのまま(色が板をまたいで漏れていない)
+  expect(await paintOf(p1), '色が隣の付箋へ漏れた').toEqual(p1Before);
+  await expect(p1).not.toHaveAttribute('data-pkc-fill', /.+/);
+  // 🔴 形のある付箋は**層**に色が乗る(ひし形: 外 = 枠 / 内 = 塗り)
+  await p2.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="place-shape-diamond"]').click();
+  await expect(p2).toHaveAttribute('data-pkc-shape', 'diamond', { timeout: 5000 });
+  const layers = await p2.evaluate((el) => ({
+    outer: getComputedStyle(el, '::before').backgroundColor,
+    inner: getComputedStyle(el, '::after').backgroundColor,
+  }));
+  expect(layers.inner, 'ひし形の塗り(内の層)が色に出ていない').toBe('rgb(255, 0, 0)');
+  expect(layers.outer, 'ひし形の枠(外の層)が色に出ていない').toBe('rgb(0, 0, 255)');
+  // 🔴 外せる(片道にしない)── 色を外すと本文の札が消え、画面は元の色へ戻る
+  await p2.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="place-color-clear"]').click();
+  await expect(p2, '色を外しても fill= が残っている').not.toHaveAttribute('data-pkc-fill', /.+/, { timeout: 5000 });
+  await expect(p2).not.toHaveAttribute('data-pkc-stroke', /.+/);
+  await p2.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="place-shape-rect"]').click();
+  await expect(p2).toHaveAttribute('data-pkc-shape', 'rect', { timeout: 5000 });
+  expect(await paintOf(p2), '色を外したのに元の見た目へ戻らない').toEqual(before);
+  // 色が無いときは「色を外す」は出ない(押しても何も起きない口を作らない)
+  await p2.click({ button: 'right' });
+  await expect(blockMenu.locator('[data-pkc-action="place-color-clear"]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
@@ -1004,6 +1068,42 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   await page.mouse.click(mid.x, mid.y, { button: 'right' });
   const lineMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(lineMenu.locator('[data-pkc-action="remove-place-line"]'), '線の上で「この線を消す」が出ていない').toBeVisible();
+  /**
+   * 🔴 **線の色と太さ**(#530 段④)── 消す前に、同じ線へ色と太さを付ける(**新しい起動は増やさない**)。
+   * ⚠ 計算後の `stroke` / `stroke-width` を見る(変数を置いても、受け皿の規則が無ければ 1 ドットも変わらない)。
+   */
+  const strokeOf = (): Promise<{ stroke: string; width: string }> =>
+    made.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { stroke: cs.stroke, width: cs.strokeWidth };
+    });
+  const was = await strokeOf();
+  expect(was.width, '前提: 色も太さも無い線は 2px').toBe('2px');
+  await lineMenu.locator('button', { hasText: /^色…$/ }).click();
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+    input.value = '#2563eb';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect.poll(async () => (await strokeOf()).stroke, { message: '線の色が画面に出ていない', timeout: 5000 }).toBe('rgb(37, 99, 235)');
+  const mid2 = await made.evaluate((el) => {
+    const path = el as unknown as SVGPathElement;
+    const pt = path.getPointAtLength(path.getTotalLength() / 2);
+    const m = path.getScreenCTM()!;
+    return { x: pt.x * m.a + pt.y * m.c + m.e, y: pt.x * m.b + pt.y * m.d + m.f };
+  });
+  await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
+  await expect(lineMenu.locator('button', { hasText: /^色を外す$/ }), '色が付いたのに「色を外す」が出ない').toBeVisible();
+  await lineMenu.locator('button', { hasText: /^線を太くする$/ }).click();
+  await expect.poll(async () => (await strokeOf()).width, { message: '線の太さが画面に出ていない', timeout: 5000 }).toBe('4px');
+  await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
+  await expect(lineMenu.locator('button', { hasText: /^線を太くする$/ }), 'いまの太さと同じ口が出ている').toHaveCount(0);
+  await lineMenu.locator('button', { hasText: /^線の太さを標準に戻す$/ }).click();
+  await expect.poll(async () => (await strokeOf()).width, { message: '太さを標準へ戻せない', timeout: 5000 }).toBe('2px');
+  await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
+  await lineMenu.locator('button', { hasText: /^色を外す$/ }).click();
+  await expect.poll(async () => strokeOf(), { message: '色を外しても元の見た目へ戻らない', timeout: 5000 }).toEqual(was);
+  await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
   await lineMenu.locator('[data-pkc-action="remove-place-line"]').click();
   await expect(page.locator('[data-pkc-field="place-lines"] path'), '線が消えていない').toHaveCount(4, { timeout: 5000 });
   await expect(made, '消したのは繋いだ線だけでなければならない').toHaveCount(0);

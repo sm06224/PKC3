@@ -300,7 +300,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-02(#999): N +1(`storage-vacuum`。保存領域を縮める ── 押した所から何も要らない。`storage-profile` と同じ仕分け)。
     // ⚠ 2026-10-02(#275 段①): N +1(`set-pdf-reader`。checkbox の `checked` を渡すだけ ── `set-inline-code-copy` と同じ仕分け)。
     // ⚠ 2026-10-02(#1231 段①): E +1(`set-revision-compare`。履歴の差分の「くらべる相手」── 閉じた選択肢を 1 つ選ぶ。`set-prose-align` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 70, P2: 34, E: 26, V: 10, N: 178 });
+    // ⚠ 2026-10-03(#530 段④): N +3(`place-color` / `place-color-clear` / `place-line-width`。付箋・線の右クリックの色と太さ ──
+    //   押した所から運ぶのは札の名前と値だけで、対象の行はメニューが運ぶ刻印から引く。`raise-place` / `place-shape-*` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 70, P2: 34, E: 26, V: 10, N: 181 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

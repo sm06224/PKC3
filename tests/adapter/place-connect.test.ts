@@ -434,7 +434,13 @@ describe('引いた線は、右クリックで消せる(片道にしない。#53
     expect(hit, '前提が崩れている: 線を押さえる層が無い').not.toBeNull();
     expect(hit!.getAttribute('data-pkc-line-decl'), '線の開き行(生の body の 8 行目)を指していない').toBe('8');
     rightClick(hit!);
-    expect(acts(root), '「この線を消す」だけが出る').toEqual(['remove-place-line']);
+    // ⚠ 2026-10-03(#530 段④): 色と太さが並んだ。色なし・太さなしの線は「色…」「細く」「太く」+「消す」(最後)
+    expect(acts(root), '色・太さ・「この線を消す」が並ぶ').toEqual([
+      'place-color',
+      'place-line-width',
+      'place-line-width',
+      'remove-place-line',
+    ]);
     expect(root.querySelector(`${MENU} [data-pkc-action="remove-place-line"]`)!.textContent).toBe('この線を消す');
     root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="remove-place-line"]`)!.click();
     expect(asks).toHaveLength(1);
@@ -557,7 +563,8 @@ describe('掴んで繋ぐ印と線の CSS(#530 段③d)', () => {
     expect(path).toMatch(decl('pointer-events', 'stroke'));
     // ⚠ 透明でも太い ── 見える線は 2px で押せない
     expect(path).toMatch(decl('stroke', 'transparent'));
-    expect(path).toMatch(decl('stroke-width', '12'));
+    // 🔑 太さは変数(#530 段④)── 太い線の当たりも太くする。変数が無いときは今までの 12
+    expect(path).toMatch(decl('stroke-width', 'var\\(--pkc-hit-width, 12\\)'));
   });
 });
 

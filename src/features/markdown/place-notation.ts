@@ -34,6 +34,16 @@
 import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
+import {
+  BOARD_STYLE_KEYS,
+  isPlaceStyle,
+  LINE_STYLE_KEYS,
+  parsePlaceColor,
+  parsePlaceWidth,
+  PLACE_STYLE_KEYS,
+  type PlaceStyle,
+  type PlaceStyleKey,
+} from './place-color';
 import { parseAnchorSpell } from './place-line';
 import { isPlaceShape, placeShapeOf, type PlaceShape } from './place-shape';
 import { blockSpanAt, scanContainers } from './source-blocks';
@@ -300,6 +310,130 @@ export function setPlaceShape(
 ): string | null {
   if (!isPlaceShape(shape)) return null;
   return spliceOpenLine(body, target, { shape });
+}
+
+/**
+ * 🔴 **付箋の色(`fill=` / `stroke=`)と線の色・太さ(`stroke=` / `width=`)を書く**
+ * (#530 段④。Gemini 裁定 A、2026-10-02)── 開き行の札**だけ**を書き換える。
+ *
+ * 🔑 門は `movePlace` / `setPlaceShape` と同じ 1 本(`placeLinesAt`)── 行番号 + 開き行の byte 一致 +
+ *   塊の開き行 + frontmatter の外 + fence の外。⚠ 受ける開き行は**付箋と線の両方**
+ *   (線の行を渡すと線の札、付箋の行を渡すと付箋の札 ── 押していない種類の札は書かない)。
+ * ⚠ **持てない札は断る**(`null`)── 付箋に `width=` を書いても読む側は使わず、
+ *   本文だけが増える(「書いたのに効かない」の入口)。
+ * ⚠ **値は綴りを検めてから書く**(`isPlaceStyle`)── 素通しにすると、空白や引用符を含む字が
+ *   開き行へ入って札の並びが壊れ、画面と PowerPoint へ知らない字が流れる(`place-color.ts`)。
+ * 🔴 **`null` の札は消す**(置けるなら外せる)。⚠ 消す札が元から無くても**書かない**
+ *   (body をそのまま返す = 済んでいる。`null` ではない)。
+ * 🔑 同じ札が重なって書かれていたら(`fill=a fill=b`)、**全部消して 1 つだけ書く** ──
+ *   読む側は後ろのものを採るので、前の 1 つを差し替えるだけでは**見た目が変わらない**。
+ */
+export function setPlaceStyle(
+  body: string,
+  target: PlaceTarget,
+  style: PlaceStyle,
+): string | null {
+  if (!isPlaceStyle(style)) return null;
+  const at = placeLinesAt(body, target, (l) => isLineOpen(l) || isPlaceOpen(l));
+  if (at === null) return null;
+  const line = at.lines[target.line]!;
+  // ⚠ 両方のクラスを持つ塊は線として読む(書き出しも同じ ── `html-blocks.ts`)
+  const asLine = isLineOpen(line);
+  const allowed = asLine ? LINE_STYLE_KEYS : BOARD_STYLE_KEYS;
+  const entries: Array<readonly [PlaceStyleKey, string | null]> = [];
+  for (const k of PLACE_STYLE_KEYS) {
+    const v = style[k];
+    if (v === undefined) continue;
+    if (!allowed.includes(k)) return null;
+    entries.push([k, v === null ? null : k === 'width' ? String(v) : parsePlaceColor(v)!]);
+  }
+  const next = spliceStyleLine(line, asLine ? 'pkc-line' : 'pkc-place', entries);
+  if (next === null) return null;
+  if (next === line) return body;
+  at.lines[target.line] = next;
+  return at.lines.join('\n');
+}
+
+/** 開き行に付いている色・太さ。⚠ 読めない値は `null`(描く側が無視する物と同じ規則)。 */
+export interface PlaceStyleRead {
+  readonly fill: string | null;
+  readonly stroke: string | null;
+  readonly width: number | null;
+  /**
+   * **その種類が持てる札のどれかが書かれているか**(値が読めなくても真)。
+   * 🔑 右クリックの「色を外す」を出すかの判定 ── 読めない値(`fill=red`)も、外せなければ
+   *   画面に出ない札が本文に残り続ける。
+   */
+  readonly any: boolean;
+  /** 札ごとの「書かれているか」(読めない値も真)。⚠ 持てない札は常に `false`。 */
+  readonly written: Readonly<Record<PlaceStyleKey, boolean>>;
+}
+
+/**
+ * その行が付箋 / 線なら、いま付いている色・太さ。どちらでもなければ `null`。
+ * 🔑 読む規則は描画(`place-board.ts`)と書き出し(`html-blocks.ts`)と**同じ**
+ *   `parsePlaceColor` / `parsePlaceWidth`(§7)。
+ */
+export function placeStyleAt(line: string): PlaceStyleRead | null {
+  const asLine = isLineOpen(line);
+  const attrs = asLine ? formatOpenAttrs(line, 'pkc-line') : placeOpenAttrs(line);
+  if (attrs === null) return null;
+  const keys = asLine ? LINE_STYLE_KEYS : BOARD_STYLE_KEYS;
+  return {
+    fill: keys.includes('fill') ? parsePlaceColor(attrs.kvs.fill) : null,
+    stroke: parsePlaceColor(attrs.kvs.stroke),
+    width: keys.includes('width') ? parsePlaceWidth(attrs.kvs.width) : null,
+    any: keys.some((k) => attrs.kvs[k] !== undefined),
+    written: {
+      fill: keys.includes('fill') && attrs.kvs.fill !== undefined,
+      stroke: attrs.kvs.stroke !== undefined,
+      width: keys.includes('width') && attrs.kvs.width !== undefined,
+    },
+  };
+}
+
+/** `key=値`(引用符つきも)を全部拾う正規表現。⚠ 前の空白ごと拾う(消したとき隙間を残さない)。 */
+const styleTokenRe = (key: string): RegExp =>
+  new RegExp(`(^|\\s)${key}=(?:"[^"]*"|'[^']*'|\\S*)`, 'g');
+
+/** 札を全部消す。 */
+function removeToken(attrs: string, key: string): string {
+  return attrs.replace(styleTokenRe(key), '').replace(/^\s+/, '');
+}
+
+/** 札を 1 つだけにして書く(無ければ足す / 1 つなら**その場で**差し替える / 重なっていれば全部消して末尾へ)。 */
+function setStyleToken(attrs: string, key: string, value: string): string {
+  const count = attrs.match(styleTokenRe(key))?.length ?? 0;
+  if (count === 1) return attrs.replace(styleTokenRe(key), `$1${key}=${value}`);
+  const rest = count === 0 ? attrs : removeToken(attrs, key);
+  return rest === '' ? `${key}=${value}` : `${rest} ${key}=${value}`;
+}
+
+/**
+ * 開き行の色・太さの札を書き換える(`spliceTokens` の線対応版 ── こちらは**札を消せる**)。
+ * - `{}` を持つ形 ── 括弧の中の札だけ差し替える
+ * - `{}` を持たない Tier 1 形 ── 札を**持てない**ので、足す物があるときだけ括弧つきへ整える
+ *   (消すだけなら**行に触らない** ── 消す物が無い)
+ */
+function spliceStyleLine(
+  line: string,
+  cls: string,
+  entries: ReadonlyArray<readonly [PlaceStyleKey, string | null]>,
+): string | null {
+  const attrs = formatOpenAttrs(line, cls);
+  if (attrs === null) return null;
+  const open = line.indexOf('{');
+  const close = line.lastIndexOf('}');
+  if (open !== -1 && close > open) {
+    let inner = line.slice(open + 1, close);
+    for (const [k, v] of entries) inner = v === null ? removeToken(inner, k) : setStyleToken(inner, k, v);
+    return line.slice(0, open + 1) + inner + line.slice(close);
+  }
+  if (!entries.some(([, v]) => v !== null)) return line;
+  const parts = attrs.classes.map((c) => `.${c}`);
+  if (attrs.id !== undefined) parts.push(`#${attrs.id}`);
+  for (const [k, v] of entries) if (v !== null) parts.push(`${k}=${v}`);
+  return `::: {${parts.join(' ')}}`;
 }
 
 /**
