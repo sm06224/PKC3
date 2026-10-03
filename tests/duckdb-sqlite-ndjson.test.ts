@@ -217,14 +217,28 @@ const PACK = JSON.stringify({
 /** 製品と同じ `DuckDbRunner`(器を起こす所と、storage worker の口だけを差す)。 */
 /** 🔴 storage worker へ「`.sqlite` を写して」と頼んだ回数(#918:構造を採った後の SQL が差し込み直さないことを見る)。 */
 let exportCalls = 0;
+/** 最後に起こした器(実物)。⚠ 塞いだ後に「器の中へ別の file を差す」test が使う。 */
+let lastHandle: DuckDbHandle | null = null;
 function makeRunner(maxTableBytes?: number): DuckDbRunner {
   return new DuckDbRunner({
     fetchText: () => Promise.resolve(PACK),
-    open: () => openReal(),
+    open: async () => {
+      lastHandle = await openReal();
+      return lastHandle;
+    },
     baseUrl: 'https://example.test/app/',
-    exportSqlite: (img, max) => {
+    // 🔴 製品の `main.ts` と同じ形:開く → 表ごとに頼む → 閉じる(storage worker の 3 つの口)
+    exportSqlite: async (img) => {
       exportCalls += 1;
-      return request({ op: 'exportSqliteForDuckDb', image: img, maxTableBytes: maxTableBytes ?? max });
+      const opened = await request({ op: 'openSqliteExport', image: img });
+      return {
+        tables: opened.tables,
+        table: (name, max) =>
+          request({ op: 'exportSqliteTable', session: opened.session, table: name, maxTableBytes: maxTableBytes ?? max }),
+        close: async () => {
+          await request({ op: 'closeSqliteExport', session: opened.session });
+        },
+      };
     },
   });
 }
@@ -366,23 +380,139 @@ describe('🔴 .sqlite を DuckDB で引く(実物の engine / 実物の storage
     }
   }, 60_000);
 
-  it('🔴 外は塞がっている ── 写した表は引けるが、file の読み直しは断られる(NDJSON は器に残さない)', async () => {
+  /**
+   * 🔴 **塞ぎ(`SET enable_external_access=false`)が効いている**ことを、**塞ぎが無いと通る相手**で見る。
+   * ⚠ 1 稿目は「写し終えた NDJSON の読み直し」「遠くの URL」が断られることを見ていたが、前者は
+   *   **手放した file** なので塞ぎが無くても落ち、後者は **httpfs が無い**ので塞ぎが無くても落ちた
+   *   (塞ぎを外す変異で、両方とも緑のまま)。
+   * 🔑 いまの相手は、**塞いだ後に器へ差した別の file**(`put` した NDJSON)── 塞ぎが無ければ `read_json` で読めて、
+   *   塞いだ後は読めない(上の対照群で「塞ぐ前は読める」を同じ器の作りで見ている)。
+   */
+  it('🔴 外は塞がっている ── 写した表は引けるが、塞いだ後に差した file は読めない(塞ぐ前は読める)', async () => {
     const img = await image((db) => {
       run(db, 'CREATE TABLE t (n INTEGER)');
       run(db, 'INSERT INTO t VALUES (1)');
     });
+    const other = new TextEncoder().encode('{"x":7}\n');
+    // 対照群:塞いでいない器なら、差した file は読める(= 下の「読めない」は file のせいではない)
+    const bare = await openReal();
+    try {
+      await bare.put('other.ndjson', other);
+      // ⚠ 器の生の答えは BigInt で返る(`DuckDbRunner` が数へ直す前)── 字で比べる
+      expect((await bare.query("SELECT x FROM read_json('other.ndjson')")).rows.map((r) => String(r[0]))).toEqual(['7']);
+    } finally {
+      await bare.terminate();
+    }
     const runner = makeRunner();
     const sources = [{ source: sqliteSource('l1', 'x.sqlite'), readBytes: asFile(img) }];
     try {
       expect((await runner.run({ sql: 'SELECT count(*) FROM t', sources })).rows).toEqual([[1]]);
-      // 塞ぎが効いている(= 差し込んだ NDJSON を読み直せない)
+      // 器は塞がれた後。ここで別の file を差しても、user の字からは読めない
+      await lastHandle!.put('other.ndjson', other);
       await expect(
-        runner.run({ sql: "SELECT * FROM read_json('source_t1.ndjson')", sources }),
+        runner.run({ sql: "SELECT x FROM read_json('other.ndjson')", sources }),
+        '塞ぎが効いていない(塞いだ後に差した file が読めてしまう)',
       ).rejects.toThrow();
-      // 遠くの file も断られる
-      await expect(
-        runner.run({ sql: "SELECT * FROM read_json('https://example.test/x.json')", sources }),
-      ).rejects.toThrow();
+      // 写した表は塞いだ後も引ける
+      expect((await runner.run({ sql: 'SELECT n FROM t', sources })).rows).toEqual([[1]]);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  /**
+   * 🔴 **「値は 1 つも失わない」**(着地後のレビューで偽と分かった)。宣言が INTEGER でも sqlite は小数を
+   *   REAL のまま保てる(価格 19.99)── DuckDB の BIGINT へ `read_json` で入れると**落ちずに丸まる**。
+   *   DOUBLE の `Infinity` は **NULL**、NUMERIC の 2^53 超は丸まる。worker が旗を立て、全列 VARCHAR で写す。
+   */
+  it('🔴 INTEGER の列の小数 / REAL の Infinity / NUMERIC の 2^53 超が、丸まらず・消えずに届く', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE price (name TEXT, p INTEGER)');
+      run(db, "INSERT INTO price VALUES ('a', 3), ('b', 19.99), ('c', 2.5), ('d', 3.5)");
+      run(db, 'CREATE TABLE inf (x REAL)');
+      run(db, 'INSERT INTO inf VALUES (1.5), (9e999), (-9e999)');
+      run(db, 'CREATE TABLE big (x NUMERIC)');
+      run(db, 'INSERT INTO big VALUES (9007199254740993)');
+      run(db, 'CREATE TABLE fp (x FLOATING POINT)');
+      run(db, 'INSERT INTO fp VALUES (0.1), (2)');
+      // 対照群:ふつうの表は型どおり(旗が立つ表の足を引っ張らない)
+      run(db, 'CREATE TABLE plain (p INTEGER, r REAL)');
+      run(db, 'INSERT INTO plain VALUES (1, 1.5), (2, 2.5)');
+    });
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', 'x.sqlite'), readBytes: asFile(img) }];
+    try {
+      const price = await runner.run({ sql: 'SELECT name, p FROM price ORDER BY name', sources });
+      expect(price.rows, '小数が丸まった(3.5 → 4 / 2.5 → 2 / 19.99 → 20)').toEqual([
+        ['a', '3'],
+        ['b', '19.99'],
+        ['c', '2.5'],
+        ['d', '3.5'],
+      ]);
+      const inf = await runner.run({ sql: 'SELECT x FROM inf ORDER BY x', sources });
+      expect(inf.rows, 'Infinity が NULL になった').toEqual([['-Infinity'], ['1.5'], ['Infinity']]);
+      expect((await runner.run({ sql: 'SELECT x FROM big', sources })).rows, '2^53 超の整数が丸まった').toEqual([
+        ['9007199254740993'],
+      ]);
+      // 型名に INT を含む `FLOATING POINT`(sqlite は INTEGER 親和性)も、小数を失わない
+      expect((await runner.run({ sql: 'SELECT x FROM fp ORDER BY x', sources })).rows).toEqual([['0.1'], ['2']]);
+      // 字で届くので、user は CAST で自分で選べる
+      expect((await runner.run({ sql: 'SELECT sum(CAST(p AS DOUBLE)) FROM price', sources })).rows).toEqual([[28.99]]);
+      // 対照群:旗の立たない表は、今までどおり型のまま
+      const types = await runner.run({
+        sql: "SELECT data_type FROM information_schema.columns WHERE table_name = 'plain' ORDER BY ordinal_position",
+        sources,
+      });
+      expect(types.rows).toEqual([['BIGINT'], ['DOUBLE']]);
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  /**
+   * 🔴 **DuckDB が作れない宣言(空の名前)は、その表だけ断る**。sqlite は空の表名・列名を許すが、
+   *   DuckDB は `zero-length delimited identifier` で断る ── 外へ投げると file 全体が英語の断りで落ちていた。
+   */
+  it('🔴 名前が空の表・列が在っても、ほかの表は引ける(その表だけ理由つきで断る)', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE "" (a INTEGER)');
+      run(db, 'CREATE TABLE emptycol ("" INTEGER, b INTEGER)');
+      run(db, 'CREATE TABLE 無事 (n INTEGER)');
+      run(db, 'INSERT INTO 無事 VALUES (5)');
+    });
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', 'x.sqlite'), readBytes: asFile(img) }];
+    try {
+      expect((await runner.run({ sql: 'SELECT n FROM 無事', sources })).rows, '無事な表まで引けなくなった').toEqual([[5]]);
+      let msg = '';
+      await runner.run({ sql: 'SELECT * FROM emptycol', sources }).catch((e: unknown) => {
+        msg = e instanceof Error ? e.message : String(e);
+      });
+      expect(msg).toContain('emptycol は DuckDB へ写せませんでした');
+      expect(msg).toContain('(名前の無い表) は DuckDB へ写せませんでした');
+    } finally {
+      await runner.release();
+    }
+  }, 60_000);
+
+  /**
+   * 🔴 **表が多くても、同時に載るのは 1 表ぶん**(実物で、写し終えた表の NDJSON を手放していること)。
+   * ⚠ 順番と「開いた写しを残さない」は `duckdb-runner-sqlite.test.ts` が持つ。ここは**実物の engine で全表が引ける**こと
+   *   (表ごとに頼む形にしても、1 表も欠けない)。
+   */
+  it('🔴 表が 12 枚あっても、全部が元の名前で引ける(表ごとに頼む形でも 1 表も欠けない)', async () => {
+    const img = await image((db) => {
+      for (let i = 0; i < 12; i += 1) {
+        run(db, `CREATE TABLE t${String(i)} (n INTEGER)`);
+        run(db, `INSERT INTO t${String(i)} VALUES (${String(i)})`);
+      }
+    });
+    const runner = makeRunner();
+    const sources = [{ source: sqliteSource('l1', 'x.sqlite'), readBytes: asFile(img) }];
+    try {
+      const parts = Array.from({ length: 12 }, (_, i) => `SELECT n FROM t${String(i)}`).join(' UNION ALL ');
+      const r = await runner.run({ sql: `SELECT count(*), sum(n) FROM (${parts})`, sources });
+      expect(r.rows).toEqual([[12, 66]]);
     } finally {
       await runner.release();
     }

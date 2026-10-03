@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  LossyWatch,
   NdjsonCollector,
   SQLITE_NDJSON_TABLE_MAX_BYTES,
   bytesToBase64,
@@ -95,6 +96,45 @@ describe('🔴 天井つきの組み立て(NdjsonCollector)', () => {
     expect(c.push('{"a":1}')).toBe(false);
   });
 
+  /**
+   * 🔴 **太い行でも、天井を超えたらすぐ止まる**(着地後のレビューで出た)。
+   * 天井を見るのが「1000 行ごと」だけだった頃は、1 行 64 KB の表が **999 行目まで止まらず**
+   * (天井の 64MiB を大きく超えて読み続け)、512 KB では `Array.join` が字の長さの上限で落ちた。
+   * 🔑 見るのは**止まる行**が「天井 ÷ 行の幅」の近く(束ねる 1 MiB ぶんの行数 + 数行)であること ──
+   *   行数だけで判定に戻すと、100 KB の行で 999 行目まで止まらない。
+   */
+  it('🔴 太い行(100KB / 300KB / 512KB)でも、止まる行は「天井 ÷ 行の幅」の近く', () => {
+    const max = 64 * 1024 * 1024;
+    for (const width of [100 * 1024, 300 * 1024, 512 * 1024]) {
+      const l = '{"a":"' + 'x'.repeat(width) + '"}';
+      const c = new NdjsonCollector(max);
+      let stoppedAt = -1;
+      for (let i = 0; i < 3000; i += 1) {
+        if (!c.push(l)) {
+          stoppedAt = i;
+          break;
+        }
+      }
+      const expected = Math.floor(max / (l.length + 1));
+      expect(stoppedAt, `${String(width)} bytes の行で、天井を超えても止まらない`).toBeGreaterThan(0);
+      // 超えた後に読み続けるのは、束ねる 1 MiB ぶんの行数(+ 数行)まで
+      const slack = Math.ceil((1024 * 1024) / l.length) + 4;
+      expect(stoppedAt, `${String(width)} bytes の行で止まるのが遅い`).toBeLessThanOrEqual(expected + slack);
+      expect(stoppedAt, `${String(width)} bytes の行で、天井の内側なのに止まった`).toBeGreaterThanOrEqual(expected - 1);
+      expect(c.exceeded).toBe(true);
+      expect(c.finish()).toBeNull();
+    }
+  });
+
+  it('⚠ 対照群 ── 太い行でも、天井の内側なら全行が返る(束ね方を変えても欠けない)', () => {
+    const l = '{"a":"' + 'x'.repeat(300 * 1024) + '"}';
+    const c = new NdjsonCollector(8 * 1024 * 1024);
+    for (let i = 0; i < 20; i += 1) expect(c.push(l)).toBe(true);
+    const out = c.finish();
+    expect(out?.byteLength).toBe(20 * (l.length + 1));
+    expect(c.rows).toBe(20);
+  });
+
   it('🔴 天井ちょうどは通り、1 バイト超えると断る(境界)', () => {
     const l = '{"a":1}'; // 7 字 + 改行 = 8 bytes
     const exact = new NdjsonCollector(8);
@@ -128,6 +168,44 @@ describe('🔴 天井つきの組み立て(NdjsonCollector)', () => {
   it('🔴 1 表あたりの天井は 64MiB(実測 100k 行 = 27.5MB の約 2.4 倍)', () => {
     // ⚠ 数を pin するのは、変えるときに**理由を読み直させる**ため(定数の docstring に根拠が在る)
     expect(SQLITE_NDJSON_TABLE_MAX_BYTES).toBe(64 * 1024 * 1024);
+  });
+});
+
+describe('🔴 型へ写すと値が黙って変わる行(LossyWatch)', () => {
+  const watch = (types: string[], rows: unknown[][]): boolean => {
+    const w = new LossyWatch(types.map((t, i) => ({ name: 'c' + String(i), type: t })));
+    for (const r of rows) w.see(r);
+    return w.lossy;
+  };
+
+  it('🔴 BIGINT へ写す列(INT / BOOL)に小数 ── 丸まるので旗を立てる', () => {
+    expect(watch(['INTEGER'], [[3], [19.99]])).toBe(true);
+    expect(watch(['BOOLEAN'], [[0.5]])).toBe(true);
+    // 対照群:整数だけ / NULL / 文字(型違いは作り直しが救う)/ 大きい整数(bigint)は立てない
+    expect(watch(['INTEGER'], [[3], [null], ['abc'], [BigInt('1000000000000000000')]])).toBe(false);
+  });
+
+  it('🔴 DOUBLE へ写す列に ±Infinity / bigint(2^53 超)── 落ちずに変わるので旗を立てる', () => {
+    expect(watch(['REAL'], [[1.5], [Infinity]])).toBe(true);
+    expect(watch(['DOUBLE'], [[-Infinity]])).toBe(true);
+    expect(watch(['NUMERIC'], [[BigInt('9007199254740993')]])).toBe(true);
+    // 対照群:ふつうの小数・整数・NULL は立てない / NaN は `null` で運ぶので立てない
+    expect(watch(['REAL', 'NUMERIC'], [[1.5, 2], [2, 3.25], [null, null], [Number.NaN, 1]])).toBe(false);
+  });
+
+  it('🔴 VARCHAR へ写す列は何が来ても立てない(字のまま入る)/ 列ごとに判定する(別の列の値で立てない)', () => {
+    expect(watch(['TEXT', ''], [[1.5, Infinity], [BigInt('1000000000000000000'), 2.5]])).toBe(false);
+    // 小数は REAL の列には普通の値 ── INTEGER の列が整数のままなら立てない
+    expect(watch(['INTEGER', 'REAL'], [[1, 2.5], [2, 3.5]])).toBe(false);
+    // 逆に、小数が INTEGER の列の位置に来たら、その列の宣言で見て立てる
+    expect(watch(['REAL', 'INTEGER'], [[1, 2.5]])).toBe(true);
+  });
+
+  it('一度立ったら、以後は見ない(旗は戻らない)', () => {
+    const w = new LossyWatch([{ name: 'a', type: 'INTEGER' }]);
+    w.see([1.5]);
+    w.see([1]);
+    expect(w.lossy).toBe(true);
   });
 });
 
@@ -216,5 +294,7 @@ describe('断る理由の字', () => {
   it('表の名前は呼び側が前置する(ここでは持たない)', () => {
     expect(tooBigReason(1024 * 1024)).not.toContain('売上');
     expect(refusedNote('売上', '理由')).toBe('売上 は DuckDB へ写せませんでした(理由)');
+    // 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
+    expect(refusedNote('', '理由')).toBe('(名前の無い表) は DuckDB へ写せませんでした(理由)');
   });
 });

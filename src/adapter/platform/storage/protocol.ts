@@ -332,19 +332,37 @@ export type StorageRequest =
   | { op: 'closeSqlGuest'; guest: string }
   | {
       /**
-       * 🔴 **取り込んだ `.sqlite` を、DuckDB で引くための NDJSON の写しにする**(#682 段④d)。
+       * 🔴 **取り込んだ `.sqlite` を、DuckDB で引くために開く**(#682 段④d。写しを取る 3 つの口の 1 つ目)。
        *
-       * ⚠ **客の DB(`openSqlGuest`)とは別物** ── 開かず、**その場で開いて・読んで・閉じる**
-       *   (窓の合言葉も要らない。常駐させない ── 不可侵指示 2026-07-27「ライフサイクル終端での即破棄」)。
-       * 🔑 行を読むのは**ここ(worker)の中**で、返すのは組み上がった bytes だけ
-       *   (メインへ行の配列を載せない ── 実測で 100k 行の `selectObjects` が 1,365ms)。
-       * ⚠ 客の file を触る口なので、`GUEST_OPS` に入れてある(壊れた `.sqlite` を選んだだけで
+       * ⚠ **客の DB(`openSqlGuest`)とは別物** ── 窓の合言葉は要らず、客を押し出さない。
+       *   開いたまま次の `exportSqliteTable` を待ち、**呼び側が `closeSqliteExport` で必ず閉じる**
+       *   (不可侵指示 2026-07-27「ライフサイクル終端での即破棄」)。
+       * 🔑 **表ごとに頼む理由**:全部を 1 回で返すと、表が多い file は全表ぶんの NDJSON が
+       *   worker と main に**同時に載る**。1 表ずつなら同時に載るのは 1 表ぶんで、
+       *   表と表の間で他の依頼(保存・検索)が割り込める。
+       * ⚠ 客の file を触る口なので、3 つとも `GUEST_OPS` に入れてある(壊れた `.sqlite` を選んだだけで
        *   「うちの DB が壊れた」と読まない ── #971)。
        */
-      op: 'exportSqliteForDuckDb';
+      op: 'openSqliteExport';
       image: Uint8Array;
+    }
+  | {
+      /**
+       * 🔴 **開いてある `.sqlite` の表 1 つを NDJSON にする**(2 つ目)。
+       * 🔑 行を読むのは**ここ(worker)の中**で、返すのは組み上がった bytes だけ
+       *   (メインへ行の配列を載せない ── 実測で 100k 行の `selectObjects` が 1,365ms)。
+       */
+      op: 'exportSqliteTable';
+      session: string;
+      /** 表の名前(`openSqliteExport` が返した元の名前のまま)。 */
+      table: string;
       /** 1 表あたりの NDJSON の天井(バイト)。⚠ 呼び側が `SQLITE_NDJSON_TABLE_MAX_BYTES` を渡す。 */
       maxTableBytes: number;
+    }
+  | {
+      /** 🔴 写しを取り終えた `.sqlite` を手放す(3 つ目)。⚠ 開いていなくても落ちない。 */
+      op: 'closeSqliteExport';
+      session: string;
     }
   | {
       op: 'upsertEntry';
@@ -1009,8 +1027,11 @@ export interface ResultMap {
     truncated: boolean;
   };
   closeSqlGuest: null;
-  /** 取り込んだ `.sqlite` の表ごとの NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
-  exportSqliteForDuckDb: { tables: SqliteExportedTable[] };
+  /** 取り込んだ `.sqlite` を写しのために開いた結果(#682 段④d)。`tables` = 元の名前の一覧(名前順)。 */
+  openSqliteExport: { session: string; tables: string[] };
+  /** 表 1 つ分の NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
+  exportSqliteTable: SqliteExportedTable;
+  closeSqliteExport: null;
   runReadOnlySql: {
     columns: string[];
     rows: Array<Array<string | number | null>>;

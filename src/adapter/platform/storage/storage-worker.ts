@@ -100,6 +100,7 @@ import { buildCsvAttachmentTable } from '@features/query/csv-attachment';
 import { readXlsxBook } from '@features/query/xlsx-book';
 // 🔴 `.sqlite` を DuckDB 用の NDJSON の写しにする(#682 段④d)── 判断は features 側の 1 か所
 import {
+  LossyWatch,
   NdjsonCollector,
   ndjsonKeysOf,
   ndjsonLineOf,
@@ -2318,17 +2319,75 @@ function needGuest(key: string): Database {
 }
 
 /**
+ * 🔴 **客の `.sqlite` の「user の表」の名前を引く 1 文**(客を開く口と、写しを取る口が**同じ文**を使う)。
+ *
+ * ⚠ **`_` は `LIKE` で任意の 1 字**である ── `NOT LIKE 'sqlite_%'` は `sqlitedata` のような
+ *   **user の表まで黙って外した**(着地後のレビューで出た)。内部の表(`sqlite_sequence` 等)だけを
+ *   外すために `\_` で逃がし、`ESCAPE` を明示する。
+ */
+const USER_TABLE_NAMES_SQL =
+  "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name";
+
+/**
+ * 🔴 **写しを取っている最中の `.sqlite`**(#682 段④d。**表ごとに写すので、開いたまま次の依頼を待つ**)。
+ *
+ * ⚠ **客の DB(`guestDbs`)とは別の入れ物** ── 窓の客を押し出さず、窓の合言葉も要らない。
+ * 🔴 **開いたのは必ず閉じる**(呼び側 `DuckDbRunner.load` の `finally` が `closeSqliteExport` を呼ぶ)。
+ *   ⚠ 呼び側が落ちて閉じ損ねても溜まり続けないよう**上限(下)で古い物から畳む**(`closeGuest` の押し出しと同じ作法)。
+ */
+const exportDbs = new Map<string, Database>();
+let exportSeq = 0;
+/**
+ * 同時に開いておく写しの上限。🔑 器へ並べる `.sqlite` の枚数(表の名前を決めるため**全部を先に開く**)に足りる数で、
+ *   常駐メモリの上限が読める数(各枚が `:memory:` に展開される)。
+ */
+const EXPORT_MAX = 8;
+
+function closeExport(session: string): void {
+  const db = exportDbs.get(session);
+  exportDbs.delete(session);
+  try {
+    db?.close();
+  } catch {
+    // ⚠ 閉じられなくても、参照は手放した
+  }
+}
+
+function closeAllExports(): void {
+  for (const k of [...exportDbs.keys()]) closeExport(k);
+}
+
+/**
+ * 🔴 **1 回に続けて読む長さ(ms)**。これを超えたら**他の依頼に順番を譲る**(`exportOneTable`)。
+ *
+ * 実測(2026-10-03、100k 行 = NDJSON 30.7MB の表):読み切るまで **約 0.75〜0.8 秒**、その間この worker の
+ *   他の依頼(ノートの保存・検索)は**1 件も返らない**(worker は 1 本の同期の処理で、写しの符号化は
+ *   DB の錠を握る側にある)。🔑 100 ms を超えたので、**行を読む途中でも区切る**
+ *   (1 表の間に他の依頼が割り込める。表と表の間は、呼び側が 1 表ずつ頼むので元から割り込める)。
+ * ⚠ 小さいほど割り込みは早いが、譲るたびに `setTimeout` の待ちが入るので写しそのものは遅くなる
+ *   (20 ms ごとに 1〜4 ms)。25 ms は「保存を押して待たされたと感じない」長さに足りる。
+ */
+const EXPORT_SLICE_MS = 25;
+
+/** 他の依頼に順番を譲る(待っているメッセージが先に処理される)。 */
+const yieldToQueue = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
  * 🔴 **`.sqlite` の表 1 つを NDJSON にする**(#682 段④d)。⚠ 投げない ── 読めなかった表は
  *   `refused` に理由を載せて返す(他の表を巻き込まない)。
+ * 🔴 **途中で他の依頼に順番を譲る**(`EXPORT_SLICE_MS`)── 大きい表を 1 回で読み切ると、その間この worker の
+ *   保存・検索が全部待たされる。⚠ 譲っている間に**この写しが閉じられる**(`close` / 押し出し)ことがあるので、
+ *   譲るたびに `alive()` を確かめる(閉じた器を読み続けない)。
  *
  * 🔑 **列は `PRAGMA table_xinfo` から採る**(行からではない)── 行から採ると**空の表で列が消える**。
  *   ⚠ 隠し列(`hidden = 1`)は `SELECT *` にも出ないので**除く**。生成列(2 / 3)は出るので入れる。
  */
-function exportOneTable(
+async function exportOneTable(
   database: Database,
   name: string,
   maxBytes: number,
-): SqliteExportedTable {
+  alive: () => boolean,
+): Promise<SqliteExportedTable> {
   const fail = (
     columns: readonly SqliteColumnShape[],
     why: string,
@@ -2339,6 +2398,7 @@ function exportOneTable(
     fks,
     ndjson: null,
     rows: 0,
+    asText: false,
     refused: why,
   });
   let columns: SqliteColumnShape[];
@@ -2375,26 +2435,51 @@ function exportOneTable(
   }
   const keys = ndjsonKeysOf(columns.map((c) => c.name));
   const out = new NdjsonCollector(maxBytes);
+  // 🔴 型へ写すと値が黙って変わる行(小数の入った INTEGER 列 / Infinity / 2^53 超)を読みながら見つける
+  const watch = new LossyWatch(columns);
+  /**
+   * ⚠ `exec` の callback ではなく **`prepare` / `step`** で読む ── callback の中では `await` できず、
+   *   途中で他の依頼に順番を譲れない。`stmt.get([])` は `exec` の `rowMode: 'array'` と同じ値の変換
+   *   (大きい整数は `bigint` / BLOB は `Uint8Array`)をする。
+   */
+  let stmt: ReturnType<Database['prepare']> | null = null;
   try {
-    database.exec({
-      sql: `SELECT ${columns.map((c) => quoteIdent(c.name)).join(', ')} FROM ${quoteIdent(name)}`,
-      rowMode: 'array',
-      callback: (row: unknown[]) => {
-        // ⚠ `false` を返すと `exec` が止まる(`runReadOnlySql` の実測と同じ ── `undefined` では回り続ける)
-        if (!out.push(ndjsonLineOf(keys, row))) return false;
-        return undefined;
-      },
-    } as unknown as Parameters<Database['exec']>[0]);
+    stmt = database.prepare(
+      `SELECT ${columns.map((c) => quoteIdent(c.name)).join(', ')} FROM ${quoteIdent(name)}`,
+    );
+    let sliceStart = performance.now();
+    let n = 0;
+    while (stmt.step()) {
+      const row = stmt.get([]) as unknown[];
+      watch.see(row);
+      // ⚠ 天井を超えたら、ここで読むのをやめる(全行を読み切らない)
+      if (!out.push(ndjsonLineOf(keys, row))) break;
+      n += 1;
+      // 🔑 時計を見るのは 256 行ごと(毎行だと時計の呼び出しが読む時間に響く)
+      if ((n & 255) === 0 && performance.now() - sliceStart >= EXPORT_SLICE_MS) {
+        await yieldToQueue();
+        if (!alive()) {
+          return fail(columns, '写しの途中で閉じられました(もう一度引いてください)', fks);
+        }
+        sliceStart = performance.now();
+      }
+    }
   } catch (e) {
     return fail(columns, `行を読めませんでした: ${String(e)}`, fks);
+  } finally {
+    try {
+      stmt?.finalize();
+    } catch {
+      // ⚠ 器ごと閉じられていたら、文はもう手放されている(`close` が畳む)
+    }
   }
   /**
-   * ⚠ **`finish()` の後で天井を見る** ── 天井は 1000 行ごとの符号化で数えるので、それに満たない表は
+   * ⚠ **`finish()` の後で天井を見る** ── 天井は束ねるごと(約 1 MiB か 1000 行)の符号化で数えるので、それに満たない表は
    *   `finish()` が最後の 1 束を符号化して**初めて**超えたと分かる(先に見ると、小さい天井を素通りする)。
    */
   const ndjson = out.finish();
   if (out.exceeded) return fail(columns, tooBigReason(maxBytes), fks);
-  return { name, columns, fks, ndjson, rows: out.rows, refused: null };
+  return { name, columns, fks, ndjson, rows: out.rows, asText: watch.lossy, refused: null };
 }
 
 const handlers: Handlers = {
@@ -2720,9 +2805,7 @@ const handlers: Handlers = {
         req.image,
       );
       const tables = (
-        db.selectObjects(
-          "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-        ) as unknown as Array<{ name: string }>
+        db.selectObjects(USER_TABLE_NAMES_SQL) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
       guestDbs.set(req.guest, db);
       return { tables, bytes: req.image.byteLength, truncated: false };
@@ -2743,43 +2826,67 @@ const handlers: Handlers = {
     return null;
   },
   /**
-   * 🔴 **取り込んだ `.sqlite` を、表ごとの NDJSON にして返す**(#682 段④d)。
+   * 🔴 **取り込んだ `.sqlite` を開き、表の名前を返す**(#682 段④d。写しを取る 3 つの口の 1 つ目)。
    *
-   * ⚠ **開いて・読んで・閉じる** ── `guestDbs` へは入れない(窓の客を押し出さない / 常駐させない)。
-   *   閉じるのは `finally`(読めなかった回も、組み立ての途中で落ちた回も手放す)。
-   * 🔑 **1 表の失敗は、その表だけ**(`refused` に理由を載せて返す)── 他の表は引ける。
-   *   ⚠ 投げるのは**file そのものが DB として読めないとき**だけ。
-   * 🔴 **行は全部ここで読み切る**(メインへ行の配列を載せない)。天井(`maxTableBytes`)を
-   *   超えたら**その時点で読むのをやめる**(`NdjsonCollector`)。
+   * ⚠ **客の DB(`openSqlGuest`)とは別物** ── `guestDbs` へは入れない(窓の客を押し出さない)。
+   *   開いたまま次の依頼(`exportSqliteTable`)を待ち、**呼び側が `closeSqliteExport` で閉じる**。
+   * 🔴 **表ごとに分ける理由**:全部を 1 回で返すと、表が多い file は**全表ぶんの NDJSON が worker と main に
+   *   同時に載る**(1 表の天井は在るが、合計の天井が無かった)。1 表ずつ「読む → 器へ入れる → 手放す」にすれば、
+   *   同時に載るのは**1 表ぶん**で済む。⚠ そして**表と表の間で、この worker の他の依頼(保存・検索)が割り込める**。
+   * ⚠ 投げるのは**file そのものが DB として読めないとき**だけ(`GUEST_OPS` ── 壊れた `.sqlite` を選んだだけで
+   *   「うちの DB が壊れた」と読まない)。
    */
-  exportSqliteForDuckDb: (req) => {
+  openSqliteExport: (req) => {
     const api = sqliteApi;
     if (api === null) throw new Error('sqlite が初期化されていません');
+    // ⚠ 自分を入れる前に押し出す(`guestDbs` と同じ作法 ── 後だと、自分が最古のときに自分を畳む)
+    while (exportDbs.size >= EXPORT_MAX) {
+      const oldest = exportDbs.keys().next().value;
+      if (oldest === undefined) break;
+      closeExport(oldest);
+    }
     const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
     const tmp = new oo1.DB(':memory:');
     try {
-      let names: string[];
-      try {
-        deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], tmp, req.image);
-        names = (
-          tmp.selectObjects(
-            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-          ) as unknown as Array<{ name: string }>
-        ).map((r) => r.name);
-      } catch (e) {
-        throw new Error(`この file は sqlite の DB として読めませんでした(${String(e)})`, {
-          cause: e,
-        });
-      }
-      return { tables: names.map((n) => exportOneTable(tmp, n, req.maxTableBytes)) };
-    } finally {
-      // ⚠ 閉じられなくても、参照は手放した(`closeGuest` と同じ作法)
+      deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], tmp, req.image);
+      const tables = (
+        tmp.selectObjects(USER_TABLE_NAMES_SQL) as unknown as Array<{ name: string }>
+      ).map((r) => r.name);
+      exportSeq += 1;
+      const session = 'e' + String(exportSeq);
+      exportDbs.set(session, tmp);
+      return { session, tables };
+    } catch (e) {
+      // ⚠ 読めなかった器も閉じる(断った回に器が残るのは「速やかな破棄」の逆である)
       try {
         tmp.close();
       } catch {
         // 次の回は新しい器を作る
       }
+      throw new Error(`この file は sqlite の DB として読めませんでした(${String(e)})`, {
+        cause: e,
+      });
     }
+  },
+  /**
+   * 🔴 **開いてある `.sqlite` の表 1 つを NDJSON にして返す**(2 つ目)。
+   *
+   * 🔑 **1 表の失敗は、その表だけ**(`refused` に理由を載せて返す)── 他の表は引ける。
+   * 🔴 **行は全部ここで読み切る**(メインへ行の配列を載せない)。天井(`maxTableBytes`)を超えたら
+   *   **その時点で読むのをやめる**(`NdjsonCollector`)。⚠ 応答の bytes は transfer で渡る(ゼロコピー)。
+   * ⚠ 開いていない / 押し出された写しには**断る**(黙って別の file の表を返さない)。
+   */
+  exportSqliteTable: (req) => {
+    const db = exportDbs.get(req.session);
+    if (db === undefined) {
+      throw new Error('取り込んだ .sqlite の写しが開かれていません(もう一度引いてください)');
+    }
+    return exportOneTable(db, req.table, req.maxTableBytes, () => exportDbs.get(req.session) === db);
+  },
+  /** 🔴 写しを取り終えた `.sqlite` を手放す(3 つ目)。⚠ 開いていなくても落ちない(`finally` から呼ばれる)。 */
+  closeSqliteExport: (req) => {
+    closeExport(req.session);
+    return null;
   },
   openContainer: (req) => {
     need().exec({
@@ -4216,6 +4323,7 @@ const handlers: Handlers = {
   close: () => {
     // ⚠ 客の DB も一緒に手放す(閉じ忘れると、この worker が持ったまま消える)
     closeAllGuests();
+    closeAllExports();
     // ⚠ close は DB 接続を閉じるだけで、SAHPool の SAH は worker 破棄まで残る
     // (review #9)。multi-tab リース実装時はこの前提で設計する
     db?.close();
@@ -4290,16 +4398,13 @@ async function quotaBlocks(op: string): Promise<boolean> {
 /**
  * 🔴 **応答の bytes を transfer で渡す**(#682 段④d。ゼロコピー ── 不可侵指示 2026-07-27)。
  *
- * ⚠ 対象は **bytes を運ぶ op だけ**(いまは `exportSqliteForDuckDb`)。🔑 transfer した buffer は
+ * ⚠ 対象は **bytes を運ぶ op だけ**(いまは `exportSqliteTable`)。🔑 transfer した buffer は
  *   こちらからは**空になる**ので、ここへ入れる op は「返した後に自分が読み直さない」物に限る。
  */
 function transferablesOf(op: StorageRequest['op'], result: unknown): ArrayBuffer[] {
-  if (op !== 'exportSqliteForDuckDb') return [];
-  const out: ArrayBuffer[] = [];
-  for (const t of (result as ResultMap['exportSqliteForDuckDb']).tables) {
-    if (t.ndjson !== null) out.push(t.ndjson.buffer as ArrayBuffer);
-  }
-  return out;
+  if (op !== 'exportSqliteTable') return [];
+  const t = result as ResultMap['exportSqliteTable'];
+  return t.ndjson === null ? [] : [t.ndjson.buffer as ArrayBuffer];
 }
 
 self.onmessage = (ev: MessageEvent<{ id: number; req: StorageRequest }>) => {

@@ -65,10 +65,12 @@ describe('壊れを見分ける(#971)', () => {
     const raw = 'この file は sqlite として読めませんでした(file is not a database)';
     expect(shouldFlagCorrupt('openSqlGuest', false, raw), '客の file で本体を止めた').toBe(false);
     // 🔴 DuckDB 用に写す口も**客の file を触る口**(#682 段④d)── 壊れた `.sqlite` を選んだだけで本体を止めない
-    expect(
-      shouldFlagCorrupt('exportSqliteForDuckDb', false, raw),
-      '客の file を DuckDB 用に写そうとして本体を止めた',
-    ).toBe(false);
+    for (const op of ['openSqliteExport', 'exportSqliteTable', 'closeSqliteExport']) {
+      expect(
+        shouldFlagCorrupt(op, false, raw),
+        `${op}: 客の file を DuckDB 用に写そうとして本体を止めた`,
+      ).toBe(false);
+    }
     expect(shouldFlagCorrupt('runReadOnlySql', true, raw), '客へ向けた問い合わせで本体を止めた').toBe(
       false,
     );
@@ -132,8 +134,10 @@ describe('止める op の仕分け(#971)', () => {
     'runReadOnlySql',
     'openSqlGuest',
     'closeSqlGuest',
-    // 客の `.sqlite` を DuckDB 用の NDJSON にする(#682 段④d)── 開いて読んで閉じるだけで、うちの DB には触らない
-    'exportSqliteForDuckDb',
+    // 客の `.sqlite` を DuckDB 用の NDJSON にする 3 つの口(#682 段④d)── 開いて読んで閉じるだけで、うちの DB には触らない
+    'openSqliteExport',
+    'exportSqliteTable',
+    'closeSqliteExport',
     // 🔴 **救出の 2 つ**(#971 段③)── ここが止まると、壊れた DB から
     //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
     'checkIntegrity',

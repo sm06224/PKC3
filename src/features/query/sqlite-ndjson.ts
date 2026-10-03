@@ -28,6 +28,7 @@
  * | 型 | 宣言の型から **BIGINT / DOUBLE / VARCHAR** の 3 つへ写す(下の表) | sqlite は動的型なので、細かく写すほど**写せない行**が増える |
  * | 写せない型 | **VARCHAR** | 値は 1 つも失わない |
  * | 型が合わない行が在る表 | その表だけ**全列 VARCHAR で作り直す** | sqlite は INTEGER の列に文字を入れられる ── 黙って NULL にしない |
+ * | 型に入れると**黙って値が変わる**行が在る表 | その表だけ**最初から全列 VARCHAR**(下の {@link LossyWatch}) | DuckDB は BIGINT へ小数を**丸めて**入れ(19.99 → 20)、DOUBLE へ `Infinity` を **NULL** で入れる。落ちれば作り直せるが、**落ちない**ので気づけない |
  * | 空の表 | 宣言から `CREATE TABLE` だけ作る | `read_json_auto` は行が無いと**列を失う** |
  * | 大きい表 | 1 表あたり **{@link SQLITE_NDJSON_TABLE_MAX_BYTES}** で、**その表だけ**断る | 他の表は引ける(下の定数の理由) |
  */
@@ -97,8 +98,27 @@ export interface SqliteExportedTable {
   /** 行を 1 つずつ JSON にして改行で繋いだ bytes(UTF-8)。 */
   readonly ndjson: Uint8Array | null;
   readonly rows: number;
+  /**
+   * 🔴 **型に入れると値が黙って変わる行が在った**(= この表は最初から全列 VARCHAR で写す。{@link LossyWatch})。
+   * ⚠ 必須の field(省ける形にすると、worker が書き忘れても tsc が黙る ── 書き忘れは**値が黙って丸まる**側へ倒れる)。
+   */
+  readonly asText: boolean;
   /** 写せなかった理由の字(表の名前を含まない ── 呼び側が最終の名前を前置する)。`null` = 写せた。 */
   readonly refused: string | null;
+}
+
+/**
+ * 🔴 **開いてある `.sqlite` から、表を 1 つずつ写してもらう口**(#682 段④d の着地後レビュー)。
+ *
+ * ⚠ 全部を 1 回で返す形にしない ── 表が多い file は**全表ぶんの NDJSON が同時に載る**(1 表の天井だけでは
+ *   合計が青天井)。表ごとに「写す → 器へ入れる → 手放す」を回せば、同時に載るのは 1 表ぶんになる。
+ * 🔑 `tables` は**元の名前**(器での名前は呼び側が決める)。`close` は**必ず呼ぶ**(`finally` で ──
+ *   落ちた回も、写しを開いたまま残さない)。
+ */
+export interface SqliteExportSession {
+  readonly tables: readonly string[];
+  table(name: string, maxTableBytes: number): Promise<SqliteExportedTable>;
+  close(): Promise<void>;
 }
 
 /** 天井を超えた理由(字)。⚠ 表の名前は含めない。 */
@@ -179,8 +199,67 @@ export function ndjsonLineOf(keys: readonly string[], row: readonly unknown[]): 
   return out + '}';
 }
 
-/** 一度に符号化する行数(小さすぎると呼び出しが増え、大きすぎると一時の字が膨らむ)。 */
+/**
+ * 🔴 **型へ写すと値が黙って変わる行を、読みながら見つける**(着地後のレビューで出た欠陥)。
+ *
+ * sqlite は型が動的で、宣言と値の型が一致しない行を持てる。DuckDB へ `read_json` で入れるとき、
+ * **落ちる**型違いは「全列 VARCHAR で作り直す」(`DuckDbRunner`)で救えるが、次の 2 つは**落ちずに値が変わる**:
+ *
+ * | 宣言の写し先 | 来た値 | DuckDB で起きること |
+ * |---|---|---|
+ * | BIGINT(`INT` / `BOOL` を含む宣言) | **小数**(`price INTEGER` に 19.99 ── sqlite の INTEGER 親和性は小数を REAL のまま保つ) | **丸まる**(3.5 → 4 / 2.5 → 2) |
+ * | DOUBLE(`REAL` / `FLOA` / `DOUB` / `DECIMAL` / `NUMERIC` を含む宣言) | `±Infinity` | **NULL** になる |
+ * | DOUBLE | 2^53 を超える整数(`NUMERIC` に入った 64 bit 整数。`bigint` で来る) | 倍精度へ**丸まる** |
+ *
+ * 🔑 1 つでも見つかったら、その表は**最初から全列 VARCHAR で写す**(旗 `asText` を応答に付ける)。
+ * VARCHAR なら JSON の数は**字のまま**入る(19.99 は 19.99、桁も変わらない)── user は `CAST` で自分で選べる。
+ * ⚠ NaN は見ない(`valueText` が `null` にする ── sqlite は NaN を保存できず NULL にする)。
+ * ⚠ 型違いで**落ちる**組み合わせ(INTEGER の列に文字)は見ない ── 既存の作り直しが救う。
+ */
+export class LossyWatch {
+  private readonly kinds: readonly DuckDbColumnType[];
+  /** 1 つでも見つかったら `true`(以後は見ない)。 */
+  lossy = false;
+
+  constructor(columns: readonly SqliteExportColumn[]) {
+    this.kinds = columns.map((c) => duckDbColumnTypeOf(c.type));
+  }
+
+  see(row: readonly unknown[]): void {
+    if (this.lossy) return;
+    for (let i = 0; i < this.kinds.length; i += 1) {
+      const v = row[i];
+      const kind = this.kinds[i];
+      if (kind === 'BIGINT') {
+        if (typeof v === 'number' && !Number.isNaN(v) && !Number.isInteger(v)) this.lossy = true;
+      } else if (kind === 'DOUBLE') {
+        if (typeof v === 'bigint' || (typeof v === 'number' && !Number.isNaN(v) && !Number.isFinite(v))) {
+          this.lossy = true;
+        }
+      }
+      if (this.lossy) return;
+    }
+  }
+}
+
+/**
+ * 一度に符号化する行数の上限(小さすぎると呼び出しが増え、大きすぎると一時の字が膨らむ)。
+ * ⚠ **これだけでは天井を守れない** ── 行が太いと 1000 行で数百 MB になる(下の {@link ENCODE_BATCH_CHARS})。
+ */
 const ENCODE_BATCH_ROWS = 1000;
+
+/**
+ * 🔴 **一度に符号化する字数の上限(約 1 MiB)**(#682 段④d の着地後レビュー)。
+ *
+ * 天井(64MiB)を見るのは**符号化して束ねた回**だけなので、行数だけで束ねると
+ * **1 行 64 KB の表は 999 行目(= 64 MB を超えた後)まで止まらず**、1 行 512 KB では
+ * `Array.join` が字の長さの上限(`RangeError`)で**天井より先に落ちた**
+ * (断り文が「64 MB 超」ではなく「行を読めませんでした」になる)。
+ * 🔑 だから**行数ではなく字数で束ねる** ── 天井を超えて読み続ける量が「1 束(約 1 MiB)」で頭打ちになる。
+ * ⚠ 字数は UTF-16 の長さで、bytes ではない(日本語は 1 字 3 bytes まで膨らむ)── 天井そのものの判定は
+ *   束ねた後の **bytes** で行う(数えるのは実際に運ぶ量)。ここは「どれだけ溜めてから確かめるか」だけ。
+ */
+const ENCODE_BATCH_CHARS = 1024 * 1024;
 
 /**
  * 🔴 **天井つきの組み立て**。
@@ -189,10 +268,13 @@ const ENCODE_BATCH_ROWS = 1000;
  *   (字の長さの上限で落ちる形にしない)。⚠ 超えたら**そこで読むのをやめる**
  *   (`push` が `false` を返す)── 天井を超えるとわかってから全行を読み切らない。
  * 🔑 数えるのは**符号化した後の bytes**(= 実際に運ぶ量)。字数ではない。
+ * 🔑 束ねる区切りは**行数と字数のどちらか先に来たほう**(行が細ければ 1000 行 / 太ければ約 1 MiB)。
  */
 export class NdjsonCollector {
   private readonly parts: Uint8Array[] = [];
   private pending: string[] = [];
+  /** `pending` の字数(改行を含む)。 */
+  private pendingChars = 0;
   private total = 0;
   private over = false;
   private readonly enc = new TextEncoder();
@@ -205,8 +287,11 @@ export class NdjsonCollector {
   push(line: string): boolean {
     if (this.over) return false;
     this.pending.push(line);
+    this.pendingChars += line.length + 1;
     this.rows += 1;
-    if (this.pending.length >= ENCODE_BATCH_ROWS) this.flush();
+    if (this.pending.length >= ENCODE_BATCH_ROWS || this.pendingChars >= ENCODE_BATCH_CHARS) {
+      this.flush();
+    }
     return !this.over;
   }
 
@@ -214,6 +299,7 @@ export class NdjsonCollector {
     if (this.pending.length === 0) return;
     const u = this.enc.encode(this.pending.join('\n') + '\n');
     this.pending = [];
+    this.pendingChars = 0;
     this.total += u.byteLength;
     if (this.total > this.maxBytes) {
       this.over = true;
@@ -321,5 +407,6 @@ export function insertFromNdjsonSql(
 
 /** 写せなかった表の理由を、画面へ出す 1 文にする(`name` は user が打つ表の名前)。 */
 export function refusedNote(name: string, why: string): string {
-  return `${name} は DuckDB へ写せませんでした(${why})`;
+  // 🔑 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
+  return `${name === '' ? '(名前の無い表)' : name} は DuckDB へ写せませんでした(${why})`;
 }
