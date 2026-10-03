@@ -20,6 +20,7 @@
 import type { AgendaItem } from '@features/schedule/agenda';
 import { formatListDate } from '@features/datetime/stored-date';
 import { REPEAT_WORDS } from '@features/schedule/repeat';
+import { formatTimeSpan } from '@features/schedule/schedule-date';
 
 /**
  * 札の器を作る(中身は `patchTaskCard` が入れる)。
@@ -153,14 +154,19 @@ export function patchTaskCard(
      */
     const till =
       data.until !== null && thisYear !== null ? `〜${formatListDate(data.until, thisYear)}` : '';
+    /**
+     * 🔴 **時刻の幅は `14:00〜15:00`**(#855 段 C′)。⚠ 字の組み立ては `formatTimeSpan` 1 本
+     *   (月の升の札も日ごとの束の札も**この関数を通る**ので、面ごとに綴りが分かれない)。
+     */
+    const clock = data.time === null ? null : formatTimeSpan(data.time, data.timeEnd);
     const head =
       till !== ''
         ? `${day}${till}`
-        : data.time === null
+        : clock === null
           ? day
           : day === ''
-            ? data.time
-            : `${day} ${data.time}`;
+            ? clock
+            : `${day} ${clock}`;
     /**
      * 🔴 **刻みは、日付を出さない面でも出す**(#344 段②)── 期間の終わりと同じ理由。
      * ⚠ 束の見出しに出ているのは**その日**であって、「これが毎週の回だ」ではない。

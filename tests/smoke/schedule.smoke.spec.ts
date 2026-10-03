@@ -606,7 +606,8 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
 
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
-  await ta.fill(`- [ ] ゴミ出し @${today} 毎週`);
+  // 🔴 時刻の幅つき(#855 段 C′)── 新しく起動を増やさず、この道中に載せる
+  await ta.fill(`- [ ] ゴミ出し @${today} 09:30..10:30 毎週`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   await clickReal(page, '[data-pkc-browse="schedule"]');
@@ -620,6 +621,8 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await expect(cardsOn(today), '今日の札が無い').toHaveCount(1);
   await expect(cardsOn(next), '7 日後の札が無い(繰り返しが展開されていない)').toHaveCount(1);
   await expect(cardsOn(next), '札に刻みが出ていない').toContainText('毎週');
+  // 🔴 時刻の幅は `〜` でつないで出る(`09:30` の 1 点に縮んでいない)
+  await expect(cardsOn(next), '札に時刻の幅が出ていない').toContainText('09:30〜10:30');
 
   // ② 7 日後のぶんを済ませる
   const box = cardsOn(next).locator('[data-pkc-action="toggle-task"]');
@@ -628,7 +631,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   // ③ 🔴 **本文にその日ぶんの行が増えた**(規則の行はそのまま)
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await expect(ta, '本文が増えていない(画面だけ済んだ形)').toHaveValue(
-    `- [ ] ゴミ出し @${today} 毎週\n- [x] ゴミ出し @${next}`,
+    `- [ ] ゴミ出し @${today} 09:30..10:30 毎週\n- [x] ゴミ出し @${next} 09:30..10:30`,
   );
   await clickReal(page, '[data-pkc-action="cancel-edit"]');
 

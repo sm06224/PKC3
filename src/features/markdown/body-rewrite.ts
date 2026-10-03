@@ -892,6 +892,10 @@ function rewriteLineDate(
         found.time,
         found.until,
         rewrite.repeat === undefined ? found.repeat : rewrite.repeat,
+        // ⚠ 振替は従来どおり渡さない(この枝は刻みだけ付け替える)
+        undefined,
+        // 🔴 書かれている**時刻の幅もそのまま**書き戻す(#855 段 C′)
+        found.timeEnd,
       ) +
       line.slice(found.end);
   } else if (rewrite.date === null) {
@@ -924,6 +928,15 @@ function rewriteLineDate(
         // 🔴 **渡されていなければ元の刻みを保つ**(#344 段②)── 日を動かしただけで
         //    `毎週` が消えたら、user は「勝手に消された」と読む(時刻と同じ向き)
         rewrite.repeat === undefined ? found.repeat : rewrite.repeat,
+        undefined,
+        /**
+         * 🔴 **時刻の幅は、始まりが動かなければ保つ**(#855 段 C′)。
+         * ⚠ 日だけ動かしたのに `14:00..15:00` が `14:00` に縮んだら、それは user が
+         *   頼んでいない変更である(刻み `毎週` を保つのと同じ向き)。
+         * ⚠ 始まりの時刻が**変わる**呼び出しでは古い終わりを持ち越さない
+         *   (別の幅になってしまう)。
+         */
+        found.time !== null && rewrite.time === found.time ? found.timeEnd : null,
       ) +
       line.slice(found.end);
   }
@@ -963,7 +976,8 @@ function materializeRepeat(
    */
   const swapped =
     line.slice(0, found.start) +
-    formatLineDate(rewrite.date, found.time, null, null) +
+    // 🔴 時刻の幅も持ち越す(#855 段 C′。`14:00..15:00 毎週` の回は 14:00〜15:00 の予定)
+    formatLineDate(rewrite.date, found.time, null, null, undefined, found.timeEnd) +
     line.slice(found.end);
   /**
    * ⚠ 印の位置は**元の行**で数えてよい ── 記法は必ず `[ ]` より後ろに在るので、
@@ -1015,7 +1029,8 @@ function moveRepeatOccurrence(
    */
   const moved =
     line.slice(0, found.start) +
-    formatLineDate(rewrite.to, found.time, null, null, rewrite.from) +
+    // 🔴 時刻の幅も持ち越す(#855 段 C′)
+    formatLineDate(rewrite.to, found.time, null, null, rewrite.from, found.timeEnd) +
     line.slice(found.end);
   if (lines.includes(moved)) return null;
   lines.splice(rewrite.line + 1, 0, moved);

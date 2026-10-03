@@ -1031,6 +1031,7 @@ describe('カンバンの札(#277 段②-b)', () => {
       time: null,
       until: null,
       repeat: null,
+      timeEnd: null,
       substitutes: null,
       ...c,
     })),

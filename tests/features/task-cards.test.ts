@@ -29,6 +29,7 @@ describe('task-cards(札 = 本文のチェック項目)', () => {
     time: null,
     until: null,
     repeat: null,
+    timeEnd: null,
     substitutes: null,
   });
 
@@ -187,6 +188,7 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     time: null,
     until: null,
     repeat: null,
+    timeEnd: null,
     substitutes: null,
   });
   /** ⚠ 項目が **0 行目と 5 行目**に来る本文(下の `card(…, 0/5, …)` と揃える)。 */
@@ -223,6 +225,7 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     expect(before[0], '前提が崩れている ── 刻みが読めていない').toMatchObject({
       date: '2026-08-25',
       repeat: 'week',
+      timeEnd: null,
       substitutes: null,
     });
     const next = replaceTaskCards(before, 'a', '- [ ] ゴミ出し @2026-08-25 毎月\n');
