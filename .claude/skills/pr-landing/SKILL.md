@@ -244,6 +244,19 @@ git stash pop
 
 ### 🔑 1 本の branch で主題を 2 つ以上並行させる ── **local branch に停めて、merge 後に載せ直す**(2026-09-02)
 
+#### 🔴 基点の古い commit を新しい main に載せたら、**全量 unit を 1 回回してから** PR にする(2026-10-03、PR #1306)
+
+agent の worktree は依頼を出した時点の main から作られる。その間に別の PR が着地すると、
+agent が回した「全量緑」は**着地前の main に対して**であって、載せ直した後の版は誰も回していない。
+実例:#529 Q3 の agent(基点 `f4abb337`)が位置の変数 `--pkc-place-x` を足し、その間に着地した
+#1304 の test が「色の変数が無い」を **`--pkc-place` の前方一致**で見ていた ── cherry-pick 後に
+依頼者が回したのは notice の門 + 触った file の test だけで、**CI で初めて赤くなった**。
+🔑 検算は 1 つ:**agent の基点 sha と、載せる先の main の sha が違うか。** 違うなら
+① その間に着地した PR が触った file を `git diff --stat <基点>..origin/main` で数え、
+② 全量 unit を runner(haiku)に投げて緑を見てから push する(3 分。CI の赤 1 回のほうが高い)。
+⚠ 「触った file の test は緑」は、**相手側の test が自分の file を見ている**形を拾えない。
+
+
 #### 🔴 検査が落ちたまま `git checkout <別 branch>` しない(2026-10-02)
 
 お知らせを足して全数検査を回し、**1 件落ちたので commit せずに**元の branch へ `git checkout` した ──
