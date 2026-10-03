@@ -153,6 +153,21 @@ commit して CI を赤くした。⚠ **2 件のうち 1 件は様式ではな�
 ⚠ `npm run lint` の範囲は **`src tests build scripts`** ── `build/` の赤を
 「CI に関係ない」と切り捨てない(CLAUDE.md の記述が `src tests` のままで、実際に踏んだ)。
 
+### 🔴 着地前レビューの直しは **1 commit に束ねる**。お知らせは**未配布なら直してよい**(2026-10-03)
+
+実装 + UX の 2 本のレビューを並走させ、返ってきた指摘を **1 つの commit** で直す(PR #1318 / #1320 で 2 回とも)。
+⚠ 片方が返るたびに commit すると、runner の全量を**その回数**だけ回し直すことになる(1 回 15〜20 分)。
+🔑 **順番**: ①両方の報告を読む → ②1 grep / 10 行で検算(「断定」の形ほど外れる) → ③束ねて直す → ④触った層の test + 門 + tsc + lint
+→ ⑤commit 1 つ → ⑥runner に「全量 unit + **名指し**の smoke」(直した層の消費者を `grep -rl` で引く)── 全量 smoke は元の head の分で足りる
+(delta が閉じていると言えるとき。言えないならフル)。
+
+⚠ **お知らせは「配ったら書き換えない」が、PR の中でまだ配っていない物は直してよい**。判定は 1 つ:
+`git log --oneline origin/main -S"<id>" -- src/features/notice/notice-log.ts` が **0 行**(announce.test の落ち方の字がそのまま手順になっている)。
+0 行なら digest の pin(`tests/adapter/announce.test.ts`)を新しい値へ動かす ── これは「事実が動いた」側の直し。
+
+⚠ 全量 smoke を runner に頼むときは **`timeout: 5400000` と「spec の数を数える」を依頼文に書く** ── `test.use` の spec は最後に回るので、
+途中で止まると静かに取りこぼす(`.claude/agents/pkc3-runner.md` 2026-10-03 の節)。
+
 ### 🔴 **`npm test` も `npm run lint` も、型を見ていない**(2026-08-22)
 
 **最後に編集した file が test でも、`typecheck` を回し直す。**

@@ -482,6 +482,16 @@ expect(ops, '2 手に割れている').not.toContain('setEntryParent');
 🔑 同型の先例: 2026-08-17「読みが書きを追い越す」も、`postMessage` を包んで
 **命令の順番を記録**したことで推測が事実に変わった。
 
+### 🔴 ③-c `domcontentloaded` は**絵を待たない** / 固定の `setTimeout` は観測点ではない(2026-10-03、#1066 / #1319)
+
+- `read-columns.smoke` の別窓の絵:`win.waitForLoadState('domcontentloaded')` の直後に `naturalHeight` を読んでいた ──
+  混んだ箱で **0** のまま読んで 1/519 落ちた(単独では緑)。🔑 待つのは「絵が読めた」そのもの
+  (`waitForFunction(() => img.complete && img.naturalHeight > 0, …, { timeout })`)。待ちきれなければ下の assert が落ちる形にする
+  (`.catch(() => undefined)` で黙らせて**通さない**)。
+- unit でも同じ族:`attach-intake.test.ts` の `UNDO_APPEND` の後の `setTimeout(100)` が負荷でだけ間に合わない(#1319)。
+  🔑 「時間」で待つ検査は、混んだ箱(runner 2 本 + レビュー 2 本)で**だけ**落ちる ── 落ちた回は製品ではなく観測点を疑い、
+  **状態が変わるまで待つ**(`vi.waitFor` / `expect.poll`)形へ直す。⚠ ただし「負荷でだけ落ちる」は**単独で回して緑**を見てから言う。
+
 ### ④ 計算後の style だけを見ない
 
 `display: none` を併せると**改頁は消える**のに、計算後の `break-after` は `'page'` の
