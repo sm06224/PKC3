@@ -358,6 +358,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     await tick();
     expect(ta.value, '答えが入っていない').toBe('2+3=5');
+    // 🔴 本文欄の命令(`EDITOR_RUN`)の経路も憶える(push 3 か所のうちの 1 つ)
+    expect(appRecentCommands.list(), '本文欄の命令を実行したのに憶えていない').toContain('inline-calc');
   });
 
   /**
@@ -379,8 +381,9 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
    * 🔴 **選んだら、控えた欄の選んだ範囲に入る**(段②-b の本体)。
    * ⚠ 器が閉じるとき焦点はこの欄へ返る(`app-dialog` の後始末)── その上で当てる。
    */
-  it('🔴 選ぶと、控えた欄の選んだ範囲へ記法が入る', async () => {
+  it('🔴 選ぶと、控えた欄の選んだ範囲へ記法が入る(実行した記法は「最近使った操作」に積む)', async () => {
     const { root } = setup();
+    appRecentCommands.clear();
     const ta = editing(root, 'あいうえお', 1, 4);
     root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
     await tick();
@@ -388,6 +391,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     await tick();
     expect(ta.value, '選んだ範囲に入っていない').toBe('あ==いうえ==お');
+    // 🔴 記録の push は 3 か所(全域 / 本文欄の命令 / 記法)── 記法の経路も憶える(#274 Q3。レビュー 2026-10-03)
+    expect(appRecentCommands.list(), '記法を入れたのに憶えていない').toEqual(['format-highlight']);
   });
 
   /**
@@ -429,6 +434,7 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     ta.remove(); // 待っている間に面ごと組み直された形
     sent.length = 0;
+    appRecentCommands.clear();
     rowOf('format-highlight')!.click();
     await tick();
     await tick();
@@ -443,6 +449,8 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     expect(msg, '断り文が空(画面には何も出ない)').not.toBe('');
     expect(msg, 'なぜ入らなかったのかが書いていない').toContain('欄');
     expect(ta.value, '消えた欄へ書き込んだ').toBe('あいうえお');
+    // 対照群: 当てられなかった回は憶えない(`applyFormatTo` が偽を返す側)
+    expect(appRecentCommands.list(), '入らなかったのに憶えた').toEqual([]);
   });
 
   /**
@@ -650,6 +658,39 @@ describe('パレットの「押せない理由」は、ボタンが持ってい�
     const why = whyOf('create-entry');
     expect(why, '編集していないのに「編集中」と言った').not.toContain('編集中');
     expect(why, 'いまの理由を言っていない').toContain('保存に失敗');
+  });
+
+  /**
+   * 🔴 **「メッセージを開く」も同じ 1 か所から理由を引く**(#1017 C5。レビュー 2026-10-03)。
+   * ⚠ 直す前は `binder` が phase を読み替えて「編集中は、保存するか…」を直書きしていたので、
+   *   保存に失敗している保護中にも「編集中」と言った(#516 の形の再発)。行の理由も静的な
+   *   `note`(出口を言わない)だった。
+   */
+  it('🔴 「メッセージを開く」── 保存に失敗している保護中は、その理由(出口つき)を言い、「編集中」と言わない', async () => {
+    const { d } = setupWithBrowse();
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '本文 2\n' });
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    d.dispatch({ type: 'SYS_ERROR', error: 'disk' });
+    expect(d.getState().phase, '前提が崩れている').toBe('error');
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    expect(rowOf('open-messages')?.disabled, '保護中なのに押せることになっている').toBe(true);
+    const why = whyOf('open-messages');
+    expect(why, '編集していないのに「編集中」と言った').not.toContain('編集中');
+    expect(why, 'いまの理由を言っていない').toContain('保存に失敗');
+    expect(why, '出口(何を押せば戻るか)を言っていない').toContain('押してから');
+  });
+
+  it('🔴 「メッセージを開く」── 編集中は、出口(保存 / やめる)まで言う', async () => {
+    const { d } = setupWithBrowse();
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    key({ key: 'p', ctrlKey: true, shiftKey: true });
+    await tick();
+    const why = whyOf('open-messages');
+    expect(why).toContain(NOT_READY_PREFIX);
+    expect(why, '出口(保存 / やめる)を言っていない').toContain('編集をやめる');
   });
 
   it('⚠ 対照群 ── 理由を持たない行は、今までどおり登記簿の字を出す', async () => {

@@ -32,8 +32,14 @@
  * どちらの面でも同じ節が出る(#274 Q3 = A)。
  */
 
-/** 憶える件数 = 節に出す上限。⚠ 5 件は見立て(一覧の頭に置いて邪魔にならない数)。 */
+/** 節に出す上限。⚠ 5 件は見立て(一覧の頭に置いて邪魔にならない数)。 */
 export const RECENT_COMMANDS_MAX = 5;
+/**
+ * 憶える件数。🔴 **出す上限より多く憶える**(UX レビュー 2026-10-03、PR #1318)── 節は「押せる物だけ」で
+ * 5 件まで出すので、憶えるのも 5 件だと、押せない行のぶん節が 3 件・2 件へ縮む(穴埋めの元が無い)。
+ * 10 は「編集中の操作 5 つと閲覧中の操作 5 つを行き来しても、どちらの面でも 5 件出る」見立て。
+ */
+export const RECENT_COMMANDS_KEEP = 10;
 
 /** 節の見出し。 */
 export const RECENT_COMMANDS_HEADING = '最近使った操作';
@@ -47,7 +53,7 @@ export const RECENT_COMMANDS_HEADING = '最近使った操作';
 export function pushRecentCommand(
   list: readonly string[],
   id: string,
-  max = RECENT_COMMANDS_MAX,
+  max = RECENT_COMMANDS_KEEP,
 ): string[] {
   if (id === '') return [...list];
   return [id, ...list.filter((x) => x !== id)].slice(0, max);

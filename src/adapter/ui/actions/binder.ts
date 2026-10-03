@@ -4301,29 +4301,31 @@ export function runGlobalCommand(
    * ⚠ 0 件のときは**メニューを出さずに帯で言う** ── 「まだ何もコピーしていません」を
    *   項目にすると、押しても何も起きない行になる。
    */
+  if (cmd === 'open-copy-history') {
+    if (dry) return true;
+    prevent();
+    openCopyHistory(root, notify);
+    return true;
+  }
   /**
    * 🔴 **メッセージを開く**(#1017 C5)── 押しボタンを持たない(状態の行の押し口は未読のときだけ
    *   出る)ので、特例で直に開く。⚠ **編集中 / 失敗の画面では開かない**(reducer が断る遷移 ──
    *   `MESSAGES_READ`)。押せるふりをして黙って何も起きない行にしない:`dry` では偽(= 一覧は
-   *   「いまは押せません ── <note>」と言う)、実行では理由を出す。
+   *   「いまは押せません ── <理由>」と言う)、実行では理由を出す。理由は `blockedActionNote` の 1 か所。
    */
   if (cmd === 'open-messages') {
-    const phase = dispatcher.getState().phase;
-    if (phase === 'editing' || phase === 'error') {
+    // 🔴 押せない理由も判定も `blockedActionNote` の 1 か所から(#791 ④ / #516 ── 保存に失敗している
+    //   保護中に「編集中」と言わない)。⚠ ここで phase を読み替えて字を直書きしない(§7)
+    const why = blockedActionNote(dispatcher.getState().phase);
+    if (why !== null) {
       if (dry) return false;
       prevent();
-      notify('いまはメッセージを開けません(編集中は、保存するか編集をやめてから開いてください)', CAUTION);
+      notify(`いまはメッセージを開けません ── ${why}`, CAUTION);
       return true;
     }
     if (dry) return true;
     prevent();
     openMessagesNote(dispatcher, SYSTEM_MESSAGE_LID);
-    return true;
-  }
-  if (cmd === 'open-copy-history') {
-    if (dry) return true;
-    prevent();
-    openCopyHistory(root, notify);
     return true;
   }
   /**
@@ -4510,6 +4512,9 @@ export function commandRowsFor(
    *   `data-pkc-blocked` を読む ── ここで phase を読み直すと**判定が 2 か所**になる(§7)。
    */
   const blockedReason = (id: string): string | null => {
+    // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
+    //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
+    if (id === 'open-messages') return blockedActionNote(dispatcher.getState().phase);
     const sel = SHORTCUT_BUTTON[id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;

@@ -548,9 +548,13 @@ describe('最近使った操作(`>` だけのとき)', () => {
     expect(orderOf(root)[0], '前提が崩れている').toBe('view-query');
     field(root).focus();
     sent.length = 0;
-    keydown(field(root), { key: 'Enter' });
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    field(root).dispatchEvent(ev);
     await tick();
     expect(sent.filter((a) => a.type !== 'SET_ENTRY_FILTER'), '`>` だけの Enter で走った').toEqual([]);
+    // 🔴 既定動作を止める ── 実ブラウザでは keydown で焦点を移した先の button に Enter の既定(click)が届き、
+    //   「打っていない操作が走る」(D8 が守る形)に戻る。happy-dom は keydown から click を作らないので字で pin する
+    expect(ev.defaultPrevented, 'Enter の既定動作を止めていない(焦点先の行が実行されうる)').toBe(true);
     expect(document.activeElement, 'Enter で先頭の行へ焦点が移っていない').toBe(rowOf(root, 'view-query'));
     expect(field(root).value, '焦点を移しただけなのに欄が変わった').toBe('>');
     // 次の Enter = 行(ボタン)の既定の実行。⚠ 実ブラウザでは Enter が click を起こす ── ここでは click で代える

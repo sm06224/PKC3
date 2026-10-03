@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RECENT_COMMANDS_MAX,
+  RECENT_COMMANDS_KEEP,
   pushRecentCommand,
   splitRecentRows,
 } from '../../src/features/palette/recent-commands';
@@ -24,9 +25,16 @@ describe('pushRecentCommand', () => {
     expect(pushRecentCommand(['a', 'b'], 'a')).toEqual(['a', 'b']);
   });
 
-  it('🔴 上限は 5(6 件目で最古が落ちる)', () => {
+  it('🔴 出すのは 5 件まで・憶えるのは 10 件(11 件目で最古が落ちる)', () => {
     expect(RECENT_COMMANDS_MAX, '上限が 5 でなくなった(画面の約束が変わる)').toBe(5);
-    const six = ['a', 'b', 'c', 'd', 'e', 'f'].reduce<string[]>((l, id) => pushRecentCommand(l, id), []);
+    // 🔴 憶えるのは出す上限より多く(押せない物を外しても 5 件出せる元を持つ ── UX レビュー 2026-10-03)
+    expect(RECENT_COMMANDS_KEEP, '憶える件数が、出す上限の 2 倍を下回った').toBeGreaterThanOrEqual(RECENT_COMMANDS_MAX * 2);
+    const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].reduce<string[]>((l, id) => pushRecentCommand(l, id), []);
+    expect(seven, '既定の push が 5 件で切っている(穴埋めの元が無い)').toHaveLength(7);
+    const eleven = 'abcdefghijk'.split('').reduce<string[]>((l, id) => pushRecentCommand(l, id), []);
+    expect(eleven, '11 件目で最古が落ちていない').toEqual('kjihgfedcb'.split(''));
+    // 出す上限(5)を渡した側は、今までどおり 6 件目で最古が落ちる
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].reduce<string[]>((l, id) => pushRecentCommand(l, id, RECENT_COMMANDS_MAX), []);
     expect(six).toEqual(['f', 'e', 'd', 'c', 'b']);
   });
 

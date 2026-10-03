@@ -676,7 +676,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'メッセージを開く',
     contexts: ['global'],
     defaults: [],
-    note: 'アプリの知らせが溜まる「メッセージ」のノートを中央に開きます(編集中は開けません)',
+    note: 'アプリの知らせが溜まる「メッセージ」のノートを中央に開きます',
   },
   /**
    * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5、2026-09-04)。

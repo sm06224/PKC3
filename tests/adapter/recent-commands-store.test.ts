@@ -89,11 +89,13 @@ describe('最近使った操作の置き場(#274)', () => {
     expect(store.list()).toEqual(['other']);
   });
 
-  it('🔴 上限 5 ・同じ操作は 1 つ', () => {
+  it('🔴 憶えるのは 10(出す上限 5 より多く ── 押せない物を外しても 5 件出せる元)・同じ操作は 1 つ', () => {
     const s = fake();
     const store = new RecentCommandsStore(s);
     for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'c']) store.push(id);
-    expect(store.list()).toEqual(['c', 'f', 'e', 'd', 'b']);
+    expect(store.list(), '7 回押して 6 種 ── 5 で切ると穴埋めの元が消える').toEqual(['c', 'f', 'e', 'd', 'b', 'a']);
+    for (const id of ['g', 'h', 'i', 'j', 'k']) store.push(id);
+    expect(store.list(), '11 件目で最古が落ちていない').toEqual(['k', 'j', 'i', 'h', 'g', 'c', 'f', 'e', 'd', 'b']);
   });
 
   it('🔴 先頭と同じなら書かない(毎回の書込を作らない)', () => {
@@ -116,9 +118,9 @@ describe('最近使った操作の置き場(#274)', () => {
     expect(new RecentCommandsStore(fake('{{{')).list()).toEqual([]);
     expect(new RecentCommandsStore(fake('"x"')).list()).toEqual([]);
     const list = new RecentCommandsStore(
-      fake(JSON.stringify([1, null, '', 'ok', 'ok', 'b', 'c', 'd', 'e', 'f', 'g'])),
+      fake(JSON.stringify([1, null, '', 'ok', 'ok', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'])),
     ).list();
-    expect(list).toEqual(['ok', 'b', 'c', 'd', 'e']);
+    expect(list, '憶える上限(10)を超えた分を落としていない').toEqual(['ok', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']);
   });
 
   it('消すと、保存からも控えからも消える', () => {
