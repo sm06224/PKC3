@@ -213,6 +213,7 @@ import {
   isOfficeLaunchFile,
   localOpenNotice,
 } from '@features/office/office-launch';
+import { attachmentSavedAt } from '@features/office/office-shadow';
 import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
@@ -1321,9 +1322,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔑 正本の更新時刻はノートの `updatedAt`(`entryMetas`)── 呼ぶたびに読む(値を固めない)。
    */
   const officeShadows = createOfficeShadows({
-    updatedAt: (lid) => {
-      const t = Date.parse(dispatcher.getState().entryMetas.get(lid)?.updatedAt ?? '');
-      return Number.isFinite(t) ? t : null;
+    /**
+     * 🔴 比べる相手は**添付の中身が最後に保存された時刻**(`attachment.history` の最新 `savedAt`。無ければ
+     *   ノートの作成時刻)。⚠ ノートの `updatedAt` ではない ── 題名やタグを直しただけで動き、控えの門が
+     *   黙って閉じる(UX レビュー 2026-10-03)。判断は `attachmentSavedAt`(features)。`client` は昇格で替わるので呼ぶたびに読む。
+     */
+    savedAt: async (lid) => {
+      const body = ((await client.request({ op: 'getBody', cid, lid })) ?? null) as string | null;
+      return attachmentSavedAt(body, dispatcher.getState().entryMetas.get(lid)?.createdAt ?? null);
     },
   });
   const officeOpener = createOfficeOpener({

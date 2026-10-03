@@ -79,7 +79,11 @@ class FakeDir {
       },
     };
   }
-  async removeEntry(n: string) {
+  async removeEntry(n: string, o?: { recursive?: boolean }) {
+    const d = this.dirs.get(n);
+    // ⚠ 本物の OPFS と同じ意味論(CLAUDE.md §3「stub は本物の意味論を真似る」): 空でない棚は
+    //   `recursive` 無しだと InvalidModificationError ── これが無いと `{ recursive: true }` を落とす変異が生き延びる
+    if (d !== undefined && !o?.recursive && d.files.size + d.dirs.size > 0) throw new Error('InvalidModificationError');
     if (!this.files.delete(n) && !this.dirs.delete(n)) throw new Error('NotFoundError');
   }
   async *keys() { for (const k of [...this.files.keys(), ...this.dirs.keys()]) yield k; }
@@ -251,8 +255,9 @@ describe('🔴 消すのは 2 つだけ(保存済みの版で開く / 7 日超�
 });
 
 describe('🔴 「Office で開く」の入口が使う束(createOfficeShadows)', () => {
-  const mk = (root: FakeDir, updatedAt: (lid: string) => number | null = () => null, now = NOW) =>
-    createOfficeShadows({ openShelf: () => openShadowShelf(root as never), updatedAt, now: () => now });
+  // ⚠ 比べる相手は「添付の中身が最後に保存された時刻」(ノートの updatedAt ではない ── UX レビュー 2026-10-03)
+  const mk = (root: FakeDir, savedAt: (lid: string) => number | null = () => null, now = NOW) =>
+    createOfficeShadows({ openShelf: () => openShadowShelf(root as never), savedAt: async (lid) => savedAt(lid), now: () => now });
 
   it('mayHave は同期。refresh するまでは偽(起動直後に押されても同期で開く)/ refresh で棚の名前が入る', async () => {
     const root = new FakeDir();
@@ -275,7 +280,7 @@ describe('🔴 「Office で開く」の入口が使う束(createOfficeShadows)'
     expect(await same.find('lid-1'), '同じ時刻を訊いた').toBeNull();
     const older = mk(root, () => NOW - 1000);
     expect(await older.find('lid-1'), '正本より古い控えを訊いた').toBeNull();
-    expect(shelfOf(root)!.dirs.has('lid-1'), '古く見えるだけで控えを消した(正本の更新時刻は題名の直しでも動く)').toBe(true);
+    expect(shelfOf(root)!.dirs.has('lid-1'), '古く見えるだけで控えを消した(添付の保存時刻が後から判明する余地を残す)').toBe(true);
     // 正本の時刻が分からない → 訊く側へ倒す
     expect(await mk(root, () => null).find('lid-1')).toEqual({ at: NOW - 10_000, ext: 'docx' });
   });
@@ -284,7 +289,7 @@ describe('🔴 「Office で開く」の入口が使う束(createOfficeShadows)'
     const root = new FakeDir();
     await writeFromWindow(root, 'lid-1', NOW - SHADOW_MAX_AGE_MS - 1);
     expect(await mk(root).find('lid-1')).toBeNull();
-    const bad = createOfficeShadows({ openShelf: async () => { throw new Error('boom'); }, updatedAt: () => null });
+    const bad = createOfficeShadows({ openShelf: async () => { throw new Error('boom'); }, savedAt: async () => null });
     expect(await bad.find('lid-1')).toBeNull();
     expect(await bad.readBytes('lid-1')).toBeNull();
     await expect(bad.discard('lid-1')).resolves.toBeUndefined();
@@ -298,12 +303,48 @@ describe('🔴 「Office で開く」の入口が使う束(createOfficeShadows)'
     await writeFromWindow(root, 'lid-2', NOW - 1000);
     const s = mk(root, (lid) => (lid === 'lid-1' ? NOW : null));
     await s.refresh();
+    // 🔴 添付より古い控えの棚は、refresh の時点で既に「在るかもしれない」に**入らない**(最初の押しが
+    //   await の後に窓を開く形にしない ── Safari 等の遮断。レビュー 2026-10-03)
+    expect(s.mayHave('lid-1'), '添付より古い控えの棚が在るだけで真になった(最初の押しが非同期で開く)').toBe(false);
     expect(await s.find('lid-1')).toBeNull();      // 正本のほうが新しい
     expect(s.mayHave('lid-1'), '見つからなかったのに在るかもしれないまま').toBe(false);
     expect(s.mayHave('lid-2')).toBe(true);
     await s.discard('lid-2');
     expect(s.mayHave('lid-2')).toBe(false);
     expect(shelfOf(root)!.dirs.has('lid-2'), '消していない').toBe(false);
+  });
+
+  it('🔴 refresh は期限切れの棚を「在るかもしれない」に入れない(sweep が消す前でも同期で開く側)', async () => {
+    const root = new FakeDir();
+    await writeFromWindow(root, 'old', NOW - SHADOW_MAX_AGE_MS - 10);
+    await writeFromWindow(root, 'fresh', NOW - 1000);
+    const s = mk(root);
+    await s.refresh();
+    expect(s.mayHave('old'), '期限切れの棚が在るだけで真になった').toBe(false);
+    expect(s.mayHave('fresh'), '対照群: 期限内で添付の時刻が分からない控えは真').toBe(true);
+    expect(shelfOf(root)!.dirs.has('old'), 'refresh が消した(消すのは sweep だけ)').toBe(true);
+  });
+
+  it('🔴 refresh が重なったら、後から始まった結果が勝つ(遅い古い読み取りが新しい棚を潰さない)', async () => {
+    const root = new FakeDir();
+    let release: (() => void) | null = null;
+    let calls = 0;
+    const s = createOfficeShadows({
+      openShelf: async () => {
+        calls += 1;
+        if (calls === 1) await new Promise<void>((r) => { release = r; }); // 1 回目だけ遅い
+        return openShadowShelf(root as never);
+      },
+      savedAt: async () => null,
+      now: () => NOW,
+    });
+    const slow = s.refresh();             // 棚が空の版を読み始める(まだ返らない)
+    await writeFromWindow(root, 'lid-1', NOW - 1000);
+    await s.refresh();                    // 新しい棚を読んだ
+    expect(s.mayHave('lid-1')).toBe(true);
+    release!();
+    await slow;                           // 古い結果が後から返る
+    expect(s.mayHave('lid-1'), '遅い古い読み取りが新しい棚を潰した').toBe(true);
   });
 
   it('readBytes は控えの bytes を返す(消さない)。sweep は期限切れを消してから refresh する', async () => {

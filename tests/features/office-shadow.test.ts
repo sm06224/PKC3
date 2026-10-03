@@ -17,8 +17,7 @@ import {
   parseShadowName,
   shadowAgo,
   shadowDialogNote,
-  shadowShelfId,
-} from '../../src/features/office/office-shadow';
+  shadowShelfId, attachmentSavedAt } from '../../src/features/office/office-shadow';
 import { BANNED_TERMS } from '../../src/features/ui-terms';
 
 describe('訊くべきか(控えが正本の添付より新しいときだけ)', () => {
@@ -96,5 +95,30 @@ describe('画面の字', () => {
         expect(b.pattern().test(t), `「${t}」に使わない語「${b.banned}」`).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * 🔴 **控えと比べる相手は「添付の中身が最後に保存された時刻」**(UX レビュー 2026-10-03、PR #1320)。
+ * ⚠ ノートの `updatedAt` ではない ── 題名・タグ・説明を直しただけで動き、控えの門が黙って閉じる。
+ */
+describe('attachmentSavedAt ── 添付の中身が最後に保存された時刻', () => {
+  const body = (history: string[]) =>
+    `---\nattachment.history:\n${history.map((l) => `  - "${l}"`).join('\n')}\n---\n本文\n`;
+  it('🔴 attachment.history の最新の savedAt(= 最後の差し替え)を返す。並びが古い順でなくても最大を取る', () => {
+    const b = body([
+      '2026-10-01T00:00:00.000Z|auto|ast-a|10|',
+      '2026-10-03T12:00:00.000Z|auto|ast-c|30|',
+      '2026-10-02T00:00:00.000Z|pinned|ast-b|20|名前',
+    ]);
+    expect(attachmentSavedAt(b, '2026-09-01T00:00:00.000Z')).toBe(Date.parse('2026-10-03T12:00:00.000Z'));
+  });
+  it('履歴が無ければノートの作成時刻(= 添付を入れた時刻)に落とす', () => {
+    expect(attachmentSavedAt('# 添付\n', '2026-09-01T00:00:00.000Z')).toBe(Date.parse('2026-09-01T00:00:00.000Z'));
+    expect(attachmentSavedAt(null, '2026-09-01T00:00:00.000Z')).toBe(Date.parse('2026-09-01T00:00:00.000Z'));
+  });
+  it('どちらも無い / 読めない時刻は null(= 訊く側へ倒す)', () => {
+    expect(attachmentSavedAt(null, null)).toBeNull();
+    expect(attachmentSavedAt('# 添付\n', 'いつか')).toBeNull();
   });
 });

@@ -201,8 +201,11 @@ export async function sweepShadows(
 export interface OfficeShadowDeps {
   /** 棚を開く(既定は `openShadowShelf()`)。⚠ 呼ぶたびに引く(棚は窓が作る)。 */
   readonly openShelf?: () => Promise<ShadowDir | null>;
-  /** そのノートの更新時刻(ms)。分からなければ `null`(= 訊く側へ倒す)。 */
-  readonly updatedAt: (lid: string) => number | null;
+  /**
+   * 🔴 **添付の中身**が最後に保存された時刻(ms)。⚠ ノートの `updatedAt` ではない(題名を直しただけで動き、
+   *   控えの門が黙って閉じる ── UX レビュー 2026-10-03)。判断は `attachmentSavedAt`(features)。`null` = 分からない → 訊く。
+   */
+  readonly savedAt: (lid: string) => Promise<number | null>;
   readonly now?: () => number;
 }
 
@@ -234,12 +237,30 @@ export interface OfficeShadows {
 export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
   const openShelf = deps.openShelf ?? ((): Promise<ShadowDir | null> => openShadowShelf());
   const now = deps.now ?? ((): number => Date.now());
-  /** 棚の名前の集合。⚠ 起動直後(`refresh` が終わるまで)は空 ── その間に押されても同期で開く(控えは棚に残る)。 */
-  let ids = new Set<string>();
+  /**
+   * 🔴 **訊く値打ちのある控え**の棚名 → 控えの時刻。⚠ 棚の名前の集合では**ない**(1 稿目はそうだった ──
+   *   添付より古い控えの棚が在るだけで `mayHave` が真になり、最初の押しが `await find` の**後**に窓を開いていた。
+   *   Chromium は通すが、Safari 等では遮断 = 無言の dead click。着地前レビュー 2026-10-03)。
+   * 🔑 `refresh` で「期限内 かつ 添付の保存時刻より新しい」物だけを入れる ── `mayHave` は**同期**でそれを見る。
+   * ⚠ 起動直後(`refresh` が終わるまで)は空 ── その間に押されても同期で開く(控えは棚に残る)。
+   */
+  let worth = new Map<string, number>();
+  /** `refresh` の世代 ── 遅い読み取りが、後から走った新しい結果を潰さない(偽陰性 = 控えを黙って見逃す、を作らない)。 */
+  let gen = 0;
   const refresh = async (): Promise<void> => {
+    const mine = ++gen;
     try {
       const shelf = await openShelf();
-      ids = new Set(shelf === null ? [] : (await listShadows(shelf)).map((e) => e.id));
+      const next = new Map<string, number>();
+      if (shelf !== null) {
+        for (const e of await listShadows(shelf)) {
+          if (isShadowExpired(e.at, now())) continue;
+          // meta に lid が無い棚(古い窓が書いた)は相手の時刻が分からない → 訊く側へ倒す(`savedAt(null)` と同じ)
+          const saved = e.lid === '' ? null : await deps.savedAt(e.lid);
+          if (isShadowNewer(e.at, saved)) next.set(e.id, e.at);
+        }
+      }
+      if (mine === gen) worth = next;
     } catch {
       /* 読めなかった ── 前の控えのまま */
     }
@@ -247,12 +268,14 @@ export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
   /** 訊く物が無かった ── 「在るかもしれない」から外す(次に控えが書かれれば窓の放送で `refresh` が戻す)。 */
   const forget = (lid: string): void => {
     const id = shadowShelfId(lid);
-    if (id !== null) ids.delete(id);
+    if (id !== null) worth.delete(id);
   };
   return {
     mayHave: (lid) => {
       const id = shadowShelfId(lid);
-      return id !== null && ids.has(id);
+      if (id === null) return false;
+      const at = worth.get(id);
+      return at !== undefined && !isShadowExpired(at, now());
     },
     refresh,
     sweep: async () => {
@@ -269,7 +292,7 @@ export function createOfficeShadows(deps: OfficeShadowDeps): OfficeShadows {
         const shelf = await openShelf();
         const e = shelf === null ? null : await findShadow(shelf, lid);
         // 🔴 古い(正本より前の)控えは**訊かないだけ**で消さない(上の 2)
-        if (e !== null && !isShadowExpired(e.at, now()) && isShadowNewer(e.at, deps.updatedAt(lid))) {
+        if (e !== null && !isShadowExpired(e.at, now()) && isShadowNewer(e.at, await deps.savedAt(lid))) {
           return { at: e.at, ext: e.ext };
         }
       } catch {

@@ -14,6 +14,7 @@
  *
  * ⚠ **pure module**。browser API を持たない。
  */
+import { readVersions } from '@features/flavor/attachment-versions';
 
 /** 控えの棚(OPFS のルート直下)。⚠ 窓の `SHELF_DIR` と同じ綴り(test が突合)。 */
 export const OFFICE_SHADOW_SHELF = 'pkc3-office-shadow';
@@ -49,12 +50,38 @@ export function parseShadowName(name: string): { at: number; ext: string } | nul
 /**
  * 🔴 **訊くべきか**。控えが**正本の添付より新しい**ときだけ(同じ時刻は訊かない)。
  * @param shadowAt 控えを書いた時刻(ms)
- * @param assetUpdatedAt そのノートの更新時刻(ms)。`null` = 分からない → **訊く側へ倒す**
- *   (分からないのに黙って見送るより、1 度訊くほうが害が小さい)
+ * @param assetSavedAt **添付の中身**が最後に保存された時刻(ms。`attachmentSavedAt`)。`null` = 分からない →
+ *   **訊く側へ倒す**(分からないのに黙って見送るより、1 度訊くほうが害が小さい)
  */
-export function isShadowNewer(shadowAt: number, assetUpdatedAt: number | null): boolean {
-  if (assetUpdatedAt === null || !Number.isFinite(assetUpdatedAt)) return true;
-  return shadowAt > assetUpdatedAt;
+export function isShadowNewer(shadowAt: number, assetSavedAt: number | null): boolean {
+  if (assetSavedAt === null || !Number.isFinite(assetSavedAt)) return true;
+  return shadowAt > assetSavedAt;
+}
+
+/**
+ * 🔴 **添付の中身が最後に保存された時刻**(ms)。控えと比べる相手は**これ**である。
+ *
+ * ⚠ ノートの `updatedAt` と比べてはいけない(1 稿目はそうしていた ── UX レビュー 2026-10-03、PR #1320)。
+ *   `updatedAt` は**題名・タグ・説明を直しただけでも動く**ので、「保存し忘れたかも」と気づいた人が
+ *   ノートを 1 度触ると、控えの門が**黙って閉じる**(7 日で消えるまで取り出す道が無い)。
+ * 🔑 添付の中身が替わるのは save-back だけで、そのとき `attachment.history`(frontmatter)に
+ *   **差し替えた時刻**(`savedAt`)が積まれる(`asset-replace-plan.ts`)── その最新が「最後に保存された時刻」。
+ *   1 度も差し替えていない添付は履歴が無いので、**ノートの作成時刻**(= 添付を入れた時刻)に落とす。
+ *   どちらも無ければ `null`(= 訊く側へ倒す)。
+ * @param body 添付ノートの本文(`null` = 読めなかった)
+ * @param createdAt 添付ノートの作成時刻(ISO。`entryMetas.createdAt`)
+ */
+export function attachmentSavedAt(body: string | null, createdAt: string | null): number | null {
+  let latest: number | null = null;
+  if (body !== null) {
+    for (const v of readVersions(body)) {
+      const t = Date.parse(v.savedAt);
+      if (Number.isFinite(t) && (latest === null || t > latest)) latest = t;
+    }
+  }
+  if (latest !== null) return latest;
+  const c = createdAt === null ? NaN : Date.parse(createdAt);
+  return Number.isFinite(c) ? c : null;
 }
 
 /** 控えが上限(7 日)を過ぎたか。 */
