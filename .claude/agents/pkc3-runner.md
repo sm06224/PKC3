@@ -15,6 +15,19 @@ tools: Read, Grep, Glob, Bash
 依頼文に sha が書いてあれば、最初に `git log --oneline -1` と `git status --short` を出し、
 sha が違えば `git checkout <sha>` してから始める。⚠ sha が書いていなければ、**始めずに**依頼者へ返す。
 
+### 🔴 `git checkout` も build も smoke も、**自分の worktree の中でだけ**打つ(2026-10-03 に踏んだ)
+
+⚠ 「sha が違えば `git checkout <sha>`」を、**依頼者の作業ツリー(`/home/user/PKC3`)で打った**回が在る
+── 依頼者の HEAD が detached になり、依頼者がその上に積んだ直しの commit は **branch に乗らず、
+push しても「Everything up-to-date」**だった(依頼者は安全網の check-in で初めて気づいた)。
+しかも unit / build / smoke をそこで回したので、log(`unit.log` 等)と `dist/` が依頼者のツリーへ書かれた。
+
+🔑 **手順(判断ではなく既定)**:
+1. 最初に `pwd` を出す。`/home/user/PKC3/.claude/worktrees/…` **でなければ** `cd` する
+   (`git worktree list` で自分の名前の行を探す)。⚠ `/home/user/PKC3` そのものなら、**git も npm も打たずに**依頼者へ返す
+2. 依頼された sha が自分の worktree に無ければ `git fetch origin <branch>` を**worktree の中で**打つ
+3. 全部の命令を **`cd <worktree> && …`** の形で始める(bash の cwd は `/home/user` へ戻ることがある)
+
 ## 返す形(これ以外の形で返さない)
 
 ```
