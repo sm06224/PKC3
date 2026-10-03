@@ -9533,6 +9533,16 @@ const ACTIONS: Record<string, ActionHandler> = {
           error: `外部の画像 ${describeAdoptFailures(failures)}(元の URL のまま残しています)`,
         });
       }
+    }).catch((e: unknown) => {
+      /**
+       * 🔴 **例外で落ちた回も、進行中の字を消す**(#1017 C5 Q3)。⚠ 直す前は `void` で投げっぱなしで、
+       *   「取りに行っています…」が居座り、理由はどこにも出なかった。
+       */
+      services.showStatus?.('');
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `外部の画像を取り込めませんでした(${e instanceof Error ? e.message : String(e)})`,
+      });
     });
   },
   'copy-asset-ref': (_dispatcher, target, services) => {

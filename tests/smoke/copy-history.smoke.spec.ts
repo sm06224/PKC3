@@ -82,6 +82,15 @@ test('🔴 コピーした物が残り、選ぶともう一度コピーされる
   // ── ④ 🔴 選ぶと**もう一度コピーされる**(本物のクリップボードで確かめる)
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-copied="0"]');
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('コピーしました');
+  /**
+   * 🔴 **結果の知らせは数秒で消える**(#1017 C5 Q1)。⚠ 読み返したければメッセージの一覧に在る
+   *   (同じ字が積まれる)ので、画面下に居座らせない。⚠ 時間に賭けない ── 「消える」を長い待ちで見る
+   *   (消えない実装は何秒待っても落ちる / 遅い環境でも消える側は通る)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="status"] [data-pkc-field="status-live"]'),
+    '結果の知らせ(コピーしました)が居座っている',
+  ).toHaveText('', { timeout: 15_000 });
   const pasted = await page.evaluate(() => navigator.clipboard.readText());
   expect(pasted, 'クリップボードに戻っていない(貼っても前の物が出る)').toContain('ひとつめの中身');
 

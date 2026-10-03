@@ -61,5 +61,10 @@ test('🔴 「自分のパソコンで動かす」を押すと、一式の zip �
 
   // 画面にも結果を言う(無言で終えない)
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('localhost:8787');
+  // 🔴 組み終えたら進行中の字(「組んでいます…」)は消えている(#1017 C5 Q3 ── 終わりの合図)
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '終わったのに進行中の字が居座っている',
+  ).not.toContainText('組んでいます');
   expect(errors, errors.join('\n')).toEqual([]);
 });

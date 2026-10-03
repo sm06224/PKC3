@@ -25,6 +25,10 @@
  *
  * 🔑 押した先は `select-entry` の受け手(`binder.ts`)── 実行の口を新しく作らない(§7)。
  *   だから書くのは `data-pkc-entry`(受け手が読む属性)と `hidden` の 2 つだけ。
+ *
+ * 🔴 **押す口を出したかを返す**(#1017 C5 Q2)。⚠ 操作のボタンを持つ知らせは**自動で消さない**
+ *   (`status-lifetime.ts`)── 「持つか」の判定をこの 3 つ(開く / 元に戻す / ノートを作る)の
+ *   **出す条件そのもの**から取る。字の一致を別の場所で書き直さない(判定が 2 か所に生えない)。
  */
 
 import { isCorruptRefusalLine } from '@features/storage/db-corruption';
@@ -47,13 +51,14 @@ export function paintStatusOpen(
   btn: HTMLElement,
   state: StatusOpenState,
   shownLine: string,
-): void {
+): boolean {
   const lid = state.noticeOpen;
   const show = lid !== null && state.selectedLid !== lid && state.notice === shownLine;
   if (show) btn.setAttribute('data-pkc-entry', lid);
   else btn.removeAttribute('data-pkc-entry');
   // ⚠ 同じ値を書き直さない(状態の行は打鍵ごとに描き直される)
   if (btn.hidden !== !show) btn.hidden = !show;
+  return show;
 }
 
 /**
@@ -104,7 +109,7 @@ import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/t
  *
  * 🔑 押した先は `undo-move` の受け手(`binder.ts`)── 書くのは `hidden` だけ。
  */
-export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownLine: string): void {
+export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownLine: string): boolean {
   /**
    * 🔴 **出ている字が「動かしました」そのものか**を見る(2026-09-09、UX レビューで直した)。
    *
@@ -151,6 +156,7 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     btn.textContent = move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
+  return show;
 }
 
 export interface StatusCreateState {
@@ -180,7 +186,7 @@ export function paintStatusCreate(
   btn: HTMLElement,
   state: StatusCreateState,
   shownLine: string,
-): void {
+): boolean {
   const date = state.noticeCreate;
   const show =
     date !== null &&
@@ -194,6 +200,7 @@ export function paintStatusCreate(
     if (btn.textContent !== label) btn.textContent = label;
   } else btn.removeAttribute('data-pkc-date');
   if (btn.hidden !== !show) btn.hidden = !show;
+  return show;
 }
 
 /**
