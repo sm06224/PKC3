@@ -105,7 +105,8 @@ import {
   ndjsonLineOf,
   quoteIdent,
   tooBigReason,
-  type SqliteExportColumn,
+  type SqliteColumnShape,
+  type SqliteExportFk,
   type SqliteExportedTable,
 } from '@features/query/sqlite-ndjson';
 import { createSmartScan } from '@features/smart/smart-spec';
@@ -2328,28 +2329,50 @@ function exportOneTable(
   name: string,
   maxBytes: number,
 ): SqliteExportedTable {
-  const fail = (columns: readonly SqliteExportColumn[], why: string): SqliteExportedTable => ({
+  const fail = (
+    columns: readonly SqliteColumnShape[],
+    why: string,
+    fks: readonly SqliteExportFk[] = [],
+  ): SqliteExportedTable => ({
     name,
     columns,
+    fks,
     ndjson: null,
     rows: 0,
     refused: why,
   });
-  let columns: SqliteExportColumn[];
+  let columns: SqliteColumnShape[];
   try {
     columns = (
       database.selectObjects(`PRAGMA table_xinfo(${quoteIdent(name)})`) as unknown as Array<{
         name: string;
         type: string;
         hidden: number;
+        notnull: number;
+        pk: number;
       }>
     )
       .filter((c) => c.hidden === 0 || c.hidden === 2 || c.hidden === 3)
-      .map((c) => ({ name: c.name, type: c.type }));
+      .map((c) => ({ name: c.name, type: c.type, notNull: c.notnull === 1, primaryKey: c.pk !== 0 }));
   } catch (e) {
     return fail([], `列を読めませんでした: ${String(e)}`);
   }
   if (columns.length === 0) return fail([], '読める列がありません');
+  /**
+   * 🔴 **外部キー**(#918 段⑦の続き)。⚠ **読めなくても表は写す**(構造の線が欠けるだけ ──
+   *   線のために行の写しまで断らない)。`id` / `seq` 順 = 構造を採る sqlite 側(`SCHEMA_FK_SQL`)と同じ並び。
+   */
+  let fks: SqliteExportFk[];
+  try {
+    fks = (
+      database.selectObjects(
+        'SELECT "table" AS ref, "from" AS col, "to" AS refcol FROM pragma_foreign_key_list(?) ORDER BY id, seq',
+        [name],
+      ) as unknown as Array<{ ref: string; col: string; refcol: string | null }>
+    ).map((f) => ({ fromColumn: f.col, toTable: f.ref, toColumn: f.refcol ?? '' }));
+  } catch {
+    fks = [];
+  }
   const keys = ndjsonKeysOf(columns.map((c) => c.name));
   const out = new NdjsonCollector(maxBytes);
   try {
@@ -2363,15 +2386,15 @@ function exportOneTable(
       },
     } as unknown as Parameters<Database['exec']>[0]);
   } catch (e) {
-    return fail(columns, `行を読めませんでした: ${String(e)}`);
+    return fail(columns, `行を読めませんでした: ${String(e)}`, fks);
   }
   /**
    * ⚠ **`finish()` の後で天井を見る** ── 天井は 1000 行ごとの符号化で数えるので、それに満たない表は
    *   `finish()` が最後の 1 束を符号化して**初めて**超えたと分かる(先に見ると、小さい天井を素通りする)。
    */
   const ndjson = out.finish();
-  if (out.exceeded) return fail(columns, tooBigReason(maxBytes));
-  return { name, columns, ndjson, rows: out.rows, refused: null };
+  if (out.exceeded) return fail(columns, tooBigReason(maxBytes), fks);
+  return { name, columns, fks, ndjson, rows: out.rows, refused: null };
 }
 
 const handlers: Handlers = {

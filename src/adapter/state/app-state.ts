@@ -19,29 +19,56 @@ import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-
 import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-source';
 
 /**
- * 🔴 **この相手からは構造を採れない、の理由**(#682 段④c)。
+ * 🔴 **構造(つながり図・構造ノート)を、どこへ頼むか**(#682 段④c → #918 で「断る」から「頼み先を変える」へ)。
  *
- * ⚠ 構造を採る 3 本(`schema-digest.ts`)は**内蔵の sqlite へ**打つ ── ところが
- *   `.parquet` / `.json` は sqlite worker を 1 度も通らない(中身を読めないので)。
- *   🔴 そのまま頼むと worker が
- *   **「取り込んだ .sqlite が開かれていません(先に選んでください)」**と返す ──
- *   user は `.parquet` を選んだのに `.sqlite` の話をされ、**いまやったばかりの操作を
- *   もう一度やれと言われる**(動線レビュー 2026-09-16 が実測で出した)。
- * 🔑 だから**頼まない**。理由はここ 1 か所に持ち、3 つの入口(相手を選んだ / 図を開いた /
- *   構造をノートへ)が同じ字を出す(§7)。
- *
- * @returns `null` = 採れる。文字列 = 採れない理由(画面に出す字)。
+ * ⚠ 構造を採る 3 本(`schema-digest.ts`)は**内蔵の sqlite へ**打つが、`.parquet` / `.json` は
+ *   sqlite worker を 1 度も通らず(中身を読めない)、2 つ以上並べた器は **DuckDB の中にしか無い**。
+ *   以前はここで「まだ出せません(DuckDB で引く相手です)」と**断っていた**(#918 の裁定 = A で、出す側へ)。
+ * 🔑 頼み先は 3 通りで、**判定はここ 1 か所**(3 つの入口 ── 相手を選んだ / 図を開いた / 構造をノートへ ──
+ *   が同じ答えを使う。§7):
+ *   - 何も選んでいない(この PKC のノート)→ `{}`
+ *   - 内蔵の sqlite が読める相手(`.sqlite` / `.csv` / `.tsv` / `.xlsx`)を 1 件 → `{ guest: true }`(今までどおり)
+ *   - DuckDB でしか読めない相手(`.parquet` / `.json`)/ **2 件以上並べた** → `{ duck, duckExtra? }`
+ *     (DuckDB の器の `duckdb_columns()` 等から採る。`duckdb-schema.ts`)
  */
-function schemaUnavailable(
+type SchemaRoute = {
+  guest?: true;
+  duck?: { lid: string; name: string };
+  duckExtra?: readonly { lid: string; name: string }[];
+};
+function schemaRouteOf(
   guest: { readonly lid: string; readonly name: string } | null,
-  /** 🔴 足した相手の数(#918 段⑦)。1 件でも在れば、構造は**まだ出せない**。 */
-  extras = 0,
+  /** 🔴 足した相手(#918 段⑦)。1 件でも在れば DuckDB の器へ頼む。 */
+  extras: readonly SqlExtraSource[] = [],
+): SchemaRoute {
+  if (guest === null) return {};
+  if (extras.length > 0 || isDuckDbOnlySource(sqlGuestSourceOf(guest.lid, guest.name))) {
+    return {
+      duck: { lid: guest.lid, name: guest.name },
+      ...(extras.length > 0
+        ? { duckExtra: extras.map((e) => ({ lid: e.lid, name: e.name })) }
+        : {}),
+    };
+  }
+  return { guest: true };
+}
+/**
+ * 🔴 **採ってある構造が「どの相手の組」の物か**を言う名札(`er.source`)。
+ * ⚠ 1 件のときは今までどおり lid だけ。**足した相手も含める** ── 含めないと、足した / 外した直後に
+ *   「前の組の図」を「いまの組の図」として使い回す(名札は同じ・中身は別の file の組)。
+ */
+function erSourceKey(
+  guest: { readonly lid: string } | null,
+  extras: readonly SqlExtraSource[] = [],
+): string {
+  return guest === null ? '' : [guest.lid, ...extras.map((e) => e.lid)].join('|');
+}
+/** 構造ノートの題名・見出しに出す「どこの構造か」(2 件以上は ` + ` で並べる)。 */
+function schemaWhereOf(
+  guest: { readonly name: string } | null,
+  extras: readonly SqlExtraSource[] = [],
 ): string | null {
-  if (guest === null) return null;
-  if (extras > 0) return '2 つ以上の file を並べているときの構造は、まだ出せません(DuckDB で引く相手です)';
-  return isDuckDbOnlySource(sqlGuestSourceOf(guest.lid, guest.name))
-    ? 'この形式のつながり図は、まだ出せません(DuckDB で引く相手です)'
-    : null;
+  return guest === null ? null : [guest.name, ...extras.map((e) => e.name)].join(' + ');
 }
 /**
  * 🔴 **足した相手の集合を差し替える**(足した / 外した の両方がここを通る。#918 段⑦)。
@@ -50,16 +77,15 @@ function schemaUnavailable(
  *   出ている表は**別の file の組の話**である。残すと「新しい組を引いた答え」に見える。
  * ⚠ **走っている答えも無効にする**(札を進める)── 走っている最中に集合を変えられるので、
  *   遅れて届いた**前の組の答え**を受けると、名札は新しいのに中身は前の組になる。
- * 🔑 つながり図は**採れない**(2 件以上)── 開いていれば理由を書く。1 件へ戻った回は
- *   `erForSource` が採り直す(1 件のときの作りに戻る)。
+ * 🔑 つながり図は**組が変わったら採り直す**(`erSourceKey` が足した相手も含む)── 開いていれば
+ *   新しい組の構造を DuckDB の器から採る(1 件へ戻った回は 1 件のときの作りへ戻る)。
  */
 function withSqlSourceSet(
   state: AppState,
   extras: readonly SqlExtraSource[],
 ): { state: AppState; events: DomainEvent[] } {
   const p = state.sqlPage;
-  const why = schemaUnavailable(p.guest, extras.length);
-  const er = erForSource(p.er, p.guest?.lid ?? '', p.guest !== null, p.guest !== null, why ?? undefined);
+  const er = erForSource(p.er, erSourceKey(p.guest, extras), schemaRouteOf(p.guest, extras), p.guest !== null);
   return {
     state: {
       ...state,
@@ -427,27 +453,17 @@ export interface SqlPageState {
  * 🔴 いちばん危ないのは「**名札は新しいのに、図は前の DB**」である ── 数字も名前も
  *   本物なので、user には間違いの手がかりが 1 つも無い。だから**必ず捨てる**。
  *
+ * @param route どこへ頼むか(`schemaRouteOf`)。⚠ event が運ぶ ── 頼む側で state を読み直すと、
+ *   選び直した直後の 1 回が前の相手へ飛ぶ。
  * @param emit いま頼んでよい回か(⚠ 相手を**開き終えた**回だけ真 ── 開く前に頼むと
  *   前の相手へ飛ぶ)。偽なら「採っています」のまま待つ。
- * @param why 🔴 **採れない相手の理由**(#682 段④c)。渡すと**頼まずに、その字を出す** ──
- *   ⚠ 「採っています」で止めない/生の断り文も出さない。
- *   出どころは 1 つ:`.parquet` / `.json` は**内蔵の sqlite が中身を読めない**ので、
- *   構造を採る `select` 3 本(`schema-digest.ts`)を打つ相手が居ない。
  */
 function erForSource(
   er: SqlPageState['er'],
   source: string,
-  guest: boolean,
+  route: SchemaRoute,
   emit: boolean,
-  why?: string,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
-  if (why !== undefined) {
-    // ⚠ 閉じていても `note` は書く(開いた瞬間に理由が読める)
-    return {
-      er: { ...er, loading: false, model: null, note: why, source, mine: [], pendingFrom: null },
-      events: [],
-    };
-  }
   if (er.source === source && er.model !== null) return { er, events: [] };
   // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
   // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
@@ -478,7 +494,7 @@ function erForSource(
       pendingFrom: null,
       mine: [],
     },
-    events: [{ type: 'REQUEST_SQL_ER', token, ...(guest ? { guest: true } : {}) }],
+    events: [{ type: 'REQUEST_SQL_ER', token, ...route }],
   };
 }
 
@@ -3429,6 +3445,13 @@ export type DomainEvent =
       type: 'REQUEST_SQL_SCHEMA';
       where: string | null;
       guest?: boolean;
+      /**
+       * 🔴 **DuckDB の器から採る**(#918)。⚠ `.parquet` / `.json` を選んでいるとき、または
+       *   **2 件以上並べている**ときだけ在る(そのとき `guest` は無い)。`duck` が 1 件目、
+       *   `duckExtra` が 2 件目以降(`REQUEST_SQL_RUN` と同じ形)。
+       */
+      duck?: { lid: string; name: string };
+      duckExtra?: readonly { lid: string; name: string }[];
       /** ⚠ **id は押した側が作る** ── 純粋な reducer も effect も乱数を持たない。 */
       lid: string;
       relationId: string;
@@ -3439,7 +3462,14 @@ export type DomainEvent =
    *   1 か所にまとめて持つので、採り方が 2 つに分かれない(CLAUDE.md §7)。
    * ⚠ **札を付ける** ── 採っている間に相手を変えられるので、古い答えは捨てる。
    */
-  | { type: 'REQUEST_SQL_ER'; token: number; guest?: boolean }
+  | {
+      type: 'REQUEST_SQL_ER';
+      token: number;
+      guest?: boolean;
+      /** 🔴 DuckDB の器から採る(#918)。⚠ `REQUEST_SQL_SCHEMA` と同じ意味・同じ形。 */
+      duck?: { lid: string; name: string };
+      duckExtra?: readonly { lid: string; name: string }[];
+    }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
   | { type: 'REQUEST_SQL_GUEST_OPEN'; lid: string; name: string }
   | {
@@ -4871,23 +4901,19 @@ function reduceCore(
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };
       /**
-       * 🔴 **採れない相手には頼まない**(#682 段④c)── 頼むと worker が
-       *   `.sqlite` の話で断るので、`.parquet` を選んだ user には意味が通らない。
-       * ⚠ `running` を立てない ── 立てると、答えが来ないまま押せなくなる。
+       * 🔴 **頼み先は 1 か所で決める**(`schemaRouteOf`)。⚠ DuckDB でしか読めない相手や 2 件以上は
+       *   DuckDB の器へ頼む(以前はここで断っていた ── #918)。
        */
-      const why = schemaUnavailable(state.sqlPage.guest, state.sqlPage.extraGuests.length);
-      if (why !== null) {
-        return { state: { ...state, sqlPage: { ...state.sqlPage, error: why, saved: '' } }, events: [] };
-      }
+      const route = schemaRouteOf(state.sqlPage.guest, state.sqlPage.extraGuests);
       return {
         state: { ...state, sqlPage: { ...state.sqlPage, running: true, error: '', saved: '' } },
         events: [
           {
             type: 'REQUEST_SQL_SCHEMA',
-            where: state.sqlPage.guest?.name ?? null,
+            where: schemaWhereOf(state.sqlPage.guest, state.sqlPage.extraGuests),
             lid: action.lid,
             relationId: action.relationId,
-            ...(state.sqlPage.guest === null ? {} : { guest: true }),
+            ...route,
           },
         ],
       };
@@ -4906,39 +4932,10 @@ function reduceCore(
           events: [],
         };
       }
-      const source = p.guest?.lid ?? '';
+      const source = erSourceKey(p.guest, p.extraGuests);
       if (p.er.model !== null && p.er.source === source) {
         return {
           state: { ...state, sqlPage: { ...p, er: { ...p.er, open: true, note: '' } } },
-          events: [],
-        };
-      }
-      /**
-       * 🔴 **採れない相手なら、開くけれど頼まない**(#682 段④c)。
-       * ⚠ 直す前はここが `note: ''` で**理由を消してから**頼んでいた ──
-       *   `SQL_GUEST_OPENED` が書いた親切な字は、図が閉じている間は画面に出ないので、
-       *   **物語の順(相手を選ぶ → 図を開く)では 1 度も読めなかった**。
-       * ⚠ 「採っています」のまま止めない(`loading: false`)。
-       */
-      const erWhyOpen = schemaUnavailable(p.guest, p.extraGuests.length);
-      if (erWhyOpen !== null) {
-        return {
-          state: {
-            ...state,
-            sqlPage: {
-              ...p,
-              er: {
-                ...p.er,
-                open: true,
-                loading: false,
-                model: null,
-                note: erWhyOpen,
-                source,
-                mine: [],
-                pendingFrom: null,
-              },
-            },
-          },
           events: [],
         };
       }
@@ -4963,9 +4960,8 @@ function reduceCore(
             },
           },
         },
-        events: [
-          { type: 'REQUEST_SQL_ER', token, ...(p.guest === null ? {} : { guest: true }) },
-        ],
+        // 🔴 頼み先は 1 か所で決める(`schemaRouteOf`。DuckDB でしか読めない相手 / 2 件以上は DuckDB の器へ)
+        events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
       };
     }
     /**
@@ -5213,7 +5209,7 @@ function reduceCore(
        * ⚠ ノートへ戻る回(`lid === ''`)は**その場で採り直せる**が、よその DB へ移る回は
        *   **まだ開いていない**ので頼めない ── 開けた回(`SQL_GUEST_OPENED`)が頼む。
        */
-      const er = erForSource(state.sqlPage.er, action.lid === '' ? '' : action.lid, action.lid !== '', action.lid === '');
+      const er = erForSource(state.sqlPage.er, action.lid, {}, action.lid === '');
       events.push(...er.events);
       return {
         state: {
@@ -5296,12 +5292,16 @@ function reduceCore(
       if (state.sqlPage.guestPending !== action.lid) return { state, events: [] };
       /**
        * 🔴 開けた相手の構造を採り直す(図を開いているときだけ ── §7 の 1 か所)。
-       * ⚠ **`.parquet` / `.json` は採れない**(#682 段④c)── 構造を採る 3 本は
-       *   内蔵の sqlite へ打つので、**そこに客の DB が無い**。頼めば生の断り文が
-       *   図の所に出るだけなので、**頼まずに理由を書く**。
+       * ⚠ **`.parquet` / `.json` も採る**(#918)── 頼み先は `schemaRouteOf`(DuckDB の器)。
+       *   以前は「採れない」理由をここで書いて頼まなかった。
        */
-      const erWhy = schemaUnavailable({ lid: action.lid, name: action.name });
-      const er = erForSource(state.sqlPage.er, action.lid, true, true, erWhy ?? undefined);
+      const opened = { lid: action.lid, name: action.name };
+      const er = erForSource(
+        state.sqlPage.er,
+        erSourceKey(opened, state.sqlPage.extraGuests),
+        schemaRouteOf(opened, state.sqlPage.extraGuests),
+        true,
+      );
       return {
         state: {
           ...state,

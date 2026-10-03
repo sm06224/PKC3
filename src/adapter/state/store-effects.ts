@@ -22,9 +22,11 @@ import {
   SCHEMA_CSV_SQL,
   SCHEMA_FK_SQL,
   countsSql,
+  schemaTableNames,
   renderSchemaDigest,
   schemaNoteTitle,
   type Cell as SqlCell,
+  type Grid as SchemaGridView,
 } from '@features/query/schema-digest';
 import {
   appendIntoSection,
@@ -504,17 +506,8 @@ async function fetchSchemaGrids(
    */
   const csv =
     opts.guest === true ? null : await ask(SCHEMA_CSV_SQL, opts).catch(() => null);
-  /**
-   * ⚠ **数えるのは表だけ**(ビューは数えない)── ビューを数えると
-   *   **その場でビューが走る**ので、重い相手で刺さる。
-   */
-  const names = [
-    ...new Set(
-      columns.rows
-        .filter((r) => r[columns.columns.indexOf('kind')] === 'table')
-        .map((r) => String(r[columns.columns.indexOf('tbl')] ?? '')),
-    ),
-  ].filter((n) => n !== '');
+  // ⚠ 数える表の決め方は 1 か所(`schemaTableNames`。DuckDB の道と共有)
+  const names = schemaTableNames(columns);
   const sql = countsSql(names);
   // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
   const counts = sql === null ? null : await ask(sql, opts).catch(() => null);
@@ -595,6 +588,17 @@ export function connectStoreEffects(
         readBytes: () => Promise<Uint8Array | null>;
       }[];
     }) => Promise<{ columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }>;
+    /**
+     * 🔴 **DuckDB の器の中の構造を採る口**(#918)。⚠ `runDuckDbSql` と**同じ器**を使う(同じ相手の組なら
+     *   差し込み直さない)。渡されなければ**機能が減るだけ** ── つながり図・構造ノートが
+     *   「この版では採れません」と断る(黙って空の図を出さない)。
+     */
+    schemaDuckDb?: (input: {
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
+    }) => Promise<{ columns: SchemaGridView; fks: SchemaGridView; counts: SchemaGridView | null }>;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -624,6 +628,59 @@ export function connectStoreEffects(
     const body = await store.getBody(lid);
     const key = readAttachmentMeta(body ?? '').assetKey;
     return key === null ? null : readAsset(key);
+  };
+  /**
+   * 🔴 **DuckDB の器へ差し込む相手の組を作る**(#682 段④c / #918 段⑦)。
+   * 🔑 SQL を走らせる回(`REQUEST_SQL_RUN`)も、構造を採る回(`REQUEST_SQL_ER` / `REQUEST_SQL_SCHEMA`)も
+   *   **ここ 1 か所**(§7)── 組み方が 2 つに分かれると、片方だけ「引けるのに構造が出ない」になる。
+   * ⚠ 1 件でも組めなければ `null`(読めない相手が混じったまま走らせると、一部の表だけが無い器になる)。
+   */
+  const duckInputsOf = (d: {
+    duck?: { lid: string; name: string };
+    duckExtra?: readonly { lid: string; name: string }[];
+  }): { source: DuckDbReadableGuestSource; readBytes: () => Promise<Uint8Array | null> }[] | null => {
+    const asked = [...(d.duck === undefined ? [] : [d.duck]), ...(d.duckExtra ?? [])];
+    const sources = asked.map((x) => duckDbReadableSourceOf(x.lid, x.name));
+    const readable = sources.filter((x): x is DuckDbReadableGuestSource => x !== null);
+    if (d.duck === undefined || readable.length !== sources.length) return null;
+    return readable.map((source) => ({ source, readBytes: () => sqlSourceBytes(source.lid) }));
+  };
+  /**
+   * 🔴 **構造の 3 枚を採る道を選ぶ**(#918)。つながり図(`REQUEST_SQL_ER`)も構造ノート
+   *   (`REQUEST_SQL_SCHEMA`)も**ここ 1 か所**を通る(§7)。
+   *
+   * - `duck` が在る(`.parquet` / `.json` / 2 件以上)→ **DuckDB の器**へ(`schemaDuckDb`)
+   * - それ以外 → 内蔵の sqlite へ(`fetchSchemaGrids`。今までどおり)
+   *
+   * @returns `null` = この版では採れない口(古い worker / 口を渡されていない)。⚠ 呼び側は**理由を言う**
+   *   (黙って空の図を出さない)。採る関数を返す形にしてあるのは、`null` の判定を呼ぶ前に済ませるため。
+   */
+  const schemaGridsFor = (ev: {
+    guest?: boolean;
+    duck?: { lid: string; name: string };
+    duckExtra?: readonly { lid: string; name: string }[];
+  }): (() => Promise<{
+    columns: SchemaGridView;
+    fks: SchemaGridView;
+    counts: SchemaGridView | null;
+    csv: SchemaGridView | null;
+  }>) | null => {
+    if (ev.duck !== undefined) {
+      const schema = opts.schemaDuckDb;
+      const inputs = duckInputsOf(ev);
+      if (schema === undefined || inputs === null) return null;
+      // 🔴 本文の csv(`csv_tables`)は **この PKC の sqlite にしか無い** ── DuckDB の器の話には出ない
+      return async () => ({ ...(await schema({ sources: inputs })), csv: null });
+    }
+    const ask = store.runReadOnlySql;
+    if (!ask) return null;
+    const limits = {
+      maxRows: SQL_MAX_ROWS,
+      maxSteps: SQL_MAX_STEPS,
+      maxMs: SQL_MAX_MS,
+      ...(ev.guest === true ? { guest: true } : {}),
+    };
+    return () => fetchSchemaGrids(ask, limits);
   };
   /**
    * 🔴 **中身を読まずに大きさだけ採る**(#682 段④c)。
@@ -1101,10 +1158,9 @@ export function connectStoreEffects(
        *   開いた図が永久に空になる(無言の dead click と同じ形)。
        */
       case 'REQUEST_SQL_ER': {
-        const ask = store.runReadOnlySql;
         const { token } = ev;
-        const guest = ev.guest === true ? { guest: true } : {};
-        if (!ask) {
+        const grids = schemaGridsFor(ev);
+        if (grids === null) {
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
@@ -1112,9 +1168,8 @@ export function connectStoreEffects(
           });
           break;
         }
-        const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
         void (async (): Promise<void> => {
-          const { columns, fks, counts, csv } = await fetchSchemaGrids(ask, opts);
+          const { columns, fks, counts, csv } = await grids();
           if (disposed) return;
           dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts, csv });
         })().catch((e: unknown) => {
@@ -1140,19 +1195,17 @@ export function connectStoreEffects(
        *   「行数は採れませんでした」と出る ── **嘘を書かない**)。
        */
       case 'REQUEST_SQL_SCHEMA': {
-        const ask = store.runReadOnlySql;
         const { where, lid, relationId } = ev;
-        const guest = ev.guest === true ? { guest: true } : {};
-        if (!ask) {
+        const grids = schemaGridsFor(ev);
+        if (grids === null) {
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
             error: 'この版では構造を採れません(アプリを読み直すと直ることがあります)',
           });
           break;
         }
-        const opts = { maxRows: SQL_MAX_ROWS, maxSteps: SQL_MAX_STEPS, maxMs: SQL_MAX_MS, ...guest };
         void (async (): Promise<void> => {
-          const { columns, fks, counts, csv } = await fetchSchemaGrids(ask, opts);
+          const { columns, fks, counts, csv } = await grids();
           if (disposed) return;
           const title = schemaNoteTitle(new Date(), where);
           dispatcher.dispatch({
@@ -1207,15 +1260,10 @@ export function connectStoreEffects(
            */
           /**
            * 🔴 **足した相手も同じ 1 か所で組む**(#918 段⑦)。⚠ 1 件でも組めなければ
-           *   **まとめて「引けません」へ畳む**(読めない相手が混じったまま走らせると、
-           *   一部の表だけが無い器で引くことになる)。
+           *   **まとめて「引けません」へ畳む**(`duckInputsOf`)。
            */
-          const sources = [
-            ...(ev.duck === undefined ? [] : [ev.duck]),
-            ...(ev.duckExtra ?? []),
-          ].map((d) => duckDbReadableSourceOf(d.lid, d.name));
-          const readable = sources.filter((x): x is DuckDbReadableGuestSource => x !== null);
-          if (duck === undefined || ev.duck === undefined || readable.length !== sources.length) {
+          const inputs = duckInputsOf(ev);
+          if (duck === undefined || inputs === null) {
             dispatcher.dispatch({
               type: 'SQL_RUN_FAILED',
               token,
@@ -1224,10 +1272,7 @@ export function connectStoreEffects(
             });
             break;
           }
-          void duck({
-            sql,
-            sources: readable.map((source) => ({ source, readBytes: () => sqlSourceBytes(source.lid) })),
-          }).then(
+          void duck({ sql, sources: inputs }).then(
             ({ columns, rows, truncated, ms }) => {
               if (disposed) return;
               dispatcher.dispatch({ type: 'SET_SQL_RESULT', token, sql, columns, rows, truncated, ms });

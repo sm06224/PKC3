@@ -56,6 +56,30 @@ export interface SqliteExportColumn {
 }
 
 /**
+ * 🔴 **宣言のままの列の形**(#918 段⑦の続き。つながり図・構造ノートが DuckDB でも出る)。
+ *
+ * ⚠ 器の表は `createTableSql` が **型を 3 つ(BIGINT / DOUBLE / VARCHAR)へ潰して**作り、**主キーも空を許さない
+ *   印も付けない**(付けると、写しの INSERT が sqlite では通っていた行で落ちる)。だから構造を採るとき、
+ *   器の `duckdb_columns()` だけでは**元の型・主キー・空を許さない印が消える** ── ここへ元のまま運び、
+ *   構造の組み立て(`duckdb-schema.ts`)が器の答えに**重ねる**。
+ */
+export interface SqliteColumnShape extends SqliteExportColumn {
+  readonly notNull: boolean;
+  /** 主キーの一部か(複合なら全部の列が真)。 */
+  readonly primaryKey: boolean;
+}
+
+/**
+ * 外部キー 1 本(`PRAGMA foreign_key_list` のまま)。
+ * ⚠ `toColumn` は空のことがある(相手の主キーを指す書き方)。`toTable` は**元の名前**(器での名前ではない)。
+ */
+export interface SqliteExportFk {
+  readonly fromColumn: string;
+  readonly toTable: string;
+  readonly toColumn: string;
+}
+
+/**
  * storage worker が返す「表 1 つ分の写し」。
  *
  * ⚠ `ndjson` が `null` の理由は 2 つ ── ①行が 0 件(空の表)②断った(`refused` が非 null)。
@@ -63,7 +87,13 @@ export interface SqliteExportColumn {
  */
 export interface SqliteExportedTable {
   readonly name: string;
-  readonly columns: readonly SqliteExportColumn[];
+  readonly columns: readonly SqliteColumnShape[];
+  /**
+   * 🔴 **外部キー**(#918 段⑦の続き)。⚠ 器の表には**写さない**(DuckDB の `FOREIGN KEY` は
+   *   相手の列に主キーを要求し、行の順にも縛られる ── 写しの INSERT が落ちる)。構造を採るときだけ
+   *   `duckdb-schema.ts` が使う。⚠ 必須の field(省ける形にすると、worker が書き忘れても tsc が黙る)。
+   */
+  readonly fks: readonly SqliteExportFk[];
   /** 行を 1 つずつ JSON にして改行で繋いだ bytes(UTF-8)。 */
   readonly ndjson: Uint8Array | null;
   readonly rows: number;

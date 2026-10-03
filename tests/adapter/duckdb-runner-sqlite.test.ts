@@ -66,14 +66,15 @@ function fakeHandle(failOn: (sql: string) => Error | undefined) {
 }
 
 const COLS = [
-  { name: 'id', type: 'INTEGER' },
-  { name: '品名', type: 'TEXT' },
+  { name: 'id', type: 'INTEGER', notNull: false, primaryKey: true },
+  { name: '品名', type: 'TEXT', notNull: false, primaryKey: false },
 ];
 
 /** 行が在る表 / 空の表 / 断った表。⚠ NDJSON の中身は fake なので大きさだけで見分ける。 */
 const withRows = (name: string, bytes = 11): SqliteExportedTable => ({
   name,
   columns: COLS,
+  fks: [],
   ndjson: new Uint8Array(bytes),
   rows: 2,
   refused: null,
@@ -81,6 +82,7 @@ const withRows = (name: string, bytes = 11): SqliteExportedTable => ({
 const empty = (name: string): SqliteExportedTable => ({
   name,
   columns: COLS,
+  fks: [],
   ndjson: null,
   rows: 0,
   refused: null,
@@ -88,6 +90,7 @@ const empty = (name: string): SqliteExportedTable => ({
 const refused = (name: string, why: string): SqliteExportedTable => ({
   name,
   columns: COLS,
+  fks: [],
   ndjson: null,
   rows: 0,
   refused: why,

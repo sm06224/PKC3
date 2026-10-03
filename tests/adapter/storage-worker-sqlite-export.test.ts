@@ -112,17 +112,53 @@ describe('🔴 表の一覧・列・行', () => {
     expect(r.tables.map((t) => t.name)).toEqual(['a表', '売上']);
     const t = r.tables[1]!;
     expect(t.columns).toEqual([
-      { name: 'id', type: 'INTEGER' },
-      { name: '品名', type: 'TEXT' },
-      { name: '単価', type: 'REAL' },
+      { name: 'id', type: 'INTEGER', notNull: false, primaryKey: false },
+      { name: '品名', type: 'TEXT', notNull: false, primaryKey: false },
+      { name: '単価', type: 'REAL', notNull: false, primaryKey: false },
       // 🔑 型の無い列は空の字(`duckDbColumnTypeOf` が VARCHAR へ写す)
-      { name: '備考', type: '' },
+      { name: '備考', type: '', notNull: false, primaryKey: false },
     ]);
     expect(t.rows).toBe(2);
     expect(t.refused).toBeNull();
     expect(rowsOf(t.ndjson)).toEqual([
       { id: 1, 品名: 'りんご', 単価: 1.5, 備考: null },
       { id: 2, 品名: 'x"y\nz', 単価: 2, 備考: 'あ' },
+    ]);
+  });
+
+  /**
+   * 🔴 **主キー・空を許さない印・外部キーを、宣言のまま運ぶ**(#918)。
+   * ⚠ 器の表は型を 3 つへ潰し、主キーも外部キーも作らない ── 構造(つながり図)を採るとき、
+   *   ここで運んだ物を重ねる。落とすと DuckDB の道だけ「主キーが無い / 線が 0 本」になる。
+   */
+  it('🔴 主キー(複合も)・NOT NULL・外部キー(列ごと)・相手の列を省いた書き方も運ぶ', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE 親 (id INTEGER PRIMARY KEY, 名 TEXT NOT NULL)');
+      run(db, 'CREATE TABLE 別 (k TEXT PRIMARY KEY)');
+      run(
+        db,
+        'CREATE TABLE 子 (a INTEGER, b INTEGER, 親id INTEGER REFERENCES 親, c TEXT, ' +
+          'PRIMARY KEY (a, b), FOREIGN KEY (a, b) REFERENCES 親(id, 名), FOREIGN KEY (c) REFERENCES 別(k))',
+      );
+    });
+    const r = await exportOf(img);
+    const t = Object.fromEntries(r.tables.map((x) => [x.name, x]));
+    expect(t['親']!.columns.map((c) => [c.name, c.primaryKey, c.notNull])).toEqual([
+      ['id', true, false],
+      ['名', false, true],
+    ]);
+    expect(
+      t['子']!.columns.filter((c) => c.primaryKey).map((c) => c.name),
+      '複合の主キーが片方しか運ばれていない',
+    ).toEqual(['a', 'b']);
+    expect(t['親']!.fks, '外部キーの無い表に線がある').toEqual([]);
+    // 🔑 `PRAGMA foreign_key_list` の並び(id → seq 順。⚠ id は宣言順とは限らない)のまま ──
+    //   内蔵の sqlite の道(`SCHEMA_FK_SQL` の `order by f.id, f.seq`)と同じ並び。相手の列を省いた書き方は空の字
+    expect(t['子']!.fks).toEqual([
+      { fromColumn: 'c', toTable: '別', toColumn: 'k' },
+      { fromColumn: 'a', toTable: '親', toColumn: 'id' },
+      { fromColumn: 'b', toTable: '親', toColumn: '名' },
+      { fromColumn: '親id', toTable: '親', toColumn: '' },
     ]);
   });
 
@@ -156,8 +192,8 @@ describe('🔴 表の一覧・列・行', () => {
     const t = (await exportOf(img)).tables[0]!;
     expect(t.name).toBe('空');
     expect(t.columns).toEqual([
-      { name: 'a', type: 'INTEGER' },
-      { name: 'b', type: 'TEXT' },
+      { name: 'a', type: 'INTEGER', notNull: false, primaryKey: false },
+      { name: 'b', type: 'TEXT', notNull: false, primaryKey: false },
     ]);
     expect(t.rows).toBe(0);
     expect(t.ndjson).toBeNull();
@@ -213,7 +249,7 @@ describe('🔴 天井 ── 超えた表だけ断る', () => {
     expect(big.refused).toContain('内蔵の sqlite');
     expect(big.ndjson, '断った表の bytes を返している').toBeNull();
     // 🔑 列は返す(呼び側が「どの表を断ったか」を名前で言える)
-    expect(big.columns).toEqual([{ name: 't', type: 'TEXT' }]);
+    expect(big.columns).toEqual([{ name: 't', type: 'TEXT', notNull: false, primaryKey: false }]);
     expect(small.refused).toBeNull();
     expect(rowsOf(small.ndjson)).toEqual([{ n: 1 }]);
   });
