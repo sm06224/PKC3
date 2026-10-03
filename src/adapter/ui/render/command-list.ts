@@ -15,34 +15,50 @@
  * 矢印で動かしている最中の焦点が行ごと消える ── **並び・押せるか・理由**が同じなら何もしない。
  */
 import type { PaletteRow } from '@features/palette/palette-rows';
+import { RECENT_COMMANDS_HEADING } from '@features/palette/recent-commands';
 
 /** 0 件のときの字。⚠ 空を黙って出さない(打ち間違いか、無いのかが分かる字にする)。 */
 export const COMMAND_LIST_EMPTY = 'その名前の操作はありません。別の言い方で探してみてください。';
 
 /** 描いた物の指紋。⚠ 並び・押せるか・理由・割当を全部含める(1 つ落とすと、変わっても描き直さない)。 */
-function shapeOf(rows: readonly PaletteRow[]): string {
-  return JSON.stringify(rows.map((r) => [r.id, r.label, r.keys, r.ready, r.why]));
+function shapeOf(rows: readonly PaletteRow[], recent: readonly PaletteRow[]): string {
+  const of = (xs: readonly PaletteRow[]) => xs.map((r) => [r.id, r.label, r.keys, r.ready, r.why]);
+  // ⚠ 「最近使った」の節に居るか否かも指紋に入れる(同じ行が節の中へ動いても描き直す)
+  return JSON.stringify([of(recent), of(rows)]);
 }
 
 const SHAPE = 'data-pkc-shape';
 
 /**
  * 一覧を描く。
+ * @param recent 🔴 先頭に出す「最近使った操作」の行(`>` だけのときだけ渡される。既定は無し)。
+ *   ⚠ 行は普通の行と**同じ形**で描く(新しい部品は作らない)── 足すのは見出し 1 行だけ。
+ *   ⚠ 0 件なら見出しも出さない。
  * @returns 組み直したか(指紋が同じなら `false` ── test が「触らない」を見る)
  */
-export function paintCommandList(host: HTMLElement, rows: readonly PaletteRow[]): boolean {
-  const shape = shapeOf(rows);
+export function paintCommandList(
+  host: HTMLElement,
+  rows: readonly PaletteRow[],
+  recent: readonly PaletteRow[] = [],
+): boolean {
+  const shape = shapeOf(rows, recent);
   if (host.getAttribute(SHAPE) === shape) return false;
   host.setAttribute(SHAPE, shape);
   host.textContent = '';
-  if (rows.length === 0) {
+  if (rows.length === 0 && recent.length === 0) {
     const none = document.createElement('p');
     none.setAttribute('data-pkc-field', 'command-empty');
     none.textContent = COMMAND_LIST_EMPTY;
     host.append(none);
     return true;
   }
-  for (const r of rows) {
+  if (recent.length > 0) {
+    const heading = document.createElement('p');
+    heading.setAttribute('data-pkc-field', 'command-recent-heading');
+    heading.textContent = RECENT_COMMANDS_HEADING;
+    host.append(heading);
+  }
+  for (const r of [...recent, ...rows]) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('data-pkc-field', 'command-row');

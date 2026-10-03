@@ -939,6 +939,42 @@ test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、E
   await expect(page.locator('[data-pkc-field="entry-sort"]'), '`>` が消えても並び順が戻らない').toBeVisible();
   await expect(page.locator('[data-pkc-region="create-bar"]'), '`>` が消えても作る帯が戻らない').toBeVisible();
 
+  /**
+   * 🔴 **`>` だけを打つと、いま実行した操作が「最近使った操作」として先頭に出る**(#274)。
+   * ⚠ 見るのは**画面の見え方**:見出しが**控えめな字の規則**(`--muted` / 11px)を実際に受けて
+   * いること ── `data-pkc-field` を付けただけで CSS に受け皿が無いと、見出しは行と同じ字で
+   * 並び、どこまでが節か読めない(属性の検査は「付けた」しか言わない)。
+   * 同じ起動の続き(⑧ で `view-query` を実行した直後なので、記録は 1 件)。
+   */
+  const recentHeading = cmdList.locator('[data-pkc-field="command-recent-heading"]');
+  await box.fill('>');
+  await expect(cmdList).toBeVisible();
+  await expect(recentHeading, '`>` だけなのに「最近使った操作」の見出しが出ない').toHaveCount(1);
+  await expect(recentHeading).toHaveText('最近使った操作');
+  await expect(
+    cmdList.locator('[data-pkc-field="command-row"]').first(),
+    '実行した操作が先頭に出ていない',
+  ).toHaveAttribute('data-pkc-command', 'view-query');
+  const styled = await recentHeading.evaluate((el) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--muted)';
+    el.parentElement!.append(probe);
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    const cs = getComputedStyle(el);
+    return { color: cs.color, muted, size: cs.fontSize };
+  });
+  expect(styled.color, '見出しが控えめな字(--muted)で描かれていない').toBe(styled.muted);
+  expect(styled.size, '見出しの字の大きさが規則どおりでない').toBe('11px');
+  expect(
+    await cmdList.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    '節を足したら一覧が横にはみ出した',
+  ).toBe(true);
+  // 名前を 1 字でも打ったら、いつもの絞り込みだけ
+  await box.fill('>集');
+  await expect(recentHeading, '打ち始めたのに見出しが残っている').toHaveCount(0);
+  await box.fill('');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
