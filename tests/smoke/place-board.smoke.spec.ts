@@ -12,6 +12,7 @@
  *   「見た目は動いたが本文に書けていない」を素通りする(#513 の「成功と同じ見た目」の型)。
  */
 import { test, expect, type Locator } from '@playwright/test';
+import { PLACE_SQL_NOTE } from '../../src/features/markdown/place-embed';
 import {
   gotoApp,
   clickReal,
@@ -448,6 +449,9 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
+/** 🔴 #529 Q3 ── 折り返せない長い数式(項を 80 並べる)。読む面(1,000px 前後)より広く描かれる。 */
+const LONG_MATH = '$$\n' + Array.from({ length: 80 }, (_, i) => `x_{${String(i)}}`).join(' + ') + '\n$$';
+
 test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、押すとそのノートを開く (#283 P4 / #529 W3-①)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -642,8 +646,15 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // 🔴 #529 Q2 ── SQL の囲み(` ```sql embed `)を持つノート。枠の中では答えを引かず、案内の 1 行が出る
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', 'SQLのノート');
+  await page.fill('[data-pkc-field="editor-body"]', '前置き\n\n```sql embed\nSELECT 1\n```\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
   const figLid = await lidOfTitle('図のノート');
   const onlyLid = await lidOfTitle('図だけのノート');
+  const sqlLid = await lidOfTitle('SQLのノート');
   const fourLid = await lidOfTitle('図の四種のノート');
   const photoLid = await lidOfTitle('写真のノート');
   const attLid = await lidOfTitle('ねこ.png');
@@ -660,6 +671,10 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
       `:::format{#pd .pkc-place entry=${pdfLid} x=700 y=270}\n:::\n\n` +
       `:::format{#mm .pkc-place entry=${onlyLid} x=10 y=540}\n:::\n\n` +
       `:::format{#fx .pkc-place entry=${fourLid} x=350 y=540}\n:::\n\n` +
+      `:::format{#sq .pkc-place entry=${sqlLid} x=700 y=540}\n:::\n\n` +
+      // 🔴 #529 Q3 ── 長い数式を持つ塊。`w=` 無し(auto)は読む面の幅で頭打ち / `w=` 付きは書いた幅のまま
+      `:::format{#lm .pkc-place x=10 y=820}\n${LONG_MATH}\n:::\n\n` +
+      `:::format{#lw .pkc-place x=10 y=1100 w=1500}\n${LONG_MATH}\n:::\n\n` +
       // 🔴 遠い枠(画面から 2,000px 以上下)── 近づくまで中身を作らない(W3-③)
       `:::format{#far .pkc-place entry=${figLid} x=10 y=2600}\n:::\n`,
   );
@@ -707,6 +722,70 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   const overflow = await slotIn('mm').evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
   expect(overflow.ch, '台の前提:枠の高さが読めていない').toBeGreaterThan(100);
   expect(overflow.sh, `図だけの枠が溢れている(scrollHeight ${String(overflow.sh)} > clientHeight ${String(overflow.ch)}。原文が見えていないか)`).toBeLessThanOrEqual(overflow.ch + 1);
+
+  /**
+   * 🔴 ①-c **枠の中の SQL は答えを引かず、案内の 1 行が出る**(#529 Q2 = B)。
+   *
+   * ⚠ 直す前は、SQL の字だけが出て答えの表は 0 行・高さ 0(画面に理由も出ない)だった。
+   * 🔑 観測点は 3 つ:案内の字 / 表と器の印が枠に無い / 案内が説明の字の見た目(地の字より小さく、色が違う)。
+   */
+  const sqlSlot = slotIn('sq');
+  await expect(sqlSlot.locator('[data-pkc-field="place-sql-note"]'), '枠の中の SQL に案内の 1 行が出ていない').toHaveText(
+    PLACE_SQL_NOTE,
+    { timeout: 30_000 },
+  );
+  await expect(sqlSlot.locator('table, [data-pkc-sql-embed]'), '枠の中で答えを引いている').toHaveCount(0);
+  await expect(sqlSlot, '枠の中に SQL の字が出ていない').toContainText('SELECT 1');
+  const sqlLook = await sqlSlot.evaluate((slot) => {
+    const note = slot.querySelector('[data-pkc-field="place-sql-note"]') as HTMLElement;
+    const card = slot.parentElement!.querySelector('[data-pkc-field="place-card"]') as HTMLElement;
+    return {
+      noteColor: getComputedStyle(note).color,
+      cardColor: getComputedStyle(card).color,
+      noteFs: parseFloat(getComputedStyle(note).fontSize),
+      slotFs: parseFloat(getComputedStyle(slot).fontSize),
+    };
+  });
+  expect(sqlLook.noteColor, '案内が地の字と同じ色(説明の字の規則が当たっていない)').not.toBe(sqlLook.cardColor);
+  expect(sqlLook.noteFs, '案内が地の字より小さくない').toBeLessThan(sqlLook.slotFs);
+
+  /**
+   * 🔴 ①-d **`w=` 無しの長い数式の塊は、読む面の幅で頭打ち**(#529 Q3 = A)。
+   *
+   * ⚠ 直す前は塊が 1,614px に広がり、読む面全体が横に 734px 溢れた(板の上は `max-width: none`)。
+   * 🔑 観測点:塊の右端が読む面の右端を超えない / **式は塊の中で横に送れる**(実際に送って動くか)/
+   *   対照群:`w=` を書いた塊は**書いた幅のまま**(読む面より広くても頭打ちにしない)。
+   */
+  await expect(body2.locator('#lm .pkc-math[data-pkc-math-state="done"]'), '台の前提:数式が描けていない').toHaveCount(1, { timeout: 30_000 });
+  await expect(body2.locator('#lw .pkc-math[data-pkc-math-state="done"]'), '台の前提:対照の数式が描けていない').toHaveCount(1, { timeout: 30_000 });
+  const wide = await body2.evaluate(() => {
+    const host = document.querySelector('[data-pkc-region="detail"] .pkc-board-host') as HTMLElement;
+    const hostR = host.getBoundingClientRect();
+    const auto = document.querySelector('[data-pkc-region="detail"] #lm') as HTMLElement;
+    const sized = document.querySelector('[data-pkc-region="detail"] #lw') as HTMLElement;
+    const a = auto.getBoundingClientRect();
+    const math = auto.querySelector('.pkc-math') as HTMLElement;
+    return {
+      hostW: hostR.width,
+      autoRight: a.right - hostR.left,
+      autoW: a.width,
+      // 🔑 式は**頭打ちにされた幅の中**で横に送れる ── ⚠ `scrollWidth > clientWidth` は `overflow: visible` でも成り立つので
+      //   見ない。**実際に送ってみて**動いたかを見る(式の器 `.pkc-math-display` か塊の `overflow: auto` のどちらかが担う)
+      mathW: math.scrollWidth,
+      mathClient: math.clientWidth,
+      canScroll: ((): boolean => {
+        math.scrollLeft = 40;
+        auto.scrollLeft = 40;
+        return math.scrollLeft > 0 || auto.scrollLeft > 0;
+      })(),
+      sizedW: sized.getBoundingClientRect().width,
+    };
+  });
+  expect(wide.mathW, `台の前提:式が読む面(${String(Math.round(wide.hostW))}px)より狭い。頭打ちを見分けられない`).toBeGreaterThan(wide.hostW);
+  expect(wide.autoRight, `w= 無しの塊が読む面の右端を超えている(右端 ${String(Math.round(wide.autoRight))}px / 面 ${String(Math.round(wide.hostW))}px)`).toBeLessThanOrEqual(wide.hostW + 1);
+  expect(wide.canScroll, '式が塊の中で横に送れない(送っても動かない = overflow が掛かっていない)').toBe(true);
+  expect(wide.mathClient, '式の器が塊の幅より広い(頭打ちの外へ出ている)').toBeLessThanOrEqual(wide.autoW + 1);
+  expect(wide.sizedW, 'w= を書いた塊が書いた幅でない(頭打ちが掛かっている)').toBe(1500);
 
   // 🔴 ② 同じノート 2 枚:実 DOM の id が重複せず、脚注・目次の押しが同じ枠の中を指す
   const idReport = await body2.evaluate((root) => {

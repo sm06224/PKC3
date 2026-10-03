@@ -16,7 +16,7 @@
  *    枠が消えれば返す。置いた添付ノートは画像なら絵そのもの、PDF は字、Office 等は帯だけ。
  *    同じノートを 2 枚置いても `id` が重複せず、目次・脚注の押しが同じ枠の中を指す
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -41,11 +41,14 @@ import {
   PLACE_ENTRY_DEFAULT_H,
   PLACE_ENTRY_DEFAULT_W,
   PLACE_NEAR_MARGIN,
+  PLACE_SQL_FIELD,
+  PLACE_SQL_NOTE,
   placeEmbeddable,
   placeFramed,
   sameExcerpt,
 } from '../../src/features/markdown/place-embed';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
+import { setSqlEmbedRunner } from '../../src/adapter/ui/render/sql-embed-hydrate';
 import { codeOnly } from '../helpers/code-only';
 
 /**
@@ -1364,6 +1367,22 @@ describe('掃除(sanitizeEmbedded)', () => {
     expect(b.textContent).toContain('添付');
   });
 
+  it('🔴 SQL の答えの器は案内の 1 行へ(器の印ごと外す ── 本文の描画が掴まない)/ SQL の字は残る', () => {
+    const b = box(
+      '<pre><code>SELECT 1</code></pre><div data-pkc-sql-embed data-pkc-sql-embed-src="SELECT 1"></div><p>後ろ</p>',
+    );
+    sanitizeEmbedded(b, () => null, 'place-1-');
+    expect(b.querySelector('[data-pkc-sql-embed], [data-pkc-sql-embed-src]'), '器の印が残っている').toBeNull();
+    const note = b.querySelector(`[data-pkc-field="${PLACE_SQL_FIELD}"]`)!;
+    expect(note.textContent).toBe(PLACE_SQL_NOTE);
+    expect(b.querySelector('pre')!.nextElementSibling, '案内が SQL の字の直下に無い').toBe(note);
+    // 対照群:器が無い本文は 1 バイトも変わらない
+    const plain = box('<pre><code>SELECT 1</code></pre><p>後ろ</p>');
+    const before = plain.innerHTML;
+    sanitizeEmbedded(plain, () => null, 'place-1-');
+    expect(plain.innerHTML).toBe(before);
+  });
+
   it('🔴 id は全部接頭辞つきに、それを指す href / for / aria も同じ接頭辞に(片方だけだと宙に浮く)', () => {
     const b = box(
       '<div class="pkc-format-block" id="inner"><sup id="fnref1"><a href="#fn1">1</a></sup></div>' +
@@ -1423,6 +1442,87 @@ describe('掃除(sanitizeEmbedded)', () => {
  * 🔑 観測点は `.pkc-render-source` の有無(CSS の効き具合ではなく DOM)── 外したことが実ブラウザの
  * 見え方に届くかは `place-board.smoke.spec.ts` が見る。
  */
+/**
+ * 🔴 **枠の中の SQL の囲みは答えを引かず、1 行の案内を出す**(#529 Q2 = B)。
+ *
+ * ⚠ 直す前は、SQL の字だけが出て答えの表は 0 行・高さ 0(画面に理由が出なかった)。
+ * 🔑 対照群は**同じ画面の枠の外の SQL**(板のノート自身の本文)── 答えが引かれ、案内は出ない。
+ */
+describe('枠の中の SQL(#529 Q2)', () => {
+  const SQL_BODIES: Record<string, string> = {
+    ...BODIES,
+    n2: '前置き\n\n```sql embed\nSELECT 2 AS inside\n```\n',
+    b: BOARD + '\n\n```sql embed\nSELECT 1 AS outside\n```\n',
+  };
+  const asked: string[] = [];
+  beforeEach(() => {
+    asked.length = 0;
+    setSqlEmbedRunner(async (sql) => {
+      asked.push(sql);
+      return { columns: ['v'], rows: [[1]], truncated: false, ms: 1 };
+    });
+  });
+  afterEach(() => {
+    setSqlEmbedRunner(null);
+  });
+
+  it('🔴 案内の字が出る / 答えの器も表も無い / SQL の字は残る / 引かない', async () => {
+    const r = await rig(SQL_BODIES);
+    const slot = slotOf(r, 'p2')!;
+    const note = slot.querySelector<HTMLElement>(`[data-pkc-field="${PLACE_SQL_FIELD}"]`);
+    expect(note, '枠の中に案内が無い').not.toBeNull();
+    expect(note!.textContent).toBe(PLACE_SQL_NOTE);
+    expect(slot.querySelector('[data-pkc-sql-embed]'), '答えの器が残っている(本文の描画が掴む)').toBeNull();
+    expect(slot.querySelector('table')).toBeNull();
+    expect(slot.textContent, 'SQL の字まで消えている').toContain('SELECT 2 AS inside');
+    // 🔑 案内は字の**直下**(コードの囲みの次)
+    expect(note!.previousElementSibling?.textContent ?? '').toContain('SELECT 2 AS inside');
+    // 掴まれた器は全部起こす ── それでも枠の中の SQL は引かれない
+    for (const [el, fire] of [...seen]) fire(el);
+    await settle();
+    expect(asked.some((q) => q.includes('inside')), `枠の中の SQL を引いている: ${asked.join(' / ')}`).toBe(false);
+  });
+
+  it('🔴 対照群:枠の外の SQL は今までどおり答えが出て、案内は出ない', async () => {
+    const r = await rig(SQL_BODIES);
+    const outer = [...r.host().querySelectorAll<HTMLElement>('[data-pkc-sql-embed]')];
+    expect(outer, '台の前提:枠の外に答えの器が 1 つだけ在る').toHaveLength(1);
+    expect(outer[0]!.closest('[data-pkc-field="place-body"]'), '台の前提:器が枠の外に居ない').toBeNull();
+    seen.get(outer[0]!)?.(outer[0]!);
+    await vi.waitFor(() => expect(outer[0]!.querySelector('table'), '枠の外の答えの表が出ていない').not.toBeNull());
+    expect(asked.some((q) => q.includes('outside')), '台の前提:枠の外の SQL が引かれていない').toBe(true);
+    expect(outer[0]!.querySelector(`[data-pkc-field="${PLACE_SQL_FIELD}"]`)).toBeNull();
+    // 案内は枠の中の 1 つだけ(枠の外へは出ていない)
+    expect(r.host().querySelectorAll(`[data-pkc-field="${PLACE_SQL_FIELD}"]`)).toHaveLength(1);
+  });
+
+  it('🔴 本文を書き直して描き直した回(鮮度の鍵が変わる)でも、枠の中の SQL は引かれない', async () => {
+    const r = await rig(SQL_BODIES);
+    await r.apply({ type: 'BODY_LOADED', lid: 'b', body: SQL_BODIES.b + '\n一行足した\n' });
+    for (const [el, fire] of [...seen]) fire(el);
+    await settle();
+    expect(slotOf(r, 'p2')!.querySelector(`[data-pkc-field="${PLACE_SQL_FIELD}"]`), '案内が消えた').not.toBeNull();
+    expect(slotOf(r, 'p2')!.querySelector('table'), '枠の中に答えの表が出た').toBeNull();
+    expect(asked.some((q) => q.includes('inside')), `枠の中の SQL を引いている: ${asked.join(' / ')}`).toBe(false);
+  });
+
+  it('🔑 案内の字は src の 1 か所にあり、マニュアルもそこから引いた字と一致する', () => {
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = `${dir}/${e.name}`;
+        if (e.isDirectory()) walk(p);
+        else if (/\.ts$/.test(e.name) && readFileSync(p, 'utf-8').includes('ここでは答えを出しません')) hits.push(p);
+      }
+    };
+    walk('src');
+    expect(hits, '案内の字が複数の場所に書かれている(正本は features/markdown/place-embed.ts の 1 か所)').toEqual([
+      'src/features/markdown/place-embed.ts',
+    ]);
+    expect(readFileSync('docs/manual.md', 'utf-8'), 'マニュアルの字が案内の字と食い違っている').toContain(PLACE_SQL_NOTE);
+  });
+});
+
 describe('枠に差し込んだ図の下に原文が残らない(#529 A-1)', () => {
   const FENCES: Record<string, string> = {
     mermaid: '```mermaid\ngraph TD; A-->B\n```',
