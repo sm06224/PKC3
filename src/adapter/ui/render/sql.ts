@@ -22,7 +22,7 @@
  * ⚠ **描画器は状態を持たない** ── 打ちかけの字は state に在るので、
  *   面を閉じて戻っても消えない。
  */
-import type { AppState, SqlPageState } from '@adapter/state/app-state';
+import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/app-state';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { paintSqlEr } from './sql-er';
@@ -50,6 +50,8 @@ import {
 import { humanBytes } from '@features/human-bytes';
 import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
 import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
+import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
+import { erSubjectOf } from '@features/query/er-connect';
 import {
   SQL_ENGINE_LABEL,
   SQL_ENGINES,
@@ -650,7 +652,14 @@ export class SqlRenderer {
       row.setAttribute('data-pkc-sql-extra', e.lid);
       const label = document.createElement('span');
       label.setAttribute('data-pkc-field', 'sql-extra-name');
-      label.textContent = `${e.name}(表 ${tables[i + 1] ?? ''})`;
+      /**
+       * 🔴 **`.sqlite` は実名を書かない**(#682 段④d の着地後レビュー D4)。⚠ 直す前は `在庫.sqlite(表 在庫_表の名前)` と出て、
+       *   **そういう名前の表が在る**ように読めた。中に在る表の名前は走らせるまで分からない ── **形**だけを言う。
+       */
+      label.textContent =
+        sqlGuestSourceOf('', e.name)?.kind === 'sqlite'
+          ? `${e.name}(表は ファイル名_表名 の形)`
+          : `${e.name}(表 ${tables[i + 1] ?? ''})`;
       const drop = document.createElement('button');
       drop.type = 'button';
       drop.setAttribute('data-pkc-action', 'remove-sql-source');
@@ -764,7 +773,11 @@ export class SqlRenderer {
      *   (state は動いているのに、描き直しの門が閉じたままになる)。
      */
     const pendingKey = p.er.pendingFrom === null ? '' : JSON.stringify(p.er.pendingFrom);
-    const erKey = `${String(p.er.open)} ${String(p.er.loading)} ${p.er.note} ${String(p.er.connecting)} ${pendingKey}`;
+    // 🔴 写せなかった表の行も指紋に入れる(#682 段④d の着地後レビュー)── 入れないと、採り直した後に行が出ない
+    const erCopy = erCopyLine(p);
+    // 🔴 主語(この DB / この file / これらの file)も指紋に入れる ── 相手が替わっても図の模型は同じ物のことがある
+    const erSubject = erSubjectOf(p.guest === null ? [] : [p.guest.name, ...p.extraGuests.map((g) => g.name)]);
+    const erKey = `${String(p.er.open)} ${String(p.er.loading)} ${p.er.note} ${String(p.er.connecting)} ${pendingKey} ${erCopy} ${erSubject}`;
     if (
       this.erHost !== null &&
       (this.erModel !== p.er.model || this.erMine !== p.er.mine || this.erKey !== erKey)
@@ -772,7 +785,7 @@ export class SqlRenderer {
       this.erModel = p.er.model;
       this.erMine = p.er.mine;
       this.erKey = erKey;
-      paintSqlEr(this.erHost, p.er);
+      paintSqlEr(this.erHost, p.er, { copyLine: erCopy, subject: erSubject });
     }
     /**
      * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。
@@ -829,7 +842,7 @@ export class SqlRenderer {
     const engine: SqlEngine = sqlEngineOf(p);
     // 🔴 足した相手の名前(#918 段⑦)── 案内も手本も、並べた全部の表の名前を出す
     const more = p.extraGuests.map((g) => g.name);
-    const tipText = sqlTipText(target, engine, more);
+    const tipText = sqlTipText(target, engine, more, p.duckCopy);
     if (this.tip !== null && this.tip.textContent !== tipText) this.tip.textContent = tipText;
     const rulesText = sqlRulesText(engine);
     if (this.rules !== null && this.rules.textContent !== rulesText) this.rules.textContent = rulesText;
@@ -870,6 +883,8 @@ export class SqlRenderer {
       // ⚠ 足した / 外したら、上の行(何を調べているか)を必ず言い直す(#918 段⑦)
       p.extraGuests.map((g) => g.lid).join(','),
       p.guestError,
+      // 🔴 写せなかった表・全列を文字で写した表も、帯の字が変わる ── 答えが同じ回に言い直す(#682 段④d の着地後レビュー)
+      duckCopyNote(p),
     ].join(' ');
     if (fingerprint === this.last) return;
     this.last = fingerprint;
@@ -1143,7 +1158,49 @@ export function historyNoteLine(p: AppState['sqlPage']): string {
   return p.historyAt === n - 1 ? `${at} ── これより前はありません` : at;
 }
 
+/**
+ * 🔴 **進捗の字**(#682 段④d の着地後レビュー D1)。⚠ 直す前は「走らせています…」だけで、DuckDB が `.sqlite` を写している
+ *   最中(100k 行の表で数秒)は**何が起きているか**が 1 字も出なかった。
+ * ⚠ 「最初の 1 回だけ」とは言わない ── DuckDB は使わないまま置くと**自分で片づける**ので、**しばらく使わなかったあとの
+ *   最初の 1 回**も写し直す(実装の事実)。⚠ 内蔵の sqlite のときは何も足さない(写さない)。
+ */
+function runningNote(p: AppState['sqlPage']): string {
+  return sqlEngineOf(p) === 'duckdb'
+    ? '(初めて引くときと、しばらく使わなかったあとは、file を DuckDB へ写すので時間がかかります)'
+    : '';
+}
+
+/**
+ * 🔴 **帯へ足す「写せなかった表 / 全部の列を文字で写した表」**(#682 段④d の着地後レビュー D3 / D6)。
+ * ⚠ **DuckDB で引いているときだけ**(内蔵の sqlite は写さないので、写せなかった表は無い ── 同じ file を
+ *   engine だけ替えたとき、前の engine の話を残さない)。⚠ 無ければ `''`。
+ */
+function duckCopyNote(p: AppState['sqlPage']): string {
+  if (sqlEngineOf(p) !== 'duckdb') return '';
+  return copyBandNote(p.duckCopy, p.extraGuests.length > 0);
+}
+
+/**
+ * 🔴 **つながり図に足す「写せなかった表・ビュー」の行**。⚠ 図の構造を **DuckDB の器から採っているときだけ**
+ *   (内蔵の sqlite から採る図は、写していないので全部の表が出ている)。⚠ 無ければ `''`。
+ */
+function erCopyLine(p: AppState['sqlPage']): string {
+  if (p.duckCopy === null || schemaRouteOf(p.guest, p.extraGuests).duck === undefined) return '';
+  return refusedLine(p.duckCopy, p.extraGuests.length > 0);
+}
+
 function noteLine(p: AppState['sqlPage']): string {
+  const core = noteLineCore(p);
+  /**
+   * 🔴 **断り・開けなかった・走っている最中には言い足さない**(断りの字は、写せなかった表の理由を**もう含んでいる**
+   *   ── `DuckDbRunner.withRefused`。同じ事を 2 度言うと別々の事が起きたように見える)。
+   */
+  if (p.running || p.error !== '' || p.guestError !== '') return core;
+  const extra = duckCopyNote(p);
+  return extra === '' ? core : core === '' ? extra : `${core} ── ${extra}`;
+}
+
+function noteLineCore(p: AppState['sqlPage']): string {
   /**
    * 🔴 **どちらを調べているかは、どの行にも添える**(#681 の着地前レビュー F2)。
    * ⚠ 直す前は「まだ走らせていない」と「答えが出た」の 2 つにしか出ておらず、
@@ -1172,7 +1229,7 @@ function noteLine(p: AppState['sqlPage']): string {
    *   開くので、字を見て相手を勘違いさせない。
    */
   if (p.guestError !== '') return `選んだ file を開けませんでした ── ${p.guestError}`;
-  if (p.running) return `走らせています…${where}`;
+  if (p.running) return `走らせています…${runningNote(p)}${where}`;
   if (p.error !== '') return `${p.error}${where}`;
   /**
    * 🔴 **書き出したことを、いちばん上で言う**(#681 段③ の 3 つ目)。

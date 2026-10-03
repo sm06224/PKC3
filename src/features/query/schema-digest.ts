@@ -34,12 +34,27 @@
  * ⚠ `like` の `_` は 1 字ワイルドカードなので、**名前の比較は `=` で**行う(`like` は固定の語だけ)。
  */
 const FTS_SHADOW_SUFFIXES = ['_data', '_idx', '_content', '_docsize', '_config'] as const;
-const NOT_FTS_BACKSTAGE = [
+/**
+ * ⚠ 別名は **`m`**(`sqlite_master m` / `sqlite_schema m`)。🔑 **`.sqlite` を DuckDB へ写す側**
+ *   (storage worker の `EXPORT_TABLE_NAMES_SQL`)も**この 1 本**を使う(§7。#682 段④d の着地後レビュー:
+ *   写しだけ「裏方を外す」判定を持たず、本文検索の影の表が全部 DuckDB へ写っていた)。
+ */
+export const NOT_FTS_BACKSTAGE = [
   ' and not exists (',
   "   select 1 from sqlite_master v where v.type = 'table'",
   "      and v.sql like 'create virtual table%using fts5%'",
   `      and m.name in (v.name, ${FTS_SHADOW_SUFFIXES.map((x) => `v.name || '${x}'`).join(', ')}))`,
 ].join('\n');
+
+/**
+ * 🔴 **`sqlite_` で始まる内部の表を外す条件**(別名は `m`)。
+ *
+ * ⚠ **`_` は `LIKE` で任意の 1 字**である ── 素の `not like 'sqlite_%'` は `sqlitedata` / `sqlite1` のような
+ *   **user の表まで黙って外す**(#682 段④d の着地後レビューで写し側が直した。ここは同じ書き方が残っていた)。
+ *   内部の表(`sqlite_sequence` 等)だけを外すため `\_` で逃がし、`ESCAPE` を明示する。
+ * 🔑 **定数は 1 本** ── 構造を採る 2 本(下)と、`.sqlite` を写す側(storage worker)が同じ条件を使う。
+ */
+export const NOT_SQLITE_INTERNAL_SQL = "m.name not like 'sqlite\\_%' escape '\\'";
 
 /**
  * 表と列を 1 回で採る。
@@ -51,7 +66,7 @@ export const SCHEMA_COLUMNS_SQL = [
   'select m.type as kind, m.name as tbl, p.cid as cid, p.name as col,',
   '       p.type as typ, p."notnull" as nn, p.pk as pk',
   '  from sqlite_master m join pragma_table_info(m.name) p',
-  " where m.type in ('table','view') and m.name not like 'sqlite_%'",
+  ` where m.type in ('table','view') and ${NOT_SQLITE_INTERNAL_SQL}`,
   NOT_FTS_BACKSTAGE,
   ' order by m.type, m.name, p.cid',
 ].join('\n');
@@ -60,7 +75,7 @@ export const SCHEMA_COLUMNS_SQL = [
 export const SCHEMA_FK_SQL = [
   'select m.name as tbl, f."table" as ref, f."from" as col, f."to" as refcol',
   '  from sqlite_master m join pragma_foreign_key_list(m.name) f',
-  " where m.type = 'table' and m.name not like 'sqlite_%'",
+  ` where m.type = 'table' and ${NOT_SQLITE_INTERNAL_SQL}`,
   ' order by m.name, f.id, f.seq',
 ].join('\n');
 
@@ -150,6 +165,13 @@ export interface SchemaDigestInput {
    *   客の DB(取り込んだ `.sqlite` / `.csv`)には本文の表が無いので渡らない。
    */
   readonly csv?: Grid;
+  /**
+   * 🔴 **末尾に足す注意の行**(#682 段④d の着地後レビュー)。⚠ **省略可** ── 内蔵の sqlite の構造には無い。
+   * DuckDB へ写した `.sqlite` の「写せなかった表・ビュー」と「型を 3 つへ丸めている」を言う
+   * (`duckdb-copy-report.ts` が字を作る)。⚠ 構造の表には出ない物なので、**ここで言わないと**
+   * ノートを AI へ貼った人が「この DB の表は、これで全部」と読む。
+   */
+  readonly notes?: readonly string[];
 }
 
 /** `Grid` を「列名 → 値」の連想に開く。⚠ 列の順に依存しない(問い合わせを直しても壊れない)。 */
@@ -327,6 +349,8 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
   if (model.tables.length === 0) {
     // ⚠ **空でも 1 枚を出す** ── 押して無反応にしない(理由を字で言う)
     out.push('表もビューも 1 つもありません。');
+    // 🔴 全部が写せなかった `.sqlite` も、この 1 行だけでは「中身が空」と読める ── 写せなかった理由を添える
+    for (const n of input.notes ?? []) out.push(`⚠ ${n}`);
     return out.join('\n');
   }
   /**
@@ -374,6 +398,7 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
   out.push('---');
   out.push('');
   out.push('⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。');
+  for (const n of input.notes ?? []) out.push(`⚠ ${n}`);
   // ⚠ 見るのは**渡されたか**であって、模型の `rows` ではない ── 表が 0 件の DB でも
   //    「採れなかった」とは書かない(採れて 0 件と、採れなかったのは別の話である)
   if (!input.counts) out.push('⚠ 行数は採れませんでした。');

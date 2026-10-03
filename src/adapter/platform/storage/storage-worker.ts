@@ -86,6 +86,8 @@ import {
   type ContactScan,
 } from '@features/contact/contact-card';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
+import { capCellText } from '@features/query/sql-cell';
+import { NOT_FTS_BACKSTAGE, NOT_SQLITE_INTERNAL_SQL } from '@features/query/schema-digest';
 import {
   collectCsvTables,
   csvCellsOverBudget,
@@ -1420,18 +1422,7 @@ type Handlers = {
  */
 const PROGRESS_EVERY = 1000;
 
-/**
- * 🔴 **1 つの升に運ぶ字数の上限**(#681 段②、2026-09-09 の着地前レビュー)。
- *
- * ⚠ **BLOB を畳む理由は、長い字にそのまま当たる** ── 画面に出しても読めず、
- *   heap に載せる理由が無い。⚠ ところが初稿は BLOB だけ畳んで**字は素通り**だった
- *   (CLAUDE.md「片側を直したら、対称の反対側を必ず疑う」)。
- * 🔴 実測(2026-09-09):`SELECT hex(randomblob(2000000))` は **1 行で 400 万字**を返し、
- *   **進み具合の見張りは 1 度も鳴らない**(1 行なので歩数も行数も門にならない)。
- *   ⚠ そして `entries.body` は同じ表に在るので、`SELECT * FROM entries` は
- *   **いちばん自然な最初の 1 打**である。
- */
-const MAX_CELL_CHARS = 2000;
+// 🔴 1 つの升に運ぶ字数の上限は `@features/query/sql-cell`(DuckDB の答えと**同じ 1 本**。#682 段④d)
 
 /**
  * `postMessage` に載る形へ畳む。
@@ -1443,10 +1434,7 @@ const MAX_CELL_CHARS = 2000;
 function cellForWire(v: unknown): string | number | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return v;
-  if (typeof v === 'string')
-    return v.length > MAX_CELL_CHARS
-      ? `${v.slice(0, MAX_CELL_CHARS)}…(全 ${String(v.length)} 字)`
-      : v;
+  if (typeof v === 'string') return capCellText(v);
   /**
    * 🔴 **字にする ── `Number()` にしない**(2026-09-09 実測)。
    * ⚠ 同梱の sqlite が `bigint` を返すのは **`Number.MAX_SAFE_INTEGER` を超えたときだけ**
@@ -2326,7 +2314,27 @@ function needGuest(key: string): Database {
  *   外すために `\_` で逃がし、`ESCAPE` を明示する。
  */
 const USER_TABLE_NAMES_SQL =
-  "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name";
+  `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'table' AND ${NOT_SQLITE_INTERNAL_SQL} ORDER BY m.name`;
+
+/**
+ * 🔴 **DuckDB へ写す表の名前を引く 1 文**(#682 段④d の着地後レビュー)。
+ *
+ * ⚠ 客を開く口と**同じ判定**(`sqlite_` の内部の表を外す)に**もう 1 つ足す**:本文検索(FTS5)の
+ *   仮想表と**影の表**(`_data` / `_idx` / `_content` / `_docsize` / `_config`)を外す。
+ *   直す前は影の表が全部 DuckDB へ写り、user の表と並んで出ていた(構造を採る側 `SCHEMA_COLUMNS_SQL` は #967 で外している)。
+ * 🔑 判定は `NOT_FTS_BACKSTAGE` **1 本**(`schema-digest.ts`)── 「仮想表の影であること」で見る
+ *   (名前が `_data` で終わるだけの user の表は残る)。
+ */
+const EXPORT_TABLE_NAMES_SQL =
+  `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'table' AND ${NOT_SQLITE_INTERNAL_SQL}` +
+  `${NOT_FTS_BACKSTAGE} ORDER BY m.name`;
+
+/**
+ * 🔴 **ビューの名前を引く 1 文**(写さないので、**写さなかったと言う**ために要る)。
+ * ⚠ ビューは中身が別の表への問い合わせで、行を持たない ── 写すと「元の表が変わっても古い行のまま」の偽物になる。
+ */
+const EXPORT_VIEW_NAMES_SQL =
+  `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'view' AND ${NOT_SQLITE_INTERNAL_SQL} ORDER BY m.name`;
 
 /**
  * 🔴 **写しを取っている最中の `.sqlite`**(#682 段④d。**表ごとに写すので、開いたまま次の依頼を待つ**)。
@@ -2850,12 +2858,15 @@ const handlers: Handlers = {
     try {
       deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], tmp, req.image);
       const tables = (
-        tmp.selectObjects(USER_TABLE_NAMES_SQL) as unknown as Array<{ name: string }>
+        tmp.selectObjects(EXPORT_TABLE_NAMES_SQL) as unknown as Array<{ name: string }>
+      ).map((r) => r.name);
+      const views = (
+        tmp.selectObjects(EXPORT_VIEW_NAMES_SQL) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
       exportSeq += 1;
       const session = 'e' + String(exportSeq);
       exportDbs.set(session, tmp);
-      return { session, tables };
+      return { session, tables, views };
     } catch (e) {
       // ⚠ 読めなかった器も閉じる(断った回に器が残るのは「速やかな破棄」の逆である)
       try {

@@ -99,7 +99,7 @@ const exportOf = async (img: Uint8Array, maxTableBytes = MAX) => {
         await request({ op: 'exportSqliteTable', session: opened.session, table, maxTableBytes }),
       );
     }
-    return { tables };
+    return { tables, views: opened.views };
   } finally {
     await request({ op: 'closeSqliteExport', session: opened.session });
   }
@@ -248,15 +248,68 @@ describe('🔴 表の一覧・列・行', () => {
     ]);
   });
 
-  it('内部の表(sqlite_ で始まる)と view は出さない', async () => {
+  it('内部の表(sqlite_ で始まる)と view は表としては出さない(view は名前だけ `views` で返す)', async () => {
     const img = await image((db) => {
       run(db, 'CREATE TABLE seq (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)');
       run(db, "INSERT INTO seq (v) VALUES ('x')");
       run(db, 'CREATE VIEW v1 AS SELECT * FROM seq');
     });
-    const names = (await exportOf(img)).tables.map((t) => t.name);
+    const got = await exportOf(img);
+    const names = got.tables.map((t) => t.name);
     // ⚠ AUTOINCREMENT は `sqlite_sequence` という内部の表を作る(対照群として必ず在る)
     expect(names).toEqual(['seq']);
+    // 🔴 view は写さない ── ただし**写さなかったと言える**よう、名前だけ返す(直す前は、在ることすらどこにも出なかった)
+    expect(got.views, 'view の名前が返っていない').toEqual(['v1']);
+  });
+
+  it('🔴 view の名前は名前順 / view が無い DB では空 / `sqlite_` で始まる view は返さない', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE t (n INTEGER)');
+      run(db, 'CREATE VIEW b_view AS SELECT * FROM t');
+      run(db, 'CREATE VIEW a_view AS SELECT * FROM t');
+      run(db, 'CREATE VIEW sqlitedata_view AS SELECT * FROM t');
+    });
+    expect((await exportOf(img)).views).toEqual(['a_view', 'b_view', 'sqlitedata_view']);
+    const none = await image((db) => run(db, 'CREATE TABLE t (n INTEGER)'));
+    expect((await exportOf(none)).views, 'view が無いのに返している').toEqual([]);
+  });
+
+  /**
+   * 🔴 **本文検索(FTS5)の仮想表と影の表は写さない**(#682 段④d の着地後レビュー R6)。
+   * ⚠ 構造を採る側(`SCHEMA_COLUMNS_SQL`)は #967 で外しているのに、写す側は判定を持たず、`_data` / `_idx` /
+   *   `_docsize` / `_config` / `_content` が**全部 DuckDB へ写って user の表と並んだ**。判定は `NOT_FTS_BACKSTAGE` 1 本。
+   */
+  it('🔴 FTS5 の仮想表と影の表(_data / _idx / _docsize / _config / _content)は写さない。user の表は残る', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE VIRTUAL TABLE docs USING fts5(title, body)');
+      run(db, "INSERT INTO docs VALUES ('あ', 'い')");
+      run(db, 'CREATE TABLE notes (id INTEGER PRIMARY KEY, t TEXT)');
+      // 対照群:名前が影の接尾辞で終わるだけの user の表は、仮想表の影ではない ── 巻き込まない
+      run(db, 'CREATE TABLE sales_data (n INTEGER)');
+      run(db, 'CREATE TABLE docs_extra (n INTEGER)');
+    });
+    const got = await exportOf(img);
+    const names = got.tables.map((t) => t.name);
+    // ⚠ 前提:影の表が本当に在る(無いと「外れている」が空振りで緑になる)
+    const sqlite3 = await sqlite3InitModule();
+    const probe = new sqlite3.oo1.DB(':memory:') as unknown as Db;
+    try {
+      run(probe, 'CREATE VIRTUAL TABLE docs USING fts5(title, body)');
+      const shadow: string[] = [];
+      (probe as unknown as { exec: (a: unknown) => void }).exec({
+        sql: "SELECT name FROM sqlite_master WHERE name LIKE 'docs\\_%' ESCAPE '\\' ORDER BY name",
+        rowMode: 'array',
+        callback: (r: unknown[]) => shadow.push(String(r[0])),
+      });
+      expect(shadow.length, '前提が崩れている(影の表が無い)').toBeGreaterThanOrEqual(4);
+    } finally {
+      probe.close();
+    }
+    expect(names, 'FTS の裏方が写っている').toEqual(['docs_extra', 'notes', 'sales_data']);
+    // 影の表の名前を 1 つずつ(どれか 1 つの除外が漏れても気づく)
+    for (const suffix of ['', '_data', '_idx', '_docsize', '_config', '_content']) {
+      expect(names, `docs${suffix} が写っている`).not.toContain(`docs${suffix}`);
+    }
   });
 
   /**
@@ -360,7 +413,9 @@ describe('🔴 天井 ── 超えた表だけ断る', () => {
     const big = r.tables.find((t) => t.name === 'big')!;
     const small = r.tables.find((t) => t.name === 'small')!;
     expect(big.refused, '天井を超えた表を断っていない').toContain('2.0 KB');
-    expect(big.refused).toContain('内蔵の sqlite');
+    // 🔴 file の大きさではなく「写した行」の大きさだと言う(file が小さくても出るので、誤読させない)
+    expect(big.refused).toContain('写した行が');
+    expect(big.refused).toContain('元の file より大きくなる');
     expect(big.ndjson, '断った表の bytes を返している').toBeNull();
     // 🔑 列は返す(呼び側が「どの表を断ったか」を名前で言える)
     expect(big.columns).toEqual([{ name: 't', type: 'TEXT', notNull: false, primaryKey: false }]);

@@ -6,7 +6,7 @@
  *   「繋ぐ手段が画面に無い」という穴を見逃した原因である(CLAUDE.md §2)。
  */
 import { describe, expect, it } from 'vitest';
-import { erZeroLinesWhy, pickErConnection } from '@features/query/er-connect';
+import { erSubjectOf, erZeroLinesWhy, pickErConnection } from '@features/query/er-connect';
 import type { SchemaLink, SchemaModel } from '@features/query/schema-digest';
 
 const link = (from: string, fromColumn: string, to: string, toColumn: string): SchemaLink => ({
@@ -130,5 +130,40 @@ describe('erZeroLinesWhy(#918 段⑤d-3)', () => {
 
   it('⚠ 起きない形(繋がりが在って落ちてもいない)には、それらしい字を置かない', () => {
     expect(erZeroLinesWhy({ ...base, declared: 1, dropped: 0 })).toBe('');
+  });
+});
+
+/**
+ * 🔴 **主語は選んでいる相手で決める**(#682 段④d の着地後レビュー D8)。
+ *
+ * ⚠ 直す前は**いつも「この DB は」**で、csv / parquet / json を 1 件選んだ図や、2 つ以上を並べた図でも
+ *   「この DB は、表どうしの繋がりを宣言していません」と言っていた(DB を選んでいない)。
+ */
+describe('erSubjectOf / erZeroLinesWhy の主語(D8)', () => {
+  const base = { boxes: 3, declared: 0, mine: 0, dropped: 0, connecting: true };
+
+  it('🔴 .sqlite 1 件 / この PKC のノートは「この DB」', () => {
+    expect(erSubjectOf([])).toBe('この DB');
+    expect(erSubjectOf(['家計.sqlite'])).toBe('この DB');
+    expect(erSubjectOf(['家計.DB'])).toBe('この DB');
+  });
+
+  it('🔴 .sqlite でない 1 件(csv / parquet / json)は「この file」/ 2 件以上は「これらの file」', () => {
+    expect(erSubjectOf(['売上.csv'])).toBe('この file');
+    expect(erSubjectOf(['売上.parquet'])).toBe('この file');
+    expect(erSubjectOf(['明細.ndjson'])).toBe('この file');
+    expect(erSubjectOf(['家計.sqlite', '在庫.csv'])).toBe('これらの file');
+    // 🔑 2 件のうち片方が .sqlite でも「DB」ではない(csv が混ざっている)
+    expect(erSubjectOf(['在庫.csv', '家計.sqlite'])).toBe('これらの file');
+  });
+
+  it('🔴 理由の字の主語が変わる(省けば今までどおり「この DB は」)', () => {
+    expect(erZeroLinesWhy(base)).toContain('この DB は、表どうしの繋がり');
+    expect(erZeroLinesWhy({ ...base, subject: erSubjectOf(['売上.parquet']) })).toContain(
+      'この file は、表どうしの繋がり(外部キー)を 1 つも宣言していません',
+    );
+    const many = erZeroLinesWhy({ ...base, subject: erSubjectOf(['a.csv', 'b.parquet']) });
+    expect(many).toContain('これらの file は、表どうしの繋がり');
+    expect(many, '並べた file を「DB」と呼んでいる').not.toContain('この DB');
   });
 });

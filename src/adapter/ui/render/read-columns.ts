@@ -54,6 +54,46 @@ export const COLUMNS_ON_ATTR = 'data-pkc-columns-on';
  */
 export const COLUMN_H_VAR = '--pkc-col-h';
 
+/**
+ * 🔴 **読む面の器(scroll 箱)の「見えている高さ」を CSS へ渡す変数**(#1044 段2 の
+ * 着地後、2026-10-03 に実ブラウザの smoke が拾った穴)。
+ *
+ * ⚠ `app.css` の章の箱 / コード枠の箱の上限は `100vh − 300px` で書かれていた ──
+ *   「読む面の高さは常に viewport − 206px」という前提である。その前提は
+ *   **shell の下の行(お知らせのカード / 注意 / 収録中の帯 / タイマー)が出ている間は
+ *   成り立たない**:1280×800 で起動直後のお知らせが 30vh(237px)まで伸びると、
+ *   器は 560px(見える本文は 526px)なのに箱は 530px のまま ── `scrollIntoView` が
+ *   箱の下端を合わせ、**見出しの行が貼り付いた帯(34px)の下へ 8px 隠れた**(実測)。
+ * 🔑 だから viewport ではなく**器そのものの高さ**を px で下ろす(段の高さと同じ作法)。
+ *   当てる側は `min(100vh − 300px, 器 − 110px)` ── 下の行が無い日は今までと同じ値、
+ *   在る日だけ器に合わせて縮む。
+ * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので、当てる側は必ず既定を書く。
+ */
+export const PANE_H_VAR = '--pkc-pane-h';
+
+/**
+ * 器(`[data-pkc-region="detail"]` = 面の親)の `clientHeight` を {@link PANE_H_VAR} へ下ろす。
+ * ⚠ 面(`view-pane`)ではなく**その親**を測る ── 読む面は `flex: 1 0 auto` で中身の高さまで
+ *   伸びるので、長いノートでは面の高さは器が縮んでも動かない(見張りも鳴らない)。
+ * ⚠ 採寸できない環境(happy-dom / 畳んだ面)は 0 なので触らない(0px にすると箱が消える)。
+ * @returns 下ろした高さ(px)。触らなかったら `null`
+ */
+export function exposePaneHeight(root: ParentNode): number | null {
+  const region = paneRegion(root);
+  if (region === null) return null;
+  const h = region.clientHeight;
+  if (!(h > 0)) return null;
+  const next = `${h}px`;
+  // ⚠ 同じ値なら書かない ── 書くと ResizeObserver がまた鳴って回り続ける
+  if (region.style.getPropertyValue(PANE_H_VAR) !== next) region.style.setProperty(PANE_H_VAR, next);
+  return h;
+}
+
+/** 面の親 = 中央の器(`overflow: auto` の唯一の scroll 箱)。面が居なければ `null`。 */
+function paneRegion(root: ParentNode): HTMLElement | null {
+  return root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')?.parentElement ?? null;
+}
+
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
@@ -255,6 +295,8 @@ function noteFoldState(next: FoldState, say: (prev: FoldState) => string | null)
 }
 
 export function fitColumnHeight(root: ParentNode, doc: Document = document): number | null {
+  // 🔴 器の高さは段組みの有無に関わらず下ろす(章の箱の上限が読む ── `PANE_H_VAR`)
+  exposePaneHeight(root);
   /**
    * ⚠ **面は「読む面かどうか」に関わらず引く** ── 編集へ入ったときに印を
    *   外せないと、DOM が「段組み中」と嘘をつく(変異試験 M10 が教えた)。
@@ -500,9 +542,21 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
   /** 面そのものの出入り。 */
   const outer = MO === undefined ? null : new MO(() => rewatch());
   let watched: HTMLElement | null = null;
+  let watchedRegion: HTMLElement | null = null;
 
   function rewatch(): void {
     const pane = root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]');
+    /**
+     * 🔴 **器(面の親)も見張る**(`PANE_H_VAR`)。⚠ 面だけ見ていると、長いノート
+     *   (面が器より高い)では **お知らせのカードが出て器が縮んでも面は 1px も動かない**
+     *   ので鳴らない ── 器の高さが変わったことは器を見て初めて分かる。
+     */
+    const region = pane?.parentElement ?? null;
+    if (region !== null && region !== watchedRegion) {
+      if (watchedRegion !== null) ro?.unobserve(watchedRegion);
+      ro?.observe(region);
+      watchedRegion = region;
+    }
     if (pane !== null && pane !== watched) {
       if (watched !== null) ro?.unobserve(watched);
       ro?.observe(pane);

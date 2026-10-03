@@ -84,6 +84,7 @@ import {
   type SqliteConvertGuestSource,
 } from '@features/query/sql-guest-source';
 import type { SqliteExportedTable } from '@features/query/sqlite-ndjson';
+import { EMPTY_DUCK_COPY, copyDigestNotes, type DuckDbCopyReport } from '@features/query/duckdb-copy-report';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import { sqlRunFailureText } from '@features/query/sql-guard';
@@ -169,7 +170,7 @@ export interface StorePort {
    *   DuckDB は storage worker を通さない設計(`runDuckDbSql`)だが、**行を読むのだけは
    *   sqlite を持つ storage worker の仕事**である。
    */
-  openSqliteExport?(image: Uint8Array): Promise<{ session: string; tables: string[] }>;
+  openSqliteExport?(image: Uint8Array): Promise<{ session: string; tables: string[]; views: string[] }>;
   exportSqliteTable?(
     session: string,
     table: string,
@@ -591,7 +592,14 @@ export function connectStoreEffects(
         /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
         readBytes: () => Promise<Uint8Array | null>;
       }[];
-    }) => Promise<{ columns: string[]; rows: Array<Array<string | number | null>>; truncated: boolean; ms: number }>;
+    }) => Promise<{
+      columns: string[];
+      rows: Array<Array<string | number | null>>;
+      truncated: boolean;
+      ms: number;
+      /** 🔴 いまの器へ写した報告(写せなかった表・ビュー / 全列を文字で写した表)。⚠ 省けば「言うことが無い」扱い。 */
+      copy?: DuckDbCopyReport;
+    }>;
     /**
      * 🔴 **DuckDB の器の中の構造を採る口**(#918)。⚠ `runDuckDbSql` と**同じ器**を使う(同じ相手の組なら
      *   差し込み直さない)。渡されなければ**機能が減るだけ** ── つながり図・構造ノートが
@@ -602,7 +610,13 @@ export function connectStoreEffects(
         source: DuckDbReadableGuestSource;
         readBytes: () => Promise<Uint8Array | null>;
       }[];
-    }) => Promise<{ columns: SchemaGridView; fks: SchemaGridView; counts: SchemaGridView | null }>;
+    }) => Promise<{
+      columns: SchemaGridView;
+      fks: SchemaGridView;
+      counts: SchemaGridView | null;
+      /** 🔴 いまの器へ写した報告(`runDuckDbSql` と同じ物)。 */
+      copy?: DuckDbCopyReport;
+    }>;
   } = {},
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
@@ -668,13 +682,18 @@ export function connectStoreEffects(
     fks: SchemaGridView;
     counts: SchemaGridView | null;
     csv: SchemaGridView | null;
+    /** 🔴 DuckDB の器から採った回だけ(内蔵の sqlite は `null`)。 */
+    copy: DuckDbCopyReport | null;
   }>) | null => {
     if (ev.duck !== undefined) {
       const schema = opts.schemaDuckDb;
       const inputs = duckInputsOf(ev);
       if (schema === undefined || inputs === null) return null;
       // 🔴 本文の csv(`csv_tables`)は **この PKC の sqlite にしか無い** ── DuckDB の器の話には出ない
-      return async () => ({ ...(await schema({ sources: inputs })), csv: null });
+      return async () => {
+        const got = await schema({ sources: inputs });
+        return { columns: got.columns, fks: got.fks, counts: got.counts, csv: null, copy: got.copy ?? EMPTY_DUCK_COPY };
+      };
     }
     const ask = store.runReadOnlySql;
     if (!ask) return null;
@@ -684,7 +703,7 @@ export function connectStoreEffects(
       maxMs: SQL_MAX_MS,
       ...(ev.guest === true ? { guest: true } : {}),
     };
-    return () => fetchSchemaGrids(ask, limits);
+    return async () => ({ ...(await fetchSchemaGrids(ask, limits)), copy: null });
   };
   /**
    * 🔴 **中身を読まずに大きさだけ採る**(#682 段④c)。
@@ -1173,9 +1192,9 @@ export function connectStoreEffects(
           break;
         }
         void (async (): Promise<void> => {
-          const { columns, fks, counts, csv } = await grids();
+          const { columns, fks, counts, csv, copy } = await grids();
           if (disposed) return;
-          dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts, csv });
+          dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts, csv, copy });
         })().catch((e: unknown) => {
           if (disposed) return;
           const raw = e instanceof Error ? e.message : String(e);
@@ -1209,7 +1228,7 @@ export function connectStoreEffects(
           break;
         }
         void (async (): Promise<void> => {
-          const { columns, fks, counts, csv } = await grids();
+          const { columns, fks, counts, csv, copy } = await grids();
           if (disposed) return;
           const title = schemaNoteTitle(new Date(), where);
           dispatcher.dispatch({
@@ -1225,6 +1244,11 @@ export function connectStoreEffects(
               // 🔴 本文の csv も 1 枚に入れる(#918 段⑤d-2)── AI に渡す構造から
               //    「引けるのに書いていない表」が落ちないようにする
               ...(csv === null ? {} : { csv }),
+              /**
+               * 🔴 **写せなかった表・ビューと、型の丸めを書く**(#682 段④d の着地後レビュー D3 / D6)。
+               * ⚠ 並べているか(`duckExtra`)で逃げ道の字が変わる(`sqliteFallbackHint`)。
+               */
+              notes: copyDigestNotes(copy, (ev.duckExtra?.length ?? 0) > 0),
             }),
             parentLid: null,
             relationId,
@@ -1277,9 +1301,19 @@ export function connectStoreEffects(
             break;
           }
           void duck({ sql, sources: inputs }).then(
-            ({ columns, rows, truncated, ms }) => {
+            ({ columns, rows, truncated, ms, copy }) => {
               if (disposed) return;
-              dispatcher.dispatch({ type: 'SET_SQL_RESULT', token, sql, columns, rows, truncated, ms });
+              dispatcher.dispatch({
+                type: 'SET_SQL_RESULT',
+                token,
+                sql,
+                columns,
+                rows,
+                truncated,
+                ms,
+                // 🔴 DuckDB の答えだけ、写した報告を運ぶ(帯が「写せなかった表」を言う)
+                ...(copy === undefined ? {} : { copy }),
+              });
             },
             (e: unknown) => {
               if (disposed) return;

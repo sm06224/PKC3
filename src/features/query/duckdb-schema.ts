@@ -24,6 +24,9 @@
  * **元の型・主キー・外部キーが消える**。storage worker が宣言のまま運んだ物(`SqliteColumnShape` /
  * `SqliteExportFk`)を、器の答えに**重ねる**(`mergeDuckDbSchema`)。
  * 🔑 重ねるのは**器に実在する表・列だけ**(user が `DROP` した表の線を残さない / 断った表を出さない)。
+ * 🔴 **列の形が写した形と一致する表だけ**(#682 段④d の着地後レビュー):user が `DROP TABLE 売上` の後に同じ名前で
+ *   `CREATE TABLE 売上 (…)` し直した表へ、元の `.sqlite` の型・主キー・外部キーを重ねると**user が作っていない
+ *   宣言を、user の表の構造として出す**(嘘)。名前だけでなく**列の名前の並び**が写した表と同じときだけ重ねる。
  *
  * ⚠ 持ち込んだ file(csv / parquet / json)には外部キーが無い → **線 0 本 = 四角だけの図**(それでよい)。
  */
@@ -78,12 +81,43 @@ export interface DuckDbTableMeta {
   readonly fks: readonly SqliteExportFk[];
 }
 
+/**
+ * 🔴 **写した表の「元の姿」を組む**(外部キーの相手の名前を、器での名前へ直す)。**pure**。
+ *
+ * @param finalOf **小文字にした元の名前 → 器での名前**。⚠ この file の**表の全部**を入れる(写せなかった表も)。
+ *
+ * ⚠ **相手がこの file の表に無い外部キーは捨てる**(#682 段④d の着地後レビュー)。直す前は
+ *   `finalOf.get(f.toTable) ?? f.toTable` で**元の名前へ落とし**、器に**同じ名前の別の表**(並べた csv など)が在れば
+ *   `mergeDuckDbSchema` の「器に在る表」の検査を**通って偽の線**になった。
+ * ⚠ **名前は大文字小文字を区別せず引く**(sqlite の `REFERENCES Customers` と `CREATE TABLE customers` は同じ表)。
+ *   直す前は完全一致だったので、この線は**黙って落ちて**いた。
+ */
+export function duckDbMetaOf(
+  columns: readonly SqliteColumnShape[],
+  fks: readonly SqliteExportFk[],
+  finalOf: ReadonlyMap<string, string>,
+): DuckDbTableMeta {
+  const kept: SqliteExportFk[] = [];
+  for (const f of fks) {
+    const to = finalOf.get(f.toTable.toLowerCase());
+    if (to === undefined) continue;
+    kept.push({ fromColumn: f.fromColumn, toTable: to, toColumn: f.toColumn });
+  }
+  return { columns, fks: kept };
+}
+
 const cellText = (v: Cell | undefined): string => (v === null || v === undefined ? '' : String(v));
+
+/** 器の列の名前の並びが、写した表の列の並びと同じか(⚠ 集合ではなく**並びも**見る ── 写しは宣言の順に作る)。 */
+function sameColumnNames(raw: readonly string[], meta: readonly SqliteColumnShape[]): boolean {
+  return raw.length === meta.length && raw.every((n, i) => n === meta[i]?.name);
+}
 
 /**
  * 器が答えた 2 枚に、`.sqlite` の元の姿を重ねる。
  *
- * - 列:器に在る表・列だけ、**型 / 空を許さない / 主キー**を元の宣言で置き換える(並びと `cid` は器のまま)
+ * - 列:器に在る表・列だけ、**型 / 空を許さない / 主キー**を元の宣言で置き換える(並びと `cid` は器のまま)。
+ *   🔴 **列の名前の並びが写した形と同じ表だけ**(user が同名で作り直した表には重ねない ── 上の ④)
  * - 外部キー:器の `FOREIGN KEY`(user が作った表)+ `.sqlite` の宣言。⚠ **両端の表が器に在る線だけ**
  *   (写せなかった表を指す線を残すと、箱の無い線になる)。重複は 1 本へ。**表の名前順**(同じ表の中は宣言順)
  *   ── `SCHEMA_FK_SQL` の `order by m.name, f.id, f.seq` と同じ並び。
@@ -99,11 +133,24 @@ export function mergeDuckDbSchema(
   const nnAt = ci(raw.columns, 'nn');
   const pkAt = ci(raw.columns, 'pk');
 
-  const exists = new Set<string>();
-  const columnRows = raw.columns.rows.map((r) => {
+  // 器に在る表と、その列の名前(並びのまま)
+  const namesOf = new Map<string, string[]>();
+  for (const r of raw.columns.rows) {
     const t = cellText(r[tblAt]);
-    exists.add(t);
-    const m = meta.get(t)?.columns.find((c) => c.name === cellText(r[colAt]));
+    const list = namesOf.get(t) ?? [];
+    list.push(cellText(r[colAt]));
+    namesOf.set(t, list);
+  }
+  const exists = new Set<string>(namesOf.keys());
+  // 🔴 重ねてよい表だけ(列の形が写した形と同じ)。⚠ 落とした表の線は出さない(下の外部キーも `usable` だけを読む)
+  const usable = new Map<string, DuckDbTableMeta>();
+  for (const [t, m] of meta) {
+    const names = namesOf.get(t);
+    if (names !== undefined && sameColumnNames(names, m.columns)) usable.set(t, m);
+  }
+
+  const columnRows = raw.columns.rows.map((r) => {
+    const m = usable.get(cellText(r[tblAt]))?.columns.find((c) => c.name === cellText(r[colAt]));
     if (m === undefined) return r;
     const out: Cell[] = [...r];
     out[typAt] = m.type;
@@ -123,8 +170,7 @@ export function mergeDuckDbSchema(
   const seen = new Set<string>(
     fkRows.map((r) => key(cellText(r[tAt]), cellText(r[rAt]), cellText(r[cAt]), cellText(r[rcAt]))),
   );
-  for (const [tbl, m] of meta) {
-    if (!exists.has(tbl)) continue;
+  for (const [tbl, m] of usable) {
     for (const f of m.fks) {
       if (!exists.has(f.toTable)) continue;
       const k = key(tbl, f.toTable, f.fromColumn, f.toColumn);

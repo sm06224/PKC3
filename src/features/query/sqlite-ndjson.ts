@@ -117,14 +117,28 @@ export interface SqliteExportedTable {
  */
 export interface SqliteExportSession {
   readonly tables: readonly string[];
+  /**
+   * 🔴 **写さないビューの名前**(元の名前。名前順)。⚠ 必須の field(省ける形にすると、口を作る側が書き忘れても
+   *   tsc が黙る ── 書き忘れは「ビューが黙って無い」側へ倒れる)。⚠ 行は頼めない(`table` に渡しても写せない)──
+   *   **写さなかったと言う**ためだけに在る(`duckdb-copy-report.ts`)。
+   */
+  readonly views: readonly string[];
   table(name: string, maxTableBytes: number): Promise<SqliteExportedTable>;
   close(): Promise<void>;
 }
 
-/** 天井を超えた理由(字)。⚠ 表の名前は含めない。 */
+/**
+ * 天井を超えた理由(字)。⚠ 表の名前は含めない。
+ *
+ * 🔴 **file の大きさではなく、写した行の大きさ**で言う ── 直す前は「行の写しが 64 MiB を超えました」で、
+ *   file が 35 MB でも出るので「file は 64 MB もないのに」と読まれた。⚠ 写すと NDJSON(字)になり、
+ *   **元の file より大きくなる**(BLOB は base64 で 3 割増える / 数も字で書く)── それを先に言う。
+ * 🔑 **内蔵の sqlite への逃げ道は、ここへ書かない**(`sqliteFallbackHint`)── 並べているときは
+ *   「file を 1 つに戻すと」と言い直す必要があり、worker は並べているかを知らない。
+ */
 export function tooBigReason(maxBytes: number): string {
   // 🔑 大きさの綴りは `humanBytes` 1 本(自前で単位を付けない ── `human-bytes.test.ts` が全数で見る)
-  return `行の写しが ${humanBytes(maxBytes)} を超えました。内蔵の sqlite なら引けます`;
+  return `写した行が ${humanBytes(maxBytes)} を超えました(元の file より大きくなることがあります)`;
 }
 
 /** SQL の識別子の引用(sqlite も DuckDB も `"` を `""` と書く)。 */
@@ -405,8 +419,12 @@ export function insertFromNdjsonSql(
   );
 }
 
-/** 写せなかった表の理由を、画面へ出す 1 文にする(`name` は user が打つ表の名前)。 */
-export function refusedNote(name: string, why: string): string {
+/**
+ * 写せなかった表の理由を、画面へ出す 1 文にする(`name` は user が打つ表の名前)。
+ *
+ * @param hint 逃げ道の 1 文(`sqliteFallbackHint`)。⚠ 省けば添えない。
+ */
+export function refusedNote(name: string, why: string, hint = ''): string {
   // 🔑 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
-  return `${name === '' ? '(名前の無い表)' : name} は DuckDB へ写せませんでした(${why})`;
+  return `${name === '' ? '(名前の無い表)' : name} は DuckDB へ写せませんでした(${why}${hint === '' ? '' : `。${hint}`})`;
 }

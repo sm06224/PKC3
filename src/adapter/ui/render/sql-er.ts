@@ -61,7 +61,18 @@ function connectHintOf(er: SqlPageState['er']): string {
  * ⚠ 閉じているときは**何も組まない** ── 畳んだ図の DOM を持ち続けると、
  *   表が何百件ある DB で常駐が無駄に増える(2026-07-27 の不可侵指示と同じ向き)。
  */
-export function paintSqlEr(host: HTMLElement, er: SqlPageState['er']): void {
+export function paintSqlEr(
+  host: HTMLElement,
+  er: SqlPageState['er'],
+  /**
+   * 🔴 図の外から運ぶ 2 つの字(#682 段④d の着地後レビュー)。⚠ どちらも**選んでいる相手**で決まる物で、`er` には
+   *   持たない(state にこの字を置くと、相手が変わるたびに 2 か所を動かす)。
+   *   - `copyLine`:写せなかった表・ビュー(無ければ `''`)
+   *   - `subject`:「この DB」/「この file」/「これらの file」(`erSubjectOf`)
+   */
+  extra: { readonly copyLine?: string; readonly subject?: string } = {},
+): void {
+  const copyLine = extra.copyLine ?? '';
   const doc = host.ownerDocument;
   host.replaceChildren();
   host.hidden = !er.open;
@@ -80,6 +91,8 @@ export function paintSqlEr(host: HTMLElement, er: SqlPageState['er']): void {
   const d = erLayout(er.model, er.mine);
   if (d.boxes.length === 0) {
     line(host, 'sql-er-note', '表もビューも 1 つもありません。');
+    // 🔴 全部が写せなかった `.sqlite` も、この 1 行だけでは「中身が空」と読める ── 理由を添える
+    line(host, 'sql-er-copy', copyLine);
     return;
   }
 
@@ -227,11 +240,17 @@ export function paintSqlEr(host: HTMLElement, er: SqlPageState['er']): void {
         mine: er.mine.length,
         dropped: d.dropped.length,
         connecting: er.connecting,
+        ...(extra.subject === undefined ? {} : { subject: extra.subject }),
       }),
     );
   }
   // 🔴 「繋ぐ」の案内(#918 段⑤d-1)。⚠ **図の下**(user 指定の言葉どおり)。
   line(host, 'sql-er-connect-hint', connectHintOf(er));
+  /**
+   * 🔴 **写せなかった表・ビュー**(#682 段④d の着地後レビュー D3)。⚠ 図に出ない物なので、**図の下で言う**
+   *   (言わないと、図を見た人が「この file の表は、これで全部」と読む)。字は `duckdb-copy-report.ts` 1 か所。
+   */
+  line(host, 'sql-er-copy', copyLine);
   // 🔑 押した結果(足した / 足せなかった理由)は**図の外**に置く ── 図を転がしても見える
   line(host, 'sql-er-note', er.note);
   if (d.dropped.length > 0) {

@@ -23,6 +23,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import {
+  NOT_SQLITE_INTERNAL_SQL,
   SCHEMA_COLUMNS_SQL,
   SCHEMA_FK_SQL,
   countsSql,
@@ -239,5 +240,54 @@ describe('本文検索の影の表は図に出さない(#967)', () => {
     expect(checkReadOnlySql('select count(*) from entries_fts_data').ok, '門が断っている').toBe(true);
     // ⚠ 打てる側の対照群 ── 仮想表そのものも引ける
     expect(() => app.exec({ sql: 'select count(*) from entries_fts', rowMode: 'array', callback: () => {} })).not.toThrow();
+  });
+});
+
+/**
+ * 🔴 **`sqlite_` で始まらない名前を、内部の表と取り違えない**(#682 段④d の着地後レビュー S)。
+ *
+ * ⚠ `LIKE` の `_` は**任意の 1 字**。素の `not like 'sqlite_%'` は `sqlitedata` / `sqlite1` のような
+ *   **user の表を、構造にも図にも出さなかった**(表は在るのに、構造を見ても無い)。
+ *   `.sqlite` を DuckDB へ写す側は同じ欠陥を直してあり、構造を採る側にだけ残っていた。
+ */
+describe('🔴 内部の表だけを外す(`sqlitedata` は出る / `sqlite_sequence` と `sqlite_stat1` は出ない)', () => {
+  it('列を採る字も、繋がりを採る字も(本物の sqlite で)', async () => {
+    const api = (await sqlite3InitModule()) as unknown as Sqlite3;
+    const d = new api.oo1.DB(':memory:', 'c');
+    d.exec({ sql: 'create table sqlitedata (n integer primary key)' });
+    d.exec({ sql: 'create table sqlite1 (id integer primary key, ref integer references sqlitedata(n))' });
+    // 内部の表(対照群):AUTOINCREMENT は sqlite_sequence を、ANALYZE は sqlite_stat1 を作る
+    d.exec({ sql: 'create table seq (id integer primary key autoincrement, v text)' });
+    d.exec({ sql: "insert into seq (v) values ('x')" });
+    d.exec({ sql: 'create index seq_v on seq(v)' });
+    d.exec({ sql: 'analyze' });
+    // ⚠ 前提:内部の表が本当に在る(無いと「外れている」が空振りで緑になる)
+    const internal: string[] = [];
+    d.exec({
+      sql: "select name from sqlite_master where name like 'sqlite\\_%' escape '\\'",
+      rowMode: 'array',
+      callback: (r) => internal.push(String(r[0])),
+    });
+    expect(internal, '前提が崩れている(内部の表が無い)').toEqual(
+      expect.arrayContaining(['sqlite_sequence', 'sqlite_stat1']),
+    );
+
+    const cols: unknown[][] = [];
+    d.exec({ sql: SCHEMA_COLUMNS_SQL, rowMode: 'array', callback: (r) => cols.push(r) });
+    const names = [...new Set(cols.map((r) => String(r[1])))].sort();
+    expect(names, 'sqlitedata / sqlite1 が黙って外れた').toEqual(['seq', 'sqlite1', 'sqlitedata']);
+    const fks: unknown[][] = [];
+    d.exec({ sql: SCHEMA_FK_SQL, rowMode: 'array', callback: (r) => fks.push(r) });
+    expect(fks.map((r) => r.map(String)), 'sqlite1 の外部キーが外れた').toEqual([
+      ['sqlite1', 'sqlitedata', 'ref', 'n'],
+    ]);
+  });
+
+  it('字そのものも ESCAPE を宣言している(`_` を素で LIKE へ渡さない)', () => {
+    expect(NOT_SQLITE_INTERNAL_SQL).toContain("escape '\\'");
+    expect(SCHEMA_COLUMNS_SQL).toContain(NOT_SQLITE_INTERNAL_SQL);
+    expect(SCHEMA_FK_SQL).toContain(NOT_SQLITE_INTERNAL_SQL);
+    expect(SCHEMA_COLUMNS_SQL, '素の `_` が LIKE へ渡っている').not.toContain("'sqlite_%'");
+    expect(SCHEMA_FK_SQL, '素の `_` が LIKE へ渡っている').not.toContain("'sqlite_%'");
   });
 });

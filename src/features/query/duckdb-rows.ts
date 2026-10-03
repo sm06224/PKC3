@@ -38,6 +38,8 @@
  *   小数点(scale)を落とす**(器は scale を知っていて、こちらは知らない)。
  * 🔑 実測どおり器の `toString()` が正しい 10 進を返すので、**まずそれを使う** ──
  *   組み直すのは、器が素の並び(`"1,0,0,0"`)しか返さなかったときだけ。
+ */
+import { capCellText } from './sql-cell';
 
 /** DuckDB から生で返る 1 枚。⚠ 列は**schema から**採る(0 行でも列が消えない)。 */
 export interface DuckDbRaw {
@@ -196,10 +198,22 @@ function safeJson(v: unknown): string {
   }
 }
 
-/** 1 枚まるごと揃える。 */
+/**
+ * 1 枚まるごと揃える。
+ *
+ * 🔴 **長い字は畳む**(#682 段④d の着地後レビュー)── 内蔵の sqlite の道(`cellForWire`)と**同じ上限・同じ書き方**
+ *   (`sql-cell.ts`)。⚠ 直す前は素通しで、BLOB(base64 で入る)や長い本文の 1 行が**そのまま画面と書き出しへ
+ *   渡っていた**(同じ `.sqlite` を内蔵の sqlite で引くと畳まれるのに、DuckDB では畳まれない)。
+ * ⚠ 畳むのは**揃えた後**の字 ── 器が `toString()` で組んだ長い字(LIST / STRUCT の字)も同じ天井に当たる。
+ */
 export function duckDbTable(raw: DuckDbRaw): DuckDbTable {
   return {
     columns: [...raw.columns],
-    rows: raw.rows.map((r) => raw.columns.map((_c, i) => normalizeDuckDbValue(r[i], raw.types[i] ?? ''))),
+    rows: raw.rows.map((r) =>
+      raw.columns.map((_c, i) => {
+        const v = normalizeDuckDbValue(r[i], raw.types[i] ?? '');
+        return typeof v === 'string' ? capCellText(v) : v;
+      }),
+    ),
   };
 }

@@ -2363,6 +2363,18 @@ li[data-pkc-row-slot] {
  *   (ここは箱の見た目の上限、あちらは打鍵ごとの reflow を増やさないための
  *   計算の頭打ち ── 2 つ目の規則を増やしているのではなく、小さい方が効くだけ)。
  * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので必ず書く(#465 / #466)。
+ * 🔴 **`100vh − 300px` だけでは足りない ── 器そのものの高さ(`--pkc-pane-h`)とも
+ *   `min()` を取る**(2026-10-03。実ブラウザの smoke が拾った)。
+ *   ⚠ 「読む面の高さは常に viewport − 206px」は、**shell の下の行**(起動直後の
+ *   お知らせのカード / 注意 / 収録中の帯 / タイマー)が出ている間は成り立たない。
+ *   1280×800 で 5 項目のお知らせが 30vh(237px)まで伸びると器は 560px になり、
+ *   箱 530px(= 500 + ボタン列 + 間隔)は見える 526px に収まらず、`scrollIntoView` が
+ *   下端を合わせて**見出しの行が帯の下へ 8px 隠れた**(実測。お知らせを 1 件足した
+ *   PR で初めて落ちた ── 元から在った穴で、閾値が下がって見えるようになっただけ)。
+ *   🔑 器の高さは `read-columns.ts` の `exposePaneHeight` が px で下ろす(段の高さと
+ *   同じ作法)。引く 110px = 帯 34 + ボタン列 26 + 間隔 `--s2` × 2 + 箱の上下 margin
+ *   `--s2` × 2 + 余裕 18。下の行が無い日は `100vh − 300px` のほうが小さいので
+ *   **見た目は 1px も変わらない**。
  * ⚠ **`overflow-y: auto` を既定にする**(`[data-pkc-scroll]` の有無に関わらず)
  *   ── `sizeTextareaToContent` の 40 行の頭打ちより**この上限が先に効く**章
  *   (viewport が低い日)では `[data-pkc-scroll]` が付かないので、`hidden` のままだと
@@ -2382,7 +2394,7 @@ li[data-pkc-row-slot] {
   color: var(--fg);
   resize: vertical;
   overflow-y: auto;
-  max-height: calc(var(--pkc-col-h, 100vh) - 300px);
+  max-height: min(calc(var(--pkc-col-h, 100vh) - 300px), calc(var(--pkc-pane-h, 100vh) - 110px));
 }
 [data-pkc-field='section-draft-input']:focus-visible {
   outline-width: 1px;
@@ -2417,7 +2429,7 @@ li[data-pkc-row-slot] {
   color: var(--fg);
   resize: vertical;
   overflow-y: auto;
-  max-height: calc(var(--pkc-col-h, 100vh) - 300px);
+  max-height: min(calc(var(--pkc-col-h, 100vh) - 300px), calc(var(--pkc-pane-h, 100vh) - 110px));
 }
 [data-pkc-field='code-draft-input']:focus-visible {
   outline-width: 1px;
@@ -5644,6 +5656,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='sql-er-note'],
 [data-pkc-field='sql-er-zero'],
+[data-pkc-field='sql-er-copy'],
 [data-pkc-field='sql-er-dropped'] {
   margin: 0;
   color: var(--muted);

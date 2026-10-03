@@ -10,13 +10,14 @@
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filter/entry-sort';
 import { checkReadOnlySql } from '@features/query/sql-guard';
-import { checkDuckDbRunSql } from '@features/query/duckdb-write';
+import { checkDuckDbRunSql, duckDbWriteKind } from '@features/query/duckdb-write';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { isSystemMessageLid } from '@features/message/message-log';
 import { erSql, type ErAction } from '@features/query/er-sql';
 import { isDuckDbOnlySource, sqlGuestSourceOf } from '@features/query/sql-guest-source';
 import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-source';
+import type { DuckDbCopyReport } from '@features/query/duckdb-copy-report';
 
 /**
  * 🔴 **構造(つながり図・構造ノート)を、どこへ頼むか**(#682 段④c → #918 で「断る」から「頼み先を変える」へ)。
@@ -31,12 +32,12 @@ import { checkAddSource, type SqlExtraSource } from '@features/query/sql-multi-s
  *   - DuckDB でしか読めない相手(`.parquet` / `.json`)/ **2 件以上並べた** → `{ duck, duckExtra? }`
  *     (DuckDB の器の `duckdb_columns()` 等から採る。`duckdb-schema.ts`)
  */
-type SchemaRoute = {
+export type SchemaRoute = {
   guest?: true;
   duck?: { lid: string; name: string };
   duckExtra?: readonly { lid: string; name: string }[];
 };
-function schemaRouteOf(
+export function schemaRouteOf(
   guest: { readonly lid: string; readonly name: string } | null,
   /** 🔴 足した相手(#918 段⑦)。1 件でも在れば DuckDB の器へ頼む。 */
   extras: readonly SqlExtraSource[] = [],
@@ -101,6 +102,8 @@ function withSqlSourceSet(
         ms: 0,
         error: '',
         saved: '',
+        // 🔴 組が変われば、写した報告も別の話になる(次に写すまで空)
+        duckCopy: null,
         er: er.er,
       },
     },
@@ -395,6 +398,15 @@ export interface SqlPageState {
    */
   readonly runToken: number;
   /**
+   * 🔴 **DuckDB へ写したときの報告**(写せなかった表・ビュー / 全列を文字で写した表。#682 段④d の着地後レビュー D3 / D6)。
+   *
+   * ⚠ `null` = まだ写していない(または写す相手ではない)。**答え(`SET_SQL_RESULT`)か構造(`SQL_ER_LOADED`)が運んできた物**を
+   *   そのまま控える ── 帯・つながり図がここから言う(字は `duckdb-copy-report.ts` 1 か所)。
+   * ⚠ **相手の組が変わったら捨てる**(`SET_SQL_SOURCE` / `withSqlSourceSet`)── 残すと、新しい組の帯に前の file の
+   *   「写せなかった表」が出る(名札は新しいのに中身は前の組 ── いちばん気づけない外し方)。
+   */
+  readonly duckCopy: DuckDbCopyReport | null;
+  /**
    * 🔴 **表のつながり図(ER)**(#918 段⑤。user 要望 2026-09-14「er でグラフィカルに
    * 取得する方法も欲しいな」/ 置き場の裁定 2026-09-15 = **この窓の中に畳める欄**)。
    *
@@ -494,6 +506,29 @@ function erForSource(
       pendingFrom: null,
       mine: [],
     },
+    events: [{ type: 'REQUEST_SQL_ER', token, ...route }],
+  };
+}
+
+/**
+ * 🔴 **DuckDB で表を作った / 消した後の、つながり図の持ち替え**(#682 段④d の着地後レビュー R1)。
+ *
+ * - 閉じているなら**採った物を捨てるだけ**(開くとき採り直す ── `SQL_ER_TOGGLE` は `model` が無ければ頼む)
+ * - 開いているなら**捨てて、いま頼む**(札を進める ── 飛んでいる前の答えは捨てられる)
+ * ⚠ `erForSource` を使わない ── あちらは `mine` / `pendingFrom` も捨てる(**別の相手へ替わった**回の作法)。
+ *   ここは**同じ相手のまま構造だけが変わった**ので、user が引いた線は残す。
+ */
+function erAfterDuckWrite(
+  er: SqlPageState['er'],
+  source: string,
+  route: SchemaRoute,
+): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (!er.open) {
+    return { er: { ...er, loading: false, model: null, note: '', source: '', pendingFrom: null }, events: [] };
+  }
+  const token = er.token + 1;
+  return {
+    er: { ...er, loading: true, model: null, note: '', source, token, pendingFrom: null },
     events: [{ type: 'REQUEST_SQL_ER', token, ...route }],
   };
 }
@@ -2078,6 +2113,7 @@ export const initialState: AppState = {
     guestPending: '',
     guestChosen: '',
     runToken: 0,
+    duckCopy: null,
     er: {
       open: false,
       loading: false,
@@ -2263,6 +2299,11 @@ export type UserAction =
       columns: Grid;
       fks: Grid;
       counts: Grid | null;
+      /**
+       * 🔴 **DuckDB へ写した報告**(#682 段④d の着地後レビュー)。⚠ 必須の field(省ける形にすると、effect が書き忘れても
+       *   tsc が黙る ── 書き忘れは「写せなかった表が出ない」側へ倒れる)。`null` = DuckDB の器ではない(内蔵の sqlite)。
+       */
+      copy: DuckDbCopyReport | null;
       /** 🔴 本文の名前つき csv の目録(#918 段⑤d-2)。⚠ 客の DB では `null`。 */
       csv: Grid | null;
     }
@@ -2340,6 +2381,11 @@ export type UserAction =
       rows: readonly (readonly (string | number | null)[])[];
       truncated: boolean;
       ms: number;
+      /**
+       * 🔴 DuckDB の答えのときだけ付く、写した報告(#682 段④d の着地後レビュー)。⚠ 省略 = 内蔵の sqlite の答え
+       *   (報告は動かさない)。
+       */
+      copy?: DuckDbCopyReport;
     }
   | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
@@ -5103,7 +5149,15 @@ function reduceCore(
         ...(action.csv === null ? {} : { csv: action.csv }),
       });
       return {
-        state: { ...state, sqlPage: { ...p, er: { ...p.er, loading: false, model } } },
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            // 🔴 DuckDB の器から採った回は、写した報告も受ける(内蔵の sqlite の回は動かさない)
+            duckCopy: action.copy ?? p.duckCopy,
+            er: { ...p.er, loading: false, model },
+          },
+        },
         events: [],
       };
     }
@@ -5128,13 +5182,29 @@ function reduceCore(
      * ⚠ 走っている最中に相手を変えられるので、受けると**新しい名札のまま
      *   古い DB の中身**が出る ── 数字は本物なので気づけない。
      */
-    case 'SET_SQL_RESULT':
-      if (state.sqlPage.runToken !== action.token) return { state, events: [] };
+    case 'SET_SQL_RESULT': {
+      const p = state.sqlPage;
+      if (p.runToken !== action.token) return { state, events: [] };
+      /**
+       * 🔴 **DuckDB で書いた文(`CREATE` / `DROP` / `ALTER` …)が通ったら、つながり図を採り直す**
+       *   (#682 段④d の着地後レビュー R1)。
+       * ⚠ 直す前は `er` に触らず、図は**書く前の構造のまま**だった ── `DROP TABLE 売上` の後も 売上 の四角が残り、
+       *   押すと `no such table` で断られる(作った表は四角に出ない)。
+       * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。⚠ 図の構造を DuckDB の器から採る相手
+       *   (`schemaRouteOf(...).duck`)のときだけ ── 内蔵の sqlite から採る相手の図は、DuckDB で何を書いても変わらない。
+       * 🔑 自分で引いた線(`mine`)は残す(user の作業。消えた表を指す線は図が「線にできなかった繋がり」と言う)。
+       *   押しかけの「ここから」(`pendingFrom`)は捨てる(その列がもう無いかもしれない)。
+       */
+      const route = schemaRouteOf(p.guest, p.extraGuests);
+      const redraw =
+        duckDbWriteKind(action.sql) !== null && route.duck !== undefined
+          ? erAfterDuckWrite(p.er, erSourceKey(p.guest, p.extraGuests), route)
+          : null;
       return {
         state: {
           ...state,
           sqlPage: {
-            ...state.sqlPage,
+            ...p,
             ranSql: action.sql,
             columns: action.columns,
             rows: action.rows,
@@ -5142,10 +5212,13 @@ function reduceCore(
             ms: action.ms,
             running: false,
             error: '',
+            duckCopy: action.copy ?? p.duckCopy,
+            ...(redraw === null ? {} : { er: redraw.er }),
           },
         },
-        events: [],
+        events: redraw === null ? [] : redraw.events,
       };
+    }
     /**
      * 🔴 **書き出したことを画面で言う**(#681 段③ の 3 つ目)。
      * ⚠ 別の窓で開いている面なので、**言わないと押せなかったように見える**。
@@ -5237,6 +5310,7 @@ function reduceCore(
             ms: 0,
             error: '',
             saved: '',
+            duckCopy: null,
             er: er.er,
           },
         },
