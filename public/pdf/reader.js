@@ -10,10 +10,14 @@
  *   - 頁は**描いたら焼く**。外れた頁の ObjectURL は **その場で revoke**(`page-cache.js`)
  *   - bytes は**複製しない**(Blob を握り、worker へは transfer)
  *   - 読めなかったら**黙って内蔵の表示へ退避**し、本体へ 1 行知らせる(`fell-back`)
+ *   - 🔴 **使われない間は pdf.js の worker を畳む**(`doc-lease.js`。60 秒。描いた頁の絵・字の層・検索用の本文は残り、
+ *     まだ描いていない頁を描くときだけ黙って開き直す)
  * ⚠ 画面の字に pdf.js / worker などの内部語を出さない。
  */
 const wire = self.PkcPdfWire;
 const { PageCache, windowOf } = self.PkcPdfPageCache;
+const { DocLease } = self.PkcPdfDocLease;
+const textHits = self.PkcPdfTextHits;
 
 /** 見えている頁の前後に、この数だけ先に描く。 */
 const RADIUS = 2;
@@ -45,7 +49,10 @@ const state = (s) => {
 };
 
 let pdfjs = null;
-let pdf = null;
+/** 解析 worker を握る貸し出し(`doc-lease.js`)。⚠ 文書(`PDFDocumentProxy`)はここ越しにしか触らない。 */
+let lease = null;
+/** 読めて、頁が並んでいる間だけ true(内蔵の表示へ退避したら false)。 */
+let ready = false;
 let total = 0;
 let blob = null;
 let ownUrl = null;
@@ -57,6 +64,8 @@ let gen = 0;
 /** 頁 → 基準(倍率 1)の大きさ。まだ読んでいない頁は 1 頁目を借りる。 */
 const sizes = [];
 const boxes = [];
+/** 頁 → 文字の層の持ち物(`divs` = span / `strs` = span ごとの字 / `marked` = 強調で作り替えた span の番号)。 */
+const layers = [];
 /** 頁 → いま描いている世代。 */
 const inflight = new Map();
 let wanted = new Set();
@@ -119,25 +128,25 @@ async function onDoc(payload) {
 async function openPdf() {
   try {
     pdfjs = await import('./lib/pdf.min.mjs');
-    const lib = new URL('./lib/', import.meta.url).href;
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('./lib/pdf.worker.min.mjs', import.meta.url).href;
-    // ⚠ transfer される(複製しない)── 取り戻したいときのために Blob は別に握っている
-    const data = new Uint8Array(await blob.arrayBuffer());
-    pdf = await pdfjs.getDocument({
-      data,
-      cMapUrl: `${lib}cmaps/`,
-      cMapPacked: true,
-      standardFontDataUrl: `${lib}standard_fonts/`,
-      wasmUrl: `${lib}wasm/`,
-    }).promise;
-    total = pdf.numPages;
-    if (!(total >= 1)) throw new Error('no pages');
-    const first = await pdf.getPage(1);
-    const vp = first.getViewport({ scale: 1 });
-    sizes[1] = { w: vp.width, h: vp.height };
-    first.cleanup();
+    lease = new DocLease({
+      open: openDoc,
+      // 🔑 解析 worker を terminate する(常駐メモリを返す)。⚠ `destroy()` は文書(`PDFDocumentProxy`)ではなく
+      //    **読み込みの課題(`loadingTask`)**に在る ── 文書に `destroy` は無く、呼ぶと TypeError になる
+      //    (貸し出しは畳む途中の例外を握りつぶすので、worker が残るだけで**何も鳴らない**。実際に踏んだ)
+      close: (doc) => doc.loadingTask.destroy(),
+    });
+    await lease.use(async (doc) => {
+      total = doc.numPages;
+      if (!(total >= 1)) throw new Error('no pages');
+      const first = await doc.getPage(1);
+      const vp = first.getViewport({ scale: 1 });
+      sizes[1] = { w: vp.width, h: vp.height };
+      first.cleanup();
+    });
     buildBoxes();
     msgEl.hidden = true;
+    ready = true;
     state('ready');
     $('pagecount').textContent = `/ ${String(total)}`;
     fitWidth();
@@ -146,16 +155,36 @@ async function openPdf() {
   }
 }
 
+/**
+ * 文書を開く(貸し出しが呼ぶ。最初の 1 回と、アイドルで畳んだ後の開き直し)。
+ * ⚠ Blob は窓が握り続けているので、開き直すたびに bytes を取り直せる(transfer で worker へ渡す = 複製しない)。
+ * ⚠ 開けなかったら `openFailed` を付けて投げる(読めていた文書の開き直しに失敗したら、内蔵の表示へ退避する)。
+ */
+async function openDoc() {
+  try {
+    const lib = new URL('./lib/', import.meta.url).href;
+    const data = new Uint8Array(await blob.arrayBuffer());
+    return await pdfjs.getDocument({
+      data,
+      cMapUrl: `${lib}cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `${lib}standard_fonts/`,
+      wasmUrl: `${lib}wasm/`,
+    }).promise;
+  } catch (e) {
+    const err = new Error(`open failed: ${String(e)}`);
+    err.openFailed = true;
+    throw err;
+  }
+}
+
 /** 内蔵の表示へ。⚠ 断り文は出さない(読めない PDF でも user は読める)。 */
 function fallBack() {
   if (blob === null) return;
   state('fell-back');
-  try {
-    if (pdf !== null) void pdf.destroy();
-  } catch {
-    // 退避を優先する
-  }
-  pdf = null;
+  ready = false;
+  // 🔑 文書(= 解析 worker)を握っていれば畳む。待っている依頼は貸し出しが reject する
+  if (lease !== null) lease.dispose();
   cache.clear();
   document.body.textContent = '';
   ownUrl = URL.createObjectURL(blob);
@@ -186,6 +215,7 @@ function sizeBox(i) {
 }
 
 function clearBox(i) {
+  layers[i] = undefined;
   if (boxes[i]) boxes[i].textContent = '';
 }
 
@@ -208,7 +238,7 @@ function visibleRange() {
 }
 
 function refresh() {
-  if (pdf === null) return;
+  if (!ready) return;
   const [first, last] = visibleRange();
   // 「いまの頁」= 窓の上 3 分の 1 の線にかかる頁
   const r = scroller.getBoundingClientRect();
@@ -235,65 +265,83 @@ async function renderPage(i) {
   const myGen = gen;
   inflight.set(i, myGen);
   try {
-    const page = await pdf.getPage(i);
-    if (myGen !== gen) return;
-    const vp = page.getViewport({ scale });
-    sizes[i] = { w: vp.width / scale, h: vp.height / scale };
-    sizeBox(i);
-    if (!wanted.has(i)) {
-      page.cleanup();
-      return;
-    }
-    let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    while (dpr > 1 && vp.width * dpr * vp.height * dpr > MAX_PIXELS) dpr -= 0.5;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.floor(vp.width * dpr));
-    canvas.height = Math.max(1, Math.floor(vp.height * dpr));
-    await page.render({
-      canvas,
-      viewport: vp,
-      transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
-    }).promise;
-    const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-    // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
-    canvas.width = 0;
-    canvas.height = 0;
-    if (png === null) return;
-    const url = URL.createObjectURL(png);
-    if (myGen !== gen || !wanted.has(i)) {
-      URL.revokeObjectURL(url);
-      page.cleanup();
-      return;
-    }
-    for (const e of cache.put(i, url)) clearBox(e);
-    const box = boxes[i];
-    box.textContent = '';
-    box.style.setProperty('--total-scale-factor', String(scale));
-    const img = document.createElement('img');
-    img.setAttribute('data-pkc-field', 'pdf-page-image');
-    img.alt = `${String(i)} 頁`;
-    img.src = url;
-    box.append(img);
-    const layer = document.createElement('div');
-    layer.className = 'textLayer';
-    box.append(layer);
-    try {
-      await new pdfjs.TextLayer({
-        textContentSource: page.streamTextContent(),
-        container: layer,
-        viewport: vp,
-      }).render();
-      markHits(i);
-    } catch {
-      // 字の層だけ落ちても絵は読める(選べないだけ)
-    }
-    page.cleanup();
+    // 🔑 描いている間は「飛んでいる依頼」── その間は解析 worker を畳まない(`doc-lease.js`)
+    await lease.use((pdf) => drawPage(pdf, i, myGen));
   } catch (e) {
+    // 内蔵の表示へ退避した後に落ちた依頼(貸し出しが reject した)は、黙って捨てる
+    if (!ready) return;
+    // 読めていた文書を、アイドルの後に開き直せなかった ── 頁が空のまま残るより、内蔵の表示で読める形にする
+    if (e && e.openFailed) {
+      fallBack();
+      return;
+    }
     console.warn('page render failed', i, e);
     // 1 頁が描けなくても、他の頁は読める(箱は空のまま残る)
   } finally {
     if (inflight.get(i) === myGen) inflight.delete(i);
   }
+}
+
+async function drawPage(pdf, i, myGen) {
+  const page = await pdf.getPage(i);
+  if (myGen !== gen) return;
+  const vp = page.getViewport({ scale });
+  sizes[i] = { w: vp.width / scale, h: vp.height / scale };
+  sizeBox(i);
+  if (!wanted.has(i)) {
+    page.cleanup();
+    return;
+  }
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  while (dpr > 1 && vp.width * dpr * vp.height * dpr > MAX_PIXELS) dpr -= 0.5;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.floor(vp.width * dpr));
+  canvas.height = Math.max(1, Math.floor(vp.height * dpr));
+  await page.render({
+    canvas,
+    viewport: vp,
+    transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
+  }).promise;
+  const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
+  canvas.width = 0;
+  canvas.height = 0;
+  if (png === null) return;
+  const url = URL.createObjectURL(png);
+  if (myGen !== gen || !wanted.has(i)) {
+    URL.revokeObjectURL(url);
+    page.cleanup();
+    return;
+  }
+  for (const e of cache.put(i, url)) clearBox(e);
+  const box = boxes[i];
+  clearBox(i);
+  box.style.setProperty('--total-scale-factor', String(scale));
+  const img = document.createElement('img');
+  img.setAttribute('data-pkc-field', 'pdf-page-image');
+  img.alt = `${String(i)} 頁`;
+  img.src = url;
+  box.append(img);
+  const layer = document.createElement('div');
+  layer.className = 'textLayer';
+  box.append(layer);
+  try {
+    const tl = new pdfjs.TextLayer({
+      textContentSource: page.streamTextContent(),
+      container: layer,
+      viewport: vp,
+    });
+    await tl.render();
+    // 🔑 span ごとの字を持っておく(検索の強調が、またがる一致を span ごとの範囲へ割り付ける)。
+    //    ⚠ 描いている間に箱が作り直された(拡大縮小 / 外れた)なら、持たない
+    if (layer.isConnected) {
+      layers[i] = { divs: tl.textDivs, strs: tl.textContentItemsStr, marked: new Set() };
+      markHits(i);
+    }
+  } catch {
+    // 字の層だけ落ちても絵は読める(選べないだけ)
+  }
+  page.cleanup();
 }
 
 // ───────── 拡大縮小 / 頁送り
@@ -363,34 +411,67 @@ let hitQuery = '';
 
 function loadTexts() {
   if (textsPromise === null) {
-    textsPromise = (async () => {
-      const out = [];
-      for (let i = 1; i <= total; i += 1) {
-        const p = await pdf.getPage(i);
-        const tc = await p.getTextContent();
-        out[i] = tc.items.map((it) => (typeof it.str === 'string' ? it.str : '')).join('');
-        p.cleanup();
-      }
-      return out;
-    })();
+    // 🔑 本文を集めている間は「飛んでいる依頼」(解析 worker を畳まない)。集め終えれば、検索は文書を要らない
+    textsPromise = lease
+      .use(async (pdf) => {
+        const out = [];
+        for (let i = 1; i <= total; i += 1) {
+          const p = await pdf.getPage(i);
+          const tc = await p.getTextContent();
+          out[i] = tc.items.map((it) => (typeof it.str === 'string' ? it.str : '')).join('');
+          p.cleanup();
+        }
+        return out;
+      })
+      .catch((e) => {
+        // 開き直せなかった等 ── 次の検索でやり直せるように覚えない
+        textsPromise = null;
+        throw e;
+      });
   }
   return textsPromise;
 }
 
+/**
+ * 頁 `i` の文字の層へ、検索の一致を強調する。
+ * 🔑 一致は**連結した本文**で取り、またがる span ごとに**その span の中の範囲**だけを `<mark>` にする
+ * (`text-hits.js`)。⚠ span の字そのものは変えない(選んで引く字は同じ)。
+ */
 function markHits(i) {
-  const box = boxes[i];
-  if (!box || hitQuery === '') return;
-  for (const span of box.querySelectorAll('.textLayer span')) {
-    if ((span.textContent || '').toLowerCase().includes(hitQuery)) span.classList.add('hit');
+  const L = layers[i];
+  if (!L) return;
+  unmarkLayer(L);
+  if (hitQuery === '') return;
+  for (const [k, list] of textHits.rangesBySpan(L.strs, hitQuery)) {
+    const div = L.divs[k];
+    const str = L.strs[k];
+    div.textContent = '';
+    let pos = 0;
+    for (const [from, to] of list) {
+      if (from > pos) div.append(str.slice(pos, from));
+      const m = document.createElement('mark');
+      m.className = 'hit';
+      m.textContent = str.slice(from, to);
+      div.append(m);
+      pos = to;
+    }
+    if (pos < str.length) div.append(str.slice(pos));
+    L.marked.add(k);
   }
 }
 
+/** 強調で作り替えた span を、元の字 1 つに戻す。 */
+function unmarkLayer(L) {
+  for (const k of L.marked) L.divs[k].textContent = L.strs[k];
+  L.marked.clear();
+}
+
 function clearMarks() {
-  for (const el of document.querySelectorAll('.textLayer span.hit')) el.classList.remove('hit');
+  for (const L of layers) if (L) unmarkLayer(L);
 }
 
 async function search(q) {
-  if (pdf === null) return;
+  if (!ready) return;
   clearMarks();
   hitQuery = q.trim().toLowerCase();
   hitList = [];
@@ -400,7 +481,15 @@ async function search(q) {
     return;
   }
   $('hits').textContent = '探しています…';
-  const texts = await loadTexts();
+  let texts;
+  try {
+    texts = await loadTexts();
+  } catch (e) {
+    // 読めていた文書を開き直せなかった(内蔵の表示へ退避する)/ もう退避済み
+    $('hits').textContent = '';
+    if (ready && e && e.openFailed) fallBack();
+    return;
+  }
   for (let i = 1; i <= total; i += 1) {
     const t = (texts[i] || '').toLowerCase();
     let at = t.indexOf(hitQuery);
@@ -496,9 +585,5 @@ window.addEventListener('pagehide', () => {
   send('closed', {});
   cache.clear();
   if (ownUrl !== null) URL.revokeObjectURL(ownUrl);
-  try {
-    if (pdf !== null) void pdf.destroy();
-  } catch {
-    // 閉じる途中
-  }
+  if (lease !== null) lease.dispose();
 });

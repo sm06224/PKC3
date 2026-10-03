@@ -11,6 +11,11 @@
  *     返し忘れ ── 外れた頁の revoke が 1 度でも出れば「返した数 > 0」は満たされるので、数では見えない)
  *   ⑤ 3 頁目の字を選んで「ノートへ引く」── 本体のノートの末尾に**頁番号(p.3)と添付名つき**の引用が入る
  *   ⑥ 読めない PDF ── **断り文を出さず**ブラウザ内蔵の表示へ退避し、状態の行に 1 行出る
+ *   ⑦ 電波が無いとき ── 1 度読めた後は**オフラインでも PKC の画面で読める**(`pdf/lib/` は precache に無いが、取れた後は
+ *     service worker の runtime cache から出る)/ まだ 1 度も取れていない所では、内蔵の表示へ退避する
+ *   ④′ 使われない間は**解析の worker を畳む**(窓の中に worker が 0 になる)/ 描いた頁の絵は残り、まだ描いていない頁を
+ *     描くとき**黙って開き直す**(worker が 1 に戻る)。⚠ 60 秒は実時間では待てないので、窓の時計だけ差し替える
+ *   ④″ 文書内の検索の一致が **span 2 つにまたがる**とき、両方の span に**一致した範囲だけ**の強調が付く
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
  *   という**切り替えの前後**が本命なので、対照群(切)と本命(入)を同じ起動の中で続けて見る必要がある
@@ -28,12 +33,17 @@ function buildPdf(pages: number): Buffer {
   const kids: string[] = [];
   objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
   objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  const boldObj = 4 + pages * 2;
+  objs[boldObj] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>';
   for (let i = 0; i < pages; i += 1) {
     const pageObj = 4 + i * 2;
     kids.push(`${String(pageObj)} 0 R`);
-    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} marker${String(i + 1)}) Tj ET`;
+    // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を足す:「split」+「match」。
+    //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
+    const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
+    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} marker${String(i + 1)}) Tj${split} ET`;
     objs[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << /Font << /F1 3 0 R >> >> /Contents ${String(pageObj + 1)} 0 R >>`;
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R >>`;
     objs[pageObj + 1] = `<< /Length ${String(stream.length)} >>\nstream\n${stream}\nendstream`;
   }
   objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${String(pages)} >>`;
@@ -105,6 +115,13 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   // 設定を閉じて、添付の画面へ戻る(同じボタンをもう一度押す)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
 
+  // 🔴 service worker が制御を持ってから開く ── 持つ前に窓を開くと、窓が取りに行く本体(`pdf/lib/`)が
+  //    runtime cache に落ちず、⑦(オフラインで読める)が空振りする
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 30_000 });
+  // 🔑 ④′(使われない間の worker の kill)のために、時計を差し替える ── 60 秒を実時間では待てない。
+  //    差し替えても時間は実時間どおり流れる(`fastForward` で進めたときだけ、予約が早く来る)
+  await context.clock.install();
+
   // ── ③ もう一度押す ── 別窓が PKC の画面で開く ──
   const [win] = await Promise.all([
     context.waitForEvent('page', { timeout: 15_000 }),
@@ -131,6 +148,14 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   await expect(win.locator('.textLayer span').first(), '字を選べる層が出ない').toContainText('Hello page 1', {
     timeout: 15_000,
   });
+
+  // ⑦ のための仕込み: 日本語の cmap(文書が使うまで取りに行かない部品)も 1 度取っておく ── `pdf/lib/` の
+  //    **js 以外の部品**も runtime cache に落ちること(落ちていなければ、次の文書の日本語がオフラインで読めない)
+  const cmapBytes = (w: typeof win): Promise<number> =>
+    w.evaluate(() =>
+      fetch('./lib/cmaps/90ms-RKSJ-H.bcmap').then(async (r) => (r.ok ? (await r.arrayBuffer()).byteLength : 0)),
+    );
+  expect(await cmapBytes(win), 'オンラインで cmap が取れない(観測が空振り)').toBeGreaterThan(0);
 
   const livePages = (): Promise<string[]> =>
     win.evaluate(() =>
@@ -196,12 +221,61 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
     `作った ObjectURL(${String(held.created)})のうち返していない数が、窓の中の絵の数(${String(held.imgs)})を超えている ── 描画中に外れた頁の絵を返し忘れている`,
   ).toBeLessThanOrEqual(held.imgs);
 
+  // ── ④′ 使われない間は、解析の worker を畳む(常駐メモリを返す)。描いた頁の絵は残り、使い直すとき黙って開き直す ──
+  //    観測点は窓の中の worker の実在(`page.workers()`)── 窓の中の変数ではなく、ブラウザが持つ worker そのもの
+  const workers = (): number => win.workers().length;
+  expect(workers(), '頁を描いているのに worker が居ない(観測が空振り)').toBeGreaterThan(0);
+  const keptBefore = await livePages();
+  expect(keptBefore.length, '絵が 1 枚も無い(観測が空振り)').toBeGreaterThan(0);
+  // 🔴 畳むのは「飛んでいる依頼が無いまま 60 秒」── 59 秒では畳まれない(対照群 = 早すぎる kill をしない)
+  await win.clock.fastForward(59_000);
+  expect(workers(), '60 秒より前に worker を畳んでいる').toBeGreaterThan(0);
+  await win.clock.fastForward(2_000);
+  await expect
+    .poll(workers, { message: '使われないのに worker が畳まれない(常駐メモリが返らない)', timeout: 10_000 })
+    .toBe(0);
+  expect(await livePages(), '畳んだら描いた頁の絵まで消えている').toEqual(keptBefore);
+  await expect(img.first(), '畳んだ後に絵が壊れている').toBeAttached();
+  // 使い直す: まだ描いていない頁(いまは先頭の頁が絵 = 末尾の頁は絵になっていない)を描くとき、黙って開き直す
+  expect(keptBefore, '末尾の頁が既に絵になっている(開き直しを要する場面ではない)').not.toContain(String(PAGES));
+  await win.locator('#scroller').evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await expect
+    .poll(livePages, { message: '畳んだ後に、描いていない頁を描けない(開き直せない)', timeout: 20_000 })
+    .toContain(String(PAGES));
+  expect(workers(), '開き直したのに worker が居ない').toBeGreaterThan(0);
+  await expect
+    .poll(
+      () => win.locator(`.page[data-page="${String(PAGES)}"] img`).evaluate((el: HTMLImageElement) => el.naturalWidth),
+      { message: '開き直して描いた絵が読み込まれていない', timeout: 15_000 },
+    )
+    .toBeGreaterThan(0);
+
   // 文書内を探す
   await win.fill('#query', 'marker3');
   await win.press('#query', 'Enter');
   await expect(win.locator('#hits')).toContainText('1 / 1 件(3 頁)', { timeout: 15_000 });
   await expect.poll(livePages, { message: '見つけた頁へ移っていない', timeout: 15_000 }).toContain('3');
-  await expect(win.locator('.page[data-page="3"] .textLayer span.hit')).toHaveCount(1, { timeout: 15_000 });
+  // 一致した範囲だけが光る(「marker3」の字だけ。行全体ではない)
+  await expect(win.locator('.page[data-page="3"] .textLayer mark.hit')).toHaveText(['marker3'], { timeout: 15_000 });
+
+  // ── ④″ 一致が span 2 つにまたがる ──「split」+「match」(書体が違うので別の span)の「litma」
+  await win.fill('#query', 'litma');
+  await win.press('#query', 'Enter');
+  await expect(win.locator('#hits')).toContainText('1 / 1 件(3 頁)', { timeout: 15_000 });
+  const marks = win.locator('.page[data-page="3"] .textLayer mark.hit');
+  // 🔴 2 つの span の両方に、その span の中の一致した範囲だけ(先頭の span にしか付かない / span 全体が光る、を許さない)
+  await expect(marks, 'またがる一致が両方の span に付いていない').toHaveText(['lit', 'ma'], { timeout: 15_000 });
+  const owners = await marks.evaluateAll((els) => els.map((e) => e.parentElement?.textContent ?? ''));
+  expect(owners, '強調が別々の span に割り付いていない').toEqual(['split', 'match']);
+  // 強調しても、選んで引く字(span の字)は変わらない
+  expect(
+    await win.locator('.page[data-page="3"] .textLayer span', { hasText: 'split' }).first().textContent(),
+  ).toBe('split');
+  // 探し直すと、前の強調は外れる(字は元の 1 つに戻る)
+  await win.fill('#query', 'marker3');
+  await win.press('#query', 'Enter');
+  await expect(win.locator('.page[data-page="3"] .textLayer mark.hit')).toHaveText(['marker3'], { timeout: 15_000 });
+  expect(await win.locator('.page[data-page="3"] .textLayer span', { hasText: 'split' }).first().innerHTML()).toBe('split');
 
   // ── ⑤ 3 頁目の字を選ぶ → 「ノートへ引く」──
   const quote = win.locator('#quote');
@@ -262,6 +336,47 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
     { timeout: 10_000 },
   );
   await bad.close();
+
+  // ── ⑦ 電波が無いとき ──
+  //    ⚠ `setOffline` ではなく **route で abort**(service worker 自身の fetch も止める。offline.smoke と同じ理由)
+  await clickReal(
+    page,
+    page.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '見積.pdf' }),
+  );
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', '見積.pdf');
+  await context.route('**/*', (route) => route.abort('internetdisconnected'));
+  // (a) 1 度読めた後は、電波が無くても PKC の画面で読める(`pdf/lib/` は precache に無いが、取れた後は cache から出る)
+  const [off] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(
+    off.locator('[data-pkc-field="pdf-page-image"]').first(),
+    '電波が無いと PKC の画面で読めない(1 度読めた後なのに、本体が cache から出ていない)',
+  ).toBeAttached({ timeout: 20_000 });
+  expect(await off.locator('body').getAttribute('data-pkc-pdf-state')).toBe('ready');
+  expect(await off.locator('[data-pkc-field="pdf-reader-fallback"]').count(), '1 度読めたのに内蔵の表示へ退避している').toBe(0);
+  expect(await cmapBytes(off), '日本語の cmap が電波なしで出ない').toBeGreaterThan(0);
+  await off.close();
+  // (b) まだ 1 度も取れていない所(runtime cache を空にする)では、内蔵の表示へ退避する ── 窓は固まらず、PDF は読める
+  await page.evaluate(async () => {
+    for (const k of await caches.keys()) {
+      const c = await caches.open(k);
+      for (const r of await c.keys()) if (new URL(r.url).pathname.includes('/pdf/lib/')) await c.delete(r);
+    }
+  });
+  const [cold] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(
+    cold.locator('[data-pkc-field="pdf-reader-fallback"]'),
+    '電波が無く、まだ本体を取れていないのに、内蔵の表示へ退避しない(窓が固まる)',
+  ).toHaveCount(1, { timeout: 20_000 });
+  expect(await cold.locator('[data-pkc-field="pdf-page-image"]').count()).toBe(0);
+  await expect(cold.locator('#msg'), '退避なのに断り文が出ている').toBeHidden();
+  await cold.close();
+  await context.unroute('**/*');
 
   expect(winErrors, '窓の中で例外が出ている').toEqual([]);
   expect(errors).toEqual([]);

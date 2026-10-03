@@ -67,6 +67,8 @@ function boot(): void {
   const g = globalThis as unknown as Record<string, unknown>;
   evalScript('public/pdf/reader-wire.js', g);
   evalScript('public/pdf/page-cache.js', g);
+  evalScript('public/pdf/doc-lease.js', g);
+  evalScript('public/pdf/text-hits.js', g);
   wire = g['PkcPdfWire'] as Wire;
   evalScript('public/pdf/reader.js', g);
   const found = FakeChannel.all[FakeChannel.all.length - 1];

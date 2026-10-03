@@ -17,6 +17,7 @@
 
   ## 窓の中の約束
   - **窓の生死 = 計算の生死**。解析は pdf.js の worker が窓の中で行い、窓を閉じれば worker も消える。
+    使われない間(60 秒)も worker を畳む(`doc-lease.js`)── 描いた頁の絵は残り、まだ描いていない頁を描くときだけ開き直す。
   - **頁は PNG の `<img>` 1 枚**(描いたら焼く)。見えている頁の前後 2 頁だけ持ち、外れたら即 revoke。
   - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
@@ -65,7 +66,9 @@
     transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)) }
   .textLayer .markedContent { display: contents }
   .textLayer ::selection { background: rgba(80, 140, 255, .4) }
-  .textLayer span.hit { background: rgba(255, 210, 0, .45) }
+  /* 検索の一致。span の中の一致した範囲だけ(またがる一致は span ごとに 1 つずつ。`text-hits.js`)。
+     ⚠ `<mark>` にするのは、`.textLayer :is(span, br)` の規則(絶対配置)に巻き込まれないため */
+  .textLayer mark.hit { color: transparent; background: rgba(255, 210, 0, .45) }
 </style>
 </head>
 <body>
@@ -89,6 +92,8 @@
 <div id="msg">読み込んでいます…</div>
 <script src="./reader-wire.js"></script>
 <script src="./page-cache.js"></script>
+<script src="./doc-lease.js"></script>
+<script src="./text-hits.js"></script>
 <script type="module" src="./reader.js"></script>
 </body>
 </html>

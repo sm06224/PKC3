@@ -345,6 +345,8 @@ describe('規則(純関数)', () => {
     ['pdf/reader.js', true],
     ['pdf/reader-wire.js', true],
     ['pdf/page-cache.js', true],
+    ['pdf/doc-lease.js', true],
+    ['pdf/text-hits.js', true],
     // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/lib/` だけを外す)
     ['assets/pdf-viewer-AAAAAAAA.js', true],
     ['pdf.js', true],
@@ -702,6 +704,30 @@ describe('fetch ── 経路ごとの戦略', () => {
     expect(
       await h.fetch('https://pkc3.example/manifest.webmanifest', { network: 'fail' }),
     ).toBe('net:https://pkc3.example/manifest.webmanifest');
+  });
+
+  /**
+   * 🔴 **PDF を読む窓の実体(`pdf/lib/`)は precache に無いが、初めて取れた後は電波なしでも出る**(#275 段①の残り)。
+   *
+   * ⚠ 載せない物(`shouldPrecache` が外す)は、**ここの「hash 無しは network-first で cache に落ちる」に乗る**ことで
+   *   はじめて 2 回目以降オフラインで読める ── 乗らなくなる(例えば fetch の分岐が増えて `pdf/lib/` を素通しにする)と、
+   *   設定を入にした人は**電波の無い所で毎回内蔵の表示へ退避する**(読めるが、字は選べない)。
+   * ⚠ 初めて(まだ 1 度も取れていない)オフラインは**失敗する**のが正しい ── 嘘の空応答を返すと、窓は
+   *   「本体が読めた」と思って先へ進み、頁が 1 枚も描けない(窓は内蔵の表示への退避を取り逃がす)。
+   */
+  it.each([
+    ['https://pkc3.example/pdf/lib/pdf.min.mjs', 'script'],
+    ['https://pkc3.example/pdf/lib/pdf.worker.min.mjs', 'worker'],
+    ['https://pkc3.example/pdf/lib/cmaps/90ms-RKSJ-H.bcmap', ''],
+    ['https://pkc3.example/pdf/lib/wasm/jbig2.wasm', ''],
+  ])('🔴 pdf/lib は precache に無いが、取れた後はオフラインでも返る: %s', async (url, destination) => {
+    const h = await seeded();
+    // 初めて ── precache に無いので、オフラインなら失敗する(嘘の空応答を返さない)
+    await expect(h.fetch(url, { network: 'fail', destination })).rejects.toThrow('offline');
+    // オンラインで 1 度取れる(取れた応答が runtime cache へ落ちる)
+    expect(await h.fetch(url, { destination })).toBe(`net:${url}`);
+    // 以後はオフラインでも出る ── ⚠ 中身は**さっき取れたもの**
+    expect(await h.fetch(url, { network: 'fail', destination })).toBe(`net:${url}`);
   });
 
   it('🔴 206(Partial)は cache に入れない(Cache.put が投げる)', async () => {
