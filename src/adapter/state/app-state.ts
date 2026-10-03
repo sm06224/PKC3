@@ -2930,6 +2930,13 @@ export type UserAction =
       createDate?: string;
     }
   /**
+   * 🔴 **画面下の知らせの時間が切れた**(#1017 C5 Q1)。⚠ `message` が**いま載っている知らせと同じとき
+   *   だけ**降ろす(古い時計が、後から来た別の知らせを消さない)。
+   * ⚠ 降ろさないと、同じ字の知らせ(「見つかりませんでした」を 2 回押す等)が
+   *   `state.notice` と同じなので**2 回目が出ない**(`main.ts` は字の変化で出す)。
+   */
+  | { type: 'NOTICE_EXPIRED'; message: string }
+  /**
    * 🔴 **押したのに入らなかったタグ**(#640 案 A)── 効果層が断った名前を欄へ戻すために撃つ。
    * ⚠ 足す(1 回の頼みの中で 1 つずつ届く ── スマートフォルダの条件は 1 タグ 1 往復)。
    */
@@ -9420,6 +9427,12 @@ function reduceCore(
     case 'SEARCH_JUMP_END':
       if ((state.searchJump ?? null) === null) return { state, events: [] };
       return { state: { ...state, searchJump: null }, events: [] };
+    case 'NOTICE_EXPIRED':
+      if (state.notice !== action.message) return { state, events: [] };
+      return {
+        state: { ...state, notice: null, noticeOpen: null, noticeCreate: null },
+        events: [],
+      };
     case 'OP_NOTICE':
       // ⚠ **`error` を触らない** ── 知らせが出たからといって、出ているエラーを
       //    消してよい理由は無い(`main.ts` が別の行として組んでいる)

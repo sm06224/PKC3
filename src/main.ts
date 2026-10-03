@@ -51,6 +51,7 @@ import {
   paintStatusUndo,
 } from '@adapter/ui/render/status-open';
 import { composeStatusLine, paintStatusText, shouldHideStatusBar } from '@adapter/ui/render/status-line';
+import { createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
 import {
   createStatusPoster,
   shouldPostNotice,
@@ -1513,6 +1514,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     portableAssetNote: '',
     persistState: '',
     savingLine: '',
+    progressLine: '',
     noticeLine: '',
     errorLine: '',
   });
@@ -1529,7 +1531,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * **エラー > 一時の知らせ > 常設(保存先の警告)**。
    */
   let errorLine = '';
-  let noticeLine = '';
+  /**
+   * 🔴 **知らせ(結果)と進行中は別の欄**(#1017 C5)── 持ち主は `createStatusNotices`(下)。
+   * ⚠ `noticeLine` / `progressLine` は**そこから読む**(ここに変数を置き直さない)。
+   *   `paint` が先に定義されるので、実体は後から埋まる。
+   */
+  let statusNotices: StatusNotices | null = null;
+  const noticeLine = (): string => statusNotices?.noticeLine() ?? '';
+  const progressLine = (): string => statusNotices?.progressLine() ?? '';
   /** ⚠ 同じ知らせで何度も塗り直さない(state は毎回流れてくる)。 */
   let noticeShown: string | null = null;
   /**
@@ -1561,7 +1570,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       portableAssetNote,
       persistState,
       savingLine: saving.line(),
-      noticeLine,
+      progressLine: progressLine(),
+      noticeLine: noticeLine(),
       errorLine,
     };
     const text = composeStatusLine(parts);
@@ -1636,18 +1646,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ `showStatus` からも撃つ ── 字だけの知らせ(コピーした等)が上書きしたら、
    *   前の知らせに添えた「開く」は**その瞬間に**消えなければならない。
    */
-  const paintOpen = (): void => {
-    paintStatusOpen(regions.statusOpen, dispatcher.getState(), noticeLine);
+  const paintOpen = (): boolean => {
+    const shown = noticeLine();
+    const open = paintStatusOpen(regions.statusOpen, dispatcher.getState(), shown);
     // 🔴 塊を動かした直後の「元に戻す」も同じ口で出し入れする(#684 段①)
-    paintStatusUndo(regions.statusUndo, dispatcher.getState(), noticeLine);
+    const undo = paintStatusUndo(regions.statusUndo, dispatcher.getState(), shown);
     // 🔴 日付のノートが無かった直後の「○○のノートを作る」も同じ口で出し入れする(#1169)
-    paintStatusCreate(regions.statusCreate, dispatcher.getState(), noticeLine);
+    const create = paintStatusCreate(regions.statusCreate, dispatcher.getState(), shown);
     /**
      * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。「開く」「元に戻す」と
      * 同じ作法 ── 常設で置いて、未読が 1 件以上あるときだけ出す。
      */
     // ⚠ 字の組み方は `status-open.ts`(test が届く所)── ここは渡すだけ
     paintStatusMessages(regions.statusMessages, dispatcher.getState().messagesUnread);
+    // 🔴 いま押す口を持つ知らせか(持つなら自動で消さない ── `status-lifetime.ts`)
+    return open || undo || create;
   };
   /**
    * 🔴 **画面下の知らせを、メッセージにも残す**(#1017 C5 段 b1)。判断は `status-notice.ts`。
@@ -1660,16 +1673,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     (onRead) => appMessagePost.onUnreadChanged((n) => { if (n === 0) onRead(); }),
   );
   /**
-   * 一時の知らせ(コピーした / 取り込んだ)。⚠ 状態変化では消えない。
-   * ⚠ **画面下の出し方は直す前と同じ**(居座り方・寿命・色は変えていない)── 増えたのは
-   *   メッセージへ積むことだけ。
+   * 🔴 **画面下の知らせの寿命と進行中の置き場**(#1017 C5 Q1〜Q3。判断は `status-lifetime.ts`)。
+   * - 結果(コピーした / 取り込んだ)は**数秒で消える**(同じ字はメッセージにある)
+   * - 注意・問題と、操作のボタンを持つ知らせは**次の知らせまで残る**
+   * - 全体の処理の進行中(`…` で終わる字)は**別の欄**へ。`notify('')` で空になる
+   * ⚠ 状態変化では消えない(時間が切れたときだけ)。
    */
-  const showStatus = (text: string, opts?: StatusOptions) => {
-    postStatus(text, opts);
-    noticeLine = text;
-    paint();
-    paintOpen();
-  };
+  statusNotices = createStatusNotices({
+    post: postStatus,
+    paint,
+    paintActions: paintOpen,
+    // 🔴 state にも載っている知らせは降ろす ── 降ろさないと、同じ字の知らせが次に来ても出ない
+    expire: (text) => dispatcher.dispatch({ type: 'NOTICE_EXPIRED', message: text }),
+  });
+  const showStatus = (text: string, opts?: StatusOptions): void => statusNotices!.show(text, opts);
   /**
    * 🔴 **PDF を PKC の画面で読む窓**(#275 段①。設定で選んだ人だけ ── 呼ぶのは `viewAsset`)。
    * ⚠ **最初に使うときまで作らない**(放送の口を使わない人に開かない)。窓の合図は全部ここへ来る。
@@ -1963,6 +1980,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ⚠ **`showStatus` と同じ行に載せる**(2 本目の行を作ると、優先順位の
      *   規則がここで割れる)。
      */
+    // 🔴 時間が切れて降ろされた(`NOTICE_EXPIRED`)── 同じ字の知らせがもう一度来ても出せるように
+    if (state.notice === null) noticeShown = null;
     if (state.notice !== null && state.notice !== noticeShown) {
       noticeShown = state.notice;
       // 🔴 **`OP_NOTICE` → メッセージ「結果」**(設計 doc §7、段②a)。
@@ -1975,7 +1994,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return; // `showStatus` が `paint` を呼ぶ
     }
     paint();
-    paintOpen(); // ⚠ 選択がその添付へ移ったら「開く」を畳む
+    // ⚠ 選択がその添付へ移ったら「開く」を畳む。畳まれた知らせは、そこから数え始める
+    statusNotices?.settle();
   });
 
   /**

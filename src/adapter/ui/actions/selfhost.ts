@@ -56,6 +56,20 @@ export interface SelfhostDeps {
  */
 export async function downloadSelfhostBundle(deps: SelfhostDeps): Promise<void> {
   deps.notify('自分のパソコンで動かす一式を組んでいます…');
+  try {
+    await buildAndDownload(deps);
+  } finally {
+    /**
+     * 🔴 **進行中の字は、成功でも失敗でも必ず消す**(#1017 C5 Q3)。⚠ 直す前は、取れない file が
+     *   あって例外で落ちると「組んでいます…」が画面下に**居座った**(呼び側は失敗の知らせを
+     *   別に出す)。⚠ 成功のときは完了の知らせの後に呼ぶが、空の字は進行中の欄だけを空にする
+     *   (知らせは巻き込まない ── `status-lifetime.ts`)。
+     */
+    deps.notify('');
+  }
+}
+
+async function buildAndDownload(deps: SelfhostDeps): Promise<void> {
   const listRes = await deps.fetchFile(`./${PRECACHE_LIST_FILE}`);
   if (!listRes.ok) {
     throw new Error(`${PRECACHE_LIST_FILE} を読めません(HTTP ${String(listRes.status)})`);

@@ -78,6 +78,14 @@ test('🔴 ⠿ を掴んで別の塊の下へ落とすと、本文の並びが�
     .toEqual(['題', '章 B', '本文 B', '章 C', '本文 C', '段落 A']);
   // 知らせの隣に「元に戻す」が出る(片道の操作にしない)
   await expect(page.locator('[data-pkc-field="status-undo"]')).toBeVisible();
+  /**
+   * 🔴 **操作のボタンを持つ知らせは、結果でも消えない**(#1017 C5 Q2)。⚠ 結果の知らせが消える長さ(6 秒)を
+   *   超えて待ってから見る ── 消えると「元に戻す」も一緒に消え、戻す道を失う。
+   *   ⚠ 消えない側の検査なので、待ちが足りなくても(速い環境でも)偽の赤にはならない。
+   */
+  await page.waitForTimeout(7000);
+  await expect(page.locator('[data-pkc-field="status-undo"]'), '時間が来て「元に戻す」が消えた').toBeVisible();
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('本文の塊を動かしました');
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect
     .poll(() => order(page), { timeout: 5000, message: '元に戻らない' })

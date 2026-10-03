@@ -65,6 +65,12 @@ export interface StatusLineParts {
   readonly persistState: string;
   /** `SavingIndicator.line()`。 */
   readonly savingLine: string;
+  /**
+   * 🔴 **全体の処理の進行中**(書き出し・取り込み・切り出し・文字起こし等。#1017 C5 Q3)。
+   * ⚠ 知らせ(`noticeLine`)とは**別の欄** ── 進行中は結果の知らせで置き換わらず、
+   *   終わりの合図で空になる。読み上げの対象にはならない(`status-live` は知らせとエラーだけ)。
+   */
+  readonly progressLine: string;
   /** 一時の知らせ(コピーした・取り込んだ)。 */
   readonly noticeLine: string;
   readonly errorLine: string;
@@ -75,6 +81,8 @@ export interface StatusLineParts {
  *
  * ⚠ 順は**状態語が先頭**(見本 3「編集中 — 保存先の注意 …」)。並びそのものは
  * 直す前と同じ(状態語を足しただけ)── 優先順位は変えていない。
+ * 🔴 **進行中は知らせより先**(#1017 C5 Q3)── 「書き出しています…」の後ろに
+ * 別の知らせが続く並びにする(進行中が後ろへ押し出されると、定位置で探せない)。
  */
 export function composeStatusLine(parts: StatusLineParts): string {
   return [
@@ -84,6 +92,7 @@ export function composeStatusLine(parts: StatusLineParts): string {
     parts.portableAssetNote,
     parts.persistState,
     parts.savingLine,
+    parts.progressLine,
     parts.noticeLine,
     parts.errorLine,
   ]

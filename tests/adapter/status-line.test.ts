@@ -26,6 +26,7 @@ function partsFor(phase: StatusLineParts['phase'], extra: Partial<StatusLinePart
     portableAssetNote: '',
     persistState: '',
     savingLine: '',
+    progressLine: '',
     noticeLine: '',
     errorLine: '',
     ...extra,

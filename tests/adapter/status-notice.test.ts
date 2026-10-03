@@ -297,7 +297,9 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
     .join('\n');
 
   it('🔴 showStatus は積む口(postStatus)を通り、積んだ字の出し直しは post:false', () => {
-    expect(code).toMatch(/const showStatus = \(text: string, opts\?: StatusOptions\) => \{\s*postStatus\(text, opts\);/);
+    // 🔴 画面下の出し方(寿命・進行中の欄)は `createStatusNotices` が持ち、積む口はそこへ渡す(#1017 C5 Q1〜Q3)
+    expect(code).toMatch(/statusNotices = createStatusNotices\(\{\s*post: postStatus,/);
+    expect(code).toContain('const showStatus = (text: string, opts?: StatusOptions): void => statusNotices!.show(text, opts);');
     expect(code).toContain('showStatus(state.notice, { post: false })');
     expect(code).toContain('showStatus(lockCaution.text, { post: false })');
     expect(code).toContain('showStatus(caution.text, { post: false })');
@@ -444,6 +446,7 @@ describe('画面下の帯は読み上げに届く(知らせとエラーだけ)',
     portableAssetNote: '',
     persistState: '',
     savingLine: '',
+    progressLine: '',
     noticeLine: '',
     errorLine: '',
     ...extra,

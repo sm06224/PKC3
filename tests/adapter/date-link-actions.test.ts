@@ -52,7 +52,7 @@ function setup(metas: EntryMeta[], services: BinderServices = {}) {
    *   写す処理は 1 か所にする。
    */
   let line = '';
-  const repaint = (): void => paintStatusCreate(regions.statusCreate, d.getState(), line);
+  const repaint = (): void => void paintStatusCreate(regions.statusCreate, d.getState(), line);
   d.onState((st) => {
     if (st.notice !== null && st.notice !== line) line = st.notice;
     repaint();

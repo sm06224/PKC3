@@ -225,6 +225,18 @@ describe('#264 段① 押してから disk へ届くまで', () => {
     expect(r.status.at(-1), '1 枚も取れなかったのに進行中の字が残る').toBe('');
   });
 
+  it('🔴 取りに行く処理が例外で落ちた回も、進行中の字を消して理由を出す(#1017 C5 Q3)', async () => {
+    const r = rig(() => {
+      throw new Error('回線が切れました');
+    });
+    r.open('n1', `![ず](${IMG})`);
+    r.btn()!.click();
+    await vi.waitFor(() => expect(r.d.getState().error).toBeTruthy());
+    expect(r.status[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取りに行っています…');
+    expect(r.status.at(-1), '落ちたのに「取りに行っています…」が居座る').toBe('');
+    expect(r.d.getState().error, '理由が出ていない').toContain('回線が切れました');
+  });
+
   it('🔴 一部だけ読めたときは、読めたぶんを当てて**残りの理由も言う**', async () => {
     const good = 'https://e.com/ok.png';
     const r = rig((urls) => ({
