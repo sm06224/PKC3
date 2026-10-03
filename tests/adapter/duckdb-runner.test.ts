@@ -48,6 +48,10 @@ function fakeHandle(answer: DuckDbRaw) {
       steps.push('put:' + name);
       return Promise.resolve();
     },
+    drop: (name) => {
+      steps.push('drop:' + name);
+      return Promise.resolve();
+    },
     query: (sql) => {
       steps.push(sql);
       return Promise.resolve(answer);

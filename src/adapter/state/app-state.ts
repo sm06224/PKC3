@@ -2292,7 +2292,8 @@ export type UserAction =
   | { type: 'SET_SQL_SOURCE'; lid: string; name: string }
   /**
    * 🔴 **調べる相手を、もう 1 つ足す**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
-   * ⚠ 足せない相手(`.xlsx` / `.sqlite` / 上限 / 重複)は**断りの字**を返す(黙って何も起きない形を作らない)。
+   * ⚠ 足せない相手(`.xlsx` / 上限 / 重複)は**断りの字**を返す(黙って何も起きない形を作らない)。
+   *   🔴 `.sqlite` は足せる(#682 段④d)。
    * ⚠ **足したら答えを捨てる**(相手の集合が変わるので、出ている表は別の話になる)。
    */
   | { type: 'ADD_SQL_SOURCE'; lid: string; name: string }

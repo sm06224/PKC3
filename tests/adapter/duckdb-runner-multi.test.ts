@@ -15,7 +15,11 @@ import {
   duckDbFileNameOf,
   duckDbLoadSql,
 } from '../../src/adapter/platform/duckdb/duckdb-runner';
-import { duckDbReadableSourceOf, type DuckDbReadableGuestSource } from '../../src/features/query/sql-guest-source';
+import {
+  duckDbReadableSourceOf,
+  type DuckDbFileGuestSource,
+  type DuckDbReadableGuestSource,
+} from '../../src/features/query/sql-guest-source';
 
 /** 実測の byte 数(`duckdb-runner.test.ts` と同じ。目録の下限を満たす)。 */
 const REAL_BYTES: Readonly<Record<string, number>> = {
@@ -35,6 +39,10 @@ function fakeHandle(answer: DuckDbRaw) {
   const h: DuckDbHandle = {
     put: (name, bytes) => {
       steps.push(`put:${name}:${String(bytes.byteLength)}`);
+      return Promise.resolve();
+    },
+    drop: (name) => {
+      steps.push(`drop:${name}`);
       return Promise.resolve();
     },
     query: (sql) => {
@@ -66,9 +74,10 @@ function make(idleMs?: number) {
   return { runner, open, made };
 }
 
-function src(lid: string, name: string): DuckDbReadableGuestSource {
+/** ⚠ 「1 file = 1 表」の相手だけ(`.sqlite` は `duckdb-runner-sqlite.test.ts` が持つ)。 */
+function src(lid: string, name: string): DuckDbFileGuestSource {
   const s = duckDbReadableSourceOf(lid, name);
-  if (s === null) throw new Error(`前提が崩れている(${name})`);
+  if (s === null || s.kind === 'sqlite') throw new Error(`前提が崩れている(${name})`);
   return s;
 }
 

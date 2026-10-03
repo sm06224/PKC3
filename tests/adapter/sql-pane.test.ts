@@ -51,7 +51,7 @@ import { stubRevisionOps } from '../helpers/revision-stub';
 import { DUCKDB_NETWORK_NOTE } from '../../src/features/query/sql-guest-source';
 import type {
   DuckDbReadableGuestSource,
-  SqliteReadableGuestSource,
+  SqliteConvertGuestSource,
 } from '../../src/features/query/sql-guest-source';
 // 🔴 手持ちのファイルを開く(#854 段②)── main.ts と**同じ実物**を配線する
 import {
@@ -162,7 +162,7 @@ function setup(
    *  ⚠ 実物は worker の別接続 ── ここは**渡された引数**だけを見る fake である。 */
   /** 開くのを**手で止められる**門(遅れて届く答えを作るため)。 */
   let holdOpen: null | (() => void) = null;
-  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqliteReadableGuestSource) => {
+  const openSqlGuest = vi.fn(async (image: Uint8Array, source?: SqliteConvertGuestSource) => {
     if (image.byteLength === 0) {
       throw new Error(
         source === undefined
@@ -3195,19 +3195,63 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
    * ⚠ この fixture に `.xlsx` の添付は無い(この file の相手は `.sqlite` / `.csv` / `.tsv` だけ)。
    * 🔑 拡張子ごとの全数は `tests/features/sql-engine.test.ts` が等値で見る ── ここは**配線**を見る。
    */
-  it('🔴 .sqlite では DuckDB を選べない(薄い字のまま)', async () => {
-    const { pick, engineSel } = setup();
-    pick('db1'); // 売上.sqlite
+  it('🔴 .xlsx では DuckDB を選べない(薄い字のまま)', async () => {
+    const { pickLocalFile, engineSel } = setup();
+    // ⚠ この fixture に `.xlsx` の添付は無いので、手持ちのファイルで開く(判定は同じ 1 か所)
+    pickLocalFile(new File([new Uint8Array(8)], '台帳.xlsx'));
     await settle();
     expect(engineSel.hidden, '選び所が消えている').toBe(false);
     const duck = [...engineSel.options].find((o) => o.value === 'duckdb');
-    expect(duck?.disabled, '.sqlite で DuckDB を選ばせている').toBe(true);
+    expect(duck?.disabled, '.xlsx で DuckDB を選ばせている').toBe(true);
     /**
      * 🔴 **理由の字が、相手に合わせて変わる**。
-     * ⚠ 組み直す合図を「並ぶ数」で持つと、ノート(1 つ)→ `.sqlite`(1 つ)で
+     * ⚠ 組み直す合図を「並ぶ数」で持つと、ノート(1 つ)→ `.xlsx`(1 つ)で
      *   **数が動かない**ので、**前の相手の理由が残る** ── そこを見る。
      */
     expect(duck?.textContent, '前の相手の理由が残っている').toContain('のときだけ');
+    // 🔴 足せる拡張子の案内に `.sqlite` が入っている(#682 段④d)
+    expect(duck?.textContent).toContain('.sqlite');
+  });
+
+  /**
+   * 🔴 **`.sqlite` は DuckDB も選べる**(#682 段④d。🟣 Gemini 裁定 2026-10-02)。
+   * ⚠ 直す前のこの test は「`.sqlite` では DuckDB を選べない」を pin していた ── 判定が
+   *   `sqlGuestSourceOf` の `null`(= 画像のまま開く道)に頼っていたため。
+   */
+  it('🔴 .sqlite でも DuckDB を選べる ── 内蔵の sqlite は今までどおり画像のまま開く', async () => {
+    const { pick, engineSel, openSqlGuest, d } = setup();
+    pick('db1'); // 売上.sqlite
+    await settle();
+    const duck = [...engineSel.options].find((o) => o.value === 'duckdb');
+    expect(duck?.disabled, '.sqlite で DuckDB を選べない').toBe(false);
+    expect([...engineSel.options].filter((o) => o.disabled), '.sqlite なのに選べない側がある').toHaveLength(0);
+    // 🔴 既定は今までどおり sqlite
+    expect(engineSel.value).toBe('sqlite');
+    expect(d.getState().sqlPage.engine).toBe('sqlite');
+    // 🔴 worker へは `source` を渡さない(画像として開く ── `.sqlite` を「変換して開く種類」へ流さない)
+    expect(openSqlGuest).toHaveBeenCalledTimes(1);
+    expect(openSqlGuest.mock.calls[0]?.[1], '.sqlite に source を渡している').toBeUndefined();
+    // 🔑 表の名前は開いた客の物のまま(DuckDB でも元の名前で引ける)
+    expect(d.getState().sqlPage.guest?.tables).toEqual(['売上', '客']);
+  });
+
+  it('🔴 .sqlite を DuckDB で引くと、DuckDB の器へ .sqlite として渡る ── sqlite は叩かない', async () => {
+    const { pick, pickEngine, type, runBtn, runReadOnlySql, duckSeen, cells, tipText } = setup();
+    pick('db1');
+    await settle();
+    pickEngine('duckdb');
+    // 🔴 案内は元の表の名前を言う(csv などに潰さない)/ 手本は 1 つ目の表を元の名前で
+    expect(tipText()).toContain('売上, 客');
+    expect(tipText()).toContain('元のまま');
+    type('FROM "売上" SELECT *');
+    runBtn.click();
+    await settle();
+    expect(duckSeen).toHaveLength(1);
+    expect(duckSeen[0]?.source).toEqual({ kind: 'sqlite', lid: 'db1', name: '売上.sqlite' });
+    // 🔴 相手の中身を読みに来ている(画像を DuckDB の側へ渡すのに要る)
+    expect(duckSeen[0]?.bytes, '相手の中身を読みに来ていない').toBeGreaterThan(0);
+    expect(runReadOnlySql, 'sqlite も叩いている(engine を分けていない)').toHaveBeenCalledTimes(0);
+    expect(cells()).toEqual([['duck']]);
   });
 
   it('🔴 DuckDB を選んで走らせると、DuckDB で引く ── sqlite は 1 度も叩かない', async () => {
@@ -3274,12 +3318,12 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
     expect(duckSeen, '断ったのに引きに行った').toHaveLength(0);
   });
 
-  it('🔴 相手を .sqlite へ替えると、選んだ DuckDB は薄い字になって sqlite で引く', async () => {
-    const { pick, pickEngine, engineSel, type, runBtn, runReadOnlySql, duckSeen, d } = setup();
+  it('🔴 相手を .xlsx へ替えると、選んだ DuckDB は薄い字になって sqlite で引く', async () => {
+    const { pick, pickEngine, pickLocalFile, engineSel, type, runBtn, runReadOnlySql, duckSeen, d } = setup();
     pick('db4');
     await settle();
     pickEngine('duckdb');
-    pick('db1'); // 売上.sqlite ── DuckDB では引けない相手
+    pickLocalFile(new File([new Uint8Array(8)], '台帳.xlsx')); // DuckDB では引けない相手
     await settle();
     expect([...engineSel.options].find((o) => o.value === 'duckdb')?.disabled).toBe(true);
     // 🔑 画面に出る値は**実際に引く物** ── 選んだ物(duckdb)をそのまま出さない
@@ -3986,12 +4030,16 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
 
   it('🔴 足す口は一覧の末尾。1 件目が DuckDB で読める相手のときだけ出る(出せない形では出さない)', async () => {
     const s = setup();
-    // 何も選んでいない(この PKC のノート)/ sqlite を選んでいる ── 足す口は無い
+    // 何も選んでいない(この PKC のノート)/ .xlsx を選んでいる ── 足す口は無い
     expect(groups(s.sourceSel), 'ノートを調べているのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
+    s.pickLocalFile(new File([new Uint8Array(8)], '台帳.xlsx'));
+    await settle();
+    expect(groups(s.sourceSel), '.xlsx を調べているのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
+    expect(optionValues(s.sourceSel).some((v) => v.startsWith('add:') || v === SQL_ADD_LOCAL_FILE_VALUE)).toBe(false);
+    // 🟢 .sqlite を調べているときは出る(#682 段④d ── 以前は出さなかった)
     s.pick('db1');
     await settle();
-    expect(groups(s.sourceSel), 'sqlite を調べているのに足す口が出ている').not.toContain(SQL_SOURCE_GROUP_ADD);
-    expect(optionValues(s.sourceSel).some((v) => v.startsWith('add:') || v === SQL_ADD_LOCAL_FILE_VALUE)).toBe(false);
+    expect(groups(s.sourceSel), '.sqlite を調べているのに足す口が出ない').toContain(SQL_SOURCE_GROUP_ADD);
     // csv を選ぶと出る ── そして**末尾**
     s.pick('db4');
     await settle();
@@ -4003,11 +4051,11 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     expect(vals).toContain(SQL_ADD_LOCAL_FILE_VALUE);
     // 自分自身は足せない相手に並ばない
     expect(vals).not.toContain('add:db4');
-    // 🔴 足せない形(.sqlite)は薄い字で理由つき ── 消さない(在るのに出てこない、にしない)
+    // 🟢 .sqlite も足せる(#682 段④d)── 薄い字ではなく、理由の字も付かない
     const sqliteOpt = s.sourceSel.querySelector<HTMLOptionElement>('option[value="add:db1"]');
-    expect(sqliteOpt, '.sqlite の添付が足す口から消えている').not.toBeNull();
-    expect(sqliteOpt?.disabled).toBe(true);
-    expect(sqliteOpt?.textContent).toContain('DuckDB では読めない');
+    expect(sqliteOpt, '.sqlite の添付が足す口に無い').not.toBeNull();
+    expect(sqliteOpt?.disabled, '.sqlite が足せない扱いのまま').toBe(false);
+    expect(sqliteOpt?.textContent).not.toContain('DuckDB では読めない');
     // 選び所は 1 件目を指したまま
     expect(s.sourceSel.value).toBe('db4');
   });
@@ -4146,7 +4194,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     expect(groups(s.sourceSel)).toContain(SQL_SOURCE_GROUP_ADD);
   });
 
-  it('🔴 .xlsx / .sqlite は 2 件目として足せない(理由を 1 行)── 足した扱いにならず、控えも手放す', async () => {
+  it('🔴 .xlsx は 2 件目として足せない(理由を 1 行)── 足した扱いにならず、控えも手放す', async () => {
     const s = setup();
     const seen = releases(s.d);
     s.pick('db4');
@@ -4160,11 +4208,32 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     // 🔴 断った file の控えは手放す(File を握ったまま残さない)
     expect(seen).toHaveLength(1);
     expect(await readSqlLocalFileBytes(seen[0]![0]!), '断った file の控えが残っている').toBeNull();
-    // .sqlite も同じ
+  });
+
+  /**
+   * 🔴 **`.sqlite` は 2 件目として足せる**(#682 段④d)。表は「ファイル名_表名」と**形**で言う ──
+   *   中に何枚在るかは走らせるまで分からない(足した側は選んだだけでは読まない)。
+   */
+  it('🔴 .sqlite を足す:足せて、案内は表の数を言わずに「ファイル名_表の名前」の形で言う', async () => {
+    const s = setup();
+    s.pick('db4'); // 売上.csv
+    await settle();
     addLocal(s, new File([new Uint8Array(8)], '別.sqlite'));
     await settle();
-    expect(s.note()).toContain('別.sqlite は DuckDB で読めないので足せません');
-    expect(chips(s.pane)).toEqual([]);
+    expect(chips(s.pane), '.sqlite が足せていない').toEqual(['別.sqlite(表 別_表の名前)']);
+    expect(s.engineSel.value, '並べたら DuckDB 固定').toBe('duckdb');
+    // 🔴 「2 つの表です」「(表 2 個)」と数えない(.sqlite は中の表の数だけ在る)
+    expect(s.tipText()).not.toContain('2 つの表');
+    expect(s.tipText()).toContain('別_表の名前');
+    expect(s.note()).not.toContain('表 2 個');
+    expect(s.note()).toContain('売上.csv / 別.sqlite を並べて調べています');
+    // 走らせると、足した .sqlite も器へ届く(種類つきで)
+    s.type('FROM 売上 SELECT *');
+    s.runBtn.click();
+    await settle();
+    const last = s.duckSeen[s.duckSeen.length - 1];
+    expect(last?.all.map((x) => x.kind)).toEqual(['csv', 'sqlite']);
+    expect(last?.allBytes).toEqual([4, 8]);
   });
 
   it('🔴 手持ちの file を足す:2 件目を足しても 1 件目が読める / 外すとその控えだけ手放す', async () => {

@@ -52,10 +52,19 @@
 import { CSV_SOURCE_COLUMNS } from '@features/query/csv-tables';
 import {
   guestTableNameOf,
+  type DuckDbFileGuestSource,
   type DuckDbReadableGuestSource,
 } from '@features/query/sql-guest-source';
 import { duckDbTable } from '@features/query/duckdb-rows';
-import { duckDbTableNamesOf } from '@features/query/sql-multi-source';
+import { duckDbTableGroupsOf } from '@features/query/sql-multi-source';
+import {
+  SQLITE_NDJSON_TABLE_MAX_BYTES,
+  createTableSql,
+  insertFromNdjsonSql,
+  quoteIdent,
+  refusedNote,
+  type SqliteExportedTable,
+} from '@features/query/sqlite-ndjson';
 import { duckDbWriteKind } from '@features/query/duckdb-write';
 import {
   DUCKDB_EXTENSIONS,
@@ -133,15 +142,26 @@ export interface DuckDbRunnerDeps {
    *   (`DuckDbPackStore.readMeta()` が `null` を返す形と揃えてある)。
    */
   lendInstalled?: () => Promise<{ wasmUrl: string; workerUrl: string; dispose: () => void } | null>;
+  /**
+   * 🔴 **`.sqlite` を表ごとの NDJSON にしてもらう口**(#682 段④d。任意 ── 渡さない版では
+   *   `.sqlite` を DuckDB へ入れるとき**理由を言って断る**)。
+   * 🔑 行を読むのは **sqlite を持つ storage worker** である(DuckDB の器では `ATTACH` が bytes を
+   *   読めない ── 実測)。⚠ 呼ぶのは**器へ入れ直すときだけ**。
+   */
+  exportSqlite?: (
+    image: Uint8Array,
+    maxTableBytes: number,
+  ) => Promise<{ tables: readonly SqliteExportedTable[] }>;
 }
 
 /** 器へ差し込む相手 1 件(#918 段⑦ で、1 件から N 件へ)。 */
 export interface DuckDbInputSource {
   /**
    * 相手。
-   * 🔴 **型が `DuckDbReadableGuestSource`** なので、`.xlsx` や `.sqlite` を
-   *   ここへ渡す道は**構造から消えている**(#682 段④c)── だから下の
-   *   `duckDbLoadSql` に「読めない相手が来たら断る」枝が要らない。
+   * 🔴 **型が `DuckDbReadableGuestSource`** なので、`.xlsx` をここへ渡す道は
+   *   **構造から消えている**(#682 段④c)── だから `load` に「読めない相手が来たら断る」枝が要らない。
+   * 🔴 `.sqlite` は渡せる(#682 段④d)── ただし `duckDbLoadSql`(1 file = 1 表)ではなく
+   *   `loadSqlite`(中の表の数だけ)で写す。`load` が `kind` で振り分ける。
    */
   readonly source: DuckDbReadableGuestSource;
   /**
@@ -187,7 +207,15 @@ export function sqlQuote(s: string): string {
  * ⚠ **`.csv` は実測済み / `.tsv` は未測** ── 区切りの見分けは上流の推定に任せている。
  *   外した回は上流の断り文がそのまま画面に出る(黙って化けはしない)。
  */
-export function duckDbFileNameOf(source: DuckDbReadableGuestSource, slot = 0): string {
+export function duckDbFileNameOf(
+  source: DuckDbReadableGuestSource,
+  slot = 0,
+  /**
+   * 🔴 **`.sqlite` だけ使う**(#682 段④d)── 中の表ごとに 1 つの NDJSON を差すので、
+   *   同じ相手でも**表の番号で名前を変える**(同じ名前を 2 度 `put` すると入れ替わる)。
+   */
+  table = 0,
+): string {
   /**
    * 🔴 **N 件を並べるときは、器の中の名前もぶつからないようにする**(#918 段⑦)。
    * ⚠ `slot` が 0 の回(= 1 件目 / 1 件だけ)は**今までと 1 バイトも変えない**(`source.csv`)。
@@ -202,6 +230,8 @@ export function duckDbFileNameOf(source: DuckDbReadableGuestSource, slot = 0): s
       return `${stem}.parquet`;
     case 'json':
       return source.lang === 'ndjson' ? `${stem}.ndjson` : `${stem}.json`;
+    case 'sqlite':
+      return `${stem}_t${String(table + 1)}.ndjson`;
     default: {
       // ⚠ 種類を足した人がここを書き忘れたら tsc が落とす(`if` を並べると黙って素通りする)
       const never: never = source;
@@ -212,10 +242,13 @@ export function duckDbFileNameOf(source: DuckDbReadableGuestSource, slot = 0): s
 
 /**
  * 差し込んだ file を読む `FROM …` の 1 句。
- * 🔑 **`DUCKDB_READABLE_KINDS` と同じ 3 つ**を網羅する ── 一覧はあちらが正本で、
+ * 🔑 **`DUCKDB_READABLE_KINDS` のうち「1 file = 1 表」の 3 つ**を網羅する ── 一覧はあちらが正本で、
  *   ここは `never` の網羅検査で追随を強制される(#682 段④c)。
+ * 🔴 **`.sqlite` は引数の型に入れていない**(#682 段④d)── 表の数が中身次第で、1 つの `FROM …` に
+ *   ならない。`sqlite` を足す枝を書くと、誰も通らない死んだ枝になる(`DuckDbFileGuestSource`)。
+ *   読み方は `sqlite-ndjson.ts` の `insertFromNdjsonSql`。
  */
-function duckDbReadFrom(source: DuckDbReadableGuestSource, file: string): string {
+function duckDbReadFrom(source: DuckDbFileGuestSource, file: string): string {
   switch (source.kind) {
     case 'csv':
       return 'read_csv_auto(' + sqlQuote(file) + ')';
@@ -253,7 +286,7 @@ function duckDbReadFrom(source: DuckDbReadableGuestSource, file: string): string
  *   外を塞いだ後に**引けなくなる**(実測で `Permission Error`)。
  */
 export function duckDbLoadSql(
-  source: DuckDbReadableGuestSource,
+  source: DuckDbFileGuestSource,
   file: string,
   /**
    * 🔴 **作る表の名前**(#918 段⑦)。省けば今までどおり(1 件のときの `csv` / `json` / `parquet`)。
@@ -283,6 +316,14 @@ export class DuckDbRunner {
   private readonly lease: DuckDbLease;
   /** 検めた目録(1 度読めば替わらない)。⚠ 読めなかった回は控えない。 */
   private urls: DuckDbOpenUrls | null = null;
+  /**
+   * 🔴 **いまの器へ写せなかった表の理由**(#682 段④d)。⚠ `load` が入れ直すたびに作り直す。
+   *
+   * 🔑 写せなかった表は**器に作らない**(空の表を作ると「0 件の表」に読める)── だから user が
+   *   その名前を引くと DuckDB は「そんな表は無い」としか言わない。**そのとき**だけ、ここの理由を
+   *   添える(`withRefused`)。引いていない回には何も言わない。
+   */
+  private refused: string[] = [];
 
   constructor(private readonly deps: DuckDbRunnerDeps) {
     this.lease = new DuckDbLease({
@@ -338,6 +379,9 @@ export class DuckDbRunner {
         key: input.sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
         load: (h) => this.load(h, input.sources),
       },
+    }).catch((e: unknown) => {
+      // 🔴 引いた回が落ちたときだけ、写せなかった表の理由を添える(`withRefused`)
+      throw this.withRefused(e);
     });
     const table = duckDbTable(raw);
     const truncated = table.rows.length > DUCKDB_MAX_ROWS;
@@ -357,15 +401,96 @@ export class DuckDbRunner {
    *   2 件目を差し込めない(塞いだ後は file を読めない)。
    */
   private async load(h: DuckDbHandle, sources: readonly DuckDbInputSource[]): Promise<void> {
-    const tables = duckDbTableNamesOf(sources.map((s) => s.source));
+    this.refused = [];
+    /**
+     * 🔴 **`.sqlite` だけ、先に中身を読む**(#682 段④d)── 表の名前が**中の表の名前**で決まる
+     *   (1 件なら元の名前のまま / 2 件以上は `ファイル名_表名`)ので、名前を決める前に要る。
+     * ⚠ 読むのは sqlite を持つ storage worker(DuckDB の器では `ATTACH` が bytes を読めない ── 実測)。
+     */
+    const exported = new Map<number, readonly SqliteExportedTable[]>();
     for (const [i, { source, readBytes }] of sources.entries()) {
+      if (source.kind !== 'sqlite') continue;
+      const bytes = await readBytes();
+      if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
+      const exportSqlite = this.deps.exportSqlite;
+      if (exportSqlite === undefined) {
+        throw new Error('この版では .sqlite を DuckDB で引けません(アプリを読み直すと直ることがあります)');
+      }
+      exported.set(i, (await exportSqlite(bytes, SQLITE_NDJSON_TABLE_MAX_BYTES)).tables);
+    }
+    const groups = duckDbTableGroupsOf(
+      sources.map((s) => s.source),
+      (i) => (exported.get(i) ?? []).map((t) => t.name),
+    );
+    for (const [i, { source, readBytes }] of sources.entries()) {
+      if (source.kind === 'sqlite') {
+        await this.loadSqlite(h, source, i, exported.get(i) ?? [], groups[i] ?? []);
+        // ⚠ 写し終えた分は手放す(同じ bytes を 2 回持たない)
+        exported.delete(i);
+        continue;
+      }
       const bytes = await readBytes();
       if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
       const file = duckDbFileNameOf(source, i);
       await h.put(file, bytes);
-      await h.query(duckDbLoadSql(source, file, tables[i]));
+      await h.query(duckDbLoadSql(source, file, groups[i]?.[0]));
     }
     await h.query(DUCKDB_SEAL_SQL);
+  }
+
+  /**
+   * 🔴 **`.sqlite` の表を 1 枚ずつ、器へ写す**(#682 段④d)。
+   *
+   * 表 1 枚あたり:①宣言から `CREATE TABLE`(**空の表も列を持つ**)→ ②行があれば NDJSON を差す →
+   * ③`INSERT … SELECT … read_json(列と型を明示)` → ④**NDJSON を外す**(表と同じ中身を 2 回持たない)。
+   *
+   * 🔑 **型が合わない行が在る表は、その表だけ全列 VARCHAR で作り直す** ── sqlite は INTEGER の列に
+   *   文字を入れられるので、型どおりに入れると落ちる(実測)。黙って NULL にはしない(値を失わない)。
+   * 🔑 **それでも入らない表は、その表だけ断る**(`refused`)── 他の表は引ける。
+   *   ⚠ 断った表は**作らない**(空の表を残すと「0 件の表」に読める)。
+   */
+  private async loadSqlite(
+    h: DuckDbHandle,
+    source: Extract<DuckDbReadableGuestSource, { kind: 'sqlite' }>,
+    slot: number,
+    tables: readonly SqliteExportedTable[],
+    names: readonly string[],
+  ): Promise<void> {
+    for (const [k, t] of tables.entries()) {
+      const name = names[k] ?? t.name;
+      if (t.refused !== null) {
+        this.refused.push(refusedNote(name, t.refused));
+        continue;
+      }
+      await h.query(createTableSql(name, t.columns));
+      // ⚠ 行が 0 件の表は file を作らない(列は上で作った ── `read_json_auto` は空だと列を失う)
+      if (t.ndjson === null) continue;
+      const file = duckDbFileNameOf(source, slot, k);
+      await h.put(file, t.ndjson);
+      try {
+        try {
+          await h.query(insertFromNdjsonSql(name, file, t.columns));
+        } catch {
+          await h.query(createTableSql(name, t.columns, true));
+          try {
+            await h.query(insertFromNdjsonSql(name, file, t.columns, true));
+          } catch (e) {
+            await h.query('DROP TABLE ' + quoteIdent(name));
+            const first = (e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '';
+            this.refused.push(refusedNote(name, `DuckDB が読めませんでした: ${first}`));
+          }
+        }
+      } finally {
+        await h.drop(file);
+      }
+    }
+  }
+
+  /** 引いた回が落ちたとき、写せなかった表の理由を添える(引いていない回は何も言わない)。 */
+  private withRefused(e: unknown): Error {
+    const err = e instanceof Error ? e : new Error(String(e));
+    if (this.refused.length === 0) return err;
+    return new Error(`${err.message} ── ${this.refused.join(' / ')}`, { cause: err });
   }
 
   /**

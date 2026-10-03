@@ -115,13 +115,11 @@ function isReserved(name: string): boolean {
 }
 
 /**
- * file の名前から、表の名前を作る。
- *
- * @param name 添付や手持ちの file の名前(`sales_2026.csv`)。
- * @param taken 既に使っている表の名前。⚠ **書き換えない**。大文字小文字は区別しない。
+ * 本体の名前から、実際の表の名前を決める(長さ・先頭の数字・予約語・取られている名前の逃がし)。
+ * ⚠ `tableNameFromFile` と `tableNameFromFileTable` が**同じ逃がし方**を使う(2 か所に書かない)。
  */
-export function tableNameFromFile(name: string, taken: ReadonlySet<string>): string {
-  let base = cleanStem(stemOf(name));
+function settle(body: string, taken: ReadonlySet<string>): string {
+  let base = body;
   if (base === '') base = TABLE_NAME_FALLBACK;
   // 先頭が数字なら `_` を前置(数字で始まる名前は裸で書けない)
   if (/^\p{N}/u.test(base)) base = `_${base}`;
@@ -141,4 +139,34 @@ export function tableNameFromFile(name: string, taken: ReadonlySet<string>): str
     const candidate = clip(base, TABLE_NAME_MAX - suffix.length) + suffix;
     if (!used.has(candidate.toLowerCase())) return candidate;
   }
+}
+
+/**
+ * file の名前から、表の名前を作る。
+ *
+ * @param name 添付や手持ちの file の名前(`sales_2026.csv`)。
+ * @param taken 既に使っている表の名前。⚠ **書き換えない**。大文字小文字は区別しない。
+ */
+export function tableNameFromFile(name: string, taken: ReadonlySet<string>): string {
+  return settle(cleanStem(stemOf(name)), taken);
+}
+
+/**
+ * 🔴 **`.sqlite` の中の表の名前を、2 つ以上の file を並べるときの名前にする**(#682 段④d)。
+ * 形は **`ファイル名_表名`**(🟣 Gemini 裁定 2026-10-02)── `売上.sqlite` の `注文` → `売上_注文`。
+ *
+ * 🔑 規則は `tableNameFromFile` と**同じ**(全角→半角 / 使えない字は `_` / 予約語 / 取られていれば `_2`)。
+ *   file 名と表名のどちらかが空になる(拡張子しか無い / 記号だけ)ときは、残った側だけを使う。
+ * ⚠ **1 つの file だけを引くときは使わない** ── その場合は**元の名前のまま**引ける
+ *   (`SELECT * FROM 売上`)。使うのは「名前を file 名から付け直す」2 件以上のときだけ。
+ */
+export function tableNameFromFileTable(
+  fileName: string,
+  tableName: string,
+  taken: ReadonlySet<string>,
+): string {
+  const f = cleanStem(stemOf(fileName));
+  const t = cleanStem(tableName);
+  const body = f !== '' && t !== '' ? `${f}_${t}` : f !== '' ? f : t;
+  return settle(body, taken);
 }

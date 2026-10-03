@@ -15,7 +15,8 @@ import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
 import type { SearchDetailRow } from '@features/filter/search-snippet';
 // 🔴 「これは何の file か」の正本は features 層に 1 つだけ在る(§7)
-import type { SqliteReadableGuestSource } from '@features/query/sql-guest-source';
+import type { SqliteConvertGuestSource } from '@features/query/sql-guest-source';
+import type { SqliteExportedTable } from '@features/query/sqlite-ndjson';
 
 export type StorageRequest =
   /**
@@ -318,16 +319,33 @@ export type StorageRequest =
        *   🔑 `kind` で割った 1 つの field なら、増やしたときに **worker の `switch` が
        *   落ちる**(網羅が型で守られる)。
        *
-       * 🔴 **受けるのは「内蔵の sqlite が読める種類」だけ**(#682 段④c)──
-       *   `SqlGuestSource` ではなく `SqliteReadableGuestSource` で受ける。
+       * 🔴 **受けるのは「変換して開く種類」(`.csv` / `.xlsx`)だけ**(#682 段④c / 段④d)──
+       *   `SqlGuestSource` ではなく `SqliteConvertGuestSource` で受ける
+       *   (`.sqlite` は画像そのもの = `source` を渡さない)。
        * ⚠ **「渡ってきたら断る」枝を書かない** ── その枝は誰も通らない死んだ枝に
        *   なり、鳴らない検査が 1 つ増えるだけである。🔑 型で切り出してあるので、
        *   `.parquet` をここへ渡す道は**構造から消えている**
        *   (CLAUDE.md §7「検出するより起こらなくする」)。
        */
-      source?: SqliteReadableGuestSource;
+      source?: SqliteConvertGuestSource;
     }
   | { op: 'closeSqlGuest'; guest: string }
+  | {
+      /**
+       * 🔴 **取り込んだ `.sqlite` を、DuckDB で引くための NDJSON の写しにする**(#682 段④d)。
+       *
+       * ⚠ **客の DB(`openSqlGuest`)とは別物** ── 開かず、**その場で開いて・読んで・閉じる**
+       *   (窓の合言葉も要らない。常駐させない ── 不可侵指示 2026-07-27「ライフサイクル終端での即破棄」)。
+       * 🔑 行を読むのは**ここ(worker)の中**で、返すのは組み上がった bytes だけ
+       *   (メインへ行の配列を載せない ── 実測で 100k 行の `selectObjects` が 1,365ms)。
+       * ⚠ 客の file を触る口なので、`GUEST_OPS` に入れてある(壊れた `.sqlite` を選んだだけで
+       *   「うちの DB が壊れた」と読まない ── #971)。
+       */
+      op: 'exportSqliteForDuckDb';
+      image: Uint8Array;
+      /** 1 表あたりの NDJSON の天井(バイト)。⚠ 呼び側が `SQLITE_NDJSON_TABLE_MAX_BYTES` を渡す。 */
+      maxTableBytes: number;
+    }
   | {
       op: 'upsertEntry';
       cid: string;
@@ -991,6 +1009,8 @@ export interface ResultMap {
     truncated: boolean;
   };
   closeSqlGuest: null;
+  /** 取り込んだ `.sqlite` の表ごとの NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
+  exportSqliteForDuckDb: { tables: SqliteExportedTable[] };
   runReadOnlySql: {
     columns: string[];
     rows: Array<Array<string | number | null>>;

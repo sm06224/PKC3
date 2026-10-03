@@ -140,6 +140,10 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
       await db.dropFile(name).catch(() => undefined);
       await db.registerFileBuffer(name, bytes);
     },
+    drop: async (name: string) => {
+      // ⚠ 無い名前は上流が投げる ── 外すだけなので飲む(`put` の先頭と同じ作法)
+      await db.dropFile(name).catch(() => undefined);
+    },
     query: async (sql: string) => {
       const table = await conn.query(sql);
       /**

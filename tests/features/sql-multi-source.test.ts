@@ -8,9 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkAddSource,
+  duckDbTableGroupsOf,
   duckDbTableNamesOf,
   duckDbTableNamesOfNames,
   SQL_MAX_SOURCES,
+  SQLITE_INNER_PLACEHOLDER,
   sqlMultiNote,
 } from '../../src/features/query/sql-multi-source';
 import { duckDbReadableSourceOf, type DuckDbReadableGuestSource } from '../../src/features/query/sql-guest-source';
@@ -67,23 +69,76 @@ describe('🔴 表の名前(設問 3 = A)', () => {
   });
 });
 
-describe('🔴 足せるか(上限 4 / xlsx・sqlite は足せない / 重複)', () => {
+describe('🔴 `.sqlite` の表の名前(#682 段④d。🟣 Gemini 裁定 2026-10-02)', () => {
+  const inner: Record<number, string[]> = { 0: ['売上', '客'], 1: ['売上'] };
+  const innerOf = (i: number): string[] => inner[i] ?? [];
+
+  it('🔴 1 件だけなら、中の表は元の名前のまま(csv などへ潰さない)', () => {
+    expect(duckDbTableGroupsOf(srcs('家計.sqlite'), innerOf)).toEqual([['売上', '客']]);
+    // 空の DB(表が 1 枚も無い)も落ちない
+    expect(duckDbTableGroupsOf(srcs('家計.sqlite'), () => [])).toEqual([[]]);
+    // ⚠ `csv` という名前に写さない(1 つに潰せない)
+    expect(duckDbTableGroupsOf(srcs('家計.sqlite'), innerOf).flat()).not.toContain('csv');
+  });
+
+  it('🔴 2 件以上なら「ファイル名_表名」(sqlite 側の全部)、csv は file 名のまま', () => {
+    expect(duckDbTableGroupsOf(srcs('家計.sqlite', '在庫.csv'), innerOf)).toEqual([
+      ['家計_売上', '家計_客'],
+      ['在庫'],
+    ]);
+  });
+
+  it('🔴 2 つの .sqlite に同じ名前の表が在っても、ぶつからない', () => {
+    const g = duckDbTableGroupsOf(srcs('a.sqlite', 'b.sqlite'), innerOf);
+    expect(g).toEqual([['a_売上', 'a_客'], ['b_売上']]);
+    // 同じ file 名 2 つ(別の場所)でも _2 が付く
+    const same = duckDbTableGroupsOf(srcs('a.sqlite', 'a.sqlite'), () => ['t']);
+    expect(same).toEqual([['a_t'], ['a_t_2']]);
+  });
+
+  it('🔴 file 名 + 表名が、別の file の名前とぶつかったら _2(取られた名前を黙って上書きしない)', () => {
+    // `a_t.csv` → `a_t`、`a.sqlite` の表 `t` → `a_t` が取られているので `a_t_2`
+    expect(duckDbTableGroupsOf(srcs('a_t.csv', 'a.sqlite'), () => ['t'])).toEqual([['a_t'], ['a_t_2']]);
+  });
+
+  it('画面用(名前だけ)は「ファイル名_表の名前」という形で言う ── 中身は読んでいない', () => {
+    expect(duckDbTableNamesOfNames(['家計.sqlite', '在庫.csv'])).toEqual([
+      `家計_${SQLITE_INNER_PLACEHOLDER}`,
+      '在庫',
+    ]);
+    // 1 相手 = 1 つ(添字が相手と揃う ── 画面が `[i + 1]` で引く)
+    expect(duckDbTableNamesOfNames(['a.sqlite', 'b.sqlite', 'c.csv'])).toHaveLength(3);
+  });
+
+  it('🔴 `.sqlite` を含むときの案内は、表の数を言わない(中に何枚在るか分からない)', () => {
+    const note = sqlMultiNote(['家計_表の名前', '在庫'], ['家計.sqlite']);
+    expect(note).not.toContain('2 つの表');
+    expect(note).toContain('家計.sqlite の表は');
+    expect(note).toContain('ファイル名_表の名前');
+    // 対照群:`.sqlite` が無ければ今までどおり
+    expect(sqlMultiNote(['売上', '在庫'], [])).toBe('いま調べているのは 売上 / 在庫 の 2 つの表です。');
+  });
+});
+
+describe('🔴 足せるか(上限 4 / xlsx は足せない / 重複)', () => {
   const primary = { lid: 'p', name: '売上.csv' };
 
-  it('csv / tsv / parquet / json 系は足せる', () => {
-    for (const n of ['a.csv', 'a.tsv', 'a.parquet', 'a.json', 'a.ndjson', 'a.jsonl']) {
+  it('csv / tsv / parquet / json 系 / sqlite は足せる', () => {
+    for (const n of ['a.csv', 'a.tsv', 'a.parquet', 'a.json', 'a.ndjson', 'a.jsonl', 'a.sqlite', 'a.db']) {
       expect(checkAddSource(primary, [], { lid: 'x', name: n }).ok, n).toBe(true);
     }
   });
 
-  it('🔴 .xlsx / .sqlite は足せない ── 理由に名前と、足せる拡張子を言う', () => {
-    for (const n of ['帳簿.xlsx', '売上.sqlite', '売上.db']) {
+  it('🔴 .xlsx は足せない ── 理由に名前と、足せる拡張子(.sqlite を含む)を言う', () => {
+    for (const n of ['帳簿.xlsx']) {
       const r = checkAddSource(primary, [], { lid: 'x', name: n });
       expect(r.ok, n).toBe(false);
       if (!r.ok) {
         expect(r.why).toContain(n);
         expect(r.why).toContain('DuckDB で読めない');
         expect(r.why).toContain('.csv');
+        // 🔴 足せる拡張子の案内に `.sqlite` が入っている(#682 段④d。入っていないと「足せるのに案内に無い」)
+        expect(r.why).toContain('.sqlite');
       }
     }
   });
@@ -109,7 +164,9 @@ describe('🔴 足せるか(上限 4 / xlsx・sqlite は足せない / 重複)',
 
   it('1 件目が DuckDB で読めない相手(または開いていない)なら、足せない', () => {
     expect(checkAddSource(null, [], { lid: 'x', name: 'a.csv' }).ok).toBe(false);
-    expect(checkAddSource({ lid: 'p', name: '売上.sqlite' }, [], { lid: 'x', name: 'a.csv' }).ok).toBe(false);
+    expect(checkAddSource({ lid: 'p', name: '帳簿.xlsx' }, [], { lid: 'x', name: 'a.csv' }).ok).toBe(false);
+    // 🟢 1 件目が `.sqlite` なら足せる(#682 段④d)
+    expect(checkAddSource({ lid: 'p', name: '売上.sqlite' }, [], { lid: 'x', name: 'a.csv' }).ok).toBe(true);
   });
 });
 

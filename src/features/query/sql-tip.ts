@@ -17,6 +17,15 @@ import type { SqlEngine } from './sql-engine';
 import { guestTableNameOf, duckDbReadableSourceOf } from './sql-guest-source';
 import { DUCKDB_TABLE_LIFETIME, DUCKDB_TABLE_RESET, DUCKDB_WRITE_FORMS } from './duckdb-write';
 import { duckDbTableNamesOfNames, sqlMultiNote } from './sql-multi-source';
+import { tableNameFromFileTable } from './sql-table-name';
+import { quoteIdent } from './sqlite-ndjson';
+
+/**
+ * 表が 1 枚も無い `.sqlite` を DuckDB で開いたときの手本(表の一覧)。
+ * ⚠ `SHOW TABLES` ではない ── 字の門(`duckdb-guard.ts`)が先頭の語を `SELECT` / `WITH` / `FROM` …
+ *   に絞っているので断られる(手本が打てないのは、いちばん悪い形の dead click)。
+ */
+const DUCKDB_TABLE_LIST_SQL = 'SELECT table_name FROM information_schema.tables';
 
 /** 名前を並べる上限。⚠ 表が何十個も在る DB で、案内文が画面を埋めない。 */
 export const TIP_TABLES_MAX = 8;
@@ -91,7 +100,7 @@ export function sqlTipText(
        *   🔑 知らせないと、**在ることに気づけないまま**になる(user の動機は
        *   「DuckDB を分かち合いたい」なので、隠れているのはいちばん悪い)。
        */
-      '取り込んだ .csv や .tsv、.parquet や .json を選ぶと、DuckDB でも引けます(DuckDB では表を作ることもできます)。'
+      '取り込んだ .csv や .tsv、.parquet や .json、.sqlite を選ぶと、DuckDB でも引けます(DuckDB では表を作ることもできます)。'
     );
   }
   if (engine === 'duckdb') {
@@ -109,6 +118,18 @@ export function sqlTipText(
      *   `CREATE TABLE` する名前と同じ物である(`duckdb-runner.ts` も同じ関数を呼ぶ)。
      */
     const src = duckDbReadableSourceOf('', target.name);
+    /**
+     * 🔴 **`.sqlite` は表が何枚も在り、名前は元のまま**(#682 段④d)。⚠ `guestTableNameOf` は
+     *   「1 つの file = 1 つの表」の相手だけを受ける(型で外してある)── ここで分ける。
+     *   🔑 並べる表の名前は**選んだ時点で開いてある客**(`target.tables`)から採る。
+     */
+    if (src?.kind === 'sqlite') {
+      return (
+        `いま調べているのは ${target.name} を DuckDB へ写した表です。この file に在る表: ${tableList(target.tables)}。` +
+        '表の名前は元のままです。BLOB の列は base64 の文字として入ります。' +
+        'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+      );
+    }
     const table = src === null ? (target.tables[0] ?? 'csv') : guestTableNameOf(src);
     return (
       `いま調べているのは ${target.name} を DuckDB へ写した表 ${table} です。` +
@@ -139,8 +160,10 @@ function multiTipText(names: readonly string[]): string {
     .map((n, i) => `${n} → ${tables[i] ?? ''}`)
     .join('、');
   const anyCsv = names.some((n) => duckDbReadableSourceOf('', n)?.kind === 'csv');
+  // 🔴 `.sqlite` を含むときは表の数を言わない(中に何枚在るかは走らせるまで分からない)
+  const sqliteNames = names.filter((n) => duckDbReadableSourceOf('', n)?.kind === 'sqlite');
   return (
-    sqlMultiNote(tables) +
+    sqlMultiNote(tables, sqliteNames) +
     `表の名前は file の名前から付けています(${pairs})。` +
     'JOIN で突き合わせられます。' +
     (anyCsv ? '.csv / .tsv の表には、先頭に _note と _lid の列が付きます。' : '') +
@@ -187,6 +210,18 @@ export function sqlPlaceholder(
    * ⚠ 全部を `,` で並べる形にしない ── 突き合わせる列の無い**総当たり**(行数の掛け算)を手本にしてしまう。
    */
   if (target !== null && more.length > 0) {
+    /**
+     * 🔴 **1 つ目が `.sqlite` のときは、開いてある客の実際の表で手本を作る**(#682 段④d)。
+     * ⚠ `duckDbTableNamesOfNames` は `.sqlite` を「`売上_表の名前`」という**形**でしか言えない ──
+     *   そのまま手本にすると**打っても引けない**。1 つ目は取り置きの名前が空なので、
+     *   `ファイル名_最初の表` がそのまま器の名前になる(`duckDbTableGroupsOf` と同じ規則)。
+     */
+    if (duckDbReadableSourceOf('', target.name)?.kind === 'sqlite') {
+      const t = target.tables[0];
+      return t === undefined
+        ? DUCKDB_TABLE_LIST_SQL
+        : `FROM ${tableNameFromFileTable(target.name, t, new Set())} SELECT * LIMIT 20`;
+    }
     const first = duckDbTableNamesOfNames([target.name, ...more])[0];
     return `FROM ${first ?? 'csv'} SELECT * LIMIT 20`;
   }
@@ -197,6 +232,11 @@ export function sqlPlaceholder(
    */
   if (engine === 'duckdb') {
     const src = target === null ? null : duckDbReadableSourceOf('', target.name);
+    // 🔴 `.sqlite` は元の名前のまま ── 1 つ目の表を引く(表が無い DB は表の一覧)
+    if (src?.kind === 'sqlite') {
+      const t = target?.tables[0];
+      return t === undefined ? DUCKDB_TABLE_LIST_SQL : `FROM ${quoteIdent(t)} SELECT * LIMIT 20`;
+    }
     return `FROM ${src === null ? 'csv' : guestTableNameOf(src)} SELECT * LIMIT 20`;
   }
   if (target === null) {

@@ -29,9 +29,10 @@ describe('どのエンジンで引くか', () => {
       ['明細.json', ['duckdb']],
       ['ログ.ndjson', ['duckdb']],
       ['ログ.jsonl', ['duckdb']],
-      // .sqlite / .xlsx は sqlite だけ(DuckDB から読むには外の拡張が要る)
-      ['家計.sqlite', ['sqlite']],
-      ['家計.db', ['sqlite']],
+      // 🔴 .sqlite は両方(#682 段④d)── DuckDB へは表を NDJSON に写して渡す
+      ['家計.sqlite', ['sqlite', 'duckdb']],
+      ['家計.db', ['sqlite', 'duckdb']],
+      // .xlsx は sqlite だけ(DuckDB から読むには `excel` 拡張が要る)
       ['表.xlsx', ['sqlite']],
       // 知らない拡張子も sqlite だけ(白名簿の向き)
       ['memo.txt', ['sqlite']],
@@ -81,8 +82,10 @@ describe('どのエンジンで引くか', () => {
   it('相手を選び直して選べなくなったら、選べる物へ落ちる', () => {
     // csv では DuckDB が選べる
     expect(resolveSqlEngine('duckdb', '売上.csv')).toBe('duckdb');
-    // 🔴 .sqlite へ選び直したら sqlite へ落ちる(画面に無い値で引かせない)
-    expect(resolveSqlEngine('duckdb', '家計.sqlite')).toBe('sqlite');
+    // 🔴 .xlsx へ選び直したら sqlite へ落ちる(画面に無い値で引かせない)
+    expect(resolveSqlEngine('duckdb', '表.xlsx')).toBe('sqlite');
+    // 🔴 .sqlite は DuckDB も選べるので、選んだまま持ち越す(#682 段④d)
+    expect(resolveSqlEngine('duckdb', '家計.sqlite')).toBe('duckdb');
     expect(resolveSqlEngine('duckdb', null)).toBe('sqlite');
     // sqlite はどこでもそのまま
     expect(resolveSqlEngine('sqlite', '売上.csv')).toBe('sqlite');
@@ -110,11 +113,11 @@ describe('🔴 選べない側に添える「どうすれば使えるか」(#682
    *   変異が生き延びる(user は前の相手の理由を読むことになる)。
    */
   it('相手ごとに、選べない理由の字が決まっている', () => {
-    const DUCK_ONLY = '.csv / .tsv / .parquet / .json のときだけ使えます';
+    const DUCK_ONLY = '.csv / .tsv / .parquet / .json / .sqlite のときだけ使えます';
     const SQLITE_NO = 'この形式は DuckDB でだけ引けます';
     const table: Array<[string | null, string | null, string | null]> = [
       // 相手, sqlite の理由, duckdb の理由 ── `null` = 選べる
-      [null, null, '取り込んだ .csv / .parquet / .json などを選ぶと使えます'],
+      [null, null, '取り込んだ .csv / .parquet / .json / .sqlite などを選ぶと使えます'],
       ['売上.csv', null, null],
       ['ログ.TSV', null, null],
       /**
@@ -128,8 +131,9 @@ describe('🔴 選べない側に添える「どうすれば使えるか」(#682
       ['明細.json', SQLITE_NO, null],
       ['ログ.ndjson', SQLITE_NO, null],
       ['ログ.JSONL', SQLITE_NO, null],
-      ['家計.sqlite', null, DUCK_ONLY],
-      ['家計.db', null, DUCK_ONLY],
+      // 🟢 .sqlite は DuckDB も選べる(表を NDJSON に写して渡す。#682 段④d)
+      ['家計.sqlite', null, null],
+      ['家計.db', null, null],
       ['表.xlsx', null, DUCK_ONLY],
       ['memo.txt', null, DUCK_ONLY],
     ];

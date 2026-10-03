@@ -154,7 +154,7 @@ export function corruptReport(op: string, raw: string): string {
  *   user は何も壊していないのに、**ノートを保存できなくなる**。
  * 🔑 だから**客の file を触る口は、判定から外す**。
  */
-const GUEST_OPS: readonly string[] = ['openSqlGuest', 'closeSqlGuest'];
+const GUEST_OPS: readonly string[] = ['openSqlGuest', 'closeSqlGuest', 'exportSqliteForDuckDb'];
 
 /**
  * 🔴 **この error で「うちの DB が壊れた」と決めてよいか**。

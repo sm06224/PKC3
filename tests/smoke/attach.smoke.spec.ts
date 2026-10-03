@@ -12,6 +12,7 @@ import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRend
 // ⚠ 段⑤(xlsx を SQL で調べる)の bytes は Node 側でこの 1 本から組む(#854 段③)。
 import { buildXlsx } from '../features/xlsx-fixture';
 import { buildParquet } from '../features/parquet-fixture';
+import { buildSqlite } from '../features/sqlite-fixture';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -2557,6 +2558,85 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     // ⚠ 次の段へ大きさを持ち越さない(この test はまだ続きうる)
     await page.setViewportSize(before);
   }
+
+  /**
+   * ⑫ 🔴 **`.sqlite` を DuckDB で引く**(#682 段④d。🟣 Gemini 裁定 2026-10-02:表の名前 = 元のまま)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ unit は「worker が NDJSON を返す」「runner が表を作る」「画面が `.sqlite` で DuckDB を選ばせる」を
+   *   **別々に**見る(`tests/duckdb-sqlite-ndjson.test.ts` は node で実物をつなぐが、ブラウザではない)。
+   *   🔴 **実ブラウザの storage worker が、添付の `.sqlite` を開いて NDJSON を組み、transfer で返し、
+   *   実ブラウザの DuckDB が `read_json` で表へ写し、外を塞いだ後で引ける**ことは、ここでしか言えない。
+   * ⚠ 観測点は **DuckDB でしか通らない字**にする ── `FROM 売上 SELECT …`(FROM 先行)と
+   *   `from_base64(…)` は sqlite では断られる / 存在しないので、**答えが返った = DuckDB が引いた**。
+   *   (`SELECT count(*) FROM 売上` だけだと、内蔵の sqlite が答えても同じ 3 が返る)
+   *
+   * 🔑 **新しい起動は増やさない**(#820)── ⑪ までの道中で開いたままの同じ面に続ける。
+   * ⚠ **履歴の帳簿(⑧)より後ろ**に置いてある ── 走らせた字が履歴に積まれ、⑧ の総数が動くので。
+   */
+  const outwardSqlite: string[] = [];
+  let seenSqlite = 0;
+  const watchSqlite = (req: { url: () => string }): void => {
+    seenSqlite += 1;
+    const u = req.url();
+    if (!u.startsWith('http://localhost') && !u.startsWith('http://127.0.0.1')) outwardSqlite.push(u);
+  };
+  page.on('request', watchSqlite);
+  try {
+    const sqliteBytes = buildSqlite((db) => {
+      db.exec('CREATE TABLE 売上 (id INTEGER, 品名 TEXT, 記録 BLOB)');
+      db.exec("INSERT INTO 売上 VALUES (1, 'りんご', x'000102'), (2, 'みかん', NULL), (3, 'ぶどう', x'ff')");
+      // 🔑 空の表も在る(列が残ることは unit が見る ── ここでは「写せない表が混ざっても引ける」を兼ねる)
+      db.exec('CREATE TABLE 空 (a INTEGER)');
+    });
+    await page.setInputFiles('[data-pkc-field="attach-input"]', {
+      name: 'kakei.sqlite',
+      mimeType: 'application/vnd.sqlite3',
+      buffer: Buffer.from(sqliteBytes),
+    });
+    // ⚠ 1 件ずつ、取り込めたのを見てから進む(上の `.parquet` の件と同じ罠)
+    await expect(sidebar, '.sqlite が添付として取り込まれていない').toContainText('kakei.sqlite');
+    await source.selectOption({ label: 'kakei.sqlite' });
+    await expect(note, '.sqlite が開いたことが画面に出ない').toContainText('kakei.sqlite を調べています');
+    // 🔴 `.sqlite` でも DuckDB が選べる(薄い字ではない)── 既定は今までの sqlite のまま
+    await expect(engine, '.sqlite を選んだのに、エンジンの選び所が出ていない').toBeVisible();
+    expect(
+      await duckOption.evaluate((o) => (o as HTMLOptionElement).disabled),
+      '.sqlite なのに DuckDB を選ばせていない',
+    ).toBe(false);
+    await expect(engine, '既定が sqlite でない(選ばなければ今までどおり、が崩れる)').toHaveValue('sqlite');
+    await engine.selectOption('duckdb');
+    await expect(engine).toHaveValue('duckdb');
+
+    // 🔴 元の表の名前のまま、DuckDB の字で引ける(件数が元の 3 件と同じ)
+    await page.fill('[data-pkc-field="sql-input"]', 'FROM 売上 SELECT count(*) AS n');
+    await clickReal(page, '[data-pkc-action="run-sql"]');
+    await expect(sqlTable.locator('thead th'), 'DuckDB が答えを返さない').toHaveText(['n'], {
+      timeout: 60_000,
+    });
+    await expect(sqlTable.locator('tbody td'), '写した表の件数が元と合わない').toHaveText(['3']);
+    // 🔴 BLOB は base64 の字で入り、元の長さ(3 bytes)へ戻せる ── 捨てていない / 化けていない
+    await page.fill(
+      '[data-pkc-field="sql-input"]',
+      'SELECT octet_length(from_base64(記録)) AS bytes FROM 売上 WHERE id = 1',
+    );
+    await clickReal(page, '[data-pkc-action="run-sql"]');
+    await expect(sqlTable.locator('thead th'), 'BLOB の答えの列が出ない').toHaveText(['bytes'], {
+      timeout: 60_000,
+    });
+    await expect(sqlTable.locator('tbody td'), 'BLOB が元の長さへ戻らない').toHaveText(['3']);
+    // 🔴 空の表も引ける(列が残っている ── 0 行の答え)
+    await page.fill('[data-pkc-field="sql-input"]', 'SELECT a FROM 空');
+    await clickReal(page, '[data-pkc-action="run-sql"]');
+    await expect(sqlTable.locator('thead th'), '空の表の列が出ない').toHaveText(['a'], { timeout: 60_000 });
+    await expect(sqlTable.locator('tbody td'), '空の表なのに行が出ている').toHaveCount(0);
+  } finally {
+    page.off('request', watchSqlite);
+  }
+  // ⚠ 空振り防止 ── 見張りが動いていたこと(動いていなければ `[]` は何も言わない)
+  expect(seenSqlite, '見張りが 1 件も数えていない(付け忘れ = この assert は空振り)').toBeGreaterThan(0);
+  expect(outwardSqlite, `.sqlite を DuckDB で引いたのに外へ出た: ${outwardSqlite.join(' / ')}`).toEqual([]);
 
   expect(errors).toEqual([]);
 });

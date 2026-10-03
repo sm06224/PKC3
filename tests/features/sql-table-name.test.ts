@@ -5,7 +5,12 @@
  *   **規則そのもの**の唯一の守り手である。1 規則ごとに、その規則だけが鳴る場面を持つ。
  */
 import { describe, expect, it } from 'vitest';
-import { TABLE_NAME_FALLBACK, TABLE_NAME_MAX, tableNameFromFile } from '../../src/features/query/sql-table-name';
+import {
+  TABLE_NAME_FALLBACK,
+  TABLE_NAME_MAX,
+  tableNameFromFile,
+  tableNameFromFileTable,
+} from '../../src/features/query/sql-table-name';
 
 const none = new Set<string>();
 
@@ -116,5 +121,43 @@ describe('表の名前の作り方', () => {
       expect(t, `${n} → ${t}`).toMatch(/^[\p{L}_][\p{L}\p{N}_]*$/u);
       expect(t.startsWith('sqlite_'), n).toBe(false);
     }
+  });
+});
+
+describe('🔴 `.sqlite` の中の表の名前(ファイル名_表名。#682 段④d)', () => {
+  it('形は「ファイル名_表名」', () => {
+    expect(tableNameFromFileTable('売上.sqlite', '注文', none)).toBe('売上_注文');
+    expect(tableNameFromFileTable('家計.db', 'items', none)).toBe('家計_items');
+  });
+
+  it('規則は file 名だけのときと同じ(全角→半角 / 使えない字は _ / 数字始まり)', () => {
+    expect(tableNameFromFileTable('ｓａｌｅｓ.sqlite', 'ｏｒｄｅｒ', none)).toBe('sales_order');
+    expect(tableNameFromFileTable('a b.sqlite', 'c-d', none)).toBe('a_b_c_d');
+    // 数字で始まる file 名 → `_` を前置(裸で書けない)
+    expect(tableNameFromFileTable('2024.sqlite', 't', none)).toBe('_2024_t');
+  });
+
+  it('取られていれば _2(別の file の同じ名前の表どうし)', () => {
+    const first = tableNameFromFileTable('売上.sqlite', '注文', none);
+    expect(tableNameFromFileTable('売上.sqlite', '注文', new Set([first]))).toBe('売上_注文_2');
+    // 大文字小文字は同じ名前
+    expect(tableNameFromFileTable('A.sqlite', 'T', new Set(['a_t']))).toBe('A_T_2');
+  });
+
+  it('どちらかが空になるときは、残った側だけ(両方空は既定の名前)', () => {
+    expect(tableNameFromFileTable('.sqlite', '注文', none)).toBe('注文');
+    expect(tableNameFromFileTable('売上.sqlite', '---', none)).toBe('売上');
+    expect(tableNameFromFileTable('.sqlite', '---', none)).toBe(TABLE_NAME_FALLBACK);
+  });
+
+  it('上限(字数)を超えない', () => {
+    const t = tableNameFromFileTable('あ'.repeat(30) + '.sqlite', 'い'.repeat(30), none);
+    expect([...t].length).toBeLessThanOrEqual(TABLE_NAME_MAX);
+  });
+
+  it('🔴 file 名だけの既存の規則は 1 文字も変わらない(共通の逃がし方へ寄せた後の対照群)', () => {
+    expect(tableNameFromFile('select.csv', none)).toBe('select_');
+    expect(tableNameFromFile('2026.csv', none)).toBe('_2026');
+    expect(tableNameFromFile('a.csv', new Set(['a']))).toBe('a_2');
   });
 });

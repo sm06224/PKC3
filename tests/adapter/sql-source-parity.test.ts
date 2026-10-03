@@ -19,7 +19,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SQLITE_EXTS, sqlSourcesOf } from '../../src/features/query/sqlite-attachment';
+import { sqlSourcesOf } from '../../src/features/query/sqlite-attachment';
 import { csvAttachmentSourcesOf } from '../../src/features/query/csv-attachment';
 import { xlsxAttachmentSourcesOf } from '../../src/features/query/xlsx-attachment';
 import {
@@ -72,12 +72,9 @@ describe('選び所と開き方が食い違わない', () => {
     const bad: string[] = [];
     for (const name of NAMES) {
       if (!listed(name)) continue;
-      const src = sqlGuestSourceOf('x', name);
-      // ⚠ `null` = 「`.sqlite` の image としてそのまま開く」既定の道 ──
-      //    その道へ落ちてよいのは、本当に sqlite 系の拡張子のときだけである
-      const ok =
-        src !== null || SQLITE_EXTS.some((e) => name.trim().toLowerCase().endsWith(e));
-      if (!ok) bad.push(name);
+      // 🔴 `.sqlite` も開き方を持つ(#682 段④d)── 以前は `null` = 「画像のまま開く」既定の道で、
+      //    sqlite 系の拡張子だけがそこへ落ちてよかった。いまは**全部が名乗る**
+      if (sqlGuestSourceOf('x', name) === null) bad.push(name);
     }
     expect(bad, `選べるのに開き方が決まらない: ${bad.join(' / ')}`).toEqual([]);
   });
@@ -106,8 +103,7 @@ describe('file 選択画面に出す拡張子と、開き方が食い違わな�
   it('🔴 `accept` に出す拡張子は、全部ほんとうに開ける', () => {
     const bad = SQL_GUEST_EXTS.filter((ext) => {
       const name = `手元の一覧${ext}`;
-      // ⚠ `null` = sqlite の既定の道 ── そこへ落ちてよいのは sqlite 系だけ
-      return sqlGuestSourceOf('x', name) === null && !SQLITE_EXTS.some((e) => ext === e);
+      return sqlGuestSourceOf('x', name) === null;
     });
     expect(bad, `選べるのに開き方が決まらない拡張子: ${bad.join(' / ')}`).toEqual([]);
   });

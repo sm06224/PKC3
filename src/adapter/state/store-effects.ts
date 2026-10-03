@@ -77,9 +77,11 @@ import {
   guestTableNameOf,
   isDuckDbOnlySource,
   sqlGuestSourceOf,
+  sqliteConvertSourceOf,
   type DuckDbReadableGuestSource,
-  type SqliteReadableGuestSource,
+  type SqliteConvertGuestSource,
 } from '@features/query/sql-guest-source';
+import type { SqliteExportedTable } from '@features/query/sqlite-ndjson';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
 import { sqlRunFailureText } from '@features/query/sql-guard';
@@ -154,9 +156,20 @@ export interface StorePort {
    */
   openSqlGuest?(
     image: Uint8Array,
-    source?: SqliteReadableGuestSource,
+    source?: SqliteConvertGuestSource,
   ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
   closeSqlGuest?(): Promise<null>;
+  /**
+   * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする**(#682 段④d)。⚠ 省略可(古い worker では
+   *   機能が減るだけ ── DuckDB で `.sqlite` を引くときに理由を言って断る)。
+   * ⚠ 呼ぶのは **DuckDB の器**(`duckdb-runner.ts`)で、effect 層は呼ばない ──
+   *   DuckDB は storage worker を通さない設計(`runDuckDbSql`)だが、**行を読むのだけは
+   *   sqlite を持つ storage worker の仕事**である。
+   */
+  exportSqliteForDuckDb?(
+    image: Uint8Array,
+    maxTableBytes: number,
+  ): Promise<{ tables: SqliteExportedTable[] }>;
   /**
    * 🔴 このノートを参照しているノート(#348)。⚠ **optional** ── 古い worker が
    * service worker のキャッシュに残っている端末では未知の op になる。
@@ -1018,11 +1031,15 @@ export function connectStoreEffects(
               );
             }
             /**
-             * ⚠ ここへ来る `source` は **`SqliteReadableGuestSource | null`** に
+             * ⚠ ここへ来る `source` は **`SqliteReadableGuestSource | null`**(`.sqlite` も入る)に
              *   絞り込まれている(すぐ上の `isDuckDbOnlySource` が型の述語)──
              *   だから「読めない相手が来たら断る」枝は書かない(誰も通らない)。
              */
-            const opened = await open(bytes, source ?? undefined);
+            /**
+             * 🔴 **`.sqlite` は `source` を渡さない**(#682 段④d)── 画像そのものなので、worker は
+             *   `source` が無ければ画像として開く。判定は `sqliteConvertSourceOf` 1 か所。
+             */
+            const opened = await open(bytes, sqliteConvertSourceOf(source));
             if (disposed) return;
             dispatcher.dispatch({
               type: 'SQL_GUEST_OPENED',

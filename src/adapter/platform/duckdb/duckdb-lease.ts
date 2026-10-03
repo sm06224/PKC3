@@ -29,6 +29,12 @@ export interface DuckDbHandle {
    *   (混ぜると、大きい csv が SQL の字として組み立てられる)。
    */
   put(name: string, bytes: Uint8Array): Promise<void>;
+  /**
+   * 🔴 **差し込んだ file を外す**(#682 段④d)。⚠ **表へ写し終えた file は残さない** ──
+   *   `.sqlite` の NDJSON は表と**同じ中身**なので、残すと**同じ物を 2 回持つ**(常駐メモリ)。
+   * ⚠ 無い名前を渡しても落ちない。
+   */
+  drop(name: string): Promise<void>;
   query(sql: string): Promise<DuckDbRaw>;
   /** 畳む。⚠ 例外を投げても貸し出しは「畳んだ」ものとして進む(下の理由)。 */
   terminate(): Promise<void>;

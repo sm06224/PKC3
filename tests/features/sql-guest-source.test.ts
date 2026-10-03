@@ -22,6 +22,7 @@ import {
   looksLikeJsonName,
   looksLikeParquetName,
   sqlGuestSourceOf,
+  sqliteConvertSourceOf,
 } from '../../src/features/query/sql-guest-source';
 
 const att = (title: string) => ({ lid: `l-${title}`, title, archetype: 'attachment' });
@@ -42,9 +43,11 @@ describe('題名から開き方を決める', () => {
       ['明細.json', 'json'],
       ['ログ.ndjson', 'json'],
       ['ログ.jsonl', 'json'],
-      // ⚠ 既定の道(`.sqlite` の image として開く)へ落ちる物
-      ['家計.sqlite', null],
-      ['家計.db', null],
+      // 🔴 `.sqlite` は名前で見分ける(#682 段④d。以前は `null` = 「画像として開く」既定の道だった)
+      ['家計.sqlite', 'sqlite'],
+      ['家計.db', 'sqlite'],
+      ['家計.SQLITE3', 'sqlite'],
+      // ⚠ 取り込めない題名だけが `null`
       ['メモ.md', null],
       ['古い台帳.xls', null],
     ];
@@ -84,7 +87,8 @@ describe('🔴 どのエンジンが読めるか(2 つの一覧)', () => {
     const both = SQLITE_READABLE_KINDS.filter((k) =>
       (DUCKDB_READABLE_KINDS as readonly string[]).includes(k),
     );
-    expect(both, '両方が読めると言っている種類が在る').toEqual(['csv']);
+    // 🔴 `.sqlite` は両方が読める(#682 段④d)── 内蔵は画像のまま、DuckDB は NDJSON の写しで
+    expect(both, '両方が読めると言っている種類が違う').toEqual(['csv', 'sqlite']);
     // ⚠ 空振り防止 ── どちらの一覧も空ではない
     expect(SQLITE_READABLE_KINDS.length).toBeGreaterThan(1);
     expect(DUCKDB_READABLE_KINDS.length).toBeGreaterThan(1);
@@ -105,9 +109,10 @@ describe('🔴 どのエンジンが読めるか(2 つの一覧)', () => {
     expect(duckDbReadableSourceOf('x', '客.csv')?.kind).toBe('csv');
     expect(duckDbReadableSourceOf('x', '売上.parquet')?.kind).toBe('parquet');
     expect(duckDbReadableSourceOf('x', '明細.json')?.kind).toBe('json');
+    // 🔴 `.sqlite` は渡せる(#682 段④d)── 表は元の名前のまま引ける
+    expect(duckDbReadableSourceOf('x', '家計.sqlite')?.kind).toBe('sqlite');
     // ⚠ 読めない相手は `null`(呼び側は既に在る「引けません」へ畳む)
     expect(duckDbReadableSourceOf('x', '台帳.xlsx'), '.xlsx を DuckDB へ渡そうとしている').toBeNull();
-    expect(duckDbReadableSourceOf('x', '家計.sqlite'), '.sqlite を DuckDB へ渡そうとしている').toBeNull();
     expect(isDuckDbReadableSource(null)).toBe(false);
   });
 });
@@ -123,7 +128,9 @@ describe('🔴 表の名前', () => {
     for (const [name, table] of want) {
       const src = duckDbReadableSourceOf('x', name);
       expect(src, `${name}: DuckDB へ渡せる形にならない`).not.toBeNull();
-      expect(guestTableNameOf(src!), `${name}: 表の名前が違う`).toBe(table);
+      // 🔴 `.sqlite` は 1 つの名前に決まらない(中の表の数だけ)ので、`guestTableNameOf` は型で受けない
+      if (src === null || src.kind === 'sqlite') throw new Error(`${name}: 前提が崩れている`);
+      expect(guestTableNameOf(src), `${name}: 表の名前が違う`).toBe(table);
     }
   });
 
@@ -133,7 +140,8 @@ describe('🔴 表の名前', () => {
    */
   it('⚠ 表の名前は、そのまま打てる字である', () => {
     for (const name of ['客.csv', '売上.parquet', '明細.json']) {
-      const src = duckDbReadableSourceOf('x', name)!;
+      const src = duckDbReadableSourceOf('x', name);
+      if (src === null || src.kind === 'sqlite') throw new Error(`${name}: 前提が崩れている`);
       expect(guestTableNameOf(src), `${name}: 打てない字が混じっている`).toMatch(/^[a-z_][a-z0-9_]*$/u);
     }
   });
@@ -163,6 +171,42 @@ describe('file 選択画面に出す拡張子', () => {
   it('🔑 DuckDB でしか読めない 4 つが入っている', () => {
     for (const ext of ['.parquet', '.json', '.ndjson', '.jsonl']) {
       expect(SQL_GUEST_EXTS, `${ext} が accept に無い`).toContain(ext);
+    }
+  });
+});
+
+describe('🔴 .sqlite の扱い(#682 段④d)', () => {
+  it('🔴 内蔵の sqlite へは「画像のまま」(source を渡さない)── csv / xlsx だけが変換して開く', () => {
+    const of = (name: string) => {
+      const src = sqlGuestSourceOf('x', name);
+      // ⚠ 内蔵の sqlite が読める相手だけが渡る(DuckDB 専用の相手は型で渡せない)
+      return src === null || isDuckDbOnlySource(src) ? 'x' : sqliteConvertSourceOf(src)?.kind;
+    };
+    expect(of('家計.sqlite'), '.sqlite に source を渡している(画像のまま開く道が壊れる)').toBeUndefined();
+    expect(of('家計.db')).toBeUndefined();
+    expect(of('客.csv')).toBe('csv');
+    expect(of('台帳.xlsx')).toBe('xlsx');
+    // `null`(取り込めない題名)も渡さない
+    expect(sqliteConvertSourceOf(null)).toBeUndefined();
+  });
+
+  it('🔴 .sqlite は DuckDB 専用ではない(内蔵の sqlite でも読める)', () => {
+    expect(isDuckDbOnlySource(sqlGuestSourceOf('x', '家計.sqlite'))).toBe(false);
+    // ⚠ 選び所の「DuckDB だけ」の並びにも入らない(内蔵の sqlite の並びと二重に出さない)
+    expect(duckDbOnlySourcesOf([att('家計.sqlite')])).toEqual([]);
+  });
+
+  it('🔴 DuckDB で読める種類の一覧の追随 ── 一覧の全種類に、判定が名乗る形がある', () => {
+    const sample: Record<(typeof DUCKDB_READABLE_KINDS)[number], string> = {
+      csv: '客.csv',
+      parquet: '客.parquet',
+      json: '客.json',
+      sqlite: '客.sqlite',
+    };
+    // ⚠ 種類を足した人がここへ書き忘れたら落ちる(空振りで通さない)
+    expect(Object.keys(sample).sort()).toEqual([...DUCKDB_READABLE_KINDS].sort());
+    for (const kind of DUCKDB_READABLE_KINDS) {
+      expect(duckDbReadableSourceOf('x', sample[kind])?.kind, `${kind}: DuckDB へ渡せない`).toBe(kind);
     }
   });
 });
