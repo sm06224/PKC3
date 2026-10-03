@@ -9,16 +9,19 @@
  *   (2 択の中身を差し替える日に、直す場所が 1 か所で済むように ── §7)。
  * ⚠ **pure module**(browser API を触らない)。取りに行くのは `adapter/platform/asr/`。
  *
- * ## 数の出どころ(`docs/development/asr-measure-2026-10.md` の実測。2026-10-01)
+ * ## 数の出どころ
  *
- * | | 重み(ONNX q8) | 1 分の音 | 推論中の常駐(プロセス木) |
+ * | | 重み(ONNX q8。**配っている物**の byte) | 1 分の音 | 推論中の常駐(プロセス木) |
  * |---|---|---|---|
- * | 軽い = base | **81,270,976 byte** | 24〜34 秒(約 25 秒) | **1.65GB** |
- * | 当たりやすい = small | **253,468,391 byte** | 60〜82 秒(約 60 秒) | **3.6GB** |
+ * | 軽い = base | **103,007,956 byte**(encoder 23,261,424 + decoder 79,746,532) | 24〜34 秒(約 25 秒) | **1.65GB** |
+ * | 当たりやすい = small | **288,448,143 byte**(encoder 92,584,327 + decoder 195,863,816) | 60〜82 秒(約 60 秒) | **3.6GB** |
  *
- * ⚠ 秒は**混んだ 4 コアの箱**で測った向きと桁である。実機で変わる ──
- *   だから字は「約」と書く。⚠ **日本語の当たり具合はまだ測っていない**(その箱では測れない)。
- *   実機の結果が出たら、この表の 2 行を差し替える(仕組みは変わらない)。
+ * 🔑 重みの byte は **`sm06224/asr-pack` の Pages に配っている物の実測**(run 37126236721 の `verify` job が
+ *   pack.json と全 file を突き合わせた値。2026-10-03、#772 段 3)。⚠ Hugging Face の再梱包(81,270,976 / 253,468,391)
+ *   ではない ── 自前で変換した物は出力層の重みが embed と別に 2 度入る(`fold_tied_transpose.py`)ので大きい。
+ * ⚠ 秒と常駐は 2026-10-01 に**混んだ 4 コアの箱**で HF の重みを使って測った向きと桁(`asr-measure-2026-10.md`)。
+ *   配っている物では測り直していない。実機で変わる ── だから字は「約」と書く。
+ *   ⚠ **日本語の当たり具合はまだ測っていない**(その箱では測れない)。実機の結果が出たら、この表を差し替える。
  */
 import { humanBytes } from '../human-bytes';
 
@@ -54,7 +57,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
     id: 'light',
     label: '軽い',
     modelId: 'openai/whisper-base',
-    modelBytes: 81_270_976,
+    modelBytes: 103_007_956,
     secondsPerMinute: 25,
     needMemoryGb: 4,
   },
@@ -62,7 +65,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
     id: 'accurate',
     label: '当たりやすい',
     modelId: 'openai/whisper-small',
-    modelBytes: 253_468_391,
+    modelBytes: 288_448_143,
     secondsPerMinute: 60,
     needMemoryGb: 8,
   },
@@ -120,10 +123,11 @@ export const ASR_RUNTIME_FILES: readonly string[] = [
 ];
 
 /**
- * 実行の部品の大きさ(byte)。実測 = `transformers.mjs` 567,126 + `ort-wasm.mjs` 24,381 + `ort-wasm.wasm` 14,264,838。
+ * 実行の部品の大きさ(byte)。配っている物の実測 = `transformers.mjs` 567,150 + `ort-wasm.mjs` 24,381 + `ort-wasm.wasm` 14,264,838
+ *(asr-pack run 37126236721。手元で束ねた 2026-10-02 の 567,126 とは 24 byte 違う ── 束ねた版の差)。
  * ⚠ 画面の字にだけ使う(判定には使わない ── 目録の下限は `RUNTIME_FLOOR`)。
  */
-export const ASR_RUNTIME_BYTES = 14_856_345;
+export const ASR_RUNTIME_BYTES = 14_856_369;
 
 /** 部品の中の model の置き場(pack 内の相対)。 */
 export function asrModelDir(part: AsrPart): string {
@@ -137,7 +141,7 @@ export function asrDownloadBytes(part: AsrPart): number {
 
 /**
  * ボタンの字(大きさと 1 行の説明つき)。
- * 例: `軽い(約 91.7 MB、1 分の音に約 25 秒)`。
+ * 例: `軽い(約 112.4 MB、1 分の音に約 25 秒)`。
  * ⚠ 数は**全部定数から出す** ── 手で書くと、実機の結果で差し替えた日に食い違う。
  * ⚠ 大きさは `humanBytes`(画面の大きさの綴りはあの 1 本 ── `tests/features/human-bytes.test.ts`)。
  */
