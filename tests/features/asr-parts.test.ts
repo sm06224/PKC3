@@ -208,7 +208,7 @@ describe('目録の検め', () => {
     for (const bad of ['../x', '/abs', 'models/../../x', 'a\\b', '', 'a//b']) {
       expect(isSafePackPath(bad), bad).toBe(false);
     }
-    expect(isSafePackPath('models/Xenova/whisper-base/config.json')).toBe(true);
+    expect(isSafePackPath('models/openai/whisper-base/config.json')).toBe(true);
     const m = JSON.parse(manifest()) as { models: Record<string, AsrPackFile[]> };
     m.models['light']!.push(file(`${asrModelDir(ASR_PARTS[1]!)}config.json`, 100));
     expect(readAsrPack(JSON.stringify(m)).ok, '別の model の置き場の file を通した').toBe(false);

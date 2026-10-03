@@ -178,21 +178,21 @@ describe('AsrRunner', () => {
     const { runner, rt } = setup();
     await runner.run(job());
     const f = rt.env.fetch;
-    const ok = await f(`${ASR_LOCAL_MODEL_PATH}Xenova/whisper-base/config.json`);
+    const ok = await f(`${ASR_LOCAL_MODEL_PATH}openai/whisper-base/config.json`);
     expect(ok.status).toBe(200);
     expect(await ok.text()).toBe('{"a":1}');
     expect(ok.headers.get('content-length')).toBe(String('{"a":1}'.length));
     // 取りこぼし = 外へ取りに行く、に化けない
     for (const miss of [
-      `${ASR_LOCAL_MODEL_PATH}Xenova/whisper-base/nope.json`,
-      'https://huggingface.co/Xenova/whisper-base/resolve/main/config.json',
+      `${ASR_LOCAL_MODEL_PATH}openai/whisper-base/nope.json`,
+      'https://huggingface.co/openai/whisper-base/resolve/main/config.json',
       'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.wasm',
       '/somewhere/else',
     ]) {
       expect((await f(miss)).status, miss).toBe(404);
     }
     // URL / Request 形でも同じ
-    expect((await f(new URL(`http://x${ASR_FETCH_PREFIX}models/Xenova/whisper-base/config.json`))).status).toBe(200);
+    expect((await f(new URL(`http://x${ASR_FETCH_PREFIX}models/openai/whisper-base/config.json`))).status).toBe(200);
     expect(outside, '網へ出た').not.toHaveBeenCalled();
   });
 

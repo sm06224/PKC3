@@ -50,8 +50,8 @@ const LICENSE_FILE_NAME = /^(licen[cs]e|notice|copying)(\.|$)/iu;
 export const DEFAULT_HF_MODELS = [
   'openai/whisper-base',
   'openai/whisper-small',
-  'Xenova/whisper-base',
-  'Xenova/whisper-small',
+  'openai/whisper-base',
+  'openai/whisper-small',
 ];
 
 /** 全文の印(取れた物が本当に全文かを見る。⚠ 404 の HTML や空を「取れた」と数えない)。 */

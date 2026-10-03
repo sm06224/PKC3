@@ -122,11 +122,11 @@ const runtimeFiles = (): Map<string, Blob> =>
   ]);
 const lightFiles = (): Map<string, Blob> =>
   new Map([
-    ['models/Xenova/whisper-base/config.json', blob(5)],
-    ['models/Xenova/whisper-base/onnx/m.onnx', blob(50)],
+    ['models/openai/whisper-base/config.json', blob(5)],
+    ['models/openai/whisper-base/onnx/m.onnx', blob(50)],
   ]);
 const accurateFiles = (): Map<string, Blob> =>
-  new Map([['models/Xenova/whisper-small/onnx/m.onnx', blob(80)]]);
+  new Map([['models/openai/whisper-small/onnx/m.onnx', blob(80)]]);
 
 describe('AsrPackStore', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -196,7 +196,7 @@ describe('AsrPackStore', () => {
     const store = new AsrPackStore();
     const l = lightFiles();
     const bad = expectOf(l);
-    bad.set('models/Xenova/whisper-base/onnx/m.onnx', { bytes: 51, sha256: 'e'.repeat(64) });
+    bad.set('models/openai/whisper-base/onnx/m.onnx', { bytes: 51, sha256: 'e'.repeat(64) });
     await expect(store.writePart('light', l, bad, 'v1')).rejects.toBeInstanceOf(AsrPackError);
     expect(fake.files.data.size).toBe(0);
     expect(fake.meta.data.size).toBe(0);
@@ -218,10 +218,10 @@ describe('AsrPackStore', () => {
     const l = lightFiles();
     await store.writeRuntime(r, expectOf(r), 'v1');
     await store.writePart('light', l, expectOf(l), 'v1');
-    fake.files.data.set('models/Xenova/whisper-base/onnx/m.onnx', blob(7));
+    fake.files.data.set('models/openai/whisper-base/onnx/m.onnx', blob(7));
     await expect(store.readFilesFor('light')).rejects.toThrow(/入れ直してください/);
     // ⚠ files が消えている場合も同じ(null にしない)
-    fake.files.data.delete('models/Xenova/whisper-base/onnx/m.onnx');
+    fake.files.data.delete('models/openai/whisper-base/onnx/m.onnx');
     await expect(store.readFilesFor('light')).rejects.toBeInstanceOf(AsrPackError);
   });
 
