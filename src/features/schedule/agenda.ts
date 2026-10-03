@@ -64,6 +64,8 @@ export interface AgendaItem {
   /** 期間なら**開始**の日。 */
   readonly date: string | null;
   readonly time: string | null;
+  /** 🔴 **時刻の終わり**(`14:00..15:00` の `15:00`)。幅でなければ `null`(#855 段 C′)。 */
+  readonly timeEnd: string | null;
   /**
    * 🔴 **期間の終わり**(`@2026-08-25..2026-08-28`)。期間でなければ `null`(#344 段①)。
    * ⚠ **`date` から `until` まで、すべての日の束に出る** ── 1 点として置くと
@@ -94,6 +96,7 @@ export function itemOfCard(card: TaskCard): AgendaItem {
     done: card.done,
     date: card.date,
     time: card.time,
+    timeEnd: card.timeEnd,
     until: card.until,
     repeat: card.repeat,
   };
@@ -112,6 +115,8 @@ export function itemOfNote(meta: EntryMeta): AgendaItem {
     done: false,
     date: meta.date,
     time: null,
+    // ⚠ 時刻が無いので幅も無い
+    timeEnd: null,
     // ⚠ frontmatter には期間の置き場が無い(#344 段②)── 常に `null`
     until: null,
     // ⚠ 繰り返しも同じ ── ノート 1 件が丸ごと繰り返す形は作っていない

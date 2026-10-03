@@ -89,3 +89,29 @@ export function isScheduleTime(value: string): boolean {
 export function isScheduleRange(start: string, end: string): boolean {
   return isScheduleDate(start) && isScheduleDate(end) && start <= end;
 }
+
+/**
+ * 🔴 **時刻の幅の形か**(#855 段 C′)。`start` と `end` が両方**時刻の形**で、
+ * かつ **`start` が `end` より後でない**こと(`14:00..15:00`)。
+ *
+ * ⚠ **逆順(`15:00..14:00`)は通さない。** 通すと「終わりが始まりより前の予定」が
+ *   立つ ── 日付の期間(`isScheduleRange`)と同じ理由で、読まなければ
+ *   **書いた字がそのまま札に残り、見て直せる**。
+ * ⚠ **同じ時刻(`14:00..14:00`)は通す**(日付の期間が「開始と同じ日でもよい」のと同じ ──
+ *   user が幅のつもりで書いたことを消さない)。
+ * ⚠ `25:99` は通す(`isScheduleTime` と同じ向き)。比較は**文字列**(`HH:MM` は辞書順 = 時刻順)。
+ */
+export function isScheduleTimeRange(start: string, end: string): boolean {
+  return isScheduleTime(start) && isScheduleTime(end) && start <= end;
+}
+
+/**
+ * 🔴 **札に出す時刻の字**(`14:00` / `14:00〜15:00`)。
+ *
+ * 🔑 札の字の組み立てはここ 1 本(CLAUDE.md §7)── 面ごとに `〜` を足すと、
+ *   同じ幅が場所によって違う字で出る。⚠ **本文へ書く綴りは `..`** であって、
+ *   これは**画面に出す字**である(日付の期間の札の「〜08/28」と同じ向き)。
+ */
+export function formatTimeSpan(time: string, timeEnd: string | null): string {
+  return timeEnd === null ? time : `${time}〜${timeEnd}`;
+}

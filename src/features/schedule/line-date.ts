@@ -56,6 +56,7 @@ import {
   isScheduleDate,
   isScheduleRange,
   isScheduleTime,
+  isScheduleTimeRange,
 } from './schedule-date';
 import {
   REPEAT_WORDS,
@@ -82,8 +83,17 @@ import {
  * ⚠ **区切りを `[\d-]` の網に入れない** ── `.` を素で入れると
  * `@2026-08-25.`(英語の文末)が `2026-08-25.` になって**日付ごと落ちる**。
  * だから `\.\.` と 2 つ揃ったときだけ拾う。
+ *
+ * 🔴 **時刻の幅も同じ網で取る**(#855 段 C′)── `@2026-08-25 14:00..15:00`。
+ * ⚠ 取るだけで、判定は `isScheduleTimeRange` が持つ(読めなければ**時刻 1 点として読み、
+ *   `..15:00` は札の字に残る** ── 日付の期間の「開始だけ活かさない」とは**逆**に倒す。
+ *   理由:時刻 1 点は**いまも読めている書き方**で、幅が読めないからといって
+ *   それまで読めていた予定を消すと、**既に書かれた本文の意味が変わる**)。
+ * ⚠ 区切りは日付の期間と同じ 3 綴り(`..` / `〜` / `～`)。⚠ **全角の数字・コロンは受けない**
+ *   (時刻 1 点も受けないので揃える)── 受けない字は札にそのまま残る。
  */
-const AT_DATE = /@([\d-]+)(?:(?:\.\.|[〜～])([\d-]*))?(?:[ T]([\d:]+))?/g;
+const AT_DATE =
+  /@([\d-]+)(?:(?:\.\.|[〜～])([\d-]*))?(?:[ T]([\d:]+)(?:(?:\.\.|[〜～])([\d:]*))?)?/g;
 
 /** 行に書かれた 1 つの日付。 */
 export interface LineDate {
@@ -107,6 +117,17 @@ export interface LineDate {
    * **記法として食べない** ── その字は札にそのまま残る(黙って捨てない)。
    */
   readonly time: string | null;
+  /**
+   * 🔴 **時刻の終わり**(`@2026-08-25 14:00..15:00` の `15:00`)。幅でなければ `null`(#855 段 C′)。
+   *
+   * ⚠ **`time` が `null` なら必ず `null`**(始まりの無い幅は無い)。
+   * ⚠ **読めない幅は `null`**(逆順 / 書きかけ / 壊れた時刻)── このとき `time` は
+   *   **1 点として読まれ**、`..…` は札の字に残る。
+   * ⚠ **期間には付かない**(期間に時刻は無い ── 上の `time`)。
+   * ⚠ 名前は `end` でも `until` でもない(`end` は文字位置、`until` は日付の終わり ──
+   *   取り違えても tsc が黙る)。
+   */
+  readonly timeEnd: string | null;
   /**
    * 🔴 **刻み**(`@2026-08-31 毎週` の `毎週`)。繰り返しでなければ `null`(#344 段②)。
    *
@@ -172,6 +193,7 @@ export function readLineDate(line: string): LineDate | null {
         until: rawUntil,
         // 🔴 期間に時刻は付けない(上の docstring)── 後ろの字は食べずに残す
         time: null,
+        timeEnd: null,
         repeat: tail === null ? null : tail.unit,
         // ⚠ 期間には振替を付けない(上の docstring)── 字は札に残る
         substitutes: null,
@@ -183,6 +205,15 @@ export function readLineDate(line: string): LineDate | null {
     // ⚠ 時刻だけ読めないときは**日付を活かす** ── `@2026-08-25 10:000円` の
     //    `10:000円` は時刻ではないが、日付は user がちゃんと書いている
     const time = rawTime !== undefined && isScheduleTime(rawTime) ? rawTime : null;
+    /**
+     * 🔴 **幅は「時刻が読めて、終わりも読めて、逆順でない」ときだけ**(#855 段 C′)。
+     * ⚠ 1 つでも欠ければ `null` ── 時刻 1 点としていまと同じに読み、`..…` は字として残る。
+     */
+    const rawTimeEnd = m[4];
+    const timeEnd =
+      time !== null && rawTimeEnd !== undefined && isScheduleTimeRange(time, rawTimeEnd)
+        ? rawTimeEnd
+        : null;
     const afterDate = start + 1 + date.length;
     /**
      * ⚠ 刻みは**日付(と時刻)の直後**からだけ拾う ── 行のどこかに「毎週」と
@@ -191,7 +222,13 @@ export function readLineDate(line: string): LineDate | null {
      *   間に挟まるので刻みは付かない ── わざとである(間の字を勝手に飛ばして
      *   繰り返しにすると、user が書いていない予定が毎週立つ)。
      */
-    const base = time === null ? afterDate : afterDate + 1 + time.length;
+    const afterTime = time === null ? afterDate : afterDate + 1 + time.length;
+    /**
+     * ⚠ 区切りは 1 文字(`〜` / `～`)か 2 文字(`..`)── 日付の期間と同じく**原文で数える**
+     *   (`indexOf` で探さない)。
+     */
+    const timeSepLen = line.startsWith('..', afterTime) ? 2 : 1;
+    const base = timeEnd === null ? afterTime : afterTime + timeSepLen + timeEnd.length;
     const tail = readRepeatTail(line.slice(base));
     /**
      * 🔴 **振替は「刻みが無いとき」だけ読む**(#855 決4)。
@@ -212,6 +249,7 @@ export function readLineDate(line: string): LineDate | null {
       date,
       until: null,
       time,
+      timeEnd,
       repeat: tail === null ? null : tail.unit,
       substitutes: sub === null ? null : sub.date,
       start,
@@ -291,12 +329,23 @@ export function formatLineDate(
    * (この file の作法:往復しない字を出力しない)。
    */
   substitutes?: string | null,
+  /**
+   * 🔴 **時刻の終わり**(#855 段 C′)。⚠ **読む側が幅として読む形のときだけ書く**
+   * (`time` が在り、逆順でない)── 読まれない字を書くと往復で食い違う
+   * (この file の作法:往復しない字を出力しない)。⚠ 期間には書かない(時刻と同じ)。
+   */
+  timeEnd?: string | null,
 ): string {
+  const hasTime = time !== undefined && time !== null && time !== '';
+  const span =
+    hasTime && timeEnd !== undefined && timeEnd !== null && isScheduleTimeRange(time, timeEnd)
+      ? `..${timeEnd}`
+      : '';
   const head =
     until !== undefined && until !== null && until !== ''
       ? `@${date}..${until}`
-      : time !== undefined && time !== null && time !== ''
-        ? `@${date} ${time}`
+      : hasTime
+        ? `@${date} ${time}${span}`
         : `@${date}`;
   /**
    * 🔴 **刻みは尻に付ける**(#344 段②)。⚠ 空白を 1 つ空ける ── 読みは

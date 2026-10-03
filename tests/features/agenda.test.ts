@@ -15,7 +15,7 @@ const card = (
   time: string | null = null,
   text = 'x',
   until: string | null = null,
-) => itemOfCard({ lid, line, text, done: false, date, time, until, repeat: null, substitutes: null });
+) => itemOfCard({ lid, line, text, done: false, date, time, until, repeat: null, timeEnd: null, substitutes: null });
 
 /** ノート 1 件が丸ごと予定(frontmatter の `date:`)。 */
 const noteMeta = (lid: string, date: string | null, title = 'n-' + lid): EntryMeta => ({
@@ -294,7 +294,7 @@ describe('繰り返し(#344 段②)', () => {
     until: string | null = null,
     text = 'ゴミ出し',
     lid = 'a',
-  ) => itemOfCard({ lid, line: 0, text, done: false, date, time: null, until, repeat: unit, substitutes: null });
+  ) => itemOfCard({ lid, line: 0, text, done: false, date, time: null, until, repeat: unit, timeEnd: null, substitutes: null });
 
   const days = (groups: { date: string | null }[]): (string | null)[] =>
     groups.map((g) => g.date);
@@ -406,6 +406,7 @@ describe('繰り返し(#344 段②)', () => {
       time: null,
       until: null,
       repeat: 'week',
+      timeEnd: null,
       substitutes: null,
     });
     const g = buildAgenda([rule], TODAY, false, { horizonDays: 8 });
@@ -436,6 +437,7 @@ describe('繰り返し(#344 段②)', () => {
       time: null,
       until: null,
       repeat: 'week',
+      timeEnd: null,
       substitutes: null,
     });
     /** 動かした先の実体。⚠ **字と lid が規則と同じ**でないと結び付かない。 */
@@ -448,6 +450,7 @@ describe('繰り返し(#344 段②)', () => {
       time: null,
       until: null,
       repeat: null,
+      timeEnd: null,
       substitutes,
     });
     const run = (sub: string | null): (string | null)[] => {
