@@ -4611,6 +4611,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             return {
               tables: opened.tables,
               views: opened.views,
+              ftsTables: opened.ftsTables,
               table: (name, max) => exportSqliteTable(opened.session, name, max),
               close: async () => {
                 await closeSqliteExport(opened.session);

@@ -48,7 +48,13 @@ import {
   SQL_PICK_LOCAL_FILE_VALUE,
 } from '@features/query/sql-local-file';
 import { humanBytes } from '@features/human-bytes';
-import { sqlExampleText, sqlPlaceholder, sqlRulesText, sqlTipText } from '@features/query/sql-tip';
+import {
+  copiedTableNames,
+  sqlExampleText,
+  sqlPlaceholder,
+  sqlRulesText,
+  sqlTipText,
+} from '@features/query/sql-tip';
 import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
 import { erSubjectOf } from '@features/query/er-connect';
@@ -833,13 +839,30 @@ export class SqlRenderer {
      *   「調べられるのは entries …」のままで、**そのとおり打つと英語で断られた**。
      */
     this.paintEngine(state);
-    const target = p.guest === null ? null : { name: p.guest.name, tables: p.guest.tables };
     /**
      * 🔴 **案内も手本も約束も、いま引く engine へ揃える**(#682 段②)。
      * ⚠ `SQL_RULES` は**同梱の sqlite を実測した字**なので、DuckDB のまま出すと嘘になる
      *   (「REGEXP は使えません」は DuckDB では誤り)。
      */
     const engine: SqlEngine = sqlEngineOf(p);
+    /**
+     * 🔴 **DuckDB で引くときに並べる表は、写した表だけ**(着地後レビュー ⚠2)── 全文検索の仮想表や大きすぎる表は
+     *   内蔵の sqlite では引けるが DuckDB へは写さないので、案内にも手本にも並べない(打つと `no such table`)。
+     */
+    const target =
+      p.guest === null
+        ? null
+        : {
+            name: p.guest.name,
+            tables:
+              engine === 'duckdb'
+                ? copiedTableNames(
+                    { name: p.guest.name, tables: p.guest.tables },
+                    p.duckCopy,
+                    p.extraGuests.length > 0,
+                  )
+                : p.guest.tables,
+          };
     // 🔴 足した相手の名前(#918 段⑦)── 案内も手本も、並べた全部の表の名前を出す
     const more = p.extraGuests.map((g) => g.name);
     const tipText = sqlTipText(target, engine, more, p.duckCopy);

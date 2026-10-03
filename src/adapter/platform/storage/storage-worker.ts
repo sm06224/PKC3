@@ -87,7 +87,12 @@ import {
 } from '@features/contact/contact-card';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import { capCellText } from '@features/query/sql-cell';
-import { NOT_FTS_BACKSTAGE, NOT_SQLITE_INTERNAL_SQL } from '@features/query/schema-digest';
+import {
+  FTS_VIRTUAL_NAMES_SQL,
+  NOT_FTS_BACKSTAGE,
+  NOT_FTS_SHADOW,
+  NOT_SQLITE_INTERNAL_SQL,
+} from '@features/query/schema-digest';
 import {
   collectCsvTables,
   csvCellsOverBudget,
@@ -2307,23 +2312,27 @@ function needGuest(key: string): Database {
 }
 
 /**
- * 🔴 **客の `.sqlite` の「user の表」の名前を引く 1 文**(客を開く口と、写しを取る口が**同じ文**を使う)。
+ * 🔴 **客の `.sqlite` の「user の表」の名前を引く 1 文**(客を開く口。案内に並ぶ名前になる)。
  *
  * ⚠ **`_` は `LIKE` で任意の 1 字**である ── `NOT LIKE 'sqlite_%'` は `sqlitedata` のような
  *   **user の表まで黙って外した**(着地後のレビューで出た)。内部の表(`sqlite_sequence` 等)だけを
  *   外すために `\_` で逃がし、`ESCAPE` を明示する。
+ * 🔴 **本文検索(FTS5)の影の表は外す**(`NOT_FTS_SHADOW`。着地後レビュー ⚠2)── 案内に `docs_data` / `docs_idx` が並び、
+ *   書いてあるとおり DuckDB で打つと `no such table` だった。⚠ **仮想表本体(`docs`)は残す** ──
+ *   内蔵の sqlite は `select` で引ける(DuckDB へ写す口 `EXPORT_TABLE_NAMES_SQL` は本体も外す)。
  */
 const USER_TABLE_NAMES_SQL =
-  `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'table' AND ${NOT_SQLITE_INTERNAL_SQL} ORDER BY m.name`;
+  `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'table' AND ${NOT_SQLITE_INTERNAL_SQL}` +
+  `${NOT_FTS_SHADOW} ORDER BY m.name`;
 
 /**
  * 🔴 **DuckDB へ写す表の名前を引く 1 文**(#682 段④d の着地後レビュー)。
  *
- * ⚠ 客を開く口と**同じ判定**(`sqlite_` の内部の表を外す)に**もう 1 つ足す**:本文検索(FTS5)の
- *   仮想表と**影の表**(`_data` / `_idx` / `_content` / `_docsize` / `_config`)を外す。
+ * ⚠ 客を開く口(`USER_TABLE_NAMES_SQL`)と**同じ判定**(`sqlite_` の内部の表を外す)に**もう 1 つ足す**:本文検索(FTS5)の
+ *   **仮想表本体も**外す(客を開く口は影の表だけ外し、本体は残す ── 内蔵の sqlite は引ける)。
  *   直す前は影の表が全部 DuckDB へ写り、user の表と並んで出ていた(構造を採る側 `SCHEMA_COLUMNS_SQL` は #967 で外している)。
  * 🔑 判定は `NOT_FTS_BACKSTAGE` **1 本**(`schema-digest.ts`)── 「仮想表の影であること」で見る
- *   (名前が `_data` で終わるだけの user の表は残る)。
+ *   (名前が `_data` で終わるだけの user の表は残る)。⚠ 本体は**写さなかったと言う**(`openSqliteExport` の `ftsTables`)。
  */
 const EXPORT_TABLE_NAMES_SQL =
   `SELECT m.name AS name FROM sqlite_schema m WHERE m.type = 'table' AND ${NOT_SQLITE_INTERNAL_SQL}` +
@@ -2863,10 +2872,14 @@ const handlers: Handlers = {
       const views = (
         tmp.selectObjects(EXPORT_VIEW_NAMES_SQL) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
+      // 🔴 本文検索の仮想表は写さない ── 写さなかったと言うために名前を返す(影の表は黙って外したまま)
+      const ftsTables = (
+        tmp.selectObjects(FTS_VIRTUAL_NAMES_SQL) as unknown as Array<{ name: string }>
+      ).map((r) => r.name);
       exportSeq += 1;
       const session = 'e' + String(exportSeq);
       exportDbs.set(session, tmp);
-      return { session, tables, views };
+      return { session, tables, views, ftsTables };
     } catch (e) {
       // ⚠ 読めなかった器も閉じる(断った回に器が残るのは「速やかな破棄」の逆である)
       try {

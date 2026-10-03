@@ -112,6 +112,8 @@ function make(
   over: Partial<DuckDbRunnerDeps> = {},
   /** 画像の大きさ(= 何件目か)→ 写さないビューの名前(既定は無し)。 */
   viewsOf: Record<string, string[]> = {},
+  /** 画像の大きさ → 写さない全文検索の仮想表の名前(既定は無し)。 */
+  ftsOf: Record<string, string[]> = {},
 ) {
   const made: Array<ReturnType<typeof fakeHandle>> = [];
   /** 器の側と storage worker の口の**時系列**(`worker:open` / `worker:table:名前` / `worker:close`)。 */
@@ -128,6 +130,7 @@ function make(
     const session: SqliteExportSession = {
       tables: tables.map((t) => t.name),
       views: viewsOf[String(image.byteLength)] ?? [],
+      ftsTables: ftsOf[String(image.byteLength)] ?? [],
       table: (name, max) => {
         log.push('worker:table:' + name);
         tableCalls.push({ name, max });
@@ -495,6 +498,7 @@ describe('🔴 表ごとに「頼む → 入れる → 手放す」(同時に載
         Promise.resolve({
           tables: ['a', 'b'],
           views: [],
+          ftsTables: [],
           table: (name: string) =>
             name === 'a'
               ? Promise.reject(new Error('取り込んだ .sqlite の写しが開かれていません'))
@@ -664,6 +668,39 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
     expect((await runner.schema(s)).copy.refused, '返した配列と控えが同じ物').toHaveLength(2);
   });
 
+  /**
+   * 🔴 **全文検索(FTS5)の仮想表本体は写さない ── 写さなかったと言う**(着地後レビュー 💭8)。
+   * ⚠ 直す前は黙って外していて、`SELECT * FROM docs` は英語の「そんな表は無い」だけだった。
+   */
+  it('🔴 全文検索の仮想表は「写せなかった表」に名前つきで載る(1 件は元の名前 / 2 件以上は ファイル名_表名)。器には作らない', async () => {
+    const one = make({ '1': [withRows('小さい')] }, () => undefined, {}, {}, { '1': ['docs'] });
+    const ran = await one.runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
+    expect(ran.copy.refused).toEqual([{ name: 'docs', view: false, why: '全文検索の表は写しません' }]);
+    expect(
+      (one.made[0]?.steps ?? []).some((x) => x.includes('"docs"')),
+      '写さない表を器に作っている',
+    ).toBe(false);
+    const many = make({ '1': [withRows('売上')] }, () => undefined, {}, {}, { '1': ['docs'] });
+    const two = await many.runner.run({
+      sql: 'SELECT 1',
+      sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
+    });
+    expect(two.copy.refused).toEqual([{ name: '家計_docs', view: false, why: '全文検索の表は写しません' }]);
+  });
+
+  it('🔴 その表を引いて落ちた回の断り文にも、名前と逃げ道が添わる', async () => {
+    const { runner } = make({ '1': [withRows('小さい')] }, (sql) => (sql === 'SELECT * FROM docs' ? new Error('Catalog Error') : undefined), {}, {}, {
+      '1': ['docs'],
+    });
+    let msg = '';
+    await runner
+      .run({ sql: 'SELECT * FROM docs', sources: [input(src('l1', '家計.sqlite'), 1)] })
+      .catch((e: unknown) => {
+        msg = e instanceof Error ? e.message : String(e);
+      });
+    expect(msg).toContain('docs は DuckDB へ写せませんでした(全文検索の表は写しません。内蔵の sqlite なら引けます)');
+  });
+
   it('対照群:写せなかった物が無ければ空 / csv だけなら .sqlite を写したとは言わない', async () => {
     const { runner } = make({ '1': [withRows('小さい')] });
     const ran = await runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
@@ -807,6 +844,7 @@ describe('🔴 器へ写す所にも時計を置く(R5 ── 止まった写し
           return Promise.resolve({
             tables: ['t'],
             views: [],
+            ftsTables: [],
             table: () => Promise.resolve(withRows('t')),
             close: () => Promise.resolve(),
           });
@@ -827,6 +865,201 @@ describe('🔴 器へ写す所にも時計を置く(R5 ── 止まった写し
       expect(r.rows).toEqual([[1]]);
       expect(made.length, '器を起こし直していない').toBe(2);
       expect(made[0]?.steps, '止まった器を畳んでいない').toContain('terminate');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 時計の後に遅れて届いた古い写しは、次の世代の控えを汚さず、残りの表も頼まない(⚠1)', async () => {
+    vi.useFakeTimers();
+    try {
+      // 古い器は畳まれた後なので、触ると落ちる(実物の worker は terminate 済み)
+      const dead = new Set<number>();
+      let handles = 0;
+      let opened = 0;
+      const oldTableCalls: string[] = [];
+      let lateOpen: (s: SqliteExportSession) => void = () => undefined;
+      let newOpen: (s: SqliteExportSession) => void = () => undefined;
+      const { runner } = make({}, () => undefined, {
+        open: () => {
+          const id = (handles += 1);
+          const f = fakeHandle(() => undefined);
+          return Promise.resolve<DuckDbHandle>({
+            ...f.h,
+            query: (sql) =>
+              dead.has(id) ? Promise.reject(new Error('terminated')) : f.h.query(sql),
+            terminate: () => {
+              dead.add(id);
+              return f.h.terminate();
+            },
+          });
+        },
+        exportSqlite: () => {
+          opened += 1;
+          // 1 回目は時計が鳴った**後**に解決する / 2 回目も手で解決する(古い写しが先に走る順番を作る)
+          return new Promise<SqliteExportSession>((resolve) => {
+            if (opened === 1) lateOpen = resolve;
+            else newOpen = resolve;
+          });
+        },
+      });
+      const sess = (tables: string[], calls?: string[]): SqliteExportSession => ({
+        tables,
+        views: [],
+        ftsTables: [],
+        table: (name) => {
+          calls?.push(name);
+          return Promise.resolve(withRows(name));
+        },
+        close: () => Promise.resolve(),
+      });
+      const stuck = runner
+        .run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] })
+        .then(
+          () => '',
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
+      const next = runner.run({ sql: 'SELECT 2', sources: [input(src('l1', '家計.sqlite'), 1)] });
+      await vi.advanceTimersByTimeAsync(DUCKDB_LOAD_MAX_MS);
+      expect(await stuck).toContain('時間がかかりすぎたので止めました');
+      // 次の世代は写しを開く所で待っている ── そこへ、古い写しが遅れて届く
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opened, '2 世代目が写しを開いていない(前提が崩れている)').toBe(2);
+      lateOpen(sess(['a', 'b'], oldTableCalls));
+      await vi.advanceTimersByTimeAsync(0);
+      newOpen(sess(['z']));
+      const r = await next;
+      expect(oldTableCalls, '古い世代が残りの表を storage worker へ頼み続けている').toEqual([]);
+      expect(r.copy.refused, '古い世代の失敗が次の世代の控えに積まれている').toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 表を写している最中に時計が鳴り、畳まれた器の失敗が遅れて届いても、「写せなかった表」にしない(⚠1)', async () => {
+    vi.useFakeTimers();
+    try {
+      let handles = 0;
+      let opened = 0;
+      const oldTableCalls: string[] = [];
+      // 古い器の `CREATE` は止まったまま ── 時計の後に「畳まれた器が断った」として届く
+      let failOldCreate: (e: Error) => void = () => undefined;
+      let newOpen: (s: SqliteExportSession) => void = () => undefined;
+      const { runner } = make({}, () => undefined, {
+        open: () => {
+          const id = (handles += 1);
+          const f = fakeHandle(() => undefined);
+          return Promise.resolve<DuckDbHandle>(
+            id === 1
+              ? {
+                  ...f.h,
+                  query: (sql) =>
+                    sql.startsWith('CREATE')
+                      ? new Promise<DuckDbRaw>((_, reject) => {
+                          failOldCreate = reject;
+                        })
+                      : f.h.query(sql),
+                }
+              : f.h,
+          );
+        },
+        exportSqlite: () => {
+          opened += 1;
+          if (opened === 1) {
+            return Promise.resolve<SqliteExportSession>({
+              tables: ['a', 'b'],
+              views: [],
+              ftsTables: [],
+              table: (name) => {
+                oldTableCalls.push(name);
+                return Promise.resolve(withRows(name));
+              },
+              close: () => Promise.resolve(),
+            });
+          }
+          return new Promise<SqliteExportSession>((resolve) => {
+            newOpen = resolve;
+          });
+        },
+      });
+      const stuck = runner
+        .run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] })
+        .then(
+          () => '',
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
+      const next = runner.run({ sql: 'SELECT 2', sources: [input(src('l1', '家計.sqlite'), 1)] });
+      await vi.advanceTimersByTimeAsync(DUCKDB_LOAD_MAX_MS);
+      expect(await stuck).toContain('時間がかかりすぎたので止めました');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opened, '2 世代目が写しを開いていない(前提が崩れている)').toBe(2);
+      expect(oldTableCalls, '前提:古い世代は 1 枚目を写している最中だった').toEqual(['a']);
+      failOldCreate(new Error('terminated'));
+      await vi.advanceTimersByTimeAsync(0);
+      newOpen({
+        tables: ['z'],
+        views: [],
+        ftsTables: [],
+        table: (name) => Promise.resolve(withRows(name)),
+        close: () => Promise.resolve(),
+      });
+      const r = await next;
+      expect(r.copy.refused, '畳まれた器の失敗が「写せなかった表」に積まれている').toEqual([]);
+      expect(oldTableCalls, '古い世代が 2 枚目を頼んでいる').toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 表を頼んでいる最中に時計が鳴り、遅れて「大きすぎて写せない」が届いても、次の世代の控えへ積まない(⚠1)', async () => {
+    vi.useFakeTimers();
+    try {
+      let opened = 0;
+      let answerOld: (t: SqliteExportedTable) => void = () => undefined;
+      let newOpen: (s: SqliteExportSession) => void = () => undefined;
+      const { runner } = make({}, () => undefined, {
+        exportSqlite: () => {
+          opened += 1;
+          if (opened === 1) {
+            return Promise.resolve<SqliteExportSession>({
+              tables: ['a'],
+              views: [],
+              ftsTables: [],
+              // 古い世代の storage worker は、時計の後に答える(表は大きすぎる)
+              table: () =>
+                new Promise<SqliteExportedTable>((resolve) => {
+                  answerOld = resolve;
+                }),
+              close: () => Promise.resolve(),
+            });
+          }
+          return new Promise<SqliteExportSession>((resolve) => {
+            newOpen = resolve;
+          });
+        },
+      });
+      const stuck = runner
+        .run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] })
+        .then(
+          () => '',
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
+      const next = runner.run({ sql: 'SELECT 2', sources: [input(src('l1', '家計.sqlite'), 1)] });
+      await vi.advanceTimersByTimeAsync(DUCKDB_LOAD_MAX_MS);
+      expect(await stuck).toContain('時間がかかりすぎたので止めました');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opened, '2 世代目が写しを開いていない(前提が崩れている)').toBe(2);
+      answerOld(refused('a', 'x'));
+      await vi.advanceTimersByTimeAsync(0);
+      newOpen({
+        tables: ['z'],
+        views: [],
+        ftsTables: [],
+        table: (name) => Promise.resolve(withRows(name)),
+        close: () => Promise.resolve(),
+      });
+      const r = await next;
+      expect(r.copy.refused, '古い世代の「写せなかった」が次の世代の控えに積まれている').toEqual([]);
     } finally {
       vi.useRealTimers();
     }

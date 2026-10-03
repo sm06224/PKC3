@@ -99,7 +99,7 @@ const exportOf = async (img: Uint8Array, maxTableBytes = MAX) => {
         await request({ op: 'exportSqliteTable', session: opened.session, table, maxTableBytes }),
       );
     }
-    return { tables, views: opened.views };
+    return { tables, views: opened.views, ftsTables: opened.ftsTables };
   } finally {
     await request({ op: 'closeSqliteExport', session: opened.session });
   }
@@ -309,6 +309,56 @@ describe('🔴 表の一覧・列・行', () => {
     // 影の表の名前を 1 つずつ(どれか 1 つの除外が漏れても気づく)
     for (const suffix of ['', '_data', '_idx', '_docsize', '_config', '_content']) {
       expect(names, `docs${suffix} が写っている`).not.toContain(`docs${suffix}`);
+    }
+  });
+
+  /**
+   * 🔴 **案内に並ぶ名前(客を開く口)と、写した表の名前(写す口)が食い違わない**(着地後レビュー ⚠2 / 💭8)。
+   * ⚠ 直す前は、客を開く口が FTS5 の**影の表**(`docs_data` / `docs_idx` …)まで並べ、書いてあるとおり
+   *   DuckDB で打つと `no such table` だった。⚠ 仮想表**本体**(`docs`)は内蔵の sqlite なら引けるので、客の口には残り、
+   *   写す口は写さずに `ftsTables` で**写さなかったと言う**。
+   * 🔑 見るのは**両方の口を本物の sqlite で通した結果の関係**:客の口の名前 = 写した表 + 写さなかった仮想表。
+   */
+  it('🔴 客を開く口の表の名前 = 写した表 + 写さなかった全文検索の表(影の表はどちらにも出ない)', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE VIRTUAL TABLE docs USING fts5(title, body)');
+      run(db, "INSERT INTO docs VALUES ('あ', 'い')");
+      run(db, 'CREATE TABLE notes (id INTEGER PRIMARY KEY, t TEXT)');
+      run(db, 'CREATE TABLE sales_data (n INTEGER)');
+    });
+    const guest = await request({ op: 'openSqlGuest', image: img, guest: 'w-fts-names' });
+    try {
+      const got = await exportOf(img);
+      const copied = got.tables.map((t) => t.name);
+      expect(got.ftsTables, '写さなかった全文検索の表を言っていない').toEqual(['docs']);
+      expect([...copied, ...got.ftsTables].sort(), '案内の名前と、写した表 + 写さなかった表が食い違っている').toEqual(
+        [...guest.tables].sort(),
+      );
+      // 内蔵の sqlite で引ける仮想表本体は、案内に残る(消すと、引ける表が案内から消える)
+      expect(guest.tables, '内蔵の sqlite で引ける仮想表本体が案内から消えている').toContain('docs');
+      for (const shadow of ['docs_data', 'docs_idx', 'docs_docsize', 'docs_config', 'docs_content']) {
+        expect(guest.tables, `影の表 ${shadow} が案内に並んでいる`).not.toContain(shadow);
+      }
+      // 対照群:名前が接尾辞で終わるだけの user の表は、案内にも写しにも残る
+      expect(guest.tables).toContain('sales_data');
+      expect(copied).toContain('sales_data');
+    } finally {
+      await request({ op: 'closeSqlGuest', guest: 'w-fts-names' });
+    }
+  });
+
+  it('対照群:全文検索の表が無い file は ftsTables が空 / 客の口と写した表が同じ集合', async () => {
+    const img = await image((db) => {
+      run(db, 'CREATE TABLE a (n INTEGER)');
+      run(db, 'CREATE TABLE b (n INTEGER)');
+    });
+    const guest = await request({ op: 'openSqlGuest', image: img, guest: 'w-fts-none' });
+    try {
+      const got = await exportOf(img);
+      expect(got.ftsTables).toEqual([]);
+      expect(got.tables.map((t) => t.name)).toEqual(guest.tables);
+    } finally {
+      await request({ op: 'closeSqlGuest', guest: 'w-fts-none' });
     }
   });
 

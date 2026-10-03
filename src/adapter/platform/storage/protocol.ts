@@ -1031,8 +1031,9 @@ export interface ResultMap {
    * 取り込んだ `.sqlite` を写しのために開いた結果(#682 段④d)。`tables` = 元の名前の一覧(名前順)。
    * 🔴 `views` = **写さない**ビューの名前(名前順)。⚠ 必須の field(省ける形にすると、worker が書き忘れても tsc が黙る ──
    *   書き忘れは「ビューが黙って無い」側へ倒れる)。
+   * 🔴 `ftsTables` = **写さない**全文検索(FTS5)の仮想表本体の名前(名前順。影の表は含めない)。⚠ 必須(`views` と同じ理由)。
    */
-  openSqliteExport: { session: string; tables: string[]; views: string[] };
+  openSqliteExport: { session: string; tables: string[]; views: string[]; ftsTables: string[] };
   /** 表 1 つ分の NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
   exportSqliteTable: SqliteExportedTable;
   closeSqliteExport: null;

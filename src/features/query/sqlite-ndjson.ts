@@ -123,6 +123,11 @@ export interface SqliteExportSession {
    *   **写さなかったと言う**ためだけに在る(`duckdb-copy-report.ts`)。
    */
   readonly views: readonly string[];
+  /**
+   * 🔴 **写さない全文検索(FTS5)の仮想表本体の名前**(元の名前。名前順。影の表は含めない)。⚠ 必須の field(`views` と同じ理由)。
+   *   **写さなかったと言う**ためだけに在る ── 内蔵の sqlite なら引けるので、逃げ道を添える(`duckdb-copy-report.ts`)。
+   */
+  readonly ftsTables: readonly string[];
   table(name: string, maxTableBytes: number): Promise<SqliteExportedTable>;
   close(): Promise<void>;
 }

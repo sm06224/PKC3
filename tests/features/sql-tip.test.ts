@@ -8,7 +8,14 @@
  *   (state には届いているのに、描画器は個数だけを使っていた)。
  */
 import { describe, expect, it } from 'vitest';
-import { SQL_RULES, sqlExampleText, sqlPlaceholder, sqlTipText, TIP_TABLES_MAX } from '../../src/features/query/sql-tip';
+import {
+  SQL_RULES,
+  copiedTableNames,
+  sqlExampleText,
+  sqlPlaceholder,
+  sqlTipText,
+  TIP_TABLES_MAX,
+} from '../../src/features/query/sql-tip';
 import { checkDuckDbSql } from '../../src/features/query/duckdb-guard';
 
 const guest = (tables: string[]) => ({ name: '売上.sqlite', tables });
@@ -254,5 +261,35 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
     const t = sqlTipText(sq(['売上', '客']), 'sqlite');
     expect(t).toContain('この file に在る表: 売上, 客');
     expect(sqlPlaceholder(sq(['売上', '客']), 'sqlite')).toBe('SELECT * FROM "売上" LIMIT 20');
+  });
+});
+
+describe('🔴 DuckDB の案内へ並べる表は、写した表だけ(着地後レビュー ⚠2)', () => {
+  const t = { name: '家計.sqlite', tables: ['docs', 'notes', '大きい'] };
+  const report = (names: string[], view = false) => ({
+    refused: names.map((name) => ({ name, view, why: 'x' })),
+    asText: [],
+    sqlite: true,
+    blob: false,
+  });
+
+  it('写さなかった表(全文検索の仮想表・大きすぎる表)を外す / 空の報告と、まだ写していない回は全部', () => {
+    expect(copiedTableNames(t, report(['docs', '大きい']), false)).toEqual(['notes']);
+    expect(copiedTableNames(t, report([]), false)).toEqual(['docs', 'notes', '大きい']);
+    expect(copiedTableNames(t, null, false), 'まだ写していない回に、知らない物を外している').toEqual([
+      'docs',
+      'notes',
+      '大きい',
+    ]);
+  });
+
+  it('並べているときの器での名前は ファイル名_表名 ── 同じ規則で突き合わせる', () => {
+    expect(copiedTableNames(t, report(['家計_docs']), true)).toEqual(['notes', '大きい']);
+    // 対照群:元の名前で載っていても、並べているときの名前とは別物(取り違えて外さない)
+    expect(copiedTableNames(t, report(['docs']), true)).toEqual(['docs', 'notes', '大きい']);
+  });
+
+  it('ビューは表の一覧に影響しない(ビューは客の表に並ばない)', () => {
+    expect(copiedTableNames(t, report(['notes'], true), false)).toEqual(['docs', 'notes', '大きい']);
   });
 });
