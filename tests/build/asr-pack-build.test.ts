@@ -80,7 +80,7 @@ function put(root: string, path: string, content: string | number): void {
   }
 }
 
-/** 下限(`readAsrPack`)を超える最小の一式。⚠ 重みは疎な file(41,000,000 byte。軽い = 81,270,976 の半分 40,635,488 を超える)。 */
+/** 下限(`readAsrPack`)を超える最小の一式。⚠ 重みは疎な file(52,000,000 byte。軽い = 103,007,956 の半分 51,503,978 を超える)。 */
 function fakePack(opts: { model?: boolean; jsBytes?: number } = {}): string {
   const root = tmp();
   // ⚠ 本物の JS として読める形にする(esbuild が在る箱では裸の指定子を数えるため)
@@ -89,7 +89,7 @@ function fakePack(opts: { model?: boolean; jsBytes?: number } = {}): string {
   put(root, 'runtime/ort-wasm.mjs', '//'.padEnd(6_000, '/'));
   put(root, 'runtime/ort-wasm.wasm', 5_100_000);
   if (opts.model !== false) {
-    put(root, ONNX, 41_000_000);
+    put(root, ONNX, 52_000_000);
     put(root, `${MODEL_DIR}/config.json`, '{"dummy":true}');
   }
   put(root, 'LICENSES/upstream/mit.txt', MIT_TEXT);
@@ -126,8 +126,8 @@ describe('make-pack ── 目録を作る', () => {
 
   it('2 択を両方置けば、目録の light / accurate に**別々に**入る(model ごとの dir で振り分ける)', async () => {
     const root = fakePack();
-    // small の下限は 253,468,391 の半分 = 126,734,195 ── 超える疎な file
-    put(root, 'models/openai/whisper-small/onnx/decoder_model_merged_quantized.onnx', 127_000_000);
+    // small の下限は 288,448,143 の半分 = 144,224,071 ── 超える疎な file
+    put(root, 'models/openai/whisper-small/onnx/decoder_model_merged_quantized.onnx', 145_000_000);
     put(root, 'models/openai/whisper-small/config.json', '{"small":true}');
     await make({ outDir: root, now: NOW });
     const r = readAsrPack(readFileSync(join(root, 'pack.json'), 'utf8'));
@@ -156,7 +156,7 @@ describe('make-pack ── 目録を作る', () => {
     expect(pb.build['builtAt']).not.toBe(pa.build['builtAt']);
     // 既知の値(算法の取り違え ── path を落とす / 先頭 12 桁でなくなる ── を殺す錨)
     expect(pa.version).toMatch(/^[0-9a-f]{12}$/);
-    expect(pa.version).toBe('bfc4d0451a19'); // 2026-10-03: models/Xenova/… → models/openai/… へ path が動いたので値も動いた(算法は同じ)
+    expect(pa.version).toBe('07a2b853fb18'); // 2026-10-03: 疎 file の大きさを新しい下限(配っている物の実測の半分)へ上げたので値も動いた(算法は同じ。その前は path の変更で bfc4d0451a19)
 
     // 1 byte 違う(大きさも同じ)
     const c = fakePack();
