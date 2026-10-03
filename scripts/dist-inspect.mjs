@@ -139,7 +139,7 @@ export const DUCKDB_REQUIRED = [
  *
  * ⚠ DuckDB と**同じ扱い** ── 設定で選んだ人が押したときだけ取りに行く物なので、precache にも
  *   アプリの配る量にも数えない。🔴 そのぶん**別立ての予算**(上限と下限)を下に置く。
- * 🔑 窓の小さな HTML / JS(`pdf/host.html` など 4 file)は**ふつうの配る物**で、precache に載る
+ * 🔑 窓の小さな HTML / JS(`pdf/host.html` など 6 file)は**ふつうの配る物**で、precache に載る
  *   (載せないと、オフラインで窓を開いたとき service worker が `index.html` へ退避して PKC をもう 1 枚開く)。
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/dist-inspect.test.ts` が突き合わせる)。
  */
@@ -151,6 +151,8 @@ export const PDF_SHELL_FILES = [
   'pdf/reader.js',
   'pdf/reader-wire.js',
   'pdf/page-cache.js',
+  'pdf/doc-lease.js',
+  'pdf/text-hits.js',
 ];
 
 /**
