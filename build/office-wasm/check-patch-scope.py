@@ -298,25 +298,6 @@ FIXES = [
         "MenuBarManager::Select の popup の分岐",
         "#include <cstdio> // PKC3-POPUPSYNC",
     ),
-    # 🔴 #121(2026-10-04)── `patch-lo-yield-proxy-guard.py`。**1 つの patch が 2 か所を関数の中へ足す**ので 2 行。
-    (
-        "patch-lo-yield-proxy-guard.py",
-        "vcl/qt5/QtInstance.cxx",
-        # 原文: `ImplYield` の 4 字下げの 1 行(足す `if (g_bPkc3InProxiedYield)` も同じ関数の中)
-        "    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);\n",
-        "if (g_bPkc3InProxiedYield) // PKC3-YIELDGUARD",
-        "QtInstance::ImplYield の dispatch の分岐",
-        "#include <cstdio> // PKC3-YIELDGUARD",
-    ),
-    (
-        "patch-lo-yield-proxy-guard.py",
-        "vcl/qt5/QtInstance.cxx",
-        # 原文: `DoYield` の proxy lambda の 16 字下げの 1 行(旗を立てる行も同じ lambda の中)
-        "                args.bWasEvent = args.This->DoYield(args.bWait, args.bHandleAllCurrentEvents);\n",
-        "g_bPkc3InProxiedYield = true; // PKC3-YIELDGUARD",
-        "QtInstance::DoYield の proxy lambda の旗",
-        "#include <cstdio> // PKC3-YIELDGUARD",
-    ),
 ]
 
 print("=== 本番(ヘルパーを持たない直し: 足した行が原文と同じスコープに在るか)")

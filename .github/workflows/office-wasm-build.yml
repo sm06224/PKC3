@@ -620,13 +620,7 @@ jobs:
           # 🔴 22 → 23(2026-10-04)。`patch-lo-uev-trace.py`(#121 の**計装**。既定では 1 バイトも書き換えない)。
           #    popup の「コピー」で落ちる user event を名指しする(`post` / `dispatch` / `done` + C stack)。
           #    ⚠ `patch-lo-idles-trace.py` と同じ 2 file を触るが**錨は重ならない**(両順で出力が同一)。
-          # 🔴 23 → 24(2026-10-04)。`patch-lo-yield-proxy-guard.py`(#121 の**直し**)。
-          #    JSPI の main thread の入力 callback の中の `Application::Yield()` が、溜まっていた user event を
-          #    dispatch して `libc++abi: terminating`(`ProcessEvent` の `emscripten_promise_await` が中断できない
-          #    stack)で落ちる。**proxy された yield の中でだけ** user event を dispatch し、入れ子の Yield では
-          #    queue に残して loop を起こす(⚠ **既定で当たる**)。⚠ `QtInstance.cxx` を触る 3 本
-          #    (`patch-lo-idles-trace.py` / `patch-lo-qt-cjk-fonts.py` / この 1 本)は**どの順でも出力が同一**。
-          test "$n" -eq 24
+          test "$n" -eq 23
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

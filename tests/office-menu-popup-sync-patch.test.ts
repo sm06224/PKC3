@@ -39,7 +39,6 @@ const REL = 'framework/source/uielement/menubarmanager.cxx';
 const MARK = 'PKC3-POPUPSYNC';
 const EXCERPT = readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8');
 const SCHED_EXCERPT = readFileSync('tests/fixtures/office-lo/scheduler.excerpt.cxx', 'utf-8');
-const QT_EXCERPT = readFileSync('tests/fixtures/office-lo/QtInstance.excerpt.cxx', 'utf-8');
 
 /** python の module から値を取り出す(⚠ 錨の字をここへ書き写さない)。 */
 function pyJson(script: string, expr: string): unknown {
@@ -298,8 +297,8 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/21 → 22\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-menu-popup-sync.py');
-    // 22 → 23 → 24(2026-10-04): `patch-lo-uev-trace.py`(計装)/ `patch-lo-yield-proxy-guard.py`(直し)を足した。「21 → 22」の注記は残っている
-    expect(yml).toContain('test "$n" -eq 24');
+    // 22 → 23(2026-10-04): `patch-lo-uev-trace.py`(#121 の計装)を 1 本足した。「21 → 22」の注記は残っている
+    expect(yml).toContain('test "$n" -eq 23');
   });
 
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {
@@ -311,15 +310,13 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
 describe('#121 の直し(menu-popup-sync)── スコープ検査(check-patch-scope.py の FIXES)を実際に走らせる', () => {
   const CHECK = 'build/office-wasm/check-patch-scope.py';
   const TASK_GONE = 'build/office-wasm/patch-lo-scheduler-task-gone.py';
-  const YIELD_GUARD = 'build/office-wasm/patch-lo-yield-proxy-guard.py';
 
-  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 3 本(+ yield-proxy-guard は 2 行)── 全部の当て先が木に要る。 */
+  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 2 本 ── 両方の当て先が木に要る。 */
   function scopeTree(): string {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-popupsync-scope-'));
     for (const [rel, body] of [
       [REL, EXCERPT],
       ['vcl/source/app/scheduler.cxx', SCHED_EXCERPT],
-      ['vcl/qt5/QtInstance.cxx', QT_EXCERPT],
     ] as const) {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
       writeFileSync(join(dir, rel), body, 'utf-8');
@@ -352,7 +349,6 @@ describe('#121 の直し(menu-popup-sync)── スコープ検査(check-patch-s
       expect(count(src, from), '壊す元の字が 1 件でない(変異が当たらない)').toBe(1);
       writeFileSync(join(dir, 'patch-lo-menu-popup-sync.py'), src.replace(from, to), 'utf-8');
       writeFileSync(join(dir, 'patch-lo-scheduler-task-gone.py'), readFileSync(TASK_GONE, 'utf-8'), 'utf-8');
-      writeFileSync(join(dir, 'patch-lo-yield-proxy-guard.py'), readFileSync(YIELD_GUARD, 'utf-8'), 'utf-8');
       writeFileSync(join(dir, 'check-patch-scope.py'), readFileSync(CHECK, 'utf-8'), 'utf-8');
       return scope(join(dir, 'check-patch-scope.py'), root);
     } finally {
