@@ -298,6 +298,17 @@ FIXES = [
         "MenuBarManager::Select の popup の分岐",
         "#include <cstdio> // PKC3-POPUPSYNC",
     ),
+    # 🔴 #121(2026-10-04)── `patch-lo-ime-nowait.py`。`ImplHandleExtTextInput` の while の中の 1 か所。
+    (
+        "patch-lo-ime-nowait.py",
+        "vcl/source/window/winproc.cxx",
+        # 原文: LOK の 5 行 + 待つ `Application::Yield();`(`Yield` は file 内に複数在るので LOK の塊で一意にする。
+        #       8 字下げ = while の `{` の中。足す `if (g_nPkc3ImeNoWaitSaid < 20)` も同じ `{` の中に入る)
+        '        if (comphelper::LibreOfficeKit::isActive())\n        {\n            SAL_WARN("vcl", "Failed to get ext text input context");\n            break;\n        }\n        Application::Yield();\n',
+        "if (g_nPkc3ImeNoWaitSaid < 20) // PKC3-IMENOWAIT",
+        "ImplHandleExtTextInput の待ちの分岐",
+        "#include <cstdio> // PKC3-IMENOWAIT",
+    ),
 ]
 
 print("=== 本番(ヘルパーを持たない直し: 足した行が原文と同じスコープに在るか)")

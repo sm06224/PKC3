@@ -362,6 +362,10 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
     const other = join(dir, 'framework/source/uielement/menubarmanager.cxx');
     mkdirSync(dirname(other), { recursive: true });
     writeFileSync(other, readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8'), 'utf-8');
+    // `patch-lo-ime-nowait.py`(#121)の当て先(`vcl/source/window/winproc.cxx`)も同じ理由で木に要る
+    const win = join(dir, 'vcl/source/window/winproc.cxx');
+    mkdirSync(dirname(win), { recursive: true });
+    writeFileSync(win, readFileSync('tests/fixtures/office-lo/winproc.excerpt.cxx', 'utf-8'), 'utf-8');
     const r = spawnSync('python3', [checkScript, dir], {
       encoding: 'utf-8',
       env: { ...process.env, PKC3_SCOPE_ONLY: 'fixes' },
@@ -386,6 +390,11 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
       writeFileSync(
         join(dir, 'patch-lo-menu-popup-sync.py'),
         readFileSync('build/office-wasm/patch-lo-menu-popup-sync.py', 'utf-8'),
+        'utf-8',
+      );
+      writeFileSync(
+        join(dir, 'patch-lo-ime-nowait.py'),
+        readFileSync('build/office-wasm/patch-lo-ime-nowait.py', 'utf-8'),
         'utf-8',
       );
       return scope(join(dir, 'check-patch-scope.py'), t.dir);
