@@ -223,6 +223,8 @@ describe('可搬 HTML', () => {
     expect(text, '本文の時刻が消えている').toContain('0:15 こんにちは');
     expect(text, '押せる印が書き出しに載っている').not.toContain('seek-media');
     expect(text, '押せる字の class が書き出しに載っている').not.toContain('pkc-seek-link');
+    // 🔴 #1232 段 b: 時刻に添える「0:15 から再生」も載らない(押せない紙に、押せるような案内を出さない)
+    expect(text, '時刻の案内(から再生)が書き出しに載っている').not.toContain('から再生');
   });
 
   /**

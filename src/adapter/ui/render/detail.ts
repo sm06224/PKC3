@@ -411,6 +411,13 @@ export class DetailRenderer {
   private readingTimeEl: HTMLElement | null = null;
   private barSlot: HTMLElement | null = null;
   /**
+   * 🔴 **操作の帯の高さを `--pkc-detail-bar-h` へ下ろす見張り**(#1232 段 b)。
+   * 音の再生機は帯の**直下**に貼り付く(`app.css` の `attachment-preview`)── 帯は幅が狭いと 2 段に折れ
+   * (実測 1600px の横 2 枠で 53px)、留めた枠では空(0px)なので、**固定の 34px では帯に重なる / 隙間が空く**。
+   * ⚠ 骨組みを捨てるとき `disconnect` する(`dropSkeleton`)。
+   */
+  private barHeightWatch: ResizeObserver | null = null;
+  /**
    * 操作の器の**形**(2026-08-07)。形が同じなら node を使い回す ──
    * 詳細は `renderBar` の注記。⚠ 骨組みを作り直したら `null` へ戻す
    * (古い node を指したまま「形は同じ」と判断すると、外れた node を patch する)。
@@ -721,12 +728,34 @@ export class DetailRenderer {
     this.lends.prune();
   }
 
+  /**
+   * 操作の帯の高さを、器(`this.region`)の `--pkc-detail-bar-h` へ書く(#1232 段 b)。
+   * ⚠ 同じ値なら書かない(書くと見張りがまた鳴って回り続ける ── `read-columns.ts` と同じ作法)。
+   * ⚠ `ResizeObserver` を持たない環境(単体の happy-dom)では何もしない ── CSS 側に既定(34px)がある。
+   */
+  private watchBarHeight(bar: HTMLElement): void {
+    this.barHeightWatch?.disconnect();
+    this.barHeightWatch = null;
+    if (typeof ResizeObserver !== 'function') return;
+    const write = (): void => {
+      const value = `${Math.ceil(bar.getBoundingClientRect().height)}px`;
+      if (this.region.style.getPropertyValue('--pkc-detail-bar-h') !== value) {
+        this.region.style.setProperty('--pkc-detail-bar-h', value);
+      }
+    };
+    const watch = new ResizeObserver(write);
+    watch.observe(bar);
+    this.barHeightWatch = watch;
+  }
+
   /** 骨組みを捨てる(次の描画で組み直す)。 */
   private dropSkeleton(): void {
     this.skeletonLid = null;
     this.titleEl = null;
     this.readingTimeEl = null;
     this.barSlot = null;
+    this.barHeightWatch?.disconnect();
+    this.barHeightWatch = null;
     this.panelSlot = null;
     this.noticeSlot = null;
     this.overviewSlot = null;
@@ -1205,6 +1234,7 @@ export class DetailRenderer {
       this.readingTimeEl.hidden = true;
       this.barSlot = document.createElement('div');
       this.barSlot.setAttribute('data-pkc-field', this.field('detail-bar-slot'));
+      this.watchBarHeight(this.barSlot);
       this.panelSlot = document.createElement('div');
       this.panelSlot.setAttribute('data-pkc-field', this.field('detail-panel-slot'));
       // ⚠ 確認の帯は**本文の器の外**に置く ── 中に入れると `applyBlocks` の

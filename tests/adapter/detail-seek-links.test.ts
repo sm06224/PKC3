@@ -137,4 +137,68 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     expect(t, '2 行目の時刻(0:20)へ動いていない').toBe(20);
     expect(play).toHaveBeenCalledTimes(1);
   });
+  /**
+   * 🔴 **音の再生機が貼り付く条件(`app.css`)を、詳細が組む形が満たしている**(#1232 段 b、Gemini 裁定 Q3 = B)。
+   * 貼り付くのは `attachment-preview` の器で、条件は「**直下の子に `<audio>` が居る**」(動画は貼らない)。
+   * ⚠ `<audio>` を別の入れ物へ包み直すと、CSS は何も言わずに外れる ── 配置は happy-dom では測れないので、
+   *   **形**をここで pin し、貼り付くこと自体は smoke(`media-capture.smoke.spec.ts`)が実ブラウザで見る。
+   */
+  it('🔴 音の再生機は attachment-preview の直下に居る / 動画も同じ器だが <video> である', async () => {
+    const { root } = await open('audio/webm', 'rec.webm');
+    const audio = root.querySelector<HTMLElement>('audio[data-pkc-field="attachment-media"]');
+    expect(audio?.parentElement?.getAttribute('data-pkc-field'), '音の再生機の親が attachment-preview でない').toBe(
+      'attachment-preview',
+    );
+    document.body.textContent = '';
+    const v = await open('video/webm', 'rec.webm');
+    expect(v.root.querySelector('audio'), '前提: 動画の添付に <audio> が居る').toBeNull();
+    expect(
+      v.root.querySelector('video[data-pkc-field="attachment-media"]')?.parentElement?.getAttribute('data-pkc-field'),
+    ).toBe('attachment-preview');
+  });
+
+  /**
+   * 🔴 **帯の高さを器へ下ろす**(`--pkc-detail-bar-h`)── 再生機は帯の直下に貼り付くので、帯が 2 段に折れて
+   * 高くなっても(実測 53px)重ならない。⚠ 実ブラウザの smoke は帯が 34px の窓で走るので、
+   * 「測った値が器へ届く」ことは**ここが唯一の門**(測らずに 34px 固定でも smoke は緑になる)。
+   */
+  it('🔴 操作の帯の高さを測って、詳細の器の --pkc-detail-bar-h へ書く(高さが変われば追従する)', async () => {
+    const watches: Array<{ cb: () => void; target: Element | null; gone: boolean }> = [];
+    class FakeResizeObserver {
+      private readonly rec: { cb: () => void; target: Element | null; gone: boolean };
+      constructor(cb: () => void) {
+        this.rec = { cb, target: null, gone: false };
+        watches.push(this.rec);
+      }
+      observe(el: Element): void {
+        this.rec.target = el;
+      }
+      disconnect(): void {
+        this.rec.gone = true;
+      }
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    let height = 53;
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const h = this.getAttribute('data-pkc-field') === 'detail-bar-slot' ? height : 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: h, width: 0, height: h, toJSON: () => ({}) } as DOMRect;
+    });
+    try {
+      const { root } = await open('audio/webm', 'rec.webm');
+      const bar = root.querySelector<HTMLElement>('[data-pkc-field="detail-bar-slot"]');
+      expect(bar, '前提: 操作の帯が無い').not.toBeNull();
+      const region = bar!.parentElement!;
+      const live = watches.filter((w) => !w.gone && w.target === bar);
+      expect(live, '帯を見張っていない').toHaveLength(1);
+      live[0]!.cb();
+      expect(region.style.getPropertyValue('--pkc-detail-bar-h'), '帯の高さが器へ届いていない').toBe('53px');
+      height = 34;
+      live[0]!.cb();
+      expect(region.style.getPropertyValue('--pkc-detail-bar-h'), '帯が低くなったのに追従しない').toBe('34px');
+    } finally {
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });

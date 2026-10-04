@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment happy-dom
+ *
  * 🔴 **文字起こしの行頭の時刻(`0:15 こんにちは`)を、押せる字にして描く**(#1232 段 b)。
  *
  * 時刻の読み(`0:15` → 15000)は `tests/features/elapsed-text.test.ts`、押した後は
@@ -17,7 +19,7 @@ describe('文字起こしの行頭の時刻を押せる字にする(#1232 段 b)
   it('🔴 入れた面では、行頭の時刻が押せる字になる(位置のミリ秒が属性に載り、字はそのまま)', () => {
     const html = on('0:15 こんにちは\n');
     expect(html, '行頭の時刻が押せる字になっていない').toContain(
-      '<span class="pkc-seek-link" data-pkc-action="seek-media" data-pkc-seek-ms="15000" role="button" tabindex="0">0:15</span> こんにちは',
+      '<span class="pkc-seek-link" data-pkc-action="seek-media" data-pkc-seek-ms="15000" role="button" tabindex="0" title="0:15 から再生" aria-label="0:15 から再生">0:15</span> こんにちは',
     );
     // 🔑 キーボードで焦点が乗り、Enter / Space で押せる(`tabindex="0"` の既存の道)
     expect(html).toContain('tabindex="0"');
@@ -110,6 +112,38 @@ describe('文字起こしの行頭の時刻を押せる字にする(#1232 段 b)
     expect(html, '字が消えている').toContain('14:00 会議');
     // 対照群 ── 全角スペースが無ければ押せる(14 分 0 秒)
     expect(on('14:00 会議\n')).toContain('data-pkc-seek-ms="840000"');
+  });
+
+  /**
+   * 🔴 **時刻に載せると「0:15 から再生」と出て、読み上げにも同じ字が出る**(#1232 段 b、Gemini 裁定 Q4 = B)。
+   * ⚠ 字は**実装の定数を import せず**、描画結果から読む ── 定数を変えた日に両方そのまま緑になるのを避ける。
+   *   見るのは「`title` と `aria-label` が**同じ字**」「表示の綴りで始まる」「`から再生` を含む」。
+   */
+  it('🔴 押せる時刻に title と aria-label が付き、2 つは同じ字で、表示の綴りで始まり「から再生」を含む', () => {
+    for (const [spell, line] of [
+      ['0:15', '0:15 こんにちは\n'],
+      ['1:02:03', '1:02:03 長い録音の終わり近く\n'],
+    ] as const) {
+      const holder = document.createElement('div');
+      holder.innerHTML = on(line);
+      const el = holder.querySelector('.pkc-seek-link');
+      expect(el, `${spell} が押せる字になっていない`).not.toBeNull();
+      const title = el!.getAttribute('title');
+      const label = el!.getAttribute('aria-label');
+      expect(title, `${spell} に title が無い`).not.toBeNull();
+      expect(label, `${spell} に aria-label が無い`).not.toBeNull();
+      expect(label, 'title と aria-label が別の字(見える人と聞く人で案内が食い違う)').toBe(title);
+      expect(title!.startsWith(spell), `案内が表示の綴り(${spell})で始まっていない`).toBe(true);
+      expect(title).toContain('から再生');
+      // 🔑 見た目の字は案内で増えない(1 ドットも変えない)
+      expect(el!.textContent).toBe(spell);
+    }
+  });
+
+  it('時刻の綴りでないもの・リンクの中の字には、案内も付かない(対照群)', () => {
+    expect(on('0:5 こんにちは\n')).not.toContain('から再生');
+    expect(on('[0:15 メモ](https://example.com/)\n')).not.toContain('から再生');
+    expect(off('0:15 こんにちは\n'), '旗を立てない面に案内が漏れている').not.toContain('から再生');
   });
 
   it('リスト・引用の中の行頭も押せる(段落の先頭だから)', () => {
