@@ -233,7 +233,13 @@ describe('AsrRunner', () => {
     await b.runner.run(job({ language: null }));
     expect('language' in b.seen.runCalls[0]!, '自動判定のはずが language を渡した').toBe(false);
     // 測った組み合わせから動かさない(chunk の切り方)
-    expect(b.seen.runCalls[0]).toMatchObject({ chunk_length_s: 30, stride_length_s: 5, task: 'transcribe' });
+    expect(b.seen.runCalls[0]).toMatchObject({
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      task: 'transcribe',
+      // 🔑 #1232 段 a: 時刻つきの区切りを頼む(false に戻すと行の形が作れない)
+      return_timestamps: true,
+    });
     expect(b.seen.pipelineCalls[0]).toMatchObject({
       task: 'automatic-speech-recognition',
       options: { device: 'wasm', dtype: 'q8' },
@@ -245,6 +251,41 @@ describe('AsrRunner', () => {
     expect((await runner.run(job())).text).toBe('こんにちは。 今日は晴れです');
     const e = setup({ nothing: 1 });
     expect((await e.runner.run(job())).text).toBe('');
+  });
+
+  it('🔴 #1232 段 a: chunks(秒)は segments(ms)になる ── 空の区切りは落とし、text は残す', async () => {
+    const { runner } = setup({
+      text: ' こんにちは。今日は',
+      chunks: [
+        { timestamp: [0, 2.5], text: ' こんにちは。' },
+        { timestamp: [2.5, 4.25], text: '   ' },
+        { timestamp: [15, 20.0004], text: '今日は' },
+      ],
+    });
+    const r = await runner.run(job());
+    expect(r.text).toBe('こんにちは。今日は');
+    expect(r.segments).toEqual([
+      { startMs: 0, endMs: 2500, text: ' こんにちは。' },
+      { startMs: 15000, endMs: 20000, text: '今日は' },
+    ]);
+  });
+
+  it('#1232: 最後の区切りの終わりが null なら endMs も null(0 や NaN にしない)', async () => {
+    const { runner } = setup({ text: 'あ い', chunks: [{ timestamp: [1.5, 3], text: 'あ' }, { timestamp: [61.2, null], text: 'い' }] });
+    const r = await runner.run(job());
+    expect(r.segments).toEqual([
+      { startMs: 1500, endMs: 3000, text: 'あ' },
+      { startMs: 61200, endMs: null, text: 'い' },
+    ]);
+  });
+
+  it('#1232: chunks が無い runtime でも text だけで動く(segments を持たない)', async () => {
+    const { runner } = setup({ text: 'こんにちは' });
+    const r = await runner.run(job());
+    expect(r.text).toBe('こんにちは');
+    expect('segments' in r, 'chunks が無いのに segments を足した').toBe(false);
+    const e = setup({ text: 'あ', chunks: [{ timestamp: [0, 1], text: '  ' }] });
+    expect('segments' in (await e.runner.run(job()))).toBe(false);
   });
 
   it('⑤ 実行の部品が欠けていれば、取り込み直しを促して断る(何も import しない)', async () => {

@@ -50,8 +50,21 @@ export interface AsrJob {
   readonly pcm: Float32Array;
 }
 
+/** 認識結果の 1 区切り(#1232 段 a)。⚠ 時刻は**録音の頭からの ms**。 */
+export interface AsrSegment {
+  readonly startMs: number;
+  /** ⚠ 最後の区切りは終わりが取れず `null` になりうる(whisper の仕様)。 */
+  readonly endMs: number | null;
+  readonly text: string;
+}
+
 export interface AsrJobResult {
   readonly text: string;
+  /**
+   * 時刻つきの区切り(#1232)。⚠ **無いことが在る**(区切りを返さない runtime / 全部空)──
+   * 受ける側は `text` だけで動く(後ろ互換)。
+   */
+  readonly segments?: readonly AsrSegment[];
   /** 読み込み(部品の import + 重みの読み + session 生成)。⚠ 読み込み済みなら 0。 */
   readonly loadMs: number;
   readonly runMs: number;
@@ -85,7 +98,7 @@ export interface AsrRunnerDeps {
 
 /** 推論の設定。⚠ 段②-0 で測った組み合わせ(wasm CPU / q8)から動かさない。 */
 const PIPELINE_OPTIONS = { device: 'wasm', dtype: 'q8' } as const;
-const RUN_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, task: 'transcribe', return_timestamps: false } as const;
+const RUN_OPTIONS = { chunk_length_s: 30, stride_length_s: 5, task: 'transcribe', return_timestamps: true } as const;
 
 function textOf(out: unknown): string {
   if (Array.isArray(out)) return out.map((o) => textOf(o)).join(' ').trim();
@@ -93,6 +106,31 @@ function textOf(out: unknown): string {
     return (out as { text: string }).text.trim();
   }
   return '';
+}
+
+/**
+ * `chunks`(`timestamp` は**秒**)を区切り(ms)へ。空 / 空白だけの区切りは落とす。
+ * ⚠ 形の合わない物は**黙って落とす**(取れなければ `text` だけで動く)。
+ */
+function segmentsOf(out: unknown): AsrSegment[] {
+  if (Array.isArray(out)) return out.flatMap((o) => segmentsOf(o));
+  if (typeof out !== 'object' || out === null) return [];
+  const chunks = (out as { chunks?: unknown }).chunks;
+  if (!Array.isArray(chunks)) return [];
+  const segs: AsrSegment[] = [];
+  for (const c of chunks) {
+    if (typeof c !== 'object' || c === null) continue;
+    const { text, timestamp } = c as { text?: unknown; timestamp?: unknown };
+    if (typeof text !== 'string' || text.trim() === '') continue;
+    if (!Array.isArray(timestamp) || typeof timestamp[0] !== 'number' || !Number.isFinite(timestamp[0])) continue;
+    const end = timestamp[1];
+    segs.push({
+      startMs: Math.round(timestamp[0] * 1000),
+      endMs: typeof end === 'number' && Number.isFinite(end) ? Math.round(end * 1000) : null,
+      text,
+    });
+  }
+  return segs;
 }
 
 /**
@@ -194,6 +232,12 @@ export class AsrRunner {
       ...(job.language === null ? {} : { language: job.language }),
     });
     const t2 = this.now();
-    return { text: textOf(out), loadMs: t1 - t0, runMs: t2 - t1 };
+    const segments = segmentsOf(out);
+    return {
+      text: textOf(out),
+      ...(segments.length > 0 ? { segments } : {}),
+      loadMs: t1 - t0,
+      runMs: t2 - t1,
+    };
   }
 }

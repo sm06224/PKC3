@@ -6,6 +6,8 @@
  * 「そのノートの本文の末尾に追記、日時見出しつき」)。
  */
 
+import { elapsedText } from '../elapsed-text';
+
 /** 画面に出る入口の名前。⚠ 設定の節の見出し・案内の字は、全部ここから引く(§7)。 */
 export const ASR_SECTION_LABEL = '音声認識';
 
@@ -32,4 +34,24 @@ export function transcriptHeading(at: Date): string {
 export function transcriptText(raw: string): string | null {
   const t = raw.replace(/\s+/g, ' ').trim();
   return t === '' ? null : t;
+}
+
+/**
+ * 時刻つきの区切りを、**1 行 = `時刻 字`** の本文にする(#1232 段 a)。**使える行が無ければ `null`**
+ * (呼び側は `transcriptText` の 1 段落へ倒す)。
+ *
+ * 🔑 時刻の綴りは `elapsedText`(`0:07` / `12:34` / `1:02:03`)── 割り算を書き足さない。
+ * 🔑 行は `\n` で並べる(markdown は `breaks: true` なので 1 段落の中で行ごとに見える)。
+ * ⚠ 字の正規化は `transcriptText` と同じ。出た字は**そのまま**(同じ字の繰り返しも畳まない)。
+ */
+export function transcriptLines(
+  segments: ReadonlyArray<{ readonly startMs: number; readonly text: string }> | undefined,
+): string | null {
+  if (segments === undefined) return null;
+  const lines: string[] = [];
+  for (const seg of segments) {
+    const t = transcriptText(seg.text);
+    if (t !== null) lines.push(`${elapsedText(seg.startMs)} ${t}`);
+  }
+  return lines.length === 0 ? null : lines.join('\n');
 }

@@ -29,6 +29,7 @@ import {
 import {
   ASR_SECTION_LABEL,
   transcriptHeading,
+  transcriptLines,
   transcriptText,
 } from '@features/asr/asr-text';
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
@@ -169,7 +170,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           language: ASR_LANGUAGE,
           pcm,
         });
-        const text = transcriptText(out.text);
+        // 時刻つきの行があればそれ、無ければ今までの 1 段落(#1232 段 a)
+        const text = transcriptLines(out.segments) ?? transcriptText(out.text);
         if (text === null) {
           say(`「${item.name}」からは字になりませんでした(声が小さい・無音かもしれません)。ノートは変えていません`);
           return;
