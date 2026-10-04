@@ -35,9 +35,10 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FLOOR = 4  # 実測(2026-10-04): idles / ime / save / scheduler の 4 本
+FLOOR = 5  # 実測(2026-10-04): idles / ime / save / scheduler / clip の 5 本
 # 🔑 3 → 4(2026-10-04): 計装 patch を 1 本足した(`patch-lo-scheduler-trace.py`、#117)。
 #    下限を据え置くと、その 1 本が拾えなくなっても気づけない。
+# 🔑 4 → 5(2026-10-04): 計装 patch をもう 1 本足した(`patch-lo-clip-trace.py`、#121)。
 
 # ⚠ `#include <pthread.h>` を差し替えて実体を作る。**両方**当てるのが肝。
 # ⚠ stub には `[[maybe_unused]]` を付ける ── stub は**足場**であって主張の対象ではない。

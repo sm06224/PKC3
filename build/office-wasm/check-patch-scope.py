@@ -141,6 +141,18 @@ SPECS = [
         ],
     ),
     (
+        "PKC3_CLIP_TRACE",
+        "patch-lo-clip-trace.py",
+        "pkc3_clip_trace",
+        [
+            # 🔴 #121(2026-10-04)── ヘルパーは `formats()` / `setContents()` の直前で、
+            #    使う所(`retrieveData` / `setContents` の中)はどれもその後ろ。
+            #    ⚠ ここを SPECS に足し忘れると、**この 2 file だけ検査の外**になる。
+            ("vcl/qt5/QtTransferable.cxx", "QStringList QtMimeData::formats() const"),
+            ("vcl/qt5/QtClipboard.cxx", "void QtClipboard::setContents("),
+        ],
+    ),
+    (
         "PKC3_IME_TRACE",
         "patch-lo-ime-trace.py",
         "pkc3_ime_trace",

@@ -118,6 +118,18 @@ on:
         description: '調査用: scheduler の再入・破棄後参照に計装を当てる(#117。別 tag へ出る)'
         type: boolean
         default: false
+      clip_trace:
+        # 🔴 **調査用**(#121)。Office の窓の `Ctrl+C` / 右クリックの「コピー」が、どの層で外へ届かなく
+        #    なるかを**数で言う**(`build/office-wasm/patch-lo-clip-trace.py`)。
+        #    ⚠ 画像の `Ctrl+C` は host へ `x-openoffice-svxb` の 1 つだけが渡り、右クリックの
+        #    「コピー」は host への依頼が 0 件だった。メニュー経由で `QtClipboard::setContents` が
+        #    呼ばれるか / Qt が何の型で中身を求めるか、を印で言う。
+        #    🔑 **直しは入れない**(計装だけ)。直し(PNG を一覧へ入れる)は
+        #    `patch-lo-clipboard-png.py` で、こちらは**既定で当たる**。出口は libc だけ
+        #    (stderr + `/tmp/pkc3-clip.log`)。
+        description: '調査用: クリップボードの受け渡し(コピー)に計装を当てる(#121。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -450,6 +462,11 @@ jobs:
           else
             export PKC3_SCHEDULER_TRACE=0
           fi
+          if [ "${{ inputs.clip_trace }}" = "true" ]; then
+            export PKC3_CLIP_TRACE=1
+          else
+            export PKC3_CLIP_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -552,7 +569,14 @@ jobs:
           #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_SCHEDULER_TRACE=1` の回だけ)が、
           #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない。
           #    ⚠ `patch-lo-idles-deadlock.py` と**同じ行を触らない**(あちらは `IdlesLockGuard`)。
-          test "$n" -eq 17
+          # 🔴 17 → 19(2026-10-04)。#121(画像のコピーが外へ届かない)の 2 本:
+          #    `patch-lo-clipboard-png.py`(**直し**。`QtMimeData::formats()` が先頭の flavor しか
+          #    一覧に入れず、Writer の画像は PNG が先頭でないので捨てられていた ── PNG が在れば
+          #    それ 1 つを入れる。⚠ **既定で当たる**)と、
+          #    `patch-lo-clip-trace.py`(**計装**。⚠ 既定では 1 バイトも書き換えない
+          #    ── `PKC3_CLIP_TRACE=1` の回だけ。錨の検査は毎回する)。
+          #    ⚠ 2 本は**同じ行を触らない**(両方当てても、どちらの順でも出力が同一)。
+          test "$n" -eq 19
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -973,6 +997,7 @@ jobs:
           if [ "${{ inputs.save_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-savetrace"; fi
           if [ "${{ inputs.idles_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-idlestrace"; fi
           if [ "${{ inputs.scheduler_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-schedtrace"; fi
+          if [ "${{ inputs.clip_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-cliptrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -987,6 +1012,7 @@ jobs:
             \"save_trace\": \"${{ inputs.save_trace }}\",
             \"idles_trace\": \"${{ inputs.idles_trace }}\",
             \"scheduler_trace\": \"${{ inputs.scheduler_trace }}\",
+            \"clip_trace\": \"${{ inputs.clip_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json
