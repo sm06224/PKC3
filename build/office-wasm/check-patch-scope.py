@@ -234,5 +234,62 @@ for env, script, fn, pairs in SPECS:
         if not ok:
             fail = 1
 
+# 🔴 #117(2026-10-04)── **ヘルパーを持たない直し**(関数の中へ数行を足すだけ)。
+#    ⚠ 上の SPECS は「`namespace { void <fn>( ... }` が入ること」を前提にするので、
+#    ヘルパーの無い直しは載せられない(載せると「ヘルパーが入っていない」で必ず落ちる)。
+#    だから別の一覧にする ── 見るのは「**足した行が、置き換えた原文と同じスコープ**に在ること」
+#    (= 関数の外へ漏れていない / `#include` が file scope に在る)。
+#    各行: (patch, file, 原文の目印, 当てた後の目印, 何を見るか)
+FIXES = [
+    (
+        "patch-lo-scheduler-task-gone.py",
+        "vcl/source/app/scheduler.cxx",
+        # 原文: JSPI の枝の 16 字下げの 2 行(置き換える `pTask->Invoke();` を含む)
+        "                SolarMutexGuard g;\n                pTask->Invoke();\n            }\n#else\n",
+        "Task* const pLiveTask = pMostUrgent->mpTask;",
+        "CallbackTaskScheduling の JSPI の枝",
+    ),
+]
+
+print("=== 本番(ヘルパーを持たない直し: 足した行が原文と同じスコープに在るか)")
+for script, rel, orig_mark, new_mark, what in FIXES:
+    src = os.path.join(LO, rel)
+    if not os.path.exists(src):
+        print(f"🔴 {script}: {rel} の元 file が無い")
+        fail = 1
+        continue
+    orig = open(src, encoding="utf-8").read()
+    if orig.count(orig_mark) != 1:
+        print(f"🔴 {script}: {rel} の原文の目印が {orig.count(orig_mark)} 件(検査が空振り)")
+        fail = 1
+        continue
+    work = f"/tmp/scope-chk-fix-{script}"
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(os.path.dirname(os.path.join(work, rel)))
+    shutil.copy(src, os.path.join(work, rel))
+    r = subprocess.run(["python3", os.path.join(HERE, script), work], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"🔴 {script}: 当たらなかった\n{r.stderr}")
+        fail = 1
+        continue
+    t = open(os.path.join(work, rel), encoding="utf-8").read()
+    if t.count(new_mark) != 1:
+        print(f"🔴 {script}: 当てた後の目印が {t.count(new_mark)} 件(検査が空振り)")
+        fail = 1
+        continue
+    want = depth_at(orig, orig.index(orig_mark))
+    got = depth_at(t, t.index(new_mark))
+    # `#include` は file scope(深さ 0)に在ること。⚠ depth_at は前処理行を数えないので、
+    # 「直前までの深さ」が 0 であることを見る(include を関数の中へ入れる誤りを拾う)
+    inc_at = t.find("#include <cstdio> // PKC3-TASKGONE")
+    inc_depth = depth_at(t, inc_at) if inc_at != -1 else -1
+    ok = got == want and want > 0 and inc_depth == 0
+    print(
+        f"  {script}: {what} 深さ {got} / 原文 {want} / include 深さ {inc_depth} "
+        f"{'✅ 同じスコープ' if ok else '🔴 スコープが違う(コンパイル不能)'}"
+    )
+    if not ok:
+        fail = 1
+
 print(f"=== fail={fail}")
 sys.exit(fail)

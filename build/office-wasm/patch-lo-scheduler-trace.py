@@ -470,13 +470,16 @@ PARTS = [
         "                auto & data = comphelper::emscriptenthreading::getData();\n",
     ],
     # ── Invoke(同じ thread)。⚠ ここで JSPI が中断する = 外側の frame の印になる
+    # 🔴 錨は 2 つに割り、**`SolarMutexGuard g;` の行で切る**(直し `patch-lo-scheduler-task-gone.py` が
+    #    その直後の `pTask->Invoke();` を置き換えるので、そこまで含めると当てる順で結果が変わる)。
+    #    `#else` 側は `#else\n` から始め、直しの錨の末尾(`#else\n`)と**行を共有しない形**で切る。
     [
         "            else\n"
         "            {\n",
         Add(16, f'pkc3_sched_step({D}, "Invoke", pMostUrgent, pTask, pTask->GetDebugName());'),
-        "                SolarMutexGuard g;\n"
-        "                pTask->Invoke();\n"
-        "            }\n"
+        "                SolarMutexGuard g;\n",
+    ],
+    [
         "#else\n",
         Add(12, f'pkc3_sched_step({D}, "Invoke", pMostUrgent, pTask, pTask->GetDebugName());'),
         "            pTask->Invoke();\n"
