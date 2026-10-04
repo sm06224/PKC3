@@ -666,6 +666,8 @@ async function oneRound(arm, n) {
       row.afterOtherPage = { err: safeErr(e) };
     }
     const clipLog = await page.evaluate('globalThis.__clip');
+    // host の窓の下の行(`setStatus` の出し先)。コピーが外へ届かなかったとき user に見える唯一の面(#121)
+    row.hostStatus = await page.evaluate("(document.getElementById('status') || {}).textContent ?? null");
     row.hostWrites = {
       bc: clipLog.bc,
       calls: clipLog.writes.slice(row.hostWritesBefore),

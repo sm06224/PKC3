@@ -16,6 +16,7 @@
  * | 🔴 読む側 | 読めなければ **reject する**(空を返さない ── #121 の主眼) |
  * | 🔴 窓の側 | 読めなければ **画面に出す**(`setStatus`)+ 依頼へ理由を返す |
  * | 書く側 | `write` は今までどおり `Promise<void>`(返事の中身を漏らさない) |
+ * | 🔴 窓の側(書き込み) | 標準の型だけを外へ書く(混在なら標準だけ)/ 標準が 0 件なら `write` を呼ばず(外は前の物のまま)**画面に言う** / 書けなかったときも**画面に言う**(#121) |
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -153,6 +154,22 @@ describe('worker 側の shim', () => {
   });
 });
 
+/**
+ * 型名の判定(`clipToBrowser` / `clipWhy`)と `serveClipboard` の原文。
+ * ⚠ 空振り防止:取り出せていることを使う前に見る。
+ */
+function clipSource(): string {
+  const i = HOST.indexOf('var CLIP_STD = ');
+  const j = HOST.indexOf('\n  serveClipboard();', i);
+  expect(i, 'CLIP_STD を取り出せていない').toBeGreaterThan(-1);
+  expect(j, 'serveClipboard の終端を取り出せていない').toBeGreaterThan(i);
+  const src = HOST.slice(i, j);
+  for (const name of ['function clipToBrowser(', 'function clipWhy(', 'function serveClipboard(']) {
+    expect(src, `${name} を取り出せていない`).toContain(name);
+  }
+  return src;
+}
+
 /** `serveRead(ch, d)` を host.html から取り出して走らせる。 */
 function runServeRead(clipboard: Partial<FakeClip>, d: Record<string, unknown>): {
   replies: Record<string, unknown>[];
@@ -172,7 +189,7 @@ function runServeRead(clipboard: Partial<FakeClip>, d: Record<string, unknown>):
     'setStatus',
     'navigator',
     'console',
-    `${src}; return serveRead;`,
+    `${clipSource()}\n${src}; return serveRead;`,
   )(
     (s: string) => void status.push(s),
     { clipboard },
@@ -231,5 +248,227 @@ describe('窓の側(serveRead)', () => {
     await vi.waitFor(() => expect(r.replies).toHaveLength(1));
     const parts = r.replies[0]!['parts'] as { type: string; buf: ArrayBuffer }[];
     expect(new TextDecoder().decode(parts[0]!.buf)).toBe('両方');
+  });
+});
+
+/**
+ * 🔴 **書く側**(#121)。実測(Chromium 141、2026-10-04): ブラウザは標準 4 つしか受けず、LO が
+ * 画像で渡す型(下の SVXB)があると `write` ごと拒む。`web ` 付きの独自の型は書けるが、書くと
+ * 外のクリップボードが**空になり**、Office の中へも貼り戻せなかったので、書かない。
+ */
+const SVXB = 'application/x-openoffice-svxb;windows_formatname="SVXB (StarView Bitmap/Animation)"';
+/** 断りの字は host.html から引く(手書きの期待値を 2 か所に置かない ── 字を変えた日に両方そのままで緑になる)。 */
+const SAY_NO_IMAGE = ((): string => {
+  const m = /var CLIP_SAY_NO_STD = '([^']+)';/.exec(HOST);
+  expect(m, 'CLIP_SAY_NO_STD を host.html から引けていない').toBeTruthy();
+  return m![1]!;
+})();
+
+interface Fns {
+  clipToBrowser(t: string): string | null;
+  clipWhy(e: unknown): string;
+  serveClipboard(): void;
+}
+
+/** 判定の関数と `serveClipboard` を、外の道具(放送 / クリップボード / 状態の行)を差して走らせる。 */
+function runHost(
+  clipboard: { write(items: unknown[]): Promise<void> } | undefined,
+  opts: { initialStatus?: string; statusThrows?: boolean } = {},
+): {
+  fns: Fns;
+  send: (d: Record<string, unknown>) => void;
+  replies: Record<string, unknown>[];
+  status: string[];
+  statusEl: { textContent: string };
+  written: { types: string[]; blobs: Record<string, Blob> }[];
+} {
+  const replies: Record<string, unknown>[] = [];
+  const status: string[] = [];
+  const written: { types: string[]; blobs: Record<string, Blob> }[] = [];
+  let handler: ((e: { data: unknown }) => void) | null = null;
+  class FakeBC {
+    public constructor(_name: string) {
+      void _name;
+    }
+    public set onmessage(f: ((e: { data: unknown }) => void) | null) {
+      handler = f;
+    }
+    public postMessage(d: Record<string, unknown>): void {
+      replies.push(d);
+    }
+  }
+  class FakeItem {
+    public types: string[];
+    public constructor(public items: Record<string, Blob>) {
+      if (Object.keys(items).length === 0) throw new TypeError('empty');
+      this.types = Object.keys(items);
+      written.push({ types: this.types, blobs: items });
+    }
+  }
+  // 状態の行の器 ── `setStatus` が書き、`clipSay` / `clipUnsay` が読む(host.html と同じ関係)
+  const statusEl = { textContent: opts.initialStatus ?? '表示中 (3.7 秒)' };
+  const fns = new Function(
+    'CLIP_CHANNEL',
+    'BroadcastChannel',
+    'ClipboardItem',
+    'navigator',
+    'setStatus',
+    'statusEl',
+    'console',
+    `${clipSource()}\nreturn { clipToBrowser, clipWhy, serveClipboard };`,
+  )(
+    'pkc3-clipboard',
+    FakeBC,
+    FakeItem,
+    { clipboard },
+    (s: string) => {
+      if (opts.statusThrows) throw new Error('status が落ちた');
+      statusEl.textContent = s;
+      status.push(s);
+    },
+    statusEl,
+    { warn: (): void => undefined },
+  ) as Fns;
+  fns.serveClipboard();
+  expect(handler, 'serveClipboard が放送を聞いていない').toBeTruthy();
+  const send = (d: Record<string, unknown>): void => {
+    (handler as unknown as (e: { data: unknown }) => void)({ data: d });
+  };
+  return { fns, send, replies, status, statusEl, written };
+}
+
+describe('型の判定(clipToBrowser)', () => {
+  it('標準の 4 つはそのまま、標準でない型は null(書かない)', () => {
+    const h = runHost(undefined);
+    for (const t of ['text/plain', 'text/html', 'image/png', 'image/svg+xml']) {
+      expect(h.fns.clipToBrowser(t), t).toBe(t);
+    }
+    expect(h.fns.clipToBrowser(SVXB)).toBeNull();
+    expect(h.fns.clipToBrowser('application/x-foo')).toBeNull();
+    // ⚠ image は png だけ(Chromium 141 の ClipboardItem.supports で実測: jpeg / gif / webp / uri-list / rtf は false)
+    for (const t of ['image/jpeg', 'image/gif', 'image/webp', 'text/uri-list', 'text/rtf']) {
+      expect(h.fns.clipToBrowser(t), `${t} を標準として通している`).toBeNull();
+    }
+    // 大文字・前後の空白はブラウザも拒む ── 揃えてから引く
+    expect(h.fns.clipToBrowser(' Text/Plain ')).toBe('text/plain');
+    // 🔴 `web ` 付きの独自の型へは変えない(書くと外が空になる ── 実測)
+    expect(h.fns.clipToBrowser('web application/x-foo')).toBeNull();
+  });
+
+  it('標準の型にパラメータが付いて来たら、標準の名前で書く(ブラウザはパラメータ付きを拒む)', () => {
+    const h = runHost(undefined);
+    expect(h.fns.clipToBrowser('text/plain;charset=utf-8')).toBe('text/plain');
+    expect(h.fns.clipToBrowser('image/png;x=y')).toBe('image/png');
+  });
+
+  it('理由は name と message の短いほう', () => {
+    const h = runHost(undefined);
+    expect(h.fns.clipWhy({ name: 'NotAllowedError', message: "Failed to execute 'write' on 'Clipboard'" })).toBe('NotAllowedError');
+    expect(h.fns.clipWhy({ name: 'TypeError', message: 'bad' })).toBe('bad');
+    expect(h.fns.clipWhy(undefined)).toBe('理由不明');
+  });
+});
+
+describe('窓の側(serveClipboard の書き込み)', () => {
+  const part = (type: string): { type: string; buf: ArrayBuffer } => ({ type, buf: bytes('中身') });
+  const ok = (): Promise<void> => Promise.resolve();
+
+  it('標準の型が書けたら何も言わない(今までどおり)', async () => {
+    const h = runHost({ write: ok });
+    h.send({ clip: 'write', id: 1, parts: [part('text/plain')] });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    expect(h.replies[0]).toEqual({ reply: true, id: 1 });
+    expect(h.written[0]!.types).toEqual(['text/plain']);
+    expect(h.written[0]!.blobs['text/plain']!.type).toBe('text/plain');
+    expect(h.status, '書けたのに断り文を出している').toEqual([]);
+  });
+
+  it('🔴 標準が 0 件なら write を呼ばず(外は前の物のまま)、画面に言い、返事を返す', async () => {
+    const write = vi.fn(ok);
+    const h = runHost({ write });
+    h.send({ clip: 'write', id: 2, parts: [part(SVXB)] });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    expect(write, '標準が無いのに write を呼んでいる(外が空になる)').not.toHaveBeenCalled();
+    expect(h.written, 'ClipboardItem も作らない').toEqual([]);
+    expect(h.status).toEqual([SAY_NO_IMAGE]);
+    expect(h.replies).toEqual([{ reply: true, id: 2 }]);
+  });
+
+  it('🔴 混在なら標準だけを write に渡す(非標準の型は item に無い)・言わない', async () => {
+    const h = runHost({ write: ok });
+    h.send({ clip: 'write', id: 3, parts: [part(SVXB), part('text/plain'), part('text/html;charset=utf-8')] });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    expect(h.written).toHaveLength(1);
+    expect([...h.written[0]!.types].sort()).toEqual(['text/html', 'text/plain']);
+    expect(h.status, '標準が書けたのに言っている').toEqual([]);
+  });
+
+  it('🔴 write が落ちたら、落ちたことを画面に言い、返事は必ず返す', async () => {
+    const h = runHost({
+      write: () => Promise.reject(new DOMException('Failed to execute write', 'NotAllowedError')),
+    });
+    h.send({ clip: 'write', id: 4, parts: [part('text/plain')] });
+    await vi.waitFor(() => expect(h.status).toHaveLength(1));
+    expect(h.status[0]).toBe('クリップボード:書けませんでした(NotAllowedError)');
+    expect(h.replies, '落ちた枝でも返事を返す(返さないと worker が 5 秒待つ)').toEqual([{ reply: true, id: 4 }]);
+  });
+
+  it('同期で投げられたときも、言って、返事を返す', () => {
+    // clipboard 自体が無い(`navigator.clipboard.write` を呼べない)端末
+    const h = runHost(undefined);
+    h.send({ clip: 'write', id: 5, parts: [part('text/plain')] });
+    expect(h.status).toHaveLength(1);
+    expect(h.status[0]).toMatch(/^クリップボード:書けませんでした\(.+\)$/);
+    expect(h.replies).toEqual([{ reply: true, id: 5 }]);
+  });
+
+  it('⚠ 画面に言う側が落ちても、返事は先に返っている(言う前に done)', () => {
+    const h = runHost(undefined, { statusThrows: true });
+    expect(() => h.send({ clip: 'write', id: 8, parts: [part(SVXB)] })).toThrow();
+    expect(h.replies, '標準 0 件の枝で、言う前に返事していない').toEqual([{ reply: true, id: 8 }]);
+    const h2 = runHost(undefined, { statusThrows: true });
+    expect(() => h2.send({ clip: 'write', id: 9, parts: [part('text/plain')] })).toThrow();
+    expect(h2.replies, '落ちた枝で、言う前に返事していない').toEqual([{ reply: true, id: 9 }]);
+  });
+
+  it('部品が 1 つも無い依頼は、言わずに返事だけ返す(「画像は…」と言う根拠が無い)', () => {
+    const write = vi.fn(ok);
+    const h = runHost({ write });
+    h.send({ clip: 'write', id: 10, parts: [] });
+    expect(write).not.toHaveBeenCalled();
+    expect(h.status).toEqual([]);
+    expect(h.replies).toEqual([{ reply: true, id: 10 }]);
+  });
+
+  /**
+   * 🔴 失敗の字は次の `setStatus` まで残る ── その後に字のコピーが**通った**のに、画面が失敗のままになる。
+   * 通ったら、まだ自分の字が出ていれば元の字へ戻す。
+   */
+  it('🔴 画像で断った後に字のコピーが通ったら、上の行は元の字へ戻る(失敗の字が居座らない)', async () => {
+    const h = runHost({ write: ok }, { initialStatus: '表示中 (3.7 秒)' });
+    h.send({ clip: 'write', id: 11, parts: [part(SVXB)] });
+    expect(h.statusEl.textContent).toBe(SAY_NO_IMAGE);
+    h.send({ clip: 'write', id: 12, parts: [part('text/plain')] });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(2));
+    await vi.waitFor(() => expect(h.statusEl.textContent).toBe('表示中 (3.7 秒)'));
+    // 対照群 ── 間に別の字が出ていたら(他の状態遷移)、それは消さない
+    const h2 = runHost({ write: ok }, { initialStatus: '表示中' });
+    h2.send({ clip: 'write', id: 13, parts: [part(SVXB)] });
+    h2.statusEl.textContent = '停止';
+    h2.send({ clip: 'write', id: 14, parts: [part('text/plain')] });
+    await vi.waitFor(() => expect(h2.replies).toHaveLength(2));
+    expect(h2.statusEl.textContent, '自分の字でない物を消した').toBe('停止');
+  });
+
+  it('読み出し(read)の型名は、変えずに LO へ返す(今日は誰も呼ばないが、書く側が名前を変えなくなった)', async () => {
+    // ⚠ 正規化しても同じになる `text/plain` では「変えていない」を言えない ── 標準でない型とパラメータ付きで見る
+    const item = {
+      types: ['text/plain;charset=utf-8', 'application/x-foo'],
+      getType: (): Promise<Blob> => Promise.resolve(new Blob(['x'])),
+    };
+    const r = runServeRead({ read: () => Promise.resolve([item]) }, { clip: 'read', id: 7 });
+    await vi.waitFor(() => expect(r.replies).toHaveLength(1));
+    const parts = r.replies[0]!['parts'] as { type: string }[];
+    expect(parts.map((p) => p.type)).toEqual(['text/plain;charset=utf-8', 'application/x-foo']);
   });
 });

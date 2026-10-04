@@ -988,6 +988,71 @@
     }
   }
 
+  /**
+   * 🔴 **LO が書く型のうち、ブラウザが受ける物だけを外のクリップボードへ書く**(#121)。
+   *
+   * 実測(2026-10-04、Chromium 141): Office の窓で画像を選んで `Ctrl+C` すると、LO が
+   * 渡す型は `application/x-openoffice-svxb;windows_formatname="SVXB (StarView
+   * Bitmap/Animation)"` の **1 つだけ**で、ブラウザは `NotAllowedError`(その型は書けない)
+   * で**書き込みごと拒む**。外のクリップボードは前の物のままで、画面には何も出なかった。
+   *
+   * 🔑 ブラウザが受けるのは標準の 4 つ(`CLIP_STD`)だけ。`web ` を前に付けた独自の型なら
+   *   書けるが、**書かない**(2026-10-04 に実測して取りやめた):
+   *   ① 書いても Office の中へ貼り戻せない(LO の貼り付けは `read()` を呼ばず、DOM の
+   *      paste event を使う ── paste event に独自の型は載らない)
+   *   ② 書くと外のクリップボードが**空になる**(user が前にコピーした物が消える。#121 の害そのもの)
+   *   だから標準の型が 1 つも無いときは、**`write` を呼ばず**(外は前の物のまま)理由を画面に言う。
+   * ⚠ 標準の型にパラメータが付いて来たとき(`text/plain;charset=utf-8` など)は、
+   *   パラメータを落として標準の名前で書く(ブラウザはパラメータ付きの名前を拒む)。
+   * ⚠ 標準と標準でない型が混ざっていたら、**標準だけ**書く(混在のまま渡すと
+   *   `write` ごと落ちて、届くはずの字まで届かない)。
+   */
+  var CLIP_STD = ['text/plain', 'text/html', 'image/png', 'image/svg+xml'];
+  /** 標準の型の名前(パラメータは落とす)。標準でなければ null。 */
+  function clipToBrowser(type) {
+    // ⚠ 大文字・前後の空白はブラウザも拒む(`Text/Plain` は NotAllowedError)── 揃えてから引く
+    var s = String(type).trim().toLowerCase();
+    var i = s.indexOf(';');
+    var base = (i < 0 ? s : s.slice(0, i)).trim();
+    return CLIP_STD.indexOf(base) >= 0 ? base : null;
+  }
+  /** 画面に出す理由。`e.name` と `e.message` の短いほう(長い英文は画面の 1 行に収まらない)。 */
+  function clipWhy(e) {
+    var n = e && e.name ? String(e.name) : '';
+    var m = e && e.message ? String(e.message) : '';
+    if (n !== '' && m !== '') return n.length <= m.length ? n : m;
+    return n || m || '理由不明';
+  }
+
+  /**
+   * 🔴 **画像はほかのアプリへ貼れない**(#121、2026-10-04 実測)── LO が渡す型は `x-openoffice-svxb` の 1 つで、
+   * ブラウザの `clipboard.write` は受けない。独自の型(`web …`)で書く案は、外のクリップボードを空にし
+   * (= 前にコピーした物を消す)、Office の中へも貼り戻せなかった(LO の貼り付けは paste event 経路)ので採らない。
+   * 🔑 字には**代わりの道**(スクリーンショット)を書く ── いちばん助けが要る場面を行き止まりにしない。
+   */
+  var CLIP_SAY_NO_STD = 'クリップボード:画像はほかのアプリへ貼れません(字は貼れます。スクリーンショットなら貼れます)';
+  /**
+   * ⚠ 失敗の字は次の `setStatus` まで残る ── その後に**字のコピーが通った**ときは、画面が失敗のままになる。
+   *   言う前の字を控えておき、通ったら(まだ自分の字が出ていれば)元へ戻す。
+   */
+  var clipSaid = null;
+  var clipBefore = '';
+  function clipSay(msg) {
+    if (clipSaid === null) clipBefore = statusEl.textContent;
+    clipSaid = msg;
+    setStatus(msg);
+  }
+  function clipUnsay() {
+    if (clipSaid !== null && statusEl.textContent === clipSaid) setStatus(clipBefore);
+    clipSaid = null;
+  }
+  /**
+   * 🔴 **コピーが外へ届かなかったことを、画面に言う**(#121)。
+   *
+   * 直す前は `console.warn` だけで、user には「画像をコピーしたのに、貼ると前にコピーした字が
+   * 出る」としか見えなかった(貼り付けの側 `serveRead` は画面に出していた ── 対の形にする)。
+   * 標準の型が書けたときは何も言わない(今までどおり)。
+   */
   function serveClipboard() {
     var ch = new BroadcastChannel(CLIP_CHANNEL);
     ch.onmessage = function (ev) {
@@ -996,19 +1061,40 @@
       if (d.clip === 'read') { serveRead(ch, d); return; }
       if (d.clip !== 'write' || !Array.isArray(d.parts)) return;
       var payload = {};
-      for (var i = 0; i < d.parts.length; i += 1) {
-        payload[d.parts[i].type] = new Blob([d.parts[i].buf], { type: d.parts[i].type });
-      }
+      var standard = 0;
+      // ⚠ **返事を必ず返す。** 返さないと worker 側が 5 秒待つ(操作が固まって見える)。
+      //   画面へ言う前に返す(言う側が落ちても、worker を待たせない)
       var done = function () { ch.postMessage({ reply: true, id: d.id }); };
-      // ⚠ **返事を必ず返す。** 返さないと worker 側が 5 秒待つ(操作が固まって見える)
-      try {
-        navigator.clipboard.write([new ClipboardItem(payload)]).then(done, function (e) {
-          console.warn('クリップボードへ書けませんでした', e);
-          done();
-        });
-      } catch (e) {
+      if (d.parts.length === 0) {
+        // 部品が 1 つも無い依頼(worker 側で読めなかった等)── 「画像は…」と言う根拠が無いので黙って返す
+        done();
+        return;
+      }
+      for (var i = 0; i < d.parts.length; i += 1) {
+        var name = clipToBrowser(d.parts[i].type);
+        if (name === null || Object.prototype.hasOwnProperty.call(payload, name)) continue;
+        payload[name] = new Blob([d.parts[i].buf], { type: name });
+        standard += 1;
+      }
+      if (standard === 0) {
+        console.warn('クリップボードへ書ける型がありません', d.parts.map(function (p) { return p.type; }));
+        done();
+        // ⚠ 「コピー」と書かない ── 切り取り(Ctrl+X)も同じ経路で来る(図は文書から消えている)
+        clipSay(CLIP_SAY_NO_STD);
+        return;
+      }
+      var fail = function (e) {
         console.warn('クリップボードへ書けませんでした', e);
         done();
+        clipSay('クリップボード:書けませんでした(' + clipWhy(e) + ')');
+      };
+      try {
+        navigator.clipboard.write([new ClipboardItem(payload)]).then(function () {
+          done();
+          clipUnsay();
+        }, fail);
+      } catch (e) {
+        fail(e);
       }
     };
   }
