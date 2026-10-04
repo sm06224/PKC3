@@ -71,8 +71,11 @@
  * - `hostWrites` … LO の worker が host へ送った **書き込みの依頼**(`BroadcastChannel`
  *   `pkc3-clipboard` を横から聞く)と、host が実際に呼んだ `navigator.clipboard.write` の
  *   **成否**(頁の `write` を包んで採る)。⚠ これは製品コードを変えずに採る**傍受**である
- * - `clipTrace` … page の console のうち `PKC3-CLIP` を含む行を `[+<ms>]` 付きで最大 400 行(`patch-lo-clip-trace.py` の計装が出す。
+ * - `clipTrace` … page の console のうち `PKC3-CLIP` / `PKC3-MENU` を含む行を `[+<ms>]` 付きで最大 400 行
+ *   (`patch-lo-clip-trace.py` / `patch-lo-menu-trace.py` の計装が出す。名前は `clip` のままだが**両方入る**。
  *   既存の `console` は 40 行で `PKC3-SCHED` に埋まるので別に持つ)
+ * - `faults[].stack` … `memory access out of bounds` / `RuntimeError` / `Aborted(` の `pageerror` の stack
+ *   (非 ASCII の行は捨て、1 行 200 字・全体 4000 字で切る。`RuntimeError: unreachable` の出所を読むため)
  *
  * ## 判定不能の規則(回す**前**に書いてある。結果の後から緩めない)
  *
@@ -194,6 +197,20 @@ const safeErr = (e) => {
     if (t !== null && t !== '') return t;
   }
   return 'error';
+};
+
+/**
+ * `pageerror` の stack を残す(1 件 ≤ 4000 字)。⚠ `safeLine` と同じ作法で、**非 ASCII の行は行ごと捨てる**
+ * (本文らしき物が混じる唯一の経路)。1 行は 200 字で切る。
+ */
+const safeStack = (e) => {
+  const raw = e && typeof e === 'object' && typeof e.stack === 'string' ? e.stack : '';
+  const kept = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (t !== '' && !/[^\x20-\x7e]/.test(t)) kept.push(t.slice(0, 200));
+  }
+  return kept.join('\n').slice(0, 4000);
 };
 
 /** ⚠ `qt-window` は shadow root の中にも生えるので、**潜って**数える。 */
@@ -368,14 +385,16 @@ async function oneRound(arm, n) {
   }
   page.on('console', (m) => {
     const t = safeLine(`[${m.type()}] ${m.text()}`);
-    if (t !== null && m.text().includes('PKC3-CLIP') && row.clipTrace.length < 400) row.clipTrace.push(`[+${Date.now() - t0}ms]${t}`);
+    // ⚠ `clipTrace` は `PKC3-CLIP`(コピー)と `PKC3-MENU`(popup メニューの選択)の**両方**が入る(名前は据え置き)
+    if (t !== null && /PKC3-(CLIP|MENU)/.test(m.text()) && row.clipTrace.length < 400) row.clipTrace.push(`[+${Date.now() - t0}ms]${t}`);
     if (t !== null && row.console.length < 40) row.console.push(`[+${Date.now() - t0}ms]${t}`);
   });
   page.on('pageerror', (e) => {
     const t = safeLine(`[pageerror] ${String(e)}`);
     if (t !== null && row.console.length < 40) row.console.push(`[+${Date.now() - t0}ms]${t}`);
     if (/memory access out of bounds|RuntimeError|Aborted\(/.test(String(e))) {
-      row.faults.push({ at: Date.now() - t0, text: safeErr(e) });
+      // 🔑 `stack` は捨てない(`RuntimeError: unreachable` の出所を、名前つきの一式で読む)
+      row.faults.push({ at: Date.now() - t0, text: safeErr(e), stack: safeStack(e) });
     }
   });
   page.on('requestfailed', (r) => {

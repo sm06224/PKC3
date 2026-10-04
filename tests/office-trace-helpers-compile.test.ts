@@ -86,7 +86,8 @@ describe('計装のヘルパーは g++ で通る', () => {
     // ⚠ 空振り防止 ── 拾えた本数を主張として読む(0 本でも「全部通った」は真になる)
     // 🔑 3 → 4(2026-10-04): 計装 patch を 1 本足した(`patch-lo-scheduler-trace.py`、#117)
     // 🔑 4 → 5(2026-10-04): もう 1 本足した(`patch-lo-clip-trace.py`、#121)
-    expect(r.out, '計装のヘルパーを 5 本以上拾えていない').toMatch(/計装のヘルパー: [5-9]\d* 本/);
+    // 🔑 5 → 6(2026-10-04): もう 1 本足した(`patch-lo-menu-trace.py`、#121 の popup メニュー)
+    expect(r.out, '計装のヘルパーを 6 本以上拾えていない').toMatch(/計装のヘルパー: [6-9]\d* 本/);
     // 🔑 事故そのものの形(整数)が、名指しで通っていること
     expect(r.out).toContain('patch-lo-idles-trace.py / 整数');
     expect(r.out).toContain('patch-lo-idles-trace.py / pointer');
@@ -96,6 +97,9 @@ describe('計装のヘルパーは g++ で通る', () => {
     // #121 の 1 本も、整数・pointer の両方で名指しに通っていること
     expect(r.out).toContain('patch-lo-clip-trace.py / 整数');
     expect(r.out).toContain('patch-lo-clip-trace.py / pointer');
+    // #121 の popup メニューの 1 本も、整数・pointer の両方で名指しに通っていること
+    expect(r.out).toContain('patch-lo-menu-trace.py / 整数');
+    expect(r.out).toContain('patch-lo-menu-trace.py / pointer');
     expect(r.code, r.out).toBe(0);
   }, COMPILE_MS);
 

@@ -90,7 +90,7 @@ run_ref() {
 
   # ⚠ 計装(trace)は既定で当てない ── ただし**錨の検査は毎回する**作りなので、
   #    ここで回す意味がある(上流が形を変えたら鳴る)。
-  export PKC3_IME_TRACE=0 PKC3_SAVE_TRACE=0 PKC3_IDLES_TRACE=0 PKC3_SCHEDULER_TRACE=0 PKC3_CLIP_TRACE=0 PKC3_WASM_SCRIPTING=yes
+  export PKC3_IME_TRACE=0 PKC3_SAVE_TRACE=0 PKC3_IDLES_TRACE=0 PKC3_SCHEDULER_TRACE=0 PKC3_CLIP_TRACE=0 PKC3_MENU_TRACE=0 PKC3_WASM_SCRIPTING=yes
   local bad=0
   for p in "$HERE"/patch-lo-*.py; do
     local name; name=$(basename "$p")

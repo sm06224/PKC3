@@ -130,6 +130,15 @@ on:
         description: '調査用: クリップボードの受け渡し(コピー)に計装を当てる(#121。別 tag へ出る)'
         type: boolean
         default: false
+      menu_trace:
+        # 🔴 **調査用**(#121)。Writer の右クリック popup で「コピー」を選んでも、LO の中で `.uno:Copy` が
+        #    実行されない理由を**thread と順番で言う**(`build/office-wasm/patch-lo-menu-trace.py`)。
+        #    ⚠ 仮説: `QMenu::exec()` の中で選んでも `triggered` が exec の戻りの**後**に届き、
+        #    `PopupMenu::ImplFlushPendingSelect` の時点で Select が積まれていない。
+        #    🔑 **直しは入れない**(計装だけ)。出口は libc だけ(stderr + `/tmp/pkc3-menu.log`)。
+        description: '調査用: popup メニューの選択が命令になるまでに計装を当てる(#121。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -467,6 +476,11 @@ jobs:
           else
             export PKC3_CLIP_TRACE=0
           fi
+          if [ "${{ inputs.menu_trace }}" = "true" ]; then
+            export PKC3_MENU_TRACE=1
+          else
+            export PKC3_MENU_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -581,7 +595,8 @@ jobs:
           #    文書が閉じられて破棄された Task を、再開後に `pTask->Invoke()` していた。
           #    錠を取った後で `pMostUrgent->mpTask` を読み直し、null なら飛ばす(⚠ **既定で当たる**)。
           #    ⚠ 計装 `patch-lo-scheduler-trace.py` と**同じ行を触らない**(両順で出力が同一)。
-          test "$n" -eq 20
+          # 🔴 20 → 21(2026-10-04)。`patch-lo-menu-trace.py`(#121 の**計装**。既定では 1 バイトも書き換えない)。
+          test "$n" -eq 21
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -1003,6 +1018,7 @@ jobs:
           if [ "${{ inputs.idles_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-idlestrace"; fi
           if [ "${{ inputs.scheduler_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-schedtrace"; fi
           if [ "${{ inputs.clip_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-cliptrace"; fi
+          if [ "${{ inputs.menu_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-menutrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -1018,6 +1034,7 @@ jobs:
             \"idles_trace\": \"${{ inputs.idles_trace }}\",
             \"scheduler_trace\": \"${{ inputs.scheduler_trace }}\",
             \"clip_trace\": \"${{ inputs.clip_trace }}\",
+            \"menu_trace\": \"${{ inputs.menu_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json

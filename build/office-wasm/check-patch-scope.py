@@ -154,6 +154,18 @@ SPECS = [
         ],
     ),
     (
+        "PKC3_MENU_TRACE",
+        "patch-lo-menu-trace.py",
+        "pkc3_menu_trace",
+        [
+            # 🔴 #121(2026-10-04)── ヘルパーは `slotMenuTriggered` / `Menu::Menu()` の直前で、
+            #    使う所(`ShowNativePopupMenu` / `ImplSelect` / `ImplFlushPendingSelect` / `Run` など)は
+            #    どれもその後ろ。⚠ ここを SPECS に足し忘れると、**この 2 file だけ検査の外**になる。
+            ("vcl/qt5/QtMenu.cxx", "void QtMenu::slotMenuTriggered("),
+            ("vcl/source/window/menu.cxx", "Menu::Menu()"),
+        ],
+    ),
+    (
         "PKC3_IME_TRACE",
         "patch-lo-ime-trace.py",
         "pkc3_ime_trace",
