@@ -4787,6 +4787,19 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   z-index: 1;
   background: var(--surface);
 }
+/**
+ * 🔴 **見出しへ飛んだとき、見出しが貼り付いた物(操作の帯 + 音の再生機)の下に隠れない**(#1232 段 b)。
+ *
+ * ⚠ 直す前は、目次から飛ぶと見出しが**操作の帯の下に隠れていた**(実測:帯 34px に対し見出しの top が
+ *   0.4px。再生機の貼り付きとは無関係の**既存の欠陥**で、全ノートに起きていた)。`scrollIntoView({ block: 'start' })`
+ *   は貼り付いた物を知らないので、**目的の要素の側が余白を持つ**(`scroll-margin-top`)。
+ * 🔑 帯の高さは `--pkc-detail-bar-h`、再生機の高さは `--pkc-sticky-player-h`(どちらも `detail.ts` が測って
+ *   書く。再生機の無いノートでは 0)。⚠ 起点は `[data-pkc-prose]` ── `.pkc-md-rendered` 起点は書き出しへ焼かれる。
+ * ⚠ 低い窓では再生機を貼らない(下の `@media (max-height: 30rem)`)ので、余白も帯だけにする。
+ */
+[data-pkc-prose] :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: calc(var(--pkc-detail-bar-h, 34px) + var(--pkc-sticky-player-h, 0px));
+}
 
 /* 🔴 **本文の中の再生機**(#413 段②)。⚠ 添付の面(`attachment-media`)とは
  * **別の名前**にしている ── あちらは「その添付だけを見る面」、こちらは
@@ -10099,8 +10112,18 @@ h6:hover > .pkc-heading-anchor,
   font-weight: 700;
 }
 
-
-
-
-
-
+/**
+ * 🔴 **低い窓(高さ 30rem 以下 ≒ 標準の文字で 480 ピクセル)では再生機を貼り付けない**(#1232 段 b)。
+ * 帯 + 再生機で上の 1/4 以上が埋まり、読む場所が残らない(高さ 400 ピクセルで帯 34 + 再生機 約 60 = 約 24%)。
+ * ⚠ **file の末尾に置く** ── 先頭側の `@media` で切って画面の規則を読む検査(`announce.test.ts` など)が、
+ *   途中の `@media` から後ろの規則を読めなくなる。⚠ 幅の px は CSS に書かない規律(`phone-layout.test.ts`)に
+ *   当たらないよう、高さは rem で書く。
+ */
+@media (max-height: 30rem) {
+  [data-pkc-field='attachment-preview']:has(> audio[data-pkc-field='attachment-media']) {
+    position: static;
+  }
+  [data-pkc-prose] :is(h1, h2, h3, h4, h5, h6) {
+    scroll-margin-top: var(--pkc-detail-bar-h, 34px);
+  }
+}

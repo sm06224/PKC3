@@ -418,6 +418,12 @@ export class DetailRenderer {
    */
   private barHeightWatch: ResizeObserver | null = null;
   /**
+   * 🔴 **貼り付いた音の再生機の高さを `--pkc-sticky-player-h` へ下ろす見張り**(#1232 段 b)。
+   * 目次などで見出しへ飛ぶとき、見出しが帯 + 再生機の**下**に来るよう `scroll-margin-top` が使う
+   * (`app.css`)。⚠ 再生機の無いノート・描き直しでは外す(`disposeLends`)── 残すと次のノートの余白になる。
+   */
+  private playerHeightWatch: ResizeObserver | null = null;
+  /**
    * 操作の器の**形**(2026-08-07)。形が同じなら node を使い回す ──
    * 詳細は `renderBar` の注記。⚠ 骨組みを作り直したら `null` へ戻す
    * (古い node を指したまま「形は同じ」と判断すると、外れた node を patch する)。
@@ -706,6 +712,9 @@ export class DetailRenderer {
     this.quickTocHandle?.dispose();
     this.quickTocHandle = null;
     this.disposeSearchJump();
+    this.playerHeightWatch?.disconnect();
+    this.playerHeightWatch = null;
+    this.region.style.removeProperty('--pkc-sticky-player-h');
   }
 
   /**
@@ -735,17 +744,21 @@ export class DetailRenderer {
    */
   private watchBarHeight(bar: HTMLElement): void {
     this.barHeightWatch?.disconnect();
-    this.barHeightWatch = null;
-    if (typeof ResizeObserver !== 'function') return;
+    this.barHeightWatch = this.watchHeight(bar, '--pkc-detail-bar-h');
+  }
+
+  /** 要素の高さを、器(`this.region`)のカスタムプロパティへ書き続ける見張りを返す(無い環境では `null`)。 */
+  private watchHeight(el: HTMLElement, prop: string): ResizeObserver | null {
+    if (typeof ResizeObserver !== 'function') return null;
     const write = (): void => {
-      const value = `${Math.ceil(bar.getBoundingClientRect().height)}px`;
-      if (this.region.style.getPropertyValue('--pkc-detail-bar-h') !== value) {
-        this.region.style.setProperty('--pkc-detail-bar-h', value);
+      const value = `${Math.ceil(el.getBoundingClientRect().height)}px`;
+      if (this.region.style.getPropertyValue(prop) !== value) {
+        this.region.style.setProperty(prop, value);
       }
     };
     const watch = new ResizeObserver(write);
-    watch.observe(bar);
-    this.barHeightWatch = watch;
+    watch.observe(el);
+    return watch;
   }
 
   /** 骨組みを捨てる(次の描画で組み直す)。 */
@@ -3537,6 +3550,11 @@ export class DetailRenderer {
         media.controls = true;
         media.src = lent.url;
         host.append(media);
+        // 🔴 音だけ貼り付く(`app.css`)── その高さを、見出しへ飛ぶ余白へ渡す(#1232 段 b)
+        if (kind === 'audio') {
+          this.playerHeightWatch?.disconnect();
+          this.playerHeightWatch = this.watchHeight(host, '--pkc-sticky-player-h');
+        }
         // 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)── 片方だけ整うと、
         //   同じ音が場所で違って聞こえる
         appVoiceBoostRouter.watch(media);
