@@ -16,6 +16,52 @@
  * | `B3` | ✅ | **画像**を `Shift+→` で選んで(段落先頭の 1 文字として)`Ctrl+C` | 外を読む |
  * | `B3c` | ✅ | **画像を左クリックで選んで**(枠の取っ手が出る)`Ctrl+C`(B3 の別の選び方。押す) | 外を読む |
  * | `B4` | ✅ | **表**を選んで `Ctrl+C` | 外を読む |
+ * | `B5` | ✅ | 字を全部選んで **ツールバーの「コピー」ボタンを左クリック**(ポインタ起源・popup なし) | 外を読む |
+ * | `B6` | ✅ | 字を全部選んで **メニューバー `Alt+E`(編集)→ 近道キー `y`(`コピー(Y)`)**。キーだけ | 外を読む |
+ * | `B7` | ✅ | 字を全部選んで **`Ctrl+Insert`**(キー起源・別の accelerator) | 外を読む |
+ * | `B8` | ✅ | 字を全部選んで**何もコピーしない**(`B1`〜`B7` の「LO の中の観測」の**陰性対照**) | 外を読む |
+ *
+ * 🔴 **`B1` が `B1'`(`B5`〜`B7` の陽性対照)を兼ねる** ── 同じ回の中で同じ手順(`Control+a` → `Control+c`)を
+ * 回し直すだけなので、別名の腕は作らない。
+ *
+ * ## #121「右クリックの『コピー』だと host へ書き込み依頼が 0 件」を割る 3 腕(B5〜B7)
+ *
+ * 仮説 **H1** = `.uno:Copy` は実行され `QtClipboard::setContents` も呼ばれるが、Qt wasm が Clipboard API を呼ばない。
+ * 仮説 **H2** = メニュー経由では `.uno:Copy` 自体が実行されていない(popup の選択がネストした Yield の後に dispatch される)。
+ *
+ * 🔴 **予測(回す前に書いた。結果の後から規則を変えない)**:
+ *
+ * | 腕 | 起源 | H1 なら host への write 依頼 | H2 なら host への write 依頼 |
+ * |---|---|---|---|
+ * | `B5` ツールバーのボタン | ポインタ(popup なし) | **0 件** | **来る** |
+ * | `B6` メニューバー → 近道キー | キー(popup あり) | **0 件** | **0 件** |
+ * | `B7` `Ctrl+Insert` | キー(別の accelerator) | 来るか不明 | **来る** |
+ * | `B1`(= `B1'`) `Ctrl+C` | キー | **来る** | **来る** |
+ *
+ * 読み方: `B5` が来て `B2`(既存)/ `B6` が来なければ **H2** に寄る。`B5` も来なければ **H1** に寄る。
+ *
+ * ### 「コピーが LO の中で実行されたか」の観測(列 `loPaste` / `pasteBtn`)
+ *
+ * write 依頼が 0 件でも、LO の**中**のクリップボードに入っていれば「実行はされた(Qt → ブラウザの間で消えた)」= H1 寄り、
+ * 入っていなければ H2 寄り。観測は 2 本(**どちらも版面の画素の集合が入れ替わったか**で見る。何が入ったかは言えない):
+ *
+ *   ① `loPaste` … 腕の後に `ArrowRight` → `Ctrl+End` → `Ctrl+V` して**本文の版面**が変わったか。
+ *   ② `pasteBtn` … ツールバーの**「貼り付け」ボタン**(LO の中が空のときは灰色)の領域が、腕の前後で変わったか。
+ *      (外へ種を置いた後も灰色のままであることを、先に画面で確かめてある = 外の値には反応しない)
+ *
+ * 🔴 **①は外の種で満たされうる**(LO の `Ctrl+V` が外の `OUTSIDE-…` を読んで貼れば、コピーしていなくても変わる)。
+ *   だから**陰性対照 `B8`(選ぶだけで何もコピーしない)で、①②が「変わらない」ことを見る**。
+ *   `B8` で①が変わるなら、①は読まない(②だけで読む)。`B8` で②が変わるなら、②も読まない。
+ *   予測: `B8` は ①②とも**変わらない**、`B1` は ①②とも**変わる**。
+ *
+ * ### 判定不能の追加規則(回す前に書いた)
+ *
+ *   ⑧ `B5`: ボタンの位置に**そもそもボタンが無い**(コピーボタンの領域が、ポインタを乗せる前後で**1 ビットも変わらない**)回は
+ *      「当たったか不明」として**数に入れる/入れないを分ける**(`landUnknown` に別立て。write 依頼 0 件を「実行されない」と読まない)。
+ *   ⑨ `B6`: `Alt+E` を **3 回まで**押し直し、**メニューの窓が増えなかった**回は判定不能(開いていない回に `y` を押すと字が入る)。
+ *   ⑩ `B6` / `B7`: 選択が版面に出なかった回は判定不能(既存の ④)。
+ *
+ * 全部 **n=3**(判定不能は数に入れず、上限 +2 回まで回し足す)。
  *
  * ## 何を読むか(読みは書かない ── 数と字だけ出す)
  *
@@ -81,10 +127,18 @@ const CTX_Y = Number(process.env.PKC3_CTX_Y ?? '0.31');
 const ROUND_SEC = Number(process.env.PKC3_ROUND_SEC ?? 240);
 /** 判定不能の回の埋め合わせに回し足すとき、種の名前が前と被らないよう開始番号を変える。 */
 const N_START = Number(process.env.PKC3_N_START ?? 1);
-const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4'];
+const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8'];
+/**
+ * ツールバーの「コピー」ボタンの位置(**canvas の比**)。🔑 見つけ方: 自作の `text.odt` を開いて字を全部選んだ版面の PNG
+ * (1280x800)に、ツールバー 1 段目の `切り取り(はさみ)/ コピー(2 枚の紙)/ 貼り付け(クリップボード)` が並ぶ。
+ * 6 倍に拡大して**コピー(2 枚の紙)の中心**を読むと page 座標 (308, 102)。canvas は (8, 60) 1272x736 なので
+ * 比 = ((308-8)/1272, (102-60)/736) = (0.236, 0.057)。⚠ 窓の大きさが変わると指す先がずれる ── 押した座標は `row.pressed` に残す。
+ */
+const TB_COPY_X = Number(process.env.PKC3_TB_COPY_X ?? '0.236');
+const TB_COPY_Y = Number(process.env.PKC3_TB_COPY_Y ?? '0.057');
 const ARMS = (process.env.PKC3_ARMS ?? ALL_ARMS.join(',')).split(',').filter((a) => ALL_ARMS.includes(a));
 /** 腕 → 開く文書。`C` / `B1` / `B2` / `C2` は字だけ、`B3` は画像、`B4` は表。 */
-const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt' };
+const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt', B5: 'text.odt', B6: 'text.odt', B7: 'text.odt', B8: 'text.odt' };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -268,6 +322,10 @@ const result = {
       B3: 'Shift+ArrowRight(先頭の段落の画像 1 枚を選ぶ)→ Control+c',
       B3c: 'mouse.click(left, canvas の比 0.30/0.40 = 画像の上)→ Control+c',
       B4: 'Control+a ×2(セル → 表)→ Control+c',
+      B5: `Control+a → mouse.click(left, canvas の比 ${TB_COPY_X}/${TB_COPY_Y} = ツールバーの「コピー」ボタン)`,
+      B6: "Control+a → Alt+e(開くまで最大 3 回)→ 'y'(`コピー(Y)`)",
+      B7: 'Control+a → Control+Insert',
+      B8: 'Control+a → (何もコピーしない)',
     },
     doc: DOC_OF,
     dist: DIST,
@@ -543,6 +601,9 @@ async function oneRound(arm, n) {
       return opened > before;
     };
     let selected = null;
+    // LO の中の「貼り付け」ボタンの領域(ツールバーのコピーの右隣。canvas の比で切る)
+    const pasteBtnClip = { x: Math.round(box.x + box.w * 0.25), y: Math.round(box.y + box.h * 0.04), width: 28, height: 33 };
+    let pasteBtnBefore = null;
     step(`腕 ${arm}`);
     if (arm === 'C') {
       await page.waitForTimeout(2500);
@@ -556,6 +617,8 @@ async function oneRound(arm, n) {
       selected = swapped(a, await framesOf(clip));
       await shot('3-selected');
       row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
       if (selected === true) {
         await page.keyboard.press('Control+c');
         row.copyKey = 'Control+c';
@@ -567,6 +630,8 @@ async function oneRound(arm, n) {
       selected = swapped(a, await framesOf(clip));
       await shot('3-selected');
       row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
       if (selected === true) {
         await page.keyboard.press('Control+c');
         row.copyKey = 'Control+c';
@@ -581,6 +646,8 @@ async function oneRound(arm, n) {
       selected = swapped(a, await framesOf(clip));
       await shot('3-selected');
       row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
       if (selected === true) {
         await page.keyboard.press('Control+c');
         row.copyKey = 'Control+c';
@@ -594,9 +661,66 @@ async function oneRound(arm, n) {
       selected = swapped(a, await framesOf(clip));
       await shot('3-selected');
       row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
       if (selected === true) {
         await page.keyboard.press('Control+c');
         row.copyKey = 'Control+c';
+      }
+    } else if (['B5', 'B6', 'B7', 'B8'].includes(arm)) {
+      // 4 腕とも「字を全部選ぶ」までは B1 と同じ(押さない・キーだけ)。違うのは**コピーの出し方**だけ。
+      const a = await framesOf(clip);
+      await page.keyboard.press('Control+a');
+      await page.waitForTimeout(1000);
+      selected = swapped(a, await framesOf(clip));
+      row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
+      await shot('3-selected');
+      if (selected === true) {
+        if (arm === 'B5') {
+          // ツールバーの「コピー」ボタン。押す前にボタン領域の画素を採り、押した後(ポインタが乗ったまま)と比べる
+          const x = box.x + box.w * TB_COPY_X;
+          const y = box.y + box.h * TB_COPY_Y;
+          row.pressed = { x: Math.round(x), y: Math.round(y), button: 'left', ratio: { x: TB_COPY_X, y: TB_COPY_Y } };
+          const copyBtnClip = { x: Math.round(x - 14), y: Math.round(y - 14), width: 28, height: 28 };
+          const bBefore = await framesOf(copyBtnClip, 3);
+          await page.mouse.move(x, y);
+          await page.waitForTimeout(600);
+          await shot('3b-hover');
+          await page.mouse.click(x, y);
+          await page.waitForTimeout(1500);
+          row.copyBtnChanged = swapped(bBefore, await framesOf(copyBtnClip, 3));
+          row.copyKey = 'toolbar:click';
+        } else if (arm === 'B6') {
+          // メニューバー 編集(E)(`Alt+e`)→ 近道キー `y`(`コピー(Y)`。`切り取り(C)` と取り違えない ── SKILL §14)
+          const before = await page.evaluate(COUNT_QT_WINDOWS);
+          let opened = before;
+          let tries = 0;
+          for (let t = 0; t < 3; t += 1) {
+            await page.keyboard.press('Alt+e');
+            await page.waitForTimeout(2500);
+            tries = t + 1;
+            opened = await page.evaluate(COUNT_QT_WINDOWS);
+            if (opened > before) break;
+          }
+          row.menu = { before, opened, tries };
+          row.menuOpened = opened > before;
+          await shot('4-menu');
+          // 🔴 開いていない回に `y` を押さない(字が本文に入って選択を潰す。open-doc-probe の実測)
+          if (row.menuOpened) {
+            await page.keyboard.press('y');
+            row.copyKey = 'menu:Alt+e,y';
+            await page.waitForTimeout(1000);
+            row.menuWindowsAfterClick = await page.evaluate(COUNT_QT_WINDOWS);
+          }
+        } else if (arm === 'B7') {
+          await page.keyboard.press('Control+Insert');
+          row.copyKey = 'Control+Insert';
+        } else {
+          row.copyKey = null; // B8 = 何もしない(陰性対照)
+          await page.waitForTimeout(1500);
+        }
       }
     } else if (arm === 'C2') {
       const menuOpen = await ctxClick();
@@ -611,6 +735,8 @@ async function oneRound(arm, n) {
       await page.waitForTimeout(1000);
       selected = swapped(a, await framesOf(clip));
       row.selectedOnScreen = selected;
+      // LO の中の「貼り付け」ボタン(空のとき灰色)の領域を、腕の手の**前**に採る(選んだ腕すべて)
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
       await shot('3-selected');
       if (selected === true) {
         const menuOpen = await ctxClick();
@@ -638,6 +764,10 @@ async function oneRound(arm, n) {
     }
     await page.waitForTimeout(3000);
     await shot('5-after');
+    if (pasteBtnBefore !== null) {
+      const pasteBtnAfter = await framesOf(pasteBtnClip, 3);
+      row.pasteBtn = { changed: swapped(pasteBtnBefore, pasteBtnAfter), clip: pasteBtnClip };
+    }
 
     // ⑤ コピーの後の外
     step('外を読む');
@@ -696,8 +826,11 @@ async function oneRound(arm, n) {
 
     // ⑥ 判定不能の規則(⑥ コピーの前の fault / ④ 選択が出ない / ⑤ メニューが開かない)
     if (faultBeforeCopy) undecidable('コピーの前後で memory access out of bounds が出た(修飾キーの経路が死ぬ。SKILL §14)');
-    if (['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k'].includes(arm) && selected !== true) undecidable('選択が版面に出なかった');
+    if (['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true) undecidable('選択が版面に出なかった');
     if (['B2', 'B2k', 'C2'].includes(arm) && row.menuOpened !== true) undecidable('右クリックのメニューが開かなかった(窓の数が増えない)');
+    if (arm === 'B6' && row.menuOpened !== true) undecidable('メニューバーの編集(Alt+e)を 3 回押してもメニューが開かなかった(窓の数が増えない。y は押していない)');
+    // ⑧ B5: ポインタを乗せる前後でコピーボタンの領域が 1 ビットも変わらない = そこにボタンが無い(当たったか不明)。判定不能とは別に数える
+    if (arm === 'B5' && row.copyBtnChanged !== true) row.landUnknown = true;
     return row;
   } catch (e) {
     row.error = safeErr(e);
@@ -757,6 +890,13 @@ try {
       keptSeed: valid.filter((r) => r.emptied === false && r.after?.text === r.seed).length,
       replacedByLo: valid.filter((r) => r.emptied === false && r.after?.text !== r.seed).length,
       otherPageEmptied: valid.filter((r) => r.afterOtherPage?.text === '').length,
+      // 🔑 #121 の列: host への write 依頼(`navigator.clipboard.write` / `writeText` を host が呼んだ回数が 1 以上の回)
+      hostWriteRounds: valid.filter((r) => (r.hostWrites?.calls?.length ?? 0) > 0).length,
+      // LO の中のクリップボードに入ったか(2 本の観測。B8 = 陰性対照で変わらないことを先に見る)
+      loPasteChanged: valid.filter((r) => r.loPaste?.changed === true).length,
+      pasteBtnChanged: valid.filter((r) => r.pasteBtn?.changed === true).length,
+      landUnknown: valid.filter((r) => r.landUnknown === true).length,
+      faultRounds: valid.filter((r) => r.faults.length > 0).length,
     };
   });
 } catch (e) {
