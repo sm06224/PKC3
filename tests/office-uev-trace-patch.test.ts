@@ -242,16 +242,16 @@ describe('#121 の計装(uev-trace)── 印が全部在り、決まった順�
       const evl = dropHelper(t.read(REL_EVL));
       // ⚠ 手書き(patch から引かない ── 引くと where を 1 つ落とした変異が「引く側も一緒に縮む」)
       const count = (body: string, needle: string): number => body.split(needle).length - 1;
-      expect(count(app, 'pkc3_uev_trace("post"'), 'svapp に post が 1 つでない').toBe(1);
+      expect(count(app, 'pkc3_uev_line("post"'), 'svapp に post が 1 つでない').toBe(1);
       expect(count(app, 'pkc3_uev_stack("post-stack"'), 'svapp に post-stack が 1 つでない').toBe(1);
-      expect(count(evl, 'pkc3_uev_trace("dispatch"'), 'salusereventlist に dispatch が 1 つでない').toBe(1);
-      expect(count(evl, 'pkc3_uev_trace("done"'), 'salusereventlist に done が 1 つでない').toBe(1);
+      expect(count(evl, 'pkc3_uev_line("dispatch"'), 'salusereventlist に dispatch が 1 つでない').toBe(1);
+      expect(count(evl, 'pkc3_uev_line("done"'), 'salusereventlist に done が 1 つでない').toBe(1);
       expect(count(evl, 'pkc3_uev_stack("dispatch-stack"'), 'salusereventlist に dispatch-stack が 1 つでない').toBe(1);
       // 取り違え(別の file に撃っている)を許さない
-      for (const w of ['pkc3_uev_trace("dispatch"', 'pkc3_uev_trace("done"', 'pkc3_uev_stack("dispatch-stack"']) {
+      for (const w of ['pkc3_uev_line("dispatch"', 'pkc3_uev_line("done"', 'pkc3_uev_stack("dispatch-stack"']) {
         expect(app, `svapp に ${w}`).not.toContain(w);
       }
-      for (const w of ['pkc3_uev_trace("post"', 'pkc3_uev_stack("post-stack"']) {
+      for (const w of ['pkc3_uev_line("post"', 'pkc3_uev_stack("post-stack"']) {
         expect(evl, `salusereventlist に ${w}`).not.toContain(w);
       }
     } finally {
@@ -267,17 +267,17 @@ describe('#121 の計装(uev-trace)── 印が全部在り、決まった順�
       const evl = dropHelper(t.read(REL_EVL));
       // post は `auto pTmpEvent` の後、`PostEvent(` の前(`std::move` の後は pSVEvent を触れない)
       const a = app.indexOf('auto pTmpEvent = pSVEvent.get();');
-      const p = app.indexOf('pkc3_uev_trace("post"');
+      const p = app.indexOf('pkc3_uev_line("post"');
       const ps = app.indexOf('pkc3_uev_stack("post-stack"');
       const pe = app.indexOf('PostEvent( std::move(pSVEvent) )');
       expect(a > -1 && a < p && p < ps && ps < pe, 'post の位置が違う').toBe(true);
       // dispatch は `auto process` の前
       const ds = evl.indexOf('pkc3_uev_stack("dispatch-stack"');
-      const d = evl.indexOf('pkc3_uev_trace("dispatch"');
+      const d = evl.indexOf('pkc3_uev_line("dispatch"');
       const ap = evl.indexOf('auto process =');
       const pr = evl.indexOf('process();');
       const en = evl.indexOf('#endif');
-      const dn = evl.indexOf('pkc3_uev_trace("done"');
+      const dn = evl.indexOf('pkc3_uev_line("done"');
       const lk = evl.indexOf('aResettableListGuard.lock();\n            if (!bHandleAllCurrentEvents)');
       expect(ds > -1 && ds < d && d < ap, 'dispatch が process の前でない').toBe(true);
       expect(ap < pr && pr < en && en < dn && dn < lk, 'done が process / #endif の後・lock の前でない').toBe(true);
@@ -295,14 +295,14 @@ describe('#121 の計装(uev-trace)── 印が全部在り、決まった順�
     try {
       expect(runPatch(t.dir, ON).code).toBe(0);
       const evl = dropHelper(t.read(REL_EVL));
-      const call = /pkc3_uev_trace\("dispatch"[\s\S]*?: -1\);/.exec(evl)?.[0] ?? '';
+      const call = /pkc3_uev_line\("dispatch"[\s\S]*?: -1\);/.exec(evl)?.[0] ?? '';
       expect(call, 'dispatch の呼び出しを拾えていない').not.toBe('');
       expect(call).toContain('pkc3_uev_ptr(aEvent.m_pData)');
       expect(call).toContain('static_cast<int>(aEvent.m_nEvent)');
       expect(call).toContain('aEvent.m_nEvent == SalEvent::UserEvent && aEvent.m_pData');
       expect(call).toContain('static_cast<ImplSVEvent*>(aEvent.m_pData)->mbCall ? 1 : 0');
       const app = dropHelper(t.read(REL_APP));
-      expect(app).toContain('pkc3_uev_trace("post", pkc3_uev_ptr(pTmpEvent), 0, 0);');
+      expect(app).toContain('pkc3_uev_line("post", pkc3_uev_ptr(pTmpEvent), 0, 0);');
       // stack の上限(post 600 / dispatch 300)は呼び出しの引数
       expect(app).toContain('pkc3_uev_stack("post-stack", pkc3_uev_ptr(pTmpEvent), 600);');
       expect(evl).toContain('pkc3_uev_stack("dispatch-stack", pkc3_uev_ptr(aEvent.m_pData), 300);');
@@ -330,13 +330,13 @@ describe('#121 の計装(uev-trace)── 印が全部在り、決まった順�
     expect(h.split('emscripten_log(').length - 1, 'emscripten_log が 1 か所でない').toBe(1);
   });
 
-  it('🔴 stack の条件は「時間が先、回数が後」(先に数えると起動時の post で枠を使い切る)', () => {
+  it('🔴 12 秒の門: stack は「時間が先、回数が後」/ 1 行の印(line)も同じ門を通る', () => {
     const h = PATCH.helper;
-    const time = h.indexOf('pkc3_uev_elapsed_ms() < 12000');
-    const cnt = h.indexOf('__atomic_fetch_add(&nShown');
-    expect(time, '12 秒の条件が無い').toBeGreaterThan(-1);
-    expect(cnt, '回数の条件が無い').toBeGreaterThan(-1);
-    expect(time < cnt, '回数を先に数えている').toBe(true);
+    const time = h.indexOf('if (!pkc3_uev_late())\n        return;\n    if (__atomic_fetch_add');
+    expect(time, '12 秒の条件が回数の前に無い(回数を先に数えている / 条件が無い)').toBeGreaterThan(-1);
+    // 門の定義は 12 秒。⚠ 1 行の印(pkc3_uev_line)も同じ門を通る
+    expect(h).toContain('return pkc3_uev_elapsed_ms() >= 12000;');
+    expect(h).toMatch(/void pkc3_uev_line\([^)]*\)\n\{\n {4}if \(!pkc3_uev_late\(\)\)\n {8}return;\n {4}pkc3_uev_trace\(/);
   });
 });
 
@@ -413,10 +413,10 @@ describe('#121 の計装(uev-trace)── idles-trace と同じ 2 file を触る
       // 両方の計装が実際に入っている(どちらかが空振りで「同一」になっていない)
       const evl = a.read(REL_EVL);
       expect(evl).toContain('pkc3_idles_trace("disp:ev"');
-      expect(evl).toContain('pkc3_uev_trace("dispatch"');
-      expect(evl).toContain('pkc3_uev_trace("done"');
+      expect(evl).toContain('pkc3_uev_line("dispatch"');
+      expect(evl).toContain('pkc3_uev_line("done"');
       expect(a.read(REL_APP)).toContain('pkc3_idles_trace("execute:call"');
-      expect(a.read(REL_APP)).toContain('pkc3_uev_trace("post"');
+      expect(a.read(REL_APP)).toContain('pkc3_uev_line("post"');
     } finally {
       a.cleanup();
       b.cleanup();
@@ -474,13 +474,13 @@ int main()
   }, 60_000);
 
   /**
-   * 🔴 **条件(12 秒 + 回数)が実際に効くこと**。⚠ `__EMSCRIPTEN__` を立て、`emscripten.h` を**偽物**に差し替え、
+   * 🔴 **条件(12 秒 + 回数)が実際に効くこと**(1 行の印 `pkc3_uev_line` も同じ 12 秒の門)。⚠ `__EMSCRIPTEN__` を立て、`emscripten.h` を**偽物**に差し替え、
    * `clock_gettime` を**自前の時計**へ名前替えして、時間を進めて呼ぶ。
-   *   - 最初の trace の 11.999 秒後 → stack は出ない(条件①)
-   *   - 12 秒後から 3 回 → 上限 2 なので **2 回だけ**出る(条件②)
+   *   - 最初の呼び出しの 11.999 秒後 → 1 行の印も stack も出ない(条件①)
+   *   - 12 秒後 → 1 行の印が出る / stack は 3 回呼んで上限 2 なので **2 回だけ**出る(条件②)
    *   - flags は 3 つとも OR されている(偽 header の定数は別々の bit)
    */
-  it('🔴 stack は「最初の trace から 12 秒以上」かつ「上限回数未満」のときだけ出る(偽の時計と偽の emscripten.h)', () => {
+  it('🔴 1 行の印と stack は「最初の呼び出しから 12 秒以上」のときだけ出る。stack は更に上限回数未満(偽の時計と偽の emscripten.h)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-uev-e-'));
     try {
       writeFileSync(join(dir, 'emscripten.h'), FAKE_EM, 'utf-8');
@@ -496,11 +496,13 @@ int main()
 {
     int nObj = 0;
     const unsigned long long a = pkc3_uev_ptr(&nObj);
-    pkc3_uev_trace("t:first", a, 0, 0);          // 起点(経過 0)
+    pkc3_uev_line("l:first", a, 0, 0);           // 起点(経過 0)→ 1 行の印も出ない
     pkc3_uev_stack("s:early", a, 2);             // 経過 0 → 出ない
     g_ms += 11999;
+    pkc3_uev_line("l:early", a, 0, 0);           // 経過 11.999 秒 → 出ない
     pkc3_uev_stack("s:early2", a, 2);            // 経過 11.999 秒 → 出ない
     g_ms += 1;
+    pkc3_uev_line("l:late", a, 3, 4);            // 経過 12 秒 → 出る
     pkc3_uev_stack("s:1", a, 2);                 // 経過 12 秒 → 出る(1 回目)
     pkc3_uev_stack("s:2", a, 2);                 // 2 回目
     pkc3_uev_stack("s:3", a, 2);                 // 上限 2 → 出ない
@@ -518,8 +520,9 @@ int main()
       expect(run.status, run.stderr).toBe(0);
       const rows = run.stderr.split('\n').filter((l) => l.length > 0);
       const em = rows.filter((l) => l.startsWith('EMLOG '));
-      // 1 行目は trace、あとは stack の 2 回だけ
-      expect(rows[0]).toMatch(/^PKC3-UEV t:first a=0x[0-9a-f]+ b=\d+ c=0 d=0$/);
+      // 1 行の印は 12 秒後の 1 本だけ(`l:first` / `l:early` は出ない)、あとは stack の 2 回だけ
+      expect(rows.filter((l) => l.startsWith('PKC3-UEV ')), '12 秒前に 1 行の印を出している / 12 秒後に出ていない').toHaveLength(1);
+      expect(rows[0]).toMatch(/^PKC3-UEV l:late a=0x[0-9a-f]+ b=\d+ c=3 d=4$/);
       expect(em, '12 秒前に出している / 上限を超えて出している / 出ていない').toHaveLength(2);
       // flags: 偽 header の定数(1 | 8 | 64)が全部 OR されている
       expect(em[0]).toMatch(/^EMLOG flags=73 PKC3-UEV s:1 a=0x[0-9a-f]+$/);
@@ -538,10 +541,26 @@ describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
     .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
     .join('\n');
 
-  it('🔑 filter に PKC3-UEV が入り、clipTrace の上限が 3000(400 ではない)', () => {
+  it('🔑 filter に PKC3-UEV が入り、clipTrace は直近 3000 行の ring(400 でも頭取りでもない)', () => {
     expect(code).toContain('/PKC3-(CLIP|MENU|UEV)/.test(m.text())');
-    expect(code).toContain('row.clipTrace.length < 3000');
-    expect(code, '旧い上限 400 が残っている').not.toContain('row.clipTrace.length < 400');
+    expect(code).toContain('pushRing(row.clipTrace, `[+${Date.now() - t0}ms]${tu}`, 3000)');
+    expect(code, '旧い頭取りの上限が残っている').not.toMatch(/row\.clipTrace\.length < \d+/);
+  });
+
+  it('🔴 pushRing は溢れたら古い行を落とす(直近を残す)。頭取りに戻すと落ちる', () => {
+    const m = /const pushRing = (\(arr, item, max\) => \{[\s\S]*?\n\});/.exec(code);
+    expect(m, 'pushRing を取り出せない').not.toBeNull();
+    const pushRing = new Function(`return ${m![1]!}`)() as (a: string[], i: string, max: number) => void;
+    const arr: string[] = [];
+    for (let i = 0; i < 3005; i++) pushRing(arr, `L${i}`, 3000);
+    expect(arr).toHaveLength(3000);
+    // 古い 5 行が落ち、直近が残る(頭取りなら先頭は L0、末尾は L2999)
+    expect(arr[0]).toBe('L5');
+    expect(arr[2999]).toBe('L3004');
+    // 溢れる前は 1 行も落とさない
+    const few: string[] = [];
+    for (let i = 0; i < 10; i++) pushRing(few, `L${i}`, 3000);
+    expect(few).toHaveLength(10);
   });
 
   it('🔴 PKC3-UEV の行は safeUevLine を通る(160 字で切らず 4000 字まで・改行を残す・非 ASCII の行だけ捨てる)', () => {

@@ -30,8 +30,10 @@
 🔑 **`dispatch` があって `done` が無い event が、落ちた event である。** その `a` を `post` /
 `post-stack` の `a` と突き合わせれば、誰が積んだか(C stack)が読める。
 ⚠ `*-stack` は `emscripten_log(EM_LOG_C_STACK)` が出す**改行入りの 1 message**(probe は ASCII だけ残す)。
-出す条件は**2 つ重ねる**: ①**最初の trace から 12 秒以上**(起動時の大量の post で枠を使い切らない)
-②**出した回数が上限未満**(`post-stack` 600 / `dispatch-stack` 300)。条件を満たさない回は 1 行だけ。
+出す条件は**2 つ重ねる**: ①**最初の呼び出しから 12 秒以上**(起動時の大量の post で枠を使い切らない)
+②**出した回数が上限未満**(`post-stack` 600 / `dispatch-stack` 300)。
+⚠ `post` / `dispatch` / `done` の 1 行の印も**同じ 12 秒の門**を通る(`pkc3_uev_line`。回数の上限 20000 は別)。
+起動時の大量の event は要らない ── 出すと probe の枠(`clipTrace`)を使い切って、肝心の popup 付近が落ちる。
 
 ## 錨の選び方 ── ⚠ `patch-lo-idles-trace.py` と重ならない
 
@@ -83,13 +85,19 @@ long long pkc3_uev_elapsed_ms()
     __atomic_compare_exchange_n(&nFirst, &nExpected, nNow, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
     return nNow - __atomic_load_n(&nFirst, __ATOMIC_RELAXED);
 }
+
+// 最初の呼び出しから 12 秒以上経ったか。⚠ 1 行の印(`pkc3_uev_line`)も C stack も同じ門を通る ──
+// 起動時の大量の event を出さない(出すと probe の枠を使い切り、肝心の popup 付近が落ちる)。
+bool pkc3_uev_late()
+{
+    return pkc3_uev_elapsed_ms() >= 12000;
+}
 }
 namespace
 {
 void pkc3_uev_trace(const char* what, unsigned long long a, int c, int d)
 {
     static int nSeq = 0;
-    (void)pkc3_uev_elapsed_ms(); // 起点を最初の trace に置く
     // ⚠ 上限を置く ── event は何度も来るので、置かないと log が膨らむ
     if (__atomic_add_fetch(&nSeq, 1, __ATOMIC_RELAXED) > 20000)
         return;
@@ -111,20 +119,29 @@ void pkc3_uev_trace(const char* what, unsigned long long a, int c, int d)
     }
 }
 
+// 呼び側が使う 1 行の印。⚠ **12 秒の門を通る**(上限 20000 は `pkc3_uev_trace` の中)。起点は**最初にここを通った回**。
+// 門を `pkc3_uev_trace` の中に置かないのは、`check-trace-helpers-compile.py` が入口を直接呼んで 1 行出ることを見るため。
+[[maybe_unused]] void pkc3_uev_line(const char* what, unsigned long long a, int c, int d)
+{
+    if (!pkc3_uev_late())
+        return;
+    pkc3_uev_trace(what, a, c, d);
+}
+
 // pointer を整数へ(`%p` で出すため)
 [[maybe_unused]] unsigned long long pkc3_uev_ptr(const void* p)
 {
     return static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(p));
 }
 
-// C stack を 1 message で出す。⚠ 条件を 2 つ重ねる: ①最初の trace から 12 秒以上 ②出した回数が nMax 未満。
+// C stack を 1 message で出す。⚠ 条件を 2 つ重ねる: ①最初の呼び出しから 12 秒以上 ②出した回数が nMax 未満。
 // 時間の判定が先 ── 先に数えると、起動時の post で枠を使い切る。
 // ⚠ Emscripten 以外(g++ 単体コンパイル)では何もしない。
 [[maybe_unused]] void pkc3_uev_stack([[maybe_unused]] const char* what, [[maybe_unused]] unsigned long long a,
                                      int nMax)
 {
     static int nShown = 0;
-    if (pkc3_uev_elapsed_ms() < 12000)
+    if (!pkc3_uev_late())
         return;
     if (__atomic_fetch_add(&nShown, 1, __ATOMIC_RELAXED) >= nMax)
         return;
@@ -146,7 +163,7 @@ APP_HELPER_ANCHOR = "ImplSVEvent * Application::PostUserEvent( const Link<void*,
 POST_ANCHOR = """    auto pTmpEvent = pSVEvent.get();
 """
 POST_REPLACE = f"""    auto pTmpEvent = pSVEvent.get();
-    pkc3_uev_trace("post", pkc3_uev_ptr(pTmpEvent), 0, 0); {MARK}
+    pkc3_uev_line("post", pkc3_uev_ptr(pTmpEvent), 0, 0); {MARK}
     pkc3_uev_stack("post-stack", pkc3_uev_ptr(pTmpEvent), 600); {MARK}
 """
 
@@ -163,7 +180,7 @@ DISPATCH_ANCHOR = """            /*
 DISPATCH_REPLACE = (
     f"""            if (aEvent.m_nEvent == SalEvent::UserEvent) {MARK}
                 pkc3_uev_stack("dispatch-stack", pkc3_uev_ptr(aEvent.m_pData), 300); {MARK}
-            pkc3_uev_trace("dispatch", pkc3_uev_ptr(aEvent.m_pData), static_cast<int>(aEvent.m_nEvent), {MARK}
+            pkc3_uev_line("dispatch", pkc3_uev_ptr(aEvent.m_pData), static_cast<int>(aEvent.m_nEvent), {MARK}
                            aEvent.m_nEvent == SalEvent::UserEvent && aEvent.m_pData {MARK}
                                ? (static_cast<ImplSVEvent*>(aEvent.m_pData)->mbCall ? 1 : 0) {MARK}
                                : -1); {MARK}
@@ -179,7 +196,7 @@ DONE_ANCHOR = """#endif
                 break;
 """
 DONE_REPLACE = f"""#endif
-            pkc3_uev_trace("done", pkc3_uev_ptr(aEvent.m_pData), static_cast<int>(aEvent.m_nEvent), 0); {MARK}
+            pkc3_uev_line("done", pkc3_uev_ptr(aEvent.m_pData), static_cast<int>(aEvent.m_nEvent), 0); {MARK}
             aResettableListGuard.lock();
             if (!bHandleAllCurrentEvents)
                 break;
