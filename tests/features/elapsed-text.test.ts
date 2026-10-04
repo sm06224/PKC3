@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { elapsedText } from '../../src/features/elapsed-text';
+import { elapsedText, msToSeconds, parseElapsed } from '../../src/features/elapsed-text';
 import { codeOnly } from '../helpers/code-only';
 
 describe('経過の見せ方(#279)', () => {
@@ -70,5 +70,33 @@ describe('経過の見せ方(#279)', () => {
     expect([...hits.keys()].sort(), '経過を自前で組み立てている場所がある').toEqual([
       'src/features/elapsed-text.ts',
     ]);
+  });
+});
+
+describe('経過の読み(parseElapsed。#1232 段 b)', () => {
+  it('🔴 `elapsedText` の逆 ── 往復で等しい(秒の単位で、時をまたいでも)', () => {
+    // ⚠ 1 秒刻みで 0 〜 3 時間 + 端の値を総当たりする(桁が変わる 59:59 / 1:00:00 / 10:00:00 を含む)
+    const edges = [0, 59_000, 60_000, 3_599_000, 3_600_000, 3_723_000, 36_000_000, 99 * 3_600_000 + 3_599_000];
+    for (const ms of edges) expect(parseElapsed(elapsedText(ms)), `${ms}ms`).toBe(ms);
+    for (let sec = 0; sec <= 3 * 3600; sec += 7) {
+      expect(parseElapsed(elapsedText(sec * 1000)), `${sec}s`).toBe(sec * 1000);
+    }
+  });
+
+  it('具体例(0:15 / 1:02:03)', () => {
+    expect(parseElapsed('0:15')).toBe(15_000);
+    expect(parseElapsed('12:34')).toBe(754_000);
+    expect(parseElapsed('1:02:03')).toBe(3_723_000);
+  });
+
+  it('🔴 経過の綴りでないものは null(空 / 1 桁の秒 / 60 以上 / 区切りの数が違う / 余計な字)', () => {
+    for (const bad of ['', '0:5', '0:75', '1:75:00', '1:2:3', '12', '1:02:03:04', ' 0:15', '0:15 ', 'abc', '-0:15', '0:1x']) {
+      expect(parseElapsed(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it('ミリ秒 → 秒の割り算は 1 本(`currentTime` の単位)', () => {
+    expect(msToSeconds(15_000)).toBe(15);
+    expect(msToSeconds(1_500)).toBe(1.5);
   });
 });

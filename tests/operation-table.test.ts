@@ -403,6 +403,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   'pick-color',
   // ⚠ 2026-10-02(#215 段②): パソコンのフォルダの行。押した行(何番目か)が要る P1(`run-command-row` と同じ仕分け)
   'pc-open-file',
+  // ⚠ 2026-10-04(#1232 段 b): 文字起こしの行頭の時刻。押した時刻(ミリ秒)が要る P1(`open-date-note` と同じ仕分け)
+  'seek-media',
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
   'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
@@ -458,6 +460,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-04(#1232 段 b): 文字起こしの行頭の時刻(`seek-media`)で受け手 +1 ── 登記は増えない(押し口は本文の時刻の字にしか無く、
+      //   鍵も持たない)。押した時刻が要る P1(`open-date-note` と同じ仕分け)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-03(#1017 C5。Gemini 裁定 B): 「メッセージを開く」(`open-messages`)を KEY_COMMANDS へ登記した ──
       //   受け手は既に在った(押し口は状態の行と「システム」の節)ので `both` +1 / `registered` +1 /
       //   `unregistered` −1(`total` / `receivers` は動かない)。`close-pane`(#1042 C3)と同じ仕分け。
@@ -730,12 +734,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 385,
-      receivers: 321,
+      total: 386,
+      receivers: 322,
       registered: 104,
       both: 40,
       outsideActionsTable: 64,
-      unregistered: 281,
+      unregistered: 282,
     });
   });
 

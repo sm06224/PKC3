@@ -301,7 +301,7 @@ import {
   integritySummary,
   parseQuickCheck,
 } from '@features/storage/db-rescue';
-import { elapsedText } from '@features/elapsed-text';
+import { elapsedText, msToSeconds } from '@features/elapsed-text';
 import { quotaText } from '@features/storage/quota-watch';
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';
 import type {
@@ -5117,6 +5117,46 @@ function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | '
 }
 
 /**
+ * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。
+ *
+ * ⚠ 再生機は**同じ詳細の中**から探す ── 説明の器(`data-pkc-prose`)の親が、再生機(`attachment-media`)の
+ *   器と同じ(本体の詳細ペインも、横に留めた枠も)。**ページ全体からは探さない**(別の添付の再生機を動かす)。
+ * ⚠ 再生機は**非同期で差す**ので、押した瞬間に無いことがある。**黙らない** ── 次にすることを言う。
+ * ⚠ 動画 webm など長さが取れない録音は、**移れたか分からない**。移れない(`seekable` が空)ときも言う。
+ */
+const SEEK_NOT_READY = '再生の準備ができてから、もう一度押してください';
+const SEEK_UNSUPPORTED = 'この録音は途中へ移れません。先頭から再生してください';
+function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
+  const raw = target.getAttribute('data-pkc-seek-ms');
+  const ms = Number(raw);
+  if (raw === null || !Number.isFinite(ms) || ms < 0) return;
+  const notice = (message: string): void => {
+    dispatcher.dispatch({ type: 'OP_NOTICE', message });
+  };
+  const media = target
+    .closest('[data-pkc-prose]')
+    ?.parentElement?.querySelector<HTMLMediaElement>(
+      'audio[data-pkc-field="attachment-media"], video[data-pkc-field="attachment-media"]',
+    );
+  // 🔑 `readyState` 0 = 長さも分からない(まだ読み込み前)。位置を書いても、読み込みが終わると 0 に戻ることがある
+  if (!media || media.readyState < 1) {
+    notice(SEEK_NOT_READY);
+    return;
+  }
+  media.currentTime = msToSeconds(ms);
+  const played = media.play();
+  if (played !== undefined && typeof played.catch === 'function') {
+    // ⚠ `AbortError` は「押した直後にもう一度押した」= 次の押しが引き継ぐ。言わない
+    played.catch((err: unknown) => {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) notice('再生を始められませんでした');
+    });
+  }
+  if (!Number.isFinite(media.duration) && media.seekable !== undefined && media.seekable.length === 0) {
+    notice(SEEK_UNSUPPORTED);
+  }
+}
+
+/**
  * 🔴 **章の別ウィンドウで押された口を、本体で走らせる**(#1044 段4)。
  *
  * 🔑 受け手は本体で押したときと**同じ `ACTIONS`** ── 窓のために 2 本目を書かない(§7)。
@@ -6157,6 +6197,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 日付を押した時点では**作らない**(打ち間違いの日付でノートが増えない)── 無ければ
    *   画面の下に「○○のノートを作る」を出し、**それを押したとき**に作る(`create-date-note`)。
    */
+  /**
+   * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。⚠ 本文は書かない(門に載せない)。
+   * 🔑 鍵(Enter / Space)は `<span role="button" tabindex="0">` の既存の道に乗る(`onKeydown`)。
+   */
+  'seek-media': (dispatcher, target) => {
+    seekMedia(dispatcher, target);
+  },
   'open-date-note': (dispatcher, target, services, root) => {
     openDateNote(dispatcher, target.getAttribute('data-pkc-date'), root, services);
   },

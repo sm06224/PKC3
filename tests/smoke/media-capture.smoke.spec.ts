@@ -758,6 +758,30 @@ ${(e as Error).message}`,
   // 🔴 元の録音は残っている(添付の情報も、その場で聞ける器も)── 足しただけで、上書きしていない
   await expect(body.locator('[data-pkc-field="attachment-info"]'), '追記したのに添付の情報が消えた').toBeVisible();
   await expect(body.locator('[data-pkc-field="attachment-media"]'), '追記したのに録音の器が消えた').toHaveCount(1);
+  /**
+   * 🔴 #1232 段 b: 行頭の時刻を押すと、**同じ詳細の再生機**がその位置へ動く(`<audio>` の `currentTime` を読む)。
+   * ⚠ 押せる字は本文の描画物なので、unit(happy-dom)は再生機を**模して**しか動かせない ──
+   *   実ブラウザで、実際に差された `<audio>` が実際に動くことをここで見る。
+   * ⚠ 偽の部品の区切りは `0:00` と `1:05`(録音は数秒)── 録音の長さを超える `1:05` を押す =
+   *   **末尾へ寄せられる**はずで、`0:00` の字は「先頭」なので動きを見るには使えない。
+   */
+  const seekPlayer = body.locator('audio[data-pkc-field="attachment-media"]');
+  await expect
+    .poll(() => seekPlayer.evaluate((a: HTMLAudioElement) => a.readyState), { message: '再生機が読み込めていない' })
+    .toBeGreaterThanOrEqual(1);
+  const seekLink = body.locator('[data-pkc-action="seek-media"][data-pkc-seek-ms="65000"]');
+  await expect(seekLink, '行頭の 1:05 が押せる字になっていない').toHaveText('1:05');
+  expect(await seekPlayer.evaluate((a: HTMLAudioElement) => a.currentTime), '前提: 再生機が先頭に居ない').toBeLessThan(1);
+  await clickReal(page, seekLink);
+  await expect
+    .poll(() => seekPlayer.evaluate((a: HTMLAudioElement) => a.currentTime), {
+      // ⚠ 時間を短く切る ── 位置を動かさず**先頭から鳴らしただけ**でも、数秒待てば 1 を超える。押した直後に末尾近くへ居ることを見る
+      timeout: 1500,
+      message: '時刻を押しても再生機が末尾へ動かない(1:05 は録音より後ろ)',
+    })
+    .toBeGreaterThanOrEqual(2);
+  // 🔑 押せる字は行頭の 2 つだけ(区切りの数と同じ)
+  await expect(body.locator('[data-pkc-action="seek-media"]'), '行頭の時刻が行の数だけ出ていない').toHaveCount(2);
 
   // ⑤ 消す → 取り込むボタンが戻り(双方向)、「文字にする」は再び案内になる
   await clickReal(page, settingsTab);
