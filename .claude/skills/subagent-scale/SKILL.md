@@ -407,6 +407,26 @@ CLAUDE.md の「**済んだと書くときは観測点を挙げる**」の**発�
 (`.claude/skills/sandbox-hygiene/SKILL.md`)。1 回でも戻れば、
 そこから先の書き換えは**依頼者のツリー**に当たる。
 
+#### 🔴 「終わった agent」を SendMessage で再開すると、worktree が**消えている**(2026-10-04 に 2 回)
+
+⚠ 上の節は「利用制限で止まった agent」だが、こちらは**正常に終わった agent** ── 完了すると、
+**変更の無い worktree は自動で消される**(harness の作法)。そこへ SendMessage で続きを頼むと、
+agent は `cd <自分の worktree>` で `No such file or directory` を見て止まる(正しく止まった ──
+止まらずに本体ツリーで回すのが最悪)。
+🔑 **続きを頼むなら、「変更が在って worktree が残っている」ことを `git worktree list` で見てから**。
+無ければ **新しく起こす**(依頼文に commit の sha を書く ── 前の agent の報告から sha を写す)。
+⚠ 続きの結果だけが要るときは、runner が書いた log を**依頼者が直に `grep`** するほうが速い
+(worktree の `unit.log` は agent が死んでも残っている)。
+
+#### 🔴 worktree 隔離の agent は **GitHub から file を落とせない**(2026-10-04、同じ日に 3 回)
+
+`curl … github.com/…/releases/download/…` は「git を含む形で worktree の内側に収まるか検証できない」で**断られる**。
+ホスト名を変数で組み直す**回避は、agent 自身が `[Containment Escape]` で止められた**(回避させない ──
+依頼文に「止められたら、止められた字をそのまま返す」と書く)。
+🔑 **落とすのは依頼者(親)**:scratchpad へ `curl` し、sha256 と `build-info.json` を確かめてから、
+**path を依頼文に書く**(「読むだけ・移動しない」と添える ── 別の agent が同じ zip を読んでいることがある)。
+上流の原文(LibreOffice / Qt)も同じ ── 親が `raw.githubusercontent.com` から `scratchpad/lo-src/` へ落として渡す。
+
 ### 🔴 依頼文に **branch 名を書くなら、agent ごとに違う名前**にする(2026-09-13)
 
 ⚠ **worktree は作業ツリーを分けるが、`refs` は分けない。** 同じ repo の

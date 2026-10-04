@@ -97,8 +97,19 @@ grep の全数を頼まれたときは、`grep -rn` の**全行**を file:line �
 🔑 **書くのは事実だけ**:全量で落ちた(spec:行・最初の 3 行)/ 単独で回した結果(緑 or 赤)。
 「だから環境のせい」は依頼者が決める ── 同じ字面が製品の穴だったことがある(CLAUDE.md §4「flake に見えるものが製品の穴だった」)。
 
+## 🔴 log は **切って**読む ── 丸ごと読むと自分が死に、回した物だけが走り続ける(2026-10-04)
+
+⚠ 全量 unit を回した runner が、log を丸ごと読んで **context が 3 回連続で溢れて止められた**(「Autocompact is thrashing」)。
+🔴 **止められても、起こした `vitest` の process は走り続ける** ── 依頼者から見ると「報告が来ないのに CPU だけ使っている」。
+依頼者は worktree の `unit.log` を直に `grep` して結果を拾い、続きを別の runner に頼むことになった。
+
+🔑 **読むのは `grep -n "Test Files\|Tests  \|exit=" unit.log` と `tail -n 10`** だけ。落ちた物も `grep … | head -30` で切る。
+`cat unit.log` / `Read` で log 全体 / `smoke.log` の全文 ── どれも**打たない**(数万行になる)。
+⚠ 依頼文にも「log は grep / tail で切る」と書いてある ── 書いてあっても踏むので、**手順として最初に守る**。
+
 ## やってはいけないこと
 
+- 🚫 log を丸ごと読む(`cat` / `Read` で全文)── context が溢れて止められ、process だけが残る(上の節)
 - 🚫 `git checkout -- <file>` / `git reset --hard` / `git stash` ── 依頼者の編集を消す
 - 🚫 落ちた test を「直す」「skip する」「緩める」
 - 🚫 `| tail` に通した終了コードを報告する(パイプの終了コードは最後の命令の物)── `cmd > log 2>&1; echo "exit=$?"` の形で log に落としてから読む
