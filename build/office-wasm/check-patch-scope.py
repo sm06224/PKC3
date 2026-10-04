@@ -41,6 +41,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 LO = sys.argv[1] if len(sys.argv) > 1 else "/tmp/lo-src"
 
@@ -264,7 +265,7 @@ for env, script, fn, pairs in SPECS:
 #    ヘルパーの無い直しは載せられない(載せると「ヘルパーが入っていない」で必ず落ちる)。
 #    だから別の一覧にする ── 見るのは「**足した行が、置き換えた原文と同じスコープ**に在ること」
 #    (= 関数の外へ漏れていない / `#include` が file scope に在る)。
-#    各行: (patch, file, 原文の目印, 当てた後の目印, 何を見るか)
+#    各行: (patch, file, 原文の目印, 当てた後の目印, 何を見るか, 足した `#include` の行)
 FIXES = [
     (
         "patch-lo-scheduler-task-gone.py",
@@ -273,11 +274,22 @@ FIXES = [
         "                SolarMutexGuard g;\n                pTask->Invoke();\n            }\n#else\n",
         "Task* const pLiveTask = pMostUrgent->mpTask;",
         "CallbackTaskScheduling の JSPI の枝",
+        "#include <cstdio> // PKC3-TASKGONE",
+    ),
+    (
+        "patch-lo-menu-popup-sync.py",
+        "framework/source/uielement/menubarmanager.cxx",
+        # 原文: `Select` の末尾で、popup の命令を後回しにしている 1 行(8 字下げ = `if` の `{` の中。
+        #       足す `if (!m_bHasMenuBar)` も同じ `{` の中に入る)
+        "        Application::PostUserEvent(LINK_NONMEMBER(nullptr, AsyncMenuExecute), pData.release());\n",
+        "if (!m_bHasMenuBar) // PKC3-POPUPSYNC",
+        "MenuBarManager::Select の popup の分岐",
+        "#include <cstdio> // PKC3-POPUPSYNC",
     ),
 ]
 
 print("=== 本番(ヘルパーを持たない直し: 足した行が原文と同じスコープに在るか)")
-for script, rel, orig_mark, new_mark, what in FIXES:
+for script, rel, orig_mark, new_mark, what, inc_line in FIXES:
     src = os.path.join(LO, rel)
     if not os.path.exists(src):
         print(f"🔴 {script}: {rel} の元 file が無い")
@@ -288,8 +300,9 @@ for script, rel, orig_mark, new_mark, what in FIXES:
         print(f"🔴 {script}: {rel} の原文の目印が {orig.count(orig_mark)} 件(検査が空振り)")
         fail = 1
         continue
-    work = f"/tmp/scope-chk-fix-{script}"
-    shutil.rmtree(work, ignore_errors=True)
+    # 🔑 作業 dir は**毎回別**にする(固定名だと、FIXES を走らせる test 2 本が並列に走ったとき
+    #    互いの木を消し合う ── 2 本目の直しを足した日に実際に踏んだ)
+    work = tempfile.mkdtemp(prefix=f"scope-chk-fix-{script}-")
     os.makedirs(os.path.dirname(os.path.join(work, rel)))
     shutil.copy(src, os.path.join(work, rel))
     r = subprocess.run(["python3", os.path.join(HERE, script), work], capture_output=True, text=True)
@@ -298,6 +311,7 @@ for script, rel, orig_mark, new_mark, what in FIXES:
         fail = 1
         continue
     t = open(os.path.join(work, rel), encoding="utf-8").read()
+    shutil.rmtree(work, ignore_errors=True)
     if t.count(new_mark) != 1:
         print(f"🔴 {script}: 当てた後の目印が {t.count(new_mark)} 件(検査が空振り)")
         fail = 1
@@ -306,7 +320,7 @@ for script, rel, orig_mark, new_mark, what in FIXES:
     got = depth_at(t, t.index(new_mark))
     # `#include` は file scope(深さ 0)に在ること。⚠ depth_at は前処理行を数えないので、
     # 「直前までの深さ」が 0 であることを見る(include を関数の中へ入れる誤りを拾う)
-    inc_at = t.find("#include <cstdio> // PKC3-TASKGONE")
+    inc_at = t.find(inc_line)
     inc_depth = depth_at(t, inc_at) if inc_at != -1 else -1
     ok = got == want and want > 0 and inc_depth == 0
     print(
