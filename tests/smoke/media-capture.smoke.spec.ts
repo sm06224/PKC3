@@ -594,7 +594,9 @@ ${(e as Error).message}`,
   const FAKE_TEXT = '偽の文字起こし';
   const jsText = [
     'export const env = { backends: { onnx: { wasm: {} } } };',
-    `export async function pipeline() { return async (pcm) => ({ text: '${FAKE_TEXT}:' + pcm.length }); }`,
+    // 🔑 #1232 段 a: 時刻つきの区切り(`chunks`。秒)も返す ── 末尾の終わりは null(whisper の仕様)
+    `export async function pipeline() { return async (pcm) => ({ text: '${FAKE_TEXT}:' + pcm.length, chunks: [`,
+    `  { timestamp: [0, 2.5], text: ' 一行目の偽の字' }, { timestamp: [65.2, null], text: '${FAKE_TEXT}:' + pcm.length }] }); }`,
     // ⚠ 目録の下限(約 100KB)を満たす大きさまで、注釈で埋める
     ...Array.from({ length: 2500 }, (_, i) => `// padding ${i} ${'x'.repeat(40)}`),
   ].join('\n');
@@ -744,6 +746,10 @@ ${(e as Error).message}`,
   await expect(body, 'ノートの末尾に日時の見出しが足されていない').toContainText(
     /文字起こし \d{4}-\d{2}-\d{2} \d{2}:\d{2}/,
   );
+  // 🔴 #1232 段 a: 行ごとに「時刻 字」で足され、1 段落の中で改行(<br>)で割れて見える
+  await expect(body, '時刻つきの行(0:00 …)が本文に足されていない').toContainText('0:00 一行目の偽の字');
+  await expect(body, '2 行目の時刻(1:05)が本文に無い').toContainText(`1:05 ${FAKE_TEXT}:`);
+  await expect(body.locator('p', { hasText: '0:00 一行目の偽の字' }).locator('br'), '行が改行で割れていない').toHaveCount(1);
   const m = new RegExp(`${FAKE_TEXT}:(\\d+)`).exec((await body.textContent()) ?? '');
   expect(m, '偽の部品が返した字が本文に入っていない').not.toBeNull();
   // 🔑 本物の録音を本物の AudioContext で 16kHz に復号した長さ(録音は 4 秒以上)

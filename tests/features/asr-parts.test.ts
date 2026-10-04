@@ -34,8 +34,11 @@ import { humanBytes } from '../../src/features/human-bytes';
 import {
   ASR_SECTION_LABEL,
   transcriptHeading,
+  transcriptLines,
   transcriptText,
 } from '../../src/features/asr/asr-text';
+import { elapsedText } from '../../src/features/elapsed-text';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 const sha = 'a'.repeat(64);
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -249,6 +252,32 @@ describe('PCM と本文へ足す字', () => {
     expect(transcriptText('  こんにちは。\n\n  今日は  晴れです。 ')).toBe('こんにちは。 今日は 晴れです。');
     expect(transcriptText('  \n ')).toBeNull();
     expect(transcriptText('')).toBeNull();
+  });
+
+  it('🔴 #1232 段 a: 時刻つきの行は「elapsedText の綴り + 空白 + 字」で 1 行ずつ(0 埋めしない)', () => {
+    const lines = transcriptLines([
+      { startMs: 0, text: ' こんにちは。' },
+      { startMs: 15_400, text: '今日は\n  晴れです' },
+      { startMs: 754_000, text: '   ' },
+      { startMs: 3_723_900, text: 'さようなら' },
+    ]);
+    expect(lines).toBe(['0:00 こんにちは。', '0:15 今日は 晴れです', '1:02:03 さようなら'].join('\n'));
+    // 綴りの正本は 1 本(割り算を新しく書かない)
+    expect(lines!.split('\n').map((l) => l.split(' ')[0])).toEqual([0, 15_400, 3_723_900].map(elapsedText));
+  });
+
+  it('#1232: 使える行が無ければ null(呼び側は今の 1 段落へ倒す)', () => {
+    expect(transcriptLines(undefined)).toBeNull();
+    expect(transcriptLines([])).toBeNull();
+    expect(transcriptLines([{ startMs: 0, text: ' \n ' }])).toBeNull();
+  });
+
+  it('#1232: 行は markdown の 1 段落の中で <br> に割れ、時刻は既存の記法に当たらない', () => {
+    const html = renderMarkdown('0:15 こんにちは\n0:20 今日は\n1:02:03 おわり');
+    expect(html).toContain('0:15 こんにちは<br>');
+    expect(html).toContain('0:20 今日は<br>');
+    expect(html).toContain('1:02:03 おわり');
+    expect((html.match(/<p>/g) ?? []).length, '1 段落のはずが割れた').toBe(1);
   });
 
   it('入口の名前は「音声認識」(節の見出しと案内が同じ字を引く)', () => {

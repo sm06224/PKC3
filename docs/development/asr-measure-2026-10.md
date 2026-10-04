@@ -246,3 +246,11 @@ await build({
 - ⚠ **GitHub Pages の 1 file 100MB の制限**: small の `decoder_model_merged_quantized.onnx` は **157MB** の 1 file。
   git で配る Pages だと当たる。Actions から直接配る Pages の制限は**実測していない**。当たるなら、
   分割(`*.part1` …)を取り込みの側へ足す必要がある(いまは未実装)。
+
+## 段⑤(時刻つき。#1232 段 a)
+
+- 何を変えた: `return_timestamps: true` にし、`chunks`(秒)を `segments`(ms)へ。追記は 1 行 = `0:15 字`(綴りは `elapsedText`)。`chunks` が無ければ今までの 1 段落。
+- 未測定: **速度**(`return_timestamps` を true にしたことで `runMs` がどう動くか)。
+- 未測定: **窓の境界(30 秒 / stride 5 秒)での時刻**が、つなぎ目でずれないか・重複しないか。
+- 未測定: **本物の transformers での `chunks` の形**(偽の部品で形だけ通した。実走は別)。
+- 段 b(字を押すとその位置から再生)は**別 PR**。この段は書く側だけ。

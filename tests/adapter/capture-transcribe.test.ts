@@ -95,6 +95,37 @@ describe('文字にする(成功する道)', () => {
     expect(h.notes.at(-1)).toContain('文字起こしを足しました');
   });
 
+  it('🔴 #1232 段 a: 時刻つきの区切りが在れば、1 行ずつ「時刻 字」で足す(見出しは同じ)', async () => {
+    const h = harness({
+      transcribe: vi.fn(async (): Promise<AsrJobResult> => ({
+        text: 'こんにちは。 今日は晴れです',
+        segments: [
+          { startMs: 0, endMs: 2500, text: ' こんにちは。' },
+          { startMs: 15_000, endMs: null, text: '今日は晴れです ' },
+        ],
+        loadMs: 1,
+        runMs: 2,
+      })),
+    });
+    await h.tr.run('a');
+    expect(h.appends).toEqual([
+      { lid: 'a', heading: transcriptHeading(NOW), text: '0:00 こんにちは。\n0:15 今日は晴れです' },
+    ]);
+  });
+
+  it('#1232: 区切りが無い / 全部空なら、今までの 1 段落で足す(前の版の形)', async () => {
+    const h = harness({
+      transcribe: vi.fn(async (): Promise<AsrJobResult> => ({
+        text: ' こんにちは。\n今日は晴れです ',
+        segments: [{ startMs: 0, endMs: 1000, text: '  ' }],
+        loadMs: 0,
+        runMs: 0,
+      })),
+    });
+    await h.tr.run('a');
+    expect(h.appends.map((a) => a.text)).toEqual(['こんにちは。 今日は晴れです']);
+  });
+
   it('部品へは「入っている部品の model」「決めた言語」「復号した PCM」を渡す', async () => {
     const h = harness();
     await h.tr.run('a');
