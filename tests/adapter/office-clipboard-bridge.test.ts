@@ -403,6 +403,53 @@ describe('窓の側(serveClipboard の書き込み)', () => {
     expect(h.status, '標準が書けたのに言っている').toEqual([]);
   });
 
+  /**
+   * 🔴 **0 byte の部品は書かない**(#121)。LO の `retrieveData` は取り出しに失敗すると
+   * `catch (...)` で**黙って空を返す**ので、PNG を取れなかった回は 0 byte の `image/png` が届く。
+   * 書くと外のクリップボードに**中身の無い画像**が載り、前にコピーした物が消える。
+   */
+  it('🔴 0 byte の標準の型は item に入れない(中身の在る型だけ書く)', async () => {
+    const write = vi.fn(ok);
+    const h = runHost({ write });
+    const empty = { type: 'image/png', buf: new ArrayBuffer(0) };
+    h.send({ clip: 'write', id: 6, parts: [empty, part('text/plain')] });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    // 対照群: 中身の在る型は今までどおり書く(0 byte だけを飛ばしている ── 全部を飛ばしていない)
+    expect(h.written).toHaveLength(1);
+    expect(h.written[0]!.types, '0 byte の image/png を item に入れている').toEqual(['text/plain']);
+    expect(h.status, '書けたのに言っている').toEqual([]);
+  });
+
+  it('🔴 標準の型が全部 0 byte なら write を呼ばず、画面に言い、返事を返す', async () => {
+    const write = vi.fn(ok);
+    const h = runHost({ write });
+    h.send({
+      clip: 'write',
+      id: 7,
+      parts: [
+        { type: 'image/png', buf: new ArrayBuffer(0) },
+        { type: 'text/plain', buf: new ArrayBuffer(0) },
+      ],
+    });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    expect(write, '0 byte だけなのに write を呼んでいる(外が空の画像で上書きされる)').not.toHaveBeenCalled();
+    expect(h.written, 'ClipboardItem も作らない').toEqual([]);
+    expect(h.status).toEqual([SAY_NO_IMAGE]);
+    expect(h.replies).toEqual([{ reply: true, id: 7 }]);
+  });
+
+  it('🔴 同じ型の 0 byte が先に来ても、後ろの中身の在る部品は書く(0 byte が席を取らない)', async () => {
+    const h = runHost({ write: ok });
+    h.send({
+      clip: 'write',
+      id: 8,
+      parts: [{ type: 'image/png', buf: new ArrayBuffer(0) }, part('image/png;x=y')],
+    });
+    await vi.waitFor(() => expect(h.replies).toHaveLength(1));
+    expect(h.written[0]!.types).toEqual(['image/png']);
+    expect(await h.written[0]!.blobs['image/png']!.text()).toBe('中身');
+  });
+
   it('🔴 write が落ちたら、落ちたことを画面に言い、返事は必ず返す', async () => {
     const h = runHost({
       write: () => Promise.reject(new DOMException('Failed to execute write', 'NotAllowedError')),

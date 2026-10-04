@@ -1073,7 +1073,13 @@
       for (var i = 0; i < d.parts.length; i += 1) {
         var name = clipToBrowser(d.parts[i].type);
         if (name === null || Object.prototype.hasOwnProperty.call(payload, name)) continue;
-        payload[name] = new Blob([d.parts[i].buf], { type: name });
+        // 🔴 **0 byte の部品は書かない**(#121)。LO の `retrieveData` は取り出しに失敗すると
+        //    `catch (...)` で**黙って空を返す**ので、PNG を取れなかった回は 0 byte の `image/png` が届く。
+        //    そのまま書くと外のクリップボードに**中身の無い画像**が載り、前にコピーした物が消える。
+        //    飛ばせば標準の型が 0 件になり、下の「書けません」の字が出る(外は前の物のまま)。
+        var buf = d.parts[i].buf;
+        if (!buf || buf.byteLength === 0) continue;
+        payload[name] = new Blob([buf], { type: name });
         standard += 1;
       }
       if (standard === 0) {
