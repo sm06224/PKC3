@@ -576,7 +576,12 @@ jobs:
           #    `patch-lo-clip-trace.py`(**計装**。⚠ 既定では 1 バイトも書き換えない
           #    ── `PKC3_CLIP_TRACE=1` の回だけ。錨の検査は毎回する)。
           #    ⚠ 2 本は**同じ行を触らない**(両方当てても、どちらの順でも出力が同一)。
-          test "$n" -eq 19
+          # 🔴 19 → 20(2026-10-04)。`patch-lo-scheduler-task-gone.py`(#117 の**直し**)。
+          #    `CallbackTaskScheduling()` の JSPI の枝が、`SolarMutexGuard` の待ちで中断している間に
+          #    文書が閉じられて破棄された Task を、再開後に `pTask->Invoke()` していた。
+          #    錠を取った後で `pMostUrgent->mpTask` を読み直し、null なら飛ばす(⚠ **既定で当たる**)。
+          #    ⚠ 計装 `patch-lo-scheduler-trace.py` と**同じ行を触らない**(両順で出力が同一)。
+          test "$n" -eq 20
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
