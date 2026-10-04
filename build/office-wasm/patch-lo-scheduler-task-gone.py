@@ -34,7 +34,7 @@ Office の文書を閉じる(Ctrl+W)と、6 回中 6 回
 
 - `pMostUrgent`(`ImplSchedulerData`)はスタックに積まれていて、この関数の後半の pop まで生きている
   (内側の再入は全部 LIFO で出ていくので、外側が再開した時点で生きている ── 観測済み)。
-- `std::fputs` は「直しが効いた回数」を probe が数えるための印でもある
+- `std::fputs` は「直しが効いた回数」を probe(`dialog-crash-probe.mjs` の `taskGone`)が数えるための印でもある
   (計装を切った焼きでも出る)。⚠ libc だけを使う(embind / Qt は LO の文脈から呼べない)。
 - 🔴 触らない: `#else`(非 JSPI)の枝 / `emscripten_proxy_promise` の枝(証拠が無い)/
   `pTask` の宣言 / `SetDeletionFlags()` / `DecideTransferredExecution()`(中断の前に済んでいる)。

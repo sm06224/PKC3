@@ -570,6 +570,9 @@ async function main() {
     await page?.screenshot({ path: join(SHOTS, '99-final.png') }).catch(() => {});
     // ⚠ 既定の 150 行は「落ちた瞬間の周り」を見るのに足りない回がある(#117 の計装は
     //    数千行出る)── 要る回だけ PKC3_CONSOLE_KEEP で広げる。既定は変えない
+    // 🔑 #117 の直し(patch-lo-scheduler-task-gone.py)が Invoke を飛ばした回数 ── 切る前の全量で数える。
+    //    fault が消えたとき「直しが効いた」のか「再入が起きなかった」のかを、この数で見分ける。
+    result.taskGone = consoleAll.filter((l) => l.includes('PKC3-TASKGONE:')).length;
     result.console = consoleAll.slice(-Number(process.env.PKC3_CONSOLE_KEEP ?? 150));
     result.pageErrors = pageErrors.slice(0, 10);
     await browser.close().catch(() => {});

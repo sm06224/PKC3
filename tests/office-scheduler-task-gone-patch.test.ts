@@ -250,7 +250,26 @@ describe('#117 の直し(scheduler-task-gone)── 当てた結果(描いた C+
     expect(after).not.toBe(EXCERPT);
     expect(restore(after)).toBe(EXCERPT);
     // 足した行は 10 行(include 1 + 注釈 4 + 読み直し 1 + if/call/else/fputs 4)
-    expect(after.split('\n').filter((l) => l.includes(MARK)).length).toBe(10);
+    const added = after.split('\n').filter((l) => l.includes(MARK));
+    expect(added.length).toBe(10);
+    // 🔴 中身まで見る(レビュー 2026-10-04): 件数と順序だけだと、注釈の 1 行を `return;` に替える /
+    //    注釈の行末に `\\` を足して次の宣言をコメントに連結する、という変異が緑のまま C++ を壊す。
+    //    ⚠ 期待値は patch から取らず**手で書く**(同じ盲点を共有しない)。
+    const code = added.filter((l) => !/^\s*\/\/ /.test(l)).map((l) => l.trim());
+    expect(code).toEqual([
+      `#include <cstdio> // ${MARK}`,
+      `Task* const pLiveTask = pMostUrgent->mpTask; // ${MARK}`,
+      `if (pLiveTask) // ${MARK}`,
+      `pLiveTask->Invoke(); // ${MARK}`,
+      `else // ${MARK}`,
+      `std::fputs("${MARK}: task destroyed while waiting for the SolarMutex; Invoke skipped\\n", stderr); // ${MARK}`,
+    ]);
+    for (const l of added) {
+      expect(l, '行末の \\ は次の行をコメントへ連結する').not.toMatch(/\\\s*$/);
+      expect(l, 'ブロックコメントは使わない').not.toMatch(/\/\*|\*\//);
+    }
+    // 注釈は 4 行で、全部 `//` 始まり(実行文を注釈の顔で足していない)
+    expect(added.filter((l) => /^\s*\/\/ /.test(l)).length).toBe(4);
   });
 });
 
