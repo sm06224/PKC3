@@ -17,7 +17,8 @@
  *   ③ **足した行は全部印を含み、置き換えた原文は 1 行だけ**(印の行を除いて戻すと原文と一致)
  *   ④ **計装(`patch-lo-scheduler-trace.py`)と両立**: 錨が重ならず、どちらの順で当てても出力が同一
  *   ⑤ **`<cstdio>`** が足されている(`std::fputs` の宣言)
- *   ⑥ スコープ検査(`check-patch-scope.py`)の一覧に載っている
+ *   ⑥ スコープ検査(`check-patch-scope.py`)の一覧に載っている **+ その FIXES を抜粋に対して実際に走らせる**
+ *      (✅ になる / 足した行を 1 段深くする・`#include` を括弧の中へ入れると ✗)
  *
  * 🔴 **言えないこと**: 当てた後の C++ が本物の LO の header でコンパイルできること /
  * 本物の JSPI で破棄済みの Task を飛ばして文書が閉じられること。どちらも**焼いて、文書を閉じる
@@ -348,5 +349,84 @@ describe('#117 の直し(scheduler-task-gone)── 他の検査との関係', (
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {
     const src = readFileSync(SCRIPT, 'utf-8');
     expect(src).toMatch(/^SRC\s*=\s*"vcl\/source\/app\/scheduler\.cxx"/m);
+  });
+});
+
+describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-patch-scope.py の FIXES)を実際に走らせる', () => {
+  const CHECK = 'build/office-wasm/check-patch-scope.py';
+
+  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。LO の全体は要らず、抜粋 1 つの木で足りる。 */
+  function scope(checkScript: string, dir: string): { code: number; out: string } {
+    const r = spawnSync('python3', [checkScript, dir], {
+      encoding: 'utf-8',
+      env: { ...process.env, PKC3_SCOPE_ONLY: 'fixes' },
+      stdio: 'pipe',
+    });
+    return { code: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
+  }
+
+  /**
+   * 検査と直しの patch を**別の場所へ写し**、patch の描く C++ だけを壊して走らせる。
+   * ⚠ 検査は `HERE`(自分の置き場)から patch を引くので、写した先の patch が当たる。
+   * ⚠ 壊す前に「元の字が 1 件在る」ことを見る(当たらなかった変異を「落ちた」と読まない)。
+   */
+  function scopeWithBrokenPatch(from: string, to: string): { code: number; out: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-scope-mut-'));
+    const t = tree();
+    try {
+      const src = readFileSync(SCRIPT, 'utf-8');
+      expect(count(src, from), '壊す元の字が 1 件でない(変異が当たらない)').toBe(1);
+      writeFileSync(join(dir, 'patch-lo-scheduler-task-gone.py'), src.replace(from, to), 'utf-8');
+      writeFileSync(join(dir, 'check-patch-scope.py'), readFileSync(CHECK, 'utf-8'), 'utf-8');
+      return scope(join(dir, 'check-patch-scope.py'), t.dir);
+    } finally {
+      t.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('🔴 抜粋に当てた木で、FIXES が ✅(exit 0)。対照群 / SPECS は走らない', () => {
+    const t = tree();
+    try {
+      const r = scope(CHECK, t.dir);
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).toContain('✅ 同じスコープ');
+      expect(r.out).toContain('CallbackTaskScheduling の JSPI の枝');
+      expect(r.out).toContain('include 深さ 0');
+      expect(r.out).toContain('fail=0');
+      // 🔑 絞れていること(LO の全体が無い木で、対照群の「元 file が無い」が出ていない)
+      expect(r.out).not.toContain('元 file が無い');
+      expect(r.out).not.toContain('🔴');
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it('🔴 足した行が原文より 1 段深くなる(`{` が 1 つ増える)と ✗(exit ≠ 0)', () => {
+    // ⚠ 字下げではなく**括弧**で深さが決まる(検査は `{` `}` を数える。空白だけ動かしても深さは同じ)
+    const from = '                Task* const pLiveTask = pMostUrgent->mpTask; // PKC3-TASKGONE\n';
+    const r = scopeWithBrokenPatch(from, `                { // PKC3-TASKGONE\n${from}`);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('スコープが違う');
+    expect(r.out).toContain('fail=1');
+    expect(r.out).not.toContain('✅ 同じスコープ');
+  });
+
+  it('🔴 `#include` が file scope でなくなる(`namespace { }` の中)と ✗ ── 足した行の深さは原文と同じでも落ちる', () => {
+    const from = '#include <cstdio> // PKC3-TASKGONE\n';
+    const r = scopeWithBrokenPatch(from, `namespace { // PKC3-TASKGONE\n${from}} // PKC3-TASKGONE\n`);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('include 深さ 1');
+    expect(r.out).toContain('スコープが違う');
+  });
+
+  it('🔑 未知の絞り込みは断る(黙って全部走らせない / 黙って何も走らせない)', () => {
+    const r = spawnSync('python3', [CHECK, '/nonexistent'], {
+      encoding: 'utf-8',
+      env: { ...process.env, PKC3_SCOPE_ONLY: 'no-such-name' },
+      stdio: 'pipe',
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('PKC3_SCOPE_ONLY');
   });
 });

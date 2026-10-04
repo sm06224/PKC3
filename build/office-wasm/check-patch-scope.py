@@ -33,6 +33,7 @@
 - ヘルパーが 1 つも見つからない patch は**失敗**にする(検査が何も見ていない)
 
     python3 build/office-wasm/check-patch-scope.py [<LO を clone した dir>]
+    PKC3_SCOPE_ONLY=fixes python3 build/office-wasm/check-patch-scope.py <dir>   # FIXES だけ
 """
 
 import os
@@ -164,6 +165,18 @@ SPECS = [
         ],
     ),
 ]
+# 🔑 #117(2026-10-04)── `PKC3_SCOPE_ONLY=fixes` で、対照群と SPECS を飛ばして**下の FIXES だけ**を走らせる
+#    (LO の全体を clone していなくても、`vcl/source/app/scheduler.cxx` 1 つで足りる)。
+#    ⚠ 絞るのは**走らせる一覧**だけで、判定は 1 行も変えない(未設定なら従来どおり全部走る)。
+#    用途: `tests/office-scheduler-task-gone-patch.test.ts` が抜粋 fixture に対して走らせる。
+ONLY = os.environ.get("PKC3_SCOPE_ONLY", "")
+if ONLY == "fixes":
+    CONTROLS = []
+    SPECS = []
+elif ONLY:
+    print(f"ERROR: PKC3_SCOPE_ONLY={ONLY!r} は未知(使えるのは fixes だけ)", file=sys.stderr)
+    sys.exit(2)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 fail = 0
 
