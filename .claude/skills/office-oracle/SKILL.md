@@ -450,6 +450,14 @@ fault は**押す段の開始から 0.65〜0.72 秒後**に揃って出る。
 実際に `Alpha beta gamma` が `iAlpha beta gamma` になった(16 → 17 文字)。
 🔑 `PKC3_MENU_TRIES=n` で開くまで押し直し、**開いていない回は項目を押さない**。
 
+## 16. コピーの後に外のクリップボードがどうなるか(#121)
+
+`build/office-wasm/clipboard-probe.mjs <pack> <fixtures> out.json [n]` ── 外へ種を置き、LO の中でコピーし
+(`Ctrl+C` / 右クリックのメニュー / 画像 / 表)、外を読み直す。fixture は
+`make-clipboard-fixtures.py <dir>` が自作する。腕・判定不能の規則・読み方は probe の先頭に書いてある。
+⚠ 一式は §1〜§3 のとおり `make-pages-bundle.mjs` で組む。⚠ ディスクの空きが少ない箱では
+`Response.blob()` が `net::ERR_FAILED` で落ちる(probe は `arrayBuffer()` で入れる)。
+
 ## 11. ⚠ 焼きは 1 本ずつ投げる
 
 2 本同時に dispatch したら**片方が 4 時間 11 分**かかった(単独なら 29〜33 分)。
