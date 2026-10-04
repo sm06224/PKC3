@@ -35,11 +35,12 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FLOOR = 6  # 実測(2026-10-04): idles / ime / save / scheduler / clip / menu の 6 本
+FLOOR = 7  # 実測(2026-10-04): idles / ime / save / scheduler / clip / menu / uev の 7 本
 # 🔑 3 → 4(2026-10-04): 計装 patch を 1 本足した(`patch-lo-scheduler-trace.py`、#117)。
 #    下限を据え置くと、その 1 本が拾えなくなっても気づけない。
 # 🔑 4 → 5(2026-10-04): 計装 patch をもう 1 本足した(`patch-lo-clip-trace.py`、#121)。
 # 🔑 5 → 6(2026-10-04): もう 1 本足した(`patch-lo-menu-trace.py`、#121 の popup メニュー)。
+# 🔑 6 → 7(2026-10-04): もう 1 本足した(`patch-lo-uev-trace.py`、#121 の user event の積み手と処理する側)。
 
 # ⚠ `#include <pthread.h>` を差し替えて実体を作る。**両方**当てるのが肝。
 # ⚠ stub には `[[maybe_unused]]` を付ける ── stub は**足場**であって主張の対象ではない。

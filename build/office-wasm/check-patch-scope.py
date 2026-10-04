@@ -177,6 +177,18 @@ SPECS = [
             ("vcl/qt5/QtFrame.cxx", "void QtFrame::SetInputContext("),
         ],
     ),
+    (
+        "PKC3_UEV_TRACE",
+        "patch-lo-uev-trace.py",
+        "pkc3_uev_trace",
+        [
+            # 🔴 #121(2026-10-04)── ヘルパーは `PostUserEvent` / コンストラクタの直前で、
+            #    使う所(`PostUserEvent` の中 / `DispatchUserEvents` の中)はどちらもその後ろ。
+            #    ⚠ ここを SPECS に足し忘れると、**この 2 file だけ検査の外**になる。
+            ("vcl/source/app/svapp.cxx", "ImplSVEvent * Application::PostUserEvent("),
+            ("vcl/source/app/salusereventlist.cxx", "SalUserEventList::SalUserEventList()"),
+        ],
+    ),
 ]
 # 🔑 #117(2026-10-04)── `PKC3_SCOPE_ONLY=fixes` で、対照群と SPECS を飛ばして**下の FIXES だけ**を走らせる
 #    (LO の全体を clone していなくても、`vcl/source/app/scheduler.cxx` 1 つで足りる)。
