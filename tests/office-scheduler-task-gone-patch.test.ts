@@ -357,6 +357,11 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
 
   /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。LO の全体は要らず、抜粋 1 つの木で足りる。 */
   function scope(checkScript: string, dir: string): { code: number; out: string } {
+    // 🔑 FIXES は他の直しも載せる(`patch-lo-menu-popup-sync.py` ── #121)。その当て先も木に要る
+    //    (無いと「元 file が無い」で、この直しと関係なく落ちる)。
+    const other = join(dir, 'framework/source/uielement/menubarmanager.cxx');
+    mkdirSync(dirname(other), { recursive: true });
+    writeFileSync(other, readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8'), 'utf-8');
     const r = spawnSync('python3', [checkScript, dir], {
       encoding: 'utf-8',
       env: { ...process.env, PKC3_SCOPE_ONLY: 'fixes' },
@@ -378,6 +383,11 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
       expect(count(src, from), '壊す元の字が 1 件でない(変異が当たらない)').toBe(1);
       writeFileSync(join(dir, 'patch-lo-scheduler-task-gone.py'), src.replace(from, to), 'utf-8');
       writeFileSync(join(dir, 'check-patch-scope.py'), readFileSync(CHECK, 'utf-8'), 'utf-8');
+      writeFileSync(
+        join(dir, 'patch-lo-menu-popup-sync.py'),
+        readFileSync('build/office-wasm/patch-lo-menu-popup-sync.py', 'utf-8'),
+        'utf-8',
+      );
       return scope(join(dir, 'check-patch-scope.py'), t.dir);
     } finally {
       t.cleanup();
@@ -409,7 +419,10 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
     expect(r.code, r.out).toBe(1);
     expect(r.out).toContain('スコープが違う');
     expect(r.out).toContain('fail=1');
-    expect(r.out).not.toContain('✅ 同じスコープ');
+    // ⚠ FIXES は他の直しも走らせる(それは ✅ のまま)── 見るのはこの直しの行だけ
+    const mine = r.out.split('\n').filter((l) => l.includes('patch-lo-scheduler-task-gone.py'));
+    expect(mine.length, 'この直しの行が出ていない').toBe(1);
+    expect(mine[0]).not.toContain('✅ 同じスコープ');
   });
 
   it('🔴 `#include` が file scope でなくなる(`namespace { }` の中)と ✗ ── 足した行の深さは原文と同じでも落ちる', () => {

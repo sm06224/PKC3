@@ -596,7 +596,14 @@ jobs:
           #    錠を取った後で `pMostUrgent->mpTask` を読み直し、null なら飛ばす(⚠ **既定で当たる**)。
           #    ⚠ 計装 `patch-lo-scheduler-trace.py` と**同じ行を触らない**(両順で出力が同一)。
           # 🔴 20 → 21(2026-10-04)。`patch-lo-menu-trace.py`(#121 の**計装**。既定では 1 バイトも書き換えない)。
-          test "$n" -eq 21
+          # 🔴 21 → 22(2026-10-04)。`patch-lo-menu-popup-sync.py`(#121 の**直し**)。
+          #    popup の「コピー」が `.uno:Copy` にならない。計装(run 37222907850)で、`Select()` までは届き、
+          #    `MenuBarManager::Select` が命令を `PostUserEvent` で**後回し**にした先が popup(入れ子の
+          #    `QMenu::exec` の後)では 10 秒走らず、走った回は `libc++abi: terminating` で落ちると割れた。
+          #    Emscripten の popup(`!m_bHasMenuBar`)だけ、その場で dispatch する(menubar は触らない。
+          #    ⚠ **既定で当たる**)。⚠ 数えているのは上の `patch-*.py` の glob(`patch-lo-*.py` 20 本 +
+          #    `patch-qt6-*.py` 2 本)── `patch-lo-*.py` だけの本数ではない。
+          test "$n" -eq 22
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
