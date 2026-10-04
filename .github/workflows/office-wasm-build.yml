@@ -107,6 +107,17 @@ on:
         description: '調査用: idle 錠の待ちに計装を当てる(#199。別 tag へ出る)'
         type: boolean
         default: false
+      scheduler_trace:
+        # 🔴 **調査用**(#117)。`Scheduler::CallbackTaskScheduling()` の中で
+        #    `null function or function signature mismatch` が出る理由を**数で言う**
+        #    (`build/office-wasm/patch-lo-scheduler-trace.py`)。
+        #    ⚠ 文書を閉じる(Ctrl+W)と 6 回中 6 回、この関数の中の vtable 経由の呼び出しで落ちる。
+        #    仮説は 2 つ ── A: 破棄後の `ImplSchedulerData::mpTask` が残っている /
+        #    B: `Invoke()` の中で JSPI が中断し、Qt の timer が再入する。
+        #    🔑 **直しは入れない**(計装だけ)。出口は libc だけ(stderr + `/tmp/pkc3-sched.log`)。
+        description: '調査用: scheduler の再入・破棄後参照に計装を当てる(#117。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -434,6 +445,11 @@ jobs:
           else
             export PKC3_IDLES_TRACE=0
           fi
+          if [ "${{ inputs.scheduler_trace }}" = "true" ]; then
+            export PKC3_SCHEDULER_TRACE=1
+          else
+            export PKC3_SCHEDULER_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -528,7 +544,15 @@ jobs:
           #    行が短いままなので上限が `ARG_MAX`(約 2MB)側になる。
           #    ⚠ 機構は手元の make で両方向を確かめた(129KB=通る / 133KB=Error 127 /
           #    直しを当てた 136KB=通る)。
-          test "$n" -eq 16
+          # 🔴 16 → 17(2026-10-04)。`patch-lo-scheduler-trace.py`(#117 の**計装**)。
+          #    文書を閉じると落ちる `null function or function signature mismatch` の
+          #    fault は `Scheduler::CallbackTaskScheduling()` の frame の中だった
+          #    (名前つきの一式で 3 回とも同じ stack)。仮説 A(破棄後の `mpTask`)/
+          #    B(JSPI の再入)のどちらかを**数で言う**。
+          #    ⚠ **既定では 1 バイトも書き換えない**(`PKC3_SCHEDULER_TRACE=1` の回だけ)が、
+          #    錨の検査は毎回する ── 門の下に隠すと上流の変形に誰も気づけない。
+          #    ⚠ `patch-lo-idles-deadlock.py` と**同じ行を触らない**(あちらは `IdlesLockGuard`)。
+          test "$n" -eq 17
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -948,6 +972,7 @@ jobs:
           if [ "${{ inputs.ime_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-imetrace"; fi
           if [ "${{ inputs.save_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-savetrace"; fi
           if [ "${{ inputs.idles_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-idlestrace"; fi
+          if [ "${{ inputs.scheduler_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-schedtrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -961,6 +986,7 @@ jobs:
             \"ime_trace\": \"${{ inputs.ime_trace }}\",
             \"save_trace\": \"${{ inputs.save_trace }}\",
             \"idles_trace\": \"${{ inputs.idles_trace }}\",
+            \"scheduler_trace\": \"${{ inputs.scheduler_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json
