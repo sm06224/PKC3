@@ -87,7 +87,8 @@ describe('計装のヘルパーは g++ で通る', () => {
     // 🔑 3 → 4(2026-10-04): 計装 patch を 1 本足した(`patch-lo-scheduler-trace.py`、#117)
     // 🔑 4 → 5(2026-10-04): もう 1 本足した(`patch-lo-clip-trace.py`、#121)
     // 🔑 5 → 6(2026-10-04): もう 1 本足した(`patch-lo-menu-trace.py`、#121 の popup メニュー)
-    expect(r.out, '計装のヘルパーを 6 本以上拾えていない').toMatch(/計装のヘルパー: [6-9]\d* 本/);
+    // 🔑 6 → 7(2026-10-04): もう 1 本足した(`patch-lo-uev-trace.py`、#121 の user event)
+    expect(r.out, '計装のヘルパーを 7 本以上拾えていない').toMatch(/計装のヘルパー: [7-9]\d* 本/);
     // 🔑 事故そのものの形(整数)が、名指しで通っていること
     expect(r.out).toContain('patch-lo-idles-trace.py / 整数');
     expect(r.out).toContain('patch-lo-idles-trace.py / pointer');
@@ -100,6 +101,9 @@ describe('計装のヘルパーは g++ で通る', () => {
     // #121 の popup メニューの 1 本も、整数・pointer の両方で名指しに通っていること
     expect(r.out).toContain('patch-lo-menu-trace.py / 整数');
     expect(r.out).toContain('patch-lo-menu-trace.py / pointer');
+    // #121 の user event の 1 本も、整数・pointer の両方で名指しに通っていること
+    expect(r.out).toContain('patch-lo-uev-trace.py / 整数');
+    expect(r.out).toContain('patch-lo-uev-trace.py / pointer');
     expect(r.code, r.out).toBe(0);
   }, COMPILE_MS);
 

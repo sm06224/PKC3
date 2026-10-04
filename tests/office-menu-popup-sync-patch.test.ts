@@ -297,7 +297,8 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/21 → 22\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-menu-popup-sync.py');
-    expect(yml).toContain('test "$n" -eq 22');
+    // 22 → 23(2026-10-04): `patch-lo-uev-trace.py`(#121 の計装)を 1 本足した。「21 → 22」の注記は残っている
+    expect(yml).toContain('test "$n" -eq 23');
   });
 
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {

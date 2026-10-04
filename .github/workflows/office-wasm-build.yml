@@ -139,6 +139,15 @@ on:
         description: '調査用: popup メニューの選択が命令になるまでに計装を当てる(#121。別 tag へ出る)'
         type: boolean
         default: false
+      uev_trace:
+        # 🔴 **調査用**(#121)。popup の「コピー」をマウスで選んだ回だけ、約 10.2 秒後に
+        #    `libc++abi: terminating`(型名の無い = JS 例外)が `SalUserEventList::DispatchUserEvents` の
+        #    `noexcept` lambda から出る。**どの user event が落ちているか・誰が積んだか**を印で言う
+        #    (`build/office-wasm/patch-lo-uev-trace.py`。`post` / `dispatch` / `done` と、積んだ側・処理する側の C stack)。
+        #    🔑 **直しは入れない**(計装だけ)。出口は libc + `emscripten_log`(stderr + `/tmp/pkc3-uev.log`)。
+        description: '調査用: user event の積んだ側と処理する側に計装を当てる(#121。別 tag へ出る)'
+        type: boolean
+        default: false
 
 # ⚠ 既定の 6 時間で足りない可能性が高い。足りなければ段を分けて artifact で繋ぐ
 jobs:
@@ -481,6 +490,11 @@ jobs:
           else
             export PKC3_MENU_TRACE=0
           fi
+          if [ "${{ inputs.uev_trace }}" = "true" ]; then
+            export PKC3_UEV_TRACE=1
+          else
+            export PKC3_UEV_TRACE=0
+          fi
           for p in "$GITHUB_WORKSPACE"/build/office-wasm/patch-*.py; do
             python3 "$p" ~/lo-core
             n=$((n + 1))
@@ -603,7 +617,10 @@ jobs:
           #    Emscripten の popup(`!m_bHasMenuBar`)だけ、その場で dispatch する(menubar は触らない。
           #    ⚠ **既定で当たる**)。⚠ 数えているのは上の `patch-*.py` の glob(`patch-lo-*.py` 20 本 +
           #    `patch-qt6-*.py` 2 本)── `patch-lo-*.py` だけの本数ではない。
-          test "$n" -eq 22
+          # 🔴 22 → 23(2026-10-04)。`patch-lo-uev-trace.py`(#121 の**計装**。既定では 1 バイトも書き換えない)。
+          #    popup の「コピー」で落ちる user event を名指しする(`post` / `dispatch` / `done` + C stack)。
+          #    ⚠ `patch-lo-idles-trace.py` と同じ 2 file を触るが**錨は重ならない**(両順で出力が同一)。
+          test "$n" -eq 23
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
@@ -1026,6 +1043,7 @@ jobs:
           if [ "${{ inputs.scheduler_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-schedtrace"; fi
           if [ "${{ inputs.clip_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-cliptrace"; fi
           if [ "${{ inputs.menu_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-menutrace"; fi
+          if [ "${{ inputs.uev_trace }}" = "true" ]; then SAFE_SUFFIX="${SAFE_SUFFIX}-uevtrace"; fi
           printf '%s\n' "{
             \"version\": \"lo-${sha:0:12}-run${GITHUB_RUN_ID}${SAFE_SUFFIX}\",
             \"lo_sha\": \"${sha}\",
@@ -1042,6 +1060,7 @@ jobs:
             \"scheduler_trace\": \"${{ inputs.scheduler_trace }}\",
             \"clip_trace\": \"${{ inputs.clip_trace }}\",
             \"menu_trace\": \"${{ inputs.menu_trace }}\",
+            \"uev_trace\": \"${{ inputs.uev_trace }}\",
             \"built_at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
           }" > build-info.json
           cat build-info.json

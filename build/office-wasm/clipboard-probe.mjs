@@ -71,9 +71,11 @@
  * - `hostWrites` … LO の worker が host へ送った **書き込みの依頼**(`BroadcastChannel`
  *   `pkc3-clipboard` を横から聞く)と、host が実際に呼んだ `navigator.clipboard.write` の
  *   **成否**(頁の `write` を包んで採る)。⚠ これは製品コードを変えずに採る**傍受**である
- * - `clipTrace` … page の console のうち `PKC3-CLIP` / `PKC3-MENU` を含む行を `[+<ms>]` 付きで最大 400 行
- *   (`patch-lo-clip-trace.py` / `patch-lo-menu-trace.py` の計装が出す。名前は `clip` のままだが**両方入る**。
- *   既存の `console` は 40 行で `PKC3-SCHED` に埋まるので別に持つ)
+ * - `clipTrace` … page の console のうち `PKC3-CLIP` / `PKC3-MENU` / `PKC3-UEV` を含む行を `[+<ms>]` 付きで最大 3000 行
+ *   (`patch-lo-clip-trace.py` / `patch-lo-menu-trace.py` / `patch-lo-uev-trace.py` の計装が出す。名前は `clip` のままだが**全部入る**。
+ *   既存の `console` は 40 行で `PKC3-SCHED` に埋まるので別に持つ)。
+ *   ⚠ `PKC3-UEV` の行は 160 字で切らず **4000 字**まで残す(`emscripten_log` の C stack は改行入りの 1 message)。
+ *   改行は残し、**非 ASCII の行(1 message の中の 1 行)は捨てる**(stack は ASCII)
  * - `faults[].stack` … `memory access out of bounds` / `RuntimeError` / `Aborted(` の `pageerror` の stack
  *   (非 ASCII の行は捨て、1 行 200 字・全体 4000 字で切る。`RuntimeError: unreachable` の出所を読むため)
  *
@@ -191,6 +193,19 @@ function serve() {
 
 /** 制御文字や非 ASCII の混入で JSON を汚さない(console は外の文字列である)。 */
 const safeLine = (s) => (/[^\x20-\x7e]/.test(s) ? null : s.slice(0, 160));
+/**
+ * `PKC3-UEV` の行用。`emscripten_log` の C stack は**改行入りの 1 message**なので、`safeLine` では(改行が
+ * 範囲外なので)丸ごと捨てられる。1 行ずつ見て、**非 ASCII の行だけ捨て**、残りを改行で繋いで 4000 字で切る。
+ * 何も残らなければ null。
+ */
+const safeUevLine = (s) => {
+  const kept = [];
+  for (const line of s.split('\n')) {
+    const t = line.trimEnd();
+    if (t !== '' && !/[^\x20-\x7e]/.test(t)) kept.push(t);
+  }
+  return kept.length === 0 ? null : kept.join('\n').slice(0, 4000);
+};
 const safeErr = (e) => {
   for (const line of String(e).split('\n')) {
     const t = safeLine(line.trim());
@@ -385,8 +400,10 @@ async function oneRound(arm, n) {
   }
   page.on('console', (m) => {
     const t = safeLine(`[${m.type()}] ${m.text()}`);
-    // ⚠ `clipTrace` は `PKC3-CLIP`(コピー)と `PKC3-MENU`(popup メニューの選択)の**両方**が入る(名前は据え置き)
-    if (t !== null && /PKC3-(CLIP|MENU)/.test(m.text()) && row.clipTrace.length < 400) row.clipTrace.push(`[+${Date.now() - t0}ms]${t}`);
+    // ⚠ `clipTrace` は `PKC3-CLIP`(コピー)/ `PKC3-MENU`(popup メニューの選択)/ `PKC3-UEV`(user event)の**全部**が入る(名前は据え置き)
+    //    `PKC3-UEV` だけ 4000 字まで残す(C stack は改行入り)。他は従来どおり 160 字
+    const tu = m.text().includes('PKC3-UEV') ? safeUevLine(`[${m.type()}] ${m.text()}`) : t;
+    if (tu !== null && /PKC3-(CLIP|MENU|UEV)/.test(m.text()) && row.clipTrace.length < 3000) row.clipTrace.push(`[+${Date.now() - t0}ms]${tu}`);
     if (t !== null && row.console.length < 40) row.console.push(`[+${Date.now() - t0}ms]${t}`);
   });
   page.on('pageerror', (e) => {
