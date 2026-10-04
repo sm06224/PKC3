@@ -71,6 +71,8 @@
  * - `hostWrites` … LO の worker が host へ送った **書き込みの依頼**(`BroadcastChannel`
  *   `pkc3-clipboard` を横から聞く)と、host が実際に呼んだ `navigator.clipboard.write` の
  *   **成否**(頁の `write` を包んで採る)。⚠ これは製品コードを変えずに採る**傍受**である
+ * - `clipTrace` … page の console のうち `PKC3-CLIP` を含む行を `[+<ms>]` 付きで最大 400 行(`patch-lo-clip-trace.py` の計装が出す。
+ *   既存の `console` は 40 行で `PKC3-SCHED` に埋まるので別に持つ)
  *
  * ## 判定不能の規則(回す**前**に書いてある。結果の後から緩めない)
  *
@@ -347,7 +349,7 @@ async function oneRound(arm, n) {
   const docName = DOC_OF[arm];
   const docB64 = (await readFile(join(FX, docName))).toString('base64');
   const seed = `OUTSIDE-${arm}-${n}`;
-  const row = { arm, n, doc: docName, seed, steps: [], faults: [], console: [] };
+  const row = { arm, n, doc: docName, seed, steps: [], faults: [], console: [], clipTrace: [] };
   const profile = `${tmpdir()}/pkc3-clip-${process.pid}-${arm}-${n}`;
   const ctx = await chromium.launchPersistentContext(profile, {
     headless: true,
@@ -366,6 +368,7 @@ async function oneRound(arm, n) {
   }
   page.on('console', (m) => {
     const t = safeLine(`[${m.type()}] ${m.text()}`);
+    if (t !== null && m.text().includes('PKC3-CLIP') && row.clipTrace.length < 400) row.clipTrace.push(`[+${Date.now() - t0}ms]${t}`);
     if (t !== null && row.console.length < 40) row.console.push(`[+${Date.now() - t0}ms]${t}`);
   });
   page.on('pageerror', (e) => {
