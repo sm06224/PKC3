@@ -44,6 +44,7 @@ const MODULE = resolve(`${DIR}/probe-watchdog.mjs`);
 const WATCHED = [
   'autorecovery-probe.mjs',
   'boot-probe.mjs',
+  'clipboard-probe.mjs',
   'combo-popup-probe.mjs',
   'convert-to-probe.mjs',
   'dialog-crash-probe.mjs',
