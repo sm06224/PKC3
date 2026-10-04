@@ -95,6 +95,21 @@ describe('markdown worker', () => {
   });
 
   /**
+   * 🔴 **文字起こしの行頭の時刻を押せる字にする旗も落とさない**(#1232 段 b)。読む面はワーカー経由で描くので、
+   * 素通しでないと「同期では押せるのに、ワーカーが立っていると押せない」という環境で割れる形になる。
+   */
+  it('🔴 opts の interactiveSeek を落とさない(文字起こしの時刻が worker でも押せる)', () => {
+    const text = '0:15 こんにちは\n';
+    const on = send(1, text, { interactiveSeek: true }) as { result: string };
+    const off = send(2, text) as { result: string };
+    // ⚠ **違いが出ること**を先に確かめる ── 同じなら opts を見ていない実装でも通る
+    expect(on.result).not.toBe(off.result);
+    expect(on.result).toContain('data-pkc-action="seek-media"');
+    expect(off.result).not.toContain('seek-media');
+    expect(on.result).toBe(renderMarkdown(text, { interactiveSeek: true }));
+  });
+
+  /**
    * 🔴 **色コードの見本を出す旗も落とさない**(#1224)。読む面はワーカー経由で描くので、
    * 素通しでないと「同期では出るのに、ワーカーが立っていると出ない」という環境で割れる形になる。
    */

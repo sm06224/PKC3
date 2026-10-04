@@ -236,6 +236,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
    *   (`app.css` の注記)── だから `markdown-css-parity` の「書き出しに載る」検査の外である。
    */
   'pkc-date-link': 'src/features/markdown/markdown-render.ts',
+  // 🔴 文字起こしの行頭の時刻(#1232 段 b)。`pkc-date-link` と同じ ── `interactiveSeek` を渡した面だけに出る
+  'pkc-seek-link': 'src/features/markdown/markdown-render.ts',
   /**
    * 色コードの左の見本(#1224)。⚠ これも**本文の描画物である**が、出るのは `colorSwatches` を渡した面だけ
    *   (= 設定に従う読む面だけ)なので、既定で描く走査には現れない。

@@ -52,7 +52,7 @@ stack-link-up stack-link-down capture-play capture-transcribe move-tile-up move-
 open-repeat-menu set-task-repeat toggle-app-group pick-app-group-icon sql-history-pick
 move-app-group-up move-app-group-down open-tile-as
 sql-er-table sql-er-column sql-er-link sql-er-unlink system-jump jump-to-asset-use open-date-note
-run-command-row pick-color pc-open-file`.split(/\s+/);
+run-command-row pick-color pc-open-file seek-media`.split(/\s+/);
 
 /** 点を取るが、state の現在値(`selectedLid` / `dual.focus`)で代替できる。 */
 export const P2 = `select-entry delete-entry enter-folder toggle-todo move-order-up move-order-down

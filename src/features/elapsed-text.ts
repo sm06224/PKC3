@@ -26,3 +26,27 @@ export function elapsedText(ms: number): string {
   const s = all % 60;
   return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
 }
+
+/**
+ * 🔴 **`elapsedText` の逆**(#1232 段 b)── 文字起こしの行頭の `0:15` から、再生を始める位置(ms)を読む。
+ *
+ * ⚠ 綴りは `elapsedText` が作る形だけ(`m:ss` / `h:mm:ss`)。**秒は 2 桁・60 未満**、時が付くとき分も 2 桁・60 未満。
+ *   別の綴り(`0:5` / `0:75` / `1:2:3` / 空)は **`null`**(呼び側は字のまま残す)。
+ * ⚠ ミリ秒を扱う場所を増やさない ── 割り算は `elapsedText`、掛け算はここの 1 本だけが持つ。
+ */
+export function parseElapsed(text: string): number | null {
+  const m = /^(?:(\d{1,2}):([0-5]\d)|([0-5]?\d)):([0-5]\d)$/.exec(text);
+  if (m === null) return null;
+  const h = m[1] === undefined ? 0 : Number(m[1]);
+  const min = Number(m[1] === undefined ? m[3] : m[2]);
+  const sec = Number(m[4]);
+  return (h * 3600 + min * 60 + sec) * 1000;
+}
+
+/**
+ * ミリ秒 → 秒(`HTMLMediaElement.currentTime` の単位)。⚠ 割り算をここに置くのは、
+ * 「ミリ秒を扱う場所を増やさない」検査(`tests/features/elapsed-text.test.ts`)が `/ 1000` を数えるため。
+ */
+export function msToSeconds(ms: number): number {
+  return ms / 1000;
+}

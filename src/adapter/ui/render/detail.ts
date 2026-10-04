@@ -3047,12 +3047,22 @@ export class DetailRenderer {
       // 🔑 添付の説明も本文と同じ読み幅(2026-08-08)。⚠ ここは**別に描く経路**
       //    なので、読む面に印を付けただけでは届かない(CLAUDE.md「経路ごとに pin」)
       desc.setAttribute('data-pkc-prose', '');
+      const kind = assetPreviewKind(meta.mime);
+      const playable = kind === 'audio' || kind === 'video';
       desc.innerHTML = renderMarkdown(description, {
         sourceLineAnchors: true,
         // ⚠ 添付の説明も本文と同じ扱い ── ここだけ素通りすると、説明に書いた
         //    追跡画像が設定を無視して飛ぶ(面ごとに違う扱いにしない)
         allowExternalImages: this.externalImages.allows(lid),
         currentContainerId,
+        /**
+         * 🔴 **文字起こしの行頭の時刻を押せる字にする**(#1232 段 b)。⚠ **再生機(`attachment-media`)が
+         *   同じ詳細の中に居る**この 1 か所だけ ── 書き出し・印刷・章の別窓・プレビューには再生機が居ない。
+         *   本体の詳細ペインと留めた枠は、どちらもここを通る。
+         * ⚠ **音・動画の添付だけ** ── PDF などの説明に `12:30 会議` と書いた行を、再生機の無い所で
+         *   押せる字にしない(押しても何も起きない dead click になる)。
+         */
+        interactiveSeek: playable,
       });
       /**
        * 🔴 文書 globals(書字方向・既定の寄せ)を説明の器にも当てる(#106 /

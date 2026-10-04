@@ -3463,6 +3463,21 @@ li[data-pkc-row-slot] {
 }
 
 /**
+ * 🔴 **文字起こしの行頭の時刻(押すとその位置から再生する)**(#1232 段 b)。
+ *
+ * 見た目は日付(`.pkc-date-link`)と**同じ系** ── 点線の下線だけ、字の色は変えない
+ * (地は無彩色、色は情報にだけ)。押せることは下線とポインタで伝える。
+ * 🔴 **`[data-pkc-prose]` を起点にする**(上と同じ理由 ── `.pkc-md-rendered` 起点は書き出しへ焼かれる。
+ *   この字は再生機が居る読む面だけが押せる形で出す)。
+ */
+[data-pkc-prose] .pkc-seek-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/**
  * 🔴 **日付の右に添える「あと3日」「5日前」**(#1225)。
  *
  * 字は**属性から出す**(`data-pkc-rel`。`relative-days.ts` が読む面にだけ差す)── 描画結果にも

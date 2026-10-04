@@ -210,6 +210,22 @@ describe('可搬 HTML', () => {
   });
 
   /**
+   * 🔴 **文字起こしの行頭の時刻(#1232 段 b)も同じ** ── 受け手(`seek-media`)と再生機は読む面にしか居ない。
+   * ⚠ 旗(`interactiveSeek`)の既定が切でも、書き出しの描画が旗を立てれば載る ── 既定の検査では見えない
+   *   (`pkc3-html.ts` / `chapter-windows.ts` に `interactiveSeek: true` を足す変異を、ここが殺す)。
+   */
+  it('🔴 文字起こしの行頭の時刻は、書き出した HTML では押せる字にならない(印も規則も載らない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '0:15 こんにちは\n' }] }),
+      NOW,
+    );
+    const text = await out.blob.text();
+    expect(text, '本文の時刻が消えている').toContain('0:15 こんにちは');
+    expect(text, '押せる印が書き出しに載っている').not.toContain('seek-media');
+    expect(text, '押せる字の class が書き出しに載っている').not.toContain('pkc-seek-link');
+  });
+
+  /**
    * 🔴 **色コードの見本(#1224)は、書き出す HTML に出ない**。
    * 空の `<span>` は Word で落ち、紙にも載せたくない ── 色は `<code>` の字で足りる。
    * ⚠ 描く側の旗(`colorSwatches`)は既定で切、見た目の規則は `[data-pkc-prose]` 起点で

@@ -76,6 +76,7 @@ import {
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate } from '../schedule/line-date';
+import { parseElapsed } from '../elapsed-text';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 
 const md = new MarkdownIt({
@@ -2809,6 +2810,66 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
 });
 
 /**
+ * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。
+ *
+ * > user の物語:録音の文字起こしに `0:15 こんにちは` と並んだ。その行を読んで、**その場の音**を聞き直したい。
+ *
+ * ⚠ **既定は切**(`env.interactiveSeek`)── 受け手(`seek-media`)と**再生機**が同じ詳細の中に居る面
+ *   (添付の説明)だけ `true` にする(押せるのに何も起きないと dead click になる。`interactiveDates` と同じ理由)。
+ *   書き出した HTML・別窓・プレビューには再生機が居ないので、**1 バイトも変わらない**。
+ *   ⚠ アプリ自身の印刷(`print-note.ts`)は**生きた詳細の DOM を刷る**ので、音・動画のノートを刷ると
+ *   時刻は点線の下線つきで紙に出る(押せはしない)── `@日付` と同じ扱い。
+ * ⚠ **行頭だけ**拾う ── 段落の先頭と、改行(`breaks: true` の 1 行)の直後。文中の `14:00` は時刻の字で、
+ *   経過ではない(`transcriptLines` が作る形は `経過 字` の行だけ)。
+ *   ⚠ 行頭に書いた時計の時刻(`14:00 会議`)も m:ss として押せる字になる ── 設計の帰結で、逃げ道は
+ *   行頭の全角スペース(マニュアル「文字起こしの時刻」)。
+ * ⚠ 綴りの読みは `parseElapsed` が**1 か所で**持つ(`elapsedText` の逆)。読めない綴りは字のまま残す。
+ * ⚠ 字は**そのまま**(`0:15`)。後ろの空白と字には触らない。リンクの中では当てない。
+ * 🔑 `<span role="button" tabindex="0">` ── 鍵(Enter / Space)は binder の「`tabindex="0"` の押せる物」の道に乗る。
+ */
+const SEEK_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
+  if ((state.env as { interactiveSeek?: boolean }).interactiveSeek !== true) return true;
+  for (const token of state.tokens) {
+    if (token.type !== 'inline') continue;
+    const children = token.children;
+    if (!children) continue;
+    const out: typeof children = [];
+    let inLink = 0;
+    let lineStart = true;
+    let changed = false;
+    for (const t of children) {
+      if (t.type === 'link_open') inLink += 1;
+      else if (t.type === 'link_close') inLink -= 1;
+      const atHead = lineStart;
+      lineStart = t.type === 'softbreak' || t.type === 'hardbreak';
+      if (!atHead || t.type !== 'text' || inLink > 0) {
+        out.push(t);
+        continue;
+      }
+      const m = SEEK_LINE_HEAD.exec(t.content);
+      const ms = m === null ? null : parseElapsed(m[1]!);
+      if (m === null || ms === null) {
+        out.push(t);
+        continue;
+      }
+      const tok = new state.Token('html_inline', '', 0);
+      tok.content =
+        `<span class="pkc-seek-link" data-pkc-action="seek-media" ` +
+        `data-pkc-seek-ms="${ms}" role="button" tabindex="0">${md.utils.escapeHtml(m[1]!)}</span>`;
+      out.push(tok);
+      const tail = new state.Token('text', '', 0);
+      tail.content = t.content.slice(m[1]!.length);
+      out.push(tail);
+      changed = true;
+    }
+    // ⚠ 当たらなかった段落は**触らない**(token の同一性を無駄に壊さない)
+    if (changed) token.children = out;
+  }
+  return true;
+});
+
+/**
  * 🔴 押せない綴りの見本のホバー(#1254 §1)。⚠ 字は `color-code.ts` の「押して直せる形」(6 桁小文字)の裏返し。
  * 🔑 **理由だけで終えない**(#1264 §1)── 押せない user に、次にすること(6 桁の小文字へ書き直す)を言う。
  */
@@ -3148,6 +3209,15 @@ export interface RenderMarkdownOptions {
    *   (`renderMarkdown` の env 組み立て)。
    */
   readonly interactiveDates?: boolean;
+  /**
+   * 🔴 **文字起こしの行頭の時刻(`0:15 `)を押せる字にするか**(#1232 段 b。既定 `false` = 押せない)。
+   *
+   * ⚠ **受け手(`seek-media`)と再生機が同じ詳細の中に居る面**(添付の説明)だけ `true` にする。
+   *   渡さなければ属性は 1 つも出ない = 書き出しの goldens は 1 バイトも動かない。
+   * ⚠ ワーカー越しの描画では `opts` の**正規化の 1 行**を通らないと黙って落ちる
+   *   (`renderMarkdown` の env 組み立て)。
+   */
+  readonly interactiveSeek?: boolean;
   /**
    * 🔴 **本文のバッククォートで囲んだ色コードの左に、色の見本を出すか**(#1224。既定 `false`)。
    *
@@ -6216,6 +6286,7 @@ export function renderMarkdown(
     interactiveTags: boolean;
     phoneLinks: boolean;
     interactiveDates: boolean;
+    interactiveSeek: boolean;
     colorSwatches: boolean;
     taskLineOffset: number;
     lineMap?: number[];
@@ -6249,6 +6320,8 @@ export function renderMarkdown(
     phoneLinks: opts.phoneLinks === true,
     // 🔴 本文の `@日付` を押せる字にするか(#1169)。既定は押せない
     interactiveDates: opts.interactiveDates === true,
+    // 🔴 文字起こしの行頭の時刻を押せる字にするか(#1232 段 b)。既定は押せない
+    interactiveSeek: opts.interactiveSeek === true,
     // 🔴 色コードの左に見本を出すか(#1224)。既定は出さない
     colorSwatches: opts.colorSwatches === true,
     // 🔴 剥がして描く面だけがずらす(既定 0)。理由は上の option の注記
