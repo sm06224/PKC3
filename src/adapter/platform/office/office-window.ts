@@ -78,7 +78,7 @@ export const OFFICE_CONFIRMING_NOTICE =
  */
 export function shadowFailedNotice(reason: string): string {
   const r = reason.trim();
-  return r === '' ? '編集の控えを書けませんでした' : `編集の控えを書けませんでした(${r})`;
+  return r === '' ? '保存していない編集を書き残せませんでした' : `保存していない編集を書き残せませんでした(${r})`;
 }
 
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */

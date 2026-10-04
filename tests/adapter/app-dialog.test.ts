@@ -20,6 +20,12 @@ import {
   pickSnippetInApp,
   resetAppDialogForTest,
 } from '../../src/adapter/ui/render/app-dialog';
+import {
+  SHADOW_DIALOG_TITLE,
+  SHADOW_OPEN_SAVED_LABEL,
+  SHADOW_OPEN_SHADOW_LABEL,
+  shadowDialogNote,
+} from '../../src/features/office/office-shadow';
 
 const q = <T extends HTMLElement>(sel: string): T =>
   document.querySelector<T>(sel) as T;
@@ -659,7 +665,7 @@ describe('日付の小窓の時刻欄(#865)', () => {
 /**
  * 🔴 **「Office で開く」で、保存していない編集の控えがあるとき**(#1228 段 2、裁定 Q1 = A)。
  *
- * ⚠ 字は裁定どおり(「直前の未保存版で開く」/「保存済みの版で開く」)。見るのは 4 つ:
+ * ⚠ 字は裁定どおり(「保存していない編集を戻して開く」/「保存済みの版で開く」)。見るのは 4 つ:
  * ①2 つの行がこの字・この順で並ぶ(先頭 = 既定 = 失う側ではない)②押した行がそのまま答え
  * ③`Escape` / 「やめる」は **どちらも選ばない**(`null`)④説明に「何分前」と「保存済みで開くと控えが消える」がある
  */
@@ -674,17 +680,19 @@ describe('Office の編集の控えの確認(#1228 段 2)', () => {
 
   it('🔴 2 つの行が裁定の字・この順で並び、先頭(控えの版)に焦点が当たる', async () => {
     const answered = pickOfficeShadowInApp(document.body, NOW - 12 * 60_000, NOW);
-    expect(rows().map((b) => b.textContent)).toEqual(['直前の未保存版で開く', '保存済みの版で開く']);
+    expect(rows().map((b) => b.textContent)).toEqual([SHADOW_OPEN_SHADOW_LABEL, SHADOW_OPEN_SAVED_LABEL]);
     expect(document.activeElement, '既定の押し所が控えの版でない(失う側が既定)').toBe(rows()[0]);
-    expect(q('[data-pkc-field="dialog-title"]').textContent).toBe('保存していない編集の控えがあります');
+    expect(q('[data-pkc-field="dialog-title"]').textContent).toBe(SHADOW_DIALOG_TITLE);
     cancelBtn().click();
     await answered;
   });
 
-  it('説明は 1 行: 何分前に残っているか / 保存済みで開くと控えが消えること(先に言う)', async () => {
+  it('説明は 1 行: 何分前に残っているか / 保存済みで開くと保存していない編集が消えること(先に言う)', async () => {
     const answered = pickOfficeShadowInApp(document.body, NOW - 12 * 60_000, NOW);
     const note = q('[data-pkc-field="pick-office-shadow-note"]').textContent ?? '';
-    expect(note).toBe('保存していない編集の控えが 12 分前に残っています。保存済みの版で開くと、この控えは消えます。');
+    expect(note).toBe(shadowDialogNote(NOW - 12 * 60_000, NOW));
+    expect(note).toContain('12 分前の、保存していない編集が残っています');
+    expect(note).toContain('保存済みの版で開くと、その編集は消えます');
     cancelBtn().click();
     await answered;
   });

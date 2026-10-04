@@ -142,6 +142,11 @@ describe('#135 ハングの検知(物差しは 2 本)', () => {
     expect(HANG_MESSAGE).toContain('タブ');
     expect(HANG_MESSAGE).toContain('開き直して');
   });
+
+  it('🔴 開き直したあと、打った分が戻せることを言う(.docx / .odt)。文言は言い切らず、対象の形式を添える', () => {
+    expect(HANG_MESSAGE.endsWith('(.docx / .odt は、打った分を次に開くときに戻せます)')).toBe(true);
+    expect(HANG_MESSAGE).not.toContain('控え');
+  });
 });
 
 /** 放送の口を模す。 */

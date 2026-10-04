@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createOfficeOpener, type OfficeTarget } from '../../src/adapter/platform/office/office-open';
 import { OfficeWindow } from '../../src/adapter/platform/office/office-window';
 import type { OfficeCapability } from '../../src/features/office/office-entry';
+import { SHADOW_GONE_NOTICE, SHADOW_OPENED_NOTICE } from '../../src/features/office/office-shadow';
 
 const OK: OfficeCapability = {
   crossOriginIsolated: true,
@@ -281,7 +282,7 @@ describe('main.ts の配線(#1228 原文 pin)', () => {
  *
  * 守る主張:
  * ① 控えが無い(`mayHave` が偽)ときは**今までどおり同期で開く**(ポップアップ遮断に当たらない・訊かない)
- * ② 在るときは**答えが出るまで窓を開かない**。「直前の未保存版で開く」→ 控えの bytes を `fromShadow` つきで渡す /
+ * ② 在るときは**答えが出るまで窓を開かない**。「保存していない編集を戻して開く」→ 控えの bytes を `fromShadow` つきで渡す /
  *    「保存済みの版で開く」→ **控えを消してから**開く / やめる → 何も開かず何も消さない
  * ③ 開いている窓へ頼むときは訊かない(その窓が自分で訊く)/ lid の無い添付は訊かない
  * ④ 確認が出せない・控えが消えた、でも開けなくしない
@@ -354,7 +355,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     expect(m.port.ask).not.toHaveBeenCalled();
   });
 
-  it('🔴 ② 「直前の未保存版で開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
+  it('🔴 ② 「保存していない編集を戻して開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
     const m = makeShadow({ answer: 'wait' });
     const done = settle(m.opener.open(NOTE));
     await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(1));
@@ -366,7 +367,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
     expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SHADOW, token: 'L1', fromShadow: true });
     expect(m.port.discard, '控えの版で開くのに控えを消した').not.toHaveBeenCalled();
-    expect(m.notes).toEqual(['保存していない編集の控えを Office で開きます。保存すると添付に入ります']);
+    expect(m.notes).toEqual([SHADOW_OPENED_NOTICE]);
   });
 
   it('🔴 ② 「保存済みの版で開く」: 控えを消してから開く(順番)/ 保存済みの bytes・fromShadow なし', async () => {
@@ -439,7 +440,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     await settle(m.opener.open(NOTE));
     await vi.waitFor(() => expect(m.officeWindow.provided).toHaveLength(1));
     expect(m.officeWindow.provided[0]).toMatchObject({ bytes: SAVED, fromShadow: false });
-    expect(m.notes).toEqual(['保存していない編集の控えを読めませんでした。保存済みの版で開きます']);
+    expect(m.notes).toEqual([SHADOW_GONE_NOTICE]);
   });
 
   it('確認のために探す・訊く口を省いた呼び側(deps.shadow なし)は今までと 1 バイトも変わらない', () => {

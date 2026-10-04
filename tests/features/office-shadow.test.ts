@@ -57,7 +57,7 @@ describe('棚の名前と控えの名前', () => {
 
 describe('画面の字', () => {
   it('🔴 裁定の字そのまま(押し所 2 つ)', () => {
-    expect(SHADOW_OPEN_SHADOW_LABEL).toBe('直前の未保存版で開く');
+    expect(SHADOW_OPEN_SHADOW_LABEL).toBe('保存していない編集を戻して開く');
     expect(SHADOW_OPEN_SAVED_LABEL).toBe('保存済みの版で開く');
   });
 
@@ -73,11 +73,31 @@ describe('画面の字', () => {
     expect(shadowAgo(now - 6 * 24 * 3_600_000, now)).toBe('6 日前');
   });
 
-  it('説明は 1 文 + 注意: 何分前か / 保存済みの版で開くと控えが消えること(先に言う)', () => {
+  it('説明: 何分前か / どちらで開いても保存するまで添付は変わらないこと / 保存済みの版で開くと編集が消えること(先に言う)', () => {
     const now = 1_800_000_000_000;
     const note = shadowDialogNote(now - 12 * 60_000, now);
-    expect(note).toBe('保存していない編集の控えが 12 分前に残っています。保存済みの版で開くと、この控えは消えます。');
+    expect(note).toBe(
+      '12 分前の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。',
+    );
+    expect(shadowDialogNote(now - 10_000, now), '1 分以内でも日本語として据わる').toBe(
+      '1 分以内の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。',
+    );
     expect(note.includes('\n'), '1 行').toBe(false);
+  });
+
+  it('🔴 この機能の画面の字に「控え」を使わない(マニュアルの「控え」= 入れ替える前の旧い中身 と別物を指してしまう)', () => {
+    const texts = [
+      SHADOW_DIALOG_TITLE,
+      SHADOW_OPEN_SHADOW_LABEL,
+      SHADOW_OPEN_SAVED_LABEL,
+      SHADOW_OPENED_NOTICE,
+      SHADOW_GONE_NOTICE,
+      shadowDialogNote(0, 1_800_000_000_000),
+    ];
+    for (const t of texts) expect(t, `「${t}」`).not.toContain('控え');
+    expect(SHADOW_DIALOG_TITLE).toBe('保存していない編集があります');
+    expect(SHADOW_OPENED_NOTICE).toBe('保存していない編集を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    expect(SHADOW_GONE_NOTICE).toBe('保存していない編集を読めませんでした。保存済みの版で開きます');
   });
 
   it('🔴 新しく出る字に、使わない語(造語・脅し語)を含めない', () => {

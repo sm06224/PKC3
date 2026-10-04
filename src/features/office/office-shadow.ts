@@ -9,7 +9,7 @@
  * ## 裁定(Gemini、#1228。変えない)
  *
  * - **Q1 = A** 次に「Office で開く」を押したとき、保存していない控えが在れば**必ず**確認を出す
- *   (「直前の未保存版で開く」/「保存済みの版で開く」。普通に閉じた場合も訊く)
+ *   (「保存していない編集を戻して開く」/「保存済みの版で開く」。普通に閉じた場合も訊く)
  * - **Q2 = A** 控えは「保存済みの版で開く」を選ぶか、新しい窓で普通に保存して添付へ入るまで残す。**上限 7 日**
  *
  * ⚠ **pure module**。browser API を持たない。
@@ -100,23 +100,23 @@ export function shadowAgo(at: number, now: number): string {
 }
 
 /** 確認の題名。 */
-export const SHADOW_DIALOG_TITLE = '保存していない編集の控えがあります';
+export const SHADOW_DIALOG_TITLE = '保存していない編集があります';
 
 /** 確認の押し所(裁定の字。⚠ そのまま使う)。 */
-export const SHADOW_OPEN_SHADOW_LABEL = '直前の未保存版で開く';
+export const SHADOW_OPEN_SHADOW_LABEL = '保存していない編集を戻して開く';
 export const SHADOW_OPEN_SAVED_LABEL = '保存済みの版で開く';
 
 /**
- * 確認の説明(1 行)。⚠ 「保存済みの版で開く」を選ぶと控えが消えることを**先に言う**
+ * 確認の説明(1 行)。⚠ 「保存済みの版で開く」を選ぶと保存していない編集が消えることを**先に言う**
  * (選んだ後に消えると分かるのでは、失う側を黙って選ばせることになる)。
  */
 export function shadowDialogNote(at: number, now: number): string {
-  return `保存していない編集の控えが ${shadowAgo(at, now)}に残っています。保存済みの版で開くと、この控えは消えます。`;
+  return `${shadowAgo(at, now)}の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。`;
 }
 
 /** 控えの版で開くと決めたとき、本体の状態の行に出す一言。 */
 export const SHADOW_OPENED_NOTICE =
-  '保存していない編集の控えを Office で開きます。保存すると添付に入ります';
+  '保存していない編集を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)';
 
 /** 控えの版を頼まれたのに、控えが読めなかった(消えた / 空)。保存済みの版で開く。 */
-export const SHADOW_GONE_NOTICE = '保存していない編集の控えを読めませんでした。保存済みの版で開きます';
+export const SHADOW_GONE_NOTICE = '保存していない編集を読めませんでした。保存済みの版で開きます';

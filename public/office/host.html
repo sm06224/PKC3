@@ -609,7 +609,7 @@
    * ⚠ 効かなくても開いた文書は使える(言うだけ)。判断は `office-unsaved.js` の `markModified`。
    */
   function markOpenedFromShadow() {
-    setStatus('保存していない編集の控えを開いています。保存すると添付に入ります');
+    setStatus('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     if (!window.PKC3OfficeUnsaved) return;
     window.PKC3OfficeUnsaved.markModified(window.__lo).then(function (ok) {
       if (ok !== true) console.warn('控えの版を「保存していない変更あり」にできませんでした');
@@ -1644,7 +1644,7 @@
     //    (窓は別 process なので生き残る)。だから**窓に預けて返させる**。
     //    ⚠ 空のまま保存が来たら「新規作成」として扱う(新しい添付ノートになる)。
     var docToken = '';
-    // 🔴 **保存していない編集の控え(影)から開いたか**(#1228 段 2)。本体が「直前の未保存版で開く」を選んだときだけ true。
+    // 🔴 **保存していない編集の控え(影)から開いたか**(#1228 段 2)。本体が「保存していない編集を戻して開く」を選んだときだけ true。
     //    ⚠ 開いた文書は LO にとって「保存済み」(`isModified` = 0)── 控えの版であることを user へ 1 度だけ言う
     var docFromShadow = false;
     // 🔴 **「挿入 → 画像」に並べる添付**(#146)。文書と**同じ封筒**で届く ──
