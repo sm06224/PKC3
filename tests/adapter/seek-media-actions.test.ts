@@ -117,28 +117,74 @@ describe('時刻を押す(seek-media)', () => {
    * 🔴 **黙らない** ── 再生機は非同期で差すので、押した瞬間に無いことがある。
    * 押しても何も起きないと、user は「壊れた」と読む。
    */
-  it('🔴 再生機がまだ無いときは、動かさず、状態の行に次にすることを出す', () => {
+  it('🔴 再生機がまだ無いときは、動かさず、画面の下に何が起きているかを出す', () => {
     const { detail, notices } = setup();
     detail('15000', null).click();
-    expect(notices(), '黙って終わった').toEqual(['再生の準備ができてから、もう一度押してください']);
+    expect(notices(), '黙って終わった').toEqual([
+      '再生機がまだ出ていません。添付が読めていないか、読み込みの途中です',
+    ]);
   });
 
-  it('🔴 再生機はあるが読み込みが始まっていない(readyState 0)ときも同じ ── 位置を書かない', () => {
+  /**
+   * 🔴 **読み込み前(readyState 0)でも、位置を書いて再生まで指示する** ── 1 稿目は「準備ができてから
+   * もう一度押して」と言って押した時刻を捨てていた(UX レビュー 2026-10-04)。
+   * ⚠ metadata が届いたとき位置が 0 へ戻る実装に備え、1 回だけ確かめ直す。戻っていなければ触らない。
+   */
+  it('🔴 読み込みが始まっていない(readyState 0)ときも、位置を書いて再生を指示し、2 度押させない', () => {
     const { detail, notices } = setup();
-    const m = fakeAudio({ readyState: 0 });
+    const m = fakeAudio({ readyState: 0, duration: NaN, seekable: 0 });
     detail('15000', m).click();
-    expect(m.time(), '読み込み前に位置を書いた').toBe(0);
-    expect(m.play).not.toHaveBeenCalled();
-    expect(notices()).toEqual(['再生の準備ができてから、もう一度押してください']);
+    expect(m.time(), '読み込み前に位置を書いていない').toBe(15);
+    expect(m.play, '再生を指示していない').toHaveBeenCalledTimes(1);
+    // ⚠ 読み込み前は duration も seekable も空 ── 「移れない」と早合点しない
+    expect(notices(), '読み込み前なのに言い訳が出た').toEqual([]);
+    // 実装差で 0 へ戻った → metadata が届いた時点で確かめ直す
+    m.el.currentTime = 0;
+    m.el.dispatchEvent(new Event('loadedmetadata'));
+    expect(m.time(), 'metadata が届いても位置を確かめ直していない').toBe(15);
+    // 2 度目の metadata では触らない(1 回だけ)
+    m.el.currentTime = 40;
+    m.el.dispatchEvent(new Event('loadedmetadata'));
+    expect(m.time(), '2 度目の metadata でも書き直した').toBe(40);
   });
 
-  it('🔴 長さの取れない録音(duration が Infinity)で移れないときは、黙らず言う', () => {
+  it('⚠ 読み込み済み(readyState 1 以上)なら metadata の確かめ直しは掛けない', () => {
+    const { detail } = setup();
+    const m = fakeAudio();
+    detail('15000', m).click();
+    m.el.currentTime = 3;
+    m.el.dispatchEvent(new Event('loadedmetadata'));
+    expect(m.time(), '読み込み済みなのに metadata で位置を戻した').toBe(3);
+  });
+
+  it('⚠ 位置は play() の前に書く(先頭の音が 1 瞬出てから飛ぶ形にしない)', () => {
+    const { detail } = setup();
+    let seen = -1;
+    const m = fakeAudio();
+    Object.defineProperty(m.el, 'play', {
+      value: vi.fn(() => {
+        seen = m.el.currentTime;
+        return Promise.resolve();
+      }),
+      configurable: true,
+    });
+    detail('15000', m).click();
+    expect(seen, 'play() の時点で位置がまだ動いていない').toBe(15);
+  });
+
+  it('🔴 長さの取れない録音(duration が Infinity)で移れないときは、先頭から鳴っていると言う', () => {
     const { detail, notices } = setup();
     const m = fakeAudio({ duration: Infinity, seekable: 0 });
     detail('15000', m).click();
+    expect(m.play, '移れなくても再生は始める').toHaveBeenCalledTimes(1);
     expect(notices(), '移れないのに黙った').toEqual([
-      'この録音は途中へ移れません。先頭から再生してください',
+      'この添付は途中へ移れないので、先頭から再生しています',
     ]);
+    // 🔑 長さが取れていれば(有限)、seekable が空でも言わない ── 言うのは「長さが取れない」組だけ
+    const finite = fakeAudio({ duration: 600, seekable: 0 });
+    const n0 = notices().length;
+    detail('15000', finite).click();
+    expect(notices().length, '長さが取れているのに言い訳が出た').toBe(n0);
     // 🔑 長さが取れなくても、移れるなら(seekable が在る)黙って動かす
     const ok = fakeAudio({ duration: Infinity, seekable: 1 });
     const before = notices().length;
@@ -168,6 +214,10 @@ describe('時刻を押す(seek-media)', () => {
     const m = fakeAudio();
     detail('-5', m).click();
     detail('abc', m).click();
+    // 属性そのものが無い押し所(描画の綴りが変わった日)でも、0 秒へ飛ばない
+    const bare = detail('0', m);
+    bare.removeAttribute('data-pkc-seek-ms');
+    bare.click();
     expect(m.time()).toBe(0);
     expect(m.play).not.toHaveBeenCalled();
     expect(notices()).toEqual([]);

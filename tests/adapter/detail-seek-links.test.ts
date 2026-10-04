@@ -88,9 +88,21 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
     expect(links[1]!.getAttribute('data-pkc-seek-ms')).toBe('20000');
   });
 
-  it('🔴 動画の添付の説明も同じ', async () => {
+  it('🔴 動画の添付の説明も同じ ── 押すと詳細が差した本物の <video> が動く', async () => {
     const { root } = await open('video/webm', 'rec.webm');
     expect(root.querySelectorAll('[data-pkc-action="seek-media"]')).toHaveLength(2);
+    // ⚠ 受け口が audio しか探さないと、動画では常に「再生機がまだ出ていません」になる
+    const video = root.querySelector<HTMLVideoElement>('video[data-pkc-field="attachment-media"]');
+    expect(video, '前提: 動画の再生機が差さっていない').not.toBeNull();
+    let t = 0;
+    Object.defineProperty(video!, 'currentTime', { get: () => t, set: (v: number) => (t = v), configurable: true });
+    Object.defineProperty(video!, 'readyState', { value: 4, configurable: true });
+    Object.defineProperty(video!, 'duration', { value: 600, configurable: true });
+    const play = vi.fn(() => Promise.resolve());
+    Object.defineProperty(video!, 'play', { value: play, configurable: true });
+    root.querySelectorAll<HTMLElement>('[data-pkc-action="seek-media"]')[0]!.click();
+    expect(t, '動画の再生機が 0:15 へ動いていない').toBe(15);
+    expect(play).toHaveBeenCalledTimes(1);
   });
 
   /**

@@ -5121,11 +5121,20 @@ function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | '
  *
  * ⚠ 再生機は**同じ詳細の中**から探す ── 説明の器(`data-pkc-prose`)の親が、再生機(`attachment-media`)の
  *   器と同じ(本体の詳細ペインも、横に留めた枠も)。**ページ全体からは探さない**(別の添付の再生機を動かす)。
- * ⚠ 再生機は**非同期で差す**ので、押した瞬間に無いことがある。**黙らない** ── 次にすることを言う。
- * ⚠ 動画 webm など長さが取れない録音は、**移れたか分からない**。移れない(`seekable` が空)ときも言う。
+ * ⚠ 再生機は**非同期で差す**ので、押した瞬間に無いことがある(添付の中身が読めなかったときは永久に来ない)。
+ *   **黙らない** ── 何が起きているかを言う。
+ * 🔑 **読み込み前(`readyState` 0)でも、位置を書いて再生まで指示する**(UX レビュー 2026-10-04)──
+ *   HTML 仕様では `HAVE_NOTHING` のときの `currentTime` の書込は「既定の再生開始位置」になり、metadata が
+ *   届いた時点でそこへ移る。⚠ 実装差で 0 へ戻る相手に備え、metadata が届いたら**位置を 1 回だけ確かめ直す**。
+ *   「準備ができてから、もう一度押して」と user に 2 度押させる形は、押した時刻を捨てていた(1 稿目)。
+ * ⚠ 動画 webm など長さが取れない録音は、**移れたか分からない**。移れない(`seekable` が空)ときは
+ *   先頭から鳴っているので、**そう言う**(「先頭から再生してください」は、もう鳴っている物を押させる字だった)。
+ *   ⚠ この判定は metadata が届いた後にだけ当てる(届く前は `duration` も `seekable` も空で、必ず真になる)。
  */
-const SEEK_NOT_READY = '再生の準備ができてから、もう一度押してください';
-const SEEK_UNSUPPORTED = 'この録音は途中へ移れません。先頭から再生してください';
+const SEEK_NO_PLAYER = '再生機がまだ出ていません。添付が読めていないか、読み込みの途中です';
+const SEEK_UNSUPPORTED = 'この添付は途中へ移れないので、先頭から再生しています';
+/** metadata が届いた後に位置を確かめ直すときの許容(秒)── seek は目標ぴったりには止まらない */
+const SEEK_RESEEK_TOLERANCE_S = 0.5;
 function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   const raw = target.getAttribute('data-pkc-seek-ms');
   const ms = Number(raw);
@@ -5138,12 +5147,23 @@ function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
     ?.parentElement?.querySelector<HTMLMediaElement>(
       'audio[data-pkc-field="attachment-media"], video[data-pkc-field="attachment-media"]',
     );
-  // 🔑 `readyState` 0 = 長さも分からない(まだ読み込み前)。位置を書いても、読み込みが終わると 0 に戻ることがある
-  if (!media || media.readyState < 1) {
-    notice(SEEK_NOT_READY);
+  if (!media) {
+    notice(SEEK_NO_PLAYER);
     return;
   }
-  media.currentTime = msToSeconds(ms);
+  const at = msToSeconds(ms);
+  const loaded = media.readyState >= 1;
+  // ⚠ 位置は `play()` の**前**に書く ── 後に書くと、先頭から鳴り始めた直後に飛ぶ(1 瞬だけ先頭の音が出る)
+  media.currentTime = at;
+  if (!loaded) {
+    media.addEventListener(
+      'loadedmetadata',
+      () => {
+        if (Math.abs(media.currentTime - at) > SEEK_RESEEK_TOLERANCE_S) media.currentTime = at;
+      },
+      { once: true },
+    );
+  }
   const played = media.play();
   if (played !== undefined && typeof played.catch === 'function') {
     // ⚠ `AbortError` は「押した直後にもう一度押した」= 次の押しが引き継ぐ。言わない
@@ -5151,7 +5171,7 @@ function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
       if (!(err instanceof DOMException && err.name === 'AbortError')) notice('再生を始められませんでした');
     });
   }
-  if (!Number.isFinite(media.duration) && media.seekable !== undefined && media.seekable.length === 0) {
+  if (loaded && !Number.isFinite(media.duration) && media.seekable !== undefined && media.seekable.length === 0) {
     notice(SEEK_UNSUPPORTED);
   }
 }
@@ -6188,6 +6208,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
   },
   /**
+   * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。⚠ 本文は書かない(門に載せない)。
+   * 🔑 鍵(Enter / Space)は `<span role="button" tabindex="0">` の既存の道に乗る(`onKeydown`)。
+   */
+  'seek-media': (dispatcher, target) => {
+    seekMedia(dispatcher, target);
+  },
+  /**
    * 🔴 **本文の `@2026-10-15` を押すと、その日のノートを開く**(#1169)。
    *
    * > user の物語:予定に `@日付` と書いた。その日に書き留めたノート(題名が日付)へ
@@ -6197,13 +6224,6 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 日付を押した時点では**作らない**(打ち間違いの日付でノートが増えない)── 無ければ
    *   画面の下に「○○のノートを作る」を出し、**それを押したとき**に作る(`create-date-note`)。
    */
-  /**
-   * 🔴 **文字起こしの行頭の時刻を押すと、その位置から再生する**(#1232 段 b)。⚠ 本文は書かない(門に載せない)。
-   * 🔑 鍵(Enter / Space)は `<span role="button" tabindex="0">` の既存の道に乗る(`onKeydown`)。
-   */
-  'seek-media': (dispatcher, target) => {
-    seekMedia(dispatcher, target);
-  },
   'open-date-note': (dispatcher, target, services, root) => {
     openDateNote(dispatcher, target.getAttribute('data-pkc-date'), root, services);
   },
