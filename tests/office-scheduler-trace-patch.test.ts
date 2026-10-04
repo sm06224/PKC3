@@ -191,7 +191,7 @@ const HARNESS = String.raw`
 int main()
 {
     int a = 0, b = 0, c = 0, d = 0;
-    int many[70];
+    int many[1030];
     std::fprintf(stderr, "== S1\n");
     // ~Task: 静的な Task は mpTask を消さない枝なので、そこでも控える
     pkc3_sched_note_task_freed(&a, &b, "StaticTimer", 1);
@@ -209,14 +209,14 @@ int main()
     pkc3_sched_note_data_freed(&d, &c, reinterpret_cast<const char*>(1));
     pkc3_sched_check("loop", 1, &d, nullptr);
     std::fprintf(stderr, "== S5\n");
-    // 環は 64 件: 70 件控えると、最初の 6 件が押し出される
-    for (int i = 0; i < 70; ++i)
+    // 環は 1024 件: 1030 件控えると、最初の 6 件が押し出される
+    for (int i = 0; i < 1030; ++i)
         pkc3_sched_note_task_freed(&many[i], nullptr, "M", 0);
     std::fprintf(stderr, "S5 first=%d sixth=%d seventh=%d last=%d\n",
                  pkc3_sched_check("ring", 1, nullptr, &many[0]),
                  pkc3_sched_check("ring", 1, nullptr, &many[5]),
                  pkc3_sched_check("ring", 1, nullptr, &many[6]),
-                 pkc3_sched_check("ring", 1, nullptr, &many[69]));
+                 pkc3_sched_check("ring", 1, nullptr, &many[1029]));
     std::fprintf(stderr, "== S6\n");
     {
         Pkc3SchedDepth d1;
@@ -326,7 +326,7 @@ describe('#117 の計装(scheduler)── helper が数えるべき物を数え�
     expect(hit).toMatch(/name=\? /);
   });
 
-  it('🔴 環は直近 64 件: 古い 6 件は押し出され、新しい物は残る', () => {
+  it('🔴 環は直近 1024 件: 古い 6 件は押し出され、新しい物は残る', () => {
     expect(S.S5!.find((l) => l.startsWith('S5 '))).toBe('S5 first=0 sixth=0 seventh=1 last=1');
   });
 

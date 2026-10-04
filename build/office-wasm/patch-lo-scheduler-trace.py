@@ -52,7 +52,7 @@
 | `REENTER depth=N` + `FRAME[i] ...` | `CallbackTaskScheduling` に**深さ 2 以上で入った** | **B**。`FRAME[1]` が「外側がどの task の `Invoke` の中で止まっているか」を名指しする |
 | `LEAVE a=N b=M` / `LEAVE-NON-LIFO a=N b=M` | 出口(深さ 2 以上、または LIFO でないとき)。`a` = 入ったときの深さ、`b` = 出る直前の生きている数。**違えば `LEAVE-NON-LIFO`** | **B**(再開が LIFO でない) |
 | `STACK-MISMATCH top=.. mostUrgent=..` | 実行後の pop で、スタックの頂が自分でない(release では assert が無い) | **B**(別の要素を外し、解放済みを指す) |
-| `USE-AFTER-FREE data=.. task=.. name=.. depth=.. where=.. via=data/task` | ループで握った `ImplSchedulerData` / `Task` が、**直近 64 件の解放の環**に在った | **A**(`via=task` かつ `static=1` なら「静的 Task の破棄で `mpTask` が残った」) |
+| `USE-AFTER-FREE data=.. task=.. name=.. depth=.. where=.. via=data/task` | ループで握った `ImplSchedulerData` / `Task` が、**直近 1024 件の解放の環**に在った | **A**(`via=task` かつ `static=1` なら「静的 Task の破棄で `mpTask` が残った」) |
 | `USE-AFTER-FREE ... where=stack / stack-top` | `mpSchedulerStack` / `mpSchedulerStackTop` が解放済み | **B**(pop の取り違えの結果) |
 | `STEP <call> data=.. task=.. depth=.. live=..` | 各 virtual 呼び出しの直前。**深さ 2 以上、または一度でも再入があった後** | どちらでもない(**どの呼び出しで落ちたか**を最後の 1 行で言う) |
 | `NULL-DEPS timer=.. defInst=..` | 入口で `mpSalTimer` / `mpDefInst` が null | どちらでもない(vtable を null の `this` から引く別の線) |
@@ -95,7 +95,7 @@ HELPER = r"""// PKC3-SCHED-HELPER-BEGIN
 #include <pthread.h>
 namespace
 {
-const int PKC3_SCHED_RING = 64;
+const int PKC3_SCHED_RING = 1024;
 const int PKC3_SCHED_FRAMES = 8;
 
 struct Pkc3SchedRec
@@ -147,7 +147,7 @@ __attribute__((format(printf, 1, 2))) void pkc3_sched_say(const char* fmt, ...)
 {
     // The whole log is capped; high-frequency marks also have their own budget below.
     int nLine = __atomic_add_fetch(&g_nPkc3SchedLine, 1, __ATOMIC_RELAXED);
-    if (nLine > 800)
+    if (nLine > 60000)
         return;
     char aMsg[300];
     std::va_list aArgs;
@@ -275,7 +275,7 @@ __attribute__((format(printf, 1, 2))) void pkc3_sched_say(const char* fmt, ...)
     pkc3_sched_unlock();
     if (!pVia)
         return false;
-    if (pkc3_sched_budget(1, 200))
+    if (pkc3_sched_budget(1, 2000))
     {
         pkc3_sched_say("USE-AFTER-FREE data=%p task=%p name=%s depth=%d where=%s via=%s static=%d "
                        "freed#=%d",
@@ -295,7 +295,7 @@ __attribute__((format(printf, 1, 2))) void pkc3_sched_say(const char* fmt, ...)
     f.pTask = pTask;
     f.pName = pName;
     if ((nMy >= 2 || __atomic_load_n(&g_nPkc3SchedReenter, __ATOMIC_RELAXED) > 0)
-        && pkc3_sched_budget(2, 300))
+        && pkc3_sched_budget(2, 30000))
         pkc3_sched_say("STEP %s data=%p task=%p name=%s depth=%d live=%d", pStep, pData, pTask,
                        pName ? pName : "?", nMy,
                        __atomic_load_n(&g_nPkc3SchedDepth, __ATOMIC_RELAXED));
@@ -309,7 +309,7 @@ __attribute__((format(printf, 1, 2))) void pkc3_sched_say(const char* fmt, ...)
     pkc3_sched_check("stack", nDepth, pStack, nullptr);
     pkc3_sched_check("stack-top", nDepth, pTop, nullptr);
     if ((nDepth >= 2 || __atomic_load_n(&g_nPkc3SchedReenter, __ATOMIC_RELAXED) > 0)
-        && pkc3_sched_budget(4, 100))
+        && pkc3_sched_budget(4, 4000))
         pkc3_sched_say("STATE timer=%p defInst=%p stack=%p top=%p depth=%d", pTimer, pInst, pStack,
                        pTop, nDepth);
 }
@@ -317,7 +317,7 @@ __attribute__((format(printf, 1, 2))) void pkc3_sched_say(const char* fmt, ...)
 // After Invoke(): the stack top must be our own entry (release builds have no assert for this).
 [[maybe_unused]] void pkc3_sched_stack_pop(int nMy, const void* pTop, const void* pMostUrgent)
 {
-    if (pTop != pMostUrgent && pkc3_sched_budget(3, 100))
+    if (pTop != pMostUrgent && pkc3_sched_budget(3, 1000))
     {
         pkc3_sched_say("STACK-MISMATCH top=%p mostUrgent=%p depth=%d live=%d", pTop, pMostUrgent,
                        nMy, __atomic_load_n(&g_nPkc3SchedDepth, __ATOMIC_RELAXED));
@@ -348,7 +348,7 @@ struct Pkc3SchedDepth
         if (nMy >= 2)
         {
             int nReenter = __atomic_add_fetch(&g_nPkc3SchedReenter, 1, __ATOMIC_RELAXED);
-            if (pkc3_sched_budget(0, 100))
+            if (pkc3_sched_budget(0, 4000))
             {
                 pkc3_sched_say("REENTER depth=%d reenters=%d", nMy, nReenter);
                 pkc3_sched_dump("REENTER");
@@ -359,7 +359,7 @@ struct Pkc3SchedDepth
     {
         int nLive = __atomic_load_n(&g_nPkc3SchedDepth, __ATOMIC_SEQ_CST);
         bool bNonLifo = nLive != nMy;
-        if ((nMy >= 2 || bNonLifo) && pkc3_sched_budget(0, 100))
+        if ((nMy >= 2 || bNonLifo) && pkc3_sched_budget(0, 4000))
             // a = depth at entry, b = live activations just before leaving.
             // (This is also what keeps the entry point used: an unused function is a warning.)
             pkc3_sched_trace(bNonLifo ? "LEAVE-NON-LIFO" : "LEAVE", nMy, nLive, 0);

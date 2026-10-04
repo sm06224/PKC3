@@ -568,7 +568,9 @@ async function main() {
     result.ok = result.reproduced || (result.controlsLanded && result.dialogsOpened > 0);
   } finally {
     await page?.screenshot({ path: join(SHOTS, '99-final.png') }).catch(() => {});
-    result.console = consoleAll.slice(-150);
+    // ⚠ 既定の 150 行は「落ちた瞬間の周り」を見るのに足りない回がある(#117 の計装は
+    //    数千行出る)── 要る回だけ PKC3_CONSOLE_KEEP で広げる。既定は変えない
+    result.console = consoleAll.slice(-Number(process.env.PKC3_CONSOLE_KEEP ?? 150));
     result.pageErrors = pageErrors.slice(0, 10);
     await browser.close().catch(() => {});
     server.close();
