@@ -254,8 +254,8 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
       new File(['3'], 'c.png', { type: 'image/png' }),
     ]);
-    // ⚠ 預かりが解けるのを待つ(錠は効果層の答えで解ける)
-    await new Promise((r) => setTimeout(r, 300));
+    // ⚠ 預かりが解けるのを待つ(錠は効果層の答えで解ける)── 3 本とも出るまで(#1319)
+    await until(() => appended(h.d).length >= 3);
 
     const lines = appended(h.d);
     expect(lines, '3 枚のうち何枚かが黙って消えた').toHaveLength(3);
@@ -444,7 +444,12 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
       new File(['3'], 'c.png', { type: 'image/png' }),
     ]);
-    await new Promise((r) => setTimeout(r, 400));
+    // 3 本とも本文に入り、3 行が 1 手として持たれるまで(#1319)
+    await until(
+      () =>
+        bodyNow().includes('![c.png](asset:') &&
+        (h.d.getState().lastAppend?.lines.filter((l) => l.includes('](asset:')).length ?? 0) >= 3,
+    );
 
     // 前提 ── 3 本とも本文に入っている(台が育っていなければここで止まる)
     const full = bodyNow();
@@ -467,7 +472,7 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
   it('⚠ C 対照群 ── 1 枚なら、その 1 行だけが 1 手', async () => {
     const { h, bodyNow } = growingNote();
     await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
-    await new Promise((r) => setTimeout(r, 200));
+    await until(() => bodyNow().includes('solo.png') && h.d.getState().lastAppend !== null); // #1319
     const last = h.d.getState().lastAppend;
     expect(last?.lines.filter((l) => l.includes('](asset:')), '1 枚なのに複数の参照を持つ').toHaveLength(1);
     expect(removeInsertedLines(bodyNow(), last!.lines)).toBe('# 買い物メモ');
@@ -484,10 +489,11 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['1'], 'a.png', { type: 'image/png' }),
       new File(['2'], 'b.png', { type: 'image/png' }),
     ]);
-    await new Promise((r) => setTimeout(r, 300));
+    // 2 枚目が入り、錠が解けるまで ── 錠が立っている間の追記は捨てられる(#1319)
+    await until(() => bodyNow().includes('![b.png](asset:') && h.d.getState().writeLock === null);
     expect(bodyNow(), '前提が崩れた').toContain('![b.png](asset:');
     h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足したメモ', heading: null, target: null });
-    await new Promise((r) => setTimeout(r, 200));
+    await until(() => h.d.getState().lastAppend?.lines.join('\n').includes('手で足したメモ') === true); // #1319
     const last = h.d.getState().lastAppend;
     expect(last?.lines.join('\n'), '手で足した追記が無い(前提が崩れた)').toContain('手で足したメモ');
     expect(last?.lines.join('\n'), '前の回の写真まで 1 手に継がれている').not.toContain('](asset:');
@@ -513,7 +519,8 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
       new File(['3'], 'c.png', { type: 'image/png' }),
     ]);
-    await new Promise((r) => setTimeout(r, 400));
+    // 件数の締めが出るまで(#1319)
+    await until(() => bodyNow().includes('![c.png](asset:') && notices.at(-1) === '3 件を本文に入れました(「c.png」ほか)');
     expect(bodyNow(), '前提が崩れた: 3 枚とも入っていない').toContain('![c.png](asset:');
     expect(notices.at(-1), '件数で締まっていない').toBe('3 件を本文に入れました(「c.png」ほか)');
     // 🔴 ファイル名は引用符で囲んである ── メッセージへ積むとき名前が残らない(#1017 C5)
@@ -547,7 +554,8 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
       new File(['333'], 'c.png', { type: 'image/png' }),
     ]);
-    await new Promise((r) => setTimeout(r, 300));
+    // 3 枚で締まるまで ── 途中の 2 件の締めは**その前**に出るので、後の not.toContain が読める(#1319)
+    await until(() => notices.at(-1) === '3 件を本文に入れました(「c.png」ほか)');
     expect(notices.at(-1), '前提が崩れた: 3 枚で締まっていない').toBe('3 件を本文に入れました(「c.png」ほか)');
     expect(notices, '数え終わる前に 2 件で締めた').not.toContain('2 件を本文に入れました(「b.png」ほか)');
   });
@@ -555,6 +563,9 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
   it('⚠ E 対照群 ── 1 枚なら件数で締めない(場所を言う 1 行のまま)', async () => {
     const { h } = growingNote();
     await attachFiles(h.d, h.deps, [new File(['1'], 'solo.png', { type: 'image/png' })]);
+    // 前半は述語(1 行が出るまで)。後半は固定 ── 「件数の締めが**後から**上書きしない」は
+    // 消えない負の主張なので、時間でしか言えない(#1319)
+    await until(() => h.d.getState().notice === '「solo.png」を本文のいちばん下に入れました');
     await new Promise((r) => setTimeout(r, 200));
     expect(h.d.getState().notice).toBe('「solo.png」を本文のいちばん下に入れました');
   });
@@ -914,7 +925,8 @@ describe('落とした所へ入れる(#684 段④)', () => {
     const events: string[] = [];
     h.d.onEvent((e) => events.push(e.type));
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
-    await new Promise((r) => setTimeout(r, 400));
+    // 預かりが解けて、末尾への追記が出るまで(#1319)
+    await until(() => appendsSeen.filter((a) => a.lid === 'n1').length >= 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ落ちていない').toHaveLength(1);
     expect(
       events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
@@ -965,7 +977,13 @@ describe('落とした所へ入れる(#684 段④)', () => {
     h.slow(200);
     h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '手で足した行', heading: null, target: null });
     await attachFiles(h.d, h.deps, [png('犬.png', 'b')], '', AFTER_MILK);
-    await new Promise((r) => setTimeout(r, 500));
+    // 2 枚目と手で足した行が disk へ入り、錠が解けるまで(#1319)
+    await until(
+      () =>
+        h.disk().includes('犬.png') &&
+        h.d.getState().writeLock === null &&
+        h.d.getState().lastAppend?.lines.some((l) => l.includes('犬.png')) === true,
+    );
     const last = h.d.getState().lastAppend;
     expect(last, '材料が無い').not.toBeNull();
     // 🔴 材料は**本当に消せる**もの ── 継いで連続しなくなっていたら `null` が返る
@@ -1043,7 +1061,12 @@ describe('落とした所へ入れる(#684 段④)', () => {
       await putBlob(key, blob);
     };
     await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
-    await new Promise((r) => setTimeout(r, 1500));
+    // 2 枚と別の追記が disk へ入り、錠が解けるまで(#1319)
+    await until(
+      () =>
+        ['猫.png', '犬.png', '別の追記'].every((t) => h.disk().includes(t)) &&
+        h.d.getState().writeLock === null,
+    );
     const rows = h.disk().split('\n');
     const cat = rows.findIndex((r) => r.includes('猫.png'));
     const dog = rows.findIndex((r) => r.includes('犬.png'));
@@ -1264,8 +1287,8 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     h.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: '卵 2 個', heading: null, target: null });
     expect(h.d.getState().writeLock?.lid, '台の前提: 錠が n1 に握られていない').toBe('n1');
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
-    // ⚠ 錠が解けるまで待つ(解けた瞬間に預かりが流れる)
-    await new Promise((r) => setTimeout(r, 300));
+    // ⚠ 錠が解けるまで待つ(解けた瞬間に預かりが流れる)── 留めた枠のノートへ入るまで(#1319)
+    await until(() => h.d.getState().writeLock === null && h.disks.n2!.includes('!['));
     expect(h.d.getState().writeLock, '台の前提: 錠がまだ解けていない').toBeNull();
     const rows = h.disks.n2!.split('\n');
     const i = rows.findIndex((r) => r.startsWith('!['));
