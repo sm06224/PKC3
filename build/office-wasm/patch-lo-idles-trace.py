@@ -271,11 +271,16 @@ QT_SRC = "vcl/qt5/QtInstance.cxx"
 #    🔑 手元で撮った stack とも噛み合う ── 詰まった回は **worker が 2 本**止まって
 #    おり(片方は #199 の `IdlesLockGuard`)、**ブラウザの主スレッドは暇**だった
 #    (`Debugger.pause` が頁の `alive` で止まった = wasm を実行していない)。
+# 🔴 **2026-10-04(#121 の直し `patch-lo-yield-proxy-guard.py` を足した日)に 2 つへ割った。**
+#    元は `SolarMutexGuard aGuard;` の**次の行**(`bool wasEvent = DispatchUserEvents(…);`)まで
+#    1 つの錨に含めていたが、その行は直しが書き換える行なので、**直しを先に当てると錨が
+#    外れる**(順不同で同一の出力、という約束が破れる)。⚠ 出力は**1 バイトも変えていない**:
+#    `yield:disp` の塊は「その行の直後」から「その行の後の `if`」の直前へ移っただけで、
+#    直しが無ければ同じ位置(= `DispatchUserEvents` の行と `if` の間)に入る。
 QT_IMPL_ANCHOR = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)
 {
     // Re-acquire the guard for user events when called via Q_EMIT ImplYieldSignal
     SolarMutexGuard aGuard;
-    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);
 """
 QT_IMPL_REPLACE = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurrentEvents)
 {
@@ -311,8 +316,12 @@ QT_IMPL_REPLACE = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurre
             pkc3_idles_trace("yield:guard", -1, -1, nPkc3Guard);
         }
     }
-    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);
-    {
+"""
+# ⚠ 2 つ目の錨は `DispatchUserEvents` の行の**次**の `if`(直しが書き換えない行)。
+QT_DISP_ANCHOR = """    if (!bHandleAllCurrentEvents && wasEvent)
+        return true;
+"""
+QT_DISP_REPLACE = """    {
         // ⚠ 配れたか(`PostUserEvent` で積まれたものが、ここで捌かれる)
         static int nPkc3Disp = 0;
         if (nPkc3Disp < 5)
@@ -321,6 +330,8 @@ QT_IMPL_REPLACE = """bool QtInstance::ImplYield(bool bWait, bool bHandleAllCurre
             pkc3_idles_trace("yield:disp", wasEvent ? 1 : 0, -1, nPkc3Disp);
         }
     }
+    if (!bHandleAllCurrentEvents && wasEvent)
+        return true;
 """
 QT_PROC_ANCHOR = """    SolarMutexReleaser aReleaser;
     QAbstractEventDispatcher* dispatcher = QAbstractEventDispatcher::instance(qApp->thread());
@@ -488,6 +499,7 @@ TARGETS = (
     (QT_SRC, QT_PROXY_ANCHOR, QT_PROXY_REPLACE),
     (QT_SRC, QT_WAIT_ANCHOR, QT_WAIT_REPLACE),
     (QT_SRC, QT_IMPL_ANCHOR, QT_IMPL_REPLACE),
+    (QT_SRC, QT_DISP_ANCHOR, QT_DISP_REPLACE),
     (QT_SRC, QT_PROC_ANCHOR, QT_PROC_REPLACE),
     (EVL_SRC, EVL_ANCHOR, EVL_REPLACE),
     (WIN_SRC, WIN_ANCHOR, WIN_REPLACE),
