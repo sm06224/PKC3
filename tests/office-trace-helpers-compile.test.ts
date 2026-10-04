@@ -81,13 +81,17 @@ describe('ヘルパーの当て先は、スコープ検査にも全部載って�
 });
 
 describe('計装のヘルパーは g++ で通る', () => {
-  it('🔴 3 本とも、pthread_t が「整数」でも「pointer」でも通り、走らせて 1 行出る', () => {
+  it('🔴 全部の計装が、pthread_t が「整数」でも「pointer」でも通り、走らせて 1 行出る', () => {
     const r = run();
     // ⚠ 空振り防止 ── 拾えた本数を主張として読む(0 本でも「全部通った」は真になる)
-    expect(r.out, '計装のヘルパーを 1 本も拾えていない').toMatch(/計装のヘルパー: [3-9]\d* 本/);
+    // 🔑 3 → 4(2026-10-04): 計装 patch を 1 本足した(`patch-lo-scheduler-trace.py`、#117)
+    expect(r.out, '計装のヘルパーを 4 本以上拾えていない').toMatch(/計装のヘルパー: [4-9]\d* 本/);
     // 🔑 事故そのものの形(整数)が、名指しで通っていること
     expect(r.out).toContain('patch-lo-idles-trace.py / 整数');
     expect(r.out).toContain('patch-lo-idles-trace.py / pointer');
+    // 新しい 1 本も、整数・pointer の両方で名指しに通っていること(#117)
+    expect(r.out).toContain('patch-lo-scheduler-trace.py / 整数');
+    expect(r.out).toContain('patch-lo-scheduler-trace.py / pointer');
     expect(r.code, r.out).toBe(0);
   }, COMPILE_MS);
 

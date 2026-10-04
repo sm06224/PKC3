@@ -127,6 +127,20 @@ SPECS = [
         ],
     ),
     (
+        "PKC3_SCHEDULER_TRACE",
+        "patch-lo-scheduler-trace.py",
+        "pkc3_sched_trace",
+        [
+            # 🔴 #117(2026-10-04)── ヘルパーを入れる所は `DropSchedulerData` の直前で、
+            #    使う所(`CallbackTaskScheduling` / ctor / dtor)はどれもその後ろ。
+            #    ⚠ ここを SPECS に足し忘れると、**この file だけ検査の外**になる。
+            (
+                "vcl/source/app/scheduler.cxx",
+                "static ImplSchedulerData* DropSchedulerData(",
+            ),
+        ],
+    ),
+    (
         "PKC3_IME_TRACE",
         "patch-lo-ime-trace.py",
         "pkc3_ime_trace",
