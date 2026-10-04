@@ -2828,6 +2828,13 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
  * 🔑 `<span role="button" tabindex="0">` ── 鍵(Enter / Space)は binder の「`tabindex="0"` の押せる物」の道に乗る。
  */
 const SEEK_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+/**
+ * 🔴 **時刻に載せると「0:15 から再生」と出る**(#1232 段 b、Gemini 裁定 Q4 = B)。
+ * ⚠ 字の形は**ここ 1 か所**(`title` = マウスを載せたときの小さな案内、`aria-label` = 読み上げ。
+ *   2 つが別の字になると、見える人と聞く人で案内が食い違う)。⚠ 見た目は 1 ドットも変えない。
+ *   `text` は表示の綴り(`m[1]` そのまま。`0:15` / `1:02:03`)。
+ */
+const seekLinkTitle = (text: string): string => `${text} から再生`;
 md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
   if ((state.env as { interactiveSeek?: boolean }).interactiveSeek !== true) return true;
   for (const token of state.tokens) {
@@ -2854,9 +2861,11 @@ md.core.ruler.after('inline', 'pkc-seek-link', function (state) {
         continue;
       }
       const tok = new state.Token('html_inline', '', 0);
+      const note = md.utils.escapeHtml(seekLinkTitle(m[1]!));
       tok.content =
         `<span class="pkc-seek-link" data-pkc-action="seek-media" ` +
-        `data-pkc-seek-ms="${ms}" role="button" tabindex="0">${md.utils.escapeHtml(m[1]!)}</span>`;
+        `data-pkc-seek-ms="${ms}" role="button" tabindex="0" title="${note}" aria-label="${note}">` +
+        `${md.utils.escapeHtml(m[1]!)}</span>`;
       out.push(tok);
       const tail = new state.Token('text', '', 0);
       tail.content = t.content.slice(m[1]!.length);

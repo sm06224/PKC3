@@ -782,6 +782,111 @@ ${(e as Error).message}`,
     .toBeGreaterThanOrEqual(2);
   // 🔑 押せる字は行頭の 2 つだけ(区切りの数と同じ)
   await expect(body.locator('[data-pkc-action="seek-media"]'), '行頭の時刻が行の数だけ出ていない').toHaveCount(2);
+  /**
+   * 🔴 #1232 段 b(Gemini 裁定 Q3 = B / Q4 = B): **音の再生機は、スクロールしても画面の上に貼り付いて見え続ける** /
+   * 時刻に載せると「0:15 から再生」が出る(`title`)。
+   * ⚠ 貼り付くのは `<audio>` ではなく**それを包む器**(`<audio>` の親は音の高さしか持たず、そこでは動けない)──
+   *   unit(happy-dom)は配置を計算しないので、実ブラウザで**本当に貼り付くか**をここで見る。
+   * 🔑 説明を長くする代わりに、説明の末尾へ 3000px の空き箱を足して**読む面の唯一の scroll 箱**
+   *   (`[data-pkc-region='detail']`)を 2000px 送る(録音の文字起こしは数行しかないので、そのままでは送れない)。
+   *   空き箱は**説明の中**(= 再生機の器の兄弟の中)に足す ── 貼り付きの範囲が「添付の面全体」であることも同時に見る。
+   * ⚠ 貼り付き先は**操作の帯**(`detail-bar-slot`・sticky)の**下**(帯の下に隠れない)── 箱の上端ではない。
+   *   帯の高さは `detail.ts` が測って渡す(2 段に折れる幅・留めた枠では 34px でない)── 測りは unit(`detail-seek-links`)が見る。
+   */
+  const stick = await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    const audio = box.querySelector<HTMLElement>('audio[data-pkc-field="attachment-media"]')!;
+    const link = box.querySelector<HTMLElement>('.pkc-seek-link')!;
+    const bar = box.querySelector<HTMLElement>('[data-pkc-field="detail-bar-slot"]')!;
+    const desc = box.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;
+    const spacer = document.createElement('div');
+    spacer.setAttribute('data-pkc-probe', 'sticky-spacer');
+    spacer.style.height = '3000px';
+    desc.append(spacer);
+    const top0 = { audio: audio.getBoundingClientRect().top, box: box.getBoundingClientRect().top };
+    box.scrollTop = 2000;
+    const r = {
+      scrolled: box.scrollTop,
+      boxTop: box.getBoundingClientRect().top,
+      barBottom: bar.getBoundingClientRect().bottom,
+      audioTop: audio.getBoundingClientRect().top,
+      linkTop: link.getBoundingClientRect().top,
+      title: link.getAttribute('title'),
+      label: link.getAttribute('aria-label'),
+      top0,
+    };
+    const wrap = audio.parentElement!;
+    const style = getComputedStyle(wrap);
+    return {
+      ...r,
+      wrapBackground: style.backgroundColor,
+      wrapZIndex: style.zIndex,
+      wrapBottom: wrap.getBoundingClientRect().bottom,
+    };
+  });
+  expect(stick.scrolled, '前提: 読む面が 1000px 以上送れていない(貼り付きを見る場面が作れていない)').toBeGreaterThan(1000);
+  expect(stick.linkTop, '対照群: 先頭の時刻が画面の上へ流れていない(= 送れていない)').toBeLessThan(stick.boxTop);
+  expect(
+    Math.abs(stick.audioTop - stick.barBottom),
+    `音の再生機が操作の帯の直下に貼り付いていない(再生機 top=${stick.audioTop} / 帯の下端=${stick.barBottom} / 送る前=${stick.top0.audio})`,
+  ).toBeLessThanOrEqual(2);
+  expect(stick.top0.audio, '前提: 送る前の再生機は貼り付き位置より下に居る(本文の先頭にある)').toBeGreaterThan(stick.barBottom + 2);
+  // 🔑 前提:帯が実在して高さを持つ(帯が 0px に潰れると「帯の下端 = 箱の上端」で上の assert が空振りで通る)
+  expect(stick.barBottom - stick.boxTop, '前提が崩れている: 操作の帯の高さが 20px 以下(帯が無い / 潰れている)').toBeGreaterThan(20);
+  // 🔴 貼り付いた器は**地を塗り、重なりの順を持つ**(塗らないと本文の字が再生機の下から透ける)
+  expect(stick.wrapBackground, '貼り付いた器の地が透明(本文が透ける)').not.toBe('rgba(0, 0, 0, 0)');
+  expect(stick.wrapZIndex, '貼り付いた器に z-index が無い(本文の押せる物の下に潜る)').not.toBe('auto');
+  // 🔴 紙には貼り付かない(`@media print` が解く)── 同じ器の配置を、画面と印刷で比べる(対照群 = 画面は sticky)
+  const previewPosition = (): Promise<string> =>
+    page.evaluate(
+      () => getComputedStyle(document.querySelector('audio[data-pkc-field="attachment-media"]')!.parentElement!).position,
+    );
+  expect(await previewPosition(), '画面で再生機の器が sticky でない').toBe('sticky');
+  await page.emulateMedia({ media: 'print' });
+  expect(await previewPosition(), '印刷でも再生機の器が貼り付いたまま').toBe('static');
+  await page.emulateMedia({ media: 'screen' });
+  /**
+   * 🔴 **目次から見出しへ飛んでも、見出しが帯 + 再生機の下に隠れない**(#1232 段 b)。
+   * ⚠ 直す前は帯(34px)の下にすら隠れていた(見出しの top が 0.4px ── 再生機と無関係の既存の欠陥)。
+   *   `scrollIntoView({ block: 'start' })` は貼り付いた物を知らないので、見出しの側が `scroll-margin-top` を持つ。
+   * 🔑 空き箱はまだ残っている(上)ので、見出しは先頭へ寄せられる余白がある。
+   */
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 0;
+  });
+  await clickReal(page, page.locator('[data-pkc-region="inspector"] [data-pkc-action="toc-jump"]').first());
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop), {
+      message: '目次を押しても読む面が動かない(見出しへ飛べていない)',
+    })
+    .toBeGreaterThan(50);
+  const jumped = await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    const head = box.querySelector<HTMLElement>('[data-pkc-field="detail-body"] :is(h1, h2, h3, h4, h5, h6)')!;
+    const wrap = box.querySelector('audio[data-pkc-field="attachment-media"]')!.parentElement!;
+    return { headTop: head.getBoundingClientRect().top, wrapBottom: wrap.getBoundingClientRect().bottom };
+  });
+  expect(
+    jumped.headTop,
+    `飛んだ見出しが貼り付いた再生機の下に隠れている(見出し top=${jumped.headTop} / 再生機の下端=${jumped.wrapBottom})`,
+  ).toBeGreaterThanOrEqual(jumped.wrapBottom - 1);
+  await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    box.querySelector('[data-pkc-probe="sticky-spacer"]')?.remove();
+    box.scrollTop = 0;
+  });
+  /**
+   * 🔴 **低い窓(高さ 480px 以下)では再生機を貼り付けない**(帯 + 再生機で上の 1/4 が埋まり、読む場所が残らない)。
+   * ⚠ 新しい起動は足さない ── 窓の高さだけ変えて、終わったら**元の高さへ戻す**(以降の道中が同じ窓で続く)。
+   */
+  const originalSize = page.viewportSize()!;
+  await page.setViewportSize({ width: originalSize.width, height: 400 });
+  expect(await previewPosition(), '高さ 400px の窓でも再生機が貼り付いたまま').toBe('static');
+  await page.setViewportSize(originalSize);
+  expect(await previewPosition(), '窓の高さを戻しても貼り付きが戻らない').toBe('sticky');
+  // 🔑 時刻の案内(マウスを載せたときの小さな字と、読み上げの字が同じ)
+  expect(stick.title, '時刻に「から再生」の案内が付いていない').toMatch(/^\d+:\d{2}(?::\d{2})? から再生$/);
+  expect(stick.label, '読み上げの字が案内と違う').toBe(stick.title);
 
   // ⑤ 消す → 取り込むボタンが戻り(双方向)、「文字にする」は再び案内になる
   await clickReal(page, settingsTab);

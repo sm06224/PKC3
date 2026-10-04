@@ -411,6 +411,19 @@ export class DetailRenderer {
   private readingTimeEl: HTMLElement | null = null;
   private barSlot: HTMLElement | null = null;
   /**
+   * 🔴 **操作の帯の高さを `--pkc-detail-bar-h` へ下ろす見張り**(#1232 段 b)。
+   * 音の再生機は帯の**直下**に貼り付く(`app.css` の `attachment-preview`)── 帯は幅が狭いと 2 段に折れ
+   * (実測 1600px の横 2 枠で 53px)、留めた枠では空(0px)なので、**固定の 34px では帯に重なる / 隙間が空く**。
+   * ⚠ 骨組みを捨てるとき `disconnect` する(`dropSkeleton`)。
+   */
+  private barHeightWatch: ResizeObserver | null = null;
+  /**
+   * 🔴 **貼り付いた音の再生機の高さを `--pkc-sticky-player-h` へ下ろす見張り**(#1232 段 b)。
+   * 目次などで見出しへ飛ぶとき、見出しが帯 + 再生機の**下**に来るよう `scroll-margin-top` が使う
+   * (`app.css`)。⚠ 再生機の無いノート・描き直しでは外す(`disposeLends`)── 残すと次のノートの余白になる。
+   */
+  private playerHeightWatch: ResizeObserver | null = null;
+  /**
    * 操作の器の**形**(2026-08-07)。形が同じなら node を使い回す ──
    * 詳細は `renderBar` の注記。⚠ 骨組みを作り直したら `null` へ戻す
    * (古い node を指したまま「形は同じ」と判断すると、外れた node を patch する)。
@@ -699,6 +712,9 @@ export class DetailRenderer {
     this.quickTocHandle?.dispose();
     this.quickTocHandle = null;
     this.disposeSearchJump();
+    this.playerHeightWatch?.disconnect();
+    this.playerHeightWatch = null;
+    this.region.style.removeProperty('--pkc-sticky-player-h');
   }
 
   /**
@@ -721,12 +737,38 @@ export class DetailRenderer {
     this.lends.prune();
   }
 
+  /**
+   * 操作の帯の高さを、器(`this.region`)の `--pkc-detail-bar-h` へ書く(#1232 段 b)。
+   * ⚠ 同じ値なら書かない(書くと見張りがまた鳴って回り続ける ── `read-columns.ts` と同じ作法)。
+   * ⚠ `ResizeObserver` を持たない環境(単体の happy-dom)では何もしない ── CSS 側に既定(34px)がある。
+   */
+  private watchBarHeight(bar: HTMLElement): void {
+    this.barHeightWatch?.disconnect();
+    this.barHeightWatch = this.watchHeight(bar, '--pkc-detail-bar-h');
+  }
+
+  /** 要素の高さを、器(`this.region`)のカスタムプロパティへ書き続ける見張りを返す(無い環境では `null`)。 */
+  private watchHeight(el: HTMLElement, prop: string): ResizeObserver | null {
+    if (typeof ResizeObserver !== 'function') return null;
+    const write = (): void => {
+      const value = `${Math.ceil(el.getBoundingClientRect().height)}px`;
+      if (this.region.style.getPropertyValue(prop) !== value) {
+        this.region.style.setProperty(prop, value);
+      }
+    };
+    const watch = new ResizeObserver(write);
+    watch.observe(el);
+    return watch;
+  }
+
   /** 骨組みを捨てる(次の描画で組み直す)。 */
   private dropSkeleton(): void {
     this.skeletonLid = null;
     this.titleEl = null;
     this.readingTimeEl = null;
     this.barSlot = null;
+    this.barHeightWatch?.disconnect();
+    this.barHeightWatch = null;
     this.panelSlot = null;
     this.noticeSlot = null;
     this.overviewSlot = null;
@@ -1205,6 +1247,7 @@ export class DetailRenderer {
       this.readingTimeEl.hidden = true;
       this.barSlot = document.createElement('div');
       this.barSlot.setAttribute('data-pkc-field', this.field('detail-bar-slot'));
+      this.watchBarHeight(this.barSlot);
       this.panelSlot = document.createElement('div');
       this.panelSlot.setAttribute('data-pkc-field', this.field('detail-panel-slot'));
       // ⚠ 確認の帯は**本文の器の外**に置く ── 中に入れると `applyBlocks` の
@@ -3507,6 +3550,11 @@ export class DetailRenderer {
         media.controls = true;
         media.src = lent.url;
         host.append(media);
+        // 🔴 音だけ貼り付く(`app.css`)── その高さを、見出しへ飛ぶ余白へ渡す(#1232 段 b)
+        if (kind === 'audio') {
+          this.playerHeightWatch?.disconnect();
+          this.playerHeightWatch = this.watchHeight(host, '--pkc-sticky-player-h');
+        }
         // 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)── 片方だけ整うと、
         //   同じ音が場所で違って聞こえる
         appVoiceBoostRouter.watch(media);

@@ -4763,6 +4763,43 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/**
+ * 🔴 **音の再生機は、スクロールしても画面の上に貼り付いて見え続ける**(#1232 段 b、Gemini 裁定 Q3 = B)。
+ *
+ * > user の物語:長い文字起こしを読み進めながら、時刻を押して**その場の音**を聞き直す。
+ * > 再生機は本文の先頭に在るので、読み進めると画面の外へ流れ、止める・戻すたびに先頭まで戻っていた。
+ *
+ * ⚠ **貼り付けるのは `<audio>` ではなく、それを包む `attachment-preview` の器**である ──
+ *   `position: sticky` は**自分の親の箱の中でしか**動けない。`<audio>` の親はこの器 1 つで、
+ *   器は音の高さしか持たないので、`<audio>` 自身に付けても**親の外へ出られず貼り付かない**
+ *   (器の親 = 添付の面なら、説明の末尾まで追従する)。
+ * ⚠ **音だけ**(`> audio`)── 動画は大きく、貼ると本文を押し潰す。画像・PDF も触らない。
+ * 🔑 `top` は**操作の帯**(`detail-bar-slot`・sticky)の高さ ── 同じ `top: 0` だと帯の下に隠れる。
+ *   高さは `detail.ts` が測って `--pkc-detail-bar-h` に下ろす(帯は幅が狭いと 2 段に折れる ── 実測 53px /
+ *   留めた枠では空で 0px)。⚠ 既定の 34px は測る前・測れない環境の値。⚠ 地を塗る(本文の字が透けると読めない)。
+ * ⚠ **紙には貼らない**(file 末尾の `@media print` が `static` に戻す)。
+ * 🔴 `[data-pkc-field]` 起点 ── `.pkc-md-rendered` 起点ではない(あちらは書き出しへ焼かれる。
+ *   この器は再生機が居る読む面だけのもので、書き出しには 1 バイトも出さない)。
+ */
+[data-pkc-field='attachment-preview']:has(> audio[data-pkc-field='attachment-media']) {
+  position: sticky;
+  top: var(--pkc-detail-bar-h, 34px);
+  z-index: 1;
+  background: var(--surface);
+}
+/**
+ * 🔴 **見出しへ飛んだとき、見出しが貼り付いた物(操作の帯 + 音の再生機)の下に隠れない**(#1232 段 b)。
+ *
+ * ⚠ 直す前は、目次から飛ぶと見出しが**操作の帯の下に隠れていた**(実測:帯 34px に対し見出しの top が
+ *   0.4px。再生機の貼り付きとは無関係の**既存の欠陥**で、全ノートに起きていた)。`scrollIntoView({ block: 'start' })`
+ *   は貼り付いた物を知らないので、**目的の要素の側が余白を持つ**(`scroll-margin-top`)。
+ * 🔑 帯の高さは `--pkc-detail-bar-h`、再生機の高さは `--pkc-sticky-player-h`(どちらも `detail.ts` が測って
+ *   書く。再生機の無いノートでは 0)。⚠ 起点は `[data-pkc-prose]` ── `.pkc-md-rendered` 起点は書き出しへ焼かれる。
+ * ⚠ 低い窓では再生機を貼らない(下の `@media (max-height: 30rem)`)ので、余白も帯だけにする。
+ */
+[data-pkc-prose] :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: calc(var(--pkc-detail-bar-h, 34px) + var(--pkc-sticky-player-h, 0px));
+}
 
 /* 🔴 **本文の中の再生機**(#413 段②)。⚠ 添付の面(`attachment-media`)とは
  * **別の名前**にしている ── あちらは「その添付だけを見る面」、こちらは
@@ -9087,6 +9124,10 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
+  /* 🔴 音の再生機の貼り付きは紙には要らない(#1232 段 b)── 解かないと、紙の送りで頭に重なる */
+  [data-pkc-field='attachment-preview']:has(> audio[data-pkc-field='attachment-media']) {
+    position: static;
+  }
   /* ① 器をほどく ── grid と 100% とスクロール箱。ここが本題である */
   [data-pkc-slot='root'],
   [data-pkc-region='shell'] {
@@ -10071,8 +10112,18 @@ h6:hover > .pkc-heading-anchor,
   font-weight: 700;
 }
 
-
-
-
-
-
+/**
+ * 🔴 **低い窓(高さ 30rem 以下 ≒ 標準の文字で 480 ピクセル)では再生機を貼り付けない**(#1232 段 b)。
+ * 帯 + 再生機で上の 1/4 以上が埋まり、読む場所が残らない(高さ 400 ピクセルで帯 34 + 再生機 約 60 = 約 24%)。
+ * ⚠ **file の末尾に置く** ── 先頭側の `@media` で切って画面の規則を読む検査(`announce.test.ts` など)が、
+ *   途中の `@media` から後ろの規則を読めなくなる。⚠ 幅の px は CSS に書かない規律(`phone-layout.test.ts`)に
+ *   当たらないよう、高さは rem で書く。
+ */
+@media (max-height: 30rem) {
+  [data-pkc-field='attachment-preview']:has(> audio[data-pkc-field='attachment-media']) {
+    position: static;
+  }
+  [data-pkc-prose] :is(h1, h2, h3, h4, h5, h6) {
+    scroll-margin-top: var(--pkc-detail-bar-h, 34px);
+  }
+}
