@@ -567,6 +567,44 @@ Qt の `EM_JS` / `EM_ASYNC_JS` の本文は **焼いた `soffice.js` に字の�
 **門が閉じた回(`sp-defer`)が 0 件**なので、v3 は trap の経路を 1 度も踏んでいない。
 🔑 **統計で言えるのは「普段の経路を変えない」まで**。「止めた」と書くには、門が閉じた回が 1 件以上要る。
 
+### 🔑 **Emscripten の library JS も、焼いた `soffice.js` を置換して直せる**(2026-10-05、#1344 (a')。PR #1358)
+
+上の節は Qt の `EM_JS` だが、**LO にも Qt にも無い関数**(`_emscripten_promise_await` = Emscripten の `src/lib/libpromise.js`)も同じ ──
+`--js-library` で上書きするには LO の link 行へ手を入れる必要が在り、`--post-js` では `wasmImports` に束ねられた後になる。
+**焼けた `soffice.js` の字を置換する**のがいちばん確実で、手元で検めた置換(121q)と workflow の置換が**同じ script**になる。
+道具は `build/office-wasm/patch-soffice-js-promise-await.mjs`(錨 = minify 後の字 1 字違わず / 印 `pkc3PaGuard`)。
+
+🔴 **当てる先は「配る一式」である**(`workdir/installation/LibreOffice/emscripten/soffice.js`。zip はここから作る)。
+`instdir/program/soffice.js` を直しても **`make instsetoo_native` が集め直す**ので、集める前に当てると素通りする ──
+1 稿目はまさにその順で書いてあり、着地前レビューが拾った(CLAUDE.md §8「tripwire は直した結果が届いたかに置く」の実例)。
+🔑 **集めた後に当てて、同じ file で印の出現回数を数える**(minify 後は 1 行なので `grep -c` では数えられない ── `grep -o | wc -l`)。
+
+🔴 **錨が無いときだけでなく、`stackSave` の定義が無いときも落とす**。置換後の JS は `typeof stackSave` で保険を掛けるが、
+それは**実行時に名前が届かなかったとき**の保険であって、焼いた物の検品ではない ── 検品で素通りさせると「門が黙って無くなる」形になる。
+`var stackSave=()=>_emscripten_stack_get_current();` を script が要求し、fixture にも同じ 1 行を実物から写してある。
+
+🔑 **置換は「足すだけ」にして、それを test で pin する**(足した字を抜くと錨そのものに戻る / `out.replace(REPLACEMENT, ANCHOR) === ORIG`)。
+元の関数の動きを 1 字も変えていないことが、「対照 = 原文」の主張の土台になる。
+
+#### 🔑 `PKC3-UEV pa-defer` の読み方
+
+| 行 | 意味 |
+|---|---|
+| `pa-defer n=1 sp=… want=… dir=above` | proxy の結果が返ったが、**上に別の計算の frame が生きている**(sp が控えより低い)ので起こさなかった。**門が効いた回** |
+| `pa-defer n=250 … dir=above` | 約 1 秒(250 周)戻らない。以後 100 ms に間引く。⚠ 1 秒を超えて続くなら、上の計算が終わらない(メニューが開いたまま等)── 異常ではない |
+| `pa-defer … dir=unwound` | sp が控えより**高い**= 自分の frame がもう無い。起こさない。⚠ これが出たら**別の欠陥**(v3 の `sp-defer dir=unwound` と同じ向き)── 門は守るが原因は直っていない |
+| `pa-defer end n=N` | 上が返って起こした。`n=1` の対が 1 つ在ること |
+
+🔑 **「止めた」と書けるのは `pa-defer n=1` → `end` の対が 1 件以上在り、その回の faults が 0 のとき**(121q: 18 round 中 3 round で対、faults 0)。
+対が 0 件の緑は「経路を踏んでいない」でしかない(上の節と同じ)。
+
+#### 🔴 競合の再現は、**構成を変えずに回す**(2026-10-05、腕 B2f の空振り)
+
+競合(proxy の待ちの窓に右クリックが入る)を**狙う腕**(`B2f`: `Control+a` の 150 ms 後に右クリック)を足したが、対照・門とも **10/10 で窓に当たらなかった**。
+再現したのは**最初に trap が出たのと同じ構成**(4 腕 × 3 round、`C,B2,B2w,B2k`)を**そのまま**回した回(121r: trace で経路を確定 / 121q: 門が待った)。
+🔑 競合は「時刻しだい」なので、**狙って当てるより、当たった構成を変えずに回数を足す**ほうが安い。
+⚠ 構成を変えて 0 件になった回を「直った」と読まない ── 変えたのは窓のほうである。
+
 ### 🔑 trace の ring は「腕の頭」を流す ── 見たい瞬間が ring の外に出ることがある(2026-10-05)
 
 `clipTrace` は **直近 3000 行**。メニューを開くと LO が **post ~180 → dispatch ~196** を一度に出すので、trap round の ring は

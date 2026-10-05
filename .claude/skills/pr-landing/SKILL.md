@@ -188,6 +188,14 @@ tests/adapter/…test.ts(78,65): error TS2353:
 ⚠ これは §「1 件直したらその command をもう一度回す」の**別の面**である
 ── あちらは「同じ command の 2 件目」、こちらは「**別の command が見ていない次元**」。
 
+### 🔴 `tests/fixtures/**` に **`.js` / `.ts` の断片**を置くと、`npm run lint` がそれを構文解析して落ちる(2026-10-05、PR #1358)
+
+Emscripten の minify 後の字を**断片のまま**(`…HEAPU32)[ptr+4>>>2>>>0]=value};var …`)fixture に置き、file-targeted の
+`npx eslint <触った file>` だけ回して push した → CI の `verify` が `tests/fixtures/emscripten/*.js` の Parsing error で赤。
+🔑 **字のまま切り出した物は `.txt` にする**(構文として完全でない物を `.js` と名乗らせない)。
+🔑 **push の前は `npm run lint`(全量)を回す** ── file-targeted は **触っていない file**(fixture / 生成物)を見ない。
+⚠ これは §「`npm test` も `npm run lint` も型を見ていない」の隣の穴 ── あちらは「別の command」、こちらは「同じ command の**範囲**」。
+
 ## 3. PR 本文に書くこと
 
 - **何が起きていたか(実測)** ── 直す前の値・件数。⚠ 「改善した」ではなく**数字**
