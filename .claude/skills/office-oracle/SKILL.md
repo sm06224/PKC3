@@ -498,8 +498,39 @@ Qt の cache 鍵は **`hashFiles('build/office-wasm/qt-wasm-configure.args', 'bu
 `patch-lo-*.py` は **LO の** patch なので Qt の cache は当たったまま(23〜35 分)。
 🔑 だから **Qt 側の直しは 1 焼きに束ねる** ── 2 本を別々に焼くと **Qt を 2 回建てる**。
 ⚠ 束ねる前に `qtbase-patch-*.py` の既存の名前を `ls` する(足した file も**変えた file も**鍵を動かす)。
+
+🔴 **`ccache-lo-qt6-…` は LO の compile cache である ── 同じ hash を含むので、Qt の patch を触ると
+LO 側もほぼ全量 compile になる**(2026-10-05 実測、#1344)。上の「Qt を焼き直す」は **Qt だけではない**。
+観測点:run 37267668276(main 4e57bd4f、`qtbase-patch-asyncify-nested.py` を足した直後)──
+Qt host 15 分 + Qt wasm 11 分 + **LO make 3 時間 37 分**(06:00:56Z → 09:38:22Z)、**合計 4 時間 15 分**。
+`ccache を復元` step は **1 秒で終わっている**(= 何も復元していない)。
+鍵は `office-wasm-build.yml` 255 行
+`ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-${{ github.sha }}`、
+`restore-keys` も**同じ hash までしか遡らない**(`CCACHE_DEPEND` の罠のため**意図的** ── 同 file 240〜247 行のコメント)。
+🔑 **qtbase patch の変更は 1 回の焼きに束ねる**(v1 → v2 のように 2 回焼くと **8 時間半**)。
+🔑 見込みは **「Qt 26 分 + LO 3.6 時間」**と書く(Qt だけの 26 分と書くと、待つ時間を桁で外す)。
 ⚠ 上の 2026-10-04 の「flag 全 OFF の焼きが 3h49m」は、この鍵が動いた(`qtbase-patch-backspace` などの追加)ことが
 **原因だった可能性**があるが、**未確認**(推測。その run の cache 復元が一致だったかを見れば決着する)。
+
+### 🔴 JSPI の suspend は **LIFO で起こす** ── Emscripten の C stack は 1 本(2026-10-05、#1344 v1 → v2)
+
+1. **Emscripten 4.0.10 `src/lib/libasync.js` の JSPI(`ASYNCIFY=2`)は、export を
+   `Asyncify.makeAsyncFunction` = `WebAssembly.promising(original)` で包むだけ**で、C の shadow stack pointer の
+   **保存も復元もしない**(2026-10-05 に raw.githubusercontent.com から読んだ)。
+   🔴 だから **suspend した stack が 2 本在るとき、外側を先に起こすと、外側の関数の return が sp を内側の frame より
+   上へ戻し、以後の呼び出しが内側の frame を踏む**。起こす順は **LIFO**(内側が JS へ戻ってから外側)でなければならない。
+2. 🔑 **壊れ方の署名**:`RuntimeError: operation does not support unaligned accesses`(V8 の unaligned atomic の trap)が、
+   **壊れた object の atomic store を踏む所**(#1344 では `QEventLoop::exit(int)` ← `QMenu::hideEvent`)で出る。
+   **その数 ms 前に外側が返っている**(`PKC3-UEV wait-out`)。
+   この署名を見たら **「壊れた番地 = LIFO 違反」を第一容疑**にする。観測点:run 37267668276 の probe
+   (scratchpad 121k)、B2 / B2w の **9 回全部**。
+3. ⚠ **未検証の穴**(着地前レビューの指摘):Qt の `qt_asyncify_suspend_js` **以外**の Suspending import
+   (LO 側の `emscripten_sleep` / 別の `EM_ASYNC_JS`)で内側が suspend すると、**Qt 側の stack 管理の外**になる。
+   🔑 v2 の焼きで**同じ署名が再発したら、これが第一容疑**。
+4. 経緯と置き場:PR #1350(v1。全部起こす)→ PR #1353(v2。LIFO)。patch は
+   `build/office-wasm/qtbase-patch-asyncify-nested.py`、test は `tests/office-asyncify-nested-patch.test.ts`
+   (偽 `setTimeout` の台に**原本 / v1 / v2** を同じ場面で回す形 ── **対照群を 2 つ**持つ)。
+   ⚠ 変異試験で**普段の経路**を通していなかった件は `mutation-testing` §3.15。
 
 ### 🔑 Qt / LO の上流 source は **raw.githubusercontent.com から取れる**(2026-10-05 実測)
 
