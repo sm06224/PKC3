@@ -314,6 +314,18 @@ FIXES = [
         "ImplHandleExtTextInput の待ちの分岐",
         "#include <cstdio> // PKC3-IMENOWAIT",
     ),
+    # 🔴 #1344(2026-10-05)── `patch-lo-popup-wake.py`。`ShowNativePopupMenu` の `exec` の前に 1 か所
+    #    (局所 struct)。⚠ 同じ file を menu-trace / uev-trace も触る(計装は SPECS 側)が、この検査は
+    #    **この直し 1 本だけ**を原文へ当てる(足した行が原文と同じスコープに在るか)。
+    (
+        "patch-lo-popup-wake.py",
+        "vcl/qt5/QtMenu.cxx",
+        # 原文: `exec` の直前の行(4 字下げ = 関数本体の `{` の中。足す局所 struct も同じ `{` の中に入る)
+        "    const QRect aRect = toQRect(aFloatRect, 1 / pFrame->devicePixelRatioF());\n",
+        "struct Pkc3PopupWake // PKC3-POPUPWAKE",
+        "ShowNativePopupMenu の exec の後始末",
+        "#include <cstdio> // PKC3-POPUPWAKE",
+    ),
 ]
 
 print("=== 本番(ヘルパーを持たない直し: 足した行が原文と同じスコープに在るか)")

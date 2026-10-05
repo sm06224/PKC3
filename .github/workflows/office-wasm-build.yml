@@ -628,7 +628,15 @@ jobs:
           #    ⚠ 取り下げた `patch-lo-yield-proxy-guard.py`(Yield 全体を締める形)は、読み込み中の入れ子 Yield まで
           #    止めて文書が開かなくなった。⚠ `patch-lo-idles-trace.py` と同じ file(`winproc.cxx`)を触るが
           #    **錨は重ならない**(両順で出力が同一)。
-          test "$n" -eq 24
+          # 🔴 24 → 25(2026-10-05)。`patch-lo-popup-wake.py`(#1344 の**直し**)。
+          #    popup(`QMenu::exec`)が返った後、round が終わるまで 13〜16 秒 user event が 1 件も dispatch
+          #    されない(判別焼き run 37256418166。`PostUserEvent` → `wakeUp()` は呼ばれているのに drain が
+          #    起きない)。外側の `processEvents(WaitForMoreEvents)` が `wakeUp()` の印を消費済みのまま待ちへ
+          #    戻る、という読み(未確定)。Emscripten の `ShowNativePopupMenu` が出る時に `QTimer::singleShot(0)`
+          #    で本物の Qt の event を 1 つ置く(⚠ **既定で当たる**。gate なし)。
+          #    ⚠ `patch-lo-menu-trace.py` / `patch-lo-uev-trace.py` と同じ file(`QtMenu.cxx`)を触るが
+          #    **錨の区間は 1 バイトも重ならない**(3 本 6 通りの順で出力が同一)。
+          test "$n" -eq 25
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

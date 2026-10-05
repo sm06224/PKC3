@@ -1,5 +1,37 @@
-// 上流 LibreOffice(sha 0c031979)`vcl/qt5/QtMenu.cxx` の抜粋(原文のまま。行 685〜702 / 932〜949)。
-// `patch-lo-menu-trace.py` の錨が当たることを見る(build はしない)。
+// 上流 LibreOffice(sha 0c031979)`vcl/qt5/QtMenu.cxx` の抜粋(原文のまま。行 10〜40 / 685〜702 / 932〜949)。
+// `patch-lo-menu-trace.py` / `patch-lo-uev-trace.py` / `patch-lo-popup-wake.py` の錨が当たることを見る(build はしない)。
+// 行 10〜40 は #1344 で足した(popup-wake の include の錨 `#include <sal/config.h>` が file の頭に在る)。
+#include <sal/config.h>
+
+#include <QtCustomStyle.hxx>
+#include <QtFrame.hxx>
+#include <QtInstance.hxx>
+#include <QtMainWindow.hxx>
+#include <QtMenu.hxx>
+#include <QtMenu.moc>
+#include <QtTools.hxx>
+#include <bitmaps.hlst>
+#include <strings.hrc>
+#include <window.h>
+
+#include <o3tl/safeint.hxx>
+#include <vcl/qt/QtUtils.hxx>
+#include <vcl/svapp.hxx>
+#include <vcl/themecolors.hxx>
+#include <vcl/toolkit/floatwin.hxx>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QtGui/QActionGroup>
+#include <QtGui/QShortcut>
+#else
+#include <QtWidgets/QActionGroup>
+#include <QtWidgets/QShortcut>
+#endif
+#include <QtWidgets/QButtonGroup>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QStyle>
 
 void QtMenu::slotMenuTriggered(QtMenuItem* pQItem)
 {

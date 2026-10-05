@@ -878,7 +878,7 @@ describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
   });
 
   /**
-   * 🔴 #1344: `B2w`(B2 と同じ手順の後、2 秒待ってから版面の外へ `mouse.move` を 1 回)。
+   * 🔴 #1344: `B2w`(B2 と同じ手順の後、2 秒待ってから版面(canvas)の**中**の右下寄りへ `mouse.move` を 1 回)。
    * ⚠ **既定の回(全部)には混ぜない**(既存の腕の回数と所要を変えない)── `PKC3_ARMS=B2w` と名指ししたときだけ。
    */
   it('🔴 B2w は名指しでだけ回る(既定の 13 腕に混ざらない)。B2 の枝の中で、click の後 → 2 秒 → mouse.move 1 回(押さない)', () => {
@@ -911,8 +911,12 @@ describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
     expect(body.split('page.mouse.move(').length - 1, 'mouse.move が 1 回でない').toBe(1);
     expect(body.indexOf('await page.waitForTimeout(2000);') < body.indexOf('await page.mouse.move(nx, ny);'), '待つのが move の後').toBe(true);
     expect(body, '押している').not.toContain('mouse.click(');
-    expect(body).toContain('box.x / 2');
-    expect(body).toContain('box.y / 2');
+    // 🔴 canvas の**中**(右下寄り)へ打つ。外(`box.x / 2` ── 余白)だと Qt の event が立たず、対照にならない(1 稿目の誤り)
+    expect(body).toContain('Math.round(box.x + box.w * NUDGE_X)');
+    expect(body).toContain('Math.round(box.y + box.h * NUDGE_Y)');
+    expect(body, '外へ打つ形に戻っている').not.toContain('box.x / 2');
+    expect(grab('NUDGE_X')).toBe('const NUDGE_X = 0.9;');
+    expect(grab('NUDGE_Y')).toBe('const NUDGE_Y = 0.9;');
     // 判定不能の規則(選択が出ない / メニューが開かない)が B2 と同じ
     expect(code).toContain("['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B2w', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true");
     expect(code).toContain("['B2', 'B2k', 'B2w', 'C2'].includes(arm) && row.menuOpened !== true");
@@ -990,10 +994,10 @@ describe('#121 の計装(uev-trace)── 台帳(スコープ検査 / workflow)�
     expect(yml.match(/inputs\.uev_trace/g)?.length, '入力を読む所が 3 か所でない').toBe(3);
     expect(strip('build/office-wasm/check-patches-on-ref.sh')).toContain('PKC3_UEV_TRACE=0');
     // 本数: 22 → 23(この 1 本)。注記も足してある(コメントなので strip しない版で見る)。
-    // いまの `-eq` は 24 ── 後から `patch-lo-ime-nowait.py` が 1 本足した(「22 → 23」の注記は残っている)。
+    // いまの `-eq` は 25 ── 後から `patch-lo-ime-nowait.py` / `patch-lo-popup-wake.py` が 1 本ずつ足した(「22 → 23」の注記は残っている)。
     const raw = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(raw).toMatch(/22 → 23\(2026-10-04\)/);
     expect(raw).toContain('patch-lo-uev-trace.py');
-    expect(yml).toContain('test "$n" -eq 24');
+    expect(yml).toContain('test "$n" -eq 25');
   });
 });

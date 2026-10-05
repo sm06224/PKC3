@@ -13,7 +13,7 @@
  * | `B1` | ✅ | 字を全部選んで **`Ctrl+C`** | 外を読む |
  * | `B2` | ✅ | 字を全部選んで **右クリック → メニューの「コピー」を押す** | 外を読む |
  * | `B2k` | ✅ | 同じ右クリック → メニューを**近道キー `y`**(`コピー(Y)`)で選ぶ(B2 の別の出し方) | 外を読む |
- * | `B2w` | ✅ | `B2` と同じ手順の後、**2 秒待ってから版面の外の無害な位置へ `mouse.move` を 1 回**(#1344 の判別用。⚠ 既定では回さない ── `PKC3_ARMS=B2w` と名指ししたときだけ) | 外を読む |
+ * | `B2w` | ✅ | `B2` と同じ手順の後、**2 秒待ってから版面(canvas)の中の無害な位置(右下寄り)へ `mouse.move` を 1 回**(#1344 の判別用。⚠ 既定では回さない ── `PKC3_ARMS=B2w` と名指ししたときだけ) | 外を読む |
  * | `B3` | ✅ | **画像**を `Shift+→` で選んで(段落先頭の 1 文字として)`Ctrl+C` | 外を読む |
  * | `B3c` | ✅ | **画像を左クリックで選んで**(枠の取っ手が出る)`Ctrl+C`(B3 の別の選び方。押す) | 外を読む |
  * | `B4` | ✅ | **表**を選んで `Ctrl+C` | 外を読む |
@@ -133,6 +133,9 @@ const DIST = resolve(process.env.PKC3_DIST ?? 'public');
 const SHOTDIR = process.env.PKC3_SHOTDIR ?? '';
 const CTX_X = Number(process.env.PKC3_CTX_X ?? '0.27');
 const CTX_Y = Number(process.env.PKC3_CTX_Y ?? '0.31');
+/** `B2w` が mouse.move を打つ canvas の比(右下寄り。本文の字には当たらない。⚠ canvas の**外**は Qt の event が立たず対照にならない)。 */
+const NUDGE_X = 0.9;
+const NUDGE_Y = 0.9;
 const ROUND_SEC = Number(process.env.PKC3_ROUND_SEC ?? 240);
 /** 判定不能の回の埋め合わせに回し足すとき、種の名前が前と被らないよう開始番号を変える。 */
 const N_START = Number(process.env.PKC3_N_START ?? 1);
@@ -365,7 +368,7 @@ const result = {
       B1: 'Control+a → Control+c',
       B2: `Control+a → mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → メニュー(開いた窓)の上端から 40px 下の「コピー(Y)」を mouse.click(left)`,
       B2k: `同じ右クリック → keyboard.press('y')(コピー(Y))`,
-      B2w: `B2 と同じ → 2 秒待つ → 版面の外(page の左上寄り・canvas の外)へ mouse.move を 1 回 → 外を読む`,
+      B2w: `B2 と同じ → 2 秒待つ → 版面の中(canvas の右下寄り ${NUDGE_X}/${NUDGE_Y})へ mouse.move を 1 回(押さない)→ 外を読む`,
       C2: `mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → Escape`,
       B3: 'Shift+ArrowRight(先頭の段落の画像 1 枚を選ぶ)→ Control+c',
       B3c: 'mouse.click(left, canvas の比 0.30/0.40 = 画像の上)→ Control+c',
@@ -813,11 +816,13 @@ async function oneRound(arm, n) {
             row.menuWindowsAfterClick = await page.evaluate(COUNT_QT_WINDOWS);
             if (arm === 'B2w') {
               // 🔑 #1344 の判別用: popup を選んだ後の user event の停止が「次の Qt 入力」で動くか。
-              //    2 秒待ってから、**canvas の外**(左上寄り。ボタンも版面も無い余白)へ 1 回動かす。押さない。
+              //    2 秒待ってから、**canvas の中**(右下寄り。本文の字には当たらない所)へ 1 回動かす。押さない。
+              //    ⚠ 外(canvas の外の余白)に打つと Qt の event が立たない ── 外へ打った 1 稿目は対照にならなかった
+              //    (「次の Qt 入力」で止まりが動くかを見たいので、Qt に届く場所でなければならない)。
               await page.waitForTimeout(2000);
-              const nx = Math.max(1, Math.round(box.x / 2));
-              const ny = Math.max(1, Math.round(box.y / 2));
-              row.nudge = { x: nx, y: ny, afterClickMs: 3000, outsideCanvas: nx < box.x || ny < box.y };
+              const nx = Math.round(box.x + box.w * NUDGE_X);
+              const ny = Math.round(box.y + box.h * NUDGE_Y);
+              row.nudge = { x: nx, y: ny, afterClickMs: 3000, insideCanvas: nx > box.x && nx < box.x + box.w && ny > box.y && ny < box.y + box.h };
               await page.mouse.move(nx, ny);
             }
           }
