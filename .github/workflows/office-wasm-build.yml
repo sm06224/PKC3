@@ -303,7 +303,13 @@ jobs:
           #    空の回が在る)。**①が届けた回だけ②を黙らせる**形にしてある。
           # ⚠ **Qt の cache 鍵は `qtbase-patch-*.py` の hash** なので、この 1 本を
           #    足した時点で **Qt を host + wasm から焼き直す**(数時間)。
-          test "$n" -eq 3
+          # 🔴 3 → 4(2026-10-05)。`qtbase-patch-asyncify-nested.py`(#1344 の直し)。
+          #    JSPI の入れ子 suspend で、resume を予約していた外側の frame の起こしが
+          #    `qtSuspendId` の照合で捨てられ、外側の `processEvents` が二度と戻らない ──
+          #    resolver の 1 枠・`g_is_asyncify_suspended` の 1 bit を、id ごとの Map・
+          #    深さの数へ替える(`qeventdispatcher_wasm.cpp` だけを触る)。
+          #    ⚠ 3 → 4 でも Qt の cache 鍵が変わるので Qt を焼き直す(数時間)。
+          test "$n" -eq 4
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
