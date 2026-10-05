@@ -234,27 +234,39 @@ jobs:
             /home/runner/qt-wasm/install
           key: qt-${{ inputs.qt_ref }}-emsdk-${{ inputs.emsdk }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}
 
-      # 🔴 **ccache の鍵にも Qt の同一性を入れる**(2026-08-10、実測で判明)。
-      #    ⚠ **Qt キャッシュの鍵だけ直して、こちらを直していなかった。**
-      #    症状: Qt を 6.11 → 6.9 に替えたのに `make` が
+      # 🔴 **LO の ccache は depend mode を切って(`--enable-ccache=nodepend`)、
+      #    鍵では Qt の patch を分けない**(2026-10-05、#1344)。
+      #    ⚠ 経緯(2026-08-10 の事故): Qt を 6.11 → 6.9 に替えたのに `make` が
       #    `undefined symbol: QObject::doSetProperty(char const*, QVariant const&, QVariant*)`
-      #    で落ちる。この**参照版のシグネチャは 6.11 にしか無い**(6.9 はポインタ版のみ。
+      #    で落ちた。この**参照版のシグネチャは 6.11 にしか無い**(6.9 はポインタ版のみ。
       #    qobject.h を両方読んで確認)── つまり `QtBuilder.o` が
       #    **6.11 のヘッダでコンパイルされた古い ccache** から出ていた。
       #    原因: LO は **depend mode の ccache**(`config_host.mk` の `CCACHE_DEPEND_MODE=1`
       #    → `gbuild.mk:382` が `CCACHE_DEPEND=1`)で、**同じパスで中身だけ変わった
-      #    ヘッダ**を取りこぼす。`$QT6DIR` は版が変わってもパスが同じである。
-      #    🔑 **鍵で名前空間を分ける**(Qt キャッシュに対して既にやったのと同じ手)。
+      #    ヘッダ**(`-isystem` の `$QT6DIR`)を取りこぼす。
+      #    そのときは**鍵で名前空間を分けて**しのいだ(Qt の patch の hash を鍵に入れた)。
+      #    ⚠ その代償: **`qtbase-patch-*.py` を 1 行触るたびに LO の cache が 1 つも
+      #    復元されず、LO が全量 compile になる**(run 37267668276: 復元 1 秒 = 0 件、
+      #    LO make 3 時間 37 分)。
+      #    🔑 **直しは鍵ではなく原因の側**: depend mode を切った
+      #    (distro conf の `--enable-ccache=nodepend`)。direct / preprocessor mode は
+      #    **include された header の中身を全部 hash する**ので、鍵で分けなくてよい。
+      #    ⚠ **`-nd-` は depend mode 時代の cache を復元しないための接頭**
+      #    (その manifest は system header を持っていない可能性がある。#1344 の v1 → v2 で
+      #    4 時間 15 分を 2 回払って判明)。**外さない**。
+      #    ⚠ Qt 自身の cache(`qt-…`)は別物で、**patch の hash で分けるのが正しい**
+      #    (Qt の build 自体が patch で変わる)。
       - name: ccache を復元
         id: c_ccache
         uses: actions/cache/restore@v6
         with:
           path: /home/runner/.ccache
           # ⚠ 完全一致は狙わない ── 前回の続きから始められればよいので
-          #    `restore-keys` で**同じ Qt の**直近のものを拾う
-          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-${{ github.sha }}
+          #    `restore-keys` で**同じ Qt 版の**直近のものを拾う
+          #    (Qt の patch の hash は入れない ── 上の注釈。direct mode なので不要)
+          key: ccache-lo-qt6-nd-${{ inputs.qt_ref }}-${{ github.sha }}
           restore-keys: |
-            ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-
+            ccache-lo-qt6-nd-${{ inputs.qt_ref }}-
 
       - name: emsdk
         if: steps.c_emsdk.outputs.cache-hit != 'true'
@@ -717,6 +729,11 @@ jobs:
           --disable-qt5
           --enable-qt6
           --disable-gen
+          # 🔴 **ccache は depend mode を切る**(#1344、2026-10-05)。⚠ depend mode は
+          #    `-isystem` の Qt header の変更を取りこぼす(2026-08-10 の事故)。
+          #    nodepend = direct / preprocessor mode で、**header の中身を全部 hash する**
+          #    (`configure.ac:2090` / `:3731`)── 鍵で Qt の patch を分けなくてよくなる。
+          --enable-ccache=nodepend
           # 🔴 **`--disable-scripting` を外した**(#431 段①。user 指示 2026-08-27
           #    「いまだに動かないマクロ機能なども全部完璧で動かせるように」)。
           #
@@ -1137,7 +1154,7 @@ jobs:
         with:
           path: /home/runner/.ccache
           # ⚠ 復元側と**同じ形**でなければ、次の run が拾えない
-          key: ccache-lo-qt6-${{ inputs.qt_ref }}-${{ hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py') }}-${{ github.sha }}
+          key: ccache-lo-qt6-nd-${{ inputs.qt_ref }}-${{ github.sha }}
 
       - name: 外部 tarball を保存
         if: always() && steps.c_tar.outputs.cache-hit != 'true'
@@ -1198,7 +1215,7 @@ jobs:
           # 🔴 **検品の grep が落ちたとき、何と食い違ったのかを読めるようにする**
           #    (2026-08-14。ここが無くて「どの grep が落ちたか」すら分からなかった)。
           if [ -f ~/lo-core/config_host.mk ]; then
-            grep -E '^export (WITH_LANG|ENABLE_QT|VCL_PLUGIN_INFO|ENABLE_WASM_STRIP|ENABLE_EMSCRIPTEN)' \
+            grep -E '^export (WITH_LANG|ENABLE_QT|VCL_PLUGIN_INFO|ENABLE_WASM_STRIP|ENABLE_EMSCRIPTEN|CCACHE_DEPEND_MODE)' \
               ~/lo-core/config_host.mk || echo '(該当なし)'
           else
             echo '(config_host.mk 無し)'
