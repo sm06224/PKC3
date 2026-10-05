@@ -655,6 +655,35 @@ describe('office-wasm のパッチ', () => {
   });
 
   /**
+   * 🔴 **`emscripten_promise_await` の門は、焼いた `soffice.js` を置換する step で入る**(#1344、2026-10-05)。
+   * ⚠ Qt の patch でも LO の patch でもない(Emscripten の library JS)ので、`qtbase-patch-*` / `patch-lo-*` の
+   *   ループには載らない ── 消えても本数の検査は鳴らない。だから step を名指しで pin する。
+   * 🔑 順: 置換は「実行一式を集める」の**後**で、当てる先は**配る一式**(`workdir/installation/…/soffice.js`)。
+   *   `instdir` を直しても `make instsetoo_native` が集め直すので、前に当てると**集め直しで素通りする**。
+   *   印(`pkc3PaGuard`)は同じ file で 1 度だけ入ったことを数える。
+   * ⚠ 見るのは**実行する行**(`#` で始まる注釈は落とす)── 注釈に同じ字が在っても満たされない(§1 の 5 度目)。
+   */
+  it('🔴 soffice.js の promise_await の門が、集めた後に配る一式へ当たり、同じ file で印を 1 度だけ数えている', () => {
+    const lines = readFileSync(YML, 'utf-8').split('\n');
+    const code = lines.map((l, i) => ({ l, i })).filter(({ l }) => !/^\s*#/.test(l));
+    const find = (re: RegExp, what: string): number => {
+      const hits = code.filter(({ l }) => re.test(l));
+      expect(hits.length, `${what}: 実行する行に ${hits.length} 件(1 件でない)`).toBe(1);
+      return hits[0]!.i;
+    };
+    const collectAt = find(/^\s*- name: 実行一式を集める\(上流の install list\)\s*$/, '集める step');
+    const targetAt = find(/^\s*target=~\/lo-core\/workdir\/installation\/LibreOffice\/emscripten\/soffice\.js\s*$/, '当てる先');
+    const patchAt = find(/^\s*node "\$GITHUB_WORKSPACE"\/build\/office-wasm\/patch-soffice-js-promise-await\.mjs "\$target"\s*$/, '置換');
+    const countAt = find(/^\s*test "\$\(grep -o 'pkc3PaGuard' "\$target" \| wc -l\)" -eq 1\s*$/, '印の数え');
+    expect(targetAt, '当てる先が「集める」より前に在る').toBeGreaterThan(collectAt);
+    expect(patchAt, '置換が当てる先の定義より前に在る').toBeGreaterThan(targetAt);
+    expect(countAt, '印の数えが置換より前に在る').toBeGreaterThan(patchAt);
+    // instdir 側へ当てる古い形が残っていないこと(残ると 2 度当てになり script が落ちる)
+    expect(code.some(({ l }) => /patch-soffice-js-promise-await\.mjs ~\/lo-core\/instdir/.test(l)), 'instdir へ当てる行が残っている').toBe(false);
+    expect(existsSync('build/office-wasm/patch-soffice-js-promise-await.mjs')).toBe(true);
+  });
+
+  /**
    * 🔴 **qtbase のパッチは Qt の cache 鍵に入っていなければならない**(#134)。
    * ⚠ 入っていないと、パッチを足したのに**パッチ前の Qt が復元され**、
    *   当てたつもりで効かない ── workflow が同じ罠を別の箇所で注記している。

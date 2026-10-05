@@ -42,7 +42,7 @@ on:
         description: 'qtbase の ref(⚠ LO の JSPI export が要求するため 6.9 固定)'
         default: '6.9'
       emsdk:
-        description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)'
+        description: 'emsdk の版(LibreOffice の README.wasm.md が指定する版に合わせる)。⚠ promise_await の門(#1344)の錨は 4.0.10 の字 ── 上げたら錨も更新'
         default: '4.0.10'
       lo_ref:
         # 🔴 **既定は安定メジャーの枝**(2026-09-12 に `master` から変えた)。
@@ -974,6 +974,25 @@ jobs:
           echo "日本語 翻訳(.mo): $mo 件 / 言語の登録(Langpack-ja.xcd): $pack 件"
           test "$mo" -gt 0
           test "$pack" -gt 0
+
+      # 🔴 **`emscripten_promise_await` の起こしに shadow stack の門を置く**(#1344、2026-10-05)。
+      #    LO の main thread は user event を handler thread へ proxy して `emscripten_promise_await` で待つ。
+      #    その間に来た右クリックが別の promising な計算としてメニューの loop を止めると、proxy の戻りで
+      #    main が門なしで起こされ、生きているメニューの frame を踏む(trace: `pa-mismatch dir=above` →
+      #    `js-inverted` → `QEventLoop::exit` の unaligned trap)。Qt 側の LIFO / sp の門は Qt の起こししか
+      #    見ないので、ここは Emscripten の library JS(焼けた `soffice.js`)を置換して止める。
+      #    🔑 当てる先は **配る一式**(`workdir/installation/…/soffice.js` ── zip はここから作る)。
+      #       `instdir` を直しても `make instsetoo_native` が集め直すので、**集めた後**に当てる。
+      #    ⚠ 錨は Emscripten **4.0.10** の minify 後の字(上の `emsdk` 入力の既定)── 版を上げて字が
+      #       変わったら **ここで落ちる**(黙って素通りしない)。`stackSave` の定義が無い一式にも当てない。
+      #    🔑 印 `pkc3PaGuard` を**同じ file**で数える(置換が 1 度だけ入ったこと)。
+      - name: emscripten_promise_await の起こしに門を置く(配る一式の soffice.js を置換。#1344)
+        run: |
+          set -euxo pipefail
+          target=~/lo-core/workdir/installation/LibreOffice/emscripten/soffice.js
+          node "$GITHUB_WORKSPACE"/build/office-wasm/patch-soffice-js-promise-await.mjs "$target"
+          # ⚠ minify 後は 1 行なので `grep -c`(行数)では数えられない ── 出現回数で数える
+          test "$(grep -o 'pkc3PaGuard' "$target" | wc -l)" -eq 1
 
       # 🔴 **テンプレートが実際に詰め込まれたか**(#591)。
       #    ⚠ 入力(`*.mk` に足したか)を守る検査は `patch-lo-fsimage.py` の後条件が持つ。
