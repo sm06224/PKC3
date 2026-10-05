@@ -491,6 +491,26 @@ runner を奪い合うので、**2 本が 2 倍ではなく 8 倍**になる。
 ③ 「検証は計装つき → OK なら配布用」の **2 段**はそのまま正しい ── 理由は速さではなく
 **計装の印で直りを読んでから配る**ためである。
 
+### 🔴 `qtbase-patch-*.py` を足す・変えると **Qt を焼き直す**(数時間)(2026-10-05)
+
+Qt の cache 鍵は **`hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py')`**
+(`office-wasm-build.yml` の `key:`。`qt-…` と `ccache-lo-qt6-…` の 2 種)。
+`patch-lo-*.py` は **LO の** patch なので Qt の cache は当たったまま(23〜35 分)。
+🔑 だから **Qt 側の直しは 1 焼きに束ねる** ── 2 本を別々に焼くと **Qt を 2 回建てる**。
+⚠ 束ねる前に `qtbase-patch-*.py` の既存の名前を `ls` する(足した file も**変えた file も**鍵を動かす)。
+⚠ 上の 2026-10-04 の「flag 全 OFF の焼きが 3h49m」は、この鍵が動いた(`qtbase-patch-backspace` などの追加)ことが
+**原因だった可能性**があるが、**未確認**(推測。その run の cache 復元が一致だったかを見れば決着する)。
+
+### 🔑 Qt / LO の上流 source は **raw.githubusercontent.com から取れる**(2026-10-05 実測)
+
+`curl -sSL --cacert /root/.ccr/ca-bundle.crt https://raw.githubusercontent.com/qt/qtbase/6.9/src/corelib/kernel/qeventdispatcher_wasm.cpp`
+が **200 / 22 KB**。🔑 **「Qt 側は読めない」と書く前に取る**(§0 の「取れない」と同じ向き)。
+#1344 では Qt の dispatcher の `qt_asyncify_resume_js` の **`suspendId` 照合**(入れ子 suspend で
+**外側の frame の起こしを捨てる**)を、**この file の 20 行**で確定できた。
+⚠ scratchpad に置いた写しは**箱が作り直されると消える** ── 根拠にするなら
+**fixture として test に入れる**(`tests/fixtures/qtbase/qeventdispatcher_wasm.cpp`)。
+⚠ 枝(`6.9`)は焼きの `qt_ref` と**揃える**(違う枝を読んで確定すると、焼いた物と別の source を根拠にする)。
+
 ### 🔴 配布は **2 段**。PKC3 の焼きだけでは user に届かない(2026-10-04)
 
 1. PKC3 `office-wasm-build.yml` → prerelease **`lo-wasm-dev`**
