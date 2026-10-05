@@ -6,6 +6,10 @@
  * マウスで選んだ回だけ、約 10.2 秒後に `DispatchUserEvents` の `noexcept` lambda から JS 例外で terminate する。
  * 焼きは 15〜30 分かかる。
  *
+ * 🔴 **2026-10-05(#1344)に 5 種を足した**(`wake` / `yield-in` / `yield-out` / `wait-out` / `proxy-out` / `exec-ret`)。
+ *   ⚠ 新しい patch ではなく**この 1 本の拡張**で、`QtInstance.cxx` / `QtMenu.cxx` が当て先に増えた。
+ *   見るのは下の「#1344 の判別用」の節(位置 / 門を g++ で実走 / idles-trace・menu-trace との両順同一 / probe の `B2w`)。
+ *
  * ⚠ 見るのは 7 つ:
  *   ① **既定(`PKC3_UEV_TRACE!=1`)は 1 バイトも書かない**。⚠ 錨の検査は毎回する
  *   ② **挙動を変えていない** ── 足した行(行末が `// PKC3-UEV`)と helper の塊を除くと原文と一致する
@@ -33,7 +37,21 @@ const REL_APP = 'vcl/source/app/svapp.cxx';
 const REL_EVL = 'vcl/source/app/salusereventlist.cxx';
 const EXCERPT_APP = readFileSync('tests/fixtures/office-lo/svapp.excerpt.cxx', 'utf-8');
 const EXCERPT_EVL = readFileSync('tests/fixtures/office-lo/salusereventlist.excerpt.cxx', 'utf-8');
-const ORIG: Record<string, string> = { [REL_APP]: EXCERPT_APP, [REL_EVL]: EXCERPT_EVL };
+// 🔴 #1344: 当て先は 4 file(svapp / salusereventlist / QtInstance / QtMenu)。
+const REL_QTI = 'vcl/qt5/QtInstance.cxx';
+const REL_QTM = 'vcl/qt5/QtMenu.cxx';
+const REL_MENU = 'vcl/source/window/menu.cxx';
+const MENU_SCRIPT = 'build/office-wasm/patch-lo-menu-trace.py';
+const EXCERPT_QTI = readFileSync('tests/fixtures/office-lo/QtInstance.excerpt.cxx', 'utf-8');
+const EXCERPT_QTM = readFileSync('tests/fixtures/office-lo/QtMenu.excerpt.cxx', 'utf-8');
+const EXCERPT_MENU = readFileSync('tests/fixtures/office-lo/menu.excerpt.cxx', 'utf-8');
+const ORIG: Record<string, string> = {
+  [REL_APP]: EXCERPT_APP,
+  [REL_EVL]: EXCERPT_EVL,
+  [REL_QTI]: EXCERPT_QTI,
+  [REL_QTM]: EXCERPT_QTM,
+};
+const FILES = [REL_APP, REL_EVL, REL_QTI, REL_QTM];
 const MARK = '// PKC3-UEV';
 const ON = { PKC3_UEV_TRACE: '1' };
 const OFF = { PKC3_UEV_TRACE: '0' };
@@ -44,7 +62,7 @@ interface Root {
   cleanup: () => void;
 }
 
-/** LO の root の形(`vcl/source/app/…`)を一時 dir に作る。既定は 2 file とも原文の抜粋。 */
+/** LO の root の形(`vcl/source/app/…` / `vcl/qt5/…`)を一時 dir に作る。既定は 4 file とも原文の抜粋。 */
 function makeRoot(files: Record<string, string> = {}): Root {
   const dir = mkdtempSync(join(tmpdir(), 'pkc3-uev-'));
   const put = (rel: string, body: string): void => {
@@ -53,6 +71,8 @@ function makeRoot(files: Record<string, string> = {}): Root {
   };
   put(REL_APP, EXCERPT_APP);
   put(REL_EVL, EXCERPT_EVL);
+  put(REL_QTI, EXCERPT_QTI);
+  put(REL_QTM, EXCERPT_QTM);
   for (const [rel, body] of Object.entries(files)) put(rel, body);
   return {
     dir,
@@ -106,12 +126,15 @@ function dropMarked(t: string): string {
 
 describe('#121 の計装(uev-trace)── 当て方', () => {
   it('🔑 空振り防止: 錨・ヘルパーの当て先を拾えている', () => {
-    expect(PATCH.targets.length, '錨を拾えていない').toBe(3);
-    expect(PATCH.helperTargets.length, 'ヘルパーの当て先を拾えていない').toBe(2);
+    // 3(post / dispatch / done)+ 6(#1344: wake / yield / wait / proxy 前 / proxy 後 / exec-ret)
+    expect(PATCH.targets.length, '錨を拾えていない').toBe(9);
+    expect(PATCH.helperTargets.length, 'ヘルパーの当て先を拾えていない').toBe(4);
     expect(new Set(PATCH.targets.map((t) => t.anchor)).size, '同じ錨が 2 つ在る').toBe(PATCH.targets.length);
     expect(PATCH.targets.filter((t) => t.src === REL_APP).length).toBe(1);
     expect(PATCH.targets.filter((t) => t.src === REL_EVL).length).toBe(2);
-    expect(PATCH.helperTargets.map((t) => t.src).sort()).toEqual([REL_EVL, REL_APP].sort());
+    expect(PATCH.targets.filter((t) => t.src === REL_QTI).length, 'QtInstance の錨は 5 つ').toBe(5);
+    expect(PATCH.targets.filter((t) => t.src === REL_QTM).length, 'QtMenu の錨は 1 つ').toBe(1);
+    expect(PATCH.helperTargets.map((t) => t.src).sort()).toEqual([...FILES].sort());
   });
 
   it('🔴 錨は、原文から抜いた抜粋に**ちょうど 1 件**ずつ当たる', () => {
@@ -128,8 +151,7 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
         const r = runPatch(t.dir, env);
         expect(r.code, r.out).toBe(0);
         expect(r.out).toContain('skip');
-        expect(t.read(REL_APP), '既定なのに書き換えている').toBe(EXCERPT_APP);
-        expect(t.read(REL_EVL), '既定なのに書き換えている').toBe(EXCERPT_EVL);
+        for (const rel of FILES) expect(t.read(rel), `${rel}: 既定なのに書き換えている`).toBe(ORIG[rel]);
       } finally {
         t.cleanup();
       }
@@ -141,7 +163,7 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
     try {
       const r = runPatch(t.dir, ON);
       expect(r.code, r.out).toBe(0);
-      for (const rel of [REL_APP, REL_EVL]) {
+      for (const rel of FILES) {
         const after = t.read(rel);
         expect(after.match(/PKC3-UEV-HELPER-BEGIN/g)?.length, `${rel}: helper が 1 つでない`).toBe(1);
         expect(after.match(/^void pkc3_uev_trace\(/gm)?.length, `${rel}: 入口が 1 つでない`).toBe(1);
@@ -158,7 +180,7 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
     const t = makeRoot();
     try {
       expect(runPatch(t.dir, ON).code).toBe(0);
-      for (const rel of [REL_APP, REL_EVL]) {
+      for (const rel of FILES) {
         const after = dropHelper(t.read(rel));
         expect(dropMarked(after), `${rel}: 足した以外のことをしている`).toBe(ORIG[rel]);
         // 🔑 対照群: 除く前は原文でない(= 足した行が実在する。無ければ上の一致は何も見ていない)
@@ -173,7 +195,7 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
     const t = makeRoot();
     try {
       expect(runPatch(t.dir, ON).code).toBe(0);
-      for (const rel of [REL_APP, REL_EVL]) {
+      for (const rel of FILES) {
         const orig = new Set(ORIG[rel]!.split('\n'));
         let added = 0;
         for (const line of dropHelper(t.read(rel)).split('\n')) {
@@ -192,11 +214,11 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
     const t = makeRoot();
     try {
       expect(runPatch(t.dir, ON).code).toBe(0);
-      const once = [t.read(REL_APP), t.read(REL_EVL)];
+      const once = FILES.map((f) => t.read(f));
       const r = runPatch(t.dir, ON);
       expect(r.code, r.out).toBe(1);
       expect(r.out).toContain('二重当て');
-      expect([t.read(REL_APP), t.read(REL_EVL)]).toEqual(once);
+      expect(FILES.map((f) => t.read(f))).toEqual(once);
     } finally {
       t.cleanup();
     }
@@ -219,12 +241,13 @@ describe('#121 の計装(uev-trace)── 当て方', () => {
       for (const env of [OFF, ON]) {
         const t = makeRoot({ [src]: broken });
         try {
-          const other = src === REL_APP ? REL_EVL : REL_APP;
           const r = runPatch(t.dir, env);
           expect(r.code, `${kind} ${i}(${src} / ${JSON.stringify(env)})を外しても落ちない:\n${r.out}`).toBe(1);
           expect(r.out, `${kind} ${i} の落ち方が「錨の欠落」でない`).toMatch(/(錨|ヘルパーの錨)が 0 件/);
           expect(t.read(src), '落ちたのに書き換えている').toBe(broken);
-          expect(t.read(other), '落ちたのにもう片方を書き換えている').toBe(ORIG[other]);
+          // ⚠ 落ちたとき**他の 3 file も**書き換えていない
+          for (const other of FILES.filter((f) => f !== src))
+            expect(t.read(other), `落ちたのに ${other} を書き換えている`).toBe(ORIG[other]);
         } finally {
           t.cleanup();
         }
@@ -382,12 +405,15 @@ describe('#121 の計装(uev-trace)── idles-trace と同じ 2 file を触る
       if (src === REL_APP || src === REL_EVL) continue;
       extra[src] = synth(src);
     }
+    // 🔴 #1344: QtInstance.cxx は**上流の抜粋そのもの**で当てる(idles の 5 つの錨も、こちらの 5 つの錨も実在する)
+    extra[REL_QTI] = EXCERPT_QTI;
     const idlesEnv = { PKC3_IDLES_TRACE: '1', PKC3_UEV_TRACE: '1' };
     // idles が当たる file は、上流の抜粋ではなく**錨を並べた版**を使う(抜粋に idles の錨が無い部分があるため)
     const base: Record<string, string> = {
       ...extra,
       [REL_APP]: EXCERPT_APP + '\n' + synth(REL_APP),
       [REL_EVL]: EXCERPT_EVL,
+      [REL_QTM]: EXCERPT_QTM,
     };
     const a = makeRoot(base);
     const b = makeRoot(base);
@@ -407,7 +433,7 @@ describe('#121 の計装(uev-trace)── idles-trace と同じ 2 file を触る
           expect(r.code, `${s}\n${r.out}`).toBe(0);
         }
       }
-      for (const rel of [REL_APP, REL_EVL]) {
+      for (const rel of [...FILES, ...Object.keys(extra)]) {
         expect(a.read(rel), `${rel}: 当てる順で出力が違う`).toBe(b.read(rel));
       }
       // 両方の計装が実際に入っている(どちらかが空振りで「同一」になっていない)
@@ -417,6 +443,13 @@ describe('#121 の計装(uev-trace)── idles-trace と同じ 2 file を触る
       expect(evl).toContain('pkc3_uev_line("done"');
       expect(a.read(REL_APP)).toContain('pkc3_idles_trace("execute:call"');
       expect(a.read(REL_APP)).toContain('pkc3_uev_line("post"');
+      // 🔴 #1344: QtInstance.cxx は 2 本とも入っている(ヘルパーも 1 つずつ)
+      const qti = a.read(REL_QTI);
+      expect(qti).toContain('pkc3_idles_trace("yield:impl"');
+      expect(qti).toContain('pkc3_idles_trace("yield:proxy"');
+      expect(qti).toContain('Pkc3UevYieldScope aPkc3UevYield');
+      expect(qti).toContain('pkc3_uev_proxy_out(nPkc3UevProxyIn);');
+      expect(qti.match(/PKC3-UEV-HELPER-BEGIN/g)?.length).toBe(1);
     } finally {
       a.cleanup();
       b.cleanup();
@@ -534,6 +567,303 @@ int main()
   }, 60_000);
 });
 
+/**
+ * 🔴 #1344(2026-10-05)の判別用 5 種(`wake` / `yield-in` / `yield-out` / `wait-out` / `proxy-out` / `exec-ret`)。
+ *
+ * マウスで popup を選んだ後、user event の処理が 10〜12 秒止まる。仮説 3 本:
+ *   ① 起こしが食われ、外側の `processEvents(WaitForMoreEvents)` が起きない ② main の `ImplYield` は動くが drain する caller が別物
+ *   ③ LO thread 側の `DoYield` 枝 B の `emscripten_promise_await` が resume しない
+ *
+ * ⚠ **言えないこと**: 本物の LO / Qt の header で通ること(焼かないと分からない)。ここで g++ に通すのは**ヘルパーの単体**で、
+ *   呼び側の行(`QtInstance` の member / `wasEvent` / `bWasEvent` など)は**上流の抜粋に当てて字面と順序を見る**だけ。
+ */
+describe('#1344 の判別用 ── 印の位置(上流の抜粋に当てた結果)', () => {
+  const applied = (): { qti: string; qtm: string; cleanup: () => void } => {
+    const t = makeRoot();
+    expect(runPatch(t.dir, ON).code).toBe(0);
+    return { qti: dropHelper(t.read(REL_QTI)), qtm: dropHelper(t.read(REL_QTM)), cleanup: t.cleanup };
+  };
+  const count = (body: string, needle: string): number => body.split(needle).length - 1;
+
+  it('🔑 wake は TriggerUserEventProcessing の中、`wakeUp()` の**直前の行**(1 度だけ)', () => {
+    const { qti, cleanup } = applied();
+    try {
+      expect(count(qti, 'pkc3_uev_wake();')).toBe(1);
+      expect(qti).toContain('    pkc3_uev_wake(); // PKC3-UEV\n    dispatcher->wakeUp();\n');
+      const fn = qti.indexOf('void QtInstance::TriggerUserEventProcessing()');
+      expect(fn, 'TriggerUserEventProcessing を拾えていない').toBeGreaterThan(-1);
+      expect(qti.indexOf('pkc3_uev_wake();'), 'wake が TriggerUserEventProcessing の外').toBeGreaterThan(fn);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('🔑 yield の RAII は DispatchUserEvents の後・**early return の前**(早期 return でも出口が出る)', () => {
+    const { qti, cleanup } = applied();
+    try {
+      expect(count(qti, 'Pkc3UevYieldScope aPkc3UevYield(bWait, bHandleAllCurrentEvents);')).toBe(1);
+      expect(qti).toContain(
+        'bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);\n' +
+          '    Pkc3UevYieldScope aPkc3UevYield(bWait, bHandleAllCurrentEvents); // PKC3-UEV\n' +
+          '    if (!bHandleAllCurrentEvents && wasEvent)\n        return true;\n',
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('🔑 wait は「入る前の時刻 → 原文の 4 行(そのまま)→ 出口 → return」の順。入る前の条件は原文の `if` と同じ', () => {
+    const { qti, cleanup } = applied();
+    try {
+      expect(count(qti, 'pkc3_uev_wait_out(')).toBe(1);
+      expect(qti).toContain(
+        '    const long long nPkc3UevWaitIn = (bWait && !wasEvent) ? pkc3_uev_elapsed_ms() : -1; // PKC3-UEV\n' +
+          '    if (bWait && !wasEvent)\n' +
+          '        wasEvent = dispatcher->processEvents(QEventLoop::WaitForMoreEvents);\n' +
+          '    else\n' +
+          '        wasEvent = dispatcher->processEvents(QEventLoop::AllEvents) || wasEvent;\n' +
+          '    if (nPkc3UevWaitIn >= 0) // PKC3-UEV\n' +
+          '        pkc3_uev_wait_out(nPkc3UevWaitIn, bHandleAllCurrentEvents ? 1 : 0, wasEvent ? 1 : 0); // PKC3-UEV\n' +
+          '    return wasEvent;\n',
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('🔑 proxy は DoYield 枝 B の `emscripten_promise_await` の前後(JSPI の #if の中・1 度ずつ)', () => {
+    const { qti, cleanup } = applied();
+    try {
+      expect(count(qti, 'pkc3_uev_elapsed_ms(); // PKC3-UEV\n        (void)emscripten_promise_await(')).toBe(1);
+      expect(qti).toContain(
+        '        const long long nPkc3UevProxyIn = pkc3_uev_elapsed_ms(); // PKC3-UEV\n' +
+          '        (void)emscripten_promise_await(emscripten_proxy_promise(\n',
+      );
+      expect(qti).toContain(
+        'bWasEvent })));\n        pkc3_uev_proxy_out(nPkc3UevProxyIn); // PKC3-UEV\n    }\n#endif\n',
+      );
+      const ifd = qti.indexOf('#if defined __EMSCRIPTEN__ && ENABLE_QT6 && HAVE_EMSCRIPTEN_JSPI');
+      const inn = qti.indexOf('nPkc3UevProxyIn = ');
+      const out = qti.indexOf('pkc3_uev_proxy_out(nPkc3UevProxyIn);');
+      expect(ifd > -1 && ifd < inn && inn < out, 'proxy の印が JSPI の #if の中に順に入っていない').toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('🔑 exec-ret は `mpQMenu->exec(...)` の**直後の行**(戻り値は取らない = menu-trace の錨と交わらない)', () => {
+    const { qtm, cleanup } = applied();
+    try {
+      expect(count(qtm, 'pkc3_uev_exec_ret();')).toBe(1);
+      expect(qtm).toContain('    mpQMenu->exec(aRect.bottomLeft());\n    pkc3_uev_exec_ret(); // PKC3-UEV\n\n    return true;\n}\n');
+      // 戻り値を受けるように exec の行を書き換えていない(それをやると menu-trace の錨と重なる)
+      expect(qtm).not.toContain('= mpQMenu->exec(');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('🔑 helper に kind ごとの上限が入っている(wake 2000 / yield 3000 ×2 / wait-out 600 / proxy-out 600 / exec-ret 200)', () => {
+    const h = PATCH.helper;
+    for (const [kind, max] of [
+      ['wake', 2000],
+      ['yield-in', 3000],
+      ['yield-out', 3000],
+      ['wait-out', 600],
+      ['proxy-out', 600],
+      ['exec-ret', 200],
+    ] as const) {
+      expect(h, `${kind} の上限が ${max} でない`).toContain(`pkc3_uev_mark("${kind}", &nShown, ${max},`);
+    }
+    // 書式: tid は %p
+    expect(h).toContain('"PKC3-UEV %s tid=%p x=%d y=%d z=%d ms=%lld in=%lld');
+  });
+});
+
+/**
+ * 🔴 **錨の区間が交わらない**(= 当てる順で結果が変わらない理由そのもの)。
+ * ⚠ 「両順で同一」だけだと、**どちらかの錨が空振りしても同一**になる(両方とも当たっていない)── 区間も直に見る。
+ * idles-trace の 2 つの錨(ヘルパーと本体)は**自分どうしで重なる**(ヘルパーの錨は本体の先頭)ので、**こちらの錨 × 相手の錨**だけを見る。
+ */
+describe('#1344 の判別用 ── idles-trace / menu-trace の錨と区間が交わらない', () => {
+  const spans = (text: string, anchors: string[]): [number, number][] =>
+    anchors.map((a) => {
+      expect(text.split(a).length - 1, `錨が 1 件でない:\n${a}`).toBe(1);
+      const i = text.indexOf(a);
+      return [i, i + a.length];
+    });
+  const overlaps = (a: [number, number][], b: [number, number][]): string[] =>
+    a.flatMap((x, i) => b.flatMap((y, j) => (x[0] < y[1] && y[0] < x[1] ? [`${i}×${j}`] : [])));
+
+  it('🔴 QtInstance.cxx: こちらの 6 つの錨(ヘルパー + 5)は idles-trace の錨と 1 バイトも重ならない', () => {
+    const mine = [...PATCH.targets, ...PATCH.helperTargets].filter((t) => t.src === REL_QTI).map((t) => t.anchor);
+    const theirs = [...IDLES.targets, ...IDLES.helperTargets].filter((t) => t.src === REL_QTI).map((t) => t.anchor);
+    expect(mine.length, '空振り防止: こちらの錨').toBe(6);
+    expect(theirs.length, '空振り防止: idles の錨(本体 5 + ヘルパー 1)').toBe(6);
+    expect(overlaps(spans(EXCERPT_QTI, mine), spans(EXCERPT_QTI, theirs)), '錨が重なっている').toEqual([]);
+  });
+
+  it('🔴 QtMenu.cxx: こちらの 2 つの錨(ヘルパー + exec-ret)は menu-trace の錨と 1 バイトも重ならない', () => {
+    const menu = loadPatch(MENU_SCRIPT);
+    const mine = [...PATCH.targets, ...PATCH.helperTargets].filter((t) => t.src === REL_QTM).map((t) => t.anchor);
+    const theirs = [...menu.targets, ...menu.helperTargets].filter((t) => t.src === REL_QTM).map((t) => t.anchor);
+    expect(mine.length, '空振り防止: こちらの錨').toBe(2);
+    expect(theirs.length, '空振り防止: menu-trace の錨(本体 4 + ヘルパー 1)').toBe(5);
+    expect(overlaps(spans(EXCERPT_QTM, mine), spans(EXCERPT_QTM, theirs)), '錨が重なっている').toEqual([]);
+  });
+
+  it('🔴 menu-trace と両順で当てて出力が同一 ── 両方の印が `exec` の行の後ろに順に入っている', () => {
+    const env = { PKC3_MENU_TRACE: '1', PKC3_UEV_TRACE: '1' };
+    const base = { [REL_MENU]: EXCERPT_MENU };
+    const a = makeRoot(base);
+    const b = makeRoot(base);
+    try {
+      for (const [root, order] of [
+        [a, [MENU_SCRIPT, SCRIPT]],
+        [b, [SCRIPT, MENU_SCRIPT]],
+      ] as const) {
+        for (const sc of order) {
+          const r = runScript(sc, root.dir, env);
+          expect(r.code, `${sc}\n${r.out}`).toBe(0);
+        }
+      }
+      for (const rel of [...FILES, REL_MENU]) {
+        expect(a.read(rel), `${rel}: 当てる順で出力が違う`).toBe(b.read(rel));
+      }
+      const qtm = a.read(REL_QTM);
+      const e = qtm.indexOf('QAction* const pPkc3Chosen = mpQMenu->exec(');
+      const r1 = qtm.indexOf('pkc3_menu_trace("exec:return"');
+      const r2 = qtm.indexOf('pkc3_uev_exec_ret();');
+      const rt = qtm.indexOf('    return true;\n}\n', r2);
+      expect(e > -1 && e < r1 && r1 < r2 && r2 < rt, 'exec → menu の exec:return → uev の exec-ret → return の順でない').toBe(true);
+      // ヘルパーが 2 種とも 1 つずつ(取り合っていない)
+      expect(qtm.match(/PKC3-UEV-HELPER-BEGIN/g)?.length).toBe(1);
+      expect(qtm.match(/PKC3-MENU-HELPER-BEGIN/g)?.length).toBe(1);
+    } finally {
+      a.cleanup();
+      b.cleanup();
+    }
+  }, 60_000);
+});
+
+describe('#1344 の判別用 ── 門を g++ で実走(偽の時計)', () => {
+  /**
+   * 🔴 **門を 1 つずつ鳴らす**(1 つ外しても他が救って緑、を許さない)。⚠ `clock_gettime` を**自前の時計**へ名前替えして時間を進める。
+   *   - 12 秒前: `wake` は出ない / nest ≥ 2 の `yield-in/out` は出ない / 5000 ms 待った `wait-out` `proxy-out` も出ない(**12 秒の門だけ**が鳴る)
+   *   - 12 秒後: 999 ms の `wait-out` `proxy-out` は出ない / nest 1・999 ms の yield は出ない(**1000 ms の門だけ**が鳴る)
+   *   - 12 秒後: 1000 ms の `wait-out` `proxy-out` は 1 行 / nest 1・1000 ms の `yield-out` は 1 行(**in 行は出ない**)/
+   *     nest 2 は 0 ms でも `yield-in` + `yield-out`(**nest の門だけ**)
+   *   - `exec-ret` は 12 秒前でも出る(門なし)
+   *   - 深さが戻る: 入れ子の後の nest 1 の 0 ms は出ない(`--depth()` を落とす変異を殺す)
+   *   - 上限: wake 2000 / wait-out 600 / proxy-out 600 / exec-ret 200 / yield-in 3000 / yield-out 3000
+   * ⚠ 1000 ms と nest ≥ 2 は**行数を抑えるための門**で、測っていない数で断るためではない。
+   */
+  it('🔴 12 秒 / 1000 ms / nest ≥ 2 の 3 つの門が、それぞれ単独で鳴る。上限は kind ごと。深さは戻る', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-uev-g-'));
+    try {
+      const src = `${PATCH.helper}
+static long long g_ms = 1000000;
+extern "C" int pkc3_fake_clock_gettime(clockid_t, struct timespec* pTs) noexcept
+{
+    pTs->tv_sec = g_ms / 1000;
+    pTs->tv_nsec = (g_ms % 1000) * 1000000;
+    return 0;
+}
+int main()
+{
+    // ── 12 秒前(経過 0 から 5000)──
+    pkc3_uev_elapsed_ms();                      // 起点(経過 0)
+    pkc3_uev_wake();                            // 12 秒前 → 出ない
+    pkc3_uev_exec_ret();                        // 門なし → 出る
+    {
+        Pkc3UevYieldScope aOuter(true, false);
+        Pkc3UevYieldScope aInner(false, true);  // nest 2 だが 12 秒前 → 出ない
+    }
+    const long long nEarly = pkc3_uev_elapsed_ms();
+    g_ms += 5000;
+    pkc3_uev_wait_out(nEarly, 1, 0);            // 5000 ms 待ったが 12 秒前 → 出ない
+    pkc3_uev_proxy_out(nEarly);                 // 同上
+    // ── 12 秒後(経過 12000)──
+    g_ms += 7000;
+    pkc3_uev_wake();                            // 出る
+    const long long nIn = pkc3_uev_elapsed_ms();
+    g_ms += 999;
+    pkc3_uev_wait_out(nIn, 1, 0);               // 999 ms → 出ない
+    pkc3_uev_proxy_out(nIn);                    // 999 ms → 出ない
+    g_ms += 1;
+    pkc3_uev_wait_out(nIn, 1, 0);               // 1000 ms → 出る
+    pkc3_uev_proxy_out(nIn);                    // 1000 ms → 出る
+    { Pkc3UevYieldScope a(true, false); }                       // nest 1・0 ms → 出ない
+    { Pkc3UevYieldScope a(true, false); g_ms += 999; }          // nest 1・999 ms → 出ない
+    { Pkc3UevYieldScope a(false, true); g_ms += 1000; }         // nest 1・1000 ms → yield-out 1 行(in は出ない)
+    {
+        Pkc3UevYieldScope aOuter(true, true);
+        Pkc3UevYieldScope aInner(false, false); // nest 2 → yield-in + yield-out(0 ms でも)
+    }
+    { Pkc3UevYieldScope a(true, false); }       // 入れ子の後の nest 1・0 ms → 出ない(深さが戻っていれば)
+    std::fputs("SENTINEL\\n", stderr);
+    // ── 上限(kind ごとに別枠)──
+    for (int k = 0; k < 2100; ++k)
+        pkc3_uev_wake();
+    for (int k = 0; k < 700; ++k)
+    {
+        pkc3_uev_wait_out(nIn, 1, 0);
+        pkc3_uev_proxy_out(nIn);
+    }
+    for (int k = 0; k < 300; ++k)
+        pkc3_uev_exec_ret();
+    for (int k = 0; k < 3100; ++k)
+    {
+        Pkc3UevYieldScope aOuter(true, false);
+        Pkc3UevYieldScope aInner(true, false);
+    }
+    return 0;
+}
+`;
+      writeFileSync(join(dir, 't.cxx'), src, 'utf-8');
+      const cc = spawnSync(
+        'g++',
+        ['-std=c++20', '-Wall', '-Wextra', '-Werror', '-Dclock_gettime=pkc3_fake_clock_gettime', join(dir, 't.cxx'), '-o', join(dir, 't')],
+        { encoding: 'utf-8', stdio: 'pipe' },
+      );
+      expect(cc.status, cc.stderr).toBe(0);
+      const run = spawnSync(join(dir, 't'), [], { encoding: 'utf-8', cwd: dir, stdio: 'pipe', maxBuffer: 64 * 1024 * 1024 });
+      expect(run.status, run.stderr).toBe(0);
+      const rows = run.stderr.split('\n').filter((l) => l.length > 0);
+      const norm = (l: string): string => {
+        const m = /^PKC3-UEV (\S+) tid=(?:0x[0-9a-f]+|\(nil\)) (x=-?\d+ y=-?\d+ z=-?\d+ ms=-?\d+ in=-?\d+)$/.exec(l);
+        expect(m, `書式が決めた形でない: ${l}`).not.toBeNull();
+        return `${m![1]} ${m![2]}`;
+      };
+      const at = rows.indexOf('SENTINEL');
+      expect(at, '番兵が出ていない(上限の段まで走っていない)').toBeGreaterThan(-1);
+      // 🔑 12 秒前に出たのは exec-ret の 1 行だけ。そのあとは**決めた順に決めた欄**で出る
+      expect(rows.slice(0, at).map(norm)).toEqual([
+        'exec-ret x=-1 y=-1 z=-1 ms=-1 in=-1',
+        'wake x=-1 y=-1 z=-1 ms=-1 in=-1',
+        'wait-out x=1 y=0 z=-1 ms=1000 in=12000',
+        'proxy-out x=-1 y=-1 z=-1 ms=1000 in=12000',
+        'yield-out x=1 y=0 z=1 ms=1000 in=13999',
+        'yield-in x=2 y=0 z=0 ms=-1 in=14999',
+        'yield-out x=2 y=0 z=0 ms=0 in=14999',
+      ]);
+      // 上限(番兵の後ろの行を kind で数える ── 番兵の前に出た分も枠に入っている)
+      const after = rows.slice(at + 1).map((l) => l.split(' ')[1]);
+      const n = (k: string): number => after.filter((x) => x === k).length;
+      expect(after.length, '想定外の kind が混じっている').toBe(2000 - 1 + 600 - 1 + 600 - 1 + 200 - 1 + (3000 - 1) + (3000 - 2));
+      expect(n('wake'), 'wake は 2000(番兵の前の 1 行を含む)').toBe(1999);
+      expect(n('wait-out'), 'wait-out は 600').toBe(599);
+      expect(n('proxy-out'), 'proxy-out は 600').toBe(599);
+      expect(n('exec-ret'), 'exec-ret は 200').toBe(199);
+      expect(n('yield-in'), 'yield-in は 3000').toBe(2999);
+      expect(n('yield-out'), 'yield-out は 3000').toBe(2998);
+    } finally {
+      rmSync('/tmp/pkc3-uev.log', { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
 describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
   const PROBE = readFileSync('build/office-wasm/clipboard-probe.mjs', 'utf-8');
   /** 注釈の行を落とす(解説文に満たされない)。 */
@@ -545,6 +875,47 @@ describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
     expect(code).toContain('/PKC3-(CLIP|MENU|UEV)/.test(m.text())');
     expect(code).toContain('pushRing(row.clipTrace, `[+${Date.now() - t0}ms]${tu}`, 3000)');
     expect(code, '旧い頭取りの上限が残っている').not.toMatch(/row\.clipTrace\.length < \d+/);
+  });
+
+  /**
+   * 🔴 #1344: `B2w`(B2 と同じ手順の後、2 秒待ってから版面の外へ `mouse.move` を 1 回)。
+   * ⚠ **既定の回(全部)には混ぜない**(既存の腕の回数と所要を変えない)── `PKC3_ARMS=B2w` と名指ししたときだけ。
+   */
+  it('🔴 B2w は名指しでだけ回る(既定の 13 腕に混ざらない)。B2 の枝の中で、click の後 → 2 秒 → mouse.move 1 回(押さない)', () => {
+    const grab = (name: string): string => {
+      const m = new RegExp(`const ${name} = [^\\n]+;`).exec(code);
+      expect(m, `${name} を取り出せない`).not.toBeNull();
+      return m![0];
+    };
+    const evalArms = (env: Record<string, string>): string[] =>
+      new Function(
+        'process',
+        `${grab('ALL_ARMS')}\n${grab('OPT_IN_ARMS')}\n${grab('ARMS')}\nreturn ARMS;`,
+      )({ env }) as string[];
+    const def = evalArms({});
+    expect(def, '既定の回に B2w が混ざっている').not.toContain('B2w');
+    expect(def, '既存の腕を落としている').toEqual(['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8']);
+    expect(evalArms({ PKC3_ARMS: 'B2w' }), '名指しで選べない').toEqual(['B2w']);
+    expect(code).toContain("B2w: 'text.odt'");
+
+    const branch = code.indexOf("} else if (arm === 'B2' || arm === 'B2k' || arm === 'B2w') {");
+    expect(branch, 'B2 の枝に B2w が入っていない').toBeGreaterThan(-1);
+    const clickAt = code.indexOf('await page.mouse.click(cx, cy);', branch);
+    expect(clickAt, 'B2 の「コピー」の click を拾えていない').toBeGreaterThan(branch);
+    const blockAt = code.indexOf("if (arm === 'B2w') {", clickAt);
+    expect(blockAt, 'B2w の塊が click の後ろに無い').toBeGreaterThan(clickAt);
+    const blk = /if \(arm === 'B2w'\) \{([\s\S]*?)\n {12}\}/.exec(code.slice(blockAt));
+    expect(blk, 'B2w の塊を取り出せない').not.toBeNull();
+    const body = blk![1]!;
+    expect(body.indexOf('await page.waitForTimeout(2000);'), '2 秒待っていない').toBeGreaterThan(-1);
+    expect(body.split('page.mouse.move(').length - 1, 'mouse.move が 1 回でない').toBe(1);
+    expect(body.indexOf('await page.waitForTimeout(2000);') < body.indexOf('await page.mouse.move(nx, ny);'), '待つのが move の後').toBe(true);
+    expect(body, '押している').not.toContain('mouse.click(');
+    expect(body).toContain('box.x / 2');
+    expect(body).toContain('box.y / 2');
+    // 判定不能の規則(選択が出ない / メニューが開かない)が B2 と同じ
+    expect(code).toContain("['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B2w', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true");
+    expect(code).toContain("['B2', 'B2k', 'B2w', 'C2'].includes(arm) && row.menuOpened !== true");
   });
 
   it('🔴 pushRing は溢れたら古い行を落とす(直近を残す)。頭取りに戻すと落ちる', () => {

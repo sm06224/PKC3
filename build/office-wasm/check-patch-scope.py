@@ -187,6 +187,11 @@ SPECS = [
             #    ⚠ ここを SPECS に足し忘れると、**この 2 file だけ検査の外**になる。
             ("vcl/source/app/svapp.cxx", "ImplSVEvent * Application::PostUserEvent("),
             ("vcl/source/app/salusereventlist.cxx", "SalUserEventList::SalUserEventList()"),
+            # 🔴 #1344(2026-10-05)── 判別用の 5 種を足した 2 file。ヘルパーは `CreateSalSystem` /
+            #    `ShowNativePopupMenu` の直前で、使う所(`ImplYield` / `DoYield` / `TriggerUserEventProcessing` /
+            #    `ShowNativePopupMenu` の中)はどれもその後ろ。⚠ ここを足し忘れると、**この 2 file だけ検査の外**になる。
+            ("vcl/qt5/QtInstance.cxx", "SalSystem* QtInstance::CreateSalSystem()"),
+            ("vcl/qt5/QtMenu.cxx", "bool QtMenu::ShowNativePopupMenu("),
         ],
     ),
 ]
