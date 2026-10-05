@@ -333,7 +333,7 @@ describe('#121 の計装(menu-trace)── 印が全部在る', () => {
 });
 
 describe('#121 の計装(menu-trace)── 他の patch と同じ行を触らない', () => {
-  it('🔴 同じ 2 file を触る patch は、この 1 本と uev-trace / popup-wake の 3 本だけ(増えたら、錨が重ならないことと両順同一を書く)', () => {
+  it('🔴 同じ 2 file を触る patch は、この 1 本と uev-trace の 2 本だけ(増えたら、錨が重ならないことと両順同一を書く)', () => {
     const dir = 'build/office-wasm';
     const files = readdirSync(dir).filter((f) => /^(qtbase-)?patch-.*\.py$/.test(f));
     // ⚠ 空振り防止 ── 一覧が空なら 0 本は真になる
@@ -349,15 +349,9 @@ describe('#121 の計装(menu-trace)── 他の patch と同じ行を触らな
     });
     // 🔴 #1344(2026-10-05): `patch-lo-uev-trace.py` が `QtMenu.cxx` に `exec-ret` の 1 行を足すようになった。
     //    錨の区間が重ならないこと・両順で出力が同一なことは `tests/office-uev-trace-patch.test.ts`
-    //    (「idles-trace / menu-trace の錨と区間が交わらない」)が見る。
-    // 🔴 #1344(2026-10-05): `patch-lo-popup-wake.py`(直し)が `QtMenu.cxx` だけを触る 3 本目として増えた(動いた物: 2 本 → 3 本)。
-    //    3 本の錨の区間が交わらないこと・6 通りの順で出力が同一なことは `tests/office-popup-wake-patch.test.ts` が見る。
-    //    ⚠ 4 本目が増えたら、そちらへ足す。
-    expect(touching, 'QtMenu.cxx / menu.cxx を触る patch').toEqual([
-      'patch-lo-menu-trace.py',
-      'patch-lo-popup-wake.py',
-      'patch-lo-uev-trace.py',
-    ]);
+    //    (「idles-trace / menu-trace の錨と区間が交わらない」)が見る。⚠ 3 本目が増えたら、そちらへ足す。
+    //    (一時 3 本になったが、#1344 で足した LO 側の直しは効かなかったので外した = 2 本へ戻った。真因は Qt 側。)
+    expect(touching, 'QtMenu.cxx / menu.cxx を触る patch').toEqual(['patch-lo-menu-trace.py', 'patch-lo-uev-trace.py']);
   });
 });
 
