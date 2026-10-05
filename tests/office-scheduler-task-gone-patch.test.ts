@@ -366,10 +366,6 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
     const win = join(dir, 'vcl/source/window/winproc.cxx');
     mkdirSync(dirname(win), { recursive: true });
     writeFileSync(win, readFileSync('tests/fixtures/office-lo/winproc.excerpt.cxx', 'utf-8'), 'utf-8');
-    // `patch-lo-popup-wake.py`(#1344)の当て先(`vcl/qt5/QtMenu.cxx`)も同じ理由で木に要る
-    const qtm = join(dir, 'vcl/qt5/QtMenu.cxx');
-    mkdirSync(dirname(qtm), { recursive: true });
-    writeFileSync(qtm, readFileSync('tests/fixtures/office-lo/QtMenu.excerpt.cxx', 'utf-8'), 'utf-8');
     const r = spawnSync('python3', [checkScript, dir], {
       encoding: 'utf-8',
       env: { ...process.env, PKC3_SCOPE_ONLY: 'fixes' },
@@ -399,11 +395,6 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
       writeFileSync(
         join(dir, 'patch-lo-ime-nowait.py'),
         readFileSync('build/office-wasm/patch-lo-ime-nowait.py', 'utf-8'),
-        'utf-8',
-      );
-      writeFileSync(
-        join(dir, 'patch-lo-popup-wake.py'),
-        readFileSync('build/office-wasm/patch-lo-popup-wake.py', 'utf-8'),
         'utf-8',
       );
       return scope(join(dir, 'check-patch-scope.py'), t.dir);

@@ -994,10 +994,10 @@ describe('#121 の計装(uev-trace)── 台帳(スコープ検査 / workflow)�
     expect(yml.match(/inputs\.uev_trace/g)?.length, '入力を読む所が 3 か所でない').toBe(3);
     expect(strip('build/office-wasm/check-patches-on-ref.sh')).toContain('PKC3_UEV_TRACE=0');
     // 本数: 22 → 23(この 1 本)。注記も足してある(コメントなので strip しない版で見る)。
-    // いまの `-eq` は 25 ── 後から `patch-lo-ime-nowait.py` / `patch-lo-popup-wake.py` が 1 本ずつ足した(「22 → 23」の注記は残っている)。
+    // いまの `-eq` は 24 ── 後から `patch-lo-ime-nowait.py` が 1 本足した(「22 → 23」の注記は残っている)。#1344 で足した LO 側の直しは効かなかったので外した(24 → 25 → 24)。
     const raw = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(raw).toMatch(/22 → 23\(2026-10-04\)/);
     expect(raw).toContain('patch-lo-uev-trace.py');
-    expect(yml).toContain('test "$n" -eq 25');
+    expect(yml).toContain('test "$n" -eq 24');
   });
 });
