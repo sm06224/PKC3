@@ -445,6 +445,10 @@ agent は `cd <自分の worktree>` で `No such file or directory` を見て止
 止まらずに本体ツリーで回すのが最悪)。
 🔑 **続きを頼むなら、「変更が在って worktree が残っている」ことを `git worktree list` で見てから**。
 無ければ **新しく起こす**(依頼文に commit の sha を書く ── 前の agent の報告から sha を写す)。
+⚠ **残っていることもある**(2026-10-05、runner を **3 回続けて** SendMessage で再開し、3 回とも worktree と `node_modules` が
+残っていた ── `npm ci` 5 分 × 2 を省けた)。消える / 残るの条件はこちらから見えないので、**依頼文の段 0 に
+`pwd` と `ls node_modules/.bin/playwright` を出させ、無ければ `npm ci`** と書いておく(残っていれば得、消えていても止まらない)。
+🔑 同じ probe を pack 違いで何本も回すなら、**同じ runner に SendMessage で続けて頼む**(起動 + `npm ci` を毎回払わない)。
 ⚠ 続きの結果だけが要るときは、runner が書いた log を**依頼者が直に `grep`** するほうが速い
 (worktree の `unit.log` は agent が死んでも残っている)。
 

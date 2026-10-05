@@ -524,13 +524,55 @@ Qt host 15 分 + Qt wasm 11 分 + **LO make 3 時間 37 分**(06:00:56Z → 09:3
    **その数 ms 前に外側が返っている**(`PKC3-UEV wait-out`)。
    この署名を見たら **「壊れた番地 = LIFO 違反」を第一容疑**にする。観測点:run 37267668276 の probe
    (scratchpad 121k)、B2 / B2w の **9 回全部**。
-3. ⚠ **未検証の穴**(着地前レビューの指摘):Qt の `qt_asyncify_suspend_js` **以外**の Suspending import
-   (LO 側の `emscripten_sleep` / 別の `EM_ASYNC_JS`)で内側が suspend すると、**Qt 側の stack 管理の外**になる。
-   🔑 v2 の焼きで**同じ署名が再発したら、これが第一容疑**。
-4. 経緯と置き場:PR #1350(v1。全部起こす)→ PR #1353(v2。LIFO)。patch は
+3. 🔴 **v2 の焼き(run 37303396759)で同じ署名が再発した**(B2w 8 round 中 2 round。B2 / B2k / C は全部通った)。
+   trap round の uev trace:項目を押した瞬間に **LO main loop(`ImplYield`、nest=1)の `wait-out` が `exec-ret` より前**に返り、
+   直後の dispatch がメニューを閉じに行って落ちる。通った round は `exec-ret` → `PKC3-CLIP` → `wait-out` の順。
+   = **メニューの計算が生きている間に main loop が起こされる**経路が、Qt 側の LIFO では閉じない。
+4. 🔑 **構造(焼いた soffice.js と LO 0c031979 の原文で実測)**。推測ではなく、次の grep で数える:
+   - promising export = `grep -o 'exportPattern=/[^/]*/' soffice.js` → **3 種**:`main` / `_emscripten_check_mailbox`(proxy queue の口)/
+     `qstdweb::EventListener` の invoker(**DOM event の口** ── だから pointer の callback は main と別の計算として suspend できる)。
+   - Suspending import = `grep -o '\w*\.isAsync=true' soffice.js` + `function __asyncjs__\w+` → **5 種**:`__asyncjs__qt_asyncify_suspend_js` /
+     `emscripten_promise_await` / `emscripten_sleep` / `fd_sync` / `emscripten_idb_*`。
+   - 🔴 LO `vcl/qt5/QtInstance.cxx`(JSPI 構成 `HAVE_EMSCRIPTEN_JSPI && !HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD`)は
+     **`ProcessEvent` を `eventHandlerThread` へ proxy し、main thread は `emscripten_promise_await` で止まる**。`DoYield` の枝 B は逆向き
+     (handler thread → main へ proxy。main は mailbox の計算の中で `ImplYield` → Qt の wait)。
+   - だから **main thread の 1 本の shadow stack の上に、main / mailbox / DOM event の計算が、Qt の suspend と `promise_await` の
+     2 種類の止まり方で積み重なる**。Qt 側の LIFO(v2)も sp の門(v3)も **Qt 側の起こし**しか見ていない ──
+     `promise_await` の起こしは Emscripten の promise が直に起こすので、下で止まっている計算を踏みうる。
+5. **v3(PR #1356)= sp の門**:suspend で `stackSave()` を控え、tick で同じ値へ戻るまで起こさない(Gemini Q2c)。
+   `stackSave` が無ければ門なし(1 度 warn)。250 周戻らなければ `PKC3-UEV sp-defer … dir=above|unwound` を出し 100 ms に間引く。
+   ⚠ **`dir=unwound`(sp が top.sp より高い = 上書きされた後)は直っていない** ── trap が診断つきの hang に変わるだけ。
+   v3 の JS を v2 の一式に当てた probe は 44 round 通ったが **門が閉じた回は 0** ── 「普段を変えない」は言えても「trap を止めた」は**言えない**。
+   残る手(Qt の patch で `promise_await` も同じ stack に載せる / LO の proxy をやめる / Emscripten 側)は #1344 コメント 5998799530 で Gemini に問うた。
+6. 経緯と置き場:PR #1350(v1。全部起こす)→ PR #1353(v2。LIFO)→ PR #1356(v3。sp の門)。patch は
    `build/office-wasm/qtbase-patch-asyncify-nested.py`、test は `tests/office-asyncify-nested-patch.test.ts`
-   (偽 `setTimeout` の台に**原本 / v1 / v2** を同じ場面で回す形 ── **対照群を 2 つ**持つ)。
-   ⚠ 変異試験で**普段の経路**を通していなかった件は `mutation-testing` §3.15。
+   (偽 `setTimeout` の台に**原本 / v1 / v2** を同じ場面で回す形 ── **対照群を 2 つ**持つ。v3 で shadow stack の模型を足した)。
+   ⚠ 変異試験で**普段の経路**を通していなかった件は `mutation-testing` §3.15、模型の「止まり直し」は §3.16。
+
+### 🔑 **JS だけの差分は、焼かずに「焼いた一式の soffice.js」へ当てて probe で検める**(2026-10-05、#1344 v3。焼き 4 h × 2 を省いた)
+
+Qt の `EM_JS` / `EM_ASYNC_JS` の本文は **焼いた `soffice.js` に字のまま(minify 済み)入っている**。だから patch の差分が JS だけなら、
+焼かずに次で検められる:
+
+1. `grep -o 'function __asyncjs__qt_asyncify_suspend_js(){.\{0,400\}' soffice.js` で **元の字を取り出す**(minify 後の形。`{resolve,wake:false}` のように短くなる)。
+2. node で `s.split(old).length - 1 === 1` を assert してから置換、`new Function('Module','stackSave','Asyncify','setTimeout', <置換後の範囲>)` で**構文だけ**検める。
+3. pack は `cp -al 121l/pack 121m/pack`(hardlink。100 MB を写さない)→ `rm 121m/pack/soffice.js` → 書く(**link を消してから**書く ── 消さずに書くと元の pack も変わる)。
+4. 同じ probe(`clipboard-probe.mjs`)を回す。🔑 観測の `console.error('PKC3-UEV …')` を JS に足せば **clipTrace が拾う**
+   (`PKC3-(CLIP|MENU|UEV)` を含む行だけ残る ── 印の字はこの 3 つから選ぶ)。
+   ⚠ 普段の経路(depth 1)の suspend / wake まで出すと ring 3000 行が溢れる ── **depth ≥ 2 のときだけ**出す。
+5. ⚠ **C++ の差分が 1 行でも在れば使えない**(そのときは焼く)。v3 が検められたのは C++ が v2 のままだったから。
+
+実測:v2 の一式(run 37303396759)に v3 の JS を当てて C 5/5 / B2 5/5 / B2w 17/17。**焼きなら 4 時間 × 2 本**。
+⚠ ただし「再現しない」は「直した」ではない ── trap は v2 で 2/8、その後 v2 + 観測で 0/12、v3 で 0/22。
+**門が閉じた回(`sp-defer`)が 0 件**なので、v3 は trap の経路を 1 度も踏んでいない。
+🔑 **統計で言えるのは「普段の経路を変えない」まで**。「止めた」と書くには、門が閉じた回が 1 件以上要る。
+
+### 🔑 trace の ring は「腕の頭」を流す ── 見たい瞬間が ring の外に出ることがある(2026-10-05)
+
+`clipTrace` は **直近 3000 行**。メニューを開くと LO が **post ~180 → dispatch ~196** を一度に出すので、trap round の ring は
+腕の開始から 6 秒後で始まっていて、**メニューが開いた瞬間が見えなかった**。
+🔑 見たい瞬間が決まっているなら、(a) 印を減らす(`post-stack` を落とす / depth ≥ 2 だけ)か (b) 腕の中で `clipTrace` を**区切る**
+(`PKC3-MENU` の行で ring を切り直す)。⚠ 件数の表(`dispatch 10539`)は ring の外を数えていない ── **何行見たか**も添える。
 
 ### 🔑 Qt / LO の上流 source は **raw.githubusercontent.com から取れる**(2026-10-05 実測)
 
