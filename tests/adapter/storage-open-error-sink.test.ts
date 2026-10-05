@@ -15,7 +15,9 @@
  * `storage-vfs-config.test.ts`)と同じ理由 ── file 末尾の `self.onmessage = …` が
  * import 時に走る(worker の中には無いので、無いと `self is not defined`)。
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { StorageRequest, StorageResponse } from '../../src/adapter/platform/storage/protocol';
 
 const pending = new Map<number, (resp: StorageResponse) => void>();
@@ -37,6 +39,9 @@ function request<T>(req: StorageRequest): Promise<T> {
 let sink: (...args: unknown[]) => void;
 let begin: () => void;
 let end: (discard: boolean) => string[];
+let markFailed: (poolName: string) => void;
+let lateErrors: () => readonly string[];
+let resetSink: () => void;
 
 beforeAll(async () => {
   const g = globalThis as unknown as Record<string, unknown>;
@@ -50,7 +55,12 @@ beforeAll(async () => {
   sink = mod.sqliteOpenErrorSink;
   begin = mod.beginOpeningStorage;
   end = mod.endOpeningStorage;
+  markFailed = mod.markPoolOpenFailed;
+  lateErrors = mod.lateOpenErrors;
+  resetSink = mod.resetOpenErrorSinkForTest;
 }, 30_000);
+
+afterEach(() => resetSink());
 
 afterAll(async () => {
   await request({ op: 'close' });
@@ -156,5 +166,124 @@ describe('sqlite の error を、開いている間だけ控える(#1073)', () =
     });
     expect(init.vfs, 'node に OPFS は無い ── memory fallback が前提').toBe('memory');
     expect(init.fallbackDetail, '呼ばれていない control.error の分が誤って載っている').toBeUndefined();
+  });
+});
+
+/**
+ * 🔴 **窓を閉じた後に着く、失敗した試行の残り**(#1311)。
+ *
+ * 上流 SAHPool は pool の 6 本の file を `Promise.all` で開き、最初の 1 本が落ちた時点で
+ * reject する ── 残りの枝の失敗は**窓を閉じた後**にエラー口へ着く。node では
+ * それを作れないので、窓を閉じる → 失敗した pool を覚える → 同じ口を直に呼ぶ、で当てる。
+ * ⚠ 実ブラウザで「本当に窓の後に着くか」はここでは測っていない(構造から言えるだけ)。
+ */
+describe('失敗した pool の残りは、窓を閉じた後も console に出さない(#1311)', () => {
+  function closeWindowAsFailed(pool: string): void {
+    begin();
+    sink(`${pool}:`, '窓の中の分');
+    end(false); // 開けなかった回
+    markFailed(pool);
+  }
+
+  it('🔴 窓の後に届く、失敗した pool の接頭の行は console に出ず lateOpenErrors に入る', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      closeWindowAsFailed('pkc3');
+      expect(lateErrors().length, '空振り防止: 始めは 0 件').toBe(0);
+      sink('pkc3:', 'NoModificationAllowedError: createSyncAccessHandle');
+      sink('pkc3:', 'NoModificationAllowedError: createSyncAccessHandle');
+      expect(spy, '失敗した pool の残りが console に出た').not.toHaveBeenCalled();
+      expect(lateErrors()).toEqual([
+        'pkc3: NoModificationAllowedError: createSyncAccessHandle',
+        'pkc3: NoModificationAllowedError: createSyncAccessHandle',
+      ]);
+      // 🔑 対照群: 別の接頭 / 接頭なしは、同じタイミングで 1 回ずつ流れる
+      sink('other:', '別の接頭');
+      sink('接頭なし');
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(spy).toHaveBeenCalledWith('other:', '別の接頭');
+      expect(spy).toHaveBeenCalledWith('接頭なし');
+      expect(lateErrors().length, '別の接頭まで控えている').toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('markPoolOpenFailed を呼んでいなければ、窓の後の同じ行は今までどおり流れる', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      begin();
+      end(false); // 開けなかった回だが、pool を覚えていない
+      sink('pkc3:', 'NoModificationAllowedError: createSyncAccessHandle');
+      expect(spy).toHaveBeenCalledWith('pkc3:', 'NoModificationAllowedError: createSyncAccessHandle');
+      expect(lateErrors().length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('開けた回(endOpeningStorage(true))の後は、pool の接頭を覚えず console へ流れる', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      begin();
+      sink('pkc3:', '一時の分');
+      end(true); // 開けた回 ── 呼び側は markPoolOpenFailed を呼ばない
+      sink('pkc3:', '開けた後の pool のエラー');
+      expect(spy).toHaveBeenCalledWith('pkc3:', '開けた後の pool のエラー');
+      expect(lateErrors().length, '開けた後のエラーを控えている').toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('markPoolOpenFailed は前の回の控えを持ち越さない', () => {
+    closeWindowAsFailed('pkc3');
+    sink('pkc3:', '前の回の残り');
+    expect(lateErrors().length).toBe(1);
+    markFailed('pkc3');
+    expect(lateErrors().length, '次の回へ控えを持ち越した').toBe(0);
+  });
+
+  /**
+   * 配線: 開けなかった `catch` が `markPoolOpenFailed(dbName)` を呼ぶこと(node では
+   * 開けなかった回を作れないので、原文で見る)。⚠ 注釈を落としてから当てる。
+   */
+  const SRC = 'src';
+  function codeOnly(text: string): string {
+    return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  }
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.(ts|tsx)$/.test(name)) out.push(full);
+    }
+    return out;
+  }
+
+  it('開けなかった catch が markPoolOpenFailed(dbName) を呼ぶ(配線)', () => {
+    const text = codeOnly(
+      readFileSync('src/adapter/platform/storage/storage-worker.ts', 'utf-8'),
+    );
+    const m = /catch \(e\) \{\s*fallbackDetail = endOpeningStorage\(false\);[^\n]*\n\s*markPoolOpenFailed\(dbName\);/;
+    expect(m.test(text), '開けなかった catch に markPoolOpenFailed(dbName) が無い').toBe(true);
+  });
+
+  it('resetOpenErrorSinkForTest は定義の 1 件だけ(製品コードは呼ばない)', () => {
+    const hits: string[] = [];
+    for (const f of walk(SRC)) {
+      readFileSync(f, 'utf-8')
+        .split('\n')
+        .forEach((l, i) => {
+          // 注釈の行は数えない(解説に名前を書いてよい)
+          if (l.includes('resetOpenErrorSinkForTest') && !/^\s*(\*|\/\/|\/\*)/.test(l)) {
+            hits.push(`${f}:${i + 1}:${l.trim()}`);
+          }
+        });
+    }
+    expect(hits.length, '定義以外で resetOpenErrorSinkForTest が使われている').toBe(1);
+    expect(hits[0]).toMatch(
+      /^src\/adapter\/platform\/storage\/storage-worker\.ts:\d+:export function resetOpenErrorSinkForTest/,
+    );
   });
 });

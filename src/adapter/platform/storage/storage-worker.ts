@@ -234,6 +234,23 @@ function deserializeInto(
  */
 let capturingOpenErrors = false;
 let openErrorLog: string[] = [];
+/**
+ * 🔴 **窓を閉じた後に着く、失敗した試行の残り**(#1311)。
+ *
+ * 上流 SAHPool の `acquireAccessHandles`(`@sqlite.org/sqlite-wasm/dist/index.mjs` 14938-14959)は
+ * pool の file(`initialCapacity` = 6 本)それぞれに `Promise.all(files.map(async …))` で
+ * `createSyncAccessHandle` を投げ、**枝ごとの `catch` が `storeErr`(= このエラー口)を呼んでから
+ * 投げ直す**。`Promise.all` は**最初の 1 本が落ちた時点で reject** するので、
+ * `installOpfsSAHPoolVfs` が `removeVfs()` を待って reject → 呼び側の `catch` が区間を閉じる。
+ * ⚠ **残りの枝の失敗は、その後に返る** ── 区間の外でこの口に届く(1 回に 1〜6 行)。
+ *
+ * 🔑 開けなかった worker は捨てられ(再試行は新しい worker)、その pool は `removeVfs` で消えている。
+ * だから **失敗した pool の接頭(pool 名 + `:`)と一致する行は、全部失敗した試行の残り**である。
+ * 接頭が違う行(`:memory:` へ退避した後の別の sqlite のエラー)は今までどおり流す。
+ * ⚠ エラーの名前では絞らない(上の理由で、その接頭で届く物は残りと決まっているため)。
+ */
+let failedPoolPrefix: string | null = null;
+let lateOpenErrorLog: string[] = [];
 
 /**
  * `sqlite3ApiConfig.error` へ渡す口。⚠ 上流の既定(`error: console.error.bind(console)`、
@@ -249,7 +266,33 @@ export function sqliteOpenErrorSink(...args: unknown[]): void {
     openErrorLog.push(args.map((a) => String(a)).join(' '));
     return;
   }
+  if (failedPoolPrefix !== null && args.length > 0 && args[0] === failedPoolPrefix) {
+    lateOpenErrorLog.push(args.map((x) => String(x)).join(' '));
+    return;
+  }
   console.error(...args);
+}
+
+/**
+ * 開けなかった pool を覚える(#1311)。以後、その接頭で届く行は
+ * 失敗した試行の残りとして `lateOpenErrors()` へ控える(理由は `failedPoolPrefix` の注記)。
+ */
+export function markPoolOpenFailed(poolName: string): void {
+  failedPoolPrefix = `${poolName}:`;
+  lateOpenErrorLog = [];
+}
+
+/** 窓を閉じた後に控えた行(test と診断用)。 */
+export function lateOpenErrors(): readonly string[] {
+  return lateOpenErrorLog;
+}
+
+/** test の後始末用 ── ⚠ 製品コードは呼ばない(`tests/adapter/storage-open-error-sink.test.ts` が pin)。 */
+export function resetOpenErrorSinkForTest(): void {
+  capturingOpenErrors = false;
+  openErrorLog = [];
+  failedPoolPrefix = null;
+  lateOpenErrorLog = [];
 }
 
 /**
@@ -391,6 +434,7 @@ async function init(
       endOpeningStorage(true); // 開けた ── 控えは捨てる
     } catch (e) {
       fallbackDetail = endOpeningStorage(false); // 開けなかった ── 診断として残す
+      markPoolOpenFailed(dbName); // 窓の後に着く残りも console へ出さない(#1311)
       vfs = 'memory';
       fallbackReason = String(e);
       opened = new sqlite3.oo1.DB(':memory:');
