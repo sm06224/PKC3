@@ -40,6 +40,7 @@ const MARK = 'PKC3-POPUPSYNC';
 const EXCERPT = readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8');
 const SCHED_EXCERPT = readFileSync('tests/fixtures/office-lo/scheduler.excerpt.cxx', 'utf-8');
 const WINPROC_EXCERPT = readFileSync('tests/fixtures/office-lo/winproc.excerpt.cxx', 'utf-8');
+const QTMENU_EXCERPT = readFileSync('tests/fixtures/office-lo/QtMenu.excerpt.cxx', 'utf-8');
 
 /** python の module から値を取り出す(⚠ 錨の字をここへ書き写さない)。 */
 function pyJson(script: string, expr: string): unknown {
@@ -298,8 +299,8 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/21 → 22\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-menu-popup-sync.py');
-    // 22 → 23 → 24(2026-10-04): `patch-lo-uev-trace.py`(計装)/ `patch-lo-ime-nowait.py`(直し)を足した。「21 → 22」の注記は残っている
-    expect(yml).toContain('test "$n" -eq 24');
+    // 22 → 23 → 24 → 25: `patch-lo-uev-trace.py`(計装)/ `patch-lo-ime-nowait.py`(直し)/ `patch-lo-popup-wake.py`(直し。#1344、2026-10-05)を足した。「21 → 22」の注記は残っている
+    expect(yml).toContain('test "$n" -eq 25');
   });
 
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {
@@ -312,14 +313,16 @@ describe('#121 の直し(menu-popup-sync)── スコープ検査(check-patch-s
   const CHECK = 'build/office-wasm/check-patch-scope.py';
   const TASK_GONE = 'build/office-wasm/patch-lo-scheduler-task-gone.py';
   const IME_NOWAIT = 'build/office-wasm/patch-lo-ime-nowait.py';
+  const POPUP_WAKE = 'build/office-wasm/patch-lo-popup-wake.py';
 
-  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 3 本 ── 全部の当て先が木に要る。 */
+  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 4 本 ── 全部の当て先が木に要る。 */
   function scopeTree(): string {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-popupsync-scope-'));
     for (const [rel, body] of [
       [REL, EXCERPT],
       ['vcl/source/app/scheduler.cxx', SCHED_EXCERPT],
       ['vcl/source/window/winproc.cxx', WINPROC_EXCERPT],
+      ['vcl/qt5/QtMenu.cxx', QTMENU_EXCERPT],
     ] as const) {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
       writeFileSync(join(dir, rel), body, 'utf-8');
@@ -353,6 +356,7 @@ describe('#121 の直し(menu-popup-sync)── スコープ検査(check-patch-s
       writeFileSync(join(dir, 'patch-lo-menu-popup-sync.py'), src.replace(from, to), 'utf-8');
       writeFileSync(join(dir, 'patch-lo-scheduler-task-gone.py'), readFileSync(TASK_GONE, 'utf-8'), 'utf-8');
       writeFileSync(join(dir, 'patch-lo-ime-nowait.py'), readFileSync(IME_NOWAIT, 'utf-8'), 'utf-8');
+      writeFileSync(join(dir, 'patch-lo-popup-wake.py'), readFileSync(POPUP_WAKE, 'utf-8'), 'utf-8');
       writeFileSync(join(dir, 'check-patch-scope.py'), readFileSync(CHECK, 'utf-8'), 'utf-8');
       return scope(join(dir, 'check-patch-scope.py'), root);
     } finally {

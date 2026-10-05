@@ -39,11 +39,13 @@ const SCRIPT = 'build/office-wasm/patch-lo-ime-nowait.py';
 const IDLES_SCRIPT = 'build/office-wasm/patch-lo-idles-trace.py';
 const POPUP_SYNC = 'build/office-wasm/patch-lo-menu-popup-sync.py';
 const TASK_GONE = 'build/office-wasm/patch-lo-scheduler-task-gone.py';
+const POPUP_WAKE = 'build/office-wasm/patch-lo-popup-wake.py';
 const REL = 'vcl/source/window/winproc.cxx';
 const MARK = 'PKC3-IMENOWAIT';
 const EXCERPT = readFileSync('tests/fixtures/office-lo/winproc.excerpt.cxx', 'utf-8');
 const MENU_EXCERPT = readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8');
 const SCHED_EXCERPT = readFileSync('tests/fixtures/office-lo/scheduler.excerpt.cxx', 'utf-8');
+const QTMENU_EXCERPT = readFileSync('tests/fixtures/office-lo/QtMenu.excerpt.cxx', 'utf-8');
 
 /** python の module から値を取り出す(⚠ 錨の字をここへ書き写さない)。 */
 function pyJson(script: string, expr: string): unknown {
@@ -533,16 +535,16 @@ describe('#121 の直し(ime-nowait)── 他の検査との関係', () => {
     expect(block).toContain('"#include <cstdio> // PKC3-IMENOWAIT"');
   });
 
-  it('🔑 workflow の本数の主張が、この 1 本を数えている(23 → 24)', () => {
+  it('🔑 workflow の本数の主張が、この 1 本を数えている(23 → 24。その後 #1344 の `patch-lo-popup-wake.py` で 25)', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/23 → 24\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-ime-nowait.py');
-    expect(yml).toContain('test "$n" -eq 24');
+    expect(yml).toContain('test "$n" -eq 25');
   });
 
-  it('🔑 実在する `patch-*.py` が 24 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
+  it('🔑 実在する `patch-*.py` が 25 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
     const files = readdirSync('build/office-wasm').filter((f) => /^patch-.*\.py$/.test(f));
-    expect(files.length).toBe(24);
+    expect(files.length).toBe(25);
     expect(files).toContain('patch-lo-ime-nowait.py');
   });
 
@@ -563,13 +565,14 @@ describe('#121 の直し(ime-nowait)── 他の検査との関係', () => {
 describe('#121 の直し(ime-nowait)── スコープ検査(check-patch-scope.py の FIXES)を実際に走らせる', () => {
   const CHECK = 'build/office-wasm/check-patch-scope.py';
 
-  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 3 本 ── 全部の当て先が木に要る。 */
+  /** FIXES だけを走らせる(`PKC3_SCOPE_ONLY=fixes`)。⚠ FIXES は 4 本 ── 全部の当て先が木に要る。 */
   function scopeTree(): string {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-imenowait-scope-'));
     for (const [rel, body] of [
       [REL, EXCERPT],
       ['framework/source/uielement/menubarmanager.cxx', MENU_EXCERPT],
       ['vcl/source/app/scheduler.cxx', SCHED_EXCERPT],
+      ['vcl/qt5/QtMenu.cxx', QTMENU_EXCERPT],
     ] as const) {
       mkdirSync(dirname(join(dir, rel)), { recursive: true });
       writeFileSync(join(dir, rel), body, 'utf-8');
@@ -603,6 +606,7 @@ describe('#121 の直し(ime-nowait)── スコープ検査(check-patch-scope.
       writeFileSync(join(dir, 'patch-lo-ime-nowait.py'), src.replace(from, to), 'utf-8');
       writeFileSync(join(dir, 'patch-lo-menu-popup-sync.py'), readFileSync(POPUP_SYNC, 'utf-8'), 'utf-8');
       writeFileSync(join(dir, 'patch-lo-scheduler-task-gone.py'), readFileSync(TASK_GONE, 'utf-8'), 'utf-8');
+      writeFileSync(join(dir, 'patch-lo-popup-wake.py'), readFileSync(POPUP_WAKE, 'utf-8'), 'utf-8');
       writeFileSync(join(dir, 'check-patch-scope.py'), readFileSync(CHECK, 'utf-8'), 'utf-8');
       return scope(join(dir, 'check-patch-scope.py'), root);
     } finally {
