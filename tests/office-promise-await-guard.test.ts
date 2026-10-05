@@ -11,15 +11,15 @@
  *
  * | 見る | 見ない |
  * |---|---|
- * | 錨(Emscripten 4.0.10 の字)に 1 度だけ当たる / 二重当て・錨無しは落ちて file 不変 | 焼きで本当に置換されるか(workflow の step。`tests/workflow-steps.test.ts` が pin) |
- * | 🔑 置換後の JS を偽の `stackSave` / timer で実走(sp が同じ → すぐ起きる / 上に frame → 待つ / 戻れば起きる / 250 周で診断と間引き / `stackSave` 無しは門なし) | 実ブラウザで trap が消えるか(probe。scratchpad 121q) |
+ * | 錨(Emscripten 4.0.10 の字)に 1 度だけ当たる / 二重当て・錨無し・錨 2 件・`stackSave` 無しは落ちて file 不変 / 置換は**足すだけ**で元へ戻せる | 焼きで本当に置換されるか(workflow の step。`tests/workflow-steps.test.ts` が pin) |
+ * | 🔑 置換後の JS を偽の `stackSave` / timer で実走(sp が同じ → すぐ起きる / 上に frame → 待つ / 戻れば起きる / 250 周で診断と間引き / 重なった 2 本の await は内側が先に起き外側は sp が戻ってから / sp が**上へ**外れていれば `unwound` で起こさない / 実行時に `stackSave` が無ければ門なし) | 実ブラウザで trap が消えるか(probe。scratchpad 121q) |
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ANCHOR, MARK, REPLACEMENT, patchText } from '../build/office-wasm/patch-soffice-js-promise-await.mjs';
+import { ANCHOR, DIAG_PREFIX, MARK, REPLACEMENT, STACK_SAVE_DEF, patchText } from '../build/office-wasm/patch-soffice-js-promise-await.mjs';
 
 const SCRIPT = 'build/office-wasm/patch-soffice-js-promise-await.mjs';
 const FIXTURE = 'tests/fixtures/emscripten/promise-await-4.0.10.excerpt.txt';
@@ -78,6 +78,61 @@ describe('promise_await の門 ── 当て方', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('🔴 錨が 2 件なら落ちる(どちらへ当てるか決められない ── 片方だけ門が無い形を作らない)', () => {
+    const twice = `${ORIG}\n${ANCHOR}\n`;
+    expect(twice.split(ANCHOR).length - 1).toBe(2);
+    expect(() => patchText(twice)).toThrow('錨が 2 件');
+  });
+
+  it('🔴 `stackSave` の定義が無い一式には当てない(門が黙って無くなる形)── CLI は落ちて file 不変', () => {
+    expect(ORIG.split(STACK_SAVE_DEF).length - 1, 'fixture に stackSave の定義が 1 件でない').toBe(1);
+    const noSave = ORIG.replace(STACK_SAVE_DEF, 'var stackSave=()=>0;');
+    expect(noSave).not.toBe(ORIG);
+    expect(noSave.split(ANCHOR).length - 1, '錨は残っている(落ちる理由が錨でないことの対照)').toBe(1);
+    expect(() => patchText(noSave)).toThrow('stackSave の定義が無い');
+    const dir = mkdtempSync(join(tmpdir(), 'pkc3-pa-'));
+    const f = join(dir, 'soffice.js');
+    try {
+      writeFileSync(f, noSave);
+      const r = run(f);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('stackSave の定義が無い');
+      expect(readFileSync(f, 'utf-8')).toBe(noSave);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('🔑 置換は「足すだけ」── 足した字を抜くと錨そのものに戻る(元の動きを 1 字も変えていない)', () => {
+    const INSERTIONS = [
+      'const pkc3sp=(typeof stackSave==="function")?stackSave():null;',
+      '.then(r=>pkc3WaitSp(pkc3sp,r))',
+    ];
+    const tail = REPLACEMENT.indexOf('Module.pkc3PaGuard=1;');
+    expect(tail, '印が無い').toBeGreaterThan(-1);
+    let stripped = REPLACEMENT.slice(0, tail);
+    for (const ins of INSERTIONS) {
+      expect(stripped.split(ins).length - 1, `足した字 ${ins} が 1 件でない`).toBe(1);
+      stripped = stripped.replace(ins, '');
+    }
+    expect(stripped).toBe(ANCHOR);
+    // 末尾(印 + 待つ関数)は宣言だけ ── 元の関数の外に在る
+    expect(REPLACEMENT.slice(tail)).toMatch(/^Module\.pkc3PaGuard=1;function pkc3WaitSp\(sp,r\)\{/);
+  });
+
+  it('🔑 可逆 ── 当てた字から置換後を錨へ戻すと、1 バイト違わず元に戻る', () => {
+    const out = patchText(ORIG);
+    expect(out.split(REPLACEMENT).length - 1).toBe(1);
+    expect(out.replace(REPLACEMENT, () => ANCHOR)).toBe(ORIG);
+  });
+
+  it('🔑 診断行の頭は全部 `PKC3-UEV pa-defer`(probe の ring はこの字で拾う)', () => {
+    const marks = [...REPLACEMENT.matchAll(/"(PKC3-UEV[^"]*)"/g)].map((m) => m[1]!);
+    expect(marks.length, '診断の字が 1 つも無い').toBeGreaterThanOrEqual(2);
+    for (const m of marks) expect(m.startsWith(DIAG_PREFIX), `頭が違う: ${m}`).toBe(true);
+    expect(DIAG_PREFIX).toBe('PKC3-UEV pa-defer');
+  });
 });
 
 /**
@@ -94,7 +149,7 @@ describe('promise_await の門 ── 実走', () => {
     const delays: number[] = [];
     const errs: string[] = [];
     const results: unknown[] = [];
-    let resolveInner: ((v: unknown) => void) | null = null;
+    const pending = new Map<number, (v: unknown) => void>();
     const Module: Record<string, unknown> = {};
     const fn = new Function(
       'Asyncify',
@@ -107,7 +162,7 @@ describe('promise_await の門 ── 実走', () => {
       `${src}\nreturn _emscripten_promise_await;`,
     )(
       { handleAsync: (f: () => Promise<unknown>) => f() },
-      () => new Promise((res) => { resolveInner = res; }),
+      (id: number) => new Promise((res) => { pending.set(id, res); }),
       (_p: number, ok: boolean, v: unknown) => { results.push([ok, v]); },
       opt.stackSave === false ? undefined : () => sp,
       (f: () => void, ms = 0) => { delays.push(ms); timers.push(f); },
@@ -115,6 +170,7 @@ describe('promise_await の門 ── 実走', () => {
       { error: (...a: unknown[]) => errs.push(a.map(String).join(' ')) },
     ) as (p: number, id: number) => Promise<unknown>;
     let woke = 0;
+    const wokeOrder: number[] = [];
     return {
       Module,
       timers,
@@ -122,14 +178,18 @@ describe('promise_await の門 ── 実走', () => {
       errs,
       results,
       sp: (v?: number) => (v === undefined ? sp : (sp = v)),
-      /** main が await に入る(呼んだ瞬間の sp を控える)。起きたら `woke` が増える。 */
-      await(): void {
-        void fn(16, 1).then(() => { woke += 1; });
+      /** main が await に入る(呼んだ瞬間の sp を控える)。起きたら `woke` が増え、`wokeOrder` に id が積まれる。 */
+      await(id = 1): void {
+        void fn(16, id).then(() => { woke += 1; wokeOrder.push(id); });
       },
       /** proxy の結果が返る。 */
-      settle(): void {
-        resolveInner!('ok');
+      settle(id = 1): void {
+        const res = pending.get(id);
+        if (!res) throw new Error(`id=${id} の promise が無い(await していない)`);
+        pending.delete(id);
+        res('ok');
       },
+      wokeOrder,
       fire(): void {
         for (const t of timers.splice(0)) t();
       },
@@ -192,9 +252,60 @@ describe('promise_await の門 ── 実走', () => {
     await h.flush();
     return { at249, at250, delay250, delayBefore, wokeEnd: h.woke() };
   }
+  /**
+   * 場面 D: await が 2 本重なる ── 外側(main、sp=65536)が待っている間に、上に積んだ別の計算(sp=65536-48)も
+   * await に入る。外側の promise が**先に**解決しても、内側が起きて返るまで外側は起こさない。
+   */
+  async function sceneD(src: string): Promise<{ order: number[]; outerWokeEarly: number; innerWokeNow: number }> {
+    const h = harness(src);
+    h.await(1); // 外側
+    await h.flush();
+    h.sp(65536 - 48); // 別の計算が上に積んで…
+    h.await(2); // …自分も await に入る
+    await h.flush();
+    h.settle(1); // 外側の結果が先に返る(上に内側が生きている)
+    await h.flush();
+    h.fire();
+    await h.flush();
+    const outerWokeEarly = h.wokeOrder.filter((id) => id === 1).length;
+    h.settle(2); // 内側の結果 ── sp はそのまま(内側の frame が top)なのですぐ起きる
+    await h.flush();
+    const innerWokeNow = h.wokeOrder.filter((id) => id === 2).length;
+    h.sp(65536); // 内側が返った
+    h.fire();
+    await h.flush();
+    return { order: [...h.wokeOrder], outerWokeEarly, innerWokeNow };
+  }
+  /** 場面 E: sp が控えより**高い**(自分の frame が無い = unwound)→ 起こさない。診断は `dir=unwound`。 */
+  async function sceneE(src: string): Promise<{ woke: number; dir: string; timersLeft: number }> {
+    const h = harness(src);
+    h.await();
+    await h.flush();
+    h.sp(65536 + 16);
+    h.settle();
+    await h.flush();
+    for (let i = 0; i < 5; i++) {
+      h.fire();
+      await h.flush();
+    }
+    const m = /dir=(\w+)/.exec(h.errs[0] ?? '');
+    return { woke: h.woke(), dir: m?.[1] ?? '', timersLeft: h.timers.length };
+  }
   const ABOVE = 'B1: 上に frame が生きているのに起こした(踏む)';
-  function claims(a: Awaited<ReturnType<typeof sceneA>>, b: Awaited<ReturnType<typeof sceneB>>, c: Awaited<ReturnType<typeof sceneC>>): string[] {
+  function claims(
+    a: Awaited<ReturnType<typeof sceneA>>,
+    b: Awaited<ReturnType<typeof sceneB>>,
+    c: Awaited<ReturnType<typeof sceneC>>,
+    d: Awaited<ReturnType<typeof sceneD>>,
+    e: Awaited<ReturnType<typeof sceneE>>,
+  ): string[] {
     const bad: string[] = [];
+    if (d.outerWokeEarly !== 0) bad.push('D1: 内側が生きているのに外側を起こした');
+    if (d.innerWokeNow !== 1) bad.push('D2: 内側(top)がすぐ起きていない');
+    if (d.order.join(',') !== '2,1') bad.push(`D3: 起きる順が 内→外 でない: ${d.order.join(',')}`);
+    if (e.woke !== 0) bad.push('E1: 自分の frame が無い(sp が高い)のに起こした');
+    if (e.dir !== 'unwound') bad.push(`E2: 向きが unwound でない: ${e.dir}`);
+    if (e.timersLeft !== 1) bad.push(`E3: 待ち続けていない(timer ${e.timersLeft} 本)`);
     if (a.woke !== 1) bad.push('A1: 上に誰も居ないのに起きない');
     if (a.timers !== 0) bad.push('A2: 上に誰も居ないのに timer を置いた');
     if (a.errs !== 0) bad.push('A3: 上に誰も居ないのに診断が出た');
@@ -213,11 +324,15 @@ describe('promise_await の門 ── 実走', () => {
     return bad;
   }
 
-  it('🔴 置換後: 上に誰も居なければすぐ起き、上に frame が生きていれば戻るまで待ち、250 周で診断と間引き', async () => {
-    expect(claims(await sceneA(REPLACEMENT), await sceneB(REPLACEMENT), await sceneC(REPLACEMENT))).toEqual([]);
+  async function all(src: string): Promise<string[]> {
+    return claims(await sceneA(src), await sceneB(src), await sceneC(src), await sceneD(src), await sceneE(src));
+  }
+
+  it('🔴 置換後: 上に誰も居なければすぐ起き、上に frame が生きていれば戻るまで待ち、250 周で診断と間引き、重なった await は内→外、unwound は起こさない', async () => {
+    expect(await all(REPLACEMENT)).toEqual([]);
   });
 
-  it('⚠ `stackSave` が無い一式では門なし(= 従来どおり。上に frame が居ても起きる)', async () => {
+  it('⚠ 実行時に `stackSave` の名前が届かなければ門なし(= 従来どおり。上に frame が居ても起きる)── 焼いた物の検品は patchText が先に落とす', async () => {
     const h = harness(REPLACEMENT, { stackSave: false });
     h.await();
     await h.flush();
@@ -240,6 +355,8 @@ describe('promise_await の門 ── 実走', () => {
     { name: '③ 再予約を外す(戻ったのを誰も見ない)', from: 'setTimeout(tick,n>=250?100:0)};setTimeout(tick)', to: '};setTimeout(tick)', claim: 'B3' },
     { name: '④ 診断の閾値を 2 周にする', from: 'if(n===1||n===250)', to: 'if(n===1||n===2)', claim: 'C1' },
     { name: '⑤ 間引かない', from: 'setTimeout(tick,n>=250?100:0)', to: 'setTimeout(tick,0)', claim: 'C4' },
+    { name: '⑥ 向きを裏返す', from: '(stackSave()<sp?"above":"unwound")', to: '(stackSave()<sp?"unwound":"above")', claim: 'B7' },
+    { name: '⑦ 上だけ見る(unwound は起こす)', from: 'if(sp===null||typeof stackSave!=="function"||stackSave()===sp)return r;', to: 'if(sp===null||typeof stackSave!=="function"||stackSave()>=sp)return r;', claim: 'E1' },
   ];
   it.each(MUTANTS)('🔴 変異 $name → KILLED', async ({ from, to, claim }) => {
     const hits = REPLACEMENT.split(from).length - 1;
@@ -247,7 +364,7 @@ describe('promise_await の門 ── 実走', () => {
     const mutated = REPLACEMENT.replace(from, () => to);
     let bad: string[];
     try {
-      bad = claims(await sceneA(mutated), await sceneB(mutated), await sceneC(mutated));
+      bad = await all(mutated);
     } catch (e) {
       bad = [`threw: ${String(e)}`];
     }

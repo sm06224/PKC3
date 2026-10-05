@@ -20,8 +20,11 @@
  * `_emscripten_promise_await` で await に入るとき `stackSave()`(= `_emscripten_stack_get_current()`)を控え、
  * promise が解決したとき **同じ値へ戻っていなければ起こさず待つ**(上に生きている frame が在る)。
  * 直列化(同じ stack に載せる)ではない ── 自分の sp が戻るまで `setTimeout` で見る。
- * 約 1 秒(250 周)戻らなければ `PKC3-UEV pa-defer …` を 1 度出し、以後は 100 ms に間引く。
- * `stackSave` が無い一式では門なし(= 従来どおり)。
+ * 診断(`PKC3-UEV pa-defer …`)は 3 点で出す ── 待ちに入った 1 周目 / 約 1 秒(250 周)戻らないとき /
+ * 戻って起こしたとき(`pa-defer end`)。250 周を超えたら 100 ms に間引く。
+ * ⚠ `stackSave` は Emscripten の runtime が必ず出す(`var stackSave=()=>_emscripten_stack_get_current();`)。
+ * 🔴 **無ければこの script は落ちる**(門が黙って無くなる形を作らない)── 置換後の JS に残る
+ * `typeof stackSave` の控えは、焼いた物の検品ではなく、実行時に名前が届かなかったときの最後の保険である。
  *
  * ## なぜ焼きの後に置換するのか
  *
@@ -29,6 +32,8 @@
  * Qt の source にも無い。`--js-library` で上書きするには LO の link 行へ手を入れる必要が在り、
  * `--post-js` では `wasmImports` に束ねられた後になる。**焼けた `soffice.js` の字を置換する**のがいちばん
  * 確実で、同じ置換を手元の pack で**焼かずに**検めた(scratchpad 121q)。
+ * 🔑 当てる先は **配る一式**(`workdir/installation/LibreOffice/emscripten/soffice.js`)── `instdir` を直しても
+ * `make instsetoo_native` が集め直すので、集めた後に当てて、同じ file で印を検める。
  * ⚠ 錨は **Emscripten 4.0.10 の minify 後の字**(`tests/fixtures/emscripten/promise-await-4.0.10.excerpt.txt`)。
  * Emscripten を上げて字が変わったら、この script は**落ちる**(黙って素通りしない)。
  *
@@ -38,6 +43,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 export const MARK = 'pkc3PaGuard';
+
+/** 診断行の頭(probe の ring はこの字で拾う)。 */
+export const DIAG_PREFIX = 'PKC3-UEV pa-defer';
+
+/** Emscripten の runtime が出す `stackSave` の定義(これが無い一式には当てない)。 */
+export const STACK_SAVE_DEF = 'var stackSave=()=>_emscripten_stack_get_current();';
 
 /** Emscripten 4.0.10 が出す `_emscripten_promise_await` の定義(minify 済み。⚠ 1 字も変えない)。 */
 export const ANCHOR =
@@ -65,9 +76,15 @@ export const REPLACEMENT =
   'if(n===1||n===250)console.error("PKC3-UEV pa-defer n="+n+" sp="+stackSave()+" want="+sp+" dir="+(stackSave()<sp?"above":"unwound"));' +
   'setTimeout(tick,n>=250?100:0)};setTimeout(tick)})}';
 
-/** 置換して新しい字を返す。⚠ 落ちる条件: 既に当たっている / 錨が 1 件でない。 */
+/** 置換して新しい字を返す。⚠ 落ちる条件: 既に当たっている / `stackSave` の定義が無い / 錨が 1 件でない。 */
 export function patchText(text) {
   if (text.includes(MARK)) throw new Error(`既に当たっている(${MARK} が在る)── 二重当ては受けない`);
+  if (!text.includes(STACK_SAVE_DEF)) {
+    throw new Error(
+      `stackSave の定義が無い(\`${STACK_SAVE_DEF}\` が 0 件)── 門が黙って無くなる形になるので当てない。` +
+        ' Emscripten の版が変わって runtime の字が変わったなら、錨と一緒に STACK_SAVE_DEF を更新する',
+    );
+  }
   const hits = text.split(ANCHOR).length - 1;
   if (hits !== 1) {
     throw new Error(
