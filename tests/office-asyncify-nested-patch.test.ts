@@ -11,6 +11,8 @@
  * `QMenu::hideEvent` → `QEventLoop::exit(int)` が `unaligned accesses` で trap した(実ブラウザ)。
  * v2 は suspend を **stack**(`Module.qtSuspends`)に積み、**LIFO で起こす**:最も内側だけを見て、
  * 起こされていなければ外側は待ち、内側が JS へ戻った後の tick で外側を起こす。
+ * v3 は suspend のとき **shadow stack の位置(`stackSave()`)** を控え、tick で起こす前に**同じ位置に戻っている**ことを見る
+ * (Qt 以外の JSPI suspend が top の上で生きている間は起こさない。`stackSave` が無ければ門なし = v2)。
  *
  * ## ⚠ ここで検められること / 検められないこと
  *
@@ -68,7 +70,7 @@ const PATCHED = (() => {
 
 describe('#1344 の直し(asyncify-nested)── 当て方', () => {
   it('🔴 原文に当たり、1 枠・suspendId・1 bit が消えて suspend の stack と深さの数が入る', () => {
-    expect(PATCHED).toContain('Module.qtSuspends.push({ resolve: resolve, wake: false });');
+    expect(PATCHED).toContain('Module.qtSuspends.push({ resolve: resolve, wake: false, sp: sp });');
     expect(PATCHED).toContain('static int g_asyncify_suspend_depth = 0;');
     // 🔴 原文の 1 枠と suspendId は、**どの字も**残っていない(v1 の `qtAsyncifyWakeUps` も含めて 0 件)
     expect(PATCHED).not.toContain('qtAsyncifyWakeUp');
@@ -289,14 +291,33 @@ EM_JS(void, qt_asyncify_resume_js, (), {
 });
 `;
 
-  function harness(src: string) {
+  /**
+   * 🔑 **shadow stack(`__stack_pointer`)を模す**:JSPI は wasm の frame は保存するが、この global は保存も復元もしない。
+   * 値を動かすのは関数の prologue(押す)/ epilogue(戻す)だけ。だから
+   * - 新しく JS から入った frame は **押してから** suspend する(`sp -= 16`)
+   * - 起きた frame が **JS へ戻る**(`then` の中で再 suspend しない)なら、押す前の値へ**戻す**
+   * - 起きた frame が `then` の中で **再 suspend** する(B → B2)のは**同じ frame が同じ深さで止まり直す**こと ──
+   *   押さず、戻すときの値(押す前)は元の frame から引き継ぐ
+   * - 🔴 **この stack に載らない suspend**(Qt 以外の JSPI suspend)は `foreignPush()` / `foreignPop()` で模す
+   * `stackSave: false` で起動すると `stackSave` が無い一式(門なし)になる。
+   */
+  function harness(src: string, opt: { stackSave?: boolean } = {}) {
     const suspendBody = bodyOf(src, 'EM_ASYNC_JS(void, qt_asyncify_suspend_js, (), {');
     const resumeBody = bodyOf(src, 'EM_JS(void, qt_asyncify_resume_js, (), {');
     const Module: Mod = {};
     const timers: (() => void)[] = [];
     const fakeSetTimeout = (fn: () => void): number => timers.push(fn);
-    const suspendFn = new AsyncFunction('Module', suspendBody);
-    const resumeFn = new Function('Module', 'setTimeout', resumeBody) as (m: Mod, st: typeof fakeSetTimeout) => void;
+    let sp = 65536;
+    let suspends = 0;
+    /** いま `then` を走らせている frame の「押す前の値」(その中の suspend は同じ frame の止まり直し)。 */
+    let waking: { before: number } | null = null;
+    const stackSave = opt.stackSave === false ? undefined : (): number => sp;
+    const suspendFn = new AsyncFunction('Module', 'stackSave', suspendBody);
+    const resumeFn = new Function('Module', 'setTimeout', 'stackSave', resumeBody) as (
+      m: Mod,
+      st: typeof fakeSetTimeout,
+      ss: (() => number) | undefined,
+    ) => void;
     const woke: Woke[] = [];
     const pending = new Set<string>();
     const stackLen = (): number => {
@@ -307,16 +328,40 @@ EM_JS(void, qt_asyncify_resume_js, (), {
       woke,
       timers,
       stackLen,
+      sp: (): number => sp,
       /** 名前を付けて suspend する。起きたら `woke` へ積み、`then` を走らせる(= その frame が次にやること)。 */
       suspend(name: string, then?: () => void): void {
         pending.add(name);
-        void suspendFn(Module).then(() => {
+        let before: number;
+        if (waking === null) {
+          before = sp; // JS から入った新しい frame ── 押す
+          sp -= 16;
+        } else {
+          before = waking.before; // 起きた frame の止まり直し ── 同じ深さ
+        }
+        suspends += 1;
+        void suspendFn(Module, stackSave).then(() => {
           pending.delete(name);
           woke.push({ name, pending: [...pending].sort(), stack: stackLen() });
-          then?.();
+          const n = suspends;
+          waking = { before };
+          try {
+            then?.();
+          } finally {
+            waking = null;
+          }
+          if (suspends === n) sp = before; // JS へ戻った = epilogue が sp を戻す
         });
       },
-      resume: (): void => resumeFn(Module, fakeSetTimeout),
+      /** Qt 以外の JSPI suspend が top の上で生きる(`Module.qtSuspends` には載らない)。 */
+      foreignPush(): void {
+        sp -= 16;
+      },
+      /** その frame が戻った。 */
+      foreignPop(): void {
+        sp += 16;
+      },
+      resume: (): void => resumeFn(Module, fakeSetTimeout, stackSave),
       /** 置かれた timer を全部発火させる(= `setTimeout(0)` が 1 周した)。⚠ 発火中に足された timer は次の周で回る。 */
       fire(): void {
         for (const t of timers.splice(0)) t();
@@ -335,8 +380,8 @@ EM_JS(void, qt_asyncify_resume_js, (), {
    * 外側 A suspend → resume#1 → 内側 B suspend(B は起きたら**もう一度 suspend** = B2)→
    * tick① → resume#2 → tick② → tick③ → resume#3 → tick④ → tick⑤。各 tick の後の「起きた名前」を返す。
    */
-  async function sceneB(src: string): Promise<{ h: H; steps: string[][] }> {
-    const h = harness(src);
+  async function sceneB(src: string, opt: { stackSave?: boolean } = {}): Promise<{ h: H; steps: string[][] }> {
+    const h = harness(src, opt);
     const steps: string[][] = [];
     const tick = async (): Promise<void> => {
       h.fire();
@@ -359,8 +404,8 @@ EM_JS(void, qt_asyncify_resume_js, (), {
   }
 
   /** 場面 C(2 つ溜まっているところへ resume が **1 回だけ**): 外側 A・内側 B が suspend → resume#1 → tick① → tick②。 */
-  async function sceneC(src: string): Promise<{ h: H; steps: string[][] }> {
-    const h = harness(src);
+  async function sceneC(src: string, opt: { stackSave?: boolean } = {}): Promise<{ h: H; steps: string[][] }> {
+    const h = harness(src, opt);
     const steps: string[][] = [];
     h.suspend('A');
     h.suspend('B');
@@ -396,6 +441,41 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     if (!same(r.steps[1], ['B', 'A'])) bad.push('C2: 内側が戻った後の tick で外側が起きていない(resume を足していない)');
     const a = r.h.woke.find((w) => w.name === 'A');
     if (a !== undefined && a.pending.length > 0) bad.push(LIFO);
+    return bad;
+  }
+
+  /**
+   * 場面 E(v3。**この stack に載らない frame が top の上で生きている**):
+   * A suspend → resume → Qt 以外の suspend が A の上で生きる(`foreignPush`)→ tick① → **待っている間に resume がもう 1 回**
+   * → tick②(どちらも A は起きない。timer は 1 本のまま)→ その frame が戻る(`foreignPop`)→ tick③(A が起きる)。
+   * 各 tick の後の「起きた名前」と、tick② の後の timer の数を返す。
+   */
+  async function sceneE(src: string, opt: { stackSave?: boolean } = {}): Promise<{ h: H; steps: string[][]; armedWhileForeign: number }> {
+    const h = harness(src, opt);
+    const steps: string[][] = [];
+    const tick = async (): Promise<void> => {
+      h.fire();
+      await h.flush();
+      steps.push(h.names());
+    };
+    h.suspend('A');
+    await h.flush();
+    h.resume();
+    h.foreignPush();
+    await tick(); // ①
+    h.resume(); // 待っている間の wake ── armed が立っていれば timer を足さない
+    await tick(); // ②
+    const armedWhileForeign = h.timers.length;
+    h.foreignPop();
+    await tick(); // ③
+    return { h, steps, armedWhileForeign };
+  }
+  const FOREIGN = 'E1: 上に別の frame が生きているのに、外側が起きた(shadow stack を踏む)';
+  function claimsE(r: { steps: string[][]; armedWhileForeign: number }): string[] {
+    const bad: string[] = [];
+    if (!same(r.steps[0], []) || !same(r.steps[1], [])) bad.push(FOREIGN);
+    if (r.armedWhileForeign !== 1) bad.push(`E2: 待っている間に tick が ${r.armedWhileForeign} 本(1 本でない ── 戻ったのを誰も見ない / 二重)`);
+    if (!same(r.steps[2], ['A'])) bad.push('E3: 上の frame が戻った後の tick で、外側が起きていない');
     return bad;
   }
 
@@ -529,6 +609,59 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     expect(r.h.woke.find((w) => w.name === 'A')!.stack).toBe(0);
   });
 
+  it('🔴 (e) v3: この stack に載らない frame が top の上で生きている間は起こさず、戻った後の tick で起こす(sp の門)', async () => {
+    const r = await sceneE(PATCHED);
+    expect(claimsE(r)).toEqual([]);
+    // 起きた時点で sp は suspend したときの値へ戻っている
+    expect(r.h.sp()).toBe(65536);
+  });
+
+  it('🔴 (e) v3: 普段の入れ子(場面 B / C)でも門は開いている ── sp は起こす前に必ず同じ値へ戻っている(待ちが 0 周)', async () => {
+    // ⚠ 門が普段の経路で閉じると、LO の main loop は**一度も起きない**(読み込みすら終わらない)。場面 B / C が
+    //    v2 と同じ周で起きていること(claimsB / claimsC)が、門が 1 周も待っていない証拠。
+    const rb = await sceneB(PATCHED);
+    expect(claimsB(rb)).toEqual([]);
+    expect(rb.h.sp(), '全部戻った後の sp が元に戻っていない(台の模型が壊れている)').toBe(65536);
+    const rc = await sceneC(PATCHED);
+    expect(claimsC(rc)).toEqual([]);
+  });
+
+  it('⚠ (e) v3: `stackSave` が無い一式では門なし(= v2)── 場面 B / C は同じに動き、場面 E は外側が起きる(守れない)', async () => {
+    expect(claimsB(await sceneB(PATCHED, { stackSave: false }))).toEqual([]);
+    expect(claimsC(await sceneC(PATCHED, { stackSave: false }))).toEqual([]);
+    const re = await sceneE(PATCHED, { stackSave: false });
+    expect(claimsE(re)).toContain(FOREIGN);
+    // ⚠ 投げていない(`stackSave` を裸で参照していない)── 投げると suspend 自体が壊れて、何も起きない
+    expect(re.h.names()).toEqual(['A']);
+  });
+
+  it('⚠ (e) v3: 約 1 秒(250 周)戻らなければ診断を 1 度だけ出し、起こしはしない', async () => {
+    const h = harness(PATCHED);
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => errs.push(a.map(String).join(' '));
+    try {
+      h.suspend('A');
+      await h.flush();
+      h.resume();
+      h.foreignPush();
+      for (let i = 0; i < 600; i++) {
+        h.fire();
+        await h.flush();
+      }
+      expect(h.names(), '待っている間に起こした').toEqual([]);
+      expect(errs.length, '診断が 1 度でない').toBe(1);
+      expect(errs[0]).toContain('PKC3-UEV sp-defer');
+      h.foreignPop();
+      h.fire();
+      await h.flush();
+      expect(h.names()).toEqual(['A']);
+      expect(errs.length).toBe(1);
+    } finally {
+      console.error = orig;
+    }
+  });
+
   it('🔴 (d) 対照群・原文: 外側の resolver は**捨てられ**、二度と起きない', async () => {
     const rb = await sceneB(ORIG);
     expect(rb.h.names(), '原文でも外側が起きている ── 対照群が捨てを再現していない').not.toContain('A');
@@ -590,16 +723,42 @@ EM_JS(void, qt_asyncify_resume_js, (), {
       claim: 'B5: 内側が戻った後に、外側が起きていない',
     },
     {
+      // ⚠ v2 では LIFO 違反(外側が内側を踏む)で破れた。v3 は sp の門が「上に frame が生きている」を見て**起こさない**ので、
+      //    壊れ方が「踏む」から「誰も起きない」へ変わる(実機では約 1 秒後に `PKC3-UEV sp-defer` が出る)。どちらも KILLED。
       name: '④ 最も内側ではなく最も外側を見る(`s[s.length - 1]` → `s[0]`。LIFO を FIFO にする)',
       from: '        const top = s[s.length - 1];',
       to: '        const top = s[0];',
-      claim: LIFO,
+      claim: 'B2: ',
     },
     {
       name: '⑤ tick の頭で armed を落とさない(次の resume が tick を予約できなくなる)',
       from: '        Module.qtResumeTickArmed = false; // PKC3-ASYNCNEST\n',
       to: '',
       claim: 'B2: resume#2 の tick で、内側だけが起きていない',
+    },
+    {
+      name: '⑥ sp の門を外す(`stackSave() !== top.sp` を false に ── 上に frame が生きていても起こす)',
+      from: "        if (top.sp !== null && typeof stackSave === 'function' && stackSave() !== top.sp) { // PKC3-ASYNCNEST",
+      to: '        if (false) { // PKC3-ASYNCNEST',
+      claim: FOREIGN,
+    },
+    {
+      name: '⑦ suspend で sp を控えない(`sp: sp` → `sp: null` ── 門が常に開く)',
+      from: '        Module.qtSuspends.push({ resolve: resolve, wake: false, sp: sp }); // PKC3-ASYNCNEST',
+      to: '        Module.qtSuspends.push({ resolve: resolve, wake: false, sp: null }); // PKC3-ASYNCNEST',
+      claim: FOREIGN,
+    },
+    {
+      name: '⑧ 待ちの再予約を外す(戻ったのを誰も見に来ない ── 外側が永久に起きない)',
+      from: '            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
+      to: '',
+      claim: 'E2: ',
+    },
+    {
+      name: '⑨ 待ちで armed を立てない(次の resume が tick を二重に置く)',
+      from: '            Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST\n            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
+      to: '            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
+      claim: 'E2: ',
     },
   ];
 
@@ -610,16 +769,16 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     expect(mutated, 'NOT-APPLIED: 何も変わっていない').not.toBe(PATCHED);
     let claims: string[];
     try {
-      claims = [...claimsB(await sceneB(mutated)), ...claimsC(await sceneC(mutated))];
+      claims = [...claimsB(await sceneB(mutated)), ...claimsC(await sceneC(mutated)), ...claimsE(await sceneE(mutated))];
     } catch (e) {
       claims = [`threw: ${String(e)}`];
     }
-    expect(claims.length, 'SURVIVED: 変異を当てても場面 B / C の主張が 1 つも破れない').toBeGreaterThan(0);
+    expect(claims.length, 'SURVIVED: 変異を当てても場面 B / C / E の主張が 1 つも破れない').toBeGreaterThan(0);
     expect(claims.some((c) => c.startsWith(claim)), `KILLED だが別の主張で: ${claims.join(' / ')}(期待: ${claim})`).toBe(true);
   });
 
-  it('⚠ 対照: 変異を当てていない v2 は、同じ台で主張が 1 つも破れない(台が全部を破っているのではない)', async () => {
-    expect([...claimsB(await sceneB(PATCHED)), ...claimsC(await sceneC(PATCHED))]).toEqual([]);
+  it('⚠ 対照: 変異を当てていない v3 は、同じ台で主張が 1 つも破れない(台が全部を破っているのではない)', async () => {
+    expect([...claimsB(await sceneB(PATCHED)), ...claimsC(await sceneC(PATCHED)), ...claimsE(await sceneE(PATCHED))]).toEqual([]);
   });
 });
 
