@@ -29,7 +29,7 @@
  * Qt の source にも無い。`--js-library` で上書きするには LO の link 行へ手を入れる必要が在り、
  * `--post-js` では `wasmImports` に束ねられた後になる。**焼けた `soffice.js` の字を置換する**のがいちばん
  * 確実で、同じ置換を手元の pack で**焼かずに**検めた(scratchpad 121q)。
- * ⚠ 錨は **Emscripten 4.0.10 の minify 後の字**(`tests/fixtures/emscripten/promise-await-4.0.10.excerpt.js`)。
+ * ⚠ 錨は **Emscripten 4.0.10 の minify 後の字**(`tests/fixtures/emscripten/promise-await-4.0.10.excerpt.txt`)。
  * Emscripten を上げて字が変わったら、この script は**落ちる**(黙って素通りしない)。
  *
  * 使い方: `node build/office-wasm/patch-soffice-js-promise-await.mjs <soffice.js>`
@@ -72,7 +72,7 @@ export function patchText(text) {
   if (hits !== 1) {
     throw new Error(
       `錨が ${hits} 件(1 件でない)── Emscripten の版が変わって \`_emscripten_promise_await\` の字が変わった。` +
-        ' tests/fixtures/emscripten/promise-await-*.excerpt.js を新しい版で切り出し直してから錨を更新する',
+        ' tests/fixtures/emscripten/promise-await-*.excerpt.txt を新しい版で切り出し直してから錨を更新する',
     );
   }
   return text.replace(ANCHOR, () => REPLACEMENT);

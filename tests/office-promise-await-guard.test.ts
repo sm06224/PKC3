@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { ANCHOR, MARK, REPLACEMENT, patchText } from '../build/office-wasm/patch-soffice-js-promise-await.mjs';
 
 const SCRIPT = 'build/office-wasm/patch-soffice-js-promise-await.mjs';
-const FIXTURE = 'tests/fixtures/emscripten/promise-await-4.0.10.excerpt.js';
+const FIXTURE = 'tests/fixtures/emscripten/promise-await-4.0.10.excerpt.txt';
 const ORIG = readFileSync(FIXTURE, 'utf-8');
 
 function run(path: string): { code: number; out: string } {
