@@ -460,6 +460,55 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     expect(h2.timers.length, 'suspend していないのに timer を足した').toBe(0);
   });
 
+  it('③ v2: 再予約の空 tick を回した後も、次の suspend → resume は timer を 1 つ置いて起きる(armed の戻し)', async () => {
+    // ⚠ 着地前レビュー(2026-10-05)の M-A: tick 頭の `armed = false` を「stack が空なら return」の後ろへ動かすと、
+    //    空 tick が armed を立てたまま終わり、次の resume が timer を置けず、LO の main loop が 2 回目の wake で永久に止まる。
+    //    上の「(a) 再予約の tick が残っていても」は空 tick を**回さずに**次へ進むので、この形を見ていなかった。
+    const h = harness(PATCHED);
+    h.suspend('A');
+    await h.flush();
+    h.resume();
+    h.fire();
+    await h.flush();
+    expect(h.names()).toEqual(['A']);
+    expect(h.timers.length, '再予約の tick が無い').toBe(1);
+    h.fire(); // 空 tick を回す(stack は空)
+    await h.flush();
+    expect(h.timers.length).toBe(0);
+    h.suspend('A3');
+    await h.flush();
+    h.resume();
+    expect(h.timers.length, '空 tick の後の resume が timer を置けない(armed が立ったまま)').toBe(1);
+    h.fire();
+    await h.flush();
+    expect(h.names()).toEqual(['A', 'A3']);
+  });
+
+  it('③ v2: 単独の entry が起きて再 suspend しても、再予約の tick は wake の無い entry を起こさない(空転しない)', async () => {
+    // ⚠ 着地前レビュー(2026-10-05)の M-B: `if (!top.wake) return;` を `s.length > 1` のときだけにすると、
+    //    入れ子でない LO の普段の loop(suspend → 起きる → 再 suspend)が tick ごとに自発的に起き続け、
+    //    setTimeout 周期で空転する(常駐 CPU の実害)。場面 B は外側が下に居るときしか見ない。
+    const h = harness(PATCHED);
+    h.suspend('A', () => h.suspend('A2'));
+    await h.flush();
+    h.resume();
+    h.fire();
+    await h.flush();
+    expect(h.names()).toEqual(['A']);
+    expect(h.stackLen(), 'A2 が積まれていない').toBe(1);
+    for (let i = 0; i < 3; i++) {
+      h.fire();
+      await h.flush();
+    }
+    expect(h.names(), 'wake の無い A2 が tick で起きた(空転)').toEqual(['A']);
+    expect(h.timers.length, '誰も起こさない tick が回り続けている').toBe(0);
+    // wake が来れば起きる(止まっているのではない)
+    h.resume();
+    h.fire();
+    await h.flush();
+    expect(h.names()).toEqual(['A', 'A2']);
+  });
+
   it('🔴 (b) v2: 入れ子 ── 内側だけが先に起き、外側は内側が JS へ戻った後で、stack に内側が 1 つも無い状態で起きる', async () => {
     const r = await sceneB(PATCHED);
     expect(claimsB(r)).toEqual([]);
