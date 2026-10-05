@@ -50,9 +50,19 @@ mouse callback の stack の上で menu の入れ子 loop が suspend してい�
 ## v3 ── shadow stack の位置で門を置く(Gemini 2026-10-05 の Q2c。sp guard)
 
 v2 の LIFO は **Qt 自身の suspend だけ**を stack に持つ。⚠ JSPI の suspend は Qt の
-`processEvents` 以外にも在りうる(Emscripten の `emscripten_sleep` / fetch の Suspending import、
-Qt の `qstdweb` の非同期呼び出し)── それらは `Module.qtSuspends` に載らないので、
-**その frame が top の上で生きている間に top を起こす**と、v1 と同じ踏み方になる。
+`processEvents` 以外にも在る ── 実測(焼いた soffice.js、run 37303396759):Suspending import は
+`__asyncjs__qt_asyncify_suspend_js` のほか `emscripten_promise_await` / `emscripten_sleep` /
+`fd_sync` / `emscripten_idb_*`。🔴 とくに LO 0c031979 の `vcl/qt5/QtInstance.cxx` は JSPI 構成で
+**`ProcessEvent`(user event の dispatch)を `eventHandlerThread` へ proxy し、main thread は
+`emscripten_promise_await` で止まる**(`DoYield` の枝 B はその逆向き)。promising export も
+`main` / `_emscripten_check_mailbox` / `qstdweb::EventListener` の invoker と 3 種在り、
+**main thread の 1 本の shadow stack の上に、別々の計算が 2 種類の止まり方で積み重なる**。
+それらは `Module.qtSuspends` に載らないので、**その frame が top の上で生きている間に top を
+起こす**と、v1 と同じ踏み方になる。
+⚠ この門が止められるのは **Qt 側の起こし**だけである。`emscripten_promise_await` 側の起こし
+(proxy の結果が返ったとき)は Emscripten の promise が直に起こすので、ここでは止められない ──
+実測(2026-10-05、v2 の一式で B2w 8 round 中 2 round)の trap はその形と読んでいる
+(`wait-out`(LO main loop、nest=1)がメニューの `exec-ret` より前に返っていた)。
 🔑 **`__stack_pointer` は 1 本の wasm global で、JSPI は保存も復元もしない**。だから
 「いま誰が上に居るか」は **`stackSave()`(= `_emscripten_stack_get_current()`)の値**で読める:
 - suspend のとき `sp: stackSave()` を控える(EM_JS の中では、呼び手の C の frame の sp)。
