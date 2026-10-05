@@ -659,14 +659,65 @@ describe('office-wasm のパッチ', () => {
    * ⚠ 入っていないと、パッチを足したのに**パッチ前の Qt が復元され**、
    *   当てたつもりで効かない ── workflow が同じ罠を別の箇所で注記している。
    */
-  it('🔴 qtbase のパッチが Qt / ccache の鍵に含まれる', () => {
+  it('🔴 qtbase のパッチが Qt の cache の鍵に含まれる', () => {
     const yml = readFileSync(YML, 'utf-8');
     const keys = [...yml.matchAll(/^\s*key: (.+)$/gm)].map((m) => m[1]!);
-    const qtKeys = keys.filter((k) => /^qt-|^ccache-/.test(k));
-    expect(qtKeys.length, 'Qt / ccache の鍵が見つからない').toBeGreaterThan(0);
+    // 🔑 **LO の ccache(`ccache-lo-…`)はここに含めない**(#1344、2026-10-05)。
+    //    Qt の build 自体は patch で変わるので Qt の cache は patch で分けるのが正しいが、
+    //    LO の ccache は depend mode を切った(下の test)ので patch で分けると
+    //    **Qt patch 1 行で LO が全量 compile になる**(3.6 時間)。
+    const qtKeys = keys.filter((k) => /^qt-/.test(k));
+    expect(qtKeys.length, 'Qt の鍵が見つからない').toBeGreaterThan(0);
     for (const k of qtKeys) {
       expect(k, `鍵が qtbase パッチを見ていない: ${k}`).toContain('qtbase-patch-');
     }
+  });
+
+  /**
+   * 🔴 **LO の ccache は depend mode を切り、鍵に Qt の patch の hash を入れない**
+   * (#1344、2026-10-05)。
+   *
+   * ⚠ 2 つで 1 組である ── 鍵から patch を外すだけだと、depend mode が
+   *   `-isystem` の Qt header の変更を取りこぼす(2026-08-10 の事故)ので
+   *   **古い Qt で compile した `.o` が出る**。逆に depend mode を切っただけだと、
+   *   鍵が patch で分かれたままで **LO 全量 compile** が残る。
+   * 🔑 見るのは**実行する行**だけ ── 注釈(`#` の行)に同じ字が在るので、
+   *   落としてから当てる(注釈に満たされないため)。
+   */
+  describe('LO の ccache(#1344)', () => {
+    const code = (): string =>
+      readFileSync(YML, 'utf-8')
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n');
+
+    it('🔴 distro conf が `--enable-ccache=nodepend` を持つ', () => {
+      const y = code();
+      const conf = /cat > distro-configs\/PKC3WASM-Qt6\.conf <<'CONF'\n([\s\S]*?)\n\s*CONF\n/.exec(y);
+      // ⚠ 空振り防止 ── conf の塊そのものを引けていること(形が変わったら下は何も見ない)
+      expect(conf, 'distro conf の heredoc を引けない').not.toBeNull();
+      expect(conf![1]).toContain('--disable-qt5');
+      expect(conf![1]!.split('\n').map((l) => l.trim())).toContain('--enable-ccache=nodepend');
+    });
+
+    it('🔴 LO の ccache の鍵(key 2 + restore-keys 1)は `-nd-` で始まり、qtbase patch の hash を含まない', () => {
+      const y = code();
+      const lines = y.split('\n').filter((l) => /ccache-lo-qt6-/.test(l));
+      // ⚠ 空振り防止 ── 復元の key / restore-keys / 保存の key で 3 回出ること
+      //   (「含まない」は無いことの主張なので、探す行が 0 件でも通ってしまう)
+      expect(lines.length, 'LO の ccache の鍵の行が 3 つでない').toBe(3);
+      expect(y.split('ccache-lo-qt6-nd-').length - 1, '`ccache-lo-qt6-nd-` が 3 回出ない').toBe(3);
+      for (const l of lines) {
+        expect(l, `鍵が -nd- で始まらない(depend mode 時代の cache を復元する): ${l}`).toMatch(
+          /ccache-lo-qt6-nd-/,
+        );
+        expect(l, `LO の ccache の鍵に Qt patch の hash が入っている: ${l}`).not.toContain(
+          'qtbase-patch',
+        );
+      }
+      // 🔑 Qt 自身の鍵は別物で、patch の hash を持ったまま(上の test)
+      expect(y).toContain("hashFiles('build/office-wasm/qt-wasm-configure.args', 'build/office-wasm/qtbase-patch-*.py')");
+    });
   });
 
   /**
