@@ -919,7 +919,39 @@ describe('#121 の計装(uev-trace)── probe の filter と上限', () => {
     expect(grab('NUDGE_Y')).toBe('const NUDGE_Y = 0.9;');
     // 判定不能の規則(選択が出ない / メニューが開かない)が B2 と同じ
     expect(code).toContain("['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B2w', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true");
-    expect(code).toContain("['B2', 'B2k', 'B2w', 'C2'].includes(arm) && row.menuOpened !== true");
+    expect(code).toContain("['B2', 'B2k', 'B2w', 'B2f', 'C2'].includes(arm) && row.menuOpened !== true");
+  });
+
+  /**
+   * 🔴 #1344 の競合を狙う腕 `B2f`(2026-10-05): `Control+a` の直後(`FAST_MS`、既定 150 ms)に右クリック ──
+   * status update の burst の最中、main loop が `ProcessEvent` の `emscripten_promise_await` で止まっている窓へ
+   * DOM event を入れる。⚠ 既定の回には混ぜない(名指しのときだけ)。選択の印は測れないので「メニューが開いた」を
+   * 選択の代わりにし、copy の結果で見る。
+   */
+  it('🔴 B2f は名指しでだけ回り、Control+a → FAST_MS → 右クリック → B2 と同じ「コピー」の click の順である', () => {
+    const grab = (name: string): string => {
+      const m = new RegExp(`const ${name} = [^\\n]+;`).exec(code);
+      expect(m, `${name} を取り出せない`).not.toBeNull();
+      return m![0];
+    };
+    const evalArms = (env: Record<string, string>): string[] =>
+      new Function('process', `${grab('ALL_ARMS')}\n${grab('OPT_IN_ARMS')}\n${grab('ARMS')}\nreturn ARMS;`)({ env }) as string[];
+    expect(evalArms({}), '既定の回に B2f が混ざっている').not.toContain('B2f');
+    expect(evalArms({ PKC3_ARMS: 'B2f' })).toEqual(['B2f']);
+    expect(code).toContain("B2f: 'text.odt'");
+    expect(grab('FAST_MS')).toBe("const FAST_MS = Number(process.env.PKC3_FAST_MS ?? 150);");
+    const at = code.indexOf("} else if (arm === 'B2f') {");
+    expect(at, 'B2f の枝が無い').toBeGreaterThan(-1);
+    const blk = /\} else if \(arm === 'B2f'\) \{([\s\S]*?)\n {4}\}\n {4}await page\.waitForTimeout\(3000\);/.exec(code.slice(at));
+    expect(blk, 'B2f の枝を取り出せない(枝の終わりの形が変わった)').not.toBeNull();
+    const body = blk![1]!;
+    const order = ["await page.keyboard.press('Control+a');", 'await page.waitForTimeout(FAST_MS);', 'await ctxClick();', 'await page.mouse.click(cx, cy);'];
+    const idx = order.map((k) => body.indexOf(k));
+    expect(idx.every((i) => i > -1), `欠けている: ${order.filter((_, i) => idx[i] === -1).join(' / ')}`).toBe(true);
+    expect(idx.every((v, i) => i === 0 || v > idx[i - 1]!), `順が違う: ${idx.join(',')}`).toBe(true);
+    // ⚠ B2 のように 1 秒待ってから右クリックする形へ戻っていない(それでは burst の窓に入らない)
+    expect(body, '1 秒待っている').not.toContain('await page.waitForTimeout(1000);\n      const menuOpen');
+    expect(body).toContain('selected = menuOpen ? true : null;');
   });
 
   it('🔴 pushRing は溢れたら古い行を落とす(直近を残す)。頭取りに戻すと落ちる', () => {

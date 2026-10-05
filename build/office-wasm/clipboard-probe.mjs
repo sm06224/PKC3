@@ -139,13 +139,20 @@ const NUDGE_Y = 0.9;
 const ROUND_SEC = Number(process.env.PKC3_ROUND_SEC ?? 240);
 /** 判定不能の回の埋め合わせに回し足すとき、種の名前が前と被らないよう開始番号を変える。 */
 const N_START = Number(process.env.PKC3_N_START ?? 1);
-const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8', 'B2w'];
+const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8', 'B2w', 'B2f'];
 /**
  * 既定では回さない腕(#1344 の判別用。マウスで popup を選んだ後の 10〜12 秒の停止が、次の Qt 入力で動き出すかを見る)。
  * ⚠ `ALL_ARMS` に入れるのは**名指しで選べるように**するため ── 入れても既定の回(全部)には混ぜない
  *   (既存の腕の回数と所要を変えない)。
  */
-const OPT_IN_ARMS = ['B2w'];
+const OPT_IN_ARMS = ['B2w', 'B2f'];
+/**
+ * `B2f` が `Control+a` の後に右クリックまで待つ ms(#1344 の競合を狙う腕)。🔑 Ctrl+A の後、LO は status update の
+ * user event を ~200 件 post し、main loop はその 1 件ごとに `ProcessEvent` → `emscripten_promise_await`(handler thread への
+ * proxy 待ち)で止まる。その窓に DOM event(別の promising な計算)を入れると、main が Qt の stack に載っていないまま
+ * メニューの loop が止まり、proxy の戻りで main が門なしで起きて内側の frame を踏む(2026-10-05 の読み)。
+ */
+const FAST_MS = Number(process.env.PKC3_FAST_MS ?? 150);
 /**
  * ツールバーの「コピー」ボタンの位置(**canvas の比**)。🔑 見つけ方: 自作の `text.odt` を開いて字を全部選んだ版面の PNG
  * (1280x800)に、ツールバー 1 段目の `切り取り(はさみ)/ コピー(2 枚の紙)/ 貼り付け(クリップボード)` が並ぶ。
@@ -156,7 +163,7 @@ const TB_COPY_X = Number(process.env.PKC3_TB_COPY_X ?? '0.236');
 const TB_COPY_Y = Number(process.env.PKC3_TB_COPY_Y ?? '0.057');
 const ARMS = (process.env.PKC3_ARMS ?? ALL_ARMS.filter((a) => !OPT_IN_ARMS.includes(a)).join(',')).split(',').filter((a) => ALL_ARMS.includes(a));
 /** 腕 → 開く文書。`C` / `B1` / `B2` / `C2` は字だけ、`B3` は画像、`B4` は表。 */
-const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B2w: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt', B5: 'text.odt', B6: 'text.odt', B7: 'text.odt', B8: 'text.odt' };
+const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B2w: 'text.odt', B2f: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt', B5: 'text.odt', B6: 'text.odt', B7: 'text.odt', B8: 'text.odt' };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -369,6 +376,7 @@ const result = {
       B2: `Control+a → mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → メニュー(開いた窓)の上端から 40px 下の「コピー(Y)」を mouse.click(left)`,
       B2k: `同じ右クリック → keyboard.press('y')(コピー(Y))`,
       B2w: `B2 と同じ → 2 秒待つ → 版面の中(canvas の右下寄り ${NUDGE_X}/${NUDGE_Y})へ mouse.move を 1 回(押さない)→ 外を読む`,
+      B2f: `Control+a → ${FAST_MS} ms 待つだけで右クリック(status update の burst の最中に DOM event を入れる。#1344 の競合狙い)→ B2 と同じ「コピー(Y)」の click`,
       C2: `mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → Escape`,
       B3: 'Shift+ArrowRight(先頭の段落の画像 1 枚を選ぶ)→ Control+c',
       B3c: 'mouse.click(left, canvas の比 0.30/0.40 = 画像の上)→ Control+c',
@@ -828,6 +836,28 @@ async function oneRound(arm, n) {
           }
         }
       }
+    } else if (arm === 'B2f') {
+      // 🔴 #1344 の競合を狙う腕(2026-10-05): Ctrl+A の直後(FAST_MS)に右クリック。status update の burst の最中、
+      //    main loop が `ProcessEvent` の promise_await で止まっている窓へ DOM event を入れる。
+      //    ⚠ 選択の印は測れない(メニューが版面を覆う前に frames を比べる時間が無い)── メニューが開いた = 右クリックが
+      //    届いた、とし、選択の有無は copy の結果(CLIPTEXT が外へ出るか)で見る。
+      pasteBtnBefore = await framesOf(pasteBtnClip, 3);
+      await page.keyboard.press('Control+a');
+      await page.waitForTimeout(FAST_MS);
+      row.fastMs = FAST_MS;
+      const menuOpen = await ctxClick();
+      row.menuOpened = menuOpen;
+      selected = menuOpen ? true : null;
+      if (menuOpen) {
+        const m = row.menu.rects.filter((r) => !(r.w === Math.round(box.w) && r.h === Math.round(box.h))).pop();
+        const cx = m.x + 60;
+        const cy = m.y + 40;
+        row.copyClick = { x: cx, y: cy, menu: m };
+        row.copyKey = 'menu:click';
+        await page.mouse.click(cx, cy);
+        await page.waitForTimeout(1000);
+        row.menuWindowsAfterClick = await page.evaluate(COUNT_QT_WINDOWS);
+      }
     }
     await page.waitForTimeout(3000);
     await shot('5-after');
@@ -894,7 +924,7 @@ async function oneRound(arm, n) {
     // ⑥ 判定不能の規則(⑥ コピーの前の fault / ④ 選択が出ない / ⑤ メニューが開かない)
     if (faultBeforeCopy) undecidable('コピーの前後で memory access out of bounds が出た(修飾キーの経路が死ぬ。SKILL §14)');
     if (['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B2w', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true) undecidable('選択が版面に出なかった');
-    if (['B2', 'B2k', 'B2w', 'C2'].includes(arm) && row.menuOpened !== true) undecidable('右クリックのメニューが開かなかった(窓の数が増えない)');
+    if (['B2', 'B2k', 'B2w', 'B2f', 'C2'].includes(arm) && row.menuOpened !== true) undecidable('右クリックのメニューが開かなかった(窓の数が増えない)');
     if (arm === 'B6' && row.menuOpened !== true) undecidable('メニューバーの編集(Alt+e)を 3 回押してもメニューが開かなかった(窓の数が増えない。y は押していない)');
     // ⑧ B5: ポインタを乗せる前後でコピーボタンの領域が 1 ビットも変わらない = そこにボタンが無い(当たったか不明)。判定不能とは別に数える
     if (arm === 'B5' && row.copyBtnChanged !== true) row.landUnknown = true;
