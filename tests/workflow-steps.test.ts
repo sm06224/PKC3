@@ -659,6 +659,27 @@ describe('office-wasm のパッチ', () => {
    * ⚠ 入っていないと、パッチを足したのに**パッチ前の Qt が復元され**、
    *   当てたつもりで効かない ── workflow が同じ罠を別の箇所で注記している。
    */
+  /**
+   * 🔴 **`emscripten_promise_await` の門は、焼いた `soffice.js` を置換する step で入る**(#1344、2026-10-05)。
+   * ⚠ Qt の patch でも LO の patch でもない(Emscripten の library JS)ので、`qtbase-patch-*` / `patch-lo-*` の
+   *   ループには載らない ── 消えても本数の検査は鳴らない。だから step を名指しで pin する。
+   * 🔑 順: 置換は「生成物が在ることを確かめる」の後・「実行一式を集める」の前(instdir を直す)。
+   *   集めた後に配る一式で印(`pkc3PaGuard`)を grep する(集め直しで素通りしない)。
+   */
+  it('🔴 soffice.js の promise_await の門が、集める前に当たり、集めた一式で印を検めている', () => {
+    const yml = readFileSync(YML, 'utf-8');
+    const patchAt = yml.indexOf('node "$GITHUB_WORKSPACE"/build/office-wasm/patch-soffice-js-promise-await.mjs ~/lo-core/instdir/program/soffice.js');
+    expect(patchAt, '置換の step が無い').toBeGreaterThan(-1);
+    const existsAt = yml.indexOf('- name: 生成物が在ることを確かめる');
+    const collectAt = yml.indexOf('- name: 実行一式を集める(上流の install list)');
+    expect(existsAt).toBeGreaterThan(-1);
+    expect(collectAt).toBeGreaterThan(-1);
+    expect(patchAt > existsAt && patchAt < collectAt, '置換が「生成物が在る」と「集める」の間に無い').toBe(true);
+    const checkAt = yml.indexOf("grep -q 'pkc3PaGuard' workdir/installation/LibreOffice/emscripten/soffice.js");
+    expect(checkAt, '集めた一式で印を検めていない').toBeGreaterThan(collectAt);
+    expect(existsSync('build/office-wasm/patch-soffice-js-promise-await.mjs')).toBe(true);
+  });
+
   it('🔴 qtbase のパッチが Qt の cache の鍵に含まれる', () => {
     const yml = readFileSync(YML, 'utf-8');
     const keys = [...yml.matchAll(/^\s*key: (.+)$/gm)].map((m) => m[1]!);

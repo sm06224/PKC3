@@ -939,6 +939,20 @@ jobs:
             exit 1
           fi
 
+      # 🔴 **`emscripten_promise_await` の起こしに shadow stack の門を置く**(#1344、2026-10-05)。
+      #    LO の main thread は user event を handler thread へ proxy して `emscripten_promise_await` で待つ。
+      #    その間に来た右クリックが別の promising な計算としてメニューの loop を止めると、proxy の戻りで
+      #    main が門なしで起こされ、生きているメニューの frame を踏む(trace: `pa-mismatch dir=above` →
+      #    `js-inverted` → `QEventLoop::exit` の unaligned trap)。Qt 側の LIFO / sp の門は Qt の起こししか
+      #    見ないので、ここは Emscripten の library JS(焼けた `soffice.js`)を置換して止める。
+      #    ⚠ 錨は Emscripten 4.0.10 の字 ── 版を上げて字が変わったら **ここで落ちる**(黙って素通りしない)。
+      #    🔑 印 `pkc3PaGuard` が配る一式に入っていることを、集めた後に名指しで検める(下の step)。
+      - name: emscripten_promise_await の起こしに門を置く(soffice.js を置換。#1344)
+        run: |
+          set -euxo pipefail
+          node "$GITHUB_WORKSPACE"/build/office-wasm/patch-soffice-js-promise-await.mjs ~/lo-core/instdir/program/soffice.js
+          grep -c 'pkc3PaGuard' ~/lo-core/instdir/program/soffice.js
+
       # 🔑 **実行に要る file 一式は上流の list に従う**(自分で並べない)。
       #    `instsetoo_native/CustomTarget_emscripten-install.mk` が
       #    workdir/installation/LibreOffice/emscripten へ必要物を集める ──
@@ -957,6 +971,8 @@ jobs:
                    qt_soffice.html qtloader.js; do
             test -f "workdir/installation/LibreOffice/emscripten/$f"
           done
+          # 🔴 置換した soffice.js が**配る一式**に入っていること(instdir を直しても集め直しで素通りしない。#1344)
+          grep -q 'pkc3PaGuard' workdir/installation/LibreOffice/emscripten/soffice.js
           # 🔴 **日本語 UI が一式に入ったことを、配る物で確かめる**(#158)。
           # ⚠ configure に渡っただけでは足りない ── #145 で「渡していないから
           #    Impress が 1 file も入っていなかった」を踏んでいる。**中身を数える。**
