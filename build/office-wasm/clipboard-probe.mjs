@@ -13,6 +13,7 @@
  * | `B1` | ✅ | 字を全部選んで **`Ctrl+C`** | 外を読む |
  * | `B2` | ✅ | 字を全部選んで **右クリック → メニューの「コピー」を押す** | 外を読む |
  * | `B2k` | ✅ | 同じ右クリック → メニューを**近道キー `y`**(`コピー(Y)`)で選ぶ(B2 の別の出し方) | 外を読む |
+ * | `B2w` | ✅ | `B2` と同じ手順の後、**2 秒待ってから版面の外の無害な位置へ `mouse.move` を 1 回**(#1344 の判別用。⚠ 既定では回さない ── `PKC3_ARMS=B2w` と名指ししたときだけ) | 外を読む |
  * | `B3` | ✅ | **画像**を `Shift+→` で選んで(段落先頭の 1 文字として)`Ctrl+C` | 外を読む |
  * | `B3c` | ✅ | **画像を左クリックで選んで**(枠の取っ手が出る)`Ctrl+C`(B3 の別の選び方。押す) | 外を読む |
  * | `B4` | ✅ | **表**を選んで `Ctrl+C` | 外を読む |
@@ -86,7 +87,7 @@
  *   ① 文書が開かなかった ② 外へ種を置けなかった / 置いた直後に読み戻せなかった
  *   ③ **字を打っても版面が変わらなかった**(入力が LO に届いていない。SKILL §4 の対照群)
  *   ④ 選ぶ腕(B1〜B4)で、**選択が版面に出なかった**(Ctrl+C の前に版面が変わらない)
- *   ⑤ `B2` / `B2k` / `C2` で**メニューが開かなかった**(窓の数が増えない ── 続く鍵は字として入る)
+ *   ⑤ `B2` / `B2k` / `B2w` / `C2` で**メニューが開かなかった**(窓の数が増えない ── 続く鍵は字として入る)
  *   ⑥ **コピーの前に** `memory access out of bounds` が出た(修飾キーの経路が死ぬ。SKILL §14)
  *   ⑦ 版面が固まった / 回の締切を超えた
  * 判定不能の回は数に入れず、**判定できた回が n 回になるまで回し足す**(上限は +2 回。足りなければ表の `valid` が n 未満になる)。
@@ -135,7 +136,13 @@ const CTX_Y = Number(process.env.PKC3_CTX_Y ?? '0.31');
 const ROUND_SEC = Number(process.env.PKC3_ROUND_SEC ?? 240);
 /** 判定不能の回の埋め合わせに回し足すとき、種の名前が前と被らないよう開始番号を変える。 */
 const N_START = Number(process.env.PKC3_N_START ?? 1);
-const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8'];
+const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', 'B6', 'B7', 'B8', 'B2w'];
+/**
+ * 既定では回さない腕(#1344 の判別用。マウスで popup を選んだ後の 10〜12 秒の停止が、次の Qt 入力で動き出すかを見る)。
+ * ⚠ `ALL_ARMS` に入れるのは**名指しで選べるように**するため ── 入れても既定の回(全部)には混ぜない
+ *   (既存の腕の回数と所要を変えない)。
+ */
+const OPT_IN_ARMS = ['B2w'];
 /**
  * ツールバーの「コピー」ボタンの位置(**canvas の比**)。🔑 見つけ方: 自作の `text.odt` を開いて字を全部選んだ版面の PNG
  * (1280x800)に、ツールバー 1 段目の `切り取り(はさみ)/ コピー(2 枚の紙)/ 貼り付け(クリップボード)` が並ぶ。
@@ -144,9 +151,9 @@ const ALL_ARMS = ['C', 'B0', 'B1', 'C2', 'B2', 'B2k', 'B3', 'B3c', 'B4', 'B5', '
  */
 const TB_COPY_X = Number(process.env.PKC3_TB_COPY_X ?? '0.236');
 const TB_COPY_Y = Number(process.env.PKC3_TB_COPY_Y ?? '0.057');
-const ARMS = (process.env.PKC3_ARMS ?? ALL_ARMS.join(',')).split(',').filter((a) => ALL_ARMS.includes(a));
+const ARMS = (process.env.PKC3_ARMS ?? ALL_ARMS.filter((a) => !OPT_IN_ARMS.includes(a)).join(',')).split(',').filter((a) => ALL_ARMS.includes(a));
 /** 腕 → 開く文書。`C` / `B1` / `B2` / `C2` は字だけ、`B3` は画像、`B4` は表。 */
-const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt', B5: 'text.odt', B6: 'text.odt', B7: 'text.odt', B8: 'text.odt' };
+const DOC_OF = { C: 'text.odt', B0: 'text.odt', B1: 'text.odt', C2: 'text.odt', B2: 'text.odt', B2k: 'text.odt', B2w: 'text.odt', B3: 'image.odt', B3c: 'image.odt', B4: 'table.odt', B5: 'text.odt', B6: 'text.odt', B7: 'text.odt', B8: 'text.odt' };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -358,6 +365,7 @@ const result = {
       B1: 'Control+a → Control+c',
       B2: `Control+a → mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → メニュー(開いた窓)の上端から 40px 下の「コピー(Y)」を mouse.click(left)`,
       B2k: `同じ右クリック → keyboard.press('y')(コピー(Y))`,
+      B2w: `B2 と同じ → 2 秒待つ → 版面の外(page の左上寄り・canvas の外)へ mouse.move を 1 回 → 外を読む`,
       C2: `mouse.click(button=right, canvas の比 ${CTX_X}/${CTX_Y}) → Escape`,
       B3: 'Shift+ArrowRight(先頭の段落の画像 1 枚を選ぶ)→ Control+c',
       B3c: 'mouse.click(left, canvas の比 0.30/0.40 = 画像の上)→ Control+c',
@@ -774,7 +782,7 @@ async function oneRound(arm, n) {
         await page.keyboard.press('Escape');
         await page.waitForTimeout(1500);
       }
-    } else if (arm === 'B2' || arm === 'B2k') {
+    } else if (arm === 'B2' || arm === 'B2k' || arm === 'B2w') {
       const a = await framesOf(clip);
       await page.keyboard.press('Control+a');
       await page.waitForTimeout(1000);
@@ -803,6 +811,15 @@ async function oneRound(arm, n) {
             await page.mouse.click(cx, cy);
             await page.waitForTimeout(1000);
             row.menuWindowsAfterClick = await page.evaluate(COUNT_QT_WINDOWS);
+            if (arm === 'B2w') {
+              // 🔑 #1344 の判別用: popup を選んだ後の user event の停止が「次の Qt 入力」で動くか。
+              //    2 秒待ってから、**canvas の外**(左上寄り。ボタンも版面も無い余白)へ 1 回動かす。押さない。
+              await page.waitForTimeout(2000);
+              const nx = Math.max(1, Math.round(box.x / 2));
+              const ny = Math.max(1, Math.round(box.y / 2));
+              row.nudge = { x: nx, y: ny, afterClickMs: 3000, outsideCanvas: nx < box.x || ny < box.y };
+              await page.mouse.move(nx, ny);
+            }
           }
         }
       }
@@ -871,8 +888,8 @@ async function oneRound(arm, n) {
 
     // ⑥ 判定不能の規則(⑥ コピーの前の fault / ④ 選択が出ない / ⑤ メニューが開かない)
     if (faultBeforeCopy) undecidable('コピーの前後で memory access out of bounds が出た(修飾キーの経路が死ぬ。SKILL §14)');
-    if (['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true) undecidable('選択が版面に出なかった');
-    if (['B2', 'B2k', 'C2'].includes(arm) && row.menuOpened !== true) undecidable('右クリックのメニューが開かなかった(窓の数が増えない)');
+    if (['B1', 'B3', 'B3c', 'B4', 'B2', 'B2k', 'B2w', 'B5', 'B6', 'B7', 'B8'].includes(arm) && selected !== true) undecidable('選択が版面に出なかった');
+    if (['B2', 'B2k', 'B2w', 'C2'].includes(arm) && row.menuOpened !== true) undecidable('右クリックのメニューが開かなかった(窓の数が増えない)');
     if (arm === 'B6' && row.menuOpened !== true) undecidable('メニューバーの編集(Alt+e)を 3 回押してもメニューが開かなかった(窓の数が増えない。y は押していない)');
     // ⑧ B5: ポインタを乗せる前後でコピーボタンの領域が 1 ビットも変わらない = そこにボタンが無い(当たったか不明)。判定不能とは別に数える
     if (arm === 'B5' && row.copyBtnChanged !== true) row.landUnknown = true;

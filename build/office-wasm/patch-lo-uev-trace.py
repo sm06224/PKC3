@@ -43,6 +43,51 @@
 あちらの錨(2 行が隣り合っていること)を壊す。**どちらの順で当てても出力は同一**
 (`tests/office-uev-trace-patch.test.ts` が見る)。
 
+## #1344 の判別用 5 種(2026-10-05 に足した。⚠ 同じ patch の拡張で、新しい patch ではない)
+
+マウスで popup を選んだ後、user event の処理が 10〜12 秒止まる。LO 側の経路(`PostUserEvent` →
+`QtInstance::TriggerUserEventProcessing` → `wakeUp()` / drain は `ImplYield` の `DispatchUserEvents` だけ)は
+マウスとキーボードで同じ。仮説は 3 本:①起こしが食われ、外側の `processEvents(WaitForMoreEvents)` が起きない
+②main の `ImplYield` は動くが、drain する caller が別物(Qt callback の中の Yield)③LO thread 側の
+`DoYield` 枝 B の `emscripten_promise_await` が resume しない。**この 5 種で 3 本が割れる**。
+
+    PKC3-UEV <kind> tid=<pthread_self を %p> x=<> y=<> z=<> ms=<> in=<>      (-1 = 使わない欄)
+
+| kind | file | x / y / z | ms / in | 出す条件(上限) |
+|---|---|---|---|---|
+| `wake` | `QtInstance.cxx` `TriggerUserEventProcessing` の `wakeUp()` の直前 | -1 / -1 / -1 | -1 / -1 | 12 秒の門(2000 行) |
+| `yield-in` | 同 `ImplYield`(⚠ 入口の 4 行は idles-trace の錨なので、**`DispatchUserEvents` の直後**) | nest / bWait / bHandleAll | -1 / 入った時刻 | **nest ≥ 2** + 12 秒の門(3000 行) |
+| `yield-out` | 同(RAII なので early return でも出る) | nest / bWait / bHandleAll | 滞在 ms / 入った時刻 | **nest ≥ 2 か 滞在 ≥ 1000 ms** + 12 秒の門(3000 行) |
+| `wait-out` | 同 `processEvents(WaitForMoreEvents)` の前後 | bHandleAll / 返り値 / -1 | 待った ms / 入る前の時刻 | **待った ≥ 1000 ms** + 12 秒の門(600 行)。⚠ `wait-in` の行は出さない(同じ行の `in=` が対) |
+| `proxy-out` | 同 `DoYield` 枝 B の `emscripten_promise_await` の前後 | -1 / -1 / -1 | 待った ms / 入る前の時刻 | **待った ≥ 1000 ms** + 12 秒の門(600 行)。⚠ `proxy-in` の行は出さない(同上) |
+| `exec-ret` | `QtMenu.cxx` `ShowNativePopupMenu` の `mpQMenu->exec(...)` の直後 | -1 / -1 / -1 | -1 / -1 | 門なし(200 行 ── popup は稀で、この TU の時計は最初の呼び出しで始まるので 12 秒の門は置けない) |
+
+⚠ **「≥ 1000 ms」「nest ≥ 2」は、行数を抑えるための門**であって、「測っていない数で断る」ための閾値ではない
+(毎 loop の `yield-in/out` で枠を溢れさせない)。
+⚠ **12 秒の門は TU ごとに時計を持つ**(`pkc3_uev_elapsed_ms` は `static`)── `QtInstance.cxx` の時計は最初の
+`ImplYield` で始まるので起動の頭。`QtMenu.cxx` の時計は最初の呼び出しで始まるので、**`exec-ret` だけ門を置かない**。
+⚠ **`exec-ret` に「戻り値が null か」は載せられない** ── 戻り値を受けるには `mpQMenu->exec(...)` の行を置き換える
+必要があり、その行は `patch-lo-menu-trace.py` の錨(`EXEC_ANCHOR`)と同じ。**錨を交えない**ために、直後に挿す
+だけにした。戻り値は menu-trace の `exec:return`(`d=`)が出している(同じ probe の clipTrace に並ぶ)。
+⚠ **`yield-in` の位置**:`ImplYield` の入口 4 行(シグネチャ〜`DispatchUserEvents`)は idles-trace の錨
+(`QT_IMPL_ANCHOR`)なので、**`DispatchUserEvents` の中で起きた入れ子はこの深さに数えない**
+(Qt の callback ── popup の `exec()` の入れ子の loop ── の中の Yield は `processEvents` の中なので数える)。
+⚠ **`wait-out` / `proxy-out` が出ない = 返っていない、ではない**(出す条件は ≥ 1000 ms)。
+返らない回の行は出ない ── 他の印(`dispatch` があって `done` が無い形など)で読む。
+
+## 錨の選び方(5 種)── ⚠ idles-trace / menu-trace と重ならない
+
+- `QtInstance.cxx` の idles-trace の錨は `ImplYield` の入口 4 行 / `SolarMutexReleaser…dispatcher` の 2 行 /
+  `DoYield` の入口 / 枝 B の `else if…SolarMutexReleaser release;` / 枝 C の `if (!bWasEvent && bWait)…return`。
+  こちらは**その間**に置く: ヘルパーは `CreateSalSystem` の 1 行の前、`yield` は `if (!bHandleAllCurrentEvents && wasEvent)`
+  の前、`wait` は `if (bWait && !wasEvent)…AllEvents…` の 4 行を**そのまま残して**前後へ、`proxy` は
+  `(void)emscripten_promise_await(emscripten_proxy_promise(` の 1 行の前と、その式の最後の行の後ろ、`wake` は
+  `dispatcher->wakeUp();` の前。
+- `QtMenu.cxx` の menu-trace の錨は `slotMenuTriggered` / `assert(mpQMenu);` / `exec(...)` の 1 行 /
+  `if (!pQItem)…` / `HandleMenuCommandEvent`。こちらのヘルパーは `ShowNativePopupMenu` のシグネチャの 1 行目の前、
+  `exec-ret` は exec の次の空行以降(`return true;` の前)。
+- どちらの順で当てても出力は同一(`tests/office-uev-trace-patch.test.ts` が見る)。
+
 ## 出口は libc だけ(+ `emscripten_log`)
 
 stderr + `/tmp/pkc3-uev.log`。embind / DOM / Qt の API をここから呼ばない
@@ -150,6 +195,102 @@ void pkc3_uev_trace(const char* what, unsigned long long a, int c, int d)
                    reinterpret_cast<void*>(static_cast<std::uintptr_t>(a)));
 #endif
 }
+
+// ── #1344 の判別用(wake / yield-in / yield-out / wait-out / proxy-out / exec-ret)──
+// 1 行: `PKC3-UEV <kind> tid=%p x=%d y=%d z=%d ms=%lld in=%lld`(使わない欄は -1)。
+// ⚠ 上限(`nMax`)は kind ごとの counter で数える。門(12 秒 / 1000 ms / nest)は呼ぶ前に済ませる。
+[[maybe_unused]] void pkc3_uev_mark(const char* what, int* pnShown, int nMax, int x, int y, int z,
+                                    long long nMs, long long nInMs)
+{
+    if (__atomic_add_fetch(pnShown, 1, __ATOMIC_RELAXED) > nMax)
+        return;
+    unsigned long long nTid = 0;
+    pthread_t aSelf = pthread_self();
+    std::memcpy(&nTid, &aSelf, sizeof aSelf < sizeof nTid ? sizeof aSelf : sizeof nTid);
+    char line[192];
+    std::snprintf(line, sizeof line, "PKC3-UEV %s tid=%p x=%d y=%d z=%d ms=%lld in=%lld\\n", what,
+                  reinterpret_cast<void*>(static_cast<std::uintptr_t>(nTid)), x, y, z, nMs, nInMs);
+    std::fputs(line, stderr);
+    std::fflush(stderr);
+    std::FILE* pLog = std::fopen("/tmp/pkc3-uev.log", "a");
+    if (pLog)
+    {
+        std::fputs(line, pLog);
+        std::fclose(pLog);
+    }
+}
+
+// 起こし(`wakeUp()` の直前)。12 秒の門を通る(起動時の大量の post で枠を使い切らない)。
+[[maybe_unused]] void pkc3_uev_wake()
+{
+    static int nShown = 0;
+    if (!pkc3_uev_late())
+        return;
+    pkc3_uev_mark("wake", &nShown, 2000, -1, -1, -1, -1, -1);
+}
+
+// 待ちの出口。nInMs(入る前の `pkc3_uev_elapsed_ms()`)から **1000 ms 以上**のときだけ 1 行(入る前の時刻を同じ行に載せる)。
+// ⚠ 1000 ms は行数を抑える門で、測っていない数で断るためではない。
+[[maybe_unused]] void pkc3_uev_wait_out(long long nInMs, int nAll, int nRet)
+{
+    static int nShown = 0;
+    const long long nMs = pkc3_uev_elapsed_ms() - nInMs;
+    if (nMs < 1000 || !pkc3_uev_late())
+        return;
+    pkc3_uev_mark("wait-out", &nShown, 600, nAll, nRet, -1, nMs, nInMs);
+}
+
+// `DoYield` 枝 B の `emscripten_promise_await` の出口。条件は `pkc3_uev_wait_out` と同じ(別枠 600)。
+[[maybe_unused]] void pkc3_uev_proxy_out(long long nInMs)
+{
+    static int nShown = 0;
+    const long long nMs = pkc3_uev_elapsed_ms() - nInMs;
+    if (nMs < 1000 || !pkc3_uev_late())
+        return;
+    pkc3_uev_mark("proxy-out", &nShown, 600, -1, -1, -1, nMs, nInMs);
+}
+
+// `mpQMenu->exec(...)` が返った直後。⚠ 12 秒の門は置かない(popup は稀。この TU の時計は最初の呼び出しで始まる)。
+[[maybe_unused]] void pkc3_uev_exec_ret()
+{
+    static int nShown = 0;
+    pkc3_uev_mark("exec-ret", &nShown, 200, -1, -1, -1, -1, -1);
+}
+
+// `ImplYield` の入口〜出口(RAII ── early return でも出口が出る)。入れ子の深さは thread ごと。
+// 入口: nest ≥ 2 のときだけ。出口: nest ≥ 2 か 滞在 ≥ 1000 ms のときだけ(毎 loop の行で枠を溢れさせない)。
+struct Pkc3UevYieldScope
+{
+    int mnNest;
+    int mnWait;
+    int mnAll;
+    long long mnInMs;
+    static int& depth()
+    {
+        thread_local int nDepth = 0;
+        return nDepth;
+    }
+    Pkc3UevYieldScope(bool bWait, bool bAll)
+        : mnNest(++depth())
+        , mnWait(bWait ? 1 : 0)
+        , mnAll(bAll ? 1 : 0)
+        , mnInMs(pkc3_uev_elapsed_ms())
+    {
+        static int nShown = 0;
+        if (mnNest >= 2 && pkc3_uev_late())
+            pkc3_uev_mark("yield-in", &nShown, 3000, mnNest, mnWait, mnAll, -1, mnInMs);
+    }
+    ~Pkc3UevYieldScope()
+    {
+        static int nShown = 0;
+        const long long nMs = pkc3_uev_elapsed_ms() - mnInMs;
+        --depth();
+        if ((mnNest >= 2 || nMs >= 1000) && pkc3_uev_late())
+            pkc3_uev_mark("yield-out", &nShown, 3000, mnNest, mnWait, mnAll, nMs, mnInMs);
+    }
+    Pkc3UevYieldScope(const Pkc3UevYieldScope&) = delete;
+    Pkc3UevYieldScope& operator=(const Pkc3UevYieldScope&) = delete;
+};
 }
 // PKC3-UEV-HELPER-END
 """
@@ -202,16 +343,77 @@ DONE_REPLACE = f"""#endif
                 break;
 """
 
+# ── ③ vcl/qt5/QtInstance.cxx(#1344 の判別用)─────────────────────────────────
+QTI_SRC = "vcl/qt5/QtInstance.cxx"
+# ヘルパーは `CreateSalSystem` の 1 行の前(file scope)。⚠ idles-trace のヘルパーは `ImplYield` の入口(その次の関数)
+# ── 錨は交わらない。使う所(`ImplYield` / `DoYield` / `TriggerUserEventProcessing`)はどれもその後ろ。
+QTI_HELPER_ANCHOR = "SalSystem* QtInstance::CreateSalSystem() { return new QtSystem; }\n"
+
+# 🔑 `ImplYield` の入口 4 行(シグネチャ〜`DispatchUserEvents`)は idles-trace の錨なので、その**次の 2 行**を錨にする。
+# RAII の 1 行を前に足すだけ(原文の 2 行はそのまま)。⚠ early return でも出口が出る。
+YIELD_ANCHOR = """    if (!bHandleAllCurrentEvents && wasEvent)
+        return true;
+"""
+YIELD_REPLACE = (
+    f"    Pkc3UevYieldScope aPkc3UevYield(bWait, bHandleAllCurrentEvents); {MARK}\n" + YIELD_ANCHOR
+)
+
+# `if (bWait && !wasEvent) A; else B;` の 4 行を**そのまま残し**、前に入る前の時刻、後ろに出口を足す。
+# ⚠ 出口の `if` は else の文の**後**(ぶら下がらない)。
+WAIT_ANCHOR = """    if (bWait && !wasEvent)
+        wasEvent = dispatcher->processEvents(QEventLoop::WaitForMoreEvents);
+    else
+        wasEvent = dispatcher->processEvents(QEventLoop::AllEvents) || wasEvent;
+"""
+WAIT_REPLACE = (
+    f"    const long long nPkc3UevWaitIn = (bWait && !wasEvent) ? pkc3_uev_elapsed_ms() : -1; {MARK}\n"
+    + WAIT_ANCHOR
+    + f"    if (nPkc3UevWaitIn >= 0) {MARK}\n"
+    + f"        pkc3_uev_wait_out(nPkc3UevWaitIn, bHandleAllCurrentEvents ? 1 : 0, wasEvent ? 1 : 0); {MARK}\n"
+)
+
+# `DoYield` 枝 B。式の**前**に入る前の時刻、**後**に出口。⚠ idles-trace の錨(`else if…SolarMutexReleaser release;`)の外。
+PROXY_IN_ANCHOR = """        (void)emscripten_promise_await(emscripten_proxy_promise(
+"""
+PROXY_IN_REPLACE = f"        const long long nPkc3UevProxyIn = pkc3_uev_elapsed_ms(); {MARK}\n" + PROXY_IN_ANCHOR
+PROXY_OUT_ANCHOR = """            &o3tl::temporary<Args>({ this, bWait, bHandleAllCurrentEvents, bWasEvent })));
+"""
+PROXY_OUT_REPLACE = PROXY_OUT_ANCHOR + f"        pkc3_uev_proxy_out(nPkc3UevProxyIn); {MARK}\n"
+
+# 起こし。`wakeUp()` の直前。
+WAKE_ANCHOR = """    dispatcher->wakeUp();
+"""
+WAKE_REPLACE = f"    pkc3_uev_wake(); {MARK}\n" + WAKE_ANCHOR
+
+# ── ④ vcl/qt5/QtMenu.cxx(#1344 の判別用)───────────────────────────────────────
+QTM_SRC = "vcl/qt5/QtMenu.cxx"
+# ヘルパーは `ShowNativePopupMenu` のシグネチャの 1 行目の前。⚠ menu-trace のヘルパーは `slotMenuTriggered` の前。
+QTM_HELPER_ANCHOR = "bool QtMenu::ShowNativePopupMenu(FloatingWindow* pWin, const tools::Rectangle& rRect,\n"
+# `exec(...)` の**直後**。⚠ exec の行そのものは menu-trace の錨(`EXEC_ANCHOR`)なので、**次の空行以降**を錨にして前へ挿す。
+EXECRET_ANCHOR = """
+    return true;
+}
+"""
+EXECRET_REPLACE = f"    pkc3_uev_exec_ret(); {MARK}\n" + EXECRET_ANCHOR
+
 # 🔑 足した行は**全部、行末が印**で、原文の行は 1 行も置き換えない
 # (test が「印の行を除くと原文一致」を見る ── `tests/office-uev-trace-patch.test.ts`)。
 HELPER_TARGETS = (
     (APP_SRC, APP_HELPER_ANCHOR, HELPER),
     (EVL_SRC, EVL_HELPER_ANCHOR, HELPER),
+    (QTI_SRC, QTI_HELPER_ANCHOR, HELPER),
+    (QTM_SRC, QTM_HELPER_ANCHOR, HELPER),
 )
 TARGETS = (
     (APP_SRC, POST_ANCHOR, POST_REPLACE),
     (EVL_SRC, DISPATCH_ANCHOR, DISPATCH_REPLACE),
     (EVL_SRC, DONE_ANCHOR, DONE_REPLACE),
+    (QTI_SRC, WAKE_ANCHOR, WAKE_REPLACE),
+    (QTI_SRC, YIELD_ANCHOR, YIELD_REPLACE),
+    (QTI_SRC, WAIT_ANCHOR, WAIT_REPLACE),
+    (QTI_SRC, PROXY_IN_ANCHOR, PROXY_IN_REPLACE),
+    (QTI_SRC, PROXY_OUT_ANCHOR, PROXY_OUT_REPLACE),
+    (QTM_SRC, EXECRET_ANCHOR, EXECRET_REPLACE),
 )
 
 
@@ -225,7 +427,7 @@ def main() -> int:
     # ⚠ **錨の検査は門の外でやる**(門の下に隠すと上流の変形に誰も気づけない)。
     # ⚠ 同じ file を複数回触るので、読み込みは 1 度にして in-memory で順に当てる。
     texts: dict[str, str] = {}
-    for src in (APP_SRC, EVL_SRC):
+    for src in (APP_SRC, EVL_SRC, QTI_SRC, QTM_SRC):
         path = root / src
         if not path.exists():
             print(f"ERROR: {src} が無い({path})", file=sys.stderr)
