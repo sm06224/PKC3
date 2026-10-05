@@ -55,6 +55,17 @@ tag と資産名は `mcp__github__get_release_by_tag`(MCP は通る)で引く。
 | `safe_heap: true` | `lo-wasm-safeheap` |
 | 両方 | `lo-wasm-safeheap-names` |
 
+### 🔴 tag 名は flag から**合成される** ── 推測せず、release の本文で run を確かめる(2026-10-04)
+
+上の表は 2 つだけだが、実際は `office-wasm-build.yml` が **flag ごとの接尾辞をこの順で連ねる**
+(`SAFE_SUFFIX`、1045〜1054 行):`-safeheap` → `-names`(`profiling_funcs`)→ `-imetrace` → `-savetrace` →
+`-idlestrace` → `-schedtrace` → `-cliptrace`(`clip_trace`)→ `-menutrace`(`menu_trace`)→ `-uevtrace`(`uev_trace`)。
+tag は **`lo-wasm` + 接尾辞**(例: `lo-wasm-names-cliptrace-menutrace`)で、**全部 OFF のときだけ `lo-wasm-dev`**。
+⚠ 2026-10-04 に **`lo-wasm-dev-menutrace`**(`dev` に接尾辞を足した形)を引いて **404** を踏んだ ──
+`dev` は「全部 OFF」の名前であって、接尾辞の前置きではない。
+🔑 **tag を推測しない。** `mcp__github__get_release_by_tag` の body(「run NNN / commit SHA」)で
+**その run の物か**を確かめてから zip を落とす(落とした後は上の `build-info.json` の `run_id`)。
+
 🔑 **検算は 1 つ: 落とした一式の `build-info.json` の `run_id` が、自分が回した run と一致するか。**
 `profiling_funcs` / `safe_heap` の値もそこに書いてある ── **引いた先ではなく、
 落とした物で確かめる**。
@@ -462,6 +473,51 @@ fault は**押す段の開始から 0.65〜0.72 秒後**に揃って出る。
 
 2 本同時に dispatch したら**片方が 4 時間 11 分**かかった(単独なら 29〜33 分)。
 runner を奪い合うので、**2 本が 2 倍ではなく 8 倍**になる。
+
+### 🔴 焼きの所要は「暖かいか冷たいか」で **8 倍**違う(2026-10-04)
+
+| 焼き | cache | 所要(観測点) |
+|---|---|---|
+| 計装 flag(`profiling_funcs` / `clip_trace` / `menu_trace` / `uev_trace`)つき、2 回目以降 | 当たる | **23〜35 分**(run 37222907850 = 23 分 / run 37246370234 = 29 分) |
+| 🔴 **flag を全部外した配布用**(tag `lo-wasm-dev`) | **Qt6 の cache も外れる** | **約 4 時間**(run 37205634760 = make 14:02→17:51Z、3h49m) |
+
+🔑 だから**検証は 2 段**にする:**計装つき(速い)で直りを見る → OK なら配布用(遅い)を 1 本**。
+配布用は**1 日 1 本**と数え、待つ間は別の仕事をする(check-in は **45 分ごと**。`sleep` で待たない)。
+⚠ 「計装つきが 30 分なら配布用も同じ桁」と読まない ── 上の表のとおり、flag を外すだけで **Qt6 の cache が当たらなくなる**(観測)。
+
+### 🔴 配布は **2 段**。PKC3 の焼きだけでは user に届かない(2026-10-04)
+
+1. PKC3 `office-wasm-build.yml` → prerelease **`lo-wasm-dev`**
+2. 🔴 **office-pack repo の `pages.yml` を `workflow_dispatch`**(inputs `pkc3_ref=main` / `lo_tag=lo-wasm-dev`、約 3 分)
+   → https://sm06224.github.io/office-pack/pack.json の **`version`** に焼いた run 番号が載る
+
+🔑 **「配った」と書く前に、pack.json の `version` を読む**(観測点:run 37222905517 の dispatch の後 →
+`lo-0c031979e70b-run37205634760`。`run` の後ろが **1 段目の焼きの run** と一致して初めて届いている)。
+⚠ 1 段目だけで「配りました」と書くのは、CLAUDE.md §4 の「焼けた」と「届いた」の間を数えない誤りと同じ型である。
+
+### 🔴 LO の直しは **「文書が開くか」を最初の門にする**(2026-10-04、#121 / PR #1342 → #1343)
+
+PR #1342(`patch-lo-yield-proxy-guard.py`:main thread の入れ子 `Yield` で user event を dispatch しない)は
+**unit・変異試験・コンパイルを全部通った**のに、焼いたら **文書が 1 件も開かなかった**
+(run 37239228503 の probe:全腕が判定不能、「印」が**起動 7 秒**で出ていた)。
+原因:**読み込み中の入れ子 `Yield` も user event を処理しており、それが進行に必要**だった ──
+検査は「止めたい経路が止まるか」しか見ておらず、**止めてはいけない経路**(読み込み)を 1 つも通っていなかった。
+🔑 **probe の判定表には、まず対照群 C(文書が開いて、外へ字が出る)を置く** ── C が落ちた回は
+**他の腕の結果を 1 つも読まない**(§6、CLAUDE.md §4「対照群が届かない回は判定不能」)。
+🔑 **直しは「広い門」より「落ちる 1 か所だけ」** ── PR #1343 は `ImplHandleExtTextInput` の**1 か所**を
+Emscripten のときだけ `break` にした。広い門は、**計装で見えていない経路まで一緒に止める**。
+⚠ #1342 は revert した(`patch-lo-yield-proxy-guard.py` は main に無い)。
+
+### 🔴 同じ上流 file を触る patch は、**どの順でも出力が同一**であることを test で pin する(2026-10-05)
+
+`patch-lo-ime-nowait.py` と `patch-lo-idles-trace.py` は**同じ `winproc.cxx`** を触る。
+⚠ 「include は無ければ足す」と書くと、**当てる順で出力が変わる**(先に当てた側が足した include を
+後の側が「在る」と見て足さない、またはその逆 ── 出力が当てた順に依る)。
+🔑 **include は無条件に足し、印を付ける**(在るかを見ない)。そのうえで次の 3 つを test で pin する:
+①**錨が交わらない**(2 つの patch の置換前の字が重ならない)②**挿入点が別**
+③ **両順(A→B / B→A)で出力が同一**(`diff -r` が 0)。形は `tests/office-ime-nowait-patch.test.ts`。
+⚠ 片方の patch を単独で test するだけでは、**もう片方が先に当たった版**を 1 度も通らない
+(§2 の「通っていない経路」と同型)。
 
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 

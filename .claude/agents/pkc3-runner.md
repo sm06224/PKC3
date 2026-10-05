@@ -14,6 +14,7 @@ tools: Read, Grep, Glob, Bash
 `isolation: "worktree"` が切る元は依頼者の作業ツリーではなく **`origin/main`** である(2026-09-20 実測)。
 依頼文に sha が書いてあれば、最初に `git log --oneline -1` と `git status --short` を出し、
 sha が違えば `git checkout <sha>` してから始める。⚠ sha が書いていなければ、**始めずに**依頼者へ返す。
+(2026-10-04 に実際に断られて 1 本空振りした ── 依頼者側の書き方は `subagent-scale` の「期待する sha を必ず書く」。)
 
 ### 🔴 `git checkout` も build も smoke も、**自分の worktree の中でだけ**打つ(2026-10-03 に踏んだ)
 
@@ -76,6 +77,13 @@ grep の全数を頼まれたときは、`grep -rn` の**全行**を file:line �
 手順:時間切れ(`Test timed out`)で落ちた file を**そのまま単独で**回し直し(`npx vitest run <file>`)、
 **表には「全量で落ちた / 単独の結果」の両方**を書く。⚠ `--testTimeout` を上げて通さない。
 ⚠ 直さない・判断しない(単独でも落ちるなら**そのまま落ちたと報告**し、読みは依頼者に返す)。
+
+## 🔴 45 分を超える物は、**背景で 1 回だけ**回す(smoke に限らない。2026-10-04、exit 137)
+
+⚠ probe(5 腕 × 3 回)を背景で回したが `timeout` を書かず、**30 分の既定上限で殺された**(終了コード **137**、`exit.txt` も書かれず、worktree は lock されたまま残った)。
+🔑 全量 smoke と同じ形で回す:**`run_in_background: true` かつ `timeout: 5400000`** で **1 回だけ**。
+完了は通知で届く ── **`sleep` / `pgrep` で待たない**(下の節)。依頼文に「45 分を超える」と書いてなくても、
+**所要が読めない probe / 焼きの待ちは背景**にする。
 
 ## 🔴 全量 smoke は **`test.use` の spec が最後に回る** ── 途中で止まると取りこぼす(2026-10-03)
 
