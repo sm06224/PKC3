@@ -20,7 +20,7 @@
  * |---|---|
  * | 錨が 1 件ずつ当たる / 二重当ては落ちて file 不変 | 🔴 **Qt 全体のコンパイル**(Qt の header が無い。焼きで見る) |
  * | 原文の削除は 1 枠・1 bit の周りだけ / 足した行は全部印つき | 実機で外側の `processEvents` が戻るか(焼いた一式の probe) |
- * | 🔑 **JS の挙動を node で実走**(原文・v1 を対照群に。変異 6 件を機械で当てる) | |
+ * | 🔑 **JS の挙動を node で実走**(原文・v1 を対照群に。変異を機械で当てる ── 件数は `MUTANTS` が正本) | |
  * | 🔑 C++ の 2 関数を**取り出して g++ で動かす**(stub の上で) | |
  */
 import { describe, expect, it } from 'vitest';
@@ -306,7 +306,12 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     const resumeBody = bodyOf(src, 'EM_JS(void, qt_asyncify_resume_js, (), {');
     const Module: Mod = {};
     const timers: (() => void)[] = [];
-    const fakeSetTimeout = (fn: () => void): number => timers.push(fn);
+    /** `setTimeout` の第 2 引数(間引きの検め用)。timer と同じ順。 */
+    const delays: number[] = [];
+    const fakeSetTimeout = (fn: () => void, ms = 0): number => {
+      delays.push(ms);
+      return timers.push(fn);
+    };
     let sp = 65536;
     let suspends = 0;
     /** いま `then` を走らせている frame の「押す前の値」(その中の suspend は同じ frame の止まり直し)。 */
@@ -327,6 +332,7 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     return {
       woke,
       timers,
+      delays,
       stackLen,
       sp: (): number => sp,
       /** 名前を付けて suspend する。起きたら `woke` へ積み、`then` を走らせる(= その frame が次にやること)。 */
@@ -360,6 +366,10 @@ EM_JS(void, qt_asyncify_resume_js, (), {
       /** その frame が戻った。 */
       foreignPop(): void {
         sp += 16;
+      },
+      /** 🔴 top の frame が**巻き戻された**(別の計算が上を走って sp を top.sp より高くした)。起こせば踏む側。 */
+      unwind(): void {
+        sp += 32;
       },
       resume: (): void => resumeFn(Module, fakeSetTimeout, stackSave),
       /** 置かれた timer を全部発火させる(= `setTimeout(0)` が 1 周した)。⚠ 発火中に足された timer は次の周で回る。 */
@@ -471,6 +481,140 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     return { h, steps, armedWhileForeign };
   }
   const FOREIGN = 'E1: 上に別の frame が生きているのに、外側が起きた(shadow stack を踏む)';
+
+  /** console.error / console.warn を集める(場面 F / G 用)。 */
+  async function withConsole<T>(fn: () => Promise<T>): Promise<{ r: T; errs: string[]; warns: string[] }> {
+    const errs: string[] = [];
+    const warns: string[] = [];
+    const origE = console.error;
+    const origW = console.warn;
+    console.error = (...a: unknown[]) => errs.push(a.map(String).join(' '));
+    console.warn = (...a: unknown[]) => warns.push(a.map(String).join(' '));
+    try {
+      return { r: await fn(), errs, warns };
+    } finally {
+      console.error = origE;
+      console.warn = origW;
+    }
+  }
+
+  /**
+   * 場面 D(v3。**待っている間に新しい suspend が積まれる**):
+   * A suspend → resume → 上に別の frame(`foreignPush`)→ tick①(A は待つ)→ その frame の中で B が suspend(= 新しい top)→
+   * tick②(B は wake 無し。空転しない = timer 0 本)→ resume → tick③(B が起きて戻る)→ `foreignPop` → tick④(A が起きる)。
+   */
+  async function sceneD(src: string): Promise<{ steps: string[][]; timersAfterPush: number }> {
+    const h = harness(src);
+    const steps: string[][] = [];
+    const tick = async (): Promise<void> => {
+      h.fire();
+      await h.flush();
+      steps.push(h.names());
+    };
+    h.suspend('A');
+    await h.flush();
+    h.resume();
+    h.foreignPush();
+    await tick(); // ① A は待つ
+    h.suspend('B'); // 上の frame の中で、新しい top
+    await h.flush();
+    await tick(); // ② B は wake 無し
+    const timersAfterPush = h.timers.length;
+    h.resume();
+    await tick(); // ③ B
+    h.foreignPop();
+    await tick(); // ④ A
+    return { steps, timersAfterPush };
+  }
+  function claimsD(r: { steps: string[][]; timersAfterPush: number }): string[] {
+    const bad: string[] = [];
+    if (!same(r.steps[0], []) || !same(r.steps[1], [])) bad.push('D1: 上に frame が生きているのに誰かが起きた');
+    if (r.timersAfterPush !== 0) bad.push(`D2: wake の無い新しい top の前で tick が回り続けている(${r.timersAfterPush} 本)`);
+    if (!same(r.steps[2], ['B'])) bad.push('D3: resume の後に、新しい top(B)だけが起きていない');
+    if (!same(r.steps[3], ['B', 'A'])) bad.push('D4: B が戻った後の tick で A が起きていない');
+    return bad;
+  }
+
+  /**
+   * 場面 F(v3。**top の frame が巻き戻されている** = sp が top.sp より高い):
+   * A suspend → resume → `unwind()` → tick ×260。起こさない(起こせば踏む)/ 250 周目に `dir=unwound` の診断が 1 度。
+   */
+  async function sceneF(src: string): Promise<{ names: string[]; errs: string[]; delaysTail: number[] }> {
+    const { r, errs } = await withConsole(async () => {
+      const h = harness(src);
+      h.suspend('A');
+      await h.flush();
+      h.resume();
+      h.unwind();
+      for (let i = 0; i < 260; i++) {
+        h.fire();
+        await h.flush();
+      }
+      return { names: h.names(), delaysTail: h.delays.slice(-3) };
+    });
+    return { ...r, errs };
+  }
+  function claimsF(r: { names: string[]; errs: string[]; delaysTail: number[] }): string[] {
+    const bad: string[] = [];
+    if (r.names.length > 0) bad.push('F1: 巻き戻された frame を起こした(踏む)');
+    if (r.errs.length !== 1) bad.push(`F2: 診断が ${r.errs.length} 件(1 件でない)`);
+    if (r.errs.length === 1 && !/sp-defer n=250 .*dir=unwound/.test(r.errs[0]!)) bad.push(`F3: 診断の向きが違う: ${r.errs[0]}`);
+    if (!same(r.delaysTail, [100, 100, 100])) bad.push(`F4: 250 周を超えても間引いていない(${r.delaysTail.join(',')})`);
+    return bad;
+  }
+
+  /**
+   * 場面 G(v3。**待ちの数え方**):短い待ち(100 周)を 3 回 ── 待ちごとに数え直すので診断 0(数え直さなければ 3 回目の途中で 250 に達して鳴る)→
+   * 長い待ち:249 周で診断 0 → 250 周目で 1、その再予約は 100 ms → 上の frame が戻れば起きる。
+   */
+  async function sceneG(src: string): Promise<{ afterShort: number; at249: number; at250: number; delayAt250: number; namesEnd: string[] }> {
+    const errs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => errs.push(a.map(String).join(' '));
+    try {
+      const h = harness(src);
+      const wait = async (name: string, rounds: number): Promise<void> => {
+        h.suspend(name);
+        await h.flush();
+        h.resume();
+        h.foreignPush();
+        for (let i = 0; i < rounds; i++) {
+          h.fire();
+          await h.flush();
+        }
+      };
+      const back = async (): Promise<void> => {
+        h.foreignPop();
+        h.fire();
+        await h.flush();
+      };
+      for (const name of ['S1', 'S2', 'S3']) {
+        await wait(name, 100);
+        await back();
+      }
+      const afterShort = errs.length;
+      await wait('L', 249);
+      const at249 = errs.length;
+      h.fire();
+      await h.flush();
+      const at250 = errs.length;
+      const delayAt250 = h.delays[h.delays.length - 1]!;
+      await back();
+      return { afterShort, at249, at250, delayAt250, namesEnd: h.names() };
+    } finally {
+      console.error = orig;
+    }
+  }
+  function claimsG(r: Awaited<ReturnType<typeof sceneG>>): string[] {
+    const bad: string[] = [];
+    if (r.afterShort !== 0) bad.push(`G5: 短い待ち 3 回(各 100 周)で診断が ${r.afterShort} 件(待ちごとに数え直していない ── 累積して鳴る)`);
+    if (r.at249 !== 0) bad.push(`G1: 249 周で診断が ${r.at249} 件(0 でない ── 約 1 秒より早く鳴る)`);
+    if (r.at250 !== 1) bad.push(`G2: 250 周で診断が ${r.at250} 件(1 でない)`);
+    if (r.delayAt250 !== 100) bad.push(`G3: 250 周目の再予約が ${r.delayAt250} ms(100 でない)`);
+    if (!same(r.namesEnd, ['S1', 'S2', 'S3', 'L'])) bad.push(`G4: 上の frame が戻った後に起きていない(${r.namesEnd.join(',')})`);
+    return bad;
+  }
+
   function claimsE(r: { steps: string[][]; armedWhileForeign: number }): string[] {
     const bad: string[] = [];
     if (!same(r.steps[0], []) || !same(r.steps[1], [])) bad.push(FOREIGN);
@@ -635,31 +779,38 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     expect(re.h.names()).toEqual(['A']);
   });
 
-  it('⚠ (e) v3: 約 1 秒(250 周)戻らなければ診断を 1 度だけ出し、起こしはしない', async () => {
-    const h = harness(PATCHED);
-    const errs: string[] = [];
-    const orig = console.error;
-    console.error = (...a: unknown[]) => errs.push(a.map(String).join(' '));
-    try {
+  it('🔴 (d) v3: 待っている間に新しい suspend が積まれたら、次の tick は新しい top を見る(空転せず、B → A の順)', async () => {
+    // ⚠ 着地前レビュー(2026-10-05、#1356)が「この場面を pin する test が無い」と指摘した。
+    expect(claimsD(await sceneD(PATCHED))).toEqual([]);
+  });
+
+  it('🔴 (f) v3: top の frame が巻き戻されている(sp が top.sp より高い)ときも起こさず、`dir=unwound` の診断を出して 100 ms に間引く', async () => {
+    // ⚠ 着地前レビュー(同上)の指摘:`!==` は低い側(上に frame が生きている)だけでなく高い側でも閉じる。
+    //    高い側 = 別の計算が top の領域を上書きした後なので、起こせば踏む(v1 の trap)。起こさない = trap が診断つきの hang に変わるだけで、直ってはいない。
+    //    ここで pin するのは「その選択を黙って変えない」こと(`<` にすると高い側で起こす = 踏む)。
+    expect(claimsF(await sceneF(PATCHED))).toEqual([]);
+  });
+
+  it('🔴 (g) v3: 短い待ちは累積せず(待ちごとに数え直す)、診断は 249 周で 0・250 周で 1、再予約は 250 周から 100 ms', async () => {
+    // ⚠ 着地前レビュー(同上)で `=== 250` / `+ 1` / `qtResumeDeferred = 0` の変異が SURVIVED だった(閾値も reset も pin されていなかった)。
+    expect(claimsG(await sceneG(PATCHED))).toEqual([]);
+  });
+
+  it('⚠ (e) v3: `stackSave` が無い一式では、最初の suspend で 1 度だけ warn する(黙って門が無くならない)', async () => {
+    const { r, warns } = await withConsole(async () => {
+      const h = harness(PATCHED, { stackSave: false });
       h.suspend('A');
       await h.flush();
       h.resume();
-      h.foreignPush();
-      for (let i = 0; i < 600; i++) {
-        h.fire();
-        await h.flush();
-      }
-      expect(h.names(), '待っている間に起こした').toEqual([]);
-      expect(errs.length, '診断が 1 度でない').toBe(1);
-      expect(errs[0]).toContain('PKC3-UEV sp-defer');
-      h.foreignPop();
       h.fire();
       await h.flush();
-      expect(h.names()).toEqual(['A']);
-      expect(errs.length).toBe(1);
-    } finally {
-      console.error = orig;
-    }
+      h.suspend('A2');
+      await h.flush();
+      return h.names();
+    });
+    expect(r).toEqual(['A']);
+    expect(warns.length, 'warn が 1 度でない').toBe(1);
+    expect(warns[0]).toContain('PKC3-UEV no-stackSave');
   });
 
   it('🔴 (d) 対照群・原文: 外側の resolver は**捨てられ**、二度と起きない', async () => {
@@ -694,7 +845,7 @@ EM_JS(void, qt_asyncify_resume_js, (), {
   });
 
   /**
-   * 🔴 **変異試験**(v2 の JS の 1 行ずつを壊し、場面 B / C のどれかが**破れる**ことを見る)。
+   * 🔴 **変異試験**(v3 の JS の 1 行ずつを壊し、場面 B / C / E / F / G のどれかが**破れる**ことを見る)。
    * `NOT-APPLIED`(元の字が 1 件でない)は合格ではない ── 当たっていない変異を「生き延びた」とも「殺した」とも読まない。
    */
   const MUTANTS: { name: string; from: string; to: string; claim: string }[] = [
@@ -750,15 +901,45 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     },
     {
       name: '⑧ 待ちの再予約を外す(戻ったのを誰も見に来ない ── 外側が永久に起きない)',
-      from: '            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
+      from: '            setTimeout(tick, n >= 250 ? 100 : 0); // PKC3-ASYNCNEST: 待ちの再予約(約 1 秒を超えたら 100 ms に間引いて空転を抑える)\n',
       to: '',
       claim: 'E2: ',
     },
     {
       name: '⑨ 待ちで armed を立てない(次の resume が tick を二重に置く)',
-      from: '            Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST\n            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
-      to: '            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約\n',
+      from: "            Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST\n            setTimeout(tick, n >= 250 ? 100 : 0); // PKC3-ASYNCNEST: 待ちの再予約(約 1 秒を超えたら 100 ms に間引いて空転を抑える)\n",
+      to: "            setTimeout(tick, n >= 250 ? 100 : 0); // PKC3-ASYNCNEST: 待ちの再予約(約 1 秒を超えたら 100 ms に間引いて空転を抑える)\n",
       claim: 'E2: ',
+    },
+    {
+      name: '⑩ 待ちを数え直さない(`qtResumeDeferred = 0` を外す ── 短い待ちが累積して偽の診断 / 2 回目以降の診断が出ない)',
+      from: '        Module.qtResumeDeferred = 0; // PKC3-ASYNCNEST: 待ちは 1 回ごとに数える(次の待ちでも診断が出る)\n',
+      to: '',
+      claim: 'G5: ',
+    },
+    {
+      name: '⑪ 診断の閾値を 1 周にする(`n === 250` → `n === 1`)',
+      from: '            if (n === 250) console.error(',
+      to: '            if (n === 1) console.error(',
+      claim: 'G1: ',
+    },
+    {
+      name: '⑫ 2 ずつ数える(`+ 1` → `+ 2` ── 約 0.5 秒で鳴る)',
+      from: '            const n = (Module.qtResumeDeferred | 0) + 1; // PKC3-ASYNCNEST',
+      to: '            const n = (Module.qtResumeDeferred | 0) + 2; // PKC3-ASYNCNEST',
+      claim: 'G1: ',
+    },
+    {
+      name: '⑬ 高い側で起こす(`!== top.sp` → `< top.sp` ── 巻き戻された frame を起こして踏む)',
+      from: "        if (top.sp !== null && typeof stackSave === 'function' && stackSave() !== top.sp) { // PKC3-ASYNCNEST",
+      to: "        if (top.sp !== null && typeof stackSave === 'function' && stackSave() < top.sp) { // PKC3-ASYNCNEST",
+      claim: 'F1: ',
+    },
+    {
+      name: '⑭ 250 周を超えても間引かない(`n >= 250 ? 100 : 0` → `0`)',
+      from: '            setTimeout(tick, n >= 250 ? 100 : 0); // PKC3-ASYNCNEST',
+      to: '            setTimeout(tick, 0); // PKC3-ASYNCNEST',
+      claim: 'F4: ',
     },
   ];
 
@@ -769,16 +950,30 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     expect(mutated, 'NOT-APPLIED: 何も変わっていない').not.toBe(PATCHED);
     let claims: string[];
     try {
-      claims = [...claimsB(await sceneB(mutated)), ...claimsC(await sceneC(mutated)), ...claimsE(await sceneE(mutated))];
+      claims = [
+        ...claimsB(await sceneB(mutated)),
+        ...claimsC(await sceneC(mutated)),
+        ...claimsE(await sceneE(mutated)),
+        ...claimsD(await sceneD(mutated)),
+        ...claimsF(await sceneF(mutated)),
+        ...claimsG(await sceneG(mutated)),
+      ];
     } catch (e) {
       claims = [`threw: ${String(e)}`];
     }
-    expect(claims.length, 'SURVIVED: 変異を当てても場面 B / C / E の主張が 1 つも破れない').toBeGreaterThan(0);
+    expect(claims.length, 'SURVIVED: 変異を当てても場面 B / C / D / E / F / G の主張が 1 つも破れない').toBeGreaterThan(0);
     expect(claims.some((c) => c.startsWith(claim)), `KILLED だが別の主張で: ${claims.join(' / ')}(期待: ${claim})`).toBe(true);
   });
 
   it('⚠ 対照: 変異を当てていない v3 は、同じ台で主張が 1 つも破れない(台が全部を破っているのではない)', async () => {
-    expect([...claimsB(await sceneB(PATCHED)), ...claimsC(await sceneC(PATCHED)), ...claimsE(await sceneE(PATCHED))]).toEqual([]);
+    expect([
+      ...claimsB(await sceneB(PATCHED)),
+      ...claimsC(await sceneC(PATCHED)),
+      ...claimsE(await sceneE(PATCHED)),
+      ...claimsD(await sceneD(PATCHED)),
+      ...claimsF(await sceneF(PATCHED)),
+      ...claimsG(await sceneG(PATCHED)),
+    ]).toEqual([]);
   });
 });
 

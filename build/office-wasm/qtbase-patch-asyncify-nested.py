@@ -68,8 +68,10 @@ v2 の LIFO は **Qt 自身の suspend だけ**を stack に持つ。⚠ JSPI �
 - suspend のとき `sp: stackSave()` を控える(EM_JS の中では、呼び手の C の frame の sp)。
 - tick で top を起こす前に **`stackSave() === top.sp`** を見る。違えば**上に frame が生きている**
   ので起こさず、tick をもう 1 周置いて待つ(戻れば sp は同じ値へ戻る ── 関数の epilogue が戻す)。
-- 約 1 秒(250 周)待っても戻らなければ `console.error('PKC3-UEV sp-defer …')` を 1 度だけ出す
-  (probe の clipTrace が拾う。⚠ 起こしはしない ── 起こせば壊れる)。
+- 約 1 秒(250 周)待っても戻らなければ `console.error('PKC3-UEV sp-defer …')` を**1 回の待ちに 1 度**出し、
+  以後の tick は 100 ms に間引く(probe の clipTrace が拾う。⚠ 起こしはしない ── 起こせば壊れる)。
+  ⚠ sp が top.sp より**高い**(top の frame が既に巻き戻されている = 別の計算が上書きした後)ときも起こさない ──
+  そのときは trap が hang(診断つき)に変わるだけで、直ってはいない。`dir=unwound` がその印。
 - `stackSave` が無い一式では `sp: null` で門を閉じない(= v2 と同じ)。焼いた soffice.js には
   `stackSave=()=>_emscripten_stack_get_current()` が在る(run 37303396759 の一式で実測)。
 ⚠ 入れ子でない普段の経路では、suspend したときの sp と tick のときの sp は**必ず同じ**
@@ -145,8 +147,9 @@ JS_REPLACE = """    // PKC3-ASYNCNEST(#1344 v2): suspend の stack(末尾が最�
     return new Promise(resolve => { // PKC3-ASYNCNEST
         if (Module.qtSuspends === undefined) Module.qtSuspends = []; // PKC3-ASYNCNEST
         // PKC3-ASYNCNEST(v3): shadow stack の位置(`__stack_pointer`)を控える。起こす前に同じ位置に戻っていることを見る門。
-        // PKC3-ASYNCNEST: `stackSave` が無い一式では null(= 門なし。v2 と同じ動き)。
+        // PKC3-ASYNCNEST: `stackSave` が無い一式では null(= 門なし。v2 と同じ動き)── 黙って無くならないよう 1 度だけ言う。
         const sp = (typeof stackSave === 'function') ? stackSave() : null; // PKC3-ASYNCNEST
+        if (sp === null && !Module.qtNoStackSaveWarned) { Module.qtNoStackSaveWarned = true; console.warn('PKC3-UEV no-stackSave: sp の門なし(v2 と同じ動き)'); } // PKC3-ASYNCNEST
         Module.qtSuspends.push({ resolve: resolve, wake: false, sp: sp }); // PKC3-ASYNCNEST
     }); // PKC3-ASYNCNEST
 });
@@ -166,14 +169,18 @@ EM_JS(void, qt_asyncify_resume_js, (), {
         if (!top.wake) return; // PKC3-ASYNCNEST: 内側が起こされていないなら外側は待つ(wake は立ったまま残る)
         // PKC3-ASYNCNEST(v3): この stack に載っていない frame(Qt 以外の JSPI suspend)が top の上で生きている間は起こさない。
         // PKC3-ASYNCNEST: 起こすと外側が内側の frame を踏む(v1 で踏んだ unaligned accesses と同じ壊れ方)。戻るまで tick で待つ。
+        // PKC3-ASYNCNEST: sp が top.sp より**低い** = 上に frame が生きている(戻れば同じ値へ戻る)。
+        // PKC3-ASYNCNEST: sp が top.sp より**高い** = top の frame はもう巻き戻されている(別の計算が上書きした後)── 起こせば踏む。
+        // PKC3-ASYNCNEST: どちらも起こさない(壊れた frame を起こすより、診断つきで止まる側を取る)。向きは診断に出す。
         if (top.sp !== null && typeof stackSave === 'function' && stackSave() !== top.sp) { // PKC3-ASYNCNEST
-            Module.qtResumeDeferred = (Module.qtResumeDeferred | 0) + 1; // PKC3-ASYNCNEST
-            if (Module.qtResumeDeferred === 250) console.error('PKC3-UEV sp-defer n=250 sp=' + stackSave() + ' top=' + top.sp + ' depth=' + s.length); // PKC3-ASYNCNEST: 約 1 秒待っても戻らない(診断。1 度だけ)
+            const n = (Module.qtResumeDeferred | 0) + 1; // PKC3-ASYNCNEST
+            Module.qtResumeDeferred = n; // PKC3-ASYNCNEST
+            if (n === 250) console.error('PKC3-UEV sp-defer n=250 sp=' + stackSave() + ' top=' + top.sp + ' dir=' + (stackSave() < top.sp ? 'above' : 'unwound') + ' depth=' + s.length); // PKC3-ASYNCNEST: 約 1 秒待っても戻らない(診断。1 回の待ちに 1 度)
             Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST
-            setTimeout(tick); // PKC3-ASYNCNEST: 待ちの再予約
+            setTimeout(tick, n >= 250 ? 100 : 0); // PKC3-ASYNCNEST: 待ちの再予約(約 1 秒を超えたら 100 ms に間引いて空転を抑える)
             return; // PKC3-ASYNCNEST
         } // PKC3-ASYNCNEST
-        Module.qtResumeDeferred = 0; // PKC3-ASYNCNEST
+        Module.qtResumeDeferred = 0; // PKC3-ASYNCNEST: 待ちは 1 回ごとに数える(次の待ちでも診断が出る)
         s.pop(); // PKC3-ASYNCNEST
         top.resolve(); // PKC3-ASYNCNEST
         // PKC3-ASYNCNEST: 起こした stack は、もう一度 suspend する(push)か JS へ戻る(push しない)。次の tick で分かる。
