@@ -17,21 +17,41 @@
   **外側の frame の resolver を捨てる** → 外側の `processEvents` は**二度と戻らず**、
   LibreOffice の main loop が死ぬ(#1344 のコメントの実測)。
 
-## 直し ── 1 枠・1 bit を、id ごとの Map・深さの数へ
+## 直し(v2)── 1 枠・1 bit を、suspend の stack・深さの数へ。**起こす順は LIFO**
 
-1. **JS**: resolver を **id ごとの `Map`** に持つ。resume は**溜まっている全部**を
-   `setTimeout(0)` で起こす(**id の照合で捨てない**)。⚠ `setTimeout` は残す
-   (emscripten #10515 の回避)。
-2. **C++**: 1 bit を **深さの数**(`g_asyncify_suspend_depth`)にする。
+⚠ v1(#1350)は resolver を id ごとの Map に持ち、resume が**溜まっている全部**を
+`setTimeout(0)` で一度に起こした。焼いて実ブラウザで測ると、popup の後の dispatch は
+exec-ret の 32 ms 後に出た(向きは正しい)が、`QMenu::hideEvent` →
+`QEventLoop::exit(int)` で **`operation does not support unaligned accesses`** が出た。
+🔴 **JSPI でも Emscripten の C の shadow stack(線形メモリ)は 1 本**である。外側の frame
+(LO の main loop → ImplYield → processEvents → wait → suspend)が suspend したまま、
+mouse callback の stack の上で menu の入れ子 loop が suspend している。そこで**外側を
+先に起こす**と、外側が内側の frame(`QMenuPrivate::exec` の局所 `QEventLoop`)の上に
+自分の frame を積んで**踏む**。内側が後で `hideEvent` → `eventLoop->exit()` を呼ぶと、
+その QEventLoop は壊れていて trap する。
+🔑 だから**起こす順は LIFO でなければならない** ── 内側(最後に suspend した物)を起こし、
+**その stack が JS へ戻った後**でなければ、外側を起こしてはいけない。
+
+1. **JS**: suspend の resolver を `Module.qtSuspends`(**stack。末尾が最も内側**)に
+   `{ resolve, wake }` で積む。resume は**溜まっている全部に `wake = true`**(wake は
+   dispatcher 全体への合図なので捨てない)を立て、`setTimeout(0)` の tick で
+   **最も内側だけ**を見る。内側が起こされていなければ**外側は待つ**(wake は立ったまま残る)。
+   起こしたら tick をもう 1 回予約する ── 起こした stack は「もう一度 suspend する(push)」
+   か「JS へ戻る(push しない)」かのどちらかで、戻っていれば次の tick で外側が最も内側に
+   なっている。⚠ `setTimeout` は残す(emscripten #10515 の回避。suspendId の照合は、
+   wake flag が同じ役を担うので要らない)。
+2. **C++**(v1 のまま): 1 bit を **深さの数**(`g_asyncify_suspend_depth`)にする。
    - `qt_asyncify_suspend()`: 深さ > 0 でも **JSPI なら入れ子で suspend してよい**。
      asyncify(1) は従来どおり入れ子不可(`return false`)。戻ってきた = この frame は
      起きたので `--depth`。
    - `qt_asyncify_resume()`: 深さが 0 のときだけ何もしない。**bit を先に落とさない**。
    - `wakeEventDispatcherThread()`: 深さが 0 のときだけ「suspend していない」。
 
-🔑 **入れ子でない普段の経路(読み込み中を含む)は、Map に 1 件しか無い**ので
-**今までと同じ動き**になる。違いが出るのは入れ子のときだけで、そのとき**両方の frame が
-起きる**(どちらが event を処理しても `QMenu` の loop は exit flag で返る)。
+🔑 **入れ子でない普段の経路(読み込み中を含む)は、stack に 1 件しか無い**ので
+**今までと同じ動き**になる(suspend → resume → tick 1 回で起きる)。違いが出るのは
+入れ子のときだけで、そのとき**内側から順に**起きる。
+⚠ 原本は外側の resolver を**捨てて**いた(外側は永久に suspend ── #1344 の症状)。
+v1 は**全部起こして**LIFO を破った。
 
 ## ⚠ この箱では compile も実行もできない
 
@@ -66,8 +86,10 @@ VAR_REPLACE = """// PKC3-ASYNCNEST(#1344): 1 bit を「いま suspend してい�
 static int g_asyncify_suspend_depth = 0; // PKC3-ASYNCNEST
 """
 
-# ── ② JS 側:1 枠 + suspendId の照合 → id ごとの Map、全部起こす
-JS_ANCHOR = """    ++Module.qtSuspendId;
+# ── ② JS 側:1 枠 + suspendId の照合 → suspend の stack、LIFO で起こす(v2)
+JS_ANCHOR = """    if (Module.qtSuspendId === undefined)
+        Module.qtSuspendId = 0;
+    ++Module.qtSuspendId;
     await new Promise(resolve => {
         Module.qtAsyncifyWakeUp = resolve;
     });
@@ -90,24 +112,35 @@ EM_JS(void, qt_asyncify_resume_js, (), {
     });
 });
 """
-JS_REPLACE = """    ++Module.qtSuspendId;
-    const id = Module.qtSuspendId; // PKC3-ASYNCNEST
-    if (Module.qtAsyncifyWakeUps === undefined) Module.qtAsyncifyWakeUps = new Map(); // PKC3-ASYNCNEST
-    await new Promise(resolve => { // PKC3-ASYNCNEST
-        Module.qtAsyncifyWakeUps.set(id, resolve); // PKC3-ASYNCNEST
-    });
+JS_REPLACE = """    // PKC3-ASYNCNEST(#1344 v2): suspend の stack(末尾が最も内側)。C の shadow stack は JSPI でも 1 本なので、
+    // PKC3-ASYNCNEST: 外側を内側より先に起こすと、内側の frame(QMenuPrivate::exec の局所 QEventLoop)を踏む。LIFO で起こす。
+    return new Promise(resolve => { // PKC3-ASYNCNEST
+        if (Module.qtSuspends === undefined) Module.qtSuspends = []; // PKC3-ASYNCNEST
+        Module.qtSuspends.push({ resolve: resolve, wake: false }); // PKC3-ASYNCNEST
+    }); // PKC3-ASYNCNEST
 });
 
 EM_JS(void, qt_asyncify_resume_js, (), {
-    const m = Module.qtAsyncifyWakeUps; // PKC3-ASYNCNEST
-    if (m === undefined || m.size === 0) // PKC3-ASYNCNEST
-        return;
-    const wakeUps = Array.from(m.values()); // PKC3-ASYNCNEST
-    m.clear(); // PKC3-ASYNCNEST
-
-    // PKC3-ASYNCNEST: Delayed wakeup with zero-timer (emscripten #10515 の回避はそのまま)。
-    // PKC3-ASYNCNEST: 1 枠 + suspendId の照合だと、JSPI の入れ子 suspend で外側の frame の起こしが捨てられる(#1344)。
-    setTimeout(() => { for (const wakeUp of wakeUps) wakeUp(); }); // PKC3-ASYNCNEST
+    const s = Module.qtSuspends; // PKC3-ASYNCNEST
+    if (s === undefined || s.length === 0) return; // PKC3-ASYNCNEST
+    for (const e of s) e.wake = true; // PKC3-ASYNCNEST: wake は dispatcher 全体への合図。溜まっている全部に立てる(捨てない)
+    if (Module.qtResumeTickArmed) return; // PKC3-ASYNCNEST
+    Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST
+    // PKC3-ASYNCNEST: Delayed wakeup with zero-timer(emscripten #10515 の回避はそのまま)。
+    const tick = () => { // PKC3-ASYNCNEST
+        Module.qtResumeTickArmed = false; // PKC3-ASYNCNEST
+        const s = Module.qtSuspends; // PKC3-ASYNCNEST
+        if (s === undefined || s.length === 0) return; // PKC3-ASYNCNEST
+        const top = s[s.length - 1]; // PKC3-ASYNCNEST: 最も内側だけを見る(LIFO)
+        if (!top.wake) return; // PKC3-ASYNCNEST: 内側が起こされていないなら外側は待つ(wake は立ったまま残る)
+        s.pop(); // PKC3-ASYNCNEST
+        top.resolve(); // PKC3-ASYNCNEST
+        // PKC3-ASYNCNEST: 起こした stack は、もう一度 suspend する(push)か JS へ戻る(push しない)。次の tick で分かる。
+        // PKC3-ASYNCNEST: 戻っていれば、次に内側になった物(外側)をその tick で起こす。
+        Module.qtResumeTickArmed = true; // PKC3-ASYNCNEST
+        setTimeout(tick); // PKC3-ASYNCNEST: 再予約
+    }; // PKC3-ASYNCNEST
+    setTimeout(tick); // PKC3-ASYNCNEST
 });
 """
 
@@ -185,7 +218,7 @@ def patch(root: Path) -> int:
                   file=sys.stderr)
             return 1
     path.write_text(text, encoding="utf-8")
-    print(f"patched: {SRC}(#1344 の直し ── JSPI の入れ子 suspend で外側の起こしを捨てない)")
+    print(f"patched: {SRC}(#1344 の直し v2 ── JSPI の入れ子 suspend は LIFO で起こす)")
     return 0
 
 

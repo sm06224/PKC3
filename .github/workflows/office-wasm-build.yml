@@ -306,8 +306,9 @@ jobs:
           # 🔴 3 → 4(2026-10-05)。`qtbase-patch-asyncify-nested.py`(#1344 の直し)。
           #    JSPI の入れ子 suspend で、resume を予約していた外側の frame の起こしが
           #    `qtSuspendId` の照合で捨てられ、外側の `processEvents` が二度と戻らない ──
-          #    resolver の 1 枠・`g_is_asyncify_suspended` の 1 bit を、id ごとの Map・
-          #    深さの数へ替える(`qeventdispatcher_wasm.cpp` だけを触る)。
+          #    resolver の 1 枠・`g_is_asyncify_suspended` の 1 bit を、suspend の stack・
+          #    深さの数へ替え、**LIFO で起こす**(v2。C の shadow stack は JSPI でも 1 本なので、
+          #    外側を内側より先に起こすと内側の frame を踏む)。`qeventdispatcher_wasm.cpp` だけを触る。
           #    ⚠ 3 → 4 でも Qt の cache 鍵が変わるので Qt を焼き直す(数時間)。
           test "$n" -eq 4
 
