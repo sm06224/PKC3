@@ -362,10 +362,10 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
     const other = join(dir, 'framework/source/uielement/menubarmanager.cxx');
     mkdirSync(dirname(other), { recursive: true });
     writeFileSync(other, readFileSync('tests/fixtures/office-lo/menubarmanager.excerpt.cxx', 'utf-8'), 'utf-8');
-    // `patch-lo-yield-proxy-guard.py`(#121)の当て先(`vcl/qt5/QtInstance.cxx`)も同じ理由で木に要る
-    const qt = join(dir, 'vcl/qt5/QtInstance.cxx');
-    mkdirSync(dirname(qt), { recursive: true });
-    writeFileSync(qt, readFileSync('tests/fixtures/office-lo/QtInstance.excerpt.cxx', 'utf-8'), 'utf-8');
+    // `patch-lo-ime-nowait.py`(#121)の当て先(`vcl/source/window/winproc.cxx`)も同じ理由で木に要る
+    const win = join(dir, 'vcl/source/window/winproc.cxx');
+    mkdirSync(dirname(win), { recursive: true });
+    writeFileSync(win, readFileSync('tests/fixtures/office-lo/winproc.excerpt.cxx', 'utf-8'), 'utf-8');
     const r = spawnSync('python3', [checkScript, dir], {
       encoding: 'utf-8',
       env: { ...process.env, PKC3_SCOPE_ONLY: 'fixes' },
@@ -393,8 +393,8 @@ describe('#117 の直し(scheduler-task-gone)── スコープ検査(check-pat
         'utf-8',
       );
       writeFileSync(
-        join(dir, 'patch-lo-yield-proxy-guard.py'),
-        readFileSync('build/office-wasm/patch-lo-yield-proxy-guard.py', 'utf-8'),
+        join(dir, 'patch-lo-ime-nowait.py'),
+        readFileSync('build/office-wasm/patch-lo-ime-nowait.py', 'utf-8'),
         'utf-8',
       );
       return scope(join(dir, 'check-patch-scope.py'), t.dir);

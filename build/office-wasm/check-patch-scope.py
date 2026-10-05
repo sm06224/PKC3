@@ -298,24 +298,16 @@ FIXES = [
         "MenuBarManager::Select の popup の分岐",
         "#include <cstdio> // PKC3-POPUPSYNC",
     ),
-    # 🔴 #121(2026-10-04)── `patch-lo-yield-proxy-guard.py`。**1 つの patch が 2 か所を関数の中へ足す**ので 2 行。
+    # 🔴 #121(2026-10-04)── `patch-lo-ime-nowait.py`。`ImplHandleExtTextInput` の while の中の 1 か所。
     (
-        "patch-lo-yield-proxy-guard.py",
-        "vcl/qt5/QtInstance.cxx",
-        # 原文: `ImplYield` の 4 字下げの 1 行(足す `if (g_bPkc3InProxiedYield)` も同じ関数の中)
-        "    bool wasEvent = DispatchUserEvents(bHandleAllCurrentEvents);\n",
-        "if (g_bPkc3InProxiedYield) // PKC3-YIELDGUARD",
-        "QtInstance::ImplYield の dispatch の分岐",
-        "#include <cstdio> // PKC3-YIELDGUARD",
-    ),
-    (
-        "patch-lo-yield-proxy-guard.py",
-        "vcl/qt5/QtInstance.cxx",
-        # 原文: `DoYield` の proxy lambda の 16 字下げの 1 行(旗を立てる行も同じ lambda の中)
-        "                args.bWasEvent = args.This->DoYield(args.bWait, args.bHandleAllCurrentEvents);\n",
-        "g_bPkc3InProxiedYield = true; // PKC3-YIELDGUARD",
-        "QtInstance::DoYield の proxy lambda の旗",
-        "#include <cstdio> // PKC3-YIELDGUARD",
+        "patch-lo-ime-nowait.py",
+        "vcl/source/window/winproc.cxx",
+        # 原文: LOK の 5 行 + 待つ `Application::Yield();`(`Yield` は file 内に複数在るので LOK の塊で一意にする。
+        #       8 字下げ = while の `{` の中。足す `if (g_nPkc3ImeNoWaitSaid < 20)` も同じ `{` の中に入る)
+        '        if (comphelper::LibreOfficeKit::isActive())\n        {\n            SAL_WARN("vcl", "Failed to get ext text input context");\n            break;\n        }\n        Application::Yield();\n',
+        "if (g_nPkc3ImeNoWaitSaid < 20) // PKC3-IMENOWAIT",
+        "ImplHandleExtTextInput の待ちの分岐",
+        "#include <cstdio> // PKC3-IMENOWAIT",
     ),
 ]
 
