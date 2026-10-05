@@ -109,7 +109,7 @@ Agent({ subagent_type: 'pkc3-implementer', isolation: 'worktree', prompt: … })
 |---|---|
 | **`node_modules` が無い** → `npx vitest` / `tsc` が動かない | `ln -s /home/user/PKC3/node_modules node_modules`(🔴 **commit しない**。`git add` は file 名を指す)。🔴 **vite の dev server を立てるなら `server.fs.allow` が要る**(2026-10-02。⚠ この行は「`fs.allow` は symlink を辿る」と書いていたが誤り ── worktree は `/home/user/PKC3/.claude/worktrees/…` で、symlink の先 `/home/user/PKC3/node_modules` は許可の外なので dev server が断る)。`server: { fs: { allow: ['/home/user/PKC3'] } }` を足した config を**worktree の中に**置き `--config` で渡す(`/tmp` に置くと config から `vite` を解決できない)。`vite build` / `preview` / vitest だけなら要らない。⚠ 副作用は `node_modules/.vite` 等への書込が本体へ戻ること(ディスクの枠が厳しければ実コピーにする ── `sandbox-hygiene`) |
 | 🔴 **`git` を含む複合コマンド / heredoc + パイプを断られる**(`too complex to verify that it stays inside the worktree`) | 命令を**素の 1 本ずつ**に割る。割れない物は **script file に書いて `sh <file>`**(`Write` で書く。heredoc で書かない) |
-| 🔴 **依頼者の cwd が `/home/user` に戻っていると `isolation: "worktree"` が `not in a git repository` で落ちる**(2026-10-02 にも 1 度踏んだ) | **`Agent` を投げる直前の Bash で `cd /home/user/PKC3 && pwd`** を打つ(下の「まず自分の cwd を見る」の実例) |
+| 🔴 **依頼者の cwd が `/home/user` に戻っていると `isolation: "worktree"` が `not in a git repository` で落ちる**(2026-10-02 にも 1 度踏んだ。2026-10-05 にも 1 回) | **`Agent` を投げる直前の Bash で `cd /home/user/PKC3 && pwd`** を打つ(下の「まず自分の cwd を見る」の実例) |
 
 ⚠ 1 行目は**依頼文に書いておく**(agent が `npm ci` を始めると、ディスクの枠と時間を使う)。
 2 行目の検査は agent 側で外せない ── 迂回を探さず、割る。
@@ -578,6 +578,18 @@ runner の probe(5 腕 × 3 回)が **30 分の既定上限で殺された**。`
 2. **画面に出すのは** kind ごとの**件数表**と、「印 X の時刻と、その後の最初の印 Y の時刻」のような
    **依頼者が決めた 2〜3 個の数**だけ
 3. **読みは依頼者が file で行う**(runner は判断しない。`.claude/agents/pkc3-runner.md` と同じ向き)
+
+### 🔴 runner に grep させる**字は、source から引いて書く**(2026-10-05、121k)
+
+⚠ 依頼文に `PKC3-UEV: dispatch`(コロン**付き**)と書いたが、実際の印は `PKC3-UEV dispatch`(コロン**無し**)で、
+runner の grep は **0 件**になった。runner は判断しない前提なので、**ここで止まるか、気づいて綴りを直すかは運**である
+(今回は直してくれた)。
+🔑 **依頼文に書く印は、書く前に `grep -rn '<印>' build/ src/` で 1 回引いて、出た行をそのまま写す**(1 秒)。
+⚠ 自分の記憶の綴りは**半分合っている** ── 半分合っている字は、grep で 0 件になる(0 件は「無い」ではなく「綴りが違う」の可能性が高い)。
+
+⚠ 同じ日に worktree agent の起動でも 1 回踏んだ:**cwd が `/home/user` に戻っていると起動に失敗する**
+(`not in a git repository and no WorktreeCreate hooks`)。🔑 **Agent を呼ぶ直前の Bash で `cd /home/user/PKC3 && pwd`**
+(§1「worktree の作法 3 つ」の 3 行目に同じ手順が在る ── 2026-10-05 に 1 回踏んだ実例として足した)。
 
 ### 🔴 読みを実測で潰す道具を 1 回の焼きに同梱するときは、**対照が相手に届いているか**を先に測る(2026-10-05、#1344)
 
