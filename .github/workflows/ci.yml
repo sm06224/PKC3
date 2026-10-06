@@ -101,9 +101,10 @@ jobs:
           fi
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint
       # PR では変えた file に関係する unit と、全体を走査する門(repo-hygiene / ui-terms 等)を回す(#1390)
       # (~5 分 → ~30 秒へ短縮。全量は下の main への push で必ず回す)
-      - name: Unit tests (PR: changed files + repo guards)
+      - name: Unit tests (PR changed files + repo guards)
         if: github.event_name == 'pull_request'
         run: node scripts/test-pr.mjs origin/${{ github.base_ref }}
       # main への push(merge 時)は全量 unit を必ず完走させる
