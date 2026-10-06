@@ -111,7 +111,7 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
   { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの HTML ファイルにまとめます' },
   {
     action: 'export-portable',
-    label: '1 ファイルの HTML で書き出す',
+    label: 'アプリ入り HTML で書き出す',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -254,7 +254,7 @@ function buildVacuumPanel(): HTMLElement {
 
   const btn = iconButton('storage-vacuum', VACUUM_LABEL);
   btn.setAttribute('data-pkc-field', 'vacuum-run');
-  btn.title = '空いたまま抱えている分を返して、保存領域の大きさを小さくします';
+  btn.title = '空いたまま確保している分を返して、保存領域の大きさを小さくします';
   btn.disabled = true;
   box.append(btn);
   return box;
@@ -282,7 +282,7 @@ function buildContainerRepair(): DocumentFragment {
 
   const toggle = iconButton('toggle-container-repair', '作り直す・初期化する のボタンを出す');
   toggle.setAttribute('aria-expanded', 'false');
-  toggle.title = 'ここを押すと、保存領域を作り直す・初期化する の 2 つのボタンが出ます';
+  toggle.title = 'ここを押すと、ノートの保存領域を作り直す・初期化する の 2 つのボタンが出ます';
   frag.append(toggle);
 
   const box = document.createElement('div');
@@ -316,7 +316,7 @@ function buildContainerRepair(): DocumentFragment {
   const rebuildNote = document.createElement('p');
   rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
   rebuildNote.textContent =
-    'ノートと添付を残したまま、保存領域だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)は戻りません。';
+    'ノートと添付を残したまま、ノートの保存領域だけ作り直します。押すと、まず読めるノートをファイル(.pkc3-part.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)は戻りません。';
   box.append(rebuildNote);
 
   const rebuild = document.createElement('button');
@@ -324,7 +324,7 @@ function buildContainerRepair(): DocumentFragment {
   rebuild.setAttribute('data-pkc-action', 'container-rebuild');
   rebuild.setAttribute('data-pkc-field', 'container-rebuild-run');
   rebuild.textContent = CONTAINER_REBUILD_LABEL;
-  rebuild.title = '読めるノートを集めて書き出してから、保存領域を作り直して同じ中身を戻します(添付はそのまま残ります)';
+  rebuild.title = '読めるノートを集めて書き出してから、ノートの保存領域を作り直して同じ中身を戻します(添付はそのまま残ります)';
   box.append(rebuild);
 
   const rebuildSum = document.createElement('p');
@@ -517,7 +517,7 @@ function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
   const h = document.createElement('h4');
-  h.textContent = '保存領域の点検';
+  h.textContent = 'ノートの保存領域の確認';
   box.append(h);
 
   const check = document.createElement('button');

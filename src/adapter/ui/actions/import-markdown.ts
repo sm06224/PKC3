@@ -112,7 +112,7 @@ export async function importMarkdownFiles(
     // 読めた分を書かずに終える ── 部分的に書くと「どこまで入ったか」が
     // user に分からないまま disk に残る(PKC2 経路は書込中の失敗なので事情が違う)
     return fail(
-      `Markdown を読めませんでした(書き込みは行われていません): ${e instanceof Error ? e.message : String(e)}`,
+      `Markdown を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 

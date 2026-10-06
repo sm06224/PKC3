@@ -647,6 +647,6 @@ describe('マニュアルの窓 — ヘルプのボタンから窓の口まで',
   it('🔴 配線が無い版では、理由を出す(黙らない)', () => {
     const { root, errors } = setup({});
     root.querySelector<HTMLElement>('[data-pkc-action="open-manual-window"]')!.click();
-    expect(errors).toEqual(['アプリの読み込みが古いためマニュアルのウィンドウを開けません。再読み込みしてください']);
+    expect(errors).toEqual(['このページが古いままのため、マニュアルのウィンドウを開けません。ページを再読み込みしてください']);
   });
 });

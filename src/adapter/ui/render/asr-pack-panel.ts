@@ -168,7 +168,7 @@ export function buildAsrPackPanel(
   //    詳しくはマニュアル(「音声を文字にする」)。
   intro.textContent = '録った音を、この端末の中だけで文字にします(音は外へ出ません)。';
   intro.title =
-    '部品を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、正確なほうは時間がかかります。';
+    '一式を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、正確なほうは時間がかかります。';
   root.append(intro);
 
   interface Row {
@@ -186,11 +186,11 @@ export function buildAsrPackPanel(
     wrap.setAttribute('data-pkc-part', part.id);
     // 🔑 ボタンの字は**大きさと 1 行の説明つき**(数は全部 `asr-parts.ts` から出す)
     const install = button('install-asr-part', asrPartLabel(part), 'asr-install', part.id);
-    install.title = 'この端末に部品を取り込みます。一度取り込めば、次からは端末の中から動きます。';
+    install.title = 'この端末に一式を取り込みます。一度取り込めば、次からは端末の中から動きます。';
     const installed = document.createElement('span');
     installed.setAttribute('data-pkc-field', 'asr-installed');
     const remove = button('remove-asr-part', `${part.label}を消す`, 'asr-remove', part.id);
-    remove.title = 'この端末から、この部品を消します(ノートや添付は消えません)。';
+    remove.title = 'この端末から、この一式を消します(ノートや添付は消えません)。';
     // 🔴 **ボタンの下**に出す(押す前に読める位置)
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'asr-memory-note');

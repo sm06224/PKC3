@@ -93,5 +93,5 @@ export function ossNoticesMissingText(license: string): string {
  *   別々に古びるのを防ぐ。
  */
 export const OSS_SCOPE_NOTE =
-  'Office 表示のための LibreOffice 一式と、DuckDB を動かす追加の部品は、' +
+  'Office 表示のための LibreOffice 一式と、DuckDB を動かす追加のライブラリは、' +
   'ここには数えていません。使うときにこの端末へ直接入る、別の配布だからです。';

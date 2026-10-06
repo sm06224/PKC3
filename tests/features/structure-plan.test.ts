@@ -72,10 +72,10 @@ describe('読める形', () => {
  */
 describe('as @名前', () => {
   it('🔴 作った名前を、後の行が親として指せる', () => {
-    const ops = ok('mkdir "アーカイブ" as @arc\nmv a @arc\nmv b @arc');
-    expect(ops[0]).toMatchObject({ kind: 'mkdir', alias: 'arc' });
-    expect(ops[1]).toMatchObject({ kind: 'mv', parent: { at: 'alias', alias: 'arc' } });
-    expect(ops[2]).toMatchObject({ kind: 'mv', parent: { at: 'alias', alias: 'arc' } });
+    const ops = ok('mkdir "資料" as @docs\nmv a @docs\nmv b @docs');
+    expect(ops[0]).toMatchObject({ kind: 'mkdir', alias: 'docs' });
+    expect(ops[1]).toMatchObject({ kind: 'mv', parent: { at: 'alias', alias: 'docs' } });
+    expect(ops[2]).toMatchObject({ kind: 'mv', parent: { at: 'alias', alias: 'docs' } });
   });
 
   it('名前つきフォルダの中に、さらに名前つきフォルダを作れる', () => {
@@ -85,7 +85,7 @@ describe('as @名前', () => {
   });
 
   it('🔴 **前の行で作られていない名前**は誤り(適用の順番が決まらない)', () => {
-    const p = parsePlan('mv a @arc\nmkdir "アーカイブ" as @arc', W);
+    const p = parsePlan('mv a @docs\nmkdir "資料" as @docs', W);
     expect(p.errors).toHaveLength(1);
     expect(p.errors[0]!.line, '行番号が違う').toBe(1);
     expect(p.errors[0]!.message).toContain('この行より前で作られていません');
@@ -242,12 +242,12 @@ describe('下見', () => {
 
   it('🔴 `@名前` は、その行で作る**題名**に読み替える', () => {
     /**
-     * ⚠ 読み替えないと「@arc の中へ移します」という、user には意味の無い字になる
+     * ⚠ 読み替えないと「@docs の中へ移します」という、user には意味の無い字になる
      *   ── 案の中で作るフォルダはまだ lid を持たない。
      */
-    const t = lines('mkdir "アーカイブ" as @arc\nmv a @arc');
-    expect(t[1]).toContain('アーカイブ');
-    expect(t[1], '内部の別名がそのまま出ている').not.toContain('@arc');
+    const t = lines('mkdir "資料" as @docs\nmv a @docs');
+    expect(t[1]).toContain('資料');
+    expect(t[1], '内部の別名がそのまま出ている').not.toContain('@docs');
   });
 
   it('作る / 移す / 変える が、それぞれ読める字になる', () => {

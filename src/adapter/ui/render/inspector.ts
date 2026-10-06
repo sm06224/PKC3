@@ -1132,7 +1132,7 @@ export class InspectorRenderer {
     bar.target.disabled = editing;
     bar.kind.disabled = editing;
     bar.add.disabled = editing;
-    const base = '選んでいるノートから、相手のノートへつながりを付けます';
+    const base = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     bar.add.title = editing ? withBlockedNote(base, blockedNote) : base;
   }
 
@@ -1319,7 +1319,7 @@ export class InspectorRenderer {
      * ── 選択に自動で追従するので、別窓に出すときの同期の仕掛けが要らない。
      * ⚠ **中央の面は奪わない**(#300 で user が叱った型)。
      */
-    row('つながり', 'inspector-relation-map');
+    row('つながりの図', 'inspector-relation-map');
     /**
      * 🔴 **開いている拡張へ、いま見ているノートを送る**(#195 / C-5 段②-b)。
      *
@@ -1349,8 +1349,8 @@ export class InspectorRenderer {
     target.type = 'text';
     target.setAttribute('data-pkc-field', 'relation-target');
     target.setAttribute('list', 'pkc-relation-candidates');
-    target.placeholder = '相手の題名';
-    target.setAttribute('aria-label', 'つながりを付ける相手の題名');
+    target.placeholder = 'つなぐ先の題名';
+    target.setAttribute('aria-label', 'つながりを付ける先の題名');
     const list = document.createElement('datalist');
     list.id = 'pkc-relation-candidates';
     this.candidates = list;
@@ -1364,7 +1364,7 @@ export class InspectorRenderer {
       kind.append(opt);
     }
     const add = iconButton('add-relation', 'つながりを足す', null);
-    add.title = '選んでいるノートから、相手のノートへつながりを付けます';
+    add.title = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     addBar.append(target, list, kind, add);
     this.region.append(addBar);
     this.relAdd = { target, kind, add };
@@ -1648,7 +1648,7 @@ export class InspectorRenderer {
     // ⚠ `data-pkc-action` は付けない ── 打鍵の受け口は `onInput` が
     //   **`data-pkc-field` で**拾う(`entry-filter` / `dual-filter` と同じ形)
     ta.rows = 6;
-    ta.placeholder = 'mkdir "アーカイブ" as @arc';
+    ta.placeholder = 'mkdir "資料" as @docs';
     // ⚠ `placeholder` は名前ではない(値を入れると読み上げから消える)
     ta.setAttribute('aria-label', '整理案を貼る');
     box.append(ta);

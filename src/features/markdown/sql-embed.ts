@@ -43,7 +43,7 @@ export const SQL_EMBED_NOTE_FIELD = 'sql-embed-note';
  * ⚠ 引けなかった 1 行(`sql-embed-note`)とは**別の field** ── 注記を数える検査に混ざらない。
  */
 export const SQL_EMBED_SAVED_FIELD = 'sql-embed-saved';
-export const SQL_EMBED_SAVED_TEXT = '保存したときの答え';
+export const SQL_EMBED_SAVED_TEXT = '保存したときの結果';
 
 /**
  * 🔴 **閲覧用の上限は、SQL を打つ面と別に、小さく持つ**(Q4 = 200 行)。

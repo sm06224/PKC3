@@ -107,12 +107,12 @@ describe('planAutoOptimize(#999 段③)', () => {
 describe('処理の記録の字(#999 段③)', () => {
   it('🔴 例: 0.4 秒・空き 11.6 MiB', () => {
     expect(optimizeDoneText(400, Math.round(11.6 * 1024 * 1024))).toBe(
-      '索引を片づけました(0.4 秒、空き 11.6 MiB)',
+      '索引を整理しました(0.4 秒、空き 11.6 MiB)',
     );
   });
 
   it('🔴 0.05 秒に届かないときは「0.0 秒」と書かない', () => {
-    expect(optimizeDoneText(10, 0)).toBe('索引を片づけました(0.1 秒未満、空き 0.0 MiB)');
+    expect(optimizeDoneText(10, 0)).toBe('索引を整理しました(0.1 秒未満、空き 0.0 MiB)');
     expect(optimizeDoneText(50, 0)).toContain('0.1 秒、'); // 境界は 50ms から数字で書く
   });
 
@@ -133,6 +133,6 @@ describe('処理の記録の字(#999 段③)', () => {
   });
 
   it('🔴 失敗の字は例外の字を含まない(固定)', () => {
-    expect(OPTIMIZE_FAILED_TEXT).toBe('索引を片づけられませんでした(次の機会にやり直します)');
+    expect(OPTIMIZE_FAILED_TEXT).toBe('索引を整理できませんでした(次の機会にやり直します)');
   });
 });

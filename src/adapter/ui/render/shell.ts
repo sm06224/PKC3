@@ -960,7 +960,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /**
    * 🔴 **字は子の `<span>` に書く**(#671 の裁定 3)。
    *
-   * ⚠ 直す前は `status.textContent = …` で**器ごと書き替えて**いたので、
+   * ⚠ 直す前は `status.textContent = …` で**器ごと書き換えて**いたので、
    *   ここに押しボタンを置くと**次の知らせで消える**。裁定 3 は
    *   「**OK 押したら**消える」= 押せる物を要求するので、字と押し物を分ける。
    * 🔑 読み側は変わらない ── `textContent` も `toContainText` も**子孫を含む**。
@@ -1024,7 +1024,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.type = 'button';
   statusRescue.setAttribute('data-pkc-field', 'status-rescue');
   statusRescue.setAttribute('data-pkc-action', 'open-storage-check');
-  statusRescue.textContent = '保存領域の点検を開く';
+  statusRescue.textContent = 'ノートの保存領域の確認を開く';
   statusRescue.hidden = true;
   /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。

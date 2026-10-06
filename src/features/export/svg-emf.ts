@@ -484,6 +484,6 @@ export function svgToEmf(svgText: string): SvgToEmfResult {
     for (const child of node.children) visit(child, here, local);
   })(root, [], base);
 
-  if (counts.shapes === 0 && counts.texts === 0) throw new Error('SVG から図形を 1 つも起こせませんでした');
+  if (counts.shapes === 0 && counts.texts === 0) throw new Error('SVG から図形を 1 つも作れませんでした');
   return { bytes: w.finish(), counts, widthPx: width, heightPx: height };
 }

@@ -484,7 +484,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(relations).toHaveLength(0);
     expect(notices.at(-1)).toMatch(/取り込み完了: 1 件\(注意 1 件\)/);
-    expect(reportedNotes()).toEqual(['端点不在の relation を除外: r1']);
+    expect(reportedNotes()).toEqual(['指す先のノートが無いつながりを除外: r1']);
     // state.error に載せると status が「⚠ エラー:」で始まる ── 成功が失敗に見える
     expect(d.getState().error).toBeNull();
   });
@@ -620,7 +620,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBeNull();
     expect(written).toHaveLength(2); // disk には残っている
     // 「失敗しました」とだけ言うと、素直な再取込が二重取込になる
-    expect(d.getState().error).toMatch(/2 件まで書き込まれました/);
+    expect(d.getState().error).toMatch(/2 件のノートまで取り込みました/);
     expect(d.getState().error).toMatch(/二重になります/);
     expect(reloadCount()).toBe(1); // 書けた分は必ず画面へ出す
     expect(d.getState().entryMetas.size).toBe(2);
@@ -847,7 +847,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     });
 
     expect(await importPkc2File(d, deps, file)).toBeNull();
-    expect(d.getState().error).toMatch(/履歴の書き込みで失敗/);
+    expect(d.getState().error).toMatch(/履歴の取り込みで失敗/);
   });
 
   // ── P6c 段②: .pkc2.zip(バックアップ正本)の取込 ──

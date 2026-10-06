@@ -934,7 +934,7 @@ function partialDraftNotFoundNote(kind: PartialDraftKind): string {
 export const SECTION_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('section');
 export const CODE_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('code');
 export const SECTION_SAVE_ANOTHER_WINDOW_NOTE =
-  '別のウィンドウがこのノートを書き替えたため、保存できませんでした(もう一度押してください)';
+  '別のウィンドウがこのノートを書き換えたため、保存できませんでした(もう一度押してください)';
 
 /** {@link replaceSectionByHeading} の失敗理由 → user に見せる字。 */
 export function sectionSaveFailureNote(reason: 'missing' | 'ambiguous' | 'mismatch'): string {

@@ -347,7 +347,7 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
     // ⚠ 「entry の出所が違う」でも同じ症状になる(別 ZIP の entry を渡した等)ので、
     // user のデータを一方的に疑う文面にしない
     throw new ZipReadError(
-      `ZIP のファイルの CRC が一致しません(${entry.name})。または entry の出所が違います`,
+      `ZIP のファイルの CRC が一致しません(${entry.name})。または ZIP の中のファイルの出所が違います`,
     );
   }
 }

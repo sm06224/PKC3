@@ -2923,7 +2923,7 @@ export class DetailRenderer {
           iconButton('launch-asset-raw', 'ノートを渡して開く', 'launch-asset-raw'),
         );
         rawRun.title =
-          'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
+          'PKC3 と同じサイトのデータを使って開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
         info.append(rawRun);
         /**
          * 🔴 **目次を見せて起動**(#195 / C-5 段①)。
@@ -3743,7 +3743,7 @@ function renderRevisionDiff(
   // ── くらべる相手(E の仕分け: 閉じた選択肢を 1 つ選ぶ。値 = current / rev:<id> / file)
   const pick = document.createElement('div');
   const pickLabel = document.createElement('label');
-  pickLabel.append('くらべる相手 ');
+  pickLabel.append('比較先 ');
   const select = document.createElement('select');
   select.setAttribute('data-pkc-action', 'set-revision-compare');
   select.setAttribute('data-pkc-field', 'revision-compare');
@@ -4022,7 +4022,7 @@ function appIconPalette(current: unknown, lid: string): HTMLElement {
   return buildIconPalette({
     current: typeof current === 'string' ? current : '',
     field: 'app-icon-palette',
-    ariaLabel: 'タイルの目印を選ぶ',
+    ariaLabel: 'タイルのアイコンを選ぶ',
     each: (btn) => {
       btn.setAttribute('data-pkc-action', 'pick-app-icon');
       // 🔴 **絵の 1 つ 1 つが効く先を持つ**(#848)── 表は留めた枠にも出る

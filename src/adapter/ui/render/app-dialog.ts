@@ -711,7 +711,7 @@ function pickIconFrom(host: HTMLElement, spec: IconPickSpec): Promise<string | n
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
-    f.ok.textContent = '図案を入れる';
+    f.ok.textContent = 'アイコンを入れる';
     f.ok.removeAttribute('data-pkc-danger');
     f.ok.hidden = true;
     f.cancel.textContent = 'やめる';
@@ -778,7 +778,7 @@ export function pickAppGroupIconInApp(
   const notes = [
     {
       field: 'pick-group-icon-note',
-      text: '目印は、このグループ専用のノートに憶えます(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
+      text: 'アイコンは、このグループ専用のノートに保存します(無ければ 1 枚作ります)。「なし」にしても、そのノートは残ります。',
     },
   ];
   /**
@@ -795,9 +795,9 @@ export function pickAppGroupIconInApp(
     });
   }
   return pickIconFrom(host, {
-    title: `「${groupName}」の目印を選ぶ`,
+    title: `「${groupName}」のアイコンを選ぶ`,
     field: 'pick-group-icon',
-    ariaLabel: `「${groupName}」の目印を選ぶ`,
+    ariaLabel: `「${groupName}」のアイコンを選ぶ`,
     current,
     withNone: true,
     notes,
@@ -819,9 +819,9 @@ export function pickAppGroupIconInApp(
  */
 export function pickBodyIconInApp(host: HTMLElement): Promise<string | null> {
   return pickIconFrom(host, {
-    title: '図案を入れる',
+    title: 'アイコンを入れる',
     field: 'pick-body-icon',
-    ariaLabel: '本文へ入れる図案を選ぶ',
+    ariaLabel: '本文へ入れるアイコンを選ぶ',
     current: '',
     withNone: false,
     notes: [

@@ -406,7 +406,7 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
   it('🔴 押す前の窓が、順番と「落とせなければ止まる」を言う', () => {
     const m = rebuildExplainMessage({ notes: 12, assetsOnDisk: 4 });
     expect(m, '件数を言っていない').toContain('12 件');
-    expect(m, '先にファイルを落とすことを言っていない').toContain('.pkc3.zip');
+    expect(m, '先にファイルを落とすことを言っていない').toContain('.pkc3-part.zip');
     expect(m, '落とせなかったときに止まることを言っていない').toContain('何も消さずに止まります');
     expect(m, '添付の件数を言っていない').toContain('添付したファイル 4 件');
     expect(m, '他のタブが読み込み直されることを言っていない').toContain('他のタブ');

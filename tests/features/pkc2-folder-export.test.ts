@@ -441,7 +441,7 @@ describe('readFolderExportBundle', () => {
       ],
     );
     const got = await readFolderExportBundle(zip);
-    expect(got.warnings.filter((w) => /compact mode/.test(w))).toHaveLength(1);
+    expect(got.warnings.filter((w) => /解決できない添付参照/.test(w))).toHaveLength(1);
   });
 
   it('folders が空配列でも平坦取込 + 明示 warning(review P-4)', async () => {

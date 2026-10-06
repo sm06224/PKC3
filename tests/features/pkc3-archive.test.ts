@@ -297,21 +297,21 @@ describe('アーカイブ ZIP — 黙って落とさない', () => {
     expect(out.warnings).toEqual(['添付の中身が見つかりませんでした: gone']);
     // meta は残るので、読み側も「入っていない」と言える
     const got = await readArchive(out.blob);
-    expect(got.warnings).toEqual(['添付の中身がアーカイブに入っていません: gone']);
+    expect(got.warnings).toEqual(['添付の中身がバックアップに入っていません: gone']);
   });
 
   it('PKC2 の ZIP を渡されたら名指しで断る', async () => {
     const { ZipWriter } = await import('../../src/features/export/zip-writer');
     const w = new ZipWriter();
     await w.add('manifest.json', ['{"format":"pkc2-package","version":1}']);
-    await expect(readArchive(w.finish())).rejects.toThrow(/PKC3 のアーカイブではありません/);
+    await expect(readArchive(w.finish())).rejects.toThrow(/PKC3 のバックアップではありません/);
   });
 
   it('未対応の版は名指しで断る', async () => {
     const { ZipWriter } = await import('../../src/features/export/zip-writer');
     const w = new ZipWriter();
     await w.add('manifest.json', [`{"format":"${ARCHIVE_FORMAT}","version":99}`]);
-    await expect(readArchive(w.finish())).rejects.toThrow(/未対応のアーカイブのバージョン/);
+    await expect(readArchive(w.finish())).rejects.toThrow(/このアプリが読めるバックアップのバージョン/);
   });
 
   it('manifest の件数が中身と違えば言う', async () => {

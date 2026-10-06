@@ -610,7 +610,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '書き出し時に解決できない添付参照が本文から除かれています(compact mode)',
+      '書き出し時に解決できない添付参照が本文から除かれています',
     ]);
   });
 
@@ -627,7 +627,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1', compacted: false }) }],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      '書き出し時に解決できない添付参照が本文から除かれています(compact mode)',
+      '書き出し時に解決できない添付参照が本文から除かれています',
     ]);
   });
 
@@ -642,8 +642,8 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      'a.text.zip: 目次と中身で ID が違います(ちがう ≠ n1)',
-      'a.text.zip: 目次と中身でタイトルが違います(ちがう題 ≠ 本当の題)',
+      'a.text.zip: manifest.json と中身で ID が違います(ちがう ≠ n1)',
+      'a.text.zip: manifest.json と中身でタイトルが違います(ちがう題 ≠ 本当の題)',
     ]);
     // 採るのは**中身**
     expect((got.container as Synth).entries[0]!.lid).toBe('n1');
@@ -660,7 +660,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '1 件目: 目次の種類(textlog)は形式(text)と違います。形式を使います',
+      '1 件目: manifest.json に書かれた種類(textlog)と実際の形式(text)が違うため、実際の形式を使います',
     ]);
     expect((got.container as Synth).entries[0]!.archetype).toBe('text');
   });

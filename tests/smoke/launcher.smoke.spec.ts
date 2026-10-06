@@ -460,7 +460,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await toolToggle.click({ button: 'right' });
   const groupMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(groupMenu, '見出しを右クリックしてもメニューが出ない').toBeVisible();
-  await expect(groupMenu, '「目印を選ぶ…」が出ていない').toContainText('目印を選ぶ');
+  await expect(groupMenu, '「アイコンを選ぶ…」が出ていない').toContainText('アイコンを選ぶ');
   /**
    * 🔴 **見分けるのは「字」ではなく「受け手の名前」**(2026-09-13、段③ で書き直した)。
    *
@@ -617,7 +617,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await page.waitForTimeout(600); // LONG_PRESS_MS(500ms)を跨ぐ
   await expect(groupMenu, '見出しを長押ししてもメニューが出ない').toBeVisible();
   await expect(groupMenu, '長押しで出たのがタイルのメニュー(上へ/下へ)になっている').toContainText(
-    '目印を選ぶ',
+    'アイコンを選ぶ',
   );
   await toolToggle.dispatchEvent('pointerup', { bubbles: true, pointerType: 'touch' });
   /**
@@ -857,7 +857,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
    */
   const capability = inApp.locator('[data-pkc-field="app-capability"]');
   await expect(capability, '無い能力に触ったのに何も出ない(黙って無いことにした)').toContainText(
-    '囲いの中では使えません',
+    '枠の中では使えません',
   );
   // ⚠ 触ったものの名前が出る(「何かが使えない」では直せない)
   await expect(capability).toContainText('IndexedDB');

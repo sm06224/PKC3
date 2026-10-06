@@ -111,13 +111,13 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   }
   if (manifest?.format !== 'pkc2-package') {
     throw new ZipReadError(
-      `この段では pkc2-package のみ扱えます(format=${String(manifest?.format)})`,
+      `この取り込みは pkc2-package だけを扱います(format=${String(manifest?.format)})`,
     );
   }
   // 未知の版は**明示 reject** ── 「読めるところだけ読む」は静かな欠損を作る
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
+      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 

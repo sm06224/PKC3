@@ -232,7 +232,7 @@ describe('🔴 断るときは 1 件も書かない', () => {
       expect(r).toBe(null);
       expect(h.opLog).toEqual([]); // ← bulkUpsertEntries が**呼ばれていない**
       expect(h.written).toEqual([]);
-      expect(h.d.getState().error).toContain('書き込みは行われていません');
+      expect(h.d.getState().error).toContain('ノートは 1 件も追加されていません');
     });
   });
 

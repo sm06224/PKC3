@@ -959,7 +959,7 @@ describe('P6e ── 鎖を書き出して復元する', () => {
       chains: [{ entryLid: 'tamdst', rows: patched }],
     });
     expect(r.added).toBe(0);
-    expect(r.brokenChains.join()).toMatch(/噛み合いません/);
+    expect(r.brokenChains.join()).toMatch(/順序が合いません/);
   });
 
   it('🔴 1 本が壊れていても健全な鎖は残る(全部を巻き戻さない)', async () => {

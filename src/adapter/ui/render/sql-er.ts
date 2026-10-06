@@ -52,7 +52,7 @@ function line(host: HTMLElement, field: string, text: string): void {
 function connectHintOf(er: SqlPageState['er']): string {
   if (!er.connecting) return '';
   if (er.pendingFrom === null) return 'つなぎたい列を 2 つ押してください';
-  return `「${er.pendingFrom.table}.${er.pendingFrom.column}」からつなぎます。相手の列を押してください`;
+  return `「${er.pendingFrom.table}.${er.pendingFrom.column}」からつなぎます。つなぐ先の列を押してください`;
 }
 
 /**

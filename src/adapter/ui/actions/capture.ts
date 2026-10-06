@@ -266,7 +266,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
       if (!(await ingest(blob, kind, why, part, at, tag)) && part !== null) stopNoRoom(kind);
     });
-    deps.notify(`${why}${CAPTURE_LABEL[kind]}を保留しました。編集を終えると、開いているノートに入れます`);
+    deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集を終えるまで入れるのを待たせています。終えると、開いているノートに入れます`);
   };
 
   /**

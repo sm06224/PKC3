@@ -117,8 +117,8 @@ export function secondsText(elapsedMs: number): string {
 export function optimizeDoneText(elapsedMs: number, freeBytesAfter: number): string {
   const secs = secondsText(elapsedMs);
   const mib = (freeBytesAfter / (1024 * 1024)).toFixed(1);
-  return `索引を片づけました(${secs}、空き ${mib} MiB)`;
+  return `索引を整理しました(${secs}、空き ${mib} MiB)`;
 }
 
 /** 失敗の字。⚠ 例外の字は入れない(中身が混じりうる)。次の一手は無い(自動なので待つだけ)。 */
-export const OPTIMIZE_FAILED_TEXT = '索引を片づけられませんでした(次の機会にやり直します)';
+export const OPTIMIZE_FAILED_TEXT = '索引を整理できませんでした(次の機会にやり直します)';

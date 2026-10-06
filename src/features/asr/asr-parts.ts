@@ -244,11 +244,11 @@ export function readAsrPack(text: string): AsrPackRead {
   const version = o['version'];
   if (typeof version !== 'string' || version === '') return { ok: false, why: 'ファイル一覧にバージョンがありません' };
 
-  const runtime = readFiles(o['runtime'], '実行の部品');
+  const runtime = readFiles(o['runtime'], '実行用のファイル');
   if (typeof runtime === 'string') return { ok: false, why: runtime };
   for (const need of ASR_RUNTIME_FILES) {
     const f = runtime.find((r) => r.path === need);
-    if (f === undefined) return { ok: false, why: `実行の部品に ${need} がありません` };
+    if (f === undefined) return { ok: false, why: `実行用のファイルに ${need} がありません` };
     if (f.bytes < (RUNTIME_FLOOR[need] ?? 1)) {
       return { ok: false, why: `${need} が小さすぎます(途中で切れた可能性があります)` };
     }
@@ -260,14 +260,14 @@ export function readAsrPack(text: string): AsrPackRead {
   for (const part of ASR_PARTS) {
     const mine = (modelsRaw as Record<string, unknown>)[part.id];
     if (mine === undefined) continue; // 配っていない 2 択は無くてよい
-    const files = readFiles(mine, `${part.label}の部品`);
+    const files = readFiles(mine, `${part.label}のファイル`);
     if (typeof files === 'string') return { ok: false, why: files };
     const dir = asrModelDir(part);
     if (!files.every((f) => f.path.startsWith(dir))) {
-      return { ok: false, why: `${part.label}の部品に ${dir} の外の名前があります` };
+      return { ok: false, why: `${part.label}のファイルに ${dir} の外の名前があります` };
     }
     const onnx = files.filter((f) => f.path.endsWith('.onnx'));
-    if (onnx.length === 0) return { ok: false, why: `${part.label}の部品に重み(.onnx)がありません` };
+    if (onnx.length === 0) return { ok: false, why: `${part.label}のファイルに重み(.onnx)がありません` };
     const total = onnx.reduce((s, f) => s + f.bytes, 0);
     if (total < asrModelFloorBytes(part)) {
       return { ok: false, why: `${part.label}の重みが小さすぎます(別の物か、途中で切れた可能性があります)` };

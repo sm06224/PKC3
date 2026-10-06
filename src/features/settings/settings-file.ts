@@ -128,7 +128,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   既定は**切**なので、運ばれるのは**入にした人の `1`** が主になる。運んだ先に窓の仕組みが無くても
    *   **害が出ない**(ブラウザ内蔵の表示のままになるだけ)。
    */
-  { key: 'pkc3.pdf-reader', label: 'PDF を PKC の画面で開くか' },
+  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の画面で開くか' },
   /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
@@ -161,7 +161,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
   {
     key: 'pkc3.split-lids',
-    why: '中身が ID そのもの(#505 段②)。別の端末・別の container へ運ぶと、そこにいないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',
+    why: '中身が ID そのもの(#505 段②)。別の端末・別のコレクションへ運ぶと、そこにいないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',
   },
   {
     key: 'pkc3.flags',
@@ -173,7 +173,7 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   },
   {
     key: 'pkc3.opened',
-    why: '中身が ID そのもの(#215 残り①)。別の container へ運ぶと、そこにいないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
+    why: '中身が ID そのもの(#215 残り①)。別のコレクションへ運ぶと、そこにいないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
   },
   {
     key: 'pkc3.search-history',

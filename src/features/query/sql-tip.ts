@@ -119,7 +119,7 @@ export function sqlTipText(
     return (
       '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
       'assets(添付)です。' +
-      '本文の csv の囲みに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
+      '本文の csv のブロックに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
       'その名前で実行できます。どんな名前があるかは csv_tables で分かります' +
       '(使えない名前は、そこの why の列に理由が出ます)。' +
       /**
@@ -243,7 +243,7 @@ export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
     `表も作れます(${DUCKDB_WRITE_FORMS})。` +
     `${DUCKDB_TABLE_LIFETIME}(別のファイルを選び直したときも消えます)。${DUCKDB_TABLE_RESET}。元のファイルは書き換わりません。` +
     'FROM から書き始められます。PIVOT や QUALIFY も打てます。' +
-    '外から追加の部品を取ってくる書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
+    '外から追加のライブラリを取得する書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
     '日本語入力のままでも打てます。'
   );
 }

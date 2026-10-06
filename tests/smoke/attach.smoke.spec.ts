@@ -350,7 +350,7 @@ test('🔴 編集中に添付しても断らず、編集を終えると本文に
     buffer: PNG_1X1,
   });
   const status = page.locator('[data-pkc-region="status"]');
-  await expect(status, '保留したことを言っていない').toContainText('「ねこ.png」を保留しました');
+  await expect(status, '保留したことを言っていない').toContainText('「ねこ.png」は、編集を終えるまで入れるのを待たせています');
   await expect(status, '断っている(直す前の症状)').not.toContainText('編集を終了してから');
   // 預かっている間、打っていた本文は無傷
   await expect(ta).toHaveValue('# 会議メモ');
@@ -1990,7 +1990,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await page.fill('[data-pkc-field="sql-input"]', 'CREATE TABLE made AS SELECT * FROM json');
   await clickReal(page, '[data-pkc-action="run-sql"]');
-  await expect(note, '作った直後に、件数が出ない').toContainText('2 行に効きました', { timeout: 60_000 });
+  await expect(note, '作った直後に、件数が出ない').toContainText('2 行が変更されました', { timeout: 60_000 });
   await expect(note, '作った表の寿命を言っていない(黙って消える)').toContainText(
     '作った表はウィンドウを閉じると消えます',
   );

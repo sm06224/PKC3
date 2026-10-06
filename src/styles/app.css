@@ -813,7 +813,7 @@ select:focus-visible {
  * ⚠ スマホの ⋯ メニューは先頭の項目に説明が在るので、この字は出ない(触らない)。
  */
 [data-pkc-field='context-menu-hint']:empty::before {
-  content: '項目に乗せると説明が出ます';
+  content: '項目にマウスを合わせると説明が出ます';
   color: color-mix(in oklab, var(--muted) 60%, var(--surface));
 }
 

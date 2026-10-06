@@ -360,7 +360,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   }
   if (manifest?.format !== ARCHIVE_FORMAT) {
     throw new ZipReadError(
-      `PKC3 のアーカイブではありません(format=${String(manifest?.format)})`,
+      `PKC3 のバックアップではありません(format=${String(manifest?.format)})`,
     );
   }
   const version = manifest.version;
@@ -370,7 +370,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version > ARCHIVE_VERSION
   ) {
     throw new ZipReadError(
-      `未対応のアーカイブのバージョンです(version=${String(version)}、対応は ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION})`,
+      `このアプリが読めるバックアップのバージョンは ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION} です(このファイルは ${String(version)})`,
     );
   }
 
@@ -418,7 +418,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   // meta 数ではなく **bytes の数**で照合する
   for (const a of c.assets ?? []) {
     if (!assetSources.has(a.key)) {
-      warn.add('absent-asset', 'アーカイブに入っていない添付', `添付の中身がアーカイブに入っていません: ${a.key}`);
+      warn.add('absent-asset', 'バックアップに入っていない添付', `添付の中身がバックアップに入っていません: ${a.key}`);
     }
   }
 
@@ -498,7 +498,7 @@ export function restoreArchive(
   const seenLid = new Set<string>();
   for (const e of archive.entries) {
     if (seenLid.has(e.lid)) {
-      warn.add('dup-lid', 'アーカイブ内で重複した ID', `アーカイブの中で ID が重複しています: ${e.lid}(別のノートとして取り込みます)`);
+      warn.add('dup-lid', 'バックアップの中で重複した ID', `バックアップの中で ID が重複しています: ${e.lid}(別のノートとして取り込みます)`);
     }
     seenLid.add(e.lid);
   }
@@ -530,7 +530,7 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warn.add('dangling-relation', '端点の無いつながり', `端点の無いつながりを除きました: ${r.id}`);
+      warn.add('dangling-relation', '指す先のノートが無いつながり', `指す先のノートが無いつながりを除きました: ${r.id}`);
       continue;
     }
     let id = r.id;

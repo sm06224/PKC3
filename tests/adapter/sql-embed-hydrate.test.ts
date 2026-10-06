@@ -266,7 +266,7 @@ describe('見えたときに引いて、表にする(実 worker)', () => {
     hydrator.sync(root, body);
     seeAll();
     const host = hostsOf()[0]!;
-    await vi.waitFor(() => expect(noteOf(host)).toContain('アプリの読み込みが古いため SQL を実行できません'));
+    await vi.waitFor(() => expect(noteOf(host)).toContain('このページが古いままのため、SQL を実行できません'));
     hydrator.release();
   });
 

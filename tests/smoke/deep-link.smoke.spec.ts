@@ -476,7 +476,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await page.setViewportSize({ width: 1440, height: 520 });
   // 探す面は「本文を畳んで中央を占める面」── 行を押しても中央はその面に留まるので、本文へ戻してから使う
   await clickReal(page, '[data-pkc-action="close-pane"]');
-  await expect(page.locator('[data-pkc-view-pane="detail"]'), '× パネルを閉じるで本文へ戻らない').toBeVisible();
+  await expect(page.locator('[data-pkc-view-pane="detail"]'), '× 画面を閉じるで本文へ戻らない').toBeVisible();
   const field = page.locator('[data-pkc-field="entry-filter"]');
   await field.fill('けんさくご');
   const sideRow = page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]');
@@ -585,7 +585,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(
     page.locator('[data-pkc-region="browse-host"]'),
     '書き出したノートが左の一覧に出ない',
-  ).toContainText('SQL の答え', { timeout: 10_000 });
+  ).toContainText('SQL の結果', { timeout: 10_000 });
 
   expect(errors, 'pageerror / console.error が出ている').toEqual([]);
 });

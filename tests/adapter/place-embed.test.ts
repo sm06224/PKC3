@@ -1512,7 +1512,7 @@ describe('枠の中の SQL(#529 Q2)', () => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = `${dir}/${e.name}`;
         if (e.isDirectory()) walk(p);
-        else if (/\.ts$/.test(e.name) && readFileSync(p, 'utf-8').includes('ここでは答えを出しません')) hits.push(p);
+        else if (/\.ts$/.test(e.name) && readFileSync(p, 'utf-8').includes('ここでは結果を出しません')) hits.push(p);
       }
     };
     walk('src');

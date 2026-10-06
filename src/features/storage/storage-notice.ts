@@ -39,7 +39,7 @@
  *   (ツールチップ)へ回す。
  */
 export const STORAGE_FALLBACK_LINE =
-  '保存先が使えません。このタブで書いたものは、閉じると消えます(ほかのタブを閉じて、読み込み直してください)';
+  '保存領域が使えません。このタブで書いたものは、閉じると消えます(ほかのタブを閉じて、読み込み直してください)';
 
 /**
  * 帯に出す字。⚠ **退避した回だけ**出す。
@@ -83,10 +83,10 @@ export function storageWhereLine(
   fallbackReason: string | undefined,
 ): string {
   const fell = fallbackReason !== undefined && fallbackReason !== '';
-  if (vfs !== 'memory') return '保存先: ブラウザの中(閉じても残ります)';
+  if (vfs !== 'memory') return '保存領域: ブラウザの中(閉じても残ります)';
   return fell
-    ? '保存先: この画面だけ。⚠ 閉じると消えます(ほかのタブを閉じて、読み込み直してください)'
-    : '保存先: この画面だけ(1 ファイルの HTML なので、書き出して保存してください)';
+    ? '保存領域: この画面だけ。⚠ 閉じると消えます(ほかのタブを閉じて、読み込み直してください)'
+    : '保存領域: この画面だけ(アプリ入り HTML なので、書き出して保存してください)';
 }
 
 /**

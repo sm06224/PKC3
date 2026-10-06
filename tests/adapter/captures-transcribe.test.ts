@@ -170,6 +170,6 @@ describe('押したら binder が実体へ渡す', () => {
     const p = pane({ captureItems: ITEMS() });
     root.append(p.host);
     btn(p.host, 'a')!.dispatchEvent(new Event('click', { bubbles: true }));
-    expect(d.getState().error).toMatch(/アプリの読み込みが古いため文字にできません/);
+    expect(d.getState().error).toMatch(/このページが古いままのため、文字にできません/);
   });
 });

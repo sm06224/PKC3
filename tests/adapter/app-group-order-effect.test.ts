@@ -253,7 +253,7 @@ describe('④ 別の窓が先に書いていたら expectHash で弾き、途中
     expect(h.calls[1]!.expectHash, 'expectHash を渡していない(M19 が生きている)').toBeDefined();
     expect(readAppGroupOrder(h.bodies.g3!), '3 行目まで書いてしまった').toBeUndefined();
     expect(h.d.getState().error).toContain(
-      '別のウィンドウがグループのノートを書き替えたため、並べ替えを最後まで保存できませんでした',
+      '別のウィンドウがグループのノートを書き換えたため、並べ替えを最後まで保存できませんでした',
     );
   });
 });

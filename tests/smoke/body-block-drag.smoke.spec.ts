@@ -502,7 +502,7 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
   await expect(editor, 'ファイルを落としたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
-  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('保留しました');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('待たせています');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

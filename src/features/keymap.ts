@@ -268,7 +268,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     id: 'close-pane',
     // ⚠ 押しボタン(center.ts の「× パネルを閉じる」)と同じ字にする(#1053 の
     //   「何を + どうする」規則。この鍵は 2 つ目の「閉じる」ボタンを作らない)。
-    label: 'パネルを閉じる',
+    label: '画面を閉じる',
     contexts: ['window'],
     defaults: ['Escape'],
     note: '別のウィンドウ(予定表・連絡先)ではウィンドウごと閉じます',
@@ -305,7 +305,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Alt+Shift+C'],
     whileTyping: true,
-    note: 'いまカーソルのある行を計算して、行の終わりに答えを入れます(本文では 2+3= のように = を最後に打って Enter でも計算します)',
+    note: 'いまカーソルのある行を計算して、行の終わりに計算結果を入れます(本文では 2+3= のように = を最後に打って Enter でも計算します)',
   },
   /**
    * 🔴 **ノートへのリンクを入れる**(#427 段②)。
@@ -775,7 +775,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+7', 'Mod+Alt+7'],
     whileTyping: true,
-    note: 'SQL を打って答えを表で見る画面です(文字を打っている間に効くのは Mod+Alt+7 のほうです)',
+    note: 'SQL を打って結果を表で見る画面です(文字を打っている間に効くのは Mod+Alt+7 のほうです)',
   },
   {
     id: 'toggle-sidebar',

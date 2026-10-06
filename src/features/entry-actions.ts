@@ -480,7 +480,7 @@ export function tileOpenTargetMenuActions(
  *   違うので、同じ一覧に「上へ / 下へ」が出ると**押した物と効く先が食い違う**。
  */
 export const APP_GROUP_MENU_ACTIONS: readonly EntryAction[] = [
-  { action: 'pick-app-group-icon', label: '目印を選ぶ…' },
+  { action: 'pick-app-group-icon', label: 'アイコンを選ぶ…' },
   /**
    * 🔴 **グループ自体を動かす**(#857 段③)。
    * ⚠ 字は**タイルの「上へ / 下へ」と同じ**にする ── 同じことをする 2 つの押し所で
@@ -1179,7 +1179,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
   //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
   'export-entry-html':
-    'ブラウザで開くだけで読める 1 ファイルの .html にします。PKC3 へ取り込み直せません',
+    'ブラウザで開いて読むだけの .html にします。PKC3 へ取り込み直せません',
   // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':

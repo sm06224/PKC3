@@ -691,7 +691,7 @@ describe('attachFiles (P4a intake)', () => {
     // ② 断らない ── 預かったことを言う
     expect(d.getState().error, '断っている(直す前の症状)').toBeNull();
     expect(d.getState().notice ?? '', '預かったことを言っていない').toBe(
-      '「late.txt」を保留しました。編集を終えると本文に入れます',
+      '「late.txt」は、編集を終えるまで入れるのを待たせています。終えると本文に入れます',
     );
     expect(d.getState().phase).toBe('editing'); // draft は無傷
 
@@ -730,7 +730,7 @@ describe('attachFiles (P4a intake)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
     ]);
     await tick();
-    expect(d.getState().notice ?? '').toBe('2 件を保留しました。編集を終えると本文に入れます');
+    expect(d.getState().notice ?? '').toBe('2 件は、編集を終えるまで入れるのを待たせています。終えると本文に入れます');
   });
 
   it('mime fallback: file.type 空は拡張子から解決(PKC2 の欠落 hack を作らない)', () => {

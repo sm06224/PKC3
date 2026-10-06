@@ -149,7 +149,7 @@ export class SearchRenderer {
    */
   private noteText(page: SearchPageState): string {
     if (page.query.trim() === '') return '語を打つと、題名と本文から探します。行を押すと、そのノートが別のウィンドウで開きます';
-    if (page.failed) return 'アプリの読み込みが古いため探せません。再読み込みしてください';
+    if (page.failed) return 'このページが古いままのため、探せません。ページを再読み込みしてください';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) return `「${page.query}」に一致するノートはありません`;
     if (page.truncated)

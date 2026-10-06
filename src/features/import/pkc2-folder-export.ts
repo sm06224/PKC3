@@ -122,7 +122,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // v2 も受ける ── `.entry.zip` だけ飛ばして残りは取り込む(段⑥ で受理予定)
   if (manifest.version !== 1 && manifest.version !== 2) {
     throw new ZipReadError(
-      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1 と 2)`,
+      `このアプリが読めるのはバージョン 1 と 2 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
   if (!Array.isArray(manifest.entries)) {
@@ -148,7 +148,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // 「成功」に見せない
   if (inner.bundles.length === 0 && inner.failed.length > 0) {
     throw new ZipReadError(
-      `内側の書き出しファイルを 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
+      `ZIP の中の書き出しファイルを 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
         `: ${warnings.join(' / ')}`,
     );
   }

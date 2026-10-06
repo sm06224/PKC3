@@ -125,12 +125,12 @@ async function readBundleCommon(
   }
   if (manifest?.format !== expectedFormat) {
     throw new ZipReadError(
-      `この段では ${expectedFormat} のみ扱えます(format=${String(manifest?.format)})`,
+      `この取り込みは ${expectedFormat} だけを扱います(format=${String(manifest?.format)})`,
     );
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
+      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 
@@ -196,7 +196,7 @@ export interface SynthRelation {
 
 /** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
 export const COMPACTED_WARNING =
-  '書き出し時に解決できない添付参照が本文から除かれています(compact mode)';
+  '書き出し時に解決できない添付参照が本文から除かれています';
 
 /**
  * 合成 container を組む(§2-5)。attachment × N + 本体 × M。

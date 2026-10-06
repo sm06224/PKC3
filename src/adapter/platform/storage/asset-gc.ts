@@ -177,7 +177,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
     return;
   }
   const ok = await deps.ask(
-    `どの entry からも参照されていない添付データ ${first.keys.length + first.strays.length} 件` +
+    `どのノートからも参照されていない添付データ ${first.keys.length + first.strays.length} 件` +
       `(${humanBytes(first.knownBytes)})を削除します。よろしいですか?`,
   );
   if (!ok) return;

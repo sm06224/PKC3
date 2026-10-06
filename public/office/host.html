@@ -675,7 +675,7 @@
       // 成功は user へ言わない(うるさい)。本体が「最後に書いた時刻」だけ覚える静かな放送
       onWritten: function (at) { say('shadow-written', { at: at }); },
       onFailed: function (reason) { say('shadow-failed', { reason: reason }); },
-      log: function (e) { console.warn('保存していない編集の下書きを書けませんでした', e); },
+      log: function (e) { console.warn('保存していない編集の下書きを残せませんでした', e); },
     });
     shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
     shadowAfterSaved = function () { return writer.afterSaved(); };

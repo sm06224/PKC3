@@ -462,7 +462,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     const { root, pane, box, runBtn } = setup();
     expect(pane.hidden, 'SQL の面が隠れている').toBe(false);
     expect(box, '打つ欄が無い').not.toBeNull();
-    expect(runBtn.textContent, '押し所の字').toBe('SQL を走らせる');
+    expect(runBtn.textContent, '押し所の字').toBe('SQL を実行');
     expect(root.querySelector<HTMLElement>('[data-pkc-view-pane="detail"]')!.hidden).toBe(true);
     expect(viewModeLabel('sql'), '面の呼び名').toBe('SQL で調べる');
     // ⚠ ノートを映さない**道具**なので aside(左の一覧を押したら中央はノートへ戻る)
@@ -642,7 +642,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     // ⚠ 相対 path で読む(`docs-parity.test.ts` と同じ作法 ── cwd はリポジトリの根)
     const manual = readFileSync('docs/manual.md', 'utf-8');
     expect(manual, 'マニュアルの数と実装が食い違っている').toContain(
-      `答えは ${String(SQL_MAX_ROWS)} 行まで`,
+      `結果は ${String(SQL_MAX_ROWS)} 行まで`,
     );
   });
 
@@ -654,7 +654,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     type('SELECT 1');
     runBtn.click();
     expect(runBtn.disabled, '走っている最中なのに押せる').toBe(true);
-    expect(note(), '走っていることを言わない').toBe('走らせています…');
+    expect(note(), '走っていることを言わない').toBe('実行しています…');
     // ⚠ **押し所を経由しない道**(近道)でも二重には走らない ── 門は reducer に在る
     d.dispatch({ type: 'RUN_SQL' });
     expect(runReadOnlySql, '二重に走った').toHaveBeenCalledTimes(1);
@@ -729,7 +729,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     type('SELECT 1');
     runBtn.click();
     await settle();
-    expect(note(), '押しても何も起きない').toContain('アプリの読み込みが古いため');
+    expect(note(), '押しても何も起きない').toContain('このページが古いままのため');
     expect(d.getState().sqlPage.running, '走ったままになった').toBe(false);
   });
 
@@ -822,8 +822,8 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     saveBtn.click();
     const metas = [...d.getState().entryMetas.values()];
     expect(metas.length, 'ノートが増えていない').toBe(before + 1);
-    const made = metas.find((m) => m.title.startsWith('SQL の答え'));
-    expect(made, '題名が「SQL の答え …」になっていない').toBeDefined();
+    const made = metas.find((m) => m.title.startsWith('SQL の結果'));
+    expect(made, '題名が「SQL の結果 …」になっていない').toBeDefined();
 
     /**
      * 🔴 **disk へ渡った本文で見る**(state の下書きではない)── ここを見ないと、
@@ -845,7 +845,7 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     expect(note(), '押す前から書き出したと言っている').not.toContain('書き出しました');
     saveBtn.click();
     expect(note(), '書き出したことを言っていない').toContain('書き出しました');
-    expect(note(), '題名を言っていない').toContain('SQL の答え');
+    expect(note(), '題名を言っていない').toContain('SQL の結果');
   });
 
   /**
@@ -1271,7 +1271,7 @@ describe('着地前レビューの直し(#681)', () => {
     type('SELECT title FROM entries');
     runBtn.click();
     await settle();
-    expect(note(), '前提が崩れている(走っていない)').toContain('走らせています');
+    expect(note(), '前提が崩れている(走っていない)').toContain('実行しています');
 
     pick('db1'); // ⚠ 走っている最中に相手を変える
     await settle();
@@ -1279,7 +1279,7 @@ describe('着地前レビューの直し(#681)', () => {
     await settle();
 
     expect(cells(), '古い DB の答えが、新しい名札のまま出た').toEqual([]);
-    expect(note(), '走らせていますが消えていない').not.toContain('走らせています');
+    expect(note(), '実行していますが消えていない').not.toContain('実行しています');
   });
 
   /**
@@ -1298,7 +1298,7 @@ describe('着地前レビューの直し(#681)', () => {
     type('SELECT title FROM entries');
     runBtn.click();
     await settle();
-    expect(note(), '前提が崩れている(走っていない)').toContain('走らせています');
+    expect(note(), '前提が崩れている(走っていない)').toContain('実行しています');
 
     pick('db1'); // ⚠ 走っている最中に相手を変える
     await settle();
@@ -1307,7 +1307,7 @@ describe('着地前レビューの直し(#681)', () => {
     await settle();
 
     expect(note(), '古い DB の断りが、新しい名札のまま出た').not.toContain('no such table');
-    expect(note(), '走らせていますが消えていない').not.toContain('走らせています');
+    expect(note(), '実行していますが消えていない').not.toContain('実行しています');
 
     /**
      * 🔑 **対照群 ── いま選んでいる相手の断りは、ちゃんと出る**(門ごと死んでいない)。
@@ -1459,7 +1459,7 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     const file = new File(['dummy'], '手元.sqlite');
     pickLocalFile(file);
     await settle();
-    expect(note(), 'アプリの読み込みが古いと言っていない').toContain('アプリの読み込みが古いため手持ちのファイルを開けません');
+    expect(note(), 'ページが古いと言っていない').toContain('このページが古いままのため、手持ちのファイルを開けません');
     expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
     // ⚠ 対照群 ── worker 自体は生きている(添付の .sqlite はいつもどおり開ける)
     openSqlGuest.mockClear();
@@ -3198,7 +3198,7 @@ describe('🔴 ER の図で、自分でキーどうしをつなぐ(#918 段⑤d-
     const { pane } = setup(oneTable);
     erBtn(pane).click();
     await settleEr();
-    expect(zeroNote(pane), '相手がいないことを言っていない').toContain('つなぐ相手がいません');
+    expect(zeroNote(pane), '相手がいないことを言っていない').toContain('ほかの表が無いのでつなげません');
     expect(zeroNote(pane), '押せない道へ誘っている').not.toContain('押して列を 2 つ');
   });
 });
@@ -3447,7 +3447,7 @@ describe('🔴 どのエンジンで引くか(#682 段②。user 裁定 2026-09-
  * ## user の物語(ここを見る)
  *
  * ①取り込んだ `.csv` を選び ②エンジンを DuckDB にし ③`CREATE TABLE …` を打って走らせる
- * ④「◯ 行に効きました ── 作った表はウィンドウを閉じると消えます」と出る
+ * ④「◯ 行が変更されました ── 作った表はウィンドウを閉じると消えます」と出る
  * ⑤`SELECT` で作った表を引ける ⑥**内蔵の sqlite のまま同じ字を打つと、今までどおり断られる**。
  *
  * ⚠ ここが見るのは**画面と配線**で、engine が実際に実行できるかは
@@ -3474,7 +3474,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     expect(runDuckDbSql, 'DuckDB へ渡していない').toHaveBeenCalledTimes(1);
     expect(runReadOnlySql, 'sqlite も叩いている').toHaveBeenCalledTimes(0);
     void duckSeen;
-    expect(note(), '件数を言っていない').toContain('3 行に効きました');
+    expect(note(), '件数を言っていない').toContain('3 行が変更されました');
     expect(note(), '作った表の寿命を言っていない').toContain('作った表はウィンドウを閉じると消えます');
     // 🔴 「条件に当たるものがありませんでした」と読める字を出さない
     expect(note()).not.toContain('条件に一致');
@@ -3510,7 +3510,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
       type(sql);
       runBtn.click();
       await settle();
-      expect(note(), sql).toContain(`${String(n)} 行に効きました`);
+      expect(note(), sql).toContain(`${String(n)} 行が変更されました`);
       expect(note(), sql).toContain('元のファイルは書き換わりません');
       expect(note(), `${sql}: 表を作っていないのに寿命を言っている`).not.toContain('消えます');
     }
@@ -3942,7 +3942,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     expect(pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain(
-      'アプリの読み込みが古いため構造を取得できません',
+      'このページが古いままのため、構造を取得できません',
     );
   });
 });
@@ -4250,7 +4250,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     (finish as (() => void) | null)?.();
     await settle();
     expect(s.cells(), '足した後に、前の組の答えを受けている').toEqual([]);
-    expect(s.runBtn.disabled, '「走らせています…」のまま止まっている').toBe(false);
+    expect(s.runBtn.disabled, '「実行しています…」のまま止まっている').toBe(false);
   });
 
   it('🔴 上限 4:4 つ並んだら足す口が消え、理由を言う。5 つ目は断りの字(黙って足さない)', async () => {
@@ -4935,7 +4935,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
-  it('🔴 DuckDB で走らせている間は、写していることを言う(「走らせています…」だけにしない)', async () => {
+  it('🔴 DuckDB で走らせている間は、写していることを言う(「実行しています…」だけにしない)', async () => {
     const s = setup();
     s.pick('db1');
     await settle();
@@ -4951,7 +4951,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.runBtn.click();
     await settle();
     const running = s.note();
-    expect(running).toContain('走らせています…');
+    expect(running).toContain('実行しています…');
     expect(running, '写していることを言っていない').toContain('DuckDB に表を読み込むので時間がかかります');
     // 🔴 「最初の 1 回だけ」とは言わない ── 使わないまま置くと片づけて、次に写し直す(実装の事実)
     expect(running).toContain('初回と、');
@@ -4989,7 +4989,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.type('SELECT 1');
     s.runBtn.click();
     await settle();
-    expect(s.note()).toContain('走らせています…');
+    expect(s.note()).toContain('実行しています…');
     expect(s.note(), 'sqlite なのに DuckDB へ読み込むと言っている').not.toContain('DuckDB に表を読み込む');
     release();
     await settle();

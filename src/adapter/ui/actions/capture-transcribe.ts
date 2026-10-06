@@ -41,7 +41,7 @@ import { createWritableQueue } from './writable-queue';
  * ⚠ **字は画面から引く**(手で「システム」と書かない ── 入口の名前を変えた日に食い違う)。
  */
 export function asrMissingText(): string {
-  return `音声認識の部品がまだ取り込まれていません。${viewModeLabel('settings')} → ${ASR_SECTION_LABEL} で取り込んでください。`;
+  return `音声認識の一式がまだ取り込まれていません。${viewModeLabel('settings')} → ${ASR_SECTION_LABEL} で取り込んでください。`;
 }
 
 /** 端末に入っていて、実際に使える 1 つ(重みと実行の部品が揃っている)。 */
@@ -150,7 +150,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           fail('この録音の中身が見つかりませんでした。');
           return;
         }
-        deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の部品)`);
+        deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式)`);
         progressShown = true;
         const startedAt = Date.now();
         let pcm: Float32Array;
@@ -193,12 +193,12 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           say(`「${item.name}」に文字起こしを足しました(${took})`);
         }, lid);
         if (held) {
-          say(`「${item.name}」の文字起こしを保留しました。編集を終えると、ノートの末尾に足します`);
+          say(`「${item.name}」の文字起こしは、編集を終えるまで足すのを待たせています。終えると、ノートの末尾に足します`);
         }
       } catch (e) {
         if (looksOutOfMemory(e)) {
           fail(
-            `この端末のメモリが足りず、文字にできませんでした。ほかのタブを閉じるか、「${ASR_PARTS[0]!.label}」の部品でもう一度お試しください。`,
+            `この端末のメモリが足りず、文字にできませんでした。ほかのタブを閉じるか、「${ASR_PARTS[0]!.label}」の一式でもう一度お試しください。`,
           );
         } else {
           fail(`文字にできませんでした(${e instanceof Error ? e.message : String(e)})`);

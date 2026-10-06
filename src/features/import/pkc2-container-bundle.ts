@@ -172,7 +172,7 @@ function resolveArchetype(
     // PKC2 は完全に無視していた ── 黙って無視せず見せる(判断は format を採る)
     if (typeof me.archetype === 'string' && me.archetype !== fixed) {
       warnings.push(
-        `${where}: 目次の種類(${me.archetype})は形式(${fixed})と違います。形式を使います`,
+        `${where}: manifest.json に書かれた種類(${me.archetype})と実際の形式(${fixed})が違うため、実際の形式を使います`,
       );
     }
     return fixed;
@@ -328,7 +328,7 @@ export async function readInnerBundles(
         throw new ZipReadError(`manifest にあるファイルが ZIP に入っていません: ${filename}`);
       }
       warnings.push(
-        `${filename}: 目次と ZIP でファイル名の正規化形が違います(${hit.name} を使います)`,
+        `${filename}: manifest.json と ZIP でファイル名の正規化形が違います(${hit.name} を使います)`,
       );
       inner = hit;
     }
@@ -368,7 +368,7 @@ export async function readInnerBundles(
     // 食い違うのは組み立ての事故なので見せる
     const innerLid = parts.manifest.source_lid ?? '';
     if (typeof me.lid === 'string' && me.lid !== '' && innerLid !== '' && me.lid !== innerLid) {
-      warnings.push(`${filename}: 目次と中身で ID が違います(${me.lid} ≠ ${innerLid})`);
+      warnings.push(`${filename}: manifest.json と中身で ID が違います(${me.lid} ≠ ${innerLid})`);
     }
     const innerTitle = parts.manifest.source_title ?? '';
     if (
@@ -377,7 +377,7 @@ export async function readInnerBundles(
       innerTitle !== '' &&
       me.title !== innerTitle
     ) {
-      warnings.push(`${filename}: 目次と中身でタイトルが違います(${me.title} ≠ ${innerTitle})`);
+      warnings.push(`${filename}: manifest.json と中身でタイトルが違います(${me.title} ≠ ${innerTitle})`);
     }
 
     // 🔴 内側 lid の重複を**言う**(review H-1)。`readBundleParts` は
@@ -447,7 +447,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
+      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
   if (!Array.isArray(manifest.entries)) {
@@ -490,7 +490,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   if (mains.length === 0) {
     throw new ZipReadError(
       failed.length > 0
-        ? `内側の書き出しファイルを 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
+        ? `ZIP の中の書き出しファイルを 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
         : '取り込めるノートが 1 件も入っていません(空の書き出しファイル)',
     );
   }

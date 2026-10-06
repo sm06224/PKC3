@@ -1856,7 +1856,7 @@ function restoreOneChain(
     const hash = contentHash64Hex(state);
     if (r.contentHash !== null && hash !== r.contentHash) {
       throw new Error(
-        `履歴が噛み合いません(版 ${r.revOrder})。アーカイブが読めない状態か、本文が書き出し時と違います`,
+        `履歴の順序が合いません(版 ${r.revOrder})。バックアップが読めない状態か、本文が書き出し時と違います`,
       );
     }
     // 「変更あり commit だけ刻む」= P5b の規律(取込経路と同じ)
@@ -2654,7 +2654,7 @@ const handlers: Handlers = {
       | ((db: unknown, n: number, fn: number, arg: number) => void)
       | undefined;
     if (install === undefined || setProgress === undefined) {
-      throw new Error('このバージョンでは問い合わせを止められないので走らせません');
+      throw new Error('このバージョンでは問い合わせを止められないので実行しません');
     }
     const pointer = (database as unknown as { pointer: unknown }).pointer;
     const started = Date.now();

@@ -469,7 +469,7 @@ async function browseArchive(
   const say = (text: string): void => services.showStatus?.(text);
   const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   if (services.readAssetBlob === undefined) {
-    say('アプリの読み込みが古いため zip ファイルの中を見られません。再読み込みしてください');
+    say('このページが古いままのため、zip ファイルの中を見られません。ページを再読み込みしてください');
     return;
   }
   /**
@@ -761,7 +761,7 @@ const dualSide = (target: HTMLElement): DualSide | null => {
  *
  * ⚠ 直す前は**同じ式が 6 か所**に書き写されていた(写す / 移す / ゴミ箱 / 落とす /
  *   鍵の行送り / 描く側)。ペインごとの絞り込みを足したとき、**1 か所でも
- *   書き替え忘れると、そこだけ別の並びで数える** ── 症状は「目で見た範囲と
+ *   書き換え忘れると、そこだけ別の並びで数える** ── 症状は「目で見た範囲と
  *   選ばれる範囲が違う」という、いちばん気づけない形になる(CLAUDE.md §7)。
  * 🔑 絞り込みの規則そのものは `paneFilterOptions`(features 層)が持つ ──
  *   reducer も描く側も**同じ関数**を通る。
@@ -2268,7 +2268,7 @@ function refuseWhileBusy(
 function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'アプリの読み込みが古いため録音・画面収録ができません。再読み込みしてください',
+    error: 'このページが古いままのため、録音・画面収録ができません。ページを再読み込みしてください',
   });
 }
 
@@ -2276,7 +2276,7 @@ function refuseNoCapture(dispatcher: Dispatcher): void {
 function refuseNoTimer(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'アプリの読み込みが古いため作業時間を計れません。再読み込みしてください',
+    error: 'このページが古いままのため、作業時間を計れません。ページを再読み込みしてください',
   });
 }
 
@@ -3520,7 +3520,7 @@ function copySourceLines(
   done: string,
 ): void {
   if (services.copyText === undefined) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
@@ -4703,7 +4703,7 @@ export function runCommandRow(
           note: entryPickNote(items.length, entryPickTotal(now.entryMetas, now.order, query, null)),
         };
       },
-      { title: `${cmd.label}(相手のノートを選びます)` },
+      { title: `${cmd.label}(つなぐ先のノートを選びます)` },
     ).then((lid) => {
       if (lid === null) return;
       exec(lid, env);
@@ -5318,7 +5318,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const trim = dispatcher.getState().captureTrim;
     if (trim === null || trim.startMs === null || trim.endMs === null) return;
     if (!services.trimCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため切り出せません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、切り出せません。ページを再読み込みしてください' });
       return;
     }
     services.trimCapture(trim.lid, trim.startMs, trim.endMs);
@@ -5332,7 +5332,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     if (!services.transcribeCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため文字にできません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、文字にできません。ページを再読み込みしてください' });
       return;
     }
     services.transcribeCapture(lid);
@@ -5551,7 +5551,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const fromLid = state.selectedLid;
     if (fromLid === null) return;
     if (name === '') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '相手の題名を入れてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'つなぐ先の題名を入れてください' });
       return;
     }
     const hits = [...state.entryMetas.values()].filter(
@@ -5809,7 +5809,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         services.showStatus?.(
           ok
             ? `「${copyLabel(item.text, 24)}」をコピーしました(そのまま貼れます)`
-            : 'コピーできませんでした(ブラウザが断りました)',
+            : 'コピーできませんでした(ブラウザに拒否されました)',
           ok ? undefined : CAUTION,
         );
       });
@@ -6617,7 +6617,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
       return;
     }
     const to = otherSide(side);
@@ -8238,7 +8238,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
       return;
     }
     /**
@@ -8388,12 +8388,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (heading.id === '') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'この見出しには参照できる目印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
+        error: 'この見出しには参照できる ID が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
       });
       return;
     }
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
       return;
     }
     // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
@@ -9324,7 +9324,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
-          { okLabel: '保存領域を作り直す', cancelLabel: 'やめる' },
+          { okLabel: 'ノートの保存領域を作り直す', cancelLabel: 'やめる' },
         ),
       )
       .then(async (answer) => {
@@ -9454,8 +9454,8 @@ const ACTIONS: Record<string, ActionHandler> = {
              * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
              */
             keeps: [
-              `Office の部品(${OFFICE_PACK_APPROX})`,
-              `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
+              `Office の一式(${OFFICE_PACK_APPROX})`,
+              `DuckDB の一式(${DUCKDB_PACK_APPROX})`,
               '設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
             ],
             rescued: rescued === null ? null : rescued.stats,
@@ -9475,7 +9475,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: '保存領域を初期化する',
+          okLabel: 'ノートの保存領域を初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });
@@ -9934,7 +9934,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (services.openManualWindow === undefined) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'アプリの読み込みが古いためマニュアルのウィンドウを開けません。再読み込みしてください',
+        error: 'このページが古いままのため、マニュアルのウィンドウを開けません。ページを再読み込みしてください',
       });
       return;
     }
@@ -10196,7 +10196,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため書き出せません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、書き出せません。ページを再読み込みしてください' });
       return;
     }
     void read([lid]).then((bodies) => {
@@ -11134,7 +11134,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const send = services.deliverToExtension;
     const read = services.readBodies;
     if (!send || !read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため送れません。再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、送れません。ページを再読み込みしてください' });
       return;
     }
     const st = dispatcher.getState();

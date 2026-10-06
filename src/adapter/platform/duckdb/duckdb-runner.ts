@@ -578,7 +578,7 @@ export class DuckDbRunner {
         if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
         const exportSqlite = this.deps.exportSqlite;
         if (exportSqlite === undefined) {
-          throw new Error('アプリの読み込みが古いため .sqlite を DuckDB で調べられません。再読み込みしてください');
+          throw new Error('このページが古いままのため、.sqlite を DuckDB で調べられません。ページを再読み込みしてください');
         }
         const opened = await exportSqlite(bytes);
         sessions.set(i, opened);

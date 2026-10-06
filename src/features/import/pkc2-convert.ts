@@ -194,7 +194,7 @@ export function convertPkc2Container(
       if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
-      warnings.push(`ID が重なったので付け直しました: ${u.lid} → ${next}`);
+      warnings.push(`ID が重複したので付け直しました: ${u.lid} → ${next}`);
     } else {
       taken.add(u.lid);
       finalLidAt.push(u.lid);
@@ -381,11 +381,11 @@ export function convertPkc2Container(
     const to = finalLid(str(r.to));
     const kind = str(r.kind);
     if (!lids.has(from) || !lids.has(to)) {
-      warnings.push(`端点不在の relation を除外: ${str(r.id)}`);
+      warnings.push(`指す先のノートが無いつながりを除外: ${str(r.id)}`);
       continue;
     }
     if (!KNOWN_RELATION_KINDS.has(kind)) {
-      warnings.push(`未知 kind の relation を除外: ${str(r.id)} (${kind})`);
+      warnings.push(`未知の種類(kind)のつながりを除外: ${str(r.id)} (${kind})`);
       continue;
     }
     let id = str(r.id);

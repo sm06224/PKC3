@@ -113,7 +113,7 @@ describe('erZeroLinesWhy(#918 段⑤d-3)', () => {
 
   it('🔴 表が 1 つだけなら「つなぐ」を勧めない(同じ表の中はつなげないので押せない道になる)', () => {
     const s = erZeroLinesWhy({ ...base, boxes: 1 });
-    expect(s, '相手がいないことを言っていない').toContain('つなぐ相手がいません');
+    expect(s, '相手がいないことを言っていない').toContain('ほかの表が無いのでつなげません');
     expect(s, '押せない道へ誘っている').not.toContain('押して列を 2 つ');
   });
 

@@ -128,5 +128,5 @@ export function sqlExportFileName(
 ): string {
   const stamp = `${String(now.getFullYear())}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}${two(now.getMinutes())}`;
   const safe = (where ?? 'この PKC').replace(/[\\/:*?"<>|]/g, '_');
-  return `SQL の答え ${safe} ${stamp}.${kind}`;
+  return `SQL の結果 ${safe} ${stamp}.${kind}`;
 }

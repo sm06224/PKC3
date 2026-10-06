@@ -132,7 +132,7 @@ describe('readTextBundle', () => {
     });
     const got = await readTextBundle(zip);
     expect(got.warnings.filter((w) => w.includes('既に失われていた'))).toHaveLength(2);
-    expect(got.warnings.some((w) => w.includes('compact mode'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('解決できない添付参照'))).toBe(true);
   });
 
   it('形が違えば理由付きで断る(manifest / body.md / 別形式 / 未対応版 / 重複)', async () => {
@@ -146,10 +146,10 @@ describe('readTextBundle', () => {
     ).rejects.toThrow(/body\.md が入っていません/);
     await expect(
       readTextBundle(await bundle({ manifest: manifestOf({ format: 'pkc2-textlog-bundle' }) })),
-    ).rejects.toThrow(/pkc2-text-bundle のみ/);
+    ).rejects.toThrow(/pkc2-text-bundle だけを扱います/);
     await expect(
       readTextBundle(await bundle({ manifest: manifestOf({ version: 2 }) })),
-    ).rejects.toThrow(/未対応の形式のバージョン/);
+    ).rejects.toThrow(/このアプリが読めるのはバージョン 1 だけです/);
     await expect(
       readTextBundle(
         await buildZip([
@@ -261,7 +261,7 @@ describe('readTextlogBundle', () => {
           { name: 'textlog.csv', bytes: bytesOf(HEADER) },
         ]),
       ),
-    ).rejects.toThrow(/pkc2-textlog-bundle のみ/);
+    ).rejects.toThrow(/pkc2-textlog-bundle だけを扱います/);
   });
 
   it('添付の突合・監査証跡の作法は .text.zip と揃っている', async () => {
@@ -285,6 +285,6 @@ describe('readTextlogBundle', () => {
     const got = await readTextlogBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['ast-k']);
     expect(got.warnings.some((w) => w.includes('既に失われていた'))).toBe(true);
-    expect(got.warnings.some((w) => w.includes('compact mode'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('解決できない添付参照'))).toBe(true);
   });
 });

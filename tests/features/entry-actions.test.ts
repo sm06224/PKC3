@@ -393,7 +393,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
-      ['export-entry-html', 'cd057c16'],
+      ['export-entry-html', '5a2b1df9'],
       ['export-folder', '1e3dc65f'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '5424c220'],

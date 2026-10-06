@@ -108,7 +108,7 @@ export class AsrPackInstaller {
       return { ok: false, message: 'すでに取り込み中です。終わるまでお待ちください。' };
     }
     const part = asrPartOf(id);
-    if (part === undefined) return { ok: false, message: '知らない部品です。' };
+    if (part === undefined) return { ok: false, message: '知らない一式です。' };
     this.running = true;
     const abort = new AbortController();
     this.abort = abort;
@@ -195,7 +195,7 @@ export class AsrPackInstaller {
       return { ok: false, message: 'いま取り込んでいる最中です。終わるまでお待ちください。' };
     }
     const part = asrPartOf(id);
-    if (part === undefined) return { ok: false, message: '知らない部品です。' };
+    if (part === undefined) return { ok: false, message: '知らない一式です。' };
     try {
       await this.deps.store.removePart(id);
       const left = await this.readInstalled();

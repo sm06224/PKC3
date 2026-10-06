@@ -1221,10 +1221,10 @@ describe('🔴 放送の parity ── 実物の窓(host.html の行)が撃つ�
     expect(ow.shadowAt()).toBeNull();
   });
 
-  it('本体の字: 「保存していない編集の下書きを書けませんでした(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
-    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('保存していない編集の下書きを書けませんでした(保存領域の空きが足りません)');
-    expect(shadowFailedNotice('')).toBe('保存していない編集の下書きを書けませんでした');
-    expect(shadowFailedNotice('  ')).toBe('保存していない編集の下書きを書けませんでした');
+  it('本体の字: 「保存していない編集の下書きを残せませんでした(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
+    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('保存していない編集の下書きを残せませんでした(保存領域の空きが足りません)');
+    expect(shadowFailedNotice('')).toBe('保存していない編集の下書きを残せませんでした');
+    expect(shadowFailedNotice('  ')).toBe('保存していない編集の下書きを残せませんでした');
     expect(shadowFailedNotice('x')).not.toMatch(/壊れ|fd_sync|storeToURL|OPFS/);
     const main = readFileSync('src/main.ts', 'utf-8');
     const i = main.indexOf("ev.type === 'shadow-failed'");

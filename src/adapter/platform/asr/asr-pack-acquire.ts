@@ -82,9 +82,9 @@ export async function fetchAsrManifest(
     throw new AsrPackError(`取得元に届きません: ${url}`);
   }
   if (res.status === 404) {
-    throw new AsrPackError('音声認識の部品を、このサイトの配布元がまだ配布していません。');
+    throw new AsrPackError('音声認識の一式を、このサイトの配布元がまだ配布していません。');
   }
-  if (!res.ok) throw new AsrPackError(`取得元に部品がありません(HTTP ${res.status}): ${url}`);
+  if (!res.ok) throw new AsrPackError(`取得元に一式がありません(HTTP ${res.status}): ${url}`);
   const parsed = readAsrPack(await res.text());
   if (!parsed.ok) throw new AsrPackError(parsed.why);
   return parsed.pack;

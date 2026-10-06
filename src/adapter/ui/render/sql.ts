@@ -247,9 +247,9 @@ export class SqlRenderer {
     run.type = 'button';
     run.setAttribute('data-pkc-action', 'run-sql');
     run.setAttribute('data-pkc-field', 'sql-run');
-    run.textContent = 'SQL を走らせる';
+    run.textContent = 'SQL を実行';
     // 🔑 近道も出す(打ち終わって手を動かさずに走らせられる)
-    run.title = 'Ctrl+Enter でも走ります';
+    run.title = 'Ctrl+Enter でも実行できます';
     /**
      * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
      * ⚠ 窓を閉じれば答えは消えるので、**残す道が要る** ── 無いと
@@ -261,7 +261,7 @@ export class SqlRenderer {
     save.setAttribute('data-pkc-action', 'sql-to-note');
     save.setAttribute('data-pkc-field', 'sql-to-note');
     save.textContent = 'ノートへ書き出す';
-    save.title = 'いま出ている答えを、新しいノートに書き出します';
+    save.title = 'いま出ている結果を、新しいノートに書き出します';
     /**
      * 🔴 **調べる相手**(#681 段③ の 2 つ目)。既定は「この PKC のノート」。
      * ⚠ **どちらを調べているかが読めない**と、user は「ノートを数えたつもりで
@@ -339,7 +339,7 @@ export class SqlRenderer {
     history.setAttribute('data-pkc-action', 'sql-history-menu');
     history.setAttribute('data-pkc-field', 'sql-history');
     history.textContent = '履歴から選ぶ';
-    history.title = '前に走らせた SQL を一覧から選びます(↑ ↓ でも戻せます)';
+    history.title = '前に実行した SQL を一覧から選びます(↑ ↓ でも戻せます)';
     /**
      * 🔴 **答えを file へ書き出す**(#918 段④。user 要望 2026-09-14「`copy to` 使えないし」)。
      *
@@ -354,7 +354,7 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-action', 'sql-export-menu');
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ書き出す';
-    toFile.title = 'いま出ている答えを、ファイルに書き出します(CSV / TSV / JSON)';
+    toFile.title = 'いま出ている結果を、ファイルに書き出します(CSV / TSV / JSON)';
     /**
      * 🔴 **選び所を帯の先頭へ**(#992 ④。Gemini の裁定 2026-10-01 = 答え A)。
      * ⚠ 直す前は `履歴` の右(6 個のボタンの向こう側)で、user が**最初にやること**
@@ -1263,7 +1263,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
    *   開くので、字を見て相手を勘違いさせない。
    */
   if (p.guestError !== '') return `選んだファイルを開けませんでした: ${p.guestError}`;
-  if (p.running) return `走らせています…${runningNote(p)}${where}`;
+  if (p.running) return `実行しています…${runningNote(p)}${where}`;
   if (p.error !== '') return `${p.error}${where}`;
   /**
    * 🔴 **書き出したことを、いちばん上で言う**(#681 段③ の 3 つ目)。

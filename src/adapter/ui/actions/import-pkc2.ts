@@ -706,8 +706,8 @@ export async function importPkc2File(
       await deps.reload().catch(() => {});
       return fail(
         entriesWritten > 0
-          ? `取り込みは ${entriesWritten} 件まで書き込まれました。${stage}の書き込みで失敗しています(このまま取り込み直すと二重になります): ${reason(e)}`
-          : `取り込みに失敗しました(書き込みは行われていません): ${reason(e)}`,
+          ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります: ${reason(e)}`
+          : `取り込みに失敗しました(ノートは 1 件も追加されていません): ${reason(e)}`,
       );
     }
 
@@ -722,7 +722,7 @@ export async function importPkc2File(
       ...(revStats.skipped > 0
         // ⚠ 見送りの理由は 1 つではない(既に鎖を持つ / 復元先に entry が無い)──
         // 片方だけを名乗ると、もう片方を踏んだ user が原因を誤解する
-        ? [`${revStats.skipped} 件のノートは履歴を追加しませんでした(既に履歴を持つ / 対象が無い)`]
+        ? [`${revStats.skipped} 件のノートは履歴を追加しませんでした(既に履歴がある / 取り込み先のノートが無い)`]
         : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
@@ -743,7 +743,7 @@ export async function importPkc2File(
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
       return fail(
-        `取り込みは ${entriesWritten} 件まで書き込まれましたが、その後で失敗しました(このまま取り込み直すと二重になります): ${reason(e)}`,
+        `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります): ${reason(e)}`,
       );
     }
     return fail(`取り込みに失敗しました: ${reason(e)}`);

@@ -102,7 +102,7 @@ export async function importVcfFiles(
     }
   } catch (e) {
     return fail(
-      `vCard を読めませんでした(書き込みは行われていません): ${e instanceof Error ? e.message : String(e)}`,
+      `vCard を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (rows.length === 0) {

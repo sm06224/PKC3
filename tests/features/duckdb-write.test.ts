@@ -214,9 +214,9 @@ describe('🔴 通った直後に言う 1 行(件数と寿命)', () => {
 
   it('🔑 件数は DuckDB が返した値から言う', () => {
     const [c, r] = count(3);
-    expect(duckDbWriteNote('insert', c, r)).toContain('3 行に効きました');
-    expect(duckDbWriteNote('update', c, [[0]])).toContain('0 行に効きました');
-    expect(duckDbWriteNote('delete', c, [[12]])).toContain('12 行に効きました');
+    expect(duckDbWriteNote('insert', c, r)).toContain('3 行が変更されました');
+    expect(duckDbWriteNote('update', c, [[0]])).toContain('0 行が変更されました');
+    expect(duckDbWriteNote('delete', c, [[12]])).toContain('12 行が変更されました');
   });
 
   it('🔑 返す値が無ければ「実行しました」(CREATE TABLE の AS 無し / DROP TABLE)', () => {
@@ -228,17 +228,17 @@ describe('🔴 通った直後に言う 1 行(件数と寿命)', () => {
     expect(duckDbWriteNote('insert', ['Count'], [['x']])).toContain('実行しました');
     // 🔴 数が入っていても、`Count` の列でなければ件数と読まない(別の列の数を件数と言わない)
     expect(duckDbWriteNote('insert', ['Success'], [[1]])).toContain('実行しました');
-    expect(duckDbWriteNote('insert', ['Success'], [[1]])).not.toContain('行に効きました');
+    expect(duckDbWriteNote('insert', ['Success'], [[1]])).not.toContain('行が変更されました');
   });
 
   it('🔴 CREATE TABLE には、作った表の寿命を添える(閉じると消える)', () => {
     const [c, r] = count(2);
     // 🔴 #918 段⑦(Gemini 裁定 2026-10-01 = 設問 2 は B):相手を足す / 外すと器を作り直す = 作った表も消える
     expect(duckDbWriteNote('create', c, r)).toBe(
-      `2 行に効きました: ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`,
+      `2 行が変更されました: ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`,
     );
     expect(DUCKDB_TABLE_LIFETIME).toBe('作った表はウィンドウを閉じると消えます');
-    expect(DUCKDB_TABLE_RESET).toBe('対象のファイルを足したり外したりすると、作った表は消えます');
+    expect(DUCKDB_TABLE_RESET).toBe('調べる対象にファイルを足したり外したりすると、作った表は消えます');
     // 🔑 対照群:表を作らない命令には寿命を言わない / 元の file の注意は行を書き換える命令だけ
     expect(duckDbWriteNote('insert', c, r)).not.toContain('消えます');
     expect(duckDbWriteNote('drop', ['Success'], [])).not.toContain('消えます');

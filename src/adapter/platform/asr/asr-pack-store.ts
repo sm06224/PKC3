@@ -84,7 +84,7 @@ function write(db: IDBDatabase, stores: string[], run: (t: IDBTransaction) => vo
   return new Promise((resolve, reject) => {
     const t = db.transaction(stores, 'readwrite');
     const fail = (e: unknown): void =>
-      reject(e instanceof Error ? e : new Error('この端末の保存領域(IndexedDB)に書き込めませんでした'));
+      reject(e instanceof Error ? e : new Error('この端末に保存できませんでした'));
     t.oncomplete = () => resolve();
     t.onerror = () => fail(t.error);
     t.onabort = () => fail(t.error ?? new Error('idb transaction aborted'));
@@ -146,7 +146,7 @@ export class AsrPackStore {
     expect: ReadonlyMap<string, { bytes: number; sha256: string }>,
     version: string,
   ): Promise<AsrGroupMeta> {
-    if (files.size === 0) throw new AsrPackError('音声認識の部品が空です(書き込みを取り消しました)');
+    if (files.size === 0) throw new AsrPackError('音声認識の一式が空です(書き込みを取り消しました)');
     const metaFiles: AsrFileMeta[] = [];
     let totalBytes = 0;
     for (const [path, blob] of files) {

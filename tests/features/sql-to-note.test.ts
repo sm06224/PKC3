@@ -28,7 +28,7 @@ const base = {
 
 describe('題名', () => {
   it('いつ調べたかが入る(並んだときに区別できる)', () => {
-    expect(sqlNoteTitle(new Date(2026, 8, 9, 15, 4))).toBe('SQL の答え 2026-09-09 15:04');
+    expect(sqlNoteTitle(new Date(2026, 8, 9, 15, 4))).toBe('SQL の結果 2026-09-09 15:04');
   });
 });
 
@@ -137,7 +137,7 @@ describe('どこを調べた答えかを残す(#837 K3)', () => {
      */
     const title = sqlNoteTitle(new Date('2026-09-09T15:04:00'));
     expect(title, '題名に括弧が付いた(毎回長くなるだけ)').not.toContain('(');
-    expect(title).toBe('SQL の答え 2026-09-09 15:04');
+    expect(title).toBe('SQL の結果 2026-09-09 15:04');
   });
 
   it('⚠ 空文字は「ノート側」と同じに扱う(呼び側の書き方で結果を変えない)', () => {
@@ -149,6 +149,6 @@ describe('どこを調べた答えかを残す(#837 K3)', () => {
 
   it('🔴 行の数は、これまでどおり残っている(足したぶんで押し出さない)', () => {
     const body = sqlNoteBody({ ...answer, rows: [[1], [2], [3]], where: '売上.sqlite' });
-    expect(body, '行の数が消えた').toContain('3 行の答えです');
+    expect(body, '行の数が消えた').toContain('3 行の結果です');
   });
 });

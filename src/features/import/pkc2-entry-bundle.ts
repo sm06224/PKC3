@@ -84,7 +84,7 @@ export async function readEntryBundleParts(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
+      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 
@@ -114,7 +114,7 @@ export async function readEntryBundleParts(
     ['archetype', str(manifest.archetype), str(record.archetype)],
   ] as const) {
     if (a !== '' && b !== '' && a !== b) {
-      warnings.push(`目次と中身で ${label} が違います(${a} ≠ ${b})。中身を使います`);
+      warnings.push(`manifest.json と中身で ${label} が違います(${a} ≠ ${b})。中身を使います`);
     }
   }
 
@@ -138,7 +138,7 @@ export async function readEntryBundleParts(
     });
   }
   if (typeof manifest.asset_count === 'number' && manifest.asset_count !== assets.size) {
-    warnings.push(`manifest の asset 件数が中身と違います(${manifest.asset_count} ≠ ${assets.size})`);
+    warnings.push(`manifest の添付の件数が中身と違います(${manifest.asset_count} ≠ ${assets.size})`);
   }
   // ⚠ この形式には `missing_asset_keys` が**無い**ので、これが唯一の監査証跡
   // (review M-3)── text/textlog bundle は key を名指しできるが、ここは件数だけ。
@@ -200,7 +200,7 @@ export function droppedFieldsWarning(dropped: readonly string[], entries = 1): s
   const uniq = [...new Set(dropped)].join(' / ');
   return [
     `${entries} 件のノートで、この形式にしか無い情報を取り込めませんでした(${uniq})` +
-      '。PKC3 側に対応する置き場がまだありません',
+      '。PKC3 にはまだ対応する項目がありません',
   ];
 }
 

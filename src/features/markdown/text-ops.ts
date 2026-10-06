@@ -764,7 +764,7 @@ export const FORMAT_OPS: readonly {
     op: 'mermaid',
     label: '図',
     // 🔴 #950: 選んでいれば ```mermaid で囲みます(選んだ字は消えません)
-    hint: '図の下書きを差し込みます(選んでいれば、選んだ範囲を ```mermaid で囲みます)',
+    hint: '図のひな形を差し込みます(選んでいれば、選んだ範囲を ```mermaid で囲みます)',
     onBar: false,
   },
   {

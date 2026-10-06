@@ -200,7 +200,7 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     const m = mount();
     m.run.click();
     await settle();
-    expect(m.body(), '拾っていないことを言っていない').toContain('まだ取り出していません');
+    expect(m.body(), '拾っていないことを言っていない').toContain('まだバックアップを取っていません');
   });
 
   /**
@@ -215,9 +215,9 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     const m = mount();
     m.run.click();
     await settle();
-    expect(m.body(), '拾えた件数が出ていない').toContain('この画面で取り出せたのは 0 件です');
+    expect(m.body(), '拾えた件数が出ていない').toContain('バックアップに入っているのは 0 件です');
     expect(m.body(), '読めなかった数が出ていない').toContain('読み込めなかった箇所 7');
-    expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ取り出していません');
+    expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだバックアップを取っていません');
   });
 
   /**

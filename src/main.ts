@@ -1720,7 +1720,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
       onFellBack: (session) =>
-        showStatus(`「${session.name}」は PKC の画面で読めなかったため、ブラウザの表示で開きました`, {
+        showStatus(`「${session.name}」は PKC3 の画面で読めなかったため、ブラウザの表示で開きました`, {
           kind: 'caution',
         }),
       onLoadFailed: (session) =>
@@ -2081,8 +2081,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。⚠ ' +
-          'ここで保存すると相手の編集を上書きします。内容を控えてから「編集をやめる」を押してください',
+          '別のタブ(またはウィンドウ)がこのノートの編集を引き継ぎました。⚠ ' +
+          'ここで保存するとそちらの編集を上書きします。必要な内容をコピーしてから「編集をやめる」を押してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;
@@ -3475,7 +3475,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         if (!lent) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `asset が見つかりません: ${name}`,
+            error: `添付が見つかりません: ${name}`,
           });
           return;
         }
@@ -3784,7 +3784,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               //    窓はどちらでも別窓で、変わるのは**データの入れ物**のほうである
               const ok = await ask(
                 `「${title}」に、この PKC3 のノート・添付・設定を渡して開きます。\n\n` +
-                  'このアプリは PKC3 と同じ保存領域で動くので、あなたのノートを' +
+                  'このアプリは PKC3 と同じサイトのデータを使うので、PKC3 のノートを' +
                   '全部読めますし、書き換えもできます。\n' +
                   (registered
                     ? 'アプリとして登録済みなので、この中身は次回から聞きません' +
@@ -4010,7 +4010,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return (
         (await confirmInApp(
           root,
-          `グループの並び順は、グループごとのノートに憶えます。順番は全部のグループの位置がそろって決まるので、` +
+          `グループの並び順は、グループごとのノートに保存します。順番は全部のグループの位置がそろって決まるので、` +
             `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
           { okLabel: 'タイルを並べ替える', cancelLabel: 'やめる' },
         )) === 'ok'
@@ -4661,7 +4661,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   setSqlEmbedRunner(async (sql, limits) => {
     await storeEffects?.settled();
     const ask = storePort.runReadOnlySql;
-    if (!ask) throw new Error('アプリの読み込みが古いため SQL を実行できません。再読み込みしてください');
+    if (!ask) throw new Error('このページが古いままのため、SQL を実行できません。ページを再読み込みしてください');
     return ask(sql, limits);
   });
   storeEffects = connectStoreEffects(dispatcher, storePort, {

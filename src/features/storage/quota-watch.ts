@@ -79,7 +79,7 @@ export function quotaText(e: QuotaEstimate): string {
     );
   }
   if (level === 'warn') {
-    return `${head} 空きが少なくなってきました。重いノートから片づけておくと安全です。`;
+    return `${head} 空きが少なくなってきました。重いノートから整理しておくと安全です。`;
   }
   return head;
 }

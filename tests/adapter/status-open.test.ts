@@ -227,7 +227,7 @@ describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
 });
 
 /**
- * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
+ * 🔴 **保存が止まった断り書きの隣の「ノートの保存領域の確認を開く」**(#1010 B)。
  *
  * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うのに、
  * **押しても設定へ飛ばなかった**。守るのは:
@@ -237,7 +237,7 @@ describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
  *
  * ⚠ ②の「出す条件」は `main.ts` から届かないので判断はここ(`status-open.ts`)に在る。
  */
-describe('保存が止まった断り書きの隣の「保存領域の点検を開く」(#1010 B)', () => {
+describe('保存が止まった断り書きの隣の「ノートの保存領域の確認を開く」(#1010 B)', () => {
   afterEach(() => {
     document.body.textContent = '';
   });
@@ -248,7 +248,7 @@ describe('保存が止まった断り書きの隣の「保存領域の点検を�
     const regions = buildShell(root);
     const b = regions.statusRescue;
     expect(b.getAttribute('data-pkc-action'), '受け手の無い口').toBe('open-storage-check');
-    expect(b.textContent).toBe('保存領域の点検を開く');
+    expect(b.textContent).toBe('ノートの保存領域の確認を開く');
     expect(b.hidden, '断り書きが無いのに出ている').toBe(true);
     expect(regions.status.contains(b), '状態の行の外に居る').toBe(true);
   });

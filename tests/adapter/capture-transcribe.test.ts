@@ -293,7 +293,7 @@ describe('⑤ 書けない間は預かる', () => {
     const h = harness({}, { writeLock: { lid: 'other' } } as Partial<AppState>);
     await h.tr.run('a');
     expect(h.appends, '書けないのに足した').toEqual([]);
-    expect(h.notes.at(-1)).toMatch(/保留しました/);
+    expect(h.notes.at(-1)).toMatch(/待たせています/);
     h.dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
     await new Promise((r) => setTimeout(r, 0));
     expect(h.appends, '解けても足されない(預かりを捨てた)').toHaveLength(1);

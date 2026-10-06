@@ -75,7 +75,7 @@ export const PLACE_NEAR_MARGIN = 800;
  *   開くたびに 200 回走ると保存を待たせる)。理由を言わないと、**SQL の字だけが出て答えが無い**ので
  *   「壊れた」に見える ── だから黙って空にせず、開けば出ることを言う。
  */
-export const PLACE_SQL_NOTE = 'ここでは答えを出しません(ノートを開くと出ます)';
+export const PLACE_SQL_NOTE = 'ここでは結果を出しません(ノートを開くと出ます)';
 /** 上の 1 行の器。⚠ 本文の `data-pkc-sql-embed` は**付けない**(付けると本文の描画が掴んで答えを引く)。 */
 export const PLACE_SQL_FIELD = 'place-sql-note';
 

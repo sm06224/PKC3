@@ -546,7 +546,7 @@ export class SettingsRenderer {
     // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
     eselect.title =
       '既定は「1 画面で編集(ライブ)」で、押した行だけがマークダウンの元の文になり、' +
-      'その場で書き替えられます。2 ペインは左に原文、右にプレビューが並びます。';
+      'その場で書き換えられます。2 ペインは左に原文、右にプレビューが並びます。';
     for (const c of EDITOR_MODES) {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -906,9 +906,9 @@ export class SettingsRenderer {
     pdfcheck.type = 'checkbox';
     pdfcheck.setAttribute('data-pkc-action', 'set-pdf-reader');
     pdfcheck.setAttribute('data-pkc-field', 'pdf-reader');
-    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引用できる)'));
+    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC3 の画面で開く(字を選んでノートへ引用できる)'));
     pdflabel.title =
-      '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読むウィンドウにします。' +
+      '添付の PDF の「別のウィンドウで見る」を、PKC3 の画面で読むウィンドウにします。' +
       '字を選んで「ノートへ引用する」を押すと、ページ番号つきで添付のノートの末尾に引用として足せます。' +
       'オフにすると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
     pdfd.append(pdflabel);

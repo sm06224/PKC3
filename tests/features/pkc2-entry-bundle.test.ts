@@ -65,7 +65,7 @@ describe('readEntryBundle — 実物', () => {
     // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
     expect(got.warnings).toEqual([
       '1 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 側に対応する置き場がまだありません',
+        '。PKC3 にはまだ対応する項目がありません',
     ]);
   });
 
@@ -142,8 +142,8 @@ describe('readEntryBundle — 形の検査', () => {
     });
     const got = await readEntryBundle(zip);
     expect(got.warnings).toEqual([
-      '目次と中身で ID が違います(ちがう ≠ t1)。中身を使います',
-      '目次と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を使います',
+      'manifest.json と中身で ID が違います(ちがう ≠ t1)。中身を使います',
+      'manifest.json と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を使います',
     ]);
     expect((got.container as Synth).entries[0]!.lid).toBe('t1');
   });
@@ -154,7 +154,7 @@ describe('readEntryBundle — 形の検査', () => {
       extra: [{ name: 'assets/k1', bytes: bytesOf('YWJj') }],
     });
     const got = await readEntryBundle(zip);
-    expect(got.warnings).toContain('manifest の asset 件数が中身と違います(3 ≠ 1)');
+    expect(got.warnings).toContain('manifest の添付の件数が中身と違います(3 ≠ 1)');
   });
 
   it('assets/ の下のディレクトリ様の名前は無視して言う', async () => {
