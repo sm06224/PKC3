@@ -667,7 +667,7 @@ ${(e as Error).message}`,
   const sectionLabel = ((await asrSection.locator('h4').textContent()) ?? '').trim();
   // 音声認識の節は「保存領域」の節の中に在る ── 案内の道順はその見出しも通る
   const storageLabel = (
-    (await page.locator('[data-pkc-region="settings-storage"] > h3').first().textContent()) ?? ''
+    (await page.locator('[data-pkc-region="settings-storage"] h3').first().textContent()) ?? ''
   ).trim();
   expect(navLabel.length, '入口の名前を読めていない').toBeGreaterThan(0);
   expect(storageLabel.length, '保存領域の見出しを読めていない').toBeGreaterThan(0);
