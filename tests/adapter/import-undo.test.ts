@@ -125,7 +125,7 @@ describe('取込の後に出す面(#535 ②)', () => {
 
   it('🔑 題は、注意が在るかで変わる(何も無いのに「注意」と言わない)', () => {
     expect(importPanel([], null).title).toBe('取り込みました');
-    expect(importPanel(['x'], null).title).toBe('取込時の注意');
+    expect(importPanel(['x'], null).title).toBe('取り込み時の注意');
   });
 });
 

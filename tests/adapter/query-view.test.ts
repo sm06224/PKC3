@@ -353,7 +353,7 @@ describe('集計の面(#184)', () => {
    * 「無い」と読める** ── PKC2 の Inventory はまさにそれで黙って切っていた。
    * ここは state を作って**描画の観測点**を見る(数えた値ではなく、出た文字)。
    */
-  it('🔴 組を切ったら「あと N 組」と画面に出す', async () => {
+  it('🔴 グループを切ったら「あと N グループ」と画面に出す', async () => {
     // ⚠ 集計を持たない store にする ── 持たせると**本物の答えが後から届いて**
     //    こちらが作った「切れた表」を上書きする(1 稿目はそれで落ちた)
     const { d, q, qa } = setup({ withQuery: false });
@@ -371,7 +371,7 @@ describe('集計の面(#184)', () => {
       },
     });
     await tick();
-    expect(q('[data-pkc-field="query-note"]')!.textContent).toContain('あと 7 組');
+    expect(q('[data-pkc-field="query-note"]')!.textContent).toContain('あと 7 グループ');
   });
 
   it('🔴 1 組の中を切ったら「N 件(先頭 M 件)」と出す', async () => {

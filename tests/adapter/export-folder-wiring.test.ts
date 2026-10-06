@@ -115,6 +115,6 @@ describe('#399 ① フォルダ書き出しの配線', () => {
     const r = rig();
     r.select('f1');
     expect(r.btn()!.title).toContain('取り込み直せます');
-    expect(r.btn()!.title, '落ちるものを言っていない').toContain('外へ繋がる関係');
+    expect(r.btn()!.title, '落ちるものを言っていない').toContain('外へのつながり');
   });
 });

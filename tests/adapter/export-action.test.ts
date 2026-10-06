@@ -99,7 +99,7 @@ function deps(over: Partial<ExportDeps> = {}): ExportDeps & {
   };
 }
 
-describe('書出しの実行部 — 注意を握り潰さない', () => {
+describe('書き出しの実行部 — 注意を握り潰さない', () => {
   it('🔴 注意の**中身**を report へ渡す(件数だけにしない)', async () => {
     const { dispatcher } = fakeDispatcher();
     // 本文が参照している添付の bytes が無い = 一番知りたい注意
@@ -107,7 +107,7 @@ describe('書出しの実行部 — 注意を握り潰さない', () => {
     await exportArchive(dispatcher, d, 'html');
     expect(d.notes).toEqual([['添付の中身が見つかりませんでした: ast-x']]);
     // status 側にも件数は出るが、それは**中身の代わりにはならない**
-    expect(d.messages.at(-1)).toContain('⚠ 注意 1 件');
+    expect(d.messages.at(-1)).toContain('(注意 1 件)');
   });
 
   it('注意が無いときも report は呼ぶ(前回の注意を消せるように)', async () => {
@@ -118,7 +118,7 @@ describe('書出しの実行部 — 注意を握り潰さない', () => {
   });
 });
 
-describe('書出しの実行部 — 形式ごとの出口', () => {
+describe('書き出しの実行部 — 形式ごとの出口', () => {
   it('アーカイブは `.pkc3-full.zip`、閲覧用は `.html`', async () => {
     const { dispatcher } = fakeDispatcher();
     const a = deps();
@@ -164,7 +164,7 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     expect(a.messages.at(-1)).not.toContain('取り込み直せません');
   });
 
-  it('🔴 md ZIP は**何が落ちるか**を件数で言う(「片道です」だけにしない)', async () => {
+  it('🔴 md ZIP は**何が落ちるか**を件数で言う(「取り込み直せません」だけにしない)', async () => {
     const { dispatcher } = fakeDispatcher();
     const withLoss: ArchiveSource = {
       ...source(),
@@ -176,8 +176,8 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     const d = deps({ source: withLoss });
     await exportArchive(dispatcher, d, 'markdown');
     expect(d.files[0]!.name).toBe('わたしのノート-20260802.md.zip');
-    expect(d.messages.at(-1)).toContain('片道');
-    expect(d.messages.at(-1)).toContain('関連 1');
+    expect(d.messages.at(-1)).toContain('取り込み直せません');
+    expect(d.messages.at(-1)).toContain('つながり 1');
     expect(d.messages.at(-1)).toContain('履歴 2 件ぶん');
   });
 
@@ -186,7 +186,7 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
     const d = deps();
     await exportArchive(dispatcher, d, 'markdown');
     expect(d.messages.at(-1)).toContain('取り込み直せません');
-    expect(d.messages.at(-1)).not.toContain('関連');
+    expect(d.messages.at(-1)).not.toContain('つながり');
   });
 
   it('既定はアーカイブ(呼び出し側が省いても閲覧用にならない)', async () => {
@@ -197,7 +197,7 @@ describe('書出しの実行部 — 形式ごとの出口', () => {
   });
 });
 
-describe('書出しの実行部 — 断るべきときに断る', () => {
+describe('書き出しの実行部 — 断るべきときに断る', () => {
   it('編集中は書き出さない(保存前の本文が入った物を作らない)', async () => {
     const { dispatcher, dispatched } = fakeDispatcher('editing');
     const d = deps();
@@ -229,7 +229,7 @@ describe('書出しの実行部 — 断るべきときに断る', () => {
   });
 });
 
-describe('書出しの実行部 — ファイル名', () => {
+describe('書き出しの実行部 — ファイル名', () => {
   it.each([
     ['a/b:c*d?e"f<g>h|i', 'a-b-c-d-e-f-g-h-i'],
     ['   ', 'pkc3'], // 空にすると「.pkc3-full.zip」だけの隠しファイルになる
@@ -248,7 +248,7 @@ describe('書出しの実行部 — ファイル名', () => {
  * ⚠ 出さないと「添付 3」とだけ出て、**なぜ zip が大きいのか**がどこにも書かれていない。
  * ⚠ 裁定 A は「**入れたまま、説明を足す**」── 減らす話ではない。
  */
-describe('書出しの実行部 — 添付の控えの内訳(#213)', () => {
+describe('書き出しの実行部 — 添付の控えの内訳(#213)', () => {
   const withHistory = [
     '---',
     'attachment.asset_key: ast-now',
@@ -266,18 +266,18 @@ describe('書出しの実行部 — 添付の控えの内訳(#213)', () => {
     getAssetBlob: async () => new Blob(['xxx']),
   });
 
-  it('🔴 控えがあるときは「うち控え N」を出す', async () => {
+  it('🔴 過去の版があるときは「うち過去の版 N」を出す', async () => {
     const { dispatcher } = fakeDispatcher();
     const d = deps({ source: src(withHistory) });
     await exportArchive(dispatcher, d, 'markdown');
-    expect(d.messages.at(-1), '控えの内訳が書き出しの行に出ていない').toContain('うち控え 1');
+    expect(d.messages.at(-1), '過去の版の内訳が書き出しの行に出ていない').toContain('うち過去の版 1');
   });
 
-  it('控えが無いときは余計なことを言わない', async () => {
+  it('過去の版が無いときは余計なことを言わない', async () => {
     const { dispatcher } = fakeDispatcher();
     const d = deps({ source: src('---\nattachment.asset_key: ast-now\n---\n') });
     await exportArchive(dispatcher, d, 'markdown');
-    expect(d.messages.at(-1), '控えが無いのに言った').not.toContain('控え');
+    expect(d.messages.at(-1), '過去の版が無いのに言った').not.toContain('うち過去の版');
     // 空振り防止 ── そもそも markdown の書出しが通っているか
     expect(d.messages.at(-1)).toContain('書き出しました');
   });

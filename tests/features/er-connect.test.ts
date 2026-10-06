@@ -32,7 +32,7 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
     expect(r).toEqual({ kind: 'from', pendingFrom: { table: '売上', column: '客id' } });
   });
 
-  it('🔴 別の表の列を押すと繋がりができる ── 宣言 0 件の DB でも繋げる', () => {
+  it('🔴 別の表の列を押すと繋がりができる ── 宣言 0 件の DB でもつなげる', () => {
     const r = pickErConnection(NO_FK_MODEL, [], { table: '売上', column: '客id' }, '客', 'id');
     expect(r).toEqual({
       kind: 'linked',
@@ -51,21 +51,21 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
     expect(r.kind).not.toBe('cancel');
   });
 
-  it('🔴 同じ表の中では繋げない(denied)', () => {
+  it('🔴 同じ表の中ではつなげない(denied)', () => {
     const r = pickErConnection(NO_FK_MODEL, [], { table: '売上', column: '客id' }, '売上', '金額');
-    expect(r).toEqual({ kind: 'denied', why: '同じ表の中では繋げません' });
+    expect(r).toEqual({ kind: 'denied', why: '同じ表の中ではつなげません' });
   });
 
   it('🔴 もう在る繋がりと同じ組み合わせは denied(宣言された FK と重複)', () => {
     const model: SchemaModel = { ...NO_FK_MODEL, links: [link('売上', '客id', '客', 'id')] };
     const r = pickErConnection(model, [], { table: '売上', column: '客id' }, '客', 'id');
-    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもう繋がっています' });
+    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもうつながっています' });
   });
 
   it('🔴 もう在る繋がりと同じ組み合わせは denied(自分で引いた mine と重複)', () => {
     const mine = [link('売上', '客id', '客', 'id')];
     const r = pickErConnection(NO_FK_MODEL, mine, { table: '売上', column: '客id' }, '客', 'id');
-    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもう繋がっています' });
+    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもうつながっています' });
   });
 
   it('🔴 向きを変えても同じ繋がりとして denied(逆向きの押し直しをすり抜けさせない)', () => {
@@ -75,7 +75,7 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
     expect(r.kind, '向きを変えると別の繋がりとして通ってしまっている').toBe('denied');
   });
 
-  it('⚠ 空振り防止 ── 違う列どうしなら、もう 1 本繋げる', () => {
+  it('⚠ 空振り防止 ── 違う列どうしなら、もう 1 本つなげる', () => {
     const mine = [link('売上', '客id', '客', 'id')];
     const r = pickErConnection(NO_FK_MODEL, mine, { table: '売上', column: '担当id' }, '在庫', 'id');
     expect(r).toEqual({ kind: 'linked', link: link('売上', '担当id', '在庫', 'id') });
@@ -97,23 +97,23 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
 describe('erZeroLinesWhy(#918 段⑤d-3)', () => {
   const base = { boxes: 3, declared: 0, mine: 0, dropped: 0, connecting: false };
 
-  it('🔴 外部キーが 0 本なら、理由と「繋ぐ」への誘いを両方言う', () => {
+  it('🔴 外部キーが 0 本なら、理由と「つなぐ」への誘いを両方言う', () => {
     const s = erZeroLinesWhy(base);
     expect(s, '理由を言っていない').toContain('宣言していません');
-    expect(s, '次に何を押せばよいか言っていない').toContain('繋ぐ');
+    expect(s, '次に何を押せばよいか言っていない').toContain('つなぐ');
   });
 
-  it('🔴 「繋ぐ」が既に入なら、次の一手は言わない(すぐ下の案内と二重になる)', () => {
+  it('🔴 「つなぐ」が既に入なら、次の一手は言わない(すぐ下の案内と二重になる)', () => {
     const on = erZeroLinesWhy({ ...base, connecting: true });
     expect(on, '理由は言い続ける').toContain('宣言していません');
-    expect(on, '入のときまで「繋ぐを押せ」と言っている').not.toContain('押して列を 2 つ');
+    expect(on, '入のときまで「つなぐを押せ」と言っている').not.toContain('押して列を 2 つ');
     // ⚠ 対照群 ── 切のときは言う(言わない実装でも上だけなら通ってしまう)
     expect(erZeroLinesWhy(base), '切のときに次の一手が消えている').toContain('押して列を 2 つ');
   });
 
-  it('🔴 表が 1 つだけなら「繋ぐ」を勧めない(同じ表の中は繋げないので押せない道になる)', () => {
+  it('🔴 表が 1 つだけなら「つなぐ」を勧めない(同じ表の中はつなげないので押せない道になる)', () => {
     const s = erZeroLinesWhy({ ...base, boxes: 1 });
-    expect(s, '相手がいないことを言っていない').toContain('繋ぐ相手がいません');
+    expect(s, '相手がいないことを言っていない').toContain('ほかの表が無いのでつなげません');
     expect(s, '押せない道へ誘っている').not.toContain('押して列を 2 つ');
   });
 
@@ -121,7 +121,7 @@ describe('erZeroLinesWhy(#918 段⑤d-3)', () => {
     const s = erZeroLinesWhy({ ...base, declared: 2, dropped: 2 });
     expect(s, '落ちたことを言っていない').toContain('線にできませんでした');
     expect(s, '在る物を「無い」と言っている').not.toContain('宣言していません');
-    expect(s, '次の一手が消えている').toContain('繋ぐ');
+    expect(s, '次の一手が消えている').toContain('つなぐ');
   });
 
   it('⚠ 四角が 1 つも無いときは何も言わない(呼ぶ側が別の字を出している)', () => {
@@ -149,21 +149,21 @@ describe('erSubjectOf / erZeroLinesWhy の主語(D8)', () => {
   });
 
   it('🔴 .sqlite でない 1 件(csv / parquet / json)は「この file」/ 2 件以上は「これらの file」', () => {
-    expect(erSubjectOf(['売上.csv'])).toBe('この file');
-    expect(erSubjectOf(['売上.parquet'])).toBe('この file');
-    expect(erSubjectOf(['明細.ndjson'])).toBe('この file');
-    expect(erSubjectOf(['家計.sqlite', '在庫.csv'])).toBe('これらの file');
+    expect(erSubjectOf(['売上.csv'])).toBe('このファイル');
+    expect(erSubjectOf(['売上.parquet'])).toBe('このファイル');
+    expect(erSubjectOf(['明細.ndjson'])).toBe('このファイル');
+    expect(erSubjectOf(['家計.sqlite', '在庫.csv'])).toBe('これらのファイル');
     // 🔑 2 件のうち片方が .sqlite でも「DB」ではない(csv が混ざっている)
-    expect(erSubjectOf(['在庫.csv', '家計.sqlite'])).toBe('これらの file');
+    expect(erSubjectOf(['在庫.csv', '家計.sqlite'])).toBe('これらのファイル');
   });
 
   it('🔴 理由の字の主語が変わる(省けば今までどおり「この DB は」)', () => {
-    expect(erZeroLinesWhy(base)).toContain('この DB は、表どうしの繋がり');
+    expect(erZeroLinesWhy(base)).toContain('この DB は、表どうしのつながり');
     expect(erZeroLinesWhy({ ...base, subject: erSubjectOf(['売上.parquet']) })).toContain(
-      'この file は、表どうしの繋がり(外部キー)を 1 つも宣言していません',
+      'このファイルは、表どうしのつながり(外部キー)を 1 つも宣言していません',
     );
     const many = erZeroLinesWhy({ ...base, subject: erSubjectOf(['a.csv', 'b.parquet']) });
-    expect(many).toContain('これらの file は、表どうしの繋がり');
+    expect(many).toContain('これらのファイルは、表どうしのつながり');
     expect(many, '並べた file を「DB」と呼んでいる').not.toContain('この DB');
   });
 });

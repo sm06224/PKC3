@@ -23,6 +23,7 @@ import type { PersistState } from '@adapter/platform/storage-persist';
 import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
+import { STORAGE_SECTION_LABEL } from '@features/asr/asr-text';
 import { PROSE_ALIGNS } from '@features/prose-align';
 import { OPEN_PLACES } from '@features/open-place';
 import { APP_OPEN_TARGETS } from '@features/launcher/open-target';
@@ -373,12 +374,12 @@ export class SettingsRenderer {
     });
     // ⚠ **いつ効くのか**まで書く ── 窓が読み幅より狭ければ、どちらでも同じに見える
     paRow.title =
-      '表・図・コードも段落と同じ側に揃います。窓が読み幅より狭い、または' +
+      '表・図・コードも段落と同じ側に揃います。ウィンドウが読み幅より狭い、または' +
       'ページ設定が「フル HD」のときはどちらでも同じ見え方です。' +
       '書き出した HTML は、書き出したときの置き場所のまま表示されます。';
     pad.append(paRow);
     pad.append(
-      buildSettingsNote('窓が読み幅より広いとき、本文を列の中央か左端に置きます(既定は中央)。'),
+      buildSettingsNote('ウィンドウが読み幅より広いとき、本文をペインの中央か左端に置きます(既定は中央)。'),
     );
     dl.append(pat, pad);
 
@@ -546,7 +547,7 @@ export class SettingsRenderer {
     // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
     eselect.title =
       '既定は「1 画面で編集(ライブ)」で、押した行だけがマークダウンの元の文になり、' +
-      'その場で書き替えられます。2 ペインは左に原文、右にプレビューが並びます。';
+      'その場で書き換えられます。2 ペインは左に原文、右にプレビューが並びます。';
     for (const c of EDITOR_MODES) {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -573,7 +574,7 @@ export class SettingsRenderer {
      *   組み立てで使う。
      */
     const st = document.createElement('dt');
-    st.textContent = 'このアプリのデータ';
+    st.textContent = 'PKC3 のデータ';
     const sd = document.createElement('dd');
     const snote = document.createElement('p');
     snote.setAttribute('data-pkc-field', 'settings-note');
@@ -602,7 +603,7 @@ export class SettingsRenderer {
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
     od.append(olabel);
     od.append(
-      buildSettingsNote('既定は「読む」状態で開き、入れると開いた時点で編集に入ります。'),
+      buildSettingsNote('既定は「読む」状態で開き、オンにすると開いた時点で編集に入ります。'),
     );
     editDl.append(ot, od);
 
@@ -618,24 +619,24 @@ export class SettingsRenderer {
      *   「設定したのに変わらない」になる(この repo がいちばん嫌う形)。
      */
     const plt = document.createElement('dt');
-    plt.textContent = '書庫(zip)を開く場所';
+    plt.textContent = 'zip ファイルを開く場所';
     const pld = document.createElement('dd');
     // 🔴 選択肢 2 つ ── プルダウンをボタンの列にする(#1038 段J)
     const plRow = buildChoiceRow({
       field: 'open-place-select',
-      ariaLabel: '書庫(zip)を開く場所',
+      ariaLabel: 'zip ファイルを開く場所',
       action: 'set-open-place',
       dataAttr: 'data-pkc-open-place-value',
       choices: OPEN_PLACES,
       currentId: '', // render 末尾の syncOpenPlace が必ず映す
     });
     plRow.title =
-      '別の窓なら本文を見ながら確かめられます。ブラウザが別の窓を止めている場合は' +
+      '別のウィンドウなら本文を見ながら確かめられます。ブラウザが別のウィンドウを止めている場合は' +
       'この画面の上に出し、理由を画面の下に出します。電話の画面ではどちらでもこの' +
-      '画面に出ます。予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
+      '画面に出ます。予定表や連絡先など、ほかのウィンドウの開き方はここでは変わりません。';
     pld.append(plRow);
     pld.append(
-      buildSettingsNote('添付の書庫(zip)の一覧を、別の窓かこの画面のどちらに出すかです。'),
+      buildSettingsNote('添付の zip ファイルの一覧を、別のウィンドウかこの画面のどちらに出すかです。'),
     );
     openDl.append(plt, pld);
 
@@ -662,9 +663,9 @@ export class SettingsRenderer {
     atselect.setAttribute('data-pkc-field', 'app-open-target-select');
     atselect.setAttribute('aria-label', 'アプリの開き方');
     atselect.title =
-      '別の窓は大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
-      'ブラウザが窓を止めているときは、止められた理由が画面の下に出ます。' +
-      '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
+      '別のウィンドウは大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
+      'ブラウザがウィンドウを止めているときは、止められた理由が画面の下に出ます。' +
+      '組み込みのアプリ(予定表・連絡先など)とマニュアルのウィンドウは、ここでは変わりません。';
     for (const c of APP_OPEN_TARGETS) {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -673,7 +674,7 @@ export class SettingsRenderer {
     }
     atd.append(atselect);
     atd.append(
-      buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別の窓に出すかです。'),
+      buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別のウィンドウに出すかです。'),
     );
     openDl.append(att, atd);
 
@@ -696,10 +697,10 @@ export class SettingsRenderer {
     // ⚠ **できないことを先に書く**(#280)── 鳴る前提で予定を任せて失わせない
     alabel.title =
       '本文の行に時刻まで書いた予定が対象です。押すとそのノートを開きます。' +
-      '起動したときに予定を数えます(切のままなら数えません)。';
+      '起動したときに予定を数えます(オフのままなら数えません)。';
     ad.append(alabel);
     ad.append(
-      buildSettingsNote('PKC を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
+      buildSettingsNote('PKC3 を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
     );
     notifyDl.append(at, ad);
 
@@ -719,7 +720,7 @@ export class SettingsRenderer {
     vcheck.setAttribute('data-pkc-field', 'voice-boost');
     vlabel.append(vcheck, document.createTextNode(' 再生するとき、声を聞き取りやすく整える'));
     vlabel.title =
-      '効くのは PKC の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見)。' +
+      '効くのは PKC3 の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見)。' +
       'お使いのブラウザがこの仕組みを持っていない場合は、整わずにそのまま鳴ります。';
     vd.append(vlabel);
     vd.append(
@@ -755,7 +756,7 @@ export class SettingsRenderer {
      *   (`tests/adapter/settings-phone-links.test.ts`)。設計 doc §9 C18 の「その 1 件だけ
      *   2 行を許す」を当て、`tests/adapter/settings-notes.test.ts` の既知の一覧で固定する。
      */
-    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、切のままなら本文の見え方は 1 文字も変わりません。'));
+    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、オフのままなら本文の見え方は 1 文字も変わりません。'));
     editDl.append(pht, phd);
 
     /**
@@ -777,7 +778,7 @@ export class SettingsRenderer {
     dllabel.title =
       '@2026-10-15 のように書いた日付に点線の下線が付きます(字の色は変わりません)。' +
       '題名がその日付のノートが無ければ、作るかどうかを画面の下で聞きます。' +
-      '切ると、日付はふつうの字のままです。';
+      'オフにすると、日付はふつうの字のままです。';
     dld.append(dllabel);
     dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
     editDl.append(dlt, dld);
@@ -850,8 +851,8 @@ export class SettingsRenderer {
     mllabel.append(mlcheck, document.createTextNode(' ノートが見つからないリンクを、薄い字と点線で見せる'));
     mllabel.title =
       '押すと「見つかりません」になるリンクに点線の下線を引きます(字の色は変わりません)。' +
-      'ゴミ箱に入れた・取り込みで外れた・別の PKC から貼ったノートが対象で、' +
-      '別の PKC を指すリンクは変わりません。';
+      'ゴミ箱に入れた・取り込みで外れた・別の PKC3 から貼ったノートが対象で、' +
+      '別の PKC3 を指すリンクは変わりません。';
     // ⚠ 説明は hover に置く ── visible の note を足すと「note は 24 段落」の数え直し
     //   (`settings-notes.test.ts` / 設計 doc)を動かす。1 行で足りる設定なので足さない。
     mld.append(mllabel);
@@ -865,17 +866,17 @@ export class SettingsRenderer {
      * ⚠ 字は「何が起きるか」で書く(「インラインコード」は内部の言葉 ── `ui-terms.ts` の BANNED_TERMS)。
      */
     const cct = document.createElement('dt');
-    cct.textContent = '長いコード枠';
+    cct.textContent = '長いコードブロック';
     const ccd = document.createElement('dd');
     const cclabel = document.createElement('label');
     const cccheck = document.createElement('input');
     cccheck.type = 'checkbox';
     cccheck.setAttribute('data-pkc-action', 'set-code-collapse');
     cccheck.setAttribute('data-pkc-field', 'code-collapse');
-    cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から畳む'));
+    cclabel.append(cccheck, document.createTextNode(' 長いコードブロックを最初から折りたたむ'));
     cclabel.title =
-      '18 行以上のコード枠を、最初は低く畳んで見せます(押すと全部見えます)。' +
-      '切ると、最初から字が全部見えます(開閉のボタンも出ません)。';
+      '18 行以上のコードブロックを、最初は低く折りたたんで見せます(押すと全部見えます)。' +
+      'オフにすると、最初から字が全部見えます(開閉のボタンも出ません)。';
     ccd.append(cclabel);
     editDl.append(cct, ccd);
     const icct = document.createElement('dt');
@@ -889,7 +890,7 @@ export class SettingsRenderer {
     icclabel.append(icccheck, document.createTextNode(' 本文の `code` を押すとコピーする'));
     icclabel.title =
       '本文の中の `code` のように書いた短いコードを押すと、その字をコピーします。' +
-      '切ると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
+      'オフにすると、押しても何も起きず、ふつうの字として選べます(コードブロックのコピーは変わりません)。';
     iccd.append(icclabel);
     editDl.append(icct, iccd);
     /**
@@ -906,11 +907,11 @@ export class SettingsRenderer {
     pdfcheck.type = 'checkbox';
     pdfcheck.setAttribute('data-pkc-action', 'set-pdf-reader');
     pdfcheck.setAttribute('data-pkc-field', 'pdf-reader');
-    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引ける)'));
+    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC3 の PDF ビューアで開く(字を選んでノートへ引用できる)'));
     pdflabel.title =
-      '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読む窓にします。' +
-      '字を選んで「ノートへ引く」を押すと、頁番号つきで添付のノートの末尾に引用として足せます。' +
-      '切ると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
+      '添付の PDF の「別のウィンドウで見る」を、PKC3 の PDF ビューア(別ウィンドウ)で開きます。' +
+      '字を選んで「ノートへ引用する」を押すと、ページ番号つきで添付のノートの末尾に引用として足せます。' +
+      'オフにすると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
     pdfd.append(pdflabel);
     editDl.append(pdft, pdfd);
 
@@ -966,7 +967,7 @@ export class SettingsRenderer {
     wcheck.setAttribute('data-pkc-action', 'set-too-narrow-enabled');
     wcheck.setAttribute('data-pkc-field', 'too-narrow-enabled');
     wlabel.append(wcheck, document.createTextNode(' 狭い画面のときに断り書きを出す'));
-    wlabel.title = '幅が 360px より狭いと出ます。「OK」を押すと切れます ── ここで戻せます。';
+    wlabel.title = '幅が 360px より狭いと出ます。「OK」を押すと切れます。ここで戻せます。';
     wd.append(wlabel);
     wd.append(buildSettingsNote('幅が狭いときに「表示が崩れることがあります」と出します。'));
     const tooNarrowDl = document.createElement('dl');
@@ -1062,7 +1063,7 @@ export class SettingsRenderer {
     const storageSection = document.createElement('section');
     storageSection.setAttribute('data-pkc-region', 'settings-storage');
     const storageHead = document.createElement('h3');
-    storageHead.textContent = '保存領域';
+    storageHead.textContent = STORAGE_SECTION_LABEL;
     storageSection.append(storageHead);
     storageSection.append(this.buildPersistSection(persistDl));
     storageSection.append(buildSettingsCommands());
@@ -1243,7 +1244,7 @@ export class SettingsRenderer {
     const h = document.createElement('h4');
     h.textContent = '最近開いたノートの記録';
     const note = buildSettingsNote(
-      '並び順「最近開いた順」に使う記録です(この端末だけ・消すと積み直します)。',
+      '並び順「最近開いた順」に使う記録です(この端末だけ・消すとまた集計されます)。',
     );
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1306,7 +1307,7 @@ export class SettingsRenderer {
     //    store の通知で件数の字を合わせる(器は 1 度しか組まないので購読も 1 度)
     appCopyHistory.onChange(() => this.syncCopyHistory());
 
-    const note = buildSettingsNote('PKC の中でコピーした物を、この端末に 20 件まで残します。');
+    const note = buildSettingsNote('PKC3 の中でコピーした物を、この端末に 20 件まで残します。');
     wrap.append(note);
 
     const btn = document.createElement('button');
@@ -1347,7 +1348,7 @@ export class SettingsRenderer {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-persist');
     const h = document.createElement('h4');
-    h.textContent = 'このアプリのデータ';
+    h.textContent = 'PKC3 のデータ';
     wrap.append(h, dl);
     return wrap;
   }
@@ -1791,7 +1792,7 @@ export class SettingsRenderer {
       return;
     }
     if (existing !== null) return;
-    const note = buildSettingsNote('日付を押せるようにすると出ます(上の「本文の日付」を入にしてください)');
+    const note = buildSettingsNote('日付を押せるようにすると出ます(上の「本文の日付」をオンにしてください)');
     note.setAttribute('data-pkc-region', 'relative-days-prereq');
     dd.append(note);
   }
@@ -1998,7 +1999,7 @@ export class SettingsRenderer {
  * 断られたのではない(起動直後は必ずここを通る)。
  */
 const PERSIST_TEXT: Record<PersistState, string> = {
-  persisted: 'このブラウザは、このアプリのデータを消さない扱いにしています。',
+  persisted: 'このブラウザは、PKC3 のデータを消さない扱いにしています。',
   denied:
     '空き容量が足りなくなると、このブラウザがデータを消すことがあります。' +
     'ホーム画面(デスクトップ)に追加すると、消さない扱いになることがあります。' +

@@ -109,7 +109,7 @@ describe('asset GC (P4b)', () => {
    * 左の列の下から設定の面へ移った。🔑 **委譲は `root` に張る**ので、面が変わっても
    * 同じ 1 本の配線で届く ── その「届く」ことこそがこの test の主張である。
    */
-  it('設定の「使っていない添付を消す」click が services.purgeOrphanAssets に届く', () => {
+  it('設定の「使われていない添付を消す」click が services.purgeOrphanAssets に届く', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     document.body.append(root);
@@ -146,7 +146,7 @@ describe('runExplicitPurge (P4b)', () => {
     deps.ports.listBlobKeys = async () => [];
     await runExplicitPurge(deps);
     expect(asked).not.toHaveBeenCalled();
-    expect(alerts[0]).toContain('未参照の添付データはありません');
+    expect(alerts[0]).toContain('どのノートからも使われていない添付はありません');
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
 
@@ -171,7 +171,7 @@ describe('runExplicitPurge (P4b)', () => {
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
 
-  it('confirm 後に再走査し、交差だけ消す(取込中 key / 参照され直した key を守る)', async () => {
+  it('confirm 後に再走査し、交差だけ消す(取り込み中 key / 参照され直した key を守る)', async () => {
     let scanCount = 0;
     const { ports, calls } = fakePorts({
       // 2 回目の走査では世界が変わっている:
@@ -193,7 +193,7 @@ describe('runExplicitPurge (P4b)', () => {
     });
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
     expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
-    expect(alerts[0]).toContain('1 件を削除しました');
+    expect(alerts[0]).toContain('1 件を消しました');
   });
 });
 
@@ -234,7 +234,7 @@ describe('整理はタブ間の編集も見る(#253)', () => {
     expect(calls.filter((c) => c.startsWith('blob:')), '編集中なのに消した').toHaveLength(0);
     expect(alerts[0]).toContain('他のタブで編集中です');
     // 🔑 **理由がそのまま出る**(「中止しました」だけだと次の一手が分からない)
-    expect(alerts[0]).toContain('整理は行っていません');
+    expect(alerts[0]).toContain('何も消していません');
   });
 
   it('⚠ 断りの文言は、判定の顔ごとに変える(存在しないタブを探させない)', async () => {
@@ -337,7 +337,7 @@ describe('器の無い bytes(#260)', () => {
     });
     expect(messages[0], '残骸を数えていない').toContain('2 件');
     expect(messages.join(' '), '残骸だけだと「ありません」で止まる').not.toContain(
-      '未参照の添付データはありません',
+      'どのノートからも使われていない添付はありません',
     );
     expect(calls).toEqual(['stray:c-gone:b', 'stray:c-gone:c']);
   });

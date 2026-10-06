@@ -126,7 +126,7 @@ export function resolveBase(base: string, baseURI: string = document.baseURI): U
   if (root.origin !== new URL(baseURI).origin) {
     throw new OfficePackError(
       `取得元は同一 origin でなければなりません(指定: ${root.origin})。`
-        + '別 origin は CORS で必ず失敗します ── 手元の zip を選ぶ導線を使ってください。',
+        + '別 origin は CORS で必ず失敗します。手元の zip を選ぶ導線を使ってください。',
     );
   }
   if (!root.href.endsWith('/')) return new URL(`${root.href}/`);

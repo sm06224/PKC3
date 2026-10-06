@@ -177,7 +177,7 @@ describe('フォルダの概要(#1222)', () => {
     await settle();
     expect(rowLids(root)).toHaveLength(FOLDER_OVERVIEW_LIMIT);
     expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-more"]')!.textContent).toBe(
-      'ほか 7 件は左の列で',
+      'ほか 7 件は左のペインで',
     );
     expect(overviewOf(root)!.querySelector('[data-pkc-field="overview-summary"]')!.textContent).toBe(
       `直下 ノート ${FOLDER_OVERVIEW_LIMIT + 7} 件 / フォルダ 0 件`,

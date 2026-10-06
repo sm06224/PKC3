@@ -467,7 +467,7 @@ describe('🔴 編集中に終わっても、収録を失わない(#413)', () =>
     b.live()!.end('shared-ended');
     await tick();
     expect(b.attached, '編集中に取り込もうとした(捨てられる側)').toEqual([]);
-    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/預かりました/);
+    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/まだ入れていません/);
     expect(b.service.line(), '終わったのに帯が残っている').toBeNull();
 
     // 🔴 **編集を終えると入る**(ここが本丸 ── 直す前は消えていた)
@@ -550,7 +550,7 @@ describe('🔴 ④⑤ 断る / 捨てる(#413)', () => {
     expect(b.attached, '捨てたのに添付を作った').toEqual([]);
     expect(appends(b.events), '捨てたのに本文を書いた').toEqual([]);
     expect(b.service.line(), '捨てたのに帯が残っている').toBeNull();
-    expect(b.notices.join(''), '捨てたことを言っていない').toMatch(/捨てました/);
+    expect(b.notices.join(''), 'やめたことを言っていない').toMatch(/残さずにやめました/);
   });
 });
 
@@ -689,7 +689,7 @@ describe('🔴 長い収録は分けて入れる(#771)', () => {
     b.live()!.cut(new Blob(['a']));
     await tick();
     expect(b.attached, '編集中に取り込もうとしている').toEqual([]);
-    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/預かりました/);
+    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/まだ入れていません/);
     // 🔑 編集を終えたら入る(捨てていない)
     b.d.dispatch({ type: 'CANCEL_EDIT' });
     await tick();

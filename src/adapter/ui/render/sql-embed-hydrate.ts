@@ -92,7 +92,7 @@ export function askSqlEmbed(src: string, alive: () => boolean = () => true): Pro
     const check = checkReadOnlySql(src);
     if (!check.ok) throw new Error(check.why);
     const run = runner;
-    if (run === null) throw new Error('この版では引けません(アプリを読み直すと直ることがあります)');
+    if (run === null) throw new Error('このタブの PKC3 が古いままのため、SQL を実行できません。再読み込みしてください');
     try {
       // ⚠ 打つのは**全角を直した後の字**(`check.sql`)── 元の字を渡さない
       const r = await run(check.sql, {
@@ -133,7 +133,7 @@ export class SqlEmbedHydrator {
   private readonly answers = new WeakMap<HTMLElement, SqlEmbedAnswer>();
   private readonly shown = new WeakMap<HTMLElement, number>();
   private readonly bound = new WeakSet<HTMLElement>();
-  /** 🔴 答えに「保存したときの答え」を添える器(2 列の下見。#1254 §1)。⚠ `sync` のたびに根ごと決まる。 */
+  /** 🔴 答えに「保存したときの結果」を添える器(2 列の下見。#1254 §1)。⚠ `sync` のたびに根ごと決まる。 */
   private readonly savedNote = new WeakSet<HTMLElement>();
   /** 器 → 「引いています」の 1 行を書いた世代。⚠ 手放した後も居座らせないための印。 */
   private readonly pendingLine = new WeakMap<HTMLElement, number>();
@@ -143,7 +143,7 @@ export class SqlEmbedHydrator {
    *
    * @param epoch 答えの鮮度を決める鍵。⚠ **本文そのもの**を渡す(同じ本文のうちは同じ答え、
    *   変われば引き直す)。別の本文と衝突させない。
-   * @param savedNote 🔴 答えに「保存したときの答え」を添える(2 列の下見だけが立てる。#1254 §1)。
+   * @param savedNote 🔴 答えに「保存したときの結果」を添える(2 列の下見だけが立てる。#1254 §1)。
    *   ⚠ 下見の鍵は**編集に入った時点の保存済みの本文**なので、打っている最中の SQL の答えではない。
    */
   sync(root: Element, epoch: string, savedNote = false): void {
@@ -271,7 +271,7 @@ export class SqlEmbedHydrator {
      *   並べ替えの矢印を字に混ぜない #1150 の直しもそこに在る)。
      * ⚠ **コピーされるのは、いま画面に出ている行**(`shown` ぶんだけ描いた表をそのまま読む。
      *   「さらに N 行」を押す前は 200 行まで)。**表だけを包む** ── 「さらに N 行」・注記・
-     *   「保存したときの答え」・「答えを引いています…」は器の外なので、コピーに混ざらない。
+     *   「保存したときの結果」・「答えを引いています…」は器の外なので、コピーに混ざらない。
      * ⚠ **▾(形を選ぶ口)は付けない** ── あれは本文の表を書き換える口を含み、答えの表には
      *   書き換える本文が無い。⚠ 並べ替えも付けない(上の註記)。
      * ⚠ 書き出し(`bakeSqlEmbeds`)は ⧉ を持たない(閲覧側に受け手が居ない)── 画面の器だけ。

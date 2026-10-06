@@ -76,7 +76,7 @@ export function pickErConnection(
     return { kind: 'cancel' };
   }
   if (same(pendingFrom.table, table)) {
-    return { kind: 'denied', why: '同じ表の中では繋げません' };
+    return { kind: 'denied', why: '同じ表の中ではつなげません' };
   }
   const link: SchemaLink = {
     from: pendingFrom.table,
@@ -86,15 +86,15 @@ export function pickErConnection(
   };
   const declared = model?.links ?? [];
   if ([...declared, ...mine].some((l) => sameLink(l, link))) {
-    return { kind: 'denied', why: 'その 2 つはもう繋がっています' };
+    return { kind: 'denied', why: 'その 2 つはもうつながっています' };
   }
   return { kind: 'linked', link };
 }
 
 /** 図の主語。⚠ 字は 3 つとも**ここ 1 か所**(`erSubjectOf`)。 */
 export const ER_SUBJECT_DB = 'この DB';
-export const ER_SUBJECT_FILE = 'この file';
-export const ER_SUBJECT_FILES = 'これらの file';
+export const ER_SUBJECT_FILE = 'このファイル';
+export const ER_SUBJECT_FILES = 'これらのファイル';
 
 /**
  * 🔴 **図が何を指しているかの呼び名**(D8)。
@@ -150,13 +150,14 @@ export function erZeroLinesWhy(input: {
   if (boxes === 0) return '';
   // ⚠ 相手が 1 つしかないなら「繋ぐ」を勧めてはいけない ── 同じ表の中は繋げない
   //   (`pickErConnection` が断る)ので、勧めると**押せない道**へ誘うことになる。
-  if (boxes === 1) return '表が 1 つだけなので、繋ぐ相手がいません。';
-  const next = connecting ? '' : ' 上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。';
+  if (boxes === 1) return 'ほかの表が無いのでつなげません。';
+  const next = connecting ? '' : ' 上の「列をつなぐ」を押して列を 2 つ押すと、自分でつなげます。';
   if (dropped > 0) {
-    return `繋がりはありますが、1 本も線にできませんでした(理由はこの下に出ています)。${next}`;
+    return `つながりはありますが、1 本も線にできませんでした(理由はこの下に出ています)。${next}`;
   }
   if (declared === 0 && mine === 0) {
-    return `${subject} は、表どうしの繋がり(外部キー)を 1 つも宣言していません。${next}`;
+    // ⚠ 主語が英字で終わる(「この DB」)ときだけ空白を挟む(「このファイル は」と空かない)
+    return `${subject}${/[A-Za-z]$/.test(subject) ? ' ' : ''}は、表どうしのつながり(外部キー)を 1 つも宣言していません。${next}`;
   }
   // ⚠ ここへは来ない(繋がりが在って落ちてもいないなら、線は引かれている)。
   //   ⚠ **それらしい字を返さない** ── 起きない形に文言を置くと、

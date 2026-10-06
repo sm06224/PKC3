@@ -124,7 +124,7 @@ describe('押した所から足す(#918 段⑤c)', () => {
     expect(sql('select 金額 from 売上', column('売上', '客id'))).toBe('select 金額, 客id from 売上');
   });
 
-  it('🔴 線を押すと JOIN が付く(相手の列で繋ぐ)', () => {
+  it('🔴 線を押すと JOIN が付く(相手の列でつなぐ)', () => {
     expect(sql('select * from 売上', linkAct())).toBe(
       'select * from 売上\n  join 客 on 客.id = 売上.客id',
     );
@@ -187,9 +187,9 @@ describe('🔴 足さないとき ── 必ず理由を言う(無言の dead cl
     expect(sql('   \n ', linkAct())).toBe('select * from 売上\n  join 客 on 客.id = 売上.客id');
   });
 
-  it('⚠ 空の欄でも、繋ぐ列が分からない線は断る(空振りで組まない)', () => {
+  it('⚠ 空の欄でも、つなぐ列が分からない線は断る(空振りで組まない)', () => {
     const l: SchemaLink = { from: '売上', fromColumn: '客id', to: '客', toColumn: '' };
-    expect(why('', linkAct(l))).toContain('どの列で繋ぐか');
+    expect(why('', linkAct(l))).toContain('どの列でつなぐか');
   });
 
   it('🔴 読めない字には足さない ── そして「空にすれば組める」と言う', () => {
@@ -202,20 +202,20 @@ describe('🔴 足さないとき ── 必ず理由を言う(無言の dead cl
     expect(why('select * from 売上', table('売上'))).toContain('もう入っています');
     expect(why('select 金額 from 売上', column('売上', '金額'))).toContain('もう選んでいます');
     const joined = 'select * from 売上\n  join 客 on 客.id = 売上.客id';
-    expect(why(joined, linkAct())).toContain('もう繋がっています');
+    expect(why(joined, linkAct())).toContain('もうつながっています');
   });
 
   it('⚠ 取っていない表の列を押したら、先に表か線を押すよう言う', () => {
     expect(why('select * from 売上', column('客', '名前'))).toContain('先に押してください');
   });
 
-  it('⚠ 繋ぎ先の表がどちらも入っていなければ、そう言う', () => {
+  it('⚠ つなぎ先の表がどちらも入っていなければ、そう言う', () => {
     expect(why('select * from 別表', linkAct())).toContain('先に');
   });
 
-  it('⚠ 繋ぐ列が分からない外部キーでは繋がない', () => {
+  it('⚠ つなぐ列が分からない外部キーでは繋がない', () => {
     const l: SchemaLink = { from: '売上', fromColumn: '客id', to: '客', toColumn: '' };
-    expect(why('select * from 売上', linkAct(l))).toContain('どの列で繋ぐか');
+    expect(why('select * from 売上', linkAct(l))).toContain('どの列でつなぐか');
   });
 
   it('🔴 足さなかったとき、元の字は 1 文字も変わらない', () => {

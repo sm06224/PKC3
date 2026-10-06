@@ -274,7 +274,7 @@ describe('書き出しの焼き込み(bakeSqlEmbeds)', () => {
     const d = document.createElement('div');
     d.innerHTML = out;
     const hosts = [...d.querySelectorAll<HTMLElement>(`[${SQL_EMBED_ATTR}]`)];
-    expect(hosts[0]!.textContent).toContain('答えを引けませんでした: no such column: bad');
+    expect(hosts[0]!.textContent).toContain('SQL を実行できませんでした: no such column: bad');
     expect(hosts[0]!.querySelector('table')).toBeNull();
     expect(hosts[1]!.querySelector('table')).not.toBeNull();
     expect(d.querySelectorAll('pre code.language-sql')).toHaveLength(2);

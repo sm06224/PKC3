@@ -62,7 +62,7 @@ export async function peekZipFormat(zip: Blob): Promise<string | null> {
   const dir = await readZipDirectory(zip);
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
   const hits = dir.filter((e) => e.name === MANIFEST);
@@ -87,14 +87,14 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 「manifest.json が無い = 不明」に混ぜると user は原因を誤解する
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
   const manifests = dir.filter((e) => e.name === MANIFEST);
   if (manifests.length === 0) {
     throw new ZipReadError(
-      `${MANIFEST} が無い ZIP です ── PKC2 のバックアップ(.pkc2.zip)を選んでください`,
+      `${MANIFEST} が無い ZIP です。PKC2 のバックアップ(.pkc2.zip)を選んでください`,
     );
   }
   // 重複は **断る**(PKC2 は first-wins + warning だが、どちらが正か決められない
@@ -111,13 +111,13 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   }
   if (manifest?.format !== 'pkc2-package') {
     throw new ZipReadError(
-      `この段では pkc2-package のみ扱えます(format=${String(manifest?.format)})`,
+      `この取り込みは pkc2-package だけを扱います(format=${String(manifest?.format)})`,
     );
   }
   // 未知の版は**明示 reject** ── 「読めるところだけ読む」は静かな欠損を作る
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の package version です(version=${String(manifest.version)} ── 対応は 1)`,
+      `PKC3 が読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 
@@ -157,11 +157,11 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
     // `..` / 絶対パス / null バイト等は PKC3 では FS に書かないので traversal 自体は
     // 無害だが、key としては不正 ── PKC2 も `INVALID_ASSET_KEY` で弾いていた
     if (!VALID_KEY.test(key)) {
-      warnings.push(`asset key として不正な名前を無視しました: ${e.name}`);
+      warnings.push(`添付の ID として不正な名前を無視しました: ${e.name}`);
       continue;
     }
     if (assetSources.has(key)) {
-      throw new ZipReadError(`asset key が重複しています: ${key}(この ZIP は読み取れません)`);
+      throw new ZipReadError(`添付の ID が重複しています: ${key}(この ZIP は読み取れません)`);
     }
     assetSources.set(key, { zip, entry: e });
   }

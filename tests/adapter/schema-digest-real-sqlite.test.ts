@@ -52,7 +52,7 @@ beforeAll(async () => {
     sql: 'create table 子(id integer primary key, 親id integer references 親(id), 数 int)',
   });
   db.exec({ sql: 'create view 見え as select 名前 from 親' });
-  db.exec({ sql: "insert into 親(id, 名前) values (1, 'あ'), (2, 'い')" });
+  db.exec({ sql: "insert into 親(id, 名前) values (1, 'ゐ'), (2, 'ゑ')" });
 });
 
 describe('組む 3 本が、本物の sqlite で通る(#918 段①)', () => {
@@ -149,7 +149,7 @@ describe('組む 3 本が、本物の sqlite で通る(#918 段①)', () => {
     expect(out, '繋がりが出ていない').toContain('- 子.親id → 親.id');
     expect(out, '中身を出していないと言っていない').toContain('中身は 1 行も含まれていません');
     // 🔴 **中身は 1 文字も出ない**(入れた値そのもので見る)
-    expect(out, '中身が混ざっている').not.toContain('あ');
+    expect(out, '中身が混ざっている').not.toContain('ゐ');
   });
 });
 

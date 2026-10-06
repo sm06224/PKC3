@@ -14,20 +14,21 @@
  *   走らせると中身が表に出る」。
  *
  * 動線②:「線が 0 本のとき、理由(外部キーを宣言していない)と次の一手
- *   (「繋ぐ」を押して列を 2 つ)が出る → 『繋ぐ』を入にすると、理由は残ったまま
+ *   (「列をつなぐ」を押して列を 2 つ)が出る → 「列をつなぐ」を押して入にすると、理由は残ったまま
  *   次の一手の誘いだけ消える(すぐ下の案内が代わりに言うので、二重に言わない)」。
  *
  * ⚠ **新しい起動は増やさない**(#820 の規律)── ②は①が開いたままの
  *   同じ SQL の面・同じ図の道中で確かめる(`gotoApp` を 2 度呼ばない)。
  */
 import { test, expect } from '@playwright/test';
+import { SQL_EMBED_SAVED_TEXT } from '../../src/features/markdown/sql-embed';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
-test('🔴 本文の名前つき csv が図の四角として出て引ける。線 0 本の理由も出て、繋ぐと誘いだけ消える (#918 段⑤d-2/d-3)', async ({
+test('🔴 本文の名前つき csv が図の四角として出て引ける。線 0 本の理由も出て、つなぐと誘いだけ消える (#918 段⑤d-2/d-3)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -188,19 +189,19 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   ).toHaveCount(0);
 
   /**
-   * 🔴 **答えを引き終えた後は「引いています」が残らず、読む面に「保存したときの答え」は出ない**
+   * 🔴 **答えを引き終えた後は「引いています」が残らず、読む面に「保存したときの結果」は出ない**
    * (#1254 §1)。⚠ 引いている最中の 1 行は一瞬で消えるので実ブラウザでは**消えたこと**を見る
    * (在るときの検査は unit の `sql-embed-hydrate.test.ts`)。
-   * 🔴 そして**編集に入り直すと、2 列の下見の答えの下にだけ「保存したときの答え」が出る**
+   * 🔴 そして**編集に入り直すと、2 列の下見の答えの下にだけ「保存したときの結果」が出る**
    * (小さく・薄い字で、表の下)。⚠ 新しい起動は足さない ── この道中で編集に入り直す。
    */
   await expect(embedHost.locator('[data-pkc-field="sql-embed-saved"]'), '読む面に添え書きが出た').toHaveCount(0);
-  await expect(embedHost, '引き終えたのに「引いています」が残っている').not.toContainText('引いています');
+  await expect(embedHost, '引き終えたのに「引いています」が残っている').not.toContainText('実行しています');
   await clickReal(page, '[data-pkc-action="start-edit"]');
   const previewHost = page.locator('[data-pkc-region="editor-preview"] [data-pkc-sql-embed]');
   await expect(previewHost.locator('tbody tr'), '下見に答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
   const savedNote = previewHost.locator('[data-pkc-field="sql-embed-saved"]');
-  await expect(savedNote, '下見の答えに「保存したときの答え」が無い').toHaveText('保存したときの答え');
+  await expect(savedNote, '下見の答えに「保存したときの結果」が無い').toHaveText(SQL_EMBED_SAVED_TEXT);
   const savedLook = await savedNote.evaluate((el) => {
     const probe = document.createElement('div');
     probe.style.color = 'var(--muted)';
@@ -278,7 +279,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    *   1 本も宣言していない(`src` を全数 grep して 0 件)ので、
    *   `declared === 0 && mine === 0` の場合分けに落ちるはず。
    * ⚠ 対照群として「箱は 2 つ以上ある」ことを先に見る ── 1 つしか無い回は
-   *   別の文言(「繋ぐ相手がいません」)になるので、ここで前提を検算する。
+   *   別の文言(「ほかの表が無いのでつなげません」)になるので、ここで前提を検算する。
    */
   await expect
     .poll(async () => erBox.count(), {
@@ -288,34 +289,34 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
     .toBeGreaterThanOrEqual(2);
   const zero = page.locator('[data-pkc-field="sql-er-zero"]');
   await expect(zero, '線 0 本の理由が出ない').toContainText(
-    'この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。',
+    'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
-  await expect(zero, '次の一手(「繋ぐ」への誘い)が出ていない').toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
+  await expect(zero, '次の一手(「つなぐ」への誘い)が出ていない').toContainText(
+    '上の「列をつなぐ」を押して列を 2 つ押すと、自分でつなげます。',
   );
 
   // ── 「繋ぐ」を入にする → 理由は残ったまま、誘いだけ消える(二重に言わない)
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   const connectBtn = page.locator('[data-pkc-field="sql-er-connect"]');
-  await expect(connectBtn, '「繋ぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
+  await expect(connectBtn, '「つなぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
 
-  await expect(zero, '繋ぐを入にしたら、理由まで消えた').toContainText(
-    'この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。',
+  await expect(zero, 'つなぐを入にしたら、理由まで消えた').toContainText(
+    'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
-  await expect(zero, '繋ぐを入にしたのに、次の一手の誘いが残っている(二重に言っている)').not.toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと',
+  await expect(zero, 'つなぐを入にしたのに、次の一手の誘いが残っている(二重に言っている)').not.toContainText(
+    '上の「列をつなぐ」を押して列を 2 つ押すと',
   );
   // 🔑 代わりに、すぐ下の案内がその役目を引き継ぐ
   const hint = page.locator('[data-pkc-field="sql-er-connect-hint"]');
   await expect(hint, 'すぐ下の案内が代わりに言っていない').toContainText(
-    '繋ぎたい列を 2 つ押してください',
+    'つなぎたい列を 2 つ押してください',
   );
 
   // ⚠ 対照群 ── 「繋ぐ」を切に戻すと、誘いが元へ戻る(退行が無いこと)
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
-  await expect(connectBtn, '「繋ぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
+  await expect(connectBtn, '「つなぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
   await expect(zero, '切に戻したのに誘いが戻らない').toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
+    '上の「列をつなぐ」を押して列を 2 つ押すと、自分でつなげます。',
   );
 
   /**

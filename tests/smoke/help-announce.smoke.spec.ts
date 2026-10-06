@@ -36,7 +36,7 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   await expect(ver).toBeVisible();
   // ⚠ **名前が付いた**(着地前レビュー・動線 7)── 「マニュアル」の見出しの下に
   //    裸の版番号を置くと**マニュアルの版**と読める。何のための数字かも書く。
-  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^この版: pkc3 v\d/);
+  expect((await ver.textContent()) ?? '', '版が出ていない').toMatch(/^このバージョン: pkc3 v\d/);
   expect((await ver.textContent()) ?? '', '版を見る理由が書かれていない').toContain('不具合の報告');
 
   /**

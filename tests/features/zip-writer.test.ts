@@ -177,6 +177,6 @@ describe('ZipWriter — reader の検査に本当に噛み合うか', () => {
     buf[35] = buf[35]! ^ 0xff;
     const broken = new Blob([buf]);
     const [e] = await readZipDirectory(broken);
-    await expect(readZipEntry(broken, e!)).rejects.toThrow(/CRC|壊れています/);
+    await expect(readZipEntry(broken, e!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
   });
 });

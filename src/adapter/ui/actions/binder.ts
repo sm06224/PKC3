@@ -469,7 +469,7 @@ async function browseArchive(
   const say = (text: string): void => services.showStatus?.(text);
   const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   if (services.readAssetBlob === undefined) {
-    say('この版では書庫の中を見られません');
+    say('このタブの PKC3 が古いままのため、zip ファイルの中を見られません。再読み込みしてください');
     return;
   }
   /**
@@ -487,7 +487,7 @@ async function browseArchive(
    *   「窓が見つからない」なので、**選び直しにさせない**。
    */
   if (win !== null && win.reused) {
-    say(`「${name}」の一覧は別の窓に出ています`);
+    say(`「${name}」の一覧は別のウィンドウに出ています`);
     return;
   }
   const blob = await services.readAssetBlob(assetKey).catch(() => null);
@@ -502,7 +502,7 @@ async function browseArchive(
   try {
     entries = await readZipDirectory(blob);
   } catch (e) {
-    const why1 = `「${name}」の中を開けません ── ${why(e)}`;
+    const why1 = `「${name}」の中を開けません: ${why(e)}`;
     win?.fail(why1);
     say(why1);
     return;
@@ -526,8 +526,8 @@ async function browseArchive(
    */
   if (wantWindow && win === null) {
     say(
-      '別の窓が開けなかったので、この画面で開きます' +
-        '(いつもこの画面でよければ、システムの「開く場所」で選べます)',
+      '別のウィンドウが開けなかったので、この画面で開きます' +
+        '(いつもこの画面でよければ、システムの「zip ファイルを開く場所」で選べます)',
     );
   }
   const marks =
@@ -548,8 +548,8 @@ async function browseArchive(
     }
   }
   if (out.length > 0) services.attachFiles?.(out, `「${name}」から取り出しました`, undefined, intoLid);
-  const tail = bad.length === 0 ? '' : ` ⚠ ${bad.length} 件は取り出せません ── ${bad.join(' / ')}`;
-  say(out.length === 0 ? `取り出せませんでした ── ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
+  const tail = bad.length === 0 ? '' : ` ${bad.length} 件は取り出せません: ${bad.join(' / ')}`;
+  say(out.length === 0 ? `取り出せませんでした: ${bad.join(' / ')}` : `${out.length} 件を添付にしました${tail}`);
 }
 import { cleanForClipboard } from '@features/export/clipboard-html';
 import {
@@ -761,7 +761,7 @@ const dualSide = (target: HTMLElement): DualSide | null => {
  *
  * ⚠ 直す前は**同じ式が 6 か所**に書き写されていた(写す / 移す / ゴミ箱 / 落とす /
  *   鍵の行送り / 描く側)。ペインごとの絞り込みを足したとき、**1 か所でも
- *   書き替え忘れると、そこだけ別の並びで数える** ── 症状は「目で見た範囲と
+ *   書き換え忘れると、そこだけ別の並びで数える** ── 症状は「目で見た範囲と
  *   選ばれる範囲が違う」という、いちばん気づけない形になる(CLAUDE.md §7)。
  * 🔑 絞り込みの規則そのものは `paneFilterOptions`(features 層)が持つ ──
  *   reducer も描く側も**同じ関数**を通る。
@@ -1664,7 +1664,7 @@ export interface BinderServices {
    */
   writeBackFile?(lid: string): void;
   /**
-   * 🔴 **結びついている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
+   * 🔴 **つながっている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
    * `null` = 読めなかった / `{ tooLarge: true }` = 大きすぎて読まなかった(どちらも**「同じ」と言わない**。言う字は分ける)。
    * ⚠ 読むだけ ── 書かない。
    * ⚠ 呼んでよいのは**相手に選んだ瞬間**だけ(一覧では呼ばない = #1271)。
@@ -2256,7 +2256,7 @@ function refuseWhileBusy(
   // ⚠ **可視に断る**(無言の操作拒否を作らない)
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: '書き出し / 取込が実行中です。完了してから操作してください',
+    error: '書き出し / 取り込みが実行中です。完了してから操作してください',
   });
   return true;
 }
@@ -2268,7 +2268,7 @@ function refuseWhileBusy(
 function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'この版では録音・画面収録ができません',
+    error: 'このタブの PKC3 が古いままのため、録音・画面収録ができません。再読み込みしてください',
   });
 }
 
@@ -2276,7 +2276,7 @@ function refuseNoCapture(dispatcher: Dispatcher): void {
 function refuseNoTimer(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'この版では作業時間を計れません',
+    error: 'このタブの PKC3 が古いままのため、作業時間を計れません。再読み込みしてください',
   });
 }
 
@@ -2380,7 +2380,7 @@ function navigateToLink(
   if (t.foreign) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'このリンクは別の PKC のノートを指しています',
+      error: 'このリンクは別の PKC3 のノートを指しています',
     });
     return;
   }
@@ -2716,7 +2716,7 @@ function acquireEditLockOrExplain(
         error:
           grant === 'denied'
             ? EDIT_ELSEWHERE_ERROR
-            : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
+            : '最初に開いた PKC3 のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
     }
@@ -3520,7 +3520,7 @@ function copySourceLines(
   done: string,
 ): void {
   if (services.copyText === undefined) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
@@ -3676,7 +3676,7 @@ function targetNow(sel: HTMLSelectElement): string {
 
 /** 追記欄をこちらが開いた回に添える一言(#655 ①)── 畳み直すことまで言う。 */
 function openedNote(opened: boolean): string {
-  return opened ? '(追記欄を開きました ── 送ると元どおり畳みます)' : '';
+  return opened ? '(追記欄を開きました、送ると元どおり折りたたみます)' : '';
 }
 
 /**
@@ -4201,7 +4201,7 @@ export function runGlobalCommand(
     if (appPhone.isPhone()) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、列は畳めません',
+        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、ペインは折りたためません',
       });
       prevent();
       return true;
@@ -4320,7 +4320,7 @@ export function runGlobalCommand(
     if (why !== null) {
       if (dry) return false;
       prevent();
-      notify(`いまはメッセージを開けません ── ${why}`, CAUTION);
+      notify(`いまはメッセージを開けません: ${why}`, CAUTION);
       return true;
     }
     if (dry) return true;
@@ -4703,7 +4703,7 @@ export function runCommandRow(
           note: entryPickNote(items.length, entryPickTotal(now.entryMetas, now.order, query, null)),
         };
       },
-      { title: `${cmd.label}(相手のノートを選びます)` },
+      { title: `${cmd.label}(つなぐ先のノートを選びます)` },
     ).then((lid) => {
       if (lid === null) return;
       exec(lid, env);
@@ -4861,7 +4861,7 @@ async function tocJump(
           dispatcher.getState().phase !== 'ready'
             ? JUMP_REFUSED_WHILE_EDITING
             : (notFound ??
-              'その見出しが本文にまだ出ていません(描き直しの途中かもしれません ── もう一度押してください)'),
+              'その見出しが本文にまだ出ていません(描き直しの途中かもしれません、もう一度押してください)'),
       });
       return;
     }
@@ -5318,7 +5318,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const trim = dispatcher.getState().captureTrim;
     if (trim === null || trim.startMs === null || trim.endMs === null) return;
     if (!services.trimCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では切り出せません。' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、切り出せません。再読み込みしてください' });
       return;
     }
     services.trimCapture(trim.lid, trim.startMs, trim.endMs);
@@ -5332,7 +5332,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     if (!services.transcribeCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では文字にできません。' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、文字にできません。再読み込みしてください' });
       return;
     }
     services.transcribeCapture(lid);
@@ -5454,7 +5454,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (appPhone.isPhone() && (COLUMN_PANES as readonly string[]).includes(id)) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、列は畳めません',
+        error: 'スマホの画面では一覧・本文・情報を 1 枚ずつ出しているので、ペインは折りたためません',
       });
       return;
     }
@@ -5540,7 +5540,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const phase = dispatcher.getState().phase;
     if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを足してください` });
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -5551,7 +5551,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const fromLid = state.selectedLid;
     if (fromLid === null) return;
     if (name === '') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '相手の題名を入れてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'つなぐ先の題名を入れてください' });
       return;
     }
     const hits = [...state.entryMetas.values()].filter(
@@ -5588,7 +5588,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
     const phase = dispatcher.getState().phase;
     if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を消してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを消してください` });
       return;
     }
     const id = target.getAttribute('data-pkc-relation');
@@ -5736,10 +5736,10 @@ const ACTIONS: Record<string, ActionHandler> = {
             ? [
                 {
                   action: 'toggle-pane',
-                  label: appPanes.getHidden().includes('append') ? '追記欄を戻す' : '追記欄を畳む',
+                  label: appPanes.getHidden().includes('append') ? '追記欄を戻す' : '追記欄を折りたたむ',
                   hint: appPanes.getHidden().includes('append')
                     ? '本文の下に追記欄を出します'
-                    : '本文の下の追記欄を畳んで、本文を広く読みます(もう一度で戻ります)',
+                    : '本文の下の追記欄を折りたたんで、本文を広く読みます(もう一度で戻ります)',
                   attrs: { 'data-pkc-pane': 'append' },
                 },
               ]
@@ -5809,7 +5809,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         services.showStatus?.(
           ok
             ? `「${copyLabel(item.text, 24)}」をコピーしました(そのまま貼れます)`
-            : 'コピーできませんでした(ブラウザが断りました)',
+            : 'コピーできませんでした(ブラウザに拒否されました)',
           ok ? undefined : CAUTION,
         );
       });
@@ -5994,7 +5994,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const rawLine = tableLineAt(target, body);
     if (rawLine === null) {
-      services.showStatus?.('このコードの枠が見つかりません(本文を開き直してください)', CAUTION);
+      services.showStatus?.('このコードブロックが見つかりません(本文を開き直してください)', CAUTION);
       return;
     }
     startCodeEditAt(dispatcher, services, root, rawLine - frontmatterLineCount(body));
@@ -6617,7 +6617,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     const to = otherSide(side);
@@ -7265,7 +7265,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       noun +
         'の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
-        'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
+        'このタブの表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
       { okLabel: '書き込みを打ち切る', danger: true },
       dispatcher,
       /**
@@ -7312,7 +7312,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         });
         // ⚠ 上で固定文を積んだので、こちらは積まない(`what` に題名が入るので、積むと中身が漏れる)
         services.showStatus?.(
-          `${noun}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります ── 開き直すと直ります`,
+          `${noun}の書き込みを打ち切りました(${what})。表示が実際の中身より古いことがあります。開き直すと直ります`,
           { post: false },
         );
         dispatcher.dispatch({ type: 'FORCE_RELEASE_LOCK', discardDraft: false });
@@ -8238,7 +8238,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     /**
@@ -8388,12 +8388,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (heading.id === '') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'この見出しには参照できる目印が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
+        error: 'この見出しには参照できる ID が無いので、章の参照を作れません(# 〜 ### の見出しで使えます)',
       });
       return;
     }
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版ではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
@@ -8424,13 +8424,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const fmBody = ob === null ? null : bodyBelowFrontmatter(ob.body);
     const span = fmBody === null ? null : blockSpanAt(fmBody, line);
     if (fmBody === null || span === null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '塊の範囲を読めませんでした(本文を開き直してください)' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ブロックの範囲を読めませんでした(本文を開き直してください)' });
       return;
     }
     if (span.open) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'この塊は閉じていないのでコピーできません(閉じの ::: を足してください)',
+        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を足してください)',
       });
       return;
     }
@@ -8440,7 +8440,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       services,
       fmBody,
       span,
-      board ? '板をコピーしました(Markdown の原文)' : '塊をコピーしました(Markdown の原文)',
+      board ? '板をコピーしました(Markdown の原文)' : 'ブロックをコピーしました(Markdown の原文)',
     );
   },
   /**
@@ -9040,7 +9040,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `設定を ${String(wrote)} 件入れました(画面に出るのは読み直してからです)`,
+      error: `設定を ${String(wrote)} 件入れました(画面に出るのは再読み込みしてからです)`,
     });
   },
   'apply-plan': (dispatcher, _target, services, root) => {
@@ -9048,7 +9048,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (ta === null) return;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}当ててください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}適用してください` });
       return;
     }
     const plan = parsePlan(ta.value, st.entryMetas);
@@ -9086,7 +9086,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔑 当てたら欄を空にする ── 残すと「もう一度押せる」ように見える(二重適用)
     ta.value = '';
     paintPlan(root, dispatcher, '');
-    services.showStatus?.(`整理案を当てました(${plan.ops.length} 件)`);
+    services.showStatus?.(`整理案を適用しました(${plan.ops.length} 件)`);
   },
   /**
    * 🔴 **何が容量を食っているか**(#415)。
@@ -9324,7 +9324,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
-          { okLabel: '保存領域を作り直す', cancelLabel: 'やめる' },
+          { okLabel: 'ノートの保存データを作り直す', cancelLabel: 'やめる' },
         ),
       )
       .then(async (answer) => {
@@ -9416,7 +9416,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (sum === null) return;
     const reset = services.resetContainer;
     if (reset === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では捨てられません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では初期化できません' });
       return;
     }
     const cid = dispatcher.getState().cid;
@@ -9454,8 +9454,8 @@ const ACTIONS: Record<string, ActionHandler> = {
              * ⚠ ここで「約 93MB」と綴ると、一式を焼き直した日に**両方そのまま**で緑になる。
              */
             keeps: [
-              `Office の部品(${OFFICE_PACK_APPROX})`,
-              `DuckDB の部品(${DUCKDB_PACK_APPROX})`,
+              `Office の一式(${OFFICE_PACK_APPROX})`,
+              `DuckDB の一式(${DUCKDB_PACK_APPROX})`,
               '設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
             ],
             rescued: rescued === null ? null : rescued.stats,
@@ -9475,7 +9475,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: '保存領域を初期化する',
+          okLabel: 'ノートの保存データを初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });
@@ -9488,7 +9488,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           });
           return;
         }
-        sum.textContent = '保存領域を消しています…';
+        sum.textContent = 'ノートの保存データを消しています…';
         sum.hidden = false;
         try {
           const report = await reset(cid);
@@ -9510,7 +9510,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         } catch (e) {
           sum.textContent = '';
           sum.hidden = true;
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${String(e)}` });
         }
       });
   },
@@ -9708,11 +9708,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       services,
       key,
-      target.getAttribute('data-pkc-asset-name') ?? '書庫',
+      target.getAttribute('data-pkc-asset-name') ?? 'zip ファイル',
       // 🔴 **押した瞬間の選択**を控える(別の窓で選んでいる間に動きうる)
       dispatcher.getState().selectedLid,
       // ⚠ 組めずに投げた回も**黙って終わらせない**(押して無反応にしない)
-    ).catch(() => services.showStatus?.('書庫の一覧を組めませんでした', CAUTION));
+    ).catch(() => services.showStatus?.('zip ファイルの一覧を作れませんでした', CAUTION));
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
@@ -9934,7 +9934,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (services.openManualWindow === undefined) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'この版ではマニュアルのウィンドウを開けません',
+        error: 'このタブの PKC3 が古いままのため、マニュアルのウィンドウを開けません。再読み込みしてください',
       });
       return;
     }
@@ -10196,7 +10196,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では書き出せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
       return;
     }
     void read([lid]).then((bodies) => {
@@ -11134,7 +11134,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const send = services.deliverToExtension;
     const read = services.readBodies;
     if (!send || !read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この版では送れません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、送れません。再読み込みしてください' });
       return;
     }
     const st = dispatcher.getState();
@@ -14148,7 +14148,7 @@ export function bindActions(
     if (st.entrySort !== 'manual') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '並べ替えは「手動の順」で並べているときだけ効きます(上の並び順を戻してください)',
+        error: '並べ替えは「自分で並べた順」で並べているときだけ効きます(上の並び順を戻してください)',
       });
       return;
     }
@@ -14158,7 +14158,7 @@ export function bindActions(
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '並べ替えられるのは同じフォルダの中の行だけです(別のフォルダへ動かすなら、フォルダの行の真ん中へ落としてください)',
+          '並べ替えられるのは同じフォルダの中の行だけです(別のフォルダへ動かすなら、フォルダの行の真ん中へドロップしてください)',
       });
       return;
     }

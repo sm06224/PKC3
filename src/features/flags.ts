@@ -168,7 +168,7 @@ export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
  */
 export const FLAG_EMBED = defineFlag('transport.embed', {
   default: false,
-  foldWhen: '埋め込みの相手(Bookmarklet / 拡張)が出荷され、許可の管理がシステムに載ったら',
+  foldWhen: '埋め込み元(Bookmarklet / 拡張)が提供され、許可の管理がシステムに載ったら',
   summary: 'PKC3 を他のページに埋め込んだとき、埋め込み先のページからの依頼を受ける(既定は受けません)',
   needsRestart: true,
 });
@@ -187,7 +187,7 @@ export const FLAG_EMBED = defineFlag('transport.embed', {
  */
 export const FLAG_CAPTURE = defineFlag('transport.capture', {
   default: false,
-  foldWhen: 'ブックマークの登録がヘルプから 1 手でできるようになり、実機で誤爆が無いと分かったら',
+  foldWhen: 'ブックマークの登録がヘルプから 1 手でできるようになり、実機で誤って押す事故が無いと分かったら',
   summary: 'ブックマークレットで、いま見ているページを 1 件取り込めるようにする(既定は取り込みません)',
   needsRestart: true,
 });
@@ -230,7 +230,7 @@ export const FLAG_CAPTURE = defineFlag('transport.capture', {
 export const FLAG_OFFICE_INPUT_LOG = defineFlag('office.inputLog', {
   default: false,
   foldWhen:
-    '#433 の原因が確定し、直しが配られたら(= どの経路が受理を返していないか分かったら)',
+    'Office のキー入力の原因が確定し、直しが提供されたら(= どの経路が受理を返していないか分かったら)',
   summary: 'Office のウィンドウで、キー入力がどの経路を通ったかをブラウザの開発者ツール(コンソール)に出す(打った字は出しません)',
   needsRestart: true,
 });
@@ -238,7 +238,7 @@ export const FLAG_OFFICE_INPUT_LOG = defineFlag('office.inputLog', {
 export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
   default: false,
   foldWhen:
-    '貼付の取り違えの報告が止まったら(= 自動の判定で困らなくなり、設定の 4 択も使われなくなったら)',
+    '貼り付けの取り違えの報告が止まったら(= 自動の判定で困らなくなり、設定の 4 択も使われなくなったら)',
   summary: '貼り付けたとき、何が届いてどれを使ったかを画面に出す(中身は出さない)',
 });
 

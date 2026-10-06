@@ -86,10 +86,10 @@ describe('integrityPlan / checkIntegrity({ table }) / integrityStamp', () => {
   });
 
   it('🔴 無い表を名指ししたら落とす(黙って丸ごとへ倒さない)', async () => {
-    await expect(request({ op: 'checkIntegrity', table: 'nosuch' })).rejects.toThrow('検める表が無い');
+    await expect(request({ op: 'checkIntegrity', table: 'nosuch' })).rejects.toThrow('確認する表が無い');
     // ⚠ 引用符を混ぜても SQL として通らない(名前として突き合わせて落ちる)
     await expect(request({ op: 'checkIntegrity', table: 'entries") OR 1=1 --' })).rejects.toThrow(
-      '検める表が無い',
+      '確認する表が無い',
     );
   });
 
@@ -108,7 +108,7 @@ describe('integrityPlan / checkIntegrity({ table }) / integrityStamp', () => {
   });
 });
 
-describe('駆動部を本物の worker に繋ぐ', () => {
+describe('駆動部を本物の worker につなぐ', () => {
   it('🔴 印が古ければ ok(印が更新される)→ すぐ 2 回目は skipped', async () => {
     await request({ op: 'integrityStamp', at: '2020-01-01T00:00:00.000Z' });
     const now = Date.parse('2026-09-20T04:00:00Z');

@@ -157,7 +157,7 @@ describe('書庫をどこで開くか', () => {
     expect(
       h.status.join(' / '),
       '落ちた理由を言っていない(user は「壊れた」と読む)',
-    ).toContain('別の窓が開けなかった');
+    ).toContain('別のウィンドウが開けなかった');
   });
 
   it('「この画面」を選んだ人には、窓を掴もうとしない', async () => {
@@ -167,7 +167,7 @@ describe('書庫をどこで開くか', () => {
     expect(h.grabbed, '選んだ結果なのに窓を掴んだ').toEqual([]);
     expect(dialogOpen()).toBe(true);
     // ⚠ 選んだ人に「開けませんでした」と言わない(混ぜない)
-    expect(h.status.join(' / ')).not.toContain('別の窓が開けなかった');
+    expect(h.status.join(' / ')).not.toContain('別のウィンドウが開けなかった');
   });
 
   /** ⚠ 渡らない版(古い外殻)では、今までどおりその場の器で開く。 */
@@ -241,7 +241,7 @@ describe('書庫をどこで開くか', () => {
     const h = setup({ grab: 'ok', reused: true });
     await press(h.root);
     expect(h.picked, '組み直している(印が消える)').toBe(0);
-    expect(h.status.join(' / ')).toContain('別の窓に出ています');
+    expect(h.status.join(' / ')).toContain('別のウィンドウに出ています');
   });
 
   /**
@@ -255,7 +255,7 @@ describe('書庫をどこで開くか', () => {
     expect(h.grabbed, '電話なのに別の窓を掴んだ').toEqual([]);
     expect(dialogOpen()).toBe(true);
     // ⚠ 電話の人に「開けませんでした」と言わない(選んだ結果でも塞がれた結果でもない)
-    expect(h.status.join(' / ')).not.toContain('別の窓が開けなかった');
+    expect(h.status.join(' / ')).not.toContain('別のウィンドウが開けなかった');
   });
 
   /** ⚠ 塞がれた回の断り文は、**戻し方**まで書く(押すたび読む人が居る)。 */

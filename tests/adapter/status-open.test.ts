@@ -105,7 +105,7 @@ describe('知らせの隣の「開く」(#668 A)', () => {
  * ⑤ ⚠ 材料が**別のノート**を指していたら出ない(押すと画面に無い物が戻る)
  */
 describe('知らせの隣の「元に戻す」── 開いていないノートの行(#684 ㋑)', () => {
-  const PUT = '「猫.png」を『さきの予定』の落とした所に入れました';
+  const PUT = '「猫.png」を『さきの予定』のドロップした所に入れました';
   const undoBtn = (): HTMLElement => {
     const b = document.createElement('button');
     b.hidden = true;
@@ -125,7 +125,7 @@ describe('知らせの隣の「元に戻す」── 開いていないノート
 
   it('🔴 ③ 塊を動かした知らせでは、これまでどおり undo-move が勝つ', () => {
     const b = undoBtn();
-    const MOVED = '本文の塊を動かしました';
+    const MOVED = '本文のブロックを動かしました';
     // ⚠ 材料が両方在る形で見る(片方しか無い台では、どちらが勝つかを見ていない)
     paintStatusUndo(b, { lastMove: {}, notice: MOVED, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, MOVED);
     expect(b.hidden).toBe(false);
@@ -227,7 +227,7 @@ describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
 });
 
 /**
- * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
+ * 🔴 **保存が止まった断り書きの隣の「ノートの保存データの確認を開く」**(#1010 B)。
  *
  * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うのに、
  * **押しても設定へ飛ばなかった**。守るのは:
@@ -237,7 +237,7 @@ describe('知らせの隣の「○○のノートを作る」(#1169)', () => {
  *
  * ⚠ ②の「出す条件」は `main.ts` から届かないので判断はここ(`status-open.ts`)に在る。
  */
-describe('保存が止まった断り書きの隣の「保存領域の点検を開く」(#1010 B)', () => {
+describe('保存が止まった断り書きの隣の「ノートの保存データの確認を開く」(#1010 B)', () => {
   afterEach(() => {
     document.body.textContent = '';
   });
@@ -248,7 +248,7 @@ describe('保存が止まった断り書きの隣の「保存領域の点検を�
     const regions = buildShell(root);
     const b = regions.statusRescue;
     expect(b.getAttribute('data-pkc-action'), '受け手の無い口').toBe('open-storage-check');
-    expect(b.textContent).toBe('保存領域の点検を開く');
+    expect(b.textContent).toBe('ノートの保存データの確認を開く');
     expect(b.hidden, '断り書きが無いのに出ている').toBe(true);
     expect(regions.status.contains(b), '状態の行の外に居る').toBe(true);
   });

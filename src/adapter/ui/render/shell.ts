@@ -685,7 +685,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   createBlockedNote.hidden = true;
   createBar.append(createBlockedNote);
 
-  /** ノート全体に対する操作(取り込む / 書き出す / 片づける)。 */
+  /** コレクションに対する操作(取り込む / 書き出す / 片づける)。 */
   const collectionBar = document.createElement('div');
   collectionBar.setAttribute('data-pkc-region', 'collection-bar');
   /**
@@ -793,10 +793,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('data-pkc-action', 'toggle-pane');
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
-    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列を畳む / 戻す`);
+    btn.setAttribute('aria-label', `${PANE_LABELS[id]}のペインを折りたたむ / 戻す`);
     // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
     //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
-    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
+    btn.title = `${PANE_LABELS[id]}のペインを折りたたむ・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
     grips[id] = btn;
   }
   /**
@@ -879,8 +879,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('data-pkc-action', 'toggle-pane');
   appendGrip.setAttribute('data-pkc-pane', 'append');
   appendGrip.setAttribute('aria-pressed', 'true');
-  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を畳む / 戻す`);
-  appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
+  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を折りたたむ / 戻す`);
+  appendGrip.title = `${PANE_LABELS.append}を折りたたむ・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
   /**
    * 🔴 **スマホ用画面の「ページの帯」**(#632 段①)。
    *
@@ -909,7 +909,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneInfo.setAttribute('data-pkc-field', 'phone-info');
   phoneInfo.setAttribute('data-pkc-page', 'info');
   phoneInfo.textContent = '情報';
-  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノートへ戻る で戻ります)';
+  phoneInfo.title = 'タグ・目次・つながり・書き出す(← ノートへ戻る で戻ります)';
   /**
    * 🔴 **左の列にしか無い操作への入口**(設計 doc §2-7)。⚠ スマホでは
    *   一覧が見えていないので、**右クリックの項目も「操作を探す」もここからしか届かない**
@@ -960,7 +960,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /**
    * 🔴 **字は子の `<span>` に書く**(#671 の裁定 3)。
    *
-   * ⚠ 直す前は `status.textContent = …` で**器ごと書き替えて**いたので、
+   * ⚠ 直す前は `status.textContent = …` で**器ごと書き換えて**いたので、
    *   ここに押しボタンを置くと**次の知らせで消える**。裁定 3 は
    *   「**OK 押したら**消える」= 押せる物を要求するので、字と押し物を分ける。
    * 🔑 読み側は変わらない ── `textContent` も `toContainText` も**子孫を含む**。
@@ -1015,7 +1015,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /**
    * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
    *
-   * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うが、
+   * 断り書きは「システム → 保存領域 →「ノートの保存データの確認」を開き…」と道順を言うが、
    * **押しても設定へ飛ばなかった**(読んで、自分で開いて、探す必要があった)。
    * ⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて要るときだけ出す(`status-open.ts` が
    *   `hidden` を書く)。実行の口は `open-storage-check` の受け手 1 つ(`binder.ts`)。
@@ -1024,7 +1024,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.type = 'button';
   statusRescue.setAttribute('data-pkc-field', 'status-rescue');
   statusRescue.setAttribute('data-pkc-action', 'open-storage-check');
-  statusRescue.textContent = '保存領域の点検を開く';
+  statusRescue.textContent = 'ノートの保存データの確認を開く';
   statusRescue.hidden = true;
   /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。

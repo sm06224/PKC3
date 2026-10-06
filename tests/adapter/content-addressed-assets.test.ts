@@ -295,7 +295,7 @@ describe('生成物の寿命', () => {
     expect(a.base64).toBe('');
   });
 
-  it('[M-5] 取込は bytes から直接ハッシュを取る(Blob 経由でコピーを増やさない)', async () => {
+  it('[M-5] 取り込みは bytes から直接ハッシュを取る(Blob 経由でコピーを増やさない)', async () => {
     const bytes = new TextEncoder().encode('中身');
     const viaBytes = await identifyBytes(bytes as Uint8Array<ArrayBuffer>);
     const viaBlob = await identifyAsset(new Blob([bytes]));

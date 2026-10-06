@@ -399,7 +399,7 @@ describe('本物の添付を通したときの預かり(#250 → #668 B)', () =>
     const pdf = new File([new Uint8Array([1])], 'a.pdf', { type: 'application/pdf' });
     ta.dispatchEvent(dragEvent('drop', [pdf]));
     await vi.waitFor(() =>
-      expect(dispatcher.getState().notice, '預かった旨が出ていない').toContain('「a.pdf」を預かりました'),
+      expect(dispatcher.getState().notice, '預かった旨が出ていない').toContain('「a.pdf」は、編集中なのでまだ入れていません'),
     );
     // ⚠ 断っていない(直す前は「編集を終了してから添付してください」だった)
     expect(dispatcher.getState().error, '断っている(直す前の症状)').toBeNull();

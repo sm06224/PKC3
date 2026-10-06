@@ -867,7 +867,7 @@ export class RowSwap {
     if (a === null) return false;
     if (a.textarea.value !== a.source) {
       this.commitActive();
-      this.cb.notify?.('確定しました ── もう一度 Shift+クリックで範囲を選べます');
+      this.cb.notify?.('確定しました。もう一度 Shift+クリックで範囲を選べます');
       return false;
     }
     const from = Math.min(a.blockIndex, blockIndex);

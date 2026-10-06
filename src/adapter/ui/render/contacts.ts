@@ -95,7 +95,7 @@ export class ContactsRenderer {
     add.textContent = '連絡先を足す';
     // ⚠ **どこへ書くか**と**いつ並ぶか**を両方言う ── 「足したのに出てこない」を作らない
     add.title =
-      '名前を題名にしたノートを作り、先頭の囲みに tel: / email: / org: を書きます(取り込みと同じ形)。電話かメールが 1 つ以上あると、ここに並びます';
+      '名前を題名にしたノートを作り、先頭の `---` の中に tel: / email: / org: を書きます(取り込みと同じ形)。電話かメールが 1 つ以上あると、ここに並びます';
     quick.append(
       input('name', '名前', '足す連絡先の名前(必須)'),
       input('tel', '電話', '電話番号', 'tel'),
@@ -215,7 +215,7 @@ export class ContactsRenderer {
     if (scan === null) return '連絡先を集めています…';
     if (scan.cards.length === 0)
       return '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。';
-    if (shown === 0) return '絞り込みに当たる連絡先がありません';
+    if (shown === 0) return '絞り込みに一致する連絡先がありません';
     const cut = scan.truncated ? '(多いので途中まで集めました)' : '';
     return `${shown} 件${cut}`;
   }

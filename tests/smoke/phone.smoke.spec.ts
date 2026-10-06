@@ -1292,7 +1292,7 @@ test('🔴 スマホで集中モードの鍵を押すと理由が出て、畳み
   await expect(
     page.locator(REGION('status')),
     '黙って受けている(理由が出ていない)',
-  ).toContainText('列は畳めません');
+  ).toContainText('ペインは折りたためません');
   const after = await page.evaluate(() => localStorage.getItem('pkc3.panes'));
   expect(after, `畳みの記録が動いた(${String(before)} → ${String(after)})`).toBe(before);
 

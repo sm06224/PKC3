@@ -324,9 +324,9 @@ export class LauncherRenderer {
       all.setAttribute('data-pkc-field', 'launcher-fold-all');
       const opens = allFolded(folded, named);
       all.title = opens
-        ? '畳んであるグループを全部開きます'
-        : 'グループを全部畳みます(中のアプリが隠れます)';
-      all.textContent = opens ? 'すべて開く' : 'すべて畳む';
+        ? '折りたたんであるグループを全部開きます'
+        : 'グループを全部折りたたみます(中のアプリが隠れます)';
+      all.textContent = opens ? 'すべて開く' : 'すべて折りたたむ';
       list.append(all);
     }
 
@@ -397,8 +397,8 @@ export class LauncherRenderer {
             btn.setAttribute('data-pkc-group', group);
             btn.setAttribute('aria-expanded', off ? 'false' : 'true');
             btn.title = off
-              ? `${group} を開きます(いまは畳んであります)`
-              : `${group} を畳みます(中のアプリが隠れます)`;
+              ? `${group} を開きます(いまは折りたたんであります)`
+              : `${group} を折りたたみます(中のアプリが隠れます)`;
             btn.textContent = off ? `${group}(${countOf(group)})` : group;
             // ⚠ `textContent` を入れた**後**に足す(先に足すと代入で消える)
             if (mark !== undefined) btn.prepend(groupMark(mark));

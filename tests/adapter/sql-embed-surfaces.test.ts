@@ -232,11 +232,11 @@ describe('② 2 列の下見 ── 答えが出る', () => {
   });
 
   /**
-   * 🔴 **下見の答えには「保存したときの答え」を添え、読む面には添えない**(#1254 §1)。
+   * 🔴 **下見の答えには「保存したときの結果」を添え、読む面には添えない**(#1254 §1)。
    * 下見は編集に入った時点の保存済みの本文で引くので、打っている最中の SQL の答えではない。
    * ⚠ 対照群は**同じ renderer の読む面** ── 「どの面でも出る」「どの面でも出ない」を別々に殺す。
    */
-  it('🔴 下見の答えにだけ「保存したときの答え」が在る(読む面には無い)', async () => {
+  it('🔴 下見の答えにだけ「保存したときの結果」が在る(読む面には無い)', async () => {
     setLive(false);
     const detail = detailRenderer();
     detail.render(editing(BODY));
@@ -248,7 +248,7 @@ describe('② 2 列の下見 ── 答えが出る', () => {
     );
     const saved = preview.querySelectorAll('[data-pkc-field="sql-embed-saved"]');
     expect(saved, '下見の答えに添え書きが無い').toHaveLength(1);
-    expect(saved[0]!.textContent).toBe('保存したときの答え');
+    expect(saved[0]!.textContent).toBe('保存したときの結果');
     // 答えの表の下(同じ器の中)に居る
     expect(saved[0]!.closest(`[${SQL_EMBED_ATTR}]`)!.querySelector('table')).not.toBeNull();
 
@@ -263,7 +263,7 @@ describe('② 2 列の下見 ── 答えが出る', () => {
     await vi.waitFor(() => expect(root.querySelector(`[${SQL_EMBED_ATTR}] td`)?.textContent).toBe('7'));
     expect(
       root.querySelector('[data-pkc-field="sql-embed-saved"]'),
-      '読む面に「保存したときの答え」が出た',
+      '読む面に「保存したときの結果」が出た',
     ).toBeNull();
   });
 });

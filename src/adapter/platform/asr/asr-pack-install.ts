@@ -108,7 +108,7 @@ export class AsrPackInstaller {
       return { ok: false, message: 'すでに取り込み中です。終わるまでお待ちください。' };
     }
     const part = asrPartOf(id);
-    if (part === undefined) return { ok: false, message: '知らない部品です。' };
+    if (part === undefined) return { ok: false, message: '知らない一式です。' };
     this.running = true;
     const abort = new AbortController();
     this.abort = abort;
@@ -119,7 +119,7 @@ export class AsrPackInstaller {
       const pack: AsrPack = await fetchAsrManifest(this.deps.base, fetchFn, abort.signal);
       const modelFiles = pack.models[id];
       if (modelFiles === undefined) {
-        return { ok: false, message: `「${part.label}」は、このサイトの配布元がまだ配っていません。` };
+        return { ok: false, message: `「${part.label}」は、このサイトの配布元がまだ配布していません。` };
       }
       const before = await this.readInstalled();
       // 🔑 **同じ版が既に入っているなら、何も取らない**(2 回目からは取らない)
@@ -195,7 +195,7 @@ export class AsrPackInstaller {
       return { ok: false, message: 'いま取り込んでいる最中です。終わるまでお待ちください。' };
     }
     const part = asrPartOf(id);
-    if (part === undefined) return { ok: false, message: '知らない部品です。' };
+    if (part === undefined) return { ok: false, message: '知らない一式です。' };
     try {
       await this.deps.store.removePart(id);
       const left = await this.readInstalled();

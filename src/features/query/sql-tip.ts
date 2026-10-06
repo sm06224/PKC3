@@ -119,8 +119,8 @@ export function sqlTipText(
     return (
       '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
       'assets(添付)です。' +
-      '本文の csv の囲みに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
-      'その名前で引けます。どんな名前が在るかは csv_tables で分かります' +
+      '本文の csv のブロックに名前を付けると(``` のあとに csv name=売上)、' +
+      'その名前で実行できます。どんな名前があるかは csv_tables で分かります' +
       '(使えない名前は、そこの why の列に理由が出ます)。' +
       /**
        * 🔴 **DuckDB が在ることを、ここで知らせる**(#682 段②)。
@@ -129,7 +129,7 @@ export function sqlTipText(
        *   🔑 知らせないと、**在ることに気づけないまま**になる(user の動機は
        *   「DuckDB を分かち合いたい」なので、隠れているのはいちばん悪い)。
        */
-      '取り込んだ .csv や .tsv、.parquet や .json、.sqlite を選ぶと、DuckDB でも引けます(DuckDB では表を作ることもできます)。'
+      '取り込んだ .csv や .tsv、.parquet や .json、.sqlite を選ぶと、DuckDB でも調べられます(DuckDB では表を作ることもできます)。'
     );
   }
   if (engine === 'duckdb') {
@@ -154,28 +154,28 @@ export function sqlTipText(
      */
     if (src?.kind === 'sqlite') {
       return (
-        `いま調べているのは ${target.name} を DuckDB へ写した表です。この file に在る表: ${tableList(target.tables)}。` +
+        `いま調べているのは ${target.name} を DuckDB に読み込んだ表です。このファイルにある表: ${tableList(target.tables)}。` +
         '表の名前は元のままです。' +
         (copy?.blob === true
           ? `BLOB の列は base64 の文字として入ります(長い字は ${String(MAX_CELL_CHARS)} 字までで切って出します)。`
           : '') +
-        'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+        'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
       );
     }
     const table = src === null ? (target.tables[0] ?? 'csv') : guestTableNameOf(src);
     return (
-      `いま調べているのは ${target.name} を DuckDB へ写した表 ${table} です。` +
+      `いま調べているのは ${target.name} を DuckDB に読み込んだ表 ${table} です。` +
       (src !== null && src.kind !== 'csv'
         ? // 🔑 `.parquet` / `.json` は**相手の列そのまま**(`_note` / `_lid` を足さない)
-          '列は、その file に書いてある列がそのまま並びます。'
-        : '列は _note と _lid のあとに、file の見出しがそのまま並びます。') +
-      'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+          '列は、そのファイルに書いてある列がそのまま並びます。'
+        : '列は _note と _lid のあとに、ファイルの見出しがそのまま並びます。') +
+      'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
     );
   }
   return (
-    `いま調べているのは ${target.name} です。この file に在る表: ${tableList(target.tables)}。` +
+    `いま調べているのは ${target.name} です。このファイルにある表: ${tableList(target.tables)}。` +
     // 🔴 **この PKC の表が出てこないことを、先に言う**(打ってから英語で断られない)
-    'この file を選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+    'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
   );
 }
 
@@ -216,12 +216,12 @@ function multiTipText(names: readonly string[], firstTables: readonly string[]):
   });
   return (
     sqlMultiNote(shownTables, sqliteNames) +
-    `表の名前は file の名前から付けています(${pairs})。` +
+    `表の名前はファイルの名前から付けています(${pairs})。` +
     // 🔑 名前の引き方(D4)── 実名が分からなくても、一覧は DuckDB に聞ける
-    (sqliteNames.length > 0 ? `表の名前の一覧は ${DUCKDB_TABLE_LIST_SQL} で引けます。` : '') +
+    (sqliteNames.length > 0 ? `表の名前の一覧は ${DUCKDB_TABLE_LIST_SQL} で実行できます。` : '') +
     'JOIN で突き合わせられます。' +
     (anyCsv ? '.csv / .tsv の表には、先頭に _note と _lid の列が付きます。' : '') +
-    'これらの file を調べている間、この PKC のノートの表(entries など)は出てきません。'
+    'これらのファイルを調べている間、この PKC3 のノートの表(entries など)は出てきません。'
   );
 }
 
@@ -241,9 +241,9 @@ export function sqlRulesText(engine: SqlEngine = 'sqlite'): string {
    */
   return (
     `表も作れます(${DUCKDB_WRITE_FORMS})。` +
-    `${DUCKDB_TABLE_LIFETIME}(別の file を選び直したときも消えます)。${DUCKDB_TABLE_RESET}。元の file は書き換わりません。` +
+    `${DUCKDB_TABLE_LIFETIME}(別のファイルを選び直したときも消えます)。${DUCKDB_TABLE_RESET}。元のファイルは書き換わりません。` +
     'FROM から書き始められます。PIVOT や QUALIFY も打てます。' +
-    '外から追加の部品を取ってくる書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
+    '外から追加のライブラリを取得する書き方(INSTALL / LOAD)と、設定を変える SET は打てません。' +
     '日本語入力のままでも打てます。'
   );
 }

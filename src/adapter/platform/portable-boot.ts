@@ -83,13 +83,13 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
       return {
         image: null,
         failure:
-          'この 1 枚に焼き込まれた中身が大きすぎて、このブラウザでは読み戻せません' +
-          `(約 ${humanBytes(embeddedBytesOf(el))})。一式のバックアップ(.pkc3-full.zip など)から取り込んでください`,
+          'この HTML ファイルに埋め込まれた中身が大きすぎて、このブラウザでは読み戻せません' +
+          `(約 ${humanBytes(embeddedBytesOf(el))})。バックアップ(.pkc3-full.zip など)から取り込んでください`,
       };
     }
     return {
       image: null,
-      failure: `この 1 枚に焼き込まれた中身が読み取れない形になっています(${String(e)})`,
+      failure: `この HTML ファイルに埋め込まれた中身が読み取れない形になっています(${String(e)})`,
     };
   } finally {
     el.remove();
@@ -107,8 +107,8 @@ export function withEmbeddedFailure(choice: ImageChoice, failure: string | null)
     use: choice.use,
     why:
       choice.use === 'fresh'
-        ? `${failure} ── 空の状態で開きます(${choice.why})`
-        : `${failure} ── ${choice.why}`,
+        ? `${failure}。空の状態で開きます(${choice.why})`
+        : `${failure}。${choice.why}`,
   };
 }
 

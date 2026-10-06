@@ -254,7 +254,7 @@ describe('「○○のノートを作る」を押す(create-date-note)', () => {
     btn.click();
     expect(created(s.sent), '取り込みの裏でノートを作った').toEqual([]);
     expect(s.d.getState().error, '黙って断った').toBe(
-      '書き出し / 取込が実行中です。完了してから操作してください',
+      '書き出し / 取り込みが実行中です。完了してから操作してください',
     );
   });
 

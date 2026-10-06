@@ -459,7 +459,7 @@ describe('🔴 器へ写す所の時間の門(R5)', () => {
   });
 
   it('🔴 断りの字は 1 つの定数(呼び側がそれで見分ける)で、打つ字の時間切れとは別の字', () => {
-    expect(DUCKDB_LOAD_TOO_LONG).toContain('写す');
+    expect(DUCKDB_LOAD_TOO_LONG).toContain('読み込む');
     expect(DUCKDB_LOAD_TOO_LONG).not.toBe(DUCKDB_TOO_LONG);
   });
 
@@ -489,9 +489,9 @@ describe('🔴 器へ写す所の時間の門(R5)', () => {
       lease.run({
         sql: 'select 1',
         loadMaxMs: 10_000,
-        data: { key: 'a', load: () => Promise.reject(new Error('写せません')) },
+        data: { key: 'a', load: () => Promise.reject(new Error('コピーできません')) },
       }),
-    ).rejects.toThrow('写せません');
+    ).rejects.toThrow('コピーできません');
     // 門の時計は外れ、畳む時計だけが張ってある
     expect(t.armed, '落ちた回の門の時計が残っている').toBe(1);
   });

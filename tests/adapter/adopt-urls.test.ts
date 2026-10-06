@@ -127,7 +127,7 @@ describe('貼り付けた URL を資産にする', () => {
     expect(failures[0]!.why).toContain('空き容量');
     // ⚠ 名前も出す ── 貼付の画像は**この文言が唯一の出口**である
     //   (添付の一覧には並ばない ── 資産だけ置いて entry は作らないため)
-    expect(failures[0]!.why, 'どれが置けなかったのか分からない').toContain('貼付画像');
+    expect(failures[0]!.why, 'どれが置けなかったのか分からない').toContain('貼り付け画像');
     // 🔴 **直せる側**である ── `describeAdoptFailures` はこれを先頭に出す
     expect(failures[0]!.fixable).toBe(true);
   });
@@ -139,8 +139,8 @@ describe('貼り付けた URL を資産にする', () => {
       async () => png(),
       ADOPTED_IMAGE_PREFIX,
     );
-    expect(failures[0]!.why).toContain('取込画像');
-    expect(failures[0]!.why, '貼付でないのに貼付と名乗った').not.toContain('貼付画像');
+    expect(failures[0]!.why).toContain('取り込み画像');
+    expect(failures[0]!.why, '貼付でないのに貼付と名乗った').not.toContain('貼り付け画像');
   });
 
   it('🔴 整理・取込の最中でも**断らずに待つ**(`blob:` は貼った瞬間しか読めない)', async () => {

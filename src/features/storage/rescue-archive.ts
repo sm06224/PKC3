@@ -391,7 +391,7 @@ export function rescueArchiveSource(opts: {
  *   なったので、⚠ **残し続けると嘘になる**(この字は user の判断材料である)。
  */
 export function rescueArchiveSummary(s: RescueStats): string {
-  const head = `${s.entries} 件を拾って、取り込める形で書き出しました`;
+  const head = `${s.entries} 件を取り出して、取り込める形で書き出しました`;
   // 🔑 添付は**入った件数と量**で言う(「入れました」だけでは足りるか判断できない)
   const got =
     s.assets > 0 ? `。添付も ${s.assets} 件(${humanBytes(s.assetBytes)})入れました` : '';

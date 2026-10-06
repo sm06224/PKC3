@@ -1098,8 +1098,8 @@ export function connectStoreEffects(
             type: 'SQL_GUEST_FAILED',
             lid,
             error: local
-              ? 'この版では手持ちのファイルを開けません(アプリを読み直すと直ることがあります)'
-              : 'この版では取り込んだ .sqlite を開けません(アプリを読み直すと直ることがあります)',
+              ? 'このタブの PKC3 が古いままのため、手持ちのファイルを開けません。再読み込みしてください'
+              : 'このタブの PKC3 が古いままのため、取り込んだ .sqlite を開けません。再読み込みしてください',
           });
           break;
         }
@@ -1109,7 +1109,7 @@ export function connectStoreEffects(
             const bytes = await sqlSourceBytes(lid);
             if (bytes === null) {
               throw new Error(
-                local ? '選んだ file を読めませんでした' : '添付の中身が見つかりません',
+                local ? '選んだファイルを読めませんでした' : '添付の中身が見つかりません',
               );
             }
             /**
@@ -1189,7 +1189,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
-            error: 'この版では構造を採れません(アプリを読み直すと直ることがあります)',
+            error: 'このタブの PKC3 が古いままのため、構造を取得できません。再読み込みしてください',
           });
           break;
         }
@@ -1203,7 +1203,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
-            error: `構造を採れませんでした: ${raw}`,
+            error: `構造を取得できませんでした: ${raw}`,
           });
         });
         break;
@@ -1225,7 +1225,7 @@ export function connectStoreEffects(
         if (grids === null) {
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
-            error: 'この版では構造を採れません(アプリを読み直すと直ることがあります)',
+            error: 'このタブの PKC3 が古いままのため、構造を取得できません。再読み込みしてください',
           });
           break;
         }
@@ -1239,7 +1239,7 @@ export function connectStoreEffects(
             lid,
             title,
             body: renderSchemaDigest({
-              source: where ?? 'この PKC のノート',
+              source: where ?? 'この PKC3 のノート',
               columns,
               fks,
               ...(counts === null ? {} : { counts }),
@@ -1261,7 +1261,7 @@ export function connectStoreEffects(
           const raw = e instanceof Error ? e.message : String(e);
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
-            error: `構造を採れませんでした(${raw})`,
+            error: `構造を取得できませんでした(${raw})`,
           });
         });
         break;
@@ -1298,7 +1298,7 @@ export function connectStoreEffects(
               type: 'SQL_RUN_FAILED',
               token,
               sql,
-              error: 'この版では DuckDB で引けません(アプリを読み直すと直ることがあります)',
+              error: 'このタブの PKC3 が古いままのため、DuckDB で SQL を実行できません。再読み込みしてください',
             });
             break;
           }
@@ -1334,7 +1334,7 @@ export function connectStoreEffects(
             type: 'SQL_RUN_FAILED',
             token,
             sql,
-            error: 'この版では SQL を打てません(アプリを読み直すと直ることがあります)',
+            error: 'このタブの PKC3 が古いままのため、SQL を実行できません。再読み込みしてください',
           });
           break;
         }
@@ -1963,7 +1963,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `居場所を変えられませんでした: ${String(e)}`,
+                error: `フォルダへの所属を変えられませんでした: ${String(e)}`,
               });
           }
         });
@@ -2014,7 +2014,7 @@ export function connectStoreEffects(
           try {
             await upsert({ id: ev.id, fromLid: ev.fromLid, toLid: ev.toLid, kind: ev.kind });
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を保存できません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを保存できません: ${String(e)}` });
           }
         });
         break;
@@ -2027,7 +2027,7 @@ export function connectStoreEffects(
           try {
             await remove(ev.id);
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を消せません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを消せません: ${String(e)}` });
           }
         });
         break;
@@ -2062,7 +2062,7 @@ export function connectStoreEffects(
               if (stamps === null) {
                 dispatcher.dispatch({
                   type: 'OP_FAILED',
-                  error: `並べ替え: entry が見つかりません(${row.lid})`,
+                  error: `並べ替え: ノートが見つかりません(${row.lid})`,
                 });
                 return;
               }
@@ -2128,7 +2128,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error:
-                  '別のウィンドウがこのノートを書き替えたため、設定を保存できませんでした(もう一度押してください)',
+                  '別のタブまたはウィンドウがこのノートを書き換えたため、設定を保存できませんでした(もう一度押してください)',
               });
               return fail();
             }
@@ -2170,7 +2170,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの一覧を読み直せませんでした: ${String(e)}`,
+                error: `アプリの一覧を再読み込みできませんでした: ${String(e)}`,
               });
           }
         });
@@ -2234,7 +2234,7 @@ export function connectStoreEffects(
               );
               if (disposed) return;
               if (stamps.conflict === true) {
-                failed = '別のウィンドウがこのノートを書き替えました';
+                failed = '別のタブまたはウィンドウがこのノートを書き換えました';
                 break;
               }
               stamp(row.lid, stamps);
@@ -2253,7 +2253,7 @@ export function connectStoreEffects(
               error:
                 wrote === 0
                   ? `並べ替えを保存できませんでした: ${failed}`
-                  : `並べ替えを途中までしか保存できませんでした(${String(wrote)} 件): ${failed}。一覧を読み直しました`,
+                  : `並べ替えを途中までしか保存できませんでした(${String(wrote)} 件): ${failed}。一覧を再読み込みしました`,
             });
           // 🔴 **ロックは必ず 1 回だけ解く**(数えているのは 1 つ)
           dispatcher.dispatch({
@@ -2277,7 +2277,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの一覧を読み直せませんでした: ${String(e)}`,
+                error: `アプリの一覧を再読み込みできませんでした: ${String(e)}`,
               });
           }
         });
@@ -2423,7 +2423,7 @@ export function connectStoreEffects(
                 dispatcher.dispatch({
                   type: 'OP_FAILED',
                   error:
-                    '別のウィンドウがグループのノートを書き替えたため、並べ替えを最後まで保存できませんでした(もう一度押してください)',
+                    '別のタブまたはウィンドウがグループのノートを書き換えたため、並べ替えを最後まで保存できませんでした(もう一度押してください)',
                 });
                 return;
               }
@@ -2457,7 +2457,7 @@ export function connectStoreEffects(
             if (body === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: 'グループの目印を変えられません(ノートが見つかりません)',
+                error: 'グループのアイコンを変えられません(ノートが見つかりません)',
               });
               return;
             }
@@ -2483,7 +2483,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_FAILED',
                 error:
-                  '別のウィンドウがこのノートを書き替えたため、目印を保存できませんでした(もう一度押してください)',
+                  '別のタブまたはウィンドウがこのノートを書き換えたため、アイコンを保存できませんでした(もう一度押してください)',
               });
               return;
             }
@@ -2492,7 +2492,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `グループの目印を保存できませんでした: ${String(e)}`,
+                error: `グループのアイコンを保存できませんでした: ${String(e)}`,
               });
           }
         });
@@ -2720,7 +2720,7 @@ export function connectStoreEffects(
                 `${label(tag)}${lim} 件はタグが ${String(MAX_TAGS)} 個に達していて付きませんでした(1 つ外してから足してください)`,
               );
           }
-          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のウィンドウが書き替えた可能性があります)`);
+          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のタブまたはウィンドウが書き換えた可能性があります)`);
           /**
            * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
            *   「外したのに、まだそのタグで集まる」= 壊れて見える。
@@ -3142,7 +3142,7 @@ export function connectStoreEffects(
               if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
               if (attempt.stamps.conflict === true)
                 return fail(
-                  '別のウィンドウがこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
+                  '別のタブまたはウィンドウがこのノートを書き換えたため、追記できませんでした(もう一度押してください)',
                 );
             }
             const { stamps, newBody, ext, base } = attempt;
@@ -3373,11 +3373,11 @@ export function connectStoreEffects(
             const toBody = await store.getBody(ev.to.lid);
             if (disposed) return;
             if (fromBody === null || toBody === null)
-              return fail('持っていけません(ノートが見つかりません)');
+              return fail('移動できません(ノートが見つかりません)');
             // ① 切った後の姿と塊を**計算だけ**する(まだ書かない)
             const cut = cutLines(fromBody, ev.from);
             if (cut === null)
-              return fail('本文が変わっているため、その塊を持っていけませんでした(開き直してください)');
+              return fail('本文が変わっているため、そのブロックを移動できませんでした(開き直してください)');
             // ② 行き先へ**先に**入れる ── 入らなければ元は 1 バイトも触らない
             /**
              * ⚠ **末尾へ入れるときは、終端の改行の「前」へ**(着地前レビュー D)。
@@ -3397,8 +3397,8 @@ export function connectStoreEffects(
                */
               return fail(
                 ev.to.toBefore === null
-                  ? `「${ev.to.title}」の本文が閉じていない囲み(\`\`\` や :::)で終わっているため、そこへは入れられませんでした`
-                  : '落とした所が本文から無くなっていたため、持っていけませんでした(開き直してください)',
+                  ? `「${ev.to.title}」の本文が閉じていないブロック(\`\`\` や :::)で終わっているため、そこへは入れられませんでした`
+                  : 'ドロップした所が本文から無くなっていたため、移動できませんでした(開き直してください)',
               );
             const toExt = extractMeta(ev.to.archetype, newTo);
             const toStamps = await store.persistEntry(
@@ -3417,7 +3417,7 @@ export function connectStoreEffects(
             if (disposed) return;
             if (toStamps.conflict === true)
               return fail(
-                '別のウィンドウが持っていき先のノートを書き替えたため、持っていけませんでした(もう一度掴んでください)',
+                '別のタブまたはウィンドウが移動先のノートを書き換えたため、移動できませんでした(もう一度ドラッグしてください)',
               );
             dispatcher.dispatch({
               type: 'BODY_REWRITTEN',
@@ -3454,7 +3454,7 @@ export function connectStoreEffects(
             if (disposed) return;
             if (fromStamps.conflict === true)
               return fail(
-                '持っていき先には入りましたが、元の本文からは消せませんでした(別のウィンドウが書き替えたためです。元の塊は残っています)',
+                '移動先には入りましたが、元の本文からは消せませんでした(別のタブまたはウィンドウが書き換えたためです。元のブロックは残っています)',
               );
             dispatcher.dispatch({
               type: 'BODY_REWRITTEN',
@@ -3487,8 +3487,8 @@ export function connectStoreEffects(
                    *   ノートの名前」なのに括弧が 2 系統**あった。
                    * 🔑 揃え方:**ノートの名前 = `『』` / ファイル名・字の名前 = `「」`**。
                    */
-                  ? `本文の塊を『${ev.to.title}』のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`
-                  : `本文の塊を『${ev.to.title}』へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`,
+                  ? `本文のブロックを『${ev.to.title}』のいちばん下へ移動しました(戻すには、そこで同じ ⠿ をドラッグして元のノートへ移してください)`
+                  : `本文のブロックを『${ev.to.title}』へ移動しました(戻すには、そこで同じ ⠿ をドラッグして元のノートへ移してください)`,
               open: ev.to.lid,
             });
           } catch (e) {
@@ -3593,8 +3593,8 @@ export function connectStoreEffects(
                 // 🔑 ファイル名の回は、題名だけが先に変わっている ── 何が変わらなかったかを言う(#1220)
                 error:
                   ev.rewrite.kind === 'attachment-name'
-                    ? 'ファイル名は変えられませんでした(別のウィンドウがこのノートを書き替えました。もう一度変えてください)'
-                    : '別のウィンドウがこのノートを書き替えたため、反映できませんでした(もう一度押してください)',
+                    ? 'ファイル名は変えられませんでした(別のタブまたはウィンドウがこのノートを書き換えました。もう一度変えてください)'
+                    : '別のタブまたはウィンドウがこのノートを書き換えたため、反映できませんでした(もう一度押してください)',
               });
               return;
             }

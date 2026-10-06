@@ -89,7 +89,7 @@ export const OPTIONAL_EXTRA_FILES: readonly string[] = ['portable-template.html'
  */
 export function planSiteFiles(precache: readonly string[]): readonly string[] {
   const listed = precache.map(precacheEntryPath);
-  if (listed.length === 0) throw new Error('配る物が 1 つも無い一式は組めません');
+  if (listed.length === 0) throw new Error('配布する物が 1 つも無い一式は作れません');
   return [...new Set([...listed, ...REQUIRED_EXTRA_FILES])].sort();
 }
 
@@ -101,7 +101,7 @@ export function planSiteFiles(precache: readonly string[]): readonly string[] {
  * ないので、仮に届いても **SW も OPFS も動かない**(= 壊れた PKC が見える)。
  */
 export const SERVE_PY = [
-  '# PKC3 self-host (#532). ただの静的サーバ ── 分離は Service Worker が被せる。',
+  '# PKC3 self-host (#532). ただの静的サーバ。分離は Service Worker が被せる。',
   'import http.server, functools, os, socketserver, sys',
   '',
   'PORT = ' + String(SELFHOST_PORT),
@@ -115,7 +115,7 @@ export const SERVE_PY = [
   "        '.mjs': 'text/javascript',",
   '    }',
   '    def end_headers(self):',
-  '        # 読み直しで古い sw.js を掴ませない',
+  '        # 再読み込みで古い sw.js を読み込ませない',
   "        self.send_header('Cache-Control', 'no-cache')",
   '        super().end_headers()',
   '    def log_message(self, *a):',
@@ -124,21 +124,21 @@ export const SERVE_PY = [
   'socketserver.TCPServer.allow_reuse_address = True',
   'try:',
   "    with socketserver.TCPServer(('127.0.0.1', PORT), functools.partial(H, directory=ROOT)) as httpd:",
-  "        print('PKC3 を " + SELFHOST_ORIGIN + " で開いてください(この窓を閉じると止まります)')",
+  "        print('PKC3 を " + SELFHOST_ORIGIN + " で開いてください(このウィンドウを閉じると止まります)')",
   '        httpd.serve_forever()',
   'except OSError as e:',
   "    print('起動できません: ' + str(e))",
   "    print('ポート " +
     String(SELFHOST_PORT) +
     " が使われています。先に使っている物を止めてから、もう一度やり直してください。')",
-  "    print('⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(住所が変わるため)。')",
+  "    print('⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(アドレスが変わるため)。')",
   '    sys.exit(1)',
   '',
 ].join('\n');
 
 /** 同じことをする node 版(python3 が無い端末のため)。 */
 export const SERVE_MJS = [
-  '// PKC3 self-host (#532). ただの静的サーバ ── 分離は Service Worker が被せる。',
+  '// PKC3 self-host (#532). ただの静的サーバ。分離は Service Worker が被せる。',
   "import { createServer } from 'node:http';",
   "import { createReadStream, statSync } from 'node:fs';",
   "import { join, normalize, extname, dirname } from 'node:path';",
@@ -181,11 +181,11 @@ export const SERVE_MJS = [
   "server.on('error', (e) => {",
   "  console.log('起動できません: ' + e.message);",
   "  console.log('ポート ' + PORT + ' が使われています。先に使っている物を止めてから、もう一度やり直してください。');",
-  "  console.log('⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(住所が変わるため)。');",
+  "  console.log('⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(アドレスが変わるため)。');",
   '  process.exit(1);',
   '});',
   "server.listen(PORT, '127.0.0.1', () => {",
-  "  console.log('PKC3 を " + SELFHOST_ORIGIN + " で開いてください(この窓を閉じると止まります)');",
+  "  console.log('PKC3 を " + SELFHOST_ORIGIN + " で開いてください(このウィンドウを閉じると止まります)');",
   '});',
   '',
 ].join('\n');
@@ -204,7 +204,7 @@ export const START_SH = [
   '# PKC3 を自分のパソコンで動かす (#532)',
   'cd "$(dirname "$0")" || exit 1',
   '',
-  '# ⚠ 「在るか」ではなく「実際に走るか」で選ぶ(殻が居る)',
+  '# 「あるか」ではなく「実際に走るか」で選ぶ(殻がいる)',
   'if python3 -c "" 2>/dev/null; then',
   '  exec python3 serve.py',
   'fi',
@@ -216,7 +216,7 @@ export const START_SH = [
   'fi',
   '',
   'echo "PKC3 を動かすのに必要な物が見つかりませんでした。"',
-  'echo "次のどちらかを入れてから、もう一度この file をダブルクリックしてください:"',
+  'echo "次のどちらかを入れてから、もう一度このファイルをダブルクリックしてください:"',
   'echo "  ・Python 3   https://www.python.org/downloads/"',
   'echo "  ・Node.js    https://nodejs.org/"',
   'echo "(macOS で python3 と打つと案内が出る場合は、まだ入っていません)"',
@@ -271,10 +271,10 @@ export const START_PS1 = [
   '} catch {',
   '  Write-Host "起動できません: $($_.Exception.Message)"',
   '  Write-Host "ポート $port が使われているか、許可がありません。先に使っている物を止めてから、もう一度やり直してください。"',
-  '  Write-Host "⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(住所が変わるため)。"',
+  '  Write-Host "⚠ ほかの番号に変えると、前に書いたノートが見えなくなります(アドレスが変わるため)。"',
   '  exit 1',
   '}',
-  'Write-Host "PKC3 を ' + SELFHOST_ORIGIN + ' で開いてください(この窓を閉じると止まります)"',
+  'Write-Host "PKC3 を ' + SELFHOST_ORIGIN + ' で開いてください(このウィンドウを閉じると止まります)"',
   'while ($listener.IsListening) {',
   '  $ctx = $listener.GetContext()',
   '  $p = [System.Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)',
@@ -335,24 +335,24 @@ export function builtAtLabel(builtAt: number): string {
 export function readmeText(src: SelfhostSource): string {
   return [
     ...README_HEAD,
-    '【この一式について】',
-    '  版          : ' + src.version + ' (' + src.kind + ')',
+    '【この zip について】',
+    '  バージョン  : ' + src.version + ' (' + src.kind + ')',
     '  作った日時  : ' + builtAtLabel(src.builtAt),
-    '  元の住所    : ' + src.from,
+    '  元のアドレス: ' + src.from,
     '',
     '【新しくするとき】',
-    '  🔴 上の「元の住所」をブラウザで開いて、そこで',
+    '  上の「元のアドレス」をブラウザで開いて、そこで',
     '     「自分のパソコンで動かす」を押してください。',
     '',
-    '  ⚠ いま動かしているこの PKC(' + SELFHOST_ORIGIN + ')で押すと、',
-    '     まったく同じ一式が落ちてきます ── この一式は自分の中から集めるためです。',
+    '  いま動かしているこの PKC3(' + SELFHOST_ORIGIN + ')で押すと、',
+    '     まったく同じ zip がダウンロードされます。この zip は自分の中から集めるためです。',
     '     (コピーをもう 1 つ作りたいときは、それで正しい動きです)',
     '',
-    '  落とし直したら、site フォルダを新しいものに入れ替えて、',
-    '  ブラウザを読み直してください。画面に「新しい版があります。」と出ます。',
-    '  ⚠ 住所が同じなので、書いたノートはそのまま残ります。',
+    '  ダウンロードし直したら、site フォルダを新しいものに入れ替えて、',
+    '  ブラウザを再読み込みしてください。画面に「新しいバージョンがあります。」と出ます。',
+    '  アドレスが同じなので、書いたノートはそのまま残ります。',
     '',
-    '  一式の形: ' + String(SELFHOST_LAYOUT),
+    '  zip の形: ' + String(SELFHOST_LAYOUT),
     '',
   ].join('\r\n');
 }
@@ -365,15 +365,15 @@ const README_HEAD = [
   '  Windows          … start-windows.cmd をダブルクリック',
   '  Mac / Linux      … start-mac-linux.sh をダブルクリック(または端末で sh start-mac-linux.sh)',
   '',
-  '  出てきた窓に住所が出ます。ブラウザで開いてください:',
+  '  出てきたウィンドウにアドレスが出ます。ブラウザで開いてください:',
   '    ' + SELFHOST_ORIGIN,
   '',
-  '  ⚠ この窓を閉じると止まります。使うあいだは開いたままにしてください。',
+  '  このウィンドウを閉じると止まります。使うあいだは開いたままにしてください。',
   '',
   '【いちばん大事なこと】',
-  '  ここに書いたノートは、上の住所にだけ残ります。',
-  '  住所(番号)が変わると、前に書いたノートは 1 件も見えなくなります。',
-  '  ── 消えたわけではありませんが、別の場所として扱われます。',
+  '  ここに書いたノートは、上のアドレスにだけ残ります。',
+  '  アドレス(番号)が変わると、前に書いたノートは 1 件も見えなくなります。',
+  '  消えたわけではありませんが、別の場所として扱われます。',
   '',
   '  だから、ポート ' +
     String(SELFHOST_PORT) +
@@ -389,7 +389,7 @@ const README_HEAD = [
   '  Mac / Linux      … Python 3 か Node.js のどちらか',
   '',
   '【中身】',
-  '  site/            … PKC3 本体(この中を配っています)',
+  '  site/            … PKC3 本体(この中を表示しています)',
   '  serve.py         … Python で動かすときの本体',
   '  serve.mjs        … Node.js で動かすときの本体',
   '',

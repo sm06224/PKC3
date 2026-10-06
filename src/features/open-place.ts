@@ -29,7 +29,7 @@ export interface OpenPlaceSpec {
  * ⚠ **並びは「既定が先」** ── 選択肢の 1 つ目が既定であることを、見ただけで分かるようにする。
  */
 export const OPEN_PLACES = [
-  { id: 'window', label: '別の窓(既定)' },
+  { id: 'window', label: '別のウィンドウ(既定)' },
   { id: 'here', label: 'この画面' },
 ] as const satisfies readonly OpenPlaceSpec[];
 

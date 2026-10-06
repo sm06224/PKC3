@@ -346,7 +346,7 @@ export class HelpRenderer {
      * 🔑 何のための数字かも書く ── 版を見る唯一の理由は**不具合の報告に添えること**である。
      */
     // ⚠ ここは**見せる字**なので `versionLine()`(日時つき)── 入れ替えの印は `versionText()`
-    ver.textContent = `この版: ${versionLine()}(不具合の報告に添えてください)`;
+    ver.textContent = `このバージョン: ${versionLine()}(不具合の報告に添えてください)`;
     body.append(ver);
 
     /**
@@ -458,7 +458,7 @@ export class HelpRenderer {
     openBtn.setAttribute('data-pkc-action', 'open-manual-window');
     openBtn.textContent = 'マニュアルを別のウィンドウで開く';
     openBtn.title =
-      'マニュアルだけのウィンドウを開きます(目次つき・窓いっぱい。Ctrl+F でブラウザの検索が使えます)';
+      'マニュアルだけのウィンドウを開きます(目次つき・ウィンドウいっぱい。Ctrl+F でブラウザの検索が使えます)';
     const jumpKeysBtn = document.createElement('button');
     jumpKeysBtn.type = 'button';
     jumpKeysBtn.setAttribute('data-pkc-field', 'help-jump-keys');
@@ -470,7 +470,7 @@ export class HelpRenderer {
     const openNote = document.createElement('span');
     openNote.setAttribute('data-pkc-field', 'settings-note');
     // 🔑 **何が起きるか**を押す前に言う(この画面の本文は消えない)
-    openNote.textContent = '目次つきで、窓いっぱいに出ます。この画面はそのまま残ります';
+    openNote.textContent = '目次つきで、ウィンドウいっぱいに出ます。いま開いているタブはそのまま残ります';
     openBar.append(openBtn, jumpKeysBtn, openNote);
     body.append(openBar);
 
@@ -547,7 +547,7 @@ export class HelpRenderer {
     const tocHead = document.createElement('p');
     tocHead.setAttribute('data-pkc-field', 'settings-note');
     tocHead.textContent =
-      '目次 ── 見出しを全部並べます。言葉で探すときは下の「マニュアルの中を探す」へ';
+      '目次: 見出しを全部並べます。言葉で探すときは下の「マニュアルの中を探す」へ';
     body.append(tocHead);
     this.tocHost = document.createElement('nav');
     this.tocHost.setAttribute('data-pkc-region', 'help-toc');
@@ -729,7 +729,7 @@ export class HelpRenderer {
       // ⚠ **次の一手を書く** ── 「0 件」だけだと、user は打ち方が悪いのか
       //    載っていないのか分からない
       count.textContent =
-        '見つかりませんでした ── 別の言い方でも試せます(例: ルビ / 予定 / 書き出し)';
+        '見つかりませんでした。別の言い方でも試せます(例: ルビ / 予定 / 書き出し)';
       return;
     }
     const total = found.reduce((n, h) => n + h.count, 0);
@@ -737,7 +737,7 @@ export class HelpRenderer {
     const rest = found.length - shown.length;
     // ⚠ **切ったことを言う**(黙って減らさない)
     count.textContent =
-      `${total} か所(${found.length} 節)` + (rest > 0 ? ` ── 下に出すのは ${shown.length} 節、あと ${rest} 節` : '');
+      `${total} か所(${found.length} 節)` + (rest > 0 ? `。下に出すのは ${shown.length} 節、あと ${rest} 節` : '');
     for (const hit of shown) hits.append(this.findRow(hit));
   }
 

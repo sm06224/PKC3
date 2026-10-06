@@ -232,7 +232,7 @@ describe('取り込んだ後に外で変わったか', () => {
     const l = new LaunchedFiles();
     const { h, state } = movable('a', 1000);
     l.remember('n1', h, 'a.md', 1000);
-    state.at = 3000; // 自分の書込で時刻が動いた
+    state.at = 3000; // 自分の書き込みで時刻が動いた
     await l.refreshModified('n1');
     expect(l.modifiedOf('n1')).toBe(3000);
     expect(await l.changedSince('n1'), '自分の書込を「外で変わった」と言っている').toBe(false);
@@ -274,7 +274,7 @@ describe('取り込んだ後に外で変わったか', () => {
       'このファイルは取り込んだ後にパソコン側で変わっています。書き戻すと、その変更は消えます',
     );
     expect(CHANGED_OUTSIDE_REOPEN_NOTE).toBe(
-      'このファイルは取り込んだ後にパソコン側で変わっています(PKC のノートは取り込んだ時の中身です)',
+      'このファイルは取り込んだ後にパソコン側で変わっています(PKC3 のノートは取り込んだ時の中身です)',
     );
   });
 });

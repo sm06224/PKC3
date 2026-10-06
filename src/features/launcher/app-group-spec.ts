@@ -81,7 +81,7 @@ export function appGroupSeed(name: string): string {
   return (
     // ⚠ 囲み(`---`)を忘れない ── 無いと**ただの本文の 1 行**になり、目印を書いても読めない
     `---\n${APP_GROUP_ICON_KEY}: \n---\n\n` +
-    `アプリの一覧の「${label === '' ? '(名前なし)' : label}」の見出しに出る目印を憶えるノートです。\n`
+    `アプリの一覧の「${label === '' ? '(名前なし)' : label}」の見出しに出るアイコンを保存するノートです。\n`
   );
 }
 

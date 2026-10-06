@@ -298,7 +298,7 @@ describe('readContainerBundle — texts', () => {
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([]);
     // 先頭は**実際に読めない**(この対照が無いと壊せていない fixture を見逃す)
-    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/CRC/);
+    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
     // 控えに健全な複製が残っており、そちらは読める
     const alts = got.assetAlternates.get('k')!;
     expect(alts).toHaveLength(2);
@@ -339,7 +339,7 @@ describe('readContainerBundle — texts', () => {
     const got = await readContainerBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([
-      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)が bundle ごとに違います ── 先の方を採ります',
+      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)がファイルごとに違います。先のほうを使います',
     ]);
   });
 });
@@ -386,7 +386,7 @@ describe('readContainerBundle — mixed', () => {
       },
       [{ name: 'x.entry.zip', bytes: await textBundle() }],
     );
-    await expect(readContainerBundle(zip)).rejects.toThrow(/archetype/);
+    await expect(readContainerBundle(zip)).rejects.toThrow(/種類/);
   });
 
   it('件数の照合は形式ごとに違う field を見る(mixed は text_count / textlog_count)', async () => {
@@ -448,10 +448,10 @@ describe('readContainerBundle — textlogs', () => {
     const got = await readContainerBundle(zip);
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
     expect(got.warnings[0]).toMatch(/g\.text\.zip: 取り込めませんでした.*pkc2-text-bundle/);
-    expect(got.warnings).toContain('1 件の bundle を取り込めませんでした(残りは取り込みます)');
+    expect(got.warnings).toContain('1 件の書き出しファイルを取り込めませんでした(残りは取り込みます)');
   });
 
-  it('🔴 全部落ちたら断る ──「取込完了 0 件」で成功に見せない', async () => {
+  it('🔴 全部落ちたら断る ──「取り込み完了 0 件」で成功に見せない', async () => {
     const zip = await outer(
       {
         format: 'pkc2-texts-container-bundle',
@@ -532,7 +532,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     const got = await readContainerBundle(zip);
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
     // 黙って拾わない ── 名前が食い違っていること自体は言う
-    expect(got.warnings[0]).toMatch(/正規化形が違います/);
+    expect(got.warnings[0]).toMatch(/文字表記が違います/);
   });
 
   it('NFC に畳んでぶつかる 2 件があるときは曖昧なので拾わない', async () => {
@@ -586,7 +586,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       ],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      'a.text.zip: 添付の中身が bundle に入っていません: ast-gone',
+      'a.text.zip: 添付の中身が書き出しファイルに入っていません: ast-gone',
     ]);
   });
 
@@ -610,7 +610,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '書出し時に解決できない添付参照が本文から除かれています(compact mode)',
+      '見つからない添付への参照は本文から除きました',
     ]);
   });
 
@@ -627,7 +627,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1', compacted: false }) }],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      '書出し時に解決できない添付参照が本文から除かれています(compact mode)',
+      '見つからない添付への参照は本文から除きました',
     ]);
   });
 
@@ -642,8 +642,8 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      'a.text.zip: 目次と中身で lid が違います(ちがう ≠ n1)',
-      'a.text.zip: 目次と中身でタイトルが違います(ちがう題 ≠ 本当の題)',
+      'a.text.zip: manifest.json と中身で ID が違います(ちがう ≠ n1)',
+      'a.text.zip: manifest.json と中身で題名が違います(ちがう題 ≠ 本当の題)',
     ]);
     // 採るのは**中身**
     expect((got.container as Synth).entries[0]!.lid).toBe('n1');
@@ -660,7 +660,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '1 件目: 目次の archetype(textlog)は形式(text)と違います ── 形式を採ります',
+      '1 件目: manifest.json に書かれた種類(textlog)と実際の形式(text)が違うため、実際の形式を使います',
     ]);
     expect((got.container as Synth).entries[0]!.archetype).toBe('text');
   });
@@ -698,7 +698,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       { format: 'pkc2-texts-container-bundle', version: 2, entries: [] },
       [],
     );
-    await expect(readContainerBundle(c)).rejects.toThrow(/version/);
+    await expect(readContainerBundle(c)).rejects.toThrow(/バージョン/);
   });
 
   it('Office 文書は名指しで断る', async () => {

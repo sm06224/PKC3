@@ -629,13 +629,13 @@ export class InspectorRenderer {
           go.setAttribute('data-pkc-field', 'relation-target-link');
           // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
           go.textContent = other?.title ?? '(見つかりません)';
-          const del = iconButton('remove-relation', '関係を消す', null);
+          const del = iconButton('remove-relation', 'つながりを消す', null);
           del.setAttribute('data-pkc-relation', r.id);
           // 🔴 編集中は押せなくする(#513)── reducer は黙って捨てるので、口の側で断る
           del.disabled = editing;
           del.title = editing
-            ? withBlockedNote('この関係を消します', blockedNote)
-            : 'この関係を消します(ノートは消えません)';
+            ? withBlockedNote('このつながりを消します', blockedNote)
+            : 'このつながりを消します(ノートは消えません)';
           item.append(label, go, del);
           relBox.append(item);
         }
@@ -1132,7 +1132,7 @@ export class InspectorRenderer {
     bar.target.disabled = editing;
     bar.kind.disabled = editing;
     bar.add.disabled = editing;
-    const base = '選んでいるノートから、相手のノートへ関係を張ります';
+    const base = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     bar.add.title = editing ? withBlockedNote(base, blockedNote) : base;
   }
 
@@ -1299,7 +1299,7 @@ export class InspectorRenderer {
      * 既に出しているので、ここは**それ以外**(関連 / 分類 / 時系列 / 出典)を出す。
      * ⚠ 値は押せる札 + 消すボタンなので、`setRow` ではなく専用の器を持つ。
      */
-    row('関係', 'inspector-relations');
+    row('つながり', 'inspector-relations');
     /**
      * 🔴 **このノートを参照しているノート**(#348、user 裁定 2026-08-23)。
      *
@@ -1319,7 +1319,7 @@ export class InspectorRenderer {
      * ── 選択に自動で追従するので、別窓に出すときの同期の仕掛けが要らない。
      * ⚠ **中央の面は奪わない**(#300 で user が叱った型)。
      */
-    row('つながり', 'inspector-relation-map');
+    row('つながりの図', 'inspector-relation-map');
     /**
      * 🔴 **開いている拡張へ、いま見ているノートを送る**(#195 / C-5 段②-b)。
      *
@@ -1349,22 +1349,22 @@ export class InspectorRenderer {
     target.type = 'text';
     target.setAttribute('data-pkc-field', 'relation-target');
     target.setAttribute('list', 'pkc-relation-candidates');
-    target.placeholder = '相手の題名';
-    target.setAttribute('aria-label', '関係を結ぶ相手の題名');
+    target.placeholder = 'つなぐ先の題名';
+    target.setAttribute('aria-label', 'つながりを付ける先の題名');
     const list = document.createElement('datalist');
     list.id = 'pkc-relation-candidates';
     this.candidates = list;
     const kind = document.createElement('select');
     kind.setAttribute('data-pkc-field', 'relation-kind');
-    kind.setAttribute('aria-label', '関係の種類');
+    kind.setAttribute('aria-label', 'つながりの種類');
     for (const k of CREATABLE_KINDS) {
       const opt = document.createElement('option');
       opt.value = k;
       opt.textContent = RELATION_LABELS[k];
       kind.append(opt);
     }
-    const add = iconButton('add-relation', '関係を足す', null);
-    add.title = '選んでいるノートから、相手のノートへ関係を張ります';
+    const add = iconButton('add-relation', 'つながりを足す', null);
+    add.title = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     addBar.append(target, list, kind, add);
     this.region.append(addBar);
     this.relAdd = { target, kind, add };
@@ -1648,7 +1648,7 @@ export class InspectorRenderer {
     // ⚠ `data-pkc-action` は付けない ── 打鍵の受け口は `onInput` が
     //   **`data-pkc-field` で**拾う(`entry-filter` / `dual-filter` と同じ形)
     ta.rows = 6;
-    ta.placeholder = 'mkdir "アーカイブ" as @arc';
+    ta.placeholder = 'mkdir "資料" as @docs';
     // ⚠ `placeholder` は名前ではない(値を入れると読み上げから消える)
     ta.setAttribute('aria-label', '整理案を貼る');
     box.append(ta);

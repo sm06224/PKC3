@@ -167,7 +167,7 @@ describe('🔴 disk まで届く(常駐だけ動いて保存されない、を�
     d.onState((s) => void (s.error && seen.push(s.error)));
     d.dispatch({ type: 'ADD_RELATION', id: 'r1', fromLid: 'n1', toLid: 'n2', kind: 'semantic' });
     for (let i = 0; i < 20; i += 1) await Promise.resolve();
-    expect(seen.join(' '), '失敗が画面に出ていない').toContain('関係を保存できません');
+    expect(seen.join(' '), '失敗が画面に出ていない').toContain('つながりを保存できません');
     off();
   });
 

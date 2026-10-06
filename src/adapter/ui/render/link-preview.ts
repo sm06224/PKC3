@@ -129,7 +129,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     // Safety hint footer
     const hint = doc.createElement('div');
     hint.className = 'pkc-link-preview-safe-hint';
-    hint.textContent = '新しいタブで安全に開きます (別ウィンドウ)';
+    hint.textContent = '新しいタブで開きます';
     card.append(hint);
 
     return card;
@@ -148,7 +148,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     card.classList.add('pkc-link-preview-foreign');
     const msg = doc.createElement('div');
     msg.className = 'pkc-link-preview-foreign-desc';
-    msg.textContent = '別の PKC のノート（外部参照）';
+    msg.textContent = '別の PKC3 のノート（外部参照）';
     card.append(msg);
     return card;
   }

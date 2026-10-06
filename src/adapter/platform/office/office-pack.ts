@@ -101,7 +101,7 @@ export function parsePackManifest(v: unknown): PackManifest {
   const fonts = Array.isArray(m.fonts) ? m.fonts.filter((f) => typeof f === 'string') : [];
   const files = Array.isArray(m.files) ? m.files.filter((f) => typeof f === 'string') : [];
   if (files.length === 0) {
-    throw new OfficePackError('配布元のファイル一覧(pack.json)が読めません ── 配布元が違う可能性があります。');
+    throw new OfficePackError('配布元のファイル一覧(pack.json)が読めません。配布元が違う可能性があります。');
   }
   if (fonts.length < MIN_FONT_COUNT) {
     throw new OfficePackError(

@@ -142,11 +142,11 @@ describe('グループを畳む(#857 段④)', () => {
    */
   it('🔴 ⑥ 「すべて畳む」で名前の付いた群が全部畳まれ、字が裏返る', () => {
     const btn = foldAll();
-    expect(btn, '「すべて畳む」の押し所が無い').not.toBeNull();
-    expect(btn!.textContent, '全部開いているのに「すべて開く」と出ている').toBe('すべて畳む');
+    expect(btn, '「すべて折りたたむ」の押し所が無い').not.toBeNull();
+    expect(btn!.textContent, '全部開いているのに「すべて開く」と出ている').toBe('すべて折りたたむ');
 
     btn!.click();
-    expect(shown('b1') || shown('b2'), '「すべて畳む」で畳まれていない').toBe(false);
+    expect(shown('b1') || shown('b2'), '「すべて折りたたむ」で折りたたまれていない').toBe(false);
     // ⚠ 名前の無い群は畳めない ── 巻き込まれていないこと(開く口が消えないため)
     expect(shown('a1'), '名前の無い群まで畳んだ(開く口が画面から消える)').toBe(true);
     expect([...folds.get()].includes('資料'), '保存に書かれていない').toBe(true);
@@ -154,7 +154,7 @@ describe('グループを畳む(#857 段④)', () => {
 
     foldAll()!.click();
     expect(shown('b1') && shown('b2'), '「すべて開く」で開かない(片道の操作)').toBe(true);
-    expect(foldAll()?.textContent, '全部開いたのに字が戻らない').toBe('すべて畳む');
+    expect(foldAll()?.textContent, '全部開いたのに字が戻らない').toBe('すべて折りたたむ');
   });
 
   it('🔴 ⑦ 名前の付いた群が 1 つも無ければ、押し所を出さない', () => {
@@ -164,7 +164,7 @@ describe('グループを畳む(#857 段④)', () => {
       tiles: [{ lid: 'a1', title: '電卓', group: '', kind: 'url', url: 'https://a.test/', order: 0 }],
     });
     expect(shown('a1'), '前提が崩れている(タイルが出ていない)').toBe(true);
-    expect(foldAll(), '畳める群が無いのに「すべて畳む」を出した').toBeNull();
+    expect(foldAll(), '折りたためる群が無いのに「すべて折りたたむ」を出した').toBeNull();
   });
 
   /**
@@ -181,7 +181,7 @@ describe('グループを畳む(#857 段④)', () => {
       region.querySelector('[data-pkc-action="toggle-app-group"]'),
       '絞り込み中に畳む口が出ている(押しても何も起きない)',
     ).toBeNull();
-    expect(foldAll(), '絞り込み中に「すべて畳む」が出ている').toBeNull();
+    expect(foldAll(), '絞り込み中に「すべて折りたたむ」が出ている').toBeNull();
     // ⚠ 字は出す ── どの群かは探している間も要る
     expect(heads().join(' '), '群の見出しの字まで消えた').toContain('資料');
     // 対照群 ── 欄を空にすれば押し所が戻る

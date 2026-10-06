@@ -99,7 +99,7 @@ describe('押したとき', () => {
     const m = mount(async () => result({ orphanBytes: 2048 }));
     m.run.click();
     await vi0();
-    expect(m.summary()).toContain('使っていない添付を消す');
+    expect(m.summary()).toContain('使われていない添付を消す');
   });
 
   it('⚠ 共有が無ければ但し書きを出さない', async () => {

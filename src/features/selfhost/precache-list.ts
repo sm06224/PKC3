@@ -30,7 +30,7 @@ export function parsePrecacheList(text: string): readonly string[] {
     throw new Error(`${PRECACHE_LIST_FILE} が JSON として読めません`, { cause: e });
   }
   if (!Array.isArray(raw)) throw new Error(`${PRECACHE_LIST_FILE} が配列ではありません`);
-  if (raw.length === 0) throw new Error(`${PRECACHE_LIST_FILE} が空です(配る物が 1 つも無い)`);
+  if (raw.length === 0) throw new Error(`${PRECACHE_LIST_FILE} が空です(配布する物が 1 つも無い)`);
   const out: string[] = [];
   for (const v of raw) {
     if (typeof v !== 'string' || v === '') {
@@ -50,7 +50,7 @@ export function parsePrecacheList(text: string): readonly string[] {
  */
 export function precacheEntryPath(ref: string): string {
   if (ref.startsWith('/')) {
-    throw new Error(`配置場所を根に決め打ちした参照が一覧に在ります: ${ref}`);
+    throw new Error(`配置場所を根に決め打ちした参照が一覧にあります: ${ref}`);
   }
   return ref.replace(/^\.\//, '');
 }

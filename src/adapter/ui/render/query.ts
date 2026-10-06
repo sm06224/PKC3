@@ -182,7 +182,7 @@ export class QueryRenderer {
      * 数えられない環境で「集計を数えています…」が**永久に出続ける**。
      */
     if (state.queryFailed) {
-      note.textContent = 'この版では集計を数えられませんでした(読み込み直すと直ることがあります)';
+      note.textContent = 'このタブの PKC3 が古いままのため、集計を数えられませんでした。再読み込みしてください';
       return;
     }
     if (keys === null) parts.push('集計を数えています…');
@@ -191,7 +191,7 @@ export class QueryRenderer {
     if (keys !== null && keys.omittedKeys > 0)
       parts.push(`項目は多い順に ${QUERY_LIMITS.keys} 個まで(あと ${keys.omittedKeys} 個)`);
     if (groups !== null && groups.omittedGroups > 0)
-      parts.push(`組は多い順に ${QUERY_LIMITS.groups} 組まで(あと ${groups.omittedGroups} 組)`);
+      parts.push(`グループは多い順に ${QUERY_LIMITS.groups} グループまで(あと ${groups.omittedGroups} グループ)`);
     note.textContent = parts.join(' / ');
   }
 

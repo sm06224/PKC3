@@ -125,8 +125,8 @@ export function chooseImage(args: {
 
   if (stored === null)
     return hasEmbedded
-      ? { use: 'embedded', why: '保存領域がまだ空なので、配られた中身を開きます' }
-      : { use: 'fresh', why: '新しい保存領域を作ります' };
+      ? { use: 'embedded', why: 'このブラウザにはまだ保存されたノートが無いので、この HTML ファイルに埋め込まれた中身を開きます' }
+      : { use: 'fresh', why: 'このブラウザにはまだ保存されたノートが無いので、新しく始めます' };
 
   /**
    * ⚠ **別のバンドルの記録が返ってきたら、それは器の名前空間が壊れている合図**である。
@@ -134,13 +134,13 @@ export function chooseImage(args: {
    */
   if (stored.bundleId !== bundle.id)
     return hasEmbedded
-      ? { use: 'embedded', why: '保存領域に別のバンドルの記録があるので、配られた中身を開きます' }
-      : { use: 'fresh', why: '保存領域に別のバンドルの記録があるので、新しい保存領域を作ります' };
+      ? { use: 'embedded', why: 'このブラウザに保存されているのは別の PKC3 入り HTML のノートなので、この HTML ファイルに埋め込まれた中身を開きます' }
+      : { use: 'fresh', why: 'このブラウザに保存されているのは別の PKC3 入り HTML のノートなので、新しく始めます' };
 
   if (stored.bytes <= 0)
     return hasEmbedded
-      ? { use: 'embedded', why: '保存領域の記録が空だったので、配られた中身を開きます' }
-      : { use: 'fresh', why: '保存領域の記録が空だったので、新しい保存領域を作ります' };
+      ? { use: 'embedded', why: 'このブラウザに保存されているノートが空なので、この HTML ファイルに埋め込まれた中身を開きます' }
+      : { use: 'fresh', why: 'このブラウザに保存されているノートが空なので、新しく始めます' };
 
   if (!hasEmbedded) return { use: 'stored', why: 'この端末に保存された中身を開きます' };
 
@@ -150,5 +150,5 @@ export function chooseImage(args: {
    */
   return stored.savedAt >= bundle.exportedAt
     ? { use: 'stored', why: 'この端末で編集した中身のほうが新しいので、そちらを開きます' }
-    : { use: 'embedded', why: '配られた中身のほうが新しいので、そちらを開きます' };
+    : { use: 'embedded', why: 'この HTML ファイルに埋め込まれた中身のほうが新しいので、そちらを開きます' };
 }

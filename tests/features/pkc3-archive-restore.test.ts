@@ -116,14 +116,14 @@ describe('復元 — 履歴を鎖のまま返す', () => {
     ]);
   });
 
-  it('🔴 entry の無い履歴(ゴミ箱の版)は黙って落とさない', () => {
+  it('🔴 ノートの無い履歴(ゴミ箱の版)は黙って落とさない', () => {
     // 鎖の起点 = tip(entries.body)が無いと decode できない ── 復元しないが言う
     const got = restoreArchive(
       archive({ entries: [entry('n1')], revisions: [rev('n1', 1), rev('gone', 1)] }),
       opts(),
     );
     expect(got.revisionChains).toHaveLength(1);
-    expect(got.warnings).toContain('entry の無い履歴 1 版は復元しませんでした(ゴミ箱の版)');
+    expect(got.warnings).toContain('ノートの無い履歴 1 版は復元しませんでした(ゴミ箱の版)');
   });
 
   it('保存形(kind / snapshot)をそのまま渡す(ここで decode しない)', () => {
@@ -185,18 +185,18 @@ describe('アーカイブの版 — 古い版を読めるまま受ける', () =>
 
   it('未来の版は断る(読めたつもりにさせない)', async () => {
     await expect(readArchive(await makeZip(ARCHIVE_VERSION + 1, []))).rejects.toThrow(
-      /未対応のアーカイブ版/,
+      /PKC3 が読めるバックアップのバージョン/,
     );
   });
 
   it('版が数値でないアーカイブも断る', async () => {
     await expect(readArchive(await makeZip('2' as unknown as number, []))).rejects.toThrow(
-      /未対応のアーカイブ版/,
+      /PKC3 が読めるバックアップのバージョン/,
     );
   });
 });
 
-describe('アーカイブの版 — 書出しは新しい版で刻む', () => {
+describe('アーカイブの版 — 書き出しは新しい版で刻む', () => {
   it('manifest の version が現行 = 2', async () => {
     const src = {
       cid: 'c1',

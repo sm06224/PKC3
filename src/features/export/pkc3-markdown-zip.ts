@@ -262,7 +262,7 @@ export async function writeMarkdownZip(
 
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら読み出しの前に断る(捨てるためだけに store を舐めない)
-  if (metas.length === 0) throw new Error('書き出せる entry が 1 件もありません');
+  if (metas.length === 0) throw new Error('書き出せるノートが 1 件もありません');
   const metaOf = new Map(metas.map((m) => [m.lid, m]));
 
   // 添付の拡張子は**本文を書く前に**要る(参照を相対パスへ書き換えるため)
@@ -287,7 +287,7 @@ export async function writeMarkdownZip(
     for (const r of rows) {
       const m = metaOf.get(r.lid);
       if (!m) {
-        warnCapped('orphan-body', '一覧に無い entry の注意', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warnCapped('orphan-body', '一覧に無いノートの注意', `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`);
         continue;
       }
       // ⚠ **読むだけ**。書くのは原文 splice(冒頭の解説)
@@ -308,7 +308,7 @@ export async function writeMarkdownZip(
         warnCapped(
           'fm-blind',
           'frontmatter の読み取りの注意',
-          `frontmatter を読み切れないので title / archetype を上書きしたか確認できません: ${m.title || m.lid}`,
+          `frontmatter を読み切れないので 題名 / 種類を上書きしたか確認できません: ${m.title || m.lid}`,
         );
       } else {
         for (const [k, v] of Object.entries(mine)) {
@@ -316,7 +316,7 @@ export async function writeMarkdownZip(
             warnCapped(
               `overwrite-${k}`,
               `frontmatter の ${k} の上書き`,
-              `frontmatter の ${k} を entry の値で上書きしました: ${m.title || m.lid}`,
+              `frontmatter の ${k} をノートの値で上書きしました: ${m.title || m.lid}`,
             );
           }
         }
@@ -391,8 +391,8 @@ export async function writeMarkdownZip(
       if (leftover > 0) {
         warnCapped(
           'leftover-ref',
-          'リンクの形になっていない添付参照の注意',
-          `リンクの形になっていない添付参照 ${leftover} 件はそのまま残ります(外では開けません): ${m.title || m.lid}`,
+          'リンクの形になっていない添付への参照の注意',
+          `リンクの形になっていない添付への参照 ${leftover} 件はそのまま残ります(外では開けません): ${m.title || m.lid}`,
         );
       }
 
@@ -429,10 +429,10 @@ export async function writeMarkdownZip(
     after = next;
   }
 
-  if (entryCount === 0) throw new Error('書き出せる entry が 1 件もありません');
+  if (entryCount === 0) throw new Error('書き出せるノートが 1 件もありません');
   // 🔴 一覧にあって本文が返らなかった ── 黙って消すと manifest の件数まで嘘になる
   if (entryCount < metas.length) {
-    warnings.push(`一覧にあって本文が取れなかった entry が ${metas.length - entryCount} 件あります`);
+    warnings.push(`一覧にあって本文が取れなかったノートが ${metas.length - entryCount} 件あります`);
   }
 
   // ── 添付: **参照されているものだけ**。中身は Blob をそのまま(コピーしない)
@@ -463,7 +463,7 @@ export async function writeMarkdownZip(
     // 🔑 **黙って大きくしない**(#213、裁定 A)。⚠ 「減らせる」とは言わない ──
     //    控えを落とすと、この zip から戻しても履歴が消える(別の話である)
     warnings.push(
-      `添付の控え(過去の版)${historyCount} 件・約 ${humanBytes(historyBytes)} を含みます`,
+      `添付の過去の版 ${historyCount} 件・約 ${humanBytes(historyBytes)} を含みます`,
     );
   }
   const skipped = assetMetas.length - used.size;
@@ -474,7 +474,7 @@ export async function writeMarkdownZip(
   // ── 落ちるものを刻む(§3-2)
   const relations = (await src.listRelations()).length;
   const revisionEntries = (await src.listRevisionLids()).length;
-  if (relations > 0) warnings.push(`関連 ${relations} 件は markdown では表せないので落ちます`);
+  if (relations > 0) warnings.push(`つながり ${relations} 件は markdown では表せないので落ちます`);
   if (revisionEntries > 0) {
     warnings.push(`履歴を持つノート ${revisionEntries} 件の履歴は落ちます`);
   }
@@ -491,7 +491,7 @@ export async function writeMarkdownZip(
         title: src.title,
         // 🔴 「戻せない」を**機械可読に**刻む。後から見分けられない形にしない
         reversible: false,
-        note: 'PKC3 から外へ出すための片道形式です。関連・履歴は含まれません。',
+        note: 'PKC3 から外へ出すための、PKC3 へ取り込み直せない形式です。つながり・履歴は含まれません。',
         entry_count: entryCount,
         asset_count: assetCount,
         // ⚠ `asset_count` に**含まれる**内訳(#213)── 外から見て理由が分かるように

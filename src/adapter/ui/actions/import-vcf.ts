@@ -102,7 +102,7 @@ export async function importVcfFiles(
     }
   } catch (e) {
     return fail(
-      `vCard を読めませんでした(書込は行われていません): ${e instanceof Error ? e.message : String(e)}`,
+      `vCard を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
     );
   }
   if (rows.length === 0) {
@@ -113,7 +113,7 @@ export async function importVcfFiles(
     await deps.bulkUpsertEntries(rows);
   } catch (e) {
     await deps.reload().catch(() => {});
-    return fail(`取込に失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   await deps.reload();
@@ -141,8 +141,8 @@ export async function importVcfFiles(
   deps.report?.(notes);
   const head =
     hidden > 0
-      ? `取込完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
-      : `取込完了: 連絡先 ${rows.length} 件`;
-  deps.notify?.(notes.length > 0 ? `${head} ⚠ 注意 ${notes.length} 件` : head);
+      ? `取り込み完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
+      : `取り込み完了: 連絡先 ${rows.length} 件`;
+  deps.notify?.(notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head);
   return rows.length;
 }

@@ -6,7 +6,7 @@
 <title>PDF — PKC3</title>
 <link rel="icon" href="data:,">
 <!--
-  PDF を **PKC の画面で読む別窓**(#275 段①。裁定: 設定で選んだ人だけ。既定はブラウザ内蔵の表示)。
+  PDF を **PKC3 の画面で読む別窓**(#275 段①。裁定: 設定で選んだ人だけ。既定はブラウザ内蔵の表示)。
 
   ## この file は bundle しない
   `public/` に置いた素の HTML である(Office の `public/office/host.html` と同じ作り)。
@@ -75,17 +75,17 @@
 <div id="bar">
   <button id="zoom-out" type="button" title="小さくする">−</button>
   <button id="zoom-in" type="button" title="大きくする">＋</button>
-  <button id="zoom-fit" type="button" title="窓の幅に合わせる">幅に合わせる</button>
-  <button id="prev" type="button" title="前の頁へ">前の頁</button>
-  <input id="pageno" type="text" inputmode="numeric" aria-label="頁">
+  <button id="zoom-fit" type="button" title="ウィンドウの幅に合わせる">幅に合わせる</button>
+  <button id="prev" type="button" title="前のページへ">前のページ</button>
+  <input id="pageno" type="text" inputmode="numeric" aria-label="ページ">
   <span id="pagecount"></span>
-  <button id="next" type="button" title="次の頁へ">次の頁</button>
+  <button id="next" type="button" title="次のページへ">次のページ</button>
   <input id="query" type="search" placeholder="文書内を検索" aria-label="文書内を検索">
   <button id="hit-prev" type="button" title="前の一致へ">前の一致</button>
   <button id="hit-next" type="button" title="次の一致へ">次の一致</button>
   <span id="hits"></span>
   <span class="sp"></span>
-  <button id="quote" type="button" disabled title="選んだ字を、ノートの末尾へ頁番号つきで引きます">ノートへ引く</button>
+  <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
 </div>
 <div id="scroller"><div id="pages"></div></div>
 <div id="status" role="status"></div>

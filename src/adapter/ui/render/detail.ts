@@ -95,7 +95,7 @@ import {
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
 // 🔑 目印の表は**共有の 1 本**(2026-09-13)── 絵の一覧・「なし」・いま選んでいる物の
 //    示し方は、この面と小窓で**同じ物**を使う(2 か所に散らさない ── §7)
-// ⚠ 件数(「絵から選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
+// ⚠ 件数(「アイコンから選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
 //    1 つ足した日に嘘になる。⚠ 絵の一覧そのものをここで読むと表が 2 本になるので、
 //    数だけを受け取る(門は `tests/adapter/icon-palette.test.ts`)
 import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
@@ -2233,7 +2233,7 @@ export class DetailRenderer {
          *   ない。引く相手は保存済みのノートなので、打鍵では答えの元が動かない
          *   (SQL の字が変われば別の問い合わせとして引く。保存して抜ければ読む面が引き直す)。
          */
-        // 🔴 答えに「保存したときの答え」を添える(#1254 §1)── 下見は保存済みの本文で引くので、
+        // 🔴 答えに「保存したときの結果」を添える(#1254 §1)── 下見は保存済みの本文で引くので、
         //   打っている最中の SQL の答えではない(読む面は保存済みそのものなので添えない)
         this.sqlEmbeds.sync(preview, open.body, true);
       },
@@ -2560,7 +2560,7 @@ export class DetailRenderer {
         note.textContent =
           why === null || why.kind !== 'unreadable'
             ? 'この文書の情報を更新しました'
-            : `この文書の情報が読めなくなりました(${why.detail})── 書いた内容は本文に残っています`;
+            : `この文書の情報が読めなくなりました(${why.detail})。書いた内容は本文に残っています`;
       });
       fmCard.append(ta, ok, cancel);
       ta.focus();
@@ -2728,7 +2728,7 @@ export class DetailRenderer {
         body = folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
         this.onBodyChange?.(body);
       });
-      note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
+      note.textContent = `この本文は行ごとに編集できません(${reason})。原文で編集します`;
       /**
        * ⚠ **札を畳む**(#284)── 退避先の入力欄には**原文(情報込み)**が入る。
        *   札を出したままにすると、同じ情報を編集する口が 2 つになり、
@@ -2923,7 +2923,7 @@ export class DetailRenderer {
           iconButton('launch-asset-raw', 'ノートを渡して開く', 'launch-asset-raw'),
         );
         rawRun.title =
-          'PKC3 と同じ保存領域で開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
+          'PKC3 と同じサイトのデータを使って開きます。自分でデータを保存するアプリも動きますが、このアプリは PKC3 のノートを全部読めますし、書き換えもできます';
         info.append(rawRun);
         /**
          * 🔴 **目次を見せて起動**(#195 / C-5 段①)。
@@ -2937,7 +2937,7 @@ export class DetailRenderer {
          */
         if (this.extensionGrants.isGranted(meta.assetKey)) {
           run.title =
-            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しはシステムから';
+            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます。取り消しはシステムから';
         } else {
           const extRun = launchOf(
             iconButton('launch-asset-extension', '目次を見せて開く', 'launch-asset-extension'),
@@ -3640,7 +3640,7 @@ function diffBadge(added: number | null, removed: number | null): HTMLElement | 
   span.textContent = `+${added} −${removed}`;
   // ⚠ **何との比較かを書く**(数字だけだと、今の本文との差だと読まれる)
   // ⚠ **向きは開いた見出しと同じ**(`+` = この版にだけある行 = 戻すと戻る行)
-  span.title = '1 つ新しい版とくらべて ─ + はこの版にだけある行 / − は 1 つ新しい版にだけある行';
+  span.title = '1 つ新しい版とくらべます(+ はこの版にだけある行 / − は 1 つ新しい版にだけある行)';
   return span;
 }
 
@@ -3743,7 +3743,7 @@ function renderRevisionDiff(
   // ── くらべる相手(E の仕分け: 閉じた選択肢を 1 つ選ぶ。値 = current / rev:<id> / file)
   const pick = document.createElement('div');
   const pickLabel = document.createElement('label');
-  pickLabel.append('くらべる相手 ');
+  pickLabel.append('比較先 ');
   const select = document.createElement('select');
   select.setAttribute('data-pkc-action', 'set-revision-compare');
   select.setAttribute('data-pkc-field', 'revision-compare');
@@ -3991,11 +3991,11 @@ function appIconPick(current: unknown, lid: string): HTMLElement {
   box.open = now !== '';
   const head = document.createElement('summary');
   /**
-   * ⚠ **件数を書く**(「絵から選ぶ」だけにしない)── 開く前に「どれだけ出るか」が
+   * ⚠ **件数を書く**(「アイコンから選ぶ」だけにしない)── 開く前に「どれだけ出るか」が
    *   分かると、押すかどうかを決められる。
    * 🔑 数は表を組む file から採る ── 字で書くと、絵を 1 つ足した日に嘘になる。
    */
-  head.textContent = `絵から選ぶ(${ICON_CHOICE_COUNT})`;
+  head.textContent = `アイコンから選ぶ(${ICON_CHOICE_COUNT})`;
   box.append(head, appIconPalette(current, lid));
   return box;
 }
@@ -4022,7 +4022,7 @@ function appIconPalette(current: unknown, lid: string): HTMLElement {
   return buildIconPalette({
     current: typeof current === 'string' ? current : '',
     field: 'app-icon-palette',
-    ariaLabel: 'タイルの目印を選ぶ',
+    ariaLabel: 'タイルのアイコンを選ぶ',
     each: (btn) => {
       btn.setAttribute('data-pkc-action', 'pick-app-icon');
       // 🔴 **絵の 1 つ 1 つが効く先を持つ**(#848)── 表は留めた枠にも出る

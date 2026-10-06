@@ -107,5 +107,5 @@ export function duplicateNote(hits: readonly DuplicateHit[], cap = 3): string | 
   const names = hits.slice(0, cap).map((h) => `「${h.title}」`).join('、');
   // ⚠ **切ったことを言う**(黙って切ると「これで全部」と読まれる)
   const rest = hits.length > cap ? ` ほか ${hits.length - cap} 件` : '';
-  return `同じ内容のノートが ${hits.length} 件ありました(${names}${rest})── 取り込みは止めていないので、要らないほうは消してください`;
+  return `同じ内容のノートが ${hits.length} 件ありました(${names}${rest})。取り込みは止めていないので、要らないほうは消してください`;
 }

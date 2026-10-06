@@ -70,7 +70,7 @@ export const OSS_SOURCE_URL = 'https://github.com/sm06224/PKC3';
 
 /** 「開発: …」の 1 行。 */
 export function ossDeveloperLine(): string {
-  return `開発: ${OSS_DEVELOPER} ── ${OSS_AI_COAUTHOR}`;
+  return `開発: ${OSS_DEVELOPER} / ${OSS_AI_COAUTHOR}`;
 }
 
 /** 一覧の見出しに出す、件数つきの字。⚠ **切るのはここ 1 か所**(面ごとに数えない)。 */
@@ -93,5 +93,5 @@ export function ossNoticesMissingText(license: string): string {
  *   別々に古びるのを防ぐ。
  */
 export const OSS_SCOPE_NOTE =
-  'Office 表示のための LibreOffice 一式と、DuckDB を動かす追加の部品は、' +
+  'Office 表示のための LibreOffice 一式と、DuckDB を動かす追加のライブラリは、' +
   'ここには数えていません。使うときにこの端末へ直接入る、別の配布だからです。';

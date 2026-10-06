@@ -192,7 +192,7 @@ describe('書込が落ち着いたら 1 回だけ打つ(#999 段③)', () => {
       { kind: 'job', source: 'storage-optimize', text: optimizeDoneText(400, 12 * MiB) },
     ]);
     // ⚠ 字の実物も 1 度は見る(関数を通しただけで「合っている」と言わない)
-    expect(r.posts[0]?.text).toBe('索引を片づけました(0.4 秒、空き 12.0 MiB)');
+    expect(r.posts[0]?.text).toBe('索引を整理しました(0.4 秒、空き 12.0 MB)');
     // その後も黙っていれば、もう打たない(1 回につき 1 件)
     await r.advance(AUTO_OPTIMIZE_MIN_INTERVAL_MS * 5);
     expect(r.optimizeCalls()).toBe(1);

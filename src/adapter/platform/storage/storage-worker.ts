@@ -1856,7 +1856,7 @@ function restoreOneChain(
     const hash = contentHash64Hex(state);
     if (r.contentHash !== null && hash !== r.contentHash) {
       throw new Error(
-        `履歴が噛み合いません(版 ${r.revOrder})── アーカイブが壊れているか、本文が書き出し時と違います`,
+        `履歴の順序が合いません(版 ${r.revOrder})。バックアップが読めない状態か、本文が書き出し時と違います`,
       );
     }
     // 「変更あり commit だけ刻む」= P5b の規律(取込経路と同じ)
@@ -1962,8 +1962,8 @@ function writeParent(
   ]) as number;
   if (taken > 0) {
     throw new Error(
-      '居場所を書き込めませんでした(同じ番号が既に使われています)。' +
-        '窓を 2 つ開いている場合は 1 つ閉じて、もう一度お試しください。',
+      'フォルダへの所属を書き込めませんでした(同じ番号が既に使われています)。' +
+        'ウィンドウを 2 つ開いている場合は 1 つ閉じて、もう一度お試しください。',
     );
   }
   database.exec({
@@ -2520,7 +2520,7 @@ async function exportOneTable(
       if ((n & 255) === 0 && performance.now() - sliceStart >= EXPORT_SLICE_MS) {
         await yieldToQueue();
         if (!alive()) {
-          return fail(columns, '写しの途中で閉じられました(もう一度引いてください)', fks);
+          return fail(columns, '読み込みの途中で閉じられました(もう一度押してください)', fks);
         }
         sliceStart = performance.now();
       }
@@ -2654,7 +2654,7 @@ const handlers: Handlers = {
       | ((db: unknown, n: number, fn: number, arg: number) => void)
       | undefined;
     if (install === undefined || setProgress === undefined) {
-      throw new Error('この版では問い合わせを止められないので走らせません');
+      throw new Error('このバージョンでは問い合わせを止められないので実行しません');
     }
     const pointer = (database as unknown as { pointer: unknown }).pointer;
     const started = Date.now();
@@ -2854,7 +2854,7 @@ const handlers: Handlers = {
       } catch (e) {
         // ⚠ **読めなかった器も閉じる**(下の sqlite 側と同じ理由)
         db.close();
-        throw new Error(`この file は ${src.kind} として読めませんでした(${String(e)})`, {
+        throw new Error(`このファイルは ${src.kind} として読めませんでした(${String(e)})`, {
           cause: e,
         });
       }
@@ -2876,7 +2876,7 @@ const handlers: Handlers = {
        *   振る舞いは変わらないが、断った回に器が残るのは「速やかな破棄」の逆である。
        */
       db.close();
-      throw new Error(`この file は sqlite の DB として読めませんでした(${String(e)})`, {
+      throw new Error(`このファイルは sqlite の DB として読めませんでした(${String(e)})`, {
         cause: e,
       });
     }
@@ -2931,7 +2931,7 @@ const handlers: Handlers = {
       } catch {
         // 次の回は新しい器を作る
       }
-      throw new Error(`この file は sqlite の DB として読めませんでした(${String(e)})`, {
+      throw new Error(`このファイルは sqlite の DB として読めませんでした(${String(e)})`, {
         cause: e,
       });
     }
@@ -2947,7 +2947,7 @@ const handlers: Handlers = {
   exportSqliteTable: (req) => {
     const db = exportDbs.get(req.session);
     if (db === undefined) {
-      throw new Error('取り込んだ .sqlite の写しが開かれていません(もう一度引いてください)');
+      throw new Error('取り込んだ .sqlite のコピーが開かれていません(もう一度実行してください)');
     }
     return exportOneTable(db, req.table, req.maxTableBytes, () => exportDbs.get(req.session) === db);
   },
@@ -4235,7 +4235,7 @@ const handlers: Handlers = {
         "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?",
         [req.table],
       );
-      if (Number(known) !== 1) throw new Error(`検める表が無い: ${req.table}`);
+      if (Number(known) !== 1) throw new Error(`確認する表が無い: ${req.table}`);
       target = `"${req.table.replaceAll('"', '""')}"`;
     }
     database.exec({

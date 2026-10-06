@@ -19,12 +19,12 @@ import { renderSchemaDigest } from '../../src/features/query/schema-digest';
 
 const report = (over: Partial<DuckDbCopyReport> = {}): DuckDbCopyReport => ({ ...EMPTY_DUCK_COPY, ...over });
 const big = { name: '大きい', view: false, why: 'x' };
-const view = { name: '月別', view: true, why: 'ビューは写しません' };
+const view = { name: '月別', view: true, why: 'ビューは読み込みません' };
 
 describe('🔴 逃げ道は、並べているかで変わる(D7)', () => {
   it('1 件だけ → 内蔵の sqlite を選べる / 並べている → 選べない(DuckDB 固定)ので、1 つに戻すよう言う', () => {
-    expect(sqliteFallbackHint(false)).toBe('内蔵の sqlite なら引けます');
-    expect(sqliteFallbackHint(true)).toBe('file を 1 つに戻すと内蔵の sqlite で引けます');
+    expect(sqliteFallbackHint(false)).toBe('内蔵の sqlite なら調べられます');
+    expect(sqliteFallbackHint(true)).toBe('ファイルを 1 つに戻すと内蔵の sqlite で調べられます');
   });
 });
 
@@ -32,15 +32,15 @@ describe('🔴 写せなかった表・ビューの 1 行', () => {
   it('表は名前を並べ、ビューは「写らない」と言う。逃げ道は末尾に 1 度だけ', () => {
     const r = report({ refused: [big, { ...big, name: '無い' }, view] });
     expect(refusedLine(r, false)).toBe(
-      '写せなかった表: 大きい、無い / 写らないビュー: 月別(ビューは写しません)(内蔵の sqlite なら引けます)',
+      '読み込めなかった表: 大きい、無い / 読み込まれないビュー: 月別(ビューは読み込みません)(内蔵の sqlite なら調べられます)',
     );
-    expect(refusedLine(r, true)).toContain('(file を 1 つに戻すと内蔵の sqlite で引けます)');
-    expect(refusedLine(r, true), '並べているのに押せない道を案内している').not.toContain('内蔵の sqlite なら引けます');
+    expect(refusedLine(r, true)).toContain('(ファイルを 1 つに戻すと内蔵の sqlite で調べられます)');
+    expect(refusedLine(r, true), '並べているのに押せない道を案内している').not.toContain('内蔵の sqlite なら調べられます');
   });
 
   it('ビューだけでも出る(ビューが在ることを、写さなかったと言わないと「無い」と読まれる)', () => {
-    expect(refusedLine(report({ refused: [view] }), false)).toContain('写らないビュー: 月別');
-    expect(refusedLine(report({ refused: [view] }), false)).not.toContain('写せなかった表');
+    expect(refusedLine(report({ refused: [view] }), false)).toContain('読み込まれないビュー: 月別');
+    expect(refusedLine(report({ refused: [view] }), false)).not.toContain('読み込めなかった表');
   });
 
   it('名前が空の表は「名前の無い表」と言う(空の字を出さない)', () => {
@@ -57,15 +57,15 @@ describe('🔴 写せなかった表・ビューの 1 行', () => {
 describe('🔴 全部の列を文字で写した表(D6)', () => {
   it('表の名前を言い、数として使うときは CAST と案内する', () => {
     const line = asTextLine(report({ asText: ['価格', '混在'] }));
-    expect(line).toContain('全部の列を文字で写した表: 価格、混在');
+    expect(line).toContain('全部の列を文字にした表: 価格、混在');
     expect(line).toContain('CAST');
     expect(asTextLine(EMPTY_DUCK_COPY)).toBe('');
   });
 
-  it('帯は 2 つの行を 1 行に繋ぐ(帯の行を増やして表を押し下げない)', () => {
+  it('帯は 2 つの行を 1 行につなぐ(帯の行を増やして表を押し下げない)', () => {
     const band = copyBandNote(report({ refused: [big], asText: ['価格'] }), false);
-    expect(band).toContain('写せなかった表: 大きい');
-    expect(band).toContain('全部の列を文字で写した表: 価格');
+    expect(band).toContain('読み込めなかった表: 大きい');
+    expect(band).toContain('全部の列を文字にした表: 価格');
     expect(band).not.toContain('\n');
   });
 });
@@ -81,7 +81,7 @@ describe('🔴 構造ノートの注記(D3 / D6)', () => {
 
   it('写せなかった表の行が先 / 型の丸めが後', () => {
     expect(copyDigestNotes(report({ sqlite: true, refused: [big] }), true)).toEqual([
-      '写せなかった表: 大きい(file を 1 つに戻すと内蔵の sqlite で引けます)',
+      '読み込めなかった表: 大きい(ファイルを 1 つに戻すと内蔵の sqlite で調べられます)',
       DUCKDB_ROUNDED_TYPES_NOTE,
     ]);
   });
@@ -98,11 +98,11 @@ describe('🔴 構造ノートの注記(D3 / D6)', () => {
       fks,
       notes: copyDigestNotes(report({ sqlite: true, refused: [big] }), false),
     });
-    expect(md).toContain('⚠ 写せなかった表: 大きい');
+    expect(md).toContain('⚠ 読み込めなかった表: 大きい');
     expect(md).toContain(`⚠ ${DUCKDB_ROUNDED_TYPES_NOTE}`);
     // 対照群:notes を渡さなければ、今までの字のまま(内蔵の sqlite の構造に何も足さない)
     const plain = renderSchemaDigest({ source: '家計.sqlite', columns, fks });
-    expect(plain).not.toContain('写せなかった');
+    expect(plain).not.toContain('読み込めなかった');
     expect(plain).not.toContain('丸めています');
     // 全部が写せなかった `.sqlite` は「表もビューも 1 つもありません」だけでは「空」と読める
     const empty = renderSchemaDigest({
@@ -112,6 +112,6 @@ describe('🔴 構造ノートの注記(D3 / D6)', () => {
       notes: copyDigestNotes(report({ refused: [big] }), false),
     });
     expect(empty).toContain('表もビューも 1 つもありません。');
-    expect(empty).toContain('⚠ 写せなかった表: 大きい');
+    expect(empty).toContain('⚠ 読み込めなかった表: 大きい');
   });
 });

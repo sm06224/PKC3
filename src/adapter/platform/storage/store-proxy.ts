@@ -528,7 +528,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (this.terminated) return Promise.reject(new Error('store client terminated'));
     if (this.state === 'dead')
       return Promise.reject(
-        new Error('本体への切り替えに失敗しています(タブを読み直してください)'),
+        new Error('本体への切り替えに失敗しています(タブを再読み込みしてください)'),
       );
     if (this.state === 'real' && this.realClient) return this.realClient.request(req);
     if (this.state === 'promoting') {
@@ -784,7 +784,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         return;
       }
       case 'changed': {
-        if (msg.origin === this.id) return; // 自分の書込は自分の state が既に知っている
+        if (msg.origin === this.id) return; // 自分の書き込みは自分の state が既に知っている
         for (const fn of this.changedListeners) fn(msg.cid, msg.lids);
         return;
       }

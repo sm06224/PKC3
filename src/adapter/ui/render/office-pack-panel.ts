@@ -39,7 +39,7 @@ export function packStatusText(meta: OfficePackMeta | null): string {
     ? '日時不明'
     : `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
   const from = meta.source === 'url' ? '配布元から' : 'ファイルから';
-  return `入っています ── ${meta.version} / ${humanBytes(meta.totalBytes)} / ${date} に${from}設置`;
+  return `入っています(${meta.version} / ${humanBytes(meta.totalBytes)} / ${date} に${from}設置)`;
 }
 
 /**
@@ -58,7 +58,7 @@ export function packBuildText(meta: OfficePackMeta | null): string {
   const parts: string[] = [];
   // ⚠ sha は**先頭 12 字**(全部は読めないし、突合には足りる)
   if (b.loSha !== '') parts.push(`LibreOffice ${b.loSha.slice(0, 12)}`);
-  if (b.builtAt !== '') parts.push(`焼いた日時 ${b.builtAt}`);
+  if (b.builtAt !== '') parts.push(`ビルド日時 ${b.builtAt}`);
   if (b.runId !== '') parts.push(`ビルド番号 ${b.runId}`);
   if (b.qtRef !== '') parts.push(`Qt ${b.qtRef}`);
   if (b.emsdk !== '') parts.push(`emsdk ${b.emsdk}`);
@@ -83,7 +83,7 @@ export function packCapabilityText(): string {
    * いまは初回に 1 回読み直して成立させるので、ここに残るのは
    * **本当にブラウザが足りない場合**だけである。だから次の一歩を書く。
    */
-  return `この環境では動きません ── ${missing.join(' / ')}。`
+  return `この環境では動きません: ${missing.join(' / ')}。`
     + 'Office 表示は Chrome / Edge などの新しい Chromium 系が要ります。';
 }
 
@@ -155,7 +155,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   intro.setAttribute('data-pkc-field', 'settings-note');
   intro.textContent =
     'Word / Excel / PowerPoint の添付を、別のウィンドウで開いて読めるようにします。'
-    + `${OFFICE_PACK_APPROX} の一式をこの端末に入れます ── 一度入れれば、次からは端末の中から起動します。`;
+    + `${OFFICE_PACK_APPROX} の一式をこの端末に入れます。一度入れれば、次からは端末の中から起動します。`;
   root.append(intro);
 
   const status = document.createElement('p');

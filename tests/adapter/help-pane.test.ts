@@ -289,7 +289,7 @@ describe('ヘルプの面', () => {
       'help-oss',
       'help-manual-open',
       'help-find-bar',
-      'settings-note:目次 ── ',
+      'settings-note:目次: 見出',
       'help-toc',
       // ⚠ **本文の直前**(#779 段⑧)── 飛び先は本文の深い所なので、帰り道は
       //    本文の頭に貼り付けて置く(CSS の `sticky`)。既定は `hidden` で畳む

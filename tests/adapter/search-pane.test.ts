@@ -218,7 +218,7 @@ describe('探す面(#680)', () => {
     expect(rows(), '打った瞬間に前の行が消えた').toHaveLength(1);
     await settle();
     expect(rows()).toHaveLength(0);
-    expect(note()).toContain('「かい」に当たるノートはありません');
+    expect(note()).toContain('「かい」に一致するノートはありません');
   });
 
   it('⚠ 空にしたら頼まず、結果も空に戻る', async () => {

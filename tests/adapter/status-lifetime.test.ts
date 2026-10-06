@@ -242,8 +242,8 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
     ['問題', { kind: 'problem' as const }],
   ])('🔴 %s の知らせが来たら、進行中の欄も空になる(処理の終わりは結果で告げられる)', (_n, opts) => {
     const r = rig();
-    r.n.show('可搬 HTML を書き出しています…');
-    expect(r.n.progressLine()).toBe('可搬 HTML を書き出しています…'); // 前提(対照群)
+    r.n.show('PKC3 入り HTML を書き出しています…');
+    expect(r.n.progressLine()).toBe('PKC3 入り HTML を書き出しています…'); // 前提(対照群)
     r.n.show('書き出しました', opts);
     expect(r.n.progressLine(), '終わりを告げる知らせが来ても進行中が居座った').toBe('');
     expect(r.n.noticeLine()).toBe('書き出しました');
@@ -292,7 +292,7 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
 
   it('🔴 行き先の判定 ── 進行中 / 終わり / 知らせ', () => {
     expect(routeStatusText('書き出しています…')).toBe('progress');
-    expect(routeStatusText('取込中…(12 件を書き込んでいます)')).toBe('progress');
+    expect(routeStatusText('取り込み中…(12 件を書き込んでいます)')).toBe('progress');
     expect(routeStatusText('')).toBe('progress-end');
     expect(routeStatusText('コピーしました')).toBe('notice');
     // 対照:途中に `…` があっても末尾でなければ結果(「…」を含む題名を結果に出す)
@@ -421,12 +421,12 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/export-portable.ts',
-      starts: ["deps.notify('可搬 HTML を書き出しています…');"],
+      starts: ["deps.notify('PKC3 入り HTML を書き出しています…');"],
       end: /deps\.notify\(''\)/,
     },
     {
       file: 'src/adapter/ui/actions/import-pkc2.ts',
-      starts: ["deps.notify?.('取込中…(ファイルを読んでいます)');", 'deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);'],
+      starts: ["deps.notify?.('取り込み中…(ファイルを読んでいます)');", 'deps.notify?.(`取り込み中…(${rows.length} 件を書き込んでいます)`);'],
       end: /deps\.notify\?\.\(''\)/,
     },
     {
@@ -436,12 +436,12 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/capture-transcribe.ts',
-      starts: ['deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の部品)`);'],
+      starts: ['deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式)`);'],
       end: /deps\.notify\(''\)/,
     },
     {
       file: 'src/adapter/ui/actions/selfhost.ts',
-      starts: ["deps.notify('自分のパソコンで動かす一式を組んでいます…');"],
+      starts: ["deps.notify('自分のパソコンで動かす zip を作っています…');"],
       end: /finally \{[\s\S]*deps\.notify\(''\)/,
     },
     {

@@ -156,7 +156,7 @@ describe('自分のパソコンで動かす ── 一式を組む', () => {
     const { d, said } = deps(HEALTHY);
     await downloadSelfhostBundle(d);
     expect(said).toHaveLength(3);
-    expect(said[0]).toContain('組んでいます');
+    expect(said[0]).toContain('作っています');
     expect(said[1]).toContain('http://localhost:8787');
     // 🔴 最後に必ず進行中を消す合図(#1017 C5 Q3)── 空の字は進行中の欄だけを空にする
     expect(said[2], '終わりに進行中を消していない').toBe('');
@@ -165,7 +165,7 @@ describe('自分のパソコンで動かす ── 一式を組む', () => {
   it('🔴 取れない file があって落ちた回も、進行中の字を消す(#1017 C5 Q3)', async () => {
     const { d, said } = deps({ ...HEALTHY, 'assets/a-AAAAAAAA.js': undefined as unknown as string });
     await expect(downloadSelfhostBundle(d)).rejects.toThrow('取れませんでした');
-    expect(said[0], '対照:進行中は出ている').toContain('組んでいます');
+    expect(said[0], '対照:進行中は出ている').toContain('作っています');
     expect(said.at(-1), '失敗の後に「組んでいます…」が居座る').toBe('');
   });
 });

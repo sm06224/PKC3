@@ -194,7 +194,7 @@ export function convertPkc2Container(
       if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
-      warnings.push(`lid 衝突を再採番: ${u.lid} → ${next}`);
+      warnings.push(`ID が重複したので付け直しました: ${u.lid} → ${next}`);
     } else {
       taken.add(u.lid);
       finalLidAt.push(u.lid);
@@ -213,7 +213,7 @@ export function convertPkc2Container(
     for (let i = 0; takenKeys.has(k) && i < 1000; i++) k = opts.genAssetKey();
     if (takenKeys.has(k)) {
       // 1000 回引いて外れない = 生成器が壊れている。黙って上書きさせない
-      throw new Error('asset key の採番が衝突し続けています(採番の仕組みの不具合)');
+      throw new Error('添付の ID が重なり続けています(ID を付ける仕組みの不具合)');
     }
     takenKeys.add(k);
     return k;
@@ -292,7 +292,7 @@ export function convertPkc2Container(
           }
           delete p.data;
           p.asset_key = newKey; // legacy は data 優先の規約だった ── bytes を正とする
-          if (!quiet) warnings.push(`legacy 内蔵 data を asset 化: ${u.lid}`);
+          if (!quiet) warnings.push(`古い形式の内蔵データを添付にしました: ${u.lid}`);
         } else {
           const k = str(p.asset_key);
           if (k !== '' && keyMap.has(k)) p.asset_key = keyMap.get(k);
@@ -317,7 +317,7 @@ export function convertPkc2Container(
               k !== 'app_icon_asset_key' &&
               str(p[k]) !== ''
             ) {
-              warnings.push(`未対応の添付参照は元のまま残ります: ${k}(${u.title || u.lid})`);
+              warnings.push(`未対応の添付への参照は元のまま残ります: ${k}(${u.title || u.lid})`);
             }
           }
         }
@@ -381,11 +381,11 @@ export function convertPkc2Container(
     const to = finalLid(str(r.to));
     const kind = str(r.kind);
     if (!lids.has(from) || !lids.has(to)) {
-      warnings.push(`端点不在の relation を除外: ${str(r.id)}`);
+      warnings.push(`つなぐ先のノートが無いつながりを除外: ${str(r.id)}`);
       continue;
     }
     if (!KNOWN_RELATION_KINDS.has(kind)) {
-      warnings.push(`未知 kind の relation を除外: ${str(r.id)} (${kind})`);
+      warnings.push(`不明な種類のつながりを除外: ${str(r.id)} (${kind})`);
       continue;
     }
     let id = str(r.id);
@@ -393,7 +393,7 @@ export function convertPkc2Container(
       id = genRelationId();
       for (let i = 0; takenRelIds.has(id) && i < 1000; i++) id = genRelationId();
       if (takenRelIds.has(id)) {
-        throw new Error('relation id の採番が衝突し続けています(採番の仕組みの不具合)');
+        throw new Error('つながりの ID が重なり続けています(ID を付ける仕組みの不具合)');
       }
     }
     takenRelIds.add(id);

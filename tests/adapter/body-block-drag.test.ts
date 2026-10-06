@@ -325,7 +325,7 @@ describe('掴む口(block-grip)', () => {
     expect(s.host.contains(g), '口が本文の器の中に在る(差分で消える)').toBe(false);
     expect(s.pane.contains(g)).toBe(true);
     // 文言は起きることで書く
-    expect(g.getAttribute('aria-label')).toContain('掴んで動かす');
+    expect(g.getAttribute('aria-label')).toContain('ドラッグして動かす');
   });
 
   it('🔴 見出しは章ごと / ::: は閉じまで / fence・箇条書きは刻印どおり', () => {
@@ -567,7 +567,7 @@ describe('掴んで落とす(dragstart / dragover / drop)', () => {
     rect(target, 500, 40);
     target.dispatchEvent(dragEv('drop', dt, 505));
     expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
-    expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('塊');
+    expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('ブロック');
     expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
 
@@ -631,7 +631,7 @@ describe('元に戻す(UNDO_MOVE)', () => {
     rewritten(s.d, moved);
     const st = s.d.getState();
     expect(st.lastMove, '戻す材料が無い').not.toBeNull();
-    expect(st.notice).toBe('本文の塊を動かしました');
+    expect(st.notice).toBe('本文のブロックを動かしました');
     s.events.length = 0;
     s.d.dispatch({ type: 'UNDO_MOVE' });
     const ev = s.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
@@ -688,7 +688,7 @@ describe('元に戻す(UNDO_MOVE)', () => {
     expect(btn.textContent).toBe('移動を元に戻す');
     expect(btn.hidden).toBe(true);
     expect(regions.status.contains(btn), '状態の行の外に居る').toBe(true);
-    const LINE = '本文の塊を動かしました';
+    const LINE = '本文のブロックを動かしました';
     const NO_APPEND = { lastAppend: null, noticeOpen: null } as const;
     paintStatusUndo(btn, { lastMove: {}, notice: LINE, ...NO_APPEND }, LINE);
     expect(btn.hidden, '材料と知らせが揃っているのに出ない').toBe(false);

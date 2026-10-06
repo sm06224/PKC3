@@ -64,13 +64,13 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
   // 「読めるところだけ読む」は静かなデータ欠損を作る
   if (m.schema !== 1) {
     throw new Pkc2ParseError(
-      `未対応の PKC2 schema です(schema=${String(m.schema)} ── 対応は 1)`,
+      `未対応の PKC2 schema です(schema=${String(m.schema)}、対応は 1)`,
     );
   }
 
   const data = doc.getElementById('pkc-data');
   if (!data) {
-    throw new Pkc2ParseError('コンテナが見つかりません(#pkc-data が無い)');
+    throw new Pkc2ParseError('PKC2 の書き出しデータが見つかりません(#pkc-data が無い)');
   }
   // PKC2 の退避は `json.replace(/<\/(script)/gi, '<\\/$1')` ── **JSON の `\/`
   // エスケープ**なので、復元は JSON.parse が行う。ここで文字列置換すると
@@ -81,17 +81,17 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
   try {
     payload = JSON.parse(raw);
   } catch (e) {
-    throw new Pkc2ParseError(`コンテナの JSON を解釈できません: ${String(e)}`);
+    throw new Pkc2ParseError(`PKC2 の書き出しデータを読み取れません: ${String(e)}`);
   }
 
   const p = payload as { container?: unknown; export_meta?: Record<string, unknown> };
   if (!p.container || typeof p.container !== 'object') {
-    throw new Pkc2ParseError('コンテナが空です');
+    throw new Pkc2ParseError('PKC2 の書き出しデータが空です');
   }
   const c = p.container as { meta?: unknown; entries?: unknown };
   // 最小 shape 検査(PKC2 importer と同じ厳しさ)。revisions は optional
   if (!c.meta || typeof c.meta !== 'object' || !Array.isArray(c.entries)) {
-    throw new Pkc2ParseError('コンテナの形が想定と違います(meta / entries)');
+    throw new Pkc2ParseError('PKC2 の書き出しデータの形が想定と違います(meta / entries)');
   }
 
   const em = p.export_meta ?? {};

@@ -137,7 +137,7 @@ describe('末尾の使い分け(#1017 段④b)', () => {
     expect(downloaded[0]!.name.endsWith('.pkc3-full.zip'), downloaded[0]!.name).toBe(true);
   });
 
-  it('🔴 1 ノートの書出しは .pkc3-notes.zip(exportEntry)', async () => {
+  it('🔴 1 ノートの書き出しは .pkc3-notes.zip(exportEntry)', async () => {
     const { deps, downloaded } = baseDeps();
     const d = readyDispatcher();
     await exportEntry(d, deps, 'a', 'archive');
@@ -145,7 +145,7 @@ describe('末尾の使い分け(#1017 段④b)', () => {
     expect(downloaded[0]!.name.endsWith('.pkc3-notes.zip'), downloaded[0]!.name).toBe(true);
   });
 
-  it('🔴 フォルダの書出しも .pkc3-notes.zip(exportFolder)', async () => {
+  it('🔴 フォルダの書き出しも .pkc3-notes.zip(exportFolder)', async () => {
     const { deps, downloaded } = baseDeps({ source: fakeSource({ folder: true }) });
     const d = readyDispatcher();
     await exportFolder(d, deps, 'box');
@@ -216,7 +216,7 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     expect(d.getState().error).toContain('書き出しに失敗しました');
   });
 
-  it('🔴 1 ノート・フォルダの書出しは、corrupt でも倒れない(archiveScope が notes)', async () => {
+  it('🔴 1 ノート・フォルダの書き出しは、corrupt でも倒れない(archiveScope が notes)', async () => {
     // ⚠ exportEntry / exportFolder は絞り込みの読み(singleEntrySource / folderSource)
     //   自体が同じ理由で落ちるので、拾い出しの対象にしない(ExportDeps.rescue の docstring)。
     const pick = vi.fn(fakeRescuePick());
@@ -228,7 +228,7 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     const n = await exportEntry(d, deps, 'a', 'archive');
     expect(n, 'notes scope では倒れずに失敗するべき').toBeNull();
     // 🔑 拾い出しの口が 1 度も呼ばれていないこと(倒れる経路にすら入っていない)
-    expect(pick, '1 ノートの書出しなのに拾い出しへ切り替わった').not.toHaveBeenCalled();
+    expect(pick, '1 ノートの書き出しなのに拾い出しへ切り替わった').not.toHaveBeenCalled();
   });
 
   /**
@@ -300,12 +300,12 @@ describe('普通のバックアップも、「入れ物を捨てる」画面の�
     expect(lastRescueWritten(), '拾い出しへ倒れた回を記録していない').not.toBeNull();
   });
 
-  it('⚠ 1 ノート・フォルダの書出しは記録しない(「捨てる」の代わりにならない)', async () => {
+  it('⚠ 1 ノート・フォルダの書き出しは記録しない(「捨てる」の代わりにならない)', async () => {
     expect(lastRescueWritten()).toBeNull();
     const { deps } = baseDeps();
     const d = readyDispatcher();
     await exportEntry(d, deps, 'a', 'archive');
-    expect(lastRescueWritten(), '1 ノートの書出しなのに「捨てる」の門を開けてしまう').toBeNull();
+    expect(lastRescueWritten(), '1 ノートの書き出しなのに「捨てる」の門を開けてしまう').toBeNull();
   });
 
   it('⚠ 失敗した回(倒れもしない失敗)は記録しない', async () => {

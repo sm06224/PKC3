@@ -174,7 +174,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
    */
   it('🔴 拾っていなければそう言い、拾ってあれば件数を言う', () => {
     const none = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
-    expect(none, 'まだ拾っていないことを言っていない').toContain('まだ拾い出していません');
+    expect(none, 'まだ拾っていないことを言っていない').toContain('まだバックアップを取っていません');
 
     const zero = resetExplainMessage({
       notes: 3,
@@ -182,7 +182,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
       assetsOnDisk: 0,
       rescued: { entries: 0, skipped: 5, empty: 2, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
     });
-    expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+    expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだバックアップを取っていません');
     expect(zero, '拾えた件数が出ていない').toContain('0 件');
     expect(zero, '読めなかった数が出ていない').toContain('5');
   });
@@ -215,7 +215,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
       rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 3, assetBytes: 99, assetMissing: 0 },
     });
     expect(took, '端末の添付の件数を言っていない').toContain('添付が 3 件あります');
-    expect(took, '全部入ったことを言っていない').toContain('3 件とも入っています');
+    expect(took, '全部入ったことを言っていない').toContain('このタブを開いてから取ったバックアップには、添付が 3 件入っています');
 
     // 🔴 欠けている回 ── **何件消えるか**が読めないと、止まる判断ができない
     const short = resetExplainMessage({
@@ -224,7 +224,8 @@ describe('押す前に読ませる字(#986 段③)', () => {
       assetsOnDisk: 3,
       rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 1, assetBytes: 9, assetMissing: 2 },
     });
-    expect(short, '欠けているのに「全部入った」と読める').not.toContain('とも入っています');
+    // ⚠ 対照群は上の took(同じ書き方で「3 件入っています」を言う)── 欠けている回は同じ文型を使わない
+    expect(short, '欠けているのに「全部入った」と読める').not.toContain('件入っています');
     expect(short, '入った件数が出ていない').toContain('1 件だけです');
     expect(short, '残りが消えることを言っていない').toContain('残りはここで消えます');
   });

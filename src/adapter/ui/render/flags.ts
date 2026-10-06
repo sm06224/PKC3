@@ -80,7 +80,7 @@ export class FlagsRenderer {
      *   user 指示は「開発者**と**パワーユーザーに開放」。
      */
     note.textContent =
-      'ここは開発中の切替です。「システム」の中の設定と違って、いつか畳まれます(畳む条件を各行に書いています)。' +
+      'ここは開発中の切り替えです。「システム」の中の設定と違って、いつか廃止され、通常の動作になります(廃止する条件を各行に書いています)。' +
       'うまく動かなくなったら「すべて既定に戻す」を押してください。';
     body.append(note);
 
@@ -145,7 +145,7 @@ export class FlagsRenderer {
       const fold = document.createElement('div');
       fold.className = 'settings-note';
       fold.setAttribute('data-pkc-field', 'flag-fold');
-      fold.textContent = `畳む条件: ${f.foldWhen}`;
+      fold.textContent = `廃止する条件: ${f.foldWhen}`;
       dd.append(fold);
       dl.append(dt, dd);
     }
@@ -193,7 +193,7 @@ export class FlagsRenderer {
       const changed = this.store.changedCount();
       this.summary.textContent =
         `${n} / ${FLAG_BUDGET} 枠を使用中` +
-        (changed > 0 ? ` ── うち ${changed} 個が既定と違います` : '');
+        (changed > 0 ? `。うち ${changed} 個が既定と違います` : '');
     }
   }
 

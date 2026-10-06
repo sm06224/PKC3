@@ -174,7 +174,7 @@ describe('情報ペインの導線', () => {
     expect(btn!.title).toContain('編集中');
   });
 
-  it('🔴 書出し / 取込の最中は断る(user のファイルを巻き込まない)', () => {
+  it('🔴 書き出し / 取込の最中は断る(user のファイルを巻き込まない)', () => {
     const root = document.createElement('div');
     document.body.append(root);
     const region = document.createElement('div');

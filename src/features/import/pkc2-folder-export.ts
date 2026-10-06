@@ -85,7 +85,7 @@ function resolveArchetype(
   if (a === 'text' || a === 'textlog') return a;
   if (typeof a !== 'string' || a === '') {
     // PKC2 はここで bundle 全体を落としていた ── 1 件の欠落で全部失わない
-    warnings.push(`${where}: archetype が書かれていません ── この 1 件を飛ばします`);
+    warnings.push(`${where}: 種類が書かれていません。この 1 件を飛ばします`);
     return 'skip';
   }
   // 段⑥: それ以外の archetype は `.entry.zip`(v2)── **受理する**。
@@ -101,7 +101,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
@@ -122,7 +122,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // v2 も受ける ── `.entry.zip` だけ飛ばして残りは取り込む(段⑥ で受理予定)
   if (manifest.version !== 1 && manifest.version !== 2) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1 と 2)`,
+      `PKC3 が読めるのはバージョン 1 と 2 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
   if (!Array.isArray(manifest.entries)) {
@@ -136,20 +136,20 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     // PKC2 は**無言 skip** で、しかも件数表示だけ manifest の総数を出していた
     warnings.push(
       `まだ扱えない形式の ${inner.skipped.length} 件を飛ばしました` +
-        `(${inner.skipped.join(' / ')})── ノート以外の entry です`,
+        `(${inner.skipped.join(' / ')})。ノート以外のものです`,
     );
   }
   // 段⑥: `.entry.zip` にしか無い情報のうち、PKC3 に受け皿が無いものを言う
   warnings.push(...droppedFieldsWarning(inner.dropped.fields, inner.dropped.entries));
   if (inner.failed.length > 0) {
-    warnings.push(`${inner.failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
+    warnings.push(`${inner.failed.length} 件の書き出しファイルを取り込めませんでした(残りは取り込みます)`);
   }
   // 🔴 内側が**全部失敗**したなら断る(段④ と同じ方針)── 空フォルダだけ作って
   // 「成功」に見せない
   if (inner.bundles.length === 0 && inner.failed.length > 0) {
     throw new ZipReadError(
-      `内側の bundle を 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
-        ` ── ${warnings.join(' / ')}`,
+      `ZIP の中の書き出しファイルを 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
+        `: ${warnings.join(' / ')}`,
     );
   }
 
@@ -160,8 +160,8 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
 
   if (!Array.isArray(manifest.folders) || manifest.folders.length === 0) {
     warnings.push(
-      'フォルダ構造を復元できませんでした(書出しにフォルダ情報が入っていません)' +
-        `── ${mains.length} 件を最上位に取り込みます`,
+      'フォルダ構造を復元できませんでした(書き出しにフォルダ情報が入っていません)' +
+        `。${mains.length} 件を最上位に取り込みます`,
     );
   } else {
     const nodes: FolderNode[] = manifest.folders.map((f) => {
@@ -170,8 +170,8 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
       const raw = f.parent_lid;
       if (raw !== undefined && raw !== null && typeof raw !== 'string') {
         warnings.push(
-          `フォルダの親 lid が文字列ではありません(${str(f.lid) || '?'}: ${typeof raw})` +
-            ' ── 最上位に置きます',
+          `フォルダの親 ID が文字列ではありません(${str(f.lid) || '?'}: ${typeof raw})` +
+            '。最上位に置きます',
         );
       }
       return {
@@ -198,7 +198,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
       taken.add(fresh);
       renamed.set(n.lid, fresh);
       warnings.push(
-        `フォルダとノートで lid がぶつかっています(${n.lid})── フォルダ側を ${fresh} にずらします`,
+        `フォルダとノートで ID がぶつかっています(${n.lid})。フォルダ側を ${fresh} にずらします`,
       );
     }
     if (renamed.size > 0) {
@@ -218,8 +218,8 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
       // `readInnerBundles` が lid の重複自体は言うが、所属が落ちたことは別に言う
       if (childOf.has(b.main.lid)) {
         warnings.push(
-          `${b.filename}: lid が重複しているためフォルダ所属を復元できません(${b.main.lid})` +
-            ' ── 最上位に置きます',
+          `${b.filename}: ID が重複しているためフォルダ所属を復元できません(${b.main.lid})` +
+            '。最上位に置きます',
         );
         continue;
       }
@@ -241,7 +241,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // (manifest の配列長で見ると、lid の無いフォルダ 1 件だけの書出しが素通りする)
   if (folderEntries.length + mains.length === 0) {
     throw new ZipReadError(
-      `取り込めるものが 1 件もありませんでした ── ${warnings.join(' / ') || '空の書出しです'}`,
+      `取り込めるものが 1 件もありませんでした: ${warnings.join(' / ') || '空の書き出しです'}`,
     );
   }
 

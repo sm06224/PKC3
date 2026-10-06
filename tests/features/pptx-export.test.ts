@@ -303,11 +303,11 @@ describe('黙って落とさない', () => {
 
   it('🔴 写せなかったものは、本文に理由が出る', () => {
     const slides = splitIntoSlides(
-      [{ kind: 'skipped', what: '埋め込みの箱', why: 'PowerPoint では動きません' }],
+      [{ kind: 'skipped', what: '埋め込み枠', why: 'PowerPoint では動きません' }],
       'ノート',
     );
     expect(slides[0]!.lines.map((l) => l.runs.map((r) => r.text).join('')).join(''))
-      .toContain('埋め込みの箱');
+      .toContain('埋め込み枠');
   });
 
   it('コードは 1 行ずつ入る(改行が消えない)', () => {
@@ -1016,7 +1016,7 @@ describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', 
       ],
       { title: 'T' },
     ), 'ppt/slides/slide1.xml');
-    expect(cxns(xml), '曲線にしたら繋ぎが外れた').toHaveLength(1);
+    expect(cxns(xml), '曲線にしたらつなぎが外れた').toHaveLength(1);
   });
 
   /**

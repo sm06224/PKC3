@@ -155,7 +155,7 @@ describe('🔴 DuckDB の案内・手本は相手ごとに変わる(#682 段④c
     ];
     for (const [name, table] of want) {
       expect(sqlTipText(target(name, [table]), 'duckdb'), `${name}: 案内の表の名前が違う`).toContain(
-        `写した表 ${table} です`,
+        `読み込んだ表 ${table} です`,
       );
       expect(sqlPlaceholder(target(name, [table]), 'duckdb'), `${name}: 手本が違う`).toBe(
         `FROM ${table} SELECT * LIMIT 20`,
@@ -175,7 +175,7 @@ describe('🔴 DuckDB の案内・手本は相手ごとに変わる(#682 段④c
       expect(sqlTipText(target(name, ['parquet']), 'duckdb'), `${name}: 在りもしない列を約束している`).not.toContain(
         '_note',
       );
-      expect(sqlTipText(target(name, ['parquet']), 'duckdb')).toContain('file に書いてある列');
+      expect(sqlTipText(target(name, ['parquet']), 'duckdb')).toContain('ファイルに書いてある列');
     }
   });
 
@@ -209,7 +209,7 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
 
   it('🔴 案内に、中の表の名前を元のまま並べる(csv などへ潰さない)', () => {
     const t = sqlTipText(sq(['売上', '客']), 'duckdb');
-    expect(t).toContain('家計.sqlite を DuckDB へ写した表です');
+    expect(t).toContain('家計.sqlite を DuckDB に読み込んだ表です');
     expect(t, '表の名前が出ていない').toContain('売上, 客');
     expect(t, '元のままと言っていない').toContain('元のまま');
     // 🔴 BLOB の注記は、BLOB の列を持つ表を写した後だけ(無いのに書くと、無い物の注意になる)
@@ -218,7 +218,7 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
     expect(withBlob, 'BLOB の扱いを言っていない').toContain('base64');
     expect(withBlob, '長い字を切ることを言っていない').toContain('2000 字');
     // ⚠ csv / parquet の案内の字が混ざらない
-    expect(t).not.toContain('写した表 csv');
+    expect(t).not.toContain('読み込んだ表 csv');
     expect(t).not.toContain('_note');
   });
 
@@ -259,7 +259,7 @@ describe('🔴 DuckDB で .sqlite を引くときの案内・手本(#682 段④d
 
   it('⚠ 内蔵の sqlite で引くときの案内は今までどおり(表の一覧と、二重引用符の手本)', () => {
     const t = sqlTipText(sq(['売上', '客']), 'sqlite');
-    expect(t).toContain('この file に在る表: 売上, 客');
+    expect(t).toContain('このファイルにある表: 売上, 客');
     expect(sqlPlaceholder(sq(['売上', '客']), 'sqlite')).toBe('SELECT * FROM "売上" LIMIT 20');
   });
 });

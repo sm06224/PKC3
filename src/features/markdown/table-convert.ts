@@ -685,7 +685,7 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
        *   潰すと user の字が黙って変わるので、**断って user に決めさせる**。
        */
       if (cell.includes('\n')) {
-        return `${where(r, c)}の升に改行があるので Markdown の表にできません${instead}`;
+        return `${where(r, c)}のセルに改行があるので Markdown の表にできません${instead}`;
       }
     }
   }

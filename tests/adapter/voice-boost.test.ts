@@ -62,7 +62,7 @@ function fakeHost(): BoostHost & { sources: FakeNode[]; resumed: number; head: F
 
 const media = (): HTMLMediaElement => document.createElement('audio');
 
-describe('聞くときだけ音を整える(繋ぎ替え)', () => {
+describe('聞くときだけ音を整える(つなぎ替え)', () => {
   it('🔴 切のままなら、音の通り道に一切触らない', () => {
     const host = fakeHost();
     const r = new VoiceBoostRouter(() => host, () => false);
@@ -72,7 +72,7 @@ describe('聞くときだけ音を整える(繋ぎ替え)', () => {
     expect(r.wiredCount()).toBe(0);
   });
 
-  it('入なら鎖の入口へ繋ぎ、器を動かす', () => {
+  it('入なら鎖の入口へつなぎ、器を動かす', () => {
     const host = fakeHost();
     const r = new VoiceBoostRouter(() => host, () => true);
     r.watch(media());
@@ -81,7 +81,7 @@ describe('聞くときだけ音を整える(繋ぎ替え)', () => {
     expect(host.resumed, '止まったままの器へ繋いでいる').toBe(1);
   });
 
-  it('🔴 切に戻したら、出口へ繋ぎ直す(外して終わりにしない = 無音にしない)', () => {
+  it('🔴 切に戻したら、出口へつなぎ直す(外して終わりにしない = 無音にしない)', () => {
     const host = fakeHost();
     let on = true;
     const r = new VoiceBoostRouter(() => host, () => on);

@@ -311,7 +311,7 @@ describe('boot 失敗の後始末', () => {
     const tail = body.slice(catchAt);
     // 受け口は成功側にしか張らない(= 消えていない)ので、**そう言う**
     expect(tail, 'ファイルの行方を伝えていない').toContain('launchQueue');
-    expect(tail).toContain('読み直すと開きます');
+    expect(tail).toContain('再読み込みすると開きます');
   });
 
   /**

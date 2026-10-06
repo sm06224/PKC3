@@ -154,7 +154,7 @@ export function isDuckDbOnlySource(src: SqlGuestSource | null): src is DuckDbOnl
  * 🔑 **判定は `isDuckDbOnlySource` 1 か所**(選び所の薄い字・開く経路と同じ答えを見る)── 2 本目を作らない。
  * ⚠ `.csv` は内蔵の sqlite で引けるので**言わない**(DuckDB を選んだ人にだけ初回の読み込みが要る)。
  */
-export const DUCKDB_NETWORK_NOTE = 'この file は DuckDB で引きます ── 初回は読み込みに電波が要ります';
+export const DUCKDB_NETWORK_NOTE = 'このファイルは DuckDB で調べます。初回はネットワークにつながっている必要があります';
 
 /** 題名(file の名前)から、選んだ直後に出す知らせを引く。⚠ 言うことが無ければ `null`。 */
 export function duckDbNetworkNoteOf(name: string): string | null {

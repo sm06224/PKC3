@@ -69,7 +69,7 @@ beforeEach(() => {
  * ⚠ **happy-dom は `offsetWidth` に 0 を返す**ので、ここで通るのは
  *   「測れないときは札へ落とす」枝である ── その落とし先まで見る(CLAUDE.md §2)。
  */
-describe('板どうしを繋ぐ線(#530 段③a)', () => {
+describe('板どうしをつなぐ線(#530 段③a)', () => {
   const LINES = [
     '<div class="pkc-format-block pkc-place" id="a" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="0" data-pkc-y="0" data-pkc-source-line="0" data-pkc-source-end="1"></div>',
     '<div class="pkc-format-block pkc-place" id="b" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="300" data-pkc-y="0" data-pkc-source-line="2" data-pkc-source-end="3"></div>',
@@ -377,7 +377,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     const host = board(LINES.replace('data-pkc-to="b"', 'data-pkc-to="a.b"'));
     const note = host.querySelector('[data-pkc-field="place-line-note"]');
     expect(note?.textContent, '名前の綴りの断りが出ていない').toBe(
-      '線が引けません:名前に「a.b」は使えません ── 空白・記号(. = { } " \')・数で始まる名前は使えません。日本語は使えます',
+      '線が引けません:名前に「a.b」は使えません。空白・記号(. = { } " \')・数で始まる名前は使えません。日本語は使えます',
     );
   });
 

@@ -350,7 +350,7 @@ test('🔴 編集中に添付しても断らず、編集を終えると本文に
     buffer: PNG_1X1,
   });
   const status = page.locator('[data-pkc-region="status"]');
-  await expect(status, '預かったことを言っていない').toContainText('「ねこ.png」を預かりました');
+  await expect(status, '保留したことを言っていない').toContainText('「ねこ.png」は、編集中なのでまだ入れていません');
   await expect(status, '断っている(直す前の症状)').not.toContainText('編集を終了してから');
   // 預かっている間、打っていた本文は無傷
   await expect(ta).toHaveValue('# 会議メモ');
@@ -546,7 +546,7 @@ test('添付取込 → entry 出現 → image preview が可視高さを持つ',
   // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
-  expect(await answerAppDialog(page, 'ok')).toContain('未参照の添付データはありません');
+  expect(await answerAppDialog(page, 'ok')).toContain('どのノートからも使われていない添付はありません');
 
   expect(errors).toEqual([]);
 });
@@ -1410,8 +1410,8 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   expect(
     await source.locator('optgroup').evaluateAll((gs) => gs.map((g) => (g as HTMLOptGroupElement).label)),
-    '調べる相手の仕切りが「この PKC / 添付 / 手持ちの file」の順でない',
-  ).toEqual(['この PKC', '添付', '手持ちの file']);
+    '調べる相手の仕切りが「この PKC3 / 添付 / 手持ちの file」の順でない',
+  ).toEqual(['この PKC3', '添付', '手持ちのファイル']);
   const xOf = async (field: string): Promise<number> =>
     (await page.locator(`[data-pkc-field="${field}"]`).first().boundingBox())!.x;
   const sourceX = await xOf('sql-source');
@@ -1660,7 +1660,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
   const erBox = page.locator('[data-pkc-field="sql-er-box"]');
-  await expect(erBox, 'つながり図の四角が出ない').toHaveCount(1, { timeout: 15_000 });
+  await expect(erBox, 'ER 図の四角が出ない').toHaveCount(1, { timeout: 15_000 });
   // ⚠ **大きさを持っている**ことまで見る(0px の箱は「出ている」と言えない)
   const erRect = (await erBox.first().boundingBox())!;
   expect(erRect.width, `四角に幅が無い: ${JSON.stringify(erRect)}`).toBeGreaterThan(80);
@@ -1798,7 +1798,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   const connectBtn = page.locator('[data-pkc-field="sql-er-connect"]');
-  await expect(connectBtn, '「繋ぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
+  await expect(connectBtn, '「つなぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
 
   // 1 つ目の四角の 1 列目 → 「ここから」の印が付く
   const colOf = (box: number) =>
@@ -1835,12 +1835,12 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   これまでの「押した列が取り出す列に足される」が死んでいないか。
    */
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
-  await expect(connectBtn, '「繋ぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
+  await expect(connectBtn, '「つなぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
   await page.fill('[data-pkc-field="sql-input"]', 'select * from sheet1');
   await clickReal(page, colOf(0));
   await expect(
     page.locator('[data-pkc-field="sql-input"]'),
-    '繋ぐを切にしたのに、列を押しても取り出す列に足されない',
+    'つなぐを切にしたのに、列を押しても取り出す列に足されない',
   ).not.toHaveValue('select * from sheet1');
 
   // 畳んで元へ戻す ── 以降の筋書きを汚さない
@@ -1990,7 +1990,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await page.fill('[data-pkc-field="sql-input"]', 'CREATE TABLE made AS SELECT * FROM json');
   await clickReal(page, '[data-pkc-action="run-sql"]');
-  await expect(note, '作った直後に、件数が出ない').toContainText('2 行に効きました', { timeout: 60_000 });
+  await expect(note, '作った直後に、件数が出ない').toContainText('2 行が変更されました', { timeout: 60_000 });
   await expect(note, '作った表の寿命を言っていない(黙って消える)').toContainText(
     '作った表はウィンドウを閉じると消えます',
   );
@@ -2191,7 +2191,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * ⑥ ⚠ **対照群** ── 「この PKC のノート」へ戻すと、csv / xlsx の表はもう引けない
    *   (入れ物が別であること ── #854 段①ノート行「別窓の入れ物」の裏取り)。
    */
-  await source.selectOption({ label: 'この PKC のノート' });
+  await source.selectOption({ label: 'この PKC3 のノート' });
   await expect(source, '選び所が「この PKC」へ戻っていない').toHaveValue('');
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
   await clickReal(page, '[data-pkc-action="run-sql"]');

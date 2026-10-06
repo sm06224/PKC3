@@ -171,10 +171,10 @@ export function buildFormatBar(): HTMLElement {
   insertIcon.type = 'button';
   insertIcon.setAttribute('data-pkc-action', 'insert-icon');
   // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-  insertIcon.title = '図案を入れます。押すと絵の一覧が出て、選ぶと打っている場所に入ります';
+  insertIcon.title = 'アイコンを入れます。押すとアイコンの一覧が出て、選ぶと打っている場所に入ります';
   const insertIconLabel = document.createElement('span');
   insertIconLabel.setAttribute('data-pkc-field', 'label');
-  insertIconLabel.textContent = '図案を入れる';
+  insertIconLabel.textContent = 'アイコンを入れる';
   insertIcon.append(insertIconLabel);
   bar.append(insertIcon);
 

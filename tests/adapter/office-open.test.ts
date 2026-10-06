@@ -196,7 +196,7 @@ describe('createOfficeOpener', () => {
  * 相手の窓役は何も組まない。上の `fakeWindow` は `provideDocument` の第 5 引数を捨てるので、
  * この繋ぎは別に要る。
  */
-describe('窓が作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+describe('窓が作り直されたとき(本物の OfficeWindow とつなぐ)', () => {
   function wired(opts: { lid?: string; current: (lid: string) => Promise<string | null> }) {
     const sent: { type: string; payload: Record<string, unknown> }[] = [];
     let handler: ((ev: MessageEvent) => void) | null = null;
@@ -282,7 +282,7 @@ describe('main.ts の配線(#1228 原文 pin)', () => {
  *
  * 守る主張:
  * ① 控えが無い(`mayHave` が偽)ときは**今までどおり同期で開く**(ポップアップ遮断に当たらない・訊かない)
- * ② 在るときは**答えが出るまで窓を開かない**。「保存していない編集を戻して開く」→ 控えの bytes を `fromShadow` つきで渡す /
+ * ② 在るときは**答えが出るまで窓を開かない**。「一時保存した内容で開く」→ 控えの bytes を `fromShadow` つきで渡す /
  *    「保存済みの版で開く」→ **控えを消してから**開く / やめる → 何も開かず何も消さない
  * ③ 開いている窓へ頼むときは訊かない(その窓が自分で訊く)/ lid の無い添付は訊かない
  * ④ 確認が出せない・控えが消えた、でも開けなくしない
@@ -355,7 +355,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     expect(m.port.ask).not.toHaveBeenCalled();
   });
 
-  it('🔴 ② 「保存していない編集を戻して開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
+  it('🔴 ② 「一時保存した内容で開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
     const m = makeShadow({ answer: 'wait' });
     const done = settle(m.opener.open(NOTE));
     await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(1));
@@ -454,7 +454,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
  * 🔴 **本物の OfficeWindow と繋ぐ**(§7)── 封筒に `fromShadow` が載り、窓が作り直されて文書を求め直したときも
  * **控えの版**が(控えがまだ在れば)送られる。偽の窓は第 6 引数を覚えているだけなので、この繋ぎは別に要る。
  */
-describe('編集の控えの版で開いた窓が、作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+describe('編集の控えの版で開いた窓が、作り直されたとき(本物の OfficeWindow とつなぐ)', () => {
   function wired(shadow: { bytes: () => Uint8Array | null }) {
     const sent: { type: string; payload: Record<string, unknown> }[] = [];
     let handler: ((ev: MessageEvent) => void) | null = null;

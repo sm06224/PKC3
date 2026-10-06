@@ -319,7 +319,7 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
         lines: [ref],
         anchor: hit.anchor,
         // 続きだけ渡す(前置きは bodyRewriteGate が付ける ── C11b / #1045)
-        refusal: '、ファイルを本文へ落としてください',
+        refusal: '、ファイルを本文へドロップしてください',
         ...(batch === undefined ? {} : { batch }),
       });
       place!.placed = true;
@@ -332,8 +332,8 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
       // 🔑 **どこに入ったかを言う**(#668 F)── 画面は動かさないので、字で場所を指す
       notify(
         intoTitle === undefined
-          ? `${why}「${name}」を落とした所に入れました`
-          : `${why}「${name}」を『${intoTitle}』の落とした所に入れました`,
+          ? `${why}「${name}」をドロップした所に入れました`
+          : `${why}「${name}」を『${intoTitle}』のドロップした所に入れました`,
         ...openArg,
       );
     } else {

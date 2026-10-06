@@ -313,7 +313,7 @@ describe('編集ロック', () => {
 });
 
 describe('昇格(holder の死 → follower が実 worker へ乗り換える)', () => {
-  it('乗り換え中の要求はバッファされ、実 client に流れる。以後の書込は放送に乗る', async () => {
+  it('乗り換え中の要求はバッファされ、実 client に流れる。以後の書き込みは放送に乗る', async () => {
     const { host, follower, hub } = await connectPair();
     host.close(); // 旧 holder の死
 

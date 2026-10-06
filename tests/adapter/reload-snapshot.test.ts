@@ -185,7 +185,7 @@ describe('読込中に編集が始まった場合(H-3)', () => {
     await reloadSnapshot(d, 'c1', async () => {
       throw new Error('本体タブと通信できません(応答がありません)');
     });
-    expect(d.getState().error).toContain('一覧を取り直せませんでした');
+    expect(d.getState().error).toContain('一覧を取得し直せませんでした');
   });
 });
 

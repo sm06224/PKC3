@@ -204,9 +204,9 @@ export class CenterRouter {
     const close = document.createElement('button');
     close.type = 'button';
     close.setAttribute('data-pkc-action', 'close-pane');
-    close.setAttribute('aria-label', 'パネルを閉じる');
+    close.setAttribute('aria-label', '画面を閉じる');
     // ⚠ 字も出す ── 記号だけだと「何が閉じるのか」が読めない
-    close.textContent = '× パネルを閉じる';
+    close.textContent = '× 画面を閉じる';
     close.title = '閉じると本文へ戻ります';
     this.bar.append(close);
     region.prepend(this.bar);

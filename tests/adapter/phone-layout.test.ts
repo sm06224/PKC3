@@ -760,7 +760,7 @@ describe('⋯ と左の列の等値(次に足した人が気づく)', () => {
     s.field('phone-menu').click();
     const item = s.menu()!.querySelector<HTMLElement>('button[data-pkc-action="toggle-pane"]');
     expect(item, '⋯ に追記欄の項目が無い').not.toBeNull();
-    expect(item!.textContent).toBe('追記欄を畳む');
+    expect(item!.textContent).toBe('追記欄を折りたたむ');
     expect(item!.getAttribute('data-pkc-pane'), '受け手が読む面の名前が無い(押しても何も起きない)').toBe('append');
     item!.click();
     expect(s.shell.getAttribute('data-pkc-hidden-panes') ?? '', '押しても畳まれない').toContain('append');
@@ -911,7 +911,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
       }),
     );
     expect(s.d.getState().error ?? '', 'スマホで集中モードを黙って受けている').toContain(
-      '列は畳めません',
+      'ペインは折りたためません',
     );
     expect(
       appPanes.getHidden().join(' '),
@@ -940,7 +940,7 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
       'inspector sidebar',
     );
     expect(s.d.getState().error ?? '', 'PC にスマホ用の断りが出ている').not.toContain(
-      '列は畳めません',
+      'ペインは折りたためません',
     );
   });
 

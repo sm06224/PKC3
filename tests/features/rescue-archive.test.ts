@@ -412,6 +412,6 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
     const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
     const got = await readArchive((await writeArchive(source, NOW)).blob);
     expect(got.entries).toHaveLength(3);
-    expect(rescueArchiveSummary(stats())).toContain('3 件を拾って');
+    expect(rescueArchiveSummary(stats())).toContain('3 件を取り出して');
   });
 });

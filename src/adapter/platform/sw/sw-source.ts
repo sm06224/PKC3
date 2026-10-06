@@ -374,7 +374,7 @@ self.addEventListener('fetch', (event) => {
               (hit) =>
                 hit ||
                 new Response(
-                  '<!doctype html><meta charset="utf-8"><p>オフラインです。まだこの版を保存していないので、一度オンラインで開き直してください。</p>',
+                  '<!doctype html><meta charset="utf-8"><p>オフラインです。まだこのバージョンを保存していないので、一度オンラインで開き直してください。</p>',
                   { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } },
                 ),
             ),

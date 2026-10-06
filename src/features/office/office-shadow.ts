@@ -103,20 +103,20 @@ export function shadowAgo(at: number, now: number): string {
 export const SHADOW_DIALOG_TITLE = '保存していない編集があります';
 
 /** 確認の押し所(裁定の字。⚠ そのまま使う)。 */
-export const SHADOW_OPEN_SHADOW_LABEL = '保存していない編集を戻して開く';
+export const SHADOW_OPEN_SHADOW_LABEL = '一時保存した内容で開く';
 export const SHADOW_OPEN_SAVED_LABEL = '保存済みの版で開く';
 
 /**
- * 確認の説明(1 行)。⚠ 「保存済みの版で開く」を選ぶと保存していない編集が消えることを**先に言う**
+ * 確認の説明(1 行)。⚠ 「保存済みの版で開く」を選ぶと一時保存した内容が消えることを**先に言う**
  * (選んだ後に消えると分かるのでは、失う側を黙って選ばせることになる)。
  */
 export function shadowDialogNote(at: number, now: number): string {
-  return `${shadowAgo(at, now)}の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。`;
+  return `${shadowAgo(at, now)}に一時保存した内容があります。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その内容は消えます。`;
 }
 
 /** 控えの版で開くと決めたとき、本体の状態の行に出す一言。 */
 export const SHADOW_OPENED_NOTICE =
-  '保存していない編集を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)';
+  '一時保存した内容を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)';
 
 /** 控えの版を頼まれたのに、控えが読めなかった(消えた / 空)。保存済みの版で開く。 */
-export const SHADOW_GONE_NOTICE = '保存していない編集を読めませんでした。保存済みの版で開きます';
+export const SHADOW_GONE_NOTICE = '一時保存した内容を読めませんでした。保存済みの版で開きます';

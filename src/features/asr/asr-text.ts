@@ -11,6 +11,9 @@ import { elapsedText } from '../elapsed-text';
 /** 画面に出る入口の名前。⚠ 設定の節の見出し・案内の字は、全部ここから引く(§7)。 */
 export const ASR_SECTION_LABEL = '音声認識';
 
+/** 音声認識の節が入っている、1 つ上の節の見出し(システム → 保存領域 → 音声認識)。案内の道順に使う。 */
+export const STORAGE_SECTION_LABEL = '保存領域';
+
 /** 「文字にする」ボタンの字。 */
 export const ASR_TRANSCRIBE_LABEL = '文字にする';
 export const ASR_TRANSCRIBING_LABEL = '文字にしています…';

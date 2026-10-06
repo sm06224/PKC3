@@ -147,11 +147,11 @@ export function csvTableNameWhy(raw: string): string {
   if (raw.toLowerCase().startsWith('sqlite_'))
     return 'sqlite_ で始まる名前は使えません(中の仕組みが使っています)';
   if (CSV_TABLE_RESERVED.includes(raw.toLowerCase()))
-    return `${raw} は中の仕組みが使っている名前です(同じ名前にすると、その表が隠れて別の答えが出ます)。別の名前にしてください`;
+    return `${raw} は中の仕組みが使っている名前です(同じ名前にすると、その表が隠れて別の結果が出ます)。別の名前にしてください`;
   for (const ch of raw) {
     const code = ch.charCodeAt(0);
     if (code >= 0xff01 && code <= 0xff5e)
-      return '全角の英数字は使えません(打つと半角に直るので引けなくなります)。半角で書くか、漢字・かなにしてください';
+      return '全角の英数字は使えません(打つと半角に直るので実行できなくなります)。半角で書くか、漢字・かなにしてください';
   }
   if (!validCsvTableName(raw))
     return '名前に使えるのは文字・数字・_ だけです(空白と記号は使えません)';
@@ -416,7 +416,7 @@ export function csvCellsOverBudget(
   for (const t of tables) {
     cells += t.rows.length * t.columns.length;
     if (cells > budget) {
-      return `表「${t.name}」が大きすぎます(升 ${String(budget)} 個まで)。囲みを分けるか、名前を分けてください`;
+      return `表「${t.name}」が大きすぎます(セル ${String(budget)} 個まで)。ブロックを分けるか、名前を分けてください`;
     }
   }
   return null;

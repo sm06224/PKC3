@@ -142,7 +142,7 @@ describe('PKC-Message の受け口', () => {
     const h = harness({ handlers: { 'pkc.ping': () => ({ pong: true }) } });
     h.post(req('pkc.createEntry'));
     expect(h.sent[0]!.payload.error).toMatchObject({ code: RPC.METHOD_NOT_FOUND });
-    expect((h.sent[0]!.payload.error as { message: string }).message).toContain('この版では扱えません');
+    expect((h.sent[0]!.payload.error as { message: string }).message).toContain('このバージョンでは扱えません');
     h.detach();
   });
 

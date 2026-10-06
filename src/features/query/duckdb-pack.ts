@@ -144,24 +144,24 @@ export function readDuckDbPack(text: string): PackRead {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ok: false, why: 'DuckDB の目録が読めません(取り直してください)' };
+    return { ok: false, why: 'DuckDB のファイル一覧が読めません(取得し直してください)' };
   }
   if (typeof raw !== 'object' || raw === null) {
-    return { ok: false, why: 'DuckDB の目録が読めません(取り直してください)' };
+    return { ok: false, why: 'DuckDB のファイル一覧が読めません(取得し直してください)' };
   }
   const o = raw as Record<string, unknown>;
   const version = o['version'];
   const files = o['files'];
   if (typeof version !== 'string' || version === '') {
-    return { ok: false, why: 'DuckDB の目録に版がありません(取り直してください)' };
+    return { ok: false, why: 'DuckDB のファイル一覧にバージョンがありません(取得し直してください)' };
   }
   if (!Array.isArray(files) || !files.every(isFile)) {
-    return { ok: false, why: 'DuckDB の目録の中身が読めません(取り直してください)' };
+    return { ok: false, why: 'DuckDB のファイル一覧の中身が読めません(取得し直してください)' };
   }
   for (const want of DUCKDB_REQUIRED_FILES) {
     const got = files.find((f) => f.path === want);
     if (got === undefined) {
-      return { ok: false, why: `DuckDB の一式に ${want} がありません(取り直してください)` };
+      return { ok: false, why: `DuckDB の一式に ${want} がありません(取得し直してください)` };
     }
     /**
      * 🔑 **下限を引けない名前は在りえない** ── `DUCKDB_REQUIRED_FILES` も `FLOOR` も
@@ -173,7 +173,7 @@ export function readDuckDbPack(text: string): PackRead {
      */
     if (got.bytes < (FLOOR[want] ?? 0)) {
       // ⚠ 数字を出す ── 「壊れています」だけだと、こちらも後から原因を絞れない
-      return { ok: false, why: `DuckDB の ${want} が小さすぎます(${got.bytes} byte。取り直してください)` };
+      return { ok: false, why: `DuckDB の ${want} が小さすぎます(${got.bytes} byte。取得し直してください)` };
     }
   }
   return { ok: true, pack: { version, files } };

@@ -82,7 +82,7 @@ export const DUCKDB_TABLE_LIFETIME = '作った表はウィンドウを閉じる
  * ⚠ 2 つ目の file を足す / 外すと**器を作り直す**(外を塞いだ器へは差し込めない)ので、
  *   作った表も消える。🔑 **字は 1 か所で持つ**(`DUCKDB_TABLE_LIFETIME` と同じ理由)。
  */
-export const DUCKDB_TABLE_RESET = '相手を足したり外したりすると、作った表は消えます';
+export const DUCKDB_TABLE_RESET = '調べるファイルを増やしたり減らしたりすると、作った表は消えます';
 
 /** 頭の語(小文字)。⚠ `bare` は塗り潰し済み。 */
 function headOf(bare: string): string {
@@ -102,7 +102,7 @@ function kindOfBare(bare: string): DuckDbWriteKind | null {
  * その字は書き込みか(種類を返す)。⚠ **門を通った字**に当てる前提だが、
  * 通っていない字を渡しても害は無い(読むだけの字は `null`)。
  *
- * 🔑 画面の側も同じ 1 本を使う(「N 行に効きました」を言うか、表を描くか)──
+ * 🔑 画面の側も同じ 1 本を使う(「N 行が変更されました」を言うか、表を描くか)──
  *   判定を 2 つにしない(§7)。
  */
 export function duckDbWriteKind(sql: string): DuckDbWriteKind | null {
@@ -125,7 +125,7 @@ function countOf(columns: readonly string[], rows: readonly (readonly (string | 
 /**
  * 書き込みが通った直後に出す 1 行(件数 + 一言)。
  *
- * - 🔑 件数は **DuckDB が返した値**から言う(`N 行に効きました`)。無ければ「実行しました」
+ * - 🔑 件数は **DuckDB が返した値**から言う(`N 行が変更されました`)。無ければ「実行しました」
  * - 🔴 **`CREATE TABLE` には、作った表の寿命を添える**(閉じると消える。黙って消さない)
  * - `INSERT` / `UPDATE` / `DELETE` には「元の file は書き換わりません」を添える
  *   (`DELETE FROM csv` を打った人が最初に心配することである)
@@ -136,10 +136,10 @@ export function duckDbWriteNote(
   rows: readonly (readonly (string | number | null)[])[],
 ): string {
   const n = countOf(columns, rows);
-  const done = n === null ? '実行しました' : `${String(n)} 行に効きました`;
-  if (kind === 'create') return `${done} ── ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`;
+  const done = n === null ? '実行しました' : `${String(n)} 行が変更されました`;
+  if (kind === 'create') return `${done}: ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`;
   if (kind === 'drop') return done;
-  return `${done} ── 元の file は書き換わりません`;
+  return `${done}。元のファイルは書き換わりません`;
 }
 
 /** 1 文だけ。⚠ 字は `sql-guard.ts` の `checkReadOnlySql` と同じにする(`tests/features/duckdb-write.test.ts` が突き合わせる)。 */
@@ -148,7 +148,7 @@ const ONE_STATEMENT_WHY = '1 度に打てるのは 1 文だけです(セミコ�
 /**
  * 読むだけの門(`checkDuckDbSql`)の断り文を、**書ける世界の字へ直す**。
  *
- * ⚠ 読むだけの門は「読み取り専用です ── DROP は打てません(ここは読むだけです)」と言う ──
+ * ⚠ 読むだけの門は「読み取り専用です: DROP は打てません(ここは読むだけです)」と言う ──
  *   書き込みを通すようになった画面では**嘘**になる(「ここは読むだけ」ではない)。
  * 🔑 直すのは**断り文の字だけ**で、通す / 断るの判定は 1 つも動かさない。
  * ⚠ 書き方が変わった日に**黙って素通りしない**よう、見つけた字は `tests/features/duckdb-write.test.ts`
@@ -156,7 +156,7 @@ const ONE_STATEMENT_WHY = '1 度に打てるのは 1 文だけです(セミコ�
  */
 function rewriteRefusal(r: SqlCheck): SqlCheck {
   if (r.ok) return r;
-  const readonly = /^読み取り専用です ── (\S+) は打てません/u.exec(r.why);
+  const readonly = /^読み取り専用です: (\S+) は打てません/u.exec(r.why);
   if (readonly !== null) {
     const word = readonly[1] ?? '';
     return {

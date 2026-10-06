@@ -41,10 +41,10 @@ export function imageTooBigMessage(bytes: number | null): string {
       ? 'いまの中身'
       : `いまの中身(${humanBytes(bytes)})`;
   return (
-    `${size}は大きすぎて「持ち歩ける 1 枚」にできませんでした。` +
-    '1 枚に焼くときだけ、保存されている中身を丸ごと 1 つの塊にする必要があり、' +
+    `${size}は大きすぎて「PKC3 入り HTML」にできませんでした。` +
+    'PKC3 入り HTML にするときだけ、保存されている中身を丸ごと 1 つのデータにする必要があり、' +
     'そこが確保できませんでした。' +
-    '代わりに 左の列の バックアップ(.pkc3-full.zip) をお使いください ── ' +
+    '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );
 }
@@ -137,11 +137,11 @@ export function tooBigToReadBack(bytes: number): boolean {
  */
 export function tooBigToReadBackMessage(what: string, bytes: number): string {
   return (
-    `${what}(${humanBytes(bytes)})は「持ち歩ける 1 枚」に入れられません。` +
-    '1 枚に焼いた中身は、開くときに丸ごと 1 つの文字列として読み直す必要があり、' +
+    `${what}(${humanBytes(bytes)})は「PKC3 入り HTML」に入れられません。` +
+    'PKC3 入り HTML にした中身は、開くときに丸ごと 1 つの文字列として読み込む必要があり、' +
     `そこに入る上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えています。` +
-    'このまま焼くと、ファイルはできても二度と開けません。' +
-    '代わりに 左の列の バックアップ(.pkc3-full.zip) をお使いください ── ' +
+    'このまま作ると、ファイルはできても二度と開けません。' +
+    '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );
 }

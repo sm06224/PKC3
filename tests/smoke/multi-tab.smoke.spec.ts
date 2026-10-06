@@ -46,7 +46,7 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await rowB.first().click();
   await clickReal(pageB, '[data-pkc-action="start-edit"]');
   await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    '別のタブかウィンドウで編集中',
+    '別のタブまたはウィンドウで編集中',
   );
   await expect(pageB.locator('[data-pkc-field="editor-body"]')).toHaveCount(0);
 
@@ -130,7 +130,7 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   await rowC.first().click();
   await clickReal(pageC, '[data-pkc-action="start-edit"]');
   await expect(pageC.locator('[data-pkc-region="status"]')).toContainText(
-    '別のタブかウィンドウで編集中',
+    '別のタブまたはウィンドウで編集中',
   );
 
   // B が保存 → 🔴 昇格後の書込が C へ届く(localClient 包み + 名乗りの pin)
@@ -165,7 +165,7 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
  * 台帳を答え、follower がそれで断ること。unit(store-proxy / asset-gc)は
  * fake channel と純関数までしか届かない。
  */
-test('🔴 タブ A が編集中は、タブ B からの「使っていない添付を消す」を断る(#253)', async ({
+test('🔴 タブ A が編集中は、タブ B からの「使われていない添付を消す」を断る(#253)', async ({
   page,
   context,
 }) => {
@@ -187,7 +187,7 @@ test('🔴 タブ A が編集中は、タブ B からの「使っていない添
   await clickReal(pageB, '[data-pkc-action="purge-orphan-assets"]');
   // ⚠ 未参照が 0 件のときは**知らせるだけ**の形(ボタンは「閉じる」1 つ ── #299 段③)
   expect(await answerAppDialog(pageB, 'ok'), '前提: 誰も編集していないのに断られた').toContain(
-    '未参照の添付データはありません',
+    'どのノートからも使われていない添付はありません',
   );
 
   // 🔴 A が編集に入る(= 編集ロックを握る)

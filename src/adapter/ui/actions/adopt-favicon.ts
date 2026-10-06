@@ -137,7 +137,7 @@ export async function fetchFavicon(pageUrl: string, deps: FaviconDeps): Promise<
 export function externalImageBlockReason(mode: ExternalImageMode): string | null {
   // ⚠ `ask` は止めない ── **押したこと自体が、その 1 回の同意**である
   if (mode !== 'never') return null;
-  return 'システムで「本文の外部画像」を常にオフにしているので、取りに行きませんでした(下の絵から選べます)';
+  return 'システムで「外部の画像を読み込む」を常にオフにしているので、取りに行きませんでした(下のアイコンから選べます)';
 }
 
 /** 取り込んだ印の名乗り(#856 段②)。⚠ 添付の一覧に**何の絵か**が出る。 */
@@ -194,7 +194,7 @@ export async function adoptLinkIcon(
   // ⚠ `gate` が**走らせずに断った**ときも、ここへ来る(理由を落とさない)
   return {
     ok: false,
-    why: out.failed ?? 'いま別の片付けが動いているので、少し待ってからもう一度押してください',
+    why: out.failed ?? 'いま別の処理が動いているので、少し待ってからもう一度押してください',
   };
 }
 

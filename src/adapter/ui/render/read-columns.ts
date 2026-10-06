@@ -489,8 +489,8 @@ export function cycleReadColumns(
   const need = Math.ceil(minWidthForColumns(eff <= 1 ? 2 : spec.count, fontPx));
   notify(
     eff <= 1
-      ? `本文の段組み: ${spec.count} 段 ── いまの画面は幅が足りないので 1 段で出ています(${need}px 以上が要ります)`
-      : `本文の段組み: ${spec.count} 段 ── いまの画面では ${eff} 段で出ています(${spec.count} 段には ${need}px 以上が要ります)`,
+      ? `本文の段組み: ${spec.count} 段。いまの画面は幅が足りないので 1 段で出ています(${need}px 以上が要ります)`
+      : `本文の段組み: ${spec.count} 段。いまの画面では ${eff} 段で出ています(${spec.count} 段には ${need}px 以上が要ります)`,
   );
 }
 

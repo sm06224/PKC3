@@ -132,7 +132,7 @@ const TASKS = '- [ ] 牛乳を買う\n- [ ] 郵便を出す\n';
  * 🔑 観測点は**保存の ack**(`stamp`)── 全部の書込経路が通る 1 か所である。
  * ⚠ 経路ごとに書くと必ずどれかが漏れる(#347 がまさにその形だった)。
  */
-describe('最初の書込で永続化を頼む (#347)', () => {
+describe('最初の書き込みで永続化を頼む (#347)', () => {
   it('🔴 書けたら頼む', async () => {
     const disk: Record<string, string> = { a: TASKS };
     boot(disk, [meta('a')]);
@@ -181,7 +181,7 @@ describe('読んで直して書き戻す経路が、別の窓の本文を消さ�
     expect(disk['a'], '別の窓が書いた本文が消えた').toBe(
       '- [ ] 割り込みで足した行\n' + TASKS,
     );
-    expect(errors.join('|'), '黙って落とした(user に理由が出ていない)').toContain('別のウィンドウ');
+    expect(errors.join('|'), '黙って落とした(user に理由が出ていない)').toContain('別のタブまたはウィンドウ');
     /**
      * 🔴 **断ったのに画面へ「裏返った」と言わない**(変異試験 M4 が SURVIVED で教えた)。
      * ⚠ `return` を落とすと OP_FAILED の**直後に** `BODY_REWRITTEN` が飛び、
@@ -215,7 +215,7 @@ describe('読んで直して書き戻す経路が、別の窓の本文を消さ�
     await tick();
 
     expect(disk['b'], '別の窓が書いた本文が消えた').toBe('別の窓が書いた本文\n');
-    expect(errors.join('|'), '黙って落とした').toContain('別のウィンドウ');
+    expect(errors.join('|'), '黙って落とした').toContain('別のタブまたはウィンドウ');
   });
 
   /**

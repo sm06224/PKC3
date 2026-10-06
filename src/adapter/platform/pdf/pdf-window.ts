@@ -280,7 +280,7 @@ export class PdfReaderHost {
       /**
        * 🔴 **捨てた token が名乗り直した**(窓の F5 / 5 秒より遅い名乗り)。⚠ 直す前は**黙って捨て**て
        * いたので、窓は「読み込んでいます…」のまま固まった。貸した URL は返した後なので渡せない ──
-       * **空で答えて窓に言わせる**(窓は「PKC の画面から、もう一度開いてください」と出す)。
+       * **空で答えて窓に言わせる**(窓は「PKC3 のウィンドウから、もう一度開いてください」と出す)。
        */
       const g = this.gone.get(token);
       if (g !== undefined && kind === 'hello') {
@@ -345,7 +345,7 @@ export class PdfReaderHost {
           }
         };
         void this.deps.onQuote(live.session, text, page).then(reply, () =>
-          reply({ ok: false, message: 'ノートへ引けませんでした。もう一度押してください' }),
+          reply({ ok: false, message: 'ノートへ引用できませんでした。もう一度押してください' }),
         );
         return;
       }

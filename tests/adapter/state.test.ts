@@ -213,7 +213,7 @@ describe('reducer: lean aggregate', () => {
 
     const c = reduce(ready, { type: 'COMMIT_EDIT' });
     expect(c.state.error, '黙って捨てている(無言の dead click)').toBe(
-      '保存できませんでした: いま編集中ではありません(この画面は編集を終えています)',
+      '保存できませんでした: いま編集中ではありません(このタブは編集を終えています)',
     );
     // ⚠ 捨てること自体は正しい ── 書き込みは 1 件も起こさない
     expect(c.events, '編集中でないのに書き込みが走った').toEqual([]);
@@ -221,7 +221,7 @@ describe('reducer: lean aggregate', () => {
 
     const x = reduce(ready, { type: 'CANCEL_EDIT' });
     expect(x.state.error, '取り消しだけ黙っている').toBe(
-      '取り消しできませんでした: いま編集中ではありません(この画面は編集を終えています)',
+      '取り消しできませんでした: いま編集中ではありません(このタブは編集を終えています)',
     );
     expect(x.events).toEqual([]);
 

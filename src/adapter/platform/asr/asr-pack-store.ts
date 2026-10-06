@@ -84,7 +84,7 @@ function write(db: IDBDatabase, stores: string[], run: (t: IDBTransaction) => vo
   return new Promise((resolve, reject) => {
     const t = db.transaction(stores, 'readwrite');
     const fail = (e: unknown): void =>
-      reject(e instanceof Error ? e : new Error('この端末の保存領域(IndexedDB)に書き込めませんでした'));
+      reject(e instanceof Error ? e : new Error('この端末に一式を保存できませんでした(IndexedDB)'));
     t.oncomplete = () => resolve();
     t.onerror = () => fail(t.error);
     t.onabort = () => fail(t.error ?? new Error('idb transaction aborted'));
@@ -146,15 +146,15 @@ export class AsrPackStore {
     expect: ReadonlyMap<string, { bytes: number; sha256: string }>,
     version: string,
   ): Promise<AsrGroupMeta> {
-    if (files.size === 0) throw new AsrPackError('音声認識の部品が空です(書き込みを取り消しました)');
+    if (files.size === 0) throw new AsrPackError('音声認識の一式が空です(書き込みを取り消しました)');
     const metaFiles: AsrFileMeta[] = [];
     let totalBytes = 0;
     for (const [path, blob] of files) {
       const want = expect.get(path);
-      if (want === undefined) throw new AsrPackError(`目録に無い file が混ざっています(${path})`);
+      if (want === undefined) throw new AsrPackError(`ファイル一覧に無いファイルが混ざっています(${path})`);
       // 🔴 書く前に大きさを突き合わせる(入れてから気づくと、quota を食っただけの半端が残る)
       if (blob.size !== want.bytes) {
-        throw new AsrPackError(`${path} の大きさが目録と違います(書き込みを取り消しました)`);
+        throw new AsrPackError(`${path} の大きさがファイル一覧と違います(書き込みを取り消しました)`);
       }
       metaFiles.push({ path, bytes: blob.size, sha256: want.sha256 });
       totalBytes += blob.size;

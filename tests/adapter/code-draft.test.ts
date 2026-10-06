@@ -98,13 +98,13 @@ describe('OPEN_CODE_DRAFT(#1044 段3)', () => {
   it('🔴 開きの行以外(枠の中の行)を押しても開かない', () => {
     const s = reduce(booted(), { type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 3 }).state;
     expect(s.sectionDraft, '開きの行以外で開いた').toBeNull();
-    expect(s.error ?? '').toContain('このコード枠を編集できませんでした');
+    expect(s.error ?? '').toContain('このコードブロックを編集できませんでした');
   });
 
   it('🔴 枠でない行を押しても、断って開かない', () => {
     const s = reduce(booted(), { type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 0 }).state;
     expect(s.sectionDraft).toBeNull();
-    expect(s.error ?? '').toContain('このコード枠を編集できませんでした');
+    expect(s.error ?? '').toContain('このコードブロックを編集できませんでした');
   });
 
   it('🔴 phase が ready でなければ開かない(無言で何もしない)', () => {
@@ -267,7 +267,7 @@ describe('CANCEL_CODE_DRAFT(#1044 段3)', () => {
 });
 
 describe('コード枠の欄が開いている間の門(#1043 の拡張・#1044 段3)', () => {
-  it('🔴 同じノートの本文の書込は「コード」で断る。別のノートは自由', () => {
+  it('🔴 同じノートの本文の書き込みは「コード」で断る。別のノートは自由', () => {
     const s = reduce(booted(), { type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 2 }).state;
     expect(bodyWriteBlockReason(s, 'n1')).toBe(CODE_DRAFT_NOTE);
     expect(bodyWriteBlockReason(s, 'n2'), '別のノートまで止めている').toBeNull();

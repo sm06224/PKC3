@@ -343,7 +343,7 @@ describe('🔴 配線 ── launch から entry ができるところまで', (
     expect(app.d.getState().error ?? '').not.toContain('選び直して');
   });
 
-  it('user のクリック起点の取込は今までどおり**断る**(選び直せる)', async () => {
+  it('user のクリック起点の取り込みは今までどおり**断る**(選び直せる)', async () => {
     const app = wiredApp();
     let release!: () => void;
     void app.gate(() => new Promise<void>((r) => (release = r)));

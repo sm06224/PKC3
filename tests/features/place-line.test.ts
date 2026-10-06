@@ -34,7 +34,7 @@ const ends = (l: { from: unknown; to: unknown }): [string, string] => [
   anchorSpell(l.to as never),
 ];
 
-describe('板どうしを繋ぐ線(#530 段③a)', () => {
+describe('板どうしをつなぐ線(#530 段③a)', () => {
   /**
    * 🔴 **横に並べたら「右 → 左」**。
    * ⚠ ここを外すと線が**板の上を横切る** ── 設計 doc §8.1 が

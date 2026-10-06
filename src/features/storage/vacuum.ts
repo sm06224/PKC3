@@ -125,7 +125,7 @@ export function vacuumFailReason(raw: string): string {
     return '空きが足りませんでした';
   }
   if (raw.includes(CORRUPT_REFUSAL)) {
-    return `保存領域に問題が見つかっているため。先に「${DB_CHECK_LABEL}」を確かめてください`;
+    return `ノートの保存データに問題が見つかっているため。先に「${DB_CHECK_LABEL}」を押してください`;
   }
   return '保存領域に書けませんでした';
 }

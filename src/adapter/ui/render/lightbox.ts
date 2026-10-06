@@ -57,8 +57,8 @@ export function renderLightboxOverlay(
     const openWinBtn = doc.createElement('button');
     openWinBtn.className = 'pkc-lightbox-btn pkc-lightbox-open-win-btn';
     openWinBtn.type = 'button';
-    openWinBtn.title = '別ウィンドウで開く';
-    openWinBtn.setAttribute('aria-label', '別ウィンドウで開く');
+    openWinBtn.title = '別のウィンドウで開く';
+    openWinBtn.setAttribute('aria-label', '別のウィンドウで開く');
     openWinBtn.textContent = '⧉';
     openWinBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();

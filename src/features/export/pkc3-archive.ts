@@ -193,7 +193,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
       const m = metaOf.get(r.lid);
       if (!m) {
         // 本文はあるが meta が無い = 書出し中に消えた ── 黙って落とさない
-        warn.add('orphan-body', '一覧に無い entry の注意', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warn.add('orphan-body', '一覧に無いノートの注意', `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`);
         continue;
       }
       const e: ArchiveEntry = {
@@ -217,7 +217,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     after = next;
   }
   if (entryCount < metas.length) {
-    warnings.push(`一覧にあって本文が取れなかった entry が ${metas.length - entryCount} 件あります`);
+    warnings.push(`一覧にあって本文が取れなかったノートが ${metas.length - entryCount} 件あります`);
   }
 
   // ── relations
@@ -360,7 +360,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   }
   if (manifest?.format !== ARCHIVE_FORMAT) {
     throw new ZipReadError(
-      `PKC3 のアーカイブではありません(format=${String(manifest?.format)})`,
+      `PKC3 のバックアップではありません(format=${String(manifest?.format)})`,
     );
   }
   const version = manifest.version;
@@ -370,7 +370,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version > ARCHIVE_VERSION
   ) {
     throw new ZipReadError(
-      `未対応のアーカイブ版です(version=${String(version)} ── 対応は ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION})`,
+      `PKC3 が読めるバックアップのバージョンは ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION} です(このファイルは ${String(version)})`,
     );
   }
 
@@ -398,7 +398,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
       warn.add('stray-file', '想定外のファイル', `assets/ の中の想定外のファイルを無視しました: ${e.name}`);
       continue;
     }
-    if (assetSources.has(key)) throw new ZipReadError(`asset key が重複しています: ${key}`);
+    if (assetSources.has(key)) throw new ZipReadError(`添付の ID が重複しています: ${key}`);
     assetSources.set(key, { zip, entry: e });
   }
 
@@ -418,7 +418,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   // meta 数ではなく **bytes の数**で照合する
   for (const a of c.assets ?? []) {
     if (!assetSources.has(a.key)) {
-      warn.add('absent-asset', 'アーカイブに入っていない添付', `添付の中身がアーカイブに入っていません: ${a.key}`);
+      warn.add('absent-asset', 'バックアップに入っていない添付', `添付の中身がバックアップに入っていません: ${a.key}`);
     }
   }
 
@@ -498,7 +498,7 @@ export function restoreArchive(
   const seenLid = new Set<string>();
   for (const e of archive.entries) {
     if (seenLid.has(e.lid)) {
-      warn.add('dup-lid', 'アーカイブ内で重複した lid', `アーカイブの中で lid が重複しています: ${e.lid}(別の entry として取り込みます)`);
+      warn.add('dup-lid', 'バックアップの中で重複した ID', `バックアップの中で ID が重複しています: ${e.lid}(別のノートとして取り込みます)`);
     }
     seenLid.add(e.lid);
   }
@@ -507,7 +507,7 @@ export function restoreArchive(
     let lid = e.lid;
     if (lid === '' || taken.has(lid)) {
       const fresh = opts.genLid();
-      warn.add('lid-clash', '付け替えた lid', `lid が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
+      warn.add('lid-clash', '付け替えた ID', `ID が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
       lid = fresh;
     }
     taken.add(lid);
@@ -530,7 +530,7 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warn.add('dangling-relation', '端点の無い関連', `端点の無い関連を除きました: ${r.id}`);
+      warn.add('dangling-relation', 'つなぐ先のノートが無いつながり', `つなぐ先のノートが無いつながりを除きました: ${r.id}`);
       continue;
     }
     let id = r.id;
@@ -557,7 +557,7 @@ export function restoreArchive(
   if (orphanRevs > 0) {
     // entry が居ない履歴 = ゴミ箱の版。**今は復元しない**(entry が無いと鎖の
     // 起点 = tip が無く、decode できない)── 黙って落とさず件数を言う
-    warnings.push(`entry の無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
+    warnings.push(`ノートの無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
   }
   const revisionChains = [...byLid].map(([entryLid, rows]) => ({
     entryLid,

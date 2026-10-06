@@ -193,7 +193,7 @@ export function buildKeymapPanel(
     sync();
     if (problem !== null) {
       const row = rows.get(target);
-      if (row) row.note.textContent = `${chordLabel(s)} は割り当てられません ── ${problem.message}`;
+      if (row) row.note.textContent = `${chordLabel(s)} は割り当てられません: ${problem.message}`;
     }
   };
 

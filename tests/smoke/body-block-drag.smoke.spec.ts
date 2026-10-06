@@ -85,7 +85,7 @@ test('🔴 ⠿ を掴んで別の塊の下へ落とすと、本文の並びが�
    */
   await page.waitForTimeout(7000);
   await expect(page.locator('[data-pkc-field="status-undo"]'), '時間が来て「元に戻す」が消えた').toBeVisible();
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('本文の塊を動かしました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('本文のブロックを動かしました');
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect
     .poll(() => order(page), { timeout: 5000, message: '元に戻らない' })
@@ -231,7 +231,7 @@ test('🔴 ファイルを本文の塊の上へ落とすと、その所に添付
     .poll(kinds, { timeout: 8000, message: '落とした所に入っていない(末尾に入っていないか)' })
     .toEqual(['題', '段落 A', 'IMG', '章 B', '本文 B', '章 C', '本文 C']);
   // どこに入ったかを字でも言う(画面は動かないので、字が唯一の手がかり)
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('落とした所に入れました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ドロップした所に入れました');
   // 🔴 片道にしない ── 追記欄の「元に戻す」1 回で消える
   const undo = page.locator('[data-pkc-action="undo-append"]');
   await expect(undo, '「元に戻す」が出ない').toBeVisible();
@@ -305,10 +305,10 @@ test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ�
   // どこへ行ったかを言う
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(
     // ⚠ #809-3 でノートの名前を『』へ揃えた(file を落とした回の知らせと同じ括弧)
-    '本文の塊を『行き先のノート』のいちばん下へ持っていきました',
+    '本文のブロックを『行き先のノート』のいちばん下へ移動しました',
   );
   // ⚠ 帰り道を同じ 1 行で言う(事故の瞬間に読むのはここだけ)
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('持ち帰って');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ドラッグして元のノートへ移して');
   // 🔴 行き先に出る(「開く」で行ける ── 帰り道もここから)
   await clickReal(page, '[data-pkc-field="status-open"]');
   await expect
@@ -502,7 +502,7 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
   await expect(editor, 'ファイルを落としたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
-  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('預かりました');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('まだ入れていません');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

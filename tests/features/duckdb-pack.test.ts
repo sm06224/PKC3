@@ -51,14 +51,14 @@ describe('🔴 目録を検める(#682)', () => {
   it('🔴 JSON として読めない → 取り直してくださいに畳む', () => {
     const r = readDuckDbPack('{ ずれた');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.why).toContain('取り直して');
+    if (!r.ok) expect(r.why).toContain('取得し直して');
   });
 
   it('🔴 版が無い / 空 → 断る', () => {
     for (const v of ['', undefined]) {
       const r = readDuckDbPack(pack({ version: v as string }));
       expect(r.ok, `版が ${JSON.stringify(v)} なのに通った`).toBe(false);
-      if (!r.ok) expect(r.why).toContain('版');
+      if (!r.ok) expect(r.why).toContain('バージョン');
     }
   });
 

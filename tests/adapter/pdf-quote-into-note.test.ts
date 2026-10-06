@@ -110,8 +110,8 @@ describe('quoteIntoNote', () => {
     expect(ev[0]?.target).toBeNull(); // 末尾
     ackOk(g.d, 'memo');
     const r = await p;
-    expect(r).toEqual({ ok: true, message: '「メモ」の末尾へ引きました(7 頁)' });
-    expect(g.notes).toEqual(['「メモ」の末尾へ引きました(7 頁)']);
+    expect(r).toEqual({ ok: true, message: '「メモ」の末尾へ引用しました(7 ページ)' });
+    expect(g.notes).toEqual(['「メモ」の末尾へ引用しました(7 ページ)']);
   });
 
   it('結びついたノートが無ければ、添付のノート自身へ追記する', async () => {
@@ -127,7 +127,7 @@ describe('quoteIntoNote', () => {
     const p = quoteIntoNote(g.d, session('att'), 'x', 42, () => undefined);
     expect(appended(g.events)[0]?.text).toContain('(p.42、報告書.pdf)');
     ackOk(g.d, 'att'); // 待ちを畳む(時計を残さない)
-    expect((await p).message).toContain('42 頁');
+    expect((await p).message).toContain('42 ページ');
   });
 
   it('lid を持たない窓・消えたノート・空の選びは、書かずに理由を返す', async () => {
@@ -167,7 +167,7 @@ describe('quoteIntoNote', () => {
     ackOk(g.d, 'att');
     expect((await p).ok).toBe(true);
     expect(settled).toBe(true);
-    expect(g.notes).toEqual(['「添付題」の末尾へ引きました(1 頁)']);
+    expect(g.notes).toEqual(['「添付題」の末尾へ引用しました(1 ページ)']);
   });
 
   it('🔴 追記が失敗した(APPEND_FAILED)なら、理由を返し、「引きました」とは言わない', async () => {
@@ -177,7 +177,7 @@ describe('quoteIntoNote', () => {
       type: 'APPEND_FAILED',
       lid: 'att',
       gen: g.d.getState().lockGen,
-      error: '別のウィンドウがこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
+      error: '別のウィンドウがこのノートを書き換えたため、追記できませんでした(もう一度押してください)',
     });
     const r = await p;
     expect(r.ok).toBe(false);

@@ -13,7 +13,7 @@
  *   (CLAUDE.md「文言は押した場所と対で pin する」)。
  * 🔑 だから export して、案内の側の test がここから引く。
  */
-export const UPDATE_TEXT = '新しい版があります。';
+export const UPDATE_TEXT = '新しいバージョンがあります。';
 
 export function showUpdateCard(region: HTMLElement): void {
   region.textContent = '';
@@ -25,7 +25,7 @@ export function showUpdateCard(region: HTMLElement): void {
   const apply = document.createElement('button');
   apply.type = 'button';
   apply.setAttribute('data-pkc-action', 'apply-update');
-  apply.textContent = '新しい版に切り替える';
+  apply.textContent = '新しいバージョンに切り替える';
 
   const later = document.createElement('button');
   later.type = 'button';
@@ -47,7 +47,7 @@ export function showUpdatingCard(region: HTMLElement): void {
   region.textContent = '';
   const text = document.createElement('span');
   text.setAttribute('data-pkc-field', 'update-text');
-  text.textContent = '新しい版に切り替えています…';
+  text.textContent = '新しいバージョンに切り替えています…';
   region.append(text);
   region.hidden = false;
 }

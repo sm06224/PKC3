@@ -393,22 +393,22 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
-      ['export-entry-html', '7f0a31b1'],
-      ['export-folder', 'b603d0ed'],
-      ['export-entry-docx', 'e79a6f86'],
-      ['export-entry-pptx', '60bcb9ea'],
-      ['export-entry-pdf', 'c9838f51'],
+      ['export-entry-html', '5a2b1df9'],
+      ['export-folder', '1e3dc65f'],
+      ['export-entry-docx', '93906675'],
+      ['export-entry-pptx', '5424c220'],
+      ['export-entry-pdf', '6ec553e1'],
       ['adopt-external-images', '36c7974a'],
       ['copy-entry-ref', '2614a326'],
       ['copy-plain-markdown', '73e9b322'],
       // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
-      ['pin-split', '1621a667'],
+      ['pin-split', '168e4ec2'],
       // 🔴 保存したスタックを載せる(#633 段③)
-      ['stack-load', 'd23f50ac'],
+      ['stack-load', 'c8508a19'],
       // 🔴 「このノート」のまとまりの先頭「編集」(#1038 台帳③ C1、2026-09-25)
       ['start-edit', 'e7a98369'],
       ['show-history', '2511b05b'],
-      ['delete-entry', '661f5844'],
+      ['delete-entry', '4492f764'],
       // 🔴 **左の列の道具 4 つ**(#632 段①)── 本文ページの ⋯ から押せるようにした
       [// ⚠ 2026-09-02: 一度「独立した添付のノートになります」へ下げたが、user 裁定
     //    (#666「読んでいたノートの本文に入る」)で**実装が字に追いついた**ので戻した
@@ -417,7 +417,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],
       // 🔴 **表の形を変える 2 つ**(#708 段②、2026-09-05)
-      ['table-to-csv', '2658a59b'],
+      ['table-to-csv', '21bdca1b'],
       ['table-to-markdown', '70082c4c'],
       // 🔴 **リストを丸ごとそろえる 2 つ**(#1173、2026-10-01)
       ['task-run-open', '8e3e5aee'],
@@ -478,7 +478,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     const long = '2026年度第3四半期営業報告書_改訂版_確定_最終版.docx';
     // ⚠ 前提: この名前は縮めなければ上限を超える(超えないなら何も検めていない)
     expect(
-      `元のファイル(${long})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`.length,
+      `元のファイル(${long})を上書きします。元の内容は戻せません(押すと確かめのウィンドウが出ます)`.length,
       '前提が崩れている: この名前では上限を超えない',
     ).toBeGreaterThan(ENTRY_ACTION_HINT_MAX);
     const h = entryActionHint('write-back-file', { archetype: 'text', linkedFile: long });
@@ -486,7 +486,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(h, '上書きだと言う所が切れている').toContain('上書きします');
     // 🔴 #587 C 案 1 ── 取り消せないことと、確かめの窓が挟まることを言う(切れずに残る)
     expect(h, '取り消せないことを言っていない').toContain('元の内容は戻せません');
-    expect(h, '確かめの窓が出ることを言っていない').toContain('(押すと確かめの窓が出ます)');
+    expect(h, '確かめの窓が出ることを言っていない').toContain('(押すと確かめのウィンドウが出ます)');
     // 🔑 頭と尻の両方を残す ── 頭だけだと拡張子が消え、尻だけだとどの文書か分からない
     expect(h, 'どの文書か分からない').toContain('2026年度');
     expect(h, '拡張子が消えている').toContain('.docx');
@@ -494,7 +494,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(
       entryActionHint('write-back-file', { archetype: 'text', linkedFile: 'メモ.md' }),
       '短い名前まで縮めている',
-    ).toBe('元のファイル(メモ.md)を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)');
+    ).toBe('元のファイル(メモ.md)を上書きします。元の内容は戻せません(押すと確かめのウィンドウが出ます)');
   });
 
   it('🔴 「書き戻す」だけは行き先を字に含める(押す前に確かめられる)', () => {
@@ -550,7 +550,7 @@ describe('右クリックの説明(#587 C-1)', () => {
     expect(
       rows.find((a) => a.action === 'pin-split')?.hint ?? '',
       'スタックに載せる の説明が帯の話をしていない',
-    ).toContain('帯');
+    ).toContain('バー');
     // ⚠ **空振り防止** ── 名前で pin した 2 つが、いまも本文のメニューに居ること
     expect(
       BODY_MENU_ACTIONS.map((a) => a.action),

@@ -142,7 +142,7 @@ export function buildBlockPartition(
     if (r === undefined) {
       return {
         ok: false,
-        reason: `塊 ${blocks.length} 個に対して最上位の範囲が ${spans.length} 個しかない`,
+        reason: `ブロック ${blocks.length} 個に対して最上位の範囲が ${spans.length} 個しかない`,
         starts,
         ends,
         derived,
@@ -155,7 +155,7 @@ export function buildBlockPartition(
   if (ri !== spans.length) {
     return {
       ok: false,
-      reason: `最上位の範囲が ${spans.length - ri} 個余った(塊と対応していない)`,
+      reason: `最上位の範囲が ${spans.length - ri} 個余った(ブロックと対応していない)`,
       starts,
       ends,
       derived,
@@ -170,12 +170,12 @@ export function buildBlockPartition(
     const st = starts[i]!;
     const en = ends[i]!;
     if (st < 0 || en < st) {
-      return { ok: false, reason: `塊 ${i} の範囲が正しくない(${st}..${en})`, starts, ends, derived };
+      return { ok: false, reason: `ブロック ${i} の範囲が正しくない(${st}..${en})`, starts, ends, derived };
     }
     if (st <= prevEnd) {
       return {
         ok: false,
-        reason: `塊 ${i} が前の塊と重なっている(${st} <= ${prevEnd})`,
+        reason: `ブロック ${i} が前のブロックと重なっている(${st} <= ${prevEnd})`,
         starts,
         ends,
         derived,
@@ -184,7 +184,7 @@ export function buildBlockPartition(
     if (en >= lineCount) {
       return {
         ok: false,
-        reason: `塊 ${i} が本文の行数(${lineCount})を超えている(end=${en})`,
+        reason: `ブロック ${i} が本文の行数(${lineCount})を超えている(end=${en})`,
         starts,
         ends,
         derived,

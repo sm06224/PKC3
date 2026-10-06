@@ -464,8 +464,8 @@ describe('🔴 天井 ── 超えた表だけ断る', () => {
     const small = r.tables.find((t) => t.name === 'small')!;
     expect(big.refused, '天井を超えた表を断っていない').toContain('2.0 KB');
     // 🔴 file の大きさではなく「写した行」の大きさだと言う(file が小さくても出るので、誤読させない)
-    expect(big.refused).toContain('写した行が');
-    expect(big.refused).toContain('元の file より大きくなる');
+    expect(big.refused).toContain('読み込んだ行が');
+    expect(big.refused).toContain('元のファイルより大きくなる');
     expect(big.ndjson, '断った表の bytes を返している').toBeNull();
     // 🔑 列は返す(呼び側が「どの表を断ったか」を名前で言える)
     expect(big.columns).toEqual([{ name: 't', type: 'TEXT', notNull: false, primaryKey: false }]);
@@ -587,12 +587,12 @@ describe('🔴 開いた写しの寿命(表ごとに頼むので、開いたま�
     await request({ op: 'closeSqliteExport', session: opened.session });
     await expect(
       request({ op: 'exportSqliteTable', session: opened.session, table: 't', maxTableBytes: MAX }),
-    ).rejects.toThrow(/写しが開かれていません/);
+    ).rejects.toThrow(/コピーが開かれていません/);
     await expect(request({ op: 'closeSqliteExport', session: opened.session })).resolves.toBeNull();
     // 知らない合言葉も同じ
     await expect(
       request({ op: 'exportSqliteTable', session: 'nope', table: 't', maxTableBytes: MAX }),
-    ).rejects.toThrow(/写しが開かれていません/);
+    ).rejects.toThrow(/コピーが開かれていません/);
   });
 
   it('🔴 2 つ開いても取り違えない(それぞれ自分の file の表を返す)', async () => {
@@ -633,7 +633,7 @@ describe('🔴 開いた写しの寿命(表ごとに頼むので、開いたま�
     try {
       await expect(
         request({ op: 'exportSqliteTable', session: sessions[0]!, table: 't', maxTableBytes: MAX }),
-      ).rejects.toThrow(/写しが開かれていません/);
+      ).rejects.toThrow(/コピーが開かれていません/);
       const last = await request({ op: 'exportSqliteTable', session: sessions[8]!, table: 't', maxTableBytes: MAX });
       expect(last.refused).toBeNull();
     } finally {
@@ -716,6 +716,6 @@ describe('🔴 大きい表の途中でも、他の依頼に順番を譲る', ()
     // 後始末:同じ合言葉で頼んでも断られる(閉じた器は残っていない)
     await expect(
       request({ op: 'exportSqliteTable', session: opened.session, table: 'big', maxTableBytes: MAX }),
-    ).rejects.toThrow(/写しが開かれていません/);
+    ).rejects.toThrow(/コピーが開かれていません/);
   }, 60_000);
 });

@@ -209,7 +209,7 @@ describe('音・動画の添付の説明(#1232 段 b)', () => {
    *   ⚠ 「今の器を見ている見張りが 1 本」まで見る(数だけでは、切れた古い見張りが別の器を指す取り違えを見逃す)。
    * ⚠ 同じ高さで 2 度鳴らしても `setProperty` は 1 度だけ(同じ値は書かない ── 書くと見張りがまた鳴って回り続ける)。
    */
-  it('🔴 見張りの寿命:ノートを移る 1 本 / 編集へ入る 0 本 / 戻る 1 本、同じ高さなら書込は 1 回だけ', async () => {
+  it('🔴 見張りの寿命:ノートを移る 1 本 / 編集へ入る 0 本 / 戻る 1 本、同じ高さなら書き込みは 1 回だけ', async () => {
     const watches: Array<{ cb: () => void; target: Element | null; gone: boolean }> = [];
     class FakeResizeObserver {
       private readonly rec: { cb: () => void; target: Element | null; gone: boolean };

@@ -90,12 +90,12 @@ export class PcFolderRenderer {
         return;
       case 'none':
         this.host.append(
-          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC に取り込んで開きます。'),
+          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC3 に取り込んで開きます。'),
           this.pickButton(),
         );
         return;
       case 'lost':
-        this.host.append(para('pc-note', '許可が切れました ── もう一度フォルダを選んでください'), this.pickButton());
+        this.host.append(para('pc-note', '許可が切れました。もう一度フォルダを選んでください'), this.pickButton());
         return;
       case 'failed':
         this.host.append(para('pc-note', view.message ?? 'フォルダを開けませんでした'), this.pickButton());
@@ -136,7 +136,7 @@ export class PcFolderRenderer {
           'pc-refresh-folder',
           'pc-refresh',
           '更新',
-          '同じフォルダの一覧を読み直します(ファイルの中身は読みません)',
+          '同じフォルダの一覧を再読み込みします(ファイルの中身は読みません)',
         ),
         // ⚠ 「フォルダを選ぶ…」と**同じ口**(`pc-pick-folder`)── 選び直しの入り口を 2 つ作らない
         button(
@@ -151,8 +151,8 @@ export class PcFolderRenderer {
       button(
         'pc-cut-folder',
         'pc-cut',
-        '切る',
-        '繋ぎを外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+        '接続を解除',
+        'このフォルダとの接続を解除します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
       ),
     );
     return band;
@@ -212,7 +212,7 @@ export class PcFolderRenderer {
       '',
       row.writeBack
         ? '取り込んで開きます。直して保存したあと、情報ペインの「元ファイルへ書き戻す」でパソコンのファイルも書き換えられます'
-        : '取り込んで開きます(PKC の添付や連絡先になります)。元のファイルへは書き戻せません',
+        : '取り込んで開きます(PKC3 の添付や連絡先になります)。元のファイルへは書き戻せません',
     );
     open.setAttribute('data-pkc-pc-index', String(row.index));
     const about = document.createElement('span');

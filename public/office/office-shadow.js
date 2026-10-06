@@ -366,7 +366,7 @@
       gate.begin();
       try { store.storeToURL('file://' + path, made.seq); } finally { gate.end(); }
       var size = FS.stat(path).size;
-      if (!(size > 0)) throw new Error('shadow: 空の影が書かれた');
+      if (!(size > 0)) throw new Error('shadow: 空の一時保存が書かれた');
       return { ext: ext, path: path, size: size };
     } finally {
       del(store);
@@ -504,7 +504,7 @@
   function reasonOf(e) {
     var code = e && e.shadowReason;
     if (code === 'no-opfs') return 'この端末の保存領域を使えません';
-    if (code === 'no-gate') return 'この版の Office では書けません';
+    if (code === 'no-gate') return 'このバージョンの Office では書けません';
     if (code === 'no-uno') return '編集の状態を Office に聞けませんでした';
     if (e && e.name === 'QuotaExceededError') return '保存領域の空きが足りません';
     return '書き出せませんでした';

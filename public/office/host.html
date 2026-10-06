@@ -423,8 +423,8 @@
       // 🔴 **黙らない**(2026-08-16、着地前レビュー R13)。⚠ console だけだと、
       //    窓は正常に見えたまま**保存が 1 件も PKC へ渡らない** ── 帯を出して
       //    「保存が効かない」と伝える(`degrade()` が在る理由そのもの)
-      console.warn('保存の見張りを積めません(script が読めていない)');
-      degrade('保存の見張りを積めませんでした(保存は PKC へ渡りません)');
+      console.warn('保存の監視機能を読み込めません(script が読めていない)');
+      degrade('保存の監視機能を読み込めませんでした(保存は PKC3 へ渡りません)');
       return;
     }
     var watch = W.createSaveWatch();
@@ -552,7 +552,7 @@
         for (var i = 0; i < hits.length; i += 1) await handOff(dir, hits[i]);
       } catch (e) {
         // 🔴 **黙って落とさない。** user は保存したつもりでいる
-        console.warn('保存を PKC へ渡せませんでした', e);
+        console.warn('保存を PKC3 へ渡せませんでした', e);
         say('save-failed', { reason: String((e && e.message) || e).slice(0, 200) });
       } finally {
         busy = false;
@@ -609,10 +609,10 @@
    * ⚠ 効かなくても開いた文書は使える(言うだけ)。判断は `office-unsaved.js` の `markModified`。
    */
   function markOpenedFromShadow() {
-    setStatus('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    setStatus('一時保存した内容を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     if (!window.PKC3OfficeUnsaved) return;
     window.PKC3OfficeUnsaved.markModified(window.__lo).then(function (ok) {
-      if (ok !== true) console.warn('控えの版を「保存していない変更あり」にできませんでした');
+      if (ok !== true) console.warn('一時保存した内容で開いた文書を「保存していない変更あり」にできませんでした');
     }, function () { /* 聞けなかった ── 開いた文書はそのまま使える */ });
   }
   var shadowTimer = null;
@@ -631,8 +631,8 @@
     var U = window.PKC3OfficeUnsaved;
     if (!SH || !shadowQuiet || !U) {
       // 🔴 **黙らない**(`armSaveWatch` と同じ作法)。⚠ console だけだと、窓は正常に見えたまま控えが 1 つも書かれない
-      console.warn('影の見張りを積めません(script が読めていない)');
-      say('shadow-failed', { reason: SH ? SH.reasonOf({ shadowReason: 'no-gate' }) : 'この版の Office では書けません' });
+      console.warn('一時保存の監視機能を読み込めません(script が読めていない)');
+      say('shadow-failed', { reason: SH ? SH.reasonOf({ shadowReason: 'no-gate' }) : 'このバージョンの Office では書けません' });
       return;
     }
     // 合言葉が無い文書(窓の中で作った物)の棚の名前。⚠ 窓ごとに別にする(別の窓の影を消さない)
@@ -675,7 +675,7 @@
       // 成功は user へ言わない(うるさい)。本体が「最後に書いた時刻」だけ覚える静かな放送
       onWritten: function (at) { say('shadow-written', { at: at }); },
       onFailed: function (reason) { say('shadow-failed', { reason: reason }); },
-      log: function (e) { console.warn('編集の控えを書けませんでした', e); },
+      log: function (e) { console.warn('編集中の内容の一時保存に失敗しました', e); },
     });
     shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
     shadowAfterSaved = function () { return writer.afterSaved(); };
@@ -885,7 +885,7 @@
     + "var ask=function(kind){return new Promise(function(ok,ng){var id=++seq;"
     + "waiting[id]=function(d){if(d&&d.parts)ok(d.parts);else ng(clipErr(d&&d.error));};"
     + "try{ch.postMessage({clip:'read',id:id,kind:kind})}"
-    + "catch(e){delete waiting[id];ng(clipErr('本体のウィンドウへ放送できません'));return}"
+    + "catch(e){delete waiting[id];ng(clipErr('本体のウィンドウへ送れません'));return}"
     + "setTimeout(function(){if(waiting[id]){delete waiting[id];"
     + "ng(clipErr('本体のウィンドウが 5 秒返しませんでした'))}},5000);});};"
     + "if(self.navigator&&!self.navigator.clipboard){"
@@ -1331,7 +1331,7 @@
     var what = document.createElement('span');
     // ⚠ **失うものを先に書く**(`showRestartBand` と同じ向き)
     what.textContent = 'Office の設定を初期化しました(書いたマクロも消えます)。'
-      + 'ウィンドウを開き直すと素の状態で始まります。 ⚠ 保存していない変更は失われます。';
+      + 'ウィンドウを開き直すと初期状態で始まります。 ⚠ 保存していない変更は失われます。';
     var again = document.createElement('button');
     again.textContent = '開き直す';
     // 🔴 ここでは退避しない ── 退避すると、消したばかりの設定が戻る
@@ -1376,7 +1376,7 @@
       }
       return new XMLSerializer().serializeToString(doc);
     } catch (e) {
-      console.warn('保存済みプロファイルを読めませんでした(素で始めます)', e);
+      console.warn('保存済みプロファイルを読めませんでした(初期状態で始めます)', e);
       return null;
     }
   }
@@ -1436,7 +1436,7 @@
       lastSavedProfile = xcu;
     } catch (e) {
       // ⚠ **大きさのために起動を落とさない。** 小さい窓のほうが、開かないよりましである
-      console.warn('ウィンドウの大きさを仕込めませんでした', e);
+      console.warn('ウィンドウの大きさを設定できませんでした', e);
     }
   }
 
@@ -1487,7 +1487,7 @@
       if (p.kind === 'same') return;
       lastSavedMacros = p.signature;
       if (p.kind === 'too-big') {
-        console.warn('マクロが大きすぎるので退避しません(' + p.bytes + ' bytes > ' + M.MAX_BYTES + ')');
+        console.warn('マクロが大きすぎるので控えを取りません(' + p.bytes + ' bytes > ' + M.MAX_BYTES + ')');
         return;
       }
       var done = p.kind === 'empty'
@@ -1497,7 +1497,7 @@
       return done.catch(function (e) {
         // ⚠ 書けなかった回は「前回」を捨てる ── 次の回でもう一度試みる
         lastSavedMacros = null;
-        console.warn('マクロを退避できませんでした', e);
+        console.warn('マクロの控えを取れませんでした', e);
       });
     } catch (e) {
       // 走査できない ── 退避できないだけで、動作は続ける
@@ -1516,7 +1516,7 @@
     try {
       if (saved && Array.isArray(saved.files)) M.restore(FS, M.DIR, saved.files);
     } catch (e) {
-      console.warn('退避したマクロを書き戻せませんでした(素で始めます)', e);
+      console.warn('控えを取ったマクロを書き戻せませんでした(初期状態で始めます)', e);
     }
     try { lastSavedMacros = M.signature(M.scan(FS, M.DIR)); } catch (e) { lastSavedMacros = null; }
   }
@@ -1531,7 +1531,7 @@
     if (!M) return Promise.resolve();
     return openDb()
       .then(function (db) { return idbDel(db, 'meta', M.KEY); })
-      .catch(function (e) { console.warn('退避したマクロを消せませんでした', e); });
+      .catch(function (e) { console.warn('控えを取ったマクロを消せませんでした', e); });
   }
 
   /**
@@ -1670,7 +1670,7 @@
     try { db = await openDb(); } catch (e) { fail('この端末の保存領域を開けません'); return; }
     var meta = await idbGet(db, 'meta', 'pack');
     if (!meta || !Array.isArray(meta.files)) {
-      fail('Office 一式がまだ入っていません(PKC3 の設定から入れてください)');
+      fail('Office 一式がまだ入っていません(PKC3 の システム → 保存領域 → Office 表示 から入れてください)');
       say('not-installed');
       return;
     }
@@ -1681,7 +1681,7 @@
     var blobs = {};
     for (var i = 0; i < need.length; i += 1) {
       blobs[need[i]] = await idbGet(db, 'files', need[i]);
-      if (!blobs[need[i]]) { fail('一式が壊れています: ' + need[i] + ' がありません'); return; }
+      if (!blobs[need[i]]) { fail('一式を読めません: ' + need[i] + ' がありません'); return; }
     }
     /**
      * 🔴 **この一式は非 ODF を保存できるか**(#225)を、**一式そのものから採る**。

@@ -139,7 +139,7 @@ describe('こちらが開いた追記欄は、送ったら畳み直す(#655 ①)
     expect(r.hiddenAttr(), '開いていない').not.toContain('append');
     expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(r.input);
     expect(r.d.getState().notice ?? '', '畳み直すことを言っていない').toContain(
-      '送ると元どおり畳みます',
+      '送ると元どおり折りたたみます',
     );
     // 🔴 記録は 1 byte も動いていない(書き戻しすらしていない)
     expect(r.writes, '記録に書いた').not.toHaveBeenCalled();

@@ -69,7 +69,7 @@ describe('無い能力の shim(実行)', () => {
     expect(line(), '触る前から出ている').toBeNull();
     void (window as { indexedDB?: unknown }).indexedDB;
     expect(line()?.textContent).toContain('IndexedDB');
-    expect(line()?.textContent).toContain('囲いの中では使えません');
+    expect(line()?.textContent).toContain('枠の中では使えません');
   });
 
   it('🔴 2 つ触っても行は 1 枚(画面が埋まらない)', () => {

@@ -114,7 +114,7 @@ describe('🔴 選べない側に添える「どうすれば使えるか」(#682
    */
   it('相手ごとに、選べない理由の字が決まっている', () => {
     const DUCK_ONLY = '.csv / .tsv / .parquet / .json / .sqlite のときだけ使えます';
-    const SQLITE_NO = 'この形式は DuckDB でだけ引けます';
+    const SQLITE_NO = 'この形式は DuckDB でだけ調べられます';
     const table: Array<[string | null, string | null, string | null]> = [
       // 相手, sqlite の理由, duckdb の理由 ── `null` = 選べる
       [null, null, '取り込んだ .csv / .parquet / .json / .sqlite などを選ぶと使えます'],

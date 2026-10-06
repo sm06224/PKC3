@@ -143,7 +143,7 @@ export interface SqliteExportSession {
  */
 export function tooBigReason(maxBytes: number): string {
   // 🔑 大きさの綴りは `humanBytes` 1 本(自前で単位を付けない ── `human-bytes.test.ts` が全数で見る)
-  return `写した行が ${humanBytes(maxBytes)} を超えました(元の file より大きくなることがあります)`;
+  return `読み込んだ行が ${humanBytes(maxBytes)} を超えました(元のファイルより大きくなることがあります)`;
 }
 
 /** SQL の識別子の引用(sqlite も DuckDB も `"` を `""` と書く)。 */
@@ -431,5 +431,5 @@ export function insertFromNdjsonSql(
  */
 export function refusedNote(name: string, why: string, hint = ''): string {
   // 🔑 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
-  return `${name === '' ? '(名前の無い表)' : name} は DuckDB へ写せませんでした(${why}${hint === '' ? '' : `。${hint}`})`;
+  return `${name === '' ? '(名前の無い表)' : name} は DuckDB に読み込めませんでした(${why}${hint === '' ? '' : `。${hint}`})`;
 }

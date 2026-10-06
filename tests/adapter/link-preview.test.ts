@@ -92,7 +92,7 @@ describe('link-preview', () => {
       const card = renderPreviewCard(document, { kind: 'foreign' });
       expect(card.classList.contains('pkc-link-preview-foreign')).toBe(true);
       expect(card.querySelector('.pkc-link-preview-foreign-desc')?.textContent).toContain(
-        '別の PKC のノート',
+        '別の PKC3 のノート',
       );
     });
 
@@ -108,7 +108,7 @@ describe('link-preview', () => {
       expect(card.querySelector('.pkc-link-preview-domain')?.textContent).toBe('github.com');
       expect(card.querySelector('.pkc-link-preview-title')?.textContent).toBe('PKC3 GitHub Repository');
       expect(card.querySelector('.pkc-link-preview-url')?.textContent).toBe('https://github.com/sm06224/PKC3');
-      expect(card.querySelector('.pkc-link-preview-safe-hint')?.textContent).toContain('新しいタブで安全に開きます');
+      expect(card.querySelector('.pkc-link-preview-safe-hint')?.textContent).toContain('新しいタブで開きます');
     });
 
     it('renders loading state when loading is true', () => {

@@ -256,7 +256,7 @@ export class SplitView {
      *   `main.ts` が渡していなかったので**製品では 1 度も出ていなかった**
      *   (test だけが自分で渡していた = CLAUDE.md §7)。
      */
-    if (dropped > 0) sayFolded(`幅が足りないので、横に並べる枠を ${dropped} 枚畳みました`);
+    if (dropped > 0) sayFolded(`幅が足りないので、横に並べる枠を ${dropped} 枚折りたたみました`);
   }
 
   /**

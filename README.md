@@ -1,11 +1,11 @@
 # PKC3
 
 [PKC2](https://github.com/sm06224/PKC2) の後継となるメジャーバージョンアップ。
-ストレージ(wasm-sqlite)の刷新を最重点に、PKC2 の成果である可搬式埋め込み形式・
-エクスポート形式・PKC-Markdown・基本機能を維持する。
+ストレージ(wasm-sqlite)の刷新を最重点に、PKC2 の成果である PKC3 入り HTML(アプリごと 1 つの `.html` に入れて持ち運べる形式)・
+書き出し形式・PKC-Markdown・基本機能を維持する。
 
-ブラウザだけで動くノートアプリ(PWA)。サーバーに何も送らない ──
-データは OPFS 上の SQLite と IndexedDB に置かれる。
+ブラウザだけで動くノートアプリ(PWA)。サーバーに何も送りません。
+データは OPFS 上の SQLite と IndexedDB に置かれます。
 
 ## 使う
 
@@ -14,13 +14,13 @@
 | **製品版** | <https://sm06224.github.io/PKC3/> | いちばん新しい**安定タグ**の中身 |
 | **開発版** | <https://sm06224.github.io/PKC3/dev/> | `main` の先頭。新しい代わりに壊れていることがある |
 
-⚠ **2 つは別のデータを持ちません** ── 同じ origin なので、同じ OPFS / IndexedDB を
+⚠ **2 つは別のデータを持ちません**。同じ origin なので、同じ OPFS / IndexedDB を
 見ます。片方で作ったノートはもう片方にも出ます。
 ⚠ 製品版はタグを出したときだけ更新されます。**開発版と離れることがあります**。
 
-- 📖 **[マニュアル](./docs/manual.md)** ── 作る・書く・書き出す・取り込む・更新
-- 📜 **[変更のあゆみ](./CHANGELOG.md)** ── アプリのお知らせに出した内容(全部)
-- 🚚 **[PKC2 からの移行ガイド](./docs/migration-from-pkc2.md)** ── 何がどう変わるか、何が落ちるか
+- 📖 **[マニュアル](./docs/manual.md)**: 作る・書く・書き出す・取り込む・更新
+- 📜 **[変更のあゆみ](./CHANGELOG.md)**: アプリのお知らせに出した内容(全部)
+- 🚚 **[PKC2 からの移行ガイド](./docs/migration-from-pkc2.md)**: 何がどう変わるか、何が落ちるか
 
 ## 対応ブラウザ
 
@@ -28,9 +28,9 @@
 (user 裁定 2026-08-10「ブラウザ的にはどれか一つがフル機能使えて、それ以外は部分機能対応と
 しましょう」)。
 
-🔴 **この表は「確かめたか」を書きます。**「仕様上は動くはず」を ✅ にはしません ──
+**この表は「確かめたか」を書きます。**「仕様上は動くはず」を ✅ にはしません。
 自動検証(smoke / probe)は **Chromium の 2 つのビルドだけ**で回しており、
-Firefox / Safari では**一度も走らせていない**からです。
+Firefox / Safari では**一度も実行していない**からです。
 
 | 機能 | Chrome / Edge | Firefox | Safari | 必要な土台 |
 |---|:---:|:---:|:---:|---|
@@ -51,7 +51,7 @@ Firefox / Safari では**一度も走らせていない**からです。
 ### なぜそうなるか
 
 - **Office は JSPI(WebAssembly の Promise 統合)を要求します。** この LibreOffice は
-  `--enable-emscripten-jspi` で焼いており、Qt6 の wasm plugin が DOM を直に触るため
+  `--enable-emscripten-jspi` でビルドしており、Qt6 の wasm plugin が DOM を直に触るため
   worker へ逃がせません([経緯](./docs/development/office-wasm-selection-2026-08.md))。
   **手元で確認できたのは Chromium(141)のみ**です。
 - **`SharedArrayBuffer` に cross-origin isolation が要ります。** PKC3 は
@@ -70,26 +70,26 @@ Firefox / Safari では**一度も走らせていない**からです。
 - **Office は既定では入っていません。** 使う人が設定画面で明示的に有効化したときだけ、
   約 106MB の一式を 1 回だけ取得して IndexedDB に置き、以降はローカルから起動します
   ([設計](./docs/development/office-wasm-integration-design-2026-08.md))。
-  ⚠ 一式を配っているのは**別のリポジトリの Pages**(`sm06224/office-pack`)ですが、
-  置き場は `https://sm06224.github.io/office-pack/` ── PKC3 本体と**同じ origin** です。
+  ⚠ 一式を配布しているのは**別のリポジトリの Pages**(`sm06224/office-pack`)ですが、
+  置き場は `https://sm06224.github.io/office-pack/` で、PKC3 本体と**同じ origin** です。
   だから CORS が起きません(別 origin に置くと `fetchPackFromBase` が弾きます)。
-  ⚠ 参照は **origin 直下の絶対 path** で書いてあります ── 相対 path にすると
+  ⚠ 参照は **origin 直下の絶対 path** で書いてあります。相対 path にすると
   `/PKC3/` と `/PKC3/dev/` で深さが違い、開発版だけ 404 になります(2026-08-11 に踏みました)。
 - **図(mermaid)とグラフ(chart)は土台が違います。** chart.js は canvas に描くので
   `OffscreenCanvas` で**丸ごとワーカーへ逃がせます**が、mermaid は SVG を吐くうえに
   レイアウトで DOM を要求するので**主スレッドから外せません**。どちらも結果は
-  **PNG に焼いて IndexedDB に置き**、画面には `<img>` 1 枚として出します
-  (user 指示 2026-08-03「描いたら焼く」)。
+  **PNG にして IndexedDB に置き**、画面には `<img>` 1 枚として出します
+  (user 指示 2026-08-03。図は描いたら画像として保存し、画面にはその画像を出す)。
 
 ## 開発
 
 - **現況**: **v3.3.0 を 2026-09-29 に公開しました**(公開済みの最新)。
   tag は `v3.0.0` 2026-08-03 / `v3.1.0` 2026-08-19 / `v3.2.0` 2026-08-29 / `v3.3.0` 2026-09-29。
-  以降の是正・機能追加は `main` へ積んでいます(**製品版のタグと `main` は離れます** ── 上の表を参照)。
-  ⚠ 次の版を本番へ配る引き金(`v*` tag / `release.yml` の手動起動)は user の示唆を待ちます
-  (user 指示 2026-08-19)── 版上げ・お知らせ・CHANGELOG までは準備として進めてよい
+  以降の是正・機能追加は `main` へ入れています(**製品版のタグと `main` は離れます**。上の表を参照)。
+  ⚠ 次のバージョンを本番へ配布する引き金(`v*` tag / `release.yml` の手動起動)は user の示唆を待ちます
+  (user 指示 2026-08-19)。バージョンの更新・お知らせ・CHANGELOG までは準備として進めてよい
 - **設計 doc(founding doc)**: [`docs/development/pkc3-major-upgrade-design-2026-07.md`](./docs/development/pkc3-major-upgrade-design-2026-07.md)
-- **残件の台帳は GitHub Issues** ── doc に「やることの一覧」は置きません
+- **残件の台帳は GitHub Issues**。doc に「やることの一覧」は置きません
   (user 指示 2026-08-15。doc に書いてよいのは**設計と根拠**だけ)
 - PKC2 リポジトリは参照のみ(read-only)。PKC3 の開発はすべて本リポジトリで行う
 
@@ -98,7 +98,7 @@ npm run dev        # Vite dev server
 npm run build      # Vite build → dist/
 npm test           # vitest run
 npm run test:smoke # playwright(実ビルドを preview して検品)
-npm run build:portable # 持ち歩ける HTML 1 枚の雛形(dist-portable/pkc3.html)
+npm run build:portable # PKC3 入り HTML のテンプレート(dist-portable/pkc3.html)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint src tests build scripts
 ```
@@ -107,7 +107,7 @@ npm run lint       # eslint src tests build scripts
 
 | いつ | 何を |
 |---|---|
-| PR / main push | `audit`(依存の脆弱性監査 ── prod 依存の high 以上で止める)/ `verify`(型 / lint / unit / build / 生成物の検品)── 2 種を**並列**に。どちらも 10 分の timeout が速度予算の tripwire。🔴 **実ブラウザの全量 smoke はここに無い**(下の行) |
-| 🔴 押したときだけ(`workflow_dispatch`) | `Smoke (手動)`(`.github/workflows/smoke.yml`)── 実ブラウザの**全量**を 3 つの shard に割って並列。**図の全数**(マニュアルの 22 種が焼けるか)もこの全量に入っている。入力で `browser: both` にすると**2 つの Chromium ビルド**で突き合わせ、`kind: product` にすると **product 版**(PR gate が触らない成果物)を焼いて回す。⚠ **自動では走らない**(user 指示 2026-09-09「自動実行は禁止 / 全て任意起動」/ 2026-09-11「フルスモークCIを自動起動しないように」)ので、着地の直前に Actions の **Run workflow** を押す |
-| nightly | 🔴 **全量 smoke は無い**(2026-09-11 に押したときだけへ移した)── product ビルドの検品(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(`Probe — store` / `Probe — sahpool` / `Probe — sidebar` / `Probe — editor / live` / `Probe — editor / split` / `Probe — schedule`)/ 赤い間は issue に積む |
-| tag(`v*`)または `workflow_dispatch` | release(SBOM / provenance / `pkc3-dist.zip` ── 中に `portable-template.html` も入る)→ Pages の `/` が入れ替わる |
+| PR / main push | `audit`(依存の脆弱性監査。prod 依存の high 以上で止める)/ `verify`(型 / lint / unit / build / 生成物の検品)の 2 種を**並列**に。どちらも 10 分の timeout が速度予算の tripwire。**実ブラウザの全量 smoke はここに無い**(下の行) |
+| 押したときだけ(`workflow_dispatch`) | `Smoke (手動)`(`.github/workflows/smoke.yml`): 実ブラウザの**全量**を 3 つの shard に割って並列。**図の全数**(マニュアルの 22 種が描けるか)もこの全量に入っている。入力で `browser: both` にすると**2 つの Chromium ビルド**で突き合わせ、`kind: product` にすると **product 版**(PR gate が触らない成果物)をビルドして回す。⚠ **自動では走らない**(user 指示 2026-09-09「自動実行は禁止 / 全て任意起動」/ 2026-09-11「フルスモークCIを自動起動しないように」)ので、着地の直前に Actions の **Run workflow** を押す |
+| nightly | **全量 smoke は無い**(2026-09-11 に押したときだけへ移した)。product ビルドの検品(PR gate が触らない成果物)/ Rust wasm の再ビルド一致 / probe 6 本(`Probe — store` / `Probe — sahpool` / `Probe — sidebar` / `Probe — editor / live` / `Probe — editor / split` / `Probe — schedule`)/ 赤い間は issue に積む |
+| tag(`v*`)または `workflow_dispatch` | release(SBOM / provenance / `pkc3-dist.zip`。中に `portable-template.html` も入る)→ Pages の `/` が入れ替わる |

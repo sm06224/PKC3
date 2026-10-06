@@ -417,7 +417,7 @@ describe('書きかけのままコード枠を残して別のノートを選ぶ�
  * 直す前は `tableLineAt`(frontmatter 込みの行を返す)の結果をそのまま
  * `startCodeEditAt` へ渡していたので、`OPEN_CODE_DRAFT` の reducer が
  * `frontmatterLineCount` を**もう一度**足し、frontmatter を持つノートでは
- * ✎ が必ず「このコード枠を編集できませんでした」に落ちていた。
+ * ✎ が必ず「このコードブロックを編集できませんでした」に落ちていた。
  */
 describe('frontmatter があるノートでも ✎ が使える(#1044 段3 2巡目の修理、V1)', () => {
   it('🔴 ✎ で開き、打って保存すると、正しい枠(disk)が変わる(frontmatter は無傷)', async () => {
@@ -425,7 +425,7 @@ describe('frontmatter があるノートでも ✎ が使える(#1044 段3 2巡�
     await clickEditCodeBlock(root);
     expect(
       d.getState().error,
-      '「このコード枠を編集できませんでした」に落ちた(V1 の再発)',
+      '「このコードブロックを編集できませんでした」に落ちた(V1 の再発)',
     ).toBeFalsy();
     expect(
       codeDraft(d)?.original,

@@ -127,7 +127,7 @@ describe('録ったものの面 ── 何が見えるか(#683 段①)', () => {
    */
   it('🔴 絞りで 0 件のときだけ「絞りを外す」が出る', () => {
     const withQuery = pane({ captureItems: ITEMS(), filterQuery: 'ぜったい無い' }).host;
-    expect(note(withQuery)).toContain('絞り込みに当たる');
+    expect(note(withQuery)).toContain('絞り込みに一致する');
     expect(
       withQuery.querySelector('[data-pkc-field="captures-clear-filter"]'),
       '絞りを外す道が無い(user は一覧タブへ戻るしかない)',

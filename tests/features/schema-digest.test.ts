@@ -36,8 +36,8 @@ const COUNTS = grid(['tbl', 'n'], [['entries', 3], ['tags', 0]]);
 
 describe('構造 1 枚を組む', () => {
   it('表・列・型・鍵・繋がり・行数が出る', () => {
-    const out = renderSchemaDigest({ source: 'この PKC のノート', columns: COLS, fks: FKS, counts: COUNTS });
-    expect(out).toContain('# この PKC のノート の構造');
+    const out = renderSchemaDigest({ source: 'この PKC3 のノート', columns: COLS, fks: FKS, counts: COUNTS });
+    expect(out).toContain('# この PKC3 のノート の構造');
     expect(out).toContain('表 / ビュー: 3 件');
     /**
      * 🔴 **数えていない物の名前を書かない**(#918 段⑤d-2)。
@@ -83,7 +83,7 @@ describe('構造 1 枚を組む', () => {
     const out = renderSchemaDigest({ source: 'x', columns: COLS, fks: grid(['tbl'], []) });
     expect(out, '採れていない行数を書いている').not.toContain('3 行');
     expect(out).toContain('## entries(表)');
-    expect(out, '採れなかったことを言っていない').toContain('行数は採れませんでした');
+    expect(out, '採れなかったことを言っていない').toContain('行数は取得できませんでした');
   });
 
   it('⚠ 表が 1 つも無くても 1 枚は出る(押して無反応にしない)', () => {
@@ -93,7 +93,7 @@ describe('構造 1 枚を組む', () => {
 
   it('⚠ 繋がりが 0 件なら、その見出しごと出さない', () => {
     const out = renderSchemaDigest({ source: 'x', columns: COLS, fks: grid(['tbl'], []) });
-    expect(out).not.toContain('表どうしの繋がり');
+    expect(out).not.toContain('表どうしのつながり');
   });
 });
 
@@ -228,7 +228,7 @@ describe('段① の字と模型が食い違わない', () => {
     const input = { source: 'x', columns: COLS, fks: FKS, counts: COUNTS };
     const m = schemaModel(input);
     const out = renderSchemaDigest(input);
-    const heads = out.split('\n').filter((l) => l.startsWith('## ') && l !== '## 表どうしの繋がり');
+    const heads = out.split('\n').filter((l) => l.startsWith('## ') && l !== '## 表どうしのつながり');
     expect(heads.length, '見出しの数が模型の表の数と違う').toBe(m.tables.length);
     for (const t of m.tables) {
       const kind = t.kind === 'view' ? 'ビュー' : '表';
@@ -263,42 +263,42 @@ describe('段① の字と模型が食い違わない', () => {
    */
   it('🔴 段① の字を丸ごと pin する', () => {
     const out = renderSchemaDigest({
-      source: 'この PKC のノート',
+      source: 'この PKC3 のノート',
       columns: COLS,
       fks: FKS,
       counts: COUNTS,
     });
     expect(out).toBe(
-      `# この PKC のノート の構造
+      `# この PKC3 のノート の構造
 
 表 / ビュー: 3 件
 
 ## entries(表・3 行)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | lid | TEXT | 不可 | 主キー |
 | title | TEXT | 可 |  |
 
 ## tags(表・0 行)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | name | (型なし) | 可 |  |
 
 ## recent(ビュー)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | lid | TEXT | 可 |  |
 
-## 表どうしの繋がり
+## 表どうしのつながり
 
 - tags.lid → entries.lid
 
 ---
 
-⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。`,
+ここにあるのは構造だけです(中身は 1 行も含まれていません)。`,
     );
   });
 });

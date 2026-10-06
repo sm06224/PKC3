@@ -47,12 +47,12 @@ export function quoteIntoNote(
   timers: QuoteTimers = REAL_TIMERS,
 ): Promise<PdfQuoteResult> {
   const st = dispatcher.getState();
-  if (session.lid === null) return Promise.resolve({ ok: false, message: '引く先のノートが分かりません' });
+  if (session.lid === null) return Promise.resolve({ ok: false, message: '引用先のノートが分かりません' });
   const target = resolveQuoteTarget(session.lid, st.entryMetas, st.relations);
   const meta = st.entryMetas.get(target);
-  if (meta === undefined) return Promise.resolve({ ok: false, message: '引く先のノートが見つかりません' });
+  if (meta === undefined) return Promise.resolve({ ok: false, message: '引用先のノートが見つかりません' });
   const block = formatPdfQuote(text, page, session.name);
-  if (block === null) return Promise.resolve({ ok: false, message: '引く字が選ばれていません' });
+  if (block === null) return Promise.resolve({ ok: false, message: '引用する字が選ばれていません' });
   // 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない。予定の面の追記と同じ)
   const lockBefore = st.writeLock;
   const gen = st.lockGen;
@@ -63,8 +63,8 @@ export function quoteIntoNote(
       if (ev.type !== 'APPEND_SETTLED' || ev.lid !== target || ev.gen !== gen) return;
       settle(
         ev.ok
-          ? { ok: true, message: `「${meta.title}」の末尾へ引きました(${String(Math.floor(page))} 頁)` }
-          : { ok: false, message: ev.error ?? '引けませんでした' },
+          ? { ok: true, message: `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)` }
+          : { ok: false, message: ev.error ?? '引用できませんでした' },
       );
     });
     let done = false;
@@ -89,7 +89,7 @@ export function quoteIntoNote(
     if (after.writeLock === lockBefore) {
       settle({
         ok: false,
-        message: after.error ?? 'いまは引けません。少し待ってから、もう一度押してください',
+        message: after.error ?? 'いまは引用できません。少し待ってから、もう一度押してください',
       });
       return;
     }

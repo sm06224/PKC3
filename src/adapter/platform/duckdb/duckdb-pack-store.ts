@@ -93,7 +93,7 @@ function write(db: IDBDatabase, stores: string[], run: (t: IDBTransaction) => vo
   return new Promise((resolve, reject) => {
     const t = db.transaction(stores, 'readwrite');
     const fail = (e: unknown): void =>
-      reject(e instanceof Error ? e : new Error('この端末の保存領域(IndexedDB)に書き込めませんでした'));
+      reject(e instanceof Error ? e : new Error('この端末に一式を保存できませんでした(IndexedDB)'));
     t.oncomplete = () => resolve();
     t.onerror = () => fail(t.error);
     t.onabort = () => fail(t.error ?? new Error('idb transaction aborted'));
@@ -188,7 +188,7 @@ export class DuckDbPackStore {
     if (fileMeta === undefined) return null;
     if (blob.size !== fileMeta.bytes) {
       throw new DuckDbPackStoreError(
-        `${name} の中身が壊れています(記録: ${fileMeta.bytes} byte / 実際: ${blob.size} byte。入れ直してください)`,
+        `${name} の中身が読めません(記録: ${fileMeta.bytes} byte / 実際: ${blob.size} byte。入れ直してください)`,
       );
     }
     return blob;

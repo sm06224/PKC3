@@ -164,7 +164,7 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(await metasOf('w1'), '前提が崩れている(頭が立っていない)').toHaveLength(1);
     // 窓 B(カレンダー / やることの板)── amend なので履歴は伸びない
     await write('w1', fromOtherWindow);
-    expect(await metasOf('w1'), '前提が崩れている(別窓の書込で履歴が伸びた)').toHaveLength(1);
+    expect(await metasOf('w1'), '前提が崩れている(別窓の書き込みで履歴が伸びた)').toHaveLength(1);
 
     // 窓 A の保存 ── **窓 B の版を上書きする**
     await write('w1', commit, { checkpoint: true });
@@ -797,7 +797,7 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(got).toContain('big2');
   });
 
-  it('[P6d] 並びは entry_order → lid(書出しの並びの正本)', async () => {
+  it('[P6d] 並びは entry_order → lid(書き出しの並びの正本)', async () => {
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-b', 'B', { entryOrder: 700 }), checkpoint: false });
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-a', 'A', { entryOrder: 700 }), checkpoint: false });
     await request({ op: 'upsertEntry', cid: 'c1', entry: entry('o-c', 'C', { entryOrder: 699 }), checkpoint: false });
@@ -959,7 +959,7 @@ describe('P6e ── 鎖を書き出して復元する', () => {
       chains: [{ entryLid: 'tamdst', rows: patched }],
     });
     expect(r.added).toBe(0);
-    expect(r.brokenChains.join()).toMatch(/噛み合いません/);
+    expect(r.brokenChains.join()).toMatch(/順序が合いません/);
   });
 
   it('🔴 1 本が壊れていても健全な鎖は残る(全部を巻き戻さない)', async () => {
@@ -2167,7 +2167,7 @@ describe('添付の差し替え(#205 / #178 / #212)', () => {
    * ⚠ 差し替えは `checkpoint` を渡さない = **amend**(版を積むと Office の保存の
    * たびに履歴が 1 件伸びる)ので、**履歴の件数が増えないこと**を見る。
    */
-  it('🔴 書込は upsertEntry と同じ 1 本を通る(amend ── 履歴は伸びない)', async () => {
+  it('🔴 書き込みは upsertEntry と同じ 1 本を通る(amend ── 履歴は伸びない)', async () => {
     await request({
       op: 'upsertEntry',
       cid: 'c1',

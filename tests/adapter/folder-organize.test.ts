@@ -1060,7 +1060,7 @@ describe('行の上半分 / 下半分に落とすと並べ替え(#215)', () => {
     const before = rows();
     edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), q('tbody [data-pkc-entry="n1"]')!, 102);
     await tick();
-    expect(d.getState().error ?? '', '無言で捨てた').toContain('手動の順');
+    expect(d.getState().error ?? '', '無言で捨てた').toContain('自分で並べた順');
     expect(reordered).toEqual([]);
     expect(rows()).toEqual(before);
   });

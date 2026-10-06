@@ -231,7 +231,7 @@ describe('位置だけの書き換え(movePlace)', () => {
     expect(next!.split('\n')[1], 'frontmatter 側まで書き換えた').toBe(open);
   });
 
-  it('🔴 fence の中へ移った同じ字面の行には書かない(別の窓の書込で行が動いた形)', () => {
+  it('🔴 fence の中へ移った同じ字面の行には書かない(別の窓の書き込みで行が動いた形)', () => {
     const open = ':::format{.pkc-place x=1 y=1}';
     const fenced = ['```', open, '```'].join('\n');
     expect(movePlace(fenced, { line: 1, openLine: open, x: 2, y: 3 })).toBeNull();
@@ -419,7 +419,7 @@ describe('板を前へ出す(raisePlace)(#676 段②)', () => {
  *
  * ⚠ **これは本文が増える操作である** ── だから門は移動と同じだけ持つ。
  */
-describe('🔴 板を線で繋ぐ(connectPlaces)(#530 段③d)', () => {
+describe('🔴 板を線でつなぐ(connectPlaces)(#530 段③d)', () => {
   const two = [
     ':::format{.pkc-place x=0 y=0}',
     '左',
@@ -437,7 +437,7 @@ describe('🔴 板を線で繋ぐ(connectPlaces)(#530 段③d)', () => {
 
   it('🔴 名前が無ければ付けて、線の塊を末尾へ足す', () => {
     const next = connectPlaces(two, { from: at(two, 0), to: at(two, 4) })!;
-    expect(next, '繋げなかった').not.toBeNull();
+    expect(next, 'つなげなかった').not.toBeNull();
     const lines = next.split('\n');
     // 🔑 名前は開き行の頭に入り、**ほかの札は 1 byte も動かない**
     expect(lines[0]).toBe(':::format{#板1 .pkc-place x=0 y=0}');
@@ -516,8 +516,8 @@ describe('🔴 板を線で繋ぐ(connectPlaces)(#530 段③d)', () => {
     const next = connectPlaces(two, { from: at(two, 0), to: at(two, 4) })!;
     const html = renderMarkdown(next, { sourceLineAnchors: true } as never);
     expect(html, '線の塊として描かれていない').toContain('pkc-line');
-    expect(html, '繋ぎ先が焼かれていない').toContain('data-pkc-from="板1"');
-    expect(html, '繋ぎ先が焼かれていない').toContain('data-pkc-to="板2"');
+    expect(html, 'つなぎ先が焼かれていない').toContain('data-pkc-from="板1"');
+    expect(html, 'つなぎ先が焼かれていない').toContain('data-pkc-to="板2"');
     // 🔑 名前も id として焼かれる(線の描画がこの id を引く)
     expect(html).toContain('id="板1"');
   });
@@ -563,7 +563,7 @@ describe('🔴 線の重複と、線を消す(connectPlaces / removePlaceLine)(#
     expect(twice, 'null(= 競合の顔)ではなく、同じ本文を返す').toBe(once);
   });
 
-  it('🔴 対照群: 繋ぎ目が違えば 2 本目を書く(同じ 2 枚の間の別の線)', () => {
+  it('🔴 対照群: つなぎ目が違えば 2 本目を書く(同じ 2 枚の間の別の線)', () => {
     const once = connectPlaces(two, {
       from: at(two, 0),
       to: at(two, 4),

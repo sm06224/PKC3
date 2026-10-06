@@ -196,7 +196,7 @@ describe('塊 → OOXML の写像', () => {
       't',
       ISO,
     );
-    expect(part(res, 'word/document.xml')).toContain('写せませんでした');
+    expect(part(res, 'word/document.xml')).toContain('コピーできませんでした');
     expect(res.warnings.join(' ')).toContain('画像 2 件');
     expect(res.counts.skipped).toBe(2);
   });
@@ -257,7 +257,7 @@ describe('HTML(画面と同じもの)→ 塊', () => {
     expect(skipped).toBe(1);
     const p = blocks[0] as Extract<DocxBlock, { kind: 'p' }>;
     expect(p.runs[0]!.text).toContain('図 1');
-    expect(p.runs[0]!.text).toContain('写せませんでした');
+    expect(p.runs[0]!.text).toContain('コピーできませんでした');
   });
 
   it('🔴 知らない器の中へ降りる(囲みの中の塊が 1 つに潰れない)', () => {
@@ -351,7 +351,7 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
    *   片方だけだと、**線を丸ごと捨てる実装**(段③a のまま)が緑で通る。
    * 🔑 運ぶのは `from` / `to` の**名前だけ**である(座標も字も持たない)。
    */
-  it('🔴 線の宣言は、繋ぎ先の名前だけを印として運ぶ(#530 段③e)', () => {
+  it('🔴 線の宣言は、つなぎ先の名前だけを印として運ぶ(#530 段③e)', () => {
     const r = blocksOf(
       '<div class="pkc-format-block pkc-line" data-pkc-from="今日" data-pkc-to="明日"></div>',
     );
@@ -446,7 +446,7 @@ describe('\u{1f534} 自由配置の板の印(#530 段①)', () => {
     expect(without, '本文が出ていない').toContain('本文');
   });
 
-  it('🔴 板の `#名前` が印として運ばれる(線の繋ぎ先になるため)', () => {
+  it('🔴 板の `#名前` が印として運ばれる(線のつなぎ先になるため)', () => {
     const r = blocksOf('<div class="pkc-place" id="今日" data-pkc-x="0"><p>あ</p></div>');
     expect(r.blocks[0]).toMatchObject({ kind: 'place', name: '今日' });
     // ⚠ 対照群 ── 名前を書いていない板は `null`(`id=""` と同じ扱い)

@@ -89,5 +89,5 @@ export function importPanel(
   notes: readonly string[],
   action: NoticeAction | null,
 ): { readonly title: string; readonly action: NoticeAction | null } {
-  return { title: notes.length > 0 ? '取込時の注意' : '取り込みました', action };
+  return { title: notes.length > 0 ? '取り込み時の注意' : '取り込みました', action };
 }

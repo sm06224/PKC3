@@ -394,7 +394,7 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
     const head = t.rows === null ? `## ${t.name}(${kind})` : `## ${t.name}(${kind}・${t.rows} 行)`;
     out.push(head);
     out.push('');
-    out.push('| 列 | 型 | 空を許すか | 鍵 |');
+    out.push('| 列 | 型 | 空を許すか | キー |');
     out.push('|---|---|---|---|');
     for (const c of t.columns) {
       const typ = c.type === '' ? '(型なし)' : c.type;
@@ -406,7 +406,7 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
   }
 
   if (model.links.length > 0) {
-    out.push('## 表どうしの繋がり');
+    out.push('## 表どうしのつながり');
     out.push('');
     for (const f of model.links) {
       const to = f.toColumn === '' ? f.to : `${f.to}.${f.toColumn}`;
@@ -421,10 +421,10 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
    */
   out.push('---');
   out.push('');
-  out.push('⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。');
+  out.push('ここにあるのは構造だけです(中身は 1 行も含まれていません)。');
   for (const n of input.notes ?? []) out.push(`⚠ ${n}`);
   // ⚠ 見るのは**渡されたか**であって、模型の `rows` ではない ── 表が 0 件の DB でも
   //    「採れなかった」とは書かない(採れて 0 件と、採れなかったのは別の話である)
-  if (!input.counts) out.push('⚠ 行数は採れませんでした。');
+  if (!input.counts) out.push('行数は取得できませんでした。');
   return out.join('\n');
 }

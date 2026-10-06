@@ -51,8 +51,8 @@ export function sqlNoteTitle(now: Date, where: string | null = null): string {
     `${String(now.getFullYear())}-${p(now.getMonth() + 1)}-${p(now.getDate())}` +
     ` ${p(now.getHours())}:${p(now.getMinutes())}`;
   return where === null || where === ''
-    ? `SQL の答え ${stamp}`
-    : `SQL の答え ${stamp}(${where})`;
+    ? `SQL の結果 ${stamp}`
+    : `SQL の結果 ${stamp}(${where})`;
 }
 
 /** 升 1 つを csv の字へ。⚠ `null` は**空の升**にする(`null` という字にしない)。 */
@@ -96,19 +96,19 @@ export function sqlNoteBody(p: {
     csvMark,
     '',
     // 🔴 **どこを調べたかを、いちばん先に言う**(#837 K3)
-    `> ${String(p.rows.length)} 行の答えです(${
+    `> ${String(p.rows.length)} 行の結果です(${
       p.where === undefined || p.where === null || p.where === ''
-        ? 'この PKC のノート'
+        ? 'この PKC3 のノート'
         : p.where
     } を調べました)。`,
   ];
   if (p.truncated) {
     lines.push('>');
-    lines.push('> ⚠ 上限で切っています ── 全部を出すには、LIMIT や条件で絞ってから走らせ直してください。');
+    lines.push('> ⚠ 上限で切っています。全部を出すには、LIMIT や条件で絞ってから実行し直してください。');
   }
   lines.push('>');
   lines.push(
-    `> 🔑 この表をまた SQL から引きたいときは、上の囲みの 1 行目を \`csv name=好きな名前\` にしてください。`,
+    `> この表をまた SQL から実行したいときは、上のブロックの 1 行目を \`csv name=好きな名前\` にしてください。`,
   );
   return `${lines.join('\n')}\n`;
 }

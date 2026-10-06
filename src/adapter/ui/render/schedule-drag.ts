@@ -9,7 +9,7 @@
  * | 🔴 指(CDP の本物の touch、50ms も 600ms も) | **1 度も光らない** | **変わらない** |
  *
  * 観測点は「掴んで動かした先で `data-pkc-dropping` が立つか」+「保存された本文が
- * 書き替わるか」の 2 つ(実ブラウザ・`Input.dispatchTouchEvent` で計測)。
+ * 書き換わるか」の 2 つ(実ブラウザ・`Input.dispatchTouchEvent` で計測)。
  * 原因は `task-card.ts` の `card.draggable = true`(= HTML5 の drag)── 大半の
  * 携帯ブラウザは指の押下から `dragstart` を起こさない。**指だけの端末には、
  * 予定を動かす道が 1 つも無かった。**
@@ -192,7 +192,7 @@ function moveRepeat(
   if (!Number.isInteger(line)) return;
   const from = grabbed.from;
   if (from === '') {
-    deny('どの回を動かすのか分かりませんでした(もう一度、カードを掴み直してください)');
+    deny('どの回を動かすのか分かりませんでした(もう一度、カードをドラッグし直してください)');
     return;
   }
   const days = daysBetween(from, dropDate);

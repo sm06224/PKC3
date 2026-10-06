@@ -210,7 +210,7 @@ describe('タイマー(#279)', () => {
     b.service.stop('a');
     await settle();
     expect(b.appends(), '編集中なのに書けている(reducer が捨てている)').toHaveLength(0);
-    expect(b.notices.join('\n'), '預かったことを言っていない').toContain('預かりました');
+    expect(b.notices.join('\n'), '預かったことを言っていない').toContain('まだ書いていません');
 
     b.d.dispatch({ type: 'CANCEL_EDIT' });
     await settle();
@@ -235,7 +235,7 @@ describe('タイマー(#279)', () => {
     b.service.stop('a');
     await settle();
     expect(b.appends(), '別のノートを編集中なのに、計っていたノートへ書けていない').toHaveLength(1);
-    expect(b.notices.join('\n'), '別のノートなのに預かった').not.toContain('預かりました');
+    expect(b.notices.join('\n'), '別のノートなのに預かった').not.toContain('まだ書いていません');
     expect(b.notices.join('\n')).toContain('書きました');
   });
 
@@ -247,7 +247,7 @@ describe('タイマー(#279)', () => {
     await settle();
     expect(b.appends(), '捨てたのに本文へ書いた').toHaveLength(0);
     expect(b.service.runs()).toHaveLength(0);
-    expect(b.notices.join('\n')).toContain('捨てました');
+    expect(b.notices.join('\n')).toContain('書かずにやめました');
   });
 
   it('🔴 ⑥ 刻みは走っている間だけ張る(0 本で外す)', () => {

@@ -198,11 +198,11 @@ describe('system 領域のノートは user 向けの読み手から漏れない
    * 1 度 pin すれば 3 経路とも守れる(CLAUDE.md §7 の逆 ── 複製が無いので
    * 経路ごとに分けて test する理由が無い)。
    */
-  it('書出し(listBodies ── archive dump / markdown zip / 閲覧用 HTML の共通経路): system は出ない / user は出る', async () => {
+  it('書き出し(listBodies ── archive dump / markdown zip / 閲覧用 HTML の共通経路): system は出ない / user は出る', async () => {
     const r = await request({ op: 'listBodies', cid: CID, maxBytes: 1_000_000 });
     const lids = r.rows.map((row) => row.lid);
     expect(lids, '対照群が出ていない(検査が空振りしている)').toContain('u-rich');
-    expect(lids, 'system 領域のノートが書出しに漏れた').not.toContain('sys-msg');
+    expect(lids, 'system 領域のノートが書き出しに漏れた').not.toContain('sys-msg');
   });
 
   /**

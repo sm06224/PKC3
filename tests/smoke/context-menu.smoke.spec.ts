@@ -1343,7 +1343,7 @@ test('🔴 見出しを右クリックして「この章をコピー」を押す
  * だから見るのは `getComputedStyle(el, '::before').content` である(user が見る字そのもの)。
  * ⚠ 説明の在る項目に乗せたら案内は消え、その説明だけが出る(対照群)。
  */
-test('🔴 本文のメニューを開いた直後、説明欄に「項目に乗せると説明が出ます」と薄く出る (#705 ③)', async ({
+test('🔴 本文のメニューを開いた直後、説明欄に「項目にマウスを合わせると説明が出ます」と薄く出る (#705 ③)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -1367,7 +1367,7 @@ test('🔴 本文のメニューを開いた直後、説明欄に「項目に乗
     guide: getComputedStyle(el, '::before').content,
   }));
   expect(before.text, '欄に字が入っている(案内は CSS で出す設計と違う)').toBe('');
-  expect(before.guide, '空の欄に案内が出ていない(何のための箱か読めない)').toContain('項目に乗せると説明が出ます');
+  expect(before.guide, '空の欄に案内が出ていない(何のための箱か読めない)').toContain('項目にマウスを合わせると説明が出ます');
 
   // 対照群: 説明の在る項目に乗せると、案内は消えて説明だけが出る
   const withHint = menu.locator('button[data-pkc-hint]').first();

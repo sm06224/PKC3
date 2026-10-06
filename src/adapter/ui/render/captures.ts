@@ -209,7 +209,7 @@ export class CapturesRenderer {
     if (state.captureItems === null) return '音と動画を集めています…';
     if (state.captureItems.length === 0)
       return '音と動画はまだありません。左下の「録音」か「画面録画」で録ると、ここに並びます。';
-    if (shown === 0) return '絞り込みに当たるものがありません';
+    if (shown === 0) return '絞り込みに一致するものがありません';
     return `${shown} 件`;
   }
 
@@ -439,7 +439,7 @@ export class CapturesRenderer {
     /**
      * 🔴 **文字にする**(#772 段②。裁定 2026-10-01 ② = 「聞く」「切り出す」と同じ並び)。
      * ⚠ **中身が分からない添付には出さない**(`assetKey` が無い行は押しても何も起きない)。
-     * ⚠ 部品が無くても**出す** ── 押すと「システム → 音声認識 で取り込んでください」と
+     * ⚠ 部品が無くても**出す** ── 押すと「システム → 保存領域 → 音声認識 で取り込んでください」と
      *   案内する(出さないと、機能があることが分からない)。
      */
     if (item.assetKey !== null) {

@@ -92,8 +92,8 @@ export function parseExtRequest(data: unknown): ExtParsed {
     return {
       ok: false,
       why:
-        `「${t}」は在りません(意図的です)。` +
-        '実体は user が情報ペインの「このアプリへ送る」で 1 件ずつ渡します ── ' +
+        `「${t}」はありません(意図的です)。` +
+        '実体は情報ペインの「このアプリへ送る」で 1 件ずつ渡します。' +
         '拡張から取りに行く手段はありません。',
     };
   return { ok: false, why: `知らない種別です: ${t}` };

@@ -526,7 +526,7 @@ describe('🔴 書く流れ(静止 → 保存済みか確かめる → 書く �
   it('理由の字: 保存領域 / 差し替えが当たらない / 聞けない / 容量 / 既定。どれも内部の語を含まない', () => {
     const cases: [unknown, string][] = [
       [{ shadowReason: 'no-opfs' }, 'この端末の保存領域を使えません'],
-      [{ shadowReason: 'no-gate' }, 'この版の Office では書けません'],
+      [{ shadowReason: 'no-gate' }, 'このバージョンの Office では書けません'],
       [{ shadowReason: 'no-uno' }, '編集の状態を Office に聞けませんでした'],
       [{ name: 'QuotaExceededError' }, '保存領域の空きが足りません'],
       [new Error('whatever'), '書き出せませんでした'],
@@ -745,7 +745,7 @@ describe('🔴 LO に影を書かせる(差し替えは storeToURL の間だけ)
     expect(f2.files.has('/work/seed.odt'), '置き場の外を消した').toBe(true);
     // 空の影
     const z = fakeShadowLo([{ loc: 'file:///work/seed.odt', modified: true }], g, { zeroSize: true });
-    expect(() => api.storeShadowSync(z.lo, g, { docPath: '/work/seed.odt' })).toThrow(/空の影/);
+    expect(() => api.storeShadowSync(z.lo, g, { docPath: '/work/seed.odt' })).toThrow(/空の一時保存/);
     expect(g.isActive()).toBe(false);
   });
 
@@ -1139,7 +1139,7 @@ describe('🔴 host.html の影の配線を実行する行のまま動かす(印
     expect(shadowsOf(root, 'lid-note')).toHaveLength(1);
   });
 
-  it('🔴 差し替えが当たっていない一式(patched が空)は、書き出しを打たず「この版の Office では書けません」を言う', async () => {
+  it('🔴 差し替えが当たっていない一式(patched が空)は、書き出しを打たず「このバージョンの Office では書けません」を言う', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const root = new FakeDir();
     // 門が無いと storeToURL が SuspendError で落ちる(本物と同じ)── 偽の LO にそれを再現させる
@@ -1147,7 +1147,7 @@ describe('🔴 host.html の影の配線を実行する行のまま動かす(印
     at(T0); h.handlers.keydown!({ key: 'a' }); at(T0 + 3000);
     await h.tick();
     expect(h.f.stores, '門が無いので storeToURL まで行った(SuspendError の生の失敗)').toHaveLength(0);
-    expect(h.said).toEqual([{ type: 'shadow-failed', payload: { reason: 'この版の Office では書けません' } }]);
+    expect(h.said).toEqual([{ type: 'shadow-failed', payload: { reason: 'このバージョンの Office では書けません' } }]);
     // 対照群: 当たっている一式は書く
     const ok = bootHostShadow({ uuid: 'B', token: 'lid-2', patched: ['env'], storage: new FakeDir() });
     at(T0 + 10000); ok.handlers.keydown!({ key: 'a' }); at(T0 + 13000);
@@ -1221,10 +1221,10 @@ describe('🔴 放送の parity ── 実物の窓(host.html の行)が撃つ�
     expect(ow.shadowAt()).toBeNull();
   });
 
-  it('本体の字: 「保存していない編集を書き残せませんでした(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
-    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('保存していない編集を書き残せませんでした(保存領域の空きが足りません)');
-    expect(shadowFailedNotice('')).toBe('保存していない編集を書き残せませんでした');
-    expect(shadowFailedNotice('  ')).toBe('保存していない編集を書き残せませんでした');
+  it('本体の字: 「編集中の内容の一時保存に失敗しました(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
+    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('編集中の内容の一時保存に失敗しました(保存領域の空きが足りません)');
+    expect(shadowFailedNotice('')).toBe('編集中の内容の一時保存に失敗しました');
+    expect(shadowFailedNotice('  ')).toBe('編集中の内容の一時保存に失敗しました');
     expect(shadowFailedNotice('x')).not.toMatch(/壊れ|fd_sync|storeToURL|OPFS/);
     const main = readFileSync('src/main.ts', 'utf-8');
     const i = main.indexOf("ev.type === 'shadow-failed'");
@@ -1489,7 +1489,7 @@ describe('🔴 host.html の段 2 の配線(実行する行のまま)', () => {
     expect(host).toContain('docFromShadow = !!(d.payload && d.payload.fromShadow === true);');
     const fn = host.indexOf('function markOpenedFromShadow() {');
     expect(fn, '控えの版で開いたと言う関数が無い').toBeGreaterThan(0);
-    expect(host.slice(fn, fn + 400)).toContain('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    expect(host.slice(fn, fn + 400)).toContain('一時保存した内容を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     // 開けた後(doc-open の枝)の中、見張りを畳んだ後から呼ぶ ── 開く前に呼ぶと、LO がまだ文書を持っていない
     const call = host.indexOf('if (docFromShadow) markOpenedFromShadow();');
     expect(call, '開けた後の枝から呼んでいない').toBeGreaterThan(0);

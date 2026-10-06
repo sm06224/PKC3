@@ -24,7 +24,7 @@ import type { MessageKind } from './message-log';
  *   片方だけ直した日に「注意」から外れる)。
  */
 export const EDIT_ELSEWHERE_ERROR =
-  'このノートは別のタブかウィンドウで編集中です(そちらを閉じるか保存してください)';
+  'このノートは別のタブまたはウィンドウで編集中です(そちらを閉じるか保存してください)';
 
 /**
  * `OP_FAILED` の文を、積むときの種類へ。
@@ -66,7 +66,7 @@ export function quotaCaution(est: QuotaEstimate): CautionPost | null {
  *   (退避した回は別の 1 行が既に言っている)。
  */
 export const RESERVED_LOCK_CAUTION_TEXT =
-  '書き込みの途中でタブが閉じたときに元へ戻す仕組みが、このブラウザでは働いていません ── 大きな取り込みや片づけの最中は、タブを閉じないでください';
+  '書き込みの途中でタブが閉じたときに元へ戻す仕組みが、このブラウザでは働いていません。大きな取り込みや索引の整理の最中は、タブを閉じないでください';
 
 export function reservedLockCaution(init: {
   vfs: 'opfs-sahpool' | 'memory';

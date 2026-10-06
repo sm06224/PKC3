@@ -348,7 +348,7 @@ describe('可搬 HTML', () => {
     );
   });
 
-  it('🔴 一覧に無い entry の注意も同じ規則で畳む(経路ごとに乗せ忘れない)', async () => {
+  it('🔴 一覧に無いノートの注意も同じ規則で畳む(経路ごとに乗せ忘れない)', async () => {
     const n = WARN_CAP + 3;
     const src = source({ entries: [{ lid: 'n1', body: 'a' }] });
     let done = false;
@@ -372,7 +372,7 @@ describe('可搬 HTML', () => {
     const out = await writePortableHtml(orphans, NOW);
     const lines = out.warnings.filter((w) => w.startsWith('本文はあるが一覧に無い'));
     expect(lines, '10 件で畳んでいない').toHaveLength(WARN_CAP);
-    expect(out.warnings.at(-1)).toBe(`一覧に無い entry の注意はほか ${n - WARN_CAP} 件あります`);
+    expect(out.warnings.at(-1)).toBe(`一覧に無いノートの注意はほか ${n - WARN_CAP} 件あります`);
   });
 
   it('🔴 前進しないカーソルで無限に回らない', async () => {

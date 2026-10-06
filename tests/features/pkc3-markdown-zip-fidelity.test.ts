@@ -214,7 +214,7 @@ describe('md ZIP — manifest の件数が実態と合う', () => {
       source({ entries: [{ lid: 'n1', body: 'a' }], bodilessLids: ['ghost1', 'ghost2'] }),
       NOW,
     );
-    expect(out.warnings).toContain('一覧にあって本文が取れなかった entry が 2 件あります');
+    expect(out.warnings).toContain('一覧にあって本文が取れなかったノートが 2 件あります');
   });
 });
 
@@ -437,7 +437,7 @@ describe('md ZIP — 生きている参照の添付を落とさない', () => {
     // 参照形式や HTML は下の test のとおり書き換わるので、ここには使えない
     const out = await withRef('添付は asset:ast-1 です\n');
     expect(
-      out.warnings.some((w) => w.includes('リンクの形になっていない添付参照 1 件')),
+      out.warnings.some((w) => w.includes('リンクの形になっていない添付への参照 1 件')),
     ).toBe(true);
   });
 

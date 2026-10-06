@@ -173,17 +173,17 @@ export interface PurgeFlowDeps {
 export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const first = await findOrphanAssets(deps.ports);
   if (first.keys.length === 0 && first.strays.length === 0) {
-    await deps.tell('未参照の添付データはありません');
+    await deps.tell('どのノートからも使われていない添付はありません');
     return;
   }
   const ok = await deps.ask(
-    `どの entry からも参照されていない添付データ ${first.keys.length + first.strays.length} 件` +
-      `(${humanBytes(first.knownBytes)})を削除します。よろしいですか?`,
+    `どのノートからも使われていない添付 ${first.keys.length + first.strays.length} 件` +
+      `(${humanBytes(first.knownBytes)})を消します。よろしいですか?`,
   );
   if (!ok) return;
   const ready = await deps.isReady();
   if (!ready.ok) {
-    await deps.tell(`${ready.reason}(整理は行っていません)`);
+    await deps.tell(`${ready.reason}(何も消していません)`);
     return;
   }
   const second = await findOrphanAssets(deps.ports);
@@ -195,7 +195,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const strays = second.strays.filter((k) => firstStrays.has(k));
   const r = await purgeAssets(deps.ports, keys, strays);
   await deps.tell(
-    `${r.deleted} 件を削除しました` +
-      (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
+    `${r.deleted} 件を消しました` +
+      (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : ''),
   );
 }

@@ -65,6 +65,6 @@ test('🔴 「自分のパソコンで動かす」を押すと、一式の zip �
   await expect(
     page.locator('[data-pkc-region="status"]'),
     '終わったのに進行中の字が居座っている',
-  ).not.toContainText('組んでいます');
+  ).not.toContainText('作っています');
   expect(errors, errors.join('\n')).toEqual([]);
 });

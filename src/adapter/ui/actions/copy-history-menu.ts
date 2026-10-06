@@ -21,7 +21,7 @@ import type { MenuItem } from '@adapter/ui/render/context-menu';
  * ⚠ メニューの項目にはしない ── 押しても何も起きない行になる。
  */
 export const COPY_HISTORY_EMPTY =
-  'まだ何もコピーしていません(PKC の中でコピーすると、この端末に 20 件まで残ります)';
+  'まだ何もコピーしていません(PKC3 の中でコピーすると、この端末に 20 件まで残ります)';
 
 /** 全部消す項目の字。 */
 export const COPY_HISTORY_CLEAR = 'コピーした物を消す';

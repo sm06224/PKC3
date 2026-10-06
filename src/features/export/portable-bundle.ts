@@ -129,7 +129,7 @@ export async function writePortableBundle(args: {
     if (!ASSET_KEY_RE.test(a.key)) {
       // ⚠ 落とさず**名指しで注意**する ── 1 件の変な key で書き出し全体を
       //   失わせない(残りは正しく焼ける)
-      warnings.push(`添付の key が扱えない形でした(焼いていません): ${a.key}`);
+      warnings.push(`添付の ID が扱えない形でした(埋め込んでいません): ${a.key}`);
       continue;
     }
     /**

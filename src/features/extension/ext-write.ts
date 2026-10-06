@@ -35,7 +35,7 @@
  *   「3 件送ったのに 2 件だけ変わった」を後から見分ける手段が無い。
  * 🔑 だから**書く前に全部検める**。検めるのは形・重複・上限・**渡した覚え**の 4 つ。
  *
- * ⚠ **これと「別の窓が書き替えていた」は別の話**である(こちらは書込の最中に
+ * ⚠ **これと「別の窓が書き換えていた」は別の話**である(こちらは書込の最中に
  *   しか分からない)── そちらは `extension-host` 側が `expectHash` で見て、
  *   起きたら残りを止めて**件数つきで断る**。ここが約束するのは
  *   「**不正な依頼では 1 バイトも書かない**」までである。
@@ -91,11 +91,11 @@ export function parseExtWrite(data: unknown, delivered: ReadonlySet<string>): Ex
       return {
         ok: false,
         why:
-          `${at}: 「${String(o.op)}」は在りません(意図的です)。` +
+          `${at}: 「${String(o.op)}」はありません(意図的です)。` +
           '書き戻せるのは setBody 1 つだけで、新規作成は pkc.createEntry を通ります。',
       };
     if (typeof o.lid !== 'string' || o.lid === '')
-      return { ok: false, why: `${at}: lid がありません` };
+      return { ok: false, why: `${at}: ID がありません` };
     if (typeof o.body !== 'string') return { ok: false, why: `${at}: body が文字列ではありません` };
     /**
      * ⚠ **同じ lid を 2 回書かせない** ── どちらが残るかは順番次第で、
@@ -110,7 +110,7 @@ export function parseExtWrite(data: unknown, delivered: ReadonlySet<string>): Ex
     if (!delivered.has(o.lid))
       return {
         ok: false,
-        why: `${at}: このノートは渡されていません(user が「このアプリへ送る」で渡した物だけ書き戻せます)`,
+        why: `${at}: このノートは渡されていません(「このアプリへ送る」で渡したノートだけ書き戻せます)`,
       };
     seen.add(o.lid);
     ops.push({ op: 'setBody', lid: o.lid, body: o.body });

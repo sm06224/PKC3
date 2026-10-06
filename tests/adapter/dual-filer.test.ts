@@ -868,7 +868,7 @@ describe('2 ペインの面(描画)', () => {
     expect(msg(), 'ルートに行が在るのに空だと言っている').toBeNull();
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'どれにも当たらない語' }).state;
     r.render(s);
-    expect(msg()).toBe('探している語に当たるものが、ここにはありません');
+    expect(msg()).toBe('探している語に一致するものが、ここにはありません');
     // 🔑 **0 件 → 0 件**でも文言が追いつく(行が 0 件だと指紋が空文字になるので、
     //    絞り込みの有無を指紋に入れていないとここで古い字が残る)
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: '' }).state;
@@ -878,7 +878,7 @@ describe('2 ペインの面(描画)', () => {
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'どれにも当たらない語' }).state;
     r.render(s);
     expect(msg(), '0 件 → 0 件で文言が古いまま残った').toBe(
-      '探している語に当たるものが、ここにはありません',
+      '探している語に一致するものが、ここにはありません',
     );
   });
 

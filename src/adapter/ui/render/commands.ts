@@ -108,10 +108,10 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
  *   `buildCollectionPane` が、この配列を描いた**直後**に手で組む。
  */
 export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
-  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの 1 枚にまとめます' },
+  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの HTML ファイルにまとめます' },
   {
     action: 'export-portable',
-    label: 'HTML 1 枚で書き出す',
+    label: 'PKC3 入り HTML で書き出す',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -155,8 +155,8 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
 export const SETTINGS_COMMANDS: readonly CollectionCommand[] = [
   {
     action: 'purge-orphan-assets',
-    label: '使っていない添付を消す',
-    title: 'どのノートでも使っていない添付を消します(元に戻せません)',
+    label: '使われていない添付を消す',
+    title: 'どのノートからも使われていない添付を消します(元に戻せません)',
   },
 ] as const;
 
@@ -216,7 +216,7 @@ function buildPurgeOrphanAssets(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'settings-purge-orphan');
   const h = document.createElement('h4');
-  h.textContent = '使っていない添付';
+  h.textContent = 'どのノートからも使われていない添付';
   box.append(h);
 
   const row = document.createElement('div');
@@ -254,7 +254,7 @@ function buildVacuumPanel(): HTMLElement {
 
   const btn = iconButton('storage-vacuum', VACUUM_LABEL);
   btn.setAttribute('data-pkc-field', 'vacuum-run');
-  btn.title = '空いたまま抱えている分を返して、保存領域の大きさを小さくします';
+  btn.title = '空いたまま確保している分を返して、保存領域の大きさを小さくします';
   btn.disabled = true;
   box.append(btn);
   return box;
@@ -280,9 +280,9 @@ function buildVacuumPanel(): HTMLElement {
 function buildContainerRepair(): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  const toggle = iconButton('toggle-container-repair', '作り直す・初期化する のボタンを出す');
+  const toggle = iconButton('toggle-container-repair', '作り直す・初期化するボタンを表示');
   toggle.setAttribute('aria-expanded', 'false');
-  toggle.title = 'ここを押すと、保存領域を作り直す・初期化する の 2 つのボタンが出ます';
+  toggle.title = 'ここを押すと、「作り直す」と「初期化する」の 2 つのボタンが出ます';
   frag.append(toggle);
 
   const box = document.createElement('div');
@@ -305,7 +305,7 @@ function buildContainerRepair(): DocumentFragment {
   const intro = document.createElement('p');
   intro.setAttribute('data-pkc-field', 'container-repair-note');
   intro.textContent =
-    `どちらも、押しただけでは何も起きません ── 何が起きるかを出して、もう一度聞きます。先に左下の「${BACKUP_LABEL}」を押して手元に控えておくと、より安全です。`;
+    `どちらも、押しただけでは何も起きません。何が起きるかを出して、もう一度聞きます。先に左下の「${BACKUP_LABEL}」を押して手元に控えておくと、より安全です。`;
   box.append(intro);
 
   /**
@@ -316,7 +316,7 @@ function buildContainerRepair(): DocumentFragment {
   const rebuildNote = document.createElement('p');
   rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
   rebuildNote.textContent =
-    'ノートと添付を残したまま、入れ物だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へ落とし、そのあと同じ中身で戻します。落とせなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士に付けた関係・履歴(前の版)は戻りません。';
+    'ノートと添付を残したまま、ノートの保存データだけ作り直します。押すと、まず読めるノートをファイル(.pkc3-part.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)は戻りません。';
   box.append(rebuildNote);
 
   const rebuild = document.createElement('button');
@@ -324,7 +324,7 @@ function buildContainerRepair(): DocumentFragment {
   rebuild.setAttribute('data-pkc-action', 'container-rebuild');
   rebuild.setAttribute('data-pkc-field', 'container-rebuild-run');
   rebuild.textContent = CONTAINER_REBUILD_LABEL;
-  rebuild.title = '読めるノートを集めて書き出してから、入れ物を作り直して同じ中身を戻します(添付はそのまま残ります)';
+  rebuild.title = '読めるノートを集めて書き出してから、ノートの保存データを作り直して同じ中身を戻します(添付はそのまま残ります)';
   box.append(rebuild);
 
   const rebuildSum = document.createElement('p');
@@ -339,7 +339,7 @@ function buildContainerRepair(): DocumentFragment {
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'container-reset-note');
   note.textContent =
-    `⚠ こちらは中身を全部消します。元に戻せません。上の「${CONTAINER_REBUILD_LABEL}」を試しても直らなかったときだけ押してください。`;
+    `⚠ こちらはノートを全部消します。元に戻せません。上の「${CONTAINER_REBUILD_LABEL}」を試しても直らなかったときだけ押してください。`;
   box.append(note);
 
   const btn = document.createElement('button');
@@ -347,7 +347,7 @@ function buildContainerRepair(): DocumentFragment {
   btn.setAttribute('data-pkc-action', 'container-reset');
   btn.setAttribute('data-pkc-field', 'container-reset-run');
   btn.textContent = CONTAINER_RESET_LABEL;
-  btn.title = 'この入れ物のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
+  btn.title = 'この端末のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
   box.append(btn);
 
   const sum = document.createElement('p');
@@ -376,14 +376,14 @@ export function buildSettingsFile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'settings-file');
   const h = document.createElement('h4');
-  h.textContent = '設定の持ち出し';
+  h.textContent = '設定の書き出し';
   h.title = '見た目・ショートカットキーの割り当て・ページ設定などを、別の端末へ持っていきます(ノートは移りません)';
   box.append(h);
 
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'settings-file-note');
   note.textContent =
-    '見た目・ペインの畳み方・編集の仕方・ページ設定・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
+    '見た目・ペインの折りたたみ方・編集の仕方・ページ設定・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
   box.append(note);
 
   const row = document.createElement('div');
@@ -517,7 +517,7 @@ function buildDbRescue(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'db-rescue');
   const h = document.createElement('h4');
-  h.textContent = '保存領域の点検';
+  h.textContent = 'ノートの保存データの確認';
   box.append(h);
 
   const check = document.createElement('button');
@@ -525,7 +525,7 @@ function buildDbRescue(): HTMLElement {
   check.setAttribute('data-pkc-action', 'db-check');
   check.setAttribute('data-pkc-field', 'db-check-run');
   check.textContent = DB_CHECK_LABEL;
-  check.title = '保存領域に問題が無いかを調べます。中身が多いと数分かかります';
+  check.title = 'ノートの保存データに問題が無いかを調べます。中身が多いと数分かかります';
   box.append(check);
 
   /**
@@ -537,8 +537,8 @@ function buildDbRescue(): HTMLElement {
   checkNote.setAttribute('data-pkc-field', 'db-check-run-note');
   checkNote.className = 'settings-note';
   checkNote.textContent =
-    '保存領域に問題が無いかを調べます。中身が多いと数分かかります。何も書き換えません。' +
-    `保存領域に問題があるときは、左下の「${BACKUP_LABEL}」を押すと、いつもどおり読める分だけを集めて書き出します。`;
+    'ノートの保存データに問題が無いかを調べます。中身が多いと数分かかります。何も書き換えません。' +
+    `ノートの保存データに問題があるときは、左下の「${BACKUP_LABEL}」を押すと、いつもどおり読める分だけを集めて書き出します。`;
   box.append(checkNote);
 
   /**

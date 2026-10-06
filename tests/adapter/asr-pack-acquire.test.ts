@@ -104,7 +104,7 @@ describe('目録', () => {
     const f: FetchLike = () => Promise.resolve(new Response('nf', { status: 404 }));
     const err = await fetchAsrManifest('/asr-pack/', f).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AsrPackError);
-    expect((err as Error).message).toMatch(/まだ配っていません/);
+    expect((err as Error).message).toMatch(/まだ配布していません/);
     expect((err as Error).message).not.toMatch(/404/);
     // 対照群:ほかの失敗は HTTP の数字つきで言う(取り直しで直るかもしれない)
     const f500: FetchLike = () => Promise.resolve(new Response('x', { status: 500 }));
@@ -126,7 +126,7 @@ describe('目録', () => {
 
   it('JSON でない・形の違う目録は理由つきで断る(404 の HTML を目録と読まない)', async () => {
     const f: FetchLike = () => Promise.resolve(new Response('<!doctype html>'));
-    await expect(fetchAsrManifest('/asr-pack/', f)).rejects.toThrow(/目録/);
+    await expect(fetchAsrManifest('/asr-pack/', f)).rejects.toThrow(/ファイル一覧/);
   });
 });
 
@@ -166,14 +166,14 @@ describe('実体の取得', () => {
     const bytes = new Uint8Array(500).fill(7);
     const f = { ...(await entry('runtime/a.bin', bytes)), bytes: 600 };
     const fetchFn: FetchLike = () => Promise.resolve(streaming(bytes, 100));
-    await expect(fetchAsrFiles(base(), [f], fetchFn)).rejects.toThrow(/大きさが目録と違います/);
+    await expect(fetchAsrFiles(base(), [f], fetchFn)).rejects.toThrow(/大きさがファイル一覧と違います/);
   });
 
   it('🔴 大きさが合っても中身が違えば断る(小さい file は sha256 で照合する)', async () => {
     const bytes = new Uint8Array(500).fill(7);
     const f = { ...(await entry('runtime/a.bin', bytes)), sha256: 'c'.repeat(64) };
     const fetchFn: FetchLike = () => Promise.resolve(streaming(bytes, 100));
-    await expect(fetchAsrFiles(base(), [f], fetchFn)).rejects.toThrow(/中身が目録と違います/);
+    await expect(fetchAsrFiles(base(), [f], fetchFn)).rejects.toThrow(/中身がファイル一覧と違います/);
   });
 
   it('⚠ 大物は大きさだけで見る(sha256 は heap に 1 度全部載せるので照合しない ── 守っていない物として pin)', async () => {

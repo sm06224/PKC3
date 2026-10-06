@@ -452,7 +452,7 @@ export class DuckDbRunner {
    * ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)。
    * 🔴 **N 件の全部を鍵に入れる**(#918 段⑦)── 足す / 外す / 順番が変わるたびに
    *   鍵が変わるので、`DuckDbLease` が**器を作り直す**(`hold` も解ける ──
-   *   作った表は消える。画面は「足したり外したりすると、作った表は消えます」と言う)。
+   *   作った表は消える。画面は「増やしたり減らしたりすると、作った表は消えます」と言う)。
    * 🔑 `run`(SQL を走らせる)と `schema`(構造を採る)が**同じ鍵**を使う ── 構造を採った後の
    *   SQL は器を作り直さない(同じ file を 2 度読まない)。
    */
@@ -478,7 +478,7 @@ export class DuckDbRunner {
   schema(sources: readonly DuckDbInputSource[]): Promise<DuckDbSchemaResult> {
     return this.serial(async () => {
       this.dropStaleRefused();
-      if (sources.length === 0) throw new Error('調べる相手がありません');
+      if (sources.length === 0) throw new Error('調べる対象がありません');
       const data = this.dataOf(sources);
       const ask = async (sql: string): Promise<Grid> => {
         const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, loadMaxMs: DUCKDB_LOAD_MAX_MS, data });
@@ -522,7 +522,7 @@ export class DuckDbRunner {
 
   private async runNow(input: DuckDbRunInput): Promise<DuckDbRunResult> {
     const started = Date.now();
-    if (input.sources.length === 0) throw new Error('調べる相手がありません');
+    if (input.sources.length === 0) throw new Error('調べる対象がありません');
     const multi = input.sources.length > 1;
     const raw = await this.lease.run({
       sql: input.sql,
@@ -578,7 +578,7 @@ export class DuckDbRunner {
         if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
         const exportSqlite = this.deps.exportSqlite;
         if (exportSqlite === undefined) {
-          throw new Error('この版では .sqlite を DuckDB で引けません(アプリを読み直すと直ることがあります)');
+          throw new Error('このタブの PKC3 が古いままのため、.sqlite を DuckDB で調べられません。再読み込みしてください');
         }
         const opened = await exportSqlite(bytes);
         sessions.set(i, opened);
@@ -595,7 +595,7 @@ export class DuckDbRunner {
         if (source.kind === 'sqlite') {
           const session = sessions.get(i);
           // ⚠ 上の頭で、`.sqlite` の全部に開いてある(崩れたら黙って飛ばさず落とす)
-          if (session === undefined) throw new Error('前提が崩れている(.sqlite の写しが開いていない)');
+          if (session === undefined) throw new Error('前提が崩れている(.sqlite のコピーが開いていない)');
           await this.loadSqlite(h, source, i, session, groups[i] ?? [], sources.length > 1, stale);
           if (stale()) return;
           // ⚠ 写し終えた file はすぐ手放す(次の file を写す間、worker に開いたまま残さない)
@@ -731,7 +731,7 @@ export class DuckDbRunner {
     if (stale()) return;
     for (const v of session.views) {
       const name = multi ? tableNameFromFileTable(source.name, v, new Set()) : v;
-      this.refused.push({ name, view: true, why: 'ビューは写しません' });
+      this.refused.push({ name, view: true, why: 'ビューは読み込みません' });
     }
     /**
      * 🔴 **全文検索(FTS5)の仮想表本体も、写さなかったと言う**(着地後レビュー 💭8)。⚠ 直す前は本体を黙って外していて、
@@ -740,7 +740,7 @@ export class DuckDbRunner {
      */
     for (const f of session.ftsTables) {
       const name = multi ? tableNameFromFileTable(source.name, f, new Set()) : f;
-      this.refused.push({ name, view: false, why: '全文検索の表は写しません' });
+      this.refused.push({ name, view: false, why: '全文検索の表は読み込みません' });
     }
   }
 
@@ -755,10 +755,10 @@ export class DuckDbRunner {
     const err = e instanceof Error ? e : new Error(String(e));
     const notes = this.refused.map((r) => refusedNote(r.name, r.why, sqliteFallbackHint(multi)));
     if (multi && /Table with name .+ does not exist/i.test(err.message)) {
-      notes.push(`表の名前は ファイル名_表名 になっています(一覧は ${DUCKDB_TABLE_LIST_SQL} で引けます)`);
+      notes.push(`表の名前は ファイル名_表名 になっています(一覧は ${DUCKDB_TABLE_LIST_SQL} で実行できます)`);
     }
     if (notes.length === 0) return err;
-    return new Error(`${err.message} ── ${notes.join(' / ')}`, { cause: err });
+    return new Error(`${err.message}: ${notes.join(' / ')}`, { cause: err });
   }
 
   /**
@@ -831,7 +831,7 @@ export class DuckDbRunner {
        * ⚠ **一式は precache に載っていない**(設計 doc §11)── 電波が無い日は
        *   ここで落ちる。🔑 だから理由を**その言葉で**言う。
        */
-      throw new Error('DuckDB の一式を取ってこられませんでした(つながっているか確かめてください)');
+      throw new Error('DuckDB の一式を取得できませんでした(つながっているか確かめてください)');
     }
     const read = readDuckDbPack(text);
     if (!read.ok) throw new Error(read.why);

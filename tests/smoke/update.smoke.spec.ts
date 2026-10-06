@@ -67,7 +67,7 @@ test('🔴 新しい版が配られたら案内が出て、押すと入れ替わ
     // ① 案内が出る
     const card = page.locator('[data-pkc-region="update"]');
     await expect(card).toBeVisible({ timeout: 20_000 });
-    await expect(card.locator('[data-pkc-field="update-text"]')).toHaveText(/新しい版/);
+    await expect(card.locator('[data-pkc-field="update-text"]')).toHaveText(/新しいバージョン/);
 
     // 🔴 ①' 先に「あとで」を押す(review M-1)。`main.ts` の
     // `dismissUpdate: () => updatePrompt.dismiss()` を **`apply()` に変異させても

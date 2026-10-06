@@ -203,7 +203,7 @@ describe('起動の検めは、壊れた DB で壊れを名指しし、印を残
     expect((await request({ op: 'integrityPlan' })).lastCheckedAt, '断られたのに印が残った').toBeNull();
   });
 
-  it('🔴 駆動部を繋ぐと broken ── 次の一手つきの字が出て、印は残らない', async () => {
+  it('🔴 駆動部をつなぐと broken ── 次の一手つきの字が出て、印は残らない', async () => {
     const broken: string[] = [];
     const outcome = await runStartupIntegrity({
       request,

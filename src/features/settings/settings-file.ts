@@ -37,14 +37,14 @@ export interface SettingsEntry {
  */
 export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
   { key: 'pkc3.theme', label: '見た目' },
-  { key: 'pkc3.panes', label: '列の畳み方' },
+  { key: 'pkc3.panes', label: 'ペインの折りたたみ方' },
   /**
    * ⚠ **畳み方と対**(#497)── 片方だけ運ぶと「畳んだのは移ったのに幅は既定」に
    * なる。⚠ px なので端末で意味が変わりそうに見えるが、値は
    * `clamp(0px, Npx, 45vw)` として当たるので**狭い端末では自分で縮む**
    * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
    */
-  { key: 'pkc3.pane-sizes', label: '列の幅' },
+  { key: 'pkc3.pane-sizes', label: 'ペインの幅' },
   { key: 'pkc3.editor-mode', label: '編集の仕方' },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
   { key: 'pkc3.page-format', label: 'ページ設定' },
@@ -79,7 +79,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は
    *   その場で理由を出すので、移して害が出ない。
    */
-  { key: 'pkc3.open-place', label: '書庫(zip)を開く場所' },
+  { key: 'pkc3.open-place', label: 'zip ファイルを開く場所' },
   /**
    * ⚠ **人に付く好み**である(#884 段①)── 「アプリは別の窓で使いたい」かどうかは
    *   端末の事情ではない(`pkc3.open-place` と同じ考え方)。
@@ -120,7 +120,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    * ⚠ **人に付く好み**(#1087)── 「長いコード枠を最初から畳みたいか」は端末の事情ではない。
    *   運んだ先に仕組みが無くても害は出ない(畳まれないだけ)。
    */
-  { key: 'pkc3.code-collapse', label: '長いコード枠を最初から畳むか' },
+  { key: 'pkc3.code-collapse', label: '長いコードブロックを最初から折りたたむか' },
   /** ⚠ **人に付く好み**(#1087)── 手が滑りやすいので切りたいかは端末ではなく人で決まる。 */
   { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか' },
   /**
@@ -128,7 +128,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   既定は**切**なので、運ばれるのは**入にした人の `1`** が主になる。運んだ先に窓の仕組みが無くても
    *   **害が出ない**(ブラウザ内蔵の表示のままになるだけ)。
    */
-  { key: 'pkc3.pdf-reader', label: 'PDF を PKC の画面で開くか' },
+  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の PDF ビューアで開くか' },
   /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
@@ -137,7 +137,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   (居ないノートを指す枠が復活する、が起きない)。`pkc3.query-key`
    *   (集計の束ね方 = 本文の鍵の名前)と同じ型である。
    */
-  { key: 'pkc3.app-group-folded', label: 'アプリのグループの畳み方' },
+  { key: 'pkc3.app-group-folded', label: 'アプリのグループの折りたたみ方' },
   /**
    * ⚠ **人に付く好み**である(設計 doc §7、段②a)── 「何件保管したいか」は
    *   端末の事情ではない。運んでも害は出ない(既定へ丸めて読むだけ)。
@@ -161,47 +161,47 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
   {
     key: 'pkc3.split-lids',
-    why: '中身が lid そのもの(#505 段②)── 別の端末・別の container へ運ぶと、そこに居ないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',
+    why: '中身が ID そのもの(#505 段②)。別の端末・別のコレクションへ運ぶと、そこにいないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',
   },
   {
     key: 'pkc3.flags',
-    why: 'flag は設定ではない(15 枠 + 畳む条件の宣言 + フラグ画面という別の機構)。運ぶと畳む条件を跨いで別の端末へ持ち込むことになる',
+    why: 'フラグは設定ではない(最大 15 個 + 廃止する条件の宣言 + フラグ画面という別の機構)。運ぶと、廃止する条件が違う別の端末へ持ち込むことになる',
   },
   {
     key: 'pkc3.copy.history',
-    why: 'コピーした物である ── その端末で、いま貼りたい物。別の端末へ運ぶ物でも、誰かに渡す物でもない(#678)',
+    why: 'コピーした物である。その端末で、いま貼りたい物。別の端末へ運ぶ物でも、誰かに渡す物でもない(#678)',
   },
   {
     key: 'pkc3.opened',
-    why: '中身が lid そのもの(#215 残り①)── 別の container へ運ぶと、そこに居ないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
+    why: '中身が ID そのもの(#215 残り①)。別のコレクションへ運ぶと、そこにいないノートを「最近開いた」に並べる。そのうえ「何を読んでいたか」は設定ではなく行動の記録なので、渡す物でもない',
   },
   {
     key: 'pkc3.search-history',
-    why: '探した語は行動の記録であって設定ではない(#1172)── 何を探していたかは、設定ファイルを渡した相手に見せる物でも、別の端末へ持ち込む物でもない',
+    why: '探した語は行動の記録であって設定ではない(#1172)。何を探していたかは、設定ファイルを渡した相手に見せる物でも、別の端末へ持ち込む物でもない',
   },
   {
     key: 'pkc3.recent-commands',
-    why: '最後に実行した操作の記録であって設定ではない(#274)── 左の探す欄の `>` の一覧から何を使ったかは、設定ファイルを渡した相手に見せる物でも、別の端末へ持ち込む物でもない',
+    why: '最後に実行した操作の記録であって設定ではない(#274)。左の探す欄の `>` の一覧から何を使ったかは、設定ファイルを渡した相手に見せる物でも、別の端末へ持ち込む物でもない',
   },
   {
     key: 'pkc3.create-kind',
-    why: '好みの設定ではなく最後の操作の記録である(#1045)── ▼ で選んだ「作る種類」は、その端末でその場で選んだ事実にすぎない。別の端末へ運ぶと、そこで選んだことのない種類が最初から選ばれた状態になる',
+    why: '好みの設定ではなく最後の操作の記録である(#1045)。▼ で選んだ「作る種類」は、その端末でその場で選んだ事実にすぎない。別の端末へ運ぶと、そこで選んだことのない種類が最初から選ばれた状態になる',
   },
   {
     key: 'pkc3.external-images',
-    why: '許可である ── その端末でその中身を見て許したもの',
+    why: '許可である。その端末でその中身を見て許したもの',
   },
   {
     key: 'pkc3.extension-grants',
-    why: '許可である ── その端末でその相手を見て許したもの',
+    why: '許可である。その端末でその相手を見て許したもの',
   },
   {
     key: 'pkc3.same-origin-grants',
-    why: '許可である ── その端末でその相手を見て許したもの',
+    why: '許可である。その端末でその相手を見て許したもの',
   },
   {
     key: 'pkc3.embed-origins',
-    why: '許可である ── その端末でその相手を見て許したもの',
+    why: '許可である。その端末でその相手を見て許したもの',
   },
   {
     key: 'pkc3.notices.seen',
@@ -213,31 +213,31 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   },
   {
     key: 'pkc3.too-narrow-ok',
-    why: '狭い画面の断り書きに OK を押したのは、その端末の画面幅を見て押した事実 ── 別の端末では幅が違う(#687 E-1)',
+    why: '狭い画面の断り書きに OK を押したのは、その端末の画面幅を見て押した事実。別の端末では幅が違う(#687 E-1)',
   },
   {
     key: 'pkc3.dual-bookmarks',
-    why: '🔴 lid を持つ ── 別の端末では別のノートを指す(あるいはどこも指さない)',
+    why: 'ID を持つ。別の端末では別のノートを指す(あるいはどこも指さない)',
   },
   {
     key: 'pkc3.app.storage',
-    why: '保存の鍵ではない ── 組み込みアプリとのやりとりに使う合図の名前',
+    why: '保存のキーではない。組み込みアプリとのやりとりに使う合図の名前',
   },
   {
     key: 'pkc3.ext.port',
-    why: '保存の鍵ではない ── 拡張とのやりとりに使う合図の名前',
+    why: '保存のキーではない。拡張とのやりとりに使う合図の名前',
   },
   {
     key: 'pkc3.opened-by-us',
-    why: '🔴 その窓 1 枚だけの事実(付箋として開いたか)── `sessionStorage` に在り、運ぶ物ではない',
+    why: 'そのウィンドウ 1 枚だけの事実(付箋として開いたか)。`sessionStorage` にあり、運ぶ物ではない',
   },
   {
     key: 'pkc3.messages.read-at',
-    why: '既読はその端末で読んだ事実(設計 doc §7、段②a)── pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
+    why: '既読はその端末で読んだ事実(設計 doc §7、段②a)。pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
   },
   {
     key: 'pkc3.notices.delivered',
-    why: '「配信」としてメッセージへ流したかの記録(設計 doc §7、段②b)── その端末での事実。運ぶと、別の端末でまだ配信していないお知らせが配信済みに化ける',
+    why: '「配信」としてメッセージへ流したかの記録(設計 doc §7、段②b)。その端末での事実。運ぶと、別の端末でまだ配信していないお知らせが配信済みに化ける',
   },
 ];
 
@@ -394,7 +394,7 @@ export function settingsPlanNote(plan: SettingsPlan): string {
   if (plan.refused.length > 0)
     parts.push(`${plan.refused.length} 件は運ばない決まりのもの(許可・フラグ・お知らせの既読)なので入れません`);
   if (plan.unknown.length > 0)
-    parts.push(`${plan.unknown.length} 件はこの版が知らない設定なので入れません`);
+    parts.push(`${plan.unknown.length} 件はこのバージョンが知らない設定なので入れません`);
   return `${parts.join('。')}。`;
 }
 

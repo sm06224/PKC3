@@ -109,10 +109,10 @@ describe('図案は書体の 1 文字である(#770 段①)', () => {
       '削除ボタンの図案が danger tone を持っていない',
     ).toBe('danger');
     // ⚠ 元に戻せない掃除も同じ危険色(`ACTION_TONES` の上書き)
-    const purge = iconButton('purge-orphan-assets', '使っていない添付を消す');
+    const purge = iconButton('purge-orphan-assets', '使われていない添付を消す');
     expect(
       purge.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-tone'),
-      '使っていない添付を消すボタンの図案が danger tone を持っていない',
+      '使われていない添付を消すボタンの図案が danger tone を持っていない',
     ).toBe('danger');
 
     const css = readFileSync('src/styles/app.css', 'utf-8');

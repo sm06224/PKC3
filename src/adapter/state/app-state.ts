@@ -822,7 +822,7 @@ export function phaseBlockReason(phase: AppPhase): string | null {
  */
 export function endEditRefusal(what: string, state: AppState): string {
   if (state.phase !== 'editing')
-    return `${what}できませんでした: いま編集中ではありません(この画面は編集を終えています)`;
+    return `${what}できませんでした: いま編集中ではありません(このタブは編集を終えています)`;
   return `${what}できませんでした: 開いている本文が見つかりません(読み込み直すと直ります)`;
 }
 
@@ -879,7 +879,7 @@ const PARTIAL_DRAFT_WORDS: Record<PartialDraftKind, PartialDraftWords> = {
     noun: 'コード',
     saveVerb: 'コードを保存する',
     cancelVerb: 'コードの編集をやめる',
-    ambiguousLead: '同じ内容のコード枠が本文の中に複数あり',
+    ambiguousLead: '同じ内容のコードブロックが本文の中に複数あり',
   },
 };
 
@@ -909,7 +909,7 @@ const PARTIAL_DRAFT_OWN_NOTES: ReadonlySet<string> = new Set([SECTION_DRAFT_NOTE
  *   (コピーして開き直す)。
  */
 function partialDraftMismatchNote(kind: PartialDraftKind): string {
-  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください`;
+  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました。書きかけをコピーしてから、開き直してください`;
 }
 function partialDraftAmbiguousNote(kind: PartialDraftKind): string {
   const w = PARTIAL_DRAFT_WORDS[kind];
@@ -934,7 +934,7 @@ function partialDraftNotFoundNote(kind: PartialDraftKind): string {
 export const SECTION_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('section');
 export const CODE_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('code');
 export const SECTION_SAVE_ANOTHER_WINDOW_NOTE =
-  '別のウィンドウがこのノートを書き替えたため、保存できませんでした(もう一度押してください)';
+  '別のタブまたはウィンドウがこのノートを書き換えたため、保存できませんでした(もう一度押してください)';
 
 /** {@link replaceSectionByHeading} の失敗理由 → user に見せる字。 */
 export function sectionSaveFailureNote(reason: 'missing' | 'ambiguous' | 'mismatch'): string {
@@ -6437,8 +6437,8 @@ function reduceCore(
           ...(diskAhead
             ? {
                 error:
-                  '別のウィンドウの変更と重なりました。こちらの内容で保存し、' +
-                  '別のウィンドウの版は履歴に残してあります(履歴から戻せます)',
+                  '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、' +
+                  '別のタブまたはウィンドウの版は履歴に残してあります(履歴から戻せます)',
               }
             : {}),
         },
@@ -6770,7 +6770,7 @@ function reduceCore(
       const identity = openCodeFenceAt(body, abs);
       if (identity === null) {
         return {
-          state: { ...state, error: 'このコード枠を編集できませんでした(本文を開き直してください)' },
+          state: { ...state, error: 'このコードブロックを編集できませんでした(本文を開き直してください)' },
           events: [],
         };
       }
@@ -7586,7 +7586,7 @@ function reduceCore(
      * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
      */
     case 'CONNECT_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を線で繋いでください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板を線でつないでください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const from = placeOpenLineOf(shown, action.line);
         const to = placeOpenLineOf(shown, action.toLine);
@@ -7653,7 +7653,7 @@ function reduceCore(
      * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
      */
     case 'MOVE_BLOCK':
-      return bodyRewriteGate(state, action.lid, '、本文の塊を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、本文のブロックを動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const { start, end, toBefore } = action;
         if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
@@ -7677,7 +7677,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${phaseBlockReason(state.phase)}、本文の塊を別のノートへ持っていってください`,
+            error: `${phaseBlockReason(state.phase)}、本文のブロックを別のノートへ移してください`,
           },
           events: [],
         };
@@ -7736,7 +7736,7 @@ function reduceCore(
       return bodyRewriteGate(
         state,
         action.lid,
-        action.refusal ?? '、一覧の行を本文へ落としてください',
+        action.refusal ?? '、一覧の行を本文へドロップしてください',
         () =>
           Number.isInteger(action.toBefore) && action.lines.length > 0
             ? {
@@ -7985,8 +7985,8 @@ function reduceCore(
       if (action.rewrite.kind === 'table-format') {
         notice =
           action.rewrite.to === 'csv'
-            ? '表を CSV の表にしました ── 行と列を足せて、式も使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
-            : '表を Markdown の表にしました ── よそへ貼りやすい字になります(戻すには表の右上の ▾ から。行と列の ＋ × と式は使えなくなります)';
+            ? '表を CSV の表にしました。行と列を足せて、式も使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
+            : '表を Markdown の表にしました。よそへ貼りやすい字になります(戻すには表の右上の ▾ から。行と列の ＋ × と式は使えなくなります)';
         noticeOpen = null;
       }
       /**
@@ -10195,7 +10195,7 @@ function syncShownBodies(
   const next = excerptOf(body, state.entryMetas.get(lid)?.archetype);
   if (sameExcerpt(prev, next)) return { splitBodies, placeBodies: state.placeBodies };
   const bodies = new Map(have);
-  bodies.set(lid, next); // ⚠ 並びは動かさない(書込は「最近読んだ」ではない)
+  bodies.set(lid, next); // ⚠ 並びは動かさない(書き込みは「最近読んだ」ではない)
   return { splitBodies, placeBodies: bodies };
 }
 

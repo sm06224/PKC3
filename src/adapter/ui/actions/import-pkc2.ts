@@ -373,13 +373,13 @@ export async function importPkc2File(
       // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
       //   を読む)が、案内には**受ける全部**を書く(#1017 段④b。3 種 + 旧形式)。
       return fail(
-        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か ` +
+        `取り込めない形式です(${file.name})。PKC2 の書き出し(HTML / ZIP)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
           'または .md を選んでください',
       );
     }
 
-    deps.notify?.('取込中…(ファイルを読んでいます)');
+    deps.notify?.('取り込み中…(ファイルを読んでいます)');
     progressShown = true;
 
     // ── 入力の違いは「container をどう得るか」と「bytes をどこから取るか」だけ。
@@ -427,7 +427,7 @@ export async function importPkc2File(
         container = null;
       } else if (format === null) {
         return fail(
-          `${file.name}: manifest.json が無い ZIP です ── PKC2 の書出しファイルを選んでください`,
+          `${file.name}: manifest.json が無い ZIP です。PKC2 の書き出しファイルを選んでください`,
         );
       }
       const read = restored
@@ -442,7 +442,7 @@ export async function importPkc2File(
               : // batch 3 形式(段④)
                 isBatchFormat(format)
                 ? readContainerBundle
-                : // フォルダ書出し(段⑤)── 階層まで復元する
+                : // フォルダ書き出し(段⑤)── 階層まで復元する
                   format === FOLDER_EXPORT_FORMAT
                   ? readFolderExportBundle
                   : // 単体 `.entry.zip`(段⑥)
@@ -451,7 +451,7 @@ export async function importPkc2File(
                     : null;
       if (!read && !restored) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
-        return fail(`${format} の取込はまだ実装されていません(${file.name})`);
+        return fail(`${format} の取り込みはまだ実装されていません(${file.name})`);
       }
       if (read) {
         const pkg = await read(file);
@@ -654,7 +654,7 @@ export async function importPkc2File(
     }
 
     // ── entries / relations は bulk(1 行ずつ書かない ── journal 増幅の教訓)
-    deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);
+    deps.notify?.(`取り込み中…(${rows.length} 件を書き込んでいます)`);
     // どの段で落ちたかを user に正しく伝える(review L-11 ── 履歴で落ちても
     // 「関連の書込で失敗」と出ていた)
     let stage = '本文';
@@ -662,7 +662,7 @@ export async function importPkc2File(
       await deps.bulkUpsertEntries(rows);
       entriesWritten = rows.length;
       if (result.relations.length > 0) {
-        stage = '関連';
+        stage = 'つながり';
         await deps.bulkUpsertRelations(result.relations);
       }
       // 履歴は entries の**後**(worker が tip = entries.body を基準に符号化する)
@@ -687,7 +687,7 @@ export async function importPkc2File(
           // ⚠ `preWarnings` はこの時点で**既に result.warnings へ写し終えている** ──
           // ここで push しても user に届かない(review M-2 で実測した dead code)
           result.warnings.push(
-            `履歴の中の添付参照 ${remapped} 件は元の key のままです(差分は書き換えられません)`,
+            `履歴の中の添付への参照 ${remapped} 件は元のままです(差分は書き換えられません)`,
           );
         }
         for (const batch of batchEncoded(encoded)) {
@@ -697,7 +697,7 @@ export async function importPkc2File(
           revStats.skipped += r.skippedEntries.length;
           // 壊れて復元できなかった鎖は**名指しで**言う(件数だけだと直しようがない)
           for (const broken of r.brokenChains) {
-            result.warnings.push(`履歴を復元できませんでした ── ${broken}`);
+            result.warnings.push(`履歴を復元できませんでした: ${broken}`);
           }
         }
       }
@@ -706,8 +706,8 @@ export async function importPkc2File(
       await deps.reload().catch(() => {});
       return fail(
         entriesWritten > 0
-          ? `取込は ${entriesWritten} 件まで書き込まれました。${stage}の書込で失敗しています(このまま取り込み直すと二重になります): ${reason(e)}`
-          : `取込に失敗しました(書込は行われていません): ${reason(e)}`,
+          ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります: ${reason(e)}`
+          : `取り込みに失敗しました(ノートは 1 件も追加されていません): ${reason(e)}`,
       );
     }
 
@@ -722,7 +722,7 @@ export async function importPkc2File(
       ...(revStats.skipped > 0
         // ⚠ 見送りの理由は 1 つではない(既に鎖を持つ / 復元先に entry が無い)──
         // 片方だけを名乗ると、もう片方を踏んだ user が原因を誤解する
-        ? [`${revStats.skipped} 件の entry は履歴を積みませんでした(既に履歴を持つ / 対象が無い)`]
+        ? [`${revStats.skipped} 件のノートは履歴を追加しませんでした(既に履歴がある / 取り込み先のノートが無い)`]
         : []),
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
@@ -730,22 +730,22 @@ export async function importPkc2File(
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);
-    progressShown = false; // ⚠ 次の「取込完了」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
+    progressShown = false; // ⚠ 次の「取り込み完了」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
-      deps.notify?.(`取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件`);
+      deps.notify?.(`取り込み完了: ${rows.length} 件${revNote}(注意 ${notes.length} 件)`);
     } else {
-      deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
+      deps.notify?.(`取り込み完了: ${rows.length} 件${revNote}`);
     }
     return rows.length;
   } catch (e) {
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
       return fail(
-        `取込は ${entriesWritten} 件まで書き込まれましたが、その後で失敗しました(このまま取り込み直すと二重になります): ${reason(e)}`,
+        `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります): ${reason(e)}`,
       );
     }
-    return fail(`取込に失敗しました: ${reason(e)}`);
+    return fail(`取り込みに失敗しました: ${reason(e)}`);
   }
 }

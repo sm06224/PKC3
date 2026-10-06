@@ -160,11 +160,11 @@ describe('答えを file へ(#918 段④)', () => {
    */
   it('🔴 file の名前 ── 相手の名前が入る / OS が受けない字は落とす', () => {
     const n = sqlExportFileName(new Date(2026, 8, 14, 5, 7), 'a/b:c*?.csv', 'csv');
-    expect(n).toBe('SQL の答え a_b_c__.csv 2026-09-14 0507.csv');
+    expect(n).toBe('SQL の結果 a_b_c__.csv 2026-09-14 0507.csv');
     expect(n, '相手の名前が入っていない').toContain('a_b_c');
     // ⚠ 相手を選んでいない回は「この PKC」
     expect(sqlExportFileName(new Date(2026, 0, 2, 3, 4), null, 'json')).toBe(
-      'SQL の答え この PKC 2026-01-02 0304.json',
+      'SQL の結果 この PKC3 2026-01-02 0304.json',
     );
   });
 });

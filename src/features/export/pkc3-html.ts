@@ -465,7 +465,7 @@ try{
     var seen={};
     box.innerHTML=e.html||'';
     /* 🔴 文書属性(書字方向など)を当てる ── 画面の applyDocumentGlobals と同じ
-       見え方にする(user 報告 2-7)。書出し側が attrs に載せてある。
+       見え方にする(user 報告 2-7)。書き出し側が attrs に載せてある。
        🔴 **先に全部消す**(2026-08-06)── box は使い回しなので、付けるだけだと
        **前のノートの書字方向が残る**(align: right のノートを見た後に宣言の無い
        ノートを開くと右寄せのまま / 縦書きのままになる)。画面側の
@@ -779,7 +779,7 @@ export async function writePortableHtml(
   const metas = await src.listEntryMetas();
   // ⚠ 断るなら**変換の前に**断る(0 entry + 大量添付で全部 base64 にしてから
   // 投げると、捨てるためだけに数十秒かかる ── review L2)
-  if (metas.length === 0) throw new Error('書き出せる entry が 1 件もありません');
+  if (metas.length === 0) throw new Error('書き出せるノートが 1 件もありません');
   const metaOf = new Map(metas.map((m) => [m.lid, m]));
 
   const parts: Array<string | Blob> = [
@@ -812,8 +812,8 @@ export async function writePortableHtml(
       if (!m) {
         warn.add(
           'orphan-body',
-          '一覧に無い entry の注意',
-          `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`,
+          '一覧に無いノートの注意',
+          `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`,
         );
         continue;
       }
@@ -864,7 +864,7 @@ export async function writePortableHtml(
           warn.add(
             'fence-asset',
             'コードブロックが指す添付の注意',
-            `コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`,
+            `コードブロックが指している添付を埋め込めませんでした(${k}): ${why}`,
           ),
       );
       const rendered = await render(r.body.slice(skip), {
@@ -912,7 +912,7 @@ export async function writePortableHtml(
     after = next;
   }
 
-  if (entryCount === 0) throw new Error('書き出せる entry が 1 件もありません');
+  if (entryCount === 0) throw new Error('書き出せるノートが 1 件もありません');
 
   const assetMetas = allAssets.filter((a) => used.has(a.key));
   const skipped = allAssets.length - assetMetas.length;
