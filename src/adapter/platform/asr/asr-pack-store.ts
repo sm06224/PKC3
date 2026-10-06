@@ -151,10 +151,10 @@ export class AsrPackStore {
     let totalBytes = 0;
     for (const [path, blob] of files) {
       const want = expect.get(path);
-      if (want === undefined) throw new AsrPackError(`ファイル一覧に無いファイルが混ざっています(${path})`);
+      if (want === undefined) throw new AsrPackError(`一式の内容一覧に無いファイルが混ざっています(${path})`);
       // 🔴 書く前に大きさを突き合わせる(入れてから気づくと、quota を食っただけの半端が残る)
       if (blob.size !== want.bytes) {
-        throw new AsrPackError(`${path} の大きさがファイル一覧と違います(書き込みを取り消しました)`);
+        throw new AsrPackError(`${path} の大きさが一式の内容一覧と違います(書き込みを取り消しました)`);
       }
       metaFiles.push({ path, bytes: blob.size, sha256: want.sha256 });
       totalBytes += blob.size;
@@ -213,11 +213,11 @@ export class AsrPackStore {
     for (const f of [...installed.runtime.files, ...part.files]) {
       const blob = await read(db, FILES, (s) => s.get(f.path));
       if (!(blob instanceof Blob)) {
-        throw new AsrPackError(`${f.path} が見つかりません(入れ直してください)`);
+        throw new AsrPackError(`${f.path} が見つかりません(取り込み直してください)`);
       }
       if (blob.size !== f.bytes) {
         throw new AsrPackError(
-          `${f.path} の中身が記録と合いません(記録: ${f.bytes} byte / 実際: ${blob.size} byte。入れ直してください)`,
+          `${f.path} の中身が記録と合いません(記録: ${f.bytes} byte / 実際: ${blob.size} byte。取り込み直してください)`,
         );
       }
       out.set(f.path, blob);

@@ -1473,7 +1473,7 @@ export class SettingsRenderer {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-extensions');
     const h = document.createElement('h4');
-    h.textContent = '目次を見せているアプリ';
+    h.textContent = 'ノート一覧を見せているアプリ';
     // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)。詳しくはマニュアル。
     const note = buildSettingsNote(
       'ノートの題名・種類・日付・状態の一覧を読めます(本文と添付は渡りません)。',
@@ -1492,7 +1492,7 @@ export class SettingsRenderer {
     list.textContent = '';
     if (keys.length === 0) {
       const li = document.createElement('li');
-      li.textContent = 'まだ目次を見せているアプリはありません';
+      li.textContent = 'まだノート一覧を見せているアプリはありません';
       list.append(li);
       return;
     }

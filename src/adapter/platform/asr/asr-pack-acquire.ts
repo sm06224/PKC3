@@ -165,7 +165,7 @@ async function fetchOne(
   //   「取れた」と言わない)
   if (blob.size !== file.bytes) {
     throw new AsrPackError(
-      `${file.path} の大きさがファイル一覧と違います(ファイル一覧 ${file.bytes} byte / 実際 ${blob.size} byte。取得し直してください)`,
+      `${file.path} の大きさが一式の内容一覧と違います(一式の内容一覧 ${file.bytes} byte / 実際 ${blob.size} byte。取得し直してください)`,
     );
   }
   /**
@@ -178,7 +178,7 @@ async function fetchOne(
   if (blob.size <= SHA_VERIFY_MAX_BYTES) {
     const got = await sha256Hex(blob);
     if (got !== file.sha256) {
-      throw new AsrPackError(`${file.path} の中身がファイル一覧と違います(取得し直してください)`);
+      throw new AsrPackError(`${file.path} の中身が一式の内容一覧と違います(取得し直してください)`);
     }
   }
   return blob;

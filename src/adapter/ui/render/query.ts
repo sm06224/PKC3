@@ -110,17 +110,17 @@ export class QueryRenderer {
     title.setAttribute('data-pkc-field', 'pane-title');
     title.textContent = '集計';
     const label = document.createElement('label');
-    label.textContent = '束ね方';
+    label.textContent = 'グループ化';
     const picker = document.createElement('select');
     picker.setAttribute('data-pkc-field', 'query-key');
     picker.setAttribute('data-pkc-action', 'set-query-key');
-    picker.setAttribute('aria-label', '束ねる項目');
+    picker.setAttribute('aria-label', 'グループ化する項目');
     /**
      * 🔴 **数えている範囲と説明を合わせる**(2026-08-29 の動線レビュー)。
      * ⚠ 段④ から **`tags` は本文の行に書いた分も数える**ので、
      *   「frontmatter に書いた項目で束ねます」はもう合っていない。
      */
-    picker.title = '本文の先頭に書いた項目と、本文の行に書いたタグで束ねます';
+    picker.title = '本文の先頭に書いた項目と、本文の行に書いたタグでグループ化します';
     label.append(picker);
     const refresh = document.createElement('button');
     refresh.type = 'button';
@@ -141,7 +141,7 @@ export class QueryRenderer {
   private renderPicker(picker: HTMLSelectElement, state: AppState): void {
     const keys = state.queryKeys?.keys ?? [];
     const wanted = [
-      { value: '', label: keys.length === 0 ? '(束ねられる項目がありません)' : '(選んでください)' },
+      { value: '', label: keys.length === 0 ? '(グループ化できる項目がありません)' : '(選んでください)' },
       /**
        * 🔴 **タグだけは日本語で出す**(2026-08-29 の動線レビュー)。
        * ⚠ アプリの他の場所は全部「タグ」と書いてあるのに、ここだけ英字の `tags` で
@@ -210,8 +210,8 @@ export class QueryRenderer {
       empty.setAttribute('data-pkc-field', 'query-empty');
       empty.textContent =
         (state.queryKeys?.keys.length ?? 0) === 0
-          ? '本文の先頭に「---」で囲んだ項目(例: author: 佐藤)を書くか、本文の行に「#買い物」と書くと、ここで束ねられます'
-          : '上の「束ね方」で項目を選ぶと、その項目の値ごとに束ねます';
+          ? '本文の先頭に「---」で囲んだ項目(例: author: 佐藤)を書くか、本文の行に「#買い物」と書くと、ここでグループ化できます'
+          : '上の「グループ化」で項目を選ぶと、その項目の値ごとにグループ化します';
       table.append(empty);
       return;
     }

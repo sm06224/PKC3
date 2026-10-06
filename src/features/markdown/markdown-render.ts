@@ -5729,7 +5729,7 @@ function processHallucinatedDirectives(
       if (!silentWarnings && typeof console !== 'undefined' && console.warn) {
         console.warn(
           `[PKC1010] hallucinated block directive :::${name} detected. ` +
-          `Use ${HALLUCINATION_BLOCK_SUGGESTION[name] ?? 'spec §1.6 推奨形'} instead.`,
+          `代わりに ${HALLUCINATION_BLOCK_SUGGESTION[name] ?? 'spec §1.6 推奨形'} を使ってください。`,
         );
       }
       inBlockHallucination = { name, startIdx: out.length };
@@ -5780,7 +5780,7 @@ function postProcessHallucinatedDirectives(html: string): string {
     ),
     (_match, name, content) => {
       const suggestion = HALLUCINATION_BLOCK_SUGGESTION[name] ?? 'spec §1.6 推奨形';
-      const title = `未実装の block directive :::${name}。spec §1.6 推奨形へ正規化してください(${suggestion})。`;
+      const title = `未対応のブロック構文 :::${name}。spec §1.6 推奨形へ正規化してください(${suggestion})。`;
       return (
         `<div class="pkc-warning-hallucination-block pkc-warning-hallucination-block-${name}" ` +
         `data-pkc-warn-code="PKC1010" data-pkc-warn-name="${name}" ` +

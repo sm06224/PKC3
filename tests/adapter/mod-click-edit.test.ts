@@ -10,7 +10,7 @@
  * | 押し方 | 何が起きるか |
  * |---|---|
  * | **Ctrl(⌘)+クリック** | **その地点から編集に入る**(既定の編集 IN 導線) |
- * | **Alt+クリック** | **追記の入り先**を、押した所の節にする |
+ * | **Alt+クリック** | **追記先**を、押した所の節にする |
  * | 素のクリック | 読むだけ(browse-first の裁定を変えない) |
  *
  * ⚠ 見るのは「その修飾キーのときだけ効くか」と「**押せる物を奪っていないか**」。
@@ -55,7 +55,7 @@ function rig(html: string, body = 'a\n\nb\n\nc\n', slugs: readonly string[] = []
   host.innerHTML = html;
   root.append(host);
   /**
-   * 追記の入り先の `<select>`。⚠ **本物と同じ印**(`append-box.ts` が組むもの)──
+   * 追記先の `<select>`。⚠ **本物と同じ印**(`append-box.ts` が組むもの)──
    *   別の名前で組むと、この test だけ通って実物では 1 度も効かない。
    */
   const target = document.createElement('select');
@@ -123,7 +123,7 @@ describe('#495 Ctrl(⌘)+クリックで、その行から編集に入る', () =
   });
 
   /**
-   * ⚠ `Ctrl+Alt` は **AltGr**。⚠ `Alt` 単独は**追記の入り先**(下の describe)
+   * ⚠ `Ctrl+Alt` は **AltGr**。⚠ `Alt` 単独は**追記先**(下の describe)
    *   なので、ここで編集に入ってしまうと**2 つの動線が同時に走る**。
    */
   it('🔴 Ctrl+Alt(AltGr)では入らない ── 記号が打てない配列の人を壊さない', () => {
@@ -187,7 +187,7 @@ describe('#495 Ctrl(⌘)+クリックで、その行から編集に入る', () =
    * 🔴 **何も起きないなら、ブラウザの既定も奪わない**(着地前レビュー M7 を
    * 検算して確定させた形)。
    *
-   * ⚠ `phase` が `ready` でないとき、`START_EDIT` は reducer が捨て、入り先は
+   * ⚠ `phase` が `ready` でないとき、`START_EDIT` は reducer が捨て、追記先は
    *   `appendModeOf` が止める ── **状態は動かない**。⚠ そこで `preventDefault`
    *   だけ走ると、**字を選ぶ / 新しいタブで開くが消えるのに、代わりに何も
    *   起きない**(CLAUDE.md §10「奪ったのに代わりが無い」)。
@@ -241,14 +241,14 @@ describe('#495 Ctrl(⌘)+クリックで、その行から編集に入る', () =
 });
 
 /**
- * 🔴 **Alt+クリック = 追記の入り先**(#495)。
+ * 🔴 **Alt+クリック = 追記先**(#495)。
  *
  * > user 裁定 2026-08-27「センターペインの**追記位置指定は Alt+クリック**にしましょう」
  *
  * ⚠ 見るのは「`<select>` が本当に変わるか」── ここが `append-entry` の読む
- *   **唯一の正本**なので、変わっていなければ**押しても入り先は動いていない**。
+ *   **唯一の正本**なので、変わっていなければ**押しても追記先は動いていない**。
  */
-describe('#495 Alt+クリックで、追記の入り先を指す', () => {
+describe('#495 Alt+クリックで、追記先を指す', () => {
   /** 見出し 2 つの本文。⚠ 行番号は下の刻印と揃える(`SECT_BODY` の行で数える)。 */
   const SECT_BODY = ['# 上の節', '', 'a', '', '## 決定事項', '', 'b', ''].join('\n');
   const SECT_HTML = [
@@ -259,10 +259,10 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
   ].join('');
   const SLUGS = ['上の節', '決定事項'];
 
-  it('🔴 押した所の節が入り先になる(いちばん近い上の見出し)', () => {
+  it('🔴 押した所の節が追記先になる(いちばん近い上の見出し)', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb', { altKey: true });
-    expect(r.target.value, '入り先が変わっていない').toBe('決定事項');
+    expect(r.target.value, '追記先が変わっていない').toBe('決定事項');
     // 対照群 ── 上の節を押せば、そちらへ移る(1 つに固まっていない)
     r.click('#pa', { altKey: true });
     expect(r.target.value).toBe('上の節');
@@ -291,7 +291,7 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     appPanes.setHidden(['append']);
     try {
       r.click('#pb', { altKey: true });
-      expect(r.target.value, '入り先が動いていない(前提が崩れている)').toBe('決定事項');
+      expect(r.target.value, '追記先が動いていない(前提が崩れている)').toBe('決定事項');
       expect(appPanes.getHidden(), '畳んだままになっている').not.toContain('append');
       expect(shell.hasAttribute('data-pkc-hidden-panes'), '画面へ写っていない').toBe(false);
       expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
@@ -303,11 +303,11 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
   });
 
   /**
-   * 🔴 **上に見出しが無ければ入り先を変えない** ── 「末尾」へ落とすと、
+   * 🔴 **上に見出しが無ければ追記先を変えない** ── 「末尾」へ落とすと、
    *   文書の上のほうを押したのに**いちばん下へ入る**(いちばん静かな取り違え)。
    * ⚠ **黙って何もしない**にはしない(理由を出す)。
    */
-  it('🔴 上に見出しが無い所では、入り先を変えずに理由を出す', () => {
+  it('🔴 上に見出しが無い所では、追記先を変えずに理由を出す', () => {
     const html = '<p data-pkc-source-line="0" id="top">まえがき</p>' + SECT_HTML;
     const r = rig(html, 'まえがき\n\n' + SECT_BODY, SLUGS);
     r.click('#pb', { altKey: true });
@@ -321,7 +321,7 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
    * ⚠ **`Alt+Shift` は字の範囲を広げる操作** ── 奪うと `preventDefault` で
    * 選択が伸びない(旧 `alt-click-edit.test.ts` に在った門。書き換えで落ちていた)。
    */
-  it('🔴 Alt+Shift では入り先を動かさない(範囲を広げる操作を奪わない)', () => {
+  it('🔴 Alt+Shift では追記先を動かさない(範囲を広げる操作を奪わない)', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb', { altKey: true, shiftKey: true });
     expect(r.target.value, '選択を広げる操作を奪った').toBe('');
@@ -333,7 +333,7 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
   /**
    * 🔴 **一覧に無い印は選ばない**(着地前レビュー G / M3)。
    * ⚠ `<select>` に無い値を代入すると `selectedIndex = -1` → `value` は `''`
-   *   (= 末尾)に落ちる。それでも「入り先を『X』にしました」と出ると、
+   *   (= 末尾)に落ちる。それでも「追記先を『X』にしました」と出ると、
    *   **追記は末尾へ入るのに user は X へ入ったと思う**。
    */
   it('🔴 一覧に無い節は選ばず、理由を出す(黙って末尾へ落とさない)', () => {
@@ -347,14 +347,14 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
 
   /**
    * ⚠ **`ready` のときだけ**(着地前レビュー I)。`START_EDIT` は reducer が
-   * 二重に守るが、**追記の入り先の側は守り手がここしか居ない**。
+   * 二重に守るが、**追記先の側は守り手がここしか居ない**。
    */
-  it('🔴 編集中は、入り先の動線も走らない', () => {
+  it('🔴 編集中は、追記先の動線も走らない', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.d.dispatch({ type: 'START_EDIT' });
     expect(r.state().phase, '前提: editing になっていない').toBe('editing');
     r.click('#pb', { altKey: true });
-    expect(r.target.value, '編集中に入り先が動いた').toBe('');
+    expect(r.target.value, '編集中に追記先が動いた').toBe('');
     // 対照群 ── 編集をやめれば動く(門が固まっているのではない)
     r.d.dispatch({ type: 'CANCEL_EDIT' });
     r.click('#pb', { altKey: true });
@@ -367,7 +367,7 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
    * ⚠ 直す前は「上に見出しが無い」「一覧に無い見出し」の 2 つが**欄を開く前に返って**
    *   いたので、マニュアルの「畳んでいても開いて、打つ欄にカーソルが入ります」が
    *   その場面で嘘だった ── 見出しが 1 つも無いノートでは**毎回**そうなる。
-   * 🔑 見るのは 3 つ:欄が開く / カーソルが入る / 断りの字(いまの入り先つき)。
+   * 🔑 見るのは 3 つ:欄が開く / カーソルが入る / 断りの字(いまの追記先つき)。
    */
   describe('断るときも打つ所までは出す(#655 ②)', () => {
     function foldedPane(r: ReturnType<typeof rig>) {
@@ -386,17 +386,17 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       appPanes.setHidden([]);
     });
 
-    it('🔴 上に見出しが無い所でも、欄は開いてカーソルが入る ── いまの入り先を添える', () => {
+    it('🔴 上に見出しが無い所でも、欄は開いてカーソルが入る ── いまの追記先を添える', () => {
       const html = '<p data-pkc-source-line="0" id="top">まえがき</p>' + SECT_HTML;
       const r = rig(html, 'まえがき\n\n' + SECT_BODY, SLUGS);
       const { shell, input } = foldedPane(r);
       r.click('#top', { altKey: true });
-      expect(r.target.value, '入り先が動いた').toBe('');
+      expect(r.target.value, '追記先が動いた').toBe('');
       expect(shell.hasAttribute('data-pkc-hidden-panes'), '断ったので欄を開かなかった').toBe(false);
       expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
       const notice = r.state().notice ?? '';
       expect(notice, '理由が出ていない').toContain('見出しが無い');
-      expect(notice, 'いまの入り先を言っていない').toContain('いまの入り先は末尾です');
+      expect(notice, 'いまの追記先を言っていない').toContain('いまの追記先は末尾です');
       expect(notice, '開いたことを言っていない').toContain('追記欄を開きました');
     });
 
@@ -404,15 +404,15 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       const html = '<p data-pkc-source-line="0" id="top">まえがき</p>' + SECT_HTML;
       const r = rig(html, 'まえがき\n\n' + SECT_BODY, SLUGS);
       r.click('#pb', { altKey: true });
-      expect(r.target.value, '前提: 入り先が選べていない').toBe('決定事項');
+      expect(r.target.value, '前提: 追記先が選べていない').toBe('決定事項');
       r.click('#top', { altKey: true });
-      expect(r.target.value, '入り先が動いた').toBe('決定事項');
+      expect(r.target.value, '追記先が動いた').toBe('決定事項');
       expect(r.state().notice ?? '', '選んであった節を言っていない').toContain(
-        'いまの入り先は「決定事項」です',
+        'いまの追記先は「決定事項」です',
       );
     });
 
-    it('🔴 一覧に無い節でも、欄は開いてカーソルが入る ── 理由にいまの入り先を添える', () => {
+    it('🔴 一覧に無い節でも、欄は開いてカーソルが入る ── 理由にいまの追記先を添える', () => {
       const r = rig(SECT_HTML, SECT_BODY, ['上の節']);
       const { shell, input } = foldedPane(r);
       r.click('#pb', { altKey: true });
@@ -420,8 +420,8 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       expect(shell.hasAttribute('data-pkc-hidden-panes'), '断ったので欄を開かなかった').toBe(false);
       expect(document.activeElement, '打つ欄にカーソルが入っていない').toBe(input);
       const error = r.state().error ?? '';
-      expect(error, '理由が出ていない').toContain('「決定事項」は追記の入り先に選べません');
-      expect(error, 'いまの入り先を言っていない').toContain('いまの入り先は末尾です');
+      expect(error, '理由が出ていない').toContain('「決定事項」は追記先に選べません');
+      expect(error, 'いまの追記先を言っていない').toContain('いまの追記先は末尾です');
     });
 
     it('🔴 見出しが 1 つも無いノートでも、欄は開いてカーソルが入る', () => {
@@ -440,15 +440,15 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
      *   `ready` でないと降り(上の「ready でない間は、既定を奪わない」)、後者は
      *   編集中に並ばない。届く「ready でない」は**書込中**だけである。
      */
-    it('🔴 書き込んでいる間は「入り先を変えられません」と理由を出す(黙らない)', () => {
+    it('🔴 書き込んでいる間は「追記先を変えられません」と理由を出す(黙らない)', () => {
       const r = rig(SECT_HTML, SECT_BODY, SLUGS);
       const { shell } = foldedPane(r);
       // ⚠ この rig には効果層が無いので、追記を撃つと書込の錠が掛かったままになる
       r.d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'n1', text: 'x', heading: null, target: null });
       expect(r.state().writeLock?.lid, '前提: 書込中になっていない').toBe('n1');
       r.click('#pb', { altKey: true });
-      expect(r.target.value, '書込中に入り先が動いた').toBe('');
-      expect(r.state().error ?? '', '書込中に黙った').toContain('入り先を変えられません');
+      expect(r.target.value, '書込中に追記先が動いた').toBe('');
+      expect(r.state().error ?? '', '書込中に黙った').toContain('追記先を変えられません');
       // ⚠ 書込中は打つ欄が無い(理由と出口の帯だけ)ので、欄を開く動作は起こさない
       expect(shell.getAttribute('data-pkc-hidden-panes'), '書込中に欄を開いた').toBe('append');
     });
@@ -465,11 +465,11 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
       r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: SECT_BODY });
       r.click('#pb', { altKey: true });
       expect(r.state().error, '追記欄の無い面で追記の断り文を出した').toBeNull();
-      expect(r.state().notice ?? '').not.toContain('入り先');
+      expect(r.state().notice ?? '').not.toContain('追記先');
     });
   });
 
-  it('🔴 素のクリックでは入り先は動かない', () => {
+  it('🔴 素のクリックでは追記先は動かない', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb');
     expect(r.target.value).toBe('');
@@ -478,11 +478,11 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     expect(r.target.value).toBe('決定事項');
   });
 
-  it('🔴 Ctrl+クリックは編集に入り、入り先は動かさない(2 つが同時に走らない)', () => {
+  it('🔴 Ctrl+クリックは編集に入り、追記先は動かさない(2 つが同時に走らない)', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb', { ctrlKey: true });
     expect(r.state().phase).toBe('editing');
-    expect(r.target.value, '編集に入りつつ入り先まで動かした').toBe('');
+    expect(r.target.value, '編集に入りつつ追記先まで動かした').toBe('');
   });
 
   it('🔴 リンクの上では奪わない', () => {
@@ -496,11 +496,11 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
    *
    * ⚠ `<select>` は器を 1 度だけ組むので、追記できないノート(添付・フォルダ)でも
    *   `querySelector` は**畳まれた物を掴む** ── 1 稿目はそこで
-   *   「『◯◯』は追記の入り先に選べません」という、**追記欄が 1 つも見えていない
+   *   「『◯◯』は追記先に選べません」という、**追記欄が 1 つも見えていない
    *   画面で、追記についての断り文**を出していた。
    * ⚠ **対照群を同じ it に置く** ── 種類を戻せば動くこと(門が固まっていないこと)。
    */
-  it('🔴 追記できない種類のノートでは、断り文も出さず入り先も動かさない', () => {
+  it('🔴 追記できない種類のノートでは、断り文も出さず追記先も動かさない', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     // 添付は `APPENDABLE_ARCHETYPES` の外 ── 追記欄そのものが出ない
     r.d.dispatch({
@@ -512,7 +512,7 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     r.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: SECT_BODY });
     r.click('#pb', { altKey: true });
-    expect(r.target.value, '出ていない欄の入り先を動かした').toBe('');
+    expect(r.target.value, '出ていない欄の追記先を動かした').toBe('');
     expect(r.state().error ?? '', '見えていない物についての断り文が出た').toBe('');
     expect(r.state().notice ?? '', '見えていない物についての知らせが出た').toBe('');
 
@@ -534,14 +534,14 @@ describe('#495 Alt+クリックで、追記の入り先を指す', () => {
    * SURVIVED で教えた)。
    *
    * ⚠ 上の「編集に入らない」だけを見る test では**足りなかった** ── `Alt` の枝から
-   *   `!ctrlKey` を外す変異は、編集ではなく**入り先を動かす**ので `phase` は
+   *   `!ctrlKey` を外す変異は、編集ではなく**追記先を動かす**ので `phase` は
    *   `ready` のまま(= 緑)になる。🔑 **2 つの出口を同じ it で見る。**
    */
-  it('🔴 Ctrl+Alt(AltGr)では、編集にも入らず入り先も動かない', () => {
+  it('🔴 Ctrl+Alt(AltGr)では、編集にも入らず追記先も動かない', () => {
     const r = rig(SECT_HTML, SECT_BODY, SLUGS);
     r.click('#pb', { altKey: true, ctrlKey: true });
     expect(r.state().phase, '編集に入った').toBe('ready');
-    expect(r.target.value, '入り先が動いた').toBe('');
+    expect(r.target.value, '追記先が動いた').toBe('');
     // 対照群 ── Alt だけなら動く(門が固まっているのではない)
     r.click('#pb', { altKey: true });
     expect(r.target.value).toBe('決定事項');

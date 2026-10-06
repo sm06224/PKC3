@@ -129,7 +129,7 @@ export function purgeBlockReason(editing: 'editing' | 'idle' | 'unknown'): strin
   if (editing === 'editing')
     return '他のタブで編集中です。そちらを保存してからもう一度お試しください';
   if (editing === 'unknown')
-    return '本体タブと通信できないため、他のタブが編集中か確かめられません';
+    return 'メインのタブと通信できないため、他のタブが編集中か確かめられません';
   return null;
 }
 

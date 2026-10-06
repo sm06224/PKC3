@@ -37,7 +37,7 @@ test('🔴 2 枚目(follower)は、別タブの更新適用で昇格して生き
     const b = await context.newPage();
     await gotoApp(b);
     await expect(b.locator('[data-pkc-region="status"]')).toContainText(
-      '保存は本体タブ経由',
+      '保存はメインのタブ経由',
       { timeout: 20_000 },
     );
 
@@ -53,7 +53,7 @@ test('🔴 2 枚目(follower)は、別タブの更新適用で昇格して生き
 
     // ✅ A の読み直しで lease が返り、B が**その場で**昇格する(reload 無し)
     await expect(b.locator('[data-pkc-region="status"]')).toContainText(
-      'このタブが本体になりました',
+      'このタブがメインのタブになりました',
       { timeout: 20_000 },
     );
     expect(await b.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-boot')).toBe(

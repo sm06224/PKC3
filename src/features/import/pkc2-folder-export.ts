@@ -112,7 +112,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     ) as Pkc2FolderExportManifest;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (manifest?.format !== FOLDER_EXPORT_FORMAT) {
     throw new ZipReadError(
@@ -126,7 +126,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     );
   }
   if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('manifest に entries の配列がありません(この ZIP は読み取れません)');
+    throw new ZipReadError('構成定義(manifest)にノートの一覧(entries)がありません。別の書き出しファイルを選んでください');
   }
 
   const inner = await readInnerBundles(zip, dir, manifest.entries, resolveArchetype);
@@ -148,7 +148,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // 「成功」に見せない
   if (inner.bundles.length === 0 && inner.failed.length > 0) {
     throw new ZipReadError(
-      `ZIP の中の書き出しファイルを 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
+      `zip の中の書き出しファイルを 1 件も取り込めませんでした(${inner.failed.length} 件すべて失敗)` +
         `: ${warnings.join(' / ')}`,
     );
   }

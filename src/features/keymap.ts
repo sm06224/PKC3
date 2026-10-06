@@ -366,10 +366,10 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'filer-open-stack',
-    label: '横の枠(スタック)へ開く',
+    label: 'スタックへ開く',
     contexts: ['filer', 'dual'],
     defaults: ['Alt+Enter'],
-    note: '中央のノートはそのまま、選んだノートを横の枠(スタック)に並べます',
+    note: '中央のノートはそのまま、選んだノートをスタックに並べます',
   },
   {
     id: 'filer-parent',
@@ -448,7 +448,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'フォルダへ移す…',
     contexts: ['filer'],
     defaults: ['F6'],
-    note: '入れ先のフォルダを選びます(選択があれば、その全部を移します)',
+    note: '移動先のフォルダを選びます(選択があれば、その全部を移します)',
   },
   {
     id: 'filer-new-in-folder',

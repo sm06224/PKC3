@@ -373,7 +373,7 @@ export async function importPkc2File(
       // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
       //   を読む)が、案内には**受ける全部**を書く(#1017 段④b。3 種 + 旧形式)。
       return fail(
-        `取り込めない形式です(${file.name})。PKC2 の書き出し(HTML / ZIP)か ` +
+        `取り込めない形式です(${file.name})。PKC2 の書き出し(HTML / zip)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
           'または .md を選んでください',
       );
@@ -427,7 +427,7 @@ export async function importPkc2File(
         container = null;
       } else if (format === null) {
         return fail(
-          `${file.name}: manifest.json が無い ZIP です。PKC2 の書き出しファイルを選んでください`,
+          `${file.name}: manifest.json が無い zip です。PKC2 の書き出しファイルを選んでください`,
         );
       }
       const read = restored
@@ -533,7 +533,7 @@ export async function importPkc2File(
         // 2 回目がここに落ちる ② 段⑤以降で「複数 bundle の map を合成する」際に
         // key 集合がずれると、その瞬間ここが唯一の防壁になる
         if (zipAssets !== null && a.oldKey !== null && src === null) {
-          throw new Error(`ZIP の中に添付の実体がありません(${a.oldKey})`);
+          throw new Error(`zip の中に添付の実体がありません(${a.oldKey})`);
         }
         // ⚠ 閾値超の asset は **heap に載せない** ── ハッシュを取らない
         // (= dedupe 対象外)ので読む理由が無く、読めばそのまま常駐する。

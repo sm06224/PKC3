@@ -162,7 +162,7 @@ export class OfficePackInstaller {
    * まだ開ける、が最悪(user は消えたと思って容量を当てにする)。
    */
   async remove(): Promise<PackResult> {
-    if (this.running) return { ok: false, message: 'いま Office 一式を入れている最中です。終わるまでお待ちください。' };
+    if (this.running) return { ok: false, message: 'いま Office 一式を取り込んでいる最中です。終わるまでお待ちください。' };
     try {
       await this.deps.store.remove();
       const left = await this.readMeta();
@@ -184,7 +184,7 @@ export class OfficePackInstaller {
     }>,
   ): Promise<PackResult> {
     if (this.running) {
-      return { ok: false, message: 'すでに設置中です。終わるまでお待ちください。' };
+      return { ok: false, message: 'すでに取り込み中です。終わるまでお待ちください。' };
     }
     this.running = true;
     const progress = (text: string): void => this.deps.onProgress?.(text);
@@ -207,7 +207,7 @@ export class OfficePackInstaller {
         meta,
         // ⚠ **黙って消えうることを黙っていない。** 拒否されたことを伝えないと、
         //    後日消えたときに user は原因を名指しできない
-        message: `Office 一式を入れました(${humanBytes(meta.totalBytes)})`
+        message: `Office 一式を取り込みました(${humanBytes(meta.totalBytes)})`
           + (persisted
             ? ''
             : '。ただし、このブラウザから「消さずに残す」許可がもらえなかったため、端末の空き容量が減ると自動で消されることがあります'),
@@ -216,7 +216,7 @@ export class OfficePackInstaller {
       return { ok: false, message: toMessage(e, what) };
     } finally {
       // ⚠ **必ず降ろす**(finally)── 落ちたまま立ちっぱなしだと、以後の操作が
-      //   全部「すでに設置中です」で断られ、リロードするしか無くなる
+      //   全部「すでに取り込み中です」で断られ、リロードするしか無くなる
       this.running = false;
       progress('');
     }

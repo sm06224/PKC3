@@ -144,19 +144,19 @@ export function readDuckDbPack(text: string): PackRead {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ok: false, why: 'DuckDB のファイル一覧が読めません(取得し直してください)' };
+    return { ok: false, why: 'DuckDB の一式の内容一覧が読めません(取得し直してください)' };
   }
   if (typeof raw !== 'object' || raw === null) {
-    return { ok: false, why: 'DuckDB のファイル一覧が読めません(取得し直してください)' };
+    return { ok: false, why: 'DuckDB の一式の内容一覧が読めません(取得し直してください)' };
   }
   const o = raw as Record<string, unknown>;
   const version = o['version'];
   const files = o['files'];
   if (typeof version !== 'string' || version === '') {
-    return { ok: false, why: 'DuckDB のファイル一覧にバージョンがありません(取得し直してください)' };
+    return { ok: false, why: 'DuckDB の一式の内容一覧にバージョンがありません(取得し直してください)' };
   }
   if (!Array.isArray(files) || !files.every(isFile)) {
-    return { ok: false, why: 'DuckDB のファイル一覧の中身が読めません(取得し直してください)' };
+    return { ok: false, why: 'DuckDB の一式の内容一覧の中身が読めません(取得し直してください)' };
   }
   for (const want of DUCKDB_REQUIRED_FILES) {
     const got = files.find((f) => f.path === want);

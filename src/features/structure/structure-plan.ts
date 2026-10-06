@@ -151,7 +151,7 @@ export function parsePlan(text: string, known: ReadonlyMap<string, EntryMeta>): 
       }
       const lid = w[0]!;
       if (!known.has(lid)) {
-        errors.push({ line, message: `${lid} というノートはありません` });
+        errors.push({ line, message: `ID ${lid} のノートはありません` });
         return;
       }
       const parent = target(w[1]);
@@ -177,7 +177,7 @@ export function parsePlan(text: string, known: ReadonlyMap<string, EntryMeta>): 
         return;
       }
       if (!known.has(lid)) {
-        errors.push({ line, message: `${lid} というノートはありません` });
+        errors.push({ line, message: `ID ${lid} のノートはありません` });
         return;
       }
       const q = quoted(rest.slice(rest.indexOf(lid) + lid.length));
@@ -226,7 +226,7 @@ function checkParent(
     return false;
   }
   if (parent.at === 'lid' && !known.has(parent.lid)) {
-    errors.push({ line, message: `${parent.lid} というノートはありません` });
+    errors.push({ line, message: `ID ${parent.lid} のノートはありません` });
     return false;
   }
   return true;

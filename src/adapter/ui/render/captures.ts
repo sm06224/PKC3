@@ -390,7 +390,7 @@ export class CapturesRenderer {
     open.setAttribute('data-pkc-field', 'capture-name');
     open.textContent = item.name;
     // ⚠ **名前を直す / 消す はノートの側に在る** ── ここに 2 本目を作らない(§7)
-    open.title = 'このノートを開きます(名前を直す・消すは開いた先でできます)。';
+    open.title = 'このノートを開きます(名前の変更と削除は開いた先でできます)。';
     li.append(open);
 
     const about = document.createElement('span');

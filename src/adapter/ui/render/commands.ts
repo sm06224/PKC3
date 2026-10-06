@@ -71,7 +71,7 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
      *   見つからず「対応していない」と読まれる)。
      */
     title:
-      'PKC2 の書き出し(HTML / ZIP)/ PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)/ Markdown / 連絡先(.vcf)を取り込みます',
+      'PKC2 の書き出し(HTML / zip)/ PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)/ Markdown / 連絡先(.vcf)を取り込みます',
   },
   {
     action: 'export-archive',

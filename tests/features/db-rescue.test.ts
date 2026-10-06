@@ -143,7 +143,7 @@ describe('画面に出す字(#971 段③)', () => {
 
   it('🔴 索引だけのときは「中身は無事かもしれない」と言い、次の一手を書く', () => {
     const s = integritySummary(parseQuickCheck(INDEX_BROKEN, SCHEMA));
-    expect(s).toContain('目次');
+    expect(s).toContain('索引');
     expect(s, '次に何を押すか書いていない').toContain(BACKUP_LABEL);
     noMarkup(s);
   });

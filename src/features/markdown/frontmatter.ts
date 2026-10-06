@@ -514,7 +514,7 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   if (fmBytes > sizeCap) {
     warnings.push({
       kind: 'size_limit',
-      detail: `frontmatter サイズが ${sizeCap} bytes を超過(${fmBytes} bytes)、parse 中止`,
+      detail: `前書き(frontmatter)が上限(${sizeCap} バイト)を超えたため、解析を中断しました`,
     });
     const remainder = lines.slice(closeIdx + 1).join('\n');
     return {

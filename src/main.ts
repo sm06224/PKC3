@@ -408,7 +408,7 @@ export interface AppHandle {
   /**
    * 🔴 **状態の行を塗り直す**(#300 段④)。⚠ 配線が「アプリの窓か」の旗を
    * 倒した瞬間に効かせるために要る ── 旗だけ倒しても、次に何かが起きるまで
-   * 古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)。
+   * 古い帯が残る(離れた瞬間に「メインのタブ経由です」が戻るべきである)。
    */
   repaintStatus(): void;
   /**
@@ -855,7 +855,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 
   /**
    * 🔴 多重タブ(#177)。lease を取れたタブ(本体)は実 worker + StoreProxyHost。
-   * 取れないタブは ProxyStoreClient(本体タブ経由)で **同じアプリをそのまま開く**
+   * 取れないタブは ProxyStoreClient(メインのタブ経由)で **同じアプリをそのまま開く**
    * ── PKC2 でできていた「複数タブで別々のノートを開く・編集する」を戻す。
    * 本体が旧ビルド(handshake 応答なし)のときだけ、従来の待機に落ちる。
    * `sync` は編集ロックと changed の口 ── 昇格で実体が host に替わるので let。
@@ -1509,7 +1509,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const statusBase = storageStatusLine(init.fallbackReason);
   regions.status.title = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
   /**
-   * #177: 本体タブ経由(follower)で開いているときの常設バッジ。fallback 警告と
+   * #177: メインのタブ経由(follower)で開いているときの常設バッジ。fallback 警告と
    * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。
    *
    * 🔴 **アプリの窓では出さない**(#300 段④、2026-08-22。動線レビュー §10)。
@@ -1523,7 +1523,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔑 判定は `heldViewWindow`(ディープリンクを握っている間だけ真)を読む ──
    *   新しい旗を作らない(CLAUDE.md §7)。
    */
-  let syncLine = followerConn ? '複数タブ: このタブの保存は本体タブ経由です' : '';
+  let syncLine = followerConn ? '複数タブ: このタブの保存はメインのタブ経由です' : '';
   // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
   // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
   let statusShown = statusBase;
@@ -2131,15 +2131,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           });
         }
         syncLine = '';
-        showStatus('このタブが本体になりました');
+        showStatus('このタブがメインのタブになりました');
         paint();
       } catch (e) {
         // 🔴 帯の常設も嘘のまま残さない(レビュー H-2)── 「本体経由」はもう成立していない
-        syncLine = '⚠ 本体への切り替えに失敗しました(保存できません、タブを再読み込みしてください)';
+        syncLine = '⚠ メインのタブへの切り替えに失敗しました(保存できません、タブを再読み込みしてください)';
         paint();
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `本体への切り替えに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+          error: `メインのタブへの切り替えに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
         });
       }
     });
@@ -3668,7 +3668,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        */
       center.invalidateDetail();
       center.render(dispatcher.getState());
-      showStatus('目次を見せる許可を取り消しました');
+      showStatus('ノート一覧を見せる許可を取り消しました');
     },
     /**
      * 🔴 **ヘルプの中の「マニュアルを別のウィンドウで開く」**(#645)。
@@ -3826,12 +3826,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               confirm: async (title) =>
                 // ⚠ 何が見えるかを**具体**で書く(「連携します」では判断できない)
                 ask(
-                  `「${title}」に、ノートの**目次**を見せて開きます。\n\n` +
+                  `「${title}」に、ノート一覧を見せて開きます。\n\n` +
                     '見えるのは、ノートの題名・種類・日付・状態の一覧だけです。\n' +
                     '本文と添付は渡りません。\n\n' +
                     'この中身は次回から聞きません(中身が変わったらまた聞きます。' +
                     'システムでいつでも取り消せます)。\n\n開きますか?',
-                  { okLabel: '目次を見せて開く' },
+                  { okLabel: 'ノート一覧を見せて開く' },
                 ),
               /**
                * 🔴 **繋いだら台帳に載せる**(#195 / C-5 段②)。⚠ 段① まで、港は
@@ -5174,7 +5174,7 @@ function bootstrap(): void {
         onHold: (view) => {
           heldViewWindow = view;
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
-          //    古い帯が残る(離れた瞬間に「本体タブ経由です」が戻るべきである)
+          //    古い帯が残る(離れた瞬間に「メインのタブ経由です」が戻るべきである)
           app.repaintStatus();
           // 🔑 題名の形は `paintTitle` 1 か所(直前は**ここに直書き**していたので、
           //    `onHold` を通らない付箋には永久に届かなかった ── 着地前レビュー ⚠3)

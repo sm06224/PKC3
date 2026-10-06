@@ -410,7 +410,7 @@ describe('添付の詳細から起動する(P10)', () => {
     expect(
       q('[data-pkc-action="launch-asset"]')!.getAttribute('title'),
       '口が開くことを 1 行も言っていない',
-    ).toContain('目次');
+    ).toContain('ノート一覧');
   });
 
   it('🔴 HTML でない添付には出さない', async () => {

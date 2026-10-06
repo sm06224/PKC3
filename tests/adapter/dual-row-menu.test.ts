@@ -258,7 +258,7 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     expect(t.d.getState().revisionPanel?.lid, '押した行の履歴が出ていない(一覧が捨てられた)').toBe('n1');
   });
 
-  it('🔴 「このスタックを載せる」は、押したときに押した行を選んでから載せる', async () => {
+  it('🔴 「このスタックを追加する」は、押したときに押した行を選んでから載せる', async () => {
     const t = setupDual();
     t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });

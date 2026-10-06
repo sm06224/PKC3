@@ -181,7 +181,7 @@ describe('readZipEntry', () => {
       { name: 'broken.bin', bytes: bytesOf('中身'), corruptCrc: true },
     ]);
     const [e] = await readZipDirectory(zip);
-    await expect(readZipEntry(zip, e!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
+    await expect(readZipEntry(zip, e!)).rejects.toThrow(/zip の中身を最後まで読めませんでした/);
     // ⚠ 検証を外す逃げ道は**持たない**。逃げ道はサイズ照合まで一緒に落として
     // 「他人の entry の中身が返る」経路を開けていた(review M-5)
   });
@@ -191,7 +191,7 @@ describe('readZipEntry', () => {
       { name: 'b.txt', bytes: bytesOf('x'.repeat(500)), method: 8, corruptCrc: true },
     ]);
     const [e] = await readZipDirectory(zip);
-    await expect(readZipEntry(zip, e!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
+    await expect(readZipEntry(zip, e!)).rejects.toThrow(/zip の中身を最後まで読めませんでした/);
   });
 
   it('未対応の圧縮方式は方式番号を出して断る(skip して欠落させない)', async () => {
@@ -308,7 +308,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const base = await buildZip([{ name: 'a.txt', bytes: bytesOf('x') }]);
     const buf = new Uint8Array(await base.arrayBuffer());
     new DataView(buf.buffer).setUint16(buf.length - 22 + 4, 3, true);
-    await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/分割された ZIP/);
+    await expect(readZipDirectory(new Blob([buf]))).rejects.toThrow(/分割された zip/);
   });
 
   it('EOCD 署名が偶然含まれていても本物を選ぶ(comment 長で検証する)', async () => {
@@ -375,7 +375,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const a = await buildZip([{ name: 'a.txt', bytes: bytesOf('AAAAAAAAAA') }]);
     const b = await buildZip([{ name: 'a.txt', bytes: bytesOf('BBBBBBBBBB') }]);
     const [ea] = await readZipDirectory(a);
-    await expect(readZipEntry(b, ea!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
+    await expect(readZipEntry(b, ea!)).rejects.toThrow(/zip の中身を最後まで読めませんでした/);
   });
 
   it('サイズだけが目次と違う壊れ方も断る(CRC が偶然一致する形)', async () => {
@@ -390,7 +390,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const zip2 = new Blob([buf]);
     const [e] = await readZipDirectory(zip2);
     expect(e!.crc32).toBe(0); // CRC は一致する
-    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/サイズが目次と違います/);
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/ファイルサイズが内容一覧と違います/);
   });
 
   it('圧縮データが壊れていたら理由の分かる文面で断る', async () => {

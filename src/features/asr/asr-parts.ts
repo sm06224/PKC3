@@ -237,12 +237,12 @@ export function readAsrPack(text: string): AsrPackRead {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ok: false, why: 'ファイル一覧(pack.json)として読めません' };
+    return { ok: false, why: '一式の内容一覧(pack.json)として読めません' };
   }
-  if (typeof raw !== 'object' || raw === null) return { ok: false, why: 'ファイル一覧の形が違います' };
+  if (typeof raw !== 'object' || raw === null) return { ok: false, why: '一式の内容一覧の形が違います' };
   const o = raw as Record<string, unknown>;
   const version = o['version'];
-  if (typeof version !== 'string' || version === '') return { ok: false, why: 'ファイル一覧にバージョンがありません' };
+  if (typeof version !== 'string' || version === '') return { ok: false, why: '一式の内容一覧にバージョンがありません' };
 
   const runtime = readFiles(o['runtime'], '実行用のファイル');
   if (typeof runtime === 'string') return { ok: false, why: runtime };
@@ -255,7 +255,7 @@ export function readAsrPack(text: string): AsrPackRead {
   }
 
   const modelsRaw = o['models'];
-  if (typeof modelsRaw !== 'object' || modelsRaw === null) return { ok: false, why: 'ファイル一覧に models がありません' };
+  if (typeof modelsRaw !== 'object' || modelsRaw === null) return { ok: false, why: '一式の内容一覧にモデルファイル(models)がありません' };
   const models: Partial<Record<AsrPartId, readonly AsrPackFile[]>> = {};
   for (const part of ASR_PARTS) {
     const mine = (modelsRaw as Record<string, unknown>)[part.id];

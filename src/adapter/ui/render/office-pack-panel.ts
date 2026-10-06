@@ -39,7 +39,7 @@ export function packStatusText(meta: OfficePackMeta | null): string {
     ? '日時不明'
     : `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
   const from = meta.source === 'url' ? '配布元から' : 'ファイルから';
-  return `入っています(${meta.version} / ${humanBytes(meta.totalBytes)} / ${date} に${from}設置)`;
+  return `入っています(${meta.version} / ${humanBytes(meta.totalBytes)} / ${date} に${from}取り込み)`;
 }
 
 /**
@@ -54,7 +54,7 @@ export function packStatusText(meta: OfficePackMeta | null): string {
 export function packBuildText(meta: OfficePackMeta | null): string {
   if (meta === null) return '';
   const b = meta.build;
-  if (b === null) return 'どのビルドかは分かりません(この一式を入れた頃は記録していませんでした)';
+  if (b === null) return 'どのビルドかは分かりません(この一式を取り込んだ頃は記録していませんでした)';
   const parts: string[] = [];
   // ⚠ sha は**先頭 12 字**(全部は読めないし、突合には足りる)
   if (b.loSha !== '') parts.push(`LibreOffice ${b.loSha.slice(0, 12)}`);
@@ -155,7 +155,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   intro.setAttribute('data-pkc-field', 'settings-note');
   intro.textContent =
     'Word / Excel / PowerPoint の添付を、別のウィンドウで開いて読めるようにします。'
-    + `${OFFICE_PACK_APPROX} の一式をこの端末に入れます。一度入れれば、次からは端末の中から起動します。`;
+    + `${OFFICE_PACK_APPROX} の一式をこの端末に取り込みます。一度取り込めば、次からは端末の中から起動します。`;
   root.append(intro);
 
   const status = document.createElement('p');
@@ -179,10 +179,10 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
 
   const row = document.createElement('div');
   row.setAttribute('data-pkc-field', 'office-pack-actions');
-  const fromUrl = button('install-office-pack', '配布元から入れる', 'office-pack-url');
+  const fromUrl = button('install-office-pack', '配布元から取り込む', 'office-pack-url');
   // ⚠ 「同じ場所」と言わない ── 配布元は**このサイトの直下**であって、
   //    いま開いている頁の隣ではない(2026-08-11 に相対 path で 404 を踏んだ跡)
-  fromUrl.title = 'このサイトに置いてある配布元から取ります';
+  fromUrl.title = 'このサイトに置いてある配布元から取り込みます';
   // ⚠ **input を先に作る**(ボタンが指す先が無い状態を一瞬も作らない)
   const input = document.createElement('input');
   input.type = 'file';
@@ -192,8 +192,8 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
   //    `data-pkc-field` で拾う(`attach-input` / `import-input` と同じ作法)──
   //    action を書くと、中身の空な受け手を 1 つ増やすことになる
   input.setAttribute('data-pkc-field', 'office-pack-input');
-  const fromFile = button('choose-office-pack', 'ファイルから入れる', 'office-pack-file');
-  fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元につながらない環境でも入れられます)';
+  const fromFile = button('choose-office-pack', 'ファイルから取り込む', 'office-pack-file');
+  fromFile.title = '手元の lo-wasm-qt6.zip を選びます(配布元につながらない環境でも取り込めます)';
   const remove = button('remove-office-pack', 'Office の一式を消す', 'office-pack-remove');
   remove.title = 'この端末から Office の一式を消します(ノートや添付は消えません)';
   /**

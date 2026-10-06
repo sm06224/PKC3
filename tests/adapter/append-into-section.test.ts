@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * #395 段①: **追記の入り先を選ぶ**(押した所から disk まで)。
+ * #395 段①: **追記先を選ぶ**(押した所から disk まで)。
  *
  * > user の物語: 長い議事録の「決定事項」の節に **1 行だけ**足したい。
  * > いまは「編集」を押して本文を丸ごと開き、目で節を探すしかない。
@@ -103,7 +103,7 @@ function send(s: ReturnType<typeof setup>, text: string): void {
   s.q('[data-pkc-action="append-entry"]')!.click();
 }
 
-describe('#395 段① 入り先の選択が画面に出る', () => {
+describe('#395 段① 追記先の選択が画面に出る', () => {
   it('🔑 本文の見出しが並ぶ(既定は末尾)', async () => {
     const s = setup();
     await open(s);
@@ -117,7 +117,7 @@ describe('#395 段① 入り先の選択が画面に出る', () => {
   });
 
   /**
-   * 🔴 **入り先は「打つ欄の行」の外に居る**(#496)。
+   * 🔴 **追記先は「打つ欄の行」の外に居る**(#496)。
    *
    * ⚠ 幅と上下は CSS の話なので unit では測れない(happy-dom は全部 0)──
    *   ここで守れるのは**器の組み立て**だけである:`<select>` が
@@ -126,21 +126,21 @@ describe('#395 段① 入り先の選択が画面に出る', () => {
    *   (実測 64px → 765px)。幅と位置そのものは
    *   `tests/smoke/append-ui.smoke.spec.ts` が実ブラウザで見る。
    */
-  it('🔴 入り先は打つ欄の行の外に居る(横 1 列に戻っていない)', async () => {
+  it('🔴 追記先は打つ欄の行の外に居る(横 1 列に戻っていない)', async () => {
     const s = setup();
     await open(s);
     const form = s.q('[data-pkc-field="append-form"]')!;
     const row = s.q('[data-pkc-field="append-row"]')!;
     const target = sel(s);
-    expect(target.parentElement, '入り先が append-form の直下に居ない').toBe(form);
-    expect(row.contains(target), '入り先が打つ欄の行の中に戻っている').toBe(false);
+    expect(target.parentElement, '追記先が append-form の直下に居ない').toBe(form);
+    expect(row.contains(target), '追記先が打つ欄の行の中に戻っている').toBe(false);
     // ⚠ 空振り防止 ── 打つ欄と押す物は**その行の中**に在る(器が空でない)
     expect(row.contains(s.q('[data-pkc-field="append-input"]')!)).toBe(true);
     expect(row.contains(s.q('[data-pkc-action="append-entry"]')!)).toBe(true);
     // 🔑 **上に出す**ので、器の中で打つ欄より前に居る
     expect(
       form.firstElementChild,
-      '入り先が打つ欄より後ろに居る(上に出ない)',
+      '追記先が打つ欄より後ろに居る(上に出ない)',
     ).toBe(target);
   });
 
@@ -171,7 +171,7 @@ describe('#395 段① 入り先の選択が画面に出る', () => {
    *   (CLAUDE.md §2「弱いのではなく走っていない」)。
    * 🔑 だから**見出しが増える追記**で見る ── そこでだけ組み直しが起きる。
    */
-  it('🔴 一覧が組み直されても、選んだ入り先は残る', async () => {
+  it('🔴 一覧が組み直されても、選んだ追記先は残る', async () => {
     const s = setup();
     await open(s);
     const target = [...sel(s).options].find((o) => o.textContent?.trim() === '決定事項')!.value;
@@ -183,7 +183,7 @@ describe('#395 段① 入り先の選択が画面に出る', () => {
       [...sel(s).options].map((o) => o.textContent?.trim()),
       '前提が崩れた(組み直しが起きていない)',
     ).toContain('あとから');
-    expect(sel(s).value, '組み直しで選んだ入り先が飛んだ').toBe(target);
+    expect(sel(s).value, '組み直しで選んだ追記先が飛んだ').toBe(target);
   });
 
   it('🔴 選んだ物は、追記しても飛ばない(続けて同じ節へ足せる)', async () => {
@@ -228,7 +228,7 @@ describe('#395 段① 選んだ節へ入る(disk まで)', () => {
     send(s, 'B を採用する');
     await tick();
     expect(s.disk['n1'], '見出しが無いのに書き込んだ').toBe('# 議事録\n\n出席者は 3 名。\n');
-    expect(s.failures.join(''), '理由が出ていない(無言で失敗した)').toContain('入り先');
+    expect(s.failures.join(''), '理由が出ていない(無言で失敗した)').toContain('追記先');
   });
 });
 

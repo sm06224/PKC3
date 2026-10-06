@@ -75,7 +75,7 @@ export async function readEntryBundleParts(
     ) as Pkc2EntryBundleManifest;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (manifest?.format !== ENTRY_BUNDLE_FORMAT) {
     throw new ZipReadError(
@@ -129,7 +129,7 @@ export async function readEntryBundleParts(
       continue;
     }
     if (assets.has(key)) {
-      throw new ZipReadError(`添付の ID が重複しています: ${key}(この ZIP は読み取れません)`);
+      throw new ZipReadError(`添付の ID が重複しています: ${key}(この zip は読み取れません)`);
     }
     assets.set(key, {
       source: { zip, entry: e, base64: true },

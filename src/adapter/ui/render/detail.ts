@@ -2937,10 +2937,10 @@ export class DetailRenderer {
          */
         if (this.extensionGrants.isGranted(meta.assetKey)) {
           run.title =
-            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます。取り消しはシステムから';
+            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノート一覧を見せます。取り消しはシステムから';
         } else {
           const extRun = launchOf(
-            iconButton('launch-asset-extension', '目次を見せて開く', 'launch-asset-extension'),
+            iconButton('launch-asset-extension', 'ノート一覧を見せて開く', 'launch-asset-extension'),
           );
           extRun.title =
             'ノートの題名・種類・日付の一覧だけを見せて開きます。本文と添付は渡りません';

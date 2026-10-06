@@ -109,7 +109,7 @@ test('🔴 本体タブが旧ビルドでも、2 枚目が起動する (#286 ─
     '2 枚目の起動が落ちている(旧本体の断りが proxy 越しに抜けている)',
   ).toHaveAttribute('data-pkc-boot', 'ready');
   // ⚠ 本体経由で動いていることの確認(空振り防止 ── 単独起動なら意味が無い)
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('本体タブ経由');
+  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('メインのタブ経由');
   // 2 枚とも旧本体の器を見ている(割れていない)
   await expect(pageB.locator('[data-pkc-slot="root"]')).toHaveAttribute(
     'data-pkc-container',

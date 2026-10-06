@@ -97,7 +97,7 @@ export class DuckDbPackInstaller {
   /** 同一オリジンの `opts.base` から入れる。 */
   async install(opts: DuckDbPackInstallArgs): Promise<DuckDbPackInstallResult> {
     if (this.running) {
-      return { ok: false, message: 'すでに設置中です。終わるまでお待ちください。' };
+      return { ok: false, message: 'すでに取り込み中です。終わるまでお待ちください。' };
     }
     this.running = true;
     const progress = (text: string): void => opts.onProgress?.(text);
@@ -122,16 +122,16 @@ export class DuckDbPackInstaller {
         meta,
         // ⚠ **黙って消えうることを黙っていない。** 拒否されたことを伝えないと、
         //    後日消えたときに user は原因を名指しできない
-        message: 'DuckDB 一式を入れました'
+        message: 'DuckDB 一式を取り込みました'
           + (persisted
             ? ''
             : '。ただし、このブラウザから「消さずに残す」許可がもらえなかったため、端末の空き容量が減ると自動で消されることがあります'),
       };
     } catch (e) {
-      return { ok: false, message: toMessage(e, '設置') };
+      return { ok: false, message: toMessage(e, '取り込み') };
     } finally {
       // ⚠ **必ず降ろす**(finally)── 落ちたまま立ちっぱなしだと、以後の操作が
-      //   全部「すでに設置中です」で断られ、リロードするしか無くなる
+      //   全部「すでに取り込み中です」で断られ、リロードするしか無くなる
       this.running = false;
       progress('');
     }
@@ -145,7 +145,7 @@ export class DuckDbPackInstaller {
    */
   async remove(): Promise<DuckDbPackInstallResult> {
     if (this.running) {
-      return { ok: false, message: 'いま DuckDB 一式を入れている最中です。終わるまでお待ちください。' };
+      return { ok: false, message: 'いま DuckDB 一式を取り込んでいる最中です。終わるまでお待ちください。' };
     }
     try {
       await this.deps.store.remove();

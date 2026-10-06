@@ -275,7 +275,7 @@ export async function readInnerBundles(
   for (const e of dir) {
     if (e.isDirectory) continue;
     if (byName.has(e.name)) {
-      throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(この ZIP は読み取れません)`);
+      throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(この zip は読み取れません)`);
     }
     byName.set(e.name, e);
     const n = e.name.normalize('NFC');
@@ -303,7 +303,7 @@ export async function readInnerBundles(
     // PKC2 は preview で**無言 skip**・import で hard fail という非対称を持つ
     // (user は「一覧に出たのに入らない」を経験しうる)── PKC3 は常に断る
     if (filename === '') {
-      throw new ZipReadError(`${where}: manifest に filename がありません(この ZIP は読み取れません)`);
+      throw new ZipReadError(`${where}: 構成定義(manifest)にファイル名(filename)がありません。別の書き出しファイルを選んでください`);
     }
     // PKC2 は同じ filename が 2 回並ぶと**同じ内容を 2 回取り込んで**いた
     if (used.has(filename)) {
@@ -325,10 +325,10 @@ export async function readInnerBundles(
       // ── 原因に辿り着けない。正規化して引き直し、当たったら**言う**
       const hit = byNfc.get(filename.normalize('NFC'));
       if (!hit) {
-        throw new ZipReadError(`manifest にあるファイルが ZIP に入っていません: ${filename}`);
+        throw new ZipReadError(`manifest にあるファイルが zip に入っていません: ${filename}`);
       }
       warnings.push(
-        `${filename}: manifest.json と ZIP でファイル名の文字表記が違います(${hit.name} を使います)`,
+        `${filename}: manifest.json と zip でファイル名の文字表記が違います(${hit.name} を使います)`,
       );
       inner = hit;
     }
@@ -439,7 +439,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     ) as Pkc2ContainerBundleManifest;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   const format = String(manifest?.format);
   if (!isBatchFormat(format)) {
@@ -451,7 +451,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
     );
   }
   if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('manifest に entries の配列がありません(この ZIP は読み取れません)');
+    throw new ZipReadError('構成定義(manifest)にノートの一覧(entries)がありません。別の書き出しファイルを選んでください');
   }
 
   const inner = await readInnerBundles(zip, dir, manifest.entries, (me, where, w) =>
@@ -490,7 +490,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   if (mains.length === 0) {
     throw new ZipReadError(
       failed.length > 0
-        ? `ZIP の中の書き出しファイルを 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
+        ? `zip の中の書き出しファイルを 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
         : '取り込めるノートが 1 件も入っていません(空の書き出しファイル)',
     );
   }

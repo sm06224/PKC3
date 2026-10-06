@@ -69,7 +69,7 @@ describe('DuckDbPackInstaller', () => {
     const r = await installer.install({ base: 'duckdb/', onProgress });
     expect(r.ok).toBe(true);
     expect(r.ok && r.meta?.version).toBe('1.33.1-dev57.0');
-    expect(r.ok && r.message).toContain('入れました');
+    expect(r.ok && r.message).toContain('取り込みました');
   });
 
   it('🔴 書く前に保存の永続化を頼む(順番が逆だと書いた分が対象にならない)', async () => {
@@ -143,7 +143,7 @@ describe('DuckDbPackInstaller', () => {
     expect(installer.isRunning()).toBe(true);
     const second = await installer.install({ base: 'duckdb/', onProgress });
     expect(second.ok).toBe(false);
-    expect(!second.ok && second.message).toContain('すでに設置中');
+    expect(!second.ok && second.message).toContain('すでに取り込み中');
     release();
     expect((await first).ok).toBe(true);
   });

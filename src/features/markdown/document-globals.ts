@@ -115,7 +115,7 @@ export function extractDocumentGlobals(body: string): DocumentGlobals {
       result.warnings.push({
         kind: 'invalid_value',
         key: 'align',
-        detail: `'${alignRaw}' は align として無効。'left' / 'right' / 'center' / 'top' / 'bottom' のみ。`,
+        detail: `'${alignRaw}' は配置指定(align)として無効です。'left' / 'right' / 'center' / 'top' / 'bottom' のみ。`,
       });
     } else {
       const align = alignRaw as Align;

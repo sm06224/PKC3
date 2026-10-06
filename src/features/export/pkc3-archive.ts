@@ -346,7 +346,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
 
   const only = (name: string): import('../import/zip-reader').ZipEntry => {
     const hits = dir.filter((e) => e.name === name);
-    if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この ZIP は読み取れません)`);
+    if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この zip は読み取れません)`);
     if (hits.length > 1) throw new ZipReadError(`${name} が ${hits.length} 個あります`);
     return hits[0]!;
   };
@@ -356,7 +356,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     manifest = JSON.parse(await readZipText(zip, only(MANIFEST))) as Pkc3Archive['manifest'];
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   if (manifest?.format !== ARCHIVE_FORMAT) {
     throw new ZipReadError(
@@ -384,10 +384,10 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     c = JSON.parse(await readZipText(zip, only(CONTAINER))) as typeof c;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${CONTAINER} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`ノートの一覧データ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   if (!Array.isArray(c.entries)) {
-    throw new ZipReadError(`${CONTAINER} の形が想定と違います(entries)`);
+    throw new ZipReadError(`ノートの一覧データ(${CONTAINER})にノートの一覧(entries)がありません。別のバックアップファイルを選んでください`);
   }
 
   const assetSources = new Map<string, { zip: Blob; entry: import('../import/zip-reader').ZipEntry }>();

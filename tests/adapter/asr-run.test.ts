@@ -291,7 +291,7 @@ describe('AsrRunner', () => {
   it('⑤ 実行の部品が欠けていれば、取り込み直しを促して断る(何も import しない)', async () => {
     const { runner, seen } = setup();
     const partial = job({ files: job().files.filter(([p]) => p !== ASR_RUNTIME_WASM) });
-    await expect(runner.run(partial)).rejects.toThrow(/入れ直してください/);
+    await expect(runner.run(partial)).rejects.toThrow(/取り込み直してください/);
     expect(seen.importedUrls).toEqual([]);
     expect(seen.pipelineCalls).toEqual([]);
   });

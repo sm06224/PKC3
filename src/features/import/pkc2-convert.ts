@@ -300,7 +300,7 @@ export function convertPkc2Container(
             // light export(assets 空)や subset export の閉包漏れ。旧 key のまま
             // 入るので開くまで気づけない ── 取込の時点で件数を言う(review M-7)
             warnings.push(
-              `添付の中身がこの export に含まれていません: ${u.title || u.lid}`,
+              `添付の中身がこの書き出しファイルに含まれていません: ${u.title || u.lid}`,
             );
           }
         }
