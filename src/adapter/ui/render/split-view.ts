@@ -420,7 +420,7 @@ export class SplitView {
     open.setAttribute('data-pkc-action', 'select-entry');
     open.setAttribute('data-pkc-entry', lid);
     open.textContent = '← 左で開く';
-    open.title = 'このノートを主の枠(左)で開く';
+    open.title = 'このノートを本文(左)で開く';
     bar.append(open, off);
     host.append(bar);
     this.row.append(host);

@@ -298,7 +298,7 @@ describe('readContainerBundle — texts', () => {
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([]);
     // 先頭は**実際に読めない**(この対照が無いと壊せていない fixture を見逃す)
-    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
+    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/zip の中身を最後まで読めませんでした/);
     // 控えに健全な複製が残っており、そちらは読める
     const alts = got.assetAlternates.get('k')!;
     expect(alts).toHaveLength(2);
@@ -474,7 +474,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       },
       [],
     );
-    await expect(readContainerBundle(zip)).rejects.toThrow(/ZIP に入っていません/);
+    await expect(readContainerBundle(zip)).rejects.toThrow(/zip に入っていません/);
   });
 
   it('filename が無い entry は断る(PKC2 は preview で無言 skip していた)', async () => {
@@ -482,7 +482,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       { format: 'pkc2-texts-container-bundle', version: 1, entries: [{ lid: 'n1' }] },
       [],
     );
-    await expect(readContainerBundle(zip)).rejects.toThrow(/filename がありません/);
+    await expect(readContainerBundle(zip)).rejects.toThrow(/ファイル名\(filename\)がありません/);
   });
 
   it('manifest が同じファイルを 2 回並べたら断る(PKC2 は 2 回取り込んでいた)', async () => {
@@ -550,7 +550,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       ],
     );
     // 別物を掴むくらいなら「無い」と言う
-    await expect(readContainerBundle(zip)).rejects.toThrow(/ZIP に入っていません/);
+    await expect(readContainerBundle(zip)).rejects.toThrow(/zip に入っていません/);
   });
 
   it('manifest に無いファイルは warning(PKC2 は無言で捨てていた)', async () => {
@@ -693,7 +693,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     const a = await outer({ format: 'pkc2-package', version: 1, entries: [] }, []);
     await expect(readContainerBundle(a)).rejects.toThrow(/batch 形式のバックアップ/);
     const b = await outer({ format: 'pkc2-texts-container-bundle', version: 1 }, []);
-    await expect(readContainerBundle(b)).rejects.toThrow(/entries の配列/);
+    await expect(readContainerBundle(b)).rejects.toThrow(/ノートの一覧\(entries\)/);
     const c = await outer(
       { format: 'pkc2-texts-container-bundle', version: 2, entries: [] },
       [],

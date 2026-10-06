@@ -152,7 +152,7 @@ describe('要求の往復', () => {
       if (!follower) throw new Error('handshake failed');
       host.close(); // holder が黙る
       const req = follower.request({ op: 'counts', cid: 'c1' });
-      const guard = expect(req).rejects.toThrow('本体タブと通信できません');
+      const guard = expect(req).rejects.toThrow('メインのタブと通信できません');
       await vi.advanceTimersByTimeAsync(11_000);
       await guard;
     } finally {
@@ -397,10 +397,10 @@ describe('レビュー指摘の回帰(H-1 / H-2 / M-7)', () => {
     });
     const inFlight = follower.request({ op: 'counts', cid: 'c1' }); // promoting バッファへ
     await expect(promoted).rejects.toThrow('SAH が返ってこない');
-    await expect(inFlight).rejects.toThrow('本体への切り替えに失敗しました');
+    await expect(inFlight).rejects.toThrow('メインのタブへの切り替えに失敗しました');
     // 以後の要求も**待たずに**断られる(積まれない)
     await expect(follower.request({ op: 'counts', cid: 'c1' })).rejects.toThrow(
-      '本体への切り替えに失敗しています',
+      'メインのタブへの切り替えに失敗しています',
     );
     expect(await follower.acquireEdit('c1', 'n1')).toBe('unreachable');
   });

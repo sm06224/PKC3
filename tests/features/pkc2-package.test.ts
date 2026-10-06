@@ -105,7 +105,7 @@ describe('readPkc2Package', () => {
     );
     await expect(
       readPkc2Package(await buildZip([{ name: 'manifest.json', bytes: bytesOf('{ 壊れた') }])),
-    ).rejects.toThrow(/解釈できません/);
+    ).rejects.toThrow(/読み取れません/);
     await expect(
       readPkc2Package(await pkg({ manifest: manifestOf({ format: 'pkc2-text-bundle' }) })),
     ).rejects.toThrow(/pkc2-package だけを扱います/);

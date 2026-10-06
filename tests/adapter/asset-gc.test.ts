@@ -244,7 +244,7 @@ describe('整理はタブ間の編集も見る(#253)', () => {
       ports,
       isReady: async () => ({
         ok: false,
-        reason: '本体タブと通信できないため、他のタブが編集中か確かめられません',
+        reason: 'メインのタブと通信できないため、他のタブが編集中か確かめられません',
       }),
       ask: () => Promise.resolve(true),
       tell: async (m) => void alerts.push(m),

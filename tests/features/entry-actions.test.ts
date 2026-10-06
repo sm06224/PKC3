@@ -393,7 +393,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
-      ['export-entry-html', '5a2b1df9'],
+      ['export-entry-html', '9250f3ab'],
       ['export-folder', '1e3dc65f'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '5424c220'],
@@ -402,7 +402,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['copy-entry-ref', '2614a326'],
       ['copy-plain-markdown', '73e9b322'],
       // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
-      ['pin-split', '168e4ec2'],
+      ['pin-split', '9d9b023a'],
       // 🔴 保存したスタックを載せる(#633 段③)
       ['stack-load', 'c8508a19'],
       // 🔴 「このノート」のまとまりの先頭「編集」(#1038 台帳③ C1、2026-09-25)
@@ -424,7 +424,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['task-run-done', '926e25f8'],
       // 🔴 **左の列の行からの整理 3 つ**(#215、2026-09-05)
       ['rename-entry-begin', 'c951ee45'],
-      ['move-to-folder', '4f9ac271'],
+      ['move-to-folder', '26f9aeac'],
       ['create-in-folder', '80e07ad8'],
     ];
     const digest = (h: string): string =>

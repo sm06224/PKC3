@@ -54,7 +54,7 @@ describe('フラグの面', () => {
   it('⚠ 予算の残りが出る(15 枠のうち何個使ったか)', () => {
     new FlagsRenderer(region, new FlagStore('')).render();
     const sum = region.querySelector('[data-pkc-field="flags-summary"]')?.textContent ?? '';
-    expect(sum, '予算が出ていない').toContain(`/ ${FLAG_BUDGET} 枠`);
+    expect(sum, '予算が出ていない').toContain(`/ ${FLAG_BUDGET} 件`);
   });
 
   it('切り替えると保存され、画面にも映る', () => {

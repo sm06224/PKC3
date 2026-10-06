@@ -217,7 +217,7 @@ describe('起動の検め ── 駆動部(#1007 段①)', () => {
     }) as typeof orig;
     const d = deps(w, { request: w.request });
     expect(await runStartupIntegrity(d.deps)).toBe('broken');
-    expect(d.broken[0], '目次の名指しが消えて「どこかまでは分かりません」に落ちた').toContain('目次だけ');
+    expect(d.broken[0], '目次の名指しが消えて「どこかまでは分かりません」に落ちた').toContain('索引だけ');
   });
 
   it('🔴 follower(別タブ)は検めない', async () => {
@@ -293,7 +293,7 @@ describe('main.ts の配線(原文 pin ── あの file はどの test から�
     // ⚠ 昇格の印(`promotedHost = host` … `writerHolder = true`)の**後**、本体になった
     //    知らせの**前**に呼ぶ ── 前だと follower として即終わる
     const from = src.indexOf('promotedHost = host;');
-    const to = src.indexOf("showStatus('このタブが本体になりました')");
+    const to = src.indexOf("showStatus('このタブがメインのタブになりました')");
     expect(from, '昇格の経路が読めない(空振り)').toBeGreaterThanOrEqual(0);
     expect(to, '昇格の知らせが読めない(空振り)').toBeGreaterThan(from);
     const promote = src.slice(from, to);

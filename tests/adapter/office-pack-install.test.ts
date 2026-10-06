@@ -159,7 +159,7 @@ describe('OfficePackInstaller', () => {
     expect(r.ok).toBe(true);
     expect(r.ok && r.meta?.version).toBe('lo-wasm-dev');
     expect(r.ok && r.meta?.source).toBe('url');
-    expect(r.ok && r.message).toContain('入れました');
+    expect(r.ok && r.message).toContain('取り込みました');
   });
 
   /**
@@ -228,7 +228,7 @@ describe('OfficePackInstaller', () => {
     expect(installer.isRunning()).toBe(true);
     const second = await installer.installFromUrl();
     expect(second.ok).toBe(false);
-    expect(!second.ok && second.message).toContain('すでに設置中');
+    expect(!second.ok && second.message).toContain('すでに取り込み中');
     release();
     expect((await first).ok).toBe(true);
   });

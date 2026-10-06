@@ -219,7 +219,7 @@ describe('AsrPackStore', () => {
     await store.writeRuntime(r, expectOf(r), 'v1');
     await store.writePart('light', l, expectOf(l), 'v1');
     fake.files.data.set('models/openai/whisper-base/onnx/m.onnx', blob(7));
-    await expect(store.readFilesFor('light')).rejects.toThrow(/入れ直してください/);
+    await expect(store.readFilesFor('light')).rejects.toThrow(/取り込み直してください/);
     // ⚠ files が消えている場合も同じ(null にしない)
     fake.files.data.delete('models/openai/whisper-base/onnx/m.onnx');
     await expect(store.readFilesFor('light')).rejects.toBeInstanceOf(AsrPackError);

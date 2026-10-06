@@ -120,8 +120,8 @@ describe('誤りの返し方', () => {
   });
 
   it('存在しない lid は誤り(適用の途中で初めて落とさない)', () => {
-    expect(parsePlan('mv zzz box', W).errors[0]!.message).toContain('というノートはありません');
-    expect(parsePlan('mv a zzz', W).errors[0]!.message).toContain('というノートはありません');
+    expect(parsePlan('mv zzz box', W).errors[0]!.message).toContain('ID zzz のノートはありません');
+    expect(parsePlan('mv a zzz', W).errors[0]!.message).toContain('ID zzz のノートはありません');
   });
 
   it('🔴 知らない命令は**黙って飛ばさない**', () => {

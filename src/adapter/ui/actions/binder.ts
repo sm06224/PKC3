@@ -2236,7 +2236,7 @@ function refuseWithoutNote(action: string, dispatcher: Dispatcher): boolean {
   //   4 つが同じ字だと、user は自分がどれを押して断られたのか分からない
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: `「${label}」はノートを開いてから押してください(入れ先のノートが決まりません)`,
+    error: `「${label}」はノートを開いてから押してください(追記先のノートが決まりません)`,
   });
   return true;
 }
@@ -2511,12 +2511,12 @@ function bodySourceLineAt(
  *
  * ## 🔴 印(slug)では引かない ── **綴りが一致しない**
  *
- * ⚠ 1 稿目は「入り先の印は、描画側の見出しの `id` と同じ綴り」と思って突き合わせていた。
+ * ⚠ 1 稿目は「追記先の印は、描画側の見出しの `id` と同じ綴り」と思って突き合わせていた。
  * **偽である**(着地前レビュー 🔴1。実測で確かめた)── 2 つは `makeSlugCounter` を
  * 共有しているだけで、**読む文字列が違う**:
- * 入り先の一覧は**原文の行**を正規表現で読み、描画側は**前処理を通った token** を読む。
+ * 追記先の一覧は**原文の行**を正規表現で読み、描画側は**前処理を通った token** を読む。
  * ⚠ 実測:`決定事項`(setext の h1)の下に `## 決定事項` が在る本文で、
- * 入り先の印は `決定事項` なのに描画側の `id` は `決定事項-1` ── **別の章が開く**。
+ * 追記先の印は `決定事項` なのに描画側の `id` は `決定事項-1` ── **別の章が開く**。
  *
  * 🔑 だから**行で引く**。`resolveAppendAt` が「入る行」を返すので、
  * その**手前で終わっている塊**を器の直下から探し、それを覆う畳みを開く。
@@ -2531,12 +2531,12 @@ function bodySourceLineAt(
  * 塊さえ正しく引ければ 1 本で解ける。
  */
 /**
- * 🔴 **入り先の直前で終わっている塊を引く**(#395 段① / #782 B)。
+ * 🔴 **追記先の直前で終わっている塊を引く**(#395 段① / #782 B)。
  *
  * 🔑 **同じ引き方を 2 つの用途が借りる**(CLAUDE.md §7)──
  *   ① 押す**前**:そこを覆う畳みを開いておく(`revealAppendTarget`)
  *   ② 着いた**後**:**足した字がその塊である**ので、そこへ送る(`jumpToAppended`)。
- *   ⚠ ②が成り立つのは、着いた後に引き直すと**入り先が足した字の後ろへ動く**から
+ *   ⚠ ②が成り立つのは、着いた後に引き直すと**追記先が足した字の後ろへ動く**から
  *   ── その手前で終わっている塊が、いま足したものである。
  *
  * @returns 器と塊。⚠ 引けなければ `null`(呼び手は**何もしない** ── 当てずっぽうで
@@ -2660,7 +2660,7 @@ function jumpWhenAppended(
       await waitPainted(detail, lid);
       /**
        * 🔴 **送る直前にもう一度見る** ── 待っている間に別のノートへ移っていたら、
-       *   引く本文も器も**そのノートのもの**になる。⚠ 入り先が「末尾」だと
+       *   引く本文も器も**そのノートのもの**になる。⚠ 追記先が「末尾」だと
        *   `appendTargetBlock` は必ず塊を引き当てるので、**開いたばかりのノートを
        *   いきなり一番下へ送る**(いちばん気づけない形)。
        */
@@ -2998,7 +2998,7 @@ function startSectionEditAt(
        *   保存の合間に上の方へ書いていれば、増減はこちらの章の分だけでは済まない)。
        * 🔑 だから**行を計算しない**。押した見出しを「字 + 同じ字の中で何番目か」
        *   (`headingRefAt`)で覚え、保存が終わった**後**の本文からもう一度
-       *   引き直す(`resolveHeadingRef`)── 追記の入り先と同じ「そのつど本文から
+       *   引き直す(`resolveHeadingRef`)── 追記先と同じ「そのつど本文から
        *   解く」作法(#395 段①)。⚠ `withSectionDraftLeave` は「保存を撃つ直前」
        *   (system 側で閉じられていないかを確かめた**後**)にこれを呼ぶ ── だから
        *   `dispatcher.getState().openBody?.body` は「これから撃つ保存の土台」と一致する。
@@ -3129,7 +3129,7 @@ const MENU_LINE_ATTR = 'data-pkc-menu-line';
  * ⚠ メニューが閉じるのは **押した / スクロールした / `Escape`** の 3 つだけなので、
  *   出したまま本文が別のノートへ替わりうる(開いた直後は焦点がメニューの先頭ボタンに
  *   移るので、鍵で移れる経路が 1 つでもあれば到達する)。
- * ⚠ そのとき運んだ行は**別のノートに効く** ── 畳む / 編集に入る / 追記の入り先、
+ * ⚠ そのとき運んだ行は**別のノートに効く** ── 畳む / 編集に入る / 追記先、
  *   どれも「押した物と効く先が食い違う」いちばん静かな形になる。
  * 🔑 **到達できるかを数え上げるより、行と一緒に身元を運ぶ** ── 受け手は
  *   自分の身元を確かめてから動く(状態の購読を増やさないので、束ねる側の台も壊さない)。
@@ -3548,15 +3548,15 @@ function headingForAction(root: HTMLElement, target: Element): Element | null {
 }
 
 /**
- * 🔴 **押した所の節を、追記の入り先にする**(#495。user 裁定 2026-08-27)。
+ * 🔴 **押した所の節を、追記先にする**(#495。user 裁定 2026-08-27)。
  *
  * > 「センターペインの**追記位置指定は Alt+クリック**にしましょう」
  *
- * 🔑 **入り先の正本は `<select>` そのもの**(`append-entry` がここから読む)──
+ * 🔑 **追記先の正本は `<select>` そのもの**(`append-entry` がここから読む)──
  *   state に 2 本目の持ち場を作らない(§7)。押した結果は**その `<select>` が
  *   変わって見える**ことで user に届く。
  * ⚠ **黙って何も起きないを作らない** ── 選べないときは理由を出す。
- * ⚠ **上に見出しが無いときは入り先を変えない** ── 「末尾」へ落とすと、
+ * ⚠ **上に見出しが無いときは追記先を変えない** ── 「末尾」へ落とすと、
  *   文書の上のほうを押したのに**いちばん下へ入る**(いちばん静かな取り違え)。
  */
 function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: number): void {
@@ -3567,11 +3567,11 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    * ⚠ `<select>` は `AppendBoxRenderer` が**器を 1 度だけ組む**ので、追記できない
    *   ノート(添付・フォルダ)でも `querySelector` は**畳まれた物を掴む** ──
    *   しかも中身は**さっきまで見ていた別のノートの見出し**のままなので、
-   *   1 稿目は「『はじめに』は追記の入り先に選べません」という
+   *   1 稿目は「『はじめに』は追記先に選べません」という
    *   **追記欄が 1 つも見えていない画面で、追記についての断り文**を出していた。
    * 🔑 判定は `appendModeOf` **1 か所**を引く(2 本目の規則を書かない。§7)。
    * ⚠ 追記欄そのものが無い面(`hidden`)は**黙って降りてよい** ── 読むだけの面なので、
-   *   押した人は「追記の入り先を選んだ」つもりが無い。
+   *   押した人は「追記先を選んだ」つもりが無い。
    * 🔴 **書込中は黙らない**(#655 ②)── 追記欄は出ている(理由と出口の帯)のに
    *   押しても何も起きないのは dead click である。理由を 1 行出す。
    * ⚠ **編集中の枝は、いまの 2 つの入口からは届かない**(実装を読んで確かめた):
@@ -3589,8 +3589,8 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
       type: 'OP_FAILED',
       error:
         mode.kind === 'editing'
-          ? '編集中は追記欄を使えません(「編集を保存する」か「編集をやめる」を押すと入り先を選べます)'
-          : '追記を書き込んでいる間は、入り先を変えられません',
+          ? '編集中は追記欄を使えません(「編集を保存する」か「編集をやめる」を押すと追記先を選べます)'
+          : '追記を書き込んでいる間は、追記先を変えられません',
     });
     return;
   }
@@ -3607,7 +3607,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
   if (sel === null || body === null) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'このノートには追記の欄が無いので、入り先は選べません',
+      error: 'このノートには追記の欄が無いので、追記先は選べません',
     });
     return;
   }
@@ -3635,8 +3635,8 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
    * ⚠ 直す前は下の 2 つの断り(上に見出しが無い / 一覧に無い見出し)が**開く前に
    *   返っていた**ので、マニュアルの「畳んでいても開いて、打つ欄にカーソルが入ります」が
    *   その場面で嘘になっていた ── 見出しが 1 つも無いノートでは**必ず**この形になる。
-   * 🔑 押した人が欲しいのは「打つ所」である。入り先を変えられなくても、欄を開いて
-   *   カーソルを入れ、**いまの入り先がどこか**を添える(「末尾です」と言い切らない ──
+   * 🔑 押した人が欲しいのは「打つ所」である。追記先を変えられなくても、欄を開いて
+   *   カーソルを入れ、**いまの追記先がどこか**を添える(「末尾です」と言い切らない ──
    *   直前に別の節を選んでいれば、そのままである)。
    */
   const opened = revealAppendPane(root);
@@ -3644,7 +3644,7 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
   if (sec === null) {
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `ここより上に見出しが無いので、入り先は変えていません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+      message: `ここより上に見出しが無いので、追記先は変えていません(いまの追記先は${targetNow(sel)}です)${openedNote(opened)}`,
     });
     return;
   }
@@ -3652,19 +3652,19 @@ function pickAppendTarget(dispatcher: Dispatcher, root: HTMLElement, line: numbe
   if (!Array.from(sel.options).some((o) => o.value === sec.slug)) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `「${sec.text}」は追記の入り先に選べません(いまの入り先は${targetNow(sel)}です)${openedNote(opened)}`,
+      error: `「${sec.text}」は追記先に選べません(いまの追記先は${targetNow(sel)}です)${openedNote(opened)}`,
     });
     return;
   }
   sel.value = sec.slug;
   dispatcher.dispatch({
     type: 'OP_NOTICE',
-    message: `追記の入り先を「${sec.text}」にしました${openedNote(opened)}`,
+    message: `追記先を「${sec.text}」にしました${openedNote(opened)}`,
   });
 }
 
 /**
- * いま選ばれている入り先を、断り文に添える字で(#655 ②)。
+ * いま選ばれている追記先を、断り文に添える字で(#655 ②)。
  * ⚠ 選択肢の字は深さを**字下げ**(全角空白)で見せている(`append-box.ts`)── 剥いで出す。
  */
 function targetNow(sel: HTMLSelectElement): string {
@@ -5822,7 +5822,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * 🔑 **入れる先は本文ではなく追記の欄**である。⚠ 本文へ直に入れると
    *   「入る前に見る」場所がどこにも無い ── 追記の欄は**既に在る下見**で、
-   *   そこで直せるし、入り先(末尾 / 章)も既に選べる(新しい入れ先を作らない)。
+   *   そこで直せるし、追記先(末尾 / 章)も既に選べる(新しい入れ先を作らない)。
    * ⚠ 欄が畳んであっても**開いてから**入れる ── 入れた字が画面のどこにも
    *   無い、という形にしない(#655 ② と同じ作法)。
    * ⚠ 既に打ちかけの字が在れば**空行 1 つで後ろに継ぐ** ── 消さない。
@@ -6105,7 +6105,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       lid,
       text: line,
       heading: null,
-      // ⚠ 末尾へ足す(入り先の選択は本文の面の話 ── ここでは選ばせない)
+      // ⚠ 末尾へ足す(追記先の選択は本文の面の話 ── ここでは選ばせない)
       target: null,
     });
     if (textEl && dispatcher.getState().writeLock !== lockBefore) textEl.value = '';
@@ -7202,7 +7202,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
     // reducer =「ロックも取らずに断る」、`appendBlock` =「本文を変えない」
     /**
-     * 🔴 **入り先**(#395 段①)。空 = 末尾(これまでと同じ)。
+     * 🔴 **追記先**(#395 段①)。空 = 末尾(これまでと同じ)。
      * ⚠ ここでは**印をそのまま渡す** ── 行番号に直さない。effect は disk から
      *   読み直すので、行番号は読み直した先で別の場所を指す。
      */
@@ -8315,7 +8315,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     startEditAt(dispatcher, services, line);
   },
   /**
-   * 🔴 **その見出しを追記の入り先にする**(#426 段②)。
+   * 🔴 **その見出しを追記先にする**(#426 段②)。
    *
    * ⚠ 断り文まで含めて `pickAppendTarget` **1 本**に任せる ── ここで
    * 追記できるかを別に判定すると、近道(`Alt` + クリック)と食い違う日が来る。
@@ -9183,7 +9183,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         sum.textContent = `${integritySummary(report)}(${elapsedText(res.elapsedMs)} かかりました)`;
         // ⚠ 生の行も出す ── こちらの言い換えが外れていても、user が読める材料を残す
         const lines = [...report.brokenTables.map((t) => `本文の表: ${t}`),
-          ...report.brokenIndexes.map((i) => `目次: ${i}`),
+          ...report.brokenIndexes.map((i) => `索引: ${i}`),
           ...report.unresolved];
         list.textContent = '';
         for (const l of lines.slice(0, 60)) {
@@ -11806,7 +11806,7 @@ export function bindActions(
     /**
      * ⚠ 右クリックの「ここに追記する」(`append-at-heading`)は**欄を使う操作**である
      *   (#724 ①)。メニューの項目は root 直下に居るので `refoldAppendAfterAction` の
-     *   「欄の外の 1 操作」に数えられ、入り先を選び直した**その瞬間に欄が消えて**いた。
+     *   「欄の外の 1 操作」に数えられ、追記先を選び直した**その瞬間に欄が消えて**いた。
      */
     if (peekedBefore && action !== 'append-at-heading') refoldAppendAfterAction(root, el);
     if (DUAL_REBUILDS_CLICKED.has(action)) {
@@ -11898,7 +11898,7 @@ export function bindActions(
      */
     const me2 = ev as MouseEvent;
     /**
-     * 🔴 **Ctrl(⌘)は「その地点から編集」/ Alt は「追記の入り先」**(#495。
+     * 🔴 **Ctrl(⌘)は「その地点から編集」/ Alt は「追記先」**(#495。
      * user 裁定 2026-08-27)。
      *
      * > 「見出しを押したら編集とかは、**Ctrl+クリックで、その地点から編集**にすれば
@@ -14503,8 +14503,8 @@ export function bindActions(
        *   引用の中の見出しでも `Ctrl`+クリックは編集に入れるので、メニューだけ
        *   出さないのは「近道では入れるのにメニューからは入れない」を自分で作る。
        * ⚠ 追記は 2 つの条件が要る:①`text` / `textlog` だけ(`appendModeOf`)
-       *   ②入り先の一覧が **`#`〜`###` しか数えない**(`append-target.ts`)ので、
-       *   `####` 以下で出すと**押した見出しではなく上の `###`** が入り先になる。
+       *   ②追記先の一覧が **`#`〜`###` しか数えない**(`append-target.ts`)ので、
+       *   `####` 以下で出すと**押した見出しではなく上の `###`** が追記先になる。
        */
       const level = heading === null ? 0 : headingLevel(heading);
       /**

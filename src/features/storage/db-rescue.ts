@@ -182,7 +182,7 @@ export function integritySummary(r: IntegrityReport): string {
   const i = r.brokenIndexes.length;
   if (t === 0 && i > 0) {
     return (
-      `読めなかったのは目次だけです(${i} 件)。中身そのものは無事な可能性が高いので、` +
+      `読めなかったのは索引だけです(${i} 件)。中身そのものは無事な可能性が高いので、` +
       `左下の「${BACKUP_LABEL}」で全部取り出せることがあります。` +
       `そのまま直すなら「${CONTAINER_REBUILD_LABEL}」を押してください。`
     );

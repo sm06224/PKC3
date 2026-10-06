@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { clickReal, collectPageErrors, createEntry, gotoApp, openTile } from './helpers';
 
 /**
- * 🔴 **アプリの窓では、常設の「本体タブ経由です」を出さない**(#300 段④、2026-08-22。
+ * 🔴 **アプリの窓では、常設の「メインのタブ経由です」を出さない**(#300 段④、2026-08-22。
  * 動線レビュー §10)。
  *
  * ## なぜ消すのか ── 「情報を減らしたい」ではない
@@ -23,7 +23,7 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, openTile } from './
  * **ふつうの 2 枚目のタブでは出る**ことを同じ spec で見る ──
  * 消したのは「アプリの窓のときだけ」であって、機能ごとではない。
  */
-const BADGE = '複数タブ: このタブの保存は本体タブ経由です';
+const BADGE = '複数タブ: このタブの保存はメインのタブ経由です';
 const STATUS = '[data-pkc-region="status"]';
 
 test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚目は出す (#300 段④)', async ({

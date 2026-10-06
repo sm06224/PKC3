@@ -174,7 +174,7 @@ export class AsrRunner {
     const loader = this.blobs.get(ASR_RUNTIME_WASM_LOADER);
     const wasm = this.blobs.get(ASR_RUNTIME_WASM);
     if (js === undefined || loader === undefined || wasm === undefined) {
-      throw new Error('音声認識の実行に必要なファイルが揃っていません(入れ直してください)');
+      throw new Error('音声認識の実行に必要なファイルが揃っていません(取り込み直してください)');
     }
     const rt = await this.deps.importModule(this.deps.createObjectURL(typed(js, 'text/javascript')));
     const env = rt.env;

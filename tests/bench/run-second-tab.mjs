@@ -83,7 +83,7 @@ async function main() {
    * #177(2026-08-15)で **2 枚目も普通に使える**ようになったので、その前提は
    * もう成立しない ── 待機を待って **30 秒で落ちていた**。
    * ⚠ 「観測点が死んだ」だけでなく「**主張が死んだ**」型である(CLAUDE.md §1)。
-   * 🔑 いまの前提は「**フォロワーとして boot する**」= 保存は本体タブ経由になる。
+   * 🔑 いまの前提は「**フォロワーとして boot する**」= 保存はメインのタブ経由になる。
    *   その証拠(帯の文言)を先に採る ── これが崩れると下の測定は全部無意味である。
    */
   const b = await ctx.newPage();
@@ -92,15 +92,15 @@ async function main() {
   await b.waitForSelector('[data-pkc-slot="root"][data-pkc-boot="ready"]', { timeout: 60000 });
   /**
    * 🔴 **帯は「状態の行」だけで見る**(2026-08-17。初稿は root 全体を見ていた)。
-   * ⚠ root で探すと、**お知らせのカード**(2026-08-15 の「保存は本体タブ経由です
+   * ⚠ root で探すと、**お知らせのカード**(2026-08-15 の「保存はメインのタブ経由です
    * と画面下に出ます」)に満たされて**常に真**になる ── 昇格して帯が消えても
    * 「消えていない」と読む。実際に 1 回転それで誤った(CLAUDE.md §1)。
    */
   const STATUS = '[data-pkc-region="status"]';
   const badgeOf = async (page) =>
-    ((await page.locator(STATUS).textContent()) ?? '').includes('保存は本体タブ経由です');
+    ((await page.locator(STATUS).textContent()) ?? '').includes('保存はメインのタブ経由です');
   await b.waitForFunction(
-    (sel) => (document.querySelector(sel)?.textContent ?? '').includes('保存は本体タブ経由です'),
+    (sel) => (document.querySelector(sel)?.textContent ?? '').includes('保存はメインのタブ経由です'),
     STATUS,
     { timeout: 30000 },
   );
@@ -188,7 +188,7 @@ async function main() {
         },
         promotion: {
           result: promoted,
-          // 🔴 昇格したら「本体タブ経由」の帯は消えていること(嘘を残さない)
+          // 🔴 昇格したら「メインのタブ経由」の帯は消えていること(嘘を残さない)
           badgeCleared: badgeAfterPromotion === false,
           notesShown: promotedNotes,
           expectedNotes: NOTES,

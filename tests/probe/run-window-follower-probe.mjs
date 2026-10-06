@@ -64,7 +64,7 @@ const args = Object.fromEntries(
 const PORT = Number(args.port ?? 45743);
 const BOOTED = '[data-pkc-slot="root"][data-pkc-boot="ready"]';
 const STATUS = '[data-pkc-region="status"]';
-const FOLLOWER_BADGE = '保存は本体タブ経由です';
+const FOLLOWER_BADGE = '保存はメインのタブ経由です';
 /**
  * 🔴 **ノートを数える面は「フォルダの表」である**(2026-08-22 に実測して直した)。
  *

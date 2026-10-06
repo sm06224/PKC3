@@ -85,7 +85,7 @@ describe('composeStatusLine ── main.ts の paint() から取り出した組�
 describe('paintStatusText ── 状態の 1 語を別の器に入れる', () => {
   it('🔴 editing: 先頭の器に「編集中」、行の字は composeStatusLine と同じ', () => {
     const el = document.createElement('span');
-    const parts = partsFor('editing', { sync: '複数タブ: このタブの保存は本体タブ経由です' });
+    const parts = partsFor('editing', { sync: '複数タブ: このタブの保存はメインのタブ経由です' });
     const text = paintStatusText(el, parts);
     const state = el.querySelector('[data-pkc-field="status-state"]');
     expect(state?.textContent, '状態語が器に入っていない').toBe(EDITING_STATE_WORD);

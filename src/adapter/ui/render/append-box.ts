@@ -66,13 +66,13 @@ export class AppendBoxRenderer {
   private readonly region: HTMLElement;
   private readonly form: HTMLElement;
   private readonly input: HTMLTextAreaElement;
-  /** 入り先の選択(#395 段①)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
+  /** 追記先の選択(#395 段①)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private readonly target: HTMLSelectElement;
   /** 直前の追記を外す(#395 段①)。⚠ 追記が通ったときだけ出す。 */
   private readonly undo: HTMLButtonElement;
-  /** 打つ欄と押す物の行(#496)。⚠ 入り先の `<select>` は**この上**に出る。 */
+  /** 打つ欄と押す物の行(#496)。⚠ 追記先の `<select>` は**この上**に出る。 */
   private readonly row: HTMLElement;
-  /** いま並べている入り先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
+  /** いま並べている追記先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
   private targetSig: string | null = null;
   private readonly lockBar: HTMLElement;
   private readonly lockText: HTMLElement;
@@ -108,7 +108,7 @@ export class AppendBoxRenderer {
       ? '追記する内容'
       : hintTitle('追記する内容', 'append-send');
     /**
-     * 🔴 **入り先を選ぶ**(#395 段①)。
+     * 🔴 **追記先を選ぶ**(#395 段①)。
      *
      * > user の物語: 長い議事録の「決定事項」の節に 1 行だけ足したい。
      *
@@ -118,7 +118,7 @@ export class AppendBoxRenderer {
      */
     this.target = document.createElement('select');
     this.target.setAttribute('data-pkc-field', 'append-target');
-    this.target.setAttribute('aria-label', '追記の入り先');
+    this.target.setAttribute('aria-label', '追記先');
     this.target.title = '追記を入れる場所です。既定は本文の末尾で、見出しを選ぶとその節の終わりに入ります';
     /**
      * 🔴 **足したものを、本文を開かずに外せる**(#395 段①。user 指示 2026-08-23
@@ -136,7 +136,7 @@ export class AppendBoxRenderer {
      */
     this.undo.title = '直前に足した内容(追記・ドロップして入れた行)を、本文から取り除きます';
     /**
-     * 🔴 **入り先は「打つ欄の上の行」に置く**(#496。user 指示 2026-08-27
+     * 🔴 **追記先は「打つ欄の上の行」に置く**(#496。user 指示 2026-08-27
      * 「**見出し選択リストはテキストボックスの上に置いて欲しい**」)。
      *
      * ⚠ 直す前は 4 つとも**横 1 列**で、`<select>` が先頭に居た ── `<select>` は
@@ -222,7 +222,7 @@ export class AppendBoxRenderer {
       this.persistedAtWrite = state.openBody?.persisted ?? null;
     }
     /**
-     * 🔴 **入り先の一覧は、下の早期 return より前で更新する**(#395 段①)。
+     * 🔴 **追記先の一覧は、下の早期 return より前で更新する**(#395 段①)。
      *
      * ⚠ 下の 1 行は「種類が同じなら DOM を触らない」だが、**本文は種類を変えずに
      *   変わる**(追記した / 別の窓が書いた / 編集を保存した)── 後ろに置くと
@@ -232,7 +232,7 @@ export class AppendBoxRenderer {
      * ⚠ **本文が読めていない間は一覧に触らない**(2 稿目。test が拾った)。
      *
      * 1 稿目は `mode.kind === 'ready'` 以外で `null` を渡して**一覧を捨てて**いた ──
-     * 追記は `ready → writing → ready` と動くので、**押すたびに選んだ入り先が
+     * 追記は `ready → writing → ready` と動くので、**押すたびに選んだ追記先が
      * 「末尾」へ戻って**いた。⚠ この機構の主な使い方は「同じ節へ続けて足す」なので、
      * それができないのは機能が半分死んでいるのと同じである。
      * 🔑 すぐ上の「隠れている間は `lastLid` を動かさない」と**同じ作法**にする ──
@@ -310,7 +310,7 @@ export class AppendBoxRenderer {
   }
 
   /**
-   * 入り先の一覧を本文から作り直す(#395 段①)。
+   * 追記先の一覧を本文から作り直す(#395 段①)。
    *
    * ⚠ **指紋が同じなら触らない** ── `<select>` を組み直すと**選んでいた物が
    *   「末尾」へ戻る**。追記のたびに本文は変わるので、ここを毎回組み直すと

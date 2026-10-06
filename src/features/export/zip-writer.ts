@@ -157,7 +157,7 @@ export class ZipWriter {
    *   ⚠ 大きさと件数では**もう断らない** ── 超えたぶんは ZIP64 の欄へ逃がす(#971 段④)
    */
   async add(name: string, parts: readonly ZipPart[]): Promise<void> {
-    if (this.closed) throw new ZipWriteError('閉じた ZIP には追記できません');
+    if (this.closed) throw new ZipWriteError('閉じた zip には追記できません');
     if (name === '') throw new ZipWriteError('名前が空のファイルは書けません');
     // ⚠ 同名を許すと reader が「後勝ちで片方を静かに捨てる」形になる ── 出さない
     if (this.names.has(name)) {

@@ -188,7 +188,7 @@ export class DuckDbPackStore {
     if (fileMeta === undefined) return null;
     if (blob.size !== fileMeta.bytes) {
       throw new DuckDbPackStoreError(
-        `${name} の中身が読めません(記録: ${fileMeta.bytes} byte / 実際: ${blob.size} byte。入れ直してください)`,
+        `${name} の中身が読めません(記録: ${fileMeta.bytes} byte / 実際: ${blob.size} byte。取り込み直してください)`,
       );
     }
     return blob;

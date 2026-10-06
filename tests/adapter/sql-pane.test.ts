@@ -633,7 +633,7 @@ describe('SQL を調べる面(#681 段②)', () => {
   it('🔴 実時間の上限は、別窓が諦めるより先に来る', () => {
     expect(
       SQL_MAX_MS,
-      '別窓は先に諦める ── 面には「本体タブと通信できません」という嘘が出る',
+      '別窓は先に諦める ── 面には「メインのタブと通信できません」という嘘が出る',
     ).toBeLessThan(REQUEST_TIMEOUT_MS);
     expect(SQL_MAX_MS, '短すぎて普通の問い合わせが止まる').toBeGreaterThan(3_000);
   });

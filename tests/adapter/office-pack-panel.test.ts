@@ -380,7 +380,7 @@ describe('配布元との版ちがい', () => {
     expect(line.hidden).toBe(false);
     expect(line.textContent).toContain('unknown');
     expect(line.textContent).toContain('lo-abc-run1');
-    expect(line.textContent).toContain('配布元から入れる');
+    expect(line.textContent).toContain('配布元から取り込む');
     panel.dispose();
   });
 

@@ -94,20 +94,21 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   const manifests = dir.filter((e) => e.name === MANIFEST);
   if (manifests.length === 0) {
     throw new ZipReadError(
-      `${MANIFEST} が無い ZIP です。PKC2 のバックアップ(.pkc2.zip)を選んでください`,
+      `${MANIFEST} が無い zip です。PKC2 のバックアップ(.pkc2.zip)を選んでください`,
     );
   }
   // 重複は **断る**(PKC2 は first-wins + warning だが、どちらが正か決められない
   // 以上、片方を静かに捨てる方が危険 ── 設計 doc §4-D)
   if (manifests.length > 1) {
-    throw new ZipReadError(`${MANIFEST} が ${manifests.length} 個あります(この ZIP は読み取れません)`);
+    throw new ZipReadError(`${MANIFEST} が ${manifests.length} 個あります(この zip は読み取れません)`);
   }
 
   let manifest: Pkc2PackageManifest;
   try {
     manifest = JSON.parse(await readZipText(zip, manifests[0]!)) as Pkc2PackageManifest;
   } catch (e) {
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    if (e instanceof ZipReadError) throw e;
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (manifest?.format !== 'pkc2-package') {
     throw new ZipReadError(
@@ -123,16 +124,17 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
 
   const containers = dir.filter((e) => e.name === CONTAINER);
   if (containers.length === 0) {
-    throw new ZipReadError(`${CONTAINER} が入っていません(この ZIP は読み取れません)`);
+    throw new ZipReadError(`${CONTAINER} が入っていません(この zip は読み取れません)`);
   }
   if (containers.length > 1) {
-    throw new ZipReadError(`${CONTAINER} が ${containers.length} 個あります(この ZIP は読み取れません)`);
+    throw new ZipReadError(`${CONTAINER} が ${containers.length} 個あります(この zip は読み取れません)`);
   }
   let container: unknown;
   try {
     container = JSON.parse(await readZipText(zip, containers[0]!));
   } catch (e) {
-    throw new ZipReadError(`${CONTAINER} の JSON を解釈できません: ${String(e)}`);
+    if (e instanceof ZipReadError) throw e;
+    throw new ZipReadError(`${CONTAINER} を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   const c = container as { meta?: unknown; entries?: unknown } | null;
   if (!c || typeof c !== 'object' || !c.meta || !Array.isArray(c.entries)) {
@@ -161,7 +163,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
       continue;
     }
     if (assetSources.has(key)) {
-      throw new ZipReadError(`添付の ID が重複しています: ${key}(この ZIP は読み取れません)`);
+      throw new ZipReadError(`添付の ID が重複しています: ${key}(この zip は読み取れません)`);
     }
     assetSources.set(key, { zip, entry: e });
   }

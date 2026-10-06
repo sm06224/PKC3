@@ -4,7 +4,7 @@
  * 「**スタックをグループとして参照のみのフォルダとして保存する機能もつけろ**」)。
  *
  * 見るのは user が見る形 ── ①帯の「保存…」を押すと題名を聞かれ、リンクの箇条書きの
- * ノートができて**読んでいる本文は退かない** ②入れ物の「このスタックを載せる」で
+ * ノートができて**読んでいる本文は退かない** ②入れ物の「このスタックを追加する」で
  * **本文の 1 行目が一番上**に来る ③消えたノートの行は残り、数えて言う。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -201,7 +201,7 @@ describe('LOAD_STACK ── 本文の並びを、いまのスタックの上に�
 });
 
 describe('行のメニュー / 情報ペインの口(when: stack)', () => {
-  it('🔴 スタックの入れ物にだけ「このスタックを載せる」が出る', () => {
+  it('🔴 スタックの入れ物にだけ「このスタックを追加する」が出る', () => {
     const forStack = entryMenuActions({ archetype: 'stack', linkedFile: null }).map((a) => a.action);
     const forText = entryMenuActions({ archetype: 'text', linkedFile: null }).map((a) => a.action);
     expect(forStack).toContain('stack-load');
@@ -308,7 +308,7 @@ describe('帯の「保存…」(#633 段③)', () => {
     expect(sent.find((a) => a.type === 'CREATE_ENTRY')).toBeUndefined();
   });
 
-  it('🔴 「このスタックを載せる」の受け手は、押した行の入れ物を LOAD_STACK へ渡す', () => {
+  it('🔴 「このスタックを追加する」の受け手は、押した行の入れ物を LOAD_STACK へ渡す', () => {
     const { root, d, sent } = bindSetup();
     const btn = document.createElement('button');
     btn.setAttribute('data-pkc-action', 'stack-load');

@@ -87,9 +87,9 @@ const ATTACHMENT_LID = (key: string): string => `bundle-att-${key}`;
 /** 同名が複数あるものを 1 件に絞る(0 件も 2 件以上も断る)。 */
 export function onlyEntry(dir: readonly ZipEntry[], name: string): ZipEntry {
   const hits = dir.filter((e) => e.name === name);
-  if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この ZIP は読み取れません)`);
+  if (hits.length === 0) throw new ZipReadError(`${name} が入っていません(この zip は読み取れません)`);
   if (hits.length > 1) {
-    throw new ZipReadError(`${name} が ${hits.length} 個あります(この ZIP は読み取れません)`);
+    throw new ZipReadError(`${name} が ${hits.length} 個あります(この zip は読み取れません)`);
   }
   return hits[0]!;
 }
@@ -121,7 +121,7 @@ async function readBundleCommon(
     manifest = JSON.parse(await readZipText(zip, onlyEntry(dir, MANIFEST))) as Pkc2TextBundleManifest;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${MANIFEST} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (manifest?.format !== expectedFormat) {
     throw new ZipReadError(

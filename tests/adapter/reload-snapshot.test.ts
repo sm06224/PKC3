@@ -183,7 +183,7 @@ describe('読込中に編集が始まった場合(H-3)', () => {
   it('読込の失敗は帯に出る(黙って落とさない ── L-2)', async () => {
     const d = booted();
     await reloadSnapshot(d, 'c1', async () => {
-      throw new Error('本体タブと通信できません(応答がありません)');
+      throw new Error('メインのタブと通信できません(応答がありません)');
     });
     expect(d.getState().error).toContain('一覧を取得し直せませんでした');
   });

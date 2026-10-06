@@ -528,7 +528,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (this.terminated) return Promise.reject(new Error('store client terminated'));
     if (this.state === 'dead')
       return Promise.reject(
-        new Error('本体への切り替えに失敗しています(タブを再読み込みしてください)'),
+        new Error('メインのタブへの切り替えに失敗しています(タブを再読み込みしてください)'),
       );
     if (this.state === 'real' && this.realClient) return this.realClient.request(req);
     if (this.state === 'promoting') {
@@ -547,7 +547,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
       };
       p.timer = setT(() => {
         this.pending.delete(id);
-        reject(new Error('本体タブと通信できません(応答がありません)'));
+        reject(new Error('メインのタブと通信できません(応答がありません)'));
       }, this.deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(id, p);
       this.ch.postMessage({ kind: 'req', from: this.id, id, req } satisfies ProxyWire);
@@ -665,7 +665,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
       const toReject = this.buffered;
       this.buffered = [];
       for (const b of toReject)
-        b.reject(new Error(`本体への切り替えに失敗しました: ${msg}`));
+        b.reject(new Error(`メインのタブへの切り替えに失敗しました: ${msg}`));
       this.ch.close();
       throw e;
     }

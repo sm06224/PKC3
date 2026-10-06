@@ -65,7 +65,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.browse', label: '探し方のタブ' },
   { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー' },
   { key: 'pkc3.paste-source', label: '貼り付けの判定' },
-  { key: 'pkc3.query-key', label: '集計の束ね方' },
+  { key: 'pkc3.query-key', label: '集計のグループ化' },
   { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },
   /**
    * ⚠ **人に付く好み**である(#772 段① B)── 「声を聞き取りやすくしたい」かどうかは

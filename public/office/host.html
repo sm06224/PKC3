@@ -1670,7 +1670,7 @@
     try { db = await openDb(); } catch (e) { fail('この端末の保存領域を開けません'); return; }
     var meta = await idbGet(db, 'meta', 'pack');
     if (!meta || !Array.isArray(meta.files)) {
-      fail('Office 一式がまだ入っていません(PKC3 の システム → 保存領域 → Office 表示 から入れてください)');
+      fail('Office 一式がまだ入っていません(PKC3 の システム → 保存領域 → Office 表示 から取り込んでください)');
       say('not-installed');
       return;
     }
