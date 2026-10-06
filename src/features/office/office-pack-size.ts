@@ -33,8 +33,12 @@
 /**
  * 一式を取るのに要る量(MB、概算)。⚠ **目録が指すものの合計**であって、
  * 圧縮された本体 2 本だけの量ではない。
+ *
+ * 🔑 2026-10-06: BIZ UD フォント 3 本が一式に入り、office-pack の検品 log の合計が
+ *   105.3MB(目録 `totalBytes`)になったので 93 → 106 へ上げた。
+ *   大きい側へ寄せる規律のまま(少なく言って失敗させない)。
  */
-export const OFFICE_PACK_APPROX_MB = 93;
+export const OFFICE_PACK_APPROX_MB = 106;
 
 /**
  * 画面に出す形。⚠ 字を組む所を散らさない。
@@ -46,4 +50,4 @@ export const OFFICE_PACK_APPROX_MB = 93;
  *   測った値を出すのは `humanBytes(meta.totalBytes)`(`office-pack-panel.ts`)の側である。
  * 🔑 2 つがずれないことは、すぐ下の test が見る。
  */
-export const OFFICE_PACK_APPROX = '約 93MB';
+export const OFFICE_PACK_APPROX = '約 106MB';

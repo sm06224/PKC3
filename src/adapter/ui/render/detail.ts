@@ -136,7 +136,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
-import { buildOfficeEntry } from './office-entry-view';
+import { buildOfficeEntry, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   assetPreviewKind,
@@ -3069,7 +3069,7 @@ export class DetailRenderer {
     previewHost.setAttribute('data-pkc-field', 'attachment-preview');
     host.append(previewHost);
     if (this.assets && meta.assetKey) {
-      void this.hydratePreview(previewHost, meta.assetKey, meta.mime, this.hydrateToken);
+      void this.hydratePreview(previewHost, meta.assetKey, meta.mime, meta.name, this.hydrateToken);
     }
 
     if (description.trim() !== '') {
@@ -3452,6 +3452,7 @@ export class DetailRenderer {
     host: HTMLElement,
     assetKey: string,
     mime: string,
+    fileName: string,
     token: number,
   ): Promise<void> {
     const assets = this.assets!;
@@ -3509,9 +3510,25 @@ export class DetailRenderer {
          */
         const p = document.createElement('p');
         p.setAttribute('data-pkc-field', 'attachment-no-preview');
+        /**
+         * 🔴 **Office で開ける種類は、「ダウンロードして開いてください」へ案内しない**(#1363)。
+         * ⚠ 上に「Office で開く」(または入れるボタン)が出ているのに、字だけが
+         *   ダウンロードを指すと、user は**目の前の入口を見落とす**。
+         * ⚠ `setup` のとき入口は**ボタンではなく理由の 1 行**で、「Office 表示を使えるようにする」
+         *   という字は**画面のどこにも出ない**(`office-entry-view.ts` が出すのは `reason`)──
+         *   無い字を案内しない(CLAUDE.md §1「押してください」と書いた物が実在するか)。
+         *   だから場所(システム → 保存領域 → Office 表示。マニュアルと同じ)で案内する。
+         * 🔑 何を出しているかは `officeEntryOf`(入口のボタンと同じ答え)から引く ──
+         *   `open` / `setup` 以外(`unsupported` / `none`)は入口が出ないので今までの字のまま。
+         */
+        const office = officeEntryOf(fileName, mime).kind;
         p.textContent = isAppMime(mime)
           ? 'この種類のファイルは画面に出せません。上の「アプリを開く」で開けます(ダウンロードしても開けます)'
-          : 'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください';
+          : office === 'open'
+            ? 'この種類は画面に出せません。上の「Office で開く」で開けます(ダウンロードしても開けます)'
+            : office === 'setup'
+              ? 'この種類は画面に出せません。システム → 保存領域 → Office 表示 で一式を入れると開けます(ダウンロードしても開けます)'
+              : 'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください';
         host.append(p);
         return;
       }

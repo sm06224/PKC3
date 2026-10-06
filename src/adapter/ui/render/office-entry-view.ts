@@ -22,6 +22,7 @@ import {
   officeEntry,
   readOfficeCapability,
   type OfficeCapability,
+  type OfficeEntry,
 } from '@features/office/office-entry';
 import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
 import { iconButton } from './icons';
@@ -123,6 +124,26 @@ export interface OfficeAttachment {
 }
 
 /**
+ * 添付 1 件に出す Office の入口を**決める**(描かない)。
+ *
+ * 🔑 入力の作り方(一式の有無・能力を `appOfficePack` から読む)を **1 か所**に置く ──
+ *   入口のボタンと、プレビューを持たない添付の案内文(`detail.ts`)が**同じ答え**を
+ *   引くため(判定を 2 か所に書かない)。
+ */
+export function officeEntryOf(
+  fileName: string,
+  mime: string,
+  avail: OfficeAvailabilitySource = appOfficePack,
+): OfficeEntry {
+  return officeEntry({
+    mime,
+    fileName,
+    packInstalled: avail.isInstalled(),
+    capability: avail.capability(),
+  });
+}
+
+/**
  * 添付 1 件ぶんの入口を組む。**Office の添付でなければ `null`**(何も出さない)。
  *
  * ⚠ 返るのは 1 要素だけ ── 呼び側は**置き場所を選ばない**(添付の情報の器へ
@@ -135,12 +156,7 @@ export function buildOfficeEntry(
   att: OfficeAttachment,
   avail: OfficeAvailabilitySource = appOfficePack,
 ): HTMLElement | null {
-  const entry = officeEntry({
-    mime: att.mime,
-    fileName: att.name,
-    packInstalled: avail.isInstalled(),
-    capability: avail.capability(),
-  });
+  const entry = officeEntryOf(att.name, att.mime, avail);
   if (entry.kind === 'none') return null;
 
   if (entry.kind === 'open') {
