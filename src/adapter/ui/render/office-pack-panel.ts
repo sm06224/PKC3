@@ -239,7 +239,7 @@ export function buildOfficePackPanel(state: OfficePackState = appOfficePack): Of
     progress.hidden = !busy;
     progress.textContent = state.progress();
     /**
-     * ⚠ **設置中は押せなくする。** 93MB を 2 本走らせると quota も帯域も倍食う。
+     * ⚠ **設置中は押せなくする。** 一式を 2 本走らせると quota も帯域も倍食う。
      * 🔑 実体側にも同じ門が在る(`OfficePackInstaller.isRunning`)── 画面の
      *   `disabled` は**見た目の親切**であって、守っているのは実体側である
      *   (`disabled` は DevTools で外せる)。

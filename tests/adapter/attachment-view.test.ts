@@ -634,6 +634,41 @@ describe('preview を持たない添付', () => {
       expect(await noteOf(docxBody)).toBe(OLD_NOTE);
     });
 
+    it('🔴 種類が octet-stream でも名前が .docx なら「Office で開く」を指す(拡張子だけで分かる取り込み)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      const body = attachmentBody({
+        name: '報告書.docx',
+        mime: 'application/octet-stream',
+        size: 12,
+        assetKey: 'ast-docx-octet',
+      });
+      const text = await noteOf(body);
+      expect(text, 'fileName が判定に渡っていない').toContain('「Office で開く」');
+    });
+
+    it('🔴 旧形式(.xls)も同じ案内(名前で開ける種類と分かる)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      const body = attachmentBody({
+        name: '集計.xls',
+        mime: 'application/octet-stream',
+        size: 12,
+        assetKey: 'ast-xls',
+      });
+      expect(await noteOf(body)).toContain('「Office で開く」');
+    });
+
+    it('対照群:この環境で Office が動かず、一式も無い .docx は、今までの字のまま(「入れると開けます」と言わない)', async () => {
+      // ⚠ 「動かない環境」は「未配備」より先に見る(office-entry.ts の順)── ここを
+      //    `isInstalled()` だけで分ける変異は、動かない端末の user に約 106MB を取らせる
+      capSpy = vi
+        .spyOn(appOfficePack, 'capability')
+        .mockReturnValue({ ...OK_CAP, jspi: false });
+      appOfficePack.setMeta(null);
+      expect(await noteOf(docxBody)).toBe(OLD_NOTE);
+    });
+
     it('対照群:Office でない種類(.zip)は、一式が入っていても今までの字のまま', async () => {
       capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
       appOfficePack.setMeta(PACK);

@@ -14,7 +14,7 @@
  * |---|---|
  * | `soffice.wasm.gz` + `soffice.data.gz` | 約 **77MB** ← 画面に出ていた数字 |
  * | ＋ `soffice.js` / `qtloader.js` / `soffice.data.js.metadata` / フォント | |
- * | **目録(`pack.json`)が指すものの合計** | 約 **93MB** ← 実際に取る量 |
+ * | **目録(`pack.json`)が指すものの合計** | 約 **93MB**(#702 の時点。BIZ UD 追加後は下の定数)← 実際に取る量 |
  *
  * 実測は `build/office-wasm/make-pages-bundle.mjs` のコメントに残っている ──
  * 「宣言 **97,311,959** に対し実際に入るのは **97,305,931**」(2026-08-14、実機検証)。
