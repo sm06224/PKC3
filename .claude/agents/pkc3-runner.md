@@ -113,6 +113,15 @@ grep の全数を頼まれたときは、`grep -rn` の**全行**を file:line �
 
 🔑 **読むのは `grep -n "Test Files\|Tests  \|exit=" unit.log` と `tail -n 10`** だけ。落ちた物も `grep … | head -30` で切る。
 `cat unit.log` / `Read` で log 全体 / `smoke.log` の全文 ── どれも**打たない**(数万行になる)。
+
+⚠ **2 度目(2026-10-06)** ── 上の戒めが在るのに、全量 smoke(16 分・516 本)を回した runner が
+**また log を読んで止められた**(unit は `exit=0` まで取れていたが、build / smoke の log は 1 行も残らず、
+依頼者は unit の結果だけ worktree から拾い、smoke は回し直しになった)。
+🔑 **log を読む命令は、この file に書いてある 2 つ(`grep -n "Test Files\|Tests  \|exit="` / `tail -n 10`)
+以外を打たない。** 落ちた物の抜き出しも `grep -n "✘\|FAIL\|Error:" smoke.log | head -40` のように
+**必ず `head` で切る**(playwright のエラーは 1 件で数百行になる)。
+⚠ 依頼者側:依頼文に「AssertionError の 10 行」のような**読ませる指示を書かない** ──
+file:line と test 名だけ返させ、中身は依頼者が `sed -n` で切って読む。
 ⚠ 依頼文にも「log は grep / tail で切る」と書いてある ── 書いてあっても踏むので、**手順として最初に守る**。
 
 ## 🔴 時系列(event の列)は **kind で絞らず、全行を file へ**書く。窓を切るのは依頼者(2026-10-05)
