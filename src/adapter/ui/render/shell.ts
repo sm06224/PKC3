@@ -909,7 +909,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneInfo.setAttribute('data-pkc-field', 'phone-info');
   phoneInfo.setAttribute('data-pkc-page', 'info');
   phoneInfo.textContent = '情報';
-  phoneInfo.title = 'タグ・目次・関係・書き出す(← ノートへ戻る で戻ります)';
+  phoneInfo.title = 'タグ・目次・つながり・書き出す(← ノートへ戻る で戻ります)';
   /**
    * 🔴 **左の列にしか無い操作への入口**(設計 doc §2-7)。⚠ スマホでは
    *   一覧が見えていないので、**右クリックの項目も「操作を探す」もここからしか届かない**

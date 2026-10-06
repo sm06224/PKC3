@@ -612,7 +612,7 @@
     setStatus('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     if (!window.PKC3OfficeUnsaved) return;
     window.PKC3OfficeUnsaved.markModified(window.__lo).then(function (ok) {
-      if (ok !== true) console.warn('控えから開いた文書を「保存していない変更あり」にできませんでした');
+      if (ok !== true) console.warn('下書きから開いた文書を「保存していない変更あり」にできませんでした');
     }, function () { /* 聞けなかった ── 開いた文書はそのまま使える */ });
   }
   var shadowTimer = null;
@@ -631,7 +631,7 @@
     var U = window.PKC3OfficeUnsaved;
     if (!SH || !shadowQuiet || !U) {
       // 🔴 **黙らない**(`armSaveWatch` と同じ作法)。⚠ console だけだと、窓は正常に見えたまま控えが 1 つも書かれない
-      console.warn('控えの監視機能を読み込めません(script が読めていない)');
+      console.warn('下書きの監視機能を読み込めません(script が読めていない)');
       say('shadow-failed', { reason: SH ? SH.reasonOf({ shadowReason: 'no-gate' }) : 'このバージョンの Office では書けません' });
       return;
     }
@@ -675,7 +675,7 @@
       // 成功は user へ言わない(うるさい)。本体が「最後に書いた時刻」だけ覚える静かな放送
       onWritten: function (at) { say('shadow-written', { at: at }); },
       onFailed: function (reason) { say('shadow-failed', { reason: reason }); },
-      log: function (e) { console.warn('編集の控えを書けませんでした', e); },
+      log: function (e) { console.warn('保存していない編集の下書きを書けませんでした', e); },
     });
     shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
     shadowAfterSaved = function () { return writer.afterSaved(); };
@@ -1681,7 +1681,7 @@
     var blobs = {};
     for (var i = 0; i < need.length; i += 1) {
       blobs[need[i]] = await idbGet(db, 'files', need[i]);
-      if (!blobs[need[i]]) { fail('一式が壊れています: ' + need[i] + ' がありません'); return; }
+      if (!blobs[need[i]]) { fail('一式を読めません: ' + need[i] + ' がありません'); return; }
     }
     /**
      * 🔴 **この一式は非 ODF を保存できるか**(#225)を、**一式そのものから採る**。

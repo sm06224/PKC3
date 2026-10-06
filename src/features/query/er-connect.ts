@@ -76,7 +76,7 @@ export function pickErConnection(
     return { kind: 'cancel' };
   }
   if (same(pendingFrom.table, table)) {
-    return { kind: 'denied', why: '同じ表の中では繋げません' };
+    return { kind: 'denied', why: '同じ表の中ではつなげません' };
   }
   const link: SchemaLink = {
     from: pendingFrom.table,
@@ -150,8 +150,8 @@ export function erZeroLinesWhy(input: {
   if (boxes === 0) return '';
   // ⚠ 相手が 1 つしかないなら「繋ぐ」を勧めてはいけない ── 同じ表の中は繋げない
   //   (`pickErConnection` が断る)ので、勧めると**押せない道**へ誘うことになる。
-  if (boxes === 1) return '表が 1 つだけなので、繋ぐ相手がいません。';
-  const next = connecting ? '' : ' 上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。';
+  if (boxes === 1) return '表が 1 つだけなので、つなぐ相手がいません。';
+  const next = connecting ? '' : ' 上の「つなぐ」を押して列を 2 つ押すと、自分でつなげます。';
   if (dropped > 0) {
     return `つながりはありますが、1 本も線にできませんでした(理由はこの下に出ています)。${next}`;
   }

@@ -319,7 +319,7 @@ async function drawPage(pdf, i, myGen) {
   box.style.setProperty('--total-scale-factor', String(scale));
   const img = document.createElement('img');
   img.setAttribute('data-pkc-field', 'pdf-page-image');
-  img.alt = `${String(i)} 頁`;
+  img.alt = `${String(i)} ページ`;
   img.src = url;
   box.append(img);
   const layer = document.createElement('div');
@@ -509,7 +509,7 @@ async function search(q) {
 function stepHit(delta) {
   if (hitList.length === 0) return;
   hitIndex = (hitIndex + delta + hitList.length) % hitList.length;
-  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件(${String(hitList[hitIndex])} 頁)`;
+  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件(${String(hitList[hitIndex])} ページ)`;
   goPage(hitList[hitIndex]);
 }
 
@@ -560,7 +560,7 @@ quoteBtn.addEventListener('click', () => {
     setStatus(refusal);
     return;
   }
-  setStatus('ノートへ引いています…');
+  setStatus('ノートへ引用しています…');
   // 🔴 返事が来なければ、「引いています…」のまま固まらず断る(本体のリロード / 閉じ)
   clearTimer(quoteTimer);
   quoteTimer = setTimeout(() => {

@@ -196,7 +196,7 @@ describe('createOfficeOpener', () => {
  * 相手の窓役は何も組まない。上の `fakeWindow` は `provideDocument` の第 5 引数を捨てるので、
  * この繋ぎは別に要る。
  */
-describe('窓が作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+describe('窓が作り直されたとき(本物の OfficeWindow とつなぐ)', () => {
   function wired(opts: { lid?: string; current: (lid: string) => Promise<string | null> }) {
     const sent: { type: string; payload: Record<string, unknown> }[] = [];
     let handler: ((ev: MessageEvent) => void) | null = null;
@@ -454,7 +454,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
  * 🔴 **本物の OfficeWindow と繋ぐ**(§7)── 封筒に `fromShadow` が載り、窓が作り直されて文書を求め直したときも
  * **控えの版**が(控えがまだ在れば)送られる。偽の窓は第 6 引数を覚えているだけなので、この繋ぎは別に要る。
  */
-describe('編集の控えの版で開いた窓が、作り直されたとき(本物の OfficeWindow と繋ぐ)', () => {
+describe('編集の控えの版で開いた窓が、作り直されたとき(本物の OfficeWindow とつなぐ)', () => {
   function wired(shadow: { bytes: () => Uint8Array | null }) {
     const sent: { type: string; payload: Record<string, unknown> }[] = [];
     let handler: ((ev: MessageEvent) => void) | null = null;

@@ -97,7 +97,7 @@ function skippedName(el: Element): { what: string; why: string } | null {
     };
   }
   if (tag === 'svg') return { what: '図(ベクタ)', why: 'このバージョンでは図を Word に入れていません' };
-  if (tag === 'iframe') return { what: '埋め込みの箱', why: 'Word では動きません' };
+  if (tag === 'iframe') return { what: '埋め込み枠', why: 'Word では動きません' };
   if (tag === 'canvas') return { what: '描画領域', why: 'Word では動きません' };
   return null;
 }

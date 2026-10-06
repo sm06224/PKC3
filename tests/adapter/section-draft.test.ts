@@ -501,7 +501,7 @@ describe('断った字は、正しく操作した後は消える(#1044 段2 2巡
 });
 
 describe('章の欄が開いている間の門(#1043 の拡張・#1044 段2)', () => {
-  it('🔴 同じノートの本文の書込は断る。別のノートは自由(#1043)', () => {
+  it('🔴 同じノートの本文の書き込みは断る。別のノートは自由(#1043)', () => {
     const s = reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 4 }).state;
     expect(bodyWriteBlockReason(s, 'n1')).toBe(SECTION_DRAFT_NOTE);
     expect(bodyWriteBlockReason(s, 'n2'), '別のノートまで止めている').toBeNull();

@@ -259,7 +259,7 @@ describe('門(書いてはいけないとき)', () => {
     expect(setPlaceStyle(BODY, target(0), { color: '#fff' } as never)).toBeNull();
   });
 
-  it('🔴 開き行がずれていたら書かない(別の窓の書込で行が動いた形)', () => {
+  it('🔴 開き行がずれていたら書かない(別の窓の書き込みで行が動いた形)', () => {
     expect(
       setPlaceStyle(BODY, { line: 0, openLine: ':::format{#a .pkc-place x=1 y=1}' }, { fill: '#ffffff' }),
     ).toBeNull();

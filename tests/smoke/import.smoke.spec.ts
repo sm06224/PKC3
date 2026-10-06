@@ -187,7 +187,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
    *   断られた事実を数え、最後まで断られたら**その旨で**落とす
    *   (「件数が増えない」ではなく「N 回とも断られた」と読めるようにする)。
    */
-  const GATE_BUSY = '添付の取込 / 整理が実行中です';
+  const GATE_BUSY = '添付の取り込み / 整理が実行中です';
   /**
    * ⚠ **抜ける条件は「断られなくなった」ではなく「4 件になった」にする。**
    * 断り文は**次の描画まで状態行に残る**ので、直前の断りを見て
@@ -212,13 +212,13 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
     refusals += 1;
     if (Date.now() > until) {
       throw new Error(
-        `2 度目の取込が ${refusals} 回とも「${GATE_BUSY}」で断られた（${GATE_DEADLINE_MS}ms）`,
+        `2 度目の取り込みが ${refusals} 回とも「${GATE_BUSY}」で断られた（${GATE_DEADLINE_MS}ms）`,
       );
     }
     await page.waitForTimeout(400);
   }
   // ⚠ 空振り防止ではなく**記録**である ── 0 でも赤にしない(断られない回もある)
-  if (refusals > 0) console.log(`[#382] 2 度目の取込が ${refusals} 回断られ、選び直した`);
+  if (refusals > 0) console.log(`[#382] 2 度目の取り込みが ${refusals} 回断られ、選び直した`);
   /**
    * 🔴 **落ちたとき、理由が分かる形にする**(2026-08-25)。
    *
@@ -1112,7 +1112,7 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
 
   // 🔴 **片道であること**が画面に出る(manifest を開かないと分からない形にしない)。
   // 取り込んだ container は履歴を 1 件持つので、その件数まで言えているか
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('片道');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('取り込み直せません');
   await expect(page.locator('[data-pkc-region="notices"]')).toContainText(
     '履歴を持つノート 1 件の履歴は落ちます',
   );

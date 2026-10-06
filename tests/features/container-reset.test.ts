@@ -174,7 +174,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
    */
   it('🔴 拾っていなければそう言い、拾ってあれば件数を言う', () => {
     const none = resetExplainMessage({ notes: 3, keeps: KEEPS, rescued: null, assetsOnDisk: 0 });
-    expect(none, 'まだ拾っていないことを言っていない').toContain('まだ拾い出していません');
+    expect(none, 'まだ拾っていないことを言っていない').toContain('まだ取り出していません');
 
     const zero = resetExplainMessage({
       notes: 3,
@@ -182,7 +182,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
       assetsOnDisk: 0,
       rescued: { entries: 0, skipped: 5, empty: 2, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
     });
-    expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+    expect(zero, '0 件なのに済んだ顔をしている').not.toContain('まだ取り出していません');
     expect(zero, '拾えた件数が出ていない').toContain('0 件');
     expect(zero, '読めなかった数が出ていない').toContain('5');
   });

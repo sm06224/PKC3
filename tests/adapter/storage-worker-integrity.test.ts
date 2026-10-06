@@ -108,7 +108,7 @@ describe('integrityPlan / checkIntegrity({ table }) / integrityStamp', () => {
   });
 });
 
-describe('駆動部を本物の worker に繋ぐ', () => {
+describe('駆動部を本物の worker につなぐ', () => {
   it('🔴 印が古ければ ok(印が更新される)→ すぐ 2 回目は skipped', async () => {
     await request({ op: 'integrityStamp', at: '2020-01-01T00:00:00.000Z' });
     const now = Date.parse('2026-09-20T04:00:00Z');

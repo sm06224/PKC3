@@ -780,6 +780,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'toggle-sidebar',
     label: '一覧のペインを折りたたむ / 戻す',
+    alias: '畳む 列',
     contexts: ['global'],
     defaults: ['Alt+BracketLeft', 'Mod+Backslash'],
     whileTyping: true,
@@ -788,6 +789,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'toggle-inspector',
     label: '情報のペインを折りたたむ / 戻す',
+    alias: '畳む 列',
     contexts: ['global'],
     defaults: ['Alt+BracketRight', 'Mod+Shift+Backslash'],
     whileTyping: true,
@@ -815,6 +817,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'toggle-append',
     label: '追記欄を折りたたむ / 戻す',
+    alias: '畳む',
     contexts: ['global'],
     defaults: ['Alt+Backslash'],
     whileTyping: true,
@@ -823,6 +826,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   {
     id: 'toggle-focus-mode',
     label: '両側のペインを折りたたむ / 戻す(集中)',
+    alias: '畳む 列',
     contexts: ['global'],
     defaults: ['Mod+Alt+Backslash'],
     whileTyping: true,

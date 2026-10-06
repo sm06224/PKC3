@@ -99,7 +99,7 @@ export function buildFolderGraph(
     }
     if (byLid.has(f.lid)) {
       // どちらが正か決められない ── 片方を静かに捨てない
-      warnings.push(`同じ ID のフォルダが 2 つあります: ${f.lid}(先の方を採ります)`);
+      warnings.push(`同じ ID のフォルダが 2 つあります: ${f.lid}(先のほうを使います)`);
       continue;
     }
     byLid.set(f.lid, f);
@@ -117,7 +117,7 @@ export function buildFolderGraph(
     if (!byLid.has(p)) {
       // PKC2 は「選択 entry の祖先」しか folders[] に入れないことがある ──
       // 親が居ないなら root 直下に置く。**黙って平坦にしない**(§4-K)
-      warnings.push(`親フォルダが書出しに含まれていません: ${f.title}(最上位に置きます)`);
+      warnings.push(`親フォルダが書き出しに含まれていません: ${f.title}(最上位に置きます)`);
       continue;
     }
     parentOf.set(f.lid, p);
@@ -148,7 +148,7 @@ export function buildFolderGraph(
       warnings.push(
         nonFolderLids.has(parent)
           ? `ノートの親がフォルダではありません(${parent})。${child} を最上位に置きます`
-          : `ノートの親フォルダが書出しに含まれていません(${parent})。${child} を最上位に置きます`,
+          : `ノートの親フォルダが書き出しに含まれていません(${parent})。${child} を最上位に置きます`,
       );
       continue;
     }

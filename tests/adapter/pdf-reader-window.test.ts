@@ -3,7 +3,7 @@
  * PDF を読む窓の本体(`public/pdf/reader.js`)の**返事待ち**(#275 段① 着地後レビュー)。
  *
  * 🔴 守るもの:本体(別のタブ)は、リロード / 閉じ / token の忘却のどれでも**返事をしなくなる**。放送は片道で、
- * 届かなかったと知る手段が無い ── 上限が無いと窓は「読み込んでいます…」「ノートへ引いています…」のまま
+ * 届かなかったと知る手段が無い ── 上限が無いと窓は「読み込んでいます…」「ノートへ引用しています…」のまま
  * **永久に固まる**。ここは **reader.js の原文を実物として走らせ**(画面は `host.html` の実物の骨組み)、
  * 時間を進めて「上限が来たら断る / 返事が来たら断らない」の**両方向**を見る。
  *
@@ -147,16 +147,16 @@ describe('🔴 本体が文書を渡してこないとき ── 「読み込ん
   });
 });
 
-describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ引いています…」のまま固まらない', () => {
+describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ引用しています…」のまま固まらない', () => {
   it('上限(QUOTE_TIMEOUT_MS)の 1 ms 前までは「引いています…」、上限で断る', () => {
     boot();
     selectText('結論', 3);
     expect(($('quote') as HTMLButtonElement).disabled).toBe(false);
     $('quote').click();
-    expect($('status').textContent).toBe('ノートへ引いています…');
+    expect($('status').textContent).toBe('ノートへ引用しています…');
     expect(sentKinds()).toContain('quote');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS - 1);
-    expect($('status').textContent).toBe('ノートへ引いています…');
+    expect($('status').textContent).toBe('ノートへ引用しています…');
     vi.advanceTimersByTime(1);
     expect($('status').textContent).toBe(wire.QUOTE_NO_REPLY);
   });
@@ -181,7 +181,7 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     $('quote').click();
     // 最初の押しから見れば上限を過ぎるが、2 度目の押しから見ればまだ待っている
     vi.advanceTimersByTime(2000);
-    expect($('status').textContent).toBe('ノートへ引いています…');
+    expect($('status').textContent).toBe('ノートへ引用しています…');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS);
     expect($('status').textContent).toBe(wire.QUOTE_NO_REPLY);
   });

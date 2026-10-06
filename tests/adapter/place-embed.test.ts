@@ -427,7 +427,7 @@ describe('state: 板のための本文', () => {
       } as never).state;
       expect(textOf(s)).toBe('古\n新');
     });
-    it('⚠ 対照群:板に置いていないノートの書込では、入れ物を作り直さない / 作らない', () => {
+    it('⚠ 対照群:板に置いていないノートの書き込みでは、入れ物を作り直さない / 作らない', () => {
       const s = reduce(loaded, { type: 'BODY_PERSISTED', lid: 'n9', body: 'よそ' }).state;
       expect(placeBodiesOf(s)).toBe(placeBodiesOf(loaded));
       expect(placeBodiesOf(s).has('n9')).toBe(false);

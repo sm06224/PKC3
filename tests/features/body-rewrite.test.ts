@@ -616,7 +616,7 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
     }
   }
 
-  it('🔴 掴んだ時点の行と byte 一致しなければ書かない(別の窓の書込で行がずれた形)', () => {
+  it('🔴 掴んだ時点の行と byte 一致しなければ書かない(別の窓の書き込みで行がずれた形)', () => {
     const shifted = RAW.replace('段落 A', '段落 A(別の窓が直した)');
     expect(applyBodyRewrite(shifted, { kind: 'move-lines', ...range(5, 5), toBefore: 29 })).toBeNull();
     // 対照群 ── 一致していれば動く
@@ -627,7 +627,7 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
     ).toBeNull();
   });
 
-  it('🔴 掴んだ塊が(別の窓の書込で)囲いの中へ移っていたら書かない', () => {
+  it('🔴 掴んだ塊が(別の窓の書き込みで)囲いの中へ移っていたら書かない', () => {
     // 段落 A の上に閉じない fence が現れた ── 5 行目は同じ字だがコードの字である
     const swallowed = RAW.replace('# 題\n', '```\n');
     expect(applyBodyRewrite(swallowed, { kind: 'move-lines', ...range(5, 5), toBefore: 29 })).toBeNull();

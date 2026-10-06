@@ -275,7 +275,7 @@ describe('parseVcf ── 読みは広く', () => {
   });
 });
 
-describe('vcfNoteOf ── 取込が書く鍵は、読む側と同じ 1 つ', () => {
+describe('vcfNoteOf ── 取り込みが書く鍵は、読む側と同じ 1 つ', () => {
   it('🔴 作った本文を**実物の読み手(contactOf)**が読める', () => {
     const { cards } = parseVcf(CARD_30);
     const note = vcfNoteOf(cards[0]!);

@@ -64,7 +64,7 @@ export async function readEntryBundleParts(
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
@@ -84,7 +84,7 @@ export async function readEntryBundleParts(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
+      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
     );
   }
 
@@ -106,7 +106,7 @@ export async function readEntryBundleParts(
   // 食い違うのは組み立ての事故 ── 黙って選ばず言う
   const archetype = str(record.archetype) || str(manifest.archetype);
   if (archetype === '') {
-    throw new ZipReadError(`${ENTRY_JSON} に archetype がありません`);
+    throw new ZipReadError(`${ENTRY_JSON} に種類がありません`);
   }
   for (const [label, a, b] of [
     ['ID', str(manifest.lid), str(record.lid)],
@@ -114,7 +114,7 @@ export async function readEntryBundleParts(
     ['archetype', str(manifest.archetype), str(record.archetype)],
   ] as const) {
     if (a !== '' && b !== '' && a !== b) {
-      warnings.push(`目次と中身で ${label} が違います(${a} ≠ ${b})。中身を採ります`);
+      warnings.push(`目次と中身で ${label} が違います(${a} ≠ ${b})。中身を使います`);
     }
   }
 
@@ -145,7 +145,7 @@ export async function readEntryBundleParts(
   // 宣言だけして読まないのは PKC2 を批判している当の振る舞い
   if (typeof manifest.missing_asset_count === 'number' && manifest.missing_asset_count > 0) {
     warnings.push(
-      `書出し時点で既に失われていた添付が ${manifest.missing_asset_count} 件あります` +
+      `書き出し時点で既に失われていた添付が ${manifest.missing_asset_count} 件あります` +
         '(この形式は key を記録しないので、どれかは分かりません)',
     );
   }
@@ -199,8 +199,8 @@ export function droppedFieldsWarning(dropped: readonly string[], entries = 1): s
   if (dropped.length === 0 || entries === 0) return [];
   const uniq = [...new Set(dropped)].join(' / ');
   return [
-    `${entries} 件の entry で、この形式にしか無い情報を取り込めませんでした(${uniq})` +
-      '。PKC3 側に受け皿がまだありません',
+    `${entries} 件のノートで、この形式にしか無い情報を取り込めませんでした(${uniq})` +
+      '。PKC3 側に対応する置き場がまだありません',
   ];
 }
 

@@ -121,7 +121,7 @@ describe('readTextBundle', () => {
     expect([...got.assetSources.keys()]).toEqual(['ast-x1']); // 取り込むのは実体のある 1 件
   });
 
-  it('書出し時点の監査証跡(missing / compacted)を黙って捨てない', async () => {
+  it('書き出し時点の監査証跡(missing / compacted)を黙って捨てない', async () => {
     const zip = await bundle({
       manifest: manifestOf({
         assets: {},
@@ -149,7 +149,7 @@ describe('readTextBundle', () => {
     ).rejects.toThrow(/pkc2-text-bundle のみ/);
     await expect(
       readTextBundle(await bundle({ manifest: manifestOf({ version: 2 }) })),
-    ).rejects.toThrow(/未対応の bundle version/);
+    ).rejects.toThrow(/未対応の形式のバージョン/);
     await expect(
       readTextBundle(
         await buildZip([
@@ -237,7 +237,7 @@ describe('readTextlogBundle', () => {
     ]);
     const got = await readTextlogBundle(zip);
     expect(got.warnings.some((w) => w.includes('1 行読み飛ばしました'))).toBe(true);
-    expect(got.warnings.some((w) => w.includes('entry 件数'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('ノート件数'))).toBe(true);
   });
 
   it('壊れた CSV は ZipReadError として理由付きで断る', async () => {

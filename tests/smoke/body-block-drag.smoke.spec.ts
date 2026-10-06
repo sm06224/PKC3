@@ -305,10 +305,10 @@ test('🔴 ⠿ を一覧の行へ落とすと、その塊が別のノートへ�
   // どこへ行ったかを言う
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(
     // ⚠ #809-3 でノートの名前を『』へ揃えた(file を落とした回の知らせと同じ括弧)
-    '本文の塊を『行き先のノート』のいちばん下へ持っていきました',
+    '本文のブロックを『行き先のノート』のいちばん下へ移動しました',
   );
   // ⚠ 帰り道を同じ 1 行で言う(事故の瞬間に読むのはここだけ)
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('持ち帰って');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ドラッグして元のノートへ移して');
   // 🔴 行き先に出る(「開く」で行ける ── 帰り道もここから)
   await clickReal(page, '[data-pkc-field="status-open"]');
   await expect
@@ -502,7 +502,7 @@ test('🔴 横に留めた枠へファイルを落とすと、その枠のノー
     .toEqual(['留める側', '牛乳', 'IMG', 'パン']);
   await expect(editor, 'ファイルを落としたら編集欄が閉じた(打っていた字を失う)').toBeVisible();
   await expect(page.locator('[data-pkc-region="status"]')).toContainText('『留める側』');
-  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('預かりました');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('保留しました');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

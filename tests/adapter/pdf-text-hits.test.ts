@@ -48,7 +48,7 @@ describe('rangesBySpan ── 一致の範囲を span ごとの範囲にする',
     });
   });
 
-  it('同じ span の中の複数の一致は、昇順で別の範囲になる(隣り合えば 1 つに繋ぐ)', () => {
+  it('同じ span の中の複数の一致は、昇順で別の範囲になる(隣り合えば 1 つにつなぐ)', () => {
     expect(obj(rangesBySpan(['abab x ab'], 'ab'))).toEqual({ 0: [[0, 4], [7, 9]] });
     expect(obj(rangesBySpan(['aa'], 'a'))).toEqual({ 0: [[0, 2]] });
   });

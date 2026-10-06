@@ -66,7 +66,7 @@ export function quotaLevel(e: QuotaEstimate): QuotaLevel {
 export function quotaText(e: QuotaEstimate): string {
   const level = quotaLevel(e);
   if (level === 'unknown') {
-    return 'この端末では、ブラウザが言う使用量を読めませんでした。';
+    return 'この端末では、ブラウザが報告する使用量を読めませんでした。';
   }
   const usage = e.usage as number;
   const quota = e.quota as number;

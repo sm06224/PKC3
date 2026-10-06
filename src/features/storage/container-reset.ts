@@ -118,7 +118,7 @@ export async function resetContainer(
 export function resetDoneMessage(r: ContainerResetReport): string {
   const head =
     r.assetFailures > 0
-      ? `中身を消しました。ただし添付 ${r.assetFailures} 件は消せませんでした`
+      ? `中身を消しました。⚠ ただし添付 ${r.assetFailures} 件は消せませんでした`
       : '中身を消しました';
   const tail = r.wiped
     ? ''
@@ -188,8 +188,8 @@ export function resetExplainMessage(opts: {
    */
   const backup =
     rescued === null
-      ? `⚠ この画面では、まだ拾い出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
-      : `この画面で拾えたのは ${rescued.entries} 件です` +
+      ? `⚠ この画面では、まだ取り出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
+      : `この画面で取り出せたのは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
           ? `(読み込めなかった箇所 ${rescued.skipped} / 空だった箇所 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
           : '') +
@@ -211,12 +211,12 @@ export function resetExplainMessage(opts: {
     attach.push(`この端末には添付が ${assetsOnDisk} 件あります。`);
     attach.push(
       took >= assetsOnDisk
-        ? `拾い出しには ${took} 件とも入っています。`
-        : `⚠ 拾い出しに入っているのは ${took} 件だけです。残りはここで消えます。`,
+        ? `取り出したバックアップには ${took} 件とも入っています。`
+        : `⚠ 取り出したバックアップに入っているのは ${took} 件だけです。残りはここで消えます。`,
     );
   }
   return [
-    'この入れ物の中身を、すべて消します。元に戻せません。',
+    'この端末の保存領域の中身を、すべて消します。元に戻せません。',
     '',
     '消えるもの',
     `・いま一覧に出ている ${notes} 件のノート(題名・本文・履歴・フォルダ・タグ・付箋・板)`,

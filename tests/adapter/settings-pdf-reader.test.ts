@@ -58,7 +58,7 @@ describe('設定画面に在る(#275)', () => {
     expect(box!.parentElement!.textContent).toBe(' PDF を PKC の画面で開く(字を選んでノートへ引用できる)');
     const title = box!.parentElement!.title;
     expect(title).toContain('ノートへ引用する');
-    expect(title).toContain('切ると、ブラウザ内蔵の表示で開きます');
+    expect(title).toContain('オフにすると、ブラウザ内蔵の表示で開きます');
     for (const banned of ['pdf.js', 'pdfjs', 'worker', 'textLayer', '壊れ']) {
       expect(`${box!.parentElement!.textContent}${title}`.toLowerCase()).not.toContain(banned.toLowerCase());
     }

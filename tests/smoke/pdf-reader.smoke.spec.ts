@@ -253,7 +253,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   // 文書内を探す
   await win.fill('#query', 'marker3');
   await win.press('#query', 'Enter');
-  await expect(win.locator('#hits')).toContainText('1 / 1 件(3 頁)', { timeout: 15_000 });
+  await expect(win.locator('#hits')).toContainText('1 / 1 件(3 ページ)', { timeout: 15_000 });
   await expect.poll(livePages, { message: '見つけた頁へ移っていない', timeout: 15_000 }).toContain('3');
   // 一致した範囲だけが光る(「marker3」の字だけ。行全体ではない)
   await expect(win.locator('.page[data-page="3"] .textLayer mark.hit')).toHaveText(['marker3'], { timeout: 15_000 });
@@ -261,7 +261,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   // ── ④″ 一致が span 2 つにまたがる ──「split」+「match」(書体が違うので別の span)の「litma」
   await win.fill('#query', 'litma');
   await win.press('#query', 'Enter');
-  await expect(win.locator('#hits')).toContainText('1 / 1 件(3 頁)', { timeout: 15_000 });
+  await expect(win.locator('#hits')).toContainText('1 / 1 件(3 ページ)', { timeout: 15_000 });
   const marks = win.locator('.page[data-page="3"] .textLayer mark.hit');
   // 🔴 2 つの span の両方に、その span の中の一致した範囲だけ(先頭の span にしか付かない / span 全体が光る、を許さない)
   await expect(marks, 'またがる一致が両方の span に付いていない').toHaveText(['lit', 'ma'], { timeout: 15_000 });

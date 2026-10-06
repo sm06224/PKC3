@@ -273,14 +273,14 @@ describe('readFolderExportBundle', () => {
     );
     const got = await readFolderExportBundle(zip);
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['root', 'n1']);
-    expect(got.warnings.some((w) => /archetype が書かれていません/.test(w))).toBe(true);
+    expect(got.warnings.some((w) => /種類が書かれていません/.test(w))).toBe(true);
   });
 
   it('format / version を名指しで検査する(v1 と v2 は受ける)', async () => {
     const wrong = await outer(base({ format: 'pkc2-package', entries: [] }), []);
     await expect(readFolderExportBundle(wrong)).rejects.toThrow(/folder-export-bundle のみ/);
     const v3 = await outer(base({ version: 3, entries: [] }), []);
-    await expect(readFolderExportBundle(v3)).rejects.toThrow(/version/);
+    await expect(readFolderExportBundle(v3)).rejects.toThrow(/バージョン/);
   });
 
   it('🔴 取り込めるものが 1 件も無ければ断る(0 件で成功に見せない)', async () => {
@@ -370,7 +370,7 @@ describe('readFolderExportBundle', () => {
     expect(got.warnings.some((w) => /ID がぶつかっています/.test(w))).toBe(true);
   });
 
-  it('🔴 lid の無いフォルダだけの書出しは断る(0 件で成功に見せない)', async () => {
+  it('🔴 lid の無いフォルダだけの書き出しは断る(0 件で成功に見せない)', async () => {
     // manifest の配列長で見ると素通りする(review M-1)
     const zip = await outer(base({ entries: [], folders: [{ title: 'なまえだけ' }] }), []);
     await expect(readFolderExportBundle(zip)).rejects.toThrow(/1 件もありませんでした/);

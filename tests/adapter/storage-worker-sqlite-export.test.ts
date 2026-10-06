@@ -464,7 +464,7 @@ describe('🔴 天井 ── 超えた表だけ断る', () => {
     const small = r.tables.find((t) => t.name === 'small')!;
     expect(big.refused, '天井を超えた表を断っていない').toContain('2.0 KB');
     // 🔴 file の大きさではなく「写した行」の大きさだと言う(file が小さくても出るので、誤読させない)
-    expect(big.refused).toContain('コピーした行が');
+    expect(big.refused).toContain('読み込んだ行が');
     expect(big.refused).toContain('元のファイルより大きくなる');
     expect(big.ndjson, '断った表の bytes を返している').toBeNull();
     // 🔑 列は返す(呼び側が「どの表を断ったか」を名前で言える)

@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
-test('🔴 本文の名前つき csv が図の四角として出て引ける。線 0 本の理由も出て、繋ぐと誘いだけ消える (#918 段⑤d-2/d-3)', async ({
+test('🔴 本文の名前つき csv が図の四角として出て引ける。線 0 本の理由も出て、つなぐと誘いだけ消える (#918 段⑤d-2/d-3)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -290,32 +290,32 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await expect(zero, '線 0 本の理由が出ない').toContainText(
     'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
-  await expect(zero, '次の一手(「繋ぐ」への誘い)が出ていない').toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
+  await expect(zero, '次の一手(「つなぐ」への誘い)が出ていない').toContainText(
+    '上の「つなぐ」を押して列を 2 つ押すと、自分でつなげます。',
   );
 
   // ── 「繋ぐ」を入にする → 理由は残ったまま、誘いだけ消える(二重に言わない)
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   const connectBtn = page.locator('[data-pkc-field="sql-er-connect"]');
-  await expect(connectBtn, '「繋ぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
+  await expect(connectBtn, '「つなぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
 
-  await expect(zero, '繋ぐを入にしたら、理由まで消えた').toContainText(
+  await expect(zero, 'つなぐを入にしたら、理由まで消えた').toContainText(
     'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
-  await expect(zero, '繋ぐを入にしたのに、次の一手の誘いが残っている(二重に言っている)').not.toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと',
+  await expect(zero, 'つなぐを入にしたのに、次の一手の誘いが残っている(二重に言っている)').not.toContainText(
+    '上の「つなぐ」を押して列を 2 つ押すと',
   );
   // 🔑 代わりに、すぐ下の案内がその役目を引き継ぐ
   const hint = page.locator('[data-pkc-field="sql-er-connect-hint"]');
   await expect(hint, 'すぐ下の案内が代わりに言っていない').toContainText(
-    '繋ぎたい列を 2 つ押してください',
+    'つなぎたい列を 2 つ押してください',
   );
 
   // ⚠ 対照群 ── 「繋ぐ」を切に戻すと、誘いが元へ戻る(退行が無いこと)
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
-  await expect(connectBtn, '「繋ぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
+  await expect(connectBtn, '「つなぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
   await expect(zero, '切に戻したのに誘いが戻らない').toContainText(
-    '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
+    '上の「つなぐ」を押して列を 2 つ押すと、自分でつなげます。',
   );
 
   /**

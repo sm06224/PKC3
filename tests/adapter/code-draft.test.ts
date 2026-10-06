@@ -267,7 +267,7 @@ describe('CANCEL_CODE_DRAFT(#1044 段3)', () => {
 });
 
 describe('コード枠の欄が開いている間の門(#1043 の拡張・#1044 段3)', () => {
-  it('🔴 同じノートの本文の書込は「コード」で断る。別のノートは自由', () => {
+  it('🔴 同じノートの本文の書き込みは「コード」で断る。別のノートは自由', () => {
     const s = reduce(booted(), { type: 'OPEN_CODE_DRAFT', lid: 'n1', line: 2 }).state;
     expect(bodyWriteBlockReason(s, 'n1')).toBe(CODE_DRAFT_NOTE);
     expect(bodyWriteBlockReason(s, 'n2'), '別のノートまで止めている').toBeNull();

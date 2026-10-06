@@ -25,9 +25,9 @@ import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import { pastedImageName } from '@features/asset/pasted-image-name';
 
 /** 貼り付けた本文から拾った画像の名乗り(#251)。 */
-export const PASTED_IMAGE_PREFIX = '貼付画像';
+export const PASTED_IMAGE_PREFIX = '貼り付け画像';
 /** 押して外から取り込んだ画像の名乗り(#264 段①)。 */
-export const ADOPTED_IMAGE_PREFIX = '取込画像';
+export const ADOPTED_IMAGE_PREFIX = '取り込み画像';
 
 /**
  * 🔴 **状態番号を落とさずに読む**(#264 段②)。

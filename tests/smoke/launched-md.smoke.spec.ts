@@ -347,7 +347,7 @@ test('🔴 PC のタブ: 選ぶ → 並ぶ → 押すと取り込んで開く(md
   // ⑥-b 🔴 vCard も同じ(#1264 §1)── 1 回目は連絡先が 1 枚入り、2 回目は増やさず連絡先の一覧へ送って言う
   await clickReal(page, row('名刺.vcf').locator('button'));
   const contacts = page.locator('[data-pkc-browse-pane="contacts"] [data-pkc-contact]');
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('取込完了');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('取り込み完了');
   await clickReal(page, row('名刺.vcf').locator('button'));
   await expect(
     page.locator('[data-pkc-region="status"]'),

@@ -265,7 +265,7 @@ describe('主の枠で直したら、留めた枠も追いつく', () => {
     expect(d.getState().splitBodies).toBe(before);
   });
 
-  it('⚠ 留めていないノートの書込では、留めの入れ物を作り直さない', () => {
+  it('⚠ 留めていないノートの書き込みでは、留めの入れ物を作り直さない', () => {
     const d = booted();
     d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
     d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n2', body: 'x' });

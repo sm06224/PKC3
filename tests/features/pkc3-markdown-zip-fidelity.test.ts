@@ -214,7 +214,7 @@ describe('md ZIP — manifest の件数が実態と合う', () => {
       source({ entries: [{ lid: 'n1', body: 'a' }], bodilessLids: ['ghost1', 'ghost2'] }),
       NOW,
     );
-    expect(out.warnings).toContain('一覧にあって本文が取れなかった entry が 2 件あります');
+    expect(out.warnings).toContain('一覧にあって本文が取れなかったノートが 2 件あります');
   });
 });
 

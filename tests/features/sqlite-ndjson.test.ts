@@ -284,7 +284,7 @@ describe('断る理由の字', () => {
     const why = tooBigReason(SQLITE_NDJSON_TABLE_MAX_BYTES);
     expect(why).toContain('64.0 MB');
     // 🔴 直す前は「行の写しが … を超えました」で、35 MB の file にも出るので「file は小さいのに」と読まれた
-    expect(why).toContain('コピーした行が');
+    expect(why).toContain('読み込んだ行が');
     expect(why).toContain('元のファイルより大きくなることがあります');
     expect(why, '逃げ道は呼び側(runner)が並べているかで言い分ける').not.toContain('内蔵の sqlite');
   });
@@ -296,12 +296,12 @@ describe('断る理由の字', () => {
 
   it('表の名前は呼び側が前置する(ここでは持たない)', () => {
     expect(tooBigReason(1024 * 1024)).not.toContain('売上');
-    expect(refusedNote('売上', '理由')).toBe('売上 は DuckDB へコピーできませんでした(理由)');
+    expect(refusedNote('売上', '理由')).toBe('売上 は DuckDB に読み込めませんでした(理由)');
     // 名前が空の表(sqlite は許す)も、何の表か分かる字で言う
-    expect(refusedNote('', '理由')).toBe('(名前の無い表) は DuckDB へコピーできませんでした(理由)');
+    expect(refusedNote('', '理由')).toBe('(名前の無い表) は DuckDB に読み込めませんでした(理由)');
     // 逃げ道を渡せば、理由のあとに 1 度だけ添える
-    expect(refusedNote('売上', '理由', '内蔵の sqlite なら実行できます')).toBe(
-      '売上 は DuckDB へコピーできませんでした(理由。内蔵の sqlite なら実行できます)',
+    expect(refusedNote('売上', '理由', '内蔵の sqlite なら調べられます')).toBe(
+      '売上 は DuckDB に読み込めませんでした(理由。内蔵の sqlite なら調べられます)',
     );
   });
 });

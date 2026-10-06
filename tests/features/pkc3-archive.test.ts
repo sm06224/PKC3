@@ -175,7 +175,7 @@ describe('アーカイブ ZIP — round-trip', () => {
     expect(got.warnings).toEqual([]);
   });
 
-  it('🔑 本文がバッチに割れても全部入る(5000 entry の書出しの本質)', async () => {
+  it('🔑 本文がバッチに割れても全部入る(5000 entry の書き出しの本質)', async () => {
     const entries = Array.from({ length: 25 }, (_, i) => ({
       lid: `n${i}`,
       body: `# ${i}\n${'あ'.repeat(i)}\n`,
@@ -247,7 +247,7 @@ describe('アーカイブ ZIP — round-trip', () => {
     });
   });
 
-  it('🔑 NULL を書出し側で正規化する(読み手に null を持ち回らせない)', async () => {
+  it('🔑 NULL を書き出し側で正規化する(読み手に null を持ち回らせない)', async () => {
     // schema v2 までの revision 行は kind が NULL / asset の mime・size も NULL がある
     const base = source({
       entries: [{ lid: 'n1', body: 'x' }],

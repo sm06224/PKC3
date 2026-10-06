@@ -108,10 +108,10 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
  *   `buildCollectionPane` が、この配列を描いた**直後**に手で組む。
  */
 export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
-  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの 1 枚にまとめます' },
+  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの HTML ファイルにまとめます' },
   {
     action: 'export-portable',
-    label: 'HTML 1 枚で書き出す',
+    label: '1 ファイルの HTML で書き出す',
     /**
      * 🔴 **「閲覧用 HTML」との違いを、題名ではなく説明で言い切る**(#400 段④)。
      * ⚠ どちらも「HTML 1 枚」なので、**何が違うか**を書かないと選べない ──
@@ -316,7 +316,7 @@ function buildContainerRepair(): DocumentFragment {
   const rebuildNote = document.createElement('p');
   rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
   rebuildNote.textContent =
-    'ノートと添付を残したまま、入れ物だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士に付けた関係・履歴(前の版)は戻りません。';
+    'ノートと添付を残したまま、保存領域だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)は戻りません。';
   box.append(rebuildNote);
 
   const rebuild = document.createElement('button');
@@ -324,7 +324,7 @@ function buildContainerRepair(): DocumentFragment {
   rebuild.setAttribute('data-pkc-action', 'container-rebuild');
   rebuild.setAttribute('data-pkc-field', 'container-rebuild-run');
   rebuild.textContent = CONTAINER_REBUILD_LABEL;
-  rebuild.title = '読めるノートを集めて書き出してから、入れ物を作り直して同じ中身を戻します(添付はそのまま残ります)';
+  rebuild.title = '読めるノートを集めて書き出してから、保存領域を作り直して同じ中身を戻します(添付はそのまま残ります)';
   box.append(rebuild);
 
   const rebuildSum = document.createElement('p');
@@ -347,7 +347,7 @@ function buildContainerRepair(): DocumentFragment {
   btn.setAttribute('data-pkc-action', 'container-reset');
   btn.setAttribute('data-pkc-field', 'container-reset-run');
   btn.textContent = CONTAINER_RESET_LABEL;
-  btn.title = 'この入れ物のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
+  btn.title = 'この端末の保存領域のノートと添付を全部消して、空の状態から始めます(元に戻せません)';
   box.append(btn);
 
   const sum = document.createElement('p');

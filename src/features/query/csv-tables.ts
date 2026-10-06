@@ -416,7 +416,7 @@ export function csvCellsOverBudget(
   for (const t of tables) {
     cells += t.rows.length * t.columns.length;
     if (cells > budget) {
-      return `表「${t.name}」が大きすぎます(升 ${String(budget)} 個まで)。囲みを分けるか、名前を分けてください`;
+      return `表「${t.name}」が大きすぎます(セル ${String(budget)} 個まで)。囲みを分けるか、名前を分けてください`;
     }
   }
   return null;

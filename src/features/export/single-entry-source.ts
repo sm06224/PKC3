@@ -33,7 +33,7 @@ export async function singleEntrySource(
   const warnings: string[] = [];
   const metas = await base.listEntryMetas();
   const meta = metas.find((m) => m.lid === lid);
-  if (!meta) throw new Error('書き出す entry が見つかりません');
+  if (!meta) throw new Error('書き出すノートが見つかりません');
 
   // 本文は 1 件ぶんだけ引く。⚠ `getBody` があれば**必ずそれを使う** ──
   // `listBodies` 走査は対象の何百倍もの本文を worker 境界へ流す(review M-1)
@@ -56,7 +56,7 @@ export async function singleEntrySource(
     }
     after = next;
   }
-  if (body === null) throw new Error('書き出す entry の本文を読めませんでした');
+  if (body === null) throw new Error('書き出すノートの本文を読めませんでした');
 
   const chain = (await base.listRevisionLids()).includes(lid)
     ? await base.getRevisionChain(lid)
@@ -84,7 +84,7 @@ export async function singleEntrySource(
   const relations = await base.listRelations();
   const touching = relations.filter((r) => r.from_lid === lid || r.to_lid === lid);
   if (touching.length > 0) {
-    warnings.push(`このノートにつながる関連 ${touching.length} 件は含まれません(相手のノートが入らないため)`);
+    warnings.push(`このノートに付いているつながり ${touching.length} 件は含まれません(相手のノートが入らないため)`);
   }
 
   const assets = allAssets.filter((a) => used.has(a.key));

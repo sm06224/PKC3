@@ -569,7 +569,7 @@ ${(e as Error).message}`,
   await clickReal(page, '[data-pkc-field="voice-boost"]');
   await expect(page.locator('[data-pkc-field="voice-boost"]')).not.toBeChecked();
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
-  await playsOn('🔴 切に戻したら音が止まった(出口へ繋ぎ直していない)');
+  await playsOn('🔴 切に戻したら音が止まった(出口へつなぎ直していない)');
   // ⚠ 切に戻しても**器は捨てない**(捨てると、通している音が無音になる)
   expect(await counts(), '切に戻したときに器を作り直している').toEqual({ ...on, src: on.src });
 

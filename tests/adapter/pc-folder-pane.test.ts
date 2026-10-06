@@ -106,8 +106,8 @@ describe('API の無いブラウザ', () => {
   });
 });
 
-describe('繋ぐ前 / 繋いだ後', () => {
-  it('🔴 繋ぐ前は説明と「フォルダを選ぶ…」だけ', () => {
+describe('つなぐ前 / 繋いだ後', () => {
+  it('🔴 つなぐ前は説明と「フォルダを選ぶ…」だけ', () => {
     const { pane } = setup(async () => dir([]));
     const pick = q(pane, '[data-pkc-action="pc-pick-folder"]');
     expect(pick?.textContent).toBe('フォルダを選ぶ…');
@@ -219,7 +219,7 @@ describe('繋ぐ前 / 繋いだ後', () => {
     expect(q(pane, '[data-pkc-field="pc-note"]')?.textContent).toBe('このフォルダにはファイルがありません');
   });
 
-  it('🔴 「切る」で繋ぐ前へ戻る', async () => {
+  it('🔴 「切る」でつなぐ前へ戻る', async () => {
     const { pane, folder } = setup(async () => dir([file('a.md')]));
     await folder.pick();
     folder.cut();
@@ -354,7 +354,7 @@ describe('帯の「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)
     expect(q(band, '[data-pkc-field="pc-repick"]')?.getAttribute('data-pkc-action')).toBe('pc-pick-folder');
     expect(q(band, '[data-pkc-field="pc-cut"]')?.textContent).toBe('切る');
     expect(q(band, '[data-pkc-field="pc-cut"]')?.title, '「切る」の説明').toBe(
-      '繋ぎを外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+      'つなぎを外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
     );
   });
 

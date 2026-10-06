@@ -69,7 +69,7 @@ beforeEach(() => {
  * ⚠ **happy-dom は `offsetWidth` に 0 を返す**ので、ここで通るのは
  *   「測れないときは札へ落とす」枝である ── その落とし先まで見る(CLAUDE.md §2)。
  */
-describe('板どうしを繋ぐ線(#530 段③a)', () => {
+describe('板どうしをつなぐ線(#530 段③a)', () => {
   const LINES = [
     '<div class="pkc-format-block pkc-place" id="a" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="0" data-pkc-y="0" data-pkc-source-line="0" data-pkc-source-end="1"></div>',
     '<div class="pkc-format-block pkc-place" id="b" data-pkc-format-block data-pkc-w="100" data-pkc-h="60" data-pkc-x="300" data-pkc-y="0" data-pkc-source-line="2" data-pkc-source-end="3"></div>',

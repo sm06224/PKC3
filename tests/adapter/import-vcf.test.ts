@@ -129,7 +129,7 @@ describe('importVcfFiles ── 実行部', () => {
     const h = harness();
     await importVcfFiles(h.d, h.deps, [vcfFile(CARD)]);
     const said = h.notices.join('');
-    expect(said).toContain('取込完了: 連絡先 1 件');
+    expect(said).toContain('取り込み完了: 連絡先 1 件');
     expect(said, '分ける必要が無いのに 2 つの数を並べた').not.toContain('ノート');
   });
 
@@ -172,7 +172,7 @@ describe('importVcfFiles ── 実行部', () => {
     ).toEqual(['山田', '連絡先 1', '山田', '連絡先 2']);
   });
 
-  it('🔴 1 枚も読めなければ断り、書込は 1 件も起きない', async () => {
+  it('🔴 1 枚も読めなければ断り、書き込みは 1 件も起きない', async () => {
     const h = harness();
     const got = await importVcfFiles(h.d, h.deps, [vcfFile('ただの文章')]);
     expect(got).toBeNull();

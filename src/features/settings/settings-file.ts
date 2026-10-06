@@ -79,7 +79,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は
    *   その場で理由を出すので、移して害が出ない。
    */
-  { key: 'pkc3.open-place', label: '書庫(zip)を開く場所' },
+  { key: 'pkc3.open-place', label: 'zip ファイルを開く場所' },
   /**
    * ⚠ **人に付く好み**である(#884 段①)── 「アプリは別の窓で使いたい」かどうかは
    *   端末の事情ではない(`pkc3.open-place` と同じ考え方)。
@@ -165,7 +165,7 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
   },
   {
     key: 'pkc3.flags',
-    why: 'flag は設定ではない(15 枠 + 折りたたむ条件の宣言 + フラグ画面という別の機構)。運ぶと折りたたむ条件を跨いで別の端末へ持ち込むことになる',
+    why: 'フラグは設定ではない(最大 15 個 + 廃止する条件の宣言 + フラグ画面という別の機構)。運ぶと、廃止する条件が違う別の端末へ持ち込むことになる',
   },
   {
     key: 'pkc3.copy.history',

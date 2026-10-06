@@ -165,7 +165,7 @@ describe('#264 段① 押してから disk へ届くまで', () => {
     await vi.waitFor(() => expect(r.asked).toHaveLength(1));
     expect(r.asked[0]!.urls, 'リンクの URL まで外へ取りに行った').toEqual([SAME]);
     // ⑥ 名乗りは取り込みの側(置けなかったときの断り文で読み分けられる)
-    expect(r.asked[0]!.prefix).toBe('取込画像');
+    expect(r.asked[0]!.prefix).toBe('取り込み画像');
   });
 
   it('🔴 取り込めたら書換要求が出て、当てると**画像だけ**が `asset:` になる', async () => {

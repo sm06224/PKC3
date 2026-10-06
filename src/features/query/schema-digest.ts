@@ -425,6 +425,6 @@ export function renderSchemaDigest(input: SchemaDigestInput): string {
   for (const n of input.notes ?? []) out.push(`⚠ ${n}`);
   // ⚠ 見るのは**渡されたか**であって、模型の `rows` ではない ── 表が 0 件の DB でも
   //    「採れなかった」とは書かない(採れて 0 件と、採れなかったのは別の話である)
-  if (!input.counts) out.push('行数は採れませんでした。');
+  if (!input.counts) out.push('行数は取得できませんでした。');
   return out.join('\n');
 }

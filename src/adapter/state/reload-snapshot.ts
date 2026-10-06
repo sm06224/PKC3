@@ -15,7 +15,7 @@ export interface Snapshot {
 }
 
 /** 編集中に取込が終わったときに出す案内。⚠ **実行する内容と一致させる**。 */
-export const DEFERRED_RELOAD_NOTICE = '取込は完了しました。編集を終了すると一覧に反映されます';
+export const DEFERRED_RELOAD_NOTICE = '取り込みは完了しました。編集を終了すると一覧に反映されます';
 
 /**
  * 一覧を入れ替える。編集中なら**編集が終わるまで待ってから**入れ替える。

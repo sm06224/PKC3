@@ -56,7 +56,7 @@ export const PASTE_SOURCES = [
   {
     id: 'rtf',
     label: 'リッチテキストを優先',
-    hint: 'ウェブページの形より先にリッチテキストを読みます。生成 AI の貼付が崩れるときに',
+    hint: 'ウェブページの形より先にリッチテキストを読みます。生成 AI の貼り付けが崩れるときに',
   },
   {
     id: 'html-fence',
@@ -123,7 +123,7 @@ export function describePaste(a: PasteAttempt): string {
     a.sizes.rtf > 0 ? `リッチテキスト ${n(a.sizes.rtf)} 字` : null,
     a.sizes.plain > 0 ? `文字 ${n(a.sizes.plain)} 字` : null,
   ].filter((s): s is string => s !== null);
-  const head = `貼付: ${got.length > 0 ? got.join(' / ') : '何も届いていません'} → ${LABEL[a.used]}を使いました`;
+  const head = `貼り付け: ${got.length > 0 ? got.join(' / ') : '何も届いていません'} → ${LABEL[a.used]}を使いました`;
   const tail = a.skipped.map((s) => `${LABEL[s.kind === 'permalink' ? 'permalink' : s.kind]}は${s.why}`);
   const setting = a.source === 'auto' ? '' : `(設定: ${PASTE_SOURCES.find((s) => s.id === a.source)!.label})`;
   return [head + setting, ...tail].join('。');

@@ -161,7 +161,7 @@ const NESTED: Fake = {
   ],
 };
 
-describe('#399 ① フォルダ書出し — フォルダごと渡せる', () => {
+describe('#399 ① フォルダ書き出し — フォルダごと渡せる', () => {
   it('🔑 フォルダの器と、配下ぜんぶ(深い階層まで)が入る', async () => {
     const { source: s } = await folderSource(source(NESTED).src, 'f1');
     const got = await readArchive((await writeArchive(s, NOW)).blob);
@@ -190,7 +190,7 @@ describe('#399 ① フォルダ書出し — フォルダごと渡せる', () =>
 });
 
 describe('#399 ① 関係 — 中で閉じているものは残す', () => {
-  it('🔑 両端が中に居る関係は残る(1 ノート書出しと違うところ)', async () => {
+  it('🔑 両端が中に居る関係は残る(1 ノート書き出しと違うところ)', async () => {
     const { source: s, warnings } = await folderSource(
       source({ ...NESTED, links: [['n1', 'n2']] }).src,
       'f1',
@@ -198,7 +198,7 @@ describe('#399 ① 関係 — 中で閉じているものは残す', () => {
     const got = await readArchive((await writeArchive(s, NOW)).blob);
     expect(got.relations.map((r) => [r.fromLid, r.toLid])).toContainEqual(['n1', 'n2']);
     // ⚠ 落ちていないので、落ちたとは言わない
-    expect(warnings.join('')).not.toContain('外へつながる関連');
+    expect(warnings.join('')).not.toContain('フォルダの外へ向かうつながり');
   });
 
   it('🔴 外へ出る関係は落とし、落ちたことを件数で言う', async () => {
@@ -208,7 +208,7 @@ describe('#399 ① 関係 — 中で閉じているものは残す', () => {
     );
     const got = await readArchive((await writeArchive(s, NOW)).blob);
     expect(got.relations.some((r) => r.toLid === 'out')).toBe(false);
-    expect(warnings.some((w) => w.includes('外へつながる関連 1 件'))).toBe(true);
+    expect(warnings.some((w) => w.includes('フォルダの外へ向かうつながり 1 件'))).toBe(true);
   });
 });
 

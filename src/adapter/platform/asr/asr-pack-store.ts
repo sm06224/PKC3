@@ -151,10 +151,10 @@ export class AsrPackStore {
     let totalBytes = 0;
     for (const [path, blob] of files) {
       const want = expect.get(path);
-      if (want === undefined) throw new AsrPackError(`構成ファイルに無いファイルが混ざっています(${path})`);
+      if (want === undefined) throw new AsrPackError(`ファイル一覧に無いファイルが混ざっています(${path})`);
       // 🔴 書く前に大きさを突き合わせる(入れてから気づくと、quota を食っただけの半端が残る)
       if (blob.size !== want.bytes) {
-        throw new AsrPackError(`${path} の大きさが構成ファイルと違います(書き込みを取り消しました)`);
+        throw new AsrPackError(`${path} の大きさがファイル一覧と違います(書き込みを取り消しました)`);
       }
       metaFiles.push({ path, bytes: blob.size, sha256: want.sha256 });
       totalBytes += blob.size;

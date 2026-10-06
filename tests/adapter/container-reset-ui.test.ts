@@ -200,7 +200,7 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     const m = mount();
     m.run.click();
     await settle();
-    expect(m.body(), '拾っていないことを言っていない').toContain('まだ拾い出していません');
+    expect(m.body(), '拾っていないことを言っていない').toContain('まだ取り出していません');
   });
 
   /**
@@ -215,9 +215,9 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     const m = mount();
     m.run.click();
     await settle();
-    expect(m.body(), '拾えた件数が出ていない').toContain('この画面で拾えたのは 0 件です');
+    expect(m.body(), '拾えた件数が出ていない').toContain('この画面で取り出せたのは 0 件です');
     expect(m.body(), '読めなかった数が出ていない').toContain('読み込めなかった箇所 7');
-    expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ拾い出していません');
+    expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだ取り出していません');
   });
 
   /**
@@ -336,7 +336,7 @@ describe('合言葉(#986 段③)', () => {
  *   (`db-rescue-archive-run` / `db-rescue-run`)を退役させた ── いまは
  *   左下の「バックアップ」が、普通に書き出せた回も**同じ状態
  *   (`noteRescueWritten`)**へ記録する(そうしないと、健全な入れ物では
- *   この画面が永久に「まだ拾い出していません」と言い続ける ──
+ *   この画面が永久に「まだ取り出していません」と言い続ける ──
  *   `export-archive.ts` の docstring)。
  *
  * 🔑 だから**実際の書き出しから記録まで繋がっているか**は、その書き出しを

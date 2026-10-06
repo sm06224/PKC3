@@ -292,7 +292,7 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
 
   it('🔴 行き先の判定 ── 進行中 / 終わり / 知らせ', () => {
     expect(routeStatusText('書き出しています…')).toBe('progress');
-    expect(routeStatusText('取込中…(12 件を書き込んでいます)')).toBe('progress');
+    expect(routeStatusText('取り込み中…(12 件を書き込んでいます)')).toBe('progress');
     expect(routeStatusText('')).toBe('progress-end');
     expect(routeStatusText('コピーしました')).toBe('notice');
     // 対照:途中に `…` があっても末尾でなければ結果(「…」を含む題名を結果に出す)
@@ -426,7 +426,7 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/import-pkc2.ts',
-      starts: ["deps.notify?.('取込中…(ファイルを読んでいます)');", 'deps.notify?.(`取込中…(${rows.length} 件を書き込んでいます)`);'],
+      starts: ["deps.notify?.('取り込み中…(ファイルを読んでいます)');", 'deps.notify?.(`取り込み中…(${rows.length} 件を書き込んでいます)`);'],
       end: /deps\.notify\?\.\(''\)/,
     },
     {

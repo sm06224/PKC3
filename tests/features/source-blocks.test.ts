@@ -234,7 +234,7 @@ describe('`:::` の塊の範囲(blockSpanAt) #677', () => {
 });
 
 describe('行範囲の切り出し(sliceLines) #677', () => {
-  it('両端含む行を、原文のまま繋ぐ(末尾の改行は付けない)', () => {
+  it('両端含む行を、原文のままつなぐ(末尾の改行は付けない)', () => {
     expect(sliceLines('a\nb\nc\nd', { start: 1, end: 2 })).toBe('b\nc');
     expect(sliceLines('a\nb\nc\nd', { start: 0, end: 3 })).toBe('a\nb\nc\nd');
     // 空行も 1 行として数える(落とすと貼った先で段落が繋がる)

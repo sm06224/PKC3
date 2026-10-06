@@ -225,7 +225,7 @@ describe('掴んで離すと、本文が書き換わる(#530 段③d)', () => {
     expect(next.split('\n')[5]).toBe('右');
   });
 
-  it('🔴 ⊕ を掴む(= 細かい繋ぎ目)と、掴んだ側が `@1/4` の綴りで書かれる。落とした辺は中央', () => {
+  it('🔴 ⊕ を掴む(= 細かいつなぎ目)と、掴んだ側が `@1/4` の綴りで書かれる。落とした辺は中央', () => {
     const { host, left, asks } = rig();
     hover(left, 96, 30);
     const plus = handles(host).find((h) => h.getAttribute('data-pkc-anchor') === 'right@1/4')!;
@@ -499,7 +499,7 @@ describe('引いた線は、右クリックで消せる(片道にしない。#53
  *
  * 🔑 CSS は構文で読む(`css-blocks.ts`。CLAUDE.md §1 で 5 回踏んだ罠の正本)。
  */
-describe('掴んで繋ぐ印と線の CSS(#530 段③d)', () => {
+describe('掴んでつなぐ印と線の CSS(#530 段③d)', () => {
   const APP = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
   const one = (sel: string): string => {
     const b = blocksFor(APP, sel);
@@ -570,7 +570,7 @@ describe('掴んで繋ぐ印と線の CSS(#530 段③d)', () => {
 
 /** 🔴 main.ts の配線(main.ts は原文を読む test しか無い ── 配線を落としても unit は黙る)。 */
 describe('配線(main.ts)', () => {
-  it('🔴 起動時に掴んで繋ぐ配線が呼ばれている', () => {
+  it('🔴 起動時に掴んでつなぐ配線が呼ばれている', () => {
     const src = stripComments(readFileSync('src/main.ts', 'utf-8')).replace(/\/\/.*$/gm, '');
     expect(src, '配線が呼ばれていない').toMatch(/installPlaceConnect\(root, dispatcher\)/);
     expect(src, '取り込みが無い').toMatch(/from '@adapter\/ui\/render\/place-connect'/);

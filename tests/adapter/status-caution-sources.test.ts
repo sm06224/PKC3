@@ -212,7 +212,7 @@ describe('挙動で通せない断り(原文 pin ── 弱い)', () => {
 
   it.each([
     "'追記の欄が見つかりません(ノートを開いてから押してください)', CAUTION",
-    "'書庫の一覧を作れませんでした', CAUTION",
+    "'zip ファイルの一覧を作れませんでした', CAUTION",
   ])('🔴 %s', (frag) => {
     expect(code).toContain(frag);
   });

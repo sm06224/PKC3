@@ -83,7 +83,7 @@ const fakeDispatcher = (phase: string) => {
   };
 };
 
-describe('1 ノート書出し — 断るなら読む前に断る', () => {
+describe('1 ノート書き出し — 断るなら読む前に断る', () => {
   it('🔴 編集中は store を**1 度も読まずに**断る', async () => {
     // ガードが読みの後ろにあると「30MB 読んでから編集中ですと言う」になり、
     // さらに読みの途中で編集が確定すると body と鎖の基準 tip が別時刻になる
@@ -109,7 +109,7 @@ describe('1 ノート書出し — 断るなら読む前に断る', () => {
   });
 });
 
-describe('削除と書出しの排他', () => {
+describe('削除と書き出しの排他', () => {
   /** binder だけを立てて、削除 action の振る舞いを見る。 */
   function setup(services: BinderServices) {
     const root = document.createElement('div');
@@ -150,7 +150,7 @@ describe('削除と書出しの排他', () => {
     return { root, d, events };
   }
 
-  it('🔴 書出しの実行中は削除を断る(走査の途中で対象が消えない)', () => {
+  it('🔴 書き出しの実行中は削除を断る(走査の途中で対象が消えない)', () => {
     // 「書き出す」を押した直後に「削除」を押せると、走査中に entry が消えて
     // 書出しが失敗する ── user は書き出したつもりでファイルが 1 個も無い
     vi.stubGlobal('confirm', () => true);
@@ -237,7 +237,7 @@ describe('書き出す対象の解決', () => {
  *
  * ⚠ 観測点は**入口ごと**。1 つでも素通しなら、そこから壊れる。
  */
-describe('書出し中に本文を書き換えられない', () => {
+describe('書き出し中に本文を書き換えられない', () => {
   /** 本文を書き換える入口を**全部**並べた root を作る。 */
   function setupAll(busy: boolean) {
     const root = document.createElement('div');
@@ -286,15 +286,15 @@ describe('書出し中に本文を書き換えられない', () => {
    *   **書出しの門を外しても満たされる**(`move-to-folder` を門から外しても緑だった)。
    * 🔑 だから**断りの字**まで見る ── 書出しの門は 1 つの文言を持っている。
    */
-  it.each(ENTRIES)('🔴 書出しの実行中は「%s」を可視に断る', (action) => {
+  it.each(ENTRIES)('🔴 書き出しの実行中は「%s」を可視に断る', (action) => {
     vi.stubGlobal('confirm', () => true);
     const { root, events, d } = setupAll(true);
     root.querySelector<HTMLElement>(`[data-pkc-action="${action}"]`)!.click();
     expect(events, `${action} が無言で素通りしている`).toContain('OP_FAILED');
     expect(
       d.getState().error ?? '',
-      `${action} が書出しの門を通っていない(別の理由で断っている)`,
-    ).toContain('書き出し / 取込が実行中です');
+      `${action} が書き出しの門を通っていない(別の理由で断っている)`,
+    ).toContain('書き出し / 取り込みが実行中です');
     vi.unstubAllGlobals();
   });
 
@@ -971,7 +971,7 @@ describe('Word / PowerPoint — 読めなかった添付の注意(#636)', () => 
  *   最後の `notify` は `''` になる。⚠ **出す前の断り**(編集中)は進行中の字を出していないので、
  *   消す `notify('')` も撃たない(別の知らせを巻き込まない)。
  */
-describe('Office 書出し ── 失敗したら進行中の字を消す(#1017 C5)', () => {
+describe('Office 書き出し ── 失敗したら進行中の字を消す(#1017 C5)', () => {
   const run = async (
     kind: 'docx' | 'pptx',
     over: Partial<ArchiveSource>,

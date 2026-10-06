@@ -193,7 +193,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
       const m = metaOf.get(r.lid);
       if (!m) {
         // 本文はあるが meta が無い = 書出し中に消えた ── 黙って落とさない
-        warn.add('orphan-body', '一覧に無い entry の注意', `本文はあるが一覧に無い entry を飛ばしました: ${r.lid}`);
+        warn.add('orphan-body', '一覧に無いノートの注意', `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`);
         continue;
       }
       const e: ArchiveEntry = {
@@ -217,7 +217,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     after = next;
   }
   if (entryCount < metas.length) {
-    warnings.push(`一覧にあって本文が取れなかった entry が ${metas.length - entryCount} 件あります`);
+    warnings.push(`一覧にあって本文が取れなかったノートが ${metas.length - entryCount} 件あります`);
   }
 
   // ── relations
@@ -498,7 +498,7 @@ export function restoreArchive(
   const seenLid = new Set<string>();
   for (const e of archive.entries) {
     if (seenLid.has(e.lid)) {
-      warn.add('dup-lid', 'アーカイブ内で重複した ID', `アーカイブの中で ID が重複しています: ${e.lid}(別の entry として取り込みます)`);
+      warn.add('dup-lid', 'アーカイブ内で重複した ID', `アーカイブの中で ID が重複しています: ${e.lid}(別のノートとして取り込みます)`);
     }
     seenLid.add(e.lid);
   }
@@ -530,7 +530,7 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warn.add('dangling-relation', '端点の無い関連', `端点の無い関連を除きました: ${r.id}`);
+      warn.add('dangling-relation', '端点の無いつながり', `端点の無いつながりを除きました: ${r.id}`);
       continue;
     }
     let id = r.id;
@@ -557,7 +557,7 @@ export function restoreArchive(
   if (orphanRevs > 0) {
     // entry が居ない履歴 = ゴミ箱の版。**今は復元しない**(entry が無いと鎖の
     // 起点 = tip が無く、decode できない)── 黙って落とさず件数を言う
-    warnings.push(`entry の無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
+    warnings.push(`ノートの無い履歴 ${orphanRevs} 版は復元しませんでした(ゴミ箱の版)`);
   }
   const revisionChains = [...byLid].map(([entryLid, rows]) => ({
     entryLid,

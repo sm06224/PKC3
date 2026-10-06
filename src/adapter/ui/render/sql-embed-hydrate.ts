@@ -92,7 +92,7 @@ export function askSqlEmbed(src: string, alive: () => boolean = () => true): Pro
     const check = checkReadOnlySql(src);
     if (!check.ok) throw new Error(check.why);
     const run = runner;
-    if (run === null) throw new Error('このバージョンでは実行できません(アプリを再読み込みすると直ることがあります)');
+    if (run === null) throw new Error('アプリの読み込みが古いため SQL を実行できません。再読み込みしてください');
     try {
       // ⚠ 打つのは**全角を直した後の字**(`check.sql`)── 元の字を渡さない
       const r = await run(check.sql, {

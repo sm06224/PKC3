@@ -134,12 +134,12 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     expect(r.warnings[0]).toMatch(/同じ ID のフォルダが 2 つ/);
   });
 
-  it('親フォルダが書出しに無いときは最上位へ寄せて言う(平坦化しない)', () => {
+  it('親フォルダが書き出しに無いときは最上位へ寄せて言う(平坦化しない)', () => {
     const r = buildFolderGraph([F('a', 'いない', 'ノート置き場'), F('b', 'a')], new Map());
     // a は root 直下、b は a の下 ── **残りの木は保つ**
     expect(parentOf(r)).toEqual({ b: 'a' });
     expect(r.warnings).toEqual([
-      '親フォルダが書出しに含まれていません: ノート置き場(最上位に置きます)',
+      '親フォルダが書き出しに含まれていません: ノート置き場(最上位に置きます)',
     ]);
   });
 
@@ -148,7 +148,7 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     const r = buildFolderGraph([F('root', null)], new Map([['n1', 'いない']]));
     expect(r.edges).toEqual([]);
     expect(r.warnings).toEqual([
-      'ノートの親フォルダが書出しに含まれていません(いない)。n1 を最上位に置きます',
+      'ノートの親フォルダが書き出しに含まれていません(いない)。n1 を最上位に置きます',
     ]);
   });
 

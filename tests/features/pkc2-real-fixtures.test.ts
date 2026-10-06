@@ -148,8 +148,8 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(t.get('n-2')).toBe('f-root');
     // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
     expect(got.warnings).toEqual([
-      '1 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 側に受け皿がまだありません',
+      '1 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        '。PKC3 側に対応する置き場がまだありません',
     ]);
   });
 
@@ -170,8 +170,8 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(c.entries.filter((e) => e.archetype === 'attachment')).toHaveLength(1);
     // 落ちる情報は件数つきで言う(todo と attachment の 2 件)
     expect(got.warnings).toEqual([
-      '2 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 側に受け皿がまだありません',
+      '2 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        '。PKC3 側に対応する置き場がまだありません',
     ]);
   });
 

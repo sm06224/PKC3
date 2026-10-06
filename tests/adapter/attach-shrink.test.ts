@@ -157,7 +157,7 @@ describe('添付を縮める(#412)', () => {
     });
   });
 
-  it('🔴 縮めるのに失敗しても、取込は続く(元のまま入る)', async () => {
+  it('🔴 縮めるのに失敗しても、取り込みは続く(元のまま入る)', async () => {
     const out = await maybeShrink(
       deps({
         shrinkImage: async () => {

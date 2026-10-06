@@ -350,7 +350,7 @@ test('🔴 編集中に添付しても断らず、編集を終えると本文に
     buffer: PNG_1X1,
   });
   const status = page.locator('[data-pkc-region="status"]');
-  await expect(status, '預かったことを言っていない').toContainText('「ねこ.png」を預かりました');
+  await expect(status, '保留したことを言っていない').toContainText('「ねこ.png」を保留しました');
   await expect(status, '断っている(直す前の症状)').not.toContainText('編集を終了してから');
   // 預かっている間、打っていた本文は無傷
   await expect(ta).toHaveValue('# 会議メモ');
@@ -1798,7 +1798,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
 
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   const connectBtn = page.locator('[data-pkc-field="sql-er-connect"]');
-  await expect(connectBtn, '「繋ぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
+  await expect(connectBtn, '「つなぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
 
   // 1 つ目の四角の 1 列目 → 「ここから」の印が付く
   const colOf = (box: number) =>
@@ -1835,12 +1835,12 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   これまでの「押した列が取り出す列に足される」が死んでいないか。
    */
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
-  await expect(connectBtn, '「繋ぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
+  await expect(connectBtn, '「つなぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
   await page.fill('[data-pkc-field="sql-input"]', 'select * from sheet1');
   await clickReal(page, colOf(0));
   await expect(
     page.locator('[data-pkc-field="sql-input"]'),
-    '繋ぐを切にしたのに、列を押しても取り出す列に足されない',
+    'つなぐを切にしたのに、列を押しても取り出す列に足されない',
   ).not.toHaveValue('select * from sheet1');
 
   // 畳んで元へ戻す ── 以降の筋書きを汚さない

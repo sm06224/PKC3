@@ -459,7 +459,7 @@ export async function rebuildContainer(
  */
 export const REBUILD_LOST: readonly string[] = [
   'どのフォルダに入っていたか',
-  'ノート同士に付けた関係',
+  'ノート同士のつながり',
   '履歴(前の版)',
 ] as const;
 
@@ -472,7 +472,7 @@ export const REBUILD_LOST: readonly string[] = [
 export function rebuildDoneMessage(r: RebuildReport): string {
   if (r.outcome === 'memory-only') {
     return (
-      '入れ物を作り直せませんでした(この画面では中身がメモリ上にしか置けません)。' +
+      '保存領域を作り直せませんでした(この画面では中身がメモリ上にしか置けません)。' +
       `書き戻していないので、いまダウンロードした ${RESCUE_ARCHIVE_SUFFIX} のファイルを、` +
       '読み込み直したあとに「取り込む」から読み込んでください。'
     );
@@ -487,7 +487,7 @@ export function rebuildDoneMessage(r: RebuildReport): string {
      * ⚠ 「何も消えていません」とは**書かない** ── 捨てた後だからである。
      */
     return (
-      `⚠ 入れ物を捨てた後に止まりました(${r.error ?? '理由は分かりません'})。` +
+      `⚠ 保存領域を消した後に止まりました(${r.error ?? '理由は分かりません'})。` +
       `いまダウンロードした ${RESCUE_ARCHIVE_SUFFIX} のファイルは手元にあります。` +
       '⚠ この画面はもう保存できないので、読み込み直してから「取り込む」で戻してください。' +
       '読み込み直します。'
@@ -548,11 +548,11 @@ export function rebuildExplainMessage(opts: {
         ? `・添付したファイル ${assetsOnDisk} 件の中身(別の場所にあるので触りません)`
         : '・添付したファイルの中身(別の場所にあるので触りません)';
   return [
-    'いま読めるノートを集めて、入れ物を作り直し、そのまま戻します。',
+    'いま読めるノートを集めて、保存領域を作り直し、そのまま戻します。',
     '',
     'この順で進みます',
     '・読めるノートを集めて、ファイル(.pkc3.zip)にして手元へダウンロードします',
-    '・入れ物を作り直します',
+    '・保存領域を作り直します',
     '・集めたノートを、そのまま戻します',
     // 🔑 いちばん怖い所を先に潰す ── 「押したら消える」ではない
     'ファイルをダウンロードできなかったときは、何も消さずに止まります。',

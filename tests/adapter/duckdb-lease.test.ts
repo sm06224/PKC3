@@ -459,7 +459,7 @@ describe('🔴 器へ写す所の時間の門(R5)', () => {
   });
 
   it('🔴 断りの字は 1 つの定数(呼び側がそれで見分ける)で、打つ字の時間切れとは別の字', () => {
-    expect(DUCKDB_LOAD_TOO_LONG).toContain('コピーする');
+    expect(DUCKDB_LOAD_TOO_LONG).toContain('読み込む');
     expect(DUCKDB_LOAD_TOO_LONG).not.toBe(DUCKDB_TOO_LONG);
   });
 

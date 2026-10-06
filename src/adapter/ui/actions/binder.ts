@@ -469,7 +469,7 @@ async function browseArchive(
   const say = (text: string): void => services.showStatus?.(text);
   const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   if (services.readAssetBlob === undefined) {
-    say('このバージョンでは書庫の中を見られません');
+    say('アプリの読み込みが古いため zip ファイルの中を見られません。再読み込みしてください');
     return;
   }
   /**
@@ -2256,7 +2256,7 @@ function refuseWhileBusy(
   // ⚠ **可視に断る**(無言の操作拒否を作らない)
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: '書き出し / 取込が実行中です。完了してから操作してください',
+    error: '書き出し / 取り込みが実行中です。完了してから操作してください',
   });
   return true;
 }
@@ -2268,7 +2268,7 @@ function refuseWhileBusy(
 function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'このバージョンでは録音・画面収録ができません',
+    error: 'アプリの読み込みが古いため録音・画面収録ができません。再読み込みしてください',
   });
 }
 
@@ -2276,7 +2276,7 @@ function refuseNoCapture(dispatcher: Dispatcher): void {
 function refuseNoTimer(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'このバージョンでは作業時間を計れません',
+    error: 'アプリの読み込みが古いため作業時間を計れません。再読み込みしてください',
   });
 }
 
@@ -3520,7 +3520,7 @@ function copySourceLines(
   done: string,
 ): void {
   if (services.copyText === undefined) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンではコピーできません' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
@@ -5318,7 +5318,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const trim = dispatcher.getState().captureTrim;
     if (trim === null || trim.startMs === null || trim.endMs === null) return;
     if (!services.trimCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンでは切り出せません。' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため切り出せません。再読み込みしてください' });
       return;
     }
     services.trimCapture(trim.lid, trim.startMs, trim.endMs);
@@ -5332,7 +5332,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     if (!services.transcribeCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンでは文字にできません。' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため文字にできません。再読み込みしてください' });
       return;
     }
     services.transcribeCapture(lid);
@@ -5540,7 +5540,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const phase = dispatcher.getState().phase;
     if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを足してください` });
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -5588,7 +5588,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 編集中は声に出して断る(#513)── reducer は黙って捨てる
     const phase = dispatcher.getState().phase;
     if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}関係を消してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを消してください` });
       return;
     }
     const id = target.getAttribute('data-pkc-relation');
@@ -6617,7 +6617,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
       return;
     }
     const to = otherSide(side);
@@ -8238,7 +8238,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
       return;
     }
     /**
@@ -8393,7 +8393,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンではコピーできません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いためコピーできません。再読み込みしてください' });
       return;
     }
     // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
@@ -9708,11 +9708,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       services,
       key,
-      target.getAttribute('data-pkc-asset-name') ?? '書庫',
+      target.getAttribute('data-pkc-asset-name') ?? 'zip ファイル',
       // 🔴 **押した瞬間の選択**を控える(別の窓で選んでいる間に動きうる)
       dispatcher.getState().selectedLid,
       // ⚠ 組めずに投げた回も**黙って終わらせない**(押して無反応にしない)
-    ).catch(() => services.showStatus?.('書庫の一覧を作れませんでした', CAUTION));
+    ).catch(() => services.showStatus?.('zip ファイルの一覧を作れませんでした', CAUTION));
   },
   'download-asset': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
@@ -9934,7 +9934,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (services.openManualWindow === undefined) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'このバージョンではマニュアルのウィンドウを開けません',
+        error: 'アプリの読み込みが古いためマニュアルのウィンドウを開けません。再読み込みしてください',
       });
       return;
     }
@@ -10196,7 +10196,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンでは書き出せません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため書き出せません。再読み込みしてください' });
       return;
     }
     void read([lid]).then((bodies) => {
@@ -11134,7 +11134,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const send = services.deliverToExtension;
     const read = services.readBodies;
     if (!send || !read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このバージョンでは送れません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'アプリの読み込みが古いため送れません。再読み込みしてください' });
       return;
     }
     const st = dispatcher.getState();

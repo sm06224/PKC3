@@ -110,8 +110,8 @@ test('🔴 .vcf を取り込むと連絡先に並び、「vCard で書き出す�
   // ② 取込の完了が帯に出る(⚠ 一覧の既定はフォルダ表示なので entry-list では見ない)
   await expect(
     page.locator('[data-pkc-region="status"]'),
-    '取込完了の帯が出ない',
-  ).toContainText('取込完了: 連絡先 1 件', { timeout: 10_000 });
+    '取り込み完了の帯が出ない',
+  ).toContainText('取り込み完了: 連絡先 1 件', { timeout: 10_000 });
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   const row = pane.locator('[data-pkc-contact]');
@@ -233,8 +233,8 @@ test('🔴 取り込んだ直後に「取り込みを取り消す」を押すと
     buffer: Buffer.from(vcf, 'utf8'),
   });
 
-  await expect(page.locator('[data-pkc-region="status"]'), '取込完了の帯が出ない').toContainText(
-    '取込完了: 連絡先 1 件',
+  await expect(page.locator('[data-pkc-region="status"]'), '取り込み完了の帯が出ない').toContainText(
+    '取り込み完了: 連絡先 1 件',
     { timeout: 10_000 },
   );
 

@@ -2520,7 +2520,7 @@ async function exportOneTable(
       if ((n & 255) === 0 && performance.now() - sliceStart >= EXPORT_SLICE_MS) {
         await yieldToQueue();
         if (!alive()) {
-          return fail(columns, 'コピーの途中で閉じられました(もう一度実行してください)', fks);
+          return fail(columns, '読み込みの途中で閉じられました(もう一度押してください)', fks);
         }
         sliceStart = performance.now();
       }

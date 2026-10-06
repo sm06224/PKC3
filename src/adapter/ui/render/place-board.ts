@@ -142,8 +142,8 @@ function ensureGrip(el: HTMLElement): void {
    */
   const label =
     el.id === ''
-      ? '掴んで動かします(離した位置が本文に書かれます)'
-      : `掴んで動かします(離した位置が本文に書かれます)。この付箋の名前は「${el.id}」です`;
+      ? 'ドラッグして動かします(離した位置が本文に書かれます)'
+      : `ドラッグして動かします(離した位置が本文に書かれます)。この付箋の名前は「${el.id}」です`;
   grip.title = label;
   grip.setAttribute('aria-label', label);
 }
@@ -162,7 +162,7 @@ function ensureSizeHandle(el: HTMLElement): void {
     handle.textContent = '';
     el.append(handle);
   }
-  const label = '角を掴んで大きさを変えます(離した大きさが本文に書かれます)';
+  const label = '角をドラッグして大きさを変えます(離した大きさが本文に書かれます)';
   handle.title = label;
   handle.setAttribute('aria-label', label);
 }

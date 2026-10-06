@@ -182,7 +182,7 @@ describe('押しても、まだ何も起きない(#1006)', () => {
     m.run.click();
     await settle();
     expect(m.calls, '押しただけで作り直しが走った').toEqual([]);
-    expect(m.body(), '説明が出ていない').toContain('入れ物を作り直します');
+    expect(m.body(), '説明が出ていない').toContain('保存領域を作り直します');
   });
 
   it('⚠ 「やめる」を押したら、何も走らない', async () => {
@@ -431,7 +431,7 @@ describe('連打(#1006)', () => {
     await m.answer('cancel');
     m.run.click();
     await settle();
-    expect(m.body(), 'やめた後に押しても窓が出ない').toContain('入れ物を作り直します');
+    expect(m.body(), 'やめた後に押しても窓が出ない').toContain('保存領域を作り直します');
   });
 
   it('🔴 落ちた回も、もう一度押せる', async () => {
@@ -441,6 +441,6 @@ describe('連打(#1006)', () => {
     await m.answer('ok');
     m.run.click();
     await settle();
-    expect(m.body(), '落ちた後に押しても窓が出ない').toContain('入れ物を作り直します');
+    expect(m.body(), '落ちた後に押しても窓が出ない').toContain('保存領域を作り直します');
   });
 });

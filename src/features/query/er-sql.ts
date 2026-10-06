@@ -280,7 +280,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
     if (action.kind === 'link') {
       const { from, fromColumn, to, toColumn } = action.link;
       if (fromColumn === '' || toColumn === '') {
-        return { ok: false, why: `「${from}」と「${to}」を、どの列で繋ぐかが分かりません` };
+        return { ok: false, why: `「${from}」と「${to}」を、どの列でつなぐかが分かりません` };
       }
       const cond = `${erQuote(to)}.${erQuote(toColumn)} = ${erQuote(from)}.${erQuote(fromColumn)}`;
       return {
@@ -304,7 +304,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
     if (has(action.table)) return { ok: false, why: `「${action.table}」はもう入っています` };
     return {
       ok: false,
-      why: `「${action.table}」を足すには、図の線(つながり)を押してください。どの列で繋ぐかが要ります`,
+      why: `「${action.table}」を足すには、図の線(つながり)を押してください。どの列でつなぐかが要ります`,
     };
   }
 
@@ -331,7 +331,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
 
   const { from, fromColumn, to, toColumn } = action.link;
   if (toColumn === '' || fromColumn === '') {
-    return { ok: false, why: `「${from}」と「${to}」を、どの列で繋ぐかが分かりません` };
+    return { ok: false, why: `「${from}」と「${to}」を、どの列でつなぐかが分かりません` };
   }
   if (has(from) && has(to)) return { ok: false, why: `「${from}」と「${to}」はもうつながっています` };
   if (!has(from) && !has(to)) {

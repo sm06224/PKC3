@@ -130,7 +130,7 @@ export function grabArchiveWindow(
     const p = win.document.createElement('p');
     p.setAttribute('data-pkc-field', 'archive-window-wait');
     // ⚠ 白紙にしない ── 掴んだだけの窓は「壊れている」に見える
-    p.textContent = '書庫を読んでいます…';
+    p.textContent = 'zip ファイルを読んでいます…';
     win.document.body.append(p);
   } catch {
     // 組めなくても窓は掴めている ── 中身は次の段で入れ直す

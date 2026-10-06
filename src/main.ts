@@ -2081,7 +2081,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
+          '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。⚠ ' +
           'ここで保存すると相手の編集を上書きします。内容を控えてから「編集をやめる」を押してください',
       });
     });
@@ -2251,7 +2251,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // ⚠ **注意の中身**を出す導線(review M1 で一度落ちた)。無いと user が
         // 見るのは「⚠ 注意 1 件」だけで、**どの添付が欠けたか**が消える ──
         // バックアップで一番知りたい情報がそこにある
-        report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+        report: (notes) => showNotices(regions.notices, '書き出し時の注意', notes),
         /**
          * 🔴 **保存の直後に押されても、保存した本文を書き出す**(2026-08-17 実測)。
          * 書込は effect 層の chain に直列化されるが、**読みはその外**なので、
@@ -4307,7 +4307,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           getAsset: (key) => blobs.get(cid, key),
           download: downloadBlob,
           notify: (message) => showStatus(message),
-          report: (notes) => showNotices(regions.notices, '書出し時の注意', notes),
+          report: (notes) => showNotices(regions.notices, '書き出し時の注意', notes),
           settle: async () => {
             await storeEffects?.settled();
           },
@@ -4661,7 +4661,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   setSqlEmbedRunner(async (sql, limits) => {
     await storeEffects?.settled();
     const ask = storePort.runReadOnlySql;
-    if (!ask) throw new Error('このバージョンでは実行できません(アプリを再読み込みすると直ることがあります)');
+    if (!ask) throw new Error('アプリの読み込みが古いため SQL を実行できません。再読み込みしてください');
     return ask(sql, limits);
   });
   storeEffects = connectStoreEffects(dispatcher, storePort, {

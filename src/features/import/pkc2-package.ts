@@ -62,7 +62,7 @@ export async function peekZipFormat(zip: Blob): Promise<string | null> {
   const dir = await readZipDirectory(zip);
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
   const hits = dir.filter((e) => e.name === MANIFEST);
@@ -87,7 +87,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 「manifest.json が無い = 不明」に混ぜると user は原因を誤解する
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
@@ -117,7 +117,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 未知の版は**明示 reject** ── 「読めるところだけ読む」は静かな欠損を作る
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の package version です(version=${String(manifest.version)}、対応は 1)`,
+      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
     );
   }
 

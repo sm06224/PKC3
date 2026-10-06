@@ -192,7 +192,7 @@ function moveRepeat(
   if (!Number.isInteger(line)) return;
   const from = grabbed.from;
   if (from === '') {
-    deny('どの回を動かすのか分かりませんでした(もう一度、カードを掴み直してください)');
+    deny('どの回を動かすのか分かりませんでした(もう一度、カードをドラッグし直してください)');
     return;
   }
   const days = daysBetween(from, dropDate);

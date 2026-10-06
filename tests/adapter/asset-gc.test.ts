@@ -171,7 +171,7 @@ describe('runExplicitPurge (P4b)', () => {
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
 
-  it('confirm 後に再走査し、交差だけ消す(取込中 key / 参照され直した key を守る)', async () => {
+  it('confirm 後に再走査し、交差だけ消す(取り込み中 key / 参照され直した key を守る)', async () => {
     let scanCount = 0;
     const { ports, calls } = fakePorts({
       // 2 回目の走査では世界が変わっている:

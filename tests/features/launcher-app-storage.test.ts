@@ -73,7 +73,7 @@ describe('貸す保存領域', () => {
     expect('pkc3.theme'.startsWith(appStoragePrefix('e-1'))).toBe(false);
   });
 
-  it('🔴 lid に `.` が入っても分離が壊れない(PKC2 取込は lid を素通しする)', () => {
+  it('🔴 lid に `.` が入っても分離が壊れない(PKC2 取り込みは lid を素通しする)', () => {
     // 直す前: lid "a" の鍵 "b.c" と lid "a.b" の鍵 "c" が**どちらも**
     // `pkc3.app.a.b.c` になり、別のアプリのデータを読み書きできた
     const outer = appStoragePrefix('a');
@@ -239,7 +239,7 @@ describe('shim の意味論(実際に走らせる)', () => {
     expect(sent[1], '前の値まで外殻へ送っている(payload が倍になる)').not.toHaveProperty('__prev');
   });
 
-  it('🔴 上限に当たった書込は**保存に行かない**が、**お知らせは出す**', () => {
+  it('🔴 上限に当たった書き込みは**保存に行かない**が、**お知らせは出す**', () => {
     const { ls, sent } = runShim({}, 32);
     try {
       ls.setItem('a', 'x'.repeat(100));
@@ -293,7 +293,7 @@ describe('shim の意味論(実際に走らせる)', () => {
     expect(() => ls.setItem('next', 'x')).not.toThrow();
   });
 
-  it('⚠ 通った書込は巻き戻さない(ok の ack で像が壊れない)', () => {
+  it('⚠ 通った書き込みは巻き戻さない(ok の ack で像が壊れない)', () => {
     const { ls, sent, ack } = runShim({});
     ls.setItem('a', '1');
     ack(Number(sent[0]!.seq), true);

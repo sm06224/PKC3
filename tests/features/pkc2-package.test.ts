@@ -111,7 +111,7 @@ describe('readPkc2Package', () => {
     ).rejects.toThrow(/pkc2-package のみ/);
     await expect(
       readPkc2Package(await pkg({ manifest: manifestOf({ version: 2 }) })),
-    ).rejects.toThrow(/未対応の package version/);
+    ).rejects.toThrow(/未対応の形式のバージョン/);
   });
 
   it('container が無い / 形が違う も断る(「読めるところだけ読む」をしない)', async () => {

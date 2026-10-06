@@ -70,7 +70,7 @@ describe('formatMessageSection(段②a)', () => {
       text: '保存できませんでした',
     });
     expect(s).toMatch(/^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n/);
-    expect(s).toContain('**問題** app ── 保存できませんでした');
+    expect(s).toContain('**問題** app: 保存できませんでした');
     expect(s.endsWith('\n\n')).toBe(true);
   });
 

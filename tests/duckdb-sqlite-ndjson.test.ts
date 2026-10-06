@@ -490,8 +490,8 @@ describe('🔴 .sqlite を DuckDB で引く(実物の engine / 実物の storage
       await runner.run({ sql: 'SELECT * FROM emptycol', sources }).catch((e: unknown) => {
         msg = e instanceof Error ? e.message : String(e);
       });
-      expect(msg).toContain('emptycol は DuckDB へコピーできませんでした');
-      expect(msg).toContain('(名前の無い表) は DuckDB へコピーできませんでした');
+      expect(msg).toContain('emptycol は DuckDB に読み込めませんでした');
+      expect(msg).toContain('(名前の無い表) は DuckDB に読み込めませんでした');
     } finally {
       await runner.release();
     }
@@ -539,7 +539,7 @@ describe('🔴 .sqlite を DuckDB で引く(実物の engine / 実物の storage
         msg = e instanceof Error ? e.message : String(e);
       });
       expect(msg, 'DuckDB の断り(表が無い)が消えている').toMatch(/大/);
-      expect(msg, '理由が添わない').toContain('大 は DuckDB へコピーできませんでした');
+      expect(msg, '理由が添わない').toContain('大 は DuckDB に読み込めませんでした');
       expect(msg).toContain('内蔵の sqlite');
     } finally {
       await runner.release();
@@ -666,8 +666,8 @@ describe('🔴 DuckDB の器の構造(#918)', () => {
       // 🔴 写さなかった view と、全文検索の仮想表(`検索`。着地後レビュー 💭8)は、報告に載る(どこにも出ないままにしない)。
       //   ⚠ 影の表(`検索_data` など)は載らない ── user の表ではないので、黙って外す
       expect(got.copy.refused).toEqual([
-        { name: '客名簿', view: true, why: 'ビューはコピーしません' },
-        { name: '検索', view: false, why: '全文検索の表はコピーしません' },
+        { name: '客名簿', view: true, why: 'ビューは読み込みません' },
+        { name: '検索', view: false, why: '全文検索の表は読み込みません' },
       ]);
     } finally {
       await runner.release();

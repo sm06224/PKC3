@@ -393,10 +393,10 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
-      ['export-entry-html', '7f0a31b1'],
-      ['export-folder', '6f6bb3c3'],
-      ['export-entry-docx', 'e79a6f86'],
-      ['export-entry-pptx', '60bcb9ea'],
+      ['export-entry-html', 'cd057c16'],
+      ['export-folder', '1e3dc65f'],
+      ['export-entry-docx', '93906675'],
+      ['export-entry-pptx', '5424c220'],
       ['export-entry-pdf', '6ec553e1'],
       ['adopt-external-images', '36c7974a'],
       ['copy-entry-ref', '2614a326'],
@@ -404,7 +404,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
       ['pin-split', '168e4ec2'],
       // 🔴 保存したスタックを載せる(#633 段③)
-      ['stack-load', 'd23f50ac'],
+      ['stack-load', 'c8508a19'],
       // 🔴 「このノート」のまとまりの先頭「編集」(#1038 台帳③ C1、2026-09-25)
       ['start-edit', 'e7a98369'],
       ['show-history', '2511b05b'],
@@ -417,7 +417,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['start-screen-capture', 'ec055655'],
       ['start-timer', '97214aee'],
       // 🔴 **表の形を変える 2 つ**(#708 段②、2026-09-05)
-      ['table-to-csv', '2658a59b'],
+      ['table-to-csv', '21bdca1b'],
       ['table-to-markdown', '70082c4c'],
       // 🔴 **リストを丸ごとそろえる 2 つ**(#1173、2026-10-01)
       ['task-run-open', '8e3e5aee'],

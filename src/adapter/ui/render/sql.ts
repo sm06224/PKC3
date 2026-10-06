@@ -270,7 +270,7 @@ export class SqlRenderer {
     const source = document.createElement('select');
     source.setAttribute('data-pkc-action', 'set-sql-source');
     source.setAttribute('data-pkc-field', 'sql-source');
-    source.setAttribute('aria-label', '調べる相手');
+    source.setAttribute('aria-label', '調べる対象');
     /**
      * 🔴 **どのエンジンで引くか**(#682 段②)。
      * ⚠ 既定は**いまの sqlite** ── 選ばなければ、これまでどおり 1 ドットも変わらない。
@@ -305,7 +305,7 @@ export class SqlRenderer {
     schema.setAttribute('data-pkc-field', 'sql-schema-to-note');
     schema.textContent = '構造をノートへ書き出す';
     schema.title =
-      'いま調べている相手の表・列・型・キー・つながり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
+      'いま調べている対象の表・列・型・キー・つながり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
     /**
      * 🔴 **前に打った字を、押して選べる**(#918 段②a。user 裁定 2026-09-14)。
      *
@@ -617,7 +617,7 @@ export class SqlRenderer {
           const readable = isDuckDbReadableSource(sqlGuestSourceOf('', s.name));
           const opt = option(
             `${SQL_ADD_SOURCE_PREFIX}${s.lid}`,
-            readable ? s.name : `${s.name} ── ${ADD_UNREADABLE_HINT}`,
+            readable ? s.name : `${s.name}(${ADD_UNREADABLE_HINT})`,
           );
           opt.disabled = !readable;
           addGroup.append(opt);
@@ -722,7 +722,7 @@ export class SqlRenderer {
         const hint = hints[i] ?? null;
         const opt = document.createElement('option');
         opt.value = e;
-        opt.textContent = hint === null ? SQL_ENGINE_LABEL[e] : `${SQL_ENGINE_LABEL[e]} ── ${hint}`;
+        opt.textContent = hint === null ? SQL_ENGINE_LABEL[e] : `${SQL_ENGINE_LABEL[e]}(${hint})`;
         opt.disabled = hint !== null;
         sel.append(opt);
       });
@@ -1201,7 +1201,7 @@ function runningNote(p: AppState['sqlPage']): string {
  *   (字へ直書きした変異が、間隔を変えない限り生き延びる、を防ぐ)。
  */
 export function duckdbWarmupNote(idleSec: number): string {
-  return `(初回と、${String(idleSec)} 秒使わなかったあとは DuckDB に表をコピーするので時間がかかります)`;
+  return `(初回と、${String(idleSec)} 秒使わなかったあとは DuckDB に表を読み込むので時間がかかります)`;
 }
 
 /**
@@ -1231,7 +1231,7 @@ function noteLine(p: AppState['sqlPage']): string {
    */
   if (p.running || p.error !== '' || p.guestError !== '') return core;
   const extra = duckCopyNote(p);
-  return extra === '' ? core : core === '' ? extra : `${core} ── ${extra}`;
+  return extra === '' ? core : core === '' ? extra : `${core} / ${extra}`;
 }
 
 function noteLineCore(p: AppState['sqlPage']): string {

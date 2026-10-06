@@ -602,7 +602,7 @@ export class SettingsRenderer {
       '行を 1 回押して選んだだけでは編集に入りません(それは「選ぶ」で、「開く」ではありません)。';
     od.append(olabel);
     od.append(
-      buildSettingsNote('既定は「読む」状態で開き、入れると開いた時点で編集に入ります。'),
+      buildSettingsNote('既定は「読む」状態で開き、オンにすると開いた時点で編集に入ります。'),
     );
     editDl.append(ot, od);
 
@@ -618,12 +618,12 @@ export class SettingsRenderer {
      *   「設定したのに変わらない」になる(この repo がいちばん嫌う形)。
      */
     const plt = document.createElement('dt');
-    plt.textContent = '書庫(zip)を開く場所';
+    plt.textContent = 'zip ファイルを開く場所';
     const pld = document.createElement('dd');
     // 🔴 選択肢 2 つ ── プルダウンをボタンの列にする(#1038 段J)
     const plRow = buildChoiceRow({
       field: 'open-place-select',
-      ariaLabel: '書庫(zip)を開く場所',
+      ariaLabel: 'zip ファイルを開く場所',
       action: 'set-open-place',
       dataAttr: 'data-pkc-open-place-value',
       choices: OPEN_PLACES,
@@ -635,7 +635,7 @@ export class SettingsRenderer {
       '画面に出ます。予定表や連絡先など、ほかのウィンドウの開き方はここでは変わりません。';
     pld.append(plRow);
     pld.append(
-      buildSettingsNote('添付の書庫(zip)の一覧を、別のウィンドウかこの画面のどちらに出すかです。'),
+      buildSettingsNote('添付の zip ファイルの一覧を、別のウィンドウかこの画面のどちらに出すかです。'),
     );
     openDl.append(plt, pld);
 
@@ -696,7 +696,7 @@ export class SettingsRenderer {
     // ⚠ **できないことを先に書く**(#280)── 鳴る前提で予定を任せて失わせない
     alabel.title =
       '本文の行に時刻まで書いた予定が対象です。押すとそのノートを開きます。' +
-      '起動したときに予定を数えます(切のままなら数えません)。';
+      '起動したときに予定を数えます(オフのままなら数えません)。';
     ad.append(alabel);
     ad.append(
       buildSettingsNote('PKC を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
@@ -755,7 +755,7 @@ export class SettingsRenderer {
      *   (`tests/adapter/settings-phone-links.test.ts`)。設計 doc §9 C18 の「その 1 件だけ
      *   2 行を許す」を当て、`tests/adapter/settings-notes.test.ts` の既知の一覧で固定する。
      */
-    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、切のままなら本文の見え方は 1 文字も変わりません。'));
+    phd.append(buildSettingsNote('本文の 090-1234-5678 のような番号を、押すと電話をかけられる字にします。日付(2026-09-09)は変わらず、オフのままなら本文の見え方は 1 文字も変わりません。'));
     editDl.append(pht, phd);
 
     /**
@@ -777,7 +777,7 @@ export class SettingsRenderer {
     dllabel.title =
       '@2026-10-15 のように書いた日付に点線の下線が付きます(字の色は変わりません)。' +
       '題名がその日付のノートが無ければ、作るかどうかを画面の下で聞きます。' +
-      '切ると、日付はふつうの字のままです。';
+      'オフにすると、日付はふつうの字のままです。';
     dld.append(dllabel);
     dld.append(buildSettingsNote('押すと、題名がその日付のノートを開きます(無ければ作るか聞きます)。'));
     editDl.append(dlt, dld);
@@ -875,7 +875,7 @@ export class SettingsRenderer {
     cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から折りたたむ'));
     cclabel.title =
       '18 行以上のコード枠を、最初は低く折りたたんで見せます(押すと全部見えます)。' +
-      '切ると、最初から字が全部見えます(開閉のボタンも出ません)。';
+      'オフにすると、最初から字が全部見えます(開閉のボタンも出ません)。';
     ccd.append(cclabel);
     editDl.append(cct, ccd);
     const icct = document.createElement('dt');
@@ -889,7 +889,7 @@ export class SettingsRenderer {
     icclabel.append(icccheck, document.createTextNode(' 本文の `code` を押すとコピーする'));
     icclabel.title =
       '本文の中の `code` のように書いた短いコードを押すと、その字をコピーします。' +
-      '切ると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
+      'オフにすると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
     iccd.append(icclabel);
     editDl.append(icct, iccd);
     /**
@@ -909,8 +909,8 @@ export class SettingsRenderer {
     pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引用できる)'));
     pdflabel.title =
       '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読むウィンドウにします。' +
-      '字を選んで「ノートへ引用する」を押すと、頁番号つきで添付のノートの末尾に引用として足せます。' +
-      '切ると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
+      '字を選んで「ノートへ引用する」を押すと、ページ番号つきで添付のノートの末尾に引用として足せます。' +
+      'オフにすると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
     pdfd.append(pdflabel);
     editDl.append(pdft, pdfd);
 
@@ -1243,7 +1243,7 @@ export class SettingsRenderer {
     const h = document.createElement('h4');
     h.textContent = '最近開いたノートの記録';
     const note = buildSettingsNote(
-      '並び順「最近開いた順」に使う記録です(この端末だけ・消すと積み直します)。',
+      '並び順「最近開いた順」に使う記録です(この端末だけ・消すとまた集計されます)。',
     );
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1791,7 +1791,7 @@ export class SettingsRenderer {
       return;
     }
     if (existing !== null) return;
-    const note = buildSettingsNote('日付を押せるようにすると出ます(上の「本文の日付」を入にしてください)');
+    const note = buildSettingsNote('日付を押せるようにすると出ます(上の「本文の日付」をオンにしてください)');
     note.setAttribute('data-pkc-region', 'relative-days-prereq');
     dd.append(note);
   }

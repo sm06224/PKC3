@@ -129,7 +129,7 @@ export function sqlTipText(
        *   🔑 知らせないと、**在ることに気づけないまま**になる(user の動機は
        *   「DuckDB を分かち合いたい」なので、隠れているのはいちばん悪い)。
        */
-      '取り込んだ .csv や .tsv、.parquet や .json、.sqlite を選ぶと、DuckDB でも実行できます(DuckDB では表を作ることもできます)。'
+      '取り込んだ .csv や .tsv、.parquet や .json、.sqlite を選ぶと、DuckDB でも調べられます(DuckDB では表を作ることもできます)。'
     );
   }
   if (engine === 'duckdb') {
@@ -154,7 +154,7 @@ export function sqlTipText(
      */
     if (src?.kind === 'sqlite') {
       return (
-        `いま調べているのは ${target.name} を DuckDB へコピーした表です。このファイルにある表: ${tableList(target.tables)}。` +
+        `いま調べているのは ${target.name} を DuckDB に読み込んだ表です。このファイルにある表: ${tableList(target.tables)}。` +
         '表の名前は元のままです。' +
         (copy?.blob === true
           ? `BLOB の列は base64 の文字として入ります(長い字は ${String(MAX_CELL_CHARS)} 字までで切って出します)。`
@@ -164,7 +164,7 @@ export function sqlTipText(
     }
     const table = src === null ? (target.tables[0] ?? 'csv') : guestTableNameOf(src);
     return (
-      `いま調べているのは ${target.name} を DuckDB へコピーした表 ${table} です。` +
+      `いま調べているのは ${target.name} を DuckDB に読み込んだ表 ${table} です。` +
       (src !== null && src.kind !== 'csv'
         ? // 🔑 `.parquet` / `.json` は**相手の列そのまま**(`_note` / `_lid` を足さない)
           '列は、そのファイルに書いてある列がそのまま並びます。'

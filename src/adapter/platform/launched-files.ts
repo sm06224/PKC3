@@ -269,12 +269,12 @@ export async function writeBackFile(
     let state = (await handle.queryPermission?.(want)) ?? 'granted';
     if (state !== 'granted') state = (await handle.requestPermission?.(want)) ?? 'denied';
     if (state !== 'granted') {
-      return { ok: false, reason: 'ファイルへの書込を許可されませんでした' };
+      return { ok: false, reason: 'ファイルへの書き込みを許可されませんでした' };
     }
   } catch (e) {
     return {
       ok: false,
-      reason: `書込の許可を確かめられませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `書き込みの許可を確かめられませんでした: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
 

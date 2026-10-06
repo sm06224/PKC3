@@ -1098,8 +1098,8 @@ export function connectStoreEffects(
             type: 'SQL_GUEST_FAILED',
             lid,
             error: local
-              ? 'このバージョンでは手持ちのファイルを開けません(アプリを再読み込みすると直ることがあります)'
-              : 'このバージョンでは取り込んだ .sqlite を開けません(アプリを再読み込みすると直ることがあります)',
+              ? 'アプリの読み込みが古いため手持ちのファイルを開けません。再読み込みしてください'
+              : 'アプリの読み込みが古いため取り込んだ .sqlite を開けません。再読み込みしてください',
           });
           break;
         }
@@ -1189,7 +1189,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
-            error: 'このバージョンでは構造を採れません(アプリを再読み込みすると直ることがあります)',
+            error: 'アプリの読み込みが古いため構造を取得できません。再読み込みしてください',
           });
           break;
         }
@@ -1203,7 +1203,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
-            error: `構造を採れませんでした: ${raw}`,
+            error: `構造を取得できませんでした: ${raw}`,
           });
         });
         break;
@@ -1225,7 +1225,7 @@ export function connectStoreEffects(
         if (grids === null) {
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
-            error: 'このバージョンでは構造を採れません(アプリを再読み込みすると直ることがあります)',
+            error: 'アプリの読み込みが古いため構造を取得できません。再読み込みしてください',
           });
           break;
         }
@@ -1261,7 +1261,7 @@ export function connectStoreEffects(
           const raw = e instanceof Error ? e.message : String(e);
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
-            error: `構造を採れませんでした(${raw})`,
+            error: `構造を取得できませんでした(${raw})`,
           });
         });
         break;
@@ -1298,7 +1298,7 @@ export function connectStoreEffects(
               type: 'SQL_RUN_FAILED',
               token,
               sql,
-              error: 'このバージョンでは DuckDB で実行できません(アプリを再読み込みすると直ることがあります)',
+              error: 'アプリの読み込みが古いため DuckDB で SQL を実行できません。再読み込みしてください',
             });
             break;
           }
@@ -1334,7 +1334,7 @@ export function connectStoreEffects(
             type: 'SQL_RUN_FAILED',
             token,
             sql,
-            error: 'このバージョンでは SQL を打てません(アプリを再読み込みすると直ることがあります)',
+            error: 'アプリの読み込みが古いため SQL を実行できません。再読み込みしてください',
           });
           break;
         }
@@ -2014,7 +2014,7 @@ export function connectStoreEffects(
           try {
             await upsert({ id: ev.id, fromLid: ev.fromLid, toLid: ev.toLid, kind: ev.kind });
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を保存できません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを保存できません: ${String(e)}` });
           }
         });
         break;
@@ -2027,7 +2027,7 @@ export function connectStoreEffects(
           try {
             await remove(ev.id);
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `関係を消せません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを消せません: ${String(e)}` });
           }
         });
         break;
@@ -3373,11 +3373,11 @@ export function connectStoreEffects(
             const toBody = await store.getBody(ev.to.lid);
             if (disposed) return;
             if (fromBody === null || toBody === null)
-              return fail('持っていけません(ノートが見つかりません)');
+              return fail('移動できません(ノートが見つかりません)');
             // ① 切った後の姿と塊を**計算だけ**する(まだ書かない)
             const cut = cutLines(fromBody, ev.from);
             if (cut === null)
-              return fail('本文が変わっているため、そのブロックを持っていけませんでした(開き直してください)');
+              return fail('本文が変わっているため、そのブロックを移動できませんでした(開き直してください)');
             // ② 行き先へ**先に**入れる ── 入らなければ元は 1 バイトも触らない
             /**
              * ⚠ **末尾へ入れるときは、終端の改行の「前」へ**(着地前レビュー D)。
@@ -3398,7 +3398,7 @@ export function connectStoreEffects(
               return fail(
                 ev.to.toBefore === null
                   ? `「${ev.to.title}」の本文が閉じていない囲み(\`\`\` や :::)で終わっているため、そこへは入れられませんでした`
-                  : 'ドロップした所が本文から無くなっていたため、持っていけませんでした(開き直してください)',
+                  : 'ドロップした所が本文から無くなっていたため、移動できませんでした(開き直してください)',
               );
             const toExt = extractMeta(ev.to.archetype, newTo);
             const toStamps = await store.persistEntry(
@@ -3417,7 +3417,7 @@ export function connectStoreEffects(
             if (disposed) return;
             if (toStamps.conflict === true)
               return fail(
-                '別のウィンドウが持っていき先のノートを書き替えたため、持っていけませんでした(もう一度掴んでください)',
+                '別のウィンドウが移動先のノートを書き替えたため、移動できませんでした(もう一度ドラッグしてください)',
               );
             dispatcher.dispatch({
               type: 'BODY_REWRITTEN',
@@ -3454,7 +3454,7 @@ export function connectStoreEffects(
             if (disposed) return;
             if (fromStamps.conflict === true)
               return fail(
-                '持っていき先には入りましたが、元の本文からは消せませんでした(別のウィンドウが書き替えたためです。元のブロックは残っています)',
+                '移動先には入りましたが、元の本文からは消せませんでした(別のウィンドウが書き替えたためです。元のブロックは残っています)',
               );
             dispatcher.dispatch({
               type: 'BODY_REWRITTEN',
@@ -3487,8 +3487,8 @@ export function connectStoreEffects(
                    *   ノートの名前」なのに括弧が 2 系統**あった。
                    * 🔑 揃え方:**ノートの名前 = `『』` / ファイル名・字の名前 = `「」`**。
                    */
-                  ? `本文のブロックを『${ev.to.title}』のいちばん下へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`
-                  : `本文のブロックを『${ev.to.title}』へ持っていきました(戻すには、そこで同じ ⠿ を掴んで持ち帰ってください)`,
+                  ? `本文のブロックを『${ev.to.title}』のいちばん下へ移動しました(戻すには、そこで同じ ⠿ をドラッグして元のノートへ移してください)`
+                  : `本文のブロックを『${ev.to.title}』へ移動しました(戻すには、そこで同じ ⠿ をドラッグして元のノートへ移してください)`,
               open: ev.to.lid,
             });
           } catch (e) {

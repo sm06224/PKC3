@@ -40,14 +40,14 @@ export async function importFiles(
   if (md.length > 0 || vcf.length > 0) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: '種類の違うファイル(Markdown / vCard / PKC2 の書出し)は分けて取り込んでください',
+      error: '種類の違うファイル(Markdown / vCard / PKC2 の書き出し)は分けて取り込んでください',
     });
     return null;
   }
   if (files.length > 1) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'PKC2 の書出しは 1 つずつ取り込んでください',
+      error: 'PKC2 の書き出しは 1 つずつ取り込んでください',
     });
     return null;
   }

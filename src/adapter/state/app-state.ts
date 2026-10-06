@@ -7586,7 +7586,7 @@ function reduceCore(
      * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
      */
     case 'CONNECT_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を線で繋いでください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板を線でつないでください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const from = placeOpenLineOf(shown, action.line);
         const to = placeOpenLineOf(shown, action.toLine);
@@ -7677,7 +7677,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${phaseBlockReason(state.phase)}、本文のブロックを別のノートへ持っていってください`,
+            error: `${phaseBlockReason(state.phase)}、本文のブロックを別のノートへ移してください`,
           },
           events: [],
         };
@@ -10195,7 +10195,7 @@ function syncShownBodies(
   const next = excerptOf(body, state.entryMetas.get(lid)?.archetype);
   if (sameExcerpt(prev, next)) return { splitBodies, placeBodies: state.placeBodies };
   const bodies = new Map(have);
-  bodies.set(lid, next); // ⚠ 並びは動かさない(書込は「最近読んだ」ではない)
+  bodies.set(lid, next); // ⚠ 並びは動かさない(書き込みは「最近読んだ」ではない)
   return { splitBodies, placeBodies: bodies };
 }
 

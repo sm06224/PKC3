@@ -478,7 +478,7 @@ export class DuckDbRunner {
   schema(sources: readonly DuckDbInputSource[]): Promise<DuckDbSchemaResult> {
     return this.serial(async () => {
       this.dropStaleRefused();
-      if (sources.length === 0) throw new Error('調べる相手がありません');
+      if (sources.length === 0) throw new Error('調べる対象がありません');
       const data = this.dataOf(sources);
       const ask = async (sql: string): Promise<Grid> => {
         const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, loadMaxMs: DUCKDB_LOAD_MAX_MS, data });
@@ -522,7 +522,7 @@ export class DuckDbRunner {
 
   private async runNow(input: DuckDbRunInput): Promise<DuckDbRunResult> {
     const started = Date.now();
-    if (input.sources.length === 0) throw new Error('調べる相手がありません');
+    if (input.sources.length === 0) throw new Error('調べる対象がありません');
     const multi = input.sources.length > 1;
     const raw = await this.lease.run({
       sql: input.sql,
@@ -578,7 +578,7 @@ export class DuckDbRunner {
         if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
         const exportSqlite = this.deps.exportSqlite;
         if (exportSqlite === undefined) {
-          throw new Error('このバージョンでは .sqlite を DuckDB で実行できません(アプリを再読み込みすると直ることがあります)');
+          throw new Error('アプリの読み込みが古いため .sqlite を DuckDB で調べられません。再読み込みしてください');
         }
         const opened = await exportSqlite(bytes);
         sessions.set(i, opened);
@@ -731,7 +731,7 @@ export class DuckDbRunner {
     if (stale()) return;
     for (const v of session.views) {
       const name = multi ? tableNameFromFileTable(source.name, v, new Set()) : v;
-      this.refused.push({ name, view: true, why: 'ビューはコピーしません' });
+      this.refused.push({ name, view: true, why: 'ビューは読み込みません' });
     }
     /**
      * 🔴 **全文検索(FTS5)の仮想表本体も、写さなかったと言う**(着地後レビュー 💭8)。⚠ 直す前は本体を黙って外していて、
@@ -740,7 +740,7 @@ export class DuckDbRunner {
      */
     for (const f of session.ftsTables) {
       const name = multi ? tableNameFromFileTable(source.name, f, new Set()) : f;
-      this.refused.push({ name, view: false, why: '全文検索の表はコピーしません' });
+      this.refused.push({ name, view: false, why: '全文検索の表は読み込みません' });
     }
   }
 
@@ -758,7 +758,7 @@ export class DuckDbRunner {
       notes.push(`表の名前は ファイル名_表名 になっています(一覧は ${DUCKDB_TABLE_LIST_SQL} で実行できます)`);
     }
     if (notes.length === 0) return err;
-    return new Error(`${err.message} ── ${notes.join(' / ')}`, { cause: err });
+    return new Error(`${err.message}: ${notes.join(' / ')}`, { cause: err });
   }
 
   /**

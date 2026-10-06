@@ -105,7 +105,7 @@ export interface MessageSectionInput {
 export function formatMessageSection(input: MessageSectionInput): string {
   const heading = `## ${formatHeadingTimestamp(input.at)}`;
   const label = MESSAGE_KIND_LABEL[input.kind];
-  return `${heading}\n**${label}** ${input.source} ── ${input.text}\n\n`;
+  return `${heading}\n**${label}** ${input.source}: ${input.text}\n\n`;
 }
 
 /**

@@ -238,7 +238,7 @@ export const FLAG_OFFICE_INPUT_LOG = defineFlag('office.inputLog', {
 export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
   default: false,
   foldWhen:
-    '貼付の取り違えの報告が止まったら(= 自動の判定で困らなくなり、設定の 4 択も使われなくなったら)',
+    '貼り付けの取り違えの報告が止まったら(= 自動の判定で困らなくなり、設定の 4 択も使われなくなったら)',
   summary: '貼り付けたとき、何が届いてどれを使ったかを画面に出す(中身は出さない)',
 });
 

@@ -18,7 +18,7 @@ describe('showNotices', () => {
   it('🔑 **全件**を出す(1 件目だけにしない)', () => {
     const r = region();
     const notes = Array.from({ length: 12 }, (_, i) => `n${i + 1}.text.zip: 添付がありません`);
-    showNotices(r, '取込時の注意', notes);
+    showNotices(r, '取り込み時の注意', notes);
     expect(items(r)).toEqual(notes);
     expect(r.hidden).toBe(false);
     // 件数も見せる(「注意がある」ことに気づく手掛かり)

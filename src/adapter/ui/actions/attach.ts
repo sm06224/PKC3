@@ -498,7 +498,7 @@ export async function attachFiles(
       } catch (e) {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `添付の取込に失敗しました(${file.name}): ${String(e)}`,
+          error: `添付の取り込みに失敗しました(${file.name}): ${String(e)}`,
         });
       }
     }
@@ -568,9 +568,9 @@ export async function attachFiles(
    */
   notify(
     elsewhere
-      ? `${why}${what}を預かりました(編集を終えたら『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : 'ドロップした所'}に入れます)`
+      ? `${why}${what}を保留しました。編集を終えると『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : 'ドロップした所'}に入れます`
       : namedTitle === undefined
-        ? `${why}${what}を預かりました(編集を終えたら本文に入れます)`
-        : `${why}${what}を預かりました(編集を終えたら『${namedTitle}』の本文のいちばん下に入れます)`,
+        ? `${why}${what}を保留しました。編集を終えると本文に入れます`
+        : `${why}${what}を保留しました。編集を終えると『${namedTitle}』の本文のいちばん下に入れます`,
   );
 }

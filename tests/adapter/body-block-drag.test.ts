@@ -325,7 +325,7 @@ describe('掴む口(block-grip)', () => {
     expect(s.host.contains(g), '口が本文の器の中に在る(差分で消える)').toBe(false);
     expect(s.pane.contains(g)).toBe(true);
     // 文言は起きることで書く
-    expect(g.getAttribute('aria-label')).toContain('掴んで動かす');
+    expect(g.getAttribute('aria-label')).toContain('ドラッグして動かす');
   });
 
   it('🔴 見出しは章ごと / ::: は閉じまで / fence・箇条書きは刻印どおり', () => {

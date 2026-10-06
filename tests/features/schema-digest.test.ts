@@ -83,7 +83,7 @@ describe('構造 1 枚を組む', () => {
     const out = renderSchemaDigest({ source: 'x', columns: COLS, fks: grid(['tbl'], []) });
     expect(out, '採れていない行数を書いている').not.toContain('3 行');
     expect(out).toContain('## entries(表)');
-    expect(out, '採れなかったことを言っていない').toContain('行数は採れませんでした');
+    expect(out, '採れなかったことを言っていない').toContain('行数は取得できませんでした');
   });
 
   it('⚠ 表が 1 つも無くても 1 枚は出る(押して無反応にしない)', () => {

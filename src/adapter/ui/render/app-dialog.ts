@@ -1509,7 +1509,7 @@ export function pickArchiveInApp(
 ): Promise<string[] | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = '書庫の中';
+    f.title.textContent = 'zip ファイルの中';
     f.body.textContent = '';
 
     const note = document.createElement('p');

@@ -286,7 +286,7 @@ export class FilerRenderer {
     const label = document.createElement('span');
     label.setAttribute('data-pkc-field', 'smart-why');
     if (hit === null) label.textContent = 'フォルダの中身を集めています…';
-    else if (hit.failed) label.textContent = 'このバージョンでは集められません';
+    else if (hit.failed) label.textContent = 'アプリの読み込みが古いため集められません。再読み込みしてください';
     else if (isSmartEmpty(hit.spec))
       label.textContent = '条件を選んでください(まだ何も集めません)';
     else {

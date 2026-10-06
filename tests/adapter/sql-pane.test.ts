@@ -729,7 +729,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     type('SELECT 1');
     runBtn.click();
     await settle();
-    expect(note(), '押しても何も起きない').toContain('このバージョンでは');
+    expect(note(), '押しても何も起きない').toContain('アプリの読み込みが古いため');
     expect(d.getState().sqlPage.running, '走ったままになった').toBe(false);
   });
 
@@ -1459,7 +1459,7 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     const file = new File(['dummy'], '手元.sqlite');
     pickLocalFile(file);
     await settle();
-    expect(note(), 'この版では…と言っていない').toContain('このバージョンでは手持ちのファイルを開けません');
+    expect(note(), 'アプリの読み込みが古いと言っていない').toContain('アプリの読み込みが古いため手持ちのファイルを開けません');
     expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
     // ⚠ 対照群 ── worker 自体は生きている(添付の .sqlite はいつもどおり開ける)
     openSqlGuest.mockClear();
@@ -1650,7 +1650,7 @@ describe('構造をノートへ(#918 段①)', () => {
     await settleAll();
     const body = persisted[0]?.body ?? '';
     expect(body, '構造ごと落ちている').toContain('## entries(表)');
-    expect(body, '採れなかったと言っていない').toContain('行数は採れませんでした');
+    expect(body, '採れなかったと言っていない').toContain('行数は取得できませんでした');
     expect(body, '採れていない行数を書いている').not.toContain('7 行');
   });
 
@@ -2847,11 +2847,11 @@ describe('表のつながり図(#918 段⑤)', () => {
     erBtn(pane).click();
     await settleEr();
     expect(region(pane).hidden, '採れなくても器は開いたまま').toBe(false);
-    expect(erNote(pane), '採れなかった理由が出ていない').toContain('構造を採れませんでした');
+    expect(erNote(pane), '採れなかった理由が出ていない').toContain('構造を取得できませんでした');
   });
 });
 
-describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)', () => {
+describe('🔴 ER の図で、自分でキーどうしをつなぐ(#918 段⑤d-1)', () => {
   /**
    * ⚠ **外部キーの宣言が 1 本も無い DB**(CLAUDE.md §2「fixture のゼロ件次元は
    *   測っていない次元」── ここまでの段⑤ の検査は全部 FK 付きの DB でしか
@@ -2935,7 +2935,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     pane.querySelector<HTMLElement>(`[data-pkc-field="sql-er-table"][data-pkc-name="${table}"]`)!.click();
   };
 
-  it('🔴 外部キーが 0 本の DB でも、「繋ぐ」で線が引ける(欄にも JOIN が組まれる)', async () => {
+  it('🔴 外部キーが 0 本の DB でも、「つなぐ」で線が引ける(欄にも JOIN が組まれる)', async () => {
     const { pane, box } = setup(noFkReply);
     erBtn(pane).click();
     await settleEr();
@@ -2946,7 +2946,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
 
     connectBtn(pane).click();
     expect(connectBtn(pane).getAttribute('aria-pressed'), '入れたのに押されて見えない').toBe('true');
-    expect(hint(pane), '入れた直後の案内が出ていない').toContain('繋ぎたい列を 2 つ');
+    expect(hint(pane), '入れた直後の案内が出ていない').toContain('つなぎたい列を 2 つ');
 
     pressColumn(pane, '売上', '客id');
     expect(hint(pane), '1 列目を押した後の案内が出ていない').toContain('売上.客id');
@@ -2968,7 +2968,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
    * 🔑 繋ぐ道ができた後は、**押した 2 つで取り出し元も決まる** ── そこで断るのは、
    *   持っている情報で組めるのに、もう 1 手を要求していることになる。
    */
-  it('🔴 表を 1 つも押していなくても、繋げば両方の表から組む', async () => {
+  it('🔴 表を 1 つも押していなくても、つなげば両方の表から組む', async () => {
     const { pane, box } = setup(noFkReply);
     erBtn(pane).click();
     await settleEr();
@@ -2983,7 +2983,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     expect(erNote(pane), '組めたのに断りの字が残っている').not.toContain('先に表の名前');
   });
 
-  it('🔴 同じ表の中では繋げない(理由が出て、線は増えない)', async () => {
+  it('🔴 同じ表の中ではつなげない(理由が出て、線は増えない)', async () => {
     const { pane } = setup(noFkReply);
     erBtn(pane).click();
     await settleEr();
@@ -2991,7 +2991,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     pressColumn(pane, '売上', '客id');
     pressColumn(pane, '売上', '担当id');
     expect(lineCount(pane), '同じ表なのに線が引けている').toBe(0);
-    expect(erNote(pane)).toBe('同じ表の中では繋げません');
+    expect(erNote(pane)).toBe('同じ表の中ではつなげません');
   });
 
   it('🔴 もう在る繋がりと同じ組み合わせは断られる(2 本目にはならない)', async () => {
@@ -3023,7 +3023,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
       columnAt(pane, '売上', '客id').getAttribute('aria-pressed'),
       'もう一度押したのに印が残っている',
     ).toBe('false');
-    expect(hint(pane), 'やめたのに「ここから」の案内が残っている').toContain('繋ぎたい列を 2 つ');
+    expect(hint(pane), 'やめたのに「ここから」の案内が残っている').toContain('つなぎたい列を 2 つ');
     expect(box.value, 'やめただけなのに欄が動いている').toBe('');
   });
 
@@ -3039,7 +3039,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     expect(connectBtn(pane).getAttribute('aria-pressed')).toBe('false');
     // もう一度入れる ── 前の「ここから」が残っていたら、次の 1 押しで繋がってしまう
     connectBtn(pane).click();
-    expect(hint(pane), '切ったのに「ここから」が生きている').toContain('繋ぎたい列を 2 つ');
+    expect(hint(pane), '切ったのに「ここから」が生きている').toContain('つなぎたい列を 2 つ');
     pressColumn(pane, '社員', 'id');
     expect(lineCount(pane), '1 列しか押していないのに線が出ている').toBe(0);
     expect(hint(pane)).toContain('社員.id');
@@ -3110,7 +3110,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
      * ⚠ 「繋ぐ」の入切は相手を変えても持ち越る(user の好みなので)── ここでは
      *   まだ入ったままなので、もう一度押さない(押すと切ってしまう)。
      */
-    expect(connectBtn(pane).getAttribute('aria-pressed'), '繋ぐが持ち越っていない').toBe('true');
+    expect(connectBtn(pane).getAttribute('aria-pressed'), 'つなぐが持ち越っていない').toBe('true');
     pressColumn(pane, '売上', '客id');
     pressColumn(pane, '客', 'id');
     expect(lineCount(pane), 'db1 の図で線が引けていない').toBe(1);
@@ -3137,7 +3137,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     expect(lineCount(pane), '前提が崩れている(この fixture は外部キー 0 本)').toBe(0);
     const s = zeroNote(pane);
     expect(s, 'なぜ 0 本なのかを言っていない').toContain('宣言していません');
-    expect(s, '次に何を押せばよいか言っていない').toContain('繋ぐ');
+    expect(s, '次に何を押せばよいか言っていない').toContain('つなぐ');
 
     /**
      * 🔴 **読む順** ── 理由が先、案内が後。
@@ -3152,7 +3152,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     ).toBeTruthy();
   });
 
-  it('🔴 「繋ぐ」が入のときは、次の一手を二重に言わない(理由は言い続ける)', async () => {
+  it('🔴 「つなぐ」が入のときは、次の一手を二重に言わない(理由は言い続ける)', async () => {
     const { pane } = setup(noFkReply);
     erBtn(pane).click();
     await settleEr();
@@ -3161,9 +3161,9 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
 
     connectBtn(pane).click();
     expect(zeroNote(pane), '入にしたのに理由まで消えている').toContain('宣言していません');
-    expect(zeroNote(pane), '入なのに「繋ぐを押せ」と言い続けている').not.toContain('押して列を 2 つ');
+    expect(zeroNote(pane), '入なのに「つなぐを押せ」と言い続けている').not.toContain('押して列を 2 つ');
     // 🔑 代わりに、すぐ下の案内が次の一手を言っている(言う人が 0 人にならない)
-    expect(hint(pane), '次の一手を言う人が 1 人もいない').toContain('繋ぎたい列を 2 つ');
+    expect(hint(pane), '次の一手を言う人が 1 人もいない').toContain('つなぎたい列を 2 つ');
   });
 
   it('🔴 線が 1 本でも引けたら、その字は消える(嘘が残らない)', async () => {
@@ -3178,7 +3178,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     expect(zeroNote(pane), '線が在るのに「0 本です」の字が残っている').toBe('');
   });
 
-  it('🔴 表が 1 つだけなら「繋ぐ」を勧めない(同じ表の中は繋げない = 押せない道)', async () => {
+  it('🔴 表が 1 つだけなら「つなぐ」を勧めない(同じ表の中はつなげない = 押せない道)', async () => {
     const oneTable = async (sql: string): Promise<SqlAnswer> => {
       if (sql.includes('pragma_table_info')) {
         return answer(
@@ -3198,7 +3198,7 @@ describe('🔴 ER の図で、自分でキーどうしを繋ぐ(#918 段⑤d-1)'
     const { pane } = setup(oneTable);
     erBtn(pane).click();
     await settleEr();
-    expect(zeroNote(pane), '相手がいないことを言っていない').toContain('繋ぐ相手がいません');
+    expect(zeroNote(pane), '相手がいないことを言っていない').toContain('つなぐ相手がいません');
     expect(zeroNote(pane), '押せない道へ誘っている').not.toContain('押して列を 2 つ');
   });
 });
@@ -3477,7 +3477,7 @@ describe('🔴 DuckDB では表を作れる / sqlite では断る(#918 段⑧)',
     expect(note(), '件数を言っていない').toContain('3 行に効きました');
     expect(note(), '作った表の寿命を言っていない').toContain('作った表はウィンドウを閉じると消えます');
     // 🔴 「条件に当たるものがありませんでした」と読める字を出さない
-    expect(note()).not.toContain('条件に当たる');
+    expect(note()).not.toContain('条件に一致');
     // 🔑 `Count` の 1 升だけの表を出さない(同じことを 2 回言わない)
     expect(pane.querySelector('[data-pkc-field="sql-table"]'), '書き込みの答えを表にしている').toBeNull();
   });
@@ -3769,7 +3769,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     await settle();
     const tip = pane.querySelector('[data-pkc-field="sql-tip"]')?.textContent ?? '';
     const example = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';
-    expect(tip, '案内が前の相手(csv)の話をしている').toContain('コピーした表 parquet です');
+    expect(tip, '案内が前の相手(csv)の話をしている').toContain('読み込んだ表 parquet です');
     expect(tip, '足さない列を約束している').not.toContain('_note');
     expect(example, '手本が打てない字になっている').toContain('FROM parquet');
     /**
@@ -3930,7 +3930,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     const er = pane.querySelector('[data-pkc-region="sql-er"]')?.textContent ?? '';
-    expect(er).toContain('構造を採れませんでした');
+    expect(er).toContain('構造を取得できませんでした');
     expect(er, '落ちた理由が消えている').toContain('一式を取得できません');
     expect(er, '採っています、のまま止まっている').not.toContain('採っています');
   });
@@ -3942,7 +3942,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     expect(pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain(
-      'このバージョンでは構造を採れません',
+      'アプリの読み込みが古いため構造を取得できません',
     );
   });
 });
@@ -4555,7 +4555,7 @@ describe('🔴 DuckDB で書いた後のつながり図(R1)', () => {
     it.each([
       ['打つ文が 30 秒の門に掛かった', DUCKDB_TOO_LONG],
       ['器へ写す所が 120 秒の門に掛かった', DUCKDB_LOAD_TOO_LONG],
-      ['断りの後ろに「写せなかった表」の理由が付いた', `${DUCKDB_TOO_LONG}。大きい は DuckDB へコピーできませんでした(x)`],
+      ['断りの後ろに「写せなかった表」の理由が付いた', `${DUCKDB_TOO_LONG}。大きい は DuckDB に読み込めませんでした(x)`],
     ])('🔴 %s → 図を採り直す(札を進め、古い模型を捨てる)', async (_name, msg) => {
       const s = await open();
       const before = s.d.getState().sqlPage.er;
@@ -4626,7 +4626,7 @@ describe('🔴 DuckDB で書いた後のつながり図(R1)', () => {
     const er = s.d.getState().sqlPage.er;
     expect(er.mine, 'user が引いた線まで消えている').toHaveLength(1);
     expect(er.pendingFrom, 'もう無いかもしれない列を「ここから」に残している').toBeNull();
-    expect(er.connecting, '「繋ぐ」の入切(好み)まで動いている').toBe(true);
+    expect(er.connecting, '「つなぐ」の入切(好み)まで動いている').toBe(true);
   });
 
   it('対照群:内蔵の sqlite から採る図(csv 1 件)は、DuckDB で書いても採り直さない', async () => {
@@ -4647,7 +4647,7 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
   const copy = {
     refused: [
       { name: '大きい', view: false, why: 'コピーした行が 64.0 MB を超えました' },
-      { name: '月別', view: true, why: 'ビューはコピーしません' },
+      { name: '月別', view: true, why: 'ビューは読み込みません' },
     ],
     asText: ['価格'],
     sqlite: true,
@@ -4677,11 +4677,11 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     s.pickEngine('duckdb');
     await runWith(s, { copy });
     const n = s.note();
-    expect(n, '写せなかった表が出ていない').toContain('コピーできなかった表: 大きい');
-    expect(n, 'ビューが写らないことを言っていない').toContain('コピーされないビュー: 月別');
+    expect(n, '写せなかった表が出ていない').toContain('読み込めなかった表: 大きい');
+    expect(n, 'ビューが写らないことを言っていない').toContain('読み込まれないビュー: 月別');
     expect(n, '全列を文字で写した表を言っていない').toContain('全部の列を文字にした表: 価格');
     // 🔴 1 件だけなら内蔵の sqlite へ切り替えられる
-    expect(n).toContain('内蔵の sqlite なら実行できます');
+    expect(n).toContain('内蔵の sqlite なら調べられます');
     expect(n, '1 件なのに「1 つに戻す」と言っている').not.toContain('1 つに戻す');
   });
 
@@ -4692,8 +4692,8 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     addAttached(s, 'db1');
     await settle();
     await runWith(s, { copy });
-    expect(s.note()).toContain('ファイルを 1 つに戻すと内蔵の sqlite で実行できます');
-    expect(s.note(), '押せない道を案内している').not.toContain('内蔵の sqlite なら実行できます');
+    expect(s.note()).toContain('ファイルを 1 つに戻すと内蔵の sqlite で調べられます');
+    expect(s.note(), '押せない道を案内している').not.toContain('内蔵の sqlite なら調べられます');
   });
 
   it('🔴 内蔵の sqlite に切り替えたら言わない(写していないので、写せなかった表は無い)/ 戻せば言う', async () => {
@@ -4702,11 +4702,11 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     await settle();
     s.pickEngine('duckdb');
     await runWith(s, { copy });
-    expect(s.note()).toContain('コピーできなかった表');
+    expect(s.note()).toContain('読み込めなかった表');
     s.pickEngine('sqlite');
-    expect(s.note(), 'sqlite で引いているのに DuckDB の写しの話をしている').not.toContain('コピーできなかった表');
+    expect(s.note(), 'sqlite で引いているのに DuckDB の写しの話をしている').not.toContain('読み込めなかった表');
     s.pickEngine('duckdb');
-    expect(s.note(), '戻したのに言い直していない').toContain('コピーできなかった表: 大きい');
+    expect(s.note(), '戻したのに言い直していない').toContain('読み込めなかった表: 大きい');
   });
 
   it('🔴 相手を選び直したら消える(新しい相手の帯に、前の file の「写せなかった表」を出さない)', async () => {
@@ -4719,7 +4719,7 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     s.pick('db4');
     await settle();
     expect(s.d.getState().sqlPage.duckCopy, '相手が変わったのに報告が残っている').toBeNull();
-    expect(s.note()).not.toContain('コピーできなかった表');
+    expect(s.note()).not.toContain('読み込めなかった表');
   });
 
   it('対照群:言うことが無ければ、帯は今までと同じ(何も足さない)', async () => {
@@ -4728,9 +4728,9 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     await settle();
     s.pickEngine('duckdb');
     await runWith(s, { copy: { refused: [], asText: [], sqlite: true, blob: false } });
-    expect(s.note()).not.toContain('コピーできなかった');
+    expect(s.note()).not.toContain('読み込めなかった');
     expect(s.note()).not.toContain('文字にした');
-    expect(s.note()).not.toContain('。写');
+    expect(s.note()).not.toContain('読み込まれないビュー');
   });
 
   it('🔴 つながり図の下にも「写せなかった表・ビュー」が出る(図に出ない物を、図を見た人に言う)', async () => {
@@ -4749,8 +4749,8 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     const line = s.pane.querySelector('[data-pkc-field="sql-er-copy"]')?.textContent ?? '';
-    expect(line, '図の下に出ていない').toContain('コピーできなかった表: 大きい');
-    expect(line).toContain('コピーされないビュー: 月別');
+    expect(line, '図の下に出ていない').toContain('読み込めなかった表: 大きい');
+    expect(line).toContain('読み込まれないビュー: 月別');
     // 🔴 図の構造から採った報告は、帯にも効く(同じ state)
     expect(s.d.getState().sqlPage.duckCopy?.refused).toHaveLength(2);
   });
@@ -4771,7 +4771,7 @@ describe('🔴 写せなかった表・ビュー・文字で写した表を、�
     s.schemaBtn.click();
     await settle();
     const body = s.persisted[0]?.body ?? '';
-    expect(body, '写せなかった表が書かれていない').toContain('⚠ コピーできなかった表: 大きい');
+    expect(body, '写せなかった表が書かれていない').toContain('⚠ 読み込めなかった表: 大きい');
     expect(body, '型の丸めが書かれていない').toContain('BIGINT / DOUBLE / VARCHAR の 3 つに丸めています');
     expect(body, '元の宣言の型は残る').toContain('DECIMAL(10,2)');
   });
@@ -4824,16 +4824,16 @@ describe('🔴 逃げ道の字は図の下と構造ノートでも「並べて�
     addAttached(s, 'db7');
     await settle();
     const line = erLine(s);
-    expect(line, '前提:図の下に出ている').toContain('コピーできなかった表: 大きい、docs');
-    expect(line).toContain('ファイルを 1 つに戻すと内蔵の sqlite で実行できます');
-    expect(line, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら実行できます');
+    expect(line, '前提:図の下に出ている').toContain('読み込めなかった表: 大きい、docs');
+    expect(line).toContain('ファイルを 1 つに戻すと内蔵の sqlite で調べられます');
+    expect(line, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら調べられます');
     // 対照群:1 件のとき(.parquet を 1 件だけ選ぶ = 図は DuckDB の器から採る)は、押せる道を言う
     const one = setup();
     one.schemaDuckDb.mockResolvedValueOnce(oneTable);
     one.pick('db7');
     await settle();
     await openEr(one);
-    expect(erLine(one)).toContain('(内蔵の sqlite なら実行できます)');
+    expect(erLine(one)).toContain('(内蔵の sqlite なら調べられます)');
     expect(erLine(one), '1 件なのに「1 つに戻す」と言っている').not.toContain('1 つに戻す');
   });
 
@@ -4847,9 +4847,9 @@ describe('🔴 逃げ道の字は図の下と構造ノートでも「並べて�
     s.schemaBtn.click();
     await settle();
     const body = s.persisted[0]?.body ?? '';
-    expect(body, '前提:ノートに書かれている').toContain('コピーできなかった表: 大きい、docs');
-    expect(body).toContain('ファイルを 1 つに戻すと内蔵の sqlite で実行できます');
-    expect(body, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら実行できます');
+    expect(body, '前提:ノートに書かれている').toContain('読み込めなかった表: 大きい、docs');
+    expect(body).toContain('ファイルを 1 つに戻すと内蔵の sqlite で調べられます');
+    expect(body, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら調べられます');
     // 対照群:1 件のノート
     const one = setup();
     one.schemaDuckDb.mockResolvedValueOnce(oneTable);
@@ -4858,7 +4858,7 @@ describe('🔴 逃げ道の字は図の下と構造ノートでも「並べて�
     one.schemaBtn.click();
     await settle();
     const oneBody = one.persisted[0]?.body ?? '';
-    expect(oneBody).toContain('内蔵の sqlite なら実行できます');
+    expect(oneBody).toContain('内蔵の sqlite なら調べられます');
     expect(oneBody, '1 件なのに「1 つに戻す」と言っている').not.toContain('1 つに戻す');
   });
 
@@ -4915,17 +4915,17 @@ describe('🔴 逃げ道の字は図の下と構造ノートでも「並べて�
     a.type('SELECT 1');
     a.runBtn.click();
     await settle();
-    expect(a.note(), '帯に出ていない').toContain('コピーできなかった表: docs(内蔵の sqlite なら実行できます)');
+    expect(a.note(), '帯に出ていない').toContain('読み込めなかった表: docs(内蔵の sqlite なら調べられます)');
     // 図の下 + 構造ノート(同じ報告)
     const b = setup();
     b.schemaDuckDb.mockResolvedValue({ ...oneTable, copy: only });
     b.pick('db7');
     await settle();
     await openEr(b);
-    expect(erLine(b), '図の下に出ていない').toContain('コピーできなかった表: docs');
+    expect(erLine(b), '図の下に出ていない').toContain('読み込めなかった表: docs');
     b.schemaBtn.click();
     await settle();
-    expect(b.persisted[0]?.body, '構造ノートに出ていない').toContain('⚠ コピーできなかった表: docs');
+    expect(b.persisted[0]?.body, '構造ノートに出ていない').toContain('⚠ 読み込めなかった表: docs');
   });
 });
 
@@ -4952,7 +4952,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     await settle();
     const running = s.note();
     expect(running).toContain('走らせています…');
-    expect(running, '写していることを言っていない').toContain('DuckDB に表をコピーするので時間がかかります');
+    expect(running, '写していることを言っていない').toContain('DuckDB に表を読み込むので時間がかかります');
     // 🔴 「最初の 1 回だけ」とは言わない ── 使わないまま置くと片づけて、次に写し直す(実装の事実)
     expect(running).toContain('初回と、');
     expect(running).not.toContain('最初の 1 回だけ');
@@ -4972,7 +4972,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     ).toBe(true);
     release();
     await settle();
-    expect(s.note(), '答えが出たのに進捗の字が残っている').not.toContain('コピーするので時間がかかります');
+    expect(s.note(), '答えが出たのに進捗の字が残っている').not.toContain('読み込むので時間がかかります');
   });
 
   it('対照群:内蔵の sqlite で走らせている間は、写すとは言わない(写さない)', async () => {
@@ -4990,7 +4990,7 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.runBtn.click();
     await settle();
     expect(s.note()).toContain('走らせています…');
-    expect(s.note(), 'sqlite なのに DuckDB へ写すと言っている').not.toContain('DuckDB へコピーする');
+    expect(s.note(), 'sqlite なのに DuckDB へ読み込むと言っている').not.toContain('DuckDB に表を読み込む');
     release();
     await settle();
   });

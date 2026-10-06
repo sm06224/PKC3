@@ -194,7 +194,7 @@ export function convertPkc2Container(
       if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
-      warnings.push(`ID 衝突を再採番: ${u.lid} → ${next}`);
+      warnings.push(`ID が重なったので付け直しました: ${u.lid} → ${next}`);
     } else {
       taken.add(u.lid);
       finalLidAt.push(u.lid);
@@ -213,7 +213,7 @@ export function convertPkc2Container(
     for (let i = 0; takenKeys.has(k) && i < 1000; i++) k = opts.genAssetKey();
     if (takenKeys.has(k)) {
       // 1000 回引いて外れない = 生成器が壊れている。黙って上書きさせない
-      throw new Error('添付の ID の採番が衝突し続けています(採番の仕組みの不具合)');
+      throw new Error('添付の ID が重なり続けています(ID を付ける仕組みの不具合)');
     }
     takenKeys.add(k);
     return k;
@@ -292,7 +292,7 @@ export function convertPkc2Container(
           }
           delete p.data;
           p.asset_key = newKey; // legacy は data 優先の規約だった ── bytes を正とする
-          if (!quiet) warnings.push(`legacy 内蔵 data を asset 化: ${u.lid}`);
+          if (!quiet) warnings.push(`古い形式の内蔵データを添付にしました: ${u.lid}`);
         } else {
           const k = str(p.asset_key);
           if (k !== '' && keyMap.has(k)) p.asset_key = keyMap.get(k);
@@ -393,7 +393,7 @@ export function convertPkc2Container(
       id = genRelationId();
       for (let i = 0; takenRelIds.has(id) && i < 1000; i++) id = genRelationId();
       if (takenRelIds.has(id)) {
-        throw new Error('relation id の採番が衝突し続けています(採番の仕組みの不具合)');
+        throw new Error('つながりの ID が重なり続けています(ID を付ける仕組みの不具合)');
       }
     }
     takenRelIds.add(id);

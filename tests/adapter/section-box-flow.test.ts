@@ -290,7 +290,7 @@ describe('章を右クリックから開き、打って保存する(#1044 段2)'
     expect(sectionInput(root)!.value, '遅れた ack で書きかけが上書きされた').toBe(
       '## 決定事項\n\n打ちかけ',
     );
-    expect(disk.n1, '打ち切った後も disk への書込は進んでいるはず').toContain('打ちかけ');
+    expect(disk.n1, '打ち切った後も disk への書き込みは進んでいるはず').toContain('打ちかけ');
   });
 
   it('🔴 別のタブが編集中なら、ロックが取れず理由が出る(箱は開かない)', async () => {

@@ -117,7 +117,7 @@ export function profileSummary(result: StorageProfileResult): string {
     result.orphanBytes > 0
       ? `。うち ${humanBytes(result.orphanBytes)} は、どのノートからも使われていません(「使っていない添付を消す」で片づけられます)`
       : '';
-  return `${head}${orphan}。ブラウザが言う使用量とは数え方が違います(こちらは添付の合計だけです)。`;
+  return `${head}${orphan}。ブラウザが報告する使用量とは数え方が違います(こちらは添付の合計だけです)。`;
 }
 
 /**

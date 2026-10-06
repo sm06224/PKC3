@@ -784,7 +784,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         return;
       }
       case 'changed': {
-        if (msg.origin === this.id) return; // 自分の書込は自分の state が既に知っている
+        if (msg.origin === this.id) return; // 自分の書き込みは自分の state が既に知っている
         for (const fn of this.changedListeners) fn(msg.cid, msg.lids);
         return;
       }

@@ -112,7 +112,7 @@ export async function importMarkdownFiles(
     // 読めた分を書かずに終える ── 部分的に書くと「どこまで入ったか」が
     // user に分からないまま disk に残る(PKC2 経路は書込中の失敗なので事情が違う)
     return fail(
-      `Markdown を読めませんでした(書込は行われていません): ${e instanceof Error ? e.message : String(e)}`,
+      `Markdown を読めませんでした(書き込みは行われていません): ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
@@ -121,7 +121,7 @@ export async function importMarkdownFiles(
   } catch (e) {
     await deps.reload().catch(() => {});
     return fail(
-      `取込に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      `取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
@@ -134,8 +134,8 @@ export async function importMarkdownFiles(
   deps.report?.(notes);
   deps.notify?.(
     notes.length > 0
-      ? `取込完了: ${rows.length} 件(注意 ${notes.length} 件)`
-      : `取込完了: ${rows.length} 件`,
+      ? `取り込み完了: ${rows.length} 件(注意 ${notes.length} 件)`
+      : `取り込み完了: ${rows.length} 件`,
   );
   return rows.length;
 }

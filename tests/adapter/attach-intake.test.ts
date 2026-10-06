@@ -691,7 +691,7 @@ describe('attachFiles (P4a intake)', () => {
     // ② 断らない ── 預かったことを言う
     expect(d.getState().error, '断っている(直す前の症状)').toBeNull();
     expect(d.getState().notice ?? '', '預かったことを言っていない').toBe(
-      '「late.txt」を預かりました(編集を終えたら本文に入れます)',
+      '「late.txt」を保留しました。編集を終えると本文に入れます',
     );
     expect(d.getState().phase).toBe('editing'); // draft は無傷
 
@@ -701,7 +701,7 @@ describe('attachFiles (P4a intake)', () => {
     await tick();
     await tick();
     expect(putBlobs, '編集を終えても取り込まれない(預かりが捨てられた)').toHaveLength(1);
-    expect(gated, '預かった取込が資産の門の外で走った(#724 ⑤)').toEqual([{ before: 0, after: 1 }]);
+    expect(gated, '預かった取り込みが資産の門の外で走った(#724 ⑤)').toEqual([{ before: 0, after: 1 }]);
     expect(d.getState().entryMetas.size, '添付が作られていない').toBe(2);
     const lines = appendsSeen.filter((a) => a.lid === 'lid-editing').map((a) => a.text);
     expect(lines, '編集していたノートの本文に入っていない').toHaveLength(1);
@@ -715,7 +715,7 @@ describe('attachFiles (P4a intake)', () => {
    *   預かりを足すときに ready 側まで `void run()` にすると、bytes を書いている最中に
    *   整理が走れる(tick を挟まずに見るのが要 ── 挟むと差が消える)。
    */
-  it('⚠ B 対照群 ── 編集中でなければ、attachFiles は取込が済んでから返る', async () => {
+  it('⚠ B 対照群 ── 編集中でなければ、attachFiles は取り込みが済んでから返る', async () => {
     const { d, deps, putBlobs } = harness();
     await attachFiles(d, deps, [new File(['x'], 'now.txt', { type: 'text/plain' })]);
     expect(putBlobs, '約束が bytes を書く前に解けている').toHaveLength(1);
@@ -730,7 +730,7 @@ describe('attachFiles (P4a intake)', () => {
       new File(['2'], 'b.png', { type: 'image/png' }),
     ]);
     await tick();
-    expect(d.getState().notice ?? '').toBe('2 件を預かりました(編集を終えたら本文に入れます)');
+    expect(d.getState().notice ?? '').toBe('2 件を保留しました。編集を終えると本文に入れます');
   });
 
   it('mime fallback: file.type 空は拡張子から解決(PKC2 の欠落 hack を作らない)', () => {

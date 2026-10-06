@@ -132,7 +132,7 @@ const TASKS = '- [ ] 牛乳を買う\n- [ ] 郵便を出す\n';
  * 🔑 観測点は**保存の ack**(`stamp`)── 全部の書込経路が通る 1 か所である。
  * ⚠ 経路ごとに書くと必ずどれかが漏れる(#347 がまさにその形だった)。
  */
-describe('最初の書込で永続化を頼む (#347)', () => {
+describe('最初の書き込みで永続化を頼む (#347)', () => {
   it('🔴 書けたら頼む', async () => {
     const disk: Record<string, string> = { a: TASKS };
     boot(disk, [meta('a')]);

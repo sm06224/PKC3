@@ -113,7 +113,7 @@ export async function fetchDuckDbPackFiles(
     const want = pack.files.find((f) => f.path === name)?.bytes;
     if (want !== undefined && blob.size !== want) {
       throw new DuckDbPackAcquireError(
-        `${name} の大きさが構成ファイルと違います(構成ファイル ${want} byte / 実際 ${blob.size} byte。取得し直してください)`,
+        `${name} の大きさがファイル一覧と違います(ファイル一覧 ${want} byte / 実際 ${blob.size} byte。取得し直してください)`,
       );
     }
     out.set(name, blob);

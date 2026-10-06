@@ -67,6 +67,7 @@ describe('定数は 1 か所(#772 段②)', () => {
     expect(new Set(ASR_PARTS.map((p) => p.id)).size).toBe(2);
     expect(new Set(ASR_PARTS.map((p) => p.modelId)).size).toBe(2);
     expect(asrPartOf('light')?.label).toBe('軽い');
+    expect(asrPartOf('accurate')?.label).toBe('正確');
     expect(asrPartOf('nope')).toBeUndefined();
   });
 

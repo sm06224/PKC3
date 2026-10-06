@@ -112,7 +112,7 @@ async function readBundleCommon(
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
@@ -130,7 +130,7 @@ async function readBundleCommon(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
+      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
     );
   }
 
@@ -148,7 +148,7 @@ async function readBundleCommon(
     if (hits.length === 0) {
       // manifest にあって実体が無い ── 参照は壊れたまま温存し(壊れシグナルの
       // 保存)、件数を可視化する
-      warnings.push(`添付の中身が bundle に入っていません: ${key}`);
+      warnings.push(`添付の中身が書き出しファイルに入っていません: ${key}`);
       continue;
     }
     if (hits.length > 1) {
@@ -173,7 +173,7 @@ async function readBundleCommon(
 
   // 監査証跡は黙って捨てない
   for (const k of manifest.missing_asset_keys ?? []) {
-    warnings.push(`書出し時点で既に失われていた添付: ${k}`);
+    warnings.push(`書き出し時点で既に失われていた添付: ${k}`);
   }
   if (manifest.compacted === true) {
     warnings.push(COMPACTED_WARNING);
@@ -196,7 +196,7 @@ export interface SynthRelation {
 
 /** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
 export const COMPACTED_WARNING =
-  '書出し時に解決できない添付参照が本文から除かれています(compact mode)';
+  '書き出し時に解決できない添付参照が本文から除かれています(compact mode)';
 
 /**
  * 合成 container を組む(§2-5)。attachment × N + 本体 × M。
@@ -269,7 +269,7 @@ export async function readBundleParts(
       manifest.entry_count !== parsed.entries.length
     ) {
       warnings.push(
-        `manifest の entry 件数が CSV と違います(${manifest.entry_count} ≠ ${parsed.entries.length})`,
+        `manifest のノート件数が CSV と違います(${manifest.entry_count} ≠ ${parsed.entries.length})`,
       );
     }
     // PKC2 入力の写し(fromPkc2 が PKC-Markdown へ変換する)

@@ -51,23 +51,23 @@ const REAL_PROGRESS_TEXTS = [
   // ⚠ 書き出しの開始の字は**実装の定数**を読む(`EXPORT_STARTING`)── 手で写すと、実装から `…` を落としても動かない
   ...Object.values(EXPORT_STARTING),
   'Word で書き出しています…',
-  '可搬 HTML を書き出しています…',
-  '取込中…(ファイルを読んでいます)',
-  '取込中…(12 件を書き込んでいます)',
+  '1 ファイルの HTML を書き出しています…',
+  '取り込み中…(ファイルを読んでいます)',
+  '取り込み中…(12 件を書き込んでいます)',
   '切り出しています…',
   '「録音.wav」を文字にしています…(標準の部品)',
   '外部の画像 3 枚を取りに行っています…',
-  '自分のパソコンで動かす一式を組んでいます…',
+  '自分のパソコンで動かす一式を作っています…',
 ];
 
 /** 結果として積む字(対照群)。⚠ 進行中に見えて結果のもの(`…` を含まない)を混ぜる。 */
 const RESULT_TEXTS = [
   'コピーしました',
-  '取込完了: 12 件',
+  '取り込み完了: 12 件',
   '書き出しました: 一式.pkc3-full.zip',
   '「録音.wav」に文字起こしを足しました(3 秒)',
-  '可搬 HTML を書き出しました(添付 2 件)',
-  '一式を組めませんでした: 失敗',
+  '1 ファイルの HTML を書き出しました(添付 2 件)',
+  '一式を作れませんでした: 失敗',
   // 🔴 `…` を**途中に**含む結果(題名の中の `…`)── 進行中の形(末尾の `…` / `…(補足)`)ではない。
   //    ⚠ 結果の字に `…` が 1 件も無いと、進行中の見分けを `/…/` に広げても対照群が鳴らない
   '「どうしよう…」を保存しました',
@@ -201,7 +201,7 @@ describe('積む / 積まないの判断(createStatusPoster)', () => {
   });
 });
 
-describe('本物の MessagePost に繋ぐ', () => {
+describe('本物の MessagePost につなぐ', () => {
   const settle = async (): Promise<void> => {
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
   };
@@ -311,7 +311,7 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
 
   it('🔴 断り・エラーの直呼びは kind を渡している(5 か所)', () => {
     expect(code).toMatch(/onBroken: \(text\) => showStatus\(text, \{ kind: 'problem' \}\)/);
-    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 4 つ(PDF が読めなかった / Office が固まった / コピーできなかった / 控えを書けなかった)').toBe(4);
+    expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 4 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった)').toBe(4);
     expect(code.match(/kind: 'problem'/g)?.length, 'problem の渡し先が 3 つ(壊れ / 一式 / Office)').toBeGreaterThanOrEqual(3);
   });
 });
@@ -323,7 +323,7 @@ describe('🔴 失敗・断りの字は「注意」で積む(原文 pin ── �
       .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
       .join('\n');
 
-  it('🔴 main.ts: コピーできなかった / 控えを書けなかったは caution', () => {
+  it('🔴 main.ts: 読み込めなかった / 控えを書けなかったは caution', () => {
     const code = strip('src/main.ts');
     expect(code).toContain("showStatus('コピーできませんでした', { kind: 'caution' })");
     expect(code).toContain("showStatus(shadowFailedNotice(ev.reason), { kind: 'caution' })");

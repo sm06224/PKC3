@@ -54,7 +54,7 @@ export const DUCKDB_TOO_LONG = '時間がかかりすぎたので止めました
  * ⚠ 字を 1 か所で持つ(`DUCKDB_TOO_LONG` と同じ理由)。
  */
 export const DUCKDB_LOAD_TOO_LONG =
-  '表を DuckDB へコピーするのに時間がかかりすぎたので止めました(もう一度押すと、最初からコピーし直します)';
+  '表を DuckDB に読み込むのに時間がかかりすぎたので止めました(もう一度押すと、最初から読み込み直します)';
 
 /** 1 件の依頼。 */
 export interface DuckDbJob {

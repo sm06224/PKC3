@@ -156,7 +156,7 @@ function harness(opts: HarnessOptions = {}) {
       if (d.getState().phase !== 'ready') {
         d.dispatch({
           type: 'OP_FAILED',
-          error: '取込は完了しました。編集を終了すると一覧に反映されます',
+          error: '取り込みは完了しました。編集を終了すると一覧に反映されます',
         });
         return;
       }
@@ -244,7 +244,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect([...s.entryMetas.keys()].sort()).toEqual(['a', 'b']);
     expect(s.error).toBeNull(); // 警告なしなら可視エラーを出さない
     // 対照群(#1017 C5):成功した回は最後が完了の字で、進行中を消す字は撃たない
-    expect(notices.at(-1)).toContain('取込完了');
+    expect(notices.at(-1)).toContain('取り込み完了');
     expect(notices, '成功なのに消す字を撃った').not.toContain('');
   });
 
@@ -422,14 +422,14 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(opLog.indexOf('entries')).toBeLessThan(opLog.indexOf('relations'));
   });
 
-  it('ZIP のふりをした壊れた入力は可視で断る ── 書込は 1 件も起きない', async () => {
+  it('ZIP のふりをした壊れた入力は可視で断る ── 書き込みは 1 件も起きない', async () => {
     const { d, deps, written, blobs } = harness();
     const zip = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0])], 'pkg.zip');
 
     expect(await importPkc2File(d, deps, zip)).toBeNull();
     expect(written).toHaveLength(0);
     expect(blobs.size).toBe(0);
-    expect(d.getState().error).toMatch(/取込に失敗しました/);
+    expect(d.getState().error).toMatch(/取り込みに失敗しました/);
     expect(d.getState().phase).toBe('ready'); // 非致命
   });
 
@@ -439,11 +439,11 @@ describe('importPkc2File (P6b 実行部)', () => {
       type: 'text/html',
     });
     expect(await importPkc2File(d, deps, stray)).toBeNull();
-    expect(d.getState().error).toMatch(/取込に失敗しました/);
+    expect(d.getState().error).toMatch(/取り込みに失敗しました/);
     expect(written).toHaveLength(0);
     // 🔴 「取込中…」を出した後で落ちたので、進行中の字を消す(#1017 C5)。⚠ 残ると「まだ続いている」と読める
-    expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取込中…');
-    expect(notices.at(-1), '失敗したのに「取込中…」が残る').toBe('');
+    expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取り込み中…');
+    expect(notices.at(-1), '失敗したのに「取り込み中…」が残る').toBe('');
     const before = notices.length;
 
     const binary = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'photo.html');
@@ -483,7 +483,7 @@ describe('importPkc2File (P6b 実行部)', () => {
 
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(relations).toHaveLength(0);
-    expect(notices.at(-1)).toMatch(/取込完了: 1 件\(注意 1 件\)/);
+    expect(notices.at(-1)).toMatch(/取り込み完了: 1 件\(注意 1 件\)/);
     expect(reportedNotes()).toEqual(['端点不在の relation を除外: r1']);
     // state.error に載せると status が「⚠ エラー:」で始まる ── 成功が失敗に見える
     expect(d.getState().error).toBeNull();
@@ -629,7 +629,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(notices.at(-1), '失敗したのに進行中の字が残る').toBe('');
   });
 
-  it('[H-4] 取込中に編集が始まったら draft を殺さない(再読込を延期する)', async () => {
+  it('[H-4] 取り込み中に編集が始まったら draft を殺さない(再読込を延期する)', async () => {
     const { d, deps, written } = harness({
       onBulkEntries: (dd) => {
         // 取込の await 中に user が編集を始める(UI に gate は無い)
@@ -833,7 +833,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(blobs.has(key)).toBe(true);
   });
 
-  it('[L-11] 履歴の書込で落ちたら「履歴」と言う(関連と混同しない)', async () => {
+  it('[L-11] 履歴の書き込みで落ちたら「履歴」と言う(関連と混同しない)', async () => {
     const { d, deps } = harness({ failRevisions: true });
     const file = htmlFile({
       container: {
@@ -847,7 +847,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     });
 
     expect(await importPkc2File(d, deps, file)).toBeNull();
-    expect(d.getState().error).toMatch(/履歴の書込で失敗/);
+    expect(d.getState().error).toMatch(/履歴の書き込みで失敗/);
   });
 
   // ── P6c 段②: .pkc2.zip(バックアップ正本)の取込 ──
@@ -1308,7 +1308,7 @@ describe('importPkc2File (P6b 実行部)', () => {
       expect(notices.some((n) => n.includes('失敗'))).toBe(false);
       expect(d.getState().error).toBeNull();
       // 🔴 やめたら「取込中…」を消す(#1017 C5)── もう進まないのに残ると「まだ続いている」と読める
-      expect(notices[0], '前提が崩れた(確認の前に進行中の字を出していない)').toContain('取込中…');
+      expect(notices[0], '前提が崩れた(確認の前に進行中の字を出していない)').toContain('取り込み中…');
       expect(notices.at(-1), 'やめたのに進行中の字が残る').toBe('');
     });
 
@@ -1431,7 +1431,7 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(revChains[0]!.snapshots.map((s) => s.body)).toEqual(['v1\n', 'v2\n']);
   });
 
-  it('[P6c] 未対応の ZIP 形式は**名指しで**断る ── 書込は 1 件も起きない', async () => {
+  it('[P6c] 未対応の ZIP 形式は**名指しで**断る ── 書き込みは 1 件も起きない', async () => {
     const { d, deps, written, blobs } = harness();
     const zip = await buildZip([
       {
@@ -1577,7 +1577,7 @@ describe('同じものを 2 回取り込んだと気づく (#399 ②)', () => {
    * ⚠ 止める側へ倒すと「**黙って取り込まれない**」になり、いまより悪い
    *   (増えたのは見えるが、入らなかったのは見えない)。
    */
-  it('🔴 中身が同じなら注意を出す ── ただし取込は止めない', async () => {
+  it('🔴 中身が同じなら注意を出す ── ただし取り込みは止めない', async () => {
     const { d, deps, written, reportedNotes } = harness({
       existingBodies: new Map([['old-1', body]]),
     });
@@ -1605,7 +1605,7 @@ describe('同じものを 2 回取り込んだと気づく (#399 ②)', () => {
   });
 
   /** ⚠ 口が無い配線(旧い版)では、数えないだけで取込は今までどおり。 */
-  it('口が無い配線でも取込は壊れない', async () => {
+  it('口が無い配線でも取り込みは壊れない', async () => {
     const { d, deps, written, reportedNotes } = harness();
     const file = htmlFile({
       container: { meta: {}, entries: [{ lid: 'n1', title: '買い物', body, archetype: 'text' }] },

@@ -51,8 +51,8 @@ function line(host: HTMLElement, field: string, text: string): void {
  */
 function connectHintOf(er: SqlPageState['er']): string {
   if (!er.connecting) return '';
-  if (er.pendingFrom === null) return '繋ぎたい列を 2 つ押してください';
-  return `「${er.pendingFrom.table}.${er.pendingFrom.column}」から繋ぎます。相手の列を押してください`;
+  if (er.pendingFrom === null) return 'つなぎたい列を 2 つ押してください';
+  return `「${er.pendingFrom.table}.${er.pendingFrom.column}」からつなぎます。相手の列を押してください`;
 }
 
 /**
@@ -84,7 +84,7 @@ export function paintSqlEr(
   }
   if (er.model === null) {
     // ⚠ 採れなかった回に**空の図**を出さない(理由を字で言う)
-    line(host, 'sql-er-note', er.note === '' ? '構造を採れませんでした' : er.note);
+    line(host, 'sql-er-note', er.note === '' ? '構造を取得できませんでした' : er.note);
     return;
   }
 
@@ -105,10 +105,10 @@ export function paintSqlEr(
   connectBtn.setAttribute('data-pkc-action', 'sql-er-connect-toggle');
   connectBtn.setAttribute('data-pkc-field', 'sql-er-connect');
   connectBtn.setAttribute('aria-pressed', er.connecting ? 'true' : 'false');
-  connectBtn.textContent = '列を繋ぐ';
+  connectBtn.textContent = '列をつなぐ';
   connectBtn.title = er.connecting
-    ? '繋ぐのをやめます(いつもどおり、押した列が取り出す列に足されます)'
-    : '列どうしを自分で繋ぎます(外部キーが宣言されていない表でも繋げます)';
+    ? 'つなぐのをやめます(いつもどおり、押した列が取り出す列に足されます)'
+    : '列どうしを自分でつなぎます(外部キーが宣言されていない表でもつなげます)';
   host.append(connectBtn);
 
   const scroll = doc.createElement('div');
@@ -172,10 +172,10 @@ export function paintSqlEr(
         const isFrom = er.pendingFrom?.table === box.table.name && er.pendingFrom.column === c.name;
         b.setAttribute('aria-pressed', isFrom ? 'true' : 'false');
         b.title = isFrom
-          ? 'ここから繋ぐのをやめます'
+          ? 'ここからつなぐのをやめます'
           : er.pendingFrom === null
-            ? 'ここから繋ぎます'
-            : 'ここへ繋ぎます';
+            ? 'ここからつなぎます'
+            : 'ここへつなぎます';
       } else {
         b.title = `「${c.name}」を取り出す列に足します`;
       }
@@ -218,7 +218,7 @@ export function paintSqlEr(
     } else {
       chip.setAttribute('data-pkc-action', 'sql-er-link');
       chip.textContent = `${k.from}.${k.fromColumn} → ${k.to}.${k.toColumn}`;
-      chip.title = `「${k.from}」と「${k.to}」を繋ぎます`;
+      chip.title = `「${k.from}」と「${k.to}」をつなぎます`;
     }
     canvas.append(chip);
   }

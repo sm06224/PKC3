@@ -63,7 +63,7 @@ export function quoteIntoNote(
       if (ev.type !== 'APPEND_SETTLED' || ev.lid !== target || ev.gen !== gen) return;
       settle(
         ev.ok
-          ? { ok: true, message: `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} 頁)` }
+          ? { ok: true, message: `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)` }
           : { ok: false, message: ev.error ?? '引用できませんでした' },
       );
     });

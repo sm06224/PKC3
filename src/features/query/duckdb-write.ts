@@ -82,7 +82,7 @@ export const DUCKDB_TABLE_LIFETIME = '作った表はウィンドウを閉じる
  * ⚠ 2 つ目の file を足す / 外すと**器を作り直す**(外を塞いだ器へは差し込めない)ので、
  *   作った表も消える。🔑 **字は 1 か所で持つ**(`DUCKDB_TABLE_LIFETIME` と同じ理由)。
  */
-export const DUCKDB_TABLE_RESET = '相手を足したり外したりすると、作った表は消えます';
+export const DUCKDB_TABLE_RESET = '対象のファイルを足したり外したりすると、作った表は消えます';
 
 /** 頭の語(小文字)。⚠ `bare` は塗り潰し済み。 */
 function headOf(bare: string): string {

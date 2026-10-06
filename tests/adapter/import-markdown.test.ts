@@ -198,7 +198,7 @@ describe('素の md を取り込む', () => {
     const h = harness();
     await importMarkdownFiles(h.d, h.deps, [mdFile('# 静か\n')]);
     expect(h.reported()).toEqual([]);
-    expect(h.notices.at(-1)).toBe('取込完了: 1 件');
+    expect(h.notices.at(-1)).toBe('取り込み完了: 1 件');
   });
 });
 
@@ -232,14 +232,14 @@ describe('🔴 断るときは 1 件も書かない', () => {
       expect(r).toBe(null);
       expect(h.opLog).toEqual([]); // ← bulkUpsertEntries が**呼ばれていない**
       expect(h.written).toEqual([]);
-      expect(h.d.getState().error).toContain('書込は行われていません');
+      expect(h.d.getState().error).toContain('書き込みは行われていません');
     });
   });
 
   it('書込に失敗したら可視で終え、再読込する', async () => {
     const h = harness({ failWrite: true });
     expect(await importMarkdownFiles(h.d, h.deps, [mdFile('# x\n')])).toBe(null);
-    expect(h.d.getState().error).toContain('取込に失敗');
+    expect(h.d.getState().error).toContain('取り込みに失敗');
     expect(h.reloads()).toBe(1); // 画面を実態に戻す
   });
 });
@@ -267,7 +267,7 @@ describe('振り分け(import-file)', () => {
     expect(h.written.map((e) => e.title)).toEqual(['md 経路']);
   });
 
-  it('PKC2 の書出しは PKC2 経路へ', async () => {
+  it('PKC2 の書き出しは PKC2 経路へ', async () => {
     const h = harness();
     await importFiles(h.d, h.deps, [pkc2Html()]);
     expect(h.written.map((e) => e.title)).toEqual(['PKC2 の記事']);
@@ -280,7 +280,7 @@ describe('振り分け(import-file)', () => {
     expect(h.d.getState().error).toContain('分けて');
   });
 
-  it('PKC2 の書出しが複数なら断る(1 件目だけ黙って取り込まない)', async () => {
+  it('PKC2 の書き出しが複数なら断る(1 件目だけ黙って取り込まない)', async () => {
     const h = harness();
     expect(await importFiles(h.d, h.deps, [pkc2Html(), pkc2Html()])).toBe(null);
     expect(h.opLog).toEqual([]);

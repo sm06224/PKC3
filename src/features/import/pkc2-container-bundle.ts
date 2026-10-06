@@ -172,7 +172,7 @@ function resolveArchetype(
     // PKC2 は完全に無視していた ── 黙って無視せず見せる(判断は format を採る)
     if (typeof me.archetype === 'string' && me.archetype !== fixed) {
       warnings.push(
-        `${where}: 目次の archetype(${me.archetype})は形式(${fixed})と違います。形式を採ります`,
+        `${where}: 目次の種類(${me.archetype})は形式(${fixed})と違います。形式を使います`,
       );
     }
     return fixed;
@@ -181,7 +181,7 @@ function resolveArchetype(
   if (a === 'text' || a === 'textlog') return a;
   // 決められないものを「たぶん text」で通すと、textlog が本文 1 行に潰れる
   throw new ZipReadError(
-    `${where}: archetype が text / textlog ではありません(${String(a)})。この形式はまだ扱えません`,
+    `${where}: 種類が text / textlog ではありません(${String(a)})。この形式はまだ扱えません`,
   );
 }
 
@@ -249,7 +249,7 @@ function mergeAssets(
       // bytes は同じなので畳めるが、見え方が変わる ── 黙って選ばない
       warnings.push(
         `${filename}: 添付 ${key} の名前(${prev.name} / ${a.name})か種別` +
-          `(${prev.mime} / ${a.mime})が bundle ごとに違います。先の方を採ります`,
+          `(${prev.mime} / ${a.mime})がファイルごとに違います。先のほうを使います`,
       );
     }
   }
@@ -389,7 +389,7 @@ export async function readInnerBundles(
     if (dupOf !== undefined) {
       warnings.push(
         `${filename}: 中身の ID が ${dupOf} と同じです(${parts.main.lid})` +
-          '。別の entry として取り込みます',
+          '。別のノートとして取り込みます',
       );
     } else {
       lidSeen.set(parts.main.lid, filename);
@@ -428,7 +428,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
     );
   }
 
@@ -447,7 +447,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
+      `未対応の形式のバージョンです(バージョン=${String(manifest.version)}、対応は 1)`,
     );
   }
   if (!Array.isArray(manifest.entries)) {
@@ -490,12 +490,12 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   if (mains.length === 0) {
     throw new ZipReadError(
       failed.length > 0
-        ? `内側の bundle を 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
-        : '取り込める entry が 1 件も入っていません(空の bundle)',
+        ? `内側の書き出しファイルを 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
+        : '取り込めるノートが 1 件も入っていません(空の書き出しファイル)',
     );
   }
   if (failed.length > 0) {
-    warnings.push(`${failed.length} 件の bundle を取り込めませんでした(残りは取り込みます)`);
+    warnings.push(`${failed.length} 件の書き出しファイルを取り込めませんでした(残りは取り込みます)`);
   }
 
   return {

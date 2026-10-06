@@ -385,7 +385,7 @@ export async function exportArchive(
           // 🔴 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを
           // 言わずに出していた ── 「片道です」だけでは user は損失量を測れない
           const lost: string[] = [];
-          if (md.dropped.relations > 0) lost.push(`関連 ${md.dropped.relations}`);
+          if (md.dropped.relations > 0) lost.push(`つながり ${md.dropped.relations}`);
           if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
           // 🔴 **控え(過去の版)の件数を出す**(#213 / user 裁定 A 2026-08-16)。
           //    ⚠ 出さないと「添付 200 件」とだけ出て、**なぜ zip が大きいのか**が
@@ -395,13 +395,13 @@ export async function exportArchive(
               ? `添付 ${md.counts.assets}(うち過去の版 ${md.counts.historyAssets})`
               : `添付 ${md.counts.assets}`;
           detail =
-            `${md.counts.entries} 件(${assetsText})、片道` +
-            (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
+            `${md.counts.entries} 件(${assetsText})。取り込み直せません` +
+            (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '');
         } else {
           out = await writeArchive(deps.source, iso);
           name = archiveFileName(base, archiveScope);
           const c = out.counts;
-          detail = `${c.entries} 件(関連 ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
+          detail = `${c.entries} 件(つながり ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;
           /**
            * 🔴 **普通に書き出せた「バックアップ」も、「拾えた」に数える**
            * (#1017 段④b。#986 段③との配線を壊さないための直し)。

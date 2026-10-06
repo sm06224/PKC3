@@ -232,7 +232,7 @@ describe('取り込んだ後に外で変わったか', () => {
     const l = new LaunchedFiles();
     const { h, state } = movable('a', 1000);
     l.remember('n1', h, 'a.md', 1000);
-    state.at = 3000; // 自分の書込で時刻が動いた
+    state.at = 3000; // 自分の書き込みで時刻が動いた
     await l.refreshModified('n1');
     expect(l.modifiedOf('n1')).toBe(3000);
     expect(await l.changedSince('n1'), '自分の書込を「外で変わった」と言っている').toBe(false);

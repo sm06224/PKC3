@@ -31,7 +31,7 @@ const OK = {
 } as const;
 
 describe('拡張子 ↔ MIME の往復', () => {
-  it('🔴 `EXT_MIME` の全項目が、書出し側で同じ拡張子に戻る', () => {
+  it('🔴 `EXT_MIME` の全項目が、書き出し側で同じ拡張子に戻る', () => {
     // ⚠ 空振り防止 ── 表が空 / 極端に小さいと、この全数検査は何も見ていない
     expect(Object.keys(EXT_MIME).length, '表が小さすぎる ── 全数検査になっていない')
       .toBeGreaterThan(20);
@@ -42,7 +42,7 @@ describe('拡張子 ↔ MIME の往復', () => {
       //    要求するのは「戻った拡張子も同じ MIME を指すこと」── 綴りの一致ではない
       if (EXT_MIME[back] !== mime) broken.push(`${ext} → ${mime} → ${back}`);
     }
-    expect(broken, '書出し側の表に無い ── 書き出すと `.bin` になり外で開けない').toEqual([]);
+    expect(broken, '書き出し側の表に無い ── 書き出すと `.bin` になり外で開けない').toEqual([]);
   });
 
   it('🔴 Office の入口が出る拡張子は、全部 MIME を持っている', () => {
@@ -60,7 +60,7 @@ describe('拡張子 ↔ MIME の往復', () => {
       // 空振り防止 ── 入口が出ないなら、この行は何も主張していない
       expect(entry.kind, `${ext}: Office の入口が出ない`).toBe('open');
       if (EXT_MIME[ext] === undefined) missing.push(ext);
-      else if (extForMime(EXT_MIME[ext]) !== ext) missing.push(`${ext}(書出しが戻らない)`);
+      else if (extForMime(EXT_MIME[ext]) !== ext) missing.push(`${ext}(書き出しが戻らない)`);
     }
     expect(missing, 'Office で開けるのに、名前を付けられない').toEqual([]);
   });
@@ -86,7 +86,7 @@ describe('拡張子 ↔ MIME の往復', () => {
    * ⚠ 期待するのは**その表と同じ拡張子**である ── `bin` でないだけでは
    *   「`.webm` の録音が `.mp3` で出る」を見逃す。
    */
-  it('🔴 録音が出しうる MIME は、書出しで同じ拡張子に戻る', () => {
+  it('🔴 録音が出しうる MIME は、書き出しで同じ拡張子に戻る', () => {
     const mimes = Object.keys(CAPTURE_MIME_EXT);
     // 空振り防止 ── 表が空になっていないこと
     expect(mimes.length, '録音の表が空(前処理が壊れている)').toBeGreaterThan(4);

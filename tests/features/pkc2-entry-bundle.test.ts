@@ -64,8 +64,8 @@ describe('readEntryBundle — 実物', () => {
     expect(JSON.parse(c.entries[0]!.body)).toMatchObject({ status: 'open', date: '2026-08-10' });
     // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
     expect(got.warnings).toEqual([
-      '1 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 側に受け皿がまだありません',
+      '1 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
+        '。PKC3 側に対応する置き場がまだありません',
     ]);
   });
 
@@ -93,7 +93,7 @@ describe('readEntryBundle — 実物', () => {
     // text-meta.entry.zip は created_at / tags / color_tag を持つ実物
     const got = await readEntryBundle(real('text-meta.entry.zip'));
     expect(got.warnings.join('\n')).toMatch(
-      /1 件の entry で.*created_at.*updated_at.*tags.*color_tag/,
+      /1 件のノートで.*created_at.*updated_at.*tags.*color_tag/,
     );
     // ただし本文と添付は入る(落ちるのはメタだけ)
     const c = got.container as Synth;
@@ -108,7 +108,7 @@ describe('readEntryBundle — 形の検査', () => {
     ).rejects.toThrow(/pkc2-entry-bundle のみ/);
     await expect(
       readEntryBundle(await bundle({ manifest: { format: 'pkc2-entry-bundle', version: 9 } })),
-    ).rejects.toThrow(/version/);
+    ).rejects.toThrow(/バージョン/);
   });
 
   it('entry.json が無い / 壊れていれば断る', async () => {
@@ -126,7 +126,7 @@ describe('readEntryBundle — 形の検査', () => {
       manifest: { format: 'pkc2-entry-bundle', version: 1 },
       entry: { lid: 'x', title: 'x', body: 'x' },
     });
-    await expect(readEntryBundle(zip)).rejects.toThrow(/archetype/);
+    await expect(readEntryBundle(zip)).rejects.toThrow(/種類/);
   });
 
   it('目次と中身が食い違えば言う(正は entry.json)', async () => {
@@ -142,8 +142,8 @@ describe('readEntryBundle — 形の検査', () => {
     });
     const got = await readEntryBundle(zip);
     expect(got.warnings).toEqual([
-      '目次と中身で ID が違います(ちがう ≠ t1)。中身を採ります',
-      '目次と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を採ります',
+      '目次と中身で ID が違います(ちがう ≠ t1)。中身を使います',
+      '目次と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を使います',
     ]);
     expect((got.container as Synth).entries[0]!.lid).toBe('t1');
   });
@@ -191,7 +191,7 @@ describe('assetsForSynthesis / droppedFieldsWarning', () => {
     expect(droppedFieldsWarning(['tags'], 0)).toEqual([]);
     expect(droppedFieldsWarning(['tags', 'tags'])).toHaveLength(1);
     // 🔑 300 件の書出しで 1 件なのか 300 件なのかが分からないと判断できない
-    expect(droppedFieldsWarning(['tags'], 42)[0]).toMatch(/^42 件の entry で/);
+    expect(droppedFieldsWarning(['tags'], 42)[0]).toMatch(/^42 件のノートで/);
   });
 
   it('missing_asset_count は唯一の監査証跡なので言う', async () => {
@@ -213,6 +213,6 @@ describe('assetsForSynthesis / droppedFieldsWarning', () => {
       },
     ]);
     const got = await readEntryBundle(zip);
-    expect(got.warnings[0]).toMatch(/書出し時点で既に失われていた添付が 2 件/);
+    expect(got.warnings[0]).toMatch(/書き出し時点で既に失われていた添付が 2 件/);
   });
 });
