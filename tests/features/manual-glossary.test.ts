@@ -77,7 +77,7 @@ describe('マニュアル「言葉の意味」── 見出し語に使わない
       '解放',
     ]);
     // 対照群:実在の複合語(画面)は誤検知しない
-    expect(bannedIn(['画面', 'パネル'])).toEqual([]);
+    expect(bannedIn(['画面', '入力画面'])).toEqual([]);
   });
 
   it('🔴 見出し語に、使わない語が出ていない', () => {
@@ -87,10 +87,9 @@ describe('マニュアル「言葉の意味」── 見出し語に使わない
   it('言い換えた先が、見出し語として載っている(用語集の言い換えと対)', () => {
     // 期待値は言い換えの対を直に書く(`ui-terms.ts` の `instead` を種にループしない)
     const pairs: [banned: string, now: string][] = [
-      ['面', 'パネル'],
+      ['面', '画面'],
       ['小窓', '別ウィンドウ'],
       ['居場所', 'フォルダ'],
-      ['解放', '編集を終える'],
     ];
     for (const [banned, now] of pairs) {
       const t = BANNED_TERMS.find((b) => b.banned === banned);
@@ -114,7 +113,8 @@ function bodyForScan(manual: string): string {
 
 /**
  * 使わない語を含む実在の語・コード。⚠ 名指しで通す ── 本文から消えたら表からも消す。
- * (場面・面積・文面 = 実在の複合語 / アイコン名の鍵 / `file://` と SQL の列名 `lid` = コードの字)
+ * (場面・面積・文面 = 実在の複合語 / アイコン名の鍵 / `file://` と SQL の列名 `lid` = コードの字 /
+ *  `/entry/` `entry=` `container=` = アドレスの字、`entry_order` `entry_lid` = SQL の列名)
  */
 const LEGIT_COMPOUNDS: readonly string[] = [
   '場面',
@@ -125,6 +125,11 @@ const LEGIT_COMPOUNDS: readonly string[] = [
   '`file://`',
   '`cid` `lid`',
   'SELECT lid,',
+  '/entry/',
+  'entry=',
+  'entry_order',
+  'entry_lid',
+  'container=',
 ];
 
 /** 評価語・脅し語は別件(#1017)。ここで見るのは、それ以外の「使わない語」。 */

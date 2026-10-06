@@ -1,7 +1,7 @@
 # PKC3
 
 [PKC2](https://github.com/sm06224/PKC2) の後継となるメジャーバージョンアップ。
-ストレージ(wasm-sqlite)の刷新を最重点に、PKC2 の成果である 1 ファイルの HTML で持ち運べる形式・
+ストレージ(wasm-sqlite)の刷新を最重点に、PKC2 の成果であるアプリ入り HTML(アプリごと 1 つの `.html` に入れて持ち運べる形式)・
 書き出し形式・PKC-Markdown・基本機能を維持する。
 
 ブラウザだけで動くノートアプリ(PWA)。サーバーに何も送りません。
@@ -98,7 +98,7 @@ npm run dev        # Vite dev server
 npm run build      # Vite build → dist/
 npm test           # vitest run
 npm run test:smoke # playwright(実ビルドを preview して検品)
-npm run build:portable # 1 ファイルの HTML のテンプレート(dist-portable/pkc3.html)
+npm run build:portable # アプリ入り HTML のテンプレート(dist-portable/pkc3.html)
 npm run typecheck  # tsc --noEmit
 npm run lint       # eslint src tests build scripts
 ```
