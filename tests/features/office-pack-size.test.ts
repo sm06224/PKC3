@@ -25,7 +25,9 @@ describe('Office 一式の大きさ(#702)', () => {
      *   空きが 80MB の人は、その字を信じて押して失敗していた。
      */
     expect(OFFICE_PACK_APPROX_MB, '2 本だけの合計に戻っている').not.toBe(77);
-    expect(OFFICE_PACK_APPROX_MB, '実測(約 92.8MB)から離れすぎ').toBeGreaterThanOrEqual(90);
-    expect(OFFICE_PACK_APPROX_MB, '多めに言うのは可だが、離れすぎない').toBeLessThanOrEqual(100);
+    // 2026-10-06 事実が動いた: BIZ UD フォント 3 本が入り、実測は約 105.3MB(目録 totalBytes)
+    // 🔑 下限は実測の切り上げ(106)── これより小さい値は「大きい側へ寄せる」規律に反する
+    expect(OFFICE_PACK_APPROX_MB, '実測(約 105.3MB)より小さい').toBeGreaterThanOrEqual(106);
+    expect(OFFICE_PACK_APPROX_MB, '多めに言うのは可だが、離れすぎない').toBeLessThanOrEqual(115);
   });
 });

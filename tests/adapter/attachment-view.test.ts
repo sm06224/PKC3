@@ -12,6 +12,8 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
 import { ExtensionGrants } from '../../src/adapter/platform/extension-grants';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
+import { appOfficePack } from '../../src/adapter/ui/render/office-entry-view';
+import type { OfficePackMeta } from '../../src/adapter/platform/office/office-pack';
 import { stubRevisionOps } from '../helpers/revision-stub';
 
 function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
@@ -553,6 +555,125 @@ describe('preview を持たない添付', () => {
     await tick(20);
     expect(q('[data-pkc-field="attachment-media"]'), '画像が出ていない').not.toBeNull();
     expect(q('[data-pkc-field="attachment-no-preview"]'), '出せているのに案内が出た').toBeNull();
+  });
+
+  /**
+   * 🔴 **Office で開ける種類は、上の入口を指す**(#1363)。
+   *
+   * ⚠ 入口(「Office で開く」)が出ているのに、案内の字だけが「ダウンロードして開いてください」
+   *   を指すと、目の前の入口を見落とす。出し分けは入口と同じ答え(`officeEntryOf`)から引く。
+   * ⚠ happy-dom は能力(分離 / JSPI)を持たないので、`capability` だけ差す
+   *   (一式の有無は本物の `appOfficePack` を通す)。
+   */
+  describe('Office の添付(#1363)', () => {
+    const OK_CAP = {
+      crossOriginIsolated: true,
+      sharedArrayBuffer: true,
+      jspi: true,
+      decompressionStream: true,
+    };
+    const PACK: OfficePackMeta = {
+      version: 'lo-wasm-dev',
+      build: null,
+      installedAt: Date.UTC(2026, 9, 6),
+      source: 'url',
+      totalBytes: 106 * 1024 * 1024,
+      files: [],
+    };
+    const docxBody = attachmentBody({
+      name: '報告書.docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 12,
+      assetKey: 'ast-docx',
+    });
+    const OLD_NOTE =
+      'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください';
+    let capSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+    afterEach(() => {
+      capSpy?.mockRestore();
+      capSpy = null;
+      appOfficePack.setMeta(null);
+    });
+
+    const noteOf = async (body: string): Promise<string> => {
+      const { d, q } = setup({ a1: body, a2: '# text' }, lender);
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      const note = q('[data-pkc-field="attachment-no-preview"]');
+      expect(note, '案内が出ていない').not.toBeNull();
+      return note!.textContent ?? '';
+    };
+
+    it('🔴 一式が入っている .docx は、上の「Office で開く」を指す(ダウンロードへ送らない)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      const text = await noteOf(docxBody);
+      expect(text).toContain('「Office で開く」');
+      expect(text, '目の前の入口があるのにダウンロードへ送っている').not.toContain('添付をダウンロード');
+      // 対照群:案内が指す入口が、本当に同じ画面に出ている
+      const btn = document.querySelector('[data-pkc-action="open-office"]');
+      expect(btn, '案内が指す「Office で開く」が画面に無い').not.toBeNull();
+    });
+
+    it('🔴 一式がまだ無い .docx は、一式を入れる場所を指す(無い字を案内しない)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(null);
+      const text = await noteOf(docxBody);
+      expect(text).toContain('システム → 保存領域 → Office 表示');
+      expect(text).not.toContain('添付をダウンロード');
+      // ⚠ 指す字が実在すること ── 入口は理由の 1 行で、ボタンは出ない
+      expect(document.querySelector('[data-pkc-action="open-office"]')).toBeNull();
+    });
+
+    it('対照群:この環境で Office が動かない .docx(入口が出ない)は、今までの字のまま', async () => {
+      capSpy = vi
+        .spyOn(appOfficePack, 'capability')
+        .mockReturnValue({ ...OK_CAP, jspi: false });
+      appOfficePack.setMeta(PACK);
+      expect(await noteOf(docxBody)).toBe(OLD_NOTE);
+    });
+
+    it('🔴 種類が octet-stream でも名前が .docx なら「Office で開く」を指す(拡張子だけで分かる取り込み)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      const body = attachmentBody({
+        name: '報告書.docx',
+        mime: 'application/octet-stream',
+        size: 12,
+        assetKey: 'ast-docx-octet',
+      });
+      const text = await noteOf(body);
+      expect(text, 'fileName が判定に渡っていない').toContain('「Office で開く」');
+    });
+
+    it('🔴 旧形式(.xls)も同じ案内(名前で開ける種類と分かる)', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      const body = attachmentBody({
+        name: '集計.xls',
+        mime: 'application/octet-stream',
+        size: 12,
+        assetKey: 'ast-xls',
+      });
+      expect(await noteOf(body)).toContain('「Office で開く」');
+    });
+
+    it('対照群:この環境で Office が動かず、一式も無い .docx は、今までの字のまま(「入れると開けます」と言わない)', async () => {
+      // ⚠ 「動かない環境」は「未配備」より先に見る(office-entry.ts の順)── ここを
+      //    `isInstalled()` だけで分ける変異は、動かない端末の user に約 106MB を取らせる
+      capSpy = vi
+        .spyOn(appOfficePack, 'capability')
+        .mockReturnValue({ ...OK_CAP, jspi: false });
+      appOfficePack.setMeta(null);
+      expect(await noteOf(docxBody)).toBe(OLD_NOTE);
+    });
+
+    it('対照群:Office でない種類(.zip)は、一式が入っていても今までの字のまま', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(PACK);
+      expect(await noteOf(zipBody)).toBe(OLD_NOTE);
+    });
   });
 });
 
