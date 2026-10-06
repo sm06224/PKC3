@@ -196,6 +196,6 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const r = await purgeAssets(deps.ports, keys, strays);
   await deps.tell(
     `${r.deleted} 件を削除しました` +
-      (r.failed > 0 ? `(${r.failed} 件は失敗 ── 再実行で回収されます)` : ''),
+      (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : ''),
   );
 }

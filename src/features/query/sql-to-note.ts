@@ -104,11 +104,11 @@ export function sqlNoteBody(p: {
   ];
   if (p.truncated) {
     lines.push('>');
-    lines.push('> ⚠ 上限で切っています ── 全部を出すには、LIMIT や条件で絞ってから走らせ直してください。');
+    lines.push('> ⚠ 上限で切っています。全部を出すには、LIMIT や条件で絞ってから走らせ直してください。');
   }
   lines.push('>');
   lines.push(
-    `> 🔑 この表をまた SQL から引きたいときは、上の囲みの 1 行目を \`csv name=好きな名前\` にしてください。`,
+    `> この表をまた SQL から実行したいときは、上の囲みの 1 行目を \`csv name=好きな名前\` にしてください。`,
   );
   return `${lines.join('\n')}\n`;
 }

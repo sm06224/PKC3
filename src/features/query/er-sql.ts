@@ -295,7 +295,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
   if (shape === null) {
     return {
       ok: false,
-      why: 'いま打っている字は、この図からは足せません(欄を空にしてから押すと組み直せます)',
+      why: 'いま打っている字は、この図からは足せません(欄を空にしてから押すと作り直せます)',
     };
   }
   const has = (name: string): boolean => shape.tables.some((t) => same(t, name));
@@ -304,7 +304,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
     if (has(action.table)) return { ok: false, why: `「${action.table}」はもう入っています` };
     return {
       ok: false,
-      why: `「${action.table}」を足すには、図の線(繋がり)を押してください ── どの列で繋ぐかが要ります`,
+      why: `「${action.table}」を足すには、図の線(つながり)を押してください。どの列で繋ぐかが要ります`,
     };
   }
 
@@ -312,7 +312,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
     if (!has(action.table)) {
       return {
         ok: false,
-        why: `「${action.table}」はまだ取り出し元に入っていません ── 表の名前か、繋がりの線を先に押してください`,
+        why: `「${action.table}」はまだ取り出し元に入っていません。表の名前か、つながりの線を先に押してください`,
       };
     }
     // ⚠ 表が 2 つ以上あるときだけ `表.列` にする(1 つなら余計な字を足さない)
@@ -333,7 +333,7 @@ export function erSql(current: string, action: ErAction): ErSqlResult {
   if (toColumn === '' || fromColumn === '') {
     return { ok: false, why: `「${from}」と「${to}」を、どの列で繋ぐかが分かりません` };
   }
-  if (has(from) && has(to)) return { ok: false, why: `「${from}」と「${to}」はもう繋がっています` };
+  if (has(from) && has(to)) return { ok: false, why: `「${from}」と「${to}」はもうつながっています` };
   if (!has(from) && !has(to)) {
     return { ok: false, why: `先に「${from}」か「${to}」の表の名前を押してください` };
   }

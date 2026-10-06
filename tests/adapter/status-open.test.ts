@@ -105,7 +105,7 @@ describe('知らせの隣の「開く」(#668 A)', () => {
  * ⑤ ⚠ 材料が**別のノート**を指していたら出ない(押すと画面に無い物が戻る)
  */
 describe('知らせの隣の「元に戻す」── 開いていないノートの行(#684 ㋑)', () => {
-  const PUT = '「猫.png」を『さきの予定』の落とした所に入れました';
+  const PUT = '「猫.png」を『さきの予定』のドロップした所に入れました';
   const undoBtn = (): HTMLElement => {
     const b = document.createElement('button');
     b.hidden = true;
@@ -125,7 +125,7 @@ describe('知らせの隣の「元に戻す」── 開いていないノート
 
   it('🔴 ③ 塊を動かした知らせでは、これまでどおり undo-move が勝つ', () => {
     const b = undoBtn();
-    const MOVED = '本文の塊を動かしました';
+    const MOVED = '本文のブロックを動かしました';
     // ⚠ 材料が両方在る形で見る(片方しか無い台では、どちらが勝つかを見ていない)
     paintStatusUndo(b, { lastMove: {}, notice: MOVED, lastAppend: { lid: 'n2' }, noticeOpen: 'n2' }, MOVED);
     expect(b.hidden).toBe(false);

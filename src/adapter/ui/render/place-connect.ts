@@ -57,7 +57,7 @@ const TARGET_ATTR = 'data-pkc-connect-target';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** 画面の字。⚠ 文言は**起きること**で書く(user 指示 2026-08-21。出どころは CLAUDE.md の節)。 */
-const DOT_LABEL = '掴んで別の付箋まで引くと、線で繋ぎます(離した位置が本文に書かれます)';
+const DOT_LABEL = '掴んで別の付箋までドラッグすると、線で繋ぎます(離した位置が本文に書かれます)';
 const PLUS_LABEL = 'ここに乗せると、繋ぎ目をさらに細かく選べます';
 
 /** 乗せている付箋と辺。 */

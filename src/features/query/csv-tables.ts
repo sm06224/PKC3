@@ -151,7 +151,7 @@ export function csvTableNameWhy(raw: string): string {
   for (const ch of raw) {
     const code = ch.charCodeAt(0);
     if (code >= 0xff01 && code <= 0xff5e)
-      return '全角の英数字は使えません(打つと半角に直るので引けなくなります)。半角で書くか、漢字・かなにしてください';
+      return '全角の英数字は使えません(打つと半角に直るので実行できなくなります)。半角で書くか、漢字・かなにしてください';
   }
   if (!validCsvTableName(raw))
     return '名前に使えるのは文字・数字・_ だけです(空白と記号は使えません)';

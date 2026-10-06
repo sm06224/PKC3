@@ -91,11 +91,11 @@ export function parseExtWrite(data: unknown, delivered: ReadonlySet<string>): Ex
       return {
         ok: false,
         why:
-          `${at}: 「${String(o.op)}」は在りません(意図的です)。` +
+          `${at}: 「${String(o.op)}」はありません(意図的です)。` +
           '書き戻せるのは setBody 1 つだけで、新規作成は pkc.createEntry を通ります。',
       };
     if (typeof o.lid !== 'string' || o.lid === '')
-      return { ok: false, why: `${at}: lid がありません` };
+      return { ok: false, why: `${at}: ID がありません` };
     if (typeof o.body !== 'string') return { ok: false, why: `${at}: body が文字列ではありません` };
     /**
      * ⚠ **同じ lid を 2 回書かせない** ── どちらが残るかは順番次第で、

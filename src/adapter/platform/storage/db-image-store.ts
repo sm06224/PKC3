@@ -89,15 +89,15 @@ export function decodeStoredImage(raw: unknown): StoredImage | null {
   const r = raw as RawRecord;
   const image = r.image;
   if (!(image instanceof Uint8Array))
-    throw new Error('器の記録の形が違います(画像が Uint8Array ではない)');
+    throw new Error('保存データの記録の形が違います(画像が Uint8Array ではない)');
   if (typeof r.bundleId !== 'string' || r.bundleId === '')
-    throw new Error('器の記録の形が違います(bundleId が無い)');
+    throw new Error('保存データの記録の形が違います(bundleId が無い)');
   for (const [k, v] of [
     ['exportedAt', r.exportedAt],
     ['savedAt', r.savedAt],
   ] as const)
     if (typeof v !== 'number' || !Number.isFinite(v))
-      throw new Error(`器の記録の形が違います(${k} が数ではない)`);
+      throw new Error(`保存データの記録の形が違います(${k} が数ではない)`);
   return {
     bundleId: r.bundleId,
     exportedAt: r.exportedAt as number,
@@ -118,7 +118,7 @@ export function decodeStoredImage(raw: unknown): StoredImage | null {
  * IDB の配管そのものは `file://` の smoke が通す(そちらが正しい層である)。
  */
 export function assertWritableImage(image: Uint8Array): void {
-  if (image.byteLength <= 0) throw new Error('空の画像は器へ書きません');
+  if (image.byteLength <= 0) throw new Error('空の画像は保存データへ書きません');
 }
 
 /**

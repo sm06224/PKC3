@@ -568,7 +568,7 @@ export async function attachFiles(
    */
   notify(
     elsewhere
-      ? `${why}${what}を預かりました(編集を終えたら『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : '落とした所'}に入れます)`
+      ? `${why}${what}を預かりました(編集を終えたら『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : 'ドロップした所'}に入れます)`
       : namedTitle === undefined
         ? `${why}${what}を預かりました(編集を終えたら本文に入れます)`
         : `${why}${what}を預かりました(編集を終えたら『${namedTitle}』の本文のいちばん下に入れます)`,

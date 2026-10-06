@@ -151,8 +151,8 @@ describe('誤りの返し方', () => {
   });
 
   it('mv / rename に lid が無い', () => {
-    expect(parsePlan('mv', W).errors[0]!.message).toContain('mv <lid>');
-    expect(parsePlan('rename', W).errors[0]!.message).toContain('rename <lid>');
+    expect(parsePlan('mv', W).errors[0]!.message).toContain('mv <ID>');
+    expect(parsePlan('rename', W).errors[0]!.message).toContain('rename <ID>');
   });
 
   it('🔴 誤った行は ops に積まない(半分だけ適用させない)', () => {

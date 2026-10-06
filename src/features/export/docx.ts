@@ -430,7 +430,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
        * 「Word に写らなかったこと」に気づけない ── PKC2 で実際にそうなっていた。
        */
       return paragraph(
-        runXml({ text: `［${block.what} は写せませんでした: ${block.why}］`, italic: true }),
+        runXml({ text: `［${block.what} はコピーできませんでした: ${block.why}］`, italic: true }),
         'PkcSkipped',
       );
   }
@@ -540,7 +540,7 @@ export function buildDocx(
     const kinds = new Map<string, number>();
     for (const s of skipped) kinds.set(s.what, (kinds.get(s.what) ?? 0) + 1);
     const detail = [...kinds].map(([what, n]) => `${what} ${n} 件`).join(' / ');
-    warnings.push(`Word に写せなかったものがあります(${detail})── 本文にその場所を書きました`);
+    warnings.push(`Word にコピーできなかったものがあります(${detail})。本文にその場所を書きました`);
   }
 
   return {

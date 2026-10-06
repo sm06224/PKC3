@@ -1737,7 +1737,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       onLateHello: () =>
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: '窓を開くのに時間がかかりすぎました。もう一度押してください',
+          error: 'ウィンドウを開くのに時間がかかりすぎました。もう一度押してください',
         }),
     });
     return pdfHost;
@@ -1808,7 +1808,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         builtAt: BUILT_AT,
       },
     }).catch((e: unknown) => {
-      showStatus(`一式を組めませんでした: ${e instanceof Error ? e.message : String(e)}`, {
+      showStatus(`一式を作れませんでした: ${e instanceof Error ? e.message : String(e)}`, {
         kind: 'problem',
       });
     });
@@ -1977,7 +1977,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 統一 ── 表示寿命は「次の成功 / 選択まで」で、event の一瞬表示問題は消滅)
   dispatcher.onState((state) => {
     // ⚠ **エラーの行だけ**を触る ── 一時の知らせを巻き添えにしない
-    errorLine = state.error ? `⚠ エラー: ${state.error}` : '';
+    errorLine = state.error ? `エラー: ${state.error}` : '';
     /**
      * 🔴 **`OP_FAILED` → メッセージ「問題」**(設計 doc §7、段②a)。
      * ⚠ **新しい非 null 値に変わった瞬間だけ** post する(直前と同じ字なら
@@ -2082,7 +2082,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         type: 'OP_FAILED',
         error:
           '本体タブの交代で、このノートの編集権を別のタブかウィンドウに取られました。' +
-          'ここで保存すると相手の編集を上書きします ── 内容を控えてから「編集をやめる」を押してください',
+          'ここで保存すると相手の編集を上書きします。内容を控えてから「編集をやめる」を押してください',
       });
     });
     let promotedHost: StoreProxyHost | null = null;
@@ -2135,7 +2135,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         paint();
       } catch (e) {
         // 🔴 帯の常設も嘘のまま残さない(レビュー H-2)── 「本体経由」はもう成立していない
-        syncLine = '⚠ 本体への切り替えに失敗しました(保存できません ── タブを読み直してください)';
+        syncLine = '⚠ 本体への切り替えに失敗しました(保存できません、タブを再読み込みしてください)';
         paint();
         dispatcher.dispatch({
           type: 'OP_FAILED',
@@ -2491,7 +2491,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     else if (ev.type === 'degraded') {
       // 🔴 **窓は生きて見えるが保存が効かない**(#117)。⚠ 2026-08-16 まで、この
       //    放送は受け側の `parseEvent` に case が無く**黙って捨てられていた**
-      showStatus('Office が不安定になりました。保存が効きません ── ウィンドウを読み込み直してください', {
+      showStatus('Office が不安定になりました。保存が効きません。ウィンドウを読み込み直してください', {
         kind: 'problem',
       });
     }
@@ -2737,8 +2737,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 章の欄の打ちかけも守る(#1044 段2、F-C。上の `onContainerWiped` と同じ穴)
     isEditing: () => hasUnsavedTyping(dispatcher.getState()),
     confirmDiscard: () =>
-      ask('編集中の内容は保存されません。新しい版に切り替えますか?', {
-        okLabel: '新しい版に切り替える',
+      ask('編集中の内容は保存されません。新しいバージョンに切り替えますか?', {
+        okLabel: '新しいバージョンに切り替える',
         danger: true,
       }),
   });
@@ -3051,7 +3051,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         showStatus(
           rang
             ? '予定の時刻に、この音で知らせます(PKC を開いている間だけです)'
-            : 'この端末では音を出せませんでした ── 時間になったら画面の下の帯でお知らせします',
+            : 'この端末では音を出せませんでした。時間になったら画面の下のステータスバーでお知らせします',
         );
       });
     },
@@ -3827,7 +3827,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 // ⚠ 何が見えるかを**具体**で書く(「連携します」では判断できない)
                 ask(
                   `「${title}」に、ノートの**目次**を見せて開きます。\n\n` +
-                    '見えるのは、ノートの題名・種類・日付・印の一覧だけです。\n' +
+                    '見えるのは、ノートの題名・種類・日付・状態の一覧だけです。\n' +
                     '本文と添付は渡りません。\n\n' +
                     'この中身は次回から聞きません(中身が変わったらまた聞きます。' +
                     'システムでいつでも取り消せます)。\n\n開きますか?',
@@ -4293,8 +4293,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             const res = await fetch(new URL('portable-template.html', document.baseURI));
             if (!res.ok)
               throw new Error(
-                `アプリの雛形を取れませんでした(HTTP ${res.status})── ` +
-                  'この配り方には雛形が同梱されていない可能性があります',
+                `アプリのテンプレートを取得できませんでした(HTTP ${res.status})。` +
+                  'この配布の形にはテンプレートが同梱されていない可能性があります',
               );
             return res.text();
           },
@@ -4661,7 +4661,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   setSqlEmbedRunner(async (sql, limits) => {
     await storeEffects?.settled();
     const ask = storePort.runReadOnlySql;
-    if (!ask) throw new Error('この版では引けません(アプリを読み直すと直ることがあります)');
+    if (!ask) throw new Error('このバージョンでは実行できません(アプリを再読み込みすると直ることがあります)');
     return ask(sql, limits);
   });
   storeEffects = connectStoreEffects(dispatcher, storePort, {
@@ -4820,7 +4820,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     appMessagePost.post({
       kind: 'result',
       source: 'app',
-      text: `起動しました:版 ${versionText()} / 保存先 ${init.vfs} / フラグ ${String(activeFlags)} 個 / ブラウザ ${navigator.userAgent} / 幅 ${String(window.innerWidth)}px`,
+      text: `起動しました:バージョン ${versionText()} / 保存先 ${init.vfs} / フラグ ${String(activeFlags)} 個 / ブラウザ ${navigator.userAgent} / 幅 ${String(window.innerWidth)}px`,
     });
   }
   /**
@@ -4955,7 +4955,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       await whenPhaseReady(dispatcher, () => {});
       showStatus(
         writable
-          ? `「${last.file.name}」を開けます ── アプリの「Office」を押してください`
+          ? `「${last.file.name}」を開けます。アプリの「Office」を押してください`
           : cannotWriteBackNotice(last.file.name),
       );
     }
@@ -5291,7 +5291,7 @@ function bootstrap(): void {
        */
       const handoff =
         'launchQueue' in window
-          ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して読み直すと開きます)'
+          ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して再読み込みすると開きます)'
           : '';
       root.textContent = `起動に失敗しました: ${message}${handoff}`;
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは

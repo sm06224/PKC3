@@ -195,7 +195,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    * (小さく・薄い字で、表の下)。⚠ 新しい起動は足さない ── この道中で編集に入り直す。
    */
   await expect(embedHost.locator('[data-pkc-field="sql-embed-saved"]'), '読む面に添え書きが出た').toHaveCount(0);
-  await expect(embedHost, '引き終えたのに「引いています」が残っている').not.toContainText('引いています');
+  await expect(embedHost, '引き終えたのに「引いています」が残っている').not.toContainText('実行しています');
   await clickReal(page, '[data-pkc-action="start-edit"]');
   const previewHost = page.locator('[data-pkc-region="editor-preview"] [data-pkc-sql-embed]');
   await expect(previewHost.locator('tbody tr'), '下見に答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
@@ -288,7 +288,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
     .toBeGreaterThanOrEqual(2);
   const zero = page.locator('[data-pkc-field="sql-er-zero"]');
   await expect(zero, '線 0 本の理由が出ない').toContainText(
-    'この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。',
+    'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
   await expect(zero, '次の一手(「繋ぐ」への誘い)が出ていない').toContainText(
     '上の「繋ぐ」を押して列を 2 つ押すと、自分で繋げます。',
@@ -300,7 +300,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await expect(connectBtn, '「繋ぐ」が入にならない').toHaveAttribute('aria-pressed', 'true');
 
   await expect(zero, '繋ぐを入にしたら、理由まで消えた').toContainText(
-    'この DB は、表どうしの繋がり(外部キー)を 1 つも宣言していません。',
+    'この DB は、表どうしのつながり(外部キー)を 1 つも宣言していません。',
   );
   await expect(zero, '繋ぐを入にしたのに、次の一手の誘いが残っている(二重に言っている)').not.toContainText(
     '上の「繋ぐ」を押して列を 2 つ押すと',

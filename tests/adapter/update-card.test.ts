@@ -33,7 +33,7 @@ describe('更新の案内 — 面', () => {
     expect(el.querySelector('[data-pkc-action="apply-update"]')).not.toBeNull();
     expect(el.querySelector('[data-pkc-action="dismiss-update"]')).not.toBeNull();
     expect(el.querySelector('[data-pkc-field="update-text"]')?.textContent).toContain(
-      '新しい版',
+      '新しいバージョン',
     );
   });
 

@@ -37,7 +37,7 @@ describe('フラグの面', () => {
     expect(region.querySelector('[data-pkc-field="pane-title"]')?.textContent).toBe('フラグ');
     const note = region.querySelector('[data-pkc-field="flags-note"]')?.textContent ?? '';
     // ⚠ 「開発者向け」だけだと、パワーユーザーが自分は対象外だと思う
-    expect(note, '「いつか畳まれる」ことが書かれていない').toContain('畳まれます');
+    expect(note, '「いつか畳まれる」ことが書かれていない').toContain('折りたたまれます');
   });
 
   it('🔴 宣言した flag が一覧に出て、畳む条件も出る', () => {

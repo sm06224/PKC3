@@ -172,7 +172,7 @@ function resolveArchetype(
     // PKC2 は完全に無視していた ── 黙って無視せず見せる(判断は format を採る)
     if (typeof me.archetype === 'string' && me.archetype !== fixed) {
       warnings.push(
-        `${where}: 目次の archetype(${me.archetype})は形式(${fixed})と違います ── 形式を採ります`,
+        `${where}: 目次の archetype(${me.archetype})は形式(${fixed})と違います。形式を採ります`,
       );
     }
     return fixed;
@@ -181,7 +181,7 @@ function resolveArchetype(
   if (a === 'text' || a === 'textlog') return a;
   // 決められないものを「たぶん text」で通すと、textlog が本文 1 行に潰れる
   throw new ZipReadError(
-    `${where}: archetype が text / textlog ではありません(${String(a)})── この形式はまだ扱えません`,
+    `${where}: archetype が text / textlog ではありません(${String(a)})。この形式はまだ扱えません`,
   );
 }
 
@@ -236,7 +236,7 @@ function mergeAssets(
       prev.source.entry.uncompressedSize !== a.source.entry.uncompressedSize
     ) {
       throw new ZipReadError(
-        `同じ添付 key が違う中身で入っています(${key}: ${filename})── 取り込めません`,
+        `同じ添付 ID が違う中身で入っています(${key}: ${filename})。取り込めません`,
       );
     }
     // 🔑 **複製を控えに残す**(review M-5)。判定は中央ディレクトリの crc/size
@@ -249,7 +249,7 @@ function mergeAssets(
       // bytes は同じなので畳めるが、見え方が変わる ── 黙って選ばない
       warnings.push(
         `${filename}: 添付 ${key} の名前(${prev.name} / ${a.name})か種別` +
-          `(${prev.mime} / ${a.mime})が bundle ごとに違います ── 先の方を採ります`,
+          `(${prev.mime} / ${a.mime})が bundle ごとに違います。先の方を採ります`,
       );
     }
   }
@@ -358,7 +358,7 @@ export async function readInnerBundles(
       // 「読めるところだけ読む」が悪いのは**黙って**やるからで、
       // どのファイルを何の理由で落としたかを言うなら静かではない
       failed.push(filename);
-      warnings.push(`${filename}: 取り込めませんでした ── ${e instanceof Error ? e.message : String(e)}`);
+      warnings.push(`${filename}: 取り込めませんでした: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
 
@@ -368,7 +368,7 @@ export async function readInnerBundles(
     // 食い違うのは組み立ての事故なので見せる
     const innerLid = parts.manifest.source_lid ?? '';
     if (typeof me.lid === 'string' && me.lid !== '' && innerLid !== '' && me.lid !== innerLid) {
-      warnings.push(`${filename}: 目次と中身で lid が違います(${me.lid} ≠ ${innerLid})`);
+      warnings.push(`${filename}: 目次と中身で ID が違います(${me.lid} ≠ ${innerLid})`);
     }
     const innerTitle = parts.manifest.source_title ?? '';
     if (
@@ -388,8 +388,8 @@ export async function readInnerBundles(
     const dupOf = lidSeen.get(parts.main.lid);
     if (dupOf !== undefined) {
       warnings.push(
-        `${filename}: 中身の lid が ${dupOf} と同じです(${parts.main.lid})` +
-          ' ── 別の entry として取り込みます',
+        `${filename}: 中身の ID が ${dupOf} と同じです(${parts.main.lid})` +
+          '。別の entry として取り込みます',
       );
     } else {
       lidSeen.set(parts.main.lid, filename);
@@ -428,7 +428,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
     );
   }
 
@@ -447,7 +447,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1)`,
+      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
     );
   }
   if (!Array.isArray(manifest.entries)) {
@@ -490,7 +490,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   if (mains.length === 0) {
     throw new ZipReadError(
       failed.length > 0
-        ? `内側の bundle を 1 件も取り込めませんでした(${failed.length} 件すべて失敗)── ${warnings.join(' / ')}`
+        ? `内側の bundle を 1 件も取り込めませんでした(${failed.length} 件すべて失敗): ${warnings.join(' / ')}`
         : '取り込める entry が 1 件も入っていません(空の bundle)',
     );
   }

@@ -95,7 +95,7 @@ export class PcFolderRenderer {
         );
         return;
       case 'lost':
-        this.host.append(para('pc-note', '許可が切れました ── もう一度フォルダを選んでください'), this.pickButton());
+        this.host.append(para('pc-note', '許可が切れました。もう一度フォルダを選んでください'), this.pickButton());
         return;
       case 'failed':
         this.host.append(para('pc-note', view.message ?? 'フォルダを開けませんでした'), this.pickButton());
@@ -136,7 +136,7 @@ export class PcFolderRenderer {
           'pc-refresh-folder',
           'pc-refresh',
           '更新',
-          '同じフォルダの一覧を読み直します(ファイルの中身は読みません)',
+          '同じフォルダの一覧を再読み込みします(ファイルの中身は読みません)',
         ),
         // ⚠ 「フォルダを選ぶ…」と**同じ口**(`pc-pick-folder`)── 選び直しの入り口を 2 つ作らない
         button(

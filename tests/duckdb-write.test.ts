@@ -126,12 +126,12 @@ describe('🔴 塞いだ後の器で、書き込みの 5 形が動く(実物の 
   it('🔴 CREATE TABLE(AS 無し)── 0 行を返し、「実行しました」と言う', () => {
     const { raw, note } = run('CREATE TABLE memo (k INT, v TEXT)');
     expect(raw.rows).toHaveLength(0);
-    expect(note).toBe(`実行しました ── 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
+    expect(note).toBe(`実行しました: 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
   });
 
   it('🔴 INSERT ── 件数が返り、入れた行が引ける', () => {
     const { note } = run("INSERT INTO memo VALUES (1, 'a'), (2, 'b'), (3, 'c')");
-    expect(note).toBe('3 行に効きました ── 元の file は書き換わりません');
+    expect(note).toBe('3 行に効きました。元のファイルは書き換わりません');
     expect(duckDbTable(ask('SELECT k, v FROM memo ORDER BY k')).rows).toEqual([
       [1, 'a'],
       [2, 'b'],
@@ -153,7 +153,7 @@ describe('🔴 塞いだ後の器で、書き込みの 5 形が動く(実物の 
 
   it('🔴 CREATE TABLE … AS SELECT ── 写した表から作れる(件数つき)', () => {
     const { note } = run('CREATE TABLE copy_of_csv AS SELECT * FROM csv WHERE id >= 2');
-    expect(note).toBe(`2 行に効きました ── 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
+    expect(note).toBe(`2 行に効きました: 作った表はウィンドウを閉じると消えます。${DUCKDB_TABLE_RESET}`);
     expect(duckDbTable(ask('SELECT id FROM copy_of_csv ORDER BY id')).rows).toEqual([[2], [3]]);
   });
 

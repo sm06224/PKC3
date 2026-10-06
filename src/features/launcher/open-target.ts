@@ -35,7 +35,7 @@ export interface AppOpenTargetSpec {
  */
 export const APP_OPEN_TARGETS = [
   { id: 'tab', label: 'ブラウザのタブ(既定)' },
-  { id: 'window', label: '別の窓' },
+  { id: 'window', label: '別のウィンドウ' },
 ] as const satisfies readonly AppOpenTargetSpec[];
 
 export type AppOpenTarget = (typeof APP_OPEN_TARGETS)[number]['id'];

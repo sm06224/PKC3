@@ -55,7 +55,7 @@ export const EMPTY_DUCK_COPY: DuckDbCopyReport = { refused: [], asText: [], sqli
  *   「内蔵の sqlite なら引けます」と言うと**押せない道を指す**。並べている file を 1 つに戻せば選べるようになる。
  */
 export function sqliteFallbackHint(multi: boolean): string {
-  return multi ? 'file を 1 つに戻すと内蔵の sqlite で引けます' : '内蔵の sqlite なら引けます';
+  return multi ? 'ファイルを 1 つに戻すと内蔵の sqlite で実行できます' : '内蔵の sqlite なら実行できます';
 }
 
 /** 名前を画面の字にする(空は「名前の無い表」)。 */
@@ -69,8 +69,8 @@ export function refusedLine(copy: DuckDbCopyReport, multi: boolean): string {
   const tables = copy.refused.filter((r) => !r.view).map((r) => shown(r.name));
   const views = copy.refused.filter((r) => r.view).map((r) => shown(r.name));
   const parts: string[] = [];
-  if (tables.length > 0) parts.push(`写せなかった表: ${tables.join('、')}`);
-  if (views.length > 0) parts.push(`写らないビュー: ${views.join('、')}(ビューは写しません)`);
+  if (tables.length > 0) parts.push(`コピーできなかった表: ${tables.join('、')}`);
+  if (views.length > 0) parts.push(`コピーされないビュー: ${views.join('、')}(ビューはコピーしません)`);
   if (parts.length === 0) return '';
   return `${parts.join(' / ')}(${sqliteFallbackHint(multi)})`;
 }
@@ -78,7 +78,7 @@ export function refusedLine(copy: DuckDbCopyReport, multi: boolean): string {
 /** 全列を文字で写した表を、1 行にする。⚠ 無ければ `''`。 */
 export function asTextLine(copy: DuckDbCopyReport): string {
   if (copy.asText.length === 0) return '';
-  return `全部の列を文字で写した表: ${copy.asText.map(shown).join('、')}(数として使うときは CAST で変えてください)`;
+  return `全部の列を文字にした表: ${copy.asText.map(shown).join('、')}(数として使うときは CAST で変えてください)`;
 }
 
 /**
@@ -96,7 +96,7 @@ export function copyBandNote(copy: DuckDbCopyReport | null, multi: boolean): str
  * 「`DECIMAL(10,2)` と書いてあるのに」と迷う。
  */
 export const DUCKDB_ROUNDED_TYPES_NOTE =
-  '型は元の .sqlite の宣言です。写し先では BIGINT / DOUBLE / VARCHAR の 3 つに丸めています。';
+  '型は元の .sqlite の宣言です。コピー先では BIGINT / DOUBLE / VARCHAR の 3 つに丸めています。';
 
 /**
  * 🔴 **構造ノートの末尾に足す行たち**(見出しの無い文)。⚠ 無ければ空の配列。

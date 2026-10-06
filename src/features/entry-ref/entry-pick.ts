@@ -92,7 +92,7 @@ export function entryPickRows(
  */
 export function entryPickNote(shown: number, total: number): string {
   if (total === 0) return 'あてはまるノートがありません(題名で探しています)';
-  if (shown < total) return `${total} 件のうち ${shown} 件を出しています ── 題名を打つと絞れます`;
+  if (shown < total) return `${total} 件のうち ${shown} 件を出しています。題名を打つと絞れます`;
   return '';
 }
 

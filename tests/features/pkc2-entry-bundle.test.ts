@@ -65,7 +65,7 @@ describe('readEntryBundle — 実物', () => {
     // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
     expect(got.warnings).toEqual([
       '1 件の entry で、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        ' ── PKC3 側に受け皿がまだありません',
+        '。PKC3 側に受け皿がまだありません',
     ]);
   });
 
@@ -142,8 +142,8 @@ describe('readEntryBundle — 形の検査', () => {
     });
     const got = await readEntryBundle(zip);
     expect(got.warnings).toEqual([
-      '目次と中身で lid が違います(ちがう ≠ t1)── 中身を採ります',
-      '目次と中身で タイトル が違います(ちがう題 ≠ 本当の題)── 中身を採ります',
+      '目次と中身で ID が違います(ちがう ≠ t1)。中身を採ります',
+      '目次と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を採ります',
     ]);
     expect((got.container as Synth).entries[0]!.lid).toBe('t1');
   });

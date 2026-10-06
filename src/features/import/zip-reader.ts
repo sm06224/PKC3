@@ -141,7 +141,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
     }
   }
   if (eocd < 0) {
-    throw new ZipReadError('ZIP の終端(EOCD)が見つかりません ── ZIP ではないかもしれません');
+    throw new ZipReadError('ZIP の終端(EOCD)が見つかりません。ZIP ではないかもしれません');
   }
   // 分割書庫(マルチディスク)── 2 枚目以降は原理的に読めないので、
   // 「読めた気になって欠落する」前に断る
@@ -347,7 +347,7 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
     // ⚠ 「entry の出所が違う」でも同じ症状になる(別 ZIP の entry を渡した等)ので、
     // user のデータを一方的に疑う文面にしない
     throw new ZipReadError(
-      `ZIP のファイルの CRC が一致しません(${entry.name})── または entry の出所が違います`,
+      `ZIP のファイルの CRC が一致しません(${entry.name})。または entry の出所が違います`,
     );
   }
 }
@@ -363,7 +363,7 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   if (entry.isDirectory) throw new ZipReadError(`ディレクトリの中身は読めません: ${entry.name}`);
   if (entry.method !== 0 && entry.method !== 8) {
     throw new ZipReadError(
-      `未対応の圧縮方式です(method=${entry.method}): ${entry.name} ── store か deflate のみ扱えます`,
+      `未対応の圧縮方式です(method=${entry.method}): ${entry.name}。store か deflate のみ扱えます`,
     );
   }
   // store は「圧縮後 = 圧縮前」が method 0 の定義。食い違いは目次の壊れ

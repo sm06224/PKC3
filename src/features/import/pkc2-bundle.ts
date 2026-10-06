@@ -112,7 +112,7 @@ async function readBundleCommon(
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
     );
   }
 
@@ -130,7 +130,7 @@ async function readBundleCommon(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1)`,
+      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
     );
   }
 

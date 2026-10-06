@@ -103,7 +103,7 @@ describe('閲覧用 HTML(writePortableHtml)', () => {
     d.innerHTML = await htmlOfFirstEntry(blob);
     expect(d.querySelector(`[${SQL_EMBED_ATTR}] table`)).toBeNull();
     expect(d.querySelector(`[${SQL_EMBED_ATTR}]`)!.textContent).toContain(
-      '答えを引けませんでした: no such table: t',
+      '答えを実行できませんでした: no such table: t',
     );
     expect(d.querySelector('pre code.language-sql')).not.toBeNull();
   });
@@ -196,6 +196,6 @@ describe('Word(exportEntryDocx)', () => {
     const { d, got } = deps(source(BODY), ask);
     const { dispatcher } = fakeDispatcher('ready');
     expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
-    expect(await got[0]!.blob.text()).toContain('答えを引けませんでした');
+    expect(await got[0]!.blob.text()).toContain('答えを実行できませんでした');
   });
 });

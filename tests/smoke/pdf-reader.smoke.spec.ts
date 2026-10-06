@@ -294,8 +294,8 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   await clickReal(win, '#quote');
 
   // 窓へ結果が返り、本体の状態の行にも出る
-  await expect(win.locator('#status')).toContainText('の末尾へ引きました(3 頁)', { timeout: 10_000 });
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('の末尾へ引きました(3 頁)');
+  await expect(win.locator('#status')).toContainText('の末尾へ引用しました(3 頁)', { timeout: 10_000 });
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('の末尾へ引用しました(3 頁)');
   // 🔴 本体のノートに、頁番号と添付の名前つきの引用が入っている(結びついたノートが無いので添付自身)
   await expect
     .poll(() => page.locator('[data-pkc-region="detail"]').innerText(), {

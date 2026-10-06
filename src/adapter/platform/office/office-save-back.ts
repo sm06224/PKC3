@@ -206,7 +206,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
       // ⚠ 残しても永久に直らないので捨てる ── ただし**黙らない**
       await discardStaged(dir, save.key);
-      deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}: 中身が壊れています)`);
+      deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}: 中身が読めません)`);
       return 'failed';
     }
     // ⚠ **`ready` を先に見る。** 見ないと reducer に黙って捨てられ、

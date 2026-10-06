@@ -198,7 +198,7 @@ describe('#399 ① 関係 — 中で閉じているものは残す', () => {
     const got = await readArchive((await writeArchive(s, NOW)).blob);
     expect(got.relations.map((r) => [r.fromLid, r.toLid])).toContainEqual(['n1', 'n2']);
     // ⚠ 落ちていないので、落ちたとは言わない
-    expect(warnings.join('')).not.toContain('外へ繋がる関連');
+    expect(warnings.join('')).not.toContain('外へつながる関連');
   });
 
   it('🔴 外へ出る関係は落とし、落ちたことを件数で言う', async () => {
@@ -208,7 +208,7 @@ describe('#399 ① 関係 — 中で閉じているものは残す', () => {
     );
     const got = await readArchive((await writeArchive(s, NOW)).blob);
     expect(got.relations.some((r) => r.toLid === 'out')).toBe(false);
-    expect(warnings.some((w) => w.includes('外へ繋がる関連 1 件'))).toBe(true);
+    expect(warnings.some((w) => w.includes('外へつながる関連 1 件'))).toBe(true);
   });
 });
 

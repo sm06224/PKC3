@@ -793,10 +793,10 @@ export function buildShell(root: HTMLElement): ShellRegions {
     btn.setAttribute('data-pkc-action', 'toggle-pane');
     btn.setAttribute('data-pkc-pane', id);
     btn.setAttribute('aria-pressed', 'true');
-    btn.setAttribute('aria-label', `${PANE_LABELS[id]}の列を畳む / 戻す`);
+    btn.setAttribute('aria-label', `${PANE_LABELS[id]}のペインを折りたたむ / 戻す`);
     // 🔴 **帯は 2 つの仕事をする**(#497)── 押すと畳み、掴むと幅が変わる。
     //    ⚠ 掴めることを字にも書く ── `cursor` だけだと、触りの端末には何も出ない。
-    btn.title = `${PANE_LABELS[id]}の列を畳む・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
+    btn.title = `${PANE_LABELS[id]}のペインを折りたたむ・戻す(左右にドラッグすると幅が変わります。矢印キーでも動かせます)`;
     grips[id] = btn;
   }
   /**
@@ -879,8 +879,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   appendGrip.setAttribute('data-pkc-action', 'toggle-pane');
   appendGrip.setAttribute('data-pkc-pane', 'append');
   appendGrip.setAttribute('aria-pressed', 'true');
-  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を畳む / 戻す`);
-  appendGrip.title = `${PANE_LABELS.append}を畳む・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
+  appendGrip.setAttribute('aria-label', `${PANE_LABELS.append}を折りたたむ / 戻す`);
+  appendGrip.title = `${PANE_LABELS.append}を折りたたむ・戻す(上下にドラッグすると高さが変わります。矢印キーでも動かせます)`;
   /**
    * 🔴 **スマホ用画面の「ページの帯」**(#632 段①)。
    *

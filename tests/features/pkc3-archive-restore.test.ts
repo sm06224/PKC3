@@ -185,13 +185,13 @@ describe('アーカイブの版 — 古い版を読めるまま受ける', () =>
 
   it('未来の版は断る(読めたつもりにさせない)', async () => {
     await expect(readArchive(await makeZip(ARCHIVE_VERSION + 1, []))).rejects.toThrow(
-      /未対応のアーカイブ版/,
+      /未対応のアーカイブのバージョン/,
     );
   });
 
   it('版が数値でないアーカイブも断る', async () => {
     await expect(readArchive(await makeZip('2' as unknown as number, []))).rejects.toThrow(
-      /未対応のアーカイブ版/,
+      /未対応のアーカイブのバージョン/,
     );
   });
 });

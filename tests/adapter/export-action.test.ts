@@ -107,7 +107,7 @@ describe('書出しの実行部 — 注意を握り潰さない', () => {
     await exportArchive(dispatcher, d, 'html');
     expect(d.notes).toEqual([['添付の中身が見つかりませんでした: ast-x']]);
     // status 側にも件数は出るが、それは**中身の代わりにはならない**
-    expect(d.messages.at(-1)).toContain('⚠ 注意 1 件');
+    expect(d.messages.at(-1)).toContain('(注意 1 件)');
   });
 
   it('注意が無いときも report は呼ぶ(前回の注意を消せるように)', async () => {
@@ -270,7 +270,7 @@ describe('書出しの実行部 — 添付の控えの内訳(#213)', () => {
     const { dispatcher } = fakeDispatcher();
     const d = deps({ source: src(withHistory) });
     await exportArchive(dispatcher, d, 'markdown');
-    expect(d.messages.at(-1), '控えの内訳が書き出しの行に出ていない').toContain('うち控え 1');
+    expect(d.messages.at(-1), '控えの内訳が書き出しの行に出ていない').toContain('うち過去の版 1');
   });
 
   it('控えが無いときは余計なことを言わない', async () => {

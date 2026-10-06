@@ -115,14 +115,14 @@ export function sqlEngineHint(engine: SqlEngine, name: string | null, multi = fa
      * ⚠ 内蔵の sqlite は**1 度に 1 つの file しか開けない**(別の接続を足す道が無い)ので、
      *   並べた file を 1 つの SQL で引けるのは DuckDB だけである。
      */
-    if (multi) return '2 つ以上の file を並べているときは DuckDB だけで引けます';
+    if (multi) return '2 つ以上のファイルを並べているときは DuckDB だけで実行できます';
     /**
      * 🔴 **内蔵の sqlite が中身を読めない相手**(#682 段④c)。
      * ⚠ ここが `null` を返し続けると、**画面には「内蔵の sqlite」と出ているのに
      *   DuckDB で引く**(あるいはその逆)が起きる ── `resolveSqlEngine` は
      *   「選べる物」からしか選ばないので、嘘をつくのは**この関数の側**になる。
      */
-    return isDuckDbOnlySource(src) ? 'この形式は DuckDB でだけ引けます' : null;
+    return isDuckDbOnlySource(src) ? 'この形式は DuckDB でだけ実行できます' : null;
   }
   if (name === null) return '取り込んだ .csv / .parquet / .json / .sqlite などを選ぶと使えます';
   /**

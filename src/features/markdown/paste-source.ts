@@ -126,7 +126,7 @@ export function describePaste(a: PasteAttempt): string {
   const head = `貼付: ${got.length > 0 ? got.join(' / ') : '何も届いていません'} → ${LABEL[a.used]}を使いました`;
   const tail = a.skipped.map((s) => `${LABEL[s.kind === 'permalink' ? 'permalink' : s.kind]}は${s.why}`);
   const setting = a.source === 'auto' ? '' : `(設定: ${PASTE_SOURCES.find((s) => s.id === a.source)!.label})`;
-  return [head + setting, ...tail].join(' ── ');
+  return [head + setting, ...tail].join('。');
 }
 
 /** 変換の口(呼び側が渡す。⚠ **遅延**である ── 使わない形は解析しない)。 */

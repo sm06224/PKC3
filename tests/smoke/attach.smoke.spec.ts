@@ -1411,7 +1411,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(
     await source.locator('optgroup').evaluateAll((gs) => gs.map((g) => (g as HTMLOptGroupElement).label)),
     '調べる相手の仕切りが「この PKC / 添付 / 手持ちの file」の順でない',
-  ).toEqual(['この PKC', '添付', '手持ちの file']);
+  ).toEqual(['この PKC', '添付', '手持ちのファイル']);
   const xOf = async (field: string): Promise<number> =>
     (await page.locator(`[data-pkc-field="${field}"]`).first().boundingBox())!.x;
   const sourceX = await xOf('sql-source');

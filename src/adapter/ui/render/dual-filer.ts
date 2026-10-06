@@ -660,7 +660,7 @@ export class DualFilerRenderer {
     };
     const back = mkBtn('dual-back', '◀', '1 つ前に見ていた場所へ戻る');
     const forward = mkBtn('dual-forward', '▶', '戻る前に見ていた場所へ進む');
-    const pin = mkBtn('dual-bookmark', '☆', 'いまの場所を留める');
+    const pin = mkBtn('dual-bookmark', '☆', 'この場所をブックマークに入れる');
     const filter = document.createElement('input');
     filter.type = 'search';
     filter.setAttribute('data-pkc-field', 'dual-filter');
@@ -675,7 +675,7 @@ export class DualFilerRenderer {
      */
     const marksBar = document.createElement('div');
     marksBar.setAttribute('data-pkc-region', 'dual-bookmarks');
-    marksBar.setAttribute('aria-label', '留めた場所');
+    marksBar.setAttribute('aria-label', 'ブックマーク');
     marksBar.hidden = true;
 
     const table = document.createElement('div');
@@ -754,12 +754,12 @@ export class DualFilerRenderer {
     frame.pin.textContent = pinned ? '★' : '☆';
     frame.pin.title =
       scope === null
-        ? 'ルートは留められません(パンくずの左端からいつでも戻れます)'
+        ? 'ルートはブックマークできません(パンくずの左端からいつでも戻れます)'
         : full
-          ? `留めた場所は ${String(MAX_BOOKMARKS)} 件までです(どれか外してください)`
+          ? `ブックマークは ${String(MAX_BOOKMARKS)} 件までです(どれか外してください)`
           : pinned
-            ? 'この場所の留めを外す'
-            : 'いまの場所を留める';
+            ? 'この場所をブックマークから外す'
+            : 'この場所をブックマークに入れる';
     frame.pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
     frame.pin.setAttribute('aria-label', frame.pin.title);
 
@@ -806,8 +806,8 @@ export class DualFilerRenderer {
       off.setAttribute('data-pkc-action', 'dual-bookmark-remove');
       off.setAttribute('data-pkc-entry', lid);
       off.textContent = '×';
-      off.title = '留めを外す';
-      off.setAttribute('aria-label', `${title ?? 'この場所'}の留めを外す`);
+      off.title = 'ブックマークから外す';
+      off.setAttribute('aria-label', `${title ?? 'この場所'}をブックマークから外す`);
       wrap.append(go, off);
       frame.marksBar.append(wrap);
     }
@@ -1169,7 +1169,7 @@ export class DualFilerRenderer {
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'dual-empty');
       empty.textContent = filtered
-        ? '探している語に当たるものが、ここにはありません'
+        ? '探している語に一致するものが、ここにはありません'
         : 'ここには何もありません';
       frame.table.append(empty);
       return;

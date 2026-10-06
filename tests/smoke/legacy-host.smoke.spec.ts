@@ -60,7 +60,7 @@ test('🔴 本体が旧ビルドでも起動し、直し方が画面に出る (#
    * ⚠ 観測点は**状態の行だけ**(root 全体で探すと、お知らせのカードや本文に
    *   満たされて常に真になる ── CLAUDE.md §1)。
    */
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('古い版のタブが本体');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('古いバージョンのタブが本体');
 
   // ④ 落ちた形跡が残っていない
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
@@ -75,7 +75,7 @@ test('対照群: 包まなければ採番済みの id が出る', async ({ page 
   await gotoApp(page);
   const cid = await page.locator('[data-pkc-slot="root"]').getAttribute('data-pkc-container');
   expect(cid, '採番されていない').toMatch(/^c-[0-9a-f]{32}$/);
-  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('古い版のタブが本体');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('古いバージョンのタブが本体');
 });
 
 /**

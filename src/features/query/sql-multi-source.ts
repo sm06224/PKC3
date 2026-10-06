@@ -163,7 +163,7 @@ export function sqlMultiNote(tables: readonly string[], sqliteNames: readonly st
   if (sqliteNames.length > 0) {
     return (
       `いま調べているのは ${tables.join(' / ')} です。` +
-      `${sqliteNames.join('、')} の表は、中に在る表ごとに「ファイル名_表の名前」の形で並びます。`
+      `${sqliteNames.join('、')} の表は、中にある表ごとに「ファイル名_表の名前」の形で並びます。`
     );
   }
   return `いま調べているのは ${tables.join(' / ')} の ${String(tables.length)} つの表です。`;

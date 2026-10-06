@@ -64,7 +64,7 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
   // 「読めるところだけ読む」は静かなデータ欠損を作る
   if (m.schema !== 1) {
     throw new Pkc2ParseError(
-      `未対応の PKC2 schema です(schema=${String(m.schema)} ── 対応は 1)`,
+      `未対応の PKC2 schema です(schema=${String(m.schema)}、対応は 1)`,
     );
   }
 

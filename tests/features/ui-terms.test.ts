@@ -25,6 +25,17 @@ import {
 const ROOTS = ['src/adapter/ui', 'src/features'];
 
 /**
+ * 🔴 **使わない語の門は `src` 全体を見る**(user 指示 2026-10-06)。
+ * ⚠ 直す前は `ROOTS`(`src/adapter/ui` と `src/features`)だけで、`src/main.ts` /
+ *   `src/adapter/platform` / `src/adapter/state` / `src/adapter/transport` に残った
+ *   造語(器・雛形・検める・面・印 など)が**門の外**だった ── 画面に出る字は
+ *   どこの層の文字列リテラルからも出るので、範囲は層ではなく `src` 全部にする。
+ * ⚠ 他の 2 つの門(動詞句・英語の識別子)は従来どおり `ROOTS` のまま(範囲を変えるのは
+ *   この門だけ ── 主張が違う)。
+ */
+const BANNED_ROOTS = ['src'];
+
+/**
  * ⚠ **正本 `ui-terms.ts` は走査から除く**(#1017 段⑤-1)。BANNED_TERMS の
  * `banned` / `excludes` は「使わない語」そのものをデータとして持つので、
  * 除かないと**登記簿が自分自身を違反として検出する**(自己言及の空振り)。
@@ -57,13 +68,28 @@ function extractLiterals(code: string): string[] {
   return out;
 }
 
+const JAPANESE = /[\u3000-\u30ff\u4e00-\u9fff]/;
+
+/**
+ * リテラルの中の `${…}`(式)を潰す ── 式は画面の字ではなくコード(`${file.name}` の
+ * `file` を「英語の素通し」と読ませない)。
+ */
+function maskInterpolation(literal: string): string {
+  return literal.replace(/\$\{[^}]*\}/g, '\uE000');
+}
+
 /** 走査対象 file と、file ごとの「comment を剥いだリテラル本文」を 1 度だけ作る。 */
 function scanTargets(): { files: string[]; literalsByFile: Map<string, string> } {
-  const files = ROOTS.flatMap((r) => walkTs(r));
+  const files = BANNED_ROOTS.flatMap((r) => walkTs(r));
   const literalsByFile = new Map<string, string>();
   for (const f of files) {
     const stripped = codeOnly(readFileSync(f, 'utf8'));
-    literalsByFile.set(f, extractLiterals(stripped).join('\n'));
+    // ⚠ 日本語を含むリテラルだけ(= 画面に出る文)。`'file'` `'lid'` のような**コードの字**
+    //   (型名・property 名)を、英語の素通しと読ませない
+    const screen = extractLiterals(stripped)
+      .map(maskInterpolation)
+      .filter((l) => JAPANESE.test(l));
+    literalsByFile.set(f, screen.join('\n'));
   }
   return { files, literalsByFile };
 }
@@ -71,13 +97,17 @@ function scanTargets(): { files: string[]; literalsByFile: Map<string, string> }
 describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
   const { files, literalsByFile } = scanTargets();
 
-  it('空振り防止:走査対象は 50 file・500 リテラルを超える', () => {
-    expect(files.length).toBeGreaterThan(50);
+  it('空振り防止:走査対象は src の 500 file・5000 リテラルを超える', () => {
+    expect(files.length).toBeGreaterThan(500);
     const totalLiterals = [...literalsByFile.values()].reduce(
       (n, text) => n + (text.length > 0 ? text.split('\n').length : 0),
       0,
     );
-    expect(totalLiterals).toBeGreaterThan(500);
+    expect(totalLiterals).toBeGreaterThan(5000);
+    // 範囲が `src` 全体であること(層で切っていない)── main.ts と platform と state が入っている
+    expect(files).toContain('src/main.ts');
+    expect(files.some((f) => f.startsWith('src/adapter/platform/'))).toBe(true);
+    expect(files.some((f) => f.startsWith('src/adapter/state/'))).toBe(true);
   });
 
   it('self-test:わざと入れた 1 件は検出できる', () => {
@@ -92,65 +122,94 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
   });
 
   /**
-   * 🔑 **`[file, banned, count][]` の等値 pin**(burn-down)。
-   * ⚠ 直したら、この行を消す(件数を減らすだけで assert には触れない書き方をしない
-   * ── 減らしても表を直さないと落ちる形にしてある)。
-   *
-   * 2026-09-21 実測(#1017 段⑤-1)。新しく増えたら落ちる。
-   * ⚠ `notice-log.ts` の行は**減らない**(配ったお知らせは書き換えない約束 ──
-   *   `announce.test.ts` の KNOWN が digest で止める)。それでも走査から外さない:
-   *   新しいお知らせに使わない語を書くと件数が増えて落ちる = **新規の門**として効く。
-   *   古い分は登記表の枠(30 件)から落ちるときに一緒に減る。
+   * 🔑 **2026-10-06 の総直しで足した語を、1 語ずつ「当たる文」と「当たらない文」で見る**
+   * (user 指示:造語・直訳を一般的な用語へ)。
+   * ⚠ 「当たる」だけだと、除外を足しすぎて何も見ない語が生き延びる ── 対照群を必ず置く。
+   * ⚠ 期待値は `BANNED_TERMS` の配列を種にしない(配列から語を落とすと、検査も同時に縮む)。
    */
-  const KNOWN_BANNED: readonly [file: string, banned: string, count: number][] = [
-    ['src/features/keymap.ts', '小窓', 1],
-    // ⚠ 2026-09-21(#1032): 2 → 1 ── 枠から落ちた 1 件(`2026-09-16-grip-no-h-scroll`)に
-    //    「印」が 1 つ在った。配布済みの文面は書き換えないので、残りは 1 件のままである
-    // ⚠ 2026-09-27(#1080): 「印」1 → 0 で行を消した ── 枠から落ちた `2026-09-17-container-reset`
-    //    の「読んだお知らせの印」が最後の 1 つだった(落としたから減った。直したのではない)
-    // ⚠ 2026-09-25(#1043): 31 → 25 ── 枠から落ちた `2026-09-16-db-broken-guard` に 6 つ在った
-    // ⚠ 2026-09-25(#1046): 25 → 20 ── 枠から落ちた `2026-09-16-db-rescue` に 5 つ在った
-    // ⚠ 2026-09-25(#1054 段①): 20 → 19 ── 枠から落ちた `2026-09-16-write-quota` に
-    //   「中身が壊れる」の 1 つが在った
-    //   (落としたから減った。直したのではない)
-    // ⚠ 2026-09-26(#1038 台帳③ 段 J、C18): 19 → 17 ── 枠から落ちた `2026-09-16-rescue-restorable` に
-    //   「壊れてしまった」が 2 つ在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-27(#1080): 17 → 15 ── 枠から落ちた `2026-09-17-container-reset` に
-    //   「壊れた」「壊れて」の 2 つが在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-27(#1081): 15 → 13 ── 枠から落ちた `2026-09-17-rescue-buttons-explain` の
-    //   題名と 1 項目めに「壊れたとき」が 1 つずつ在った(落としたから減った。直したのではない)
-    // ⚠ 2026-10-01(#1167): `2026-09-17-rescue-keeps-assets` を枠から落としたので 13 → 12(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1165): `2026-09-18-container-rebuild` を枠から落としたので 12 → 10(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1168): `2026-09-18-check-points-at-repair` を枠から落としたので 10 → 7(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1166): `2026-09-20-startup-integrity-check` を枠から落としたので 7 → 3(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1169): 「壊れ」3 → 0 で行を消した ── 枠から落とした `2026-09-21-system-sections` に
-    //    最後の 3 つが在った(直したのではなく落とした)。notice-log.ts の行は 0 になった
-    // ⚠ 2026-09-25(#1038 台帳③ 段 D / C4): 「居場所」1 → 0 で行を消した ── 枠から落ちた
-    //    `2026-09-16-folder-place-keep` の題名に 1 つ在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-27(#1080): 「拾う」1 → 0 で行を消した / 「捨てる」7 → 5 / 「最後の手」3 → 2 ──
-    //    どれも枠から落ちた `2026-09-17-container-reset` に在った(「拾う → 捨てる → 戻す」
-    //    「実行する『捨てる』のボタン」「壊れて直らないときの、最後の手」)
-    // ⚠ 2026-10-01(#1167): 同じ 1 件を落としたので 5 → 3(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1165): 同じ 1 件を落としたので 3 → 1(直したのではなく落とした)
-    // ⚠ 2026-10-01(#1169): 「捨てる」1 → 0 / 「最後の手」1 → 0 で行を消した ── どちらも
-    //    枠から落とした `2026-09-21-system-sections` に在った(直したのではなく落とした)
-    // ⚠ 2026-09-25(#1045): 「札」2 → 0 で行を消した ── 枠から落ちた 1 件
-    //    (`2026-09-16-er-connect-by-hand`)に 2 つ在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-21(#1032): 9 → 7 ── 枠から落ちた 1 件に「面」が 2 つ在った
-    // ⚠ 2026-09-25(#1045): 7 → 6 ── 枠から落ちた `2026-09-16-er-connect-by-hand` に 1 つ在った
-    // ⚠ 2026-09-25(編集に入る口): 6 → 5 ── 枠から落ちた `2026-09-16-er-notes-csv-and-why` に 1 つ在った
-    // ⚠ 2026-09-25(#1043): 5 → 4 ── 枠から落ちた `2026-09-16-db-broken-guard` に 1 つ在った
-    // ⚠ 2026-09-25(#1042): 4 → 3 ── 枠から落ちた `2026-09-16-quota-watch` に
-    //   「この面が」の 1 つが在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-25(#1038 台帳③ C1): 3 → 1 ── 枠から落ちた `2026-09-16-wide-csv-speed` に
-    //   「SQL で調べる の面が」が 2 つ在った(落としたから減った。直したのではない)
-    // ⚠ 2026-09-26(#1044 段2): 「面」1 → 0 で行を消した ── 枠から落ちた
-    //   `2026-09-16-duckdb-extensions` に「SQL で調べる面で」の 1 つが在った
-    //   (落としたから減った。直したのではない)
+  const FIND: readonly [banned: string, hit: string, ok: string][] = [
+    ['近道', '近道キーで開きます', 'ショートカットキーで開きます'],
+    ['鍵', '同じ鍵が 2 回', '鍵盤の字'],
+    ['窓', '別の窓に出ます', '窓口に問い合わせる'],
+    ['小窓', '▾ の小窓', '別ウィンドウ'],
+    ['帯', '上の帯に並びます', '時間帯で見る'],
+    ['焼', '1 枚に焼く', '描いた図'],
+    ['栞', '栞を付ける', 'ブックマーク'],
+    ['留め', '場所を留める', 'ピン留めしたパネル'],
+    ['写す', '表を写す', 'コピーする'],
+    ['写し', '写しの途中', 'コピーの途中'],
+    ['影', '影の表', '影響が出る'],
+    ['目録', '目録が読めません', '構成ファイルが読めません'],
+    ['ひとそろい', 'Office のひとそろい', 'Office の一式'],
+    ['持ち歩', '持ち歩ける 1 枚', '1 ファイルの HTML'],
+    ['持ち出し', '設定の持ち出し', '設定の書き出し'],
+    ['読み直', 'アプリを読み直す', 'アプリを再読み込みする'],
+    ['畳', '一覧を畳む', '一覧を折りたたむ'],
+    ['取っ手', '取っ手をつかむ', 'つまみをつかむ'],
+    ['左の列', '左の列で探す', '左のペインで探す'],
+    ['この版では', 'この版では使えません', 'このバージョンでは使えません'],
+    ['塊', '本文の塊', '本文のブロック'],
+    ['住所', 'ブラウザの住所', 'ブラウザのアドレス'],
+    ['取り直', '取り直してください', '取得し直してください'],
+    ['取ってこ', '取ってこられません', '取得できません'],
+    ['配る', '配る物がありません', '配布する物がありません'],
+    ['在る', '中に在る表', '中にある表'],
+    ['居る', 'そこに居る人', 'そこにいる人'],
+    ['繋が', '繋がりの線', 'つながりの線'],
+    ['ごみ箱', 'ごみ箱へ移す', 'ゴミ箱へ移す'],
+    ['file', 'この file を選ぶ', 'このファイルを選ぶ'],
+    ['lid', 'lid が違います', 'ID が違います'],
+    ['asset key', 'asset key が重複', '添付の ID が重複'],
+    ['🔴', '🔴 戻らないもの', '戻らないもの'],
+    ['──', '押せません ── 理由', '押せません。理由'],
+    ['焦点', '欄に焦点を移す', '欄にフォーカスを移す'],
+    ['引く', '答えを引く', '線を引く'],
+    ['引け', 'DuckDB で引けます', '線が引けません'],
+    ['当たり', '当たりへ送る', '一致へ送る'],
+    ['当てて', '当ててください', '割り当ててください'],
+    ['落と', '本文へ落としてください', '段落と同じ左端'],
+    ['組んで', '一式を組んでいます', '一式を作っています'],
   ];
 
-  it('いまの残りと一致する(増えたら落ちる。直したら KNOWN_BANNED から消す)', () => {
-    const rows: [string, string, number][] = [];
+  it.each(FIND)('「%s」は当たる文を見つけ、置き換えた文は見つけない', (word, hit, ok) => {
+    const t = BANNED_TERMS.find((b) => b.banned === word);
+    if (!t) throw new Error(`BANNED_TERMS に「${word}」が無い`);
+    expect(t.pattern().test(hit), `当たる文: ${hit}`).toBe(true);
+    // 置き換えた文を、全部の使わない語に当てて 1 件も当たらないこと(別の語が拾っても同じ)
+    for (const b of BANNED_TERMS) {
+      expect(b.pattern().test(ok), `${ok} が「${b.banned}」に当たった`).toBe(false);
+    }
+  });
+
+  /**
+   * 🔑 **使わない語が 0 件であること**(CLAUDE.md「`KNOWN_BANNED` は 0 件を保つ。増やさない」)。
+   * ⚠ 配布済みのお知らせの字も直した(user 指示 2026-10-06「全部」)ので、`notice-log.ts` も 0 件。
+   * ⚠ 増えたら落ちる。**直せない理由があっても、この表に足さない**(足すと 0 件の規律が崩れる)
+   *   ── 普通の語として使っている物は、下の `ORDINARY_USES` に**理由つき**で置く。
+   */
+  const KNOWN_BANNED: readonly [file: string, banned: string, count: number][] = [];
+
+  /**
+   * 🔑 **普通の語として使っている物**(造語ではない。理由を 1 行ずつ)。
+   * ⚠ 件数まで等値で pin する ── 件数が動いたら(別の所にも増えたら)落ちる。
+   */
+  const ORDINARY_USES: readonly [file: string, banned: string, count: number, why: string][] = [
+    // 連絡先の「住所」(vCard の項目名・連絡先の説明)── URL ではなく所在地のこと
+    ['src/adapter/ui/render/contacts.ts', '住所', 1, '連絡先の住所(所在地)'],
+    ['src/features/contact/vcard.ts', '住所', 2, '連絡先の住所(所在地)の項目名'],
+    // 操作を探すときの旧い呼び名(別名)。画面には出ない ── 旧い呼び名で探した人を新しい名前へ案内する
+    ['src/features/keymap.ts', '小窓', 1, '検索用の旧い別名(画面には出ない)'],
+    ['src/features/keymap.ts', '窓', 1, '同じ別名(「小窓」が「窓」にも当たる)'],
+    // アイコン「key」の呼び名 ── 物としての鍵(ショートカットキーの意味ではない)
+    ['src/features/icon/tile-icons.ts', '鍵', 1, '絵の名前(物としての鍵)'],
+  ];
+
+  type Row = [file: string, banned: string, count: number];
+  const cmp = (a: Row, b: Row): number =>
+    a[0] === b[0] ? (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0) : a[0] < b[0] ? -1 : 1;
+
+  function currentRows(): Row[] {
+    const rows: Row[] = [];
     for (const f of files) {
       const text = literalsByFile.get(f) ?? '';
       for (const t of BANNED_TERMS) {
@@ -160,8 +219,54 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
         }
       }
     }
-    rows.sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : 1) : a[0] < b[0] ? -1 : 1));
-    expect(rows).toEqual([...KNOWN_BANNED].sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : 1) : a[0] < b[0] ? -1 : 1)));
+    return rows.sort(cmp);
+  }
+
+  it('普通の語として使う物は、件数まで当たっている(増えても減っても落ちる)', () => {
+    const rows = currentRows();
+    for (const [file, word, count] of ORDINARY_USES) {
+      const row = rows.find((r) => r[0] === file && r[1] === word);
+      expect(row, `${file} に「${word}」が無い(理由が消えたなら行を消す)`).toBeDefined();
+      expect(row?.[2], `${file} の「${word}」の件数`).toBe(count);
+    }
+  });
+
+  it('いまの残りと一致する(増えたら落ちる。直したら KNOWN_BANNED から消す)', () => {
+    const ordinary = new Set(ORDINARY_USES.map(([f, w]) => `${f}\u0000${w}`));
+    const rows = currentRows().filter((r) => !ordinary.has(`${r[0]}\u0000${r[1]}`));
+    expect(rows).toEqual([...KNOWN_BANNED].sort(cmp));
+  });
+
+  /**
+   * 🔑 **「⚠」は危険・不可逆を言う文の先頭にだけ**(user 指示 2026-10-06)。
+   * ⚠ 字の意味(危険か)は機械では読めないので、**残ってよい file と件数を等値で pin する**
+   *   ── 増えたら落ちる(足した人が「これは危険を言う文か」を 1 度考える)。
+   */
+  const WARNING_MARKS: readonly [file: string, count: number][] = [
+  ['src/adapter/ui/actions/binder.ts', 1], // 取り込みで長すぎる電話・メールを外した(データが減る)
+  ['src/adapter/ui/render/commands.ts', 2], // 作り直し・全消去の確認(戻せない)
+  ['src/adapter/ui/render/office-pack-panel.ts', 1], // Office で書いたマクロが消える
+  ['src/features/asset/image-shrink.ts', 1], // 縮めると元の細かさは戻らない
+  ['src/features/entry-actions.ts', 1], // CSV にすると桁揃えが落ちる
+  ['src/features/query/sql-to-note.ts', 1], // 上限で切っている(出力が欠ける)
+  ['src/features/selfhost/bundle.ts', 3], // 番号を変えると前のノートが見えなくなる(3 つのスクリプト)
+  ['src/features/storage/container-rebuild.ts', 7], // 作り直しの結末・戻らないもの
+  ['src/features/storage/container-reset.ts', 3], // 全消去の確認(拾い出していない・消える)
+  ['src/features/storage/db-rescue.ts', 1], // 読めなかった所がある
+  ['src/features/storage/rescue-archive.ts', 2], // 本文を読めなかった・つながりと履歴は戻せない
+  ['src/features/storage/storage-notice.ts', 1], // この画面だけ(閉じると消える)
+  ['src/features/structure/structure-text.ts', 1], // 件数が多くて一部だけ出している
+  ['src/main.ts', 3], // 保存できなかった・添付が読めなかった・本体への切り替え失敗
+];
+
+  it('「⚠」を使っている file と件数が、pin と一致する', () => {
+    const rows: [string, number][] = [];
+    for (const f of files) {
+      const n = (literalsByFile.get(f) ?? '').split('⚠').length - 1;
+      if (n > 0) rows.push([relative('.', f).split('\\').join('/'), n]);
+    }
+    rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    expect(rows).toEqual([...WARNING_MARKS].sort((a, b) => (a[0] < b[0] ? -1 : 1)));
   });
 });
 

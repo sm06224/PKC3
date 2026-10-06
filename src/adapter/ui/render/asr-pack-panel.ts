@@ -115,7 +115,7 @@ export function asrInstalledText(part: AsrPart, installed: AsrInstalled): string
   const date = Number.isNaN(at.getTime())
     ? '日時不明'
     : `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
-  return `取り込み済み ── ${humanBytes(m.totalBytes)} / ${date}`;
+  return `取り込み済み(${humanBytes(m.totalBytes)} / ${date})`;
 }
 
 function button(action: string, label: string, field: string, part?: AsrPartId): HTMLButtonElement {
@@ -168,7 +168,7 @@ export function buildAsrPackPanel(
   //    詳しくはマニュアル(「音声を文字にする」)。
   intro.textContent = '録った音を、この端末の中だけで文字にします(音は外へ出ません)。';
   intro.title =
-    '部品を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、当たりやすいほうは時間がかかります。';
+    '部品を 1 度取り込めば、次からは端末の中から動きます。軽いほうは速く、正確なほうは時間がかかります。';
   root.append(intro);
 
   interface Row {

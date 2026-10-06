@@ -59,7 +59,7 @@ export function comparePackVersion(
 export function packUpdateText(diff: PackVersionDiff): string | null {
   if (diff.kind === 'quiet') return null;
   return (
-    `配布元には別の版があります ── 手元: ${diff.installed} / 配布元: ${diff.available}。`
+    `配布元には別のバージョンがあります。手元: ${diff.installed} / 配布元: ${diff.available}。`
     + '「配布元から入れる」で入れ直せます。'
   );
 }
@@ -70,7 +70,7 @@ export function packUpdateText(diff: PackVersionDiff): string | null {
  */
 export function packUpdateNotice(diff: PackVersionDiff): string | null {
   if (diff.kind === 'quiet') return null;
-  return 'Office のひとそろいは、配布元と別の版です(システム → Office 表示 から入れ直せます)';
+  return 'Office の一式は、配布元と別のバージョンです(システム → Office 表示 から入れ直せます)';
 }
 
 export interface PackUpdateCheckDeps {

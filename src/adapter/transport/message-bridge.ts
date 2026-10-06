@@ -185,11 +185,11 @@ export function attachMessageBridge(options: BridgeOptions): () => void {
     }
     const fn = options.handlers[parsed.request.method];
     if (!fn) {
-      reject(`捌き手が居ない: ${parsed.request.method}`, origin);
+      reject(`捌き手がいない: ${parsed.request.method}`, origin);
       reply(
         errResponse(parsed.request.id, {
           code: RPC.METHOD_NOT_FOUND,
-          message: `この版では扱えません: ${parsed.request.method}`,
+          message: `このバージョンでは扱えません: ${parsed.request.method}`,
         }),
       );
       return;

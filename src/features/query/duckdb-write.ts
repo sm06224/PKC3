@@ -137,9 +137,9 @@ export function duckDbWriteNote(
 ): string {
   const n = countOf(columns, rows);
   const done = n === null ? '実行しました' : `${String(n)} 行に効きました`;
-  if (kind === 'create') return `${done} ── ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`;
+  if (kind === 'create') return `${done}: ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`;
   if (kind === 'drop') return done;
-  return `${done} ── 元の file は書き換わりません`;
+  return `${done}。元のファイルは書き換わりません`;
 }
 
 /** 1 文だけ。⚠ 字は `sql-guard.ts` の `checkReadOnlySql` と同じにする(`tests/features/duckdb-write.test.ts` が突き合わせる)。 */
@@ -148,7 +148,7 @@ const ONE_STATEMENT_WHY = '1 度に打てるのは 1 文だけです(セミコ�
 /**
  * 読むだけの門(`checkDuckDbSql`)の断り文を、**書ける世界の字へ直す**。
  *
- * ⚠ 読むだけの門は「読み取り専用です ── DROP は打てません(ここは読むだけです)」と言う ──
+ * ⚠ 読むだけの門は「読み取り専用です: DROP は打てません(ここは読むだけです)」と言う ──
  *   書き込みを通すようになった画面では**嘘**になる(「ここは読むだけ」ではない)。
  * 🔑 直すのは**断り文の字だけ**で、通す / 断るの判定は 1 つも動かさない。
  * ⚠ 書き方が変わった日に**黙って素通りしない**よう、見つけた字は `tests/features/duckdb-write.test.ts`
@@ -156,7 +156,7 @@ const ONE_STATEMENT_WHY = '1 度に打てるのは 1 文だけです(セミコ�
  */
 function rewriteRefusal(r: SqlCheck): SqlCheck {
   if (r.ok) return r;
-  const readonly = /^読み取り専用です ── (\S+) は打てません/u.exec(r.why);
+  const readonly = /^読み取り専用です: (\S+) は打てません/u.exec(r.why);
   if (readonly !== null) {
     const word = readonly[1] ?? '';
     return {

@@ -234,7 +234,7 @@ describe('繋ぐ前 / 繋いだ後', () => {
     perm.state = 'prompt';
     await folder.open(0);
     expect(q(pane, '[data-pkc-field="pc-note"]')?.textContent).toBe(
-      '許可が切れました ── もう一度フォルダを選んでください',
+      '許可が切れました。もう一度フォルダを選んでください',
     );
     expect(q(pane, '[data-pkc-action="pc-pick-folder"]')).not.toBeNull();
     expect(q(pane, '[data-pkc-field="pc-list"]')).toBeNull();

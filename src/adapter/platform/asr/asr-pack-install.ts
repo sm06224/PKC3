@@ -119,7 +119,7 @@ export class AsrPackInstaller {
       const pack: AsrPack = await fetchAsrManifest(this.deps.base, fetchFn, abort.signal);
       const modelFiles = pack.models[id];
       if (modelFiles === undefined) {
-        return { ok: false, message: `「${part.label}」は、このサイトの配布元がまだ配っていません。` };
+        return { ok: false, message: `「${part.label}」は、このサイトの配布元がまだ配布していません。` };
       }
       const before = await this.readInstalled();
       // 🔑 **同じ版が既に入っているなら、何も取らない**(2 回目からは取らない)

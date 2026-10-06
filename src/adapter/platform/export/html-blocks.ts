@@ -96,9 +96,9 @@ function skippedName(el: Element): { what: string; why: string } | null {
       why: '添付ではない画像は Word に入れていません',
     };
   }
-  if (tag === 'svg') return { what: '図(ベクタ)', why: 'この版では図を Word に入れていません' };
+  if (tag === 'svg') return { what: '図(ベクタ)', why: 'このバージョンでは図を Word に入れていません' };
   if (tag === 'iframe') return { what: '埋め込みの箱', why: 'Word では動きません' };
-  if (tag === 'canvas') return { what: '描画の面', why: 'Word では動きません' };
+  if (tag === 'canvas') return { what: '描画領域', why: 'Word では動きません' };
   return null;
 }
 
@@ -213,7 +213,7 @@ export function htmlToDocxBlocks(doc: Document): {
       if (gone !== null) {
         skipped += 1;
         // ⚠ 段落の**中**に在った画像も、理由を文字として残す(黙って消さない)
-        pushRun(out, `［${gone.what} は写せませんでした: ${gone.why}］`, { ...style, italic: true });
+        pushRun(out, `［${gone.what} はコピーできませんでした: ${gone.why}］`, { ...style, italic: true });
         continue;
       }
       if (tag === 'br') {

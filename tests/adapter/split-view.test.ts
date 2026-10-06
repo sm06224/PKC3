@@ -520,7 +520,7 @@ describe('枠を畳んだ理由を帯に出す(#606)', () => {
       '枠が畳まれていない(この台では文言を見られない)',
     ).toBe(0);
     expect(said, '枠を畳んだのに理由が出ていない').toEqual([
-      '幅が足りないので、横に並べる枠を 1 枚畳みました',
+      '幅が足りないので、横に並べる枠を 1 枚折りたたみました',
     ]);
   });
 
@@ -601,7 +601,7 @@ describe('枠を畳んだ帯の作法(#606)', () => {
       root.querySelectorAll('[data-pkc-split-lid]').length,
       '広げたのに枠が戻っていない(台の空振り)',
     ).toBeGreaterThan(0);
-    expect(said.filter((t) => t.includes('0 枚')), '「0 枚畳みました」と言った').toEqual([]);
+    expect(said.filter((t) => t.includes('0 枚')), '「0 枚折りたたみました」と言った').toEqual([]);
   });
 
   /**

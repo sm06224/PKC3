@@ -488,7 +488,7 @@ export function smartCondError(
 ): string | null {
   if (reason === 'unchanged') return null;
   // ⚠ 名前は**打った字**をそのまま出す(正規化した綴りだと、打った字と読み合わせられない)
-  const who = tag === undefined || tag === '' ? '' : `「${tag}」は足せませんでした ── `;
+  const who = tag === undefined || tag === '' ? '' : `「${tag}」は足せませんでした。`;
   if (reason === 'limit')
     return `${who}条件は ${MAX_SMART_TAGS} つまでです(1 つ外してから足してください)`;
   return `${who}そのタグは条件にできません(空か、${MAX_TAG_CHARS} 文字を超えています)`;
@@ -523,8 +523,8 @@ export function smartWriteError(spec: SmartSpec, mode: 'add' | 'remove'): string
   if (spec.tags.length > 0) return null;
   // ⚠ **押した動作の言葉で書く** ── 「落とした」と「外した」では、次にすることが違う
   return mode === 'add'
-    ? 'このスマートフォルダはタグ以外の条件で集めています(ドラッグして入れることはできません)── 条件にタグを足すと入れられます'
-    : 'このスマートフォルダはタグ以外の条件で集めています(ここから外すことはできません)── 集まるかどうかはノートの中身が決めます';
+    ? 'このスマートフォルダはタグ以外の条件で集めています(ドラッグして入れることはできません)。条件にタグを足すと入れられます'
+    : 'このスマートフォルダはタグ以外の条件で集めています(ここから外すことはできません)。集まるかどうかはノートの中身が決めます';
 }
 
 /**

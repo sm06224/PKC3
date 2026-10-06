@@ -59,13 +59,13 @@ describe('pickErConnection(#918 段⑤d-1)', () => {
   it('🔴 もう在る繋がりと同じ組み合わせは denied(宣言された FK と重複)', () => {
     const model: SchemaModel = { ...NO_FK_MODEL, links: [link('売上', '客id', '客', 'id')] };
     const r = pickErConnection(model, [], { table: '売上', column: '客id' }, '客', 'id');
-    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもう繋がっています' });
+    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもうつながっています' });
   });
 
   it('🔴 もう在る繋がりと同じ組み合わせは denied(自分で引いた mine と重複)', () => {
     const mine = [link('売上', '客id', '客', 'id')];
     const r = pickErConnection(NO_FK_MODEL, mine, { table: '売上', column: '客id' }, '客', 'id');
-    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもう繋がっています' });
+    expect(r).toEqual({ kind: 'denied', why: 'その 2 つはもうつながっています' });
   });
 
   it('🔴 向きを変えても同じ繋がりとして denied(逆向きの押し直しをすり抜けさせない)', () => {
@@ -149,21 +149,21 @@ describe('erSubjectOf / erZeroLinesWhy の主語(D8)', () => {
   });
 
   it('🔴 .sqlite でない 1 件(csv / parquet / json)は「この file」/ 2 件以上は「これらの file」', () => {
-    expect(erSubjectOf(['売上.csv'])).toBe('この file');
-    expect(erSubjectOf(['売上.parquet'])).toBe('この file');
-    expect(erSubjectOf(['明細.ndjson'])).toBe('この file');
-    expect(erSubjectOf(['家計.sqlite', '在庫.csv'])).toBe('これらの file');
+    expect(erSubjectOf(['売上.csv'])).toBe('このファイル');
+    expect(erSubjectOf(['売上.parquet'])).toBe('このファイル');
+    expect(erSubjectOf(['明細.ndjson'])).toBe('このファイル');
+    expect(erSubjectOf(['家計.sqlite', '在庫.csv'])).toBe('これらのファイル');
     // 🔑 2 件のうち片方が .sqlite でも「DB」ではない(csv が混ざっている)
-    expect(erSubjectOf(['在庫.csv', '家計.sqlite'])).toBe('これらの file');
+    expect(erSubjectOf(['在庫.csv', '家計.sqlite'])).toBe('これらのファイル');
   });
 
   it('🔴 理由の字の主語が変わる(省けば今までどおり「この DB は」)', () => {
-    expect(erZeroLinesWhy(base)).toContain('この DB は、表どうしの繋がり');
+    expect(erZeroLinesWhy(base)).toContain('この DB は、表どうしのつながり');
     expect(erZeroLinesWhy({ ...base, subject: erSubjectOf(['売上.parquet']) })).toContain(
-      'この file は、表どうしの繋がり(外部キー)を 1 つも宣言していません',
+      'このファイルは、表どうしのつながり(外部キー)を 1 つも宣言していません',
     );
     const many = erZeroLinesWhy({ ...base, subject: erSubjectOf(['a.csv', 'b.parquet']) });
-    expect(many).toContain('これらの file は、表どうしの繋がり');
+    expect(many).toContain('これらのファイルは、表どうしのつながり');
     expect(many, '並べた file を「DB」と呼んでいる').not.toContain('この DB');
   });
 });

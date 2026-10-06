@@ -534,7 +534,7 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   if (dup.length > 0) {
     warnings.push({
       kind: 'duplicate_key',
-      detail: `同じ鍵が 2 回以上書かれています(${dup.join(' / ')})── 後の行だけが読まれ、先に書いた行は無視されます`,
+      detail: `同じキーが 2 回以上書かれています(${dup.join(' / ')})。後の行だけが読まれ、先に書いた行は無視されます`,
     });
   }
   const remainder = lines.slice(closeIdx + 1).join('\n');

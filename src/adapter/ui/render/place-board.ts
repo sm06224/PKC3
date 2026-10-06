@@ -235,7 +235,7 @@ function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>)
   if (id === null) return '行き先が書かれていません(from= と to= の両方が要ります)';
   if (byId.has(id)) return null;
   if (!NAME_RE.test(id)) {
-    return `名前に「${id}」は使えません ── 空白・記号(. = { } " ')・数で始まる名前は使えません。日本語は使えます`;
+    return `名前に「${id}」は使えません。空白・記号(. = { } " ')・数で始まる名前は使えません。日本語は使えます`;
   }
   return `「${id}」という名前の付箋がありません`;
 }
@@ -256,20 +256,20 @@ function lineTrouble(raw: string | null, byId: ReadonlyMap<string, HTMLElement>)
 function routeTrouble(raw: string | null): string | null {
   const r = parseRouteSpell(raw);
   if (r.kind !== 'bad') return null;
-  return `線の通り方に「${r.raw}」は使えません ── ${PLACE_ROUTES.join(' / ')} のどれかです`;
+  return `線の通り方に「${r.raw}」は使えません: ${PLACE_ROUTES.join(' / ')} のどれかです`;
 }
 
 /** ⚠ 同上。`bend=` は **v:(縦線の x)** か **h:(横線の y)** だけを受ける。 */
 function bendTrouble(raw: string | null): string | null {
   const b = parseBendSpell(raw);
   if (b.kind !== 'bad') return null;
-  return `曲がる所に「${b.raw}」は使えません ── 縦線なら v:320、横線なら h:240 のように書きます`;
+  return `曲がる所に「${b.raw}」は使えません。縦線なら v:320、横線なら h:240 のように書きます`;
 }
 
 function anchorTrouble(raw: string | null): string | null {
   const a = placeLineAnchorOf(raw);
   if (a.kind !== 'bad') return null;
-  return `つなぎ目に「${a.raw}」は使えません ── top / right / bottom / left か、`
+  return `つなぎ目に「${a.raw}」は使えません。top / right / bottom / left か、`
     + `辺のどこかなら right@1/4 のように書きます(分母は ${ANCHOR_DEN_MAX} まで)`;
 }
 

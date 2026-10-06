@@ -80,7 +80,7 @@ function ensureToggle(heading: Element, folded: boolean): void {
    * 🔑 印は **CSS の `::before`** で出し、名前は `aria-label` で持つ。
    */
   btn.textContent = '';
-  const label = folded ? 'この見出しの中身を出します' : 'この見出しの中身を畳みます';
+  const label = folded ? 'この見出しの中身を出します' : 'この見出しの中身を折りたたみます';
   // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
   btn.title = label;
   btn.setAttribute('aria-label', label);

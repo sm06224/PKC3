@@ -106,7 +106,7 @@ describe('設定の持ち出しの配線(#414)', () => {
     const said = sent.find((a) => a.type === 'OP_FAILED');
     expect(said, '何も言わずに終えた').toBeDefined();
     const msg = said?.type === 'OP_FAILED' ? said.error : '';
-    expect(msg, '読み直しが要ることを言っていない').toContain('読み直');
+    expect(msg, '読み直しが要ることを言っていない').toContain('再読み込み');
   });
 
   /** 🔴 **運ばない鍵は、file に書いてあっても書き込まない**(許可・フラグ)。 */

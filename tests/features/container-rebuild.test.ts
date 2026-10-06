@@ -502,7 +502,7 @@ describe('🔴 捨てた後に落ちた回(#1006)', () => {
     expect(line, '捨てた後なのに「何も消えていません」と言っている').not.toContain(
       '何も消えていません',
     );
-    expect(line, 'ファイルが手元に在ることを言っていない').toContain('手元に在ります');
+    expect(line, 'ファイルが手元に在ることを言っていない').toContain('手元にあります');
     expect(line, '読み込み直すよう言っていない').toContain('読み込み直して');
     expect(line, '戻す道(取り込む)を案内していない').toContain('取り込む');
   });

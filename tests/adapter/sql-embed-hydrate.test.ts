@@ -238,7 +238,7 @@ describe('見えたときに引いて、表にする(実 worker)', () => {
     seeAll();
     const host = hostsOf()[0]!;
     await vi.waitFor(() => expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('failed'));
-    expect(noteOf(host)).toContain('答えを引けませんでした: ');
+    expect(noteOf(host)).toContain('答えを実行できませんでした: ');
     expect(noteOf(host)).toContain('no_such_table');
     expect(host.querySelector('table')).toBeNull();
     expect(root.querySelector('pre code.language-sql')).not.toBeNull();
@@ -266,7 +266,7 @@ describe('見えたときに引いて、表にする(実 worker)', () => {
     hydrator.sync(root, body);
     seeAll();
     const host = hostsOf()[0]!;
-    await vi.waitFor(() => expect(noteOf(host)).toContain('この版では引けません'));
+    await vi.waitFor(() => expect(noteOf(host)).toContain('このバージョンでは実行できません'));
     hydrator.release();
   });
 
@@ -380,7 +380,7 @@ describe('読むだけ・全角 ── 字の門は runner の手前', () => {
     const host = hostsOf()[0]!;
     await vi.waitFor(() => expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('failed'));
     expect(spy, '書く SQL が引く口まで届いた').not.toHaveBeenCalled();
-    expect(noteOf(host)).toContain('答えを引けませんでした: ');
+    expect(noteOf(host)).toContain('答えを実行できませんでした: ');
     hydrator.release();
   });
 
@@ -526,11 +526,11 @@ describe('寿命 ── 手放した後の答えは画面に当てない', () =>
     await vi.waitFor(() => expect(finish).not.toBeNull());
     const host = hostsOf()[0]!;
     expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('pending');
-    expect(noteOf(host), '引いている間に 1 行も出ていない').toBe('答えを引いています…');
+    expect(noteOf(host), '引いている間に 1 行も出ていない').toBe('答えを実行しています…');
     expect(host.querySelector('table')).toBeNull();
     finish!();
     await vi.waitFor(() => expect(rowsOf(host)).toBe(1));
-    expect(host.textContent, '答えが来ても「引いています」が残っている').not.toContain('引いています');
+    expect(host.textContent, '答えが来ても「引いています」が残っている').not.toContain('実行しています');
     hydrator.release();
   });
 
@@ -548,10 +548,10 @@ describe('寿命 ── 手放した後の答えは画面に当てない', () =>
     hydrator.sync(root, body);
     seeAll();
     await vi.waitFor(() => expect(fail).not.toBeNull());
-    expect(noteOf(hostsOf()[0]!)).toBe('答えを引いています…');
+    expect(noteOf(hostsOf()[0]!)).toBe('答えを実行しています…');
     fail!();
-    await vi.waitFor(() => expect(noteOf(hostsOf()[0]!)).toContain('答えを引けませんでした'));
-    expect(hostsOf()[0]!.textContent).not.toContain('引いています');
+    await vi.waitFor(() => expect(noteOf(hostsOf()[0]!)).toContain('答えを実行できませんでした'));
+    expect(hostsOf()[0]!.textContent).not.toContain('実行しています');
     hydrator.release();
   });
 
@@ -569,7 +569,7 @@ describe('寿命 ── 手放した後の答えは画面に当てない', () =>
     hydrator.sync(root, body);
     seeAll();
     await vi.waitFor(() => expect(finish).not.toBeNull());
-    expect(noteOf(hostsOf()[0]!)).toBe('答えを引いています…');
+    expect(noteOf(hostsOf()[0]!)).toBe('答えを実行しています…');
     hydrator.release();
     finish!();
     await new Promise((r) => setTimeout(r, 20));
@@ -598,7 +598,7 @@ describe('寿命 ── 手放した後の答えは画面に当てない', () =>
     await vi.waitFor(() => expect(finish).not.toBeNull());
     const host = hostsOf()[0]!;
     expect(rowsOf(host), '引き直している間に表が消えた').toBe(1);
-    expect(host.textContent).not.toContain('引いています');
+    expect(host.textContent).not.toContain('実行しています');
     finish!();
     await vi.waitFor(() => expect(host.querySelector('td')?.textContent).toBe('2'));
     hydrator.release();

@@ -909,7 +909,7 @@ const PARTIAL_DRAFT_OWN_NOTES: ReadonlySet<string> = new Set([SECTION_DRAFT_NOTE
  *   (コピーして開き直す)。
  */
 function partialDraftMismatchNote(kind: PartialDraftKind): string {
-  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください`;
+  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました。書きかけをコピーしてから、開き直してください`;
 }
 function partialDraftAmbiguousNote(kind: PartialDraftKind): string {
   const w = PARTIAL_DRAFT_WORDS[kind];
@@ -7653,7 +7653,7 @@ function reduceCore(
      * ⚠ `dragstart` では phase を見ない(掴むのは自由)── 落としたときにここで断る。
      */
     case 'MOVE_BLOCK':
-      return bodyRewriteGate(state, action.lid, '、本文の塊を動かしてください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、本文のブロックを動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const { start, end, toBefore } = action;
         if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
@@ -7677,7 +7677,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${phaseBlockReason(state.phase)}、本文の塊を別のノートへ持っていってください`,
+            error: `${phaseBlockReason(state.phase)}、本文のブロックを別のノートへ持っていってください`,
           },
           events: [],
         };
@@ -7736,7 +7736,7 @@ function reduceCore(
       return bodyRewriteGate(
         state,
         action.lid,
-        action.refusal ?? '、一覧の行を本文へ落としてください',
+        action.refusal ?? '、一覧の行を本文へドロップしてください',
         () =>
           Number.isInteger(action.toBefore) && action.lines.length > 0
             ? {
@@ -7985,8 +7985,8 @@ function reduceCore(
       if (action.rewrite.kind === 'table-format') {
         notice =
           action.rewrite.to === 'csv'
-            ? '表を CSV の表にしました ── 行と列を足せて、式も使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
-            : '表を Markdown の表にしました ── よそへ貼りやすい字になります(戻すには表の右上の ▾ から。行と列の ＋ × と式は使えなくなります)';
+            ? '表を CSV の表にしました。行と列を足せて、式も使えます(戻すには表の右上の ▾ から。桁揃えは戻りません)'
+            : '表を Markdown の表にしました。よそへ貼りやすい字になります(戻すには表の右上の ▾ から。行と列の ＋ × と式は使えなくなります)';
         noticeOpen = null;
       }
       /**

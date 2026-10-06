@@ -85,7 +85,7 @@ test('🔴 ⠿ を掴んで別の塊の下へ落とすと、本文の並びが�
    */
   await page.waitForTimeout(7000);
   await expect(page.locator('[data-pkc-field="status-undo"]'), '時間が来て「元に戻す」が消えた').toBeVisible();
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('本文の塊を動かしました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('本文のブロックを動かしました');
   await clickReal(page, '[data-pkc-field="status-undo"]');
   await expect
     .poll(() => order(page), { timeout: 5000, message: '元に戻らない' })
@@ -231,7 +231,7 @@ test('🔴 ファイルを本文の塊の上へ落とすと、その所に添付
     .poll(kinds, { timeout: 8000, message: '落とした所に入っていない(末尾に入っていないか)' })
     .toEqual(['題', '段落 A', 'IMG', '章 B', '本文 B', '章 C', '本文 C']);
   // どこに入ったかを字でも言う(画面は動かないので、字が唯一の手がかり)
-  await expect(page.locator('[data-pkc-region="status"]')).toContainText('落とした所に入れました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('ドロップした所に入れました');
   // 🔴 片道にしない ── 追記欄の「元に戻す」1 回で消える
   const undo = page.locator('[data-pkc-action="undo-append"]');
   await expect(undo, '「元に戻す」が出ない').toBeVisible();

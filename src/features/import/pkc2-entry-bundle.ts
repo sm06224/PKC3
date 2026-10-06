@@ -64,7 +64,7 @@ export async function readEntryBundleParts(
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です ── 取込対象ではありません',
+      'これは Office 文書(.xlsx / .docx / .pptx)です。取込対象ではありません',
     );
   }
 
@@ -84,7 +84,7 @@ export async function readEntryBundleParts(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `未対応の bundle version です(version=${String(manifest.version)} ── 対応は 1)`,
+      `未対応の bundle version です(version=${String(manifest.version)}、対応は 1)`,
     );
   }
 
@@ -109,12 +109,12 @@ export async function readEntryBundleParts(
     throw new ZipReadError(`${ENTRY_JSON} に archetype がありません`);
   }
   for (const [label, a, b] of [
-    ['lid', str(manifest.lid), str(record.lid)],
+    ['ID', str(manifest.lid), str(record.lid)],
     ['タイトル', str(manifest.title), str(record.title)],
     ['archetype', str(manifest.archetype), str(record.archetype)],
   ] as const) {
     if (a !== '' && b !== '' && a !== b) {
-      warnings.push(`目次と中身で ${label} が違います(${a} ≠ ${b})── 中身を採ります`);
+      warnings.push(`目次と中身で ${label} が違います(${a} ≠ ${b})。中身を採ります`);
     }
   }
 
@@ -129,7 +129,7 @@ export async function readEntryBundleParts(
       continue;
     }
     if (assets.has(key)) {
-      throw new ZipReadError(`asset key が重複しています: ${key}(この ZIP は読み取れません)`);
+      throw new ZipReadError(`添付の ID が重複しています: ${key}(この ZIP は読み取れません)`);
     }
     assets.set(key, {
       source: { zip, entry: e, base64: true },
@@ -200,7 +200,7 @@ export function droppedFieldsWarning(dropped: readonly string[], entries = 1): s
   const uniq = [...new Set(dropped)].join(' / ');
   return [
     `${entries} 件の entry で、この形式にしか無い情報を取り込めませんでした(${uniq})` +
-      ' ── PKC3 側に受け皿がまだありません',
+      '。PKC3 側に受け皿がまだありません',
   ];
 }
 

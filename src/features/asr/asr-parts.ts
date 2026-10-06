@@ -63,7 +63,7 @@ export const ASR_PARTS: readonly AsrPart[] = [
   },
   {
     id: 'accurate',
-    label: '当たりやすい',
+    label: '正確',
     modelId: 'openai/whisper-small',
     modelBytes: 288_448_143,
     secondsPerMinute: 60,
@@ -237,12 +237,12 @@ export function readAsrPack(text: string): AsrPackRead {
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ok: false, why: '目録(pack.json)として読めません' };
+    return { ok: false, why: '構成ファイル(pack.json)として読めません' };
   }
-  if (typeof raw !== 'object' || raw === null) return { ok: false, why: '目録の形が違います' };
+  if (typeof raw !== 'object' || raw === null) return { ok: false, why: '構成ファイルの形が違います' };
   const o = raw as Record<string, unknown>;
   const version = o['version'];
-  if (typeof version !== 'string' || version === '') return { ok: false, why: '目録に版がありません' };
+  if (typeof version !== 'string' || version === '') return { ok: false, why: '構成ファイルにバージョンがありません' };
 
   const runtime = readFiles(o['runtime'], '実行の部品');
   if (typeof runtime === 'string') return { ok: false, why: runtime };
@@ -255,7 +255,7 @@ export function readAsrPack(text: string): AsrPackRead {
   }
 
   const modelsRaw = o['models'];
-  if (typeof modelsRaw !== 'object' || modelsRaw === null) return { ok: false, why: '目録に models がありません' };
+  if (typeof modelsRaw !== 'object' || modelsRaw === null) return { ok: false, why: '構成ファイルに models がありません' };
   const models: Partial<Record<AsrPartId, readonly AsrPackFile[]>> = {};
   for (const part of ASR_PARTS) {
     const mine = (modelsRaw as Record<string, unknown>)[part.id];

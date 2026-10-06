@@ -80,7 +80,7 @@ function insideContainer(spans: readonly ContainerSpan[], p: number): boolean {
  *   出ていた ── 判定が「字が一致するか」だったが、呼び側は**いまの知らせ**を渡すので
  *   常に一致していた(空振り)。
  */
-export const BLOCK_MOVED_NOTICE = '本文の塊を動かしました';
+export const BLOCK_MOVED_NOTICE = '本文のブロックを動かしました';
 
 /**
  * 🔴 **差し込む所**(#684 段④)── 落とした所か、直前に入れた行の下か。

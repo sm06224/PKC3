@@ -118,7 +118,7 @@ export async function resetContainer(
 export function resetDoneMessage(r: ContainerResetReport): string {
   const head =
     r.assetFailures > 0
-      ? `中身を消しました。⚠ ただし添付 ${r.assetFailures} 件は消せませんでした`
+      ? `中身を消しました。ただし添付 ${r.assetFailures} 件は消せませんでした`
       : '中身を消しました';
   const tail = r.wiped
     ? ''
@@ -188,7 +188,7 @@ export function resetExplainMessage(opts: {
    */
   const backup =
     rescued === null
-      ? `🔴 この画面では、まだ拾い出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
+      ? `⚠ この画面では、まだ拾い出していません。先に左下の「${BACKUP_LABEL}」を押してください。`
       : `この画面で拾えたのは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
           ? `(読み込めなかった箇所 ${rescued.skipped} / 空だった箇所 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
@@ -205,14 +205,14 @@ export function resetExplainMessage(opts: {
    */
   const attach: string[] = [];
   if (assetsOnDisk === null) {
-    attach.push('⚠ 添付が何件あるかは、この端末では数えられませんでした。');
+    attach.push('添付が何件あるかは、この端末では数えられませんでした。');
   } else if (assetsOnDisk > 0) {
     const took = rescued?.assets ?? 0;
     attach.push(`この端末には添付が ${assetsOnDisk} 件あります。`);
     attach.push(
       took >= assetsOnDisk
         ? `拾い出しには ${took} 件とも入っています。`
-        : `🔴 拾い出しに入っているのは ${took} 件だけです。残りはここで消えます。`,
+        : `⚠ 拾い出しに入っているのは ${took} 件だけです。残りはここで消えます。`,
     );
   }
   return [
@@ -231,7 +231,7 @@ export function resetExplainMessage(opts: {
     backup,
     ...attach,
     // ⚠ 黙って他のタブを読み込み直さない ── 先に言う
-    '⚠ 同じ PKC を開いている他のタブも、読み込み直されます。',
+    '同じ PKC を開いている他のタブも、読み込み直されます。',
   ].join('\n');
 }
 

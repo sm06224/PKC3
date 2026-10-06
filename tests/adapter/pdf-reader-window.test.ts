@@ -165,11 +165,11 @@ describe('🔴 ノートへ引く返事が来ないとき ── 「ノートへ
     boot();
     selectText('結論', 3);
     $('quote').click();
-    fromHost('quote-result', { ok: true, message: '「メモ」の末尾へ引きました(3 頁)' });
-    expect($('status').textContent).toBe('「メモ」の末尾へ引きました(3 頁)');
+    fromHost('quote-result', { ok: true, message: '「メモ」の末尾へ引用しました(3 頁)' });
+    expect($('status').textContent).toBe('「メモ」の末尾へ引用しました(3 頁)');
     vi.advanceTimersByTime(wire.QUOTE_TIMEOUT_MS * 3);
     expect($('status').textContent, '返事が来たのに時間切れの字で上書きしている').toBe(
-      '「メモ」の末尾へ引きました(3 頁)',
+      '「メモ」の末尾へ引用しました(3 頁)',
     );
   });
 

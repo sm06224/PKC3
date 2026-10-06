@@ -199,7 +199,7 @@ export interface SearchJumpBarHandle {
  *   ── `search-hits.ts`、設計 doc §3)。
  */
 export function searchJumpLabel(total: number, index: number): string {
-  return total <= 0 ? '本文の字には当たりませんでした(太字やリンクをまたぐ語、図の中は数えません)' : `${index + 1}/${total} 件`;
+  return total <= 0 ? '本文の字には一致しませんでした(太字やリンクをまたぐ語、図の中は数えません)' : `${index + 1}/${total} 件`;
 }
 
 /**
@@ -215,7 +215,7 @@ export function installSearchJumpBar(container: HTMLElement): SearchJumpBarHandl
   wrapper.className = 'pkc-search-jump';
   wrapper.setAttribute('data-pkc-field', 'search-jump');
   wrapper.setAttribute('role', 'group');
-  wrapper.setAttribute('aria-label', '探した語の当たり');
+  wrapper.setAttribute('aria-label', '探した語の一致');
   wrapper.hidden = true;
 
   const label = doc.createElement('span');
@@ -234,11 +234,11 @@ export function installSearchJumpBar(container: HTMLElement): SearchJumpBarHandl
   };
   // ⚠ 受け手の名前は**ここに字で書く**(変数で配らない)── 「どの操作がどこから焼かれるか」を
   //   静的に追える形にしておく(`tests/action-outlets.test.ts` の「追えない出口」を増やさない)
-  const prev = button('‹', '前の当たりへ');
+  const prev = button('‹', '前の一致へ');
   prev.setAttribute('data-pkc-action', 'search-jump-prev');
-  const next = button('›', '次の当たりへ');
+  const next = button('›', '次の一致へ');
   next.setAttribute('data-pkc-action', 'search-jump-next');
-  const end = button('×', '当たりの表示を閉じる');
+  const end = button('×', '一致の表示を閉じる');
   end.setAttribute('data-pkc-action', 'search-jump-end');
 
   wrapper.append(label, prev, next, end);
@@ -253,7 +253,7 @@ export function installSearchJumpBar(container: HTMLElement): SearchJumpBarHandl
         return;
       }
       label.textContent = searchJumpLabel(view.total, view.index);
-      wrapper.title = `「${view.query}」の当たり`;
+      wrapper.title = `「${view.query}」の一致`;
       // 当たりが無いときは送れない(押せるのに何も起きない、を作らない)
       prev.disabled = view.total <= 0;
       next.disabled = view.total <= 0;

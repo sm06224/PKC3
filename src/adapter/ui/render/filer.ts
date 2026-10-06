@@ -286,7 +286,7 @@ export class FilerRenderer {
     const label = document.createElement('span');
     label.setAttribute('data-pkc-field', 'smart-why');
     if (hit === null) label.textContent = 'フォルダの中身を集めています…';
-    else if (hit.failed) label.textContent = 'この版では集められません';
+    else if (hit.failed) label.textContent = 'このバージョンでは集められません';
     else if (isSmartEmpty(hit.spec))
       label.textContent = '条件を選んでください(まだ何も集めません)';
     else {
@@ -481,7 +481,7 @@ export class FilerRenderer {
       count.textContent = `${marks.length} 件を選んでいます`;
       const del = iconButton('delete-selected', 'まとめてゴミ箱へ移す');
       // ⚠ 行き先は画面に在る名前で(上の `delete-entry` と同じ直し ── **対称の反対側**)
-      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(左の列の「フォルダ」タブの中のゴミ箱から戻せます)`;
+      del.title = `選んでいる ${marks.length} 件をゴミ箱へ入れます(左のペインの「フォルダ」タブの中のゴミ箱から戻せます)`;
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'clear-selection');
@@ -961,7 +961,7 @@ export class FilerRenderer {
         pressed: state.filerFlatten,
         title: state.filerFlatten
           ? 'いま、下の階層まで平らに出しています。押すと、直下だけに戻します'
-          : '押すと、いま居る場所の下の階層まで、全部を平らに並べます',
+          : '押すと、いまいる場所の下の階層まで、全部を平らに並べます',
       });
       if (state.filerFlatten) {
         const group = document.createElement('span');
@@ -1136,7 +1136,7 @@ export class FilerRenderer {
     if (state.searchHitsTruncated) {
       const more = document.createElement('p');
       more.setAttribute('data-pkc-field', 'filer-more');
-      more.textContent = '200 件より多く当たりました。語を足して絞ってください';
+      more.textContent = '200 件より多く一致しました。語を足して絞ってください';
       this.region.append(more);
     }
     // ⚠ 帯は**表の後**(上の注記)── 選んだ瞬間に行が動かないようにする

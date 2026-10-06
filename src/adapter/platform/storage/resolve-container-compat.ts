@@ -92,4 +92,4 @@ export async function resolveContainerCompat(
  * 何をすれば直るかまで書く。
  */
 export const LEGACY_HOST_NOTICE =
-  '古い版のタブが本体になっています。すべてのタブを閉じてから開き直すと、新しい版で動きます';
+  '古いバージョンのタブが本体になっています。すべてのタブを閉じてから開き直すと、新しいバージョンで動きます';

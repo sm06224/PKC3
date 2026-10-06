@@ -170,6 +170,6 @@ describe('押したら binder が実体へ渡す', () => {
     const p = pane({ captureItems: ITEMS() });
     root.append(p.host);
     btn(p.host, 'a')!.dispatchEvent(new Event('click', { bubbles: true }));
-    expect(d.getState().error).toMatch(/この版では文字にできません/);
+    expect(d.getState().error).toMatch(/このバージョンでは文字にできません/);
   });
 });

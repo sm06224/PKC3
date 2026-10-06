@@ -86,10 +86,10 @@ describe('integrityPlan / checkIntegrity({ table }) / integrityStamp', () => {
   });
 
   it('🔴 無い表を名指ししたら落とす(黙って丸ごとへ倒さない)', async () => {
-    await expect(request({ op: 'checkIntegrity', table: 'nosuch' })).rejects.toThrow('検める表が無い');
+    await expect(request({ op: 'checkIntegrity', table: 'nosuch' })).rejects.toThrow('確認する表が無い');
     // ⚠ 引用符を混ぜても SQL として通らない(名前として突き合わせて落ちる)
     await expect(request({ op: 'checkIntegrity', table: 'entries") OR 1=1 --' })).rejects.toThrow(
-      '検める表が無い',
+      '確認する表が無い',
     );
   });
 

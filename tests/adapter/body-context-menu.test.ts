@@ -675,7 +675,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.head);
     expect(
       r.root.querySelector(`${MENU} [data-pkc-action="toggle-heading-fold"]`)!.textContent,
-    ).toContain('畳む');
+    ).toContain('折りたたむ');
   });
 
   /**
@@ -1501,12 +1501,12 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
   it('🔴 `:::` の囲みの中で右クリックすると「この塊をコピー」── 開きから閉じまで', () => {
     const r = rig();
     rightClick(r.q('p[data-pkc-source-line="5"]'));
-    expect(r.acts(), '「この塊をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.acts(), '「このブロックをコピー」が出ていない').toContain('copy-block-md');
     expect(r.acts(), '段落の上なのに章の物が出た').not.toContain('copy-chapter-md');
-    expect(r.label('copy-block-md')).toBe('この塊をコピー');
+    expect(r.label('copy-block-md')).toBe('このブロックをコピー');
     r.press('copy-block-md');
     expect(r.copied.map((c) => c.text)).toEqual([NOTE]);
-    expect(r.copied[0]!.done).toBe('塊をコピーしました(Markdown の原文)');
+    expect(r.copied[0]!.done).toBe('ブロックをコピーしました(Markdown の原文)');
   });
 
   it('🔴 入れ子の内側で右クリックすると、**内側**の塊(外側を写さない)', () => {

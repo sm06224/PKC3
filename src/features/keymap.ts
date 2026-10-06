@@ -94,7 +94,7 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
    */
   filer: 'フォルダの一覧と 2 ペイン(行を選んでいるとき)',
   /** ⚠ こちらは**2 ペインにしか存在しない操作**だけ(反対側へ写す / 移す など)。 */
-  dual: '2 ペインだけの操作(そのペインに焦点があるとき)',
+  dual: '2 ペインだけの操作(そのペインにフォーカスがあるとき)',
   /** ⚠ 何も編集していないときだけ効く(#1042 C3)。 */
   reading: 'ノートを読んでいるとき',
   /** ⚠ 予定表・連絡先の別ウィンドウ、および中央の面(query/settings/help など)。 */
@@ -249,7 +249,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '絞り込みの欄へ移る',
     contexts: ['global'],
     defaults: ['Mod+F'],
-    note: '左の一覧の絞り込み欄に焦点を移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
+    note: '左の一覧の絞り込み欄にフォーカスを移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
   },
   /**
    * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
@@ -305,7 +305,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Alt+Shift+C'],
     whileTyping: true,
-    note: 'いまカーソルの在る行を計算して、行の終わりに答えを入れます(本文では 2+3= のように = を最後に打って Enter でも計算します)',
+    note: 'いまカーソルのある行を計算して、行の終わりに答えを入れます(本文では 2+3= のように = を最後に打って Enter でも計算します)',
   },
   /**
    * 🔴 **ノートへのリンクを入れる**(#427 段②)。
@@ -356,7 +356,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['filer', 'dual'],
     // ⚠ `F3` は古典 4 実装(TC / DC / FAR / Krusader)の「見る」と同じ位置
     defaults: ['Enter', 'F3'],
-    note: 'OS のファイラと同じ ── 行を選んで Enter(F3 でも開きます)',
+    note: 'OS のファイラと同じ。行を選んで Enter(F3 でも開きます)',
   },
   /**
    * 🔴 **選んだノートを横の枠(スタック)へ開く**(#1092)。
@@ -470,7 +470,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '行の選択を切り替える(次の行へ移る)',
     contexts: ['dual'],
     defaults: ['Space', 'Insert'],
-    note: 'カーソルは選択と別です ── 見て回るのは矢印、選ぶのは Space',
+    note: 'カーソルは選択と別です。見て回るのは矢印、選ぶのは Space',
   },
   {
     id: 'dual-copy-to-other',
@@ -779,7 +779,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-sidebar',
-    label: '一覧の列を畳む / 戻す',
+    label: '一覧のペインを折りたたむ / 戻す',
     contexts: ['global'],
     defaults: ['Alt+BracketLeft', 'Mod+Backslash'],
     whileTyping: true,
@@ -787,7 +787,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'toggle-inspector',
-    label: '情報の列を畳む / 戻す',
+    label: '情報のペインを折りたたむ / 戻す',
     contexts: ['global'],
     defaults: ['Alt+BracketRight', 'Mod+Shift+Backslash'],
     whileTyping: true,
@@ -814,15 +814,15 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'toggle-append',
-    label: '追記欄を畳む / 戻す',
+    label: '追記欄を折りたたむ / 戻す',
     contexts: ['global'],
     defaults: ['Alt+Backslash'],
     whileTyping: true,
-    note: '本文の下の追記欄。畳んでも掴む帯は残る',
+    note: '本文の下の追記欄。折りたたんでもつまみは残る',
   },
   {
     id: 'toggle-focus-mode',
-    label: '両側の列を畳む / 戻す(集中)',
+    label: '両側のペインを折りたたむ / 戻す(集中)',
     contexts: ['global'],
     defaults: ['Mod+Alt+Backslash'],
     whileTyping: true,
@@ -1038,7 +1038,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '表の列幅を揃える',
     contexts: ['editor', 'row'],
     defaults: [],
-    note: 'カーソルの在る表の、列の幅を空白で揃えます(中の字は変えません)。1 画面編集の行では「全文を編集」に切り替えてから',
+    note: 'カーソルのある表の、列の幅を空白で揃えます(中の字は変えません)。1 画面編集の行では「全文を編集」に切り替えてから',
   },
   /**
    * 🔴 **選んだ字を整える 5 つ**(#1233。Gemini 裁定 A ── 別アプリは作らず、本文で字を選んで
@@ -1462,7 +1462,7 @@ export function validateBinding(
   if (!c.mod && !c.alt && !bareAllowed(c.key, commandId)) {
     return {
       kind: 'bare',
-      message: 'Ctrl(⌘)か Alt と組み合わせてください ── そのままだと文字が打てなくなります',
+      message: 'Ctrl(⌘)か Alt と組み合わせてください。そのままだと文字が打てなくなります',
     };
   }
   if (REFUSED.some((r) => sameChord(r, norm))) {

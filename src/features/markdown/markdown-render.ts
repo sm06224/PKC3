@@ -549,7 +549,7 @@ function buildFenceAssetHtml(
     ` data-pkc-fence-asset-key="${escapeHtmlAttr(parse.key)}"` +
     ` data-pkc-fence-asset-info="${escapeHtmlAttr(info)}"${sourceLineAttrs}>` +
     `<p data-pkc-fence-asset-pending>このコードブロックの中身は添付(asset:` +
-    `${md.utils.escapeHtml(parse.key)})に在ります</p>` +
+    `${md.utils.escapeHtml(parse.key)})にあります</p>` +
     fallback +
     `</div>`
   );

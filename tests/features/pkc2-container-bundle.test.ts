@@ -339,7 +339,7 @@ describe('readContainerBundle — texts', () => {
     const got = await readContainerBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([
-      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)が bundle ごとに違います ── 先の方を採ります',
+      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)が bundle ごとに違います。先の方を採ります',
     ]);
   });
 });
@@ -642,7 +642,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      'a.text.zip: 目次と中身で lid が違います(ちがう ≠ n1)',
+      'a.text.zip: 目次と中身で ID が違います(ちがう ≠ n1)',
       'a.text.zip: 目次と中身でタイトルが違います(ちがう題 ≠ 本当の題)',
     ]);
     // 採るのは**中身**
@@ -660,7 +660,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '1 件目: 目次の archetype(textlog)は形式(text)と違います ── 形式を採ります',
+      '1 件目: 目次の archetype(textlog)は形式(text)と違います。形式を採ります',
     ]);
     expect((got.container as Synth).entries[0]!.archetype).toBe('text');
   });

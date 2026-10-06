@@ -2560,7 +2560,7 @@ export class DetailRenderer {
         note.textContent =
           why === null || why.kind !== 'unreadable'
             ? 'この文書の情報を更新しました'
-            : `この文書の情報が読めなくなりました(${why.detail})── 書いた内容は本文に残っています`;
+            : `この文書の情報が読めなくなりました(${why.detail})。書いた内容は本文に残っています`;
       });
       fmCard.append(ta, ok, cancel);
       ta.focus();
@@ -2728,7 +2728,7 @@ export class DetailRenderer {
         body = folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
         this.onBodyChange?.(body);
       });
-      note.textContent = `この本文は行ごとに編集できません(${reason})── 原文で編集します`;
+      note.textContent = `この本文は行ごとに編集できません(${reason})。原文で編集します`;
       /**
        * ⚠ **札を畳む**(#284)── 退避先の入力欄には**原文(情報込み)**が入る。
        *   札を出したままにすると、同じ情報を編集する口が 2 つになり、
@@ -2937,7 +2937,7 @@ export class DetailRenderer {
          */
         if (this.extensionGrants.isGranted(meta.assetKey)) {
           run.title =
-            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます ── 取り消しはシステムから';
+            'PKC3 から切り離して開きます(PKC3 の中身には触れません)。このアプリにはノートの目次を見せます。取り消しはシステムから';
         } else {
           const extRun = launchOf(
             iconButton('launch-asset-extension', '目次を見せて開く', 'launch-asset-extension'),
@@ -3640,7 +3640,7 @@ function diffBadge(added: number | null, removed: number | null): HTMLElement | 
   span.textContent = `+${added} −${removed}`;
   // ⚠ **何との比較かを書く**(数字だけだと、今の本文との差だと読まれる)
   // ⚠ **向きは開いた見出しと同じ**(`+` = この版にだけある行 = 戻すと戻る行)
-  span.title = '1 つ新しい版とくらべて ─ + はこの版にだけある行 / − は 1 つ新しい版にだけある行';
+  span.title = '1 つ新しい版とくらべます(+ はこの版にだけある行 / − は 1 つ新しい版にだけある行)';
   return span;
 }
 

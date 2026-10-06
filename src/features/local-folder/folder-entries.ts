@@ -53,7 +53,7 @@ export const PC_LINK_NOTE = '元ファイルと結びつきます';
  * フォルダ(OneDrive / iCloud / Dropbox のファイルオンデマンド)で未ダウンロードの実体が一斉に落ちてくる。
  * ホバーに出す(「—」を壊れと読ませない)。
  */
-export const PC_STATS_NOTE = '大きさと更新日は、開くときに読みます(一覧では file の中身を読みません)';
+export const PC_STATS_NOTE = '大きさと更新日は、開くときに読みます(一覧ではファイルの中身を読みません)';
 
 /** 取り込まれ方。 */
 export type FolderFileRoute = 'note' | 'contact' | 'attachment';

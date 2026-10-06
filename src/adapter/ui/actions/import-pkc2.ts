@@ -373,7 +373,7 @@ export async function importPkc2File(
       // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
       //   を読む)が、案内には**受ける全部**を書く(#1017 段④b。3 種 + 旧形式)。
       return fail(
-        `取り込めない形式です(${file.name})── PKC2 の書出し(HTML / ZIP)か ` +
+        `取り込めない形式です(${file.name})。PKC2 の書出し(HTML / ZIP)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
           'または .md を選んでください',
       );
@@ -427,7 +427,7 @@ export async function importPkc2File(
         container = null;
       } else if (format === null) {
         return fail(
-          `${file.name}: manifest.json が無い ZIP です ── PKC2 の書出しファイルを選んでください`,
+          `${file.name}: manifest.json が無い ZIP です。PKC2 の書出しファイルを選んでください`,
         );
       }
       const read = restored
@@ -697,7 +697,7 @@ export async function importPkc2File(
           revStats.skipped += r.skippedEntries.length;
           // 壊れて復元できなかった鎖は**名指しで**言う(件数だけだと直しようがない)
           for (const broken of r.brokenChains) {
-            result.warnings.push(`履歴を復元できませんでした ── ${broken}`);
+            result.warnings.push(`履歴を復元できませんでした: ${broken}`);
           }
         }
       }
@@ -734,7 +734,7 @@ export async function importPkc2File(
     if (notes.length > 0) {
       // 警告は握りつぶさない。ただし**成功を失敗の見た目にしない** ──
       // OP_FAILED は state.error に載って「⚠ エラー」表示になる(review L-11)
-      deps.notify?.(`取込完了: ${rows.length} 件${revNote} ⚠ 注意 ${notes.length} 件`);
+      deps.notify?.(`取込完了: ${rows.length} 件${revNote}(注意 ${notes.length} 件)`);
     } else {
       deps.notify?.(`取込完了: ${rows.length} 件${revNote}`);
     }

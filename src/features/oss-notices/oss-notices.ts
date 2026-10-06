@@ -70,7 +70,7 @@ export const OSS_SOURCE_URL = 'https://github.com/sm06224/PKC3';
 
 /** 「開発: …」の 1 行。 */
 export function ossDeveloperLine(): string {
-  return `開発: ${OSS_DEVELOPER} ── ${OSS_AI_COAUTHOR}`;
+  return `開発: ${OSS_DEVELOPER} / ${OSS_AI_COAUTHOR}`;
 }
 
 /** 一覧の見出しに出す、件数つきの字。⚠ **切るのはここ 1 か所**(面ごとに数えない)。 */

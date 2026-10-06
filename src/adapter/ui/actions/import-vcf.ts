@@ -143,6 +143,6 @@ export async function importVcfFiles(
     hidden > 0
       ? `取込完了: ノート ${rows.length} 件(うち連絡先に並ぶのは ${listed} 件)`
       : `取込完了: 連絡先 ${rows.length} 件`;
-  deps.notify?.(notes.length > 0 ? `${head} ⚠ 注意 ${notes.length} 件` : head);
+  deps.notify?.(notes.length > 0 ? `${head}(注意 ${notes.length} 件)` : head);
   return rows.length;
 }

@@ -31,7 +31,7 @@ import {
 } from '@features/keymap';
 
 /** 押せない行の理由に必ず付く頭。⚠ **押せる行には付かない**(見分けの印)。 */
-export const NOT_READY_PREFIX = 'いまは押せません ── ';
+export const NOT_READY_PREFIX = 'いまは押せません。';
 
 /** 一覧の 1 行。 */
 export interface PaletteRow {

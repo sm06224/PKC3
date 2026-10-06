@@ -864,7 +864,7 @@ export async function writePortableHtml(
           warn.add(
             'fence-asset',
             'コードブロックが指す添付の注意',
-            `コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`,
+            `コードブロックが指している添付を埋め込めませんでした(${k}): ${why}`,
           ),
       );
       const rendered = await render(r.body.slice(skip), {

@@ -84,7 +84,7 @@ export async function singleEntrySource(
   const relations = await base.listRelations();
   const touching = relations.filter((r) => r.from_lid === lid || r.to_lid === lid);
   if (touching.length > 0) {
-    warnings.push(`このノートに繋がる関連 ${touching.length} 件は含まれません(相手のノートが入らないため)`);
+    warnings.push(`このノートにつながる関連 ${touching.length} 件は含まれません(相手のノートが入らないため)`);
   }
 
   const assets = allAssets.filter((a) => used.has(a.key));

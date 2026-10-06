@@ -80,7 +80,7 @@ import {
  */
 export const SQL_SOURCE_GROUP_PKC = 'この PKC';
 export const SQL_SOURCE_GROUP_ATTACHED = '添付';
-export const SQL_SOURCE_GROUP_LOCAL = '手持ちの file';
+export const SQL_SOURCE_GROUP_LOCAL = '手持ちのファイル';
 /**
  * 🔴 **「もう 1 つ足す…」の仕切り**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
  * ⚠ 並びは**いちばん最後**(一覧の末尾)。中身は「足せる添付」と「手持ちのファイルを足す…」。
@@ -279,7 +279,7 @@ export class SqlRenderer {
     const engine = document.createElement('select');
     engine.setAttribute('data-pkc-action', 'set-sql-engine');
     engine.setAttribute('data-pkc-field', 'sql-engine');
-    engine.setAttribute('aria-label', 'どのエンジンで引くか');
+    engine.setAttribute('aria-label', 'どのエンジンで実行するか');
     engine.hidden = true;
     /**
      * 🔴 **「手持ちのファイルを開く…」が押した先**(#854 段②)。
@@ -305,7 +305,7 @@ export class SqlRenderer {
     schema.setAttribute('data-pkc-field', 'sql-schema-to-note');
     schema.textContent = '構造をノートへ書き出す';
     schema.title =
-      'いま調べている相手の表・列・型・鍵・繋がり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
+      'いま調べている相手の表・列・型・キー・つながり・行数を、ノート 1 枚にします(中身は入りません)。AI に貼るのに使えます。';
     /**
      * 🔴 **前に打った字を、押して選べる**(#918 段②a。user 裁定 2026-09-14)。
      *
@@ -354,7 +354,7 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-action', 'sql-export-menu');
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ書き出す';
-    toFile.title = 'いま出ている答えを、file に書き出します(CSV / TSV / JSON)';
+    toFile.title = 'いま出ている答えを、ファイルに書き出します(CSV / TSV / JSON)';
     /**
      * 🔴 **選び所を帯の先頭へ**(#992 ④。Gemini の裁定 2026-10-01 = 答え A)。
      * ⚠ 直す前は `履歴` の右(6 個のボタンの向こう側)で、user が**最初にやること**
@@ -1179,7 +1179,7 @@ export function historyNoteLine(p: AppState['sqlPage']): string {
     return p.historyDraft === '' ? '' : '打ちかけの字を見ています';
   }
   const at = `前に打った字(${String(p.historyAt + 1)} / ${String(n)})`;
-  return p.historyAt === n - 1 ? `${at} ── これより前はありません` : at;
+  return p.historyAt === n - 1 ? `${at}(これより前はありません)` : at;
 }
 
 /**
@@ -1201,7 +1201,7 @@ function runningNote(p: AppState['sqlPage']): string {
  *   (字へ直書きした変異が、間隔を変えない限り生き延びる、を防ぐ)。
  */
 export function duckdbWarmupNote(idleSec: number): string {
-  return `(初回と、${String(idleSec)} 秒使わなかったあとは DuckDB に表を写すので時間がかかります)`;
+  return `(初回と、${String(idleSec)} 秒使わなかったあとは DuckDB に表をコピーするので時間がかかります)`;
 }
 
 /**
@@ -1255,14 +1255,14 @@ function noteLineCore(p: AppState['sqlPage']): string {
    */
   const everyName =
     p.guest === null ? '' : [p.guest.name, ...p.extraGuests.map((g) => g.name)].join(' / ');
-  const where = p.guest === null ? '' : ` ── ${everyName} を調べています${truncNote}`;
+  const where = p.guest === null ? '' : `(${everyName} を調べています${truncNote})`;
   /**
    * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
    * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
    * ⚠ **`.sqlite` に決め打たない**(#854 段①)── `.csv` / `.tsv` も同じ相手選びから
    *   開くので、字を見て相手を勘違いさせない。
    */
-  if (p.guestError !== '') return `選んだ file を開けませんでした ── ${p.guestError}`;
+  if (p.guestError !== '') return `選んだファイルを開けませんでした: ${p.guestError}`;
   if (p.running) return `走らせています…${runningNote(p)}${where}`;
   if (p.error !== '') return `${p.error}${where}`;
   /**
@@ -1273,7 +1273,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
   if (p.saved !== '')
     return p.savedKind === 'file'
       ? // ⚠ **落ちた先は言えない** ── ブラウザの設定(既定の保存先 / 毎回聞く)で変わる
-        `「${p.saved}」という file に書き出しました(ブラウザの保存先をご覧ください)${where}`
+        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${where}`
       : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
@@ -1308,9 +1308,9 @@ function noteLineCore(p: AppState['sqlPage']): string {
   const wrote = duckDbWriteKind(p.ranSql);
   if (wrote !== null) return `${duckDbWriteNote(wrote, p.columns, p.rows)}${took}${where}`;
   if (p.truncated)
-    return `${String(p.rows.length)} 行${took} ── 多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
+    return `${String(p.rows.length)} 行${took}。多すぎるので途中まで出しています(LIMIT や条件で絞ると全部見えます)${where}`;
   if (p.rows.length === 0)
-    return `0 行${took} ── 条件に当たるものがありませんでした${zeroHint(p.ranSql)}${where}`;
+    return `0 行${took}。条件に一致するものがありませんでした${zeroHint(p.ranSql)}${where}`;
   return `${String(p.rows.length)} 行${took}${windowNote(p.rows.length)}${where}`;
 }
 
@@ -1329,7 +1329,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
  */
 function windowNote(rows: number): string {
   if (rows <= SQL_WINDOW_MIN) return '';
-  return ' ── 見えている分だけ描いています(全部を探す・写すには ノートへ書き出す / ファイルへ書き出す)';
+  return '。見えている分だけ描いています(全部を探す・コピーするには ノートへ書き出す / ファイルへ書き出す)';
 }
 
 /**
@@ -1343,6 +1343,6 @@ function windowNote(rows: number): string {
  */
 function zeroHint(sql: string): string {
   return /[％＿]/.test(sql)
-    ? '(打った字に全角の ％ か ＿ が入っています ── LIKE の記号は半角の % と _ です)'
+    ? '(打った字に全角の ％ か ＿ が入っています、LIKE の記号は半角の % と _ です)'
     : '';
 }

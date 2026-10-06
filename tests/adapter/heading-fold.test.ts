@@ -27,8 +27,8 @@ describe('見出しの畳み(器) #396', () => {
     expect(applyHeadingFold(h)).toBe(2);
     expect(btns(h)).toHaveLength(2);
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    expect(btns(h)[0]!.title).toContain('畳みます');
-    expect(btns(h)[0]!.getAttribute('aria-label')).toContain('畳みます');
+    expect(btns(h)[0]!.title).toContain('折りたたみます');
+    expect(btns(h)[0]!.getAttribute('aria-label')).toContain('折りたたみます');
     /**
      * 🔴 **見出しの字を汚さない**(2026-08-25 に実際に落ちた)。
      * ⚠ ボタンに字を入れると `h1.textContent` に混ざり、

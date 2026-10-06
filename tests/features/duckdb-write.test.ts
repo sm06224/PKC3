@@ -78,8 +78,8 @@ describe('🔴 sqlite の門は変わっていない(対照群)', () => {
   });
 
   it('⚠ 断り文は今までの字のまま', () => {
-    expect(checkReadOnlySql('CREATE TABLE t (a INT)').why).toBe('読み取り専用です ── CREATE は打てません(ここは読むだけです)');
-    expect(checkReadOnlySql('DROP TABLE entries').why).toBe('読み取り専用です ── DROP は打てません(ここは読むだけです)');
+    expect(checkReadOnlySql('CREATE TABLE t (a INT)').why).toBe('読み取り専用です: CREATE は打てません(ここは読むだけです)');
+    expect(checkReadOnlySql('DROP TABLE entries').why).toBe('読み取り専用です: DROP は打てません(ここは読むだけです)');
   });
 
   it('⚠ 読むだけの DuckDB の門(`checkDuckDbSql`)も、書き込みを断ったまま', () => {
@@ -235,15 +235,15 @@ describe('🔴 通った直後に言う 1 行(件数と寿命)', () => {
     const [c, r] = count(2);
     // 🔴 #918 段⑦(Gemini 裁定 2026-10-01 = 設問 2 は B):相手を足す / 外すと器を作り直す = 作った表も消える
     expect(duckDbWriteNote('create', c, r)).toBe(
-      `2 行に効きました ── ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`,
+      `2 行に効きました: ${DUCKDB_TABLE_LIFETIME}。${DUCKDB_TABLE_RESET}`,
     );
     expect(DUCKDB_TABLE_LIFETIME).toBe('作った表はウィンドウを閉じると消えます');
     expect(DUCKDB_TABLE_RESET).toBe('相手を足したり外したりすると、作った表は消えます');
     // 🔑 対照群:表を作らない命令には寿命を言わない / 元の file の注意は行を書き換える命令だけ
     expect(duckDbWriteNote('insert', c, r)).not.toContain('消えます');
     expect(duckDbWriteNote('drop', ['Success'], [])).not.toContain('消えます');
-    expect(duckDbWriteNote('update', c, r)).toContain('元の file は書き換わりません');
-    expect(duckDbWriteNote('delete', c, r)).toContain('元の file は書き換わりません');
-    expect(duckDbWriteNote('create', c, r)).not.toContain('元の file');
+    expect(duckDbWriteNote('update', c, r)).toContain('元のファイルは書き換わりません');
+    expect(duckDbWriteNote('delete', c, r)).toContain('元のファイルは書き換わりません');
+    expect(duckDbWriteNote('create', c, r)).not.toContain('元のファイル');
   });
 });

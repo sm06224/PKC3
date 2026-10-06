@@ -373,12 +373,12 @@ export class SettingsRenderer {
     });
     // ⚠ **いつ効くのか**まで書く ── 窓が読み幅より狭ければ、どちらでも同じに見える
     paRow.title =
-      '表・図・コードも段落と同じ側に揃います。窓が読み幅より狭い、または' +
+      '表・図・コードも段落と同じ側に揃います。ウィンドウが読み幅より狭い、または' +
       'ページ設定が「フル HD」のときはどちらでも同じ見え方です。' +
       '書き出した HTML は、書き出したときの置き場所のまま表示されます。';
     pad.append(paRow);
     pad.append(
-      buildSettingsNote('窓が読み幅より広いとき、本文を列の中央か左端に置きます(既定は中央)。'),
+      buildSettingsNote('ウィンドウが読み幅より広いとき、本文をペインの中央か左端に置きます(既定は中央)。'),
     );
     dl.append(pat, pad);
 
@@ -630,12 +630,12 @@ export class SettingsRenderer {
       currentId: '', // render 末尾の syncOpenPlace が必ず映す
     });
     plRow.title =
-      '別の窓なら本文を見ながら確かめられます。ブラウザが別の窓を止めている場合は' +
+      '別のウィンドウなら本文を見ながら確かめられます。ブラウザが別のウィンドウを止めている場合は' +
       'この画面の上に出し、理由を画面の下に出します。電話の画面ではどちらでもこの' +
-      '画面に出ます。予定表や連絡先など、ほかの窓の開き方はここでは変わりません。';
+      '画面に出ます。予定表や連絡先など、ほかのウィンドウの開き方はここでは変わりません。';
     pld.append(plRow);
     pld.append(
-      buildSettingsNote('添付の書庫(zip)の一覧を、別の窓かこの画面のどちらに出すかです。'),
+      buildSettingsNote('添付の書庫(zip)の一覧を、別のウィンドウかこの画面のどちらに出すかです。'),
     );
     openDl.append(plt, pld);
 
@@ -662,9 +662,9 @@ export class SettingsRenderer {
     atselect.setAttribute('data-pkc-field', 'app-open-target-select');
     atselect.setAttribute('aria-label', 'アプリの開き方');
     atselect.title =
-      '別の窓は大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
-      'ブラウザが窓を止めているときは、止められた理由が画面の下に出ます。' +
-      '組み込みのアプリ(予定表・連絡先など)とマニュアルの窓は、ここでは変わりません。';
+      '別のウィンドウは大きさを指定して開くので、画面より大きいときはブラウザが縮めます。' +
+      'ブラウザがウィンドウを止めているときは、止められた理由が画面の下に出ます。' +
+      '組み込みのアプリ(予定表・連絡先など)とマニュアルのウィンドウは、ここでは変わりません。';
     for (const c of APP_OPEN_TARGETS) {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -673,7 +673,7 @@ export class SettingsRenderer {
     }
     atd.append(atselect);
     atd.append(
-      buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別の窓に出すかです。'),
+      buildSettingsNote('アプリの一覧のタイルを押したとき、タブか別のウィンドウに出すかです。'),
     );
     openDl.append(att, atd);
 
@@ -872,9 +872,9 @@ export class SettingsRenderer {
     cccheck.type = 'checkbox';
     cccheck.setAttribute('data-pkc-action', 'set-code-collapse');
     cccheck.setAttribute('data-pkc-field', 'code-collapse');
-    cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から畳む'));
+    cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から折りたたむ'));
     cclabel.title =
-      '18 行以上のコード枠を、最初は低く畳んで見せます(押すと全部見えます)。' +
+      '18 行以上のコード枠を、最初は低く折りたたんで見せます(押すと全部見えます)。' +
       '切ると、最初から字が全部見えます(開閉のボタンも出ません)。';
     ccd.append(cclabel);
     editDl.append(cct, ccd);
@@ -906,10 +906,10 @@ export class SettingsRenderer {
     pdfcheck.type = 'checkbox';
     pdfcheck.setAttribute('data-pkc-action', 'set-pdf-reader');
     pdfcheck.setAttribute('data-pkc-field', 'pdf-reader');
-    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引ける)'));
+    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC の画面で開く(字を選んでノートへ引用できる)'));
     pdflabel.title =
-      '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読む窓にします。' +
-      '字を選んで「ノートへ引く」を押すと、頁番号つきで添付のノートの末尾に引用として足せます。' +
+      '添付の PDF の「別のウィンドウで見る」を、PKC の画面で読むウィンドウにします。' +
+      '字を選んで「ノートへ引用する」を押すと、頁番号つきで添付のノートの末尾に引用として足せます。' +
       '切ると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
     pdfd.append(pdflabel);
     editDl.append(pdft, pdfd);
@@ -966,7 +966,7 @@ export class SettingsRenderer {
     wcheck.setAttribute('data-pkc-action', 'set-too-narrow-enabled');
     wcheck.setAttribute('data-pkc-field', 'too-narrow-enabled');
     wlabel.append(wcheck, document.createTextNode(' 狭い画面のときに断り書きを出す'));
-    wlabel.title = '幅が 360px より狭いと出ます。「OK」を押すと切れます ── ここで戻せます。';
+    wlabel.title = '幅が 360px より狭いと出ます。「OK」を押すと切れます。ここで戻せます。';
     wd.append(wlabel);
     wd.append(buildSettingsNote('幅が狭いときに「表示が崩れることがあります」と出します。'));
     const tooNarrowDl = document.createElement('dl');

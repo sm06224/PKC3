@@ -28,7 +28,7 @@ describe('OSS 表記(純粋関数)', () => {
     expect(line).toContain(OSS_DEVELOPER);
     expect(line).toContain(OSS_AI_COAUTHOR);
     // ⚠ 実名は出さない(裁定)── 開発者名の行に "sm06224" 以外の固有名を持ち込まない
-    expect(line).toBe(`開発: ${OSS_DEVELOPER} ── ${OSS_AI_COAUTHOR}`);
+    expect(line).toBe(`開発: ${OSS_DEVELOPER} / ${OSS_AI_COAUTHOR}`);
   });
 
   it('GitHub への導線は裁定済みの URL そのまま', () => {

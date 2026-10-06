@@ -134,7 +134,7 @@ export async function importMarkdownFiles(
   deps.report?.(notes);
   deps.notify?.(
     notes.length > 0
-      ? `取込完了: ${rows.length} 件 ⚠ 注意 ${notes.length} 件`
+      ? `取込完了: ${rows.length} 件(注意 ${notes.length} 件)`
       : `取込完了: ${rows.length} 件`,
   );
   return rows.length;

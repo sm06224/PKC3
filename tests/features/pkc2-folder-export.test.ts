@@ -312,7 +312,7 @@ describe('readFolderExportBundle', () => {
     );
     const got = await readFolderExportBundle(zip);
     // 重複自体と、所属を復元できなかったことの**両方**を言う
-    expect(got.warnings.some((w) => /中身の lid が .* と同じです/.test(w))).toBe(true);
+    expect(got.warnings.some((w) => /中身の ID が .* と同じです/.test(w))).toBe(true);
     expect(
       got.warnings.some((w) => /フォルダ所属を復元できません/.test(w)),
     ).toBe(true);
@@ -367,7 +367,7 @@ describe('readFolderExportBundle', () => {
     // 階層は保たれる ── 2026 は root の下、子ノートは 2026 の下
     expect(t[byTitle.get('2026')!]).toBe(byTitle.get('仕事'));
     expect(t[byTitle.get('子ノート')!]).toBe(byTitle.get('2026'));
-    expect(got.warnings.some((w) => /lid がぶつかっています/.test(w))).toBe(true);
+    expect(got.warnings.some((w) => /ID がぶつかっています/.test(w))).toBe(true);
   });
 
   it('🔴 lid の無いフォルダだけの書出しは断る(0 件で成功に見せない)', async () => {
@@ -400,7 +400,7 @@ describe('readFolderExportBundle', () => {
       [],
     );
     const got = await readFolderExportBundle(zip);
-    expect(got.warnings.some((w) => /親 lid が文字列ではありません/.test(w))).toBe(true);
+    expect(got.warnings.some((w) => /親 ID が文字列ではありません/.test(w))).toBe(true);
   });
 
   it('other_count も照合する(宣言だけして読まないのは PKC2 の振る舞い / review M-5)', async () => {

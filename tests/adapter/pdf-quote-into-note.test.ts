@@ -110,8 +110,8 @@ describe('quoteIntoNote', () => {
     expect(ev[0]?.target).toBeNull(); // 末尾
     ackOk(g.d, 'memo');
     const r = await p;
-    expect(r).toEqual({ ok: true, message: '「メモ」の末尾へ引きました(7 頁)' });
-    expect(g.notes).toEqual(['「メモ」の末尾へ引きました(7 頁)']);
+    expect(r).toEqual({ ok: true, message: '「メモ」の末尾へ引用しました(7 頁)' });
+    expect(g.notes).toEqual(['「メモ」の末尾へ引用しました(7 頁)']);
   });
 
   it('結びついたノートが無ければ、添付のノート自身へ追記する', async () => {
@@ -167,7 +167,7 @@ describe('quoteIntoNote', () => {
     ackOk(g.d, 'att');
     expect((await p).ok).toBe(true);
     expect(settled).toBe(true);
-    expect(g.notes).toEqual(['「添付題」の末尾へ引きました(1 頁)']);
+    expect(g.notes).toEqual(['「添付題」の末尾へ引用しました(1 頁)']);
   });
 
   it('🔴 追記が失敗した(APPEND_FAILED)なら、理由を返し、「引きました」とは言わない', async () => {

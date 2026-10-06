@@ -369,7 +369,7 @@ export async function exportArchive(
       name = `${base}.html`;
       // ⚠ **可逆ではない**ことをその場で言う(後から見分けられない形にしない ──
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
-      detail = `${out.counts.entries} 件(添付 ${out.counts.assets})── 閲覧用(取り込み直せません)`;
+      detail = `${out.counts.entries} 件(添付 ${out.counts.assets})、閲覧用(取り込み直せません)`;
     } else {
       /**
        * 🔴 **『バックアップ』『Markdown』は、保存領域に問題があるとき自動で
@@ -392,10 +392,10 @@ export async function exportArchive(
           //    どこにも書かれていない。⚠ 減らすのではなく**言う**のが裁定 A である
           const assetsText =
             md.counts.historyAssets > 0
-              ? `添付 ${md.counts.assets}(うち控え ${md.counts.historyAssets})`
+              ? `添付 ${md.counts.assets}(うち過去の版 ${md.counts.historyAssets})`
               : `添付 ${md.counts.assets}`;
           detail =
-            `${md.counts.entries} 件(${assetsText})── 片道` +
+            `${md.counts.entries} 件(${assetsText})、片道` +
             (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '(取り込み直せません)');
         } else {
           out = await writeArchive(deps.source, iso);
@@ -446,7 +446,7 @@ export async function exportArchive(
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     deps.notify?.(
       notes.length > 0
-        ? `書き出しました: ${detail} ⚠ 注意 ${notes.length} 件`
+        ? `書き出しました: ${detail}(注意 ${notes.length} 件)`
         : `書き出しました: ${detail}`,
     );
     return out.counts.entries;
@@ -559,7 +559,7 @@ async function collectOfficeBlocks(
     (k) => deps.source.getAssetBlob(k),
     collectFenceAssetKeys(body.slice(skip)),
     (k, why) =>
-      warnings.push(`コードブロックが指している添付を焼き込めませんでした(${k}): ${why}`),
+      warnings.push(`コードブロックが指している添付を埋め込めませんでした(${k}): ${why}`),
   );
   const rendered = await renderBody(body.slice(skip), {
     vars: extractVars(body),
@@ -735,7 +735,7 @@ async function exportEntryOffice(
   // ⚠ **知らせを出す前に断る** ── 「書き出しています…」の直後に断り文が出ると、
   //    user には「途中で失敗した」に見える(実際は 1 バイトも読んでいない)
   const renderBody = deps.renderBody;
-  if (!renderBody) return fail('本文を組み立てられませんでした(描画する機能が渡っていません)');
+  if (!renderBody) return fail('本文を作れませんでした(描画する機能が渡っていません)');
   deps.notify?.(`${target.app} で書き出しています…`);
   progressShown = true;
   try {
@@ -771,7 +771,7 @@ async function exportEntryOffice(
     const how =
       'slides' in built.counts
         ? `${built.counts.slides} 枚 / 画像 ${built.counts.images} 枚`
-        : `${built.counts.blocks} 塊 / 画像 ${built.counts.images} 枚`;
+        : `${built.counts.blocks} ブロック / 画像 ${built.counts.images} 枚`;
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(結果は進行中の終わりでもある)
     deps.notify?.(`${target.app} で書き出しました(${how})`);
     return true;

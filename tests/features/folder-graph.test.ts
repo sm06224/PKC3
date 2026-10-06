@@ -131,7 +131,7 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     const r = buildFolderGraph([F('root', null, '一つ目'), F('root', 'x', '二つ目')], new Map());
     expect(r.entries).toHaveLength(1);
     expect(r.entries[0]!.title).toBe('一つ目');
-    expect(r.warnings[0]).toMatch(/同じ lid のフォルダが 2 つ/);
+    expect(r.warnings[0]).toMatch(/同じ ID のフォルダが 2 つ/);
   });
 
   it('親フォルダが書出しに無いときは最上位へ寄せて言う(平坦化しない)', () => {
@@ -148,7 +148,7 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     const r = buildFolderGraph([F('root', null)], new Map([['n1', 'いない']]));
     expect(r.edges).toEqual([]);
     expect(r.warnings).toEqual([
-      'ノートの親フォルダが書出しに含まれていません(いない)── n1 を最上位に置きます',
+      'ノートの親フォルダが書出しに含まれていません(いない)。n1 を最上位に置きます',
     ]);
   });
 
@@ -157,13 +157,13 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     // なっていることが実際にある ──「含まれていません」は事実と違う
     const r = buildFolderGraph([F('root', null)], new Map([['n2', 'n1']]), new Set(['n1']));
     expect(r.warnings).toEqual([
-      'ノートの親がフォルダではありません(n1)── n2 を最上位に置きます',
+      'ノートの親がフォルダではありません(n1)。n2 を最上位に置きます',
     ]);
   });
 
   it('lid の無いフォルダは無視して言う', () => {
     const r = buildFolderGraph([F('', null)], new Map());
     expect(r.entries).toEqual([]);
-    expect(r.warnings).toEqual(['lid の無いフォルダを無視しました']);
+    expect(r.warnings).toEqual(['ID の無いフォルダを無視しました']);
   });
 });

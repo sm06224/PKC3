@@ -501,7 +501,7 @@ describe('md ZIP — 添付の控え(過去の版)', () => {
     // ⚠ **いまの版は数えない** ── 台帳に載っているのは「過去の版」だけである
     expect(out.counts.historyAssets, '控えの件数が出ていない').toBe(2);
     expect(
-      out.warnings.some((w) => w.includes('控え') && w.includes('2 件')),
+      out.warnings.some((w) => w.includes('過去の版') && w.includes('2 件')),
       '控えを含むことを画面に出していない',
     ).toBe(true);
     // manifest からも読める(外から理由が分かる形)

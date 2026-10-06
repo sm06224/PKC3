@@ -215,7 +215,7 @@ export class ContactsRenderer {
     if (scan === null) return '連絡先を集めています…';
     if (scan.cards.length === 0)
       return '連絡先はまだありません。ノートの先頭に tel: か email: を書くと、ここに並びます。';
-    if (shown === 0) return '絞り込みに当たる連絡先がありません';
+    if (shown === 0) return '絞り込みに一致する連絡先がありません';
     const cut = scan.truncated ? '(多いので途中まで集めました)' : '';
     return `${shown} 件${cut}`;
   }

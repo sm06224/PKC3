@@ -755,7 +755,7 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'edit-section', label: 'この章を編集する' },
   { action: 'edit-from-heading', label: 'ここから編集する' },
   { action: 'append-at-heading', label: 'ここに追記する' },
-  { action: 'toggle-heading-fold', label: 'この見出しの中身を畳む' },
+  { action: 'toggle-heading-fold', label: 'この見出しの中身を折りたたむ' },
   /**
    * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
    * ⚠ 下の「章の参照をコピー」とは別物 ── こちらは**記法を増やさない**。
@@ -823,7 +823,7 @@ export function headingMenuActions(ctx: {
   if (ctx.foldable) {
     out.push({
       action: 'toggle-heading-fold',
-      label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を畳む',
+      label: ctx.folded ? 'この見出しの中身を出す' : 'この見出しの中身を折りたたむ',
     });
     /**
      * 🔴 **章の範囲は畳みと同じ計算**(#677)── 「次の同段以上の見出しの手前まで」を
@@ -874,7 +874,7 @@ export function blockMenuActions(ctx: {
   /** 🔴 色の札(`fill=` / `stroke=`)が書かれているか(#530 段④。読めない値も数える)。 */
   readonly styled?: boolean;
 }): readonly EntryAction[] {
-  if (!ctx.board) return [{ action: 'copy-block-md', label: 'この塊をコピー' }];
+  if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
    * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
    *   2026-08-23「片道の操作を作らない」)。⚠ 消すは取り消せないので**確認を挟む**
@@ -1183,7 +1183,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':
-    '中のノートと添付を保存します(.pkc3-notes.zip)。取り込み直せます(外へ繋がる関係は入りません)',
+    '中のノートと添付を保存します(.pkc3-notes.zip)。取り込み直せます(外へつながる関係は入りません)',
   // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
   //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
@@ -1197,7 +1197,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // ⚠ **起きることを書く**(user 指示 2026-08-21「画面で何が起きるかで書く」)──
   //    押すと**ブラウザの印刷画面**が開く。PDF にするかはそこで user が選ぶ
   'export-entry-pdf':
-    '紙の形に組んでブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます',
+    '印刷用に整えてブラウザの印刷画面を開きます。そこで「PDF として保存」を選べます',
   // 🔴 **押すと外へ通信する**ことを先に言う(user 指示 2026-08-21「画面で何が起きるかで書く」)
   //    ⚠ 「取り込みます」だけだと、**押した瞬間に相手のサーバーへ要求が飛ぶ**ことが読めない
   'adopt-external-images':
@@ -1215,7 +1215,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
    * ⚠ 帯の名前(スタック)と押す字を**同じ語**にする ── 違うと、帯に並んだ物と
    *   押した物の対応が読めない。説明は**押した後に画面で起きること**で書く。
    */
-  'pin-split': '一番上に載って横の枠に出ます。上の帯に並び、押せば一番上へ戻せます',
+  'pin-split': '一番上に載って横の枠に出ます。上のバーに並び、押せば一番上へ戻せます',
   // 🔴 保存したスタックを載せる(#633 段③)── 積む(入れ替えない)ことと、消えた物の扱いを先に言う
   'stack-load': 'このノートに並んだリンク先を、いま横に出ている物の上に積みます(消えた物は数えて言います)',
   // 🔴 **本文の上のボタンと同じ字**(#1038 台帳③ C1)── 押した後に起きることは同じ
@@ -1228,7 +1228,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    焦っている場面で、案内された先に戻す物が無い ── しかも 2 ペインには
   //    **同じ名前で逆の操作**(選んだ物をゴミ箱へ入れる)が在る。
   //    🔑 字はマニュアル「フォルダに入れる・出す・並べ替える」に揃える。
-  'delete-entry': 'ゴミ箱へ移します(左の列の「フォルダ」タブの中のゴミ箱から戻せます)',
+  'delete-entry': 'ゴミ箱へ移します(左のペインの「フォルダ」タブの中のゴミ箱から戻せます)',
   /**
    * 🔴 **表の形を変える 2 つ**(#708 段②)。⚠ **何が変わるか**を書く ──
    *   csv の表は升を押して打てるが、markdown の表は本文の字をそのまま読める。
@@ -1279,7 +1279,7 @@ function middleEllipsis(name: string, max: number): string {
  *   何を上書きするか(名前)と、戻せないこと、確かめの窓の 3 つが全部 2 行に収まる
  *   (固定 40 字 / 名前に 16 字)。「このノートの内容で」は操作の名(書き戻す)が既に言っている。
  */
-const WRITE_BACK_FRAME = '元のファイル()を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)';
+const WRITE_BACK_FRAME = '元のファイル()を上書きします。元の内容は戻せません(押すと確かめのウィンドウが出ます)';
 
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
   if (action === 'write-back-file') {
@@ -1292,7 +1292,7 @@ export function entryActionHint(action: string, ctx: EntryMenuContext): string {
      * 🔑 だから名前のほうを縮める(頭と尻を残す)── 言うべきことは必ず残る。
      */
     const room = ENTRY_ACTION_HINT_MAX - WRITE_BACK_FRAME.length;
-    return `元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を上書きします。元の内容は戻せません(押すと確かめの窓が出ます)`;
+    return `元のファイル(${middleEllipsis(ctx.linkedFile ?? '', room)})を上書きします。元の内容は戻せません(押すと確かめのウィンドウが出ます)`;
   }
   return ENTRY_ACTION_HINTS[action] ?? '';
 }

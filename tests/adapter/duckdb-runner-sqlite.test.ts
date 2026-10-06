@@ -305,7 +305,7 @@ describe('🔴 1 表の失敗は、その表だけ ── ほかの表は引け�
       msg = e instanceof Error ? e.message : String(e);
     });
     expect(msg, 'DuckDB の断りが消えている').toContain('does not exist');
-    expect(msg, '写せなかった表の理由が添わない').toContain('大きい は DuckDB へ写せませんでした');
+    expect(msg, '写せなかった表の理由が添わない').toContain('大きい は DuckDB へコピーできませんでした');
     expect(msg).toContain('64.0 MB');
     expect(msg, '内蔵の sqlite という逃げ道を案内していない').toContain('内蔵の sqlite');
   });
@@ -325,7 +325,7 @@ describe('🔴 1 表の失敗は、その表だけ ── ほかの表は引け�
       msg = e instanceof Error ? e.message : String(e);
     });
     expect(msg).toContain('Parser Error');
-    expect(msg).toContain('大きい は DuckDB へ写せませんでした');
+    expect(msg).toContain('大きい は DuckDB へコピーできませんでした');
   });
 
   it('🔴 器を入れ直すと、前の器の理由は持ち越さない(別の相手を引く回に出ない)', async () => {
@@ -385,7 +385,7 @@ describe('🔴 1 表の失敗は、その表だけ ── ほかの表は引け�
     await runner.run({ sql: 'SELECT * FROM 壊れ', sources: sources() }).catch((e: unknown) => {
       msg = e instanceof Error ? e.message : String(e);
     });
-    expect(msg).toContain('壊れ は DuckDB へ写せませんでした');
+    expect(msg).toContain('壊れ は DuckDB へコピーできませんでした');
     // 理由の 1 行目だけ(DuckDB の複数行の断りをそのまま画面へ流さない)
     expect(msg).toContain('DuckDB が読めませんでした: Invalid Input Error: broken');
     expect(msg).not.toContain('LINE 1');
@@ -414,12 +414,12 @@ describe('🔴 読めない回は理由つきで断る(外が開いたままの�
     });
     await expect(
       runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] }),
-    ).rejects.toThrow('この版では .sqlite を DuckDB で引けません');
+    ).rejects.toThrow('このバージョンでは .sqlite を DuckDB で実行できません');
   });
 
   it('🔴 file そのものが DB として読めなければ、worker の断りがそのまま画面へ出る', async () => {
     const { runner } = make({}, undefined, {
-      exportSqlite: () => Promise.reject(new Error('この file は sqlite の DB として読めませんでした(file is not a database)')),
+      exportSqlite: () => Promise.reject(new Error('このファイルは sqlite の DB として読めませんでした(ファイル is not a database)')),
     });
     await expect(
       runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '壊れ.sqlite'), 1)] }),
@@ -545,7 +545,7 @@ describe('🔴 写せなかった理由は、器と同じ寿命(別の失敗に�
       msg = e instanceof Error ? e.message : String(e);
     });
     expect(msg).toContain('Failed to fetch');
-    expect(msg, 'もう無い器の理由が別の失敗に付いている').not.toContain('写せませんでした');
+    expect(msg, 'もう無い器の理由が別の失敗に付いている').not.toContain('コピーできませんでした');
   });
 
   it('⚠ 対照群 ── 器が生きている間は、2 回目以降の失敗にも理由を添える(最初の 1 回だけにしない)', async () => {
@@ -558,7 +558,7 @@ describe('🔴 写せなかった理由は、器と同じ寿命(別の失敗に�
     await runner.run({ sql: 'SELECT * FROM 大きい', sources: s }).catch((e: unknown) => {
       msg = e instanceof Error ? e.message : String(e);
     });
-    expect(msg).toContain('大きい は DuckDB へ写せませんでした');
+    expect(msg).toContain('大きい は DuckDB へコピーできませんでした');
   });
 
   it('🔴 構造を採る回(schema)から入っても同じ ── 畳まれた後に落ちた回へ、前の理由を添えない', async () => {
@@ -581,7 +581,7 @@ describe('🔴 写せなかった理由は、器と同じ寿命(別の失敗に�
       msg = e instanceof Error ? e.message : String(e);
     });
     expect(msg).toContain('Failed to fetch');
-    expect(msg).not.toContain('写せませんでした');
+    expect(msg).not.toContain('コピーできませんでした');
   });
 });
 
@@ -607,7 +607,7 @@ describe('🔴 表を作れない / 型へ写すと値が変わる ── その
     await r2.run({ sql: 'SELECT 1', sources: sources() }).catch((e: unknown) => {
       msg = e instanceof Error ? e.message : String(e);
     });
-    expect(msg).toContain('(名前の無い表) は DuckDB へ写せませんでした');
+    expect(msg).toContain('(名前の無い表) は DuckDB へコピーできませんでした');
     expect(msg).toContain('DuckDB が表を作れませんでした: Parser Error: zero-length delimited identifier');
   });
 
@@ -657,7 +657,7 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
     expect(ran.copy.refused).toEqual([
       { name: '大きい', view: false, why },
       // 🔴 ビューは写さない ── 写さなかったと言う(直す前は、どこにも出なかった)
-      { name: '見出し', view: true, why: 'ビューは写しません' },
+      { name: '見出し', view: true, why: 'ビューはコピーしません' },
     ]);
     expect(ran.copy.sqlite, '.sqlite を写したと言っていない').toBe(true);
     // 構造を採る回(つながり図・構造ノート)も同じ報告を返す(同じ器の控え)
@@ -675,7 +675,7 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
   it('🔴 全文検索の仮想表は「写せなかった表」に名前つきで載る(1 件は元の名前 / 2 件以上は ファイル名_表名)。器には作らない', async () => {
     const one = make({ '1': [withRows('小さい')] }, () => undefined, {}, {}, { '1': ['docs'] });
     const ran = await one.runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] });
-    expect(ran.copy.refused).toEqual([{ name: 'docs', view: false, why: '全文検索の表は写しません' }]);
+    expect(ran.copy.refused).toEqual([{ name: 'docs', view: false, why: '全文検索の表はコピーしません' }]);
     expect(
       (one.made[0]?.steps ?? []).some((x) => x.includes('"docs"')),
       '写さない表を器に作っている',
@@ -685,7 +685,7 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
       sql: 'SELECT 1',
       sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
     });
-    expect(two.copy.refused).toEqual([{ name: '家計_docs', view: false, why: '全文検索の表は写しません' }]);
+    expect(two.copy.refused).toEqual([{ name: '家計_docs', view: false, why: '全文検索の表はコピーしません' }]);
   });
 
   it('🔴 その表を引いて落ちた回の断り文にも、名前と逃げ道が添わる', async () => {
@@ -698,7 +698,7 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
       .catch((e: unknown) => {
         msg = e instanceof Error ? e.message : String(e);
       });
-    expect(msg).toContain('docs は DuckDB へ写せませんでした(全文検索の表は写しません。内蔵の sqlite なら引けます)');
+    expect(msg).toContain('docs は DuckDB へコピーできませんでした(全文検索の表はコピーしません。内蔵の sqlite なら実行できます)');
   });
 
   it('対照群:写せなかった物が無ければ空 / csv だけなら .sqlite を写したとは言わない', async () => {
@@ -716,7 +716,7 @@ describe('🔴 写した報告(copy)── 写せなかった表・ビュー・�
       sql: 'SELECT 1',
       sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
     });
-    expect(ran.copy.refused).toEqual([{ name: '家計_月別', view: true, why: 'ビューは写しません' }]);
+    expect(ran.copy.refused).toEqual([{ name: '家計_月別', view: true, why: 'ビューはコピーしません' }]);
   });
 
   it('🔴 全列を文字で写した表の名前が載る(最初から旗が立っていた表 / 型が合わず作り直した表。入らず断った表は載らない)', async () => {
@@ -774,7 +774,7 @@ describe('🔴 逃げ道の字は、並べているかで変わる(D7)', () => {
   it('🔴 1 件だけなら「内蔵の sqlite なら引けます」', async () => {
     const { runner } = make({ '1': [refused('大きい', why)] }, fails);
     const msg = await msgOf(runner.run({ sql: 'SELECT 9', sources: [input(src('l1', '家計.sqlite'), 1)] }));
-    expect(msg).toContain('内蔵の sqlite なら引けます');
+    expect(msg).toContain('内蔵の sqlite なら実行できます');
     expect(msg).not.toContain('1 つに戻す');
   });
 
@@ -786,15 +786,15 @@ describe('🔴 逃げ道の字は、並べているかで変わる(D7)', () => {
         sources: [input(src('l1', '家計.sqlite'), 1), input(src('l2', '在庫.csv'), 9)],
       }),
     );
-    expect(msg).toContain('file を 1 つに戻すと内蔵の sqlite で引けます');
-    expect(msg, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら引けます');
+    expect(msg).toContain('ファイルを 1 つに戻すと内蔵の sqlite で実行できます');
+    expect(msg, '並べているのに、押せない道を案内している').not.toContain('内蔵の sqlite なら実行できます');
   });
 
   it('🔴 超えた理由の字は file の大きさではなく「写した行」の大きさ(35 MB の file でも出るので)', async () => {
     const { runner } = make({ '1': [refused('大きい', why)] }, fails);
     const msg = await msgOf(runner.run({ sql: 'SELECT 9', sources: [input(src('l1', '家計.sqlite'), 1)] }));
-    expect(msg).toContain('写した行が 64.0 MB を超えました');
-    expect(msg).toContain('元の file より大きくなることがあります');
+    expect(msg).toContain('コピーした行が 64.0 MB を超えました');
+    expect(msg).toContain('元のファイルより大きくなることがあります');
   });
 });
 

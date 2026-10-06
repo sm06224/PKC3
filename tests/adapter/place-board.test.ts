@@ -377,7 +377,7 @@ describe('板どうしを繋ぐ線(#530 段③a)', () => {
     const host = board(LINES.replace('data-pkc-to="b"', 'data-pkc-to="a.b"'));
     const note = host.querySelector('[data-pkc-field="place-line-note"]');
     expect(note?.textContent, '名前の綴りの断りが出ていない').toBe(
-      '線が引けません:名前に「a.b」は使えません ── 空白・記号(. = { } " \')・数で始まる名前は使えません。日本語は使えます',
+      '線が引けません:名前に「a.b」は使えません。空白・記号(. = { } " \')・数で始まる名前は使えません。日本語は使えます',
     );
   });
 

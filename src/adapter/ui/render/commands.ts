@@ -305,7 +305,7 @@ function buildContainerRepair(): DocumentFragment {
   const intro = document.createElement('p');
   intro.setAttribute('data-pkc-field', 'container-repair-note');
   intro.textContent =
-    `どちらも、押しただけでは何も起きません ── 何が起きるかを出して、もう一度聞きます。先に左下の「${BACKUP_LABEL}」を押して手元に控えておくと、より安全です。`;
+    `どちらも、押しただけでは何も起きません。何が起きるかを出して、もう一度聞きます。先に左下の「${BACKUP_LABEL}」を押して手元に控えておくと、より安全です。`;
   box.append(intro);
 
   /**
@@ -316,7 +316,7 @@ function buildContainerRepair(): DocumentFragment {
   const rebuildNote = document.createElement('p');
   rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
   rebuildNote.textContent =
-    'ノートと添付を残したまま、入れ物だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へ落とし、そのあと同じ中身で戻します。落とせなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士に付けた関係・履歴(前の版)は戻りません。';
+    'ノートと添付を残したまま、入れ物だけ作り直します。押すと、まず読めるノートをファイル(.pkc3.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士に付けた関係・履歴(前の版)は戻りません。';
   box.append(rebuildNote);
 
   const rebuild = document.createElement('button');
@@ -376,14 +376,14 @@ export function buildSettingsFile(): HTMLElement {
   const box = document.createElement('section');
   box.setAttribute('data-pkc-region', 'settings-file');
   const h = document.createElement('h4');
-  h.textContent = '設定の持ち出し';
+  h.textContent = '設定の書き出し';
   h.title = '見た目・ショートカットキーの割り当て・ページ設定などを、別の端末へ持っていきます(ノートは移りません)';
   box.append(h);
 
   const note = document.createElement('p');
   note.setAttribute('data-pkc-field', 'settings-file-note');
   note.textContent =
-    '見た目・ペインの畳み方・編集の仕方・ページ設定・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
+    '見た目・ペインの折りたたみ方・編集の仕方・ページ設定・ショートカットキーの割り当てなどを 1 つのファイルにします。ノートは入りません。許可とフラグとお知らせの既読は、その端末のものなので持っていきません。';
   box.append(note);
 
   const row = document.createElement('div');

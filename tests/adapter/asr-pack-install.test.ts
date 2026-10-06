@@ -238,7 +238,7 @@ describe('AsrPackInstaller.install', () => {
     const fs = fakeStore();
     const r = await installer(w, fs).install('accurate');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.message).toMatch(/まだ配っていません/);
+    if (!r.ok) expect(r.message).toMatch(/まだ配布していません/);
     expect(fileFetches(w)).toEqual([]);
     expect(fs.calls).toEqual([]);
   });
@@ -248,7 +248,7 @@ describe('AsrPackInstaller.install', () => {
     const f: FetchLike = () => Promise.resolve(new Response('nf', { status: 404 }));
     const r = await new AsrPackInstaller({ store: fs.store, base: '/asr-pack/', fetchFn: f }).install('light');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.message).toMatch(/まだ配っていません/);
+    if (!r.ok) expect(r.message).toMatch(/まだ配布していません/);
   });
 
   it('🔴 進み具合を必ず流す ── 増えていき、終わったら空へ戻る', async () => {

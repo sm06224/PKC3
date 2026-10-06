@@ -446,7 +446,7 @@ describe('Word の画像(#187 段②)', () => {
     expect(text, 'zip に画像が入っていない').toContain('word/media/image1.png');
     // ⚠ VML なので `r:id`(#238 で DrawingML から移した)
     expect(text, 'document が画像を指していない').toContain('r:id="rIdM1"');
-    expect(text, '本文が「写せませんでした」のまま').not.toContain('写せませんでした');
+    expect(text, '本文が「写せませんでした」のまま').not.toContain('コピーできませんでした');
   });
 
   it('🔴 bytes が取れなければ、理由を残して本文を続ける(黙って消さない)', async () => {
@@ -455,7 +455,7 @@ describe('Word の画像(#187 段②)', () => {
     expect(await exportEntryDocx(dispatcher, d, 'n1')).toBe(true);
     const text = await got[0]!.text();
     expect(text).not.toContain('word/media/');
-    expect(text, '落ちたことがどこにも書かれていない').toContain('写せませんでした');
+    expect(text, '落ちたことがどこにも書かれていない').toContain('コピーできませんでした');
   });
 
   it('🔴 大きさが読めなければ入れない(潰れた図を出さない)', async () => {
@@ -784,7 +784,7 @@ describe('PowerPoint の出口(#187 段⑤)', () => {
     expect(text, 'スライドが画像を指していない').toContain('<a:blip r:embed=');
     // 🔴 目録に宣言が無いと PowerPoint は **file ごと拒む**
     expect(text, 'png の宣言が無い').toContain('<Default Extension="png"');
-    expect(text, '本文が「写せませんでした」のまま').not.toContain('写せませんでした');
+    expect(text, '本文が「写せませんでした」のまま').not.toContain('コピーできませんでした');
   });
 
   /**
@@ -940,7 +940,7 @@ describe('Word / PowerPoint — 読めなかった添付の注意(#636)', () => 
     expect(
       notes[0]!.filter((n) => n.includes('ast-miss')),
       '読めなかった添付が注意に出ていない',
-    ).toEqual(['コードブロックが指している添付を焼き込めませんでした(ast-miss): その添付が見つかりません']);
+    ).toEqual(['コードブロックが指している添付を埋め込めませんでした(ast-miss): その添付が見つかりません']);
   });
 
   /**

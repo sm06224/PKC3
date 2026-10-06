@@ -345,7 +345,7 @@ export class PdfReaderHost {
           }
         };
         void this.deps.onQuote(live.session, text, page).then(reply, () =>
-          reply({ ok: false, message: 'ノートへ引けませんでした。もう一度押してください' }),
+          reply({ ok: false, message: 'ノートへ引用できませんでした。もう一度押してください' }),
         );
         return;
       }

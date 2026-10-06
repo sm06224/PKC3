@@ -93,7 +93,7 @@ describe('構造 1 枚を組む', () => {
 
   it('⚠ 繋がりが 0 件なら、その見出しごと出さない', () => {
     const out = renderSchemaDigest({ source: 'x', columns: COLS, fks: grid(['tbl'], []) });
-    expect(out).not.toContain('表どうしの繋がり');
+    expect(out).not.toContain('表どうしのつながり');
   });
 });
 
@@ -228,7 +228,7 @@ describe('段① の字と模型が食い違わない', () => {
     const input = { source: 'x', columns: COLS, fks: FKS, counts: COUNTS };
     const m = schemaModel(input);
     const out = renderSchemaDigest(input);
-    const heads = out.split('\n').filter((l) => l.startsWith('## ') && l !== '## 表どうしの繋がり');
+    const heads = out.split('\n').filter((l) => l.startsWith('## ') && l !== '## 表どうしのつながり');
     expect(heads.length, '見出しの数が模型の表の数と違う').toBe(m.tables.length);
     for (const t of m.tables) {
       const kind = t.kind === 'view' ? 'ビュー' : '表';
@@ -275,30 +275,30 @@ describe('段① の字と模型が食い違わない', () => {
 
 ## entries(表・3 行)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | lid | TEXT | 不可 | 主キー |
 | title | TEXT | 可 |  |
 
 ## tags(表・0 行)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | name | (型なし) | 可 |  |
 
 ## recent(ビュー)
 
-| 列 | 型 | 空を許すか | 鍵 |
+| 列 | 型 | 空を許すか | キー |
 |---|---|---|---|
 | lid | TEXT | 可 |  |
 
-## 表どうしの繋がり
+## 表どうしのつながり
 
 - tags.lid → entries.lid
 
 ---
 
-⚠ ここに在るのは構造だけです(中身は 1 行も含まれていません)。`,
+ここにあるのは構造だけです(中身は 1 行も含まれていません)。`,
     );
   });
 });

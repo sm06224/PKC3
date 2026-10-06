@@ -182,7 +182,7 @@ export class QueryRenderer {
      * 数えられない環境で「集計を数えています…」が**永久に出続ける**。
      */
     if (state.queryFailed) {
-      note.textContent = 'この版では集計を数えられませんでした(読み込み直すと直ることがあります)';
+      note.textContent = 'このバージョンでは集計を数えられませんでした(読み込み直すと直ることがあります)';
       return;
     }
     if (keys === null) parts.push('集計を数えています…');

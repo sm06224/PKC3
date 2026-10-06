@@ -82,7 +82,7 @@ export async function fetchAsrManifest(
     throw new AsrPackError(`取得元に届きません: ${url}`);
   }
   if (res.status === 404) {
-    throw new AsrPackError('音声認識の部品を、このサイトの配布元がまだ配っていません。');
+    throw new AsrPackError('音声認識の部品を、このサイトの配布元がまだ配布していません。');
   }
   if (!res.ok) throw new AsrPackError(`取得元に部品がありません(HTTP ${res.status}): ${url}`);
   const parsed = readAsrPack(await res.text());
@@ -165,7 +165,7 @@ async function fetchOne(
   //   「取れた」と言わない)
   if (blob.size !== file.bytes) {
     throw new AsrPackError(
-      `${file.path} の大きさが目録と違います(目録 ${file.bytes} byte / 実際 ${blob.size} byte。取り直してください)`,
+      `${file.path} の大きさが構成ファイルと違います(構成ファイル ${file.bytes} byte / 実際 ${blob.size} byte。取得し直してください)`,
     );
   }
   /**
@@ -178,7 +178,7 @@ async function fetchOne(
   if (blob.size <= SHA_VERIFY_MAX_BYTES) {
     const got = await sha256Hex(blob);
     if (got !== file.sha256) {
-      throw new AsrPackError(`${file.path} の中身が目録と違います(取り直してください)`);
+      throw new AsrPackError(`${file.path} の中身が構成ファイルと違います(取得し直してください)`);
     }
   }
   return blob;

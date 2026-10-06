@@ -156,7 +156,7 @@ export async function folderSource(
   );
   if (dangling.length > 0) {
     warnings.push(
-      `このフォルダの外へ繋がる関連 ${dangling.length} 件は含まれません(相手のノートが入らないため)`,
+      `このフォルダの外へつながる関連 ${dangling.length} 件は含まれません(相手のノートが入らないため)`,
     );
   }
 

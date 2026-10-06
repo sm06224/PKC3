@@ -146,7 +146,7 @@ export function parsePlan(text: string, known: ReadonlyMap<string, EntryMeta>): 
     if (head === 'mv') {
       const w = words(rest);
       if (w.length === 0) {
-        errors.push({ line, message: 'mv は「mv <lid> <行き先>」の形で書いてください' });
+        errors.push({ line, message: 'mv は「mv <ID> <行き先>」の形で書いてください' });
         return;
       }
       const lid = w[0]!;
@@ -173,7 +173,7 @@ export function parsePlan(text: string, known: ReadonlyMap<string, EntryMeta>): 
       const w = words(rest);
       const lid = w[0];
       if (lid === undefined) {
-        errors.push({ line, message: 'rename は「rename <lid> "<新しい題名>"」の形で書いてください' });
+        errors.push({ line, message: 'rename は「rename <ID> "<新しい題名>"」の形で書いてください' });
         return;
       }
       if (!known.has(lid)) {

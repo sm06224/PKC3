@@ -420,7 +420,7 @@ describe('タイル設定の ack(段㉕)', () => {
     h.d.dispatch({ type: 'SET_APP_TILE', lid: 'a1', registered: true });
     await tick(30);
     expect(h.d.getState().error ?? '', '読み直しの失敗を書込の失敗として出している').toMatch(
-      /一覧を読み直せません/,
+      /一覧を再読み込みできません/,
     );
   });
 });

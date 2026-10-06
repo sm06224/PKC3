@@ -174,14 +174,14 @@ export function sqlEmbedAnswerHtml(
  * 引いている間も「何かが来る」と分かるようにする。⚠ 器は**引けなかったときの 1 行と同じ**
  * (`sql-embed-note`)── 見た目の規則を 2 つ持たない。
  */
-export const SQL_EMBED_PENDING_TEXT = '答えを引いています…';
+export const SQL_EMBED_PENDING_TEXT = '答えを実行しています…';
 export function sqlEmbedPendingHtml(): string {
   return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(SQL_EMBED_PENDING_TEXT)}</p>`;
 }
 
 /** 引けなかったときの 1 行(原文のコード枠はそのまま残る)。 */
 export function sqlEmbedFailureHtml(why: string): string {
-  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`答えを引けませんでした: ${why}`)}</p>`;
+  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`答えを実行できませんでした: ${why}`)}</p>`;
 }
 
 /** 器の HTML を取り出す正規表現。⚠ `sqlEmbedHostHtml` が組む形と**同じ綴り**(門は test)。 */

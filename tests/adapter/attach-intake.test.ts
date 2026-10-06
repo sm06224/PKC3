@@ -812,7 +812,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
     expect(rows[i - 2] ?? rows[i - 1], '「牛乳」の下に入っていない').toBe('牛乳');
     expect(rows.indexOf('パン'), '「パン」の下(= 末尾寄り)へ落ちた').toBeGreaterThan(i);
     // ⚠ **どこに入ったかを字で言う**(押した場所と文言が対 ── 着地前レビュー G)
-    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('ドロップした所');
   });
 
   /**
@@ -849,7 +849,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK);
     await tick();
     const said = h.d.getState().notice ?? '';
-    expect(said, '入った知らせが出ていない(空振り)').toContain('落とした所に入れました');
+    expect(said, '入った知らせが出ていない(空振り)').toContain('ドロップした所に入れました');
     expect(said, '枠を使わない user にまで名前が出ている').not.toContain('『買い物メモ』');
   });
 
@@ -1178,7 +1178,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     await tick();
     expect(h.disks.n1!.includes('!['), '開いているノートへ入っていない').toBe(true);
     expect(h.d.getState().notice ?? '', '1 つしか見ていないのに名前が出た').not.toContain('『');
-    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('落とした所');
+    expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('ドロップした所');
     // ⚠ 開いているノート自身へ入れた回は道を添えない(押しても何も起きない口を出さない)
     expect(h.d.getState().noticeOpen, '開いているノート自身へ「開く」を添えた').toBeNull();
   });
@@ -1211,7 +1211,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     expect(h.disks.n1, '見ていたノートの本文が動いた').toBe(MAIN);
 
     // 知らせはその場で入ったことを言い、行き先への道を持つ
-    expect(h.d.getState().notice ?? '', '入れた場所を言っていない').toContain('『さきの予定』の落とした所に入れました');
+    expect(h.d.getState().notice ?? '', '入れた場所を言っていない').toContain('『さきの予定』のドロップした所に入れました');
     expect(h.d.getState().noticeOpen, '行き先へ行く道が要る').toBe('n2');
   });
 

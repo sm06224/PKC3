@@ -528,7 +528,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (this.terminated) return Promise.reject(new Error('store client terminated'));
     if (this.state === 'dead')
       return Promise.reject(
-        new Error('本体への切り替えに失敗しています(タブを読み直してください)'),
+        new Error('本体への切り替えに失敗しています(タブを再読み込みしてください)'),
       );
     if (this.state === 'real' && this.realClient) return this.realClient.request(req);
     if (this.state === 'promoting') {

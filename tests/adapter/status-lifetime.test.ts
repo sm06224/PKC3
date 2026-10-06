@@ -242,8 +242,8 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
     ['問題', { kind: 'problem' as const }],
   ])('🔴 %s の知らせが来たら、進行中の欄も空になる(処理の終わりは結果で告げられる)', (_n, opts) => {
     const r = rig();
-    r.n.show('可搬 HTML を書き出しています…');
-    expect(r.n.progressLine()).toBe('可搬 HTML を書き出しています…'); // 前提(対照群)
+    r.n.show('1 ファイルの HTML を書き出しています…');
+    expect(r.n.progressLine()).toBe('1 ファイルの HTML を書き出しています…'); // 前提(対照群)
     r.n.show('書き出しました', opts);
     expect(r.n.progressLine(), '終わりを告げる知らせが来ても進行中が居座った').toBe('');
     expect(r.n.noticeLine()).toBe('書き出しました');
@@ -421,7 +421,7 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/export-portable.ts',
-      starts: ["deps.notify('可搬 HTML を書き出しています…');"],
+      starts: ["deps.notify('1 ファイルの HTML を書き出しています…');"],
       end: /deps\.notify\(''\)/,
     },
     {
@@ -441,7 +441,7 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/selfhost.ts',
-      starts: ["deps.notify('自分のパソコンで動かす一式を組んでいます…');"],
+      starts: ["deps.notify('自分のパソコンで動かす一式を作っています…');"],
       end: /finally \{[\s\S]*deps\.notify\(''\)/,
     },
     {

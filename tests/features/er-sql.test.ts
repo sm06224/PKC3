@@ -202,7 +202,7 @@ describe('🔴 足さないとき ── 必ず理由を言う(無言の dead cl
     expect(why('select * from 売上', table('売上'))).toContain('もう入っています');
     expect(why('select 金額 from 売上', column('売上', '金額'))).toContain('もう選んでいます');
     const joined = 'select * from 売上\n  join 客 on 客.id = 売上.客id';
-    expect(why(joined, linkAct())).toContain('もう繋がっています');
+    expect(why(joined, linkAct())).toContain('もうつながっています');
   });
 
   it('⚠ 取っていない表の列を押したら、先に表か線を押すよう言う', () => {

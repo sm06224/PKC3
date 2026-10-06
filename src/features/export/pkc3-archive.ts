@@ -370,7 +370,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version > ARCHIVE_VERSION
   ) {
     throw new ZipReadError(
-      `未対応のアーカイブ版です(version=${String(version)} ── 対応は ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION})`,
+      `未対応のアーカイブのバージョンです(version=${String(version)}、対応は ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION})`,
     );
   }
 
@@ -398,7 +398,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
       warn.add('stray-file', '想定外のファイル', `assets/ の中の想定外のファイルを無視しました: ${e.name}`);
       continue;
     }
-    if (assetSources.has(key)) throw new ZipReadError(`asset key が重複しています: ${key}`);
+    if (assetSources.has(key)) throw new ZipReadError(`添付の ID が重複しています: ${key}`);
     assetSources.set(key, { zip, entry: e });
   }
 
@@ -498,7 +498,7 @@ export function restoreArchive(
   const seenLid = new Set<string>();
   for (const e of archive.entries) {
     if (seenLid.has(e.lid)) {
-      warn.add('dup-lid', 'アーカイブ内で重複した lid', `アーカイブの中で lid が重複しています: ${e.lid}(別の entry として取り込みます)`);
+      warn.add('dup-lid', 'アーカイブ内で重複した ID', `アーカイブの中で ID が重複しています: ${e.lid}(別の entry として取り込みます)`);
     }
     seenLid.add(e.lid);
   }
@@ -507,7 +507,7 @@ export function restoreArchive(
     let lid = e.lid;
     if (lid === '' || taken.has(lid)) {
       const fresh = opts.genLid();
-      warn.add('lid-clash', '付け替えた lid', `lid が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
+      warn.add('lid-clash', '付け替えた ID', `ID が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
       lid = fresh;
     }
     taken.add(lid);

@@ -372,7 +372,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
   await expect(
     foldAll,
     '既定で「すべて畳む」が出ていない(20 個あるグループを 1 つずつ押させることになる)',
-  ).toHaveText('すべて畳む');
+  ).toHaveText('すべて折りたたむ');
   const toolToggle = page.locator('[data-pkc-action="toggle-app-group"][data-pkc-group="ツール"]');
   await clickReal(page, '[data-pkc-field="launcher-fold-all"]');
   await expect(foldAll, '畳んだのに字が「すべて開く」へ裏返らない').toHaveText('すべて開く');
@@ -400,7 +400,7 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     '名前の無い群まで「すべて畳む」の巻き添えで消えている',
   ).toHaveCount(1);
   await clickReal(page, '[data-pkc-field="launcher-fold-all"]');
-  await expect(foldAll, 'もう一度押しても字が「すべて畳む」へ戻らない').toHaveText('すべて畳む');
+  await expect(foldAll, 'もう一度押しても字が「すべて畳む」へ戻らない').toHaveText('すべて折りたたむ');
   await expect(page.locator(builtinTile('dual')), 'もう一度押しても組み込みが開かない').toHaveCount(
     1,
   );

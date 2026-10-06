@@ -69,7 +69,7 @@ export function reloadSnapshot(
       //   ここが timeout reject しうる。誰も受けない rejection にせず帯へ出す
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `一覧を取り直せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        error: `一覧を取得し直せませんでした: ${e instanceof Error ? e.message : String(e)}`,
       });
       return;
     }

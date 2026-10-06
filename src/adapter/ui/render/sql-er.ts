@@ -214,7 +214,7 @@ export function paintSqlEr(
       badge.setAttribute('data-pkc-field', 'sql-er-mine-badge');
       badge.textContent = '自分';
       chip.append(badge, doc.createTextNode(`${k.from}.${k.fromColumn} → ${k.to}.${k.toColumn}`));
-      chip.title = `「${k.from}」と「${k.to}」の繋がりを消します`;
+      chip.title = `「${k.from}」と「${k.to}」のつながりを消します`;
     } else {
       chip.setAttribute('data-pkc-action', 'sql-er-link');
       chip.textContent = `${k.from}.${k.fromColumn} → ${k.to}.${k.toColumn}`;
@@ -257,7 +257,7 @@ export function paintSqlEr(
     line(
       host,
       'sql-er-dropped',
-      `線にできなかった繋がり: ${d.dropped.map((x) => x.why).join(' / ')}`,
+      `線にできなかったつながり: ${d.dropped.map((x) => x.why).join(' / ')}`,
     );
   }
 }
