@@ -204,6 +204,34 @@ done
 ②**エージェントを 10 本投げたら、そのターンの終わりに掃除する**
 (⚠ 「あとで」は来ない ── 次に気づくのは build が落ちた日である)。
 
+### 🔴 worktree だけではない ── scratchpad と `/tmp` の「落とした物」が枠を使い切る(2026-10-06 実測)
+
+症状は 2 つの顔で出た:① `isolation: "worktree"` の起動が
+`error: unable to write file 'tests/…'` / `fatal: Could not reset index file` で落ちる
+② 走っていた runner が「`tasks/` が満杯(0MB)で全部 `ENOSPC`」と**何も回せずに**戻る。
+`df` は **Avail 6.5M / 100%**(Used 39G ── 枠は 40G 弱と読める)。
+
+何が食っていたか(`du` は**全体に掛けると 120 秒で終わらない** ── 深さ 2 で止める):
+
+| 置き場 | 中身 | 量 |
+|---|---|---|
+| `scratchpad/` | LO の一式の zip 2 本 / 一式を展開した probe 用の木 10 本(`121h`〜`121r`)/ 作業ツリーの複製(`682` `merge`) | **約 900MB** |
+| `/tmp/lo-ar` `/tmp/lo-1228-x` | LO の調査で落とした一式 | **740MB** |
+| `/tmp/playwright-transform-cache-0` / `/tmp/node-compile-cache` | 再生成される cache | **830MB** |
+| `/tmp/pkc3-*` | smoke が置いた profile / site | 100MB × 3 |
+| `.claude/worktrees/agent-*` | runner の複製(`node_modules` 込み) | 720MB / 本 |
+
+🔑 **全部「落とし直せる物」である** ── 消す順は **worktree の残骸 → `/tmp/lo-*` →
+scratchpad の一式 / 展開した木 → cache**。これで **6.5M → 5.1G** に戻った。
+⚠ `git worktree remove --force` が `Directory not empty` で断ることがある(終わった
+エージェントの `node_modules` の symlink)── `rm -rf` してから `git worktree prune`。
+⚠ 枠が尽きると**途中で落ちた worktree の残骸**(`agent-<id>/` の一部と
+`worktree-agent-<id>` branch)も残るので、それも消す。
+
+🔑 **合図を 1 つ足す**:**一式(数百 MB)を落としたら、その issue が済んだ時点で消す**
+(上の「測ったら消す」と同じ)── ⚠ この日は 2 週間前の一式が 10 本以上残っていた。
+runner を 1 本投げるたびに 700MB 要るので、**投げる前に `df -h /` を 1 行見る**。
+
 ## ⚠ 失わないための置き場の選び方
 
 | 置く物 | どこへ | なぜ |
