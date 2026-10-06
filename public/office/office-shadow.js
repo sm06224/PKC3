@@ -504,7 +504,7 @@
   function reasonOf(e) {
     var code = e && e.shadowReason;
     if (code === 'no-opfs') return 'この端末の保存領域を使えません';
-    if (code === 'no-gate') return 'この版の Office では書けません';
+    if (code === 'no-gate') return 'このバージョンの Office では書けません';
     if (code === 'no-uno') return '編集の状態を Office に聞けませんでした';
     if (e && e.name === 'QuotaExceededError') return '保存領域の空きが足りません';
     return '書き出せませんでした';

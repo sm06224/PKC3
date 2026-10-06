@@ -526,7 +526,7 @@ describe('🔴 書く流れ(静止 → 保存済みか確かめる → 書く �
   it('理由の字: 保存領域 / 差し替えが当たらない / 聞けない / 容量 / 既定。どれも内部の語を含まない', () => {
     const cases: [unknown, string][] = [
       [{ shadowReason: 'no-opfs' }, 'この端末の保存領域を使えません'],
-      [{ shadowReason: 'no-gate' }, 'この版の Office では書けません'],
+      [{ shadowReason: 'no-gate' }, 'このバージョンの Office では書けません'],
       [{ shadowReason: 'no-uno' }, '編集の状態を Office に聞けませんでした'],
       [{ name: 'QuotaExceededError' }, '保存領域の空きが足りません'],
       [new Error('whatever'), '書き出せませんでした'],
@@ -1139,7 +1139,7 @@ describe('🔴 host.html の影の配線を実行する行のまま動かす(印
     expect(shadowsOf(root, 'lid-note')).toHaveLength(1);
   });
 
-  it('🔴 差し替えが当たっていない一式(patched が空)は、書き出しを打たず「この版の Office では書けません」を言う', async () => {
+  it('🔴 差し替えが当たっていない一式(patched が空)は、書き出しを打たず「このバージョンの Office では書けません」を言う', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const root = new FakeDir();
     // 門が無いと storeToURL が SuspendError で落ちる(本物と同じ)── 偽の LO にそれを再現させる
@@ -1147,7 +1147,7 @@ describe('🔴 host.html の影の配線を実行する行のまま動かす(印
     at(T0); h.handlers.keydown!({ key: 'a' }); at(T0 + 3000);
     await h.tick();
     expect(h.f.stores, '門が無いので storeToURL まで行った(SuspendError の生の失敗)').toHaveLength(0);
-    expect(h.said).toEqual([{ type: 'shadow-failed', payload: { reason: 'この版の Office では書けません' } }]);
+    expect(h.said).toEqual([{ type: 'shadow-failed', payload: { reason: 'このバージョンの Office では書けません' } }]);
     // 対照群: 当たっている一式は書く
     const ok = bootHostShadow({ uuid: 'B', token: 'lid-2', patched: ['env'], storage: new FakeDir() });
     at(T0 + 10000); ok.handlers.keydown!({ key: 'a' }); at(T0 + 13000);
