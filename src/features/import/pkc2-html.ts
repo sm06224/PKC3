@@ -80,8 +80,8 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
   let payload: unknown;
   try {
     payload = JSON.parse(raw);
-  } catch (e) {
-    throw new Pkc2ParseError(`PKC2 の書き出しデータを読み取れません: ${String(e)}`);
+  } catch {
+    throw new Pkc2ParseError('PKC2 の書き出しデータを読み取れません(JSON として読めません)。別の書き出しファイルを選んでください');
   }
 
   const p = payload as { container?: unknown; export_meta?: Record<string, unknown> };

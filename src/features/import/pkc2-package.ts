@@ -106,7 +106,8 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   let manifest: Pkc2PackageManifest;
   try {
     manifest = JSON.parse(await readZipText(zip, manifests[0]!)) as Pkc2PackageManifest;
-  } catch {
+  } catch (e) {
+    if (e instanceof ZipReadError) throw e;
     throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (manifest?.format !== 'pkc2-package') {
@@ -132,7 +133,8 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   try {
     container = JSON.parse(await readZipText(zip, containers[0]!));
   } catch (e) {
-    throw new ZipReadError(`${CONTAINER} の JSON を解釈できません: ${String(e)}`);
+    if (e instanceof ZipReadError) throw e;
+    throw new ZipReadError(`${CONTAINER} を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   const c = container as { meta?: unknown; entries?: unknown } | null;
   if (!c || typeof c !== 'object' || !c.meta || !Array.isArray(c.entries)) {

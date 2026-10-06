@@ -96,7 +96,7 @@ export async function readEntryBundleParts(
     >;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`${ENTRY_JSON} を解釈できません: ${String(e)}`);
+    throw new ZipReadError(`${ENTRY_JSON} を読み取れません(JSON として読めません)。別の書き出しファイルを選んでください`);
   }
   if (!record || typeof record !== 'object' || Array.isArray(record)) {
     throw new ZipReadError(`${ENTRY_JSON} の形が想定と違います`);
