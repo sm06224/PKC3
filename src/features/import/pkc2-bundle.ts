@@ -130,7 +130,7 @@ async function readBundleCommon(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
+      `PKC3 が読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 
@@ -196,7 +196,7 @@ export interface SynthRelation {
 
 /** compact mode の warning(batch は export 単位の性質なので 1 回だけ出す)。 */
 export const COMPACTED_WARNING =
-  '書き出し時に解決できない添付参照が本文から除かれています';
+  '見つからない添付への参照は本文から除きました';
 
 /**
  * 合成 container を組む(§2-5)。attachment × N + 本体 × M。

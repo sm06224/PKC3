@@ -1015,7 +1015,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   /**
    * 🔴 **保存が止まった断り書きの隣の「保存領域の点検を開く」**(#1010 B)。
    *
-   * 断り書きは「システム の 保存領域 の「保存領域の点検」で…」と道順を言うが、
+   * 断り書きは「システム → 保存領域 →「ノートの保存データの確認」を開き…」と道順を言うが、
    * **押しても設定へ飛ばなかった**(読んで、自分で開いて、探す必要があった)。
    * ⚠ 「開く」「元に戻す」と同じ作法 ── 常設で置いて要るときだけ出す(`status-open.ts` が
    *   `hidden` を書く)。実行の口は `open-storage-check` の受け手 1 つ(`binder.ts`)。
@@ -1024,7 +1024,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusRescue.type = 'button';
   statusRescue.setAttribute('data-pkc-field', 'status-rescue');
   statusRescue.setAttribute('data-pkc-action', 'open-storage-check');
-  statusRescue.textContent = 'ノートの保存領域の確認を開く';
+  statusRescue.textContent = 'ノートの保存データの確認を開く';
   statusRescue.hidden = true;
   /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。

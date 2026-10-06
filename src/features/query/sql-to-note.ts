@@ -98,7 +98,7 @@ export function sqlNoteBody(p: {
     // 🔴 **どこを調べたかを、いちばん先に言う**(#837 K3)
     `> ${String(p.rows.length)} 行の結果です(${
       p.where === undefined || p.where === null || p.where === ''
-        ? 'この PKC のノート'
+        ? 'この PKC3 のノート'
         : p.where
     } を調べました)。`,
   ];

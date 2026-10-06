@@ -194,7 +194,7 @@ export async function adoptLinkIcon(
   // ⚠ `gate` が**走らせずに断った**ときも、ここへ来る(理由を落とさない)
   return {
     ok: false,
-    why: out.failed ?? 'いま別の整理が動いているので、少し待ってからもう一度押してください',
+    why: out.failed ?? 'いま別の処理が動いているので、少し待ってからもう一度押してください',
   };
 }
 

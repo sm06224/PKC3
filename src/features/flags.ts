@@ -230,7 +230,7 @@ export const FLAG_CAPTURE = defineFlag('transport.capture', {
 export const FLAG_OFFICE_INPUT_LOG = defineFlag('office.inputLog', {
   default: false,
   foldWhen:
-    '原因が確定し、直しが提供されたら(= どの経路が受理を返していないか分かったら)',
+    'Office のキー入力の原因が確定し、直しが提供されたら(= どの経路が受理を返していないか分かったら)',
   summary: 'Office のウィンドウで、キー入力がどの経路を通ったかをブラウザの開発者ツール(コンソール)に出す(打った字は出しません)',
   needsRestart: true,
 });

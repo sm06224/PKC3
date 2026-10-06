@@ -193,7 +193,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           say(`「${item.name}」に文字起こしを足しました(${took})`);
         }, lid);
         if (held) {
-          say(`「${item.name}」の文字起こしは、編集を終えるまで足すのを待たせています。終えると、ノートの末尾に足します`);
+          say(`「${item.name}」の文字起こしは、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
         }
       } catch (e) {
         if (looksOutOfMemory(e)) {

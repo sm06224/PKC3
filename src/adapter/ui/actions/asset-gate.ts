@@ -63,7 +63,7 @@ export function createAssetGate(dispatcher: Dispatcher): AssetGate {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '添付の取り込み / 整理が実行中です。完了してから、もう一度選び直してください',
+          '添付の取り込み / 削除の処理が実行中です。完了してから、もう一度選び直してください',
       });
       return;
     }

@@ -25,6 +25,8 @@
  * 見て動かす ── 動かすときは数だけ直す(判断の形は動かさない)。
  */
 
+import { humanBytes } from '../human-bytes';
+
 /** 最後の書込からこれだけ黙っていたら「落ち着いた」(ms)。 */
 export const AUTO_OPTIMIZE_QUIET_MS = 60_000;
 
@@ -116,8 +118,7 @@ export function secondsText(elapsedMs: number): string {
  */
 export function optimizeDoneText(elapsedMs: number, freeBytesAfter: number): string {
   const secs = secondsText(elapsedMs);
-  const mib = (freeBytesAfter / (1024 * 1024)).toFixed(1);
-  return `索引を整理しました(${secs}、空き ${mib} MiB)`;
+  return `索引を整理しました(${secs}、空き ${humanBytes(freeBytesAfter)})`;
 }
 
 /** 失敗の字。⚠ 例外の字は入れない(中身が混じりうる)。次の一手は無い(自動なので待つだけ)。 */

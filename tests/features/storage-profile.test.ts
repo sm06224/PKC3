@@ -129,7 +129,7 @@ describe('合計の言い方', () => {
   it('孤児が在れば、片づけられることまで言う', () => {
     const s = profileSummary(result([row('a', 1024)], { orphanBytes: 2048 }));
     expect(s).toContain('使われていません');
-    expect(s, '片づけ方が書いていない').toContain('使っていない添付を消す');
+    expect(s, '片づけ方が書いていない').toContain('使われていない添付を消す');
   });
 
   it('⚠ 孤児が無いときは、その話をしない(要らない注意書きを出さない)', () => {

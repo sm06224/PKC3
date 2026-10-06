@@ -57,7 +57,7 @@ describe('棚の名前と控えの名前', () => {
 
 describe('画面の字', () => {
   it('🔴 裁定の字そのまま(押し所 2 つ)', () => {
-    expect(SHADOW_OPEN_SHADOW_LABEL).toBe('保存していない編集を戻して開く');
+    expect(SHADOW_OPEN_SHADOW_LABEL).toBe('一時保存した内容で開く');
     expect(SHADOW_OPEN_SAVED_LABEL).toBe('保存済みの版で開く');
   });
 
@@ -77,10 +77,10 @@ describe('画面の字', () => {
     const now = 1_800_000_000_000;
     const note = shadowDialogNote(now - 12 * 60_000, now);
     expect(note).toBe(
-      '12 分前の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。',
+      '12 分前に一時保存した内容があります。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その内容は消えます。',
     );
     expect(shadowDialogNote(now - 10_000, now), '1 分以内でも日本語として据わる').toBe(
-      '1 分以内の、保存していない編集が残っています。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その編集は消えます。',
+      '1 分以内に一時保存した内容があります。どちらで開いても、保存するまで添付は変わりません。保存済みの版で開くと、その内容は消えます。',
     );
     expect(note.includes('\n'), '1 行').toBe(false);
   });
@@ -96,8 +96,8 @@ describe('画面の字', () => {
     ];
     for (const t of texts) expect(t, `「${t}」`).not.toContain('控え');
     expect(SHADOW_DIALOG_TITLE).toBe('保存していない編集があります');
-    expect(SHADOW_OPENED_NOTICE).toBe('保存していない編集を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
-    expect(SHADOW_GONE_NOTICE).toBe('保存していない編集を読めませんでした。保存済みの版で開きます');
+    expect(SHADOW_OPENED_NOTICE).toBe('一時保存した内容を Office で開きます。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    expect(SHADOW_GONE_NOTICE).toBe('一時保存した内容を読めませんでした。保存済みの版で開きます');
   });
 
   it('🔴 新しく出る字に、使わない語(造語・脅し語)を含めない', () => {

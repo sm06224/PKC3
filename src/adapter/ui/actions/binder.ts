@@ -469,7 +469,7 @@ async function browseArchive(
   const say = (text: string): void => services.showStatus?.(text);
   const why = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   if (services.readAssetBlob === undefined) {
-    say('このページが古いままのため、zip ファイルの中を見られません。ページを再読み込みしてください');
+    say('このタブの PKC3 が古いままのため、zip ファイルの中を見られません。再読み込みしてください');
     return;
   }
   /**
@@ -1664,7 +1664,7 @@ export interface BinderServices {
    */
   writeBackFile?(lid: string): void;
   /**
-   * 🔴 **結びついている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
+   * 🔴 **つながっている PC のファイルの、いまの中身を読む**(#1231 段①。履歴の面の「くらべる相手」)。
    * `null` = 読めなかった / `{ tooLarge: true }` = 大きすぎて読まなかった(どちらも**「同じ」と言わない**。言う字は分ける)。
    * ⚠ 読むだけ ── 書かない。
    * ⚠ 呼んでよいのは**相手に選んだ瞬間**だけ(一覧では呼ばない = #1271)。
@@ -2268,7 +2268,7 @@ function refuseWhileBusy(
 function refuseNoCapture(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'このページが古いままのため、録音・画面収録ができません。ページを再読み込みしてください',
+    error: 'このタブの PKC3 が古いままのため、録音・画面収録ができません。再読み込みしてください',
   });
 }
 
@@ -2276,7 +2276,7 @@ function refuseNoCapture(dispatcher: Dispatcher): void {
 function refuseNoTimer(dispatcher: Dispatcher): void {
   dispatcher.dispatch({
     type: 'OP_FAILED',
-    error: 'このページが古いままのため、作業時間を計れません。ページを再読み込みしてください',
+    error: 'このタブの PKC3 が古いままのため、作業時間を計れません。再読み込みしてください',
   });
 }
 
@@ -2380,7 +2380,7 @@ function navigateToLink(
   if (t.foreign) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'このリンクは別の PKC のノートを指しています',
+      error: 'このリンクは別の PKC3 のノートを指しています',
     });
     return;
   }
@@ -2716,7 +2716,7 @@ function acquireEditLockOrExplain(
         error:
           grant === 'denied'
             ? EDIT_ELSEWHERE_ERROR
-            : '最初に開いた PKC のタブと通信できません(少し待ってもう一度お試しください)',
+            : '最初に開いた PKC3 のタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
     }
@@ -3520,7 +3520,7 @@ function copySourceLines(
   done: string,
 ): void {
   if (services.copyText === undefined) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
     return;
   }
   services.copyText(sliceLines(fmBody, span), done);
@@ -5318,7 +5318,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const trim = dispatcher.getState().captureTrim;
     if (trim === null || trim.startMs === null || trim.endMs === null) return;
     if (!services.trimCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、切り出せません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、切り出せません。再読み込みしてください' });
       return;
     }
     services.trimCapture(trim.lid, trim.startMs, trim.endMs);
@@ -5332,7 +5332,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-entry');
     if (!lid) return;
     if (!services.transcribeCapture) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、文字にできません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、文字にできません。再読み込みしてください' });
       return;
     }
     services.transcribeCapture(lid);
@@ -6617,7 +6617,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     const to = otherSide(side);
@@ -7265,7 +7265,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       root,
       noun +
         'の書き込みを強制的に打ち切ります。書き込みが実際には進んでいた場合、' +
-        'この画面の表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
+        'このタブの表示が実際の中身より古くなることがあります(開き直すと直ります)。よろしいですか?',
       { okLabel: '書き込みを打ち切る', danger: true },
       dispatcher,
       /**
@@ -8238,7 +8238,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const plain = stripDialect(body);
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     /**
@@ -8393,7 +8393,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (services.copyText === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、コピーできません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
     // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
@@ -9324,7 +9324,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         confirmInApp(
           root,
           rebuildExplainMessage({ notes: dispatcher.getState().entryMetas.size, assetsOnDisk }),
-          { okLabel: 'ノートの保存領域を作り直す', cancelLabel: 'やめる' },
+          { okLabel: 'ノートの保存データを作り直す', cancelLabel: 'やめる' },
         ),
       )
       .then(async (answer) => {
@@ -9475,7 +9475,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           label: resetPassphraseLabel(),
           // ⚠ **`initial` を渡さない** ── 渡すと、空のまま受けたときに
           //    `promptInApp` がその字を返す(= 何も打たずに合言葉が通る)
-          okLabel: 'ノートの保存領域を初期化する',
+          okLabel: 'ノートの保存データを初期化する',
           // 🔴 danger ── ここが**本当に消える 1 押し**である(1 件削除より重い)
           danger: true,
         });
@@ -9488,7 +9488,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           });
           return;
         }
-        sum.textContent = '保存領域を消しています…';
+        sum.textContent = 'ノートの保存データを消しています…';
         sum.hidden = false;
         try {
           const report = await reset(cid);
@@ -9934,7 +9934,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (services.openManualWindow === undefined) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'このページが古いままのため、マニュアルのウィンドウを開けません。ページを再読み込みしてください',
+        error: 'このタブの PKC3 が古いままのため、マニュアルのウィンドウを開けません。再読み込みしてください',
       });
       return;
     }
@@ -10196,7 +10196,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-message-lid') ?? SYSTEM_MESSAGE_LID;
     const read = services.readBodies;
     if (!read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、書き出せません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
       return;
     }
     void read([lid]).then((bodies) => {
@@ -11134,7 +11134,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const send = services.deliverToExtension;
     const read = services.readBodies;
     if (!send || !read) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このページが古いままのため、送れません。ページを再読み込みしてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、送れません。再読み込みしてください' });
       return;
     }
     const st = dispatcher.getState();

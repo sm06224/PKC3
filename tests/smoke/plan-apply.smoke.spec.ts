@@ -170,7 +170,7 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
   await clickReal(page, '[data-pkc-field="container-rebuild-run"]');
   await expect(dialog, '作り直しの説明の窓が出ない').toBeVisible();
   await expect(resetEntryRows, '窓を出しただけでノートが消えた').toHaveCount(2);
-  await expect(dialogBody, '何をするのかが書いていない').toContainText('ノートの保存領域を作り直します');
+  await expect(dialogBody, '何をするのかが書いていない').toContainText('ノートの保存データを作り直します');
   // 🔴 戻らない物を、押す前に言い切っている(窓の字が features の一覧と揃っていること)
   await expect(dialogBody, '戻らない物を言っていない').toContainText('戻らないもの');
   await expect(dialogBody, '履歴が戻らないことを言っていない').toContainText('履歴');

@@ -549,7 +549,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+1', 'Mod+Alt+1'],
     whileTyping: true,
-    note: '文字を打っている間に効くのは Mod+Alt+1 のほうです(Alt+1 は文字が入るキーなので、打っている間は効きません)',
+    note: '文字を打っている間に効くのは Ctrl+Alt+1(Mac は ⌘+Alt+1)のほうです(Alt+1 は文字が入るキーなので、打っている間は効きません)',
   },
   {
     id: 'view-query',
@@ -557,7 +557,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
-    note: '文字を打っている間に効くのは Mod+Alt+2 のほうです(本文を編集している間は、「編集を保存する」か「編集をやめる」を押すと開けます)',
+    note: '文字を打っている間に効くのは Ctrl+Alt+2(Mac は ⌘+Alt+2)のほうです(本文を編集している間は、「編集を保存する」か「編集をやめる」を押すと開けます)',
   },
   {
     /**
@@ -595,7 +595,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      *   文字を打たない鍵にすれば即座に効く。
      */
     whileTyping: true,
-    note: '文字を打っている間に効くのは Mod+, のほうです(Alt+3 は文字が入るキーなので、打っている間は効きません)',
+    note: '文字を打っている間に効くのは Ctrl+,(Mac は ⌘+,)のほうです(Alt+3 は文字が入るキーなので、打っている間は効きません)',
   },
   {
     id: 'open-flags',
@@ -755,7 +755,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      */
     defaults: ['Alt+6', 'Mod+Alt+6'],
     whileTyping: true,
-    note: '別の場所を左右に開いて、まとめて移す画面です(文字を打っている間に効くのは Mod+Alt+6 のほうです)',
+    note: '別の場所を左右に開いて、まとめて移す画面です。文字を打っている間に効くのは Ctrl+Alt+6(Mac は ⌘+Alt+6)のほうです',
   },
   /**
    * 🔴 **SQL の面にも戻り道を置く**(#681 段②、2026-09-09 の動線レビュー)。
@@ -775,7 +775,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+7', 'Mod+Alt+7'],
     whileTyping: true,
-    note: 'SQL を打って結果を表で見る画面です(文字を打っている間に効くのは Mod+Alt+7 のほうです)',
+    note: 'SQL を打って結果を表で見る画面です。文字を打っている間に効くのは Ctrl+Alt+7(Mac は ⌘+Alt+7)のほうです',
   },
   {
     id: 'toggle-sidebar',

@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
  * 🔴 **手が滑りやすい 2 つを切る設定**(#1087。裁定 2026-10-01)
- *   ── 「長いコード枠を最初から畳む」/「本文の `code` を押すとコピーする」。
+ *   ── 「長いコードブロックを最初から畳む」/「本文の `code` を押すとコピーする」。
  *
  * ⚠ 守るのは「設定に在って、映って、押せて、憶える」の 4 つ。`missing-links` と同じく
  *   **既定が入**なので、いちばん強く見るのは**何も選んでいない人で入になっていること**と、
@@ -78,8 +78,8 @@ describe('設定画面に在る(#1087)', () => {
   it('🔴 画面の字(dt / label / hover)', () => {
     const { collapseBox, copyBox } = setup();
     const dtOf = (box: HTMLElement) => box.closest('dd')!.previousElementSibling!.textContent;
-    expect(dtOf(collapseBox!)).toBe('長いコード枠');
-    expect(collapseBox!.parentElement!.textContent).toBe(' 長いコード枠を最初から折りたたむ');
+    expect(dtOf(collapseBox!)).toBe('長いコードブロック');
+    expect(collapseBox!.parentElement!.textContent).toBe(' 長いコードブロックを最初から折りたたむ');
     expect(collapseBox!.parentElement!.title).toContain('オフにすると、最初から字が全部見えます');
     expect(dtOf(copyBox!)).toBe('文中の短いコード');
     expect(copyBox!.parentElement!.textContent).toBe(' 本文の `code` を押すとコピーする');

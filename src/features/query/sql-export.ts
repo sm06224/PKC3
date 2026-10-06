@@ -127,6 +127,6 @@ export function sqlExportFileName(
   kind: SqlExportKind,
 ): string {
   const stamp = `${String(now.getFullYear())}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}${two(now.getMinutes())}`;
-  const safe = (where ?? 'この PKC').replace(/[\\/:*?"<>|]/g, '_');
+  const safe = (where ?? 'この PKC3').replace(/[\\/:*?"<>|]/g, '_');
   return `SQL の結果 ${safe} ${stamp}.${kind}`;
 }

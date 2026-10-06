@@ -729,7 +729,7 @@ describe('SQL を調べる面(#681 段②)', () => {
     type('SELECT 1');
     runBtn.click();
     await settle();
-    expect(note(), '押しても何も起きない').toContain('このページが古いままのため');
+    expect(note(), '押しても何も起きない').toContain('このタブの PKC3 が古いままのため');
     expect(d.getState().sqlPage.running, '走ったままになった').toBe(false);
   });
 
@@ -928,7 +928,7 @@ describe('取り込んだ .sqlite を調べる(#681 段③ の 2 つ目)', () =>
   it('🔴 選び所に、添付の .sqlite が並ぶ(対照群 ── #854 段① で拾い方を広げても壊れていない)', () => {
     const { sourceSel } = setup();
     const names = [...sourceSel.options].map((o) => o.textContent);
-    expect(names[0], '既定が「この PKC」でない').toBe('この PKC のノート');
+    expect(names[0], '既定が「この PKC」でない').toBe('この PKC3 のノート');
     expect(names, '取り込んだ DB が並んでいない').toContain('売上.sqlite');
     // ⚠ **対照群** ── 添付でも DB / csv / tsv でないものは並ばない
     expect(names, '写真まで並んでいる').not.toContain('ねこ.png');
@@ -1255,7 +1255,7 @@ describe('着地前レビューの直し(#681)', () => {
     expect(names, '手持ちのファイルを開く口が無い').toContain('手持ちのファイルを開く…');
     // ⚠ 対照群 ── 添付は 0 件のまま(取り込んでいない DB 名は出ない)
     expect(names, '前提が崩れている(添付を持たせていないのに何か並んでいる)').toEqual([
-      'この PKC のノート',
+      'この PKC3 のノート',
       '手持ちのファイルを開く…',
     ]);
   });
@@ -1459,7 +1459,7 @@ describe('SQL の面から、手持ちのファイルを開く(#854 段②)', ()
     const file = new File(['dummy'], '手元.sqlite');
     pickLocalFile(file);
     await settle();
-    expect(note(), 'ページが古いと言っていない').toContain('このページが古いままのため、手持ちのファイルを開けません');
+    expect(note(), 'ページが古いと言っていない').toContain('このタブの PKC3 が古いままのため、手持ちのファイルを開けません');
     expect(sourceSel.value, '開けていないのに選んだ顔をしている').toBe('');
     // ⚠ 対照群 ── worker 自体は生きている(添付の .sqlite はいつもどおり開ける)
     openSqlGuest.mockClear();
@@ -3942,7 +3942,7 @@ describe('🔴 .parquet / .json を調べる相手として受ける(#682 段④
     pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-toggle"]')!.click();
     await settle();
     expect(pane.querySelector('[data-pkc-region="sql-er"]')?.textContent).toContain(
-      'このページが古いままのため、構造を取得できません',
+      'このタブの PKC3 が古いままのため、構造を取得できません',
     );
   });
 });
@@ -3964,7 +3964,7 @@ describe('🔴 調べる相手の選び所(#992)', () => {
       [...(groups.find((g) => g.label === label)?.querySelectorAll('option') ?? [])].map(
         (o) => o.textContent ?? '',
       );
-    expect(inside(SQL_SOURCE_GROUP_PKC)).toEqual(['この PKC のノート']);
+    expect(inside(SQL_SOURCE_GROUP_PKC)).toEqual(['この PKC3 のノート']);
     // 🔑 添付の中の並びは**仕切りを足す前と同じ**(.sqlite → .csv/.tsv → .parquet/.ndjson)
     const attached = inside(SQL_SOURCE_GROUP_ATTACHED);
     expect(attached.indexOf('売上.csv'), '.csv が .sqlite より前').toBeGreaterThan(attached.indexOf('売上.sqlite'));
@@ -4374,14 +4374,14 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     expect(chips(s.pane)).toHaveLength(1);
     expect(document.querySelector('dialog[open]'), '確認の窓が出ている').toBeNull();
     // 打つ前の約束に書いてある
-    expect(s.rules()).toContain('足したり外したりすると、作った表は消えます');
+    expect(s.rules()).toContain('増やしたり減らしたりすると、作った表は消えます');
     // 表を作った直後の 1 行にも出る
     s.runDuckDbSql.mockResolvedValueOnce({ columns: ['Count'], rows: [[2]], truncated: false, ms: 3 });
     s.type('CREATE TABLE t AS SELECT 1');
     s.runBtn.click();
     await settle();
     expect(s.note()).toContain('作った表はウィンドウを閉じると消えます');
-    expect(s.note()).toContain('足したり外したりすると、作った表は消えます');
+    expect(s.note()).toContain('増やしたり減らしたりすると、作った表は消えます');
   });
 
   it('🔴 2 件以上のとき、構造をノートへ / つながり図は、並べた全部を DuckDB の器から採る(断らない)', async () => {

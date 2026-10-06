@@ -452,7 +452,7 @@ export class DuckDbRunner {
    * ⚠ 鍵は lid と名前の両方(名前だけだと、同じ題名の別ノートで入れ替わらない)。
    * 🔴 **N 件の全部を鍵に入れる**(#918 段⑦)── 足す / 外す / 順番が変わるたびに
    *   鍵が変わるので、`DuckDbLease` が**器を作り直す**(`hold` も解ける ──
-   *   作った表は消える。画面は「足したり外したりすると、作った表は消えます」と言う)。
+   *   作った表は消える。画面は「増やしたり減らしたりすると、作った表は消えます」と言う)。
    * 🔑 `run`(SQL を走らせる)と `schema`(構造を採る)が**同じ鍵**を使う ── 構造を採った後の
    *   SQL は器を作り直さない(同じ file を 2 度読まない)。
    */
@@ -578,7 +578,7 @@ export class DuckDbRunner {
         if (bytes === null) throw new Error(source.name + ' の中身を読めませんでした');
         const exportSqlite = this.deps.exportSqlite;
         if (exportSqlite === undefined) {
-          throw new Error('このページが古いままのため、.sqlite を DuckDB で調べられません。ページを再読み込みしてください');
+          throw new Error('このタブの PKC3 が古いままのため、.sqlite を DuckDB で調べられません。再読み込みしてください');
         }
         const opened = await exportSqlite(bytes);
         sessions.set(i, opened);

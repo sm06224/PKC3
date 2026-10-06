@@ -311,7 +311,7 @@ describe('アーカイブ ZIP — 黙って落とさない', () => {
     const { ZipWriter } = await import('../../src/features/export/zip-writer');
     const w = new ZipWriter();
     await w.add('manifest.json', [`{"format":"${ARCHIVE_FORMAT}","version":99}`]);
-    await expect(readArchive(w.finish())).rejects.toThrow(/このアプリが読めるバックアップのバージョン/);
+    await expect(readArchive(w.finish())).rejects.toThrow(/PKC3 が読めるバックアップのバージョン/);
   });
 
   it('manifest の件数が中身と違えば言う', async () => {

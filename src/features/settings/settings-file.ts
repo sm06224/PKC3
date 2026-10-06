@@ -120,7 +120,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    * ⚠ **人に付く好み**(#1087)── 「長いコード枠を最初から畳みたいか」は端末の事情ではない。
    *   運んだ先に仕組みが無くても害は出ない(畳まれないだけ)。
    */
-  { key: 'pkc3.code-collapse', label: '長いコード枠を最初から折りたたむか' },
+  { key: 'pkc3.code-collapse', label: '長いコードブロックを最初から折りたたむか' },
   /** ⚠ **人に付く好み**(#1087)── 手が滑りやすいので切りたいかは端末ではなく人で決まる。 */
   { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか' },
   /**
@@ -128,7 +128,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   既定は**切**なので、運ばれるのは**入にした人の `1`** が主になる。運んだ先に窓の仕組みが無くても
    *   **害が出ない**(ブラウザ内蔵の表示のままになるだけ)。
    */
-  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の画面で開くか' },
+  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の PDF ビューアで開くか' },
   /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。

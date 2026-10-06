@@ -494,8 +494,8 @@ function buildRenderableBlockHtml(
     // ⚠ 同じ文書に同じ内容の fence が 2 つあっても衝突しないよう、位置も混ぜる。
     const id = `pkc-rv-${toggleKey(fence.lang + '\u0000' + content, String(occurrence))}`;
     toggleHtml =
-      `<input type="checkbox" id="${id}" class="pkc-render-toggle-input" aria-label="ソース / レンダリング切り替え">` +
-      `<label for="${id}" class="pkc-render-toggle" title="ソース / レンダリング切り替え">‹/›</label>`;
+      `<input type="checkbox" id="${id}" class="pkc-render-toggle-input" aria-label="原文 / 表示の切り替え">` +
+      `<label for="${id}" class="pkc-render-toggle" title="原文 / 表示の切り替え">‹/›</label>`;
   }
   const sourceHtml = `<pre class="pkc-render-source"><code class="language-${fence.lang}">${highlightCode(content, fence.lang)}</code></pre>`;
   return `<div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="${fence.lang}" data-pkc-render-mode="${fence.mode}"${sourceLineAttrs}>` +

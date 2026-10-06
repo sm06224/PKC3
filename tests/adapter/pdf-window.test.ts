@@ -370,11 +370,11 @@ describe('ノートへ引く', () => {
     g.win.send('quote', { text: 'x', page: 1 });
     await flush();
     expect(g.win.received.find((m) => m.kind === 'quote-result'), '結末の前に返事をしている').toBeUndefined();
-    resolveIt({ ok: false, message: '別のウィンドウが書き替えたため、追記できませんでした' });
+    resolveIt({ ok: false, message: '別のタブまたはウィンドウが書き替えたため、追記できませんでした' });
     await flush();
     expect(g.win.received.find((m) => m.kind === 'quote-result')?.payload).toEqual({
       ok: false,
-      message: '別のウィンドウが書き替えたため、追記できませんでした',
+      message: '別のタブまたはウィンドウが書き替えたため、追記できませんでした',
     });
 
     // onQuote が reject しても、窓へ理由を返す(窓の「引いています…」を残さない)

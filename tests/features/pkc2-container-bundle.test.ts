@@ -298,7 +298,7 @@ describe('readContainerBundle — texts', () => {
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([]);
     // 先頭は**実際に読めない**(この対照が無いと壊せていない fixture を見逃す)
-    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/CRC/);
+    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/正しく読めないか、別の物に差し替わっている/);
     // 控えに健全な複製が残っており、そちらは読める
     const alts = got.assetAlternates.get('k')!;
     expect(alts).toHaveLength(2);
@@ -532,7 +532,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     const got = await readContainerBundle(zip);
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
     // 黙って拾わない ── 名前が食い違っていること自体は言う
-    expect(got.warnings[0]).toMatch(/正規化形が違います/);
+    expect(got.warnings[0]).toMatch(/文字表記が違います/);
   });
 
   it('NFC に畳んでぶつかる 2 件があるときは曖昧なので拾わない', async () => {
@@ -610,7 +610,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      '書き出し時に解決できない添付参照が本文から除かれています',
+      '見つからない添付への参照は本文から除きました',
     ]);
   });
 
@@ -627,7 +627,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       [{ name: 'a.text.zip', bytes: await textBundle({ lid: 'n1', compacted: false }) }],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      '書き出し時に解決できない添付参照が本文から除かれています',
+      '見つからない添付への参照は本文から除きました',
     ]);
   });
 
@@ -643,7 +643,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
       'a.text.zip: manifest.json と中身で ID が違います(ちがう ≠ n1)',
-      'a.text.zip: manifest.json と中身でタイトルが違います(ちがう題 ≠ 本当の題)',
+      'a.text.zip: manifest.json と中身で題名が違います(ちがう題 ≠ 本当の題)',
     ]);
     // 採るのは**中身**
     expect((got.container as Synth).entries[0]!.lid).toBe('n1');

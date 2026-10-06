@@ -164,7 +164,7 @@ describe('答えを file へ(#918 段④)', () => {
     expect(n, '相手の名前が入っていない').toContain('a_b_c');
     // ⚠ 相手を選んでいない回は「この PKC」
     expect(sqlExportFileName(new Date(2026, 0, 2, 3, 4), null, 'json')).toBe(
-      'SQL の結果 この PKC 2026-01-02 0304.json',
+      'SQL の結果 この PKC3 2026-01-02 0304.json',
     );
   });
 });

@@ -906,7 +906,7 @@ describe('フォルダの表の鍵', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(acquireEditLock, 'ロックを問い合わせずに編集へ入った').toHaveBeenCalledWith('a');
     expect(d.getState().phase, '別のタブで編集中なのに入った').toBe('ready');
-    expect(d.getState().error ?? '').toContain('別のタブかウィンドウで編集中');
+    expect(d.getState().error ?? '').toContain('別のタブまたはウィンドウで編集中');
   });
 
   it('🔴 設定が入っていても、別のノートへ移ったら後から勝手に編集へ入らない', () => {

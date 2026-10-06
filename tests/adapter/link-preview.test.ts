@@ -92,7 +92,7 @@ describe('link-preview', () => {
       const card = renderPreviewCard(document, { kind: 'foreign' });
       expect(card.classList.contains('pkc-link-preview-foreign')).toBe(true);
       expect(card.querySelector('.pkc-link-preview-foreign-desc')?.textContent).toContain(
-        '別の PKC のノート',
+        '別の PKC3 のノート',
       );
     });
 

@@ -115,13 +115,13 @@ describe('つなぐ前 / 繋いだ後', () => {
     expect(q(pane, '[data-pkc-field="pc-list"]')).toBeNull();
   });
 
-  it('🔴 選ぶと帯にフォルダ名と「フォルダを外す」、行に 名前 / 種類 / 大きさ「—」/ 更新日「—」(一覧では file を読まない #1271)', async () => {
+  it('🔴 選ぶと帯にフォルダ名と「接続を解除」、行に 名前 / 種類 / 大きさ「—」/ 更新日「—」(一覧では file を読まない #1271)', async () => {
     getFileCalls = 0;
     const { pane, folder } = setup(async () => dir([file('メモ.md'), file('猫.png')]));
     await folder.pick();
     await settle();
     expect(q(pane, '[data-pkc-field="pc-folder-name"]')?.textContent).toBe('資料');
-    expect(q(pane, '[data-pkc-action="pc-cut-folder"]')?.textContent).toBe('フォルダを外す');
+    expect(q(pane, '[data-pkc-action="pc-cut-folder"]')?.textContent).toBe('接続を解除');
     expect(q(pane, '[data-pkc-field="pc-note"]')?.textContent).toBe('2 件');
     const rows = [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')];
     expect(rows).toHaveLength(2);
@@ -134,7 +134,7 @@ describe('つなぐ前 / 繋いだ後', () => {
     expect(getFileCalls, '一覧を出しただけで getFile が呼ばれた(クラウド同期のフォルダで実体を一斉に取りに行く)').toBe(0);
   });
 
-  it('🔴 Markdown の行にだけ「元ファイルと結びつきます」── 画像・PDF には何も添えない(「書き戻せません」を全行に繰り返さない)', async () => {
+  it('🔴 Markdown の行にだけ「元ファイルとつながります」── 画像・PDF には何も添えない(「書き戻せません」を全行に繰り返さない)', async () => {
     const { pane, folder } = setup(async () => dir([file('メモ.md'), file('猫.png'), file('報告.pdf')]));
     await folder.pick();
     await settle();
@@ -142,7 +142,7 @@ describe('つなぐ前 / 繋いだ後', () => {
       [...pane.querySelectorAll<HTMLElement>('[data-pkc-pc-row]')].find(
         (r) => q(r, '[data-pkc-field="pc-name"]')?.textContent === n,
       )!;
-    expect(PC_LINK_NOTE).toBe('元ファイルと結びつきます');
+    expect(PC_LINK_NOTE).toBe('元ファイルとつながります');
     expect(q(byName('メモ.md'), '[data-pkc-field="pc-link-note"]')?.textContent).toBe(PC_LINK_NOTE);
     expect(q(byName('猫.png'), '[data-pkc-field="pc-link-note"]'), '画像に「結びつきます」が出ている').toBeNull();
     expect(q(byName('報告.pdf'), '[data-pkc-field="pc-link-note"]'), 'PDF に「結びつきます」が出ている').toBeNull();
@@ -219,7 +219,7 @@ describe('つなぐ前 / 繋いだ後', () => {
     expect(q(pane, '[data-pkc-field="pc-note"]')?.textContent).toBe('このフォルダにはファイルがありません');
   });
 
-  it('🔴 「フォルダを外す」でつなぐ前へ戻る', async () => {
+  it('🔴 「接続を解除」でつなぐ前へ戻る', async () => {
     const { pane, folder } = setup(async () => dir([file('a.md')]));
     await folder.pick();
     folder.cut();
@@ -240,7 +240,7 @@ describe('つなぐ前 / 繋いだ後', () => {
     expect(q(pane, '[data-pkc-field="pc-list"]')).toBeNull();
   });
 
-  it('🔴 読み込み中は件数を出し、「フォルダを外す」が押せる', async () => {
+  it('🔴 読み込み中は件数を出し、「接続を解除」が押せる', async () => {
     let release: () => void = () => {};
     const wait = new Promise<void>((r) => (release = r));
     const d: DirectoryHandleLike = {
@@ -255,7 +255,7 @@ describe('つなぐ前 / 繋いだ後', () => {
     const picking = folder.pick();
     await settle();
     expect(q(pane, '[data-pkc-field="pc-note"]')?.textContent).toContain('読み込んでいます');
-    expect(q(pane, '[data-pkc-action="pc-cut-folder"]'), '読み込み中に「フォルダを外す」が無い').not.toBeNull();
+    expect(q(pane, '[data-pkc-action="pc-cut-folder"]'), '読み込み中に「接続を解除」が無い').not.toBeNull();
     folder.cut();
     release();
     await picking;
@@ -352,13 +352,13 @@ describe('帯の「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)
     expect(q(band, '[data-pkc-field="pc-repick"]')?.textContent).toBe('別のフォルダ…');
     // ⚠ 選び直しの入り口を 2 つ作らない ── 繋ぐ前の「フォルダを選ぶ…」と同じ action
     expect(q(band, '[data-pkc-field="pc-repick"]')?.getAttribute('data-pkc-action')).toBe('pc-pick-folder');
-    expect(q(band, '[data-pkc-field="pc-cut"]')?.textContent).toBe('フォルダを外す');
-    expect(q(band, '[data-pkc-field="pc-cut"]')?.title, '「フォルダを外す」の説明').toBe(
-      'このフォルダとの接続を外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+    expect(q(band, '[data-pkc-field="pc-cut"]')?.textContent).toBe('接続を解除');
+    expect(q(band, '[data-pkc-field="pc-cut"]')?.title, '「接続を解除」の説明').toBe(
+      'このフォルダとの接続を解除します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
     );
   });
 
-  it('🔴 読み込み中は「フォルダを外す」だけ(更新・選び直しは一覧が出た後)', async () => {
+  it('🔴 読み込み中は「接続を解除」だけ(更新・選び直しは一覧が出た後)', async () => {
     let release: () => void = () => {};
     const wait = new Promise<void>((r) => (release = r));
     const slow: DirectoryHandleLike = {
@@ -372,7 +372,7 @@ describe('帯の「更新」と「別のフォルダ…」(#1264 §2 欠陥 4-a)
     const { pane, folder } = setup(async () => slow);
     const picking = folder.pick();
     await settle();
-    expect(q(pane, '[data-pkc-field="pc-cut"]'), '読み込み中に「フォルダを外す」が無い').not.toBeNull();
+    expect(q(pane, '[data-pkc-field="pc-cut"]'), '読み込み中に「接続を解除」が無い').not.toBeNull();
     expect(q(pane, '[data-pkc-field="pc-refresh"]'), '読み込み中に更新が出ている').toBeNull();
     release();
     await picking;

@@ -687,7 +687,7 @@ export async function importPkc2File(
           // ⚠ `preWarnings` はこの時点で**既に result.warnings へ写し終えている** ──
           // ここで push しても user に届かない(review M-2 で実測した dead code)
           result.warnings.push(
-            `履歴の中の添付参照 ${remapped} 件は元の key のままです(差分は書き換えられません)`,
+            `履歴の中の添付への参照 ${remapped} 件は元のままです(差分は書き換えられません)`,
           );
         }
         for (const batch of batchEncoded(encoded)) {

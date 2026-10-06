@@ -745,7 +745,7 @@ describe('🔴 LO に影を書かせる(差し替えは storeToURL の間だけ)
     expect(f2.files.has('/work/seed.odt'), '置き場の外を消した').toBe(true);
     // 空の影
     const z = fakeShadowLo([{ loc: 'file:///work/seed.odt', modified: true }], g, { zeroSize: true });
-    expect(() => api.storeShadowSync(z.lo, g, { docPath: '/work/seed.odt' })).toThrow(/空の下書き/);
+    expect(() => api.storeShadowSync(z.lo, g, { docPath: '/work/seed.odt' })).toThrow(/空の一時保存/);
     expect(g.isActive()).toBe(false);
   });
 
@@ -1221,10 +1221,10 @@ describe('🔴 放送の parity ── 実物の窓(host.html の行)が撃つ�
     expect(ow.shadowAt()).toBeNull();
   });
 
-  it('本体の字: 「保存していない編集の下書きを残せませんでした(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
-    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('保存していない編集の下書きを残せませんでした(保存領域の空きが足りません)');
-    expect(shadowFailedNotice('')).toBe('保存していない編集の下書きを残せませんでした');
-    expect(shadowFailedNotice('  ')).toBe('保存していない編集の下書きを残せませんでした');
+  it('本体の字: 「編集中の内容の一時保存に失敗しました(理由)」。理由が空なら括弧を付けない。main.ts が状態の行へ出す', () => {
+    expect(shadowFailedNotice('保存領域の空きが足りません')).toBe('編集中の内容の一時保存に失敗しました(保存領域の空きが足りません)');
+    expect(shadowFailedNotice('')).toBe('編集中の内容の一時保存に失敗しました');
+    expect(shadowFailedNotice('  ')).toBe('編集中の内容の一時保存に失敗しました');
     expect(shadowFailedNotice('x')).not.toMatch(/壊れ|fd_sync|storeToURL|OPFS/);
     const main = readFileSync('src/main.ts', 'utf-8');
     const i = main.indexOf("ev.type === 'shadow-failed'");
@@ -1489,7 +1489,7 @@ describe('🔴 host.html の段 2 の配線(実行する行のまま)', () => {
     expect(host).toContain('docFromShadow = !!(d.payload && d.payload.fromShadow === true);');
     const fn = host.indexOf('function markOpenedFromShadow() {');
     expect(fn, '控えの版で開いたと言う関数が無い').toBeGreaterThan(0);
-    expect(host.slice(fn, fn + 400)).toContain('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    expect(host.slice(fn, fn + 400)).toContain('一時保存した内容を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     // 開けた後(doc-open の枝)の中、見張りを畳んだ後から呼ぶ ── 開く前に呼ぶと、LO がまだ文書を持っていない
     const call = host.indexOf('if (docFromShadow) markOpenedFromShadow();');
     expect(call, '開けた後の枝から呼んでいない').toBeGreaterThan(0);

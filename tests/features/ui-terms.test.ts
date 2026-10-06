@@ -205,12 +205,12 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     ['抱え', '同時に抱える', '読み込んでおく'],
     ['囲み', 'SQL の囲みを分ける', '== で囲みます'],
     ['アーカイブ', 'アーカイブが読めません', 'バックアップが読めません'],
-    ['端点', '端点の無いつながり', '指す先のノートが無いつながり'],
+    ['端点', '端点の無いつながり', 'つなぐ先のノートが無いつながり'],
     ['乗せる', 'ここに乗せると', 'マウスを合わせると'],
     ['憶え', 'ノートに憶えます', 'ノートに保存します'],
     ['メガ', '30 メガ', '30 MB'],
     ['entry', 'entry が見つかりません', 'ノートが見つかりません'],
-    ['relation', '端点不在の relation', '指す先が無いつながり'],
+    ['relation', '端点不在の relation', 'つなぐ先が無いつながり'],
     ['container', '別の container へ運ぶ', '別のコレクションへ運ぶ'],
     ['書き替', 'ノートを書き替えた', 'ノートを書き換えた'],
     ['切替', '開発中の切替です', '開発中の切り替えです'],
@@ -220,6 +220,14 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
     ['出荷', '出荷されたら', '提供されたら'],
     ['誤爆', '誤爆が無い', '誤って押す事故が無い'],
     ['パネル', 'パネルを閉じる', '画面を閉じる'],
+    ['逆引用符', '3 つの逆引用符のあとに', '``` のあとに'],
+    ['レンダリング', 'ソース / レンダリング切り替え', '原文 / 表示の切り替え'],
+    ['MiB', '空き 12.3 MiB', '空き 12.3 MB'],
+    ['結びつ', 'PC と結びついているとき', 'PC のフォルダとつながっているとき'],
+    ['正規化形', 'ファイル名の正規化形が違います', 'ファイル名の文字表記が違います'],
+    ['出所が違', 'ファイルの出所が違います', '別の物に差し替わっている可能性があります'],
+    ['コード枠', '長いコード枠', '長いコードブロック'],
+    ['つなぎ先', 'つなぎ先のノート', 'つなぐ先のノート'],
   ];
 
   /**
@@ -368,6 +376,14 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
       '出荷',
       '誤爆',
       'パネル',
+      '逆引用符',
+      'レンダリング',
+      'MiB',
+      '結びつ',
+      '正規化形',
+      '出所が違',
+      'コード枠',
+      'つなぎ先',
     ]);
   });
 
@@ -481,7 +497,6 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
   ['src/features/storage/container-reset.ts', 4], // 全消去の確認(取り出していない・消える)/ 消せなかった添付がある
   ['src/features/storage/db-rescue.ts', 1], // 読めなかった所がある
   ['src/features/storage/rescue-archive.ts', 2], // 本文を読めなかった・つながりと履歴は戻せない
-  ['src/features/storage/storage-notice.ts', 1], // この画面だけ(閉じると消える)
   ['src/features/structure/structure-text.ts', 1], // 件数が多くて一部だけ出している
   ['src/main.ts', 4], // 保存できなかった・添付が読めなかった・本体への切り替え失敗・相手の編集を上書きする
 ];
@@ -561,6 +576,59 @@ describe('public の画面の字に使わない語', () => {
     const rows: string[] = [];
     for (const f of files) {
       for (const text of screenTexts(f)) {
+        for (const b of BANNED_TERMS) if (b.pattern().test(text)) rows.push(`${f}: 「${b.banned}」 ${text.slice(0, 50)}`);
+      }
+    }
+    expect(rows).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **CSS の `content:` に書いた日本語も同じ門で見る**(2026-10-06)。`::before` / `::after` / `:empty::before` に
+ * 書いた文は画面に出るのに、走査の対象が `.ts` だけで素通りしていた(`app.css` に 3 件)。
+ * ⚠ 見るのは `content: '…'` / `content: "…"` の引用符の中だけ(コメントは先に落とす)。
+ */
+describe('CSS の content: の画面の字に使わない語', () => {
+  function walkCss(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walkCss(full, out);
+      else if (name.endsWith('.css')) out.push(full.split('\\').join('/'));
+    }
+    return out;
+  }
+
+  /** `content:` の引用符の中の日本語だけ。⚠ ブロックコメントを先に落とす(解説に満たされない)。 */
+  function contentTexts(css: string): string[] {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const out: string[] = [];
+    for (const m of bare.matchAll(/content\s*:\s*([^;}]*)/g)) {
+      for (const q of (m[1] ?? '').matchAll(/'([^']*)'|"([^"]*)"/g)) {
+        const t = q[1] ?? q[2] ?? '';
+        if (JAPANESE.test(t)) out.push(t);
+      }
+    }
+    return out;
+  }
+
+  const files = walkCss('src/styles');
+
+  it('空振り防止:src/styles の CSS から日本語の content: を 3 件以上拾っている', () => {
+    expect(files).toContain('src/styles/app.css');
+    const all = files.flatMap((f) => contentTexts(readFileSync(f, 'utf8')));
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    // 名指しの対照群(実際の字が拾える)
+    expect(all).toContain('ここに追記する');
+  });
+
+  it('self-test:コメントの中の content: は拾わず、規則の中の content: は拾う', () => {
+    expect(contentTexts("/* content: 'コメント'; */ a::before { content: 'ほんもの'; }")).toEqual(['ほんもの']);
+  });
+
+  it('使わない語が 1 件も無い(増えたら落ちる)', () => {
+    const rows: string[] = [];
+    for (const f of files) {
+      for (const text of contentTexts(readFileSync(f, 'utf8'))) {
         for (const b of BANNED_TERMS) if (b.pattern().test(text)) rows.push(`${f}: 「${b.banned}」 ${text.slice(0, 50)}`);
       }
     }

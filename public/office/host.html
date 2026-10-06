@@ -9,7 +9,7 @@
   Office(LibreOffice wasm)を動かす**別窓**(#88 / 統合設計 O2)。
 
   🔴 user 裁定 2026-08-10「別タブでも構いません / 見やすければいいのだ /
-     同じ窓にこだわると、PKC の編集をしながら資料を読むとかできませんし」。
+     同じ窓にこだわると、PKC3 の編集をしながら資料を読むとかできませんし」。
 
   ## なぜ別窓なのか(要点だけ。詳細は設計 doc §3)
   - LO は **worker へ出せない**(Qt6 の wasm plugin が DOM を直に触る)
@@ -424,7 +424,7 @@
       //    窓は正常に見えたまま**保存が 1 件も PKC へ渡らない** ── 帯を出して
       //    「保存が効かない」と伝える(`degrade()` が在る理由そのもの)
       console.warn('保存の監視機能を読み込めません(script が読めていない)');
-      degrade('保存の監視機能を読み込めませんでした(保存は PKC へ渡りません)');
+      degrade('保存の監視機能を読み込めませんでした(保存は PKC3 へ渡りません)');
       return;
     }
     var watch = W.createSaveWatch();
@@ -552,7 +552,7 @@
         for (var i = 0; i < hits.length; i += 1) await handOff(dir, hits[i]);
       } catch (e) {
         // 🔴 **黙って落とさない。** user は保存したつもりでいる
-        console.warn('保存を PKC へ渡せませんでした', e);
+        console.warn('保存を PKC3 へ渡せませんでした', e);
         say('save-failed', { reason: String((e && e.message) || e).slice(0, 200) });
       } finally {
         busy = false;
@@ -609,10 +609,10 @@
    * ⚠ 効かなくても開いた文書は使える(言うだけ)。判断は `office-unsaved.js` の `markModified`。
    */
   function markOpenedFromShadow() {
-    setStatus('保存していない編集を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
+    setStatus('一時保存した内容を開いています。保存すると、添付の中身が入れ替わります(前の中身は残ります)');
     if (!window.PKC3OfficeUnsaved) return;
     window.PKC3OfficeUnsaved.markModified(window.__lo).then(function (ok) {
-      if (ok !== true) console.warn('下書きから開いた文書を「保存していない変更あり」にできませんでした');
+      if (ok !== true) console.warn('一時保存した内容で開いた文書を「保存していない変更あり」にできませんでした');
     }, function () { /* 聞けなかった ── 開いた文書はそのまま使える */ });
   }
   var shadowTimer = null;
@@ -631,7 +631,7 @@
     var U = window.PKC3OfficeUnsaved;
     if (!SH || !shadowQuiet || !U) {
       // 🔴 **黙らない**(`armSaveWatch` と同じ作法)。⚠ console だけだと、窓は正常に見えたまま控えが 1 つも書かれない
-      console.warn('下書きの監視機能を読み込めません(script が読めていない)');
+      console.warn('一時保存の監視機能を読み込めません(script が読めていない)');
       say('shadow-failed', { reason: SH ? SH.reasonOf({ shadowReason: 'no-gate' }) : 'このバージョンの Office では書けません' });
       return;
     }
@@ -675,7 +675,7 @@
       // 成功は user へ言わない(うるさい)。本体が「最後に書いた時刻」だけ覚える静かな放送
       onWritten: function (at) { say('shadow-written', { at: at }); },
       onFailed: function (reason) { say('shadow-failed', { reason: reason }); },
-      log: function (e) { console.warn('保存していない編集の下書きを残せませんでした', e); },
+      log: function (e) { console.warn('編集中の内容の一時保存に失敗しました', e); },
     });
     shadowTimer = setInterval(function () { void writer.tick(); }, 1000);
     shadowAfterSaved = function () { return writer.afterSaved(); };

@@ -128,7 +128,7 @@ export async function applyExtWriteOps(
         if (wrote > 0) await deps.refresh();
         return {
           ok: false as const,
-          why: `別のウィンドウがこのノートを書き換えたため、${wrote} 件まで書いて止めました(もう一度送ってください)`,
+          why: `別のタブまたはウィンドウがこのノートを書き換えたため、${wrote} 件まで書いて止めました(もう一度送ってください)`,
         };
       }
       wrote += 1;

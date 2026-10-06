@@ -437,7 +437,7 @@ describe('md ZIP — 生きている参照の添付を落とさない', () => {
     // 参照形式や HTML は下の test のとおり書き換わるので、ここには使えない
     const out = await withRef('添付は asset:ast-1 です\n');
     expect(
-      out.warnings.some((w) => w.includes('リンクの形になっていない添付参照 1 件')),
+      out.warnings.some((w) => w.includes('リンクの形になっていない添付への参照 1 件')),
     ).toBe(true);
   });
 

@@ -178,7 +178,7 @@ describe('🔴 断るときは理由を出す', () => {
     stop = bindActions(root, dispatcher);
     cardRef('pkc://other/entry/b').click();
     expect(dispatcher.getState().selectedLid, '別の PKC のリンクで同じ lid のノートが開いた').toBeNull();
-    expect(lastError()).toBe('このリンクは別の PKC のノートを指しています');
+    expect(lastError()).toBe('このリンクは別の PKC3 のノートを指しています');
   });
 
   it('対照群: 自分の id の card は今までどおり開き、断りは出ない', () => {

@@ -222,6 +222,6 @@ describe('🔴 案内文・手本(名前を並べて出す)', () => {
 
   it('🔴 作った表が消える扱い(設問 2 = B)── 打つ前の約束にも書いてある', () => {
     expect(sqlRulesText('duckdb')).toContain(DUCKDB_TABLE_RESET);
-    expect(DUCKDB_TABLE_RESET).toContain('足したり外したり');
+    expect(DUCKDB_TABLE_RESET).toContain('増やしたり減らしたり');
   });
 });

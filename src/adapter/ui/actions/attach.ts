@@ -568,9 +568,9 @@ export async function attachFiles(
    */
   notify(
     elsewhere
-      ? `${why}${what}は、編集を終えるまで入れるのを待たせています。終えると『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : 'ドロップした所'}に入れます`
+      ? `${why}${what}は、編集中なのでまだ入れていません。編集を終えると『${dropped!.title}』の本文の${place === undefined ? 'いちばん下' : 'ドロップした所'}に入れます`
       : namedTitle === undefined
-        ? `${why}${what}は、編集を終えるまで入れるのを待たせています。終えると本文に入れます`
-        : `${why}${what}は、編集を終えるまで入れるのを待たせています。終えると『${namedTitle}』の本文のいちばん下に入れます`,
+        ? `${why}${what}は、編集中なのでまだ入れていません。編集を終えると本文に入れます`
+        : `${why}${what}は、編集中なのでまだ入れていません。編集を終えると『${namedTitle}』の本文のいちばん下に入れます`,
   );
 }

@@ -122,7 +122,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   // v2 も受ける ── `.entry.zip` だけ飛ばして残りは取り込む(段⑥ で受理予定)
   if (manifest.version !== 1 && manifest.version !== 2) {
     throw new ZipReadError(
-      `このアプリが読めるのはバージョン 1 と 2 だけです(このファイルは ${String(manifest.version)})`,
+      `PKC3 が読めるのはバージョン 1 と 2 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
   if (!Array.isArray(manifest.entries)) {

@@ -84,7 +84,7 @@ export async function readEntryBundleParts(
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
+      `PKC3 が読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 
@@ -110,7 +110,7 @@ export async function readEntryBundleParts(
   }
   for (const [label, a, b] of [
     ['ID', str(manifest.lid), str(record.lid)],
-    ['タイトル', str(manifest.title), str(record.title)],
+    ['題名', str(manifest.title), str(record.title)],
     ['archetype', str(manifest.archetype), str(record.archetype)],
   ] as const) {
     if (a !== '' && b !== '' && a !== b) {

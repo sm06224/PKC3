@@ -157,10 +157,10 @@ test('🔴 設定に Office 一式の状態と、入れる 2 つの導線が出�
  * 🔑 控えは**実物の窓の書き手**(`public/office/office-shadow.js` の `shelve`)で置く ── 棚の綴りを test が手で組むと、
  *    書く側と読む側の食い違いが両側緑のまま通る。窓の役(「文書をちょうだい」)だけは放送で演じる(本物の LO は要らない)。
  * 🔑 見るのは 5 つ: ①確認が出ている間は窓が開かない(ポップアップ遮断の折り合い)②やめる → 何も開かず控えも残る
- *    ③「保存していない編集を戻して開く」→ 窓が開き、渡る bytes は**控えの版**(`fromShadow`)④「保存済みの版で開く」→ 控えが消え、
+ *    ③「一時保存した内容で開く」→ 窓が開き、渡る bytes は**控えの版**(`fromShadow`)④「保存済みの版で開く」→ 控えが消え、
  *    渡る bytes は保存済みの版 ⑤控えが無くなれば、次は訊かずに窓が開く(対照群)。
  */
-test('🔴 保存していない編集があれば、開く前に 2 択を訊く(やめる / 保存していない編集を戻して開く / 保存済みの版)', async ({
+test('🔴 保存していない編集があれば、開く前に 2 択を訊く(やめる / 一時保存した内容で開く / 保存済みの版)', async ({
   page,
   context,
 }) => {
@@ -271,8 +271,8 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   const rows = page.locator('[data-pkc-field="pick-office-shadow"]');
   await expect(rows).toHaveText([SHADOW_OPEN_SHADOW_LABEL, SHADOW_OPEN_SAVED_LABEL]);
   await expect(rows.first(), '既定の押し所が保存していない編集の版でない').toBeFocused();
-  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('保存していない編集が残っています');
-  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('保存済みの版で開くと、その編集は消えます');
+  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('一時保存した内容があります');
+  await expect(page.locator('[data-pkc-field="pick-office-shadow-note"]')).toContainText('保存済みの版で開くと、その内容は消えます');
   expect(popups, '確認を出している間に窓を開いた').toHaveLength(0);
 
   // ② やめる: 何も開かず、控えも残る
@@ -283,7 +283,7 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   expect(popups, 'やめたのに窓が開いた').toHaveLength(0);
   expect(await shelf(), 'やめたのに控えを消した').toHaveLength(1);
 
-  // ③ 保存していない編集を戻して開く: 窓が開き、渡る bytes は控えの版
+  // ③ 一時保存した内容で開く: 窓が開き、渡る bytes は控えの版
   await clickReal(page, open);
   await expect(rows.first()).toBeVisible();
   const first = context.waitForEvent('page');

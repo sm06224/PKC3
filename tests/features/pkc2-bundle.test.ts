@@ -132,7 +132,7 @@ describe('readTextBundle', () => {
     });
     const got = await readTextBundle(zip);
     expect(got.warnings.filter((w) => w.includes('既に失われていた'))).toHaveLength(2);
-    expect(got.warnings.some((w) => w.includes('解決できない添付参照'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('見つからない添付への参照'))).toBe(true);
   });
 
   it('形が違えば理由付きで断る(manifest / body.md / 別形式 / 未対応版 / 重複)', async () => {
@@ -149,7 +149,7 @@ describe('readTextBundle', () => {
     ).rejects.toThrow(/pkc2-text-bundle だけを扱います/);
     await expect(
       readTextBundle(await bundle({ manifest: manifestOf({ version: 2 }) })),
-    ).rejects.toThrow(/このアプリが読めるのはバージョン 1 だけです/);
+    ).rejects.toThrow(/PKC3 が読めるのはバージョン 1 だけです/);
     await expect(
       readTextBundle(
         await buildZip([
@@ -285,6 +285,6 @@ describe('readTextlogBundle', () => {
     const got = await readTextlogBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['ast-k']);
     expect(got.warnings.some((w) => w.includes('既に失われていた'))).toBe(true);
-    expect(got.warnings.some((w) => w.includes('解決できない添付参照'))).toBe(true);
+    expect(got.warnings.some((w) => w.includes('見つからない添付への参照'))).toBe(true);
   });
 });

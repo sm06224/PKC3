@@ -573,7 +573,7 @@ export class SettingsRenderer {
      *   組み立てで使う。
      */
     const st = document.createElement('dt');
-    st.textContent = 'このアプリのデータ';
+    st.textContent = 'PKC3 のデータ';
     const sd = document.createElement('dd');
     const snote = document.createElement('p');
     snote.setAttribute('data-pkc-field', 'settings-note');
@@ -699,7 +699,7 @@ export class SettingsRenderer {
       '起動したときに予定を数えます(オフのままなら数えません)。';
     ad.append(alabel);
     ad.append(
-      buildSettingsNote('PKC を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
+      buildSettingsNote('PKC3 を開いている間だけ鳴ります(閉じている間は鳴りません)。'),
     );
     notifyDl.append(at, ad);
 
@@ -719,7 +719,7 @@ export class SettingsRenderer {
     vcheck.setAttribute('data-pkc-field', 'voice-boost');
     vlabel.append(vcheck, document.createTextNode(' 再生するとき、声を聞き取りやすく整える'));
     vlabel.title =
-      '効くのは PKC の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見)。' +
+      '効くのは PKC3 の中で鳴らすときだけです(音と動画、本文に出る再生機、添付の下見)。' +
       'お使いのブラウザがこの仕組みを持っていない場合は、整わずにそのまま鳴ります。';
     vd.append(vlabel);
     vd.append(
@@ -850,8 +850,8 @@ export class SettingsRenderer {
     mllabel.append(mlcheck, document.createTextNode(' ノートが見つからないリンクを、薄い字と点線で見せる'));
     mllabel.title =
       '押すと「見つかりません」になるリンクに点線の下線を引きます(字の色は変わりません)。' +
-      'ゴミ箱に入れた・取り込みで外れた・別の PKC から貼ったノートが対象で、' +
-      '別の PKC を指すリンクは変わりません。';
+      'ゴミ箱に入れた・取り込みで外れた・別の PKC3 から貼ったノートが対象で、' +
+      '別の PKC3 を指すリンクは変わりません。';
     // ⚠ 説明は hover に置く ── visible の note を足すと「note は 24 段落」の数え直し
     //   (`settings-notes.test.ts` / 設計 doc)を動かす。1 行で足りる設定なので足さない。
     mld.append(mllabel);
@@ -865,16 +865,16 @@ export class SettingsRenderer {
      * ⚠ 字は「何が起きるか」で書く(「インラインコード」は内部の言葉 ── `ui-terms.ts` の BANNED_TERMS)。
      */
     const cct = document.createElement('dt');
-    cct.textContent = '長いコード枠';
+    cct.textContent = '長いコードブロック';
     const ccd = document.createElement('dd');
     const cclabel = document.createElement('label');
     const cccheck = document.createElement('input');
     cccheck.type = 'checkbox';
     cccheck.setAttribute('data-pkc-action', 'set-code-collapse');
     cccheck.setAttribute('data-pkc-field', 'code-collapse');
-    cclabel.append(cccheck, document.createTextNode(' 長いコード枠を最初から折りたたむ'));
+    cclabel.append(cccheck, document.createTextNode(' 長いコードブロックを最初から折りたたむ'));
     cclabel.title =
-      '18 行以上のコード枠を、最初は低く折りたたんで見せます(押すと全部見えます)。' +
+      '18 行以上のコードブロックを、最初は低く折りたたんで見せます(押すと全部見えます)。' +
       'オフにすると、最初から字が全部見えます(開閉のボタンも出ません)。';
     ccd.append(cclabel);
     editDl.append(cct, ccd);
@@ -889,7 +889,7 @@ export class SettingsRenderer {
     icclabel.append(icccheck, document.createTextNode(' 本文の `code` を押すとコピーする'));
     icclabel.title =
       '本文の中の `code` のように書いた短いコードを押すと、その字をコピーします。' +
-      'オフにすると、押しても何も起きず、ふつうの字として選べます(コード枠のコピーは変わりません)。';
+      'オフにすると、押しても何も起きず、ふつうの字として選べます(コードブロックのコピーは変わりません)。';
     iccd.append(icclabel);
     editDl.append(icct, iccd);
     /**
@@ -906,9 +906,9 @@ export class SettingsRenderer {
     pdfcheck.type = 'checkbox';
     pdfcheck.setAttribute('data-pkc-action', 'set-pdf-reader');
     pdfcheck.setAttribute('data-pkc-field', 'pdf-reader');
-    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC3 の画面で開く(字を選んでノートへ引用できる)'));
+    pdflabel.append(pdfcheck, document.createTextNode(' PDF を PKC3 の PDF ビューアで開く(字を選んでノートへ引用できる)'));
     pdflabel.title =
-      '添付の PDF の「別のウィンドウで見る」を、PKC3 の画面で読むウィンドウにします。' +
+      '添付の PDF の「別のウィンドウで見る」を、PKC3 の PDF ビューア(別ウィンドウ)で開きます。' +
       '字を選んで「ノートへ引用する」を押すと、ページ番号つきで添付のノートの末尾に引用として足せます。' +
       'オフにすると、ブラウザ内蔵の表示で開きます(読めない PDF のときも自動でそちらになります)。';
     pdfd.append(pdflabel);
@@ -1306,7 +1306,7 @@ export class SettingsRenderer {
     //    store の通知で件数の字を合わせる(器は 1 度しか組まないので購読も 1 度)
     appCopyHistory.onChange(() => this.syncCopyHistory());
 
-    const note = buildSettingsNote('PKC の中でコピーした物を、この端末に 20 件まで残します。');
+    const note = buildSettingsNote('PKC3 の中でコピーした物を、この端末に 20 件まで残します。');
     wrap.append(note);
 
     const btn = document.createElement('button');
@@ -1347,7 +1347,7 @@ export class SettingsRenderer {
     const wrap = document.createElement('section');
     wrap.setAttribute('data-pkc-region', 'settings-persist');
     const h = document.createElement('h4');
-    h.textContent = 'このアプリのデータ';
+    h.textContent = 'PKC3 のデータ';
     wrap.append(h, dl);
     return wrap;
   }
@@ -1998,7 +1998,7 @@ export class SettingsRenderer {
  * 断られたのではない(起動直後は必ずここを通る)。
  */
 const PERSIST_TEXT: Record<PersistState, string> = {
-  persisted: 'このブラウザは、このアプリのデータを消さない扱いにしています。',
+  persisted: 'このブラウザは、PKC3 のデータを消さない扱いにしています。',
   denied:
     '空き容量が足りなくなると、このブラウザがデータを消すことがあります。' +
     'ホーム画面(デスクトップ)に追加すると、消さない扱いになることがあります。' +

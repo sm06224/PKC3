@@ -344,7 +344,7 @@ describe('章の保存の楽観衝突は 1 回だけ読み直して当て直す(
 
     expect(n, 'やり直しが 1 回で止まっていない(無限に回る)').toBe(2);
     expect(errors, '黙って断った(user は書きかけが消えたとしか見えない)').toHaveLength(1);
-    expect(errors[0], '何が起きたか書いていない').toContain('別のウィンドウ');
+    expect(errors[0], '何が起きたか書いていない').toContain('別のタブまたはウィンドウ');
     expect(errors[0], '次にどうすればよいか書いていない').toContain('もう一度');
     // 🔑 **保存中の錠が解けている** ── 解かないと user は永久に章を保存できない
     expect(d.getState().sectionDraft?.saving, '保存中の印が残っている').toBe(false);

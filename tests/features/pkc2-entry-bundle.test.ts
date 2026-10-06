@@ -143,7 +143,7 @@ describe('readEntryBundle — 形の検査', () => {
     const got = await readEntryBundle(zip);
     expect(got.warnings).toEqual([
       'manifest.json と中身で ID が違います(ちがう ≠ t1)。中身を使います',
-      'manifest.json と中身で タイトル が違います(ちがう題 ≠ 本当の題)。中身を使います',
+      'manifest.json と中身で 題名 が違います(ちがう題 ≠ 本当の題)。中身を使います',
     ]);
     expect((got.container as Synth).entries[0]!.lid).toBe('t1');
   });

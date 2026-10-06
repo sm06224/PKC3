@@ -366,7 +366,7 @@
       gate.begin();
       try { store.storeToURL('file://' + path, made.seq); } finally { gate.end(); }
       var size = FS.stat(path).size;
-      if (!(size > 0)) throw new Error('shadow: 空の下書きが書かれた');
+      if (!(size > 0)) throw new Error('shadow: 空の一時保存が書かれた');
       return { ext: ext, path: path, size: size };
     } finally {
       del(store);

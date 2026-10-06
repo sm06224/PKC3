@@ -86,11 +86,11 @@ export async function exportPortable(
    */
   if (deps.insideBundle())
     return fail(
-      'いま開いているのは アプリ入り HTML で、アプリのテンプレートを取得できないため、' +
-        'ここからは アプリ入り HTML を作れません。ブラウザで開いた PKC3 から書き出してください',
+      'いま開いているのは PKC3 入り HTML で、元になるファイルを取得できないため、' +
+        'ここからは PKC3 入り HTML を作れません。ブラウザで開いた PKC3 から書き出してください',
     );
 
-  deps.notify('アプリ入り HTML を書き出しています…');
+  deps.notify('PKC3 入り HTML を書き出しています…');
   progressShown = true;
   try {
     // 🔴 直前の保存が disk に着いてから読む
@@ -131,7 +131,7 @@ export async function exportPortable(
     if (notes.length > 0) deps.report(notes);
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
     deps.notify(
-      `アプリ入り HTML を書き出しました(添付 ${out.assets} 件` +
+      `PKC3 入り HTML を書き出しました(添付 ${out.assets} 件` +
         (notes.length > 0 ? ` / 注意 ${notes.length} 件` : '') +
         ')',
     );

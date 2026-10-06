@@ -36,8 +36,8 @@ const COUNTS = grid(['tbl', 'n'], [['entries', 3], ['tags', 0]]);
 
 describe('構造 1 枚を組む', () => {
   it('表・列・型・鍵・繋がり・行数が出る', () => {
-    const out = renderSchemaDigest({ source: 'この PKC のノート', columns: COLS, fks: FKS, counts: COUNTS });
-    expect(out).toContain('# この PKC のノート の構造');
+    const out = renderSchemaDigest({ source: 'この PKC3 のノート', columns: COLS, fks: FKS, counts: COUNTS });
+    expect(out).toContain('# この PKC3 のノート の構造');
     expect(out).toContain('表 / ビュー: 3 件');
     /**
      * 🔴 **数えていない物の名前を書かない**(#918 段⑤d-2)。
@@ -263,13 +263,13 @@ describe('段① の字と模型が食い違わない', () => {
    */
   it('🔴 段① の字を丸ごと pin する', () => {
     const out = renderSchemaDigest({
-      source: 'この PKC のノート',
+      source: 'この PKC3 のノート',
       columns: COLS,
       fks: FKS,
       counts: COUNTS,
     });
     expect(out).toBe(
-      `# この PKC のノート の構造
+      `# この PKC3 のノート の構造
 
 表 / ビュー: 3 件
 

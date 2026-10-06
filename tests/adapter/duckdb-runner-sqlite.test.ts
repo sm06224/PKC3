@@ -414,7 +414,7 @@ describe('🔴 読めない回は理由つきで断る(外が開いたままの�
     });
     await expect(
       runner.run({ sql: 'SELECT 1', sources: [input(src('l1', '家計.sqlite'), 1)] }),
-    ).rejects.toThrow('このページが古いままのため、.sqlite を DuckDB で調べられません');
+    ).rejects.toThrow('このタブの PKC3 が古いままのため、.sqlite を DuckDB で調べられません');
   });
 
   it('🔴 file そのものが DB として読めなければ、worker の断りがそのまま画面へ出る', async () => {

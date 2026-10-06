@@ -328,7 +328,7 @@ export async function readInnerBundles(
         throw new ZipReadError(`manifest にあるファイルが ZIP に入っていません: ${filename}`);
       }
       warnings.push(
-        `${filename}: manifest.json と ZIP でファイル名の正規化形が違います(${hit.name} を使います)`,
+        `${filename}: manifest.json と ZIP でファイル名の文字表記が違います(${hit.name} を使います)`,
       );
       inner = hit;
     }
@@ -377,7 +377,7 @@ export async function readInnerBundles(
       innerTitle !== '' &&
       me.title !== innerTitle
     ) {
-      warnings.push(`${filename}: manifest.json と中身でタイトルが違います(${me.title} ≠ ${innerTitle})`);
+      warnings.push(`${filename}: manifest.json と中身で題名が違います(${me.title} ≠ ${innerTitle})`);
     }
 
     // 🔴 内側 lid の重複を**言う**(review H-1)。`readBundleParts` は
@@ -447,7 +447,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   }
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
+      `PKC3 が読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
   if (!Array.isArray(manifest.entries)) {

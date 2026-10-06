@@ -391,8 +391,8 @@ export async function writeMarkdownZip(
       if (leftover > 0) {
         warnCapped(
           'leftover-ref',
-          'リンクの形になっていない添付参照の注意',
-          `リンクの形になっていない添付参照 ${leftover} 件はそのまま残ります(外では開けません): ${m.title || m.lid}`,
+          'リンクの形になっていない添付への参照の注意',
+          `リンクの形になっていない添付への参照 ${leftover} 件はそのまま残ります(外では開けません): ${m.title || m.lid}`,
         );
       }
 

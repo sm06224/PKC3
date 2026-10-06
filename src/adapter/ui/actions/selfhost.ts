@@ -55,7 +55,7 @@ export interface SelfhostDeps {
  *   「白い画面」になる。落ちる場所は**組んでいるあいだ**であるべきである。
  */
 export async function downloadSelfhostBundle(deps: SelfhostDeps): Promise<void> {
-  deps.notify('自分のパソコンで動かす一式を作っています…');
+  deps.notify('自分のパソコンで動かす zip を作っています…');
   try {
     await buildAndDownload(deps);
   } finally {
@@ -105,6 +105,6 @@ async function buildAndDownload(deps: SelfhostDeps): Promise<void> {
   }
   deps.download(selfhostZipName(deps.stamp()), zip.finish());
   deps.notify(
-    `一式をダウンロードしました。中の start-windows.cmd(Mac / Linux は start-mac-linux.sh)を開くと、${SELFHOST_ORIGIN} で使えます`,
+    `zip をダウンロードしました。中の start-windows.cmd(Mac / Linux は start-mac-linux.sh)を開くと、${SELFHOST_ORIGIN} で使えます`,
   );
 }

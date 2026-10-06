@@ -115,7 +115,7 @@ export function profileSummary(result: StorageProfileResult): string {
   const head = `添付はぜんぶで ${humanBytes(result.totalAssetBytes)} です`;
   const orphan =
     result.orphanBytes > 0
-      ? `。うち ${humanBytes(result.orphanBytes)} は、どのノートからも使われていません(「使っていない添付を消す」で消せます)`
+      ? `。うち ${humanBytes(result.orphanBytes)} は、どのノートからも使われていません(「使われていない添付を消す」で消せます)`
       : '';
   return `${head}${orphan}。ブラウザが報告する使用量とは数え方が違います(こちらは添付の合計だけです)。`;
 }

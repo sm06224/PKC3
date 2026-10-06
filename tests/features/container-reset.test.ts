@@ -215,7 +215,7 @@ describe('押す前に読ませる字(#986 段③)', () => {
       rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 3, assetBytes: 99, assetMissing: 0 },
     });
     expect(took, '端末の添付の件数を言っていない').toContain('添付が 3 件あります');
-    expect(took, '全部入ったことを言っていない').toContain('いまのバックアップには 3 件入っています');
+    expect(took, '全部入ったことを言っていない').toContain('このタブを開いてから取ったバックアップには、添付が 3 件入っています');
 
     // 🔴 欠けている回 ── **何件消えるか**が読めないと、止まる判断ができない
     const short = resetExplainMessage({
@@ -224,7 +224,8 @@ describe('押す前に読ませる字(#986 段③)', () => {
       assetsOnDisk: 3,
       rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 1, assetBytes: 9, assetMissing: 2 },
     });
-    expect(short, '欠けているのに「全部入った」と読める').not.toContain('とも入っています');
+    // ⚠ 対照群は上の took(同じ書き方で「3 件入っています」を言う)── 欠けている回は同じ文型を使わない
+    expect(short, '欠けているのに「全部入った」と読める').not.toContain('件入っています');
     expect(short, '入った件数が出ていない').toContain('1 件だけです');
     expect(short, '残りが消えることを言っていない').toContain('残りはここで消えます');
   });

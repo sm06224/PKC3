@@ -111,7 +111,7 @@ describe('readPkc2Package', () => {
     ).rejects.toThrow(/pkc2-package だけを扱います/);
     await expect(
       readPkc2Package(await pkg({ manifest: manifestOf({ version: 2 }) })),
-    ).rejects.toThrow(/このアプリが読めるのはバージョン 1 だけです/);
+    ).rejects.toThrow(/PKC3 が読めるのはバージョン 1 だけです/);
   });
 
   it('container が無い / 形が違う も断る(「読めるところだけ読む」をしない)', async () => {

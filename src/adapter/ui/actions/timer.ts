@@ -112,7 +112,7 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       deps.notify(`「${run.title}」に${what}を書きました`);
     }, lid);
     // ⚠ 預かった回は**そう言う**(押したのに何も起きていないように見せない)
-    if (held) deps.notify(`「${run.title}」の${what}は、編集を終えるまで書くのを待たせています。終えると本文に入れます`);
+    if (held) deps.notify(`「${run.title}」の${what}は、編集中なのでまだ書いていません。編集を終えると本文に入れます`);
   };
 
   return {

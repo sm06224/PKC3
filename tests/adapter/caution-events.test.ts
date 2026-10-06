@@ -190,7 +190,7 @@ describe('別のタブが同じノートを編集中 → 「注意」(binder か
 
   it('対照群:本体と話せない断りは「問題」のまま(「注意」へ広げない)', async () => {
     const error = await pressEdit('unreachable');
-    expect(error).toContain('最初に開いた PKC のタブと通信できません');
+    expect(error).toContain('最初に開いた PKC3 のタブと通信できません');
     expect(messageKindForOpError(error as string)).toBe('problem');
   });
 
@@ -215,7 +215,7 @@ describe('別のタブが同じノートを編集中 → 「注意」(binder か
     expect(req.lid).toBe(SYSTEM_MESSAGE_LID);
     expect(req.section).toContain('**注意** app');
     // 文の括弧(…)は「…」ではないので潰されない(読める形で残る)
-    expect(req.section).toContain('別のタブかウィンドウで編集中です');
+    expect(req.section).toContain('別のタブまたはウィンドウで編集中です');
   });
 });
 
@@ -247,6 +247,6 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
 
   it('binder.ts: 断り文は正本の定数から出し、字を 2 か所に書かない', () => {
     expect(binder).toContain('? EDIT_ELSEWHERE_ERROR');
-    expect(binder).not.toContain('別のタブかウィンドウで編集中です');
+    expect(binder).not.toContain('別のタブまたはウィンドウで編集中です');
   });
 });

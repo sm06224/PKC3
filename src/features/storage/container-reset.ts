@@ -188,8 +188,8 @@ export function resetExplainMessage(opts: {
    */
   const backup =
     rescued === null
-      ? `⚠ まだバックアップを取っていません。先に左下の「${BACKUP_LABEL}」を押してください。`
-      : `バックアップに入っているのは ${rescued.entries} 件です` +
+      ? `⚠ このタブを開いてからは、まだバックアップを取っていません。先に左下の「${BACKUP_LABEL}」を押してください。`
+      : `このタブを開いてから取ったバックアップに入っているノートは ${rescued.entries} 件です` +
         (rescued.skipped + rescued.empty + rescued.bodyMissing > 0
           ? `(読み込めなかった箇所 ${rescued.skipped} / 空だった箇所 ${rescued.empty} / 本文が読めなかったノート ${rescued.bodyMissing} 件)`
           : '') +
@@ -211,12 +211,12 @@ export function resetExplainMessage(opts: {
     attach.push(`この端末には添付が ${assetsOnDisk} 件あります。`);
     attach.push(
       took >= assetsOnDisk
-        ? `いまのバックアップには ${took} 件入っています。`
-        : `⚠ いまのバックアップに入っているのは ${took} 件だけです。残りはここで消えます。`,
+        ? `このタブを開いてから取ったバックアップには、添付が ${took} 件入っています。`
+        : `⚠ このタブを開いてから取ったバックアップに入っている添付は ${took} 件だけです。残りはここで消えます。`,
     );
   }
   return [
-    'この端末のノートの保存領域の中身を、すべて消します(Office などの一式は残ります)。元に戻せません。',
+    'この端末のノートの保存データを、すべて消します(Office などの一式は残ります)。元に戻せません。',
     '',
     '消えるもの',
     `・いま一覧に出ている ${notes} 件のノート(題名・本文・履歴・フォルダ・タグ・付箋・板)`,
@@ -231,7 +231,7 @@ export function resetExplainMessage(opts: {
     backup,
     ...attach,
     // ⚠ 黙って他のタブを読み込み直さない ── 先に言う
-    '同じ PKC を開いている他のタブも、読み込み直されます。',
+    '同じ PKC3 を開いている他のタブも、読み込み直されます。',
   ].join('\n');
 }
 
@@ -260,7 +260,7 @@ export function resetPassphraseOk(typed: string | null): boolean {
  *   🔑 だから「**コピーする時間**」を渡す(字が消えるのを止める道は、それしか無い)。
  */
 export const WIPED_ELSEWHERE_ASK =
-  'この PKC の中身は、別のタブで捨てられました。この画面はもう保存できません。' +
+  'この PKC3 の中身は、別のタブで捨てられました。このタブはもう保存できません。' +
   'いま読み込み直しますか?(やめる を選ぶと、打った字をコピーしてから読み込み直せます)';
 
 /** 別のタブが捨てた ── いま読み込み直してよいか。 */

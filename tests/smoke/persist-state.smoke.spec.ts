@@ -16,7 +16,7 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, collectPageErrors } from './helpers';
 
-test('🔴 設定に「このアプリのデータ」の行が出て、空欄ではない', async ({ page }) => {
+test('🔴 設定に「PKC3 のデータ」の行が出て、空欄ではない', async ({ page }) => {
   // 🔴 **例外を 1 度も見ていなかった**(#713、2026-09-05)── 設定の面は
   //    boot の後半で組まれるので、そこで落ちても「行が在る」だけで緑になる
   const errors = collectPageErrors(page);

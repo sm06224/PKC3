@@ -370,7 +370,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version > ARCHIVE_VERSION
   ) {
     throw new ZipReadError(
-      `このアプリが読めるバックアップのバージョンは ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION} です(このファイルは ${String(version)})`,
+      `PKC3 が読めるバックアップのバージョンは ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION} です(このファイルは ${String(version)})`,
     );
   }
 
@@ -530,7 +530,7 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warn.add('dangling-relation', '指す先のノートが無いつながり', `指す先のノートが無いつながりを除きました: ${r.id}`);
+      warn.add('dangling-relation', 'つなぐ先のノートが無いつながり', `つなぐ先のノートが無いつながりを除きました: ${r.id}`);
       continue;
     }
     let id = r.id;

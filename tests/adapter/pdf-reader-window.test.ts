@@ -119,10 +119,10 @@ describe('🔴 本体が文書を渡してこないとき ── 「読み込ん
     expect(document.body.getAttribute('data-pkc-pdf-state')).toBe('failed');
   });
 
-  it('断りの字は、画面の字として「PKC3 の画面から、もう一度開いてください」を言う(内部語なし)', () => {
+  it('断りの字は、画面の字として「PKC3 のウィンドウから、もう一度開いてください」を言う(内部語なし)', () => {
     boot();
-    expect(wire.DOC_FAILED).toBe('文書を受け取れませんでした。PKC3 の画面から、もう一度開いてください');
-    expect(wire.QUOTE_NO_REPLY).toContain('PKC3 の画面から、もう一度開いてください');
+    expect(wire.DOC_FAILED).toBe('文書を受け取れませんでした。PKC3 のウィンドウから、もう一度開いてください');
+    expect(wire.QUOTE_NO_REPLY).toContain('PKC3 のウィンドウから、もう一度開いてください');
     for (const t of [wire.DOC_FAILED, wire.QUOTE_NO_REPLY]) {
       expect(t, '内部の語が画面に出ている').not.toMatch(/pdf\.js|worker|token|BroadcastChannel/i);
     }

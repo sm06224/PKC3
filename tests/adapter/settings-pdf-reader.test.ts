@@ -55,7 +55,7 @@ describe('設定画面に在る(#275)', () => {
   it('🔴 画面の字(dt / label / hover)── 内部の部品名を出さない', () => {
     const { box } = setup();
     expect(box!.closest('dd')!.previousElementSibling!.textContent).toBe('PDF');
-    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の画面で開く(字を選んでノートへ引用できる)');
+    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の PDF ビューアで開く(字を選んでノートへ引用できる)');
     const title = box!.parentElement!.title;
     expect(title).toContain('ノートへ引用する');
     expect(title).toContain('オフにすると、ブラウザ内蔵の表示で開きます');

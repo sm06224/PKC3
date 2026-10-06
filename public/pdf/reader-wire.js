@@ -30,9 +30,9 @@
   var DOC_TIMEOUT_MS = 8000;
   var QUOTE_TIMEOUT_MS = 10000;
   /** 文書が来なかった / 来ても読めなかったときの字。⚠ 窓の中で 3 か所が同じ字を言う。 */
-  var DOC_FAILED = '文書を受け取れませんでした。PKC3 の画面から、もう一度開いてください';
+  var DOC_FAILED = '文書を受け取れませんでした。PKC3 のウィンドウから、もう一度開いてください';
   /** ノートへ引く返事が来なかったときの字。 */
-  var QUOTE_NO_REPLY = 'ノートへ引用できたか確かめられませんでした。PKC3 の画面から、もう一度開いてください';
+  var QUOTE_NO_REPLY = 'ノートへ引用できたか確かめられませんでした。PKC3 のウィンドウから、もう一度開いてください';
 
   /** 窓 → 本体の封筒を組む(唯一の口)。 */
   function envelope(kind, token, payload) {

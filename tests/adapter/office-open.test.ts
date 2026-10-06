@@ -282,7 +282,7 @@ describe('main.ts の配線(#1228 原文 pin)', () => {
  *
  * 守る主張:
  * ① 控えが無い(`mayHave` が偽)ときは**今までどおり同期で開く**(ポップアップ遮断に当たらない・訊かない)
- * ② 在るときは**答えが出るまで窓を開かない**。「保存していない編集を戻して開く」→ 控えの bytes を `fromShadow` つきで渡す /
+ * ② 在るときは**答えが出るまで窓を開かない**。「一時保存した内容で開く」→ 控えの bytes を `fromShadow` つきで渡す /
  *    「保存済みの版で開く」→ **控えを消してから**開く / やめる → 何も開かず何も消さない
  * ③ 開いている窓へ頼むときは訊かない(その窓が自分で訊く)/ lid の無い添付は訊かない
  * ④ 確認が出せない・控えが消えた、でも開けなくしない
@@ -355,7 +355,7 @@ describe('編集の控え(影)の確認(#1228 段 2)', () => {
     expect(m.port.ask).not.toHaveBeenCalled();
   });
 
-  it('🔴 ② 「保存していない編集を戻して開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
+  it('🔴 ② 「一時保存した内容で開く」: 答えが出るまで開かない / 控えの bytes を fromShadow つきで渡す / 控えは消さない', async () => {
     const m = makeShadow({ answer: 'wait' });
     const done = settle(m.opener.open(NOTE));
     await vi.waitFor(() => expect(m.port.ask).toHaveBeenCalledTimes(1));

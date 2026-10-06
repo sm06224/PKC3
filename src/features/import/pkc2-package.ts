@@ -117,7 +117,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 未知の版は**明示 reject** ── 「読めるところだけ読む」は静かな欠損を作る
   if (manifest.version !== 1) {
     throw new ZipReadError(
-      `このアプリが読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
+      `PKC3 が読めるのはバージョン 1 だけです(このファイルは ${String(manifest.version)})`,
     );
   }
 

@@ -335,7 +335,7 @@ export function builtAtLabel(builtAt: number): string {
 export function readmeText(src: SelfhostSource): string {
   return [
     ...README_HEAD,
-    '【この一式について】',
+    '【この zip について】',
     '  バージョン  : ' + src.version + ' (' + src.kind + ')',
     '  作った日時  : ' + builtAtLabel(src.builtAt),
     '  元のアドレス: ' + src.from,
@@ -344,15 +344,15 @@ export function readmeText(src: SelfhostSource): string {
     '  上の「元のアドレス」をブラウザで開いて、そこで',
     '     「自分のパソコンで動かす」を押してください。',
     '',
-    '  いま動かしているこの PKC(' + SELFHOST_ORIGIN + ')で押すと、',
-    '     まったく同じ一式がダウンロードされます。この一式は自分の中から集めるためです。',
+    '  いま動かしているこの PKC3(' + SELFHOST_ORIGIN + ')で押すと、',
+    '     まったく同じ zip がダウンロードされます。この zip は自分の中から集めるためです。',
     '     (コピーをもう 1 つ作りたいときは、それで正しい動きです)',
     '',
     '  ダウンロードし直したら、site フォルダを新しいものに入れ替えて、',
     '  ブラウザを再読み込みしてください。画面に「新しいバージョンがあります。」と出ます。',
     '  アドレスが同じなので、書いたノートはそのまま残ります。',
     '',
-    '  一式の形: ' + String(SELFHOST_LAYOUT),
+    '  zip の形: ' + String(SELFHOST_LAYOUT),
     '',
   ].join('\r\n');
 }

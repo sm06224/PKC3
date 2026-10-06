@@ -894,7 +894,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * handshake できるかの早い方で進む。⚠ lease を優先する ── handshake の相手が
        * 死んだ直後なら、こちらが本体になるのが正しい。
        */
-      root.textContent = '別のタブかウィンドウで開いています。そちらを閉じると、ここで続きが開きます…';
+      root.textContent = '別のタブまたはウィンドウで開いています。そちらを閉じると、ここで続きが開きます…';
       let held = false;
       const heldP = lease.whenHeld.then(() => {
         held = true;
@@ -1047,7 +1047,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return;
     }
     // 🔴 danger ── 打った字は AppState にしか無いので、本当に戻せない
-    void ask(plan.ask, { okLabel: 'この画面を読み込み直す', danger: true }).then((yes) => {
+    void ask(plan.ask, { okLabel: 'このタブを読み込み直す', danger: true }).then((yes) => {
       if (yes) location.reload();
     });
   };
@@ -1720,7 +1720,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
       onFellBack: (session) =>
-        showStatus(`「${session.name}」は PKC3 の画面で読めなかったため、ブラウザの表示で開きました`, {
+        showStatus(`「${session.name}」は PDF ビューアで読めなかったため、ブラウザ標準の PDF 表示で開きました`, {
           kind: 'caution',
         }),
       onLoadFailed: (session) =>
@@ -2081,7 +2081,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '別のタブ(またはウィンドウ)がこのノートの編集を引き継ぎました。⚠ ' +
+          '別のタブまたはウィンドウがこのノートの編集を引き継ぎました。⚠ ' +
           'ここで保存するとそちらの編集を上書きします。必要な内容をコピーしてから「編集をやめる」を押してください',
       });
     });
@@ -3050,7 +3050,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       void alarmChime.play().then((rang) => {
         showStatus(
           rang
-            ? '予定の時刻に、この音で知らせます(PKC を開いている間だけです)'
+            ? '予定の時刻に、この音で知らせます(PKC3 を開いている間だけです)'
             : 'この端末では音を出せませんでした。時間になったら画面の下のステータスバーでお知らせします',
         );
       });
@@ -3789,7 +3789,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                   (registered
                     ? 'アプリとして登録済みなので、この中身は次回から聞きません' +
                       '(中身が変わったらまた聞きます。システムでいつでも取り消せます)。\n'
-                    : 'この画面を開いている間は、もう一度は聞きません' +
+                    : 'このタブを開いている間は、もう一度は聞きません' +
                       '(読み込み直すとまた聞きます)。\n') +
                   '\n開きますか?',
                 { okLabel: 'ノートを渡して開く', danger: true },
@@ -4293,8 +4293,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             const res = await fetch(new URL('portable-template.html', document.baseURI));
             if (!res.ok)
               throw new Error(
-                `アプリのテンプレートを取得できませんでした(HTTP ${res.status})。` +
-                  'この配布の形にはテンプレートが同梱されていない可能性があります',
+                `元になるファイルを取得できませんでした(HTTP ${res.status})。` +
+                  'この配布の形には、元になるファイルが同梱されていない可能性があります',
               );
             return res.text();
           },
@@ -4661,7 +4661,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   setSqlEmbedRunner(async (sql, limits) => {
     await storeEffects?.settled();
     const ask = storePort.runReadOnlySql;
-    if (!ask) throw new Error('このページが古いままのため、SQL を実行できません。ページを再読み込みしてください');
+    if (!ask) throw new Error('このタブの PKC3 が古いままのため、SQL を実行できません。再読み込みしてください');
     return ask(sql, limits);
   });
   storeEffects = connectStoreEffects(dispatcher, storePort, {

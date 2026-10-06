@@ -86,7 +86,7 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
   it('知らせるだけの形は、取り消しのボタンを出さない', async () => {
     const p = alertInApp(host, '掃除しました');
     expect(cancelBtn().hidden, '取り消しのボタンが出ている').toBe(true);
-    expect(okBtn().textContent).toBe('メッセージを閉じる');
+    expect(okBtn().textContent).toBe('閉じる');
     okBtn().click();
     expect(await p).toBe('ok');
   });
@@ -199,17 +199,17 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
    * ⚠ ここは `confirmInApp` とは**別の関数**なので、上の test は 1 度も通らない
    *   (CLAUDE.md §7「同じ判定が複数の場所にある」)── 段① は alert 側の
    *   取りこぼしを 1 件も見ていなかった。実害は**断りの理由が丸ごと消える**こと
-   *   (「他のタブで編集中です(整理は行っていません)」はこれでしか届かない)。
+   *   (「他のタブで編集中です(何も消していません)」はこれでしか届かない)。
    */
   it('🔴 確認が開いている間に来た「お知らせ」も、順番に出る', async () => {
     const asking = confirmInApp(host, 'P');
-    const telling = alertInApp(host, '他のタブで編集中です(整理は行っていません)');
+    const telling = alertInApp(host, '他のタブで編集中です(何も消していません)');
     expect(bodyText(), '確認の本文がお知らせに書き換えられた').toBe('P');
     cancelBtn().click();
     expect(await asking).toBe('cancel');
     await tick();
     expect(dialog().open, 'お知らせが出ていない(捨てられた)').toBe(true);
-    expect(bodyText()).toContain('整理は行っていません');
+    expect(bodyText()).toContain('何も消していません');
     expect(cancelBtn().hidden, '知らせるだけなのに「やめる」が出ている').toBe(true);
     okBtn().click();
     await telling;
@@ -665,7 +665,7 @@ describe('日付の小窓の時刻欄(#865)', () => {
 /**
  * 🔴 **「Office で開く」で、保存していない編集の控えがあるとき**(#1228 段 2、裁定 Q1 = A)。
  *
- * ⚠ 字は裁定どおり(「保存していない編集を戻して開く」/「保存済みの版で開く」)。見るのは 4 つ:
+ * ⚠ 字は裁定どおり(「一時保存した内容で開く」/「保存済みの版で開く」)。見るのは 4 つ:
  * ①2 つの行がこの字・この順で並ぶ(先頭 = 既定 = 失う側ではない)②押した行がそのまま答え
  * ③`Escape` / 「やめる」は **どちらも選ばない**(`null`)④説明に「何分前」と「保存済みで開くと控えが消える」がある
  */
@@ -691,8 +691,8 @@ describe('Office の編集の控えの確認(#1228 段 2)', () => {
     const answered = pickOfficeShadowInApp(document.body, NOW - 12 * 60_000, NOW);
     const note = q('[data-pkc-field="pick-office-shadow-note"]').textContent ?? '';
     expect(note).toBe(shadowDialogNote(NOW - 12 * 60_000, NOW));
-    expect(note).toContain('12 分前の、保存していない編集が残っています');
-    expect(note).toContain('保存済みの版で開くと、その編集は消えます');
+    expect(note).toContain('12 分前に一時保存した内容があります');
+    expect(note).toContain('保存済みの版で開くと、その内容は消えます');
     cancelBtn().click();
     await answered;
   });

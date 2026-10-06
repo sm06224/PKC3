@@ -96,7 +96,7 @@ describe('start-edit の編集権ゲート(#177)', () => {
     await tick();
     expect(d.getState().phase).toBe('ready');
     // ⚠ 文言は押した場所と対(§1)── 「別のタブ」が理由だと分かる形
-    expect(d.getState().error).toContain('別のタブかウィンドウで編集中');
+    expect(d.getState().error).toContain('別のタブまたはウィンドウで編集中');
   });
 
   it('本体と話せないときは「編集中」と言わない(レビュー M-7 ── 文言の嘘)', async () => {
@@ -106,7 +106,7 @@ describe('start-edit の編集権ゲート(#177)', () => {
     q('[data-pkc-action="start-edit"]')!.click();
     await tick();
     expect(d.getState().phase).toBe('ready');
-    expect(d.getState().error).toContain('最初に開いた PKC のタブと通信できません');
+    expect(d.getState().error).toContain('最初に開いた PKC3 のタブと通信できません');
     expect(d.getState().error, '存在しない編集タブを探させる文言').not.toContain('編集中です');
   });
 
@@ -205,7 +205,7 @@ describe('Ctrl+クリックの編集権ゲート', () => {
     await tick();
     expect(acquireEditLock, 'ロックを問い合わせずに編集へ入った').toHaveBeenCalledWith('a');
     expect(d.getState().phase, '別のタブで編集中なのに入った').toBe('ready');
-    expect(d.getState().error).toContain('別のタブかウィンドウで編集中');
+    expect(d.getState().error).toContain('別のタブまたはウィンドウで編集中');
   });
 
   it('⚠ 対照群 ── 取れたら押した行から編集に入る', async () => {

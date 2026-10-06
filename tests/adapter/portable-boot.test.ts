@@ -195,7 +195,7 @@ describe('🔴 焼き込みが読み戻せないとき(#996)', () => {
       document.body.innerHTML = imageTag([9, 9, 9]);
       const start = (await resolvePortableStart(document, () => fakeStore(null)))!;
       expect(start.embeddedFailure).toBeNull();
-      expect(start.choice.why).toBe('保存領域がまだ空なので、この HTML ファイルに埋め込まれた中身を開きます');
+      expect(start.choice.why).toBe('このブラウザにはまだ保存されたノートが無いので、この HTML ファイルに埋め込まれた中身を開きます');
     });
   });
 });

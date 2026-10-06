@@ -141,7 +141,7 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   // ⚠ #239 でこの操作は設定の中(書き出しと片づけ)へ移った ── 先に開く
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, '[data-pkc-action="purge-orphan-assets"]');
-  expect(await answerAppDialog(page, 'ok')).toContain('未参照の添付データはありません');
+  expect(await answerAppDialog(page, 'ok')).toContain('どのノートからも使われていない添付はありません');
 
   // ── 同じファイルをもう一度取り込む(review mutation M23 / M24 / H-2)──
   // 既存 lid・既存 relation id・entryOrder のどれか 1 つでも見ていなければ、

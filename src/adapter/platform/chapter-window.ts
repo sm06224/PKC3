@@ -211,7 +211,7 @@ export const CHAPTER_WINDOW_TEXT = {
    * 元のウィンドウを閉じた後の説明(#1081 の動線レビュー)。⚠ そのとき「元のウィンドウで開く」は
    *   消える(`markChapterWindowOrphaned`)ので、ボタンの字で案内すると**行き止まり**になる。
    */
-  readOnlyOrphanHint: 'このウィンドウでは書けません。元のウィンドウを閉じたため、直すときは PKC でこのノートを開き直してください。',
+  readOnlyOrphanHint: 'このウィンドウでは書けません。元のウィンドウを閉じたため、直すときは PKC3 でこのノートを開き直してください。',
   offChapter: 'この章の外を指すリンクです(元のウィンドウで見てください)',
 } as const;
 

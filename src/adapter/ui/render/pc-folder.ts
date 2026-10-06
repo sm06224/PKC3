@@ -90,7 +90,7 @@ export class PcFolderRenderer {
         return;
       case 'none':
         this.host.append(
-          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC に取り込んで開きます。'),
+          para('pc-note', 'パソコンのフォルダを選ぶと、中のファイルが並びます。押すと PKC3 に取り込んで開きます。'),
           this.pickButton(),
         );
         return;
@@ -151,8 +151,8 @@ export class PcFolderRenderer {
       button(
         'pc-cut-folder',
         'pc-cut',
-        'フォルダを外す',
-        'このフォルダとの接続を外します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
+        '接続を解除',
+        'このフォルダとの接続を解除します(取り込んだノートはそのまま残ります。パソコンのファイルには何もしません)',
       ),
     );
     return band;
@@ -212,7 +212,7 @@ export class PcFolderRenderer {
       '',
       row.writeBack
         ? '取り込んで開きます。直して保存したあと、情報ペインの「元ファイルへ書き戻す」でパソコンのファイルも書き換えられます'
-        : '取り込んで開きます(PKC の添付や連絡先になります)。元のファイルへは書き戻せません',
+        : '取り込んで開きます(PKC3 の添付や連絡先になります)。元のファイルへは書き戻せません',
     );
     open.setAttribute('data-pkc-pc-index', String(row.index));
     const about = document.createElement('span');

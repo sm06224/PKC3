@@ -822,7 +822,7 @@ export function phaseBlockReason(phase: AppPhase): string | null {
  */
 export function endEditRefusal(what: string, state: AppState): string {
   if (state.phase !== 'editing')
-    return `${what}できませんでした: いま編集中ではありません(この画面は編集を終えています)`;
+    return `${what}できませんでした: いま編集中ではありません(このタブは編集を終えています)`;
   return `${what}できませんでした: 開いている本文が見つかりません(読み込み直すと直ります)`;
 }
 
@@ -879,7 +879,7 @@ const PARTIAL_DRAFT_WORDS: Record<PartialDraftKind, PartialDraftWords> = {
     noun: 'コード',
     saveVerb: 'コードを保存する',
     cancelVerb: 'コードの編集をやめる',
-    ambiguousLead: '同じ内容のコード枠が本文の中に複数あり',
+    ambiguousLead: '同じ内容のコードブロックが本文の中に複数あり',
   },
 };
 
@@ -934,7 +934,7 @@ function partialDraftNotFoundNote(kind: PartialDraftKind): string {
 export const SECTION_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('section');
 export const CODE_SAVE_NOT_FOUND_NOTE = partialDraftNotFoundNote('code');
 export const SECTION_SAVE_ANOTHER_WINDOW_NOTE =
-  '別のウィンドウがこのノートを書き換えたため、保存できませんでした(もう一度押してください)';
+  '別のタブまたはウィンドウがこのノートを書き換えたため、保存できませんでした(もう一度押してください)';
 
 /** {@link replaceSectionByHeading} の失敗理由 → user に見せる字。 */
 export function sectionSaveFailureNote(reason: 'missing' | 'ambiguous' | 'mismatch'): string {
@@ -6437,8 +6437,8 @@ function reduceCore(
           ...(diskAhead
             ? {
                 error:
-                  '別のウィンドウの変更と重なりました。こちらの内容で保存し、' +
-                  '別のウィンドウの版は履歴に残してあります(履歴から戻せます)',
+                  '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、' +
+                  '別のタブまたはウィンドウの版は履歴に残してあります(履歴から戻せます)',
               }
             : {}),
         },
@@ -6770,7 +6770,7 @@ function reduceCore(
       const identity = openCodeFenceAt(body, abs);
       if (identity === null) {
         return {
-          state: { ...state, error: 'このコード枠を編集できませんでした(本文を開き直してください)' },
+          state: { ...state, error: 'このコードブロックを編集できませんでした(本文を開き直してください)' },
           events: [],
         };
       }

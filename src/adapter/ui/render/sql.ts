@@ -78,7 +78,7 @@ import {
  * 🔴 **調べる相手の仕切りの字**(#992 ③)。⚠ 並びは**この順**(この PKC → 添付 → 手持ちの file)。
  * 🔑 test はここから引く(字を手で書き写さない)。
  */
-export const SQL_SOURCE_GROUP_PKC = 'この PKC';
+export const SQL_SOURCE_GROUP_PKC = 'この PKC3';
 export const SQL_SOURCE_GROUP_ATTACHED = '添付';
 export const SQL_SOURCE_GROUP_LOCAL = '手持ちのファイル';
 /**
@@ -585,7 +585,7 @@ export class SqlRenderer {
         return opt;
       };
       const pkcGroup = group(SQL_SOURCE_GROUP_PKC);
-      pkcGroup.append(option('', 'この PKC のノート'));
+      pkcGroup.append(option('', 'この PKC3 のノート'));
       sel.append(pkcGroup);
       if (attached.length > 0) {
         const g = group(SQL_SOURCE_GROUP_ATTACHED);
@@ -824,7 +824,7 @@ export class SqlRenderer {
      *   押せる状態を作らない(どちらも「いま出ている答え」を持ち帰る口である)。
      */
     /**
-     * 🔴 **書き込みの答えは持ち帰らない**(#918 段⑧)── 答えは「N 行に効きました」の 1 行で、
+     * 🔴 **書き込みの答えは持ち帰らない**(#918 段⑧)── 答えは「N 行が変更されました」の 1 行で、
      *   表(`Count` の 1 升)を「ノートへ」「ファイルへ」で持ち帰らせても意味が無い
      *   (押せるのに何も得られない口を作らない)。
      */
@@ -926,7 +926,7 @@ export class SqlRenderer {
     this.drawn = null;
     /**
      * 🔴 **書き込みの答えは表にしない**(#918 段⑧)。⚠ 上の 1 行(`noteLine`)が
-     *   「N 行に効きました」と言うので、`Count` の 1 升だけの表を出すと同じことを 2 回言う。
+     *   「N 行が変更されました」と言うので、`Count` の 1 升だけの表を出すと同じことを 2 回言う。
      * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
      */
     if (p.columns.length === 0 || duckDbWriteKind(p.ranSql) !== null) return;

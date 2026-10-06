@@ -115,7 +115,7 @@ describe('断る場面', () => {
     const dp = deps({ insideBundle: () => true });
     expect(await exportPortable(d, dp)).toBeNull();
     // ⚠ 「失敗しました」では足りない ── **何をすればよいか**まで言う
-    expect(errors[0]).toContain('アプリ入り HTML');
+    expect(errors[0]).toContain('PKC3 入り HTML');
     expect(errors[0]).toContain('ブラウザで開いた PKC3 から');
     expect(dp.order, '取りに行こうとしている').toEqual([]);
   });

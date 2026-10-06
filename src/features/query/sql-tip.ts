@@ -119,7 +119,7 @@ export function sqlTipText(
     return (
       '調べられるのは entries(ノート)/ relations(つながり)/ revisions(履歴)/ ' +
       'assets(添付)です。' +
-      '本文の csv のブロックに名前を付けると(3 つの逆引用符のあとに csv name=売上)、' +
+      '本文の csv のブロックに名前を付けると(``` のあとに csv name=売上)、' +
       'その名前で実行できます。どんな名前があるかは csv_tables で分かります' +
       '(使えない名前は、そこの why の列に理由が出ます)。' +
       /**
@@ -159,7 +159,7 @@ export function sqlTipText(
         (copy?.blob === true
           ? `BLOB の列は base64 の文字として入ります(長い字は ${String(MAX_CELL_CHARS)} 字までで切って出します)。`
           : '') +
-        'このファイルを選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+        'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
       );
     }
     const table = src === null ? (target.tables[0] ?? 'csv') : guestTableNameOf(src);
@@ -169,13 +169,13 @@ export function sqlTipText(
         ? // 🔑 `.parquet` / `.json` は**相手の列そのまま**(`_note` / `_lid` を足さない)
           '列は、そのファイルに書いてある列がそのまま並びます。'
         : '列は _note と _lid のあとに、ファイルの見出しがそのまま並びます。') +
-      'このファイルを選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+      'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
     );
   }
   return (
     `いま調べているのは ${target.name} です。このファイルにある表: ${tableList(target.tables)}。` +
     // 🔴 **この PKC の表が出てこないことを、先に言う**(打ってから英語で断られない)
-    'このファイルを選んでいる間、この PKC のノートの表(entries など)は出てきません。'
+    'このファイルを選んでいる間、この PKC3 のノートの表(entries など)は出てきません。'
   );
 }
 
@@ -221,7 +221,7 @@ function multiTipText(names: readonly string[], firstTables: readonly string[]):
     (sqliteNames.length > 0 ? `表の名前の一覧は ${DUCKDB_TABLE_LIST_SQL} で実行できます。` : '') +
     'JOIN で突き合わせられます。' +
     (anyCsv ? '.csv / .tsv の表には、先頭に _note と _lid の列が付きます。' : '') +
-    'これらのファイルを調べている間、この PKC のノートの表(entries など)は出てきません。'
+    'これらのファイルを調べている間、この PKC3 のノートの表(entries など)は出てきません。'
   );
 }
 

@@ -215,7 +215,7 @@ describe('押しても、まだ消えない(#986 段③)', () => {
     const m = mount();
     m.run.click();
     await settle();
-    expect(m.body(), '拾えた件数が出ていない').toContain('バックアップに入っているのは 0 件です');
+    expect(m.body(), '拾えた件数が出ていない').toContain('バックアップに入っているノートは 0 件です');
     expect(m.body(), '読めなかった数が出ていない').toContain('読み込めなかった箇所 7');
     expect(m.body(), '0 件なのに済んだ顔をしている').not.toContain('まだバックアップを取っていません');
   });

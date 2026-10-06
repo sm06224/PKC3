@@ -470,7 +470,7 @@ export class HelpRenderer {
     const openNote = document.createElement('span');
     openNote.setAttribute('data-pkc-field', 'settings-note');
     // 🔑 **何が起きるか**を押す前に言う(この画面の本文は消えない)
-    openNote.textContent = '目次つきで、ウィンドウいっぱいに出ます。この画面はそのまま残ります';
+    openNote.textContent = '目次つきで、ウィンドウいっぱいに出ます。いま開いているタブはそのまま残ります';
     openBar.append(openBtn, jumpKeysBtn, openNote);
     body.append(openBar);
 

@@ -82,7 +82,7 @@ export const DUCKDB_TABLE_LIFETIME = '作った表はウィンドウを閉じる
  * ⚠ 2 つ目の file を足す / 外すと**器を作り直す**(外を塞いだ器へは差し込めない)ので、
  *   作った表も消える。🔑 **字は 1 か所で持つ**(`DUCKDB_TABLE_LIFETIME` と同じ理由)。
  */
-export const DUCKDB_TABLE_RESET = '調べる対象にファイルを足したり外したりすると、作った表は消えます';
+export const DUCKDB_TABLE_RESET = '調べるファイルを増やしたり減らしたりすると、作った表は消えます';
 
 /** 頭の語(小文字)。⚠ `bare` は塗り潰し済み。 */
 function headOf(bare: string): string {
@@ -102,7 +102,7 @@ function kindOfBare(bare: string): DuckDbWriteKind | null {
  * その字は書き込みか(種類を返す)。⚠ **門を通った字**に当てる前提だが、
  * 通っていない字を渡しても害は無い(読むだけの字は `null`)。
  *
- * 🔑 画面の側も同じ 1 本を使う(「N 行に効きました」を言うか、表を描くか)──
+ * 🔑 画面の側も同じ 1 本を使う(「N 行が変更されました」を言うか、表を描くか)──
  *   判定を 2 つにしない(§7)。
  */
 export function duckDbWriteKind(sql: string): DuckDbWriteKind | null {
@@ -125,7 +125,7 @@ function countOf(columns: readonly string[], rows: readonly (readonly (string | 
 /**
  * 書き込みが通った直後に出す 1 行(件数 + 一言)。
  *
- * - 🔑 件数は **DuckDB が返した値**から言う(`N 行に効きました`)。無ければ「実行しました」
+ * - 🔑 件数は **DuckDB が返した値**から言う(`N 行が変更されました`)。無ければ「実行しました」
  * - 🔴 **`CREATE TABLE` には、作った表の寿命を添える**(閉じると消える。黙って消さない)
  * - `INSERT` / `UPDATE` / `DELETE` には「元の file は書き換わりません」を添える
  *   (`DELETE FROM csv` を打った人が最初に心配することである)

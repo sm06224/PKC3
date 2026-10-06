@@ -182,7 +182,7 @@ export class QueryRenderer {
      * 数えられない環境で「集計を数えています…」が**永久に出続ける**。
      */
     if (state.queryFailed) {
-      note.textContent = 'このページが古いままのため、集計を数えられませんでした。ページを再読み込みしてください';
+      note.textContent = 'このタブの PKC3 が古いままのため、集計を数えられませんでした。再読み込みしてください';
       return;
     }
     if (keys === null) parts.push('集計を数えています…');

@@ -1,17 +1,17 @@
 /**
- * smoke: **PDF を PKC の画面で読み、字を選んでノートへ引く**(#275 段①)。
+ * smoke: **PDF を PKC3 の PDF ビューアで読み、字を選んでノートへ引く**(#275 段①)。
  *
  * 裁定(Gemini):設定で選んだ人だけ・**既定はブラウザ内蔵の表示**。この 1 本が 1 回の起動で通す物語:
  *
- *   ① 何も選んでいない(既定)── 「別のウィンドウで見る」は今までの窓(`<object>`)で、PKC の画面は出ない(対照群)
+ *   ① 何も選んでいない(既定)── 「別のウィンドウで見る」は今までの窓(`<object>`)で、PKC3 の PDF ビューアは出ない(対照群)
  *   ② 設定の「PDF」を入にする
- *   ③ もう一度押す ── 別窓が **PKC の画面**で開き、見えている頁の前後だけが PNG の `<img>` で出て、字が選べる層がある
+ *   ③ もう一度押す ── 別窓が **PKC3 の PDF ビューア**で開き、見えている頁の前後だけが PNG の `<img>` で出て、字が選べる層がある
  *   ④ 末尾へ送ると、**外れた頁の ObjectURL が revoke される**(描いたら焼き、外れたら即返す)/ 文書内を探せる
  *     🔴 そして**「作った ObjectURL の数 − 返した数 ≤ 窓の中の絵の数」**(**描いている最中に窓から外れた頁**の
  *     返し忘れ ── 外れた頁の revoke が 1 度でも出れば「返した数 > 0」は満たされるので、数では見えない)
  *   ⑤ 3 頁目の字を選んで「ノートへ引く」── 本体のノートの末尾に**頁番号(p.3)と添付名つき**の引用が入る
  *   ⑥ 読めない PDF ── **断り文を出さず**ブラウザ内蔵の表示へ退避し、状態の行に 1 行出る
- *   ⑦ 電波が無いとき ── 1 度読めた後は**オフラインでも PKC の画面で読める**(`pdf/lib/` は precache に無いが、取れた後は
+ *   ⑦ 電波が無いとき ── 1 度読めた後は**オフラインでも PKC3 の PDF ビューアで読める**(`pdf/lib/` は precache に無いが、取れた後は
  *     service worker の runtime cache から出る)/ まだ 1 度も取れていない所では、内蔵の表示へ退避する
  *   ④′ 使われない間は**解析の worker を畳む**(窓の中に worker が 0 になる)/ 描いた頁の絵は残り、まだ描いていない頁を
  *     描くとき**黙って開き直す**(worker が 1 に戻る)。⚠ 60 秒は実時間では待てないので、窓の時計だけ差し替える
@@ -62,7 +62,7 @@ function buildPdf(pages: number): Buffer {
 
 const PAGES = 10;
 
-test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける(設定で選んだ人だけ)', async ({ page, context }) => {
+test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノートへ引ける(設定で選んだ人だけ)', async ({ page, context }) => {
   // ⚠ 窓の中の revoke を数える(描いた頁の ObjectURL を、外れたときに返しているか)。本体の側は数えない
   await context.addInitScript(() => {
     const w = window as unknown as { __revoked: string[]; __created: number };
@@ -93,7 +93,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
     'application/pdf',
   );
 
-  // ── ① 対照群: 何も選んでいない ── 今までのブラウザ内蔵の窓(PKC の画面は出ない) ──
+  // ── ① 対照群: 何も選んでいない ── 今までのブラウザ内蔵の窓(PKC3 の PDF ビューアは出ない) ──
   const [plain] = await Promise.all([
     page.waitForEvent('popup', { timeout: 10_000 }),
     clickReal(page, '[data-pkc-action="view-asset"]'),
@@ -101,7 +101,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   await plain.waitForSelector('[data-pkc-field="asset-window-pdf"]', { timeout: 5000 });
   expect(
     await plain.locator('[data-pkc-field="pdf-page-image"]').count(),
-    '既定(切)なのに PKC の画面で開いている',
+    '既定(切)なのに PKC3 の PDF ビューアで開いている',
   ).toBe(0);
   await plain.close();
 
@@ -122,7 +122,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   //    差し替えても時間は実時間どおり流れる(`fastForward` で進めたときだけ、予約が早く来る)
   await context.clock.install();
 
-  // ── ③ もう一度押す ── 別窓が PKC の画面で開く ──
+  // ── ③ もう一度押す ── 別窓が PKC3 の PDF ビューアで開く ──
   const [win] = await Promise.all([
     context.waitForEvent('page', { timeout: 15_000 }),
     clickReal(page, '[data-pkc-action="view-asset"]'),
@@ -130,7 +130,7 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   const winErrors: string[] = [];
   win.on('pageerror', (e) => winErrors.push(e.message));
   const img = win.locator('[data-pkc-field="pdf-page-image"]');
-  await expect(img.first(), '頁の絵が出ない(PKC の画面で開いていない / 読めていない)').toBeAttached({
+  await expect(img.first(), '頁の絵が出ない(PKC3 の PDF ビューアで開いていない / 読めていない)').toBeAttached({
     timeout: 20_000,
   });
   await expect
@@ -345,14 +345,14 @@ test('🔴 PDF を PKC の画面で読み、字を選んでノートへ引ける
   );
   await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', '見積.pdf');
   await context.route('**/*', (route) => route.abort('internetdisconnected'));
-  // (a) 1 度読めた後は、電波が無くても PKC の画面で読める(`pdf/lib/` は precache に無いが、取れた後は cache から出る)
+  // (a) 1 度読めた後は、電波が無くても PKC3 の PDF ビューアで読める(`pdf/lib/` は precache に無いが、取れた後は cache から出る)
   const [off] = await Promise.all([
     context.waitForEvent('page', { timeout: 15_000 }),
     clickReal(page, '[data-pkc-action="view-asset"]'),
   ]);
   await expect(
     off.locator('[data-pkc-field="pdf-page-image"]').first(),
-    '電波が無いと PKC の画面で読めない(1 度読めた後なのに、本体が cache から出ていない)',
+    '電波が無いと PKC3 の PDF ビューアで読めない(1 度読めた後なのに、本体が cache から出ていない)',
   ).toBeAttached({ timeout: 20_000 });
   expect(await off.locator('body').getAttribute('data-pkc-pdf-state')).toBe('ready');
   expect(await off.locator('[data-pkc-field="pdf-reader-fallback"]').count(), '1 度読めたのに内蔵の表示へ退避している').toBe(0);

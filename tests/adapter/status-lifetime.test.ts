@@ -421,7 +421,7 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/export-portable.ts',
-      starts: ["deps.notify('アプリ入り HTML を書き出しています…');"],
+      starts: ["deps.notify('PKC3 入り HTML を書き出しています…');"],
       end: /deps\.notify\(''\)/,
     },
     {
@@ -441,7 +441,7 @@ describe('全体の処理の出す側の全数', () => {
     },
     {
       file: 'src/adapter/ui/actions/selfhost.ts',
-      starts: ["deps.notify('自分のパソコンで動かす一式を作っています…');"],
+      starts: ["deps.notify('自分のパソコンで動かす zip を作っています…');"],
       end: /finally \{[\s\S]*deps\.notify\(''\)/,
     },
     {

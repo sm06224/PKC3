@@ -156,7 +156,7 @@ export async function folderSource(
   );
   if (dangling.length > 0) {
     warnings.push(
-      `このフォルダの外へ向かうつながり ${dangling.length} 件は含まれません(つなぎ先のノートが入らないため)`,
+      `このフォルダの外へ向かうつながり ${dangling.length} 件は含まれません(つなぐ先のノートが入らないため)`,
     );
   }
 

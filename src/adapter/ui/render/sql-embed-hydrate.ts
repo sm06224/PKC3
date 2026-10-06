@@ -92,7 +92,7 @@ export function askSqlEmbed(src: string, alive: () => boolean = () => true): Pro
     const check = checkReadOnlySql(src);
     if (!check.ok) throw new Error(check.why);
     const run = runner;
-    if (run === null) throw new Error('このページが古いままのため、SQL を実行できません。ページを再読み込みしてください');
+    if (run === null) throw new Error('このタブの PKC3 が古いままのため、SQL を実行できません。再読み込みしてください');
     try {
       // ⚠ 打つのは**全角を直した後の字**(`check.sql`)── 元の字を渡さない
       const r = await run(check.sql, {
