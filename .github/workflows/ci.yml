@@ -101,8 +101,15 @@ jobs:
           fi
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
+      # PR では変えた file に関係する unit と、全体を走査する門(repo-hygiene / ui-terms 等)を回す(#1390)
+      # (~5 分 → ~30 秒へ短縮。全量は下の main への push で必ず回す)
+      - name: Unit tests (PR: changed files + repo guards)
+        if: github.event_name == 'pull_request'
+        run: node scripts/test-pr.mjs origin/${{ github.base_ref }}
+      # main への push(merge 時)は全量 unit を必ず完走させる
+      - name: Full unit tests (main push)
+        if: github.event_name != 'pull_request'
+        run: npm test
       # ⚠ kind を**明示**する ── 既定(未指定)と `dev` が同じ生成物になるのは
       # `release-meta.ts` が両者を同じ定数へ畳んでいるからで、意図ではなく副作用
       # である(レビュー 2 巡目 L-4)。既定が変わると「CI が検品・smoke した物」と
