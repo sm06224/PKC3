@@ -184,7 +184,7 @@ describe('つなぐ前 / 繋いだ後', () => {
     const row = pane.querySelector<HTMLElement>('[data-pkc-pc-row="0"]')!;
     expect(row.title).toBe(PC_DIRECTORY_NOTE);
     expect(PC_DIRECTORY_NOTE).toContain('中へは入りません');
-    expect(PC_DIRECTORY_NOTE, '次にすること(切ってから選ぶ)が無い').toContain('切ってから');
+    expect(PC_DIRECTORY_NOTE, '次にすること(接続を解除してから選ぶ)が無い').toContain('接続を解除してから');
     expect(row.getAttribute('data-pkc-action')).toBe('pc-dir-note');
     // 押す(binder を通す)
     const d = new Dispatcher();

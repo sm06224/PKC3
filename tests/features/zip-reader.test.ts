@@ -181,7 +181,7 @@ describe('readZipEntry', () => {
       { name: 'broken.bin', bytes: bytesOf('中身'), corruptCrc: true },
     ]);
     const [e] = await readZipDirectory(zip);
-    await expect(readZipEntry(zip, e!)).rejects.toThrow(/正しく読めないか、別の物に差し替わっている/);
+    await expect(readZipEntry(zip, e!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
     // ⚠ 検証を外す逃げ道は**持たない**。逃げ道はサイズ照合まで一緒に落として
     // 「他人の entry の中身が返る」経路を開けていた(review M-5)
   });
@@ -191,7 +191,7 @@ describe('readZipEntry', () => {
       { name: 'b.txt', bytes: bytesOf('x'.repeat(500)), method: 8, corruptCrc: true },
     ]);
     const [e] = await readZipDirectory(zip);
-    await expect(readZipEntry(zip, e!)).rejects.toThrow(/正しく読めないか、別の物に差し替わっている/);
+    await expect(readZipEntry(zip, e!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
   });
 
   it('未対応の圧縮方式は方式番号を出して断る(skip して欠落させない)', async () => {
@@ -375,7 +375,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const a = await buildZip([{ name: 'a.txt', bytes: bytesOf('AAAAAAAAAA') }]);
     const b = await buildZip([{ name: 'a.txt', bytes: bytesOf('BBBBBBBBBB') }]);
     const [ea] = await readZipDirectory(a);
-    await expect(readZipEntry(b, ea!)).rejects.toThrow(/別の物に差し替わっている可能性があります/);
+    await expect(readZipEntry(b, ea!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
   });
 
   it('サイズだけが目次と違う壊れ方も断る(CRC が偶然一致する形)', async () => {

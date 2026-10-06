@@ -100,7 +100,7 @@ describe('parsePkc2Html (P6b)', () => {
     expect(() => parsePkc2Html(pkc2Html({ container: { meta: {} } }))).toThrow(
       /形が想定と違います/,
     );
-    expect(() => parsePkc2Html(pkc2Html({ export_meta: {} }))).toThrow(/コンテナが空です/);
+    expect(() => parsePkc2Html(pkc2Html({ export_meta: {} }))).toThrow(/PKC2 の書き出しデータが空です/);
     expect(() => parsePkc2Html(`<html><head>
       <script id="pkc-meta" type="application/json">{"app":"pkc2","schema":1}</script>
       </head><body><script id="pkc-data" type="application/json">{ 壊れた</script></body></html>`),

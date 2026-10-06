@@ -95,7 +95,7 @@ import {
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
 // 🔑 目印の表は**共有の 1 本**(2026-09-13)── 絵の一覧・「なし」・いま選んでいる物の
 //    示し方は、この面と小窓で**同じ物**を使う(2 か所に散らさない ── §7)
-// ⚠ 件数(「絵から選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
+// ⚠ 件数(「アイコンから選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
 //    1 つ足した日に嘘になる。⚠ 絵の一覧そのものをここで読むと表が 2 本になるので、
 //    数だけを受け取る(門は `tests/adapter/icon-palette.test.ts`)
 import { buildIconPalette, ICON_CHOICE_COUNT } from './icon-palette';
@@ -2233,7 +2233,7 @@ export class DetailRenderer {
          *   ない。引く相手は保存済みのノートなので、打鍵では答えの元が動かない
          *   (SQL の字が変われば別の問い合わせとして引く。保存して抜ければ読む面が引き直す)。
          */
-        // 🔴 答えに「保存したときの答え」を添える(#1254 §1)── 下見は保存済みの本文で引くので、
+        // 🔴 答えに「保存したときの結果」を添える(#1254 §1)── 下見は保存済みの本文で引くので、
         //   打っている最中の SQL の答えではない(読む面は保存済みそのものなので添えない)
         this.sqlEmbeds.sync(preview, open.body, true);
       },
@@ -3991,11 +3991,11 @@ function appIconPick(current: unknown, lid: string): HTMLElement {
   box.open = now !== '';
   const head = document.createElement('summary');
   /**
-   * ⚠ **件数を書く**(「絵から選ぶ」だけにしない)── 開く前に「どれだけ出るか」が
+   * ⚠ **件数を書く**(「アイコンから選ぶ」だけにしない)── 開く前に「どれだけ出るか」が
    *   分かると、押すかどうかを決められる。
    * 🔑 数は表を組む file から採る ── 字で書くと、絵を 1 つ足した日に嘘になる。
    */
-  head.textContent = `絵から選ぶ(${ICON_CHOICE_COUNT})`;
+  head.textContent = `アイコンから選ぶ(${ICON_CHOICE_COUNT})`;
   box.append(head, appIconPalette(current, lid));
   return box;
 }

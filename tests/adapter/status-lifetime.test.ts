@@ -242,8 +242,8 @@ describe('Q3 全体の処理の進行中は別の欄', () => {
     ['問題', { kind: 'problem' as const }],
   ])('🔴 %s の知らせが来たら、進行中の欄も空になる(処理の終わりは結果で告げられる)', (_n, opts) => {
     const r = rig();
-    r.n.show('アプリ入り HTML を書き出しています…');
-    expect(r.n.progressLine()).toBe('アプリ入り HTML を書き出しています…'); // 前提(対照群)
+    r.n.show('PKC3 入り HTML を書き出しています…');
+    expect(r.n.progressLine()).toBe('PKC3 入り HTML を書き出しています…'); // 前提(対照群)
     r.n.show('書き出しました', opts);
     expect(r.n.progressLine(), '終わりを告げる知らせが来ても進行中が居座った').toBe('');
     expect(r.n.noticeLine()).toBe('書き出しました');

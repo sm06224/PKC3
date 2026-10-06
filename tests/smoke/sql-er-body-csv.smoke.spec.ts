@@ -21,6 +21,7 @@
  *   同じ SQL の面・同じ図の道中で確かめる(`gotoApp` を 2 度呼ばない)。
  */
 import { test, expect } from '@playwright/test';
+import { SQL_EMBED_SAVED_TEXT } from '../../src/features/markdown/sql-embed';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -188,10 +189,10 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   ).toHaveCount(0);
 
   /**
-   * 🔴 **答えを引き終えた後は「引いています」が残らず、読む面に「保存したときの答え」は出ない**
+   * 🔴 **答えを引き終えた後は「引いています」が残らず、読む面に「保存したときの結果」は出ない**
    * (#1254 §1)。⚠ 引いている最中の 1 行は一瞬で消えるので実ブラウザでは**消えたこと**を見る
    * (在るときの検査は unit の `sql-embed-hydrate.test.ts`)。
-   * 🔴 そして**編集に入り直すと、2 列の下見の答えの下にだけ「保存したときの答え」が出る**
+   * 🔴 そして**編集に入り直すと、2 列の下見の答えの下にだけ「保存したときの結果」が出る**
    * (小さく・薄い字で、表の下)。⚠ 新しい起動は足さない ── この道中で編集に入り直す。
    */
   await expect(embedHost.locator('[data-pkc-field="sql-embed-saved"]'), '読む面に添え書きが出た').toHaveCount(0);
@@ -200,7 +201,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   const previewHost = page.locator('[data-pkc-region="editor-preview"] [data-pkc-sql-embed]');
   await expect(previewHost.locator('tbody tr'), '下見に答えの表が出ない').toHaveCount(2, { timeout: 15_000 });
   const savedNote = previewHost.locator('[data-pkc-field="sql-embed-saved"]');
-  await expect(savedNote, '下見の答えに「保存したときの答え」が無い').toHaveText('保存したときの答え');
+  await expect(savedNote, '下見の答えに「保存したときの結果」が無い').toHaveText(SQL_EMBED_SAVED_TEXT);
   const savedLook = await savedNote.evaluate((el) => {
     const probe = document.createElement('div');
     probe.style.color = 'var(--muted)';

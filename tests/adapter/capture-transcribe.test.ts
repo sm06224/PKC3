@@ -23,7 +23,7 @@ import { initialState, viewModeLabel, type AppState } from '../../src/adapter/st
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { captureItemsFrom } from '../../src/features/capture/capture-item';
 import { ASR_LANGUAGE, ASR_PARTS } from '../../src/features/asr/asr-parts';
-import { ASR_SECTION_LABEL, transcriptHeading } from '../../src/features/asr/asr-text';
+import { ASR_SECTION_LABEL, STORAGE_SECTION_LABEL, transcriptHeading } from '../../src/features/asr/asr-text';
 import type { AsrJob, AsrJobResult } from '../../src/adapter/platform/asr/asr-run';
 
 const body = (name: string, mime: string): string =>
@@ -168,15 +168,17 @@ describe('① 部品が無いとき', () => {
 
   /**
    * 🔴 **案内の字は、画面に実在する名前から引く**(#996 / #1011 の作法)。
-   * ⚠ 期待値を手で「システム → 音声認識」と書かない ── 入口の名前を変えた日に、
+   * ⚠ 期待値を手で「システム → 保存領域 → 音声認識」と書かない ── 入口の名前を変えた日に、
    *   実装も検査も古い字のまま緑になる。
    */
   it('🔴 案内の字は入口の名前(viewModeLabel)と節の見出し(ASR_SECTION_LABEL)から引ける', () => {
     const m = asrMissingText();
     expect(m).toContain(viewModeLabel('settings'));
     expect(m).toContain(ASR_SECTION_LABEL);
-    // 入口 → 節の順に 1 本の道として書く(逆に読ませない)
-    expect(m).toContain(`${viewModeLabel('settings')} → ${ASR_SECTION_LABEL}`);
+    // 入口 → 保存領域 → 節の順に 1 本の道として書く(逆に読ませない)
+    expect(m).toContain(
+      `${viewModeLabel('settings')} → ${STORAGE_SECTION_LABEL} → ${ASR_SECTION_LABEL}`,
+    );
   });
 
   it('壊れた部品は「入っていない」にせず、理由を出す(取り直せば直る)', async () => {

@@ -550,7 +550,7 @@ describe('🔴 ④⑤ 断る / 捨てる(#413)', () => {
     expect(b.attached, '捨てたのに添付を作った').toEqual([]);
     expect(appends(b.events), '捨てたのに本文を書いた').toEqual([]);
     expect(b.service.line(), '捨てたのに帯が残っている').toBeNull();
-    expect(b.notices.join(''), '捨てたことを言っていない').toMatch(/捨てました/);
+    expect(b.notices.join(''), 'やめたことを言っていない').toMatch(/残さずにやめました/);
   });
 });
 

@@ -177,7 +177,7 @@ describe('quoteIntoNote', () => {
       type: 'APPEND_FAILED',
       lid: 'att',
       gen: g.d.getState().lockGen,
-      error: '別のウィンドウがこのノートを書き替えたため、追記できませんでした(もう一度押してください)',
+      error: '別のウィンドウがこのノートを書き換えたため、追記できませんでした(もう一度押してください)',
     });
     const r = await p;
     expect(r.ok).toBe(false);

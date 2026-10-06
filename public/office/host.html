@@ -9,7 +9,7 @@
   Office(LibreOffice wasm)を動かす**別窓**(#88 / 統合設計 O2)。
 
   🔴 user 裁定 2026-08-10「別タブでも構いません / 見やすければいいのだ /
-     同じ窓にこだわると、PKC3 の編集をしながら資料を読むとかできませんし」。
+     同じ窓にこだわると、PKC の編集をしながら資料を読むとかできませんし」。
 
   ## なぜ別窓なのか(要点だけ。詳細は設計 doc §3)
   - LO は **worker へ出せない**(Qt6 の wasm plugin が DOM を直に触る)
@@ -1670,7 +1670,7 @@
     try { db = await openDb(); } catch (e) { fail('この端末の保存領域を開けません'); return; }
     var meta = await idbGet(db, 'meta', 'pack');
     if (!meta || !Array.isArray(meta.files)) {
-      fail('Office 一式がまだ入っていません(PKC3 の設定から入れてください)');
+      fail('Office 一式がまだ入っていません(PKC3 の システム → 保存領域 → Office 表示 から入れてください)');
       say('not-installed');
       return;
     }

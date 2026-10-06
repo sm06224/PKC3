@@ -70,7 +70,7 @@ export function packUpdateText(diff: PackVersionDiff): string | null {
  */
 export function packUpdateNotice(diff: PackVersionDiff): string | null {
   if (diff.kind === 'quiet') return null;
-  return 'Office の一式は、配布元と別のバージョンです(システム → Office 表示 から入れ直せます)';
+  return 'Office の一式は、配布元と別のバージョンです(システム → 保存領域 → Office 表示 から入れ直せます)';
 }
 
 export interface PackUpdateCheckDeps {

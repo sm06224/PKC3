@@ -84,7 +84,7 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
         image: null,
         failure:
           'この HTML ファイルに埋め込まれた中身が大きすぎて、このブラウザでは読み戻せません' +
-          `(約 ${humanBytes(embeddedBytesOf(el))})。一式のバックアップ(.pkc3-full.zip など)から取り込んでください`,
+          `(約 ${humanBytes(embeddedBytesOf(el))})。バックアップ(.pkc3-full.zip など)から取り込んでください`,
       };
     }
     return {

@@ -9,7 +9,7 @@
  *  ③ 状態で出る物が切り替わる(まだ / 取り込み済み / 取り込み中)
  *  ④ 器は 1 度だけ組み、字と hidden だけ差し替える(押している最中のボタンを作り直さない)
  *  ⑤ 押し所が binder を通って実体まで届く / 設定の面の「保存領域」に実際に載っている
- *  ⑥ 🔴 案内の字(「システム → 音声認識」)が、画面に実在する名前と一致する
+ *  ⑥ 🔴 案内の字(「システム → 保存領域 → 音声認識」)が、画面に実在する名前と一致する
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -25,7 +25,7 @@ import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/b
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, viewModeLabel } from '../../src/adapter/state/app-state';
 import { ASR_PARTS, asrMemoryNote, asrPartLabel } from '../../src/features/asr/asr-parts';
-import { ASR_SECTION_LABEL } from '../../src/features/asr/asr-text';
+import { ASR_SECTION_LABEL, STORAGE_SECTION_LABEL } from '../../src/features/asr/asr-text';
 import { asrMissingText } from '../../src/adapter/ui/actions/capture-transcribe';
 import type { AsrInstalled } from '../../src/adapter/platform/asr/asr-pack-store';
 
@@ -251,17 +251,19 @@ describe('⑤ 設定の面(システム)に実際に載っている', () => {
 
   /**
    * 🔴 **案内の字が、画面に実在する名前を指している**(#996 の作法 ── 手で書かず、描かせて引く)。
-   * 「システム → 音声認識 で取り込んでください」の 2 語が、実際に描かれる面の名前と同じ。
+   * 「システム → 保存領域 → 音声認識 で取り込んでください」の 3 語が、実際に描かれる面の名前と同じ。
    */
-  it('🔴 ⑥ 案内の「システム」「音声認識」は、描かれる面の見出しと同じ字', () => {
+  it('🔴 ⑥ 案内の「システム」「保存領域」「音声認識」は、描かれる面の見出しと同じ字', () => {
     const region = document.createElement('div');
     document.body.append(region);
     new SettingsRenderer(region, new JobMonitor()).render(initialState);
     const title = region.querySelector('[data-pkc-field="pane-title"]')?.textContent;
     const head = region.querySelector('[data-pkc-region="settings-asr"] h4')?.textContent;
+    const group = region.querySelector('[data-pkc-region="settings-storage"] h3')?.textContent;
     expect(title, '面の見出しが、案内が言う入口の名前と違う').toBe(viewModeLabel('settings'));
     expect(head, '節の見出しが、案内が言う名前と違う').toBe(ASR_SECTION_LABEL);
-    expect(asrMissingText()).toContain(`${title} → ${head}`);
+    expect(group, '音声認識の 1 つ上の節の見出しが、案内が言う名前と違う').toBe(STORAGE_SECTION_LABEL);
+    expect(asrMissingText()).toContain(`${title} → ${group} → ${head}`);
   });
 });
 

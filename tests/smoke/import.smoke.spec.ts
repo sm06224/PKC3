@@ -129,11 +129,11 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   ).toHaveText('処理の記録');
   // ⚠ 「車線が在る」で止めない ── **実際に完了した**行まで見る
   //    (spawn しただけで 1 件も流れていない実装が通ってしまう)。
-  //    行の形は job-monitor.ts の `PHASE_LABEL` + lane 名(`asset`)
+  //    行の形は message-log.ts の「出所: 字」で、字は job-monitor.ts の `PHASE_LABEL`、出所は lane 名(`asset`)
   await expect(
     jobsPane,
     '添付の展開がメインスレッドで走っている(ワーカーへ出ていない ── 処理の記録に asset の完了が無い)',
-  ).toContainText(/asset ── 完了/, { timeout: 10_000 });
+  ).toContainText(/asset: 完了/, { timeout: 10_000 });
   // ⚠ ここは detail(処理の記録)の面に居る ── 下の「先に開く」がシステムを開く
 
   // ── 取り込んだ asset は「参照されている」と実 sqlite 走査で判定される ──

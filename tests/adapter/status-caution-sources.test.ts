@@ -171,7 +171,7 @@ describe('断りは caution で出る(挙動)', () => {
     b.d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
     click(b.root, 'edit-code-block'); // 開いているが、刻印のある塊の中ではない
     expect(b.said).toEqual([
-      { text: 'このコードの枠が見つかりません(本文を開き直してください)', opts: { kind: 'caution' } },
+      { text: 'このコードブロックが見つかりません(本文を開き直してください)', opts: { kind: 'caution' } },
     ]);
   });
 

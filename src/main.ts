@@ -1808,7 +1808,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         builtAt: BUILT_AT,
       },
     }).catch((e: unknown) => {
-      showStatus(`一式を作れませんでした: ${e instanceof Error ? e.message : String(e)}`, {
+      showStatus(`自分のパソコンで動かす zip を作れませんでした: ${e instanceof Error ? e.message : String(e)}`, {
         kind: 'problem',
       });
     });
@@ -3649,7 +3649,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    届かない。押しても一覧が消えず「効いていない」に見える(実際に踏んだ)。
       //    `setExternalImages` と同じ倒し方に揃える。
       center.render(dispatcher.getState());
-      showStatus('素のまま起動の許可を取り消しました');
+      showStatus('「ノートを渡して開く」の許可を取り消しました');
     },
     /**
      * 🔴 **目次を見せる許可を取り消す**(#195 / C-5 段①)。

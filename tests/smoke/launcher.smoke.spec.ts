@@ -1709,7 +1709,7 @@ test('🔴 登録 → タイル → SPA が動き、開き直しても続きが�
   // 🔴 畳んでいる間は、絵は**押せない所に在る**(見えていない)
   await expect(folded().first(), '畳んでいるのに絵が見えている').toBeHidden();
   await clickReal(page, '[data-pkc-field="app-icon-pick"] > summary');
-  await expect(pick, '「絵から選ぶ」を押しても開かない').toHaveAttribute('open', /.*/);
+  await expect(pick, '「アイコンから選ぶ」を押しても開かない').toHaveAttribute('open', /.*/);
   // 🔴 開いたら**端まで押せる**(dead click と occlusion まで見る)
   await expectReachable(page, folded().last());
   await clickReal(page, '[data-pkc-action="pick-app-icon"][data-pkc-icon-name="map"]');

@@ -332,7 +332,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   // 断り文は出さない(窓の中に message は無い)── 退避したことは本体の状態の行に 1 行
   await expect(bad.locator('#msg'), '退避なのに断り文が出ている').toBeHidden();
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(
-    'ブラウザの表示で開きました',
+    'PDF 表示で開きました',
     { timeout: 10_000 },
   );
   await bad.close();

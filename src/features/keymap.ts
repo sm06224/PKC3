@@ -284,7 +284,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+Semicolon'],
     whileTyping: true,
-    note: '編集中だけ効きます(本文の caret の位置に入ります)',
+    note: '編集中だけ効きます(本文のカーソルの位置に入ります)',
   },
   /**
    * 🔴 **その場で計算する**(#766 D-2、2026-09-08)。
@@ -319,7 +319,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+Shift+K'],
     whileTyping: true,
-    note: '編集中だけ効きます(題名で探して、caret の位置にリンクが入ります)',
+    note: '編集中だけ効きます(題名で探して、カーソルの位置にリンクが入ります)',
   },
   /**
    * 🔴 **雛形を入れる**(#196 / B-2 段②-b)。
@@ -333,7 +333,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+Slash'],
     whileTyping: true,
-    note: '編集中だけ効きます(本文の caret の位置に入ります)',
+    note: '編集中だけ効きます(本文のカーソルの位置に入ります)',
   },
   {
     id: 'toggle-replace',

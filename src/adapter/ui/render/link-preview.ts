@@ -129,7 +129,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     // Safety hint footer
     const hint = doc.createElement('div');
     hint.className = 'pkc-link-preview-safe-hint';
-    hint.textContent = '新しいタブで安全に開きます (別ウィンドウ)';
+    hint.textContent = '新しいタブで開きます';
     card.append(hint);
 
     return card;

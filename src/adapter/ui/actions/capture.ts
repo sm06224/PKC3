@@ -431,7 +431,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        */
       h.discard();
       close();
-      deps.notify(`${CAPTURE_LABEL[h.kind]}を捨てました`);
+      deps.notify(`${CAPTURE_LABEL[h.kind]}を残さずにやめました`);
     },
   };
 }

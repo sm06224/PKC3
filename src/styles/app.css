@@ -964,7 +964,7 @@ select:focus-visible {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-/* 左の列の下端: **ノート全体**に対する操作 */
+/* 左の列の下端: **コレクション**に対する操作 */
 [data-pkc-region='collection-bar'] {
   display: flex;
   flex-wrap: wrap;
@@ -2069,7 +2069,7 @@ button[data-pkc-primary] [data-pkc-icon] {
   margin: var(--s2) 0 0;
   color: var(--muted);
 }
-/* 🔴 2 列の下見の答えに添える「保存したときの答え」(#1254 §1)。注記より小さく、控えめに。 */
+/* 🔴 2 列の下見の答えに添える「保存したときの結果」(#1254 §1)。注記より小さく、控えめに。 */
 [data-pkc-sql-embed] [data-pkc-field='sql-embed-saved'] {
   margin: var(--s2) 0 0;
   color: var(--muted);

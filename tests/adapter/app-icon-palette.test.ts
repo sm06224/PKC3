@@ -173,7 +173,7 @@ describe('目印を絵から選ぶ(#770 段②)', () => {
     ).toBe(TILE_ICON_CHOICES.length + 1);
     // 🔑 開く前に「どれだけ出るか」が字で分かる(押すかどうかを決められる)
     expect(pick!.querySelector('summary')?.textContent, '件数が出ていない').toBe(
-      `絵から選ぶ(${TILE_ICON_CHOICES.length})`,
+      `アイコンから選ぶ(${TILE_ICON_CHOICES.length})`,
     );
   });
 

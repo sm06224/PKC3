@@ -247,7 +247,7 @@ describe('タイマー(#279)', () => {
     await settle();
     expect(b.appends(), '捨てたのに本文へ書いた').toHaveLength(0);
     expect(b.service.runs()).toHaveLength(0);
-    expect(b.notices.join('\n')).toContain('捨てました');
+    expect(b.notices.join('\n')).toContain('書かずにやめました');
   });
 
   it('🔴 ⑥ 刻みは走っている間だけ張る(0 本で外す)', () => {

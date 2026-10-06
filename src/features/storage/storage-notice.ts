@@ -85,7 +85,7 @@ export function storageWhereLine(
   const fell = fallbackReason !== undefined && fallbackReason !== '';
   if (vfs !== 'memory') return '保存領域: ブラウザの中(閉じても残ります)';
   return fell
-    ? '保存領域: このタブだけ(閉じると消えます)。ほかのタブを閉じて、読み込み直してください'
+    ? '保存領域: このタブだけ(⚠ 閉じると消えます)。ほかのタブを閉じて、読み込み直してください'
     : '保存領域: このタブだけ(PKC3 入り HTML なので、書き出して保存してください)';
 }
 

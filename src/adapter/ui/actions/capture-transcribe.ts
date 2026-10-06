@@ -28,6 +28,7 @@ import {
 } from '@features/asr/asr-parts';
 import {
   ASR_SECTION_LABEL,
+  STORAGE_SECTION_LABEL,
   transcriptHeading,
   transcriptLines,
   transcriptText,
@@ -41,7 +42,7 @@ import { createWritableQueue } from './writable-queue';
  * ⚠ **字は画面から引く**(手で「システム」と書かない ── 入口の名前を変えた日に食い違う)。
  */
 export function asrMissingText(): string {
-  return `音声認識の一式がまだ取り込まれていません。${viewModeLabel('settings')} → ${ASR_SECTION_LABEL} で取り込んでください。`;
+  return `音声認識の一式がまだ取り込まれていません。${viewModeLabel('settings')} → ${STORAGE_SECTION_LABEL} → ${ASR_SECTION_LABEL} で取り込んでください。`;
 }
 
 /** 端末に入っていて、実際に使える 1 つ(重みと実行の部品が揃っている)。 */

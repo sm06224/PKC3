@@ -298,7 +298,7 @@ describe('readContainerBundle — texts', () => {
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([]);
     // 先頭は**実際に読めない**(この対照が無いと壊せていない fixture を見逃す)
-    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/正しく読めないか、別の物に差し替わっている/);
+    await expect(readAssetSource(got.assetSources.get('k')!)).rejects.toThrow(/ZIP の中身を最後まで読めませんでした/);
     // 控えに健全な複製が残っており、そちらは読める
     const alts = got.assetAlternates.get('k')!;
     expect(alts).toHaveLength(2);

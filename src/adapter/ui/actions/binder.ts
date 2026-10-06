@@ -527,7 +527,7 @@ async function browseArchive(
   if (wantWindow && win === null) {
     say(
       '別のウィンドウが開けなかったので、この画面で開きます' +
-        '(いつもこの画面でよければ、システムの「開く場所」で選べます)',
+        '(いつもこの画面でよければ、システムの「zip ファイルを開く場所」で選べます)',
     );
   }
   const marks =
@@ -5994,7 +5994,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const rawLine = tableLineAt(target, body);
     if (rawLine === null) {
-      services.showStatus?.('このコードの枠が見つかりません(本文を開き直してください)', CAUTION);
+      services.showStatus?.('このコードブロックが見つかりません(本文を開き直してください)', CAUTION);
       return;
     }
     startCodeEditAt(dispatcher, services, root, rawLine - frontmatterLineCount(body));
@@ -9086,7 +9086,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔑 当てたら欄を空にする ── 残すと「もう一度押せる」ように見える(二重適用)
     ta.value = '';
     paintPlan(root, dispatcher, '');
-    services.showStatus?.(`整理案を当てました(${plan.ops.length} 件)`);
+    services.showStatus?.(`整理案を適用しました(${plan.ops.length} 件)`);
   },
   /**
    * 🔴 **何が容量を食っているか**(#415)。
@@ -9416,7 +9416,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (sum === null) return;
     const reset = services.resetContainer;
     if (reset === undefined) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では捨てられません' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この環境では初期化できません' });
       return;
     }
     const cid = dispatcher.getState().cid;
@@ -9510,7 +9510,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         } catch (e) {
           sum.textContent = '';
           sum.hidden = true;
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `捨てられませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${String(e)}` });
         }
       });
   },
@@ -14148,7 +14148,7 @@ export function bindActions(
     if (st.entrySort !== 'manual') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '並べ替えは「手動の順」で並べているときだけ効きます(上の並び順を戻してください)',
+        error: '並べ替えは「自分で並べた順」で並べているときだけ効きます(上の並び順を戻してください)',
       });
       return;
     }

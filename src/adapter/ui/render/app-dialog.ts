@@ -1115,7 +1115,7 @@ export function pickCommandInApp(
 ): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = '操作を名前で探す';
+    f.title.textContent = '操作を探す';
     f.body.textContent = '';
 
     const input = document.createElement('input');

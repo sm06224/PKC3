@@ -685,7 +685,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   createBlockedNote.hidden = true;
   createBar.append(createBlockedNote);
 
-  /** ノート全体に対する操作(取り込む / 書き出す / 片づける)。 */
+  /** コレクションに対する操作(取り込む / 書き出す / 片づける)。 */
   const collectionBar = document.createElement('div');
   collectionBar.setAttribute('data-pkc-region', 'collection-bar');
   /**

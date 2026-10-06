@@ -172,7 +172,7 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
       running.delete(lid);
       armTick();
       paint();
-      deps.notify(`「${run.title}」の計測を捨てました(本文には入れていません)`);
+      deps.notify(`「${run.title}」の計測を書かずにやめました(本文には入れていません)`);
     },
   };
 }

@@ -189,7 +189,7 @@ export function integritySummary(r: IntegrityReport): string {
   }
   if (t > 0) {
     return (
-      `本文をしまっている所が読めません(${t} 件)。取り出せるのは一部だけになります。` +
+      `ノートの本文が入っている部分が読めません(${t} 件)。取り出せるのは一部だけになります。` +
       `左下の「${BACKUP_LABEL}」を押すと、読める分を集めて書き出します。` +
       `そのあと「${CONTAINER_REBUILD_LABEL}」で、読めた分だけで作り直せます。`
     );

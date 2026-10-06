@@ -23,6 +23,7 @@ import type { PersistState } from '@adapter/platform/storage-persist';
 import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { THEMES } from './theme';
 import { PAGE_FORMATS } from '@features/page-format';
+import { STORAGE_SECTION_LABEL } from '@features/asr/asr-text';
 import { PROSE_ALIGNS } from '@features/prose-align';
 import { OPEN_PLACES } from '@features/open-place';
 import { APP_OPEN_TARGETS } from '@features/launcher/open-target';
@@ -1062,7 +1063,7 @@ export class SettingsRenderer {
     const storageSection = document.createElement('section');
     storageSection.setAttribute('data-pkc-region', 'settings-storage');
     const storageHead = document.createElement('h3');
-    storageHead.textContent = '保存領域';
+    storageHead.textContent = STORAGE_SECTION_LABEL;
     storageSection.append(storageHead);
     storageSection.append(this.buildPersistSection(persistDl));
     storageSection.append(buildSettingsCommands());

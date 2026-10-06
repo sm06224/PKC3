@@ -80,7 +80,7 @@ describe('操作を名前で探す(一覧)', () => {
   it('説明の中の語でも当たる(名前を思い出せないとき)', () => {
     const cmd = findCommand('insert-date')!;
     expect(cmd.note ?? '', '前提が崩れている(説明が無い)').not.toBe('');
-    expect(idsOf('caret'), '説明で当たっていない').toContain('insert-date');
+    expect(idsOf('カーソル'), '説明で当たっていない').toContain('insert-date');
   });
 
   it('綴り(id)でも当たる ── 大文字小文字は問わない', () => {

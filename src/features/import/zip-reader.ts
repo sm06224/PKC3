@@ -345,9 +345,9 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
   if (actualCrc !== entry.crc32) {
     // PKC2 はここを検証しておらず、asset だけ壊れた ZIP が無言で欠けた添付になった。
     // ⚠ 「entry の出所が違う」でも同じ症状になる(別 ZIP の entry を渡した等)ので、
-    // user のデータを一方的に疑う文面にしない
+    // user のデータを一方的に疑う文面にしない(改ざんをほのめかさない)
     throw new ZipReadError(
-      `ZIP の中身が正しく読めないか、別の物に差し替わっている可能性があります(${entry.name})`,
+      `ZIP の中身を最後まで読めませんでした(ダウンロードが途中で切れた可能性があります)(${entry.name})`,
     );
   }
 }

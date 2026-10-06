@@ -105,6 +105,17 @@ export const STANDARD_TERMS: readonly UiTerm[] = [
   { term: 'リンク', meaning: '他のノート・外部を指す参照' },
   { term: 'システム', meaning: 'system 領域(user のディレクトリと分かれた場所)の入り口の名前' },
   { term: 'フラグ', meaning: '開発者向けの切替(型としては上の表を見よ)' },
+  { term: '枠', meaning: 'スタックの 1 件、または本文の中の埋め込み(板・図・SQL の結果)の四角。どちらかが分かるように書く' },
+  { term: 'ノートの保存データ', meaning: 'この端末に保存しているノート・添付・つながり・履歴の中身(確認する・初期化する対象)' },
+  { term: '本体タブ', meaning: '複数のタブで開いているとき、保存を受け持つ 1 つのタブ' },
+  { term: 'タイル', meaning: 'ランチャーに並ぶアプリ 1 つ分の四角' },
+  { term: 'グループ', meaning: 'ランチャーでタイルをまとめる見出し' },
+  { term: '追記欄', meaning: '本文の下にある、編集に入らず 1 行足せる入力欄' },
+  { term: '整理案', meaning: '「構成をコピー」して整理してもらい、貼り付けて適用する案' },
+  { term: '構造ノート', meaning: 'SQL で調べているファイルの表・列・つながりを書き出したノート' },
+  { term: '予定表', meaning: '左のペインの予定のタブ(日付を書いた行を並べる)' },
+  { term: '連絡先', meaning: '左のペインの連絡先のタブ(取り込んだ連絡先の一覧)' },
+  { term: '組み込みアプリ', meaning: 'PKC3 が最初から持っている道具(マニュアル・SQL で調べる など)。自分で登録した HTML のアプリとは別' },
 ] as const;
 
 function escapeRegExp(s: string): string {
@@ -311,7 +322,7 @@ export const BANNED_TERMS: readonly BannedTerm[] = [
   banned('MiB', 'MB', '表記の統一'),
   banned('結びつ', 'つながっ(PC のファイルとつながる)', '造語'),
   banned('正規化形', '文字表記', '造語'),
-  banned('出所が違', '別の物に差し替わっている可能性があります', '造語'),
+  banned('出所が違', 'ZIP の中身を最後まで読めませんでした', '造語'),
   banned('コード枠', 'コードブロック', '造語'),
   banned('つなぎ先', 'つなぐ先', '造語'),
 ] as const;
