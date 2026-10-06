@@ -658,15 +658,21 @@ ${(e as Error).message}`,
   const statusLine = page.locator('[data-pkc-region="status"]');
   const originalRow = page.locator('[data-pkc-capture]:not(:has-text("(0:01〜0:03)"))').first();
 
-  // 入口と節の字は**画面から読む**(案内の字がこれと一致することを見る ── 手で「システム → 音声認識」と書かない)
+  // 入口と節の字は**画面から読む**(案内の字がこれと一致することを見る ── 手で「システム → 保存領域 → 音声認識」と書かない)
   const settingsTab = '[data-pkc-action="set-view"][data-pkc-view="settings"]';
   await clickReal(page, settingsTab);
   const navLabel = ((await page.locator(settingsTab).first().textContent()) ?? '').trim();
   const asrSection = page.locator('[data-pkc-region="settings-asr"]');
   await asrSection.scrollIntoViewIfNeeded();
   const sectionLabel = ((await asrSection.locator('h4').textContent()) ?? '').trim();
+  // 音声認識の節は「保存領域」の節の中に在る ── 案内の道順はその見出しも通る
+  const storageLabel = (
+    (await page.locator('[data-pkc-region="settings-storage"] > h3').first().textContent()) ?? ''
+  ).trim();
   expect(navLabel.length, '入口の名前を読めていない').toBeGreaterThan(0);
+  expect(storageLabel.length, '保存領域の見出しを読めていない').toBeGreaterThan(0);
   expect(sectionLabel.length, '節の見出しを読めていない').toBeGreaterThan(0);
+  const asrPath = `${navLabel} → ${storageLabel} → ${sectionLabel}`;
 
   // ④ 🔴 押す前に、メモリの案内が**ボタンの下**に出る。ボタンは押せるまま
   const installLight = asrSection.locator(
@@ -691,7 +697,7 @@ ${(e as Error).message}`,
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
   await expect(statusLine, '部品が無いのに案内が出ない').toContainText(
-    `${navLabel} → ${sectionLabel}`,
+    asrPath,
   );
   expect(await asrRequests(), '部品が無いのに取りに行った').toEqual([]);
 
@@ -896,7 +902,7 @@ ${(e as Error).message}`,
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
   await clickReal(page, originalRow.locator('[data-pkc-field="capture-transcribe"]'));
   await expect(statusLine, '消したのに文字にできてしまう').toContainText(
-    `${navLabel} → ${sectionLabel}`,
+    asrPath,
   );
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
