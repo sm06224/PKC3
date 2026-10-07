@@ -390,7 +390,7 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     const zip2 = new Blob([buf]);
     const [e] = await readZipDirectory(zip2);
     expect(e!.crc32).toBe(0); // CRC は一致する
-    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/ファイルサイズが内容一覧と違います/);
+    await expect(readZipEntry(zip2, e!)).rejects.toThrow(/ファイルサイズが内容一覧\(中央ディレクトリ\)と違います/);
   });
 
   it('圧縮データが壊れていたら理由の分かる文面で断る', async () => {

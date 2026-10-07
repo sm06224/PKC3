@@ -384,10 +384,10 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     c = JSON.parse(await readZipText(zip, only(CONTAINER))) as typeof c;
   } catch (e) {
     if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`ノートの一覧データ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
+    throw new ZipReadError(`バックアップに入っているノートの保存データ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   if (!Array.isArray(c.entries)) {
-    throw new ZipReadError(`ノートの一覧データ(${CONTAINER})にノートの一覧(entries)がありません。別のバックアップファイルを選んでください`);
+    throw new ZipReadError(`バックアップに入っているノートの保存データ(${CONTAINER})に、ノート(entries)の記載がありません。別のバックアップファイルを選んでください`);
   }
 
   const assetSources = new Map<string, { zip: Blob; entry: import('../import/zip-reader').ZipEntry }>();

@@ -314,7 +314,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   // 件数を使い切った後に余りがあれば、EOCD の件数が中身と食い違っている ──
   // 素通りさせると **entry が黙って消える**(review H-3)
   if (pos !== cd.byteLength) {
-    throw new ZipReadError('zip の内容一覧と件数が合いません');
+    throw new ZipReadError('zip の内容一覧(中央ディレクトリ)と件数が合いません');
   }
   return entries;
 }
@@ -339,7 +339,7 @@ async function verifyStream(
 function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry): void {
   if (actualSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip のファイルサイズが内容一覧と違います(${entry.name}: ${actualSize} ≠ ${entry.uncompressedSize})`,
+      `zip のファイルサイズが内容一覧(中央ディレクトリ)と違います(${entry.name}: ${actualSize} ≠ ${entry.uncompressedSize})`,
     );
   }
   if (actualCrc !== entry.crc32) {
@@ -369,7 +369,7 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   // store は「圧縮後 = 圧縮前」が method 0 の定義。食い違いは目次の壊れ
   if (entry.method === 0 && entry.compressedSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip の内容一覧のサイズが合いません(${entry.name}: store なのに一致しません)`,
+      `zip の内容一覧(中央ディレクトリ)のサイズが合いません(${entry.name}: store なのに一致しません)`,
     );
   }
 

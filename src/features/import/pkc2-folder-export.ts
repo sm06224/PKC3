@@ -126,7 +126,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
     );
   }
   if (!Array.isArray(manifest.entries)) {
-    throw new ZipReadError('構成定義(manifest)にノートの一覧(entries)がありません。別の書き出しファイルを選んでください');
+    throw new ZipReadError('構成定義(manifest)に、ノート(entries)の記載がありません。別の書き出しファイルを選んでください');
   }
 
   const inner = await readInnerBundles(zip, dir, manifest.entries, resolveArchetype);

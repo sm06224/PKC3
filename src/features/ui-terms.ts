@@ -94,6 +94,7 @@ export const STANDARD_TERMS: readonly UiTerm[] = [
   { term: 'フォーカス', meaning: '入力が向いている場所(押したキーが届く所)' },
   { term: 'ペイン', meaning: '画面を縦に分けた領域(左・中央・右)' },
   { term: '一式の内容一覧', meaning: '一式に何が入っているかを書いたファイル(pack.json)' },
+  { term: 'zip の内容一覧(中央ディレクトリ)', meaning: 'zip ファイルの中に、どのファイルが入っているかを書いた部分。「一式の内容一覧(pack.json)」とは別の物なので、zip のほうは必ず括弧を付けて言い分ける' },
   { term: 'ブロック', meaning: '本文の 1 まとまり(段落・表・コードブロック・SQL のブロックなど)' },
   { term: 'ファイル', meaning: '端末に保存する 1 つの書類やデータ' },
   { term: 'ID', meaning: 'ノートや添付を見分ける番号' },

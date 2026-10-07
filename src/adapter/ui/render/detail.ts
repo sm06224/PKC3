@@ -446,7 +446,7 @@ export class DetailRenderer {
   private noticeSlot: HTMLElement | null = null;
   /**
    * 🔴 **フォルダの概要の器**(#1222)。⚠ 本文の器の**外**(`applyBlocks` の差分に消されない)。
-   * 主の枠だけが持つ(留めた枠は `null` ── 横に並べる枠には出さない)。
+   * 主の枠だけが持つ(留めた枠は `null` ── スタックのノートには出さない)。
    */
   private overviewSlot: HTMLElement | null = null;
   /**

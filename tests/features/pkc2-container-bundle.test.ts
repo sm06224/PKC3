@@ -693,7 +693,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
     const a = await outer({ format: 'pkc2-package', version: 1, entries: [] }, []);
     await expect(readContainerBundle(a)).rejects.toThrow(/batch 形式のバックアップ/);
     const b = await outer({ format: 'pkc2-texts-container-bundle', version: 1 }, []);
-    await expect(readContainerBundle(b)).rejects.toThrow(/ノートの一覧\(entries\)/);
+    await expect(readContainerBundle(b)).rejects.toThrow(/ノート\(entries\)の記載がありません/);
     const c = await outer(
       { format: 'pkc2-texts-container-bundle', version: 2, entries: [] },
       [],
