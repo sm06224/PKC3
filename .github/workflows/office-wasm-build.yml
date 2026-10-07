@@ -328,7 +328,14 @@ jobs:
           #    emval の handle が作ったスレッドでしか有効でないのに main(copy event)と
           #    pthread(LO のコピー)の両方から呼ばれる。static をやめて毎回 `module_property` を取る。
           #    ⚠ 4 → 5 でも Qt の cache 鍵が変わるので Qt を焼き直す(数時間)。
-          test "$n" -eq 5
+          # 🔴 5 → 6(2026-10-07)。`qtbase-patch-wake-async.py`(#1408 の直し)。
+          #    main が SolarMutex を futex の busy-wait で待つ間に、持ち主(別スレッド)が
+          #    `wakeEventDispatcherThread()` の同期 proxy(`runOnMainThread` = main の mailbox 待ち)へ入ると
+          #    双方が永久に待つ。別スレッドからは `runOnMainThreadAsync` にする(Qt 6.10 も別スレッドからの起こしは非同期。
+          #    main からも非同期だが、ここでは main は従来どおり同期のまま)。
+          #    ⚠ 「数時間」は古い ── 実測は host 13m49s + wasm 10m44s = 約 24.5 分(run 37586026030)。
+          #    ⚠ 5 → 6 でも Qt の cache 鍵が変わるので Qt を焼き直す(上の実測のとおり約 25 分)。
+          test "$n" -eq 6
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
@@ -923,6 +930,30 @@ jobs:
           grep -q '^export DISABLE_PYTHON=TRUE' config_host.mk
           grep -q '^ENABLE_DOTNET=$' config_host.mk
 
+      # 🔴 **emsdk の `proxying.c` の順序を直す**(#1408)。emscripten 4.0.10 の `emscripten_proxy_finish` は
+      #    `pthread_mutex_unlock` の**後**に `pthread_cond_signal` する ── 待つ側が先に起きて stack 上の ctx を
+      #    捨て、完了側が捨てた condvar を signal しに行って固まる(5.0.5 の #26582 で修正済み。起動中の固まり y4-IDm-14)。
+      #    🔑 当てる先は **emsdk(cache から復元した物)** ── 毎回当てる(patch は冪等で、当たっていれば SKIP)。
+      #    ⚠ 名前が `patch-*.py` / `qtbase-patch-*.py` の glob に当たらない(`emsdk-patch-proxying.py`)のは、
+      #       どちらのループにも巻き込まず、qtbase patch の本数の pin(上)を動かさないため。
+      #    🔴 **libc の archive は cache の物を消す**: `proxying.c` は libc(`libc-mt*.a` と、その子 class の `libc_optz-mt*.a`。
+      #       `libc++-mt` / `libc++abi-mt` / `libcompiler_rt-mt` には入っていないので消さない)に入っており、
+      #       emscripten は `cache/sysroot/lib/wasm32-emscripten/` に**出来上がった .a があれば作り直さない**。
+      #       消せば**最終 link(下の make)が file の無い物を build する**(emscripten の cache の作法)。
+      #    ⚠ 初回は assert ではなく診断: 消した物と、patch 後に残った物を `ls -l` で出すだけ。
+      #       make の後で「作り直された」かを診断する(落とさない)。
+      - name: emsdk の proxying.c の順序を直す(#1408)
+        run: |
+          set -euxo pipefail
+          python3 "$GITHUB_WORKSPACE"/build/office-wasm/emsdk-patch-proxying.py ~/emsdk/upstream/emscripten
+          touch ~/.pkc3-proxying-patched
+          libdir=~/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten
+          echo '--- 消す前の libc-mt*.a / libc_optz-mt*.a ---'
+          ls -l "$libdir"/libc-mt*.a "$libdir"/libc_optz-mt*.a || echo '(無い ── 最終 link が初めて作る)'
+          rm -fv "$libdir"/libc-mt*.a "$libdir"/libc_optz-mt*.a
+          echo '--- 消した後 ---'
+          ls -l "$libdir"/libc-mt*.a "$libdir"/libc_optz-mt*.a || echo '(無い ── 最終 link が作り直す)'
+
       # 🔴 **`| tail` を噛ませない**(2026-08-09 に踏んだ)。bash のパイプの終了コードは
       #    最後のコマンドのものなので、`make | tail` は **make が落ちても step が緑**になる。
       #    CLAUDE.md の「検品が ✗ を出したのに job は green」と同じ型。
@@ -945,6 +976,19 @@ jobs:
       - name: ccache の効き
         if: always()
         run: ccache -s
+
+      # 📏 **libc の `-mt` archive が patch の後に作り直されたか**(#1408。診断で、落とさない)。
+      #    patch(`~/.pkc3-proxying-patched` の mtime)より新しければ、直した `proxying.c` で作り直された。
+      # 🔑 一度『作り直された:』が出るのを見たら、この診断を assert(`exit 1`)へ昇格させる(2026-10-07)。
+      #    CLAUDE.md §1「未確認は assert ではなく診断で出す。通ったのを見てから昇格」。
+      - name: libc の作り直しを診断(#1408)
+        if: ${{ !cancelled() }}
+        run: |
+          libdir=~/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten
+          test -f ~/.pkc3-proxying-patched || echo "stamp 無し(patch step が走っていない)"
+          ls -l --time-style=full-iso ~/.pkc3-proxying-patched "$libdir"/libc-mt*.a "$libdir"/libc_optz-mt*.a || echo '(libc-mt*.a / libc_optz-mt*.a が無い)'
+          find "$libdir" -maxdepth 1 \( -name 'libc-mt*.a' -o -name 'libc_optz-mt*.a' \) -newer ~/.pkc3-proxying-patched -print | sed 's/^/作り直された: /'
+          find "$libdir" -maxdepth 1 \( -name 'libc-mt*.a' -o -name 'libc_optz-mt*.a' \) ! -newer ~/.pkc3-proxying-patched -print | sed 's/^/⚠ patch より古い: /'
 
       # ⚠ **生成物が在ることを step として主張する** ── 無ければここで赤にする
       #    (artifact の `if-no-files-found: warn` は黙って通してしまう)
