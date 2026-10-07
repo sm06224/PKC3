@@ -676,6 +676,37 @@ JSPI の Qt backend では、レイアウトの Idle(`InterimItemWindow::m_aLayo
 test は `tests/office-layout-guard-patch.test.ts` / `office-hscroll-hdl-patch.test.ts` / `office-viewdata-gone-patch.test.ts`
 (fixture は上流 `7f96a38cf750` の file そのままの抜粋)。
 
+### 🔴 #1393 形 B の門 `patch-lo-tooltip-guard.py`(2026-10-07。⚠ 焼く前 ── 門は**ぶら下がりを捕まえない**)
+
+閉じている最中に `ToolTip::maShowTimer` が main スレッドへ SolarMutex なしで発火し、`ToolTip::DoShow()`(`SlsToolTip.cxx`)が
+`GetPageObjectLayouter()` を null 検査なしで使って `PageObjectLayouter::GetBoundingBox` で落ちる(30 回に 1 回)。
+`!pWindow` の検査の直後に 5 つ見る門を足し、当たればそのツールチップ 1 回だけ出さず返る。印は `PKC3-TOOLTIPGUARD: DoShow skipped why=N`(**20 回まで**。上限は印だけ)。
+
+| `why=` | 見るもの |
+|---|---|
+| 1 | `pWindow->isDisposed()` |
+| 2 | `!pWindow->IsReallyVisible()` |
+| 3 | `!mpDescriptor` |
+| 4 | `!mpDescriptor->GetPage()` |
+| 5 | `!…GetPageObjectLayouter()` |
+
+🔑 **次の焼きの読み方**: 1〜5 のどれかが出て落ちない → 門が効いた(出た番号が「空だった物」)。
+🔴 **どれも 0 回のまま落ちる → 門は原因に届いていない**(解放済みの `SdPage` / `PageObjectLayouter` を指したままの**ぶら下がり**は、null でも破棄済みでもないので素通りする)。
+そのときは timer を dispose で止める側へ直す。害は「そのツールチップが 1 回出ない」だけ。
+test は `tests/office-tooltip-guard-patch.test.ts`(fixture は上流 `d6226c1a` の `SlsToolTip.cxx` の抜粋。当て済みは **SKIP(exit 0)**)。
+
+### 🔴 #1402 の印と null 門 `patch-lo-grip-guard.py`(2026-10-07。⚠ 直しではなく**主に印**)
+
+Impress を開くと約 3 % で `SalGraphics::DrawPolyLine`(非 virtual の wrapper)← `OutputDevice::DrawPolygon(tools::Polygon)`(hairline)←
+`SplitWindow::ImplDrawGrip` で落ちる。塗り(`DrawPolyPolygon`)が main スレッドへ hop する間に `mpGraphics` が変わりうるのに、縁を引く直前で誰も再検査しない
+(`vcl/source/outdev/polygon.cxx`)。縁の直前に ① `mpGraphics` が null なら縁を引かず返る ② `before gfx=… dev=… stackfree=…` を **100 回まで**出し、
+`DrawPolyLine` から戻ったら `after` を出す(旗が立った回だけ)。
+
+🔑 **次の焼きの読み方**: `mpGraphics null after fill` が出る → null 門が効いた / `before` が出て `after` が出ないまま落ちる → 落ちたのは `DrawPolyLine` の中
+(`gfx=` が前の回と違うかを見る)/ `before` が出ず落ちる → この経路ではない。
+🔴 **解放済みの `SalGraphics` を指したままの `mpGraphics` は直せない**(null 門は素通りする)── 停止が残るのは想定内で、印が目的。
+test は `tests/office-grip-guard-patch.test.ts`(fixture は上流 `d6226c1a` の `polygon.cxx` の抜粋)。
+
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 
 焼きが `make` の 15 分で落ち、こう出た:
