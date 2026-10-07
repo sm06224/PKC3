@@ -45,7 +45,7 @@
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "chart.js": "^4.5.1",
-    "katex": "^0.18.9",
+    "katex": "^0.18.10",
     "markdown-it": "15.0.2",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "^12.0.0",
