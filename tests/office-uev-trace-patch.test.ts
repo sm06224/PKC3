@@ -1030,6 +1030,7 @@ describe('#121 の計装(uev-trace)── 台帳(スコープ検査 / workflow)�
     const raw = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(raw).toMatch(/22 → 23\(2026-10-04\)/);
     expect(raw).toContain('patch-lo-uev-trace.py');
-    expect(yml).toContain('test "$n" -eq 24');
+    // 2026-10-07 に #1393 / #1396 の LO 側の直し 3 本を足して 27(24 → 27)
+    expect(yml).toContain('test "$n" -eq 27');
   });
 });
