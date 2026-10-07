@@ -680,7 +680,12 @@ jobs:
           #    JSPI 構成の `QtTimer::timeoutActivated()` は SolarMutex なしで scheduler の走査と選択をするので、
           #    LO 側が dispose / 削除した Task や窓に触る。先頭で SolarMutex を**待たずに**取りに行き、
           #    LO 側が持っていれば 1 ms 後に張り直して返す(⚠ LO 側が自分で手放す所は塞がない。当たり外れは各 `PKC3-*` の印の回数で次の焼きで分かる)。
-          test "$n" -eq 30
+          # 🔴 30 → 31(2026-10-07)。`patch-lo-yield-wait.py`(#1408 の**印**。直しではない)。
+          #    Impress を読み込む最中(約 13 秒)に 30 回に 1 回、無言で固まる。直前まで timer は鍵を取れずに skip し続け、
+          #    その後 `m_aTimer.start(1)` 自体が止まる = main の event loop が回らない。`QtYieldMutex::doAcquire` の main の枝で
+          #    LO スレッドの鍵を待つ `m_InMainCondition.wait` の前後に `PKC3-YIELDWAIT: enter/leave` を置き、
+          #    **enter があって leave が無い**かで「main がそこで止まっている」を言う(⚠ 足すだけ。他の patch と当て先の錨は重ならない)。
+          test "$n" -eq 31
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

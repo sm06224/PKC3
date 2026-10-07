@@ -511,6 +511,6 @@ describe('#1393 timer-mutex ── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/29 → 30\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-timer-mutex.py');
-    expect(yml).toContain('test "$n" -eq 30');
+    expect(yml).toContain('test "$n" -eq 31');
   });
 });

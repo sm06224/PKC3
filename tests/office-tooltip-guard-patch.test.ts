@@ -365,10 +365,10 @@ describe('#1393 形 B(tooltip-guard)── 他の検査との関係', () => {
     expect(src).toMatch(/^SRC\s*=\s*"sd\/source\/ui\/slidesorter\/view\/SlsToolTip\.cxx"/m);
   });
 
-  it('🔑 workflow の本数の主張が、この 1 本を数えている(27 → 28。いまの `-eq` は 30)', () => {
+  it('🔑 workflow の本数の主張が、この 1 本を数えている(27 → 28。いまの `-eq` は 31)', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/27 → 28\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-tooltip-guard.py');
-    expect(yml).toContain('test "$n" -eq 30');
+    expect(yml).toContain('test "$n" -eq 31');
   });
 });
