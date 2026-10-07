@@ -127,6 +127,23 @@ def main() -> int:
         return 1
     text = path.read_text(encoding="utf-8")
 
+    # 🔑 **上流が自分で直した形なら、何もせずに通す**(2026-10-07。`libreoffice-26-8` の
+    #    d6226c1a44b573bf03ed6afea100647ce91dcf1c で `SelFormatHdl` は `if (styleIdx == -1)` で
+    #    「なし」の書式を描き、`OKHdl` は `if (styleIdx != -1)` で自動書式を飛ばすようになった ──
+    #    本パッチの目的(#135)は上流で満たされている)。
+    #    ⚠ 錨 0 件 = 即エラー、だと**上流が直した日に焼きが全部止まる**(run 37586026030 で実際に
+    #    止まった)。⚠ ただし「直した形」は**両方揃って**初めて認める ── 片方だけ新しい形なら
+    #    上流が別の変え方をしたということなので、従来どおり錨 0 件で落ちて知らせる。
+    if (
+        text.count(ANCHOR_SEL) == 0
+        and text.count(ANCHOR_OK) == 0
+        and text.count("if (styleIdx == -1)") == 1
+        and text.count("if (styleIdx != -1)") == 1
+        and "assert(styleIdx != -1" not in text
+    ):
+        print(f"SKIP: 上流が直している({SRC} ── SelFormatHdl / OKHdl とも -1 を扱う。#135 は上流で満たされた)")
+        return 0
+
     for anchor in (ANCHOR_SEL, ANCHOR_OK):
         hits = text.count(anchor)
         if hits != 1:
