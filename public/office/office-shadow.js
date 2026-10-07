@@ -510,6 +510,35 @@
     return '書き出せませんでした';
   }
 
+  // ───────────────────────── 閉じる操作の門(Cmd+W / Ctrl+W / タブを閉じる) ─────────────────────────
+
+  /**
+   * 窓に聞いた「保存していない変更が在るか」の**最後の答え**(`true` / `false`。聞く前は `null`)。
+   * ⚠ 聞けなかった(`null`)答えでは**動かさない** ── 前の答えのまま(変更ありと分かっていたのに、
+   *   一度聞けなかっただけで確認を外さない)。`createWriter` が `isModified()` を待つ**全部の場所**で据える。
+   */
+  var lastModifiedAnswer = null;
+  function noteModified(answer) {
+    if (answer === true || answer === false) lastModifiedAnswer = answer;
+    return answer;
+  }
+  function lastModified() { return lastModifiedAnswer; }
+
+  /**
+   * 🔴 窓を閉じようとしたとき、ブラウザの確認を出すか(`host.html` の `beforeunload` が呼ぶ。#1363 項目 6)。
+   *   - 保存を渡している最中(`pending` / `busy`)→ 出す
+   *   - 保存していない変更あり(`lastModified === true`)→ 出す
+   *   - 🔴 打ってから影をまだ書いていない(`typed` = `createQuiet().isDirty()`)→ 出す ── 窓へ聞くのは
+   *     `MODIFIED_POLL_MS` ごとなので、保存・開いた直後(答え false)に打って**次の問い合わせの前に閉じる**と、
+   *     `lastModified` だけでは素通りする(最大約 3.5 秒の窓。影も書けていないので、その分は本当に消える)。
+   *     ⚠ 代わりに、矢印キーやコピーの直後(編集ではない打鍵)に閉じても確認が出る ── 確認は 1 回押せば済むので、
+   *     数秒の編集を黙って失うより安い側へ倒す
+   *   - 変更なし(`false`)/ まだ聞いていない・開いただけ(`null`)で、打ってもいない → 出さない(平常時に確認を出すと、ただの邪魔)
+   */
+  function shouldBlockUnload(s) {
+    return !!(s && (s.pending || s.busy || s.typed === true || s.lastModified === true));
+  }
+
   // ───────────────────────── 書く流れ(静止 → 確かめる → 書く → 棚へ) ─────────────────────────
 
   /**
@@ -530,7 +559,7 @@
     async function clearShelf() {
       // 🔴 **消してよいのは「保存した後に変更が無い」と窓が答えたときだけ**。⚠ 聞けなかった(`null`)/ 変更あり
       //    は消さない ── 保存の後に打った分は、これから書く影が持つ(消すと、その分を守れない)
-      var mod = await d.isModified();
+      var mod = noteModified(await d.isModified());
       if (mod !== false) return false;
       if (typeof d.unshelve !== 'function') return false;
       try { return !!(await d.unshelve()); } catch (e) { return false; }
@@ -556,7 +585,7 @@
           if (lastPoll === null || t - lastPoll >= d.pollMs) {
             lastPoll = t;
             busy = true;
-            try { d.quiet.observeModified(await d.isModified(), d.now()); }
+            try { d.quiet.observeModified(noteModified(await d.isModified()), d.now()); }
             catch (e) { /* 聞けなかった ── 次の回に聞く */ }
             finally {
               busy = false;
@@ -567,7 +596,7 @@
         if (!d.quiet.take(d.now())) return 'wait';
         busy = true;
         try {
-          var mod = await d.isModified();
+          var mod = noteModified(await d.isModified());
           if (mod === null) { fail(reasonOf({ shadowReason: 'no-uno' })); again(); return 'failed'; }
           // 保存済み(変更なし)は書かない
           if (mod !== true) { failures = 0; return 'clean'; }
@@ -629,5 +658,7 @@
     unshelve: unshelve,
     reasonOf: reasonOf,
     createWriter: createWriter,
+    lastModified: lastModified,
+    shouldBlockUnload: shouldBlockUnload,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
