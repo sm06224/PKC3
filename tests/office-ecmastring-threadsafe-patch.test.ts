@@ -80,13 +80,17 @@ describe('QString の ECMAScript 変換の static val をやめる patch(#1394)'
       expect(r.code, `落ちた: ${r.out}`).toBe(0);
       const out = t.read();
       const c = code(out);
-      expect(count(c, 'static const emscripten::val'), 'static が残っている').toBe(0);
+      // 🔑 `static` は綴りではなく語で数える(`static  const` / `thread_local static` の変異を逃さない。
+      //    コメントは `code()` で落としてあるので、解説の字には満たされない)
+      expect(c.match(/\bstatic\b/g) ?? [], 'static が残っている').toHaveLength(0);
       expect(count(c, 'module_property('), 'module_property が 2 件ではない').toBe(2);
-      expect(c).toContain(
-        'const emscripten::val stringToUTF16 = emscripten::val::module_property("stringToUTF16");',
+      // 🔑 行ごとの等値(部分一致だと `static  const …` の前置きを見逃す)
+      const lines = c.split('\n');
+      expect(lines).toContain(
+        '    const emscripten::val stringToUTF16 = emscripten::val::module_property("stringToUTF16");',
       );
-      expect(c).toContain(
-        'const emscripten::val UTF16ToString = emscripten::val::module_property("UTF16ToString");',
+      expect(lines).toContain(
+        '    const emscripten::val UTF16ToString = emscripten::val::module_property("UTF16ToString");',
       );
       // 周りは 1 字も動かない:直した 2 行と足したコメントを除いた残りは原文と同じ
       const strip = (s: string) =>
