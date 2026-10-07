@@ -875,8 +875,11 @@ export function extractVars(body: string): Record<string, string> {
     let j = i + 1;
     while (j < frontLines.length) {
       const child = frontLines[j] ?? '';
-      // 空行は break(ネストブロック終了)
-      if (child.trim() === '') break;
+      // 空行はスキップ(ブロック内空行を許容)
+      if (child.trim() === '') {
+        j++;
+        continue;
+      }
       const m = /^(\s+)([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(child);
       if (!m) break;  // 非インデント or 不正形式 = nested 終了
       const key = m[2]!;
@@ -1017,7 +1020,8 @@ export function spliceFrontmatterKeys(
   if (!OPEN_FENCE.test(body)) {
     const lines = entries.map(lineFor).filter((l): l is string => l !== null);
     if (lines.length === 0) return body;
-    return `---\n${lines.join('\n')}\n---\n${body}`;
+    const eol = body.includes('\r\n') ? '\r\n' : '\n';
+    return `---${eol}${lines.join(eol)}${eol}---${eol}${body}`;
   }
 
   const open = body.match(OPEN_FENCE)![0];
