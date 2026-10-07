@@ -7,14 +7,16 @@
  * `IconView::GetOptimalSize`。`getPreferredDimensions` は model の全 entry の `GetWidth()` を引くが、
  * それは view data(`m_DataTable`)を引く。model に入った後・view data を作る前(`Insert` の Broadcast の前)や、
  * view data を消した後・entry を消す前(`Clear`)に、レイアウトの Idle が割り込むと null 起点の添字で落ちる。
- * 直しは 2 つの門: `m_pModel` が無ければ 0 を返す / view data の無い entry は飛ばして次へ進む。
+ * 直しは門 1 つ: view data の無い entry は飛ばして次へ進む(印は 20 回まで ── 上限は印だけで、skip は毎回)。
+ * ⚠ `m_pModel` の null 門は足さない(`SvTreeListBox::First()` が `treelistbox.hxx:446` で null 安全なので、
+ * 足しても挙動が変わらない ── レビューで外した)。
  *
  * ⚠ 見るのは 5 つ:
  *   ① **錨が原文に当たる**(上流の抜粋 ── 合成した物ではない)/ 1 つ外しても落ちる / 二重当ては落ちて不変
- *   ② **直しの中身を、描いた結果で見る**: `rWidths.clear()` → `m_pModel` の門 → `First()` → `while` →
- *      view data の門(飛ばすときは `Next` へ進む = 無限ループにならない)→ 原文の本体、の順
+ *   ② **直しの中身を、描いた結果で見る**: `rWidths.clear()` → `First()` → `while` →
+ *      view data の門(飛ばすときは `Next` へ進む = 無限ループにならない。上限は印だけ)→ 原文の本体、の順
  *   ③ **足した行は全部印を含み、原文の行は 1 行も書き換えない**
- *   ④ **`<cstdio>`** が足されている / 他の LO patch と当て先が重ならない
+ *   ④ **`<cstdio>`** と印の上限のカウンタが足されている / 他の LO patch と当て先が重ならない
  *   ⑤ workflow の本数の主張がこの 1 本を数えている
  *
  * 🔴 **言えないこと**: 当てた後の C++ が本物の LO の header でコンパイルできること
@@ -185,9 +187,9 @@ describe('#1396 の直し(viewdata-gone)── 当て方', () => {
 });
 
 describe('#1396 の直し(viewdata-gone)── 当てた結果(描いた C++ で見る)', () => {
-  it('🔴 順序: clear → m_pModel の門 → First → while → view data の門 → 原文の本体(注釈を落として見る)', () => {
+  it('🔴 順序: clear → First → while → view data の門 → 原文の本体(注釈を落として見る)', () => {
     const after = patched();
-    // 注釈を落としてから探す(注釈にも `m_pModel` / `First` の語は出うる)
+    // 注釈を落としてから探す(注釈にも `First` の語は出うる)
     const code = after
       .split('\n')
       .filter((l) => !/^\s*\/\/ /.test(l))
@@ -200,14 +202,13 @@ describe('#1396 の直し(viewdata-gone)── 当てた結果(描いた C++ で
       return fn.indexOf(needle);
     };
     const clearAt = at('rWidths.clear();');
-    const modelAt = at('if (!m_pModel) return 0; // PKC3-VIEWDATAGONE');
     const firstAt = at('SvTreeListEntry* pEntry = First();');
     const whileAt = at('while (pEntry)');
     const gateAt = at('if (m_DataTable.find(pEntry) == m_DataTable.end())');
     const bodyAt = at('sal_uInt16 nCount = pEntry->ItemCount();');
-    expect(clearAt).toBeLessThan(modelAt);
-    // 🔴 `m_pModel` の門は `First()` より**前**(`First()` が `m_pModel` を読むので、後では間に合わない)
-    expect(modelAt).toBeLessThan(firstAt);
+    expect(clearAt).toBeLessThan(firstAt);
+    // 🔴 `m_pModel` の null 門は無い(`First()` は null 安全 ── 足しても挙動が変わらない)
+    expect(count(after, '!m_pModel')).toBe(0);
     expect(firstAt).toBeLessThan(whileAt);
     expect(whileAt).toBeLessThan(gateAt);
     expect(gateAt).toBeLessThan(bodyAt);
@@ -215,20 +216,50 @@ describe('#1396 の直し(viewdata-gone)── 当てた結果(描いた C++ で
     expect(fn).toContain('    while (pEntry)\n    {\n        if (m_DataTable.find(pEntry)');
   });
 
-  it('🔴 飛ばす枝は `Next(pEntry)` で進んでから `continue`(進まずに continue すると無限ループ)', () => {
+  it('🔴 飛ばす枝は `Next(pEntry)` で進んでから `continue`(進まずに continue すると無限ループ)。上限は印だけ', () => {
     const after = patched();
-    const gate = after.split('\n').find((l) => l.includes('m_DataTable.find(pEntry) == m_DataTable.end()'));
-    expect(gate, '門の行が無い').toBeDefined();
-    const next = gate!.indexOf('pEntry = Next(pEntry);');
-    const cont = gate!.indexOf('continue;');
-    const puts = gate!.indexOf('std::fputs(');
-    expect(puts).toBeGreaterThan(-1);
-    expect(next).toBeGreaterThan(puts);
-    expect(cont).toBeGreaterThan(next);
+    const gateAt = after.indexOf('if (m_DataTable.find(pEntry) == m_DataTable.end())');
+    const bodyAt = after.indexOf('sal_uInt16 nCount = pEntry->ItemCount();');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(bodyAt).toBeGreaterThan(gateAt);
+    // 🔑 期待値は patch から取らず**手で書く**。上限の if は fputs だけを包み、`Next` / `continue` は包まない
+    //    (`Next` が上限の中に入ると、21 回目以降は進まずに continue して**無限ループ**になる)
+    const gate = after.slice(gateAt, bodyAt);
+    expect(gate).toBe(
+      [
+        `if (m_DataTable.find(pEntry) == m_DataTable.end()) // ${MARK}`,
+        `        { // ${MARK}`,
+        `            if (g_nPkc3ViewDataGoneSaid < 20) // ${MARK}`,
+        `            { // ${MARK}`,
+        `                ++g_nPkc3ViewDataGoneSaid; // ${MARK}`,
+        `                std::fputs("${MARK}: entry without view data skipped\\n", stderr); // ${MARK}`,
+        `            } // ${MARK}`,
+        `            pEntry = Next(pEntry); // ${MARK}`,
+        `            continue; // ${MARK}`,
+        `        } // ${MARK}`,
+        `        `,
+      ].join('\n'),
+    );
     // 原文の進め方(末尾の `pEntry = Next( pEntry );` と `nHeight += …`)は元のまま 1 件
     expect(count(after, '        pEntry = Next( pEntry );\n        nHeight += GetEntryHeight();\n')).toBe(1);
-    // 🔴 `return nHeight;` は元のまま(`m_pModel` の門は 0 を返すだけで、本体の戻りは触らない)
+    // 🔴 `return nHeight;` は元のまま(本体の戻りは触らない)
     expect(count(after, '    return nHeight;\n')).toBe(1);
+  });
+
+  it('🔴 印の上限: `< 20` と `++` が在り、カウンタは file scope(関数より前)に 1 つ。`fputs` は上限の内側', () => {
+    const after = patched();
+    const counter = `namespace { int g_nPkc3ViewDataGoneSaid = 0; } // ${MARK}`;
+    expect(count(after, counter), 'カウンタの宣言が 1 件でない').toBe(1);
+    expect(after.indexOf(counter), 'カウンタが関数より後ろ(file scope でない)').toBeLessThan(
+      after.indexOf('tools::Long SvTreeListBox::getPreferredDimensions('),
+    );
+    expect(count(after, 'g_nPkc3ViewDataGoneSaid < 20'), '上限の `< 20` が 1 件でない').toBe(1);
+    expect(count(after, '++g_nPkc3ViewDataGoneSaid;'), '`++` が 1 件でない').toBe(1);
+    const capAt = after.indexOf('g_nPkc3ViewDataGoneSaid < 20');
+    const incAt = after.indexOf('++g_nPkc3ViewDataGoneSaid;');
+    const putsAt = after.indexOf('std::fputs(');
+    expect(capAt).toBeLessThan(incAt);
+    expect(incAt).toBeLessThan(putsAt);
   });
 
   it('🔴 原文の他の所は動かない: GetViewData の nullptr 返し・GetOptimalSize が元のまま', () => {
@@ -251,9 +282,9 @@ describe('#1396 の直し(viewdata-gone)── 当てた結果(描いた C++ で
     const after = patched();
     expect(after).not.toBe(EXCERPT);
     expect(restore(after)).toBe(EXCERPT);
-    // 足した行は 7 行(include 1 + 注釈 4 + 門 2)
+    // 足した行は 16 行(include 1 + カウンタ 1 + 注釈 4 + 門 10)
     const added = after.split('\n').filter((l) => l.includes(MARK));
-    expect(added.length).toBe(7);
+    expect(added.length).toBe(16);
     // 🔴 印の無い足し行が無い(原文の行集合に無い行は、全部印を含む)
     const origLines = new Set(EXCERPT.split('\n'));
     const bare = after.split('\n').filter((l) => !origLines.has(l) && !l.includes(MARK));
@@ -262,8 +293,17 @@ describe('#1396 の直し(viewdata-gone)── 当てた結果(描いた C++ で
     const code = added.filter((l) => !/^\s*\/\/ /.test(l)).map((l) => l.trim());
     expect(code).toEqual([
       `#include <cstdio> // ${MARK}`,
-      `if (!m_pModel) return 0; // ${MARK}`,
-      `if (m_DataTable.find(pEntry) == m_DataTable.end()) { std::fputs("${MARK}: entry without view data skipped\\n", stderr); pEntry = Next(pEntry); continue; } // ${MARK}`,
+      `namespace { int g_nPkc3ViewDataGoneSaid = 0; } // ${MARK}`,
+      `if (m_DataTable.find(pEntry) == m_DataTable.end()) // ${MARK}`,
+      `{ // ${MARK}`,
+      `if (g_nPkc3ViewDataGoneSaid < 20) // ${MARK}`,
+      `{ // ${MARK}`,
+      `++g_nPkc3ViewDataGoneSaid; // ${MARK}`,
+      `std::fputs("${MARK}: entry without view data skipped\\n", stderr); // ${MARK}`,
+      `} // ${MARK}`,
+      `pEntry = Next(pEntry); // ${MARK}`,
+      `continue; // ${MARK}`,
+      `} // ${MARK}`,
     ]);
     for (const l of added) {
       expect(l, '行末の \\ は次の行をコメントへ連結する').not.toMatch(/\\\s*$/);

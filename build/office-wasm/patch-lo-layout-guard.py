@@ -26,8 +26,13 @@ fault は `RuntimeError: table index is out of bounds` か `null function or fun
 ## 直し(最小)
 
 `Layout()` の `m_aLayoutIdle.Stop();` の直後に「`m_xContainer` が無ければ(= dispose が始まっている)
-何もせず返る」門を置く。`m_xContainer` は ctor の最後で代入され(ctor の途中に `Layout()` は届かない)、
-dispose の最初の `reset()` で null になる。Idle は `Stop()` で既に止めてあるので、返っても再予約は残らない。
+何もせず返る」門を置く。`m_xContainer` は ctor の最後で代入され、dispose の最初の `reset()` で null になる。
+Idle は `Stop()` で既に止めてあるので、返っても再予約は残らない。
+
+- ⚠ **未確認(副作用)**: ctor が builder を作っている間(= `m_xContainer` が代入される前)に
+  `queue_resize` → `StartIdleLayout` が来れば、この門はその回の Layout を捨てる(再予約はされない。
+  後の `queue_resize` / `Resize` で回復する見込み)。⚠ 「ctor の途中に `Layout()` は届かない」とは
+  確かめていない。印 `PKC3-LAYOUTGUARD` が停止しない回にも大量に出たら、この副作用を疑う。
 
 - 効いた回数は `std::fputs`(libc だけ)で出す ── probe が `PKC3-LAYOUTGUARD:` の行を数える印でもある。
 - 🔴 触らない: ctor / `dispose()` / `StartIdleLayout()` / `Resize()` / `Layout()` の残り。

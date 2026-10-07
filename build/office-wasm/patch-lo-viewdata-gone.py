@@ -23,14 +23,17 @@ stack の最上段は `SvTreeListBox::getPreferredDimensions` ← `IconView::Get
 
 ## 直し(最小。印を数える門)
 
-`getPreferredDimensions` に 2 つの門を足す。足すだけで、原文の行は 1 行も書き換えない。
+`getPreferredDimensions` に門を 1 つ足す。足すだけで、原文の行は 1 行も書き換えない。
 
-1. `rWidths.clear();` の直後: `m_pModel` が無ければ 0 を返す(`First()` が `m_pModel` を読むので、その前)。
-2. `while (pEntry)` の直後: `m_DataTable` に無い entry は飛ばして `Next(pEntry)` へ進む。
-   当たった回の寸法は 1 回だけ小さくなるが、`INSERTED` の `queue_resize()`(:3693-3694)が次の Layout を
-   予約するので直る。
+- `while (pEntry)` の直後: `m_DataTable` に無い entry は飛ばして `Next(pEntry)` へ進む。
+  当たった回の寸法は 1 回だけ小さくなるが、`INSERTED` の `queue_resize()`(:3693-3694)が次の Layout を
+  予約するので直る。
+- `m_pModel` の null 門は足さない: `SvTreeListBox::First()` は `m_pModel ? m_pModel->First() : nullptr`
+  (`treelistbox.hxx:446`)で null 安全なので、足しても挙動が変わらない(レビューで外した)。
 
 - `std::fputs`(libc だけ)の行が、probe が当たった回数を数える印を兼ねる(`PKC3-VIEWDATAGONE:`)。
+  🔑 印は **20 回まで**(`g_nPkc3ViewDataGoneSaid`、`patch-lo-ime-nowait.py` と同じ作法)── 開いている間
+  毎 Layout 出ると stderr が溢れる。⚠ 上限は**印だけ**で、skip(`Next` へ進む)は毎回やる。
 - `m_DataTable` は `SvTreeListBox` の member(`treelistbox.hxx:208`)、`Next()` は const member
   (:447)── const の `getPreferredDimensions` から呼べる。
 - 🔴 触らない: `GetOptimalSize` / `m_aTabs` / `GetWidth`。
@@ -38,7 +41,7 @@ stack の最上段は `SvTreeListBox::getPreferredDimensions` ← `IconView::Get
 ## 覆る条件
 
 焼いて停止の回に `PKC3-VIEWDATAGONE` が **0 回**のまま落ちる → 「view data が無い」ではなく
-`m_pModel` null(`First()` :847)か `m_pImpl` null(`iconview.cxx:144`)側 → そこへ門を足す。
+`m_pImpl` null(`iconview.cxx:144`)側 → そこへ門を足す。
 ⚠ `SplitWindow::Paint` の別形 2 回はこの案の外。⚠ #1393 の入口の門(`patch-lo-layout-guard.py`)は
 **構築中・破棄中**にだけ効くので、entry 操作の最中(開いた直後)はこちらが要る。
 
@@ -57,15 +60,16 @@ from pathlib import Path
 SRC = "vcl/source/treelist/treelistbox.cxx"
 MARK = "PKC3-VIEWDATAGONE"
 
-# ── ① include(`std::fputs`)────────────────────────────────────────────
+# ── ① include(`std::fputs`)と、印を出す回数のカウンタ(file scope)─────────────────
 # 🔑 無条件に足して印を付ける(在るかを見ない ── 当てる順で出力が変わるのを避ける)
 INC_ANCHOR = """#include <vcl/toolkit/treelistbox.hxx>
 """
 INC_REPLACE = """#include <vcl/toolkit/treelistbox.hxx>
 #include <cstdio> // PKC3-VIEWDATAGONE
+namespace { int g_nPkc3ViewDataGoneSaid = 0; } // PKC3-VIEWDATAGONE
 """
 
-# ── ② `getPreferredDimensions` の冒頭の 2 つの門 ──────────────────────────────
+# ── ② `getPreferredDimensions` の門(`while (pEntry)` の直後)──────────────────────────────
 # 🔑 錨は冒頭の塊(`rWidths.clear();` から `sal_uInt16 nCount = …;` まで)。`while (pEntry)` は file 内に
 #    他にも在りうるので、関数の頭ごと錨にして一意にする。原文に**1 件**。
 #    ⚠ 足す行は**全部**印を含む。原文の行は 1 字も変えない。
@@ -80,11 +84,19 @@ PREF_REPLACE = """    rWidths.clear();
     // PKC3-VIEWDATAGONE view data not yet made in the Broadcast) or in SvTreeList::Clear (view data reset before
     // PKC3-VIEWDATAGONE the entries). GetWidth() then reads a null view data. Skip what has no view data:
     // PKC3-VIEWDATAGONE the INSERTED queue_resize() asks for the next layout, so the size is right a moment later.
-    if (!m_pModel) return 0; // PKC3-VIEWDATAGONE
     SvTreeListEntry* pEntry = First();
     while (pEntry)
     {
-        if (m_DataTable.find(pEntry) == m_DataTable.end()) { std::fputs("PKC3-VIEWDATAGONE: entry without view data skipped\\n", stderr); pEntry = Next(pEntry); continue; } // PKC3-VIEWDATAGONE
+        if (m_DataTable.find(pEntry) == m_DataTable.end()) // PKC3-VIEWDATAGONE
+        { // PKC3-VIEWDATAGONE
+            if (g_nPkc3ViewDataGoneSaid < 20) // PKC3-VIEWDATAGONE
+            { // PKC3-VIEWDATAGONE
+                ++g_nPkc3ViewDataGoneSaid; // PKC3-VIEWDATAGONE
+                std::fputs("PKC3-VIEWDATAGONE: entry without view data skipped\\n", stderr); // PKC3-VIEWDATAGONE
+            } // PKC3-VIEWDATAGONE
+            pEntry = Next(pEntry); // PKC3-VIEWDATAGONE
+            continue; // PKC3-VIEWDATAGONE
+        } // PKC3-VIEWDATAGONE
         sal_uInt16 nCount = pEntry->ItemCount();
 """
 
@@ -140,9 +152,6 @@ def main() -> int:
         text = text.replace(anchor, replace, 1)
 
     # ⚠ 置換が本当に効いたか(空振りを合格と読まない)
-    if text.count("if (!m_pModel) return 0; // PKC3-VIEWDATAGONE") != 1:
-        print("ERROR: `m_pModel` の門が 1 つ入っていない", file=sys.stderr)
-        return 1
     if text.count("if (m_DataTable.find(pEntry) == m_DataTable.end())") != 1:
         print("ERROR: view data の門が 1 つ入っていない", file=sys.stderr)
         return 1
