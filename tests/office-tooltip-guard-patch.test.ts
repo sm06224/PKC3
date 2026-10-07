@@ -34,7 +34,8 @@ const REL = 'sd/source/ui/slidesorter/view/SlsToolTip.cxx';
 const MARK = 'PKC3-TOOLTIPGUARD';
 const EXCERPT = readFileSync('tests/fixtures/office-lo/SlsToolTip.excerpt.cxx', 'utf-8');
 /** 上流(`d6226c1a`)を展開した作業 dir。在るときだけ実 file へ当てる(CI には無い)。 */
-const UPSTREAM = process.env['PKC3_LO_UP'] ?? '/tmp/claude-0/-home-user/03a53e94-0d92-5ef2-a9a7-701e7efecdc8/scratchpad/office-probe/up-d6226c1a';
+/** 上流の実 file(在る箱でだけ回す。CI には無いので skip ── 実物の錨は焼く前の `check-patches-on-ref.sh` が見る)。 */
+const UPSTREAM = process.env['PKC3_LO_UP'] ?? '';
 
 /** python の module から値を取り出す(⚠ 錨の字をここへ書き写さない)。 */
 function pyJson(script: string, expr: string): unknown {
@@ -130,6 +131,22 @@ describe('#1393 形 B(tooltip-guard)── 当て方', () => {
       expect(t.read()).toBe(once);
       // 印の行が 2 組に増えていない
       expect(count(t.read(), 'if (g_nPkc3TipSaid < 20)')).toBe(1);
+    } finally {
+      t.cleanup();
+    }
+  });
+
+  it('🔴 印が在るのに門が欠けている file(部分適用 / 手編集)は SKIP しない ── exit 1 で file は不変', () => {
+    // 印を 1 行だけ持つ file(include の行だけ当たっていて、門が無い形)
+    const partial = EXCERPT.replace(FIX_ANCHORS[0]!, FIX_ANCHORS[0]! + '// PKC3-TOOLTIPGUARD (only the include line)\n');
+    expect(partial, '部分適用の形を作れていない').not.toBe(EXCERPT);
+    const t = tree(partial);
+    try {
+      const r = run(SCRIPT, t.dir);
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).not.toContain('SKIP');
+      expect(r.out).toContain('部分適用');
+      expect(t.read(), '部分適用の file を書き換えた').toBe(partial);
     } finally {
       t.cleanup();
     }
@@ -313,8 +330,8 @@ describe('#1393 形 B(tooltip-guard)── 当てた結果(描いた C++ で見�
 });
 
 describe('#1393 形 B(tooltip-guard)── 上流の実 file へ', () => {
-  const real = join(UPSTREAM, REL);
-  it.skipIf(!existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 18・消した行は 0。2 度目は SKIP で不変', () => {
+  const real = UPSTREAM ? join(UPSTREAM, REL) : '';
+  it.skipIf(!real || !existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 18・消した行は 0。2 度目は SKIP で不変', () => {
     const orig = readFileSync(real, 'utf-8');
     const t = tree(orig);
     try {

@@ -33,6 +33,73 @@
 
 namespace sd::slidesorter::view {
 
+ToolTip::ToolTip (SlideSorter& rSlideSorter)
+    : mrSlideSorter(rSlideSorter),
+      mnHelpWindowHandle(nullptr),
+      maShowTimer("sd::slidesorter::view::ToolTip maShowTimer"),
+      maHiddenTimer("sd::slidesorter::view::ToolTip maHiddenTimer")
+{
+    maShowTimer.SetTimeout(HelpSettings::GetTipDelay());
+    maShowTimer.SetInvokeHandler(LINK(this, ToolTip, DelayTrigger));
+    maHiddenTimer.SetTimeout(HelpSettings::GetTipDelay());
+}
+
+void ToolTip::ImplDestroy()
+{
+    maShowTimer.Stop();
+    maHiddenTimer.Stop();
+    Hide();
+}
+
+ToolTip::~ToolTip()
+{
+    suppress_fun_call_w_exception(ImplDestroy());
+}
+
+void ToolTip::SetPage (const model::SharedPageDescriptor& rpDescriptor)
+{
+    if (mpDescriptor == rpDescriptor)
+        return;
+
+    maShowTimer.Stop();
+    bool bWasVisible = Hide();
+
+    if (bWasVisible)
+    {
+        maHiddenTimer.Start();
+    }
+
+    mpDescriptor = rpDescriptor;
+
+    if (mpDescriptor)
+    {
+        SdPage* pPage = mpDescriptor->GetPage();
+        OUString sHelpText;
+        if (pPage != nullptr)
+            sHelpText = pPage->GetName();
+        else
+        {
+            OSL_ASSERT(mpDescriptor->GetPage() != nullptr);
+        }
+        if (sHelpText.isEmpty())
+        {
+            sHelpText = SdResId(STR_PAGE) +
+                OUString::number(mpDescriptor->GetPageIndex()+1);
+        }
+
+        msCurrentHelpText = sHelpText;
+        // show new tooltip immediately, if last one was recently hidden
+        if(maHiddenTimer.IsActive())
+            DoShow();
+        else
+            maShowTimer.Start();
+    }
+    else
+    {
+        msCurrentHelpText.clear();
+    }
+}
+
 void ToolTip::DoShow()
 {
     if (maShowTimer.IsActive())
@@ -75,4 +142,24 @@ void ToolTip::DoShow()
         QuickHelpFlags::Center | QuickHelpFlags::Top);
 }
 
+bool ToolTip::Hide()
+{
+    if (mnHelpWindowHandle)
+    {
+        sd::Window *pWindow (mrSlideSorter.GetContentWindow().get());
+        Help::HidePopover(pWindow, mnHelpWindowHandle);
+        mnHelpWindowHandle = nullptr;
+        return true;
+    }
+    else
+        return false;
+}
+
+IMPL_LINK_NOARG(ToolTip, DelayTrigger, Timer *, void)
+{
+    DoShow();
+}
+
 } // end of namespace ::sd::slidesorter::view
+
+/* vim:set shiftwidth=4 softtabstop=4 expandtab: */

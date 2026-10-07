@@ -31,7 +31,8 @@ const REL = 'vcl/source/outdev/polygon.cxx';
 const MARK = 'PKC3-GRIPGUARD';
 const EXCERPT = readFileSync('tests/fixtures/office-lo/polygon.excerpt.cxx', 'utf-8');
 /** 上流(`d6226c1a`)を展開した作業 dir。在るときだけ実 file へ当てる(CI には無い)。 */
-const UPSTREAM = process.env['PKC3_LO_UP'] ?? '/tmp/claude-0/-home-user/03a53e94-0d92-5ef2-a9a7-701e7efecdc8/scratchpad/office-probe/up-d6226c1a';
+/** 上流の実 file(在る箱でだけ回す。CI には無いので skip ── 実物の錨は焼く前の `check-patches-on-ref.sh` が見る)。 */
+const UPSTREAM = process.env['PKC3_LO_UP'] ?? '';
 
 /** python の module から値を取り出す(⚠ 錨の字をここへ書き写さない)。 */
 function pyJson(script: string, expr: string): unknown {
@@ -131,6 +132,21 @@ describe('#1402(grip-guard)── 当て方', () => {
     }
   });
 
+  it('🔴 印が在るのに門が欠けている file(部分適用 / 手編集)は SKIP しない ── exit 1 で file は不変', () => {
+    const partial = EXCERPT.replace(FIX_ANCHORS[0]!, FIX_ANCHORS[0]! + '// PKC3-GRIPGUARD (only the include line)\n');
+    expect(partial, '部分適用の形を作れていない').not.toBe(EXCERPT);
+    const t = tree(partial);
+    try {
+      const r = run(SCRIPT, t.dir);
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).not.toContain('SKIP');
+      expect(r.out).toContain('部分適用');
+      expect(t.read(), '部分適用の file を書き換えた').toBe(partial);
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it('🔴 錨が 1 つでも無ければ落ちる(exit 1)。何も書かない', () => {
     for (let i = 0; i < FIX_ANCHORS.length; i++) {
       const broken = EXCERPT.replace(FIX_ANCHORS[i]!, '// 上流が形を変えた\n');
@@ -148,7 +164,8 @@ describe('#1402(grip-guard)── 当て方', () => {
   });
 
   it('🔴 錨が 1 字違っても落ちる(上流が空白を変えたら、黙って通さない)', () => {
-    const broken = EXCERPT.replace('        bool bSuccess(true);\n', '        bool  bSuccess(true);\n');
+    // ⚠ `bool bSuccess(true);` は兄弟の DrawPolyPolygon(B2DPolyPolygon) にも在る ── 変えるのは**錨の中**の 1 字
+    const broken = EXCERPT.replace(FIX_ANCHORS[1]!, FIX_ANCHORS[1]!.replace('bool bSuccess(true);', 'bool  bSuccess(true);'));
     expect(broken).not.toBe(EXCERPT);
     const t = tree(broken);
     try {
@@ -187,12 +204,17 @@ describe('#1402(grip-guard)── 当て方', () => {
 
 describe('#1402(grip-guard)── 当てた結果(描いた C++ で見る)', () => {
   it('🔴 順序: bSuccess → 旗 → null 門 → 印(上限)→ DrawPolyLine → after の印 → if(bSuccess)', () => {
-    const after = patched();
+    const whole = patched();
+    // 🔑 兄弟の DrawPolyPolygon(B2DPolyPolygon) にも同じ形が在るので、**この関数の範囲**だけを見る
+    const fnAt = whole.indexOf('void OutputDevice::DrawPolygon( const tools::Polygon& rPoly )');
+    expect(fnAt, '関数が無い').toBeGreaterThan(0);
+    const fnEnd = whole.indexOf('\n}\n', fnAt);
+    expect(fnEnd, '関数の終わりが無い').toBeGreaterThan(fnAt);
+    const after = whole.slice(fnAt, fnEnd);
     const at = (needle: string): number => {
-      expect(count(after, needle), `「${needle.trim()}」が 1 件でない`).toBe(1);
+      expect(count(after, needle), `「${needle.trim()}」が関数の中で 1 件でない`).toBe(1);
       return after.indexOf(needle);
     };
-    const fnAt = at('void OutputDevice::DrawPolygon( const tools::Polygon& rPoly )');
     const succAt = at('bool bSuccess(true);');
     const flagAt = at('bool bPkc3Said = false;');
     const nullAt = at('if (!mpGraphics) // PKC3-GRIPGUARD');
@@ -201,7 +223,7 @@ describe('#1402(grip-guard)── 当てた結果(描いた C++ で見る)', () 
     const lineAt = at('bSuccess = mpGraphics->DrawPolyLine(');
     const afterAt = at('after DrawPolyLine returned');
     const okAt = at('if(bSuccess)');
-    expect(fnAt).toBeLessThan(succAt);
+    expect(succAt).toBeGreaterThan(0);
     expect(succAt).toBeLessThan(flagAt);
     expect(flagAt).toBeLessThan(nullAt);
     expect(nullAt).toBeLessThan(capAt);
@@ -216,7 +238,8 @@ describe('#1402(grip-guard)── 当てた結果(描いた C++ で見る)', () 
   it('🔴 null 門は印を出して `return`(縁を引かない)/ 印の上限は 100 で、`DrawPolyLine` は包まない', () => {
     const after = patched();
     const nullAt = after.indexOf('            if (!mpGraphics) // PKC3-GRIPGUARD');
-    const lineAt = after.indexOf('            bSuccess = mpGraphics->DrawPolyLine(');
+    // ⚠ 兄弟関数にも同じ行が在るので、null 門より**後ろ**の 1 件を取る
+    const lineAt = after.indexOf('            bSuccess = mpGraphics->DrawPolyLine(', nullAt);
     expect(nullAt).toBeGreaterThan(-1);
     expect(lineAt).toBeGreaterThan(nullAt);
     // 🔑 期待値は patch から取らず**手で書く**
@@ -309,13 +332,13 @@ describe('#1402(grip-guard)── 当てた結果(描いた C++ で見る)', () 
     ]) {
       expect(count(after, needle), needle).toBe(count(EXCERPT, needle));
     }
-    expect(count(after, 'DrawPolyLine(')).toBe(1);
+    expect(count(after, 'DrawPolyLine(')).toBe(count(EXCERPT, 'DrawPolyLine('));
   });
 });
 
 describe('#1402(grip-guard)── 上流の実 file へ', () => {
-  const real = join(UPSTREAM, REL);
-  it.skipIf(!existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 23・消した行は 0。2 度目は SKIP で不変', () => {
+  const real = UPSTREAM ? join(UPSTREAM, REL) : '';
+  it.skipIf(!real || !existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 23・消した行は 0。2 度目は SKIP で不変', () => {
     const orig = readFileSync(real, 'utf-8');
     const t = tree(orig);
     try {

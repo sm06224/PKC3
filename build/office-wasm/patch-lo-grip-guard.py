@@ -37,10 +37,11 @@ stack と実測: https://github.com/sm06224/PKC3/issues/1402#issuecomment-603720
   `before` が出ず落ちる → この経路ではない(`DrawPolygon` に来る前)。
 - ⚠ **この箱では compile できない**。`emscripten_stack_get_free()` は `<emscripten/stack.h>` の関数(`__EMSCRIPTEN__` の中だけ使う)。
 
-## ⚠ 作法(`patch-lo-viewdata-gone.py` と同じ)
+## ⚠ 作法(錨と印は `patch-lo-viewdata-gone.py`、当て済みの扱いは `patch-lo-scripting.py` と同じ)
 
 - **毎回当たる直し**(入力で gate しない)。錨が**ちょうど 1 件**在ることを書く前に確かめる。1 つでも外れたら何も書かない。
-- 既に印が在る(= 当て済み)ときは **SKIP して exit 0**(file は触らない)。
+- 印の行数が期待どおり(= 当て済み)なら **SKIP して exit 0**(file は触らない)。印が在るのに行数が違う
+  (部分適用 / 手編集)は **exit 1** ── 門なしで焼かない(`patch-lo-scripting.py` の SKIP と同じ向き)。
 - **足した行は全部 `PKC3-GRIPGUARD` を含む**。原文の行は 1 行も書き換えない(足すだけ)。
 """
 
@@ -136,10 +137,29 @@ def main() -> int:
         return 1
     text = path.read_text(encoding="utf-8")
 
-    # 🔑 先に「もう当たっていないか」を見る(`patch-lo-scripting.py` の作法)。file は触らない。
+    # 足す行は**全部**印を含む(印の無い足し行は、後で「原文」と見分けられない)
+    n_expected = 0
+    for anchor, replace in PARTS:
+        added = _added_lines(anchor, replace)
+        bare = [ln for ln in added if MARK not in ln]
+        if bare:
+            print(f"ERROR: 印の無い足し行が在る(この patch の書き方の誤り): {bare}", file=sys.stderr)
+            return 1
+        n_expected += len(added)
+
+    # 🔑 先に「もう当たっていないか」を見る(`patch-lo-scripting.py` の SKIP と同じ向き)。file は触らない。
+    # ⚠ 「印が在る」だけでは SKIP しない ── 印の行数が期待どおりのときだけ当て済みと読む。
+    #    印が在るのに行数が違う(部分適用 / 手で直した)file は、門なしで焼かないために exit 1。
     if MARK in text:
-        print(f"SKIP: 既に当たっている({SRC})")
-        return 0
+        n_have = sum(1 for line in text.splitlines() if MARK in line)
+        if n_have == n_expected:
+            print(f"SKIP: 既に当たっている({SRC}、印 {n_have} 行)")
+            return 0
+        print(
+            f"ERROR: 印が {n_have} 行だけ在る(期待 {n_expected})── 部分適用か手編集。{SRC} を上流の形に戻してから当て直す",
+            file=sys.stderr,
+        )
+        return 1
 
     # ⚠ 錨は全部**ちょうど 1 件**。1 つでも外れたら何も書かない(「半分だけ当たる」を作らない)。
     for anchor, _replace in PARTS:
@@ -150,16 +170,6 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-
-    # 足す行は**全部**印を含む(印の無い足し行は、後で「原文」と見分けられない)
-    n_expected = 0
-    for anchor, replace in PARTS:
-        added = _added_lines(anchor, replace)
-        bare = [ln for ln in added if MARK not in ln]
-        if bare:
-            print(f"ERROR: 印の無い足し行が在る(この patch の書き方の誤り): {bare}", file=sys.stderr)
-            return 1
-        n_expected += len(added)
 
     for anchor, replace in PARTS:
         text = text.replace(anchor, replace, 1)
