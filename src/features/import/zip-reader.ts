@@ -203,7 +203,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   }
 
   if (prefix < 0 || cdOffset + cdSize + prefix > zip.size) {
-    throw new ZipReadError('zip の中央ディレクトリが範囲外を指しています');
+    throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が範囲外を指しています');
   }
 
   const cdStart = cdOffset + prefix;
@@ -216,10 +216,10 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   let pos = 0;
   for (let i = 0; i < count; i++) {
     if (pos + 46 > cd.byteLength) {
-      throw new ZipReadError('zip の中央ディレクトリが途中で切れています');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が途中で切れています');
     }
     if (cd.getUint32(pos, true) !== CD_SIG) {
-      throw new ZipReadError('zip の中央ディレクトリの署名が不正です');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)の署名が不正です');
     }
     const flags = cd.getUint16(pos + 8, true);
     const method = cd.getUint16(pos + 10, true);
@@ -235,7 +235,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
     // **黙って clamp** するので、CD が名前の途中で切れていると名前が静かに縮む
     // (最後の 1 件は次の CD 署名検査にも掛からないので素通りする)
     if (pos + 46 + nameLen + extraLen + commentLen > cd.byteLength) {
-      throw new ZipReadError('zip の中央ディレクトリが途中で切れています');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が途中で切れています');
     }
 
     if (flags & 0x1) throw new ZipReadError('暗号化された zip には対応していません');
@@ -314,7 +314,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   // 件数を使い切った後に余りがあれば、EOCD の件数が中身と食い違っている ──
   // 素通りさせると **entry が黙って消える**(review H-3)
   if (pos !== cd.byteLength) {
-    throw new ZipReadError('zip の内容一覧と件数が合いません');
+    throw new ZipReadError('zip の内容一覧(中央ディレクトリ)と件数が合いません');
   }
   return entries;
 }
@@ -339,7 +339,7 @@ async function verifyStream(
 function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry): void {
   if (actualSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip のファイルサイズが内容一覧と違います(${entry.name}: ${actualSize} ≠ ${entry.uncompressedSize})`,
+      `zip のファイルサイズが内容一覧(中央ディレクトリ)と違います(${entry.name}: ${actualSize} ≠ ${entry.uncompressedSize})`,
     );
   }
   if (actualCrc !== entry.crc32) {
@@ -369,7 +369,7 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   // store は「圧縮後 = 圧縮前」が method 0 の定義。食い違いは目次の壊れ
   if (entry.method === 0 && entry.compressedSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip の内容一覧のサイズが合いません(${entry.name}: store なのに一致しません)`,
+      `zip の内容一覧(中央ディレクトリ)のサイズが合いません(${entry.name}: store なのに一致しません)`,
     );
   }
 
