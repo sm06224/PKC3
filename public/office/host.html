@@ -580,8 +580,10 @@
     window.addEventListener('beforeunload', function (e) {
       var SH = window.PKC3OfficeShadow;
       var pending = watch.pendingCount() > 0;
+      // ⚠ `shadowQuiet` は下で据える(同じ script の var なので、閉じるときには在る)── 打ってから影を書く前に閉じる窓を塞ぐ
+      var typed = !!(shadowQuiet && shadowQuiet.isDirty());
       var block = SH
-        ? SH.shouldBlockUnload({ pending: pending, busy: !!busy, lastModified: SH.lastModified() })
+        ? SH.shouldBlockUnload({ pending: pending, busy: !!busy, typed: typed, lastModified: SH.lastModified() })
         : (pending || !!busy);
       if (!block) return;
       e.preventDefault();

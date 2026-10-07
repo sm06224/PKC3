@@ -49,7 +49,7 @@ interface Api {
   createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean; afterSaved(): Promise<boolean> };
   MODIFIED_POLL_MS: number;
   lastModified(): boolean | null;
-  shouldBlockUnload(s: { pending: boolean; busy: boolean; lastModified: boolean | null }): boolean;
+  shouldBlockUnload(s: { pending: boolean; busy: boolean; typed?: boolean; lastModified: boolean | null }): boolean;
   unshelve(d: { storage: unknown; id: string }): Promise<boolean>;
   SHADOW_DIR: string;
   SHELF_DIR: string;
@@ -1558,23 +1558,54 @@ describe('🔴 窓を閉じる操作の門(Cmd+W / Ctrl+W / タブを閉じる�
     expect(fresh.lastModified(), '保存した直後なのに、次の問い合わせまで「変更あり」のまま').toBe(false);
   });
 
-  it('shouldBlockUnload: 保存を渡している最中(pending / busy)か、変更あり(true)のときだけ出す。false / null は出さない(2×2×3 の全数)', () => {
+  it('shouldBlockUnload: 保存を渡している最中(pending / busy)か、打った直後(typed)か、変更あり(true)のときだけ出す。false / null は出さない(2×2×2×3 の全数)', () => {
     const fresh = load();
     const vals: Array<boolean | null> = [true, false, null];
     let n = 0;
     for (const pending of [true, false]) {
       for (const busy of [true, false]) {
-        for (const lastModified of vals) {
-          const want = pending || busy || lastModified === true;
-          expect(
-            fresh.shouldBlockUnload({ pending, busy, lastModified }),
-            `pending=${pending} busy=${busy} lastModified=${String(lastModified)}`,
-          ).toBe(want);
-          n += 1;
+        for (const typed of [true, false]) {
+          for (const lastModified of vals) {
+            const want = pending || busy || typed || lastModified === true;
+            expect(
+              fresh.shouldBlockUnload({ pending, busy, typed, lastModified }),
+              `pending=${pending} busy=${busy} typed=${typed} lastModified=${String(lastModified)}`,
+            ).toBe(want);
+            n += 1;
+          }
         }
       }
     }
-    expect(n, '全数を回していない').toBe(12);
+    expect(n, '全数を回していない').toBe(24);
+    // `typed` を渡さない呼び手(古い配線)でも落ちない ── 省略は false と同じ
+    expect(fresh.shouldBlockUnload({ pending: false, busy: false, lastModified: false })).toBe(false);
+  });
+
+  it('打ってから影を書く(take)経路の答えも覚える ── poll の間隔より先に静止が来ても、取りこぼさない', async () => {
+    const fresh = load();
+    const clock = { t: 1_000_000 };
+    const state: { modified: boolean | null } = { modified: null };
+    const quiet = fresh.createQuiet();
+    const writer = fresh.createWriter({
+      now: () => clock.t, quiet, isDead: () => false,
+      isModified: async () => state.modified,
+      write: () => ({ ext: 'odt', path: '/p', size: 1 }),
+      shelve: async () => undefined,
+      discard: () => undefined, onWritten: () => undefined, onFailed: () => undefined,
+      // ⚠ poll を遠ざけて、take の経路だけが窓へ聞く形にする(poll が救うと、この経路の取りこぼしが見えない)
+      pollMs: 60 * 60 * 1000,
+      unshelve: async () => true,
+    });
+    await writer.tick();                       // 最初の poll(答え null)
+    expect(fresh.lastModified()).toBeNull();
+    quiet.typed(clock.t);
+    expect(quiet.isDirty(), '打った印が立っていない').toBe(true);
+    state.modified = true;
+    clock.t += fresh.QUIET_MS + 500;
+    const r = await writer.tick();             // 静止 → take → 窓に聞く → 書く
+    expect(r, 'take の経路を通っていない(前提が崩れている)').not.toBe('wait');
+    expect(fresh.lastModified(), 'take の経路で聞いた「変更あり」を覚えていない').toBe(true);
+    expect(quiet.isDirty(), '影を書いたのに打った印が下りていない').toBe(false);
   });
 
   it('host.html の beforeunload が、この判断を通している(原文 pin ── 配線を落とすと閉じる操作が素通りする)', () => {
@@ -1584,7 +1615,13 @@ describe('🔴 窓を閉じる操作の門(Cmd+W / Ctrl+W / タブを閉じる�
     const body = host.slice(at, at + 700);
     expect(body).toContain('shouldBlockUnload(');
     expect(body, '窓に最後に聞いた答えを渡していない').toContain('lastModified: SH.lastModified()');
-    expect(body, '保存を渡している最中の条件が落ちた').toContain('watch.pendingCount() > 0');
+    expect(body, '打った直後の印を渡していない').toContain('typed: typed,');
+    expect(body, '打った印の出どころが createQuiet でない').toContain('var typed = !!(shadowQuiet && shadowQuiet.isDirty());');
+    expect(body, '保存を渡している最中の条件が落ちた').toContain('var pending = watch.pendingCount() > 0;');
+    expect(body, 'busy を渡していない').toContain('busy: !!busy,');
+    // 判断が逆(block なら return)になる変異を落とす ── 平常時に確認が出て、未保存のときだけ素通りする形
+    expect(body, '判断の向きが違う').toContain('if (!block) return;');
+    expect(body, 'script が読めないときの従来の条件が落ちた').toContain(': (pending || !!busy);');
     expect(body).toContain('e.preventDefault();');
   });
 });
