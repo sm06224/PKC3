@@ -178,6 +178,11 @@ describe('井桁が付いていれば、空白で区切る(#637)', () => {
     expect(splitTags('#買い物')).toEqual(['買い物']);
   });
 
+  it('角括弧付きでカンマ区切りのタグが正しく分割される (#1373)', () => {
+    expect(splitTags('[tag1], [tag2]')).toEqual(['tag1', 'tag2']);
+    expect(splitTags('[tag1], [tag2], [tag3]')).toEqual(['tag1', 'tag2', 'tag3']);
+  });
+
   it('空の欄は 0 個(押しても撃たない側へ倒す)', () => {
     expect(splitTags('')).toEqual([]);
     expect(splitTags('   ')).toEqual([]);
