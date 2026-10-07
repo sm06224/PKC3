@@ -660,6 +660,22 @@ Emscripten のときだけ `break` にした。広い門は、**計装で見え�
 ⚠ 片方の patch を単独で test するだけでは、**もう片方が先に当たった版**を 1 度も通らない
 (§2 の「通っていない経路」と同型)。
 
+### 🔴 #1393 / #1396 の LO 側の直し 3 本(2026-10-07。⚠ 焼く前 ── 効くかは未測定)
+
+JSPI の Qt backend では、レイアウトの Idle(`InterimItemWindow::m_aLayoutIdle`)が dispose / entry 操作の**途中**に main スレッドから割り込める。
+`~Task` の後しか見ない #117 の直しは、この途中を塞いでいない。**別の file・別の主張**なので 3 本に分けた(1 patch = 1 主張):
+
+| patch | 触る所 | 主張 | 印 |
+|---|---|---|---|
+| `patch-lo-layout-guard.py` | `InterimItemWindow::Layout()` の `Stop()` の直後 | dispose 中(`m_xContainer` 無し)は返す | `PKC3-LAYOUTGUARD:` を出す |
+| `patch-lo-hscroll-hdl.py` | `~SalInstanceScrolledWindow()` | 上流の戻し忘れ(横の `ScrollHdl`)を戻す | 出さない(停止の有無で見る) |
+| `patch-lo-viewdata-gone.py` | `SvTreeListBox::getPreferredDimensions` | view data の無い entry / model の無い箱を飛ばす | `PKC3-VIEWDATAGONE:` を出す |
+
+🔑 焼いて停止の回に `PKC3-VIEWDATAGONE` が **0 回**のまま落ちたら、3 本目の推測(view data が無い瞬間)が外れている ──
+`m_pModel` null か `m_pImpl` null(`iconview.cxx:144`)側へ門を足す(#1396 のコメントの「覆る条件」)。
+test は `tests/office-layout-guard-patch.test.ts` / `office-hscroll-hdl-patch.test.ts` / `office-viewdata-gone-patch.test.ts`
+(fixture は上流 `7f96a38cf750` の file そのままの抜粋)。
+
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 
 焼きが `make` の 15 分で落ち、こう出た:

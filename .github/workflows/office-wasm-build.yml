@@ -656,7 +656,19 @@ jobs:
           # 🔴 25 → 24(2026-10-05): #1344 で足した LO 側の直し(QtMenu の出口で Qt の event を 1 つ置く形)を外した。
           #    効かなかった(焼いて測ると armed も timer の発火も出たが、外側の待ちは戻らなかった)。
           #    真因は Qt 側で、`qtbase-patch-asyncify-nested.py` が直した。
-          test "$n" -eq 24
+          # 🔴 24 → 25(2026-10-07)。`patch-lo-layout-guard.py`(#1393 の**直し**。入口の門)。
+          #    `InterimItemWindow::Layout()` が、dispose の途中(`m_xContainer` を reset した後)に JSPI で割り込んだ
+          #    レイアウトの Idle から呼ばれ、空になった子窓へ触る。`Stop()` の直後で `m_xContainer` が無ければ返す
+          #    (⚠ **既定で当たる**。`patch-lo-scheduler-task-gone.py` は `~Task` の後しか見ないので dispose 中は通り抜ける)。
+          # 🔴 25 → 26(2026-10-07)。`patch-lo-hscroll-hdl.py`(#1393 の**直し**。落ちた先)。
+          #    `~SalInstanceScrolledWindow()` が縦の `ScrollHdl` しか元へ戻さない上流の戻し忘れ。横も戻す 2 行を足す。
+          #    ⚠ 入口の門(上)と**独立に正しい**(別 file・別の主張)。
+          # 🔴 26 → 27(2026-10-07)。`patch-lo-viewdata-gone.py`(#1396 の**直し**)。
+          #    `SvTreeListBox::getPreferredDimensions` が、model には在るが view data の無い entry を読んで
+          #    `memory access out of bounds`(Impress を開いた直後)。`m_pModel` が無ければ 0 / view data の無い entry は飛ばす
+          #    (⚠ **既定で当たる**。推測の当たり外れは `PKC3-VIEWDATAGONE` の回数で次の焼きで分かる)。
+          #    ⚠ 3 本は**別の file**(`InterimItemWindow.cxx` / `salvtables.cxx` / `treelistbox.cxx`)で、他の patch と重ならない。
+          test "$n" -eq 27
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
