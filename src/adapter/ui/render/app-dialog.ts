@@ -47,6 +47,13 @@ import {
   SHADOW_OPEN_SHADOW_LABEL,
   shadowDialogNote,
 } from '@features/office/office-shadow';
+import {
+  AGENT_ASK_LABELS,
+  AGENT_ASK_NOTE,
+  AGENT_ASK_TITLE,
+  type AgentAnswer,
+  type AgentScope,
+} from '@features/agent/agent-gate';
 import { buildIconPalette, isTableIcon } from './icon-palette';
 import { diffLineEl } from './diff-line';
 
@@ -983,6 +990,33 @@ export function pickOfficeShadowInApp(
   });
 }
 
+/**
+ * 🔴 **ブラウザの AI が道具を呼んだとき、許すかを聞く**(#1407 段①。裁定「許可すれば渡す」)。
+ *
+ * 3 択:「今回だけ」「常に許す」「許さない」。
+ * ⚠ **`Escape` / 外を押す / 「許さない」は全部「許さない」**(`'deny'`)── 押し損ねで通さない。
+ * ⚠ **既定の焦点は「今回だけ」**(先頭の行)── 「常に許す」を既定にしない(憶えるのは明示の 1 手)。
+ * ⚠ 字は `features/agent/agent-gate.ts`(読む側は「本文が AI の提供元へ送られます」と言う)。
+ * ⚠ 重なったら順番に出す(`pickRowInApp` の列)── 別のダイアログが開いていれば、閉じるのを待つ。
+ */
+export async function pickAgentGrantInApp(
+  host: HTMLElement,
+  scope: AgentScope,
+): Promise<AgentAnswer> {
+  const chosen = await pickRowInApp<'once' | 'always'>(host, {
+    title: AGENT_ASK_TITLE,
+    field: 'pick-agent-grant',
+    indexAttr: 'data-pkc-agent-grant-index',
+    note: AGENT_ASK_NOTE[scope],
+    cancelLabel: AGENT_ASK_LABELS.deny,
+    rows: [
+      { label: AGENT_ASK_LABELS.once, value: 'once' },
+      { label: AGENT_ASK_LABELS.always, value: 'always' },
+    ],
+  });
+  return chosen ?? 'deny';
+}
+
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
 interface PickRowsSpec<T> {
   readonly title: string;
@@ -991,6 +1025,8 @@ interface PickRowsSpec<T> {
   readonly indexAttr: string;
   /** 一覧の上に出す 1 行。空なら出さない。 */
   readonly note: string;
+  /** 取り消す側のボタンの字。既定は「やめる」。 */
+  readonly cancelLabel?: string;
   readonly rows: readonly {
     readonly label: string;
     readonly value: T;
@@ -1076,7 +1112,7 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     f.ok.removeAttribute('data-pkc-danger');
     // 🔑 受ける側は**隠す**(`pickSnippetInApp` の docstring)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
-    f.cancel.textContent = 'やめる';
+    f.cancel.textContent = spec.cancelLabel ?? 'やめる';
     f.cancel.hidden = false;
 
     const answered = open(f, 'cancel');

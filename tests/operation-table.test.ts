@@ -406,7 +406,7 @@ const UNREGISTERED_POINT: readonly string[] = [
   // ⚠ 2026-10-04(#1232 段 b): 文字起こしの行頭の時刻。押した時刻(ミリ秒)が要る P1(`open-date-note` と同じ仕分け)
   'seek-media',
   'open-tile', 'open-tile-as', 'pick-app-group-icon', 'preview-revision', 'remove-relation',
-  'restore-revision', 'restore-trash', 'revoke-extension', 'revoke-same-origin',
+  'restore-revision', 'restore-trash', 'revoke-agent', 'revoke-extension', 'revoke-same-origin',
   'schedule-pick-day', 'schedule-quick-here', 'set-task-repeat', 'shape-cell',
   'smart-cond-remove',
   /**
@@ -460,6 +460,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-07(#1407 段①): 設定の「ブラウザの AI に許したこと」の取り消し(`revoke-agent`)で受け手 +1 ── 登記は増えない
+      //   (押し口は設定の一覧の行にしか無く、鍵も持たない)。押した範囲の名前だけを渡す N(`revoke-extension` と同じ仕分け)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-04(#1232 段 b): 文字起こしの行頭の時刻(`seek-media`)で受け手 +1 ── 登記は増えない(押し口は本文の時刻の字にしか無く、
       //   鍵も持たない)。押した時刻が要る P1(`open-date-note` と同じ仕分け)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-03(#1017 C5。Gemini 裁定 B): 「メッセージを開く」(`open-messages`)を KEY_COMMANDS へ登記した ──
@@ -734,12 +737,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 386,
-      receivers: 322,
+      total: 387,
+      receivers: 323,
       registered: 104,
       both: 40,
       outsideActionsTable: 64,
-      unregistered: 282,
+      unregistered: 283,
     });
   });
 

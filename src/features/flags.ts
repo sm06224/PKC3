@@ -242,6 +242,22 @@ export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
   summary: '貼り付けたとき、何が届いてどれを使ったかを画面に出す(中身は出さない)',
 });
 
+/**
+ * 🔴 **ブラウザの AI から、ノートを探す・作る・追記できるようにする**(#1407 段⓪)。
+ *
+ * ⚠ 仕様(W3C WebML CG の WebMCP)はまだ草案で、`document.modelContext` を出すブラウザは
+ * 一部の先行版だけである。⚠ **既定はオフ** ── オンにしても、AI が実際に呼んだとき
+ * 「今回だけ / 常に許す / 許さない」を聞くまでは何も渡さない(許可は端末に残り、
+ * 設定の「許可」で取り消せる)。
+ * ⚠ **起動時に 1 度だけ登録する**(メインのタブだけ)ので、切り替えたら再起動が要る。
+ */
+export const FLAG_WEBMCP = defineFlag('agent.webmcp', {
+  default: false,
+  foldWhen: 'Chrome / Edge が flag なしで document.modelContext を提供したら(設定へ昇格)',
+  summary: 'ブラウザの AI(WebMCP)に、ノートを探す・作る道具を渡す(既定はオフ。使うときに許可を聞きます)',
+  needsRestart: true,
+});
+
 // 🔴 `editor.live` は 2026-08-14 に**退役**した(user 裁定 2026-08-08
 //    「既定でONかつ設定で2ペイン編集はできるようにする」)。foldWhen
 //    「既定 ON にできたら」が成就し、設定 `pkc3.editor-mode` へ昇格(既定 live)。

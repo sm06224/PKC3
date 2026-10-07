@@ -88,6 +88,11 @@ import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
 import { startCapture } from '@adapter/transport/capture-bridge';
+import { createWebMcpRegistration } from '@adapter/transport/webmcp';
+import { buildAgentTools } from '@adapter/transport/webmcp-tools';
+import { createAgentGate } from '@features/agent/agent-gate';
+import { appAgentGrants } from '@adapter/platform/agent-grants';
+import { TAGS_KEY } from '@features/query/group-by';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
 import {
@@ -95,6 +100,7 @@ import {
   FLAG_EMBED,
   FLAG_OFFICE_INPUT_LOG,
   FLAG_PASTE_INSPECT,
+  FLAG_WEBMCP,
   registeredFlags,
 } from '@features/flags';
 import { appBrowseMode, browseScanOf, isBrowseMode } from '@adapter/ui/render/browse-mode';
@@ -369,6 +375,7 @@ import {
   alertInApp,
   confirmInApp,
   pickOfficeShadowInApp,
+  pickAgentGrantInApp,
   pickAppGroupIconInApp,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -1870,6 +1877,45 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         opener: typeof window === 'object' ? window.opener : null,
       })
     : null;
+  /**
+   * 🔴 **外から増えたことを、黙って起こさない**(段②)。
+   * ⚠ 一覧に 1 件増えるだけだと、user は「自分が作ったか」が分からない ──
+   * どこから来たかまで帯に出す。
+   * 🔴 **ノートを外から作る道は、この 1 本だけ**(#1407)── `pkc.createEntry`(C-4 / C-3)も
+   *   ブラウザの AI(WebMCP の `pkc_create_note`)も**同じ関数**を通る。2 つ目を作らない。
+   */
+  const createEntryFromOutside = (
+    input: { title: string; body: string },
+    origin: string,
+    via: 'origin' | 'capture',
+  ): string => {
+    const lid = generateLid();
+    /**
+     * 🔴 **見せ方を門で変える**(#194)。
+     *
+     * ⚠ 許可リストの相手(`'origin'`)は **user が作業している最中**に送ってくる ──
+     * `edit: false` で、**いまの作業を退かさない**(#300 で user が叱った型)。
+     * 🔑 合図の相手(`'capture'`)は違う ── その窓は**たったいま取り込みのために
+     * 開かれた**ので、退かす作業が無い。しかも送り主の身元は確かめていないので、
+     * **黙って積まずに目の前へ出す**(見て、要らなければ捨てられる)。
+     */
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title: input.title,
+      body: input.body,
+      edit: via === 'capture',
+      parentLid: null,
+      relationId: generateLid(),
+    });
+    showStatus(
+      via === 'capture'
+        ? `${origin} から取り込みました。保存すると残ります:『${input.title}』`
+        : `${origin} から 1 件取り込みました:『${input.title}』`,
+    );
+    return lid;
+  };
   startEmbedBridge({
     // ⚠ **合図で来たときは flag に依らず張る** ── flag は「iframe の親から受けるか」
     //    の切替であって、user が自分でブックマークを押した動線とは別物である。
@@ -1878,39 +1924,56 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔑 **flag が下りていれば許可リストは空**(= 全部拒否)── 合図の門だけ開く
       appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : [],
     ...(capture === null ? {} : { capture }),
-    /**
-     * 🔴 **外から増えたことを、黙って起こさない**(段②)。
-     * ⚠ 一覧に 1 件増えるだけだと、user は「自分が作ったか」が分からない ──
-     * どこから来たかまで帯に出す。
-     */
-    createEntry: (input, origin, via) => {
-      const lid = generateLid();
-      /**
-       * 🔴 **見せ方を門で変える**(#194)。
-       *
-       * ⚠ 許可リストの相手(`'origin'`)は **user が作業している最中**に送ってくる ──
-       * `edit: false` で、**いまの作業を退かさない**(#300 で user が叱った型)。
-       * 🔑 合図の相手(`'capture'`)は違う ── その窓は**たったいま取り込みのために
-       * 開かれた**ので、退かす作業が無い。しかも送り主の身元は確かめていないので、
-       * **黙って積まずに目の前へ出す**(見て、要らなければ捨てられる)。
-       */
-      dispatcher.dispatch({
-        type: 'CREATE_ENTRY',
-        archetype: 'text',
-        lid,
-        title: input.title,
-        body: input.body,
-        edit: via === 'capture',
-        parentLid: null,
-        relationId: generateLid(),
-      });
-      showStatus(
-        via === 'capture'
-          ? `${origin} から取り込みました。保存すると残ります:『${input.title}』`
-          : `${origin} から 1 件取り込みました:『${input.title}』`,
-      );
-      return lid;
-    },
+    createEntry: createEntryFromOutside,
+  });
+  /**
+   * 🔴 **ブラウザの AI(WebMCP)へ道具を渡す**(#1407 段①)。
+   *
+   * ⚠ **判断は `createWebMcpRegistration` と `buildAgentTools` に在る**(この file はどの test からも
+   *   実行されない)── 条件(flag・メインのタブだけ・入口が無ければ何もしない)も、許可の門も、
+   *   ここには書かない。ここは**道具を束ねて、呼ぶ**だけである。
+   * 🔴 **作る道は `pkc.createEntry` と同じ `createEntryFromOutside`**(2 つ目を作らない)。
+   *   探す・読むは既存の op(`searchEntries` / `getBodies` / `queryScan('tags')`)── SQL は書かない。
+   * ⚠ `client` は昇格で差し替わる `let` ── 呼ぶたびに読むので、乗り換えた後も正しい口を叩く。
+   */
+  const agentGate = createAgentGate({
+    grants: appAgentGrants,
+    ask: (scope) => pickAgentGrantInApp(root, scope),
+    now: () => Date.now(),
+  });
+  const agentRegistration = createWebMcpRegistration({
+    enabled: () => appFlags.isOn(FLAG_WEBMCP.name),
+    host: { document, navigator },
+    tools: () =>
+      buildAgentTools({
+        meta: (id) => {
+          const m = dispatcher.getState().entryMetas.get(id);
+          return m === undefined
+            ? undefined
+            : { title: m.title, archetype: m.archetype, updatedAt: m.updatedAt };
+        },
+        search: async (query, limit) => {
+          const r = await client.request({ op: 'searchEntries', cid, query, limit });
+          return { ids: r.lids, truncated: r.truncated };
+        },
+        bodies: async (ids) => {
+          const rows = await client.request({ op: 'getBodies', cid, lids: ids });
+          return new Map(rows.map((r) => [r.lid, r.body] as const));
+        },
+        tags: async () => {
+          const r = await client.request({ op: 'queryScan', cid, key: TAGS_KEY });
+          return { groups: r.groups?.groups ?? [], omitted: r.groups?.omittedGroups ?? 0 };
+        },
+        createEntry: createEntryFromOutside,
+        gate: agentGate,
+      }),
+  });
+  // 🔑 メインのタブだけ(2 枚目以降は、メインへ昇格した瞬間に下の 1 か所で呼ぶ)
+  agentRegistration.sync(followerConn === null);
+  // タブを閉じるとき消す。⚠ 戻るで復元されたとき(bfcache)は登録し直す
+  window.addEventListener('pagehide', () => agentRegistration.stop());
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) agentRegistration.sync(writerHolder || followerConn === null);
   });
   /**
    * 🔗 組み込みタイルから Office を開く(#148 / #174)。
@@ -2121,6 +2184,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    店(store)が使えるようになる瞬間がずれる**からである(`promote` の
           //    中で新しい worker を建てている)── 早すぎると書きに行って失敗する
           writerHolder = true;
+          // 🔴 メインになったので、ブラウザの AI へ道具を渡す(flag がオンのときだけ。#1407)
+          agentRegistration.sync(true);
           /**
            * 🔴 **昇格した直後にも 1 回検める**(#1007 段①、user 目線レビュー 欠陥 5)。
            * ⚠ boot の刻印から呼ぶ 1 回は follower として即終わっているので、
@@ -3656,6 +3721,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ `revokeSameOrigin` と**同じ倒し方**にする ── 許可は state に持たないので、
      *   自分で描き直さないと一覧が消えず「効いていない」に見える。
      */
+    /**
+     * 🔴 **ブラウザの AI に許した範囲を取り消す**(#1407)。
+     * ⚠ `revokeSameOrigin` と**同じ倒し方** ── 許可は state に持たないので、自分で描き直さないと
+     *   一覧が消えず「効いていない」に見える。
+     */
+    revokeAgent: (scope) => {
+      if (scope !== 'read' && scope !== 'write') return;
+      appAgentGrants.revoke(scope);
+      center.render(dispatcher.getState());
+      showStatus('ブラウザの AI への許可を取り消しました');
+    },
     revokeExtension: (assetKey) => {
       appExtensionGrants.revoke(assetKey);
       /**
