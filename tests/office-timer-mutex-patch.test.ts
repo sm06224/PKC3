@@ -15,7 +15,7 @@
  *   ② **`#else` の位置**: `#if !(defined __EMSCRIPTEN__ …` → `SolarMutexGuard aGuard;` → `#else` → 足した本体 → 原文の `#endif` の順で、
  *      `#else` は 1 件(2 件目を足すと前処理が壊れる)
  *   ③ **本体の中身を、描いた結果で見る**: `IsCurrentThread()` を**先に**見る / 取れなければ `m_aTimer.start(1)` して `return`
- *      (どちらも失敗の枝の**中**)/ 取れたら RAII で `release()` / 印は 20 回まで(上限は印だけを包む)
+ *      (どちらも失敗の枝の**中**)/ 取れたら RAII で `release()` / 印は 最初の 20 回 + 100 回ごと(上限は印だけを包む)・どの行にも `t=<ms>`(#1408 固まった後に印が止まるか続くかを時刻で読む)
  *   ④ **足した行は全部印を含み、原文の行は 1 行も書き換えない**
  *   ⑤ workflow の本数の主張がこの 1 本を数えている / 上流の実 file(在れば)へ本当に当たる
  *
@@ -308,18 +308,25 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
         `    comphelper::SolarMutex* const pPkc3Mutex = comphelper::SolarMutex::get(); // ${MARK}`,
         `    static int nPkc3Skipped = 0; // ${MARK}`,
         `    static int nPkc3Ran = 0; // ${MARK}`,
+        `    // ${MARK}: ms on the steady clock (wasm: since page start), so the log shows whether the re-arm keeps going.`,
+        `    auto const pPkc3Ms = []() -> long long // ${MARK}`,
+        `    { // ${MARK}`,
+        `        return std::chrono::duration_cast<std::chrono::milliseconds>( // ${MARK}`,
+        `                   std::chrono::steady_clock::now().time_since_epoch()) // ${MARK}`,
+        `            .count(); // ${MARK}`,
+        `    }; // ${MARK}`,
         `    if (pPkc3Mutex && !pPkc3Mutex->IsCurrentThread()) // ${MARK}`,
         `    { // ${MARK}`,
         `        if (!pPkc3Mutex->tryToAcquire()) // ${MARK}`,
         `        { // ${MARK}`,
-        `            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 1000 == 0) // ${MARK}`,
-        `                std::fprintf(stderr, "${MARK}: skipped #%d (LO thread holds SolarMutex)\\n", nPkc3Skipped); // ${MARK}`,
+        `            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 100 == 0) // ${MARK}`,
+        `                std::fprintf(stderr, "${MARK}: skipped #%d (LO thread holds SolarMutex) t=%lld\\n", nPkc3Skipped, pPkc3Ms()); // ${MARK}`,
         `            m_aTimer.start(1); // ${MARK}`,
         `            return; // ${MARK}`,
         `        } // ${MARK}`,
         `        aPkc3Held.m_pMutex = pPkc3Mutex; // ${MARK}`,
-        `        if (nPkc3Ran++ < 20) // ${MARK}`,
-        `            std::fprintf(stderr, "${MARK}: ran under mutex (skipped so far %d)\\n", nPkc3Skipped); // ${MARK}`,
+        `        if (nPkc3Ran++ < 20 || nPkc3Ran % 100 == 0) // ${MARK}`,
+        `            std::fprintf(stderr, "${MARK}: ran under mutex (skipped so far %d) ran=%d t=%lld\\n", nPkc3Skipped, nPkc3Ran, pPkc3Ms()); // ${MARK}`,
         `    } // ${MARK}`,
         ``,
       ].join('\n'),
@@ -377,13 +384,13 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
     expect(body).toContain('comphelper::SolarMutex* m_pMutex = nullptr;');
   });
 
-  it('🔴 印の上限: 2 つの印は `< 20` で、**印だけ**を包む(`m_aTimer.start(1)` と `return` は毎回)', () => {
+  it('🔴 印の頻度: skip も ran も「最初の 20 回 + 100 回ごと」で、**印だけ**を包む(`m_aTimer.start(1)` と `return` は毎回)', () => {
     const body = elseBody(patched());
-    expect(count(body, 'nPkc3Skipped++ < 20')).toBe(1);
-    expect(count(body, 'nPkc3Ran++ < 20')).toBe(1);
+    expect(count(body, 'nPkc3Skipped++ < 20 || nPkc3Skipped % 100 == 0')).toBe(1);
+    expect(count(body, 'nPkc3Ran++ < 20 || nPkc3Ran % 100 == 0')).toBe(1);
+    // 🔴 1000 回ごとへ戻していない(#1408: 372 → 1000 の間が無音で、固まった後の様子が読めなかった)
+    expect(body, '1000 回ごとへ戻っている').not.toMatch(/% 1000\b/);
     expect(count(body, 'std::fprintf(')).toBe(2);
-    // skip の印は 20 回の後も 1000 回ごとに出す(1 ms の再武装の頻度を累計で読む)
-    expect(count(body, 'nPkc3Skipped % 1000 == 0')).toBe(1);
     expect(count(body, 'skipped so far %d')).toBe(1);
     expect(count(body, 'static int nPkc3Skipped = 0;')).toBe(1);
     expect(count(body, 'static int nPkc3Ran = 0;')).toBe(1);
@@ -397,15 +404,37 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
     expect(lines[j + 2]).toContain('} //');
   });
 
-  it('🔴 include: `<comphelper/solarmutex.hxx>` と `<cstdio>` が `<vcl/svapp.hxx>` の直後に足され、使う所より前に在る', () => {
+  it('🔴 時刻: どちらの印にも `t=%lld` + `pPkc3Ms()` が付き、接頭辞は既存の形のまま(集計 script が grep する)', () => {
+    const body = elseBody(patched());
+    const prints = body.split('\n').filter((l) => l.includes('std::fprintf('));
+    expect(prints.length).toBe(2);
+    for (const l of prints) {
+      expect(l, '経過時間の欄が無い').toMatch(/ t=%lld\\n"/);
+      expect(l, '経過時間を渡していない').toMatch(/pPkc3Ms\(\)\)/);
+    }
+    // 接頭辞(`PKC3-TIMERMUTEX: skipped #` / `PKC3-TIMERMUTEX: ran under mutex`)は残す
+    expect(prints[0]).toContain(`"${MARK}: skipped #%d (LO thread holds SolarMutex) t=%lld`);
+    expect(prints[1]).toContain(`"${MARK}: ran under mutex (skipped so far %d) ran=%d t=%lld`);
+    // 時計は steady(壁時計は巻き戻る)で、ms に落とす。lambda は 1 件で、使う所より前
+    expect(count(body, 'std::chrono::steady_clock::now()')).toBe(1);
+    expect(body).not.toContain('system_clock');
+    expect(count(body, 'std::chrono::milliseconds')).toBe(1);
+    expect(body.indexOf('auto const pPkc3Ms')).toBeLessThan(body.indexOf('std::fprintf('));
+    // 🔴 所有者の thread id は出さない(`m_nThreadId` は private で、読み出し口が上流に無い。private を覗く手は使わない)
+    expect(body).not.toMatch(/get_id|m_nThreadId|#define private/);
+  });
+
+  it('🔴 include: `<comphelper/solarmutex.hxx>` と `<cstdio>` と `<chrono>` が `<vcl/svapp.hxx>` の直後に足され、使う所より前に在る', () => {
     const after = patched();
     expect(count(EXCERPT, '#include <cstdio>'), '抜粋の前提(元には無い)').toBe(0);
+    expect(count(EXCERPT, '#include <chrono>'), '抜粋の前提(元には無い)').toBe(0);
     expect(count(EXCERPT, 'solarmutex.hxx'), '抜粋の前提(元には無い)').toBe(0);
     expect(after).toContain(
-      `#include <vcl/svapp.hxx>\n#include <comphelper/solarmutex.hxx> // ${MARK}\n#include <cstdio> // ${MARK}\n`,
+      `#include <vcl/svapp.hxx>\n#include <comphelper/solarmutex.hxx> // ${MARK}\n#include <cstdio> // ${MARK}\n#include <chrono> // ${MARK}\n`,
     );
     const fnAt = after.indexOf('void QtTimer::timeoutActivated()');
     expect(after.indexOf('#include <cstdio>')).toBeLessThan(fnAt);
+    expect(after.indexOf('#include <chrono>')).toBeLessThan(fnAt);
     expect(after.indexOf('#include <comphelper/solarmutex.hxx>')).toBeLessThan(fnAt);
   });
 
@@ -413,9 +442,9 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
     const after = patched();
     expect(after).not.toBe(EXCERPT);
     expect(restore(after)).toBe(EXCERPT);
-    // 足した行は 32 行(include 2 + `#else` 1 + 注釈 4 + 本体 25)
+    // 足した行は 40 行(include 3 + `#else` 1 + 注釈 4 + 本体 32)
     const added = after.split('\n').filter((l) => l.includes(MARK));
-    expect(added.length).toBe(32);
+    expect(added.length).toBe(40);
     // 🔴 印の無い足し行が無い(原文の行集合に無い行は、全部印を含む)
     const origLines = new Set(EXCERPT.split('\n'));
     const bare = after.split('\n').filter((l) => !origLines.has(l) && !l.includes(MARK));
@@ -444,7 +473,7 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
 
 describe('#1393 timer-mutex ── 上流の実 file へ', () => {
   const real = UPSTREAM ? join(UPSTREAM, REL) : '';
-  it.skipIf(!real || !existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 32・消した行は 0。2 度目は SKIP で不変', () => {
+  it.skipIf(!real || !existsSync(real))('🔴 実 file へ当たる(exit 0)。足した行は 40・消した行は 0。2 度目は SKIP で不変', () => {
     const orig = readFileSync(real, 'utf-8');
     const t = tree(orig);
     try {
@@ -453,7 +482,7 @@ describe('#1393 timer-mutex ── 上流の実 file へ', () => {
       const after = t.read();
       const o = orig.split('\n');
       const a = after.split('\n');
-      expect(a.length - o.length).toBe(32);
+      expect(a.length - o.length).toBe(40);
       expect(restore(after)).toBe(orig);
       const r2 = run(SCRIPT, t.dir);
       expect(r2.code, r2.out).toBe(0);
