@@ -374,6 +374,6 @@ describe('#1402(grip-guard)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/28 → 29\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-grip-guard.py');
-    expect(yml).toContain('test "$n" -eq 29');
+    expect(yml).toContain('test "$n" -eq 30');
   });
 });
