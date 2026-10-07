@@ -18,6 +18,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:guards": "node scripts/test-pr.mjs --guards",
+    "test:pr": "node scripts/test-pr.mjs",
     "test:smoke": "playwright test --config tests/smoke/playwright.config.ts",
     "smoke:pick": "node scripts/pick-smoke.mjs --run",
     "smoke:budget": "node scripts/smoke-budget.mjs",
