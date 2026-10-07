@@ -512,6 +512,10 @@ Qt host 15 分 + Qt wasm 11 分 + **LO make 3 時間 37 分**(06:00:56Z → 09:3
 ⚠ 上の 2026-10-04 の「flag 全 OFF の焼きが 3h49m」は、この鍵が動いた(`qtbase-patch-backspace` などの追加)ことが
 **原因だった可能性**があるが、**未確認**(推測。その run の cache 復元が一致だったかを見れば決着する)。
 
+🔑 Qt の patch の一覧(2026-10-07 時点で 5 本):`asyncify-nested`(#1344)/ `backspace`(#433)/ `ime-panel` / `inputcontext` /
+`ecmastring-threadsafe`(#1394。`qcore_wasm.cpp` の関数内 static な `emscripten::val` を、main と pthread の両方から
+呼ばれても `invalid handle` にならないよう毎回 `module_property` を取る形へ。test は `tests/office-ecmastring-threadsafe-patch.test.ts`)。
+
 ### 🔴 JSPI の suspend は **LIFO で起こす** ── Emscripten の C stack は 1 本(2026-10-05、#1344 v1 → v2)
 
 1. **Emscripten 4.0.10 `src/lib/libasync.js` の JSPI(`ASYNCIFY=2`)は、export を
