@@ -934,6 +934,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         client = host.localClient();
         init = real.init;
         sync = host;
+        // 🔴 **待った末に本体になった経路でも控える**(#1409)。ここが無いと `isHolder` /
+        //    `holdsWriterLease` / `isHost` が偽のまま ── Office の保存の引き取り・索引の片づけ・
+        //    縮める・起動時の検めが、このタブでは閉じたままになる(boot と昇格にだけ在った)
+        writerHolder = true;
       }
     }
   }

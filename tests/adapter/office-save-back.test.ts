@@ -613,16 +613,36 @@ describe('holder の門(main.ts の配線)', () => {
     expect(body, '控えを渡していない').toContain('provideDocument(staged.name, staged.bytes, staged.token)');
   });
 
-  it('🔴 boot で取れたときと、昇格したときの**両方**で真になる', () => {
-    // ⚠ 片方だけだと、もう片方の経路で保存が永久に届かない
+  it('🔴 boot で取れたとき・待った末に取れたとき・昇格したとき、の**3 経路とも**で真になる', () => {
+    // ⚠ 1 経路でも欠けると、その経路で本体になったタブは保存が永久に届かない
     const assigns = code.match(/writerHolder = true;/g) ?? [];
-    expect(assigns.length, 'writerHolder を真にする場所が 2 つ無い(boot / 昇格)').toBe(2);
+    expect(assigns.length, 'writerHolder を真にする場所が 3 つ無い(boot / 待った末 / 昇格)').toBe(3);
     // 昇格の分岐の中に在ることまで見る(どこかに 2 個ある、では足りない)
     const promoted = code.slice(code.indexOf('if (promotedHost) {'));
     expect(
       promoted.slice(0, promoted.indexOf('}')),
       '昇格の分岐で holder になっていない',
     ).toContain('writerHolder = true;');
+  });
+
+  /**
+   * 🔴 **待った末に lease を得た経路でも真になる**(#1409)。
+   * ⚠ 本体が handshake に答えない間(旧ビルド / boot 中)は旧式の待機に落ち、
+   *   `await heldP` の後に自分の worker を建てて本体になる ── 2 経路しか代入が無い間は、
+   *   このタブだけ Office の保存の引き取り・索引の片づけ・縮める・起動時の検めが閉じたままだった。
+   * ⚠ 数だけでは「別の場所に 3 つ目を足した」でも通るので、`await heldP` の枝の中を見る。
+   */
+  it('🔴 待った末の枝(await heldP の後)で holder になっている', () => {
+    const from = code.indexOf('await heldP;');
+    expect(from, '待った末の枝が読めない(空振り)').toBeGreaterThan(-1);
+    const tail = code.slice(from);
+    const end = tail.indexOf('const resolved = await resolveContainerCompat(');
+    expect(end, '枝の終点が読めない(切り出しが壊れた)').toBeGreaterThan(0);
+    const branch = tail.slice(0, end);
+    expect(branch, '待った末の枝で StoreProxyHost を建てていない(切り出しが壊れた)').toContain(
+      'new StoreProxyHost(',
+    );
+    expect(branch, '待った末に本体になったタブが holder にならない').toContain('writerHolder = true;');
   });
 });
 
