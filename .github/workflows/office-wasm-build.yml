@@ -668,7 +668,15 @@ jobs:
           #    `memory access out of bounds`(Impress を開いた直後)。`m_pModel` が無ければ 0 / view data の無い entry は飛ばす
           #    (⚠ **既定で当たる**。推測の当たり外れは `PKC3-VIEWDATAGONE` の回数で次の焼きで分かる)。
           #    ⚠ 3 本は**別の file**(`InterimItemWindow.cxx` / `salvtables.cxx` / `treelistbox.cxx`)で、他の patch と重ならない。
-          test "$n" -eq 27
+          # 🔴 27 → 28(2026-10-07)。`patch-lo-tooltip-guard.py`(#1393 形 B の**門と印**)。
+          #    閉じている最中にスライド一覧のツールチップの表示 timer が割り込み、`ToolTip::DoShow()` が
+          #    `GetPageObjectLayouter()` を null 検査なしで使う。窓の破棄済み / 非表示 / 記述・ページ・配置器が空なら
+          #    その 1 回だけ出さずに返し、理由を `PKC3-TOOLTIPGUARD: … why=` で数える(⚠ ぶら下がった pointer は捕まえられない)。
+          # 🔴 28 → 29(2026-10-07)。`patch-lo-grip-guard.py`(#1402 の**印と null 門**)。
+          #    開いた直後の約 3 % で `OutputDevice::DrawPolygon` の縁を引く `SalGraphics::DrawPolyLine` が範囲外で落ちる。
+          #    塗りの後に読み直す `mpGraphics` が null なら縁を引かず返し、前後の印(`PKC3-GRIPGUARD:`)で落ちた場所を絞る
+          #    (⚠ 直しではない。ぶら下がった pointer は捕まえられない)。⚠ 2 本とも他の patch と当て先が重ならない。
+          test "$n" -eq 29
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
