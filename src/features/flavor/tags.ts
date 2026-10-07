@@ -90,7 +90,9 @@ export function splitTags(raw: string): string[] {
   for (const part of parts) {
     // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
     //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
-    const t = normalize(part.replace(/[,、;；]+$/u, ''));
+    // 🔑 各要素の前後の角括弧も落とす(`[tag1], [tag2]` のような並びに対応)
+    const stripped = part.trim().replace(/^\[+/u, '').replace(/\]+$/u, '');
+    const t = normalize(stripped.replace(/[,、;；]+$/u, ''));
     if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
     if (out.some((x) => sameTag(x, t))) continue;
     out.push(t);
