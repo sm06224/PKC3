@@ -171,6 +171,24 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     const out = spliceFrontmatterKeys(body, { date: '2026-09-01' });
     expect(out).toBe('---\ndate-done: 2026-01-01\ndate: 2026-09-01\n---\nx');
   });
+
+  it('CRLF 本文で frontmatter が新規作成されたとき改行コードが CRLF で統一される (#1367)', () => {
+    const body = '# 見出し\r\n本文\r\n次行';
+    const out = spliceFrontmatterKeys(body, { status: 'open' });
+    expect(out).toBe('---\r\nstatus: open\r\n---\r\n# 見出し\r\n本文\r\n次行');
+  });
+
+  it('vars ブロック内に空行があっても後続の変数が読み飛ばされない (#1371)', () => {
+    const src = '---\nvars:\n  x: 1\n\n  y: 2\n---\n本文';
+    expect(extractVars(src)).toEqual({ x: '1', y: '2' });
+  });
+
+  it('シングルクォートエスケープを含む文字列と末尾コメント (#1372)', () => {
+    const src = "---\ntitle: 'It''s a note' # メモ\ntags: ['It''s a tag'] # タグ\n---\n本文";
+    const r = parseFrontmatter(src);
+    expect(r.meta['title']).toBe("It's a note");
+    expect(r.meta['tags']).toEqual(["It's a tag"]);
+  });
 });
 
 describe('withTodoStatus(かんばんトグルの構造化操作)', () => {
