@@ -47,6 +47,14 @@ import {
   SHADOW_OPEN_SHADOW_LABEL,
   shadowDialogNote,
 } from '@features/office/office-shadow';
+import {
+  AGENT_ASK_LABELS,
+  AGENT_ASK_NOTE_MORE,
+  AGENT_ASK_TITLE,
+  agentAskNote,
+  type AgentAnswer,
+  type AgentTarget,
+} from '@features/agent/agent-gate';
 import { buildIconPalette, isTableIcon } from './icon-palette';
 import { diffLineEl } from './diff-line';
 
@@ -983,6 +991,41 @@ export function pickOfficeShadowInApp(
   });
 }
 
+/**
+ * 🔴 **ブラウザの AI がツールを呼んだとき、許すかを聞く**(#1407 段①。裁定「許可すれば渡す」)。
+ *
+ * 3 択:「この 1 回だけ」「常に許す」「許さない」。
+ * ⚠ **`Escape` / 外を押す / 「許さない」は全部「許さない」**(`'deny'`)── 押し損ねで通さない。
+ * 🔴 **最初の焦点は「許さない」**(取り消し側)── 打鍵の最中に出ると、続けて打った `Space` / `Enter` が
+ *   先頭の行(通す側)を押してしまう。通す 2 つは、user が目で見て押す。
+ * ⚠ 字は `features/agent/agent-gate.ts`。1 行目は**何を**しようとしているか(探す語 / 題名)と、
+ *   読む側は「本文が AI の提供元へ送られます」。2 行目は「この 1 回だけ」の動き。
+ * ⚠ 重なったら順番に出す(`pickRowInApp` の列)── 別のダイアログが開いていれば、閉じるのを待つ。
+ * 🔴 `signal` が abort されたら(AI が依頼を取り消した)、待っている間は出さず、出ていれば閉じて
+ *   「許さない」にする。
+ */
+export async function pickAgentGrantInApp(
+  host: HTMLElement,
+  target: AgentTarget,
+  signal?: AbortSignal,
+): Promise<AgentAnswer> {
+  const chosen = await pickRowInApp<'once' | 'always'>(host, {
+    title: AGENT_ASK_TITLE,
+    field: 'pick-agent-grant',
+    indexAttr: 'data-pkc-agent-grant-index',
+    note: agentAskNote(target),
+    noteMore: AGENT_ASK_NOTE_MORE,
+    cancelLabel: AGENT_ASK_LABELS.deny,
+    focusCancel: true,
+    ...(signal === undefined ? {} : { signal }),
+    rows: [
+      { label: AGENT_ASK_LABELS.once, value: 'once' },
+      { label: AGENT_ASK_LABELS.always, value: 'always' },
+    ],
+  });
+  return chosen ?? 'deny';
+}
+
 /** 「一覧から 1 行選ぶ」器の中身。⚠ `field` は行の `data-pkc-field`(test / smoke が見る)。 */
 interface PickRowsSpec<T> {
   readonly title: string;
@@ -991,6 +1034,18 @@ interface PickRowsSpec<T> {
   readonly indexAttr: string;
   /** 一覧の上に出す 1 行。空なら出さない。 */
   readonly note: string;
+  /** 取り消す側のボタンの字。既定は「やめる」。 */
+  readonly cancelLabel?: string;
+  /** `note` の下に出す 2 行目。省略 = 出さない。 */
+  readonly noteMore?: string;
+  /**
+   * 🔴 最初の焦点を取り消し側へ置く。既定は先頭の行。
+   * ⚠ 打鍵の最中に出るダイアログ(外から呼ばれるもの)は、先頭の行へ焦点を置くと
+   *   続けて打った `Space` / `Enter` が通す側を押す。
+   */
+  readonly focusCancel?: boolean;
+  /** abort されたら、待っている間は出さず、出ていれば閉じる(取り消した扱い)。 */
+  readonly signal?: AbortSignal;
   readonly rows: readonly {
     readonly label: string;
     readonly value: T;
@@ -1022,6 +1077,8 @@ interface PickRowsSpec<T> {
  */
 function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | null> {
   return enqueue(async () => {
+    // 🔴 順番を待っている間に取り消されたなら、器を触らずに「選ばなかった」で返す
+    if (spec.signal?.aborted === true) return null;
     const f = ensureFrame(host);
     f.title.textContent = spec.title;
     f.body.textContent = '';
@@ -1030,6 +1087,12 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
       line.setAttribute('data-pkc-field', `${spec.field}-note`);
       line.textContent = spec.note;
       f.body.append(line);
+    }
+    if (spec.noteMore !== undefined) {
+      const more = document.createElement('p');
+      more.setAttribute('data-pkc-field', `${spec.field}-note-more`);
+      more.textContent = spec.noteMore;
+      f.body.append(more);
     }
 
     let chosen: T | null = null;
@@ -1076,13 +1139,19 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     f.ok.removeAttribute('data-pkc-danger');
     // 🔑 受ける側は**隠す**(`pickSnippetInApp` の docstring)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
-    f.cancel.textContent = 'やめる';
+    f.cancel.textContent = spec.cancelLabel ?? 'やめる';
     f.cancel.hidden = false;
 
     const answered = open(f, 'cancel');
+    // 🔴 取り消されたら、出ているダイアログごと閉じる(押された扱いにはしない ── 取り消し側を押したのと同じ)
+    const onAbort = (): void => f.cancel.click();
+    spec.signal?.addEventListener('abort', onAbort, { once: true });
     // 🔑 焦点は**先頭の行**へ ── 開いた直後にやることは「選ぶ」だからである
-    rows[0]?.focus();
+    // 🔴 ただし外から呼ばれるもの(`focusCancel`)は取り消し側 ── 打鍵の最中に出て押し間違えない
+    if (spec.focusCancel === true) f.cancel.focus();
+    else rows[0]?.focus();
     const answer = await answered;
+    spec.signal?.removeEventListener('abort', onAbort);
     f.dialog.removeEventListener('keydown', onArrow);
     f.dialog.removeEventListener('click', onOutside);
     // ⚠ 隠したままにしない ── 器は使い回すので、次の確認で受ける側が消える

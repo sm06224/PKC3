@@ -1,0 +1,207 @@
+/**
+ * ブラウザの AI に許した範囲の台帳(#1407 段①)。
+ *
+ * 守る主張:
+ * 1. 既定は許可なし / 憶えるのは「常に許す」だけ(touch だけでは一覧に出ない)
+ * 2. 取り消せる(read を外しても write は残る)/ 取り消すと時刻も消える
+ * 3. container には入れない(鍵は端末の localStorage の 1 本。他の許可の台帳とは別)
+ * 4. 壊れた値・知らない範囲は読むときに捨てる
+ * 5. 🔴 保存が使えない端末でも、この session の中では効く(控えを読む枝が生きている)
+ */
+import { describe, expect, it } from 'vitest';
+import { AGENT_GRANTS_KEY, AgentGrants } from '@adapter/platform/agent-grants';
+import { EXTENSION_GRANTS_KEY } from '@adapter/platform/extension-grants';
+
+function fakeStorage() {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+  };
+}
+
+describe('AgentGrants', () => {
+  it('既定は許可なし。touch(今回だけ)では一覧に出ない', () => {
+    const g = new AgentGrants(fakeStorage());
+    expect(g.isAlways('read')).toBe(false);
+    expect(g.isAlways('write')).toBe(false);
+    g.touch('read', 10);
+    expect(g.isAlways('read')).toBe(false);
+    expect(g.list()).toEqual([]);
+  });
+
+  it('常に許すを憶える ── 別の台帳(別のタブ)でも読める。最終の時刻も出る', () => {
+    const store = fakeStorage();
+    new AgentGrants(store).setAlways('read');
+    new AgentGrants(store).touch('read', 1234);
+    const other = new AgentGrants(store);
+    expect(other.isAlways('read')).toBe(true);
+    expect(other.isAlways('write')).toBe(false);
+    expect(other.list()).toEqual([{ scope: 'read', last: 1234 }]);
+  });
+
+  it('許した直後はまだ呼ばれていない(last は null)', () => {
+    const g = new AgentGrants(fakeStorage());
+    g.setAlways('write');
+    expect(g.list()).toEqual([{ scope: 'write', last: null }]);
+  });
+
+  it('🔴 取り消せる: read を外しても write は残り、外した範囲の時刻も消える', () => {
+    const store = fakeStorage();
+    const g = new AgentGrants(store);
+    g.setAlways('read');
+    g.setAlways('write');
+    g.touch('read', 1);
+    g.revoke('read');
+    expect(g.isAlways('read')).toBe(false);
+    expect(g.isAlways('write')).toBe(true);
+    expect(g.list().map((r) => r.scope)).toEqual(['write']);
+    g.revoke('write');
+    // 空になったら鍵ごと消す
+    expect(store.map.has(AGENT_GRANTS_KEY)).toBe(false);
+    // 再び許すと、消した時刻は戻らない
+    g.setAlways('read');
+    expect(g.list()).toEqual([{ scope: 'read', last: null }]);
+  });
+
+  it('鍵は他の許可の台帳と別(混ぜると、片方を取り消した人の許可がもう片方まで消える)', () => {
+    expect(AGENT_GRANTS_KEY).not.toBe(EXTENSION_GRANTS_KEY);
+    const store = fakeStorage();
+    new AgentGrants(store).setAlways('read');
+    expect([...store.map.keys()]).toEqual([AGENT_GRANTS_KEY]);
+  });
+
+  it('壊れた値・知らない範囲・型違いは読むときに捨てる(許可なしへ倒れる)', () => {
+    const store = fakeStorage();
+    const g = new AgentGrants(store);
+    for (const raw of ['{broken', '[]', '"read"', 'null', '{"read":{"always":"yes"}}']) {
+      store.map.set(AGENT_GRANTS_KEY, raw);
+      expect(g.isAlways('read'), raw).toBe(false);
+    }
+    store.map.set(AGENT_GRANTS_KEY, '{"admin":{"always":true},"read":{"always":true,"last":"x"}}');
+    expect(g.list()).toEqual([{ scope: 'read', last: null }]);
+    expect(g.isAlways('write')).toBe(false);
+  });
+
+  it('🔴 保存が使えない端末(null)でも、この session の中では効く', () => {
+    const g = new AgentGrants(null);
+    g.setAlways('read');
+    g.touch('read', 7);
+    expect(g.isAlways('read')).toBe(true);
+    expect(g.list()).toEqual([{ scope: 'read', last: 7 }]);
+    g.revoke('read');
+    expect(g.isAlways('read')).toBe(false);
+  });
+
+  it('保存が読み書きで例外を投げても落ちない(控えへ倒れる)', () => {
+    const boom = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    };
+    const g = new AgentGrants(boom);
+    g.setAlways('write');
+    expect(g.isAlways('write')).toBe(true);
+    g.revoke('write');
+    expect(g.isAlways('write')).toBe(false);
+  });
+
+  /**
+   * 🔴 読めるのに書けない端末(容量 0 など)。`getItem` は「何も無い」を返し、`setItem` だけ投げる。
+   * 直す前は、書いた許可が次の `read` で消え(保存を読んで `{}`)、「常に許す」を選んだのに
+   * 毎回聞かれ、設定の一覧にも出なかった。
+   */
+  it('🔴 setItem だけ投げる端末でも、「常に許す」はこの session の中で効き、一覧にも出る', () => {
+    const map = new Map<string, string>();
+    const readOnly = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: (k: string) => void map.delete(k),
+    };
+    const g = new AgentGrants(readOnly);
+    g.setAlways('read');
+    expect(g.isAlways('read'), '書けなかった許可がすぐ消えた').toBe(true);
+    expect(g.list()).toEqual([{ scope: 'read', last: null }]);
+    g.touch('read', 9);
+    expect(g.list()).toEqual([{ scope: 'read', last: 9 }]);
+    g.revoke('read');
+    expect(g.isAlways('read')).toBe(false);
+    expect(map.size, '書けない保存へ何かが入った').toBe(0);
+  });
+
+  it('removeItem だけ投げる端末でも、取り消しはこの session で効く', () => {
+    const map = new Map<string, string>();
+    const s = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    };
+    const g = new AgentGrants(s);
+    g.setAlways('write');
+    g.revoke('write');
+    expect(g.isAlways('write'), '取り消したのに許可が残っている').toBe(false);
+  });
+
+  /**
+   * 🔑 上の「書けなかったら控えへ倒す」の対照群 ── 保存が使えるときは**保存が正本**である
+   * (別のタブでの取り消しが、控えに残った古い許可で打ち消されない)。
+   */
+  it('保存が使えるときは保存が正本: 別のタブが外した許可を、控えで蘇らせない', () => {
+    const store = fakeStorage();
+    const g = new AgentGrants(store);
+    g.setAlways('read'); // 控え(fallback)にも同じ状態が残る
+    store.map.delete(AGENT_GRANTS_KEY); // 別のタブが取り消した
+    expect(g.isAlways('read'), '控えの古い許可が蘇った').toBe(false);
+    expect(g.list()).toEqual([]);
+  });
+
+  describe('onChange(設定の一覧が自分から更新されるための合図)', () => {
+    it('憶えた・時刻が動いた・取り消した、のどれでも 1 回ずつ呼ぶ', () => {
+      const g = new AgentGrants(fakeStorage());
+      let n = 0;
+      g.onChange(() => void n++);
+      g.setAlways('read');
+      expect(n).toBe(1);
+      g.touch('read', 5);
+      expect(n).toBe(2);
+      g.revoke('read');
+      expect(n).toBe(3);
+    });
+
+    it('読むだけでは呼ばない / 外した購読は呼ばれない / 書けない端末でも呼ぶ', () => {
+      const g = new AgentGrants(fakeStorage());
+      let n = 0;
+      const off = g.onChange(() => void n++);
+      g.isAlways('read');
+      g.list();
+      expect(n).toBe(0);
+      off();
+      g.setAlways('read');
+      expect(n).toBe(0);
+
+      const broken = new AgentGrants({
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('x');
+        },
+        removeItem: () => undefined,
+      });
+      let m = 0;
+      broken.onChange(() => void m++);
+      broken.setAlways('write');
+      expect(m).toBe(1);
+    });
+  });
+});

@@ -22,8 +22,14 @@ export interface EmbedDeps {
    * ── 「あります」と言って何もしないのが、いちばん困る形である。
    * 🔑 呼び手(boot)は**帯に出す**ところまでやる ── 外から増えたことが
    * **黙って起きない**ようにするのは、この口の動線そのものである。
+   * 🔴 **作れなかったら `null`**(いまの状態では作れない)── 相手へはエラーで返す
+   * (「受け取りました」と言ったのに無い、を作らない)。
    */
-  createEntry?: (input: CreateEntryInput, origin: string, via: Via) => Promise<string> | string;
+  createEntry?: (
+    input: CreateEntryInput,
+    origin: string,
+    via: Via,
+  ) => Promise<string | null> | string | null;
   /** 許す origin(呼ぶたびに読む ── 設定を変えたら張り直さずに効く)。 */
   origins: () => readonly string[];
   onReject?: BridgeOptions['onReject'];
@@ -78,6 +84,10 @@ export function startEmbedBridge(deps: EmbedDeps): (() => void) | null {
                 throw Object.assign(new Error(parsed.message), { rpcCode: RPC.INVALID_PARAMS });
               }
               const lid = await deps.createEntry!(parsed.input, origin, via);
+              if (lid === null) {
+                // 🔴 作れなかったのに成功を返さない ── 相手が「入った」と思って先へ進む
+                throw new Error('いまノートを作れませんでした(PKC3 の状態によっては、少し待てば作れます)');
+              }
               /**
                * 🔴 **合図で通した相手には `lid` を返さない**(#194)。
                *

@@ -44,7 +44,7 @@ import { receivers } from './action-outlets.mjs';
 export const P1 = `edit-cell edit-header-cell shape-cell toggle-task unschedule-task schedule-pick-day schedule-quick-here
 toc-jump toggle-heading-fold toggle-code-collapse append-at-heading edit-from-heading edit-section edit-code-block open-chapter-window copy-md-block view-big export-diagram
 remove-relation untag-entry smart-cond-remove filter-by-tag
-download-asset browse-archive view-asset open-office copy-asset-ref navigate-asset-ref revoke-same-origin revoke-extension
+download-asset browse-archive view-asset open-office copy-asset-ref navigate-asset-ref revoke-same-origin revoke-extension revoke-agent
 preview-revision restore-revision restore-trash stop-timer discard-timer open-alarm dismiss-alarm
 open-tile deliver-to-extension navigate-entry-ref navigate-card-ref
 dual-bookmark-open dual-bookmark-remove dual-tab-activate unsplit-entry dual-crumb
