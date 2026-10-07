@@ -24,6 +24,7 @@ import {
   resolveModelContext,
   type ModelContextLike,
   type ModelContextTool,
+  type WebMcpTabStatus,
 } from '@features/agent/webmcp-types';
 
 export interface WebMcpDeps {
@@ -33,6 +34,8 @@ export interface WebMcpDeps {
   host: { document?: unknown; navigator?: unknown };
   /** 登録する道具。⚠ 登録する瞬間に作る(許可の門・ストアは呼び手が束ねる)。 */
   tools: () => ModelContextTool[];
+  /** 状態が変わりうる所(`sync` / `stop`)の後に、このタブの状態を渡す(設定の一覧が読む)。 */
+  onStatus?: (status: WebMcpTabStatus) => void;
 }
 
 export interface WebMcpRegistration {
@@ -46,12 +49,26 @@ export interface WebMcpRegistration {
   stop: () => void;
   /** いま登録しているか。 */
   active: () => boolean;
+  /**
+   * このタブの状態(設定の一覧に 1 行で出す)。
+   * 順は フラグ → メインのタブか → ブラウザが対応しているか。
+   */
+  status: () => WebMcpTabStatus;
 }
 
 export function createWebMcpRegistration(deps: WebMcpDeps): WebMcpRegistration {
   let controller: AbortController | null = null;
+  /** 最後に `sync` で知らされた「メインのタブか」。⚠ 知らされる前は false(登録していない)。 */
+  let lastHolder = false;
 
-  const stop = (): void => {
+  const status = (): WebMcpTabStatus => {
+    if (!deps.enabled()) return 'flag-off';
+    if (!lastHolder) return 'not-holder';
+    return resolveModelContext(deps.host) === null ? 'unsupported' : 'ready';
+  };
+  const publish = (): void => deps.onStatus?.(status());
+
+  const abort = (): void => {
     controller?.abort();
     controller = null;
   };
@@ -78,10 +95,16 @@ export function createWebMcpRegistration(deps: WebMcpDeps): WebMcpRegistration {
 
   return {
     sync: (holder) => {
+      lastHolder = holder;
       if (holder) start();
-      else stop();
+      else abort();
+      publish();
     },
-    stop,
+    stop: () => {
+      abort();
+      publish();
+    },
     active: () => controller !== null,
+    status,
   };
 }

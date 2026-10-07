@@ -19,7 +19,10 @@
  * 3. 🔴 **生の SQL は出さない。** 探すのは既存の全文検索の op、タグは既存のタグの集計である。
  * 4. 🔴 **system 領域のノート(メッセージ等)は読ませない** ── 読む道は `entryMetas`(user 領域だけ)
  *    を通った ID に限る(`getBody` は領域を見ないので、ID を直に渡すと漏れる)。
- * 5. 返す本文には上限を置く(`MAX_BODY`。作る側と同じ桁)。切ったら `bodyTruncated: true` と言う
+ * 5. 🔴 **呼び出しの回数に上限を置く**(1 分に `MAX_PER_MINUTE` ── `pkc.createEntry` の窓口と同じ数)。
+ *    AI の道具は postMessage の窓口(`message-bridge`)を通らないので、あちらの上限が効かない。
+ *    超えたら断る(許可を聞く前に ── 暴走した AI にダイアログを出し続けさせない)。
+ * 6. 返す本文には上限を置く(`MAX_BODY`。作る側と同じ桁)。切ったら `bodyTruncated: true` と言う
  *    (黙って切ると、AI は「これが全文」と読む)。
  *
  * ⚠ 画面に出る字(説明文・断り文)は `ui-terms` の門を通る。
@@ -27,20 +30,19 @@
 
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { UNSET } from '@features/query/group-by';
-import {
-  AGENT_DENIED_TEXT,
-  type AgentScope,
-} from '@features/agent/agent-gate';
+import { AGENT_DENIED_TEXT, type AgentGate } from '@features/agent/agent-gate';
 import type { ModelContextTool, ToolResult } from '@features/agent/webmcp-types';
 import { MAX_BODY, parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
+import { AGENT_ORIGIN_LABEL } from './outside-create';
 import type { Via } from './message-bridge';
+import { MAX_PER_MINUTE } from './protocol';
 
 /** 探す件数の既定と上限。 */
 export const SEARCH_DEFAULT_LIMIT = 10;
 export const SEARCH_MAX_LIMIT = 50;
 
-/** 作ったノートを「どこから来たか」で言うときの名前(帯に出る)。 */
-export const AGENT_ORIGIN_LABEL = 'ブラウザの AI';
+/** 作ったノートを「どこから来たか」で言うときの名前(ステータスバーに出る)。実体は作成の 1 本の側。 */
+export { AGENT_ORIGIN_LABEL };
 
 /** ノート 1 件の見取り(`entryMetas` の 1 行)。 */
 export interface AgentMeta {
@@ -60,11 +62,26 @@ export interface AgentToolDeps {
   bodies: (ids: string[]) => Promise<Map<string, string>>;
   /** タグの集計(既存の `queryScan('tags')`)。 */
   tags: () => Promise<{ groups: ReadonlyArray<{ value: string; total: number }>; omitted: number }>;
-  /** 🔴 `pkc.createEntry` と**同じ関数**(`main.ts` が bridge へ渡す物)。 */
-  createEntry: (input: CreateEntryInput, origin: string, via: Via) => Promise<string> | string;
-  /** 許可の門(`createAgentGate`)。 */
-  gate: (scope: AgentScope) => Promise<boolean>;
+  /**
+   * 🔴 `pkc.createEntry` と**同じ関数**(`main.ts` が bridge へ渡す物)。
+   * 作れなかったとき(いまの状態では作れない)は `null`。
+   */
+  createEntry: (
+    input: CreateEntryInput,
+    origin: string,
+    via: Via,
+  ) => Promise<string | null> | string | null;
+  /** 許可の門(`createAgentGate`)。`signal` は AI が依頼を取り消したとき abort される。 */
+  gate: AgentGate;
+  /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
+  now?: () => number;
 }
+
+/** 回数の上限に当たったときの断り。 */
+export const AGENT_RATE_LIMIT_TEXT = '呼び出しが多すぎます。1 分ほど待ってください';
+
+/** 作れなかったときの断り(`pkc_create_note`)。 */
+export const AGENT_CREATE_FAILED_TEXT = 'いま作れませんでした。PKC3 で編集中の可能性があります';
 
 function ok(value: unknown): ToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(value) }] };
@@ -96,6 +113,21 @@ function noteOf(id: string, meta: AgentMeta, body: string): Record<string, unkno
 }
 
 export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
+  /** 1 分の窓で数える(4 本まとめて 1 つ ── 呼び手は AI 1 つなので origin ごとには分けない)。 */
+  const clock = deps.now ?? Date.now;
+  let windowStart = 0;
+  let count = 0;
+  const withinRate = (): boolean => {
+    const t = clock();
+    if (count === 0 || t - windowStart >= 60_000) {
+      windowStart = t;
+      count = 1;
+      return true;
+    }
+    count += 1;
+    return count <= MAX_PER_MINUTE;
+  };
+
   const search: ModelContextTool = {
     name: 'pkc_search_notes',
     title: 'ノートを探す',
@@ -115,7 +147,8 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       required: ['query'],
     },
     annotations: { readOnlyHint: true, untrustedContentHint: true },
-    execute: async (raw) => {
+    execute: async (raw, options) => {
+      if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
       const input = asRecord(raw);
       const query = typeof input.query === 'string' ? input.query.trim() : '';
       if (query === '') return fail('query は空でない文字列である必要があります');
@@ -127,7 +160,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
         SEARCH_MAX_LIMIT,
         Math.max(1, Math.floor(asked ?? SEARCH_DEFAULT_LIMIT)),
       );
-      if (!(await deps.gate('read'))) return fail(AGENT_DENIED_TEXT);
+      if (!(await deps.gate({ action: 'search', query }, options.signal))) return fail(AGENT_DENIED_TEXT);
       const found = await deps.search(query, limit);
       const ids = found.ids.filter((id) => deps.meta(id) !== undefined).slice(0, limit);
       const bodies = await deps.bodies(ids);
@@ -153,14 +186,18 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       required: ['id'],
     },
     annotations: { readOnlyHint: true, untrustedContentHint: true },
-    execute: async (raw) => {
+    execute: async (raw, options) => {
+      if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
       const input = asRecord(raw);
       const id = typeof input.id === 'string' ? input.id : '';
       if (id === '') return fail('id は空でない文字列である必要があります');
-      if (!(await deps.gate('read'))) return fail(AGENT_DENIED_TEXT);
       const meta = deps.meta(id);
-      // ⚠ 見取りに無い ID は読ませない(system 領域のノートを、ID を直に渡して読む道を塞ぐ)
+      // ⚠ 見取りに無い ID は読ませない(system 領域のノートを、ID を直に渡して読む道を塞ぐ)。
+      //   ⚠ 許可を聞く前に断る ── 読めないノートの題名をダイアログに出さない
       if (meta === undefined) return fail('そのノートは見つかりません');
+      if (!(await deps.gate({ action: 'read', title: meta.title }, options.signal))) {
+        return fail(AGENT_DENIED_TEXT);
+      }
       const body = (await deps.bodies([id])).get(id);
       if (body === undefined) return fail('そのノートは見つかりません');
       return ok(noteOf(id, meta, body));
@@ -174,8 +211,9 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       'PKC3 で使われているタグを、使われている件数の多い順に返します。どんな話題のノートがあるかを知りたいときに使います。',
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true },
-    execute: async () => {
-      if (!(await deps.gate('read'))) return fail(AGENT_DENIED_TEXT);
+    execute: async (_raw, options) => {
+      if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
+      if (!(await deps.gate({ action: 'tags' }, options.signal))) return fail(AGENT_DENIED_TEXT);
       const scanned = await deps.tags();
       return ok({
         // ⚠ 「タグが無いノート」の組(UNSET)はタグではない
@@ -199,15 +237,20 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       required: ['body'],
     },
     annotations: { consequentialHint: true },
-    execute: async (raw) => {
+    execute: async (raw, options) => {
+      if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
       const input = asRecord(raw);
       if (typeof input.body !== 'string') return fail('body は文字列である必要があります');
       // 🔴 検査は `pkc.createEntry` と同じ関数(題名の上限・本文の上限・題名の作り方)
       const parsed = parseCreateEntryParams({ title: input.title, body: input.body });
       if (!parsed.ok) return fail(parsed.message);
-      if (!(await deps.gate('write'))) return fail(AGENT_DENIED_TEXT);
+      if (!(await deps.gate({ action: 'create', title: parsed.input.title }, options.signal))) {
+        return fail(AGENT_DENIED_TEXT);
+      }
       // 🔴 作るのも同じ関数(`main.ts` が bridge に渡す `createEntry`)── 画面に出る形も C-4 と同じ
       const id = await deps.createEntry(parsed.input, AGENT_ORIGIN_LABEL, 'origin');
+      // 🔴 作れなかったときに成功を返さない(AI が「作った」と user に言ってしまう)
+      if (id === null) return fail(AGENT_CREATE_FAILED_TEXT);
       return ok({ id, title: parsed.input.title });
     },
   };

@@ -189,6 +189,74 @@ describe('createWebMcpRegistration', () => {
   });
 });
 
+describe('status() ── このタブの状態(設定の一覧が 1 行で言う)', () => {
+  const make = (over: { enabled?: boolean; host?: object }) => {
+    const f = fakeModelContext();
+    const seen: string[] = [];
+    const reg = createWebMcpRegistration({
+      enabled: () => over.enabled ?? true,
+      host: over.host ?? { document: { modelContext: f.mc } },
+      tools: () => [tool('a')],
+      onStatus: (s) => void seen.push(s),
+    });
+    return { reg, seen, f };
+  };
+
+  it('フラグ → メインのタブか → ブラウザが対応しているか の順で 4 値を返す', () => {
+    const ready = make({});
+    ready.reg.sync(true);
+    expect(ready.reg.status()).toBe('ready');
+
+    const off = make({ enabled: false });
+    off.reg.sync(true);
+    // フラグがオフなら、メインのタブでも未対応のブラウザでも「フラグがオフ」(まず直せる所から言う)
+    expect(off.reg.status()).toBe('flag-off');
+    const offUnsupported = make({ enabled: false, host: {} });
+    offUnsupported.reg.sync(false);
+    expect(offUnsupported.reg.status()).toBe('flag-off');
+
+    const follower = make({});
+    follower.reg.sync(false);
+    expect(follower.reg.status()).toBe('not-holder');
+    // メインのタブでなければ、ブラウザが未対応でも「メインのタブではありません」を先に言う
+    const followerUnsupported = make({ host: {} });
+    followerUnsupported.reg.sync(false);
+    expect(followerUnsupported.reg.status()).toBe('not-holder');
+
+    const unsupported = make({ host: { document: {}, navigator: {} } });
+    unsupported.reg.sync(true);
+    expect(unsupported.reg.status()).toBe('unsupported');
+  });
+
+  it('知らされる前は「メインのタブではありません」(登録していないので嘘ではない)', () => {
+    expect(make({}).reg.status()).toBe('not-holder');
+  });
+
+  it('昇格(sync(true))で ready に変わる。旧名(navigator)だけの入口も ready', () => {
+    const { reg } = make({});
+    reg.sync(false);
+    expect(reg.status()).toBe('not-holder');
+    reg.sync(true);
+    expect(reg.status()).toBe('ready');
+    const f = fakeModelContext();
+    const nav = createWebMcpRegistration({
+      enabled: () => true,
+      host: { navigator: { modelContext: f.mc } },
+      tools: () => [],
+    });
+    nav.sync(true);
+    expect(nav.status()).toBe('ready');
+  });
+
+  it('onStatus は sync / stop のたびに現在の状態を渡す', () => {
+    const { reg, seen } = make({});
+    reg.sync(true);
+    reg.sync(false);
+    reg.stop();
+    expect(seen).toEqual(['ready', 'not-holder', 'not-holder']);
+  });
+});
+
 /**
  * 🔴 `main.ts` はどの test からも実行されない ── 判断は上の関数に在り、ここは**配線の原文**だけを見る
  * (弱い pin と自覚して使う)。見るのは「作る道が 1 本」と「holder の扱い」。
@@ -200,9 +268,24 @@ describe('main.ts の配線(原文 pin)', () => {
     const uses = main.match(/createEntry:\s*createEntryFromOutside\b/g) ?? [];
     // startEmbedBridge と buildAgentTools の 2 か所(2 つ目の作成経路を作ったら 1 か所に減る)
     expect(uses).toHaveLength(2);
-    // 定義は 1 つだけ(CREATE_ENTRY を dispatch する外向きの口が増えていない)
+    // 定義は 1 つだけ。中身は outside-create.ts の 1 本へ委ねる(main に CREATE_ENTRY を撃つ外向きの口を増やさない)
     expect(main.match(/const createEntryFromOutside\b/g)).toHaveLength(1);
-    expect(main.match(/type:\s*'CREATE_ENTRY',\s*\n\s*archetype:\s*'text',\s*\n\s*lid,/g) ?? []).toHaveLength(1);
+    expect(main).toMatch(/createEntryFromOutsideImpl\(/);
+    expect(main.match(/archetype:\s*'text'/g) ?? []).toHaveLength(0);
+  });
+
+  it('🔴 bfcache から戻ったときは登録し直す(pageshow の persisted)', () => {
+    expect(main).toMatch(
+      /'pageshow',\s*\(ev\)\s*=>\s*\{\s*if \(ev\.persisted\)\s*agentRegistration\.sync\(writerHolder \|\| followerConn === null\)/,
+    );
+  });
+
+  it('許可が変わったら設定の一覧を描き直す(onChange → center.render)。取り消しの描き直しもそこへ寄せてある', () => {
+    expect(main).toMatch(/appAgentGrants\.onChange\(\(\)\s*=>\s*center\.render\(dispatcher\.getState\(\)\)\)/);
+  });
+
+  it('このタブの状態を設定へ渡す(onStatus → appAgentTabStatus)', () => {
+    expect(main).toMatch(/onStatus:\s*\(status\)\s*=>\s*appAgentTabStatus\.set\(status\)/);
   });
 
   it('メインのタブだけ登録する: 起動時は followerConn === null、昇格したら sync(true)', () => {

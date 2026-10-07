@@ -84,3 +84,21 @@ export function resolveModelContext(host: {
 }): ModelContextLike | null {
   return asModelContext(host.document) ?? asModelContext(host.navigator);
 }
+
+/**
+ * このタブで AI のツールが使えるか(設定の「ブラウザの AI に許したこと」に 1 行で出す)。
+ *
+ * 判定の順は **フラグ → メインのタブか → ブラウザが対応しているか**(user がまず直せる所から言う)。
+ * - `ready` … このタブが登録している
+ * - `flag-off` … フラグがオフ
+ * - `not-holder` … メインのタブではない(別のタブが使える)
+ * - `unsupported` … このブラウザに入口(`document.modelContext`)が無い
+ */
+export type WebMcpTabStatus = 'ready' | 'flag-off' | 'not-holder' | 'unsupported';
+
+export const WEBMCP_TAB_STATUS_TEXT: Readonly<Record<WebMcpTabStatus, string>> = {
+  ready: 'このタブ: 使えます',
+  'flag-off': 'このタブ: フラグがオフです',
+  'not-holder': 'このタブ: メインのタブではありません(別のタブが使えます)',
+  unsupported: 'このタブ: このブラウザは対応していません',
+};

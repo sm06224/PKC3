@@ -381,8 +381,11 @@ describe('ファイル名・題名は引用符で囲む(原文 pin ── `main.
 
   it('🔴 main.ts: 取り込んだ題名 / Office のファイル名は囲んである', () => {
     const code = strip('src/main.ts');
-    expect(code).toContain('保存すると残ります:『${input.title}』');
-    expect(code).toContain('から 1 件取り込みました:『${input.title}』');
+    // ⚠ 取り込んだ題名の知らせは、外から作る 1 本(#1407)へ移った ── 字はそちらで囲んでいる
+    const outside = strip('src/adapter/transport/outside-create.ts');
+    expect(outside).toContain('保存すると残ります:『${title}』');
+    expect(outside).toContain('から 1 件取り込みました:『${title}』');
+    expect(outside).toContain('がノートを作りました:『${title}』');
     expect(code).toContain('`「${staged.name}」を開いています');
     expect(code).toContain('`「${last.file.name}」を開けます');
   });

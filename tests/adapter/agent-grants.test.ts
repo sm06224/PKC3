@@ -113,4 +113,95 @@ describe('AgentGrants', () => {
     g.revoke('write');
     expect(g.isAlways('write')).toBe(false);
   });
+
+  /**
+   * 🔴 読めるのに書けない端末(容量 0 など)。`getItem` は「何も無い」を返し、`setItem` だけ投げる。
+   * 直す前は、書いた許可が次の `read` で消え(保存を読んで `{}`)、「常に許す」を選んだのに
+   * 毎回聞かれ、設定の一覧にも出なかった。
+   */
+  it('🔴 setItem だけ投げる端末でも、「常に許す」はこの session の中で効き、一覧にも出る', () => {
+    const map = new Map<string, string>();
+    const readOnly = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: (k: string) => void map.delete(k),
+    };
+    const g = new AgentGrants(readOnly);
+    g.setAlways('read');
+    expect(g.isAlways('read'), '書けなかった許可がすぐ消えた').toBe(true);
+    expect(g.list()).toEqual([{ scope: 'read', last: null }]);
+    g.touch('read', 9);
+    expect(g.list()).toEqual([{ scope: 'read', last: 9 }]);
+    g.revoke('read');
+    expect(g.isAlways('read')).toBe(false);
+    expect(map.size, '書けない保存へ何かが入った').toBe(0);
+  });
+
+  it('removeItem だけ投げる端末でも、取り消しはこの session で効く', () => {
+    const map = new Map<string, string>();
+    const s = {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    };
+    const g = new AgentGrants(s);
+    g.setAlways('write');
+    g.revoke('write');
+    expect(g.isAlways('write'), '取り消したのに許可が残っている').toBe(false);
+  });
+
+  /**
+   * 🔑 上の「書けなかったら控えへ倒す」の対照群 ── 保存が使えるときは**保存が正本**である
+   * (別のタブでの取り消しが、控えに残った古い許可で打ち消されない)。
+   */
+  it('保存が使えるときは保存が正本: 別のタブが外した許可を、控えで蘇らせない', () => {
+    const store = fakeStorage();
+    const g = new AgentGrants(store);
+    g.setAlways('read'); // 控え(fallback)にも同じ状態が残る
+    store.map.delete(AGENT_GRANTS_KEY); // 別のタブが取り消した
+    expect(g.isAlways('read'), '控えの古い許可が蘇った').toBe(false);
+    expect(g.list()).toEqual([]);
+  });
+
+  describe('onChange(設定の一覧が自分から更新されるための合図)', () => {
+    it('憶えた・時刻が動いた・取り消した、のどれでも 1 回ずつ呼ぶ', () => {
+      const g = new AgentGrants(fakeStorage());
+      let n = 0;
+      g.onChange(() => void n++);
+      g.setAlways('read');
+      expect(n).toBe(1);
+      g.touch('read', 5);
+      expect(n).toBe(2);
+      g.revoke('read');
+      expect(n).toBe(3);
+    });
+
+    it('読むだけでは呼ばない / 外した購読は呼ばれない / 書けない端末でも呼ぶ', () => {
+      const g = new AgentGrants(fakeStorage());
+      let n = 0;
+      const off = g.onChange(() => void n++);
+      g.isAlways('read');
+      g.list();
+      expect(n).toBe(0);
+      off();
+      g.setAlways('read');
+      expect(n).toBe(0);
+
+      const broken = new AgentGrants({
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('x');
+        },
+        removeItem: () => undefined,
+      });
+      let m = 0;
+      broken.onChange(() => void m++);
+      broken.setAlways('write');
+      expect(m).toBe(1);
+    });
+  });
 });

@@ -14,6 +14,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsRenderer } from '@adapter/ui/render/settings';
 import { AgentGrants } from '@adapter/platform/agent-grants';
+import { AgentTabStatus } from '@adapter/platform/agent-tab-status';
+import { WEBMCP_TAB_STATUS_TEXT, type WebMcpTabStatus } from '@features/agent/webmcp-types';
 import { bindActions } from '@adapter/ui/actions/binder';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { initialState } from '@adapter/state/app-state';
@@ -31,7 +33,7 @@ function fakeStorage() {
 /** `agentGrants` より前の引数の数(region の後ろの、既定つきの引数)。 */
 const BEFORE_AGENT_GRANTS = 21;
 
-function setup(grants: AgentGrants) {
+function setup(grants: AgentGrants, tab: AgentTabStatus = new AgentTabStatus()) {
   const root = document.createElement('div');
   document.body.append(root);
   const region = document.createElement('div');
@@ -42,6 +44,7 @@ function setup(grants: AgentGrants) {
     region,
     ...Array.from({ length: BEFORE_AGENT_GRANTS }, () => undefined),
     grants,
+    tab,
   );
   return { root, region, renderer };
 }
@@ -75,10 +78,10 @@ describe('ブラウザの AI に許したこと(#1407)', () => {
     const [read, write] = rows(region);
     expect(read!.getAttribute('data-pkc-agent-scope')).toBe('read');
     expect(read!.textContent).toContain('ノートを探す・読む');
-    expect(read!.textContent).toContain('最後の呼び出し: 2026-10-07 09:05');
+    expect(read!.textContent).toContain('最後に使われた: 2026-10-07 09:05');
     expect(write!.getAttribute('data-pkc-agent-scope')).toBe('write');
     expect(write!.textContent).toContain('ノートを作る');
-    expect(write!.textContent).toContain('まだ呼ばれていません');
+    expect(write!.textContent).toContain('まだ使われていません');
   });
 
   it('「今回だけ」(touch だけ)は一覧に出ない', () => {
@@ -129,5 +132,53 @@ describe('ブラウザの AI に許したこと(#1407)', () => {
     grants.revoke('read');
     renderer.render(initialState);
     expect(rows(region)[0]!.textContent).toContain('まだ許したことはありません');
+  });
+
+  describe('🔴 このタブの状態を 1 行で言う', () => {
+    const CASES: ReadonlyArray<[WebMcpTabStatus, string]> = [
+      ['ready', 'このタブ: 使えます'],
+      ['unsupported', 'このタブ: このブラウザは対応していません'],
+      ['not-holder', 'このタブ: メインのタブではありません(別のタブが使えます)'],
+      ['flag-off', 'このタブ: フラグがオフです'],
+    ];
+
+    it.each(CASES)('%s → %s', (status, text) => {
+      const tab = new AgentTabStatus();
+      tab.set(status);
+      const { region, renderer } = setup(new AgentGrants(fakeStorage()), tab);
+      renderer.render(initialState);
+      const line = region.querySelector('[data-pkc-field="agent-tab-status"]');
+      expect(line?.textContent).toBe(text);
+      expect(WEBMCP_TAB_STATUS_TEXT[status]).toBe(text);
+    });
+
+    it('一覧が空でも状態は出る(節は常に出す ── 同じ物が同じ場所に)。状態が変わったら次の描画で変わる', () => {
+      const tab = new AgentTabStatus();
+      const { region, renderer } = setup(new AgentGrants(fakeStorage()), tab);
+      tab.set('flag-off');
+      renderer.render(initialState);
+      expect(region.querySelector('[data-pkc-region="settings-agents"]')).not.toBeNull();
+      expect(rows(region)[0]!.textContent).toBe('まだ許したことはありません');
+      tab.set('ready');
+      renderer.render(initialState);
+      expect(region.querySelector('[data-pkc-field="agent-tab-status"]')?.textContent).toBe(
+        'このタブ: 使えます',
+      );
+    });
+  });
+
+  it('🔴 ダイアログの答えで許可が増えたら、手で render を呼ばなくても一覧に出る(onChange で描き直す配線)', () => {
+    const grants = new AgentGrants(fakeStorage());
+    const { region, renderer } = setup(grants);
+    renderer.render(initialState);
+    // main.ts と同じ配線: 台帳の変化 → 描き直し
+    grants.onChange(() => renderer.render(initialState));
+    expect(rows(region)[0]!.textContent).toBe('まだ許したことはありません');
+    grants.setAlways('read');
+    expect(rows(region)[0]!.getAttribute('data-pkc-agent-scope')).toBe('read');
+    grants.touch('read', new Date(2026, 9, 7, 9, 5).getTime());
+    expect(rows(region)[0]!.textContent).toContain('2026-10-07 09:05');
+    grants.revoke('read');
+    expect(rows(region)[0]!.textContent).toBe('まだ許したことはありません');
   });
 });

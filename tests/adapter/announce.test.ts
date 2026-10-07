@@ -904,7 +904,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /** ⚠ **#1407 で足した**(2026-10-07)。枠が満杯だったので、いちばん古い 1 件(`2026-10-02-header-sort-only`)を落とした ── 原本は `CHANGELOG.md`(2026-10-02 の節)。 */
-    ['2026-10-07-agent-webmcp', 'd4b3837b'],
+    ['2026-10-07-agent-webmcp', '2a8e5c50'],
     /** ⚠ **#1363 で足した**(2026-10-07)。枠が満杯だったので、いちばん古い 1 件(`2026-10-02-place-figures`)を落とした ── 原本は `CHANGELOG.md`(2026-10-02 の節)。 */
     ['2026-10-07-office-pack-confirm-and-unsaved-guard', 'a57031dc'],
     /** ⚠ **#1389 で足した**(2026-10-07)。枠が満杯だったので、いちばん古い 1 件(`2026-10-02-office-unsaved-confirm`)を落とした ── 原本は `CHANGELOG.md`(2026-10-02 の節)。 */

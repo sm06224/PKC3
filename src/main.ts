@@ -89,10 +89,12 @@ import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
 import { startCapture } from '@adapter/transport/capture-bridge';
 import { createWebMcpRegistration } from '@adapter/transport/webmcp';
+import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
+import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
+import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { buildAgentTools } from '@adapter/transport/webmcp-tools';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
-import { TAGS_KEY } from '@features/query/group-by';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
 import {
@@ -1878,44 +1880,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       })
     : null;
   /**
-   * 🔴 **外から増えたことを、黙って起こさない**(段②)。
-   * ⚠ 一覧に 1 件増えるだけだと、user は「自分が作ったか」が分からない ──
-   * どこから来たかまで帯に出す。
    * 🔴 **ノートを外から作る道は、この 1 本だけ**(#1407)── `pkc.createEntry`(C-4 / C-3)も
    *   ブラウザの AI(WebMCP の `pkc_create_note`)も**同じ関数**を通る。2 つ目を作らない。
+   * ⚠ **判断は `outside-create.ts` に在る**(この file はどの test からも実行されない):
+   *   許可した相手は読んでいる本文を退かさず(`keepSelection`)、本当に作られたかを見て、
+   *   作れなかったら `null` を返す(呼び側が失敗として返す)。ここは道具を渡すだけ。
    */
   const createEntryFromOutside = (
     input: { title: string; body: string },
     origin: string,
     via: 'origin' | 'capture',
-  ): string => {
-    const lid = generateLid();
-    /**
-     * 🔴 **見せ方を門で変える**(#194)。
-     *
-     * ⚠ 許可リストの相手(`'origin'`)は **user が作業している最中**に送ってくる ──
-     * `edit: false` で、**いまの作業を退かさない**(#300 で user が叱った型)。
-     * 🔑 合図の相手(`'capture'`)は違う ── その窓は**たったいま取り込みのために
-     * 開かれた**ので、退かす作業が無い。しかも送り主の身元は確かめていないので、
-     * **黙って積まずに目の前へ出す**(見て、要らなければ捨てられる)。
-     */
-    dispatcher.dispatch({
-      type: 'CREATE_ENTRY',
-      archetype: 'text',
-      lid,
-      title: input.title,
-      body: input.body,
-      edit: via === 'capture',
-      parentLid: null,
-      relationId: generateLid(),
-    });
-    showStatus(
-      via === 'capture'
-        ? `${origin} から取り込みました。保存すると残ります:『${input.title}』`
-        : `${origin} から 1 件取り込みました:『${input.title}』`,
+  ): string | null =>
+    createEntryFromOutsideImpl(
+      {
+        dispatch: (action) => dispatcher.dispatch(action),
+        hasEntry: (lid) => dispatcher.getState().entryMetas.has(lid),
+        notifyOpen: (message, lid) =>
+          dispatcher.dispatch({ type: 'OP_NOTICE', message, open: lid }),
+        notify: (message) => showStatus(message),
+        generateLid,
+      },
+      input,
+      origin,
+      via,
     );
-    return lid;
-  };
   startEmbedBridge({
     // ⚠ **合図で来たときは flag に依らず張る** ── flag は「iframe の親から受けるか」
     //    の切替であって、user が自分でブックマークを押した動線とは別物である。
@@ -1938,32 +1926,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const agentGate = createAgentGate({
     grants: appAgentGrants,
-    ask: (scope) => pickAgentGrantInApp(root, scope),
+    ask: (target, signal) => pickAgentGrantInApp(root, target, signal),
     now: () => Date.now(),
   });
+  // 🔴 ダイアログの答え(常に許す / 最後に使われた時刻)で、設定の一覧が自分から更新される
+  //   (設定が開いていない間は `render` が早く戻る)
+  appAgentGrants.onChange(() => center.render(dispatcher.getState()));
   const agentRegistration = createWebMcpRegistration({
     enabled: () => appFlags.isOn(FLAG_WEBMCP.name),
     host: { document, navigator },
+    onStatus: (status) => appAgentTabStatus.set(status),
     tools: () =>
       buildAgentTools({
-        meta: (id) => {
-          const m = dispatcher.getState().entryMetas.get(id);
-          return m === undefined
-            ? undefined
-            : { title: m.title, archetype: m.archetype, updatedAt: m.updatedAt };
-        },
-        search: async (query, limit) => {
-          const r = await client.request({ op: 'searchEntries', cid, query, limit });
-          return { ids: r.lids, truncated: r.truncated };
-        },
-        bodies: async (ids) => {
-          const rows = await client.request({ op: 'getBodies', cid, lids: ids });
-          return new Map(rows.map((r) => [r.lid, r.body] as const));
-        },
-        tags: async () => {
-          const r = await client.request({ op: 'queryScan', cid, key: TAGS_KEY });
-          return { groups: r.groups?.groups ?? [], omitted: r.groups?.omittedGroups ?? 0 };
-        },
+        ...agentStoreDeps({
+          entryMetas: () => dispatcher.getState().entryMetas,
+          client: () => client,
+          cid,
+        }),
         createEntry: createEntryFromOutside,
         gate: agentGate,
       }),
@@ -3728,8 +3707,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     revokeAgent: (scope) => {
       if (scope !== 'read' && scope !== 'write') return;
+      // ⚠ 描き直しは `appAgentGrants.onChange`(上の配線)が受ける
       appAgentGrants.revoke(scope);
-      center.render(dispatcher.getState());
       showStatus('ブラウザの AI への許可を取り消しました');
     },
     revokeExtension: (assetKey) => {

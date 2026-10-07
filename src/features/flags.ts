@@ -243,18 +243,19 @@ export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
 });
 
 /**
- * 🔴 **ブラウザの AI から、ノートを探す・作る・追記できるようにする**(#1407 段⓪)。
+ * 🔴 **ブラウザの AI から、ノートを探す・読む・作れるようにする**(#1407 段⓪)。
  *
  * ⚠ 仕様(W3C WebML CG の WebMCP)はまだ草案で、`document.modelContext` を出すブラウザは
  * 一部の先行版だけである。⚠ **既定はオフ** ── オンにしても、AI が実際に呼んだとき
- * 「今回だけ / 常に許す / 許さない」を聞くまでは何も渡さない(許可は端末に残り、
+ * 「この 1 回だけ / 常に許す / 許さない」を聞くまでは何も渡さない(許可は端末に残り、
  * 設定の「許可」で取り消せる)。
  * ⚠ **起動時に 1 度だけ登録する**(メインのタブだけ)ので、切り替えたら再起動が要る。
  */
 export const FLAG_WEBMCP = defineFlag('agent.webmcp', {
   default: false,
   foldWhen: 'Chrome / Edge が flag なしで document.modelContext を提供したら(設定へ昇格)',
-  summary: 'ブラウザの AI(WebMCP)に、ノートを探す・作る道具を渡す(既定はオフ。使うときに許可を聞きます)',
+  summary:
+    'ブラウザの AI(WebMCP: ブラウザに付いている AI がページの機能を呼ぶための仕様)に、ノートを探す・作るツールを渡す。既定はオフ。使うときに許可を聞きます(探す・読むを許すと、当たったノートの本文が AI の提供元へ送られます)',
   needsRestart: true,
 });
 

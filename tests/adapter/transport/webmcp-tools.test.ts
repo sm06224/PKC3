@@ -11,14 +11,24 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AGENT_CREATE_FAILED_TEXT,
   AGENT_ORIGIN_LABEL,
+  AGENT_RATE_LIMIT_TEXT,
   SEARCH_DEFAULT_LIMIT,
   SEARCH_MAX_LIMIT,
   buildAgentTools,
   type AgentToolDeps,
 } from '@adapter/transport/webmcp-tools';
+import { readFileSync } from 'node:fs';
+import { FLAG_WEBMCP } from '@features/flags';
 import { MAX_BODY, MAX_TITLE } from '@adapter/transport/create-entry-params';
-import { AGENT_DENIED_TEXT, type AgentScope } from '@features/agent/agent-gate';
+import { MAX_PER_MINUTE } from '@adapter/transport/protocol';
+import {
+  AGENT_DENIED_TEXT,
+  scopeOf,
+  type AgentScope,
+  type AgentTarget,
+} from '@features/agent/agent-gate';
 import type { ModelContextTool, ToolResult } from '@features/agent/webmcp-types';
 
 const SIGNAL = { signal: new AbortController().signal };
@@ -37,7 +47,11 @@ const NOTES: Record<string, Note> = {
 
 function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentScope) => boolean) = true) {
   const calls = {
+    /** 聞かれた範囲(read / write)。 */
     gate: [] as AgentScope[],
+    /** 聞かれた中身(何を)と、渡された signal。 */
+    targets: [] as AgentTarget[],
+    signals: [] as Array<AbortSignal | undefined>,
     search: [] as Array<[string, number]>,
     bodies: [] as string[][],
     tags: 0,
@@ -69,11 +83,13 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
     },
     createEntry: (input, origin, via) => {
       calls.create.push([input, origin, via]);
-      return 'lid-new';
+      return 'lid-new' as string | null;
     },
-    gate: async (s) => {
-      calls.gate.push(s);
-      return typeof allow === 'function' ? allow(s) : allow;
+    gate: async (t, signal) => {
+      calls.gate.push(scopeOf(t));
+      calls.targets.push(t);
+      calls.signals.push(signal);
+      return typeof allow === 'function' ? allow(scopeOf(t)) : allow;
     },
     ...over,
   };
@@ -301,7 +317,6 @@ describe('🔴 許可が無ければ、何も読まず・何も作らず isError
     const r = await tool(name).execute(INPUTS[name]!, SIGNAL);
     expect(r.isError).toBe(true);
     expect(r.content).toEqual([{ type: 'text', text: AGENT_DENIED_TEXT }]);
-    expect(AGENT_DENIED_TEXT).toBe('user が許可しませんでした');
     expect(calls.search).toEqual([]);
     expect(calls.bodies).toEqual([]);
     expect(calls.tags).toBe(0);
@@ -327,5 +342,99 @@ describe('spy: 門を呼び忘れる配線を許さない', () => {
     await tool('pkc_list_tags').execute({}, SIGNAL);
     await tool('pkc_list_tags').execute({}, SIGNAL);
     expect(gate).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('🔴 許可のダイアログに「何を」を渡す', () => {
+  it('探す: 探す語 / 読む: 題名 / タグ: 何も / 作る: 検査後の題名(省いたときは本文の 1 行目)', async () => {
+    const { tool, calls } = setup();
+    await tool('pkc_search_notes').execute({ query: '  買い物  ' }, SIGNAL);
+    await tool('pkc_read_note').execute({ id: 'b2' }, SIGNAL);
+    await tool('pkc_list_tags').execute({}, SIGNAL);
+    await tool('pkc_create_note').execute({ body: '# 見出しの題名\n\n中身' }, SIGNAL);
+    expect(calls.targets).toEqual([
+      { action: 'search', query: '買い物' },
+      { action: 'read', title: '会議メモ' },
+      { action: 'tags' },
+      { action: 'create', title: '見出しの題名' },
+    ]);
+  });
+
+  it('🔴 AI が取り消せるよう、execute の signal を門へ渡す', async () => {
+    const { tool, calls } = setup();
+    const ac = new AbortController();
+    await tool('pkc_list_tags').execute({}, { signal: ac.signal });
+    await tool('pkc_search_notes').execute({ query: 'x' }, { signal: ac.signal });
+    expect(calls.signals).toEqual([ac.signal, ac.signal]);
+  });
+
+  it('見取りに無い ID を読もうとしたときは、題名が無いので許可も聞かない(読めないノートの題名を出さない)', async () => {
+    const { tool, calls } = setup();
+    const r = await tool('pkc_read_note').execute({ id: 'sys-message' }, SIGNAL);
+    expect(r.isError).toBe(true);
+    expect(calls.targets).toEqual([]);
+  });
+});
+
+describe('🔴 作れなかったとき成功を返さない', () => {
+  it('createEntry が null を返したら isError(AI が「作った」と言わない)', async () => {
+    const { tool } = setup({ createEntry: () => null });
+    const r = await tool('pkc_create_note').execute({ body: 'x' }, SIGNAL);
+    expect(r.isError).toBe(true);
+    expect(r.content[0]!.text).toBe(AGENT_CREATE_FAILED_TEXT);
+    expect(AGENT_CREATE_FAILED_TEXT).toBe('いま作れませんでした。PKC3 で編集中の可能性があります');
+    // 非同期で null でも同じ
+    const { tool: t2 } = setup({ createEntry: async () => null });
+    expect((await t2('pkc_create_note').execute({ body: 'x' }, SIGNAL)).isError).toBe(true);
+  });
+});
+
+describe('🔴 呼び出しの回数の上限(AI の道具は message-bridge を通らないので、ここで数える)', () => {
+  it('1 分に MAX_PER_MINUTE 回まで。超えたら許可も聞かず断る。窓が明けたらまた通る', async () => {
+    let t = 1_000_000;
+    const { tool, calls } = setup({ now: () => t });
+    expect(MAX_PER_MINUTE).toBe(120);
+    for (let i = 0; i < MAX_PER_MINUTE; i += 1) {
+      const r = await tool('pkc_list_tags').execute({}, SIGNAL);
+      expect(r.isError, `${String(i + 1)} 回目で断られた`).toBeUndefined();
+    }
+    expect(calls.gate).toHaveLength(MAX_PER_MINUTE);
+    const over = await tool('pkc_list_tags').execute({}, SIGNAL);
+    expect(over.isError).toBe(true);
+    expect(over.content[0]!.text).toBe(AGENT_RATE_LIMIT_TEXT);
+    expect(AGENT_RATE_LIMIT_TEXT).toBe('呼び出しが多すぎます。1 分ほど待ってください');
+    expect(calls.gate, '上限を超えた呼び出しで許可を聞いた').toHaveLength(MAX_PER_MINUTE);
+    // 4 本で 1 つの窓を数える
+    const other = await tool('pkc_search_notes').execute({ query: 'x' }, SIGNAL);
+    expect(other.content[0]!.text).toBe(AGENT_RATE_LIMIT_TEXT);
+    // 59 秒ではまだ、60 秒で明ける
+    t += 59_000;
+    expect((await tool('pkc_list_tags').execute({}, SIGNAL)).isError).toBe(true);
+    t += 1_000;
+    expect((await tool('pkc_list_tags').execute({}, SIGNAL)).isError).toBeUndefined();
+  });
+
+  it('入力が間違っている呼び出しも数える(暴走した AI が空の呼び出しで回数を逃れない)', async () => {
+    const { tool } = setup({ now: () => 5 });
+    for (let i = 0; i < MAX_PER_MINUTE; i += 1) await tool('pkc_search_notes').execute({}, SIGNAL);
+    const r = await tool('pkc_list_tags').execute({}, SIGNAL);
+    expect(r.content[0]!.text).toBe(AGENT_RATE_LIMIT_TEXT);
+  });
+});
+
+describe('画面・マニュアルの字が実装と食い違わない', () => {
+  const manual = readFileSync('docs/manual.md', 'utf8');
+  it('マニュアルの回数の上限は MAX_PER_MINUTE と同じ数', () => {
+    expect(manual).toContain(`1 分に ${String(MAX_PER_MINUTE)} 回まで`);
+  });
+  it('フラグの説明は、探す・読むを許すと本文が AI の提供元へ送られると先に言う', () => {
+    expect(FLAG_WEBMCP.summary).toContain('探す・読むを許すと、当たったノートの本文が AI の提供元へ送られます');
+    expect(FLAG_WEBMCP.summary).toContain('ブラウザに付いている AI がページの機能を呼ぶための仕様');
+    expect(FLAG_WEBMCP.summary).not.toContain('道具');
+  });
+  it('マニュアルはメインのタブだけで使えること・前面にしておくことを 1 行ずつ言う', () => {
+    expect(manual).toContain('使えるのはメインのタブだけ');
+    expect(manual).toContain('PKC3 のタブを手前に出しておいてください');
+    expect(manual).toContain('最初にフォーカスが当たっているのもこのボタンです');
   });
 });

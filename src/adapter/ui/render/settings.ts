@@ -13,6 +13,8 @@
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import { ExtensionGrants } from '@adapter/platform/extension-grants';
 import { AgentGrants, appAgentGrants } from '@adapter/platform/agent-grants';
+import { AgentTabStatus, appAgentTabStatus } from '@adapter/platform/agent-tab-status';
+import { WEBMCP_TAB_STATUS_TEXT } from '@features/agent/webmcp-types';
 import { AGENT_SCOPE_LABEL } from '@features/agent/agent-gate';
 import { currentMessageCap } from '@adapter/platform/message-post';
 import {
@@ -95,7 +97,7 @@ function buildSettingsNote(text: string): HTMLParagraphElement {
   return note;
 }
 
-/** 最後の呼び出しの時刻を「2026-10-07 09:05」の形で出す(この端末の時刻)。 */
+/** 最後に使われた時刻を「2026-10-07 09:05」の形で出す(この端末の時刻)。 */
 function formatAgentTime(ms: number): string {
   const d = new Date(ms);
   const two = (n: number): string => String(n).padStart(2, '0');
@@ -224,11 +226,16 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。test は自分で `new AgentGrants(fake)` を渡す。
      */
     private readonly agentGrants: AgentGrants = appAgentGrants,
+    /**
+     * 🔴 **このタブで AI のツールが使えるか**(#1407)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly agentTabStatus: AgentTabStatus = appAgentTabStatus,
   ) {}
 
   private sameOriginList: HTMLElement | null = null;
   private extensionList: HTMLElement | null = null;
   private agentList: HTMLElement | null = null;
+  private agentStatusLine: HTMLElement | null = null;
 
   render(state: AppState): void {
     if (this.built) {
@@ -1548,9 +1555,12 @@ export class SettingsRenderer {
     const note = buildSettingsNote(
       'ノートを探す・読むを許すと、見つかったノートの本文が AI の提供元へ送られます。',
     );
+    // 🔴 **このタブの状態を 1 行で言う**(使えない理由を user が探し回らない ── 同じ物が同じ場所に出る)
+    this.agentStatusLine = document.createElement('p');
+    this.agentStatusLine.setAttribute('data-pkc-field', 'agent-tab-status');
     this.agentList = document.createElement('ul');
     this.agentList.setAttribute('data-pkc-field', 'agent-list');
-    wrap.append(h, note, this.agentList);
+    wrap.append(h, note, this.agentStatusLine, this.agentList);
     return wrap;
   }
 
@@ -1558,6 +1568,9 @@ export class SettingsRenderer {
   private syncAgents(): void {
     const list = this.agentList;
     if (!list) return;
+    if (this.agentStatusLine) {
+      this.agentStatusLine.textContent = WEBMCP_TAB_STATUS_TEXT[this.agentTabStatus.get()];
+    }
     const rows = this.agentGrants.list();
     list.textContent = '';
     if (rows.length === 0) {
@@ -1575,7 +1588,7 @@ export class SettingsRenderer {
       const last = document.createElement('span');
       last.setAttribute('data-pkc-field', 'agent-last-used');
       last.textContent =
-        row.last === null ? 'まだ呼ばれていません' : `最後の呼び出し: ${formatAgentTime(row.last)}`;
+        row.last === null ? 'まだ使われていません' : `最後に使われた: ${formatAgentTime(row.last)}`;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('data-pkc-action', 'revoke-agent');

@@ -70,7 +70,7 @@ interface Sent {
   payload: Record<string, unknown>;
 }
 
-function harness(createEntry?: (i: { title: string; body: string }, o: string) => string) {
+function harness(createEntry?: (i: { title: string; body: string }, o: string) => string | null) {
   const sent: Sent[] = [];
   const source = {
     postMessage: (payload: Record<string, unknown>) => void sent.push({ payload }),
@@ -121,6 +121,17 @@ describe('外から 1 件作らせる', () => {
     h.post({ body: 1 });
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     expect(h.sent[0]!.payload.error).toMatchObject({ code: RPC.INVALID_PARAMS });
+    h.detach();
+  });
+
+  it('🔴 作れなかったら(null)成功を返さない ── 相手が「入った」と思って先へ進まない', async () => {
+    const h = harness(() => null);
+    h.post({ title: '外から', body: '本文' });
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    const payload = h.sent[0]!.payload;
+    expect(payload).not.toHaveProperty('result');
+    expect(payload.error).toMatchObject({ code: RPC.INTERNAL_ERROR });
+    expect((payload.error as { message: string }).message).toContain('作れませんでした');
     h.detach();
   });
 

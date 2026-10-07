@@ -60,7 +60,26 @@ export class AgentGrants implements AgentGrantsLike {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: State = {};
 
-  constructor(private readonly storage: Store | null = readStorage()) {}
+  private readonly listeners = new Set<() => void>();
+
+  /**
+   * ⚠ `readonly` ではない ── 読めるのに書けない端末(容量 0 など)で、書いた後に `null`
+   *   (= 控えだけで動く)へ倒すため(`write` を見よ)。
+   */
+  private storage: Store | null;
+
+  constructor(storage: Store | null = readStorage()) {
+    this.storage = storage;
+  }
+
+  /**
+   * 許可が変わったとき(憶えた / 取り消した / 最後に使われた時刻が動いた)に呼ばれる。
+   * ⚠ 設定の一覧が、ダイアログの答えで自分から更新されるために要る(取り消しだけ描き直していた)。
+   */
+  onChange(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  }
 
   /** ⚠ **読むときに検める** ── 保存はアプリ自身も書ける場所なので、壊れた値・知らない範囲は捨てる。 */
   private read(): State {
@@ -93,14 +112,22 @@ export class AgentGrants implements AgentGrantsLike {
 
   private write(state: State): void {
     this.fallback = state;
-    if (this.storage === null) return;
-    try {
-      // 空になったら鍵ごと消す(要らない行を残さない)
-      if (AGENT_SCOPES.every((s) => state[s] === undefined)) this.storage.removeItem(KEY);
-      else this.storage.setItem(KEY, JSON.stringify(state));
-    } catch {
-      // 容量超過等 ── 憶えられないだけ(この session では控えが効いている)。次回はまた聞く
+    if (this.storage !== null) {
+      try {
+        // 空になったら鍵ごと消す(要らない行を残さない)
+        if (AGENT_SCOPES.every((s) => state[s] === undefined)) this.storage.removeItem(KEY);
+        else this.storage.setItem(KEY, JSON.stringify(state));
+      } catch {
+        /**
+         * 🔴 容量超過等 ── **書けないなら、以後は控えだけで動く**(`storage` を捨てる)。
+         * ⚠ 捨てないと、`getItem` は「何も無い」を返すので、書いたばかりの許可が
+         *   次の `read` で消え、「常に許す」を選んだのに毎回聞かれる(一覧にも出ない)。
+         * この session では効く(次の起動ではまた聞く ── 安全側)。
+         */
+        this.storage = null;
+      }
     }
+    for (const fn of this.listeners) fn();
   }
 
   isAlways(scope: AgentScope): boolean {
