@@ -725,6 +725,19 @@ mutex なしで進め、`pTask->Invoke()` の周りでだけ取る(`scheduler.cx
 `PKC3-TIMERMUTEX: skipped` が 1 回も出ないなら、この直しは効く場面に 1 度も入っていない。
 test は `tests/office-timer-mutex-patch.test.ts`(fixture は上流 `d6226c1a` の `QtTimer.cxx` の全文。当て済みは **SKIP(exit 0)**)。
 
+### 🔴 #1408 の印 `patch-lo-yield-wait.py`(2026-10-07。⚠ 焼く前 ── **直しではなく印**。行き先は 🟡 推測)
+
+Impress の読み込み中(約 13 秒)に 1/30 で無言で固まる。直前まで timer は鍵を取れずに skip し続け、その後 `m_aTimer.start(1)` 自体が止まる = main の event loop が回らない。
+候補は、main の別の入口が `QtYieldMutex::doAcquire`(`vcl/qt5/QtInstance.cxx`)の main の枝で、LO スレッドの鍵を `m_InMainCondition.wait`(述語つき・無期限)で待ったまま戻らないこと。
+`wait` の**外側の前後**に `PKC3-YIELDWAIT: enter #N t=<ms> held_by_lo=1 wake=<0/1> closure=<0/1>` と
+`leave #M (enter #N) t=<ms> waited=<ms> closure=<0/1>` を足す(連番は enter / leave で別。**3000 回までは毎回**、その後 100 回ごと、
+`waited` が 100 ms を超えた leave は必ず)。`held_by_lo` は `tryToAcquire` が偽の枝なので構成上いつも 1。
+🔑 **読み方**: 固まった run の最後の行が `enter #N` で同じ N の `leave` が無い = **main はその wait で止まっている**(決め手)。
+leave が出た後に無音なら、main は別の所で止まっている(この印は指さない)。⚠ 3000 回目より後に固まれば enter は 100 回に 1 回しか出ない ──
+最後の leave の `#M` と timer の最後の行(`PKC3-TIMERMUTEX: skipped #N … t=`)の時刻を突き合わせて読む。
+test は `tests/office-yield-wait-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 95〜205 行 = `tests/fixtures/office-lo/QtYieldMutex.excerpt.cxx`。
+手元の stub harness では compile と enter/leave の出方を確かめた ── 本物の header ではまだ)。
+
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 
 焼きが `make` の 15 分で落ち、こう出た:
