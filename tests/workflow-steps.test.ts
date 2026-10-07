@@ -1325,6 +1325,12 @@ describe('#1039 ── dependabot の auto-merge は CI を待ち、/dev/ を配
     expect(deploy, '/dev/ を配り直していない').toBeGreaterThan(merge);
   });
 
+  it('🔴 ③ の `gh workflow run` は `--repo "$REPO"` を付ける(checkout の無い job では git から repo を読めない / #1039)', () => {
+    // 2026-10-07 run 37586132034: merge は済んだのに `gh workflow run pages.yml --ref main` が
+    // 「failed to run git: fatal: not a git repository」で落ち、`/dev/` が配られなかった
+    expect(mergeRun()).toMatch(/gh workflow run pages\.yml --ref main --repo "\$REPO"/);
+  });
+
   /**
    * 🔴 **本物の道具で走らせる。** `gh` を差し替え、`api` には fixture を返させ、
    * `pr merge` / `workflow run` は log に書かせる。⚠ 4 通り揃えるのが肝 ──
@@ -1341,10 +1347,10 @@ describe('#1039 ── dependabot の auto-merge は CI を待ち、/dev/ を配
   ]);
   const pending = JSON.stringify([{ name: 'verify', status: 'in_progress', conclusion: null }]);
   const cases: Case[] = [
-    { name: '緑なら merge → pages.yml', checks: [green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main'] },
+    { name: '緑なら merge → pages.yml', checks: [green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main --repo o/r'] },
     { name: '赤なら merge しない', checks: [red], exit: 1, calls: [] },
     { name: '検査 0 件のまま上限 → merge しない', checks: ['[]'], exit: 1, calls: [] },
-    { name: '走行中 → 緑(待ってから merge)', checks: [pending, pending, green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main'] },
+    { name: '走行中 → 緑(待ってから merge)', checks: [pending, pending, green], exit: 0, calls: ['pr merge --squash', 'workflow run pages.yml --ref main --repo o/r'] },
   ];
   for (const c of cases) {
     it(`🔴 bash -e で実際に走らせる: ${c.name}`, () => {
@@ -1364,6 +1370,12 @@ describe('#1039 ── dependabot の auto-merge は CI を待ち、/dev/ を配
             '    [ -f "$f" ] || f="$PKC3_FAKE_DIR/checks.$((i-1)).json"',
             '    echo $((i+1)) > "$PKC3_FAKE_DIR/i"',
             '    cat "$f";;',
+            // 🔴 本物の `gh workflow run` の意味論を真似る(#1039、2026-10-07): checkout の無い job では
+            //    `--repo` が無いと git から repo を読もうとして落ちる。stub を本物より甘くしない
+            '  workflow)',
+            '    case " $* " in *" --repo "*) echo "$*" >> "$PKC3_FAKE_DIR/calls.log";;',
+            '      *) echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2; exit 1;;',
+            '    esac;;',
             '  *) echo "$*" >> "$PKC3_FAKE_DIR/calls.log";;',
             'esac',
           ].join('\n') + '\n',
