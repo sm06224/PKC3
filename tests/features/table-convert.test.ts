@@ -18,6 +18,7 @@ import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
   convertTable,
   fencesBelowFrontmatter,
+  mdCellSpan,
   tableAt,
   tableConvertRefusal,
   type TableFormat,
@@ -686,6 +687,27 @@ describe('CRLF 改行と fencesBelowFrontmatter の最適化(#1100)', () => {
     expect(fences.length).toBe(1);
     expect(fences[0]?.start).toBe(6);
     expect(fences[0]?.end).toBe(8);
+  });
+});
+
+describe('エスケープされたバックスラッシュ直後のパイプ (#1368)', () => {
+  it('エスケープされたバックスラッシュ直後のパイプでセルが正しく分割される', () => {
+    const line = '| a\\\\|b | c |';
+    const span0 = mdCellSpan(line, 0);
+    const span1 = mdCellSpan(line, 1);
+    const span2 = mdCellSpan(line, 2);
+    expect(span0).not.toBeNull();
+    expect(span1).not.toBeNull();
+    expect(span2).not.toBeNull();
+    expect(line.slice(span0!.start, span0!.end)).toBe('a\\\\');
+    expect(line.slice(span1!.start, span1!.end)).toBe('b');
+    expect(line.slice(span2!.start, span2!.end)).toBe('c');
+  });
+
+  it('Markdown 表から CSV 表への変換でセルが正しく分割される', () => {
+    const md = '| a\\\\|b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n';
+    const csv = convert(md, 0, 'csv');
+    expect(csv).toBe('```csv\na\\\\,b,c\n1,2,3\n```\n');
   });
 });
 

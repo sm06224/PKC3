@@ -179,8 +179,12 @@ function splitRowSpans(line: string): { cells: string[]; spans: { start: number;
         last = i + 1;
         cellStart = i + 1;
       }
+      escaped = false;
+    } else if (ch === '\\') {
+      escaped = !escaped;
+    } else {
+      escaped = false;
     }
-    escaped = ch === '\\';
   }
   out.push(cur + src.slice(last));
   raw.push({ start: cellStart, end: src.length });
