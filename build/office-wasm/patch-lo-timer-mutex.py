@@ -40,11 +40,18 @@ stack と実測は PKC3 の issue #1393 のコメントに在る。
 | `tryToAcquire()` が偽(LO のスレッドが持っている) | `m_aTimer.start(1)` で 1 ms 後に張り直して**返る**(待たない ── 待つと main が固まる) |
 | `tryToAcquire()` が真 | 取れたので走る。関数を出るとき RAII(`Pkc3Held` の dtor)で `release()` する |
 
-- 印(`PKC3-TIMERMUTEX: skipped …` / `ran under mutex`)は **20 回まで**(`nPkc3Skipped` / `nPkc3Ran`。⚠ 上限は**印だけ**)。
+- 印(`PKC3-TIMERMUTEX: skipped #N …` / `ran under mutex (skipped so far N)`)は **20 回まで**、skip はさらに **1000 回ごと**に 1 行
+  (`nPkc3Skipped` / `nPkc3Ran`。⚠ 上限は**印だけ** ── skip の頻度は `#N` と `skipped so far N` の累計で読む。20 回で止めると
+  1 ms の再武装が何千回回ったかが読めない)。
 - 🟡 `SolarMutex::tryToAcquire` は `comphelper::SolarMutex` の virtual(`QtYieldMutex` は上書きしない。`solarmutex.cxx:87-97`)、
   `release()` は public、`m_aTimer` は `QtTimer` の QTimer の member、と宣言と原文を読んで確かめただけ。
 
 ## ⚠ 言えないこと(正直に)
+- 取れた枝では `DispatchUserEvents(true)` も SolarMutex の下で走る(原文の JSPI 枝では鍵なしだった)。`ProcessEvent` は
+  `SolarMutexReleaser` で全部手放してから待つので循環は無い(`QtInstance.cxx:551`。`ImplYield` :455 と同じ形)が、
+  🟡 未検証 ── 焼いた後に `ran under mutex` の直後で止まる log が無いかを見る。
+- `Task::DecideTransferredExecution()` が真の Task(`scheduler.cxx:596-607` の proxy 枝。既定は false)は、生の `pTask` を
+  LO スレッドへ投げた後に main の鍵が解けるので、この直しでは守れない(上書きしている Task の全数は未確認)。
 
 - 🔴 **塞ぐのは「走査と選択 → `Invoke`」の窓だけ**である。LO のスレッド自身が mutex を**手放す**所
   (`EmscriptenLightweightRunInMainThread` / `QtInstance.cxx` の `DoYield` の枝 B)で main の timer が割り込む窓は塞がない。
@@ -107,14 +114,14 @@ GATE_REPLACE = """    SolarMutexGuard aGuard;
     { // PKC3-TIMERMUTEX
         if (!pPkc3Mutex->tryToAcquire()) // PKC3-TIMERMUTEX
         { // PKC3-TIMERMUTEX
-            if (nPkc3Skipped++ < 20) // PKC3-TIMERMUTEX
-                std::fputs("PKC3-TIMERMUTEX: skipped (LO thread holds SolarMutex)\\n", stderr); // PKC3-TIMERMUTEX
+            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 1000 == 0) // PKC3-TIMERMUTEX
+                std::fprintf(stderr, "PKC3-TIMERMUTEX: skipped #%d (LO thread holds SolarMutex)\\n", nPkc3Skipped); // PKC3-TIMERMUTEX
             m_aTimer.start(1); // PKC3-TIMERMUTEX
             return; // PKC3-TIMERMUTEX
         } // PKC3-TIMERMUTEX
         aPkc3Held.m_pMutex = pPkc3Mutex; // PKC3-TIMERMUTEX
         if (nPkc3Ran++ < 20) // PKC3-TIMERMUTEX
-            std::fputs("PKC3-TIMERMUTEX: ran under mutex\\n", stderr); // PKC3-TIMERMUTEX
+            std::fprintf(stderr, "PKC3-TIMERMUTEX: ran under mutex (skipped so far %d)\\n", nPkc3Skipped); // PKC3-TIMERMUTEX
     } // PKC3-TIMERMUTEX
 #endif
     if (Application::IsUseSystemEventLoop())

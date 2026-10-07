@@ -191,6 +191,22 @@ describe('#1393 timer-mutex ── 当て方', () => {
     }
   });
 
+  it('🔴 当てた後に印の行を 1 行**足した** file も SKIP しない(行数が期待より多い = exit 1 で不変)', () => {
+    const t = tree();
+    try {
+      expect(run(SCRIPT, t.dir).code).toBe(0);
+      const extra = t.read().replace('#else // PKC3-TIMERMUTEX\n', '#else // PKC3-TIMERMUTEX\n    // hand-added line // PKC3-TIMERMUTEX\n');
+      expect(extra).not.toBe(t.read());
+      writeFileSync(join(t.dir, REL), extra, 'utf-8');
+      const r = run(SCRIPT, t.dir);
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).not.toContain('SKIP');
+      expect(t.read(), '印が多い file を書き換えた').toBe(extra);
+    } finally {
+      t.cleanup();
+    }
+  });
+
   it('🔴 錨が 1 つでも無ければ落ちる(exit 1)。何も書かない', () => {
     for (let i = 0; i < FIX_ANCHORS.length; i++) {
       const broken = EXCERPT.replace(FIX_ANCHORS[i]!, '// 上流が形を変えた\n');
@@ -296,14 +312,14 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
         `    { // ${MARK}`,
         `        if (!pPkc3Mutex->tryToAcquire()) // ${MARK}`,
         `        { // ${MARK}`,
-        `            if (nPkc3Skipped++ < 20) // ${MARK}`,
-        `                std::fputs("${MARK}: skipped (LO thread holds SolarMutex)\\n", stderr); // ${MARK}`,
+        `            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 1000 == 0) // ${MARK}`,
+        `                std::fprintf(stderr, "${MARK}: skipped #%d (LO thread holds SolarMutex)\\n", nPkc3Skipped); // ${MARK}`,
         `            m_aTimer.start(1); // ${MARK}`,
         `            return; // ${MARK}`,
         `        } // ${MARK}`,
         `        aPkc3Held.m_pMutex = pPkc3Mutex; // ${MARK}`,
         `        if (nPkc3Ran++ < 20) // ${MARK}`,
-        `            std::fputs("${MARK}: ran under mutex\\n", stderr); // ${MARK}`,
+        `            std::fprintf(stderr, "${MARK}: ran under mutex (skipped so far %d)\\n", nPkc3Skipped); // ${MARK}`,
         `    } // ${MARK}`,
         ``,
       ].join('\n'),
@@ -365,16 +381,19 @@ describe('#1393 timer-mutex ── 当てた結果(描いた C++ で見る)', ()
     const body = elseBody(patched());
     expect(count(body, 'nPkc3Skipped++ < 20')).toBe(1);
     expect(count(body, 'nPkc3Ran++ < 20')).toBe(1);
-    expect(count(body, 'std::fputs(')).toBe(2);
+    expect(count(body, 'std::fprintf(')).toBe(2);
+    // skip の印は 20 回の後も 1000 回ごとに出す(1 ms の再武装の頻度を累計で読む)
+    expect(count(body, 'nPkc3Skipped % 1000 == 0')).toBe(1);
+    expect(count(body, 'skipped so far %d')).toBe(1);
     expect(count(body, 'static int nPkc3Skipped = 0;')).toBe(1);
     expect(count(body, 'static int nPkc3Ran = 0;')).toBe(1);
-    // 上限の `if` は波括弧なしの 1 文(= fputs だけ)。次の行が `m_aTimer.start(1);` で、`{` で包んでいない
+    // 上限の `if` は波括弧なしの 1 文(= fprintf だけ)。次の行が `m_aTimer.start(1);` で、`{` で包んでいない
     const lines = body.split('\n');
     const i = lines.findIndex((l) => l.includes('nPkc3Skipped++ < 20'));
-    expect(lines[i + 1]).toContain('std::fputs(');
+    expect(lines[i + 1]).toContain('std::fprintf(');
     expect(lines[i + 2]).toContain('m_aTimer.start(1);');
     const j = lines.findIndex((l) => l.includes('nPkc3Ran++ < 20'));
-    expect(lines[j + 1]).toContain('std::fputs(');
+    expect(lines[j + 1]).toContain('std::fprintf(');
     expect(lines[j + 2]).toContain('} //');
   });
 
