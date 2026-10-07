@@ -26,6 +26,8 @@ import {
   packStatusText,
 } from '../../src/adapter/ui/render/office-pack-panel';
 import type { OfficePackMeta } from '../../src/adapter/platform/office/office-pack';
+import { DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
+import { OFFICE_PACK_APPROX } from '../../src/features/office/office-pack-size';
 
 const META: OfficePackMeta = {
   version: 'lo-wasm-dev',
@@ -295,14 +297,66 @@ describe('受け口(binder)', () => {
     expect(services.installOfficePackFromFile).not.toHaveBeenCalled();
   });
 
-  it('🔴 「Office の一式を消す」が実体まで届く', () => {
-    const { services, panel } = harness();
+  /** 開いている確認の窓。⚠ 窓は `enqueue` の中の `async` なので microtask を数周進めてから引く。 */
+  async function openDialog(): Promise<HTMLDialogElement | null> {
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    return (
+      [...document.querySelectorAll<HTMLDialogElement>(`[data-pkc-region="${DIALOG_REGION}"]`)].find(
+        (el) => el.open,
+      ) ?? null
+    );
+  }
+
+  /** 「Office の一式を消す」を押す。⚠ 入っていないと `disabled` なので、押せる状態を作ってから押す。 */
+  function pressRemove(panel: { root: HTMLElement }): void {
     const btn = panel.root.querySelector<HTMLButtonElement>(
       '[data-pkc-action="remove-office-pack"]',
     )!;
-    // ⚠ 入っていないと `disabled` なので、押せる状態を作ってから見る
     btn.disabled = false;
     btn.dispatchEvent(new Event('click', { bubbles: true }));
+  }
+
+  async function answer(which: 'ok' | 'cancel'): Promise<void> {
+    const dialog = await openDialog();
+    expect(dialog, '確認が開いていない').not.toBeNull();
+    dialog!
+      .querySelector<HTMLButtonElement>(
+        `[data-pkc-field="${which === 'ok' ? 'dialog-ok' : 'dialog-cancel'}"]`,
+      )!
+      .click();
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+  }
+
+  it('🔴 「Office の一式を消す」は、押しただけでは消さず、確認を出す(字・押し所・赤い印)', async () => {
+    const { services, panel } = harness();
+    pressRemove(panel);
+    const dialog = await openDialog();
+    expect(dialog, '確認が出ない(押した瞬間に消えている)').not.toBeNull();
+    expect(services.removeOfficePack, '確認の前に消した').not.toHaveBeenCalled();
+    // ⚠ 大きさは定数から引く(手で綴ると、一式を焼き直した日に両方そのままで緑になる)
+    expect(dialog!.querySelector('[data-pkc-field="dialog-body"]')?.textContent).toBe(
+      `Office の一式(${OFFICE_PACK_APPROX})を消します。もう一度ダウンロードすれば戻ります。`,
+    );
+    const ok = dialog!.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!;
+    expect(ok.textContent).toBe('消す');
+    expect(ok.hasAttribute('data-pkc-danger'), '消す操作なのに赤い印が無い').toBe(true);
+    expect(
+      dialog!.querySelector('[data-pkc-field="dialog-cancel"]')?.textContent,
+    ).toBe('やめる');
+    await answer('cancel');
+  });
+
+  it('🔴 「やめる」なら消さない', async () => {
+    const { services, panel } = harness();
+    pressRemove(panel);
+    await answer('cancel');
+    expect(services.removeOfficePack, 'やめると答えたのに消した').not.toHaveBeenCalled();
+  });
+
+  it('🔴 「消す」で実体まで届く(1 回だけ)', async () => {
+    const { services, panel } = harness();
+    pressRemove(panel);
+    await answer('ok');
     expect(services.removeOfficePack).toHaveBeenCalledTimes(1);
   });
 });

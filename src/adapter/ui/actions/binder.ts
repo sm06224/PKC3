@@ -10064,8 +10064,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       ?.querySelector<HTMLInputElement>('[data-pkc-field="office-pack-input"]')
       ?.click();
   },
-  'remove-office-pack': (_dispatcher, _target, services) => {
-    services.removeOfficePack?.();
+  /**
+   * 🔴 **消す前に確認を出す**(#1363 項目 5)── 一式は約 100MB あり、ダウンロードし直すには時間が掛かる。
+   * ⚠ 大きさは定数から引く(手で綴ると、一式を焼き直した日に字だけ古くなる)。
+   * ⚠ `answer !== 'ok'`(やめる / Esc / 背面を押した)なら**何も消さない**。
+   */
+  'remove-office-pack': (_dispatcher, _target, services, root) => {
+    void confirmInApp(
+      root,
+      `Office の一式(${OFFICE_PACK_APPROX})を消します。もう一度ダウンロードすれば戻ります。`,
+      { okLabel: '消す', cancelLabel: 'やめる', danger: true },
+    ).then((answer) => {
+      if (answer !== 'ok') return;
+      services.removeOfficePack?.();
+    });
   },
   /**
    * 🔴 **音声認識の部品を入れる / やめる / 消す**(#772 段②)。⚠ **どの部品かは押した

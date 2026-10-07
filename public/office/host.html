@@ -573,10 +573,17 @@
      * (大きい文書ならさらに書き出しの時間)。⚠ user が Ctrl+S を押して
      * 「保存できた」と思い、**その 1 秒以内にタブを閉じる**のはごく自然な動作である。
      *
-     * ⚠ 出すのは**渡している最中だけ** ── 平常時に確認を出すと、ただの邪魔になる。
+     * ⚠ 出すのは**渡している最中**と**保存していない編集が在るとき**だけ ── 平常時に確認を出すと、ただの邪魔になる。
      */
+    // 🔴 もう 1 つ: **保存していない編集が在るとき**(Cmd+W / Ctrl+W / タブを閉じる)も出す(#1363 項目 6)。
+    // 判断は全部 `office-shadow.js` の `shouldBlockUnload`(窓に最後に聞いた答えを `lastModified` が持つ)── ここは配線だけ。
     window.addEventListener('beforeunload', function (e) {
-      if (watch.pendingCount() === 0 && !busy) return;
+      var SH = window.PKC3OfficeShadow;
+      var pending = watch.pendingCount() > 0;
+      var block = SH
+        ? SH.shouldBlockUnload({ pending: pending, busy: !!busy, lastModified: SH.lastModified() })
+        : (pending || !!busy);
+      if (!block) return;
       e.preventDefault();
       e.returnValue = '';   // 旧い browser 向け(文面は browser が決める)
     });
