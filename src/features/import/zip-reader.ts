@@ -203,7 +203,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   }
 
   if (prefix < 0 || cdOffset + cdSize + prefix > zip.size) {
-    throw new ZipReadError('zip の中央ディレクトリが範囲外を指しています');
+    throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が範囲外を指しています');
   }
 
   const cdStart = cdOffset + prefix;
@@ -216,10 +216,10 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
   let pos = 0;
   for (let i = 0; i < count; i++) {
     if (pos + 46 > cd.byteLength) {
-      throw new ZipReadError('zip の中央ディレクトリが途中で切れています');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が途中で切れています');
     }
     if (cd.getUint32(pos, true) !== CD_SIG) {
-      throw new ZipReadError('zip の中央ディレクトリの署名が不正です');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)の署名が不正です');
     }
     const flags = cd.getUint16(pos + 8, true);
     const method = cd.getUint16(pos + 10, true);
@@ -235,7 +235,7 @@ export async function readZipDirectory(zip: Blob): Promise<ZipEntry[]> {
     // **黙って clamp** するので、CD が名前の途中で切れていると名前が静かに縮む
     // (最後の 1 件は次の CD 署名検査にも掛からないので素通りする)
     if (pos + 46 + nameLen + extraLen + commentLen > cd.byteLength) {
-      throw new ZipReadError('zip の中央ディレクトリが途中で切れています');
+      throw new ZipReadError('zip の内容一覧(中央ディレクトリ)が途中で切れています');
     }
 
     if (flags & 0x1) throw new ZipReadError('暗号化された zip には対応していません');

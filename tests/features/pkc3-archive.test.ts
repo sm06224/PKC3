@@ -13,6 +13,7 @@ import {
   type ArchiveSource,
 } from '../../src/features/export/pkc3-archive';
 import { readZipEntry, readZipDirectory } from '../../src/features/import/zip-reader';
+import { buildZip, bytesOf } from './zip-fixture';
 
 const enc = new TextEncoder();
 
@@ -404,6 +405,33 @@ describe('アーカイブ ZIP — file 名の末尾は中身を変えない(#101
     expect(bufA.byteLength, '空振り防止 ── 0 バイトを比べていない').toBeGreaterThan(0);
     expect(new Uint8Array(bufA), 'file 名の意図が中身にまで漏れている').toEqual(
       new Uint8Array(bufB),
+    );
+  });
+});
+
+/**
+ * 🔴 断り文は user が読む字である(#1389、2026-10-07)。
+ * ⚠ 「ノートの一覧データ」「ノートの一覧(entries)」は、用語集の「ノート一覧」(B2 = アプリに見せる一覧)
+ *   と字面が同じで別の物を指していたので、言い分けた。その字を pin する(変異: 旧字へ戻すと落ちる)。
+ */
+describe('readArchive: container.json の断り文(#1389)', () => {
+  const manifest = bytesOf(JSON.stringify({ format: ARCHIVE_FORMAT, version: 1 }));
+  it('container.json が JSON として読めないとき、何の file かを user の言葉で言う', async () => {
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: manifest },
+      { name: 'container.json', bytes: bytesOf('{ not json') },
+    ]);
+    await expect(readArchive(zip)).rejects.toThrow(
+      /^バックアップの中のノートのデータ\(container\.json\)を読み取れません\(JSON として読めません\)/,
+    );
+  });
+  it('container.json に entries が無いとき、「ノート(entries)の記載がありません」と言う', async () => {
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: manifest },
+      { name: 'container.json', bytes: bytesOf(JSON.stringify({ relations: [] })) },
+    ]);
+    await expect(readArchive(zip)).rejects.toThrow(
+      /^バックアップの中のノートのデータ\(container\.json\)に、ノート\(entries\)の記載がありません/,
     );
   });
 });

@@ -601,7 +601,9 @@ describe('枠を畳んだ帯の作法(#606)', () => {
       root.querySelectorAll('[data-pkc-split-lid]').length,
       '広げたのに枠が戻っていない(台の空振り)',
     ).toBeGreaterThan(0);
-    expect(said.filter((t) => t.includes('0 件')), '「0 件を折りたたみました」と言った').toEqual([]);
+    // 🔑 文言に依らない形で見る(「0 件」の字を探すと、単位を変えた日に空振りする)──
+    //    畳んだときの 1 回より増えていなければ、広げて戻したときに何も言っていない
+    expect(said, '広げて戻したときに何か言った(「0 件を折りたたみました」の類)').toHaveLength(1);
   });
 
   /**

@@ -16,6 +16,8 @@ import {
   ZipReadError,
 } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf } from './zip-fixture';
+import { readFileSync } from 'node:fs';
+import { codeOnly } from '../helpers/code-only';
 
 const text = async (blob: Blob): Promise<string> => blob.text();
 
@@ -443,5 +445,24 @@ describe('実物の ZIP が持つ形(合成 fixture では見落とす縁)', () 
     // 文面まで pin する:「署名が不正」= 内側基準の offset で外側を読んだ結果、
     // local header がそこに無かった、ということ(= 別位置を読んだ実証)
     await expect(readZipEntry(outer, innerEntry)).rejects.toThrow(/ヘッダ署名が不正/);
+  });
+});
+
+/**
+ * 🔴 同じ物(zip の中央ディレクトリ)を 2 通りに言わない(#1389、2026-10-07)。
+ * pack.json の「一式の内容一覧」と言い分けるために、zip 側は必ず「内容一覧(中央ディレクトリ)」と書く
+ * (`src/features/ui-terms.ts` の STANDARD_TERMS)。⚠ 断り文の全数を字面で見る ── fixture で全経路を
+ * 踏むより、言い方が割れていないことを 1 か所で pin するほうが、足した日に漏れない。
+ */
+describe('zip-reader: 中央ディレクトリの呼び方は 1 つ(#1389)', () => {
+  it('ZipReadError の文で「中央ディレクトリ」を言うときは、必ず「内容一覧(中央ディレクトリ)」の形', () => {
+    const src = codeOnly(readFileSync('src/features/import/zip-reader.ts', 'utf8'));
+    const messages = [...src.matchAll(/ZipReadError\(\s*[`'"]([^`'"]*)[`'"]/g)].map((m) => m[1]!);
+    expect(messages.length, '断り文を 1 つも拾えていない(正規表現の空振り)').toBeGreaterThan(10);
+    const mentioning = messages.filter((m) => m.includes('中央ディレクトリ'));
+    expect(mentioning.length, '中央ディレクトリを言う断り文を拾えていない(空振り)').toBeGreaterThanOrEqual(5);
+    for (const m of mentioning) {
+      expect(m, '「zip の中央ディレクトリ」の形が残っている').toContain('内容一覧(中央ディレクトリ)');
+    }
   });
 });
