@@ -334,6 +334,6 @@ describe('#1396 の直し(viewdata-gone)── 他の検査との関係', () => 
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/26 → 27\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-viewdata-gone.py');
-    expect(yml).toContain('test "$n" -eq 29');
+    expect(yml).toContain('test "$n" -eq 30');
   });
 });

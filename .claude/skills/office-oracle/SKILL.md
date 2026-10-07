@@ -707,6 +707,22 @@ Impress を開くと約 3 % で `SalGraphics::DrawPolyLine`(非 virtual の wrap
 🔴 **解放済みの `SalGraphics` を指したままの `mpGraphics` は直せない**(null 門は素通りする)── 停止が残るのは想定内で、印が目的。
 test は `tests/office-grip-guard-patch.test.ts`(fixture は上流 `d6226c1a` の `polygon.cxx` の抜粋)。
 
+### 🔴 #1393 / #1396 / #117 の原因側の直し `patch-lo-timer-mutex.py`(2026-10-07。⚠ 焼く前 ── 🟡 推測。塞ぐのは**半分だけ**)
+
+JSPI かつ PROXY_TO_PTHREAD でない wasm では、`QtTimer::timeoutActivated()`(`vcl/qt5/QtTimer.cxx`)が **SolarMutex を取らずに** main スレッドで走る
+(上流が前処理で `SolarMutexGuard` を外し「too brittle」の TODO を書いている)。`Scheduler::CallbackTaskScheduling` は task の走査・`UpdateMinPeriod()`・`pTask` の選択を
+mutex なしで進め、`pTask->Invoke()` の周りでだけ取る(`scheduler.cxx` の 407-417 / 522-533 / 611)。その間に LO のスレッドが窓を dispose し Task を delete すると、
+解放済みの Idle(`null function or function signature mismatch`)/ 破棄中の `InterimItemWindow::Layout` / dispose 後のツールチップの timer になる、という読み。
+直しは `#if` の**偽の側**(`#else`)で mutex を**待たずに**試す:`IsCurrentThread()` が真(main が持っている = `QtYieldMutex` の借りている状態)なら今まで通り /
+`tryToAcquire()` が偽(LO のスレッドが持っている)なら `m_aTimer.start(1)` で 1 ms 後に張り直して返る / 取れたら RAII で `release()`。
+印は `PKC3-TIMERMUTEX: skipped …` / `ran under mutex`(それぞれ **20 回まで**。上限は印だけ)。
+
+🔑 **次の焼きの読み方**(印は各 patch の `PKC3-*` の回数):
+`PKC3-TASKGONE` / `PKC3-LAYOUTGUARD` / `PKC3-TOOLTIPGUARD` / `PKC3-VIEWDATAGONE` が **0 に近づく** → 原因は「走査と選択 → `Invoke`」の間だった(この直しが効いた)。
+**減らない** → LO のスレッド自身が mutex を手放す所(`EmscriptenLightweightRunInMainThread` / `QtInstance.cxx` の `DoYield` の枝 B)が残っている ── この直しはそこを塞がない。
+`PKC3-TIMERMUTEX: skipped` が 1 回も出ないなら、この直しは効く場面に 1 度も入っていない。
+test は `tests/office-timer-mutex-patch.test.ts`(fixture は上流 `d6226c1a` の `QtTimer.cxx` の全文。当て済みは **SKIP(exit 0)**)。
+
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 
 焼きが `make` の 15 分で落ち、こう出た:

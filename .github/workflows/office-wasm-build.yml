@@ -676,7 +676,11 @@ jobs:
           #    開いた直後の約 3 % で `OutputDevice::DrawPolygon` の縁を引く `SalGraphics::DrawPolyLine` が範囲外で落ちる。
           #    塗りの後に読み直す `mpGraphics` が null なら縁を引かず返し、前後の印(`PKC3-GRIPGUARD:`)で落ちた場所を絞る
           #    (⚠ 直しではない。ぶら下がった pointer は捕まえられない)。⚠ 2 本とも他の patch と当て先が重ならない。
-          test "$n" -eq 29
+          # 🔴 29 → 30(2026-10-07)。`patch-lo-timer-mutex.py`(#1393 / #1396 / #117 の**原因側の仮説への直し**)。
+          #    JSPI 構成の `QtTimer::timeoutActivated()` は SolarMutex なしで scheduler の走査と選択をするので、
+          #    LO 側が dispose / 削除した Task や窓に触る。先頭で SolarMutex を**待たずに**取りに行き、
+          #    LO 側が持っていれば 1 ms 後に張り直して返す(⚠ LO 側が自分で手放す所は塞がない。当たり外れは各 `PKC3-*` の印の回数で次の焼きで分かる)。
+          test "$n" -eq 30
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと

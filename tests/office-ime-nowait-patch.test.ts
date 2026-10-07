@@ -537,13 +537,13 @@ describe('#121 の直し(ime-nowait)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/23 → 24\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-ime-nowait.py');
-    // いまの `-eq` は 29 ── 2026-10-07 に #1393 / #1396 / #1402 の LO 側の直し 5 本(layout-guard / hscroll-hdl / viewdata-gone / tooltip-guard / grip-guard)を足した(24 → 29)
-    expect(yml).toContain('test "$n" -eq 29');
+    // いまの `-eq` は 30 ── 2026-10-07 に #1393 / #1396 / #1402 の LO 側の直し 5 本(layout-guard / hscroll-hdl / viewdata-gone / tooltip-guard / grip-guard)を足し(24 → 29)、timer-mutex で 30
+    expect(yml).toContain('test "$n" -eq 30');
   });
 
-  it('🔑 実在する `patch-*.py` が 29 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
+  it('🔑 実在する `patch-*.py` が 30 本(workflow の `-eq` と同じ数。glob と同じ集合)', () => {
     const files = readdirSync('build/office-wasm').filter((f) => /^patch-.*\.py$/.test(f));
-    expect(files.length).toBe(29);
+    expect(files.length).toBe(30);
     expect(files).toContain('patch-lo-ime-nowait.py');
   });
 
