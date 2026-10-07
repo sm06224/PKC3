@@ -499,6 +499,8 @@ Qt の cache 鍵は **`hashFiles('build/office-wasm/qt-wasm-configure.args', 'bu
 🔑 だから **Qt 側の直しは 1 焼きに束ねる** ── 2 本を別々に焼くと **Qt を 2 回建てる**。
 ⚠ 束ねる前に `qtbase-patch-*.py` の既存の名前を `ls` する(足した file も**変えた file も**鍵を動かす)。
 
+⚠ **2026-10-07 訂正: 鍵に hash は無い**(`office-wasm-build.yml` の :267 は `ccache-lo-qt6-nd-${{ inputs.qt_ref }}-${{ github.sha }}`。
+`-nd-` の depend mode を切った鍵で、Qt の patch を触っても LO の ccache は復元される)。下の段落は 2026-10-05 時点の記述として残す。
 🔴 **`ccache-lo-qt6-…` は LO の compile cache である ── 同じ hash を含むので、Qt の patch を触ると
 LO 側もほぼ全量 compile になる**(2026-10-05 実測、#1344)。上の「Qt を焼き直す」は **Qt だけではない**。
 観測点:run 37267668276(main 4e57bd4f、`qtbase-patch-asyncify-nested.py` を足した直後)──
@@ -512,9 +514,18 @@ Qt host 15 分 + Qt wasm 11 分 + **LO make 3 時間 37 分**(06:00:56Z → 09:3
 ⚠ 上の 2026-10-04 の「flag 全 OFF の焼きが 3h49m」は、この鍵が動いた(`qtbase-patch-backspace` などの追加)ことが
 **原因だった可能性**があるが、**未確認**(推測。その run の cache 復元が一致だったかを見れば決着する)。
 
-🔑 Qt の patch の一覧(2026-10-07 時点で 5 本):`asyncify-nested`(#1344)/ `backspace`(#433)/ `ime-panel` / `inputcontext` /
+🔑 Qt の patch の一覧(2026-10-07 時点で 6 本):`asyncify-nested`(#1344)/ `backspace`(#433)/ `ime-panel` / `inputcontext` /
 `ecmastring-threadsafe`(#1394。`qcore_wasm.cpp` の関数内 static な `emscripten::val` を、main と pthread の両方から
-呼ばれても `invalid handle` にならないよう毎回 `module_property` を取る形へ。test は `tests/office-ecmastring-threadsafe-patch.test.ts`)。
+呼ばれても `invalid handle` にならないよう毎回 `module_property` を取る形へ。test は `tests/office-ecmastring-threadsafe-patch.test.ts`)/
+`wake-async`(#1408。`wakeEventDispatcherThread()` の resume の依頼を、別スレッドからは `runOnMainThreadAsync` に ──
+同期だと main の SolarMutex の busy-wait と相互待ちになる。Qt 6.10 も別スレッドからの起こしは非同期(main からも非同期だが、ここでは main は従来どおり同期のまま)。⚠ `asyncify-nested` の**後**にしか当たらない
+(錨が 3 行)。test は `tests/office-wake-async-patch.test.ts`)。
+
+🔑 **emsdk への patch**(Qt の patch ではない。本数の pin に載らない名前 `emsdk-patch-*`):`build/office-wasm/emsdk-patch-proxying.py`(#1408)。
+emscripten 4.0.10 の `system/lib/pthread/proxying.c` の `emscripten_proxy_finish` を、`pthread_cond_signal` → `pthread_mutex_unlock`
+の順へ(`cancel_ctx` も同じ順。5.0.5 の #26582 と同じ。unlock の後だと、待つ側が先に起きて捨てた condvar を signal しに行って固まる)。
+workflow は patch の後に **cache の `libc-mt*.a` / `libc_optz-mt*.a` を消す**(proxying.c は libc の archive に入っていて、cache に在れば作り直されない。
+消せば最終 link が build する)。make の後に「patch より新しいか」を診断で出す。test は `tests/office-proxying-patch.test.ts`。
 
 ### 🔴 JSPI の suspend は **LIFO で起こす** ── Emscripten の C stack は 1 本(2026-10-05、#1344 v1 → v2)
 

@@ -684,6 +684,48 @@ describe('office-wasm のパッチ', () => {
   });
 
   /**
+   * 🔴 **emsdk の `proxying.c` の順序を直す step は、configure の後・make の前に在り、実行する行で patch を呼ぶ**(#1408)。
+   * ⚠ emsdk への patch は Qt の patch でも LO の patch でもない(`emsdk-patch-*`)ので、上の本数のループには載らない ──
+   *   消えても本数の検査は鳴らない。だから step を名指しで pin する。
+   * 🔑 順: 最終 link(make)が cache に無い libc を build するので、patch と **libc の削除は make の前**でなければならない
+   *   (後だと、直す前の libc がそのまま link される)。
+   * ⚠ 見るのは**実行する行**(`#` で始まる注釈は落とす)── 注釈に同じ字が在っても満たされない(§1 の 5 度目)。
+   */
+  it('🔴 emsdk の proxying.c の patch が configure の後・make の前で呼ばれ、libc の `-mt` archive を消している', () => {
+    const lines = readFileSync(YML, 'utf-8').split('\n');
+    const code = lines.map((l, i) => ({ l, i })).filter(({ l }) => !/^\s*#/.test(l));
+    const find = (re: RegExp, what: string): number => {
+      const hits = code.filter(({ l }) => re.test(l));
+      expect(hits.length, `${what}: 実行する行に ${hits.length} 件(1 件でない)`).toBe(1);
+      return hits[0]!.i;
+    };
+    const configureAt = find(/^\s*- name: configure\(Qt6\)\s*$/, 'configure step');
+    const stepAt = find(/^\s*- name: emsdk の proxying\.c の順序を直す\(#1408\)\s*$/, 'emsdk patch step');
+    const makeAt = find(/^\s*- name: make\s*$/, 'make step');
+    const patchAt = find(/^\s*python3 "\$GITHUB_WORKSPACE"\/build\/office-wasm\/emsdk-patch-proxying\.py ~\/emsdk\/upstream\/emscripten\s*$/, 'patch の呼び出し');
+    const rmAt = find(/^\s*rm -fv "\$libdir"\/libc-mt\*\.a "\$libdir"\/libc_optz-mt\*\.a\s*$/, 'libc の削除');
+    expect(stepAt, 'patch の step が configure より前').toBeGreaterThan(configureAt);
+    expect(makeAt, 'patch の step が make より後').toBeGreaterThan(stepAt);
+    // 呼び出しと削除は、その step の中(make の前)で、patch が先・削除が後
+    expect(patchAt).toBeGreaterThan(stepAt);
+    expect(rmAt, '削除が patch より前').toBeGreaterThan(patchAt);
+    expect(makeAt, '削除が make より後').toBeGreaterThan(rmAt);
+    // 🔴 step に `if:` が無い。⚠ 直上の qtbase patch の step は `if: steps.c_qt.outputs.cache-hit != 'true'` なので、
+    //    その形をコピーすると Qt の cache が当たった回に patch が走らない ── 診断は落とさないので、緑のまま未修正の一式ができる。
+    const nextName = code.find(({ i }) => i > stepAt && /^\s*- name:/.test(lines[i]!));
+    expect(nextName, '次の step が見つからない').toBeDefined();
+    const block = code.filter(({ i }) => i >= stepAt && i < nextName!.i);
+    expect(block.length, '空振り防止: step の塊が空').toBeGreaterThan(5);
+    expect(block.filter(({ l }) => /^\s*if:/.test(l)).map(({ l }) => l), 'patch の step に if: が付いている').toEqual([]);
+    // 消す先は libdir(cache/sysroot/lib/wasm32-emscripten)── 別の場所を消していないこと
+    expect(code.some(({ l }) => /^\s*libdir=~\/emsdk\/upstream\/emscripten\/cache\/sysroot\/lib\/wasm32-emscripten\s*$/.test(l)), 'libdir の定義').toBe(true);
+    // 🔑 実在し、qtbase / LO のどちらの glob にも当たらない名前(本数の pin を動かさない)
+    expect(existsSync('build/office-wasm/emsdk-patch-proxying.py')).toBe(true);
+    expect('emsdk-patch-proxying.py'.startsWith('patch-'), 'LO の glob に当たる').toBe(false);
+    expect(/^qtbase-patch-.*\.py$/.test('emsdk-patch-proxying.py'), 'qtbase の glob に当たる').toBe(false);
+  });
+
+  /**
    * 🔴 **qtbase のパッチは Qt の cache 鍵に入っていなければならない**(#134)。
    * ⚠ 入っていないと、パッチを足したのに**パッチ前の Qt が復元され**、
    *   当てたつもりで効かない ── workflow が同じ罠を別の箇所で注記している。
