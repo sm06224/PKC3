@@ -322,7 +322,13 @@ jobs:
           #    深さの数へ替え、**LIFO で起こす**(v2。C の shadow stack は JSPI でも 1 本なので、
           #    外側を内側より先に起こすと内側の frame を踏む)。`qeventdispatcher_wasm.cpp` だけを触る。
           #    ⚠ 3 → 4 でも Qt の cache 鍵が変わるので Qt を焼き直す(数時間)。
-          test "$n" -eq 4
+          # 🔴 4 → 5(2026-10-07)。`qtbase-patch-ecmastring-threadsafe.py`(#1394 の直し)。
+          #    外から貼った後の Ctrl+C で窓が止まる(`invalid handle`)── `qcore_wasm.cpp` の
+          #    `fromEcmaString` / `toEcmaString` が持つ**関数内 static の `emscripten::val`** は、
+          #    emval の handle が作ったスレッドでしか有効でないのに main(copy event)と
+          #    pthread(LO のコピー)の両方から呼ばれる。static をやめて毎回 `module_property` を取る。
+          #    ⚠ 4 → 5 でも Qt の cache 鍵が変わるので Qt を焼き直す(数時間)。
+          test "$n" -eq 5
 
       # 🔑 Qt6 は **host build が別に要る**(Qt5 には無かった要件)。
       # ⚠ `-no-gui` で建ててはいけない ── wasm 側で Gui/Widgets を建てるとき、host の
