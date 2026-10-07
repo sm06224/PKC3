@@ -749,6 +749,27 @@ leave が出た後に無音なら、main は別の所で止まっている(こ�
 test は `tests/office-yield-wait-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 95〜205 行 = `tests/fixtures/office-lo/QtYieldMutex.excerpt.cxx`。
 手元の stub harness では compile と enter/leave の出方を確かめた ── 本物の header ではまだ)。
 
+### 🔴 #1402 の閉じた直後の停止 ── 計装 3 本 `patch-lo-surface-trace.py` / `patch-lo-sdpr-trace.py` / `patch-lo-gfxdata-trace.py`(2026-10-07。⚠ 焼く前 ── **直しではなく印**。行き先は 🟡 推測)
+
+Office を閉じた直後に、本体スレッドが `ThumbnailView::Paint` ← `createPixelProcessor2DFromOutputDevice` で `memory access out of bounds`(先の grip-guard とは別の経路)。
+候補は 2 つ: ① `QtSvpSalFrame::DoHandleResizeEvent`(`vcl/qt5/QtSvpSalFrame.cxx`)が **main で SolarMutex なしに** 新しい cairo surface へ差し替えて古い物を捨てる間に、
+本体が `GetGraphicsData()` で受け取った生の `pSurface` を `CairoPixelProcessor2D` の ctor が読む ② `OutputDevice::GetSystemGfxData`(`vcl/source/outdev/outdev.cxx`)が
+`ApplyFullDamage()`(SolarMutex を手放す hop)の**後**に `mpGraphics` を読み直す間に、`WindowOutputDevice::AcquireGraphics` の奪取で null にされる。
+
+| patch | 当て先 / 印 | 内容 |
+|---|---|---|
+| `patch-lo-surface-trace.py` | `QtSvpSalFrame.cxx` / `PKC3-SURFACE:` | `resize before`(作った後・差し替えの前)/ `resize after`(`m_pSurface.reset` の後)/ `resize destroy old=X`(`copySource` の後 = 古い surface が捨てられる直前)。毎回出す(頻度が低い) |
+| `patch-lo-sdpr-trace.py` | `processor2dtools.cxx` / `PKC3-SDPR:` | `enter #N outdev= type=`(**`HasMirroredGraphics()` の前**)と `made #N outdev= valid=`(ctor の直後)。300 回まで毎回・以後 50 回ごと・**2 秒空いたら必ず・`outdev` が前回出した物と変わったら必ず・前の呼び出しから 100 ms 空いたら必ず**(閉じた直後の連続描画の先頭と相手の入れ替わりを拾う) |
+| `patch-lo-gfxdata-trace.py` | `outdev.cxx` / `PKC3-GFXDATA:` | `ApplyFullDamage` の前後で `mpGraphics` が**変わったときだけ** `gfx changed before= after=`(0 行なら変わっていない)+ 🔴 **after が null なら空の `SystemGraphicsData()` を返して落ちない**(門)+ 返す直前の `surface outdev= gfx= surface=`(300 回まで毎回・50 回ごと・2 秒空いたら必ず・**`pSurface` が前回出した値と変わったら必ず** = resize の直後の最初の読み) |
+
+🔑 **次の焼きの読み方**: `t=` は 3 本とも同じ `steady_clock` の ms。
+`PKC3-SDPR: enter #N` があって `made #N` が無いまま落ちる → 落ちたのは `HasMirroredGraphics()` か ctor の中 / `surface=X` が `PKC3-SURFACE: resize destroy old=X` の `t=` より**後**に読まれている → 捨てた surface を読んだ(①)/
+`gfx changed … after=(nil)` が出る → ② が当たり、門が効いた(落ちる回が減る)/ どれも出ずに落ちる → 候補が外れ。
+🔴 **直らないもの**: 門は null のときだけ。`pSurface` が差し替えで捨てられた物を指す競合(①)は印だけで直さない。出ない形は 1 つだけ: 同じ `outdev` / 同じ `pSurface` への呼び出しが 100 ms 未満の間隔で続く塊の**途中**(50 回の倍数でも前回の出力から 2 秒未満でもない回)で落ちたとき。そのときは最後の行の `t=` と落ちた時刻の差で読む。
+test は `tests/office-surface-trace-patch.test.ts` / `office-sdpr-trace-patch.test.ts` / `office-gfxdata-trace-patch.test.ts`(fixture は上流 `d6226c1a` の抜粋 `tests/fixtures/office-lo/{QtSvpSalFrame,processor2dtools,outdev}.excerpt.cxx`。
+3 本の `pPkc3Ms`(`steady_clock` の ms)が一致することは `tests/office-trace-clock-parity.test.ts` が見る。共有の道具は `tests/helpers/office-lo-patch.ts` ── 当てた後の関数を**型だけ stub に替えて g++ でコンパイルして走らせる**(`-Wall -Wextra -Werror`。g++ が無い箱では skip。本物の LO の header ではない)。
+`PKC3_LO_UP=<上流 d6226c1a の木>` を渡すと実 file にも当たる)。ヘルパー関数を作らない(lambda を関数の中に置く)ので `check-patch-scope.py` の SPECS / FIXES には載せていない(grip-guard / timer-mutex と同じ)。
+
 ## 12. 🔴 詰め込みの命令行は **128 KiB** で切れる(2026-08-30、#591)
 
 焼きが `make` の 15 分で落ち、こう出た:

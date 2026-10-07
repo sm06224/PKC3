@@ -300,7 +300,7 @@ describe('#121 の直し(menu-popup-sync)── 他の検査との関係', () =>
     expect(yml).toContain('patch-lo-menu-popup-sync.py');
     // 22 → 23 → 24 → 25 → 24: `patch-lo-uev-trace.py`(計装)/ `patch-lo-ime-nowait.py`(直し)を足し、#1344 で足した LO 側の直しは効かなかったので外した(真因は Qt 側)。「21 → 22」の注記は残っている
     // いまの `-eq` は 31 ── 2026-10-07 に #1393 / #1396 / #1402 の LO 側の直し 5 本を足し(24 → 29)、timer-mutex で 30、yield-wait(#1408 の印)で 31
-    expect(yml).toContain('test "$n" -eq 31');
+    expect(yml).toContain('test "$n" -eq 34');
   });
 
   it('🔑 check-patches-on-ref.sh が拾える形(`SRC = "…"`)で当て先を宣言している', () => {

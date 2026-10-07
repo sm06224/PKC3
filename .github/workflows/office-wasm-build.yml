@@ -692,7 +692,14 @@ jobs:
           #    その後 `m_aTimer.start(1)` 自体が止まる = main の event loop が回らない。`QtYieldMutex::doAcquire` の main の枝で
           #    LO スレッドの鍵を待つ `m_InMainCondition.wait` の前後に `PKC3-YIELDWAIT: enter/leave` を置き、
           #    **enter があって leave が無い**かで「main がそこで止まっている」を言う(⚠ 足すだけ。他の patch と当て先の錨は重ならない)。
-          test "$n" -eq 31
+          # 🔴 31 → 34(2026-10-07)。#1402 の**計装 3 本**(閉じた直後に本体スレッドが `ThumbnailView::Paint` ←
+          #    `createPixelProcessor2DFromOutputDevice` で落ちる件)。仮説は 2 つ: ① `QtSvpSalFrame::DoHandleResizeEvent` が
+          #    main で SolarMutex なしに cairo surface を差し替えて古い物を捨てる間に、本体が生の `pSurface` を読む
+          #    ② `GetSystemGfxData` が `ApplyFullDamage()`(SolarMutex を手放す hop)の後で `mpGraphics` を読み直す間に、奪取で null にされる。
+          #    `patch-lo-surface-trace.py`(差し替えの前後と破棄の印 `PKC3-SURFACE:`)/ `patch-lo-sdpr-trace.py`(入口と出口の印 `PKC3-SDPR:`)/
+          #    `patch-lo-gfxdata-trace.py`(`mpGraphics` が変わったときの印 + null なら空を返す門 + `pSurface` の印 `PKC3-GFXDATA:`)。
+          #    ⚠ 3 本とも `t=` が同じ steady_clock の ms。当て先は 3 本とも他の patch と重ならない(`QtSvpSalFrame.cxx` / `processor2dtools.cxx` / `outdev.cxx`)。
+          test "$n" -eq 34
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
