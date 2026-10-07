@@ -4,14 +4,16 @@
  *
  * 守る主張:
  * 1. ci.yml の PR 時は scripts/test-pr.mjs を呼び、push 時は npm test を呼ぶ
- * 2. GUARD_TESTS の対象テストファイルがすべてリポジトリ内に実在する
- * 3. package.json の test:guards が GUARD_TESTS を過不足なく網羅している
- * 4. resolveBase の引数・環境変数・git 探索のフォールバック動作
+ * 2. collectGuardTests は 100 本以上のガードテストを収集し、7 本の錨をすべて含む
+ * 3. 収集されたすべてのガードテストファイルがリポジトリ内に実在する
+ * 4. package.json の scripts に test:pr と test:guards が定義されている
+ * 5. detectFallbackReasonFromFiles は package.json や config の変更を検出し、通常ファイルは null
+ * 6. resolveBase の引数・環境変数・git 探索のフォールバック動作
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 // @ts-expect-error -- CI scripts are .mjs
-import { resolveBase, GUARD_TESTS } from '../scripts/test-pr.mjs';
+import { resolveBase, collectGuardTests, ANCHOR_GUARD_TESTS, detectFallbackReasonFromFiles } from '../scripts/test-pr.mjs';
 
 describe('PR 高速 unit テスト (#1390)', () => {
   it('ci.yml で PR 時は test-pr.mjs、push 時は npm test を呼ぶ', () => {
@@ -20,23 +22,34 @@ describe('PR 高速 unit テスト (#1390)', () => {
     expect(ci).toContain('run: npm test');
   });
 
-  it('GUARD_TESTS に指定されたすべてのテストファイルが実在する', () => {
-    expect(GUARD_TESTS.length).toBeGreaterThan(0);
-    for (const file of GUARD_TESTS) {
+  it('collectGuardTests は 100 本以上のガードテストを収集し、7 本の錨をすべて含む', () => {
+    const guards = collectGuardTests();
+    expect(guards.length).toBeGreaterThanOrEqual(100);
+    for (const anchor of ANCHOR_GUARD_TESTS) {
+      expect(guards, `${anchor} がガードテストに含まれていません`).toContain(anchor);
+    }
+  });
+
+  it('collectGuardTests で収集されたすべてのテストファイルが実在する', () => {
+    const guards = collectGuardTests();
+    for (const file of guards) {
       expect(existsSync(file), `${file} が存在しません`).toBe(true);
     }
   });
 
-  it('package.json の test:guards に GUARD_TESTS がすべて含まれる', () => {
+  it('package.json の scripts に test:pr と test:guards が定義されている', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf-8')) as {
       scripts: Record<string, string>;
     };
     expect(pkg.scripts['test:pr']).toBe('node scripts/test-pr.mjs');
-    const guardsScript = pkg.scripts['test:guards'];
-    expect(guardsScript).toBeDefined();
-    for (const file of GUARD_TESTS) {
-      expect(guardsScript).toContain(file);
-    }
+    expect(pkg.scripts['test:guards']).toBe('node scripts/test-pr.mjs --guards');
+  });
+
+  it('detectFallbackReasonFromFiles は package.json や config の変更を検出する', () => {
+    expect(detectFallbackReasonFromFiles(['package.json'])).toContain('package.json');
+    expect(detectFallbackReasonFromFiles(['vite.config.ts'])).toContain('vite.config.ts');
+    expect(detectFallbackReasonFromFiles(['src/foo.ts', 'tests/foo.test.ts'])).toBeNull();
+    expect(detectFallbackReasonFromFiles(null)).toBe('git diff 取得失敗');
   });
 
   it('resolveBase は明示引数、環境変数、git 探索の順で解決する', () => {

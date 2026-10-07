@@ -18,7 +18,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:guards": "vitest run tests/features/ui-terms.test.ts tests/features/ui-terms-doc.test.ts tests/features/manual-glossary.test.ts tests/repo-hygiene.test.ts tests/docs-parity.test.ts tests/workflow-steps.test.ts tests/workflow-shell.test.ts",
+    "test:guards": "node scripts/test-pr.mjs --guards",
     "test:pr": "node scripts/test-pr.mjs",
     "test:smoke": "playwright test --config tests/smoke/playwright.config.ts",
     "smoke:pick": "node scripts/pick-smoke.mjs --run",
