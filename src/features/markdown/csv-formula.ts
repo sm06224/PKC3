@@ -119,9 +119,23 @@ function tokenize(src: string): Token[] {
     if (ch === '"') {
       let s = '';
       i += 1;
-      while (i < src.length && src[i] !== '"') { s += src[i]; i += 1; }
-      if (i >= src.length) throw new Fail('#ERR!', '文字列の `"` が閉じていません');
-      i += 1;
+      let closed = false;
+      while (i < src.length) {
+        if (src[i] === '"') {
+          if (src[i + 1] === '"') {
+            s += '"';
+            i += 2;
+          } else {
+            closed = true;
+            i += 1;
+            break;
+          }
+        } else {
+          s += src[i];
+          i += 1;
+        }
+      }
+      if (!closed) throw new Fail('#ERR!', '文字列の `"` が閉じていません');
       out.push({ t: 'str', v: s });
       continue;
     }

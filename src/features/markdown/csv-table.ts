@@ -133,9 +133,7 @@ export function parseCsv(
    */
   out?: CsvPositions,
 ): string[][] | null {
-  // Normalise line endings so the row split is consistent.
-  const normalised = src.replace(/\r\n?/g, '\n');
-  if (normalised.trim() === '') return null;
+  if (src.trim() === '') return null;
 
   const rows: string[][] = [];
   let row: string[] = [];
@@ -147,11 +145,11 @@ export function parseCsv(
   let cellStart = 0;
   const spans: Array<Array<{ start: number; end: number }>> = [];
   let rowSpans: Array<{ start: number; end: number }> = [];
-  for (let i = 0; i < normalised.length; i++) {
-    const ch = normalised[i];
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (normalised[i + 1] === '"') {
+        if (src[i + 1] === '"') {
           // Escaped quote inside quoted cell → literal `"`.
           cell += '"';
           i++;
@@ -159,8 +157,16 @@ export function parseCsv(
           inQuotes = false;
         }
       } else {
-        if (ch === '\n') line++;
-        cell += ch;
+        if (ch === '\r') {
+          if (src[i + 1] === '\n') i++;
+          line++;
+          cell += '\n';
+        } else if (ch === '\n') {
+          line++;
+          cell += '\n';
+        } else {
+          cell += ch;
+        }
       }
       continue;
     }
@@ -175,7 +181,8 @@ export function parseCsv(
       cellStart = i + 1;
       continue;
     }
-    if (ch === '\n') {
+    if (ch === '\r' || ch === '\n') {
+      const isCrLf = ch === '\r' && src[i + 1] === '\n';
       row.push(cell);
       rowSpans.push({ start: cellStart, end: i });
       rows.push(row);
@@ -186,6 +193,7 @@ export function parseCsv(
       cell = '';
       line++;
       rowStartLine = line;
+      if (isCrLf) i++;
       cellStart = i + 1;
       continue;
     }
@@ -194,7 +202,7 @@ export function parseCsv(
   // Flush the final cell / row (when input doesn't end with \n).
   if (cell !== '' || row.length > 0) {
     row.push(cell);
-    rowSpans.push({ start: cellStart, end: normalised.length });
+    rowSpans.push({ start: cellStart, end: src.length });
     rows.push(row);
     spans.push(rowSpans);
     if (out) out.rowLines?.push({ start: rowStartLine, end: line });
