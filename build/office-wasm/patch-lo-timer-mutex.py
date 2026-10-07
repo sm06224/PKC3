@@ -40,9 +40,14 @@ stack と実測は PKC3 の issue #1393 のコメントに在る。
 | `tryToAcquire()` が偽(LO のスレッドが持っている) | `m_aTimer.start(1)` で 1 ms 後に張り直して**返る**(待たない ── 待つと main が固まる) |
 | `tryToAcquire()` が真 | 取れたので走る。関数を出るとき RAII(`Pkc3Held` の dtor)で `release()` する |
 
-- 印(`PKC3-TIMERMUTEX: skipped #N …` / `ran under mutex (skipped so far N)`)は **20 回まで**、skip はさらに **1000 回ごと**に 1 行
-  (`nPkc3Skipped` / `nPkc3Ran`。⚠ 上限は**印だけ** ── skip の頻度は `#N` と `skipped so far N` の累計で読む。20 回で止めると
-  1 ms の再武装が何千回回ったかが読めない)。
+- 印(`PKC3-TIMERMUTEX: skipped #N … t=<ms>` / `ran under mutex (skipped so far N) ran=M t=<ms>`)は **最初の 20 回 + その後 100 回ごと**に 1 行
+  (`nPkc3Skipped` / `nPkc3Ran`。⚠ 上限は**印だけ** ── skip の頻度は `#N` と `skipped so far N` の累計で読む)。
+  🔑 `t=` は `std::chrono::steady_clock` の ms(wasm では ページ開始からの経過)。**固まった後に印が止まるか・続くか**を時刻で読むため(#1408)。
+  1 ms の張り直しが続いていれば 100 回 ≒ 100 ms 強ごとに skip の行が出続ける ── **止まれば timer 自体が戻っていない(main が返っていない)**、
+  **続けば LO スレッドが鍵を持ったまま戻らない**。(#1408 の 1/30 では 372 回の後に 1 行も無く、どちらか区別できなかった。)
+- 🔴 **所有者の thread id は取れない**: `comphelper::SolarMutex::m_nThreadId` は `private` で、`SalYieldMutex` / `QtYieldMutex` / `SalInstance::GetYieldMutex()` /
+  `ImplSVData` のどれにも読み出し口が無い(`IsCurrentThread()` は呼んだ thread 自身の判定だけ)。足さない。
+  ただし skip の枝では**構成上、持ち主は main ではない**(main が持っていれば `IsCurrentThread()` が真で枝に入らない)── 行の文言 `LO thread holds` はそのまま真。
 - 🟡 `SolarMutex::tryToAcquire` は `comphelper::SolarMutex` の virtual(`QtYieldMutex` は上書きしない。`solarmutex.cxx:87-97`)、
   `release()` は public、`m_aTimer` は `QtTimer` の QTimer の member、と宣言と原文を読んで確かめただけ。
 
@@ -84,6 +89,7 @@ INC_REPLACE = """#include <svdata.hxx>
 #include <vcl/svapp.hxx>
 #include <comphelper/solarmutex.hxx> // PKC3-TIMERMUTEX
 #include <cstdio> // PKC3-TIMERMUTEX
+#include <chrono> // PKC3-TIMERMUTEX
 """
 
 # ── ② `QtTimer::timeoutActivated()` の `#else`(JSPI の枝 = `SolarMutexGuard` の行が無い側)────
@@ -110,18 +116,25 @@ GATE_REPLACE = """    SolarMutexGuard aGuard;
     comphelper::SolarMutex* const pPkc3Mutex = comphelper::SolarMutex::get(); // PKC3-TIMERMUTEX
     static int nPkc3Skipped = 0; // PKC3-TIMERMUTEX
     static int nPkc3Ran = 0; // PKC3-TIMERMUTEX
+    // PKC3-TIMERMUTEX: ms on the steady clock (wasm: since page start), so the log shows whether the re-arm keeps going.
+    auto const pPkc3Ms = []() -> long long // PKC3-TIMERMUTEX
+    { // PKC3-TIMERMUTEX
+        return std::chrono::duration_cast<std::chrono::milliseconds>( // PKC3-TIMERMUTEX
+                   std::chrono::steady_clock::now().time_since_epoch()) // PKC3-TIMERMUTEX
+            .count(); // PKC3-TIMERMUTEX
+    }; // PKC3-TIMERMUTEX
     if (pPkc3Mutex && !pPkc3Mutex->IsCurrentThread()) // PKC3-TIMERMUTEX
     { // PKC3-TIMERMUTEX
         if (!pPkc3Mutex->tryToAcquire()) // PKC3-TIMERMUTEX
         { // PKC3-TIMERMUTEX
-            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 1000 == 0) // PKC3-TIMERMUTEX
-                std::fprintf(stderr, "PKC3-TIMERMUTEX: skipped #%d (LO thread holds SolarMutex)\\n", nPkc3Skipped); // PKC3-TIMERMUTEX
+            if (nPkc3Skipped++ < 20 || nPkc3Skipped % 100 == 0) // PKC3-TIMERMUTEX
+                std::fprintf(stderr, "PKC3-TIMERMUTEX: skipped #%d (LO thread holds SolarMutex) t=%lld\\n", nPkc3Skipped, pPkc3Ms()); // PKC3-TIMERMUTEX
             m_aTimer.start(1); // PKC3-TIMERMUTEX
             return; // PKC3-TIMERMUTEX
         } // PKC3-TIMERMUTEX
         aPkc3Held.m_pMutex = pPkc3Mutex; // PKC3-TIMERMUTEX
-        if (nPkc3Ran++ < 20) // PKC3-TIMERMUTEX
-            std::fprintf(stderr, "PKC3-TIMERMUTEX: ran under mutex (skipped so far %d)\\n", nPkc3Skipped); // PKC3-TIMERMUTEX
+        if (nPkc3Ran++ < 20 || nPkc3Ran % 100 == 0) // PKC3-TIMERMUTEX
+            std::fprintf(stderr, "PKC3-TIMERMUTEX: ran under mutex (skipped so far %d) ran=%d t=%lld\\n", nPkc3Skipped, nPkc3Ran, pPkc3Ms()); // PKC3-TIMERMUTEX
     } // PKC3-TIMERMUTEX
 #endif
     if (Application::IsUseSystemEventLoop())

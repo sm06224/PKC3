@@ -715,7 +715,9 @@ mutex なしで進め、`pTask->Invoke()` の周りでだけ取る(`scheduler.cx
 解放済みの Idle(`null function or function signature mismatch`)/ 破棄中の `InterimItemWindow::Layout` / dispose 後のツールチップの timer になる、という読み。
 直しは `#if` の**偽の側**(`#else`)で mutex を**待たずに**試す:`IsCurrentThread()` が真(main が持っている = `QtYieldMutex` の借りている状態)なら今まで通り /
 `tryToAcquire()` が偽(LO のスレッドが持っている)なら `m_aTimer.start(1)` で 1 ms 後に張り直して返る / 取れたら RAII で `release()`。
-印は `PKC3-TIMERMUTEX: skipped #N …`(20 回まで + その後 1000 回ごと)/ `ran under mutex (skipped so far N)`(20 回まで)。上限は印だけ ── skip の累計 `N` で 1 ms の再武装の頻度を読む。
+印は `PKC3-TIMERMUTEX: skipped #N … t=<ms>` / `ran under mutex (skipped so far N) ran=M t=<ms>`(どちらも最初の 20 回 + 100 回ごと。上限は印だけ ── skip の累計 `N` で 1 ms の再武装の頻度を読む)。
+🔑 `t=` は `steady_clock` の ms(wasm ではページ開始から)。#1408(最初の Tab の直後に無言で固まる、1/30)で、固まった後に **skip の行が続く = LO スレッドが鍵を持ったまま戻らない** /
+**止まる = main の timer が返っていない** を読み分けるため(以前の 1000 回ごとでは 372 → 1000 の間が無音だった)。🔴 鍵の所有者の thread id は上流に読み出し口が無く(`m_nThreadId` は private)出せない。
 
 🔑 **次の焼きの読み方**(印は各 patch の `PKC3-*` の回数):
 `PKC3-TASKGONE` / `PKC3-LAYOUTGUARD` / `PKC3-TOOLTIPGUARD` / `PKC3-VIEWDATAGONE` が **0 に近づく** → 原因は「走査と選択 → `Invoke`」の間だった(この直しが効いた)。
