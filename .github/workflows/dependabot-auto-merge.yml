@@ -66,4 +66,9 @@ jobs:
           echo "検査 $n 件が緑 ── merge する"
           gh pr merge --squash "$PR_URL"
           # 🔴 GITHUB_TOKEN の push は `pages.yml` の on: push を起こさない ── 手で起こす
-          gh workflow run pages.yml --ref main
+          # 🔴 `--repo` を必ず付ける(2026-10-07、#1039)── この job は checkout を持たないので、
+          #    `gh workflow run` は repo を git から読めず「failed to run git: fatal: not a git
+          #    repository」で落ちる(run 37586132034 / 37586116849 で実測。merge は済んでいるのに
+          #    `/dev/` だけ配られない = #1039 の症状がそのまま残る形)。`gh pr merge` は URL を
+          #    渡しているので落ちない ── 同じ job で片方だけ落ちる理由はここに在る
+          gh workflow run pages.yml --ref main --repo "$REPO"
