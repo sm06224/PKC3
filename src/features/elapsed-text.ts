@@ -44,6 +44,37 @@ export function parseElapsed(text: string): number | null {
 }
 
 /**
+ * 🔴 **行頭の経過**(`0:15 こんにちは` の `0:15`)を切り出す綴り(#1232 段 b / #1447)。
+ *
+ * ⚠ **1 か所で持つ** ── 画面で押せる字にする側(`markdown-render.ts` の `pkc-seek-link`)と、
+ *   字幕ファイルへ出す側(`features/asr/srt.ts`)が同じ行を「時刻つきの行」と読む。
+ *   別々に書くと「押せるのに字幕に出ない / 字幕に出るのに押せない」行が生まれる(§7)。
+ * ⚠ 当たっても `parseElapsed` が `null` を返す綴り(`0:75`)は時刻ではない ── 呼び側は両方を通す。
+ */
+export const ELAPSED_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+
+/** 3 桁に揃える(ミリ秒)。 */
+const three = (n: number): string => String(n).padStart(3, '0');
+
+/**
+ * 🔴 **字幕ファイル(SRT)の時刻**(`HH:MM:SS,mmm`。#1447)。
+ *
+ * ⚠ `elapsedText` と違い**時は必ず 2 桁で出す**(`00:00:15,000`)── SRT の綴りがそう決まっている
+ *   (読み手は `\d+:\d\d:\d\d,\d\d\d` を期待する。時を落とすと開けない再生機が在る)。
+ * ⚠ 小数点は**コンマ**(SRT の規格。`.` は WebVTT)。⚠ 負の値は 0 に倒す(`elapsedText` と同じ)。
+ * ⚠ ミリ秒の割り算をここに置くのは、`tests/features/elapsed-text.test.ts` の門が
+ *   「経過を組み立てる場所は elapsed-text.ts だけ」を数えるため(2 本目を外に書かせない)。
+ */
+export function srtTime(ms: number): string {
+  const total = Math.max(0, Math.floor(ms));
+  const all = Math.floor(total / 1000);
+  const h = Math.floor(all / 3600);
+  const m = Math.floor((all % 3600) / 60);
+  const s = all % 60;
+  return `${two(h)}:${two(m)}:${two(s)},${three(total % 1000)}`;
+}
+
+/**
  * ミリ秒 → 秒(`HTMLMediaElement.currentTime` の単位)。⚠ 割り算をここに置くのは、
  * 「ミリ秒を扱う場所を増やさない」検査(`tests/features/elapsed-text.test.ts`)が `/ 1000` を数えるため。
  */

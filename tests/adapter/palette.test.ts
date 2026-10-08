@@ -9,7 +9,7 @@
  * 🔑 **`runGlobalCommand` は鍵とパレットの共通の 1 本**なので、ここが落ちる変異は
  *   近道も同時に殺す(CLAUDE.md §7 ── 判定を 2 か所に置かないための作り)。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -781,6 +781,100 @@ describe('操作を探す ── 最近使った操作(#274 Q3)', () => {
  * 🔴 **「メッセージを開く」が、操作を探す / `>` の一覧に出る**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
  * ⚠ 新しい画面は作らない ── 開くのは「システム → メッセージ」の押しボタンと同じ実体(`openMessagesNote`)。
  */
+/**
+ * 🔴 **「字幕ファイル(.srt)で書き出す」が、操作を探すから呼べる**(#1447)。
+ * ⚠ 押しボタンを持たない ── 読むのは画面に出ている本文(`openBody`)で、落とすのは `downloadBlob`。
+ * 🔑 観測点は **`URL.createObjectURL` に渡った Blob の中身と、`<a download>` の名前**(押した結果そのもの)。
+ */
+describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
+  const TRANSCRIPT = '## 文字起こし\n0:00 こんにちは\n0:15 晴れ\n';
+  const openPalette = async (root: HTMLElement, query: string): Promise<void> => {
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = query;
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  /** `downloadBlob` を観測する(本物の `<a download>` を通す ── 名前は click された `<a>` から読む)。 */
+  const watchDownload = (): { names: string[]; blobs: Blob[]; restore: () => void } => {
+    const names: string[] = [];
+    const blobs: Blob[] = [];
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      blobs.push(b as Blob);
+      return 'blob:test';
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download);
+    });
+    return { names, blobs, restore: () => { create.mockRestore(); revoke.mockRestore(); click.mockRestore(); } };
+  };
+
+  it('🔴 時刻つきの行があるノートを開いていれば押せて、SRT が <題名>-<日付>.srt で落ちる', async () => {
+    // ⚠ 知らせは `services.showStatus` へ出る(`openPaletteFor` の `notify`)── 共通の `setup` は渡さないので、ここで結ぶ
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const root = document.createElement('div');
+    document.body.append(root);
+    buildShell(root);
+    const d = new Dispatcher();
+    const said: string[] = [];
+    bindActions(root, d, { showStatus: (t) => said.push(t) });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: TRANSCRIPT });
+    const w = watchDownload();
+    try {
+      await openPalette(root, '字幕');
+      const row = rowOf('export-transcript-srt');
+      expect(row, '「字幕ファイル(.srt)で書き出す」が一覧に出ていない').toBeDefined();
+      expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+      row!.click();
+      await tick();
+      expect(w.names, '落ちていない').toHaveLength(1);
+      expect(w.names[0]).toMatch(/^めも-\d{4}-\d{2}-\d{2}\.srt$/);
+      expect(w.blobs[0]!.type).toBe('application/x-subrip');
+      expect(await w.blobs[0]!.text()).toBe('1\n00:00:00,000 --> 00:00:15,000\nこんにちは\n\n2\n00:00:15,000 --> 00:00:20,000\n晴れ\n');
+      // 🔑 推定であることを知らせで言う(黙って作らない)
+      expect(said.join('\n'), '知らせが無い').toContain('2 件');
+      expect(said.join('\n'), '推定だと言っていない').toContain('5 秒後');
+    } finally {
+      w.restore();
+    }
+  });
+
+  it('🔴 時刻つきの行が無いノートでは押せず、理由(note)が出る', async () => {
+    const { root, d } = setup();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '会議は 14:00 から\n' });
+    const w = watchDownload();
+    try {
+      await openPalette(root, '字幕');
+      const row = rowOf('export-transcript-srt');
+      expect(row, '行が出ていない').toBeDefined();
+      expect(row!.disabled, '時刻つきの行が無いのに押せることになっている').toBe(true);
+      expect(whyOf('export-transcript-srt')).toContain(NOT_READY_PREFIX);
+      expect(whyOf('export-transcript-srt')).toContain('時刻のある行が無い');
+      expect(w.names).toHaveLength(0);
+    } finally {
+      w.restore();
+    }
+  });
+
+  it('🔴 ノートを開いていなければ押せない / 編集中は理由(出口つき)を言う', async () => {
+    const { root, d } = setup();
+    await openPalette(root, '字幕');
+    expect(rowOf('export-transcript-srt')!.disabled, 'ノートを開いていないのに押せる').toBe(true);
+    dialog()?.close();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: TRANSCRIPT });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    await openPalette(root, '字幕');
+    expect(rowOf('export-transcript-srt')!.disabled, '編集中なのに押せる').toBe(true);
+    expect(whyOf('export-transcript-srt'), '出口(保存 / やめる)を言っていない').toContain('編集をやめる');
+  });
+});
+
 describe('メッセージを開く(#1017 C5)', () => {
   it('🔴 操作を探すの一覧に出て、押すとメッセージのノートが開く(既読にする)', async () => {
     const { root, sent } = setup();

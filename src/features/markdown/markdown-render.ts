@@ -76,7 +76,7 @@ import {
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate } from '../schedule/line-date';
-import { parseElapsed } from '../elapsed-text';
+import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 
 const md = new MarkdownIt({
@@ -2827,7 +2827,8 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
  * ⚠ 字は**そのまま**(`0:15`)。後ろの空白と字には触らない。リンクの中では当てない。
  * 🔑 `<span role="button" tabindex="0">` ── 鍵(Enter / Space)は binder の「`tabindex="0"` の押せる物」の道に乗る。
  */
-const SEEK_LINE_HEAD = /^((?:\d{1,2}:)?\d{1,2}:\d{2}) /;
+// 🔑 綴りは `ELAPSED_LINE_HEAD`(`elapsed-text.ts`)── 字幕ファイル(#1447)と同じ 1 本で「時刻つきの行」を読む
+const SEEK_LINE_HEAD = ELAPSED_LINE_HEAD;
 /**
  * 🔴 **時刻に載せると「0:15 から再生」と出る**(#1232 段 b、Gemini 裁定 Q4 = B)。
  * ⚠ 字の形は**ここ 1 か所**(`title` = マウスを載せたときの小さな案内、`aria-label` = 読み上げ。

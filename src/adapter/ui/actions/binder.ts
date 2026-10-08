@@ -164,6 +164,8 @@ import { knownSplitLids } from '@features/split-frames';
 import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
+import { safeName } from '@features/export/file-name';
+import { srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
 import {
   DATE_SHORTCUTS,
@@ -4331,6 +4333,48 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **字幕ファイル(.srt)で書き出す**(#1447)── 押しボタンを持たないので特例で直に落とす。
+   *
+   * 🔑 読むのは**画面に出ている本文**(`openBody`。disk と同じ ── 編集中は `blockedActionNote` が断る)
+   *   なので、読み直しも `services` も要らない。組むのは `srtFromTranscript` 1 本(pure)。
+   * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で**押せるふりをしない**):
+   *   ①編集中 / 保護中(理由は `blockedActionNote` の 1 か所)②ノートを開いていない
+   *   ③時刻つきの行が無い。⚠ ②③の字は `note`(`keymap.ts`)が一覧で出すので、ここは実行の断りだけ。
+   * ⚠ 終了時刻は**推定**(次の行の開始 / 最後は `LAST_CUE_MS`)── 知らせでそう言う(黙って作らない)。
+   */
+  if (cmd === 'export-transcript-srt') {
+    const st = dispatcher.getState();
+    const why = blockedActionNote(st.phase);
+    if (why !== null) {
+      if (dry) return false;
+      prevent();
+      notify(`いまは字幕ファイルを書き出せません: ${why}`, CAUTION);
+      return true;
+    }
+    const lid = st.selectedLid;
+    const open = st.openBody;
+    if (lid === null || open === null || open.lid !== lid) {
+      if (dry) return false;
+      prevent();
+      notify('字幕にするノートがありません(先にノートを開いてください)', CAUTION);
+      return true;
+    }
+    const srt = srtFromTranscript(open.body);
+    if (srt === null) {
+      if (dry) return false;
+      prevent();
+      notify('行頭に時刻のある行(文字起こし)が無いので、字幕ファイルにできません', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    const title = st.entryMetas.get(lid)?.title ?? lid;
+    downloadBlob(`${safeName(title)}-${dayStamp(new Date())}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
+    const n = transcriptCues(open.body).length;
+    notify(`字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりで、最後の行だけ 5 秒後と見なしています)`);
+    return true;
+  }
+  /**
    * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
    *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
    *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
@@ -4516,7 +4560,8 @@ export function commandRowsFor(
   const blockedReason = (id: string): string | null => {
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
-    if (id === 'open-messages') return blockedActionNote(dispatcher.getState().phase);
+    //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
+    if (id === 'open-messages' || id === 'export-transcript-srt') return blockedActionNote(dispatcher.getState().phase);
     const sel = SHORTCUT_BUTTON[id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
