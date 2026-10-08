@@ -815,6 +815,37 @@ describe('main.ts の配線(#274 段①)', () => {
  * 🔴 **左の `>` の一覧にも「メッセージを開く」が出る**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
  * ⚠ 開く実体は「システム → メッセージ」の押しボタンと同じ 1 本(開く + 既読の 2 手)。
  */
+/**
+ * 🔴 **左の `>` の一覧にも「マニュアルを別のウィンドウで開く」が出る**(#1452 案 1)。
+ * ⚠ 実体はヘルプの押しボタンと同じ `services.openManualWindow`(root に結んだ物を特例が引く)。
+ */
+describe('マニュアルを別のウィンドウで開く(`>` の一覧)', () => {
+  it('🔴 `>マニュアル` で出て、押すと実体が 1 回呼ばれ、「最近使った操作」へ積む', async () => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    appSearchHistory.clear();
+    appRecentCommands.clear();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const regions = buildShell(root);
+    const d = new Dispatcher();
+    const browse = new BrowseRouter(regions.sidebar, regions.browseHost);
+    d.onState((st) => browse.render(st, 'filer'));
+    d.onState(() => repaintCommandList(root, d, appKeymap));
+    let opened = 0;
+    bindActions(root, d, { openManualWindow: () => (opened += 1) });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    type(root, '>マニュアル');
+    const row = rowOf(root, 'open-manual-window');
+    expect(row, '「マニュアルを別のウィンドウで開く」が `>` の一覧に出ていない').toBeDefined();
+    expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+    row!.click();
+    await tick();
+    expect(opened, '押しても開かない').toBe(1);
+    expect(appRecentCommands.list(), '実行したのに「最近使った操作」へ積んでいない').toEqual(['open-manual-window']);
+  });
+});
+
 describe('メッセージを開く(`>` の一覧)', () => {
   it('🔴 `>メッセージ` で出て、押すとメッセージのノートが開き、既読にする(押しボタンと同じ 2 手)', async () => {
     const { root, sent } = setup();

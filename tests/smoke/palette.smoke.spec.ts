@@ -3,6 +3,40 @@ import { test, expect } from '@playwright/test';
 import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
 
 /**
+ * 🔴 **「操作を探す」から「マニュアルを別のウィンドウで開く」**(#1452 案 1)。
+ * ⚠ ヘルプの面は開くまで組まれないので、ボタンを撃つ形は「ヘルプを 1 度開いた後」しか押せない。
+ *   ここは**ヘルプを開かずに**、パレットの Enter(dialog が閉じた後の microtask)で `window.open` を撃つ。
+ *   transient activation の内側かどうかは、実ブラウザでしか分からない。
+ * 返すのは開いた窓(`manual.html` に着き、帯の題名が出るまで待つ)。
+ */
+async function openManualFromPalette(
+  page: import('@playwright/test').Page,
+  context: import('@playwright/test').BrowserContext,
+) {
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, 'マニュアルの窓を探すためにパレットが開かない').toBeVisible();
+  await page.locator('[data-pkc-field="palette-filter"]').fill('マニュアル');
+  const row = page.locator('[data-pkc-field="palette-row"][data-pkc-command="open-manual-window"]');
+  await expect(row, '「マニュアルを別のウィンドウで開く」が探せない').toBeVisible();
+  await expect(row, '押せないことになっている(編集中でも押せるはず)').toBeEnabled();
+  // ⚠ 行が先頭でなければ Enter が別の操作を撃つ ── 先頭であることまで見る
+  await expect(
+    page.locator('[data-pkc-field="palette-row"]').first(),
+    '「マニュアル」と打っても先頭が別の操作(Enter が別の物を撃つ)',
+  ).toHaveAttribute('data-pkc-command', 'open-manual-window');
+  const popup = context.waitForEvent('page');
+  await page.keyboard.press('Enter');
+  const win = await popup;
+  await win.waitForURL((u) => /\/manual\.html$/u.test(u.pathname));
+  await expect(win.locator('[data-pkc-region="manual-window-main"]')).toBeVisible();
+  await expect(win.locator('[data-pkc-field="manual-window-head"]')).toContainText('マニュアル — PKC3');
+  expect(await win.locator('[data-pkc-region="manual-window-toc"] a').count(), '目次が空').toBeGreaterThan(100);
+  await expect(dialog, 'Enter のあとパレットが閉じていない').toBeHidden();
+  return win;
+}
+
+/**
  * 🔴 **操作を名前で探す**(#425 段①)。
  *
  * 🔴 **unit では原理的に届かない層だけ**をここで見る:
@@ -15,7 +49,7 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } fr
  *    「プライベートウィンドウ」と同じ綴りである。少なくとも Chromium で
  *    **アプリが生きたまま**開けることを見る。
  */
-test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で走る (#425)', async ({ page }) => {
+test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で走る (#425)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -84,6 +118,19 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     page.locator('[data-pkc-region="detail"]'),
     '閉じた後に鍵が死んでいる(焦点が返っていない)',
   ).toBeVisible();
+
+  /**
+   * ⑦ 🔴 **ヘルプを 1 度も開かずに、「マニュアル」で探して Enter ── 別のウィンドウが開く**(#1452 案 1)。
+   * ⚠ 同じ起動の続き(この test は `help` の面を一度も開いていない = 「ヘルプのボタン」は
+   *   まだ組まれていない)。
+   */
+  expect(
+    await page.locator('[data-pkc-action="open-manual-window"]').count(),
+    '前提が崩れている(ヘルプを開いていないのにマニュアルのボタンが在る)',
+  ).toBe(0);
+  const manualWin = await openManualFromPalette(page, context);
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+  await manualWin.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -261,6 +308,7 @@ test('🔴 パレットの一覧を送っても、探す欄と「やめる」は
 
 test('🔴 選んでからパレットで記法を入れると、選んだ範囲に入る (#425 段②-b)', async ({
   page,
+  context,
 }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -330,6 +378,21 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
   // 🔑 カーソルは同じ升の「ご」の手前に残る(続けて打った字がそこへ入る)
   await page.keyboard.type('X');
   await expect(ta, 'カーソルが同じ升に残っていない').toHaveValue(/りんXご/);
+
+  /**
+   * 🔴 **編集中(打った字が下書きにある)でも、別のウィンドウが開き、元のタブは編集のまま**(#1452 案 1)。
+   * ⚠ マニュアルの窓は本文に触らない ── 打った字が残り、編集の欄がそのまま在ること。
+   */
+  const draft = await ta.inputValue();
+  expect(draft, '前提が崩れている(打った字が無い)').toMatch(/りんXご/);
+  const manualWin = await openManualFromPalette(page, context);
+  await expect(ta, '別のウィンドウを開いたら編集の欄が消えた').toBeVisible();
+  await expect(ta, '別のウィンドウを開いたら打った字が変わった').toHaveValue(draft);
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    '別のウィンドウを開いたら編集が終わった(読む形に戻った)',
+  ).toHaveCount(0);
+  await manualWin.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

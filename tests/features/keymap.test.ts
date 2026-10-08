@@ -201,7 +201,9 @@ describe('割当の検め', () => {
   // 🔴 #1017 C5(Gemini 裁定 B): メッセージを開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'open-messages',
   // 🔴 #1447: 字幕ファイル(.srt)で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'export-transcript-srt'];
+  'export-transcript-srt',
+  // 🔴 #1452 案 1: マニュアルを別のウィンドウで開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'open-manual-window'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

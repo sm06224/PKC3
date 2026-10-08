@@ -241,11 +241,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
   'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
-  'move-order-up', 'mute-announce', 'next-announce', 'open-manual-window',
+  'move-order-up', 'mute-announce', 'next-announce',
+  // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
   /**
    * ⚠ **2026-09-21(#1017 段③-2)で 1 件増やした** ── ヘルプの「お知らせを開く」。
-   *   🔑 押した所から**何も要らない**(`open-manual-window` と同じ仕分け ──
-   *   行き先は固定で、鍵も持たない)。
+   *   🔑 押した所から**何も要らない**(行き先は固定で、鍵も持たない。
+   *   ⚠ 2026-10-08 までは `open-manual-window` も同じ仕分けだったが、#1452 案 1 で登記簿に載った)。
    */
   'open-storage-check', 'open-system-notices', 'open-today',
   'paste-many-copied',
@@ -744,10 +745,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
       total: 388,
       receivers: 323,
-      registered: 105,
-      both: 40,
+      registered: 106,
+      both: 41,
       outsideActionsTable: 65,
-      unregistered: 283,
+      unregistered: 282,
     });
   });
 
@@ -793,7 +794,7 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
     // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 81,
+      key: 82,
       entry: 17,
       body: 3,
       collection: 2,

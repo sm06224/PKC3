@@ -4129,6 +4129,18 @@ export const ROW_HOST_REGIONS: readonly string[] = ['filer-table', 'dual-table']
 /** 上の 2 つを選択子にしたもの。 */
 export const ROW_HOST_SELECTOR = ROW_HOST_REGIONS.map((r) => `[data-pkc-region="${r}"]`).join(', ');
 
+/**
+ * 🔴 **root に結んだ services**(#1452 案 1)── `runGlobalCommand` は services を受け取らない
+ *   (鍵 / パレット / 左の `>` の一覧の 3 つの入口が同じ口を呼ぶ)ので、押しボタンを持たず
+ *   services が要る命令(マニュアルの別ウィンドウ)は、`bindActions` が結んだ物をここから引く。
+ * ⚠ `WeakMap` ── root が消えれば一緒に消える(test が root を何百も作っても溜まらない)。
+ *   `bindActions` の後始末でも外す。
+ */
+const ROOT_SERVICES = new WeakMap<HTMLElement, BinderServices>();
+
+/** 配線が落ちた版で「マニュアルを別のウィンドウで開く」を押したときの字(押しボタンと特例で同じ 1 つ)。 */
+const MANUAL_WINDOW_STALE = 'このタブの PKC3 が古いままのため、マニュアルのウィンドウを開けません。再読み込みしてください';
+
 export function runGlobalCommand(
   cmd: string,
   root: HTMLElement,
@@ -4377,6 +4389,27 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **マニュアルを別のウィンドウで開く**(#1452 案 1)── 押しボタンはヘルプの面の中にしか無く、
+   *   面は開くまで組まれない(`center.ts` は `help` の面のときだけ `render` する)ので、
+   *   `SHORTCUT_BUTTON` では「ヘルプを 1 度開いた後」しか押せない。実体は押しボタンと同じ
+   *   `services.openManualWindow`(`ROOT_SERVICES` から引く)── 口を 2 つ作らない。
+   * ⚠ phase で断らない ── 別のウィンドウは本文に触らないので、編集中こそ押したい(提案の核)。
+   * ⚠ 配線が無い版(古いタブ)では、押しボタンと同じ字で断る(`dry` では偽 = 一覧が理由を言う)。
+   */
+  if (cmd === 'open-manual-window') {
+    const open = ROOT_SERVICES.get(root)?.openManualWindow;
+    if (open === undefined) {
+      if (dry) return false;
+      prevent();
+      notify(MANUAL_WINDOW_STALE, CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    open();
+    return true;
+  }
+  /**
    * 🔴 **スタックの 3 手**(#633 段②)── 押しボタンを持たないので、`view-dual` と同じく
    *   ここで直に投げる。⚠ 断り文は**ここに書かない**ものと**ここで言うもの**を分ける:
    *   満杯・フォルダの断りは reducer が 1 か所で出す(`PIN_SPLIT_ENTRY`)。
@@ -4564,6 +4597,8 @@ export function commandRowsFor(
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
     if (id === 'open-messages' || id === 'export-transcript-srt') return blockedActionNote(dispatcher.getState().phase);
+    // 「マニュアルを別のウィンドウで開く」(#1452 案 1)── 押せないのは配線が無い版だけ(phase では断らない)
+    if (id === 'open-manual-window') return ROOT_SERVICES.get(root)?.openManualWindow === undefined ? MANUAL_WINDOW_STALE : null;
     const sel = SHORTCUT_BUTTON[id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
@@ -9981,10 +10016,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-manual-window': (dispatcher, _target, services) => {
     // ⚠ **無言で終えない** ── 配線が落ちた版でも、押した手応えは返す
     if (services.openManualWindow === undefined) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: 'このタブの PKC3 が古いままのため、マニュアルのウィンドウを開けません。再読み込みしてください',
-      });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: MANUAL_WINDOW_STALE });
       return;
     }
     services.openManualWindow();
@@ -11821,6 +11853,8 @@ export function bindActions(
    */
   openInEdit: OpenInEditStore = appOpenInEdit,
 ): () => void {
+  // 🔑 押しボタンを持たない命令が services を引く口(#1452 案 1。`runGlobalCommand` の特例)
+  ROOT_SERVICES.set(root, services);
   /**
    * 🔴 **画面へ 1 行出す口**(#522)。⚠ **エラーの欄ではない** ──
    * `main.ts` が優先順位(エラー > 一時の知らせ > 常設)を持っているので、
@@ -16199,6 +16233,8 @@ export function bindActions(
   const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
   const teardownLightbox = setupLightbox(root);
   return () => {
+    // ⚠ 自分が結んだ物だけ外す ── 同じ root に 2 度結んだとき、1 回目の後始末が 2 回目の登録を消さない
+    if (ROOT_SERVICES.get(root) === services) ROOT_SERVICES.delete(root);
     /**
      * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
      * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。
