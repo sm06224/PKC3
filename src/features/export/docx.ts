@@ -521,8 +521,8 @@ export function buildDocx(
     //    「リンク先が壊れている」/ 画像が出ない。id の前置き(`rIdM` / `rIdL`)で分ける
     ...[...rels].map(([target, id]) =>
       id.startsWith('rIdM')
-        ? `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${xmlEscape(target)}"/>`
-        : `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(target)}" TargetMode="External"/>`,
+        ? `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${xmlEscape(xmlSafe(target))}"/>`
+        : `<Relationship Id="${xmlEscape(id)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(xmlSafe(target))}" TargetMode="External"/>`,
     ),
   ].join('');
   const documentRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

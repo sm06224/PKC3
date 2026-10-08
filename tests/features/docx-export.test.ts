@@ -10,6 +10,7 @@
  * ⚠ HTML → 塊の畳み込み(adapter)も同じ file で通す ── 2 つを別々に見ると、
  * 「塊は正しいのに XML が空」「XML は正しいのに塊が落ちている」を見分けられない。
  */
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { buildDocx, DOCX_LIST_DEPTH_MAX, type DocxBlock } from '@features/export/docx';
 import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
@@ -768,5 +769,101 @@ describe('数式(#707)', () => {
     const html = katexish('E = mc^2', false);
     expect(html, '前提が崩れている: MathML が無い').toContain('katex-mathml');
     expect(html, '前提が崩れている: 見た目の span が無い').toContain('katex-html');
+  });
+});
+
+describe('🔴 制御文字を、書き出しの全部品から落とす(#1430。pptx の #1366 と同じ型)', () => {
+  // ⚠ fixture の制御文字は escape で書く(生バイトを埋めない)。
+  /**
+   * 🔴 **XML 1.0 の Char に入らない字を、出力から直に探す。** happy-dom の `DOMParser` は制御文字を
+   * 咎めない(pptx-export.test.ts に実測)ので、parse の成否では検出できない。実装の `xmlSafe` とは
+   * 別の綴り(許す範囲を符号位置の比較で書く)で見る。
+   */
+  const hasIllegal = (s: string): boolean => {
+    for (const ch of s) {
+      const c = ch.codePointAt(0)!;
+      const ok = c === 0x9 || c === 0xa || c === 0xd
+        || (c >= 0x20 && c <= 0xd7ff) || (c >= 0xe000 && c <= 0xfffd) || (c >= 0x10000 && c <= 0x10ffff);
+      if (!ok) return true;
+    }
+    return false;
+  };
+  const illegalIn = (r: ReturnType<typeof buildDocx>): string[] =>
+    r.parts.filter((x) => hasIllegal(x.text)).map((x) => x.name);
+
+  it('🔴 リンク先(word/_rels/document.xml.rels の Target)の制御文字が落ちる ── 1 字で Word が file ごと開けなくなる所', () => {
+    const r = buildDocx([{ kind: 'p', runs: [{ text: 'link', href: 'http://x/\u0001a' }] }], 't', ISO);
+    const rels = part(r, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="http://x/a" TargetMode="External"');
+    expect(rels.includes('\u0001')).toBe(false);
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('防御: 塊の href に制御文字が来ても落ちる(HTML → 塊 → docx の経路。⚠ いまの製品では届かない ── 下の test)', () => {
+    // ⚠ `htmlToDocxBlocks` は `getAttribute('href')` をそのまま運ぶので、ここに制御文字が来れば rels まで届く。
+    //    ただし製品の HTML は markdown-it(`html: false`)が作るので、raw の <a> は字として escape される(下で pin)
+    const { blocks } = blocksOf('<p><a href="http://x/\u0001a">l</a></p>');
+    const run = blocks.flatMap((bl) => (bl.kind === 'p' ? bl.runs : [])).find((x) => x.href !== undefined);
+    expect(run?.href, '塊の href に制御文字が届いていない(この test の前提が崩れた ── 経路が変わった)').toBe('http://x/\u0001a');
+    const r = buildDocx(blocks, 't', ISO);
+    expect(part(r, 'word/_rels/document.xml.rels')).toContain('Target="http://x/a"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('到達性の記録: markdown から来る link は制御文字が %01 に符号化され、raw HTML は字になる ── 届かない(html: true や素通りの経路ができた日に落ちる)', () => {
+    const md = '[l](<http://x/\u0001a>)\n\n<a href="http://x/\u0001b">raw</a>\n';
+    const doc = new DOMParser().parseFromString(`<body>${renderMarkdown(md)}</body>`, 'text/html');
+    const hrefs = [...doc.querySelectorAll('a')].map((el) => el.getAttribute('href'));
+    // ⚠ raw の <a> は字として escape され、その字の中の URL を linkify が拾う ── 制御文字の手前で切れる(`http://x/`)
+    expect(hrefs, 'markdown の link が %01 に符号化されていない / raw HTML の href が link になった').toEqual(['http://x/%01a', 'http://x/']);
+    const { blocks } = htmlToDocxBlocks(doc);
+    const r = buildDocx(blocks, 't', ISO);
+    const rels = part(r, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="http://x/%01a"');
+    expect(rels).toContain('Target="http://x/"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('🔴 リンク先の & と " は escape される(rels を壊さない ── ?a=1&b=2 は markdown でいちばん普通の URL)', () => {
+    const r = buildDocx([{ kind: 'p', runs: [{ text: 'l', href: 'http://x/?a=1&b="2"' }] }], 't', ISO);
+    const rels = part(r, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="http://x/?a=1&amp;b=&quot;2&quot;"');
+    expect(rels).not.toContain('b="2"');
+  });
+
+  it('画像の代替文(alt / o:title)と文書の題名(dc:title)の制御文字も落ちる(本文とは別の経路)', () => {
+    const r = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 50, alt: 'alt\u0001x' }],
+      '題\u0001名', ISO,
+    );
+    const doc = part(r, 'word/document.xml');
+    expect(doc).toContain('alt="altx"');
+    expect(doc).toContain('o:title="altx"');
+    expect(part(r, 'docProps/core.xml')).toContain('<dc:title>題名</dc:title>');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('残る側の対照群: tab / 絵文字 / 全角 / & < は残り、本文の制御文字は落ちる(既存の xmlSafe の経路)', () => {
+    const r = buildDocx([{ kind: 'p', runs: [{ text: 'a\tb😀全角&<\u0007z' }] }], 't', ISO);
+    const doc = part(r, 'word/document.xml');
+    expect(doc).toContain('a\tb😀全角&amp;&lt;z');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('対照群: 検出器自身が、制御文字・孤立した代用対・U+FFFE を見つける(空振り防止)', () => {
+    for (const bad of ['a\u0001', 'a\uD800b', 'a\uDC00b', 'a\uFFFEb', 'a\uFFFFb']) {
+      expect(hasIllegal(bad), JSON.stringify(bad)).toBe(true);
+    }
+    expect(hasIllegal('a\tb\nc\r😀全角&<')).toBe(false);
+  });
+
+  // xmllint が在る箱でだけ、本物の parser でも見る(無い箱では skip ── 上の走査が本体)。
+  const hasXmllint = spawnSync('xmllint', ['--version'], { stdio: 'pipe' }).status !== null;
+  it.skipIf(!hasXmllint)('xmllint が、document.xml と rels を well-formed と読む', () => {
+    const r = buildDocx([{ kind: 'p', runs: [{ text: 'x\u0001y', href: 'http://x/\u0001a' }] }], 't\u0001', ISO);
+    for (const name of ['word/document.xml', 'word/_rels/document.xml.rels', 'docProps/core.xml']) {
+      const out = spawnSync('xmllint', ['--noout', '-'], { input: part(r, name), encoding: 'utf8', stdio: 'pipe' });
+      expect(out.status, `${name}: ${out.stderr}`).toBe(0);
+    }
   });
 });
