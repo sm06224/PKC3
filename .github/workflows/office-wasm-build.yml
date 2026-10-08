@@ -954,8 +954,8 @@ jobs:
       #       `libc++-mt` / `libc++abi-mt` / `libcompiler_rt-mt` には入っていないので消さない)に入っており、
       #       emscripten は `cache/sysroot/lib/wasm32-emscripten/` に**出来上がった .a があれば作り直さない**。
       #       消せば**最終 link(下の make)が file の無い物を build する**(emscripten の cache の作法)。
-      #    ⚠ 初回は assert ではなく診断: 消した物と、patch 後に残った物を `ls -l` で出すだけ。
-      #       make の後で「作り直された」かを診断する(落とさない)。
+      #    🔑 この step は消した物と残った物を `ls -l` で出すだけ。make の後の step
+      #       「libc が patch の後に作り直されたことを確かめる」が、作り直されたかを主張する(落とす)。
       - name: emsdk の proxying.c の順序を直す(#1408)
         run: |
           set -euxo pipefail
@@ -991,18 +991,64 @@ jobs:
         if: always()
         run: ccache -s
 
-      # 📏 **libc の `-mt` archive が patch の後に作り直されたか**(#1408。診断で、落とさない)。
+      # 📏 **libc の `-mt` archive が patch の後に作り直されたことを主張する**(#1408)。
       #    patch(`~/.pkc3-proxying-patched` の mtime)より新しければ、直した `proxying.c` で作り直された。
-      # 🔑 一度『作り直された:』が出るのを見たら、この診断を assert(`exit 1`)へ昇格させる(2026-10-07)。
-      #    CLAUDE.md §1「未確認は assert ではなく診断で出す。通ったのを見てから昇格」。
-      - name: libc の作り直しを診断(#1408)
+      # 🔴 3 つ全部が真でなければ赤: ① stamp が在る(patch step が走った)② 当てた `proxying.c` に印
+      #    (`PKC3-PROXYFINISH`)が 1 行以上在る ③ `libc-mt*.a` / `libc_optz-mt*.a` に **patch より古い物が無く**、
+      #    **新しい物が 1 つ以上**在る。
+      #    ⚠ どの変種(`libc-mt.a` / `libc-mt-debug.a` / `libc_optz-mt.a` …)が link に使われるかは焼くまで分からないので、
+      #       名指しせず「古い物が 1 つも残らない + 作り直された物が在る」で見る(古い物が残れば、直す前の libc が link されうる)。
+      #    🔑 2 回の焼き(run 37695070751 / 37703782078)で step は走り、固まり(startup hang 形 A)は 0/150 になっていたので、
+      #       診断から昇格した(2026-10-08。CLAUDE.md §1「通ったのを見てから昇格」)。印字は落ちたときに読むために残す。
+      - name: libc が patch の後に作り直されたことを確かめる(#1408)
         if: ${{ !cancelled() }}
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+          stamp=~/.pkc3-proxying-patched
+          src=~/emsdk/upstream/emscripten/system/lib/pthread/proxying.c
           libdir=~/emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten
-          test -f ~/.pkc3-proxying-patched || echo "stamp 無し(patch step が走っていない)"
-          ls -l --time-style=full-iso ~/.pkc3-proxying-patched "$libdir"/libc-mt*.a "$libdir"/libc_optz-mt*.a || echo '(libc-mt*.a / libc_optz-mt*.a が無い)'
-          find "$libdir" -maxdepth 1 \( -name 'libc-mt*.a' -o -name 'libc_optz-mt*.a' \) -newer ~/.pkc3-proxying-patched -print | sed 's/^/作り直された: /'
-          find "$libdir" -maxdepth 1 \( -name 'libc-mt*.a' -o -name 'libc_optz-mt*.a' \) ! -newer ~/.pkc3-proxying-patched -print | sed 's/^/⚠ patch より古い: /'
+          bad=0
+          if [ -f "$stamp" ]; then
+            ls -l --time-style=full-iso "$stamp"
+          else
+            echo "::error::stamp が無い(emsdk の proxying.c を直す step が走っていない)"
+            bad=1
+          fi
+          marks=0
+          if [ -f "$src" ]; then
+            marks=$(grep -c 'PKC3-PROXYFINISH' "$src" || true)
+          fi
+          echo "proxying.c の印(PKC3-PROXYFINISH)の行数: $marks"
+          if [ "$marks" -lt 1 ]; then
+            echo "::error::$src に印(PKC3-PROXYFINISH)が 1 行も無い(patch が当たっていない)"
+            bad=1
+          fi
+          mt=("$libdir"/libc-mt*.a)
+          optz=("$libdir"/libc_optz-mt*.a)
+          echo "libc-mt*.a: ${#mt[@]} 件 / libc_optz-mt*.a: ${#optz[@]} 件"
+          fresh=0
+          stale=0
+          for f in "${mt[@]}" "${optz[@]}"; do
+            ls -l --time-style=full-iso "$f"
+            if [ -f "$stamp" ] && [ "$f" -nt "$stamp" ]; then
+              echo "作り直された: $f"
+              fresh=$((fresh + 1))
+            else
+              echo "⚠ patch より古い: $f"
+              stale=$((stale + 1))
+            fi
+          done
+          echo "作り直された $fresh 件 / patch より古い $stale 件"
+          if [ "$stale" -gt 0 ]; then
+            echo "::error::patch より古い libc が $stale 件残っている(直す前の proxying.c で作られた物が link されうる)"
+            bad=1
+          fi
+          if [ "$fresh" -lt 1 ]; then
+            echo "::error::patch の後に作り直された libc が 1 つも無い(最終 link が libc を作り直していない)"
+            bad=1
+          fi
+          exit "$bad"
 
       # ⚠ **生成物が在ることを step として主張する** ── 無ければここで赤にする
       #    (artifact の `if-no-files-found: warn` は黙って通してしまう)

@@ -18,7 +18,7 @@
  * step を取りこぼしたら、その瞬間に数が合わなくなる。
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -723,6 +723,171 @@ describe('office-wasm のパッチ', () => {
     expect(existsSync('build/office-wasm/emsdk-patch-proxying.py')).toBe(true);
     expect('emsdk-patch-proxying.py'.startsWith('patch-'), 'LO の glob に当たる').toBe(false);
     expect(/^qtbase-patch-.*\.py$/.test('emsdk-patch-proxying.py'), 'qtbase の glob に当たる').toBe(false);
+  });
+
+  /**
+   * 🔴 **libc が patch の後に作り直されたことを、step が主張する**(#1408。診断から昇格、2026-10-08)。
+   * ⚠ 診断のままだと、古い libc が残っても job が緑のまま ── 直したつもりで直っていない焼きを配れる。
+   * 🔑 2 段で見る:
+   *   (1) **実行する行**の pin(`#` で始まる注釈は落とす ── 注釈に同じ字が在っても満たされない、§1 の 5 度目)。
+   *       名前・位置(make の後)・`if: ${{ !cancelled() }}`・4 つの `bad=1`・古い物の判定・stamp の検査・印の検査。
+   *       当てた file の path は **emsdk-patch-proxying.py の `SRC` から引く**(手で綴りを書かない)。
+   *   (2) **`run:` を本物の bash で走らせる** ── 字面の pin は 1 度も到達しない枝でも緑になる(§2)。
+   *       偽の HOME に stamp / proxying.c / libc を作り、両方向(通る / 落ちる)を揃える。
+   */
+  describe('🔴 libc が patch の後に作り直されたことを確かめる step(#1408)', () => {
+    const STEP_NAME = 'libc が patch の後に作り直されたことを確かめる(#1408)';
+    const lines = readFileSync(YML, 'utf-8').split('\n');
+    const nameAt = lines.findIndex((l) => l === `      - name: ${STEP_NAME}`);
+    const nextAt = lines.findIndex((l, i) => i > nameAt && /^ {6}- name:/.test(l));
+    const body = nameAt < 0 ? [] : lines.slice(nameAt, nextAt < 0 ? lines.length : nextAt);
+    const runAt = body.findIndex((l) => /^ {8}run: \|\s*$/.test(l));
+    // run の本文(10 字の字下げを落とす)
+    const script = runAt < 0 ? '' : body.slice(runAt + 1).map((l) => l.replace(/^ {10}/, '')).join('\n');
+    const code = script.split('\n');
+
+    it('空振り防止: step が 1 つだけ在り、run の本文が取れている', () => {
+      expect(lines.filter((l) => l.includes(`name: ${STEP_NAME}`)).length, 'step が 1 つでない').toBe(1);
+      expect(runAt, 'run: | が見つからない').toBeGreaterThan(0);
+      expect(code.length, 'run の本文が短すぎる').toBeGreaterThan(30);
+      // 診断の名前が戻っていない
+      expect(lines.some((l) => /^\s*- name: libc の作り直しを診断/.test(l)), '診断の名前が残っている').toBe(false);
+    });
+
+    it('make の後・「生成物が在ることを確かめる」の前に在り、前が落ちても走る', () => {
+      const at = (re: RegExp): number => {
+        const hits = lines.map((l, i) => ({ l, i })).filter(({ l }) => re.test(l));
+        expect(hits.length, `${re}: ${hits.length} 件(1 件でない)`).toBe(1);
+        return hits[0]!.i;
+      };
+      const makeAt = at(/^\s*- name: make\s*$/);
+      const outAt = at(/^\s*- name: 生成物が在ることを確かめる\s*$/);
+      expect(nameAt, 'make より後').toBeGreaterThan(makeAt);
+      expect(nameAt, '生成物の検査より前').toBeLessThan(outAt);
+      expect(body.filter((l) => /^\s*if:/.test(l)), 'if: が !cancelled() ただ 1 つ').toEqual([
+        '        if: ${{ !cancelled() }}',
+      ]);
+    });
+
+    it('実行する行が、stamp・印・古い物・新しい物の 4 つの門を持ち、赤で終わる', () => {
+      const exec = code.filter((l) => !/^\s*#/.test(l));
+      const has = (re: RegExp, what: string): void => {
+        expect(exec.filter((l) => re.test(l)).length, `${what}: 実行する行に 1 件でない`).toBe(1);
+      };
+      has(/^set -euo pipefail$/, 'pipefail');
+      has(/^shopt -s nullglob$/, 'nullglob');
+      has(/^stamp=~\/\.pkc3-proxying-patched$/, 'stamp の path(patch step の touch と同じ)');
+      // 🔑 当てた file は書き手(script)の `SRC` から引く
+      const py = readFileSync('build/office-wasm/emsdk-patch-proxying.py', 'utf-8');
+      const srcRel = /^SRC = "([^"]+)"$/m.exec(py)?.[1];
+      expect(srcRel, 'emsdk-patch-proxying.py の SRC が読めない').toBeDefined();
+      has(new RegExp(`^src=~/emsdk/upstream/emscripten/${srcRel!.replace(/[.+^${}()|[\]\\/]/g, '\\$&')}$`), '印を数える file');
+      has(/^libdir=~\/emsdk\/upstream\/emscripten\/cache\/sysroot\/lib\/wasm32-emscripten$/, 'libdir');
+      has(/^ {2}marks=\$\(grep -c 'PKC3-PROXYFINISH' "\$src" \|\| true\)$/, '印の行数');
+      has(/^if \[ "\$marks" -lt 1 \]; then$/, '印が 1 行も無いと赤');
+      has(/^if \[ -f "\$stamp" \]; then$/, 'stamp の存在(無ければ赤の枝)');
+      // glob は 2 つに分ける(片方だけ無いのを「両方無い」と言わない)
+      has(/^mt=\("\$libdir"\/libc-mt\*\.a\)$/, 'libc-mt の配列');
+      has(/^optz=\("\$libdir"\/libc_optz-mt\*\.a\)$/, 'libc_optz-mt の配列');
+      has(/^ {2}if \[ -f "\$stamp" \] && \[ "\$f" -nt "\$stamp" \]; then$/, '新しい物の判定(-nt)');
+      has(/^if \[ "\$stale" -gt 0 \]; then$/, '古い物が 1 つでも在ると赤');
+      has(/^if \[ "\$fresh" -lt 1 \]; then$/, '新しい物が 1 つも無いと赤');
+      has(/^exit "\$bad"$/, '赤で終わる');
+      expect(exec.filter((l) => /^\s*bad=1$/.test(l)).length, 'bad=1 が 4 つ(stamp / 印 / 古い / 新しい無し)').toBe(4);
+      expect(exec.some((l) => /\|\| echo/.test(l)), '「無い」を握りつぶす || echo が戻っている').toBe(false);
+      expect(exec.some((l) => /libc-mt\*\.a "\$libdir"\/libc_optz/.test(l)), '2 つの glob を 1 つの ls に渡す形が戻っている').toBe(false);
+    });
+
+    describe('run を bash で実際に走らせる(偽の HOME)', () => {
+      const LIBDIR_REL = 'emsdk/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten';
+      const T0 = 1_700_000_000; // stamp の時刻(秒)
+      interface Fx {
+        stamp?: boolean;
+        marker?: boolean;
+        libs?: Record<string, number>; // 名前 → T0 からの差(秒)
+      }
+      const exec = (fx: Fx): { status: number | null; out: string } => {
+        const home = mkdtempSync(join(tmpdir(), 'pkc3-libc-'));
+        try {
+          // 🔑 proxying.c の置き場は書き手(script)の `SRC` と同じ
+          const py = readFileSync('build/office-wasm/emsdk-patch-proxying.py', 'utf-8');
+          const srcRel = /^SRC = "([^"]+)"$/m.exec(py)![1]!;
+          const srcFile = join(home, 'emsdk/upstream/emscripten', srcRel);
+          const libDir = join(home, LIBDIR_REL);
+          mkdirSync(join(srcFile, '..'), { recursive: true });
+          mkdirSync(libDir, { recursive: true });
+          writeFileSync(srcFile, fx.marker === false ? '// 印なし\n' : 'x(); // PKC3-PROXYFINISH\n');
+          if (fx.stamp !== false) {
+            writeFileSync(join(home, '.pkc3-proxying-patched'), '');
+            utimesSync(join(home, '.pkc3-proxying-patched'), T0, T0);
+          }
+          for (const [name, d] of Object.entries(fx.libs ?? {})) {
+            writeFileSync(join(libDir, name), '');
+            utimesSync(join(libDir, name), T0 + d, T0 + d);
+          }
+          writeFileSync(join(home, 'step.sh'), script);
+          const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', join(home, 'step.sh')], {
+            env: { ...process.env, HOME: home },
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          return { status: r.status, out: `${r.stdout}${r.stderr}` };
+        } finally {
+          rmSync(home, { recursive: true, force: true });
+        }
+      };
+
+      it('対照群: 新しい libc-mt だけ在る → 通る(= 通る形が在る)。無い側だけを言う', () => {
+        const r = exec({ libs: { 'libc-mt.a': 100 } });
+        expect(r.status, r.out).toBe(0);
+        expect(r.out).toContain('作り直された:');
+        expect(r.out).toContain('libc_optz-mt*.a: 0 件');
+        expect(r.out).not.toContain('⚠ patch より古い');
+      });
+
+      it('新しい libc_optz-mt だけ在る(libc-mt は無い)→ 通る。無い側だけを言う', () => {
+        const r = exec({ libs: { 'libc_optz-mt.a': 100 } });
+        expect(r.status, r.out).toBe(0);
+        expect(r.out).toContain('libc-mt*.a: 0 件');
+      });
+
+      it('変種が複数でも、全部新しければ通る', () => {
+        const r = exec({ libs: { 'libc-mt.a': 5, 'libc-mt-debug.a': 5, 'libc_optz-mt.a': 5 } });
+        expect(r.status, r.out).toBe(0);
+      });
+
+      it('🔴 新しい libc-mt が在っても、古い libc_optz-mt が 1 つ残れば赤', () => {
+        const r = exec({ libs: { 'libc-mt.a': 100, 'libc_optz-mt.a': -100 } });
+        expect(r.status, r.out).not.toBe(0);
+        expect(r.out).toContain('⚠ patch より古い');
+        expect(r.out).toContain('古い libc が 1 件残っている');
+      });
+
+      it('🔴 古い物だけ(新しい物が 1 つも無い)→ 赤。stamp と同時刻も「古い」側', () => {
+        const r = exec({ libs: { 'libc-mt.a': -100 } });
+        expect(r.status, r.out).not.toBe(0);
+        const same = exec({ libs: { 'libc-mt.a': 0 } });
+        expect(same.status, same.out).not.toBe(0);
+      });
+
+      it('🔴 libc が 1 つも無い → 赤(最終 link が作り直していない)', () => {
+        const r = exec({ libs: {} });
+        expect(r.status, r.out).not.toBe(0);
+        expect(r.out).toContain('作り直された libc が 1 つも無い');
+      });
+
+      it('🔴 stamp が無い → 赤(libc が新しく見えても)', () => {
+        const r = exec({ stamp: false, libs: { 'libc-mt.a': 100 } });
+        expect(r.status, r.out).not.toBe(0);
+        expect(r.out).toContain('stamp が無い');
+      });
+
+      it('🔴 proxying.c に印が無い → 赤(patch が当たっていない)', () => {
+        const r = exec({ marker: false, libs: { 'libc-mt.a': 100 } });
+        expect(r.status, r.out).not.toBe(0);
+        expect(r.out).toContain('印(PKC3-PROXYFINISH)が 1 行も無い');
+      });
+    });
   });
 
   /**

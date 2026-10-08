@@ -283,7 +283,7 @@ describe('#1393 の直し(layout-guard)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/24 → 25\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-layout-guard.py');
-    // 3 本(layout-guard / hscroll-hdl / viewdata-gone)と tooltip-guard / grip-guard の 2 本を足して 24 → 29、timer-mutex で 30、yield-wait(#1408 の印)で 31
+    // 3 本(layout-guard / hscroll-hdl / viewdata-gone)と tooltip-guard / grip-guard の 2 本を足して 24 → 29、timer-mutex で 30、yield-wait(#1408 の印)で 31(以後の増分は workflow の実行行が正本)
     expect(yml).toContain('test "$n" -eq 35');
   });
 });
