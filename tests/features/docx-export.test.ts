@@ -799,12 +799,47 @@ describe('🔴 制御文字を、書き出しの全部品から落とす(#1430�
     expect(illegalIn(r)).toEqual([]);
   });
 
-  it('到達性: 画面の HTML の <a href> に制御文字が在れば、塊の href までそのまま届く(markdown の link は %01 に符号化されるが、raw HTML は素通り)', () => {
+  it('防御: 塊の href に制御文字が来ても落ちる(HTML → 塊 → docx の経路。⚠ いまの製品では届かない ── 下の test)', () => {
+    // ⚠ `htmlToDocxBlocks` は `getAttribute('href')` をそのまま運ぶので、ここに制御文字が来れば rels まで届く。
+    //    ただし製品の HTML は markdown-it(`html: false`)が作るので、raw の <a> は字として escape される(下で pin)
     const { blocks } = blocksOf('<p><a href="http://x/\u0001a">l</a></p>');
     const run = blocks.flatMap((bl) => (bl.kind === 'p' ? bl.runs : [])).find((x) => x.href !== undefined);
     expect(run?.href, '塊の href に制御文字が届いていない(この test の前提が崩れた ── 経路が変わった)').toBe('http://x/\u0001a');
     const r = buildDocx(blocks, 't', ISO);
     expect(part(r, 'word/_rels/document.xml.rels')).toContain('Target="http://x/a"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('到達性の記録: markdown から来る link は制御文字が %01 に符号化され、raw HTML は字になる ── 届かない(html: true や素通りの経路ができた日に落ちる)', () => {
+    const md = '[l](<http://x/\u0001a>)\n\n<a href="http://x/\u0001b">raw</a>\n';
+    const doc = new DOMParser().parseFromString(`<body>${renderMarkdown(md)}</body>`, 'text/html');
+    const hrefs = [...doc.querySelectorAll('a')].map((el) => el.getAttribute('href'));
+    // ⚠ raw の <a> は字として escape され、その字の中の URL を linkify が拾う ── 制御文字の手前で切れる(`http://x/`)
+    expect(hrefs, 'markdown の link が %01 に符号化されていない / raw HTML の href が link になった').toEqual(['http://x/%01a', 'http://x/']);
+    const { blocks } = htmlToDocxBlocks(doc);
+    const r = buildDocx(blocks, 't', ISO);
+    const rels = part(r, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="http://x/%01a"');
+    expect(rels).toContain('Target="http://x/"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('🔴 リンク先の & と " は escape される(rels を壊さない ── ?a=1&b=2 は markdown でいちばん普通の URL)', () => {
+    const r = buildDocx([{ kind: 'p', runs: [{ text: 'l', href: 'http://x/?a=1&b="2"' }] }], 't', ISO);
+    const rels = part(r, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="http://x/?a=1&amp;b=&quot;2&quot;"');
+    expect(rels).not.toContain('b="2"');
+  });
+
+  it('画像の代替文(alt / o:title)と文書の題名(dc:title)の制御文字も落ちる(本文とは別の経路)', () => {
+    const r = buildDocx(
+      [{ kind: 'image', media: 'media/image1.png', widthPx: 100, heightPx: 50, alt: 'alt\u0001x' }],
+      '題\u0001名', ISO,
+    );
+    const doc = part(r, 'word/document.xml');
+    expect(doc).toContain('alt="altx"');
+    expect(doc).toContain('o:title="altx"');
+    expect(part(r, 'docProps/core.xml')).toContain('<dc:title>題名</dc:title>');
     expect(illegalIn(r)).toEqual([]);
   });
 
