@@ -72,6 +72,27 @@ describe('位置を採る', () => {
     expect(get(2, 1)).toBe('f');
   });
 
+  it('🔴 引用の中の CRLF は 1 つの改行として数える(#1418 レビュー)', () => {
+    // ⚠ `\r\n` を 2 つの改行と数えると、後ろの行がすべて 1 つずれて
+    //    **別の行を書き換える**。期待値は手書きの literal(実装を参照しない)
+    const src = '"a\r\nb",c\r\nd,e\r\n';
+    const out: CsvPositions = { rowLines: [], cellSpans: [] };
+    expect(parseCsv(src, ',', out)).toEqual([
+      ['a\nb', 'c'],
+      ['d', 'e'],
+    ]);
+    expect(out.rowLines).toEqual([
+      { start: 0, end: 1 },
+      { start: 2, end: 2 },
+    ]);
+    expect(out.cellSpans![0]).toEqual([
+      { start: 0, end: 6 },
+      { start: 7, end: 8 },
+    ]);
+    // 🔑 範囲は原文の字を指す(引用符・CRLF を含む外側)
+    expect(src.slice(0, 6)).toBe('"a\r\nb"');
+  });
+
   it('逃げの規則', () => {
     expect(csvEscapeField('あ', ',')).toBe('あ');
     expect(csvEscapeField('a,b', ',')).toBe('"a,b"');
@@ -150,6 +171,21 @@ describe('セルを 1 つ書き換える(#418 段①)', () => {
     // ⚠ `"b"` は要らない引用だが、**user が書いた字**である ── 組み直すと消える
     const body = '```csv\na,"b",c\n```';
     expect(cell(body, 1, 2, 'z')).toBe('```csv\na,"b",z\n```');
+  });
+
+  it('🔴 CRLF の本文でも指定の 1 セルだけが変わる(#1418 レビュー)', () => {
+    // ⚠ 製品の書き戻しは 1 行ずつ `cellsOf` を通る(`splitLines` が `\r` を落とし、
+    //    `eol` で再結合する)。`parseCsv` が CRLF の位置を直しても、この経路は
+    //    別の道なので、**本文の byte が 1 つも動かない**ことを本文ごと見る。
+    // 🔑 変異の記録:`parseCsv` の先頭で `\r\n?` → `\n` に正規化する旧い形へ戻しても
+    //    この it は**落ちない**(位置の 2 本が落ちる)= 製品の書き戻しは main でも
+    //    正しかった。この it が守るのは `eol` の再結合(`join('\n')` に固定すると落ちる)
+    const crlf = '```csv\r\na,b\r\nc,d\r\n```\r\n';
+    expect(cell(crlf, 2, 1, 'X')).toBe('```csv\r\na,b\r\nc,X\r\n```\r\n');
+    expect(cell(crlf, 1, 0, 'Y')).toBe('```csv\r\nY,b\r\nc,d\r\n```\r\n');
+    // 対照群 ── 同じ本文の LF 版は、同じ位置が同じように変わる
+    const lf = '```csv\na,b\nc,d\n```\n';
+    expect(cell(lf, 2, 1, 'X')).toBe('```csv\na,b\nc,X\n```\n');
   });
 
   it('🔴 双方向 ── 空の字を渡すとセルが空になる', () => {
