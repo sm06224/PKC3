@@ -250,7 +250,7 @@ export function xmlEscape(s: string): string {
  * 「読み取れないコンテンツ」と言って**ファイルごと**開かない ── 1 文字で全損になる。
  * 許すのは XML 1.0 の範囲(tab / LF / CR と U+0020 以降)。
  */
-function xmlSafe(s: string): string {
+export function xmlSafe(s: string): string {
   let out = '';
   for (const ch of s) {
     const c = ch.codePointAt(0) ?? 0;
