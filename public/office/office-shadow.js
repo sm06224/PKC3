@@ -546,8 +546,11 @@
    * @param d `now()` / `quiet`(`createQuiet`)/ `isDead()` / `isModified()`(Promise。`true` / `false` / `null` = 聞けなかった)/
    *   `write()`(同期。`storeShadowSync`)/ `shelve(info)`(Promise)/ `discard()` / `onWritten(at)` / `onFailed(reason)` /
    *   `log(e)`(任意)/ `pollMs`(任意。`MODIFIED_POLL_MS` ── 聞く間隔。省けば聞かない = 打鍵の契機だけ)/
-   *   `unshelve()`(任意。Promise ── `afterSaved` が棚を消す)
-   * @returns `'dead' | 'busy' | 'wait' | 'clean' | 'skipped' | 'written' | 'failed'`(test の観測点)
+   *   `unshelve()`(任意。Promise ── `afterSaved` が棚を消す)/
+   *   `isLoading()`(任意。真の間は Office 本体へ**何も聞かない**。#1429 ── 文書を読み込んでいる最中に
+   *   `isModified` を聞くと、その問い合わせが本体の鍵(SolarMutex)を読み込みが終わるまで 4〜15 秒待ち、
+   *   窓の JS が止まる。見張りは `callMain` の前に積まれるので、省くと最初の tick(1 秒後)で必ず踏む)
+   * @returns `'dead' | 'busy' | 'loading' | 'wait' | 'clean' | 'skipped' | 'written' | 'failed'`(test の観測点)
    */
   function createWriter(d) {
     var busy = false;
@@ -579,6 +582,8 @@
       tick: async function () {
         if (d.isDead()) return 'dead';
         if (busy) return 'busy';
+        // 🔴 読み込み中は本体へ聞かない(#1429)。⚠ `take` より前 ── 開く前に打てる物は無いが、聞く契機を 1 つも残さない
+        if (typeof d.isLoading === 'function' && d.isLoading()) return 'loading';
         // 🔴 マウスだけの編集(#1228 段 2): 一定の間隔で窓に聞き、変わったら静止の印を立てる(書くのは下の同じ 1 本)
         if (typeof d.pollMs === 'number' && typeof d.quiet.observeModified === 'function') {
           var t = d.now();

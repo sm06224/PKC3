@@ -275,6 +275,10 @@
   //    2 つ目の窓を開く(1 窓 約 750MB)。停止したことは `crashed` で別に言う。
   var tick = null;
   var dead = false;
+  // 🔴 Office 本体が文書を読み込んでいる最中か(#1429)。影の見張り(`armShadow`)はこれが真の間、本体へ聞かない。
+  //    下ろすのは起動の見張り(`tick`)の 3 つの出口(開けた / 文書を渡していない / 36 秒の上限)── 上限で下ろすのは、
+  //    開かなかった回でも従来どおり見張りを続けるため(開けなかった文書に影は書かれない = `isModified` が偽)
+  var loLoading = true;
   function died(reason) {
     if (dead) return;
     dead = true;
@@ -651,6 +655,8 @@
       quiet: shadowQuiet,
       isDead: function () { return dead; },
       isModified: function () { return U.anyModified(window.__lo); },
+      // 🔴 読み込み中は聞かない(#1429 ── 読み込み中の問い合わせは本体の鍵を 4〜15 秒待つ)。判断は `office-shadow.js` の tick
+      isLoading: function () { return loLoading; },
       // 🔴 マウスだけの編集を拾うために、一定の間隔で「保存していない変更が在るか」を聞く(#1228 段 2。判断は `office-shadow.js`)
       pollMs: SH.MODIFIED_POLL_MS,
       // 保存が通ったら棚を消す(同じ棚の名前 = `safeId`)。⚠ 判断(変更が無いときだけ消す)は `createWriter().afterSaved`
@@ -1997,6 +2003,7 @@
            */
           clearInterval(tick);
           tick = null;
+          loLoading = false;   // #1429: 開けたので、影の見張りが本体へ聞いてよい
           // 🔴 控えの版で開いたなら、そう言って「保存していない変更あり」にする(#1228 段 2)。⚠ 畳んだ後に呼ぶ
           //    (判断は上の `markOpenedFromShadow`。ここに足すと、上の見張りを畳む窓の外へ溢れる)
           if (docFromShadow) markOpenedFromShadow();
@@ -2005,12 +2012,14 @@
         if (launched && !wantDoc) {
           clearInterval(tick);
           tick = null;
+          loLoading = false;   // #1429: 文書を渡していない(Start Center)── 読み込む物が無い
           return;
         }
         ticks += 1;
         if (ticks >= 120) {          // 300ms × 120 = 36 秒
           clearInterval(tick);
           tick = null;
+          loLoading = false;   // #1429: 上限 ── 開けなくても見張りは従来どおり続ける
           /**
            * 🔴 **上限に達したら黙らない**(#199)。⚠ 直す前はここへ**到達しなかった**
            *   ── canvas が先に出て `clearInterval` していたので、開かない文書でも
