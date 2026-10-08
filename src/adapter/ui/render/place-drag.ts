@@ -26,7 +26,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
-import { PLACE_FOCUS_ATTR } from './place-board';
+import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
 
 /** 押すと掴むの境目(px)。 */
 const DRAG_SLOP = 4;
@@ -180,6 +180,13 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     drag = null;
     if (!d.moved) return;
     swallowClick = true;
+    /**
+     * 🔴 離した瞬間に ● ⊕ の層を消す(#1464 段 2)── 掴んでいる間もマウスは板の上に在るので
+     *   層は必ず在り、残したまま書くと直後の描き直しが**全塊の作り直し**へ倒れる
+     *   (`clearConnectLayer` の注釈)。⚠ 書く前に消す ── 書いた後の描き直し(BODY_REWRITTEN)が
+     *   この層を host の子として数える。
+     */
+    clearConnectLayer(d.block.parentElement);
     const dx = e.clientX - d.startClientX;
     const dy = e.clientY - d.startClientY;
     if (d.mode === 'size') {

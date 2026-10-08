@@ -179,6 +179,41 @@ describe('差分で当てる', () => {
     expect(r2.replaced, '偽造の印が、印なしの余分な子を隠した').toBe(r2.view.blocks.length);
   });
 
+  /**
+   * 🔴 **仮の層(`data-pkc-transient`)は描く直前に消える**(#1464 段 2)── 乗せた辺の ● ⊕ / 仮の線のように
+   *   次の描き直しまでしか意味を持たない物。残すと「外から子が増えた」で丸ごとへ倒れる(板 1 枚を動かすたびに全塊)。
+   * ⚠ 重ね物(`OVERLAY_ATTR`)とは逆向き ── こちらは残さない(古い節点を指す ● が画面に残る)。
+   */
+  it('🔴 仮の層(data-pkc-transient)は描く直前に消え、差分は生きる', () => {
+    const h = host();
+    const first = applyBlocks(h, render(DOC), EMPTY_VIEW);
+    const layer = document.createElement('div');
+    layer.setAttribute('data-pkc-transient', '');
+    h.append(layer);
+    const r = applyBlocks(h, render(`${DOC}\n足した段落。\n`), first.view);
+    expect(layer.isConnected, '仮の層が描き直しの後も残っている(古い節点を指す ● が画面に残る)').toBe(false);
+    expect(r.replaced, '仮の層を「外から増えた子」と読んで丸ごと作り直した').toBe(1);
+    // ⚠ 対照群: 印の無い余分な子は今までどおり丸ごとへ倒す(消しもしない)
+    const stray = document.createElement('span');
+    h.append(stray);
+    const r2 = applyBlocks(h, render(DOC), r.view);
+    expect(stray.isConnected, '印の無い子まで消した').toBe(false); // 丸ごとで host が空になるので消える
+    expect(r2.replaced, '印の無い余分な子で丸ごとへ倒れていない').toBe(r2.view.blocks.length);
+  });
+
+  it('🔴 `:::format{transient=1}` の本文の塊は消えない(偽造の印)', () => {
+    const forged = `${DOC}\n:::format{transient=1}\n印を持つ塊。\n:::\n`;
+    const html = render(forged);
+    expect(html, '前提が崩れている(塊に data-pkc-transient が焼かれていない)').toContain('data-pkc-transient="1"');
+    const h = host();
+    const first = applyBlocks(h, html, EMPTY_VIEW);
+    const block = h.querySelector('[data-pkc-transient]');
+    expect(block, '前提が崩れている(印つきの塊が host に無い)').not.toBeNull();
+    const r = applyBlocks(h, render(`${forged}\n足した段落。\n`), first.view);
+    expect(block!.isConnected, '本文の塊を仮の層と取り違えて消した').toBe(true);
+    expect(r.replaced, '偽造の印で差分が死んだ(毎回丸ごと)').toBe(1);
+  });
+
   it('全部消しても壊れない', () => {
     const h = host();
     const first = applyBlocks(h, render(DOC), EMPTY_VIEW);

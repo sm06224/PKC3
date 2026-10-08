@@ -42,6 +42,7 @@ import {
   topPlaceAt,
   type PlaceDrop,
 } from '@features/markdown/place-handles';
+import { TRANSIENT_ATTR } from './apply-blocks';
 import { intAttr, rectOf } from './place-board';
 import { placeTargetOf } from './place-drag';
 
@@ -156,11 +157,15 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     for (const a of h.plus) box.append(makeHandle('plus', a, rect));
     box.append(makeHandle('dot', h.dot, rect));
     /**
-     * ⚠ この層には**重ね物の印(`OVERLAY_ATTR`)を付けていない**(#1464 段 1 の着地前レビュー #2)──
-     *   乗っている間に本文が描き直されると、今までどおり丸ごと作り直しへ倒れる(層は消える)。
-     *   印を付けるなら、描き直しの後に古い `hover.block`(外れた節点)を指したまま残る層を
-     *   消す経路が要る。板を離した直後の `replaced` を実ブラウザで見てから決める(#1464 段 2)。
+     * 🔴 **仮の層の印**(`TRANSIENT_ATTR`、#1464 段 2)── 描き直し(`applyBlocks`)が**描く直前に消す**。
+     *   付けないと、板を離した直後の描き直しが「外から子が増えた」で丸ごと作り直しへ倒れる。
+     * ⚠ 重ね物の印(`OVERLAY_ATTR` = 数えずに残す)は付けない(段 1 の着地前レビュー #2 → 段 2 で確定)──
+     *   残すと、描き直しの後に古い `hover.block`(外れた節点)を指したまま層が残り、
+     *   **押しても何も起きない ●** になる。
+     * 🔑 外から消されても困らない ── 上の `layer.isConnected` が偽になるので、次の pointermove で作り直す
+     *   (`tests/adapter/place-board.test.ts` が「消えた後、同じ辺でもう 1 度出る」を pin する)。
      */
+    box.setAttribute(TRANSIENT_ATTR, '');
     host.append(box);
     layer = box;
     hover = { block, edge, focus: h.dot };
@@ -254,6 +259,7 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     if (d.ghost === null) {
       const svg = doc.createElementNS(SVG_NS, 'svg');
       svg.setAttribute('data-pkc-field', GHOST_FIELD);
+      svg.setAttribute(TRANSIENT_ATTR, ''); // 仮の線も描き直しの前に消える(● ⊕ の層と同じ)
       svg.append(doc.createElementNS(SVG_NS, 'path'));
       d.host.append(svg);
       d.ghost = svg;

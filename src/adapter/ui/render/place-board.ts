@@ -81,6 +81,34 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  */
 export const PLACE_FOCUS_ATTR = 'data-pkc-place-focus';
 
+/**
+ * 🔴 **乗せた辺の ● ⊕ の層**(`place-connect.ts` が host の子として置く)の綴り。
+ *
+ * ⚠ 正本はここ ── 作る側(`place-connect.ts`)と、板を離した瞬間に消す側(`place-drag.ts`)が
+ *   同じ字を引く。別々に書くと「消したつもりで残る」層が生まれる(§7)。
+ */
+export const CONNECT_LAYER_FIELD = 'place-connect-handles';
+
+/**
+ * 🔴 **板を離した瞬間に、● ⊕ の層を消す**(#1464 段 2。実ブラウザの実測 2026-10-08)。
+ *
+ * ⚠ 板を掴んで動かす間、マウスは板の上に在るので ● ⊕ の層は**離す瞬間に必ず在る**。
+ *   その層には重ね物の印(`OVERLAY_ATTR`)を**付けていない**ので、離した直後の描き直しで
+ *   `applyBlocks` が「外から子が増えた」と読み、板 1 枚を動かしただけで**全塊を作り直していた**
+ *   (300 枚の板で 282 ms・long task 1 回。消してから書くと 187 ms・long task 0)。
+ * ⚠ 印を付ける向きには直さない ── 描き直しの後も層が残ると、古い板(外れた節点)を指したまま
+ *   ● が画面に残り、**押しても何も起きない ●**になる。消すほうが素直である。
+ * 🔑 `place-connect.ts` は層が外から消えても困らない ── 次の pointermove で `layer.isConnected`
+ *   を見て作り直す(`showHandles`)。
+ * @returns 消した層の数(test が「在ったものを消した」と「元から無かった」を見分けるため)
+ */
+export function clearConnectLayer(host: Element | null): number {
+  if (host === null) return 0;
+  const layers = host.querySelectorAll(`[data-pkc-field="${CONNECT_LAYER_FIELD}"]`);
+  for (const l of layers) l.remove();
+  return layers.length;
+}
+
 /** 印が在れば、その開き行の塊の掴む口へ焦点を返して印を外す。 */
 function restoreGripFocus(host: HTMLElement): void {
   const line = host.getAttribute(PLACE_FOCUS_ATTR);

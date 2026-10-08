@@ -25,6 +25,7 @@ import type { DomainEvent } from '../../src/adapter/state/app-state';
 import { applyPlaceLayout, PLACE_FOCUS_ATTR } from '../../src/adapter/ui/render/place-board';
 import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
 import { installPlaceDrag, NUDGE_SETTLE_MS } from '../../src/adapter/ui/render/place-drag';
+import { installPlaceConnect } from '../../src/adapter/ui/render/place-connect';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const BOARD = [
@@ -905,6 +906,68 @@ describe('掴んで動かす(place-drag)', () => {
     expect(block.style.left).toBe('120px');
     expect(block.style.top).toBe('40px');
     off();
+  });
+
+  /**
+   * 🔴 **離した後の描き直しが、● ⊕ の層が在っても差分のまま通る**(#1464 段 2。
+   * 実ブラウザの実測 2026-10-08: 掴んでいる間もマウスは板の上に在るので層は離す瞬間に必ず在り、
+   * 残したまま書くと `applyBlocks` が「外から子が増えた」と読んで**全塊を作り直していた**)。
+   * ⚠ 消すのは**描く側**(`applyBlocks` が `TRANSIENT_ATTR` の層を描く直前に外す)── 離した瞬間に
+   *   消す 1 稿目は、描き直し(worker 往復 2 回の後)までに手が 1px 動くと層が戻って同じ丸ごとへ倒れた
+   *   (着地前レビュー A)。だからここでも**離した後にもう 1 度乗せてから**描き直す。
+   * ⚠ 本物の `applyBlocks` → `applyPlaceLayout` → 乗せる → 掴んで離す → 乗せ直す → `applyBlocks` の順で通す。
+   * ⚠ 層が消えた後、**同じ板の同じ辺でもう 1 度出る**ことまで見る ── `place-connect.ts` の closure は
+   *   `hover` を持ったままなので、`layer.isConnected` を見ていないと「同じ辺」で早期 return して二度と出ない。
+   */
+  it('🔴 離した後に ● ⊕ の層が在っても、描き直しは変わった塊 1 つだけ ── 層は消え、乗せ直すと戻る', () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    const host = document.createElement('div');
+    host.className = 'pkc-md-rendered';
+    root.append(host);
+    const first = applyBlocks(host, RENDERED, EMPTY_VIEW);
+    expect(first.replaced, '前提が崩れている(初回は全塊)').toBe(2);
+    applyPlaceLayout(host, () => null, 0);
+    const d = new Dispatcher();
+    const events: DomainEvent[] = [];
+    d.onEvent((e) => events.push(e));
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '板')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD });
+    events.length = 0;
+    const offDrag = installPlaceDrag(root, d);
+    const offConnect = installPlaceConnect(root, d);
+    const LAYER = '[data-pkc-field="place-connect-handles"]';
+    const hover = (el: HTMLElement): void => {
+      el.dispatchEvent(new PointerEvent('pointermove', { ...opts, clientX: 0, clientY: 0 }));
+    };
+    hover(host.querySelector<HTMLElement>('#p1')!);
+    expect(host.querySelectorAll(LAYER).length, '前提が崩れている(乗せても ● ⊕ の層が出ない)').toBe(1);
+    const grip = host.querySelector<HTMLElement>('#p1 [data-pkc-field="place-grip"]')!;
+    down(grip);
+    move(30, 30);
+    up(30, 30);
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE'), '書換の依頼が出ていない').toMatchObject({
+      rewrite: { kind: 'place-move', line: 0, x: 150, y: 70 },
+    });
+    // 離した後、描き直しが来るまでに手が動く(動かしていない板 p2 に乗る)── 層は在る
+    const p2 = host.querySelector<HTMLElement>('#p2')!;
+    hover(p2);
+    expect(host.querySelectorAll(LAYER).length, '前提が崩れている(離した後に乗せても層が出ない)').toBe(1);
+    // 描き直し(p1 だけ動いた形)── 層が残っていれば「外から子が増えた」で全塊になる
+    const moved = RENDERED.replace('data-pkc-x="120"', 'data-pkc-x="150"');
+    expect(moved, '前提が崩れている(x= が置き換わっていない)').not.toBe(RENDERED);
+    const second = applyBlocks(host, moved, first.view);
+    expect(second.replaced, '● ⊕ の層を「外から増えた子」と読んで丸ごと作り直した').toBe(1);
+    expect(host.querySelectorAll(LAYER).length, '描き直しの後に ● ⊕ の層が残っている(古い節点を指す ●)').toBe(0);
+    expect(host.querySelector('#p2'), '動かしていない板 p2 が作り直された').toBe(p2);
+    // 🔑 同じ板の同じ辺にもう 1 度乗せると、層は戻る(closure が `layer.isConnected` を見ている証拠)
+    applyPlaceLayout(host, () => null, 0);
+    hover(p2);
+    expect(host.querySelectorAll(LAYER).length, '層が消えた後、同じ辺に乗せ直しても ● ⊕ が二度と出ない').toBe(1);
+    offDrag();
+    offConnect();
   });
 
   it('slop 未満(押しただけ)では動かさず、書かない', () => {
