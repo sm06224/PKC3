@@ -58,6 +58,20 @@ describe('位置を採る', () => {
     expect(p.cellSpans).toHaveLength(1);
   });
 
+  it('CRLF 改行のとき各行のセルの原文位置オフセットがずれない (#1369)', () => {
+    const src = 'a,b\r\nc,d\r\ne,f\r\n';
+    const p = pos(src);
+    const spans = p.cellSpans!;
+    expect(spans).toHaveLength(3);
+    const get = (r: number, c: number) => src.slice(spans[r]![c]!.start, spans[r]![c]!.end);
+    expect(get(0, 0)).toBe('a');
+    expect(get(0, 1)).toBe('b');
+    expect(get(1, 0)).toBe('c');
+    expect(get(1, 1)).toBe('d');
+    expect(get(2, 0)).toBe('e');
+    expect(get(2, 1)).toBe('f');
+  });
+
   it('逃げの規則', () => {
     expect(csvEscapeField('あ', ',')).toBe('あ');
     expect(csvEscapeField('a,b', ',')).toBe('"a,b"');
