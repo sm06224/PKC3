@@ -835,6 +835,13 @@ test は緑で、**SURVIVED と出た**(本当は狙った行に 1 度も触れ�
 (`grep -n` で行番号 → その上の `'<action>': (` を見る)。
 ⚠ 「1 件だけ当たった」は**どこに当たったか**を言わない。
 
+### 🔴 harness の stub が、実物の「呼び方」を写していないと、書き方の誤りを見逃す(2026-10-08、#1408 (c) / PR #1423)
+
+C++ の patch を g++ の stub harness で確かめるとき、`emscripten_sync_run_in_main_runtime_thread` を**関数として** stub したら、
+実物は**可変長 macro** なので「lambda の最上位カンマで引数が割れる」誤りが**そのままコンパイルできてしまい**、1 稿目は焼きが落ちる形のまま通った(着地前レビューが g++ で再現)。
+🔑 stub は**意味論だけでなく呼び方**(macro / 可変長引数 / attribute)も写す。macro は上流の `#define` を fixture に抜いて harness に取り込む。
+⚠ 「stub が本物より甘い」(CLAUDE.md §3「stub は本物の意味論を真似る」)の、呼び方版である。
+
 ## 報告の形
 
 ```

@@ -749,7 +749,7 @@ leave が出た後に無音なら、main は別の所で止まっている(こ�
 test は `tests/office-yield-wait-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 95〜205 行 = `tests/fixtures/office-lo/QtYieldMutex.excerpt.cxx`。
 手元の stub harness では compile と enter/leave の出方を確かめた ── 本物の header ではまだ)。
 
-### 🔴 #1408 (c) の直し `patch-lo-hop-borrow.py`(2026-10-08。35 本目。⚠ 焼く前 ── 🟡 推測ではなく**実測した stack への直し**。効いたかは次の焼き)
+### 🔴 #1408 (c) の直し `patch-lo-hop-borrow.py`(2026-10-08。35 本目。⚠ 焼く前 ── 🟡 推測ではなく**実測した stack への直し**。効いたかは次の節の焼き)
 
 150 本の焼きで 1/150(y7-61)、Impress の起動中に無言で固まった形:main の Qt イベントが SolarMutex を持ったまま別の `osl::Mutex`(Z)を busy-wait し、本体スレッドは
 Z を持ったまま lightweight の hop(`QtInstance::EmscriptenLightweightRunInMainThread_`)の `SolarMutexReleaser` の戻りで SolarMutex を取り直せない = **鍵の順序の逆転**。
@@ -762,6 +762,42 @@ hop が SolarMutex を**手放す隙**が素(#1402 の「描画の途中で鍵�
 🔑 **次の焼きの読み方**:150 本で固まりの stack に `SolarMutexReleaser の戻り ← QtYieldMutex::doAcquire` が残るか。残れば別の手放し口(枝 B 等)。
 test は `tests/office-hop-borrow-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 207〜266 行 = `tests/fixtures/office-lo/QtInstance-hop.excerpt.cxx`。
 g++ + pthread の stub harness で、借りて走る / 持っていない呼び手は従来どおり / 入れ子 / 投げても旗が戻る を、**当てていない原文を対照群**にして確かめた)。
+
+### 🔴 #1408 (c) を焼いた結果と副作用 ── 固まりは消え、main の待ちが長くなった(2026-10-08、#1429)
+
+**結果**(dev-hop = run 37712665674、main `b5e4fb22`、LO `d6226c1a`、300 本):
+
+| 症状 | 直す前 | (c) |
+|---|---|---|
+| 起動中の固まり(B2) | 2/240 | **0**/300 |
+| 閉じた後の OOB(#1402) | 4/270 | **0** |
+| docking 配置の OOB | 1/210 | **0** |
+
+**副作用**(#1429):main の `QtYieldMutex::doAcquire` の待ち(`PKC3-YIELDWAIT`)が長くなった。
+
+| | 計装 pack(借りる前) | (c) |
+|---|---|---|
+| p50 | 50 ms | **220 ms** |
+| 最大 | 0.9 s | **7.4 s**(CPU が混むと 14.9 s) |
+| 1 秒超 | (記録なし) | 各 run に 1 回(読み込み中、経過 4.5 s 付近) |
+| 読み込み時間 p50 | 14.2 s | 15.0 s |
+
+待っている相手は PKC 側の JS の橋渡し(embind の getter → `framework::OComponentAccess::createEnumeration`)。
+
+**作法**(本体は上の節。要点だけ):
+- `emscripten_sync_run_in_main_runtime_thread` は**可変長 macro**(4.0.10 `system/include/emscripten/threading_legacy.h:180`)。macro の引数に `#if` を挟まない / **lambda(最上位カンマを含みうる)を引数に直書きしない**(関数ポインタに受けてから渡す)。
+- 「借りる」作法は `QtYieldMutex::m_bNoYieldLock` を立てて func を走らせること(`doAcquire` の closure と同じ)。旗はデストラクタで戻す。
+
+**test の罠**:
+- harness が macro を**関数として stub** すると、macro の引数が割れる誤りを見逃す(PR #1423 の 1 稿目は、それで焼きが落ちる形だった)。実物の `#define` を fixture(`tests/fixtures/emscripten/threading_legacy-4.0.10.excerpt.h`)に写して harness に取り込む。
+- g++ の文言を読む test は **`LC_ALL=C`** で引用符を固定する。CI は UTF-8 locale で `‘}’` を出す(PR #1423 の verify で踏んだ)。
+
+**名前の解決**(wasm の stack の関数名を `dl-names` で引くとき):計装 pack(#1421)は vcl の `outdev.cxx` の patch で関数が 1 つ増え、**44509 より上の添字が +1 ずれる**。
+`dl-names`(`d6226c1a`、run 37685470296)で引くときは `doAcquire`(193216)/ hop(193127)/ `QtTimer::timeoutActivated`(197773)の **3 点で整合を取ってから**読む。
+
+**全スレッドの dump**(`PKC3_STACKDUMP=all`):`--remote-debugging-port=0` + `Target.setAutoAttach {flatten:true}` で worker(pthread)にも attach する。
+`Debugger.enable` は**固まる前に**有効化しておく(固まった page は enable を処理しない)。`Atomics.wait` 中の worker は pause しない(`NO PAUSE` と出る)。
+⚠ 本稿を書いた時点で `PKC3_STACKDUMP` を読む script はこの木(main `90003836`)に無い ── 上は手順の記録であり、script の場所は書けない。
 
 ### 🔴 #1402 の閉じた直後の停止 ── 計装 3 本 `patch-lo-surface-trace.py` / `patch-lo-sdpr-trace.py` / `patch-lo-gfxdata-trace.py`(2026-10-07。⚠ 焼く前 ── **直しではなく印**。行き先は 🟡 推測)
 
