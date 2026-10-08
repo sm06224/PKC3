@@ -575,6 +575,9 @@ int main(int argc, char** argv)
     const cc = spawnSync('g++', ['-std=c++20', '-Wall', '-Wextra', '-Werror', '-pthread', join(dir, 't.cxx'), '-o', join(dir, 't')], {
       encoding: 'utf-8',
       stdio: 'pipe',
+      // ⚠ 文言を読む test が在るので、引用符を ASCII に固定する ── CI の runner は UTF-8 locale で
+      //   g++ が ‘}’(U+2018/2019)で出し、手元(C locale)の '}' と食い違って落ちた(PR #1423 の verify)。
+      env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
     });
     return { bin: join(dir, 't'), dir, status: cc.status ?? -1, stderr: cc.stderr };
   }
@@ -651,7 +654,8 @@ int main(int argc, char** argv)
     try {
       expect(bad.status, '直し前の形がコンパイルを通った ── harness が macro の引数の割れを見ていない').not.toBe(0);
       // 落ちる理由まで見る(別の理由で落ちたのを「macro で割れた」と読まない)── レビューが g++ で再現した文言
-      expect(bad.stderr).toMatch(/expected '\}' before '\)' token/);
+      // 引用符は locale で ' か ‘ ’ に変わる(上の env で C に固定してあるが、両方受ける)
+      expect(bad.stderr).toMatch(/expected ['\u2018]\}['\u2019] before ['\u2018]\)['\u2019] token/);
     } finally {
       rmSync(bad.dir, { recursive: true, force: true });
     }
