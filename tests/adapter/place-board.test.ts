@@ -909,14 +909,17 @@ describe('掴んで動かす(place-drag)', () => {
   });
 
   /**
-   * 🔴 **離した瞬間に ● ⊕ の層が消え、直後の描き直しが差分のまま通る**(#1464 段 2。
+   * 🔴 **離した後の描き直しが、● ⊕ の層が在っても差分のまま通る**(#1464 段 2。
    * 実ブラウザの実測 2026-10-08: 掴んでいる間もマウスは板の上に在るので層は離す瞬間に必ず在り、
    * 残したまま書くと `applyBlocks` が「外から子が増えた」と読んで**全塊を作り直していた**)。
-   * ⚠ 本物の `applyBlocks` → `applyPlaceLayout` → 掴んで離す → `applyBlocks` の順で通す(stub にしない)。
-   * ⚠ 層が消えた後、**次に乗せたときは戻る**ことまで見る ── 消しただけで二度と出ない形
-   *   (`place-connect.ts` の closure が外からの削除に付いてこない)を、この 1 件で閉じる。
+   * ⚠ 消すのは**描く側**(`applyBlocks` が `TRANSIENT_ATTR` の層を描く直前に外す)── 離した瞬間に
+   *   消す 1 稿目は、描き直し(worker 往復 2 回の後)までに手が 1px 動くと層が戻って同じ丸ごとへ倒れた
+   *   (着地前レビュー A)。だからここでも**離した後にもう 1 度乗せてから**描き直す。
+   * ⚠ 本物の `applyBlocks` → `applyPlaceLayout` → 乗せる → 掴んで離す → 乗せ直す → `applyBlocks` の順で通す。
+   * ⚠ 層が消えた後、**同じ板の同じ辺でもう 1 度出る**ことまで見る ── `place-connect.ts` の closure は
+   *   `hover` を持ったままなので、`layer.isConnected` を見ていないと「同じ辺」で早期 return して二度と出ない。
    */
-  it('🔴 離した瞬間に、つなぐ印の層が消える ── 直後の描き直しは変わった塊 1 つだけ', () => {
+  it('🔴 離した後に ● ⊕ の層が在っても、描き直しは変わった塊 1 つだけ ── 層は消え、乗せ直すと戻る', () => {
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
     document.body.append(root);
@@ -944,22 +947,25 @@ describe('掴んで動かす(place-drag)', () => {
     const grip = host.querySelector<HTMLElement>('#p1 [data-pkc-field="place-grip"]')!;
     down(grip);
     move(30, 30);
-    expect(host.querySelectorAll(LAYER).length, '前提が崩れている(掴んでいる間に層が消えた)').toBe(1);
     up(30, 30);
-    expect(host.querySelectorAll(LAYER).length, '離した瞬間に ● ⊕ の層が消えていない').toBe(0);
     expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE'), '書換の依頼が出ていない').toMatchObject({
       rewrite: { kind: 'place-move', line: 0, x: 150, y: 70 },
     });
-    // 離した後の描き直し(p1 だけ動いた形)── 層が残っていれば「外から子が増えた」で全塊になる
+    // 離した後、描き直しが来るまでに手が動く(動かしていない板 p2 に乗る)── 層は在る
+    const p2 = host.querySelector<HTMLElement>('#p2')!;
+    hover(p2);
+    expect(host.querySelectorAll(LAYER).length, '前提が崩れている(離した後に乗せても層が出ない)').toBe(1);
+    // 描き直し(p1 だけ動いた形)── 層が残っていれば「外から子が増えた」で全塊になる
     const moved = RENDERED.replace('data-pkc-x="120"', 'data-pkc-x="150"');
     expect(moved, '前提が崩れている(x= が置き換わっていない)').not.toBe(RENDERED);
     const second = applyBlocks(host, moved, first.view);
     expect(second.replaced, '● ⊕ の層を「外から増えた子」と読んで丸ごと作り直した').toBe(1);
-    expect(host.querySelector('#p2'), '動かしていない板 p2 が作り直された').toBe(first.inserted[1]);
-    // 🔑 次に乗せたとき、層は戻る(外から消されたことに closure が付いてくる)
+    expect(host.querySelectorAll(LAYER).length, '描き直しの後に ● ⊕ の層が残っている(古い節点を指す ●)').toBe(0);
+    expect(host.querySelector('#p2'), '動かしていない板 p2 が作り直された').toBe(p2);
+    // 🔑 同じ板の同じ辺にもう 1 度乗せると、層は戻る(closure が `layer.isConnected` を見ている証拠)
     applyPlaceLayout(host, () => null, 0);
-    hover(host.querySelector<HTMLElement>('#p1')!);
-    expect(host.querySelectorAll(LAYER).length, '離した後に乗せ直しても ● ⊕ が二度と出ない').toBe(1);
+    hover(p2);
+    expect(host.querySelectorAll(LAYER).length, '層が消えた後、同じ辺に乗せ直しても ● ⊕ が二度と出ない').toBe(1);
     offDrag();
     offConnect();
   });

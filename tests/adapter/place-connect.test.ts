@@ -274,6 +274,9 @@ describe('掴んで離すと、本文が書き換わる(#530 段③d)', () => {
     down(dot(host), 100, 30);
     move(200, 200);
     expect(document.querySelector(GHOST), '掴んでいる間に仮の線が無い').not.toBeNull();
+    // ⚠ 仮の線も ● ⊕ の層も、描き直しの直前に消える印を持つ(#1464 段 2。消す側は apply-blocks.test.ts が pin)
+    expect(document.querySelector(GHOST)!.hasAttribute('data-pkc-transient'), '仮の線に仮の層の印が無い').toBe(true);
+    expect(document.querySelector('[data-pkc-field="place-connect-handles"]')?.hasAttribute('data-pkc-transient'), '● ⊕ の層に仮の層の印が無い').toBe(true);
     up(200, 200);
     expect(asks, '外で離したのに書いた').toHaveLength(0);
     expect(document.querySelector(GHOST), '仮の線が残っている').toBeNull();

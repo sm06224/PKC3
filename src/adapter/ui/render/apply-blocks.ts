@@ -92,6 +92,36 @@ export const OVERLAY_ATTR = 'data-pkc-overlay';
 /** 重ね物か(印つきの要素)。⚠ 判定は 1 つ ── `intact` の両側で同じ述語を使う。 */
 const isOverlay = (n: Node): boolean => n instanceof Element && n.hasAttribute(OVERLAY_ATTR);
 
+/**
+ * 🔴 **描き直しの前に捨てる「仮の層」の印**(#1464 段 2)── 乗せた辺の ● ⊕ と、掴んで繋ぐ仮の線
+ *   (`place-connect.ts` が host の子として置く)のように、**次の描き直しまでしか意味を持たない**物の印。
+ *
+ * ⚠ `OVERLAY_ATTR`(数えないで残す)とは**逆向き** ── こちらは描き直しのたびに消す。残す向きには直さない:
+ *   描き直しの後に古い板(外れた節点)を指したまま ● が画面に残り、**押しても何も起きない ●** になる。
+ * ⚠ 消さないと、板を離した直後の描き直しは `intact` が「外から子が増えた」と読み、板 1 枚を動かしただけで
+ *   **全塊を作り直していた**(実ブラウザの実測 2026-10-08: 300 枚で 282 ms・long task 1 回 → 消すと 187 ms・0 回)。
+ * 🔑 入力側(`pointerup`)で消す形は取らない(1 稿目がそうだった。着地前レビュー A)── 本当の描き直し
+ *   (`BODY_REWRITTEN`)は worker の往復 2 回の後に来るので、その間に手が 1px 動くと層が戻り、同じ丸ごとへ
+ *   倒れる。**描く側が描く直前に消す**なら、誰がいつ層を足しても必ず消える(矢印キー / 大きさ / 形のメニューも同じ)。
+ * ⚠ 偽造(`:::format{transient=1}` は塊そのものに `data-pkc-transient` を焼く)── 覚えているノード(本文の塊)は
+ *   消さない。消すのは**覚えていない子**だけなので、偽の印は何もしない。
+ */
+export const TRANSIENT_ATTR = 'data-pkc-transient';
+
+/** 仮の層(印つきで、本文の塊として覚えていない子)を host から外す。 @returns 外した数 */
+function dropTransient(host: HTMLElement, view: BlockView): number {
+  const kept = new Set<Node>();
+  for (const ns of view.nodes) for (const n of ns) kept.add(n);
+  let dropped = 0;
+  for (const c of [...host.children]) {
+    if (c.hasAttribute(TRANSIENT_ATTR) && !kept.has(c)) {
+      c.remove();
+      dropped += 1;
+    }
+  }
+  return dropped;
+}
+
 /** 覚えているノード列が**まだ DOM と合っているか**(外から書き換えられていないか)。 */
 function intact(host: HTMLElement, view: BlockView): boolean {
   if (view.blocks.length !== view.nodes.length || view.blocks.length === 0) return false;
@@ -169,6 +199,7 @@ export function applyBlocks(
   pin: readonly number[] = [],
 ): ApplyResult {
   const next = splitTopLevelBlocks(html);
+  dropTransient(host, view); // ⚠ `intact` より前 ── 仮の層を「外から増えた子」と数えない
   if (!intact(host, view)) return replaceAll(host, next, pin);
 
   const guarded =

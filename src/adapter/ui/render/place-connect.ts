@@ -42,7 +42,8 @@ import {
   topPlaceAt,
   type PlaceDrop,
 } from '@features/markdown/place-handles';
-import { CONNECT_LAYER_FIELD, intAttr, rectOf } from './place-board';
+import { TRANSIENT_ATTR } from './apply-blocks';
+import { intAttr, rectOf } from './place-board';
 import { placeTargetOf } from './place-drag';
 
 /** 押すと掴むの境目(px)。⚠ `place-drag.ts` と同じ値(同じ手で動かす)。 */
@@ -50,7 +51,7 @@ const DRAG_SLOP = 4;
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 const HOST_SELECTOR = '.pkc-board-host';
-const LAYER_FIELD = CONNECT_LAYER_FIELD; // ⚠ 綴りの正本は place-board.ts(離した瞬間に消す側と共有)
+const LAYER_FIELD = 'place-connect-handles';
 const HANDLE_FIELD = 'place-handle';
 const GHOST_FIELD = 'place-connect-ghost';
 const TARGET_ATTR = 'data-pkc-connect-target';
@@ -156,13 +157,15 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     for (const a of h.plus) box.append(makeHandle('plus', a, rect));
     box.append(makeHandle('dot', h.dot, rect));
     /**
-     * ⚠ この層には**重ね物の印(`OVERLAY_ATTR`)を付けない**(#1464 段 1 の着地前レビュー #2 →
-     *   段 2 で実ブラウザの実測により確定)── 印を付けると、描き直しの後に古い `hover.block`
-     *   (外れた節点)を指したまま層が残り、**押しても何も起きない ●** になる。
-     * 🔑 板を離した瞬間は `place-drag.ts` が `clearConnectLayer` でこの層を消す(消さないと
-     *   離した直後の描き直しが丸ごと作り直しへ倒れる)。⚠ 外から消されても困らない ──
-     *   上の `layer.isConnected` が偽になるので、次の pointermove で作り直す。
+     * 🔴 **仮の層の印**(`TRANSIENT_ATTR`、#1464 段 2)── 描き直し(`applyBlocks`)が**描く直前に消す**。
+     *   付けないと、板を離した直後の描き直しが「外から子が増えた」で丸ごと作り直しへ倒れる。
+     * ⚠ 重ね物の印(`OVERLAY_ATTR` = 数えずに残す)は付けない(段 1 の着地前レビュー #2 → 段 2 で確定)──
+     *   残すと、描き直しの後に古い `hover.block`(外れた節点)を指したまま層が残り、
+     *   **押しても何も起きない ●** になる。
+     * 🔑 外から消されても困らない ── 上の `layer.isConnected` が偽になるので、次の pointermove で作り直す
+     *   (`tests/adapter/place-board.test.ts` が「消えた後、同じ辺でもう 1 度出る」を pin する)。
      */
+    box.setAttribute(TRANSIENT_ATTR, '');
     host.append(box);
     layer = box;
     hover = { block, edge, focus: h.dot };
@@ -256,6 +259,7 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     if (d.ghost === null) {
       const svg = doc.createElementNS(SVG_NS, 'svg');
       svg.setAttribute('data-pkc-field', GHOST_FIELD);
+      svg.setAttribute(TRANSIENT_ATTR, ''); // 仮の線も描き直しの前に消える(● ⊕ の層と同じ)
       svg.append(doc.createElementNS(SVG_NS, 'path'));
       d.host.append(svg);
       d.ghost = svg;
