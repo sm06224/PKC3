@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } from './helpers';
 
@@ -357,6 +358,20 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   await page.keyboard.press('Control+Shift+P');
   await expect(dialog, 'パレットが開かない(台が崩れている)').toBeVisible();
 
+  // 🔴 字幕ファイル(.srt)で書き出す(#1447)── ノートを開いていないときは**出るが押せず、理由が出る**
+  //   (同じ道中に assert を足す。新しく起動しない)
+  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕');
+  const srtRow = page.locator('[data-pkc-field="palette-row"]').first();
+  await expect(srtRow, '字幕の操作が名前で探せない').toHaveAttribute(
+    'data-pkc-command',
+    'export-transcript-srt',
+  );
+  await expect(srtRow, 'ノートを開いていないのに押せる').toBeDisabled();
+  await expect(
+    srtRow.locator('[data-pkc-field="palette-why"]'),
+    '押せない理由が出ていない(字幕)',
+  ).toContainText('いまは押せません');
+
   /**
    * ⚠ **押し所を経由せず、器を直に閉じる。** `Escape` ではこの形にならない
    *   (`Escape` も `close` を出すが、それは器が自分で閉じる道である)。
@@ -375,7 +390,8 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   // 🔴 本題 ── ここから編集して、**終えられる**
   await createEntry(page, 'text');
   const ta = page.locator('[data-pkc-field="editor-body"]');
-  await ta.fill('パレットを外から閉じた後の本文');
+  // ⚠ 行頭に時刻のある行(文字起こしの形)を 2 行足す ── 後段の字幕ファイル(#1447)の材料
+  await ta.fill('パレットを外から閉じた後の本文\n0:15 こんにちは\n0:20 さようなら');
   await page.keyboard.press('Control+s');
 
   // 保存できた = 編集の面から出ている(読む形の本文が出ている)
@@ -387,6 +403,25 @@ test('🔴 パレットを外から閉じた後でも、編集を保存できる
   await expect(page.locator('[data-pkc-region="status"]')).not.toContainText(
     '保存できませんでした',
   );
+
+  /**
+   * 🔴 字幕ファイル(.srt)で書き出す(#1447)── 開いたノートに時刻つきの行が在れば**押せて、落ちる**。
+   * ⚠ 日本語の題名では `suggestedFilename` が当てにならない環境なので、見るのは**中身**だけ(拡張子は unit が見る)。
+   */
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, '保存後にパレットが開かない').toBeVisible();
+  await page.locator('[data-pkc-field="palette-filter"]').fill('字幕');
+  const srtRow2 = page.locator('[data-pkc-field="palette-row"]').first();
+  await expect(srtRow2).toHaveAttribute('data-pkc-command', 'export-transcript-srt');
+  await expect(srtRow2, '時刻つきの行が在るのに押せない').toBeEnabled();
+  const srtDl = page.waitForEvent('download');
+  await page.keyboard.press('Enter');
+  const srtFile = await srtDl;
+  const srtPath = await srtFile.path();
+  const srtText = readFileSync(srtPath, 'utf8');
+  expect(srtText, 'SRT の 1 件目が組まれていない').toContain('00:00:15,000 --> 00:00:20,000');
+  expect(srtText).toContain('こんにちは');
+  expect(srtText).toContain('さようなら');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
