@@ -42,7 +42,7 @@ import {
   topPlaceAt,
   type PlaceDrop,
 } from '@features/markdown/place-handles';
-import { intAttr, rectOf } from './place-board';
+import { CONNECT_LAYER_FIELD, intAttr, rectOf } from './place-board';
 import { placeTargetOf } from './place-drag';
 
 /** 押すと掴むの境目(px)。⚠ `place-drag.ts` と同じ値(同じ手で動かす)。 */
@@ -50,7 +50,7 @@ const DRAG_SLOP = 4;
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 const HOST_SELECTOR = '.pkc-board-host';
-const LAYER_FIELD = 'place-connect-handles';
+const LAYER_FIELD = CONNECT_LAYER_FIELD; // ⚠ 綴りの正本は place-board.ts(離した瞬間に消す側と共有)
 const HANDLE_FIELD = 'place-handle';
 const GHOST_FIELD = 'place-connect-ghost';
 const TARGET_ATTR = 'data-pkc-connect-target';
@@ -156,10 +156,12 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     for (const a of h.plus) box.append(makeHandle('plus', a, rect));
     box.append(makeHandle('dot', h.dot, rect));
     /**
-     * ⚠ この層には**重ね物の印(`OVERLAY_ATTR`)を付けていない**(#1464 段 1 の着地前レビュー #2)──
-     *   乗っている間に本文が描き直されると、今までどおり丸ごと作り直しへ倒れる(層は消える)。
-     *   印を付けるなら、描き直しの後に古い `hover.block`(外れた節点)を指したまま残る層を
-     *   消す経路が要る。板を離した直後の `replaced` を実ブラウザで見てから決める(#1464 段 2)。
+     * ⚠ この層には**重ね物の印(`OVERLAY_ATTR`)を付けない**(#1464 段 1 の着地前レビュー #2 →
+     *   段 2 で実ブラウザの実測により確定)── 印を付けると、描き直しの後に古い `hover.block`
+     *   (外れた節点)を指したまま層が残り、**押しても何も起きない ●** になる。
+     * 🔑 板を離した瞬間は `place-drag.ts` が `clearConnectLayer` でこの層を消す(消さないと
+     *   離した直後の描き直しが丸ごと作り直しへ倒れる)。⚠ 外から消されても困らない ──
+     *   上の `layer.isConnected` が偽になるので、次の pointermove で作り直す。
      */
     host.append(box);
     layer = box;

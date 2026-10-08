@@ -274,7 +274,26 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
   await page.mouse.down();
   await page.mouse.move(g.x + g.width / 2 + 100, g.y + g.height / 2 + 60, { steps: 5 });
+  /**
+   * 🔴 **離した瞬間に ● ⊕ の層が消え、動かしていない板は作り直されない**(#1464 段 2)。
+   *
+   * ⚠ ここは**実ブラウザでしか見られない** ── 掴んでいる間、pointer capture で pointermove は
+   *   掴む口に届くので、乗せた辺の ● ⊕ の層が host に居る(unit の happy-dom は pointermove を
+   *   document へ撃つので、この「離す瞬間に層が在る」状態は手で作るしかない)。
+   * 🔑 観測点は 3 つ: ①離す前に層が在る(前提)②離した直後に無い ③動かしていない板 `#p2` の
+   *   **要素そのもの**が描き直しを生き延びる(丸ごと作り直しなら別の要素になり、印が消える)。
+   *   実測(直す前): 板 1 枚を動かすたびに全塊が作り直され、300 枚で 282 ms・long task 1 回。
+   */
+  const handles = page.locator('[data-pkc-field="place-connect-handles"]');
+  await expect(handles, '前提が崩れている(掴んでいる間に ● ⊕ の層が無い)').toHaveCount(1);
+  await p2.evaluate((el) => {
+    (el as unknown as { __pkcKeep?: true }).__pkcKeep = true;
+  });
   await page.mouse.up();
+  await expect(
+    handles,
+    '離した瞬間に ● ⊕ の層が消えていない(直後の描き直しが丸ごと作り直しへ倒れる)',
+  ).toHaveCount(0);
 
   /**
    * 🔴 観測点は**本文から描き直された属性** ── 保存 → 再読込 → 再描画の往復が
@@ -289,6 +308,16 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
 
   // ⚠ 対照群: 掴んでいない塊は動いていない
   await expect(p2).toHaveAttribute('data-pkc-x', '460');
+  // 🔴 動かしていない板は**同じ要素のまま**(差分描画が通った証拠 ── 作り直されると印が消える)
+  expect(
+    await p2.evaluate((el) => (el as unknown as { __pkcKeep?: true }).__pkcKeep === true),
+    '動かしていない板 p2 が作り直された(離した直後の描き直しが丸ごと作り直しへ倒れている)',
+  ).toBe(true);
+  // 🔑 層は次に乗せたとき戻る(消しただけで、二度と出ない形にしていない)── 見たら板の無い所へ退いて畳む
+  await page.mouse.move(g.x + g.width / 2 + 101, g.y + g.height / 2 + 61);
+  await expect(handles, '離した後に乗せ直しても ● ⊕ が二度と出ない').toHaveCount(1);
+  await page.mouse.move(hostBox.x + 40, hostBox.y + hostBox.height - 12);
+  await expect(handles, '板の無い所へ退いても ● ⊕ が畳まれない').toHaveCount(0);
 
   // 🔴 **線は板に付いてくる**(座標を持たず、毎回引き直している証拠)
   await expect
