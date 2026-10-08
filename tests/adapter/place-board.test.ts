@@ -118,10 +118,14 @@ describe('板どうしをつなぐ線(#530 段③a)', () => {
     expect(moved, '前提が崩れている(x= が置き換わっていない)').not.toBe(LINES);
     const second = applyBlocks(host, moved, first.view);
     expect(second.replaced, '線の層を「外から増えた子」と読んで丸ごと作り直した').toBe(1);
-    // ⚠ 置き直しても線は 1 枚のまま(層は作り直し、板は残る)
+    // ⚠ 置き直しても線は 1 枚のまま(層は作り直し、板は残る)── そして**端点は動いた板に追う**
+    //    (着地前レビュー 変異 3: 「層が在れば作り直さない」を殺す)
+    const endBefore = finish(drawn(host)[0]!);
     applyPlaceLayout(host, () => null, 0);
     expect(host.querySelectorAll('[data-pkc-field="place-lines"]').length).toBe(1);
     expect(host.querySelector('#a'), '動かしていない板 a が作り直された').toBe(first.inserted[0]);
+    const endAfter = finish(drawn(host)[0]!);
+    expect(endAfter[0], '板 b を動かしたのに線の終点が追っていない').toBe(endBefore[0]! + 20);
   });
 
   it('🔴 from= と to= の板の間に、いちばん近い辺どうしで線が引かれる', () => {

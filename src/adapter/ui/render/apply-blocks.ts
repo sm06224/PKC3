@@ -83,11 +83,14 @@ function replaceAll(
  *   `intact` が「host の子の数 = 覚えているノードの数」を要求し、層の 2 枚で数が合わないため
  *   (実測: 板 5 枚で `replaced=1` → 線を引くと `replaced=6`)。差分描画が死ぬだけでなく、
  *   掴む口・札・焦点も毎回作り直しになっていた。
- * 🔑 印の無い余分な子は今までどおり**丸ごとへ倒す**(`apply-blocks.test.ts`「外から要素が増えていても
+ * 🔑 印の無い余分な子は今までどおり**丸ごとへ倒す**(`apply-blocks.test.ts`「外から要素が**増えて**いても
  *   丸ごとに落ちる」── 位置がずれたまま差分を当てると中身が食い違う)。印を付けてよいのは
  *   **塊の順番に関わらない重ね物だけ**(線の層は先頭に居て、差分の挿入位置は塊のノードから引くので影響しない)。
  */
 export const OVERLAY_ATTR = 'data-pkc-overlay';
+
+/** 重ね物か(印つきの要素)。⚠ 判定は 1 つ ── `intact` の両側で同じ述語を使う。 */
+const isOverlay = (n: Node): boolean => n instanceof Element && n.hasAttribute(OVERLAY_ATTR);
 
 /** 覚えているノード列が**まだ DOM と合っているか**(外から書き換えられていないか)。 */
 function intact(host: HTMLElement, view: BlockView): boolean {
@@ -96,15 +99,19 @@ function intact(host: HTMLElement, view: BlockView): boolean {
   for (const ns of view.nodes) {
     for (const n of ns) {
       if (n.parentNode !== host) return false;
-      count += 1;
+      /**
+       * ⚠ **両側から同じ印つきを除く**(着地前レビュー 2026-10-08 #1)── 印の名前は `data-pkc-overlay` で、
+       *   user が本文に `:::format{overlay=1}` と書くと**塊そのもの**がこの属性を持つ(`markdown-render.ts` は
+       *   `{key=…}` を `data-pkc-<key>` に焼く)。覚えている側(`count`)だけ数えて host 側(`own`)で除くと、
+       *   その本文は `intact` が常に偽(毎回丸ごと)になり、逆に印なしの余分な子 1 つを**偽の印が隠す**。
+       *   両側で除けば、塊が印を持っていても数は揃い、余分な子は今までどおり丸ごとへ倒す。
+       */
+      if (!isOverlay(n)) count += 1;
     }
   }
   // ⚠ 重ね物(印つき)は数えない ── それ以外の余分な子は丸ごとへ倒す
   let own = 0;
-  for (const c of host.childNodes) {
-    if (c instanceof Element && c.hasAttribute(OVERLAY_ATTR)) continue;
-    own += 1;
-  }
+  for (const c of host.childNodes) if (!isOverlay(c)) own += 1;
   return count === own;
 }
 
