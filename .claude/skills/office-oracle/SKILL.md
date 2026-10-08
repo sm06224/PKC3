@@ -797,7 +797,7 @@ g++ + pthread の stub harness で、借りて走る / 持っていない呼び�
 
 **全スレッドの dump**(`PKC3_STACKDUMP=all`):`--remote-debugging-port=0` + `Target.setAutoAttach {flatten:true}` で worker(pthread)にも attach する。
 `Debugger.enable` は**固まる前に**有効化しておく(固まった page は enable を処理しない)。`Atomics.wait` 中の worker は pause しない(`NO PAUSE` と出る)。
-⚠ 本稿を書いた時点で `PKC3_STACKDUMP` を読む script はこの木(main `90003836`)に無い ── 上は手順の記録であり、script の場所は書けない。
+🔑 道具は `build/office-wasm/probe/`(`README.md` に回し方・環境変数・印の読み方・名前の解き方・集計)。`lib.mjs` が `PKC3_JSBEAT` / `PKC3_STACKDUMP` を読み、`alldump.mjs` が全 target の stack を取る。
 
 ### 🔴 #1402 の閉じた直後の停止 ── 計装 3 本 `patch-lo-surface-trace.py` / `patch-lo-sdpr-trace.py` / `patch-lo-gfxdata-trace.py`(2026-10-07。⚠ 焼く前 ── **直しではなく印**。行き先は 🟡 推測)
 
