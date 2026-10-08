@@ -825,6 +825,76 @@ describe('メッセージを開く(#1017 C5)', () => {
  * ⚠ 押しボタンを持たない ── 読むのは画面に出ている本文(`openBody`)で、落とすのは `downloadBlob`。
  * 🔑 観測点は **`URL.createObjectURL` に渡った Blob の中身と、`<a download>` の名前**(押した結果そのもの)。
  */
+/**
+ * 🔴 **「マニュアルを別のウィンドウで開く」が、操作を探すから呼べる**(#1452 案 1)。
+ * ⚠ 押しボタンはヘルプの面の中にしか無く、面は開くまで組まれない ── だから root に結んだ services から直に呼ぶ。
+ * 🔑 実体は押しボタンと同じ `services.openManualWindow`(口を 2 つ作らない)。編集中でも押せる(提案の核)。
+ */
+describe('マニュアルを別のウィンドウで開く(#1452 案 1)', () => {
+  const setupWith = (services: Parameters<typeof bindActions>[2]): { root: HTMLElement; d: Dispatcher } => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const root = document.createElement('div');
+    document.body.append(root);
+    buildShell(root);
+    const d = new Dispatcher();
+    bindActions(root, d, services);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
+    return { root, d };
+  };
+  const openWith = async (root: HTMLElement): Promise<void> => {
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'マニュアル';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('🔴 ヘルプを 1 度も開いていなくても、一覧に出て押せて、押しボタンと同じ実体が 1 回呼ばれる', async () => {
+    let opened = 0;
+    const { root } = setupWith({ openManualWindow: () => (opened += 1) });
+    // ⚠ 前提:ヘルプの押しボタンはまだ DOM に無い(面を開いていない)── これが特例の理由
+    expect(root.querySelector('[data-pkc-action="open-manual-window"]'), '前提が崩れている(ボタンが既に在る)').toBeNull();
+    await openWith(root);
+    const row = rowOf('open-manual-window');
+    expect(row, '「マニュアルを別のウィンドウで開く」が一覧に出ていない').toBeDefined();
+    expect(row!.querySelector('[data-pkc-field="palette-label"]')!.textContent).toBe('マニュアルを別のウィンドウで開く');
+    expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+    row!.click();
+    await tick();
+    expect(opened, '押したのに開いていない').toBe(1);
+  });
+
+  it('🔴 編集中でも押せる(別のウィンドウは本文に触らない ── #300 の形を避けるのが提案の核)', async () => {
+    let opened = 0;
+    const { root, d } = setupWith({ openManualWindow: () => (opened += 1) });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    await openWith(root);
+    const row = rowOf('open-manual-window');
+    expect(row!.disabled, '編集中に押せない').toBe(false);
+    row!.click();
+    await tick();
+    expect(opened).toBe(1);
+    expect(d.getState().phase, '開いただけで編集が終わった').toBe('editing');
+  });
+
+  it('⚠ 配線の無い版(古いタブ)では押せず、押しボタンと同じ理由が出る / 鍵で撃てば理由を言う', async () => {
+    const { root, d } = setupWith({});
+    await openWith(root);
+    const row = rowOf('open-manual-window');
+    expect(row!.disabled, '配線が無いのに押せることになっている').toBe(true);
+    expect(whyOf('open-manual-window')).toContain('再読み込み');
+    dialog()?.close();
+    const told: string[] = [];
+    let prevented = 0;
+    expect(runGlobalCommand('open-manual-window', root, d, new KeymapStore(), () => (prevented += 1), (t) => told.push(t))).toBe(true);
+    expect(told.at(-1)).toContain('再読み込み');
+    expect(prevented).toBe(1);
+  });
+});
+
 describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
   const TRANSCRIPT = '## 文字起こし\n0:00 こんにちは\n0:15 晴れ\n';
   const openPalette = async (root: HTMLElement, query: string): Promise<void> => {
