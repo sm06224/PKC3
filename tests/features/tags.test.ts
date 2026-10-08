@@ -183,6 +183,46 @@ describe('井桁が付いていれば、空白で区切る(#637)', () => {
     expect(splitTags('[tag1], [tag2], [tag3]')).toEqual(['tag1', 'tag2', 'tag3']);
   });
 
+  it('🔴 括弧で終わる正当な名前は 1 字も欠けない(正 = 対になっている / 負 = 閉じていない)', () => {
+    // 正の対照群: 対になっているので、そのまま残る(main と同じ)
+    expect(splitTags('a[1]')).toEqual(['a[1]']);
+    expect(splitTags('a[1], b')).toEqual(['a[1]', 'b']);
+    expect(splitTags('日本語[注]')).toEqual(['日本語[注]']);
+    expect(splitTags('tag[]')).toEqual(['tag[]']);
+    expect(splitTags('x [a]')).toEqual(['x [a]']);
+    expect(splitTags('[a]b')).toEqual(['[a]b']);
+    expect(splitTags('b, a[1]')).toEqual(['b', 'a[1]']);
+    // frontmatter の文字列形も同じ口(`splitTags`)を通る
+    expect(readTags(fm('tags: a[1], b'))).toEqual(['a[1]', 'b']);
+    // 括弧に触れない入力は main と同じ(区切りの後ろに空白が続く `b、 ` の `、` は落ちない)
+    expect(splitTags('b、 , c')).toEqual(['b、', 'c']);
+    // 負の対照群(同じ it): 閉じていない / 開いていない端だけ落ちる。
+    // ⚠ 括弧を位置を問わず全部消す実装は、上の正の側で落ちる ── 両側を同じ it に置く
+    expect(splitTags('[tag1], [tag2]')).toEqual(['tag1', 'tag2']);
+    expect(splitTags('[a], [b[1]]')).toEqual(['a', 'b[1]']);
+    expect(splitTags('x, [y')).toEqual(['x', 'y']);
+    expect(splitTags('x, y]')).toEqual(['x', 'y']);
+    // 端でない位置の対の無い括弧は名前の一部として残す
+    expect(splitTags('p, a]b')).toEqual(['p', 'a]b']);
+    expect(splitTags('p, a[b')).toEqual(['p', 'a[b']);
+  });
+
+  it('入れ子: 全体が 1 組なら外側だけ剥ぐ(main の bare の規則)/ 並びなら要素ごとに 1 組だけ剥ぐ', () => {
+    // 全体が 1 組の括弧なら外側 1 組だけ剥ぐ(main と同じ)→ 中の `[a]` は対なので残る
+    expect(splitTags('[[a]]')).toEqual(['[a]']);
+    expect(splitTags('[a, b]')).toEqual(['a', 'b']);
+    // 並び(先頭の `[` の相手が末尾ではない)は要素ごとに 1 組だけ剥ぐ:
+    // `[[a]]` → `[a]`(2 組目は残す)、`[b]` → `b`
+    expect(splitTags('[[a]], [b]')).toEqual(['[a]', 'b']);
+    // 剥いだ後に片割れが残る形(`[a]]` / `[b`)は、対の無い端だけ落ちる
+    expect(splitTags('[a]], [b')).toEqual(['[a]', 'b']);
+    // 並びの中の括弧で終わる名前は、並びの形でも残る
+    expect(splitTags('[a[1]], [b]')).toEqual(['a[1]', 'b']);
+    expect(splitTags('[x[1]], y[2]')).toEqual(['x[1]', 'y[2]']);
+    // 先頭が `[` で末尾が `]` でも、1 組ではない要素(`[a]b[c]`)は剥がない
+    expect(splitTags('[x], [a]b[c]')).toEqual(['x', '[a]b[c]']);
+  });
+
   it('空の欄は 0 個(押しても撃たない側へ倒す)', () => {
     expect(splitTags('')).toEqual([]);
     expect(splitTags('   ')).toEqual([]);
