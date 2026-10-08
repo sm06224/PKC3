@@ -544,7 +544,7 @@ function textBox(
         : `<a:ln w="9525"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:ln>`;
   const fill =
     fillRgb === null ? '<a:noFill/>' : `<a:solidFill><a:srgbClr val="${fillRgb}"/></a:solidFill>`;
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(xmlSafe(name))}"/>`
     + `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`
     + `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/>`
     + `<a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>`
@@ -859,7 +859,7 @@ function connectorXml(
     (look.width === null ? null : parsePlaceWidth(String(look.width))) ?? PLACE_LINE_WIDTH_DEFAULT;
   const wEmu = w * EMU_PER_PX;
   const flip = (p2.x < p1.x ? ' flipH="1"' : '') + (p2.y < p1.y ? ' flipV="1"' : '');
-  return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(name)}"/>`
+  return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${xmlEscape(xmlSafe(name))}"/>`
     + `<p:cNvCxnSpPr><a:stCxn id="${st.id}" idx="${st.idx}"/>`
     + `<a:endCxn id="${end.id}" idx="${end.idx}"/></p:cNvCxnSpPr><p:nvPr/></p:nvCxnSpPr>`
     + `<p:spPr><a:xfrm${flip}><a:off x="${Math.min(p1.x, p2.x)}" y="${Math.min(p1.y, p2.y)}"/>`

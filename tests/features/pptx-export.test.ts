@@ -1198,6 +1198,16 @@ describe('🔴 制御文字を、書き出しの全部品から落とす(#1366 �
     expect(illegalIn(r)).toEqual([]);
   });
 
+  it('板の名前(p:cNvPr の name)は user の字ではなく「付箋 N」の定数 ── 制御文字は届かない(#1430 の到達性の記録)', () => {
+    // ⚠ #1430 は `name="${xmlEscape(name)}"` に xmlSafe が無いことを穴と読んだが、ここに来る name は
+    //    `付箋 N` / `線 N` の定数で、user が書いた板の名前(#id)は書かれない。だから守る test は置けず、
+    //    実装の xmlSafe は防御のみ。この test は「届かない」ことを固定する(届くようになった日に落ちる)
+    const r = buildPptx([place(0, 0, 100, 50, 1, 'rect', '板\u0001名'), p('x')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect([...xml.matchAll(/name="([^"]*)"/g)].map((m) => m[1])).toEqual(['', '付箋 1']);
+    expect(illegalIn(r)).toEqual([]);
+  });
+
   it('対照群: 検出器自身が、制御文字・孤立した代用対・U+FFFE を見つける(空振り防止)', () => {
     for (const bad of ['a\u0001', 'a\uD800b', 'a\uDC00b', 'a￾b', 'a￿b']) {
       expect(hasIllegal(bad), JSON.stringify(bad)).toBe(true);
