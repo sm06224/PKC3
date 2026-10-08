@@ -178,16 +178,70 @@ describe('spliceFrontmatterKeys(原文 splice ── P3-4 review #5 の規律)',
     expect(out).toBe('---\r\nstatus: open\r\n---\r\n# 見出し\r\n本文\r\n次行');
   });
 
-  it('vars ブロック内に空行があっても後続の変数が読み飛ばされない (#1371)', () => {
-    const src = '---\nvars:\n  x: 1\n\n  y: 2\n---\n本文';
-    expect(extractVars(src)).toEqual({ x: '1', y: '2' });
+  it('⚠ CRLF 本文に複数の key を足すと、key 同士の間も CRLF (#1367)', () => {
+    // key が 1 本だと key 同士の区切りが無く、`join` の改行を取り違えても見えない
+    const body = '# 見出し\r\n本文\r\n';
+    const out = spliceFrontmatterKeys(body, { a: '1', b: '2' });
+    expect(out).toBe('---\r\na: "1"\r\nb: "2"\r\n---\r\n# 見出し\r\n本文\r\n');
+    // 対照群: LF 本文は LF のまま
+    expect(spliceFrontmatterKeys('# 見出し\n本文\n', { a: '1', b: '2' })).toBe(
+      '---\na: "1"\nb: "2"\n---\n# 見出し\n本文\n',
+    );
   });
 
-  it('シングルクォートエスケープを含む文字列と末尾コメント (#1372)', () => {
-    const src = "---\ntitle: 'It''s a note' # メモ\ntags: ['It''s a tag'] # タグ\n---\n本文";
-    const r = parseFrontmatter(src);
-    expect(r.meta['title']).toBe("It's a note");
-    expect(r.meta['tags']).toEqual(["It's a tag"]);
+  it('⚠ CRLF の水平線で始まる文書(閉じも key も無い)にも、前置する fence は CRLF (#1367)', () => {
+    // `---` で始まるが key の行が 1 つも無い = ただの水平線。fence を前置する枝
+    const body = '---\r\n本文\r\n';
+    const out = spliceFrontmatterKeys(body, { status: 'open' });
+    expect(out).toBe('---\r\nstatus: open\r\n---\r\n---\r\n本文\r\n');
+    // 対照群: LF の水平線は LF
+    expect(spliceFrontmatterKeys('---\n本文\n', { status: 'open' })).toBe(
+      '---\nstatus: open\n---\n---\n本文\n',
+    );
+  });
+
+  describe('vars: の途中に空行があるとき、書く側も読む側と同じに読む (#1371)', () => {
+    // extractVars は空行を跨いで vars の子行を読む。書く側がそこで閉じると
+    // 空行の先の子行を「トップレベルの key」と見て vars.status を書き換えてしまう
+    const src = '---\nvars:\n  x: 1\n\n  status: open\n---\n進捗は {{vars.status}}\n';
+
+    it('🔴 空行の先の `vars.status` を書き換えず、トップに足す', () => {
+      expect(extractVars(src), '前提: 空行の先も vars の子').toEqual({ x: '1', status: 'open' });
+      const out = spliceFrontmatterKeys(src, { status: 'done' });
+      expect(out).toBe(
+        '---\nvars:\n  x: 1\n\n  status: open\nstatus: done\n---\n進捗は {{vars.status}}\n',
+      );
+      expect(extractVars(out), 'vars.status が動いた').toEqual({ x: '1', status: 'open' });
+      expect(parseFrontmatter(out).meta['status']).toBe('done');
+    });
+
+    it('🔴 消す操作でも、空行の先の子行は消えない', () => {
+      expect(spliceFrontmatterKeys(src, { status: undefined })).toBe(src);
+    });
+
+    it('⚠ 対照群: 空行の先でも、字下げの無いトップレベルの key は書き換わる', () => {
+      const b = '---\nvars:\n  x: 1\n\nstatus: open\n---\n本文\n';
+      expect(spliceFrontmatterKeys(b, { status: 'done' })).toBe(
+        '---\nvars:\n  x: 1\n\nstatus: done\n---\n本文\n',
+      );
+    });
+  });
+
+  describe('他の呼び手 duplicateTopLevelKeys(parseFrontmatter の warnings)も空行を跨ぐ子行を数えない (#1371)', () => {
+    const dups = (b: string) =>
+      parseFrontmatter(b).warnings.filter((w) => w.kind === 'duplicate_key');
+
+    it('🔴 vars の子行(空行の先)と同名のトップ key は、重複と誤報しない', () => {
+      const b = '---\nvars:\n  a: 1\n\n  status: open\nstatus: done\n---\n本文\n';
+      expect(parseFrontmatter(b).meta['status'], '前提: 後勝ちで done').toBe('done');
+      expect(dups(b)).toHaveLength(0);
+    });
+
+    it('⚠ 対照群: 本物の重複は、空行を挟んでいても言う', () => {
+      expect(dups('---\nstatus: open\n\nstatus: done\n---\n本文\n')).toHaveLength(1);
+      // vars の子の後ろに空行があって、字下げの無い key が重なる形
+      expect(dups('---\nvars:\n  a: 1\n\nstatus: open\nstatus: done\n---\n本文\n')).toHaveLength(1);
+    });
   });
 });
 
@@ -206,5 +260,33 @@ describe('withTodoStatus(かんばんトグルの構造化操作)', () => {
 
   it('frontmatter の無い todo(素の本文)にも安全に付く', () => {
     expect(withTodoStatus('やること', 'done')).toBe('---\nstatus: done\n---\nやること');
+  });
+});
+
+/**
+ * 読む側の回帰 pin(splice の describe の外)。
+ * ⚠ #1372 は main で再現せず閉じた issue ── ここは「再現しない」ことの固定だけで、
+ *   PR #1417 の変更を守る test ではない。
+ */
+describe('frontmatter の読み取り(extractVars / parseFrontmatter)', () => {
+  it('vars ブロック内に空行があっても後続の変数が読み飛ばされない (#1371)', () => {
+    const src = '---\nvars:\n  x: 1\n\n  y: 2\n---\n本文';
+    expect(extractVars(src)).toEqual({ x: '1', y: '2' });
+  });
+
+  it('⚠ 対照群: 空行のあとに字下げの無い非 key 行が来たら vars はそこで閉じる (#1371)', () => {
+    // 終端を pin する ── 空行のあとの非 key 行を skip して読み進める変異を殺す
+    expect(extractVars('---\nvars:\n  x: 1\n\nnote: a\n  y: 2\n---\nb')).toEqual({ x: '1' });
+  });
+
+  it('⚠ 対照群: 空白だけの行も空行として跨ぐ (#1371)', () => {
+    expect(extractVars('---\nvars:\n  x: 1\n   \n  y: 2\n---\nb')).toEqual({ x: '1', y: '2' });
+  });
+
+  it('シングルクォートエスケープを含む文字列と末尾コメント(#1372 は再現せず。回帰 pin のみ)', () => {
+    const src = "---\ntitle: 'It''s a note' # メモ\ntags: ['It''s a tag'] # タグ\n---\n本文";
+    const r = parseFrontmatter(src);
+    expect(r.meta['title']).toBe("It's a note");
+    expect(r.meta['tags']).toEqual(["It's a tag"]);
   });
 });

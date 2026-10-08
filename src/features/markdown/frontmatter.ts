@@ -277,8 +277,12 @@ function frontmatterRunLength(lines: readonly string[]): number {
  * ⚠ 消す操作だけは「子行しか無い」ときに無言の no-op になる ── それでも
  *   **user の `vars` を壊すより良い**(取り消せない側へ倒さない)。
  *
- * 判定は `extractVars:617-627` の入れ子の読み方に合わせる ── 「**値の無い key**
- * より深く字下げされた行」が子で、空行か同じ深さ以下の行で閉じる。
+ * 判定は `extractVars` の入れ子の読み方に合わせる ── 「**値の無い key**
+ * より深く字下げされた行」が子で、**同じ深さ以下の行**で閉じる。
+ * 🔴 **空行は閉じない**(#1371)── `extractVars` は `vars:` の途中の空行を跨いで
+ *   後ろの子行も読む。書く側が空行で閉じると、空行の先の `  status: open` を
+ *   「トップレベルの key」と見て**`vars.status` を書き換えてしまう**(読む側と
+ *   書く側で空行の扱いが食い違う)。
  */
 function topLevelKeyLines(lines: readonly string[]): boolean[] {
   const flags: boolean[] = [];
@@ -289,7 +293,7 @@ function topLevelKeyLines(lines: readonly string[]): boolean[] {
     // ⚠ 次の行も渡す ── 「井桁の並びか」の判定が箇条書きの有無を見るため(#637 D)
     const line = stripTrailingComment(raw.replace(/\r?\n$/, ''), lines[i + 1]);
     if (line.trim() === '') {
-      openIndent = null;
+      // ⚠ `openIndent` はそのまま ── 空行はブロックを閉じない(上の注釈・#1371)
       flags.push(false);
       continue;
     }
@@ -1017,10 +1021,11 @@ export function spliceFrontmatterKeys(
         ? `${key}: [${value.map(serializeScalar).join(', ')}]`
         : `${key}: ${serializeScalar(value)}`;
 
+  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
+
   if (!OPEN_FENCE.test(body)) {
     const lines = entries.map(lineFor).filter((l): l is string => l !== null);
     if (lines.length === 0) return body;
-    const eol = body.includes('\r\n') ? '\r\n' : '\n';
     return `---${eol}${lines.join(eol)}${eol}---${eol}${body}`;
   }
 
@@ -1035,7 +1040,6 @@ export function spliceFrontmatterKeys(
       break;
     }
   }
-  const eol = body.includes('\r\n') ? '\r\n' : '\n'; // 新規行のみに使う
   if (closeAt === -1) {
     /**
      * 🔴 **開きは在るが閉じが無い**(#318)。直す前はここも「frontmatter 不在」と
@@ -1061,7 +1065,7 @@ export function spliceFrontmatterKeys(
     if (run === 0) {
       const lines = entries.map(lineFor).filter((l): l is string => l !== null);
       if (lines.length === 0) return body;
-      return `---\n${lines.join('\n')}\n---\n${body}`;
+      return `---${eol}${lines.join(eol)}${eol}---${eol}${body}`;
     }
     /**
      * 🔴 **書くものが何も無いなら、直さない**(着地前レビュー ②)。
