@@ -41,6 +41,63 @@ function normalize(raw: string): string {
   return raw.trim().replace(/^[#\s]+/u, '').trim().replace(/\s+/g, ' ');
 }
 
+/** 前後の空白はそのまま、中身(`trim` した部分)にだけ `fn` を掛ける。 */
+function onCore(t: string, fn: (core: string) => string): string {
+  const core = t.trim();
+  if (core === '') return t;
+  const at = t.indexOf(core);
+  return t.slice(0, at) + fn(core) + t.slice(at + core.length);
+}
+
+/**
+ * 先頭の `[` に対応する `]` の位置(無ければ -1)。先頭が `[` でなければ -1。
+ */
+function closeOfFirst(t: string): number {
+  if (t[0] !== '[') return -1;
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === '[') depth++;
+    else if (t[i] === ']' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** 全体が 1 組の角括弧で包まれている(先頭の `[` の相手が最後の `]`)なら、その 1 組だけ剥ぐ。 */
+function peelWrapped(t: string): string {
+  return t.length >= 2 && closeOfFirst(t) === t.length - 1 ? t.slice(1, -1) : t;
+}
+
+/**
+ * 🔴 **要素の端の角括弧を、対になっていないときだけ落とす**(#1373 の着地前レビュー)。
+ *
+ * > user の物語: `[tag1], [tag2]` や `[a[1]], [b]` を欄へ貼る。要素ごとの包みを剥いだ後に
+ * > `[a]]` のような片割れが残ることがある。一方 `a[1]` や `日本語[注]` は
+ * > **括弧で終わる正当な名前**で、落としてはいけない。
+ *
+ * 🔑 判定は要素の中の `[` と `]` の**対応**で決める ── 先頭の `[` は対応する `]` が
+ *   要素内に無いときだけ、末尾の `]` は対応する `[` が要素内に無いときだけ落とす。
+ *   (`[a]b` / `tag[]` / `x [a]` のように対になっている物は 1 字も変えない)
+ * ⚠ 端でない位置の対の無い括弧(`a]b`)は落とさない ── 名前の一部かもしれない。
+ */
+function dropUnpairedEdgeBrackets(t: string): string {
+  const open: number[] = [];
+  const unpaired = new Set<number>();
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '[') open.push(i);
+    else if (c === ']') {
+      if (open.length > 0) open.pop();
+      else unpaired.add(i);
+    }
+  }
+  for (const i of open) unpaired.add(i);
+  let a = 0;
+  let b = t.length;
+  while (a < b && t[a] === '[' && unpaired.has(a)) a++;
+  while (b > a && t[b - 1] === ']' && unpaired.has(b - 1)) b--;
+  return t.slice(a, b);
+}
+
 /**
  * 🔴 **1 本の字を、いくつのタグとして読むか**(#637。user 裁定 2026-08-31)。
  *
@@ -74,12 +131,19 @@ export function splitTags(raw: string): string[] {
   //    ここに 2 本目の判定を書くと、同じ字が欄と `tags:` で別の個数になる
   const words = hashRunWords(s) ?? strandedHashWords(s);
   /**
+   * 🔑 `[tag1], [tag2]` は**全体が 1 組の括弧ではない**(先頭の `[` は `tag1` の直後で閉じる)。
+   *   これを「外側 1 組」と読んで剥ぐと、内側の括弧が片割れになる ── だから**要素ごとに**
+   *   包まれていれば 1 組だけ剥ぐ(下の `listForm`)。外側が本当に 1 組(`[a, b]`)なら、これまでどおり。
+   */
+  const listForm =
+    words === null && s.startsWith('[') && s.endsWith(']') && closeOfFirst(s) !== s.length - 1;
+  /**
    * ⚠ 井桁の並びでないときは、これまでどおり**カンマだけ**で割る(空白は割らない)。
    * 🔑 **角括弧は落とす**(着地前の動線レビュー F)── マニュアルは `tags:` の行に
    *   `[#買い物, #家事]` と書く形を薦めているので、それを**欄へ貼る人が居る**。
    *   落とさないと「[買い物」「家事]」という 2 つの名前ができる(実測)。
    */
-  const bare = /^\[.*\]$/u.test(s) ? s.slice(1, -1) : s;
+  const bare = listForm ? s : /^\[.*\]$/u.test(s) ? s.slice(1, -1) : s;
   /**
    * ⚠ **カンマは井桁の並びの中でも区切りである**(2 稿目で `#買い物,#家事` を落として判明)。
    *   空白が 1 つも無いので語は 1 つになり、井桁の並びとしては割れない ── ここで
@@ -90,7 +154,12 @@ export function splitTags(raw: string): string[] {
   for (const part of parts) {
     // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
     //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
-    const t = normalize(part.replace(/[,、;；]+$/u, ''));
+    // 🔑 各要素の端の角括弧は、**対になっていないものだけ**落とす(`[tag1], [tag2]` のような並び。
+    //    ⚠ 無条件に落とすと `a[1]` が `a[1` になり、打った字が黙って欠ける)
+    // ⚠ 空白は**残したまま**中身だけ見る ── 先に `trim` すると `b、 ` の末尾の `、` まで
+    //    落ちて、括弧の無い名前の結果が変わる(括弧に触れない入力は 1 字も変えない)
+    const stripped = onCore(part, (c) => dropUnpairedEdgeBrackets(listForm ? peelWrapped(c) : c));
+    const t = normalize(stripped.replace(/[,、;；]+$/u, ''));
     if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
     if (out.some((x) => sameTag(x, t))) continue;
     out.push(t);
