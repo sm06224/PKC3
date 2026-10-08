@@ -1018,6 +1018,7 @@ jobs:
           marks=0
           if [ -f "$src" ]; then
             marks=$(grep -c 'PKC3-PROXYFINISH' "$src" || true)
+            marks=${marks:-0} # grep が読めずに落ちた回は空文字になり、[ "" -lt 1 ] が偽で素通りする ── 0 に倒す
           fi
           echo "proxying.c の印(PKC3-PROXYFINISH)の行数: $marks"
           if [ "$marks" -lt 1 ]; then

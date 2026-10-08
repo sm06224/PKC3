@@ -537,7 +537,7 @@ describe('#121 の直し(ime-nowait)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/23 → 24\(2026-10-04\)/);
     expect(yml).toContain('patch-lo-ime-nowait.py');
-    // いまの `-eq` は 35 ── 2026-10-07 に #1393 / #1396 / #1402 の LO 側の直し 5 本(layout-guard / hscroll-hdl / viewdata-gone / tooltip-guard / grip-guard)を足し(24 → 29)、timer-mutex で 30、yield-wait(#1408 の印)で 31、#1402 の計装 3 本(surface-trace / sdpr-trace / gfxdata-trace)で 34、2026-10-08 に hop-borrow(#1408 (c) の直し)で 35
+    // 🔑 本数は workflow の `test "$n" -eq N` の**実行行が正本**(下の pin)── 注釈に「いまの本数」を書かない(足すたびに古くなる)。経緯は workflow の `N` の行の注釈に在る。
     expect(yml).toContain('test "$n" -eq 35');
   });
 
