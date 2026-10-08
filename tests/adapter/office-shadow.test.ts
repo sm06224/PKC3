@@ -48,6 +48,9 @@ interface Api {
   reasonOf(e: unknown): string;
   createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean; afterSaved(): Promise<boolean> };
   MODIFIED_POLL_MS: number;
+  LOADING_CEILING_MS: number;
+  LOADING_GRACE_MS: number;
+  createLoadState(d: { now(): number; ceilingMs?: number; graceMs?: number }): { opened(): void; isLoading(): boolean };
   lastModified(): boolean | null;
   shouldBlockUnload(s: { pending: boolean; busy: boolean; typed?: boolean; lastModified: boolean | null }): boolean;
   unshelve(d: { storage: unknown; id: string }): Promise<boolean>;
@@ -71,7 +74,7 @@ interface WriterDeps {
   now(): number; quiet: Quiet; isDead(): boolean; isModified(): Promise<boolean | null>;
   write(): StoreResult; shelve(info: StoreResult): Promise<unknown>; discard(): void;
   onWritten(at: number): void; onFailed(reason: string): void; log?(e: unknown): void;
-  pollMs?: number; unshelve?(): Promise<boolean>;
+  pollMs?: number; unshelve?(): Promise<boolean>; isLoading?(): boolean;
 }
 
 function load(): Api {
@@ -196,6 +199,52 @@ describe('🔴 host.html の配線(原文の pin ── host.html は bundle さ
     expect(i, 'instantiateWasm を抜き出せていない').toBeGreaterThan(0);
     expect(k, '起動の import を包んでいない').toBeGreaterThan(i);
     expect(k, '包むのが instantiateStreaming より後(import は instantiate の時に決まる)').toBeLessThan(j);
+  });
+
+  it('🔴 読み込み中は本体へ聞かない(#1429): 判断は createLoadState、host は callMain の直前に作り、起動の見張りの 3 つの出口で opened() する', () => {
+    // ⚠ 注釈に満たされない形で見る ── 字面の pin は自分の解説コメントに満たされる(CLAUDE.md §1 の 5 度目 / 10 度目)。
+    //    全体から注釈を剥ぐと文字列の中の `//` まで剥がれるので、**当たった行が注釈でない**ことを見る
+    const lineOf = (text: string, idx: number) => text.slice(text.lastIndexOf('\n', idx) + 1, text.indexOf('\n', idx));
+    const live = (text: string, idx: number) => idx >= 0 && !/^\s*(\/\/|\*)/.test(lineOf(text, idx));
+    const code = host;
+    const arm = code.indexOf('function armShadow(');
+    const call = code.indexOf('armShadow(FS, function () { return docToken; }');   // ⚠ 定義ではなく呼ぶ行
+    const main = code.indexOf('inst.callMain(args)');
+    expect(arm, 'armShadow が無い').toBeGreaterThan(0);
+    expect(call, 'armShadow を呼んでいない').toBeGreaterThan(0);
+    expect(main, 'callMain が無い').toBeGreaterThan(call);
+    // 見張りは callMain の前に積まれる(armShadow が先)── だから読み込み中の印も同じ場所で、armShadow より前に作る
+    const made = code.indexOf('loLoad = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createLoadState({');
+    expect(made, '読み込み中の印を作っていない').toBeGreaterThan(0);
+    expect(live(code, made), '印を作る行が注釈').toBe(true);
+    expect(made, '印を作るのが armShadow より後').toBeLessThan(call);
+    const decl = code.indexOf('var loLoad = null;');
+    expect(live(code, decl), 'var loLoad の宣言が無い(または注釈)').toBe(true);
+    const pass = code.indexOf('isLoading: function () { return loLoad ? loLoad.isLoading() : false; }', arm);
+    expect(pass, 'armShadow が isLoading を渡していない').toBeGreaterThan(arm);
+    expect(pass, 'isLoading を渡すのが armShadow の外').toBeLessThan(code.indexOf('shadowTimer = setInterval', arm));
+    expect(live(code, pass), 'isLoading を渡す行が注釈').toBe(true);
+    // 下ろす場所は起動の見張りの 3 つの出口。それぞれの条件の塊の中(= 畳んだ直後)に在ること
+    const watch = code.slice(code.indexOf('tick = setInterval(function () {', main - 20000), main);
+    expect(watch.length, '起動の見張りを抜き出せていない').toBeGreaterThan(500);
+    const exits = [
+      ['開けた', 'docSeen = true;'],
+      ['文書を渡していない', 'if (launched && !wantDoc) {'],
+      ['36 秒の上限', 'if (ticks >= 120) {'],
+    ] as const;
+    for (const [name, anchor] of exits) {
+      const a = watch.indexOf(anchor);
+      expect(a, `出口「${name}」が無い`).toBeGreaterThan(0);
+      const after = watch.slice(a, a + 300);
+      const closed = after.indexOf('tick = null;');
+      expect(closed, `出口「${name}」で見張りを畳んでいない`).toBeGreaterThan(0);
+      const op = after.indexOf('if (loLoad) loLoad.opened();', closed);
+      expect(op, `出口「${name}」で opened() していない(畳んだ直後に)`).toBeGreaterThan(closed);
+      expect(live(after, op), `出口「${name}」の opened() が注釈`).toBe(true);
+    }
+    const liveCalls = [...code.matchAll(/loLoad\.opened\(\)/g)].filter((m) => live(code, m.index!));
+    expect(liveCalls, 'opened() を呼ぶ生きた行が出口の数と違う').toHaveLength(3);
+    expect(liveCalls.every((m) => m.index! > code.indexOf('tick = setInterval(function () {', main - 20000) && m.index! < main), '出口の外で opened() している').toBe(true);
   });
 });
 
@@ -1024,6 +1073,8 @@ function bootHostShadow(o: {
   doc?: { name: string; size: number; lid?: string };
   /** 窓に「保存していない変更が在るか」を聞かれたときの答え(既定は在る)。 */
   modified?: () => boolean | null;
+  /** 文書を読み込んでいる最中か(#1429。既定は開けた後)。host.html の `loLoad`(`createLoadState`)── 起動の見張りが `opened()` する。 */
+  loading?: boolean;
 }) {
   const raw = readFileSync('public/office/host.html', 'utf-8');
   const a = raw.indexOf('var shadowQuiet = ');
@@ -1053,7 +1104,7 @@ function bootHostShadow(o: {
   };
   const self = { crypto: { randomUUID: () => o.uuid } };
   const boot = new Function(
-    'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console',
+    'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console', 'loLoad',
     `${raw.slice(a, b)}\n;return { armShadow: armShadow, shadowQuiet: shadowQuiet, afterSaved: function () { return shadowAfterSaved ? shadowAfterSaved() : null; } };`,
   );
   const host = boot(
@@ -1061,6 +1112,7 @@ function bootHostShadow(o: {
     (type: string, payload: Record<string, unknown>) => { said.push({ type, payload }); },
     false, o.patched, gate, { storage: o.storage },
     (fn: () => void) => { intervals.push(fn); return 1; }, () => undefined, { warn: () => undefined },
+    { isLoading: () => o.loading === true, opened: () => undefined },
   ) as { armShadow(FS: unknown, getToken: () => string, getDoc: () => unknown): void; shadowQuiet: Quiet; afterSaved(): Promise<boolean> | null };
   host.armShadow(f.lo.FS, () => o.token, () => o.doc ?? { name: 'a.docx', size: 1234 });
   expect(intervals, '1 秒ごとの見張りを積んでいない').toHaveLength(1);
@@ -1075,6 +1127,19 @@ describe('🔴 host.html の影の配線を実行する行のまま動かす(印
   afterEach(() => { vi.useRealTimers(); });
   const at = (ms: number) => { vi.setSystemTime(ms); };
   const T0 = 1_700_000_000_000;
+
+  it('🔴 読み込み中(loLoading)は、打っても間隔が来ても本体へ 1 度も聞かず、書かない(#1429。host の配線を通して)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const root = new FakeDir();
+    let asked = 0;
+    const h = bootHostShadow({ uuid: 'L', token: 'lid-L', patched: ['env'], storage: root, loading: true, modified: () => { asked += 1; return true; } });
+    at(T0);
+    h.handlers.keydown!({ key: 'a' });
+    for (let i = 1; i <= 12; i += 1) { at(T0 + i * 1000); await h.tick(); }
+    expect(asked, '読み込み中に本体へ聞いた').toBe(0);
+    expect(h.said.filter((m) => m.type === 'shadow-written'), '読み込み中に書いた').toEqual([]);
+    expect(root.files.size, '読み込み中に棚へ置いた').toBe(0);
+  });
 
   it('keydown を撃つと印が立ち、3 秒止まると 1 回書く(印の種類から keydown を外すと窓の打鍵が届かない)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -1342,6 +1407,94 @@ describe('🔴 マウスだけの編集を拾う(isModified の変化 + 変更�
     api.feedInput(on.quiet, 'pointerup', {}, clock.t);
     for (let i = 0; i < 5; i += 1) { clock.t += 1000; await on.writer.tick(); }
     expect(written, '変更ありのまま 2 手目のマウス操作が書かれない').toHaveLength(2);
+  });
+});
+
+describe('🔴 読み込み中か(createLoadState、#1429)', () => {
+  it('開けるまで真。opened() の後も猶予(LOADING_GRACE_MS)の間は真 ── 題名が出た後も本体の読み込みは 2〜3 秒続く。猶予が過ぎたら偽', () => {
+    const clock = { t: 5_000_000 };
+    const st = api.createLoadState({ now: () => clock.t });
+    expect(st.isLoading()).toBe(true);
+    clock.t += 15_000;
+    expect(st.isLoading(), '開ける前に偽になった').toBe(true);
+    st.opened();
+    expect(st.isLoading(), '開けた直後に偽(最初の問い合わせが本体の鍵を待つ)').toBe(true);
+    clock.t += api.LOADING_GRACE_MS - 1;
+    expect(st.isLoading(), '猶予の途中で偽').toBe(true);
+    clock.t += 1;
+    expect(st.isLoading(), '猶予が過ぎても真').toBe(false);
+    // opened() を 2 度呼んでも猶予は伸びない(見張りの出口が 2 度通っても同じ)
+    st.opened();
+    expect(st.isLoading()).toBe(false);
+  });
+
+  it('🔴 opened() が一度も来なくても天井(LOADING_CEILING_MS)で偽になる ── 影が永久に止まる窓を作らない', () => {
+    const clock = { t: 5_000_000 };
+    const st = api.createLoadState({ now: () => clock.t });
+    clock.t += api.LOADING_CEILING_MS - 1;
+    expect(st.isLoading()).toBe(true);
+    clock.t += 1;
+    expect(st.isLoading(), '天井を超えても真').toBe(false);
+    // 対照群: 天井の後に opened() が来ても、もう猶予で真に戻さない… ではなく、猶予は「開けた」を起点に数える
+    st.opened();
+    expect(st.isLoading(), '天井の後の opened() で猶予が始まる(開けたのが本当に遅かった窓)').toBe(true);
+    clock.t += api.LOADING_GRACE_MS;
+    expect(st.isLoading()).toBe(false);
+  });
+
+  it('天井と猶予は渡して変えられる(測り直した日に数だけ直せる)', () => {
+    const clock = { t: 0 };
+    const st = api.createLoadState({ now: () => clock.t, ceilingMs: 100, graceMs: 50 });
+    clock.t = 99; expect(st.isLoading()).toBe(true);
+    clock.t = 100; expect(st.isLoading()).toBe(false);
+    st.opened(); clock.t = 149; expect(st.isLoading()).toBe(true);
+    clock.t = 150; expect(st.isLoading()).toBe(false);
+  });
+});
+
+describe('🔴 読み込み中は本体へ聞かない(#1429)', () => {
+  it('isLoading が真の間は tick が loading を返し、isModified を 1 度も呼ばない。偽になったら従来どおり聞いて書く', async () => {
+    const clock = { t: 1_000_000 };
+    let loading = true;
+    const polls: number[] = [];
+    const written: number[] = [];
+    const quiet = api.createQuiet();
+    const writer = api.createWriter({
+      now: () => clock.t, quiet, isDead: () => false, isLoading: () => loading,
+      isModified: async () => { polls.push(clock.t); return true; },
+      write: () => ({ ext: 'odt', path: '/p', size: 1 }),
+      shelve: async () => { written.push(clock.t); },
+      discard: () => undefined, onWritten: () => undefined, onFailed: () => undefined,
+      pollMs: api.MODIFIED_POLL_MS,
+    });
+    // 読み込み中(最初の tick は積んだ 1 秒後 ── ここで聞くと本体の鍵を 4〜15 秒待つ)。打鍵の契機が在っても聞かない
+    quiet.typed(clock.t);
+    for (let i = 0; i < 15; i += 1) { clock.t += 1000; expect(await writer.tick()).toBe('loading'); }
+    expect(polls, '読み込み中に本体へ聞いた').toEqual([]);
+    expect(written).toEqual([]);
+    // 開けた(対照群): 同じ writer が聞き始め、変更ありなので静止の後に 1 回書く
+    loading = false;
+    const outcomes: string[] = [];
+    for (let i = 0; i < 10; i += 1) { clock.t += 1000; outcomes.push(await writer.tick()); }
+    expect(polls.length, '開けた後に聞いていない').toBeGreaterThanOrEqual(1);
+    expect(outcomes.filter((o) => o === 'written'), `開けた後に書かれない: ${outcomes.join(',')}`).toHaveLength(1);
+    expect(outcomes, '開けた後に loading を返した').not.toContain('loading');
+  });
+
+  it('isLoading を渡さなければ従来どおり最初の tick から聞く(対照群 ── 門が無ければ素通りすることの pin)', async () => {
+    const clock = { t: 1_000_000 };
+    const polls: number[] = [];
+    const quiet = api.createQuiet();
+    const writer = api.createWriter({
+      now: () => clock.t, quiet, isDead: () => false,
+      isModified: async () => { polls.push(clock.t); return false; },
+      write: () => ({ ext: 'odt', path: '/p', size: 1 }), shelve: async () => undefined,
+      discard: () => undefined, onWritten: () => undefined, onFailed: () => undefined,
+      pollMs: api.MODIFIED_POLL_MS,
+    });
+    clock.t += 1000;
+    expect(await writer.tick()).toBe('wait');
+    expect(polls, '渡していないのに聞かない').toHaveLength(1);
   });
 });
 
