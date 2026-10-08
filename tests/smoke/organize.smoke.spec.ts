@@ -724,7 +724,7 @@ test('🔴 ↑↓ で行を送れて、Enter は読むところから始まる',
  * 合成 event では「押した鍵が本当にブラウザの既定(検索・全画面解除)より
  * 先に消費されるか」までは確かめられない)。
  */
-test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、Escape の 2 段決着 (#1042 / #813)', async ({ page }) => {
+test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、Escape の 2 段決着 (#1042 / #813)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -973,6 +973,21 @@ test('🔴 フォルダの表の ↑↓・Enter・探す欄からの ↓ と、E
   // 名前を 1 字でも打ったら、いつもの絞り込みだけ
   await box.fill('>集');
   await expect(recentHeading, '打ち始めたのに見出しが残っている').toHaveCount(0);
+
+  /**
+   * 🔴 **左の `>` の一覧からも「マニュアルを別のウィンドウで開く」が押せて、別のウィンドウが開く**(#1452 案 1)。
+   * ⚠ ヘルプの面を開いていない起動の続き(ボタンを撃つ形では届かない)。
+   */
+  await box.fill('>マニュアル');
+  const manualRow = cmdList.locator('[data-pkc-command="open-manual-window"]');
+  await expect(manualRow, '左の `>` の一覧に「マニュアルを別のウィンドウで開く」が出ない').toBeVisible();
+  const manualPopup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-region="command-list"] [data-pkc-command="open-manual-window"]');
+  const manualWin = await manualPopup;
+  await manualWin.waitForURL((u) => /\/manual\.html$/u.test(u.pathname));
+  await expect(manualWin.locator('[data-pkc-field="manual-window-head"]')).toContainText('マニュアル — PKC3');
+  await manualWin.close();
+  await page.bringToFront();
   await box.fill('');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
