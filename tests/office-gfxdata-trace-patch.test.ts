@@ -500,6 +500,6 @@ describe('#1402(gfxdata-trace)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/31 → 34\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-gfxdata-trace.py');
-    expect(yml).toContain('test "$n" -eq 34');
+    expect(yml).toContain('test "$n" -eq 35');
   });
 });
