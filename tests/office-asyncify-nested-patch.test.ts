@@ -1048,7 +1048,8 @@ int main()
     }
   }
 
-  it('🔴 JSPI: 予約しても深さは落ちず、入れ子の suspend が通り(戻ると 1 つ減る)、外側も戻る', () => {
+  // ⚠ g++ による実走コンパイル・実行で並列負荷時に 10 秒超を要するため 20 秒に緩和(#1463)
+  it('🔴 JSPI: 予約しても深さは落ちず、入れ子の suspend が通り(戻ると 1 つ減る)、外側も戻る', { timeout: 20_000 }, () => {
     const r = compileAndRun(true);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('idle-resume js=0 depth=0');
@@ -1059,7 +1060,8 @@ int main()
     expect(r.out).toContain('outer=1 depth=0');
   });
 
-  it('🔴 asyncify(1): 入れ子は従来どおり断る(false)。JS へ 2 度目は入らない', () => {
+  // ⚠ g++ による実走コンパイル・実行で並列負荷時に 10 秒超を要するため 20 秒に緩和(#1463)
+  it('🔴 asyncify(1): 入れ子は従来どおり断る(false)。JS へ 2 度目は入らない', { timeout: 20_000 }, () => {
     const r = compileAndRun(false);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('nested-returned=0 depth=1');
