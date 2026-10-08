@@ -786,7 +786,7 @@ function tableXml(id: number, rect: Rect, rows: readonly (readonly ExportCell[])
 
 /** 画像 1 つ → `<p:pic>`。⚠ `r:embed` はそのスライドの rels に実体が要る。 */
 function picXml(id: number, rect: Rect, relId: string, alt: string): string {
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="画像" descr="${xmlEscape(alt)}"/>`
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="画像" descr="${xmlEscape(xmlSafe(alt))}"/>`
     + '<p:cNvPicPr/><p:nvPr/></p:nvPicPr>'
     + `<p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>`
     + `<p:spPr><a:xfrm><a:off x="${rect.x}" y="${rect.y}"/><a:ext cx="${rect.w}" cy="${rect.h}"/></a:xfrm>`
@@ -1185,11 +1185,11 @@ export function buildPptx(
           //    package の中の部品を探し、見つからずに file ごと拒む
           if (rel.kind === 'hyperlink') {
             return `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"`
-              + ` Target="${xmlEscape(rel.target)}" TargetMode="External"/>`;
+              + ` Target="${xmlEscape(xmlSafe(rel.target))}" TargetMode="External"/>`;
           }
           // ⚠ 画像は **package の中**を指す(`../media/...`)── bytes を入れるのは呼び側
           return `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-            + ` Target="../${xmlEscape(rel.target)}"/>`;
+            + ` Target="../${xmlEscape(xmlSafe(rel.target))}"/>`;
         }).join('')
         + '</Relationships>',
     });

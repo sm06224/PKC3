@@ -10,6 +10,7 @@
  * 4. **PowerPoint に縮めさせる**(`<a:normAutofit/>`)── 切り捨てない
  */
 import type { PlaceShape } from '../../src/features/markdown/place-shape';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { buildPptx, splitIntoSlides, type ExportBlock, type ExportCell } from '@features/export/pptx';
 
@@ -1146,6 +1147,77 @@ describe('制御文字の除去 (xmlSafe) (#1366)', () => {
     const badControls = ['\u0000', '\u0007', '\u000B', '\u001F'];
     for (const c of badControls) {
       expect(xml.includes(c)).toBe(false);
+    }
+  });
+});
+
+describe('🔴 制御文字を、書き出しの全部品から落とす(#1366 の続き)', () => {
+  // ⚠ fixture の制御文字は escape で書く(生バイトを埋めない)。
+  /**
+   * 🔴 **XML 1.0 の Char に入らない字を、出力から直に探す。** ⚠ happy-dom の `DOMParser` は
+   * 制御文字を**咎めない**(実測: `<a b="x&#1;y">a\u0001</a>` が `parsererror` 0 件で通る)ので、
+   * 「parse して `parsererror` が無い」は**この欠陥を 1 つも検出できない**。
+   * 実装の `xmlSafe` とは別の綴り(許す範囲を符号位置の比較で書く)で見る。
+   */
+  const hasIllegal = (s: string): boolean => {
+    for (const ch of s) {
+      const c = ch.codePointAt(0)!;
+      const ok = c === 0x9 || c === 0xa || c === 0xd
+        || (c >= 0x20 && c <= 0xd7ff) || (c >= 0xe000 && c <= 0xfffd) || (c >= 0x10000 && c <= 0x10ffff);
+      if (!ok) return true;
+    }
+    return false;
+  };
+  const illegalIn = (r: ReturnType<typeof buildPptx>): string[] =>
+    r.parts.filter((x) => hasIllegal(x.text)).map((x) => x.name);
+
+  it('残る側の対照群: tab / LF / CR / 絵文字(代用対)/ 全角 / & < は残り、U+FFFE と U+FFFF は落ちる', () => {
+    const r = buildPptx([p('a\tb\nc\r😀全角&<￾￿z')], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml).toContain('<a:t>a\tb\nc\r😀全角&amp;&lt;z</a:t>');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('画像の代替文(descr)の制御文字が落ちる(段落とは別の経路)', () => {
+    const r = buildPptx(
+      [{ kind: 'image', media: 'media/a.png', widthPx: 100, heightPx: 50, alt: 'alt\u0001' }],
+      { title: 'T' },
+    );
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml).toContain('descr="alt"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('リンク先(.rels の Target)の制御文字が落ちる', () => {
+    const r = buildPptx(
+      [{ kind: 'p', runs: [{ text: 'link', href: 'http://x/\u0001a' }] }],
+      { title: 'T' },
+    );
+    const rels = partOf(r, 'ppt/slides/_rels/slide1.xml.rels');
+    expect(rels).toContain('Target="http://x/a"');
+    expect(illegalIn(r)).toEqual([]);
+  });
+
+  it('対照群: 検出器自身が、制御文字・孤立した代用対・U+FFFE を見つける(空振り防止)', () => {
+    for (const bad of ['a\u0001', 'a\uD800b', 'a\uDC00b', 'a￾b', 'a￿b']) {
+      expect(hasIllegal(bad), JSON.stringify(bad)).toBe(true);
+    }
+    expect(hasIllegal('a\tb\nc\r😀全角&<')).toBe(false);
+  });
+
+  // xmllint が在る箱でだけ、本物の parser でも見る(無い箱では skip ── 上の走査が本体)。
+  const hasXmllint = spawnSync('xmllint', ['--version'], { stdio: 'pipe' }).status !== null;
+  it.skipIf(!hasXmllint)('xmllint が、slide と rels を well-formed と読む', () => {
+    const r = buildPptx(
+      [
+        { kind: 'p', runs: [{ text: 'x\u0001y', href: 'http://x/\u0001a' }] },
+        { kind: 'image', media: 'media/a.png', widthPx: 100, heightPx: 50, alt: 'alt\u0001' },
+      ],
+      { title: 'T' },
+    );
+    for (const name of ['ppt/slides/slide1.xml', 'ppt/slides/_rels/slide1.xml.rels']) {
+      const out = spawnSync('xmllint', ['--noout', '-'], { input: partOf(r, name), encoding: 'utf8', stdio: 'pipe' });
+      expect(out.status, `${name}: ${out.stderr}`).toBe(0);
     }
   });
 });
