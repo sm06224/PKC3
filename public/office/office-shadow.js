@@ -539,6 +539,38 @@
     return !!(s && (s.pending || s.busy || s.typed === true || s.lastModified === true));
   }
 
+  // ───────────────────────── 読み込み中か(#1429) ─────────────────────────
+
+  /** 読み込み中の天井(ms)。起動の見張りが出口に届かない窓(見張りの callback が毎回例外を投げる等)でも、影を永久に止めない。 */
+  var LOADING_CEILING_MS = 60000;
+  /**
+   * 「開けた」の後の猶予(ms)。⚠ 起動の見張りの「開けた」は**題名に文書名が出た時点**で、本体の読み込みはそこから
+   * まだ続く(headless の実測 2026-10-08、配った一式 run37712665674: 題名の後 2.2〜3.0 秒は本体が鍵を持ったまま ──
+   * 猶予なしだと最初の問い合わせがそこで 2〜4 秒待つ)。実機は箱より遅いので余裕を取る。
+   */
+  var LOADING_GRACE_MS = 10000;
+  /**
+   * 文書を読み込んでいる最中か(#1429)。`opened()` で「開けた」を知らせる(host.html は起動の見張りの出口で呼ぶ)。
+   * 読み込み中 = まだ開けていない(天井まで)か、開けてから猶予が過ぎていない。
+   * ⚠ 下ろされなくても `ceilingMs`(既定 `LOADING_CEILING_MS`)で偽になる ── 読み込み中に聞かないのは体感の話だが、
+   *   影が二度と書かれないのは user の未保存分を守れない話で、後者のほうが重い。
+   * @param d `now()` / `ceilingMs`(任意)/ `graceMs`(任意)
+   */
+  function createLoadState(d) {
+    var t0 = d.now();
+    var openedAt = null;
+    var ceiling = typeof d.ceilingMs === 'number' ? d.ceilingMs : LOADING_CEILING_MS;
+    var grace = typeof d.graceMs === 'number' ? d.graceMs : LOADING_GRACE_MS;
+    return {
+      opened: function () { if (openedAt === null) openedAt = d.now(); },
+      isLoading: function () {
+        var t = d.now();
+        if (openedAt === null) return (t - t0) < ceiling;
+        return (t - openedAt) < grace;
+      },
+    };
+  }
+
   // ───────────────────────── 書く流れ(静止 → 確かめる → 書く → 棚へ) ─────────────────────────
 
   /**
@@ -547,9 +579,10 @@
    *   `write()`(同期。`storeShadowSync`)/ `shelve(info)`(Promise)/ `discard()` / `onWritten(at)` / `onFailed(reason)` /
    *   `log(e)`(任意)/ `pollMs`(任意。`MODIFIED_POLL_MS` ── 聞く間隔。省けば聞かない = 打鍵の契機だけ)/
    *   `unshelve()`(任意。Promise ── `afterSaved` が棚を消す)/
-   *   `isLoading()`(任意。真の間は Office 本体へ**何も聞かない**。#1429 ── 文書を読み込んでいる最中に
-   *   `isModified` を聞くと、その問い合わせが本体の鍵(SolarMutex)を読み込みが終わるまで 4〜15 秒待ち、
-   *   窓の JS が止まる。見張りは `callMain` の前に積まれるので、省くと最初の tick(1 秒後)で必ず踏む)
+   *   `isLoading()`(任意。真の間は **tick が** Office 本体へ何も聞かない(`afterSaved` は別 ── 保存は開いた後にしか
+   *   起きない)。#1429 ── 文書を読み込んでいる最中に `isModified` を聞くと、その問い合わせが本体の鍵(SolarMutex)を
+   *   読み込みが終わるまで 4〜15 秒待ち、窓の JS が止まる。見張りは `callMain` の前に積まれるので、省くと最初の tick
+   *   (1 秒後)で必ず踏む。判断は `createLoadState` ── host は出口で `opened()` を呼ぶだけ)
    * @returns `'dead' | 'busy' | 'loading' | 'wait' | 'clean' | 'skipped' | 'written' | 'failed'`(test の観測点)
    */
   function createWriter(d) {
@@ -663,6 +696,9 @@
     unshelve: unshelve,
     reasonOf: reasonOf,
     createWriter: createWriter,
+    LOADING_CEILING_MS: LOADING_CEILING_MS,
+    LOADING_GRACE_MS: LOADING_GRACE_MS,
+    createLoadState: createLoadState,
     lastModified: lastModified,
     shouldBlockUnload: shouldBlockUnload,
   };

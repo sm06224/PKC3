@@ -276,9 +276,10 @@
   var tick = null;
   var dead = false;
   // 🔴 Office 本体が文書を読み込んでいる最中か(#1429)。影の見張り(`armShadow`)はこれが真の間、本体へ聞かない。
-  //    下ろすのは起動の見張り(`tick`)の 3 つの出口(開けた / 文書を渡していない / 36 秒の上限)── 上限で下ろすのは、
-  //    開かなかった回でも従来どおり見張りを続けるため(開けなかった文書に影は書かれない = `isModified` が偽)
-  var loLoading = true;
+  //    判断は `office-shadow.js` の `createLoadState`(天井つき)。作るのは `callMain` の直前、下ろすのは起動の見張り
+  //    (`tick`)の 3 つの出口(開けた / 文書を渡していない / 36 秒の上限)── 上限でも下ろすのは、開かなかった回でも
+  //    従来どおり見張りを続けるため(開けなかった文書に影は書かれない = `isModified` が偽)
+  var loLoad = null;
   function died(reason) {
     if (dead) return;
     dead = true;
@@ -655,8 +656,8 @@
       quiet: shadowQuiet,
       isDead: function () { return dead; },
       isModified: function () { return U.anyModified(window.__lo); },
-      // 🔴 読み込み中は聞かない(#1429 ── 読み込み中の問い合わせは本体の鍵を 4〜15 秒待つ)。判断は `office-shadow.js` の tick
-      isLoading: function () { return loLoading; },
+      // 🔴 読み込み中は聞かない(#1429 ── 読み込み中の問い合わせは本体の鍵を 4〜15 秒待つ)。判断は `office-shadow.js`
+      isLoading: function () { return loLoad ? loLoad.isLoading() : false; },
       // 🔴 マウスだけの編集を拾うために、一定の間隔で「保存していない変更が在るか」を聞く(#1228 段 2。判断は `office-shadow.js`)
       pollMs: SH.MODIFIED_POLL_MS,
       // 保存が通ったら棚を消す(同じ棚の名前 = `safeId`)。⚠ 判断(変更が無いときだけ消す)は `createWriter().afterSaved`
@@ -1927,6 +1928,8 @@
       //    ことがある ── 後ろに置くと**一生積まれない**。
       //    ⚠ 文書が無いとき(Start Center)も積む ── 新規作成の保存がここから来る
       armSaveWatch(FS, docToken);
+      // 🔴 読み込み中の印(#1429)。天井の時計はここから(一式を IDB から読む時間を含めない)
+      loLoad = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createLoadState({ now: function () { return Date.now(); } }) : null;
       // 🔴 影(編集中の文書の写し)の見張り(#1228 段 1)。⚠ 保存の見張りと**別の timer**(1 timer = 1 仕事)
       armShadow(FS, function () { return docToken; }, function () { return { name: docName, size: docBytes ? docBytes.length : 0, lid: docToken }; });
       // 版面が出たら確定させる。⚠ callMain は event loop に入ったまま戻らないことがある
@@ -2003,7 +2006,7 @@
            */
           clearInterval(tick);
           tick = null;
-          loLoading = false;   // #1429: 開けたので、影の見張りが本体へ聞いてよい
+          if (loLoad) loLoad.opened();   // #1429: 開けたので、影の見張りが本体へ聞いてよい
           // 🔴 控えの版で開いたなら、そう言って「保存していない変更あり」にする(#1228 段 2)。⚠ 畳んだ後に呼ぶ
           //    (判断は上の `markOpenedFromShadow`。ここに足すと、上の見張りを畳む窓の外へ溢れる)
           if (docFromShadow) markOpenedFromShadow();
@@ -2012,14 +2015,14 @@
         if (launched && !wantDoc) {
           clearInterval(tick);
           tick = null;
-          loLoading = false;   // #1429: 文書を渡していない(Start Center)── 読み込む物が無い
+          if (loLoad) loLoad.opened();   // #1429: 文書を渡していない(Start Center)── 読み込む物が無い
           return;
         }
         ticks += 1;
         if (ticks >= 120) {          // 300ms × 120 = 36 秒
           clearInterval(tick);
           tick = null;
-          loLoading = false;   // #1429: 上限 ── 開けなくても見張りは従来どおり続ける
+          if (loLoad) loLoad.opened();   // #1429: 上限 ── 開けなくても見張りは従来どおり続ける
           /**
            * 🔴 **上限に達したら黙らない**(#199)。⚠ 直す前はここへ**到達しなかった**
            *   ── canvas が先に出て `clearInterval` していたので、開かない文書でも

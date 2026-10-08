@@ -48,6 +48,9 @@ interface Api {
   reasonOf(e: unknown): string;
   createWriter(d: WriterDeps): { tick(): Promise<string>; isBusy(): boolean; afterSaved(): Promise<boolean> };
   MODIFIED_POLL_MS: number;
+  LOADING_CEILING_MS: number;
+  LOADING_GRACE_MS: number;
+  createLoadState(d: { now(): number; ceilingMs?: number; graceMs?: number }): { opened(): void; isLoading(): boolean };
   lastModified(): boolean | null;
   shouldBlockUnload(s: { pending: boolean; busy: boolean; typed?: boolean; lastModified: boolean | null }): boolean;
   unshelve(d: { storage: unknown; id: string }): Promise<boolean>;
@@ -198,21 +201,50 @@ describe('🔴 host.html の配線(原文の pin ── host.html は bundle さ
     expect(k, '包むのが instantiateStreaming より後(import は instantiate の時に決まる)').toBeLessThan(j);
   });
 
-  it('🔴 読み込み中は本体へ聞かない(#1429): isLoading を渡し、起動の見張りの 3 つの出口で下ろす', () => {
-    // 見張りは callMain の前に積まれる(armShadow が先)。isLoading が無いと最初の tick で本体の鍵を待つ
-    const arm = host.indexOf('function armShadow(');
-    const call = host.indexOf('armShadow(FS,');
-    const main = host.indexOf('inst.callMain(args)');
+  it('🔴 読み込み中は本体へ聞かない(#1429): 判断は createLoadState、host は callMain の直前に作り、起動の見張りの 3 つの出口で opened() する', () => {
+    // ⚠ 注釈に満たされない形で見る ── 字面の pin は自分の解説コメントに満たされる(CLAUDE.md §1 の 5 度目 / 10 度目)。
+    //    全体から注釈を剥ぐと文字列の中の `//` まで剥がれるので、**当たった行が注釈でない**ことを見る
+    const lineOf = (text: string, idx: number) => text.slice(text.lastIndexOf('\n', idx) + 1, text.indexOf('\n', idx));
+    const live = (text: string, idx: number) => idx >= 0 && !/^\s*(\/\/|\*)/.test(lineOf(text, idx));
+    const code = host;
+    const arm = code.indexOf('function armShadow(');
+    const call = code.indexOf('armShadow(FS, function () { return docToken; }');   // ⚠ 定義ではなく呼ぶ行
+    const main = code.indexOf('inst.callMain(args)');
     expect(arm, 'armShadow が無い').toBeGreaterThan(0);
     expect(call, 'armShadow を呼んでいない').toBeGreaterThan(0);
     expect(main, 'callMain が無い').toBeGreaterThan(call);
-    expect(host.slice(arm, host.indexOf('shadowTimer = setInterval', arm))).toContain('isLoading: function () { return loLoading; }');
-    expect(host).toContain('var loLoading = true;');
-    // 下ろす場所は 3 つ: 開けた / 文書を渡していない / 36 秒の上限 ── どれも見張りを畳んだ直後
-    const lowered = [...host.matchAll(/loLoading = false;/g)].map((m) => m.index!);
-    expect(lowered, '下ろす場所が 3 つではない').toHaveLength(3);
-    for (const i of lowered) expect(host.slice(i - 80, i), `見張りを畳まずに下ろしている @${i}`).toContain('tick = null;');
-    expect(lowered.every((i) => i > call), '見張りの出口より前で下ろしている').toBe(true);
+    // 見張りは callMain の前に積まれる(armShadow が先)── だから読み込み中の印も同じ場所で、armShadow より前に作る
+    const made = code.indexOf('loLoad = window.PKC3OfficeShadow ? window.PKC3OfficeShadow.createLoadState({');
+    expect(made, '読み込み中の印を作っていない').toBeGreaterThan(0);
+    expect(live(code, made), '印を作る行が注釈').toBe(true);
+    expect(made, '印を作るのが armShadow より後').toBeLessThan(call);
+    const decl = code.indexOf('var loLoad = null;');
+    expect(live(code, decl), 'var loLoad の宣言が無い(または注釈)').toBe(true);
+    const pass = code.indexOf('isLoading: function () { return loLoad ? loLoad.isLoading() : false; }', arm);
+    expect(pass, 'armShadow が isLoading を渡していない').toBeGreaterThan(arm);
+    expect(pass, 'isLoading を渡すのが armShadow の外').toBeLessThan(code.indexOf('shadowTimer = setInterval', arm));
+    expect(live(code, pass), 'isLoading を渡す行が注釈').toBe(true);
+    // 下ろす場所は起動の見張りの 3 つの出口。それぞれの条件の塊の中(= 畳んだ直後)に在ること
+    const watch = code.slice(code.indexOf('tick = setInterval(function () {', main - 20000), main);
+    expect(watch.length, '起動の見張りを抜き出せていない').toBeGreaterThan(500);
+    const exits = [
+      ['開けた', 'docSeen = true;'],
+      ['文書を渡していない', 'if (launched && !wantDoc) {'],
+      ['36 秒の上限', 'if (ticks >= 120) {'],
+    ] as const;
+    for (const [name, anchor] of exits) {
+      const a = watch.indexOf(anchor);
+      expect(a, `出口「${name}」が無い`).toBeGreaterThan(0);
+      const after = watch.slice(a, a + 300);
+      const closed = after.indexOf('tick = null;');
+      expect(closed, `出口「${name}」で見張りを畳んでいない`).toBeGreaterThan(0);
+      const op = after.indexOf('if (loLoad) loLoad.opened();', closed);
+      expect(op, `出口「${name}」で opened() していない(畳んだ直後に)`).toBeGreaterThan(closed);
+      expect(live(after, op), `出口「${name}」の opened() が注釈`).toBe(true);
+    }
+    const liveCalls = [...code.matchAll(/loLoad\.opened\(\)/g)].filter((m) => live(code, m.index!));
+    expect(liveCalls, 'opened() を呼ぶ生きた行が出口の数と違う').toHaveLength(3);
+    expect(liveCalls.every((m) => m.index! > code.indexOf('tick = setInterval(function () {', main - 20000) && m.index! < main), '出口の外で opened() している').toBe(true);
   });
 });
 
@@ -1041,7 +1073,7 @@ function bootHostShadow(o: {
   doc?: { name: string; size: number; lid?: string };
   /** 窓に「保存していない変更が在るか」を聞かれたときの答え(既定は在る)。 */
   modified?: () => boolean | null;
-  /** 文書を読み込んでいる最中か(#1429。既定は開けた後)。host.html の `loLoading` ── 起動の見張りが下ろす。 */
+  /** 文書を読み込んでいる最中か(#1429。既定は開けた後)。host.html の `loLoad`(`createLoadState`)── 起動の見張りが `opened()` する。 */
   loading?: boolean;
 }) {
   const raw = readFileSync('public/office/host.html', 'utf-8');
@@ -1072,7 +1104,7 @@ function bootHostShadow(o: {
   };
   const self = { crypto: { randomUUID: () => o.uuid } };
   const boot = new Function(
-    'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console', 'loLoading',
+    'window', 'self', 'say', 'dead', 'shadowPatched', 'shadowGate', 'navigator', 'setInterval', 'clearInterval', 'console', 'loLoad',
     `${raw.slice(a, b)}\n;return { armShadow: armShadow, shadowQuiet: shadowQuiet, afterSaved: function () { return shadowAfterSaved ? shadowAfterSaved() : null; } };`,
   );
   const host = boot(
@@ -1080,7 +1112,7 @@ function bootHostShadow(o: {
     (type: string, payload: Record<string, unknown>) => { said.push({ type, payload }); },
     false, o.patched, gate, { storage: o.storage },
     (fn: () => void) => { intervals.push(fn); return 1; }, () => undefined, { warn: () => undefined },
-    o.loading === true,
+    { isLoading: () => o.loading === true, opened: () => undefined },
   ) as { armShadow(FS: unknown, getToken: () => string, getDoc: () => unknown): void; shadowQuiet: Quiet; afterSaved(): Promise<boolean> | null };
   host.armShadow(f.lo.FS, () => o.token, () => o.doc ?? { name: 'a.docx', size: 1234 });
   expect(intervals, '1 秒ごとの見張りを積んでいない').toHaveLength(1);
@@ -1375,6 +1407,48 @@ describe('🔴 マウスだけの編集を拾う(isModified の変化 + 変更�
     api.feedInput(on.quiet, 'pointerup', {}, clock.t);
     for (let i = 0; i < 5; i += 1) { clock.t += 1000; await on.writer.tick(); }
     expect(written, '変更ありのまま 2 手目のマウス操作が書かれない').toHaveLength(2);
+  });
+});
+
+describe('🔴 読み込み中か(createLoadState、#1429)', () => {
+  it('開けるまで真。opened() の後も猶予(LOADING_GRACE_MS)の間は真 ── 題名が出た後も本体の読み込みは 2〜3 秒続く。猶予が過ぎたら偽', () => {
+    const clock = { t: 5_000_000 };
+    const st = api.createLoadState({ now: () => clock.t });
+    expect(st.isLoading()).toBe(true);
+    clock.t += 15_000;
+    expect(st.isLoading(), '開ける前に偽になった').toBe(true);
+    st.opened();
+    expect(st.isLoading(), '開けた直後に偽(最初の問い合わせが本体の鍵を待つ)').toBe(true);
+    clock.t += api.LOADING_GRACE_MS - 1;
+    expect(st.isLoading(), '猶予の途中で偽').toBe(true);
+    clock.t += 1;
+    expect(st.isLoading(), '猶予が過ぎても真').toBe(false);
+    // opened() を 2 度呼んでも猶予は伸びない(見張りの出口が 2 度通っても同じ)
+    st.opened();
+    expect(st.isLoading()).toBe(false);
+  });
+
+  it('🔴 opened() が一度も来なくても天井(LOADING_CEILING_MS)で偽になる ── 影が永久に止まる窓を作らない', () => {
+    const clock = { t: 5_000_000 };
+    const st = api.createLoadState({ now: () => clock.t });
+    clock.t += api.LOADING_CEILING_MS - 1;
+    expect(st.isLoading()).toBe(true);
+    clock.t += 1;
+    expect(st.isLoading(), '天井を超えても真').toBe(false);
+    // 対照群: 天井の後に opened() が来ても、もう猶予で真に戻さない… ではなく、猶予は「開けた」を起点に数える
+    st.opened();
+    expect(st.isLoading(), '天井の後の opened() で猶予が始まる(開けたのが本当に遅かった窓)').toBe(true);
+    clock.t += api.LOADING_GRACE_MS;
+    expect(st.isLoading()).toBe(false);
+  });
+
+  it('天井と猶予は渡して変えられる(測り直した日に数だけ直せる)', () => {
+    const clock = { t: 0 };
+    const st = api.createLoadState({ now: () => clock.t, ceilingMs: 100, graceMs: 50 });
+    clock.t = 99; expect(st.isLoading()).toBe(true);
+    clock.t = 100; expect(st.isLoading()).toBe(false);
+    st.opened(); clock.t = 149; expect(st.isLoading()).toBe(true);
+    clock.t = 150; expect(st.isLoading()).toBe(false);
   });
 });
 
