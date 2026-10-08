@@ -97,8 +97,8 @@ function scanBracketBalanced(src: string, start: number, open: string, close: st
       i++;
       continue;
     }
-    // blank line(連続 \n\n)で reject(paragraph break)
-    if (c === '\n' && src[i + 1] === '\n') return -1;
+    // blank line(連続 \n\n または \r\n\r\n)で reject(paragraph break)
+    if (c === '\n' && (src[i + 1] === '\n' || (src[i + 1] === '\r' && src[i + 2] === '\n'))) return -1;
     if (c === open) depth++;
     else if (c === close) {
       depth--;

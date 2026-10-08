@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ALIGN_CANONICAL_HINT, renderMarkdown } from '@features/markdown/markdown-render';
 // 🔑 **global direction の switch** は frontmatter 側の機構(行頭マーカーとは別系統)
 import { extractDocumentGlobals } from '@features/markdown/document-globals';
+import { parseInlineRoleAt } from '../../src/features/markdown/inline-role-parser';
 
 /** 見える文字だけ取り出す(タグの形ではなく**中身が届いたか**を見る)。 */
 function textOf(html: string): string {
@@ -784,3 +785,11 @@ describe('図の名前に日本語が使える(#530)', () => {
     }
   });
 });
+
+describe('inline-role-parser の CRLF 段落境界判定 (#1375)', () => {
+  it('CRLF 改行の空行で未完のインラインロールが段落境界として正しく拒否される', () => {
+    const src = ':emphasis:[未完の記述\r\n\r\n次の段落]';
+    expect(parseInlineRoleAt(src, 0)).toBeNull();
+  });
+});
+
