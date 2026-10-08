@@ -16233,7 +16233,8 @@ export function bindActions(
   const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
   const teardownLightbox = setupLightbox(root);
   return () => {
-    ROOT_SERVICES.delete(root);
+    // ⚠ 自分が結んだ物だけ外す ── 同じ root に 2 度結んだとき、1 回目の後始末が 2 回目の登録を消さない
+    if (ROOT_SERVICES.get(root) === services) ROOT_SERVICES.delete(root);
     /**
      * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
      * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。

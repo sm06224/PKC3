@@ -245,8 +245,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
   /**
    * ⚠ **2026-09-21(#1017 段③-2)で 1 件増やした** ── ヘルプの「お知らせを開く」。
-   *   🔑 押した所から**何も要らない**(`open-manual-window` と同じ仕分け ──
-   *   行き先は固定で、鍵も持たない)。
+   *   🔑 押した所から**何も要らない**(行き先は固定で、鍵も持たない。
+   *   ⚠ 2026-10-08 までは `open-manual-window` も同じ仕分けだったが、#1452 案 1 で登記簿に載った)。
    */
   'open-storage-check', 'open-system-notices', 'open-today',
   'paste-many-copied',

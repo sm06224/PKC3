@@ -821,11 +821,6 @@ describe('メッセージを開く(#1017 C5)', () => {
 });
 
 /**
- * 🔴 **「字幕ファイル(.srt)で書き出す」が、操作を探すから呼べる**(#1447)。
- * ⚠ 押しボタンを持たない ── 読むのは画面に出ている本文(`openBody`)で、落とすのは `downloadBlob`。
- * 🔑 観測点は **`URL.createObjectURL` に渡った Blob の中身と、`<a download>` の名前**(押した結果そのもの)。
- */
-/**
  * 🔴 **「マニュアルを別のウィンドウで開く」が、操作を探すから呼べる**(#1452 案 1)。
  * ⚠ 押しボタンはヘルプの面の中にしか無く、面は開くまで組まれない ── だから root に結んだ services から直に呼ぶ。
  * 🔑 実体は押しボタンと同じ `services.openManualWindow`(口を 2 つ作らない)。編集中でも押せる(提案の核)。
@@ -880,21 +875,74 @@ describe('マニュアルを別のウィンドウで開く(#1452 案 1)', () => 
     expect(d.getState().phase, '開いただけで編集が終わった').toBe('editing');
   });
 
-  it('⚠ 配線の無い版(古いタブ)では押せず、押しボタンと同じ理由が出る / 鍵で撃てば理由を言う', async () => {
+  it('⚠ 配線の無い版(古いタブ)では押せず、押しボタンと同じ理由が出る / 鍵で撃てば理由を言う(注意の種類つき)', async () => {
     const { root, d } = setupWith({});
     await openWith(root);
     const row = rowOf('open-manual-window');
     expect(row!.disabled, '配線が無いのに押せることになっている').toBe(true);
     expect(whyOf('open-manual-window')).toContain('再読み込み');
     dialog()?.close();
+    const told: Array<[string, string | undefined]> = [];
+    let prevented = 0;
+    expect(
+      runGlobalCommand('open-manual-window', root, d, new KeymapStore(), () => (prevented += 1), (t, o) => told.push([t, o?.kind])),
+    ).toBe(true);
+    expect(told.at(-1)?.[0]).toContain('再読み込み');
+    // ⚠ 断りは `CAUTION`(結果のまま渡すと 6 秒で消えて未読にもならない ── `runGlobalCommand` の規約)
+    expect(told.at(-1)?.[1], '断りに注意の種類が付いていない').toBe('caution');
+    expect(prevented).toBe(1);
+  });
+
+  /**
+   * 🔴 **鍵で撃つ成功枝**(着地前レビュー 2026-10-08 M1)── 配線が在れば `prevent` を 1 回呼び、実体を 1 回呼ぶ。
+   * ⚠ パレットは `prevent` に no-op を渡すので、上の 1 件目では成功枝の `prevent` を消す変異が生き延びた ──
+   *   鍵を割り当てた人(例: Ctrl+P 系)だと、ブラウザの既定(印刷など)が一緒に走る。
+   */
+  it('🔴 鍵で撃つと、既定を止めて実体を 1 回呼ぶ(対照群:配線が無ければ断りだけ)', () => {
+    let opened = 0;
+    const { root, d } = setupWith({ openManualWindow: () => (opened += 1) });
     const told: string[] = [];
     let prevented = 0;
     expect(runGlobalCommand('open-manual-window', root, d, new KeymapStore(), () => (prevented += 1), (t) => told.push(t))).toBe(true);
-    expect(told.at(-1)).toContain('再読み込み');
-    expect(prevented).toBe(1);
+    expect(opened, '開いていない').toBe(1);
+    expect(prevented, '既定(ブラウザの鍵)を止めていない').toBe(1);
+    expect(told, '成功したのに断りを言った').toEqual([]);
+  });
+
+  /**
+   * 🔴 **services は root ごとに引く**(着地前レビュー 2026-10-08 M2 / M3)── 「最後に結んだ物」で引く形に
+   *   変えても 1 root の test は全部緑なので、root を 2 つ並べて見る。後始末の後は配線なしに戻る。
+   */
+  it('🔴 配線は root ごと ── 別の root から呼べば配線なし、後始末の後も配線なし', () => {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const mk = (services: Parameters<typeof bindActions>[2]): { root: HTMLElement; d: Dispatcher; off: () => void } => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      buildShell(root);
+      const d = new Dispatcher();
+      const off = bindActions(root, d, services);
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+      return { root, d, off };
+    };
+    let opened = 0;
+    const b = mk({});
+    const a = mk({ openManualWindow: () => (opened += 1) }); // ⚠ 配線ありを**後**に結ぶ(「最後に結んだ物」でも A は通る形)
+    const dryA = (): boolean => runGlobalCommand('open-manual-window', a.root, a.d, new KeymapStore(), () => undefined, () => undefined, true);
+    const dryB = (): boolean => runGlobalCommand('open-manual-window', b.root, b.d, new KeymapStore(), () => undefined, () => undefined, true);
+    expect(dryA(), 'A(配線あり)が押せない').toBe(true);
+    expect(dryB(), 'B(配線なし)が押せることになっている ── root で引いていない').toBe(false);
+    a.off();
+    expect(dryA(), '後始末の後も押せることになっている').toBe(false);
+    expect(opened, 'dry で開いた').toBe(0);
   });
 });
 
+/**
+ * 🔴 **「字幕ファイル(.srt)で書き出す」が、操作を探すから呼べる**(#1447)。
+ * ⚠ 押しボタンを持たない ── 読むのは画面に出ている本文(`openBody`)で、落とすのは `downloadBlob`。
+ * 🔑 観測点は **`URL.createObjectURL` に渡った Blob の中身と、`<a download>` の名前**(押した結果そのもの)。
+ */
 describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
   const TRANSCRIPT = '## 文字起こし\n0:00 こんにちは\n0:15 晴れ\n';
   const openPalette = async (root: HTMLElement, query: string): Promise<void> => {
