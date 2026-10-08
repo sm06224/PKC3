@@ -243,6 +243,6 @@ describe('#1393 の直し(hscroll-hdl)── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/25 → 26\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-hscroll-hdl.py');
-    expect(yml).toContain('test "$n" -eq 34');
+    expect(yml).toContain('test "$n" -eq 35');
   });
 });

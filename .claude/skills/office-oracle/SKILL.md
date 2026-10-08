@@ -749,6 +749,20 @@ leave が出た後に無音なら、main は別の所で止まっている(こ�
 test は `tests/office-yield-wait-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 95〜205 行 = `tests/fixtures/office-lo/QtYieldMutex.excerpt.cxx`。
 手元の stub harness では compile と enter/leave の出方を確かめた ── 本物の header ではまだ)。
 
+### 🔴 #1408 (c) の直し `patch-lo-hop-borrow.py`(2026-10-08。35 本目。⚠ 焼く前 ── 🟡 推測ではなく**実測した stack への直し**。効いたかは次の焼き)
+
+150 本の焼きで 1/150(y7-61)、Impress の起動中に無言で固まった形:main の Qt イベントが SolarMutex を持ったまま別の `osl::Mutex`(Z)を busy-wait し、本体スレッドは
+Z を持ったまま lightweight の hop(`QtInstance::EmscriptenLightweightRunInMainThread_`)の `SolarMutexReleaser` の戻りで SolarMutex を取り直せない = **鍵の順序の逆転**。
+hop が SolarMutex を**手放す隙**が素(#1402 の「描画の途中で鍵が手放される」隙も同じ)。直しは**手放さず main に貸す**:Releaser をやめ、main の lambda で
+`QtYieldMutex::m_bNoYieldLock` を立てて func を走らせ、戻す(重い経路 `doAcquire` と同じ作法)。
+🔴 **持っていない呼び手がありうる**(旗を立てると鍵なしで走る)── hop の前に本体で `IsCurrentThread()` を取り、持っているときだけ借りる。持っていないときは従来どおり main が `SolarMutexGuard` で取る
+(`SolarMutexReleaser` は持っていなければ何もしないので、挙動は変わらない)。旗の戻しはデストラクタ(func が投げても戻る)。入れ子(旗が既に立っている)は触らない。
+⚠ 原文の 10 行は **`#if 0` ... `#else` の中にそのまま残し**、`#else` の側に新しい呼び出しを足す(🔴 `emscripten_sync_run_in_main_runtime_thread` は**関数ではなく可変長 macro**(4.0.10 `threading_legacy.h:180`)。macro の引数は `( )` しか守らず `{ }` は守らない ── ①`#if` を呼び出しの引数の中に挟まない ②**lambda を macro の引数に直書きしない**(中の最上位カンマで引数が割れ `expected '}' before ')' token`。1 稿目はこれで焼きが必ず落ちる形だった ── 着地前レビューが g++ で再現。直しは lambda を関数ポインタに受けてから渡す)。harness は macro を fixture `tests/fixtures/emscripten/threading_legacy-4.0.10.excerpt.h` の字のまま持つ(関数 stub にすると割れを見逃す))。
+言えないこと:本物の header でのコンパイル / 鍵なしで走る呼び手の有無(静的には数え切れない)/ 借りている間に main が func の中でイベントループを回す場合 / `DoYield` の枝 B と `ProcessEvent` の suspend は別。
+🔑 **次の焼きの読み方**:150 本で固まりの stack に `SolarMutexReleaser の戻り ← QtYieldMutex::doAcquire` が残るか。残れば別の手放し口(枝 B 等)。
+test は `tests/office-hop-borrow-patch.test.ts`(fixture は上流 `d6226c1a` の `QtInstance.cxx` の 207〜266 行 = `tests/fixtures/office-lo/QtInstance-hop.excerpt.cxx`。
+g++ + pthread の stub harness で、借りて走る / 持っていない呼び手は従来どおり / 入れ子 / 投げても旗が戻る を、**当てていない原文を対照群**にして確かめた)。
+
 ### 🔴 #1402 の閉じた直後の停止 ── 計装 3 本 `patch-lo-surface-trace.py` / `patch-lo-sdpr-trace.py` / `patch-lo-gfxdata-trace.py`(2026-10-07。⚠ 焼く前 ── **直しではなく印**。行き先は 🟡 推測)
 
 Office を閉じた直後に、本体スレッドが `ThumbnailView::Paint` ← `createPixelProcessor2DFromOutputDevice` で `memory access out of bounds`(先の grip-guard とは別の経路)。

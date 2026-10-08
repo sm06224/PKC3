@@ -511,7 +511,7 @@ describe('#1408 yield-wait ── 他の検査との関係', () => {
     const yml = readFileSync('.github/workflows/office-wasm-build.yml', 'utf-8');
     expect(yml).toMatch(/30 → 31\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-yield-wait.py');
-    expect(yml).toContain('test "$n" -eq 34');
+    expect(yml).toContain('test "$n" -eq 35');
     expect(readdirSync('build/office-wasm').filter((f) => /^patch-.*\.py$/.test(f))).toContain('patch-lo-yield-wait.py');
   });
 });

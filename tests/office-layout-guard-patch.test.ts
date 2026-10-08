@@ -284,6 +284,6 @@ describe('#1393 の直し(layout-guard)── 他の検査との関係', () => {
     expect(yml).toMatch(/24 → 25\(2026-10-07\)/);
     expect(yml).toContain('patch-lo-layout-guard.py');
     // 3 本(layout-guard / hscroll-hdl / viewdata-gone)と tooltip-guard / grip-guard の 2 本を足して 24 → 29、timer-mutex で 30、yield-wait(#1408 の印)で 31
-    expect(yml).toContain('test "$n" -eq 34');
+    expect(yml).toContain('test "$n" -eq 35');
   });
 });

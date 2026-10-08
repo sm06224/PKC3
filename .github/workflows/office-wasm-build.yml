@@ -699,7 +699,14 @@ jobs:
           #    `patch-lo-surface-trace.py`(差し替えの前後と破棄の印 `PKC3-SURFACE:`)/ `patch-lo-sdpr-trace.py`(入口と出口の印 `PKC3-SDPR:`)/
           #    `patch-lo-gfxdata-trace.py`(`mpGraphics` が変わったときの印 + null なら空を返す門 + `pSurface` の印 `PKC3-GFXDATA:`)。
           #    ⚠ 3 本とも `t=` が同じ steady_clock の ms。当て先は 3 本とも他の patch と重ならない(`QtSvpSalFrame.cxx` / `processor2dtools.cxx` / `outdev.cxx`)。
-          test "$n" -eq 34
+          # 🔴 34 → 35(2026-10-08)。`patch-lo-hop-borrow.py`(#1408 (c) の**直し**)。lightweight の hop
+          #    (`EmscriptenLightweightRunInMainThread_`)が `SolarMutexReleaser` で SolarMutex を手放す隙に、main の Qt イベントが
+          #    SolarMutex を取って、本体スレッドが持ったままの別の osl::Mutex を要求する ── 鍵の順序の逆転(150 本の焼きで 1/150、
+          #    stack は #1408 の最新コメント)。手放さず、main の lambda で `QtYieldMutex::m_bNoYieldLock` を立てて借りる
+          #    (重い経路 `doAcquire` と同じ作法)。持っていない呼び手は従来どおり `SolarMutexGuard` で取る(⚠ **既定で当たる**。
+          #    効いたかは次の焼きで、固まりの stack から `SolarMutexReleaser` の戻りが消えるかで見る)。
+          #    ⚠ 同じ file の `patch-lo-yield-wait.py` / `patch-lo-idles-trace.py` / `patch-lo-uev-trace.py` と錨は重ならない。
+          test "$n" -eq 35
 
       # 🔴 **Qt と LO の「握手」を、リンクの 16 分前に確かめる**(2026-08-10)。
       #    LO は Qt の embind シンボルを名指しで export する。無いと
