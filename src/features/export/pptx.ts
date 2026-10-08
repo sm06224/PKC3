@@ -31,7 +31,7 @@ import {
   type PlaceRoute,
 } from '../markdown/place-line';
 import type { DocxBlock, DocxCell, DocxRun } from './docx';
-import { xmlEscape } from './docx';
+import { xmlEscape, xmlSafe } from './docx';
 
 /**
  * 🔑 **塊の列は形式に依らない**(見出し・段落・箇条書き・表・画像・写せなかったもの)。
@@ -481,7 +481,7 @@ function runXml(r: ExportRun, sz: number, linkId?: string, ink?: string | null):
   // 🔴 塗りの上の字の色(#530 段④)── 塗りが付いた付箋だけ。⚠ 順序は `fill → latin → hlinkClick`
   const color = ink == null ? '' : `<a:solidFill><a:srgbClr val="${ink}"/></a:solidFill>`;
   return `<a:r><a:rPr ${props.join(' ')} dirty="0">${color}${face}${link}</a:rPr>`
-    + `<a:t>${xmlEscape(r.text)}</a:t></a:r>`;
+    + `<a:t>${xmlEscape(xmlSafe(r.text))}</a:t></a:r>`;
 }
 
 /**

@@ -1136,3 +1136,17 @@ describe('🔴 板どうしの線が PowerPoint でも繋がる(#530 段③e)', 
     expect(xml, '負の大きさを書いている').not.toMatch(/<a:ext cx="-/);
   });
 });
+
+describe('制御文字の除去 (xmlSafe) (#1366)', () => {
+  it('本文に制御文字が含まれていても XML 不正文字が除去されて出力される', () => {
+    const textWithControls = 'Hello\u0000 World\u0007!\u000B Test\u001F.';
+    const r = buildPptx([p(textWithControls)], { title: 'T' });
+    const xml = partOf(r, 'ppt/slides/slide1.xml');
+    expect(xml).toContain('<a:t>Hello World! Test.</a:t>');
+    const badControls = ['\u0000', '\u0007', '\u000B', '\u001F'];
+    for (const c of badControls) {
+      expect(xml.includes(c)).toBe(false);
+    }
+  });
+});
+
