@@ -14,7 +14,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { bindActions, formatTargetOf } from '../../src/adapter/ui/actions/binder';
+import { bindActions, formatTargetOf, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { DIALOG_REGION, resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { NOT_READY_PREFIX } from '../../src/features/palette/palette-rows';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
@@ -781,6 +782,44 @@ describe('操作を探す ── 最近使った操作(#274 Q3)', () => {
  * 🔴 **「メッセージを開く」が、操作を探す / `>` の一覧に出る**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
  * ⚠ 新しい画面は作らない ── 開くのは「システム → メッセージ」の押しボタンと同じ実体(`openMessagesNote`)。
  */
+describe('メッセージを開く(#1017 C5)', () => {
+  it('🔴 操作を探すの一覧に出て、押すとメッセージのノートが開く(既読にする)', async () => {
+    const { root, sent } = setup();
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'メッセージ';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    const row = rowOf('open-messages');
+    expect(row, '「メッセージを開く」が一覧に出ていない').toBeDefined();
+    expect(row!.querySelector('[data-pkc-field="palette-label"]')!.textContent).toBe('メッセージを開く');
+    expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
+    row!.click();
+    await tick();
+    expect(
+      sent.some((a) => a.type === 'MESSAGES_READ' && a.lid === SYSTEM_MESSAGE_LID),
+      '押してもメッセージのノートが開かない',
+    ).toBe(true);
+  });
+
+  it('🔴 編集中は押せず、理由が出る(reducer が断る遷移を、押せるふりで出さない)', async () => {
+    const { root, d, sent } = setup();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集中でない)').toBe('editing');
+    sent.length = 0;
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'メッセージを開く';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    const row = rowOf('open-messages');
+    expect(row, '行が出ていない').toBeDefined();
+    expect(row!.disabled, '編集中なのに押せることになっている').toBe(true);
+    expect(whyOf('open-messages')).toContain(NOT_READY_PREFIX);
+    expect(sent.some((a) => a.type === 'MESSAGES_READ')).toBe(false);
+  });
+});
+
 /**
  * 🔴 **「字幕ファイル(.srt)で書き出す」が、操作を探すから呼べる**(#1447)。
  * ⚠ 押しボタンを持たない ── 読むのは画面に出ている本文(`openBody`)で、落とすのは `downloadBlob`。
@@ -833,7 +872,7 @@ describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
       expect(w.names, '落ちていない').toHaveLength(1);
       expect(w.names[0]).toMatch(/^めも-\d{4}-\d{2}-\d{2}\.srt$/);
       expect(w.blobs[0]!.type).toBe('application/x-subrip');
-      expect(await w.blobs[0]!.text()).toBe('1\n00:00:00,000 --> 00:00:15,000\nこんにちは\n\n2\n00:00:15,000 --> 00:00:20,000\n晴れ\n');
+      expect(await w.blobs[0]!.text()).toBe('1\n00:00:00,000 --> 00:00:15,000\nこんにちは\n\n2\n00:00:15,000 --> 00:00:20,000\n晴れ\n\n');
       // 🔑 推定であることを知らせで言う(黙って作らない)
       expect(said.join('\n'), '知らせが無い').toContain('2 件');
       expect(said.join('\n'), '推定だと言っていない').toContain('5 秒後');
@@ -873,42 +912,29 @@ describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
     expect(rowOf('export-transcript-srt')!.disabled, '編集中なのに押せる').toBe(true);
     expect(whyOf('export-transcript-srt'), '出口(保存 / やめる)を言っていない').toContain('編集をやめる');
   });
-});
 
-describe('メッセージを開く(#1017 C5)', () => {
-  it('🔴 操作を探すの一覧に出て、押すとメッセージのノートが開く(既読にする)', async () => {
-    const { root, sent } = setup();
-    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
-    await tick();
-    filter().value = 'メッセージ';
-    filter().dispatchEvent(new Event('input', { bubbles: true }));
-    const row = rowOf('open-messages');
-    expect(row, '「メッセージを開く」が一覧に出ていない').toBeDefined();
-    expect(row!.querySelector('[data-pkc-field="palette-label"]')!.textContent).toBe('メッセージを開く');
-    expect(row!.disabled, '押せるはずの行が押せない').toBe(false);
-    row!.click();
-    await tick();
-    expect(
-      sent.some((a) => a.type === 'MESSAGES_READ' && a.lid === SYSTEM_MESSAGE_LID),
-      '押してもメッセージのノートが開かない',
-    ).toBe(true);
-  });
-
-  it('🔴 編集中は押せず、理由が出る(reducer が断る遷移を、押せるふりで出さない)', async () => {
-    const { root, d, sent } = setup();
+  /**
+   * 🔴 **断りの実行側**(`dry` でない呼び方)── 一覧は押せない行を `disabled` にするので、ここへ届くのは
+   *   user が鍵を割り当てたときだけ。⚠ 着地前レビュー(2026-10-08 M3)が「3 枝とも誰も通っていない」と
+   *   出した ── 鍵の人に「何も起きない」を返す変異が緑で通っていた。
+   */
+  it('🔴 鍵で撃ったときの断り 3 つ(ノート無し / 時刻なし / 編集中)は、理由を言って既定を止める', () => {
+    const { root, d } = setup();
+    const store = new KeymapStore();
+    const told: string[] = [];
+    let prevented = 0;
+    const run = (): boolean =>
+      runGlobalCommand('export-transcript-srt', root, d, store, () => (prevented += 1), (t) => told.push(t));
+    expect(run(), '受け付けた(handled)と答える').toBe(true);
+    expect(told.at(-1), 'ノートを開いていない理由').toContain('先にノートを開いてください');
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
-    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文\n' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '会議は 14:00 から\n' });
+    expect(run()).toBe(true);
+    expect(told.at(-1), '時刻つきの行が無い理由').toContain('時刻のある行');
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: TRANSCRIPT });
     d.dispatch({ type: 'START_EDIT' });
-    expect(d.getState().phase, '前提が崩れている(編集中でない)').toBe('editing');
-    sent.length = 0;
-    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
-    await tick();
-    filter().value = 'メッセージを開く';
-    filter().dispatchEvent(new Event('input', { bubbles: true }));
-    const row = rowOf('open-messages');
-    expect(row, '行が出ていない').toBeDefined();
-    expect(row!.disabled, '編集中なのに押せることになっている').toBe(true);
-    expect(whyOf('open-messages')).toContain(NOT_READY_PREFIX);
-    expect(sent.some((a) => a.type === 'MESSAGES_READ')).toBe(false);
+    expect(run()).toBe(true);
+    expect(told.at(-1), '編集中の理由(出口つき)').toContain('編集をやめる');
+    expect(prevented, '3 回とも既定(ブラウザの鍵)を止めている').toBe(3);
   });
 });

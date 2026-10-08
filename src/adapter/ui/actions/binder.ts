@@ -165,7 +165,7 @@ import { STACK_ARCHETYPE, stackBody } from '@features/flavor/stack-flavor';
 import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
-import { srtFromTranscript, transcriptCues } from '@features/asr/srt';
+import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
 import {
   DATE_SHORTCUTS,
@@ -4359,8 +4359,8 @@ export function runGlobalCommand(
       notify('字幕にするノートがありません(先にノートを開いてください)', CAUTION);
       return true;
     }
-    const srt = srtFromTranscript(open.body);
-    if (srt === null) {
+    // ⚠ `dry` は一覧が 1 打鍵ごとに呼ぶ ── 全文を組まず「1 行でも在るか」だけ見る(`hasTranscriptCues`)
+    if (!hasTranscriptCues(open.body)) {
       if (dry) return false;
       prevent();
       notify('行頭に時刻のある行(文字起こし)が無いので、字幕ファイルにできません', CAUTION);
@@ -4368,10 +4368,12 @@ export function runGlobalCommand(
     }
     if (dry) return true;
     prevent();
+    const srt = srtFromTranscript(open.body);
+    if (srt === null) return false; // ⚠ `hasTranscriptCues` が真なら来ない(同じ読み)── tsc のための null 除け
     const title = st.entryMetas.get(lid)?.title ?? lid;
     downloadBlob(`${safeName(title)}-${dayStamp(new Date())}.srt`, new Blob([srt], { type: 'application/x-subrip' }));
     const n = transcriptCues(open.body).length;
-    notify(`字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりで、最後の行だけ 5 秒後と見なしています)`);
+    notify(`字幕ファイルを保存しました(${String(n)} 件。終わりの時刻は次の行の始まりです。次の行が無い・時刻が進んでいない行は 5 秒後と見なしています)`);
     return true;
   }
   /**
