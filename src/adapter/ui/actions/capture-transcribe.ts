@@ -35,6 +35,7 @@ import {
 } from '@features/asr/asr-text';
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
+import { isNearSilent } from '@features/asr/asr-pcm';
 import { createWritableQueue } from './writable-queue';
 
 /**
@@ -163,6 +164,14 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         }
         if (pcm.length === 0) {
           fail('この録音には音が入っていませんでした。');
+          return;
+        }
+        /**
+         * 🔴 **ほぼ無音は認識に渡さない**(#1446 B)── whisper は無音に `you you you` を出す(実測)。
+         *   閾値は `ASR_SILENCE_RMS`(音声を 1 件も切らない側)。⚠ 重い仕事(ワーカーの起動)の前に断る。
+         */
+        if (isNearSilent(pcm)) {
+          fail('この録音には音が入っていませんでした(ほぼ無音で、字にできる音がありません)。');
           return;
         }
         const out = await deps.transcribe({

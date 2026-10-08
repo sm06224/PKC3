@@ -213,6 +213,23 @@ describe('③ 黙って終わらない', () => {
     expect(h.deps.transcribe).not.toHaveBeenCalled();
   });
 
+  /**
+   * 🔴 **ほぼ無音は認識に渡さない**(#1446 B)── whisper は無音に `you you you` を出す(2026-10-08 の実測)。
+   * 🔑 対照群 = 閾値のすぐ上(−76 dBFS 相当)は**渡す**(音声を 1 件も切らない側の値であること)。
+   */
+  it('🔴 ほぼ無音(RMS < 1e-4)は理由を言って認識に渡さない / すぐ上の小さい音は渡す', async () => {
+    const quiet = new Float32Array(16_000).fill(5e-5); // −86 dBFS 相当(実測で崩れた側)
+    const h = harness({ decode: vi.fn(async () => quiet) });
+    await h.tr.run('a');
+    expect(error(h.dispatcher)).toMatch(/音が入っていません/);
+    expect(error(h.dispatcher), 'ほぼ無音だと言っていない').toMatch(/ほぼ無音/);
+    expect(h.deps.transcribe, 'ほぼ無音を認識に渡した').not.toHaveBeenCalled();
+    const faint = new Float32Array(16_000).fill(1.6e-4); // −76 dBFS 相当(実測で字になった側)
+    const h2 = harness({ decode: vi.fn(async () => faint) });
+    await h2.tr.run('a');
+    expect(h2.deps.transcribe, '小さい声を切った(閾値が高すぎる)').toHaveBeenCalledTimes(1);
+  });
+
   it('🔴 字にならなかったら、ノートを変えずに言う(空の見出しを足さない)', async () => {
     const h = harness({ transcribe: vi.fn(async () => ({ text: '  \n ', loadMs: 0, runMs: 0 })) });
     await h.tr.run('a');
@@ -356,6 +373,7 @@ describe('進行中の字の後始末(#1017 C5)', () => {
   it.each([
     ['読めない音', { decode: vi.fn(async () => Promise.reject(new Error('EncodingError'))) }],
     ['音が入っていない', { decode: vi.fn(async () => new Float32Array(0)) }],
+    ['ほぼ無音', { decode: vi.fn(async () => new Float32Array(16_000)) }],
     ['メモリ不足', { transcribe: vi.fn(async () => Promise.reject(new RangeError('Array buffer allocation failed'))) }],
     ['別の例外', { transcribe: vi.fn(async () => Promise.reject(new Error('boom'))) }],
   ] as const)('🔴 %s: 失敗したら最後は消す字になる', async (_label, over) => {
