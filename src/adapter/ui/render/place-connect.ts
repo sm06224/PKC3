@@ -155,6 +155,12 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     box.setAttribute('data-pkc-edge', edge);
     for (const a of h.plus) box.append(makeHandle('plus', a, rect));
     box.append(makeHandle('dot', h.dot, rect));
+    /**
+     * ⚠ この層には**重ね物の印(`OVERLAY_ATTR`)を付けていない**(#1464 段 1 の着地前レビュー #2)──
+     *   乗っている間に本文が描き直されると、今までどおり丸ごと作り直しへ倒れる(層は消える)。
+     *   印を付けるなら、描き直しの後に古い `hover.block`(外れた節点)を指したまま残る層を
+     *   消す経路が要る。板を離した直後の `replaced` を実ブラウザで見てから決める(#1464 段 2)。
+     */
     host.append(box);
     layer = box;
     hover = { block, edge, focus: h.dot };

@@ -10,7 +10,7 @@
  * 「中身が正しいか」だけを見ると、丸ごと差し替えでも通ってしまう。
  */
 import { describe, expect, it } from 'vitest';
-import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
+import { applyBlocks, EMPTY_VIEW, OVERLAY_ATTR } from '../../src/adapter/ui/render/apply-blocks';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 function host(): HTMLElement {
@@ -120,6 +120,63 @@ describe('差分で当てる', () => {
     const r = applyBlocks(h, render(DOC), first.view);
     expect(r.replaced, '差分を当ててしまった').toBe(first.view.blocks.length);
     expect(h.innerHTML).toBe(render(DOC));
+  });
+
+  /**
+   * 🔴 **重ね物(印つき)は「外から増えた子」に数えない**(#1464)。
+   * ⚠ 直す前は、線の層(`place-board.ts` が host の先頭へ prepend する svg)が在るだけで
+   *   **毎回丸ごと作り直し**になっていた(差分描画・掴む口・焦点が毎回消える)。
+   * 🔑 対照群 = 上の「印なしの span は丸ごと」── 印の有無だけで分かれることを同じ形で見る。
+   */
+  it('🔴 印つきの重ね物が host の先頭に居ても、差分のまま(印なしは丸ごと ── 上の test が対照群)', () => {
+    const h = host();
+    const first = applyBlocks(h, render(DOC), EMPTY_VIEW);
+    const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    layer.setAttribute(OVERLAY_ATTR, '');
+    h.prepend(layer);
+    const before = [...h.children].filter((c) => c !== layer);
+    const r = applyBlocks(h, render(`${DOC}\n足した段落。\n`), first.view);
+    expect(r.replaced, '重ね物を「外から増えた子」と読んで丸ごとに落ちた').toBe(1);
+    // 🔑 同一性で見る(`toEqual` は構造の一致なので、作り直した塊でも通る ── 着地前レビュー #4)
+    const after = [...h.children].filter((c) => c !== layer);
+    before.forEach((el, i) => expect(after[i], `前の塊 ${String(i)} が作り直された`).toBe(el));
+    expect(layer.parentNode, '重ね物が消えた').toBe(h);
+  });
+
+  it('🔴 印の有無で分かれる ── 印なしの svg は丸ごと / 印つきの層と印なしの span が両方居ても丸ごと', () => {
+    // ⚠ 「svg なら重ね物」のような別の述語に替える変異(着地前レビュー 変異 1)を殺す
+    const h = host();
+    const first = applyBlocks(h, render(DOC), EMPTY_VIEW);
+    h.prepend(document.createElementNS('http://www.w3.org/2000/svg', 'svg')); // 印なしの svg
+    const r = applyBlocks(h, render(DOC), first.view);
+    expect(r.replaced, '印の無い svg を重ね物と読んだ').toBe(first.view.blocks.length);
+    // ⚠ 印を緩めたことが、余分な子まで隠さない(件数だけで決まる形 ── レビュー #3)
+    const h2 = host();
+    const f2 = applyBlocks(h2, render(DOC), EMPTY_VIEW);
+    const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    layer.setAttribute(OVERLAY_ATTR, '');
+    h2.prepend(layer);
+    h2.append(document.createElement('span')); // 印なしの余分な子
+    const r2 = applyBlocks(h2, render(DOC), f2.view);
+    expect(r2.replaced, '印つきの層が、印なしの余分な子を隠した').toBe(f2.view.blocks.length);
+  });
+
+  /**
+   * 🔴 **印の名前は user が本文から偽造できる**(着地前レビュー 2026-10-08 #1)── `:::format{overlay=1}` は
+   *   塊そのものに `data-pkc-overlay="1"` を焼く。覚えている側と host 側の**両方**から同じ印つきを除くので、
+   *   その本文でも差分は生き、印なしの余分な子は隠れない。
+   */
+  it('🔴 `:::format{overlay=1}` の本文でも差分のまま / 余分な子は隠れない(偽造の印)', () => {
+    const forged = `${DOC}\n:::format{overlay=1}\n印を持つ塊。\n:::\n`;
+    const html = render(forged);
+    expect(html, '前提が崩れている(塊に data-pkc-overlay が焼かれていない)').toContain('data-pkc-overlay="1"');
+    const h = host();
+    const first = applyBlocks(h, html, EMPTY_VIEW);
+    const r = applyBlocks(h, render(`${forged}\n足した段落。\n`), first.view);
+    expect(r.replaced, '偽造の印で intact が偽になった(毎回丸ごと)').toBe(1);
+    h.append(document.createElement('span'));
+    const r2 = applyBlocks(h, render(forged), r.view);
+    expect(r2.replaced, '偽造の印が、印なしの余分な子を隠した').toBe(r2.view.blocks.length);
   });
 
   it('全部消しても壊れない', () => {

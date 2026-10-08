@@ -23,6 +23,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
 import { applyPlaceLayout, PLACE_FOCUS_ATTR } from '../../src/adapter/ui/render/place-board';
+import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
 import { installPlaceDrag, NUDGE_SETTLE_MS } from '../../src/adapter/ui/render/place-drag';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -96,6 +97,36 @@ describe('板どうしをつなぐ線(#530 段③a)', () => {
     (l.getAttribute('d') ?? '').split(/[^\d.-]+/).filter((t) => t !== '').map(Number);
   const start = (l: SVGPathElement): number[] => ends(l).slice(0, 2);
   const finish = (l: SVGPathElement): number[] => ends(l).slice(-2);
+
+  /**
+   * 🔴 **線の層が在っても、次の描き直しは差分のまま**(#1464。実地調査 2026-10-08 が実行で見つけた)。
+   * ⚠ 直す前は、`applyBlocks` が host の子の数で「外から書き換えられた」と読み、線を 1 本引いた板は
+   *   **描き直しのたびに全塊を作り直していた**(板 3 塊で `replaced=3`)。
+   * 🔑 本物の `applyBlocks` → `applyPlaceLayout`(線を引く)→ `applyBlocks` の順で通す(stub にしない)。
+   */
+  it('🔴 線を引いた後の描き直しでも、変わった塊 1 つだけが作り直される', () => {
+    const host = document.createElement('div');
+    host.className = 'pkc-md-rendered';
+    document.body.append(host);
+    // 🔑 塊への切り方は `applyBlocks` 自身(`splitTopLevelBlocks`)── `LINES` は 3 つの div なので 3 塊になる
+    const first = applyBlocks(host, LINES, EMPTY_VIEW);
+    expect(first.replaced, '前提が崩れている(初回は全塊)').toBe(3);
+    applyPlaceLayout(host, () => null, 0);
+    expect(drawn(host).length, '前提が崩れている(線が引かれていない)').toBe(1);
+    // 板 b だけ動かした形(x= を変える)── 本文の塊 1 つだけが変わる
+    const moved = LINES.replace('data-pkc-x="300"', 'data-pkc-x="320"');
+    expect(moved, '前提が崩れている(x= が置き換わっていない)').not.toBe(LINES);
+    const second = applyBlocks(host, moved, first.view);
+    expect(second.replaced, '線の層を「外から増えた子」と読んで丸ごと作り直した').toBe(1);
+    // ⚠ 置き直しても線は 1 枚のまま(層は作り直し、板は残る)── そして**端点は動いた板に追う**
+    //    (着地前レビュー 変異 3: 「層が在れば作り直さない」を殺す)
+    const endBefore = finish(drawn(host)[0]!);
+    applyPlaceLayout(host, () => null, 0);
+    expect(host.querySelectorAll('[data-pkc-field="place-lines"]').length).toBe(1);
+    expect(host.querySelector('#a'), '動かしていない板 a が作り直された').toBe(first.inserted[0]);
+    const endAfter = finish(drawn(host)[0]!);
+    expect(endAfter[0], '板 b を動かしたのに線の終点が追っていない').toBe(endBefore[0]! + 20);
+  });
 
   it('🔴 from= と to= の板の間に、いちばん近い辺どうしで線が引かれる', () => {
     const host = board(LINES);
