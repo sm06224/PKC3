@@ -65,7 +65,8 @@ describe('経過の見せ方(#279)', () => {
 
     // ⚠ **空振り防止 2 つ** ── ①走査が届いている ②当の 1 本を実際に拾えている
     expect(files.length, 'src を走査できていない').toBeGreaterThan(200);
-    expect(hits.get('src/features/elapsed-text.ts'), 'elapsed-text.ts を拾えていない').toBe(3);
+    // ⚠ 3 → 5(2026-10-08、#1447):字幕ファイルの時刻 `srtTime`(`HH:MM:SS,mmm`)の 2 つの `:` が増えた
+    expect(hits.get('src/features/elapsed-text.ts'), 'elapsed-text.ts を拾えていない').toBe(5);
 
     expect([...hits.keys()].sort(), '経過を自前で組み立てている場所がある').toEqual([
       'src/features/elapsed-text.ts',

@@ -84,6 +84,11 @@ const UNBRIDGED: readonly string[] = [
    *   「本文の欄へ当てる命令」の継ぎ目(`EDITOR_RUN`)で受け、「操作を探す」から呼ぶ。
    */
   'align-table',
+  /**
+   * ⚠ 2026-10-08(#1447): 字幕ファイル(.srt)で書き出す。**押しボタンを持たない** ── `open-messages` と
+   *   同じく `runGlobalCommand` の特例で受け、「操作を探す」/ 左の `>` の一覧から呼ぶ。
+   */
+  'export-transcript-srt',
   'append-send',
   /**
    * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
@@ -737,11 +742,11 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 387,
+      total: 388,
       receivers: 323,
-      registered: 104,
+      registered: 105,
       both: 40,
-      outsideActionsTable: 64,
+      outsideActionsTable: 65,
       unregistered: 283,
     });
   });
@@ -788,7 +793,7 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
     // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 80,
+      key: 81,
       entry: 17,
       body: 3,
       collection: 2,

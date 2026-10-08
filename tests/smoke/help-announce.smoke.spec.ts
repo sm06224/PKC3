@@ -764,6 +764,12 @@ test('🔴 マニュアルの中を探して、押すとその節まで送られ
   const before = ((await host.textContent()) ?? '').length;
   expect(before, 'マニュアルが描かれていない(台の空振り)').toBeGreaterThan(1000);
 
+  // 🔴 字幕ファイル(.srt)の節が描かれている(#1447)── 同じ道中に assert を足す(新しく起動しない)
+  await expect(
+    host.locator('h3', { hasText: '文字起こしを字幕ファイル(.srt)にする' }),
+    'マニュアルに字幕ファイルの節が描かれていない',
+  ).toHaveCount(1);
+
   const box = page.locator('[data-pkc-field="help-find"]');
   await expect(box).toBeVisible();
   await box.fill('ルビ');

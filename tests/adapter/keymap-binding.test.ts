@@ -1019,6 +1019,11 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   同じ `openMessagesNote`)。
        */
       'open-messages',
+      /**
+       * ⚠ 2026-10-08 に足した(#1447)── 字幕ファイル(.srt)で書き出す。押しボタンを持たず、
+       *   画面に出ている本文(`openBody`)から組んで落とすので、特例で直に実行する。
+       */
+      'export-transcript-srt',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

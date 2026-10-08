@@ -199,7 +199,9 @@ describe('割当の検め', () => {
   // 🔴 #1233: 選んだ字を整える 5 つ ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる(既定を置くと割当と重なる)
   'tidy-join-lines', 'tidy-to-halfwidth', 'tidy-kana-to-fullwidth', 'tidy-squeeze-blank-lines', 'tidy-strip-bullets',
   // 🔴 #1017 C5(Gemini 裁定 B): メッセージを開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'open-messages'];
+  'open-messages',
+  // 🔴 #1447: 字幕ファイル(.srt)で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'export-transcript-srt'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));
