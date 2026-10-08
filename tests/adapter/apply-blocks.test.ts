@@ -10,7 +10,7 @@
  * 「中身が正しいか」だけを見ると、丸ごと差し替えでも通ってしまう。
  */
 import { describe, expect, it } from 'vitest';
-import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
+import { applyBlocks, EMPTY_VIEW, OVERLAY_ATTR } from '../../src/adapter/ui/render/apply-blocks';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 function host(): HTMLElement {
@@ -120,6 +120,29 @@ describe('差分で当てる', () => {
     const r = applyBlocks(h, render(DOC), first.view);
     expect(r.replaced, '差分を当ててしまった').toBe(first.view.blocks.length);
     expect(h.innerHTML).toBe(render(DOC));
+  });
+
+  /**
+   * 🔴 **重ね物(印つき)は「外から増えた子」に数えない**(#1464)。
+   * ⚠ 直す前は、線の層(`place-board.ts` が host の先頭へ prepend する svg)が在るだけで
+   *   **毎回丸ごと作り直し**になっていた(差分描画・掴む口・焦点が毎回消える)。
+   * 🔑 対照群 = 上の「印なしの span は丸ごと」── 印の有無だけで分かれることを同じ形で見る。
+   */
+  it('🔴 印つきの重ね物が host の先頭に居ても、差分のまま(印なしは丸ごと ── 上の test が対照群)', () => {
+    const h = host();
+    const first = applyBlocks(h, render(DOC), EMPTY_VIEW);
+    const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    layer.setAttribute(OVERLAY_ATTR, '');
+    h.prepend(layer);
+    const before = [...h.children].filter((c) => c !== layer);
+    const r = applyBlocks(h, render(`${DOC}\n足した段落。\n`), first.view);
+    expect(r.replaced, '重ね物を「外から増えた子」と読んで丸ごとに落ちた').toBe(1);
+    expect([...h.children].filter((c) => c !== layer).slice(0, before.length), '前の塊が作り直された').toEqual(before);
+    expect(layer.parentNode, '重ね物が消えた').toBe(h);
+    // ⚠ 印が付いていても**本文の塊が外から消えた**ら今までどおり丸ごと(印は数の照合を緩めるだけ)
+    h.children[1]!.remove();
+    const r2 = applyBlocks(h, render(DOC), r.view);
+    expect(r2.replaced).toBe(r2.view.blocks.length);
   });
 
   it('全部消しても壊れない', () => {

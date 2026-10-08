@@ -24,6 +24,7 @@
  * host の直下であることを前提にしている。位置は style で当てるだけ。
  */
 
+import { OVERLAY_ATTR } from './apply-blocks';
 import {
   anchorSpell,
   ANCHOR_DEN_MAX,
@@ -328,6 +329,10 @@ function applyPlaceLines(
   svg.setAttribute('data-pkc-field', 'place-lines');
   const hits = document.createElementNS(SVG_NS, 'svg');
   hits.setAttribute('data-pkc-field', 'place-line-hits');
+  // 🔴 重ね物の印(#1464)── 付けないと `applyBlocks` が「外から子が増えた」と読み、線の在る板は
+  //    描き直しのたびに**丸ごと作り直し**になる(差分描画・掴む口・焦点が毎回消える)
+  svg.setAttribute(OVERLAY_ATTR, '');
+  hits.setAttribute(OVERLAY_ATTR, '');
   /**
    * 🔴 **2 巡する**(#530 段③b)── 1 巡目で「同じ 2 枚の間に何本あるか」を数え、
    * 2 巡目でその数に応じて辺の上に散らす。

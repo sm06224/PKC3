@@ -75,6 +75,20 @@ function replaceAll(
   return { inserted, replaced: blocks.length, view: { blocks, nodes, pin } };
 }
 
+/**
+ * 🔴 **本文の塊ではない「重ね物」の印**(#1464)── 板どうしを繋ぐ線の層(`place-board.ts` が host の
+ *   先頭へ `prepend` する svg 2 枚)のように、**描画のたびに作り直す**物が host の直下に居てよい印。
+ *
+ * ⚠ 直す前は、線が 1 本でも引かれた板では、次の描き直しが**必ず丸ごと作り直し**になっていた ──
+ *   `intact` が「host の子の数 = 覚えているノードの数」を要求し、層の 2 枚で数が合わないため
+ *   (実測: 板 5 枚で `replaced=1` → 線を引くと `replaced=6`)。差分描画が死ぬだけでなく、
+ *   掴む口・札・焦点も毎回作り直しになっていた。
+ * 🔑 印の無い余分な子は今までどおり**丸ごとへ倒す**(`apply-blocks.test.ts`「外から要素が増えていても
+ *   丸ごとに落ちる」── 位置がずれたまま差分を当てると中身が食い違う)。印を付けてよいのは
+ *   **塊の順番に関わらない重ね物だけ**(線の層は先頭に居て、差分の挿入位置は塊のノードから引くので影響しない)。
+ */
+export const OVERLAY_ATTR = 'data-pkc-overlay';
+
 /** 覚えているノード列が**まだ DOM と合っているか**(外から書き換えられていないか)。 */
 function intact(host: HTMLElement, view: BlockView): boolean {
   if (view.blocks.length !== view.nodes.length || view.blocks.length === 0) return false;
@@ -85,7 +99,13 @@ function intact(host: HTMLElement, view: BlockView): boolean {
       count += 1;
     }
   }
-  return count === host.childNodes.length;
+  // ⚠ 重ね物(印つき)は数えない ── それ以外の余分な子は丸ごとへ倒す
+  let own = 0;
+  for (const c of host.childNodes) {
+    if (c instanceof Element && c.hasAttribute(OVERLAY_ATTR)) continue;
+    own += 1;
+  }
+  return count === own;
 }
 
 /**
