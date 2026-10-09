@@ -43,9 +43,9 @@
  * …描画…
  * use(newKey);     // 中身を入れ**終わってから**、その面の位置へ戻す(鍵も切り替える)
  * ```
- * ⚠ `use()` が `scrollTop` を書くのは**次の frame の頭**(段 3-g)── 同じ task で読み直しても
- *   まだ動いていない。test は frame を 1 つ待ってから見る。`use()` の後に誰かが位置を動かした
- *   (`scroll` が届いた)なら、frame の頭では**書かない**(後から動かした人が勝つ)。
+ * ⚠ 鍵が変わるとき(面の切り替え)はその場で書く。**同じ鍵の描き直し**では次の frame の頭で書く
+ *   (段 3-g)── 同じ task で読み直してもまだ動いていないので、test は frame を 1 つ待ってから見る。
+ *   `use()` の後に誰かが位置を動かした(`scroll` が届いた)なら、frame の頭では**書かない**。
  * ⚠ `use()` を描画の前にすると、まだ `scrollHeight` が足りないので指した位置が丸められる
  * (段⑪ でも同じ罠を踏んだ)。
  */
@@ -58,6 +58,8 @@ const requestFrame: (cb: () => void) => number =
   typeof requestAnimationFrame === 'function'
     ? (cb) => requestAnimationFrame(cb)
     : (cb) => setTimeout(cb, 0) as unknown as number;
+const cancelFrame: (id: number) => void =
+  typeof cancelAnimationFrame === 'function' ? (id) => cancelAnimationFrame(id) : (id) => clearTimeout(id);
 
 export class ScrollMemory {
   private readonly el: HTMLElement;
@@ -88,24 +90,38 @@ export class ScrollMemory {
    * 覚えた値なので、戻しても何も動かない。
    */
   use(key: string): void {
-    this.key = key;
+    const value = this.seen.get(key) ?? 0;
     /**
-     * 🔴 **書くのは frame の頭(requestAnimationFrame)で**(#1467 段 3-g)── `scrollTop = …` も
-     *   読みと同じく配置を強いる(段 3-e のレビューの実測)。描き直しの task の中で書くと、
-     *   直前の描き直しが汚した文書全体をここで払う(trace: 20,000 行の追記 1 回で 267 ms)。
-     *   frame の頭なら、その配置は frame 自身が 1 回払う分と同じ物になる(二重に払わない)。
-     * 🔴 **`use()` の後に `scroll` が届いたら、書かない**(着地前レビューが実ブラウザで示した穴)──
-     *   同じ task で `use()` の**後**に誰かが位置を動かす経路が在る(お知らせを開く / 目次から飛ぶ /
-     *   検索の当たりへ飛ぶ = `scrollIntoView`、user がホイールを回した分)。その `scroll` は
-     *   次の frame の**scroll steps = rAF より前**に届く(chromium / headless_shell の両方で実測)ので、
-     *   届いていたら「後から動かした人」の意図を勝たせる(frame の頭で古い値を上書きしない)。
-     * ⚠ 値は `use()` の時点で決める(`seen` を frame で読まない)── 同じ frame に 2 度来たら後の鍵の値を 1 回。
-     * ⚠ 知っている穴: 同じ task の中で「中身を空にする → **配置を強いる読み** → 入れ直す」と、
-     *   丸めの `scroll@0` が rAF より前に届く版(headless_shell。フル chromium は後に届く)では
-     *   戻しを捨てて先頭になる。描き直しの task に配置を強いる読みを置かないこと自体が
-     *   この一連(#1467)の目的なので、読みを置かない側で守る。
+     * 🔴 **鍵が変わる(面を切り替える)ときは、その場で書く**(段 3-g の着地前レビュー + smoke が教えた 2 つ):
+     *   ① 面を切り替えた**同じ task**で `scrollIntoView` する動線が在る(お知らせを開く / 目次から飛ぶ /
+     *   検索の当たりへ飛ぶ)── 書くのを frame まで遅らせると、その後に古い値で上書きして飛び先が消える。
+     *   ② 絞り込みで中身が縮むと、frame より前に誰かが配置を強いた瞬間に scrollTop が丸められ、
+     *   その `scroll` を「後から動かした人」と読み違えて、絞り込んだ結果が**途中から**見える
+     *   (`layout.smoke` :1044 で実測 41 px)。切り替えは user の操作 1 回につき 1 度なので、
+     *   そのときの配置 1 回は払う(描き直しのたびには払わない ── 下)。
      */
-    this.pending = this.seen.get(key) ?? 0;
+    if (key !== this.key) {
+      this.key = key;
+      if (this.frame !== null) {
+        cancelFrame(this.frame); // 前の面の予約は捨てる(新しい面の値を古い予約で上書きしない)
+        this.frame = null;
+      }
+      this.el.scrollTop = value;
+      return;
+    }
+    /**
+     * 🔴 **同じ面の描き直しでは、書くのは次の frame の頭(requestAnimationFrame)**(#1467 段 3-g)──
+     *   `scrollTop = …` も読みと同じく配置を強いる(段 3-e のレビューの実測)。左の列は描き直しのたびに
+     *   ここへ来るので、task の中で書くと直前の描き直しが汚した文書全体をここで払う
+     *   (trace: 20,000 行の追記 1 回で 267 ms)。frame の頭なら frame 自身が 1 回払う分と同じ物。
+     * 🔴 **`use()` の後に `scroll` が届いたら、書かない** ── user がホイールを回した分(その `scroll` は
+     *   次の frame の scroll steps = rAF より前に届く。実測)を frame の頭で巻き戻さない。
+     *   同じ面なら書く値は最後の `scroll` が覚えた値なので、届いていないときに書いても普段は動かない。
+     *   動くのは「空にして入れ直す間に配置が走って丸められた」ときだけで、そのときは戻す
+     *   (丸めの `scroll` は配置の後 = rAF の後に届くので、`moved` は立たない ── 実測)。
+     * ⚠ 値は `use()` の時点で決める(同じ frame に 2 度来たら後の方を 1 回)。
+     */
+    this.pending = value;
     this.moved = false;
     if (this.frame !== null) return;
     this.frame = requestFrame(() => {
@@ -114,7 +130,7 @@ export class ScrollMemory {
     });
   }
 
-  /** frame で書く位置(`use()` が決める)と、その予約。`moved` = 予約の後に `scroll` が届いた(書かない)。 */
+  /** 同じ面の描き直しで frame に書く位置と、その予約。`moved` = 予約の後に `scroll` が届いた(書かない)。 */
   private pending = 0;
   private frame: number | null = null;
   private moved = false;

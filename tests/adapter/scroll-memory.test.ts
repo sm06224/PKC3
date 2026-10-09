@@ -115,12 +115,12 @@ describe('スクロール位置の記憶', () => {
   });
 
   /**
-   * 🔴 **`use()` は同じ task の中で `scrollTop` を書かない ── 次の frame の頭で 1 回**(#1467 段 3-g)。
-   *   `scrollTop = …` も配置を強いる(読みと同じ)ので、描き直しの task の中で書くと直前の描き直しが
-   *   汚した文書全体をそこで払う(trace: 20,000 行の追記 1 回で 267 ms)。
-   * 🔑 観測点は setter の回数。同じ frame に鍵が 2 度変わっても書くのは 1 回で、後の鍵の値。
+   * 🔴 **同じ鍵の描き直しでは、`use()` は同じ task の中で `scrollTop` を書かない ── 次の frame の頭で 1 回**
+   *   (#1467 段 3-g)。`scrollTop = …` も配置を強いる(読みと同じ)ので、描き直しのたびに task の中で書くと
+   *   直前の描き直しが汚した文書全体をそこで払う(trace: 20,000 行の追記 1 回で 267 ms)。
+   * 🔑 観測点は setter の回数。同じ frame に 2 度来ても書くのは 1 回。
    */
-  it('🔴 use() は同じ task では scrollTop を書かない ── 次の frame の頭で 1 回(後の鍵の値)', async () => {
+  it('🔴 同じ鍵の描き直しでは同じ task で scrollTop を書かない ── 次の frame の頭で 1 回', async () => {
     const el = document.createElement('div');
     let top = 0;
     let writes = 0;
@@ -134,51 +134,63 @@ describe('スクロール位置の記憶', () => {
     });
     const m = new ScrollMemory(el);
     m.use('a');
-    await frame();
     top = 250;
     el.dispatchEvent(new Event('scroll')); // a = 250
-    m.use('b');
-    top = 40;
-    el.dispatchEvent(new Event('scroll')); // b = 40
     writes = 0;
     m.use('a');
-    m.use('b');
-    expect(writes, '描き直しの task の中で scrollTop を書いている(強制レイアウトを払う)').toBe(0);
+    m.use('a');
+    expect(writes, '同じ鍵の描き直しの task の中で scrollTop を書いている(強制レイアウトを払う)').toBe(0);
     await frame();
     expect(writes, '同じ frame に 2 度 use したのに 2 回書いた / 1 回も書いていない').toBe(1);
-    expect(top, '後の鍵(b)の値になっていない').toBe(40);
+    expect(top).toBe(250);
   });
 
   /**
-   * 🔴 **`use()` の後に誰かが位置を動かしたら、frame の頭で上書きしない**(着地前レビューが実ブラウザで示した穴)。
-   *   お知らせを開く / 目次から飛ぶ / 検索の当たりへ飛ぶは、面を切り替える(`use(newKey)`)→ 同じ task で
-   *   `scrollIntoView` の順。その `scroll` は rAF より前に届く(実測)ので、届いていたら書かない。
-   *   user がホイールを回した分も同じ。
+   * 🔴 **鍵が変わる(面を切り替える)ときは、その場で書く**(着地前レビュー + smoke が教えた 2 つ)──
+   *   ① 面を切り替えた同じ task で `scrollIntoView` する動線(お知らせを開く / 目次から飛ぶ)を、frame の頭の
+   *   古い値で上書きしない ② 絞り込みで縮んだ分の丸めを「後から動かした人」と読み違えない。
    */
-  it('🔴 use() の後に scroll が届いたら、frame の頭で古い値を書かない(後から動かした人が勝つ)', async () => {
+  it('🔴 鍵が変わるときはその場で書く ── 切り替えた直後の scrollIntoView を frame の頭で上書きしない', async () => {
     const c = container();
     const m = new ScrollMemory(c.el);
     m.use('detail');
-    await frame();
     c.el.scrollTop = 700;
     scrolled(c.el); // detail = 700
-    // 面を切り替えて(settings は覚えが無い = 0)、同じ task でお知らせの節へ飛ぶ
+    // 同じ task で描き直し(予約が 1 つ残る)→ 面を切り替える → お知らせの節へ飛ぶ
+    m.use('detail');
     m.use('settings');
-    c.el.scrollTop = 900;
-    scrolled(c.el); // scrollIntoView の scroll は rAF より前に届く
-    await frame();
-    expect(c.el.scrollTop, 'frame の頭で 0 を書いて、飛び先が消えた').toBe(900);
-    expect(m.peek('settings'), '飛んだ先を settings の位置として覚えていない').toBe(900);
-    // user がホイールを回した分も同じ(同じ鍵の描き直しの直後)
-    m.use('settings');
-    c.el.scrollTop = 920;
+    expect(c.el.scrollTop, '切り替えた瞬間に先頭へ戻っていない(その場で書いていない)').toBe(0);
+    c.el.scrollTop = 900; // scrollIntoView
     scrolled(c.el);
     await frame();
-    expect(c.el.scrollTop, 'user が送った分を frame の頭で戻した').toBe(920);
-    // 対照群: 誰も動かさなければ frame の頭で戻す
+    expect(c.el.scrollTop, 'frame の頭で古い値を書いて、飛び先が消えた').toBe(900);
+    expect(m.peek('settings'), '飛んだ先を settings の位置として覚えていない').toBe(900);
+    // 戻ると detail の位置
     m.use('detail');
+    expect(c.el.scrollTop, '戻ったのに detail の位置でない').toBe(700);
+  });
+
+  /**
+   * 🔴 **同じ鍵の描き直しで、`use()` の後に `scroll` が届いたら frame の頭で書かない**(着地前レビュー #2)──
+   *   user がホイールを回している最中に描き直されても、送った分を巻き戻さない(その `scroll` は rAF より前に届く)。
+   */
+  it('🔴 use() の後に scroll が届いたら、frame の頭で古い値を書かない(user が送った分を巻き戻さない)', async () => {
+    const c = container();
+    const m = new ScrollMemory(c.el);
+    m.use('a');
+    c.el.scrollTop = 500;
+    scrolled(c.el); // a = 500
+    m.use('a');
+    c.el.scrollTop = 520;
+    scrolled(c.el); // frame の前に user が送った
     await frame();
-    expect(c.el.scrollTop, '誰も動かしていないのに戻らない').toBe(700);
+    expect(c.el.scrollTop, 'user が送った分を frame の頭で巻き戻した').toBe(520);
+    // 対照群: 誰も動かさなければ frame の頭で戻す(空にして入れ直す間に丸められた形)
+    m.use('a');
+    c.setContent(0);
+    c.setContent(1000);
+    await frame();
+    expect(c.el.scrollTop, '誰も動かしていないのに戻らない').toBe(520);
   });
 
   it('🔴 同じ面を描き直しただけでも戻す(ログのように作り直す面)', async () => {
