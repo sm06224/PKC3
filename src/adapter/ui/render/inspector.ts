@@ -240,8 +240,7 @@ export class InspectorRenderer {
      */
     const alive = this.head !== null && this.head.parentElement === this.region;
     if (!alive || this.shape !== shape) {
-      // 形が変わった(または器を失った)ときだけ組み直す
-      this.scroll.park();
+      // 形が変わった(または器を失った)ときだけ組み直す(位置は `ScrollMemory` が scroll で覚えている)
       this.build(shape);
       this.shape = shape;
     }
@@ -254,7 +253,6 @@ export class InspectorRenderer {
 
     // ── ここから下は**値の差し替えだけ**(器は触らない)
     const noteChanged = this.shownLid !== lid;
-    if (noteChanged) this.scroll.park();
 
     /**
      * 🔴 **編集中に「押せるのに無言で捨てる」口を作らない**(#513)。

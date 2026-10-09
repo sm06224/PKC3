@@ -271,9 +271,8 @@ export class BrowseRouter {
     //    ときだけスクロールが前の位置のまま残る(語で絞ったときと振る舞いが違う)
     const filtering = state.filterQuery !== '' || state.kindFilter.size > 0;
     const key = `${mode}|${filtering ? 'q' : ''}`;
-    // ① 🔴 **中身を書き換える前に**退避する ── 描いた後だと、縮んで 0 に
-    //    丸められた値を保存してしまう(実測でそう外した)
-    this.scroll.park();
+    // 🔑 位置は `ScrollMemory` が `scroll` イベントで覚えている ── ここで `scrollTop` を読まない
+    //    (読むと直前の描き直しの強制レイアウトをここで払う。#1467 段 3-e)
     if (mode !== this.last) {
       this.panes[this.last].hidden = true;
       this.panes[mode].hidden = false;

@@ -62,7 +62,7 @@ function booted(): AppState {
  * ── `renderTable` は `frame.table.textContent = ''` で中身を空にするだけで、
  * その場では誰も `scrollTop` に触らない。実ブラウザは**中身が空になった
  * その瞬間**に(誰も読み書きしなくても)値を 0 へ丸めるので、ここも
- * `textContent` の書き込みそのものへ割り込んで丸める(でなければ `park()` /
+ * `textContent` の書き込みそのものへ割り込んで丸める(でなければ `scroll` の記録 /
  * `use()` を丸ごと外しても、この test の器は 300 を持ち続けてしまう ──
  * 実際に 1 度それで空振りした)。
  */
@@ -130,7 +130,9 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     clampToChildren(left);
     clampToChildren(right);
     left.scrollTop = 300;
+    left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     right.scrollTop = 150;
+    right.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     // 空振り防止 ── clamp が中身在るうちは丸めていないことを確かめる
     expect(left.scrollTop, '前提: 300 まで送れる').toBe(300);
     expect(right.scrollTop, '前提: 150 まで送れる').toBe(150);
@@ -155,6 +157,7 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     r.render(s0);
     const left = tableOf(region, 'left');
     left.scrollTop = 300;
+    left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     const s1 = reduce(s0, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s1);
     expect(tableOf(region, 'left').scrollTop, '印だけの変化で送り位置が動いた').toBe(300);
@@ -176,7 +179,9 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     const right = tableOf(region, 'right');
     clampToChildren(left);
     right.scrollTop = 400; // 右は動かさない(clamp 無しでも素の数値のまま保たれるはず)
+    right.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     left.scrollTop = 300;
+    left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
 
     const s1 = reduce(s0, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     r.render(s1);
@@ -185,6 +190,7 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
 
     // 入った先で少し送ってから、上へ戻る
     left.scrollTop = 40;
+    left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     const s2 = reduce(s1, { type: 'DUAL_SET_SCOPE', side: 'left', lid: null }).state;
     r.render(s2);
     expect(tableOf(region, 'left').scrollTop, '上へ戻ったのに元の位置へ戻らない').toBe(300);

@@ -932,7 +932,7 @@ export class DualFilerRenderer {
        * ⚠ 絞り込みの有無だけを鍵にすると、フォルダ A を下まで見てから B に入ったとき
        *   **B が A の位置から出る**(入った先が途中から見える)。
        */
-      frame.scroll.park();
+      // 🔑 位置は `ScrollMemory` が `scroll` イベントで覚えている(描き直しの中で `scrollTop` を読まない)
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
       frame.scroll.use(`${paneScope(pane) ?? ''}${SEP}${filtered ? 'q' : ''}`);
     } else if (dates !== frame.dates) {

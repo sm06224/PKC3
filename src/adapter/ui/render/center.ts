@@ -299,7 +299,7 @@ export class CenterRouter {
     if (switched) {
       // ① 🔴 **入れ替える前に退避する**(`scroll-memory.ts` の 2 手のうち①)。
       //    ⚠ 後にすると、短い面で 0 に丸められた値を保存してしまう
-      this.scroll.park();
+      // 位置は `ScrollMemory` が scroll イベントで覚えている(描き直しの中で scrollTop を読まない)
       this.panes[this.lastPane].hidden = true;
       this.panes[view].hidden = false;
       /**

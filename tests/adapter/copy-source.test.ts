@@ -183,6 +183,35 @@ describe('読む面のコピー ── 配線と活性', () => {
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!.disabled).toBe(true);
   });
 
+  /**
+   * 🔴 **描き直しは選択を読まない**(#1467 段 3-e)── `getSelection()` の判定は見える選択を決めるために
+   *   スタイルと配置を強制するので、帯を描き直すたびに呼ぶと本文全体の再計算をそこで払う
+   *   (20,000 行の追記 1 回で 327 ms)。読むのは `selectionchange` の中だけ。
+   * 🔑 観測点は `document.getSelection` の呼び出し回数(本物の rig で描き直す)。対照群: 選択を変えると 1 回読む。
+   */
+  it('🔴 描き直しでは getSelection を呼ばない ── 選択が変わったときだけ 1 回読む', async () => {
+    const { d, q, root } = setup({ a: DOC });
+    clearSelection();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(30);
+    const btn = q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!;
+    expect(btn.disabled, '前提が崩れている(選択が無いのに押せる)').toBe(true);
+    const spy = vi.spyOn(document, 'getSelection');
+    // 本文が動いて面と帯を描き直す(追記と同じ経路)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: `${DOC}\n\n追記した段落。` });
+    await tick(30);
+    expect(root.querySelector('[data-pkc-field="detail-body"]')!.textContent, '前提が崩れている(描き直されていない)').toContain('追記した段落');
+    expect(spy, '描き直しのたびに選択を読んでいる(本文全体の強制レイアウトを払う)').not.toHaveBeenCalled();
+    // 対照群: 本文の中を選択すると selectionchange で読み、押せるようになる
+    const host = root.querySelector('[data-pkc-field="detail-body"]')!;
+    const ps = [...host.querySelectorAll('p')];
+    select(ps[0]!.firstChild!, 3, ps[1]!.firstChild!, 2);
+    await tick(0);
+    expect(spy.mock.calls.length, '選択が変わったのに読んでいない(押せるようにならない)').toBeGreaterThan(0);
+    expect(btn.disabled, '選択したのに押せない').toBe(false);
+    spy.mockRestore();
+  });
+
   it('🔴 「Markdown をコピー」── 原文が text/plain で渡り、ボタンが光る', async () => {
     const spy = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
     const { d, q } = setup({ a: DOC });

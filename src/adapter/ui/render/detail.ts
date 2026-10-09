@@ -650,8 +650,21 @@ export class DetailRenderer {
      * ⚠ renderer はアプリと同寿命なので外さない ── handler は器が外れていれば
      * 何もしない(test が renderer を作り捨てても積み害は無い)。
      */
-    region.ownerDocument.addEventListener('selectionchange', () => this.syncCopySelection());
+    region.ownerDocument.addEventListener('selectionchange', () => {
+      /**
+       * 🔴 **選択の判定はここでだけ読む**(#1467 段 3-e)── `getSelection()` の `isCollapsed` /
+       *   `getRangeAt` は見える選択を決めるために**スタイルと配置を強制する**。描き直しの帯
+       *   (`renderBar`)が毎回これを呼ぶと、直前の描き直しが汚した本文全体をそこで払っていた
+       *   (trace: 20,000 行の追記 1 回で 327 ms、1.2 万要素)。選択が変わった知らせの中で
+       *   1 回読んで覚え、描き直しは覚えた値を使う。
+       */
+      this.selectionUsable = this.bodyHost !== null && hasSourceSelection(this.bodyHost);
+      this.syncCopySelection();
+    });
   }
+
+  /** 直近の `selectionchange` で読んだ「選択範囲をコピーできる選択があるか」(描き直しはこれを読む)。 */
+  private selectionUsable = false;
 
   /**
    * 🔴 **この面が名乗る `data-pkc-field`**(#505 段②)。
@@ -1873,12 +1886,10 @@ export class DetailRenderer {
   private syncCopySelection(): void {
     const btn = this.barCopy?.sel;
     if (!btn || !btn.isConnected) return;
+    // ⚠ ここで `hasSourceSelection` を呼ばない(強制レイアウト)── 値は `selectionchange` が覚えている
     const usable =
-      this.mode === 'view' &&
-      this.lastBody !== null &&
-      this.bodyHost !== null &&
-      hasSourceSelection(this.bodyHost);
-    btn.disabled = !usable;
+      this.mode === 'view' && this.lastBody !== null && this.bodyHost !== null && this.selectionUsable;
+    if (btn.disabled !== !usable) btn.disabled = !usable;
   }
 
   /**

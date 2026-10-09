@@ -9,7 +9,7 @@
  * `[data-pkc-browse-pane]`(一覧 / フォルダ / アプリ …)は転がらない
  * (`app.css`: `browse-host` が `overflow: auto`、`browse-pane` は無い)。
  * `BrowseRouter.render()` は**毎回**(タブが変わっていない回も含めて)
- * `ScrollMemory.park()` → 中身の描画 → `ScrollMemory.use()` の順で
+ * 位置は `ScrollMemory` が `scroll` イベントで覚え、中身の描画 → `ScrollMemory.use()` の順で
  * `browse-host` を挟む(`src/adapter/ui/render/browse.ts`)。
  *
  * ⚠ ここは「filer.ts 自身に ScrollMemory を持たせる」形にしていない ──
@@ -121,6 +121,7 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
     const { d, regions, pane } = setup();
     clampHostOnPaneClear(regions.browseHost, pane);
     regions.browseHost.scrollTop = 500;
+    regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     expect(regions.browseHost.scrollTop, '前提: 500 まで送れる').toBe(500);
 
     d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
@@ -140,12 +141,14 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
   it('🔴 別のタブへ切り替えて戻ると、フォルダの送り位置を保つ', () => {
     const { setMode, regions } = setup();
     regions.browseHost.scrollTop = 500;
+    regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
 
     setMode('launcher');
     // ⚠ アプリタブは中身が少ない ── 実ブラウザなら送れる位置も違う。ここでは
     //   「違う値を書く」ことで、フォルダのタブへ戻った回に**上書きされずに残る**か
     //   を見分けられるようにする
     regions.browseHost.scrollTop = 10;
+    regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
 
     setMode('filer');
     expect(regions.browseHost.scrollTop, 'フォルダタブへ戻って送り位置を忘れた').toBe(500);
@@ -159,6 +162,7 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
     const { d, regions, pane } = setup();
     clampHostOnPaneClear(regions.browseHost, pane);
     regions.browseHost.scrollTop = 500;
+    regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n0' });
     expect(regions.browseHost.scrollTop, '選択だけの変化で送り位置が動いた').toBe(500);
   });
