@@ -903,6 +903,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * handshake できるかの早い方で進む。⚠ lease を優先する ── handshake の相手が
        * 死んだ直後なら、こちらが本体になるのが正しい。
        */
+      root.removeAttribute('data-pkc-shell'); // 素の字に戻る(余白の規則は `data-pkc-shell` を見る)
       root.textContent = '別のタブまたはウィンドウで開いています。そちらを閉じると、ここで続きが開きます…';
       let held = false;
       const heldP = lease.whenHeld.then(() => {
@@ -5352,6 +5353,7 @@ function bootstrap(): void {
         'launchQueue' in window
           ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して再読み込みすると開きます)'
           : '';
+      root.removeAttribute('data-pkc-shell'); // 素の字に戻る(余白の規則は `data-pkc-shell` を見る)
       root.textContent = `起動に失敗しました: ${message}${handoff}`;
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)

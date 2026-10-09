@@ -473,7 +473,7 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
       true,
     );
     const exit = rulesFor(
-      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden])) [data-pkc-region='append']",
+      "[data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append'][data-pkc-lock-open]",
     );
     expect(exit.length, '編集中の出口を出す規則が無い').toBeGreaterThan(0);
     // ⚠ 宣言の形で見る(`display-x: block` のような別名に `toContain` は通る)
@@ -481,6 +481,54 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
       /(^|;)\s*display:\s*block/.test(exit.join(' ')),
       '出口の規則が display:block を宣言していない',
     ).toBe(true);
+  });
+
+  /**
+   * 🔴 **shell 階層(root / shell / 中央 MAIN)を `:has()` の主語にしない**(#1467 段 3-h)。
+   *   Chromium は `:has()` の無効化集合を全部の `:has()` 規則で共有し、主語になりうる要素の下に
+   *   何かが挿さるたびに、その子孫全体へ当て直す。主語が MAIN だと、目次の組み直し 1 回で本文の
+   *   `p` 3,654 個(20,000 行)が 4 回当て直された(trace)。本文の塊(`.pkc-md-block`)や `th` が
+   *   主語の `:has()` は子孫が小さいので、この門の対象ではない。
+   * 🔑 禁止の目的は「文書全体を子孫に持つ要素を `:has()` の主語にしないこと」── 新しい規則を
+   *   足すときは、状態を書く側が印(属性)を立てる(`shell.ts` / `append-box.ts` が前例)。
+   */
+  it('🔴 root / shell / center を主語にする :has() 規則が 1 つも無い', () => {
+    const css = stripComments(readFileSync('src/styles/app.css', 'utf8'));
+    const offenders = [...css.matchAll(/([^{}]+)\{/g)]
+      .map((m) => m[1]!.trim())
+      .filter((sel) => sel.includes(':has('))
+      .filter((sel) =>
+        sel.split(',').some((one) => /^\s*\[data-pkc-(slot=['"]root['"]|region=['"](shell|center)['"])\][^ >]*:has\(/.test(one)),
+      );
+    expect(offenders, 'shell 階層を主語にする :has() が在る(本文全体が当て直される)').toEqual([]);
+    // 空振り防止: `:has()` 自体はまだ在る(本文の塊や th が主語の物)
+    expect(css.includes(':has('), '前提が崩れている(:has() が 1 つも無い ── この門は何も見ていない)').toBe(true);
+  });
+
+  it('🔴 buildShell は root に「shell が入った」印を、MAIN に「追記欄が隠れている」印を立てる', () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    expect(root.hasAttribute('data-pkc-shell'), '前提が崩れている(組む前から印が在る)').toBe(false);
+    const regions = buildShell(root);
+    expect(root.hasAttribute('data-pkc-shell'), 'shell を入れたのに root に印が無い(余白が素の字のまま)').toBe(true);
+    expect(regions.append.hidden, '前提が崩れている(組んだ直後から追記欄が出ている)').toBe(true);
+    expect(
+      root.querySelector('[data-pkc-region="center"]')!.hasAttribute('data-pkc-append-hidden'),
+      '追記欄が隠れているのに MAIN に印が無い(掴む帯が最初から出る)',
+    ).toBe(true);
+    root.remove();
+  });
+
+  it('🔴 追記欄が隠れているときの掴む帯と、shell が入った root の余白は、印の規則で決まる', () => {
+    const grip = rulesFor(
+      "[data-pkc-region='center'][data-pkc-append-hidden] [data-pkc-region='pane-grip'][data-pkc-axis='y']",
+    );
+    expect(grip.length, '追記欄が隠れているときに帯を消す規則が無い').toBeGreaterThan(0);
+    expect(/(^|;)\s*display:\s*none/.test(grip.join(' ')), '帯を消す規則が display:none でない').toBe(true);
+    const root = rulesFor("[data-pkc-slot='root'][data-pkc-shell]");
+    expect(root.length, 'shell が入った root の余白を 0 にする規則が無い').toBeGreaterThan(0);
+    expect(/(^|;)\s*padding:\s*0/.test(root.join(' ')), 'root の規則が padding:0 でない').toBe(true);
   });
 
   it('🔴 畳んだぶん grid の列も減る(空の 1 列が残らない)', () => {

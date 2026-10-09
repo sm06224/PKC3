@@ -863,6 +863,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
+  // 🔑 追記欄が隠れている印は MAIN に立てる(`app.css` の掴む帯の規則が読む。`:has()` を使わない ── #1467 段 3-h)
+  center.setAttribute('data-pkc-append-hidden', '');
   /**
    * 🔴 **追記欄の掴む帯**(#497)。user 指示 2026-08-27:「**追記メインで使う場合は
    * わくを大きくしたいとか、閲覧メインで使う時は消したい**」。
@@ -1204,6 +1206,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   }
   root.append(skip);
   root.append(shell);
+  // 🔑 shell が入った印(`app.css` の root の余白の規則が読む。`:has([data-pkc-region='shell'])` を使わない ── #1467 段 3-h)
+  root.setAttribute('data-pkc-shell', '');
   return {
     browseHost,
     sidebar,
