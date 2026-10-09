@@ -114,7 +114,10 @@ body {
   height: 100%;
   padding: var(--s5);
 }
-[data-pkc-slot='root']:has([data-pkc-region='shell']) {
+/* ⚠ `:has([data-pkc-region='shell'])` と書かない(#1467 段 3-h)── root を `:has()` の主語にすると、
+ *   Chromium は root の下に何かが挿さるたびに `:has()` 共通の無効化集合(`p` や本文の塊の class)を
+ *   文書全体へ当て直す(20,000 行の追記 1 回で `p` 3,654 個 × 4 回)。印は `buildShell` が root に立てる。 */
+[data-pkc-slot='root'][data-pkc-shell] {
   padding: 0;
 }
 
@@ -257,8 +260,9 @@ body {
  *   main の 3 か所が動き、帯の見た目の規則(`append-lock`)も引っ越す。器を出す条件を
  *   1 行足すほうが小さい。⚠ 副作用:編集中は帯(掴む部分)を押しても見え方が変わらない
  *   (畳んでも出口だけは残るので)── 記録と `aria-pressed` は動き、編集を終えると効く。 */
-[data-pkc-region='shell'][data-pkc-hidden-panes~='append']:has([data-pkc-field='append-lock']:not([hidden]))
-  [data-pkc-region='append'] {
+/* ⚠ `:has([data-pkc-field='append-lock']:not([hidden]))` と書かない(#1467 段 3-h ── 上の root と同じ理由)。
+ *   帯が出ているかは、帯の `hidden` を書く `append-box.ts` が同じ場所で器に `data-pkc-lock-open` を立てる。 */
+[data-pkc-region='shell'][data-pkc-hidden-panes~='append'] [data-pkc-region='append'][data-pkc-lock-open] {
   display: block;
 }
 
@@ -321,8 +325,10 @@ body {
 /* ⚠ **追記欄そのものが出ていない回は、帯も出さない** ── 開いているノートが
  * 無いときに「畳む・戻す」だけが浮いていると、押しても何も起きない導線になる。
  * 🔑 畳んだとき(上の `display:none`)は `hidden` が付かないので、帯は**残る**。 */
-[data-pkc-region='center']:has([data-pkc-region='append'][hidden])
-  [data-pkc-region='pane-grip'][data-pkc-axis='y'] {
+/* ⚠ `[data-pkc-region='center']:has([data-pkc-region='append'][hidden])` と書かない(#1467 段 3-h)── MAIN を
+ *   `:has()` の主語にすると、本文の下に何かが挿さるたび(目次の組み直しなど)に `p` 3,654 個が当て直される。
+ *   追記欄の `hidden` を書く `append-box.ts` / `shell.ts` が、同じ場所で MAIN に `data-pkc-append-hidden` を立てる。 */
+[data-pkc-region='center'][data-pkc-append-hidden] [data-pkc-region='pane-grip'][data-pkc-axis='y'] {
   display: none;
 }
 [data-pkc-region='pane-grip'][data-pkc-pane='sidebar'] {

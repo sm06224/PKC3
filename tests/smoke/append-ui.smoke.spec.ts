@@ -122,7 +122,21 @@ test('⚠ 見出しが無いノートでは、リストの行ごと畳む (#496)
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
+  /**
+   * 🔴 **何も選んでいない間は、追記欄の掴む帯が出ない**(#1467 段 3-h ── 以前は `app.css` の
+   *   `:has([data-pkc-region='append'][hidden])` が決めていた。いまは `shell.ts` / `append-box.ts` が MAIN に
+   *   `data-pkc-append-hidden` を立て、規則はそれを読む)。印と帯の両方を見る ── 印だけだと規則が
+   *   読んでいなくても緑、帯だけだと印の名前が食い違っても(規則が当たらず)赤にならない形が在る。
+   */
+  const center = page.locator('[data-pkc-region="center"]');
+  const grip = page.locator('[data-pkc-region="pane-grip"][data-pkc-axis="y"]');
+  await expect(center, '何も選んでいないのに MAIN に「追記欄が隠れている」印が無い').toHaveAttribute('data-pkc-append-hidden', '');
+  await expect(grip, '何も選んでいないのに追記欄の掴む帯が出ている').toBeHidden();
+
   await createEntry(page, 'text');
+  // ノートを選んだ(作った)ので追記欄が出る → 印が消え、帯が出る
+  await expect(center, 'ノートを選んだのに MAIN の印が残る(帯が消えたまま)').not.toHaveAttribute('data-pkc-append-hidden', '');
+  await expect(grip, 'ノートを選んだのに追記欄の掴む帯が出ない').toBeVisible();
   const live = page.locator('[data-pkc-region="editor-live"]');
   await clickReal(page, '[data-pkc-region="editor-live"]');
   await live.locator('[data-pkc-field="row-source"]').fill('見出しの無い本文です。');

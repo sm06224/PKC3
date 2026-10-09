@@ -64,6 +64,7 @@ export function appendModeOf(state: AppState): AppendMode {
 
 export class AppendBoxRenderer {
   private readonly region: HTMLElement;
+  private readonly center: HTMLElement | null;
   private readonly form: HTMLElement;
   private readonly input: HTMLTextAreaElement;
   /** 追記先の選択(#395 段①)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
@@ -86,6 +87,8 @@ export class AppendBoxRenderer {
 
   constructor(region: HTMLElement) {
     this.region = region;
+    /** 追記欄を抱える MAIN(掴む帯の規則が `data-pkc-append-hidden` を読む)。test の素の器では無いこともある。 */
+    this.center = region.closest<HTMLElement>('[data-pkc-region="center"]');
 
     this.form = document.createElement('div');
     this.form.setAttribute('data-pkc-field', 'append-form');
@@ -254,8 +257,16 @@ export class AppendBoxRenderer {
     }
     this.last = mode.kind;
     this.region.hidden = mode.kind === 'hidden';
+    /**
+     * 🔑 **祖先の印は、`hidden` を書くのと同じ場所で立てる**(#1467 段 3-h)── `app.css` が
+     *   `:has([data-pkc-region='append'][hidden])` / `:has([data-pkc-field='append-lock']:not([hidden]))` で
+     *   読んでいた 2 つ。MAIN を `:has()` の主語にすると、本文の下に何かが挿さるたびに `p` 3,654 個が
+     *   当て直されていた(20,000 行の追記 1 回で 4 回)。印なら、変えた要素の規則だけが動く。
+     */
+    this.center?.toggleAttribute('data-pkc-append-hidden', this.region.hidden);
     this.form.hidden = mode.kind !== 'ready';
     this.lockBar.hidden = mode.kind === 'ready' || mode.kind === 'hidden';
+    this.region.toggleAttribute('data-pkc-lock-open', !this.lockBar.hidden);
     this.resolve.hidden = mode.kind !== 'editing';
     this.discard.hidden = mode.kind !== 'editing';
     this.release.hidden = mode.kind !== 'writing';
