@@ -108,6 +108,41 @@ describe('code block collapse / expand (Issue #1139)', () => {
       expect(block.querySelectorAll('.pkc-code-collapse-top-btn')).toHaveLength(1);
     });
 
+    /**
+     * 🔴 **描画のたびの冪等更新は scroll しない**(#1467 段 1)。
+     * ⚠ 直す前は `setCodeCollapsed` の畳む側が `scrollIntoView` を撃っていたので、本文を描き直すたびに
+     *   **畳んである塊の数だけ**視点が動き、ffmpeg のヘルプの形(30 行の囲み 200 本)では追記 1 回が 28.5 秒だった。
+     * 🔑 対照群: user が押して畳んだときは 1 回だけ寄せる(押した帯を見失わない)。
+     */
+    it('🔴 再描画の冪等更新では scrollIntoView を 1 回も撃たない(押して畳んだときだけ 1 回)', () => {
+      const longCode = Array.from({ length: 30 }, (_, i) => `item_${i}`).join('\n');
+      host.innerHTML = Array.from(
+        { length: 5 },
+        () => `<div class="pkc-md-block" data-pkc-md-block-kind="code"><pre><code>${longCode}</code></pre></div>`,
+      ).join('');
+      const calls: HTMLElement[] = [];
+      const orig = HTMLElement.prototype.scrollIntoView;
+      HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+        calls.push(this);
+      };
+      try {
+        applyCodeCollapse(host);
+        const blocks = [...host.querySelectorAll<HTMLElement>('.pkc-md-block')];
+        expect(blocks.every((b) => isCodeCollapsed(b)), '前提が崩れている(初期は畳む)').toBe(true);
+        expect(calls, '初回の付与で scroll した').toHaveLength(0);
+        applyCodeCollapse(host); // 再描画(冪等更新)
+        applyCodeCollapse(host);
+        expect(calls, '再描画のたびに畳んだ塊へ scrollIntoView を撃っている(追記 1 回で 201 回になる)').toHaveLength(0);
+        // 対照群: 展開 → 押して畳む、で 1 回だけ寄せる
+        toggleCodeCollapse(blocks[2]!);
+        expect(calls, '展開で scroll した').toHaveLength(0);
+        toggleCodeCollapse(blocks[2]!);
+        expect(calls, '押して畳んだのに寄せていない(帯を見失う)').toEqual([blocks[2]]);
+      } finally {
+        HTMLElement.prototype.scrollIntoView = orig;
+      }
+    });
+
     it('skips blocks that have .pkc-render-slot (e.g. CSV table views)', () => {
       const longCode = Array.from({ length: 30 }, (_, i) => `val,${i}`).join('\n');
       host.innerHTML = `

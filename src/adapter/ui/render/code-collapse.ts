@@ -106,10 +106,8 @@ export function setCodeCollapsed(block: HTMLElement, collapsed: boolean): void {
       barBtn.textContent = label;
       barBtn.setAttribute('aria-label', lineCount > 0 ? `コードをすべて表示 (${lineCount} 行)` : 'コードをすべて表示');
     }
-
-    if (typeof block.scrollIntoView === 'function') {
-      block.scrollIntoView({ block: 'nearest' });
-    }
+    // ⚠ ここでは scroll しない ── 描画のたびの冪等更新(`applyCodeCollapse`)もここを通る。
+    //   見える位置へ寄せるのは user が押したとき(`toggleCodeCollapse`)だけ(#1467 段 1)。
   } else {
     block.removeAttribute('data-pkc-code-collapsed');
 
@@ -129,10 +127,22 @@ export function setCodeCollapsed(block: HTMLElement, collapsed: boolean): void {
 }
 
 /**
- * コードブロックの折りたたみ／展開を反転する。
+ * コードブロックの折りたたみ／展開を反転する(user が押したとき)。
+ *
+ * 🔑 **畳んだときだけ、その塊を見える位置へ寄せる** ── 長いコードの下の帯で畳むと、
+ *   塊が縮んで帯が画面の外へ飛ぶので、押した物を見失わないため。
+ * 🔴 **scroll はここにだけ置く**(#1467 段 1)── 1 稿目は `setCodeCollapsed` の畳む側に在り、
+ *   描画のたびに `applyCodeCollapse` の冪等更新が**畳んである塊の数だけ** `scrollIntoView` を撃っていた。
+ *   実測(ffmpeg のヘルプの形 = 30 行のコード囲み 200 本、20,000 行): 追記 1 回で 201 回・28.5 秒
+ *   (壁時間 33.9 秒の 84%)。5,000 行・50 本でも 1.76 秒(追記 2.7 秒の 6 割)。
+ *   しかも描き直しのたびに視点が最後のコード囲みへ飛ぶ。
  */
 export function toggleCodeCollapse(block: HTMLElement): void {
-  setCodeCollapsed(block, !isCodeCollapsed(block));
+  const collapse = !isCodeCollapsed(block);
+  setCodeCollapsed(block, collapse);
+  if (collapse && typeof block.scrollIntoView === 'function') {
+    block.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 /**
