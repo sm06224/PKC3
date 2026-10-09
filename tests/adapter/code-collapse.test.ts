@@ -121,7 +121,8 @@ describe('code block collapse / expand (Issue #1139)', () => {
         () => `<div class="pkc-md-block" data-pkc-md-block-kind="code"><pre><code>${longCode}</code></pre></div>`,
       ).join('');
       const calls: HTMLElement[] = [];
-      const orig = HTMLElement.prototype.scrollIntoView;
+      // ⚠ happy-dom の scrollIntoView は Element.prototype に在る ── HTMLElement 側に自前の property を生やして
+      //   先に拾わせ、終わったら delete で消す(代入で戻すと継承物の写しが残る)
       HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
         calls.push(this);
       };
@@ -139,7 +140,7 @@ describe('code block collapse / expand (Issue #1139)', () => {
         toggleCodeCollapse(blocks[2]!);
         expect(calls, '押して畳んだのに寄せていない(帯を見失う)').toEqual([blocks[2]]);
       } finally {
-        HTMLElement.prototype.scrollIntoView = orig;
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
       }
     });
 
