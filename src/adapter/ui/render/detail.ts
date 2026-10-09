@@ -325,7 +325,16 @@ export class DetailRenderer {
   }
   private set mode(m: Mode) {
     this._mode = m;
-    (this.markOn ?? this.region).setAttribute('data-pkc-detail-mode', m);
+    const el = this.markOn ?? this.region;
+    /**
+     * 🔴 **同じ値なら書かない**(#1467 段 3)── `renderView` は state が動くたびに通るので、
+     *   追記 1 回で 20 回以上ここへ来る。同じ値でも `setAttribute` は MutationObserver
+     *   (`read-columns.ts` の `installColumnFit`、`attributeFilter: ['data-pkc-detail-mode']`)を鳴らし、
+     *   そのたびに `fitColumnHeight` が描いた直後の DOM を採寸して**強制レイアウト**を払っていた
+     *   (profile: 20,000 行の追記 1 回で 23 回・約 4 秒)。
+     * ⚠ 見張りは「面が切り替わった」ときに鳴ればよい ── 値が変わるときは今までどおり書く。
+     */
+    if (el.getAttribute('data-pkc-detail-mode') !== m) el.setAttribute('data-pkc-detail-mode', m);
   }
   private lastSelected: string | null = null;
   /** view で最後に描いた body(null = openBody 不在の loading 表示)。 */
