@@ -23,8 +23,8 @@ import {
   installColumnFit,
   limitDraftInput,
 } from '../../src/adapter/ui/render/read-columns';
-import { installSectionBox } from '../../src/adapter/ui/render/section-box';
-import { installCodeBox } from '../../src/adapter/ui/render/code-box';
+import { SECTION_BOX_INPUT_FIELD, installSectionBox } from '../../src/adapter/ui/render/section-box';
+import { CODE_BOX_INPUT_FIELD, installCodeBox } from '../../src/adapter/ui/render/code-box';
 
 const css = (): string => withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
 
@@ -65,11 +65,12 @@ function shell(): { root: HTMLElement; region: HTMLElement; pane: HTMLElement; i
   pane.setAttribute('data-pkc-detail-mode', 'view');
   // 開いている章の編集箱(`--pkc-pane-h` の唯一の読み手)
   const input = document.createElement('textarea');
-  input.setAttribute('data-pkc-field', 'section-draft-input');
+  input.setAttribute('data-pkc-field', SECTION_BOX_INPUT_FIELD);
   pane.append(input);
   region.append(pane);
   root.append(region);
   document.body.append(root);
+  limitDraftInput(input); // 箱は台帳に載って初めて書かれる(本物の差し込みと同じ道)
   return { root, region, pane, input };
 }
 
@@ -131,7 +132,47 @@ describe('器の高さを CSS へ下ろす(exposePaneHeight)', () => {
     expect(code, '前提が崩れている(コード枠の箱が差し込まれていない)').not.toBeNull();
     expect(code!.style.getPropertyValue(PANE_H_VAR), 'コード枠の箱に器の高さが下りていない').toBe('500px');
     expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている').toBe('');
+    // 🔑 器が後から縮む(お知らせのカード)── 見張りが呼ぶ exposePaneHeight が**両方の本物の箱**へ追随させる
+    //    (着地前レビュー B: 台帳からコード枠の箱が抜ける変異 / 1 つしか書かない変異を殺す)
+    Object.defineProperty(region, 'clientHeight', { value: 300, configurable: true });
+    expect(exposePaneHeight(root)).toBe(300);
+    expect(section!.style.getPropertyValue(PANE_H_VAR), '章の箱が器の縮みに追随していない').toBe('300px');
+    expect(code!.style.getPropertyValue(PANE_H_VAR), 'コード枠の箱が器の縮みに追随していない').toBe('300px');
+    // 閉じた箱には書かない(台帳から落ちる)
+    section!.closest('[data-pkc-region]')!.remove();
+    Object.defineProperty(region, 'clientHeight', { value: 320, configurable: true });
+    expect(exposePaneHeight(root)).toBe(320);
+    expect(section!.style.getPropertyValue(PANE_H_VAR), '閉じた箱に書き続けている').toBe('300px');
+    expect(code!.style.getPropertyValue(PANE_H_VAR)).toBe('320px');
     root.remove();
+  });
+
+  /**
+   * 🔴 **CSS で `--pkc-pane-h` を読む箱 = `limitDraftInput` を呼ぶ箱**(着地前レビュー A、parity)。
+   * ⚠ 器に書いていた頃は 3 つ目の読み手を CSS に足せば自動で効いたが、箱に書く作りでは差し込み側が
+   *   `limitDraftInput` を呼ばない限り効かない(黙って `100vh - 110px` に戻る)。CSS の読み手の集合を
+   *   全数で拾い、箱の field 名の集合と等値で比べる。
+   */
+  it('🔴 CSS で --pkc-pane-h を読む箱の集合 = limitDraftInput を呼ぶ箱の集合(parity)', () => {
+    const text = css();
+    const readers = new Set<string>();
+    // 規則(`選択子 { 宣言 }`)を全部読み、宣言に `var(--pkc-pane-h` を持つ物の選択子を箱の field 名へ落とす
+    for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!m[2]!.includes('var(--pkc-pane-h')) continue;
+      for (const sel of m[1]!.split(',')) {
+        const f = /\[data-pkc-field=['"]([a-z-]+)['"]\]/.exec(sel.trim());
+        expect(f, `読み手の選択子が箱の field 名で書かれていない: ${sel.trim()}`).not.toBeNull();
+        readers.add(f![1]!);
+      }
+    }
+    expect(readers.size, '読み手が 1 つも拾えていない(空振り)').toBeGreaterThan(0);
+    // 書き手: limitDraftInput を呼ぶ差し込み側の field 名(section-box.ts / code-box.ts が export する正本)
+    const writers = new Set([SECTION_BOX_INPUT_FIELD, CODE_BOX_INPUT_FIELD]);
+    for (const f of [SECTION_BOX_INPUT_FIELD, CODE_BOX_INPUT_FIELD]) {
+      const src = readFileSync(`src/adapter/ui/render/${f === SECTION_BOX_INPUT_FIELD ? 'section-box' : 'code-box'}.ts`, 'utf-8');
+      expect(src, `${f} の差し込み側が limitDraftInput を呼んでいない`).toContain('limitDraftInput(ta)');
+    }
+    expect([...readers].sort(), 'CSS の読み手と、箱に書く側が食い違っている').toEqual([...writers].sort());
   });
 
   it('採寸できない(0)なら触らない ── 0px にすると箱が消える', () => {

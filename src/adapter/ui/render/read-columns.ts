@@ -72,10 +72,12 @@ export const COLUMN_H_VAR = '--pkc-col-h';
 export const PANE_H_VAR = '--pkc-pane-h';
 
 /**
- * 🔴 **`--pkc-pane-h` を読む箱**(章の編集箱 / コード枠の編集箱の `max-height`)。
+ * 🔴 **`--pkc-pane-h` を読む箱の台帳**(章の編集箱 / コード枠の編集箱 ── `limitDraftInput` が登録する)。
  * ⚠ 変数は**この箱そのものに inline で書く** ── 器(面の親)に書いてはいけない(下)。
+ * ⚠ 本文を `querySelectorAll` で走査しない(着地前レビュー C)── `fitColumnHeight` は ResizeObserver /
+ *   MutationObserver のたびに走るので、4.7 万要素の本文で毎回の走査は要らない。外れた箱は次に書くときに落とす。
  */
-const PANE_H_TARGETS = '[data-pkc-field="section-draft-input"], [data-pkc-field="code-draft-input"]';
+const paneHeightTargets = new Set<HTMLElement>();
 
 /** 箱 1 つに `--pkc-pane-h` を書く(同じ値なら触らない)。 */
 function writePaneHeight(el: HTMLElement, h: number): void {
@@ -103,7 +105,10 @@ export function exposePaneHeight(root: ParentNode): number | null {
   if (region === null) return null;
   const h = region.clientHeight;
   if (!(h > 0)) return null;
-  for (const el of region.querySelectorAll<HTMLElement>(PANE_H_TARGETS)) writePaneHeight(el, h);
+  for (const el of paneHeightTargets) {
+    if (!el.isConnected) paneHeightTargets.delete(el); // 閉じた箱は台帳から落とす
+    else writePaneHeight(el, h);
+  }
   return h;
 }
 
@@ -114,6 +119,7 @@ export function exposePaneHeight(root: ParentNode): number | null {
  * @returns 下ろした高さ(px)。器が見つからない / 採れないときは `null`
  */
 export function limitDraftInput(el: HTMLElement): number | null {
+  paneHeightTargets.add(el); // 🔑 器の高さが後から動いたときは `exposePaneHeight` がここから書く
   const region = el.closest<HTMLElement>('[data-pkc-view-pane="detail"]')?.parentElement ?? null;
   if (region === null) return null;
   const h = region.clientHeight;
