@@ -12,6 +12,7 @@
  *   緑で通る(いちばん質の悪い形)。**保存された本文**を見る。
  */
 import { stubStamps } from '../helpers/store-stamps';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -275,6 +276,29 @@ describe('予定の面(#292 段③)', () => {
     btn.click();
     await tick();
     expect(groups(qa)).toEqual(['今日(1)']);
+  });
+
+  /**
+   * 🔴 **切替が 1 つも出ないときは行ごと隠れ、1 つでも出れば行は見える**(#1467 段 3-d)。
+   * ⚠ 直す前は CSS の `:not(:has(button:not([hidden])))` が隠していた ── happy-dom では効かないので
+   *   見えなかったが、実ブラウザでは文書のどこで button が入っても祖先の再評価が走っていた。
+   *   JS で `hidden` を決める形にし、CSS に `:has(` の規則が戻らないことも pin する。
+   */
+  it('🔴 切替が 1 つも出ないときは行ごと hidden、1 つでも出れば行は出る(CSS の :has に頼らない)', () => {
+    // 期限つきだけ・済み無し・片付け無し → 3 つとも出ない
+    const a = setup({ e1: '- [ ] まだ @2026-08-23\n' });
+    const rowA = a.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!;
+    expect(rowA, '前提が崩れている(切替の行が無い)').not.toBeNull();
+    expect(a.q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!.hidden).toBe(true);
+    expect(rowA.hidden, '切替が 1 つも無いのに行が出ている(空の行が嵩む)').toBe(true);
+    // 済んだ物が 1 つ在る → 「済んだ予定も出す」が出て、行も出る
+    const b = setup({ e1: '- [ ] まだ @2026-08-23\n- [x] 済み @2026-08-23\n' });
+    const rowB = b.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!;
+    expect(b.q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!.hidden).toBe(false);
+    expect(rowB.hidden, '切替が出るのに行が隠れている(押せない)').toBe(false);
+    // CSS 側に :has の規則が戻っていない(戻すと文書全体の再評価が復活する)
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    expect(css, 'schedule-toggles の :has() 規則が CSS に戻っている').not.toMatch(/schedule-toggles'\]:not\(:has\(/);
   });
 
   /** ⚠ 済んだ物が 1 つも無ければ、戻す口は出さない(dead click を作らない)。 */

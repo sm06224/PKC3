@@ -144,6 +144,36 @@ describe('code block collapse / expand (Issue #1139)', () => {
       }
     });
 
+    /**
+     * 🔴 **再描画の冪等更新は DOM に 1 byte も触らない**(#1467 段 3-d)。
+     * ⚠ 直す前は同じ属性・同じ字を毎回書き直していた ── 同じ値でも `setAttribute` / `textContent` は
+     *   スタイルの無効化を予約するので、折りたたんだ囲み 200 本のノートでは描き直しのたびに
+     *   `:has(> .pkc-code-collapse-top-btn)` の再評価 800 件と塊 200 の無効化が走っていた(trace)。
+     * 🔑 観測点は**本物の MutationObserver**(属性・子・字の全部)── 書き方を変えても拾う。
+     */
+    it('🔴 再描画の冪等更新では、属性も字も 1 つも書き直さない(押して変えたときだけ動く)', async () => {
+      const longCode = Array.from({ length: 30 }, (_, i) => `item_${i}`).join('\n');
+      host.innerHTML = Array.from(
+        { length: 3 },
+        () => `<div class="pkc-md-block" data-pkc-md-block-kind="code"><pre><code>${longCode}</code></pre></div>`,
+      ).join('');
+      applyCodeCollapse(host);
+      const records: string[] = [];
+      const mo = new MutationObserver((ms) => {
+        for (const m of ms) records.push(`${m.type}:${m.attributeName ?? ''}`);
+      });
+      mo.observe(host, { attributes: true, childList: true, characterData: true, subtree: true });
+      applyCodeCollapse(host);
+      applyCodeCollapse(host);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(records, '再描画の冪等更新が DOM を書き直している(同じ値でも無効化を予約する)').toEqual([]);
+      // 対照群: 押して展開すると属性と字が動く(観測点が死んでいない証拠)
+      toggleCodeCollapse(host.querySelector<HTMLElement>('.pkc-md-block')!);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(records.length, '押して変えたのに何も動かない(観測点が空振り)').toBeGreaterThan(0);
+      mo.disconnect();
+    });
+
     it('skips blocks that have .pkc-render-slot (e.g. CSV table views)', () => {
       const longCode = Array.from({ length: 30 }, (_, i) => `val,${i}`).join('\n');
       host.innerHTML = `

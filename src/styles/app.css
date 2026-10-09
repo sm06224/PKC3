@@ -5945,9 +5945,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   flex-wrap: wrap;
   gap: var(--s3);
 }
-[data-pkc-field='schedule-toggles']:not(:has(button:not([hidden]))) {
-  display: none;
-}
+/* ⚠ 切替が 1 つも出ないときは行ごと `hidden`(`schedule.ts` が決める)── ここに
+ *   `:not(:has(button:not([hidden])))` を書いてはいけない: 文書のどこで button が入っても
+ *   `hidden` が動いても祖先が再評価され、長いノートの描き直しのたびに MAIN まで無効化が走る(#1467 段 3-d) */
 [data-pkc-field='schedule-undated'],
 [data-pkc-field='schedule-done'],
 [data-pkc-field='schedule-archived'] {

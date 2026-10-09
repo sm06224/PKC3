@@ -82,6 +82,19 @@ export function isCodeCollapsed(block: Element): boolean {
 }
 
 /**
+ * 🔴 **同じ値なら書かない**(#1467 段 3-d)── 描画のたびに `applyCodeCollapse` → `setCodeCollapsed` が
+ *   折りたたんである囲み全部(ffmpeg の形で 200)に同じ属性と字を書き直していた。同じ値でも
+ *   `setAttribute` / `textContent` はスタイルの無効化を予約する(trace: 塊 200 に「保留の無効化」、
+ *   `:has(> .pkc-code-collapse-top-btn)` の再評価 800 件 / 追記 1 回)。値が違うときだけ触る。
+ */
+function setAttr(el: Element, name: string, value: string): void {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+function setText(el: Element, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+/**
  * コードブロックの折りたたみ／展開状態を更新する。
  */
 export function setCodeCollapsed(block: HTMLElement, collapsed: boolean): void {
@@ -91,37 +104,37 @@ export function setCodeCollapsed(block: HTMLElement, collapsed: boolean): void {
   const barBtn = block.querySelector<HTMLButtonElement>('.pkc-code-collapse-btn');
 
   if (collapsed) {
-    block.setAttribute('data-pkc-code-collapsed', '');
+    setAttr(block, 'data-pkc-code-collapsed', '');
 
     if (topBtn) {
-      topBtn.setAttribute('aria-expanded', 'false');
-      topBtn.setAttribute('title', 'コードブロックを展開する');
-      topBtn.setAttribute('aria-label', 'コードブロックを展開する');
-      topBtn.textContent = '▾';
+      setAttr(topBtn, 'aria-expanded', 'false');
+      setAttr(topBtn, 'title', 'コードブロックを展開する');
+      setAttr(topBtn, 'aria-label', 'コードブロックを展開する');
+      setText(topBtn, '▾');
     }
 
     if (barBtn) {
-      barBtn.setAttribute('aria-expanded', 'false');
+      setAttr(barBtn, 'aria-expanded', 'false');
       const label = lineCount > 0 ? `▾ すべて表示 (${lineCount} 行)` : '▾ すべて表示';
-      barBtn.textContent = label;
-      barBtn.setAttribute('aria-label', lineCount > 0 ? `コードをすべて表示 (${lineCount} 行)` : 'コードをすべて表示');
+      setText(barBtn, label);
+      setAttr(barBtn, 'aria-label', lineCount > 0 ? `コードをすべて表示 (${lineCount} 行)` : 'コードをすべて表示');
     }
     // ⚠ ここでは scroll しない ── 描画のたびの冪等更新(`applyCodeCollapse`)もここを通る。
     //   見える位置へ寄せるのは user が押したとき(`toggleCodeCollapse`)だけ(#1467 段 1)。
   } else {
-    block.removeAttribute('data-pkc-code-collapsed');
+    if (block.hasAttribute('data-pkc-code-collapsed')) block.removeAttribute('data-pkc-code-collapsed');
 
     if (topBtn) {
-      topBtn.setAttribute('aria-expanded', 'true');
-      topBtn.setAttribute('title', 'コードブロックを折りたたむ');
-      topBtn.setAttribute('aria-label', 'コードブロックを折りたたむ');
-      topBtn.textContent = '▴';
+      setAttr(topBtn, 'aria-expanded', 'true');
+      setAttr(topBtn, 'title', 'コードブロックを折りたたむ');
+      setAttr(topBtn, 'aria-label', 'コードブロックを折りたたむ');
+      setText(topBtn, '▴');
     }
 
     if (barBtn) {
-      barBtn.setAttribute('aria-expanded', 'true');
-      barBtn.textContent = '▴ 折りたたむ';
-      barBtn.setAttribute('aria-label', 'コードを折りたたむ');
+      setAttr(barBtn, 'aria-expanded', 'true');
+      setText(barBtn, '▴ 折りたたむ');
+      setAttr(barBtn, 'aria-label', 'コードを折りたたむ');
     }
   }
 }
@@ -164,9 +177,9 @@ export function applyCodeCollapse(host: HTMLElement): void {
 
     if (lines < CODE_COLLAPSE_LINE_THRESHOLD) continue;
 
-    // 既に初期化済みの場合はライン数の最新化のみ
-    block.setAttribute('data-pkc-code-collapsible', 'true');
-    block.setAttribute('data-pkc-code-lines', String(lines));
+    // 既に初期化済みの場合はライン数の最新化のみ(⚠ 同じ値なら書かない ── 上の `setAttr`)
+    setAttr(block, 'data-pkc-code-collapsible', 'true');
+    setAttr(block, 'data-pkc-code-lines', String(lines));
 
     if (block.querySelector('.pkc-code-collapse-bar')) {
       // 冪等更新
