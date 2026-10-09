@@ -26,14 +26,13 @@ import { EDITING_STATE_WORD } from './status-line';
 // 🔑 指で触るだけの端末かの判定は 1 か所(#722 P2-12)── 各面で `matchMedia` を書かない
 import { isTouchOnly } from './touch-device';
 
-/** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
-
 /** frame の頭に 1 回(test の node 環境には無いので setTimeout へ落とす ── `scroll-memory.ts` と同じ形)。 */
 const requestFrame = (cb: () => void): void => {
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(cb);
   else setTimeout(cb, 0);
 };
 
+/** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
 export type AppendMode =
   | { kind: 'hidden' }
   | { kind: 'ready'; lid: string }
@@ -371,10 +370,8 @@ export class AppendBoxRenderer {
      * 🔴 **焦点を戻すのは frame の頭で**(#1467 段 3-g)── `focus()` は「焦点を置けるか(描かれているか)」を
      *   決めるために配置を強いるので、描き直しの task の中で呼ぶと、直前の描き直しが汚した文書全体を
      *   ここで払う(trace: 20,000 行の追記 1 回で 194 ms)。frame の頭なら frame 自身の配置と同じ 1 回で済む。
-     * ⚠ その間に欄が畳まれた / 外れたなら置かない(`display: none` に焦点は乗らない)。
+     * ⚠ その間に欄が畳まれていれば `focus()` は何もしない(`display: none` に焦点は乗らない)── 門は置かない。
      */
-    requestFrame(() => {
-      if (this.input.isConnected && !this.input.hidden) this.input.focus();
-    });
+    requestFrame(() => this.input.focus());
   }
 }

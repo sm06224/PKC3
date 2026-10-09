@@ -44,7 +44,8 @@
  * use(newKey);     // 中身を入れ**終わってから**、その面の位置へ戻す(鍵も切り替える)
  * ```
  * ⚠ `use()` が `scrollTop` を書くのは**次の frame の頭**(段 3-g)── 同じ task で読み直しても
- *   まだ動いていない。test は frame を 1 つ待ってから見る。
+ *   まだ動いていない。test は frame を 1 つ待ってから見る。`use()` の後に誰かが位置を動かした
+ *   (`scroll` が届いた)なら、frame の頭では**書かない**(後から動かした人が勝つ)。
  * ⚠ `use()` を描画の前にすると、まだ `scrollHeight` が足りないので指した位置が丸められる
  * (段⑪ でも同じ罠を踏んだ)。
  */
@@ -72,6 +73,7 @@ export class ScrollMemory {
   /** いまの位置を、いまの面の鍵で覚える(`scroll` イベントの中でだけ読む ── 強制レイアウトにならない)。 */
   private remember(): void {
     if (this.key === null) return;
+    if (this.frame !== null) this.moved = true; // `use()` の後に誰かが動かした ── frame の頭で上書きしない
     this.seen.set(this.key, this.el.scrollTop);
     if (this.seen.size > CAP) {
       const oldest = this.seen.keys().next().value; // Map は挿入順
@@ -92,21 +94,30 @@ export class ScrollMemory {
      *   読みと同じく配置を強いる(段 3-e のレビューの実測)。描き直しの task の中で書くと、
      *   直前の描き直しが汚した文書全体をここで払う(trace: 20,000 行の追記 1 回で 267 ms)。
      *   frame の頭なら、その配置は frame 自身が 1 回払う分と同じ物になる(二重に払わない)。
-     * ⚠ 値は**いま**決める(`seen` を frame で読まない)── 縮んで丸められた分の `scroll` は
-     *   frame の頭(scroll steps)で届いて `seen` を 0 で上書きするので、frame で読むと 0 を書く。
-     * ⚠ 同じ frame に 2 度来たら後の方だけ書く(鍵が 2 度変わっても 1 回)。
+     * 🔴 **`use()` の後に `scroll` が届いたら、書かない**(着地前レビューが実ブラウザで示した穴)──
+     *   同じ task で `use()` の**後**に誰かが位置を動かす経路が在る(お知らせを開く / 目次から飛ぶ /
+     *   検索の当たりへ飛ぶ = `scrollIntoView`、user がホイールを回した分)。その `scroll` は
+     *   次の frame の**scroll steps = rAF より前**に届く(chromium / headless_shell の両方で実測)ので、
+     *   届いていたら「後から動かした人」の意図を勝たせる(frame の頭で古い値を上書きしない)。
+     * ⚠ 値は `use()` の時点で決める(`seen` を frame で読まない)── 同じ frame に 2 度来たら後の鍵の値を 1 回。
+     * ⚠ 知っている穴: 同じ task の中で「中身を空にする → **配置を強いる読み** → 入れ直す」と、
+     *   丸めの `scroll@0` が rAF より前に届く版(headless_shell。フル chromium は後に届く)では
+     *   戻しを捨てて先頭になる。描き直しの task に配置を強いる読みを置かないこと自体が
+     *   この一連(#1467)の目的なので、読みを置かない側で守る。
      */
     this.pending = this.seen.get(key) ?? 0;
+    this.moved = false;
     if (this.frame !== null) return;
     this.frame = requestFrame(() => {
       this.frame = null;
-      this.el.scrollTop = this.pending;
+      if (!this.moved) this.el.scrollTop = this.pending;
     });
   }
 
-  /** frame で書く位置(`use()` が決める)と、その予約。 */
+  /** frame で書く位置(`use()` が決める)と、その予約。`moved` = 予約の後に `scroll` が届いた(書かない)。 */
   private pending = 0;
   private frame: number | null = null;
+  private moved = false;
 
   /** いま覚えている位置(test の観測点)。 */
   peek(key: string): number | undefined {
