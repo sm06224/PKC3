@@ -240,7 +240,7 @@ export class CenterRouter {
       storageWhere ?? null,
     );
     /**
-     * ⚠ **最初の鍵をここで立てる。** `park()` は鍵が `null` だと**黙って何もしない**
+     * ⚠ **最初の鍵をここで立てる。** `ScrollMemory` は鍵が `null` の間は scroll を**黙って覚えない**
      *   ので、立てないと「初めて面を開いたとき」の位置が保存されない ──
      *   つまり **1 回目だけ必ず飛ぶ**(実測でそうなった)。
      * 🔑 この時点の `scrollTop` は 0 なので、`use()` が動かす物は無い。
@@ -297,9 +297,9 @@ export class CenterRouter {
     const view = toPane(state.viewMode);
     const switched = view !== this.lastPane;
     if (switched) {
-      // ① 🔴 **入れ替える前に退避する**(`scroll-memory.ts` の 2 手のうち①)。
-      //    ⚠ 後にすると、短い面で 0 に丸められた値を保存してしまう
-      // 位置は `ScrollMemory` が scroll イベントで覚えている(描き直しの中で scrollTop を読まない)
+      // 位置は `ScrollMemory` が scroll イベントで覚えている(描き直しの中で scrollTop を読まない)。
+      // ⚠ 入れ替えで短い面に丸められた分の scroll は**入れ替えの後**に届き、そのときの鍵は
+      //    下の `restoreScroll(view)` が切り替えた新しい面なので、前の面の位置は上書きされない
       this.panes[this.lastPane].hidden = true;
       this.panes[view].hidden = false;
       /**

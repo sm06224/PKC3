@@ -162,7 +162,7 @@ function setup(bodies: Record<string, string>) {
     reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
   });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: Object.keys(bodies).map((lid) => meta(lid)), relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   return { root, d, q };
 }
@@ -210,6 +210,37 @@ describe('読む面のコピー ── 配線と活性', () => {
     expect(spy.mock.calls.length, '選択が変わったのに読んでいない(押せるようにならない)').toBeGreaterThan(0);
     expect(btn.disabled, '選択したのに押せない').toBe(false);
     spy.mockRestore();
+  });
+
+  /**
+   * 🔴 **本文の器が差し替わると、選択はノードごと潰れるのに `selectionchange` は飛ばない**
+   *   (着地前レビューが chromium / headless_shell で実測: 0 回)。覚えた `true` だけを見ると、
+   *   選択の無い新しいノートで「選択範囲をコピー」が押せたまま残る(押すと理由だけ出る)。
+   * 🔑 描き直しは、覚えた選択の端のノードが**まだ本文の中に在るか**を併せて見る。
+   *   ⚠ happy-dom は `removeAllRanges` 以外で `selectionchange` を飛ばさないので、
+   *   「ノードが消えただけ」が本物の形で再現できる。
+   */
+  it('🔴 選択したままノートを切り替えると「選択範囲をコピー」は押せなくなる(selectionchange が飛ばなくても)', async () => {
+    const { d, q, root } = setup({ a: DOC, b: '# 別のノート\n\n別の段落。' });
+    clearSelection();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(30);
+    const btn = q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!;
+    const host = root.querySelector('[data-pkc-field="detail-body"]')!;
+    const ps = [...host.querySelectorAll('p')];
+    select(ps[0]!.firstChild!, 3, ps[1]!.firstChild!, 2);
+    await tick(0);
+    expect(btn.disabled, '前提が崩れている(選択したのに押せない)').toBe(false);
+    // 別のノートへ ── 本文の器が作り直される。選択は消すが、selectionchange は飛ばさない
+    const changes = vi.fn();
+    document.addEventListener('selectionchange', changes);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    await tick(30);
+    expect(root.querySelector('[data-pkc-field="detail-body"]')!.textContent, '前提が崩れている(切り替わっていない)').toContain('別の段落');
+    expect(ps[0]!.isConnected, '前提が崩れている(古い本文が残っている)').toBe(false);
+    expect(changes, '前提が崩れている(selectionchange が飛んでいる ── この test は飛ばない場面を見たい)').not.toHaveBeenCalled();
+    document.removeEventListener('selectionchange', changes);
+    expect(q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!.disabled, '選択が消えたのに押せる').toBe(true);
   });
 
   it('🔴 「Markdown をコピー」── 原文が text/plain で渡り、ボタンが光る', async () => {
