@@ -12,6 +12,7 @@
  */
 import { releaseGripIfTargeting } from './block-grip';
 import { iconButton } from './icons';
+import { limitDraftInput } from './read-columns';
 import { sizeTextareaToContent } from './row-swap';
 
 /** 章の箱の器(`data-pkc-region`)。⚠ test / smoke はここだけを見る。 */
@@ -115,6 +116,8 @@ export function installSectionBox(
    */
   sizeTextareaToContent(ta);
   ta.addEventListener('input', () => sizeTextareaToContent(ta));
+  // 🔴 器の高さの上限(`--pkc-pane-h`)は箱に直に書く(#1467 段 3-c ── 器に書くと本文全体が再計算になる)
+  limitDraftInput(ta);
   /**
    * 🔴 **カーソルは見出し行の末尾に置く**(#1044 段2、F-F)。⚠ 直す前は
    *   本文の**末尾**に置いていたので、開いた瞬間に textarea が下まで
