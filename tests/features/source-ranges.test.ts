@@ -21,10 +21,13 @@ import {
   blockIndexForLine,
   buildBlockPartition,
   derivedKindOf,
+  effectiveTopSpans,
   mapVisibleToSource,
   renderMarkdownWithRanges,
+  type BlockPartition,
+  type SourceRange,
 } from '@features/markdown/source-ranges';
-import { scanContainers } from '@features/markdown/source-blocks';
+import { scanContainers, type ContainerSpan } from '@features/markdown/source-blocks';
 
 const GOLDENS = JSON.parse(
   readFileSync('tests/fixtures/markdown-goldens/goldens.json', 'utf-8'),
@@ -580,5 +583,171 @@ describe('⑤ 実データ(repo の doc 群)で分割が成立する', () => {
     // ⚠ 空振り防止 ── 実際に何千行も見ていること
     expect(nonBlank).toBeGreaterThan(4000);
     expect(orphan, `持ち主の無い非空行が ${orphan} / ${nonBlank} 行ある`).toBe(0);
+  });
+});
+
+describe('⑥ 段 2: buildBlockPartition の leftover 計算の等値性と計算量(#1467)', () => {
+  function legacyBuildBlockPartition(
+    blocks: readonly string[],
+    ranges: readonly SourceRange[],
+    lineCount: number,
+    containers: readonly ContainerSpan[] = [],
+  ): BlockPartition {
+    const spans = effectiveTopSpans(ranges, containers);
+    const leftover = ranges.filter(
+      (r) => !spans.some((sp) => r.start >= sp.start && r.start <= sp.end),
+    );
+    const footnoteStart = leftover.length > 0 ? Math.min(...leftover.map((r) => r.start)) : -1;
+    const footnoteEnd = leftover.length > 0 ? Math.max(...leftover.map((r) => r.end)) : -1;
+    const starts: number[] = [];
+    const ends: number[] = [];
+    const derived: (string | null)[] = [];
+    let ri = 0;
+    for (const b of blocks) {
+      const kind = derivedKindOf(b);
+      if (kind !== null) {
+        const owns = kind === 'footnotes' && footnoteStart >= 0;
+        starts.push(owns ? footnoteStart : -1);
+        ends.push(owns ? footnoteEnd : -1);
+        derived.push(kind);
+        continue;
+      }
+      const r = spans[ri];
+      ri += 1;
+      if (r === undefined) {
+        return {
+          ok: false,
+          reason: `ブロック ${blocks.length} 個に対して最上位の範囲が ${spans.length} 個しかない`,
+          starts,
+          ends,
+          derived,
+        };
+      }
+      starts.push(r.start);
+      ends.push(r.end);
+      derived.push(null);
+    }
+    if (ri !== spans.length) {
+      return {
+        ok: false,
+        reason: `最上位の範囲が ${spans.length - ri} 個余った(ブロックと対応していない)`,
+        starts,
+        ends,
+        derived,
+      };
+    }
+    let prevEnd = -1;
+    for (let i = 0; i < starts.length; i += 1) {
+      const st = starts[i]!;
+      const en = ends[i]!;
+      if (st < 0) continue;
+      if (st > en) {
+        return {
+          ok: false,
+          reason: `塊 ${i} の範囲 [${st}, ${en}] が逆転している`,
+          starts,
+          ends,
+          derived,
+        };
+      }
+      if (st <= prevEnd) {
+        return {
+          ok: false,
+          reason: `塊 ${i} の開始行 ${st} が前の終了行 ${prevEnd} と重複している`,
+          starts,
+          ends,
+          derived,
+        };
+      }
+      prevEnd = en;
+    }
+    return { ok: true, starts, ends, derived };
+  }
+
+  it('🔴 直す前後の関数で 3 形(脚注あり・脚注なし・塊の端にかかる)の分割結果が byte 完全一致する', () => {
+    const patterns = [
+      // 1. 脚注が在る本文
+      `本文の段落 1[^1]。\n\n本文の段落 2[^2]。\n\n[^1]: 最初の脚注。\n[^2]: 2つ目の脚注。\n`,
+      // 2. 脚注が無い本文
+      `# 見出し 1\n\n普通の段落 1 です。\n\n- 箇条書き A\n- 箇条書き B\n\n普通の段落 2 です。\n`,
+      // 3. 範囲が塊の端にかかる本文(:::note 等のディレクティブコンテナ)
+      `:::note\n囲みの中の段落 1。\n\n囲みの中の段落 2。\n:::\n\n外の段落 3。\n`,
+    ];
+
+    for (const text of patterns) {
+      const { html, ranges } = renderMarkdownWithRanges(text, {});
+      const blocks = splitTopLevelBlocks(html);
+      const containers = scanContainers(text);
+      const lines = text.split('\n');
+
+      const legacyResult = legacyBuildBlockPartition(blocks, ranges, lines.length, containers);
+      const currentResult = buildBlockPartition(blocks, ranges, lines.length, containers);
+
+      expect(currentResult).toEqual(legacyResult);
+      expect(JSON.stringify(currentResult)).toBe(JSON.stringify(legacyResult));
+    }
+  });
+
+  it('🔴 20,000 行相当の入力で leftover 計算が高速化されていることの実測', () => {
+    // 20,000 行相当の入力(1 段落 2 行 × 10,000 個 = 20,000 行)
+    const N = 10_000;
+    const fakeRanges: SourceRange[] = [];
+    const fakeSpans: { start: number; end: number }[] = [];
+    for (let i = 0; i < N; i++) {
+      const start = i * 2;
+      const end = start + 1;
+      fakeRanges.push({ start, end, level: 0, type: 'paragraph' });
+      fakeSpans.push({ start, end });
+    }
+    // 末尾に脚注の範囲(spans に含まれない ranges)を 10 個追加
+    for (let j = 0; j < 10; j++) {
+      const start = N * 2 + j;
+      const end = start;
+      fakeRanges.push({ start, end, level: 1, type: 'footnote' });
+    }
+
+    // legacy(旧: ranges.filter + spans.some)の測定
+    const t0 = performance.now();
+    const legacyLeftover = fakeRanges.filter(
+      (r) => !fakeSpans.some((sp) => r.start >= sp.start && r.start <= sp.end),
+    );
+    const legacyMs = performance.now() - t0;
+
+    // new(新: ソート + 2-pointer)の測定
+    const t1 = performance.now();
+    const sortedSpans = [...fakeSpans].sort((a, b) => a.start - b.start);
+    const mergedSpans: { start: number; end: number }[] = [];
+    for (const sp of sortedSpans) {
+      const last = mergedSpans[mergedSpans.length - 1];
+      if (!last || sp.start > last.end) {
+        mergedSpans.push({ start: sp.start, end: sp.end });
+      } else if (sp.end > last.end) {
+        last.end = sp.end;
+      }
+    }
+    const sortedRanges = fakeRanges
+      .map((r, idx) => ({ r, idx }))
+      .sort((a, b) => a.r.start - b.r.start);
+    const leftoverIndices = new Set<number>();
+    let si = 0;
+    for (let ri = 0; ri < sortedRanges.length; ri++) {
+      const { r, idx } = sortedRanges[ri]!;
+      while (si < mergedSpans.length && mergedSpans[si]!.end < r.start) {
+        si++;
+      }
+      const inSpan =
+        si < mergedSpans.length &&
+        r.start >= mergedSpans[si]!.start &&
+        r.start <= mergedSpans[si]!.end;
+      if (!inSpan) {
+        leftoverIndices.add(idx);
+      }
+    }
+    const currentLeftover = fakeRanges.filter((_, idx) => leftoverIndices.has(idx));
+    const currentMs = performance.now() - t1;
+
+    expect(currentLeftover).toEqual(legacyLeftover);
+    console.log(`[#1467 段2 実測] 20,000 行(N=${N}) leftover 抽出: 旧=${legacyMs.toFixed(2)}ms -> 新=${currentMs.toFixed(2)}ms`);
+    expect(currentMs).toBeLessThan(legacyMs);
   });
 });
