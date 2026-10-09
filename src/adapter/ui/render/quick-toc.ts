@@ -279,40 +279,63 @@ export function installQuickToc(
       found.push(h);
     }
 
-    list.textContent = '';
-    itemEls = [];
     headingEls = found;
-    activeIdx = -1;
 
     if (items.length === 0) {
+      list.textContent = '';
+      itemEls = [];
+      activeIdx = -1;
       wrapper.hidden = true;
       closePopover();
       return;
     }
 
-    wrapper.hidden = false;
+    if (wrapper.hidden) wrapper.hidden = false;
 
-    for (const item of items) {
-      const li = doc.createElement('li');
-      li.className = 'pkc-quick-toc-item';
-      li.setAttribute('data-pkc-toc-level', String(item.level));
-
-      const link = doc.createElement('button');
-      link.type = 'button';
-      link.className = 'pkc-quick-toc-link';
-      link.setAttribute('data-pkc-action', 'toc-jump');
-      link.setAttribute('data-pkc-toc-slug', item.id);
-      link.textContent = item.text;
-      link.title = item.text;
-
-      link.addEventListener('click', () => {
-        closePopover();
-      });
-
-      li.append(link);
-      list.append(li);
-      itemEls.push(li);
+    /**
+     * 🔴 **行を丸ごと作り直さない**(#1467 段 3-i)── この `update` は本文を描き直すたびに呼ばれる
+     *   (`detail.ts`)ので、`list.textContent = ''` → 見出しごとに `append` だと、20,000 行の
+     *   ノートでは描き直し 1 回に 600 個の `<li>` を挿していた(trace: MAIN への挿入 600 回)。
+     *   見出しの列を前と index で突き合わせ、同じ位置は属性と字だけ直し(同じ値なら触らない)、
+     *   足りない末尾を足し、余りを消す。
+     * ⚠ 使い回した行の**印**(いま読んでいる章)は、閉じているときは外す(作り直していた頃は
+     *   組み直した行に印が無かった)。開いているときは下の `refreshActive(true)` が付け直す。
+     */
+    const next: HTMLElement[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      let li = itemEls[i];
+      let link: HTMLButtonElement;
+      if (li === undefined || !li.isConnected) {
+        li = doc.createElement('li');
+        li.className = 'pkc-quick-toc-item';
+        link = doc.createElement('button');
+        link.type = 'button';
+        link.className = 'pkc-quick-toc-link';
+        link.setAttribute('data-pkc-action', 'toc-jump');
+        link.addEventListener('click', () => {
+          closePopover();
+        });
+        li.append(link);
+        list.append(li);
+      } else {
+        link = li.firstElementChild as HTMLButtonElement;
+      }
+      if (li.getAttribute('data-pkc-toc-level') !== String(item.level)) {
+        li.setAttribute('data-pkc-toc-level', String(item.level));
+      }
+      if (link.getAttribute('data-pkc-toc-slug') !== item.id) link.setAttribute('data-pkc-toc-slug', item.id);
+      if (link.textContent !== item.text) link.textContent = item.text;
+      if (link.title !== item.text) link.title = item.text;
+      if (popover.hidden && li.hasAttribute(ACTIVE_ATTR)) {
+        li.removeAttribute(ACTIVE_ATTR);
+        link.removeAttribute('aria-current');
+      }
+      next.push(li);
     }
+    for (let i = itemEls.length - 1; i >= items.length; i--) itemEls[i]?.remove();
+    itemEls = next;
+    if (popover.hidden) activeIdx = -1;
 
     // 開いている間に本文が描き直されたら、印も付け直す(組み直した行には印が無い)
     if (!popover.hidden) refreshActive(true);

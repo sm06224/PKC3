@@ -62,6 +62,40 @@ describe('quick table of contents (ToC) popover (Issue #1130)', () => {
     handle.dispose();
   });
 
+  /**
+   * 🔴 **`update()` は行を丸ごと作り直さない**(#1467 段 3-i)── 本文を描き直すたびに呼ばれるので、
+   *   20,000 行のノートでは描き直し 1 回に 600 個の `<li>` を挿していた。見出しが同じなら同じ node、
+   *   末尾に増えた分だけ足す、余りは消す。
+   */
+  it('🔴 update() で見出しが同じなら行は同じ node のまま、末尾に増えた分だけ足し、余りは消す', () => {
+    bodyHost.innerHTML = '<h2 id="a">章 A</h2><h3 id="b">節 B</h3>';
+    const handle = installQuickToc(container, bodyHost);
+    const before = [...container.querySelectorAll<HTMLElement>('.pkc-quick-toc-item')];
+    expect(before, '前提が崩れている').toHaveLength(2);
+    handle.update();
+    const same = [...container.querySelectorAll<HTMLElement>('.pkc-quick-toc-item')];
+    expect(same.map((li, i) => li === before[i]), '見出しが同じなのに行を作り直した').toEqual([true, true]);
+    // 末尾に 1 つ増える
+    bodyHost.insertAdjacentHTML('beforeend', '<h2 id="c">章 C</h2>');
+    handle.update();
+    const grown = [...container.querySelectorAll<HTMLElement>('.pkc-quick-toc-item')];
+    expect(grown.map((li) => li.querySelector('button')!.textContent)).toEqual(['章 A', '節 B', '章 C']);
+    expect(grown.slice(0, 2).map((li, i) => li === before[i]), '末尾に足しただけなのに既存の行を作り直した').toEqual([true, true]);
+    expect(grown[2]!.querySelector('button')!.getAttribute('data-pkc-toc-slug')).toBe('c');
+    // 途中が入れ替わる ── 使い回した行の押す先・深さ・字は新しい列
+    bodyHost.innerHTML = '<h2 id="a">章 A</h2><h2 id="x">章 X</h2><h3 id="b">節 B</h3>';
+    handle.update();
+    const swapped = [...container.querySelectorAll<HTMLElement>('.pkc-quick-toc-item')];
+    expect(swapped.map((li) => li.querySelector('button')!.getAttribute('data-pkc-toc-slug'))).toEqual(['a', 'x', 'b']);
+    expect(swapped.map((li) => li.getAttribute('data-pkc-toc-level'))).toEqual(['2', '2', '3']);
+    expect(swapped.map((li) => li.querySelector('button')!.textContent)).toEqual(['章 A', '章 X', '節 B']);
+    // 減ると余りが消える
+    bodyHost.innerHTML = '<h2 id="a">章 A</h2>';
+    handle.update();
+    expect(container.querySelectorAll('.pkc-quick-toc-item'), '減った分の行が残っている').toHaveLength(1);
+    handle.dispose();
+  });
+
   it('toggles popover visibility on button click', () => {
     bodyHost.innerHTML = '<h2 id="chap-1">章 1</h2>';
     const handle = installQuickToc(container, bodyHost);
