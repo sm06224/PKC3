@@ -83,6 +83,22 @@ const until = async (pred: () => boolean, ms = 3000): Promise<void> => {
 };
 
 /**
+ * 🔴 追記(appendsSeen)が届くのを待つ(上限つき、#1463)。
+ * 固定の `await tick()` だと並列負荷時に I/O 順がずれて「まだ届いていない」で落ちるため。
+ */
+const waitForAppend = async (lid: string, minCount = 1, ms = 3000): Promise<void> => {
+  const t0 = Date.now();
+  while (appendsSeen.filter((a) => a.lid === lid).length < minCount && Date.now() - t0 < ms) {
+    await tick();
+  }
+  if (appendsSeen.filter((a) => a.lid === lid).length < minCount) {
+    throw new Error(
+      `追記が届きませんでした(lid=${lid}, 要求=${minCount}件, 実際=${appendsSeen.filter((a) => a.lid === lid).length}件, ${ms}ms 時間切れ)`,
+    );
+  }
+};
+
+/**
  * 🔴 **添付は、開いていたノートの本文へ入る**(user 裁定 2026-09-02、#666)。
  *
  * > 「読んでいたノートの本文に入る」
@@ -195,7 +211,7 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     });
     h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     await attachFiles(h.d, h.deps, [new File(['a'], 'a.png', { type: 'image/png' })]);
-    await tick();
+    await waitForAppend('n2', 1);
     expect(appended(h.d), '名指ししていないのに n1 へ入った').toHaveLength(0);
     expect(appendsSeen.filter((a) => a.lid === 'n2')).toHaveLength(1);
   });
@@ -698,8 +714,7 @@ describe('attachFiles (P4a intake)', () => {
     // ③ 編集を終えると入る ── 本文は変えていないので commit は書込を起こさず ready へ戻る
     d.dispatch({ type: 'COMMIT_EDIT' });
     expect(d.getState().phase, '台の前提: 編集が終わっていない').toBe('ready');
-    await tick();
-    await tick();
+    await waitForAppend('lid-editing', 1);
     expect(putBlobs, '編集を終えても取り込まれない(預かりが捨てられた)').toHaveLength(1);
     expect(gated, '預かった取り込みが資産の門の外で走った(#724 ⑤)').toEqual([{ before: 0, after: 1 }]);
     expect(d.getState().entryMetas.size, '添付が作られていない').toBe(2);
@@ -879,8 +894,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '預かる前に書いた').toHaveLength(0);
     // 編集を抜けると預かりが流れる ── そこで入るのは**末尾**である
     h.d.dispatch({ type: 'CANCEL_EDIT' });
-    await tick();
-    await tick();
+    await waitForAppend('n1', 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '預かったぶんが入っていない').toHaveLength(1);
     expect(
       events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
@@ -895,8 +909,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
   it('🔴 ④ 「元に戻す」の材料が残り、まとめて落とした回は 1 手で全部消える', async () => {
     const h = withBody();
     await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
-    await tick();
-    await tick();
+    await until(() => (h.d.getState().lastAppend?.lines.filter((l) => l.includes('asset:')) ?? []).length >= 2);
     const last = h.d.getState().lastAppend;
     expect(last, '差し込んだのに「元に戻す」の材料が無い').not.toBeNull();
     expect(last!.lid).toBe('n1');
@@ -947,7 +960,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
     const events: string[] = [];
     h.d.onEvent((e) => events.push(e.type));
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', { ...AFTER_MILK, lid: 'other' });
-    await tick();
+    await waitForAppend('n1', 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ落ちていない').toHaveLength(1);
     expect(
       events.filter((t) => t === 'REQUEST_BODY_REWRITE'),
@@ -1087,7 +1100,7 @@ describe('落とした所へ入れる(#684 段④)', () => {
     const h = withBody();
     appendsSeen.length = 0;
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')]);
-    await tick();
+    await waitForAppend('n1', 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾の経路が消えた').toHaveLength(1);
     expect(h.d.getState().error ?? '', '断りが出ている').toBe('');
   });
@@ -1230,8 +1243,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     });
     await tick();
     h.d.dispatch({ type: 'CANCEL_EDIT' });
-    await tick();
-    await tick();
+    await waitForAppend('n1', 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '末尾へ入っていない').toHaveLength(1);
   });
 
@@ -1243,8 +1255,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
   it('🔴 2 枚まとめて落としても、締めの 1 行が行き先と道を持っている', async () => {
     const h = withNotes();
     await attachFiles(h.d, h.deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK_ON_SIDE);
-    await tick();
-    await tick();
+    await until(() => (h.disks.n2?.split('\n').filter((r) => r.startsWith('![')) ?? []).length >= 2);
     const rows = h.disks.n2!.split('\n');
     expect(rows.filter((r) => r.startsWith('![')), '2 枚とも入っていない').toHaveLength(2);
     // 🔴 台の前提 ── 締めが出る回である(1 枚だけの回と取り違えない)
@@ -1326,8 +1337,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
       place: dropCursor({ lid: 'n1', toBefore: 3, body: MAIN, anchor: { line: 2, text: '卵' } }),
     });
     h.d.dispatch({ type: 'CANCEL_EDIT' });
-    await tick();
-    await tick();
+    await until(() => (h.disks.n1?.split('\n').some((r) => r.startsWith('![')) ?? false));
     const rows = h.disks.n1!.split('\n');
     const i = rows.findIndex((r) => r.startsWith('!['));
     expect(i, '本文に入っていない').toBeGreaterThan(-1);
@@ -1340,7 +1350,7 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
   it('🔴 ④ 入れられない種類の本文へ落ちた回は、開いているノートの末尾へ', async () => {
     const h = withNotes('folder');
     await attachFiles(h.d, h.deps, [png('猫.png', 'a')], '', AFTER_MILK_ON_SIDE);
-    await tick();
+    await waitForAppend('n1', 1);
     expect(appendsSeen.filter((a) => a.lid === 'n1'), '開いているノートの末尾へ入っていない').toHaveLength(1);
     expect(h.disks.n2, '入れられない種類の本文へ書いた').toBe(SIDE);
     expect(h.d.getState().error ?? '', '断りが出ている(開いているノートには入れられる)').toBe('');
