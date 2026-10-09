@@ -513,8 +513,7 @@ int main()
    *   - 12 秒後 → 1 行の印が出る / stack は 3 回呼んで上限 2 なので **2 回だけ**出る(条件②)
    *   - flags は 3 つとも OR されている(偽 header の定数は別々の bit)
    */
-  // ⚠ g++ による実走コンパイル・実行で並列負荷時に 5 秒を超えるため 20 秒に緩和(#1463)
-  it('🔴 1 行の印と stack は「最初の呼び出しから 12 秒以上」のときだけ出る。stack は更に上限回数未満(偽の時計と偽の emscripten.h)', { timeout: 20_000 }, () => {
+  it('🔴 1 行の印と stack は「最初の呼び出しから 12 秒以上」のときだけ出る。stack は更に上限回数未満(偽の時計と偽の emscripten.h)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-uev-e-'));
     try {
       writeFileSync(join(dir, 'emscripten.h'), FAKE_EM, 'utf-8');
@@ -759,8 +758,7 @@ describe('#1344 の判別用 ── 門を g++ で実走(偽の時計)', () => {
    *   - 上限: wake 2000 / wait-out 600 / proxy-out 600 / exec-ret 200 / yield-in 3000 / yield-out 3000
    * ⚠ 1000 ms と nest ≥ 2 は**行数を抑えるための門**で、測っていない数で断るためではない。
    */
-  // ⚠ g++ による実走コンパイル・実行で並列負荷時に 5 秒を超えるため 20 秒に緩和(#1463)
-  it('🔴 12 秒 / 1000 ms / nest ≥ 2 の 3 つの門が、それぞれ単独で鳴る。上限は kind ごと。深さは戻る', { timeout: 20_000 }, () => {
+  it('🔴 12 秒 / 1000 ms / nest ≥ 2 の 3 つの門が、それぞれ単独で鳴る。上限は kind ごと。深さは戻る', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pkc3-uev-g-'));
     try {
       const src = `${PATCH.helper}
