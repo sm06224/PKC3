@@ -551,6 +551,8 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
    */
   const lock = append.locator('[data-pkc-field="append-lock"]');
   await expect(lock, '前提: 編集中なのに出口の帯が出ていない').toBeVisible();
+  // 🔴 帯が出ている間は、器に出口の印が立つ(#1467 段 3-h ── 畳んでも器を出す規則はこの印を読む)
+  await expect(append, '出口の帯が出ているのに、器に data-pkc-lock-open が無い(畳むと出口ごと消える)').toHaveAttribute('data-pkc-lock-open', '');
   // 🔴 #1221: 作った直後は題名の欄に焦点が在り、打鍵中は近道を受けない ── 外してから押す
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Alt+Backslash');
@@ -580,6 +582,7 @@ test('🔴 追記欄も鍵で畳めて、戻せる (#609)', async ({ page }) => 
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-action="start-edit"]'), '編集を終えていない(前提が崩れた)').toBeVisible();
   await expect(append.locator('[data-pkc-field="append-lock"]'), '前提: 編集を終えたのに出口の帯が残っている').toBeHidden();
+  await expect(append, '帯が消えたのに出口の印が残る(畳んでも器が消えない)').not.toHaveAttribute('data-pkc-lock-open', '');
 
   await page.keyboard.press('Alt+Backslash');
   await expect(shell, '鍵で畳めていない').toHaveAttribute('data-pkc-hidden-panes', /append/);
