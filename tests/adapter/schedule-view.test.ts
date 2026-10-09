@@ -296,9 +296,24 @@ describe('予定の面(#292 段③)', () => {
     const rowB = b.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!;
     expect(b.q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!.hidden).toBe(false);
     expect(rowB.hidden, '切替が出るのに行が隠れている(押せない)').toBe(false);
-    // CSS 側に :has の規則が戻っていない(戻すと文書全体の再評価が復活する)
-    const css = readFileSync('src/styles/app.css', 'utf-8');
-    expect(css, 'schedule-toggles の :has() 規則が CSS に戻っている').not.toMatch(/schedule-toggles'\]:not\(:has\(/);
+    // 🔑 残り 2 つの切替でも行は出る(着地前レビュー T3 ── 「済んだ」の項だけで決める変異を殺す)
+    const c = setup({ e1: '- [ ] 日付なし\n' }); // 期限の無い予定だけ → 「期限の無い予定も出す」
+    expect(c.q<HTMLButtonElement>('[data-pkc-action="toggle-show-undated"]')!.hidden, '前提が崩れている').toBe(false);
+    expect(c.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!.hidden, '期限の無い予定の切替だけのとき行が隠れている').toBe(false);
+    const d = setup({ e1: '- [ ] 片付けた @2026-08-23\n' }, {}, new Set(['e1'])); // 片付けたノートの予定だけ
+    expect(d.q<HTMLButtonElement>('[data-pkc-action="toggle-show-archived"]')!.hidden, '前提が崩れている').toBe(false);
+    expect(d.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!.hidden, '片付けた予定の切替だけのとき行が隠れている').toBe(false);
+    // CSS 側に :has の規則が戻っていない(戻すと文書全体の再評価が復活する)── 注釈を落とし、規則単位で見る
+    const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const hasRules = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)]
+      .map((m) => m[1]!.trim())
+      .filter((sel) => sel.includes('schedule-toggles') && sel.includes(':has('));
+    expect(hasRules, 'schedule-toggles に :has() の規則が CSS に戻っている').toEqual([]);
+    // ⚠ 空振り防止: 同じ走査で schedule-toggles の規則そのものは拾えている
+    expect(
+      [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].some((m) => m[1]!.includes('schedule-toggles')),
+      '走査が schedule-toggles の規則を 1 つも拾えていない(空振り)',
+    ).toBe(true);
   });
 
   /** ⚠ 済んだ物が 1 つも無ければ、戻す口は出さない(dead click を作らない)。 */
