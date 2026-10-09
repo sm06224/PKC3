@@ -624,6 +624,16 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   // 🔴 時刻の幅は `〜` でつないで出る(`09:30` の 1 点に縮んでいない)
   await expect(cardsOn(next), '札に時刻の幅が出ていない').toContainText('09:30〜10:30');
 
+  /**
+   * 🔴 **切替の行は、出す切替が 1 つも無いときは行ごと隠れる**(#1467 段 3-d。起動は増やさない)。
+   * ⚠ 直す前は CSS の `:not(:has(button:not([hidden])))` が隠していた ── JS の `hidden` に替えたので、
+   *   実ブラウザで「本当に場所を取っていない」(高さ 0)ことをここで見る。
+   *   この時点は 期限つきの未完 1 件だけ(済んだ・期限なし・片付けたが 0 件)。
+   */
+  const toggles = pane.locator('[data-pkc-field="schedule-toggles"]');
+  await expect(toggles, '切替が 1 つも無いのに行が出ている(空の行が場所を取る)').toBeHidden();
+  expect((await toggles.boundingBox())?.height ?? 0, '隠れた行が場所を取っている').toBe(0);
+
   // ② 7 日後のぶんを済ませる
   const box = cardsOn(next).locator('[data-pkc-action="toggle-task"]');
   await box.click();
@@ -638,6 +648,12 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   // ④ その日の札は畳まれ(済んだ扱い)、次の回は残っている
   await expect(cardsOn(next), '済ませた回が残っている').toHaveCount(0);
   await expect(cardsOn(today), '他の回まで消えた').toHaveCount(1);
+  // 🔴 済んだ予定が 1 件できたので、切替の行が出て「済んだ予定も出す」が押せる(行の hidden が追随する)
+  await expect(toggles, '済んだ予定ができたのに切替の行が隠れたまま(押せない)').toBeVisible();
+  await expect(
+    pane.locator('[data-pkc-action="toggle-show-done"]'),
+    '「済んだ予定も出す」が押せる位置に無い',
+  ).toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

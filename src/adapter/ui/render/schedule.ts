@@ -75,6 +75,8 @@ export class ScheduleRenderer {
      *   『代わりに何ができるようになるか』を書く」)。
      */
     archived: HTMLButtonElement;
+    /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
+    toggles: HTMLElement;
     groups: HTMLElement;
   } | null = null;
   private last: {
@@ -190,6 +192,16 @@ export class ScheduleRenderer {
     this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     this.paintDoneToggle(frame.done, state, all, filter);
     this.paintArchivedToggle(frame.archived, state, all);
+    /**
+     * 🔴 **切替が 1 つも出ないときは行ごと隠す ── JS で決める**(#1467 段 3-d)。
+     * ⚠ 直す前は CSS の `[data-pkc-field='schedule-toggles']:not(:has(button:not([hidden])))` が
+     *   決めていた。`:has(button:not([hidden]))` は**文書のどこで button が入っても / `hidden` が
+     *   動いても**祖先を遡って再評価されるので、長いノートの描き直しのたびに MAIN まで
+     *   1,000 件の無効化を予約していた(trace、追記 1 回)。この行の中身を知っているのはここなので、
+     *   ここで `hidden` を決める。
+     */
+    const anyToggle = !frame.undated.hidden || !frame.done.hidden || !frame.archived.hidden;
+    if (frame.toggles.hidden !== !anyToggle) frame.toggles.hidden = !anyToggle;
     this.paintGroups(frame.groups, groups, state);
   }
 
@@ -572,7 +584,7 @@ export class ScheduleRenderer {
      */
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.region.append(bar, quick, grid, note, toggles, groups);
-    this.frame = { month, grid, note, undated, done, archived, groups };
+    this.frame = { month, grid, note, undated, done, archived, toggles, groups };
     return this.frame;
   }
 }

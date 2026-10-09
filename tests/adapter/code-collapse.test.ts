@@ -144,6 +144,60 @@ describe('code block collapse / expand (Issue #1139)', () => {
       }
     });
 
+    /**
+     * 🔴 **再描画の冪等更新は DOM に 1 byte も触らない**(#1467 段 3-d)。
+     * ⚠ 直す前は同じ属性・同じ字を毎回書き直していた ── 同じ値でも `setAttribute` / `textContent` は
+     *   スタイルの無効化を予約するので、折りたたんだ囲み 200 本のノートでは描き直しのたびに
+     *   `:has(> .pkc-code-collapse-top-btn)` の再評価 800 件と塊 200 の無効化が走っていた(trace)。
+     * 🔑 観測点は**本物の MutationObserver**(属性・子・字の全部)── 書き方を変えても拾う。
+     */
+    it('🔴 再描画の冪等更新では、属性も字も 1 つも書き直さない(押して変えたときだけ動く)', async () => {
+      const longCode = Array.from({ length: 30 }, (_, i) => `item_${i}`).join('\n');
+      host.innerHTML = Array.from(
+        { length: 3 },
+        () => `<div class="pkc-md-block" data-pkc-md-block-kind="code"><pre><code>${longCode}</code></pre></div>`,
+      ).join('');
+      applyCodeCollapse(host);
+      const records: string[] = [];
+      const mo = new MutationObserver((ms) => {
+        for (const m of ms) records.push(`${m.type}:${m.attributeName ?? ''}`);
+      });
+      mo.observe(host, { attributes: true, childList: true, characterData: true, subtree: true });
+      applyCodeCollapse(host);
+      applyCodeCollapse(host);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(records, '再描画の冪等更新が DOM を書き直している(同じ値でも無効化を予約する)').toEqual([]);
+      // 対照群: 押して展開すると属性と字が動く(観測点が死んでいない証拠)
+      const blocks = [...host.querySelectorAll<HTMLElement>('.pkc-md-block')];
+      for (const b of blocks) toggleCodeCollapse(b);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(records.length, '押して変えたのに何も動かない(観測点が空振り)').toBeGreaterThan(0);
+      // 🔑 展開した側も同じ(着地前レビュー T1 ── 展開済みの囲みが多いノートでも描き直しが無言)
+      records.length = 0;
+      applyCodeCollapse(host);
+      applyCodeCollapse(host);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(records, '展開した囲みの冪等更新が DOM を書き直している').toEqual([]);
+      mo.disconnect();
+    });
+
+    /**
+     * 🔴 **同値の門は「書き忘れ」になってはいけない**(着地前レビュー T2)── コードが伸びたら
+     *   行数の属性とバーの字は新しい値になる(`hasAttribute` で済ませる変異を殺す)。
+     */
+    it('🔴 コードが伸びたら、行数の属性とバーの字は新しい値になる(同値の門は書き忘れではない)', () => {
+      const code = (n: number) => Array.from({ length: n }, (_, i) => `item_${i}`).join('\n');
+      host.innerHTML = `<div class="pkc-md-block" data-pkc-md-block-kind="code"><pre><code>${code(30)}</code></pre></div>`;
+      applyCodeCollapse(host);
+      const block = host.querySelector<HTMLElement>('.pkc-md-block')!;
+      expect(block.getAttribute('data-pkc-code-lines'), '前提が崩れている').toBe('30');
+      block.querySelector('code')!.textContent = code(40);
+      applyCodeCollapse(host);
+      expect(block.getAttribute('data-pkc-code-lines'), '行数が古いまま(同値の門が書き忘れになっている)').toBe('40');
+      expect(block.querySelector('.pkc-code-collapse-btn')!.textContent, 'バーの字が古いまま').toBe('▾ すべて表示 (40 行)');
+      expect(block.querySelector('.pkc-code-collapse-btn')!.getAttribute('aria-label')).toBe('コードをすべて表示 (40 行)');
+    });
+
     it('skips blocks that have .pkc-render-slot (e.g. CSV table views)', () => {
       const longCode = Array.from({ length: 30 }, (_, i) => `val,${i}`).join('\n');
       host.innerHTML = `
