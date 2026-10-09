@@ -12,6 +12,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
 import {
   appCodeCollapse,
   clearCodeCollapse,
@@ -117,6 +119,44 @@ describe('detail: 長いコード枠の最初の畳み(#1087)', () => {
     expect(blockOf(root)).toBe(block);
     expect(block.hasAttribute('data-pkc-code-collapsed'), '入に戻しても畳まれない').toBe(true);
     expect(block.querySelectorAll('.pkc-code-collapse-btn').length, 'ボタンが重なった').toBe(1);
+  });
+});
+
+describe('detail: 畳んだコードと scrollIntoView(#1467 段 1)', () => {
+  /**
+   * 🔴 **描き直しでは視点が動かない / 押して畳んだときだけ 1 回寄せる**。
+   * ⚠ 直す前は `setCodeCollapsed` の畳む側が scroll していたので、`DetailRenderer` の描き直し
+   *   (冪等更新)のたびに畳んである囲みの数だけ `scrollIntoView` が走った(ffmpeg のヘルプの形で追記 1 回 28.5 秒)。
+   * 🔑 ここは `code-collapse.test.ts` と違い、**本物の描画経路(`detail.render`)と本物の押す道(`bindActions`)**で見る
+   *   ── 受け口が `toggleCodeCollapse` を通らなくなる変異(`setCodeCollapsed` を直に呼ぶ)は unit の直呼びでは生き延びる
+   *   (着地前レビュー 2026-10-09 ⚠)。
+   */
+  it('🔴 描き直しは scroll しない ── 押して畳んだときだけ、その塊へ 1 回', async () => {
+    const calls: Element[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      calls.push(this);
+    });
+    const { root, detail, s0 } = await open();
+    const block = blockOf(root);
+    expect(block.hasAttribute('data-pkc-code-collapsed'), '前提が崩れている(畳まれていない)').toBe(true);
+    expect(calls, '初回の描画で scroll した').toHaveLength(0);
+    detail.invalidate();
+    detail.render(s0);
+    await settle();
+    expect(blockOf(root), '前提が崩れている(同じ節点のまま描き直されていない)').toBe(block);
+    expect(calls, '描き直しのたびに畳んだ塊へ scrollIntoView を撃っている').toHaveLength(0);
+    // 押す道(binder → toggleCodeCollapse): 展開は寄せない / 畳むと 1 回だけ寄せる
+    const d = new Dispatcher();
+    const off = bindActions(root, d);
+    const bar = block.querySelector<HTMLButtonElement>('.pkc-code-collapse-btn')!;
+    bar.click();
+    expect(block.hasAttribute('data-pkc-code-collapsed'), '押しても展開されない(押す道が死んでいる)').toBe(false);
+    expect(calls, '展開で scroll した').toHaveLength(0);
+    bar.click();
+    expect(block.hasAttribute('data-pkc-code-collapsed'), '押しても畳まれない').toBe(true);
+    expect(calls, '押して畳んだのに、その塊へ 1 回寄せていない(帯を見失う)').toEqual([block]);
+    off();
+    spy.mockRestore();
   });
 });
 
