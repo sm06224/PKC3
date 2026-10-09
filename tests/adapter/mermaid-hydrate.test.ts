@@ -613,6 +613,110 @@ describe('幅と dpr を変えたときの焼き直し(P8 段㉘)', () => {
     expect(vi.mocked(renderToPng), '畳んだ後に焼いた').toHaveBeenCalledTimes(1);
     b.remove();
   });
+
+  it('🔴 非表示中(checkVisibility が偽)は焼き直さず、再表示されたときに新しい幅で 1 回だけ焼く(#1473 / #1480)', async () => {
+    const { b, scope } = await painted(700);
+    const host = b.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+
+    // 非表示にする(設定画面等へ遷移)
+    b.style.display = 'none';
+    setPaneWidth(host, 1400);
+    fireResize!();
+    await settle();
+    expect(vi.mocked(renderToPng), '非表示中に偽の幅で焼き直している').toHaveBeenCalledTimes(1);
+
+    // 再表示する(本文へ戻る)
+    b.style.display = '';
+    fireResize!();
+    await settle();
+    expect(vi.mocked(renderToPng), '再表示後に新しい幅で焼き直していない').toHaveBeenCalledTimes(2);
+    expect(vi.mocked(renderToPng).mock.calls[1]![0].width).toBe(1408);
+
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 隠れている間(details 閉じ等)に配色を変えて戻すと、見えたときに新しい配色で焼き直す(#1480)', async () => {
+    const { b, scope } = await painted(700);
+    const host = b.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(renderToPng).mock.calls[0]![0].theme).toBe('light');
+
+    // 非表示にする(details を閉じる等)
+    b.style.display = 'none';
+
+    // テーマを dark に変える
+    document.documentElement.setAttribute('data-pkc-theme', 'dark');
+    await settle();
+
+    // 非表示中なので焼き直していない
+    expect(vi.mocked(renderToPng), '非表示中に焼き直してしまっている').toHaveBeenCalledTimes(1);
+
+    // 再表示する(details を開く)
+    b.style.display = '';
+    // IntersectionObserver が「見えた」を通知
+    fire!([host]);
+    await settle();
+
+    // 新しい配色(dark)で焼き直している
+    expect(vi.mocked(renderToPng), '再表示後に新しい配色で焼き直していない').toHaveBeenCalledTimes(2);
+    expect(vi.mocked(renderToPng).mock.calls[1]![0].theme).toBe('dark');
+
+    scope.dispose();
+    b.remove();
+  });
+
+  it('🔴 見える器の描画中に隠れた器で recheck されても、gen を進めて見える器を捨てない(変異試験 #1480)', async () => {
+    const bA = block('graph TD\n A-->B');
+    const bB = block('graph TD\n C-->D');
+    document.body.append(bA, bB);
+    const hostA = bA.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    const hostB = bB.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    setPaneWidth(hostA, 700);
+    setPaneWidth(hostB, 700);
+
+    const scope = hydrateMermaid([bA, bB]);
+
+    // B を一度焼いて started に入れる
+    fire!([hostB]);
+    await settle();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+
+    // B を非表示にして幅を変える(recheck で条件不一致にする)
+    bB.style.display = 'none';
+    setPaneWidth(hostB, 1400);
+
+    // A の焼きを遅延させる Promise
+    let finishA!: () => void;
+    const promiseA = new Promise<{ png: Blob; cssWidth: number }>((resolve) => {
+      finishA = () => resolve({ png: new Blob(['png'], { type: 'image/png' }), cssWidth: 320 });
+    });
+    vi.mocked(renderToPng).mockImplementationOnce(() => promiseA);
+
+    // A の焼きを開始する(at = gen = 0)
+    fire!([hostA]);
+
+    // A が焼いている最中に resize を起こして recheck を走らせる
+    // A は 700px のまま条件不変。B は 1400px だが非表示。
+    // 正常なら B が非表示なので gen は 0 のまま進まない。
+    // 変異(非表示判定が bumped の後)だと B で gen が 1 に進んでしまう！
+    fireResize!();
+    await settle();
+
+    // A の焼きを完了させる
+    finishA();
+    await settle();
+
+    // 隠れた B のせいで gen が上がっていなければ、A は捨てられず ready になり img が入る
+    expect(vi.mocked(renderToPng), '隠れた器のせいで gen が進み A が 2 度焼きされている').toHaveBeenCalledTimes(2);
+    expect(hostA.getAttribute('data-pkc-mermaid-state'), '隠れた器 B で gen が進み、A の焼きが捨てられた').toBe('ready');
+    expect(hostA.querySelector('img'), 'A に img が入っていない(<pre> のまま)').not.toBeNull();
+
+    scope.dispose();
+    bA.remove();
+    bB.remove();
+  });
 });
 
 /**

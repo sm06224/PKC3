@@ -5,6 +5,7 @@ import {
   createEntry,
   collectPageErrors,
   openBigWindowViaLightbox,
+  waitForDiagramSettled,
 } from './helpers';
 
 /**
@@ -690,6 +691,8 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
 
   // ① 🔴 **空振り防止** ── この図が**本当に縦に長い**(短ければ以下は自明に通る)
   const one = await shape();
+  const oneSrc = await fig.locator('img').getAttribute('src');
+  expect(oneSrc, '前提: 図の 1 枚目の src が取れない').not.toBeNull();
   expect(one.natural, '図が縦に長くない(この次元を測れていない)').toBeGreaterThan(1500);
   expect(one.over, '1 段でもはみ出している(段組み固有でない = 別の話)').toBeLessThanOrEqual(0);
 
@@ -699,6 +702,8 @@ test('🔴 段組みで縦に長い図が段に収まり、押し所も同じ段
   await expect
     .poll(async () => (await readGeom(page)).on, { timeout: 5_000 })
     .toBe(true);
+  // 3 段用の幅での図の焼き直し(ResizeObserver 150ms debounce)が新しい src で落ち着くのを待つ(#1473)
+  await waitForDiagramSettled(page, '[data-pkc-field="detail-body"] [data-pkc-mermaid-src]', oneSrc);
 
   const three = await shape();
   // ③ 🔴 **はみ出していない**(直す前は +2345px、見えているのは 18.2% だった)
