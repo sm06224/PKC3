@@ -298,15 +298,17 @@ export function installQuickToc(
      *   ノートでは描き直し 1 回に 600 個の `<li>` を挿していた(trace: MAIN への挿入 600 回)。
      *   見出しの列を前と index で突き合わせ、同じ位置は属性と字だけ直し(同じ値なら触らない)、
      *   足りない末尾を足し、余りを消す。
-     * ⚠ 使い回した行の**印**(いま読んでいる章)は、閉じているときは外す(作り直していた頃は
-     *   組み直した行に印が無かった)。開いているときは下の `refreshActive(true)` が付け直す。
+     * ⚠ 使い回した行の**印**(いま読んでいる章)は触らない ── 閉じた一覧は見えず、開き直すと
+     *   `startTracking` の `refreshActive(true)` が全行を付け直す。開いたまま描き直された回は
+     *   下の `refreshActive(true)`。
      */
     const next: HTMLElement[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!;
       let li = itemEls[i];
       let link: HTMLButtonElement;
-      if (li === undefined || !li.isConnected) {
+      // ⚠ `isConnected` で見ない ── 器が document に繋がっていない回(test の素の器)は全行が「作り直し」へ落ちて増殖する(レビューで実測)
+      if (li === undefined || li.parentNode !== list) {
         li = doc.createElement('li');
         li.className = 'pkc-quick-toc-item';
         link = doc.createElement('button');
@@ -327,10 +329,6 @@ export function installQuickToc(
       if (link.getAttribute('data-pkc-toc-slug') !== item.id) link.setAttribute('data-pkc-toc-slug', item.id);
       if (link.textContent !== item.text) link.textContent = item.text;
       if (link.title !== item.text) link.title = item.text;
-      if (popover.hidden && li.hasAttribute(ACTIVE_ATTR)) {
-        li.removeAttribute(ACTIVE_ATTR);
-        link.removeAttribute('aria-current');
-      }
       next.push(li);
     }
     for (let i = itemEls.length - 1; i >= items.length; i--) itemEls[i]?.remove();

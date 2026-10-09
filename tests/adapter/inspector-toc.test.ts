@@ -168,6 +168,28 @@ describe('目次(#493)', () => {
     expect(after[4]!.getAttribute('data-pkc-toc-slug')).toBe(extractHeadingsFromMarkdown(`${BODY}\n# 第 3 章\nえ`)[4]!.slug);
   });
 
+  /** 🔴 同じ字の本文が別の器で届く(保存の ack)── 字が同じなら抽出しない(鍵は `openBody` の参照ではなく字)。 */
+  it('同じ字の本文が届き直しても(openBody の器は別)、見出しを抽出し直さない', () => {
+    const { root, d } = setup(BODY);
+    const before = links(root);
+    extractSpy.mockClear();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BODY });
+    expect(extractSpy, '字が同じなのに抽出し直した(鍵が器の参照になっている)').not.toHaveBeenCalled();
+    expect(links(root).map((b, i) => b === before[i])).toEqual([true, true, true, true]);
+  });
+
+  /**
+   * 🔴 **器を組み直したら目次の記憶を手放す**(レビューの指摘)── ノートにリンクが付くと形が変わって
+   *   `build()` が新しい空の `<dd>` を作る。記憶を持ったままだと「同じ本文」と読んで埋め直さず、
+   *   見出しが在るのに右の列の目次が空になる。
+   */
+  it('🔴 ノートにリンクが付いて器が組み直されても、目次は残る', () => {
+    const { root, d } = setup(BODY);
+    expect(links(root), '前提が崩れている').toHaveLength(4);
+    d.dispatch({ type: 'FILE_LINKED', lid: 'n1', name: 'memo.md' });
+    expect(links(root).map((b) => b.textContent), 'リンクが付いて器が組み直されたら目次が空になった').toEqual(['第 1 章', '節 A', '細目', '第 2 章']);
+  });
+
   /** ⚠ 途中に見出しが入ると後続の slug / 深さ / 字がずれる ── 行を使い回しても、押す先は新しい綴りでなければならない。 */
   it('🔴 途中に見出しを差し込むと、使い回した行の押す先・深さ・字が新しい列に揃う(余りは消える)', () => {
     const { root, d } = setup(BODY);
@@ -177,6 +199,8 @@ describe('目次(#493)', () => {
     expect(links(root).map((b) => b.textContent)).toEqual(want.map((h) => h.text));
     expect(links(root).map((b) => b.getAttribute('data-pkc-toc-slug'))).toEqual(want.map((h) => h.slug));
     expect(links(root).map((b) => b.parentElement?.getAttribute('data-pkc-toc-level'))).toEqual(want.map((h) => String(h.level)));
+    // 使い回した行の説明文(title)も新しい見出しの字(前の見出しの字が残ると、読み上げが別の章を言う)
+    expect(links(root).map((b) => b.title.includes(b.textContent ?? '\u0000')), '使い回した行の説明文が前の見出しのまま').toEqual(want.map(() => true));
     // 見出しが減った回は余りの行が残らない(4 → 4 なので別の本文で 2 行へ)
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '# 一\n## 二\n' });
     expect(links(root).map((b) => b.textContent), '減った分の行が残っている').toEqual(['一', '二']);

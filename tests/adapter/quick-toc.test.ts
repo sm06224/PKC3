@@ -89,10 +89,22 @@ describe('quick table of contents (ToC) popover (Issue #1130)', () => {
     expect(swapped.map((li) => li.querySelector('button')!.getAttribute('data-pkc-toc-slug'))).toEqual(['a', 'x', 'b']);
     expect(swapped.map((li) => li.getAttribute('data-pkc-toc-level'))).toEqual(['2', '2', '3']);
     expect(swapped.map((li) => li.querySelector('button')!.textContent)).toEqual(['章 A', '章 X', '節 B']);
+    expect(swapped.map((li) => li.querySelector('button')!.title), '使い回した行の説明文が前の見出しのまま').toEqual(['章 A', '章 X', '節 B']);
     // 減ると余りが消える
     bodyHost.innerHTML = '<h2 id="a">章 A</h2>';
     handle.update();
     expect(container.querySelectorAll('.pkc-quick-toc-item'), '減った分の行が残っている').toHaveLength(1);
+    handle.dispose();
+  });
+
+  /** 🔴 器が document に繋がっていない回に update() を重ねても行が増えない(レビューで `isConnected` 判定の増殖を実測)。 */
+  it('🔴 繋がっていない器で update() を重ねても、行は増えない', () => {
+    const loose = document.createElement('div');
+    bodyHost.innerHTML = '<h2 id="a">章 A</h2><h2 id="b">章 B</h2>';
+    const handle = installQuickToc(loose, bodyHost);
+    handle.update();
+    handle.update();
+    expect(loose.querySelectorAll('.pkc-quick-toc-item'), '繋がっていない器で行が増殖した').toHaveLength(2);
     handle.dispose();
   });
 
