@@ -167,6 +167,41 @@ describe('追記(P8 段⑧)', () => {
     expect(q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!.value).toBe('');
   });
 
+  /**
+   * 🔴 **通った後に欄へ焦点を戻すのは、次の frame の頭**(#1467 段 3-g)── `focus()` は「焦点を置けるか」を
+   *   決めるために配置を強いるので、描き直しの task の中で呼ぶと直前の描き直しが汚した文書全体を
+   *   そこで払う(trace: 20,000 行の追記 1 回で 194 ms)。
+   * 🔑 観測点は `requestAnimationFrame` に積まれた仕事 ── 通った直後(同じ task)はまだ焦点が無く、
+   *   frame を回すと欄に入る。
+   */
+  it('🔴 通った後の焦点の戻しは同じ task ではなく、次の frame の頭で', async () => {
+    const queued: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => queued.push(cb));
+    try {
+      const { d, q, persisted } = setup([meta('log', 'textlog')], { log: '前の記録' });
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      const input = q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+      input.blur();
+      expect(document.activeElement, '前提が崩れている(最初から欄に焦点がある)').not.toBe(input);
+      type(q, '今日のできごと');
+      q('[data-pkc-action="append-entry"]')!.click();
+      await tick();
+      expect(persisted, '前提が崩れている(通っていない)').toHaveLength(1);
+      expect(input.value, '前提が崩れている(欄が空になっていない)').toBe('');
+      // 通った task の中では焦点を置かない(置くと配置を強いる)
+      expect(document.activeElement, '描き直しの task の中で focus() を呼んでいる').not.toBe(input);
+      expect(queued.length, 'frame に焦点の戻しが積まれていない(二度と欄へ戻らない)').toBeGreaterThan(0);
+      // frame を回すと欄へ戻る(続けて打てる)
+      for (const cb of queued.splice(0)) cb(0);
+      expect(document.activeElement, 'frame を回しても欄に焦点が戻らない').toBe(input);
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it('ノートは日時の見出しを足さない(構造は書く人のもの)', async () => {
     const { d, q, persisted } = setup([meta('a', 'text')], { a: '本文' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });

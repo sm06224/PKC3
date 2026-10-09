@@ -27,6 +27,13 @@ import { EDITING_STATE_WORD } from './status-line';
 import { isTouchOnly } from './touch-device';
 
 /** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
+
+/** frame の頭に 1 回(test の node 環境には無いので setTimeout へ落とす ── `scroll-memory.ts` と同じ形)。 */
+const requestFrame = (cb: () => void): void => {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(cb);
+  else setTimeout(cb, 0);
+};
+
 export type AppendMode =
   | { kind: 'hidden' }
   | { kind: 'ready'; lid: string }
@@ -359,6 +366,15 @@ export class AppendBoxRenderer {
    */
   clear(): void {
     this.input.value = '';
-    if (!refoldPeeked(this.region)) this.input.focus();
+    if (refoldPeeked(this.region)) return;
+    /**
+     * 🔴 **焦点を戻すのは frame の頭で**(#1467 段 3-g)── `focus()` は「焦点を置けるか(描かれているか)」を
+     *   決めるために配置を強いるので、描き直しの task の中で呼ぶと、直前の描き直しが汚した文書全体を
+     *   ここで払う(trace: 20,000 行の追記 1 回で 194 ms)。frame の頭なら frame 自身の配置と同じ 1 回で済む。
+     * ⚠ その間に欄が畳まれた / 外れたなら置かない(`display: none` に焦点は乗らない)。
+     */
+    requestFrame(() => {
+      if (this.input.isConnected && !this.input.hidden) this.input.focus();
+    });
   }
 }

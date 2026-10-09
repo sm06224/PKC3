@@ -102,6 +102,9 @@ function tableOf(region: HTMLElement, side: 'left' | 'right'): HTMLElement {
   )!;
 }
 
+/** `ScrollMemory.use()` は次の frame の頭で `scrollTop` を書く(#1467 段 3-g)── 読む前に 1 frame 待つ。 */
+const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+
 describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
   let region: HTMLElement;
   beforeEach(() => {
@@ -120,10 +123,11 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
    * ここでは並べ替え(`SET_ENTRY_SORT`)でその形を再現する ── 起きることは同じ
    * (指紋が変わって `renderTable` が走る)で、既存の実装済みの入口を使える。
    */
-  it('🔴 並べ替えで表が作り直っても、左右それぞれの送り位置を保つ', () => {
+  it('🔴 並べ替えで表が作り直っても、左右それぞれの送り位置を保つ', async () => {
     const r = new DualFilerRenderer(region);
     const s0 = booted();
     r.render(s0);
+    await frame(); // 最初の use() が frame で 0 を書き終えてから、user が送る
 
     const left = tableOf(region, 'left');
     const right = tableOf(region, 'right');
@@ -134,7 +138,9 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     right.scrollTop = 150;
     right.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     // 空振り防止 ── clamp が中身在るうちは丸めていないことを確かめる
+    await frame();
     expect(left.scrollTop, '前提: 300 まで送れる').toBe(300);
+    await frame();
     expect(right.scrollTop, '前提: 150 まで送れる').toBe(150);
 
     // 🔑 スコープは動かさない ── 「別の画面へ行って戻る」を、指紋だけ変える形で作る
@@ -142,7 +148,9 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     expect(s1.entrySort, '前提: 並びが動いた').toBe('title');
     r.render(s1);
 
+    await frame();
     expect(tableOf(region, 'left').scrollTop, '左の送り位置を忘れた').toBe(300);
+    await frame();
     expect(tableOf(region, 'right').scrollTop, '右の送り位置を忘れた').toBe(150);
   });
 
@@ -151,15 +159,17 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
    * `frame.table.textContent = ''` を通らない ── clamp を使わなくても保たれる
    * (`renderTable` を通す変異でなければ落ちないことを確かめる ── §2「未実行の経路」)。
    */
-  it('印だけの変化(表を作り直さない)では、そもそも scrollTop に触れない', () => {
+  it('印だけの変化(表を作り直さない)では、そもそも scrollTop に触れない', async () => {
     const r = new DualFilerRenderer(region);
     const s0 = booted();
     r.render(s0);
+    await frame(); // 最初の use() が frame で 0 を書き終えてから、user が送る
     const left = tableOf(region, 'left');
     left.scrollTop = 300;
     left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     const s1 = reduce(s0, { type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' }).state;
     r.render(s1);
+    await frame();
     expect(tableOf(region, 'left').scrollTop, '印だけの変化で送り位置が動いた').toBe(300);
   });
 
@@ -171,10 +181,11 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
    *   (鍵 = フォルダ × 絞り込みの有無)。⚠ 鍵が絞り込みの有無だけだと、
    *   入ったフォルダが**前のフォルダの位置から**出る(1 稿目はそうだった)。
    */
-  it('🔴 片方のペインだけフォルダへ入ると、入った先は先頭から・戻ると元の位置、もう片方は動かない', () => {
+  it('🔴 片方のペインだけフォルダへ入ると、入った先は先頭から・戻ると元の位置、もう片方は動かない', async () => {
     const r = new DualFilerRenderer(region);
     const s0 = booted();
     r.render(s0);
+    await frame(); // 最初の use() が frame で 0 を書き終えてから、user が送る
     const left = tableOf(region, 'left');
     const right = tableOf(region, 'right');
     clampToChildren(left);
@@ -185,7 +196,9 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
 
     const s1 = reduce(s0, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     r.render(s1);
+    await frame();
     expect(tableOf(region, 'right').scrollTop, '触っていない右が動いた').toBe(400);
+    await frame();
     expect(tableOf(region, 'left').scrollTop, '入ったフォルダが前のフォルダの位置から出た').toBe(0);
 
     // 入った先で少し送ってから、上へ戻る
@@ -193,11 +206,13 @@ describe('2 ペインのスクロール位置を覚える(C10 / #1045)', () => {
     left.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     const s2 = reduce(s1, { type: 'DUAL_SET_SCOPE', side: 'left', lid: null }).state;
     r.render(s2);
+    await frame();
     expect(tableOf(region, 'left').scrollTop, '上へ戻ったのに元の位置へ戻らない').toBe(300);
 
     // もう一度入ると、そのフォルダで見ていた位置へ
     const s3 = reduce(s2, { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     r.render(s3);
+    await frame();
     expect(tableOf(region, 'left').scrollTop, '入り直したフォルダの位置を忘れた').toBe(40);
   });
 });

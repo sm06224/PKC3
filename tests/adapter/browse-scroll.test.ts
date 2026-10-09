@@ -111,22 +111,27 @@ function setup() {
   return { d, regions, setMode, pane };
 }
 
+/** `ScrollMemory.use()` は次の frame の頭で `scrollTop` を書く(#1467 段 3-g)── 読む前に 1 frame 待つ。 */
+const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+
 describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #1045)', () => {
   /**
    * 🔴 **本体**: スコープを動かさずに表が作り直っても、位置を失わない。
    * `SET_ENTRY_SORT` は `filer.ts` の `listChanged` を真にする(並び順が指紋の
    * 一部)ので、フォルダを移らなくても `region.textContent = ''` が走る。
    */
-  it('🔴 並べ替えでフォルダの表が作り直っても、送り位置を保つ', () => {
+  it('🔴 並べ替えでフォルダの表が作り直っても、送り位置を保つ', async () => {
     const { d, regions, pane } = setup();
     clampHostOnPaneClear(regions.browseHost, pane);
     regions.browseHost.scrollTop = 500;
     regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
+    await frame();
     expect(regions.browseHost.scrollTop, '前提: 500 まで送れる').toBe(500);
 
     d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
     expect(d.getState().entrySort, '前提: 並びが動いた').toBe('title');
 
+    await frame();
     expect(regions.browseHost.scrollTop, '並べ替えで送り位置を忘れた').toBe(500);
   });
 
@@ -138,7 +143,7 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
    *   `use()` を外すと**前のタブで書かれた値がそのまま残る**ことで検算する
    *   (下の kill 手順で確認済み)。
    */
-  it('🔴 別のタブへ切り替えて戻ると、フォルダの送り位置を保つ', () => {
+  it('🔴 別のタブへ切り替えて戻ると、フォルダの送り位置を保つ', async () => {
     const { setMode, regions } = setup();
     regions.browseHost.scrollTop = 500;
     regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
@@ -151,6 +156,7 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
     regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
 
     setMode('filer');
+    await frame();
     expect(regions.browseHost.scrollTop, 'フォルダタブへ戻って送り位置を忘れた').toBe(500);
   });
 
@@ -158,12 +164,13 @@ describe('フォルダ表(左の列)のスクロール位置を覚える(C10 / #
    * ⚠ **対照群**: 表を作り直さない回(選択だけの変化)は、そもそも
    * `region.textContent = ''` を通らない ── 空振り防止(§2「未実行の経路」)。
    */
-  it('選択だけの変化(表を作り直さない)では、そもそも scrollTop に触れない', () => {
+  it('選択だけの変化(表を作り直さない)では、そもそも scrollTop に触れない', async () => {
     const { d, regions, pane } = setup();
     clampHostOnPaneClear(regions.browseHost, pane);
     regions.browseHost.scrollTop = 500;
     regions.browseHost.dispatchEvent(new Event('scroll')); // user が送った(本物はブラウザが出す)
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n0' });
+    await frame();
     expect(regions.browseHost.scrollTop, '選択だけの変化で送り位置が動いた').toBe(500);
   });
 });

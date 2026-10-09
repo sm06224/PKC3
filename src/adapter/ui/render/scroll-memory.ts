@@ -43,12 +43,20 @@
  * …描画…
  * use(newKey);     // 中身を入れ**終わってから**、その面の位置へ戻す(鍵も切り替える)
  * ```
+ * ⚠ `use()` が `scrollTop` を書くのは**次の frame の頭**(段 3-g)── 同じ task で読み直しても
+ *   まだ動いていない。test は frame を 1 つ待ってから見る。
  * ⚠ `use()` を描画の前にすると、まだ `scrollHeight` が足りないので指した位置が丸められる
  * (段⑪ でも同じ罠を踏んだ)。
  */
 
 /** 覚えておく面の数。⚠ 無制限に持つと、面が増えるたびに伸びる辞書になる。 */
 const CAP = 8;
+
+/** frame の頭に 1 回(test の node 環境には無いので setTimeout へ落とす ── `quick-toc.ts` と同じ形)。 */
+const requestFrame: (cb: () => void) => number =
+  typeof requestAnimationFrame === 'function'
+    ? (cb) => requestAnimationFrame(cb)
+    : (cb) => setTimeout(cb, 0) as unknown as number;
 
 export class ScrollMemory {
   private readonly el: HTMLElement;
@@ -79,8 +87,26 @@ export class ScrollMemory {
    */
   use(key: string): void {
     this.key = key;
-    this.el.scrollTop = this.seen.get(key) ?? 0;
+    /**
+     * 🔴 **書くのは frame の頭(requestAnimationFrame)で**(#1467 段 3-g)── `scrollTop = …` も
+     *   読みと同じく配置を強いる(段 3-e のレビューの実測)。描き直しの task の中で書くと、
+     *   直前の描き直しが汚した文書全体をここで払う(trace: 20,000 行の追記 1 回で 267 ms)。
+     *   frame の頭なら、その配置は frame 自身が 1 回払う分と同じ物になる(二重に払わない)。
+     * ⚠ 値は**いま**決める(`seen` を frame で読まない)── 縮んで丸められた分の `scroll` は
+     *   frame の頭(scroll steps)で届いて `seen` を 0 で上書きするので、frame で読むと 0 を書く。
+     * ⚠ 同じ frame に 2 度来たら後の方だけ書く(鍵が 2 度変わっても 1 回)。
+     */
+    this.pending = this.seen.get(key) ?? 0;
+    if (this.frame !== null) return;
+    this.frame = requestFrame(() => {
+      this.frame = null;
+      this.el.scrollTop = this.pending;
+    });
   }
+
+  /** frame で書く位置(`use()` が決める)と、その予約。 */
+  private pending = 0;
+  private frame: number | null = null;
 
   /** いま覚えている位置(test の観測点)。 */
   peek(key: string): number | undefined {

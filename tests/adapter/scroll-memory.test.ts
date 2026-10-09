@@ -37,23 +37,28 @@ function container() {
   };
 }
 
+/** `ScrollMemory.use()` は次の frame の頭で `scrollTop` を書く(#1467 段 3-g)── 読む前に 1 frame 待つ。 */
+const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+
 describe('スクロール位置の記憶', () => {
   /** user が送った / ブラウザが丸めた、の後に届く `scroll`(⚠ 本物は非同期 ── 描き直しの後に届く)。 */
   const scrolled = (el: HTMLElement): void => {
     el.dispatchEvent(new Event('scroll'));
   };
 
-  it('同じ面に戻ったら同じ位置', () => {
+  it('同じ面に戻ったら同じ位置', async () => {
     const c = container();
     const m = new ScrollMemory(c.el);
     m.use('a');
     c.el.scrollTop = 250;
     scrolled(c.el);
     m.use('b');
+    await frame();
     expect(c.el.scrollTop, '別の面は先頭から').toBe(0);
     c.el.scrollTop = 100;
     scrolled(c.el);
     m.use('a');
+    await frame();
     expect(c.el.scrollTop, 'a の位置に戻っていない').toBe(250);
   });
 
@@ -62,7 +67,7 @@ describe('スクロール位置の記憶', () => {
    * ⚠ これが「絞り込み → 戻す」で飛んでいた形そのもの ── 丸められた 0 を**前の面の鍵**で覚えると飛ぶ。
    *   本物のブラウザは `scroll` を非同期に出すので、描き直し(`use(newKey)`)の後に届く。
    */
-  it('🔴 縮んで丸められた分の scroll が描き直しの後に届いても、元の面の位置を失わない', () => {
+  it('🔴 縮んで丸められた分の scroll が描き直しの後に届いても、元の面の位置を失わない', async () => {
     const c = container();
     const m = new ScrollMemory(c.el);
     m.use('all');
@@ -70,12 +75,14 @@ describe('スクロール位置の記憶', () => {
     scrolled(c.el); // user が送った
     // 絞り込み = 中身が縮む(ブラウザが 0 へ丸める)→ 描き直し → 鍵を切り替える
     c.setContent(0);
+    await frame();
     expect(c.el.scrollTop).toBe(0);
     m.use('filtered');
     scrolled(c.el); // ⚠ 丸められた分の scroll はここで届く(鍵は既に filtered)
     // 戻す = 中身が伸びる
     c.setContent(1000);
     m.use('all');
+    await frame();
     expect(c.el.scrollTop, '縮んだ後の 0 を前の面の鍵で覚えてしまった').toBe(250);
   });
 
@@ -107,7 +114,42 @@ describe('スクロール位置の記憶', () => {
     expect(reads).toBe(1);
   });
 
-  it('🔴 同じ面を描き直しただけでも戻す(ログのように作り直す面)', () => {
+  /**
+   * 🔴 **`use()` は同じ task の中で `scrollTop` を書かない ── 次の frame の頭で 1 回**(#1467 段 3-g)。
+   *   `scrollTop = …` も配置を強いる(読みと同じ)ので、描き直しの task の中で書くと直前の描き直しが
+   *   汚した文書全体をそこで払う(trace: 20,000 行の追記 1 回で 267 ms)。
+   * 🔑 観測点は setter の回数。同じ frame に鍵が 2 度変わっても書くのは 1 回で、後の鍵の値。
+   */
+  it('🔴 use() は同じ task では scrollTop を書かない ── 次の frame の頭で 1 回(後の鍵の値)', async () => {
+    const el = document.createElement('div');
+    let top = 0;
+    let writes = 0;
+    Object.defineProperty(el, 'scrollTop', {
+      get: () => top,
+      set: (v: number) => {
+        writes += 1;
+        top = v;
+      },
+      configurable: true,
+    });
+    const m = new ScrollMemory(el);
+    m.use('a');
+    await frame();
+    top = 250;
+    el.dispatchEvent(new Event('scroll')); // a = 250
+    m.use('b');
+    top = 40;
+    el.dispatchEvent(new Event('scroll')); // b = 40
+    writes = 0;
+    m.use('a');
+    m.use('b');
+    expect(writes, '描き直しの task の中で scrollTop を書いている(強制レイアウトを払う)').toBe(0);
+    await frame();
+    expect(writes, '同じ frame に 2 度 use したのに 2 回書いた / 1 回も書いていない').toBe(1);
+    expect(top, '後の鍵(b)の値になっていない').toBe(40);
+  });
+
+  it('🔴 同じ面を描き直しただけでも戻す(ログのように作り直す面)', async () => {
     const c = container();
     const m = new ScrollMemory(c.el);
     m.use('log');
@@ -116,13 +158,15 @@ describe('スクロール位置の記憶', () => {
     c.setContent(0); // 作り直しで一瞬空になる
     c.setContent(1000);
     m.use('log');
+    await frame();
     expect(c.el.scrollTop, '同じ鍵だからと戻さなかった').toBe(250);
   });
 
-  it('覚えていない面は先頭から', () => {
+  it('覚えていない面は先頭から', async () => {
     const c = container();
     const m = new ScrollMemory(c.el);
     m.use('x');
+    await frame();
     expect(c.el.scrollTop).toBe(0);
   });
 
