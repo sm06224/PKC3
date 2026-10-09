@@ -901,11 +901,90 @@ describe('掴んで動かす(place-drag)', () => {
     const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(ev, '書換の依頼が出ていない').toBeDefined();
     expect(ev).toMatchObject({ rewrite: { kind: 'place-move', line: 0, x: 150, y: 30 } });
-    // ⚠ 見た目はいったん戻る ── 書けた位置は BODY_REWRITTEN の再描画が置き直す。
-    //   戻さないと、断られた drop で画面と本文が食い違ったまま残る(レビュー所見 5)
+    // 🔴 離した位置を維持する(#1464 案 3)── 再描画までの間も動いた先にとどまる
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
+  });
+
+  it('🔴 書換が断られたとき(編集中など)は、離した後に元の位置へ戻る(#1464 案 3)', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' });
+    down(grip);
+    move(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    up(30, -10);
+    // 断られたので即座に元の位置に戻る
+    expect(d.getState().error).toBeDefined();
     expect(block.style.left).toBe('120px');
     expect(block.style.top).toBe('40px');
     off();
+  });
+
+  it('🔴 書換後に非同期エラーが通知されたときは元の位置へ戻る(#1464 案 3)', () => {
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    // 非同期にエラーが発生
+    d.dispatch({ type: 'OP_FAILED', error: 'ディスク容量不足' });
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 描き直しが 2000ms 来ないときはタイムアウトで元の位置へ戻る(#1464 案 3)', () => {
+    vi.useFakeTimers();
+    const { grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    vi.advanceTimersByTime(1999);
+    expect(block.style.left).toBe('150px');
+    vi.advanceTimersByTime(1);
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+    vi.useRealTimers();
+  });
+
+  it('🔴 正常に再描画されたら監視が外れ、2000ms 経過しても戻らない(#1464 案 3)', () => {
+    vi.useFakeTimers();
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    // 再描画によって属性が更新された(同一要素の場合)
+    block.setAttribute('data-pkc-x', '150');
+    block.setAttribute('data-pkc-y', '30');
+    // 状態変化通知を発火させる
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
+    vi.advanceTimersByTime(3000);
+    expect(block.style.left).toBe('150px');
+    off();
+    vi.useRealTimers();
+  });
+
+  it('🔴 新しい要素へ差し替えられたら監視が外れ、2000ms 経過しても戻らない(#1464 案 3)', () => {
+    vi.useFakeTimers();
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    // DOM から切り離された(新しい要素に差し替えられた)
+    block.remove();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
+    vi.advanceTimersByTime(3000);
+    expect(block.style.left).toBe('150px');
+    off();
+    vi.useRealTimers();
   });
 
   /**
@@ -1078,9 +1157,9 @@ describe('掴んで動かす(place-drag)', () => {
       const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
       expect(asks).toHaveLength(1);
       expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-size', line: 0, w: 360, h: 230 } });
-      // ⚠ 見た目はいったん戻る(書けた大きさは再描画が当て直す)
-      expect(block.style.width).toBe('320px');
-      expect(block.style.height).toBe('200px');
+      // 🔴 離した大きさを維持する(#1464 案 3)
+      expect(block.style.width).toBe('360px');
+      expect(block.style.height).toBe('230px');
       off();
     });
 
@@ -1110,7 +1189,7 @@ describe('掴んで動かす(place-drag)', () => {
       off();
     });
 
-    it('w= / h= を持たない塊は実寸を基点にし、戻すときは style を外す', () => {
+    it('w= / h= を持たない塊は実寸を基点にし、離した後はその大きさを維持する(#1464 案 3)', () => {
       const { host, events, off } = mounted();
       const block2 = host.querySelector<HTMLElement>('#p2')!;
       expect(block2.style.width, '前提が崩れている: p2 に width が当たっている').toBe('');
@@ -1123,7 +1202,22 @@ describe('掴んで動かす(place-drag)', () => {
       expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
         rewrite: { kind: 'place-size', line: 5, w: 200, h: 100 },
       });
-      expect(block2.style.width, '無かった width が残っている').toBe('');
+      expect(block2.style.width).toBe('200px');
+      expect(block2.style.height).toBe('100px');
+      off();
+    });
+
+    it('🔴 大きさ変更が断られたときは、元々 w= / h= が無かった塊は style を外して戻る(#1464 案 3)', () => {
+      const { host, d, off } = mounted();
+      d.dispatch({ type: 'START_EDIT' });
+      const block2 = host.querySelector<HTMLElement>('#p2')!;
+      const handle = sizeHandle(host, 'p2');
+      down(handle);
+      move(200, 100);
+      expect(block2.style.width).toBe('200px');
+      up(200, 100);
+      expect(d.getState().error).toBeDefined();
+      expect(block2.style.width).toBe('');
       expect(block2.style.height).toBe('');
       off();
     });

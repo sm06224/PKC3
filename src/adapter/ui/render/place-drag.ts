@@ -171,6 +171,80 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     d.block.style.top = `${d.startY}px`;
   };
 
+  /**
+   * 🔴 離した位置・大きさを楽観的に維持し、断られたときだけ戻す(#1464 案 3)。
+   * worker 往復を待つ約 190ms の間、板が元の位置へ戻って見える体験を解消する。
+   * 異常系(エラー発生 / 上限時間経過)では元の位置・大きさへロールバックする。
+   */
+  const registerPendingDrop = (
+    d: Drag,
+    action:
+      | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
+      | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number },
+  ): void => {
+    const startError = dispatcher.getState().error;
+    const block = d.block;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubs: (() => void)[] = [];
+
+    const cleanup = (): void => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      for (const u of unsubs) u();
+      unsubs = [];
+    };
+
+    const rollback = (): void => {
+      cleanup();
+      restore(d);
+    };
+
+    // 1. 状態の監視: エラー発生で即座に戻す / 描画完了で成功終了
+    const unbind = dispatcher.onState((state) => {
+      if (state.error && state.error !== startError) {
+        rollback();
+        return;
+      }
+      // 再描画で新しい要素に差し替えられた(正常完了)
+      if (!block.isConnected) {
+        cleanup();
+        return;
+      }
+      // 同一要素で属性が更新された(正常完了)
+      if (action.type === 'MOVE_PLACE') {
+        const cx = Number(block.getAttribute('data-pkc-x'));
+        const cy = Number(block.getAttribute('data-pkc-y'));
+        if (cx === action.x && cy === action.y) {
+          cleanup();
+          return;
+        }
+      } else {
+        const cw = Number(block.getAttribute('data-pkc-w'));
+        const ch = Number(block.getAttribute('data-pkc-h'));
+        if (cw === action.w && ch === action.h) {
+          cleanup();
+          return;
+        }
+      }
+    });
+    unsubs.push(unbind);
+
+    // 2. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
+    timer = setTimeout(() => {
+      rollback();
+    }, 2000);
+
+    // 3. 本文書換の dispatch
+    dispatcher.dispatch(action);
+
+    // 4. 同期判定: bodyRewriteGate で即時拒否された場合はその場で戻す
+    if (dispatcher.getState().error && dispatcher.getState().error !== startError) {
+      rollback();
+    }
+  };
+
   const targetOf = (block: HTMLElement): { lid: string; line: number } | null =>
     placeTargetOf(block, dispatcher);
 
@@ -193,11 +267,16 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       const w = Math.max(MIN_W, Math.round(d.startW + dx));
       const h = Math.max(MIN_H, Math.round(d.startH + dy));
       // 🔑 取りやめ(元の大きさへ戻して離す)は書かない ── 位置と同じ理由(下)
-      restore(d);
-      if (w === d.startW && h === d.startH) return;
+      if (w === d.startW && h === d.startH) {
+        restore(d);
+        return;
+      }
       const t = targetOf(d.block);
-      if (t === null) return;
-      dispatcher.dispatch({ type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
+      if (t === null) {
+        restore(d);
+        return;
+      }
+      registerPendingDrop(d, { type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
       return;
     }
     const x = Math.max(0, Math.round(d.startX + dx));
@@ -209,14 +288,11 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       return;
     }
     const t = targetOf(d.block);
-    /**
-     * ⚠ 見た目は**常に**いったん戻す ── 書けた場合は BODY_REWRITTEN の再描画が
-     * 正しい位置に置き直す。戻さないと、断られた drop(byte 不一致 / 行ずれ)で
-     * 画面と本文が次の無関係な再描画まで食い違う(レビュー所見 5)。
-     */
-    restore(d);
-    if (t === null) return;
-    dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
+    if (t === null) {
+      restore(d);
+      return;
+    }
+    registerPendingDrop(d, { type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
   };
 
   const onPointerCancel = (): void => {
