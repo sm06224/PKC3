@@ -657,6 +657,8 @@ export class DetailRenderer {
        *   (`renderBar`)が毎回これを呼ぶと、直前の描き直しが汚した本文全体をそこで払っていた
        *   (trace: 20,000 行の追記 1 回で 327 ms、1.2 万要素)。選択が変わった知らせの中で
        *   1 回読んで覚え、描き直しは覚えた値を使う。
+       * ⚠ 読み手を 1 人外しても、同じ task に次の読み手が居れば支払いはそこへ移る(`scroll-memory.ts` の
+       *   冒頭)── 実測では 20,000 行の wall は動いていない。ms ではなく「読み手が 1 人減った」が主張。
        */
       const usable = this.bodyHost !== null && hasSourceSelection(this.bodyHost);
       this.selectionUsable = usable;
