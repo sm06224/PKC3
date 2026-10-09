@@ -2371,8 +2371,8 @@ li[data-pkc-row-slot] {
  *   箱 530px(= 500 + ボタン列 + 間隔)は見える 526px に収まらず、`scrollIntoView` が
  *   下端を合わせて**見出しの行が帯の下へ 8px 隠れた**(実測。お知らせを 1 件足した
  *   PR で初めて落ちた ── 元から在った穴で、閾値が下がって見えるようになっただけ)。
- *   🔑 器の高さは `read-columns.ts` の `exposePaneHeight` が px で下ろす(段の高さと
- *   同じ作法)。引く 110px = 帯 34 + ボタン列 26 + gap 4 + 箱の上下 margin 8 + 余裕 38
+ *   🔑 器の高さは `read-columns.ts` の `exposePaneHeight` / `limitDraftInput` が**箱の inline** に
+ *   px で下ろす(器に書くと、継承される変数なので本文の子孫全部が再計算になる ── #1467 段 3-c)。引く 110px = 帯 34 + ボタン列 26 + gap 4 + 箱の上下 margin 8 + 余裕 38
  *   (`--s2` = 0.25rem = 4px。`tokens.css`)。下の行が無い日は `100vh − 300px` のほうが小さいので
  *   **見た目は 1px も変わらない**。
  * ⚠ **`overflow-y: auto` を既定にする**(`[data-pkc-scroll]` の有無に関わらず)

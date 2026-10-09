@@ -21,7 +21,10 @@ import {
   exposePaneHeight,
   fitColumnHeight,
   installColumnFit,
+  limitDraftInput,
 } from '../../src/adapter/ui/render/read-columns';
+import { installSectionBox } from '../../src/adapter/ui/render/section-box';
+import { installCodeBox } from '../../src/adapter/ui/render/code-box';
 
 const css = (): string => withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
 
@@ -53,45 +56,102 @@ describe('章の箱の高さは器の高さにも頭打ちされる(2026-10-03)'
   });
 });
 
-function shell(): { root: HTMLElement; region: HTMLElement; pane: HTMLElement } {
+function shell(): { root: HTMLElement; region: HTMLElement; pane: HTMLElement; input: HTMLElement } {
   const root = document.createElement('div');
   const region = document.createElement('div');
   region.setAttribute('data-pkc-region', 'detail');
   const pane = document.createElement('div');
   pane.setAttribute('data-pkc-view-pane', 'detail');
   pane.setAttribute('data-pkc-detail-mode', 'view');
+  // 開いている章の編集箱(`--pkc-pane-h` の唯一の読み手)
+  const input = document.createElement('textarea');
+  input.setAttribute('data-pkc-field', 'section-draft-input');
+  pane.append(input);
   region.append(pane);
   root.append(region);
   document.body.append(root);
-  return { root, region, pane };
+  return { root, region, pane, input };
 }
 
 describe('器の高さを CSS へ下ろす(exposePaneHeight)', () => {
-  it('🔴 器の clientHeight を px で、面ではなく器(面の親)へ書く', () => {
-    const { root, region, pane } = shell();
+  /**
+   * 🔴 **測るのは器(面の親)、書くのは編集箱そのもの**(#1467 段 3-c)。
+   * ⚠ 直す前は器の `style` に書いていた ── 自前の変数は継承されるので、器の値が動くたびに本文の
+   *   子孫 4.7 万要素が丸ごとスタイル再計算になり、直後の採寸がそれを払っていた(20,000 行の追記で 2.0 秒)。
+   */
+  it('🔴 器の clientHeight を px で、器にも面にも書かず、編集箱に書く', () => {
+    const { root, region, pane, input } = shell();
     Object.defineProperty(region, 'clientHeight', { value: 560, configurable: true });
     expect(exposePaneHeight(root)).toBe(560);
-    expect(region.style.getPropertyValue(PANE_H_VAR)).toBe('560px');
-    // ⚠ 面には書かない ── 読む面は中身の高さまで伸びるので、面の高さは器の高さではない
+    expect(input.style.getPropertyValue(PANE_H_VAR), '編集箱に下りていない').toBe('560px');
+    // 🔴 器に書くと、継承で本文の全子孫が再計算になる(#1467 段 3-c)
+    expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている(本文全体の再計算を起こす)').toBe('');
+    // ⚠ 面にも書かない ── 読む面は中身の高さまで伸びるので、面の高さは器の高さではない(同じく継承で全子孫)
     expect(pane.style.getPropertyValue(PANE_H_VAR)).toBe('');
     root.remove();
   });
 
+  it('🔴 開いたばかりの編集箱には limitDraftInput が同じ値を下ろす(見張りが鳴る前に効く)', () => {
+    const { root, region, input } = shell();
+    Object.defineProperty(region, 'clientHeight', { value: 480, configurable: true });
+    expect(limitDraftInput(input)).toBe(480);
+    expect(input.style.getPropertyValue(PANE_H_VAR)).toBe('480px');
+    expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている').toBe('');
+    // 器の外の要素には何も書かない(器が見つからない)
+    const stray = document.createElement('textarea');
+    document.body.append(stray);
+    expect(limitDraftInput(stray)).toBeNull();
+    expect(stray.style.getPropertyValue(PANE_H_VAR)).toBe('');
+    stray.remove();
+    root.remove();
+  });
+
+  /**
+   * 🔴 **開いた瞬間に上限が効く**(見張りの ResizeObserver は次のフレームまで鳴らない)──
+   *   章の箱 / コード枠の箱の**本物の差し込み**で、箱に `--pkc-pane-h` が載っている。
+   */
+  it('🔴 章の箱 / コード枠の箱を差し込んだ瞬間、箱そのものに --pkc-pane-h が載る(器には載らない)', () => {
+    const { root, region, pane } = shell();
+    pane.querySelector('[data-pkc-field="section-draft-input"]')!.remove(); // shell の箱は使わない
+    Object.defineProperty(region, 'clientHeight', { value: 500, configurable: true });
+    const host = document.createElement('div');
+    for (const n of [0, 2, 4]) {
+      const b = document.createElement('div');
+      b.className = 'pkc-md-block';
+      b.setAttribute('data-pkc-source-line', String(n));
+      if (n === 4) b.setAttribute('data-pkc-md-block-kind', 'code');
+      b.textContent = `line ${n}`;
+      host.append(b);
+    }
+    pane.append(host);
+    const section = installSectionBox(host, { from: 0, to: 3, text: '## 見出し\n本文' });
+    expect(section, '前提が崩れている(章の箱が差し込まれていない)').not.toBeNull();
+    expect(section!.style.getPropertyValue(PANE_H_VAR), '章の箱に器の高さが下りていない').toBe('500px');
+    const code = installCodeBox(host, { line: 4, text: 'const a = 1;' });
+    expect(code, '前提が崩れている(コード枠の箱が差し込まれていない)').not.toBeNull();
+    expect(code!.style.getPropertyValue(PANE_H_VAR), 'コード枠の箱に器の高さが下りていない').toBe('500px');
+    expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている').toBe('');
+    root.remove();
+  });
+
   it('採寸できない(0)なら触らない ── 0px にすると箱が消える', () => {
-    const { root, region } = shell();
-    region.style.setProperty(PANE_H_VAR, '560px');
+    const { root, region, input } = shell();
+    input.style.setProperty(PANE_H_VAR, '560px');
     Object.defineProperty(region, 'clientHeight', { value: 0, configurable: true });
     expect(exposePaneHeight(root)).toBeNull();
-    expect(region.style.getPropertyValue(PANE_H_VAR), '0 の回に前の値を消した / 0px を書いた').toBe('560px');
+    expect(input.style.getPropertyValue(PANE_H_VAR), '0 の回に前の値を消した / 0px を書いた').toBe('560px');
+    expect(limitDraftInput(input)).toBeNull();
+    expect(input.style.getPropertyValue(PANE_H_VAR)).toBe('560px');
     root.remove();
   });
 
   it('🔴 fitColumnHeight が段組みの有無に関わらず下ろす(1 段でも / off の経路でも)', () => {
-    const { root, region } = shell();
+    const { root, region, input } = shell();
     Object.defineProperty(region, 'clientHeight', { value: 420, configurable: true });
     // happy-dom は getBoundingClientRect が 0 なので fitColumnHeight 自体は null(= 段組みの採寸はしない)
     expect(fitColumnHeight(root, document)).toBeNull();
-    expect(region.style.getPropertyValue(PANE_H_VAR), '段組みを採れない回に器の高さを下ろしていない').toBe('420px');
+    expect(input.style.getPropertyValue(PANE_H_VAR), '段組みを採れない回に器の高さを下ろしていない').toBe('420px');
+    expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている').toBe('');
     root.remove();
   });
 
@@ -116,7 +176,7 @@ describe('器の高さを CSS へ下ろす(exposePaneHeight)', () => {
       disconnect(): void {}
     }
     vi.stubGlobal('ResizeObserver', FakeRO);
-    const { root, region, pane } = shell();
+    const { root, region, pane, input } = shell();
     let dispose: (() => void) | null = null;
     try {
       Object.defineProperty(region, 'clientHeight', { value: 560, configurable: true });
@@ -124,12 +184,13 @@ describe('器の高さを CSS へ下ろす(exposePaneHeight)', () => {
       expect(observed, '器(面の親)を観ていない').toContain(region);
       // 対照群:面も観ている(器だけ観る形に置き換えても、面の追随は残る)
       expect(observed, '面を観ていない').toContain(pane);
-      expect(region.style.getPropertyValue(PANE_H_VAR), '前提:起動直後に器の高さを下ろしている').toBe('560px');
+      expect(input.style.getPropertyValue(PANE_H_VAR), '前提:起動直後に器の高さを下ろしている').toBe('560px');
       // 器だけが縮む(面は動かさない)── お知らせのカードが出た日
       Object.defineProperty(region, 'clientHeight', { value: 300, configurable: true });
       expect(fires.length, '前提:ResizeObserver を作っていない').toBeGreaterThan(0);
       for (const f of fires) f();
-      expect(region.style.getPropertyValue(PANE_H_VAR), '器が縮んだのに --pkc-pane-h が古いまま').toBe('300px');
+      expect(input.style.getPropertyValue(PANE_H_VAR), '器が縮んだのに --pkc-pane-h が古いまま').toBe('300px');
+      expect(region.style.getPropertyValue(PANE_H_VAR), '器に書いている').toBe('');
     } finally {
       dispose?.();
       vi.unstubAllGlobals();

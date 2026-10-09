@@ -72,20 +72,53 @@ export const COLUMN_H_VAR = '--pkc-col-h';
 export const PANE_H_VAR = '--pkc-pane-h';
 
 /**
- * 器(`[data-pkc-region="detail"]` = 面の親)の `clientHeight` を {@link PANE_H_VAR} へ下ろす。
+ * 🔴 **`--pkc-pane-h` を読む箱**(章の編集箱 / コード枠の編集箱の `max-height`)。
+ * ⚠ 変数は**この箱そのものに inline で書く** ── 器(面の親)に書いてはいけない(下)。
+ */
+const PANE_H_TARGETS = '[data-pkc-field="section-draft-input"], [data-pkc-field="code-draft-input"]';
+
+/** 箱 1 つに `--pkc-pane-h` を書く(同じ値なら触らない)。 */
+function writePaneHeight(el: HTMLElement, h: number): void {
+  const next = `${h}px`;
+  if (el.style.getPropertyValue(PANE_H_VAR) !== next) el.style.setProperty(PANE_H_VAR, next);
+}
+
+/**
+ * 器(`[data-pkc-region="detail"]` = 面の親)の `clientHeight` を、いま開いている編集箱へ
+ * {@link PANE_H_VAR} として下ろす。
  * ⚠ 面(`view-pane`)ではなく**その親**を測る ── 読む面は `flex: 1 0 auto` で中身の高さまで
  *   伸びるので、長いノートでは面の高さは器が縮んでも動かない(見張りも鳴らない)。
  * ⚠ 採寸できない環境(happy-dom / 畳んだ面)は 0 なので触らない(0px にすると箱が消える)。
- * @returns 下ろした高さ(px)。触らなかったら `null`
+ *
+ * 🔴 **器には書かない**(#1467 段 3-c。trace 2026-10-09 で確定)── 1 稿目は器の `style` に
+ *   書いていた。自前の変数は**継承される**ので、器の値が変わるたびに**本文の子孫 4.7 万要素が
+ *   丸ごとスタイル再計算**になり、直後の `fitColumnHeight` の採寸がそれを払っていた
+ *   (ffmpeg の形・20,000 行の追記 1 回で、器の高さが 3 回動き、**1 回 660 ms × 3 = 2.0 秒**。
+ *   値を書かなかった 4 回目は 0 ms)。読み手は編集箱の 2 か所だけなので、箱に直に書けば
+ *   再計算は箱 1 つで済む。
+ * @returns 器の高さ(px)。採れなかったら `null`(箱が無くても高さは返す)
  */
 export function exposePaneHeight(root: ParentNode): number | null {
   const region = paneRegion(root);
   if (region === null) return null;
   const h = region.clientHeight;
   if (!(h > 0)) return null;
-  const next = `${h}px`;
-  // ⚠ 同じ値なら書かない ── 書くと ResizeObserver がまた鳴って回り続ける
-  if (region.style.getPropertyValue(PANE_H_VAR) !== next) region.style.setProperty(PANE_H_VAR, next);
+  for (const el of region.querySelectorAll<HTMLElement>(PANE_H_TARGETS)) writePaneHeight(el, h);
+  return h;
+}
+
+/**
+ * 開いたばかりの編集箱に、その器の高さを下ろす(`section-box.ts` / `code-box.ts` が呼ぶ)。
+ * ⚠ 見張り(ResizeObserver → `fitColumnHeight` → `exposePaneHeight`)は次のフレームまで
+ *   鳴らないので、開いた瞬間の上限はここで当てる。
+ * @returns 下ろした高さ(px)。器が見つからない / 採れないときは `null`
+ */
+export function limitDraftInput(el: HTMLElement): number | null {
+  const region = el.closest<HTMLElement>('[data-pkc-view-pane="detail"]')?.parentElement ?? null;
+  if (region === null) return null;
+  const h = region.clientHeight;
+  if (!(h > 0)) return null;
+  writePaneHeight(el, h);
   return h;
 }
 

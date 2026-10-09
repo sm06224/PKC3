@@ -11,6 +11,7 @@
  */
 import { releaseGripIfTargeting } from './block-grip';
 import { iconButton } from './icons';
+import { limitDraftInput } from './read-columns';
 import { sizeTextareaToContent } from './row-swap';
 
 /** コード枠の箱の器(`data-pkc-region`)。⚠ test / smoke はここだけを見る。 */
@@ -99,6 +100,8 @@ export function installCodeBox(
    */
   sizeTextareaToContent(ta);
   ta.addEventListener('input', () => sizeTextareaToContent(ta));
+  // 🔴 器の高さの上限(`--pkc-pane-h`)は箱に直に書く(#1467 段 3-c ── 器に書くと本文全体が再計算になる)
+  limitDraftInput(ta);
   // 🔴 カーソルは先頭に置く(章と違い見出し行を持たないので、素直に中身の先頭)。
   ta.setSelectionRange(0, 0);
   ta.focus();
