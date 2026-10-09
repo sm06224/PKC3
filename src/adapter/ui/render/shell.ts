@@ -271,6 +271,16 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
   }
 }
 
+/**
+ * root を**素の字だけ**に戻す(別のタブ待ち / boot 失敗)。
+ * ⚠ `buildShell` が立てた印 `data-pkc-shell` を外す ── 外さないと、余白 0 の規則が残って
+ *   「起動に失敗しました…」の字が画面の端に貼り付く(`app.css` の root の余白は印で決まる。#1467 段 3-h)。
+ */
+export function showRootText(root: HTMLElement, text: string): void {
+  root.removeAttribute('data-pkc-shell');
+  root.textContent = text;
+}
+
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
   const shell = document.createElement('div');

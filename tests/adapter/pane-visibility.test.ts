@@ -25,7 +25,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { mediaBlock, stripComments } from '../helpers/css-blocks';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { buildShell } from '../../src/adapter/ui/render/shell';
+import { buildShell, showRootText } from '../../src/adapter/ui/render/shell';
 import { bindActions, SHORTCUT_BUTTON } from '../../src/adapter/ui/actions/binder';
 
 describe('畳める面の規則', () => {
@@ -494,12 +494,21 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
    */
   it('🔴 root / shell / center を主語にする :has() 規則が 1 つも無い', () => {
     const css = stripComments(readFileSync('src/styles/app.css', 'utf8'));
+    /**
+     * `:has(` の**直前の複合選択子**(前の結合子 ` ` / `>` / `+` / `~` から `:has(` まで)を主語と読む。
+     * ⚠ 属性の順番を入れ替えた形 / `main:has(` / `:not(:has(` で包んだ形も拾う(文頭だけ見ない ──
+     *   着地前レビューの変異で、文頭の正規表現は `[hidden-panes~=append][region=shell]:has(` を素通りした)。
+     */
+    const subjectsOfHas = (sel: string): string[] =>
+      [...sel.matchAll(/:has\(/g)].map((m) => sel.slice(0, m.index).split(/[\s>+~]/).pop() ?? '');
+    const shellLevel = (subject: string): boolean =>
+      /\[data-pkc-slot=['"]root['"]\]|\[data-pkc-region=['"](shell|center)['"]\]|^(main|html|body)[^-\w]/.test(
+        subject,
+      ) || subject === 'main';
     const offenders = [...css.matchAll(/([^{}]+)\{/g)]
       .map((m) => m[1]!.trim())
       .filter((sel) => sel.includes(':has('))
-      .filter((sel) =>
-        sel.split(',').some((one) => /^\s*\[data-pkc-(slot=['"]root['"]|region=['"](shell|center)['"])\][^ >]*:has\(/.test(one)),
-      );
+      .filter((sel) => sel.split(',').some((one) => subjectsOfHas(one).some(shellLevel)));
     expect(offenders, 'shell 階層を主語にする :has() が在る(本文全体が当て直される)').toEqual([]);
     // 空振り防止: `:has()` 自体はまだ在る(本文の塊や th が主語の物)
     expect(css.includes(':has('), '前提が崩れている(:has() が 1 つも無い ── この門は何も見ていない)').toBe(true);
@@ -517,6 +526,18 @@ describe('CSS(畳んだ列が本当に消えるか)', () => {
       root.querySelector('[data-pkc-region="center"]')!.hasAttribute('data-pkc-append-hidden'),
       '追記欄が隠れているのに MAIN に印が無い(掴む帯が最初から出る)',
     ).toBe(true);
+    root.remove();
+  });
+
+  it('🔴 素の字に戻すときは root の印を外す(起動に失敗した字が余白 0 で端に貼り付かない)', () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    buildShell(root);
+    expect(root.hasAttribute('data-pkc-shell'), '前提が崩れている(印が立っていない)').toBe(true);
+    showRootText(root, '起動に失敗しました: x');
+    expect(root.textContent).toBe('起動に失敗しました: x');
+    expect(root.hasAttribute('data-pkc-shell'), '素の字に戻したのに印が残る(余白 0 のまま)').toBe(false);
     root.remove();
   });
 
