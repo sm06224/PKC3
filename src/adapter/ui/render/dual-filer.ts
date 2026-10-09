@@ -925,14 +925,15 @@ export class DualFilerRenderer {
       frame.cursor = '';
       /**
        * 🔴 **`renderTable` は `frame.table.textContent = ''` で丸ごと作り直す**
-       * (C10 / #1045)。① 作り直す**前**に退避 ② 入れ**終わってから**戻す
-       * (`scroll-memory.ts` の「順番が本体」)。
+       * (C10 / #1045)。位置は `ScrollMemory` が scroll イベントで覚えているので、
+       * 入れ**終わってから** `use()` で戻すだけ(作り直しで 0 に丸められた分の scroll は
+       * 後から届き、そのときの鍵は新しい面 ── `scroll-memory.ts`)。
        * 🔑 鍵は **いま開いているフォルダ × 絞り込みの有無** ── 入ったフォルダは
        *   **先頭から**、上へ戻ったら**元の位置**(ファイルの整理画面の約束)。
        * ⚠ 絞り込みの有無だけを鍵にすると、フォルダ A を下まで見てから B に入ったとき
        *   **B が A の位置から出る**(入った先が途中から見える)。
        */
-      frame.scroll.park();
+      // 🔑 位置は `ScrollMemory` が `scroll` イベントで覚えている(描き直しの中で `scrollTop` を読まない)
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
       frame.scroll.use(`${paneScope(pane) ?? ''}${SEP}${filtered ? 'q' : ''}`);
     } else if (dates !== frame.dates) {

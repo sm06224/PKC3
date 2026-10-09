@@ -162,7 +162,7 @@ function setup(bodies: Record<string, string>) {
     reorderEntry: async () => stubStamps(),
     persistEntry: async () => stubStamps(),
   });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: Object.keys(bodies).map((lid) => meta(lid)), relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   return { root, d, q };
 }
@@ -181,6 +181,66 @@ describe('読む面のコピー ── 配線と活性', () => {
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-md"]')!.disabled).toBe(false);
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-note-rich"]')!.disabled).toBe(false);
     expect(q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!.disabled).toBe(true);
+  });
+
+  /**
+   * 🔴 **描き直しは選択を読まない**(#1467 段 3-e)── `getSelection()` の判定は見える選択を決めるために
+   *   スタイルと配置を強制するので、帯を描き直すたびに呼ぶと本文全体の再計算をそこで払う
+   *   (20,000 行の追記 1 回で 327 ms)。読むのは `selectionchange` の中だけ。
+   * 🔑 観測点は `document.getSelection` の呼び出し回数(本物の rig で描き直す)。対照群: 選択を変えると 1 回読む。
+   */
+  it('🔴 描き直しでは getSelection を呼ばない ── 選択が変わったときだけ 1 回読む', async () => {
+    const { d, q, root } = setup({ a: DOC });
+    clearSelection();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(30);
+    const btn = q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!;
+    expect(btn.disabled, '前提が崩れている(選択が無いのに押せる)').toBe(true);
+    const spy = vi.spyOn(document, 'getSelection');
+    // 本文が動いて面と帯を描き直す(追記と同じ経路)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: `${DOC}\n\n追記した段落。` });
+    await tick(30);
+    expect(root.querySelector('[data-pkc-field="detail-body"]')!.textContent, '前提が崩れている(描き直されていない)').toContain('追記した段落');
+    expect(spy, '描き直しのたびに選択を読んでいる(本文全体の強制レイアウトを払う)').not.toHaveBeenCalled();
+    // 対照群: 本文の中を選択すると selectionchange で読み、押せるようになる
+    const host = root.querySelector('[data-pkc-field="detail-body"]')!;
+    const ps = [...host.querySelectorAll('p')];
+    select(ps[0]!.firstChild!, 3, ps[1]!.firstChild!, 2);
+    await tick(0);
+    expect(spy.mock.calls.length, '選択が変わったのに読んでいない(押せるようにならない)').toBeGreaterThan(0);
+    expect(btn.disabled, '選択したのに押せない').toBe(false);
+    spy.mockRestore();
+  });
+
+  /**
+   * 🔴 **本文の器が差し替わると、選択はノードごと潰れるのに `selectionchange` は飛ばない**
+   *   (着地前レビューが chromium / headless_shell で実測: 0 回)。覚えた `true` だけを見ると、
+   *   選択の無い新しいノートで「選択範囲をコピー」が押せたまま残る(押すと理由だけ出る)。
+   * 🔑 描き直しは、覚えた選択の端のノードが**まだ本文の中に在るか**を併せて見る。
+   *   ⚠ happy-dom は `removeAllRanges` 以外で `selectionchange` を飛ばさないので、
+   *   「ノードが消えただけ」が本物の形で再現できる。
+   */
+  it('🔴 選択したままノートを切り替えると「選択範囲をコピー」は押せなくなる(selectionchange が飛ばなくても)', async () => {
+    const { d, q, root } = setup({ a: DOC, b: '# 別のノート\n\n別の段落。' });
+    clearSelection();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick(30);
+    const btn = q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!;
+    const host = root.querySelector('[data-pkc-field="detail-body"]')!;
+    const ps = [...host.querySelectorAll('p')];
+    select(ps[0]!.firstChild!, 3, ps[1]!.firstChild!, 2);
+    await tick(0);
+    expect(btn.disabled, '前提が崩れている(選択したのに押せない)').toBe(false);
+    // 別のノートへ ── 本文の器が作り直される。選択は消すが、selectionchange は飛ばさない
+    const changes = vi.fn();
+    document.addEventListener('selectionchange', changes);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    await tick(30);
+    expect(root.querySelector('[data-pkc-field="detail-body"]')!.textContent, '前提が崩れている(切り替わっていない)').toContain('別の段落');
+    expect(ps[0]!.isConnected, '前提が崩れている(古い本文が残っている)').toBe(false);
+    expect(changes, '前提が崩れている(selectionchange が飛んでいる ── この test は飛ばない場面を見たい)').not.toHaveBeenCalled();
+    document.removeEventListener('selectionchange', changes);
+    expect(q<HTMLButtonElement>('[data-pkc-action="copy-selection-md"]')!.disabled, '選択が消えたのに押せる').toBe(true);
   });
 
   it('🔴 「Markdown をコピー」── 原文が text/plain で渡り、ボタンが光る', async () => {

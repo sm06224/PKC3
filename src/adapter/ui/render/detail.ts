@@ -650,8 +650,34 @@ export class DetailRenderer {
      * ⚠ renderer はアプリと同寿命なので外さない ── handler は器が外れていれば
      * 何もしない(test が renderer を作り捨てても積み害は無い)。
      */
-    region.ownerDocument.addEventListener('selectionchange', () => this.syncCopySelection());
+    region.ownerDocument.addEventListener('selectionchange', () => {
+      /**
+       * 🔴 **選択の判定はここでだけ読む**(#1467 段 3-e)── `getSelection()` の `isCollapsed` /
+       *   `getRangeAt` は見える選択を決めるために**スタイルと配置を強制する**。描き直しの帯
+       *   (`renderBar`)が毎回これを呼ぶと、直前の描き直しが汚した本文全体をそこで払っていた
+       *   (trace: 20,000 行の追記 1 回で 327 ms、1.2 万要素)。選択が変わった知らせの中で
+       *   1 回読んで覚え、描き直しは覚えた値を使う。
+       * ⚠ 読み手を 1 人外しても、同じ task に次の読み手が居れば支払いはそこへ移る(`scroll-memory.ts` の
+       *   冒頭)── 実測では 20,000 行の wall は動いていない。ms ではなく「読み手が 1 人減った」が主張。
+       */
+      const usable = this.bodyHost !== null && hasSourceSelection(this.bodyHost);
+      this.selectionUsable = usable;
+      /**
+       * 🔴 **選択の端のノードも覚える**(着地前レビューが実ブラウザで示した穴)── ノートを切り替える /
+       *   別窓の保存で本文の器が作り直されると、**選択はノードごと潰れるのに `selectionchange` は
+       *   飛ばない**(chromium / headless_shell の両方で 0 回)。覚えた `true` だけを見ると、選択の
+       *   無い新しいノートで「選択範囲をコピー」が押せたまま残る。描き直しは、このノードが
+       *   **まだ本文の中に在るか**(`isConnected` / `contains` ── 配置を強いない)を併せて見る。
+       */
+      this.selectionAnchor = usable ? (region.ownerDocument.getSelection()?.anchorNode ?? null) : null;
+      this.syncCopySelection();
+    });
   }
+
+  /** 直近の `selectionchange` で読んだ「選択範囲をコピーできる選択があるか」(描き直しはこれを読む)。 */
+  private selectionUsable = false;
+  /** そのときの選択の端のノード ── 本文の器が差し替わったら、覚えた `selectionUsable` は古い。 */
+  private selectionAnchor: Node | null = null;
 
   /**
    * 🔴 **この面が名乗る `data-pkc-field`**(#505 段②)。
@@ -1873,12 +1899,17 @@ export class DetailRenderer {
   private syncCopySelection(): void {
     const btn = this.barCopy?.sel;
     if (!btn || !btn.isConnected) return;
+    // ⚠ ここで `hasSourceSelection` を呼ばない(強制レイアウト)── 値は `selectionchange` が覚えている。
+    //    ⚠ ただし覚えた選択が**いまの本文の中に残っているか**は見る(器が差し替わっても selectionchange は飛ばない)
     const usable =
       this.mode === 'view' &&
       this.lastBody !== null &&
       this.bodyHost !== null &&
-      hasSourceSelection(this.bodyHost);
-    btn.disabled = !usable;
+      this.selectionUsable &&
+      this.selectionAnchor !== null &&
+      this.selectionAnchor.isConnected &&
+      this.bodyHost.contains(this.selectionAnchor);
+    if (btn.disabled !== !usable) btn.disabled = !usable;
   }
 
   /**
