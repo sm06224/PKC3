@@ -30,7 +30,7 @@
  * ⚠ 口に載せる座標は**生の body**(刻印 + frontmatter ぶん)── `data-pkc-place-line`
  *   と同じ座標系。書く側(`MOVE_BLOCK` → `line-move.ts`)がそのまま読む。
  */
-import { blockSpanAt, type BlockSpan } from '@features/markdown/source-blocks';
+import { blockSpanLookup, type BlockSpan } from '@features/markdown/source-blocks';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
 import { chapterSpanOf, headingLevel } from './heading-fold';
 
@@ -55,7 +55,7 @@ interface Painted {
    * ⚠ 控えないと、カーソルが塊の上を通るたびに本文を全部割り直していた(20,000 行のノートで、
    *   スクロールの間に約 1 秒 ── カーソルが動かなくても、中身が下を流れるので pointerover が出続ける)。
    */
-  spans: Map<number, BlockSpan | null>;
+  spans: (openLine: number) => BlockSpan | null;
   /** 本文の行数(章の範囲を引くとき)。`-1` = まだ数えていない。 */
   lineCount: number;
 }
@@ -151,11 +151,7 @@ function blockRange(p: Painted, block: HTMLElement): { start: number; end: numbe
     const span = chapterSpanOf(p.host, block, p.lineCount);
     return span === null ? null : { start: span.start + p.fm, end: span.end + p.fm };
   }
-  let directive = p.spans.get(line);
-  if (directive === undefined) {
-    directive = blockSpanAt(p.fmBody, line);
-    p.spans.set(line, directive);
-  }
+  const directive = p.spans(line);
   if (directive !== null) {
     if (directive.open) return null; // 閉じていない ── 末尾まで飲んでいるので塊の範囲が無い
     return { start: line + p.fm, end: directive.end + p.fm };
@@ -306,12 +302,13 @@ const LEFT_CLEARANCE = 5;
 export function installBlockGrip(region: HTMLElement, host: HTMLElement, lid: string, body: string): void {
   const anchor = gripAnchorOf(region);
   const first = !painted.has(anchor);
+  const fmBody = bodyBelowFrontmatter(body);
   painted.set(anchor, {
     host,
     lid,
-    fmBody: bodyBelowFrontmatter(body),
+    fmBody,
     fm: frontmatterLineCount(body),
-    spans: new Map(),
+    spans: blockSpanLookup(fmBody),
     lineCount: -1,
   });
   const grip = ensureGrip(anchor);

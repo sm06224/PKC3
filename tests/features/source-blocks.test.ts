@@ -19,6 +19,7 @@ import {
   quoteMarkLength,
   quotePrefix,
   blockSpanAt,
+  blockSpanLookup,
   containerAtLine,
   fenceAt,
   findOpenEnds,
@@ -446,5 +447,40 @@ describe('引用の前置き(quoteMarkLength / quoteLead / quotePrefix)#775', ()
   it('⚠ 深さと字数を数える', () => {
     expect(quotePrefix('>> a')).toEqual({ depth: 2, length: 3 });
     expect(quotePrefix('a')).toEqual({ depth: 0, length: 0 });
+  });
+});
+
+describe('同じ本文に何度も聞く口(blockSpanLookup)#1467', () => {
+  const CORPUS = [
+    '前', // 0
+    ':::note', // 1
+    '```', // 2
+    ':::fake', // 3 ── fence の中なので塊ではない
+    '```', // 4
+    ':::section', // 5
+    ':::details', // 6
+    '深い', // 7
+    ':::', // 8
+    ':::', // 9
+    ':::', // 10
+    '間', // 11
+    ':::note', // 12
+    '閉じない', // 13
+  ].join('\n');
+
+  it('🔴 1 つの口に順不同で何度聞いても、毎回新しく聞いたときと同じ答え(控えが答えを混ぜない)', () => {
+    const lines = CORPUS.split('\n').length;
+    const fresh = Array.from({ length: lines }, (_, i) => blockSpanLookup(CORPUS)(i));
+    // 前提: 次元が揃っている(入れ子 3 段・fence の中の偽物・閉じない塊)
+    expect(fresh.filter((x) => x !== null).length, '塊の数').toBe(4);
+    expect(fresh[3], 'fence の中の ::: を塊と読んだ').toBeNull();
+    expect(fresh[12]?.open, '閉じない塊が open になっていない').toBe(true);
+    const shared = blockSpanLookup(CORPUS);
+    const order = [7, 6, 0, 12, 5, 3, 1, 6, 13, 10, 5, 1, 8, 2, 12, 9, 4, 11, 99, -1];
+    for (const i of order) {
+      expect(shared(i), `行 ${String(i)}`).toEqual(i >= 0 && i < lines ? fresh[i] : null);
+    }
+    expect(fresh[6]).toEqual({ start: 6, end: 8, open: false });
+    expect(blockSpanAt(CORPUS, 5)).toEqual({ start: 5, end: 9, open: false });
   });
 });

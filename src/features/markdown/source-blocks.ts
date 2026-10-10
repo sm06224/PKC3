@@ -391,24 +391,48 @@ export interface BlockSpan {
  * @returns その行が `:::` の開きでなければ `null`
  */
 export function blockSpanAt(body: string, openLine: number): BlockSpan | null {
-  const lines = splitLines(body);
-  if (openLine < 0 || openLine >= lines.length) return null;
-  let from = 0;
-  let to = lines.length - 1;
-  for (;;) {
-    const spans = scanContainers(lines.slice(from, to + 1).join('\n'));
-    const hit = containerAtLine(spans, openLine - from);
-    if (hit === null || hit.kind === 'fence') return null;
-    if (hit.start === openLine - from) {
-      return { start: openLine, end: from + hit.end, open: hit.open };
+  return blockSpanLookup(body)(openLine);
+}
+
+/**
+ * 🔴 **同じ本文に何度も聞くとき用の `blockSpanAt`**(#1467)── 行の分割と走査の結果を控え、2 回目からは読み直さない。
+ * ⚠ 規則は `blockSpanAt` と同じ 1 本(`blockSpanAt` はこれを 1 回だけ使う形)。
+ * 🔑 読む面で、カーソルが塊の上を通るたびに聞く口(`block-grip.ts`)が使う ── 20,000 行のノートで、
+ *   聞くたびに本文を割り直していると、スクロールの間ずっと割り続ける。
+ * ⚠ 控えは返した関数が持つ ── 本文が変わったら作り直す(呼び手が描き直しごとに作る)。
+ */
+export function blockSpanLookup(body: string): (openLine: number) => BlockSpan | null {
+  let lines: string[] | null = null;
+  const scans = new Map<string, ContainerSpan[]>();
+  const scan = (from: number, to: number): ContainerSpan[] => {
+    const key = `${String(from)}:${String(to)}`;
+    let spans = scans.get(key);
+    if (spans === undefined) {
+      spans = scanContainers(lines!.slice(from, to + 1).join('\n'));
+      scans.set(key, spans);
     }
-    // 入れ子の内側に居る ── 外側の中身(開き行の次 〜 閉じの手前)へ降りる
-    const innerFrom = from + hit.start + 1;
-    const innerTo = hit.open ? from + hit.end : from + hit.end - 1;
-    if (innerFrom > openLine || innerTo < openLine) return null;
-    from = innerFrom;
-    to = innerTo;
-  }
+    return spans;
+  };
+  return (openLine) => {
+    lines ??= splitLines(body);
+    if (openLine < 0 || openLine >= lines.length) return null;
+    let from = 0;
+    let to = lines.length - 1;
+    for (;;) {
+      const spans = scan(from, to);
+      const hit = containerAtLine(spans, openLine - from);
+      if (hit === null || hit.kind === 'fence') return null;
+      if (hit.start === openLine - from) {
+        return { start: openLine, end: from + hit.end, open: hit.open };
+      }
+      // 入れ子の内側に居る ── 外側の中身(開き行の次 〜 閉じの手前)へ降りる
+      const innerFrom = from + hit.start + 1;
+      const innerTo = hit.open ? from + hit.end : from + hit.end - 1;
+      if (innerFrom > openLine || innerTo < openLine) return null;
+      from = innerFrom;
+      to = innerTo;
+    }
+  };
 }
 
 /** 行範囲(両端含む)を原文のまま切り出す。⚠ 末尾の改行は付けない(行の並びそのもの)。 */

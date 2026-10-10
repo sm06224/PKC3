@@ -329,12 +329,24 @@ export function openContextMenu(
   return { close, el };
 }
 
+/**
+ * 出ているメニュー。
+ * 🔴 **root の直下だけを見る**(#1467)── メニューは `root.append(el)` で置く(`openContextMenu`)。
+ * ⚠ `root.querySelector` だと、押すたび・スクロールのたびに文書全体(長いノートで約 3 万要素)を探していた。
+ */
+function menuOf(root: HTMLElement): Element | null {
+  for (const child of root.children) {
+    if (child.getAttribute('data-pkc-region') === REGION) return child;
+  }
+  return null;
+}
+
 /** 出ているメニューを畳む(出ていなければ何もしない)。 */
 export function closeContextMenu(root: HTMLElement): void {
-  root.querySelector(`[data-pkc-region="${REGION}"]`)?.remove();
+  menuOf(root)?.remove();
 }
 
 /** 出ているか。⚠ test と binder が同じ問いに 2 つの答えを持たないため。 */
 export function contextMenuOpen(root: HTMLElement): boolean {
-  return root.querySelector(`[data-pkc-region="${REGION}"]`) !== null;
+  return menuOf(root) !== null;
 }

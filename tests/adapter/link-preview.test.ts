@@ -583,3 +583,28 @@ describe('link-preview', () => {
     });
   });
 });
+
+describe('スクロールで閉じるとき、文書全体を探さない(#1467)', () => {
+  it('🔴 カードは root の直下だけを見る ── スクロールのたびに root.querySelector を呼ばない', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const card = document.createElement('div');
+    card.setAttribute('data-pkc-region', LINK_PREVIEW_REGION);
+    root.append(card);
+    const dispatcher = { getState: () => ({ cid: 'c1' }) } as unknown as Parameters<typeof setupLinkPreview>[1];
+    const teardown = setupLinkPreview(root, dispatcher);
+    const qs = vi.spyOn(root, 'querySelector');
+    expect(linkPreviewOpen(root)).toBe(true);
+    root.dispatchEvent(new Event('scroll'));
+    expect(linkPreviewOpen(root), 'スクロールで閉じていない').toBe(false);
+    expect(qs, '文書全体を探した(長いノートで重い)').not.toHaveBeenCalled();
+    // 閉じる口も同じ
+    root.append(card);
+    closeLinkPreview(root);
+    expect(card.isConnected).toBe(false);
+    expect(qs).not.toHaveBeenCalled();
+    qs.mockRestore();
+    teardown();
+    root.remove();
+  });
+});
