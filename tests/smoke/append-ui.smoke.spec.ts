@@ -109,6 +109,33 @@ test('🔴 入り先のリストは、打つ欄の上に出る (#496)', async ({
     `リストが打つ欄の上に無い(list.bottom=${sel.y + sel.height} / input.top=${input.y})`,
   ).toBeLessThanOrEqual(input.y + 1);
 
+  /**
+   * 🔴 **手で高さを決めていなければ、打った行数に合わせて伸びる**(#1443)。
+   * 上限で止まり、押す物(追記ボタン)の左右の位置と、入り先のリストの位置は動かない。
+   */
+  const field = page.locator('[data-pkc-field="append-input"]');
+  const send = page.locator('[data-pkc-action="append-entry"]');
+  const sendBefore = (await send.boundingBox())!;
+  await field.fill('一行');
+  const h1 = (await field.boundingBox())!.height;
+  await field.fill(Array.from({ length: 6 }, (_, i) => `行${i}`).join('\n'));
+  const h6 = (await field.boundingBox())!.height;
+  expect(h6, `6 行打っても伸びない(${h1} → ${h6})`).toBeGreaterThan(h1 + 40);
+  await field.fill(Array.from({ length: 80 }, (_, i) => `行${i}`).join('\n'));
+  const h80 = (await field.boundingBox())!.height;
+  expect(h80, `上限で止まらない(${h6} → ${h80})`).toBeLessThan(h6 * 4);
+  const selAfter = (await page.locator('[data-pkc-field="append-target"]').boundingBox())!;
+  expect(selAfter.y + selAfter.height, '伸びた欄が入り先のリストの上へ回り込んだ').toBeLessThanOrEqual(
+    (await field.boundingBox())!.y + 1,
+  );
+  expect(
+    Math.abs((await send.boundingBox())!.x - sendBefore.x),
+    '伸びたら追記ボタンが左右に動いた',
+  ).toBeLessThan(2);
+  await field.fill('');
+  const hEnd = (await field.boundingBox())!.height;
+  expect(Math.abs(hEnd - h1), `空にしても元の高さへ戻らない(${h1} → ${hEnd})`).toBeLessThan(2);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

@@ -361,6 +361,12 @@ test('🔴 追記欄の帯は、ノートを開いたときだけ出る (#497)',
   const after = (await input.boundingBox())?.height ?? 0;
   expect(after, `上へ引いたのに高くならない(${before} → ${after})`).toBeGreaterThan(before + 50);
 
+  // 🔴 手で決めた高さは、打っても自動の高さ合わせ(#1443)が変えない
+  await input.fill(Array.from({ length: 30 }, (_, i) => `行${i}`).join('\n'));
+  const typed = (await input.boundingBox())?.height ?? 0;
+  expect(Math.abs(typed - after), `手で決めた高さが打鍵で動いた(${after} → ${typed})`).toBeLessThan(2);
+  await input.fill('');
+
   // 🔴 押すと消え、帯は残る(「閲覧メインで使う時は消したい」)
   await page.locator(grip('append')).click();
   await expect(page.locator('[data-pkc-region="append"]'), '押しても消えない').toBeHidden();
