@@ -800,3 +800,107 @@ describe('幅を掴んで動かしている間の間引き(P8 段㉘)', () => {
     b.remove();
   });
 });
+
+describe('差し替えを 1 コマにまとめる(#1467)', () => {
+  /** 次のコマ(requestAnimationFrame)を手で進める。 */
+  let frames: FrameRequestCallback[] = [];
+  const runFrame = (): void => {
+    const cbs = frames;
+    frames = [];
+    for (const cb of cbs) cb(0);
+  };
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      frames = [];
+    });
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:x');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  }
+
+  function mount(n: number): { root: HTMLElement; hosts: HTMLElement[] } {
+    const root = document.createElement('div');
+    for (let i = 0; i < n; i++) root.append(block(`graph TD\n A${i}-->B`));
+    document.body.append(root);
+    const hosts = [...root.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]')];
+    for (const h of hosts) setPaneWidth(h, 700);
+    return { root, hosts };
+  }
+  const images = (root: ParentNode): number => root.querySelectorAll('img').length;
+
+  it('🔴 同じ間に焼けた図は、次のコマで**まとめて**差し替える(1 枚ずつ配置をやり直させない)', async () => {
+    const { root, hosts } = mount(3);
+    const scope = hydrateMermaid([...root.children]);
+    fire!(hosts);
+    await settle();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(3);
+    expect(images(root), 'コマを待たずに 1 枚ずつ差し替えている').toBe(0);
+    expect(frames, '差し替えごとにコマを予約している').toHaveLength(1);
+    runFrame();
+    expect(images(root), 'まとめた差し替えが載っていない').toBe(3);
+    scope.dispose();
+    root.remove();
+  });
+
+  it('🔴 1 枚の差し替えが失敗しても、同じコマの残りは載る(失敗はその図にだけ出る)', async () => {
+    const { root, hosts } = mount(2);
+    vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    const scope = hydrateMermaid([...root.children]);
+    fire!(hosts);
+    await settle();
+    runFrame();
+    await settle();
+    expect(hosts[0]!.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(hosts[1]!.getAttribute('data-pkc-mermaid-state'), '失敗に巻き込まれて残りが載らない').toBe('ready');
+    scope.dispose();
+    root.remove();
+  });
+
+  it('⚠ 待っている間に畳んだら載せない(畳んだ面に描かない)', async () => {
+    const { root, hosts } = mount(1);
+    const scope = hydrateMermaid([...root.children]);
+    fire!(hosts);
+    await settle();
+    scope.dispose();
+    runFrame();
+    expect(images(root), '畳んだ後に差し替えた').toBe(0);
+    root.remove();
+  });
+
+  it('🔑 先読みは空き時間 1 回で 8 枚まで始める(1 枚ずつだと、まとめる相手がいない)', async () => {
+    const idles: IdleRequestCallback[] = [];
+    vi.stubGlobal('requestIdleCallback', (cb: IdleRequestCallback) => {
+      idles.push(cb);
+      return idles.length;
+    });
+    const { root } = mount(10);
+    const scope = hydrateMermaid([...root.children]);
+    expect(idles).toHaveLength(1);
+    idles.shift()!({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+    await settle();
+    expect(vi.mocked(renderToPng), '1 回の空き時間に始めた枚数').toHaveBeenCalledTimes(8);
+    runFrame();
+    await settle();
+    expect(idles, '残りのために空き時間を取り直していない').toHaveLength(1);
+    idles.shift()!({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+    await settle();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(10);
+    scope.dispose();
+    root.remove();
+  });
+});

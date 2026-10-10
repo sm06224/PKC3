@@ -26,6 +26,13 @@ interface Pending {
 }
 
 /**
+ * 先読みで、空き時間 1 回に始める図の枚数(#1467)。
+ * ⚠ 1 枚ずつだと、差し替えのたびに文書全体の配置と描画が走り(20,000 行で 1 回 約 180ms)、
+ *   400 図で 100 秒ほど画面が重い。差し替えは 1 コマにまとめるので、まとめて始めるほど回数が減る。
+ */
+const PREFETCH_BATCH = 8;
+
+/**
  * 配色が変わったら教える口(P8 段⑬)。
  *
  * 🔴 **観測器は全体で 1 つ**。`hydrateMermaid` は差分反映のたびに呼ばれる
@@ -214,6 +221,43 @@ export function hydrateDiagrams(
    */
   let gen = 0;
 
+  /**
+   * 🔴 **差し替えは溜めて、次のコマで 1 回にまとめて当てる**(#1467)。
+   * ⚠ 図 1 枚ごとに `<img>` を差し込むと、そのたびに**文書全体の配置**がやり直しになる ──
+   *   20,000 行・図 400 枚のノートで 1 回約 180 ms、開いてから約 100 秒、スクロールが最大 0.4 秒引っかかっていた
+   *   (trace。JS は 1 枚 2 ms 未満で、重いのは配置と描画)。まとめれば、配置は「まとめた回数」で済む。
+   * ⚠ 溜めている間に条件が変わりうるので、載せてよいかの判定は**当てる瞬間**に行う(下の `commit` の中)。
+   */
+  const pendingCommits: (() => void)[] = [];
+  let commitFrame = 0;
+  const flushCommits = (): void => {
+    commitFrame = 0;
+    const jobs = pendingCommits.splice(0);
+    for (const job of jobs) job();
+  };
+  const raf: (cb: () => void) => number =
+    typeof requestAnimationFrame === 'function'
+      ? (cb) => requestAnimationFrame(cb)
+      : (cb) => setTimeout(cb, 0) as unknown as number;
+  const caf: (id: number) => void =
+    typeof cancelAnimationFrame === 'function' ? (id) => cancelAnimationFrame(id) : (id) => clearTimeout(id);
+  /**
+   * 差し替えを溜める。当て終わったら解決する(呼び手が「載った後」を待てるように)。
+   * ⚠ 1 枚の失敗は**その呼び手へ返す**(投げたまま抜けると、同じコマに溜めた残りが載らない)。
+   */
+  const commit = (job: () => void): Promise<void> =>
+    new Promise((resolve, reject) => {
+      pendingCommits.push(() => {
+        try {
+          job();
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+      if (commitFrame === 0) commitFrame = raf(flushCommits);
+    });
+
   const paint = async (p: Pending, force = false): Promise<void> => {
     if (disposed) return;
     // ⚠ **画面から外れた器には描かない**(差し替え済みの器を先読み列が
@@ -238,57 +282,59 @@ export function hydrateDiagrams(
       inFlightKey.set(p.host, currentKey);
       const raster = await kind.render(key);
       if (disposed) return;
-      // ⚠ 焼いている間に配色が変わった / 器が外れたなら**載せない**
-      //    (載せると古い配色の絵が最後に勝つ)
-      if (at !== gen || !p.host.isConnected) return;
-      const url = URL.createObjectURL(raster.png);
-      const img = document.createElement('img');
-      img.setAttribute('data-pkc-field', kind.imgField);
-      // ⚠ **絵しか無い面で唯一の情報**。種類ごとに中身を書く(#188 の chart は数値の要約)
-      img.alt = kind.alt(p.source);
-      img.decoding = 'async';
-      img.src = url;
-      // ⚠ 焼いた実寸ではなく**CSS 幅**で出す(dpr 倍で焼いているので縮む = 鮮明)。
-      // 🔴 器いっぱいに引き伸ばさない(P8 段⑱)── 2 節点の図が 875×1286px を
-      //    占めていた。`cssWidth` は SVG の自然幅で頭打ちにした値
-      img.style.width = `${raster.cssWidth}px`;
-      img.style.maxWidth = '100%';
-      img.style.height = 'auto';
-      /**
-       * 🔴 **押すと別窓で実寸で見られる**(#527 案 A。user 指示 2026-08-28
-       * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
-       *
-       * ⚠ **ボタンを置かない** ── 図は本文に何枚でも入るので、置くと
-       *   **図の数だけ常設の物が増える**(#501「増えすぎたボタンを整理する」と逆向き)。
-       * 🔑 絵そのものを押し所にする ── 画像を押すと大きくなるのは広く通じた動きで、
-       *   カーソル(`zoom-in`)と吹き出しで**押せることをその場で示す**。
-       * ⚠ **段組みのときこそ効く** ── 段に収めるために縮めてあるので
-       *   (`app.css` の `--pkc-col-h` の頭打ち)、実寸で見る道が要る。
-       *
-       * 🔴 **編集の面(1 面)では付けない**(2026-08-28、実ブラウザで測って判明)。
-       *   ⚠ あちらは**図を押すとその原文が開く**(`RowSwap`)のが動線である。
-       *   付けたまま測ったら、**窓が開いて行は開かなかった**
-       *   ── つまり**図の原文を直す道を丸ごと奪っていた**。
-       *   🔑 判定は `markViewBig` **1 か所**が持つ(2026-08-28 に本文の画像へ
-       *   広げたとき、ここに直書きすると同じ判定が 2 か所になった ── §7)。
-       */
-      p.host.textContent = '';
-      p.host.append(img);
-      // ⚠ **繋いでから**印を付ける(`markViewBig` は面を `closest` で読むので、
-      //    繋ぐ前だと「どの面か」が分からない)
-      markViewBig(img);
-      // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
-      if (kind.savable) p.host.append(saveButton());
-      p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');
-      // ⚠ **差し替えてから**前の URL を捨てる(生成物の寿命終端 ── 不可侵指示)
-      const prev = urlOf.get(p.host);
-      urlOf.set(p.host, url);
-      if (prev !== undefined) URL.revokeObjectURL(prev);
-      // 🔑 **どの条件で焼いたか**を控える(段㉘)── 焼き直すかどうかは
-      //    これと「いまの条件」を比べて決める。⚠ 控えるのは `cacheKey` そのもの
-      //    にする ── 別に条件を書き起こすと、鍵に項目が増えたときにここだけ
-      //    古くなる(段⑬ の「鍵はあるが焼き直す者がいない」の再演になる)
-      bakedKey.set(p.host, currentKey);
+      await commit(() => {
+        // ⚠ 焼いている間(と、溜めている間)に配色が変わった / 器が外れたなら**載せない**
+        //    (載せると古い配色の絵が最後に勝つ)
+        if (disposed || at !== gen || !p.host.isConnected) return;
+        const url = URL.createObjectURL(raster.png);
+        const img = document.createElement('img');
+        img.setAttribute('data-pkc-field', kind.imgField);
+        // ⚠ **絵しか無い面で唯一の情報**。種類ごとに中身を書く(#188 の chart は数値の要約)
+        img.alt = kind.alt(p.source);
+        img.decoding = 'async';
+        img.src = url;
+        // ⚠ 焼いた実寸ではなく**CSS 幅**で出す(dpr 倍で焼いているので縮む = 鮮明)。
+        // 🔴 器いっぱいに引き伸ばさない(P8 段⑱)── 2 節点の図が 875×1286px を
+        //    占めていた。`cssWidth` は SVG の自然幅で頭打ちにした値
+        img.style.width = `${raster.cssWidth}px`;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        /**
+         * 🔴 **押すと別窓で実寸で見られる**(#527 案 A。user 指示 2026-08-28
+         * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
+         *
+         * ⚠ **ボタンを置かない** ── 図は本文に何枚でも入るので、置くと
+         *   **図の数だけ常設の物が増える**(#501「増えすぎたボタンを整理する」と逆向き)。
+         * 🔑 絵そのものを押し所にする ── 画像を押すと大きくなるのは広く通じた動きで、
+         *   カーソル(`zoom-in`)と吹き出しで**押せることをその場で示す**。
+         * ⚠ **段組みのときこそ効く** ── 段に収めるために縮めてあるので
+         *   (`app.css` の `--pkc-col-h` の頭打ち)、実寸で見る道が要る。
+         *
+         * 🔴 **編集の面(1 面)では付けない**(2026-08-28、実ブラウザで測って判明)。
+         *   ⚠ あちらは**図を押すとその原文が開く**(`RowSwap`)のが動線である。
+         *   付けたまま測ったら、**窓が開いて行は開かなかった**
+         *   ── つまり**図の原文を直す道を丸ごと奪っていた**。
+         *   🔑 判定は `markViewBig` **1 か所**が持つ(2026-08-28 に本文の画像へ
+         *   広げたとき、ここに直書きすると同じ判定が 2 か所になった ── §7)。
+         */
+        p.host.textContent = '';
+        p.host.append(img);
+        // ⚠ **繋いでから**印を付ける(`markViewBig` は面を `closest` で読むので、
+        //    繋ぐ前だと「どの面か」が分からない)
+        markViewBig(img);
+        // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
+        if (kind.savable) p.host.append(saveButton());
+        p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');
+        // ⚠ **差し替えてから**前の URL を捨てる(生成物の寿命終端 ── 不可侵指示)
+        const prev = urlOf.get(p.host);
+        urlOf.set(p.host, url);
+        if (prev !== undefined) URL.revokeObjectURL(prev);
+        // 🔑 **どの条件で焼いたか**を控える(段㉘)── 焼き直すかどうかは
+        //    これと「いまの条件」を比べて決める。⚠ 控えるのは `cacheKey` そのもの
+        //    にする ── 別に条件を書き起こすと、鍵に項目が増えたときにここだけ
+        //    古くなる(段⑬ の「鍵はあるが焼き直す者がいない」の再演になる)
+        bakedKey.set(p.host, currentKey);
+      });
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
@@ -427,17 +473,21 @@ export function hydrateDiagrams(
 
   /**
    * 🔑 **先読み**(user 指示「スクロール追従が悪いなら…あらかじめ」)。
-   * 空き時間に 1 枚ずつ。⚠ 1 枚ごとに空き時間を取り直す ── まとめて回すと
+   * 空き時間に PREFETCH_BATCH 枚ずつ。⚠ 1 束ごとに空き時間を取り直す ── 束を続けて回すと
    * そのフレームで打鍵が詰まる。
+   * ⚠ 2026-10 までは 1 枚ずつだった ── 差し替えのたびに長いノートの配置が丸ごとやり直しになり、
+   *   その回数のほうが重かった(#1467。焼く処理は `kind.render` の側で 1 本ずつ直列)。
    */
   const ric: typeof requestIdleCallback | undefined =
     typeof requestIdleCallback === 'function' ? requestIdleCallback : undefined;
   const step = (): void => {
     idle = 0;
     if (disposed) return;
-    const next = queue.shift();
-    if (!next) return;
-    void paint(next).then(() => {
+    // 🔑 空き時間 1 回で **PREFETCH_BATCH 枚**を始める ── 差し替えは上の `commit` が 1 コマにまとめるので、
+    //    1 枚ずつ始めると、まとめる相手がいない(#1467)。⚠ 焼く処理そのものは `kind.render` の側で直列
+    const batch = queue.splice(0, PREFETCH_BATCH);
+    if (batch.length === 0) return;
+    void Promise.all(batch.map((p) => paint(p))).then(() => {
       if (!disposed && queue.length > 0) idle = ric ? ric(step, { timeout: 2000 }) : 0;
     });
   };
@@ -446,6 +496,9 @@ export function hydrateDiagrams(
   return {
     dispose: () => {
       disposed = true;
+      if (commitFrame !== 0) caf(commitFrame);
+      commitFrame = 0;
+      flushCommits(); // ⚠ 待っている呼び手を解決させる(中身は disposed を見て何もしない)
       io.disconnect();
       unwatchTheme();
       // ⚠ 段㉘ で足した引き金も**全部畳む**(観測器と待ち時間を残さない)
