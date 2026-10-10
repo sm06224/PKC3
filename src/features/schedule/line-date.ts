@@ -268,9 +268,14 @@ export function readLineDate(line: string): LineDate | null {
       timeEnd,
       repeat: tail === null ? null : tail.unit,
       substitutes: sub === null ? null : sub.date,
-      // 読めた時刻の直後に、幅として読まれなかった終わり(逆順・夜をまたぐ)が付いているときの字数
+      // 読めた時刻の直後に、幅として読まれなかった終わり(逆順・夜をまたぐ)が付いているときの字数。
+      // ⚠ 書きかけ(`20:00..` の終わりが空)も数える ── 縁を引いて終わりを書くと `20:00..21:00..` が残るため。
+      //   ただし空の終わりは `..` / `〜` / `～` のときだけ(`14:00-会議` の `-` は区切りとは限らないので触らない)
       strayEnd:
-        time !== null && timeEnd === null && rawTimeEnd !== undefined && rawTimeEnd !== ''
+        time !== null &&
+        timeEnd === null &&
+        rawTimeEnd !== undefined &&
+        (rawTimeEnd !== '' || line[afterTime] !== '-')
           ? timeSepLen + rawTimeEnd.length
           : 0,
       start,
