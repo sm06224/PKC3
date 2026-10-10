@@ -6297,7 +6297,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: var(--s2);
   padding: 2px 0;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--btn-fs-sm);
   color: var(--muted);
   background: none;
   border: 0;
