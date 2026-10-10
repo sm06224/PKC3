@@ -95,9 +95,9 @@ describe('🔴 枠の色を配色に合わせる(#718)', () => {
     document.head.append(style);
   });
 
-  it('🔴 9 配色すべてで、枠の色が tokens.css の地の色と一致する', () => {
+  it('🔴 10 配色すべてで、枠の色が tokens.css の地の色と一致する', () => {
     const m = meta();
-    // 空振り防止 ── 9 件そろって空文字だと「全部一致」で通ってしまう
+    // 空振り防止 ── 10 件そろって空文字だと「全部一致」で通ってしまう
     const seen = new Set<string>();
     for (const t of THEMES) {
       const want = declaredBg(t.id);
@@ -106,7 +106,7 @@ describe('🔴 枠の色を配色に合わせる(#718)', () => {
       expect(m.content, `${t.id} の枠の色が地の色と違う`).toBe(want);
       seen.add(m.content);
     }
-    // ⚠ 固定値へ戻す変異(全部同じ色)を殺す ── 9 配色の地は全部違う
+    // ⚠ 固定値へ戻す変異(全部同じ色)を殺す ── 10 配色の地は全部違う
     expect(seen.size, '配色を変えても枠の色が変わっていない').toBe(THEMES.length);
   });
 

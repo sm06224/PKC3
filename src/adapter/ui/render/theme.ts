@@ -31,6 +31,7 @@ export const THEMES = [
   { id: 'dracula', label: 'Dracula', dark: true },
   { id: 'nord', label: 'Nord', dark: true },
   { id: 'terminal', label: 'ターミナル(端末風)', dark: true },
+  { id: 'retro', label: 'レトロ(茶とオレンジ)', dark: true },
 ] as const;
 
 export type Theme = (typeof THEMES)[number]['id'];
