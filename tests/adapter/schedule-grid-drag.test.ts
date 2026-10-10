@@ -87,6 +87,12 @@ function setup(body: string, mode: 'day' | 'week') {
       scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
     });
   scan();
+  /** 本文が変わった後の走査(札が目盛りと終日の間を行き来する場面)。 */
+  const rescan = (b: string): void =>
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: taskCardsOf('e1', b), totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
   const dispatched: UserAction[] = [];
   const orig = d.dispatch.bind(d);
   d.dispatch = (a: UserAction) => {
@@ -105,7 +111,7 @@ function setup(body: string, mode: 'day' | 'week') {
   const laneSel = `[data-pkc-field="${mode === 'day' ? 'schedule-day-lane' : 'schedule-weekview-lane'}"]`;
   const lanes = (): HTMLElement[] => qa(laneSel);
   const laneCards = (): HTMLElement[] => qa(`${laneSel} > [data-pkc-entry]`);
-  return { root, d, store, dispatched, detach, qa, lanes, laneCards, scan };
+  return { root, d, store, dispatched, detach, qa, lanes, laneCards, scan, rescan };
 }
 
 type Kind = 'mouse' | 'touch' | 'pen';
@@ -116,6 +122,8 @@ function pointer(el: Element, type: string, kind: Kind, y: number, x = 0, pointe
       cancelable: true,
       pointerType: kind,
       button: 0,
+      // 🔑 マウスのボタンは、離す前の間は押されている(離した合図が届かなかったかは `buttons` で見分ける)
+      buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
       pointerId,
       clientX: x,
       clientY: y,
@@ -593,5 +601,210 @@ describe('書き込みの口(`SET_TASK_DATE` / `MOVE_REPEAT_OCCURRENCE`)', () =>
     const plain = reduce(s, { type: 'MOVE_REPEAT_OCCURRENCE', lid: 'e1', line: 0, from: '2026-08-24', to: '2026-08-25' });
     const rw2 = plain.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(rw2 && 'rewrite' in rw2 ? 'time' in rw2.rewrite : null, '渡していないのに time が載った').toBe(false);
+  });
+});
+
+describe('レビューの直し(#855 段 B-1)', () => {
+  const BODY = '- [ ] 会議 @2026-08-23 14:00..15:00\n';
+  const ghostText = (qa: (s: string) => HTMLElement[]): string | undefined =>
+    qa('[data-pkc-field="schedule-drag-ghost"]')[0]?.textContent ?? undefined;
+
+  it('🔴 掴んでいる間の Esc は、開いているノートを閉じない(対照群: 掴んでいなければ閉じる)', () => {
+    const s = setup(BODY, 'day');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    // 対照群 ── 掴んでいない Esc は、binder が開いているノートを閉じる(これが成り立たないと下は空振り)
+    s.dispatched.length = 0;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(s.dispatched.some((a) => a.type === 'DESELECT_ENTRY'), '前提: 掴んでいない Esc でノートが閉じる').toBe(true);
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    s.dispatched.length = 0;
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 700);
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    pointer(s.lanes()[0]!, 'pointerup', 'mouse', 700);
+    expect(s.dispatched.map((a) => a.type), '掴んでいる間の Esc でノートが閉じた / 書いた').toEqual([]);
+    s.detach();
+  });
+
+  it('🔴 離した合図が届かなかった(ボタンが離れているのに move が来た)ら、書かずに畳む', () => {
+    const s = setup(BODY, 'day');
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 700);
+    expect(s.qa('[data-pkc-field="schedule-drag-ghost"]')).toHaveLength(1);
+    s.lanes()[0]!.dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, cancelable: true, pointerType: 'mouse', pointerId: 1, buttons: 0, clientY: 800 }),
+    );
+    expect(s.qa('[data-pkc-field="schedule-drag-ghost"]'), 'ボタンが離れているのに影が残った').toHaveLength(0);
+    // 後で別の所を動かしても離しても、書かれない
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 900);
+    pointer(s.lanes()[0]!, 'pointerup', 'mouse', 900);
+    expect(s.dispatched.filter((a) => a.type === 'SET_TASK_DATE')).toEqual([]);
+    s.detach();
+  });
+
+  it('🔴 窓が離れた(blur)ら、書かずに畳む', () => {
+    const s = setup(BODY, 'day');
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 700);
+    window.dispatchEvent(new Event('blur'));
+    expect(s.qa('[data-pkc-field="schedule-drag-ghost"]')).toHaveLength(0);
+    pointer(s.lanes()[0]!, 'pointerup', 'mouse', 700);
+    expect(s.dispatched.filter((a) => a.type === 'SET_TASK_DATE')).toEqual([]);
+    s.detach();
+  });
+
+  it('🔴 スクロールしても、影は指の下の時刻に付いてくる(列の上端から測る)', () => {
+    const s = setup(BODY, 'day');
+    const scroller = s.root.querySelector<HTMLElement>('[data-pkc-field="schedule-day-scroll"]')!;
+    let top = 0;
+    s.lanes()[0]!.getBoundingClientRect = () =>
+      ({ top, left: 0, bottom: top + LANE_H, right: 100, width: 100, height: LANE_H, x: 0, y: top }) as DOMRect;
+    void scroller;
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 600);
+    expect(ghostText(s.qa)).toBe('15:00〜16:00');
+    // 目盛りが 100px 送られた(列の上端が -100 へ)── 指は動かしていない
+    top = -100;
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 600);
+    expect(ghostText(s.qa), 'スクロールした分、指の下の時刻が変わっていない').toBe('17:30〜18:30');
+    s.detach();
+  });
+
+  it('🔴 札の途中を掴んでも、札の上端が指に付いてくる(掴んだ位置の分を引く)', () => {
+    const s = setup(BODY, 'day');
+    // 札の 15 分下(=札の途中)を掴んで 1 時間下へ ── 始まりは +1 時間
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560 + minPx(15));
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 560 + minPx(15) + minPx(60));
+    expect(ghostText(s.qa)).toBe('15:00〜16:00');
+    s.detach();
+  });
+
+  it('🔴 縁に近づけると目盛りが自動で送られ、影がそれに付いてくる', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    const s = setup(BODY, 'day');
+    const scroller = s.root.querySelector<HTMLElement>('[data-pkc-field="schedule-day-scroll"]')!;
+    scroller.getBoundingClientRect = () =>
+      ({ top: 0, left: 0, bottom: 300, right: 100, width: 100, height: 300, x: 0, y: 0 }) as DOMRect;
+    scroller.scrollTop = 0;
+    s.lanes()[0]!.getBoundingClientRect = () =>
+      ({ top: -scroller.scrollTop, left: 0, bottom: LANE_H, right: 100, width: 100, height: LANE_H, x: 0, y: 0 }) as DOMRect;
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    // 縁(300 - 32 = 268 より下)に指を置く
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 290);
+    const before = ghostText(s.qa);
+    vi.advanceTimersByTime(200);
+    expect(scroller.scrollTop, '縁に近いのに目盛りが送られない').toBeGreaterThan(0);
+    expect(ghostText(s.qa), '送ったのに影が付いてこない').not.toBe(before);
+    // 離すと止まる
+    pointer(s.lanes()[0]!, 'pointerup', 'mouse', 290);
+    const stopped = scroller.scrollTop;
+    vi.advanceTimersByTime(200);
+    expect(scroller.scrollTop, '離したのに送り続けている').toBe(stopped);
+    s.detach();
+  });
+
+  it('🔴 真ん中では自動で送らない(対照群)', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    const s = setup(BODY, 'day');
+    const scroller = s.root.querySelector<HTMLElement>('[data-pkc-field="schedule-day-scroll"]')!;
+    scroller.getBoundingClientRect = () =>
+      ({ top: 0, left: 0, bottom: 300, right: 100, width: 100, height: 300, x: 0, y: 0 }) as DOMRect;
+    scroller.scrollTop = 0;
+    pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+    pointer(s.lanes()[0]!, 'pointermove', 'mouse', 150);
+    vi.advanceTimersByTime(200);
+    expect(scroller.scrollTop).toBe(0);
+    pointer(s.lanes()[0]!, 'pointerup', 'mouse', 150);
+    s.detach();
+  });
+
+  describe('目盛りが使わない終わりは、動かしても上書きしない', () => {
+    it('🔴 幅 0(14:00..14:00)── 動かしても幅 0 のまま(30 分を書き込まない)', async () => {
+      const s = setup('- [ ] 会議 @2026-08-23 14:00..14:00\n', 'day');
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, 560, minPx(60));
+      await tick(20);
+      expect(s.store['e1']).toBe('- [ ] 会議 @2026-08-23 15:00..15:00\n');
+      s.detach();
+    });
+
+    it('🔴 夜をまたぐ終わり(22:00..02:00)── 動かしても書いた終わりの字は残る', async () => {
+      const s = setup('- [ ] 夜勤 @2026-08-23 20:00..02:00\n', 'day');
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(20 * 60), minPx(60));
+      await tick(20);
+      expect(s.store['e1']).toBe('- [ ] 夜勤 @2026-08-23 21:00..02:00\n');
+      s.detach();
+    });
+
+    it('縁を引けば、明示の操作として終わりが書かれる(幅 0 から)', async () => {
+      const s = setup('- [ ] 会議 @2026-08-23 14:00..14:00\n', 'day');
+      const h = s.laneCards()[0]!.querySelector<HTMLElement>('[data-pkc-field="task-resize"]')!;
+      pointer(h, 'pointerdown', 'mouse', minPx(14 * 60 + 30) - 2);
+      pointer(s.lanes()[0]!, 'pointermove', 'mouse', minPx(15 * 60));
+      pointer(s.lanes()[0]!, 'pointerup', 'mouse', minPx(15 * 60));
+      await tick(20);
+      expect(s.store['e1']).toBe('- [ ] 会議 @2026-08-23 14:00..15:00\n');
+      s.detach();
+    });
+  });
+
+  describe('刻みの内側の動きは書かない', () => {
+    it('🔴 14:07 の札を 4px(6 分)だけ動かして離しても、書かない(15 分刻みに寄せない)', () => {
+      const s = setup('- [ ] 会議 @2026-08-23 14:07..15:07\n', 'day');
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(14 * 60 + 7), 4);
+      expect(s.dispatched.filter((a) => a.type === 'SET_TASK_DATE')).toEqual([]);
+      s.detach();
+    });
+
+    it('対照群: 14:07 の札を 1 時間動かせば書く(刻みに寄る)', async () => {
+      const s = setup('- [ ] 会議 @2026-08-23 14:07..15:07\n', 'day');
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(14 * 60 + 7), minPx(60));
+      await tick(20);
+      expect(s.store['e1']).toBe('- [ ] 会議 @2026-08-23 15:00..16:00\n');
+      s.detach();
+    });
+
+    it('🔴 23:45 の点の札(目盛りでは 23:30 に寄せて描く)を動かさずに離しても、23:30 へ引かない', () => {
+      const s = setup('- [ ] 夜 @2026-08-23 23:45\n', 'day');
+      dragCard(s.laneCards()[0]!, s.lanes()[0]!, minPx(23 * 60 + 45), 4);
+      expect(s.dispatched.filter((a) => a.type === 'SET_TASK_DATE')).toEqual([]);
+      s.detach();
+    });
+  });
+
+  describe('取りこぼしやすい所(変異試験で生き延びた分)', () => {
+    it('🔴 目盛りから終日へ戻った札は、HTML5 の drag を取り戻す', () => {
+      const s = setup(BODY, 'day');
+      expect(s.laneCards()[0]!.draggable).toBe(false);
+      s.rescan('- [ ] 会議 @2026-08-23\n');
+      const allDay = s.qa('[data-pkc-field="schedule-day-allday"] [data-pkc-entry]');
+      expect(allDay, '前提: 札が終日の欄へ移った').toHaveLength(1);
+      expect(allDay[0]!.draggable, '終日へ戻ったのに、掴めない(draggable=false のまま)').toBe(true);
+      s.detach();
+    });
+
+    it('🔴 離した click が届かなかったら、後から来る無関係な click は飲まない', () => {
+      vi.useFakeTimers();
+      const s = setup(BODY, 'day');
+      const card = s.laneCards()[0]!;
+      dragCard(card, s.lanes()[0]!, 560, 80);
+      // click は届かないまま時間が進む
+      vi.advanceTimersByTime(5);
+      expect(click(card), '無関係な click を飲んだ(小窓の行やキーボードの Enter が効かなくなる)').toBe(true);
+      s.detach();
+    });
+
+    it('🔴 2 本目のポインタの動き・離しは、掴んでいる間は無視する', () => {
+      const s = setup(BODY, 'day');
+      pointer(s.laneCards()[0]!, 'pointerdown', 'mouse', 560);
+      pointer(s.lanes()[0]!, 'pointermove', 'mouse', 640);
+      expect(ghostText(s.qa)).toBe('16:00〜17:00');
+      pointer(s.lanes()[0]!, 'pointermove', 'mouse', 800, 0, 2);
+      expect(ghostText(s.qa), '別のポインタの動きで影が動いた').toBe('16:00〜17:00');
+      pointer(s.lanes()[0]!, 'pointerup', 'mouse', 800, 0, 2);
+      expect(s.dispatched.filter((a) => a.type === 'SET_TASK_DATE'), '別のポインタの離しで書かれた').toEqual([]);
+      expect(s.qa('[data-pkc-field="schedule-drag-ghost"]'), '別のポインタの離しで畳まれた').toHaveLength(1);
+      pointer(s.lanes()[0]!, 'pointerup', 'mouse', 640);
+      s.detach();
+    });
   });
 });

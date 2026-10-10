@@ -6416,8 +6416,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 6px;
+  /* 取っ手は札の下半分まで(短い札で、本文を掴む上半分を覆わない)。細かい指し示しは 8px・指は 14px */
+  height: min(8px, 50%);
   cursor: ns-resize;
+  touch-action: none;
 }
 [data-pkc-field='schedule-day-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize']:hover,
 [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize']:hover {
@@ -6425,7 +6427,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-day-lane'] > [data-pkc-entry][data-pkc-dragging],
 [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry][data-pkc-dragging] {
-  opacity: 0.45;
+  opacity: 0.45;  touch-action: none;
 }
 [data-pkc-field='schedule-drag-ghost'] {
   position: absolute;
@@ -7956,6 +7958,14 @@ mark[data-pkc-diff-char='del'] {
  * 付随情報は「書き出す / 履歴 / 削除」を持っている面なので、畳むと
  * **その 3 つに到達する導線が画面から消える**(キーボードでも届かない)。
  * 幅が足りないなら**場所を変える**のであって、操作を無くしてよい理由にはならない。 */
+/* 時間の目盛りの札の下の縁(#855 段 B-1)── 指で引くので太くする(細かい指し示しは 8px のまま) */
+@media (pointer: coarse) {
+  [data-pkc-field='schedule-day-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'],
+  [data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'] {
+    height: min(14px, 50%);
+  }
+}
+
 @media (max-width: 1100px) {
   [data-pkc-region='shell'] {
     /* ⚠ 一覧は**まだ列**なので、user が決めた幅はここでも効かせる(#497)。
