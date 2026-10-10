@@ -138,6 +138,8 @@ export class ScheduleRenderer {
   render(state: AppState): void {
     const at = this.now();
     const today = dateKey(at.getFullYear(), at.getMonth() + 1, at.getDate());
+    // 🔴 見せ方は**この面の器**で選ぶ(狭い面 = 左の列は `scheduleNarrowMode` / 広い面は `scheduleMode`)
+    const narrow = this.region.hasAttribute('data-pkc-browse-pane');
     const next = {
       scan: state.taskScan,
       failed: state.taskScanFailed,
@@ -153,7 +155,7 @@ export class ScheduleRenderer {
       showUndated: state.showUndatedTasks,
       calendarMonth: state.calendarMonth,
       // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
-      mode: state.scheduleMode,
+      mode: narrow ? state.scheduleNarrowMode : state.scheduleMode,
       shownDay: state.scheduleDay,
       selected: state.selectedLid,
       error: state.error,
@@ -215,11 +217,10 @@ export class ScheduleRenderer {
      * ⚠ 片付けたノートの札も入れる ── 同じ理由(隠れているだけで実体は在る)。
      */
     /**
-     * 🔴 **「週」は広い面だけ**(#855 段 A-2)。左の列(`data-pkc-browse-pane`)は 7 日を並べる幅が
-     *   無いので、state が「週」でも**一覧として描く**(「週」を押すと別のウィンドウで開く ── `binder.ts`)。
+     * 🔴 **「週」は広い面だけ**(#855 段 A-2)。左の列(`data-pkc-browse-pane`)は 7 日を並べる幅が無く、
+     *   `scheduleNarrowMode`(一覧 / 日だけ)を自分の見せ方に持つ ── 「週」を押すと別のウィンドウで開く(`binder.ts`)。
      */
-    const narrow = this.region.hasAttribute('data-pkc-browse-pane');
-    const mode = state.scheduleMode === 'week' && narrow ? 'list' : state.scheduleMode;
+    const mode = narrow ? state.scheduleNarrowMode : state.scheduleMode;
     const dayMode = mode === 'day';
     const weekMode = mode === 'week';
     const shown = state.scheduleDay ?? today;

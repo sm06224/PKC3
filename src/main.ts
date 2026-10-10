@@ -360,6 +360,7 @@ import {
   windowDeepLinkTarget,
   windowTitleFor,
 } from '@adapter/platform/deep-link';
+import { applyScheduleDeepLink } from '@adapter/platform/schedule-deep-link';
 import { openView, openViewHere } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
@@ -5252,10 +5253,8 @@ function bootstrap(): void {
         searchJump: (lid, find) =>
           app.dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find }),
         // 🔴 **予定の面を「週」で開く**(#855 段 A-2)── 左の列の「週」が別のウィンドウで開いたとき
-        scheduleView: (mode, day) => {
-          app.dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
-          if (day !== null) app.dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date: day });
-        },
+        // ⚠ 判断は `schedule-deep-link.ts`(test される)── ここは呼ぶだけ
+        scheduleView: (mode, day) => applyScheduleDeepLink(app.dispatcher, mode, day),
         onHold: (view) => {
           heldViewWindow = view;
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで

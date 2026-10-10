@@ -21,6 +21,7 @@ import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { connectViewDeepLink, type DeepLinkTarget } from '../../src/adapter/platform/deep-link';
 import { openViewInWindow, type ViewWindowDeps } from '../../src/adapter/platform/view-window';
+import { applyScheduleDeepLink } from '../../src/adapter/platform/schedule-deep-link';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
 
@@ -44,7 +45,7 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
 
 function setup(
   bodies: Record<string, string>,
-  opts: { wide?: boolean; services?: BinderServices } = {},
+  opts: { wide?: boolean; services?: BinderServices; scan?: boolean } = {},
 ) {
   const wide = opts.wide ?? true;
   const root = document.createElement('div');
@@ -79,10 +80,13 @@ function setup(
     relations: [],
   });
   const cards = Object.entries(bodies).flatMap(([lid, body]) => taskCardsOf(lid, body));
-  d.dispatch({
-    type: 'SET_TASK_SCAN',
-    scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
-  });
+  const scan = (): void =>
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+  // ⚠ `scan: false` = 予定の走査がまだ済んでいない状態(最初の位置を確定させない経路を見る)
+  if (opts.scan !== false) scan();
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const qa = (sel: string) => [...root.querySelectorAll<HTMLElement>(sel)];
   const press = (sel: string): void => {
@@ -91,7 +95,7 @@ function setup(
     el.click();
   };
   const showWeek = (): void => press('[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
-  return { root, d, q, qa, press, showWeek };
+  return { root, d, q, qa, press, showWeek, scan };
 }
 
 const lanes = (qa: (s: string) => HTMLElement[]): HTMLElement[] =>
@@ -305,7 +309,15 @@ describe('左の列の「週」', () => {
     expect(d.getState().error).toContain('開けませんでした');
   });
 
-  it('🔴 state が週でも左の列は一覧として描く(別窓の左の列に 7 列を詰めない)', () => {
+  it('🔴 左の列の見せ方は自分の state(scheduleNarrowMode)── 一覧 / 日を押しても広い面の scheduleMode は動かない', () => {
+    const { d, press, q } = setup({}, { wide: false });
+    press('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
+    expect(d.getState().scheduleNarrowMode).toBe('day');
+    expect(d.getState().scheduleMode, '左の列が広い面の見せ方を書いた').toBe('list');
+    expect(q('[data-pkc-region="schedule-day"]')!.hidden).toBe(false);
+  });
+
+  it('🔴 左の列は、広い面が「週」でも自分の見せ方(一覧)で描く', () => {
     const { q, qa, d } = setup({ e1: '- [ ] 会議 @2026-08-25 14:00\n' }, { wide: false });
     d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
     expect(q('[data-pkc-region="schedule-weekview"]')!.hidden).toBe(true);
@@ -313,6 +325,125 @@ describe('左の列の「週」', () => {
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => b.getAttribute('aria-pressed')),
     ).toEqual(['true', 'false', 'false']);
+  });
+
+  it('🔴 小さな月の日: 左の列は自分の見せ方で決める(広い面が「週」でも、一覧なら日を動かさず束へ送る)', () => {
+    const { d, press } = setup({}, { wide: false });
+    d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
+    press('[data-pkc-field="schedule-week"] > button[data-pkc-drop-date="2026-08-13"]');
+    expect(d.getState().scheduleDay, '左の列(一覧)が広い面の見せ方で日を動かした').toBeNull();
+  });
+
+  it('対照群: 左の列が「日」なら、広い面が一覧でも日を動かす', () => {
+    const { d, press } = setup({}, { wide: false });
+    press('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
+    press('[data-pkc-field="schedule-week"] > button[data-pkc-drop-date="2026-08-13"]');
+    expect(d.getState().scheduleDay).toBe('2026-08-13');
+  });
+});
+
+/**
+ * 🔴 **週のために開いた窓**(左の列と中央が同じ state を読む)。
+ * 左の列で「日」「一覧」を押しても、中央の週を消さない ── 窓を開いた理由がそれだから。
+ */
+describe('窓の中の 2 つの面(左の列 + 中央)', () => {
+  function windowLike() {
+    const h = setup({ e1: '- [ ] 会議 @2026-08-25 14:00\n' }, { wide: false });
+    const host = document.createElement('div');
+    host.setAttribute('data-pkc-view-pane', 'schedule');
+    h.root.append(host);
+    const centre = new ScheduleRenderer(host, () => TODAY);
+    h.d.onState((s) => centre.render(s));
+    centre.render(h.d.getState());
+    const narrowEl = h.root.querySelector<HTMLElement>('[data-pkc-browse-pane="schedule"]')!;
+    const press = (face: HTMLElement, mode: string): void =>
+      face.querySelector<HTMLElement>(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`)!.click();
+    const weekShown = (): boolean =>
+      !host.querySelector<HTMLElement>('[data-pkc-region="schedule-weekview"]')!.hidden;
+    const dayShown = (face: HTMLElement): boolean =>
+      !face.querySelector<HTMLElement>('[data-pkc-region="schedule-day"]')!.hidden;
+    return { ...h, host, narrowEl, press, weekShown, dayShown };
+  }
+
+  it('🔴 左の列で「日」を押しても、中央は週のまま(左だけが日になる)', () => {
+    const w = windowLike();
+    w.d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
+    expect(w.weekShown()).toBe(true);
+    w.press(w.narrowEl, 'day');
+    expect(w.weekShown(), '左の列の「日」が中央の週を消した').toBe(true);
+    expect(w.d.getState().scheduleMode).toBe('week');
+    expect(w.dayShown(w.narrowEl)).toBe(true);
+    expect(w.dayShown(w.host), '中央に日が出た').toBe(false);
+  });
+
+  it('🔴 左の列で「一覧」を押しても、中央は週のまま', () => {
+    const w = windowLike();
+    w.d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
+    w.press(w.narrowEl, 'day');
+    w.press(w.narrowEl, 'list');
+    expect(w.weekShown(), '左の列の「一覧」が中央の週を消した').toBe(true);
+    expect(w.dayShown(w.narrowEl)).toBe(false);
+  });
+
+  it('🔴 中央で「日」を押すと中央は日になり、左の列は動かない', () => {
+    const w = windowLike();
+    w.d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
+    w.press(w.host, 'day');
+    expect(w.weekShown()).toBe(false);
+    expect(w.dayShown(w.host)).toBe(true);
+    expect(w.d.getState().scheduleNarrowMode, '中央の「日」が左の列の見せ方を書いた').toBe('list');
+    expect(w.dayShown(w.narrowEl)).toBe(false);
+  });
+});
+
+describe('「週」の最初に見せる位置', () => {
+  it('🔴 走査が済む前に user が自分で送ったら、済んだ後の描き直しで最初の位置へ戻さない', () => {
+    const { q, showWeek, scan } = setup(
+      { e1: '- [ ] 会議 @2026-08-25 14:00..15:00\n' },
+      { scan: false },
+    );
+    const scroller = q('[data-pkc-field="schedule-weekview-scroll"]')!;
+    Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
+    showWeek();
+    // 予定が無いので 8:00(まだ確定していない)
+    expect(scroller.scrollTop).toBe(320);
+    scroller.scrollTop = 77;
+    scroller.dispatchEvent(new Event('scroll'));
+    scan();
+    expect(scroller.scrollTop, 'user が送った位置を奪い返した').toBe(77);
+  });
+
+  it('対照群: 送っていなければ、済んだ後に最初の位置(13:00)へ移る / 週を変えたらまた当てる', () => {
+    const { q, showWeek, scan, press } = setup(
+      { e1: '- [ ] 会議 @2026-08-25 14:00..15:00\n' },
+      { scan: false },
+    );
+    const scroller = q('[data-pkc-field="schedule-weekview-scroll"]')!;
+    Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
+    showWeek();
+    expect(scroller.scrollTop).toBe(320);
+    scan();
+    // 14:00 の 1 時間前 = 13:00 → 960 * 780 / 1440
+    expect(scroller.scrollTop).toBe(520);
+    press('[data-pkc-field="schedule-weekview-next"]');
+    expect(scroller.scrollTop, '週を変えたのに最初の位置を当て直していない').toBe(320);
+  });
+});
+
+describe('起動の合図を当てる(main.ts が呼ぶ関数)', () => {
+  it('🔴 日が無ければ見せ方だけ / 日があれば見せ方 + 日(左の列の見せ方は触らない)', () => {
+    const d = new Dispatcher();
+    applyScheduleDeepLink(d, 'week', null);
+    expect(d.getState().scheduleMode).toBe('week');
+    expect(d.getState().scheduleDay, '日の無い合図が日を動かした').toBeNull();
+    expect(d.getState().calendarMonth).toBeNull();
+    const e = new Dispatcher();
+    applyScheduleDeepLink(e, 'week', '2026-09-02');
+    expect(e.getState().scheduleMode).toBe('week');
+    expect(e.getState().scheduleDay).toBe('2026-09-02');
+    expect(e.getState().scheduleNarrowMode).toBe('list');
   });
 });
 

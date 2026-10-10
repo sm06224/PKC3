@@ -1517,6 +1517,13 @@ export interface AppState {
    * ⚠ 保存しない(開き直したら一覧に戻る)── 見え方の一時の選びであって、ノートの中身ではない。
    */
   scheduleMode: 'list' | 'day' | 'week';
+  /**
+   * 🔴 **左の列(狭い面)の予定の見せ方**(#855 段 A-2 の直し)。`list` / `day` だけ(既定は一覧。保存しない)。
+   * ⚠ 狭い面だけがこれを読み、広い面(中央 / 別のウィンドウ)は `scheduleMode` だけを読む ──
+   *   共有すると、週のために開いた窓の左の列で「日」「一覧」を押すと**中央の週が消える**。
+   * ⚠ 見ている日(`scheduleDay`)は 2 つの面で**共有する**(小さな月の日を押すと両方が同じ日を見る)。
+   */
+  scheduleNarrowMode: 'list' | 'day';
   /** `day` で見ている日(`YYYY-MM-DD`)。`null` = 今日(日付が変わったら追従する)。 */
   scheduleDay: string | null;
   /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
@@ -2160,6 +2167,7 @@ export const initialState: AppState = {
   appGroupGen: 0,
   calendarMonth: null,
   scheduleMode: 'list',
+  scheduleNarrowMode: 'list',
   scheduleDay: null,
   showArchived: false,
   showDoneTasks: false,
@@ -2894,6 +2902,7 @@ export type UserAction =
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。 */
   | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' | 'week' }
+  | { type: 'SET_SCHEDULE_NARROW_MODE'; mode: 'list' | 'day' }
   /** 「日」で見る日。`null` = 今日に戻る。実在しない日は黙って捨てる(別の日へ寄せない)。 */
   | { type: 'SET_SCHEDULE_DAY'; date: string | null }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
@@ -8063,6 +8072,8 @@ function reduceCore(
     }
     case 'SET_SCHEDULE_MODE':
       return { state: { ...state, scheduleMode: action.mode }, events: [] };
+    case 'SET_SCHEDULE_NARROW_MODE':
+      return { state: { ...state, scheduleNarrowMode: action.mode }, events: [] };
     case 'SET_SCHEDULE_DAY': {
       // ⚠ 今日に戻るときは小さな月も今月へ戻す(日と月が別の場所を指したままにしない)
       if (action.date === null)

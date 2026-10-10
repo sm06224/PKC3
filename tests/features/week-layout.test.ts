@@ -95,6 +95,19 @@ describe('ディープリンクの合図(sched / day)', () => {
     });
   });
 
+  it('🔴 1000 年より前の年は捨てる(`new Date(50, …)` が 1950 年へ寄せる ── 別の日を見せない)', () => {
+    expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=week&day=0050-01-01')).toEqual({
+      mode: 'week',
+      day: null,
+    });
+    expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=week&day=1000-01-01')!.day).toBe(
+      '1000-01-01',
+    );
+    expect(
+      formatViewDeepLink(BASE, 'schedule', { schedule: { mode: 'week', day: '0050-01-01' } }),
+    ).not.toContain('day=');
+  });
+
   it('🔴 読めない値は無視する(week 以外・空・合図なし)', () => {
     expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=month')).toBeNull();
     expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=')).toBeNull();

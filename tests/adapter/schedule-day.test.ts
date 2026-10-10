@@ -114,6 +114,13 @@ describe('状態(SET_SCHEDULE_MODE / SET_SCHEDULE_DAY)', () => {
     expect(reduce(day, { type: 'SET_SCHEDULE_MODE', mode: 'list' }).state.scheduleMode).toBe('list');
   });
 
+  it('左の列の見せ方は別の state(既定は一覧)── 広い面の見せ方を動かさない', () => {
+    expect(initialState.scheduleNarrowMode).toBe('list');
+    const s = reduce(initialState, { type: 'SET_SCHEDULE_NARROW_MODE', mode: 'day' }).state;
+    expect(s.scheduleNarrowMode).toBe('day');
+    expect(s.scheduleMode).toBe('list');
+  });
+
   it('日を選ぶと、小さな月もその月へ動く / null で今日(今月)へ戻る', () => {
     const s = reduce(initialState, { type: 'SET_SCHEDULE_DAY', date: '2026-11-03' }).state;
     expect(s.scheduleDay).toBe('2026-11-03');
@@ -234,8 +241,11 @@ describe('予定の面の「一覧 / 日」', () => {
     // 一覧のとき: 何も変わらない(束へ送るだけ)
     press('button[data-pkc-action="schedule-pick-day"][data-pkc-drop-date="2026-08-27"]');
     expect(d.getState().scheduleDay).toBeNull();
-    expect(d.getState().scheduleMode).toBe('list');
+    // 左の列(この台は browse-pane)の見せ方は自分の state(`scheduleNarrowMode`)で持つ
+    expect(d.getState().scheduleNarrowMode).toBe('list');
     showDay();
+    expect(d.getState().scheduleNarrowMode).toBe('day');
+    expect(d.getState().scheduleMode, '左の列が広い面の見せ方を触った').toBe('list');
     expect(qa(lane).map(textOf)).toEqual(['今日の用']);
     press('button[data-pkc-action="schedule-pick-day"][data-pkc-drop-date="2026-08-27"]');
     expect(d.getState().scheduleDay).toBe('2026-08-27');

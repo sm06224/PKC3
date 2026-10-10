@@ -468,7 +468,7 @@ export function parseViewDeepLinkSchedule(
   if (params === null || params.get('sched') !== 'week') return null;
   const day = params.get('day');
   if (day === null || day === '') return { mode: 'week', day: null };
-  return isRealCalendarDate(day) ? { mode: 'week', day } : { mode: 'week', day: null };
+  return isScheduleDay(day) ? { mode: 'week', day } : { mode: 'week', day: null };
 }
 
 /** 🔴 **予定の見せ方の合図だけを落とす**(#855 段 A-2)。⚠ `container` / `entry` / `view` は残す。 */
@@ -616,7 +616,7 @@ export function formatViewDeepLink(
   if (view === 'schedule' && input.schedule !== undefined) {
     parts.push(`sched=${input.schedule.mode}`);
     const day = input.schedule.day;
-    if (day !== null && isRealCalendarDate(day)) parts.push(`day=${encodeURIComponent(day)}`);
+    if (day !== null && isScheduleDay(day)) parts.push(`day=${encodeURIComponent(day)}`);
   }
   return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }
@@ -699,6 +699,14 @@ export type ParsedPermalink = ParsedPortablePkcReference;
 
 /** @deprecated Use `PortablePkcReferenceInput`. */
 export type PermalinkInput = PortablePkcReferenceInput;
+
+/**
+ * 🔴 合図の `day` として受ける日(#855 段 A-2)。実在する日で、**年が 4 桁(1000 年以降)**。
+ * ⚠ `0050-01-01` は実在の日として通るが、`new Date(50, …)` は 1950 年へ寄せる ── 別の日を見せない。
+ */
+function isScheduleDay(day: string): boolean {
+  return isRealCalendarDate(day) && Number(day.slice(0, 4)) >= 1000;
+}
 
 /** @deprecated Use `PkcRefKind`. */
 export type PkcPermalinkKind = PkcRefKind;

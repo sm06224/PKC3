@@ -7897,12 +7897,18 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   開く側(`view-window.ts`)が出す。⚠ 判定は押した面(`data-pkc-browse-pane`)で ──
      *   state ではない(別窓の中央の面は同じ state でも 7 日を並べる)。
      */
-    if (mode === 'week' && target.closest('[data-pkc-browse-pane]') !== null) {
+    const narrow = target.closest('[data-pkc-browse-pane]') !== null;
+    if (mode === 'week' && narrow) {
       if (services.openScheduleWindow === undefined) {
         dispatcher.dispatch({ type: 'OP_FAILED', error: '別のウィンドウを開けませんでした' });
         return;
       }
       services.openScheduleWindow('week', dispatcher.getState().scheduleDay);
+      return;
+    }
+    // 🔴 狭い面は自分の見せ方(`scheduleNarrowMode`)を持つ ── 中央の見せ方を巻き込まない
+    if (narrow && (mode === 'list' || mode === 'day')) {
+      dispatcher.dispatch({ type: 'SET_SCHEDULE_NARROW_MODE', mode });
       return;
     }
     dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
@@ -7946,11 +7952,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     /**
      * 🔴 **「日」のときは、押した日を見せる**(#855 段 A-1)。⚠ 一覧のときの「束へ送る」は
      *   「日」には束が無いので何も起きない ── 押しても何も起きない升目にしない。
-     * 🔑 見せ方は state(`scheduleMode`)で決める ── 面ごとに持たない(別窓の面も同じ state を読む)。
+     * 🔑 見せ方は押した面の state で決める(狭い面 `scheduleNarrowMode` / 広い面 `scheduleMode`)。
      */
-    const shown = dispatcher.getState().scheduleMode;
-    // 🔴 「週」は 7 日を並べる広い面でだけ(左の列は「週」を見せない ── 一覧のまま束へ送る)
-    if (shown === 'day' || (shown === 'week' && target.closest('[data-pkc-browse-pane]') === null)) {
+    const st = dispatcher.getState();
+    // 🔴 **押した面の見せ方**で決める(狭い面は `scheduleNarrowMode`、広い面は `scheduleMode`)
+    const narrowFace = target.closest('[data-pkc-browse-pane]') !== null;
+    const shown = narrowFace ? st.scheduleNarrowMode : st.scheduleMode;
+    if (shown === 'day' || shown === 'week') {
       dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
       return;
     }
