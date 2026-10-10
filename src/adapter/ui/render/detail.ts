@@ -165,6 +165,7 @@ import { humanBytes } from '@features/human-bytes';
  *   **型だけ**(`import type` なので、走る物には残らない)。
  */
 import { AssetLends } from './asset-lends';
+import { captureReadAnchor, resolveReadAnchor, type ReadAnchor } from './read-anchor';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -286,6 +287,13 @@ export const PAINTED_ATTR = 'data-pkc-painted';
  *   (常駐メモリの主張が変わる)。古いものから忘れる。
  */
 const READ_POSITION_CAP = 200;
+
+/** 読んでいた場所。`anchor` は縦送りで目印が取れたときだけ(#1490)。 */
+interface ReadPosition {
+  readonly top: number;
+  readonly left: number;
+  readonly anchor: ReadAnchor | null;
+}
 
 /**
  * 🔴 **本文が空のときの案内の字**(#1221)。2 列の欄(`placeholder`)と 1 面の紙
@@ -524,7 +532,7 @@ export class DetailRenderer {
    * 編集へ入る直前の scroll。⚠ 編集の面は別物なので骨組みごと作り直すが、
    * **戻ってきたら元の位置へ戻す** ── 保存しただけで先頭へ飛ぶのも同じ no-op。
    */
-  private parkedScroll: { lid: string; top: number; left: number } | null = null;
+  private parkedScroll: { lid: string; top: number; left: number; anchor?: ReadAnchor | null } | null = null;
   /**
    * **ノートごと**に読んでいた場所(#690 ①。user 裁定 2026-09-04、案 A)。
    *
@@ -535,7 +543,7 @@ export class DetailRenderer {
    *   ── 2 か所で別の要素を読むと、片方だけ効かない形になる。
    * ⚠ Map は挿入順なので、書き直すときは**消してから入れる**(古い順を保つ)。
    */
-  private readonly readPositions = new Map<string, { top: number; left: number }>();
+  private readonly readPositions = new Map<string, ReadPosition>();
   /**
    * 骨組みを組み直した直後に戻したい位置。
    * ⚠ **本文を入れてから**戻す ── 空の器に `scrollTop` を代入しても
@@ -544,7 +552,7 @@ export class DetailRenderer {
    *   縦だけ覚えていると**段組みで開き直すたびに先頭へ飛ぶ**
    *   (いまの縦送りでは覚えているので、覚えないのは**動線を 1 つ失う**ことになる)。
    */
-  private pendingScroll: { top: number; left: number } | null = null;
+  private pendingScroll: ReadPosition | null = null;
   /**
    * 読む面の描画の世代(2026-08-06。user 報告 2-8)。ワーカーへ逃がしたので
    * **古い結果を載せない**ための弁別が要る(選択を素早く動かすと逆順で届く)。
@@ -1327,10 +1335,10 @@ export class DetailRenderer {
       const remembered = this.readPositions.get(lid);
       this.pendingScroll =
         this.parkedScroll?.lid === lid
-          ? { top: this.parkedScroll.top, left: this.parkedScroll.left }
+          ? { top: this.parkedScroll.top, left: this.parkedScroll.left, anchor: this.parkedScroll.anchor ?? null }
           : remembered !== undefined
-            ? { top: remembered.top, left: remembered.left }
-            : { top: 0, left: 0 };
+            ? { top: remembered.top, left: remembered.left, anchor: remembered.anchor ?? null }
+            : { top: 0, left: 0, anchor: null };
       this.parkedScroll = null;
     }
     // 🔴 system 領域のノートは `entryMetas` に無い(設計 doc §1.1、段②a)。
@@ -1745,13 +1753,18 @@ export class DetailRenderer {
    * ⚠ NaN や負は書かない ── 戻すときに `scrollTop` へそのまま代入するので、
    *   ここで 0 に落としておく(本文が短くなった分の clamp はブラウザに任せる)。
    */
-  private rememberReadPosition(lid: string): { top: number; left: number } {
+  private rememberReadPosition(lid: string): ReadPosition {
     const sane = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
-    const pos = {
-      top: sane(this.scroller.scrollTop),
-      // 🔴 段組みでは送りが横(#505)── `parkedScroll` と同じく両方持つ
-      left: sane(this.bodyHost?.scrollLeft ?? 0),
-    };
+    const top = sane(this.scroller.scrollTop);
+    // 🔴 段組みでは送りが横(#505)── `parkedScroll` と同じく両方持つ
+    const left = sane(this.bodyHost?.scrollLeft ?? 0);
+    // 🔴 縦送りのときは「先頭の塊 + ずれ」も憶える(#1490)── px だけだと、戻った直後に上側の図の
+    //    高さが違うと別の行が出る。⚠ `scrollTop` を読んだ後なので、配置はもう済んでいる(追加の払いは無い)
+    const anchor =
+      top > 0 && left === 0 && this.bodyHost !== null
+        ? captureReadAnchor(this.bodyHost, this.scroller)
+        : null;
+    const pos: ReadPosition = { top, left, anchor };
     this.readPositions.delete(lid); // 挿入順を「最後に触った順」に保つ
     this.readPositions.set(lid, pos);
     if (this.readPositions.size > READ_POSITION_CAP) {
@@ -1764,9 +1777,12 @@ export class DetailRenderer {
   /** 骨組みを組み直したときの位置戻し。⚠ **本文が入ってから**呼ぶ。 */
   private restoreScroll(): void {
     if (this.pendingScroll === null) return;
-    const { top, left } = this.pendingScroll;
+    const { top, left, anchor } = this.pendingScroll;
     this.pendingScroll = null;
-    this.scroller.scrollTop = top;
+    // 🔑 目印の塊が在ればその位置へ(#1490)。無ければ(配置を持たない環境 / 本文が変わった)px で戻す
+    const byAnchor =
+      anchor && this.bodyHost !== null ? resolveReadAnchor(this.bodyHost, this.scroller, anchor) : null;
+    this.scroller.scrollTop = byAnchor ?? top;
     if (this.bodyHost !== null) this.bodyHost.scrollLeft = left;
     this.backToTopHandle?.update();
     this.readingProgressHandle?.update();
