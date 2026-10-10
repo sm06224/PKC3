@@ -36,14 +36,19 @@ export function captureReadAnchor(host: HTMLElement, scroller: HTMLElement): Rea
   let hi = blocks.length - 1;
   let found = -1;
   // 下端が画面の上端より下にある最初の塊
+  // ⚠ 畳んだ章(`hidden`)の塊は高さ 0 で、位置の並びが崩れる ── 高さを持つ次の塊で比べる
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    const r = (blocks[mid] as HTMLElement).getBoundingClientRect();
-    if (r.bottom - scrollerTop > 0) {
-      found = mid;
+    let m = mid;
+    let r = (blocks[m] as HTMLElement).getBoundingClientRect();
+    while (r.height === 0 && m < hi) r = (blocks[++m] as HTMLElement).getBoundingClientRect();
+    if (r.height === 0) {
+      hi = mid - 1; // mid〜hi は全部高さ 0 ── 答えは左にしか無い
+    } else if (r.bottom - scrollerTop > 0) {
+      found = m;
       hi = mid - 1;
     } else {
-      lo = mid + 1;
+      lo = m + 1;
     }
   }
   if (found < 0) return null;
@@ -52,6 +57,8 @@ export function captureReadAnchor(host: HTMLElement, scroller: HTMLElement): Rea
     const el = blocks[i] as HTMLElement;
     const raw = el.getAttribute(LINE_ATTR);
     if (raw === null) continue;
+    // ⚠ 畳んだ章の塊(高さ 0)は目印にしない ── 戻ったときは開いているので位置が合わない
+    if (el.getBoundingClientRect().height === 0) continue;
     const line = Number(raw);
     if (!Number.isInteger(line)) continue;
     // ⚠ 配置を持たない環境(高さが全部 0)では、上の二分探索が 1 塊も選ばないので、ここへは来ない

@@ -495,6 +495,24 @@ describe('読んでいた場所の目印(#1490)', () => {
     }
   });
 
+  it('🔴 戻ったとき目印の行が無ければ(本文が変わった)、送り量のまま戻す', async () => {
+    const { scroller, r } = setup();
+    const restore = stubLayout(scroller, () => 100);
+    try {
+      r.render(state('a', LONG));
+      await settle();
+      scroller.scrollTop = 1050;
+      r.render(state('b', LONG));
+      await settle();
+      // 先頭に 1 行足す ── 塊の行番号が全部 1 つずれ、目印の行(偶数)の塊が無くなる
+      r.render(state('a', `前置き\n${LONG}`));
+      await settle();
+      expect(scroller.scrollTop, '目印が見つからないのに送り量で戻さなかった').toBe(1050);
+    } finally {
+      restore();
+    }
+  });
+
   it('編集から戻るときも目印で戻す', async () => {
     const { scroller, r } = setup();
     let tall = false;

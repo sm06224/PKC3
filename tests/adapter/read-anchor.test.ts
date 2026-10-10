@@ -18,6 +18,8 @@ function board(heights: number[], lines: (number | null)[] = heights.map((_, i) 
   scroller.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600 }) as DOMRect;
   blocks.forEach((el, i) => {
     el.getBoundingClientRect = () => {
+      // ⚠ 畳んだ塊(`hidden`)は、実ブラウザでは位置も大きさも全部 0 を返す
+      if (hs[i] === 0) return { top: 0, bottom: 0, height: 0 } as DOMRect;
       const y = hs.slice(0, i).reduce((a, b) => a + b, 0) - scroller.scrollTop;
       return { top: y, bottom: y + hs[i]!, height: hs[i]! } as DOMRect;
     };
@@ -66,5 +68,32 @@ describe('読んでいた場所の目印(#1490)', () => {
   it('目印の塊が無ければ null(本文が変わった)', () => {
     const { scroller, host } = board(Array(5).fill(100));
     expect(resolveReadAnchor(host, scroller, { line: 999, offset: 0 })).toBeNull();
+  });
+});
+
+describe('読んでいた場所の目印 ── 端の形(#1490 レビュー)', () => {
+  it('🔴 畳んだ章(高さ 0)の塊が挟まっても、画面の先頭の塊を選ぶ', () => {
+    // 0〜9 は 100px、10〜14 は畳んで 0、15〜 は 100px。画面の先頭 = 5 番目(行 15)の 50px 下
+    // ⚠ 二分探索の最初の比較が畳んだ塊(12 番目)に当たる配置 ── 位置 0 を「上」と読むと、左半分を捨てる
+    const hs = [...Array(10).fill(100), ...Array(5).fill(0), ...Array(10).fill(100)];
+    const { scroller, host } = board(hs);
+    scroller.scrollTop = 550;
+    expect(captureReadAnchor(host, scroller)).toEqual({ line: 15, offset: 50 });
+  });
+
+  it('🔴 戻す先の塊が高さ 0 なら null(畳まれた塊へ合わせない)', () => {
+    const { scroller, host } = board([100, 0, 100]);
+    expect(resolveReadAnchor(host, scroller, { line: 3, offset: 0 })).toBeNull();
+  });
+
+  it('戻す計算は、いまの送り量に依らない', () => {
+    const { scroller, host } = board(Array(20).fill(100));
+    scroller.scrollTop = 700;
+    expect(resolveReadAnchor(host, scroller, { line: 30, offset: 50 })).toBe(1050);
+  });
+
+  it('先頭より上へは戻さない(ずれが負でも 0 で止める)', () => {
+    const { scroller, host } = board(Array(5).fill(100));
+    expect(resolveReadAnchor(host, scroller, { line: 0, offset: -80 })).toBe(0);
   });
 });
