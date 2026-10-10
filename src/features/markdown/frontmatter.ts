@@ -90,19 +90,74 @@ function byteLength(s: string): number {
  *   差分で数えると **1 行ずれる**ことがあり、そのずれは
  *   「行ごとの編集が 1 行上を書き換える」という**静かなデータ破壊**になる。
  * 🔑 だから**原文の物理行**をここで数え、切るのも呼び側で
- *   `split('\n').slice(n)` に統一する(規則を 2 つ作らない)。
+ *   `locateFrontmatter`(物理行の切り方は `split('\n').slice(n)` と同じ)に統一する(規則を 2 つ作らない)。
  */
 export function frontmatterLineCount(body: string): number {
   if (!body) return 0;
+  const loc = locateFrontmatter(body);
+  return loc === null ? 0 : loc.lineCount;
+}
+
+/** `locateFrontmatter` の答え。位置は全部 `body` / `after`(開きの fence を落とした残り)の offset。 */
+interface FrontmatterLocation {
+  /** 開きの fence を落とした残り(`body.slice(開きの長さ)`)。 */
+  after: string;
+  /** 閉じの行が `after` の何番目の物理行か(0 始まり)。 */
+  closeIdx: number;
+  /** 閉じの行の頭の offset(`after` 内)。 */
+  closeStart: number;
+  /** 閉じの行の**次の行**の頭の offset(`after` 内)。閉じが最終行なら `after.length`。 */
+  restStart: number;
+  /** 閉じの行までの物理行数(開き・閉じを含む)。 */
+  lineCount: number;
+  /** 閉じの行の次の行の頭の offset(`body` 内)。 */
+  bodyRestOffset: number;
+}
+
+/**
+ * 🔑 **frontmatter の位置を決める唯一の規則**(#1381)。閉じの `---` の行までしか読まない。
+ *
+ * ⚠ かつては 4 か所(行数 / 描く本文 / parse / vars)がそれぞれ**本文全体を
+ *   `split` して**から閉じを探していた ── 閉じは先頭の数行に在るのに 1MB で
+ *   2.7〜4ms、5MB で 11〜33ms を毎回払っていた。**規則は 1 つのまま**(行の切り方は
+ *   `split(/\r?\n/)` と同じ:`\n` で切り、直前の `\r` 1 つを落とす)、
+ *   読む範囲だけを閉じの行までにした。閉じが無いときは最後まで読む(= 従来と同じ)。
+ */
+function locateFrontmatter(body: string): FrontmatterLocation | null {
   const open = OPEN_FENCE.exec(body);
-  if (open === null) return 0;
+  if (open === null) return null;
+  const openText = open[0];
   // ⚠ 開きは `---\s*\r?\n` ── 直後が空行なら改行を 2 つ飲んでいる
-  const openLines = (open[0].match(/\n/g) ?? []).length;
-  const lines = body.replace(OPEN_FENCE, '').split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    if (CLOSE_FENCE_LINE.test(lines[i] ?? '')) return openLines + i + 1;
+  let openLines = 0;
+  for (let p = openText.indexOf('\n'); p !== -1; p = openText.indexOf('\n', p + 1)) openLines++;
+  const after = body.slice(openText.length);
+  let start = 0;
+  for (let idx = 0; ; idx++) {
+    const nl = after.indexOf('\n', start);
+    let end = nl === -1 ? after.length : nl;
+    if (nl !== -1 && end > start && after.charCodeAt(end - 1) === 13) end--;
+    if (CLOSE_FENCE_LINE.test(after.slice(start, end))) {
+      const restStart = nl === -1 ? after.length : nl + 1;
+      return {
+        after,
+        closeIdx: idx,
+        closeStart: start,
+        restStart,
+        lineCount: openLines + idx + 1,
+        bodyRestOffset: openText.length + restStart,
+      };
+    }
+    if (nl === -1) return null;
+    start = nl + 1;
   }
-  return 0;
+}
+
+/** 閉じの行より前(= frontmatter の中身)の行。`split(/\r?\n/).slice(0, closeIdx)` と同じ。 */
+function frontmatterInnerLines(loc: FrontmatterLocation): string[] {
+  if (loc.closeIdx === 0) return [];
+  let end = loc.closeStart - 1; // 直前の行の `\n`
+  if (loc.after.charCodeAt(end - 1) === 13) end--;
+  return loc.after.slice(0, end).split(/\r?\n/);
 }
 
 /**
@@ -126,8 +181,9 @@ export function frontmatterLineCount(body: string): number {
  *   関数として置き、描く側が必ずこれを通るようにする(§7)。
  */
 export function bodyBelowFrontmatter(body: string): string {
-  const n = frontmatterLineCount(body);
-  return n === 0 ? body : body.split('\n').slice(n).join('\n');
+  if (!body) return body;
+  const loc = locateFrontmatter(body);
+  return loc === null ? body : body.slice(loc.bodyRestOffset);
 }
 
 /**
@@ -459,17 +515,8 @@ export function parseFrontmatter(body: string): FrontmatterResult {
   if (!body || !OPEN_FENCE.test(body)) {
     return { meta: emptyMeta, body, found: false, warnings };
   }
-  // Strip the opening `---\n`.
-  const afterOpen = body.replace(OPEN_FENCE, '');
-  const lines = afterOpen.split(/\r?\n/);
-  let closeIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (CLOSE_FENCE_LINE.test(lines[i] ?? '')) {
-      closeIdx = i;
-      break;
-    }
-  }
-  if (closeIdx === -1) {
+  const loc = locateFrontmatter(body);
+  if (loc === null) {
     /**
      * 🔴 **黙って通さない**(#284)。⚠ ここは `found: false` を返すので、
      * 呼び側から見ると「frontmatter が無い文書」と**区別が付かない** ── 実測では
@@ -499,7 +546,7 @@ export function parseFrontmatter(body: string): FrontmatterResult {
      * 🔑 水平線との切り分けは `frontmatterRunLength` に寄せた(`key:` の行が
      *   1 つも無ければ 0 = 警告しない)。
      */
-    if (frontmatterRunLength(lines) > 0) {
+    if (frontmatterRunLength(body.replace(OPEN_FENCE, '').split(/\r?\n/)) > 0) {
       warnings.push({
         kind: 'malformed',
         detail: '先頭の --- に対応する閉じの --- がありません(文書の情報として読めていません)',
@@ -508,7 +555,12 @@ export function parseFrontmatter(body: string): FrontmatterResult {
     return { meta: emptyMeta, body, found: false, warnings };
   }
 
-  const yamlLines = lines.slice(0, closeIdx);
+  const yamlLines = frontmatterInnerLines(loc);
+  // 閉じの後ろ。CRLF は LF へ正規化する(従来の `split(/\r?\n/).join('\n')` と同じ)。
+  const restOf = (): string => {
+    const rest = loc.after.slice(loc.restStart);
+    return rest.includes('\r') ? rest.replace(/\r?\n/g, '\n') : rest;
+  };
 
   // reform-2026-05 PR-B:size cap 適用(SOFT_DEFAULTS 16 KB、HARD 1 MB)。
   // 超過時は parse 中止 + 可視 warning(spec §07.3 silent fail 禁止)。
@@ -520,7 +572,7 @@ export function parseFrontmatter(body: string): FrontmatterResult {
       kind: 'size_limit',
       detail: `前書き(frontmatter)が上限(${sizeCap} バイト)を超えたため、解析を中断しました`,
     });
-    const remainder = lines.slice(closeIdx + 1).join('\n');
+    const remainder = restOf();
     return {
       meta: emptyMeta,
       body: remainder.startsWith('\n') ? remainder.slice(1) : remainder,
@@ -541,7 +593,7 @@ export function parseFrontmatter(body: string): FrontmatterResult {
       detail: `同じキーが 2 回以上書かれています(${dup.join(' / ')})。後の行だけが読まれ、先に書いた行は無視されます`,
     });
   }
-  const remainder = lines.slice(closeIdx + 1).join('\n');
+  const remainder = restOf();
   return {
     meta,
     body: remainder.startsWith('\n') ? remainder.slice(1) : remainder,
@@ -888,18 +940,10 @@ export function getFrontmatterKind(body: string): string | null {
  */
 export function extractVars(body: string): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!body || !OPEN_FENCE.test(body)) return out;
-  const afterOpen = body.replace(OPEN_FENCE, '');
-  const lines = afterOpen.split(/\r?\n/);
-  let closeIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (CLOSE_FENCE_LINE.test(lines[i] ?? '')) {
-      closeIdx = i;
-      break;
-    }
-  }
-  if (closeIdx === -1) return out;
-  const frontLines = lines.slice(0, closeIdx);
+  if (!body) return out;
+  const loc = locateFrontmatter(body);
+  if (loc === null) return out;
+  const frontLines = frontmatterInnerLines(loc);
 
   // 1. nested object 形式:`vars:` 単独行 + 後続の indented `<key>: <value>` 群
   for (let i = 0; i < frontLines.length; i++) {
