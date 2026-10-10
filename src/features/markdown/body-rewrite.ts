@@ -971,7 +971,11 @@ function rewriteLineDate(
             ? found.timeEnd
             : null,
       ) +
-      line.slice(found.end);
+      // 🔴 終わりを**書き直す**ときは、幅として読まれなかった古い終わり(`..02:00`)も一緒に差し替える
+      //    (残すと `14:00..15:00..02:00` になる)。⚠ 終わりを渡さない動かし方では 1 バイトも触らない
+      line.slice(
+        found.end + (typeof rewrite.timeEnd === 'string' ? found.strayEnd : 0),
+      );
   }
   if (next === line) return null;
   lines[rewrite.line] = next;

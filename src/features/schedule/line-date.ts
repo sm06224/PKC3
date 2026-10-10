@@ -157,6 +157,13 @@ export interface LineDate {
    *   これが無いと、動かした先と元の日の**両方に札が出る**。
    */
   readonly substitutes: string | null;
+  /**
+   * 🔴 **幅として読まれなかった「終わり」の字数**(`20:00..02:00` の `..02:00` = 7)。無ければ 0(#855 段 B-1)。
+   *
+   * ⚠ `end` には**含めない**(読めない字は札にそのまま残す ── 上の `timeEnd`)。目盛りの縁を引いて
+   *   終わりを**書き直す**ときだけ、この字数を一緒に差し替える(残すと `14:00..15:00..02:00` になる)。
+   */
+  readonly strayEnd: number;
   /** 記法そのものの範囲(`@` から)。⚠ **時刻が読めなかったときは日付までで終わる**。 */
   readonly start: number;
   readonly end: number;
@@ -205,6 +212,7 @@ export function readLineDate(line: string): LineDate | null {
         repeat: tail === null ? null : tail.unit,
         // ⚠ 期間には振替を付けない(上の docstring)── 字は札に残る
         substitutes: null,
+        strayEnd: 0,
         start,
         end: tail === null ? base : base + tail.length,
       };
@@ -260,6 +268,11 @@ export function readLineDate(line: string): LineDate | null {
       timeEnd,
       repeat: tail === null ? null : tail.unit,
       substitutes: sub === null ? null : sub.date,
+      // 読めた時刻の直後に、幅として読まれなかった終わり(逆順・夜をまたぐ)が付いているときの字数
+      strayEnd:
+        time !== null && timeEnd === null && rawTimeEnd !== undefined && rawTimeEnd !== ''
+          ? timeSepLen + rawTimeEnd.length
+          : 0,
       start,
       end: tail !== null ? base + tail.length : sub !== null ? base + sub.length : base,
     };

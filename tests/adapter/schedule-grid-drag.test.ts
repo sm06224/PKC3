@@ -735,6 +735,17 @@ describe('レビューの直し(#855 段 B-1)', () => {
       s.detach();
     });
 
+    it('🔴 夜をまたぐ終わり(20:00..02:00)の縁を引くと、古い終わりを差し替える(字が残らない)', async () => {
+      const s = setup('- [ ] 夜勤 @2026-08-23 20:00..02:00\n', 'day');
+      const h = s.laneCards()[0]!.querySelector<HTMLElement>('[data-pkc-field="task-resize"]')!;
+      pointer(h, 'pointerdown', 'mouse', minPx(20 * 60 + 30) - 2);
+      pointer(s.lanes()[0]!, 'pointermove', 'mouse', minPx(21 * 60 + 30));
+      pointer(s.lanes()[0]!, 'pointerup', 'mouse', minPx(21 * 60 + 30));
+      await tick(20);
+      expect(s.store['e1']).toBe('- [ ] 夜勤 @2026-08-23 20:00..21:30\n');
+      s.detach();
+    });
+
     it('縁を引けば、明示の操作として終わりが書かれる(幅 0 から)', async () => {
       const s = setup('- [ ] 会議 @2026-08-23 14:00..14:00\n', 'day');
       const h = s.laneCards()[0]!.querySelector<HTMLElement>('[data-pkc-field="task-resize"]')!;
