@@ -609,6 +609,55 @@ describe('位置を当てる(applyPlaceLayout)', () => {
     applyPlaceLayout(host, () => null, 0);
     expect(host.querySelector<HTMLElement>('.pkc-place')!.style.left).toBe('0px');
   });
+
+  it('🔴 lineOffset 変更時は全数フォールバックして行番号が更新される(#1464)', () => {
+    const host = document.createElement('div');
+    host.innerHTML = RENDERED;
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0);
+    const p1 = host.querySelector<HTMLElement>('#p1')!;
+    expect(p1.getAttribute('data-pkc-place-line')).toBe('0');
+    // lineOffset を変更して再度呼び出し(resolveTitle と embeds は同一のまま)
+    applyPlaceLayout(host, () => null, 4);
+    expect(p1.getAttribute('data-pkc-place-line'), 'lineOffset 変更が反映されていない').toBe('4');
+  });
+
+  it('🔴 resolveTitle 変更時は全数フォールバックして札の題名が更新される(#1464)', () => {
+    const { host } = mounted();
+    const card = host.querySelector<HTMLButtonElement>('#p2 [data-pkc-field="place-card"]')!;
+    expect(card.textContent).toBe('相手のノート');
+    // タイトル解決結果を変更して再度呼び出し(板要素は同一のまま)
+    applyPlaceLayout(host, (l) => (l === 'n2' ? '新しい題名' : null), 0);
+    expect(card.textContent, 'resolveTitle 変更が反映されていない').toBe('新しい題名');
+  });
+
+  it('🔴 embeds 変更時は全数フォールバックして枠付き状態が更新される(#1464)', () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="pkc-format-block pkc-place" id="p2" data-pkc-entry="n2" data-pkc-x="460" data-pkc-y="40" data-pkc-w="200" data-pkc-h="100"></div>';
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0, () => false);
+    const p2 = host.querySelector<HTMLElement>('#p2')!;
+    expect(p2.hasAttribute('data-pkc-place-framed')).toBe(false);
+    // embeds の結果を変更して再度呼び出し(w/h指定があっても framed 印が追従する)
+    applyPlaceLayout(host, () => null, 0, (l) => l === 'n2');
+    expect(p2.hasAttribute('data-pkc-place-framed'), 'embeds 変更で framed 印が付いていない').toBe(true);
+  });
+
+  it('🔴 変更のない板は DOM 操作がスキップされ、動いた板の控えが更新される(#1464)', () => {
+    const { host } = mounted();
+    const p1 = host.querySelector<HTMLElement>('#p1')!;
+    // 2回目: p1 の x 属性を変更して更新
+    p1.setAttribute('data-pkc-x', '200');
+    applyPlaceLayout(host, () => null, 0);
+    expect(p1.style.left).toBe('200px');
+
+    // 3回目: 属性は変更せず再呼び出し -> p1 の控えが x=200 で更新されているため DOM 更新はスキップされる
+    const spy = vi.spyOn(p1.style, 'setProperty');
+    applyPlaceLayout(host, () => null, 0);
+    expect(spy, '控えが更新されておらずスキップされなかった').not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe('書換の門(MOVE_PLACE)', () => {
@@ -1583,5 +1632,25 @@ describe('板の CSS ── 位置は board-host 起点だけ', () => {
     expect(look, '編集面・書き出しで付箋が積み重なる(position が漏れている)').not.toContain(
       'position',
     );
+  });
+});
+
+describe('配置の控え ── 同じ要素の属性がその場で変わったら当て直す(#1464 案 1 の検算)', () => {
+  it('🔴 控えの在る板でも、x / y / 開き行が変わっていれば新しい値を当てる(古い位置を残さない)', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="pkc-format-block pkc-place" data-pkc-x="10" data-pkc-y="20" data-pkc-source-line="3">a</div>';
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0);
+    const el = host.querySelector<HTMLElement>('[data-pkc-x]')!;
+    expect(el.style.left).toBe('10px');
+    // 位置だけ変える
+    el.setAttribute('data-pkc-x', '50');
+    applyPlaceLayout(host, () => null, 0);
+    expect(el.style.left, '控えに当たって古い位置のまま').toBe('50px');
+    // 開き行だけ変える(位置は同じ)── 位置の比較に救われない形で見る
+    el.setAttribute('data-pkc-source-line', '7');
+    applyPlaceLayout(host, () => null, 0);
+    expect(el.getAttribute('data-pkc-place-line'), '開き行が古いまま(掴んで離すと別の行に書く)').toBe('7');
+    host.remove();
   });
 });

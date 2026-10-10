@@ -477,6 +477,39 @@ function applyPlaceLines(
 }
 
 /**
+ * 🔴 板 1 枚の配置の控え(#1464 案 1)。
+ * 変更のない板に対する DOM スタイル・属性・子要素操作をスキップし差分描画を高速化する。
+ * ⚠ ふだんは差分描画が「中身の変わった塊を作り直す」ので、控えが当たる板の属性は前回と同じである ──
+ *   それでも値を全部比べるのは、同じ要素の属性がその場で書き換わった回(本文が正本)にも古い位置を残さないため。
+ */
+interface BlockLayoutCache {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly useW: number | null;
+  readonly useH: number | null;
+  readonly z: number | null;
+  readonly fill: string | null;
+  readonly ink: string | null;
+  readonly stroke: string | null;
+  readonly placed: string;
+  /** 掴んで離したときに書き戻す開き行(`data-pkc-place-line`)── ⚠ 古いまま残すと別の行に書く */
+  readonly line: string | null;
+}
+
+/**
+ * 🔴 全数フォールバック判定のためのホスト単位の控え(#1464 案 1)。
+ */
+interface HostLayoutCache {
+  readonly lineOffset: number;
+  readonly titles: Map<string, string | null>;
+  readonly embedsMap: Map<string, boolean>;
+}
+
+const blockCaches = new WeakMap<HTMLElement, BlockLayoutCache>();
+const hostLayouts = new WeakMap<HTMLElement, HostLayoutCache>();
+
+/**
  * 描画済みの本文に、板の配置を当てる。⚠ **描画のたびに呼ぶ**(冪等)。
  *
  * @param lineOffset 描画の `data-pkc-source-line`(frontmatter を剥がした本文の
@@ -496,6 +529,7 @@ export function applyPlaceLayout(
 ): number {
   const blocks = [...host.querySelectorAll<HTMLElement>(PLACE_SELECTOR)];
   if (blocks.length === 0) {
+    hostLayouts.delete(host);
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
@@ -506,24 +540,90 @@ export function applyPlaceLayout(
     return 0;
   }
   host.classList.add('pkc-board-host');
+
+  const prevHost = hostLayouts.get(host);
+  const forceLineOffset = prevHost !== undefined && prevHost.lineOffset !== lineOffset;
+
+  let forceResolveTitle = false;
+  if (prevHost !== undefined) {
+    for (const el of blocks) {
+      const placed = el.getAttribute('data-pkc-place-entry') ?? el.getAttribute('data-pkc-entry') ?? '';
+      if (placed !== '') {
+        const prevTitle = prevHost.titles.get(placed);
+        const currentTitle = resolveTitle(placed);
+        if (prevTitle !== currentTitle) {
+          forceResolveTitle = true;
+          break;
+        }
+      }
+    }
+  }
+
+  let forceEmbeds = false;
+  if (prevHost !== undefined) {
+    for (const el of blocks) {
+      const placed = el.getAttribute('data-pkc-place-entry') ?? el.getAttribute('data-pkc-entry') ?? '';
+      if (placed !== '') {
+        const prevEmbed = prevHost.embedsMap.get(placed);
+        const currentEmbed = embeds(placed);
+        if (prevEmbed !== currentEmbed) {
+          forceEmbeds = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const forceAll = prevHost === undefined || forceLineOffset || forceResolveTitle || forceEmbeds;
+
+  const nextTitles = new Map<string, string | null>();
+  const nextEmbedsMap = new Map<string, boolean>();
   let bottom = 0;
+
   for (const el of blocks) {
     const x = intAttr(el, 'data-pkc-x') ?? 0;
     const y = intAttr(el, 'data-pkc-y') ?? 0;
     const w = intAttr(el, 'data-pkc-w');
     const h = intAttr(el, 'data-pkc-h');
     const z = intAttr(el, 'data-pkc-z');
-    // 🔑 中身を出す塊は、書いていない辺に**既定の大きさ**を当てる(書いた辺はそのまま)
-    // ⚠ 名前を替える**前**に読む(下の `data-pkc-place-entry` への付け替えは 1 度きり)── 2 回目以降は
-    //   付け替え済みの側から読む
-    const placed = el.getAttribute('data-pkc-place-entry') ?? el.getAttribute('data-pkc-entry') ?? '';
+    const rawEntry = el.getAttribute('data-pkc-entry');
+    const placed = el.getAttribute('data-pkc-place-entry') ?? rawEntry ?? '';
     const sized = placed !== '' && embeds(placed);
+    if (placed !== '') nextEmbedsMap.set(placed, sized);
+
     const useW = w ?? (sized ? PLACE_ENTRY_DEFAULT_W : null);
     const useH = h ?? (sized ? PLACE_ENTRY_DEFAULT_H : null);
-    // 🔑 「既定の大きさを当てるべきと判断した」印 ── 添付ノートは**読んだ後**に答えが変わるので、
-    //   detail が「いまの答え」と見比べて置き直す(`placeFramedChanged`)
+    const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
+    const ink = fill === null ? null : placeInkOf(fill);
+    const stroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
+    const src = intAttr(el, 'data-pkc-source-line');
+    const line = src !== null ? String(src + lineOffset) : null;
+    const title = placed !== '' ? resolveTitle(placed) : null;
+    if (placed !== '') nextTitles.set(placed, title);
+
+    const prev = forceAll ? undefined : blockCaches.get(el);
+    if (
+      prev !== undefined &&
+      prev.id === el.id &&
+      prev.x === x &&
+      prev.y === y &&
+      prev.useW === useW &&
+      prev.useH === useH &&
+      prev.z === z &&
+      prev.fill === fill &&
+      prev.ink === ink &&
+      prev.stroke === stroke &&
+      prev.placed === placed &&
+      prev.line === line
+    ) {
+      bottom = Math.max(bottom, y + (useH ?? 160));
+      continue;
+    }
+
+    // 🔑 中身を出す塊は、書いていない辺に**既定の大きさ**を当てる(書いた辺はそのまま)
     if (sized) el.setAttribute('data-pkc-place-framed', '');
     else el.removeAttribute('data-pkc-place-framed');
+
     el.style.left = `${x}px`;
     // 🔑 `w=` 無しの塊が頭打ちになる幅(器の幅 − `left`)を CSS が引くための値(`app.css` の `--pkc-place-x`)
     el.style.setProperty('--pkc-place-x', `${x}px`);
@@ -534,11 +634,12 @@ export function applyPlaceLayout(
     else el.style.removeProperty('height');
     if (z !== null) el.style.zIndex = String(z);
     else el.style.removeProperty('z-index');
+
     // 🔴 色(#530 段④)── 塗りの上の字は、塗りの明るさに合わせて読める色にする(`placeInkOf`)
-    const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
     setStyleVar(el, '--pkc-place-fill', fill);
-    setStyleVar(el, '--pkc-place-ink', fill === null ? null : placeInkOf(fill));
-    setStyleVar(el, '--pkc-place-stroke', parsePlaceColor(el.getAttribute('data-pkc-stroke')));
+    setStyleVar(el, '--pkc-place-ink', ink);
+    setStyleVar(el, '--pkc-place-stroke', stroke);
+
     /**
      * 🔑 **開き行の行番号**(生の body 基準)を焼く ── 掴んで離したとき、
      * この行番号で本文の開き行を指す。描画が焼いた `data-pkc-source-line` に
@@ -546,9 +647,9 @@ export function applyPlaceLayout(
      * ⚠ 数え直しの第 2 の規則を持たない ── 初版の「N 番目」方式は、描画と
      *   別に数えたせいで**掴んだ付箋と別の行に書いた**(レビュー実測 2026-08-28)。
      */
-    const src = intAttr(el, 'data-pkc-source-line');
-    if (src !== null) el.setAttribute('data-pkc-place-line', String(src + lineOffset));
+    if (line !== null) el.setAttribute('data-pkc-place-line', line);
     else el.removeAttribute('data-pkc-place-line');
+
     /**
      * 🔴 塊の `data-pkc-entry`(`entry=` の kv がそのまま焼かれた物)は
      * **名前を替えて外す** ── binder の `toggle-task` / `edit-cell` は lid を
@@ -556,17 +657,37 @@ export function applyPlaceLayout(
      * **押した印が別ノートの同じ行番号に書かれる**(レビュー実測 2026-08-28)。
      * 札のボタン自身の `data-pkc-entry` は残す(押す動線はそちらが受ける)。
      */
-    const rawEntry = el.getAttribute('data-pkc-entry');
     if (rawEntry !== null) {
       el.setAttribute('data-pkc-place-entry', rawEntry);
       el.removeAttribute('data-pkc-entry');
     }
+
     ensureGrip(el);
     ensureSizeHandle(el);
-    const lid = el.getAttribute('data-pkc-place-entry');
-    if (lid !== null && lid !== '') ensureCard(el, lid, resolveTitle);
+    if (placed !== '') ensureCard(el, placed, resolveTitle);
     bottom = Math.max(bottom, y + (useH ?? 160));
+
+    blockCaches.set(el, {
+      id: el.id,
+      x,
+      y,
+      useW,
+      useH,
+      z,
+      fill,
+      ink,
+      stroke,
+      placed,
+      line,
+    });
   }
+
+  hostLayouts.set(host, {
+    lineOffset,
+    titles: nextTitles,
+    embedsMap: nextEmbedsMap,
+  });
+
   // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
   applyPlaceLines(host, blocks, lineOffset);
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
