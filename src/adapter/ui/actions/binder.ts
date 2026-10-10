@@ -7881,6 +7881,22 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
   },
+  /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
+  'schedule-mode': (dispatcher, target) => {
+    const mode = target.getAttribute('data-pkc-mode');
+    if (mode !== 'list' && mode !== 'day') return;
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
+  },
+  /**
+   * 「日」の ‹ › 今日(#855 段 A-1)。⚠ **行き先の日は描画時に焼いてある**(`data-pkc-day-to`)──
+   * binder に「いま見ている日」の別ソース(実時刻)を持たせない(`schedule-nav` と同じ)。
+   * 空 = 今日へ戻る。
+   */
+  'schedule-day-go': (dispatcher, target) => {
+    const to = target.getAttribute('data-pkc-day-to');
+    if (to === null) return;
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date: to === '' ? null : to });
+  },
   'schedule-today': (dispatcher) => {
     const now = new Date();
     dispatcher.dispatch({
@@ -7894,9 +7910,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 束が無い日(予定 0 件)は**何も起きない** ── 空の束を作ると、
    *   押しても何も無い見出しが増える。
    */
-  'schedule-pick-day': (_dispatcher, target) => {
+  'schedule-pick-day': (dispatcher, target) => {
     const date = target.getAttribute('data-pkc-drop-date');
     if (date === null) return;
+    /**
+     * 🔴 **「日」のときは、押した日を見せる**(#855 段 A-1)。⚠ 一覧のときの「束へ送る」は
+     *   「日」には束が無いので何も起きない ── 押しても何も起きない升目にしない。
+     * 🔑 見せ方は state(`scheduleMode`)で決める ── 面ごとに持たない(別窓の面も同じ state を読む)。
+     */
+    if (dispatcher.getState().scheduleMode === 'day') {
+      dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
+      return;
+    }
     // 🔴 **押した面の束**へ送る(#673 段②)── 予定の面は 2 つ在りうる(`scheduleFaceOf`)
     scheduleFaceOf(target)
       ?.querySelector(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${date}"]`)

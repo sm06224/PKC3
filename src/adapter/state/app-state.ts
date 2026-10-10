@@ -132,6 +132,7 @@ import {
 } from '@features/markdown/line-move';
 import { replaceTaskCards, type TaskScan } from '@features/schedule/task-cards';
 import type { RepeatUnit } from '@features/schedule/repeat';
+import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { CaptureItem } from '@features/capture/capture-item';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -1511,6 +1512,13 @@ export interface AppState {
   viewMode: ViewMode;
   /** calendar の表示月(null = 今日の月を renderer 側で解決)。 */
   calendarMonth: { year: number; month: number } | null;
+  /**
+   * 予定の面の見せ方(#855 段 A-1)。`list` = 日ごとの一覧(既定)/ `day` = 1 日を時間の目盛りに並べる。
+   * ⚠ 保存しない(開き直したら一覧に戻る)── 見え方の一時の選びであって、ノートの中身ではない。
+   */
+  scheduleMode: 'list' | 'day';
+  /** `day` で見ている日(`YYYY-MM-DD`)。`null` = 今日(日付が変わったら追従する)。 */
+  scheduleDay: string | null;
   /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
   showArchived: boolean;
   /**
@@ -2151,6 +2159,8 @@ export const initialState: AppState = {
   appGroupOrders: {},
   appGroupGen: 0,
   calendarMonth: null,
+  scheduleMode: 'list',
+  scheduleDay: null,
   showArchived: false,
   showDoneTasks: false,
   showUndatedTasks: false,
@@ -2882,6 +2892,10 @@ export type UserAction =
   | { type: 'ENTRY_BODY_REFRESHED'; lid: string; body: string }
   | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
+  /** 予定の面の「一覧 / 日」(#855 段 A-1)。 */
+  | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' }
+  /** 「日」で見る日。`null` = 今日に戻る。実在しない日は黙って捨てる(別の日へ寄せない)。 */
+  | { type: 'SET_SCHEDULE_DAY'; date: string | null }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
@@ -8046,6 +8060,26 @@ function reduceCore(
         month = 1;
       }
       return { state: { ...state, calendarMonth: { year, month } }, events: [] };
+    }
+    case 'SET_SCHEDULE_MODE':
+      return { state: { ...state, scheduleMode: action.mode }, events: [] };
+    case 'SET_SCHEDULE_DAY': {
+      // ⚠ 今日に戻るときは小さな月も今月へ戻す(日と月が別の場所を指したままにしない)
+      if (action.date === null)
+        return { state: { ...state, scheduleDay: null, calendarMonth: null }, events: [] };
+      if (!isRealCalendarDate(action.date)) return { state, events: [] };
+      // 🔑 見ている日の月を小さな月も映す(‹ › で月をまたいだとき、升目が置いて行かれない)
+      return {
+        state: {
+          ...state,
+          scheduleDay: action.date,
+          calendarMonth: {
+            year: Number(action.date.slice(0, 4)),
+            month: Number(action.date.slice(5, 7)),
+          },
+        },
+        events: [],
+      };
     }
     case 'TOGGLE_SHOW_ARCHIVED':
       return { state: { ...state, showArchived: !state.showArchived }, events: [] };

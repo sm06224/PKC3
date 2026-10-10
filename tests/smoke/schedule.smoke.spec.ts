@@ -761,6 +761,42 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
     '足したのに、その日の束へ出ていない',
   ).toHaveCount(1);
 
+  /**
+   * 🔴 **「日」の目盛りで、14:00..15:00 の札が 14:00 の高さに 1 時間ぶん**(#855 段 A-1)。
+   *
+   * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで見る(`scripts/smoke-budget.mjs`)。
+   * ⚠ unit(`tests/adapter/schedule-day.test.ts`)は位置を CSS の変数で見ている。**1 時間が実際に
+   *   40px になるか / 押している側が見分けられるか**は、実ブラウザの計算後の値でしか言えない。
+   * 🔑 位置は目盛り(`schedule-day-grid`)の上端からの差で見る ── 最初に見せる位置へ動いた後でも
+   *   差は変わらない。
+   */
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill(`- [ ] 会議 @${value} 14:00..15:00`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
+  const dayCard = pane
+    .locator('[data-pkc-field="schedule-day-lane"] > [data-pkc-entry]')
+    .filter({ hasText: '会議' });
+  await expect(dayCard, '「日」に 14:00 の札が出ていない').toHaveCount(1);
+  const gridBox = (await pane.locator('[data-pkc-field="schedule-day-grid"]').boundingBox())!;
+  const cardBox = (await dayCard.boundingBox())!;
+  expect(cardBox.height, '1 時間の札が 40px の高さではない').toBeGreaterThan(39);
+  expect(cardBox.height).toBeLessThan(41);
+  expect(cardBox.y - gridBox.y, '札が 14:00 の高さ(14 × 40px)にない').toBeGreaterThan(559);
+  expect(cardBox.y - gridBox.y).toBeLessThan(561);
+  // 時刻なしの札(足した用事)は目盛りではなく終日の枠
+  await expect(
+    pane.locator('[data-pkc-field="schedule-day-allday"] [data-pkc-entry]'),
+    '時刻のない札が終日の枠に居ない',
+  ).toContainText('きょうの用事');
+  // 🔴 押している側が画面で見分けられる(属性だけでなく計算後の色が違う)
+  const bg = (mode: string) =>
+    pane
+      .locator(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`)
+      .evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await bg('day'), '押している「日」が「一覧」と同じ色').not.toBe(await bg('list'));
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

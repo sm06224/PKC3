@@ -6101,6 +6101,141 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--danger, #b3261e);
 }
 
+/* ── 予定の「日」(#855 段 A-1)────────────────────────────
+ * 1 日を 0:00〜24:00 の目盛りに並べる。札は一覧と同じ札(`schedule-cards` の直下)なので、
+ * 掴む・押す・開くは一覧の規則がそのまま効く。ここが足すのは**置き場所**だけ。
+ * 位置は `schedule-day.ts` が焼く変数 4 つ(`--day-start` / `--day-span` は分、
+ * `--day-col` / `--day-cols` は列)から計算する ── 1 時間の高さは `--day-hour` の 1 か所。
+ * 地は無彩色。色は「押している側」(`data-pkc-choice-btn`)と「今日」にだけ使う。 */
+[data-pkc-field='schedule-modes'] {
+  display: flex;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-modes'] button {
+  padding: 1px 10px;
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+[data-pkc-region='schedule-day'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='schedule-day-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-day-label'] {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='schedule-day-head'] button {
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: var(--btn-fs-bar);
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-day-head'] button:hover:not(:disabled) {
+  color: var(--fg);
+}
+[data-pkc-field='schedule-day-head'] button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+[data-pkc-field='schedule-day-allday'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-field='schedule-day-allday-label'] {
+  font-size: 10px;
+  color: var(--muted);
+}
+/* 目盛りは箱の中で縦に動く(1 日 24 時間ぶんの高さを、左の列に丸ごと広げない) */
+[data-pkc-field='schedule-day-scroll'] {
+  max-height: 22rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-field='schedule-day-grid'] {
+  position: relative;
+}
+[data-pkc-field='schedule-day-hour'] {
+  box-sizing: border-box;
+  height: var(--day-hour);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='schedule-day-hour']:first-child {
+  border-top-color: transparent;
+}
+[data-pkc-field='schedule-day-hour'] > span {
+  display: block;
+  width: 2.25rem;
+  padding-right: var(--s2);
+  text-align: right;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-0.45em);
+}
+[data-pkc-field='schedule-day-hour']:first-child > span {
+  transform: none;
+}
+[data-pkc-field='schedule-day-lane'] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2.5rem;
+  right: 0;
+  display: block;
+}
+/* 目盛りの札: 位置と高さは変数から。⚠ 実際の長さが短くても 20px は残す(読めなくなるため) */
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry] {
+  position: absolute;
+  box-sizing: border-box;
+  top: calc(var(--day-hour) * var(--day-start, 0) / 60);
+  /* ⚠ 最低の高さ(1 時間の半分 = 30 分)は `day-layout.ts` の MIN_SLOT_MINUTES と同じ値 ── 重なりの判定がこの長さで行われる */
+  height: max(calc(var(--day-hour) / 2), calc(var(--day-hour) * var(--day-span, 30) / 60));
+  left: calc(100% * var(--day-col, 0) / var(--day-cols, 1));
+  width: calc(100% / var(--day-cols, 1));
+  overflow: hidden;
+  padding: 1px var(--s2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='schedule-day-lane'] [data-pkc-field='text'] {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 出どころのノート名は狭い札では出さない(高さ 20px に収める) */
+[data-pkc-field='schedule-day-lane'] [data-pkc-field='note'] {
+  display: none;
+}
+
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
  * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
  * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある

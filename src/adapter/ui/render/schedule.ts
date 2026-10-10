@@ -40,9 +40,28 @@ import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
+import { buildPressedButton } from './choice-buttons';
+import { ScheduleDay } from './schedule-day';
 import { createTaskCard, patchTaskCard } from './task-card';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/**
+ * 🔴 **「日」に出す 1 日ぶん**(#855 段 A-1)── **その日を「起点の日」にして** `buildAgenda` に束ねさせる。
+ *
+ * ⚠ 一覧の束(今日を起点に 62 日先まで)から拾わない ── 拾うと、繰り返しは**過ぎた日に 1 枚も出ず**、
+ *   先の日も**回の上限(200)で途切れる**(`毎日` は 200 日先から空になる。着地前レビューが読んで指摘)。
+ * 🔑 起点をその日にすると、繰り返しは**その日から**数えるので(`firstIndexFrom` が直に飛ぶ)、何年先でも
+ *   過ぎた日でも 1 回ぶんだけ展開する。展開の規則は `buildAgenda` 1 本のまま(規則を 2 つ持たない)。
+ * ⚠ 一覧が過ぎた回を出さないのは「期限切れが 340 個並ぶ」からで、1 日だけを見る面にその理由は当たらない。
+ */
+function dayItems(
+  items: readonly AgendaItem[],
+  day: string,
+  skip: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly AgendaItem[] {
+  return buildAgenda(items, day, false, { skip, horizonDays: 0 }).find((g) => g.date === day)?.cards ?? [];
+}
 
 /** 落とし先を表す属性。⚠ **空文字 = 日付なし**(属性が無いのとは別物)。 */
 export const DROP_DATE = 'data-pkc-drop-date';
@@ -78,7 +97,15 @@ export class ScheduleRenderer {
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
+    /** 「一覧 / 日」の 2 つ(#855 段 A-1)。 */
+    modes: HTMLButtonElement[];
+    /** 「予定を足す」の日付の欄(「日」では見ている日に合わせる)。 */
+    quickDate: HTMLInputElement;
   } | null = null;
+  /** 「予定を足す」の日付を最後に合わせた日(`null` = 合わせていない)。 */
+  private quickDay: string | null = null;
+  /** 「日」の描き手(#855 段 A-1)。一覧のときは隠すだけで捨てない(札と位置を使い回す)。 */
+  private readonly day = new ScheduleDay(DROP_DATE);
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
@@ -90,6 +117,8 @@ export class ScheduleRenderer {
     showDone: boolean;
     showUndated: boolean;
     calendarMonth: AppState['calendarMonth'];
+    mode: AppState['scheduleMode'];
+    shownDay: string | null;
     selected: string | null;
     error: string | null;
     today: string;
@@ -118,6 +147,9 @@ export class ScheduleRenderer {
       showDone: state.showDoneTasks,
       showUndated: state.showUndatedTasks,
       calendarMonth: state.calendarMonth,
+      // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
+      mode: state.scheduleMode,
+      shownDay: state.scheduleDay,
       selected: state.selectedLid,
       error: state.error,
       today,
@@ -177,9 +209,10 @@ export class ScheduleRenderer {
      *   何も起きないので、user から見ると**壊れて見える**)。
      * ⚠ 片付けたノートの札も入れる ── 同じ理由(隠れているだけで実体は在る)。
      */
-    const groups = buildAgenda(items, today, state.showUndatedTasks, {
-      skip: materializedDates(all),
-    });
+    const dayMode = state.scheduleMode === 'day';
+    const shown = state.scheduleDay ?? today;
+    const skip = materializedDates(all);
+    const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
     this.paintMonth(frame, state, today, groups);
@@ -202,7 +235,41 @@ export class ScheduleRenderer {
      */
     const anyToggle = !frame.undated.hidden || !frame.done.hidden || !frame.archived.hidden;
     if (frame.toggles.hidden !== !anyToggle) frame.toggles.hidden = !anyToggle;
-    this.paintGroups(frame.groups, groups, state);
+    /**
+     * 一覧は日ごとの束、「日」は 1 日の目盛り。⚠ 「日」のときも**日付のない束**は一覧の器に残す
+     * (「日付のない項目も出す」の切替が、どちらの見せ方でも効く)。
+     */
+    for (const m of frame.modes) {
+      const on = m.getAttribute('data-pkc-mode') === state.scheduleMode;
+      const pressed = on ? 'true' : 'false';
+      if (m.getAttribute('aria-pressed') !== pressed) m.setAttribute('aria-pressed', pressed);
+    }
+    this.day.el.hidden = !dayMode;
+    /**
+     * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
+     *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
+     *   描き直しのたびに入れ直すと、user が欄を直した字(空にする = 日付なしで足す、も含む)を奪う。
+     */
+    if (dayMode && this.quickDay !== shown) {
+      frame.quickDate.value = shown;
+      this.quickDay = shown;
+    } else if (!dayMode) this.quickDay = null;
+    if (dayMode) {
+      this.day.paint({
+        day: shown,
+        today,
+        items: dayItems(items, shown, skip),
+        titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
+        selectedLid: state.selectedLid,
+        year: at.getFullYear(),
+        settled: state.taskScan !== null,
+      });
+    } else this.day.leave();
+    this.paintGroups(
+      frame.groups,
+      dayMode ? groups.filter((g) => g.date === null) : groups,
+      state,
+    );
   }
 
   /**
@@ -496,6 +563,30 @@ export class ScheduleRenderer {
     todayBtn.textContent = '今月に戻る';
     bar.append(nav('‹', -1), month, nav('›', 1), todayBtn);
     /**
+     * 🔴 **見せ方 2 つ ── 一覧 / 日**(#855 段 A-1)。既定は一覧(いままでの見え方)。
+     * ⚠ 押している側は `aria-pressed` + 濃さ(`data-pkc-choice-btn` の規則)で示す。
+     */
+    const modeRow = document.createElement('div');
+    modeRow.setAttribute('data-pkc-field', 'schedule-modes');
+    modeRow.setAttribute('role', 'group');
+    modeRow.setAttribute('aria-label', '予定の見せ方');
+    const modes = (
+      [
+        ['list', '一覧', '日ごとの一覧で見ます'],
+        ['day', '日', '1 日を時間の目盛りに並べて見ます'],
+      ] as const
+    ).map(([mode, label, title]) =>
+      buildPressedButton({
+        action: 'schedule-mode',
+        dataAttr: 'data-pkc-mode',
+        value: mode,
+        label,
+        pressed: mode === 'list',
+        title,
+      }),
+    );
+    modeRow.append(...modes);
+    /**
      * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
      *
      * > user の物語: 予定タブで今週を眺めている。「木曜に見積を出す」を足したい。
@@ -583,8 +674,9 @@ export class ScheduleRenderer {
      *   属性が違うので、器の属性ではなく**描画器が自分の印を焼く**。
      */
     this.region.setAttribute('data-pkc-region', 'schedule');
-    this.region.append(bar, quick, grid, note, toggles, groups);
-    this.frame = { month, grid, note, undated, done, archived, toggles, groups };
+    this.day.el.hidden = true;
+    this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, groups);
+    this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }
