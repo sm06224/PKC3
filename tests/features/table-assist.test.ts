@@ -108,3 +108,22 @@ describe('🔴 Markdown 表の編集アシスト (Tab / Shift+Tab) (#1093)', () 
     }
   });
 });
+
+describe('🔴 升の区切りは画面の読み手と同じ規則(#1426)', () => {
+  it('`\\` を k 本続けた直後の `|` ── k の偶奇によらず、画面と同じ列で Tab が移る', async () => {
+    const MarkdownIt = (await import('markdown-it')).default;
+    const md = new MarkdownIt();
+    for (let k = 1; k <= 5; k += 1) {
+      const header = `| a${'\\'.repeat(k)}|b | c |`;
+      const table = `${header}\n|---|---|\n| x | y |`;
+      // 前提: 画面の読み手は 2 列の表として描く(3 列なら区切り行と合わず表にならない)
+      const th = (md.render(table).match(/<th>/gu) ?? []).length;
+      expect(th, `k=${k}: 読み手が 2 列と読んでいない(前提が崩れている)`).toBe(2);
+      const res = tableOnTab(table, 2, false);
+      expect(res?.kind, `k=${k}`).toBe('navigate');
+      if (res?.kind === 'navigate') {
+        expect(table.slice(res.start, res.end), `k=${k}: 2 つ目の升へ移っていない`).toBe('c');
+      }
+    }
+  });
+});
