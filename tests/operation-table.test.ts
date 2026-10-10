@@ -275,7 +275,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   // 🔴 2026-10-01(#918 段⑦): SQL の面で足した相手を外す口。外す相手の lid は押し口自身が運ぶ
   'remove-sql-source',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
-  'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-nav', 'schedule-quick-add',
+  'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-day-go', 'schedule-mode',
+  'schedule-nav', 'schedule-quick-add',
   'schedule-today',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
@@ -466,6 +467,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11(#855 段 A-1): 予定の面の「一覧 / 日」(`schedule-mode`)と「日」の ‹ › 今日(`schedule-day-go`)で受け手 +2 ──
+      //   登記は増えない(押し口は予定の面の中にしか無く、鍵も持たない。`schedule-nav` / `schedule-today` と同じ置き場)。
+      //   押したボタンの属性(見せ方 / 行き先の日)を渡すだけの N。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-07(#1407 段①): 設定の「ブラウザの AI に許したこと」の取り消し(`revoke-agent`)で受け手 +1 ── 登記は増えない
       //   (押し口は設定の一覧の行にしか無く、鍵も持たない)。押した範囲の名前だけを渡す N(`revoke-extension` と同じ仕分け)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
@@ -743,12 +747,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 388,
-      receivers: 323,
+      total: 390,
+      receivers: 325,
       registered: 106,
       both: 41,
       outsideActionsTable: 65,
-      unregistered: 282,
+      unregistered: 284,
     });
   });
 

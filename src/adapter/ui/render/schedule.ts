@@ -30,6 +30,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import {
+  AGENDA_REPEAT_HORIZON_DAYS,
   buildAgenda,
   itemOfCard,
   itemOfNote,
@@ -40,9 +41,18 @@ import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
+import { daysBetween } from '@features/datetime/date-math';
+import { buildPressedButton } from './choice-buttons';
+import { ScheduleDay } from './schedule-day';
 import { createTaskCard, patchTaskCard } from './task-card';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
+
+/**
+ * 「日」で先の日を見るときの、繰り返しを数える日数の上限(5 年)。
+ * ⚠ 上限が無いと、遠い日を指した 1 回の操作で束が際限なく作られる(`agenda.ts` の窓と同じ理由)。
+ */
+const DAY_HORIZON_MAX_DAYS = 366 * 5;
 
 /** 落とし先を表す属性。⚠ **空文字 = 日付なし**(属性が無いのとは別物)。 */
 export const DROP_DATE = 'data-pkc-drop-date';
@@ -78,7 +88,11 @@ export class ScheduleRenderer {
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
+    /** 「一覧 / 日」の 2 つ(#855 段 A-1)。 */
+    modes: HTMLButtonElement[];
   } | null = null;
+  /** 「日」の描き手(#855 段 A-1)。一覧のときは隠すだけで捨てない(札と位置を使い回す)。 */
+  private readonly day = new ScheduleDay(DROP_DATE);
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
@@ -90,6 +104,8 @@ export class ScheduleRenderer {
     showDone: boolean;
     showUndated: boolean;
     calendarMonth: AppState['calendarMonth'];
+    mode: AppState['scheduleMode'];
+    shownDay: string | null;
     selected: string | null;
     error: string | null;
     today: string;
@@ -118,6 +134,9 @@ export class ScheduleRenderer {
       showDone: state.showDoneTasks,
       showUndated: state.showUndatedTasks,
       calendarMonth: state.calendarMonth,
+      // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
+      mode: state.scheduleMode,
+      shownDay: state.scheduleDay,
       selected: state.selectedLid,
       error: state.error,
       today,
@@ -177,8 +196,20 @@ export class ScheduleRenderer {
      *   何も起きないので、user から見ると**壊れて見える**)。
      * ⚠ 片付けたノートの札も入れる ── 同じ理由(隠れているだけで実体は在る)。
      */
+    const dayMode = state.scheduleMode === 'day';
+    const shown = state.scheduleDay ?? today;
+    /**
+     * 🔴 **「日」で先の日を見るとき、繰り返しがその日まで届くように窓を伸ばす**(#855 段 A-1)。
+     * ⚠ 伸ばさないと、`毎週` の予定が 3 か月先の日には**出ない**(束が作られていない)。
+     * 🔑 展開の規則は `buildAgenda` 1 本のまま ── ここは窓の長さを渡すだけ(規則を 2 つ持たない)。
+     *   過ぎた日の繰り返しは一覧と同じく出さない(今日から先だけ)。
+     */
+    const ahead = dayMode ? (daysBetween(today, shown) ?? 0) : 0;
     const groups = buildAgenda(items, today, state.showUndatedTasks, {
       skip: materializedDates(all),
+      ...(ahead + 1 > AGENDA_REPEAT_HORIZON_DAYS
+        ? { horizonDays: Math.min(ahead + 1, DAY_HORIZON_MAX_DAYS) }
+        : {}),
     });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
@@ -202,7 +233,32 @@ export class ScheduleRenderer {
      */
     const anyToggle = !frame.undated.hidden || !frame.done.hidden || !frame.archived.hidden;
     if (frame.toggles.hidden !== !anyToggle) frame.toggles.hidden = !anyToggle;
-    this.paintGroups(frame.groups, groups, state);
+    /**
+     * 一覧は日ごとの束、「日」は 1 日の目盛り。⚠ 「日」のときも**日付のない束**は一覧の器に残す
+     * (「日付のない項目も出す」の切替が、どちらの見せ方でも効く)。
+     */
+    for (const m of frame.modes) {
+      const on = m.getAttribute('data-pkc-mode') === state.scheduleMode;
+      const pressed = on ? 'true' : 'false';
+      if (m.getAttribute('aria-pressed') !== pressed) m.setAttribute('aria-pressed', pressed);
+    }
+    this.day.el.hidden = !dayMode;
+    if (dayMode) {
+      this.day.paint({
+        day: shown,
+        today,
+        items: groups.find((g) => g.date === shown)?.cards ?? [],
+        titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
+        selectedLid: state.selectedLid,
+        year: at.getFullYear(),
+        settled: state.taskScan !== null,
+      });
+    } else this.day.leave();
+    this.paintGroups(
+      frame.groups,
+      dayMode ? groups.filter((g) => g.date === null) : groups,
+      state,
+    );
   }
 
   /**
@@ -496,6 +552,30 @@ export class ScheduleRenderer {
     todayBtn.textContent = '今月に戻る';
     bar.append(nav('‹', -1), month, nav('›', 1), todayBtn);
     /**
+     * 🔴 **見せ方 2 つ ── 一覧 / 日**(#855 段 A-1)。既定は一覧(いままでの見え方)。
+     * ⚠ 押している側は `aria-pressed` + 濃さ(`data-pkc-choice-btn` の規則)で示す。
+     */
+    const modeRow = document.createElement('div');
+    modeRow.setAttribute('data-pkc-field', 'schedule-modes');
+    modeRow.setAttribute('role', 'group');
+    modeRow.setAttribute('aria-label', '予定の見せ方');
+    const modes = (
+      [
+        ['list', '一覧', '日ごとの一覧で見ます'],
+        ['day', '日', '1 日を時間の目盛りに並べて見ます'],
+      ] as const
+    ).map(([mode, label, title]) =>
+      buildPressedButton({
+        action: 'schedule-mode',
+        dataAttr: 'data-pkc-mode',
+        value: mode,
+        label,
+        pressed: mode === 'list',
+        title,
+      }),
+    );
+    modeRow.append(...modes);
+    /**
      * 🔴 **予定の面から、その場でやることを足す**(#402 ②)。
      *
      * > user の物語: 予定タブで今週を眺めている。「木曜に見積を出す」を足したい。
@@ -583,8 +663,9 @@ export class ScheduleRenderer {
      *   属性が違うので、器の属性ではなく**描画器が自分の印を焼く**。
      */
     this.region.setAttribute('data-pkc-region', 'schedule');
-    this.region.append(bar, quick, grid, note, toggles, groups);
-    this.frame = { month, grid, note, undated, done, archived, toggles, groups };
+    this.day.el.hidden = true;
+    this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, groups);
+    this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes };
     return this.frame;
   }
 }
