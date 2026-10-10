@@ -836,6 +836,78 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await expect(whenOf, '下の縁を 30 分引いたのに、終わりが 17:30 にならない').toHaveText('16:00〜17:30');
 
   /**
+   * 🔴 **「日」の空いた所を 10:00 から 11:30 までドラッグして名前を打ち、Enter で札が出る**(#855 段 B-2)。
+   *
+   * ⚠ 起動を増やさない ── 札を動かした道中の続きで、本物のマウスとキーボードを通す。
+   *   unit(`tests/adapter/schedule-grid-create.test.ts`)は列の高さを差し替え、焦点も happy-dom の物 ──
+   *   **実際の 1 時間 40px で、離した後に入力欄へ本当に焦点が入り、打った字が本文へ書かれて札になるか**は
+   *   ここでしか言えない。
+   * 🔑 観測点は札の字(本文を走査し直して出る)と、枠の中の入力欄の焦点。
+   */
+  const dayScroll = pane.locator('[data-pkc-field="schedule-day-scroll"]');
+  await dayScroll.evaluate((el) => {
+    el.scrollTop = 340; // 10:00(400px)が上端から 60px の所に来る
+  });
+  const laneBox = (await pane.locator('[data-pkc-field="schedule-day-lane"]').boundingBox())!;
+  const cx = laneBox.x + laneBox.width * 0.25;
+  await page.mouse.move(cx, laneBox.y + 400);
+  await page.mouse.down();
+  await page.mouse.move(cx, laneBox.y + 400 + 20, { steps: 4 });
+  await page.mouse.move(cx, laneBox.y + 400 + 60, { steps: 6 });
+  await expect(
+    pane.locator('[data-pkc-field="schedule-drag-ghost"]'),
+    '空いた所をドラッグしている間、作る枠(影)が出ていない',
+  ).toHaveText('10:00〜11:30');
+  await page.mouse.up();
+  const createInput = pane.locator('[data-pkc-field="schedule-create-input"]');
+  await expect(createInput, '離したのに入力欄が出ていない').toBeVisible();
+  await expect(createInput, '入力欄に焦点が入っていない').toBeFocused();
+  await expect(
+    pane.locator('[data-pkc-field="schedule-create-box"]'),
+    '枠が 10:00〜11:30 を言っていない',
+  ).toContainText('10:00〜11:30');
+  await page.keyboard.type('見積レビュー');
+  await page.keyboard.press('Enter');
+  const created = pane
+    .locator('[data-pkc-field="schedule-day-lane"] > [data-pkc-entry]')
+    .filter({ hasText: '見積レビュー' });
+  await expect(created, '名前を打って Enter を押したのに、「日」に札が出ていない').toHaveCount(1);
+  await expect(created.locator('[data-pkc-field="when"]')).toHaveText('10:00〜11:30');
+  await expect(createInput, '書けたのに入力欄が残っている').toHaveCount(0);
+
+  /**
+   * 🔴 **短い枠(ダブルクリックの 30 分 = 20px / 15 分のドラッグ = 10px)でも、入力欄が全部見える**
+   * (#855 段 B-2 の着地前レビュー)。⚠ 枠の高さは時間に比例するので、直す前は 10px の枠に入力欄が
+   * 隠れて打てなかった。実ブラウザの計算後の大きさでしか言えない。
+   */
+  const laneEl = pane.locator('[data-pkc-field="schedule-day-lane"]');
+  const insideLane = async (): Promise<void> => {
+    const lb = (await laneEl.boundingBox())!;
+    const ib = (await createInput.boundingBox())!;
+    expect(ib.height, '入力欄が 16px 未満に潰れている').toBeGreaterThanOrEqual(16);
+    expect(ib.y, '入力欄が列の上にはみ出している').toBeGreaterThanOrEqual(lb.y - 1);
+    expect(ib.y + ib.height, '入力欄が列の下にはみ出している').toBeLessThanOrEqual(lb.y + lb.height + 1);
+    const vp = page.viewportSize()!;
+    expect(ib.y + ib.height, '入力欄が画面の外にある').toBeLessThanOrEqual(vp.height);
+  };
+  const lane2 = (await laneEl.boundingBox())!;
+  await page.mouse.dblclick(lane2.x + lane2.width * 0.25, lane2.y + 480); // 12:00
+  await expect(createInput, 'ダブルクリックの 30 分の枠に入力欄が見えていない').toBeVisible();
+  await insideLane();
+  await page.keyboard.press('Escape');
+  await expect(createInput).toHaveCount(0);
+  const lane3 = (await laneEl.boundingBox())!;
+  await page.mouse.move(lane3.x + lane3.width * 0.25, lane3.y + 480);
+  await page.mouse.down();
+  await page.mouse.move(lane3.x + lane3.width * 0.25, lane3.y + 480 + 10, { steps: 4 });
+  await expect(pane.locator('[data-pkc-field="schedule-drag-ghost"]')).toHaveText('12:00〜12:15');
+  await page.mouse.up();
+  await expect(createInput, '15 分の枠に入力欄が見えていない').toBeVisible();
+  await insideLane();
+  await page.keyboard.press('Escape');
+  await expect(createInput).toHaveCount(0);
+
+  /**
    * 🔴 **左の列の「週」は別のウィンドウで開く。開いた窓は 7 列で、その日の列に 14:00 の札**(#855 段 A-2)。
    *
    * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで、押して出る窓(popup)を見る
@@ -892,6 +964,10 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   );
   // ⚠ 今日が土曜(最後の列)なら、ひとつ前の列へ動かす
   const nextLane = weekLanes.nth(laneIdx < 6 ? laneIdx + 1 : laneIdx - 1);
+  // ⚠ 開いた窓は最初の予定の 1 時間前へ送って開く ── 「日」で 10:00 の札を作った後は 16:00 の札が窓の下に出ている
+  await centre.locator('[data-pkc-field="schedule-weekview-scroll"]').evaluate((el) => {
+    el.scrollTop = 600; // 15:00 を上端に(端の自動送りに掛からない所へ 16:00 の札を置く)
+  });
   const wFrom = (await weekCard.boundingBox())!;
   const wTo = (await nextLane.boundingBox())!;
   const wx = wFrom.x + wFrom.width / 2;

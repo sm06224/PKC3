@@ -714,6 +714,103 @@ function randomSuffix(): string {
   }
   return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 }
+/**
+ * 🔴 **予定を 1 行、今日のノートの末尾へ足す**(#402 ② の「予定の面から足す」/ #855 段 B-2 の
+ * 「目盛りをドラッグして足す」の**共通の書き口**)。
+ *
+ * 🔑 **新しい入れ物を作らない** ── 行き先は「**今日のノート**」で、その決め方は `open-today` と
+ *   **同じ 1 本**(`todayNoteTitle` / `findTodayNote`)。書込も既存の追記(`APPEND_TO_ENTRY`)を通る。
+ *   ⚠ ノートがまだ無ければ**先に作る** ── 作成の書込と追記の読みは effect の**同じ 1 本の chain** に
+ *   載るので、順序は保たれる。
+ * ⚠ 面は切り替えない・編集にも入らない(眺めたまま足したい ── #300「補助が主の作業領域を奪わない」)。
+ *
+ * @returns 書込が通ったか。⚠ 断った回(理由は `OP_FAILED` で出ている)は `false` ── 呼び側は
+ *   **通ったときだけ欄を空にする**(#1051。打った字を黙って捨てない)。
+ */
+export function addScheduleItem(
+  dispatcher: Dispatcher,
+  item: {
+    readonly text: string;
+    /** `YYYY-MM-DD`。空 = 日付なし。 */
+    readonly date: string;
+    readonly time?: string | null;
+    readonly timeEnd?: string | null;
+  },
+): boolean {
+  const st = dispatcher.getState();
+  /**
+   * 🔴 **編集中でも、今日のノートが別のノートなら足せる**(#1081。user 裁定 2026-09-27「推奨で」)。
+   * ⚠ 直す前は `phase !== 'ready'` で**丸ごと**断っていた ── 行き先(今日のノート)は
+   *   編集中のノートと別のことが多いのに、C6 / #1043 の「編集中でも別のノートは止めない」から
+   *   外れていた。
+   * 🔑 断るのは 3 つ:①読み込み中・保存に失敗して止まっている(ここ)②今日のノートが
+   *   **まだ無い**のに編集中(作る `CREATE_ENTRY` は編集中に通らない ── 下)③今日のノートが
+   *   **編集中のノート自身** / 章の欄が開いている / 書込中(reducer の `APPEND_TO_ENTRY` が
+   *   同じ門 `bodyWriteBlockReason` で理由を出して断る)。
+   */
+  if (st.phase !== 'ready' && st.phase !== 'editing') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+    return false;
+  }
+  const text = item.text.trim();
+  if (text === '') {
+    // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'やることを入力してください' });
+    return false;
+  }
+  // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28 14:00..15:30`)── ここで綴らない
+  const line = `- [ ] ${text}${
+    item.date === ''
+      ? ''
+      : ` ${formatLineDate(item.date, item.time ?? null, null, null, null, item.timeEnd ?? null)}`
+  }`;
+  const title = todayNoteTitle(new Date());
+  let lid = findTodayNote(st.entryMetas.values(), title)?.lid ?? null;
+  if (lid === null) {
+    /**
+     * ⚠ **作るのは読む画面のときだけ** ── `CREATE_ENTRY` は編集中に通らない(通すと編集の
+     *   状態を置き換える)。理由も「今日のノートがまだ無いから」と言う ── 同じ「足す」が
+     *   今日のノートの有無で通ったり断られたりするので、違いが読めるようにする。
+     * ⚠ 断った回は欄を空にしない(呼び側は `false` で分かる)。
+     */
+    if (st.phase === 'editing') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `今日のノートがまだ無いので、${phaseBlockReason('editing')}足してください`,
+      });
+      return false;
+    }
+    lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title,
+      parentLid: null,
+      relationId: generateLid(),
+      // ⚠ **編集に入らない**(予定を眺めたまま足したいので、面を奪わない)
+      edit: false,
+    });
+  }
+  /**
+   * 🔴 **通ったときだけ欄を空にする**(#1051)。⚠ 直す前は撃った直後に必ず空にしていた
+   *   ── 前の追記の書込が返る前に押すと reducer が断る(直す前は**黙って**捨てていた)ので、
+   *   **打った字ごと消えていた**。
+   * 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない)── 判定を
+   *   ここに 2 つ目として書かない(§7)。
+   */
+  const lockBefore = dispatcher.getState().writeLock;
+  dispatcher.dispatch({
+    type: 'APPEND_TO_ENTRY',
+    lid,
+    text: line,
+    heading: null,
+    // ⚠ 末尾へ足す(追記先の選択は本文の面の話 ── ここでは選ばせない)
+    target: null,
+  });
+  return dispatcher.getState().writeLock !== lockBefore;
+}
+
 export function generateLid(): string {
   lidCounter += 1;
   return `${Date.now().toString(36)}-${lidCounter.toString(36).padStart(4, '0')}-${randomSuffix()}`;
@@ -6126,79 +6223,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   本文へ飛ばされたいわけではない(#300「補助が主の作業領域を奪わない」)。
    */
   'schedule-quick-add': (dispatcher, target, services) => {
-    const st = dispatcher.getState();
-    /**
-     * 🔴 **編集中でも、今日のノートが別のノートなら足せる**(#1081。user 裁定 2026-09-27「推奨で」)。
-     * ⚠ 直す前は `phase !== 'ready'` で**丸ごと**断っていた ── 行き先(今日のノート)は
-     *   編集中のノートと別のことが多いのに、C6 / #1043 の「編集中でも別のノートは止めない」から
-     *   外れていた。
-     * 🔑 断るのは 3 つ:①読み込み中・保存に失敗して止まっている(ここ)②今日のノートが
-     *   **まだ無い**のに編集中(作る `CREATE_ENTRY` は編集中に通らない ── 下)③今日のノートが
-     *   **編集中のノート自身** / 章の欄が開いている / 書込中(reducer の `APPEND_TO_ENTRY` が
-     *   同じ門 `bodyWriteBlockReason` で理由を出して断る)。
-     */
-    if (st.phase !== 'ready' && st.phase !== 'editing') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
-      return;
-    }
     // 🔴 **押した面の欄**を読む(#673 段②)── `root` から引くと別の面の空欄を読む
     const face = scheduleFaceOf(target);
     const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
-    const text = (textEl?.value ?? '').trim();
-    if (text === '') {
-      // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
-      dispatcher.dispatch({ type: 'OP_FAILED', error: 'やることを入力してください' });
-      return;
-    }
     const date =
       face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
-    // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28`)── ここで綴らない
-    const line = `- [ ] ${text}${date === '' ? '' : ` ${formatLineDate(date)}`}`;
-    const title = todayNoteTitle(new Date());
-    let lid = findTodayNote(st.entryMetas.values(), title)?.lid ?? null;
-    if (lid === null) {
-      /**
-       * ⚠ **作るのは読む画面のときだけ** ── `CREATE_ENTRY` は編集中に通らない(通すと編集の
-       *   状態を置き換える)。理由も「今日のノートがまだ無いから」と言う ── 同じ「足す」が
-       *   今日のノートの有無で通ったり断られたりするので、違いが読めるようにする。
-       * ⚠ 断った回は欄を空にしない(下の `return` は欄に触らない)。
-       */
-      if (st.phase === 'editing') {
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error: `今日のノートがまだ無いので、${phaseBlockReason('editing')}足してください`,
-        });
-        return;
-      }
-      lid = generateLid();
-      dispatcher.dispatch({
-        type: 'CREATE_ENTRY',
-        archetype: 'text',
-        lid,
-        title,
-        parentLid: null,
-        relationId: generateLid(),
-        // ⚠ **編集に入らない**(予定を眺めたまま足したいので、面を奪わない)
-        edit: false,
-      });
-    }
-    /**
-     * 🔴 **通ったときだけ欄を空にする**(#1051)。⚠ 直す前は撃った直後に必ず空にしていた
-     *   ── 前の追記の書込が返る前に押すと reducer が断る(直す前は**黙って**捨てていた)ので、
-     *   **打った字ごと消えていた**。
-     * 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない)── 判定を
-     *   ここに 2 つ目として書かない(§7)。
-     */
-    const lockBefore = dispatcher.getState().writeLock;
-    dispatcher.dispatch({
-      type: 'APPEND_TO_ENTRY',
-      lid,
-      text: line,
-      heading: null,
-      // ⚠ 末尾へ足す(追記先の選択は本文の面の話 ── ここでは選ばせない)
-      target: null,
-    });
-    if (textEl && dispatcher.getState().writeLock !== lockBefore) textEl.value = '';
+    // 🔑 書く口は目盛りのドラッグ作成(`schedule-grid-create`)と**同じ 1 本**(`addScheduleItem`)
+    const ok = addScheduleItem(dispatcher, { text: textEl?.value ?? '', date });
+    // 通ったときだけ欄を空にする(#1051。理由は `addScheduleItem` の中)
+    if (textEl && ok) textEl.value = '';
     void services;
   },
   /**

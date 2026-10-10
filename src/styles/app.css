@@ -6447,6 +6447,44 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   pointer-events: none;
 }
 
+/* 空いた所をドラッグして作った予定の枠(#855 段 B-2)。位置は影と同じ変数から。入力欄を中に持つ */
+[data-pkc-field='schedule-create-box'] {
+  position: absolute;
+  box-sizing: border-box;
+  left: 0;
+  width: 100%;
+  /* 🔴 入力欄が全部見える最低の高さ(22px)。15 分の枠は 10px・30 分は 20px しかない。夜遅くの短い枠は上へ寄せて列の内側に収める */
+  top: min(calc(var(--day-hour) * var(--day-start, 0) / 60), calc(var(--day-hour) * 24 - 22px));
+  height: max(calc(var(--day-hour) * var(--day-span, 30) / 60), 22px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px var(--s2);
+  border: 1px dashed var(--fg);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+/* 1 時間に満たない枠は時刻の字を隠す(時刻は title / aria-label に残る)── 入力欄を全部見せるため */
+[data-pkc-field='schedule-create-box'][data-pkc-short] > [data-pkc-field='schedule-create-label'] {
+  display: none;
+}
+[data-pkc-field='schedule-create-input'] {
+  box-sizing: border-box;
+  height: 18px;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  padding: 0 var(--s1);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+}
+
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
  * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
  * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある

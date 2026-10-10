@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
 import {
   DAY_MINUTES,
+  createSlot,
   dayHeading,
+  doubleClickSlot,
   deltaMinutes,
   formatMinutes,
   formatTimeRange,
@@ -268,5 +270,43 @@ describe('目盛りの上で札を動かす計算(#855 段 B-1)', () => {
   it('動かしている間の字は札と同じ 〜 区切り', () => {
     expect(formatTimeRange(14 * 60 + 15, 15 * 60 + 15)).toBe('14:15〜15:15');
     expect(formatTimeRange(23 * 60, DAY_MINUTES)).toBe('23:00〜24:00');
+  });
+});
+
+describe('空いた所をドラッグして作る計算(#855 段 B-2)', () => {
+  const H = 960; // 1 時間 40px
+  const px = (min: number): number => (min / 60) * 40;
+
+  it('🔴 両端を 15 分刻みに丸める(近いほう)── 丸めないと 10:07〜11:23 になる', () => {
+    expect(createSlot(px(607), px(683), H)).toEqual({ startMin: 600, endMin: 690 });
+  });
+
+  it('🔴 上へドラッグしたら始まりと終わりを入れ替える', () => {
+    expect(createSlot(px(690), px(600), H)).toEqual({ startMin: 600, endMin: 690 });
+  });
+
+  it('🔴 最低 15 分 ── 動かさなくても、少し動かしても、15 分の枠になる', () => {
+    expect(createSlot(px(600), px(600), H)).toEqual({ startMin: 600, endMin: 615 });
+    expect(createSlot(px(600), px(604), H)).toEqual({ startMin: 600, endMin: 615 });
+    expect(createSlot(px(604), px(600), H)).toEqual({ startMin: 600, endMin: 615 });
+  });
+
+  it('🔴 0:00〜24:00 の内側に収める(上にも下にもはみ出さない)', () => {
+    expect(createSlot(px(60), -500, H)).toEqual({ startMin: 0, endMin: 60 });
+    expect(createSlot(px(1380), 5000, H)).toEqual({ startMin: 1380, endMin: DAY_MINUTES });
+    // 最後の 15 分でも 15 分の枠が残る(終わりが 24:00 を越えない)
+    expect(createSlot(px(1435), px(1440), H)).toEqual({ startMin: 1425, endMin: DAY_MINUTES });
+    expect(createSlot(5000, 5000, H)).toEqual({ startMin: 1425, endMin: DAY_MINUTES });
+  });
+
+  it('器の高さが無ければ落ちない(0:00〜0:15)', () => {
+    expect(createSlot(10, 50, 0)).toEqual({ startMin: 0, endMin: 15 });
+  });
+
+  it('🔴 ダブルクリックは 30 分 ── 押した所を 15 分刻みに丸めた始まり / 夜遅くは始まりを寄せる', () => {
+    expect(doubleClickSlot(px(14 * 60 + 10), H)).toEqual({ startMin: 14 * 60 + 15, endMin: 14 * 60 + 45 });
+    expect(doubleClickSlot(px(14 * 60 + 5), H)).toEqual({ startMin: 14 * 60, endMin: 14 * 60 + 30 });
+    expect(doubleClickSlot(px(1439), H)).toEqual({ startMin: 1410, endMin: DAY_MINUTES });
+    expect(doubleClickSlot(-10, H)).toEqual({ startMin: 0, endMin: 30 });
   });
 });

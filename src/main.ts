@@ -85,6 +85,7 @@ import { installPlaceConnect } from '@adapter/ui/render/place-connect';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
 import { installScheduleDrag } from '@adapter/ui/render/schedule-drag';
 import { installScheduleGridDrag } from '@adapter/ui/render/schedule-grid-drag';
+import { installScheduleGridCreate } from '@adapter/ui/render/schedule-grid-create';
 import { appKeymap } from '@adapter/ui/render/keymap';
 import { wireShortcutHints } from '@adapter/ui/render/shortcut-hint';
 import { startEmbedBridge } from '@adapter/transport/embed-bridge';
@@ -1187,6 +1188,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   外さない(アプリと同寿命)。
    */
   installScheduleGridDrag(root, dispatcher);
+  /**
+   * 🔴 **「日」「週」の目盛りの空いた所をドラッグして、予定を作る配線**(#855 段 B-2)。
+   * ⚠ 札の上で始めたドラッグは受けない(上の `installScheduleGridDrag` の仕事)。外さない(アプリと同寿命)。
+   */
+  installScheduleGridCreate(root, dispatcher);
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に
