@@ -987,6 +987,87 @@ describe('掴んで動かす(place-drag)', () => {
     vi.useRealTimers();
   });
 
+  it('🔴 正常完了 / 断り / タイムアウトのどれでも onState の購読数が 0 に戻る(#1481 a)', () => {
+    const { d, grip, block, off } = mounted();
+    const countListeners = (): number =>
+      (d as unknown as { stateListeners: Set<unknown> }).stateListeners.size;
+    const base = countListeners();
+
+    // 1. 断られた場合: 離した直後に解除される
+    d.dispatch({ type: 'START_EDIT' });
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(countListeners(), '断られた後に onState の購読が残っている').toBe(base);
+
+    // 2. 正常完了の場合: 再描画で解除される
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(countListeners(), '保留中に onState が購読されていない').toBe(base + 1);
+    block.remove();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
+    expect(countListeners(), '再描画後に onState の購読が残っている').toBe(base);
+
+    // 3. タイムアウトの場合: 2000ms 経過で解除される
+    vi.useFakeTimers();
+    const { grip: g2, off: off2 } = mounted();
+    down(g2);
+    move(30, -10);
+    up(30, -10);
+    vi.advanceTimersByTime(2000);
+    expect(countListeners(), 'タイムアウト後に onState の購読が残っている').toBe(base);
+    off();
+    off2();
+    vi.useRealTimers();
+  });
+
+  it('🔴 同じ断り文が 2 回続いても、2 回目に離した直後に戻る(#1481 b / c\')', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' });
+    // 1 回目
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(d.getState().error).toBeDefined();
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+
+    // 2 回目: 同じエラー文が state.error に残ったまま再度ドロップ
+    down(grip);
+    move(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    up(30, -10);
+    // 2 回目も即座に元の位置に戻る(同文の再発でも正しくロールバック)
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 再描画が来ないまま同じ板をもう一度掴んだら、前の保留は解除される(#1481 e)', () => {
+    vi.useFakeTimers();
+    const { grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    vi.advanceTimersByTime(1000);
+    expect(block.style.left).toBe('150px');
+
+    // 2 回目の掴み開始(1 回目のタイマーや購読が解除される)
+    down(grip);
+    move(50, 20);
+    // 1 回目の 2000ms 満了タイミング(1000ms + 1500ms = 2500ms)
+    vi.advanceTimersByTime(1500);
+    // 1 回目のタイマーで戻されず、2 回目のドラッグ中の位置が保たれている
+    expect(block.style.left).toBe('170px');
+    up(50, 20);
+    off();
+    vi.useRealTimers();
+  });
+
   /**
    * 🔴 **離した後の描き直しが、● ⊕ の層が在っても差分のまま通る**(#1464 段 2。
    * 実ブラウザの実測 2026-10-08: 掴んでいる間もマウスは板の上に在るので層は離す瞬間に必ず在り、

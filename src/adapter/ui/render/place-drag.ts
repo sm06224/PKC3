@@ -108,10 +108,16 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   let swallowClick = false;
 
   let nudge: Nudge | null = null;
+  let pendingCleanup: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
     swallowClick = false;
     if (e.button !== 0) return;
+    // ⚠ 前のドロップの保留(タイマー / 購読)が残っていれば掴み直しの時点で解除する(#1481 e)
+    if (pendingCleanup !== null) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
     // ⚠ 矢印で動かしかけた物が在れば、掴む前に書いておく(見た目と本文を食い違わせない)
     if (nudge !== null) commitNudge();
     // ⚠ 2 本目の指では掴み直さない ── 前の掴みを restore せず捨てると、
@@ -182,12 +188,18 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
       | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number },
   ): void => {
-    const startError = dispatcher.getState().error;
+    if (pendingCleanup !== null) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
     const block = d.block;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubs: (() => void)[] = [];
 
     const cleanup = (): void => {
+      if (pendingCleanup === cleanup) {
+        pendingCleanup = null;
+      }
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;
@@ -195,14 +207,25 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       for (const u of unsubs) u();
       unsubs = [];
     };
+    pendingCleanup = cleanup;
 
     const rollback = (): void => {
       cleanup();
       restore(d);
     };
 
-    // 1. 状態の監視: エラー発生で即座に戻す / 描画完了で成功終了
-    const unbind = dispatcher.onState((state) => {
+    // 1. 本文書換の要求が通ったかをイベントで捕える(同文の再発・既存エラーでも確実に同期判定)
+    let requested = false;
+    const unbindEvent = dispatcher.onEvent((ev) => {
+      if (ev.type === 'REQUEST_BODY_REWRITE') {
+        requested = true;
+      }
+    });
+    unsubs.push(unbindEvent);
+
+    // 2. 状態の監視: 非同期エラー発生で戻す / 描画完了で成功終了
+    const startError = dispatcher.getState().error;
+    const unbindState = dispatcher.onState((state) => {
       if (state.error && state.error !== startError) {
         rollback();
         return;
@@ -229,18 +252,18 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
         }
       }
     });
-    unsubs.push(unbind);
+    unsubs.push(unbindState);
 
-    // 2. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
+    // 3. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
     timer = setTimeout(() => {
       rollback();
     }, 2000);
 
-    // 3. 本文書換の dispatch
+    // 4. 本文書換の dispatch
     dispatcher.dispatch(action);
 
-    // 4. 同期判定: bodyRewriteGate で即時拒否された場合はその場で戻す
-    if (dispatcher.getState().error && dispatcher.getState().error !== startError) {
+    // 5. 同期判定: bodyRewriteGate で断られた場合(REQUEST_BODY_REWRITE が出ない)はその場で戻す(#1481 c')
+    if (!requested) {
       rollback();
     }
   };
@@ -382,6 +405,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   doc.addEventListener('keydown', onKeyDown);
   return () => {
     cancelNudge(); // ⚠ 外した後に timer が dispatch しない
+    if (pendingCleanup !== null) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
     doc.removeEventListener('pointerdown', onPointerDown);
     doc.removeEventListener('pointermove', onPointerMove);
     doc.removeEventListener('pointerup', onPointerUp);
