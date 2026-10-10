@@ -1634,3 +1634,23 @@ describe('板の CSS ── 位置は board-host 起点だけ', () => {
     );
   });
 });
+
+describe('配置の控え ── 同じ要素の属性がその場で変わったら当て直す(#1464 案 1 の検算)', () => {
+  it('🔴 控えの在る板でも、x / y / 開き行が変わっていれば新しい値を当てる(古い位置を残さない)', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="pkc-format-block pkc-place" data-pkc-x="10" data-pkc-y="20" data-pkc-source-line="3">a</div>';
+    document.body.append(host);
+    applyPlaceLayout(host, () => null, 0);
+    const el = host.querySelector<HTMLElement>('[data-pkc-x]')!;
+    expect(el.style.left).toBe('10px');
+    // 位置だけ変える
+    el.setAttribute('data-pkc-x', '50');
+    applyPlaceLayout(host, () => null, 0);
+    expect(el.style.left, '控えに当たって古い位置のまま').toBe('50px');
+    // 開き行だけ変える(位置は同じ)── 位置の比較に救われない形で見る
+    el.setAttribute('data-pkc-source-line', '7');
+    applyPlaceLayout(host, () => null, 0);
+    expect(el.getAttribute('data-pkc-place-line'), '開き行が古いまま(掴んで離すと別の行に書く)').toBe('7');
+    host.remove();
+  });
+});

@@ -479,6 +479,8 @@ function applyPlaceLines(
 /**
  * 🔴 板 1 枚の配置の控え(#1464 案 1)。
  * 変更のない板に対する DOM スタイル・属性・子要素操作をスキップし差分描画を高速化する。
+ * ⚠ ふだんは差分描画が「中身の変わった塊を作り直す」ので、控えが当たる板の属性は前回と同じである ──
+ *   それでも値を全部比べるのは、同じ要素の属性がその場で書き換わった回(本文が正本)にも古い位置を残さないため。
  */
 interface BlockLayoutCache {
   readonly id: string;
@@ -491,6 +493,8 @@ interface BlockLayoutCache {
   readonly ink: string | null;
   readonly stroke: string | null;
   readonly placed: string;
+  /** 掴んで離したときに書き戻す開き行(`data-pkc-place-line`)── ⚠ 古いまま残すと別の行に書く */
+  readonly line: string | null;
 }
 
 /**
@@ -523,7 +527,6 @@ export function applyPlaceLayout(
    */
   embeds: (lid: string) => boolean = () => false,
 ): number {
-  performance.mark('apl-start');
   const blocks = [...host.querySelectorAll<HTMLElement>(PLACE_SELECTOR)];
   if (blocks.length === 0) {
     hostLayouts.delete(host);
@@ -534,7 +537,6 @@ export function applyPlaceLayout(
     //   🔑 ただし**線の宣言そのものには断りを出す** ── 板を全部消した user に
     //   「線の機能ごと無くなった」と読ませない(動線レビュー ①と同じ向き)。
     applyPlaceLines(host, [], lineOffset);
-    performance.clearMarks('apl-start');
     return 0;
   }
   host.classList.add('pkc-board-host');
@@ -611,7 +613,8 @@ export function applyPlaceLayout(
       prev.fill === fill &&
       prev.ink === ink &&
       prev.stroke === stroke &&
-      prev.placed === placed
+      prev.placed === placed &&
+      prev.line === line
     ) {
       bottom = Math.max(bottom, y + (useH ?? 160));
       continue;
@@ -675,6 +678,7 @@ export function applyPlaceLayout(
       ink,
       stroke,
       placed,
+      line,
     });
   }
 
@@ -690,7 +694,5 @@ export function applyPlaceLayout(
   host.style.minHeight = `${bottom + 40}px`;
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)
   restoreGripFocus(host);
-  performance.mark('apl-end');
-  performance.measure('applyPlaceLayout', 'apl-start', 'apl-end');
   return blocks.length;
 }
