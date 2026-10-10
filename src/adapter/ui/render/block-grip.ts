@@ -30,7 +30,7 @@
  * ⚠ 口に載せる座標は**生の body**(刻印 + frontmatter ぶん)── `data-pkc-place-line`
  *   と同じ座標系。書く側(`MOVE_BLOCK` → `line-move.ts`)がそのまま読む。
  */
-import { blockSpanAt } from '@features/markdown/source-blocks';
+import { blockSpanLookup, type BlockSpan } from '@features/markdown/source-blocks';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
 import { chapterSpanOf, headingLevel } from './heading-fold';
 
@@ -50,6 +50,14 @@ interface Painted {
   fmBody: string;
   /** frontmatter の行数(刻印 → 生の body へ写す足し込み)。 */
   fm: number;
+  /**
+   * 🔴 **原文を読んだ答えの控え**(#1467)── 本文はこの描画の間は変わらないので、1 度読めば足りる。
+   * ⚠ 控えないと、カーソルが塊の上を通るたびに本文を全部割り直していた(20,000 行のノートで、
+   *   スクロールの間に約 1 秒 ── カーソルが動かなくても、中身が下を流れるので pointerover が出続ける)。
+   */
+  spans: (openLine: number) => BlockSpan | null;
+  /** 本文の行数(章の範囲を引くとき)。`-1` = まだ数えていない。 */
+  lineCount: number;
 }
 
 const painted = new WeakMap<HTMLElement, Painted>();
@@ -139,10 +147,11 @@ function blockRange(p: Painted, block: HTMLElement): { start: number; end: numbe
   const line = Number(raw);
   if (!Number.isInteger(line) || line < 0) return null;
   if (headingLevel(block) > 0) {
-    const span = chapterSpanOf(p.host, block, p.fmBody.split('\n').length);
+    if (p.lineCount < 0) p.lineCount = p.fmBody.split('\n').length;
+    const span = chapterSpanOf(p.host, block, p.lineCount);
     return span === null ? null : { start: span.start + p.fm, end: span.end + p.fm };
   }
-  const directive = blockSpanAt(p.fmBody, line);
+  const directive = p.spans(line);
   if (directive !== null) {
     if (directive.open) return null; // 閉じていない ── 末尾まで飲んでいるので塊の範囲が無い
     return { start: line + p.fm, end: directive.end + p.fm };
@@ -293,7 +302,15 @@ const LEFT_CLEARANCE = 5;
 export function installBlockGrip(region: HTMLElement, host: HTMLElement, lid: string, body: string): void {
   const anchor = gripAnchorOf(region);
   const first = !painted.has(anchor);
-  painted.set(anchor, { host, lid, fmBody: bodyBelowFrontmatter(body), fm: frontmatterLineCount(body) });
+  const fmBody = bodyBelowFrontmatter(body);
+  painted.set(anchor, {
+    host,
+    lid,
+    fmBody,
+    fm: frontmatterLineCount(body),
+    spans: blockSpanLookup(fmBody),
+    lineCount: -1,
+  });
   const grip = ensureGrip(anchor);
   if (first) {
     // ⚠ 触るのは**自分の口だけ**(`ownGripOf`)── 子孫で探すと、留めた枠の口を拾って隠す(#1081)

@@ -246,14 +246,27 @@ export function positionPreviewCard(
   card.style.left = `${Math.round(left)}px`;
 }
 
+/**
+ * 出ているプレビューカード。
+ * 🔴 **root の直下だけを見る**(#1467)── カードは必ず `root.append(card)` で置く(この file の 4 か所)。
+ * ⚠ `root.querySelector` だと、スクロールのたびに(`onScroll` → `close`)文書全体を探していた
+ *   (20,000 行のノートで約 3 万要素 ── スクロールの間に約 0.4 秒)。
+ */
+function previewCardOf(root: HTMLElement): Element | null {
+  for (const child of root.children) {
+    if (child.getAttribute('data-pkc-region') === LINK_PREVIEW_REGION) return child;
+  }
+  return null;
+}
+
 /** 表示中のプレビューカードを閉じる */
 export function closeLinkPreview(root: HTMLElement): void {
-  root.querySelector(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`)?.remove();
+  previewCardOf(root)?.remove();
 }
 
 /** プレビューカードが表示中かどうか */
 export function linkPreviewOpen(root: HTMLElement): boolean {
-  return root.querySelector(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`) !== null;
+  return previewCardOf(root) !== null;
 }
 
 /**
