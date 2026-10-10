@@ -90,7 +90,7 @@ git switch -                                                  # 指定 branch �
 
 🔴 **worktree で走るエージェントはとくに危ない** ── cwd が**依頼者の本体ツリー**へ
 戻るので、そこで書き換えると**他人の作業を壊す**。手順は
-`.claude/skills/subagent-scale/SKILL.md` §1。
+`.claude/skills/subagent-scale/SKILL.md`「隔離」(事故の記録は `.claude/skills/subagent-scale/reference/worktree-incidents.md`)。
 
 🔴 **戻った cwd は、worktree 隔離そのものを起動不能にする**(2026-09-16 実測)。
 cwd が `/home/user` のまま `isolation: "worktree"` を投げると

@@ -1468,7 +1468,7 @@ hook は在る** ── `cd <作業ツリー>` 1 行で通る。🔴 **そのと
 起動しない** ── 「patch だけ返して」と頼むのは退避策ではない(`Write`/`Edit` を持ったまま
 走るので、守っているのは指示だけである)。正しい退避は **read-only の型に下書きさせ、
 依頼者が当てる**こと。🔑 **規律を守るのは tools の一覧であって、プロンプトの文言ではない。**
-手順は `.claude/skills/subagent-scale/SKILL.md` §1
+手順は `.claude/skills/subagent-scale/SKILL.md`「隔離」「依頼文の頭に書くこと(段 0)」(事故の記録は `reference/worktree-incidents.md`)
 
 | スキル(手順) | 中身 |
 |---|---|

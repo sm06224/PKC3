@@ -8,38 +8,24 @@ tools: Read, Grep, Glob, Bash, Write, Edit
 あなたは PKC3 の**実装担当**です。渡された **1 主題だけ**を実装します。
 
 
-## 🔴 段 0 ── 始める前に「自分が見ている版」を確かめる（必ず最初にやる）
+## 🔴 段 0 ── 自分が見ている版と場所を確かめる(必ず最初に)
 
-⚠ `isolation: "worktree"` が切る元は、**依頼者の作業ツリーの姿とは限らない** ──
-未 commit の変更は **1 バイトも入らず**、HEAD が branch の先端より古いことも、
-**別の branch（`origin/main`）から切られる**こともある（**4 度実際に起きた**）。
-
-🔴 **どれも「隔離が壊れている」ようには見えない** ── `git status` は clean で、
-file も一式そろっている。⚠ **違うのは中身だけ**なので、そのまま進むと
-**まだ存在しない物を「確かめました」と返す**ことになる。
-
-🔑 **依頼文に何も書かれていなくても、最初にこれを打つ**:
+`isolation: "worktree"` が切る元は依頼者の作業ツリーではない(未 commit は 1 バイトも入らず、
+`origin/main` から切られることもある)。`git status` は clean に見えるので、見た目では分からない。
 
 ```
 pwd && git worktree list && git log --oneline -1
 ```
 
-そのうえで、**依頼文が前提にしている物が本当に在るか**を 1 つ grep する
-（直したはずの関数名 / 足したはずの file 名）。
+1. `pwd` が `/home/user/PKC3/.claude/worktrees/<自分の id>` でなければ、**git も npm も打たずに**止まって報告する
+   (`/home/user/PKC3` 本体や別の担当の worktree で書くと、他人の編集を壊す)
+2. 依頼文の sha と違えば、**自分の worktree の中で** `git fetch origin <branch> && git checkout --detach <sha>`。
+   sha が書いていなければ始めずに返す
+3. 依頼文が前提にする物(直したはずの関数名 / 足したはずの file)を 1 つ grep する。無ければ何も走らせずに止まる
+   ── ⚠ 「自分の箱に無い」を「repo に無い」と書かない(調査の結論の顔で返り、依頼者に存在しない手戻りをさせる)
+4. 報告に**どの sha で回したか**を必ず書く
 
-| | どうするか |
-|---|---|
-| 🟢 **在る** | 進む。⚠ **報告に「どの sha で回したか」を必ず書く** |
-| 🔴 **無い** | **何も走らせずに止まり、そう報告する** |
-
-🔴 **無いときの書き方に注意**:「自分の箱に無い」を
-**「repo に無い」と書かない** ── それは実装の失敗ではなく
-**調査の結論**の顔で返るので、依頼者に**存在しない手戻り**を始めさせる（実際に起きた）。
-⚠ repo 全体を探すなら **path で引く**（`git log --all --oneline -- '<path>'`）──
-この repo の commit の題名は**日本語**なので、ASCII の file 名で `grep` しても当たらない。
-
-🔑 依頼文に base の sha が在れば `git checkout <sha>` で揃えてよい。
-無ければ**依頼者に sha を聞く**（推測で進めない）。
+なぜ要るか(事故 2026-08-04 / 2026-09-25 #1045 / 2026-10-03 / 2026-10-04): `.claude/skills/subagent-scale/reference/agent-start.md`
 
 ## 🔴 起動条件(依頼者向けだが、あなたも確認する)
 
@@ -86,7 +72,7 @@ pwd && git worktree list && git log --oneline -1
   `action-scope-survey` + 設計 doc §7.1 / `store-fallback` / 設定の持ち出しの件数)。
   一覧は `.claude/skills/pr-landing/SKILL.md` の「UI の口を 1 つ足すと動く全数検査の一覧」。
   ⚠ 数を直すのは**事実が動いた分だけ**(「何が動いたか」を 1 行添えられないなら、緩めている)。
-- 🔴 **worktree の作法 3 つ**(`.claude/skills/subagent-scale/SKILL.md` §1):`node_modules` は
+- 🔴 **worktree の作法 3 つ**(`.claude/skills/subagent-scale/reference/worktree-incidents.md`「worktree の作法 3 つ」):`node_modules` は
   `ln -s /home/user/PKC3/node_modules node_modules`(commit しない)/ 複合コマンド・heredoc + パイプは
   断られるので script file に書いて `sh <file>` / 変異ハーネスの `ROOT` は自分の tree、
   作業 file は `scratchpad/<issue 番号>/`、smoke の port 3 つは固有の値に。

@@ -543,7 +543,7 @@ paths:
 **実例**
 
 - **結果は `KILLED` / `SURVIVED` / `NOT-APPLIED` で出す**(時間切れは `TIMEOUT`、計器が
-  立たなかったら `INFRA` ── 計 5 値。`.claude/skills/mutation-testing/SKILL.md` §2.1)
+  立たなかったら `INFRA` ── 計 5 値。`.claude/skills/mutation-testing/SKILL.md`「結果は 5 値で読む」。`TIMEOUT` / `INFRA` の事故は `reference/harness-notes.md`)
   (= **「当たらなかった変異」と「生き延びた変異」を区別する**。2026-08-04、1 セッションで
   2 度踏んだ)。変異が**適用されていない**とき、結果は「生存」と見分けがつかない ──
   **空振りを合格と読む**。① shell の引用で python が SyntaxError になり変異が当たらなかった
