@@ -123,9 +123,9 @@ describe('🔒 押しかけない(#347 の裁定の半分)', () => {
     'まだ確かめていません。最初に何か保存したときに確かめます。',
   ];
 
-  it('🔴 状態の文は `settings.ts` にしか無い(帯・お知らせに出さない)', () => {
+  it('🔴 状態の文は `settings/persist.ts` にしか無い(帯・お知らせに出さない)', () => {
     const files = walk(SRC).map((f) => [f, readFileSync(f, 'utf-8')] as const);
-    const only = join('src', 'adapter', 'ui', 'render', 'settings.ts');
+    const only = join('src', 'adapter', 'ui', 'render', 'settings', 'persist.ts');
     for (const sentence of STATUS_SENTENCES) {
       const hits = files.filter(([, body]) => body.includes(sentence)).map(([f]) => f);
       // 空振り防止 ── 1 件も無いなら、この検査は何も守っていない
@@ -136,7 +136,7 @@ describe('🔒 押しかけない(#347 の裁定の半分)', () => {
 
   /** 🔴 **型で塞ぐ側** ── `PERSIST_TEXT` を外へ出さない(出すと別の面が使える)。 */
   it('🔴 `PERSIST_TEXT` は export されていない', () => {
-    const src = readFileSync(join('src', 'adapter', 'ui', 'render', 'settings.ts'), 'utf-8');
+    const src = readFileSync(join('src', 'adapter', 'ui', 'render', 'settings', 'persist.ts'), 'utf-8');
     expect(src, '前提: 文言の表が無い').toContain('const PERSIST_TEXT');
     expect(src, '文言の表を外へ出した(別の面が同じ文を出せる)').not.toContain(
       'export const PERSIST_TEXT',
