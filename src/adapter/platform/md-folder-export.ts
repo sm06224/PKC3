@@ -29,6 +29,7 @@ export interface WritableDirLike {
   name: string;
   getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<WritableDirLike>;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<FileHandleLike>;
+  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
 export type FolderWritePicker = (options: { mode: 'readwrite' }) => Promise<WritableDirLike>;
@@ -45,6 +46,8 @@ export class FolderWriteError extends Error {
   constructor(
     readonly path: string,
     cause: unknown,
+    /** 書きかけの file を消せず、空のまま残っているかもしれない。 */
+    readonly mayRemain = false,
   ) {
     super(cause instanceof Error ? cause.message : String(cause));
     this.name = 'FolderWriteError';
@@ -87,26 +90,48 @@ export async function createFreshSubfolder(
   );
 }
 
+/** 大文字小文字と正規化(NFC)を同一視する(macOS / Windows は同じ file として扱う)。 */
+const fold = (s: string): string => s.normalize('NFC').toLowerCase();
+
+/** 書き出し先の口 + 何 file 書けたか。 */
+export interface FolderSink extends MarkdownSink {
+  /** 最後まで書き終えた file の数(失敗した 1 件は数えない)。 */
+  readonly written: number;
+}
+
 /** `dir` の下へ `a/b.ext` の形の path で 1 file ずつ書く口。 */
-export function folderSink(dir: WritableDirLike): MarkdownSink {
+export function folderSink(dir: WritableDirLike): FolderSink {
   const dirs = new Map<string, WritableDirLike>();
+  const seen = new Set<string>();
+  let written = 0;
   return {
+    get written() {
+      return written;
+    },
     async add(path, parts) {
+      // 🔴 同じ path を 2 度書かない(ZipWriter と同じ。上書きで 1 件が黙って消えるのを止める)
+      const key = fold(path);
+      if (seen.has(key)) throw new FolderWriteError(path, new Error('同じ名前のファイルが 2 つあります'));
+      seen.add(key);
+      let cur = dir;
+      let file = path;
+      let created = false;
       try {
         const segs = path.split('/');
-        const file = segs.pop()!;
-        let cur = dir;
-        let key = '';
+        file = segs.pop()!;
+        let k = '';
         for (const seg of segs) {
-          key += `${seg}/`;
-          let next = dirs.get(key);
+          k += `${seg}/`;
+          let next = dirs.get(k);
           if (!next) {
             next = await cur.getDirectoryHandle(seg, { create: true });
-            dirs.set(key, next);
+            dirs.set(k, next);
           }
           cur = next;
         }
-        const w = await (await cur.getFileHandle(file, { create: true })).createWritable();
+        const fh = await cur.getFileHandle(file, { create: true });
+        created = true;
+        const w = await fh.createWritable();
         try {
           for (const p of parts) await w.write(p);
           await w.close();
@@ -114,8 +139,18 @@ export function folderSink(dir: WritableDirLike): MarkdownSink {
           await w.abort?.().catch(() => {});
           throw e;
         }
+        written++;
       } catch (e) {
-        throw new FolderWriteError(path, e);
+        // 🔴 0 バイトの書きかけを残さない。消せなければ「残っているかも」と言う
+        let mayRemain = false;
+        if (created) {
+          try {
+            await cur.removeEntry(file);
+          } catch {
+            mayRemain = true;
+          }
+        }
+        throw new FolderWriteError(path, e, mayRemain);
       }
     },
   };

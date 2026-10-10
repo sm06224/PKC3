@@ -39,7 +39,9 @@ import {
   folderSink,
   FolderWriteError,
   isPickerCancel,
+  type FolderSink,
   type FolderWritePicker,
+  type WritableDirLike,
 } from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { folderSource } from '@features/export/folder-source';
@@ -390,21 +392,7 @@ export async function exportArchive(
           const md = await writeMarkdownZip(deps.source, iso);
           out = md;
           name = `${base}.md.zip`;
-          // 🔴 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを
-          // 言わずに出していた ── 「片道です」だけでは user は損失量を測れない
-          const lost: string[] = [];
-          if (md.dropped.relations > 0) lost.push(`つながり ${md.dropped.relations}`);
-          if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
-          // 🔴 **控え(過去の版)の件数を出す**(#213 / user 裁定 A 2026-08-16)。
-          //    ⚠ 出さないと「添付 200 件」とだけ出て、**なぜ zip が大きいのか**が
-          //    どこにも書かれていない。⚠ 減らすのではなく**言う**のが裁定 A である
-          const assetsText =
-            md.counts.historyAssets > 0
-              ? `添付 ${md.counts.assets}(うち過去の版 ${md.counts.historyAssets})`
-              : `添付 ${md.counts.assets}`;
-          detail =
-            `${md.counts.entries} 件(${assetsText})。取り込み直せません` +
-            (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : '');
+          detail = `${md.counts.entries} 件(${describeMarkdownExport(md).assets})${describeMarkdownExport(md).tail}`;
         } else {
           out = await writeArchive(deps.source, iso);
           name = archiveFileName(base, archiveScope);
@@ -464,60 +452,128 @@ export async function exportArchive(
 }
 
 /**
- * 🔴 **Markdown を PC のフォルダへ 1 度だけ書き出す**(#1455 (b))。
+ * 🔴 **md 書き出しの結果の言い方(zip とフォルダで 1 本)**(#1455 (b)レビュー)。
+ * ⚠ 「取り込み直せません」と**何が落ちたか**(つながり / 履歴)は、書き出し先に依らず言う。
+ * 🔑 **何が落ちたかを件数で言う**(設計 doc §3-2)。PKC2 は落ちたことを言わずに出していた。
+ */
+export function describeMarkdownExport(md: {
+  counts: { assets: number; historyAssets: number };
+  dropped: { relations: number; revisionEntries: number };
+}): { assets: string; tail: string } {
+  const lost: string[] = [];
+  if (md.dropped.relations > 0) lost.push(`つながり ${md.dropped.relations}`);
+  if (md.dropped.revisionEntries > 0) lost.push(`履歴 ${md.dropped.revisionEntries} 件ぶん`);
+  // 🔴 控え(過去の版)の件数を出す(#213 / user 裁定 A 2026-08-16)── 減らすのではなく**言う**
+  const assets =
+    md.counts.historyAssets > 0
+      ? `添付 ${md.counts.assets}(うち過去の版 ${md.counts.historyAssets})`
+      : `添付 ${md.counts.assets}`;
+  return {
+    assets,
+    tail: `。取り込み直せません` + (lost.length > 0 ? `(${lost.join(' / ')}が落ちます)` : ''),
+  };
+}
+
+/**
+ * 🔴 **PC のフォルダへ書く前の確認 + 選択**(#1455 (b))。
+ *
+ * ⚠ **選択ウィンドウは asset gate の外**で開く(選んでいる間、添付の取り込み / 削除を止めない)。
+ *   ただし**押した直後の最初の await**にする(ユーザー操作の効力が切れる前に開く)。
+ * ⚠ 二度押しは**自前の旗**で断る(gate の「添付の処理が実行中」では嘘になる)。
+ * ⚠ ノートが 0 件なら、選ばせる前に断る(空のフォルダを作らない)。
+ * @param run 選んだ後の書き出し(呼び側が asset gate に入れる)
+ */
+export function createMarkdownFolderFlow(
+  dispatcher: Dispatcher,
+  picker: FolderWritePicker,
+  run: (root: WritableDirLike) => Promise<void>,
+): () => Promise<void> {
+  let busy = false;
+  return async () => {
+    if (busy) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: 'Markdown をフォルダに書き出している途中です。終わってから、もう一度押してください',
+      });
+      return;
+    }
+    const state = dispatcher.getState();
+    if (state.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(state.phase)}書き出してください` });
+      return;
+    }
+    // ⚠ メタが読めている(起動済み)状態の件数。0 件なら選ばせない
+    if (state.entryMetas.size === 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '書き出せるノートが 1 件もありません。ノートを作ってから押してください',
+      });
+      return;
+    }
+    busy = true;
+    try {
+      let root: WritableDirLike;
+      try {
+        root = await picker({ mode: 'readwrite' });
+      } catch (e) {
+        if (isPickerCancel(e)) return;
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `書き出し先のフォルダを開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        return;
+      }
+      await run(root);
+    } finally {
+      busy = false;
+    }
+  };
+}
+
+/**
+ * 🔴 **Markdown を PC のフォルダへ 1 度だけ書き出す**(#1455 (b))。選んだ後の書き出し部。
  *
  * zip の「Markdown で書き出す」と**同じ中身**(`writeMarkdownTo` 1 本)を、選んだフォルダの
  * 中の**新しいサブフォルダ**へ 1 file ずつ書く。憶えない・同期しない・上書きしない
- * (`md-folder-export.ts`)。
- *
- * ⚠ **選択窓を先に出す**(押した直後の操作でないと開けないブラウザがある)。
- *   窓を閉じたら**何も言わない**(取り消しはエラーではない)。
- * ⚠ 保存領域が壊れているときの自動の拾い出し(`rescue`)は**持たない** ── あちらは
- *   `.pkc3-part.zip` を落とす道で、フォルダへ書く道とは出口が違う。
+ * (`md-folder-export.ts`)。選ぶところは `createMarkdownFolderFlow`。
+ * ⚠ 保存領域が壊れているときの自動の拾い出し(`rescue`)は**持たない**。
  */
 export async function exportMarkdownToFolder(
   dispatcher: Dispatcher,
   deps: ExportDeps,
-  picker: FolderWritePicker,
+  root: WritableDirLike,
 ): Promise<number | null> {
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
-    return null;
-  }
-  let root;
-  try {
-    root = await picker({ mode: 'readwrite' });
-  } catch (e) {
-    if (isPickerCancel(e)) return null;
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: `書き出し先のフォルダを開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
-    });
-    return null;
-  }
   deps.notify?.('Markdown をフォルダに書き出しています…');
   let sub: string | null = null;
+  let sink: FolderSink | null = null;
   try {
     await deps.settle();
     const now = deps.now?.() ?? new Date();
     const base = `${safeName(deps.source.title)}-${stamp(now)}`;
     const fresh = await createFreshSubfolder(root, base);
     sub = fresh.name;
-    const md = await writeMarkdownTo(deps.source, now.toISOString(), folderSink(fresh.dir));
+    sink = folderSink(fresh.dir);
+    const md = await writeMarkdownTo(deps.source, now.toISOString(), sink);
     deps.report(md.warnings);
-    const assets = md.counts.assets > 0 ? `(添付 ${md.counts.assets})` : '';
+    const d = describeMarkdownExport(md);
     deps.notify?.(
-      `${md.counts.entries} 件のノートを『${sub}』に書き出しました${assets}` +
+      `${md.counts.entries} 件のノートを『${sub}』に書き出しました(${d.assets})${d.tail}` +
         (md.warnings.length > 0 ? `(注意 ${md.warnings.length} 件)` : ''),
     );
     return md.counts.entries;
   } catch (e) {
     deps.notify?.('');
-    const where = sub === null ? '' : `。すでに書いた分は『${sub}』に残っています`;
+    // 🔴 「残っています」と言うのは 1 file でも書けたときだけ
+    const where =
+      sub === null
+        ? ''
+        : sink !== null && sink.written > 0
+          ? `。すでに書いた分は『${sub}』に残っています`
+          : `。『${sub}』は作りましたが、中身は空です`;
     const what =
       e instanceof FolderWriteError
-        ? `『${e.path}』を書けませんでした(${e.message})${where}`
+        ? `『${e.path}』を書けませんでした(${e.message})${where}` +
+          (e.mayRemain ? `。『${e.path}』は空のまま残っているかもしれません` : '')
         : `${e instanceof Error ? e.message : String(e)}${where}`;
     dispatcher.dispatch({ type: 'OP_FAILED', error: `書き出しに失敗しました: ${what}` });
     return null;

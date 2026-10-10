@@ -317,7 +317,7 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
-import { windowFolderWritePicker, type FolderWritePicker } from '@adapter/platform/md-folder-export';
+import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
 import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
 import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
@@ -327,6 +327,7 @@ import {
   exportEntry,
   exportFolder,
   exportMarkdownToFolder,
+  createMarkdownFolderFlow,
   type ExportDeps,
   exportEntryDocx,
   exportEntryMarkdown,
@@ -2275,7 +2276,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     kind:
       | ExportKind
       | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' }
-      | { mdFolder: FolderWritePicker },
+      | { mdFolder: WritableDirLike },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -4361,10 +4362,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
     // 🔴 PC のフォルダへ 1 度だけ(#1455 (b))。⚠ 無いブラウザではボタンごと出ない
-    exportMarkdownFolder: () => {
+    // 🔴 選ぶウィンドウは asset gate の**外**(`createMarkdownFolderFlow`)。書くところだけ gate に入る
+    exportMarkdownFolder: (() => {
       const picker = windowFolderWritePicker();
-      if (picker) void runExport({ mdFolder: picker });
-    },
+      if (!picker) return () => {};
+      const flow = createMarkdownFolderFlow(dispatcher, picker, (root) => runExport({ mdFolder: root }));
+      return () => void flow();
+    })(),
     /**
      * 🔴 **可搬単一 HTML**(#400 段④)。⚠ 「閲覧用 HTML」とは別の口である ──
      *   あちらは読むだけ、こちらは**アプリごと 1 枚**(続きが書ける)。

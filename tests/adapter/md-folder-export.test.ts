@@ -10,13 +10,18 @@
  * - ブラウザに窓が無ければ**ボタンごと出さない**
  */
 import { describe, expect, it, vi } from 'vitest';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { createAssetGate } from '../../src/adapter/ui/actions/asset-gate';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import {
   exportMarkdownToFolder,
+  createMarkdownFolderFlow,
+  describeMarkdownExport,
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
 import {
   windowFolderWritePicker,
+  folderSink,
   SUBFOLDER_TRY_MAX,
   type FolderWritePicker,
   type WritableDirLike,
@@ -47,17 +52,33 @@ class FakeDir implements WritableDirLike {
     this.dirs.set(name, made);
     return made;
   }
+  /** 消せない相手を作る(`removeEntry` が落ちる)。 */
+  noRemove = false;
+  removed: string[] = [];
+  aborted: string[] = [];
+  async removeEntry(name: string): Promise<void> {
+    if (this.noRemove) throw named('NoModificationAllowedError');
+    this.files.delete(name);
+    this.dirs.delete(name);
+    this.removed.push(name);
+  }
   async getFileHandle(name: string, o: { create?: boolean } = {}) {
     if (this.dirs.has(name)) throw named('TypeMismatchError');
     if (!this.files.has(name) && !o.create) throw named('NotFoundError');
+    // 本物と同じく、作った時点で 0 バイトの file が現れる
+    if (!this.files.has(name)) this.files.set(name, new Uint8Array(0));
     const files = this.files;
+    const aborted = this.aborted;
     const failFile = this.failFile;
     return {
       async createWritable() {
-        if (failFile === name) throw named('QuotaExceededError', 'ディスクがいっぱいです');
         const chunks: Uint8Array[] = [];
         return {
+          async abort() {
+            aborted.push(name);
+          },
           async write(data: Blob | string) {
+            if (failFile === name) throw named('QuotaExceededError', 'ディスクがいっぱいです');
             chunks.push(
               typeof data === 'string'
                 ? new TextEncoder().encode(data)
@@ -88,7 +109,7 @@ class FakeDir implements WritableDirLike {
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 250, 251]);
 
-function source(): ArchiveSource {
+function source(x: { relations?: number; revisions?: string[]; strayAsset?: boolean } = {}): ArchiveSource {
   const entries = [
     {
       lid: 'a',
@@ -115,19 +136,25 @@ function source(): ArchiveSource {
       done: true,
       next: { entryOrder: 2, lid: 'b' },
     }),
-    listRelations: async () => [],
-    listAssetMetas: async () => [{ key: 'ast-1', mime: 'image/png', size: PNG.length, hash: null }],
+    listRelations: async () =>
+      Array.from({ length: x.relations ?? 0 }, (_, i) => ({
+        id: `r${i}`, from_lid: 'a', to_lid: 'b', kind: 'link', created_at: null, updated_at: null,
+      })),
+    listAssetMetas: async () => [
+      { key: 'ast-1', mime: 'image/png', size: PNG.length, hash: null },
+      ...(x.strayAsset ? [{ key: 'ast-stray', mime: 'image/png', size: 1, hash: null }] : []),
+    ],
     getAssetBlob: async (key) => (key === 'ast-1' ? new Blob([PNG as unknown as BlobPart]) : null),
-    listRevisionLids: async () => [],
+    listRevisionLids: async () => x.revisions ?? [],
     getRevisionChain: async () => [],
   };
 }
 
-function setup(over: Partial<ExportDeps> = {}) {
+function setup(over: Partial<ExportDeps> = {}, metas: EntryMeta[] = [noteMeta()]) {
   const notices: string[] = [];
   const reported: string[][] = [];
   const dispatcher = new Dispatcher();
-  dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+  dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const failed: string[] = [];
   const orig = dispatcher.dispatch.bind(dispatcher);
   vi.spyOn(dispatcher, 'dispatch').mockImplementation((a) => {
@@ -153,13 +180,36 @@ function setup(over: Partial<ExportDeps> = {}) {
   return { dispatcher, deps, notices, reported, failed };
 }
 
+function noteMeta(): EntryMeta {
+  return {
+    lid: 'a', title: '会議メモ', archetype: 'text', createdAt: null, updatedAt: null,
+    entryOrder: 1, status: null, date: null, archived: false, bodyChars: null,
+  };
+}
+
+/** 画面の道(確認 → 選ぶ → 書く)を通す。返すのは書いたノート数(書かなければ null)。 */
+async function go(
+  d: Dispatcher,
+  deps: ExportDeps,
+  picker: FolderWritePicker,
+  wrap: (run: () => Promise<void>) => Promise<void> = (run) => run(),
+): Promise<number | null> {
+  let n: number | null = null;
+  await createMarkdownFolderFlow(d, picker, (root) =>
+    wrap(async () => {
+      n = await exportMarkdownToFolder(d, deps, root);
+    }),
+  )();
+  return n;
+}
+
 const pickerOf = (root: FakeDir): FolderWritePicker => async () => root;
 
 describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
   it('🔴 パスもバイト列も zip の書き出しと同じ(題名は日本語・frontmatter・添付つき)', async () => {
     const { dispatcher, deps } = setup();
     const root = new FakeDir('選んだ場所');
-    await exportMarkdownToFolder(dispatcher, deps, pickerOf(root));
+    await go(dispatcher, deps, pickerOf(root));
 
     const zip = await writeMarkdownZip(source(), '2026-10-10T03:00:00.000Z');
     const dir = await readZipDirectory(zip.blob);
@@ -195,19 +245,19 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
     old.files.set('user.md', mine);
     root.files.set(`${base}-2`, mine);
 
-    await exportMarkdownToFolder(dispatcher, deps, pickerOf(root));
+    await go(dispatcher, deps, pickerOf(root));
 
     expect([...root.dirs.keys()].sort()).toEqual([base, `${base}-3`].sort());
     expect([...old.files.keys()], '既存のサブフォルダに書いていない').toEqual(['user.md']);
     expect(root.files.get('メモ.md')).toBe(mine);
     expect(root.files.get(`${base}-2`)).toBe(mine);
     expect(root.dirs.get(`${base}-3`)!.flat().size).toBe(4);
-    expect(notices.at(-1)).toBe(`2 件のノートを『${base}-3』に書き出しました(添付 1)`);
+    expect(notices.at(-1)).toBe(`2 件のノートを『${base}-3』に書き出しました(添付 1)。取り込み直せません`);
   });
 
   it('🔴 窓を閉じたら何も言わない(進行中の字も出さない / 失敗にもしない)', async () => {
     const { dispatcher, deps, notices, failed } = setup();
-    const n = await exportMarkdownToFolder(dispatcher, deps, async () => {
+    const n = await go(dispatcher, deps, async () => {
       throw named('AbortError');
     });
     expect(n).toBeNull();
@@ -223,7 +273,7 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
       tries++;
       return new FakeDir('x');
     };
-    const n = await exportMarkdownToFolder(dispatcher, deps, pickerOf(root));
+    const n = await go(dispatcher, deps, pickerOf(root));
     expect(n).toBeNull();
     expect(tries).toBe(SUBFOLDER_TRY_MAX);
     expect(failed).toHaveLength(1);
@@ -233,7 +283,7 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
 
   it('窓が開けなかった(取り消し以外)は失敗として言う', async () => {
     const { dispatcher, deps, failed } = setup();
-    await exportMarkdownToFolder(dispatcher, deps, async () => {
+    await go(dispatcher, deps, async () => {
       throw named('SecurityError', 'blocked');
     });
     expect(failed).toHaveLength(1);
@@ -243,7 +293,7 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
   it('🔴 途中で失敗したら、どの file か・書いた分が残ることを言う', async () => {
     const { dispatcher, deps, notices, failed } = setup();
     const root = new FakeDir('選んだ場所', '買い物-リスト.md');
-    const n = await exportMarkdownToFolder(dispatcher, deps, pickerOf(root));
+    const n = await go(dispatcher, deps, pickerOf(root));
     expect(n).toBeNull();
     expect(failed).toHaveLength(1);
     expect(failed[0]).toContain('買い物-リスト.md');
@@ -260,9 +310,114 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
     const { deps, failed } = setup();
     const d = new Dispatcher(); // まだ起動していない
     const picker = vi.fn(pickerOf(new FakeDir('x')));
-    await exportMarkdownToFolder(d, deps, picker);
+    await go(d, deps, picker);
     expect(picker).not.toHaveBeenCalled();
     void failed;
+  });
+});
+
+describe('レビュー指摘の直し(#1455 (b))', () => {
+  it('🔴 ノートが 0 件なら、選ばせる前に断る(空のフォルダを作らない)', async () => {
+    const { dispatcher, deps, failed, notices } = setup({}, []);
+    const root = new FakeDir('選んだ場所');
+    const picker = vi.fn(pickerOf(root));
+    expect(await go(dispatcher, deps, picker)).toBeNull();
+    expect(picker).not.toHaveBeenCalled();
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain('書き出せるノートが 1 件もありません');
+    expect(root.dirs.size).toBe(0);
+    expect(notices).toEqual([]);
+  });
+
+  it('🔴 1 file も書けなかったときは「残っています」と言わず、空だと言う / 書きかけは消す', async () => {
+    const { dispatcher, deps, failed } = setup();
+    const root = new FakeDir('選んだ場所', '会議メモ.md');
+    await go(dispatcher, deps, pickerOf(root));
+    expect(failed[0]).toContain('中身は空です');
+    expect(failed[0]).not.toContain('残っています');
+    const sub = root.dirs.get('私の-PKC-20261010')!;
+    expect(sub.aborted, '書きかけを abort していない').toContain('会議メモ.md');
+    expect(sub.removed).toContain('会議メモ.md');
+    expect(sub.files.has('会議メモ.md'), '0 バイトの書きかけが残っている').toBe(false);
+  });
+
+  it('🔴 書きかけを消せないときは、空のまま残るかもしれないと言う', async () => {
+    const { dispatcher, deps, failed } = setup();
+    const root = new FakeDir('選んだ場所', '会議メモ.md');
+    const orig = root.getDirectoryHandle.bind(root);
+    root.getDirectoryHandle = async (n, o) => {
+      const d = await orig(n, o);
+      d.noRemove = true;
+      return d;
+    };
+    await go(dispatcher, deps, pickerOf(root));
+    expect(failed[0]).toContain('空のまま残っているかもしれません');
+  });
+
+  it('🔴 選ぶウィンドウは asset gate の外で開く / 選んでいる間、二度押しは自前の字で断る', async () => {
+    const { dispatcher, deps, failed } = setup();
+    const gate = createAssetGate(dispatcher);
+    const root = new FakeDir('選んだ場所');
+    const order: string[] = [];
+    let release!: (r: FakeDir) => void;
+    const picker: FolderWritePicker = () => {
+      order.push(`picker(gate busy=${gate.busy})`);
+      return new Promise<FakeDir>((res) => (release = res));
+    };
+    const flow = createMarkdownFolderFlow(dispatcher, picker, (r) =>
+      gate(async () => {
+        order.push('gate');
+        await exportMarkdownToFolder(dispatcher, deps, r);
+      }),
+    );
+    const first = flow();
+    await Promise.resolve();
+    // 選んでいる最中: gate は空いている(添付の取り込み / 削除は断られない)
+    expect(order).toEqual(['picker(gate busy=false)']);
+    let attachRan = false;
+    await gate(async () => {
+      attachRan = true;
+    });
+    expect(attachRan, '選んでいる間、添付の処理が断られた').toBe(true);
+    expect(failed).toEqual([]);
+    // 二度押し: gate の字ではなく自前の字
+    await flow();
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain('Markdown をフォルダに書き出している途中です');
+    expect(failed[0]).not.toContain('添付');
+    release(root);
+    await first;
+    expect(order).toEqual(['picker(gate busy=false)', 'gate']);
+    expect(root.dirs.size).toBe(1);
+  });
+
+  it('🔴 つながり・履歴が落ちることを、zip と同じ言い方で言う / 注意の件数も', async () => {
+    const { dispatcher, deps, notices } = setup({
+      source: source({ relations: 2, revisions: ['a'], strayAsset: true }),
+    });
+    await go(dispatcher, deps, pickerOf(new FakeDir('選んだ場所')));
+    const last = notices.at(-1)!;
+    expect(last).toContain('取り込み直せません');
+    expect(last).toContain('つながり 2');
+    expect(last).toContain('履歴 1 件ぶん');
+    expect(last).toMatch(/\(注意 \d+ 件\)$/);
+    // zip の詳細と同じ部品から出ている
+    const d = describeMarkdownExport({
+      counts: { assets: 1, historyAssets: 0 },
+      dropped: { relations: 2, revisionEntries: 1 },
+    });
+    expect(last).toContain(d.tail);
+  });
+
+  it('🔴 同じ path(大文字小文字・正規化違いを含む)を 2 度書かない', async () => {
+    const dir = new FakeDir('x');
+    const sink = folderSink(dir);
+    await sink.add('メモ.md', ['a']);
+    await expect(sink.add('メモ.MD', ['b'])).rejects.toMatchObject({ name: 'FolderWriteError' });
+    await sink.add('が.md', ['a']);
+    await expect(sink.add('が.md', ['b'])).rejects.toMatchObject({ path: 'が.md' });
+    expect(sink.written).toBe(2);
+    expect(new TextDecoder().decode(dir.files.get('メモ.md'))).toBe('a');
   });
 });
 
