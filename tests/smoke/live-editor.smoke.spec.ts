@@ -729,7 +729,6 @@ test('🔴 長い 1 段落は折り返したぶんだけ箱が伸びる(先頭�
   const m = await row.evaluate((el) => {
     const ta = el as HTMLTextAreaElement;
     return {
-      rows: ta.rows,
       clientHeight: ta.clientHeight,
       scrollHeight: ta.scrollHeight,
       scrollTop: ta.scrollTop,
@@ -740,7 +739,8 @@ test('🔴 長い 1 段落は折り返したぶんだけ箱が伸びる(先頭�
   expect(m.clientHeight, '折り返していない ── 本文が短すぎて何も測っていない').toBeGreaterThan(
     m.lineHeight * 2,
   );
-  expect(m.rows, '改行の数(=1)のままになっている').toBeGreaterThan(1);
+  // ⚠ `rows` は見ない ── `field-sizing: content` が効くブラウザでは、高さは CSS が決めて `rows` は書かない
+  //   (#1467。打鍵のたびの配置を減らすため)。伸びたことは上の高さ(2 行より高い)と下の「溢れていない」で言える
   expect(m.scrollHeight, '箱の中に押し込まれている(溢れている)').toBeLessThanOrEqual(
     m.clientHeight + 1,
   );
