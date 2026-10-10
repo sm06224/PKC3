@@ -1232,7 +1232,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   wireShortcutHints(root);
 
   // ⚠ 配色の選択欄は**設定の画面**に在る(段⑨c で移した)。合わせるのは
-  //    `SettingsRenderer.syncTheme()` の仕事 ── ここに 2 本目を置かない
+  //    `settings/theme.ts` の sync の仕事 ── ここに 2 本目を置かない
   //    (P8 段㉕:帯を探す死んだ同期が残っており、常に空振りしていた)
   // 🔑 左の列は**探し方**で切り替わる(P8 段⑤)。中央は常に「開いているノート」
   // assets: bytes は IDB Blob(sqlite には meta のみ)。表示は lend/dispose 規律
