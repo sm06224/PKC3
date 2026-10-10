@@ -732,7 +732,7 @@ test('🔴 札にマウスを乗せると × が出て、押すと予定から�
  * 🔑 ここでしか見られないのは「**実際に今日の束へ出るか**」である
  *   (unit は欄の値と本文までを見る)。
  */
-test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499)', async ({ page }) => {
+test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499)', async ({ page, context }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -796,6 +796,57 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
       .locator(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`)
       .evaluate((e) => getComputedStyle(e).backgroundColor);
   expect(await bg('day'), '押している「日」が「一覧」と同じ色').not.toBe(await bg('list'));
+
+  /**
+   * 🔴 **左の列の「週」は別のウィンドウで開く。開いた窓は 7 列で、その日の列に 14:00 の札**(#855 段 A-2)。
+   *
+   * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで、押して出る窓(popup)を見る
+   *   (`scripts/smoke-budget.mjs` は `gotoApp` を数える。窓は数に入らない)。
+   * ⚠ unit(`tests/adapter/schedule-week.test.ts`)は窓を開く口を stub で受けている。
+   *   **本物の窓が、合図(`sched=week`)を読んで「週」で立ち上がるか / 札が 14:00 の高さにあるか**は
+   *   実ブラウザでしか言えない。
+   * 🔑 位置は目盛り(`schedule-weekview-grid`)の上端からの差で見る(「日」と同じ)。
+   */
+  const weekPopup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
+  const week = await weekPopup;
+  const weekErrors = collectPageErrors(week);
+  await expect(week.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  // ⚠ 開いた窓にも左の列の予定の面が在る(隠れた「週」の器を持つ)── 数えるのは中央の面の中だけ
+  const centre = week.locator('[data-pkc-view-pane="schedule"]');
+  const weekLanes = centre.locator('[data-pkc-field="schedule-weekview-lane"]');
+  await expect(weekLanes, '開いた窓に 7 列が出ていない(「週」で立ち上がっていない)').toHaveCount(7, {
+    timeout: 20_000,
+  });
+  // 左の列は「日」のまま、7 列を詰めていない
+  await expect(
+    pane.locator('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]'),
+    '左の列の見せ方が変わった',
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(pane.locator('[data-pkc-region="schedule-weekview"]')).toBeHidden();
+  const weekCard = centre
+    .locator(`[data-pkc-field="schedule-weekview-lane"][data-pkc-drop-date="${value}"] > [data-pkc-entry]`)
+    .filter({ hasText: '会議' });
+  await expect(weekCard, '「週」のその日の列に 14:00 の札が出ていない').toHaveCount(1, { timeout: 20_000 });
+  const weekGrid = (await centre.locator('[data-pkc-field="schedule-weekview-grid"]').boundingBox())!;
+  const weekBox = (await weekCard.boundingBox())!;
+  expect(weekBox.height, '1 時間の札が 40px の高さではない').toBeGreaterThan(39);
+  expect(weekBox.height).toBeLessThan(41);
+  expect(weekBox.y - weekGrid.y, '札が 14:00 の高さ(14 × 40px)にない').toBeGreaterThan(559);
+  expect(weekBox.y - weekGrid.y).toBeLessThan(561);
+  // 7 列は横に並ぶ(縦に積まれていない)
+  const laneBoxes = await weekLanes.evaluateAll((els) =>
+    els.map((e) => {
+      const r = e.getBoundingClientRect();
+      return { x: r.x, w: r.width };
+    }),
+  );
+  expect(laneBoxes.every((b, i) => i === 0 || b.x > laneBoxes[i - 1]!.x), '列が横に並んでいない').toBe(true);
+  expect(Math.min(...laneBoxes.map((b) => b.w)), '列の幅が 80px を割っている').toBeGreaterThanOrEqual(79);
+  // 合図は使ったらアドレスから外れる(栞や F5 に焼き付かない)
+  expect(week.url(), '見せ方の合図がアドレスに残っている').not.toContain('sched=');
+  expect(weekErrors, `page error: ${weekErrors.join(' / ')}`).toEqual([]);
+  await week.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -42,6 +42,9 @@ import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
+import { ScheduleWeek } from './schedule-week';
+import { weekOf } from '@features/schedule/day-layout';
+import { addDays } from '@features/datetime/date-math';
 import { createTaskCard, patchTaskCard } from './task-card';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
@@ -97,7 +100,7 @@ export class ScheduleRenderer {
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
-    /** 「一覧 / 日」の 2 つ(#855 段 A-1)。 */
+    /** 「一覧 / 日 / 週」の 3 つ(#855 段 A-1 / A-2)。 */
     modes: HTMLButtonElement[];
     /** 「予定を足す」の日付の欄(「日」では見ている日に合わせる)。 */
     quickDate: HTMLInputElement;
@@ -106,6 +109,8 @@ export class ScheduleRenderer {
   private quickDay: string | null = null;
   /** 「日」の描き手(#855 段 A-1)。一覧のときは隠すだけで捨てない(札と位置を使い回す)。 */
   private readonly day = new ScheduleDay(DROP_DATE);
+  /** 「週」の描き手(#855 段 A-2)。広い面だけで描く(左の列は別のウィンドウで開く)。同じく隠すだけで捨てない。 */
+  private readonly week = new ScheduleWeek(DROP_DATE);
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
@@ -133,6 +138,8 @@ export class ScheduleRenderer {
   render(state: AppState): void {
     const at = this.now();
     const today = dateKey(at.getFullYear(), at.getMonth() + 1, at.getDate());
+    // 🔴 見せ方は**この面の器**で選ぶ(狭い面 = 左の列は `scheduleNarrowMode` / 広い面は `scheduleMode`)
+    const narrow = this.region.hasAttribute('data-pkc-browse-pane');
     const next = {
       scan: state.taskScan,
       failed: state.taskScanFailed,
@@ -148,7 +155,7 @@ export class ScheduleRenderer {
       showUndated: state.showUndatedTasks,
       calendarMonth: state.calendarMonth,
       // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
-      mode: state.scheduleMode,
+      mode: narrow ? state.scheduleNarrowMode : state.scheduleMode,
       shownDay: state.scheduleDay,
       selected: state.selectedLid,
       error: state.error,
@@ -209,7 +216,13 @@ export class ScheduleRenderer {
      *   何も起きないので、user から見ると**壊れて見える**)。
      * ⚠ 片付けたノートの札も入れる ── 同じ理由(隠れているだけで実体は在る)。
      */
-    const dayMode = state.scheduleMode === 'day';
+    /**
+     * 🔴 **「週」は広い面だけ**(#855 段 A-2)。左の列(`data-pkc-browse-pane`)は 7 日を並べる幅が無く、
+     *   `scheduleNarrowMode`(一覧 / 日だけ)を自分の見せ方に持つ ── 「週」を押すと別のウィンドウで開く(`binder.ts`)。
+     */
+    const mode = narrow ? state.scheduleNarrowMode : state.scheduleMode;
+    const dayMode = mode === 'day';
+    const weekMode = mode === 'week';
     const shown = state.scheduleDay ?? today;
     const skip = materializedDates(all);
     const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
@@ -240,20 +253,47 @@ export class ScheduleRenderer {
      * (「日付のない項目も出す」の切替が、どちらの見せ方でも効く)。
      */
     for (const m of frame.modes) {
-      const on = m.getAttribute('data-pkc-mode') === state.scheduleMode;
+      const on = m.getAttribute('data-pkc-mode') === mode;
       const pressed = on ? 'true' : 'false';
       if (m.getAttribute('aria-pressed') !== pressed) m.setAttribute('aria-pressed', pressed);
     }
     this.day.el.hidden = !dayMode;
+    this.week.el.hidden = !weekMode;
     /**
      * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
      *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
      *   描き直しのたびに入れ直すと、user が欄を直した字(空にする = 日付なしで足す、も含む)を奪う。
      */
+    const weekDays = weekMode ? (weekOf(shown) ?? weekOf(today) ?? []) : [];
     if (dayMode && this.quickDay !== shown) {
       frame.quickDate.value = shown;
       this.quickDay = shown;
-    } else if (!dayMode) this.quickDay = null;
+    } else if (weekMode && this.quickDay !== `week ${weekDays[0] ?? ''}`) {
+      // 🔑 「週」では、週が変わったときだけ合わせる(今日を含む週は今日 / 他の週はその週の最初の日)
+      frame.quickDate.value = weekDays.includes(today) ? today : (weekDays[0] ?? today);
+      this.quickDay = `week ${weekDays[0] ?? ''}`;
+    } else if (!dayMode && !weekMode) this.quickDay = null;
+    if (weekMode) {
+      const thisWeek = weekOf(today) ?? [];
+      // 🔑 行き先が今日を含む週なら空(= 今日に追従する状態へ戻る)── 「日」と同じ
+      const goTo = (n: number): string => {
+        const d = addDays(shown, n);
+        if (d === null) return '';
+        return (weekOf(d) ?? []).includes(today) ? '' : d;
+      };
+      this.week.paint({
+        days: weekDays,
+        today,
+        itemsOf: (d) => dayItems(items, d, skip),
+        titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
+        selectedLid: state.selectedLid,
+        year: at.getFullYear(),
+        settled: state.taskScan !== null,
+        prevTo: goTo(-7),
+        nextTo: goTo(7),
+        isThisWeek: weekDays[0] !== undefined && weekDays[0] === thisWeek[0],
+      });
+    } else this.week.leave();
     if (dayMode) {
       this.day.paint({
         day: shown,
@@ -267,7 +307,7 @@ export class ScheduleRenderer {
     } else this.day.leave();
     this.paintGroups(
       frame.groups,
-      dayMode ? groups.filter((g) => g.date === null) : groups,
+      dayMode || weekMode ? groups.filter((g) => g.date === null) : groups,
       state,
     );
   }
@@ -574,6 +614,13 @@ export class ScheduleRenderer {
       [
         ['list', '一覧', '日ごとの一覧で見ます'],
         ['day', '日', '1 日を時間の目盛りに並べて見ます'],
+        [
+          'week',
+          '週',
+          this.region.hasAttribute('data-pkc-browse-pane')
+            ? '別のウィンドウで、1 週間を時間の目盛りに並べて開きます'
+            : '1 週間を時間の目盛りに並べて見ます',
+        ],
       ] as const
     ).map(([mode, label, title]) =>
       buildPressedButton({
@@ -675,7 +722,8 @@ export class ScheduleRenderer {
      */
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.day.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, groups);
+    this.week.el.hidden = true;
+    this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, this.week.el, groups);
     this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }

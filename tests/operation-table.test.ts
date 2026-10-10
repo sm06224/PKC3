@@ -277,7 +277,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-day-go', 'schedule-mode',
   'schedule-nav', 'schedule-quick-add',
-  'schedule-today',
+  'schedule-today', 'schedule-week-pick',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
    *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
@@ -467,6 +467,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-10(#855 段 A-2): 予定の「週」の曜日の見出し(`schedule-week-pick`。押した日の「日」へ)で受け手 +1 ── 登記は増えない
+      //   (押し口は予定の面の中にしか無く、鍵も持たない。`schedule-day-go` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 A-1): 予定の面の「一覧 / 日」(`schedule-mode`)と「日」の ‹ › 今日(`schedule-day-go`)で受け手 +2 ──
       //   登記は増えない(押し口は予定の面の中にしか無く、鍵も持たない。`schedule-nav` / `schedule-today` と同じ置き場)。
       //   押したボタンの属性(見せ方 / 行き先の日)を渡すだけの N。`receivers` +2 / `total` +2 / `unregistered` +2。
@@ -747,12 +749,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 390,
-      receivers: 325,
+      total: 391,
+      receivers: 326,
       registered: 106,
       both: 41,
       outsideActionsTable: 65,
-      unregistered: 284,
+      unregistered: 285,
     });
   });
 

@@ -1623,6 +1623,12 @@ export interface BinderServices {
    */
   openNoteWindow?(lid: string, find?: string): void;
   /**
+   * 🔴 **予定を「週」で、別のウィンドウに開く**(#855 段 A-2)。左の列の「週」ボタンが呼ぶ。
+   * ⚠ **同期に呼べること**(`window.open` は click の gesture の中でしか通らない)。
+   * @param day いま見ている日(`null` = 今日)── 開いた窓が同じ週を見せる
+   */
+  openScheduleWindow?(mode: 'week', day: string | null): void;
+  /**
    * 🔴 **その見出しの章を、読むだけの別のウィンドウで開く**(#1044 段4)。
    * ⚠ **同期で**窓を掴むこと(user の操作の続きでしか開けない)。
    * @param line 押した見出しの行(frontmatter を剥がした側 ── 右クリックが運ぶ値)
@@ -7882,10 +7888,40 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
   },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
-  'schedule-mode': (dispatcher, target) => {
+  'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
-    if (mode !== 'list' && mode !== 'day') return;
+    if (mode !== 'list' && mode !== 'day' && mode !== 'week') return;
+    /**
+     * 🔴 **左の列の「週」は、別のウィンドウで開く**(#855 段 A-2)。左の列は狭く、7 日を並べると
+     *   1 日が読めなくなる ── 左の見せ方(一覧 / 日)は変えない。窓が出なかったときの理由は
+     *   開く側(`view-window.ts`)が出す。⚠ 判定は押した面(`data-pkc-browse-pane`)で ──
+     *   state ではない(別窓の中央の面は同じ state でも 7 日を並べる)。
+     */
+    const narrow = target.closest('[data-pkc-browse-pane]') !== null;
+    if (mode === 'week' && narrow) {
+      if (services.openScheduleWindow === undefined) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '別のウィンドウを開けませんでした' });
+        return;
+      }
+      services.openScheduleWindow('week', dispatcher.getState().scheduleDay);
+      return;
+    }
+    // 🔴 狭い面は自分の見せ方(`scheduleNarrowMode`)を持つ ── 中央の見せ方を巻き込まない
+    if (narrow && (mode === 'list' || mode === 'day')) {
+      dispatcher.dispatch({ type: 'SET_SCHEDULE_NARROW_MODE', mode });
+      return;
+    }
     dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
+  },
+  /**
+   * 「週」の曜日の見出しを押したら、その日の「日」へ(#855 段 A-2)。行き先は描画時に焼いてある
+   * (`data-pkc-day-to`)。⚠ 空 = 今日(今日に追従する状態)。
+   */
+  'schedule-week-pick': (dispatcher, target) => {
+    const to = target.getAttribute('data-pkc-day-to');
+    if (to === null) return;
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'day' });
+    dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date: to === '' ? null : to });
   },
   /**
    * 「日」の ‹ › 今日(#855 段 A-1)。⚠ **行き先の日は描画時に焼いてある**(`data-pkc-day-to`)──
@@ -7916,9 +7952,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     /**
      * 🔴 **「日」のときは、押した日を見せる**(#855 段 A-1)。⚠ 一覧のときの「束へ送る」は
      *   「日」には束が無いので何も起きない ── 押しても何も起きない升目にしない。
-     * 🔑 見せ方は state(`scheduleMode`)で決める ── 面ごとに持たない(別窓の面も同じ state を読む)。
+     * 🔑 見せ方は押した面の state で決める(狭い面 `scheduleNarrowMode` / 広い面 `scheduleMode`)。
      */
-    if (dispatcher.getState().scheduleMode === 'day') {
+    const st = dispatcher.getState();
+    // 🔴 **押した面の見せ方**で決める(狭い面は `scheduleNarrowMode`、広い面は `scheduleMode`)
+    const narrowFace = target.closest('[data-pkc-browse-pane]') !== null;
+    const shown = narrowFace ? st.scheduleNarrowMode : st.scheduleMode;
+    if (shown === 'day' || shown === 'week') {
       dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
       return;
     }

@@ -21,6 +21,7 @@
 import type { AgendaItem } from './agenda';
 import { isRealCalendarDate } from './schedule-date';
 import { storedDateParts } from '@features/datetime/stored-date';
+import { addDays } from '@features/datetime/date-math';
 
 /** 1 日の分。 */
 export const DAY_MINUTES = 24 * 60;
@@ -173,4 +174,51 @@ export function dayHeading(date: string, today: string, tomorrow: string): strin
   if (date === today) return `${head} 今日`;
   if (date === tomorrow) return `${head} 明日`;
   return head;
+}
+
+/**
+ * 🔴 **「週」で見せる 7 日**(#855 段 A-2)。**日曜始まり**(小さな月の升目 `WEEKDAYS` と同じ並び)。
+ * 実在しない日 / 読めない字は `null`(別の週へ寄せない)。
+ */
+export function weekOf(day: string): string[] | null {
+  const parts = isRealCalendarDate(day) ? storedDateParts(day) : null;
+  if (parts === null) return null;
+  const dow = new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day)).getDay();
+  const out: string[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    const d = addDays(day, i - dow);
+    if (d === null) return null;
+    out.push(d);
+  }
+  return out;
+}
+
+/** 日付の 1 端の字(`10月4日`)。今年でないときは年を前に付ける。読めなければ `null`。 */
+function monthDay(date: string, withYear: boolean): string | null {
+  const parts = isRealCalendarDate(date) ? storedDateParts(date) : null;
+  if (parts === null) return null;
+  return `${withYear ? `${Number(parts.year)}年` : ''}${Number(parts.month)}月${Number(parts.day)}日`;
+}
+
+/**
+ * 「週」の見出しの字(`10月4日〜10月10日`)。どちらかの端が今年でなければ、**両端に**年を付ける
+ * (片方だけだと、どちらの年か読めない)。読めない字はそのまま出す(`dayHeading` と同じ向き)。
+ */
+export function weekHeading(days: readonly string[], today: string): string {
+  const first = days[0];
+  const last = days[days.length - 1];
+  if (first === undefined || last === undefined) return '';
+  const year = today.slice(0, 4);
+  const withYear = first.slice(0, 4) !== year || last.slice(0, 4) !== year;
+  const a = monthDay(first, withYear);
+  const b = monthDay(last, withYear);
+  return a === null || b === null ? `${first}〜${last}` : `${a}〜${b}`;
+}
+
+/** 「週」の列の見出し(曜日の字と `10/4`)。読めない字は日付をそのまま。 */
+export function weekColumnLabel(date: string): { readonly weekday: string; readonly date: string } {
+  const parts = isRealCalendarDate(date) ? storedDateParts(date) : null;
+  if (parts === null) return { weekday: '', date };
+  const at = new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  return { weekday: WEEKDAYS[at.getDay()]!, date: `${Number(parts.month)}/${Number(parts.day)}` };
 }

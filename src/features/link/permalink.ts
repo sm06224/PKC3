@@ -31,6 +31,8 @@
  *     equal to `input` modulo the optional `raw` field
  */
 
+import { isRealCalendarDate } from '@features/schedule/schedule-date';
+
 export const PKC_SCHEME = 'pkc://';
 
 export type PkcRefKind = 'entry' | 'asset';
@@ -450,6 +452,30 @@ export function parseViewDeepLinkFind(raw: string): string | null {
   return find === null || find === '' ? null : find;
 }
 
+/**
+ * 🔴 **予定の面を「週」で開く合図**(`sched=week`、任意で `day=YYYY-MM-DD`。#855 段 A-2)。
+ *
+ * 左の列は狭くて 7 日を並べられないので、「週」は別のウィンドウで開く ── 開いた窓が起動で読んで
+ * 見せ方を「週」にする。⚠ 使ったらアドレスから外す(`dropViewScheduleFromHash`)── 栞や `F5` に
+ * 焼き付くと、次に開くたびに見せ方を奪う(頼んでいない見え方の変更)。
+ * ⚠ 受けるのは `week` だけ。日付は実在する日だけ(`2026-02-30` は捨てる ── 別の日へ寄せない)。
+ *   読めない値は丸ごと `null`(半分だけ拾わない)。
+ */
+export function parseViewDeepLinkSchedule(
+  raw: string,
+): { readonly mode: 'week'; readonly day: string | null } | null {
+  const params = hashParams(raw);
+  if (params === null || params.get('sched') !== 'week') return null;
+  const day = params.get('day');
+  if (day === null || day === '') return { mode: 'week', day: null };
+  return isScheduleDay(day) ? { mode: 'week', day } : { mode: 'week', day: null };
+}
+
+/** 🔴 **予定の見せ方の合図だけを落とす**(#855 段 A-2)。⚠ `container` / `entry` / `view` は残す。 */
+export function dropViewScheduleFromHash(raw: string): string {
+  return dropHashKeys(raw, ['sched', 'day']);
+}
+
 /** 🔴 **探していた語だけを落とす**(#1102 段①)。⚠ `container` / `entry` / `view` は残す。 */
 export function dropViewFindFromHash(raw: string): string {
   return dropHashKeys(raw, ['find']);
@@ -547,6 +573,11 @@ export interface ViewDeepLinkInput {
    * 一緒にだけ運ぶ ── 行き先の無い語は意味が無いので、ノートが載らなかったときは落とす。
    */
   readonly find?: string;
+  /**
+   * 🔴 **予定の面を開く見せ方**(`sched` / `day`。#855 段 A-2)。⚠ 面が `schedule` のときだけ運ぶ
+   * (他の面には意味が無い)。`day` は実在する日だけ。
+   */
+  readonly schedule?: { readonly mode: 'week'; readonly day: string | null };
 }
 
 export function formatViewDeepLink(
@@ -582,6 +613,11 @@ export function formatViewDeepLink(
   // ⚠ ノートが載ったときだけ(上の理由)。空は載せない
   if (carried && input.find !== undefined && input.find !== '')
     parts.push(`find=${encodeURIComponent(input.find)}`);
+  if (view === 'schedule' && input.schedule !== undefined) {
+    parts.push(`sched=${input.schedule.mode}`);
+    const day = input.schedule.day;
+    if (day !== null && isScheduleDay(day)) parts.push(`day=${encodeURIComponent(day)}`);
+  }
   return `${baseUrl}${PKC_FRAGMENT_PREFIX}${parts.join('&')}`;
 }
 
@@ -663,6 +699,14 @@ export type ParsedPermalink = ParsedPortablePkcReference;
 
 /** @deprecated Use `PortablePkcReferenceInput`. */
 export type PermalinkInput = PortablePkcReferenceInput;
+
+/**
+ * 🔴 合図の `day` として受ける日(#855 段 A-2)。実在する日で、**年が 4 桁(1000 年以降)**。
+ * ⚠ `0050-01-01` は実在の日として通るが、`new Date(50, …)` は 1950 年へ寄せる ── 別の日を見せない。
+ */
+function isScheduleDay(day: string): boolean {
+  return isRealCalendarDate(day) && Number(day.slice(0, 4)) >= 1000;
+}
 
 /** @deprecated Use `PkcRefKind`. */
 export type PkcPermalinkKind = PkcRefKind;

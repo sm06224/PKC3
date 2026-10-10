@@ -307,7 +307,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `revoke-extension` / `revoke-same-origin` と同じ仕分け)。
     // ⚠ 2026-10-11(#855 段 A-1): N +2(`schedule-mode` / `schedule-day-go`。予定の面の「一覧 / 日」と「日」の ‹ › 今日 ──
     //   押したボタン自身の属性(見せ方 / 行き先の日)を渡すだけ。`schedule-nav` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 183 });
+    // ⚠ 2026-10-10(#855 段 A-2): N +1(`schedule-week-pick`。「週」の曜日の見出し ── 行き先の日はボタン自身の属性で、押した所から他に何も要らない。
+    //   `schedule-day-go` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 184 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
