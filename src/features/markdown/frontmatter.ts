@@ -690,7 +690,7 @@ function parseFlatYaml(lines: readonly string[]): Record<string, FrontmatterValu
       continue;
     }
 
-    if (valuePart.startsWith('[') && valuePart.endsWith(']')) {
+    if (isFlowSequence(valuePart)) {
       out[key] = parseInlineArray(valuePart.slice(1, -1));
       continue;
     }
@@ -750,6 +750,36 @@ function findKeyColon(line: string): number {
     else if (!inSingle && !inDouble && ch === ':') return i;
   }
   return -1;
+}
+
+/**
+ * 🔴 **値の全体が 1 組の `[ … ]` か**(#1428)。
+ *
+ * ⚠ `tags: [a], [b]` は `[` で始まり `]` で終わるが、先頭の `[` は `a` の直後で閉じる ──
+ *   1 組の配列ではない。配列として割ると `a]` と `[b` という片割れの名前ができ、
+ *   タグを 1 つ付けた途端に本文が `tags: ["a]", "[b", c]` へ書き変わっていた。
+ * 🔑 1 組でないなら**文字列**として返す ── タグなら `readTags` の文字列の枝(`splitTags`)が読み、
+ *   打つ欄と同じ `a` / `b` になる(欄と `tags:` の行で規則を 2 本にしない。§7)。
+ * ⚠ 引用の中の括弧は数えない ── writer は `]` を含む名前を `"a]"` と quote して書く。
+ */
+function isFlowSequence(v: string): boolean {
+  if (!v.startsWith('[') || !v.endsWith(']')) return false;
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < v.length; i++) {
+    const ch = v[i];
+    if (ch === '\\' && (inSingle || inDouble)) {
+      i += 1;
+      continue;
+    }
+    if (!inDouble && ch === "'") inSingle = !inSingle;
+    else if (!inSingle && ch === '"') inDouble = !inDouble;
+    if (inSingle || inDouble) continue;
+    if (ch === '[') depth += 1;
+    else if (ch === ']' && --depth === 0) return i === v.length - 1;
+  }
+  return false;
 }
 
 function parseInlineArray(inner: string): Array<string | number | boolean | null> {

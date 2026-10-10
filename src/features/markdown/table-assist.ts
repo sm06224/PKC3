@@ -47,20 +47,16 @@ interface TableLineInfo {
 
 /**
  * 行内のエスケープされていないパイプ (`|`) のインデックスを抽出する。
+ *
+ * 🔴 **画面に描く読み手(markdown-it の `escapedSplit`)と同じ規則**(#1426)──
+ *   直前の 1 字が `\` なら区切りではない(本数の偶奇は数えない)。
+ *   ⚠ 偶奇で数えていた頃は、`| a\\|b | c |` を画面は 2 列、ここは 3 列と読み、
+ *   Tab で移る升がその行だけずれていた。升へ割る側(`table-convert.ts` の `splitRowSpans`)も同じ規則。
  */
 function unescapedPipeIndices(line: string): number[] {
   const pipes: number[] = [];
   for (let i = 0; i < line.length; i += 1) {
-    if (line[i] === '|') {
-      // 直前が奇数個のバックスラッシュならエスケープされている
-      let bsCount = 0;
-      for (let j = i - 1; j >= 0 && line[j] === '\\'; j -= 1) {
-        bsCount += 1;
-      }
-      if (bsCount % 2 === 0) {
-        pipes.push(i);
-      }
-    }
+    if (line[i] === '|' && line[i - 1] !== '\\') pipes.push(i);
   }
   return pipes;
 }

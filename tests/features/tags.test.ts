@@ -420,3 +420,29 @@ describe('生き延びた変異を殺す(#637)', () => {
     expect(applyBodyRewrite(body, { kind: 'tag', tags: ['家事'], mode: 'add' })).toBeNull();
   });
 });
+
+describe('`tags:` の行の要素ごとの角括弧(#1428)', () => {
+  it('🔴 `tags: [a], [b]` は欄と同じく a / b ── 片割れの名前(`a]` / `[b`)を作らない', () => {
+    expect(readTags(fm('tags: [a], [b]'))).toEqual(['a', 'b']);
+    expect(readTags(fm('tags: [a], [b], [c]'))).toEqual(['a', 'b', 'c']);
+    // 欄と同じ規則(§7)
+    expect(readTags(fm('tags: [a], [b]'))).toEqual(splitTags('[a], [b]'));
+  });
+
+  it('対照群: 1 組の配列はこれまでどおり配列 ── 引用の中の括弧は数えない', () => {
+    expect(parseFrontmatter(fm('tags: [a, b]')).meta.tags).toEqual(['a', 'b']);
+    expect(parseFrontmatter(fm('tags: ["a]", "[b"]')).meta.tags).toEqual(['a]', '[b']);
+    expect(parseFrontmatter(fm("tags: ['x]', y]")).meta.tags).toEqual(['x]', 'y']);
+    expect(parseFrontmatter(fm('tags: []')).meta.tags).toEqual([]);
+  });
+
+  it('🔴 タグを 1 つ付けて外すと、a / b のまま戻る(本文が片割れの名前に書き変わらない)', () => {
+    const body = fm('tags: [a], [b]');
+    const added = applyBodyRewrite(body, { kind: 'tag', tags: ['c'], mode: 'add' })!;
+    expect(added).not.toContain('a]');
+    expect(readTags(added)).toEqual(['a', 'b', 'c']);
+    const removed = applyBodyRewrite(added, { kind: 'tag', tags: ['c'], mode: 'remove' })!;
+    expect(readTags(removed)).toEqual(['a', 'b']);
+    expect(removed).not.toMatch(/\[a\]|\[b\]/u);
+  });
+});
