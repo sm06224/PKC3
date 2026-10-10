@@ -149,7 +149,11 @@ try {
      * `host` の子を数えると、束ごと差し替えられたとき**外れた古い器**を見て
      * 「他のカードは無傷」という嘘の緑になる。
      */
-    const hostNow = document.querySelector('[data-pkc-region="schedule-cards"]');
+    // ⚠ **束の中の器**を引く(2026-10-10、Nightly が赤くなった)── 「日」「週」の見せ方(#855)が
+    //   同じ名前の器(終日の欄・目盛りの列)を一覧の束より**前**に置くので、文書の先頭の器は束の器ではない
+    const hostNow = document.querySelector(
+      '[data-pkc-region="schedule-group"] [data-pkc-region="schedule-cards"]',
+    );
     const hostSameNode = hostNow === host;
     const othersIntact =
       hostNow !== null && others.every((el, i) => [...hostNow.children].slice(0, 49)[i] === el);

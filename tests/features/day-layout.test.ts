@@ -4,6 +4,13 @@ import { itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda'
 import {
   DAY_MINUTES,
   dayHeading,
+  deltaMinutes,
+  formatMinutes,
+  formatTimeRange,
+  minutesFromOffset,
+  moveSlot,
+  resizeSlot,
+  snapMinutes,
   initialScrollMinutes,
   minutesOf,
   pieceOf,
@@ -193,5 +200,73 @@ describe('見出しの字', () => {
   it('今年でなければ年も出す / 実在しない日は寄せずそのまま', () => {
     expect(dayHeading('2027-01-05', '2026-10-10', '2026-10-11')).toBe('2027年1月5日(火)');
     expect(dayHeading('2026-02-30', '2026-10-10', '2026-10-11')).toBe('2026-02-30');
+  });
+});
+
+/**
+ * 🔴 **目盛りの上で札を動かす計算**(#855 段 B-1)。pure なので、ここで端を総当たりする
+ * (画面での掴み方は `tests/adapter/schedule-grid-drag.test.ts`)。
+ */
+describe('目盛りの上で札を動かす計算(#855 段 B-1)', () => {
+  it('🔴 15 分刻みに丸める(近いほう)', () => {
+    expect(snapMinutes(0)).toBe(0);
+    expect(snapMinutes(7)).toBe(0);
+    expect(snapMinutes(8)).toBe(15);
+    expect(snapMinutes(14 * 60 + 22)).toBe(14 * 60 + 15);
+    expect(snapMinutes(14 * 60 + 23)).toBe(14 * 60 + 30);
+  });
+
+  it('距離(px)を分にする ── 1 時間 40px なら 20px は 30 分 / 器の高さが無ければ 0', () => {
+    expect(minutesFromOffset(560, 960)).toBe(14 * 60);
+    expect(minutesFromOffset(-5, 960)).toBe(0);
+    expect(minutesFromOffset(5000, 960)).toBe(DAY_MINUTES);
+    expect(minutesFromOffset(10, 0)).toBe(0);
+    expect(deltaMinutes(20, 960)).toBe(30);
+    expect(deltaMinutes(-80, 960)).toBe(-120);
+    expect(deltaMinutes(20, 0)).toBe(0);
+  });
+
+  it('時刻の字(24:00 は 24:00)', () => {
+    expect(formatMinutes(0)).toBe('00:00');
+    expect(formatMinutes(14 * 60 + 5)).toBe('14:05');
+    expect(formatMinutes(DAY_MINUTES)).toBe('24:00');
+    expect(formatMinutes(DAY_MINUTES + 30)).toBe('24:00');
+    expect(formatMinutes(-5)).toBe('00:00');
+  });
+
+  it('🔴 動かすと始まりが 15 分刻みになり、長さは保たれる', () => {
+    // 14:00..15:00 を 2 時間 7 分下へ → 16:07 ではなく 16:00(近い刻み)
+    expect(moveSlot(14 * 60, 15 * 60, 127)).toEqual({ startMin: 16 * 60, endMin: 17 * 60 });
+    // 14:00..15:00 を 1 時間 23 分下へ → 15:23 → 15:30
+    expect(moveSlot(14 * 60, 15 * 60, 83)).toEqual({ startMin: 15 * 60 + 30, endMin: 16 * 60 + 30 });
+    // 90 分の札は 90 分のまま
+    const m = moveSlot(9 * 60, 10 * 60 + 30, 61);
+    expect(m.endMin - m.startMin).toBe(90);
+    expect(m).toEqual({ startMin: 10 * 60, endMin: 11 * 60 + 30 });
+  });
+
+  it('🔴 日の内側に収める ── 上は 0:00 / 下は終わりが 24:00 になるところまで(長さを保つ)', () => {
+    expect(moveSlot(1 * 60, 2 * 60, -600)).toEqual({ startMin: 0, endMin: 60 });
+    expect(moveSlot(22 * 60, 23 * 60, 600)).toEqual({ startMin: 23 * 60, endMin: 24 * 60 });
+    const long = moveSlot(10 * 60, 13 * 60, 900);
+    expect(long).toEqual({ startMin: 21 * 60, endMin: 24 * 60 });
+  });
+
+  it('🔴 縁を引くと終わりだけが 15 分刻みで動く / 最低 15 分 / 24:00 まで', () => {
+    expect(resizeSlot(14 * 60, 15 * 60 + 40)).toBe(15 * 60 + 45);
+    // 始まりより手前・同じ位置まで引いても 15 分は残る
+    expect(resizeSlot(14 * 60, 13 * 60)).toBe(14 * 60 + 15);
+    expect(resizeSlot(14 * 60, 14 * 60)).toBe(14 * 60 + 15);
+    expect(resizeSlot(14 * 60, 14 * 60 + 5)).toBe(14 * 60 + 15);
+    // 24:00 を越えない
+    expect(resizeSlot(23 * 60, 5000)).toBe(DAY_MINUTES);
+    // 終わりの無い札(目盛りには 30 分で描く)でも、始まりを基準に伸ばせる
+    const p = pieceOf('k', '14:00', null)!;
+    expect(resizeSlot(p.startMin, 15 * 60 + 30)).toBe(15 * 60 + 30);
+  });
+
+  it('動かしている間の字は札と同じ 〜 区切り', () => {
+    expect(formatTimeRange(14 * 60 + 15, 15 * 60 + 15)).toBe('14:15〜15:15');
+    expect(formatTimeRange(23 * 60, DAY_MINUTES)).toBe('23:00〜24:00');
   });
 });

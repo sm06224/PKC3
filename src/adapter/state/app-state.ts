@@ -2693,6 +2693,11 @@ export type UserAction =
       time?: string | null;
       /** 🔴 期間の終わり(#344 段①)。単日にするなら渡さないか `null`。 */
       until?: string | null;
+      /**
+       * 🔴 **時刻の終わり**(#855 段 B-1。時間の目盛りで札の下の縁を引く / 札を動かす)。
+       * ⚠ 渡さなければ**書かれている終わりを保つ**(始まりが同じとき)── 渡して `null` なら終わりを外す。
+       */
+      timeEnd?: string | null;
     }
   /**
    * 🔴 **その行の繰り返しを付け替える**(#855 段 0 の 3 つ目。user 裁定 2026-09-13
@@ -2775,7 +2780,19 @@ export type UserAction =
    *   書き換えるだけなので `SET_TASK_DATE` で足りる(口を増やさない ── §7)。
    * ⚠ `line` は**規則の行**、`from` は**動かす回の日**、`to` は**落とした日**。
    */
-  | { type: 'MOVE_REPEAT_OCCURRENCE'; lid: string; line: number; from: string; to: string }
+  | {
+      type: 'MOVE_REPEAT_OCCURRENCE';
+      lid: string;
+      line: number;
+      from: string;
+      to: string;
+      /**
+       * 🔴 **その回の時刻も変える**(#855 段 B-1。時間の目盛りで動かしたとき)。
+       * ⚠ 渡さなければ規則の時刻を持ち越す。渡したとき `timeEnd` を省けば終わりは付かない。
+       */
+      time?: string;
+      timeEnd?: string | null;
+    }
   /**
    * 🔴 **外部の画像を手元へ取り込んだ結果を本文へ当てる**(#264 段①)。
    *
@@ -7250,6 +7267,8 @@ function reduceCore(
               // ⚠ **渡されたときだけ**載せる(渡していないのに `null` を載せると、
               //    「期間を外す」という**頼んでいない指示**になる)
               ...(action.until === undefined ? {} : { until: action.until }),
+              // ⚠ 同じ向き ── 渡されたときだけ(渡していないのに `null` を載せると終わりを外してしまう)
+              ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
             },
           },
         ],
@@ -7573,6 +7592,8 @@ function reduceCore(
               line: action.line,
               from: action.from,
               to: action.to,
+              ...(action.time === undefined ? {} : { time: action.time }),
+              ...(action.timeEnd === undefined ? {} : { timeEnd: action.timeEnd }),
             },
           },
         ],

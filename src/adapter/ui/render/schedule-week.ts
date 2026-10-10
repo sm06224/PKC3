@@ -24,7 +24,7 @@
  * - 🔑 **札も器も使い回す**(掴んでいる札を作り直さない)。⚠ 札の鍵は**日を含める**
  *   (同じ予定が複数の日に出る ── 期間・繰り返し ── ので、日が違えば別の札)。
  * - 🔴 **落とし先は列全体**(曜日の見出し・終日の升・目盛りの列の全部)── 落とすとその日になる。
- *   ⚠ 時刻を変える落とし方は作らない(「日」と同じ ── 別の段)。
+ *   ⚠ 時刻を変える落とし方(目盛りの上で札を動かす / 下の縁を引く)は `schedule-grid-drag.ts`(「日」と同じ 1 本)。
  * - 🔑 **最初に見せる位置は、週を変えたときと開いたときの 1 回だけ**(`pendingMin`)。
  */
 import type { AgendaItem } from '@features/schedule/agenda';
@@ -37,7 +37,7 @@ import {
   weekHeading,
   type DaySlot,
 } from '@features/schedule/day-layout';
-import { createTaskCard, patchTaskCard } from './task-card';
+import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
 
 export interface WeekPaint {
   /** 見せる 7 日(`YYYY-MM-DD`。日曜始まり)。 */
@@ -242,6 +242,7 @@ export class ScheduleWeek {
         card.style.removeProperty('--day-span');
         card.style.removeProperty('--day-col');
         card.style.removeProperty('--day-cols');
+        placeCardInGrid(card, false);
         if (cursor === card) cursor = card.nextSibling;
         else col.allDay.insertBefore(card, cursor);
       }
@@ -260,6 +261,8 @@ export class ScheduleWeek {
         set('--day-col', s.col);
         set('--day-cols', s.cols);
         if (card.parentElement !== col.lane) col.lane.append(card);
+        // 🔴 目盛りの札は Pointer Events で掴む(HTML5 の drag は切る ── 奪い合わない。#855 段 B-1)
+        placeCardInGrid(card, true);
       }
     });
     this.allDayRow.hidden = perDay.every(({ items }) => splitDay(items).allDay.length === 0);

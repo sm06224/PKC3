@@ -912,12 +912,18 @@ export function pickRepeatMoveInApp(
   host: HTMLElement,
   /** 何日ぶんずれるか(画面の字に出す)。 */
   days: number,
+  /**
+   * 🔴 **時間の目盛りで動かしたときの、動かした先の時刻の字**(`14:15〜15:15`。#855 段 B-1)。
+   * ⚠ 日が同じ(`days === 0`)なら時刻だけを言う ── 「0 日あとへ」とは書かない。
+   */
+  clock: string | null = null,
 ): Promise<'one' | 'all' | null> {
   /**
    * ⚠ **向きを字にする**(「3 日後ろへ」)── 「3 日ずらす」だけだと
    *   前へか後ろへか読めない。0 日は呼び側が弾く(同じ日には落とせない)。
    */
-  const move = days > 0 ? `${days} 日あと` : `${-days} 日まえ`;
+  const dayWord = days > 0 ? `${days} 日あと` : `${-days} 日まえ`;
+  const move = clock === null ? dayWord : days === 0 ? clock : `${dayWord}の ${clock}`;
   return pickRowInApp<'one' | 'all'>(host, {
     title: '繰り返しの予定を動かします',
     field: 'pick-repeat-move',

@@ -116,6 +116,14 @@ const TASK_CARD_SELECTOR =
  */
 const NO_GRAB_SELECTOR = 'input[type="checkbox"], [data-pkc-field="task-unschedule"]';
 
+/**
+ * 🔴 **時間の目盛りの器**(「日」「週」の札を置く列)。#855 段 B-1。
+ * ⚠ ここに居る札は `schedule-grid-drag.ts` が掴む ── このファイルの指の掴み(日へ落とすだけ)は受けない
+ *   (同じ札に答える口を 2 つ作らない)。
+ */
+export const GRID_LANE_SELECTOR =
+  '[data-pkc-field="schedule-day-lane"], [data-pkc-field="schedule-weekview-lane"]';
+
 /** 掴んだ札が持つ荷物。`binder.ts` の HTML5 drag が組む文字列と同じ 4 つ。 */
 export interface GrabbedTask {
   readonly lid: string;
@@ -224,9 +232,22 @@ export function repeatMoveAction(
   /** 何日ぶんずれるか。 */
   days: number,
   pick: 'one' | 'all' | null,
+  /**
+   * 🔴 **その回の時刻も変えるとき**(#855 段 B-1。時間の目盛りで動かした)。
+   * ⚠ 省けば従来どおり(日だけ動かし、時刻と幅は規則のまま)。`timeEnd: null` は「幅なし」。
+   */
+  slot?: { readonly time: string; readonly timeEnd: string | null },
 ): UserAction | null {
   if (pick === null) return null; // やめる
-  if (pick === 'one') return { type: 'MOVE_REPEAT_OCCURRENCE', lid: grabbed.lid, line, from, to };
+  if (pick === 'one')
+    return {
+      type: 'MOVE_REPEAT_OCCURRENCE',
+      lid: grabbed.lid,
+      line,
+      from,
+      to,
+      ...(slot === undefined ? {} : { time: slot.time, timeEnd: slot.timeEnd }),
+    };
   /**
    * 🔴 **全部ずらす = 規則の行の日付を同じ差だけ動かす。**
    * ⚠ **落とした日そのものを書かない** ── 落とした日は「**掴んだ回**」が来る日で
@@ -241,7 +262,9 @@ export function repeatMoveAction(
     lid: grabbed.lid,
     line,
     date: anchor,
-    time: card?.time ?? null,
+    time: slot === undefined ? (card?.time ?? null) : slot.time,
+    // 🔴 時刻の幅は、動かしたときだけ渡す(渡さなければ書かれた幅を保つ ── `rewriteLineDate`)
+    ...(slot === undefined ? {} : { timeEnd: slot.timeEnd }),
     // ⚠ `until` は**繰り返しの終わり**である ── 同じ差だけ動かす(期間と同じ作法)
     until: card?.until == null ? null : (addDays(card.until, days) ?? card.until),
   };
@@ -382,6 +405,8 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     if (target?.closest(NO_GRAB_SELECTOR) != null) return;
     const card = target?.closest<HTMLElement>(TASK_CARD_SELECTOR) ?? null;
     if (card === null || !root.contains(card)) return;
+    // 🔴 時間の目盛りの札は `schedule-grid-drag.ts` が掴む(時刻も動かせる)
+    if (card.parentElement?.matches(GRID_LANE_SELECTOR) === true) return;
     const lid = card.getAttribute('data-pkc-entry');
     if (lid === null) return;
     /**

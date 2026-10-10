@@ -96,9 +96,27 @@ export function createTaskCard(data: AgendaItem): HTMLElement {
   off.type = 'button';
   off.setAttribute('data-pkc-action', 'unschedule-task');
   off.setAttribute('data-pkc-field', 'task-unschedule');
-  card.append(box, line, note, off);
+  /**
+   * 🔴 **下の縁(時間の目盛りの上でだけ出る)**(#855 段 B-1)。引くと終わりの時刻が変わる。
+   * ⚠ 一覧・終日の札では `display: none`(`app.css`)── 字は持たない。名前は `aria-label`。
+   */
+  const resize = document.createElement('span');
+  resize.setAttribute('data-pkc-field', 'task-resize');
+  resize.setAttribute('aria-label', '終わりの時刻を変える');
+  card.append(box, line, note, off, resize);
   patchTaskCard(card, data, '', null);
   return card;
+}
+
+/**
+ * 🔴 **札が時間の目盛りに居るか終日・一覧に居るかを合わせる**(#855 段 B-1)。
+ *
+ * ⚠ **目盛りの札は HTML5 の drag を切る**(`draggable = false`)── マウスの掴みは Pointer Events
+ *   (`schedule-grid-drag.ts`)が答えるので、両方が生きていると 2 つが奪い合う。
+ *   終日・一覧の札は従来どおり HTML5 の drag で日へ落とす。
+ */
+export function placeCardInGrid(card: HTMLElement, inGrid: boolean): void {
+  if (card.draggable === inGrid) card.draggable = !inGrid;
 }
 
 /**
@@ -182,6 +200,11 @@ export function patchTaskCard(
    * 🔑 **期間であることを札の属性に出す**(#344 段①)── 見た目のためではなく、
    * **外から見える継ぎ目**を作るため(smoke と CSS が「期間の札」を名指しできる)。
    */
+  // 🔴 時刻の素の値(#855 段 B-1)── 時間の目盛りで動かす側が読む(札の字は読まない)
+  if (data.time !== null) card.setAttribute('data-pkc-task-time', data.time);
+  else card.removeAttribute('data-pkc-task-time');
+  if (data.timeEnd !== null) card.setAttribute('data-pkc-task-time-end', data.timeEnd);
+  else card.removeAttribute('data-pkc-task-time-end');
   if (data.until !== null) card.setAttribute('data-pkc-task-range', data.until);
   else card.removeAttribute('data-pkc-task-range');
   /**

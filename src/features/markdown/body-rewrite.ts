@@ -318,6 +318,11 @@ export type BodyRewrite =
        */
       until?: string | null;
       /**
+       * 🔴 **時刻の終わり**(#855 段 B-1)。⚠ **渡さなければ従来どおり**(始まりが動かなければ保つ / 動けば外す)。
+       * 渡して `null` なら外す。⚠ `time` が無い・期間のときは書かれない(`formatLineDate` の規則)。
+       */
+      timeEnd?: string | null;
+      /**
        * 🔴 **刻み**(#344 段②)。⚠ **渡さなければ元の刻みを保つ** ── 日付だけ
        *   動かしたつもりで `毎週` が黙って消えたら、それは user が頼んでいない変更である。
        *   はっきり `null` を渡したときだけ外す。
@@ -363,6 +368,12 @@ export type BodyRewrite =
       from: string;
       /** どこへ動かすか(`YYYY-MM-DD`)。 */
       to: string;
+      /**
+       * 🔴 **その回の時刻**(#855 段 B-1)。⚠ 渡さなければ規則の時刻と幅を持ち越す。
+       * 渡したら `timeEnd` も**その回の幅として**書く(省けば幅なし)。
+       */
+      time?: string;
+      timeEnd?: string | null;
     }
   | {
       /**
@@ -879,6 +890,7 @@ function rewriteLineDate(
     date?: string | null;
     time?: string | null;
     until?: string | null;
+    timeEnd?: string | null;
     repeat?: RepeatUnit | null;
   },
 ): string | null {
@@ -943,7 +955,8 @@ function rewriteLineDate(
         // 🔴 **渡されていなければ元の刻みを保つ**(#344 段②)── 日を動かしただけで
         //    `毎週` が消えたら、user は「勝手に消された」と読む(時刻と同じ向き)
         rewrite.repeat === undefined ? found.repeat : rewrite.repeat,
-        undefined,
+        // 🔴 振替の字は保つ(#855 段 B-1)── 落とすと動かす前の日の回が規則から出直して、2 枚に見える
+        found.substitutes,
         /**
          * 🔴 **時刻の幅は、始まりが動かなければ保つ**(#855 段 C′)。
          * ⚠ 日だけ動かしたのに `14:00..15:00` が `14:00` に縮んだら、それは user が
@@ -951,9 +964,18 @@ function rewriteLineDate(
          * ⚠ 始まりの時刻が**変わる**呼び出しでは古い終わりを持ち越さない
          *   (別の幅になってしまう)。
          */
-        found.time !== null && rewrite.time === found.time ? found.timeEnd : null,
+        // 🔴 渡されたら**それを書く**(#855 段 B-1。縁を引いた / 動かした)── `null` は「幅なし」
+        rewrite.timeEnd !== undefined
+          ? rewrite.timeEnd
+          : found.time !== null && rewrite.time === found.time
+            ? found.timeEnd
+            : null,
       ) +
-      line.slice(found.end);
+      // 🔴 終わりを**書き直す**ときは、幅として読まれなかった古い終わり(`..02:00`)も一緒に差し替える
+      //    (残すと `14:00..15:00..02:00` になる)。⚠ 終わりを渡さない動かし方では 1 バイトも触らない
+      line.slice(
+        found.end + (typeof rewrite.timeEnd === 'string' ? found.strayEnd : 0),
+      );
   }
   if (next === line) return null;
   lines[rewrite.line] = next;
@@ -1024,7 +1046,7 @@ function materializeRepeat(
  */
 function moveRepeatOccurrence(
   body: string,
-  rewrite: { line: number; from: string; to: string },
+  rewrite: { line: number; from: string; to: string; time?: string; timeEnd?: string | null },
 ): string | null {
   const lines = splitLines(body);
   const line = lines[rewrite.line];
@@ -1035,8 +1057,11 @@ function moveRepeatOccurrence(
   if (found === null || found.repeat === null) return null;
   // ⚠ 読めない日は書かない(当てずっぽうの日付を本文へ残さない)
   if (!isScheduleDate(rewrite.from) || !isScheduleDate(rewrite.to)) return null;
-  // 🔑 動いていないなら書かない
-  if (rewrite.from === rewrite.to) return null;
+  // 🔴 その回の時刻(#855 段 B-1)。渡されたときだけ規則の時刻を上書きする
+  const time = rewrite.time === undefined ? found.time : rewrite.time;
+  const timeEnd = rewrite.time === undefined ? found.timeEnd : (rewrite.timeEnd ?? null);
+  // 🔑 日も時刻も動いていないなら書かない(同じ日でも時刻が動けば、その回の行を増やす)
+  if (rewrite.from === rewrite.to && time === found.time && timeEnd === found.timeEnd) return null;
   /**
    * ⚠ 記法を**落とした日の単日 + 振替**へ差し替える(刻みは落とす ── 増えた行が
    *   また繰り返したら回が無限に増える)。⚠ 時刻は**持ち越す**
@@ -1045,7 +1070,7 @@ function moveRepeatOccurrence(
   const moved =
     line.slice(0, found.start) +
     // 🔴 時刻の幅も持ち越す(#855 段 C′)
-    formatLineDate(rewrite.to, found.time, null, null, rewrite.from, found.timeEnd) +
+    formatLineDate(rewrite.to, time, null, null, rewrite.from, timeEnd) +
     line.slice(found.end);
   if (lines.includes(moved)) return null;
   lines.splice(rewrite.line + 1, 0, moved);

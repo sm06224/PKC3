@@ -25,6 +25,7 @@ import {
 import { formatTimeSpan, isScheduleTimeRange } from '../../src/features/schedule/schedule-date';
 import { replaceTaskCards, taskCardsOf } from '../../src/features/schedule/task-cards';
 import { buildAgenda, itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
+import { materializedDates } from '../../src/features/schedule/repeat';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { patchTaskCard, createTaskCard } from '../../src/adapter/ui/render/task-card';
 import { dropTaskCard } from '../../src/adapter/ui/render/schedule-drag';
@@ -322,6 +323,181 @@ describe('本文を書き換えても、幅は 1 byte も変わらない', () =>
     expect(readLineDate(moved.split('\n')[1]!)).toMatchObject({
       timeEnd: '10:30',
       substitutes: '2026-09-07',
+    });
+  });
+
+  /**
+   * 🔴 **時間の目盛りで動かした / 縁を引いた**(#855 段 B-1)── `timeEnd` を渡すと、その幅が書かれる。
+   * ⚠ 渡さない呼び方(日だけ動かす)の挙動は上の 2 つが守っている。
+   */
+  it('🔴 動かす: 始まりと終わりが一緒に動く(長さを保つ)', () => {
+    expect(
+      apply('- [ ] 会議 @2026-08-23 14:00..15:00', {
+        kind: 'line-date',
+        line: 0,
+        date: '2026-08-23',
+        time: '16:15',
+        timeEnd: '17:15',
+      }),
+    ).toBe('- [ ] 会議 @2026-08-23 16:15..17:15');
+  });
+
+  it('🔴 縁を引く: 始まりはそのまま、終わりだけが変わる', () => {
+    expect(
+      apply('- [ ] 会議 @2026-08-23 14:00..15:00', {
+        kind: 'line-date',
+        line: 0,
+        date: '2026-08-23',
+        time: '14:00',
+        timeEnd: '15:30',
+      }),
+    ).toBe('- [ ] 会議 @2026-08-23 14:00..15:30');
+  });
+
+  it('🔴 終わりの無い札(点の時刻)の縁を引くと、終わりが付く', () => {
+    expect(
+      apply('- [ ] 会議 @2026-08-23 14:00', {
+        kind: 'line-date',
+        line: 0,
+        date: '2026-08-23',
+        time: '14:00',
+        timeEnd: '15:30',
+      }),
+    ).toBe('- [ ] 会議 @2026-08-23 14:00..15:30');
+  });
+
+  it('終わりの無い札を動かしたら、点のまま動く(`timeEnd: null`)', () => {
+    expect(
+      apply('- [ ] 会議 @2026-08-23 14:00', {
+        kind: 'line-date',
+        line: 0,
+        date: '2026-08-24',
+        time: '16:15',
+        timeEnd: null,
+      }),
+    ).toBe('- [ ] 会議 @2026-08-24 16:15');
+  });
+
+  it('🔴 繰り返しの「この回だけ」に時刻を渡すと、その回の行が新しい時刻で増える(規則は触らない)', () => {
+    const rule = '- [ ] 朝会 @2026-08-31 09:30..10:30 毎週\n';
+    const moved = apply(rule, {
+      kind: 'repeat-move',
+      line: 0,
+      from: '2026-09-07',
+      to: '2026-09-07',
+      time: '11:00',
+      timeEnd: '12:00',
+    });
+    expect(moved.split('\n')[0], '規則の行が触られた').toBe('- [ ] 朝会 @2026-08-31 09:30..10:30 毎週');
+    // 同じ日でも時刻が動けば行が増える(日が同じ + 時刻が同じなら増えない ── 下)
+    expect(moved.split('\n')[1]).toBe('- [ ] 朝会 @2026-09-07 11:00..12:00 振替2026-09-07');
+    expect(
+      apply(rule, { kind: 'repeat-move', line: 0, from: '2026-09-07', to: '2026-09-07', time: '09:30', timeEnd: '10:30' }),
+      '日も時刻も同じなのに書いた',
+    ).toBe('(null)');
+  });
+
+  /**
+   * 🔴 **振替の行を書き換えても、`振替<元の日>` は残る**(#855 段 B-1)。
+   * 落とすと、動かす前の日の回が規則から出直して、予定が 2 枚に見える。
+   */
+  describe('幅として読まれなかった終わり(夜をまたぐ・逆順)', () => {
+    const edit = (body: string, timeEnd?: string | null, time = '20:00'): string =>
+      apply(body, {
+        kind: 'line-date',
+        line: 0,
+        date: '2026-08-23',
+        time,
+        ...(timeEnd === undefined ? {} : { timeEnd }),
+      });
+
+    it('🔴 終わりを書き直すと、古い終わりの字を一緒に差し替える(夜をまたぐ)', () => {
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', '21:30')).toBe('- [ ] 夜勤 @2026-08-23 20:00..21:30');
+    });
+
+    it('🔴 逆順(15:00..14:00)・他の区切りでも同じ', () => {
+      expect(edit('- [ ] a @2026-08-23 15:00..14:00', '16:00', '15:00')).toBe('- [ ] a @2026-08-23 15:00..16:00');
+      expect(edit('- [ ] a @2026-08-23 20:00〜02:00', '21:00')).toBe('- [ ] a @2026-08-23 20:00..21:00');
+      expect(edit('- [ ] a @2026-08-23 20:00-02:00 の枠', '21:00')).toBe('- [ ] a @2026-08-23 20:00..21:00 の枠');
+    });
+
+    it('🔴 書きかけの終わり(20:00.. / 20:00〜)も、終わりを書き直すと一緒に差し替える(20:00..21:00.. を残さない)', () => {
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..', '21:00')).toBe('- [ ] 夜勤 @2026-08-23 20:00..21:00');
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00〜 の枠', '21:00')).toBe('- [ ] 夜勤 @2026-08-23 20:00..21:00 の枠');
+      // ⚠ 空の終わりの `-` は区切りとは限らない(`14:00-会議`)── 触らない
+      expect(edit('- [ ] a @2026-08-23 20:00-会議', '21:00')).toBe('- [ ] a @2026-08-23 20:00..21:00-会議');
+      // 動かし方(終わりを渡さない)では書きかけの `..` も触らない
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..', undefined, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..');
+    });
+
+    it('🔴 終わりを渡さない動かし方では、古い終わりの字は 1 バイトも触らない', () => {
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', undefined, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..02:00');
+      expect(edit('- [ ] 夜勤 @2026-08-23 20:00..02:00', null, '21:00')).toBe('- [ ] 夜勤 @2026-08-23 21:00..02:00');
+    });
+
+    it('幅 0(14:00..14:00)は幅として読まれるので、普通に差し替わる', () => {
+      expect(edit('- [ ] a @2026-08-23 14:00..14:00', '15:00', '14:00')).toBe('- [ ] a @2026-08-23 14:00..15:00');
+    });
+  });
+
+  describe('振替の行の書き換え', () => {
+    const RULE = '- [ ] 朝会 @2026-08-31 09:30..10:30 毎週';
+    const SUB = '- [ ] 朝会 @2026-09-09 09:30..10:30 振替2026-09-07';
+    const body = `${RULE}\n${SUB}\n`;
+    /** 書き換え後の本文で、元の回(9/7)が規則から出直していないか。 */
+    const originalDayCards = (b: string): number => {
+      const cards = taskCardsOf('a', b);
+      const items = cards.map((c) => itemOfCard(c));
+      const g = buildAgenda(items, '2026-09-01', false, {
+        skip: materializedDates(cards),
+        horizonDays: 14,
+      });
+      return g.filter((x) => x.date === '2026-09-07').flatMap((x) => x.cards).length;
+    };
+
+    it('前提(対照群): 振替の行がそのままなら、元の回は出ない', () => {
+      expect(originalDayCards(body)).toBe(0);
+      // 振替を持たない同じ行なら、元の回は規則から出る(= 振替が効いていることの証拠)
+      expect(originalDayCards(`${RULE}\n- [ ] 朝会 @2026-09-09 09:30..10:30\n`)).toBe(1);
+    });
+
+    it('🔴 日を動かしても(日付ドロップ)振替の字は残り、元の回は出ない', () => {
+      const out = apply(body, {
+        kind: 'line-date',
+        line: 1,
+        date: '2026-09-10',
+        time: '09:30',
+        until: null,
+      });
+      expect(out.split('\n')[1]).toBe('- [ ] 朝会 @2026-09-10 09:30..10:30 振替2026-09-07');
+      expect(originalDayCards(out)).toBe(0);
+    });
+
+    it('🔴 時刻を動かしても(目盛りのドラッグ)振替の字は残り、元の回は出ない', () => {
+      const out = apply(body, {
+        kind: 'line-date',
+        line: 1,
+        date: '2026-09-09',
+        time: '11:00',
+        timeEnd: '12:00',
+      });
+      expect(out.split('\n')[1]).toBe('- [ ] 朝会 @2026-09-09 11:00..12:00 振替2026-09-07');
+      expect(originalDayCards(out)).toBe(0);
+    });
+
+    it('縁を引いても残る', () => {
+      const out = apply(body, {
+        kind: 'line-date',
+        line: 1,
+        date: '2026-09-09',
+        time: '09:30',
+        timeEnd: '11:00',
+      });
+      expect(out.split('\n')[1]).toBe('- [ ] 朝会 @2026-09-09 09:30..11:00 振替2026-09-07');
+    });
+
+    it('日付を外すと記法ごと消える(振替の字も残らない)', () => {
+      expect(apply(body, { kind: 'line-date', line: 1, date: null }).split('\n')[1]).toBe('- [ ] 朝会');
     });
   });
 
