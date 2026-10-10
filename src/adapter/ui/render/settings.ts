@@ -14,14 +14,6 @@ import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import { ExtensionGrants } from '@adapter/platform/extension-grants';
 import { AgentGrants, appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentTabStatus, appAgentTabStatus } from '@adapter/platform/agent-tab-status';
-import { WEBMCP_TAB_STATUS_TEXT } from '@features/agent/webmcp-types';
-import { AGENT_SCOPE_LABEL } from '@features/agent/agent-gate';
-import { currentMessageCap } from '@adapter/platform/message-post';
-import {
-  MESSAGE_CAP_OPTIONS,
-  SYSTEM_JOB_LID,
-  SYSTEM_MESSAGE_LID,
-} from '@features/message/message-log';
 import type { AppState } from '@adapter/state/app-state';
 import type { PersistState } from '@adapter/platform/storage-persist';
 import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
@@ -80,29 +72,16 @@ import { buildOfficePackPanel, type OfficePackPanel } from './office-pack-panel'
 import { buildAsrPackPanel, type AsrPackPanel } from './asr-pack-panel';
 import { buildSettingsCommands, buildSettingsFile } from './commands';
 import { buildKeymapPanel, type KeymapPanel } from './keymap-panel';
-import { appCopyHistory } from '@adapter/platform/copy-history-store';
 import { buildChoiceRow, syncChoiceRow } from './choice-buttons';
-
-/**
- * 🔴 **説明は 1 行 + 詳しくは hover / マニュアルへ**(#1017 §6.1 規則 3、
- * #1038 段J で全 24 項目に適用)。⚠ **不可逆・データが消える警告はここへ流さない**
- * ── そのまま可視の 1 行に残す(`persist-state` / 「ノートを渡して開くことを
- * 許したアプリ」の note がその実例。`tests/adapter/settings-notes.test.ts` の
- * `KNOWN_MULTILINE` が例外を等値 pin する)。
- */
-function buildSettingsNote(text: string): HTMLParagraphElement {
-  const note = document.createElement('p');
-  note.setAttribute('data-pkc-field', 'settings-note');
-  note.textContent = text;
-  return note;
-}
-
-/** 最後に使われた時刻を「2026-10-07 09:05」の形で出す(この端末の時刻)。 */
-function formatAgentTime(ms: number): string {
-  const d = new Date(ms);
-  const two = (n: number): string => String(n).padStart(2, '0');
-  return `${String(d.getFullYear())}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
-}
+import { buildSettingsNote } from './settings/note';
+import type { SettingsGroup, SettingsSection } from './settings/section';
+import { createMessagesSection } from './settings/messages';
+import { createSameOriginSection } from './settings/same-origin';
+import { createExtensionsSection } from './settings/extensions';
+import { createAgentsSection } from './settings/agents';
+import { createOpenedHistorySection } from './settings/opened-history';
+import { createSearchHistorySection } from './settings/search-history';
+import { createCopyHistorySection } from './settings/copy-history';
 
 export class SettingsRenderer {
   private built = false;
@@ -230,46 +209,89 @@ export class SettingsRenderer {
      * 🔴 **このタブで AI のツールが使えるか**(#1407)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly agentTabStatus: AgentTabStatus = appAgentTabStatus,
-  ) {}
+  ) {
+    /**
+     * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
+     * ここへ 1 行足す。⚠ 組む(`build`)も映す(`sync`)も**この表を回す**ので、`sync` を
+     * 呼び忘れる道が無い(`tests/adapter/settings-sections.test.ts` が全数 pin する)。
+     * ⚠ `inline` は、まだ `render()` が直に組んでいる節 ── 映す口だけを載せてある。
+     * ⚠ 映す順は「最初の組み立て」と「以後の `render()`」で同じ(前は 2 通りに書いてあった)。
+     */
+    const inline = (id: string, sync: (state: AppState) => void): SettingsSection => ({
+      id,
+      group: 'inline',
+      build: () => null,
+      sync,
+    });
+    this.sections = [
+      createMessagesSection(region),
+      inline('theme', () => this.syncTheme()),
+      inline('page-format', () => this.syncPageFormat()),
+      inline('prose-align', () => this.syncProseAlign()),
+      inline('text-scale', () => this.syncTextScale()),
+      inline('read-columns', () => this.syncReadColumns()),
+      inline('editor-mode', () => this.syncEditorMode()),
+      inline('open-in-edit', () => this.syncOpenInEdit()),
+      inline('open-place', () => this.syncOpenPlace()),
+      inline('app-open-target', () => this.syncAppOpenTarget()),
+      inline('alarm-enabled', () => this.syncAlarmEnabled()),
+      inline('voice-boost', () => this.syncVoiceBoost()),
+      inline('phone-links', () => this.syncPhoneLinks()),
+      inline('date-links', () => this.syncDateLinks()),
+      inline('relative-days', () => this.syncRelativeDays()),
+      inline('color-swatch', () => this.syncColorSwatch()),
+      inline('missing-links', () => this.syncMissingLinks()),
+      inline('code-collapse', () => this.syncCodeCollapse()),
+      inline('inline-code-copy', () => this.syncInlineCodeCopy()),
+      inline('pdf-reader', () => this.syncPdfReader()),
+      {
+        id: 'external-images',
+        group: 'permissions',
+        build: () => this.buildExternalImages(),
+        sync: () => this.syncExternalImages(),
+      },
+      inline('paste-source', () => this.syncPasteSource()),
+      createSameOriginSection(sameOriginGrants),
+      createExtensionsSection(extensionGrants),
+      createAgentsSection(agentGrants, agentTabStatus),
+      inline('persist', (state) => this.syncPersist(state)),
+      inline('notices', () => this.syncNotices()),
+      inline('too-narrow', () => this.syncTooNarrow()),
+      createOpenedHistorySection(),
+      createSearchHistorySection(),
+      createCopyHistorySection(),
+    ];
+  }
 
-  private sameOriginList: HTMLElement | null = null;
-  private extensionList: HTMLElement | null = null;
-  private agentList: HTMLElement | null = null;
-  private agentStatusLine: HTMLElement | null = null;
+  /** 節の登録表(constructor で 1 度だけ組む)。並びが画面の並び。 */
+  private readonly sections: readonly SettingsSection[];
+
+  /** 登録表を読む口(test 用 ── 並びと「全部の `sync` が呼ばれる」を pin する)。 */
+  registeredSections(): readonly SettingsSection[] {
+    return this.sections;
+  }
+
+  /** 登録表のうち `group` の節を、登録の順に組む(`build` が `null` の節は `render()` が直に組む)。 */
+  private buildGroup(group: SettingsGroup): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    for (const s of this.sections) {
+      if (s.group !== group) continue;
+      const el = s.build();
+      if (el !== null) out.push(el);
+    }
+    return out;
+  }
+
+  /** 登録表の全部を映す。⚠ 節ごとの `syncX()` を直に呼ばない(呼び忘れを作らない)。 */
+  private syncSections(state: AppState): void {
+    for (const s of this.sections) s.sync(state);
+  }
+
 
   render(state: AppState): void {
     if (this.built) {
-      // 🔴 未読は毎 state で変わりうる(設計 doc §7、段②a)。
-      this.syncMessages(state);
-      // 配色は user 操作でしか変わらない ── 毎 state で組み直さない
-      this.syncTheme();
-      this.syncPageFormat();
-      this.syncProseAlign();
-      this.syncTextScale();
-      this.syncReadColumns();
-      this.syncEditorMode();
-      this.syncOpenInEdit();
-      this.syncOpenPlace();
-      this.syncAppOpenTarget();
-      this.syncAlarmEnabled();
-      this.syncVoiceBoost();
-      this.syncPhoneLinks();
-      this.syncDateLinks();
-      this.syncRelativeDays();
-      this.syncColorSwatch();
-      this.syncMissingLinks();
-      this.syncCodeCollapse();
-      this.syncInlineCodeCopy();
-      this.syncPdfReader();
-      this.syncExternalImages();
-      this.syncPasteSource();
-      this.syncSameOrigin(state);
-      this.syncExtensions(state);
-      this.syncAgents();
-      this.syncPersist(state);
-      this.syncNotices();
-      this.syncTooNarrow();
-      this.syncCopyHistory();
+      // 🔴 未読・許可・件数などは毎 state で変わりうる ── 登録表の全部を映す。
+      this.syncSections(state);
       // 🔴 開いている間に大きさが動きうる ── 測り直す(間隔は係が持つ)
       this.vacuum.refresh();
       return;
@@ -289,7 +311,7 @@ export class SettingsRenderer {
      * 🔴 **メッセージ**(設計 doc §7、段②a)── **先頭(目次の直後)に置く**
      * (裁定 2026-09-20「システムのノートは system 領域」)。
      */
-    body.append(this.buildMessages());
+    body.append(...this.buildGroup('top'));
 
     /**
      * 🔴 **「設定」(#1017 段③-1)** ── PKC を型システムとして言い直した結果、
@@ -1059,10 +1081,7 @@ export class SettingsRenderer {
     const permHead = document.createElement('h3');
     permHead.textContent = '許可';
     permSection.append(permHead);
-    permSection.append(this.buildExternalImages());
-    permSection.append(this.buildSameOrigin());
-    permSection.append(this.buildExtensions());
-    permSection.append(this.buildAgents());
+    permSection.append(...this.buildGroup('permissions'));
     body.append(permSection);
 
     /**
@@ -1073,9 +1092,7 @@ export class SettingsRenderer {
     const historyHead = document.createElement('h3');
     historyHead.textContent = '記録';
     historySection.append(historyHead);
-    historySection.append(this.buildOpenedHistory());
-    historySection.append(this.buildSearchHistory());
-    historySection.append(this.buildCopyHistory());
+    historySection.append(...this.buildGroup('history'));
     historySection.append(this.buildTooNarrowSection(tooNarrowDl));
     body.append(historySection);
 
@@ -1125,35 +1142,7 @@ export class SettingsRenderer {
      */
     this.region.append(this.buildToc(body));
     this.region.append(body);
-    this.syncMessages(state);
-    this.syncTheme();
-    this.syncPageFormat();
-    this.syncProseAlign();
-    this.syncTextScale();
-    this.syncReadColumns();
-    this.syncEditorMode();
-    this.syncOpenInEdit();
-    this.syncOpenPlace();
-    this.syncAppOpenTarget();
-    this.syncAlarmEnabled();
-    this.syncVoiceBoost();
-    this.syncPhoneLinks();
-    this.syncDateLinks();
-    this.syncRelativeDays();
-    this.syncColorSwatch();
-    this.syncMissingLinks();
-    this.syncCodeCollapse();
-    this.syncInlineCodeCopy();
-    this.syncPdfReader();
-    this.syncSameOrigin(state);
-    this.syncExtensions(state);
-    this.syncAgents();
-    this.syncPersist(state);
-    this.syncExternalImages();
-    this.syncPasteSource();
-    this.syncNotices();
-    this.syncTooNarrow();
-    this.syncCopyHistory();
+    this.syncSections(state);
     // 🔴 保存領域を縮める(#999)── 係の表示が変わるたびに映す(購読は 1 組しか生きない)
     this.vacuum.subscribe(() => this.syncVacuum());
     this.syncVacuum();
@@ -1181,19 +1170,6 @@ export class SettingsRenderer {
    * ⚠ **「表示」には入れない** ── これは見た目の好みではなく、**外へ何が伝わるか**の
    *   判断である。同じ場所に混ぜると、配色を選ぶ気分で押される。
    * ⚠ 何が起きるのかを書く ── 「外部画像を許可」だけでは判断できない。
-   */
-  /**
-   * 🔴 **素のまま起動を許したアプリの一覧**(#301。user 裁定 2026-08-21)。
-   *
-   * > 「**同じハッシュのアプリ登録済みの URL もしくは HTML に関しては永続化
-   * > (文字通りの永続化、期間とかない)**」
-   *
-   * ⚠ **期限が無い以上、取り消す場所が要る。** 永続化そのものは user の裁定だが、
-   *   「一度許したら二度と外せない」は裁定に含まれていない ── 出口を作る。
-   * ⚠ 一覧に**限界も併記する** ── 素のままのアプリはこの一覧自体を書き換えられる。
-   *   隠すと「一覧があるから安全」と読まれるので、**実際より安全に見せない**
-   *   (`same-origin-grants.ts` 冒頭の判断と同じ向き)。
-   * ⚠ 「表示」には入れない ── 見た目の好みではなく**外へ何を渡すか**の判断である。
    */
   /**
    * 🔴 **先頭に置く目次**(#1017 段⓪)。
@@ -1252,106 +1228,6 @@ export class SettingsRenderer {
     });
     return nav;
   }
-  /**
-   * 🔴 **最近開いた記録を消す**(#215 残り①)。
-   *
-   * ⚠ **記録を作ったら、消す口も作る** ── 一覧の並びに「最近開いた順」を足した
-   *   ということは、**この端末に「何を読んだか」が積まれる**ということである。
-   *   ⚠ 積むだけ積んで消せないのは、user から物を取り上げているのと同じ。
-   * ⚠ 「表示」の節には入れない ── 見た目の好みではなく、**この端末に何を残すか**の
-   *   判断である(外部画像・ノートを渡して開く、と同じ並び)。
-   * 🔑 押すと**その場で消える**(確かめを挟まない)── 消えて困る物ではないうえ、
-   *   また開けば積み直る。⚠ 消えたことは字で言う(無言にしない)。
-   */
-  private buildOpenedHistory(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-opened');
-    const h = document.createElement('h4');
-    h.textContent = '最近開いたノートの記録';
-    const note = buildSettingsNote(
-      '並び順「最近開いた順」に使う記録です(この端末だけ・消すとまた集計されます)。',
-    );
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'clear-opened-history');
-    btn.textContent = '最近開いた記録を消す';
-    btn.title = 'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。';
-    wrap.append(h, note, btn);
-    return wrap;
-  }
-
-  /**
-   * 🔴 **検索した語の記録**(#1172)── 「最近開いたノートの記録」の隣。
-   * ⚠ 左の列の「本文ごと探す」欄に出る**候補**の元である。**この端末にだけ**残し、
-   *   書き出しにもバックアップにも入らない(`search-history-store.ts`)。
-   * ⚠ 記録を作ったら消す口も作る(上の開いた記録と同じ理由)。押すとその場で消え、
-   *   消えたことは字で言う。
-   */
-  private buildSearchHistory(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-search-history');
-    const h = document.createElement('h4');
-    h.textContent = '検索した語の記録';
-    const note = buildSettingsNote(
-      '「本文ごと探す」欄の候補に使う記録です(この端末だけ・8 件まで)。',
-    );
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'clear-search-history');
-    btn.textContent = '検索した語の記録を消す';
-    btn.title = 'この端末にだけ残り、書き出しにも、ほかの端末にも持っていきません。';
-    wrap.append(h, note, btn);
-    return wrap;
-  }
-
-  /** いま持っている件数の字。⚠ 器は 1 度だけ組む(器は 1 度しか組まないので、映さないと古い値が見える)。 */
-  private copyHistoryCount: HTMLElement | null = null;
-
-  /**
-   * 🔴 **コピーの履歴**(#1017 段③-1。新設)── 「記録」の h4。
-   *
-   * ⚠ **消す口は既にメニュー(`copyHistoryMenu`)に在る**(`clear-copy-history`)──
-   *   ここは**同じ action** をもう 1 か所から呼べるようにするだけで、
-   *   新しい判断は 1 つも持たない(§7「同じ問いに答える口が 2 つ」を避ける ──
-   *   判定はどちらも `appCopyHistory.clear()` の 1 本)。
-   * ⚠ **一覧そのものは出さない** ── コピーの中身はその場のメニューで貼るものであって、
-   *   設定画面で読み返す物ではない(founding「必要十分」)。
-   */
-  private buildCopyHistory(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-copy-history');
-    const h = document.createElement('h4');
-    h.textContent = 'コピーの履歴';
-    wrap.append(h);
-
-    const count = document.createElement('p');
-    count.setAttribute('data-pkc-field', 'copy-history-count');
-    this.copyHistoryCount = count;
-    wrap.append(count);
-    // ⚠ 「消す」は binder が store を直に触るので、状態変化では描き直されない ──
-    //    store の通知で件数の字を合わせる(器は 1 度しか組まないので購読も 1 度)
-    appCopyHistory.onChange(() => this.syncCopyHistory());
-
-    const note = buildSettingsNote('PKC3 の中でコピーした物を、この端末に 20 件まで残します。');
-    wrap.append(note);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('data-pkc-action', 'clear-copy-history');
-    btn.textContent = 'コピーの履歴を消す';
-    btn.title =
-      '貼るときは、貼り先を右クリックして選び直せます。この端末にだけ残ります。';
-    wrap.append(btn);
-    return wrap;
-  }
-
-  /** ⚠ 件数は他の面(貼り付けの右クリック)でも増減するので、毎 state で映す。 */
-  private syncCopyHistory(): void {
-    if (!this.copyHistoryCount) return;
-    const n = appCopyHistory.items().length;
-    this.copyHistoryCount.textContent = n > 0 ? `いま ${n} 件あります。` : 'いまは 0 件です。';
-  }
-
   /**
    * 🔴 **狭い画面の断り書き**(#1017 段③-1。「表示」から移した dl をそのまま使う)。
    * ⚠ **判断は 1 つも増やさない** ── 中身(dt/dd)は `render()` が組んだものを渡すだけ。
@@ -1433,252 +1309,6 @@ export class SettingsRenderer {
     }
     frag.append(h2, list);
     return frag;
-  }
-
-  private buildSameOrigin(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-same-origin');
-    const h = document.createElement('h4');
-    h.textContent = 'ノートを渡して開くことを許したアプリ';
-    // ⚠ この 1 行の警告は落とさない(不可侵指示「不可逆は必ず言う」に準じる ──
-    //   このアプリは一覧そのものも書き換えられるので、hover やマニュアルへ逃がさない)。
-    const note = buildSettingsNote(
-      'ノート・添付・設定を読み書きできます(この一覧も書き換えられるので注意してください)。',
-    );
-    this.sameOriginList = document.createElement('ul');
-    this.sameOriginList.setAttribute('data-pkc-field', 'same-origin-list');
-    wrap.append(h, note, this.sameOriginList);
-    return wrap;
-  }
-
-  /**
-   * ⚠ **毎回組み直す** ── 許可はこの面の外(添付の起動)で増えるので、
-   *   「開いている間に変わらない」という前提が成り立たない(P8 段⑩ と同じ理由で、
-   *   隠れている間の変化を取りこぼすと**画面が嘘をつく**)。
-   */
-  private syncSameOrigin(state: AppState): void {
-    const list = this.sameOriginList;
-    if (!list) return;
-    const keys = this.sameOriginGrants.list();
-    list.textContent = '';
-    if (keys.length === 0) {
-      const li = document.createElement('li');
-      li.textContent = 'まだ許可したアプリはありません';
-      list.append(li);
-      return;
-    }
-    for (const key of keys) {
-      const li = document.createElement('li');
-      li.setAttribute('data-pkc-asset-key', key);
-      const name = document.createElement('span');
-      // ⚠ 題名は**いま並んでいるタイル**から引く ── 引けないものは消えた / 登録を
-      //    外した添付なので、**鍵の頭だけ**を出す(空欄にすると取り消しようがない)
-      const tile = state.launcherTiles?.find((t) => t.assetKey === key);
-      name.textContent = tile?.title ?? `(一覧に無いアプリ ${key.slice(4, 12)}…)`;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-pkc-action', 'revoke-same-origin');
-      btn.setAttribute('data-pkc-asset-key', key);
-      btn.textContent = '許可を取り消す';
-      li.append(name, btn);
-      list.append(li);
-    }
-  }
-
-  /**
-   * 🔴 **目次を見せる許可の一覧**(#195 / C-5 段①)。
-   *
-   * ⚠ 素のまま起動の隣に、**別の一覧として**置く ── 台帳が別なので、片方を
-   *   消してももう片方は残る。1 つの一覧に混ぜると「どちらを取り消したのか」が
-   *   user から見えなくなる。
-   * 🔑 ここが**取り消しの唯一の出口**である ── 許可は期限なしで憶えるので、
-   *   出口が無いと二度と外せない。
-   */
-  private buildExtensions(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-extensions');
-    const h = document.createElement('h4');
-    h.textContent = 'ノート一覧を見せているアプリ';
-    // ⚠ **見えるものを書く**(「projection を渡す」では判断できない)。詳しくはマニュアル。
-    const note = buildSettingsNote(
-      'ノートの題名・種類・日付・状態の一覧を読めます(本文と添付は渡りません)。',
-    );
-    this.extensionList = document.createElement('ul');
-    this.extensionList.setAttribute('data-pkc-field', 'extension-list');
-    wrap.append(h, note, this.extensionList);
-    return wrap;
-  }
-
-  /** ⚠ **毎回組み直す**(許可はこの面の外で増える ── `syncSameOrigin` と同じ理由)。 */
-  private syncExtensions(state: AppState): void {
-    const list = this.extensionList;
-    if (!list) return;
-    const keys = this.extensionGrants.list();
-    list.textContent = '';
-    if (keys.length === 0) {
-      const li = document.createElement('li');
-      li.textContent = 'まだノート一覧を見せているアプリはありません';
-      list.append(li);
-      return;
-    }
-    for (const key of keys) {
-      const li = document.createElement('li');
-      li.setAttribute('data-pkc-asset-key', key);
-      const name = document.createElement('span');
-      // ⚠ 題名は**いま並んでいるタイル**から引く(`syncSameOrigin` と同じ作法)
-      const tile = state.launcherTiles?.find((t) => t.assetKey === key);
-      name.textContent = tile?.title ?? `(一覧に無いアプリ ${key.slice(4, 12)}…)`;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-pkc-action', 'revoke-extension');
-      btn.setAttribute('data-pkc-asset-key', key);
-      btn.textContent = '許可を取り消す';
-      li.append(name, btn);
-      list.append(li);
-    }
-  }
-
-  /**
-   * 🔴 **ブラウザの AI に許した範囲の一覧**(#1407 段①)。
-   *
-   * ⚠ 「許可」の節に**同じ形の一覧として並べる**(新しい見出しを作らない ── 取り消す入口は
-   *   1 つの節に揃える)。台帳は他の 2 つとは**別**なので、片方を取り消してももう片方は残る。
-   * 🔑 ここが**取り消しの唯一の出口**である ── 「常に許す」は期限なしで憶えるので、
-   *   出口が無いと二度と外せない。
-   * ⚠ 見えるものを書く:許すと何が外へ出るか(読む側は本文)。
-   */
-  private buildAgents(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-agents');
-    const h = document.createElement('h4');
-    h.textContent = 'ブラウザの AI に許したこと';
-    const note = buildSettingsNote(
-      'ノートを探す・読むを許すと、見つかったノートの本文が AI の提供元へ送られます。',
-    );
-    // 🔴 **このタブの状態を 1 行で言う**(使えない理由を user が探し回らない ── 同じ物が同じ場所に出る)
-    this.agentStatusLine = document.createElement('p');
-    this.agentStatusLine.setAttribute('data-pkc-field', 'agent-tab-status');
-    this.agentList = document.createElement('ul');
-    this.agentList.setAttribute('data-pkc-field', 'agent-list');
-    wrap.append(h, note, this.agentStatusLine, this.agentList);
-    return wrap;
-  }
-
-  /** ⚠ **毎回組み直す**(許可はこの画面の外 ── AI が呼んだときのダイアログ ── で増える)。 */
-  private syncAgents(): void {
-    const list = this.agentList;
-    if (!list) return;
-    if (this.agentStatusLine) {
-      this.agentStatusLine.textContent = WEBMCP_TAB_STATUS_TEXT[this.agentTabStatus.get()];
-    }
-    const rows = this.agentGrants.list();
-    list.textContent = '';
-    if (rows.length === 0) {
-      const li = document.createElement('li');
-      li.textContent = 'まだ許したことはありません';
-      list.append(li);
-      return;
-    }
-    for (const row of rows) {
-      const li = document.createElement('li');
-      li.setAttribute('data-pkc-agent-scope', row.scope);
-      const name = document.createElement('span');
-      name.setAttribute('data-pkc-field', 'agent-scope-name');
-      name.textContent = AGENT_SCOPE_LABEL[row.scope];
-      const last = document.createElement('span');
-      last.setAttribute('data-pkc-field', 'agent-last-used');
-      last.textContent =
-        row.last === null ? 'まだ使われていません' : `最後に使われた: ${formatAgentTime(row.last)}`;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-pkc-action', 'revoke-agent');
-      btn.setAttribute('data-pkc-agent-scope', row.scope);
-      btn.textContent = '許可を取り消す';
-      li.append(name, last, btn);
-      list.append(li);
-    }
-  }
-
-  /** メッセージの本文の字。⚠ 未読の数だけ差し替える(器は 1 度だけ組む)。 */
-  private messagesUnreadText: HTMLElement | null = null;
-
-  /**
-   * 🔴 **メッセージ**(設計 doc §7、段②a。裁定 2026-09-20)。
-   *
-   * ⚠ **先頭(目次の直後)に置く**(user 裁定「システムのノートで GO」)。
-   * ⚠ **新しい面を作らない**(§7「新しい画面も道具も作らない」)── 開くのは
-   *   普通のノートと同じ中央の面、書き出すのも普通の `.md` である。
-   */
-  private buildMessages(): HTMLElement {
-    const wrap = document.createElement('section');
-    wrap.setAttribute('data-pkc-region', 'settings-messages');
-    const h = document.createElement('h3');
-    h.textContent = 'メッセージ';
-    wrap.append(h);
-
-    const unread = document.createElement('p');
-    unread.setAttribute('data-pkc-field', 'messages-unread');
-    this.messagesUnreadText = unread;
-    wrap.append(unread);
-
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.setAttribute('data-pkc-action', 'open-messages');
-    open.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
-    open.textContent = 'メッセージを開く';
-
-    /**
-     * 🔴 **処理の記録**(§7「処理」)── 段②b でワーカーの記録を繋ぐまでは
-     *   空のまま開く(#7 の注記どおり、それ自体は実害ではない)。
-     */
-    const openJobs = document.createElement('button');
-    openJobs.type = 'button';
-    openJobs.setAttribute('data-pkc-action', 'open-messages');
-    openJobs.setAttribute('data-pkc-message-lid', SYSTEM_JOB_LID);
-    openJobs.textContent = '処理の記録を開く';
-
-    const dl = document.createElement('dl');
-    const dt = document.createElement('dt');
-    dt.textContent = '保管件数';
-    const dd = document.createElement('dd');
-    // 🔴 選択肢 3 つ ── プルダウンをボタンの列にする(#1038 段J。メッセージの節の 1 項目)
-    const capRow = buildChoiceRow({
-      field: 'messages-cap-select',
-      ariaLabel: 'メッセージの保管件数',
-      action: 'set-message-cap',
-      dataAttr: 'data-pkc-message-cap-value',
-      choices: MESSAGE_CAP_OPTIONS.map((n) => ({ id: String(n), label: `${n} 件` })),
-      currentId: '', // render 末尾の syncMessages が必ず映す
-    });
-    dd.append(capRow);
-    dl.append(dt, dd);
-
-    const exportBtn = document.createElement('button');
-    exportBtn.type = 'button';
-    exportBtn.setAttribute('data-pkc-action', 'export-messages');
-    exportBtn.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
-    exportBtn.textContent = 'メッセージを書き出す';
-    exportBtn.title = 'ノートの中身・題名・添付名は書き込まれません。バグ報告に貼れます。';
-
-    const note = buildSettingsNote(
-      'アプリの知らせが溜まります(上限を超えると古い分から自動で消えます)。',
-    );
-
-    wrap.append(open, openJobs, dl, exportBtn, note);
-    return wrap;
-  }
-
-  /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字とボタンの列の押され方だけ差し替える)。 */
-  private syncMessages(state: AppState): void {
-    if (this.messagesUnreadText)
-      this.messagesUnreadText.textContent =
-        state.messagesUnread > 0 ? `未読 ${state.messagesUnread} 件` : '未読はありません';
-    syncChoiceRow(
-      this.region,
-      'messages-cap-select',
-      'data-pkc-message-cap-value',
-      String(currentMessageCap()),
-    );
   }
 
   private buildExternalImages(): HTMLElement {
