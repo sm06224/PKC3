@@ -619,11 +619,11 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
   });
 
   /**
-   * 🔴 **画面収録はまだ対象外**(docstring のとおり ── 実ブラウザの画面収録では
-   *   確かめていない)。⚠ ここが `true` に裏返ったら、それは**確かめずに
-   *   「動画でも直った」と言っている**ことになる(依頼の禁止事項そのもの)。
+   * 🔴 **画面収録にも書く**(#952 A3 の残り。2026-10-10 に実ブラウザの録画 ──
+   *   VP8 + opus ── で `Infinity` → 4.008 秒と終わりへの飛び先を確かめた)。
+   * ⚠ 門が `kind === 'audio'` に戻ったら、録画だけシークバーが伸びなくなる。
    */
-  it('⚠ 画面収録はまだ対象外', async () => {
+  it('🔴 画面収録にも Duration が書き足されている', async () => {
     const track = fakeTrack();
     const rec = fakeRecorder();
     const h = await startCapture(
@@ -634,9 +634,8 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
     rec.last().pushBytes(minimalWebm());
     const blob = await h.stop();
     if (blob === null) throw new Error('止めたのに何も返らない');
-    expect(blob.size, '画面収録なのにバイト数が変わっている').toBe(minimalWebm().length);
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    expect(durationOf(bytes), '画面収録にまで効くようになった(docstring と食い違う)').toBeNull();
+    expect(durationOf(bytes), '画面収録に長さが書かれていない').not.toBeNull();
   });
 
   /**

@@ -605,10 +605,8 @@ export type DurationWriteResult =
  * ここは opus の packet も、映像の frame も**読まない**。触るのは
  * `Segment`(容器)の直下に 1 つだけ在る `Info`(見出し)だけである。
  * ⚠ **`trimWebmOpus` と違って、`Tracks` / `Cluster` の中へは 1 歩も降りない**
- * ── だから音声(opus のみ)でも画面収録(映像 + opus)でも**同じ答えになるはず**
- * だが、⚠ **実ブラウザの画面収録では確かめていない**(smoke は音だけを見ている)。
- * `withRecordedDuration`(`media-capture.ts`)が **`kind === 'audio'` のときだけ**
- * 呼ぶのは、この「はず」を「確かめた」に格上げしていないからである。
+ * ── だから音声(opus のみ)でも画面収録(VP8 + opus)でも**同じ答えになる**
+ * (2026-10-10 に実ブラウザの録画で確かめた。`withRecordedDuration` は両方で呼ぶ)。
  *
  * ## 🔑 中身(音・映像のバイト)は 1 バイトも読まない・動かさない
  *

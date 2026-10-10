@@ -31,9 +31,9 @@ import { createHash } from 'node:crypto';
  *    「器が出た」までしか言えない。実ブラウザで `readyState` を見て初めて
  *    「**その場で聞ける**」が言える
  *
- * ⚠ **音だけ**を通す。画面収録(`getDisplayMedia`)は headless で
- *   共有元を選べないので、ここでは回さない ── ⚠ 「回していない」であって
- *   「動かない」ではない(段取りは `capture-service.test.ts` が両方通している)。
+ * 🔑 画面収録(`getDisplayMedia`)は**最後に 1 本だけ**通す(#952 A3 の残り:
+ *   長さが出て終わりまで飛べるか)── `--use-fake-ui-for-media-stream` で
+ *   共有元の窓を出さずに偽の画面が来る(2026-10-10 に両方のブラウザで実測)。
  *
  * ⚠ 偽のマイクを渡すのは**起動引数**である ── `launchOptions` は丸ごと
  *   差し替わるので、どのバイナリで走るかは config から読む(CLAUDE.md §5)。
@@ -904,6 +904,53 @@ ${(e as Error).message}`,
   await expect(statusLine, '消したのに文字にできてしまう').toContainText(
     asrPath,
   );
+
+  /**
+   * 🔴 **画面録画も、開いたら長さが出て終わりまで飛べる**(#952 A3 の残り)。
+   *
+   * ⚠ `MediaRecorder` の webm には長さが書かれない ── 録ったままだと
+   *   `duration` が `Infinity` で、シークバーが伸びない(2026-10-10 に両方のブラウザで実測)。
+   * 🔑 `getDisplayMedia` は上の起動引数(`--use-fake-ui-for-media-stream`)で
+   *   許可の窓を出さずに通る ── 新しい起動は足さず、この道中の最後に録る。
+   * ⚠ ほかの行を指す locator(`originalRow` など)より**後**に置く ── 行が増えるので。
+   */
+  await clickReal(page, '[data-pkc-field="start-screen-capture"]');
+  await expect(bar, '画面録画を押しても帯が出ない').toBeVisible();
+  await expect(status, '画面録画が 3 秒まで録れていない').toContainText(/中 0:0[3-9]/, {
+    timeout: 20_000,
+  });
+  await clickReal(page, '[data-pkc-field="stop-capture"]');
+  await expect(bar, '画面録画を止めたのに帯が残っている').toBeHidden();
+  await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="captures"]');
+  const screenRow = page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first();
+  await expect(screenRow, '画面録画が一覧に出ない').toBeVisible({ timeout: 15_000 });
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-play"]'));
+  const screenMedia = screenRow.locator('video[data-pkc-field="capture-media"]');
+  await expect(screenMedia, '画面録画の再生機が出ない').toBeVisible();
+  const screenDur = await screenMedia.evaluate(async (el: HTMLVideoElement) => {
+    if (el.readyState < 1) {
+      await new Promise((res) => el.addEventListener('loadedmetadata', res, { once: true }));
+    }
+    const duration = el.duration;
+    let seekedTo: number | null = null;
+    if (Number.isFinite(duration)) {
+      el.pause();
+      el.currentTime = Math.max(0, duration - 0.5);
+      await Promise.race([
+        new Promise((res) => el.addEventListener('seeked', res, { once: true })),
+        new Promise((res) => setTimeout(res, 5000)),
+      ]);
+      seekedTo = el.currentTime;
+    }
+    // ⚠ JSON は Infinity を null にするので、字で持ち帰る
+    return { duration: String(duration), seekedTo };
+  });
+  const durNum = Number(screenDur.duration);
+  expect(Number.isFinite(durNum), `画面録画の長さが出ない(${screenDur.duration})`).toBe(true);
+  expect(durNum, `画面録画の長さが録った時間と合わない(${screenDur.duration})`).toBeGreaterThan(2);
+  expect(durNum).toBeLessThan(30);
+  expect(screenDur.seekedTo, '画面録画の終わりの手前へ飛べない').not.toBeNull();
+  expect(screenDur.seekedTo!, '画面録画の終わりの手前へ飛べない').toBeGreaterThan(durNum - 1.5);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
