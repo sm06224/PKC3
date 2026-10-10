@@ -77,6 +77,7 @@ function setup() {
   const tools = buildAgentTools({
     ...store,
     createEntry: () => null,
+    append: async () => ({ ok: true }),
     gate: async () => true,
   });
   const tool = (name: string) => tools.find((t) => t.name === name)!;

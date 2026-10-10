@@ -13,7 +13,7 @@
  *   ⚠ 結末が来ない回(強制解放・本体の入れ替わり)は**時間切れ**で断る(窓を待たせ続けない)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import type { DomainEvent } from '@adapter/state/app-state';
+import { appendAndSettle, REAL_APPEND_TIMERS, type AppendTimers } from '@adapter/state/append-settle';
 import { formatPdfQuote, resolveQuoteTarget } from '@features/pdf/pdf-quote';
 import type { PdfQuoteResult, PdfSession } from './pdf-window';
 
@@ -27,75 +27,38 @@ export const QUOTE_SETTLE_TIMEOUT_MS = 8000;
 export const QUOTE_SETTLE_TIMEOUT_MESSAGE =
   'ノートに入ったか確かめられませんでした。ノートを開いて確かめてください';
 
-export interface QuoteTimers {
-  readonly setTimer: (fn: () => void, ms: number) => unknown;
-  readonly clearTimer: (h: unknown) => void;
-}
+export type QuoteTimers = AppendTimers;
 
-const REAL_TIMERS: QuoteTimers = {
-  setTimer: (fn, ms) => setTimeout(fn, ms),
-  clearTimer: (h) => clearTimeout(h as number),
-};
-
-export function quoteIntoNote(
+export async function quoteIntoNote(
   dispatcher: Dispatcher,
   session: PdfSession,
   text: string,
   page: number,
   /** 本体の状態の行へ出す口(**disk に着いたときだけ**呼ぶ)。 */
   note: (text: string) => void,
-  timers: QuoteTimers = REAL_TIMERS,
+  timers: QuoteTimers = REAL_APPEND_TIMERS,
 ): Promise<PdfQuoteResult> {
   const st = dispatcher.getState();
-  if (session.lid === null) return Promise.resolve({ ok: false, message: '引用先のノートが分かりません' });
+  if (session.lid === null) return { ok: false, message: '引用先のノートが分かりません' };
   const target = resolveQuoteTarget(session.lid, st.entryMetas, st.relations);
   const meta = st.entryMetas.get(target);
-  if (meta === undefined) return Promise.resolve({ ok: false, message: '引用先のノートが見つかりません' });
+  if (meta === undefined) return { ok: false, message: '引用先のノートが見つかりません' };
   const block = formatPdfQuote(text, page, session.name);
-  if (block === null) return Promise.resolve({ ok: false, message: '引用する字が選ばれていません' });
-  // 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない。予定の面の追記と同じ)
-  const lockBefore = st.writeLock;
-  const gen = st.lockGen;
-  return new Promise<PdfQuoteResult>((resolve) => {
-    let handle: unknown = null;
-    // ⚠ dispatch の**前**に張る(同期に結末が出る経路があっても取りこぼさない)
-    const off = dispatcher.onEvent((ev: DomainEvent) => {
-      if (ev.type !== 'APPEND_SETTLED' || ev.lid !== target || ev.gen !== gen) return;
-      settle(
-        ev.ok
-          ? { ok: true, message: `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)` }
-          : { ok: false, message: ev.error ?? '引用できませんでした' },
-      );
-    });
-    let done = false;
-    const settle = (r: PdfQuoteResult): void => {
-      if (done) return;
-      done = true;
-      off();
-      if (handle !== null) timers.clearTimer(handle);
-      // 🔑 言うのは、disk に着いてから(窓にも状態の行にも同じ字)
-      if (r.ok) note(r.message);
-      resolve(r);
-    };
-    dispatcher.dispatch({
-      type: 'APPEND_TO_ENTRY',
-      lid: target,
-      text: block,
-      heading: null,
-      // ⚠ 末尾へ足す(入り先の選択は本文の面の話 ── ここでは選ばせない)
-      target: null,
-    });
-    const after = dispatcher.getState();
-    if (after.writeLock === lockBefore) {
-      settle({
-        ok: false,
-        message: after.error ?? 'いまは引用できません。少し待ってから、もう一度押してください',
-      });
-      return;
-    }
-    handle = timers.setTimer(
-      () => settle({ ok: false, message: QUOTE_SETTLE_TIMEOUT_MESSAGE }),
-      QUOTE_SETTLE_TIMEOUT_MS,
-    );
-  });
+  if (block === null) return { ok: false, message: '引用する字が選ばれていません' };
+  // 🔑 書き足しと結末待ちは `appendAndSettle` 1 本(ブラウザの AI の書き足しと同じ口。§7)
+  const r = await appendAndSettle(dispatcher, target, block, null, QUOTE_SETTLE_TIMEOUT_MS, timers);
+  if (r.ok) {
+    const message = `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)`;
+    // 🔑 言うのは、disk に着いてから(窓にも状態の行にも同じ字)
+    note(message);
+    return { ok: true, message };
+  }
+  switch (r.reason) {
+    case 'refused':
+      return { ok: false, message: r.error ?? 'いまは引用できません。少し待ってから、もう一度押してください' };
+    case 'failed':
+      return { ok: false, message: r.error ?? '引用できませんでした' };
+    case 'timeout':
+      return { ok: false, message: QUOTE_SETTLE_TIMEOUT_MESSAGE };
+  }
 }

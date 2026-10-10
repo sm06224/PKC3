@@ -1,5 +1,5 @@
 /**
- * 🔴 **ブラウザの AI(WebMCP)に渡す道具 4 本**(#1407 段①)。
+ * 🔴 **ブラウザの AI(WebMCP)に渡す道具 5 本**(#1407 段① / 段④)。
  *
  * ## なぜ実ブラウザで見るのか
  *
@@ -126,7 +126,7 @@ async function expectAsk(page: Page, noteHas: string): Promise<void> {
   await expect(page.locator(ASK_DENY)).toHaveText('許さない');
 }
 
-test('🔴 WebMCP: OFF では登録されず / ON で 4 本 / 許可のダイアログ → 結果 / 作っても選択は動かず / 取り消すとまた聞く / 2 枚目のタブには無い', async ({
+test('🔴 WebMCP: OFF では登録されず / ON で 5 本 / 許可のダイアログ → 結果 / 作っても選択は動かず / 取り消すとまた聞く / 2 枚目のタブには無い', async ({
   page,
   context,
 }) => {
@@ -147,8 +147,8 @@ test('🔴 WebMCP: OFF では登録されず / ON で 4 本 / 許可のダイア
   await page.reload();
   await bootedHere(page);
   await expect
-    .poll(() => toolNames(page), { message: 'メインのタブで 4 本が登録されない', timeout: 15_000 })
-    .toEqual(['pkc_create_note', 'pkc_list_tags', 'pkc_read_note', 'pkc_search_notes']);
+    .poll(() => toolNames(page), { message: 'メインのタブで 5 本が登録されない', timeout: 15_000 })
+    .toEqual(['pkc_append_note', 'pkc_create_note', 'pkc_list_tags', 'pkc_read_note', 'pkc_search_notes']);
   await dismissAnnounce(page);
 
   // 設定 → システム → 許可 の節:「このタブ: 使えます」。許したことはまだ無い。
@@ -207,6 +207,8 @@ test('🔴 WebMCP: OFF では登録されず / ON で 4 本 / 許可のダイア
   expect(foundJson.notes, '目印のノートがちょうど 1 件見つかる').toHaveLength(1);
   expect(foundJson.notes[0]!.body, 'body に本文が入っていない').toContain(MARKER);
   const foundId = foundJson.notes[0]!.id;
+  // ⚠ 題名は本文の見出しではなく作ったときの既定(「日付 ノート N」)── 期待値は検索の答えから引く
+  const foundTitle = foundJson.notes[0]!.title;
   const readRow = agents.locator('li[data-pkc-agent-scope="read"]');
   await expect(readRow, '「探す・読む」の行が(描き直さずに)出ていない').toBeVisible();
   await expect(readRow.locator('[data-pkc-field="agent-scope-name"]')).toHaveText('ノートを探す・読む');
@@ -252,6 +254,21 @@ test('🔴 WebMCP: OFF では登録されず / ON で 4 本 / 許可のダイア
   expect(ledger.read?.always, '「常に許す」が台帳に残っていない').toBe(true);
   expect(ledger.write?.always, '「この 1 回だけ」が write の許可として台帳に残った').not.toBe(true);
 
+  // ── 8b. append(#1407 段④)→ 書き足す側のダイアログ(write)。末尾に足され、選択は動かない。
+  //    disk に着いたかは read で読み直して見る(read は「常に許す」済み ── ダイアログ無し)
+  await callNoWait(page, 'pkc_append_note', { id: foundId, text: 'AI が足した続き' });
+  await expectAsk(page, `『${foundTitle}』の末尾に書き足そう`);
+  await clickReal(page, `${ASK_ROW}[data-pkc-agent-grant-index="0"]`); // この 1 回だけ
+  await expect(page.locator(ASK_NOTE)).toBeHidden();
+  const appended = await takeResult(page);
+  expect(appended.isError, `書き足せなかった: ${textOf(appended)}`).toBeFalsy();
+  expect(JSON.parse(textOf(appended))).toEqual({ id: foundId, title: foundTitle });
+  await expect(reading, '書き足したら読んでいたノートが動いた').toContainText('読んでいる側');
+  await callNoWait(page, 'pkc_read_note', { id: foundId });
+  const reread = JSON.parse(textOf(await takeResult(page))) as { body: string };
+  expect(reread.body, '書き足した字が本文の末尾に無い').toMatch(/AI が足した続き\s*$/u);
+  expect(reread.body, '書き足したら元の本文が消えた').toContain(MARKER);
+
   // ── 9. 許可を取り消す → 一覧から消え、search はまた聞く ──
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await clickReal(page, readRow.locator('[data-pkc-action="revoke-agent"]'));
@@ -283,7 +300,7 @@ test('🔴 WebMCP: OFF では登録されず / ON で 4 本 / 許可のダイア
     pageB.locator('[data-pkc-region="settings-agents"] [data-pkc-field="agent-tab-status"]'),
   ).toContainText('メインのタブではありません');
   // メインのタブの登録は 2 枚目のタブに左右されない
-  expect(await toolNames(page)).toHaveLength(4);
+  expect(await toolNames(page)).toHaveLength(5);
 
   expect(errors, 'pageerror が出た(1 枚目)').toEqual([]);
   expect(errorsB, 'pageerror が出た(2 枚目)').toEqual([]);
