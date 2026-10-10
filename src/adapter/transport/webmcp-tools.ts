@@ -41,6 +41,7 @@ import { AGENT_ORIGIN_LABEL } from './outside-create';
 import type { Via } from './message-bridge';
 import { MAX_PER_MINUTE } from './protocol';
 import type { AppendOutcome } from '@adapter/state/append-settle';
+import { appendHeadingFor, appendableKindsLabel, isAppendable } from '@features/flavor/append-spec';
 
 /** 探す件数の既定と上限。 */
 export const SEARCH_DEFAULT_LIMIT = 10;
@@ -80,7 +81,7 @@ export interface AgentToolDeps {
    * 🔴 ノートの末尾へ書き足し、disk に着くまで待つ(`appendAndSettle` ── PDF の引用と同じ 1 本)。
    * ⚠ ID は `meta` を通った物だけが来る(system 領域へは書かせない)。
    */
-  append: (id: string, text: string) => Promise<AppendOutcome>;
+  append: (id: string, text: string, heading: string | null) => Promise<AppendOutcome>;
   /** 許可の門(`createAgentGate`)。`signal` は AI が依頼を取り消したとき abort される。 */
   gate: AgentGate;
   /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
@@ -282,7 +283,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
     name: 'pkc_append_note',
     title: 'ノートに書き足す',
     description:
-      'ID を指定して、PKC3 のノートの末尾に字(Markdown)を書き足します。既にあるノートに続きを残すときに使います。本文の途中や既存の字は変えません。',
+      `ID を指定して、PKC3 のノートの末尾に字(Markdown)を書き足します。既にあるノートに続きを残すときに使います。本文の途中や既存の字は変えません。書き足せるのは${appendableKindsLabel()}だけです(ログには日時の見出しが付きます)。`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -308,10 +309,18 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       // ⚠ 見取りに無い ID へは書かせない(system 領域のノートを、ID を直に渡して書き換える道を塞ぐ)。
       //   ⚠ 許可を聞く前に断る ── 書けないノートの題名をダイアログに出さない
       if (meta === undefined) return fail('そのノートは見つかりません');
+      // 🔴 追記欄と同じ種類だけ(`isAppendable` 1 か所 ── 添付・フォルダの本文は「説明」で、記録の連なりではない)
+      //   ⚠ 許可を聞く前に断る(書けない物のためにダイアログを出さない)
+      if (!isAppendable(meta.archetype)) {
+        return fail(`そのノートには書き足せません(書き足せるのは${appendableKindsLabel()}だけです)`);
+      }
       if (!(await deps.gate({ action: 'append', title: meta.title }, options.signal))) {
         return fail(AGENT_DENIED_TEXT);
       }
-      const r = await deps.append(id, input.text);
+      // ⚠ 改行は LF にそろえ、NUL は落とす(追記欄は入力欄が \r\n を直すが、AI の字はそのまま来る)
+      const text = input.text.replace(/\r\n?/g, '\n').split('\u0000').join('');
+      // 🔑 ログは日時の節を付ける(追記欄と同じ `appendHeadingFor`)── 付けないと前の節に溶け込む
+      const r = await deps.append(id, text, appendHeadingFor(meta.archetype, new Date(clock())));
       // 🔴 書けなかったときに成功を返さない(AI が「書き足した」と user に言ってしまう)
       if (r.ok) return ok({ id, title: meta.title });
       if (r.reason === 'timeout') return fail(AGENT_APPEND_TIMEOUT_TEXT);

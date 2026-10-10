@@ -1,14 +1,15 @@
 /**
  * ブラウザの AI(WebMCP)に何を許すか ── **範囲 2 つと、聞くときの規則**(#1407 段①)。
  *
- * ## 範囲は 2 つ(裁定「許可すれば渡す」)
+ * ## 範囲は 3 つ(裁定「許可すれば渡す」+ 段④の書き足し)
  *
  * | 範囲 | できること | 渡るもの |
  * |---|---|---|
  * | `read` | 探す・読む・タグの一覧 | **本文**(見つかったノートの本文が AI の提供元へ送られる) |
- * | `write` | ノートを作る・末尾に書き足す(#1407 段④) | 何も出ない(書くだけ) |
+ * | `write` | ノートを作る | 何も出ない(作るだけ) |
+| `append` | 既存のノートの末尾に書き足す(#1407 段④)| 何も出ない(書くだけ)── ⚠ `write` と分ける: 作ってよいと許した人に、既存のノートを書き換える許可まで黙って広げない |
  *
- * **既定はどちらも許可なし。** 道具そのものは flag がオンなら登録するが、`execute` の先頭で
+ * **既定はどれも許可なし。** 道具そのものは flag がオンなら登録するが、`execute` の先頭で
  * ここを通り、許可が無ければ**アプリのダイアログで聞く**。
  *
  * ## 聞き方(3 択)
@@ -24,9 +25,9 @@
  */
 
 /** 許す範囲。 */
-export type AgentScope = 'read' | 'write';
+export type AgentScope = 'read' | 'write' | 'append';
 
-export const AGENT_SCOPES: readonly AgentScope[] = ['read', 'write'];
+export const AGENT_SCOPES: readonly AgentScope[] = ['read', 'write', 'append'];
 
 /** ダイアログの答え。 */
 export type AgentAnswer = 'once' | 'always' | 'deny';
@@ -34,7 +35,8 @@ export type AgentAnswer = 'once' | 'always' | 'deny';
 /** 設定の一覧に出す範囲の名前。 */
 export const AGENT_SCOPE_LABEL: Readonly<Record<AgentScope, string>> = {
   read: 'ノートを探す・読む',
-  write: 'ノートを作る・書き足す',
+  write: 'ノートを作る',
+  append: 'ノートに書き足す',
 };
 
 /**
@@ -50,7 +52,11 @@ export type AgentTarget =
   | { action: 'append'; title: string };
 
 export function scopeOf(target: AgentTarget): AgentScope {
-  return target.action === 'create' || target.action === 'append' ? 'write' : 'read';
+  if (target.action === 'create') return 'write';
+  // 🔴 書き足すは**別の範囲**(#1407 段④ レビュー)── 「作る」を常に許した人は、既存のノートを書き換える許可まで
+  //    与えていない(段①の字は「ノートを作る」だった)。同じ範囲にすると、その「常に許す」が黙って広がる
+  if (target.action === 'append') return 'append';
+  return 'read';
 }
 
 /** ダイアログの題名の中に入れる字の上限。 */

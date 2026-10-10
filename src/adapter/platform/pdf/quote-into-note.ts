@@ -46,7 +46,7 @@ export async function quoteIntoNote(
   const block = formatPdfQuote(text, page, session.name);
   if (block === null) return { ok: false, message: '引用する字が選ばれていません' };
   // 🔑 書き足しと結末待ちは `appendAndSettle` 1 本(ブラウザの AI の書き足しと同じ口。§7)
-  const r = await appendAndSettle(dispatcher, target, block, QUOTE_SETTLE_TIMEOUT_MS, timers);
+  const r = await appendAndSettle(dispatcher, target, block, null, QUOTE_SETTLE_TIMEOUT_MS, timers);
   if (r.ok) {
     const message = `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)`;
     // 🔑 言うのは、disk に着いてから(窓にも状態の行にも同じ字)

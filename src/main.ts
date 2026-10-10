@@ -1950,7 +1950,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }),
         createEntry: createEntryFromOutside,
         // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
-        append: (id, text) => appendAndSettle(dispatcher, id, text, AGENT_APPEND_SETTLE_TIMEOUT_MS),
+        append: (id, text, heading) =>
+          appendAndSettle(dispatcher, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
         gate: agentGate,
       }),
   });

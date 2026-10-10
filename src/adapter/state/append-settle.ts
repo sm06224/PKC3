@@ -37,6 +37,8 @@ export function appendAndSettle(
   dispatcher: Dispatcher,
   lid: string,
   text: string,
+  /** 節の見出し(ログは日時 = `appendHeadingFor`)。`null` = 付けない(PDF の引用は末尾に足すだけ)。 */
+  heading: string | null,
   timeoutMs: number,
   timers: AppendTimers = REAL_APPEND_TIMERS,
 ): Promise<AppendOutcome> {
@@ -44,6 +46,9 @@ export function appendAndSettle(
   // 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない。予定の面の追記と同じ)
   const lockBefore = st.writeLock;
   const gen = st.lockGen;
+  // ⚠ 断られた理由は「この dispatch で立った」字だけを返す ── 前から残っている字を理由として返さない
+  //   (ノートが消えていた回など、reducer が理由を付けずに断る経路がある)
+  const errorBefore = st.error;
   return new Promise<AppendOutcome>((resolve) => {
     let handle: unknown = null;
     let done = false;
@@ -63,14 +68,14 @@ export function appendAndSettle(
       type: 'APPEND_TO_ENTRY',
       lid,
       text,
-      heading: null,
+      heading,
       // ⚠ 末尾へ足す(追記先の選択は本文の画面の話 ── ここでは選ばせない)
       target: null,
     });
     if (done) return;
     const after = dispatcher.getState();
     if (after.writeLock === lockBefore) {
-      settle({ ok: false, reason: 'refused', error: after.error });
+      settle({ ok: false, reason: 'refused', error: after.error === errorBefore ? null : after.error });
       return;
     }
     handle = timers.setTimer(() => settle({ ok: false, reason: 'timeout', error: null }), timeoutMs);

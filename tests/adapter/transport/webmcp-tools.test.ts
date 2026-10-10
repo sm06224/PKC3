@@ -46,6 +46,11 @@ interface Note {
 const NOTES: Record<string, Note> = {
   a1: { title: '買い物', archetype: 'text', updatedAt: '2026-10-01 10:00:00', body: '牛乳を買う\n\n#家事 #買い物' },
   b2: { title: '会議メモ', archetype: 'text', updatedAt: null, body: '---\ntags: [仕事]\n---\n議題は予算' },
+  // 書き足しの種類の門(#1407 段④)── 追記欄と同じく、ノートとログだけ
+  log: { title: '作業ログ', archetype: 'textlog', updatedAt: null, body: '## 2026-10-01 10:00:00\n始めた' },
+  att: { title: '見積.pdf', archetype: 'attachment', updatedAt: null, body: '説明' },
+  dir: { title: '資料', archetype: 'folder', updatedAt: null, body: '' },
+  todo: { title: '買う', archetype: 'todo', updatedAt: null, body: '' },
 };
 
 function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentScope) => boolean) = true) {
@@ -59,7 +64,7 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
     bodies: [] as string[][],
     tags: 0,
     create: [] as Array<[unknown, string, string]>,
-    append: [] as Array<[string, string]>,
+    append: [] as Array<[string, string, string | null]>,
   };
   const deps: AgentToolDeps = {
     meta: (id) => {
@@ -89,8 +94,8 @@ function setup(over: Partial<AgentToolDeps> = {}, allow: boolean | ((s: AgentSco
       calls.create.push([input, origin, via]);
       return 'lid-new' as string | null;
     },
-    append: async (id, text) => {
-      calls.append.push([id, text]);
+    append: async (id, text, heading) => {
+      calls.append.push([id, text, heading]);
       return { ok: true } as AppendOutcome;
     },
     gate: async (t, signal) => {
@@ -337,14 +342,14 @@ describe('🔴 許可が無ければ、何も読まず・何も作らず isError
     expect(calls.append).toEqual([]);
   });
 
-  it('範囲: 読む 3 本は read、作る・書き足す 2 本は write で聞く(read だけ許しても書けない)', async () => {
+  it('範囲: 読む 3 本は read、作るは write、書き足すは append で聞く(read だけ許しても書けない)', async () => {
     const { tool, calls } = setup({}, (s) => s === 'read');
     await tool('pkc_search_notes').execute({ query: 'x' }, SIGNAL);
     await tool('pkc_read_note').execute({ id: 'a1' }, SIGNAL);
     await tool('pkc_list_tags').execute({}, SIGNAL);
     const made = await tool('pkc_create_note').execute({ body: 'x' }, SIGNAL);
     const added = await tool('pkc_append_note').execute({ id: 'a1', text: 'x' }, SIGNAL);
-    expect(calls.gate).toEqual(['read', 'read', 'read', 'write', 'write']);
+    expect(calls.gate).toEqual(['read', 'read', 'read', 'write', 'append']);
     expect(made.isError).toBe(true);
     expect(added.isError).toBe(true);
     expect(calls.create).toEqual([]);
@@ -462,7 +467,7 @@ describe('pkc_append_note(#1407 段④)', () => {
     const r = await tool('pkc_append_note').execute({ id: 'b2', text: '## 追加\n\n決まったこと' }, SIGNAL);
     expect(r.isError).toBeUndefined();
     expect(json(r)).toEqual({ id: 'b2', title: '会議メモ' });
-    expect(calls.append).toEqual([['b2', '## 追加\n\n決まったこと']]);
+    expect(calls.append).toEqual([['b2', '## 追加\n\n決まったこと', null]]);
     expect(calls.targets).toEqual([{ action: 'append', title: '会議メモ' }]);
   });
 
@@ -509,4 +514,54 @@ describe('pkc_append_note(#1407 段④)', () => {
     expect(r3.content[0]!.text).toBe(AGENT_APPEND_TIMEOUT_TEXT);
     expect(AGENT_APPEND_TIMEOUT_TEXT).toContain('もう一度送らず');
   });
+});
+
+describe('pkc_append_note ── 追記欄と同じ門(#1407 段④ レビュー)', () => {
+  it('🔴 添付・フォルダ・todo には書き足さない(許可も聞かない)。断り文はどれなら書けるかを言う', async () => {
+    for (const id of ['att', 'dir', 'todo']) {
+      const { tool, calls } = setup();
+      const r = await tool('pkc_append_note').execute({ id, text: 'x' }, SIGNAL);
+      expect(r.isError, id).toBe(true);
+      expect(r.content[0]!.text, id).toContain('ノートとログ');
+      expect(calls.targets, `${id}: 書けないのに許可を聞いた`).toEqual([]);
+      expect(calls.append, `${id}: 書けない種類へ書き足した`).toEqual([]);
+    }
+  });
+
+  it('🔴 ログには日時の節の見出しを付けて足す(付けないと前の節に溶け込む)。ノートには付けない', async () => {
+    const t = Date.UTC(2026, 9, 10, 3, 4, 5);
+    const { tool, calls } = setup({ now: () => t });
+    await tool('pkc_append_note').execute({ id: 'log', text: '終えた' }, SIGNAL);
+    await tool('pkc_append_note').execute({ id: 'a1', text: '続き' }, SIGNAL);
+    expect(calls.append[0]![0]).toBe('log');
+    expect(calls.append[0]![2], 'ログに見出しが付いていない').toMatch(/^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/u);
+    expect(calls.append[1]![2], 'ノートに見出しを勝手に足した').toBeNull();
+  });
+
+  it('改行は LF にそろえ、NUL は落とす(追記欄の入力欄がしていることを AI の字にも)', async () => {
+    const { tool, calls } = setup();
+    await tool('pkc_append_note').execute({ id: 'a1', text: '一\r\n二\r三\u0000四' }, SIGNAL);
+    expect(calls.append[0]![1]).toBe('一\n二\n三四');
+  });
+
+  it.each(['pkc_search_notes', 'pkc_read_note', 'pkc_list_tags', 'pkc_create_note', 'pkc_append_note'])(
+    '%s も 1 分の回数の上限で断る(書く道具も逃れない)',
+    async (name) => {
+      const { tool, calls } = setup({ now: () => 7 });
+      for (let i = 0; i < MAX_PER_MINUTE; i += 1) await tool('pkc_list_tags').execute({}, SIGNAL);
+      const before = calls.targets.length;
+      const input: Record<string, unknown> = {
+        pkc_search_notes: { query: 'x' },
+        pkc_read_note: { id: 'a1' },
+        pkc_list_tags: {},
+        pkc_create_note: { body: 'x' },
+        pkc_append_note: { id: 'a1', text: 'x' },
+      }[name]!;
+      const r = await tool(name).execute(input, SIGNAL);
+      expect(r.content[0]!.text).toBe(AGENT_RATE_LIMIT_TEXT);
+      expect(calls.targets.length, '上限を超えたのに許可を聞いた').toBe(before);
+      expect(calls.append).toEqual([]);
+      expect(calls.create).toEqual([]);
+    },
+  );
 });

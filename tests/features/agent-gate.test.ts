@@ -45,8 +45,8 @@ describe('scopeOf', () => {
     expect(scopeOf({ action: 'search', query: 'x' })).toBe('read');
     expect(scopeOf({ action: 'read', title: 'x' })).toBe('read');
     expect(scopeOf({ action: 'tags' })).toBe('read');
-    // 🔴 書き足すも write(read だけ許した AI に、既存のノートを書き換えさせない)(#1407 段④)
-    expect(scopeOf({ action: 'append', title: 'x' })).toBe('write');
+    // 🔴 書き足すは**別の範囲**(#1407 段④)── 「作る」を常に許した人の許可を、既存のノートの書き換えへ黙って広げない
+    expect(scopeOf({ action: 'append', title: 'x' })).toBe('append');
   });
 });
 
