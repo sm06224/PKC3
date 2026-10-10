@@ -1369,6 +1369,9 @@ describe('掴んで動かす(place-drag)', () => {
       expect(d.getState().error).toBeDefined();
       expect(block2.style.width).toBe('');
       expect(block2.style.height).toBe('');
+      // 🔴 離したときに書いた属性も外す ── 残ると、次に掴んだとき起点が「無かった大きさ」になる(#1481 1)
+      expect(block2.hasAttribute('data-pkc-w'), '断られたのに data-pkc-w が残っている').toBe(false);
+      expect(block2.hasAttribute('data-pkc-h'), '断られたのに data-pkc-h が残っている').toBe(false);
       off();
     });
 
