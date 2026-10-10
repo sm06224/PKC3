@@ -248,8 +248,14 @@ function follow(anchor: HTMLElement, grip: HTMLElement, target: Element | null):
   gripTargets.set(grip, block);
   const a = anchor.getBoundingClientRect();
   const b = block.getBoundingClientRect();
-  grip.style.top = `${b.top - a.top + anchor.scrollTop}px`;
-  grip.style.left = `${gripLeft(a, b) + anchor.scrollLeft}px`;
+  /**
+   * 🔴 **`transform` で動かす**(#1467)── `top` / `left` を書くと配置が汚れ、次の `scroll` で位置を読む所
+   *   (`scroll-memory.ts` の `remember`)が**文書全体の配置のやり直し**を起こしていた(20,000 行のノートで 1 回 約 4 ms、
+   *   スクロールの間 200 回以上)。`transform` は描画だけで済み、配置は汚れない。⚠ 見える位置は同じ(CSS で `top: 0; left: 0`)。
+   */
+  const x = gripLeft(a, b) + anchor.scrollLeft;
+  const y = b.top - a.top + anchor.scrollTop;
+  grip.style.transform = `translate(${String(x)}px, ${String(y)}px)`;
   if (grip.hidden) grip.hidden = false;
 }
 
