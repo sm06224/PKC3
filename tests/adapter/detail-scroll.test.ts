@@ -423,3 +423,94 @@ describe('ノートごとに読んでいた場所を憶える (#690 ①)', () =>
     expect(scroller.scrollTop, '器を空にした後の値(0)を憶えた').toBe(500);
   });
 });
+
+/**
+ * 🔴 **読んでいた場所は「先頭の塊 + ずれ」で戻す**(#1490)。
+ *
+ * ⚠ happy-dom は配置を持たない(高さが全部 0)ので、ここだけ塊の位置を差し込む ──
+ *   塊は 100px ずつ積む。戻る前に上の 5 塊を 300px にする(離れたとき焼けていた図が、
+ *   戻った直後は原文のまま、の代わり)。px で戻すと同じ 1,050px に別の塊が来る。
+ */
+describe('読んでいた場所の目印(#1490)', () => {
+  function stubLayout(scroller: HTMLElement, height: (i: number) => number): () => void {
+    const orig = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+      if (this === scroller) return { top: 0, bottom: 600, height: 600 } as DOMRect;
+      const host = scroller.querySelector('[data-pkc-field="detail-body"]');
+      if (host !== null && this.parentElement === host) {
+        let y = 0;
+        let i = 0;
+        for (const c of host.children) {
+          if (c === this) break;
+          y += height(i++);
+        }
+        const top = y - scroller.scrollTop;
+        const h = height(i);
+        return { top, bottom: top + h, height: h } as DOMRect;
+      }
+      return orig.call(this);
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = orig;
+    };
+  }
+
+  it('🔴 上側の塊の高さが変わっても、読んでいた塊へ戻る', async () => {
+    const { scroller, r } = setup();
+    let tall = false;
+    const restore = stubLayout(scroller, (i) => (tall && i < 5 ? 300 : 100));
+    try {
+      r.render(state('a', LONG));
+      await settle();
+      const host = scroller.querySelector('[data-pkc-field="detail-body"]')!;
+      expect(host.children.length, '前提: 塊が 12 個以上無い').toBeGreaterThan(12);
+      expect(host.children[10]!.hasAttribute('data-pkc-source-line'), '前提: 塊に行番号が無い').toBe(true);
+      scroller.scrollTop = 1050; // 11 番目の塊(上端 1,000)の 50px 下
+      r.render(state('b', LONG));
+      await settle();
+      tall = true; // 戻った直後、上の 5 塊の高さが違う
+      r.render(state('a', LONG));
+      await settle();
+      // 11 番目の塊の上端は 5×300 + 5×100 = 2,000 → 2,050 へ
+      expect(scroller.scrollTop, '送り量(px)のまま戻した ── 別の行が出る').toBe(2050);
+    } finally {
+      restore();
+    }
+  });
+
+  it('高さが変わらなければ、送り量と同じ所へ戻る(対照群)', async () => {
+    const { scroller, r } = setup();
+    const restore = stubLayout(scroller, () => 100);
+    try {
+      r.render(state('a', LONG));
+      await settle();
+      scroller.scrollTop = 1050;
+      r.render(state('b', LONG));
+      await settle();
+      r.render(state('a', LONG));
+      await settle();
+      expect(scroller.scrollTop).toBe(1050);
+    } finally {
+      restore();
+    }
+  });
+
+  it('編集から戻るときも目印で戻す', async () => {
+    const { scroller, r } = setup();
+    let tall = false;
+    const restore = stubLayout(scroller, (i) => (tall && i < 5 ? 300 : 100));
+    try {
+      r.render(state('a', LONG));
+      await settle();
+      scroller.scrollTop = 1050;
+      r.render(state('a', LONG, 'editing'));
+      await settle();
+      tall = true;
+      r.render(state('a', LONG));
+      await settle();
+      expect(scroller.scrollTop, '編集から戻ると px のまま').toBe(2050);
+    } finally {
+      restore();
+    }
+  });
+});
