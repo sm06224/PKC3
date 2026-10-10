@@ -229,18 +229,26 @@ export function hydrateDiagrams(
    * ⚠ 溜めている間に条件が変わりうるので、載せてよいかの判定は**当てる瞬間**に行う(下の `commit` の中)。
    */
   const pendingCommits: (() => void)[] = [];
-  let commitFrame = 0;
+  /** 予約した当て時の取り消し(`null` = 予約なし)。 */
+  let cancelCommit: (() => void) | null = null;
   const flushCommits = (): void => {
-    commitFrame = 0;
+    cancelCommit = null;
     const jobs = pendingCommits.splice(0);
     for (const job of jobs) job();
   };
-  const raf: (cb: () => void) => number =
-    typeof requestAnimationFrame === 'function'
-      ? (cb) => requestAnimationFrame(cb)
-      : (cb) => setTimeout(cb, 0) as unknown as number;
-  const caf: (id: number) => void =
-    typeof cancelAnimationFrame === 'function' ? (id) => cancelAnimationFrame(id) : (id) => clearTimeout(id);
+  /**
+   * 次のコマに当てる。⚠ 背景のタブでは requestAnimationFrame が止まる ── 待つと先読みも止まるので、
+   * 見えていない間はコマを待たずに当てる(見えていないので、配置をやり直しても画面は引っかからない)。
+   */
+  const scheduleCommit = (): (() => void) => {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    if (!hidden && typeof requestAnimationFrame === 'function') {
+      const id = requestAnimationFrame(flushCommits);
+      return () => cancelAnimationFrame(id);
+    }
+    const id = setTimeout(flushCommits, 0);
+    return () => clearTimeout(id);
+  };
   /**
    * 差し替えを溜める。当て終わったら解決する(呼び手が「載った後」を待てるように)。
    * ⚠ 1 枚の失敗は**その呼び手へ返す**(投げたまま抜けると、同じコマに溜めた残りが載らない)。
@@ -255,7 +263,7 @@ export function hydrateDiagrams(
           reject(e);
         }
       });
-      if (commitFrame === 0) commitFrame = raf(flushCommits);
+      if (cancelCommit === null) cancelCommit = scheduleCommit();
     });
 
   const paint = async (p: Pending, force = false): Promise<void> => {
@@ -496,8 +504,7 @@ export function hydrateDiagrams(
   return {
     dispose: () => {
       disposed = true;
-      if (commitFrame !== 0) caf(commitFrame);
-      commitFrame = 0;
+      cancelCommit?.();
       flushCommits(); // ⚠ 待っている呼び手を解決させる(中身は disposed を見て何もしない)
       io.disconnect();
       unwatchTheme();

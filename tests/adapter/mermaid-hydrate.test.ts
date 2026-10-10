@@ -882,6 +882,19 @@ describe('差し替えを 1 コマにまとめる(#1467)', () => {
     root.remove();
   });
 
+  it('⚠ 背景のタブ(見えていない)では、コマを待たずに差し替える(止まったコマで先読みを止めない)', async () => {
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const { root, hosts } = mount(2);
+    const scope = hydrateMermaid([...root.children]);
+    fire!(hosts);
+    await settle();
+    expect(frames, '見えていないのにコマを予約した').toHaveLength(0);
+    expect(images(root), '見えていないときに差し替わっていない').toBe(2);
+    vis.mockRestore();
+    scope.dispose();
+    root.remove();
+  });
+
   it('🔑 先読みは空き時間 1 回で 8 枚まで始める(1 枚ずつだと、まとめる相手がいない)', async () => {
     const idles: IdleRequestCallback[] = [];
     vi.stubGlobal('requestIdleCallback', (cb: IdleRequestCallback) => {
@@ -894,6 +907,8 @@ describe('差し替えを 1 コマにまとめる(#1467)', () => {
     idles.shift()!({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
     await settle();
     expect(vi.mocked(renderToPng), '1 回の空き時間に始めた枚数').toHaveBeenCalledTimes(8);
+    // 🔑 次の束は、この束が**載り終わってから**(載る前に次の空き時間を取らない)
+    expect(idles, '束が載る前に次の空き時間を取った').toHaveLength(0);
     runFrame();
     await settle();
     expect(idles, '残りのために空き時間を取り直していない').toHaveLength(1);
