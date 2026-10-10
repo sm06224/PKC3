@@ -18,6 +18,19 @@ import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRend
   gotoCollectionPane,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
+import { chromiumLaunch } from './playwright.config';
+
+/**
+ * 🔴 ブラウザを UTF-8 のロケールで起動する(#1455 (b))。⚠ ロケールが C の箱(runner の既定)では、
+ * Chromium の OPFS が**非 ASCII の file 名を `TypeMismatchError` で拒む**(実測。UTF-8 なら書ける)。
+ * 「Markdown を PC のフォルダに書き出す」の日本語名の検査が runner の環境に依らないようにする。
+ */
+test.use({
+  launchOptions: {
+    ...chromiumLaunch,
+    env: { ...(process.env as Record<string, string>), LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+  },
+});
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -1092,8 +1105,19 @@ test('🔴 可搬 HTML: 書き出したファイルが**単体で開いて読め
   await rm(file, { force: true });
 });
 
-test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る', async ({ page }) => {
+test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る(+ PC のフォルダへも同じ中身)', async ({ page }) => {
   const errors = collectPageErrors(page);
+  /**
+   * 🔴 #1455 (b): `showDirectoryPicker` を **OPFS の本物の `FileSystemDirectoryHandle`** で差し替える
+   * (選択窓は自動化できない。handle は本物なので、書き込みの経路は実ブラウザのまま通る)。
+   * 🔑 **新しい起動は足さない** ── 下の zip の道中に、同じ書き出しを 1 回足す(smoke-budget)。
+   */
+  await page.addInitScript(() => {
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = async () => {
+      const root = await navigator.storage.getDirectory();
+      return root.getDirectoryHandle('pkc-md-out', { create: true });
+    };
+  });
   await gotoApp(page);
 
   await page.setInputFiles('[data-pkc-field="import-input"]', {
@@ -1125,6 +1149,43 @@ test('🔴 md ZIP: 落ちるものを言い、添付が**相対パス**で入る
   expect(names).toContain('ZIP のノート.md');
   // 添付は拡張子つきの相対パス ── これが無いと外の markdown ビューアで開けない
   expect(names.some((n) => /^assets\/.+\.png$/.test(n))).toBe(true);
+
+  /**
+   * 🔴 **PC のフォルダへ**(#1455 (b))── zip と**同じ名前の並び**が、選んだフォルダの中の
+   * 新しいサブフォルダに実際に書かれる。⚠ 名前だけでなく**添付の大きさ**も見る
+   * (中身が空の file を書いても名前は揃う)。
+   */
+  // ⚠ 右の列(コレクションの面)は上の zip を押した所から開いたまま ── 読み込み直さない
+  const folderBtn = page.locator('[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
+  await expect(folderBtn, 'PC のフォルダへ書き出すボタンが出ていない').toBeVisible();
+  await clickReal(page, '[data-pkc-field="collection-pane"] [data-pkc-action="export-markdown-folder"]');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('件のノートを『');
+  const written = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const out = await root.getDirectoryHandle('pkc-md-out');
+    const subs: string[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const [name] of (out as any).entries()) subs.push(name as string);
+    const files: Array<{ path: string; size: number }> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const walk = async (dir: any, prefix: string): Promise<void> => {
+      for await (const [name, h] of dir.entries()) {
+        if (h.kind === 'directory') await walk(h, `${prefix}${name}/`);
+        else files.push({ path: `${prefix}${name}`, size: (await h.getFile()).size });
+      }
+    };
+    for (const sub of subs) await walk(await out.getDirectoryHandle(sub), '');
+    await root.removeEntry('pkc-md-out', { recursive: true });
+    return { subs, files };
+  });
+  expect(written.subs, '選んだフォルダの中に新しいフォルダが 1 つ').toHaveLength(1);
+  expect(written.subs[0]).toMatch(/-\d{8}$/);
+  expect(written.files.map((f) => f.path).sort(), 'zip と同じ並びで書かれている').toEqual(
+    [...names].filter((n) => !n.endsWith('/')).sort(),
+  );
+  for (const f of written.files.filter((x) => /^assets\//.test(x.path))) {
+    expect(f.size, `${f.path} が空`).toBeGreaterThan(0);
+  }
 
   expect(errors).toEqual([]);
   await rm(file, { force: true });

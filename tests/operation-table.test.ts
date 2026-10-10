@@ -469,6 +469,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-10(#1455 (b)): 「Markdown を PC のフォルダに書き出す」(`export-markdown-folder`)で受け手 +1 / 登記 +1(右の列の `collectionPane`)/ `both` +1 ──
+      //   `total` +1 / `receivers` +1 / `registered` +1。
       // ⚠ 2026-10-10(#1440): 右クリックの「Markdown で書き出す」(`export-entry-markdown`)で受け手 +1 / 登記 +1(行のメニュー)/ `both` +1、
       //   「操作を探す」の `export-note-markdown` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-transcript-srt` と同じ置き場)。
       //   `total` +2 / `receivers` +1 / `registered` +2 / `unregistered` は動かない。
@@ -754,10 +756,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 393,
-      receivers: 327,
-      registered: 108,
-      both: 42,
+      total: 394,
+      receivers: 328,
+      registered: 109,
+      both: 43,
       outsideActionsTable: 66,
       unregistered: 285,
     });
@@ -804,13 +806,14 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)で `key` 72 → 74
     // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
     // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
+    // ⚠ 2026-10-10(#1455 (b)): 右の列(`collectionPane`)が 4 → 5(`export-markdown-folder`)
     // ⚠ 2026-10-10(#1440): 行のメニューが 17 → 18(`export-entry-markdown`)、鍵が 82 → 83(`export-note-markdown`。鍵の既定は持たない)
     expect(s().perBook).toEqual({
       key: 83,
       entry: 18,
       body: 3,
       collection: 2,
-      collectionPane: 4,
+      collectionPane: 5,
       settings: 1,
     });
   });

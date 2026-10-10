@@ -44,6 +44,7 @@ import { archetypeLabel } from '@features/flavor/archetype-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
 import { COLLECTION_PANE_COMMANDS } from './commands';
+import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
@@ -1601,7 +1602,10 @@ export class InspectorRenderer {
 
     const cmds = document.createElement('div');
     cmds.setAttribute('data-pkc-field', 'collection-commands');
-    for (const { action, label, title } of COLLECTION_PANE_COMMANDS) {
+    const canWriteFolder = windowFolderWritePicker() !== null;
+    for (const { action, label, title, needs } of COLLECTION_PANE_COMMANDS) {
+      // 🔴 ブラウザに無い機能のボタンは出さない(dead click を作らない)
+      if (needs === 'folder-write' && !canWriteFolder) continue;
       const item = document.createElement('div');
       item.setAttribute('data-pkc-field', 'collection-command-item');
       const btn = iconButton(action, label, null);

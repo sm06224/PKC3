@@ -1658,6 +1658,8 @@ export interface BinderServices {
   exportHtml?(): void;
   /** md ZIP の書出し(P6d 段④)。 */
   exportMarkdown?(): void;
+  /** md を PC のフォルダへ 1 度だけ書き出す(#1455 (b))。 */
+  exportMarkdownFolder?(): void;
   /**
    * 🔴 **可搬単一 HTML**(#400 段④)── アプリごと 1 枚に焼く。
    * ⚠ 「閲覧用 HTML」とは別物である(あちらは読むだけ、こちらは**続きが書ける**)。
@@ -11130,6 +11132,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'export-markdown': (_dispatcher, _target, services) => {
     services.exportMarkdown?.();
+  },
+  'export-markdown-folder': (_dispatcher, _target, services) => {
+    services.exportMarkdownFolder?.();
   },
   'export-portable': (_dispatcher, _target, services) => {
     services.exportPortable?.();

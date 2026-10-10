@@ -416,7 +416,12 @@ describe('全体の処理の出す側の全数', () => {
   }> = [
     {
       file: 'src/adapter/ui/actions/export-archive.ts',
-      starts: ['deps.notify?.(EXPORT_STARTING[kind]);', 'deps.notify?.(`${target.app} で書き出しています…`);'],
+      starts: [
+        'deps.notify?.(EXPORT_STARTING[kind]);',
+        'deps.notify?.(`${target.app} で書き出しています…`);',
+        // 🔴 #1455 (b): PC のフォルダへ。終わりの合図は失敗の枝の `notify?.('')`(成功は結果の字で置き換わる)
+        "deps.notify?.('Markdown をフォルダに書き出しています…');",
+      ],
       end: /deps\.notify\?\.\(''\)/,
     },
     {
@@ -481,8 +486,8 @@ describe('全体の処理の出す側の全数', () => {
     expect(Object.fromEntries([...perFile].sort()), '表に無い出す側が増えた / 減った(表と終わりの合図を直す)').toEqual(
       Object.fromEntries([...expected].sort()),
     );
-    // 空振り防止:合計が 10(表の始まりの数)。⚠ 0 件なら走査が何も見ていない
-    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(10);
+    // 空振り防止:合計が 11(表の始まりの数。#1455 (b) で +1)。⚠ 0 件なら走査が何も見ていない
+    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(11);
   });
 });
 
