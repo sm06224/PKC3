@@ -26,6 +26,7 @@ import {
   isHeadingFolded,
   revealBlock,
   toggleHeadingFold,
+  toggleLogDay,
 } from '../render/heading-fold';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
@@ -8489,6 +8490,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const heading = headingForAction(root, target);
     if (heading !== null) toggleHeadingFold(heading);
+  },
+  /**
+   * 🔴 **ログの日をまとめて畳む / 戻す**(#1441)。⚠ 規則も当て方も `render/log-days.ts` と
+   *   `heading-fold.ts` に在る ── ここは**渡すだけ**。
+   * ⚠ 本文は 1 バイトも変わらない(見え方だけ)ので `BODY_WRITE_ACTIONS` には載せない。
+   */
+  'toggle-log-day': (_dispatcher, target) => {
+    const row = target.closest<HTMLElement>('[data-pkc-log-day]');
+    if (row !== null) toggleLogDay(row);
   },
   /**
    * 🔴 **長大なコードブロックの折りたたみ／展開切り替え**(#1139)。

@@ -28,6 +28,7 @@ import { hydrateChart } from './chart-raster';
 import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
 import { applyHeadingFold, revealBlock } from './heading-fold';
+import { LOG_DAYS_HOST_ATTR } from './log-days';
 import { applyHeadingAnchors } from './heading-anchor';
 import { applyCodeLangBadges } from './code-lang';
 import { appCodeCollapse, applyCodeCollapse, clearCodeCollapse } from './code-collapse';
@@ -1625,6 +1626,13 @@ export class DetailRenderer {
          *   ここで足す口は差分に影響しない)。
          * ⚠ 節点は 1 つも動かさない(入れ子にするとライブエディタが死ぬ)。
          */
+        /**
+         * 🔴 **ログの日の行**(#1441)── ログ(`textlog`)の読む面だけ。⚠ 器は使い回すので
+         *   **毎回付け外す**(ログでないノートへ移った描画で、前のログの行を残さない)。
+         *   行そのものは `applyHeadingFold` が置く(畳みの数え方を 1 本にするため)。
+         */
+        if (meta?.archetype === 'textlog') host.setAttribute(LOG_DAYS_HOST_ATTR, '');
+        else host.removeAttribute(LOG_DAYS_HOST_ATTR);
         applyHeadingFold(host);
         /**
          * 🔴 **見出しのアンカーリンク（章・見出し参照リンク）ワンクリックコピー**(#1124)。
