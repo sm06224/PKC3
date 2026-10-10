@@ -1709,6 +1709,11 @@ export interface BinderServices {
    */
   exportEntryHtml?(lid: string): void;
   /**
+   * 🔴 **このノートの本文を、そのまま 1 つの .md で書き出す**(#1440)。
+   * ⚠ 入口は右クリックと「操作を探す」だけ(右の列には置かない ── `menuOnly`)。
+   */
+  exportEntryMarkdown?(lid: string): void;
+  /**
    * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
    *
    * > 「**マルチで付箋開けるといいかもね**」(利用者の感想 2026-09-04)
@@ -4492,6 +4497,40 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
+   * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
+   * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
+   *   ①編集中 / 保護中(理由は `blockedActionNote` の 1 か所)②ノートを開いていない ③配線が無い版。
+   */
+  if (cmd === 'export-note-markdown') {
+    const st = dispatcher.getState();
+    const why = blockedActionNote(st.phase);
+    if (why !== null) {
+      if (dry) return false;
+      prevent();
+      notify(`いまは書き出せません: ${why}`, CAUTION);
+      return true;
+    }
+    const lid = st.selectedLid;
+    if (lid === null) {
+      if (dry) return false;
+      prevent();
+      notify('書き出すノートがありません(先にノートを開いてください)', CAUTION);
+      return true;
+    }
+    const run = ROOT_SERVICES.get(root)?.exportEntryMarkdown;
+    if (run === undefined) {
+      if (dry) return false;
+      prevent();
+      notify('このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    run(lid);
+    return true;
+  }
+  /**
    * 🔴 **マニュアルを別のウィンドウで開く**(#1452 案 1)── 押しボタンはヘルプの面の中にしか無く、
    *   面は開くまで組まれない(`center.ts` は `help` の面のときだけ `render` する)ので、
    *   `SHORTCUT_BUTTON` では「ヘルプを 1 度開いた後」しか押せない。実体は押しボタンと同じ
@@ -4699,7 +4738,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
     // 「マニュアルを別のウィンドウで開く」(#1452 案 1)── 押せないのは配線が無い版だけ(phase では断らない)
     if (id === 'open-manual-window') return ROOT_SERVICES.get(root)?.openManualWindow === undefined ? MANUAL_WINDOW_STALE : null;
     const sel = SHORTCUT_BUTTON[id];
@@ -11211,6 +11250,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportEntryHtml?.(lid);
+  },
+  'export-entry-markdown': (dispatcher, target, services) => {
+    // 🔴 解決規則は隣の `export-entry-html` と**同じ**(#877)── 揃えないと「A を書き出して B を削除する」が成立する
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (lid) services.exportEntryMarkdown?.(lid);
   },
   /**
    * 🔴 **このノートを別の窓で開く**(#685 段②)。

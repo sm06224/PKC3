@@ -202,6 +202,8 @@ describe('割当の検め', () => {
   'open-messages',
   // 🔴 #1447: 字幕ファイル(.srt)で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'export-transcript-srt',
+  // 🔴 #1440: このノートを Markdown で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'export-note-markdown',
   // 🔴 #1452 案 1: マニュアルを別のウィンドウで開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'open-manual-window'];
 

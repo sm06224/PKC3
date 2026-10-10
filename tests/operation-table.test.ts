@@ -89,6 +89,8 @@ const UNBRIDGED: readonly string[] = [
    *   同じく `runGlobalCommand` の特例で受け、「操作を探す」/ 左の `>` の一覧から呼ぶ。
    */
   'export-transcript-srt',
+  // 🔴 #1440: このノートを Markdown で書き出す ── 受け手を持たない特例(`runGlobalCommand`)。「操作を探す」から呼ぶ
+  'export-note-markdown',
   'append-send',
   /**
    * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
@@ -467,6 +469,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-10(#1440): 右クリックの「Markdown で書き出す」(`export-entry-markdown`)で受け手 +1 / 登記 +1(行のメニュー)/ `both` +1、
+      //   「操作を探す」の `export-note-markdown` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-transcript-srt` と同じ置き場)。
+      //   `total` +2 / `receivers` +1 / `registered` +2 / `unregistered` は動かない。
       // ⚠ 2026-10-10(#855 段 A-2): 予定の「週」の曜日の見出し(`schedule-week-pick`。押した日の「日」へ)で受け手 +1 ── 登記は増えない
       //   (押し口は予定の面の中にしか無く、鍵も持たない。`schedule-day-go` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 A-1): 予定の面の「一覧 / 日」(`schedule-mode`)と「日」の ‹ › 今日(`schedule-day-go`)で受け手 +2 ──
@@ -749,11 +754,11 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 391,
-      receivers: 326,
-      registered: 106,
-      both: 41,
-      outsideActionsTable: 65,
+      total: 393,
+      receivers: 327,
+      registered: 108,
+      both: 42,
+      outsideActionsTable: 66,
       unregistered: 285,
     });
   });
@@ -799,9 +804,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-01(#1213): 行を上 / 下へ動かす(`move-line-up` / `move-line-down`)で `key` 72 → 74
     // ⚠ 2026-10-02(#1233): 選んだ字を整える 5 つ(`tidy-*`)で `key` 74 → 79(鍵の既定は持たない)
     // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
+    // ⚠ 2026-10-10(#1440): 行のメニューが 17 → 18(`export-entry-markdown`)、鍵が 82 → 83(`export-note-markdown`。鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 82,
-      entry: 17,
+      key: 83,
+      entry: 18,
       body: 3,
       collection: 2,
       collectionPane: 4,

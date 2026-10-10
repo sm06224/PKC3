@@ -327,6 +327,7 @@ import {
   exportFolder,
   type ExportDeps,
   exportEntryDocx,
+  exportEntryMarkdown,
   exportEntryPptx,
   type ExportKind,
 } from '@adapter/ui/actions/export-archive';
@@ -2269,7 +2270,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
 
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' },
+    kind: ExportKind | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -2401,6 +2402,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid);
         // 🔴 **相手に渡せる 1 枚**(#491)── 同じ `deps`・同じ絞り込み・同じ実行部を通る
         else if (kind.as === 'html') await exportEntry(dispatcher, deps, kind.entryLid, 'html');
+        // 🔴 **本文そのままの 1 つの .md**(#1440)── 同じ `deps`(読み口・待ち・知らせ)を通る
+        else if (kind.as === 'markdown') await exportEntryMarkdown(dispatcher, deps, kind.entryLid);
         else await exportEntry(dispatcher, deps, kind.entryLid, 'archive');
       }
       else await exportArchive(dispatcher, deps, kind);
@@ -4397,6 +4400,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
+    // 🔴 **本文そのままの 1 つの .md**(#1440)── 入口は右クリックと「操作を探す」だけ
+    exportEntryMarkdown: (lid) => void runExport({ entryLid: lid, as: 'markdown' }),
     /**
      * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
      *

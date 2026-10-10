@@ -296,6 +296,16 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'export-entry-pptx', label: 'PowerPoint で書き出す', group: 'export' },
   { action: 'export-entry-pdf', label: 'PDF で書き出す', group: 'export' },
   /**
+   * 🔴 **本文そのままの 1 つの .md**(#1440)。
+   *
+   * ⚠ **右クリックと「操作を探す」だけ**(`menuOnly`)── 右の列には置かない。書き出しの 5 つが
+   *   既に並んでいる所へ 6 つ目を足すと、毎日見る群れが長くなる(押す頻度の低い物の置き場ではない)。
+   * ⚠ コレクションの `Markdown で書き出す`(zip・添付ごと)とは**別の物** ── あちらは全部、こちらは
+   *   この 1 件の本文だけ(添付は入らない)。🔑 字は同じ形(`〜で書き出す`)に揃えた。
+   * ⚠ 種類で絞らない(`when` なし)── 隣の閲覧用 HTML / Word と同じ。全部のノートの本文は Markdown である。
+   */
+  { action: 'export-entry-markdown', label: 'Markdown で書き出す', group: 'export', menuOnly: true },
+  /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
    * ⚠ これは**上書き**である ── 上の書き出し 5 つと違って新しい file を作らない。
@@ -1188,6 +1198,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、
   //    ⚠ **画面の説明だけが古いまま user に嘘をついていた**(押すのを諦めさせる向き)。
+  // ⚠ **起きることと、入らない物を先に言う**(押してから「添付が無い」と思わせない)
+  'export-entry-markdown':
+    '本文をそのまま .md ファイルで保存します。添付は入りません(バックアップなら入ります)',
   'export-entry-docx':
     'Word 文書(.docx)で保存します。取り込み直せません(画像も、図はベクタで、グラフは絵で入ります)',
   // ⚠ **切れ方を先に言う**(user 指示 2026-08-21「画面で何が起きるかで書く」)──

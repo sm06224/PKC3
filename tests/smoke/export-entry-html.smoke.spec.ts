@@ -100,7 +100,8 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
-  await page.fill('[data-pkc-field="editor-title"]', '配る資料');
+  // ⚠ 題名は ASCII(headless は非 ASCII の download 名を捨てる ── 下の .md の名前の観測点のため)
+  await page.fill('[data-pkc-field="editor-title"]', 'handout');
   await page.fill('[data-pkc-field="editor-body"]', '本文。');
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -118,6 +119,34 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
     'メニューが出ていない(空振り)',
   ).toBeVisible();
   expect(await item.textContent(), '呼び名が字の正本と違う').toContain('閲覧用 HTML');
+
+  /**
+   * 🔴 **同じメニューの「Markdown で書き出す」で、本文がそのまま落ちる**(#1440)── 新しい起動を足さず、
+   *   この道中に載せる。観測点は**落ちた file の中身と名前**(「落ち始めた」だけでは空の file でも通る)。
+   * ⚠ 右の列(情報ペイン)には**出ない**(右クリックと「操作を探す」だけ)── 対照群は隣の
+   *   「閲覧用 HTML」が右の列に出ていること(描けていることの証拠)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry-html"]'),
+    '右の列が描けていない(空振り)',
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry-markdown"]'),
+    '右の列に「Markdown で書き出す」が出ている',
+  ).toHaveCount(0);
+  const md = page.locator(
+    '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-markdown"]',
+  );
+  await expect(md, '右クリックに「Markdown で書き出す」が無い').toBeVisible();
+  expect(await md.textContent()).toContain('Markdown で書き出す');
+  const [mdDownload] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-markdown"]'),
+  ]);
+  const mdPath = await mdDownload.path();
+  expect(mdPath, 'file が落ちてきていない').not.toBeNull();
+  expect(readFileSync(mdPath!, 'utf-8'), '本文がそのまま入っていない').toBe('本文。');
+  expect(mdDownload.suggestedFilename(), '<題名>-<日付>.md で落ちていない').toMatch(/^handout-\d{8}\.md$/);
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

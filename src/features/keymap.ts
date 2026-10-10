@@ -697,6 +697,21 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: 'SRT 字幕 文字起こし 書き出し',
   },
   /**
+   * 🔴 **このノートを Markdown で書き出す**(#1440)。
+   *
+   * 🔑 本文をそのまま 1 つの .md にして落とす。入口は右クリックと「操作を探す」だけ(右の列には置かない)。
+   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)。
+   * ⚠ 実体は右クリックの `export-entry-markdown` と同じ(`services.exportEntryMarkdown`)── 口を 2 つ作らない。
+   */
+  {
+    id: 'export-note-markdown',
+    label: 'このノートを Markdown で書き出す',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートの本文を、そのまま .md ファイルで保存します。添付は入りません(バックアップなら入ります)',
+    alias: 'マークダウン md 書き出し エクスポート 保存',
+  },
+  /**
    * 🔴 **マニュアルを別のウィンドウで開く**(#1452 案 1。🟣 Gemini 提案「編集中にショートカットと記法を
    *   確かめたい」の核)。
    *

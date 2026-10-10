@@ -309,7 +309,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   押したボタン自身の属性(見せ方 / 行き先の日)を渡すだけ。`schedule-nav` と同じ仕分け)。
     // ⚠ 2026-10-10(#855 段 A-2): N +1(`schedule-week-pick`。「週」の曜日の見出し ── 行き先の日はボタン自身の属性で、押した所から他に何も要らない。
     //   `schedule-day-go` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 184 });
+    // ⚠ 2026-10-10(#1440): N +1(`export-entry-markdown`。右クリックの「Markdown で書き出す」── 押した行は `rowLidOrSelected` が決める。
+    //   `export-entry-html` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 185 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

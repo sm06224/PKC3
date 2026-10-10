@@ -178,6 +178,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry': 'arrow-out',
   // 🔑 全体の「閲覧用 HTML」(`export-html`)と**同じ図案** ── 同じ形の物である
   'export-entry-html': 'globe',
+  'export-entry-markdown': 'page',
   'show-history': 'clock',
   'delete-entry': 'trash',
   // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)

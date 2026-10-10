@@ -40,6 +40,7 @@ import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
+import { assetRefsIn } from '@features/asset/asset-ref-scan';
 
 export interface ExportDeps {
   source: ArchiveSource;
@@ -712,6 +713,53 @@ export async function exportEntryPptx(
   lid: string,
 ): Promise<boolean> {
   return exportEntryOffice(dispatcher, deps, lid, POWERPOINT);
+}
+
+/**
+ * 🔴 **このノートの本文を、そのまま 1 つの .md にして落とす**(#1440)。
+ *
+ * 🔑 **本文は 1 バイトも変えない** ── 方言の剥がしも frontmatter の付け足しも、`asset:` の書き換えも
+ *   しない(コレクションの `.md.zip` が添付を相対パスへ書き換えるのとは別の物。あちらは zip の中に
+ *   添付ごと入れるから書き換える。こちらは 1 file なので、書き換えると指す先が無い)。
+ * ⚠ 読みは `getBody` 1 本(`singleEntrySource` は履歴と添付まで集めるので重い ── 要るのは本文だけ)。
+ * ⚠ 題名と日付の規則は隣の Word / PowerPoint と同じ(`safeName` と `stamp`)── 規則を写さない。
+ * 🔴 **添付は入らない**ので、本文が添付を指していれば**数えて言う**(黙って落とさない ── #213 の裁定 A と
+ *   同じ向き)。⚠ 数えるのは**ノートが実際に指している添付**(`assetRefsIn`。GC・1 ノート書出しと同じ規則)。
+ *   同じ添付を 2 か所で指していても 1 件、添付の一覧に無い key(切れた参照)は数えない。
+ * @returns 書き出せたら true
+ */
+export async function exportEntryMarkdown(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  lid: string,
+): Promise<boolean> {
+  const fail = (msg: string): false => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
+    return false;
+  };
+  // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
+  try {
+    // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
+    await deps.settle();
+    const meta = (await deps.source.listEntryMetas()).find((m) => m.lid === lid);
+    if (!meta) return fail('書き出すノートが見つかりません');
+    const body = (await deps.source.getBody?.(lid)) ?? null;
+    if (body === null) return fail('書き出すノートの本文を読めませんでした');
+    const now = deps.now?.() ?? new Date();
+    deps.download(`${safeName(meta.title)}-${stamp(now)}.md`, new Blob([body], { type: 'text/markdown' }));
+    const keys = (await deps.source.listAssetMetas()).map((a) => a.key);
+    const n = assetRefsIn(body, keys).length;
+    const notes = n > 0 ? [`添付 ${n} 件は入っていません(バックアップなら入ります)`] : [];
+    deps.report(notes);
+    deps.notify?.(
+      notes.length > 0 ? `Markdown で書き出しました。${notes[0]!}` : 'Markdown で書き出しました',
+    );
+    return true;
+  } catch (e) {
+    return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Word / PowerPoint の**共通の道**(#187 段⑤)。 */

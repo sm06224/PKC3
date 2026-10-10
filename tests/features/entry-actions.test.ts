@@ -394,6 +394,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
       ['export-entry-html', '9250f3ab'],
+      // 🔴 本文そのままの .md(#1440)── 右クリックだけ(menuOnly)
+      ['export-entry-markdown', 'd97ee74b'],
       ['export-folder', '1e3dc65f'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '5424c220'],
