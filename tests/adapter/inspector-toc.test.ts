@@ -32,6 +32,22 @@ import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { extractHeadingsFromMarkdown } from '../../src/features/markdown/markdown-toc';
 
+/**
+ * 🔴 見出しの抽出の回数を数える(#1467 段 3-i)── 本文の字が同じ描き直しでは抽出しない、を pin する。
+ *   namespace の export は差し替えられないので module ごと包む(実体はそのまま呼ぶ)。
+ */
+const extractSpy = vi.fn();
+vi.mock('../../src/features/markdown/markdown-toc', async (orig) => {
+  const real = await orig<typeof import('../../src/features/markdown/markdown-toc')>();
+  return {
+    ...real,
+    extractHeadingsFromMarkdown: (...a: Parameters<typeof real.extractHeadingsFromMarkdown>) => {
+      extractSpy(...a);
+      return real.extractHeadingsFromMarkdown(...a);
+    },
+  };
+});
+
 function meta(lid: string): EntryMeta {
   return {
     lid,
@@ -122,6 +138,72 @@ describe('目次(#493)', () => {
   it('本文が読めていないときも出さない', () => {
     const { root } = setup(null);
     expect(tocRow(root).hidden).toBe(true);
+  });
+
+  /**
+   * 🔴 **本文の字が同じ描き直しでは、抽出も目次の DOM も触らない**(#1467 段 3-i)── この面は state が
+   *   動くたびに描くので、追記 1 回で 3 回来るうち本文が変わるのは 1 回。20,000 行では毎回 2,400 個の
+   *   `<div>` を挿していた。観測点: 抽出の回数 + 行の node の同一性(同じ node なら挿入は 0)。
+   */
+  it('🔴 本文が同じ描き直しでは見出しを抽出し直さず、目次の行も同じ node のまま', () => {
+    const { root, d } = setup(BODY);
+    const before = links(root);
+    expect(before, '前提が崩れている(目次が出ていない)').toHaveLength(4);
+    extractSpy.mockClear();
+    // 本文に触らない state の動き(更新日時の刻印 / 選択の変化)── openBody の器は作り直されても字は同じ
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'x' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    expect(extractSpy, '本文が同じなのに見出しを抽出し直した').not.toHaveBeenCalled();
+    const after = links(root);
+    expect(after.map((b, i) => b === before[i]), '本文が同じなのに目次の行を作り直した').toEqual([true, true, true, true]);
+  });
+
+  it('🔴 末尾に見出しを足す追記では、既存の行は同じ node のまま 1 行だけ増える', () => {
+    const { root, d } = setup(BODY);
+    const before = links(root);
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: `${BODY}\n# 第 3 章\nえ` });
+    const after = links(root);
+    expect(after.map((b) => b.textContent)).toEqual(['第 1 章', '節 A', '細目', '第 2 章', '第 3 章']);
+    expect(after.slice(0, 4).map((b, i) => b === before[i]), '末尾に足しただけなのに既存の行を作り直した').toEqual([true, true, true, true]);
+    expect(after[4]!.getAttribute('data-pkc-toc-slug')).toBe(extractHeadingsFromMarkdown(`${BODY}\n# 第 3 章\nえ`)[4]!.slug);
+  });
+
+  /** 🔴 同じ字の本文が別の器で届く(保存の ack)── 字が同じなら抽出しない(鍵は `openBody` の参照ではなく字)。 */
+  it('同じ字の本文が届き直しても(openBody の器は別)、見出しを抽出し直さない', () => {
+    const { root, d } = setup(BODY);
+    const before = links(root);
+    extractSpy.mockClear();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BODY });
+    expect(extractSpy, '字が同じなのに抽出し直した(鍵が器の参照になっている)').not.toHaveBeenCalled();
+    expect(links(root).map((b, i) => b === before[i])).toEqual([true, true, true, true]);
+  });
+
+  /**
+   * 🔴 **器を組み直したら目次の記憶を手放す**(レビューの指摘)── ノートにリンクが付くと形が変わって
+   *   `build()` が新しい空の `<dd>` を作る。記憶を持ったままだと「同じ本文」と読んで埋め直さず、
+   *   見出しが在るのに右の列の目次が空になる。
+   */
+  it('🔴 ノートにリンクが付いて器が組み直されても、目次は残る', () => {
+    const { root, d } = setup(BODY);
+    expect(links(root), '前提が崩れている').toHaveLength(4);
+    d.dispatch({ type: 'FILE_LINKED', lid: 'n1', name: 'memo.md' });
+    expect(links(root).map((b) => b.textContent), 'リンクが付いて器が組み直されたら目次が空になった').toEqual(['第 1 章', '節 A', '細目', '第 2 章']);
+  });
+
+  /** ⚠ 途中に見出しが入ると後続の slug / 深さ / 字がずれる ── 行を使い回しても、押す先は新しい綴りでなければならない。 */
+  it('🔴 途中に見出しを差し込むと、使い回した行の押す先・深さ・字が新しい列に揃う(余りは消える)', () => {
+    const { root, d } = setup(BODY);
+    const next = ['# 第 1 章', '本文', '## 新しい節', 'x', '## 節 A', 'あ', '# 第 2 章', 'う'].join('\n');
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: next });
+    const want = extractHeadingsFromMarkdown(next);
+    expect(links(root).map((b) => b.textContent)).toEqual(want.map((h) => h.text));
+    expect(links(root).map((b) => b.getAttribute('data-pkc-toc-slug'))).toEqual(want.map((h) => h.slug));
+    expect(links(root).map((b) => b.parentElement?.getAttribute('data-pkc-toc-level'))).toEqual(want.map((h) => String(h.level)));
+    // 使い回した行の説明文(title)も新しい見出しの字(前の見出しの字が残ると、読み上げが別の章を言う)
+    expect(links(root).map((b) => b.title.includes(b.textContent ?? '\u0000')), '使い回した行の説明文が前の見出しのまま').toEqual(want.map(() => true));
+    // 見出しが減った回は余りの行が残らない(4 → 4 なので別の本文で 2 行へ)
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '# 一\n## 二\n' });
+    expect(links(root).map((b) => b.textContent), '減った分の行が残っている').toEqual(['一', '二']);
   });
 
   /** ⚠ 直したら戻ること(状態が残らない)── 見出しを足せば出る。 */

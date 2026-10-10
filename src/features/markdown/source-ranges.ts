@@ -117,10 +117,42 @@ export function buildBlockPartition(
    * の中に集まる。だから最上位の範囲には現れない ── 何もしないと**その行は
    * どの塊にも属さず、永久に編集できない**(1 巡目はそうなっていた)。
    * 最上位のどの範囲にも入らない行を集めて、脚注の塊に持たせる。
+   *
+   * ⚡ O(ranges × spans) を ranges・spans それぞれの start 順による
+   * 2 本の添字の 1 走査(O(N log N + M log M))に最適化(#1467 段 2)。
    */
-  const leftover = ranges.filter(
-    (r) => !spans.some((sp) => r.start >= sp.start && r.start <= sp.end),
-  );
+  const sortedSpans = [...spans].sort((a, b) => a.start - b.start);
+  const mergedSpans: { start: number; end: number }[] = [];
+  for (const sp of sortedSpans) {
+    const last = mergedSpans[mergedSpans.length - 1];
+    if (!last || sp.start > last.end) {
+      mergedSpans.push({ start: sp.start, end: sp.end });
+    } else if (sp.end > last.end) {
+      last.end = sp.end;
+    }
+  }
+
+  const sortedRanges = ranges
+    .map((r, idx) => ({ r, idx }))
+    .sort((a, b) => a.r.start - b.r.start);
+
+  const leftoverIndices = new Set<number>();
+  let si = 0;
+  for (let ri = 0; ri < sortedRanges.length; ri++) {
+    const { r, idx } = sortedRanges[ri]!;
+    while (si < mergedSpans.length && mergedSpans[si]!.end < r.start) {
+      si++;
+    }
+    const inSpan =
+      si < mergedSpans.length &&
+      r.start >= mergedSpans[si]!.start &&
+      r.start <= mergedSpans[si]!.end;
+    if (!inSpan) {
+      leftoverIndices.add(idx);
+    }
+  }
+
+  const leftover = ranges.filter((_, idx) => leftoverIndices.has(idx));
   const footnoteStart = leftover.length > 0 ? Math.min(...leftover.map((r) => r.start)) : -1;
   const footnoteEnd = leftover.length > 0 ? Math.max(...leftover.map((r) => r.end)) : -1;
   const starts: number[] = [];
@@ -203,7 +235,7 @@ export function buildBlockPartition(
  * 範囲を持つ。集約しないと「範囲が 6 個余った」で必ず検証に落ちる。
  * ⚠ fence は token 自身が範囲を 1 個持つ(中は parse されない)ので集約不要。
  */
-function effectiveTopSpans(
+export function effectiveTopSpans(
   ranges: readonly SourceRange[],
   containers: readonly ContainerSpan[],
 ): { start: number; end: number }[] {

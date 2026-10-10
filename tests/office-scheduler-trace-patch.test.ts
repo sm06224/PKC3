@@ -152,7 +152,8 @@ describe('#117 の計装(scheduler)── 当て方', () => {
    * (1 つ外しても他が救って緑、を許さない)。⚠ 既定(計装を入れない回)でも落ちる:
    * 上流の変形は、計装を入れない焼きでも**先に**気づきたい。
    */
-  it('🔴 錨が 1 つでも無ければ落ちる(全数 ── 既定の回でも)', () => {
+  // ⚠ 錨全数のテストで並列負荷時に 5 秒を超えるため 20 秒に緩和(#1463)
+  it('🔴 錨が 1 つでも無ければ落ちる(全数 ── 既定の回でも)', { timeout: 20_000 }, () => {
     expect(PATCH.anchors.length).toBeGreaterThan(0);
     for (let i = 0; i < PATCH.anchors.length; i++) {
       for (const on of [false, true]) {

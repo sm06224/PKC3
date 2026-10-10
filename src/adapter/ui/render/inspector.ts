@@ -163,6 +163,13 @@ export class InspectorRenderer {
   private taskCount: { body: string; total: number; done: number } | null = null;
 
   /**
+   * 🔴 **目次の見出しの列**(#1467 段 3-i)── `imgCount` と同じ作り。本文の字を鍵に憶え、同じなら
+   * 抽出も目次の DOM も触らない。`body` が `null`(本文がまだ届いていない / 別のノート)の回も憶える
+   * (空の目次を毎回畳み直さない)。⚠ ノートを切り替えて器を組み直す(`build`)ときは手放す。
+   */
+  private toc: { body: string | null; headings: ReturnType<typeof extractHeadingsFromMarkdown> } | null = null;
+
+  /**
    * 🔴 **説明文の空の添付に出す「元の file 名」**(#1207 I4)。
    *
    * 名前は添付ノートの本文(frontmatter)にしか無く、**この面は同期に描く**ので、
@@ -345,30 +352,51 @@ export class InspectorRenderer {
     const tocBox = this.rows.get('inspector-toc');
     if (tocBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
-      const headings = body === null ? [] : extractHeadingsFromMarkdown(body);
-      tocBox.textContent = '';
-      // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)
-      const dt = tocBox.previousElementSibling;
-      const empty = headings.length === 0;
-      tocBox.hidden = empty;
-      if (dt instanceof HTMLElement) dt.hidden = empty;
-      if (!empty) {
-        for (const h of headings) {
-          const item = document.createElement('div');
-          item.setAttribute('data-pkc-field', 'inspector-toc-item');
+      /**
+       * 🔴 **本文の字が同じなら、見出しの抽出も目次の作り直しもしない**(#1467 段 3-i)── この面は
+       *   state が動くたびに描く(指紋を廃した作り)ので、追記 1 回で 3 回来るうち本文が変わるのは 1 回。
+       *   それでも毎回 `textContent = ''` → 見出しごとに `append` していたので、20,000 行のノートでは
+       *   追記 1 回に 2,400 個の `<div>` を挿していた(trace: StyleRecalc 2,556 のうち 2,418)。
+       *   鍵は `imgCount` / `taskCount` と同じ**本文の字そのもの**(`openBody` の器は作り直されても
+       *   `body` の文字列は同じ物が渡る)。
+       * 🔑 本文が変わった回も**丸ごと捨てない** ── 見出しの列を前と index で突き合わせ、同じ位置は
+       *   属性と字だけ直し(同じ値なら触らない)、足りない末尾を足し、余りを消す。追記で見出しが
+       *   1 つ増えた回は `<div>` 1 個の挿入で済む。⚠ 途中に見出しが入ると後続の slug がずれるので、
+       *   全属性を毎回 `setAttr` で比べる(押すと別の見出しへ飛ぶ、を作らない)。
+       */
+      if (this.toc === null || this.toc.body !== body) {
+        const headings = body === null ? [] : extractHeadingsFromMarkdown(body);
+        this.toc = { body, headings };
+        // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)
+        const dt = tocBox.previousElementSibling;
+        const empty = headings.length === 0;
+        if (tocBox.hidden !== empty) tocBox.hidden = empty;
+        if (dt instanceof HTMLElement && dt.hidden !== empty) dt.hidden = empty;
+        const items = tocBox.children;
+        for (let i = 0; i < headings.length; i++) {
+          const h = headings[i]!;
+          let item = items[i] as HTMLElement | undefined;
+          let go: HTMLButtonElement;
+          if (item === undefined) {
+            item = document.createElement('div');
+            item.setAttribute('data-pkc-field', 'inspector-toc-item');
+            go = document.createElement('button');
+            go.type = 'button';
+            go.setAttribute('data-pkc-action', 'toc-jump');
+            go.setAttribute('data-pkc-field', 'inspector-toc-link');
+            item.append(go);
+            tocBox.append(item);
+          } else {
+            go = item.firstElementChild as HTMLButtonElement;
+          }
           // ⚠ 深さは**属性**で出す(CSS が字下げする)── 空白を字で入れると
           //    読み上げがその空白を読む
-          item.setAttribute('data-pkc-toc-level', String(h.level));
-          const go = document.createElement('button');
-          go.type = 'button';
-          go.setAttribute('data-pkc-action', 'toc-jump');
-          go.setAttribute('data-pkc-toc-slug', h.slug);
-          go.setAttribute('data-pkc-field', 'inspector-toc-link');
-          go.title = `本文の「${h.text}」へ移動します`;
-          go.textContent = h.text;
-          item.append(go);
-          tocBox.append(item);
+          setAttr(item, 'data-pkc-toc-level', String(h.level));
+          setAttr(go, 'data-pkc-toc-slug', h.slug);
+          setAttr(go, 'title', `本文の「${h.text}」へ移動します`);
+          setText(go, h.text);
         }
+        while (items.length > headings.length) items[items.length - 1]!.remove();
       }
     }
     /**
@@ -1141,6 +1169,7 @@ export class InspectorRenderer {
     this.buttons = new Map();
     this.relAdd = null;
     this.editingNote = null;
+    this.toc = null; // 器を組み直したら目次の記憶も手放す(新しい `<dd>` は空なので、同じ本文でも埋め直す)
 
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'pane-title');

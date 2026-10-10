@@ -10,9 +10,9 @@ description: サブエージェントを大量に並列で投げて、突き合�
 - 🔴 **割り方を先に決める** ── 観点で割る / 面で割る / 案で割る / 敵対で割る。
   「調べて」を N 本投げるのは物量ではなく**同じ見落としを N 回すること**
 - 🔴 **書くエージェントは `isolation: "worktree"`**。read-only なら同居してよい。
-  ⚠ **この箱では worktree の起動に失敗する**(2026-08-14 実測)── そのときは
-  **書けるエージェントを起動しない**。read-only の型(`pkc3-surveyor`)に patch を
-  書かせ、依頼者が当てる(`.claude/skills/subagent-scale/SKILL.md` §1)。
+  ⚠ `no WorktreeCreate hooks are configured` で落ちたら、**まず `pwd`**(2026-09-16 訂正)──
+  cwd が repo の外だと同じ文面で落ちる。`cd <作業ツリー>` で通る。本当に起動できないときだけ
+  read-only の型(`pkc3-surveyor`)に patch を書かせ、依頼者が当てる(`subagent-scale/SKILL.md`「隔離」)。
   🔑 守るのは **tools の一覧**であって、プロンプトの文言ではない
 - **プロンプトに 5 つ入れる**:範囲(base の sha)/ 済んでいること / read-only の明示 /
   CONFIRMED と未検証の区別 / 「無ければ無いと言え」

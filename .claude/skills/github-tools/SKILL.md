@@ -1,9 +1,11 @@
 ---
 name: github-tools
-description: この箱から GitHub を叩くときの道具立てと罠。api.github.com への直 curl は塞がれ `gh` CLI も無いので MCP の github tool を使う。issue を閉じるときに本文を消す / 監視ループが想定外の応答に沈黙する、という消えた物が戻らない型の事故がある。「issue にコメント」「issue を閉じる」「run を引く」「CI を見る」「PR を読む」という文脈で必ず使う。
+description: この箱から GitHub を叩くときの道具立てと罠。api.github.com への直 curl は塞がれ `gh` CLI は token が無効なので MCP の github tool を使う。issue を閉じるときに本文を消す / 監視ループが想定外の応答に沈黙する、という消えた物が戻らない型の事故がある。「issue にコメント」「issue を閉じる」「run を引く」「CI を見る」「PR を読む」という文脈で必ず使う。
 ---
 
 # GitHub を道具として叩く(PKC3)
+
+> 事故の記録(issue と台帳の腐り / 導線の書き順。日付・issue つき)は `reference/ledger-rot.md`。ここは手順。
 
 > ⚠ **これは PR の着地とは別の主題である**(2026-09-05 に `pr-landing` から切り出した ──
 > 1 枚 1 主題)。ここに在る罠は**起票・棚卸し・調査**でも同じように踏む。
@@ -13,7 +15,8 @@ description: この箱から GitHub を叩くときの道具立てと罠。api.g
 
 - 🚫 **`https://api.github.com` への直 curl は塞がれている** ── `GH_TOKEN` は env に
   在るのに、返るのは `{"message": "GitHub access is not enabled for this session. ..."}`
-- 🚫 **`gh` CLI は無い**(2026-09-05 に再確認: `gh: command not found`)
+- 🚫 **`gh` CLI は在るが使えない**(2026-10-10 実測 `gh auth status`: `The token in GH_TOKEN is invalid`。
+  2026-09-05 は binary 自体が無かった ── 箱が変わると状態も変わるので、使う前に 1 回 `gh auth status`)
 - 🟢 **MCP の github tool を使う**(`actions_list` / `pull_request_read` /
   `issue_write` / `add_issue_comment` / `list_workflow_jobs` ...)
 

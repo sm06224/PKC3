@@ -275,6 +275,45 @@ describe('🔴 競合ロック(P8 段⑧、user 指示 2026-08-03)', () => {
     expect(s.d.getState().phase).toBe('editing');
   });
 
+  /**
+   * 🔴 **祖先の印は、`hidden` を書くのと同じ場所で立てる**(#1467 段 3-h)── `app.css` は
+   *   `[data-pkc-region='center'][data-pkc-append-hidden]`(掴む帯を消す)と
+   *   `[data-pkc-region='append'][data-pkc-lock-open]`(畳んでいても出口を出す)を読む。
+   *   以前は `:has([data-pkc-region='append'][hidden])` / `:has([data-pkc-field='append-lock']:not([hidden]))`
+   *   で読んでいたが、MAIN を `:has()` の主語にすると本文の下に何かが挿さるたびに `p` 3,654 個が
+   *   当て直されていた。印が `hidden` と食い違うと、帯が消えない / 出口が出ない、が画面で起きる。
+   */
+  it('🔴 追記欄の hidden と帯の hidden は、MAIN と器の印に同じ場所で写る(:has を使わない)', async () => {
+    const s = setup([meta('log', 'textlog'), meta('att', 'attachment')], { log: '元', att: '' });
+    const center = s.root.querySelector<HTMLElement>('[data-pkc-region="center"]')!;
+    const region = s.root.querySelector<HTMLElement>('[data-pkc-region="append"]')!;
+    // 何も選んでいない = 追記欄は隠れている → MAIN に印、出口の印は無い
+    expect(region.hidden, '前提が崩れている(最初から追記欄が出ている)').toBe(true);
+    expect(center.hasAttribute('data-pkc-append-hidden'), '隠れているのに MAIN に印が無い(帯が残る)').toBe(true);
+    expect(region.hasAttribute('data-pkc-lock-open')).toBe(false);
+    // ノートを選ぶ → 欄が出る → MAIN の印が消える
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+    await tick();
+    expect(region.hidden).toBe(false);
+    expect(center.hasAttribute('data-pkc-append-hidden'), '出ているのに MAIN の印が残る(帯が消えたまま)').toBe(false);
+    expect(region.hasAttribute('data-pkc-lock-open'), '帯が出ていないのに出口の印が立つ').toBe(false);
+    // 編集に入る → 帯が出る → 器に出口の印
+    s.q('[data-pkc-action="start-edit"]')!.click();
+    await tick();
+    expect(s.q('[data-pkc-field="append-lock"]')!.hidden, '前提が崩れている(帯が出ていない)').toBe(false);
+    expect(region.hasAttribute('data-pkc-lock-open'), '帯が出ているのに出口の印が無い(畳んだ人に出口が出ない)').toBe(true);
+    // 編集をやめる → 帯が消える → 印も消える
+    s.q('[data-pkc-action="cancel-edit"]')!.click();
+    await tick();
+    expect(s.q('[data-pkc-field="append-lock"]')!.hidden).toBe(true);
+    expect(region.hasAttribute('data-pkc-lock-open'), '帯が消えたのに出口の印が残る').toBe(false);
+    // 追記できない種類を選ぶ → 欄が隠れる → MAIN に印が戻る
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'att' });
+    await tick();
+    expect(region.hidden, '前提が崩れている(添付で追記欄が出ている)').toBe(true);
+    expect(center.hasAttribute('data-pkc-append-hidden'), '隠れたのに MAIN の印が戻らない').toBe(true);
+  });
+
   it('🔴 編集中は追記できない(理由と出口が画面に出る)', async () => {
     const s = setup([meta('log', 'textlog')], { log: '元' });
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });

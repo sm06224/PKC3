@@ -90,7 +90,7 @@ git switch -                                                  # 指定 branch �
 
 🔴 **worktree で走るエージェントはとくに危ない** ── cwd が**依頼者の本体ツリー**へ
 戻るので、そこで書き換えると**他人の作業を壊す**。手順は
-`.claude/skills/subagent-scale/SKILL.md` §1。
+`.claude/skills/subagent-scale/SKILL.md`「隔離」(事故の記録は `.claude/skills/subagent-scale/reference/worktree-incidents.md`)。
 
 🔴 **戻った cwd は、worktree 隔離そのものを起動不能にする**(2026-09-16 実測)。
 cwd が `/home/user` のまま `isolation: "worktree"` を投げると
@@ -308,7 +308,7 @@ until grep -qE "Tests  " .../scratchpad/full3.log; do sleep 5; done
 ⚠ 上は「前のセッションの残骸」だが、**同じセッションの 2 時間半前の走り**でも同じである ──
 `g-full.log` という名前を使い回し、**05:52 に走らせた**つもりで **03:26 の中身**を読んだ。
 🔴 **そこには「590 passed / 10853」と書いてあり、いまの木では通らない古い件数だった**
-(いまは 591 / 10893)── ⚠ **件数が「減った」形**に見えるので、CLAUDE.md §9 の
+(その日の木では 591 / 10893 ── 件数は毎日動くので、見るのは「減ったか」だけ)── ⚠ **件数が「減った」形**に見えるので、CLAUDE.md §9 の
 「検査が消えた」と読み違える向きに効く。
 
 🔑 気づけたのは `ls -la --time-style=full-iso` の**1 回**である。

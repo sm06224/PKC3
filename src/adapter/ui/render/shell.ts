@@ -271,6 +271,16 @@ export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void
   }
 }
 
+/**
+ * root を**素の字だけ**に戻す(別のタブ待ち / boot 失敗)。
+ * ⚠ `buildShell` が立てた印 `data-pkc-shell` を外す ── 外さないと、余白 0 の規則が残って
+ *   「起動に失敗しました…」の字が画面の端に貼り付く(`app.css` の root の余白は印で決まる。#1467 段 3-h)。
+ */
+export function showRootText(root: HTMLElement, text: string): void {
+  root.removeAttribute('data-pkc-shell');
+  root.textContent = text;
+}
+
 export function buildShell(root: HTMLElement): ShellRegions {
   root.textContent = '';
   const shell = document.createElement('div');
@@ -863,6 +873,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const append = document.createElement('div');
   append.setAttribute('data-pkc-region', 'append');
   append.hidden = true;
+  // 🔑 追記欄が隠れている印は MAIN に立てる(`app.css` の掴む帯の規則が読む。`:has()` を使わない ── #1467 段 3-h)
+  center.setAttribute('data-pkc-append-hidden', '');
   /**
    * 🔴 **追記欄の掴む帯**(#497)。user 指示 2026-08-27:「**追記メインで使う場合は
    * わくを大きくしたいとか、閲覧メインで使う時は消したい**」。
@@ -1204,6 +1216,8 @@ export function buildShell(root: HTMLElement): ShellRegions {
   }
   root.append(skip);
   root.append(shell);
+  // 🔑 shell が入った印(`app.css` の root の余白の規則が読む。`:has([data-pkc-region='shell'])` を使わない ── #1467 段 3-h)
+  root.setAttribute('data-pkc-shell', '');
   return {
     browseHost,
     sidebar,
