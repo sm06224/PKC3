@@ -230,6 +230,24 @@ describe('③ 黙って終わらない', () => {
     expect(h2.deps.transcribe, '小さい声を切った(閾値が高すぎる)').toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * 🔴 **小さな雑音 + 同じ語のくり返し は出力ごと捨てる**(#1446)。対照群 = 同じ出力でも普通の声(RMS 1e-2 以上)なら足す。
+   */
+  it('🔴 小さな雑音に「you you you …」が出たら、足さずに言う / 普通の声の同じ出力は足す', async () => {
+    const noise = new Float32Array(16_000).fill(3.9e-3); // −48 dBFS(ほぼ無音の足切りは越える)
+    const repeat = vi.fn(async (): Promise<AsrJobResult> => ({ text: ' you you you you you ', loadMs: 0, runMs: 0 }));
+    const h = harness({ decode: vi.fn(async () => noise), transcribe: repeat });
+    await h.tr.run('a');
+    expect(h.appends, '幻覚を足した').toEqual([]);
+    expect(h.notes.at(-1)).toBe(
+      '「録音-2026-09-12-143000.webm」からは字になりませんでした(小さな雑音だけで、同じ語のくり返ししか聞き取れませんでした)。ノートは変えていません',
+    );
+    const voice = new Float32Array(16_000).fill(0.05);
+    const h2 = harness({ decode: vi.fn(async () => voice), transcribe: repeat });
+    await h2.tr.run('a');
+    expect(h2.appends.map((a) => a.text), '普通の声のくり返しまで捨てた').toEqual(['you you you you you']);
+  });
+
   it('🔴 字にならなかったら、ノートを変えずに言う(空の見出しを足さない)', async () => {
     const h = harness({ transcribe: vi.fn(async () => ({ text: '  \n ', loadMs: 0, runMs: 0 })) });
     await h.tr.run('a');

@@ -29,13 +29,14 @@ import {
 import {
   ASR_SECTION_LABEL,
   STORAGE_SECTION_LABEL,
+  isQuietRepetition,
   transcriptHeading,
   transcriptLines,
   transcriptText,
 } from '@features/asr/asr-text';
 import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
-import { isNearSilent } from '@features/asr/asr-pcm';
+import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
 import { createWritableQueue } from './writable-queue';
 
 /**
@@ -184,6 +185,14 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         const text = transcriptLines(out.segments) ?? transcriptText(out.text);
         if (text === null) {
           say(`「${item.name}」からは字になりませんでした(声が小さい・無音かもしれません)。ノートは変えていません`);
+          return;
+        }
+        /**
+         * 🔴 **小さな雑音に出る同じ語のくり返しは、出力ごと捨てる**(#1446)── 入力が小さく、かつ少ない語彙の
+         *   くり返しだけなら幻覚(`you you you`)。⚠ 直さず全部捨てる。普通の声(RMS 1e-2 以上)は触らない。
+         */
+        if (isQuietRepetition(out.text, pcmRms(pcm))) {
+          say(`「${item.name}」からは字になりませんでした(小さな雑音だけで、同じ語のくり返ししか聞き取れませんでした)。ノートは変えていません`);
           return;
         }
         const took = elapsedText(Date.now() - startedAt);
