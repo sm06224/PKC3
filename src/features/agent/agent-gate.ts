@@ -6,7 +6,7 @@
  * | 範囲 | できること | 渡るもの |
  * |---|---|---|
  * | `read` | 探す・読む・タグの一覧 | **本文**(見つかったノートの本文が AI の提供元へ送られる) |
- * | `write` | ノートを作る | 何も出ない(作るだけ) |
+ * | `write` | ノートを作る・末尾に書き足す(#1407 段④) | 何も出ない(書くだけ) |
  *
  * **既定はどちらも許可なし。** 道具そのものは flag がオンなら登録するが、`execute` の先頭で
  * ここを通り、許可が無ければ**アプリのダイアログで聞く**。
@@ -34,7 +34,7 @@ export type AgentAnswer = 'once' | 'always' | 'deny';
 /** 設定の一覧に出す範囲の名前。 */
 export const AGENT_SCOPE_LABEL: Readonly<Record<AgentScope, string>> = {
   read: 'ノートを探す・読む',
-  write: 'ノートを作る',
+  write: 'ノートを作る・書き足す',
 };
 
 /**
@@ -46,10 +46,11 @@ export type AgentTarget =
   | { action: 'search'; query: string }
   | { action: 'read'; title: string }
   | { action: 'tags' }
-  | { action: 'create'; title: string };
+  | { action: 'create'; title: string }
+  | { action: 'append'; title: string };
 
 export function scopeOf(target: AgentTarget): AgentScope {
-  return target.action === 'create' ? 'write' : 'read';
+  return target.action === 'create' || target.action === 'append' ? 'write' : 'read';
 }
 
 /** ダイアログの題名の中に入れる字の上限。 */
@@ -89,6 +90,8 @@ export function agentAskNote(target: AgentTarget): string {
       return 'ブラウザの AI が、ノートを探して読もうとしています。許すと、見つかったノートの本文が AI の提供元へ送られます。';
     case 'create':
       return `ブラウザの AI が、『${agentLabel(target.title)}』というノートを作ろうとしています。`;
+    case 'append':
+      return `ブラウザの AI が、『${agentLabel(target.title)}』の末尾に書き足そうとしています。`;
   }
 }
 

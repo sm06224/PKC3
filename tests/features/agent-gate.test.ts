@@ -45,6 +45,8 @@ describe('scopeOf', () => {
     expect(scopeOf({ action: 'search', query: 'x' })).toBe('read');
     expect(scopeOf({ action: 'read', title: 'x' })).toBe('read');
     expect(scopeOf({ action: 'tags' })).toBe('read');
+    // 🔴 書き足すも write(read だけ許した AI に、既存のノートを書き換えさせない)(#1407 段④)
+    expect(scopeOf({ action: 'append', title: 'x' })).toBe('write');
   });
 });
 
@@ -296,6 +298,12 @@ describe('ダイアログの 1 行目 ── 何を', () => {
   it('作る: 題名を出す。本文が送られるとは言わない(嘘を言わない)', () => {
     const note = agentAskNote({ action: 'create', title: 'AI のメモ' });
     expect(note).toBe('ブラウザの AI が、『AI のメモ』というノートを作ろうとしています。');
+    expect(note).not.toContain('送られ');
+  });
+
+  it('書き足す: 題名を出す。本文が送られるとは言わない(#1407 段④)', () => {
+    const note = agentAskNote({ action: 'append', title: '会議メモ' });
+    expect(note).toBe('ブラウザの AI が、『会議メモ』の末尾に書き足そうとしています。');
     expect(note).not.toContain('送られ');
   });
 

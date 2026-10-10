@@ -92,7 +92,8 @@ import { createWebMcpRegistration } from '@adapter/transport/webmcp';
 import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
 import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
 import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
-import { buildAgentTools } from '@adapter/transport/webmcp-tools';
+import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transport/webmcp-tools';
+import { appendAndSettle } from '@adapter/state/append-settle';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
@@ -1948,6 +1949,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           cid,
         }),
         createEntry: createEntryFromOutside,
+        // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
+        append: (id, text) => appendAndSettle(dispatcher, id, text, AGENT_APPEND_SETTLE_TIMEOUT_MS),
         gate: agentGate,
       }),
   });

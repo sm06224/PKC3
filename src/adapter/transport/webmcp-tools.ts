@@ -1,5 +1,5 @@
 /**
- * ブラウザの AI(WebMCP)に渡す**道具 4 本**の定義(#1407 段①)。
+ * ブラウザの AI(WebMCP)に渡す**道具 5 本**の定義(#1407 段① / 段④)。
  *
  * | 道具 | 範囲 | できること |
  * |---|---|---|
@@ -7,6 +7,7 @@
  * | `pkc_read_note` | read | ID で 1 件読む |
  * | `pkc_list_tags` | read | タグの一覧(件数つき) |
  * | `pkc_create_note` | write | ノートを 1 件作る |
+ * | `pkc_append_note` | write | ノートの末尾に字を書き足す(#1407 段④) |
  *
  * ## 守っていること
  *
@@ -24,6 +25,9 @@
  *    超えたら断る(許可を聞く前に ── 暴走した AI にダイアログを出し続けさせない)。
  * 6. 返す本文には上限を置く(`MAX_BODY`。作る側と同じ桁)。切ったら `bodyTruncated: true` と言う
  *    (黙って切ると、AI は「これが全文」と読む)。
+ * 7. 🔴 **書き足す道は既存の追記(`APPEND_TO_ENTRY`)と同じ 1 本**(`appendAndSettle` ── PDF の
+ *    「ノートへ引く」と同じ口)。「書き足しました」は **disk に着いてから**返す。編集中などで
+ *    断られたら、その理由を返す(AI が「書いた」と user に言ってしまわない)。
  *
  * ⚠ 画面に出る字(説明文・断り文)は `ui-terms` の門を通る。
  */
@@ -36,6 +40,7 @@ import { MAX_BODY, parseCreateEntryParams, type CreateEntryInput } from './creat
 import { AGENT_ORIGIN_LABEL } from './outside-create';
 import type { Via } from './message-bridge';
 import { MAX_PER_MINUTE } from './protocol';
+import type { AppendOutcome } from '@adapter/state/append-settle';
 
 /** 探す件数の既定と上限。 */
 export const SEARCH_DEFAULT_LIMIT = 10;
@@ -71,6 +76,11 @@ export interface AgentToolDeps {
     origin: string,
     via: Via,
   ) => Promise<string | null> | string | null;
+  /**
+   * 🔴 ノートの末尾へ書き足し、disk に着くまで待つ(`appendAndSettle` ── PDF の引用と同じ 1 本)。
+   * ⚠ ID は `meta` を通った物だけが来る(system 領域へは書かせない)。
+   */
+  append: (id: string, text: string) => Promise<AppendOutcome>;
   /** 許可の門(`createAgentGate`)。`signal` は AI が依頼を取り消したとき abort される。 */
   gate: AgentGate;
   /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
@@ -79,6 +89,19 @@ export interface AgentToolDeps {
 
 /** 回数の上限に当たったときの断り。 */
 export const AGENT_RATE_LIMIT_TEXT = '呼び出しが多すぎます。1 分ほど待ってください';
+
+/**
+ * 書き足しの結末を待つ上限(ms)。PDF の引用(`QUOTE_SETTLE_TIMEOUT_MS`)と同じ桁 ──
+ * ふつうは 1 秒かからない(待つのは保存の往復だけ)。
+ */
+export const AGENT_APPEND_SETTLE_TIMEOUT_MS = 8000;
+
+/** 書き足しが着いたか分からないときの断り(`pkc_append_note`)。⚠「書けなかった」とは言い切らない。 */
+export const AGENT_APPEND_TIMEOUT_TEXT =
+  '書き足せたか確かめられませんでした。同じ字をもう一度送らず、ユーザーにノートを確かめてもらってください';
+
+/** 書き足せなかったときの断り(reducer / 保存が理由を言わなかった回)。 */
+export const AGENT_APPEND_FAILED_TEXT = 'いま書き足せませんでした。PKC3 で編集中の可能性があります';
 
 /** 作れなかったときの断り(`pkc_create_note`)。 */
 export const AGENT_CREATE_FAILED_TEXT = 'いま作れませんでした。PKC3 で編集中の可能性があります';
@@ -113,7 +136,7 @@ function noteOf(id: string, meta: AgentMeta, body: string): Record<string, unkno
 }
 
 export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
-  /** 1 分の窓で数える(4 本まとめて 1 つ ── 呼び手は AI 1 つなので origin ごとには分けない)。 */
+  /** 1 分の窓で数える(5 本まとめて 1 つ ── 呼び手は AI 1 つなので origin ごとには分けない)。 */
   const clock = deps.now ?? Date.now;
   let windowStart = 0;
   let count = 0;
@@ -255,5 +278,46 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
     },
   };
 
-  return [search, read, tags, create];
+  const append: ModelContextTool = {
+    name: 'pkc_append_note',
+    title: 'ノートに書き足す',
+    description:
+      'ID を指定して、PKC3 のノートの末尾に字(Markdown)を書き足します。既にあるノートに続きを残すときに使います。本文の途中や既存の字は変えません。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ノートの ID(pkc_search_notes などで分かる)' },
+        text: { type: 'string', description: '書き足す字(Markdown)' },
+      },
+      required: ['id', 'text'],
+    },
+    annotations: { consequentialHint: true },
+    execute: async (raw, options) => {
+      if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
+      const input = asRecord(raw);
+      const id = typeof input.id === 'string' ? input.id : '';
+      if (id === '') return fail('id は空でない文字列である必要があります');
+      if (typeof input.text !== 'string' || input.text.trim() === '') {
+        return fail('text は空でない文字列である必要があります');
+      }
+      // ⚠ 上限は作る側と同じ桁(1 回に書き足せる量)
+      if (input.text.length > MAX_BODY) {
+        return fail(`text が長すぎます(上限 ${String(MAX_BODY)} 字)`);
+      }
+      const meta = deps.meta(id);
+      // ⚠ 見取りに無い ID へは書かせない(system 領域のノートを、ID を直に渡して書き換える道を塞ぐ)。
+      //   ⚠ 許可を聞く前に断る ── 書けないノートの題名をダイアログに出さない
+      if (meta === undefined) return fail('そのノートは見つかりません');
+      if (!(await deps.gate({ action: 'append', title: meta.title }, options.signal))) {
+        return fail(AGENT_DENIED_TEXT);
+      }
+      const r = await deps.append(id, input.text);
+      // 🔴 書けなかったときに成功を返さない(AI が「書き足した」と user に言ってしまう)
+      if (r.ok) return ok({ id, title: meta.title });
+      if (r.reason === 'timeout') return fail(AGENT_APPEND_TIMEOUT_TEXT);
+      return fail(r.error ?? AGENT_APPEND_FAILED_TEXT);
+    },
+  };
+
+  return [search, read, tags, create, append];
 }
