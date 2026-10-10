@@ -218,8 +218,13 @@ export function hydrateDiagrams(
    * 焼き直しの世代(P8 段⑰。レビュー H-8 / M)。
    * 🔴 配色を続けて変えると、**最後に解決した**古い配色の絵が残る ── 焼くのは
    * 非同期なので、後から始まった方が先に終わりうる。世代が古い結果は捨てる。
+   * 🔴 **世代は器ごとに持つ**(#1467 のレビューで判明)。全体で 1 つにしていた頃は、
+   *   器 A だけ焼き直すときにも世代を上げたので、**別の幅の器 B が正しい条件で焼いている最中の結果まで捨てていた** ──
+   *   B は「いま焼いている」控えが消え、`done` にも入っているので、次の引き金(配色・幅・dpr の変化)まで原文のまま残る。
    */
-  let gen = 0;
+  // ⚠ WeakMap ── 外れた器の控えを抱えない(`prune` で消すと、付け直された器の世代が 0 へ戻って古い結果が通る)
+  const genOf = new WeakMap<HTMLElement, number>();
+  const genAt = (host: HTMLElement): number => genOf.get(host) ?? 0;
 
   /**
    * 🔴 **差し替えは溜めて、次のコマで 1 回にまとめて当てる**(#1467)。
@@ -276,7 +281,7 @@ export function hydrateDiagrams(
     if (!force && done.has(p.host)) return;
     done.add(p.host);
     started.add(p.host);
-    const at = gen;
+    const at = genAt(p.host);
     let currentKey = '';
     try {
       const key = {
@@ -293,7 +298,7 @@ export function hydrateDiagrams(
       await commit(() => {
         // ⚠ 焼いている間(と、溜めている間)に配色が変わった / 器が外れたなら**載せない**
         //    (載せると古い配色の絵が最後に勝つ)
-        if (disposed || at !== gen || !p.host.isConnected) return;
+        if (disposed || at !== genAt(p.host) || !p.host.isConnected) return;
         const url = URL.createObjectURL(raster.png);
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', kind.imgField);
@@ -397,7 +402,6 @@ export function hydrateDiagrams(
     const theme = themeOf();
     const palette = readPalette();
     const dpr = window.devicePixelRatio || 1;
-    let bumped = false;
     // ⚠ **焼き始めた器**を対象にする ── 焼き終わったもの(`urlOf`)だけだと、
     //    ちょうど焼いている最中の 1 枚が古い条件のまま残る
     for (const host of started) {
@@ -417,13 +421,9 @@ export function hydrateDiagrams(
         continue;
       }
       deferred.delete(host);
-      // ⚠ 飛んでいる焼きの結果を捨てる(古い条件を最後に勝たせない)。
-      //    ⚠ **必要な器が 1 つでもあったときだけ**上げる ── 無条件に上げると、
-      //    何も変わっていない resize の通知だけで進行中の焼きが捨てられる
-      if (!bumped) {
-        gen += 1;
-        bumped = true;
-      }
+      // ⚠ **この器の**飛んでいる焼きの結果だけを捨てる(古い条件を最後に勝たせない)。
+      //    ⚠ 他の器の世代は上げない ── 上げると、条件の合っている焼きまで捨てる(上の `genOf`)
+      genOf.set(host, genAt(host) + 1);
       void paint({ host, source }, true);
     }
   };
