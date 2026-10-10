@@ -617,6 +617,10 @@ export function connectStoreEffects(
         source: DuckDbReadableGuestSource;
         readBytes: () => Promise<Uint8Array | null>;
       }[];
+      /**
+       * 🔴 器が表を読み込み始めた合図(#682)。⚠ 付くのは**構造をノートへ書く回**だけ(つながり図は走っている表示が無いので付けない)。
+       */
+      onLoad?: () => void;
     }) => Promise<{
       columns: SchemaGridView;
       fks: SchemaGridView;
@@ -684,7 +688,7 @@ export function connectStoreEffects(
     guest?: boolean;
     duck?: { lid: string; name: string };
     duckExtra?: readonly { lid: string; name: string }[];
-  }): (() => Promise<{
+  }, onLoad?: () => void): (() => Promise<{
     columns: SchemaGridView;
     fks: SchemaGridView;
     counts: SchemaGridView | null;
@@ -698,7 +702,7 @@ export function connectStoreEffects(
       if (schema === undefined || inputs === null) return null;
       // 🔴 本文の csv(`csv_tables`)は **この PKC の sqlite にしか無い** ── DuckDB の器の話には出ない
       return async () => {
-        const got = await schema({ sources: inputs });
+        const got = await schema({ sources: inputs, ...(onLoad === undefined ? {} : { onLoad }) });
         return { columns: got.columns, fks: got.fks, counts: got.counts, csv: null, copy: got.copy ?? EMPTY_DUCK_COPY };
       };
     }
@@ -1226,7 +1230,14 @@ export function connectStoreEffects(
        */
       case 'REQUEST_SQL_SCHEMA': {
         const { where, lid, relationId } = ev;
-        const grids = schemaGridsFor(ev);
+        /**
+         * 🔴 構造をノートへ書く回も、器が表を読み込み始めたら画面で言う(#682)。
+         * ⚠ この回は `runToken` を進めない(`SQL_SCHEMA_TO_NOTE`)── 合図の札は**いまの `runToken`**を読む。
+         */
+        const grids = schemaGridsFor(ev, () => {
+          if (disposed) return;
+          dispatcher.dispatch({ type: 'SQL_DUCK_LOADING', token: dispatcher.getState().sqlPage.runToken });
+        });
         if (grids === null) {
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',

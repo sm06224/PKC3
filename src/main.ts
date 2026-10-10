@@ -4818,7 +4818,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   重ねる)は `duckdb-runner.ts` と `duckdb-schema.ts` が持つ ── この file は繋ぐだけ
      *   (どの test からも実行されない ── CLAUDE.md §2)。上の `runDuckDbSql` と**同じ器**。
      */
-    schemaDuckDb: (input) => duckDbRunner.schema(input.sources),
+    schemaDuckDb: (input) => duckDbRunner.schema(input.sources, input.onLoad),
   });
   /**
    * 🔴 **索引の片づけを、書込が落ち着いたときに自動で打つ**(#999 段③。Gemini 裁定 A)。

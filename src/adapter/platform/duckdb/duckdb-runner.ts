@@ -469,18 +469,13 @@ export class DuckDbRunner {
   ): {
     key: string;
     load: (h: DuckDbHandle) => Promise<void>;
+    onLoad?: () => void;
   } {
     return {
       key: sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
-      load: (h) => {
-        // 🔴 読み込みに入る合図は `load` の頭で 1 度だけ(`DuckDbLease` が必要なときにだけ呼ぶ)
-        try {
-          onLoad?.();
-        } catch {
-          // 合図の失敗で、引く回を落とさない
-        }
-        return this.load(h, sources);
-      },
+      load: (h) => this.load(h, sources),
+      // 🔴 合図は lease が出す(器を起こす前に、読み込む回にだけ)── ここで `load` の頭に置くと、いちばん長い待ち(器を起こす所)の後になる
+      ...(onLoad === undefined ? {} : { onLoad }),
     };
   }
 
@@ -493,11 +488,11 @@ export class DuckDbRunner {
    *   ことになるが、行を数えるのに必要で、その後の SQL は同じ器をそのまま使える。
    * ⚠ 行数が採れなくても**構造は返す**(`counts: null`)。他の落ち方(器を起こせない等)は投げる。
    */
-  schema(sources: readonly DuckDbInputSource[]): Promise<DuckDbSchemaResult> {
+  schema(sources: readonly DuckDbInputSource[], onLoad?: () => void): Promise<DuckDbSchemaResult> {
     return this.serial(async () => {
       this.dropStaleRefused();
       if (sources.length === 0) throw new Error('調べる対象がありません');
-      const data = this.dataOf(sources);
+      const data = this.dataOf(sources, onLoad);
       const ask = async (sql: string): Promise<Grid> => {
         const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, loadMaxMs: DUCKDB_LOAD_MAX_MS, data });
         return duckDbTable(raw);

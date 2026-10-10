@@ -230,6 +230,15 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     expect(onLoad, '相手が替わって読み込み直す回で呼んでいない').toHaveBeenCalledTimes(2);
   });
 
+  it('🔴 #682:構造を採る回(schema)も、読み込む回にだけ合図する', async () => {
+    const { runner, readBytes } = make({ answer: { columns: ['n'], types: ['Int32'], rows: [[1]] } });
+    const onLoad = vi.fn();
+    await runner.schema([{ source: SRC, readBytes }], onLoad).catch(() => undefined);
+    expect(onLoad, '構造の回で呼んでいない').toHaveBeenCalledTimes(1);
+    await runner.schema([{ source: SRC, readBytes }], onLoad).catch(() => undefined);
+    expect(onLoad, '読み込み済みの 2 回目で呼んでいる').toHaveBeenCalledTimes(1);
+  });
+
   it('⚠ #682:合図は表を写す前に呼ぶ(写している最中に出すため)/ 合図が落ちても引ける', async () => {
     const { runner, made, readBytes } = make();
     let seenSteps = -1;
