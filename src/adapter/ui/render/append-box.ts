@@ -201,6 +201,10 @@ export class AppendBoxRenderer {
    *   ① 境目の帯で決めた高さ(#497。`shell` の `--pkc-pane-append`)
    *   ② 欄の角を掴んで引いた高さ(ブラウザが `style.height` に書く)
    * ⚠ どちらも user の決めた高さなので、自動で変えない。
+   * 🔑 `field-sizing: content` が使えるブラウザでは、明示の `height`(CSS の変数 / 掴んだ inline)が
+   *   もともと勝つので、この門が守るのは **`rows` を書いて合わせる経路**(使えないブラウザ)である。
+   *   ⚠ そちらは明示の高さが見た目で勝っていても `rows` だけは書き換わるので、
+   *   帯の解除や掴み直しのときに食い違いが出ないよう、手で決めている間は書かない。
    */
   private isHandSized(): boolean {
     if (this.input.style.height !== '') return true;

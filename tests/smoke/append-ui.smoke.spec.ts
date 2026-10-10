@@ -121,9 +121,12 @@ test('🔴 入り先のリストは、打つ欄の上に出る (#496)', async ({
   await field.fill(Array.from({ length: 6 }, (_, i) => `行${i}`).join('\n'));
   const h6 = (await field.boundingBox())!.height;
   expect(h6, `6 行打っても伸びない(${h1} → ${h6})`).toBeGreaterThan(h1 + 40);
+  await field.fill(Array.from({ length: 12 }, (_, i) => `行${i}`).join('\n'));
+  const h12 = (await field.boundingBox())!.height;
+  expect(h12, `12 行で 6 行より伸びていない(${h6} → ${h12})`).toBeGreaterThan(h6 + 40);
   await field.fill(Array.from({ length: 80 }, (_, i) => `行${i}`).join('\n'));
   const h80 = (await field.boundingBox())!.height;
-  expect(h80, `上限で止まらない(${h6} → ${h80})`).toBeLessThan(h6 * 4);
+  expect(Math.abs(h80 - h12), `12 行の上限で止まらない(${h12} → ${h80})`).toBeLessThanOrEqual(2);
   const selAfter = (await page.locator('[data-pkc-field="append-target"]').boundingBox())!;
   expect(selAfter.y + selAfter.height, '伸びた欄が入り先のリストの上へ回り込んだ').toBeLessThanOrEqual(
     (await field.boundingBox())!.y + 1,
