@@ -955,7 +955,8 @@ function rewriteLineDate(
         // 🔴 **渡されていなければ元の刻みを保つ**(#344 段②)── 日を動かしただけで
         //    `毎週` が消えたら、user は「勝手に消された」と読む(時刻と同じ向き)
         rewrite.repeat === undefined ? found.repeat : rewrite.repeat,
-        undefined,
+        // 🔴 振替の字は保つ(#855 段 B-1)── 落とすと動かす前の日の回が規則から出直して、2 枚に見える
+        found.substitutes,
         /**
          * 🔴 **時刻の幅は、始まりが動かなければ保つ**(#855 段 C′)。
          * ⚠ 日だけ動かしたのに `14:00..15:00` が `14:00` に縮んだら、それは user が
