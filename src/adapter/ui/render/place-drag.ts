@@ -108,6 +108,14 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   let swallowClick = false;
 
   let nudge: Nudge | null = null;
+  let pendingBlock: HTMLElement | null = null;
+  /**
+   * 保留中の板の「離した先」。🔴 `data-pkc-x/y/w/h` には書かない ── 属性は**本文から描いた値**であり、
+   * 「本文に書けた」の印として読む側が居る(smoke の観測点も同じ)。離した時点で書くと、
+   * 書込が飛んでいる間に「もう書けた」と読まれ、続けて頼んだ書換(形を変える等)が断られる(#1481)。
+   */
+  let pendingTo: { x: number; y: number } | { w: number; h: number } | null = null;
+  let pendingCleanup: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
     swallowClick = false;
@@ -120,16 +128,28 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const grip = (e.target as Element | null)?.closest<HTMLElement>(HANDLE_SELECTOR);
     const block = grip?.closest<HTMLElement>('.pkc-format-block.pkc-place') ?? null;
     if (!grip || block === null) return;
-    const wAttr = block.getAttribute('data-pkc-w');
-    const hAttr = block.getAttribute('data-pkc-h');
+    // ⚠ 前のドロップの保留(タイマー / 購読)が残っていれば、掴んだ板と同じときだけ解除する(#1481 2)
+    // 画面の他所や別の板を押したときは保留を解除しない(別所クリックでロールバックが効かなくなるのを防ぐ)
+    // 🔑 描き直し前に同じ板を掴み直したら、起点は属性(まだ古い本文の値)ではなく離した先にする(#1481 1)
+    const to = pendingCleanup !== null && block === pendingBlock ? pendingTo : null;
+    if (pendingCleanup !== null && block === pendingBlock) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
+    const wAttr =
+      to !== null && 'w' in to ? String(to.w) : block.getAttribute('data-pkc-w');
+    const hAttr =
+      to !== null && 'h' in to ? String(to.h) : block.getAttribute('data-pkc-h');
+    const xAttr = to !== null && 'x' in to ? String(to.x) : block.getAttribute('data-pkc-x');
+    const yAttr = to !== null && 'y' in to ? String(to.y) : block.getAttribute('data-pkc-y');
     drag = {
       block,
       pointerId: e.pointerId,
       mode: grip.getAttribute('data-pkc-field') === 'place-size' ? 'size' : 'move',
       startClientX: e.clientX,
       startClientY: e.clientY,
-      startX: Number(block.getAttribute('data-pkc-x')) || 0,
-      startY: Number(block.getAttribute('data-pkc-y')) || 0,
+      startX: Number(xAttr) || 0,
+      startY: Number(yAttr) || 0,
       startW: wAttr === null ? block.offsetWidth : Number(wAttr) || 0,
       startH: hAttr === null ? block.offsetHeight : Number(hAttr) || 0,
       attrW: wAttr !== null,
@@ -171,6 +191,94 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     d.block.style.top = `${d.startY}px`;
   };
 
+  /**
+   * 🔴 離した位置・大きさを楽観的に維持し、断られたときだけ戻す(#1464 案 3)。
+   * worker 往復を待つ約 190ms の間、板が元の位置へ戻って見える体験を解消する。
+   * 異常系(エラー発生 / 上限時間経過)では元の位置・大きさへロールバックする。
+   */
+  const registerPendingDrop = (
+    d: Drag,
+    action:
+      | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
+      | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number },
+  ): void => {
+    if (pendingCleanup !== null) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
+    const block = d.block;
+    pendingBlock = block;
+    pendingTo =
+      action.type === 'MOVE_PLACE' ? { x: action.x, y: action.y } : { w: action.w, h: action.h };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubs: (() => void)[] = [];
+
+    const cleanup = (): void => {
+      if (pendingCleanup === cleanup) {
+        pendingCleanup = null;
+        pendingBlock = null;
+        pendingTo = null;
+      }
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      for (const u of unsubs) u();
+      unsubs = [];
+    };
+    pendingCleanup = cleanup;
+
+    const rollback = (): void => {
+      cleanup();
+      restore(d);
+    };
+
+    // 1. 本文書換の要求が通ったかをイベントで捕える(同文の再発・既存エラーでも確実に同期判定)
+    let requested = false;
+    const unbindEvent = dispatcher.onEvent((ev) => {
+      if (ev.type === 'REQUEST_BODY_REWRITE') {
+        requested = true;
+      }
+    });
+    unsubs.push(unbindEvent);
+
+    // 2. 状態の監視: 非同期エラー発生で戻す / 描画完了で成功終了
+    // ⚠ 同期の門(bodyWriteBlockReason / 編集開始中など)で断られた場合は下の !requested で即時戻す。
+    //   非同期(worker 競合など)で断られた場合は state.error の変化で戻す。
+    //   なお、非同期の断り文が直前と同一の場合は文字列比較で拾えないため、タイムアウト(2000ms)で戻る。
+    const startError = dispatcher.getState().error;
+    const unbindState = dispatcher.onState((state) => {
+      if (state.error && state.error !== startError) {
+        rollback();
+        return;
+      }
+      // 再描画で新しい要素に差し替えられた(正常完了: 古い要素が外れた)
+      if (!block.isConnected) {
+        cleanup();
+        return;
+      }
+    });
+    unsubs.push(unbindState);
+
+    // 3. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
+    // 期限が来たとき、すでに要素が外れていれば(再描画済み)何もしない(#1481 6)
+    timer = setTimeout(() => {
+      if (!block.isConnected) {
+        cleanup();
+        return;
+      }
+      rollback();
+    }, 2000);
+
+    // 4. 本文書換の dispatch
+    dispatcher.dispatch(action);
+
+    // 5. 同期判定: bodyRewriteGate で断られた場合(REQUEST_BODY_REWRITE が出ない)はその場で戻す(#1481 c')
+    if (!requested) {
+      rollback();
+    }
+  };
+
   const targetOf = (block: HTMLElement): { lid: string; line: number } | null =>
     placeTargetOf(block, dispatcher);
 
@@ -193,11 +301,16 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       const w = Math.max(MIN_W, Math.round(d.startW + dx));
       const h = Math.max(MIN_H, Math.round(d.startH + dy));
       // 🔑 取りやめ(元の大きさへ戻して離す)は書かない ── 位置と同じ理由(下)
-      restore(d);
-      if (w === d.startW && h === d.startH) return;
+      if (w === d.startW && h === d.startH) {
+        restore(d);
+        return;
+      }
       const t = targetOf(d.block);
-      if (t === null) return;
-      dispatcher.dispatch({ type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
+      if (t === null) {
+        restore(d);
+        return;
+      }
+      registerPendingDrop(d, { type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
       return;
     }
     const x = Math.max(0, Math.round(d.startX + dx));
@@ -209,14 +322,11 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       return;
     }
     const t = targetOf(d.block);
-    /**
-     * ⚠ 見た目は**常に**いったん戻す ── 書けた場合は BODY_REWRITTEN の再描画が
-     * 正しい位置に置き直す。戻さないと、断られた drop(byte 不一致 / 行ずれ)で
-     * 画面と本文が次の無関係な再描画まで食い違う(レビュー所見 5)。
-     */
-    restore(d);
-    if (t === null) return;
-    dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
+    if (t === null) {
+      restore(d);
+      return;
+    }
+    registerPendingDrop(d, { type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
   };
 
   const onPointerCancel = (): void => {
@@ -244,7 +354,8 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   /**
    * 矢印で動かした先を **1 回だけ**書く(手が止まってから / 掴む直前)。
-   * ⚠ 見た目は掴みと同じくいったん戻す ── 書けた位置は再描画が置き直す。
+   * ⚠ 矢印キー操作では見た目をいったん戻し、書けた位置へは再描画で置き直す
+   * (マウスで離したときと異なり、キー操作は焦点を返す印を器に置く都合上この作法を維持する)。
    * 🔑 焦点を返す印を器へ置く ── 再描画で口が作り直されるので、返すのは `applyPlaceLayout`。
    */
   function commitNudge(): void {
@@ -306,6 +417,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   doc.addEventListener('keydown', onKeyDown);
   return () => {
     cancelNudge(); // ⚠ 外した後に timer が dispatch しない
+    if (pendingCleanup !== null) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
     doc.removeEventListener('pointerdown', onPointerDown);
     doc.removeEventListener('pointermove', onPointerMove);
     doc.removeEventListener('pointerup', onPointerUp);

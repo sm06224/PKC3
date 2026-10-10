@@ -901,11 +901,257 @@ describe('掴んで動かす(place-drag)', () => {
     const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(ev, '書換の依頼が出ていない').toBeDefined();
     expect(ev).toMatchObject({ rewrite: { kind: 'place-move', line: 0, x: 150, y: 30 } });
-    // ⚠ 見た目はいったん戻る ── 書けた位置は BODY_REWRITTEN の再描画が置き直す。
-    //   戻さないと、断られた drop で画面と本文が食い違ったまま残る(レビュー所見 5)
+    // 🔴 離した位置を維持する(#1464 案 3)── 再描画までの間も動いた先にとどまる
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
+  });
+
+  it('🔴 書換が断られたとき(編集中など)は、離した後に元の位置へ戻る(#1464 案 3)', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' });
+    down(grip);
+    move(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    up(30, -10);
+    // 断られたので即座に元の位置に戻る
+    expect(d.getState().error).toBeDefined();
     expect(block.style.left).toBe('120px');
     expect(block.style.top).toBe('40px');
     off();
+  });
+
+  it('🔴 書換後に非同期エラーが通知されたときは元の位置へ戻る(#1464 案 3)', () => {
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    // 非同期にエラーが発生
+    d.dispatch({ type: 'OP_FAILED', error: 'ディスク容量不足' });
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 描き直しが 2000ms 来ないときはタイムアウトで元の位置へ戻る(#1464 案 3)', () => {
+    vi.useFakeTimers();
+    const { grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    vi.advanceTimersByTime(1999);
+    expect(block.style.left).toBe('150px');
+    vi.advanceTimersByTime(1);
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+    vi.useRealTimers();
+  });
+
+  it('🔴 新しい要素へ差し替えられたら(古い要素が外れたら)監視が外れ、2000ms 経過しても戻らない(#1464 案 3 / #1481 6)', () => {
+    vi.useFakeTimers();
+    const { d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    // DOM から切り離された(新しい要素に差し替えられた)
+    block.remove();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
+    vi.advanceTimersByTime(3000);
+    expect(block.style.left).toBe('150px');
+    off();
+    vi.useRealTimers();
+  });
+
+  it('🔴 正常完了 / 断り / タイムアウトのどれでも onState と onEvent の購読が解除される(#1481 a / 3-(i))', () => {
+    const { d, grip, block, off } = mounted();
+    const countStateListeners = (): number =>
+      (d as unknown as { stateListeners: Set<unknown> }).stateListeners.size;
+    const countEventListeners = (): number =>
+      (d as unknown as { eventListeners: Set<unknown> }).eventListeners.size;
+    const baseState = countStateListeners();
+    const baseEvent = countEventListeners();
+
+    // 1. 断られた場合: 離した直後に解除される
+    d.dispatch({ type: 'START_EDIT' });
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(countStateListeners(), '断られた後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), '断られた後に onEvent の購読が残っている').toBe(baseEvent);
+
+    // 2. 正常完了の場合: 再描画で解除される
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(countStateListeners(), '保留中に onState が購読されていない').toBe(baseState + 1);
+    expect(countEventListeners(), '保留中に onEvent が購読されていない').toBe(baseEvent + 1);
+    block.remove();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
+    expect(countStateListeners(), '再描画後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), '再描画後に onEvent の購読が残っている').toBe(baseEvent);
+
+    // 3. タイムアウトの場合: 2000ms 経過で解除される
+    vi.useFakeTimers();
+    const { grip: g2, off: off2 } = mounted();
+    down(g2);
+    move(30, -10);
+    up(30, -10);
+    vi.advanceTimersByTime(2000);
+    expect(countStateListeners(), 'タイムアウト後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), 'タイムアウト後に onEvent の購読が残っている').toBe(baseEvent);
+    off();
+    off2();
+    vi.useRealTimers();
+  });
+
+  it('🔴 既存の error が残っている状態でも、正常なドロップは離した直後に戻らない(#1481 3-(ii))', () => {
+    const { d, grip, block, off } = mounted();
+    // 事前にエラーが残っている状態を作る
+    d.dispatch({ type: 'SYS_ERROR', error: '既存のエラー' });
+    expect(d.getState().error).toBe('既存のエラー');
+
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+
+    // ドロップ後に何らかの state 更新が届いても、既存のエラーに反応して戻らない
+    // (state.error && state.error !== startError を state.error に変えるとここで落ちる)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'foo' });
+
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
+  });
+
+  it('🔴 同じ断り文が 2 回続いても、2 回目に離した直後に戻る(#1481 b / c\')', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' });
+    // 1 回目
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(d.getState().error).toBeDefined();
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+
+    // 2 回目: 同じエラー文が state.error に残ったまま再度ドロップ
+    down(grip);
+    move(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    up(30, -10);
+    // 2 回目も即座に元の位置に戻る(同文の再発でも正しくロールバック)
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 再描画前に同じ板を掴み直しても、起点座標が更新されており板が跳ばない(#1481 1)', () => {
+    const { grip, block, off } = mounted();
+    // 1 回目のドラッグ＆ドロップ: (120, 40) から +30, -10 移動して (150, 30) へ
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    // 🔴 属性は本文から描いた値のまま(描き直しまで動かさない)── 離した時点で書き換えると、
+    //    書込が飛んでいる間に「もう書けた」と読まれ、続けて頼んだ形の変更が断られる(#1481、実ブラウザ 8 回中 5 回)
+    expect(block.getAttribute('data-pkc-x'), '離しただけで属性を書き換えている').toBe('120');
+    expect(block.getAttribute('data-pkc-y'), '離しただけで属性を書き換えている').toBe('40');
+
+    // 再描画が来る前に同じ板をもう一度掴む
+    down(grip);
+    move(10, 10);
+    // 起点が (150, 30) から計算されるため、(160, 40) になる(古い起点 120 + 10 = 130 へ跳ばない)
+    expect(block.style.left).toBe('160px');
+    expect(block.style.top).toBe('40px');
+    up(10, 10);
+    expect(block.style.left).toBe('160px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 断られたら見た目は元へ戻り、属性は本文の値のまま(#1481 1)', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' }); // 同期の門で断られる状態
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(d.getState().error).toBeDefined();
+    // ロールバックされて style も属性も元通り
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    expect(block.getAttribute('data-pkc-x')).toBe('120');
+    expect(block.getAttribute('data-pkc-y')).toBe('40');
+    off();
+  });
+
+  it('🔴 保留中に画面の余白や別の板を押しても保留は解除されない(#1481 2)', () => {
+    const { host, d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+
+    // 画面の余白(host)を押しても保留は外れない
+    const emptySpace = new PointerEvent('pointerdown', { ...opts, clientX: 500, clientY: 500 });
+    host.dispatchEvent(emptySpace);
+
+    // 別の板(p2)を押しても p1 の保留は外れない
+    const grip2 = host.querySelector<HTMLElement>('#p2 [data-pkc-field="place-grip"]')!;
+    const downGrip2 = new PointerEvent('pointerdown', { ...opts, clientX: 460, clientY: 80 });
+    grip2.dispatchEvent(downGrip2);
+
+    // その後に非同期エラーが通知されたら元の位置へ戻る
+    d.dispatch({ type: 'SYS_ERROR', error: '遅れて届いた worker エラー' });
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 保留中に別の板を掴んだら、その板は自分の位置から動く(保留中の板の離した先を借りない)(#1481 1)', () => {
+    const { host, grip, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    const p2 = host.querySelector<HTMLElement>('#p2')!;
+    const grip2 = host.querySelector<HTMLElement>('#p2 [data-pkc-field="place-grip"]')!;
+    down(grip2);
+    move(10, 10);
+    expect(p2.style.left, '別の板が、保留中の板の離した先へ跳んだ').toBe('470px');
+    expect(p2.style.top).toBe('50px');
+    up(10, 10);
+    off();
+  });
+
+  it('🔴 再描画が来ないまま同じ板をもう一度掴んだら、前の保留は解除される(#1481 e)', () => {
+    vi.useFakeTimers();
+    const { grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    vi.advanceTimersByTime(1000);
+    expect(block.style.left).toBe('150px');
+
+    // 2 回目の掴み開始(1 回目のタイマーや購読が解除される)
+    down(grip);
+    move(50, 20);
+    // 1 回目の 2000ms 満了タイミング(1000ms + 1500ms = 2500ms)
+    vi.advanceTimersByTime(1500);
+    // 1 回目のタイマーで戻されず、2 回目のドラッグ中の位置が保たれている
+    expect(block.style.left).toBe('200px');
+    up(50, 20);
+    off();
+    vi.useRealTimers();
   });
 
   /**
@@ -1078,9 +1324,9 @@ describe('掴んで動かす(place-drag)', () => {
       const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
       expect(asks).toHaveLength(1);
       expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-size', line: 0, w: 360, h: 230 } });
-      // ⚠ 見た目はいったん戻る(書けた大きさは再描画が当て直す)
-      expect(block.style.width).toBe('320px');
-      expect(block.style.height).toBe('200px');
+      // 🔴 離した大きさを維持する(#1464 案 3)
+      expect(block.style.width).toBe('360px');
+      expect(block.style.height).toBe('230px');
       off();
     });
 
@@ -1110,7 +1356,7 @@ describe('掴んで動かす(place-drag)', () => {
       off();
     });
 
-    it('w= / h= を持たない塊は実寸を基点にし、戻すときは style を外す', () => {
+    it('w= / h= を持たない塊は実寸を基点にし、離した後はその大きさを維持する(#1464 案 3)', () => {
       const { host, events, off } = mounted();
       const block2 = host.querySelector<HTMLElement>('#p2')!;
       expect(block2.style.width, '前提が崩れている: p2 に width が当たっている').toBe('');
@@ -1123,8 +1369,45 @@ describe('掴んで動かす(place-drag)', () => {
       expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
         rewrite: { kind: 'place-size', line: 5, w: 200, h: 100 },
       });
-      expect(block2.style.width, '無かった width が残っている').toBe('');
+      expect(block2.style.width).toBe('200px');
+      expect(block2.style.height).toBe('100px');
+      off();
+    });
+
+    it('🔴 大きさ変更が断られたときは、元々 w= / h= が無かった塊は style を外して戻る(#1464 案 3)', () => {
+      const { host, d, off } = mounted();
+      d.dispatch({ type: 'START_EDIT' });
+      const block2 = host.querySelector<HTMLElement>('#p2')!;
+      const handle = sizeHandle(host, 'p2');
+      down(handle);
+      move(200, 100);
+      expect(block2.style.width).toBe('200px');
+      up(200, 100);
+      expect(d.getState().error).toBeDefined();
+      expect(block2.style.width).toBe('');
       expect(block2.style.height).toBe('');
+      // 🔴 属性は本文の値のまま(w= / h= が無い塊に属性を生やさない)── 生えると、次に掴んだとき起点が「無かった大きさ」になる(#1481 1)
+      expect(block2.hasAttribute('data-pkc-w'), '断られたのに data-pkc-w が残っている').toBe(false);
+      expect(block2.hasAttribute('data-pkc-h'), '断られたのに data-pkc-h が残っている').toBe(false);
+      off();
+    });
+
+    it('🔴 描き直し前に同じ板の大きさを掴み直すと、起点は離した大きさ(属性はまだ古い)(#1481 1)', () => {
+      const { host, events, off } = mounted();
+      const block2 = host.querySelector<HTMLElement>('#p2')!;
+      const handle = sizeHandle(host, 'p2');
+      down(handle);
+      move(200, 100);
+      up(200, 100);
+      expect(block2.style.width).toBe('200px');
+      expect(block2.hasAttribute('data-pkc-w'), '離しただけで属性を生やしている').toBe(false);
+      down(handle);
+      move(20, 10);
+      expect(block2.style.width, '掴み直したら古い大きさから測り直した(跳んだ)').toBe('220px');
+      expect(block2.style.height).toBe('110px');
+      up(20, 10);
+      const sizes = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+      expect(sizes[sizes.length - 1]).toMatchObject({ rewrite: { kind: 'place-size', w: 220, h: 110 } });
       off();
     });
 
@@ -1173,7 +1456,7 @@ describe('掴んで動かす(place-drag)', () => {
       const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
       expect(asks, '1 回だけでない').toHaveLength(1);
       expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-move', line: 0, x: 122, y: 41 } });
-      // ⚠ 見た目はいったん戻る(掴みと同じ)。焦点を返す印が器に置かれている
+      // ⚠ キー操作では見た目はいったん戻る。焦点を返す印が器に置かれている
       expect(block.style.left).toBe('120px');
       expect(block.parentElement!.getAttribute(PLACE_FOCUS_ATTR)).toBe('0');
       off();
