@@ -378,7 +378,21 @@ test('🔴 お知らせは 1 件ずつ出て、「次へ」で送れる', async 
    *   **項目の x が揃っていない**ことで見る(`column-width` は器の幅で決まるので、
    *   閾値ではなく「2 列以上になっているか」で採るのが正しい)。
    * ⚠ 空振り防止 ── 項目が 2 つ以上あること。
+   * 🔴 **項目は台の側で足す**(2026-10-10、全量 smoke で落ちた)── 先頭のお知らせが 1 項目の日には
+   *   段に割る物が無く、この検査は**登記表の中身で**落ちていた(下の `padAnnounceBody` と同じ理由)。
+   *   見たいのは「段に割る規則が効いているか」であって、お知らせの項目数ではない。
+   *   ⚠ 足すのは上の「1 件が箱に収まる」を測った**後**(足した行で収まらなくなるのは当然)。
    */
+  await page.evaluate(() => {
+    const ul = document.querySelector('[data-pkc-field="announce-body"] ul');
+    if (!(ul instanceof HTMLElement)) return;
+    for (let i = ul.children.length; i < 4; i++) {
+      const li = document.createElement('li');
+      li.setAttribute('data-pkc-smoke-pad', String(i));
+      li.textContent = `(台が足した項目 ${i + 1})段に割る規則を見るための短い字です。`;
+      ul.append(li);
+    }
+  });
   const cols = await page.$$eval('[data-pkc-announce] li', (els) =>
     els.map((e) => Math.round(e.getBoundingClientRect().left)),
   );
