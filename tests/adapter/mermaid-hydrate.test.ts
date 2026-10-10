@@ -637,6 +637,30 @@ describe('幅と dpr を変えたときの焼き直し(P8 段㉘)', () => {
     b.remove();
   });
 
+  it('🔴 隠れている器は先読みでも焼かない ── 見えたときに 1 回だけ焼く(#1480)', async () => {
+    // 先読みは空き時間に回る。台(happy-dom)には無いので、すぐ回す形で差し込む
+    vi.stubGlobal('requestIdleCallback', (cb: IdleRequestCallback) => {
+      setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline), 0);
+      return 1;
+    });
+    const b = block('graph TD\n A-->B');
+    b.style.display = 'none';
+    document.body.append(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    setPaneWidth(host, 700);
+    const scope = hydrateMermaid(b);
+    await settle();
+    expect(vi.mocked(renderToPng), '隠れている器を先読みで焼いた').toHaveBeenCalledTimes(0);
+
+    b.style.display = '';
+    fire!([host]);
+    await settle();
+    expect(vi.mocked(renderToPng), '見えたのに焼いていない').toHaveBeenCalledTimes(1);
+
+    scope.dispose();
+    b.remove();
+  });
+
   it('🔴 隠れている間(details 閉じ等)に配色を変えて戻すと、見えたときに新しい配色で焼き直す(#1480)', async () => {
     const { b, scope } = await painted(700);
     const host = b.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
@@ -652,6 +676,13 @@ describe('幅と dpr を変えたときの焼き直し(P8 段㉘)', () => {
 
     // 非表示中なので焼き直していない
     expect(vi.mocked(renderToPng), '非表示中に焼き直してしまっている').toHaveBeenCalledTimes(1);
+
+    // 🔴 見えたときに知らせが来るよう、観測を戻している(本物の観測器は 1 度見えたら外す ──
+    //    戻さないと、下の fire が来ない)。最初の 1 回 + 隠れた間の 1 回。
+    expect(
+      observed.filter((el) => el === host),
+      '隠れた器を観測し直していない(開いても焼き直しの知らせが来ない)',
+    ).toHaveLength(2);
 
     // 再表示する(details を開く)
     b.style.display = '';
