@@ -68,7 +68,7 @@ const CORPUS: Array<[string, string]> = [
   ['本文に --- が在る', '---\ntags: [a]\n---\n本文\n---\n水平線の後\n---\n'],
   ['frontmatter の中に空行', '---\ntags: [a]\n\ntitle: T\n---\n本文'],
   ['最終行が \\r で終わる', '---\ntags: [a]\n---\n本文\r'],
-  ['BOM つき', '﻿---\ntags: [a]\n---\n本文'],
+  ['BOM つき', '\uFEFF---\ntags: [a]\n---\n本文'],
   ['先頭が空行', '\n---\ntags: [a]\n---\n本文'],
   ['タブ', '---\n\ttags: [a]\n\ttitle:\tT\n---\t\n\t本文\n'],
   ['vars ブロック', '---\nvars:\n  x: 1\n  y: "two"\n---\n{{x}} {{y}}\n'],
