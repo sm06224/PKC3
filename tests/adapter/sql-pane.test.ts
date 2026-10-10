@@ -151,6 +151,7 @@ function setup(
         source: DuckDbReadableGuestSource;
         readBytes: () => Promise<Uint8Array | null>;
       }[];
+      onLoad: () => void;
     }) => {
       const read = await Promise.all(input.sources.map((s) => s.readBytes()));
       const first = input.sources[0];
@@ -177,6 +178,7 @@ function setup(
         source: DuckDbReadableGuestSource;
         readBytes: () => Promise<Uint8Array | null>;
       }[];
+      onLoad?: () => void;
     }) => {
       const read = await Promise.all(input.sources.map((x) => x.readBytes()));
       schemaSeen.push({ sources: input.sources.map((x) => x.source), bytes: read.map((b) => b?.byteLength ?? null) });
@@ -231,7 +233,7 @@ function setup(
   const readAssetBytes = vi.fn(async (key: string) =>
     key === 'ast-ng' ? null : key === 'ast-csv-broken' ? new Uint8Array([]) : new Uint8Array([1, 2, 3, 4]),
   );
-  connectStoreEffects(d, {
+  const effects = connectStoreEffects(d, {
     ...stubRevisionOps(),
     deleteEntry: async () => {},
     setEntryParent: async () => {},
@@ -398,6 +400,7 @@ function setup(
     pickEngine,
     rules,
     tipText,
+    effects,
     runDuckDbSql,
     duckSeen,
     schemaDuckDb,
@@ -4942,8 +4945,10 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.pickEngine('duckdb');
     let release: () => void = () => undefined;
     s.runDuckDbSql.mockImplementationOnce(
-      () =>
+      (input: { onLoad: () => void }) =>
         new Promise((resolve) => {
+          // 🔴 器が表を読み込み始めた合図(#682)── これが来た回にだけ「時間がかかります」を出す
+          input.onLoad();
           release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
         }),
     );
@@ -4973,6 +4978,119 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     release();
     await settle();
     expect(s.note(), '答えが出たのに進捗の字が残っている').not.toContain('読み込むので時間がかかります');
+  });
+
+  it('🔴 #682:読み込み済みの器で引く回(合図が来ない)は、「時間がかかります」を言わない', async () => {
+    const s = setup();
+    s.pick('db1');
+    await settle();
+    s.pickEngine('duckdb');
+    let release: () => void = () => undefined;
+    // ⚠ 合図(`onLoad`)を呼ばない = 器が起きていて、読み込まない回
+    s.runDuckDbSql.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+        }),
+    );
+    s.type('SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.note()).toContain('実行しています…');
+    expect(s.note(), '読み込まない回なのに、待たせる字を出している').not.toContain('時間がかかります');
+    release();
+    await settle();
+  });
+
+  it('🔴 #682:読み込みの合図は次の回へ持ち越さない(2 回目は合図が無ければ出ない)', async () => {
+    const s = setup();
+    s.pick('db1');
+    await settle();
+    s.pickEngine('duckdb');
+    // 1 回目:読み込む回(合図あり)
+    s.runDuckDbSql.mockImplementationOnce((input: { onLoad: () => void }) => {
+      input.onLoad();
+      return Promise.resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+    });
+    s.type('SELECT 1');
+    s.runBtn.click();
+    await settle();
+    // 2 回目:読み込まない回(合図なし)
+    let release: () => void = () => undefined;
+    s.runDuckDbSql.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+        }),
+    );
+    s.runBtn.click();
+    await settle();
+    expect(s.note()).toContain('実行しています…');
+    expect(s.note(), '前の回の「読み込んでいる」が残っている').not.toContain('時間がかかります');
+    release();
+    await settle();
+  });
+
+  it('🔴 #682:構造をノートへ書く回も、器が読み込み始めたら「時間がかかります」を言う / 合図が無ければ言わない', async () => {
+    for (const signal of [true, false]) {
+      const s = setup();
+      s.pick('db7');
+      await settle();
+      const base = s.schemaDuckDb.getMockImplementation()!;
+      let release: () => void = () => undefined;
+      s.schemaDuckDb.mockImplementationOnce(async (input) => {
+        if (signal) input.onLoad?.();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return base(input);
+      });
+      s.schemaBtn.click();
+      await settle();
+      expect(s.note()).toContain('実行しています…');
+      if (signal) expect(s.note(), '構造の回で案内が出ていない').toContain('時間がかかります');
+      else expect(s.note(), '合図が無いのに案内が出ている').not.toContain('時間がかかります');
+      release();
+      await settle();
+    }
+  });
+
+  it('🔴 #682:片づけた後に合図が来ても、何も dispatch しない(走らせる回 / 構造の回の両方)', async () => {
+    // 走らせる回
+    const a = setup();
+    a.pick('db1');
+    await settle();
+    a.pickEngine('duckdb');
+    let runSignal: () => void = () => undefined;
+    a.runDuckDbSql.mockImplementationOnce(
+      (input: { onLoad: () => void }) =>
+        new Promise(() => {
+          runSignal = input.onLoad;
+        }),
+    );
+    a.type('SELECT 1');
+    a.runBtn.click();
+    await settle();
+    a.effects();
+    runSignal();
+    await settle();
+    expect(a.d.getState().sqlPage.duckLoading, '片づけた後の合図で state が動いた').toBe(false);
+    // 構造の回
+    const b = setup();
+    b.pick('db7');
+    await settle();
+    let schemaSignal: (() => void) | undefined;
+    b.schemaDuckDb.mockImplementationOnce((input) => {
+      schemaSignal = input.onLoad;
+      return new Promise(() => undefined);
+    });
+    b.schemaBtn.click();
+    await settle();
+    expect(schemaSignal, '構造の回に合図の口が渡っていない').toBeDefined();
+    b.effects();
+    schemaSignal?.();
+    await settle();
+    expect(b.d.getState().sqlPage.duckLoading, '片づけた後の合図で state が動いた').toBe(false);
   });
 
   it('対照群:内蔵の sqlite で走らせている間は、写すとは言わない(写さない)', async () => {

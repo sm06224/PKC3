@@ -214,6 +214,13 @@ export interface DuckDbRunInput {
    * ⚠ 空は受けない(呼び側が `source` を 1 つも持たない回は走らせない)。
    */
   readonly sources: readonly DuckDbInputSource[];
+  /**
+   * 🔴 **器へ表を読み込み始めたときに 1 度呼ぶ**(#682。画面の「時間がかかります」は、この合図が来た回にだけ出す)。
+   * ⚠ 呼ばれるのは**器を起こし直す回だけ**(最初の 1 回 / 相手の組が変わった / 使わなくて片づけた後)── 器が起きていて
+   *   読み込み済みの回は呼ばれない。判定は `DuckDbLease` が持つ(「読み込む必要があるか」を、ここで二重に数えない)。
+   * ⚠ 省けば誰も聞かない回(構造を採る `schema` は聞かない)。落ちても回は続ける(合図の失敗で引けなくしない)。
+   */
+  readonly onLoad?: () => void;
 }
 
 export interface DuckDbRunResult {
@@ -456,13 +463,19 @@ export class DuckDbRunner {
    * 🔑 `run`(SQL を走らせる)と `schema`(構造を採る)が**同じ鍵**を使う ── 構造を採った後の
    *   SQL は器を作り直さない(同じ file を 2 度読まない)。
    */
-  private dataOf(sources: readonly DuckDbInputSource[]): {
+  private dataOf(
+    sources: readonly DuckDbInputSource[],
+    onLoad?: () => void,
+  ): {
     key: string;
     load: (h: DuckDbHandle) => Promise<void>;
+    onLoad?: () => void;
   } {
     return {
       key: sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
       load: (h) => this.load(h, sources),
+      // 🔴 合図は lease が出す(器を起こす前に、読み込む回にだけ)── ここで `load` の頭に置くと、いちばん長い待ち(器を起こす所)の後になる
+      ...(onLoad === undefined ? {} : { onLoad }),
     };
   }
 
@@ -475,11 +488,11 @@ export class DuckDbRunner {
    *   ことになるが、行を数えるのに必要で、その後の SQL は同じ器をそのまま使える。
    * ⚠ 行数が採れなくても**構造は返す**(`counts: null`)。他の落ち方(器を起こせない等)は投げる。
    */
-  schema(sources: readonly DuckDbInputSource[]): Promise<DuckDbSchemaResult> {
+  schema(sources: readonly DuckDbInputSource[], onLoad?: () => void): Promise<DuckDbSchemaResult> {
     return this.serial(async () => {
       this.dropStaleRefused();
       if (sources.length === 0) throw new Error('調べる対象がありません');
-      const data = this.dataOf(sources);
+      const data = this.dataOf(sources, onLoad);
       const ask = async (sql: string): Promise<Grid> => {
         const raw = await this.lease.run({ sql, maxMs: DUCKDB_MAX_MS, loadMaxMs: DUCKDB_LOAD_MAX_MS, data });
         return duckDbTable(raw);
@@ -535,7 +548,7 @@ export class DuckDbRunner {
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      data: this.dataOf(input.sources),
+      data: this.dataOf(input.sources, input.onLoad),
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときは、**どの失敗にも**写せなかった表の理由を添える(`withRefused`)
       throw this.withRefused(e, multi);

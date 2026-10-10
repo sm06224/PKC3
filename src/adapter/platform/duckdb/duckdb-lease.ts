@@ -80,7 +80,17 @@ export interface DuckDbJob {
    *   打鍵のたびに読み直すと、大きい file で毎回待たされる。
    * 🔑 畳んだら控えも捨てる(起こし直した器には何も入っていない)。
    */
-  readonly data?: { readonly key: string; readonly load: (h: DuckDbHandle) => Promise<void> };
+  readonly data?: {
+    readonly key: string;
+    readonly load: (h: DuckDbHandle) => Promise<void>;
+    /**
+     * 🔴 **この回が表を読み込む(器を起こす / 起こし直す / 相手を差し直す)と決まった時に、1 度だけ呼ぶ**(#682)。
+     * ⚠ 呼ぶのは**器を起こす前**(`ensure()` の前)── 起こす所(wasm の読み込み + 拡張の取得)がいちばん長い待ちで、
+     *   その後で呼ぶと、画面の「時間がかかります」が**言いたい待ちを取りこぼす**。
+     * ⚠ 器が起きていて同じ `key` が入っている回は呼ばない。落ちても回は続ける。
+     */
+    readonly onLoad?: () => void;
+  };
   /**
    * 🔴 **この打ち込みが通ったら、器を畳まずに持ち続ける**(#918 段⑧)。
    *
@@ -164,6 +174,13 @@ export class DuckDbLease {
       const stale = this.handle;
       if (job.data !== undefined && stale !== null && this.loadedKey !== null && this.loadedKey !== job.data.key) {
         this.forget(stale);
+      }
+      if (job.data?.onLoad !== undefined && (this.handle === null || this.loadedKey !== job.data.key)) {
+        try {
+          job.data.onLoad();
+        } catch {
+          // 合図の失敗で、引く回を落とさない
+        }
       }
       const h = await this.ensure();
       /**

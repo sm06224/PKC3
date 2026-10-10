@@ -105,6 +105,7 @@ function withSqlSourceSet(
         saved: '',
         // 🔴 組が変われば、写した報告も別の話になる(次に写すまで空)
         duckCopy: null,
+        duckLoading: false,
         er: er.er,
       },
     },
@@ -408,6 +409,13 @@ export interface SqlPageState {
    *   「写せなかった表」が出る(名札は新しいのに中身は前の組 ── いちばん気づけない外し方)。
    */
   readonly duckCopy: DuckDbCopyReport | null;
+  /**
+   * 🔴 **いまの回が、DuckDB の器へ表を読み込んでいる最中か**(#682 の最後の 1 件)。
+   * ⚠ 「走っている」(`running`)とは別 ── 器が起きていて読み込み済みなら、DuckDB の回でも**読み込まない**ので、
+   *   「時間がかかります」を出すと**嘘**になる。`SQL_DUCK_LOADING`(器が読み込みを始めた合図)でだけ立つ。
+   * ⚠ 回が始まる所(`RUN_SQL` / `SQL_SCHEMA_TO_NOTE`)と終わる所(`SET_SQL_RESULT` / `SQL_RUN_FAILED`)で必ず降ろす。
+   */
+  readonly duckLoading: boolean;
   /**
    * 🔴 **表のつながり図(ER)**(#918 段⑤。user 要望 2026-09-14「er でグラフィカルに
    * 取得する方法も欲しいな」/ 置き場の裁定 2026-09-15 = **この窓の中に畳める欄**)。
@@ -2130,6 +2138,7 @@ export const initialState: AppState = {
     guestChosen: '',
     runToken: 0,
     duckCopy: null,
+    duckLoading: false,
     er: {
       open: false,
       loading: false,
@@ -2407,6 +2416,8 @@ export type UserAction =
       copy?: DuckDbCopyReport;
     }
   | { type: 'SQL_RUN_FAILED'; token: number; sql: string; error: string }
+  /** 🔴 DuckDB の器が表の読み込みを始めた(#682)。⚠ `token` = どの回か(古い回の合図は捨てる)。 */
+  | { type: 'SQL_DUCK_LOADING'; token: number }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
   | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
   /**
@@ -4921,6 +4932,7 @@ function reduceCore(
             historyDraft: '',
             historyEdits: [],
             running: true,
+            duckLoading: false,
             error: '',
             saved: '',
             // 🔴 開けなかった断りもここで消す(#681 F4 ── 上の `SET_SQL_TEXT` と同じ理由)
@@ -4993,7 +5005,7 @@ function reduceCore(
        */
       const route = schemaRouteOf(state.sqlPage.guest, state.sqlPage.extraGuests);
       return {
-        state: { ...state, sqlPage: { ...state.sqlPage, running: true, error: '', saved: '' } },
+        state: { ...state, sqlPage: { ...state.sqlPage, running: true, duckLoading: false, error: '', saved: '' } },
         events: [
           {
             type: 'REQUEST_SQL_SCHEMA',
@@ -5252,6 +5264,7 @@ function reduceCore(
             truncated: action.truncated,
             ms: action.ms,
             running: false,
+            duckLoading: false,
             error: '',
             duckCopy: action.copy ?? p.duckCopy,
             ...(redraw === null ? {} : { er: redraw.er }),
@@ -5352,6 +5365,7 @@ function reduceCore(
             error: '',
             saved: '',
             duckCopy: null,
+            duckLoading: false,
             er: er.er,
           },
         },
@@ -5477,6 +5491,12 @@ function reduceCore(
         },
         events: [],
       };
+    case 'SQL_DUCK_LOADING': {
+      const p = state.sqlPage;
+      // ⚠ 古い回の合図・走っていない間の合図は捨てる(終わった画面に「時間がかかります」を残さない)
+      if (!p.running || p.runToken !== action.token) return { state, events: [] };
+      return { state: { ...state, sqlPage: { ...p, duckLoading: true } }, events: [] };
+    }
     case 'SQL_RUN_FAILED':
       /**
        * ⚠ **前の表は残す**(消すと「失敗して 0 件だった」に見える)── 印だけ立てる
@@ -5503,7 +5523,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            sqlPage: { ...p, running: false, error: action.error, ...(redraw === null ? {} : { er: redraw.er }) },
+            sqlPage: { ...p, running: false, duckLoading: false, error: action.error, ...(redraw === null ? {} : { er: redraw.er }) },
           },
           events: redraw === null ? [] : redraw.events,
         };

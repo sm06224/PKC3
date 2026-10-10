@@ -210,6 +210,69 @@ describe('🔴 相手の差し込み(#682 段②)', () => {
   });
 });
 
+describe('🔴 読み込みの合図(onLoad。#682)', () => {
+  it('🔴 器を起こす前に呼ぶ(いちばん長い待ちに間に合う)', async () => {
+    const h = handle();
+    let openResolve: () => void = () => undefined;
+    const events: string[] = [];
+    const lease = new DuckDbLease({
+      open: async () => {
+        events.push('open:start');
+        await new Promise<void>((r) => {
+          openResolve = r;
+        });
+        events.push('open:end');
+        return h;
+      },
+      ...fakeTimers(),
+    });
+    const onLoad = vi.fn(() => {
+      events.push('onLoad');
+    });
+    const p = lease.run({ sql: 'select 1', data: { key: 'a', load: () => Promise.resolve(), onLoad } });
+    await Promise.resolve();
+    await Promise.resolve();
+    // ⚠ 器を起こしている最中(まだ resolve していない)に、もう呼ばれている
+    expect(events, '起こす前に合図していない').toEqual(['onLoad', 'open:start']);
+    openResolve();
+    await p;
+    expect(onLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('読み込み済みの 2 回目は呼ばない / 相手が替わると呼ぶ / 畳んだ後は呼ぶ', async () => {
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...fakeTimers() });
+    const load = vi.fn(() => Promise.resolve());
+    const onLoad = vi.fn();
+    await lease.run({ sql: 'select 1', data: { key: 'a', load, onLoad } });
+    await lease.run({ sql: 'select 2', data: { key: 'a', load, onLoad } });
+    expect(onLoad, '読み込み済みで呼んでいる').toHaveBeenCalledTimes(1);
+    await lease.run({ sql: 'select 3', data: { key: 'b', load, onLoad } });
+    expect(onLoad, '相手が替わったのに呼んでいない').toHaveBeenCalledTimes(2);
+    await lease.release();
+    await lease.run({ sql: 'select 4', data: { key: 'b', load, onLoad } });
+    expect(onLoad, '畳んだ後に呼んでいない').toHaveBeenCalledTimes(3);
+  });
+
+  it('書き込みで持ち続けている器(hold)の、同じ相手の回は呼ばない', async () => {
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...fakeTimers() });
+    const load = vi.fn(() => Promise.resolve());
+    const onLoad = vi.fn();
+    await lease.run({ sql: 'create table t(x int)', hold: true, data: { key: 'a', load, onLoad } });
+    await lease.run({ sql: 'select 1', data: { key: 'a', load, onLoad } });
+    expect(onLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('合図が投げても、引く回は落とさない', async () => {
+    const lease = new DuckDbLease({ open: () => Promise.resolve(handle()), ...fakeTimers() });
+    const onLoad = (): void => {
+      throw new Error('合図の失敗');
+    };
+    await expect(
+      lease.run({ sql: 'select 1', data: { key: 'a', load: () => Promise.resolve(), onLoad } }),
+    ).resolves.toBeDefined();
+  });
+});
+
 describe('🔴 時間で切る(#682 段②)', () => {
   /** 返らない問い合わせ。⚠ 上流に中断の口が無いので、畳む以外に止める手が無い。 */
   function stuck(): DuckDbHandle & { terminated: number } {

@@ -897,6 +897,8 @@ export class SqlRenderer {
       p.ranSql,
       p.error,
       String(p.running),
+      // 🔴 器が読み込み始めた合図で、走っている最中に「時間がかかります」を言い足す(#682)
+      String(p.duckLoading),
       String(p.truncated),
       String(p.ms),
       String(p.rows.length),
@@ -1192,7 +1194,8 @@ export function historyNoteLine(p: AppState['sqlPage']): string {
  *   間隔を変えた日に字が嘘になる。
  */
 function runningNote(p: AppState['sqlPage']): string {
-  return sqlEngineOf(p) === 'duckdb' ? duckdbWarmupNote(DEFAULT_IDLE_SEC) : '';
+  // 🔴 器が表を読み込み始めた回にだけ言う(#682)── 読み込み済みの器で引く回は、待たないので言わない
+  return sqlEngineOf(p) === 'duckdb' && p.duckLoading ? duckdbWarmupNote(DEFAULT_IDLE_SEC) : '';
 }
 
 /**
