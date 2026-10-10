@@ -12,7 +12,7 @@ description: サブエージェントを大量に並列で投げて、突き合�
 - 🔴 **書くエージェントは `isolation: "worktree"`**。read-only なら同居してよい。
   ⚠ `no WorktreeCreate hooks are configured` で落ちたら、**まず `pwd`**(2026-09-16 訂正)──
   cwd が repo の外だと同じ文面で落ちる。`cd <作業ツリー>` で通る。本当に起動できないときだけ
-  read-only の型(`pkc3-surveyor`)に patch を書かせ、依頼者が当てる(`subagent-scale` §1)。
+  read-only の型(`pkc3-surveyor`)に patch を書かせ、依頼者が当てる(`subagent-scale/SKILL.md`「隔離」)。
   🔑 守るのは **tools の一覧**であって、プロンプトの文言ではない
 - **プロンプトに 5 つ入れる**:範囲(base の sha)/ 済んでいること / read-only の明示 /
   CONFIRMED と未検証の区別 / 「無ければ無いと言え」

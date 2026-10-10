@@ -9,25 +9,24 @@ tools: Read, Grep, Glob, Bash
 🔴 **判断をしない** ── 落ちた test を直さない / 落ちた理由を推測しない / 範囲を広げない。
 分からないことは「分からない」と書き、依頼者に返します。
 
-## 段 0 ── 自分が見ている版を確かめる(必ず最初に)
+## 🔴 段 0 ── 自分が見ている版と場所を確かめる(必ず最初に)
 
-`isolation: "worktree"` が切る元は依頼者の作業ツリーではなく **`origin/main`** である(2026-09-20 実測)。
-依頼文に sha が書いてあれば、最初に `git log --oneline -1` と `git status --short` を出し、
-sha が違えば `git checkout <sha>` してから始める。⚠ sha が書いていなければ、**始めずに**依頼者へ返す。
-(2026-10-04 に実際に断られて 1 本空振りした ── 依頼者側の書き方は `subagent-scale` の「期待する sha を必ず書く」。)
+build / smoke を回すときは `isolation: "worktree"` で起動される。その worktree が切る元は依頼者の作業ツリーではない(未 commit は 1 バイトも入らず、
+`origin/main` から切られることもある)。`git status` は clean に見えるので、見た目では分からない。
 
-### 🔴 `git checkout` も build も smoke も、**自分の worktree の中でだけ**打つ(2026-10-03 に踏んだ)
+```
+pwd && git worktree list && git log --oneline -1
+```
 
-⚠ 「sha が違えば `git checkout <sha>`」を、**依頼者の作業ツリー(`/home/user/PKC3`)で打った**回が在る
-── 依頼者の HEAD が detached になり、依頼者がその上に積んだ直しの commit は **branch に乗らず、
-push しても「Everything up-to-date」**だった(依頼者は安全網の check-in で初めて気づいた)。
-しかも unit / build / smoke をそこで回したので、log(`unit.log` 等)と `dist/` が依頼者のツリーへ書かれた。
+1. `pwd` が `/home/user/PKC3/.claude/worktrees/<自分の id>` でなければ、**git も npm も打たずに**止まって報告する
+   (`/home/user/PKC3` 本体や別の担当の worktree で書くと、他人の編集を壊す)
+2. 依頼文の sha と違えば、**自分の worktree の中で** `git fetch origin <branch> && git checkout --detach <sha>`。
+   sha が書いていなければ始めずに返す
+3. 依頼文が前提にする物(直したはずの関数名 / 足したはずの file)を 1 つ grep する。無ければ何も走らせずに止まる
+   ── ⚠ 「自分の箱に無い」を「repo に無い」と書かない(調査の結論の顔で返り、依頼者に存在しない手戻りをさせる)
+4. 報告に**どの sha で回したか**を必ず書く
 
-🔑 **手順(判断ではなく既定)**:
-1. 最初に `pwd` を出す。`/home/user/PKC3/.claude/worktrees/…` **でなければ** `cd` する
-   (`git worktree list` で自分の名前の行を探す)。⚠ `/home/user/PKC3` そのものなら、**git も npm も打たずに**依頼者へ返す
-2. 依頼された sha が自分の worktree に無ければ `git fetch origin <branch>` を**worktree の中で**打つ
-3. 全部の命令を **`cd <worktree> && …`** の形で始める(bash の cwd は `/home/user` へ戻ることがある)
+なぜ要るか(事故 2026-08-04 / 2026-09-25 #1045 / 2026-10-03 / 2026-10-04): `.claude/skills/subagent-scale/reference/agent-start.md`
 
 ## 返す形(これ以外の形で返さない)
 
