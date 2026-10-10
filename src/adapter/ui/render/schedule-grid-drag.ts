@@ -66,7 +66,7 @@ const EDGE_MAX_SPEED = 16;
 /** 掴ませない部品(チェックの印 / 外す ✕)。⚠ 属性の綴りを `schedule-drag.ts` と揃える。 */
 const NO_GRAB_SELECTOR = 'input[type="checkbox"], [data-pkc-field="task-unschedule"]';
 const RESIZE_SELECTOR = '[data-pkc-field="task-resize"]';
-const SCROLLER_SELECTOR =
+export const GRID_SCROLLER_SELECTOR =
   '[data-pkc-field="schedule-day-scroll"], [data-pkc-field="schedule-weekview-scroll"]';
 /** 影(動かす先の枠)。 */
 export const GRID_GHOST_FIELD = 'schedule-drag-ghost';
@@ -120,6 +120,23 @@ const cancelRaf = (id: unknown): void => {
   if (typeof cancelAnimationFrame === 'function' && typeof id === 'number') cancelAnimationFrame(id);
   else clearTimeout(id as ReturnType<typeof setTimeout>);
 };
+
+/**
+ * 目盛りの縁に近いとき、自動で送る量(px。負 = 上へ)。0 = 送らない。
+ * ⚠ 札を動かす掴みと、空いた所をドラッグして作る掴み(`schedule-grid-create.ts`)が**同じ 1 本**を使う。
+ */
+export function gridEdgeSpeed(scroller: HTMLElement | null, y: number): number {
+  if (scroller === null) return 0;
+  const r = scroller.getBoundingClientRect();
+  if (!(r.height > 0)) return 0;
+  if (y < r.top + GRID_EDGE_PX) {
+    return -Math.ceil((EDGE_MAX_SPEED * Math.min(GRID_EDGE_PX, r.top + GRID_EDGE_PX - y)) / GRID_EDGE_PX);
+  }
+  if (y > r.bottom - GRID_EDGE_PX) {
+    return Math.ceil((EDGE_MAX_SPEED * Math.min(GRID_EDGE_PX, y - (r.bottom - GRID_EDGE_PX))) / GRID_EDGE_PX);
+  }
+  return 0;
+}
 
 /**
  * root へ 1 度だけ配線する(`installScheduleDrag` と同じ作法)。
@@ -216,19 +233,7 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     minutesFromOffset(y - lane.getBoundingClientRect().top, laneHeightOf(lane, fallbackH));
 
   /** 目盛りの縁に近いとき、送る量(px。負 = 上へ)。0 = 送らない。 */
-  const edgeSpeed = (g: Grab): number => {
-    if (g.scroller === null) return 0;
-    const r = g.scroller.getBoundingClientRect();
-    if (!(r.height > 0)) return 0;
-    const y = g.last.y;
-    if (y < r.top + GRID_EDGE_PX) {
-      return -Math.ceil((EDGE_MAX_SPEED * Math.min(GRID_EDGE_PX, r.top + GRID_EDGE_PX - y)) / GRID_EDGE_PX);
-    }
-    if (y > r.bottom - GRID_EDGE_PX) {
-      return Math.ceil((EDGE_MAX_SPEED * Math.min(GRID_EDGE_PX, y - (r.bottom - GRID_EDGE_PX))) / GRID_EDGE_PX);
-    }
-    return 0;
-  };
+  const edgeSpeed = (g: Grab): number => gridEdgeSpeed(g.scroller, g.last.y);
   const tickScroll = (): void => {
     scrollLoop = null;
     const g = grab;
@@ -292,7 +297,7 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
       endMin: rawStart + dur,
       endAdopted: rawEnd !== null && rawEnd > rawStart,
       grabOffsetMin: minutesFromOffset(e.clientY - lane.getBoundingClientRect().top, laneHeight) - rawStart,
-      scroller: lane.closest<HTMLElement>(SCROLLER_SELECTOR),
+      scroller: lane.closest<HTMLElement>(GRID_SCROLLER_SELECTOR),
       pointerId: e.pointerId,
       pointerType: e.pointerType,
       startX: e.clientX,

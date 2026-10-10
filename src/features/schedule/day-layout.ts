@@ -205,6 +205,48 @@ export function resizeSlot(startMin: number, rawEndMin: number): number {
   return Math.min(DAY_MINUTES, Math.max(startMin + MIN_RESIZE_MINUTES, snapMinutes(rawEndMin)));
 }
 
+/** ダブルクリックで作る予定の長さ(分)。 */
+export const CREATE_DEFAULT_MINUTES = 30;
+
+/**
+ * 🔴 **空いた所をドラッグして予定を作る計算**(#855 段 B-2)。pure。
+ *
+ * `startY` / `currentY` は**列の上端からの距離(px)**(押した所と今の指の所)。上へドラッグしても
+ * 始まりと終わりを入れ替えて同じ枠にする。両端を **15 分刻み**に丸め、**最低 15 分**・0:00〜24:00 の内側。
+ * ⚠ 最低 15 分は**終わりを伸ばして**満たす(24:00 に届くときだけ始まりを前へ寄せる)。
+ */
+export function createSlot(
+  startY: number,
+  currentY: number,
+  laneHeight: number,
+): { readonly startMin: number; readonly endMin: number } {
+  const a = minutesFromOffset(startY, laneHeight);
+  const b = minutesFromOffset(currentY, laneHeight);
+  let start = snapMinutes(Math.min(a, b));
+  let end = snapMinutes(Math.max(a, b));
+  if (end - start < MIN_RESIZE_MINUTES) end = start + MIN_RESIZE_MINUTES;
+  if (end > DAY_MINUTES) {
+    end = DAY_MINUTES;
+    start = Math.min(start, DAY_MINUTES - MIN_RESIZE_MINUTES);
+  }
+  return { startMin: start, endMin: end };
+}
+
+/**
+ * ダブルクリックで作る 30 分の枠。始まりは押した所を **15 分刻み**に丸め、終わりが 24:00 を越えるなら
+ * 始まりを前へ寄せる。
+ */
+export function doubleClickSlot(
+  y: number,
+  laneHeight: number,
+): { readonly startMin: number; readonly endMin: number } {
+  const start = Math.min(
+    DAY_MINUTES - CREATE_DEFAULT_MINUTES,
+    snapMinutes(minutesFromOffset(y, laneHeight)),
+  );
+  return { startMin: start, endMin: start + CREATE_DEFAULT_MINUTES };
+}
+
 /**
  * 動かしている間に見せる時刻の字(`14:15〜15:15`)。
  * 🔑 字の組み立ては札と同じ `formatTimeSpan` 1 本(綴りを面ごとに分けない)。
