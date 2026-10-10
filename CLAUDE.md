@@ -338,7 +338,7 @@ user が「漏らすな」と言って渡した資料(以下 **機密資料**)�
 - 🔴 **レビューは「自信のある断定」の形で外す**(2026-08-22、#300 段③ / #178 で 2 件)。
   ⚠ どちらも**file:line 付きの断定**だったので、そのまま信じかけた:
   ① 動線レビュー「編集ロックはごみ箱の掃除にしか使われていない」→ **1 grep で反証**
-  (`acquireEditLock` は `binder.ts:970` / `:1063` = **編集を始めるとき**に通っている)
+  (`acquireEditLock` は `binder.ts` の**編集を始めるとき**に通っている ── 行番号は動くので書かない)
   ② レビュー 2 本 + issue「別窓の書込は黙って**消える**」→ **10 行の test で反証**
   (消えていない。履歴に在る ── 上の §4)。
   🔑 **反証は安い。** 1 grep / 10 行 ── 「大量に投げる」の相方は
@@ -395,15 +395,15 @@ user から見ると**こちらの使い方の問題が見えなくなる**。�
   残っているとき」だけ張り、着地したら畳む
 - **CI を長くしない**(PKC2 の「CI 長すぎ問題」の再発防止): PR gate は**速い lane に限定**
   (typecheck / lint / unit / build ── 目標 5 分以内、workflow の timeout 10 分 = tripwire)。
-  重い検証(視覚テスト全量・ベンチ・全 matrix・カバレッジ集計)は main push / nightly /
-  手動 dispatch に逃がす。**gate を足すときは「これは PR で走る必要があるか」を毎回問う**
+  重い検証(全量 smoke・ベンチ・全 matrix・カバレッジ集計)は**押したときだけ**
+  (`workflow_dispatch`)か nightly(⚠ 全量 smoke は夜に無い ── 下の 2026-09-11 追記)へ逃がす。**gate を足すときは「これは PR で走る必要があるか」を毎回問う**
 - **品質はサブエージェント・スキルで守る**: 実装 PR は着地前に code review(サブエージェント)を
   回す(`.claude/agents/pkc3-reviewer.md` / `/review`)。性能の主張は**測ってから言う**
   (規律の正本は本 file 冒頭の計測規律。**手順**は `.claude/skills/perf-measurement/SKILL.md`
   / `/measure`)。視覚を持つ変更は smoke(`.claude/skills/smoke-testing/`)
-- **視覚テスト**: PKC2 の視覚テスト資産(playwright-visual / visual-parity / shinsatsu)を
-  **遅くなりすぎないように改修して**使う。UI 実装が始まる P3 で導入 ──
-  PR gate には最小 smoke(数 spec・秒オーダー)のみ、全量は nightly
+- **視覚テスト**: 実ブラウザ smoke(`tests/smoke`、Playwright。手順は `.claude/skills/smoke-testing/`)。
+  PR gate には載せない ── 全量は `Smoke (手動)` を押したときだけ(下の 2026-09-09 / 09-11 追記)。
+  ⚠ PKC2 の資産名(playwright-visual / visual-parity / shinsatsu)は PKC3 には無い
 
 ### 🔴 test は**使い所を選ぶ**。減らすことが目的ではない(user 指示 2026-08-19 / 訂正 2026-08-23。不可侵)
 
@@ -429,9 +429,8 @@ user から見ると**こちらの使い方の問題が見えなくなる**。�
 ときだけである(「触ったのは 1 spec で、共有面には当たっていない」)。
 書けないなら**それは判断ではなく横着**である。
 
-**既定は「触った spec だけ」。** フル(2026-09-21 現在 **101 spec**。⚠ 件数は書かない ──
-pin が在るのは spec の数だけである。実数は
-`tests/repo-hygiene.test.ts` が pin)は**ここぞ**のときだけ ──
+**既定は「触った spec だけ」。** フル(⚠ 件数は書かない ── spec の実数は
+`tests/repo-hygiene.test.ts` が pin する)は**ここぞ**のときだけ ──
 ⚠ ただし下の「ここぞ」は**遠慮する条件ではなく、必ず回す条件**である。
 
 実測(2026-08-19): 手元の**狙い撃ち** 1〜3 spec は **4〜20 秒**。一方 CI の
@@ -452,7 +451,8 @@ pin が在るのは spec の数だけである。実数は
 > フルのまま**放置していた)。🔴 **いまは外してある** ── PR gate は
 > **型 / lint / unit / build / 検品だけ**で、全量 smoke は
 > ① `Smoke (手動)`(`smoke.yml`。Actions の **Run workflow** を押したときだけ)
-> ② `Nightly`(夜。2 つのブラウザで突き合わせる唯一の場所)の 2 か所に在る。
+> ② `Nightly`(夜。2 つのブラウザで突き合わせる唯一の場所)の 2 か所に在る
+> ── ⚠ ②は下の 2026-09-11 追記で外した。**いまは①だけ**。
 > 🔑 **1 件も減らしていない ── 起動する条件だけを変えた。**
 > ⚠ `on:` に `push` / `pull_request` を足したら
 > `tests/workflow-steps.test.ts` が全数走査で落とす。
@@ -598,19 +598,12 @@ assert を足す**。門は `scripts/smoke-budget.mjs`(`tests/smoke-budget.test.
 1. **途中は引く**: `node scripts/pick-smoke.mjs --run` ── 触った物から spec を引く。
    ⚠ **読めない物が 1 件でも混じったらフルへ倒れる**(表に無い file / CSS /
    `tests/smoke` の土台 / `src` の外 / 表そのものが無い)。表は
-   `tests/smoke/smoke-map.json`。🔴 **自動で作り直す仕掛けはどこにも無い**(2026-09-16 に実測)──
-   ここは「作り直しは **nightly** と `npm run smoke:map`」と書いてあったが、
-   `.github/workflows/` に `smoke-map` の字は **一度も在ったことがない**
-   (`git log -S 'smoke-map' -- .github/workflows/` が **0 行**)。⚠ だから表は
-   **2026-09-09 のまま**で、いま `src` の `.ts` **471 件のうち 93 件(19.7%)が表に無い**
-   ── **引こうとしてもほぼフルへ倒れる**(この規律が道具の側で成立していない)。
-   ⚠ **手で作り直す道具は在る**(`npm run build && npm run smoke:record && npm run smoke:map`)
-   ── 無いのは**それを誰かが回す仕掛け**のほうである(#993)。
-   🔴 **鳴る条件は「日数」から「表に無い割合」へ移した**(2026-09-16)── 直す前は
-   **14 日**より古いときだけ言う作りで、⚠ **7 日目のこの日は 1 度も鳴っていなかった**
-   のに、既に 2 割が漏れていた。🔑 **日数は原因ではない** ── 倒れるのは
-   「表に無い file を触ったとき」なので、1 日古いだけでも、その日に足された file を
-   触れば倒れる(門は `tests/pick-smoke.test.ts`)。
+   `tests/smoke/smoke-map.json`。作り直す口は 2 つ ── Actions の **`smoke-map.yml`**
+   (押したときだけ。#993)と手元の `npm run build && npm run smoke:record && npm run smoke:map`。
+   🔑 鳴る条件は**日数ではなく「表に無い割合」**(`tests/pick-smoke.test.ts`)── 倒れるのは
+   「表に無い file を触ったとき」なので、1 日古いだけでも、その日に足された file を触れば倒れる。
+   ⚠ 自動で作り直す仕掛けは**無い**(2026-09-16 に 19.7% が漏れていた。2026-10-02 の作り直しで
+   2.5%)── `pick-smoke` が割合を言ったら、`smoke-map.yml` を押す。
 2. **着地の直前に 1 回だけフル**。⚠ ここは**引かない** ── 表が言えるのは
    「**あの日の版で動かした**」であって「これから動かしうる」ではない(TIA の定石)
 3. **push はまとめる** ── ⚠ 2026-08-19 の「push 1 回 = CI のフル 1 回」は
@@ -1182,7 +1175,7 @@ inline `<style>` 1,249 行 + inline `<script>` 1,609 行が**複製**されて�
 - 🔑 **出す場は issue にする**(会話に流すと消える)── 「いまこう見える → こうすると
   こう良くなる」を**画面の言葉**で並べる
 - 🔑 **出どころを 1 つ決める**: `pkc3-ux-reviewer` を「不具合探し」だけでなく
-  **「良くできる所探し」でも回す**(いまは動線の欠陥しか見ていない)
+  **「良くできる所探し」でも回す**(その節は `.claude/agents/pkc3-ux-reviewer.md` に在る)
 - ⚠ 提案が無いまま「言われたことは全部やりました」で閉じるのは、**この指示を満たしていない**
 
 #### 🔴 見え方を変える判断は user のもの ── **「報告への修理」でも例外にしない**(user 指示 2026-08-28。不可侵)
@@ -1312,9 +1305,9 @@ npm run lint       # eslint src tests build scripts
 
 ## 段階(正本 doc §11)
 
-P1 bootstrap → P2 計測 + sqlite core → P3 app 層の総合的見直し + リーン集約 →
-P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PWA 仕上げ)。
-各段階が単独で着地し、単独で計測できる。「効果が小さい」は棄却理由にしない。
+P1〜P7(bootstrap → sqlite core → app 層 → assets → revisions → import/export → v3.0.0)は
+**全部着地済み**(いまは v3.3.0 以降、issue 単位の継続改善)。残る原則は 1 つ ──
+各段が単独で着地し、単独で計測できる形にする。「効果が小さい」は棄却理由にしない。
 
 ## 検証の規律(2026-08-02 に確立。P6c〜P6f の実測から)
 
@@ -1638,8 +1631,8 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
 
 - 🔴 **`SURVIVED` の半分は「弱い」ではなく「通っていない」**(2026-08-07)。変異は当たったのに
   **test がその行を 1 度も実行していない**ことがある ── 履歴パネルのガードを消す変異が
-  生き延びた原因は assert ではなく、`render()` が**指紋(selectedLid / body / phase /
-  revisionPanel)が同じなら何もせず返る**ことで、test は `entryMetas` だけ動かしていたため
+  生き延びた原因は assert ではなく、`render()` が**指紋(当時 4 項: selectedLid / body / phase /
+  revisionPanel。いまは 6 項、`detail.ts` の `render()` 冒頭)が同じなら何もせず返る**ことで、test は `entryMetas` だけ動かしていたため
   **その関数に入っていなかった**。🔑 生き延びたら **assert を足す前に「通っているか」を疑う**
   ── 壊す代わりに `throw` を置いて、落ちなければ**誰も通っていない**。
   手順は `.claude/skills/mutation-testing/SKILL.md`
@@ -1729,7 +1722,8 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
   使い、未 commit の workflow 変更を失った(入れ直した)。⚠ CLAUDE.md と
   `.claude/skills/mutation-testing/SKILL.md` の**2 か所に書いてあって止まらなかった**。
   🔑 文言を 3 か所目にせず、**戻しをハーネスの `finally` に閉じ込める**(手で戻す手順を残さない)
-- 🔴 **結果は `KILLED` / `SURVIVED` / `NOT-APPLIED` の 3 値で出す**
+- 🔴 **結果は `KILLED` / `SURVIVED` / `NOT-APPLIED` で出す**(時間切れは `TIMEOUT`、計器が
+  立たなかったら `INFRA` ── 計 5 値。`.claude/skills/mutation-testing/SKILL.md` §2.1)
   (= **「当たらなかった変異」と「生き延びた変異」を区別する**。2026-08-04、1 セッションで
   2 度踏んだ)。変異が**適用されていない**とき、結果は「生存」と見分けがつかない ──
   **空振りを合格と読む**。① shell の引用で python が SyntaxError になり変異が当たらなかった
@@ -1789,7 +1783,7 @@ P4 assets → P5 revisions → P6 import/export → P7 v3.0.0(Pages product + PW
     ハーネスは 2 度とも**ぶら下がったまま**で、殺したら(上の 2 度目と同じく)
     変異が作業ツリーに残った。
     🔑 ハーネス側:**`timeout -k` で確実に殺す** / **各変異の直後に必ず戻す**
-    (`trap` だけに頼らない)/ **`124` / `137` は `HUNG` として出す**
+    (`trap` だけに頼らない)/ **`124` / `137` は `HUNG` として出す**(ハーネスの出力名は `TIMEOUT`)
     (`SURVIVED` と混ぜない ── 3 値の規律に 4 つ目が要る)。
     🔴 **製品側のほうが本題である** ── 門が 1 つ消えただけで固まるなら、
     **門の置き方が悪い**。この件の輪は「`onState` の中から `dispatch` する」
@@ -2597,6 +2591,7 @@ hook は在る** ── `cd <作業ツリー>` 1 行で通る。🔴 **そのと
 | `pr-landing/` | PR を作って着地させる(1 主題 / 止めて裁定を仰ぐ条件) |
 | `github-tools/` | **GitHub を叩く道具立てと罠**(直 curl は塞がれている / 閉じるついでに本文を消す / 計器が凍る) |
 | `sandbox-hygiene/` | **この箱の性質**(作り直される / ディスクの枠 / cwd が戻る ── 手元の物を失わない) |
+| `office-oracle/` | **Office(LibreOffice wasm)を手元に立てて測る**(「この箱では確かめられない」と書く前に読む) |
 | `session-handoff/` | 引き継ぎ **PR** の作り方(最初の仕事の有無は必須) |
 | `knowledge-reflection/` | **教訓を資産へ分割して残す**(`.claude更新`) |
 
@@ -2698,9 +2693,9 @@ hook は在る** ── `cd <作業ツリー>` 1 行で通る。🔴 **そのと
   - 🔴 **古い調査から起票するときは、起票の直前に現状を確かめる**(同日、user 指摘
     「**対応済みを誤認したらどうする?その抜けをお前はフォローできるのか?**」)。
     11 日前の doc から 6 件を起票したら、**2 件が事実と食い違っていた** ──
-    A-3「固定順のみ」は**手動の並べ替えが既に実装済み**(`binder.ts:762`)、
+    A-3「固定順のみ」は**手動の並べ替えが既に実装済み**(`binder.ts`)、
     A-7「データはあるのに触れない」は**親子関係は情報ペインに出ている**
-    (`inspector.ts:126`)。⚠ 誤った起票は**自分では気づけない** ── 次に読む人が
+    (`inspector.ts`)。⚠ 誤った起票は**自分では気づけない** ── 次に読む人が
     「無い」を前提に作り、既に在るものを二重に作る。
     🔑 **1 件 1 grep でよい**(実際 2 分で 2 件見つかった)。書くのは「doc にこう
     書いてある」ではなく **「いま実装がこうである」**

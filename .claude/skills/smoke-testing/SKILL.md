@@ -16,9 +16,8 @@ npm run smoke:pick
 # 🟢 引く先が分かっているなら直に ── **触った spec だけ**(4〜20 秒)
 npm run test:smoke -- tests/smoke/<触った>.smoke.spec.ts
 
-# 🔴 全量(2026-09-21 現在 101 spec ── この数だけが tests/repo-hygiene.test.ts で pin されている)。
-#    **着地の直前に 1 回だけ**。2026-09-09 実測: 手元 headless_shell・`workers: 4` で
-#    約 7 分(`workers: 1` だった頃は 13.2 分)
+# 🔴 全量(spec 数は tests/repo-hygiene.test.ts が pin)。**着地の直前に 1 回だけ**。
+#    `workers: 2`(playwright.config.ts ── 4 は箱に多すぎた)で手元 約 8〜13 分(箱の負荷で動く)
 npm run test:smoke
 ```
 
@@ -204,7 +203,10 @@ node scripts/pick-smoke.mjs src/a.ts     # file を直に渡す
 上限は `scripts/smoke-budget.mjs` の `BOOT_BUDGET`(`tests/smoke-budget.test.ts` が pin)。
 ⚠ **上げてよい。ただし理由を 1 行書く** ── 黙って上げると、何も守らない数字になる。
 
-#### ③ 作り直す ── `npm run smoke:record && npm run smoke:map`
+#### ③ 作り直す ── `smoke-map.yml` を押す(#993)か、手元で `npm run smoke:record && npm run smoke:map`
+
+🟢 Actions の `smoke-map.yml`(`workflow_dispatch` のみ)が同じ 3 手を CI で回して表を commit する。
+`pick-smoke` が「表に無い割合」を言ったら押す(2026-10-02 の作り直しで 19.7% → 2.5%)。
 
 ```bash
 npm run build                 # ⚠ smoke は dist を配る
@@ -212,9 +214,9 @@ npm run smoke:record          # PKC3_SMOKE_COVERAGE=1 で全量(記録つき)
 npm run smoke:map             # coverage-smoke/ → tests/smoke/smoke-map.json
 ```
 
-⚠ **記録は既定では取らない**(取ること自体が遅くする)。表が古くなっても
-**引く側が「表に無い」でフルへ倒れる**ので、腐り方は安全側である。
-🔑 ただし**古い表は引きすぎず・引かなすぎる**ので、spec を大きく足したら作り直す。
+⚠ **記録は既定では取らない**(取ること自体が遅くする)。表が古くなると
+**引く側が「表に無い」でフルへ倒れる** ── 安全側だが、**規律が道具の側で成立しなくなる**
+(2026-09-16 に 7 日で 19.7% が漏れ、ほぼ毎回フルへ倒れていた)。鳴る条件は `tests/pick-smoke.test.ts`。
 
 ⚠ **表が言えるのは「あの日の版で動かした」だけ** ── 「これから動かしうる」は
 言えない(TIA の定石)。だから**着地の 1 回はフルのまま**にする。

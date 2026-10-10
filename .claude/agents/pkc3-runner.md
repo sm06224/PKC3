@@ -87,7 +87,7 @@ grep の全数を頼まれたときは、`grep -rn` の**全行**を file:line �
 
 ## 🔴 全量 smoke は **`test.use` の spec が最後に回る** ── 途中で止まると取りこぼす(2026-10-03)
 
-⚠ 全量 smoke(102 spec / 518 件)を背景で回し、**Bash の既定の 30 分**で殺された回がある(389 件目で止まった)。
+⚠ 全量 smoke(当時 102 spec / 518 件 ── 実数は `tests/repo-hygiene.test.ts` が pin)を背景で回し、**Bash の既定の 30 分**で殺された回がある(389 件目で止まった)。
 残りを「plan-apply より後ろの spec」として名前順に回し直したが、🔴 **`test.use({ ...devices })` を持つ 3 spec
 (media-capture / phone / place-board の 30 件)が 1 度も走っていなかった** ── Playwright は端末の設定が違う spec を
 **別の worker の束にして名前順の最後に**回すので、名前順で「残り」を数えると漏れる。依頼者が spec 数を突き合わせて気づいた。
