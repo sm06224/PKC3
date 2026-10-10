@@ -393,6 +393,23 @@ describe('掴む口(block-grip)', () => {
     expect(gripLeft({ left: 0, right: 1000 }, { left: 23, right: 500 }), '余白ちょうどなら左の端').toBe(0);
   });
 
+  it('🔴 原文を読んだ答えは描き直しごとに読み直す ── 同じ行の塊の閉じが動いたら、新しい範囲を出す(#1467 の控え)', () => {
+    const s = setup();
+    teardown = s.unbind;
+    const v1 = '# 題\n\n:::note\n一\n:::\n';
+    s.host.innerHTML = renderMarkdown(v1, { sourceLineAnchors: true });
+    installBlockGrip(s.region, s.host, 'n1', v1);
+    s.hover(s.block(2));
+    s.hover(s.block(2)); // 2 度目は控えから
+    expect(s.grip()!.getAttribute(BLOCK_END_ATTR)).toBe('4');
+    // 同じ開き行のまま、中身が 2 行増えて閉じが下へ動いた
+    const v2 = '# 題\n\n:::note\n一\n二\n三\n:::\n';
+    s.host.innerHTML = renderMarkdown(v2, { sourceLineAnchors: true });
+    installBlockGrip(s.region, s.host, 'n1', v2);
+    s.hover(s.block(2));
+    expect(s.grip()!.getAttribute(BLOCK_END_ATTR), '前の描画の答えを使い回した(閉じが古い)').toBe('6');
+  });
+
   it('閉じていない ::: の塊には口を出さない(末尾まで飲んでいるので範囲が無い)', () => {
     const s = setup();
     teardown = s.unbind;
