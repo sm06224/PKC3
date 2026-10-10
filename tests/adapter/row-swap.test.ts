@@ -838,6 +838,63 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
    * **箱の高さごと壊れる**。⚠ happy-dom では溢れが常に 0 なのでこの門は素通りする
    * (= 出力では殺せない)。だから**溢れを差してから**読めない高さを渡す。
    */
+  /**
+   * 🔴 **伸ばすのをブラウザに任せられるときは、行数を書かず、高さも測らない**(#1467)。
+   * ⚠ 測ると配置が強制され、行数を書くともう 1 度汚れる ── 20,000 行の編集で 1 打鍵に 3 回の配置
+   *   (trace)。happy-dom は `field-sizing` を持たないので、`CSS.supports` を差して分岐を通す。
+   */
+  it('🔴 field-sizing が効くなら、打鍵で rows を書かず scrollHeight も読まない', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    // ⚠ 本物のブラウザと同じく、ありえない値には偽を返す(happy-dom の本物は何でも真)
+    vi.stubGlobal('CSS', {
+      supports: (p: string, v?: string) => p === 'field-sizing' && v === 'content',
+    });
+    let read = 0;
+    Object.defineProperty(ta, 'scrollHeight', {
+      get: () => {
+        read += 1;
+        return 55;
+      },
+      configurable: true,
+    });
+    const before = ta.getAttribute('rows');
+    try {
+      ta.value = 'いち\nに\nさん';
+      ta.dispatchEvent(new Event('input'));
+      expect(read, '任せられるのに高さを測っている(配置を強制する)').toBe(0);
+      expect(ta.getAttribute('rows'), '任せられるのに rows を書いている(配置を汚す)').toBe(before);
+      expect(ta.hasAttribute('data-pkc-autosize'), 'CSS に任せる印が無い').toBe(true);
+      expect(ta.style.getPropertyValue('--pkc-autosize-cap'), '上限の行数を CSS へ渡していない').toBe('40');
+      expect(ta.hasAttribute('data-pkc-scroll')).toBe(false);
+      // 上限を超えたら箱の中で送る印(変わるときだけ書く)
+      ta.value = Array.from({ length: 45 }, (_, i) => `行 ${i}`).join('\n');
+      ta.dispatchEvent(new Event('input'));
+      expect(ta.getAttribute('data-pkc-scroll'), '上限を超えたのに箱の中で送る印が無い(値は 1)').toBe('1');
+      ta.value = '短い';
+      ta.dispatchEvent(new Event('input'));
+      expect(ta.hasAttribute('data-pkc-scroll'), '上限を下回ったのに印が残る').toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('field-sizing が効かないなら、これまでどおり rows を数える(対照群)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    vi.stubGlobal('CSS', { supports: () => false });
+    try {
+      ta.value = 'いち\nに\nさん';
+      ta.dispatchEvent(new Event('input'));
+      expect(Number(ta.rows)).toBe(3);
+      expect(ta.hasAttribute('data-pkc-autosize')).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('🔴 行の高さが読めない版面では、折り返しを数えない', () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));

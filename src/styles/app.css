@@ -2188,6 +2188,23 @@ li[data-pkc-row-slot] {
   overflow: auto;
   resize: vertical;
 }
+/* 🔴 **中身に合わせて伸ばすのをブラウザに任せる**(#1467)── 印は `sizeTextareaToContent` が付ける。
+ * 打鍵のたびに JS で行数を数えて高さを測る代わり(配置が 1 打鍵 3 回 → 1 回になる)。
+ * 上限は `--pkc-autosize-cap` 行(JS が書く。既定は 40)── 超えたら箱の中で送る。
+ * ⚠ 段組みの上限(`[data-pkc-columns-on] [data-pkc-field='row-source']`)のほうが詳しい選択子なので勝つ。
+ * ⚠ 余白と枠のぶん(6px)は `row-source` の値(上下 2px + 1px)。他の欄では数 px の差は気にしない */
+@supports (field-sizing: content) {
+  textarea[data-pkc-autosize] {
+    field-sizing: content;
+    overflow-y: auto;
+  }
+  /* ⚠ 上限は**いちばん弱い選択子**(`:where` で 0)にする ── 章の欄・コードの欄は面の高さに合わせた
+   *   自前の上限(`section-draft-input` / `code-draft-input`)を持つので、そちらを必ず勝たせる
+   *   (1 稿目は勝ってしまい、45 行の章で箱が面からあふれ、見出しが帯の下に隠れた) */
+  :where(textarea[data-pkc-autosize]) {
+    max-height: calc(var(--pkc-autosize-cap, 40) * 1lh + 6px);
+  }
+}
 [data-pkc-field='row-source']:focus-visible {
   outline-width: 1px;
 }

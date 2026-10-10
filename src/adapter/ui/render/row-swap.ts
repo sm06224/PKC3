@@ -118,6 +118,20 @@ const PROSE_ROW_ATTR = 'data-pkc-row-prose';
  */
 const ROWS_CAP = 40;
 
+/** 中身に合わせて伸ばすのをブラウザに任せた入力欄の印(`app.css` と 1 対 1)。 */
+const AUTOSIZE_ATTR = 'data-pkc-autosize';
+
+/**
+ * `field-sizing: content` が効くか(Chromium 123 以降)。
+ * ⚠ **ありえない値に偽を返すことも見る** ── 版面を持たない環境(happy-dom)の `CSS.supports` は
+ *   何を聞いても真を返すので、それだけで信じると「伸ばすのを任せたのに、誰も伸ばさない」形になる。
+ */
+function fieldSizingSupported(ta: HTMLTextAreaElement): boolean {
+  const css = ta.ownerDocument.defaultView?.CSS;
+  if (typeof css?.supports !== 'function') return false;
+  return css.supports('field-sizing', 'content') && !css.supports('field-sizing', 'pkc-not-a-value');
+}
+
 /**
  * 🔴 **折り返しで増えた視覚の行を数える**(2026-08-15、user 報告)。
  *
@@ -154,6 +168,29 @@ function wrappedExtraRows(ta: HTMLTextAreaElement): number {
  */
 export function sizeTextareaToContent(ta: HTMLTextAreaElement, cap: number = ROWS_CAP): void {
   const logical = Math.max(1, ta.value.split('\n').length);
+  /**
+   * 🔴 **ブラウザが中身に合わせて伸ばせるなら、任せる**(#1467。`field-sizing: content`)。
+   * ⚠ 下の経路は打鍵のたびに `rows` を書いて `scrollHeight` を読む ── 読んだ瞬間に配置が強制され、
+   *   書いた `rows` がもう 1 度配置を汚す。配置は本文の行の数に比例するので、20,000 行の編集では
+   *   1 打鍵に 3 回 × 約 40 ms 払っていた(trace)。任せると 1 回で済む(実験 123 → 45 ms)。
+   * 🔑 見え方は同じ(中身の高さぴったり / 上限を超えたら箱の中で送る)。上限は CSS が
+   *   `--pkc-autosize-cap` 行で引く(`app.css` の `[data-pkc-autosize]`)。
+   * ⚠ 任せられないブラウザ(`CSS.supports` が偽)は、これまでどおり下で数える。
+   */
+  if (fieldSizingSupported(ta)) {
+    if (!ta.hasAttribute(AUTOSIZE_ATTR)) {
+      ta.setAttribute(AUTOSIZE_ATTR, '');
+      ta.style.setProperty('--pkc-autosize-cap', String(cap));
+    }
+    // ⚠ 変わるときだけ書く(書くだけで配置が汚れる)
+    const over = logical > cap;
+    // ⚠ 値は下の経路と同じ '1'(読み手は値で見る)
+    if (over !== ta.hasAttribute('data-pkc-scroll')) {
+      if (over) ta.setAttribute('data-pkc-scroll', '1');
+      else ta.removeAttribute('data-pkc-scroll');
+    }
+    return;
+  }
   ta.rows = Math.min(logical, cap);
   // 🔑 測るのは上限に届いていないときだけ(打鍵ごとの reflow を増やさない)
   const wanted = logical < cap ? logical + wrappedExtraRows(ta) : logical;
