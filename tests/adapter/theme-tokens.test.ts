@@ -78,7 +78,7 @@ const PAIRS: readonly { fg: string; bg: string; min: number; what: string }[] = 
    * ⚠ **名前を pin する検査では守れない** ── `shell-a11y.test.ts` は
    *   `var(--fg)` という**綴り**しか見ないので、**名前が同じまま値が変わる**日に
    *   何も鳴らない(CLAUDE.md §1「需要の数を見て供給を見ていない」の色版)。
-   * ⚠ terminal は余裕 0.59(3.59)で 9 配色中いちばん薄い ── 次にこの配色を
+   * ⚠ terminal は余裕 0.59(3.59)で 9 配色(当時)中いちばん薄い ── 次にこの配色を
    *   触る人が気づけるように、ここで下限を持つ。
    */
   { fg: '--fg', bg: '--accent-dim', min: 3, what: '選んでいるタブの下線' },

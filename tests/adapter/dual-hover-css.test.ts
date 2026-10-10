@@ -44,8 +44,8 @@ const rgb = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i
 describe('2 ペインの行: hover と印(marked)の色(#312 ①)', () => {
   // ⚠ 空振り防止 ── テーマの数え上げは選択画面の一覧(THEMES)と突き合わせる。
   //   tokens.css を数え直すと「両方から消えた」を見逃す(docs-parity が 1 対 1 を守る)
-  it('前提: テーマが 9 つ在る(減ったらこの test の走査範囲も減っている)', () => {
-    expect(THEMES.length).toBe(9);
+  it('前提: テーマが 10 個在る(減ったらこの test の走査範囲も減っている)', () => {
+    expect(THEMES.length).toBe(10);
   });
 
   it('🔴 --surface-hover が全テーマに定義されている(欠けたテーマだけ hover が消える)', () => {

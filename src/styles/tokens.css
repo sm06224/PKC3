@@ -228,6 +228,30 @@
   color-scheme: dark;
 }
 
+/* レトロ(茶とオレンジ。PKC1 の配色を暗い地へ移した試用版。#1458)
+   橙は選択・リンク・帯にだけ使う(地は茶の無彩寄り。色は情報にだけ) */
+:root[data-pkc-theme='retro'] {
+  --bg: #1f150e;
+  --surface: #2a1d14;
+  --surface-2: #3a2a1c;
+  --surface-hover: #33241a;
+  --fg: #e8e4dc; /* PKC1 の beige */
+  --muted: #b9a68d;
+  --border: #5a4128;
+  --accent: #e8a840; /* PKC1 の orange */
+  --accent-fg: #1f150e;
+  --accent-dim: #8b4513; /* PKC1 の brown */
+  --accent-dim-fg: #fff1d9;
+  --danger: #f08a78;
+  --warn: #f0b84a;
+  /* コードの色(地は `--surface-2`) */
+  --code-key: #e8a840;
+  --code-lit: #b9cf92;
+  --shadow: 0 2px 6px rgb(0 0 0 / 55%);
+  --sandbox-bg: #ffffff;
+  color-scheme: dark;
+}
+
 /* 幾何とフォント ── **テーマで変えない**(配色ではないので) */
 :root {
   --radius: 3px;
