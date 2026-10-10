@@ -956,6 +956,78 @@ describe('掴んで動かす(place-drag)', () => {
     off();
   });
 
+  it('🔴 掴んでいる最中に板が作り直されても、新しい要素へ掴みが移り、動かした先で書く(#1499)', () => {
+    const { host, events, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    // 描き直しが届いて、#p1 が作り直された(差分描画は中身の変わった塊を新しい要素に替える)
+    const fresh = block.cloneNode(true) as HTMLElement;
+    fresh.removeAttribute('style');
+    block.replaceWith(fresh);
+    applyPlaceLayout(host, () => null, 0);
+    expect(fresh.style.left, '前提: 作り直した板は本文の位置').toBe('120px');
+    move(40, -10);
+    expect(fresh.style.left, '新しい要素が手に付いて動かない').toBe('160px');
+    expect(fresh.style.top).toBe('30px');
+    up(40, -10);
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev, '作り直された後の移動が書かれていない').toMatchObject({
+      rewrite: { kind: 'place-move', line: 0, x: 160, y: 30 },
+    });
+    expect(fresh.style.left, '離した位置を保っていない').toBe('160px');
+    off();
+  });
+
+  it('🔴 離す直前(最後に動かした後)に作り直されても、新しい要素で書いて、離した位置を保つ(#1499)', () => {
+    const { host, d, grip, block, off } = mounted();
+    const sent = vi.spyOn(d, 'dispatch');
+    down(grip);
+    move(30, -10);
+    const fresh = block.cloneNode(true) as HTMLElement;
+    fresh.removeAttribute('style');
+    // 作り直しで、板の開き行も変わった(上に行が増えた)── 同じ板かは id で見る
+    fresh.setAttribute('data-pkc-source-line', '2');
+    block.replaceWith(fresh);
+    applyPlaceLayout(host, () => null, 0);
+    up(30, -10);
+    // ⚠ この台の本文は描き直していないので、行 2 への書換は reducer が断る ── 見るのは「どの行で頼んだか」
+    const moved = sent.mock.calls.map((c) => c[0]).find((a) => a.type === 'MOVE_PLACE');
+    expect(moved, '新しい要素の開き行で頼んでいない').toMatchObject({ type: 'MOVE_PLACE', line: 2, x: 150, y: 30 });
+    sent.mockRestore();
+    off();
+  });
+
+  it('離す直前に作り直されても、離した位置を新しい要素が保つ(#1499)', () => {
+    const { host, events, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    const fresh = block.cloneNode(true) as HTMLElement;
+    fresh.removeAttribute('style');
+    block.replaceWith(fresh);
+    applyPlaceLayout(host, () => null, 0);
+    up(30, -10);
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      rewrite: { kind: 'place-move', line: 0, x: 150, y: 30 },
+    });
+    expect(fresh.style.left, '新しい要素が離した位置を保っていない').toBe('150px');
+    off();
+  });
+
+  it('id の無い板は開き行で同じ板を見つける(#1499)', () => {
+    const { events, grip, block, off } = mounted();
+    block.removeAttribute('id');
+    down(grip);
+    move(30, -10);
+    const fresh = block.cloneNode(true) as HTMLElement;
+    fresh.removeAttribute('style');
+    block.replaceWith(fresh);
+    move(30, -10);
+    expect(fresh.style.left, '開き行で見つけられていない').toBe('150px');
+    up(30, -10);
+    expect(events.some((e) => e.type === 'REQUEST_BODY_REWRITE')).toBe(true);
+    off();
+  });
+
   it('🔴 書換が断られたとき(編集中など)は、離した後に元の位置へ戻る(#1464 案 3)', () => {
     const { d, grip, block, off } = mounted();
     d.dispatch({ type: 'START_EDIT' });
