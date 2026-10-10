@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
 import {
@@ -7,6 +8,7 @@ import {
   minutesOf,
   pieceOf,
   placeColumns,
+  MIN_SLOT_MINUTES,
   splitDay,
   type DayPiece,
 } from '../../src/features/schedule/day-layout';
@@ -108,6 +110,17 @@ describe('重なる予定を横に並べる(placeColumns)', () => {
     expect(byKey(r)).toEqual({ a: [0, 1], b: [0, 1] });
   });
 
+  it('🔴 30 分未満の予定は、描く高さ(30 分)で重なりを判定する ── 15 分の 2 件が上下に覆い合わない', () => {
+    const r = placeColumns([p('a', '14:00', '14:15'), p('b', '14:15', '14:30')]);
+    expect(byKey(r), '15 分の 2 件が同じ列に入り、1 件目の札が 2 件目を覆う').toEqual({
+      a: [0, 2],
+      b: [1, 2],
+    });
+    // 返す長さは実際の分のまま(高さを決めるのは CSS の最低の高さ)
+    expect(r.find((x) => x.key === 'a')!.endMin).toBe(14 * 60 + 15);
+    expect(MIN_SLOT_MINUTES).toBe(30);
+  });
+
   it('重なれば横に分け、幅は 1/列数', () => {
     const r = placeColumns([p('a', '14:00', '15:30'), p('b', '15:00', '16:00')]);
     expect(byKey(r)).toEqual({ a: [0, 2], b: [1, 2] });
@@ -142,6 +155,20 @@ describe('重なる予定を横に並べる(placeColumns)', () => {
 
   it('空は空', () => {
     expect(placeColumns([])).toEqual([]);
+  });
+});
+
+describe('描く最低の長さと CSS の最低の高さが同じ値', () => {
+  it('🔴 MIN_SLOT_MINUTES = 札の最低の高さ(1 時間の半分)── 片方だけ動くと、重なりの判定と見た目が食い違う', () => {
+    const css = readFileSync('src/styles/app.css', 'utf-8');
+    const tokens = readFileSync('src/styles/tokens.css', 'utf-8');
+    const rule = /\[data-pkc-field='schedule-day-lane'\] > \[data-pkc-entry\] \{([^}]*)\}/.exec(css);
+    expect(rule, '目盛りの札の規則が見つからない').not.toBeNull();
+    const h = /height:\s*max\(calc\(var\(--day-hour\) \/ (\d+)\)/.exec(rule![1]!);
+    expect(h, '最低の高さが「1 時間の 1/N」の形でない').not.toBeNull();
+    const hour = /--day-hour:\s*(\d+)px/.exec(tokens);
+    expect(hour, '--day-hour が見つからない').not.toBeNull();
+    expect(60 / Number(h![1])).toBe(MIN_SLOT_MINUTES);
   });
 });
 

@@ -15,9 +15,8 @@
  * | 幅が 0 や逆(`14:00..14:00`) | 幅なしと同じ(30 分) |
  * | 24:00 を越える | **24:00 で切る** |
  *
- * ⚠ **重なりの判定は実際の分で行う**(画面の最低の高さではない)── 画面の読みやすさのために
- *   高さを持ち上げても、`14:00..15:00` と `15:00..16:00` が重なったことにはならない
- *   (接しているだけ。同じ列に並ぶ)。
+ * ⚠ **重なりの判定は画面に描く長さで行う**(30 分未満の予定は 30 分ぶんの高さで描くので、その長さで)。
+ *   `14:00..15:00` と `15:00..16:00` は接しているだけなので重ならない(同じ列に並ぶ)。
  */
 import type { AgendaItem } from './agenda';
 
@@ -26,6 +25,13 @@ export const DAY_MINUTES = 24 * 60;
 
 /** 幅のない予定を目盛りに置くときの長さ(分)。 */
 export const DEFAULT_SPAN_MINUTES = 30;
+
+/**
+ * 🔴 **画面に描く最低の長さ(分)** ── 札の最低の高さ(`app.css` の `calc(var(--day-hour) / 2)`)と同じ値。
+ * ⚠ 重なりの判定は**この長さで**行う(着地前レビューが読んで指摘)── 実際の分だけで判定すると、
+ *   `14:00..14:15` と `14:15..14:30` は同じ列に入るのに、画面では 1 件目の札が 2 件目の上半分を覆って押せない。
+ */
+export const MIN_SLOT_MINUTES = 30;
 
 /**
  * `HH:MM` を 0 時からの分にする。読めない字は `null`。
@@ -117,17 +123,19 @@ export function placeColumns(pieces: readonly DayPiece[]): DaySlot[] {
     clusterEnd = -1;
   };
   for (const p of sorted) {
+    // ⚠ 判定は画面に描く長さで(上の MIN_SLOT_MINUTES)。返す endMin は実際の分のまま
+    const drawnEnd = Math.max(p.endMin, p.startMin + MIN_SLOT_MINUTES);
     // 接しているだけ(前の終わり == 次の始まり)は重なりではない
     if (cluster.length > 0 && p.startMin >= clusterEnd) flush();
     let col = colEnds.findIndex((end) => end <= p.startMin);
     if (col === -1) {
       col = colEnds.length;
-      colEnds.push(p.endMin);
+      colEnds.push(drawnEnd);
     } else {
-      colEnds[col] = p.endMin;
+      colEnds[col] = drawnEnd;
     }
     cluster.push({ piece: p, col });
-    clusterEnd = Math.max(clusterEnd, p.endMin);
+    clusterEnd = Math.max(clusterEnd, drawnEnd);
   }
   flush();
   return out;

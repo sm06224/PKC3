@@ -30,7 +30,6 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import {
-  AGENDA_REPEAT_HORIZON_DAYS,
   buildAgenda,
   itemOfCard,
   itemOfNote,
@@ -41,7 +40,6 @@ import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
-import { daysBetween } from '@features/datetime/date-math';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
 import { createTaskCard, patchTaskCard } from './task-card';
@@ -49,10 +47,21 @@ import { createTaskCard, patchTaskCard } from './task-card';
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
 /**
- * 「日」で先の日を見るときの、繰り返しを数える日数の上限(5 年)。
- * ⚠ 上限が無いと、遠い日を指した 1 回の操作で束が際限なく作られる(`agenda.ts` の窓と同じ理由)。
+ * 🔴 **「日」に出す 1 日ぶん**(#855 段 A-1)── **その日を「起点の日」にして** `buildAgenda` に束ねさせる。
+ *
+ * ⚠ 一覧の束(今日を起点に 62 日先まで)から拾わない ── 拾うと、繰り返しは**過ぎた日に 1 枚も出ず**、
+ *   先の日も**回の上限(200)で途切れる**(`毎日` は 200 日先から空になる。着地前レビューが読んで指摘)。
+ * 🔑 起点をその日にすると、繰り返しは**その日から**数えるので(`firstIndexFrom` が直に飛ぶ)、何年先でも
+ *   過ぎた日でも 1 回ぶんだけ展開する。展開の規則は `buildAgenda` 1 本のまま(規則を 2 つ持たない)。
+ * ⚠ 一覧が過ぎた回を出さないのは「期限切れが 340 個並ぶ」からで、1 日だけを見る面にその理由は当たらない。
  */
-const DAY_HORIZON_MAX_DAYS = 366 * 5;
+function dayItems(
+  items: readonly AgendaItem[],
+  day: string,
+  skip: ReadonlyMap<string, ReadonlySet<string>>,
+): readonly AgendaItem[] {
+  return buildAgenda(items, day, false, { skip, horizonDays: 0 }).find((g) => g.date === day)?.cards ?? [];
+}
 
 /** 落とし先を表す属性。⚠ **空文字 = 日付なし**(属性が無いのとは別物)。 */
 export const DROP_DATE = 'data-pkc-drop-date';
@@ -90,7 +99,11 @@ export class ScheduleRenderer {
     groups: HTMLElement;
     /** 「一覧 / 日」の 2 つ(#855 段 A-1)。 */
     modes: HTMLButtonElement[];
+    /** 「予定を足す」の日付の欄(「日」では見ている日に合わせる)。 */
+    quickDate: HTMLInputElement;
   } | null = null;
+  /** 「予定を足す」の日付を最後に合わせた日(`null` = 合わせていない)。 */
+  private quickDay: string | null = null;
   /** 「日」の描き手(#855 段 A-1)。一覧のときは隠すだけで捨てない(札と位置を使い回す)。 */
   private readonly day = new ScheduleDay(DROP_DATE);
   private last: {
@@ -198,19 +211,8 @@ export class ScheduleRenderer {
      */
     const dayMode = state.scheduleMode === 'day';
     const shown = state.scheduleDay ?? today;
-    /**
-     * 🔴 **「日」で先の日を見るとき、繰り返しがその日まで届くように窓を伸ばす**(#855 段 A-1)。
-     * ⚠ 伸ばさないと、`毎週` の予定が 3 か月先の日には**出ない**(束が作られていない)。
-     * 🔑 展開の規則は `buildAgenda` 1 本のまま ── ここは窓の長さを渡すだけ(規則を 2 つ持たない)。
-     *   過ぎた日の繰り返しは一覧と同じく出さない(今日から先だけ)。
-     */
-    const ahead = dayMode ? (daysBetween(today, shown) ?? 0) : 0;
-    const groups = buildAgenda(items, today, state.showUndatedTasks, {
-      skip: materializedDates(all),
-      ...(ahead + 1 > AGENDA_REPEAT_HORIZON_DAYS
-        ? { horizonDays: Math.min(ahead + 1, DAY_HORIZON_MAX_DAYS) }
-        : {}),
-    });
+    const skip = materializedDates(all);
+    const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
     this.paintMonth(frame, state, today, groups);
@@ -243,11 +245,20 @@ export class ScheduleRenderer {
       if (m.getAttribute('aria-pressed') !== pressed) m.setAttribute('aria-pressed', pressed);
     }
     this.day.el.hidden = !dayMode;
+    /**
+     * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
+     *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
+     *   描き直しのたびに入れ直すと、user が欄を直した字(空にする = 日付なしで足す、も含む)を奪う。
+     */
+    if (dayMode && this.quickDay !== shown) {
+      frame.quickDate.value = shown;
+      this.quickDay = shown;
+    } else if (!dayMode) this.quickDay = null;
     if (dayMode) {
       this.day.paint({
         day: shown,
         today,
-        items: groups.find((g) => g.date === shown)?.cards ?? [],
+        items: dayItems(items, shown, skip),
         titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
         selectedLid: state.selectedLid,
         year: at.getFullYear(),
@@ -665,7 +676,7 @@ export class ScheduleRenderer {
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.day.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes };
+    this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

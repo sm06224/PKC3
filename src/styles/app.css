@@ -6216,7 +6216,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   position: absolute;
   box-sizing: border-box;
   top: calc(var(--day-hour) * var(--day-start, 0) / 60);
-  height: max(20px, calc(var(--day-hour) * var(--day-span, 30) / 60));
+  /* ⚠ 最低の高さ(1 時間の半分 = 30 分)は `day-layout.ts` の MIN_SLOT_MINUTES と同じ値 ── 重なりの判定がこの長さで行われる */
+  height: max(calc(var(--day-hour) / 2), calc(var(--day-hour) * var(--day-span, 30) / 60));
   left: calc(100% * var(--day-col, 0) / var(--day-cols, 1));
   width: calc(100% / var(--day-cols, 1));
   overflow: hidden;

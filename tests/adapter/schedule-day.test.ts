@@ -41,7 +41,11 @@ function meta(lid: string, over: Partial<EntryMeta> = {}): EntryMeta {
 
 const tick = (ms = 10): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-function setup(bodies: Record<string, string>, dates: Record<string, string> = {}) {
+function setup(
+  bodies: Record<string, string>,
+  dates: Record<string, string> = {},
+  opts: { scan?: boolean } = {},
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -75,10 +79,13 @@ function setup(bodies: Record<string, string>, dates: Record<string, string> = {
     relations: [],
   });
   const cards = Object.entries(bodies).flatMap(([lid, body]) => taskCardsOf(lid, body));
-  d.dispatch({
-    type: 'SET_TASK_SCAN',
-    scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
-  });
+  const scan = (): void =>
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards, totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+  // ⚠ `scan: false` = 予定の走査がまだ済んでいない状態(最初の位置を確定させない経路を見る)
+  if (opts.scan !== false) scan();
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const qa = (sel: string) => [...root.querySelectorAll<HTMLElement>(sel)];
   const press = (sel: string): void => {
@@ -87,7 +94,7 @@ function setup(bodies: Record<string, string>, dates: Record<string, string> = {
     el.click();
   };
   const showDay = (): void => press('[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
-  return { root, d, q, qa, store, press, showDay };
+  return { root, d, q, qa, store, press, showDay, scan };
 }
 
 const lane = '[data-pkc-field="schedule-day-lane"] > [data-pkc-entry]';
@@ -251,6 +258,24 @@ describe('予定の面の「一覧 / 日」', () => {
     expect(qa(lane).map(textOf)).toEqual(['昨日の用']);
   });
 
+  it('🔴 毎日の繰り返しは、回の上限(200)より先の日にも、過ぎた日にも出る(その日を起点に数える)', () => {
+    const { qa, d, showDay } = setup({ e1: '- [ ] 散歩 @2026-08-23 06:00 毎日\n' });
+    showDay();
+    // 300 日先 ── 一覧の束(今日から数えて 200 回まで)から拾うと空になる
+    d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2027-06-19' });
+    expect(qa(lane).map(textOf), '200 回より先の日に毎日の予定が出ない').toEqual(['散歩']);
+    // 起点より後の過ぎた日(この test の「今日」は 8/23 なので、起点を前へずらした行で見る)
+    d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2026-08-22' });
+    expect(qa(lane), '起点より前の日に出ている').toHaveLength(0);
+  });
+
+  it('🔴 過ぎた日にも、その日の繰り返しの回が出る(一覧は今日から先だけ)', () => {
+    const { qa, d, showDay } = setup({ e1: '- [ ] 散歩 @2026-08-01 06:00 毎日\n' });
+    showDay();
+    d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2026-08-10' });
+    expect(qa(lane).map(textOf), '過ぎた日に繰り返しの回が出ない').toEqual(['散歩']);
+  });
+
   it('🔴 繰り返しは、窓(62 日)より先の日にも届く', () => {
     const { qa, d, showDay } = setup({ e1: '- [ ] 体操 @2026-08-23 07:00 毎週\n' });
     showDay();
@@ -298,6 +323,63 @@ describe('予定の面の「一覧 / 日」', () => {
     expect(store['e1'], '落とした日が本文に書かれていない').toBe(
       '- [ ] 会議 @2026-08-23 14:00\n- [ ] あとで @2026-08-23\n',
     );
+  });
+
+  it('🔴 時刻を書き足した札は、終日の枠から目盛りへ移る(同じ札が両方に残らない)', () => {
+    const { qa, d, showDay } = setup({ e1: '- [ ] 会議 @2026-08-23\n' });
+    showDay();
+    const allDay = '[data-pkc-field="schedule-day-allday"] [data-pkc-entry]';
+    expect(qa(allDay).map(textOf)).toEqual(['会議']);
+    const again = (body: string): void =>
+      d.dispatch({
+        type: 'SET_TASK_SCAN',
+        scan: { cards: taskCardsOf('e1', body), totalNotes: 1, scannedNotes: 1, truncated: false },
+      });
+    again('- [ ] 会議 @2026-08-23 14:00\n');
+    expect(qa(lane).map(textOf), '時刻を書いたのに目盛りへ移らない').toEqual(['会議']);
+    expect(qa(allDay), '終日の枠に残っている').toHaveLength(0);
+    again('- [ ] 会議 @2026-08-23\n');
+    expect(qa(allDay).map(textOf), '時刻を消したのに終日へ戻らない').toEqual(['会議']);
+    expect(qa(lane)).toHaveLength(0);
+  });
+
+  it('🔴 ‹ › で今日に着いたら「今日に追従する」状態へ戻る(実日付を残さない)', () => {
+    const { d, press, showDay } = setup({ e1: '- [ ] 用 @2026-08-23 09:00\n' });
+    showDay();
+    press('[data-pkc-field="schedule-day-next"]');
+    expect(d.getState().scheduleDay).toBe('2026-08-24');
+    press('[data-pkc-field="schedule-day-prev"]');
+    expect(d.getState().scheduleDay, '今日に着いたのに実日付が残った').toBeNull();
+  });
+
+  it('🔴 「日」では、「予定を足す」の日付が見ている日に合う / 直した字は描き直しで奪わない', () => {
+    const { q, d, showDay } = setup({ e1: '- [ ] 用 @2026-08-23 09:00\n' });
+    const date = q<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')!;
+    expect(date.value).toBe('2026-08-23');
+    showDay();
+    d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2026-08-27' });
+    expect(date.value, '見ている日に合っていない(足しても見ている日に出ない)').toBe('2026-08-27');
+    // user が欄を空にした(日付なしで足す)── 無関係な描き直しで入れ直さない
+    date.value = '';
+    d.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' });
+    expect(date.value, '直した字を描き直しで奪った').toBe('');
+    // 日を変えたら、また合わせる
+    d.dispatch({ type: 'SET_SCHEDULE_DAY', date: '2026-08-28' });
+    expect(date.value).toBe('2026-08-28');
+  });
+
+  it('🔴 走査が済む前に user が自分で送ったら、済んだ後の描き直しで最初の位置へ戻さない', () => {
+    const { q, showDay, scan } = setup({ e1: '- [ ] 会議 @2026-08-23 14:00..15:00\n' }, {}, { scan: false });
+    const scroller = q('[data-pkc-field="schedule-day-scroll"]')!;
+    Object.defineProperty(scroller, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(scroller, 'scrollHeight', { value: 960, configurable: true });
+    showDay();
+    // 予定が無いので 8:00(まだ確定していない)
+    expect(scroller.scrollTop).toBe(320);
+    scroller.scrollTop = 77;
+    scroller.dispatchEvent(new Event('scroll'));
+    scan();
+    expect(scroller.scrollTop, 'user が送った位置を奪い返した').toBe(77);
   });
 
   it('🔴 最初の位置は、開いたとき・日を変えたときの 1 回だけ(描き直しで奪わない)', () => {

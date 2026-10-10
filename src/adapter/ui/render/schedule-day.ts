@@ -118,9 +118,16 @@ export class ScheduleDay {
 
     el.append(head, this.allDay, this.scroller);
     this.el = el;
-    // 🔑 表示が決まってから(隠れていた面が開いたとき)最初の位置を当てる
+    // 🔑 表示が決まってから(隠れていた面が開いたとき)最初の位置を当てる。
+    // ⚠ 外さない(disconnect しない)── この描き手は面の描画器(`ScheduleRenderer`)と同じ寿命で、
+    //   描画器は面ごとに 1 度だけ作られる(`center.ts` / `browse.ts`)。作り直す経路を足すなら、ここに後始末が要る
     if (typeof ResizeObserver !== 'undefined')
       new ResizeObserver(() => this.applyScroll()).observe(this.scroller);
+    // 🔴 user が自分で送ったら、最初の位置はもう当てない(走査が済む前の描き直しで位置を奪い返さない。着地前レビュー)
+    this.scroller.addEventListener('scroll', () => {
+      if (this.pendingMin === null || this.lastSetTop === null) return;
+      if (Math.abs(this.scroller.scrollTop - this.lastSetTop) > 1) this.pendingMin = null;
+    });
   }
 
   private readonly dropAttr: string;
@@ -138,8 +145,11 @@ export class ScheduleDay {
     const tomorrow = addDays(p.today, 1) ?? '';
     const heading = dayHeading(p.day, p.today, tomorrow);
     if (this.label.textContent !== heading) this.label.textContent = heading;
-    this.prev.setAttribute('data-pkc-day-to', addDays(p.day, -1) ?? p.day);
-    this.next.setAttribute('data-pkc-day-to', addDays(p.day, 1) ?? p.day);
+    // 🔑 行き先が今日なら空(= 今日に追従する状態へ戻す)── 実日付を入れると、日付をまたいで開いたままにしたとき
+    //   昨日が出たままになる(着地前レビュー)
+    const goTo = (d: string | null): string => (d === null ? p.day : d === p.today ? '' : d);
+    this.prev.setAttribute('data-pkc-day-to', goTo(addDays(p.day, -1)));
+    this.next.setAttribute('data-pkc-day-to', goTo(addDays(p.day, 1)));
     // 空 = 今日(日付が変わったら追従する状態へ戻る)。⚠ 既に今日なら押しても何も起きない
     this.todayBtn.setAttribute('data-pkc-day-to', '');
     this.todayBtn.disabled = p.day === p.today;
@@ -216,12 +226,15 @@ export class ScheduleDay {
   }
 
   private settledNow = false;
+  /** こちらが最後に当てた位置(user が自分で送ったかを見分ける)。 */
+  private lastSetTop: number | null = null;
 
   /** 見えているときだけ当てる(隠れた面の `scrollTop` は無視される)。 */
   private applyScroll(settled: boolean = this.settledNow): void {
     this.settledNow = settled;
     if (this.pendingMin === null || this.scroller.clientHeight === 0) return;
     this.scroller.scrollTop = (this.scroller.scrollHeight * this.pendingMin) / DAY_MINUTES;
+    this.lastSetTop = this.scroller.scrollTop;
     if (settled) this.pendingMin = null;
   }
 }
