@@ -207,6 +207,8 @@ test('🔴 WebMCP: OFF では登録されず / ON で 5 本 / 許可のダイア
   expect(foundJson.notes, '目印のノートがちょうど 1 件見つかる').toHaveLength(1);
   expect(foundJson.notes[0]!.body, 'body に本文が入っていない').toContain(MARKER);
   const foundId = foundJson.notes[0]!.id;
+  // ⚠ 題名は本文の見出しではなく作ったときの既定(「日付 ノート N」)── 期待値は検索の答えから引く
+  const foundTitle = foundJson.notes[0]!.title;
   const readRow = agents.locator('li[data-pkc-agent-scope="read"]');
   await expect(readRow, '「探す・読む」の行が(描き直さずに)出ていない').toBeVisible();
   await expect(readRow.locator('[data-pkc-field="agent-scope-name"]')).toHaveText('ノートを探す・読む');
@@ -255,12 +257,12 @@ test('🔴 WebMCP: OFF では登録されず / ON で 5 本 / 許可のダイア
   // ── 8b. append(#1407 段④)→ 書き足す側のダイアログ(write)。末尾に足され、選択は動かない。
   //    disk に着いたかは read で読み直して見る(read は「常に許す」済み ── ダイアログ無し)
   await callNoWait(page, 'pkc_append_note', { id: foundId, text: 'AI が足した続き' });
-  await expectAsk(page, '『探される側』の末尾に書き足そう');
+  await expectAsk(page, `『${foundTitle}』の末尾に書き足そう`);
   await clickReal(page, `${ASK_ROW}[data-pkc-agent-grant-index="0"]`); // この 1 回だけ
   await expect(page.locator(ASK_NOTE)).toBeHidden();
   const appended = await takeResult(page);
   expect(appended.isError, `書き足せなかった: ${textOf(appended)}`).toBeFalsy();
-  expect(JSON.parse(textOf(appended))).toEqual({ id: foundId, title: '探される側' });
+  expect(JSON.parse(textOf(appended))).toEqual({ id: foundId, title: foundTitle });
   await expect(reading, '書き足したら読んでいたノートが動いた').toContainText('読んでいる側');
   await callNoWait(page, 'pkc_read_note', { id: foundId });
   const reread = JSON.parse(textOf(await takeResult(page))) as { body: string };
