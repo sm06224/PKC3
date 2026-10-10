@@ -63,11 +63,14 @@ export function isPickerCancel(e: unknown): boolean {
  * `root` の中に**まだ無い名前**のサブフォルダを作って返す(`base`、`base-2`、`base-3`…)。
  * 🔴 同名の **file** が在っても「在る」と読む(`TypeMismatchError`)── 上書きしない。
  */
+/** `-N` を試す上限。⚠ 無いと、常に「在る」と答える相手で終わらない。 */
+export const SUBFOLDER_TRY_MAX = 1000;
+
 export async function createFreshSubfolder(
   root: WritableDirLike,
   base: string,
 ): Promise<{ dir: WritableDirLike; name: string }> {
-  for (let n = 1; ; n++) {
+  for (let n = 1; n <= SUBFOLDER_TRY_MAX; n++) {
     const name = n === 1 ? base : `${base}-${n}`;
     try {
       await root.getDirectoryHandle(name);
@@ -79,6 +82,9 @@ export async function createFreshSubfolder(
     }
     return { dir: await root.getDirectoryHandle(name, { create: true }), name };
   }
+  throw new Error(
+    `同じ名前のフォルダが多すぎます(『${base}』から『${base}-${SUBFOLDER_TRY_MAX}』まで使われています)。別のフォルダを選んでください`,
+  );
 }
 
 /** `dir` の下へ `a/b.ext` の形の path で 1 file ずつ書く口。 */

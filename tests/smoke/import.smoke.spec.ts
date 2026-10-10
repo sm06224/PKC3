@@ -18,6 +18,19 @@ import { answerAppDialog, gotoApp, collectPageErrors, clickReal, expectImageRend
   gotoCollectionPane,
 } from './helpers';
 import { withStateOnFail } from './state-dump';
+import { chromiumLaunch } from './playwright.config';
+
+/**
+ * 🔴 ブラウザを UTF-8 のロケールで起動する(#1455 (b))。⚠ ロケールが C の箱(runner の既定)では、
+ * Chromium の OPFS が**非 ASCII の file 名を `TypeMismatchError` で拒む**(実測。UTF-8 なら書ける)。
+ * 「Markdown を PC のフォルダに書き出す」の日本語名の検査が runner の環境に依らないようにする。
+ */
+test.use({
+  launchOptions: {
+    ...chromiumLaunch,
+    env: { ...(process.env as Record<string, string>), LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
+  },
+});
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。

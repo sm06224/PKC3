@@ -17,6 +17,7 @@ import {
 } from '../../src/adapter/ui/actions/export-archive';
 import {
   windowFolderWritePicker,
+  SUBFOLDER_TRY_MAX,
   type FolderWritePicker,
   type WritableDirLike,
 } from '../../src/adapter/platform/md-folder-export';
@@ -212,6 +213,22 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
     expect(n).toBeNull();
     expect(notices).toEqual([]);
     expect(failed).toEqual([]);
+  });
+
+  it('🔴 どの名前も「在る」と答える相手でも、終わって理由を言う(無限に回らない)', async () => {
+    const { dispatcher, deps, failed, notices } = setup();
+    const root = new FakeDir('選んだ場所');
+    let tries = 0;
+    root.getDirectoryHandle = async () => {
+      tries++;
+      return new FakeDir('x');
+    };
+    const n = await exportMarkdownToFolder(dispatcher, deps, pickerOf(root));
+    expect(n).toBeNull();
+    expect(tries).toBe(SUBFOLDER_TRY_MAX);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain('同じ名前のフォルダが多すぎます');
+    expect(notices.at(-1)).toBe('');
   });
 
   it('窓が開けなかった(取り消し以外)は失敗として言う', async () => {
