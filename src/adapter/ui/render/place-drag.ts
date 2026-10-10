@@ -58,7 +58,13 @@ interface Nudge {
 }
 
 interface Drag {
-  readonly block: HTMLElement;
+  /**
+   * 掴んでいる板。⚠ `readonly` ではない ── 掴んでいる最中に描き直しが届くと要素が作り直されるので、
+   * 同じ板の新しい要素へ掴みを移す(`follow`。#1499)。
+   */
+  block: HTMLElement;
+  /** 掴んだ板が居た器(描き直しの後、同じ板を探す範囲)。 */
+  readonly host: HTMLElement | null;
   readonly pointerId: number;
   /** 掴んだのは位置(右上の ⠿)か大きさ(右下の角)か。 */
   readonly mode: 'move' | 'size';
@@ -144,6 +150,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const yAttr = to !== null && 'y' in to ? String(to.y) : block.getAttribute('data-pkc-y');
     drag = {
       block,
+      host: block.parentElement,
       pointerId: e.pointerId,
       mode: grip.getAttribute('data-pkc-field') === 'place-size' ? 'size' : 'move',
       startClientX: e.clientX,
@@ -164,8 +171,36 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     e.preventDefault();
   };
 
+  /**
+   * 🔴 **掴んでいる最中に要素が作り直されたら、同じ板の新しい要素へ掴みを移す**(#1499)。
+   * ⚠ 移さないと、外れた古い要素を動かし続けるので画面の板は元の位置のまま動かず、
+   *   離しても古い要素の行番号で書くか(本文がずれていれば別の行)、何も起きない。
+   * 🔑 同じ板かは **id** で見る(本文の `#…`。線も id で板を指す)。id が無い板は**開き行**で見る
+   *   (描き直しの理由が別の塊の変更なら、この板の開き行は変わらない)。見つからなければ移さない。
+   * 起点(掴んだ時点の位置・大きさ)は掴んだときの値のまま ── 動かした量は手の動きで決まる。
+   */
+  const follow = (d: Drag): void => {
+    if (d.block.isConnected || d.host === null || !d.host.isConnected) return;
+    const id = d.block.id;
+    const line = d.block.getAttribute('data-pkc-source-line');
+    const blocks = d.host.querySelectorAll<HTMLElement>('.pkc-format-block.pkc-place');
+    for (const el of blocks) {
+      const same =
+        id !== '' ? el.id === id : line !== null && el.getAttribute('data-pkc-source-line') === line;
+      if (!same) continue;
+      // 見えている大きさ・位置を新しい要素へ写す(次の pointermove を待たずに、手の下へ戻す)
+      for (const prop of ['left', 'top', 'width', 'height'] as const) {
+        const v = d.block.style.getPropertyValue(prop);
+        if (v !== '') el.style.setProperty(prop, v);
+      }
+      d.block = el;
+      return;
+    }
+  };
+
   const onPointerMove = (e: PointerEvent): void => {
     if (drag === null || e.pointerId !== drag.pointerId) return;
+    follow(drag);
     const dx = e.clientX - drag.startClientX;
     const dy = e.clientY - drag.startClientY;
     if (!drag.moved && Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
@@ -288,6 +323,8 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     drag = null;
     if (!d.moved) return;
     swallowClick = true;
+    // 🔴 書く前に、作り直された板へ掴みを移す(古い要素の行番号で書かない ── #1499)
+    follow(d);
     /**
      * 🔴 離した瞬間に ● ⊕ の層を消す(#1464 段 2)── 掴んでいる間もマウスは板の上に在るので
      *   層は必ず在り、残したまま書くと直後の描き直しが**全塊の作り直し**へ倒れる
@@ -331,6 +368,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   const onPointerCancel = (): void => {
     if (drag === null) return;
+    follow(drag); // 作り直されていれば、見えている方を戻す
     restore(drag); // 途中で切れたら戻す(本文はまだ書いていない)
     drag = null;
   };
