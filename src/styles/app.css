@@ -9593,6 +9593,8 @@ h3[data-pkc-section] {
   /* ⚠ フォルダの概要も紙には要らない(#1222)── 画面の補助 */
   [data-pkc-region='folder-overview'],
   .pkc-md-copy-btn,
+  /* ⚠ ログの日の行(#1441)も紙には要らない ── 押せる物が無い */
+  [data-pkc-log-day],
   /* 🔴 画面専用の操作子は紙に要らない(#1129, #1137) */
   .pkc-back-to-top-container,
   .pkc-reading-progress,
@@ -9776,6 +9778,39 @@ h3[data-pkc-section] {
   color: var(--muted, inherit);
   font-size: 0.8em;
   line-height: 1.6;
+}
+
+/**
+ * 🔴 **ログの日の行**(#1441 案 b)。時刻の見出しは今までの大きさのまま、日が変わる所の手前に
+ * 薄い行を 1 本挟む。⚠ これは**見出しではない**(見出しは本文より小さくしない ── 行は本文の
+ * 字の大きさのまま、色だけ薄くする)。地は無彩色、色は情報にだけ ── 畳んでいる間だけ強調色を使う。
+ * ⚠ 押せる物は `<button>`(鍵でも届く)。畳んだ印は `aria-expanded` と ▸ で出す。
+ */
+[data-pkc-log-day] {
+  display: block;
+  width: 100%;
+  margin: 1.1em 0 0.3em;
+  padding: 0.15em 0.4em;
+  text-align: start;
+  font: inherit;
+  color: var(--muted, inherit);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border, currentColor);
+  cursor: pointer;
+}
+[data-pkc-log-day]::before {
+  content: '▾ ';
+}
+[data-pkc-log-day][aria-expanded='false']::before {
+  content: '▸ ';
+}
+[data-pkc-log-day][aria-expanded='false'] {
+  color: var(--accent);
+}
+[data-pkc-log-day]:hover,
+[data-pkc-log-day]:focus-visible {
+  color: var(--accent);
 }
 
 /**

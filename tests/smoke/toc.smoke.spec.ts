@@ -223,6 +223,48 @@ test('🔴 畳んだ章の中の見出しへ、目次から開いて飛べる (#
   expect(box, '見出しが画面に無い').not.toBeNull();
   expect(box!.y, `見出しが画面の上に来ていない(y=${box!.y})`).toBeLessThan(300);
 
+  /**
+   * 🔴 **同じ道中で、ログの日の行を見る**(#1441。畳みの道に足す ── 起動は増やさない)。
+   * 2 日 × 2 件のログ → 日の行が 2 つ。最初の日を押す → その日の 2 件が隠れ、次の日は見えたまま。
+   * もう一度押す → 戻る。⚠ 押した印(`aria-expanded`)に**見た目の規則が在る**ことも、
+   * 実ブラウザの計算後の色で見る(属性を付けただけで終わらせない)。
+   */
+  const LOGBODY = [
+    '## 2026-10-09 09:00:00',
+    '一日目の一件目',
+    '## 2026-10-09 10:00:00',
+    '一日目の二件目',
+    '## 2026-10-10 09:00:00',
+    '二日目の一件目',
+    '## 2026-10-10 10:00:00',
+    '二日目の二件目',
+  ].join('\n\n');
+  await createEntry(page, 'textlog');
+  await page.fill('[data-pkc-field="editor-body"]', LOGBODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const days = page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] [data-pkc-log-day]');
+  await expect(days, '日の行が 2 つ出ていない').toHaveCount(2);
+  await expect(days.nth(0)).toHaveText('2026-10-09(金)');
+  await expect(days.nth(1)).toHaveText('2026-10-10(土)');
+  const bodyP = page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] p');
+  await expect(bodyP.filter({ visible: true }), '前提が崩れている(最初は 4 件とも見える)').toHaveCount(4);
+  // ⚠ 触れている間の色(:hover)に満たされない ── マウスを外してから測る
+  await page.mouse.move(0, 0);
+  const openColor = await days.nth(0).evaluate((el) => getComputedStyle(el).color);
+
+  await days.nth(0).click();
+  await expect(days.nth(0)).toHaveAttribute('aria-expanded', 'false');
+  await expect(bodyP.filter({ visible: true })).toHaveText(['二日目の一件目', '二日目の二件目']);
+  await expect(days.nth(1), '次の日の行まで隠れた').toBeVisible();
+  await page.mouse.move(0, 0);
+  const foldedColor = await days.nth(0).evaluate((el) => getComputedStyle(el).color);
+  expect(foldedColor, '畳んだ印に見た目の規則が無い(開いているときと同じ色)').not.toBe(openColor);
+
+  await days.nth(0).click();
+  await expect(days.nth(0)).toHaveAttribute('aria-expanded', 'true');
+  await expect(bodyP.filter({ visible: true }), '戻らない(片道)').toHaveCount(4);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

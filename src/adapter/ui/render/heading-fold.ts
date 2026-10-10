@@ -29,6 +29,7 @@ import {
   hiddenByFolds,
   type ChapterSpan,
 } from '@features/markdown/heading-fold';
+import { bodyBlocks, flipLogDay, openLogDayCovering, syncLogDays } from './log-days';
 
 /** 畳んでいる印。⚠ 見出しそのものに付ける(配下ではない)。 */
 const FOLDED = 'data-pkc-folded';
@@ -92,10 +93,16 @@ function ensureToggle(heading: Element, folded: boolean): void {
  * @returns 押す口を出した見出しの数(0 = 畳める見出しが無い)
  */
 export function applyHeadingFold(host: HTMLElement): number {
-  const blocks = [...host.children];
+  // 🔑 ログの日の行(#1441)は本文の塊ではない ── 数えに入れない(前の追記を畳んで次の日の行まで隠さない)
+  const blocks = bodyBlocks(host);
   const levels = blocks.map(headingLevel);
   const spans = foldSpans(levels);
-  if (spans.length === 0) return 0;
+  /**
+   * 🔴 **日の畳みは見出しの畳みの「もう 1 つの集合」**(#1441)── 印(`data-pkc-folded`)は触らない。
+   * ⚠ 見出しの早期 return より**前**に呼ぶ(畳める見出しが無いログでも、日の行は要る)。
+   */
+  const days = syncLogDays(host, blocks, levels);
+  if (spans.length === 0 && days.managed.size === 0) return 0;
 
   const folded = new Set<number>();
   for (const s of spans) if (blocks[s.heading]!.hasAttribute(FOLDED)) folded.add(s.heading);
@@ -107,7 +114,15 @@ export function applyHeadingFold(host: HTMLElement): number {
    */
   const managed = new Set<number>();
   for (const s of spans) for (let i = s.from; i < s.to; i += 1) managed.add(i);
+  for (const i of days.managed) managed.add(i);
   const hidden = hiddenByFolds(levels, folded);
+  /**
+   * 🔴 **行は、直後の塊が見出しの畳みで隠れているなら一緒に隠す**(#1441 レビュー)。
+   * ⚠ 日の畳みでは隠さない(でないと畳んだ行が自分で消える)── 見るのは**見出しの畳みだけ**で、
+   *   `#` の章を畳んだときに中の日の行だけが残らないようにする。
+   */
+  for (const r of days.rows) r.row.hidden = hidden.has(r.start);
+  for (const i of days.hidden) hidden.add(i);
   for (const i of managed) {
     const el = blocks[i];
     if (el instanceof HTMLElement) el.hidden = hidden.has(i);
@@ -157,7 +172,7 @@ export function chapterSpanOf(
   heading: Element,
   lineCount: number,
 ): ChapterSpan | null {
-  const blocks = [...host.children];
+  const blocks = bodyBlocks(host);
   const idx = blocks.indexOf(heading);
   if (idx < 0) return null;
   return chapterSpan(blocks.map(headingLevel), blocks.map(sourceLineOf), idx, lineCount);
@@ -178,12 +193,13 @@ export function revealBlock(host: HTMLElement, target: Element): boolean {
   let block: Element | null = target;
   while (block !== null && block.parentElement !== host) block = block.parentElement;
   if (block === null) return false;
-  const blocks = [...host.children];
+  const blocks = bodyBlocks(host);
   const idx = blocks.indexOf(block);
   if (idx < 0) return false;
   const levels = blocks.map(headingLevel);
   const spans = foldSpans(levels);
-  let opened = false;
+  // 日の畳み(#1441)も「そこまでの道」の一部 ── 先に開く
+  let opened = openLogDayCovering(host, blocks, levels, idx);
   for (const s of spans) {
     if (idx < s.from || idx >= s.to) continue;
     const heading = blocks[s.heading];
@@ -208,5 +224,16 @@ export function toggleHeadingFold(heading: Element): void {
   if (host === null) return;
   if (heading.hasAttribute(FOLDED)) heading.removeAttribute(FOLDED);
   else heading.setAttribute(FOLDED, '');
+  applyHeadingFold(host);
+}
+
+/**
+ * 🔴 **ログの日の畳みを反転して当て直す**(#1441)。
+ * 🔑 印を反転するだけ ── 見え方は `applyHeadingFold` が計算し直す(時刻見出しの畳みは触らない)。
+ */
+export function toggleLogDay(row: Element): void {
+  const host = row.parentElement;
+  if (host === null) return;
+  flipLogDay(row);
   applyHeadingFold(host);
 }
