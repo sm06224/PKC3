@@ -953,25 +953,7 @@ describe('掴んで動かす(place-drag)', () => {
     vi.useRealTimers();
   });
 
-  it('🔴 正常に再描画されたら監視が外れ、2000ms 経過しても戻らない(#1464 案 3)', () => {
-    vi.useFakeTimers();
-    const { d, grip, block, off } = mounted();
-    down(grip);
-    move(30, -10);
-    up(30, -10);
-    expect(block.style.left).toBe('150px');
-    // 再描画によって属性が更新された(同一要素の場合)
-    block.setAttribute('data-pkc-x', '150');
-    block.setAttribute('data-pkc-y', '30');
-    // 状態変化通知を発火させる
-    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
-    vi.advanceTimersByTime(3000);
-    expect(block.style.left).toBe('150px');
-    off();
-    vi.useRealTimers();
-  });
-
-  it('🔴 新しい要素へ差し替えられたら監視が外れ、2000ms 経過しても戻らない(#1464 案 3)', () => {
+  it('🔴 新しい要素へ差し替えられたら(古い要素が外れたら)監視が外れ、2000ms 経過しても戻らない(#1464 案 3 / #1481 6)', () => {
     vi.useFakeTimers();
     const { d, grip, block, off } = mounted();
     down(grip);
@@ -987,28 +969,34 @@ describe('掴んで動かす(place-drag)', () => {
     vi.useRealTimers();
   });
 
-  it('🔴 正常完了 / 断り / タイムアウトのどれでも onState の購読数が 0 に戻る(#1481 a)', () => {
+  it('🔴 正常完了 / 断り / タイムアウトのどれでも onState と onEvent の購読が解除される(#1481 a / 3-(i))', () => {
     const { d, grip, block, off } = mounted();
-    const countListeners = (): number =>
+    const countStateListeners = (): number =>
       (d as unknown as { stateListeners: Set<unknown> }).stateListeners.size;
-    const base = countListeners();
+    const countEventListeners = (): number =>
+      (d as unknown as { eventListeners: Set<unknown> }).eventListeners.size;
+    const baseState = countStateListeners();
+    const baseEvent = countEventListeners();
 
     // 1. 断られた場合: 離した直後に解除される
     d.dispatch({ type: 'START_EDIT' });
     down(grip);
     move(30, -10);
     up(30, -10);
-    expect(countListeners(), '断られた後に onState の購読が残っている').toBe(base);
+    expect(countStateListeners(), '断られた後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), '断られた後に onEvent の購読が残っている').toBe(baseEvent);
 
     // 2. 正常完了の場合: 再描画で解除される
     d.dispatch({ type: 'COMMIT_EDIT' });
     down(grip);
     move(30, -10);
     up(30, -10);
-    expect(countListeners(), '保留中に onState が購読されていない').toBe(base + 1);
+    expect(countStateListeners(), '保留中に onState が購読されていない').toBe(baseState + 1);
+    expect(countEventListeners(), '保留中に onEvent が購読されていない').toBe(baseEvent + 1);
     block.remove();
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD + '\n' });
-    expect(countListeners(), '再描画後に onState の購読が残っている').toBe(base);
+    expect(countStateListeners(), '再描画後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), '再描画後に onEvent の購読が残っている').toBe(baseEvent);
 
     // 3. タイムアウトの場合: 2000ms 経過で解除される
     vi.useFakeTimers();
@@ -1017,10 +1005,30 @@ describe('掴んで動かす(place-drag)', () => {
     move(30, -10);
     up(30, -10);
     vi.advanceTimersByTime(2000);
-    expect(countListeners(), 'タイムアウト後に onState の購読が残っている').toBe(base);
+    expect(countStateListeners(), 'タイムアウト後に onState の購読が残っている').toBe(baseState);
+    expect(countEventListeners(), 'タイムアウト後に onEvent の購読が残っている').toBe(baseEvent);
     off();
     off2();
     vi.useRealTimers();
+  });
+
+  it('🔴 既存の error が残っている状態でも、正常なドロップは離した直後に戻らない(#1481 3-(ii))', () => {
+    const { d, grip, block, off } = mounted();
+    // 事前にエラーが残っている状態を作る
+    d.dispatch({ type: 'SYS_ERROR', error: '既存のエラー' });
+    expect(d.getState().error).toBe('既存のエラー');
+
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+
+    // ドロップ後に何らかの state 更新が届いても、既存のエラーに反応して戻らない
+    // (state.error && state.error !== startError を state.error に変えるとここで落ちる)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'foo' });
+
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    off();
   });
 
   it('🔴 同じ断り文が 2 回続いても、2 回目に離した直後に戻る(#1481 b / c\')', () => {
@@ -1046,6 +1054,67 @@ describe('掴んで動かす(place-drag)', () => {
     off();
   });
 
+  it('🔴 再描画前に同じ板を掴み直しても、起点座標が更新されており板が跳ばない(#1481 1)', () => {
+    const { grip, block, off } = mounted();
+    // 1 回目のドラッグ＆ドロップ: (120, 40) から +30, -10 移動して (150, 30) へ
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+    expect(block.style.top).toBe('30px');
+    expect(block.getAttribute('data-pkc-x')).toBe('150');
+    expect(block.getAttribute('data-pkc-y')).toBe('30');
+
+    // 再描画が来る前に同じ板をもう一度掴む
+    down(grip);
+    move(10, 10);
+    // 起点が (150, 30) から計算されるため、(160, 40) になる(古い起点 120 + 10 = 130 へ跳ばない)
+    expect(block.style.left).toBe('160px');
+    expect(block.style.top).toBe('40px');
+    up(10, 10);
+    expect(block.style.left).toBe('160px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 ロールバック時には data-pkc-x/y/w/h 属性も元の値に戻る(#1481 1)', () => {
+    const { d, grip, block, off } = mounted();
+    d.dispatch({ type: 'START_EDIT' }); // 同期の門で断られる状態
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(d.getState().error).toBeDefined();
+    // ロールバックされて style も属性も元通り
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    expect(block.getAttribute('data-pkc-x')).toBe('120');
+    expect(block.getAttribute('data-pkc-y')).toBe('40');
+    off();
+  });
+
+  it('🔴 保留中に画面の余白や別の板を押しても保留は解除されない(#1481 2)', () => {
+    const { host, d, grip, block, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    expect(block.style.left).toBe('150px');
+
+    // 画面の余白(host)を押しても保留は外れない
+    const emptySpace = new PointerEvent('pointerdown', { ...opts, clientX: 500, clientY: 500 });
+    host.dispatchEvent(emptySpace);
+
+    // 別の板(p2)を押しても p1 の保留は外れない
+    const grip2 = host.querySelector<HTMLElement>('#p2 [data-pkc-field="place-grip"]')!;
+    const downGrip2 = new PointerEvent('pointerdown', { ...opts, clientX: 460, clientY: 80 });
+    grip2.dispatchEvent(downGrip2);
+
+    // その後に非同期エラーが通知されたら元の位置へ戻る
+    d.dispatch({ type: 'SYS_ERROR', error: '遅れて届いた worker エラー' });
+    expect(block.style.left).toBe('120px');
+    expect(block.style.top).toBe('40px');
+    off();
+  });
+
   it('🔴 再描画が来ないまま同じ板をもう一度掴んだら、前の保留は解除される(#1481 e)', () => {
     vi.useFakeTimers();
     const { grip, block, off } = mounted();
@@ -1062,7 +1131,7 @@ describe('掴んで動かす(place-drag)', () => {
     // 1 回目の 2000ms 満了タイミング(1000ms + 1500ms = 2500ms)
     vi.advanceTimersByTime(1500);
     // 1 回目のタイマーで戻されず、2 回目のドラッグ中の位置が保たれている
-    expect(block.style.left).toBe('170px');
+    expect(block.style.left).toBe('200px');
     up(50, 20);
     off();
     vi.useRealTimers();
@@ -1348,7 +1417,7 @@ describe('掴んで動かす(place-drag)', () => {
       const asks = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
       expect(asks, '1 回だけでない').toHaveLength(1);
       expect(asks[0]).toMatchObject({ rewrite: { kind: 'place-move', line: 0, x: 122, y: 41 } });
-      // ⚠ 見た目はいったん戻る(掴みと同じ)。焦点を返す印が器に置かれている
+      // ⚠ キー操作では見た目はいったん戻る。焦点を返す印が器に置かれている
       expect(block.style.left).toBe('120px');
       expect(block.parentElement!.getAttribute(PLACE_FOCUS_ATTR)).toBe('0');
       off();

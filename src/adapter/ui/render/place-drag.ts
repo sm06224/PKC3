@@ -108,16 +108,12 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   let swallowClick = false;
 
   let nudge: Nudge | null = null;
+  let pendingBlock: HTMLElement | null = null;
   let pendingCleanup: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
     swallowClick = false;
     if (e.button !== 0) return;
-    // ⚠ 前のドロップの保留(タイマー / 購読)が残っていれば掴み直しの時点で解除する(#1481 e)
-    if (pendingCleanup !== null) {
-      pendingCleanup();
-      pendingCleanup = null;
-    }
     // ⚠ 矢印で動かしかけた物が在れば、掴む前に書いておく(見た目と本文を食い違わせない)
     if (nudge !== null) commitNudge();
     // ⚠ 2 本目の指では掴み直さない ── 前の掴みを restore せず捨てると、
@@ -126,6 +122,12 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const grip = (e.target as Element | null)?.closest<HTMLElement>(HANDLE_SELECTOR);
     const block = grip?.closest<HTMLElement>('.pkc-format-block.pkc-place') ?? null;
     if (!grip || block === null) return;
+    // ⚠ 前のドロップの保留(タイマー / 購読)が残っていれば、掴んだ板と同じときだけ解除する(#1481 2)
+    // 画面の他所や別の板を押したときは保留を解除しない(別所クリックでロールバックが効かなくなるのを防ぐ)
+    if (pendingCleanup !== null && block === pendingBlock) {
+      pendingCleanup();
+      pendingCleanup = null;
+    }
     const wAttr = block.getAttribute('data-pkc-w');
     const hAttr = block.getAttribute('data-pkc-h');
     drag = {
@@ -167,14 +169,26 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   const restore = (d: Drag): void => {
     if (d.mode === 'size') {
-      if (d.attrW) d.block.style.width = `${d.startW}px`;
-      else d.block.style.removeProperty('width');
-      if (d.attrH) d.block.style.height = `${d.startH}px`;
-      else d.block.style.removeProperty('height');
+      if (d.attrW) {
+        d.block.style.width = `${d.startW}px`;
+        d.block.setAttribute('data-pkc-w', String(d.startW));
+      } else {
+        d.block.style.removeProperty('width');
+        d.block.removeAttribute('data-pkc-w');
+      }
+      if (d.attrH) {
+        d.block.style.height = `${d.startH}px`;
+        d.block.setAttribute('data-pkc-h', String(d.startH));
+      } else {
+        d.block.style.removeProperty('height');
+        d.block.removeAttribute('data-pkc-h');
+      }
       return;
     }
     d.block.style.left = `${d.startX}px`;
     d.block.style.top = `${d.startY}px`;
+    d.block.setAttribute('data-pkc-x', String(d.startX));
+    d.block.setAttribute('data-pkc-y', String(d.startY));
   };
 
   /**
@@ -193,12 +207,23 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       pendingCleanup = null;
     }
     const block = d.block;
+    pendingBlock = block;
+    // 🔴 離した位置・大きさを属性にも即時反映する(#1481 1)
+    // 描き直し前に同じ板を掴み直しても起点座標(data-pkc-x/y/w/h)が新しい値になり、板が跳ばない。
+    if (action.type === 'MOVE_PLACE') {
+      block.setAttribute('data-pkc-x', String(action.x));
+      block.setAttribute('data-pkc-y', String(action.y));
+    } else {
+      block.setAttribute('data-pkc-w', String(action.w));
+      block.setAttribute('data-pkc-h', String(action.h));
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubs: (() => void)[] = [];
 
     const cleanup = (): void => {
       if (pendingCleanup === cleanup) {
         pendingCleanup = null;
+        pendingBlock = null;
       }
       if (timer !== null) {
         clearTimeout(timer);
@@ -224,38 +249,30 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     unsubs.push(unbindEvent);
 
     // 2. 状態の監視: 非同期エラー発生で戻す / 描画完了で成功終了
+    // ⚠ 同期の門(bodyWriteBlockReason / 編集開始中など)で断られた場合は下の !requested で即時戻す。
+    //   非同期(worker 競合など)で断られた場合は state.error の変化で戻す。
+    //   なお、非同期の断り文が直前と同一の場合は文字列比較で拾えないため、タイムアウト(2000ms)で戻る。
     const startError = dispatcher.getState().error;
     const unbindState = dispatcher.onState((state) => {
       if (state.error && state.error !== startError) {
         rollback();
         return;
       }
-      // 再描画で新しい要素に差し替えられた(正常完了)
+      // 再描画で新しい要素に差し替えられた(正常完了: 古い要素が外れた)
       if (!block.isConnected) {
         cleanup();
         return;
-      }
-      // 同一要素で属性が更新された(正常完了)
-      if (action.type === 'MOVE_PLACE') {
-        const cx = Number(block.getAttribute('data-pkc-x'));
-        const cy = Number(block.getAttribute('data-pkc-y'));
-        if (cx === action.x && cy === action.y) {
-          cleanup();
-          return;
-        }
-      } else {
-        const cw = Number(block.getAttribute('data-pkc-w'));
-        const ch = Number(block.getAttribute('data-pkc-h'));
-        if (cw === action.w && ch === action.h) {
-          cleanup();
-          return;
-        }
       }
     });
     unsubs.push(unbindState);
 
     // 3. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
+    // 期限が来たとき、すでに要素が外れていれば(再描画済み)何もしない(#1481 6)
     timer = setTimeout(() => {
+      if (!block.isConnected) {
+        cleanup();
+        return;
+      }
       rollback();
     }, 2000);
 
@@ -343,7 +360,8 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   /**
    * 矢印で動かした先を **1 回だけ**書く(手が止まってから / 掴む直前)。
-   * ⚠ 見た目は掴みと同じくいったん戻す ── 書けた位置は再描画が置き直す。
+   * ⚠ 矢印キー操作では見た目をいったん戻し、書けた位置へは再描画で置き直す
+   * (マウスで離したときと異なり、キー操作は焦点を返す印を器に置く都合上この作法を維持する)。
    * 🔑 焦点を返す印を器へ置く ── 再描画で口が作り直されるので、返すのは `applyPlaceLayout`。
    */
   function commitNudge(): void {
