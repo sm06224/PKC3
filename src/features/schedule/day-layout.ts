@@ -19,6 +19,8 @@
  *   `14:00..15:00` と `15:00..16:00` は接しているだけなので重ならない(同じ列に並ぶ)。
  */
 import type { AgendaItem } from './agenda';
+import { isRealCalendarDate } from './schedule-date';
+import { storedDateParts } from '@features/datetime/stored-date';
 
 /** 1 日の分。 */
 export const DAY_MINUTES = 24 * 60;
@@ -155,18 +157,18 @@ const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
 /**
  * 「日」の見出しの字(`10月10日(土)` / 今日と明日は後ろに添える / 今年でなければ年も出す)。
- * ⚠ `Date` に通して実在を確かめる(`2026-02-30` が 3 月 2 日へ寄るのを、別の日として出さない)。
+ * ⚠ 実在を確かめる(`2026-02-30` が 3 月 2 日へ寄るのを、別の日として出さない)。
  *   読めない字はそのまま出す(`agenda.ts` の `labelOf` と同じ向き)。
  */
 export function dayHeading(date: string, today: string, tomorrow: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (m === null) return date;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
+  // ⚠ 日付の切り方は stored-date の 1 か所(`tests/features/stored-date.test.ts` の全数検査)。実在は予定の規則で見る
+  const parts = isRealCalendarDate(date) ? storedDateParts(date) : null;
+  if (parts === null) return date;
+  const y = Number(parts.year);
+  const mo = Number(parts.month);
+  const d = Number(parts.day);
   const at = new Date(y, mo - 1, d);
-  if (at.getFullYear() !== y || at.getMonth() !== mo - 1 || at.getDate() !== d) return date;
-  const thisYear = today.slice(0, 4) === m[1];
+  const thisYear = today.slice(0, 4) === parts.year;
   const head = `${thisYear ? '' : `${y}年`}${mo}月${d}日(${WEEKDAYS[at.getDay()]})`;
   if (date === today) return `${head} 今日`;
   if (date === tomorrow) return `${head} 明日`;
