@@ -32,8 +32,11 @@
  *   容器に書き足すのは `features/audio/webm-opus.ts` の
  *   `insertMissingDuration`(先頭の数百バイトだけ読む ── 中身は 1 バイトも
  *   読まない・動かさない)。
- * ⚠ **画面収録(`kind: 'screen'`)はまだ対象外** ── 機構は track の中身を
- *   見ないので効くはずだが、実ブラウザの画面収録では確かめていない。
+ * 🟢 **画面収録(`kind: 'screen'`)にも効く**(2026-10-10 に実ブラウザで確かめた)。
+ *   機構は track の中身を見ないので、VP8 + opus の容器でも同じ答えになる ──
+ *   フル chromium / headless_shell の両方で、録ったままは `duration` が `Infinity`、
+ *   書き足すと 4.008 秒(壁時計の 4008ms)になり、終わりの 0.5 秒前へ飛べた。
+ *   回帰は `tests/smoke/media-capture.smoke.spec.ts` の録画の段が見る。
  * ⚠ **既にある添付は書き換えない**(不可逆 ── 添付を勝手に書き換えるのは
  *   user のデータへの介入である)。効くのは**これから録る物**だけ。
  *   `notice-log.ts` の対応する entry でそう伝える。
@@ -269,11 +272,11 @@ export async function startCapture(
   };
 
   /**
-   * 🔴 **長さを容器へ書く**(#952 A3)。⚠ **画面収録はまだ対象外**
+   * 🔴 **長さを容器へ書く**(#952 A3)。録音も画面収録も同じ道を通る
    *   (`media-capture.ts` 冒頭の docstring を見よ)。
    */
   const finalizeSegment = (seg: { blob: Blob; durationMs: number }): Promise<Blob> =>
-    kind === 'audio' ? withRecordedDuration(seg.blob, seg.durationMs) : Promise.resolve(seg.blob);
+    withRecordedDuration(seg.blob, seg.durationMs);
 
   /**
    * 🔴 **「止まった」は 1 本の約束で表す**(`onstop` が解決する)。
