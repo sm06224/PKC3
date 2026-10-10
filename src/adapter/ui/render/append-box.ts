@@ -21,10 +21,18 @@ import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
 import { refoldPeeked } from './pane-visibility';
+import { sizeTextareaToContent } from './row-swap';
 import { hintTitle } from './shortcut-hint';
 import { EDITING_STATE_WORD } from './status-line';
 // 🔑 指で触るだけの端末かの判定は 1 か所(#722 P2-12)── 各面で `matchMedia` を書かない
 import { isTouchOnly } from './touch-device';
+
+/**
+ * 打つ欄が中身に合わせて伸びる上限(行)と、何も打っていないときの行数(#1443)。
+ * ⚠ 上限は本文を押しのけないための数 ── 超えたら欄の中で送る。
+ */
+const APPEND_ROWS_CAP = 12;
+const APPEND_ROWS_DEFAULT = 2;
 
 /** 追記欄の見え方。⚠ ここが唯一の判定(描画側と binder で二重に持たない)。 */
 export type AppendMode =
@@ -96,7 +104,13 @@ export class AppendBoxRenderer {
     this.input.setAttribute('data-pkc-field', 'append-input');
     // ⚠ 読み上げから見て無名にしない(2026-08-19 の全数監査)
     this.input.setAttribute('aria-label', '追記する内容');
-    this.input.rows = 2;
+    this.input.rows = APPEND_ROWS_DEFAULT;
+    /**
+     * 🔴 **打った行数に合わせて欄が伸びる**(#1443)。⚠ 計算は `row-swap.ts` の
+     *   `sizeTextareaToContent` **1 本**(2 つ目を作らない)。手で高さを決めていれば
+     *   `fitToContent` が何もしない。
+     */
+    this.input.addEventListener('input', () => this.fitToContent());
     // ⚠ placeholder は `title` ではないので、`applyShortcutHints` の対象外 ──
     //    ここは組み立てた字をそのまま入れる(割当を変えたら次の描画で追いつく)
     /**
@@ -182,6 +196,30 @@ export class AppendBoxRenderer {
     this.region.append(this.lockBar, this.form);
   }
 
+  /**
+   * 🔴 **高さを手で決めているか**(#1443)。2 つの道を両方見る ──
+   *   ① 境目の帯で決めた高さ(#497。`shell` の `--pkc-pane-append`)
+   *   ② 欄の角を掴んで引いた高さ(ブラウザが `style.height` に書く)
+   * ⚠ どちらも user の決めた高さなので、自動で変えない。
+   * 🔑 `field-sizing: content` が使えるブラウザでは、明示の `height`(CSS の変数 / 掴んだ inline)が
+   *   もともと勝つので、この門が守るのは **`rows` を書いて合わせる経路**(使えないブラウザ)である。
+   *   ⚠ そちらは明示の高さが見た目で勝っていても `rows` だけは書き換わるので、
+   *   帯の解除や掴み直しのときに食い違いが出ないよう、手で決めている間は書かない。
+   */
+  private isHandSized(): boolean {
+    if (this.input.style.height !== '') return true;
+    const shell = this.region.closest<HTMLElement>('[data-pkc-region="shell"]');
+    return shell !== null && shell.style.getPropertyValue('--pkc-pane-append') !== '';
+  }
+
+  /** 打った行数に合わせて高さを揃える。手で決めた高さがあれば何もしない。 */
+  private fitToContent(): void {
+    if (this.isHandSized()) return;
+    sizeTextareaToContent(this.input, APPEND_ROWS_CAP);
+    // 空のときも 2 行を下回らない(`rows` を書く経路は 1 まで縮む)
+    if (Number(this.input.rows) < APPEND_ROWS_DEFAULT) this.input.rows = APPEND_ROWS_DEFAULT;
+  }
+
   /** 書込に入った時点の disk 内容。**成功したかどうかの唯一の判別材料**。 */
   private persistedAtWrite: string | null = null;
 
@@ -212,6 +250,7 @@ export class AppendBoxRenderer {
      */
     if (mode.kind !== 'hidden' && mode.lid !== this.lastLid) {
       this.input.value = '';
+      this.fitToContent();
       this.lastLid = mode.lid;
     }
     // 🔑 **通ったときだけ欄を空にする**。失敗・強制解放では打った内容を残す ──
@@ -370,6 +409,7 @@ export class AppendBoxRenderer {
    */
   clear(): void {
     this.input.value = '';
+    this.fitToContent();
     if (!refoldPeeked(this.region)) this.input.focus();
   }
 }
