@@ -311,7 +311,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `schedule-day-go` と同じ仕分け)。
     // ⚠ 2026-10-10(#1440): N +1(`export-entry-markdown`。右クリックの「Markdown で書き出す」── 押した行は `rowLidOrSelected` が決める。
     //   `export-entry-html` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 185 });
+    // ⚠ 2026-10-10(#1455 (b)): N +1(`export-markdown-folder`。右の列の「Markdown を PC のフォルダに書き出す」── `export-markdown` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 72, P2: 34, E: 26, V: 10, N: 186 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
