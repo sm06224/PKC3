@@ -4,6 +4,7 @@
  * ## 何が起きるか
  *
  * 編集中に入力欄で字を選ぶと、編集の帯(`detail-toolbar`)の右端に「選択: 142 文字(3 行)」。
+ * 選びが無く caret が表の行に在るときは「Tab で次のセル」(#1451。選びが勝つ)。
  * 選びを外すと枠は空になる(枠は残る ── 版面は動かない)。
  * 効く欄は `formatTarget` が引く 3 つ(2 列の `editor-body` / 1 画面の行の欄 `row-source` /
  * 「全文を編集」の欄)。追記欄・章の欄・別窓・読む面には出さない。
@@ -22,12 +23,15 @@
  *   選びが動いている最中(= layout が汚れている)に毎フレーム読むと、数 MB の本文の欄で
  *   **50ms 超の long task が積み増しになった**(同じ操作で、枠を外した対照群の 3〜4 倍)。
  *   動きが止まって layout が落ち着いてから 1 度だけ読めば、読むのは安い。
- * - 🔑 **本文を複製しない**。選んでいないとき(caret だけ)は本文を**読みもしない**。
- *   選んでいるときも `indexOf` で選んだ範囲だけを走る(`selectionLineCount`)。
+ * - 🔑 **本文を複製しない**。選んでいるときは `indexOf` で選んだ範囲だけを走る(`selectionLineCount`)。
+ * - 🔑 **表の案内は「行が変わったときだけ」再計算する**(#1451)。caret の行 `[from, to]` と表かどうかを
+ *   控え(`LineCache`)に持ち、caret がその行の中に居て入力(`input`)が無いかぎり、本文(`ta.value`)を
+ *   **読みも走査もしない**。行を出たとき・入力があったとき(`input` で控えを捨てる)だけ 1 度引き直す。
  * - 🔑 **IME の変換中は書かない**(変換中の選びは確定前の字で、数えても意味が無い)。
  *   `compositionend` で 1 度合わせ直す。
  */
 import { formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
+import { tableRowAt } from '@features/markdown/table-assist';
 import { formatTarget } from '../actions/format-target';
 
 /**
@@ -38,6 +42,26 @@ export const SELECTION_STATS_DELAY_MS = 120;
 
 /** 枠の `data-pkc-field`(描くのは `detail.ts`、書くのはここ)。 */
 export const SELECTION_STATS_FIELD = 'selection-stats';
+
+/**
+ * 🔴 **caret が表の行に在るとき、同じ枠へ出す案内**(#1451)。選んでいる間は選択の数が勝つ。
+ * Tab が実際にセルを移す欄(`editor-body` / `row-source` = `formatTarget`)と同じ欄でだけ出る。
+ * 枠は同じ `<span>` を使い回す ── 帯の高さは動かない。
+ */
+export const TABLE_TAB_HINT = 'Tab で次のセル';
+
+/**
+ * 🔴 **caret の行の判定の控え**(#1451。「再計算は行が変わったときだけ」)。
+ * caret が控えの行 `[from, to]` の中に居て、入力(`input`)が無いかぎり、本文(`ta.value`)を**読みもしない**。
+ * ⚠ 入力は `watchSelectionStats` が invalidate する(`writeBack` も `input` を撃つ)。
+ */
+interface LineCache {
+  ta: HTMLTextAreaElement;
+  from: number;
+  to: number;
+  table: boolean;
+}
+type CacheRef = { current: LineCache | null };
 
 /** 字を打つ欄ではない `<input>`(ここへ焦点が在っても、選んだ字の数は残してよい)。 */
 const NON_TEXT_INPUT = new Set([
@@ -80,7 +104,7 @@ function focusOnOtherField(region: HTMLElement, ta: HTMLTextAreaElement | null):
  * 枠へ**いまの選び**を合わせる。⚠ すでに同じ字なら書かない。
  * @returns 書いたら `true`(test の空振り防止 ── 書かなかったのか枠が無いのか区別する)
  */
-export function syncSelectionStats(region: HTMLElement): boolean {
+export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boolean {
   const slot = region.querySelector<HTMLElement>(`[data-pkc-field="${SELECTION_STATS_FIELD}"]`);
   if (slot === null) return false;
   const ta = formatTarget(region);
@@ -88,8 +112,17 @@ export function syncSelectionStats(region: HTMLElement): boolean {
   if (ta !== null && !focusOnOtherField(region, ta)) {
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
-    // 🔑 caret だけのときは本文(`ta.value`)に触らない
     if (end > start) text = formatSelectionStats(end - start, selectionLineCount(ta.value, start, end));
+    // 選びが無く、caret が表の行に在るときだけ案内(1 行ぶんだけ読む。debounce 後の 1 回)
+    else {
+      let c = cache?.current ?? null;
+      if (c === null || c.ta !== ta || start < c.from || start > c.to) {
+        const r = tableRowAt(ta.value, start);
+        c = { ta, from: r.from, to: r.to, table: r.table };
+        if (cache !== undefined) cache.current = c;
+      }
+      if (c.table) text = TABLE_TAB_HINT;
+    }
   }
   if (slot.textContent === text) return false;
   slot.textContent = text;
@@ -103,12 +136,16 @@ export function syncSelectionStats(region: HTMLElement): boolean {
 export function watchSelectionStats(region: HTMLElement): () => void {
   const doc = region.ownerDocument;
   let composing = false;
+  const cache: CacheRef = { current: null };
+  const invalidate = (): void => {
+    cache.current = null;
+  };
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const run = (): void => {
     timer = null;
     if (composing) return;
-    syncSelectionStats(region);
+    syncSelectionStats(region, cache);
   };
   /** 🔑 trailing debounce ── 動いている間は何も読まず、止まって 1 度だけ読む。 */
   const schedule = (): void => {
@@ -124,6 +161,8 @@ export function watchSelectionStats(region: HTMLElement): () => void {
     schedule();
   };
 
+  // 入力があれば控えは古い(`input` は bubble する。`writeBack` / `insertText` も撃つ)
+  region.addEventListener('input', invalidate, true);
   doc.addEventListener('selectionchange', schedule);
   // 🔴 焦点が動いたときも合わせ直す(#1264 §1)── 本文の欄の選びは、焦点が移っても動かない
   //    (selectionchange が来ない)ので、題名の欄へ移ったときに数が残っていた
@@ -136,6 +175,7 @@ export function watchSelectionStats(region: HTMLElement): () => void {
     doc.removeEventListener('selectionchange', schedule);
     doc.removeEventListener('focusin', schedule);
     doc.removeEventListener('focusout', schedule);
+    region.removeEventListener('input', invalidate, true);
     region.removeEventListener('compositionstart', onStart, true);
     region.removeEventListener('compositionend', onEnd, true);
     if (timer !== null) clearTimeout(timer);

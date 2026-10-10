@@ -7,7 +7,7 @@
  * 1. 選ぶと「選択: N 文字(M 行)」/ 外すと空(枠は残る)
  * 2. 効く欄は `formatTarget` が引く 3 つ(`editor-body` / `row-source` / 全文編集の欄)。
  *    **追記欄・章の欄は対象外**(そこで選んでも枠は動かない)
- * 3. 🔑 字が同じなら書かない(setter を数える)/ caret だけなら本文(`value`)を読まない
+ * 3. 🔑 字が同じなら書かない(setter を数える)/ caret だけのとき本文(`value`)を読むのは 1 回の読みにつき 1 度まで(表の行かを引く #1451)
  * 4. 🔑 選びが止まってから 1 度だけ読む(trailing debounce。連打の最中は何も読まない ──
  *    数 MB の欄で読むたびに layout が確定して long task が積み増しになった実測の裏)
  * 5. IME の変換中は書かない / 確定したら合わせる
@@ -26,6 +26,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import {
+  TABLE_TAB_HINT,
   SELECTION_STATS_DELAY_MS,
   SELECTION_STATS_FIELD,
   syncSelectionStats,
@@ -322,7 +323,7 @@ describe('書き込みを減らす(#1215)', () => {
     }
   });
 
-  it('🔑 caret だけのときは本文(value)を読まない / 選んだときだけ読む', () => {
+  it('🔑 caret が同じ行にいるあいだ本文を読まない / 行が変わったときだけ 1 度読む(#1451)/ 選んだときも読む', () => {
     const { region, ta } = surface();
     const un = watchSelectionStats(region);
     let reads = 0;
@@ -349,9 +350,16 @@ describe('書き込みを減らす(#1215)', () => {
       flush();
       counting = false;
     };
+    moveAndCount(4, 4); // 2 行目に入る(控えが無いので引く)
+    expect(reads, '最初の caret で本文を 1 度も読んでいない(空振り防止)').toBeGreaterThan(0);
+    expect(reads, '1 回の読みで 2 度以上読んだ').toBeLessThanOrEqual(1);
+    const first = reads;
+    moveAndCount(5, 5); // 同じ行の中(#1451: 行が変わらないかぎり読まない)
+    moveAndCount(7, 7); // 同じ行の行末
     moveAndCount(4, 4);
-    moveAndCount(5, 5);
-    expect(reads, 'caret だけなのに本文を読んだ').toBe(0);
+    expect(reads, '同じ行の中の caret 移動で本文を読んだ').toBe(first);
+    moveAndCount(9, 9); // 別の行へ
+    expect(reads - first, '別の行へ移ったのに引き直していない').toBe(1);
     moveAndCount(0, 3);
     expect(reads, '選んだのに本文を読んでいない(行数が数えられない)').toBeGreaterThan(0);
     un();
@@ -522,5 +530,81 @@ describe('編集セッションの寿命(#1215)', () => {
     const mine = added.slice(addedBefore);
     for (const h of mine) expect(removed, '編集を抜けたのに購読を外していない').toContain(h);
     expect(q('[data-pkc-field="selection-stats"]'), '抜けた後に枠が残っている').toBeNull();
+  });
+});
+
+describe('🔴 caret が表の行に在るとき「Tab で次のセル」(#1451)', () => {
+  const TABLE = '前置き\n| a | b |\n|---|---|\n| 1 | 2 |\n後ろ';
+  it('表の行に caret → 案内 / 表の外 → 空 / 戻ると出る(対照群つき)', () => {
+    const { region, slot, ta } = surface('editor-body', TABLE);
+    const un = watchSelectionStats(region);
+    select(ta, 8, 8); // 表の 1 行目の中
+    expect(slot.textContent).toBe(TABLE_TAB_HINT);
+    expect(TABLE_TAB_HINT).toBe('Tab で次のセル');
+    select(ta, 2, 2); // 「前置き」の行
+    expect(slot.textContent, '表の外なのに出ている').toBe('');
+    select(ta, TABLE.length, TABLE.length); // 「後ろ」の行
+    expect(slot.textContent).toBe('');
+    select(ta, 20, 20); // 区切り行(Tab が実際に移す行)
+    expect(slot.textContent).toBe(TABLE_TAB_HINT);
+    expect(slot.parentElement === region.firstElementChild, '枠が使い回されていない').toBe(true);
+    un();
+  });
+
+  it('🔴 選んでいるときは選択の数が勝つ(表の中でも)', () => {
+    const { region, slot, ta } = surface('editor-body', TABLE);
+    const un = watchSelectionStats(region);
+    select(ta, 8, 8);
+    expect(slot.textContent).toBe(TABLE_TAB_HINT);
+    select(ta, 8, 11);
+    expect(slot.textContent).toBe('選択: 3 文字(1 行)');
+    select(ta, 11, 11); // 外すとまた案内
+    expect(slot.textContent).toBe(TABLE_TAB_HINT);
+    un();
+  });
+
+  it('行頭の空白つきの表・row-source でも出る / 全角｜と追記欄では出ない', () => {
+    for (const field of ['row-source', 'editor-body'] as const) {
+      document.body.textContent = '';
+      const { region, slot, ta } = surface(field, '  | x | y |');
+      const un = watchSelectionStats(region);
+      select(ta, 5, 5);
+      expect(slot.textContent, field).toBe(TABLE_TAB_HINT);
+      un();
+    }
+    document.body.textContent = '';
+    let t = surface('editor-body', '｜ x ｜ y ｜');
+    let un = watchSelectionStats(t.region);
+    select(t.ta, 3, 3);
+    expect(t.slot.textContent, '全角の｜は表の行ではない').toBe('');
+    un();
+    document.body.textContent = '';
+    t = surface('append-input', '| x | y |');
+    un = watchSelectionStats(t.region);
+    select(t.ta, 3, 3);
+    expect(t.slot.textContent, '追記欄では Tab はセルを移さない').toBe('');
+    un();
+  });
+
+  it('🔴 同じ行のまま打って表になる(行頭に | を足す)と、控えが捨てられて案内が出る / 外すと消える', () => {
+    const { region, slot, ta } = surface('editor-body', 'x | y |');
+    const un = watchSelectionStats(region);
+    select(ta, 3, 3);
+    expect(slot.textContent, '表でない行').toBe('');
+    // 同じ行のまま行頭に | を打つ(input が来る。caret は行の中のまま)
+    ta.value = '| x | y |';
+    ta.setSelectionRange(4, 4);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    selectionChanged();
+    flush();
+    expect(slot.textContent, '打った後も古い控えのまま').toBe(TABLE_TAB_HINT);
+    // 逆向き: 表の行から | を消して表でなくなる
+    ta.value = ' x | y |';
+    ta.setSelectionRange(4, 4);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    selectionChanged();
+    flush();
+    expect(slot.textContent, '表でなくなったのに案内が残った').toBe('');
+    un();
   });
 });
