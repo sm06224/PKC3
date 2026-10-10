@@ -224,6 +224,12 @@ afterEach(() => {
  *   主の器が空になり(`renderEditor`)、直す前は面の listener が**子孫**で口を探して
  *   留めた枠の口を拾い、古い本文で見て隠していた。
  */
+/** 口の横位置(`transform: translate(Xpx, Ypx)` の X)。⚠ 口は `top` / `left` ではなく `transform` で動く(#1467)。 */
+function gripX(g: HTMLElement): string {
+  const m = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\)$/u.exec(g.style.transform);
+  return m === null ? `(transform が無い: "${g.style.transform}")` : `${m[1]}px`;
+}
+
 describe('留めた枠の口 ── 本文の面の口に隠されない(#1081)', () => {
   const MAIN = '# 主\n\n卵\n';
   const SIDE = '# さき\n\n牛乳\n\nパン\n';
@@ -374,21 +380,24 @@ describe('掴む口(block-grip)', () => {
     // 面 = 40..400。塊は 40..300(左余白 0・右は空いている)→ 右側(300 - 40 + 2 = 262)
     rect(s.block(2), 100, 20, 40, 300);
     s.hover(s.block(2));
-    expect(s.grip()!.style.left, '左余白が無いのに左へ置いた(字の上に重なる)').toBe('262px');
+    expect(gripX(s.grip()!), '左余白が無いのに左へ置いた(字の上に重なる)').toBe('262px');
+    // 🔴 配置を汚さない ── `top` / `left` は書かない(書くと次の scroll で文書全体の配置がやり直しになる。#1467)
+    expect(s.grip()!.style.top, 'top を書いた(配置が汚れる)').toBe('');
+    expect(s.grip()!.style.left, 'left を書いた(配置が汚れる)').toBe('');
     // 左余白が 30px 在る塊 → 左。⚠ 塊の左端との間に 5px 空ける(畳みの帯は左端から 3px 外へ
     //    張り出している ── 口の右端を左端に揃えると帯に重なり、帯が押せなくなる。CI の
     //    `heading-look` smoke が拾った)→ 30 - 18 - 5 = 7
     rect(s.block(6), 200, 20, 70, 380);
     s.hover(s.block(6));
-    expect(s.grip()!.style.left, '口の右端が塊の左端に貼り付いている(畳みの帯に重なる)').toBe('7px');
+    expect(gripX(s.grip()!), '口の右端が塊の左端に貼り付いている(畳みの帯に重なる)').toBe('7px');
     // 見出しで左余白が 22px(口 18 + あき 5 に足りない)→ 帯に重ねず右へ逃がす
     rect(s.block(4), 250, 20, 62, 300);
     s.hover(s.block(4));
-    expect(s.grip()!.style.left, '帯に重なる位置へ置いた').toBe('262px');
+    expect(gripX(s.grip()!), '帯に重なる位置へ置いた').toBe('262px');
     // 右にも左にも入らない(塊が面いっぱい)→ 左端に重ねる(面の外へ出さない)
     rect(s.block(19), 300, 20, 40, 395);
     s.hover(s.block(19));
-    expect(s.grip()!.style.left).toBe('0px');
+    expect(gripX(s.grip()!)).toBe('0px');
     expect(gripLeft({ left: 0, right: 100 }, { left: 0, right: 100 })).toBe(0);
     expect(gripLeft({ left: 0, right: 1000 }, { left: 23, right: 500 }), '余白ちょうどなら左の端').toBe(0);
   });

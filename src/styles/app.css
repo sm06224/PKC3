@@ -9401,6 +9401,9 @@ h3[data-pkc-section] {
 }
 [data-pkc-field='block-grip'] {
   position: absolute;
+  /* 位置は `transform` で動かす(`block-grip.ts` ── `top` / `left` を書くと配置がやり直しになる。#1467) */
+  top: 0;
+  left: 0;
   width: 18px;
   height: 1.6em;
   padding: 0;
