@@ -748,6 +748,54 @@ describe('幅と dpr を変えたときの焼き直し(P8 段㉘)', () => {
     bA.remove();
     bB.remove();
   });
+
+  it('🔴 器 A だけ焼き直すとき、**別の幅で焼いている最中の器 B の結果を捨てない**(世代は器ごと。#1467)', async () => {
+    const bA = block('graph TD\n A-->B');
+    const bB = block('graph TD\n C-->D');
+    document.body.append(bA, bB);
+    const hostA = bA.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    const hostB = bB.querySelector('[data-pkc-mermaid-src]') as HTMLElement;
+    setPaneWidth(hostA, 700);
+    setPaneWidth(hostB, 1400);
+    const scope = hydrateMermaid([bA, bB]);
+
+    // A を焼き終える
+    fire!([hostA]);
+    await settle();
+    expect(hostA.getAttribute('data-pkc-mermaid-state')).toBe('ready');
+
+    // B の焼きを止めておく(正しい条件 = 1400px で焼いている最中)
+    let finishB!: () => void;
+    vi.mocked(renderToPng).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishB = () => resolve({ png: new Blob(['png'], { type: 'image/png' }), cssWidth: 320 });
+        }),
+    );
+    fire!([hostB]);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(vi.mocked(renderToPng), 'B が焼き始めていない(前提)').toHaveBeenCalledTimes(2);
+
+    // A の幅だけが変わる → A だけ焼き直す。B の条件は変わっていない
+    setPaneWidth(hostA, 1200);
+    fireResize!();
+    await settle();
+    expect(vi.mocked(renderToPng), 'A が焼き直されていない(前提)').toHaveBeenCalledTimes(3);
+
+    finishB();
+    await settle();
+
+    expect(vi.mocked(renderToPng), 'B を焼き直している(捨てた結果の穴埋め)').toHaveBeenCalledTimes(3);
+    expect(
+      hostB.getAttribute('data-pkc-mermaid-state'),
+      'A の焼き直しで B の焼き上がりが捨てられ、原文のまま残った',
+    ).toBe('ready');
+    expect(hostB.querySelector('img')).not.toBeNull();
+
+    scope.dispose();
+    bA.remove();
+    bB.remove();
+  });
 });
 
 /**
