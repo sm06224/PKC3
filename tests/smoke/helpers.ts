@@ -855,12 +855,12 @@ export async function openBigWindowViaLightbox(
   };
   context.on('page', onPage);
   const lightbox = page.locator('[data-pkc-region="lightbox"]');
-  const srcBody = await img.getAttribute('src');
   // ⚠ 押す前に見える所へ寄せる ── 寄せないと押すときのスクロールが「元の位置」の比較に混ざる
   await img.scrollIntoViewIfNeeded();
   const boxBefore = await img.boundingBox();
   expect(boxBefore, '前提: 絵の位置が取れない').not.toBeNull();
   const open = async (): Promise<void> => {
+    const srcBody = await img.getAttribute('src');
     await img.click();
     await expect(lightbox, '絵を押しても拡大が開かない(何も起きない)').toHaveCount(1);
     await expect(
@@ -882,4 +882,53 @@ export async function openBigWindowViaLightbox(
   ]);
   context.off('page', onPage);
   return win;
+}
+
+/**
+ * 🔴 図の焼き直し(ResizeObserver → debounce 150ms → renderToPng)が落ち着くまで待つ(#1473)。
+ * 段組み変更やリサイズ等で幅が変わった際の非同期差し替えによる DOM detach や blob URL 不一致を防ぐ。
+ * 直前の src(prevSrc) が渡された場合は、新しい src へ差し替わった上で安定するのを待つ。
+ */
+export async function waitForDiagramSettled(
+  page: Page,
+  selector = '[data-pkc-field="detail-body"] [data-pkc-mermaid-src]',
+  prevSrc: string | null = null,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const t0 = Date.now();
+  let lastSrc = '';
+  let stableCount = 0;
+  while (Date.now() - t0 < timeoutMs) {
+    const info = await page.evaluate((sel) => {
+      const host = document.querySelector(sel);
+      if (!host) return null;
+      const state = host.getAttribute('data-pkc-mermaid-state');
+      const img = host.querySelector('img');
+      if (state !== 'ready' || !img || !img.complete || img.naturalHeight === 0) {
+        return { ready: false, src: '' };
+      }
+      return { ready: true, src: img.src };
+    }, selector);
+
+    if (info && info.ready && info.src) {
+      const isReplaced = prevSrc === null || info.src !== prevSrc;
+      if (isReplaced) {
+        if (info.src === lastSrc) {
+          stableCount++;
+          // 50ms 間隔で 4 回連続同じ src (計 200ms 以上安定 = debounce 150ms を確実に超過)
+          if (stableCount >= 4) {
+            return;
+          }
+        } else {
+          lastSrc = info.src;
+          stableCount = 1;
+        }
+      }
+    } else {
+      stableCount = 0;
+      lastSrc = '';
+    }
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`waitForDiagramSettled: 図の描画が ${timeoutMs}ms 以内に落ち着きませんでした`);
 }

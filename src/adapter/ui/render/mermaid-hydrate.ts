@@ -202,6 +202,10 @@ export function hydrateDiagrams(
   const started = new Set<HTMLElement>();
   /** 器 → **その絵を焼いたときの鍵**(段㉘。焼き直しの要否はこれで決める)。 */
   const bakedKey = new Map<HTMLElement, string>();
+  /** 器 → **いま焼いている最中の絵の鍵**(進行中に同条件で再焼きするのを防ぐ)。 */
+  const inFlightKey = new Map<HTMLElement, string>();
+  /** 非表示中に条件が変わり、可視化時に焼き直しを保留した器(#1480)。 */
+  const deferred = new Set<HTMLElement>();
 
   /**
    * 焼き直しの世代(P8 段⑰。レビュー H-8 / M)。
@@ -215,10 +219,13 @@ export function hydrateDiagrams(
     // ⚠ **画面から外れた器には描かない**(差し替え済みの器を先読み列が
     //    焼き続けていた ── 配色経路 と規則を 1 つに寄せる)
     if (!p.host.isConnected) return;
+    // ⚠ 非表示中は描かない ── 先読み等で 640px 代用幅で誤って焼くのを防ぐ(#1473 / #1480)。
+    if (typeof p.host.checkVisibility === 'function' && !p.host.checkVisibility()) return;
     if (!force && done.has(p.host)) return;
     done.add(p.host);
     started.add(p.host);
     const at = gen;
+    let currentKey = '';
     try {
       const key = {
         source: p.source,
@@ -227,6 +234,8 @@ export function hydrateDiagrams(
         width: widthOf(p.host),
         dpr: window.devicePixelRatio || 1,
       };
+      currentKey = cacheKey(key);
+      inFlightKey.set(p.host, currentKey);
       const raster = await kind.render(key);
       if (disposed) return;
       // ⚠ 焼いている間に配色が変わった / 器が外れたなら**載せない**
@@ -279,13 +288,28 @@ export function hydrateDiagrams(
       //    これと「いまの条件」を比べて決める。⚠ 控えるのは `cacheKey` そのもの
       //    にする ── 別に条件を書き起こすと、鍵に項目が増えたときにここだけ
       //    古くなる(段⑬ の「鍵はあるが焼き直す者がいない」の再演になる)
-      bakedKey.set(p.host, cacheKey(key));
+      bakedKey.set(p.host, currentKey);
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
       p.host.setAttribute(`data-pkc-${kind.name}-error`, String(e).slice(0, 120));
+    } finally {
+      if (inFlightKey.get(p.host) === currentKey) inFlightKey.delete(p.host);
     }
   };
+
+  // 🔑 見えたら描く(「見えたか」の判定は `visible-watch.ts` の 1 本 ── 本文に埋め込んだ
+  //    SQL の答えも同じ口を使う。#1223)
+  const io = watchVisible((host) => {
+    const source = host.getAttribute(kind.attr) ?? '';
+    // ⚠ 非表示中に条件が変わり、焼き直しを保留した器が見えたら最新条件で強制焼き直し(#1480)
+    if (deferred.has(host)) {
+      deferred.delete(host);
+      void paint({ host, source }, true);
+      return;
+    }
+    void paint({ host, source });
+  });
 
   /**
    * 🔑 **焼いた条件が変わった器を焼き直す**(P8 段⑬ で配色、段㉘ で幅と dpr)。
@@ -326,7 +350,19 @@ export function hydrateDiagrams(
       if (!host.isConnected) continue;
       const source = host.getAttribute(kind.attr) ?? '';
       const k = cacheKey({ source, theme, palette, width: widthOf(host), dpr });
-      if (bakedKey.get(host) === k) continue;
+      if (bakedKey.get(host) === k || inFlightKey.get(host) === k) {
+        deferred.delete(host);
+        continue;
+      }
+      // ⚠ 非表示中は焼き直さない ── 隠れただけなのに 640px で焼いてしまい、
+      //    戻ったときに本当の幅で 2 度焼きになる(#1473 / #1480)。
+      //    見えたとき(IntersectionObserver)に最新の条件で焼き直せるよう、deferred に控えて観測を戻す。
+      if (typeof host.checkVisibility === 'function' && !host.checkVisibility()) {
+        deferred.add(host);
+        io.observe(host);
+        continue;
+      }
+      deferred.delete(host);
       // ⚠ 飛んでいる焼きの結果を捨てる(古い条件を最後に勝たせない)。
       //    ⚠ **必要な器が 1 つでもあったときだけ**上げる ── 無条件に上げると、
       //    何も変わっていない resize の通知だけで進行中の焼きが捨てられる
@@ -384,12 +420,6 @@ export function hydrateDiagrams(
    */
   const unwatchDpr = watchDevicePixelRatio(schedule);
 
-  // 🔑 見えたら描く(「見えたか」の判定は `visible-watch.ts` の 1 本 ── 本文に埋め込んだ
-  //    SQL の答えも同じ口を使う。#1223)
-  const io = watchVisible((host) => {
-    const source = host.getAttribute(kind.attr) ?? '';
-    void paint({ host, source });
-  });
   for (const host of hosts) {
     io.observe(host);
     queue.push({ host, source: host.getAttribute(kind.attr) ?? '' });
@@ -428,6 +458,8 @@ export function hydrateDiagrams(
       urlOf.clear();
       started.clear();
       bakedKey.clear();
+      inFlightKey.clear();
+      deferred.clear();
     },
     prune: () => {
       if (disposed) return 0;
@@ -438,6 +470,8 @@ export function hydrateDiagrams(
         urlOf.delete(host);
         started.delete(host);
         bakedKey.delete(host);
+        inFlightKey.delete(host);
+        deferred.delete(host);
         io.unobserve(host);
       }
       let live = 0;
