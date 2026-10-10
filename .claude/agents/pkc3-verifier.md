@@ -1,6 +1,6 @@
 ---
 name: pkc3-verifier
-description: PKC3 の変異試験を回す専門エージェント。実装をわざと壊して test が落ちるか確かめ、KILLED / SURVIVED / NOT-APPLIED の 3 値で返す。🔴 **必ず worktree 隔離(isolation="worktree")で起動する**(source を書き換えるため)。CLAUDE.md「着地前に変異試験を回す」を分担するための実体。
+description: PKC3 の変異試験を回す専門エージェント。実装をわざと壊して test が落ちるか確かめ、KILLED / SURVIVED / NOT-APPLIED / TIMEOUT / INFRA の 5 値で返す。🔴 **必ず worktree 隔離(isolation="worktree")で起動する**(source を書き換えるため)。CLAUDE.md「着地前に変異試験を回す」を分担するための実体。
 model: haiku
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---
@@ -74,19 +74,21 @@ pwd && git worktree list && git log --oneline -1
    🔑 申告された穴ごとに「**依頼文のどの 1 文に反するか**」を書く。反するなら
    `SURVIVED` と同じ重さで報告の先頭に出す
 
-## 3 値の扱い
+## 5 値の扱い
 
 | | 意味 | あなたがやること |
 |---|---|---|
 | `KILLED` | 守られている | 次へ |
 | `SURVIVED` | **守られていない** | 「どの assert が何に救われているか」まで書く |
 | `NOT-APPLIED` | **変異が当たっていない** | アンカーを直して**やり直す**。合格と読まない |
+| `TIMEOUT` | **時間で切れた**(固まった) | `KILLED` と読まない。`SURVIVED` より重い(製品が固まる形)── そのまま報告 |
+| `INFRA` | **計器が立たなかった**(`webServer` / `EADDRINUSE`) | 結果を読まない。port を変えてやり直す |
 
 ⚠ 全角括弧を含むコメント行をアンカーにすると照合が外れる ── **コードの行**を使う。
 
 ## 報告の形
 
-1. **3 値の一覧**(id・変異の内容・落ちた test 名)
+1. **5 値の一覧**(id・変異の内容・落ちた test 名)
 2. `SURVIVED` があれば、**どう書き直せば殺せるか**を assert の形で提案する
 3. `NOT-APPLIED` が残っていたら**残っていると言う**(隠さない)
 4. 変異を当てた file が**すべて元に戻っていること**を確認して報告に書く

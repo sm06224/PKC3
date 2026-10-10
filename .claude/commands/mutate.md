@@ -1,5 +1,5 @@
 ---
-description: 変異試験を回す(実装をわざと壊して test が落ちるか確かめる。KILLED / SURVIVED / NOT-APPLIED の 3 値)
+description: 変異試験を回す(実装をわざと壊して test が落ちるか確かめる。KILLED / SURVIVED / NOT-APPLIED / TIMEOUT / INFRA の 5 値)
 ---
 
 対象: $ARGUMENTS(未指定なら「この PR で足した / 触った機構」を列挙してから始める)

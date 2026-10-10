@@ -131,6 +131,10 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 `read-columns.ts` の `exposePaneHeight` / `--pkc-pane-h`)。CSS で `100vh` から引く規則を書くときは
 **「shell の下の行(お知らせ / 注意 / 収録中 / タイマー)が出ている間も成り立つか」**を 1 度問う。
 
+🔑 CLAUDE.md「ここぞは無条件ではない(2026-09-12)」との折り合い:お知らせを足した sha で回すのは
+**起動直後の版面を見る spec**(`grep -rl 'お知らせ\|notice\|toc' tests/smoke` で引く ── system-toc /
+help-announce / inspector-fit / 章の箱)でよい。フルは着地直前の 1 回と兼ねる(別に 1 回足さない)。
+
 **そのあとに**:
 
 ```bash
