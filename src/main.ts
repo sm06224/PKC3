@@ -317,6 +317,7 @@ import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
 import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
+import { windowFolderWritePicker, type FolderWritePicker } from '@adapter/platform/md-folder-export';
 import { LocalFolder, windowDirectoryPicker, type LocalFileItem } from '@adapter/platform/local-folder';
 import { createLocalFileOpener } from '@adapter/ui/actions/open-local-file';
 import type { ImportDeps } from '@adapter/ui/actions/import-pkc2';
@@ -325,6 +326,7 @@ import {
   exportArchive,
   exportEntry,
   exportFolder,
+  exportMarkdownToFolder,
   type ExportDeps,
   exportEntryDocx,
   exportEntryMarkdown,
@@ -2270,7 +2272,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     });
 
   const runExport = (
-    kind: ExportKind | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' },
+    kind:
+      | ExportKind
+      | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' }
+      | { mdFolder: FolderWritePicker },
   ): Promise<void> =>
     withAssetGate(async () => {
       const deps: ExportDeps = {
@@ -2392,7 +2397,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
-      if (typeof kind === 'object') {
+      if (typeof kind === 'object' && 'mdFolder' in kind) {
+        await exportMarkdownToFolder(dispatcher, deps, kind.mdFolder);
+      } else if (typeof kind === 'object') {
         // ⚠ 1 ノートの出口は 4 つ ── バックアップ(取り込み直せる)/ **閲覧用 HTML** /
         //    Word / PowerPoint(後ろの 3 つは片道)
         if (kind.as === 'docx') await exportEntryDocx(dispatcher, deps, kind.entryLid);
@@ -4353,6 +4360,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
     exportMarkdown: () => void runExport('markdown'),
+    // 🔴 PC のフォルダへ 1 度だけ(#1455 (b))。⚠ 無いブラウザではボタンごと出ない
+    exportMarkdownFolder: () => {
+      const picker = windowFolderWritePicker();
+      if (picker) void runExport({ mdFolder: picker });
+    },
     /**
      * 🔴 **可搬単一 HTML**(#400 段④)。⚠ 「閲覧用 HTML」とは別の口である ──
      *   あちらは読むだけ、こちらは**アプリごと 1 枚**(続きが書ける)。

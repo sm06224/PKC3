@@ -131,6 +131,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-html': 'globe',
   'export-portable': 'archive',
   'export-markdown': 'page',
+  'export-markdown-folder': 'page',
   /** 構成(目次の形)を写す ── 中身ではなく**並び**を渡すので一覧の図案。 */
   'export-structure': 'list',
   'export-entry-docx': 'page',
@@ -282,6 +283,7 @@ export const ACTION_TONES: Readonly<Record<string, IconTone>> = {
   'export-entry-docx': 'io',
   'export-entry-pptx': 'io',
   'export-markdown': 'io',
+  'export-markdown-folder': 'io',
   'export-structure': 'io',
   'launch-asset': 'io',
   'launch-asset-extension': 'io',

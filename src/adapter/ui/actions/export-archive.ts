@@ -33,7 +33,14 @@ import { htmlToDocxBlocks } from '@adapter/platform/export/html-blocks';
 import { bakeSqlEmbeds, type SqlEmbedAnswer } from '@features/markdown/sql-embed';
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { DEFAULT_PROSE_ALIGN, type ProseAlign } from '@features/prose-align';
-import { writeMarkdownZip } from '@features/export/pkc3-markdown-zip';
+import { writeMarkdownZip, writeMarkdownTo } from '@features/export/pkc3-markdown-zip';
+import {
+  createFreshSubfolder,
+  folderSink,
+  FolderWriteError,
+  isPickerCancel,
+  type FolderWritePicker,
+} from '@adapter/platform/md-folder-export';
 import { singleEntrySource } from '@features/export/single-entry-source';
 import { folderSource } from '@features/export/folder-source';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
@@ -453,6 +460,67 @@ export async function exportArchive(
     return out.counts.entries;
   } catch (e) {
     return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
+ * 🔴 **Markdown を PC のフォルダへ 1 度だけ書き出す**(#1455 (b))。
+ *
+ * zip の「Markdown で書き出す」と**同じ中身**(`writeMarkdownTo` 1 本)を、選んだフォルダの
+ * 中の**新しいサブフォルダ**へ 1 file ずつ書く。憶えない・同期しない・上書きしない
+ * (`md-folder-export.ts`)。
+ *
+ * ⚠ **選択窓を先に出す**(押した直後の操作でないと開けないブラウザがある)。
+ *   窓を閉じたら**何も言わない**(取り消しはエラーではない)。
+ * ⚠ 保存領域が壊れているときの自動の拾い出し(`rescue`)は**持たない** ── あちらは
+ *   `.pkc3-part.zip` を落とす道で、フォルダへ書く道とは出口が違う。
+ */
+export async function exportMarkdownToFolder(
+  dispatcher: Dispatcher,
+  deps: ExportDeps,
+  picker: FolderWritePicker,
+): Promise<number | null> {
+  const phase = dispatcher.getState().phase;
+  if (phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
+    return null;
+  }
+  let root;
+  try {
+    root = await picker({ mode: 'readwrite' });
+  } catch (e) {
+    if (isPickerCancel(e)) return null;
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `書き出し先のフォルダを開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+    });
+    return null;
+  }
+  deps.notify?.('Markdown をフォルダに書き出しています…');
+  let sub: string | null = null;
+  try {
+    await deps.settle();
+    const now = deps.now?.() ?? new Date();
+    const base = `${safeName(deps.source.title)}-${stamp(now)}`;
+    const fresh = await createFreshSubfolder(root, base);
+    sub = fresh.name;
+    const md = await writeMarkdownTo(deps.source, now.toISOString(), folderSink(fresh.dir));
+    deps.report(md.warnings);
+    const assets = md.counts.assets > 0 ? `(添付 ${md.counts.assets})` : '';
+    deps.notify?.(
+      `${md.counts.entries} 件のノートを『${sub}』に書き出しました${assets}` +
+        (md.warnings.length > 0 ? `(注意 ${md.warnings.length} 件)` : ''),
+    );
+    return md.counts.entries;
+  } catch (e) {
+    deps.notify?.('');
+    const where = sub === null ? '' : `。すでに書いた分は『${sub}』に残っています`;
+    const what =
+      e instanceof FolderWriteError
+        ? `『${e.path}』を書けませんでした(${e.message})${where}`
+        : `${e instanceof Error ? e.message : String(e)}${where}`;
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `書き出しに失敗しました: ${what}` });
+    return null;
   }
 }
 

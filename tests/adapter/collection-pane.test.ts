@@ -52,7 +52,9 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
      * (`inspector.ts` の `buildPlanApplyItem`)。
      */
     expect(actions).toEqual([
-      ...COLLECTION_PANE_COMMANDS.map((c) => c.action),
+      // 🔴 `needs` つき(PC のフォルダへ書く窓が要る物)は、happy-dom に窓が無いので出ない
+      //   (出る側は `md-folder-export.test.ts`)
+      ...COLLECTION_PANE_COMMANDS.filter((c) => c.needs === undefined).map((c) => c.action),
       'toggle-plan-apply',
       'apply-plan',
     ]);
@@ -75,8 +77,12 @@ describe('右の列(何も選んでいない = コレクション。#1017 段④
   });
 
   it('🔴 各ボタンの下に説明(`title`)が見える字としても出る', () => {
+    // 🔴 PC のフォルダへ書く窓が在るブラウザ(Chrome / Edge)として描く ── 全部のボタンを見る
+    const w = window as unknown as { showDirectoryPicker?: unknown };
+    w.showDirectoryPicker = () => {};
     const { root, inspector } = makeInspector();
     inspector.render(initialState);
+    delete w.showDirectoryPicker;
     const pane = root.querySelector('[data-pkc-field="collection-pane"]')!;
     for (const { action, title } of COLLECTION_PANE_COMMANDS) {
       const btn = pane.querySelector<HTMLElement>(`[data-pkc-action="${action}"]`)!;

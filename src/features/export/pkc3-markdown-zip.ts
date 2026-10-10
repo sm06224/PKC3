@@ -33,7 +33,7 @@ import {
   spliceFrontmatterKeys,
   type FrontmatterValue,
 } from '../markdown/frontmatter';
-import { ZipWriter } from './zip-writer';
+import { ZipWriter, type ZipPart } from './zip-writer';
 import type { ArchiveSource } from './pkc3-archive';
 import { scanLinks, rewriteLinkDests } from '@features/markdown/link-scan';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
@@ -57,8 +57,18 @@ const ASSET_DIR = 'assets/';
  */
 const ASSET_REF_RE = /asset:([A-Za-z0-9_.-]+)/g;
 
-export interface MarkdownZipResult {
-  blob: Blob;
+/**
+ * 書き出し先の口(zip でも PC のフォルダでも**同じ中身**を渡す)。
+ * 🔴 内容(パス・バイト列)を組む道は `writeMarkdownTo` の 1 本 ── 書き出し先ごとに
+ * 直列化器を持つと、「zip とフォルダで中身が違う」が起きる(§7)。
+ * ⚠ 部品の `Blob` は**コピーせず**そのまま渡す(書き終えたら呼び側が手放す)。
+ */
+export interface MarkdownSink {
+  add(path: string, parts: readonly ZipPart[]): Promise<void>;
+}
+
+/** `writeMarkdownTo` の結果(書き出し先の実体は含まない)。 */
+export interface MarkdownWriteResult {
   warnings: string[];
   counts: {
     entries: number;
@@ -68,6 +78,10 @@ export interface MarkdownZipResult {
   };
   /** 片道で落ちたもの。**manifest と同じ数字**を UI へ渡す。 */
   dropped: { relations: number; revisionEntries: number };
+}
+
+export interface MarkdownZipResult extends MarkdownWriteResult {
+  blob: Blob;
 }
 
 /**
@@ -250,6 +264,21 @@ export async function writeMarkdownZip(
   src: ArchiveSource,
   exportedAt: string,
 ): Promise<MarkdownZipResult> {
+  const w = new ZipWriter();
+  const r = await writeMarkdownTo(src, exportedAt, w);
+  return { ...r, blob: w.finish() };
+}
+
+/**
+ * md の中身(`.md` / `assets/` / `manifest.json`)を `w` へ 1 件ずつ渡す。
+ * ⚠ 添付は 1 件ずつ取って渡す(全部を heap に載せない)。
+ * @throws entry 0 件のときは**断る**(「書き出したつもりで空」を作らない)
+ */
+export async function writeMarkdownTo(
+  src: ArchiveSource,
+  exportedAt: string,
+  w: MarkdownSink,
+): Promise<MarkdownWriteResult> {
   const warnings: string[] = [];
   /**
    * 同種の注意は上限まで ── 3000 件並べると誰も読まない(review L-2)。
@@ -274,7 +303,6 @@ export async function writeMarkdownZip(
   const pathOf = new Map(
     assetMetas.map((a) => [a.key, ASSET_DIR + names.claim(a.key, extForMime(a.mime))]),
   );
-  const w = new ZipWriter();
   const mdNames = new NameAllocator();
   const used = new Set<string>();
   /** 控え(`attachment.history` に載っている過去の版)の key。#213 の内訳に使う。 */
@@ -505,7 +533,6 @@ export async function writeMarkdownZip(
   ]);
 
   return {
-    blob: w.finish(),
     warnings,
     counts: { entries: entryCount, assets: assetCount, historyAssets: historyCount },
     dropped: { relations, revisionEntries },

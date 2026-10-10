@@ -49,6 +49,11 @@ export interface CollectionCommand {
   readonly action: string;
   readonly label: string;
   readonly title: string;
+  /**
+   * 🔴 ブラウザにこの機能が無いときは、**ボタンごと出さない**(押しても何も起きない物を置かない)。
+   * 今は `'folder-write'`(`showDirectoryPicker` ── Chrome / Edge だけ。Firefox / Safari は無い)。
+   */
+  readonly needs?: 'folder-write';
 }
 
 /**
@@ -132,6 +137,18 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
      */
     title:
       '1 ノート = 1 つの .md にして zip で保存します。PKC3 を使わなくなっても読める形で、Pandoc など他のアプリにもそのまま渡せます',
+  },
+  /**
+   * 🔴 **PC のフォルダへ 1 度だけ**(#1455 (b))。zip と**同じ中身**を、選んだフォルダの中の
+   * 新しいサブフォルダに 1 ノート = 1 つの .md で並べる。
+   * ⚠ 「フォルダ」は PKC3 のノートのフォルダではなく **PC のフォルダ**(字で言い分ける)。
+   */
+  {
+    action: 'export-markdown-folder',
+    label: 'Markdown を PC のフォルダに書き出す',
+    title:
+      '押すとフォルダを選ぶウィンドウが開きます。選んだフォルダの中に新しいフォルダを作り、1 ノート = 1 つの .md で並べます(添付は assets に入ります)。もとからあるファイルは書き換えません。自動では同期されません',
+    needs: 'folder-write',
   },
   /**
    * 🔴 **構成をテキストでコピー**(#429 段①)── AI に整理を頼むための材料。
