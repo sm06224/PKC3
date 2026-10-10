@@ -214,6 +214,13 @@ export interface DuckDbRunInput {
    * ⚠ 空は受けない(呼び側が `source` を 1 つも持たない回は走らせない)。
    */
   readonly sources: readonly DuckDbInputSource[];
+  /**
+   * 🔴 **器へ表を読み込み始めたときに 1 度呼ぶ**(#682。画面の「時間がかかります」は、この合図が来た回にだけ出す)。
+   * ⚠ 呼ばれるのは**器を起こし直す回だけ**(最初の 1 回 / 相手の組が変わった / 使わなくて片づけた後)── 器が起きていて
+   *   読み込み済みの回は呼ばれない。判定は `DuckDbLease` が持つ(「読み込む必要があるか」を、ここで二重に数えない)。
+   * ⚠ 省けば誰も聞かない回(構造を採る `schema` は聞かない)。落ちても回は続ける(合図の失敗で引けなくしない)。
+   */
+  readonly onLoad?: () => void;
 }
 
 export interface DuckDbRunResult {
@@ -456,13 +463,24 @@ export class DuckDbRunner {
    * 🔑 `run`(SQL を走らせる)と `schema`(構造を採る)が**同じ鍵**を使う ── 構造を採った後の
    *   SQL は器を作り直さない(同じ file を 2 度読まない)。
    */
-  private dataOf(sources: readonly DuckDbInputSource[]): {
+  private dataOf(
+    sources: readonly DuckDbInputSource[],
+    onLoad?: () => void,
+  ): {
     key: string;
     load: (h: DuckDbHandle) => Promise<void>;
   } {
     return {
       key: sources.map((s) => s.source.lid + '|' + s.source.name).join('||'),
-      load: (h) => this.load(h, sources),
+      load: (h) => {
+        // 🔴 読み込みに入る合図は `load` の頭で 1 度だけ(`DuckDbLease` が必要なときにだけ呼ぶ)
+        try {
+          onLoad?.();
+        } catch {
+          // 合図の失敗で、引く回を落とさない
+        }
+        return this.load(h, sources);
+      },
     };
   }
 
@@ -535,7 +553,7 @@ export class DuckDbRunner {
        * 🔑 判定は字の門と**同じ 1 本**(`duckDbWriteKind`)。
        */
       hold: duckDbWriteKind(input.sql) !== null,
-      data: this.dataOf(input.sources),
+      data: this.dataOf(input.sources, input.onLoad),
     }).catch((e: unknown) => {
       // 🔴 引いた回が落ちたときは、**どの失敗にも**写せなかった表の理由を添える(`withRefused`)
       throw this.withRefused(e, multi);

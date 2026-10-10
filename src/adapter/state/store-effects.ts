@@ -594,6 +594,11 @@ export function connectStoreEffects(
         /** ⚠ 呼ばれるのは**器へ入れ直すときだけ**(同じ相手を打鍵のたびに読み直さない)。 */
         readBytes: () => Promise<Uint8Array | null>;
       }[];
+      /**
+       * 🔴 **器が表を読み込み始めた合図**(#682)。⚠ 呼ばれない回(読み込み済みの器で引く回)が在る ──
+       *   画面の「時間がかかります」は、これが来た回にだけ出る。
+       */
+      onLoad: () => void;
     }) => Promise<{
       columns: string[];
       rows: Array<Array<string | number | null>>;
@@ -1302,7 +1307,14 @@ export function connectStoreEffects(
             });
             break;
           }
-          void duck({ sql, sources: inputs }).then(
+          void duck({
+            sql,
+            sources: inputs,
+            onLoad: () => {
+              if (disposed) return;
+              dispatcher.dispatch({ type: 'SQL_DUCK_LOADING', token });
+            },
+          }).then(
             ({ columns, rows, truncated, ms, copy }) => {
               if (disposed) return;
               dispatcher.dispatch({

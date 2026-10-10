@@ -151,6 +151,7 @@ function setup(
         source: DuckDbReadableGuestSource;
         readBytes: () => Promise<Uint8Array | null>;
       }[];
+      onLoad: () => void;
     }) => {
       const read = await Promise.all(input.sources.map((s) => s.readBytes()));
       const first = input.sources[0];
@@ -4942,8 +4943,10 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     s.pickEngine('duckdb');
     let release: () => void = () => undefined;
     s.runDuckDbSql.mockImplementationOnce(
-      () =>
+      (input: { onLoad: () => void }) =>
         new Promise((resolve) => {
+          // 🔴 器が表を読み込み始めた合図(#682)── これが来た回にだけ「時間がかかります」を出す
+          input.onLoad();
           release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
         }),
     );
@@ -4973,6 +4976,57 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     release();
     await settle();
     expect(s.note(), '答えが出たのに進捗の字が残っている').not.toContain('読み込むので時間がかかります');
+  });
+
+  it('🔴 #682:読み込み済みの器で引く回(合図が来ない)は、「時間がかかります」を言わない', async () => {
+    const s = setup();
+    s.pick('db1');
+    await settle();
+    s.pickEngine('duckdb');
+    let release: () => void = () => undefined;
+    // ⚠ 合図(`onLoad`)を呼ばない = 器が起きていて、読み込まない回
+    s.runDuckDbSql.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+        }),
+    );
+    s.type('SELECT 1');
+    s.runBtn.click();
+    await settle();
+    expect(s.note()).toContain('実行しています…');
+    expect(s.note(), '読み込まない回なのに、待たせる字を出している').not.toContain('時間がかかります');
+    release();
+    await settle();
+  });
+
+  it('🔴 #682:読み込みの合図は次の回へ持ち越さない(2 回目は合図が無ければ出ない)', async () => {
+    const s = setup();
+    s.pick('db1');
+    await settle();
+    s.pickEngine('duckdb');
+    // 1 回目:読み込む回(合図あり)
+    s.runDuckDbSql.mockImplementationOnce((input: { onLoad: () => void }) => {
+      input.onLoad();
+      return Promise.resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+    });
+    s.type('SELECT 1');
+    s.runBtn.click();
+    await settle();
+    // 2 回目:読み込まない回(合図なし)
+    let release: () => void = () => undefined;
+    s.runDuckDbSql.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ columns: ['g'], rows: [], truncated: false, ms: 1 });
+        }),
+    );
+    s.runBtn.click();
+    await settle();
+    expect(s.note()).toContain('実行しています…');
+    expect(s.note(), '前の回の「読み込んでいる」が残っている').not.toContain('時間がかかります');
+    release();
+    await settle();
   });
 
   it('対照群:内蔵の sqlite で走らせている間は、写すとは言わない(写さない)', async () => {

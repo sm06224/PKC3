@@ -218,6 +218,30 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
     expect(made[1]?.steps[2]).toBe(DUCKDB_SEAL_SQL);
   });
 
+  it('🔴 #682:読み込み合図(onLoad)は、器へ読み込む回にだけ呼ぶ(読み込み済みの 2 回目は呼ばない)', async () => {
+    const { runner, readBytes } = make();
+    const onLoad = vi.fn();
+    const other = { kind: 'csv', lang: 'csv', lid: 'l2', name: '別.csv' } as const;
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }], onLoad });
+    expect(onLoad, '最初の回で呼んでいない').toHaveBeenCalledTimes(1);
+    await runner.run({ sql: 'SELECT 2', sources: [{ source: SRC, readBytes }], onLoad });
+    expect(onLoad, '読み込み済みの器で呼んでいる(待たせる字が嘘になる)').toHaveBeenCalledTimes(1);
+    await runner.run({ sql: 'SELECT 3', sources: [{ source: other, readBytes }], onLoad });
+    expect(onLoad, '相手が替わって読み込み直す回で呼んでいない').toHaveBeenCalledTimes(2);
+  });
+
+  it('⚠ #682:合図は表を写す前に呼ぶ(写している最中に出すため)/ 合図が落ちても引ける', async () => {
+    const { runner, made, readBytes } = make();
+    let seenSteps = -1;
+    const onLoad = (): void => {
+      seenSteps = made[0]?.steps.length ?? 0;
+      throw new Error('合図の失敗');
+    };
+    const r = await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }], onLoad });
+    expect(seenSteps, '写し始めた後に合図している').toBe(0);
+    expect(r.rows).toEqual([[1]]);
+  });
+
   it('🔴 同じ題名の別ノートは、別の相手として扱う', async () => {
     const { runner, open, readBytes } = make();
     await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
