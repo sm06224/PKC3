@@ -281,6 +281,13 @@ async function seedFakePack(
         var c = document.createElement('canvas');
         c.width = 320; c.height = 200;
         cfg.qt.containerElements[0].appendChild(c);
+        // 🔴 **本物と同じく、窓の題名に文書名と LibreOffice を出す**(#1429 の後、ここが無いと「開けた」にならず、
+        //   影の見張りが天井(36〜60 秒)まで本体へ聞かない ── 影の test が全部時間切れになっていた)。
+        //   名前は host と同じく URL の name から(渡していない回は題名だけ。fixture の名前に区切りの字は無いので、正規表現で消さず / だけ割る)。(template literal の中 ── バッククォートを書かない)
+        var tb = document.createElement('div');
+        var qn = new URLSearchParams(location.search).get('name') || '';
+        tb.textContent = (qn ? qn.split('/').join('_') + ' - ' : '') + 'LibreOffice';
+        cfg.qt.containerElements[0].appendChild(tb);
         window.__written = [];
         window.__order = [];
         // ⚠ **stub は本物の意味論を真似る**(CLAUDE.md)。MEMFS は親ディレクトリが
