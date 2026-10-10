@@ -33,16 +33,19 @@ function setup() {
   const region = document.createElement('div');
   document.body.append(region);
   const args: unknown[] = Array.from({ length: 21 }, () => undefined);
-  args[5] = new SameOriginGrants(fakeStorage());
-  args[6] = new ExtensionGrants(fakeStorage());
+  const sameOrigin = new SameOriginGrants(fakeStorage());
+  const extension = new ExtensionGrants(fakeStorage());
+  const agent = new AgentGrants(fakeStorage());
+  args[5] = sameOrigin;
+  args[6] = extension;
   const Ctor = SettingsRenderer as unknown as new (...a: unknown[]) => SettingsRenderer;
   const renderer = new Ctor(
     region,
     ...args,
-    new AgentGrants(fakeStorage()),
+    agent,
     new AgentTabStatus(),
   );
-  return { region, renderer };
+  return { region, renderer, sameOrigin, extension, agent };
 }
 
 /** ファイルへ移した節(`settings/` の下に 1 つずつ在る)。登録表に在ることを等値で見る。 */
@@ -56,14 +59,118 @@ const MOVED = [
   'copy-history',
 ];
 
+/** 登録表の全 id(並びが画面の並び)。節を足したらここへ 1 行足す。 */
+const ALL_IDS = [
+  'messages',
+  'theme',
+  'page-format',
+  'prose-align',
+  'text-scale',
+  'read-columns',
+  'editor-mode',
+  'open-in-edit',
+  'open-place',
+  'app-open-target',
+  'alarm-enabled',
+  'voice-boost',
+  'phone-links',
+  'date-links',
+  'relative-days',
+  'color-swatch',
+  'missing-links',
+  'code-collapse',
+  'inline-code-copy',
+  'pdf-reader',
+  'external-images',
+  'paste-source',
+  'same-origin',
+  'extensions',
+  'agents',
+  'persist',
+  'notices',
+  'too-narrow',
+  'opened-history',
+  'search-history',
+  'copy-history',
+];
+
+/** inline(と未移動の外部画像)の id → 呼ばれるべき private メソッド。 */
+const INLINE_SYNC: Record<string, string> = {
+  theme: 'syncTheme',
+  'page-format': 'syncPageFormat',
+  'prose-align': 'syncProseAlign',
+  'text-scale': 'syncTextScale',
+  'read-columns': 'syncReadColumns',
+  'editor-mode': 'syncEditorMode',
+  'open-in-edit': 'syncOpenInEdit',
+  'open-place': 'syncOpenPlace',
+  'app-open-target': 'syncAppOpenTarget',
+  'alarm-enabled': 'syncAlarmEnabled',
+  'voice-boost': 'syncVoiceBoost',
+  'phone-links': 'syncPhoneLinks',
+  'date-links': 'syncDateLinks',
+  'relative-days': 'syncRelativeDays',
+  'color-swatch': 'syncColorSwatch',
+  'missing-links': 'syncMissingLinks',
+  'code-collapse': 'syncCodeCollapse',
+  'inline-code-copy': 'syncInlineCodeCopy',
+  'pdf-reader': 'syncPdfReader',
+  'external-images': 'syncExternalImages',
+  'paste-source': 'syncPasteSource',
+  persist: 'syncPersist',
+  notices: 'syncNotices',
+  'too-narrow': 'syncTooNarrow',
+};
+
 describe('設定画面の節の登録表(#1382)', () => {
   it('名前は一意で、ファイルへ移した節は全部載っている', () => {
     const { renderer } = setup();
     const ids = renderer.registeredSections().map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of MOVED) expect(ids).toContain(id);
-    // 空振り防止:inline(直に組む節)も映す口は載っている
-    expect(ids.length).toBeGreaterThan(MOVED.length);
+    // 全 id を並びごと等値で pin(inline の削除・並べ替え・改名も鳴る)
+    expect(ids).toEqual(ALL_IDS);
+  });
+
+  it('🔴 inline の節は、id ごとに対応する syncX が render() で呼ばれる(取り違え・空の sync・削除が鳴る)', () => {
+    const { renderer } = setup();
+    const inlineIds = renderer
+      .registeredSections()
+      .filter((s) => s.group === 'inline' || s.id === 'external-images')
+      .map((s) => s.id);
+    // 表が inline の全 id を覆う(行の無い inline が増えたら落ちる)+ 表に余分な行が無い
+    expect([...Object.keys(INLINE_SYNC)].sort()).toEqual([...inlineIds].sort());
+    const spies = Object.entries(INLINE_SYNC).map(([id, method]) => {
+      const spy = vi.spyOn(renderer as unknown as Record<string, () => void>, method);
+      return { id, method, spy };
+    });
+    renderer.render(initialState);
+    renderer.render(initialState);
+    for (const { id, method, spy } of spies) {
+      // 組み立て直後 + 以後の render で 1 回ずつ。他の節の sync が呼ばれて満たされない
+      expect(spy, `${id} → ${method}`).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('🔴 位置引数で渡した台帳が、実際に画面へ届いている(引数がずれたら落ちる)', () => {
+    const { region, renderer, sameOrigin, extension, agent } = setup();
+    const KA = 'ast-' + 'a'.repeat(64);
+    const KB = 'ast-' + 'b'.repeat(64);
+    sameOrigin.grant(KA);
+    extension.grant(KB);
+    agent.setAlways('write');
+    renderer.render(initialState);
+    const keys = (field: string): (string | null)[] =>
+      [...region.querySelectorAll(`[data-pkc-field="${field}"] li`)].map((li) =>
+        li.getAttribute('data-pkc-asset-key'),
+      );
+    expect(keys('same-origin-list')).toEqual([KA]);
+    expect(keys('extension-list')).toEqual([KB]);
+    expect(
+      [...region.querySelectorAll('[data-pkc-field="agent-list"] li')].map((li) =>
+        li.getAttribute('data-pkc-agent-scope'),
+      ),
+    ).toEqual(['write']);
   });
 
   it('🔴 登録表の並び = 画面の並び(build が返した根が、登録の順に DOM に並ぶ)', () => {
