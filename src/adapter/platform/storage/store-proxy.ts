@@ -75,6 +75,9 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'purgeTrash',
   'putAssetMeta',
   'deleteAssetMeta',
+  // ⚠ **足し忘れると、他タブのタグの色が古いまま**(#1457)── 受け手は main.ts の `onRemoteChanged`
+  //    (`listTagColors` を読み直す)。当たり先の lid は無い(`changedLids` は null)
+  'putTagColor',
 ]);
 
 /** 変更の当たり先(null = 特定できない → 全面 refresh)。 */

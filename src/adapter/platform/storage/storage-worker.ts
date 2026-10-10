@@ -29,6 +29,7 @@ import { trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
+import { MAX_TAG_COLORS, normalizeTagColor } from '@features/tag-color';
 import {
   CORRUPT_BLOCKED_OPS,
   CORRUPT_REFUSAL,
@@ -609,6 +610,11 @@ function syncFtsIndex(database: Database): void {
  */
 const BODY_TAGS_RULE = '2';
 const DERIVE_SCOPE = '__derive__';
+
+/** タグの色を持つ `settings` の scope(器ごと)。 */
+function tagColorScope(cid: string): string {
+  return `tag-color:${cid}`;
+}
 
 /**
  * 🔴 **旧ビルドが書いた行は、索引が据え置かれる**(2026-08-29 の着地後レビュー)。
@@ -4265,6 +4271,62 @@ const handlers: Handlers = {
       /* 空のまま返す ── 名前に直せないことは呼び側が言う */
     }
     return { rows, schema, elapsedMs: Date.now() - started };
+  },
+  /**
+   * 🔴 **タグの色**(#1457)── `settings` 表の 1 タグ 1 行(`k` = 大小無視の鍵、
+   * `v` = `{"tag","color"}` の JSON)。表を足さない = 版(`DB_SCHEMA_VERSION`)を上げない。
+   * ⚠ 読むときも `#rrggbb` を検める(手で書き換えた / 壊れた行を画面へ出さない)。
+   */
+  listTagColors: (req) => {
+    const rows = need().selectObjects(
+      'SELECT v FROM settings WHERE scope = ? ORDER BY k',
+      [tagColorScope(req.cid)],
+    ) as Array<{ v: string | null }>;
+    const out: Array<{ tag: string; color: string }> = [];
+    for (const r of rows) {
+      try {
+        const o = JSON.parse(r.v ?? '') as { tag?: unknown; color?: unknown };
+        const color = normalizeTagColor(o.color);
+        if (typeof o.tag === 'string' && o.tag !== '' && color !== null) {
+          out.push({ tag: o.tag, color });
+        }
+      } catch {
+        /* 読めない行は無いものとして扱う */
+      }
+    }
+    return out;
+  },
+  putTagColor: (req) => {
+    const database = need();
+    if (req.color === null) {
+      database.exec({
+        sql: 'DELETE FROM settings WHERE scope = ? AND k = ?',
+        bind: [tagColorScope(req.cid), req.key],
+      });
+      return null;
+    }
+    // ⚠ worker でも検める(呼び側が検め損ねても、壊れた色を表に書かない)
+    const color = normalizeTagColor(req.color);
+    if (color === null || req.key === '') throw new Error('タグの色は #rrggbb で指定してください');
+    // 🔴 上限(`MAX_TAG_COLORS`)── 画面側(`withTagColor`)と同じ数を worker でも守る。
+    //   新しい鍵だけ断り、付いているタグの色変更は通す(上限いっぱいでも直せる)
+    const scope = tagColorScope(req.cid);
+    const existing = database.selectValue('SELECT 1 FROM settings WHERE scope = ? AND k = ?', [
+      scope,
+      req.key,
+    ]);
+    if (existing === undefined || existing === null) {
+      const n = Number(database.selectValue('SELECT count(*) FROM settings WHERE scope = ?', [scope]));
+      if (n >= MAX_TAG_COLORS) {
+        throw new Error(`色を付けられるタグは ${MAX_TAG_COLORS} 個までです`);
+      }
+    }
+    database.exec({
+      sql: `INSERT INTO settings(scope, k, v) VALUES (?, ?, ?)
+              ON CONFLICT(scope, k) DO UPDATE SET v = excluded.v`,
+      bind: [tagColorScope(req.cid), req.key, JSON.stringify({ tag: req.tag, color })],
+    });
+    return null;
   },
   /**
    * 🔴 **起動の検めの計画**(#1007 段①)。

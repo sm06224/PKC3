@@ -107,6 +107,8 @@ describe('止める op の仕分け(#971)', () => {
     'listEntryMetas',
     // system 領域のノート一覧(設計 doc §1.1、段①)── listEntryMetas と同じ読み専用
     'listSystemEntries',
+    // タグの色(#1457)── 読むだけ(書く `putTagColor` は CORRUPT_BLOCKED_OPS 側)
+    'listTagColors',
     'listBodies',
     'getBody',
     'getBodies',

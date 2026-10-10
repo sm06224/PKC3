@@ -35,6 +35,14 @@ import { applyTextScale, chosenTextScale, initialTextScale } from '@adapter/ui/r
 import { textScaleSpec } from '@features/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
+import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
+import {
+  MAX_TAG_COLORS,
+  mergeMissingTagColors,
+  tagColorKey,
+  withTagColor,
+} from '@features/tag-color';
+import { normalizeTag } from '@features/flavor/tags';
 import {
   applyReadColumns,
   initialReadColumns,
@@ -1110,6 +1118,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   印を 1 つ当てるだけで、描き直しは要らない(骨組みは markdown が常に出す)。
    */
   applyTagBadge(document.documentElement, initialTagBadge());
+  /**
+   * 🔴 **タグの色を読んで当てる**(#1457)。色は器のデータ(`settings` 表)── 端末の好みではない。
+   * ⚠ 起動を待たせない(読めなくても札は灰色で出るだけ)。
+   */
+  void client
+    .request({ op: 'listTagColors', cid })
+    .then((list) => applyTagColors(document, list))
+    .catch(() => {});
   const regions = buildShell(root);
   /**
    * 🔴 **版面が入れ替わったときに面を描き直す口**(#671)。⚠ `center` はずっと後で
@@ -2101,6 +2117,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   reload しない ── 編集中の下書きをタブの中で生かしたまま)
    */
   let syncReloadQueued = false;
+  /** タグの色を storage から読み直して当てる(起動 / 他タブの変更 / 保存の失敗の後。いつも**正本を読む**)。 */
+  const reloadTagColors = (): Promise<void> =>
+    client
+      .request({ op: 'listTagColors', cid })
+      .then((list) => applyTagColors(document, list))
+      .catch(() => {});
   const onRemoteChanged = (_cid: string, lids: string[] | null): void => {
     /**
      * 🔴 **編集中のタブにも、別の窓が書いたことを届ける**(#178、2026-08-22)。
@@ -2116,6 +2138,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
       apply: (lid, body) => dispatcher.dispatch({ type: 'REMOTE_BODY_CHANGED', lid, body }),
     });
+    /**
+     * 🔴 **他タブが付け外ししたタグの色を読み直す**(#1457)。⚠ 色は器のデータで、`putTagColor` も
+     *   `changed` を放送する(`store-proxy.ts` の `MUTATING_OPS`)── 受け手が無いと、他タブの色は
+     *   次の読み直しまで古いまま。1 件の小さな読みなので、どの `changed` でも読み直す。
+     */
+    void reloadTagColors();
     if (syncReloadQueued) return;
     syncReloadQueued = true;
     setTimeout(() => {
@@ -2303,6 +2331,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           listRelations: () => client.request({ op: 'listRelations', cid }),
           listAssetMetas: () => client.request({ op: 'listAssetMetas', cid }),
           getAssetBlob: (key) => blobs.get(cid, key),
+          // 🔴 タグの色(#1457)── 全体のバックアップだけが運ぶ(部分の書き出しの源は持たない)
+          listTagColors: () => client.request({ op: 'listTagColors', cid }),
           listRevisionLids: () =>
             client.request({ op: 'listRevisionLids', cid }),
           // ⚠ 鎖は**保存形のまま**取る(P6e)── `getRevision` で版ごとに
@@ -2679,6 +2709,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       },
       importRevisionChains: (chains) =>
         client.request({ op: 'importRevisionChains', cid, chains }),
+      /**
+       * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ いま付けている色は動かさず、
+       * **付いていないタグの分だけ足す**(取り込みで user の今の選び方を上書きしない)。
+       */
+      importTagColors: async (incoming) => {
+        const now = await client.request({ op: 'listTagColors', cid });
+        const m = mergeMissingTagColors(now, incoming);
+        for (const e of m.added) {
+          const key = tagColorKey(e.tag);
+          if (key !== null) {
+            await client.request({ op: 'putTagColor', cid, key, tag: e.tag, color: e.color });
+          }
+        }
+        applyTagColors(document, m.list);
+        return { added: m.added.length, kept: m.kept, overLimit: m.overLimit };
+      },
       // ⚠ `keepLatest` を**明示で渡す**(review L-2)── 省くと worker の
       // 既定値が使われ、アプリ側の設定と偶然一致しているだけになる。
       // 片方を変えた瞬間に自分のバックアップが黙って削れる
@@ -4267,6 +4313,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     setFlag: (name, on) => {
       center.setFlag(name, on);
+    },
+    /**
+     * 🔴 **タグの色を付ける / 外す**(#1457)。画面を先に動かし、書けなければ**戻して言う**
+     * (黙って食い違わせない)。色の綴りの検めは `withTagColor`(`#rrggbb` だけ)。
+     */
+    setTagColor: (tag, color) => {
+      const key = tagColorKey(tag);
+      if (key === null) return;
+      const before = currentTagColors();
+      const next = withTagColor(before, tag, color);
+      if (!next.ok) {
+        showStatus(
+          next.reason === 'limit'
+            ? `色を付けられるタグは ${MAX_TAG_COLORS} 個までです。使わない色を外してから付けてください`
+            : 'この色は付けられません(#rrggbb の色だけ付けられます)',
+        );
+        return;
+      }
+      applyTagColors(document, next.list);
+      void client
+        .request({ op: 'putTagColor', cid, key, tag: normalizeTag(tag), color })
+        .catch(() => {
+          // ⚠ 古い写し(`before`)を戻さない ── その間に別タブが付けた色まで巻き戻す。正本を読み直す
+          void reloadTagColors();
+          showStatus('タグの色を保存できませんでした(保存されている色に戻しました)');
+        });
     },
     resetFlags: () => {
       center.resetFlags();

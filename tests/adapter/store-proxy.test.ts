@@ -223,6 +223,28 @@ describe("'changed' の放送", () => {
     expect(seen, '並べ替えが他タブへ届かない(一覧に古い並びが残る)').toEqual([['z']]);
   });
 
+  /**
+   * 🔴 **タグの色の付け外しも他タブへ届く**(#1457)。足し忘れると、他タブのバッジは
+   * 次の読み直しまで古い色のまま ── 受け手(`main.ts` の `onRemoteChanged`)が色を読み直す合図がこれである。
+   */
+  it('🔴 タグの色の付け外しは他タブ(と holder)へ放送される (#1457)', async () => {
+    const { host, follower } = await connectPair();
+    const seenByFollower: Array<string[] | null> = [];
+    const seenByHost: Array<string[] | null> = [];
+    follower.onChanged((_cid, lids) => seenByFollower.push(lids));
+    host.onChanged((_cid, lids) => seenByHost.push(lids));
+    // holder が付ける → follower に届く
+    await host.localClient().request({
+      op: 'putTagColor', cid: 'c1', key: 'a', tag: 'A', color: '#ff0000',
+    });
+    await drain();
+    expect(seenByFollower, '付けた色が他タブへ届かない').toEqual([null]);
+    // follower が外す → holder に届く
+    await follower.request({ op: 'putTagColor', cid: 'c1', key: 'a', tag: 'A', color: null });
+    await drain();
+    expect(seenByHost, '外した色が holder へ届かない').toEqual([null]);
+  });
+
   it('follower の書込 → 他の follower と holder 自身に届く。発信者には届かない', async () => {
     const { hub, host, follower } = await connectPair();
     const f2 = await ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f2' });

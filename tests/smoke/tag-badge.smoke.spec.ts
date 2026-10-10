@@ -43,6 +43,37 @@ async function chooseBadge(page: Page, value: string): Promise<void> {
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
 }
 
+/**
+ * 🔴 **タグに色を付ける / 外す**(#1457)。情報ペインの札の「色」を押す ── 色を選ぶ窓は
+ * 付箋・線と同じ部品(`input[data-pkc-field="color-pick"]`)で、`change` で 1 回だけ撃つ。
+ * ⚠ OS の色選択は実ブラウザでも開けないので、窓の `change` を合成して選んだことにする
+ *   (押し所に手が届くこと・窓が開くこと・選んだ後の画面は本物を通る)。
+ */
+async function paintTag(page: Page, tag: string, hex: string): Promise<void> {
+  const pick = page.locator(
+    `[data-pkc-region="inspector"] [data-pkc-field="inspector-body-tag"][data-pkc-tag="${tag}"] [data-pkc-action="tag-color-pick"]`,
+  );
+  await expectReachable(page, pick);
+  await clickReal(page, pick);
+  await expect(page.locator('input[data-pkc-field="color-pick"]'), '押しても色を選ぶ窓が出ない').toHaveCount(1);
+  await page.evaluate((v) => {
+    const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+    input.value = v;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, hex);
+  await expect(page.locator('input[data-pkc-field="color-pick"]'), '使い終わった窓が残っている').toHaveCount(0);
+}
+
+async function unpaintTag(page: Page, tag: string): Promise<void> {
+  await clickReal(
+    page,
+    `[data-pkc-region="inspector"] [data-pkc-field="inspector-body-tag"][data-pkc-tag="${tag}"] [data-pkc-action="tag-color-clear"]`,
+  );
+}
+
+const bgOf = (loc: ReturnType<Page['locator']>) =>
+  loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+
 test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550 段③)', async ({ page }) => {
   const errors = collectPageErrors(page);
   /**
@@ -67,6 +98,50 @@ test('🔴 本文のタグが札で出て、押すと一覧が絞られる (#550
 
   /** 🔴 **押し所に手が届く**(別の要素が覆っていない)。 */
   await expectReachable(page, chip);
+
+  /**
+   * 🔴 **色を付けたタグだけが色つきの札になる**(#1457)── 本文の札と情報ペインの札の両方。
+   * ⚠ 色の付いていない `家事` は灰色のまま(対照群)。字の色は下地から自動で選ばれる。
+   */
+  const other = page.locator('[data-pkc-tagline] [data-pkc-tag="家事"]');
+  const otherBg = await bgOf(other);
+  const side = page.locator(
+    '[data-pkc-region="inspector"] [data-pkc-field="inspector-body-tag-find"][data-pkc-tag="買い物"]',
+  );
+  await expect(side, '情報ペインに本文のタグの札が無い(台の空振り)').toBeVisible();
+  await expect(
+    page.locator('[data-pkc-action="tag-color-clear"][data-pkc-tag="買い物"]'),
+    '色の無いタグに「色を外す」が出ている',
+  ).toBeHidden();
+  await paintTag(page, '買い物', '#ff8800');
+  await expect(chip, '本文の札に色が付かない').toHaveCSS('background-color', 'rgb(255, 136, 0)');
+  await expect(side, '情報ペインの札に色が付かない').toHaveCSS('background-color', 'rgb(255, 136, 0)');
+  // 🔴 色の押し所を足しても、右の列の中身は右端からはみ出さない(`inspector-fit` と同じ向きの全数)
+  const over = await page.locator('[data-pkc-region="inspector"]').evaluate((el) => {
+    const vw = document.documentElement.clientWidth;
+    return [...el.querySelectorAll('*')]
+      .filter((c) => {
+        const b = c.getBoundingClientRect();
+        return b.width > 0 && b.right > vw;
+      })
+      .map((c) => c.getAttribute('data-pkc-field') ?? c.getAttribute('data-pkc-action') ?? c.tagName);
+  });
+  expect(over, '色の押し所で右の列の中身がはみ出している').toEqual([]);
+  // #ff8800 は明るいので字は黒
+  await expect(chip, '色つきの札の字が読めない色').toHaveCSS('color', 'rgb(0, 0, 0)');
+  expect(await bgOf(other), '色を付けていないタグまで色が付いた').toBe(otherBg);
+  // 色はコレクションに残る ── 読み直しても付いている
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-action="select-entry"]').first().click();
+  await expect(
+    page.locator('[data-pkc-tagline] [data-pkc-tag="買い物"]'),
+    '読み直すと色が消えた',
+  ).toHaveCSS('background-color', 'rgb(255, 136, 0)');
+  // 外すと灰色に戻る(片道にしない)
+  await unpaintTag(page, '買い物');
+  expect(await bgOf(chip), '色を外しても灰色に戻らない').toBe(bg);
+  await expect(page.locator('[data-pkc-action="tag-color-clear"][data-pkc-tag="買い物"]')).toBeHidden();
 
   // 🔴 押すと一覧が絞られる
   await clickReal(page, '[data-pkc-tagline] [data-pkc-tag="買い物"]');
@@ -98,6 +173,23 @@ test('🔴 見せ方を「文字のまま」にすると、下地が消える (#
   await chooseBadge(page, 'chip');
   const back = await chip.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(back, '札へ戻せない').toBe(before);
+
+  /**
+   * 🔴 **色の当たり方は見せ方ごとに違う**(#1457)。
+   * バッジ = 下地が色 / 枠だけ = 枠の線だけ色(下地なし)/ 文字のまま = 色は付かない。
+   */
+  await paintTag(page, '買い物', '#0044cc');
+  await expect(chip, 'バッジで下地が色にならない').toHaveCSS('background-color', 'rgb(0, 68, 204)');
+  await expect(chip, '暗い下地なのに字が黒のまま').toHaveCSS('color', 'rgb(255, 255, 255)');
+  await chooseBadge(page, 'outline');
+  await expect(chip, '枠だけなのに下地が付いている').toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(chip, '枠だけで枠の線が色にならない').toHaveCSS('border-top-color', 'rgb(0, 68, 204)');
+  await chooseBadge(page, 'plain');
+  await expect(chip, '文字のままなのに下地が付いている').toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(chip, '文字のままなのに枠が付いている').toHaveCSS('border-top-width', '0px');
+  await chooseBadge(page, 'chip');
+  await unpaintTag(page, '買い物');
+  expect(await bgOf(chip), '色を外しても灰色に戻らない').toBe(before);
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });

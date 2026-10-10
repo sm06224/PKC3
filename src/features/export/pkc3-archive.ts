@@ -23,6 +23,7 @@
 import { ZipWriter, type ZipPart } from './zip-writer';
 import { readZipDirectory, readZipText, ZipReadError } from '../import/zip-reader';
 import { createWarnCollector } from './warn-cap';
+import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
 /**
@@ -136,6 +137,12 @@ export interface ArchiveSource {
     Array<{ key: string; mime: string | null; size: number | null; hash: string | null }>
   >;
   getAssetBlob(key: string): Promise<Blob | null>;
+  /**
+   * 🔴 **タグの色**(#1457)。⚠ 任意 ── 無い源(1 ノート / フォルダの書き出し・救出)は
+   * 色を運ばない(部分の書き出しに、関係の無いタグの名前と色を混ぜない)。
+   * 色は `container.json` の `tagColors` に入る。旧ビルドは知らないキーとして読み飛ばす。
+   */
+  listTagColors?(): Promise<TagColorEntry[]>;
   listRevisionLids(): Promise<string[]>;
   /**
    * 鎖を**保存形のまま**取り出す(P6e、新しい → 古い)。
@@ -273,7 +280,9 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     };
     parts.push(i === 0 ? j(meta) : `,${j(meta)}`);
   });
-  parts.push(']}');
+  // 🔴 タグの色(#1457)── 1 つも無ければキーごと書かない(旧い読み手にも同じ形のまま)
+  const tagColors = (await src.listTagColors?.()) ?? [];
+  parts.push(tagColors.length > 0 ? `],"tagColors":${j(tagColors)}}` : ']}');
 
   const w = new ZipWriter();
   await w.add(
@@ -332,6 +341,8 @@ export interface Pkc3Archive {
   relations: ArchiveRelation[];
   revisions: ArchiveRevision[];
   assets: ArchiveAsset[];
+  /** タグの色(#1457)。無いバックアップ・読めない要素は空 / 落とす(`warnings` で言う)。 */
+  tagColors: TagColorEntry[];
   /** asset key → bytes(**まだ読んでいない**。adapter が 1 件ずつ流す)。 */
   assetSources: Map<string, { zip: Blob; entry: import('../import/zip-reader').ZipEntry }>;
   warnings: string[];
@@ -379,6 +390,7 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     relations?: ArchiveRelation[];
     revisions?: ArchiveRevision[];
     assets?: ArchiveAsset[];
+    tagColors?: unknown;
   };
   try {
     c = JSON.parse(await readZipText(zip, only(CONTAINER))) as typeof c;
@@ -428,9 +440,15 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     version < 2 ? { ...r, kind: 'full' } : r,
   );
 
+  const colors = parseTagColorList(c.tagColors);
+  if (colors.dropped > 0) {
+    warnings.push(`タグの色のうち取り込めないもの ${colors.dropped} 件は取り込みません(#rrggbb の色だけ・500 個までです)`);
+  }
+
   warn.finish();
   return {
     manifest,
+    tagColors: colors.list,
     entries: c.entries,
     relations: c.relations ?? [],
     revisions,
@@ -485,6 +503,8 @@ export function restoreArchive(
       contentHash: string | null;
     }>;
   }>;
+  /** 取り込む色(#1457)。⚠ いま付けている色は動かさない ── 足りない分だけ足すのは取込側。 */
+  tagColors: TagColorEntry[];
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
@@ -583,5 +603,5 @@ export function restoreArchive(
   }));
 
   warn.finish();
-  return { entries, relations, assets, revisionChains, warnings };
+  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, warnings };
 }

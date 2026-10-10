@@ -77,6 +77,7 @@ import {
 import { findPhones } from '../contact/phone-link';
 import { allDateTokens, readLineDate } from '../schedule/line-date';
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
+import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
 
 const md = new MarkdownIt({
@@ -2641,12 +2642,21 @@ md.core.ruler.after('inline', 'pkc-tagline', function (state) {
   return true;
 });
 
+/** 色を引く鍵の属性(`data-pkc-tag-key`)。鍵が作れない名前には付けない。 */
+function tagKeyAttr(name: string): string {
+  const key = tagColorKey(name);
+  return key === null ? '' : ` data-pkc-tag-key="${escapeHtmlAttr(key)}"`;
+}
+
 /** バッジ 1 行の HTML。⚠ 属性も本文も**必ず escape する**。 */
 function tagLineHtml(names: readonly string[], interactive: boolean): string {
   const chips = names
     .map((name) => {
       const attrs =
         ` class="pkc-tag" data-pkc-tag="${escapeHtmlAttr(name)}"` +
+        // 🔴 色を引く鍵(#1457)。⚠ 判定は `tagColorKey` の 1 か所 ── CSS の `i`(ASCII だけの大小無視)に
+        //   任せると、全角 Ａ/ａ や Ä/ä の大小違いが同じタグなのに色が付かない
+        tagKeyAttr(name) +
         (interactive
           ? ' data-pkc-action="filter-by-tag" role="button" tabindex="0"' +
             // 🔴 **起きることをそのまま書く**(2026-08-29 の動線レビュー)。

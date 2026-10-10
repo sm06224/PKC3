@@ -148,6 +148,7 @@ import { isColumnRule } from '@features/column-rule';
 import { isTagBadge } from '@features/tag-badge';
 import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
+import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -1617,6 +1618,11 @@ export interface BinderServices {
    */
   setFlag?(name: string, on: boolean): void;
   resetFlags?(): void;
+  /**
+   * タグの色を付ける / 外す(#1457。`color: null` = 外す)。保存は器(コレクション)に書く。
+   * ⚠ 色の綴りの検めは受け手(`putTagColor`)が持つ ── ここは渡すだけ。
+   */
+  setTagColor?(tag: string, color: string | null): void;
   /**
    * いま開いているノートについて答えた(「常に確認」の帯の 2 つのボタン)。
    * ⚠ **ノート単位**で、覚えるのはタブを閉じるまで。⚠ 設定は変えない ──
@@ -5236,6 +5242,8 @@ function moveAppGroup(
  */
 const PLACE_FILL_SEED = '#fffffe';
 const PLACE_STROKE_SEED = '#7f7f7f';
+/** タグの色(#1457)の初めの色。上と同じ理由で、灰色に見えて本物の灰色ではない値。 */
+const TAG_COLOR_SEED = '#808081';
 
 /**
  * 🔴 **色を選ぶ窓を 1 つ開く**(#1224 で書いた物を、#530 段④で付箋・線の色と**共有**する)。
@@ -11042,6 +11050,23 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
     dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
+  },
+  /**
+   * 🔴 **タグに色を付ける**(#1457)── 色を選ぶ窓は付箋・線と同じ 1 つ(`openColorPicker`)。
+   * ⚠ ノートの本文は書かない(色は器のデータ)ので、編集中でも通す。
+   * ⚠ 色が未設定のタグの初めの色は、灰色に見える「わざと 1 ずらした値」(窓は値が変わらないと
+   *   `change` を撃たないので、本物の灰色にすると、その 1 色だけ選べない)。
+   */
+  'tag-color-pick': (_dispatcher, target, services) => {
+    const tag = target.getAttribute('data-pkc-tag') ?? '';
+    if (tag === '') return;
+    openColorPicker(target, currentTagColor(tag) ?? TAG_COLOR_SEED, (to) =>
+      services.setTagColor?.(tag, to),
+    );
+  },
+  'tag-color-clear': (_dispatcher, target, services) => {
+    const tag = target.getAttribute('data-pkc-tag') ?? '';
+    if (tag !== '') services.setTagColor?.(tag, null);
   },
   'set-tag-badge': (_dispatcher, target) => {
     const v =

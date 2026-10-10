@@ -95,6 +95,13 @@ export interface ImportDeps {
     brokenChains: string[];
   }>;
   /**
+   * 🔴 **バックアップのタグの色を戻す**(#1457)。⚠ **省略可** ── 無い配線では色を戻さない。
+   * ⚠ いま付けている色は動かさず、付いていないタグの分だけ足す(`kept` = 見送った数)。
+   */
+  importTagColors?(
+    incoming: readonly import('@features/tag-color').TagColorEntry[],
+  ): Promise<{ added: number; kept: number; overLimit: number }>;
+  /**
    * 既に **bytes を持っている** key の集合。
    * ⚠ **meta 行で代用しない**(review H-1)── bytes は IDB、meta は sqlite と
    * 別ストアで、GC は `deleteBlob` → `deleteMeta` の順に消して途中失敗を
@@ -484,6 +491,8 @@ export async function importPkc2File(
           revisionChains: [] as RevisionChain[],
           /** アーカイブ経路だけが持つ**保存形の鎖**(P6e)。 */
           encodedChains: restored.revisionChains,
+          /** 🔴 アーカイブ経路だけが持つ**タグの色**(#1457)。 */
+          tagColors: restored.tagColors,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -699,6 +708,19 @@ export async function importPkc2File(
           for (const broken of r.brokenChains) {
             result.warnings.push(`履歴を復元できませんでした: ${broken}`);
           }
+        }
+      }
+      // 🔴 タグの色(#1457)── 履歴の後。色は本文ではないので、戻せなくても取込は失敗にしない
+      const colors = 'tagColors' in result ? result.tagColors : [];
+      if (colors.length > 0 && deps.importTagColors !== undefined) {
+        try {
+          // ⚠ 戻せたときは黙る(「注意」に数えない)。付いている色を残した分は仕様どおり。上限で落ちた分は言う
+          const r = await deps.importTagColors(colors);
+          if (r.overLimit > 0) {
+            result.warnings.push(`上限のため ${r.overLimit} 件の色を戻せませんでした(色を付けられるタグは 500 個までです)`);
+          }
+        } catch (e) {
+          result.warnings.push(`タグの色を戻せませんでした: ${reason(e)}`);
         }
       }
     } catch (e) {
