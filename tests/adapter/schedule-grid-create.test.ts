@@ -476,3 +476,182 @@ describe('書き口は予定の面の「足す」と同じ 1 本', () => {
     s.detach();
   });
 });
+
+describe('日・週を切り替えても、打ちかけの字を静かに失わない', () => {
+  const clickField = (s: ReturnType<typeof setup>, field: string): void =>
+    (s.root.querySelector(`[data-pkc-field="${field}"]`) as HTMLElement).click();
+
+  it('🔴 字を打ちかけて日を切り替えると預かり、その日がまた出たら字ごと戻って焦点が入る', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.input()!.value = '打ちかけ';
+    await tick();
+    clickField(s, 'schedule-day-next');
+    expect(s.qa(BOX), '別の日の列に枠が居座っている').toHaveLength(0);
+    clickField(s, 'schedule-day-prev');
+    expect(s.qa(BOX), '日を戻したのに枠が戻らない').toHaveLength(1);
+    expect(s.input()!.value, '打った字が戻っていない').toBe('打ちかけ');
+    expect(s.qa(BOX)[0]!.textContent).toContain('10:00〜11:30');
+    expect(document.activeElement).toBe(s.input());
+    // 戻した枠から書ける
+    key(s.input()!, 'Enter');
+    await tick();
+    expect(s.store['e1']).toBe(`${BODY}\n- [ ] 打ちかけ @2026-08-23 10:00..11:30\n`);
+    s.detach();
+  });
+
+  it('🔴 空の枠は預からない(戻ってこない)', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    await tick();
+    clickField(s, 'schedule-day-next');
+    clickField(s, 'schedule-day-prev');
+    expect(s.qa(BOX)).toHaveLength(0);
+    s.detach();
+  });
+
+  it('🔴 「日」から「週」へ移っても字は消えない: 隠れた日の列ではなく、見えている週の同じ日の列に出る', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.input()!.value = '週へ持っていく';
+    await tick();
+    (s.root.querySelector('[data-pkc-action="schedule-mode"][data-pkc-mode="week"]') as HTMLElement).click();
+    const boxes = s.qa(BOX);
+    expect(boxes, '枠が 1 つだけ出ている').toHaveLength(1);
+    expect(boxes[0]!.closest('[hidden]'), '隠れた列に枠が残っている').toBeNull();
+    expect(boxes[0]!.parentElement!.getAttribute('data-pkc-field')).toBe('schedule-weekview-lane');
+    expect(boxes[0]!.parentElement!.getAttribute('data-pkc-drop-date')).toBe('2026-08-23');
+    expect(s.input()!.value).toBe('週へ持っていく');
+    s.detach();
+  });
+
+  it('🔴 預かりがある間に別の日で作り始めると、理由を出して断る(預かりも新しい枠も増えない)', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.input()!.value = '預かり中';
+    await tick();
+    clickField(s, 'schedule-day-next');
+    await tick();
+    dragEmpty(s.lanes()[0]!, minPx(300), minPx(360));
+    expect(s.qa(BOX), '預かりがあるのに新しい枠が出た(預かりを捨てる道になる)').toHaveLength(0);
+    expect(s.d.getState().error ?? '', '断った理由が出ていない').toContain('2026-08-23');
+    s.lanes()[0]!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientY: 300 }));
+    expect(s.qa(BOX), 'ダブルクリックで預かりを捨てる道ができた').toHaveLength(0);
+    clickField(s, 'schedule-day-prev');
+    expect(s.input()!.value, '預かった字が失われた').toBe('預かり中');
+    s.detach();
+  });
+
+  it('🔴 Esc で捨てれば預かりも消え、日を戻しても出ない / また作れる', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.input()!.value = '捨てる';
+    await tick();
+    clickField(s, 'schedule-day-next');
+    clickField(s, 'schedule-day-prev'); // 戻った枠
+    key(s.input()!, 'Escape');
+    expect(s.qa(BOX)).toHaveLength(0);
+    clickField(s, 'schedule-day-next');
+    clickField(s, 'schedule-day-prev');
+    expect(s.qa(BOX), 'Esc で捨てたのに戻ってきた').toHaveLength(0);
+    await tick();
+    dragEmpty(s.lanes()[0]!, minPx(300), minPx(360));
+    expect(s.qa(BOX), '預かりが無いのに作れない').toHaveLength(1);
+    s.detach();
+  });
+});
+
+describe('短い枠でも入力欄を隠さない', () => {
+  it('🔴 1 時間に満たない枠は時刻の字を隠す印を持ち、時刻は title に残る / 1 時間以上は持たない', () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(600) + 8); // 12 分 → 15 分の枠
+    expect(s.qa(BOX)[0]!.hasAttribute('data-pkc-short')).toBe(true);
+    expect(s.qa(BOX)[0]!.title).toBe('10:00〜10:15');
+    key(s.input()!, 'Escape');
+    s.lanes()[0]!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientY: minPx(720) }));
+    expect(s.qa(BOX)[0]!.hasAttribute('data-pkc-short'), '30 分の枠').toBe(true);
+    key(s.input()!, 'Escape');
+    dragEmpty(s.lanes()[0]!, minPx(300), minPx(360)); // 60 分
+    expect(s.qa(BOX)[0]!.hasAttribute('data-pkc-short'), '1 時間の枠で時刻の字を隠した').toBe(false);
+    s.detach();
+  });
+});
+
+describe('端の自動スクロール / 取り消しの残りの道 / 離した直後の click', () => {
+  /** 端の自動スクロールを試すための入れ物(列は動いたぶんだけ上へずれる)。 */
+  function scrollable(s: ReturnType<typeof setup>): HTMLElement {
+    const scroller = s.root.querySelector<HTMLElement>('[data-pkc-field="schedule-day-scroll"]')!;
+    scroller.getBoundingClientRect = () =>
+      ({ top: 0, left: 0, bottom: 300, right: 100, width: 100, height: 300, x: 0, y: 0 }) as DOMRect;
+    scroller.scrollTop = 0;
+    const lane = s.lanes()[0]!;
+    lane.getBoundingClientRect = () =>
+      ({
+        top: -scroller.scrollTop,
+        left: 0,
+        bottom: LANE_H - scroller.scrollTop,
+        right: 100,
+        width: 100,
+        height: LANE_H,
+        x: 0,
+        y: 0,
+      }) as DOMRect;
+    return scroller;
+  }
+
+  it('🔴 下の縁でドラッグを続けると、目盛りが下へ送られ、枠の終わりも延びる', async () => {
+    const s = setup(BODY, 'day');
+    const scroller = scrollable(s);
+    const lane = s.lanes()[0]!;
+    pointer(lane, 'pointerdown', 100);
+    pointer(lane, 'pointermove', 290); // 下の縁(残り 10px < 32px)
+    const first = s.qa(GHOST)[0]!.textContent!;
+    await tick(120);
+    expect(scroller.scrollTop, '下の縁なのに送られていない / 逆へ送られた').toBeGreaterThan(0);
+    expect(s.qa(GHOST)[0]!.textContent, '送ったのに枠の終わりが延びていない').not.toBe(first);
+    pointer(lane, 'pointerup', 290);
+    s.detach();
+  });
+
+  it('🔴 ページが隠れたら、書かずに畳む', () => {
+    const s = setup(BODY, 'day');
+    pointer(s.lanes()[0]!, 'pointerdown', minPx(600));
+    pointer(s.lanes()[0]!, 'pointermove', minPx(690));
+    expect(s.qa(GHOST)).toHaveLength(1);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+    } finally {
+      delete (document as unknown as Record<string, unknown>)['visibilityState'];
+    }
+    expect(s.qa(GHOST), '隠れたのに影が残っている').toHaveLength(0);
+    pointer(s.lanes()[0]!, 'pointerup', minPx(690));
+    expect(s.qa(BOX)).toHaveLength(0);
+    s.detach();
+  });
+
+  it('🔴 動かした後にポインタを失ったら(lostpointercapture)、影が消えて枠は出ない', () => {
+    const s = setup(BODY, 'day');
+    pointer(s.lanes()[0]!, 'pointerdown', minPx(600));
+    pointer(s.lanes()[0]!, 'pointermove', minPx(690));
+    expect(s.qa(GHOST)).toHaveLength(1);
+    s.lanes()[0]!.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 1 }));
+    expect(s.qa(GHOST), 'ポインタを失ったのに影が残っている').toHaveLength(0);
+    pointer(s.lanes()[0]!, 'pointerup', minPx(690));
+    expect(s.qa(BOX)).toHaveLength(0);
+    s.detach();
+  });
+
+  it('🔴 離した直後の click は飲む(列の click に届かない)/ 次の周では通る', async () => {
+    const s = setup(BODY, 'day');
+    const seen = vi.fn();
+    s.lanes()[0]!.addEventListener('click', seen);
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.lanes()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(seen, '離した直後の click が列に届いた').not.toHaveBeenCalled();
+    await tick();
+    s.lanes()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(seen, '対照群: 次の周の click まで飲んだ').toHaveBeenCalledTimes(1);
+    s.detach();
+  });
+});

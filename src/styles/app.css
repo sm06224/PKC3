@@ -6453,8 +6453,9 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   box-sizing: border-box;
   left: 0;
   width: 100%;
-  top: calc(var(--day-hour) * var(--day-start, 0) / 60);
-  height: calc(var(--day-hour) * var(--day-span, 30) / 60);
+  /* 🔴 入力欄が全部見える最低の高さ(22px)。15 分の枠は 10px・30 分は 20px しかない。夜遅くの短い枠は上へ寄せて列の内側に収める */
+  top: min(calc(var(--day-hour) * var(--day-start, 0) / 60), calc(var(--day-hour) * 24 - 22px));
+  height: max(calc(var(--day-hour) * var(--day-span, 30) / 60), 22px);
   z-index: 3;
   display: flex;
   flex-direction: column;
@@ -6467,8 +6468,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-variant-numeric: tabular-nums;
   overflow: hidden;
 }
+/* 1 時間に満たない枠は時刻の字を隠す(時刻は title / aria-label に残る)── 入力欄を全部見せるため */
+[data-pkc-field='schedule-create-box'][data-pkc-short] > [data-pkc-field='schedule-create-label'] {
+  display: none;
+}
 [data-pkc-field='schedule-create-input'] {
   box-sizing: border-box;
+  height: 18px;
+  flex: none;
   width: 100%;
   min-width: 0;
   font: inherit;

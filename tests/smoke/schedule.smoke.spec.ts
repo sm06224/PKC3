@@ -876,6 +876,38 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await expect(createInput, '書けたのに入力欄が残っている').toHaveCount(0);
 
   /**
+   * 🔴 **短い枠(ダブルクリックの 30 分 = 20px / 15 分のドラッグ = 10px)でも、入力欄が全部見える**
+   * (#855 段 B-2 の着地前レビュー)。⚠ 枠の高さは時間に比例するので、直す前は 10px の枠に入力欄が
+   * 隠れて打てなかった。実ブラウザの計算後の大きさでしか言えない。
+   */
+  const laneEl = pane.locator('[data-pkc-field="schedule-day-lane"]');
+  const insideLane = async (): Promise<void> => {
+    const lb = (await laneEl.boundingBox())!;
+    const ib = (await createInput.boundingBox())!;
+    expect(ib.height, '入力欄が 16px 未満に潰れている').toBeGreaterThanOrEqual(16);
+    expect(ib.y, '入力欄が列の上にはみ出している').toBeGreaterThanOrEqual(lb.y - 1);
+    expect(ib.y + ib.height, '入力欄が列の下にはみ出している').toBeLessThanOrEqual(lb.y + lb.height + 1);
+    const vp = page.viewportSize()!;
+    expect(ib.y + ib.height, '入力欄が画面の外にある').toBeLessThanOrEqual(vp.height);
+  };
+  const lane2 = (await laneEl.boundingBox())!;
+  await page.mouse.dblclick(lane2.x + lane2.width * 0.25, lane2.y + 480); // 12:00
+  await expect(createInput, 'ダブルクリックの 30 分の枠に入力欄が見えていない').toBeVisible();
+  await insideLane();
+  await page.keyboard.press('Escape');
+  await expect(createInput).toHaveCount(0);
+  const lane3 = (await laneEl.boundingBox())!;
+  await page.mouse.move(lane3.x + lane3.width * 0.25, lane3.y + 480);
+  await page.mouse.down();
+  await page.mouse.move(lane3.x + lane3.width * 0.25, lane3.y + 480 + 10, { steps: 4 });
+  await expect(pane.locator('[data-pkc-field="schedule-drag-ghost"]')).toHaveText('12:00〜12:15');
+  await page.mouse.up();
+  await expect(createInput, '15 分の枠に入力欄が見えていない').toBeVisible();
+  await insideLane();
+  await page.keyboard.press('Escape');
+  await expect(createInput).toHaveCount(0);
+
+  /**
    * 🔴 **左の列の「週」は別のウィンドウで開く。開いた窓は 7 列で、その日の列に 14:00 の札**(#855 段 A-2)。
    *
    * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで、押して出る窓(popup)を見る

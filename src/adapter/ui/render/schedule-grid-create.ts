@@ -19,10 +19,16 @@
  * - **書き口は 1 本**: `addScheduleItem`(`binder.ts`)── 予定の面の「足す」と同じ関数。開いている間の
  *   制限(編集中は今日のノートが無ければ断る等)もそこが持つ。**通ったときだけ**入力欄を消す。
  * - 🔑 **入力欄は列の直下に置く**(札の管理の外)── 描き直しは札だけを動かすので、打ちかけの字が消えない。
- *   ただし**列が別の日になった / 隠れた**(日を切り替えた・月に移った)ときは、欄を畳む(別の日の枠に
- *   居座らない。打ちかけは捨てる)。
+ *   ただし**列が別の日になった / 隠れた**(日を切り替えた・日から週へ移った)ときは、枠を畳む(別の日の列に
+ *   居座らない)。🔴 **字があれば捨てずに 1 件だけ預かる**(`parked` ── 日付・時刻・字)。**その日の列が
+ *   また見えたら**(同じ見せ方でも、日⇄週の別の見せ方でも)枠を字ごと戻して焦点を入れる。空なら預からない。
+ * - 🔴 **預かっている間に別の所で新しく作り始めたら、断る**(理由を出す)。預かった字を黙って捨てる道も、
+ *   2 件目を預かる道も作らない(いちばん単純で、打った字を静かに失わない規則)。`Enter` で書けたとき・
+ *   `Esc` を押したとき・空にして `Enter` を押したときは、預かりも消える。
  * - **入力欄から焦点が外れたとき**: 空なら畳む。**字があれば残す**(打った字を失わない)── `Enter` か `Esc` まで。
  *   別の所を押しても字があれば畳まず、焦点を欄へ戻す。
+ * - 🔑 **入力欄はいつも全部見える**: 15 分の枠は 10px、30 分は 20px しかないので、枠の高さに最低を置き
+ *   (`app.css`)、1 時間に満たない枠は時刻の字を隠す(時刻は `title` と `aria-label` に残す)。
  * - `Enter` は**変換中なら送らない**(`isComposing` / `keyCode 229`)。
  *
  * ## 取り消し(書かずに畳む)
@@ -85,6 +91,8 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
   let press: Press | null = null;
   let box: { el: HTMLElement; input: HTMLInputElement; lane: HTMLElement; date: string; startMin: number; endMin: number } | null =
     null;
+  /** 日を切り替えて畳んだ枠のうち、字を打ちかけていたもの(1 件だけ)。 */
+  let parked: { date: string; startMin: number; endMin: number; text: string } | null = null;
   let swallowClick = false;
   let swallowTimer: ReturnType<typeof setTimeout> | null = null;
   let escapedUntilUp = false;
@@ -136,12 +144,31 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
     });
     if (ok) closeBox();
   };
-  const openBox = (lane: HTMLElement, date: string, startMin: number, endMin: number): void => {
+  /** 預かりがあるとき、新しい枠を作り始めるのを断る(理由を出す)。断ったら true。 */
+  const refuseWhileParked = (): boolean => {
+    if (parked === null) return false;
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `${parked.date} に、名前を打ちかけの予定があります。その日を開いて、書くか取り消すかしてから作ってください`,
+    });
+    return true;
+  };
+  const openBox = (
+    lane: HTMLElement,
+    date: string,
+    startMin: number,
+    endMin: number,
+    text: string = '',
+  ): void => {
     closeBox();
+    parked = null;
     const el = doc.createElement('div');
     el.setAttribute('data-pkc-field', GRID_CREATE_FIELD);
     el.style.setProperty('--day-start', String(startMin));
     el.style.setProperty('--day-span', String(endMin - startMin));
+    // 🔴 1 時間に満たない枠は時刻の字を隠して、入力欄を全部見せる(時刻は title / aria-label に残る)
+    if (endMin - startMin < 60) el.setAttribute('data-pkc-short', '');
+    el.title = formatTimeRange(startMin, endMin);
     const label = doc.createElement('span');
     label.setAttribute('data-pkc-field', 'schedule-create-label');
     label.textContent = formatTimeRange(startMin, endMin);
@@ -150,6 +177,7 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
     input.setAttribute('data-pkc-field', GRID_CREATE_INPUT_FIELD);
     input.setAttribute('aria-label', `${formatTimeRange(startMin, endMin)} の予定の名前`);
     input.placeholder = '予定の名前';
+    input.value = text;
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         // 🔴 変換中の Enter は確定であって送信ではない(日本語入力)
@@ -162,6 +190,7 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
         e.preventDefault();
         e.stopPropagation();
         closeBox();
+        parked = null;
       }
     });
     input.addEventListener('blur', () => {
@@ -173,11 +202,28 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
     box = { el, input, lane, date, startMin, endMin };
     input.focus();
   };
-  /** 日を切り替えた・隠れたなど、枠がいまの列と合わなくなったら畳む。 */
+  const shownLaneOf = (date: string): HTMLElement | null => {
+    for (const lane of root.querySelectorAll<HTMLElement>(GRID_LANE_SELECTOR)) {
+      if (lane.closest('[hidden]') === null && dateOf(lane) === date) return lane;
+    }
+    return null;
+  };
+  /**
+   * 日を切り替えた・隠れたなど、枠がいまの列と合わなくなったら畳む。🔴 字があれば預かり、
+   * その日の列がまた見えたら字ごと戻す。
+   */
   const unsubscribe = dispatcher.onState(() => {
     const b = box;
-    if (b === null) return;
-    if (!b.lane.isConnected || dateOf(b.lane) !== b.date || b.lane.closest('[hidden]') !== null) closeBox();
+    if (b !== null) {
+      if (b.lane.isConnected && dateOf(b.lane) === b.date && b.lane.closest('[hidden]') === null) return;
+      const text = b.input.value;
+      closeBox();
+      if (text.trim() !== '') parked = { date: b.date, startMin: b.startMin, endMin: b.endMin, text };
+    }
+    if (parked !== null) {
+      const lane = shownLaneOf(parked.date);
+      if (lane !== null) openBox(lane, parked.date, parked.startMin, parked.endMin, parked.text);
+    }
   });
 
   // ── ドラッグ ──
@@ -257,6 +303,7 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
     }
     const date = dateOf(lane);
     if (date === '' || !(laneHeightOf(lane) > 0)) return;
+    if (refuseWhileParked()) return;
     const p: Press = {
       lane,
       date,
@@ -358,6 +405,7 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
     if (lane === null) return;
     const date = dateOf(lane);
     if (date === '' || !(laneHeightOf(lane) > 0)) return;
+    if (refuseWhileParked()) return;
     if (box !== null && box.input.value.trim() !== '') {
       box.input.focus();
       return;
@@ -397,6 +445,7 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
   return () => {
     finish();
     closeBox();
+    parked = null;
     unsubscribe();
     if (swallowTimer !== null) clearTimeout(swallowTimer);
     doc.removeEventListener('pointerdown', onPointerDown);
