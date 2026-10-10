@@ -40,6 +40,7 @@ function archive(over: Partial<Pkc3Archive> = {}): Pkc3Archive {
     relations: [],
     revisions: [],
     assets: [],
+    tagColors: [],
     assetSources: new Map(),
     warnings: [],
     ...over,

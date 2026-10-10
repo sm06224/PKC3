@@ -108,6 +108,8 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'reorderEntry',
   // 起動の検めの印(#1007 段①)── `settings` の 1 行を上書きするだけ(実質増えない)
   'integrityStamp',
+  // タグの色(#1457)── `settings` の 1 行(外すときは減る)。空きが無くても付け外しできる
+  'putTagColor',
 ];
 
 /**

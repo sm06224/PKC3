@@ -1222,6 +1222,80 @@ describe('importPkc2File (P6b 実行部)', () => {
   });
 
   /**
+   * 🔴 **タグの色(#1457)**: バックアップの色が取り込みの口(`importTagColors`)へ渡り、
+   * 戻せなくても取り込みは失敗にしない(色は本文ではない)。色の無いバックアップでは呼ばない。
+   */
+  describe('タグの色', () => {
+    async function archiveWith(tagColors: unknown): Promise<File> {
+      const { ZipWriter } = await import('../../src/features/export/zip-writer');
+      const w = new ZipWriter();
+      await w.add('manifest.json', ['{"format":"pkc3-archive","version":2}']);
+      await w.add('container.json', [
+        JSON.stringify({
+          meta: {},
+          entries: [
+            { lid: 'n1', title: 'ノート', archetype: 'text', body: 'x', entryOrder: 1,
+              createdAt: null, updatedAt: null, status: null, date: null, archived: false },
+          ],
+          relations: [],
+          revisions: [],
+          assets: [],
+          ...(tagColors === undefined ? {} : { tagColors }),
+        }),
+      ]);
+      return new File([w.finish()], 'a.pkc3-full.zip');
+    }
+
+    it('色が importTagColors へ渡る(検めた後の綴りで)', async () => {
+      const { d, deps } = harness();
+      const got: unknown[] = [];
+      deps.importTagColors = async (incoming) => {
+        got.push(...incoming);
+        return { added: incoming.length, kept: 0, overLimit: 0 };
+      };
+      const file = await archiveWith([
+        { tag: '買い物', color: '#FF8800' },
+        { tag: 'bad', color: 'red' },
+      ]);
+      expect(await importPkc2File(d, deps, file)).toBe(1);
+      expect(got).toEqual([{ tag: '買い物', color: '#ff8800' }]);
+    });
+
+    it('色が無いバックアップでは呼ばない', async () => {
+      const { d, deps } = harness();
+      let called = 0;
+      deps.importTagColors = async () => {
+        called++;
+        return { added: 0, kept: 0, overLimit: 0 };
+      };
+      expect(await importPkc2File(d, deps, await archiveWith(undefined))).toBe(1);
+      expect(called).toBe(0);
+    });
+
+    it('色を戻せなくても取り込みは成功し、注意として言う', async () => {
+      const { d, deps, reportedNotes } = harness();
+      deps.importTagColors = async () => {
+        throw new Error('壊れた');
+      };
+      expect(
+        await importPkc2File(d, deps, await archiveWith([{ tag: 'a', color: '#123456' }])),
+      ).toBe(1);
+      expect(reportedNotes().join('\n')).toContain('タグの色を戻せませんでした');
+    });
+
+    it('🔴 上限で戻せなかった色は件数つきで言う(黙って捨てない)。戻せたときは言わない', async () => {
+      const { d, deps, reportedNotes } = harness();
+      deps.importTagColors = async () => ({ added: 3, kept: 0, overLimit: 7 });
+      await importPkc2File(d, deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
+      expect(reportedNotes().join('\n')).toContain('上限のため 7 件の色を戻せませんでした');
+      const h2 = harness();
+      h2.deps.importTagColors = async () => ({ added: 1, kept: 0, overLimit: 0 });
+      await importPkc2File(h2.d, h2.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
+      expect(h2.reportedNotes().join('\n')).not.toContain('上限のため');
+    });
+  });
+
+  /**
    * 🔴 **判定は末尾ではなく中身**(#1017 段④b)。⚠ ここが「新しい 3 種の末尾を
    *   足したら、判定を末尾で書いてしまった」を捕まえる ── 3 種 + 旧形式を
    *   受けるようにした変更のついでに、`file.name` を見る分岐を紛れ込ませても

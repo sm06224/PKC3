@@ -2663,6 +2663,19 @@ li[data-pkc-row-slot] {
   align-items: center;
   gap: 2px;
 }
+/* 🔴 **タグの色(#1457)の「色」「色を外す」を足したので、右の列の幅(下限 220px)に収まるよう
+ *    包みの中で折り返す**。折り返さないと名前 + 2 つのボタンが列の右端からはみ出す
+ *    (実画面で確かめた。`inspector-fit` の観測点と同じ向き)。ボタンは字を小さくして場所を取らない。 */
+[data-pkc-field='inspector-tag'],
+[data-pkc-field='inspector-body-tag'] {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+[data-pkc-field='inspector-tag-color'],
+[data-pkc-field='inspector-tag-color-clear'] {
+  font-size: 11px;
+  padding: 0 4px;
+}
 [data-pkc-field='inspector-body-tag-where'] {
   color: var(--muted);
   font-size: 11px;

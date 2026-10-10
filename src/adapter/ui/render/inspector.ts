@@ -43,6 +43,7 @@ import { ScrollMemory } from './scroll-memory';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { formatEntryLink } from '@features/entry-ref/entry-ref-format';
 import { iconButton } from './icons';
+import { setTagKey, tagColorControls } from './tag-color';
 import { COLLECTION_PANE_COMMANDS } from './commands';
 import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(一覧の行と共有)。
@@ -542,6 +543,7 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-tag', tag);
           find.setAttribute('data-pkc-field', 'inspector-tag-find');
           find.title = `「${tag}」を含むノートを探します`;
+          setTagKey(find, tag);
           find.textContent = tag;
           chip.append(find);
           /**
@@ -556,6 +558,8 @@ export class InspectorRenderer {
             off.title = `このノートから「${tag}」を外します(ノートも本文の他の行も消えません)`;
             chip.append(off);
           }
+          // 🔴 色(#1457)── 器のデータなので、本文を書けない状態でも押せる
+          chip.append(...tagColorControls(tag));
           tagBox.append(chip);
         }
       }
@@ -587,8 +591,10 @@ export class InspectorRenderer {
           find.setAttribute('data-pkc-tag', name);
           find.setAttribute('data-pkc-field', 'inspector-body-tag-find');
           find.title = `「${name}」を含むノートを探します`;
+          setTagKey(find, name);
           find.textContent = name;
           chip.append(find);
+          chip.append(...tagColorControls(name));
           /**
            * 🔑 **どこに書いたか**を添える(user 要件の当のもの)。
            * ⚠ 同じタグを何度書いても**場所は畳んで**出す ── 同じ見出しで 3 回書いた

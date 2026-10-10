@@ -455,7 +455,7 @@ const UNREGISTERED_POINT: readonly string[] = [
    */
   'toggle-code-collapse',
   'toggle-heading-fold', 'toggle-log-day', 'toggle-task', 'unschedule-task', 'unsplit-entry',
-  'untag-entry', 'view-asset', 'view-big',
+  'tag-color-clear', 'tag-color-pick', 'untag-entry', 'view-asset', 'view-big',
 ];
 
 describe('操作の全数台帳(#582 段①)', () => {
@@ -469,6 +469,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-10(#1457): タグの色(`tag-color-pick` / `tag-color-clear`。押したバッジの名前が要る P1 ── `untag-entry` と同じ仕分け)で受け手 +2 ──
+      //   登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-10(#1441): ログの日付の行(`toggle-log-day`)で受け手 +1 ── 登記は増えない(押し口は本文の日付の行にしか無い)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-10(#1455 (b)): 「Markdown を PC のフォルダに書き出す」(`export-markdown-folder`)で受け手 +1 / 登記 +1(右の列の `collectionPane`)/ `both` +1 ──
@@ -758,12 +760,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 395,
-      receivers: 329,
+      total: 397,
+      receivers: 331,
       registered: 109,
       both: 43,
       outsideActionsTable: 66,
-      unregistered: 286,
+      unregistered: 288,
     });
   });
 

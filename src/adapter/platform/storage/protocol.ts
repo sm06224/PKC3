@@ -106,6 +106,17 @@ export type StorageRequest =
    */
   | { op: 'appendMessage'; cid: string; lid: string; title: string; section: string; cap: number }
   /**
+   * 🔴 **タグの色を全部返す**(#1457)。`settings` 表の `scope = 'tag-color:<cid>'` の行。
+   * ⚠ 壊れた行(JSON でない / `#rrggbb` でない)は**返さない**(読み手に検めさせない)。
+   */
+  | { op: 'listTagColors'; cid: string }
+  /**
+   * 🔴 **タグの色を 1 つ付ける / 外す**(#1457。`color: null` = 外す)。
+   * ⚠ 1 タグ 1 行の書込なので、別の窓が別のタグの色を付けても**互いを消さない**
+   *   (表ごと書き戻す形にしない)。`key` は `tagColorKey`(大小無視)── 呼び側が作る。
+   */
+  | { op: 'putTagColor'; cid: string; key: string; tag: string; color: string | null }
+  /**
    * 🔴 **カンバンの札(チェック項目)を集める**(#277 段②)。
    *
    * ⚠ カンバンが**全ノートの本文を読まない**ための門である ── 面を開くたびの
@@ -970,6 +981,8 @@ export interface ResultMap {
   listSystemEntries: EntryMetaRow[];
   /** 追記できたら `null`(設計 doc §7、段②a)。 */
   appendMessage: null;
+  listTagColors: Array<{ tag: string; color: string }>;
+  putTagColor: null;
   /** カンバンの札(ノートの並び → 行番号 順)。⚠ 切ったときは `truncated`。 */
   taskScan: TaskScan;
   /** 連絡先(題名順は描画側)。⚠ 切ったときは `truncated`。 */
