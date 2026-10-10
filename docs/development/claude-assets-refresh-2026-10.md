@@ -82,10 +82,10 @@ CLAUDE.md(目標 1,300 行前後)
 
 | 段 | 中身 | 誰が | 検算 |
 |---|---|---|---|
-| **A** | この doc + 腐った記述 15 件の訂正(§1 の表) | 親 | 導線 grep(`.claude/` を指す path が全部実在)/ `tests/repo-hygiene` `tests/pick-smoke` |
-| **B** | 新 skill `gemini-outsourcing` + 2026-10-09 の教訓(速度)を `perf-measurement` と CLAUDE.md の表へ | 親 | skill 一覧に出る / 導線 grep |
-| **C** | CLAUDE.md のこちらの教訓(1,688 行)→ 型の表 + `.claude/rules/` + skill `reference/`。user 印の節は `diff` で **0 行の変更**を機械で確かめる | implementer(sonnet、worktree)× 3(§1〜4 / §5〜10 / 末尾)→ 親が突き合わせ | 🔴 user 印の節の `diff` が 0 行 / 日付と issue 番号が 1 つも落ちていない(`grep -c '2026-'` の前後比較)/ rules の `paths:` が `claude --debug` で読める |
-| **D** | skill 5 本を 500 行未満へ(`reference/` へ 1 段)/ agents の同文を 1 か所へ / description を仕事の順で短く | implementer × 2 | 行数 / 連番の見出しが SKILL.md に残っていない / 導線 grep |
+| **A** ✅ #1483 | この doc + 腐った記述 15 件の訂正(§1 の表) | 親 | 導線 grep(`.claude/` を指す path が全部実在)/ `tests/repo-hygiene` `tests/pick-smoke` |
+| **B** ✅ #1484 | 新 skill `gemini-outsourcing` + 2026-10-09 の教訓(速度)を `perf-measurement` と CLAUDE.md の表へ | 親 | skill 一覧に出る / 導線 grep |
+| **C** ✅ #1485 | CLAUDE.md のこちらの教訓(1,688 行)→ 型の表 + `.claude/rules/` + skill `reference/`。user 印の節は `diff` で **0 行の変更**を機械で確かめる | implementer(sonnet、worktree)× 3(§1〜4 / §5〜10 / 末尾)→ 親が突き合わせ | 🔴 user 印の節の `diff` が 0 行 / 日付と issue 番号が 1 つも落ちていない(`grep -c '2026-'` の前後比較)/ rules の `paths:` が `claude --debug` で読める |
+| **D** ✅ #1486 | skill 5 本を 500 行未満へ(`reference/` へ 1 段)/ agents の同文を 1 か所へ / description を仕事の順で短く | implementer × 2 | 行数 / 連番の見出しが SKILL.md に残っていない / 導線 grep |
 
 ⚠ **C と D は、A が着地して user が doc を見てから**。A・B は訂正と追加だけなので待たない
 (2026-08-19 の委任の内側)。C は見え方ではないが**毎回読む物の形**を変えるので、
@@ -120,6 +120,23 @@ test が在るぶん品質も担保される。外注の仕方をスキルにし
 - user 印の節を**動かす**判断が要る場面が出たら、止めて聞く(ここに書いた線を越える)
 - rules の `paths:` が**読まれない**(`claude --debug` で載らない)なら、rules をやめて skill の `reference/` に寄せる
 - C の後に、こちらの教訓を参照する test(`tests/repo-hygiene.test.ts` などが CLAUDE.md の §番号を docstring で指す)が**行き止まり**になる ── §番号は表に残すので壊れないはずだが、`grep -rn 'CLAUDE.md §' tests src` を C の検算に入れる
+
+## 8. 結果(2026-10-10。段 A〜D 着地後の実測)
+
+| 計器 | before(2026-10-10 朝) | after |
+|---|---|---|
+| CLAUDE.md | 2,875 行 | **1,571 行**(user 印の節 39 件は byte 一致。日付・issue 番号は落ちた物 0) |
+| `.claude/` の agents + commands + SKILL.md | 7,291 行 | **約 4,500 行** |
+| 500 行超の SKILL.md | 5 本 | **0 本**(最大 office-oracle 450) |
+| 実例の置き場 | CLAUDE.md と SKILL.md の本文 | `.claude/rules/` 3 本(paths つき)+ `reference/` 15 本 |
+| 腐った記述(表 2) | 15 件 | 0(段 A) |
+| 新 skill | ─ | `gemini-outsourcing` |
+
+PR: 段 A #1483(cbc1f5cc)/ 段 B #1484(ce410790)/ 段 C #1485(485d9711)/ 段 D #1486(599afa62)。
+
+⚠ **未検証のまま残っている物**: `.claude/rules/` の `paths:` が「その file を触ったときだけ」載ること(この箱では
+`claude --debug` を打てない)。載らなければ §7 の条件で reference へ寄せる。次のセッションで、`tests/` の file を 1 つ
+Read したあとに rules の文が context に在るかを 1 度見る。
 
 ## 出典
 
