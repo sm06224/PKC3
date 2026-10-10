@@ -29,7 +29,7 @@
  *   `compositionend` で 1 度合わせ直す。
  */
 import { formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
-import { caretInTableRow } from '@features/markdown/table-assist';
+import { tableRowAt } from '@features/markdown/table-assist';
 import { formatTarget } from '../actions/format-target';
 
 /**
@@ -47,6 +47,19 @@ export const SELECTION_STATS_FIELD = 'selection-stats';
  * 枠は同じ `<span>` を使い回す ── 帯の高さは動かない。
  */
 export const TABLE_TAB_HINT = 'Tab で次のセル';
+
+/**
+ * 🔴 **caret の行の判定の控え**(#1451。「再計算は行が変わったときだけ」)。
+ * caret が控えの行 `[from, to]` の中に居て、入力(`input`)が無いかぎり、本文(`ta.value`)を**読みもしない**。
+ * ⚠ 入力は `watchSelectionStats` が invalidate する(`writeBack` も `input` を撃つ)。
+ */
+interface LineCache {
+  ta: HTMLTextAreaElement;
+  from: number;
+  to: number;
+  table: boolean;
+}
+type CacheRef = { current: LineCache | null };
 
 /** 字を打つ欄ではない `<input>`(ここへ焦点が在っても、選んだ字の数は残してよい)。 */
 const NON_TEXT_INPUT = new Set([
@@ -89,7 +102,7 @@ function focusOnOtherField(region: HTMLElement, ta: HTMLTextAreaElement | null):
  * 枠へ**いまの選び**を合わせる。⚠ すでに同じ字なら書かない。
  * @returns 書いたら `true`(test の空振り防止 ── 書かなかったのか枠が無いのか区別する)
  */
-export function syncSelectionStats(region: HTMLElement): boolean {
+export function syncSelectionStats(region: HTMLElement, cache?: CacheRef): boolean {
   const slot = region.querySelector<HTMLElement>(`[data-pkc-field="${SELECTION_STATS_FIELD}"]`);
   if (slot === null) return false;
   const ta = formatTarget(region);
@@ -99,7 +112,15 @@ export function syncSelectionStats(region: HTMLElement): boolean {
     const end = ta.selectionEnd;
     if (end > start) text = formatSelectionStats(end - start, selectionLineCount(ta.value, start, end));
     // 選びが無く、caret が表の行に在るときだけ案内(1 行ぶんだけ読む。debounce 後の 1 回)
-    else if (caretInTableRow(ta.value, start)) text = TABLE_TAB_HINT;
+    else {
+      let c = cache?.current ?? null;
+      if (c === null || c.ta !== ta || start < c.from || start > c.to) {
+        const r = tableRowAt(ta.value, start);
+        c = { ta, from: r.from, to: r.to, table: r.table };
+        if (cache !== undefined) cache.current = c;
+      }
+      if (c.table) text = TABLE_TAB_HINT;
+    }
   }
   if (slot.textContent === text) return false;
   slot.textContent = text;
@@ -113,12 +134,16 @@ export function syncSelectionStats(region: HTMLElement): boolean {
 export function watchSelectionStats(region: HTMLElement): () => void {
   const doc = region.ownerDocument;
   let composing = false;
+  const cache: CacheRef = { current: null };
+  const invalidate = (): void => {
+    cache.current = null;
+  };
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const run = (): void => {
     timer = null;
     if (composing) return;
-    syncSelectionStats(region);
+    syncSelectionStats(region, cache);
   };
   /** 🔑 trailing debounce ── 動いている間は何も読まず、止まって 1 度だけ読む。 */
   const schedule = (): void => {
@@ -134,6 +159,8 @@ export function watchSelectionStats(region: HTMLElement): () => void {
     schedule();
   };
 
+  // 入力があれば控えは古い(`input` は bubble する。`writeBack` / `insertText` も撃つ)
+  region.addEventListener('input', invalidate, true);
   doc.addEventListener('selectionchange', schedule);
   // 🔴 焦点が動いたときも合わせ直す(#1264 §1)── 本文の欄の選びは、焦点が移っても動かない
   //    (selectionchange が来ない)ので、題名の欄へ移ったときに数が残っていた
@@ -146,6 +173,7 @@ export function watchSelectionStats(region: HTMLElement): () => void {
     doc.removeEventListener('selectionchange', schedule);
     doc.removeEventListener('focusin', schedule);
     doc.removeEventListener('focusout', schedule);
+    region.removeEventListener('input', invalidate, true);
     region.removeEventListener('compositionstart', onStart, true);
     region.removeEventListener('compositionend', onEnd, true);
     if (timer !== null) clearTimeout(timer);

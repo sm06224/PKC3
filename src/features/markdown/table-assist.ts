@@ -141,9 +141,20 @@ function getLineRange(value: string, pos: number): { start: number; end: number 
  *   半角 `|` だけが区切り(全角 `｜` は表の行ではない ── 読み手も同じ)。
  */
 export function caretInTableRow(value: string, caret: number): boolean {
+  return tableRowAt(value, caret).table;
+}
+
+/**
+ * caret の行の範囲 `[from, to]`(`to` は改行の手前 = caret が行末に在っても同じ行)と、表の行か。
+ * 🔑 帯の案内が「caret が同じ行に居るあいだは本文を読み直さない」ために範囲ごと返す(#1451)。
+ */
+export function tableRowAt(
+  value: string,
+  caret: number,
+): { readonly from: number; readonly to: number; readonly table: boolean } {
   const { start, end } = getLineRange(value, caret);
   const line = parseTableLine(value, start, end);
-  return line !== null && line.cells.length > 0;
+  return { from: start, to: end, table: line !== null && line.cells.length > 0 };
 }
 
 /**

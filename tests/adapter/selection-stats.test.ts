@@ -323,7 +323,7 @@ describe('書き込みを減らす(#1215)', () => {
     }
   });
 
-  it('🔑 caret だけのときの本文の読みは 1 回につき 1 度まで(表の行かを引くため #1451)/ 選んだときも読む', () => {
+  it('🔑 caret が同じ行にいるあいだ本文を読まない / 行が変わったときだけ 1 度読む(#1451)/ 選んだときも読む', () => {
     const { region, ta } = surface();
     const un = watchSelectionStats(region);
     let reads = 0;
@@ -350,11 +350,16 @@ describe('書き込みを減らす(#1215)', () => {
       flush();
       counting = false;
     };
+    moveAndCount(4, 4); // 2 行目に入る(控えが無いので引く)
+    expect(reads, '最初の caret で本文を 1 度も読んでいない(空振り防止)').toBeGreaterThan(0);
+    expect(reads, '1 回の読みで 2 度以上読んだ').toBeLessThanOrEqual(1);
+    const first = reads;
+    moveAndCount(5, 5); // 同じ行の中(#1451: 行が変わらないかぎり読まない)
+    moveAndCount(7, 7); // 同じ行の行末
     moveAndCount(4, 4);
-    moveAndCount(5, 5);
-    // 🔴 #1451 以前は 0(caret だけでは読まなかった)。いまは caret の行が表かを引くため 1 回読む。
-    //    ⚠ 2 回の移動で 2 回以内 = 1 回の読みにつき 1 度(複製・走査の繰り返しを増やさない)
-    expect(reads, 'caret だけなのに本文を 1 回の読みで 2 度以上読んだ').toBeLessThanOrEqual(2);
+    expect(reads, '同じ行の中の caret 移動で本文を読んだ').toBe(first);
+    moveAndCount(9, 9); // 別の行へ
+    expect(reads - first, '別の行へ移ったのに引き直していない').toBe(1);
     moveAndCount(0, 3);
     expect(reads, '選んだのに本文を読んでいない(行数が数えられない)').toBeGreaterThan(0);
     un();
@@ -578,6 +583,28 @@ describe('🔴 caret が表の行に在るとき「Tab で次のセル」(#1451)
     un = watchSelectionStats(t.region);
     select(t.ta, 3, 3);
     expect(t.slot.textContent, '追記欄では Tab はセルを移さない').toBe('');
+    un();
+  });
+
+  it('🔴 同じ行のまま打って表になる(行頭に | を足す)と、控えが捨てられて案内が出る / 外すと消える', () => {
+    const { region, slot, ta } = surface('editor-body', 'x | y |');
+    const un = watchSelectionStats(region);
+    select(ta, 3, 3);
+    expect(slot.textContent, '表でない行').toBe('');
+    // 同じ行のまま行頭に | を打つ(input が来る。caret は行の中のまま)
+    ta.value = '| x | y |';
+    ta.setSelectionRange(4, 4);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    selectionChanged();
+    flush();
+    expect(slot.textContent, '打った後も古い控えのまま').toBe(TABLE_TAB_HINT);
+    // 逆向き: 表の行から | を消して表でなくなる
+    ta.value = ' x | y |';
+    ta.setSelectionRange(4, 4);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    selectionChanged();
+    flush();
+    expect(slot.textContent, '表でなくなったのに案内が残った').toBe('');
     un();
   });
 });
