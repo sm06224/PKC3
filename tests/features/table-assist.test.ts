@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tableOnTab } from '../../src/features/markdown/table-assist';
+import { caretInTableRow, tableOnTab } from '../../src/features/markdown/table-assist';
 
 describe('🔴 Markdown 表の編集アシスト (Tab / Shift+Tab) (#1093)', () => {
   it('表の外(通常の段落)では null を返す(通常動作を妨げない)', () => {
@@ -125,5 +125,30 @@ describe('🔴 升の区切りは画面の読み手と同じ規則(#1426)', () =
         expect(table.slice(res.start, res.end), `k=${k}: 2 つ目の升へ移っていない`).toBe('c');
       }
     }
+  });
+});
+
+describe('🔴 caret が表の行に在るか(#1451。帯の「Tab で次のセル」の判定)', () => {
+  it('表の行 / 区切り行 / 行頭の空白つきは true、本文・空行・全角｜・片側だけの | は false', () => {
+    const v = '段落\n| a | b |\n|---|---|\n  | 1 | 2 |\n\n｜ x ｜\n| 開いたまま';
+    const at = (needle: string): number => v.indexOf(needle) + 1;
+    expect(caretInTableRow(v, at('| a'))).toBe(true);
+    expect(caretInTableRow(v, at('|---'))).toBe(true);
+    expect(caretInTableRow(v, at('| 1'))).toBe(true);
+    expect(caretInTableRow(v, 1), '段落').toBe(false);
+    expect(caretInTableRow(v, v.indexOf('\n\n') + 1), '空行').toBe(false);
+    expect(caretInTableRow(v, at('｜ x')), '全角').toBe(false);
+    expect(caretInTableRow(v, at('| 開')), '末尾の | が無い').toBe(false);
+  });
+
+  it('🔑 Tab が実際に何かする行(tableOnTab が null でない)と全位置で一致する', () => {
+    const v = '段落\n| a | b |\n|---|---|\n  | 1 | 2 |\n\n```\n| in | fence |\n```\n| a\\|b | c |';
+    let tableHits = 0;
+    for (let i = 0; i <= v.length; i += 1) {
+      const real = tableOnTab(v, i, false) !== null;
+      if (real) tableHits += 1;
+      expect(caretInTableRow(v, i), `caret ${i}`).toBe(real);
+    }
+    expect(tableHits, '表の行が 1 つも通っていない').toBeGreaterThan(20);
   });
 });

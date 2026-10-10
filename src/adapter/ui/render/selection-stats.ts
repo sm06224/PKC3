@@ -4,6 +4,7 @@
  * ## 何が起きるか
  *
  * 編集中に入力欄で字を選ぶと、編集の帯(`detail-toolbar`)の右端に「選択: 142 文字(3 行)」。
+ * 選びが無く caret が表の行に在るときは「Tab で次のセル」(#1451。選びが勝つ)。
  * 選びを外すと枠は空になる(枠は残る ── 版面は動かない)。
  * 効く欄は `formatTarget` が引く 3 つ(2 列の `editor-body` / 1 画面の行の欄 `row-source` /
  * 「全文を編集」の欄)。追記欄・章の欄・別窓・読む面には出さない。
@@ -22,12 +23,13 @@
  *   選びが動いている最中(= layout が汚れている)に毎フレーム読むと、数 MB の本文の欄で
  *   **50ms 超の long task が積み増しになった**(同じ操作で、枠を外した対照群の 3〜4 倍)。
  *   動きが止まって layout が落ち着いてから 1 度だけ読めば、読むのは安い。
- * - 🔑 **本文を複製しない**。選んでいないとき(caret だけ)は本文を**読みもしない**。
+ * - 🔑 **本文を複製しない**。選んでいないとき(caret だけ)は、caret の行が表かを引くために本文を 1 度読む(#1451。字は作らない)。
  *   選んでいるときも `indexOf` で選んだ範囲だけを走る(`selectionLineCount`)。
  * - 🔑 **IME の変換中は書かない**(変換中の選びは確定前の字で、数えても意味が無い)。
  *   `compositionend` で 1 度合わせ直す。
  */
 import { formatSelectionStats, selectionLineCount } from '@features/stats/body-stats';
+import { caretInTableRow } from '@features/markdown/table-assist';
 import { formatTarget } from '../actions/format-target';
 
 /**
@@ -38,6 +40,13 @@ export const SELECTION_STATS_DELAY_MS = 120;
 
 /** 枠の `data-pkc-field`(描くのは `detail.ts`、書くのはここ)。 */
 export const SELECTION_STATS_FIELD = 'selection-stats';
+
+/**
+ * 🔴 **caret が表の行に在るとき、同じ枠へ出す案内**(#1451)。選んでいる間は選択の数が勝つ。
+ * Tab が実際にセルを移す欄(`editor-body` / `row-source` = `formatTarget`)と同じ欄でだけ出る。
+ * 枠は同じ `<span>` を使い回す ── 帯の高さは動かない。
+ */
+export const TABLE_TAB_HINT = 'Tab で次のセル';
 
 /** 字を打つ欄ではない `<input>`(ここへ焦点が在っても、選んだ字の数は残してよい)。 */
 const NON_TEXT_INPUT = new Set([
@@ -88,8 +97,9 @@ export function syncSelectionStats(region: HTMLElement): boolean {
   if (ta !== null && !focusOnOtherField(region, ta)) {
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
-    // 🔑 caret だけのときは本文(`ta.value`)に触らない
     if (end > start) text = formatSelectionStats(end - start, selectionLineCount(ta.value, start, end));
+    // 選びが無く、caret が表の行に在るときだけ案内(1 行ぶんだけ読む。debounce 後の 1 回)
+    else if (caretInTableRow(ta.value, start)) text = TABLE_TAB_HINT;
   }
   if (slot.textContent === text) return false;
   slot.textContent = text;

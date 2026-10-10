@@ -133,6 +133,20 @@ function getLineRange(value: string, pos: number): { start: number; end: number 
 }
 
 /**
+ * 🔴 **caret が表の行の上に在るか**(#1451。編集の帯の「Tab で次のセル」を出す判定)。
+ *
+ * ⚠ 答えは `tableOnTab` が `null` でない場合と**同じ**(Tab が実際にセルを移す行 = 表の行)。
+ *   第二の正本を作らず、行の読み(`parseTableLine`)を共有する。
+ *   fence の中でも `tableOnTab` は移すので、ここも除外しない(ヒントは実際の挙動に合わせる)。
+ *   半角 `|` だけが区切り(全角 `｜` は表の行ではない ── 読み手も同じ)。
+ */
+export function caretInTableRow(value: string, caret: number): boolean {
+  const { start, end } = getLineRange(value, caret);
+  const line = parseTableLine(value, start, end);
+  return line !== null && line.cells.length > 0;
+}
+
+/**
  * Tab / Shift+Tab が押された時の表の移動・行追加アクションを決定する。
  *
  * @param value 本文全体

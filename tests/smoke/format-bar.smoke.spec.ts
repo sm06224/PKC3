@@ -107,6 +107,18 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // ④'' の続き 🔴 #1451 ── 同じ枠に、caret が表の行に在るときだけ「Tab で次のセル」。
+  //     選んでいれば選択の数が勝ち、表の外では空。⚠ どの場面でも帯の高さは動かない。
+  await ta.fill('段落\n| a | b |\n|---|---|\n| 1 | 2 |\n');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(8, 8)); // 表の 1 行目
+  await expect(stats, '表の行に caret があるのに案内が出ない').toHaveText('Tab で次のセル');
+  expect((await toolbar.boundingBox())!.height, '案内が出たら帯の高さが動いた').toBe(toolbarH);
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(8, 11));
+  await expect(stats, '選んでいるのに案内が勝った').toHaveText('選択: 3 文字(1 行)');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(1, 1)); // 「段落」の行
+  await expect(stats, '表の外なのに案内が残った').toHaveText('');
+  expect((await toolbar.boundingBox())!.height, '案内を外したら帯の高さが動いた').toBe(toolbarH);
+
   // ④''' 🔴 行の入れ替え(#1213)── 2 列の欄で Alt+↓ / Alt+↑。caret が行に付いていき、
   //     端では動かず、Ctrl+Z で 1 回で戻る(⚠ `insertText` を通っていないと戻らない)
   await ta.fill('あ\nい\nう');
