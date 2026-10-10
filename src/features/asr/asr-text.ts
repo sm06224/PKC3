@@ -46,6 +46,7 @@ export function transcriptText(raw: string): string | null {
  * 🔑 時刻の綴りは `elapsedText`(`0:07` / `12:34` / `1:02:03`)── 割り算を書き足さない。
  * 🔑 行は `\n` で並べる(markdown は `breaks: true` なので 1 段落の中で行ごとに見える)。
  * ⚠ 字の正規化は `transcriptText` と同じ。出た字は**そのまま**(同じ字の繰り返しも畳まない)。
+ *   例外は `isQuietRepetition` が真のとき**だけ**で、それは畳むのではなく**出力ごと捨てる**(呼び側が字にしない)。
  */
 export function transcriptLines(
   segments: ReadonlyArray<{ readonly startMs: number; readonly text: string }> | undefined,
@@ -57,4 +58,31 @@ export function transcriptLines(
     if (t !== null) lines.push(`${elapsedText(seg.startMs)} ${t}`);
   }
   return lines.length === 0 ? null : lines.join('\n');
+}
+
+/**
+ * 🔴 **小さな雑音の幻覚**の判定(#1446)── 入力が小さく(全体 RMS が `ASR_QUIET_RMS` 未満)、**かつ**出力が
+ *   「少ない語彙のくり返し」だけのとき、出力ごと捨てる(畳まない・直さない。全部か無しか)。
+ *
+ * ⚠ 値の根拠(2026-10-08 の実測。#1446): 雑音(−48 / −68 dBFS)に whisper は `you you you` を出した。
+ *   普通の声は RMS 1e-2(−40 dBFS)より上なので、この判定は**触らない**(「はいはいはい」は普通の声なら残る)。
+ *   裁定は #1446 のコメント 6075038618(Gemini が user に代わって裁定)。
+ */
+export const ASR_QUIET_RMS = 1e-2;
+/** くり返しと見なす最小の語数(これ未満は短い返事かもしれない)。 */
+export const ASR_REPEAT_MIN_WORDS = 5;
+/** くり返しと見なす語彙の上限(異なる語が これ以下)。 */
+export const ASR_REPEAT_MAX_VOCAB = 3;
+
+/** 空白と、日本語 / ASCII の区切りの記号で語に分ける。ASCII は大文字小文字を区別しない。 */
+const WORD_SPLIT = /[\s、。，．,.!?！？…]+/;
+
+export function isQuietRepetition(text: string, rms: number): boolean {
+  if (!(rms < ASR_QUIET_RMS)) return false;
+  const words = text
+    .toLowerCase()
+    .split(WORD_SPLIT)
+    .filter((w) => w !== '');
+  if (words.length < ASR_REPEAT_MIN_WORDS) return false;
+  return new Set(words).size <= ASR_REPEAT_MAX_VOCAB;
 }
