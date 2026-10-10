@@ -142,9 +142,10 @@ describe('予定の面の「一覧 / 日」', () => {
     expect(pressed).toEqual([
       ['一覧', 'true'],
       ['日', 'false'],
+      ['週', 'false'],
     ]);
-    // 🔑 「週」は足さない
-    expect(qa('[data-pkc-action="schedule-mode"]')).toHaveLength(2);
+    // 🔑 見せ方は 3 つ(動いた事実:「週」を段 A-2 で足した、2 → 3。週の中身は `schedule-week.test.ts`)
+    expect(qa('[data-pkc-action="schedule-mode"]')).toHaveLength(3);
   });
 
   it('🔴 「日」を押すと日ごとの束が消えて目盛りが出る / 「一覧」で元へ戻る', () => {
@@ -154,7 +155,7 @@ describe('予定の面の「一覧 / 日」', () => {
     expect(qa('[data-pkc-region="schedule-group"]'), '日ごとの束が残っている').toHaveLength(0);
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => b.getAttribute('aria-pressed')),
-    ).toEqual(['false', 'true']);
+    ).toEqual(['false', 'true', 'false']);
     press('[data-pkc-action="schedule-mode"][data-pkc-mode="list"]');
     expect(q('[data-pkc-region="schedule-day"]')!.hidden).toBe(true);
     expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(1);

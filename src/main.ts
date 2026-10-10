@@ -564,8 +564,11 @@ function openViewTile(
    *   実体は `binder.ts` の `focus-search`(畳んだ列を戻してから焦点を入れる)。
    */
   focusSearch: () => boolean,
+  /** 🔴 予定の面を「週」で開く合図(#855 段 A-2)。⚠ 渡すと窓が出なかったとき退避しない。 */
+  schedule?: { mode: 'week'; day: string | null },
 ): Promise<unknown> {
   return openViewInWindow(view, {
+    ...(schedule === undefined ? {} : { schedule }),
     // ⚠ `noopener` で開く ── 別プロセスになり、閉じれば常駐が還る(段③ の実測)。
     //    🔑 **口は `view-window.ts` の 1 つ**(着地前レビュー M2)── 手で書くと、
     //       片方から `noopener` が落ちた日に誰も鳴らない
@@ -4390,6 +4393,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ **押した行のノート**を連れて行く(`selectedLid` ではない)── ⋯ は
      *   行から開くので、選ばれている物と違うことがある。
      */
+    /**
+     * 🔴 **予定を「週」で、別のウィンドウに開く**(#855 段 A-2)。左の列は狭く 7 日を並べられない。
+     * ⚠ 組み込みタイルと**同じ仕掛け**(`openViewTile`)── 窓が出なかったときは左の列の見せ方を変えず、
+     *   理由だけ出す(退避しない)。**同期に呼ぶ**(`window.open` は gesture の中でしか通らない)。
+     */
+    openScheduleWindow: (mode, day) =>
+      void openViewTile(
+        dispatcher,
+        cid,
+        'schedule',
+        (m) => services.setBrowse?.(m),
+        focusSearch,
+        { mode, day },
+      ),
     openNoteWindow: (lid, find) => {
       /**
        * 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
@@ -5234,6 +5251,11 @@ function bootstrap(): void {
         //    ⚠ 選んだ後に呼ばれる ── 判断(選んでいる物か / 編集中でないか)は reducer が持つ
         searchJump: (lid, find) =>
           app.dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find }),
+        // 🔴 **予定の面を「週」で開く**(#855 段 A-2)── 左の列の「週」が別のウィンドウで開いたとき
+        scheduleView: (mode, day) => {
+          app.dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
+          if (day !== null) app.dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date: day });
+        },
         onHold: (view) => {
           heldViewWindow = view;
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで

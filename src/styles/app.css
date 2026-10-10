@@ -6236,6 +6236,167 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: none;
 }
 
+/* ── 予定の「週」(#855 段 A-2)────────────────────────────
+ * 「日」を 7 列に並べる。札・位置の変数・最低の高さは「日」と同じ(上の `schedule-day-lane` の規則を共有)。
+ * 広い面(中央 / 別のウィンドウ)だけで描く ── 左の列は別のウィンドウで開く。
+ * 幅が足りないときは列を詰めず、箱ごと横に動かす(列の下限 80px)。地は無彩色、色は使わない
+ * (今日は線で示す ── 小さな月の升目と同じ作法)。 */
+[data-pkc-region='schedule-weekview'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='schedule-weekview-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-weekview-label'] {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='schedule-weekview-head'] button {
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: var(--btn-fs-bar);
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-weekview-head'] button:hover:not(:disabled) {
+  color: var(--fg);
+}
+[data-pkc-field='schedule-weekview-head'] button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+[data-pkc-field='schedule-weekview-wrap'] {
+  overflow-x: auto;
+  min-width: 0;
+}
+[data-pkc-field='schedule-weekview-inner'] {
+  /* 時刻の列 2.5rem + 7 列 × 80px */
+  min-width: calc(2.5rem + 7 * 80px);
+}
+[data-pkc-field='schedule-weekview-heads'],
+[data-pkc-field='schedule-weekview-allday'] {
+  display: grid;
+  grid-template-columns: 2.5rem repeat(7, minmax(0, 1fr));
+}
+[data-pkc-field='schedule-weekview-heads'] > button {
+  display: flex;
+  justify-content: center;
+  gap: var(--s2);
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-weekview-heads'] > button:hover {
+  background: var(--surface-2);
+}
+/* 🔑 今日は線と太さで示す(地は無彩色、色は情報にだけ) */
+[data-pkc-field='schedule-weekview-heads'] > button[data-pkc-today] {
+  color: var(--fg);
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+[data-pkc-field='schedule-weekview-allday'] {
+  padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--border);
+}
+[data-pkc-field='schedule-weekview-allday-label'] {
+  font-size: 10px;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-weekview-allday-cell'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+[data-pkc-field='schedule-weekview-scroll'] {
+  max-height: 22rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-field='schedule-weekview-grid'] {
+  position: relative;
+}
+[data-pkc-field='schedule-weekview-hour'] {
+  box-sizing: border-box;
+  height: var(--day-hour);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='schedule-weekview-hour']:first-child {
+  border-top-color: transparent;
+}
+[data-pkc-field='schedule-weekview-hour'] > span {
+  display: block;
+  width: 2.25rem;
+  padding-right: var(--s2);
+  text-align: right;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-0.45em);
+}
+[data-pkc-field='schedule-weekview-hour']:first-child > span {
+  transform: none;
+}
+[data-pkc-field='schedule-weekview-lanes'] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2.5rem;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+[data-pkc-field='schedule-weekview-lane'] {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] {
+  position: absolute;
+  box-sizing: border-box;
+  top: calc(var(--day-hour) * var(--day-start, 0) / 60);
+  /* ⚠ 最低の高さは「日」と同じ(`day-layout.ts` の MIN_SLOT_MINUTES) */
+  height: max(calc(var(--day-hour) / 2), calc(var(--day-hour) * var(--day-span, 30) / 60));
+  left: calc(100% * var(--day-col, 0) / var(--day-cols, 1));
+  width: calc(100% / var(--day-cols, 1));
+  overflow: hidden;
+  padding: 1px var(--s2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='schedule-weekview-lane'] [data-pkc-field='text'] {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='schedule-weekview-lane'] [data-pkc-field='note'] {
+  display: none;
+}
+
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
  * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
  * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある

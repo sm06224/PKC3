@@ -59,12 +59,14 @@ import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
   dropViewFindFromHash,
+  dropViewScheduleFromHash,
   dropViewFromHash,
   dropViewWindowToken,
   isHeadingAnchor,
   parseViewDeepLink,
   parseViewDeepLinkEntry,
   parseViewDeepLinkFind,
+  parseViewDeepLinkSchedule,
   parseViewWindowToken,
   setHashEntry,
 } from '../../features/link/permalink';
@@ -90,6 +92,11 @@ export interface DeepLinkTarget {
    * ⚠ 省略可(古い test の的)── 無ければ落とせないだけで、他は壊れない。
    */
   readonly dropFind?: () => void;
+  /**
+   * 🔴 **予定の見せ方の合図(`sched` / `day`)だけを落とす**(#855 段 A-2)。⚠ 履歴を積まない。
+   * ⚠ 残すと、栞や `F5` のたびに見せ方を奪う。省略可(古い test の的)。
+   */
+  readonly dropSchedule?: () => void;
   /**
    * 🔴 **住所を、いま見ているノートへ書き換える**(#689 案 B、2026-09-04)。
    *
@@ -141,6 +148,14 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         null,
         '',
         `${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,
+      );
+    },
+    dropSchedule: () => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${location.search}${dropViewScheduleFromHash(location.hash)}`,
       );
     },
     setEntry: (containerId, lid) => {
@@ -388,6 +403,12 @@ export interface DeepLinkWiring {
    */
   readonly searchJump?: (lid: string, find: string) => void;
   /**
+   * 🔴 **予定の面を「週」で開く**(#855 段 A-2)── 左の列の「週」が別のウィンドウで開くとき運ぶ合図。
+   * ⚠ 面が `schedule` のときだけ呼ぶ。**面を開いた後**に呼ぶ(見せ方は面の状態)。
+   *   使ったらアドレスから外す(`DeepLinkTarget.dropSchedule`)。
+   */
+  readonly scheduleView?: (mode: 'week', day: string | null) => void;
+  /**
    * 🔴 **いま断片が指している面が変わったら呼ばれる**(#300 段③ の直し)。
    *
    * `null` = もう指していない(user が自分で離れた)。
@@ -534,6 +555,13 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       const here = parseViewDeepLinkEntry(target.hash);
       if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
       wiring.openView(read.view);
+      if (read.view === 'schedule') {
+        const sched = parseViewDeepLinkSchedule(target.hash);
+        if (sched !== null) {
+          wiring.scheduleView?.(sched.mode, sched.day);
+          target.dropSchedule?.();
+        }
+      }
       return;
     }
     if ('moved' in read) {

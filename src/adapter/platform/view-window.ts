@@ -200,6 +200,11 @@ export interface ViewWindowDeps {
    * ⚠ 省略可 ── 渡さなければ、これまでどおり(語を運ばない)。
    */
   readonly find?: string;
+  /**
+   * 🔴 **予定の面を「週」で開く**(#855 段 A-2)。⚠ 面が `schedule` のときだけ使う。
+   * 窓が出なかったときの退避は**しない**(左の列は狭くて 7 日を並べられない ── 理由だけ出す)。
+   */
+  readonly schedule?: { readonly mode: 'week'; readonly day: string | null };
 }
 
 /**
@@ -239,6 +244,7 @@ export async function openViewInWindow(
     ...(here === null ? {} : { containerId: here.containerId, entry: here.lid }),
     token,
     ...(deps.find === undefined ? {} : { find: deps.find }),
+    ...(deps.schedule === undefined ? {} : { schedule: deps.schedule }),
   });
   if (url === null) {
     /**
@@ -272,6 +278,14 @@ export async function openViewInWindow(
  * 「この画面で開きました」と言うと、user は**開いていない面を探す**。
  */
 function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): void {
+  /**
+   * 🔴 **「週」には退避先が無い**(#855 段 A-2)。⚠ 左の列の予定は狭くて 7 日を並べられないので、
+   *   開いたと言わない(「この画面で開きました」は嘘になる)── 見せ方も変えない。理由だけ出す。
+   */
+  if (deps.schedule !== undefined) {
+    deps.fail(`${why}。週で見るには、ポップアップの許可を出してください`);
+    return;
+  }
   /**
    * 🔴 **付箋には退避先が無い**(#685 段②、2026-09-04)。
    *

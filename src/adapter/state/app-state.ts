@@ -1513,10 +1513,10 @@ export interface AppState {
   /** calendar の表示月(null = 今日の月を renderer 側で解決)。 */
   calendarMonth: { year: number; month: number } | null;
   /**
-   * 予定の面の見せ方(#855 段 A-1)。`list` = 日ごとの一覧(既定)/ `day` = 1 日を時間の目盛りに並べる。
+   * 予定の面の見せ方(#855 段 A-1)。`list` = 日ごとの一覧(既定)/ `day` = 1 日を時間の目盛りに並べる / `week` = 7 日を並べる(広い面だけ ── 左の列は別のウィンドウで開く。#855 段 A-2)。
    * ⚠ 保存しない(開き直したら一覧に戻る)── 見え方の一時の選びであって、ノートの中身ではない。
    */
-  scheduleMode: 'list' | 'day';
+  scheduleMode: 'list' | 'day' | 'week';
   /** `day` で見ている日(`YYYY-MM-DD`)。`null` = 今日(日付が変わったら追従する)。 */
   scheduleDay: string | null;
   /** calendar で archived todo を見せるか(PKC2 の showArchived と同じ意味論)。 */
@@ -2893,7 +2893,7 @@ export type UserAction =
   | { type: 'FORCE_RELEASE_LOCK'; discardDraft: boolean }
   | { type: 'SET_CALENDAR_MONTH'; year: number; month: number }
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。 */
-  | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' }
+  | { type: 'SET_SCHEDULE_MODE'; mode: 'list' | 'day' | 'week' }
   /** 「日」で見る日。`null` = 今日に戻る。実在しない日は黙って捨てる(別の日へ寄せない)。 */
   | { type: 'SET_SCHEDULE_DAY'; date: string | null }
   | { type: 'TOGGLE_SHOW_ARCHIVED' }
