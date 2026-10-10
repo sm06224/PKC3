@@ -21,7 +21,7 @@
  *
  * - 🔑 **札も器も使い回す** ── 捨てて作り直すと、掴んでいる札が途中で消える。
  * - 🔴 **落とし先は日全体**(見出し・終日・目盛りの全部)── 落とすとその日になる。
- *   ⚠ 時刻を変える落とし方は、ここでは作らない(別の段)。
+ *   ⚠ 時刻を変える落とし方(目盛りの上で札を動かす / 下の縁を引く)は `schedule-grid-drag.ts`。
  * - 🔑 **最初に見せる位置は、日を変えたときと開いたときの 1 回だけ**(`pendingMin`)。
  *   描き直しのたびに戻すと、読んでいる最中の位置が奪われる。
  */
@@ -34,7 +34,7 @@ import {
   splitDay,
 } from '@features/schedule/day-layout';
 import { addDays } from '@features/datetime/date-math';
-import { createTaskCard, patchTaskCard } from './task-card';
+import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
 
 export interface DayPaint {
   /** 見る日(`YYYY-MM-DD`)。 */
@@ -187,6 +187,7 @@ export class ScheduleDay {
       card.style.removeProperty('--day-span');
       card.style.removeProperty('--day-col');
       card.style.removeProperty('--day-cols');
+      placeCardInGrid(card, false);
       if (cursor === card) cursor = card.nextSibling;
       else this.allDayHost.insertBefore(card, cursor);
     }
@@ -204,6 +205,8 @@ export class ScheduleDay {
       set('--day-col', s.col);
       set('--day-cols', s.cols);
       if (card.parentElement !== this.lane) this.lane.append(card);
+      // 🔴 目盛りの札は Pointer Events で掴む(HTML5 の drag は切る ── 奪い合わない。#855 段 B-1)
+      placeCardInGrid(card, true);
     }
 
     // 最初に見せる位置 ── 日を変えたとき / 開いたときの 1 回(走査が済むまでは確定させない)

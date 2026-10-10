@@ -19,7 +19,7 @@
  *   `14:00..15:00` と `15:00..16:00` は接しているだけなので重ならない(同じ列に並ぶ)。
  */
 import type { AgendaItem } from './agenda';
-import { isRealCalendarDate } from './schedule-date';
+import { formatTimeSpan, isRealCalendarDate } from './schedule-date';
 import { storedDateParts } from '@features/datetime/stored-date';
 import { addDays } from '@features/datetime/date-math';
 
@@ -142,6 +142,75 @@ export function placeColumns(pieces: readonly DayPiece[]): DaySlot[] {
   }
   flush();
   return out;
+}
+
+/**
+ * 🔴 **目盛りの上で札を動かす計算**(#855 段 B-1)。pure ── DOM も時計も読まない。
+ *
+ * 札を掴んで上下に動かす / 下の縁を引く、の「何分になるか」だけをここに置く
+ * (掴む・見せる・書くは `schedule-grid-drag.ts`)。
+ *
+ * | 操作 | 規則 |
+ * |---|---|
+ * | 動かす | 始まりを **15 分刻み**に丸める。**長さは保つ**。0:00 〜 24:00 の内側に収める(終わりが 24:00 を越えるなら始まりを前へ寄せる) |
+ * | 縁を引く | 終わりを **15 分刻み**に丸める。**最低 15 分**。24:00 で切る |
+ */
+export const SNAP_MINUTES = 15;
+
+/** 刻みの最低の長さ(分)。縁を引いて 0 分や逆にならないようにする。 */
+export const MIN_RESIZE_MINUTES = 15;
+
+/** 15 分刻みに丸める(近いほう)。 */
+export function snapMinutes(min: number): number {
+  return Math.round(min / SNAP_MINUTES) * SNAP_MINUTES;
+}
+
+/**
+ * 目盛りの上端からの距離(px)を、0 時からの分にする(0〜24:00 の内側)。
+ * ⚠ 器の高さが 0 以下なら `0`(割れない ── 呼び側が高さを持たない環境でも落ちない)。
+ */
+export function minutesFromOffset(y: number, laneHeight: number): number {
+  if (!(laneHeight > 0)) return 0;
+  return Math.min(DAY_MINUTES, Math.max(0, (y / laneHeight) * DAY_MINUTES));
+}
+
+/** 縦に動いた距離(px)を分にする(内側に収めない ── 動かした差なので)。 */
+export function deltaMinutes(dy: number, laneHeight: number): number {
+  if (!(laneHeight > 0)) return 0;
+  return (dy / laneHeight) * DAY_MINUTES;
+}
+
+/** 0 時からの分を `HH:MM` にする(24:00 は `24:00`)。 */
+export function formatMinutes(min: number): string {
+  const m = Math.min(DAY_MINUTES, Math.max(0, Math.round(min)));
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/** 札を `deltaMin` 分だけ動かした置き場所(長さを保つ)。 */
+export function moveSlot(
+  startMin: number,
+  endMin: number,
+  deltaMin: number,
+): { readonly startMin: number; readonly endMin: number } {
+  const dur = Math.max(0, endMin - startMin);
+  const start = Math.min(DAY_MINUTES - dur, Math.max(0, snapMinutes(startMin + deltaMin)));
+  return { startMin: start, endMin: start + dur };
+}
+
+/**
+ * 下の縁を `rawEndMin`(指の位置の分)まで引いた終わり。
+ * ⚠ 始まりは動かさない。最低 15 分・24:00 まで。
+ */
+export function resizeSlot(startMin: number, rawEndMin: number): number {
+  return Math.min(DAY_MINUTES, Math.max(startMin + MIN_RESIZE_MINUTES, snapMinutes(rawEndMin)));
+}
+
+/**
+ * 動かしている間に見せる時刻の字(`14:15〜15:15`)。
+ * 🔑 字の組み立ては札と同じ `formatTimeSpan` 1 本(綴りを面ごとに分けない)。
+ */
+export function formatTimeRange(startMin: number, endMin: number): string {
+  return formatTimeSpan(formatMinutes(startMin), formatMinutes(endMin));
 }
 
 /**

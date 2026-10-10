@@ -6397,6 +6397,54 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   display: none;
 }
 
+/* ── 時間の目盛りで札を動かす(#855 段 B-1)────────────────────────
+ * 札を上下に動かすと始まりの時刻が、下の縁を引くと終わりの時刻が変わる(`schedule-grid-drag.ts`)。
+ * 動かしている間は、札は元の場所に残り、動かす先に**影**(点線の枠 + 時刻の字)が出る。
+ * 影の位置・高さは札と同じ変数(`--day-start` / `--day-span`)から。地は無彩色、色は使わない(線の濃さだけ)。 */
+[data-pkc-field='task-resize'] {
+  display: none;
+}
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry],
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] {
+  user-select: none;
+  cursor: grab;
+}
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'],
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize'] {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize']:hover,
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry] > [data-pkc-field='task-resize']:hover {
+  background: var(--muted);
+}
+[data-pkc-field='schedule-day-lane'] > [data-pkc-entry][data-pkc-dragging],
+[data-pkc-field='schedule-weekview-lane'] > [data-pkc-entry][data-pkc-dragging] {
+  opacity: 0.45;
+}
+[data-pkc-field='schedule-drag-ghost'] {
+  position: absolute;
+  box-sizing: border-box;
+  left: 0;
+  width: 100%;
+  top: calc(var(--day-hour) * var(--day-start, 0) / 60);
+  height: calc(var(--day-hour) * var(--day-span, 30) / 60);
+  z-index: 2;
+  padding: 1px var(--s2);
+  border: 1px dashed var(--fg);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 /* ══ カレンダー(#276 / 2026-08-20 に面を作り直し)════════════════════
  * user 指示「カレンダーを利用するための導線が不足している」を受けた直し。
  * 実測(1440×900、直す前):曜日の列が **40.6px×6 + 696.1px×1**(予定のある

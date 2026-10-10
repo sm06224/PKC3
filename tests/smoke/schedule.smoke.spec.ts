@@ -798,6 +798,44 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   expect(await bg('day'), '押している「日」が「一覧」と同じ色').not.toBe(await bg('list'));
 
   /**
+   * 🔴 **目盛りの上で札を 2 時間下へドラッグすると 16:00..17:00 になり、下の縁を 30 分引くと 17:30 になる**
+   * (#855 段 B-1)。
+   *
+   * ⚠ 起動を増やさない ── 既に「日」を見ているこの道中の続きで、`page.mouse` の本物の押す・動かす・離す
+   *   を通す(`scripts/smoke-budget.mjs`)。unit(`tests/adapter/schedule-grid-drag.test.ts`)は列の
+   *   高さを差し替えている ── **実際の 1 時間 40px で、本物の `elementFromPoint` を通って、本文が書き換わるか**は
+   *   ここでしか言えない。
+   * 🔑 観測点は札の字(`when` ── 本文を走査し直して出る字)と、目盛りの上端からの位置。
+   */
+  const whenOf = dayCard.locator('[data-pkc-field="when"]');
+  await expect(whenOf, '前提: 札が 14:00〜15:00 と出ている').toHaveText('14:00〜15:00');
+  const grab = (await dayCard.boundingBox())!;
+  const gx = grab.x + grab.width * 0.6;
+  await page.mouse.move(gx, grab.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(gx, grab.y + 12 + 30, { steps: 5 });
+  // 動かしている間: 動かす先に影が出て、時刻の字を言う
+  await page.mouse.move(gx, grab.y + 12 + 80, { steps: 8 });
+  await expect(
+    pane.locator('[data-pkc-field="schedule-drag-ghost"]'),
+    '動かしている間、動かす先の影が出ていない',
+  ).toHaveText('16:00〜17:00');
+  await page.mouse.up();
+  await expect(whenOf, '2 時間下へ動かしたのに、時刻が 16:00〜17:00 にならない').toHaveText('16:00〜17:00');
+  await expect(pane.locator('[data-pkc-field="schedule-drag-ghost"]'), '離したのに影が残っている').toHaveCount(0);
+  const movedBox = (await dayCard.boundingBox())!;
+  const gridBox2 = (await pane.locator('[data-pkc-field="schedule-day-grid"]').boundingBox())!;
+  expect(movedBox.y - gridBox2.y, '札が 16:00 の高さ(16 × 40px)にない').toBeGreaterThan(639);
+  expect(movedBox.y - gridBox2.y).toBeLessThan(641);
+  // 下の縁を 30 分(20px)引く ── 始まりは動かず、終わりだけが 17:30 になる
+  await page.mouse.move(gx, movedBox.y + movedBox.height - 3);
+  await page.mouse.down();
+  await page.mouse.move(gx, movedBox.y + movedBox.height - 3 + 10, { steps: 4 });
+  await page.mouse.move(gx, movedBox.y + movedBox.height - 3 + 20, { steps: 4 });
+  await page.mouse.up();
+  await expect(whenOf, '下の縁を 30 分引いたのに、終わりが 17:30 にならない').toHaveText('16:00〜17:30');
+
+  /**
    * 🔴 **左の列の「週」は別のウィンドウで開く。開いた窓は 7 列で、その日の列に 14:00 の札**(#855 段 A-2)。
    *
    * ⚠ 起動を増やさない ── 既に予定の面に居るこの道中の続きで、押して出る窓(popup)を見る
@@ -830,10 +868,11 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await expect(weekCard, '「週」のその日の列に 14:00 の札が出ていない').toHaveCount(1, { timeout: 20_000 });
   const weekGrid = (await centre.locator('[data-pkc-field="schedule-weekview-grid"]').boundingBox())!;
   const weekBox = (await weekCard.boundingBox())!;
-  expect(weekBox.height, '1 時間の札が 40px の高さではない').toBeGreaterThan(39);
-  expect(weekBox.height).toBeLessThan(41);
-  expect(weekBox.y - weekGrid.y, '札が 14:00 の高さ(14 × 40px)にない').toBeGreaterThan(559);
-  expect(weekBox.y - weekGrid.y).toBeLessThan(561);
+  expect(weekBox.height, '1 時間半の札が 60px の高さではない').toBeGreaterThan(59);
+  expect(weekBox.height).toBeLessThan(61);
+  // 🔑 左の列で 16:00..17:30 に動かした後なので、開いた窓にもその時刻で出る(動かしたことが保存されている)
+  expect(weekBox.y - weekGrid.y, '札が 16:00 の高さ(16 × 40px)にない').toBeGreaterThan(639);
+  expect(weekBox.y - weekGrid.y).toBeLessThan(641);
   // 7 列は横に並ぶ(縦に積まれていない)
   const laneBoxes = await weekLanes.evaluateAll((els) =>
     els.map((e) => {
@@ -843,6 +882,28 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   );
   expect(laneBoxes.every((b, i) => i === 0 || b.x > laneBoxes[i - 1]!.x), '列が横に並んでいない').toBe(true);
   expect(Math.min(...laneBoxes.map((b) => b.w)), '列の幅が 80px を割っている').toBeGreaterThanOrEqual(79);
+  /**
+   * 🔴 **「週」で、札を隣の日の列へドラッグすると、日と時刻が一緒に変わる**(#855 段 B-1)。
+   * 🔑 開いた窓の中で本物のマウスを通す ── 列の判定(`elementFromPoint`)は実ブラウザでしか言えない。
+   */
+  const laneIdx = await weekLanes.evaluateAll(
+    (els, d) => els.findIndex((e) => e.getAttribute('data-pkc-drop-date') === d),
+    value,
+  );
+  // ⚠ 今日が土曜(最後の列)なら、ひとつ前の列へ動かす
+  const nextLane = weekLanes.nth(laneIdx < 6 ? laneIdx + 1 : laneIdx - 1);
+  const wFrom = (await weekCard.boundingBox())!;
+  const wTo = (await nextLane.boundingBox())!;
+  const wx = wFrom.x + wFrom.width / 2;
+  await week.mouse.move(wx, wFrom.y + 12);
+  await week.mouse.down();
+  await week.mouse.move(wTo.x + wTo.width / 2, wFrom.y + 12 + 20, { steps: 6 });
+  await week.mouse.move(wTo.x + wTo.width / 2, wFrom.y + 12 + 40, { steps: 6 });
+  await week.mouse.up();
+  await expect(
+    nextLane.locator('> [data-pkc-entry]').filter({ hasText: '会議' }).locator('[data-pkc-field="when"]'),
+    '隣の日の列へ動かしたのに、隣の列に 17:00〜18:30 で出ていない',
+  ).toHaveText('17:00〜18:30', { timeout: 20_000 });
   // 合図は使ったらアドレスから外れる(栞や F5 に焼き付かない)
   expect(week.url(), '見せ方の合図がアドレスに残っている').not.toContain('sched=');
   expect(weekErrors, `page error: ${weekErrors.join(' / ')}`).toEqual([]);
