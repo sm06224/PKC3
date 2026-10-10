@@ -871,7 +871,7 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
       // 上限を超えたら箱の中で送る印(変わるときだけ書く)
       ta.value = Array.from({ length: 45 }, (_, i) => `行 ${i}`).join('\n');
       ta.dispatchEvent(new Event('input'));
-      expect(ta.hasAttribute('data-pkc-scroll'), '上限を超えたのに箱の中で送る印が無い').toBe(true);
+      expect(ta.getAttribute('data-pkc-scroll'), '上限を超えたのに箱の中で送る印が無い(値は 1)').toBe('1');
       ta.value = '短い';
       ta.dispatchEvent(new Event('input'));
       expect(ta.hasAttribute('data-pkc-scroll'), '上限を下回ったのに印が残る').toBe(false);

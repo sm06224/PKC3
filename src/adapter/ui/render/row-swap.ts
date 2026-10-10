@@ -184,7 +184,11 @@ export function sizeTextareaToContent(ta: HTMLTextAreaElement, cap: number = ROW
     }
     // ⚠ 変わるときだけ書く(書くだけで配置が汚れる)
     const over = logical > cap;
-    if (over !== ta.hasAttribute('data-pkc-scroll')) ta.toggleAttribute('data-pkc-scroll', over);
+    // ⚠ 値は下の経路と同じ '1'(読み手は値で見る)
+    if (over !== ta.hasAttribute('data-pkc-scroll')) {
+      if (over) ta.setAttribute('data-pkc-scroll', '1');
+      else ta.removeAttribute('data-pkc-scroll');
+    }
     return;
   }
   ta.rows = Math.min(logical, cap);
