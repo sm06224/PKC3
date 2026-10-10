@@ -5,6 +5,8 @@ description: この箱から GitHub を叩くときの道具立てと罠。api.g
 
 # GitHub を道具として叩く(PKC3)
 
+> 事故の記録(issue と台帳の腐り / 導線の書き順。日付・issue つき)は `reference/ledger-rot.md`。ここは手順。
+
 > ⚠ **これは PR の着地とは別の主題である**(2026-09-05 に `pr-landing` から切り出した ──
 > 1 枚 1 主題)。ここに在る罠は**起票・棚卸し・調査**でも同じように踏む。
 > 着地の手順そのものは `.claude/skills/pr-landing/SKILL.md`。
