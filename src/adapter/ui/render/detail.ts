@@ -39,6 +39,7 @@ import { applyMissingLinks, clearMissingLinks } from './link-missing';
 import { appMissingLinks } from './missing-links';
 import { applyPlaceLayout } from './place-board';
 import { PlaceEmbeds } from './place-embed';
+import { SectionEmbeds } from './section-embed';
 import { placeFramed } from '@features/markdown/place-embed';
 import { placeBodiesOf } from '@adapter/state/app-state';
 import { folderOverview, hasFolderOverview } from '@features/relation/folder-overview';
@@ -377,6 +378,8 @@ export class DetailRenderer {
   private placeRef: ReturnType<typeof placeBodiesOf> | null = null;
   /** 板に置いたノートの中身を描く(描き直しをまたいで、控えと「もう頼んだ」を持つ)。 */
   private readonly placeEmbeds = new PlaceEmbeds();
+  /** 本文の中の `![](entry:ノート#h/見出し)` を節の中身で置き換える(#1459 ①。板と同じ入れ物の抜粋を読む)。 */
+  private readonly sectionEmbeds = new SectionEmbeds();
   /** この render pass が貸し出した ObjectURL の dispose 群。**表示の寿命の
    *  終わり(次の render / 選択遷移)で必ず全部呼ぶ**(生成物のライフサイクル
    *  終端での即破棄 ── user 指示 2026-07-27 不可侵)。 */
@@ -749,6 +752,7 @@ export class DetailRenderer {
     this.sqlEmbeds.release();
     // 🔴 板に置いたノートの図・画像も返す(#529 W3-②)── 面を捨てるとき ObjectURL を残さない
     this.placeEmbeds.release();
+    this.sectionEmbeds.release();
     this.backToTopHandle?.dispose();
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
@@ -927,6 +931,22 @@ export class DetailRenderer {
       figures: (roots) => hydrateFigures(roots),
       // 🔴 「見えそうな枠」の基準 = 板を送る器(W3-③)
       viewRoot: this.scroller,
+    });
+    // 🔴 本文の中の見出しの節の埋め込み(#1459 ①)── 板と**同じ読み取り専用の設定・同じ口**で描く
+    this.sectionEmbeds.sync(host, {
+      selfLid: self,
+      excerptOf: (k) => bodies.get(k),
+      metaOf: (l) => metas.get(l),
+      render: (text) => {
+        const opts = {
+          ...readingRenderOptions(text, { allowExternalImages: false, currentContainerId: this.cidRef }),
+          sourceLineAnchors: false,
+        };
+        return this.markdown.render(text, opts).catch(() => renderMarkdown(text, opts));
+      },
+      wanted: (keys) => wanted?.(keys),
+      lender: this.assets,
+      figures: (roots) => hydrateFigures(roots),
     });
     // 🔴 添付ノートは「絵を出せる画像か」が**読んだ後**に分かる ── 既定の大きさを当て直す
     const body = this.lastBody;
@@ -1328,6 +1348,7 @@ export class DetailRenderer {
       this.skeletonLid = lid;
       // 🔑 別のノートへ移った ── 板の中身の控えも「頼んだ」も持ち越さない(読めなかった lid を頼み直せる)
       this.placeEmbeds.reset();
+      this.sectionEmbeds.reset();
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
       // ⚠ 編集から戻ったときは**元の位置へ**。それ以外は**そのノートで読んでいた

@@ -101,6 +101,16 @@ export interface PlaceExcerpt {
   readonly cut: boolean;
   /** 添付ノートで、絵(または PDF の字)を出せる物。⚠ 添付以外では**必ず無い**。 */
   readonly att?: PlaceAttachment;
+  /**
+   * 🔴 **見出しを指した抜粋で、その見出しが本文に無い**(#1459 ①。`section-embed.ts`)。
+   * ⚠ 板の抜粋では**必ず無い**。`text` は空。描く側が「見出しが見つかりません」を出す。
+   */
+  readonly missing?: true;
+  /**
+   * 🔴 **読みに行ったが、ノートの本文が読めなかった**(消えた / 読み出しの失敗。見出しの節の鍵だけ)。
+   * ⚠ 「読み込んでいます」のまま止めないための印。書込が届けば(`syncShownBodies`)通常の抜粋に戻る。
+   */
+  readonly gone?: true;
 }
 
 /**
@@ -137,7 +147,9 @@ export function sameExcerpt(a: PlaceExcerpt, b: PlaceExcerpt): boolean {
     a.text === b.text &&
     a.att?.key === b.att?.key &&
     a.att?.mime === b.att?.mime &&
-    a.att?.kind === b.att?.kind
+    a.att?.kind === b.att?.kind &&
+    a.missing === b.missing &&
+    a.gone === b.gone
   );
 }
 
@@ -158,7 +170,14 @@ export function excerptOf(body: string, archetype?: string): PlaceExcerpt {
     if (meta.assetKey === null || (kind !== 'image' && kind !== 'pdf')) return { text: '', cut: false };
     return { text: '', cut: false, att: { key: meta.assetKey, mime: meta.mime, kind } };
   }
-  const below = bodyBelowFrontmatter(body);
+  return clipText(bodyBelowFrontmatter(body));
+}
+
+/**
+ * 切り出しの規則(板の本文も、見出しの節の埋め込みも**この 1 本**で切る ── #1459 ①)。
+ * `PLACE_BODY_CLIP` 字以内ならそのまま。超えたら手前の最後の改行で切る(サロゲートペアは割らない)。
+ */
+export function clipText(below: string): PlaceExcerpt {
   if (below.length <= PLACE_BODY_CLIP) return { text: below, cut: false };
   const nl = below.lastIndexOf('\n', PLACE_BODY_CLIP);
   let end = nl > PLACE_BODY_CLIP / 2 ? nl : PLACE_BODY_CLIP;

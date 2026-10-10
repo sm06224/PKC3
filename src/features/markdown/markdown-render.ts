@@ -1387,22 +1387,19 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 // Instead, the image rule below detects the `entry:` scheme and emits
 // an inert `<div class="pkc-transclusion-placeholder">`.
 //
-// 🔴 **展開する側は、まだ在りません**(#397 ②、2026-08-25 に訂正)。
-// ⚠ ここには「adapter-layer expander (`adapter/ui/transclusion.ts`) later replaces
-//    with the actual embed HTML」と**現在形で、file 名まで名指しして**書いてありましたが、
-//    **その file は存在しません**(`grep -rn "pkc-transclusion-placeholder"` の hit は
-//    この file 自身と `styles/app.css` の空状態の見た目だけ)。
-// 🔴 「未実装」より悪い形でした ── 次に読む人は「在るもの」として設計します。
-// 🔑 いまの実物の挙動: **空の器が残る**(本文には何も出ない)。
-//    ⚠ この記法は `docs/manual.md` に 1 度も出てこないので、踏む user はほぼ居ません。
-//    展開する側を作るかどうかは #397 ② で決めます(作るなら循環参照の門が要る)。
+// 🔴 **展開する側**(#1459 ①、2026-10-10 に訂正):`![説明](entry:ノート#h/見出し)` だけは、
+//    `adapter/ui/render/section-embed.ts` が描いた後の DOM でこの器を節の中身に置き換える
+//    (読む面 = `DetailRenderer`。規則は `features/markdown/section-embed.ts`)。
+// ⚠ 他の面(書き出し・印刷の元になる HTML・ライブ編集の下見・別ウィンドウの章)は**描いた HTML をそのまま使う**ので、
+//    ここが出す空の器のまま。見出しを指さない画像形(`![](entry:ノート)` / `#log/…`)も今までどおり空の器。
+// ⚠ 展開した器の中の埋め込みは展開しない(深さ ≤ 1)── 展開側が題名のリンクへ降ろす。
 //
 // Why a `<div>` (not a `<span>`): the expanded content is block-level
 // (day-grouped articles for TEXTLOG, paragraphs for TEXT). markdown-it
 // emits the image inside a `<p>`, so the browser's HTML parser will
 // auto-close the paragraph when it encounters the div, leaving an
-// empty `<p></p>` behind. ⚠ **いまは誰も掃除しません**(展開する側が無いので)──
-// 展開する側を作るときに、その空 `<p>` を消すところまで含めてください。
+// empty `<p></p>` behind. 展開した器の前後の空 `<p>` は展開側(`section-embed.ts`)が消す
+// (展開しない器の前後は、今までどおり残る)。
 //
 // The raw `entry:` href is preserved in `data-pkc-embed-ref` verbatim
 // so a future expander can re-parse it via `parseEntryRef` (same grammar
@@ -1444,10 +1441,12 @@ md.renderer.rules.image = function (tokens, idx, options, env, self) {
     const alt = token.content ?? '';
     const srcEsc = escapeHtmlAttr(src);
     const altEsc = escapeHtmlAttr(alt);
+    // 🔴 器の中に**字を入れる**(#1459 ①)── 展開しない面(書き出し HTML / Word / PDF / 下見)で
+    //    空の枠にならないように。説明が無ければ「別のノートの内容」。展開する面は子を差し替えるので画面は変わらない
     return (
       `<div class="pkc-transclusion-placeholder"` +
       ` data-pkc-embed-ref="${srcEsc}"` +
-      ` data-pkc-embed-alt="${altEsc}"></div>`
+      ` data-pkc-embed-alt="${altEsc}">${alt === '' ? '別のノートの内容' : altEsc}</div>`
     );
   }
   // メモリ:画面外画像のデコード後ビットマップ常駐を抑えるため、描画 <img> を

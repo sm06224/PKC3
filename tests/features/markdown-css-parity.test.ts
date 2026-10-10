@@ -203,6 +203,12 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
   /**
+   * 本文の `![題名](entry:ノート#h/見出し)` を節の中身で置き換えた器(#1459 ①)。
+   * ⚠ `renderMarkdown` が出すのは**展開前の器**(`pkc-transclusion-placeholder`)まで ── 節の中身は
+   *   別のノートの本文なので、**描いた後に**展開する側が class を付け替える。
+   */
+  'pkc-section-embed': 'src/adapter/ui/render/section-embed.ts',
+  /**
    * 読めなかった式の断り(#707。user 裁定 2026-09-06「打った字 + 式が読めません」)。
    * ⚠ `renderMarkdown` は**器と原文**しか出さない ── 読めたかどうかは
    *   KaTeX に投げてみるまで分からないので、断りは**描いた後に**差し込まれる。

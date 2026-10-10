@@ -24,6 +24,8 @@ test('🔴 題名で選ぶと caret の位置にリンクが入り、押すと�
   // 相手になるノートを作る
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('先週の議事録');
+  // 🔑 章を 2 つ持たせる(末尾の「章の埋め込み」の段で、片方だけが出ることを見る)
+  await page.locator('[data-pkc-field="editor-body"]').fill('## 決定\nA案で進める\n## 保留\n未定');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // 書く側のノート
@@ -87,6 +89,7 @@ test('🔴 題名で選ぶと caret の位置にリンクが入り、押すと�
   await expect
     .poll(() => ta.inputValue(), { message: 'caret の位置にリンクが入っていない' })
     .toMatch(/^まえBB\[先週の議事録\]\(entry:[^)]+\)うしろ$/);
+  const aiteLid = /entry:([^)#]+)\)/.exec(await ta.inputValue())![1]!;
 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
@@ -107,6 +110,40 @@ test('🔴 題名で選ぶと caret の位置にリンクが入り、押すと�
   ).toContainText('先週の議事録');
   // ⚠ 未知スキームへ遷移していない(`entry:` は アプリが受ける)
   expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
+
+  /**
+   * ④ 🔴 **章の埋め込み**(#1459 ①)── `![題名](entry:ID#h/見出し)` が、指した章の中身になる。
+   *
+   * 見るもの(実ブラウザの計算後):章の中身が出る / 次の章は出ない / 元のノートの字を直すと追いかける /
+   * 展開した器には左の罫線(見た目の規則が CSS に在る)。⚠ ふつうのリンクが展開されていないことは
+   * 上の③(リンクが押せる形のまま)と unit が見る。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('転載');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`![決定](entry:${aiteLid}#h/決定)`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const embed = page.locator('[data-pkc-field="detail-body"] .pkc-section-embed');
+  await expect(embed, '章の中身が出ていない').toContainText('A案で進める');
+  await expect(embed, '次の章まで出ている').not.toContainText('未定');
+  expect(
+    await embed.evaluate((el) => getComputedStyle(el).borderLeftWidth),
+    '展開した器に罫線の規則が当たっていない',
+  ).toBe('3px');
+
+  // 元のノートの字を直す → 戻ると追いかけている
+  await clickReal(page, '[data-pkc-field="detail-body"] [data-pkc-field="section-embed-source"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]')).toContainText('先週の議事録');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.locator('[data-pkc-field="editor-body"]').fill('## 決定\nB案へ変更\n## 保留\n未定');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(
+    page,
+    page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '転載' }),
+  );
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] .pkc-section-embed'),
+    '元のノートを直したのに追いかけていない',
+  ).toContainText('B案へ変更');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });

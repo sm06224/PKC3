@@ -3558,6 +3558,50 @@ li[data-pkc-row-slot] {
   font-size: 12px;
 }
 
+/* 🔴 本文の中に展開した「別のノートの見出しの節」(#1459 ①)── 読み取り専用の引用。
+ * 地は無彩色:左の罫線と題名のリンクだけで「ここは別のノート」と分かる。
+ * 見出しは見出しでない行(目次・章の右クリックを奪わない)── 板の中身と同じ太さの段。 */
+.pkc-md-rendered .pkc-section-embed {
+  margin: var(--s2) 0;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.pkc-section-embed [data-pkc-field='section-embed-source'] {
+  display: block;
+  margin: 0 0 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85em;
+  text-align: start;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.pkc-section-embed [data-pkc-field='section-embed-source']:hover,
+.pkc-section-embed [data-pkc-field='section-embed-source']:focus-visible {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+.pkc-section-embed [data-pkc-field='section-embed-note'] {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.pkc-section-embed [data-pkc-embedded-heading] {
+  margin: 0.6em 0 0.2em;
+  font-weight: 700;
+}
+.pkc-section-embed [data-pkc-embedded-heading='1'] {
+  font-size: 1.25em;
+}
+.pkc-section-embed [data-pkc-embedded-heading='2'] {
+  font-size: 1.15em;
+}
+.pkc-section-embed [data-pkc-embedded-heading='3'] {
+  font-size: 1.05em;
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * 🔴 **PKC-Markdown の装飾**(2026-08-05、user 報告「レンダリングができていない」)
  *

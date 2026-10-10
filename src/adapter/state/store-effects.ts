@@ -108,6 +108,7 @@ import {
   SECTION_SAVE_NOT_FOUND_NOTE,
   CODE_SAVE_NOT_FOUND_NOTE,
 } from './app-state';
+import { baseLidOfKey } from '@features/markdown/section-embed';
 import { replaceSectionByHeading } from '@features/markdown/append-target';
 import { replaceCodeFenceContent } from '@features/markdown/code-fence-edit';
 
@@ -1886,11 +1887,16 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            const body = await store.getBody(ev.lid);
-            if (disposed || body === null) return;
+            const body = await store.getBody(baseLidOfKey(ev.lid));
+            if (disposed) return;
+            // 🔴 見出しの節(鍵に `#h/`)は、読めなくても**結果を返す**(消えたノートで「読み込んでいます」のまま止めない)
+            if (body === null && baseLidOfKey(ev.lid) === ev.lid) return;
             dispatcher.dispatch({ type: 'PLACE_BODY_LOADED', lid: ev.lid, body });
           } catch {
-            // ⚠ 読めなかっただけ ── 板が次に描き直されるときにもう一度頼まれる
+            // ⚠ 板は読めなかっただけ ── 次に描き直されるときにもう一度頼まれる。
+            //    見出しの節は「読めなかった」を返す(上と同じ理由)
+            if (!disposed && baseLidOfKey(ev.lid) !== ev.lid)
+              dispatcher.dispatch({ type: 'PLACE_BODY_LOADED', lid: ev.lid, body: null });
           }
         });
         break;

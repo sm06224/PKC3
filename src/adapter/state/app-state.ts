@@ -185,6 +185,12 @@ import {
   type PlaceExcerpt,
 } from '@features/markdown/place-embed';
 import {
+  baseLidOfKey,
+  parseSectionKey,
+  sectionEmbedKeys,
+  sectionExcerptOf,
+} from '@features/markdown/section-embed';
+import {
   EMPTY_HISTORY,
   canGoBack,
   canGoForward,
@@ -3227,7 +3233,7 @@ export type SystemCommand =
    */
   | { type: 'PLACE_BODIES_WANTED'; lids: readonly string[] }
   /** 板のための本文が読めた(#529 W3-①)。⚠ **全文を受けて、ここで切る**(切る規則は 1 か所)。 */
-  | { type: 'PLACE_BODY_LOADED'; lid: string; body: string }
+  | { type: 'PLACE_BODY_LOADED'; lid: string; body: string | null }
   /** 前回の並びを憶えていたので戻す(#505 段②)。⚠ 起動時に 1 度だけ。 */
   | { type: 'SPLIT_RESTORED'; lids: readonly string[] }
   | { type: 'BODY_LOAD_FAILED'; lid: string; error: string }
@@ -4380,6 +4386,9 @@ function reduceCore(
           selectionAnchor: keepAnchor,
           openBody: null,
           freshLid: null,
+          // 🔴 別の container なら、板・見出しの節の抜粋も捨てる(lid の偶然衝突で他人の本文を出さない)。
+          //    同じ container の再読込では保つ(書込の追随は `syncShownBodies` が担う)
+          placeBodies: sameCid ? state.placeBodies : new Map<string, PlaceExcerpt>(),
           // ⚠ 元ファイルの紐づけは**このセッションの持ち物**なので、同じ container の
           //    再読込では保つ(取込のたびに消えると、開いた直後に書き戻せなくなる)。
           //    ⚠ ただし**消えた lid は落とす** ── 居ない entry を指す導線を残さない
@@ -9391,7 +9400,8 @@ function reduceCore(
       for (const lid of action.lids) {
         if (want.length >= PLACE_BODY_CAP) break;
         if (have.has(lid) || want.includes(lid)) continue;
-        const meta = state.entryMetas.get(lid);
+        // 🔑 見出しの節(#1459 ①)の鍵は `<lid>#h/<印>` ── 居るか・読めるかは**ノート**で決める
+        const meta = state.entryMetas.get(baseLidOfKey(lid));
         if (meta === undefined || !placeEmbeddable(meta.archetype)) continue;
         want.push(lid);
       }
@@ -9402,8 +9412,25 @@ function reduceCore(
     }
     case 'PLACE_BODY_LOADED': {
       const have = placeBodiesOf(state);
+      // 🔴 読めなかった(`null`)── 見出しの節の鍵だけ「読めなかった」と持つ(「読み込んでいます」で止めない)。
+      //    板の抜粋は今までどおり何もしない(板は題名の行で断る)
+      if (action.body === null) {
+        if (parseSectionKey(action.lid) === null) return { state, events: [] };
+        const gone: PlaceExcerpt = { text: '', cut: false, missing: true, gone: true };
+        const prevGone = have.get(action.lid);
+        if (prevGone !== undefined && sameExcerpt(prevGone, gone)) return { state, events: [] };
+        return {
+          state: { ...state, placeBodies: withPlaceBody(have, action.lid, gone, () => placeLidsOnScreen(state)) },
+          events: [],
+        };
+      }
       // 🔑 添付は絵を出せるかを**本文(frontmatter)から**読む ── 型は一覧(entryMetas)が知っている
-      const next = excerptOf(action.body, state.entryMetas.get(action.lid)?.archetype);
+      //    見出しの節の鍵(#1459 ①)は、その節だけを切り出す(板の抜粋と同じ入れ物・同じ口)
+      const sec = parseSectionKey(action.lid);
+      const next =
+        sec !== null
+          ? sectionExcerptOf(action.body, sec.id)
+          : excerptOf(action.body, state.entryMetas.get(action.lid)?.archetype);
       const prev = have.get(action.lid);
       if (prev !== undefined && sameExcerpt(prev, next)) return { state, events: [] };
       return {
@@ -10257,6 +10284,9 @@ function placeLidsOnScreen(state: AppState): ReadonlySet<string> {
   const out = new Set<string>();
   if (state.openBody) for (const l of placeEntryLids(state.openBody.body)) out.add(l);
   for (const body of state.splitBodies.values()) for (const l of placeEntryLids(body)) out.add(l);
+  // 🔴 見出しの節の埋め込み(#1459 ①)が要る抜粋も手放さない(鍵は `<lid>#h/<印>`)
+  if (state.openBody) for (const k of sectionEmbedKeys(state.openBody.body)) out.add(k);
+  for (const body of state.splitBodies.values()) for (const k of sectionEmbedKeys(body)) out.add(k);
   return out;
 }
 
@@ -10276,13 +10306,26 @@ function syncShownBodies(
 ): { splitBodies: ReadonlyMap<string, string>; placeBodies: ReadonlyMap<string, PlaceExcerpt> } {
   const splitBodies = syncSplitBody(state, lid, body);
   const have = placeBodiesOf(state);
+  let bodies: Map<string, PlaceExcerpt> | null = null;
   const prev = have.get(lid);
-  if (prev === undefined) return { splitBodies, placeBodies: state.placeBodies };
-  const next = excerptOf(body, state.entryMetas.get(lid)?.archetype);
-  if (sameExcerpt(prev, next)) return { splitBodies, placeBodies: state.placeBodies };
-  const bodies = new Map(have);
-  bodies.set(lid, next); // ⚠ 並びは動かさない(書き込みは「最近読んだ」ではない)
-  return { splitBodies, placeBodies: bodies };
+  if (prev !== undefined) {
+    const next = excerptOf(body, state.entryMetas.get(lid)?.archetype);
+    if (!sameExcerpt(prev, next)) {
+      bodies = new Map(have);
+      bodies.set(lid, next); // ⚠ 並びは動かさない(書き込みは「最近読んだ」ではない)
+    }
+  }
+  // 🔴 このノートの見出しの節(#1459 ①。鍵は `<lid>#h/<印>`)も**同じ書込で**追随させる ──
+  //    別の口にすると、板だけ新しく節だけ古い、が起きる
+  for (const [key, old] of have) {
+    const sec = parseSectionKey(key);
+    if (sec === null || sec.lid !== lid) continue;
+    const next = sectionExcerptOf(body, sec.id);
+    if (sameExcerpt(old, next)) continue;
+    bodies ??= new Map(have);
+    bodies.set(key, next);
+  }
+  return { splitBodies, placeBodies: bodies ?? state.placeBodies };
 }
 
 /** `syncShownBodies` の答えが、いまの state と同じか(同じなら state を差し替えない)。 */
