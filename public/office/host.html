@@ -135,6 +135,7 @@
 <script src="office-images.js"></script>
 <script src="office-unsaved.js"></script>
 <script src="office-shadow.js"></script>
+<script src="office-title-watch.js"></script>
 <script>
 (function () {
   'use strict';
@@ -1184,6 +1185,22 @@
     return text.indexOf(leaf) >= 0 && /LibreOffice/i.test(text);
   }
 
+  /**
+   * 🔴 **開いた文書を閉じたら、上のバーから名前を外す**(#1363 の 3)。
+   * バーの名前は開いたときに 1 度書くだけだったので、閉じてスタートセンターへ戻っても残っていた。
+   * 判断は `office-title-watch.js` ── ここは「題名にまだ名前が在るか」を `docOpened` で見て流すだけ
+   * (開いたかの判定と同じ観測点。2 か所で別々に決めない)。
+   */
+  function watchTitle(leaf, shownName) {
+    var TW = window.PKC3OfficeTitleWatch;
+    if (!TW || !leaf || !shownName) return;
+    var w = TW.createTitleWatch(shownName);
+    setInterval(function () {
+      var next = w.observe(docOpened(leaf));
+      if (next !== null) nameEl.textContent = next;
+    }, TW.TITLE_POLL_MS);
+  }
+
   /** Qt 6 の canvas は **shadow root の中**に在る(#88 §3.11 で 1 日溶かした罠)。 */
   function deepCanvases(root) {
     var out = [];
@@ -2010,6 +2027,7 @@
           // 🔴 控えの版で開いたなら、そう言って「保存していない変更あり」にする(#1228 段 2)。⚠ 畳んだ後に呼ぶ
           //    (判断は上の `markOpenedFromShadow`。ここに足すと、上の見張りを畳む窓の外へ溢れる)
           if (docFromShadow) markOpenedFromShadow();
+          watchTitle(docLeaf, nameEl.textContent || '');
           return;
         }
         if (launched && !wantDoc) {
