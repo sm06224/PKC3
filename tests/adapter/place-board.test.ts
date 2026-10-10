@@ -1062,8 +1062,10 @@ describe('掴んで動かす(place-drag)', () => {
     up(30, -10);
     expect(block.style.left).toBe('150px');
     expect(block.style.top).toBe('30px');
-    expect(block.getAttribute('data-pkc-x')).toBe('150');
-    expect(block.getAttribute('data-pkc-y')).toBe('30');
+    // 🔴 属性は本文から描いた値のまま(描き直しまで動かさない)── 離した時点で書き換えると、
+    //    書込が飛んでいる間に「もう書けた」と読まれ、続けて頼んだ形の変更が断られる(#1481、実ブラウザ 8 回中 5 回)
+    expect(block.getAttribute('data-pkc-x'), '離しただけで属性を書き換えている').toBe('120');
+    expect(block.getAttribute('data-pkc-y'), '離しただけで属性を書き換えている').toBe('40');
 
     // 再描画が来る前に同じ板をもう一度掴む
     down(grip);
@@ -1077,7 +1079,7 @@ describe('掴んで動かす(place-drag)', () => {
     off();
   });
 
-  it('🔴 ロールバック時には data-pkc-x/y/w/h 属性も元の値に戻る(#1481 1)', () => {
+  it('🔴 断られたら見た目は元へ戻り、属性は本文の値のまま(#1481 1)', () => {
     const { d, grip, block, off } = mounted();
     d.dispatch({ type: 'START_EDIT' }); // 同期の門で断られる状態
     down(grip);
@@ -1112,6 +1114,21 @@ describe('掴んで動かす(place-drag)', () => {
     d.dispatch({ type: 'SYS_ERROR', error: '遅れて届いた worker エラー' });
     expect(block.style.left).toBe('120px');
     expect(block.style.top).toBe('40px');
+    off();
+  });
+
+  it('🔴 保留中に別の板を掴んだら、その板は自分の位置から動く(保留中の板の離した先を借りない)(#1481 1)', () => {
+    const { host, grip, off } = mounted();
+    down(grip);
+    move(30, -10);
+    up(30, -10);
+    const p2 = host.querySelector<HTMLElement>('#p2')!;
+    const grip2 = host.querySelector<HTMLElement>('#p2 [data-pkc-field="place-grip"]')!;
+    down(grip2);
+    move(10, 10);
+    expect(p2.style.left, '別の板が、保留中の板の離した先へ跳んだ').toBe('470px');
+    expect(p2.style.top).toBe('50px');
+    up(10, 10);
     off();
   });
 
@@ -1369,9 +1386,28 @@ describe('掴んで動かす(place-drag)', () => {
       expect(d.getState().error).toBeDefined();
       expect(block2.style.width).toBe('');
       expect(block2.style.height).toBe('');
-      // 🔴 離したときに書いた属性も外す ── 残ると、次に掴んだとき起点が「無かった大きさ」になる(#1481 1)
+      // 🔴 属性は本文の値のまま(w= / h= が無い塊に属性を生やさない)── 生えると、次に掴んだとき起点が「無かった大きさ」になる(#1481 1)
       expect(block2.hasAttribute('data-pkc-w'), '断られたのに data-pkc-w が残っている').toBe(false);
       expect(block2.hasAttribute('data-pkc-h'), '断られたのに data-pkc-h が残っている').toBe(false);
+      off();
+    });
+
+    it('🔴 描き直し前に同じ板の大きさを掴み直すと、起点は離した大きさ(属性はまだ古い)(#1481 1)', () => {
+      const { host, events, off } = mounted();
+      const block2 = host.querySelector<HTMLElement>('#p2')!;
+      const handle = sizeHandle(host, 'p2');
+      down(handle);
+      move(200, 100);
+      up(200, 100);
+      expect(block2.style.width).toBe('200px');
+      expect(block2.hasAttribute('data-pkc-w'), '離しただけで属性を生やしている').toBe(false);
+      down(handle);
+      move(20, 10);
+      expect(block2.style.width, '掴み直したら古い大きさから測り直した(跳んだ)').toBe('220px');
+      expect(block2.style.height).toBe('110px');
+      up(20, 10);
+      const sizes = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+      expect(sizes[sizes.length - 1]).toMatchObject({ rewrite: { kind: 'place-size', w: 220, h: 110 } });
       off();
     });
 

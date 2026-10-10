@@ -109,6 +109,12 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   let nudge: Nudge | null = null;
   let pendingBlock: HTMLElement | null = null;
+  /**
+   * 保留中の板の「離した先」。🔴 `data-pkc-x/y/w/h` には書かない ── 属性は**本文から描いた値**であり、
+   * 「本文に書けた」の印として読む側が居る(smoke の観測点も同じ)。離した時点で書くと、
+   * 書込が飛んでいる間に「もう書けた」と読まれ、続けて頼んだ書換(形を変える等)が断られる(#1481)。
+   */
+  let pendingTo: { x: number; y: number } | { w: number; h: number } | null = null;
   let pendingCleanup: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
@@ -124,20 +130,26 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (!grip || block === null) return;
     // ⚠ 前のドロップの保留(タイマー / 購読)が残っていれば、掴んだ板と同じときだけ解除する(#1481 2)
     // 画面の他所や別の板を押したときは保留を解除しない(別所クリックでロールバックが効かなくなるのを防ぐ)
+    // 🔑 描き直し前に同じ板を掴み直したら、起点は属性(まだ古い本文の値)ではなく離した先にする(#1481 1)
+    const to = pendingCleanup !== null && block === pendingBlock ? pendingTo : null;
     if (pendingCleanup !== null && block === pendingBlock) {
       pendingCleanup();
       pendingCleanup = null;
     }
-    const wAttr = block.getAttribute('data-pkc-w');
-    const hAttr = block.getAttribute('data-pkc-h');
+    const wAttr =
+      to !== null && 'w' in to ? String(to.w) : block.getAttribute('data-pkc-w');
+    const hAttr =
+      to !== null && 'h' in to ? String(to.h) : block.getAttribute('data-pkc-h');
+    const xAttr = to !== null && 'x' in to ? String(to.x) : block.getAttribute('data-pkc-x');
+    const yAttr = to !== null && 'y' in to ? String(to.y) : block.getAttribute('data-pkc-y');
     drag = {
       block,
       pointerId: e.pointerId,
       mode: grip.getAttribute('data-pkc-field') === 'place-size' ? 'size' : 'move',
       startClientX: e.clientX,
       startClientY: e.clientY,
-      startX: Number(block.getAttribute('data-pkc-x')) || 0,
-      startY: Number(block.getAttribute('data-pkc-y')) || 0,
+      startX: Number(xAttr) || 0,
+      startY: Number(yAttr) || 0,
       startW: wAttr === null ? block.offsetWidth : Number(wAttr) || 0,
       startH: hAttr === null ? block.offsetHeight : Number(hAttr) || 0,
       attrW: wAttr !== null,
@@ -169,26 +181,14 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
 
   const restore = (d: Drag): void => {
     if (d.mode === 'size') {
-      if (d.attrW) {
-        d.block.style.width = `${d.startW}px`;
-        d.block.setAttribute('data-pkc-w', String(d.startW));
-      } else {
-        d.block.style.removeProperty('width');
-        d.block.removeAttribute('data-pkc-w');
-      }
-      if (d.attrH) {
-        d.block.style.height = `${d.startH}px`;
-        d.block.setAttribute('data-pkc-h', String(d.startH));
-      } else {
-        d.block.style.removeProperty('height');
-        d.block.removeAttribute('data-pkc-h');
-      }
+      if (d.attrW) d.block.style.width = `${d.startW}px`;
+      else d.block.style.removeProperty('width');
+      if (d.attrH) d.block.style.height = `${d.startH}px`;
+      else d.block.style.removeProperty('height');
       return;
     }
     d.block.style.left = `${d.startX}px`;
     d.block.style.top = `${d.startY}px`;
-    d.block.setAttribute('data-pkc-x', String(d.startX));
-    d.block.setAttribute('data-pkc-y', String(d.startY));
   };
 
   /**
@@ -208,15 +208,8 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     }
     const block = d.block;
     pendingBlock = block;
-    // 🔴 離した位置・大きさを属性にも即時反映する(#1481 1)
-    // 描き直し前に同じ板を掴み直しても起点座標(data-pkc-x/y/w/h)が新しい値になり、板が跳ばない。
-    if (action.type === 'MOVE_PLACE') {
-      block.setAttribute('data-pkc-x', String(action.x));
-      block.setAttribute('data-pkc-y', String(action.y));
-    } else {
-      block.setAttribute('data-pkc-w', String(action.w));
-      block.setAttribute('data-pkc-h', String(action.h));
-    }
+    pendingTo =
+      action.type === 'MOVE_PLACE' ? { x: action.x, y: action.y } : { w: action.w, h: action.h };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubs: (() => void)[] = [];
 
@@ -224,6 +217,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       if (pendingCleanup === cleanup) {
         pendingCleanup = null;
         pendingBlock = null;
+        pendingTo = null;
       }
       if (timer !== null) {
         clearTimeout(timer);
