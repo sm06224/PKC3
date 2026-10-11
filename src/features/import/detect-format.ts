@@ -8,9 +8,12 @@
  * ── 推測で処理して静かに壊すより、読めないと言う方が良い。
  */
 
+import { PORTABLE_SNIFF_BYTES, sniffPortableHtml } from './portable-html';
+
 /** 受理しうる形式(設計 doc §1 の最小完全集合)。 */
 export type Pkc2Format =
   | 'html' // 単一 HTML export
+  | 'pkc3-html' // PKC3 入り HTML(`.pkc3.html`。書き出しが埋めた印で見分ける)
   | 'package' // pkc2-package ZIP(バックアップ正本)
   | 'text-bundle'
   | 'textlog-bundle'
@@ -85,9 +88,13 @@ export function detectPkc2Format(
     // HTML かどうかは中身で決める(拡張子 .html を信じない)。
     // 先頭 4KB に PKC2 の slot id が見えるかで判断する ── ここで確定しなくても
     // parsePkc2Html が最終的に厳格検査するので、取りこぼしより誤受理を避ける
-    const head = new TextDecoder('utf-8', { fatal: false }).decode(
-      bytes.subarray(0, Math.min(bytes.length, 4096)),
+    // 🔴 PKC3 入り HTML は**書き出しが埋めた印**で見分ける(拡張子は見ない)。⚠ PKC2 の単一 HTML より
+    //   **先に**聞く ── 後ろにすると、どちらも `<` で始まるので全部 `html`(= PKC2 の読み手)に落ちる
+    const wide = new TextDecoder('utf-8', { fatal: false }).decode(
+      bytes.subarray(0, Math.min(bytes.length, PORTABLE_SNIFF_BYTES)),
     );
+    if (sniffPortableHtml(wide) !== null) return 'pkc3-html';
+    const head = wide.slice(0, 4096);
     if (head.includes('<')) return 'html';
     return 'unknown';
   }

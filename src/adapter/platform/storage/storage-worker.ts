@@ -917,6 +917,50 @@ export function applySchema(database: Database): void {
   }
 }
 
+/** 空白の違いを無視して比べるための正規形。 */
+const normSql = (sql: unknown): string => String(sql ?? '').replace(/\s+/g, ' ').trim();
+
+let ownTriggers: Map<string, string> | null = null;
+
+/**
+ * 🔴 **客の画像に、PKC3 が作る引き金以外が入っていないか**(#1416)。
+ *
+ * 基準は、新しい DB に `applySchema` が作る引き金の原文(空白を無視して等値)。ビューは PKC3 は作らないので 1 つでもあれば断る。
+ * ⚠ 旧い `entries_fts_au`(`UPDATE OF` が無い版)だけは、`applySchema` が最初に落とすので通す。
+ */
+function hasOnlyOwnTriggers(
+  oo1: { DB: new (name: string) => Database },
+  image: Database,
+): boolean {
+  if (ownTriggers === null) {
+    const fresh = new oo1.DB(':memory:');
+    try {
+      applySchema(fresh);
+      ownTriggers = new Map(
+        (
+          fresh.selectObjects(
+            `SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'`,
+          ) as unknown as Array<{ name: string; sql: string }>
+        ).map((r) => [r.name, normSql(r.sql)]),
+      );
+    } finally {
+      fresh.close();
+    }
+  }
+  const rows = image.selectObjects(
+    `SELECT type, name, sql FROM sqlite_schema WHERE type IN ('trigger', 'view')`,
+  ) as unknown as Array<{ type: string; name: string; sql: string }>;
+  for (const r of rows) {
+    if (r.type === 'view') return false;
+    const expected = ownTriggers.get(r.name);
+    if (expected === undefined) return false;
+    if (normSql(r.sql) === expected) continue;
+    if (r.name === 'entries_fts_au' && !/UPDATE\s+OF/i.test(r.sql)) continue;
+    return false;
+  }
+  return true;
+}
+
 function need(): Database {
   if (!db) throw new Error('storage worker not initialized');
   return db;
@@ -2961,6 +3005,84 @@ const handlers: Handlers = {
   closeSqliteExport: (req) => {
     closeExport(req.session);
     return null;
+  },
+  /**
+   * 🔴 **PKC3 入り HTML に焼かれた DB の写しから、バックアップの材料を読む**(#1416)。
+   *
+   * ⚠ **いま開いているコレクション(`db`)には触れない。** 一時の `:memory:` の DB に画像を流し込み、
+   *   `db` を**この呼び出しの間だけ**差し替えて、既存の読み口をそのまま当てる(読み口の SQL を
+   *   2 本目書かない ── 書き出しと同じ規則が、取り込みでも効く)。
+   * ⚠ **全部が同期** ── 差し替えている間に他の依頼が割り込めない(handler の頭書きの前提)。
+   *   `await` を足すと `db` が戻る前に別の依頼が一時の DB を読む。足さないこと。
+   * ⚠ `applySchema` は古い版の画像を新しい版へ移す(`init` と同じ道)。その途中で壊れの綴りが出ても、
+   *   **本体を壊れ扱いにしない**(`dbCorrupt` を元に戻す ── 客の画像の話である)。
+   */
+  readImageArchive: (req) => {
+    const api = sqliteApi;
+    if (api === null) throw new Error('sqlite が初期化されていません');
+    const oo1 = (api as unknown as { oo1: { DB: new (name: string) => Database } }).oo1;
+    const tmp = new oo1.DB(':memory:');
+    const prevDb = db;
+    const prevCorrupt = dbCorrupt;
+    const sync = <T,>(v: T | Promise<T>): T => v as T;
+    try {
+      try {
+        // 🔴 細工した画像の引き金・ビューを、`applySchema` の更新で走らせない(この worker を占有させない)
+        tmp.exec('PRAGMA trusted_schema=OFF');
+        deserializeInto(api as unknown as Parameters<typeof deserializeInto>[0], tmp, req.image);
+        // ⚠ `sqlite3_deserialize` は中身を見ない ── ここで 1 回読んで、画像の話として言い直す
+        tmp.selectValue('SELECT count(*) FROM sqlite_schema');
+      } catch (e) {
+        throw new Error(`ファイルの中身を読み込めませんでした(${String(e)})`, { cause: e });
+      }
+      // 🔴 引き金・ビューは、PKC3 が作るもの(新しい DB に作られる 3 本の引き金)だけを通す。それ以外は読まずに断る
+      if (!hasOnlyOwnTriggers(oo1, tmp)) {
+        throw new Error('この HTML の中身は、PKC3 が書き出したものではないため取り込めません');
+      }
+      try {
+        applySchema(tmp);
+      } catch (e) {
+        throw new Error(`ファイルの中身を読み込めませんでした(${String(e)})`, { cause: e });
+      }
+      if (dbCorrupt !== prevCorrupt) throw new Error('ファイルの中身が読み取れない形になっています');
+      const first = tmp.selectObjects(
+        'SELECT cid, title FROM containers ORDER BY created_at, cid LIMIT 1',
+      )[0];
+      const cid = first?.cid;
+      if (typeof cid !== 'string' || cid === '') {
+        throw new Error('ファイルの中にコレクションが入っていません');
+      }
+      db = tmp;
+      const metas = sync(handlers.listEntryMetas({ op: 'listEntryMetas', cid }));
+      const bodies = sync(
+        handlers.listBodies({ op: 'listBodies', cid, maxBytes: Number.MAX_SAFE_INTEGER }),
+      ).rows;
+      const chains: ResultMap['readImageArchive']['chains'] = [];
+      for (const lid of sync(handlers.listRevisionLids({ op: 'listRevisionLids', cid }))) {
+        chains.push({
+          lid,
+          rows: sync(handlers.exportRevisionChain({ op: 'exportRevisionChain', cid, entryLid: lid })),
+        });
+      }
+      return {
+        cid,
+        title: typeof first?.title === 'string' ? first.title : '',
+        metas,
+        bodies,
+        relations: sync(handlers.listRelations({ op: 'listRelations', cid })),
+        assets: sync(handlers.listAssetMetas({ op: 'listAssetMetas', cid })),
+        tagColors: sync(handlers.listTagColors({ op: 'listTagColors', cid })),
+        chains,
+      };
+    } finally {
+      db = prevDb;
+      dbCorrupt = prevCorrupt;
+      try {
+        tmp.close();
+      } catch {
+        /* 閉じ損ねても本体には届かない */
+      }
+    }
   },
   openContainer: (req) => {
     need().exec({

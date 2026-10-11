@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { join, resolve } from 'node:path';
-import { clickReal, createEntry,
+import { answerAppDialog, clickReal, createEntry,
   gotoCollectionPane,
 } from './helpers';
 
@@ -322,6 +322,24 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
     { timeout: 10_000 },
   );
   await carried.close();
+
+  /**
+   * ④ 🔴 **その 1 枚を、元の PKC3 の「取り込み」に選ぶと、ノートが戻る**(#1416)。
+   *
+   * 🔑 取り込み先には同じノートが**もう在る**(書き出した元) ── 戻ったなら、同じ題名が **2 件**になる
+   *   (ID が衝突するので付け替えて追加される)。1 件のままなら「何も入らなかった」。
+   * ⚠ 取り込む前に出る確認は、バックアップ(.pkc3-full.zip)と同じ道を通っている印である。
+   */
+  const rowsOf = page
+    .locator('[data-pkc-region="filer-table"] [data-pkc-entry]')
+    .filter({ hasText: title });
+  await expect(rowsOf, '前提: 取り込む前は 1 件').toHaveCount(1);
+  await page.setInputFiles('[data-pkc-field="import-input"]', out);
+  const asked = await answerAppDialog(page, 'ok');
+  expect(asked, '取り込み前の確認にノートの件数が出ていない').toContain('1');
+  await expect(rowsOf, '🔴 PKC3 入り HTML を取り込んでも、ノートが戻らない').toHaveCount(2, {
+    timeout: 15_000,
+  });
 });
 
 /**
