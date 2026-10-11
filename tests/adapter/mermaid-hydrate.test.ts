@@ -12,6 +12,12 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
 import { renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
+import {
+  noteTyping,
+  resetTyping,
+  TYPING_QUIET_MS,
+  typingQuietIn,
+} from '../../src/adapter/ui/render/typing-gate';
 
 // 🔑 焼く所は差す ── ここで見たいのは**いつ焼き直すか**であって、絵ではない。
 // ⚠ `cacheKey` は**本物を通す**(段㉘)── 焼き直しの要否は鍵の一致で決めるので、
@@ -963,6 +969,140 @@ describe('差し替えを 1 コマにまとめる(#1467)', () => {
     idles.shift()!({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
     await settle();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(10);
+    scope.dispose();
+    root.remove();
+  });
+});
+
+describe('打っている間は、画面の外の図の先読みを始めない(#1467)', () => {
+  const idles: IdleRequestCallback[] = [];
+  const runIdle = (): void => {
+    idles.shift()!({ didTimeout: false, timeRemaining: () => 50 } as IdleDeadline);
+  };
+  /** microtask を流す(焼きは Promise なので、fake timer の外で進む)。 */
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+  function mount(n: number): HTMLElement {
+    const root = document.createElement('div');
+    for (let i = 0; i < n; i++) root.append(block(`graph TD\n A${i}-->B`));
+    document.body.append(root);
+    for (const h of root.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]')) setPaneWidth(h, 700);
+    return root;
+  }
+  const typeKey = (): void => {
+    const ta = document.createElement('textarea');
+    document.body.append(ta);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.remove();
+  };
+  beforeEach(() => {
+    idles.length = 0;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    vi.setSystemTime(1_000_000);
+    resetTyping();
+    vi.stubGlobal('requestIdleCallback', (cb: IdleRequestCallback) => {
+      idles.push(cb);
+      return idles.length;
+    });
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 0) as unknown as number,
+    );
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id));
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:x');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    resetTyping();
+  });
+
+  it('🔴 入力の listener は読み込んだときに付く(1 度も聞かれていなくても最初の打鍵を拾う)', async () => {
+    vi.resetModules();
+    const fresh = await import('../../src/adapter/ui/render/typing-gate');
+    fresh.resetTyping();
+    // ⚠ typingQuietIn を呼ぶ前に打つ(最初に聞かれたときに付ける作りだと、この打鍵を取りこぼす)
+    typeKey();
+    expect(fresh.typingQuietIn(), '読み込んだだけでは打鍵を拾っていない').toBeGreaterThan(0);
+  });
+
+  it('🔴 時計が巻き戻っても、待つのは静かな時間 1 回ぶんまで', () => {
+    noteTyping(10_000_000); // 巻き戻る前の時刻に打った(= いまから見ると未来)
+    expect(typingQuietIn(1_000)).toBeLessThanOrEqual(TYPING_QUIET_MS);
+    expect(typingQuietIn(1_000)).toBeGreaterThan(0);
+  });
+
+  it('🔴 打った直後は新しい先読みを始めず、止まって 1 秒たつと再開する', async () => {
+    const root = mount(10);
+    const scope = hydrateMermaid([...root.children]);
+    typeKey();
+    runIdle();
+    await flush();
+    expect(vi.mocked(renderToPng), '打っている最中に先読みを始めた').toHaveBeenCalledTimes(0);
+    expect(idles, '待つ間に空き時間を取っていない').toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(TYPING_QUIET_MS - 1);
+    expect(idles, '止まって 1 秒たつ前に再開した').toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(idles, '止まって 1 秒たったのに再開しない').toHaveLength(1);
+    runIdle();
+    await flush();
+    expect(vi.mocked(renderToPng), '再開後に 1 束(8 枚)始める').toHaveBeenCalledTimes(8);
+    scope.dispose();
+    root.remove();
+  });
+
+  it('🔴 待っている間にまた打てば、待ちは延びる', async () => {
+    const root = mount(10);
+    const scope = hydrateMermaid([...root.children]);
+    typeKey();
+    runIdle();
+    await vi.advanceTimersByTimeAsync(600);
+    typeKey(); // 600ms 時点でもう 1 打
+    await vi.advanceTimersByTimeAsync(400); // 最初の待ちが明ける
+    expect(idles).toHaveLength(1);
+    runIdle();
+    await flush();
+    expect(vi.mocked(renderToPng), '2 打目の後に始めた').toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(idles).toHaveLength(1);
+    runIdle();
+    await flush();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(8);
+    scope.dispose();
+    root.remove();
+  });
+
+  it('🔴 画面に見えている図は、打っている間も焼く(止めるのは先読みだけ)', async () => {
+    const root = mount(10);
+    const hosts = [...root.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]')];
+    const scope = hydrateMermaid([...root.children]);
+    typeKey();
+    fire!([hosts[9]!]);
+    await flush();
+    expect(vi.mocked(renderToPng), '見えている図を打鍵中に焼いていない').toHaveBeenCalledTimes(1);
+    scope.dispose();
+    root.remove();
+  });
+
+  it('⚠ 待っている間に畳んだら、再開しない(編集を終えて面が作り直された後に焼かない)', async () => {
+    const root = mount(10);
+    const scope = hydrateMermaid([...root.children]);
+    typeKey();
+    runIdle();
+    scope.dispose();
+    expect(vi.getTimerCount(), '畳んだのに待ちの timer が残っている').toBe(0);
+    await vi.advanceTimersByTimeAsync(TYPING_QUIET_MS + 10);
+    expect(idles, '畳んだ後に空き時間を取った').toHaveLength(0);
+    root.remove();
+  });
+
+  it('🔑 入力が無ければ、いつもどおり即座に始める(対照群)', async () => {
+    const root = mount(10);
+    const scope = hydrateMermaid([...root.children]);
+    runIdle();
+    await flush();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(8);
     scope.dispose();
     root.remove();
   });

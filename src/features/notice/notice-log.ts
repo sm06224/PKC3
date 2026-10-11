@@ -168,6 +168,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-11-typing-prefetch',
+    title: '長いノートで図が多いとき、打っている間の引っかかりを減らしました',
+    items: [
+      '図がたくさんあるノートを編集で打っているとき、画面の外の図を先に描く処理を止めるようにしました。打つのをやめて 1 秒ほどたつと、また描き始めます。',
+      'いま見えている図は、打っている間も描きます。',
+    ],
+  },
+  {
     id: '2026-10-11-audio-waveform',
     title: '録音に波形が出て、ドラッグで切り出す範囲を選べます',
     items: [
@@ -573,14 +581,9 @@ export const NOTICES: readonly Notice[] = [
       '過去のお知らせとマニュアルも同じ言葉で書き直しました。',
     ],
   },
-  {
-    id: '2026-10-06-office-attachment-guide',
-    title: 'Word / Excel の添付の案内が、Office で開く方法を指すようになりました',
-    items: [
-      'Word / Excel などの添付を開いた画面の案内が、「ダウンロードして開いてください」ではなく、Office で開く方法を指すようになりました。',
-      'Office 表示のために取り込む一式の大きさの案内を、実際に合わせて約 106MB に直しました。',
-    ],
-  },
+  // ⚠ 2026-10-11(1467): 枠を超えたので
+  //    `2026-10-06-office-attachment-guide` を登記表から落とした ──
+  //    **原本は CHANGELOG.md に在る**(2026-10-06 の節)
   // ⚠ 2026-10-11(1232): 枠を超えたので
   //    `2026-10-04-transcript-seek-player` を登記表から落とした ──
   //    **原本は CHANGELOG.md に在る**(2026-10-04 の節)

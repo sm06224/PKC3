@@ -18,6 +18,7 @@ import { ACTION_ICONS, iconSpan } from './icons';
 import { markViewBig } from './view-big';
 import { watchDevicePixelRatio } from './dpr-watch';
 import { watchVisible } from './visible-watch';
+import { typingQuietIn } from './typing-gate';
 
 /** 1 つの器を埋めるのに要る情報。 */
 interface Pending {
@@ -203,6 +204,8 @@ export function hydrateDiagrams(
   const urlOf = new Map<HTMLElement, string>();
   let disposed = false;
   let idle = 0;
+  /** 打鍵が止まるのを待つ timer(0 = 待っていない)。 */
+  let quietTimer = 0;
   const queue: Pending[] = [];
   const done = new WeakSet<HTMLElement>();
   /** 焼き**始めた**器(配色を変えたときの対象。`urlOf` は焼き終わったものだけ)。 */
@@ -491,6 +494,17 @@ export function hydrateDiagrams(
   const step = (): void => {
     idle = 0;
     if (disposed) return;
+    // 🔴 **打っている間は新しく始めない**(#1467)。画面の外の図を焼いて載せるたびに文書全体の配置が
+    //    やり直しになり、打鍵が遅れる。⚠ 始める側だけ止める(焼いている最中の物は終わらせる)。
+    //    ⚠ 見えている図は `watchVisible` の経路で焼くので、ここでは止まらない。
+    const wait = typingQuietIn();
+    if (wait > 0) {
+      quietTimer = setTimeout(() => {
+        quietTimer = 0;
+        if (!disposed) idle = ric ? ric(step, { timeout: 2000 }) : 0;
+      }, wait) as unknown as number;
+      return;
+    }
     // 🔑 空き時間 1 回で **PREFETCH_BATCH 枚**を始める ── 差し替えは上の `commit` が 1 コマにまとめるので、
     //    1 枚ずつ始めると、まとめる相手がいない(#1467)。⚠ 焼く処理そのものは `kind.render` の側で直列
     const batch = queue.splice(0, PREFETCH_BATCH);
@@ -512,6 +526,7 @@ export function hydrateDiagrams(
       ro?.disconnect();
       clearTimeout(settle);
       unwatchDpr();
+      clearTimeout(quietTimer);
       if (idle !== 0 && typeof cancelIdleCallback === 'function') cancelIdleCallback(idle);
       // ⚠ **表示の寿命終端で捨てる**(生成物を残さない)
       for (const u of urlOf.values()) URL.revokeObjectURL(u);

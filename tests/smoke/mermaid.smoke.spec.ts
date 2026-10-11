@@ -856,3 +856,52 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });
+
+/**
+ * #1467: **打っている間は、画面の外の図の先読みを始めない**。見えている図は焼く。
+ *
+ * 観測点は「画面の外にあって、焼き終わった図の数」── 先読みが走れば増え、止まっていれば 0 のまま。
+ * ⚠ 見えている図の数ではない(打つたびに焼き直るので、数が動く)。
+ * ⚠ 打ち終えて 1 秒ほどたつと数が増える(= 止めっぱなしではない)ことを対で見る。
+ */
+test('🔴 打っている間は画面の外の図を先読みせず、止まると再開する (#1467)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const parts: string[] = [];
+  for (let i = 0; i < 40; i++) {
+    parts.push(`## 節 ${i}`, '', '```mermaid', 'graph TD', `  A${i}["始め ${i}"]-->B${i}["終わり ${i}"]`, '```', '');
+    for (let j = 0; j < 12; j++) parts.push(`補足の行 ${i}-${j}`, '');
+  }
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill(parts.join('\n'));
+  // 🔑 すぐ打ち始める ── 待つと、打つ前に先読みが進んでしまう(対照にならない)
+  await ta.press('Control+Home'); // ⚠ 末尾へ飛ぶと、見えていた図が画面の外へ動いて「外で焼けた」に数えてしまう
+  const offscreenReady = (): Promise<{ off: number; on: number }> =>
+    page.evaluate(() => {
+      const pane = document.querySelector('[data-pkc-region="editor-preview"]')!.getBoundingClientRect();
+      let off = 0;
+      let on = 0;
+      for (const h of document.querySelectorAll<HTMLElement>(
+        '[data-pkc-region="editor-preview"] [data-pkc-mermaid-src]',
+      )) {
+        if (h.getAttribute('data-pkc-mermaid-state') !== 'ready') continue;
+        const r = h.getBoundingClientRect();
+        if (r.bottom < pane.top || r.top > pane.bottom) off += 1;
+        else on += 1;
+      }
+      return { off, on };
+    });
+  await page.keyboard.type('abcdefghijklmnopqrst', { delay: 100 });
+  const during = await offscreenReady();
+  expect(during.off, '打っている間に、画面の外の図が先読みで焼かれた').toBe(0);
+  // 対照 ── 止まれば先読みが再開する(止めっぱなしでは、長いノートの図が一生焼けない)
+  await expect
+    .poll(async () => (await offscreenReady()).off, {
+      timeout: 30000,
+      message: '打つのをやめても先読みが再開しない',
+    })
+    .toBeGreaterThan(0);
+  expect(errors, 'ページ例外が出ている').toEqual([]);
+});
