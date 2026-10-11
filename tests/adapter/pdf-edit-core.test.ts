@@ -213,6 +213,177 @@ describe('🔴 外したページへのリンクから、外したページが�
   });
 });
 
+/** 他のアプリが付ける注釈: 3 ページとも、`/P`(属するページ)つき。ページごとに**別の目印**を `Contents` に持つ。 */
+const NOTE = (m: string): string => `NOTE-${m}`;
+async function annotated(kind: 'Highlight' | 'Text' | 'Link' | 'Square' = 'Highlight'): Promise<Uint8Array> {
+  const doc = await PDFLib.PDFDocument.create();
+  const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const ctx = doc.context;
+  [A, B, C].forEach((m) => {
+    const p = doc.addPage([300, 400]);
+    p.drawText(m, { x: 20, y: 200, size: 18, font });
+    const base: Record<string, unknown> = {
+      Type: 'Annot',
+      Subtype: kind,
+      Rect: [20, 195, 120, 220],
+      Contents: PDFLib.PDFString.of(NOTE(m)),
+      P: p.ref,
+    };
+    if (kind === 'Highlight') base.QuadPoints = [20, 220, 120, 220, 20, 195, 120, 195];
+    if (kind === 'Link') base.A = { S: 'URI', URI: PDFLib.PDFString.of('https://example.com/') };
+    const annot = ctx.obj(base as never) as unknown as PDFLib.PDFDict;
+    const ref = ctx.register(annot);
+    const list: PDFLib.PDFRef[] = [ref];
+    if (kind === 'Text') {
+      // /Popup を持つ形(ポップアップ側も /P を持つ)
+      const popup = ctx.register(
+        ctx.obj({ Type: 'Annot', Subtype: 'Popup', Rect: [130, 195, 250, 260], Parent: ref, P: p.ref }),
+      );
+      annot.set(PDFLib.PDFName.of('Popup'), popup);
+      list.push(popup);
+    }
+    p.node.set(PDFLib.PDFName.of('Annots'), ctx.obj(list));
+  });
+  return doc.save();
+}
+
+/** 出力の `i` ページ目の注釈それぞれの `/P` が指す出力のページ番号(`/P` が無ければ -1、どのページでもなければ -2)。 */
+async function annotOwners(bytes: Uint8Array, i: number): Promise<number[]> {
+  const doc = await PDFLib.PDFDocument.load(bytes);
+  const annots = doc.getPage(i).node.Annots();
+  const out: number[] = [];
+  for (let j = 0; j < (annots?.size() ?? 0); j += 1) {
+    const d = annots?.lookup(j, PDFLib.PDFDict);
+    const ref = d?.get(PDFLib.PDFName.of('P'));
+    out.push(ref === undefined ? -1 : doc.getPages().findIndex((pg) => String(pg.ref) === String(ref)));
+  }
+  return out;
+}
+
+describe('🔴 他のアプリが付けた注釈(`/P` つき)のある PDF も、ページを編集して保存できる(#275 段②-2a)', () => {
+  it('対照群: 元の PDF には注釈が在り、素の copyPages は `/P` から外したページをもう 1 枚写す(再現できている)', async () => {
+    const src = await annotated();
+    expect(hasMark(src, NOTE(B))).toBe(true);
+    const loaded = await PDFLib.PDFDocument.load(src);
+    const naive = await PDFLib.PDFDocument.create();
+    for (const pg of await naive.copyPages(loaded, [0])) naive.addPage(pg);
+    // 1 ページしか頼んでいないのに、Page 辞書が 2 つ以上 ── 外すページ(の複製)が混ざる
+    const reread = await PDFLib.PDFDocument.load(await naive.save());
+    let dicts = 0;
+    reread.context.enumerateIndirectObjects().forEach(([, o]) => {
+      if (o instanceof PDFLib.PDFDict && o.get(PDFLib.PDFName.of('Type')) === PDFLib.PDFName.of('Page')) dicts += 1;
+    });
+    expect(dicts, '素の copyPages が `/P` からページを増やしていない').toBeGreaterThan(1);
+  });
+
+  for (const kind of ['Highlight', 'Text', 'Link', 'Square'] as const) {
+    it(`${kind}: 並べ替え ── 断られず、注釈が全ページに残り、出力のページを指す`, async () => {
+      const src = await annotated(kind);
+      const out = await core.build(PDFLib, src, { order: [3, 1, 2], rotate: {} });
+      await core.verify(PDFLib, out, 3);
+      // 出力の i ページ目は元の [3,1,2][i] ページ目 ── 注釈の目印がページの字と一緒に動いている
+      const marks = [C, A, B];
+      for (let i = 0; i < 3; i += 1) {
+        expect(showsMark(await pageText(out, i), marks[i] as string)).toBe(true);
+        const doc = await PDFLib.PDFDocument.load(out);
+        const first = doc.getPage(i).node.Annots()?.lookup(0, PDFLib.PDFDict);
+        const text = (first?.lookup(PDFLib.PDFName.of('Contents')) as PDFLib.PDFString | undefined)?.decodeText();
+        expect(text, `${i + 1} ページ目の注釈`).toBe(NOTE(marks[i] as string));
+        expect((await annotOwners(out, i))[0], '`/P` は自分のページを指す').toBe(i);
+      }
+      if (kind === 'Text') {
+        // /Popup 側の `/P` も自分のページ
+        const doc = await PDFLib.PDFDocument.load(out);
+        const popup = doc.getPage(0).node.Annots()?.lookup(0, PDFLib.PDFDict)?.lookup(PDFLib.PDFName.of('Popup'), PDFLib.PDFDict);
+        expect(String(popup?.get(PDFLib.PDFName.of('P')))).toBe(String(doc.getPage(0).ref));
+      }
+    });
+
+    it(`${kind}: 外す / 抜き出す ── 断られず、外したページの注釈と字は出力に 0 件、残したページの注釈は残る`, async () => {
+      const src = await annotated(kind);
+      for (const order of [[1, 3], [2]]) {
+        const out = await core.build(PDFLib, src, { order, rotate: {} });
+        await core.verify(PDFLib, out, order.length);
+        const kept = order.map((n) => [A, B, C][n - 1] as string);
+        const gone = [A, B, C].filter((m) => !kept.includes(m));
+        for (const m of kept) {
+          expect(hasMark(out, m), m).toBe(true);
+          expect(hasMark(out, NOTE(m)), NOTE(m)).toBe(true);
+        }
+        for (const m of gone) {
+          expect(hasMark(out, m), `外した ${m} の字`).toBe(false);
+          expect(hasMark(out, NOTE(m)), `外した ${m} の注釈`).toBe(false);
+        }
+        for (let i = 0; i < order.length; i += 1) expect((await annotOwners(out, i))[0]).toBe(i);
+        expect((await PDFLib.PDFDocument.load(out)).getPageCount()).toBe(order.length);
+      }
+    });
+  }
+
+  it('Text: どの出力ページでも、親と /Popup の両方の `/P` がその出力ページを指す(並べ替え / 外す / 抜き出し)', async () => {
+    const src = await annotated('Text');
+    for (const order of [[3, 1, 2], [1, 3], [2]]) {
+      const out = await core.build(PDFLib, src, { order, rotate: {} });
+      const doc = await PDFLib.PDFDocument.load(out);
+      expect(doc.getPageCount()).toBe(order.length);
+      for (let i = 0; i < order.length; i += 1) {
+        const page = doc.getPage(i);
+        const annots = page.node.Annots();
+        expect(annots?.size(), `${order} の ${i + 1} ページ目: 親 + popup`).toBe(2);
+        const parent = annots?.lookup(0, PDFLib.PDFDict);
+        const popup = parent?.lookup(PDFLib.PDFName.of('Popup'), PDFLib.PDFDict);
+        expect(String(parent?.get(PDFLib.PDFName.of('P'))), `${order} 親 ${i}`).toBe(String(page.ref));
+        expect(String(popup?.get(PDFLib.PDFName.of('P'))), `${order} popup ${i}`).toBe(String(page.ref));
+      }
+    }
+  });
+
+  it('前の注釈(外すページへのリンク)が落とされて位置がずれても、残った注釈の `/P` は出力の自ページを指す', async () => {
+    const doc = await PDFLib.PDFDocument.create();
+    const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const pages = [A, B, C].map((m) => {
+      const pg = doc.addPage([300, 400]);
+      pg.drawText(m, { x: 20, y: 200, size: 18, font });
+      return pg;
+    });
+    const [p1, , p3] = pages as [PDFLib.PDFPage, PDFLib.PDFPage, PDFLib.PDFPage];
+    const ctx = doc.context;
+    const dropLink = ctx.register(
+      ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: [10, 10, 100, 30], Dest: [p3.ref, 'Fit'] }),
+    );
+    const hl = ctx.register(
+      ctx.obj({
+        Type: 'Annot',
+        Subtype: 'Highlight',
+        Rect: [20, 195, 120, 220],
+        QuadPoints: [20, 220, 120, 220, 20, 195, 120, 195],
+        Contents: PDFLib.PDFString.of(NOTE(A)),
+        P: p1.ref,
+      }),
+    );
+    p1.node.set(PDFLib.PDFName.of('Annots'), ctx.obj([dropLink, hl]));
+    const out = await core.build(PDFLib, await doc.save(), { order: [1, 2], rotate: {} });
+    expect(await annotCount(out, 0), 'リンクは落ち、ハイライトだけが残る').toBe(1);
+    expect(hasMark(out, NOTE(A))).toBe(true);
+    expect(await annotOwners(out, 0)).toEqual([0]);
+    expect(hasMark(out, C), '外したページの字').toBe(false);
+  });
+
+  it('門は緩んでいない: `/P` の無い注釈でも、`/P` を残したまま別のページを指す独自の項目(/Foo)は leaked で断る', async () => {
+    const src = await annotated('Highlight');
+    const doc = await PDFLib.PDFDocument.load(src);
+    const page3 = doc.getPage(2);
+    doc.getPage(0).node.Annots()?.lookup(0, PDFLib.PDFDict)?.set(PDFLib.PDFName.of('Foo'), page3.ref);
+    let code: string | undefined;
+    try {
+      await core.build(PDFLib, await doc.save(), { order: [1, 2], rotate: {} });
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(code).toBe('leaked');
+  });
+});
+
 describe('🔴 選んだページを抜き出す(#275 段②-1c)── 選んだページだけが入り、選ばなかったページの中身は残らない', () => {
   const D = 'MARK-DELTA-444';
   const E = 'MARK-ECHO-555';
