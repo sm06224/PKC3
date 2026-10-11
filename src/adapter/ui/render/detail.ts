@@ -946,6 +946,23 @@ export class DetailRenderer {
     this.held = null;
   }
 
+  /**
+   * 持ち越した本文の器(`keep`)以外の子 = 編集の面を外す。
+   * 🔴 **焦点を持っている節点は最後に外す**(#1467 段 6)。焦点のある節点(保存ボタンを押した帯)を外すと、ブラウザは
+   *   **その場で配置を払う** ── 先に外すと、まだ居る 20,000 行の編集の面の配置を丸ごと払う(20,001 塊で約 40 ms)。
+   *   重い物を先に外しておけば、焦点の後始末の配置は軽い。
+   */
+  private removeEditorFace(keep: HTMLElement): void {
+    const focused = document.activeElement;
+    const rest: ChildNode[] = [];
+    for (const c of Array.from(this.region.childNodes)) {
+      if (c === keep) continue;
+      if (focused !== null && c.contains(focused)) rest.push(c);
+      else c.remove();
+    }
+    for (const c of rest) c.remove();
+  }
+
   /** 持ち越しを捨てる(節点だけ。借りた物の返却は呼び側の `disposeLends` / `pruneLends`)。 */
   private dropHeldDom(): void {
     if (this.held === null) return;
@@ -1489,7 +1506,7 @@ export class DetailRenderer {
       } else {
         // 編集の面だけ外す(持ち越した本文の器は**その場に残す** ── 動かすと配置を作り直す)。借りた物は返さない
         this.disposeLends(true);
-        for (const c of Array.from(this.region.childNodes)) if (c !== adopted.host) c.remove();
+        this.removeEditorFace(adopted.host);
       }
       this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
       /**
