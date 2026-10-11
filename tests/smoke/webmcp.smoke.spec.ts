@@ -386,6 +386,17 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
       undefined,
       { timeout: 40_000 },
     );
+    // 🔴 #1569: 組み込み先の iframe は、初回訪問の「分離のための読み直し」で起動の 2〜3 秒後に
+    //    丸ごと作り直されていた(開いた設定が閉じ、AI の許可のダイアログも消える)。
+    //    作り直されたら window の印が消える ── 印を置いてから、読み直しが起きうる時間を待つ
+    await frame.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__noReload = true;
+    });
+    await frame.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+    await frame.waitForTimeout(4000);
+    const notReloaded = () =>
+      frame.evaluate(() => (window as unknown as Record<string, unknown>).__noReload === true);
+    expect(await notReloaded(), '組み込み先の iframe が起動の後に勝手に読み直された(#1569)').toBe(true);
 
     interface Rpc {
       id?: number;
@@ -426,9 +437,6 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
 
     // ── 2. 許可リストに親を入れる ── 🔴 開発者ツールではなく、設定の画面から(#1407)。窓口は呼ぶたびに読む ──
     //    後ろ(パス)の付いたアドレスを入れても origin に落ちる。断る入力は保存を変えず、理由が 1 行出る
-    //    ⚠ 設定の画面は**ここで開いたまま 5 まで閉じない**。2026-10-11 の実測(4/4 回): 「開く → 閉じる → AI がノートを
-    //      作る(3)→ 開き直す」の並びで、開き直した画面が自分で ~300ms 後に閉じた(アドレスの追加とは無関係 ──
-    //      開閉だけでも同じ。原因は未調査で、別件として報告した)。その並びを踏まない形にしてある
     await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
     const embedInput = frame.locator('[data-pkc-field="embed-origin-input"]');
     const embedResult = frame.locator('[data-pkc-field="embed-origin-result"]');
@@ -453,6 +461,11 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
       'pkc_search_notes',
     ]);
     expect(await regOf(), '何も許していない origin に登録した(道具の一覧を黙って見せた)').toEqual([]);
+    await frame.locator('[data-pkc-action="close-pane"]').click();
+
+    // ── 2b. 先に設定を開いて閉じる(#1569 の再現手順: この往復の後で開いた設定が、勝手に閉じていた) ──
+    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    await frame.locator('[data-pkc-action="close-pane"]').click();
 
     // ── 3. 作る(この 1 回だけ)── ダイアログに親の origin がそのまま出る ──
     const frameNote = frame.locator(ASK_NOTE);
@@ -497,7 +510,11 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
     await expect(frameNote, '常に許したのにダイアログが出た').toBeHidden();
 
     // ── 5. 設定の一覧に親の origin の行 → 取り消す → 登録が畳まれる ──
-    // (設定の画面は 2 から開いたまま ── 上の ⚠ のとおり、ここでは開き直さない)
+    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    // 開いた設定が居座る(読み直しや別の面の割り込みで 300ms 後に閉じない)
+    await frame.waitForTimeout(1500);
+    expect(await notReloaded(), '設定を開いた後に iframe が読み直された(#1569)').toBe(true);
+    await expect(frame.locator('[data-pkc-action="close-pane"]'), '開いた設定が勝手に閉じた(#1569)').toBeVisible();
     const row = frame.locator(`li[data-pkc-agent-origin="${PARENT}"][data-pkc-agent-scope="read"]`);
     await expect(row, '設定の一覧に親の origin の行が出ていない').toBeVisible();
     await expect(row.locator('[data-pkc-field="agent-origin"]')).toHaveText(`${PARENT} のページの AI`);
