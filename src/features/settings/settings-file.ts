@@ -200,6 +200,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '許可である。その端末でブラウザの AI に許したもの(書き出して渡すと、相手の端末でも「AI に読ませてよい」が立ってしまう)',
   },
   {
+    key: 'pkc3.agent-origin-grants',
+    why: '許可である。その端末で、組み込み先のページの AI に許したもの(書き出して渡すと、相手の端末でも「そのページの AI に読ませてよい」が立ってしまう)',
+  },
+  {
     key: 'pkc3.same-origin-grants',
     why: '許可である。その端末でその相手を見て許したもの',
   },

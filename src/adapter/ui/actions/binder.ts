@@ -1543,8 +1543,11 @@ export interface BinderServices {
   revokeSameOrigin?(assetKey: string): void;
   /** 目次を見せる許可を取り消す(#195)。 */
   revokeExtension?(assetKey: string): void;
-  /** ブラウザの AI に許した範囲(`read` / `write`)を取り消す(#1407)。 */
-  revokeAgent?(scope: string): void;
+  /**
+   * ブラウザの AI に許した範囲を取り消す(#1407)。`origin` = 組み込み先のページの AI の行(段⑥)。
+   * 無い = このブラウザの AI。
+   */
+  revokeAgent?(scope: string, origin?: string): void;
   /**
    * 紙面(2026-08-08、user 裁定「A4 と A3、フル HD と 4:3 の縦横」)。
    * ⚠ **flag ではない**(正規設定)── 散文の読み幅と、印刷の紙が決まる。
@@ -10503,7 +10506,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'revoke-agent': (_dispatcher, target, services) => {
     const scope = target.getAttribute('data-pkc-agent-scope');
-    if (scope !== null && scope !== '') services.revokeAgent?.(scope);
+    // 🔴 組み込み先のページの AI の行は origin を持つ(同じ範囲でも台帳が別)
+    const origin = target.getAttribute('data-pkc-agent-origin');
+    if (scope !== null && scope !== '') {
+      if (origin !== null && origin !== '') services.revokeAgent?.(scope, origin);
+      else services.revokeAgent?.(scope);
+    }
   },
   /**
    * 🔴 **「システム」の目次から節へ飛ぶ / 「上へ」で目次へ戻る**(#1017 段⓪)。

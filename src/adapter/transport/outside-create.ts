@@ -25,6 +25,14 @@ import type { Via } from './message-bridge';
 /** AI の道具が名乗る出どころの名前(知らせの字が変わる)。 */
 export const AGENT_ORIGIN_LABEL = 'ブラウザの AI';
 
+/**
+ * AI の出どころの名前。他のページに組み込まれた AI(#1407 段⑥)は、そのページの origin を名指しする
+ * (ステータスバーの知らせで、どこから来たかが分かる)。
+ */
+export function agentOriginLabel(from?: string): string {
+  return from === undefined ? AGENT_ORIGIN_LABEL : `${from} の AI`;
+}
+
 /** 道具(Dispatcher / ステータスバー)の最小の形。 */
 export interface OutsideCreateDeps {
   dispatch: (action: {
@@ -50,7 +58,7 @@ export interface OutsideCreateDeps {
 /** 知らせの字。⚠ AI の経路は「取り込みました」ではなく「作りました」(取り込んだのではなく AI が作った)。 */
 export function outsideCreatedText(origin: string, via: Via, title: string): string {
   if (via === 'capture') return `${origin} から取り込みました。保存すると残ります:『${title}』`;
-  if (origin === AGENT_ORIGIN_LABEL) return `${origin} がノートを作りました:『${title}』`;
+  if (origin === AGENT_ORIGIN_LABEL || origin.endsWith(' の AI')) return `${origin} がノートを作りました:『${title}』`;
   return `${origin} から 1 件取り込みました:『${title}』`;
 }
 

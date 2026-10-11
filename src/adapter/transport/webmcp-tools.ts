@@ -37,7 +37,7 @@ import { UNSET } from '@features/query/group-by';
 import { AGENT_DENIED_TEXT, type AgentGate } from '@features/agent/agent-gate';
 import type { ModelContextTool, ToolResult } from '@features/agent/webmcp-types';
 import { MAX_BODY, parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
-import { AGENT_ORIGIN_LABEL } from './outside-create';
+import { AGENT_ORIGIN_LABEL, agentOriginLabel } from './outside-create';
 import type { Via } from './message-bridge';
 import { MAX_PER_MINUTE } from './protocol';
 import type { AppendOutcome } from '@adapter/state/append-settle';
@@ -86,6 +86,13 @@ export interface AgentToolDeps {
   gate: AgentGate;
   /** 時計(回数の窓を測る)。省略 = `Date.now`。 */
   now?: () => number;
+  /**
+   * 🔴 他のページに組み込まれた AI 用の道具として組むとき、そのページの origin(#1407 段⑥)。
+   * 門へ渡す依頼に `from` として載り(許可の台帳もダイアログも origin ごと)、作ったノートの出どころの
+   * 名前も変わる。⚠ 回数の上限は**この組ごと**に数える ── origin ごとに 1 組ずつ組むので、1 つの相手が
+   * 他の相手の枠を食わない。
+   */
+  from?: string;
 }
 
 /** 回数の上限に当たったときの断り。 */
@@ -137,6 +144,11 @@ function noteOf(id: string, meta: AgentMeta, body: string): Record<string, unkno
 }
 
 export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
+  const from = deps.from;
+  /** 🔴 どの道具も門を通す前に、呼び手(origin)を依頼へ載せる(載せ忘れ = 台帳を取り違える)。 */
+  const gate: AgentGate = (target, signal) =>
+    deps.gate(from === undefined ? target : { ...target, from }, signal);
+  const originLabel = agentOriginLabel(from);
   /** 1 分の窓で数える(5 本まとめて 1 つ ── 呼び手は AI 1 つなので origin ごとには分けない)。 */
   const clock = deps.now ?? Date.now;
   let windowStart = 0;
@@ -184,7 +196,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
         SEARCH_MAX_LIMIT,
         Math.max(1, Math.floor(asked ?? SEARCH_DEFAULT_LIMIT)),
       );
-      if (!(await deps.gate({ action: 'search', query }, options.signal))) return fail(AGENT_DENIED_TEXT);
+      if (!(await gate({ action: 'search', query }, options.signal))) return fail(AGENT_DENIED_TEXT);
       const found = await deps.search(query, limit);
       const ids = found.ids.filter((id) => deps.meta(id) !== undefined).slice(0, limit);
       const bodies = await deps.bodies(ids);
@@ -219,7 +231,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       // ⚠ 見取りに無い ID は読ませない(system 領域のノートを、ID を直に渡して読む道を塞ぐ)。
       //   ⚠ 許可を聞く前に断る ── 読めないノートの題名をダイアログに出さない
       if (meta === undefined) return fail('そのノートは見つかりません');
-      if (!(await deps.gate({ action: 'read', title: meta.title }, options.signal))) {
+      if (!(await gate({ action: 'read', title: meta.title }, options.signal))) {
         return fail(AGENT_DENIED_TEXT);
       }
       const body = (await deps.bodies([id])).get(id);
@@ -237,7 +249,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
     annotations: { readOnlyHint: true },
     execute: async (_raw, options) => {
       if (!withinRate()) return fail(AGENT_RATE_LIMIT_TEXT);
-      if (!(await deps.gate({ action: 'tags' }, options.signal))) return fail(AGENT_DENIED_TEXT);
+      if (!(await gate({ action: 'tags' }, options.signal))) return fail(AGENT_DENIED_TEXT);
       const scanned = await deps.tags();
       return ok({
         // ⚠ 「タグが無いノート」の組(UNSET)はタグではない
@@ -268,11 +280,11 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       // 🔴 検査は `pkc.createEntry` と同じ関数(題名の上限・本文の上限・題名の作り方)
       const parsed = parseCreateEntryParams({ title: input.title, body: input.body });
       if (!parsed.ok) return fail(parsed.message);
-      if (!(await deps.gate({ action: 'create', title: parsed.input.title }, options.signal))) {
+      if (!(await gate({ action: 'create', title: parsed.input.title }, options.signal))) {
         return fail(AGENT_DENIED_TEXT);
       }
       // 🔴 作るのも同じ関数(`main.ts` が bridge に渡す `createEntry`)── 画面に出る形も C-4 と同じ
-      const id = await deps.createEntry(parsed.input, AGENT_ORIGIN_LABEL, 'origin');
+      const id = await deps.createEntry(parsed.input, originLabel, 'origin');
       // 🔴 作れなかったときに成功を返さない(AI が「作った」と user に言ってしまう)
       if (id === null) return fail(AGENT_CREATE_FAILED_TEXT);
       return ok({ id, title: parsed.input.title });
@@ -314,7 +326,7 @@ export function buildAgentTools(deps: AgentToolDeps): ModelContextTool[] {
       if (!isAppendable(meta.archetype)) {
         return fail(`そのノートには書き足せません(書き足せるのは${appendableKindsLabel()}だけです)`);
       }
-      if (!(await deps.gate({ action: 'append', title: meta.title }, options.signal))) {
+      if (!(await gate({ action: 'append', title: meta.title }, options.signal))) {
         return fail(AGENT_DENIED_TEXT);
       }
       // ⚠ 改行は LF にそろえ、NUL は落とす(追記欄は入力欄が \r\n を直すが、AI の字はそのまま来る)

@@ -13,6 +13,7 @@
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import { ExtensionGrants } from '@adapter/platform/extension-grants';
 import { AgentGrants, appAgentGrants } from '@adapter/platform/agent-grants';
+import { AgentOriginGrants, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
 import { AgentTabStatus, appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import type { AppState } from '@adapter/state/app-state';
 import { appStorageVacuum, type StorageVacuum } from '@adapter/platform/storage/vacuum-run';
@@ -201,6 +202,11 @@ export class SettingsRenderer {
      * 🔴 **このタブで AI のツールが使えるか**(#1407)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly agentTabStatus: AgentTabStatus = appAgentTabStatus,
+    /**
+     * 🔴 **組み込み先のページの AI に許した範囲**(#1407 段⑥)── 「許可」の同じ一覧に並べる。
+     * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly agentOriginGrants: AgentOriginGrants = appAgentOriginGrants,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -238,7 +244,7 @@ export class SettingsRenderer {
       createExternalImagesSection(region, externalImages),
       createSameOriginSection(sameOriginGrants),
       createExtensionsSection(extensionGrants),
-      createAgentsSection(agentGrants, agentTabStatus),
+      createAgentsSection(agentGrants, agentTabStatus, agentOriginGrants),
       createOpenedHistorySection(),
       createSearchHistorySection(),
       createCopyHistorySection(),

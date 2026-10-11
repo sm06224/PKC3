@@ -13,6 +13,7 @@
 import { METHODS, RPC } from './protocol';
 import { attachMessageBridge, type BridgeOptions, type Via } from './message-bridge';
 import { parseCreateEntryParams, type CreateEntryInput } from './create-entry-params';
+import type { AgentEmbed } from './agent-embed';
 
 export interface EmbedDeps {
   /** flag が立っているか。 */
@@ -30,6 +31,11 @@ export interface EmbedDeps {
     origin: string,
     via: Via,
   ) => Promise<string | null> | string | null;
+  /**
+   * 🔴 組み込み先の AI に道具を使わせる口(#1407 段⑥)。⚠ 渡されない / flag `agent.webmcp` がオフのときは
+   * `tools/list` / `tools/call` を申告せず、呼ばれても `METHOD_NOT_FOUND` で返す。
+   */
+  agent?: AgentEmbed & { enabled: () => boolean };
   /** 許す origin(呼ぶたびに読む ── 設定を変えたら張り直さずに効く)。 */
   origins: () => readonly string[];
   onReject?: BridgeOptions['onReject'];
@@ -48,12 +54,28 @@ export const ALWAYS_SERVED: readonly string[] = ['pkc.hello', 'pkc.ping'];
  * ⚠ `createEntry` を渡されていない器で `pkc.createEntry` を申告すると、
  * 相手は送ってきて `METHOD_NOT_FOUND` を食う(**嘘の申告**)。
  */
-export function served(deps: Pick<EmbedDeps, 'createEntry'>): string[] {
-  return [...ALWAYS_SERVED, ...(deps.createEntry ? ['pkc.createEntry'] : [])];
+export function served(deps: Pick<EmbedDeps, 'createEntry' | 'agent'>): string[] {
+  return [
+    ...ALWAYS_SERVED,
+    ...(deps.createEntry ? ['pkc.createEntry'] : []),
+    ...(deps.agent?.enabled() === true ? ['tools/list', 'tools/call'] : []),
+  ];
 }
 
 /** ⚠ 後方互換のために残す名前(段① の test が読む)。 */
 export const SERVED: readonly string[] = ALWAYS_SERVED;
+
+/**
+ * 道具の口を使ってよいか。🔴 flag オフ・合図の相手(身元を確かめていない)は**存在しない口**として断る。
+ * ⚠ 合図の相手は `accepts` が `createEntry` 以外を先に撥ねるが、ここでも断る(門が 1 枚に頼らない)。
+ */
+function agentFor(deps: Pick<EmbedDeps, 'agent'>, via: Via): AgentEmbed {
+  const agent = deps.agent;
+  if (agent === undefined || !agent.enabled() || via !== 'origin') {
+    throw Object.assign(new Error('このバージョンでは扱えません'), { rpcCode: RPC.METHOD_NOT_FOUND });
+  }
+  return agent;
+}
 
 /**
  * 張る。⚠ **flag が false のときは `null` を返し、listener を 1 つも足さない。**
@@ -68,6 +90,22 @@ export function startEmbedBridge(deps: EmbedDeps): (() => void) | null {
         protocol: 'jsonrpc-2.0',
       }),
       'pkc.ping': () => ({ pong: true }),
+      ...(deps.agent === undefined
+        ? {}
+        : {
+            'tools/list': (_request: unknown, origin: string, via: Via) => {
+              const agent = agentFor(deps, via);
+              return { tools: agent.list(origin) };
+            },
+            'tools/call': async (
+              request: { params?: Record<string, unknown> },
+              origin: string,
+              via: Via,
+            ) => {
+              const agent = agentFor(deps, via);
+              return agent.call(origin, request.params?.name, request.params?.arguments);
+            },
+          }),
       ...(deps.createEntry === undefined
         ? {}
         : {

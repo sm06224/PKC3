@@ -108,6 +108,8 @@ import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transp
 import { appendAndSettle } from '@adapter/state/append-settle';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
+import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
+import { createAgentEmbed } from '@adapter/transport/agent-embed';
 import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { appFlags } from '@adapter/platform/flag-store';
 import {
@@ -2037,6 +2039,47 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       origin,
       via,
     );
+  const agentGate = createAgentGate({
+    // 🔴 台帳は 2 つ ── このブラウザの AI と、組み込み先のページの AI(origin ごと)。振り分けは 1 か所
+    grants: new AgentGrantsRouter(appAgentGrants, appAgentOriginGrants),
+    ask: (target, signal) => pickAgentGrantInApp(root, target, signal),
+    now: () => Date.now(),
+  });
+  // 🔴 ダイアログの答え(常に許す / 最後に使われた時刻)で、設定の一覧が自分から更新される
+  //   (設定が開いていない間は `render` が早く戻る)
+  appAgentGrants.onChange(() => center.render(dispatcher.getState()));
+  appAgentOriginGrants.onChange(() => center.render(dispatcher.getState()));
+  /** 道具の材料(このブラウザの AI にも、組み込み先の AI にも同じ物を渡す ── 実行の道は 1 本)。 */
+  const agentToolBase = {
+    ...agentStoreDeps({
+      entryMetas: () => dispatcher.getState().entryMetas,
+      client: () => client,
+      cid,
+    }),
+    createEntry: createEntryFromOutside,
+    // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
+    append: (id: string, text: string, heading: string | null) =>
+      appendAndSettle(dispatcher, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
+    gate: agentGate,
+  };
+  /**
+   * 🔴 **組み込み先のページの AI へ道具を渡す**(#1407 段⑥)。判断は `createAgentEmbed` に在る
+   *   (許可リストの origin だけ・取り消すと即座に畳む・flag オフなら何もしない)。
+   */
+  const agentEmbed = createAgentEmbed({
+    enabled: () => appFlags.isOn(FLAG_WEBMCP.name),
+    allowed: () => (appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : []),
+    granted: () => appAgentOriginGrants.origins(),
+    host: { document, navigator },
+    buildTools: (from) => buildAgentTools({ ...agentToolBase, from }),
+  });
+  appAgentOriginGrants.onChange(() => agentEmbed.sync());
+  agentEmbed.sync();
+  window.addEventListener('pagehide', () => agentEmbed.stop());
+  // ⚠ 戻るで復元されたとき(bfcache)は登録し直す ── しないと、次に台帳が変わるまで組み込み先から見えない
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) agentEmbed.sync();
+  });
   startEmbedBridge({
     // ⚠ **合図で来たときは flag に依らず張る** ── flag は「iframe の親から受けるか」
     //    の切替であって、user が自分でブックマークを押した動線とは別物である。
@@ -2046,6 +2089,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : [],
     ...(capture === null ? {} : { capture }),
     createEntry: createEntryFromOutside,
+    agent: { ...agentEmbed, enabled: () => appFlags.isOn(FLAG_WEBMCP.name) },
   });
   /**
    * 🔴 **ブラウザの AI(WebMCP)へ道具を渡す**(#1407 段①)。
@@ -2057,31 +2101,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   探す・読むは既存の op(`searchEntries` / `getBodies` / `queryScan('tags')`)── SQL は書かない。
    * ⚠ `client` は昇格で差し替わる `let` ── 呼ぶたびに読むので、乗り換えた後も正しい口を叩く。
    */
-  const agentGate = createAgentGate({
-    grants: appAgentGrants,
-    ask: (target, signal) => pickAgentGrantInApp(root, target, signal),
-    now: () => Date.now(),
-  });
-  // 🔴 ダイアログの答え(常に許す / 最後に使われた時刻)で、設定の一覧が自分から更新される
-  //   (設定が開いていない間は `render` が早く戻る)
-  appAgentGrants.onChange(() => center.render(dispatcher.getState()));
   const agentRegistration = createWebMcpRegistration({
     enabled: () => appFlags.isOn(FLAG_WEBMCP.name),
     host: { document, navigator },
     onStatus: (status) => appAgentTabStatus.set(status),
-    tools: () =>
-      buildAgentTools({
-        ...agentStoreDeps({
-          entryMetas: () => dispatcher.getState().entryMetas,
-          client: () => client,
-          cid,
-        }),
-        createEntry: createEntryFromOutside,
-        // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
-        append: (id, text, heading) =>
-          appendAndSettle(dispatcher, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
-        gate: agentGate,
-      }),
+    tools: () => buildAgentTools(agentToolBase),
   });
   // 🔑 メインのタブだけ(2 枚目以降は、メインへ昇格した瞬間に下の 1 か所で呼ぶ)
   agentRegistration.sync(followerConn === null);
@@ -3926,8 +3950,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ `revokeSameOrigin` と**同じ倒し方** ── 許可は state に持たないので、自分で描き直さないと
      *   一覧が消えず「効いていない」に見える。
      */
-    revokeAgent: (scope) => {
-      if (scope !== 'read' && scope !== 'write') return;
+    revokeAgent: (scope, origin) => {
+      if (scope !== 'read' && scope !== 'write' && scope !== 'append') return;
+      if (origin !== undefined) {
+        // 🔴 組み込み先のページの AI ── 登録・飛んでいる依頼・ダイアログを**今すぐ**畳む(`agentEmbed.revoke`)。
+        //   台帳を先に外す(畳んだ後に同じ origin の新しい依頼が許可済みとして通らないように)
+        appAgentOriginGrants.revoke(origin, scope);
+        agentEmbed.revoke(origin);
+        agentEmbed.sync();
+        showStatus('組み込み先のページの AI への許可を取り消しました');
+        return;
+      }
       // ⚠ 描き直しは `appAgentGrants.onChange`(上の配線)が受ける
       appAgentGrants.revoke(scope);
       showStatus('ブラウザの AI への許可を取り消しました');
