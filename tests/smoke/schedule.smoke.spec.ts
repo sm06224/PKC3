@@ -708,8 +708,23 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await expect(foldNote, '既定なのに脇の 1 行が出ている').toBeHidden();
   await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
   await expect(doneBox, '「出すもの」を押してもチェックが開かない').toBeVisible();
-  await doneBox.check();
+  // 🔴 押しても読んでいるノートは閉じない(左の列の「何も無い所を押すとノートを閉じる」に巻き込まれない)
+  const openNote = page.locator('[data-pkc-action="start-edit"]');
+  await expect(openNote, '「出すもの」を押したらノートが閉じた').toBeVisible();
+  // 字(ラベル)を実際に押す ── 旗がちょうど 1 回反転して、枠は開いたまま
+  await fold.locator('[data-pkc-field="schedule-option"]').filter({ hasText: '済み' }).locator('span').click();
+  await expect(doneBox, '字を押して旗が 1 回反転していない').toBeChecked();
   await expect(foldNote, '済みを出したのに脇の 1 行が言わない').toHaveText('済みも表示中');
+  await expect(openNote, 'チェックの字を押したらノートが閉じた').toBeVisible();
+  await expect(doneBox, '1 つ付けたら枠が閉じた').toBeVisible();
+  // Esc は枠だけを閉じる(ノートは残る)。枠の外を押しても閉じる
+  await page.keyboard.press('Escape');
+  await expect(doneBox, 'Esc で枠が閉じない').toBeHidden();
+  await expect(openNote, 'Esc でノートまで閉じた').toBeVisible();
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
+  await expect(doneBox).toBeVisible();
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-month"]');
+  await expect(doneBox, '枠の外を押しても閉じない').toBeHidden();
   await expect(cardsOn(next), '済みにチェックしても済んだ回が出ない').not.toHaveCount(0);
 
   /**

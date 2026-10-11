@@ -10311,6 +10311,9 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 **作る種類の一覧を開く / 閉じる**(P10 の分割ボタン)。
    * ⚠ `<details>` を使わない ── この repo は「主要な導線を畳まない」を規律に持ち、
    *   shell に `<details>` が 0 件であることを test で pin している。
+   * 🔑 **例外が 1 つ在る**(#855。Gemini 裁定 = #1163 の依頼 10-A):予定表の「出すもの」(3 つの絞りを畳んだ小さな
+   *   枠)は `<details>` で作る。主要な導線ではなく、既定で隠している絞りの出し入れだけを畳む物で、
+   *   shell(`buildShell`)の骨組みには入らない ── 面が描いたときにだけ在る。
    */
   'toggle-create-menu': (_dispatcher, target, _services, root) => {
     const menu = root.querySelector<HTMLElement>('[data-pkc-region="create-menu"]');
@@ -12318,6 +12321,18 @@ export function bindActions(
      */
     const me2 = ev as MouseEvent;
     /**
+     * 🔴 **予定表の「出すもの」は、枠の外を押したら閉じる**(#855。複数のチェックを続けて付けるあいだは開いたまま)。
+     * ⚠ 閉じるのは**押した物がその枠の外**のときだけ ── 中(見出し・チェック・字・余白)と脇の 1 行は触らない。
+     */
+    for (const open of root.querySelectorAll<HTMLDetailsElement>(
+      'details[data-pkc-field="schedule-fold"][open]',
+    )) {
+      const inside =
+        open.contains(ev.target as Node | null) ||
+        (ev.target as HTMLElement | null)?.closest?.('[data-pkc-field="schedule-fold-note"]') != null;
+      if (!inside) open.open = false;
+    }
+    /**
      * 🔴 **Ctrl(⌘)は「その地点から編集」/ Alt は「追記先」**(#495。
      * user 裁定 2026-08-27)。
      *
@@ -12397,6 +12412,17 @@ export function bindActions(
      *   並べ替えの帯・移動の帯・タブは**そのまま効く**。
      */
     if (!el) {
+      /**
+       * 🔴 **「出すもの」の見出し・チェックの字・枠の余白・脇の 1 行は、「何も無い所」ではない**(#855)。
+       * ⚠ 除かないと、押した瞬間に読んでいるノートが閉じる(これらは `data-pkc-action` を持たない:
+       *   チェック本体だけが持つ)。
+       */
+      if (
+        (ev.target as HTMLElement | null)?.closest(
+          '[data-pkc-field="schedule-fold"],[data-pkc-field="schedule-fold-note"]',
+        )
+      )
+        return;
       const host = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
         '[data-pkc-region="browse-host"]',
       );
@@ -15445,6 +15471,19 @@ export function bindActions(
     const next = idx === -1 ? 0 : (idx + dir + items.length) % items.length;
     items[next]?.focus();
   };
+  /**
+   * 🔴 **予定表の「出すもの」は Esc で閉じる**(#855)。`onCreateMenuKey` と同じ形 ── 開いている間の Esc は
+   * 枠を閉じて焦点を見出しへ返すだけで、同じ Esc が後ろの `deselect-entry` へ流れて読んでいるノートを閉じない。
+   */
+  const onFoldKey = (ev: KeyboardEvent): void => {
+    if (!root.isConnected || ev.key !== 'Escape') return;
+    const open = root.querySelector<HTMLDetailsElement>('details[data-pkc-field="schedule-fold"][open]');
+    if (open === null) return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    open.open = false;
+    open.querySelector<HTMLElement>('summary')?.focus();
+  };
   const onMenuKey = (ev: KeyboardEvent): void => {
     /**
      * 🔴 **`root` が外れていたら何もしない**(#1042 followup。regression 修理)。
@@ -15545,6 +15584,7 @@ export function bindActions(
   listen(root, 'click', onCloseMenu);
   listen(root, 'click', onCloseCreateMenu);
   listen(root.ownerDocument, 'keydown', onCreateMenuKey);
+  listen(root.ownerDocument, 'keydown', onFoldKey);
   /**
    * 🔴 **スクロールで閉じるのは、開いた「後に」動いたときだけ**(#875、2026-09-13)。
    *

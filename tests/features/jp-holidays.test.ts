@@ -203,3 +203,110 @@ describe('日本の祝日(jp-holidays)', () => {
     }
   });
 });
+
+const EQUINOX: Record<number, readonly [number, number]> = {
+  1980: [20, 23],
+  1981: [21, 23],
+  1982: [21, 23],
+  1983: [21, 23],
+  1984: [20, 23],
+  1985: [21, 23],
+  1986: [21, 23],
+  1987: [21, 23],
+  1988: [20, 23],
+  1989: [21, 23],
+  1990: [21, 23],
+  1991: [21, 23],
+  1992: [20, 23],
+  1993: [20, 23],
+  1994: [21, 23],
+  1995: [21, 23],
+  1996: [20, 23],
+  1997: [20, 23],
+  1998: [21, 23],
+  1999: [21, 23],
+  2000: [20, 23],
+  2001: [20, 23],
+  2002: [21, 23],
+  2003: [21, 23],
+  2004: [20, 23],
+  2005: [20, 23],
+  2006: [21, 23],
+  2007: [21, 23],
+  2008: [20, 23],
+  2009: [20, 23],
+  2010: [21, 23],
+  2011: [21, 23],
+  2012: [20, 22],
+  2013: [20, 23],
+  2014: [21, 23],
+  2015: [21, 23],
+  2016: [20, 22],
+  2017: [20, 23],
+  2018: [21, 23],
+  2019: [21, 23],
+  2020: [20, 22],
+  2021: [20, 23],
+  2022: [21, 23],
+  2023: [21, 23],
+  2024: [20, 22],
+  2025: [20, 23],
+  2026: [20, 23],
+  2027: [21, 23],
+  2028: [20, 22],
+  2029: [20, 23],
+  2030: [20, 23],
+};
+
+describe('日本の祝日 ── 規則の境界(実装の式を参照しない、書き写した値)', () => {
+  it('春分の日・秋分の日:1980〜2030 年の全 51 年が国立天文台の暦要項の日と一致する', () => {
+    expect(Object.keys(EQUINOX)).toHaveLength(51);
+    const bad: string[] = [];
+    for (const [y, [sp, au]] of Object.entries(EQUINOX)) {
+      const spring = `${y}-03-${String(sp).padStart(2, '0')}`;
+      const autumn = `${y}-09-${String(au).padStart(2, '0')}`;
+      if (holidayName(spring) !== '春分の日') bad.push(`${spring} が春分の日でない`);
+      if (holidayName(autumn) !== '秋分の日') bad.push(`${autumn} が秋分の日でない`);
+      // 隣の日が春分・秋分になっていない(1 年に 1 日)
+      const names = [...holidaysOfYear(Number(y)).values()];
+      if (names.filter((n) => n === '春分の日').length !== 1) bad.push(`${y} 春分が 1 日でない`);
+      if (names.filter((n) => n === '秋分の日').length !== 1) bad.push(`${y} 秋分が 1 日でない`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('制度が替わる年の境界(海の日・成人の日・敬老の日・山の日)', () => {
+    expect(holidayName('1995-07-20')).toBeNull(); // 海の日は 1996 年から
+    for (let y = 1996; y <= 2002; y += 1) expect(holidayName(`${y}-07-20`), `${y}`).toBe('海の日');
+    expect(holidayName('2003-07-21')).toBe('海の日'); // 2003 年から 7 月の第 3 月曜
+    expect(holidayName('2003-07-20')).toBeNull();
+    expect(holidayName('1999-01-15')).toBe('成人の日');
+    expect(holidayName('2000-01-15')).toBeNull();
+    expect(holidayName('2000-01-10')).toBe('成人の日'); // 第 2 月曜
+    expect(holidayName('2002-09-15')).toBe('敬老の日');
+    expect(holidayName('2004-09-15')).toBeNull();
+    expect(holidayName('2004-09-20')).toBe('敬老の日'); // 第 3 月曜
+    expect(holidayName('2015-08-11')).toBeNull(); // 山の日は 2016 年から
+    expect(holidayName('2016-08-11')).toBe('山の日');
+    expect(holidayName('2017-08-11')).toBe('山の日');
+  });
+
+  it('一度きりの祝日と 2019 年', () => {
+    expect(holidayName('1989-02-24')).toBe('昭和天皇の大喪の礼');
+    expect(holidayName('1990-11-12')).toBe('即位礼正殿の儀');
+    expect(holidayName('1993-06-09')).toBe('皇太子徳仁親王の結婚の儀');
+    expect(holidayName('2019-05-06')).toBe('振替休日'); // 5/5(日)こどもの日
+    expect(holidayName('2019-10-22')).toBe('即位礼正殿の儀');
+  });
+
+  it('2006 年までの振替休日は翌日だけ(先へ送らない)。2007 年から送る', () => {
+    // 5/3 が日曜の年:1987・1992・1998 は翌日 5/4 が振替休日。5/5 はこどもの日、5/6 は平日のまま
+    for (const y of [1987, 1992, 1998]) {
+      expect(holidayName(`${y}-05-04`), `${y}-05-04`).toBe('振替休日');
+      expect(holidayName(`${y}-05-05`)).toBe('こどもの日');
+      expect(holidayName(`${y}-05-06`), `${y}-05-06 を先へ送っている`).toBeNull();
+    }
+    // 対照群:2007 年以降は 5/6 へ送る(2009 の 5/3 は日曜 → 5/4 5/5 は祝日 → 5/6)
+    expect(holidayName('2009-05-06')).toBe('振替休日');
+  });
+});

@@ -379,6 +379,53 @@ describe('予定の面(#292 段③)', () => {
     expect(note.textContent).toBe('済みも表示中');
   });
 
+  /**
+   * 🔴 **「出すもの」の中を押しても、読んでいるノートは閉じない / 枠の外を押すと枠が閉じる / Esc は枠だけを閉じる**
+   * (#855。着地前レビュー)。⚠ 左の列の「何も無い所を押すとノートを閉じる」(#1032)は、`data-pkc-action` を
+   * 持たない物(見出し・字・余白・脇の 1 行)を「何も無い所」と読む ── 除かないと押した瞬間にノートが閉じる。
+   */
+  it('🔴 「出すもの」の見出し・字・余白・脇の 1 行を押してもノートは閉じない。外を押すと枠が閉じ、Esc は枠だけを閉じる', async () => {
+    const { d, q } = setup({
+      e1: '- [x] 済み @2026-08-23\n- [ ] まだ @2026-08-23\n',
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    const fold = q<HTMLDetailsElement>('[data-pkc-field="schedule-fold"]')!;
+    const sel = (): string | null => d.getState().selectedLid;
+    expect(sel(), '前提:ノートが選ばれている').toBe('e1');
+    fold.open = true;
+    const done = q<HTMLInputElement>('[data-pkc-action="toggle-show-done"]')!;
+    for (const [name, el] of [
+      ['見出し', fold.querySelector('summary')!],
+      ['枠の余白', fold.querySelector('[data-pkc-field="schedule-fold-panel"]')!],
+    ] as const) {
+      (el as HTMLElement).click();
+      await tick();
+      expect(sel(), `${name}を押したらノートが閉じた`).toBe('e1');
+    }
+    expect(d.getState().showDoneTasks, '見出しと余白で旗が動いた').toBe(false);
+    fold.open = true; // 見出しを押すと開閉する(本物の動き)ので、開き直す
+    // チェックの字(ラベル)を押すと、ノートは残ったまま旗がちょうど 1 回反転する
+    done.parentElement!.lastElementChild!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    expect(sel(), 'チェックの字を押したらノートが閉じた').toBe('e1');
+    expect(d.getState().showDoneTasks, '字を押して旗が 1 回反転していない').toBe(true);
+    expect(fold.open, 'チェックを付けても枠は開いたまま').toBe(true);
+    // 脇の 1 行(旗が立ったので出ている)
+    q<HTMLElement>('[data-pkc-field="schedule-fold-note"]')!.click();
+    await tick();
+    expect(sel(), '脇の 1 行を押したらノートが閉じた').toBe('e1');
+    // Esc:枠だけ閉じる(ノートは残る)。2 回目の Esc は従来どおりノートを閉じる
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await tick();
+    expect(fold.open, 'Esc で枠が閉じない').toBe(false);
+    expect(sel(), 'Esc で枠と一緒にノートまで閉じた').toBe('e1');
+    // 外を押すと閉じる
+    fold.open = true;
+    q<HTMLElement>('[data-pkc-field="schedule-month"]')!.click();
+    await tick();
+    expect(fold.open, '枠の外を押しても閉じない').toBe(false);
+  });
+
   /** ⚠ 済んだ物が 1 つも無ければ、戻す口は出さない(dead click を作らない)。 */
   it('済んだ予定が無ければ、切替は出さない', () => {
     const { q } = setup({ e1: '- [ ] まだ @2026-08-23\n' });
