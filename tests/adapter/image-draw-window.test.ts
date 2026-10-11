@@ -12,6 +12,7 @@
  * ⚠ 期待値は**偽の台の寸法から**計算する(換算の式を test で写さない)。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DRAW_COLORS, textFont } from '../../src/features/asset/image-draw';
 import {
   OPENER_GONE_TEXT,
   openImageDrawWindow,
@@ -23,6 +24,9 @@ import {
 interface Rec {
   arcs: Array<[number, number]>;
   lines: Array<[number, number]>;
+  texts: Array<{ text: string; x: number; y: number; fill: string; font: string }>;
+  gets: Array<[number, number, number, number]>;
+  puts: Array<[number, number]>;
 }
 
 let rec: Rec;
@@ -30,7 +34,7 @@ let blobOut: Blob | null;
 let toBlobCalls: number;
 
 beforeEach(() => {
-  rec = { arcs: [], lines: [] };
+  rec = { arcs: [], lines: [], texts: [], gets: [], puts: [] };
   blobOut = new Blob([new Uint8Array([9])], { type: 'image/png' });
   toBlobCalls = 0;
   const ctx = {
@@ -47,6 +51,15 @@ beforeEach(() => {
     stroke: () => undefined,
     fill: () => undefined,
     strokeRect: () => undefined,
+    font: '',
+    textBaseline: 'alphabetic',
+    fillText: (text: string, x: number, y: number) =>
+      void rec.texts.push({ text, x, y, fill: String(ctx.fillStyle), font: ctx.font }),
+    getImageData: (x: number, y: number, w: number, h: number) => {
+      rec.gets.push([x, y, w, h]);
+      return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
+    },
+    putImageData: (_d: unknown, x: number, y: number) => void rec.puts.push([x, y]),
     clearRect: () => undefined,
     drawImage: () => undefined,
   };
@@ -449,5 +462,155 @@ describe('窓そのもの', () => {
     expect(save).toBeGreaterThan(cancel + 3);
     // 保存は右の端
     expect(save).toBe(kids.length - 1);
+  });
+});
+
+/** 台を等倍で出す(枠 = 台の大きさ)。押した位置 = 台の座標。 */
+function actualSize(s: Setup): void {
+  s.canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: s.canvas.width, height: s.canvas.height }) as DOMRect;
+}
+const textBox = (s: Setup): HTMLInputElement | null =>
+  s.w.document.querySelector<HTMLInputElement>('[data-pkc-field="image-draw-text-input"]');
+function keydown(el: HTMLElement, init: { key: string; isComposing?: boolean; keyCode?: number }): void {
+  const ev = new Event('keydown', { bubbles: true, cancelable: true });
+  Object.defineProperties(ev, {
+    key: { value: init.key },
+    isComposing: { value: init.isComposing ?? false },
+    keyCode: { value: init.keyCode ?? 0 },
+    shiftKey: { value: false },
+  });
+  el.dispatchEvent(ev);
+}
+function tapAt(s: Setup, x: number, y: number): void {
+  ptr(s.canvas, 'pointerdown', { id: 7, x, y });
+  ptr(s.canvas, 'pointerup', { id: 7, x, y });
+}
+
+describe('文字', () => {
+  it('🔴 押した所に入力欄が出て、Enter で確定すると押した所へ字が置かれ、保存できるようになる', async () => {
+    const s = await setup({ bitmap: { width: 200, height: 100 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+    tapAt(s, 30, 40);
+    const box = textBox(s)!;
+    expect(box).not.toBeNull();
+    box.value = 'ここを確認';
+    keydown(box, { key: 'Enter' });
+    expect(textBox(s)).toBeNull();
+    const t = rec.texts.at(-1)!;
+    expect([t.text, t.x, t.y]).toEqual(['ここを確認', 30, 40]);
+    expect(t.fill).toBe(DRAW_COLORS.red);
+    expect(t.font).toBe(textFont(Number(/^(\d+)px/.exec(t.font)![1])));
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', false);
+  });
+
+  it('🔴 日本語の変換中の Enter では確定しない(変換が済んだ Enter で確定する)', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    const box = textBox(s)!;
+    box.value = 'にほんご';
+    keydown(box, { key: 'Enter', isComposing: true });
+    keydown(box, { key: 'Enter', keyCode: 229 });
+    expect(textBox(s)).toBe(box); // まだ入力中
+    expect(rec.texts).toHaveLength(0);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+    box.value = '日本語';
+    keydown(box, { key: 'Enter' });
+    expect(rec.texts.at(-1)!.text).toBe('日本語');
+  });
+
+  it('Esc でやめると何も置かれない / 空のまま確定しても何も置かれない', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    textBox(s)!.value = 'やめる';
+    keydown(textBox(s)!, { key: 'Escape' });
+    expect(textBox(s)).toBeNull();
+    tapAt(s, 12, 12);
+    keydown(textBox(s)!, { key: 'Enter' });
+    expect(textBox(s)).toBeNull();
+    expect(rec.texts).toHaveLength(0);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+  });
+
+  it('打っている途中で保存を押す(押す前に入力欄から焦点が外れる)と、打った字が入った画像が保存される', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    const box = textBox(s)!;
+    box.value = '途中';
+    box.dispatchEvent(new Event('blur'));
+    click(s.q('image-draw-save'));
+    await flush();
+    expect(rec.texts.at(-1)!.text).toBe('途中');
+    expect(s.saves).toHaveLength(1);
+  });
+
+  it('🔴 打っている途中で窓を手放すと、入力欄も外れる', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    expect(textBox(s)).not.toBeNull();
+    s.closeWait();
+    await flush();
+    expect(textBox(s)).toBeNull();
+    expect([s.canvas.width, s.canvas.height]).toEqual([0, 0]);
+  });
+
+  it('選んだ色で置かれる(青)', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    click(s.q('image-draw-color-blue'));
+    tapAt(s, 10, 10);
+    textBox(s)!.value = 'a';
+    keydown(textBox(s)!, { key: 'Enter' });
+    expect(rec.texts.at(-1)!.fill).toBe(DRAW_COLORS.blue);
+  });
+});
+
+describe('モザイク', () => {
+  it('🔴 なぞった四角の範囲の画素を読んで書き戻す(台の外へはみ出す分は台の中へ収める)', async () => {
+    const s = await setup({ bitmap: { width: 200, height: 100 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-mosaic'));
+    ptr(s.canvas, 'pointerdown', { id: 3, x: 50, y: 20 });
+    ptr(s.canvas, 'pointermove', { id: 3, x: 400, y: 60 }); // 台(200 幅)の外
+    ptr(s.canvas, 'pointerup', { id: 3, x: 400, y: 60 });
+    expect(rec.gets.at(-1)).toEqual([50, 20, 150, 40]);
+    expect(rec.puts.at(-1)).toEqual([50, 20]);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', false);
+  });
+});
+
+describe('色と太さ', () => {
+  it('🔴 色は 4 つ、太さは 2 つのボタンがあり、選んだ物が aria-pressed に出る', async () => {
+    const s = await setup();
+    for (const c of ['red', 'black', 'blue', 'yellow']) expect(s.q(`image-draw-color-${c}`), c).not.toBeNull();
+    click(s.q('image-draw-color-yellow'));
+    expect(s.q('image-draw-color-yellow').getAttribute('aria-pressed')).toBe('true');
+    expect(s.q('image-draw-color-red').getAttribute('aria-pressed')).toBe('false');
+    expect(s.q('image-draw-thickness-thin').getAttribute('aria-pressed')).toBe('true');
+    click(s.q('image-draw-thickness-thick'));
+    expect(s.q('image-draw-thickness-thick').getAttribute('aria-pressed')).toBe('true');
+    expect(s.q('image-draw-thickness-thin').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('🔴 「選んでいる」を見た目に写す CSS が、道具・色・太さに同じ規則で効く', async () => {
+    const s = await setup();
+    const css = s.w.document.querySelector('style')!.textContent!;
+    expect(css).toContain('[data-pkc-field="image-draw-bar"] button[aria-pressed="true"]');
+    // 色・太さのボタンも、その規則が当たる「バーの中の button」である
+    for (const f of ['image-draw-color-blue', 'image-draw-thickness-thick', 'image-draw-tool-mosaic']) {
+      expect(s.q(f).closest('[data-pkc-field="image-draw-bar"]'), f).not.toBeNull();
+      expect(s.q(f).tagName).toBe('BUTTON');
+    }
   });
 });

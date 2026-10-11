@@ -32,17 +32,26 @@
  *   全部の指が離れるまで描かない(拡大・移動の 2 本指操作は段階 1 では持たない)
  * - 線が 1 本も無いうちは「新しい画像として保存」を押せない。線があるときの「やめる」と
  *   ウィンドウの × は、捨ててよいか確かめる(窓の中の確認 / `beforeunload`)
- * - 選んでいる道具・色は `aria-pressed` と、それを**見た目に写す CSS**の両方で示す
+ * - 🔴 **文字**:押した所に入力欄を出し、打って Enter(または別の所を押す)で確定、Esc でやめる。
+ *   日本語の変換中の Enter は確定にしない(`shouldCommitText`)
+ * - **モザイク**:四角でなぞった範囲を、粗い升目の平均色で塗る(元の画素は書き出した PNG に残らない)
+ * - 選んでいる道具・色・太さは `aria-pressed` と、それを**見た目に写す CSS**の両方で示す
  */
 import {
+  DRAW_COLORS,
+  clampPt,
   drawSize,
   isDrawable,
+  mosaicCellFor,
   paintPenSegment,
   paintStroke,
   pushStroke,
+  shouldCommitText,
   strokeWidthFor,
+  textSizeFor,
   undoStroke,
   type DrawColor,
+  type DrawThickness,
   type DrawTool,
   type Pt,
   type Stroke,
@@ -107,16 +116,27 @@ const CSS =
   '[data-pkc-field="image-draw-stage"]{flex:1;min-height:0;display:grid;grid-template:minmax(0,1fr) / minmax(0,1fr);place-items:center;overflow:hidden;padding:8px}' +
   '[data-pkc-field="image-draw-canvas"]{display:block;max-width:100%;max-height:100%;' +
   'touch-action:none;cursor:crosshair;background:#fff}' +
-  '[data-pkc-field="image-draw-loading"]{margin:auto;padding:2rem}';
+  '[data-pkc-field="image-draw-loading"]{margin:auto;padding:2rem}' +
+  '[data-pkc-field="image-draw-text-input"]{position:fixed;z-index:10;margin:0;padding:0;border:1px dashed #09f;' +
+  'background:rgba(255,255,255,.85);outline:none;font-family:system-ui,sans-serif;min-width:6em;line-height:1.2}';
 
+const DRAW_COLOR_CSS = DRAW_COLORS;
 const TOOLS: ReadonlyArray<{ tool: DrawTool; label: string }> = [
   { tool: 'pen', label: 'ペン' },
   { tool: 'arrow', label: '矢印' },
   { tool: 'rect', label: '四角' },
+  { tool: 'text', label: '文字' },
+  { tool: 'mosaic', label: 'モザイク' },
 ];
 const COLORS: ReadonlyArray<{ color: DrawColor; label: string }> = [
   { color: 'red', label: '赤' },
   { color: 'black', label: '黒' },
+  { color: 'blue', label: '青' },
+  { color: 'yellow', label: '黄' },
+];
+const THICKNESSES: ReadonlyArray<{ thickness: DrawThickness; label: string }> = [
+  { thickness: 'thin', label: '細い' },
+  { thickness: 'thick', label: '太い' },
 ];
 
 /**
@@ -169,17 +189,22 @@ async function build(
 
   let tool: DrawTool = 'pen';
   let color: DrawColor = 'red';
+  let thickness: DrawThickness = 'thin';
   let strokes: readonly Stroke[] = [];
   let live: Stroke | null = null;
   let bitmap: ImageDrawBitmap | null = null;
   let released = false;
   let saving = false;
   let leaving = false;
+  /** 打っている最中の文字の入力欄と、置く位置・色・大きさ。 */
+  let textInput: HTMLInputElement | null = null;
+  let textPlacement: { at: Pt; color: DrawColor; px: number } | null = null;
   let loaded = false;
   let frame: number | null = null;
 
   const toolButtons = new Map<DrawTool, HTMLButtonElement>();
   const colorButtons = new Map<DrawColor, HTMLButtonElement>();
+  const thicknessButtons = new Map<DrawThickness, HTMLButtonElement>();
   // 確認の行(線があるときの「やめる」)
   const confirmRow = doc.createElement('span');
   confirmRow.setAttribute('data-pkc-field', 'image-draw-confirm');
@@ -195,6 +220,7 @@ async function build(
   const saveBtn = button('image-draw-save', '新しい画像として保存', () => void doSave());
   const cancelBtn = button('image-draw-cancel', 'やめる', () => {
     if (saving) return;
+    commitText();
     if (strokes.length === 0) {
       leave();
       return;
@@ -207,12 +233,36 @@ async function build(
   const sync = (): void => {
     for (const [t, b] of toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     for (const [c, b] of colorButtons) b.setAttribute('aria-pressed', String(c === color));
+    for (const [k, b] of thicknessButtons) b.setAttribute('aria-pressed', String(k === thickness));
     undoBtn.disabled = saving || strokes.length === 0;
     // 線が 1 本も無いまま保存すると、元と同じ画像が増えるだけ
     saveBtn.disabled = saving || !loaded || strokes.length === 0;
     cancelBtn.disabled = saving;
     if (strokes.length === 0) confirmRow.hidden = true;
   };
+
+  /** 打っている文字を確定する(空なら何も置かない)。入力欄は必ず外す。 */
+  function commitText(): void {
+    const input = textInput;
+    const placed = textPlacement;
+    if (input === null || placed === null) return;
+    textInput = null;
+    textPlacement = null;
+    const text = input.value;
+    input.remove();
+    if (released) return;
+    const s: Stroke = { tool: 'text', color: placed.color, size: placed.px, at: placed.at, text };
+    if (!isDrawable(s)) return;
+    strokes = pushStroke(strokes, s);
+    repaint();
+    sync();
+  }
+  function cancelText(): void {
+    const input = textInput;
+    textInput = null;
+    textPlacement = null;
+    input?.remove();
+  }
 
   const leave = (): void => {
     leaving = true;
@@ -231,6 +281,7 @@ async function build(
   bar.append(cancelBtn, confirmRow, sep());
   for (const t of TOOLS) {
     const b = button(`image-draw-tool-${t.tool}`, t.label, () => {
+      commitText();
       tool = t.tool;
       sync();
     });
@@ -244,6 +295,15 @@ async function build(
       sync();
     });
     colorButtons.set(c.color, b);
+    bar.append(b);
+  }
+  bar.append(sep());
+  for (const k of THICKNESSES) {
+    const b = button(`image-draw-thickness-${k.thickness}`, k.label, () => {
+      thickness = k.thickness;
+      sync();
+    });
+    thicknessButtons.set(k.thickness, b);
     bar.append(b);
   }
   bar.append(sep(), undoBtn, status, saveBtn);
@@ -280,6 +340,8 @@ async function build(
     }
     strokes = [];
     live = null;
+    textInput?.remove();
+    textInput = null;
     bitmap?.close();
     bitmap = null;
     // 寸法を 0 にすると、台の画素の確保が即座に手放される
@@ -304,7 +366,7 @@ async function build(
     bitmap = bm;
   } catch {
     say('この画像は読み込めませんでした', true);
-    for (const b of [...toolButtons.values(), ...colorButtons.values()]) b.disabled = true;
+    for (const b of [...toolButtons.values(), ...colorButtons.values(), ...thicknessButtons.values()]) b.disabled = true;
     sync();
     return release;
   }
@@ -319,13 +381,47 @@ async function build(
   sync();
 
   // ---- 描く ----
-  const widthPx = strokeWidthFor(size.width, size.height);
+  const widthPx = (): number => strokeWidthFor(size.width, size.height, thickness);
+  const cellPx = mosaicCellFor(size.width, size.height);
   /** いま触れている指(またはマウス)。2 本以上になったら描かない。 */
   const down = new Set<number>();
   let drawingId: number | null = null;
   let tainted = false;
   /** ペンの点。動かしている間は 1 本の配列へ足していく(毎回コピーしない)。 */
   let penPoints: Pt[] = [];
+
+  /** 文字を置こうとしている位置(台の座標)。指を離すまで持つ。 */
+  let textAt: Pt | null = null;
+
+  /** 文字を打つ入力欄を、押した所に出す。 */
+  const openTextInput = (ev: PointerEvent, at: Pt): void => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width > 0 ? rect.width / canvas.width : 1;
+    const px = textSizeFor(size.width, size.height, thickness);
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'image-draw-text-input');
+    input.setAttribute('aria-label', '置く文字');
+    input.style.left = `${ev.clientX}px`;
+    input.style.top = `${ev.clientY}px`;
+    input.style.fontSize = `${Math.max(10, px * scale)}px`;
+    input.style.color = DRAW_COLOR_CSS[color];
+    const placed = { at, color, px };
+    textPlacement = placed;
+    input.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (shouldCommitText(e)) {
+        e.preventDefault();
+        commitText();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelText();
+      }
+    });
+    input.addEventListener('blur', () => commitText());
+    doc.body.append(input);
+    textInput = input;
+    input.focus();
+  };
 
   const toCanvas = (ev: PointerEvent): Pt => {
     const r = canvas.getBoundingClientRect();
@@ -341,6 +437,7 @@ async function build(
     if (down.size > 1) {
       // 2 本目の指 ── 描きかけは捨て、全部の指が離れるまで描かない
       tainted = true;
+      textAt = null;
       if (live !== null) {
         live = null;
         drawingId = null;
@@ -355,26 +452,33 @@ async function build(
     } catch {
       // 捕まえられなくても描ける(窓の外へ出たときだけ途切れる)
     }
+    commitText();
     const p = toCanvas(ev);
     drawingId = ev.pointerId;
     if (tool === 'pen') {
       penPoints = [p];
-      live = { tool: 'pen', color, width: widthPx, points: penPoints };
+      live = { tool: 'pen', color, width: widthPx(), points: penPoints };
       const c = ctx();
       if (c !== null) paintPenSegment(c, live, 0);
+    } else if (tool === 'text') {
+      // 置くのは指を離したとき(押した瞬間に入力欄へ焦点を移すと、離した操作に取り返される)
+      textAt = p;
+    } else if (tool === 'mosaic') {
+      const q = clampPt(p, canvas.width, canvas.height);
+      live = { tool: 'mosaic', cell: cellPx, from: q, to: q };
     } else {
-      live = { tool, color, width: widthPx, from: p, to: p };
+      live = { tool, color, width: widthPx(), from: p, to: p };
     }
   });
 
   canvas.addEventListener('pointermove', (ev: PointerEvent) => {
     if (released || live === null || ev.pointerId !== drawingId) return;
-    const p = toCanvas(ev);
+    const p = live.tool === 'mosaic' ? clampPt(toCanvas(ev), canvas.width, canvas.height) : toCanvas(ev);
     if (live.tool === 'pen') {
       penPoints.push(p);
       const c = ctx();
       if (c !== null) paintPenSegment(c, live, penPoints.length - 1);
-    } else {
+    } else if (live.tool !== 'text') {
       live = { ...live, to: p };
       scheduleRepaint();
     }
@@ -383,6 +487,13 @@ async function build(
   const end = (ev: PointerEvent, commit: boolean): void => {
     down.delete(ev.pointerId);
     if (down.size === 0) tainted = false;
+    if (tool === 'text' && textAt !== null && ev.pointerId === drawingId) {
+      const at = textAt;
+      textAt = null;
+      drawingId = null;
+      if (commit && !released) openTextInput(ev, at);
+      return;
+    }
     if (released || live === null || ev.pointerId !== drawingId) return;
     const done = live;
     live = null;
@@ -407,6 +518,7 @@ async function build(
 
   // ---- 保存する ----
   const doSave = async (): Promise<void> => {
+    commitText();
     if (saving || released || bitmap === null || strokes.length === 0) return;
     saving = true;
     sync();
