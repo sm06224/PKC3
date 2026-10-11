@@ -133,7 +133,7 @@ export const DUCKDB_PRECACHE_SKIP = 'duckdb/';
  *
  * 設定で選んだ人が押したときだけ取りに行く物(pdf.js 本体 + 日本語の cmap で数 MB)なので、
  * DuckDB と同じ扱いにする。🔑 外すのは**重い実体(`pdf/lib/`)だけ**で、窓の小さな HTML / JS
- * (`public/pdf/` 直下の 6 file)は載せる ── 載せないと、オフラインで窓を開いたとき service worker が
+ * (`public/pdf/` 直下の 7 file)は載せる ── 載せないと、オフラインで窓を開いたとき service worker が
  * `index.html` へ退避して**PKC をもう 1 枚開く**(窓は開き、本体が取れなければ内蔵の表示へ退避する形にする)。
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/adapter/sw-source.test.ts` が突合)。
  */

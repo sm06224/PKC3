@@ -12,7 +12,7 @@ import { COI_HEADERS } from '../src/adapter/platform/sw/coi-headers.ts';
  * 裁定(Gemini、#275):設定で**選んだ人だけ**が PKC の画面で PDF を読む。既定はブラウザ内蔵の表示。
  * だから pdf.js 本体と日本語の cmap(合わせて数 MB)は**選んだ人が押したときだけ取りに行く**物で、
  * 全員が install で落とす precache に載せない(`shouldPrecache` が `pdf/lib/` を外す)。
- * 🔑 窓の小さな HTML / JS(`public/pdf/` 直下の 6 file)は**precache に載る** ── 載せないと、オフラインで窓を開いたとき
+ * 🔑 窓の小さな HTML / JS(`public/pdf/` 直下の 7 file)は**precache に載る** ── 載せないと、オフラインで窓を開いたとき
  *   service worker が `index.html` へ退避して**PKC をもう 1 枚開く**(マニュアルの窓と同じ穴)。載せておけば
  *   窓は開き、本体(`lib/`)が取れなくても**内蔵の表示へ自動で退避**する。
  * ⚠ 「配る量は気にしない」(不可侵指示 2026-08-03)は**全員が使う物**の話で、

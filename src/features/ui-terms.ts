@@ -64,6 +64,7 @@ export const STANDARD_TERMS: readonly UiTerm[] = [
   { term: 'アイコン', meaning: 'タイル・グループ・本文に入れる小さな絵(以前の「目印」「図案」)' },
   { term: 'PDF', meaning: '印刷・書き出しで使う形式' },
   { term: 'PDF ビューア', meaning: '添付の PDF を読む別ウィンドウ(ページ送り・拡大・検索・ノートへ引用)' },
+  { term: 'ページの一覧', meaning: 'PDF ビューアの左に並ぶ、各ページの小さな絵(押すとそのページへ移る。ボタンで出し入れできる)' },
   { term: 'ER 図', meaning: 'SQL で調べる画面に出す、表どうしのつながりの図' },
   { term: '一時保存', meaning: 'Office で編集中の内容を、保存する前にこの端末へ一時的に残しておくこと' },
   { term: 'Word', meaning: 'Office のノート編集アプリの名前' },

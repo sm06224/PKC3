@@ -15,6 +15,7 @@
  *     service worker の runtime cache から出る)/ まだ 1 度も取れていない所では、内蔵の表示へ退避する
  *   ④′ 使われない間は**解析の worker を畳む**(窓の中に worker が 0 になる)/ 描いた頁の絵は残り、まだ描いていない頁を
  *     描くとき**黙って開き直す**(worker が 1 に戻る)。⚠ 60 秒は実時間では待てないので、窓の時計だけ差し替える
+ *   ③′ ページの一覧(#275 段②-1a)── 窓の左に頁の数だけ小さな絵が並び、押すとその頁へ移り、いまの頁が光り、ボタンで隠す / 出す
  *   ④″ 文書内の検索の一致が **span 2 つにまたがる**とき、両方の span に**一致した範囲だけ**の強調が付く
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
@@ -72,6 +73,19 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     URL.revokeObjectURL = (u: string): void => {
       w.__revoked.push(u);
       orig(u);
+    };
+    // 一覧の絵(小さな canvas)だけ、頼んだときに「絵にできなかった」(null)を返す ── 描き直しが止まるかを見る
+    const w2 = window as unknown as { __nullThumb: boolean; __nullCalls: number };
+    w2.__nullThumb = false;
+    w2.__nullCalls = 0;
+    const origBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback, ...rest: unknown[]): void {
+      if (w2.__nullThumb && this.width < 300) {
+        w2.__nullCalls += 1;
+        cb(null);
+        return;
+      }
+      (origBlob as (...a: unknown[]) => void).call(this, cb, ...rest);
     };
     const origCreate = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (o: Blob | MediaSource): string => {
@@ -172,6 +186,130 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(first, '見えていない遠い頁まで描いている(焼く範囲は前後 2 頁)').not.toContain(String(PAGES));
   expect(await revoked(), '何も外れていないのに revoke している').toBe(0);
 
+  // ── ③′ ページの一覧(#275 段②-1a)── 窓の左に小さな絵が並び、押すとそのページへ移り、ボタンで出し入れできる ──
+  const plist = win.locator('#plist');
+  const thumbs = win.locator('[data-pkc-field="pdf-page-thumb"]');
+  const toggle = win.locator('#toggle-list');
+  const thumbImgs = win.locator('[data-pkc-field="pdf-page-thumb-image"]');
+  const cssOf = (loc: typeof plist, prop: string): Promise<string> =>
+    loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+  await expect(plist, 'ページの一覧が既定で出ていない').toBeVisible();
+  await expect(thumbs, '一覧の項目の数が頁の数と違う').toHaveCount(PAGES);
+  expect(await win.locator('body').getAttribute('data-pkc-pdf-list')).toBe('on');
+  await expect(toggle, '出し入れのボタンが押された印になっていない').toHaveAttribute('aria-pressed', 'true');
+  // 小さな絵が実際に読み込まれている
+  await expect
+    .poll(() => thumbImgs.first().evaluate((el: HTMLImageElement) => el.naturalWidth), {
+      message: '一覧の絵が読み込まれていない',
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0);
+  // 幅は固定の小ささで、読む側は残りを使う(読む幅を奪いすぎない)
+  const plistBox = await plist.boundingBox();
+  const scrollBox = await win.locator('#scroller').boundingBox();
+  expect(plistBox?.width, '一覧の幅が 120px でない').toBe(120);
+  expect(scrollBox?.x, '読む側が一覧の右から始まっていない').toBe(120);
+  const winWidth = await win.evaluate(() => window.innerWidth);
+  expect(scrollBox?.width, '読む側の幅が窓の残り(窓の幅 − 120)でない').toBe(winWidth - 120);
+  // 🔑 いまの頁(1)が見分けられる ── 属性ではなく、計算後の色が他の項目と違う
+  const item = (n: number) => win.locator(`[data-pkc-field="pdf-page-thumb"][data-thumb="${String(n)}"]`);
+  await expect(item(1), 'いまの頁が光っていない').toHaveAttribute('aria-current', 'true');
+  const curColor = await cssOf(item(1), 'border-top-color');
+  const otherColor = await cssOf(item(2), 'border-top-color');
+  expect(curColor, 'いまの頁の枠の色が、ほかの項目と見分けられない(CSS に受け皿が無い)').not.toBe(otherColor);
+  const pressedBg = await cssOf(toggle, 'background-color');
+
+  // 押すとそのページへ移る(3 頁目)。光る頁も移る
+  await clickReal(win, '[data-pkc-field="pdf-page-thumb"][data-thumb="3"]');
+  await expect
+    .poll(
+      async () => {
+        const top = await win.locator('.page[data-page="3"]').evaluate((el) => el.getBoundingClientRect().top);
+        const sTop = await win.locator('#scroller').evaluate((el) => el.getBoundingClientRect().top);
+        return Math.abs(top - sTop);
+      },
+      { message: '3 頁目の絵を押しても、3 頁目へ移っていない', timeout: 10_000 },
+    )
+    .toBeLessThan(40);
+  await expect(item(3), '移った頁が光っていない').toHaveAttribute('aria-current', 'true');
+  await expect(item(1), '前の頁の光りが残っている').not.toHaveAttribute('aria-current', 'true');
+  await expect(win.locator('#pageno'), '頁番号の欄が移っていない').toHaveValue('3');
+
+  // ボタンで隠す ── 一覧が消え、読む側が左端まで広がり、絵は返される(隠している間は何も持たない)
+  const revokedBeforeHide = await revoked();
+  // 🔴 隠す前の一覧の絵の URL を控える ── 読む頁の置き場の掃除(幅合わせ)では返らない物なので、
+  //    「一覧の絵を 1 つずつ返した」をこれで言う(数が増えただけでは、読む頁の分で満たされる)
+  const thumbSrcs = await thumbImgs.evaluateAll((els) => els.map((e) => e.getAttribute('src') ?? ''));
+  expect(thumbSrcs.length, '隠す前に一覧の絵が無い(観測が空振り)').toBeGreaterThan(0);
+  expect(thumbSrcs.every((u) => u.startsWith('blob:'))).toBe(true);
+  await clickReal(win, '#toggle-list');
+  await expect(plist, '隠せない').toBeHidden();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(await win.locator('body').getAttribute('data-pkc-pdf-list')).toBe('off');
+  expect((await win.locator('#scroller').boundingBox())?.x, '隠しても読む側が広がらない').toBe(0);
+  expect(await cssOf(toggle, 'background-color'), '押された印と押されていない印が、色で見分けられない').not.toBe(pressedBg);
+  expect(await thumbImgs.count(), '隠したのに一覧の絵を持ち続けている').toBe(0);
+  await expect
+    .poll(revoked, { message: '隠したのに一覧の ObjectURL を返していない', timeout: 5000 })
+    .toBeGreaterThan(revokedBeforeHide);
+  await expect
+    .poll(
+      () =>
+        win.evaluate(
+          (srcs) => srcs.every((u) => (window as unknown as { __revoked: string[] }).__revoked.includes(u)),
+          thumbSrcs,
+        ),
+      { message: '隠したのに、一覧の絵の ObjectURL を 1 つずつ返していない', timeout: 5000 },
+    )
+    .toBe(true);
+  // 出し直す ── 絵がまた出て、いまの頁(3)が光っている
+  await clickReal(win, '#toggle-list');
+  await expect(plist, '出し直せない').toBeVisible();
+  await expect(item(3)).toHaveAttribute('aria-current', 'true');
+  await expect
+    .poll(() => thumbImgs.count(), { message: '出し直したのに絵が出ない', timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect(win.locator('.page img').first(), '出し入れの後に読む頁が消えている').toBeAttached({ timeout: 15_000 });
+
+  // 絵にできなかった頁は、描き直し続けない(隠して出し直すと、もう 1 度だけ試す)
+  const nullCalls = (): Promise<number> =>
+    win.evaluate(() => (window as unknown as { __nullCalls: number }).__nullCalls);
+  // 先に全部描き終えておく(描いている最中に印を立てると、その分も数に入る)
+  await expect.poll(() => thumbImgs.count(), { message: '一覧の絵が揃わない', timeout: 20_000 }).toBe(PAGES);
+  await win.evaluate(() => {
+    (window as unknown as { __nullThumb: boolean }).__nullThumb = true;
+  });
+  await clickReal(win, '#toggle-list');
+  await clickReal(win, '#toggle-list');
+  await expect.poll(nullCalls, { message: '絵にできない頁を試してもいない(観測が空振り)', timeout: 10_000 }).toBeGreaterThan(0);
+  await win.waitForTimeout(1500);
+  const nullA = await nullCalls();
+  await win.waitForTimeout(1500);
+  expect(await nullCalls(), '絵にできなかった頁を描き直し続けている').toBe(nullA);
+  expect(nullA, '同じ頁を何度も試している(頁の数を超えた)').toBeLessThanOrEqual(PAGES);
+  await win.evaluate(() => {
+    (window as unknown as { __nullThumb: boolean }).__nullThumb = false;
+  });
+  await clickReal(win, '#toggle-list');
+  await clickReal(win, '#toggle-list');
+  await expect.poll(() => thumbImgs.count(), { message: '失敗が直った後に絵が戻らない', timeout: 15_000 }).toBeGreaterThan(0);
+
+  // キーボード: Tab の止まり先は「いまの頁」の 1 つだけ。矢印で動き、Enter でその頁へ移る
+  expect(await thumbs.evaluateAll((els) => els.filter((e) => e.getAttribute('tabindex') === '0').length)).toBe(1);
+  await expect(item(3), 'Tab の止まり先がいまの頁でない').toHaveAttribute('tabindex', '0');
+  await expect(item(2)).toHaveAttribute('tabindex', '-1');
+  await win.focus('#hit-next');
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), 'Tab がいまの頁の項目に着かない').toBe('3');
+  await win.keyboard.press('ArrowDown');
+  expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), '↓ で次の項目へ動かない').toBe('4');
+  await win.keyboard.press('ArrowUp');
+  expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), '↑ で前の項目へ動かない').toBe('3');
+  await win.keyboard.press('ArrowDown');
+  await win.keyboard.press('Enter');
+  await expect(win.locator('#pageno'), 'Enter でその頁へ移らない').toHaveValue('4', { timeout: 10_000 });
+  await expect(item(4)).toHaveAttribute('aria-current', 'true');
+
   // ── ④ 末尾へ送ると、外れた頁の絵が返される ──
   await win.locator('#scroller').evaluate((el) => (el.scrollTop = el.scrollHeight));
   await expect
@@ -212,7 +350,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     return {
       created: w.__created,
       revoked: w.__revoked.length,
-      imgs: document.querySelectorAll('img[data-pkc-field="pdf-page-image"]').length,
+      imgs: document.querySelectorAll('img[data-pkc-field^="pdf-page"]').length, // 読む頁の絵 + 一覧の絵(どちらも ObjectURL を握る)
     };
   });
   expect(held.created, '往復しても 1 枚も焼いていない(観測が空振り)').toBeGreaterThan(held.imgs);
@@ -304,6 +442,63 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     })
     .toContain('marker3 (p.3、見積.pdf)');
   await win.close();
+
+  // ── ⑤′ 頁が多い文書の一覧(70 頁)── 持つ絵の数に上限があり、離れた頁の絵は返され、読み進めると光る項目が見える所へ動く ──
+  const LONG = 70;
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: '長い見本.pdf',
+    mimeType: 'application/pdf',
+    buffer: buildPdf(LONG),
+  });
+  await clickReal(
+    page,
+    page.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: '長い見本.pdf' }),
+  );
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', '長い見本.pdf');
+  const [big] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  const bigThumbs = big.locator('[data-pkc-field="pdf-page-thumb"]');
+  const bigImgs = big.locator('[data-pkc-field="pdf-page-thumb-image"]');
+  await expect(bigThumbs, '70 頁なのに一覧の項目が 70 でない').toHaveCount(LONG, { timeout: 20_000 });
+  await expect.poll(() => bigImgs.count(), { message: '一覧の絵が出ない', timeout: 20_000 }).toBeGreaterThan(0);
+  await expect(big.locator('[data-thumb="1"] img'), '先頭の項目の絵が出ない').toHaveCount(1, { timeout: 15_000 });
+  const bigRect = (n: number): Promise<{ top: number; bottom: number }> =>
+    big.evaluate((k) => {
+      const el = document.querySelector(`[data-pkc-field="pdf-page-thumb"][data-thumb="${String(k)}"]`);
+      const list = document.getElementById('plist');
+      if (el === null || list === null) throw new Error('項目が無い');
+      const r = el.getBoundingClientRect();
+      const lr = list.getBoundingClientRect();
+      return { top: r.top - lr.top, bottom: r.bottom - lr.top - lr.height };
+    }, n);
+  // 一覧を末尾までスクロール ── 先頭付近の絵は返され、持つ絵は上限(40)以内
+  await big.locator('#plist').evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await expect(big.locator(`[data-thumb="${String(LONG)}"] img`), '末尾の項目の絵が出ない').toHaveCount(1, { timeout: 20_000 });
+  await expect
+    .poll(() => big.locator('[data-thumb="1"] img').count(), {
+      message: '一覧から遠く離れた先頭の絵を持ち続けている(外れた絵を返していない)',
+      timeout: 10_000,
+    })
+    .toBe(0);
+  expect(await bigImgs.count(), '一覧の絵が上限(40)を超えている').toBeLessThanOrEqual(40);
+  // 読み進めて光る項目が一覧の外へ出たら、見える所へ動く: 一覧を先頭へ戻し、頁番号の欄から末尾の頁へ送る
+  await big.locator('#plist').evaluate((el) => (el.scrollTop = 0));
+  await big.fill('#pageno', String(LONG));
+  await big.press('#pageno', 'Enter');
+  await expect
+    .poll(
+      async () => {
+        const cur = await big.locator('[data-pkc-field="pdf-page-thumb"][aria-current="true"]').getAttribute('data-thumb');
+        if (cur === null || Number(cur) < LONG - 3) return 'まだ末尾の頁が光らない';
+        const r = await bigRect(Number(cur));
+        return r.top >= -1 && r.bottom <= 1 ? 'ok' : `見える所の外(top=${String(r.top)} bottom=${String(r.bottom)})`;
+      },
+      { message: '光る項目が一覧の外のまま(読み進めても、光る頁が見える所へ動かない)', timeout: 15_000 },
+    )
+    .toBe('ok');
+  await big.close();
 
   // ── ⑥ 読めない PDF ── 断り文を出さず、ブラウザ内蔵の表示へ退避する ──
   await page.setInputFiles('[data-pkc-field="attach-input"]', {

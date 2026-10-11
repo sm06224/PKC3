@@ -19,6 +19,7 @@
   - **窓の生死 = 計算の生死**。解析は pdf.js の worker が窓の中で行い、窓を閉じれば worker も消える。
     使われない間(60 秒)も worker を畳む(`doc-lease.js`)── 描いた頁の絵は残り、まだ描いていない頁を描くときだけ開き直す。
   - **頁は PNG の `<img>` 1 枚**(描いたら焼く)。見えている頁の前後 2 頁だけ持ち、外れたら即 revoke。
+  - **ページの一覧**(#275 段②-1a)は窓の左に固定幅(120px)。一覧の中で見えている頁の前後だけ、小さな PNG に焼き、外れたら即 revoke。
   - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
 
@@ -42,7 +43,22 @@
   #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
     max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee }
   #status:empty { display: none }
+  #bar button[aria-pressed="true"] { background: #3d5a80; border-color: #8ab4ff }
   #scroller { position: fixed; inset: 38px 0 0 0; overflow: auto }
+  /* ページの一覧(#275 段②-1a)。幅は固定の小ささ(読む幅を奪わない)。出し入れは帯のボタン */
+  #plist { position: fixed; inset: 38px auto 0 0; width: 120px; overflow-y: auto; overflow-x: hidden;
+    box-sizing: border-box; padding: 8px 0 24px; background: #151515; border-right: 1px solid #333;
+    display: none; flex-direction: column; align-items: center; gap: 8px }
+  body[data-pkc-pdf-list="on"] #plist { display: flex }
+  body[data-pkc-pdf-list="on"] #scroller, body[data-pkc-pdf-list="on"] #msg { left: 120px }
+  .thumb { all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 104px; padding: 4px 4px 3px;
+    border: 2px solid transparent; border-radius: 4px; text-align: center; color: #aaa; font-size: 11px }
+  .thumb:hover { background: #262626 }
+  .thumb:focus-visible { outline: 2px solid #8ab4ff }
+  .thumb[aria-current="true"] { border-color: #8ab4ff; background: #26354d; color: #fff }
+  .thumb-img { display: block; width: 94px; margin: 0 auto 3px; background: #fff; box-shadow: 0 0 0 1px #0006 }
+  .thumb-img img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
+    pointer-events: none }
   #pages { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0 40px }
   .page { position: relative; background: #fff; box-shadow: 0 0 0 1px #0006; flex: none }
   .page img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
@@ -73,6 +89,7 @@
 </head>
 <body>
 <div id="bar">
+  <button id="toggle-list" type="button" aria-pressed="true" disabled title="ページの一覧を出したり隠したりします">ページの一覧</button>
   <button id="zoom-out" type="button" title="小さくする">−</button>
   <button id="zoom-in" type="button" title="大きくする">＋</button>
   <button id="zoom-fit" type="button" title="ウィンドウの幅に合わせる">幅に合わせる</button>
@@ -87,6 +104,7 @@
   <span class="sp"></span>
   <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
 </div>
+<nav id="plist" aria-label="ページの一覧"></nav>
 <div id="scroller"><div id="pages"></div></div>
 <div id="status" role="status"></div>
 <div id="msg">読み込んでいます…</div>
@@ -94,6 +112,7 @@
 <script src="./page-cache.js"></script>
 <script src="./doc-lease.js"></script>
 <script src="./text-hits.js"></script>
+<script src="./page-list.js"></script>
 <script type="module" src="./reader.js"></script>
 </body>
 </html>

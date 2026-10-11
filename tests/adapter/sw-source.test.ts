@@ -347,6 +347,7 @@ describe('規則(純関数)', () => {
     ['pdf/page-cache.js', true],
     ['pdf/doc-lease.js', true],
     ['pdf/text-hits.js', true],
+    ['pdf/page-list.js', true],
     // 対照群 ── 名前が似ているだけの物は載る(接頭辞の `pdf/lib/` だけを外す)
     ['assets/pdf-viewer-AAAAAAAA.js', true],
     ['pdf.js', true],
