@@ -51,6 +51,11 @@ export interface ModelContextTool {
 export interface RegisterToolOptions {
   /** abort すると登録が消える。 */
   signal?: AbortSignal;
+  /**
+   * この道具を見せてよい origin(組み込み先のページ ── 草案の `exposedTo`、#1407 段⑥)。
+   * ⚠ 無いと**自分のページだけ**に見える。こちらは必ず名指しで渡す(`*` は渡さない)。
+   */
+  exposedTo?: string[];
 }
 
 /** ブラウザの入口(`document.modelContext`)のうち、こちらが使う所だけ。 */

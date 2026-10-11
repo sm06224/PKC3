@@ -40,7 +40,14 @@ export const RPC = {
 } as const;
 
 /** 受け付ける method。⚠ **ここに無いものは全部撥ねる**(素通りさせない)。 */
-export const METHODS = ['pkc.hello', 'pkc.ping', 'pkc.createEntry'] as const;
+export const METHODS = [
+  'pkc.hello',
+  'pkc.ping',
+  'pkc.createEntry',
+  // 組み込み先の AI が道具を使う道(#1407 段⑥。MCP の method 名のまま ── 新しい封筒を作らない)
+  'tools/list',
+  'tools/call',
+] as const;
 export type Method = (typeof METHODS)[number];
 
 /**

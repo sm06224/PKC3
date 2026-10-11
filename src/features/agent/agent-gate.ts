@@ -44,12 +44,21 @@ export const AGENT_SCOPE_LABEL: Readonly<Record<AgentScope, string>> = {
  * 範囲(`read` / `write`)はここから決まる ── 呼び手が範囲だけを渡して、何をするかを隠さない。
  * ⚠ `query` / `title` は AI が決めた字 ── 画面に出す前に `agentLabel` を通す。
  */
-export type AgentTarget =
+export type AgentTarget = (
   | { action: 'search'; query: string }
   | { action: 'read'; title: string }
   | { action: 'tags' }
   | { action: 'create'; title: string }
-  | { action: 'append'; title: string };
+  | { action: 'append'; title: string }
+) & {
+  /**
+   * 🔴 呼んでいるのが**他のページに組み込まれた AI**のとき、そのページの origin(#1407 段⑥)。
+   * 無い = PKC3 を開いているブラウザの AI。⚠ 許可の台帳は origin ごとに別で、ダイアログは origin を
+   * そのまま名指しする(`agentAskNote`)。origin は呼び手(`agent-embed.ts`)が許可リストから引いた値で、
+   * AI が決める字ではない。
+   */
+  from?: string;
+};
 
 export function scopeOf(target: AgentTarget): AgentScope {
   if (target.action === 'create') return 'write';
@@ -87,17 +96,19 @@ export const AGENT_ASK_TITLE = 'ブラウザの AI からの依頼';
  * ⚠ タグの一覧は、範囲(read)が同じなので探す・読むと同じ文にする(「常に許す」は範囲ぜんたいに効く)。
  */
 export function agentAskNote(target: AgentTarget): string {
+  // 🔴 組み込まれたページの AI は origin をそのまま名指しする(`agentLabel` で切らない ── 切ると別の origin に見える)
+  const who = target.from === undefined ? 'ブラウザの AI' : `${target.from} のページに組み込まれた AI`;
   switch (target.action) {
     case 'search':
-      return `ブラウザの AI が、『${agentLabel(target.query)}』でノートを探して読もうとしています。許すと、当たったノートの本文が AI の提供元へ送られます。`;
+      return `${who} が、『${agentLabel(target.query)}』でノートを探して読もうとしています。許すと、当たったノートの本文が AI の提供元へ送られます。`;
     case 'read':
-      return `ブラウザの AI が、『${agentLabel(target.title)}』を読もうとしています。許すと、そのノートの本文が AI の提供元へ送られます。`;
+      return `${who} が、『${agentLabel(target.title)}』を読もうとしています。許すと、そのノートの本文が AI の提供元へ送られます。`;
     case 'tags':
-      return 'ブラウザの AI が、ノートを探して読もうとしています。許すと、見つかったノートの本文が AI の提供元へ送られます。';
+      return `${who} が、ノートを探して読もうとしています。許すと、見つかったノートの本文が AI の提供元へ送られます。`;
     case 'create':
-      return `ブラウザの AI が、『${agentLabel(target.title)}』というノートを作ろうとしています。`;
+      return `${who} が、『${agentLabel(target.title)}』というノートを作ろうとしています。`;
     case 'append':
-      return `ブラウザの AI が、『${agentLabel(target.title)}』の末尾に書き足そうとしています。`;
+      return `${who} が、『${agentLabel(target.title)}』の末尾に書き足そうとしています。`;
   }
 }
 
@@ -120,10 +131,11 @@ export const AGENT_DENIED_TEXT =
 
 /** この端末に憶えている許可(`adapter/platform/agent-grants.ts` が実体)。 */
 export interface AgentGrantsLike {
-  isAlways(scope: AgentScope): boolean;
-  setAlways(scope: AgentScope): void;
+  /** ⚠ `from` = 組み込まれたページの origin(`AgentTarget.from`)。無い = このブラウザの AI。台帳は別。 */
+  isAlways(scope: AgentScope, from?: string): boolean;
+  setAlways(scope: AgentScope, from?: string): void;
   /** 最後に使われた時刻を控える(設定の一覧に出す)。 */
-  touch(scope: AgentScope, at: number): void;
+  touch(scope: AgentScope, at: number, from?: string): void;
 }
 
 export interface AgentGateDeps {
@@ -156,7 +168,7 @@ export function createAgentGate(deps: AgentGateDeps): AgentGate {
     // ⚠ 関数にして毎回読む(`await` をまたぐと、型が「まだ取り消されていない」で固まる)
     const cancelled = (): boolean => signal?.aborted === true;
     if (cancelled()) return false;
-    let allowed = deps.grants.isAlways(scope);
+    let allowed = deps.grants.isAlways(scope, target.from);
     if (!allowed) {
       let answer: AgentAnswer = 'deny';
       try {
@@ -167,10 +179,10 @@ export function createAgentGate(deps: AgentGateDeps): AgentGate {
       }
       // 聞いている間に取り消された ── 答えが何であれ通さず、台帳も触らない
       if (cancelled()) return false;
-      if (answer === 'always') deps.grants.setAlways(scope);
+      if (answer === 'always') deps.grants.setAlways(scope, target.from);
       allowed = answer === 'once' || answer === 'always';
     }
-    if (allowed) deps.grants.touch(scope, deps.now());
+    if (allowed) deps.grants.touch(scope, deps.now(), target.from);
     return allowed;
   };
   return (target, signal) => {

@@ -3,6 +3,7 @@
  * (#1382 で `settings.ts` から移した。中身は変えていない。)
  */
 import type { AgentGrants } from '@adapter/platform/agent-grants';
+import type { AgentOriginGrants } from '@adapter/platform/agent-origin-grants';
 import type { AgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { WEBMCP_TAB_STATUS_TEXT } from '@features/agent/webmcp-types';
 import { AGENT_SCOPE_LABEL } from '@features/agent/agent-gate';
@@ -16,7 +17,11 @@ function formatAgentTime(ms: number): string {
   return `${String(d.getFullYear())}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
-export function createAgentsSection(grants: AgentGrants, tabStatus: AgentTabStatus): SettingsSection {
+export function createAgentsSection(
+  grants: AgentGrants,
+  tabStatus: AgentTabStatus,
+  originGrants: AgentOriginGrants,
+): SettingsSection {
   let agentList: HTMLElement | null = null;
   let agentStatusLine: HTMLElement | null = null;
 
@@ -56,8 +61,9 @@ export function createAgentsSection(grants: AgentGrants, tabStatus: AgentTabStat
         agentStatusLine.textContent = WEBMCP_TAB_STATUS_TEXT[tabStatus.get()];
       }
       const rows = grants.list();
+      const originRows = originGrants.list();
       list.textContent = '';
-      if (rows.length === 0) {
+      if (rows.length === 0 && originRows.length === 0) {
         const li = document.createElement('li');
         li.textContent = 'まだ許したことはありません';
         list.append(li);
@@ -79,6 +85,31 @@ export function createAgentsSection(grants: AgentGrants, tabStatus: AgentTabStat
         btn.setAttribute('data-pkc-agent-scope', row.scope);
         btn.textContent = '許可を取り消す';
         li.append(name, last, btn);
+        list.append(li);
+      }
+      // 🔴 組み込み先のページの AI ── 同じ範囲でも台帳は別なので、相手(origin)を行の頭に出す
+      //   (`textContent` で出す ── origin は字として扱い、HTML にはしない)
+      for (const row of originRows) {
+        const li = document.createElement('li');
+        li.setAttribute('data-pkc-agent-scope', row.scope);
+        li.setAttribute('data-pkc-agent-origin', row.origin);
+        const who = document.createElement('span');
+        who.setAttribute('data-pkc-field', 'agent-origin');
+        who.textContent = `${row.origin} のページの AI`;
+        const name = document.createElement('span');
+        name.setAttribute('data-pkc-field', 'agent-scope-name');
+        name.textContent = AGENT_SCOPE_LABEL[row.scope];
+        const last = document.createElement('span');
+        last.setAttribute('data-pkc-field', 'agent-last-used');
+        last.textContent =
+          row.last === null ? 'まだ使われていません' : `最後に使われた: ${formatAgentTime(row.last)}`;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-pkc-action', 'revoke-agent');
+        btn.setAttribute('data-pkc-agent-scope', row.scope);
+        btn.setAttribute('data-pkc-agent-origin', row.origin);
+        btn.textContent = '許可を取り消す';
+        li.append(who, name, last, btn);
         list.append(li);
       }
     },

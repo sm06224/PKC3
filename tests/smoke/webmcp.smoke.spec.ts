@@ -24,6 +24,7 @@
  * 1 度だけ読む(`needsRestart`)ので、OFF と ON を 1 起動には載せられない。
  * ON の起動の道中に、動線 2〜9 を全部載せた。
  */
+import { createServer } from 'node:http';
 import { test, expect, type Page } from '@playwright/test';
 import {
   gotoApp,
@@ -304,4 +305,211 @@ test('🔴 WebMCP: OFF では登録されず / ON で 5 本 / 許可のダイア
 
   expect(errors, 'pageerror が出た(1 枚目)').toEqual([]);
   expect(errorsB, 'pageerror が出た(2 枚目)').toEqual([]);
+});
+
+/**
+ * 🔴 **段⑥: 組み込み先のページの AI**(#1407)。
+ *
+ * 別の origin のページ(親)が PKC3 を iframe に入れ、AI の道具を使う物語を、実ブラウザで通す:
+ *   許可リストに無い間は `tools/list` も `tools/call` も断られる → 許可リストに入れる →
+ *   `tools/list` が 5 本返る → 作る(ダイアログに親の origin がそのまま出る)→ 探す・読む(「常に許す」)→
+ *   題名が返る → 設定の一覧に「親の origin の行」→ 取り消す → 登録が畳まれ、次の依頼はまた聞かれる。
+ *
+ * ## 差し込み(⚠ 本物の WebMCP の `exposedTo` ではない)
+ *
+ * 親は同じ context の別 origin(`http://localhost:<port+7>`)で、**route で HTML を返す**(サーバ不要)。
+ * iframe の中の PKC3 にだけ、`registerTool` の記録を取る模した入口を置く。言えるのは
+ * 「アプリが `exposedTo: [親の origin]` で登録し、取り消しで signal を abort する」まで。
+ * ⚠ Chromium 141 に本物の `getTools({ fromOrigins })` は無い ── **本物のブラウザが親の AI から
+ * 呼ぶ経路**は見ていない(実機の Chrome で確かめる物)。JSON-RPC の道は本物どうしで通る。
+ * ⚠ iframe の中の操作は `clickReal`(page の座標)ではなく frame の locator で押す。
+ */
+test('🔴 WebMCP 段⑥: 組み込み先の AI ── 許可リストの外は断る / 許すと 5 本 / origin 名指しのダイアログ / 取り消しで畳む', async ({
+  page,
+  baseURL,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const PKC = new URL(baseURL!).origin;
+  const PARENT = `http://localhost:${String(Number(new URL(baseURL!).port) + 7)}`;
+  const MARK = 'zqembed5528';
+
+  // 親のページ: iframe と、postMessage で依頼する小さな窓口。
+  // ⚠ `page.route` で返すと iframe の読み込みが `ERR_ABORTED` になった(実測)── 本物の server で返す
+  const parentHtml = `<!doctype html><title>親</title><body style="margin:0">
+<iframe id="f" src="${PKC}/" style="width:100vw;height:100vh;border:0"></iframe>
+<script>
+const PKC=${JSON.stringify(PKC)};let n=0;const pend=new Map();
+// ⚠ 許可リストの外への断りは id が null(中身を見る前に断るので id を読んでいない)── 待っている 1 件の答えとして渡す
+addEventListener('message',e=>{if(e.origin!==PKC)return;const d=e.data;if(!d)return;
+  const k=d.id===null?pend.keys().next().value:d.id;
+  if(k!==undefined&&pend.has(k)){const f=pend.get(k);pend.delete(k);f(d);}});
+window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
+  const t=setTimeout(()=>{pend.delete(id);res(null);},ms||30000);
+  pend.set(id,d=>{clearTimeout(t);res(d);});
+  document.getElementById('f').contentWindow.postMessage({jsonrpc:'2.0',id,method,params},PKC);});
+</script></body>`;
+  const parentServer = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(parentHtml);
+  });
+  await new Promise<void>((ok) => parentServer.listen(Number(new URL(PARENT).port), ok));
+  try {
+    // iframe の中の PKC3 だけ: フラグを立て、WebMCP の登録を記録する入口を置く
+    await page.addInitScript((pkc: string) => {
+      if (location.origin !== pkc || window.top === window) return;
+      try {
+        localStorage.setItem('pkc3.flags', JSON.stringify({ 'agent.webmcp': true, 'transport.embed': true }));
+      } catch {
+        return;
+      }
+      const reg: Array<{ name: string; exposedTo: string[] | undefined; signal: AbortSignal | undefined }> = [];
+      (window as unknown as Record<string, unknown>).__reg = reg;
+      Object.defineProperty(document, 'modelContext', {
+        configurable: true,
+        value: {
+          registerTool(tool: { name: string }, o?: { signal?: AbortSignal; exposedTo?: string[] }) {
+            reg.push({ name: tool.name, exposedTo: o?.exposedTo, signal: o?.signal });
+            return Promise.resolve(undefined);
+          },
+        },
+      });
+    }, PKC);
+
+    await page.goto(`${PARENT}/p.html`, { waitUntil: 'commit' });
+    await expect
+      .poll(() => page.frames().some((f) => f.url().startsWith(PKC)), { timeout: 20_000 })
+      .toBe(true);
+    const frame = page.frames().find((f) => f.url().startsWith(PKC))!;
+    await frame.waitForFunction(
+      () => document.querySelector('[data-pkc-boot]')?.getAttribute('data-pkc-boot') === 'ready',
+      undefined,
+      { timeout: 40_000 },
+    );
+
+    interface Rpc {
+      id?: number;
+      result?: { tools?: { name: string }[]; methods?: string[]; content?: { text: string }[]; isError?: boolean };
+      error?: { code: number; message: string };
+    }
+    const rpc = (method: string, params?: unknown, ms?: number): Promise<Rpc | null> =>
+      page.evaluate(
+        ([m, p, t]) =>
+          (window as unknown as { rpc: (a: string, b: unknown, c: number) => Promise<Rpc | null> }).rpc(
+            m as string,
+            p,
+            t as number,
+          ),
+        [method, params, ms] as const,
+      );
+    const regOf = () =>
+      frame.evaluate(() =>
+        (
+          window as unknown as { __reg: Array<{ name: string; exposedTo?: string[]; signal?: AbortSignal }> }
+        ).__reg
+          // ⚠ exposedTo の無い登録は、iframe 自身のページ向け(段①のもの)── 段⑥が見るのは exposedTo つきだけ
+          .filter((r) => r.exposedTo !== undefined)
+          .map((r) => ({ name: r.name, exposedTo: r.exposedTo ?? null, aborted: r.signal?.aborted ?? null })),
+      );
+    const ls = (k: string) => frame.evaluate((key) => localStorage.getItem(key), k);
+
+    // ── 1. 許可リストが空 ── 窓口は生きているが、道具の道は断る ──
+    await expect
+      .poll(async () => (await rpc('pkc.ping', undefined, 500))?.error?.code, { timeout: 15_000 })
+      .toBe(-32001);
+    expect((await rpc('tools/list'))?.error?.code, '許可リストの外なのに tools/list が通った').toBe(-32001);
+    expect(
+      (await rpc('tools/call', { name: 'pkc_search_notes', arguments: { query: MARK } }))?.error?.code,
+      '許可リストの外なのに tools/call が通った',
+    ).toBe(-32001);
+    expect(await regOf(), '許していないのに WebMCP へ登録された').toEqual([]);
+
+    // ── 2. 許可リストに親を入れる(窓口は呼ぶたびに読む ── 張り直し不要) ──
+    await frame.evaluate((o) => localStorage.setItem('pkc3.embed-origins', JSON.stringify([o])), PARENT);
+    const hello = await rpc('pkc.hello');
+    expect(hello?.result?.methods).toEqual(expect.arrayContaining(['tools/list', 'tools/call']));
+    const list = await rpc('tools/list');
+    expect(list?.result?.tools?.map((t) => t.name).sort()).toEqual([
+      'pkc_append_note',
+      'pkc_create_note',
+      'pkc_list_tags',
+      'pkc_read_note',
+      'pkc_search_notes',
+    ]);
+    expect(await regOf(), '何も許していない origin に登録した(道具の一覧を黙って見せた)').toEqual([]);
+
+    // ── 3. 作る(この 1 回だけ)── ダイアログに親の origin がそのまま出る ──
+    const frameNote = frame.locator(ASK_NOTE);
+    const created = rpc('tools/call', {
+      name: 'pkc_create_note',
+      arguments: { title: `組み込み先 ${MARK}`, body: `${MARK} の本文` },
+    });
+    await expect(frameNote, '許可のダイアログが出ていない').toBeVisible({ timeout: 15_000 });
+    await expect(frameNote).toContainText(
+      `${PARENT} のページに組み込まれた AI が、『組み込み先 ${MARK}』というノートを作ろう`,
+    );
+    await frame.locator(`${ASK_ROW}[data-pkc-agent-grant-index="0"]`).click();
+    const madeRes = await created;
+    expect(madeRes?.result?.isError, JSON.stringify(madeRes)).toBeFalsy();
+    expect(await ls('pkc3.agent-origin-grants'), '「この 1 回だけ」が台帳に残った').not.toContain('"always":true');
+
+    // ── 4. 探す・読む(常に許す)── 題名が返る。登録は親の origin だけへ。台帳は別 ──
+    const found = rpc('tools/call', { name: 'pkc_search_notes', arguments: { query: MARK } });
+    await expect(frameNote).toBeVisible({ timeout: 15_000 });
+    await expect(frameNote).toContainText(
+      `${PARENT} のページに組み込まれた AI が、『${MARK}』でノートを探して読もう`,
+    );
+    await frame.locator(`${ASK_ROW}[data-pkc-agent-grant-index="1"]`).click();
+    const foundRes = await found;
+    expect(foundRes?.result?.isError, JSON.stringify(foundRes)).toBeFalsy();
+    const notes = (
+      JSON.parse(foundRes!.result!.content![0]!.text) as { notes: { title: string; body: string }[] }
+    ).notes;
+    expect(notes.map((n) => n.title)).toEqual([`組み込み先 ${MARK}`]);
+    expect(notes[0]!.body).toContain(MARK);
+    expect(JSON.parse((await ls('pkc3.agent-origin-grants')) ?? '{}')).toHaveProperty([PARENT, 'read', 'always'], true);
+    expect(await ls('pkc3.agent-grants'), 'このブラウザの AI の台帳に入った(台帳が混ざった)').toBeNull();
+    await expect
+      .poll(async () => (await regOf()).filter((r) => r.exposedTo?.[0] === PARENT && r.aborted === false).length, {
+        message: '常に許した origin だけへ exposedTo で 5 本登録される',
+      })
+      .toBe(5);
+    expect((await regOf()).every((r) => r.exposedTo?.length === 1 && r.exposedTo[0] === PARENT)).toBe(true);
+    // 許可済みなので 2 回目はダイアログ無し
+    const again = await rpc('tools/call', { name: 'pkc_search_notes', arguments: { query: MARK } });
+    expect(again?.result?.isError).toBeFalsy();
+    await expect(frameNote, '常に許したのにダイアログが出た').toBeHidden();
+
+    // ── 5. 設定の一覧に親の origin の行 → 取り消す → 登録が畳まれる ──
+    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    const row = frame.locator(`li[data-pkc-agent-origin="${PARENT}"][data-pkc-agent-scope="read"]`);
+    await expect(row, '設定の一覧に親の origin の行が出ていない').toBeVisible();
+    await expect(row.locator('[data-pkc-field="agent-origin"]')).toHaveText(`${PARENT} のページの AI`);
+    await row.locator('[data-pkc-action="revoke-agent"]').click();
+    await expect(row, '取り消したのに一覧に残っている').toHaveCount(0);
+    // ⚠ 「この 1 回だけ」で作ったときの時刻だけは残る(常に許すではない記録)── 見るのは read が消えたこと
+    expect(await ls('pkc3.agent-origin-grants'), '取り消したのに read の許可が台帳に残っている').not.toContain('"read"');
+    expect(
+      (await regOf()).every((r) => r.aborted === true),
+      '取り消したのに登録(signal)が畳まれていない',
+    ).toBe(true);
+    await frame.locator('[data-pkc-action="close-pane"]').click();
+
+    // ── 6. 取り消し後の依頼はまた聞かれる。断れば本文は返らない ──
+    const after = rpc('tools/call', { name: 'pkc_search_notes', arguments: { query: MARK } });
+    await expect(frameNote, '取り消した後はまた聞かれる').toBeVisible({ timeout: 15_000 });
+    await frame.locator(ASK_DENY).click();
+    const afterRes = await after;
+    expect(afterRes?.result?.isError).toBe(true);
+    expect(JSON.stringify(afterRes)).toContain('ユーザーが許可しませんでした');
+    expect(JSON.stringify(afterRes)).not.toContain(`${MARK} の本文`);
+
+    // ── 7. 許可リストから外せば、また窓口で断られる ──
+    await frame.evaluate(() => localStorage.setItem('pkc3.embed-origins', '[]'));
+    expect((await rpc('tools/list'))?.error?.code).toBe(-32001);
+
+    expect(errors, 'pageerror が出た').toEqual([]);
+  } finally {
+    await new Promise((ok) => parentServer.close(ok));
+  }
 });
