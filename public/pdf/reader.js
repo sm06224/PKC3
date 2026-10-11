@@ -21,6 +21,7 @@ const textHits = self.PkcPdfTextHits;
 const { thumbWanted, pickNext, currentChange } = self.PkcPdfPageList;
 const pageEdit = self.PkcPdfPageEdit;
 const editStage = self.PkcPdfEditStage;
+const hl = self.PkcPdfHighlight;
 
 /** 見えている頁の前後に、この数だけ先に描く。 */
 const RADIUS = 2;
@@ -55,6 +56,9 @@ const saveBtn = $('edit-save');
 const resetBtn = $('edit-reset');
 const extractBtn = $('extract');
 const unpickBtn = $('edit-unpick');
+const hlBtn = $('hl-apply');
+const hlPop = $('hl-pop');
+const hlPopBtn = $('hl-remove');
 const editNote = $('edit-note');
 const editWarn = $('edit-warn');
 const editBar = $('edit-bar');
@@ -90,6 +94,9 @@ const sizes = [];
 const boxes = [];
 /** 頁 → 文字の層の持ち物(`divs` = span / `strs` = span ごとの字 / `marked` = 強調で作り替えた span の番号)。 */
 const layers = [];
+/** 頁 → 描いたときの viewport(ハイライトの座標を PDF ⇄ 窓で行き来する)/ 元の PDF に付いていたハイライト(`getAnnotations`)。 */
+const pageVp = [];
+const existing = [];
 /** 頁 → いま描いている世代。 */
 const inflight = new Map();
 let wanted = new Set();
@@ -253,6 +260,8 @@ function sizeBox(i) {
 
 function clearBox(i) {
   layers[i] = undefined;
+  pageVp[i] = undefined;
+  existing[i] = undefined;
   if (boxes[i]) boxes[i].textContent = '';
 }
 
@@ -340,6 +349,8 @@ async function drawPage(pdf, i, myGen) {
     viewport: vp,
     transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
   }).promise;
+  // 元の PDF に付いているハイライト(外すために押せる印を重ねる材料)。絵には焼き込まれている
+  const annots = await loadHighlights(page);
   const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
   canvas.width = 0;
@@ -360,6 +371,9 @@ async function drawPage(pdf, i, myGen) {
   img.alt = `${String(i)} ページ`;
   img.src = url;
   box.append(img);
+  pageVp[i] = vp;
+  existing[i] = annots;
+  paintMarks(i);
   const layer = document.createElement('div');
   layer.className = 'textLayer';
   box.append(layer);
@@ -818,6 +832,7 @@ const EDIT_MESSAGES = {
   unreadable: 'この PDF はページを編集できない形です',
   worker: 'ページの編集を始められませんでした。もう一度試してください',
   leaked: '外したページ・選ばなかったページの内容を含めずには作れませんでした。保存していません',
+  'bad-highlight': '外そうとしたハイライトが PDF の中に見つかりませんでした。保存していません',
 };
 
 function codeError(code) {
@@ -879,7 +894,13 @@ async function callEdit(op, job) {
     return await mine.use((h) => h.call({ op, bytes: buf, job }, [buf]));
   } catch (e) {
     const code = e && e.pkcCode;
-    if (code !== 'encrypted' && code !== 'unreadable' && code !== 'bad-job' && code !== 'leaked') {
+    if (
+      code !== 'encrypted' &&
+      code !== 'unreadable' &&
+      code !== 'bad-job' &&
+      code !== 'leaked' &&
+      code !== 'bad-highlight'
+    ) {
       // 立ち上がらなかった / 落ちた worker は握り直す(死んだものを貸し続けない)
       mine.dispose();
       if (editLease === mine) editLease = null;
@@ -1015,13 +1036,14 @@ function applyItems(focusPage) {
   scheduleThumbs();
 }
 
-/** まだ保存していない変更があるか(基準 = 最後に保存した並び)。 */
+/** まだ保存していない変更があるか(基準 = 最後に保存した並びと、最後に保存したハイライト)。 */
 function isDirty() {
-  return !pageEdit.sameArrangement(items, baseline);
+  return !pageEdit.sameArrangement(items, baseline) || isHlDirty();
 }
 
 /** 上のバーと、窓の上の案内(編集中の 1 行 + 引き継がれない物の行)。 */
 function updateEditUi() {
+  const arrangeDirty = !pageEdit.sameArrangement(items, baseline);
   const dirty = isDirty();
   const picked = pageEdit.pickSelected(items, selected).length;
   const showBar = dirty || picked > 0;
@@ -1036,7 +1058,11 @@ function updateEditUi() {
   unpickBtn.hidden = picked < 1;
   unpickBtn.disabled = saving;
   const notes = [];
-  if (dirty) notes.push(pageEdit.noteLine(items.length, total));
+  if (arrangeDirty) notes.push(pageEdit.noteLine(items.length, total));
+  if (isHlDirty()) {
+    const c = hlCounts();
+    notes.push(hl.note(c.added, c.removed, !arrangeDirty));
+  }
   if (picked > 0) notes.push(pageEdit.pickNote(picked));
   editNote.textContent = notes.join(' ');
   // 引き継がれない物の行は、元にあるものがあるときだけ(無ければ行ごと出さない)。
@@ -1052,6 +1078,13 @@ function syncBarHeight() {
   document.body.style.setProperty('--edit-bar-h', `${String(editBar.hidden ? 0 : editBar.offsetHeight)}px`);
 }
 if (typeof ResizeObserver === 'function') new ResizeObserver(syncBarHeight).observe(editBar);
+
+/** 上の帯の高さを測って、下の面の top を合わせる(帯が 2 行に折り返しても、読む面に重ならない)。 */
+function syncTopBar() {
+  const h = $('bar').offsetHeight;
+  if (h > 0) document.body.style.setProperty('--bar-h', `${String(h)}px`);
+}
+if (typeof ResizeObserver === 'function') new ResizeObserver(syncTopBar).observe($('bar'));
 
 /** ↻ ── 右へ 90° 回す。 */
 async function editRotate(page, focus) {
@@ -1147,6 +1180,10 @@ unpickBtn.addEventListener('click', () => {
 resetBtn.addEventListener('click', () => {
   if (!ready || saving) return;
   items = baseline.slice();
+  marks = hlBase.marks.slice();
+  removals = new Map(hlBase.removals);
+  hideHlPop();
+  repaintMarks();
   applyItems();
   setStatus('');
 });
@@ -1287,8 +1324,13 @@ async function submitBuild(list, name, kind) {
       updateEditUi();
       return;
     }
-    // 渡すのは**ページ番号の並びと回す角度だけ**(bytes は別に transfer)
-    const res = await callEdit('build', pageEdit.toJob(list));
+    // 渡すのは**ページ番号の並びと回す角度・ハイライトの座標と色・外す注釈の id だけ**(bytes は別に transfer)
+    const hlJob = hl.toJob(
+      marks,
+      removals,
+      list.map((it) => it.page),
+    );
+    const res = await callEdit('build', { ...pageEdit.toJob(list), ...hlJob });
     const dir = await editStage.openDir();
     if (dir === null) {
       setStatus('この端末の保存領域を使えないため、保存できません');
@@ -1311,7 +1353,13 @@ async function submitBuild(list, name, kind) {
       updateEditUi();
     }, wire.EDIT_TIMEOUT_MS);
     // 返事(`edit-result`)が来るまで `saving` のまま
-    pending = { key: staged.key, kind, baseline: kind === 'save' ? list : null };
+    pending = {
+      key: staged.key,
+      kind,
+      baseline: kind === 'save' ? list : null,
+      // 保存した時点のハイライト(できたら、これが新しい基準になる)
+      hlBase: kind === 'save' ? { marks: marks.slice(), removals: new Map(removals) } : null,
+    };
     send('edited', { key: staged.key });
   } catch (e) {
     const code = e && e.pkcCode;
@@ -1336,6 +1384,7 @@ function onEditResult(payload) {
     if (lateOk && ok) {
       const kind = pending.kind;
       if (kind === 'save' && pending.baseline !== null) baseline = pending.baseline;
+      if (kind === 'save' && pending.hlBase !== null) hlBase = pending.hlBase;
       if (kind === 'extract') selected = new Set();
       pending = null;
       lateOk = false;
@@ -1351,6 +1400,7 @@ function onEditResult(payload) {
   lateOk = false;
   if (ok && pending.kind === 'save' && pending.baseline !== null) {
     baseline = pending.baseline;
+    if (pending.hlBase !== null) hlBase = pending.hlBase;
     setStatus(SAVED_NOTE);
   } else if (ok && pending.kind === 'extract') {
     // 🔴 抜き出せたら選びを外す ── 押し直して同じ PDF の添付を増やさせない(保存で基準を直すのと同じ向き)。並びの基準は動かさない
@@ -1564,25 +1614,40 @@ $('hit-prev').addEventListener('click', () => {
 
 // ───────── 字を選ぶ → ノートへ引く
 
-/** 最後に選んだ字(`null` = 選んでいない)。 */
+/** 最後に選んだ字(`null` = 選んでいない)。`range` = 選びの複製(ボタンを押す間に選びが消えても、位置を読める)。 */
 let lastSel = null;
+const swatches = [];
+
+/** 「ノートへ引用する」「ハイライト」と色のボタンは、字を選んだときだけ押せる(同じ選びから、どれもできる)。 */
+function setSelButtons(on) {
+  quoteBtn.disabled = !on;
+  hlBtn.disabled = !on;
+  for (const b of swatches) b.disabled = !on;
+}
+
+const isBarButton = (el) => el === quoteBtn || el === hlBtn || swatches.includes(el);
 
 document.addEventListener('selectionchange', () => {
   const sel = window.getSelection();
   const text = sel === null ? '' : sel.toString();
   if (sel === null || sel.rangeCount === 0 || text.trim() === '') {
     // ボタンを押す間に選びが消える環境でも、押した結果は残す
-    if (document.activeElement === quoteBtn) return;
+    if (isBarButton(document.activeElement)) return;
     lastSel = null;
-    quoteBtn.disabled = true;
+    setSelButtons(false);
     return;
   }
-  const node = sel.getRangeAt(0).startContainer;
+  const range = sel.getRangeAt(0);
+  const node = range.startContainer;
   const el = node.nodeType === 1 ? node : node.parentElement;
   const box = el === null ? null : el.closest('[data-page]');
   if (box === null || !pagesEl.contains(box)) return;
-  lastSel = { text, page: Number(box.getAttribute('data-page')) };
-  quoteBtn.disabled = false;
+  lastSel = {
+    text,
+    page: Number(box.getAttribute('data-page')),
+    range: typeof range.cloneRange === 'function' ? range.cloneRange() : null,
+  };
+  setSelButtons(true);
 });
 
 quoteBtn.addEventListener('click', () => {
@@ -1601,6 +1666,304 @@ quoteBtn.addEventListener('click', () => {
   }, wire.QUOTE_TIMEOUT_MS);
   send('quote', { text: lastSel.text, page: lastSel.page });
 });
+
+// ───────── ハイライト(#275 段②-2b/c)── 字を選んで色を付ける・付いたハイライトを外す
+//
+// 🔴 画面で触るのは**計画**(`marks` = 付ける / `removals` = 外す元のハイライト)だけで、PDF は保存を押すまで書き換えない。
+// 保存は**ページの編集と同じ 1 本**(`submitBuild` → `edit-worker.js` → 棚 → 本体)── 別の保存経路を作らない。
+// 設計 doc: `docs/development/pdf-annotation-design-2026-10.md`。座標の計算は `highlight.js`(取り出して test できる形)。
+
+/** 付けたハイライト `{ uid, page(元のページ番号), color, quads }`。保存した後も、この窓の間は残す(窓の絵には焼かれていない)。 */
+let marks = [];
+/** 外すと決めた、元の PDF に付いていたハイライト `Map<"頁:id", { page, id }>`。 */
+let removals = new Map();
+/** 最後に保存した時点の `marks` / `removals`。「まだ保存していない変更」はこれとの違いで見る。 */
+let hlBase = { marks: [], removals: new Map() };
+/** 選んだ色(窓を閉じるまで覚える)。 */
+let hlColor = hl.DEFAULT_COLOR;
+let uidSeq = 0;
+/** 「ハイライトを外す」を出している対象(`null` = 出していない)と、そのときの読む面の位置。 */
+let hlTarget = null;
+let hlPopScroll = 0;
+
+function isHlDirty() {
+  return !hl.sameMarks(marks, hlBase.marks) || !hl.sameRemovals(removals, hlBase.removals);
+}
+
+/** 案内に出す数: 保存した状態に無い付けた数 / 保存した状態から外した数。 */
+function hlCounts() {
+  const has = new Set(marks.map((m) => `${String(m.uid)}:${m.color}`));
+  const baseHas = new Set(hlBase.marks.map((m) => `${String(m.uid)}:${m.color}`));
+  const uids = new Set(marks.map((m) => m.uid));
+  let removed = 0;
+  for (const b of hlBase.marks) if (!uids.has(b.uid)) removed += 1;
+  for (const k of removals.keys()) if (!hlBase.removals.has(k)) removed += 1;
+  return { added: [...has].filter((k) => !baseHas.has(k)).length, removed };
+}
+
+/** 元の PDF のそのページに付いているハイライト(外すために押せる印の材料)。読めなければ 0 件(外せないだけ)。 */
+async function loadHighlights(page) {
+  try {
+    const type = pdfjs.AnnotationType?.HIGHLIGHT ?? 9;
+    const list = await page.getAnnotations();
+    return list
+      .filter((a) => a.annotationType === type && typeof a.id === 'string' && hl.parseAnnotId(a.id) !== null)
+      .map((a) => ({ id: a.id, quads: quadsOfAnnotation(a) }));
+  } catch {
+    return [];
+  }
+}
+
+function quadsOfAnnotation(a) {
+  const q = a.quadPoints ? Array.from(a.quadPoints) : [];
+  if (q.length >= 8 && q.length % 8 === 0) {
+    const out = [];
+    for (let k = 0; k < q.length; k += 8) out.push(q.slice(k, k + 8));
+    return out;
+  }
+  const r = a.rect;
+  return [[r[0], r[3], r[2], r[3], r[0], r[1], r[2], r[1]]];
+}
+
+const cssRgb = (rgb) => `rgb(${rgb.map((c) => String(Math.round(c * 255))).join(',')})`;
+
+/** 4 点(PDF の座標)を囲む、窓の座標の長方形を `<div>` にする。 */
+function quadBox(vp, q) {
+  const xs = [];
+  const ys = [];
+  for (let k = 0; k < 8; k += 2) {
+    const p = vp.convertToViewportPoint(q[k], q[k + 1]);
+    xs.push(p[0]);
+    ys.push(p[1]);
+  }
+  const el = document.createElement('div');
+  el.style.left = `${String(Math.min(...xs))}px`;
+  el.style.top = `${String(Math.min(...ys))}px`;
+  el.style.width = `${String(Math.max(...xs) - Math.min(...xs))}px`;
+  el.style.height = `${String(Math.max(...ys) - Math.min(...ys))}px`;
+  return el;
+}
+
+/**
+ * 頁 `i` に、ハイライトの層を重ねる(絵の上・字の層の下)。
+ * 付けたハイライトは色つきで見せる(絵は焼き直さない)。元から付いているハイライトは絵に焼かれているので**透明**で重ね
+ * (押せる印)、外すと決めたものだけ薄く覆って破線で囲む。⚠ 層は `pointer-events: none` ── 字を選ぶ邪魔をしない
+ * (押したかどうかは、下の `click` が長方形の位置で調べる)。
+ */
+function paintMarks(i) {
+  const box = boxes[i];
+  const vp = pageVp[i];
+  if (!box || !vp) return;
+  const old = box.querySelector(':scope > .hl-layer');
+  if (old !== null) old.remove();
+  const img = box.querySelector(':scope > img');
+  if (img === null) return;
+  const layer = document.createElement('div');
+  layer.className = 'hl-layer';
+  layer.setAttribute('data-pkc-field', 'pdf-highlight-layer');
+  for (const e of existing[i] || []) {
+    const gone = removals.has(`${String(i)}:${e.id}`);
+    for (const q of e.quads) {
+      const el = quadBox(vp, q);
+      el.setAttribute('data-pkc-field', 'pdf-highlight-existing');
+      el.setAttribute('data-hl-id', e.id);
+      if (gone) el.setAttribute('data-pkc-removed', 'true');
+      layer.append(el);
+    }
+  }
+  for (const m of marks) {
+    if (m.page !== i) continue;
+    for (const q of m.quads) {
+      const el = quadBox(vp, q);
+      el.setAttribute('data-pkc-field', 'pdf-highlight-new');
+      el.setAttribute('data-hl-uid', String(m.uid));
+      el.setAttribute('data-hl-color', m.color);
+      el.style.backgroundColor = cssRgb(hl.colorOf(m.color).rgb);
+      layer.append(el);
+    }
+  }
+  img.after(layer);
+}
+
+/** いま絵になっている頁のハイライトの層を作り直す。 */
+function repaintMarks() {
+  for (let i = 1; i <= total; i += 1) paintMarks(i);
+}
+
+/** 選んだ範囲を、頁ごとの `{ page, quads }` にする(頁にまたがる選びは頁ごとに分ける)。 */
+function marksFromRange(range) {
+  if (range === null || typeof range.getClientRects !== 'function') return [];
+  const rects = [...range.getClientRects()].map((r) => ({
+    left: r.left,
+    top: r.top,
+    right: r.right,
+    bottom: r.bottom,
+  }));
+  const out = [];
+  for (let i = 1; i <= total; i += 1) {
+    const vp = pageVp[i];
+    const box = boxes[i];
+    if (!vp || !box) continue;
+    const b = box.getBoundingClientRect();
+    const got = hl.quadsOnPage(
+      rects,
+      { left: b.left, top: b.top, width: b.width, height: b.height },
+      { width: vp.width, height: vp.height },
+      (x, y) => vp.convertToPdfPoint(x, y),
+    );
+    if (got !== null) out.push({ page: i, quads: got.quads });
+  }
+  return out;
+}
+
+const HL_NOT_READ = 'ハイライトを付ける範囲を読み取れませんでした。字を選び直してください';
+
+/** 「ハイライト」── 選んだ字に、いまの色で付ける。同じ範囲に付け直したときは、重ねずに色を取り替える。 */
+async function addHighlight() {
+  if (!ready || saving || lastSel === null) return;
+  // 🔑 位置は await の前に読む(選びの複製から。待っている間に画面が動いても、押した瞬間の範囲)
+  const made = marksFromRange(lastSel.range);
+  if (made.length === 0) {
+    setStatus(HL_NOT_READ);
+    return;
+  }
+  if (!(await canEdit())) return;
+  if (saving) return;
+  for (const m of made) {
+    const same = marks.find((o) => o.page === m.page && hl.sameQuads(o.quads, m.quads));
+    if (same !== undefined) {
+      // 同じ範囲 ── 色だけ取り替える(新しい uid にして、保存した状態との違いとして数える)
+      marks = marks.map((o) => (o === same ? { ...o, uid: (uidSeq += 1), color: hlColor } : o));
+    } else {
+      uidSeq += 1;
+      marks.push({ uid: uidSeq, page: m.page, color: hlColor, quads: m.quads });
+    }
+  }
+  repaintMarks();
+  updateEditUi();
+  setStatus('ハイライトを付けました。「別の PDF として保存」で新しい PDF になります');
+}
+
+function setHlColor(id) {
+  hlColor = hl.colorOf(id).id;
+  for (const b of swatches) b.setAttribute('aria-pressed', b.getAttribute('data-hl-color') === hlColor ? 'true' : 'false');
+}
+
+/** 色のボタンを作って、「ノートへ引用する」の手前に並べる(色の正本は `highlight.js` の `COLORS` ── 窓の色もここから引く)。 */
+function buildSwatches() {
+  for (const c of hl.COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.disabled = true;
+    b.setAttribute('data-pkc-field', 'pdf-highlight-color');
+    b.setAttribute('data-hl-color', c.id);
+    b.setAttribute('aria-label', `${c.label}色`);
+    b.title = `${c.label}色で付ける`;
+    b.style.backgroundColor = cssRgb(c.rgb);
+    b.addEventListener('click', () => setHlColor(c.id));
+    quoteBtn.before(b);
+    swatches.push(b);
+  }
+  setHlColor(hlColor);
+}
+buildSwatches();
+hlBtn.addEventListener('click', () => {
+  void addHighlight();
+});
+
+// ── 付いたハイライトを押す → 「ハイライトを外す」
+
+function hideHlPop() {
+  hlTarget = null;
+  hlPop.hidden = true;
+}
+
+function showHlPop(el, x, y) {
+  const field = el.getAttribute('data-pkc-field');
+  const page = Number(el.closest('.page').getAttribute('data-page'));
+  if (field === 'pdf-highlight-new') {
+    hlTarget = { kind: 'new', page, uid: Number(el.getAttribute('data-hl-uid')) };
+    hlPopBtn.textContent = 'ハイライトを外す';
+  } else {
+    const id = el.getAttribute('data-hl-id') ?? '';
+    hlTarget = { kind: 'existing', page, id };
+    hlPopBtn.textContent = removals.has(`${String(page)}:${id}`) ? 'ハイライトを外すのをやめる' : 'ハイライトを外す';
+  }
+  hlPop.hidden = false;
+  hlPopScroll = scroller.scrollTop;
+  const w = hlPop.offsetWidth;
+  const h = hlPop.offsetHeight;
+  hlPop.style.left = `${String(Math.max(4, Math.min(x + 6, window.innerWidth - w - 4)))}px`;
+  hlPop.style.top = `${String(Math.max(4, Math.min(y + 6, window.innerHeight - h - 4)))}px`;
+}
+
+/** 押し下げた位置(ドラッグで字を選んだ後の click と、ただ押した click を見分ける)。 */
+let hlDown = null;
+pagesEl.addEventListener('pointerdown', (ev) => {
+  hlDown = { x: ev.clientX, y: ev.clientY };
+});
+
+pagesEl.addEventListener('click', (ev) => {
+  if (!ready) return;
+  // 🔑 見分けは**選びの有無ではなく動き**で ── 付けた直後の字は選ばれたままなので、その上を押した click でも「外す」を出す。
+  //    ドラッグで字を選んだ後の click(押した位置から動いている)と、ダブルクリック(単語を選ぶ)は、押したことにしない
+  const moved = hlDown !== null && Math.hypot(ev.clientX - hlDown.x, ev.clientY - hlDown.y) > 4;
+  if (moved || ev.detail >= 2) {
+    hideHlPop();
+    return;
+  }
+  const t = ev.target instanceof Element ? ev.target : null;
+  const box = t === null ? null : t.closest('.page');
+  if (box === null) {
+    hideHlPop();
+    return;
+  }
+  const hit = [...box.querySelectorAll(':scope > .hl-layer > div')].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+  });
+  if (hit.length === 0) {
+    hideHlPop();
+    return;
+  }
+  // 重なっていたら、いちばん上(後から付けた物)
+  showHlPop(hit[hit.length - 1], ev.clientX, ev.clientY);
+});
+// 読み進めたら畳む(押した場所から離れる)。⚠ ほんの少しの動き(押した直後の位置合わせ)では畳まない
+scroller.addEventListener('scroll', () => {
+  if (hlTarget !== null && Math.abs(scroller.scrollTop - hlPopScroll) > 8) hideHlPop();
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') hideHlPop();
+});
+
+hlPopBtn.addEventListener('click', () => {
+  void removeTarget();
+});
+
+async function removeTarget() {
+  const t = hlTarget;
+  hideHlPop();
+  if (t === null || !ready || saving) return;
+  if (t.kind === 'new') {
+    marks = marks.filter((m) => m.uid !== t.uid);
+    setStatus('ハイライトを外しました');
+  } else {
+    if (!(await canEdit())) return;
+    if (saving) return;
+    const key = `${String(t.page)}:${t.id}`;
+    if (removals.has(key)) {
+      removals.delete(key);
+      setStatus('ハイライトを外すのをやめました');
+    } else {
+      removals.set(key, { page: t.page, id: t.id });
+      setStatus('ハイライトを外します。「別の PDF として保存」で新しい PDF から消えます');
+    }
+  }
+  repaintMarks();
+  updateEditUi();
+}
 
 // ───────── 生死
 

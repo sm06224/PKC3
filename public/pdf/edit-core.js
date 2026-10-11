@@ -19,7 +19,14 @@
   'use strict';
 
   /** 断りの種類。窓が user の言葉に直す(`reader.js`)。 */
-  var CODES = { encrypted: 'encrypted', unreadable: 'unreadable', badJob: 'bad-job', leaked: 'leaked' };
+  var CODES = {
+    encrypted: 'encrypted',
+    unreadable: 'unreadable',
+    badJob: 'bad-job',
+    leaked: 'leaked',
+    // 外すと言われたハイライトが、元の PDF のそのページに見つからない(#275 段②-2c)
+    badHighlight: 'bad-highlight',
+  };
 
   function fail(code) {
     var e = new Error('pdf-edit: ' + code);
@@ -56,9 +63,12 @@
   }
 
   /**
-   * 依頼 `{ order, rotate }` を確かめる。@returns 正規化した依頼 / 不正なら `bad-job` で投げる
+   * 依頼 `{ order, rotate, highlights?, removals? }` を確かめる。@returns 正規化した依頼 / 不正なら `bad-job` で投げる
    * - `order`: 1 以上のページ番号の並び(空でない・重ならない・文書のページ数以内)
    * - `rotate`: 元のページ番号 → 右へ回す角度(90 の倍数)。`order` に無いページは受けない
+   * - `highlights`(#275 段②-2b): 付けるハイライト `{ page, rgb: [r,g,b](0〜1), quads: [[8 数]…] }`。
+   *   `order` に無いページの物は**捨てる**(外したページには付けない)
+   * - `removals`(#275 段②-2c): 外すハイライト `{ page, id: '14R' }`(pdf.js の注釈の id)。`order` に無いページの物は捨てる
    */
   function checkJob(job, pageCount) {
     if (!job || !Array.isArray(job.order) || job.order.length < 1) throw fail(CODES.badJob);
@@ -75,7 +85,55 @@
       if (!seen[p] || !Number.isInteger(d) || d % 90 !== 0) throw fail(CODES.badJob);
       rotate[p] = ((d % 360) + 360) % 360;
     });
-    return { order: job.order.slice(), rotate: rotate };
+    return {
+      order: job.order.slice(),
+      rotate: rotate,
+      highlights: checkHighlights(job.highlights, seen),
+      removals: checkRemovals(job.removals, seen),
+    };
+  }
+
+  /** 上限(1 つの依頼で付ける・外すハイライトの数、1 つが持つ行の数)。手違いの検出であって、使い方の上限ではない。 */
+  var MAX_MARKS = 5000;
+  var MAX_QUADS = 2000;
+
+  function isNum(n) {
+    return typeof n === 'number' && isFinite(n);
+  }
+
+  /** 付けるハイライトを確かめる。不正なら `bad-job`。残すページに無い物は捨てる。 */
+  function checkHighlights(list, kept) {
+    if (list === undefined || list === null) return [];
+    if (!Array.isArray(list) || list.length > MAX_MARKS) throw fail(CODES.badJob);
+    var out = [];
+    list.forEach(function (h) {
+      if (!h || !Number.isInteger(h.page) || h.page < 1) throw fail(CODES.badJob);
+      if (!Array.isArray(h.rgb) || h.rgb.length !== 3 || !h.rgb.every(function (c) { return isNum(c) && c >= 0 && c <= 1; })) {
+        throw fail(CODES.badJob);
+      }
+      if (!Array.isArray(h.quads) || h.quads.length < 1 || h.quads.length > MAX_QUADS) throw fail(CODES.badJob);
+      h.quads.forEach(function (q) {
+        if (!Array.isArray(q) || q.length !== 8 || !q.every(isNum)) throw fail(CODES.badJob);
+      });
+      if (kept[h.page]) out.push({ page: h.page, rgb: h.rgb.slice(), quads: h.quads.map(function (q) { return q.slice(); }) });
+    });
+    return out;
+  }
+
+  /** 外すハイライトを確かめる。不正なら `bad-job`。残すページに無い物は捨て、同じ注釈の重なりは 1 つにする。 */
+  function checkRemovals(list, kept) {
+    if (list === undefined || list === null) return [];
+    if (!Array.isArray(list) || list.length > MAX_MARKS) throw fail(CODES.badJob);
+    var out = [];
+    var seenId = {};
+    list.forEach(function (r) {
+      if (!r || !Number.isInteger(r.page) || r.page < 1 || !/^\d+R\d*$/.test(String(r.id))) throw fail(CODES.badJob);
+      var key = r.page + ':' + r.id;
+      if (!kept[r.page] || seenId[key]) return;
+      seenId[key] = true;
+      out.push({ page: r.page, id: String(r.id) });
+    });
+    return out;
   }
 
   /** 題名などを写す(`copyPages` は文書の情報を持たない)。無い物は触らない。 */
@@ -263,6 +321,137 @@
         });
       },
     };
+  }
+
+  // ───────── ハイライトを外す・付ける(#275 段②-2b/c)
+
+  /**
+   * 🔴 **外すと言われたハイライトを、残すページの注釈の並びから抜く**(元の文書の上で。`copyPages` の前)。
+   * 新しい文書へ写す道(B)なので、並びから抜けば**注釈・外観・外観の中の stream は出力に入らない**
+   * (設計 doc §2.3 の「抜くだけ」で門が断るのは、**開いた文書の中で保存する**道の話。ここは写す道)。
+   * ⚠ 一緒に抜く物: そのハイライトの吹き出し(`/Popup`)。残すと `/Parent` をたどって `copyPages` が
+   *   外したはずのハイライトをもう一度写す。⚠ ハイライトへの返信(`/IRT` が指している注釈)は**残す**(コメントには触らない)
+   *   が、`/IRT` だけ外す(残すと同じ理由で外したハイライトが戻る)。
+   * ⚠ 見つからない(id が合わない / ハイライトでない)ときは**黙って通さず `bad-highlight` で断る**
+   *   (外したつもりのハイライトが出力に残ると、user は消えたと思って人に渡す)。
+   * @returns 抜いた数
+   */
+  function dropHighlights(PDFLib, src, removals) {
+    if (removals.length === 0) return 0;
+    var N = PDFLib.PDFName;
+    var D = PDFLib.PDFDict;
+    var A = PDFLib.PDFArray;
+    var pages = src.getPages();
+    var byPage = {};
+    removals.forEach(function (r) {
+      (byPage[r.page] = byPage[r.page] || []).push(r);
+    });
+    var done = 0;
+    Object.keys(byPage).forEach(function (k) {
+      var node = pages[Number(k) - 1].node;
+      var annots = node.lookup(N.of('Annots'));
+      if (!(annots instanceof A)) throw fail(CODES.badHighlight);
+      var drop = {}; // 抜く参照(ハイライトと、その吹き出し)
+      var gone = {}; // 抜いたハイライトの参照
+      byPage[k].forEach(function (r) {
+        var m = /^(\d+)R(\d*)$/.exec(r.id);
+        var want = PDFLib.PDFRef.of(Number(m[1]), m[2] === '' ? 0 : Number(m[2])).toString();
+        var hit = false;
+        for (var j = 0; j < annots.size(); j += 1) {
+          if (refKey(annots.get(j)) !== want) continue;
+          var dict = annots.lookup(j);
+          if (!(dict instanceof D) || dict.lookup(N.of('Subtype')) !== N.of('Highlight')) break;
+          hit = true;
+          drop[want] = true;
+          gone[want] = true;
+          var pop = dict.get(N.of('Popup'));
+          if (pop) drop[refKey(pop)] = true;
+          break;
+        }
+        if (!hit) throw fail(CODES.badHighlight);
+        done += 1;
+      });
+      var keep = [];
+      for (var i = 0; i < annots.size(); i += 1) {
+        var raw = annots.get(i);
+        if (drop[refKey(raw)]) continue;
+        var d = annots.lookup(i);
+        if (d instanceof D) {
+          var irt = d.get(N.of('IRT'));
+          if (irt && gone[refKey(irt)]) d.delete(N.of('IRT'));
+        }
+        keep.push(raw);
+      }
+      node.set(N.of('Annots'), src.context.obj(keep));
+    });
+    return done;
+  }
+
+  function fmt(n) {
+    return String(Math.round(n * 1000) / 1000);
+  }
+
+  /**
+   * 🔴 **付けるハイライトを、出力のページに足す**(`copyPages` で写した後)。注釈 `/Highlight` + **外観(`/AP`)**。
+   * 設計 doc §2.2/§2.4:外観が無いと描かないビューアが在ると知られている(測っていない)ので、**外観を必ず書く**。
+   * `/P` は付けない(省略可。付けると 2.3 の問題に当たる)。`/F 4`(印刷する)、`/C` 色、`/CA` 1。
+   * 外観は 1 つの Form XObject に行ごとの長方形を**乗算**(`/BM /Multiply`)で塗る ── 字は隠れない。
+   */
+  function addHighlights(PDFLib, out, pages, plan) {
+    if (plan.highlights.length === 0) return;
+    var ctx = out.context;
+    var N = PDFLib.PDFName;
+    var posOf = {};
+    plan.order.forEach(function (p, i) {
+      posOf[p] = i;
+    });
+    plan.highlights.forEach(function (h) {
+      var page = pages[posOf[h.page]];
+      var flat = [];
+      var minX = Infinity;
+      var minY = Infinity;
+      var maxX = -Infinity;
+      var maxY = -Infinity;
+      var path = [];
+      h.quads.forEach(function (q) {
+        for (var i = 0; i < 8; i += 2) {
+          minX = Math.min(minX, q[i]);
+          maxX = Math.max(maxX, q[i]);
+          minY = Math.min(minY, q[i + 1]);
+          maxY = Math.max(maxY, q[i + 1]);
+        }
+        Array.prototype.push.apply(flat, q);
+        // 並びは 左上・右上・左下・右下 ── 塗る輪郭は 左上 → 右上 → 右下 → 左下
+        path.push(
+          fmt(q[0]) + ' ' + fmt(q[1]) + ' m ' + fmt(q[2]) + ' ' + fmt(q[3]) + ' l ' +
+            fmt(q[6]) + ' ' + fmt(q[7]) + ' l ' + fmt(q[4]) + ' ' + fmt(q[5]) + ' l h f',
+        );
+      });
+      var box = [minX, minY, maxX, maxY];
+      var ap = ctx.register(
+        ctx.stream('/GS0 gs ' + h.rgb.map(fmt).join(' ') + ' rg ' + path.join(' '), {
+          Type: 'XObject',
+          Subtype: 'Form',
+          BBox: box,
+          Resources: { ExtGState: { GS0: { Type: 'ExtGState', BM: 'Multiply' } } },
+        }),
+      );
+      var annot = ctx.register(
+        ctx.obj({
+          Type: 'Annot',
+          Subtype: 'Highlight',
+          Rect: box,
+          QuadPoints: flat,
+          C: h.rgb,
+          CA: 1,
+          F: 4,
+          AP: { N: ap },
+        }),
+      );
+      var annots = page.node.lookup(N.of('Annots'));
+      if (annots instanceof PDFLib.PDFArray) annots.push(annot);
+      else page.node.set(N.of('Annots'), ctx.obj([annot]));
+    });
   }
 
   /** 出力の中の Page 辞書の数(孤立したものも含む。全部の間接物を数える)。 */
@@ -464,12 +653,14 @@
   }
 
   /**
-   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate }`
+   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate, highlights?, removals? }`
    * @returns `Uint8Array`(⚠ 呼び側が transfer する。大きさぴったりの buffer)
    */
   async function build(PDFLib, bytes, job) {
     var src = await loadSource(PDFLib, bytes);
     var plan = checkJob(job, src.getPageCount());
+    // 🔴 外すと言われたハイライトを、先に残すページの並びから抜く(`prepareLinks` が注釈の位置を数える前に)
+    dropHighlights(PDFLib, src, plan.removals);
     // 🔴 `copyPages` の前に、リンクの注釈が持つページの参照を扱う(でないと外したページが孤立して出力に入る)
     var links = prepareLinks(
       PDFLib,
@@ -495,6 +686,8 @@
       out.addPage(page);
     });
     links.restore(out, pages);
+    // 付けるハイライトは、写した後の出力のページへ(`restore` が注釈の位置を使い終えた後)
+    addHighlights(PDFLib, out, pages, plan);
     // 🔴 共有された Resources に乗って来た、選ばなかったページの部品を落とす(上の注釈)
     var seenForms = new Set();
     pages.forEach(function (page) {

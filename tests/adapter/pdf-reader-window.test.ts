@@ -71,6 +71,7 @@ function boot(): void {
   evalScript('public/pdf/text-hits.js', g);
   evalScript('public/pdf/page-list.js', g);
   evalScript('public/pdf/page-edit.js', g);
+  evalScript('public/pdf/highlight.js', g);
   evalScript('public/pdf/edit-stage.js', g);
   wire = g['PkcPdfWire'] as Wire;
   evalScript('public/pdf/reader.js', g);
@@ -196,5 +197,62 @@ describe('上限の値(本体との順番を pin する)', () => {
     expect(wire.DOC_TIMEOUT_MS).toBe(8000);
     expect(wire.QUOTE_TIMEOUT_MS).toBe(10000);
     expect(QUOTE_SETTLE_TIMEOUT_MS).toBeLessThan(wire.QUOTE_TIMEOUT_MS);
+  });
+});
+
+describe('ハイライトのボタン(#275 段②-2b)── 上のバーの「ノートへ引用する」の隣', () => {
+  const swatchEls = (): HTMLButtonElement[] =>
+    [...document.querySelectorAll<HTMLButtonElement>('#bar button.swatch')];
+
+  it('「ハイライト」と色 4 つが「ノートへ引用する」の手前に並び、字を選ぶまでは全部押せない(同じ選びから引用もハイライトもできる)', () => {
+    boot();
+    const bar = [...$('bar').children].map((el) => el.id || el.className);
+    const iq = bar.indexOf('quote');
+    expect(bar.slice(iq - 5, iq + 1), '「ハイライト」→ 色 4 つ → 「ノートへ引用する」の順').toEqual([
+      'hl-apply',
+      'swatch',
+      'swatch',
+      'swatch',
+      'swatch',
+      'quote',
+    ]);
+    expect(swatchEls().map((b) => b.getAttribute('data-hl-color'))).toEqual(['yellow', 'green', 'blue', 'pink']);
+    for (const b of [$('hl-apply'), $('quote'), ...swatchEls()]) expect((b as HTMLButtonElement).disabled).toBe(true);
+    selectText('結論', 3);
+    for (const b of [$('hl-apply'), $('quote'), ...swatchEls()]) expect((b as HTMLButtonElement).disabled).toBe(false);
+    // 選びが消えたら、全部また押せない
+    vi.spyOn(window, 'getSelection').mockReturnValue({ rangeCount: 0, toString: () => '' } as unknown as Selection);
+    document.dispatchEvent(new Event('selectionchange'));
+    for (const b of [$('hl-apply'), $('quote'), ...swatchEls()]) expect((b as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('色は黄が既定。押した色だけが「押されている」になり、押し直すまで覚える(色の見た目は窓の表から付く)', () => {
+    boot();
+    const pressed = (): string[] =>
+      swatchEls()
+        .filter((b) => b.getAttribute('aria-pressed') === 'true')
+        .map((b) => b.getAttribute('data-hl-color') ?? '');
+    expect(pressed()).toEqual(['yellow']);
+    selectText('結論', 3);
+    (swatchEls()[2] as HTMLButtonElement).click();
+    expect(pressed()).toEqual(['blue']);
+    (swatchEls()[3] as HTMLButtonElement).click();
+    expect(pressed()).toEqual(['pink']);
+    // 窓の表(highlight.js)の色がそのまま背景になっている(CSS に色を二重に持たない)
+    const g = globalThis as unknown as { PkcPdfHighlight: { COLORS: { id: string; rgb: number[] }[] } };
+    expect(g.PkcPdfHighlight.COLORS).toHaveLength(4);
+    for (const c of g.PkcPdfHighlight.COLORS) {
+      const el = swatchEls().find((b) => b.getAttribute('data-hl-color') === c.id) as HTMLButtonElement;
+      const want = c.rgb.map((v) => String(Math.round(v * 255))).join(',');
+      expect(el.style.backgroundColor.replaceAll(' ', '')).toBe(`rgb(${want})`);
+    }
+  });
+
+  it('文書が読めていない間は、押しても何も起きない(状態の行も動かない)', () => {
+    boot();
+    selectText('結論', 3);
+    ($('hl-apply') as HTMLButtonElement).click();
+    expect($('status').textContent).toBe('');
+    expect(sentKinds().filter((k) => k !== 'hello')).toEqual([]);
   });
 });
