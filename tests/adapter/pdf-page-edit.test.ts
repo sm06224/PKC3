@@ -25,6 +25,14 @@ interface Api {
   sameArrangement(a: Item[], b: Item[]): boolean;
   noteLine(kept: number, total: number): string;
   warnLine(info: { outlines: boolean; form: boolean; signature: boolean }): string;
+  toggleSel(sel: Set<number>, page: number): Set<number>;
+  rangeSel(items: Item[], a: number, b: number): Set<number>;
+  pruneSel(sel: Set<number>, items: Item[]): Set<number>;
+  pickSelected(items: Item[], sel: Set<number>): Item[];
+  canExtract(items: Item[], sel: Set<number>): boolean;
+  extractName(name: string): string;
+  pickNote(count: number): string;
+  replyMatches(pending: { key: string } | null, payload: unknown): boolean;
 }
 
 function load(): Api {
@@ -196,5 +204,88 @@ describe('編集中の案内の 1 行 / 引き継がれない物の行', () => {
     expect(api.warnLine({ ...none, signature: true })).toBe('電子署名は無効になります。');
     const all = api.warnLine({ outlines: true, form: true, signature: true });
     for (const w of ['しおり', '入力欄', '電子署名']) expect(all).toContain(w);
+  });
+});
+
+describe('選ぶ・抜き出す(#275 段②-1c)', () => {
+  // 並べ替えて 3 を回し、5 を外した後の一覧: 4, 3(右へ 90°), 1, 2
+  const list: Item[] = [
+    { page: 4, rot: 0 },
+    { page: 3, rot: 90 },
+    { page: 1, rot: 0 },
+    { page: 2, rot: 0 },
+  ];
+
+  it('🔴 選んだページだけが、一覧の並びと向きのまま残る(選んだ順ではなく、見えている順)', () => {
+    const picked = api.pickSelected(list, new Set([2, 3]));
+    expect(picked).toEqual([
+      { page: 3, rot: 90 },
+      { page: 2, rot: 0 },
+    ]);
+    // 抜き出す依頼は元のページ番号で、回したページの角度を持つ
+    expect(api.toJob(picked)).toEqual({ order: [3, 2], rotate: { 3: 90 } });
+    // 選んでいないページは 1 つも入らない
+    expect(pages(picked)).not.toContain(1);
+    expect(pages(picked)).not.toContain(4);
+  });
+
+  it('🔴 0 件では抜き出せない / 一覧に無いページしか選んでいなくても抜き出せない(外したページは数えない)', () => {
+    expect(api.canExtract(list, new Set())).toBe(false);
+    expect(api.canExtract(list, new Set([5]))).toBe(false);
+    expect(api.canExtract(list, new Set([5, 2]))).toBe(true);
+  });
+
+  it('toggleSel は入れ替える(元の集まりは変えない)/ rangeSel は一覧の並びで両端を含む(向きは問わない)', () => {
+    const base = new Set([1]);
+    const on = api.toggleSel(base, 2);
+    expect([...on].sort()).toEqual([1, 2]);
+    expect([...base]).toEqual([1]);
+    expect([...api.toggleSel(on, 1)]).toEqual([2]);
+    // 見えている順 4,3,1,2 の「3 から 2」= 3,1,2。ページ番号の大小ではない
+    expect([...api.rangeSel(list, 3, 2)].sort()).toEqual([1, 2, 3]);
+    expect([...api.rangeSel(list, 2, 3)].sort()).toEqual([1, 2, 3]);
+    expect([...api.rangeSel(list, 4, 4)]).toEqual([4]);
+    // 一覧に無いページが端なら空
+    expect(api.rangeSel(list, 5, 2).size).toBe(0);
+  });
+
+  it('pruneSel: 外したページは選びから落ちる', () => {
+    expect([...api.pruneSel(new Set([1, 5, 3]), list)].sort()).toEqual([1, 3]);
+  });
+
+  it('extractName: 「元の名前 (抜き出し).pdf」/ 重ねない / 拡張子の大小・無し・空', () => {
+    expect(api.extractName('報告書.pdf')).toBe('報告書 (抜き出し).pdf');
+    expect(api.extractName('A.PDF')).toBe('A (抜き出し).pdf');
+    expect(api.extractName('報告書 (抜き出し).pdf')).toBe('報告書 (抜き出し).pdf');
+    expect(api.extractName('memo')).toBe('memo (抜き出し).pdf');
+    expect(api.extractName('')).toBe('document (抜き出し).pdf');
+    // 編集の名前とは別(同じ PDF から保存と抜き出しをしても、名前が重ならない)
+    expect(api.extractName('x.pdf')).not.toBe(api.outputName('x.pdf'));
+  });
+
+  it('pickNote は選んだ数と、元の PDF が変わらないことを言う', () => {
+    const t = api.pickNote(3);
+    expect(t).toContain('3 ページ');
+    expect(t).toContain('選んだページを別の PDF にする');
+    expect(t).toContain('元の PDF は変わりません');
+  });
+});
+
+describe('本体の返事を依頼に突き合わせる(#275 段②-1c)', () => {
+  it('🔴 時間切れの後に遅れて届いた前の依頼の返事は、次の依頼の返事として受けない(保存と抜き出しの取り違え)', () => {
+    // 保存(鍵 A)を送る → 時間切れ → 抜き出し(鍵 B)を送る → A の遅い返事が届く
+    let pending: { key: string } | null = { key: 'pA' };
+    // A の返事は A の間は受ける
+    expect(api.replyMatches(pending, { ok: true, key: 'pA' })).toBe(true);
+    pending = { key: 'pB' };
+    expect(api.replyMatches(pending, { ok: true, key: 'pA' }), 'A の遅い返事を B の返事として受けた').toBe(false);
+    expect(api.replyMatches(pending, { ok: true, key: 'pB' })).toBe(true);
+  });
+
+  it('鍵が無い・型が違う・控えが無い返事は受けない', () => {
+    expect(api.replyMatches({ key: 'pA' }, { ok: true })).toBe(false);
+    expect(api.replyMatches({ key: 'pA' }, { ok: true, key: 5 })).toBe(false);
+    expect(api.replyMatches({ key: 'pA' }, null)).toBe(false);
+    expect(api.replyMatches(null, { ok: true, key: 'pA' })).toBe(false);
   });
 });

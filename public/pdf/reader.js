@@ -53,6 +53,8 @@ const listEl = $('plist');
 const listBtn = $('toggle-list');
 const saveBtn = $('edit-save');
 const resetBtn = $('edit-reset');
+const extractBtn = $('extract');
+const unpickBtn = $('edit-unpick');
 const editNote = $('edit-note');
 const editWarn = $('edit-warn');
 const editBar = $('edit-bar');
@@ -176,6 +178,7 @@ async function openPdf() {
     buildThumbs();
     msgEl.hidden = true;
     ready = true;
+    updateEditUi();
     state('ready');
     // 一覧は既定で出す(読む幅を取られたくない人は、帯のボタンで隠せる)── 幅合わせの前に出す(幅が変わるので)
     listBtn.disabled = false;
@@ -398,7 +401,16 @@ let items = [];
  */
 let baseline = [];
 /** 保存を送った並び(返事が来るまでの控え。時間切れの後に遅れて成功の返事が来たとき、基準にする)。 */
-let pendingBaseline = null;
+/**
+ * 送った依頼の控え `{ key, kind, baseline }`(`null` = 送っていない)。`key` = 棚に置いた物の鍵で、本体の返事(`edit-result`)が
+ * 同じ鍵を持って返る。🔴 **鍵が合う返事だけ**を受ける ── 時間切れの後に遅れて来た前の依頼の返事で、今の依頼の控え
+ * (保存か抜き出しか)・基準・選びを動かさない。`kind` = 'save'(別の PDF として保存)/ 'extract'(選んだページを別の PDF に)、
+ * `baseline` = 保存した並び(保存のときだけ)。
+ */
+let pending = null;
+/** 選んだページ(元のページ番号。#275 段②-1c)と、Shift+クリックの起点。 */
+let selected = new Set();
+let selAnchor = 0;
 /** 頁 → 並びの中の位置(1 始まり)。0 = 外してある。 */
 const posByPage = [];
 /** 一覧の枠の中に見えている頁(IntersectionObserver が教える)。 */
@@ -438,7 +450,6 @@ function buildThumbs() {
     item.className = 'thumb';
     item.setAttribute('data-pkc-field', 'pdf-page-thumb');
     item.setAttribute('data-thumb', String(i));
-    item.setAttribute('aria-label', `${String(i)} ページへ`);
     // 🔑 Tab の止まり先は 1 つ(いまの頁)。項目の間は矢印で動く(`listEl` の keydown)
     item.tabIndex = i === 1 ? 0 : -1;
     const holder = document.createElement('span');
@@ -488,6 +499,7 @@ function buildThumbs() {
     down.textContent = '↓';
     cell.append(item, turn, drop, up, down);
     thumbItems[i] = item;
+    paintThumbLabel(i);
     thumbHolders[i] = holder;
     thumbCells[i] = cell;
     thumbNos[i] = no;
@@ -701,6 +713,30 @@ listEl.addEventListener('keydown', (ev) => {
     void editRemove(page, true);
     return;
   }
+  // 選ぶ(#275 段②-1c): Ctrl/⌘+Space = このページの選びを切り替える / Ctrl/⌘+A = 全部 / Shift+↑↓ = 範囲を広げる / Esc = 外す
+  const mod = (ev.ctrlKey || ev.metaKey) && !ev.altKey;
+  if (mod && !ev.shiftKey && ev.key === ' ') {
+    ev.preventDefault();
+    keyPickedAt = Date.now();
+    void pickToggle(page);
+    return;
+  }
+  if (mod && !ev.shiftKey && (ev.key === 'a' || ev.key === 'A')) {
+    ev.preventDefault();
+    void pickAll();
+    return;
+  }
+  if (ev.key === 'Escape' && plain && selected.size > 0) {
+    ev.preventDefault();
+    pickClear();
+    return;
+  }
+  if (ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+    const toPos = Math.max(0, Math.min(items.length - 1, at + (ev.key === 'ArrowDown' ? 1 : -1)));
+    ev.preventDefault();
+    void pickRange(page, items[toPos].page, true);
+    return;
+  }
   let to = at;
   if (ev.key === 'ArrowDown') to = at + 1;
   else if (ev.key === 'ArrowUp') to = at - 1;
@@ -713,9 +749,15 @@ listEl.addEventListener('keydown', (ev) => {
   setTabStop(next);
   thumbItems[next].focus();
 });
+// Ctrl/⌘+Space を離したときにボタンの「押した」が続けて来ないようにする(来ると選びが 2 度切り替わる)
+listEl.addEventListener('keyup', (ev) => {
+  if (ev.key === ' ' && (ev.ctrlKey || ev.metaKey)) ev.preventDefault();
+});
 listEl.addEventListener('click', (ev) => {
   // ドラッグを離した直後のクリックは、押したことにしない
   if (Date.now() - dragEndedAt < 80) return;
+  // キーで選びを切り替えた直後に、同じキーから来る「押した」は数えない(マウスの押下は `detail` が 1 以上)
+  if (ev.detail === 0 && Date.now() - keyPickedAt < 500) return;
   const t = ev.target instanceof Element ? ev.target : null;
   if (t === null) return;
   const act = t.closest('.thumb-act');
@@ -732,6 +774,16 @@ listEl.addEventListener('click', (ev) => {
   if (el === null) return;
   const n = Number(el.getAttribute('data-thumb'));
   setTabStop(n);
+  // 🔑 Ctrl/⌘+クリック = 選びを切り替える / Shift+クリック = 起点から範囲を選ぶ(どちらもそのページへは移らない)。
+  //    ふつうのクリックはこれまでどおりそのページへ移るだけで、選びは動かさない(読みながら選べる)
+  if (ev.ctrlKey || ev.metaKey) {
+    void pickToggle(n);
+    return;
+  }
+  if (ev.shiftKey) {
+    void pickRange(selAnchor >= 1 && posByPage[selAnchor] > 0 ? selAnchor : n, n, false);
+    return;
+  }
   goPage(n);
 });
 // 一覧から出たら、Tab の止まり先をいまの頁へ戻す(操作の最中は動かさなかった分)
@@ -756,14 +808,16 @@ let editLease = null;
 let saving = false;
 let editTimer = null;
 let dragEndedAt = 0;
+let keyPickedAt = 0;
 
 const PREPARING = 'ページの編集を準備しています…';
 const SAVED_NOTE = '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます';
+const EXTRACTED_NOTE = '選んだページを新しい PDF にしました。ノートの画面で「開く」を押すと開きます';
 const EDIT_MESSAGES = {
   encrypted: 'パスワードで守られた PDF は、ページを編集できません',
   unreadable: 'この PDF はページを編集できない形です',
   worker: 'ページの編集を始められませんでした。もう一度試してください',
-  leaked: '外したページの内容を含めずには作れませんでした。保存していません',
+  leaked: '外したページ・選ばなかったページの内容を含めずには作れませんでした。保存していません',
 };
 
 function codeError(code) {
@@ -907,22 +961,30 @@ async function canEdit() {
   return false;
 }
 
+/** 項目の読み上げの字(並びの位置と、選んでいるかを言う)。 */
+function paintThumbLabel(p) {
+  const k = posByPage[p];
+  let label = k === p || k === 0 ? `${String(p)} ページへ` : `${String(p)} ページへ(いま ${String(k)} 番目)`;
+  if (selected.has(p)) label += '(選択中)';
+  thumbItems[p].setAttribute('aria-label', label);
+}
+
 /** 並びを画面に映す: 行の順・外した行の隠し・位置の番号・回した絵の描き直し・上のバー。 */
 function applyItems(focusPage) {
   posByPage.fill(0);
   items.forEach((it, k) => {
     posByPage[it.page] = k + 1;
   });
+  // 外したページは選びから落ちる(外した後に「選んだページ」へ入っていると、user が思っていない物を抜き出す)
+  selected = pageEdit.pruneSel(selected, items);
   const frag = document.createDocumentFragment();
   items.forEach((it, k) => {
     const p = it.page;
     thumbCells[p].hidden = false;
     frag.append(thumbCells[p]);
     thumbNos[p].textContent = String(k + 1);
-    thumbItems[p].setAttribute(
-      'aria-label',
-      k + 1 === p ? `${String(p)} ページへ` : `${String(p)} ページへ(いま ${String(k + 1)} 番目)`,
-    );
+    paintSelected(p);
+    paintThumbLabel(p);
     if (thumbRot[p] !== it.rot) {
       // 回した(または元に戻した)ページは、新しい向きで描き直す
       thumbRot[p] = it.rot;
@@ -935,6 +997,7 @@ function applyItems(focusPage) {
   for (let p = 1; p <= total; p += 1) {
     if (posByPage[p] > 0) continue;
     thumbCells[p].hidden = true;
+    thumbCells[p].removeAttribute('data-pkc-selected');
     thumbVisible.delete(p);
     frag.append(thumbCells[p]);
   }
@@ -960,14 +1023,25 @@ function isDirty() {
 /** 上のバーと、窓の上の案内(編集中の 1 行 + 引き継がれない物の行)。 */
 function updateEditUi() {
   const dirty = isDirty();
-  document.body.setAttribute('data-pkc-pdf-edited', dirty ? 'on' : 'off');
+  const picked = pageEdit.pickSelected(items, selected).length;
+  const showBar = dirty || picked > 0;
+  document.body.setAttribute('data-pkc-pdf-edited', showBar ? 'on' : 'off');
   saveBtn.hidden = !dirty;
-  editBar.hidden = !dirty;
+  editBar.hidden = !showBar;
   saveBtn.disabled = !dirty || !pageEdit.canSave(items) || saving;
+  // 🔴 選んだページが 0 件では押せない(0 ページの PDF は作らない)
+  extractBtn.disabled = !ready || saving || !pageEdit.canExtract(items, selected);
+  resetBtn.hidden = !dirty;
   resetBtn.disabled = saving;
-  editNote.textContent = dirty ? pageEdit.noteLine(items.length, total) : '';
-  // 引き継がれない物の行は、元にあるものがあるときだけ(無ければ行ごと出さない)
-  const warn = dirty && items.length > 0 ? pageEdit.warnLine(editInfo) : '';
+  unpickBtn.hidden = picked < 1;
+  unpickBtn.disabled = saving;
+  const notes = [];
+  if (dirty) notes.push(pageEdit.noteLine(items.length, total));
+  if (picked > 0) notes.push(pageEdit.pickNote(picked));
+  editNote.textContent = notes.join(' ');
+  // 引き継がれない物の行は、元にあるものがあるときだけ(無ければ行ごと出さない)。
+  // 保存する・抜き出すのどちらでも同じ(新しい文書へ写す道は同じ ── 設計 doc §2)
+  const warn = (dirty && items.length > 0) || picked > 0 ? pageEdit.warnLine(editInfo) : '';
   editWarn.textContent = warn;
   editWarn.hidden = warn === '';
   syncBarHeight();
@@ -1008,6 +1082,67 @@ async function editMove(page, to, focus) {
   items = next;
   applyItems(focus ? page : undefined);
 }
+
+// ───────── ページを選ぶ(#275 段②-1c)
+
+/** 選んでいるか(`data-pkc-selected`。見た目は host.html)と、読み上げの字。 */
+function paintSelected(p) {
+  if (selected.has(p)) thumbCells[p].setAttribute('data-pkc-selected', 'true');
+  else thumbCells[p].removeAttribute('data-pkc-selected');
+  paintThumbLabel(p);
+}
+
+/** 選びを `next` に取り替えて、変わったページだけ描き直す。 */
+function setSelection(next) {
+  const before = selected;
+  selected = next;
+  for (let p = 1; p <= total; p += 1) {
+    if (before.has(p) !== next.has(p)) paintSelected(p);
+  }
+  updateEditUi();
+}
+
+/** 選ぶ操作の入口。最初の 1 回だけ、編集できる形かを確かめる(抜き出しも同じ道で新しい文書を作るので)。 */
+async function canPick() {
+  // 🔴 保存・抜き出しを作っている間は選びを動かさない(送った中身と、画面の選びがずれる)
+  if (saving) return false;
+  const ok = await canEdit();
+  return ok && !saving && posByPage.length > 0;
+}
+
+async function pickToggle(page) {
+  if (!(await canPick()) || !(posByPage[page] > 0)) return;
+  selAnchor = page;
+  setSelection(pageEdit.toggleSel(selected, page));
+}
+
+/** `from` から `to` までを選ぶ(起点は動かさない)。`extend` = 今の選びに足す(Shift+↑↓)/ そうでなければ取り替える(Shift+クリック)。 */
+async function pickRange(from, to, extend) {
+  if (!(await canPick())) return;
+  if (!(posByPage[from] > 0) || !(posByPage[to] > 0)) return;
+  if (!(selAnchor >= 1)) selAnchor = from;
+  const anchor = extend ? selAnchor : from;
+  const range = pageEdit.rangeSel(items, posByPage[anchor] > 0 ? anchor : from, to);
+  setSelection(range);
+  if (extend) {
+    setTabStop(to);
+    thumbItems[to].focus();
+  }
+}
+
+async function pickAll() {
+  if (!(await canPick())) return;
+  setSelection(new Set(items.map((it) => it.page)));
+}
+
+function pickClear() {
+  if (saving || selected.size === 0) return;
+  setSelection(new Set());
+}
+
+unpickBtn.addEventListener('click', () => {
+  if (!saving) pickClear();
+});
 
 resetBtn.addEventListener('click', () => {
   if (!ready || saving) return;
@@ -1106,10 +1241,33 @@ listEl.addEventListener('pointercancel', () => {
 saveBtn.addEventListener('click', () => {
   void saveEdited();
 });
+extractBtn.addEventListener('click', () => {
+  void extractSelected();
+});
 
+/** 「別の PDF として保存」── いまの並び全部を新しい PDF にする。 */
 async function saveEdited() {
   if (!ready || saving || !pageEdit.canSave(items) || !isDirty()) return;
+  await submitBuild(items.slice(), pageEdit.outputName(docName), 'save');
+}
+
+/**
+ * 「選んだページを別の PDF にする」(#275 段②-1c)── 選んだページだけを、いまの並びと向きのまま新しい PDF にする。
+ * 🔴 作り方は保存と**同じ 1 本**(新しい文書へ写す道 ── 外したページの中身が file に残らない。`edit-core.js` の `build`)で、
+ *    作った後にページ数を読み直す門も同じ。選ばなかったページの中身が残っていたら、渡さずに断る。
+ * ⚠ 並びの基準(`baseline`)は動かさない ── 抜き出しは「並びを保存した」ことにならない。
+ */
+async function extractSelected() {
+  if (!ready || saving) return;
+  const picked = pageEdit.pickSelected(items, selected);
+  if (picked.length < 1) return;
+  await submitBuild(picked, pageEdit.extractName(docName), 'extract');
+}
+
+/** 新しい PDF を作って棚へ置き、本体へ知らせる(保存も抜き出しもここを通る)。@param list 新しい PDF にするページ(`items` の形) */
+async function submitBuild(list, name, kind) {
   saving = true;
+  lateOk = false;
   updateEditUi();
   setStatus('保存しています…');
   try {
@@ -1130,7 +1288,7 @@ async function saveEdited() {
       return;
     }
     // 渡すのは**ページ番号の並びと回す角度だけ**(bytes は別に transfer)
-    const res = await callEdit('build', pageEdit.toJob(items));
+    const res = await callEdit('build', pageEdit.toJob(list));
     const dir = await editStage.openDir();
     if (dir === null) {
       setStatus('この端末の保存領域を使えないため、保存できません');
@@ -1138,11 +1296,10 @@ async function saveEdited() {
       updateEditUi();
       return;
     }
-    const sentItems = items.slice();
     const staged = await editStage.stageBytes({
       dir,
       bytes: new Uint8Array(res.bytes),
-      name: pageEdit.outputName(docName),
+      name,
     });
     // 🔴 返事が来なければ、「保存しています…」のまま固まらず断る(本体のリロード / 閉じ)
     clearTimer(editTimer);
@@ -1154,7 +1311,7 @@ async function saveEdited() {
       updateEditUi();
     }, wire.EDIT_TIMEOUT_MS);
     // 返事(`edit-result`)が来るまで `saving` のまま
-    pendingBaseline = sentItems;
+    pending = { key: staged.key, kind, baseline: kind === 'save' ? list : null };
     send('edited', { key: staged.key });
   } catch (e) {
     const code = e && e.pkcCode;
@@ -1171,14 +1328,19 @@ async function saveEdited() {
  */
 let lateOk = false;
 function onEditResult(payload) {
+  // 🔴 鍵が合わない返事(前の依頼の遅い返事 / 控えが無い)は捨てる
+  if (!pageEdit.replyMatches(pending, payload)) return;
   const ok = payload.ok === true;
   if (!saving) {
     // 時間切れの後の遅い返事: 成功なら基準だけ直し、字は「確かめられませんでした」のときだけ置き換える
-    if (lateOk && ok && pendingBaseline !== null) {
-      baseline = pendingBaseline;
-      pendingBaseline = null;
+    if (lateOk && ok) {
+      const kind = pending.kind;
+      if (kind === 'save' && pending.baseline !== null) baseline = pending.baseline;
+      if (kind === 'extract') selected = new Set();
+      pending = null;
       lateOk = false;
-      if (statusEl.textContent === wire.EDIT_NO_REPLY) setStatus(SAVED_NOTE);
+      if (kind === 'extract') clearPaintedSelection();
+      if (statusEl.textContent === wire.EDIT_NO_REPLY) setStatus(kind === 'extract' ? EXTRACTED_NOTE : SAVED_NOTE);
       updateEditUi();
     }
     return;
@@ -1187,14 +1349,24 @@ function onEditResult(payload) {
   editTimer = null;
   saving = false;
   lateOk = false;
-  if (ok && pendingBaseline !== null) {
-    baseline = pendingBaseline;
+  if (ok && pending.kind === 'save' && pending.baseline !== null) {
+    baseline = pending.baseline;
     setStatus(SAVED_NOTE);
+  } else if (ok && pending.kind === 'extract') {
+    // 🔴 抜き出せたら選びを外す ── 押し直して同じ PDF の添付を増やさせない(保存で基準を直すのと同じ向き)。並びの基準は動かさない
+    selected = new Set();
+    clearPaintedSelection();
+    setStatus(EXTRACTED_NOTE);
   } else {
     setStatus(typeof payload.message === 'string' && payload.message !== '' ? payload.message : '保存できませんでした。もう一度押してください');
   }
-  pendingBaseline = null;
+  pending = null;
   updateEditUi();
+}
+
+/** 選びの印を全部消す(`selected` を空にした後に呼ぶ)。 */
+function clearPaintedSelection() {
+  for (let p = 1; p <= total; p += 1) paintSelected(p);
 }
 
 // 🔴 まだ保存していない変更があるまま窓を閉じる / 読み込み直すときだけ、ブラウザの確認を出す(変更が無ければ何も出さない)

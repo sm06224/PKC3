@@ -20,6 +20,9 @@
  *   ⑤″ ページの編集(#275 段②-1b)── キーボードだけで全部外す(0 ページは保存できない)→ 編集をやめる → 外す・回す・
  *     ドラッグ・Alt+↑↓ → 「別の PDF として保存」で新しい添付が 1 つ増える(元と、読んでいた画面は動かない)→ できた PDF は
  *     順・向き・外したページの字が依頼どおり / 元は 5 ページのまま / パスワード付きは読めて、編集は理由つきで断る
+ *   ⑤‴ ページを選んで抜き出す(#275 段②-1c)── 0 件では押せない → Ctrl+クリック / Shift+クリック / Ctrl+Space・Shift+↑↓ / Esc で選ぶ
+ *     (選んだページは画面で見分けられる)→ 「選んだページを別の PDF にする」で新しい添付が 1 つ増える(元と、読んでいた画面は動かない)
+ *     → できた PDF は選んだ 2 ページだけ・順と向きは一覧のとおり・選ばなかったページの字は無い
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
  *   という**切り替えの前後**が本命なので、対照群(切)と本命(入)を同じ起動の中で続けて見る必要がある
@@ -551,6 +554,27 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await clickReal(page, entryNamed(ED_NAME));
   await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', ED_NAME);
   await expect(entryNamed(ED_OUT), '保存の前に編集後の添付がある(観測が空振り)').toHaveCount(0);
+  // 🔴 「置いた」の放送を止められる口(保存の最中の状態を保つため)。`__holdEdited` が真の間だけ、窓から本体への
+  //    `edited` を手元に留める。⚠ 留めるだけで書き換えない(放す `__releaseEdited` は、留めた物をそのまま送る)
+  await context.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const orig = BroadcastChannel.prototype.postMessage;
+    BroadcastChannel.prototype.postMessage = function (this: BroadcastChannel, m: unknown): void {
+      if (w['__holdEdited'] === true && (m as Record<string, unknown> | null)?.['pkc3Pdf'] === 'edited') {
+        w['__held'] = { chan: this, msg: m };
+        return;
+      }
+      orig.call(this, m);
+    };
+    w['__releaseEdited'] = (): boolean => {
+      const h = w['__held'] as { chan: BroadcastChannel; msg: unknown } | undefined;
+      if (h === undefined) return false;
+      w['__holdEdited'] = false;
+      w['__held'] = undefined;
+      orig.call(h.chan, h.msg);
+      return true;
+    };
+  });
   const [ed] = await Promise.all([
     context.waitForEvent('page', { timeout: 15_000 }),
     clickReal(page, '[data-pkc-action="view-asset"]'),
@@ -582,7 +606,14 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(await order()).toEqual(['1', '2', '3', '4', '5']);
   // 🔴 使い方の 1 行が、触れる前から常に出ている(↻ × は触れないと出ない物ではない)
   await expect(ed.locator('#plist-hint')).toBeVisible();
-  await expect(ed.locator('#plist-hint')).toHaveText('ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す');
+  await expect(ed.locator('#plist-hint')).toHaveText(
+    'ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl+クリックで選ぶ',
+  );
+  // 使い方の欄に字が収まっている(はみ出して切れていない)
+  expect(
+    await ed.locator('#plist-hint').evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
+    '使い方の欄から字がはみ出している',
+  ).toBe(true);
   const unloadAsks = (): Promise<boolean> =>
     ed.evaluate(() => {
       const e = new Event('beforeunload', { cancelable: true });
@@ -747,6 +778,98 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(save).toBeHidden();
   expect(await order(), '元に戻したら、保存した並びでなく元の並びへ戻っている').toEqual(['5', '1', '3', '4']);
   expect((await holderBox(3)).w, '保存した向き(3 ページ目は横長)まで戻っていない').toBeGreaterThan((await holderBox(3)).h);
+
+  // (f') 選んだページだけを別の PDF にする(#275 段②-1c)── 一覧は 5,1,3,4(3 は回してある)
+  const extract = ed.locator('#extract');
+  const thumbBtn = (n: number): string => `[data-pkc-field="pdf-page-thumb"][data-thumb="${String(n)}"]`;
+  const cell = (n: number) => ed.locator(`.thumb-cell[data-thumb-cell="${String(n)}"]`);
+  const withKey = async (key: string, f: () => Promise<void>): Promise<void> => {
+    await ed.keyboard.down(key);
+    try {
+      await f();
+    } finally {
+      await ed.keyboard.up(key);
+    }
+  };
+  const outlineOf = (n: number): Promise<string> => cssOf(cell(n), 'outline-color');
+  const widthOf = (n: number): Promise<string> => cssOf(cell(n), 'outline-width');
+  const PICK_OUT = 'ページ編集 (抜き出し).pdf';
+  // 0 件では押せない(対照群 ── 何も選んでいない)。案内の行も出ない
+  await expect(extract).toHaveText('選んだページを別の PDF にする');
+  await expect(extract, '何も選んでいないのに、抜き出すボタンが押せる').toBeDisabled();
+  await expect(ed.locator('#edit-bar')).toBeHidden();
+  await expect(entryNamed(PICK_OUT), '抜き出す前に添付がある(観測が空振り)').toHaveCount(0);
+  // 普通のクリックはこれまでどおり「そのページへ移る」だけで、選びにならない
+  await clickReal(ed, thumbBtn(4));
+  await expect(extract).toBeDisabled();
+  // Ctrl+クリックで 5 を選ぶ ── 見た目が変わる(計算後の枠の太さ。選んでいないページは 0)
+  expect(await widthOf(5), '選ぶ前なのに枠が付いている(観測が空振り)').toBe('0px');
+  await withKey('Control', () => clickReal(ed, thumbBtn(5)));
+  await expect(cell(5)).toHaveAttribute('data-pkc-selected', 'true');
+  expect(await widthOf(5), '選んだページが画面で見分けられない(枠が無い)').toBe('2px');
+  expect(await outlineOf(5), '選んだ枠の色が、いまの頁の青い枠と同じ').not.toBe(await cssOf(ed.locator(thumbBtn(4)), 'border-top-color'));
+  await expect(extract).toBeEnabled();
+  await expect(ed.locator('#edit-note')).toContainText('1 ページを選んでいます');
+  await expect(ed.locator('#edit-warn'), '元にしおりがあるのに、選んだときに引き継がれないと言っていない').toContainText('しおりは引き継がれません');
+  // Shift+クリックで範囲(5 から 3 = 見えている順で 5,1,3)── ページ番号の大小ではなく並びで数える
+  await withKey('Shift', () => clickReal(ed, thumbBtn(3)));
+  for (const n of [5, 1, 3]) await expect(cell(n), `${String(n)} が範囲に入っていない`).toHaveAttribute('data-pkc-selected', 'true');
+  await expect(cell(4), '範囲の外まで選んでいる').not.toHaveAttribute('data-pkc-selected', 'true');
+  await expect(ed.locator('#edit-note')).toContainText('3 ページを選んでいます');
+  // Ctrl+クリックでもう一度押すと外れる(片道にしない)→ 5 と 3 が残る
+  await withKey('Control', () => clickReal(ed, thumbBtn(1)));
+  await expect(cell(1)).not.toHaveAttribute('data-pkc-selected', 'true');
+  await expect(ed.locator('#edit-note')).toContainText('2 ページを選んでいます');
+  // 選んだだけでは「保存していない変更」にならない(保存ボタンは出ず、閉じる確認も出ない)
+  await expect(save).toBeHidden();
+  expect(await unloadAsks(), '選んだだけなのに、閉じるときの確認が出る').toBe(false);
+  // Esc で選びが全部外れ、押せなくなる / キーボードだけでも選べる(Ctrl+Space・Shift+↓)
+  await ed.focus(thumbBtn(5));
+  await ed.keyboard.press('Escape');
+  await expect(extract).toBeDisabled();
+  await expect(ed.locator('[data-pkc-selected="true"]')).toHaveCount(0);
+  await ed.keyboard.press('Control+Space');
+  await expect(cell(5), 'Ctrl+Space で選べない').toHaveAttribute('data-pkc-selected', 'true');
+  await ed.keyboard.press('Shift+ArrowDown');
+  await ed.keyboard.press('Shift+ArrowDown');
+  for (const n of [5, 1, 3]) await expect(cell(n), `Shift+↓ で ${String(n)} まで広がらない`).toHaveAttribute('data-pkc-selected', 'true');
+  await ed.keyboard.press('Shift+ArrowUp');
+  await expect(cell(3), 'Shift+↑ で範囲が縮まない').not.toHaveAttribute('data-pkc-selected', 'true');
+  await expect(cell(1)).toHaveAttribute('data-pkc-selected', 'true');
+  // 5 と 3 を選び直して(1 を外す)抜き出す
+  await withKey('Control', () => clickReal(ed, thumbBtn(3)));
+  await withKey('Control', () => clickReal(ed, thumbBtn(1)));
+  await expect(ed.locator('[data-pkc-selected="true"]')).toHaveCount(2);
+  // 🔴 作っている間(本体の返事を待つ間)は、選びを動かせない: 「置いた」を手元に留めて、その間に触ってみる
+  await ed.evaluate(() => ((window as unknown as Record<string, unknown>)['__holdEdited'] = true));
+  await clickReal(ed, '#extract');
+  await expect
+    .poll(() => ed.evaluate(() => (window as unknown as Record<string, unknown>)['__held'] !== undefined), { message: '保存の最中の状態を作れない(観測が空振り)', timeout: 20_000 })
+    .toBe(true);
+  await expect(ed.locator('#status')).toContainText('保存しています');
+  await withKey('Control', () => clickReal(ed, thumbBtn(4)));
+  await ed.focus(thumbBtn(5));
+  await ed.keyboard.press('Control+a');
+  await ed.keyboard.press('Escape');
+  await expect(ed.locator('[data-pkc-selected="true"]'), '作っている間に選びが動いた').toHaveCount(2);
+  await expect(cell(4)).not.toHaveAttribute('data-pkc-selected', 'true');
+  await expect(ed.locator('#edit-unpick'), '作っている間に「選びを外す」が押せる').toBeDisabled();
+  expect(await ed.evaluate(() => (window as unknown as { __releaseEdited: () => boolean }).__releaseEdited())).toBe(true);
+  await expect(ed.locator('#status'), '抜き出しの結果が窓に出ない').toContainText('選んだページを新しい PDF にしました', { timeout: 20_000 });
+  await expect(entryNamed(PICK_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(ED_NAME).filter({ hasNotText: '(編集)' }).filter({ hasNotText: '(抜き出し)' }), '元の添付が消えた').toHaveCount(1);
+  await expect(page.locator('[data-pkc-action="view-asset"]'), '抜き出しで読んでいた画面が動いた').toHaveAttribute('data-pkc-asset-name', ED_NAME);
+  // 抜き出せたら選びは外れ、押し直して同じ添付を増やせない。並びは動かない(抜き出しは「保存した」ことにならない)
+  await expect(extract).toBeDisabled();
+  await expect(ed.locator('[data-pkc-selected="true"]')).toHaveCount(0);
+  expect(await order()).toEqual(['5', '1', '3', '4']);
+  await expect(entryNamed(PICK_OUT)).toHaveCount(1);
+  // 外したページは選びから落ちる: 4 を選んでから × で外すと、抜き出せなくなる
+  await withKey('Control', () => clickReal(ed, thumbBtn(4)));
+  await expect(extract).toBeEnabled();
+  await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="4"]');
+  await expect(extract, '外したページが選びに残っている').toBeDisabled();
+  await clickReal(ed, '#edit-reset');
   await ed.close();
 
   // (g) できた PDF を開く ── 4 ページ。順は 5,1,3,4 / 3 番目だけ横長 / 外した 2 ページ目の字はどこにも無い
@@ -778,8 +901,32 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(out.locator('#hits'), '外したはずの 2 ページ目の字が、できた PDF に残っている').toContainText('見つかりません', {
     timeout: 15_000,
   });
-  // 元は変わっていない: 5 ページのまま、外したページの字も残っている
   await out.close();
+  // 抜き出した PDF(5 と 3 の 2 ページ)── 順・向き・選ばなかったページの字が無い
+  await clickReal(page, entryNamed(PICK_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', PICK_OUT);
+  const [ex] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(ex.locator('#pagecount'), '抜き出した PDF が 2 ページでない').toHaveText('/ 2', { timeout: 20_000 });
+  await expect(ex.locator('.page[data-page="1"] .textLayer')).toContainText('marker5', { timeout: 20_000 });
+  await ex.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  await expect(ex.locator('.page[data-page="2"] .textLayer')).toContainText('marker3', { timeout: 20_000 });
+  const exBox = async (n: number): Promise<{ w: number; h: number }> => {
+    const b = await ex.locator(`.page[data-page="${String(n)}"]`).boundingBox();
+    return { w: b?.width ?? 0, h: b?.height ?? 0 };
+  };
+  expect((await exBox(2)).w, '抜き出した PDF の 3 ページ目(回してあった)が横長でない').toBeGreaterThan((await exBox(2)).h);
+  expect((await exBox(1)).h, '回していないページまで回っている').toBeGreaterThan((await exBox(1)).w);
+  for (const m of ['marker1', 'marker2', 'marker4']) {
+    await ex.fill('#query', m);
+    await ex.press('#query', 'Enter');
+    await expect(ex.locator('#hits'), `選ばなかったページの字 ${m} が、抜き出した PDF に残っている`).toContainText('見つかりません', { timeout: 15_000 });
+  }
+  await ex.close();
+  // 元は変わっていない: 5 ページのまま、外したページの字も残っている
+
   await clickReal(page, entryNamed(ED_NAME).filter({ hasNotText: '(編集)' }));
   await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', ED_NAME);
   const [orig] = await Promise.all([

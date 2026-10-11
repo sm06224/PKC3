@@ -468,6 +468,8 @@ describe('編集した PDF を保存する(#275 段②-1b)', () => {
     expect(g.win.received.find((m) => m.kind === 'edit-result')?.payload).toEqual({
       ok: true,
       message: '「報告書 (編集).pdf」を添付に加えました',
+      // 🔴 返事は依頼の鍵を持って返る(窓が、遅れて届いた前の依頼の返事を捨てるため)
+      key: 'pabc123',
     });
   });
 

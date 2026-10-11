@@ -122,6 +122,80 @@
     return line;
   }
 
+  // ───────── ページを選ぶ・抜き出す(#275 段②-1c)── 選んだページだけの新しい PDF
+  //
+  // 選びは**元のページ番号**の集まり(`Set<number>`)。並べ替えても回しても選びは動かない。
+  // 抜き出す PDF の並びと向きは、いまの一覧(`items`)のとおり ── 並べ替え・回転を済ませた後に抜き出せば、その状態が反映される。
+
+  /** `page` の選びを入れ替えた新しい集まり(元の集まりは変えない)。 */
+  function toggleSel(sel, page) {
+    var out = new Set(sel);
+    if (out.has(page)) out.delete(page);
+    else out.add(page);
+    return out;
+  }
+
+  /** 一覧の並びで `a` と `b`(ページ番号)の間(両端を含む)のページ。どちらかが一覧に無ければ空。 */
+  function rangeSel(items, a, b) {
+    var ia = -1;
+    var ib = -1;
+    items.forEach(function (it, i) {
+      if (it.page === a) ia = i;
+      if (it.page === b) ib = i;
+    });
+    var out = new Set();
+    if (ia < 0 || ib < 0) return out;
+    for (var i = Math.min(ia, ib); i <= Math.max(ia, ib); i += 1) out.add(items[i].page);
+    return out;
+  }
+
+  /** 一覧に残っているページだけの選び(外したページは選びから落ちる)。 */
+  function pruneSel(sel, items) {
+    var here = {};
+    items.forEach(function (it) {
+      here[it.page] = true;
+    });
+    var out = new Set();
+    sel.forEach(function (p) {
+      if (here[p]) out.add(p);
+    });
+    return out;
+  }
+
+  /** 選んだページだけ、一覧の並びのまま(向きもそのまま)。抜き出す PDF の元。 */
+  function pickSelected(items, sel) {
+    return items.filter(function (it) {
+      return sel.has(it.page);
+    });
+  }
+
+  /** 抜き出せるか(選んだページが 1 つ以上。0 件では作らない)。 */
+  function canExtract(items, sel) {
+    return pickSelected(items, sel).length >= 1;
+  }
+
+  /** 抜き出した PDF の名前。`元の名前.pdf` → `元の名前 (抜き出し).pdf`。既に ` (抜き出し)` で終わっていれば重ねない。 */
+  function extractName(name) {
+    var base = String(name || '').replace(/\.pdf$/i, '');
+    if (base === '') base = 'document';
+    if (!/ \(抜き出し\)$/.test(base)) base += ' (抜き出し)';
+    return base + '.pdf';
+  }
+
+  /** 選んでいるときの案内の 1 行(何ページ選んでいて、押すとどうなるか)。 */
+  function pickNote(count) {
+    return String(count) + ' ページを選んでいます。「選んだページを別の PDF にする」で新しい PDF として添付に加わります(元の PDF は変わりません)。';
+  }
+
+  /**
+   * 本体の返事(`edit-result`)が、いま待っている依頼の返事か。🔴 鍵(棚に置いた物の鍵)が合うときだけ真。
+   * 時間切れの後に遅れて届いた**前の依頼**の返事を、今の依頼の返事として扱わない(保存と抜き出しの取り違え)。
+   * @param {{ key: string } | null} pending  送った依頼の控え
+   */
+  function replyMatches(pending, payload) {
+    return pending !== null && !!payload && typeof payload.key === 'string' && payload.key === pending.key;
+  }
+
   root.PkcPdfPageEdit = {
     fresh: fresh,
     rotateAt: rotateAt,
@@ -134,5 +208,13 @@
     sameArrangement: sameArrangement,
     noteLine: noteLine,
     warnLine: warnLine,
+    toggleSel: toggleSel,
+    rangeSel: rangeSel,
+    pruneSel: pruneSel,
+    pickSelected: pickSelected,
+    canExtract: canExtract,
+    extractName: extractName,
+    pickNote: pickNote,
+    replyMatches: replyMatches,
   };
 })(typeof self !== 'undefined' ? self : this);
