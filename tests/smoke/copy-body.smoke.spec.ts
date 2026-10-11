@@ -63,7 +63,20 @@ async function copyAndWait(page: Page, action: string): Promise<void> {
   ).toBeAttached({ timeout: 2_000 });
   // 押す前に仕掛ける ── 700ms で消える属性を後から探すと落ちる
   await page.evaluate((s) => {
-    const el = document.querySelector(s)!;
+    const el = document.querySelector(s);
+    if (el === null) {
+      // 診断(#878 ②)── 隠さず、何が在ったかを文言に載せて次の失敗を読めるようにする
+      const regions = [...document.querySelectorAll('[data-pkc-region]')]
+        .map((r) => r.getAttribute('data-pkc-region'))
+        .join(',');
+      const actions = [...document.querySelectorAll('[data-pkc-action]')]
+        .map((b) => b.getAttribute('data-pkc-action'))
+        .slice(0, 40)
+        .join(',');
+      throw new Error(
+        `押し所 ${s} が無い: regions=[${regions}] data-pkc-action 計${document.querySelectorAll('[data-pkc-action]').length}件 先頭40=[${actions}]`,
+      );
+    }
     const w = window as unknown as { __flashed: Record<string, boolean> };
     w.__flashed = w.__flashed ?? {};
     w.__flashed[s] = false;
