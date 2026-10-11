@@ -696,10 +696,56 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await expect(cardsOn(today), '他の回まで消えた').toHaveCount(1);
   // 🔴 済んだ予定が 1 件できたので、切替の行が出て「済んだ予定も出す」が押せる(行の hidden が追随する)
   await expect(toggles, '済んだ予定ができたのに切替の行が隠れたまま(押せない)').toBeVisible();
-  await expect(
-    pane.locator('[data-pkc-action="toggle-show-done"]'),
-    '「済んだ予定も出す」が押せる位置に無い',
-  ).toBeVisible();
+  /**
+   * 🔴 **3 つの切り替えは「出すもの」1 つ**(#855。Gemini 裁定 = #1163 の依頼 10)── 押すとチェックが開き、
+   * 「済み」にチェックを付けると済んだ行が出て、脇に「済みも表示中」と出る。起動は増やさない(この道中の続き)。
+   */
+  const fold = pane.locator('[data-pkc-field="schedule-fold"]');
+  const foldNote = pane.locator('[data-pkc-field="schedule-fold-note"]');
+  const doneBox = pane.locator('[data-pkc-action="toggle-show-done"]');
+  await expect(fold.locator('summary'), 'ボタンの字').toHaveText('出すもの');
+  await expect(doneBox, '開く前なのに「済み」のチェックが見えている').toBeHidden();
+  await expect(foldNote, '既定なのに脇の 1 行が出ている').toBeHidden();
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
+  await expect(doneBox, '「出すもの」を押してもチェックが開かない').toBeVisible();
+  // 🔴 押しても読んでいるノートは閉じない(左の列の「何も無い所を押すとノートを閉じる」に巻き込まれない)
+  const openNote = page.locator('[data-pkc-action="start-edit"]');
+  await expect(openNote, '「出すもの」を押したらノートが閉じた').toBeVisible();
+  // 字(ラベル)を実際に押す ── 旗がちょうど 1 回反転して、枠は開いたまま
+  await fold.locator('[data-pkc-field="schedule-option"]').filter({ hasText: '済み' }).locator('span').click();
+  await expect(doneBox, '字を押して旗が 1 回反転していない').toBeChecked();
+  await expect(foldNote, '済みを出したのに脇の 1 行が言わない').toHaveText('済みも表示中');
+  await expect(openNote, 'チェックの字を押したらノートが閉じた').toBeVisible();
+  await expect(doneBox, '1 つ付けたら枠が閉じた').toBeVisible();
+  // Esc は枠だけを閉じる(ノートは残る)。枠の外を押しても閉じる
+  await page.keyboard.press('Escape');
+  await expect(doneBox, 'Esc で枠が閉じない').toBeHidden();
+  await expect(openNote, 'Esc でノートまで閉じた').toBeVisible();
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
+  await expect(doneBox).toBeVisible();
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-month"]');
+  await expect(doneBox, '枠の外を押しても閉じない').toBeHidden();
+  await expect(cardsOn(next), '済みにチェックしても済んだ回が出ない').not.toHaveCount(0);
+
+  /**
+   * 🔴 **土日の見出しは薄く色が付き、祝日の数字は赤い**(#855)── 属性ではなく**計算後の色**で見る
+   * (CSS に受け皿が無いと、付けた印が画面で見分けられない)。祝日は今日から先の月を送って、最初に出る月で見る。
+   */
+  const heads = pane.locator('[data-pkc-field="schedule-grid"] > [data-pkc-field="schedule-week"]:first-child > span');
+  const bg = (i: number) => heads.nth(i).evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await bg(0), '日曜の見出しに色が付いていない').not.toBe(await bg(1));
+  expect(await bg(6), '土曜の見出しに色が付いていない').not.toBe(await bg(1));
+  const holiday = pane.locator('[data-pkc-field="schedule-grid"] button[data-pkc-holiday]').first();
+  for (let i = 0; i < 3 && (await holiday.count()) === 0; i += 1)
+    await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]');
+  expect(await holiday.count(), '祝日の升が見つからない').toBeGreaterThan(0);
+  await expect(holiday, '祝日の名前が title に出ていない').toHaveAttribute('title', /.+/);
+  const colorOf = (loc: typeof holiday) => loc.evaluate((e) => getComputedStyle(e).color);
+  const plain = pane.locator('[data-pkc-field="schedule-grid"] button[data-pkc-drop-date]:not([data-pkc-holiday])').first();
+  expect(await colorOf(holiday), '祝日の数字が普通の日と同じ色').not.toBe(await colorOf(plain));
+  // 赤い(R が G・B より十分大きい)── 明るい地でも暗い地でも `--danger` は赤系
+  const [r, g, b] = (await colorOf(holiday)).match(/\d+/g)!.map(Number) as [number, number, number];
+  expect(r, `祝日の数字が赤くない(${r},${g},${b})`).toBeGreaterThan(Math.max(g, b) + 40);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -1063,6 +1109,13 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   // 🔑 左の列で 16:00..17:30 に動かした後なので、開いた窓にもその時刻で出る(動かしたことが保存されている)
   expect(weekBox.y - weekGrid.y, '札が 16:00 の高さ(16 × 40px)にない').toBeGreaterThan(639);
   expect(weekBox.y - weekGrid.y).toBeLessThan(641);
+  // 🔴 「週」の列の見出し:日曜(左端)は平日(2 番目)と背景色が違う(#855。計算後の色)
+  const weekHeadBg = (i: number) =>
+    centre
+      .locator('[data-pkc-field="schedule-weekview-heads"] > button')
+      .nth(i)
+      .evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await weekHeadBg(0), '「週」の日曜の見出しに色が付いていない').not.toBe(await weekHeadBg(1));
   /**
    * 🔴 **小さな月で、いま見ている週の行に色が付き、他の行には付かない**(#855。Gemini 裁定 = #1163 の
    * コメント 6104130726 の 5)。⚠ 属性ではなく**計算後の背景色**で見る(CSS に受け皿が無いと、付けた印が

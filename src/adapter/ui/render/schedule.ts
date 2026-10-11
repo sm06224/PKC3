@@ -38,6 +38,7 @@ import {
 } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
+import { holidayName } from '@features/schedule/jp-holidays';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { buildPressedButton } from './choice-buttons';
@@ -66,6 +67,37 @@ function dayItems(
   return buildAgenda(items, day, false, { skip, horizonDays: 0 }).find((g) => g.date === day)?.cards ?? [];
 }
 
+/** 切替 1 つの行(チェックを包む `label`)。 */
+function optionOf(box: HTMLInputElement): HTMLElement {
+  return box.parentElement as HTMLElement;
+}
+
+/** 切替 1 つを描く。⚠ 出さないときは行ごと隠す。`checked` は旗にそろえる(押した直後の見た目と旗を食い違わせない)。 */
+function setOption(box: HTMLInputElement, show: boolean, on: boolean, text: string): void {
+  const row = optionOf(box);
+  row.hidden = !show;
+  if (!show) return;
+  if (box.checked !== on) box.checked = on;
+  const span = row.lastElementChild as HTMLElement;
+  if (span.textContent !== text) span.textContent = text;
+}
+
+/**
+ * 「出すもの」の脇の 1 行(既定に加えて出しているもの)。何も加えていなければ空(行ごと出さない)。
+ * 🔑 既定のままなら黙る ── 「何も足していません」を毎回言うと、畳んだ意味が薄れる。
+ */
+export function shownExtrasText(state: {
+  showDoneTasks: boolean;
+  showArchived: boolean;
+  showUndatedTasks: boolean;
+}): string {
+  const on: string[] = [];
+  if (state.showDoneTasks) on.push('済み');
+  if (state.showArchived) on.push('片付けたもの');
+  if (state.showUndatedTasks) on.push('日付のないもの');
+  return on.length === 0 ? '' : `${on.join('・')}も表示中`;
+}
+
 /** 落とし先を表す属性。⚠ **空文字 = 日付なし**(属性が無いのとは別物)。 */
 export const DROP_DATE = 'data-pkc-drop-date';
 
@@ -80,14 +112,14 @@ export class ScheduleRenderer {
     month: HTMLElement;
     grid: HTMLElement;
     note: HTMLElement;
-    undated: HTMLButtonElement;
+    undated: HTMLInputElement;
     /**
      * 🔴 **済んだ予定を戻す口**(2026-08-23、変異試験 S7 が教えた)。
      * ⚠ 直す前は済んだ行を**黙って外す**だけで、この面から戻す道が無かった ──
      *   板は「完了」の見出しが戻す口を兼ねていたが、予定の面には列が無いので
      *   **落ちていた**。「置けるなら外せる」の裏返し(片道を作らない)。
      */
-    done: HTMLButtonElement;
+    done: HTMLInputElement;
     /**
      * 🔴 **片付けたノートの予定を戻す口**(段⑤ で移した)。
      * ⚠ 直す前、`toggle-show-archived` の口は**カレンダーの面 1 つだけ**だった
@@ -96,7 +128,13 @@ export class ScheduleRenderer {
      * 🔑 落とす前に**代わりを立てる**(CLAUDE.md「捨てるものの表は、行ごとに
      *   『代わりに何ができるようになるか』を書く」)。
      */
-    archived: HTMLButtonElement;
+    archived: HTMLInputElement;
+    /**
+     * 🔴 **3 つの切替を 1 つに畳んだボタン「出すもの」**(#855。Gemini 裁定 = #1163 の依頼 10)と、
+     *   いま既定に加えて出しているものを言う 1 行。
+     */
+    fold: HTMLDetailsElement;
+    foldNote: HTMLElement;
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
@@ -238,6 +276,9 @@ export class ScheduleRenderer {
     this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     this.paintDoneToggle(frame.done, state, all, filter);
     this.paintArchivedToggle(frame.archived, state, all);
+    const foldText = shownExtrasText(state);
+    if (frame.foldNote.textContent !== foldText) frame.foldNote.textContent = foldText;
+    frame.foldNote.hidden = foldText === '';
     /**
      * 🔴 **切替が 1 つも出ないときは行ごと隠す ── JS で決める**(#1467 段 3-d)。
      * ⚠ 直す前は CSS の `[data-pkc-field='schedule-toggles']:not(:has(button:not([hidden])))` が
@@ -246,7 +287,8 @@ export class ScheduleRenderer {
      *   1,000 件の無効化を予約していた(trace、追記 1 回)。この行の中身を知っているのはここなので、
      *   ここで `hidden` を決める。
      */
-    const anyToggle = !frame.undated.hidden || !frame.done.hidden || !frame.archived.hidden;
+    const anyToggle =
+      !optionOf(frame.undated).hidden || !optionOf(frame.done).hidden || !optionOf(frame.archived).hidden;
     if (frame.toggles.hidden !== !anyToggle) frame.toggles.hidden = !anyToggle;
     /**
      * 一覧は日ごとの束、「日」は 1 日の目盛り。⚠ 「日」のときも**日付のない束**は一覧の器に残す
@@ -346,11 +388,13 @@ export class ScheduleRenderer {
     frame.grid.textContent = '';
     const head = document.createElement('div');
     head.setAttribute('data-pkc-field', 'schedule-week');
-    for (const w of WEEKDAYS) {
+    WEEKDAYS.forEach((w, i) => {
       const cell = document.createElement('span');
       cell.textContent = w;
+      // 🔴 土日の見出しは薄く沈める(#855。地は無彩色のまま ── 色は情報にだけ使う)
+      if (i === 0 || i === 6) cell.setAttribute('data-pkc-weekend', '');
       head.append(cell);
-    }
+    });
     frame.grid.append(head);
     for (const week of getMonthGrid(year, month)) {
       const row = document.createElement('div');
@@ -374,6 +418,12 @@ export class ScheduleRenderer {
         cell.setAttribute(DROP_DATE, key);
         cell.textContent = String(day);
         if (key === today) cell.setAttribute('data-pkc-today', '');
+        // 🔴 祝日は数字を赤くして名前を `title` に出す(#855。`jp-holidays.ts`)
+        const holiday = holidayName(key);
+        if (holiday !== null) {
+          cell.setAttribute('data-pkc-holiday', '');
+          cell.title = holiday;
+        }
         if (has.has(key)) cell.setAttribute('data-pkc-has', '');
         // 🔴 「日」で見ている日の升目(#855)── 押した結果がその場で見える
         if (key === marks.day) cell.setAttribute('data-pkc-viewed', '');
@@ -406,15 +456,9 @@ export class ScheduleRenderer {
   }
 
   /** 「日付のない項目も出す」の切替。⚠ **押しても何も起きないボタンを出さない**。 */
-  private paintUndatedToggle(btn: HTMLButtonElement, state: AppState, undated: number): void {
+  private paintUndatedToggle(box: HTMLInputElement, state: AppState, undated: number): void {
     const show = undated > 0 || state.showUndatedTasks;
-    btn.hidden = !show;
-    if (!show) return;
-    btn.setAttribute('aria-pressed', state.showUndatedTasks ? 'true' : 'false');
-    const text = state.showUndatedTasks
-      ? '日付のない項目を隠す'
-      : `日付のない項目も出す(${undated})`;
-    if (btn.textContent !== text) btn.textContent = text;
+    setOption(box, show, state.showUndatedTasks, `日付のないもの(${undated})`);
   }
 
   /**
@@ -423,7 +467,7 @@ export class ScheduleRenderer {
    *   チェックを付けたときに**この数が増える**のが、保存された手応えになる。
    */
   private paintDoneToggle(
-    btn: HTMLButtonElement,
+    box: HTMLInputElement,
     state: AppState,
     all: readonly TaskCard[],
     filter: EntryFilter,
@@ -438,11 +482,7 @@ export class ScheduleRenderer {
       return matchesEntry(m, filter);
     }).length;
     const show = hidden > 0 || state.showDoneTasks;
-    btn.hidden = !show;
-    if (!show) return;
-    btn.setAttribute('aria-pressed', state.showDoneTasks ? 'true' : 'false');
-    const text = state.showDoneTasks ? '済んだ予定を隠す' : `済んだ予定も出す(${hidden})`;
-    if (btn.textContent !== text) btn.textContent = text;
+    setOption(box, show, state.showDoneTasks, `済み(${hidden})`);
   }
 
   /**
@@ -450,7 +490,7 @@ export class ScheduleRenderer {
    * ⚠ **片付けた物が 1 つも無ければ出さない** ── 押しても何も起きないボタンにしない。
    */
   private paintArchivedToggle(
-    btn: HTMLButtonElement,
+    box: HTMLInputElement,
     state: AppState,
     all: readonly TaskCard[],
   ): void {
@@ -460,13 +500,7 @@ export class ScheduleRenderer {
     for (const [lid, m] of state.entryMetas)
       if (m.archived && m.date !== null) lids.add(lid);
     const show = lids.size > 0 || state.showArchived;
-    btn.hidden = !show;
-    if (!show) return;
-    btn.setAttribute('aria-pressed', state.showArchived ? 'true' : 'false');
-    const text = state.showArchived
-      ? '片付けたものを隠す'
-      : `片付けたものも出す(${lids.size})`;
-    if (btn.textContent !== text) btn.textContent = text;
+    setOption(box, show, state.showArchived, `片付けたもの(${lids.size})`);
   }
 
   /**
@@ -697,24 +731,47 @@ export class ScheduleRenderer {
     grid.setAttribute('data-pkc-field', 'schedule-grid');
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'schedule-note');
-    const undated = document.createElement('button');
-    undated.type = 'button';
+    /**
+     * 🔴 **3 つの切替は 1 つのボタン「出すもの」に畳む**(#855。Gemini 裁定 = #1163 の依頼 10)。
+     * ⚠ 押すとチェックが 3 つ開く(中央を奪わない小さな枠。モーダルにしない)。**口(`data-pkc-action`)は
+     *   前のまま** ── 3 つとも板 / カレンダーと同じ action を共有する(旗が 1 つなので意味論も 1 つ)。
+     * 🔑 器は `<details>`(キーボードで開け閉めでき、開いているかをこちらで持たない)。
+     * ⚠ **押しても何も起きない切替は出さない**(前からの規則)── 3 つとも出ないときは行ごと隠す。
+     */
+    // ⚠ 口(`data-pkc-action`)は**字で書く**(変数で配ると `tests/action-outlets.test.ts` が静的に追えなくなる)
+    const option = (field: string): HTMLInputElement => {
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.setAttribute('data-pkc-field', field);
+      const text = document.createElement('span');
+      const label = document.createElement('label');
+      label.setAttribute('data-pkc-field', 'schedule-option');
+      label.append(box, text);
+      return box;
+    };
+    const undated = option('schedule-undated');
     undated.setAttribute('data-pkc-action', 'toggle-show-undated');
-    undated.setAttribute('data-pkc-field', 'schedule-undated');
-    const done = document.createElement('button');
-    done.type = 'button';
-    // 🔑 板と**同じ action**(旗が 1 つなので、口も 1 つの意味論を共有する)
+    const done = option('schedule-done');
     done.setAttribute('data-pkc-action', 'toggle-show-done');
-    done.setAttribute('data-pkc-field', 'schedule-done');
-    // ⚠ 切替は 1 行に並べる(縦に積むと狭い列で嵩む)
-    const archived = document.createElement('button');
-    archived.type = 'button';
-    // 🔑 板 / カレンダーと**同じ action**(旗が 1 つなので、口も同じ意味論を共有する)
+    const archived = option('schedule-archived');
     archived.setAttribute('data-pkc-action', 'toggle-show-archived');
-    archived.setAttribute('data-pkc-field', 'schedule-archived');
+    const fold = document.createElement('details');
+    fold.setAttribute('data-pkc-field', 'schedule-fold');
+    const summary = document.createElement('summary');
+    summary.setAttribute('data-pkc-field', 'schedule-fold-button');
+    summary.textContent = '出すもの';
+    summary.title = '済み・片付けたもの・日付のないものを、一覧に出すかどうかを選びます';
+    const panel = document.createElement('div');
+    panel.setAttribute('data-pkc-field', 'schedule-fold-panel');
+    panel.append(optionOf(done), optionOf(archived), optionOf(undated));
+    fold.append(summary, panel);
+    // 🔑 既定に加えて出しているものを 1 行で言う(何も加えていないときは出さない)
+    const foldNote = document.createElement('span');
+    foldNote.setAttribute('data-pkc-field', 'schedule-fold-note');
+    foldNote.hidden = true;
     const toggles = document.createElement('div');
     toggles.setAttribute('data-pkc-field', 'schedule-toggles');
-    toggles.append(undated, done, archived);
+    toggles.append(fold, foldNote);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
     /**
@@ -731,7 +788,7 @@ export class ScheduleRenderer {
     this.day.el.hidden = true;
     this.week.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, this.week.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, toggles, groups, modes, quickDate: qDate };
+    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

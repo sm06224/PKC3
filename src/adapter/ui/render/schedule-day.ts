@@ -32,7 +32,9 @@ import {
   initialScrollMinutes,
   placeColumns,
   splitDay,
+  weekColumnLabel,
 } from '@features/schedule/day-layout';
+import { holidayName } from '@features/schedule/jp-holidays';
 import { addDays } from '@features/datetime/date-math';
 import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
 
@@ -87,6 +89,7 @@ export class ScheduleDay {
     this.label = document.createElement('span');
     this.label.setAttribute('data-pkc-field', 'schedule-day-label');
     head.append(this.prev, this.label, this.next, this.todayBtn);
+    this.headBar = head;
 
     this.allDay = document.createElement('div');
     this.allDay.setAttribute('data-pkc-field', 'schedule-day-allday');
@@ -131,6 +134,8 @@ export class ScheduleDay {
   }
 
   private readonly dropAttr: string;
+  /** 見出しの行(土日の地と祝日の印を付ける)。 */
+  private readonly headBar: HTMLElement;
 
   /** 「日」を離れた(次に入ったとき最初の位置をもう一度当てる)。 */
   leave(): void {
@@ -145,6 +150,18 @@ export class ScheduleDay {
     const tomorrow = addDays(p.today, 1) ?? '';
     const heading = dayHeading(p.day, p.today, tomorrow);
     if (this.label.textContent !== heading) this.label.textContent = heading;
+    // 🔴 土日の見出しは薄く沈め、祝日は日付を赤くして名前を出す(#855)
+    const weekday = weekColumnLabel(p.day).weekday;
+    if (weekday === '土' || weekday === '日') this.headBar.setAttribute('data-pkc-weekend', '');
+    else this.headBar.removeAttribute('data-pkc-weekend');
+    const holiday = holidayName(p.day);
+    if (holiday !== null) {
+      this.label.setAttribute('data-pkc-holiday', '');
+      this.label.title = holiday;
+    } else {
+      this.label.removeAttribute('data-pkc-holiday');
+      this.label.removeAttribute('title');
+    }
     // 🔑 行き先が今日なら空(= 今日に追従する状態へ戻す)── 実日付を入れると、日付をまたいで開いたままにしたとき
     //   昨日が出たままになる(着地前レビュー)
     const goTo = (d: string | null): string => (d === null ? p.day : d === p.today ? '' : d);
