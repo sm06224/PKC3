@@ -129,6 +129,20 @@ export function describePaste(a: PasteAttempt): string {
   return [head + setting, ...tail].join('。');
 }
 
+/**
+ * 🔴 **Markdown に直して貼ったとき、メッセージに残す文**(#1379)。
+ * ⚠ **固定の文** ── 貼った中身は 1 文字も入れない(メッセージは中身を漏らさない)。
+ * 🔑 戻し方は実際の挙動: 差し込みは `insertText` なので 1 回の Ctrl+Z で貼る前へ戻り、
+ *   書式なしで貼るのはブラウザの Ctrl+Shift+V(本文を打っている最中はアプリの
+ *   「コピーした物」より先にブラウザが受ける ── マニュアルの近道の表)。
+ * ⚠ メッセージは 80 字で切られる(`sanitizeMessageText`)── 超えない長さに保つ(test が見る)。
+ */
+export const PASTE_CONVERTED_MESSAGE =
+  'Web などの書式つきの字を Markdown に直して貼りました(戻す: Ctrl+Z / 書式なしで貼る: Ctrl+Shift+V)';
+
+/** 続けて貼ったとき、この間隔(ミリ秒)以内は 1 件に束ねる。 */
+export const PASTE_MESSAGE_COALESCE_MS = 5000;
+
 /** 変換の口(呼び側が渡す。⚠ **遅延**である ── 使わない形は解析しない)。 */
 export interface PasteConverters {
   readonly permalink: () => string | null;

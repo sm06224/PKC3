@@ -199,6 +199,8 @@ import {
   choosePaste,
   describePaste,
   DEFAULT_PASTE_SOURCE,
+  PASTE_CONVERTED_MESSAGE,
+  PASTE_MESSAGE_COALESCE_MS,
   type PasteSource,
 } from '@features/markdown/paste-source';
 import { convertPastedPermalink } from '@features/link/permalink';
@@ -1683,6 +1685,12 @@ export interface BinderServices {
    *   よいか分かる。⚠ 渡されなければ出さない。
    */
   pasteInspect?(): boolean;
+  /**
+   * 🔴 **メッセージへ 1 件残す**(#1379)── 貼ったウェブの字を Markdown に直したときに使う。
+   * ⚠ 画面下の 1 行には出さない(貼るたびに割り込まない)。**本文の字は渡さない**
+   *   (固定の文だけ ── メッセージは中身を漏らさない)。渡されなければ残さない。
+   */
+  leaveMessage?(input: { kind: 'result'; source: string; text: string }): void;
   /** 設定を変える(設定画面の選択)。⚠ 知らない値は呼び側が捨てる。 */
   setPasteSource?(id: string): void;
   /**
@@ -13372,6 +13380,9 @@ export function bindActions(
     return handled;
   };
 
+  /** 直近に「Markdown に直しました」を残した時刻(束ねる用)。 */
+  let lastPasteMessageAt: number | null = null;
+
   /**
    * 🔴 **文字の貼付**(#251)。2 つのことをする ──
    * ① `text/html` を PKC-Markdown へ戻す ② `data:` / `blob:` を資産へ逃がす。
@@ -13470,6 +13481,20 @@ export function bindActions(
     const converted = chosen.text;
     const text = converted ?? plain;
     if (text === '') return false;
+    /**
+     * 🔴 **Markdown に直して貼ったときだけ、メッセージへ 1 件残す**(#1379)。
+     * ⚠ 対象は HTML / リッチテキストから起こした物だけ(平文・パーマリンク・
+     *   そのまま囲む・タブ表は「直した」ではない)。⚠ **字は固定** ── 貼った中身を含めない。
+     * ⚠ 続けて貼ったときは束ねる(`PASTE_MESSAGE_COALESCE_MS` 以内は 1 件)。
+     * ⚠ **差し込みに成功した後で呼ぶ**(資産化を待つ間に欄が閉じたら、「貼りました」は嘘になる)。
+     */
+    const leaveConverted = (): void => {
+      if (converted === null || (chosen.attempt.used !== 'html' && chosen.attempt.used !== 'rtf')) return;
+      const now = Date.now();
+      if (lastPasteMessageAt !== null && now - lastPasteMessageAt < PASTE_MESSAGE_COALESCE_MS) return;
+      lastPasteMessageAt = now;
+      services.leaveMessage?.({ kind: 'result', source: '貼り付け', text: PASTE_CONVERTED_MESSAGE });
+    };
 
     const adopt = services.adoptUrls;
     const urls = adopt ? adoptableUrls(text) : [];
@@ -13479,6 +13504,7 @@ export function bindActions(
     if (urls.length === 0) {
       // ⚠ 囲みは行頭から差す(行の途中だと柵が柵として読まれない ── #708 段③)
       insertBlockText(target, text);
+      leaveConverted();
       return true;
     }
 
@@ -13499,6 +13525,7 @@ export function bindActions(
       }
       into.focus();
       insertBlockText(into, r.text);
+      leaveConverted();
       /**
        * 🔴 **断りは 1 本にまとめる**(検算で判明)。`state.error` は **1 枠**なので、
        * 理由(空き容量)を先に出しても、件数の総括で**上書きされて消える**。

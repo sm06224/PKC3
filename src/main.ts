@@ -4454,6 +4454,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      */
     pasteSource: () => appPasteSource.get(),
     pasteInspect: () => appFlags.isOn(FLAG_PASTE_INSPECT.name),
+    leaveMessage: (m) => appMessagePost.post(m),
     exportPortable: () =>
       void withAssetGate(async () => {
         await exportPortable(dispatcher, {

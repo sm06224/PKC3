@@ -157,6 +157,23 @@ test('🔴 ウェブページをコピーして貼ると、形のまま入って
   await expect(live.locator('table td').first(), '表として描かれていない').toContainText('あ');
   await expect(live.locator('ul ul li'), '入れ子の箇条書きが描かれていない').toContainText('子');
 
+  // ④ 🔴 **直して貼ったことが、実物の配線でメッセージに届く**(#1379)。
+  //    ⚠ unit は `leaveMessage` を自前で差すので、`main.ts` の配線(`appMessagePost.post`)は通らない。
+  //    画面下の 1 行には出さない(割り込まない)。⚠ 編集中は中央がエディタのままなので、保存してから開く
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('Markdown に直して');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const openMessages = page
+    .locator('[data-pkc-view-pane="settings"]')
+    .locator('[data-pkc-action="open-messages"]')
+    .first();
+  await expect(openMessages).toBeVisible();
+  await clickReal(page, openMessages);
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '直して貼ったのにメッセージに残っていない(配線が落ちている)',
+  ).toContainText('Markdown に直して貼りました', { timeout: 10_000 });
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

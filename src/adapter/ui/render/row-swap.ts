@@ -1549,9 +1549,11 @@ export function insertText(ta: HTMLTextAreaElement, text: string): void {
    *   **画面には見えているのに保存された本文には無い**(2 列の保存は state を書く)
    */
   const { selectionStart: s, selectionEnd: e, value } = ta;
-  const at = (s ?? value.length) + text.length;
-  ta.value = value.slice(0, s ?? value.length) + text + value.slice(e ?? s ?? value.length);
-  ta.selectionStart = at;
-  ta.selectionEnd = at;
+  const from = s ?? value.length;
+  // ⚠ `value` 直代入をしない ── 履歴を捨てる
+  ta.setRangeText(text, from, e ?? from, 'preserve');
+  // ⚠ caret は自分で進める(happy-dom の `'end'` は 2 字ずれた ── 本物の意味論と揃える)
+  ta.selectionStart = from + text.length;
+  ta.selectionEnd = from + text.length;
   ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
