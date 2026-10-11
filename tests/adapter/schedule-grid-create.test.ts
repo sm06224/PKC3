@@ -247,6 +247,55 @@ describe('入力欄の Enter / Esc / 空', () => {
     s.detach();
   });
 
+  /**
+   * 🔴 **枠の右端の ×**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 9)。
+   * マウスだけで「作るのをやめる」── 字を打っていても、書かずに畳む(Esc と同じ)。
+   */
+  const CANCEL = '[data-pkc-field="schedule-create-cancel"]';
+  it('🔴 枠には × があり、押すと何も書かずに畳む(字を打っていても)', async () => {
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    const x = s.qa(`${BOX} ${CANCEL}`);
+    expect(x, '枠の中に × が無い').toHaveLength(1);
+    expect(x[0]!.getAttribute('aria-label')).toBe('予定を作るのをやめる');
+    s.input()!.value = '消える';
+    await tick(); // 離した直後の click は飲まれる(ここで押すのは、その後の別の click)
+    x[0]!.click();
+    await tick();
+    expect(s.qa(BOX), '× を押したのに枠が残っている').toHaveLength(0);
+    expect(appends(s), '× で書いてしまった').toHaveLength(0);
+    expect(s.store['e1']).toBe(BODY);
+    s.detach();
+  });
+
+  it('🔴 × で捨てた枠は、日を替えて戻しても戻ってこない', async () => {
+    const clickField = (s: ReturnType<typeof setup>, field: string): void =>
+      (s.root.querySelector(`[data-pkc-field="${field}"]`) as HTMLElement).click();
+    const s = setup(BODY, 'day');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    s.input()!.value = '捨てる';
+    await tick();
+    clickField(s, 'schedule-day-next');
+    clickField(s, 'schedule-day-prev'); // 預かりから戻った枠
+    s.qa(CANCEL)[0]!.click();
+    expect(s.qa(BOX)).toHaveLength(0);
+    clickField(s, 'schedule-day-next');
+    clickField(s, 'schedule-day-prev');
+    expect(s.qa(BOX), '× で捨てたのに戻ってきた').toHaveLength(0);
+    s.detach();
+  });
+
+  it('「週」の枠にも × がある / × の上を押しても新しい枠は始まらない', async () => {
+    const s = setup(BODY, 'week');
+    dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
+    const x = s.qa(CANCEL)[0]!;
+    expect(x, '「週」の枠に × が無い').toBeDefined();
+    pointer(x, 'pointerdown', minPx(610));
+    pointer(x, 'pointerup', minPx(610));
+    expect(s.qa(BOX), '× を押し始めただけで枠が畳まれた / 増えた').toHaveLength(1);
+    s.detach();
+  });
+
   it('🔴 日本語入力の変換中の Enter は送らない(確定であって送信ではない)', async () => {
     const s = setup(BODY, 'day');
     dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));

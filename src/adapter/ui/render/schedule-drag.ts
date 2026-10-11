@@ -93,10 +93,12 @@
  * `[data-pkc-drop-date][data-pkc-dropping]`)そのもの ── 新しい装飾は足していない。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import type { AppState, UserAction } from '@adapter/state/app-state';
+import { bodyWriteBlockReason, type AppState, type UserAction } from '@adapter/state/app-state';
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
+import { slotOfCard } from '@features/schedule/move-undo';
+import { offerMoveUndo } from './schedule-undo';
 
 /** 掴める札。⚠ `kanban-cards` は #292 段⑤で外れた死んだ綴り(`app.css` に残骸あり) ──
  *  ただし `binder.ts` の HTML5 dragstart と選び方を揃え、勝手に狭めない。 */
@@ -305,7 +307,18 @@ export function dropTaskCard(
    *   ここで分ける(面ごとに 2 つの落とし先を作らない)。
    */
   if (grabbed.line === '') {
+    const entryState = dispatcher.getState();
+    const was = entryState.entryMetas.get(grabbed.lid)?.date ?? null;
+    const refused = bodyWriteBlockReason(entryState, grabbed.lid) !== null;
     dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date });
+    // 🔴 動かしたら「元に戻す」の 1 行(#855)。⚠ 断られた回(編集中など)・日が変わらない回は出さない
+    if (!refused && entryState.entryMetas.has(grabbed.lid))
+      offerMoveUndo(host, dispatcher, {
+        target: { kind: 'entry', lid: grabbed.lid },
+        before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+        after: { date, time: null, timeEnd: null, until: null, text: '' },
+        verb: 'moved',
+      });
     return;
   }
   const line = Number(grabbed.line);
@@ -338,6 +351,7 @@ export function dropTaskCard(
    *   期間の開始ではない(掴んだのが 3 日目なら、開始は落とした日の 2 日前になる)。
    */
   const start = shift === null || card?.date == null ? date : (addDays(card.date, shift) ?? date);
+  const refused = bodyWriteBlockReason(dispatcher.getState(), grabbed.lid) !== null;
   dispatcher.dispatch({
     type: 'SET_TASK_DATE',
     lid: grabbed.lid,
@@ -347,6 +361,22 @@ export function dropTaskCard(
     time: card?.time ?? null,
     until,
   });
+  /**
+   * 🔴 **動かしたら「元に戻す」の 1 行**(#855)。⚠ 断られた回(編集中など)・札が走査に無い回は出さない。
+   * 戻し先は**走査が持っている動かす前の姿**(`card`)── 外した回は時刻・終わりも戻す。
+   */
+  if (!refused && card !== undefined) {
+    const before = slotOfCard(card);
+    offerMoveUndo(host, dispatcher, {
+      target: { kind: 'task', lid: grabbed.lid, line },
+      before,
+      after:
+        start === null
+          ? { date: null, time: null, timeEnd: null, until: null, text: before.text }
+          : { ...before, date: start, until },
+      verb: 'moved',
+    });
+  }
 }
 
 /**

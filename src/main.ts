@@ -374,7 +374,14 @@ import {
   windowDeepLinkTarget,
   windowTitleFor,
 } from '@adapter/platform/deep-link';
-import { applyScheduleDeepLink } from '@adapter/platform/schedule-deep-link';
+import {
+  SCHEDULE_REGISTRY_CHANNEL,
+  applyScheduleDeepLink,
+  openOrRaiseWeekWindow,
+  weekAnnounceKey,
+  weekWindowKey,
+} from '@adapter/platform/schedule-deep-link';
+import { dateKey } from '@features/schedule/month-grid';
 import { openView, openViewHere } from '@adapter/ui/render/open-view';
 import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
@@ -383,6 +390,7 @@ import {
 } from '@adapter/platform/note-window-registry';
 import {
   closeViewWindow,
+  markHeldView,
   openNoteWindowUrl,
   openViewInWindow,
   openViewWindowUrl,
@@ -778,10 +786,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (find !== undefined) jumpFromRaise?.(find);
     },
   });
+  /**
+   * 🔴 **同じ週のウィンドウは 2 枚作らない台帳**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 3)。
+   * ⚠ 付箋の台帳と**同じ仕掛け・別の放送路**(週の鍵と lid を取り違えない)。判断は
+   *   `schedule-deep-link.ts`(`openOrRaiseWeekWindow`)── ここは台帳と窓を渡すだけ。
+   */
+  const scheduleChannel = portable
+    ? `${SCHEDULE_REGISTRY_CHANNEL}:${portable.bundle.id}`
+    : SCHEDULE_REGISTRY_CHANNEL;
+  const scheduleRegistry = createNoteRegistry({
+    channel: typeof BroadcastChannel === 'function' ? new BroadcastChannel(scheduleChannel) : null,
+    id: makeViewWindowToken(),
+    // ⚠ 付箋と同じく「前に出る」は実測できていない ── 例外を投げないことだけ。字では約束しない
+    onRaise: () => window.focus(),
+  });
+  const todayKey = (): string => {
+    const at = new Date();
+    return dateKey(at.getFullYear(), at.getMonth() + 1, at.getDate());
+  };
   if (typeof window === 'object') {
     // ⚠ **閉じない。名乗りを 1 通出すだけ**(着地前レビュー ⚠2)── `pagehide` は
     //    bfcache へ入るときにも飛ぶので、ここで放送路を閉じると戻ってきた窓が壊れる
     window.addEventListener('pagehide', () => noteRegistry.leave());
+    // 🔴 週の窓の台帳も同じ作法(閉じない。名乗りを 1 通出すだけ)
+    window.addEventListener('pagehide', () => scheduleRegistry.leave());
   }
 
   /**
@@ -1705,9 +1733,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const announceNote = (): void =>
     noteRegistry.announce(heldNoteWindow ? dispatcher.getState().selectedLid : null);
+  /**
+   * 🔴 **この窓が「週」で出している週を、他の窓へ伝える**(#855)。予定の面の窓で、広い面が「週」のときだけ。
+   * ⚠ 変わったときだけ放送される(`announce` の作法)。
+   */
+  const announceWeek = (): void => {
+    const st = dispatcher.getState();
+    scheduleRegistry.announce(
+      weekAnnounceKey(heldViewWindow, st.scheduleMode, st.scheduleDay, todayKey()),
+    );
+  };
   dispatcher.onState(() => {
     paintTitle();
     announceNote();
+    announceWeek();
   });
   /**
    * ⚠ 起動のときに添付が読めなかったことは、**黙らせない**(#400 段④)。
@@ -4509,14 +4548,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   理由だけ出す(退避しない)。**同期に呼ぶ**(`window.open` は gesture の中でしか通らない)。
      */
     openScheduleWindow: (mode, day) =>
-      void openViewTile(
-        dispatcher,
-        cid,
-        'schedule',
-        (m) => services.setBrowse?.(m),
-        focusSearch,
-        { mode, day },
-      ),
+      // 🔴 同じ週の窓が開いているなら、開かずに前に出す(#855)── 判断は `openOrRaiseWeekWindow`
+      void openOrRaiseWeekWindow({
+        key: weekWindowKey(day, todayKey()),
+        whereIs: (k) => scheduleRegistry.whereIs(k),
+        raise: (k) => scheduleRegistry.raise(k),
+        reserve: (k) => scheduleRegistry.reserve(k),
+        release: (k) => scheduleRegistry.release(k),
+        notice: (message) => dispatcher.dispatch({ type: 'OP_NOTICE', message }),
+        now: () => Date.now(),
+        open: () =>
+          openViewTile(
+            dispatcher,
+            cid,
+            'schedule',
+            (m) => services.setBrowse?.(m),
+            focusSearch,
+            { mode, day },
+          ),
+      }),
     openNoteWindow: (lid, find) => {
       /**
        * 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
@@ -5366,6 +5416,8 @@ function bootstrap(): void {
         scheduleView: (mode, day) => applyScheduleDeepLink(app.dispatcher, mode, day),
         onHold: (view) => {
           heldViewWindow = view;
+          // 🔴 窓の中では左の列の「週」を隠す(#855)── 印は文書に 1 つ(`markHeldView`。CSS が読む)
+          markHeldView(document.documentElement, view);
           // ⚠ **その場で塗り直す** ── 旗を倒しただけでは、次に何かが起きるまで
           //    古い帯が残る(離れた瞬間に「メインのタブ経由です」が戻るべきである)
           app.repaintStatus();

@@ -29,6 +29,7 @@ import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
 import { openDialog } from './dialog-helper';
+import { clearMoveOffer, currentMoveOffer } from '../../src/adapter/ui/render/schedule-undo';
 
 const TODAY = new Date(2026, 7, 23); // 2026-08-23(日)
 const HOUR = 40; // 1 時間 40px
@@ -817,5 +818,54 @@ describe('レビューの直し(#855 段 B-1)', () => {
       pointer(s.lanes()[0]!, 'pointerup', 'mouse', 640);
       s.detach();
     });
+  });
+});
+
+describe('動かした直後の「元に戻す」(#855)', () => {
+  const BODY = '- [ ] 会議 @2026-08-23 14:00..15:00\n';
+  afterEach(() => clearMoveOffer());
+
+  it('🔴 目盛りで動かして書込が届くと、画面の下の知らせが出て、押すと元の時刻へ戻る', async () => {
+    const { laneCards, lanes, store, d, root, detach } = setup(BODY, 'day');
+    dragCard(laneCards()[0]!, lanes()[0]!, minPx(14 * 60), minPx(120));
+    await tick(30);
+    expect(store['e1']).toBe('- [ ] 会議 @2026-08-23 16:00..17:00\n');
+    expect(d.getState().notice, '動かしたのに知らせが出ていない').toBe('8/23(日) 16:00〜17:00 へ動かしました');
+    expect(currentMoveOffer()).not.toBeNull();
+    // 画面の下の押し口(`shell.ts` の status-undo が替わる先)を押す
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'schedule-undo-move');
+    root.append(btn);
+    btn.click();
+    await tick(30);
+    expect(d.getState().error ?? '', '戻せなかった理由').toBe('');
+    expect(store['e1'], '押したのに元の時刻へ戻らない').toBe(BODY);
+    detach();
+  });
+
+  it('🔴 縁を引いたときは「に変えました」', async () => {
+    const { laneCards, lanes, d, detach } = setup(BODY, 'day');
+    const h = laneCards()[0]!.querySelector<HTMLElement>('[data-pkc-field="task-resize"]')!;
+    pointer(h, 'pointerdown', 'mouse', minPx(15 * 60) - 2);
+    pointer(lanes()[0]!, 'pointermove', 'mouse', minPx(15 * 60 + 30));
+    pointer(lanes()[0]!, 'pointerup', 'mouse', minPx(15 * 60 + 30));
+    await tick(30);
+    expect(d.getState().notice).toBe('8/23(日) 14:00〜15:30 に変えました');
+    detach();
+  });
+
+  it('🔴 書込が断られた回(読み込み中など)は、動いていないので出さない', async () => {
+    const { laneCards, lanes, store, d, detach } = setup(BODY, 'day');
+    // 編集中にする(そのノートの本文は書けない ── `bodyWriteBlockReason`)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick(30);
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提: 編集中になっている').toBe('editing');
+    dragCard(laneCards()[0]!, lanes()[0]!, minPx(14 * 60), minPx(120));
+    await tick(30);
+    expect(store['e1'], '前提: 断られて書かれていない').toBe(BODY);
+    expect(currentMoveOffer(), '断られたのに持っている').toBeNull();
+    expect(d.getState().notice ?? '').not.toContain('動かしました');
+    detach();
   });
 });

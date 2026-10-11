@@ -36,6 +36,7 @@
  *   なので `e.target` に落とす ── `schedule-drag.ts` と同じ作法。unit は列の要素へ直に撃つ)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { bodyWriteBlockReason } from '@adapter/state/app-state';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { daysBetween } from '@features/datetime/date-math';
 import {
@@ -49,6 +50,8 @@ import {
   resizeSlot,
 } from '@features/schedule/day-layout';
 import { pickRepeatMoveInApp } from './app-dialog';
+import { slotOfCard } from '@features/schedule/move-undo';
+import { offerMoveUndo } from './schedule-undo';
 import {
   GRID_LANE_SELECTOR,
   dropTaskCard,
@@ -482,7 +485,21 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
             ? formatMinutes(endMin)
             : formatMinutes(startMin);
     if (g.task.repeat === '') {
+      const st = dispatcher.getState();
+      const refused = bodyWriteBlockReason(st, g.task.lid) !== null;
+      // 動かす前の姿は走査が持っている札から取る(中身の指紋もそこにある)。札が走査に無い回は出さない
+      const card = st.taskScan?.cards.find((c) => c.lid === g.task.lid && c.line === line);
       dispatcher.dispatch({ type: 'SET_TASK_DATE', lid: g.task.lid, line, date, time, timeEnd });
+      // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
+      if (!refused && g.from !== '' && card !== undefined) {
+        const before = slotOfCard(card);
+        offerMoveUndo(root, dispatcher, {
+          target: { kind: 'task', lid: g.task.lid, line },
+          before,
+          after: { ...before, date, time, timeEnd },
+          verb: r.kind === 'resize' ? 'changed' : 'moved',
+        });
+      }
       return;
     }
     // 繰り返しの回 ── 1 回か全部かを聞いてから書く(日だけ動かす落とし方と同じ小窓)

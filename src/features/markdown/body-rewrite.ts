@@ -943,7 +943,15 @@ function rewriteLineDate(
     // 日付を付ける。⚠ 区切りの空白は `insertionForLineDate` 1 か所が決める(§7)
     next =
       line +
-      insertionForLineDate(line, rewrite.date, rewrite.time, rewrite.until, rewrite.repeat);
+      insertionForLineDate(
+        line,
+        rewrite.date,
+        rewrite.time,
+        rewrite.until,
+        rewrite.repeat,
+        // 🔴 幅も一緒に書く(日付を外した予定を「元に戻す」で、時刻の幅ごと戻す ── #855)
+        rewrite.timeEnd,
+      );
   } else {
     // 日付を差し替える。⚠ **記法の範囲だけ**を入れ替える(前後の字は 1 バイトも動かさない)
     next =

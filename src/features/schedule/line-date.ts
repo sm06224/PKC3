@@ -406,7 +406,12 @@ export function insertionForLineDate(
   time?: string | null,
   until?: string | null,
   repeat?: RepeatUnit | null,
+  /**
+   * 🔴 時刻の幅(`14:00..15:00` の `15:00`)。⚠ 省くと幅なし(従来どおり)。
+   * 日付を外した予定を「元に戻す」(#855)で、幅ごと戻すために要る。
+   */
+  timeEnd?: string | null,
 ): string {
-  const text = formatLineDate(date, time, until, repeat);
+  const text = formatLineDate(date, time, until, repeat, undefined, timeEnd);
   return /\S$/.test(before) ? ` ${text}` : text;
 }

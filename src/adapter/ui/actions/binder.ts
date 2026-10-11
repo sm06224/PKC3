@@ -169,6 +169,7 @@ import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
 import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
+import { undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import {
   DATE_SHORTCUTS,
   isDateShortcut,
@@ -2099,6 +2100,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-append',
   // ⚠ 塊の移動の「元に戻す」も同じ経路(#684 段①)
   'undo-move',
+  // 🔴 予定を動かした直後の「元に戻す」(#855)── 日付を書き戻す 1 手なので同じ門をくぐらせる
+  'schedule-undo-move',
   // 🔑 スタックの保存はノートを 1 件**作る**(`CREATE_ENTRY`。#633 段③)── 取込・書出しの
   //    最中に entry を足すと、総入れ替えの裏で 1 件増える形になるので同じ門をくぐらせる
   'stack-save',
@@ -7348,6 +7351,21 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'undo-move': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_MOVE' });
+  },
+  /**
+   * 🔴 **予定を動かした直後の「元に戻す」**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 6)。
+   * ⚠ 新しい書込経路は作らない ── 動かす前の姿へ向けた `SET_TASK_DATE` / `SET_ENTRY_DATE` を 1 手撃つ。
+   *   動かした後に本文が変わっていたら戻さず、理由を言う(行番号の違う別の行を書き換えない)。
+   *   口は画面の下の知らせの隣(`shell.ts` の `status-undo`。出し入れは `status-open.ts`)── `UNDO_MOVE`(塊の移動)とは別物。
+   */
+  'schedule-undo-move': (dispatcher) => {
+    const result = undoScheduleMove(dispatcher.getState());
+    if (result === null) return;
+    if ('refusal' in result) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: result.refusal });
+      return;
+    }
+    dispatcher.dispatch(result.action);
   },
   /**
    * 🔴 **最近開いた記録を消す**(#215 残り①)。口は設定の中。
