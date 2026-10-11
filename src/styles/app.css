@@ -9596,6 +9596,39 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
+  /**
+   * 🔴 **紙は、どの配色でも白地に濃い字**(#1387)。
+   *
+   * ⚠ 直す前は、ダーク系の配色のまま印刷すると **薄い字が白い紙に出た**(背景は
+   *   `background: none` で消えるが、文字の色は配色のまま = 紙の上でほぼ読めない)。
+   * 🔑 **変えるのは色の変数だけ**(地・文字・薄い字・罫線・コードの字・警告の字・強調の色)。
+   *   強調の色(`--accent` とその対)も戻す ── リンクの字は `--accent` なので、暗い配色の
+   *   明るい `--accent` を白い紙に出すとコントラストが 1.3〜4.0 しかない(terminal 1.34 /
+   *   nord 2.00 / dracula 2.41)。⚠ 図は PNG の `<img>` なので変数に触れず、そのまま出る。
+   * 🔑 値は `tokens.css` の `light`(ライト)と同じ。`color-scheme` も `light` に戻す
+   *   (フォーム部品・スクロールバーが暗いまま紙に出ない)。
+   * ⚠ `:root[data-pkc-theme]`(0,2,0)は `tokens.css` の `:root[data-pkc-theme='dark']`
+   *   と同じ詳細度なので、**後ろに在ること**で勝つ ── この節が file の末尾なのはそのためでもある。
+   * ⚠ `bake` する書き出し HTML 側は `build/body-css.ts` の `PAPER_TOKENS` が同じ集合を持つ。
+   */
+  :root[data-pkc-theme] {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f5f6f8;
+    --surface-hover: #fafbfc;
+    --fg: #16191d;
+    --muted: #59616b;
+    --border: #cdd2d9;
+    --accent: #14663c;
+    --accent-fg: #ffffff;
+    --accent-dim: #dcebe2;
+    --accent-dim-fg: #0d3f26;
+    --danger: #a3231c;
+    --warn: #7a4a00;
+    --code-key: #1f4bb8;
+    --code-lit: #0a6b52;
+    color-scheme: light;
+  }
   /* 🔴 音の再生機の貼り付きは紙には要らない(#1232 段 b)── 解かないと、紙の送りで頭に重なる */
   [data-pkc-field='attachment-preview']:has(> audio[data-pkc-field='attachment-media']) {
     position: static;

@@ -247,7 +247,7 @@ describe('焼いたマニュアル — 配色', () => {
      *   食い違ったまま全部緑、を作らない。
      */
     it('🔴 アプリの initialTheme() と同じ答え(保存 3 通り × OS 2 通り)', () => {
-      for (const stored of [null, 'dracula', 'bogus']) {
+      for (const stored of [null, 'dracula', 'bogus', 'auto']) {
         for (const dark of [true, false]) {
           localStorage.clear();
           if (stored !== null) localStorage.setItem(THEME_STORAGE_KEY, stored);

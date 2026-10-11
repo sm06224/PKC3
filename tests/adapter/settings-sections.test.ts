@@ -44,7 +44,7 @@ import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { chooseReadColumns } from '@adapter/ui/render/read-columns';
 import { chooseOpenPlace } from '@adapter/ui/render/open-place';
 import { chooseAppOpenTarget } from '@adapter/ui/render/app-open-target';
-import { THEMES } from '@adapter/ui/render/theme';
+import { chooseTheme, THEMES } from '@adapter/ui/render/theme';
 import { TEXT_SCALES } from '@features/text-scale';
 import { COLUMN_RULES } from '@features/column-rule';
 import { PROSE_ALIGNS } from '@features/prose-align';
@@ -356,7 +356,7 @@ describe('設定画面の節の登録表(#1382)', () => {
 
       // 変える前の値(= 最後の選択肢以外)を控え、最後の選択肢へ変える
       const nextThemeId = lastOf(THEMES).id;
-      html.setAttribute('data-pkc-theme', nextThemeId);
+      chooseTheme(html, nextThemeId);
       choosePageFormat(html, lastOf(PAGE_FORMATS).id);
       chooseProseAlign(html, lastOf(PROSE_ALIGNS).id);
       chooseTextScale(html, lastOf(TEXT_SCALES).id);

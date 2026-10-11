@@ -43,6 +43,29 @@ export function isTheme(v: string): v is Theme {
 }
 
 /**
+ * 「OS に合わせる」の保存値(#1386)。⚠ **配色ではない**(`tokens.css` に
+ * `[data-pkc-theme='auto']` は無い)── 選ぶと、その時々の OS の明暗に応じて
+ * 既定の 2 つ(`light` / `dark`)のどちらかを `<html>` に立てる。
+ * だから `THEMES`(= 実在する配色の一覧)には入れない。
+ */
+export const THEME_AUTO = 'auto';
+
+/** 選べるもの = 配色 + 「OS に合わせる」。 */
+export type ThemeChoice = Theme | typeof THEME_AUTO;
+
+export const THEME_AUTO_LABEL = 'OS に合わせる';
+
+export function isThemeChoice(v: string): v is ThemeChoice {
+  return v === THEME_AUTO || isTheme(v);
+}
+
+/** 選び方と OS の明暗から、実際に当てる配色を決める(純関数)。 */
+export function resolveTheme(choice: ThemeChoice, prefersDark: boolean): Theme {
+  if (choice !== THEME_AUTO) return choice;
+  return prefersDark ? 'dark' : 'light';
+}
+
+/**
  * ⚠ **端末ごとの保存は `pkc3.*` を 1 鍵ずつ**(2026-08-08 に書き換えた)。
  *
  * ここには長く「1 キーだけ。増やすなら設定機構を建ててからにする」と書いてあったが、
@@ -61,16 +84,29 @@ export function isTheme(v: string): v is Theme {
  */
 export const THEME_STORAGE_KEY = 'pkc3.theme';
 
-function readStored(): Theme | null {
+function readStored(): ThemeChoice | null {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
-    return v !== null && isTheme(v) ? v : null;
+    return v !== null && isThemeChoice(v) ? v : null;
   } catch {
     return null; // 使えない環境でも落ちない
   }
 }
 
-function write(theme: Theme): void {
+/**
+ * いまの選び方。⚠ **何も保存されていなければ「OS に合わせる」**(#1386)──
+ * 従来も「無ければ起動時に OS に従う」だったので、変わるのは**起動後に OS が切り替わったら
+ * 追従する**ことだけである(選んでいない人の見え方は、起動時点では 1 バイトも変わらない)。
+ */
+export function readThemeChoice(): ThemeChoice {
+  return readStored() ?? THEME_AUTO;
+}
+
+function osPrefersDark(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function write(theme: ThemeChoice): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
@@ -83,12 +119,7 @@ function write(theme: Theme): void {
  * ⚠ OS を見ないと、暗い部屋の人にいきなり白を出すことになる。
  */
 export function initialTheme(prefersDark?: boolean): Theme {
-  const stored = readStored();
-  if (stored) return stored;
-  const dark =
-    prefersDark ??
-    (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
-  return dark ? 'dark' : 'light';
+  return resolveTheme(readThemeChoice(), prefersDark ?? osPrefersDark());
 }
 
 /** 明暗の逆側(既定の 2 つの間を往復する)。 */
@@ -134,11 +165,35 @@ function syncThemeColor(target: HTMLElement): void {
   if (bg !== '') meta.content = bg;
 }
 
+/** OS の明暗の変化を聞いている間の「やめる」(聞いていなければ null)。 */
+let stopFollowing: (() => void) | null = null;
+
+/**
+ * 🔑 **「OS に合わせる」の間だけ OS の切り替えを聞く**(#1386)。
+ * ⚠ 呼ぶたびに前の listener を外してから付け直す ── 重ねて付くと、別の配色へ
+ *   替えた後も古い listener が上書きし続ける(外し忘れは画面で見分けがつかない)。
+ * ⚠ 聞くのは選び方が `auto` のときだけ。ほかの配色を選んだら外す。
+ */
+export function syncThemeFollow(target: HTMLElement): void {
+  stopFollowing?.();
+  stopFollowing = null;
+  if (readThemeChoice() !== THEME_AUTO) return;
+  if (typeof matchMedia !== 'function') return;
+  const mql = matchMedia('(prefers-color-scheme: dark)');
+  const onChange = (e: { matches: boolean }): void => {
+    applyTheme(target, resolveTheme(THEME_AUTO, e.matches));
+  };
+  mql.addEventListener('change', onChange);
+  stopFollowing = () => mql.removeEventListener('change', onChange);
+}
+
 /**
  * user が選んだ ── 適用して**保存する**。
  * ⚠ 起動時にはこれを呼ばない(呼ぶと M-7 が再発する)。
+ * `auto` なら OS の今の明暗で当て、以後の切り替えにも付いていく。
  */
-export function chooseTheme(target: HTMLElement, theme: Theme): void {
-  applyTheme(target, theme);
-  write(theme);
+export function chooseTheme(target: HTMLElement, choice: ThemeChoice): void {
+  write(choice);
+  applyTheme(target, resolveTheme(choice, osPrefersDark()));
+  syncThemeFollow(target);
 }

@@ -12,7 +12,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { codeOnly as stripComments } from './helpers/code-only';
 // ⚠ 配色の正本(#718)── `index.html` の inline script が持つ写しを突き合わせる
-import { THEMES, THEME_STORAGE_KEY, initialTheme } from '../src/adapter/ui/render/theme';
+import { THEMES, THEME_STORAGE_KEY, initialTheme, resolveTheme } from '../src/adapter/ui/render/theme';
 
 /**
  * 追跡対象のテキスト file を集める(生成物・依存は見ない)。
@@ -1514,7 +1514,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 509 の行を参照)。起動の予算は 507 → 509。
     // ⚠ 2026-10-11(#1525): `read-position-diagrams.smoke.spec.ts`(新設・test 1 本(図あり / なしの 2 件に展開)・起動 1 つ)→ 515 → 516。
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 510 の行を参照)。起動の予算は 509 → 510。
-    ).toBe(516);
+    // ⚠ 2026-10-11(#1386): `theme-boot.smoke.spec.ts` に 1 本足した(OS に合わせる)→ 516 → 517。起動の予算は 510 → 511。
+    // ⚠ 2026-10-11(#1387): `print.smoke.spec.ts` に 1 本足した(暗い配色で刷る)→ 517 → 518。起動の予算は 511 → 512。
+    ).toBe(518);
   });
 });
 
@@ -1624,6 +1626,7 @@ describe('\u{1f534} 起動より前に配色を当てる(#718)', () => {
       expect(run(null, prefersDark)).toBe(initialTheme(prefersDark));
       expect(run('solarized', prefersDark)).toBe('solarized');
       expect(run('nosuchtheme', prefersDark)).toBe(initialTheme(prefersDark));
+      expect(run('auto', prefersDark)).toBe(resolveTheme('auto', prefersDark));
     }
   });
 });

@@ -202,7 +202,7 @@ import {
 import { portableManualPage } from '@adapter/platform/portable-manual';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
-import { applyTheme, chooseTheme, initialTheme, isTheme } from '@adapter/ui/render/theme';
+import { applyTheme, chooseTheme, initialTheme, isThemeChoice, syncThemeFollow } from '@adapter/ui/render/theme';
 import {
   applyProseAlign,
   chooseProseAlign,
@@ -1086,6 +1086,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // 🎨 配色は**枠より先**に当てる ── 後だと一瞬だけ既定色で描かれて瞬く
   const bootTheme = initialTheme();
   applyTheme(document.documentElement, bootTheme);
+  // 「OS に合わせる」(何も保存していない場合を含む)なら、起動後の OS の切り替えにも付いていく
+  syncThemeFollow(document.documentElement);
   // 📄 紙面も**枠より先**(同じ理由 ── 後だと 42rem で 1 度組んでから広がる)。
   // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
@@ -4059,7 +4061,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ **一覧は 1 か所**(`THEMES`)。ここに `light | dark` のような
     // 別の一覧を書くと、テーマを足しても**黙って効かない**(実際に踏んだ)
     setTheme: (theme) => {
-      if (isTheme(theme)) chooseTheme(document.documentElement, theme);
+      if (isThemeChoice(theme)) chooseTheme(document.documentElement, theme);
     },
     /**
      * 📄 紙面(2026-08-08、user 裁定)。⚠ **一覧は 1 か所**(`PAGE_FORMATS`)。

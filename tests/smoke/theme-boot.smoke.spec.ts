@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp } from './helpers';
+import { clickReal, gotoApp } from './helpers';
 
 /**
  * 🔴 **OS がダークの端末で、最初に白い画面が出ない**(#718)。
@@ -66,4 +66,55 @@ test('🔴 OS がダークなら、body が生える前に配色が当たって�
   } finally {
     await context.close();
   }
+});
+
+/**
+ * 🔴 「OS に合わせる」を選ぶと、OS の明暗が切り替わったときに**再読み込み無しで**付いてくる(#1386)。
+ *
+ * 観測点は `<html data-pkc-theme>` と地の色(計算後)。⚠ 属性だけだと、属性は立つのに
+ * CSS が当たらない形を素通りする。対照群 = 配色(nord)を選んだ後は OS が変わっても動かない。
+ */
+test('🔴 OS に合わせる ── OS の明暗の切り替えに付いてくる / 別の配色を選ぶと止まる', async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="theme-select"]');
+  await select.selectOption('auto');
+  const bg = (): Promise<string> =>
+    page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'light');
+  const lightBg = await bg();
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'dark');
+  const darkBg = await bg();
+  expect(darkBg, '暗くなったのに地の色が変わっていない').not.toBe(lightBg);
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'light');
+  expect(await bg()).toBe(lightBg);
+
+  // 覚えている(再読み込みしても「OS に合わせる」のまま)
+  await page.reload();
+  await expect(page.locator('[data-pkc-slot="root"][data-pkc-boot="ready"]')).toBeAttached();
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await expect(page.locator('[data-pkc-field="theme-select"]')).toHaveValue('auto');
+
+  // 対照群 ── 配色を選んだら、OS が変わっても動かない
+  await page.locator('[data-pkc-field="theme-select"]').selectOption('nord');
+  // ⚠ 変化を待つ ── 待たずに見ると、外し忘れた listener が走る前に「nord のまま」と読んで通る。
+  //    emulateMedia の後に 2 フレーム送ると、`change` の配信と属性の書き込みが終わっている。
+  const frames = (): Promise<void> =>
+    page.evaluate(
+      () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
+    );
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await frames();
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'nord');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await frames();
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-theme', 'nord');
 });
