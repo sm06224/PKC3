@@ -1,7 +1,7 @@
 # 名前で呼べない操作(未登記)の全数分類(#582 段③の下準備)
 
 > 出どころ:`node scripts/operation-table.mjs --unregistered`(2026-10-11、base `b1d8d9eb`)が出す 295 件のうち、
-> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件増えて **228**)を、場面で分けて「名前で呼ぶ意味」を付けた。
+> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件増えて **228**。第 1 群で 18 件を登記して **210**)を、場面で分けて「名前で呼ぶ意味」を付けた。
 > 手順と結論は `docs/development/operation-model-2026-08.md` §5.3「未登記 219 件の分類」。この file は**その全数表**である。
 
 ## 読み方
@@ -15,9 +15,9 @@
 
 | 場面 | 件数 | 高 | 低 | 高の例 / 低の例 |
 |---|---|---|---|---|
-| ノートの整理 | 28 | 8 | 20 | つながりを足す / タグを足す / 本文に追記する ／ 低: この整理案を適用 / タグを付ける |
-| コピー・書き出し | 11 | 5 | 6 | Markdown をコピー / 書式付きでコピー / 選択範囲をコピー ／ 低: このブロックをコピー / この章をコピー |
-| 予定 | 11 | 6 | 5 | 予定を足す / 今月に戻る/今日 / 片付けたノート ／ 低: (前の日/次の日) / やること ほか |
+| ノートの整理 | 20 | 0 | 20 | (第 1 群で登記した ── 下の「登記した 18 件」) ／ 低: この整理案を適用 / タグを付ける |
+| コピー・書き出し | 7 | 0 | 7 | (第 1 群で 4 件を登記した) ／ 低: 選択範囲をコピー / このブロックをコピー / この章をコピー |
+| 予定 | 5 | 0 | 5 | (第 1 群で登記した) ／ 低: (前の日/次の日) / やること ほか |
 | SQL | 12 | 4 | 8 | SQL を実行 / 構造を見る / 構造をノートへ書き出す ／ 低: ○○ を外す / どのエンジンで実行するか |
 | 本文の整形 | 5 | 4 | 1 | 図を入れる / アイコンを入れる / 番号を振り直す ／ 低: (整形バーの書式ボタン) |
 | 録音・録画・時間 | 10 | 3 | 7 | 録音する / 画面を録画する / 時間を計る ／ 低: 再生をやめる / 選んだ範囲を消す |
@@ -36,20 +36,12 @@
 | 部品を取る | 7 | 0 | 7 | (なし) ／ 低: (取り込み中のやめる) / (Office の部品を選ぶ) |
 | 章・コードの編集箱 | 4 | 0 | 4 | (なし) ／ 低: コードの編集をやめる / 章の編集をやめる |
 | スマホ幅専用 | 2 | 0 | 2 | (なし) ／ 低: このノートの操作を開く / ← 一覧へ戻る ほか |
-| **合計** | **220** | **48** | **172** | |
+| **合計** | **202** | **29** | **173** | |
 
 ## ノートの整理
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `add-relation` | 高 | つながりを足す | `src/adapter/ui/render/inspector.ts:1400` | 開いているノートへの日常操作(足す先の入力は開いた先で聞く) |
-| `add-tag` | 高 | タグを足す | `src/adapter/ui/render/inspector.ts:1216` | 同上 |
-| `append-entry` | 高 | 本文に追記する | `src/adapter/ui/render/append-box.ts:173` | 追記は主要動線(開かずに済ませる道)。追記欄の字を読む |
-| `attach-file` | 高 | 添付する | `src/adapter/ui/render/shell.ts:627`<br>`src/adapter/ui/render/shell.ts:632` | ファイルを選ぶ入口。作る操作と並ぶ日常操作 |
-| `clear-entry-date` | 高 | 日付を外す | `src/adapter/ui/render/inspector.ts:1132`<br>`src/adapter/ui/render/inspector.ts:1125` | 開いているノートの日付を外す(片道にしない操作) |
-| `open-today` | 高 | 今日のノートを開く | `src/adapter/ui/render/browse.ts:116`<br>`src/adapter/ui/render/shell.ts:613` | 日付ノートの日常の入口 |
-| `refresh-query` | 高 | 集計を数え直す | `src/adapter/ui/render/query.ts:127` | 集計ノートの更新 |
-| `stack-save` | 高 | スタックを保存… | `src/adapter/ui/render/split-view.ts:340` | スタックの保存。名前入力を開く |
 | `apply-plan` | 低 | この整理案を適用 | `src/adapter/ui/render/inspector.ts:1711` | 整理案を見たあとの確認ボタン |
 | `bulk-tag-add` | 低 | タグを付ける | `src/adapter/ui/render/filer.ts:511` | 複数選択してから使う(選択が前提) |
 | `bulk-tag-remove` | 低 | タグを外す | `src/adapter/ui/render/filer.ts:513` | 同上 |
@@ -75,17 +67,48 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `copy-note-md` | 高 | Markdown をコピー | `src/adapter/ui/render/detail.ts:2153` | 開いているノートをコピー |
-| `copy-note-rich` | 高 | 書式付きでコピー | `src/adapter/ui/render/detail.ts:2155` | 同上 |
-| `copy-selection-md` | 高 | 選択範囲をコピー | `src/adapter/ui/render/detail.ts:2157` | 選択範囲をコピー |
-| `export-messages` | 高 | メッセージを書き出す | `src/adapter/ui/render/settings/messages.ts:76` | バグ報告の取り出し口。探す人が居る |
-| `export-settings` | 高 | 設定を書き出す | `src/adapter/ui/render/commands.ts:408` | 設定の持ち出し |
+| `copy-selection-md` | 低 | 選択範囲をコピー | `src/adapter/ui/render/detail.ts:2157` | 🔴 第 1 群で登記を試みて外した:一覧を開いた瞬間に本文の選択が消え、ボタン自身も押せなくなる(実ブラウザで測った)。選択を運ぶ設計が別に要る |
 | `copy-block-md` | 低 | このブロックをコピー | `src/features/entry-actions.ts:941`<br>`src/features/entry-actions.ts:948` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `copy-chapter-md` | 低 | この章をコピー | `src/features/entry-actions.ts:814`<br>`src/features/entry-actions.ts:894` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `copy-section-link` | 低 | 章のリンクをコピー | `src/features/entry-actions.ts:826`<br>`src/features/entry-actions.ts:900` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `copy-section-ref` | 低 | 章の参照をコピー | `src/features/entry-actions.ts:821`<br>`src/features/entry-actions.ts:898` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `paste-many-copied` | 低 | 選んで、並べて、追記の欄へ入れる | `src/adapter/ui/actions/copy-history-menu.ts:56` | コピー履歴のメニューの中の項目 |
 | `use-copied` | 低 | もう一度コピーする | `src/adapter/ui/actions/copy-history-menu.ts:48` | コピー履歴メニューの項目 |
+
+## 登記した 18 件(#582 段③ 第 1 群、2026-10-11)
+
+🟣 Gemini の回答(#1163 の依頼 16)「**場面ごとに 1 群ずつ足す**」の第 1 群 ── 上の 3 場面の「高」のうち 18 件を、
+「操作を探す」と左の `>` の一覧に登記した(`KEY_COMMANDS`。鍵は付けない)。命令 id は押しボタンの
+`data-pkc-action` と同じ綴りで、受け手は画面のボタンそのもの(`binder.ts` の `SHORTCUT_BUTTON`)。
+**上の全数表(`高` / `低` の行)からは外した**(残る 1 件 `copy-selection-md` は上の表に 低 として置いた)(`tests/operation-table.test.ts` が「表の行 = 未登記の在庫」で突き合わせる)。
+
+| 操作 | 状態 | 画面の字(元の表) | 一覧の字 | 押し所 |
+|---|---|---|---|---|
+| `add-relation` | 登記済み | つながりを足す | (下記) | `src/adapter/ui/render/inspector.ts:1400` |
+| `add-tag` | 登記済み | タグを足す | (下記) | `src/adapter/ui/render/inspector.ts:1216` |
+| `append-entry` | 登記済み | 本文に追記する | (下記) | `src/adapter/ui/render/append-box.ts:173` |
+| `attach-file` | 登記済み | 添付する | (下記) | `src/adapter/ui/render/shell.ts:627`<br>`src/adapter/ui/render/shell.ts:632` |
+| `clear-entry-date` | 登記済み | 日付を外す | (下記) | `src/adapter/ui/render/inspector.ts:1132`<br>`src/adapter/ui/render/inspector.ts:1125` |
+| `open-today` | 登記済み | 今日のノートを開く | (下記) | `src/adapter/ui/render/browse.ts:116`<br>`src/adapter/ui/render/shell.ts:613` |
+| `refresh-query` | 登記済み | 集計を数え直す | (下記) | `src/adapter/ui/render/query.ts:127` |
+| `stack-save` | 登記済み | スタックを保存… | (下記) | `src/adapter/ui/render/split-view.ts:340` |
+| `copy-note-md` | 登記済み | Markdown をコピー | (下記) | `src/adapter/ui/render/detail.ts:2153` |
+| `copy-note-rich` | 登記済み | 書式付きでコピー | (下記) | `src/adapter/ui/render/detail.ts:2155` |
+| `export-messages` | 登記済み | メッセージを書き出す | (下記) | `src/adapter/ui/render/settings/messages.ts:76` |
+| `export-settings` | 登記済み | 設定を書き出す | (下記) | `src/adapter/ui/render/commands.ts:408` |
+| `schedule-quick-add` | 登記済み | 予定を足す | (下記) | `src/adapter/ui/render/schedule.ts:742` |
+| `schedule-today` | 登記済み | 今月に戻る/今日 | (下記) | `src/adapter/ui/render/schedule.ts:662` |
+| `export-schedule-ics` | 登記済み | 予定を .ics で書き出す | (下記) | `src/adapter/ui/render/schedule.ts:777` |
+| `toggle-show-archived` | 登記済み | 片付けたノート | (下記) | `src/adapter/ui/render/schedule.ts:776` |
+| `toggle-show-done` | 登記済み | 済んだ行 | (下記) | `src/adapter/ui/render/schedule.ts:774` |
+| `toggle-show-undated` | 登記済み | 日付のない項目 | (下記) | `src/adapter/ui/render/schedule.ts:772` |
+
+- 🔑 一覧の字(`keymap.ts` の `label`)は押しボタンの字と同じ(`tests/adapter/palette-scene-batch.test.ts` が source から引いて突き合わせる)。**違うのは 4 件**:
+  `toggle-show-*` の 3 件(画面の字は件数つきの「済み(3)」「片付けたもの(2)」「日付のないもの(5)」で、一覧に出すには「出す・隠す」の動詞が要る。頭の語は画面と同じ)/
+  `attach-file`(画面は帯の「添付」と、`⋯` のメニューの「添付する」の 2 つ ── 後者に合わせた)。
+  ⚠ 元の表の `schedule-today` の「今月に戻る/今日」は、後ろの「今日」が日・週の表示の `schedule-day-go` のボタンなので、`schedule-today` の字は「今月に戻る」だけである。
+- 🔑 押せる条件は**ボタンが画面に在るか**:別の画面にいる間 / ノートを選んでいない間は、一覧が「いまは押せません ── 〜のときだけ効きます」と言う。
+  行ごと隠してある間(日付が無い / 済み・片付け・日付なしが 0 件)も押せない。
 
 ## 板
 
@@ -118,12 +141,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `schedule-quick-add` | 高 | 予定を足す | `src/adapter/ui/render/schedule.ts:742` | 予定の日常操作 |
-| `schedule-today` | 高 | 今月に戻る/今日 | `src/adapter/ui/render/schedule.ts:662` | 予定面を今日へ |
-| `export-schedule-ics` | 高 | 予定を .ics で書き出す | `src/adapter/ui/render/schedule.ts:777` | 予定面の書き出し(連絡先の vCard と同じ置き場。分類の後、#1562 で足した) |
-| `toggle-show-archived` | 高 | 片付けたノート | `src/adapter/ui/render/schedule.ts:776` | 予定面の表示の切り替え |
-| `toggle-show-done` | 高 | 済んだ行 | `src/adapter/ui/render/schedule.ts:774` | 同上 |
-| `toggle-show-undated` | 高 | 日付のない項目 | `src/adapter/ui/render/schedule.ts:772` | 同上 |
 | `schedule-day-go` | 低 | (前の日/次の日) | `src/adapter/ui/render/schedule-day.ts:58`<br>`src/adapter/ui/render/schedule-week.ts:65` | 日表示の前後。押したボタンが向きを運ぶ |
 | `schedule-mode` | 低 | やること ほか | `src/adapter/ui/render/schedule.ts:687` | 予定面の表示の切り替え(押した見出しが運ぶ) |
 | `schedule-nav` | 低 | (前へ/次へ/今月) | `src/adapter/ui/render/schedule.ts:653`<br>`src/adapter/ui/render/schedule.ts:396` | 押したボタンが向きを運ぶ |

@@ -750,6 +750,161 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: 'パーマリンク URL アドレス 共有 permalink',
   },
   /**
+   * 🔴 **名前で呼べなかった「高」の操作を、場面ごとに足す**(#582 段③。🟣 Gemini の回答 =
+   *   #1163 の依頼 16「場面ごとに 1 群ずつ足す」。第 1 群 = ノートの整理 / コピー・書き出し / 予定)。
+   *
+   * 🔑 **命令 id は押しボタンの `data-pkc-action` と同じ綴り**にした(`tests/features/keymap-scene-batch.test.ts` が
+   *   全数で突き合わせる)── 受け手は `binder.ts` の `SHORTCUT_BUTTON`(画面のボタンをそのまま押す。
+   *   2 本目の実行経路を作らない)。字(`label`)は**ボタンの画面の字**と揃える。
+   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)── 名前で呼ぶだけの操作。
+   * ⚠ `note` の末尾の「(…のときだけ効きます)」は**押せないときの理由**として一覧に出る
+   *   (そのボタンが画面に無い間は `note` がそのまま理由になる ── `palette-rows.ts` の `reasonOf`)。
+   */
+  {
+    id: 'add-relation',
+    label: 'つながりを足す',
+    contexts: ['global'],
+    defaults: [],
+    note: 'つなぐ先の題名を入れて、選んでいるノートにつながりを付けます。欄が空なら、その欄へ移ります(ノートを選んでいるときだけ効きます)',
+    alias: 'つながり リンク 関連 関係',
+  },
+  {
+    id: 'add-tag',
+    label: 'タグを足す',
+    contexts: ['global'],
+    defaults: [],
+    note: 'このノートにタグを足します。欄が空なら、その欄へ移ります(ノートを選んでいるときだけ効きます)',
+    alias: 'タグ 付ける ラベル 分類',
+  },
+  {
+    id: 'append-entry',
+    label: '本文に追記する',
+    contexts: ['global'],
+    defaults: [],
+    note: '追記欄に書いた字を、開いているノートの本文に足します。欄が空なら、その欄へ移ります(追記欄が出ているノートでだけ効きます)',
+    alias: '追記 追加 書き足す',
+  },
+  {
+    id: 'attach-file',
+    label: '添付する',
+    contexts: ['global'],
+    defaults: [],
+    note: 'ファイルを選んで、開いているノートの本文に取り込みます(ファイルの選択画面が開きます)',
+    alias: '添付 ファイル 画像 取り込み アップロード',
+  },
+  {
+    id: 'clear-entry-date',
+    label: '日付を外す',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートの日付を外します。ノートは消えません(日付のあるノートを開いているときだけ効きます)',
+    alias: '日付 予定 外す 消す',
+  },
+  {
+    id: 'open-today',
+    label: '今日のノートを開く',
+    contexts: ['global'],
+    defaults: [],
+    note: '今日の日付のノートを開きます。無ければ作ります',
+    alias: '今日 日記 デイリー 日付ノート',
+  },
+  {
+    id: 'refresh-query',
+    label: '集計を数え直す',
+    contexts: ['global'],
+    defaults: [],
+    note: '書き換えた後の中身で、集計のノートを数え直します(集計のノートを開いているときだけ効きます)',
+    alias: '集計 クエリ 更新 再計算',
+  },
+  {
+    id: 'stack-save',
+    label: 'スタックを保存…',
+    contexts: ['global'],
+    defaults: [],
+    note: 'スタックに載せてある並びを、リンクの箇条書きのノートとして保存します(スタックにノートを載せているときだけ効きます)',
+    alias: 'スタック 保存 並び 横に並べる',
+  },
+  {
+    id: 'copy-note-md',
+    label: 'Markdown をコピー',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートの本文を、Markdown の原文のままコピーします(ノートを読んでいるときだけ効きます)',
+    alias: 'コピー マークダウン md 原文 クリップボード',
+  },
+  {
+    id: 'copy-note-rich',
+    label: '書式付きでコピー',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートを、見たままの書式つきでコピーします。Word やメールに貼れます(ノートを読んでいるときだけ効きます)',
+    alias: 'コピー 書式 リッチ HTML Word メール 貼り付け',
+  },
+  {
+    id: 'export-messages',
+    label: 'メッセージを書き出す',
+    contexts: ['global'],
+    defaults: [],
+    note: 'メッセージのノートを .md ファイルで保存します。バグ報告に貼れます(システムの「メッセージ」を開いているときだけ効きます)',
+    alias: 'メッセージ 書き出し バグ報告 ログ 保存',
+  },
+  {
+    id: 'export-settings',
+    label: '設定を書き出す',
+    contexts: ['global'],
+    defaults: [],
+    note: '見た目やショートカットキーの割り当てなどを 1 つのファイルにして保存します。ノートは入りません(システムの「設定」を開いているときだけ効きます)',
+    alias: '設定 書き出し エクスポート 保存 移行',
+  },
+  {
+    id: 'schedule-quick-add',
+    label: '予定を足す',
+    contexts: ['global'],
+    defaults: [],
+    note: '予定の画面で、書いた字と日付から予定を 1 件足します。欄が空なら、その欄へ移ります(予定の画面を開いているときだけ効きます)',
+    alias: '予定 追加 スケジュール カレンダー タスク',
+  },
+  {
+    id: 'schedule-today',
+    label: '今月に戻る',
+    contexts: ['global'],
+    defaults: [],
+    note: '予定の画面を、今月の表示に戻します(予定の画面を開いているときだけ効きます)',
+    alias: '予定 今日 今月 カレンダー 戻る',
+  },
+  {
+    id: 'export-schedule-ics',
+    label: '予定を .ics で書き出す',
+    contexts: ['global'],
+    defaults: [],
+    note: 'いま予定の画面に出している予定を .ics ファイルにして保存します。ほかのカレンダーのアプリに取り込めます(予定の画面を開いているときだけ効きます)',
+    alias: '予定 ics iCalendar カレンダー 書き出し エクスポート',
+  },
+  {
+    id: 'toggle-show-done',
+    label: '済みの予定を出す・隠す',
+    contexts: ['global'],
+    defaults: [],
+    note: '予定の画面で、済んだ予定を一覧に出すか隠すかを切り替えます(予定の画面を開いていて、済んだ予定があるときだけ効きます)',
+    alias: '予定 済み 完了 表示 切り替え',
+  },
+  {
+    id: 'toggle-show-archived',
+    label: '片付けたものを出す・隠す',
+    contexts: ['global'],
+    defaults: [],
+    note: '予定の画面で、片付けたノートの予定を一覧に出すか隠すかを切り替えます(予定の画面を開いていて、片付けたノートの予定があるときだけ効きます)',
+    alias: '予定 片付け 表示 切り替え',
+  },
+  {
+    id: 'toggle-show-undated',
+    label: '日付のないものを出す・隠す',
+    contexts: ['global'],
+    defaults: [],
+    note: '予定の画面で、日付のない項目を一覧に出すか隠すかを切り替えます(予定の画面を開いていて、日付のない項目があるときだけ効きます)',
+    alias: '予定 日付なし 表示 切り替え',
+  },
+  /**
    * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5、2026-09-04)。
    *
    * ⚠ 直す前は「操作を探す」で「窓」「付箋」「ウィンドウ」と打っても **0 行**だった ──

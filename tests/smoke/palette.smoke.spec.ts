@@ -132,6 +132,54 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
   await manualWin.close();
 
+  /**
+   * ⑧ 🔴 **場面ごとに足した操作(#582 段③ 第 1 群)が、実ブラウザで走る**。
+   * ⚠ 同じ起動の続き(新しい起動を足さない)。見るのは 3 つ:
+   *   ア 開いていない場面の操作は**灰色 + 理由**(予定の画面を開いていない)
+   *   イ 欄が先に要る操作(タグを足す)は、空なら**欄へ移り**、字を入れて呼び直すと**足せる**
+   *   ウ 「今日のノートを開く」は、押しボタンと同じく今日のノートを作って開く
+   */
+  await createEntry(page, 'text');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  const ask = async (q: string): Promise<void> => {
+    await page.keyboard.press('Control+Shift+P');
+    await expect(dialog).toBeVisible();
+    await page.locator('[data-pkc-field="palette-filter"]').fill(q);
+  };
+  const rowOf = (id: string) => page.locator(`[data-pkc-field="palette-row"][data-pkc-command="${id}"]`);
+  await ask('予定を足す');
+  await expect(rowOf('schedule-quick-add'), '予定の画面を開いていないのに押せる顔').toBeDisabled();
+  await expect(rowOf('schedule-quick-add').locator('[data-pkc-field="palette-why"]')).toContainText(
+    '予定の画面を開いているとき',
+  );
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+
+  const tagField = page.locator('[data-pkc-field="tag-add-input"]');
+  await ask('タグを足す');
+  await expect(rowOf('add-tag'), 'ノートを選んでいるのに押せない').toBeEnabled();
+  await expect(page.locator('[data-pkc-field="palette-row"]').first()).toHaveAttribute('data-pkc-command', 'add-tag');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(tagField, '欄が空なのに、欄へ移っていない').toBeFocused();
+  await page.keyboard.type('烏龍');
+  await ask('タグを足す');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.locator('[data-pkc-field="inspector-tag-chips"]'),
+    '字を入れて呼び直したのに、タグが足されていない',
+  ).toContainText('烏龍');
+
+  const listed = page.locator('[data-pkc-region="sidebar"] [data-pkc-entry]');
+  const listedBefore = await listed.count();
+  await ask('今日のノートを開く');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(() => listed.count(), { message: '今日のノートが作られていない' })
+    .toBe(listedBefore + 1);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
