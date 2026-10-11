@@ -14,6 +14,7 @@ import {
   type ReadColumns,
 } from '@features/read-columns';
 import { buildChoiceRow, syncChoiceRow } from '../choice-buttons';
+import { BODY_HOST_SELECTOR } from '../detail';
 import { currentReadColumns, lastReadPaneMetrics } from '../read-columns';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
@@ -41,7 +42,7 @@ function syncColumnsEffective(region: ParentNode, chosen: ReadColumns): void {
    * ⚠ **生きた採寸を優先する** ── 読む面が見えている場面(将来この注記を
    *   別の面へ出すとき)では、憶えた値より今の値のほうが正しい。
    */
-  const host = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const host = document.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
   const live = host?.getBoundingClientRect().width ?? 0;
   const liveFont = host === null ? 0 : Number.parseFloat(getComputedStyle(host).fontSize);
   const remembered = lastReadPaneMetrics();

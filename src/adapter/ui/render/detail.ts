@@ -155,7 +155,7 @@ import { appKeymap, type KeymapStore } from './keymap';
 import { appPhoneLinks } from './phone-links';
 import { appDateLinks } from './date-links';
 import { appColorSwatch } from './color-swatch';
-import { syncRelativeDays } from './relative-days';
+import { appRelativeDays, syncRelativeDays } from './relative-days';
 import { appVoiceBoostRouter } from './voice-boost';
 import {
   appExtensionGrants,
@@ -289,6 +289,47 @@ export function readingRenderOptions(
  * ⚠ 綴りを写さない ── 待つ側(`binder.ts` の目次)はここを引く(§7)。
  */
 export const PAINTED_ATTR = 'data-pkc-painted';
+
+/**
+ * 🔴 **編集のあいだ持ち越している読む面の印**(#1467 段 5)。値は持ち越しているノートの lid。
+ *
+ * 本文の器を `detail-body` で探す所(`binder.ts` に十数か所・`settings/read-columns.ts`)が、編集中に持ち越した側を
+ * 掴まないよう、**探す側がこの印を除く**(`BODY_HOST_SELECTOR`)。
+ * 🔴 **器の `data-pkc-field` を替える道は捨てた**(実測 2026-10-11): 本文の器の `data-pkc-field` は `app.css` の子孫選択子
+ *   (`[data-pkc-field='detail-body'] img` など)に使われているので、替えて戻すと、戻した瞬間に**本文の全要素のスタイルが
+ *   引き直される** ── 20,001 塊のノートで戻す 75 ms が 355 ms になった。この印は選択子に使われていないので、付け外しで
+ *   スタイルが動かない。
+ */
+export const HELD_ATTR = 'data-pkc-held';
+/**
+ * 🔴 **読む面の本文の器を探す選択子**(持ち越して隠している器を除く)。⚠ 探す所は**これを引く**(綴りを写さない ── §7)。
+ * 編集中は読む面の本文の器は無い、が今までの前提 ── 持ち越した器を掴むと「編集中なのに読む面がある」ことになる。
+ */
+export const BODY_HOST_SELECTOR = `[data-pkc-field="detail-body"]:not([${HELD_ATTR}])`;
+/**
+ * 持ち越している間の器の style。`content-visibility: hidden` は中身の配置を捨てずに描かない(戻すとき配置を作り直さない)。
+ * `contain-intrinsic-size: 0 0` + 余白 0 + `height: 0` で、編集の面の寸法に出ない。
+ * 🔴 `height: 0` は**段組みのために要る**: 段組みのとき器には `fitColumnHeight` が `height: Npx` を inline で書いており、
+ *   `contain-intrinsic-size` はそれを上書きしない ── 持ち越した器が段の高さのまま居座り、編集の面を押し下げて
+ *   「編集に入ると段組みが解ける」(smoke `read-columns` の 2 本が落ちて分かった)。戻すときは saved の style を書き戻す。
+ */
+export const HELD_STYLE =
+  'content-visibility:hidden;contain-intrinsic-size:0 0;margin:0;padding:0;border:0;height:0;overflow:hidden;flex:none;';
+
+/** 編集のあいだ持ち越した読む面(控え)。 */
+interface HeldView {
+  readonly lid: string;
+  /** 持ち越した本文の器。⚠ 区画ごと**同じ節点**を戻す(作り直さない)。 */
+  readonly host: HTMLElement;
+  /** `applyBlocks` の台帳。⚠ 戻って本文が変わったときの差分の土台。 */
+  readonly view: BlockView;
+  /** 描き終えた本文(これと同じなら描き直さない)。 */
+  readonly body: string;
+  /** 描き終えたときの描画設定の鍵(`paintKeyOf`)。 */
+  readonly key: string;
+  /** 持ち越す前の `style` 属性(戻すとき書き戻す)。 */
+  readonly style: string | null;
+}
 
 /**
  * 読んでいた場所を憶えておくノートの数(#690 ①)。
@@ -528,6 +569,17 @@ export class DetailRenderer {
   private bodyKind: 'md' | 'attachment' | 'loading' | null = null;
   private bodyView: BlockView = EMPTY_VIEW;
   /**
+   * 🔴 **編集のあいだ持ち越している読む面**(#1467 段 5)。⚠ 寿命は「その編集が終わるまで」── 別のノートへ移る /
+   * ノートが消える / 編集のまま別の画面へ / 窓を閉じる、で必ず捨てる(`dropHeldDom`・`releaseHeld`・`disposeLends()`)。
+   * 戻るときの鍵(本文と描画設定)が合えば**ワーカーを呼ばず同じ節点を戻す**。
+   */
+  private held: HeldView | null = null;
+  /** 最後に描き終えた本文と、そのときの描画設定の鍵(持ち越すときの控え)。 */
+  private paintedBody: string | null = null;
+  private paintedKey: string | null = null;
+  /** 飛んでいる添付の読み込み(画像・音・動画・囲み)の数。⚠ 0 でなければ持ち越さない(読み込み中の節点を止めない)。 */
+  private hydrating = 0;
+  /**
    * 図の面倒を**塊ごと**に持つ(全体に掛け直すと生きている `<img>` を壊す)。
    * ⚠ 新しい塊を作る前に `prune()` して、**器が全部外れた塊は畳む**
    * (P8 段⑰。レビュー H-5 ── 積もると PNG の URL と観測器が残り続ける)。
@@ -743,8 +795,16 @@ export class DetailRenderer {
   /** 図の後始末(ObjectURL の revoke と観測の解除)。 */
   private disposeMermaid: (() => void) | null = null;
 
-  private disposeLends(): void {
-    this.lends.disposeAll();
+  /**
+   * @param keepView 真なら**読む面が借りている物(画像の URL・図・SQL・板の中身)は返さない**
+   *   (編集のあいだ読む面を持ち越すとき ── #1467 段 5)。⚠ 編集の面が借りた分は、戻ったあとの
+   *   `pruneLends` / `pruneScopes`(画面に残っていない物だけ返す)が返す。偽なら全部返し、持ち越しも捨てる。
+   */
+  private disposeLends(keepView = false): void {
+    if (!keepView) {
+      this.dropHeldDom();
+      this.lends.disposeAll();
+    }
     this.hydrateToken += 1;
     // 🔴 **囲みが読み込んだ字も手放す**(#444 段①)── 別のノートへ移るときに
     //    握ったままだと、その本文が常駐する(2026-07-27「速やかな破棄」)
@@ -757,11 +817,13 @@ export class DetailRenderer {
     this.unwatchSelectionStats = null;
     this.disposeMermaid?.();
     this.disposeMermaid = null;
-    for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
-    this.sqlEmbeds.release();
-    // 🔴 板に置いたノートの図・画像も返す(#529 W3-②)── 面を捨てるとき ObjectURL を残さない
-    this.placeEmbeds.release();
-    this.sectionEmbeds.release();
+    if (!keepView) {
+      for (const sc of this.mermaidScopes.splice(0)) sc.dispose();
+      this.sqlEmbeds.release();
+      // 🔴 板に置いたノートの図・画像も返す(#529 W3-②)── 面を捨てるとき ObjectURL を残さない
+      this.placeEmbeds.release();
+      this.sectionEmbeds.release();
+    }
     this.readAnchorHold?.dispose();
     this.readAnchorHold = null;
     this.backToTopHandle?.dispose();
@@ -794,6 +856,120 @@ export class DetailRenderer {
    */
   private pruneLends(): void {
     this.lends.prune();
+  }
+
+  /**
+   * 描いた本文の鍵 ── 読む面の描画に効く**設定**(本文以外)を 1 本に畳む。
+   * ⚠ 戻るときこれが同じでなければ持ち越した節点は使わない(旗を切り替えた後に古い装飾が残る)。
+   */
+  private paintKeyOf(containerId: string, allowExternalImages: boolean): string {
+    return [
+      containerId,
+      allowExternalImages,
+      appDateLinks.enabled(),
+      appColorSwatch.enabled(),
+      appPhoneLinks.enabled(),
+      appCodeCollapse.enabled(),
+      appInlineCodeCopy.enabled(),
+      appRelativeDays.enabled(),
+    ].join('|');
+  }
+
+  /** 飛んでいる添付の読み込みを数える(持ち越してよい静けさかの判定)。 */
+  private tracked<T>(job: Promise<T>): Promise<T> {
+    this.hydrating += 1;
+    return job.finally(() => {
+      this.hydrating -= 1;
+    });
+  }
+
+  /**
+   * 🔴 **編集に入るとき、読む面を捨てずに持ち越す**(#1467 段 5。設計 `long-note-open-save-2026-10.md` §5-A)。
+   *
+   * 本文の器を**その場に残し**(⚠ 動かさない ── 動かすと配置が壊れ、戻すとき作り直しになる)、`content-visibility: hidden`
+   * にして、ほかの子(題名・帯・概要)だけ外す。戻るとき本文と設定の鍵が同じなら**同じ節点を戻すだけ**になる。
+   * 持ち越さない(今までの経路: 全部捨てる)のは、描き終えていない / 読み込みが飛んでいる / 章の下書きが開いている /
+   * `content-visibility` が使えない、とき。
+   * @returns 持ち越したか。⚠ 偽のときは何も触っていない。
+   */
+  private holdReadingView(lid: string, wasView: boolean): boolean {
+    const host = this.bodyHost;
+    if (
+      host === null ||
+      !wasView ||
+      this.skeletonLid !== lid ||
+      this.bodyKind !== 'md' ||
+      !host.isConnected ||
+      host.parentElement !== this.region ||
+      host.getAttribute(PAINTED_ATTR) !== lid ||
+      this.paintedBody === null ||
+      this.paintedKey === null ||
+      this.hydrating > 0 ||
+      this.pendingSectionInstall !== null ||
+      this.sectionBoxFor !== null
+    )
+      return false;
+    // ⚠ 使えない環境(古いブラウザ)は今までの経路へ。単体の疑似 DOM は `CSS` を持たないので通す
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && !CSS.supports('content-visibility', 'hidden'))
+      return false;
+    this.held = {
+      lid,
+      host,
+      view: this.bodyView,
+      body: this.paintedBody,
+      key: this.paintedKey,
+      style: host.getAttribute('style'),
+    };
+    // 🔴 鳴っている音・動画は止める(今までは節点ごと消えて止まっていた ── 見えない所で鳴り続けない)
+    for (const m of host.querySelectorAll<HTMLMediaElement>('audio,video')) m.pause?.();
+    host.removeAttribute(PAINTED_ATTR);
+    host.setAttribute(HELD_ATTR, lid);
+    const style = this.held.style ?? '';
+    host.setAttribute('style', style === '' || style.trimEnd().endsWith(';') ? style + HELD_STYLE : `${style};${HELD_STYLE}`);
+    return true;
+  }
+
+  /** 持ち越した読む面を取り出す(戻るとき)。別のノート・器が外れている・控えが無い、は `null`(= 今までの経路)。 */
+  private claimHeld(lid: string): HeldView | null {
+    const h = this.held;
+    if (h === null || h.lid !== lid || !h.host.isConnected || h.host.parentElement !== this.region) return null;
+    return h;
+  }
+
+  /** 取り出した器を、読む面として見せる(印と style を戻す)。 */
+  private unholdReadingView(h: HeldView): void {
+    const host = h.host;
+    host.removeAttribute(HELD_ATTR);
+    if (h.style === null) host.removeAttribute('style');
+    else host.setAttribute('style', h.style);
+    this.held = null;
+  }
+
+  /** 持ち越しを捨てる(節点だけ。借りた物の返却は呼び側の `disposeLends` / `pruneLends`)。 */
+  private dropHeldDom(): void {
+    if (this.held === null) return;
+    this.held.host.remove();
+    this.held = null;
+  }
+
+  /**
+   * 🔴 **持ち越しを捨てて、借りていた物を返す**(編集のまま別の画面へ出たとき ── `center.ts` が呼ぶ)。
+   * ⚠ 編集は続いている(編集の面はそのまま)。捨てるのは読む面の控えだけ。
+   */
+  releaseHeld(): void {
+    if (this.held === null) return;
+    this.dropHeldDom();
+    this.pruneLends();
+    pruneScopes(this.mermaidScopes);
+    // 🔴 板・節の埋め込みが借りた図の URL・画像も返す ── どちらも**読む面の器**(`bodyHost`)にだけ描く物で、
+    //    編集の面は使わない(使うのは下見の SQL の答えだけ ── `sqlEmbeds` は編集の下見も共有するので触らない)
+    this.placeEmbeds.release();
+    this.sectionEmbeds.release();
+  }
+
+  /** 持ち越している読む面があるか(test・`center.ts` 用)。 */
+  get holdsReadingView(): boolean {
+    return this.held !== null;
   }
 
   /**
@@ -1294,14 +1470,26 @@ export class DetailRenderer {
 
     // 🔴 骨組みは**同じノートを見ている間は作り直さない**(scroll を殺さない)
     const fresh = this.skeletonLid !== lid || !this.bodyHost?.isConnected;
+    /**
+     * 🔴 **編集で持ち越した読む面があれば、それを使う**(#1467 段 5)。本文が届いていて(`body !== null`)、
+     * 添付ではないときだけ ── それ以外は今までどおり全部作り直す(`disposeLends()` が持ち越しも捨てる)。
+     */
+    const adopted =
+      fresh && body !== null && state.entryMetas.get(lid)?.archetype !== 'attachment' ? this.claimHeld(lid) : null;
     if (fresh) {
       // 🔴 **別のノートへ移る直前に、いまの場所を憶える**(#690 ①)。
       //    ⚠ 器を空にする**前**に読む ── 後だと中身が無く 0 に丸められた値を憶える
       //    (`scroll-memory.ts` の「順番が本体」と同じ罠)
       if (this.skeletonLid !== null && this.skeletonLid !== lid)
         this.rememberReadPosition(this.skeletonLid);
-      this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
-      this.region.textContent = '';
+      if (adopted === null) {
+        this.disposeLends(); // 前の表示が借りた URL はここで寿命終端
+        this.region.textContent = '';
+      } else {
+        // 編集の面だけ外す(持ち越した本文の器は**その場に残す** ── 動かすと配置を作り直す)。借りた物は返さない
+        this.disposeLends(true);
+        for (const c of Array.from(this.region.childNodes)) if (c !== adopted.host) c.remove();
+      }
       this.dropBarState(); // ⚠ slot ごと作り直すので、いま出している形も忘れる
       /**
        * 🔴 **開いているノートの題名は `h1`**(#720。cowork 評価レポート)。
@@ -1331,16 +1519,12 @@ export class DetailRenderer {
       //    差分が「知らない子」として消す(そして次の描画で戻るので点滅する)
       this.noticeSlot = document.createElement('div');
       this.noticeSlot.setAttribute('data-pkc-field', this.field('detail-notice-slot'));
-      this.bodyHost = document.createElement('div');
-      this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
-      this.region.append(
-        this.titleEl,
-        this.readingTimeEl,
-        this.barSlot,
-        this.panelSlot,
-        this.noticeSlot,
-        this.bodyHost,
-      );
+      this.bodyHost = adopted !== null ? adopted.host : document.createElement('div');
+      if (adopted === null) this.bodyHost.setAttribute('data-pkc-field', this.field('detail-body-host'));
+      const head = [this.titleEl, this.readingTimeEl, this.barSlot, this.panelSlot, this.noticeSlot];
+      // ⚠ 持ち越した器は動かさず、その手前へ差し込む
+      if (adopted !== null) this.bodyHost.before(...head);
+      else this.region.append(...head, this.bodyHost);
       // 🔴 フォルダの概要は本文の**下**(説明が先、概要が後 ── #1222)。留めた枠には持たない
       this.overviewFp = null;
       if (this.pinnedLid === null) {
@@ -1362,10 +1546,21 @@ export class DetailRenderer {
       if (this.pinnedLid === null) this.searchJumpBar = installSearchJumpBar(this.region);
       this.skeletonLid = lid;
       // 🔑 別のノートへ移った ── 板の中身の控えも「頼んだ」も持ち越さない(読めなかった lid を頼み直せる)
-      this.placeEmbeds.reset();
-      this.sectionEmbeds.reset();
+      // 🔑 持ち越した読む面を使うなら**同じノート**なので、板の中身の控えも持ち越す
+      if (adopted === null) {
+        this.placeEmbeds.reset();
+        this.sectionEmbeds.reset();
+      }
       this.bodyKind = null;
       this.bodyView = EMPTY_VIEW;
+      if (adopted !== null) {
+        this.unholdReadingView(adopted);
+        this.bodyKind = 'md';
+        this.bodyView = adopted.view;
+        // 編集の面が借りた物(編集の節点は外した)を返す。⚠ 持ち越した側は画面に残っているので返らない
+        this.pruneLends();
+        pruneScopes(this.mermaidScopes);
+      }
       // ⚠ 編集から戻ったときは**元の位置へ**。それ以外は**そのノートで読んでいた
       //    場所**(#690 ①)── 初めて開くノートだけ先頭から。実際に戻すのは本文を
       //    入れた後。⚠ 憶えた物は写して渡す(器の値を後から書き換えない)
@@ -1594,6 +1789,35 @@ export class DetailRenderer {
        *   選択の瞬間に白くならない。
        */
       const token = ++this.viewToken;
+      const key = this.paintKeyOf(selfContainerId(state), this.externalImages.allows(lid));
+      /**
+       * 🔴 **編集から戻ったとき、本文も設定も変わっていなければ、描かずに表示を戻すだけ**(#1467 段 5)。
+       * ワーカーも `applyBlocks` も呼ばない ── 持ち越した節点が**そのまま**画面に戻る(図の `<img>` も同じ節点)。
+       * ⚠ 帯・目次・送り位置・予約の差し込みなど、**骨組み側が作り直された分**だけ当て直す。
+       * 本文が変わっていれば、下の通常の経路で**持ち越した台帳(`bodyView`)を土台に差分**を当てる。
+       */
+      if (
+        adopted !== null &&
+        adopted.body === body &&
+        adopted.key === key &&
+        this.pendingSectionInstall === null
+      ) {
+        const host = this.bodyHost!;
+        this.sqlEmbeds.sync(host, body);
+        this.syncMissingLinks();
+        this.syncPlaceEmbeds();
+        installBlockGrip(this.region, host, lid, body);
+        this.renderExternalImageBar(lid, host);
+        this.restoreScroll();
+        // 🔴 「あとN日」は**今日が動くと古くなる**(編集のあいだに日付をまたいだ)── 戻すだけでも当て直す(冪等)
+        syncRelativeDays(host);
+        host.setAttribute(PAINTED_ATTR, lid);
+        this.paintedBody = body;
+        this.paintedKey = key;
+        this.quickTocHandle?.update();
+        this.syncSearchJump();
+        return;
+      }
       /**
        * 🔴 **「この lid の本文が描けた」を DOM の印で外へ出す**(#517)。
        *
@@ -1755,6 +1979,9 @@ export class DetailRenderer {
          *   前に置くと、捨てるはずの古い結果が印を付けてしまう。
          */
         host.setAttribute(PAINTED_ATTR, lid);
+        // 🔑 持ち越し(#1467 段 5)の控え ── 描き終えた本文と設定。戻るときこれと比べる
+        this.paintedBody = body;
+        this.paintedKey = key;
         this.quickTocHandle?.update();
         // 🔴 描き終わったので、「探す」の塗りを当て直す(#1102 段①)── 塊が差し替わると Range が
         //   消えた節点を指す。⚠ 送るのは世代が変わったときだけ(`jumpSentGen`)
@@ -2103,6 +2330,7 @@ export class DetailRenderer {
 
   private renderEditor(state: AppState): void {
     const open = state.openBody!;
+    const wasView = this.mode === 'view';
     this.mode = 'editor';
     this.lastSelected = open.lid;
     this.lastBody = null;
@@ -2116,8 +2344,18 @@ export class DetailRenderer {
         lid: this.skeletonLid,
         ...this.rememberReadPosition(this.skeletonLid),
       };
-    this.disposeLends();
-    this.region.textContent = '';
+    /**
+     * 🔴 **読む面を捨てずに持ち越す**(#1467 段 5)。本文の器を残して他の子だけ外す。
+     * ⚠ 持ち越せないとき・別のノートのときは今までどおり全部捨てる(`disposeLends()` が前の持ち越しも捨てる)。
+     */
+    if (this.held !== null && this.held.lid !== open.lid) this.disposeLends();
+    if (this.holdReadingView(open.lid, wasView)) {
+      this.disposeLends(true);
+      for (const c of Array.from(this.region.childNodes)) if (c !== this.held!.host) c.remove();
+    } else {
+      this.disposeLends();
+      this.region.textContent = '';
+    }
     this.dropSkeleton();
     // title は uncontrolled input(commit 時に binder が RENAME を先行 dispatch)
     const titleInput = document.createElement('input');
@@ -3259,7 +3497,16 @@ export class DetailRenderer {
    * - 選択が移っていたら(token 不一致)結果を捨てて即 dispose
    * - 見つからない key は `data-pkc-asset-missing` を立てる(alt が可視 fallback)
    */
-  private async hydrateAssetRefs(
+  private hydrateAssetRefs(
+    rootEls: HTMLElement | readonly Element[],
+    token: number,
+    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+  ): Promise<void> {
+    return this.tracked(this.hydrateAssetRefsInner(rootEls, token, env));
+  }
+
+  /** 本体。⚠ 呼ぶ側は `hydrateAssetRefs`(飛んでいる読み込みを数える ── 持ち越しの判定に使う)。 */
+  private async hydrateAssetRefsInner(
     /** ⚠ **まとめて渡す**(P8 段⑪)── 1 根ずつ呼ぶと、同じ key を別の塊から
      *  参照しているとき **2 回借りて ObjectURL が 2 本**になる(実際に退行した)。 */
     rootEls: HTMLElement | readonly Element[],
@@ -3276,9 +3523,9 @@ export class DetailRenderer {
     env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
   ): Promise<void> {
     // 🔴 **囲みの中身も添付から来る**(#444 段①)── 同じ lender・同じ世代で埋める
-    void this.hydrateFenceAssets(rootEls, token, env);
+    void this.tracked(this.hydrateFenceAssets(rootEls, token, env));
     // 🔴 **本文に書いた音・動画は、その場で聞ける**(#413 段②)── 同上
-    void this.hydrateMediaRefs(rootEls, token);
+    void this.tracked(this.hydrateMediaRefs(rootEls, token));
     if (!this.assets) return;
     const assets = this.assets;
     const roots: readonly Element[] = Array.isArray(rootEls)

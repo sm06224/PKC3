@@ -543,6 +543,7 @@ interface Rig {
   /** 状態を変えずに描き直させる(同じ本文の描き直し)。 */
   again: () => Promise<void>;
   host: () => HTMLElement;
+  detail: DetailRenderer;
   /** 板のノートが別のノートへ移るまでを辿る(面を捨てる = 寿命の終端)。 */
   leave: () => Promise<void>;
 }
@@ -583,6 +584,7 @@ async function rig(
     root,
     wanted,
     state: () => s,
+    detail,
     host: () => root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!,
     async apply(action) {
       s = reduce(s, action).state;
@@ -871,7 +873,7 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
     expect(revoked, '面を捨てても PNG の URL が生きている').toBe(1);
   });
 
-  it('🔴 板のノートの編集に入ると(読む面を捨てる)、板の中の図の URL・画像の貸出も返る', async () => {
+  it('🔴 板のノートの編集のあいだは読む面を持ち越して貸出も残る(#1467 段 5)/ 編集をやめて別のノートへ移ると返る', async () => {
     const f = fakeLender();
     const r = await rig({ ...BODIES, n1: `![写真](asset:abc)\n\n${MERMAID}` }, undefined, true, f.lender);
     await settle();
@@ -882,8 +884,33 @@ describe('描画: 図と画像と添付ノート(W3-②)', () => {
     expect(f.live(), '台の前提:画像が借りられていない').toBe(1);
     await r.apply({ type: 'START_EDIT' });
     expect(r.state().phase, '台の前提:編集に入っていない').toBe('editing');
-    expect(f.live(), '編集に入っても板の画像の貸出が残っている').toBe(0);
-    expect(revoked, '編集に入っても板の図の URL が残っている').toBe(1);
+    // 🔑 事実が動いた(#1467 段 5): 読む面を捨てずに持ち越す ── 戻るとき同じ節点を戻すので、借りた物も残る。
+    //    ⚠ 寿命の終端は「編集に入ったとき」から「その編集が終わって読む面が画面から外れたとき」へ移った
+    expect(f.live(), '持ち越した読む面の画像の貸出が、編集に入った時点で返っている').toBe(1);
+    expect(revoked, '持ち越した読む面の図の URL が、編集に入った時点で返っている').toBe(0);
+    await r.apply({ type: 'CANCEL_EDIT' });
+    expect(f.live(), '変更なしで戻ったのに画像の貸出が返っている(同じ節点を戻すはず)').toBe(1);
+    expect(revoked, '変更なしで戻ったのに図の URL が返っている').toBe(0);
+    await r.leave();
+    expect(f.live(), '別のノートへ移ったのに板の画像の貸出が残っている').toBe(0);
+    expect(revoked, '別のノートへ移ったのに板の図の URL が残っている').toBe(1);
+  });
+
+  it('🔴 板のノートを編集したまま別の画面へ出ると(持ち越しを捨てる)、板の中の図の URL・画像の貸出が返る(#1467 段 5)', async () => {
+    const f = fakeLender();
+    const r = await rig({ ...BODIES, n1: `![写真](asset:abc)\n\n${MERMAID}` }, undefined, true, f.lender);
+    await settle();
+    const host = hostsIn(slotOf(r, 'p1')!)[0]!;
+    seen.get(host)!(host);
+    await settle();
+    expect(made, '台の前提:図が焼かれていない').toBe(1);
+    expect(f.live(), '台の前提:画像が借りられていない').toBe(1);
+    await r.apply({ type: 'START_EDIT' });
+    expect(r.detail.holdsReadingView, '台の前提:持ち越していない').toBe(true);
+    expect(f.live() + revoked, '台の前提:編集に入った時点で返っている').toBe(1);
+    r.detail.releaseHeld();
+    expect(f.live(), '捨てたのに板の画像の貸出が残っている').toBe(0);
+    expect(revoked, '捨てたのに板の図の URL が残っている').toBe(1);
   });
 
   it('🔴 置いたノートの画像を消すと(画像 0 枚の内容へ描き直す)、前の画像の貸出が返る', async () => {
