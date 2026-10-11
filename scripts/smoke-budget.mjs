@@ -106,8 +106,11 @@ import { join } from 'node:path';
  *   ⚠ **同じ起動に載せられない** ── 消すのは**起動の前**(`addInitScript` でメインとワーカーの両方から
  *   `VideoEncoder` / `VideoDecoder` を外す)で、細かく切れる道と同じ起動の中では両立しない。
  *   手前の区切りで切る道は b-1 から smoke が守っていた物で、捨てずに残した。
+ * - 2026-10-11(#1467、打っている間は画面の外の図を先読みしない): **521**(そのときの実数 521)。
+ *   `mermaid.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ **既存の道中には載せられない** ── 40 枚の図を持つ長い本文を
+ *   **入れた直後に**打ち始めて「画面の外で焼けた図が 0 枚 → 止まると増える」を見る。待つと打つ前に先読みが進み、対照にならない。
  */
-export const BOOT_BUDGET = 520;
+export const BOOT_BUDGET = 521;
 
 /** 実測の 1 起動あたり秒(手元・headless_shell・`workers: 1`)。 */
 export const SECONDS_PER_BOOT = 1.63;
