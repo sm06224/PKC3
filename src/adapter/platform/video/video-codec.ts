@@ -22,6 +22,9 @@
  *   環境によっては `configure` や出力で落ちる。結果は**環境ごとに 1 回だけ**測る
  * - ⚠ 途中で 1 枚でも落ちたら**ファイルを作らず** `preciseFailed` で返す(部分的な file を出さない)。
  *   呼び側は手前のキーフレームから切る道へ回し、**確認を出す**
+ * - 🔴 **落ちたのが「その録画だけ」か「環境そのもの」かは、小さい 1 枚をもう一度通して決める**(`recheckAfterFailure`)。
+ *   通れば環境は使える(次の録画は押した所ぴったりで切る)── 1 本の失敗で、このページを開いている間ずっと
+ *   確認つきの道へ倒さない。通らなければ環境の失敗として「使えない」に倒す
  */
 import {
   planVideoTrim,
@@ -41,9 +44,9 @@ export const MAX_LIVE_FRAMES = 10;
 /** 符号化器の待ち行列の上限。 */
 const MAX_ENCODE_QUEUE = 8;
 /** 検出の打ち切り(ミリ秒)。⚠ 出力が返らない符号化器で固まらない。 */
-const DETECT_TIMEOUT_MS = 8000;
+export const DETECT_TIMEOUT_MS = 8000;
 /** 作り直しの途中で、出力が 1 つも来ないまま経つ時間の上限(ミリ秒)。⚠ 固まった符号化器で永久に待たない。 */
-const STALL_MS = 30_000;
+export const STALL_MS = 30_000;
 
 /** 依頼。⚠ `Blob` で渡す(構造化複製で参照として渡り、bytes は写されない)。 */
 export type VideoJob =
@@ -52,8 +55,6 @@ export type VideoJob =
       readonly blob: Blob;
       readonly startMs: number;
       readonly endMs: number;
-      /** 環境で押した所ぴったりに切れるかを**もう測ってある**とき(メイン側の覚え)。省くと測る。 */
-      readonly known?: boolean;
     }
   | {
       readonly op: 'cut';
@@ -103,7 +104,12 @@ export type VideoCutResult =
     }
   | { readonly ok: false; readonly reason: VideoTrimRefusal }
   /** 🔴 押した所ぴったりの道が途中で落ちた。**何も作っていない**。呼び側は手前のキーフレームから切る道へ回す。 */
-  | { readonly ok: false; readonly preciseFailed: true };
+  | {
+      readonly ok: false;
+      readonly preciseFailed: true;
+      /** 落ちたのが環境そのものか(再検出も通らなかった)。`false` = その録画だけ。 */
+      readonly environmentBroken: boolean;
+    };
 
 export type VideoJobResult = VideoScanResult | VideoCutResult;
 
@@ -132,6 +138,8 @@ export interface EncodedOut {
 
 export interface EncoderLike {
   readonly encodeQueueSize: number;
+  /** 待ち行列が減ったときの合図(`dequeue`)。⚠ 背景のタブでは `setTimeout` が約 1 秒に間引かれるので、待ちは合図で起こす。 */
+  onDequeue(listener: () => void): void;
   configure(config: { codec: 'vp8'; width: number; height: number; bitrate: number; framerate: number }): void;
   encode(frame: FrameLike, options?: { keyFrame?: boolean }): void;
   flush(): Promise<void>;
@@ -140,6 +148,7 @@ export interface EncoderLike {
 
 export interface DecoderLike {
   readonly decodeQueueSize: number;
+  onDequeue(listener: () => void): void;
   configure(config: { codec: 'vp8'; codedWidth: number; codedHeight: number }): void;
   decode(chunk: { type: 'key' | 'delta'; timestamp: number; data: Uint8Array }): void;
   flush(): Promise<void>;
@@ -183,6 +192,7 @@ export function nativeCodecApi(): CodecApi | null {
         get encodeQueueSize(): number {
           return enc.encodeQueueSize;
         },
+        onDequeue: (listener) => enc.addEventListener('dequeue', listener),
         configure: (config) => enc.configure({ ...config, bitrateMode: 'variable' }),
         encode: (frame, options) => enc.encode(frame as VideoFrame, options),
         flush: () => enc.flush(),
@@ -197,6 +207,7 @@ export function nativeCodecApi(): CodecApi | null {
         get decodeQueueSize(): number {
           return dec.decodeQueueSize;
         },
+        onDequeue: (listener) => dec.addEventListener('dequeue', listener),
         configure: (config) => dec.configure(config),
         decode: (chunk) => dec.decode(new EncodedVideoChunk(chunk)),
         flush: () => dec.flush(),
@@ -220,11 +231,6 @@ export function nativeCodecApi(): CodecApi | null {
     },
   };
   return nativeApi;
-}
-
-/** 条件が成り立つまで待つ(背圧)。⚠ 失敗(`stop`)でも抜ける。 */
-async function waitUntil(cond: () => boolean): Promise<void> {
-  while (!cond()) await new Promise<void>((r) => setTimeout(r, 1));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -252,6 +258,19 @@ export function detectPrecise(api: CodecApi | null = nativeCodecApi()): Promise<
 /** 切っている途中で落ちた環境を「使えない」に倒す(以後の切り出しで同じ失敗を繰り返さない)。 */
 export function markPreciseBroken(api: CodecApi | null = nativeCodecApi()): void {
   if (api !== null) detectCache.set(api, Promise.resolve(false));
+}
+
+/**
+ * 🔴 **作り直しが落ちた後に、環境がまだ使えるかを測り直す**(小さい 1 枚をもう一度通す)。
+ *
+ * ⚠ 1 本の録画の失敗(枚数の食い違い・その録画の復号の error)で、このページを開いている間ずっと
+ *   押した所ぴったりの道を閉じない。通れば覚えを「使える」に戻す。通らなければ環境の失敗として倒す。
+ * @returns 環境が使えなくなったか
+ */
+export async function recheckAfterFailure(api: CodecApi): Promise<boolean> {
+  const ok = await probeOnce(api).catch(() => false);
+  detectCache.set(api, Promise.resolve(ok));
+  return !ok;
 }
 
 async function probeOnce(api: CodecApi): Promise<boolean> {
@@ -333,14 +352,37 @@ export async function reencodeHead(
   let pumping = false;
   let error: unknown = null;
   let lastProgress = Date.now();
+  /**
+   * 🔑 待ちは**合図で起こす**(`dequeue` / 数が変わったとき)。⚠ 1 ミリ秒ごとの `setTimeout` の見張りは、
+   *   背景のタブで約 1 秒に間引かれ、1 枚ごとに 1 秒待つ。合図を取りこぼしても進めるよう、250ms の保険の時計も置く。
+   */
+  const waiters = new Set<() => void>();
+  const wake = (): void => {
+    const all = [...waiters];
+    waiters.clear();
+    for (const w of all) w();
+  };
+  const waitUntil = async (cond: () => boolean): Promise<void> => {
+    while (!cond()) {
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(wake, 250);
+        waiters.add(() => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }
+  };
   const fail = (e: unknown): void => {
     if (error === null) error = e instanceof Error ? e : new Error(String(e));
+    wake();
   };
 
   const enc = api.createEncoder({
     output: (c) => {
       lastProgress = Date.now();
       out.push({ ms: Math.round(c.timestamp / 1000), bytes: c.data, key: c.type === 'key' });
+      wake();
     },
     error: fail,
   });
@@ -353,6 +395,7 @@ export async function reencodeHead(
       if (error !== null || f.timestamp < firstUs) {
         f.close();
         live -= 1;
+        wake();
         return;
       }
       queue.push(f);
@@ -367,7 +410,8 @@ export async function reencodeHead(
     try {
       while (queue.length > 0) {
         await waitUntil(() => enc.encodeQueueSize < MAX_ENCODE_QUEUE || error !== null);
-        const f = queue.shift()!;
+        const f = queue.shift();
+        if (f === undefined) break; // 待っている間に後始末(諦め)で空にされた
         try {
           if (error === null) {
             enc.encode(f, encoded === 0 ? { keyFrame: true } : undefined);
@@ -378,12 +422,16 @@ export async function reencodeHead(
         } finally {
           f.close();
           live -= 1;
+          wake();
         }
       }
     } finally {
       pumping = false;
+      wake();
     }
   }
+  enc.onDequeue(wake);
+  dec.onDequeue(wake);
 
   const run = async (): Promise<{ frames: HeadFrame[]; stats: ReencodeStats }> => {
     enc.configure({ codec: 'vp8', ...params });
@@ -392,6 +440,8 @@ export async function reencodeHead(
       await waitUntil(() => error !== null || live + dec.decodeQueueSize < MAX_LIVE_FRAMES);
       if (error !== null) break;
       const data = await src.read(b.dataStart, b.dataEnd);
+      // 🔴 読んでいる間に止められた(stall)なら、閉じた復号器へ渡さない
+      if (error !== null) break;
       dec.decode({ type: b.key ? 'key' : 'delta', timestamp: b.ms * 1000, data });
     }
     if (error === null) await dec.flush();
@@ -407,7 +457,11 @@ export async function reencodeHead(
   let watchdog: ReturnType<typeof setInterval> | undefined;
   const stalled = new Promise<never>((_, reject) => {
     watchdog = setInterval(() => {
-      if (Date.now() - lastProgress > STALL_MS) reject(new Error('作り直しが止まった'));
+      if (Date.now() - lastProgress > STALL_MS) {
+        const e = new Error('作り直しが止まった');
+        fail(e); // 🔑 負けた run() が、閉じた後の復号器 / 元の Blob に触らないよう、先に止める印を立てる
+        reject(e);
+      }
     }, 1000);
   });
   const running = run();
@@ -416,6 +470,7 @@ export async function reencodeHead(
     return await Promise.race([running, stalled]);
   } finally {
     if (watchdog !== undefined) clearInterval(watchdog);
+    fail(new Error('終了')); // 後から動く run() があっても、ここで止まる
     // 失敗でも成功でも、残っている `VideoFrame` を全部閉じる
     for (const f of queue.splice(0)) {
       f.close();
@@ -439,7 +494,7 @@ export async function reencodeHead(
 // ---------------------------------------------------------------------------------------------
 
 export async function scanVideo(
-  job: { blob: Blob; startMs: number; endMs: number; known?: boolean },
+  job: { blob: Blob; startMs: number; endMs: number },
   api: CodecApi | null = nativeCodecApi(),
 ): Promise<VideoScanResult> {
   const scanned = await scanWebmVideo(blobSource(job.blob), job.endMs);
@@ -451,7 +506,7 @@ export async function scanVideo(
   if (spec !== null) {
     // 🔑 押した所に表示されているフレームがキーフレームなら、作り直しも WebCodecs も要らない
     if (!spec.reencode) precise = 'ready';
-    else precise = (job.known ?? (await detectPrecise(api))) ? 'ready' : 'needs-codec';
+    else precise = (await detectPrecise(api)) ? 'ready' : 'needs-codec';
   }
   return {
     ok: true,
@@ -478,7 +533,7 @@ export async function cutVideo(
   let planned;
   if (job.mode === 'precise') {
     const spec = precisePlanSpec(job.scan, job.startMs, job.endMs);
-    if (spec === null) return { ok: false, preciseFailed: true };
+    if (spec === null) return { ok: false, preciseFailed: true, environmentBroken: false };
     let frames: readonly HeadFrame[];
     if (job.head !== undefined) {
       frames = job.head;
@@ -486,14 +541,13 @@ export async function cutVideo(
       const f = spec.emit[0]!;
       frames = [{ ms: f.ms, bytes: await src.read(f.dataStart, f.dataEnd), key: true }];
     } else {
-      if (api === null) return { ok: false, preciseFailed: true };
+      if (api === null) return { ok: false, preciseFailed: true, environmentBroken: true };
       try {
         frames = (await reencodeHead(src, job.scan, spec, api)).frames;
         reencoded = frames.length;
       } catch {
-        // 🔴 途中で落ちた:以後も同じ失敗を繰り返さない。何も作らずに返す
-        markPreciseBroken(api);
-        return { ok: false, preciseFailed: true };
+        // 🔴 途中で落ちた:何も作らずに返す。環境が壊れたのか、この録画だけかは測り直して決める
+        return { ok: false, preciseFailed: true, environmentBroken: await recheckAfterFailure(api) };
       }
     }
     if (job.head !== undefined) reencoded = job.head.length;

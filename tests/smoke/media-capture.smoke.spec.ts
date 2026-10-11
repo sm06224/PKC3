@@ -1098,6 +1098,15 @@ async function recordScreenForTrim(page: Page) {
       break;
     }
   }
+  if (!Number.isFinite(startSec) && keys.length > 0) {
+    // 🔑 2 つ目の区切りが 9 秒経っても録れない録画がある(実測:間欠)── 最後の区切りの 0.5 秒後から 2 秒ぶんを切る。
+    //   作り直した頭が終わりまで続き、元のバイトで繋ぐ部分が無い形(unit が両方の形を持つ)。
+    const k = keys[keys.length - 1]!;
+    if ((k + 500) / 1000 + 2 <= durNum - 0.4) {
+      startSec = (k + 500) / 1000;
+      endSec = startSec + 2;
+    }
+  }
   if (!Number.isFinite(startSec)) throw new Error(`切り出しの範囲を決められる区切りが録れていない(区切り ${keys.join(',')} / 長さ ${durNum})`);
   test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
   return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec };
@@ -1260,23 +1269,31 @@ test('🔴 画面収録を押した所ぴったりに切り出せる:確認が�
   expect(cutProbe.decoded, '映像の最初のフレームが出ない').toBe(true);
   expect(cutProbe.firstFrame, '最初のフレームを描けない').toBe(true);
   /**
-   * 🔴 **最初のフレームが押した所のフレーム**:切り出した動画を先頭で止めて撮った絵が、元の動画の
-   *   「押した所の前後 ±3 枚」のうち**どれに最も近いか**を見る。⚠ 近いのが 0(押した所)か ±1 なら合格。
-   * 🔑 見分けられる台であること(= 隣のフレームどうしが、再エンコードの粗さより大きく違う)を先に確かめる。
+   * 🔴 **最初のフレームが押した所のフレームそのもの**(±1 枚の幅は許さない ── 1 枚ずれる欠陥が通ってしまう)。
+   *   切り出した動画を先頭で止めて撮った絵を、元の動画の「押した所の前後 ±3 枚」と見比べ、2 段で言う:
+   *   ①**いちばん近いのが 0(押した所)** ②**次に近い別のフレームとの比が 1.5 倍以上**(= 0 が僅差の勝ちでない)。
+   * 🔑 比の根拠:実測(フル Chromium)で 0 との違い 0.81 に対し、次に近い隣は 1.94(= 2.4 倍)・もう一方の隣は 3.09。
+   *   再エンコードの粗さ(0.81)に対し、隣のフレームは 2 倍以上遠い ── 1.5 倍なら粗さのゆれを許し、1 枚のずれは落とす。
+   * ⚠ 前後の撮り方で**同じフレームを 2 度撮った**(隣の時刻が同じ絵を映す)場合は、0 と同じ絵の候補を「別のフレーム」に数えない。
+   * 🔑 見分けられる台であること(隣どうしが、再エンコードの粗さより大きく違う)を先に確かめる。
    */
   const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
   const dists = around.map((f) => frameDistance(firstFrame, f));
   const nearest = dists.indexOf(Math.min(...dists)) - 3;
   const adjacent = frameDistance(around[3]!, around[4]!);
+  const others = dists.filter((_, k) => k !== 3 && frameDistance(around[k]!, around[3]!) > 0.05);
+  const ratio = others.length === 0 ? Number.NaN : Math.min(...others) / dists[3]!;
   test.info().annotations.push({
-    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い',
-    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)}`,
+    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い / 別のフレームとの比',
+    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)} / ${ratio.toFixed(2)}`,
   });
   expect(adjacent, '空振り防止:隣のフレームどうしが同じ絵になっている(見分けられない台)').toBeGreaterThan(0.05);
+  expect(others.length, '空振り防止:0 と違う絵の候補が無い').toBeGreaterThan(0);
   expect(
-    Math.abs(nearest),
+    nearest,
     `最初のフレームが押した所のフレームでない(いちばん近い位置 ${nearest} / ${dists.map((d) => d.toFixed(2)).join(' ')})`,
-  ).toBeLessThanOrEqual(1);
+  ).toBe(0);
+  expect(ratio, `押した所のフレームとの違いが、別のフレームとの違いと僅差(比 ${ratio.toFixed(2)})`).toBeGreaterThanOrEqual(1.5);
   expect(cutProbe.played, 'ブラウザが再生を断った').toBe(true);
   expect(cutProbe.advanced, '再生が進まない').toBeGreaterThan(0.3);
   expect(cutProbe.audioBytes, `音が復号されていない(${said})`).toBeGreaterThan(0);

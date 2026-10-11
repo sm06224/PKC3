@@ -14,7 +14,7 @@ import { WorkerLease } from '../worker-lease';
 import { appJobMonitor, type JobMonitor } from '../job-monitor';
 import {
   detectPrecise,
-  markPreciseBroken,
+  recheckAfterFailure,
   nativeCodecApi,
   reencodeHead,
   blobSource,
@@ -41,14 +41,14 @@ export interface VideoClientOptions {
 export class VideoClient {
   private readonly lease: WorkerLease | null;
   private readonly mainApi: CodecApi | null | undefined;
-  /**
-   * 🔑 **ワーカーで押した所ぴったりに切れるか**の覚え(環境ごとに 1 回だけ測る。`null` = まだ測っていない)。
-   * 走査のたびにワーカーが測り直さないよう、次の依頼で渡す。落ちたら `false` にする。
-   */
-  private workerPrecise: boolean | null = null;
   /** 直前の走査が「作り直しはメインスレッドで」と決めたか(走査 → 切り出しは 1 本ずつ進む)。 */
   private viaMain = false;
-  /** ワーカーの作り直しが途中で落ちたことがあるか(あれば、メインでの作り直しへ回さない ── 同じエンジンで同じ失敗をする)。 */
+  /**
+   * ワーカーの環境そのものが壊れていると分かったか(落ちた後の再検出も通らなかった)。立っていれば、
+   * メインでの作り直しへ回さない ── 同じエンジンで同じ失敗をする。
+   * 🔑 **ワーカーの覚えと同じ寿命にする**:ワーカーが畳まれて作り直されたら、こちらも忘れて測り直す
+   *   (ワーカー側の「使える / 使えない」の覚えはワーカーと一緒に消えるので、片方だけ残さない)。
+   */
   private broken = false;
 
   constructor(options: VideoClientOptions = {}) {
@@ -85,18 +85,12 @@ export class VideoClient {
    * 符号化器と復号器はブラウザが別スレッドで動かす)。どちらも使えなければ `needs-codec` のまま返す。
    */
   async scan(blob: Blob, startMs: number, endMs: number): Promise<VideoScanResult> {
-    const known = this.workerPrecise === null ? undefined : this.workerPrecise;
-    const r = (await this.run({ op: 'scan', blob, startMs, endMs, ...(known === undefined ? {} : { known }) })) as VideoScanResult;
+    // ワーカーが居ない(まだ / 畳まれた)なら、次の依頼で新しく起きて測り直す ── 覚えも一緒に忘れる
+    if (!this.alive) this.broken = false;
+    const r = (await this.run({ op: 'scan', blob, startMs, endMs })) as VideoScanResult;
     this.viaMain = false;
     if (!r.ok) return r;
-    if (r.precise === 'ready') {
-      // 作り直しが要るときだけ「ワーカーで通った」と覚える(要らない録画では測っていない)
-      const spec = precisePlanSpec(r.scan, startMs, endMs);
-      if (spec?.reencode === true) this.workerPrecise = true;
-      return r;
-    }
     if (r.precise === 'needs-codec' && !this.broken) {
-      this.workerPrecise = false;
       const api = this.mainApi === undefined ? nativeCodecApi() : this.mainApi;
       if (api !== null && (await detectPrecise(api))) {
         this.viaMain = true;
@@ -121,23 +115,18 @@ export class VideoClient {
     if (mode === 'precise' && this.viaMain) {
       const spec = precisePlanSpec(scan, startMs, endMs);
       const api = this.mainApi === undefined ? nativeCodecApi() : this.mainApi;
-      if (spec === null || api === null) return { ok: false, preciseFailed: true };
+      if (spec === null || api === null) return { ok: false, preciseFailed: true, environmentBroken: api === null };
       try {
         const head = (await reencodeHead(blobSource(blob), scan, spec, api)).frames;
         return (await this.run({ op: 'cut', blob, scan, startMs, endMs, mode: 'precise', head })) as VideoCutResult;
       } catch {
-        // ⚠ `markPreciseBroken` が環境ごとの覚えを「使えない」に倒す ── 次の走査のメイン側の検出は false になる
-        markPreciseBroken(api);
+        // 🔴 この録画だけの失敗かもしれない ── 小さい 1 枚を通し直して、環境が壊れたときだけ以後を閉じる
         this.viaMain = false;
-        return { ok: false, preciseFailed: true };
+        return { ok: false, preciseFailed: true, environmentBroken: await recheckAfterFailure(api) };
       }
     }
     const r = (await this.run({ op: 'cut', blob, scan, startMs, endMs, mode })) as VideoCutResult;
-    // 落ちた環境は、次の走査から「使えない」と見る(同じ失敗を繰り返して確認なしで戻らない)
-    if (!r.ok && 'preciseFailed' in r) {
-      this.workerPrecise = false;
-      this.broken = true;
-    }
+    if (!r.ok && 'preciseFailed' in r && r.environmentBroken) this.broken = true;
     return r;
   }
 

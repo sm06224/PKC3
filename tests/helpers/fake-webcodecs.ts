@@ -30,6 +30,12 @@ export interface FakeOptions {
   readonly decoderSilent?: boolean;
   /** 検出の符号化で error。 */
   readonly encoderBroken?: boolean;
+  /** n 枚目以降の符号化がすべて error(環境そのものが壊れた形 ── 再検出の 1 枚も通らない)。 */
+  readonly brokenFromEncode?: number;
+  /** 出力を、時計を使わず n 回ぶんの微小な順番待ちだけ遅らせる(背圧の待ちが必ず起きる。時計が止まった背景のタブの形)。 */
+  readonly lagMicrotasks?: number;
+  /** 符号化が出力を返さず、flush も終わらない(固まった符号化器)。 */
+  readonly hangEncoder?: boolean;
 }
 
 export interface FakeStats {
@@ -44,6 +50,9 @@ export interface FakeStats {
   probeFrames: number;
   encoderClosed: number;
   decoderClosed: number;
+  /** `dequeue` の合図に聞き耳を立てた数(符号化器 / 復号器)。 */
+  encoderDequeueListeners: number;
+  decoderDequeueListeners: number;
 }
 
 class FakeFrame implements FrameLike {
@@ -67,6 +76,9 @@ class FakeFrame implements FrameLike {
 }
 
 const tick = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+async function lag(n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) await Promise.resolve();
+}
 
 export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: FakeStats } {
   const stats: FakeStats = {
@@ -81,6 +93,8 @@ export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: Fa
     probeFrames: 0,
     encoderClosed: 0,
     decoderClosed: 0,
+    encoderDequeueListeners: 0,
+    decoderDequeueListeners: 0,
   };
   let encodeCount = 0;
   let decodeCount = 0;
@@ -91,9 +105,14 @@ export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: Fa
       let pending = 0;
       let closed = false;
       const jobs: Promise<void>[] = [];
+      const listeners: (() => void)[] = [];
       return {
         get encodeQueueSize(): number {
           return pending;
+        },
+        onDequeue: (l) => {
+          stats.encoderDequeueListeners += 1;
+          listeners.push(l);
         },
         configure: () => {},
         encode(frame, options): void {
@@ -108,10 +127,17 @@ export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: Fa
           const idx = f.index;
           jobs.push(
             (async () => {
-              await tick(opts.encodeDelayMs ?? 0);
+              if (opts.hangEncoder === true) return new Promise<void>(() => {});
+              if (opts.lagMicrotasks !== undefined) await lag(opts.lagMicrotasks);
+              else await tick(opts.encodeDelayMs ?? 0);
               pending -= 1;
+              for (const l of listeners) l();
               if (closed) return;
-              if (opts.encoderBroken === true || opts.errorAtEncode === n) {
+              if (
+                opts.encoderBroken === true ||
+                opts.errorAtEncode === n ||
+                (opts.brokenFromEncode !== undefined && n >= opts.brokenFromEncode)
+              ) {
                 init.error(new Error('encode の error'));
                 return;
               }
@@ -143,9 +169,14 @@ export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: Fa
       let gotKey = false;
       let closed = false;
       const jobs: Promise<void>[] = [];
+      const listeners: (() => void)[] = [];
       return {
         get decodeQueueSize(): number {
           return pending;
+        },
+        onDequeue: (l) => {
+          stats.decoderDequeueListeners += 1;
+          listeners.push(l);
         },
         configure: () => {},
         decode(chunk): void {
@@ -156,8 +187,10 @@ export function fakeCodecApi(opts: FakeOptions = {}): { api: CodecApi; stats: Fa
           pending += 1;
           jobs.push(
             (async () => {
-              await tick(opts.decodeDelayMs ?? 0);
+              if (opts.lagMicrotasks !== undefined) await lag(opts.lagMicrotasks);
+              else await tick(opts.decodeDelayMs ?? 0);
               pending -= 1;
+              for (const l of listeners) l();
               if (closed) return;
               if (chunk.type === 'key') gotKey = true;
               if (!gotKey) {
