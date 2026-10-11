@@ -230,7 +230,10 @@ import {
   getAncestorFolders,
   listMoveTargets,
   listSiblings,
+  resolveCanonicalParents,
 } from '@features/relation/tree';
+import { bookmarkRefusal, liveBookmarks, noteBookmarkKey } from '@features/relation/dual-bookmarks';
+import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
 import { planCopy } from '@features/relation/copy-plan';
 import {
@@ -6732,14 +6735,78 @@ const ACTIONS: Record<string, ActionHandler> = {
     const scope = paneScope(paneOf(dispatcher.getState().dual, side));
     // ⚠ ルートは留めない(パンくずの左端から 1 押しで行ける)
     if (scope === null) return;
+    // 🔴 足すのを断る理由は 1 本(ノートの口と同じ ── `bookmarkRefusal`)。外すときは通る
+    const st = dispatcher.getState();
+    const stored = appDualPrefs.getBookmarks();
+    const why = bookmarkRefusal(
+      stored,
+      liveBookmarks(stored, st.cid, (l) => st.entryMetas.has(l)),
+      scope,
+    );
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      return;
+    }
     services.toggleDualBookmark?.(scope);
   },
-  /** 留めた場所へ移る。⚠ **消えた場所は reducer が弾く**(空の表を出さない)。 */
+  /**
+   * 留めた場所へ移る。⚠ **消えた場所は reducer が弾く**(空の表を出さない)。
+   * 🔴 **ノート(入れ物でない物)なら、そのノートのある場所へ移って、その行を選ぶ**(#1377)。
+   *   ⚠ 行を選ぶだけだと、別のフォルダを見ているときは**行が表に無い**(押したのに何も見えない)。
+   *   ⚠ `SELECT_ENTRY` は撃たない(2 ペインを抜けて本文の画面へ切り替わる ── 帯の外へ連れ出さない)。
+   */
   'dual-bookmark-open': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-entry');
     if (lid === null || lid === '') return;
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
+    const st = dispatcher.getState();
+    const meta = st.entryMetas.get(lid);
+    if (meta !== undefined && !canEnterScope(meta.archetype)) {
+      const parent = resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+      /**
+       * 🔴 **そのペインの名前の絞りを先に解く**(#1377)。⚠ 絞りが掛かったままだと、移った先で
+       *   ノートの行が**絞られて表に無い**(押したのに何も選ばれない)。絞りは `DUAL_SET_FILTER ''` で解ける
+       *   (ペインの「名前で絞る」欄と同じ 1 本)。場所へ移る枝は今までどおり触らない。
+       */
+      dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: '' });
+      dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: parent });
+      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      return;
+    }
     dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid });
+  },
+  /**
+   * 🔴 **ノートをブックマークに入れる / 外す**(#1377)。⚠ 右クリックの対(置けるなら外せる)。
+   * ⚠ 相手は**メニューを開いた瞬間のノート**(`rowLidOrSelected`)── 選択ではない。
+   * ⚠ 満杯なら**理由を声に出して断る**(押しても増えない理由が見えないと壊れて見える)。
+   *   数えるのは**このコレクションの生きているもの**だけ ── 消えたノート・別のコレクションの
+   *   ノートは保存に残っていても数えない(保存の総数だけは別の上限で止める)。
+   */
+  'bookmark-note-add': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || st.cid === null || !st.entryMetas.has(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+      return;
+    }
+    const key = noteBookmarkKey(st.cid, lid);
+    const stored = appDualPrefs.getBookmarks();
+    const why = bookmarkRefusal(
+      stored,
+      liveBookmarks(stored, st.cid, (l) => st.entryMetas.has(l)),
+      key,
+    );
+    if (why !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+      return;
+    }
+    services.toggleDualBookmark?.(key);
+  },
+  'bookmark-note-remove': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || st.cid === null) return;
+    services.toggleDualBookmark?.(noteBookmarkKey(st.cid, lid));
   },
   /**
    * 🔴 **留めを外す**(user 指示 2026-08-23「なんで双方向にする発想がでねぇんだよ!」)
@@ -15022,9 +15089,18 @@ export function bindActions(
        *   押した行 1 件を選んでいるので、**同じ行がその場で打ち替わる**。
        *   側は `data-pkc-side` で運ぶ(メニューは root 直下に出るので、押した所からは辿れない)。
        */
+      const archetype = st.entryMetas.get(lid)?.archetype ?? null;
       const items = entryMenuActions({
-        archetype: st.entryMetas.get(lid)?.archetype ?? null,
+        archetype,
         linkedFile: st.linkedFiles.get(lid) ?? null,
+        /**
+         * 🔴 **ノートのブックマーク**(#1377)。⚠ 帯が見えるのは**この面だけ**なので、
+         *   ここだけが `bookmarked` を渡す(他の 3 か所は渡さない = 出さない)。
+         * ⚠ フォルダ(入れる物)は渡さない ── 場所は列の頭の ☆ で入れる(口を 2 つにしない)。
+         */
+        ...(archetype !== null && st.cid !== null && !canEnterScope(archetype)
+          ? { bookmarked: appDualPrefs.getBookmarks().includes(noteBookmarkKey(st.cid, lid)) }
+          : {}),
       })
         .filter(
           (a) =>

@@ -9,6 +9,7 @@
 import {
   decodeBookmarks,
   encodeBookmarks,
+  MAX_BOOKMARKS_STORED,
   toggleBookmark,
 } from '@features/relation/dual-bookmarks';
 
@@ -53,9 +54,13 @@ export class DualPrefsStore {
     return next;
   }
 
-  /** 留める / 外す。⚠ **同じ口が二役**(押し口を 2 つ作らない)。 */
+  /**
+   * 留める / 外す。⚠ **同じ口が二役**(押し口を 2 つ作らない)。
+   * ⚠ 保存は**掃除しない**(消えたノート・別のコレクションのノートも残す) ── 帯に出す物と
+   *   上限の数える物は描く側 / 押し口が `liveBookmarks` で絞る。ここは総数の上限だけ守る。
+   */
   toggleBookmark(lid: string): string[] {
-    return this.setBookmarks(toggleBookmark(this.getBookmarks(), lid));
+    return this.setBookmarks(toggleBookmark(this.getBookmarks(), lid, MAX_BOOKMARKS_STORED));
   }
 
   isPreviewOn(): boolean {

@@ -35,7 +35,12 @@ import {
   paneOf,
   paneScope,
 } from '@features/relation/dual-pane';
-import { MAX_BOOKMARKS, isBookmarked } from '@features/relation/dual-bookmarks';
+import {
+  MAX_BOOKMARKS,
+  isBookmarked,
+  liveBookmarks,
+  noteRefOf,
+} from '@features/relation/dual-bookmarks';
 import { filerRows, smartLidsOf } from '@features/relation/filer-list';
 import { SMART_ARCHETYPE } from '@features/smart/smart-spec';
 import { normalizeQuery } from '@features/filter/title-filter';
@@ -362,7 +367,13 @@ export class DualFilerRenderer {
      * ⚠ **端末の保存は毎回読む**(state に居ないので)── 読み値そのものを
      *   下の門の材料にする(`appPanes` と同じ作法)。
      */
-    const bookmarks = this.prefs.getBookmarks();
+    /**
+     * 🔴 **このコレクションの、いま在るノートだけ帯に出す**(#1377)── 場所(フォルダ)の分は
+     *   消えていても残す(外せるように)。保存は書き換えない(ゴミ箱から戻せば帯へ復活する)。
+     */
+    const bookmarks = liveBookmarks(this.prefs.getBookmarks(), state.cid, (lid) =>
+      state.entryMetas.has(lid),
+    );
     /**
      * 🔴 **窓の幅は state に居ない**(#671)── 1 枚だけ出すかどうかは
      *   `appPhone` が決めるので、**門より前**で塗る。⚠ 門の後に置くと、
@@ -782,16 +793,23 @@ export class DualFilerRenderer {
     bookmarks: readonly string[],
   ): void {
     const key = bookmarks
-      .map((lid) => `${lid}${SEP}${state.entryMetas.get(lid)?.title ?? ''}`)
+      .map((k) => `${k}${SEP}${state.entryMetas.get(noteRefOf(k)?.lid ?? k)?.title ?? ''}`)
       .join(SEP);
     if (key === frame.marksBarKey) return;
     frame.marksBarKey = key;
     frame.marksBar.textContent = '';
     frame.marksBar.hidden = bookmarks.length === 0;
     if (bookmarks.length === 0) return;
-    for (const lid of bookmarks) {
+    for (const key of bookmarks) {
+      /**
+       * 🔴 **ノートも同じ帯に出す**(#1377)。⚠ 外す口の `data-pkc-entry` は**一覧の綴り**
+       *   (`key`)、開く口のは**ノートの lid** ── 外すは綴りで引き、開くは lid で引く。
+       */
+      const noteLid = noteRefOf(key)?.lid ?? null;
+      const lid = noteLid ?? key;
       const wrap = document.createElement('span');
       wrap.setAttribute('data-pkc-region', 'dual-bookmark');
+      if (noteLid !== null) wrap.setAttribute('data-pkc-bookmark-kind', 'note');
       const go = document.createElement('button');
       go.type = 'button';
       go.setAttribute('data-pkc-action', 'dual-bookmark-open');
@@ -800,11 +818,16 @@ export class DualFilerRenderer {
       const title = state.entryMetas.get(lid)?.title ?? null;
       go.textContent = title ?? `(消えた場所 ${lid.slice(0, 8)})`;
       go.disabled = title === null;
-      go.title = title === null ? 'この場所はもうありません' : `${title} へ移動`;
+      go.title =
+        title === null
+          ? 'この場所はもうありません'
+          : noteLid !== null
+            ? `${title} を開く`
+            : `${title} へ移動`;
       const off = document.createElement('button');
       off.type = 'button';
       off.setAttribute('data-pkc-action', 'dual-bookmark-remove');
-      off.setAttribute('data-pkc-entry', lid);
+      off.setAttribute('data-pkc-entry', key);
       off.textContent = '×';
       off.title = 'ブックマークから外す';
       off.setAttribute('aria-label', `${title ?? 'この場所'}をブックマークから外す`);
