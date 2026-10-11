@@ -62,6 +62,16 @@ export interface PdfQuoteResult {
   readonly message: string;
 }
 
+/**
+ * 「編集した PDF を保存する」の結果(#275 段②-1b)。窓へそのまま返る(窓が自分の画面へ出す)。
+ * ⚠ 形は `PdfQuoteResult` と同じ ── 窓の「返事を待つ」作法も同じ(`reader-wire.js` の `EDIT_TIMEOUT_MS`)。
+ */
+export interface PdfEditResult {
+  readonly ok: boolean;
+  /** 窓に出す一言。⚠ user の言葉で(内部語を出さない)。 */
+  readonly message: string;
+}
+
 interface Broadcaster {
   postMessage(data: unknown): void;
   close(): void;
@@ -74,6 +84,12 @@ export interface PdfReaderDeps {
    * 🔴 **Promise** ── 「引けた」は disk に着いてから言う(錠を掛けた時点で返さない)。
    */
   readonly onQuote: (session: PdfSession, text: string, page: number) => Promise<PdfQuoteResult>;
+  /**
+   * 🔴 **窓が、編集した PDF を棚へ置いた**(`key` = 棚の中の置き物の鍵。#275 段②-1b)。
+   * ⚠ bytes は放送に載らない(窓が OPFS の棚へ置き、本体が棚から読む ── Office の窓の保存と同じ鎖)。
+   * 🔴 **Promise** ── 「できた」は新しい添付が作れてから返す。失敗しても理由を返す(窓を待たせ続けない)。
+   */
+  readonly onEdited: (session: PdfSession, key: string) => Promise<PdfEditResult>;
   /** 窓が読めず、内蔵の表示へ退避した(断り文は出さない。状態の行へ 1 行)。 */
   readonly onFellBack: (session: PdfSession) => void;
   /** 窓が文書を取れなかった(貸した URL が既に無い等)。 */
@@ -346,6 +362,21 @@ export class PdfReaderHost {
         };
         void this.deps.onQuote(live.session, text, page).then(reply, () =>
           reply({ ok: false, message: 'ノートへ引用できませんでした。もう一度押してください' }),
+        );
+        return;
+      }
+      case 'edited': {
+        const key = payload['key'];
+        if (typeof key !== 'string' || key === '') return;
+        const reply = (r: PdfEditResult): void => {
+          try {
+            this.send('edit-result', token, { ok: r.ok, message: r.message });
+          } catch {
+            // 待っている間に放送を閉じた(本体の入れ替わり)── 返す先が無いだけ
+          }
+        };
+        void this.deps.onEdited(live.session, key).then(reply, () =>
+          reply({ ok: false, message: '保存できませんでした。もう一度押してください' }),
         );
         return;
       }

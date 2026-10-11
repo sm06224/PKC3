@@ -139,7 +139,7 @@ export const DUCKDB_REQUIRED = [
  *
  * ⚠ DuckDB と**同じ扱い** ── 設定で選んだ人が押したときだけ取りに行く物なので、precache にも
  *   アプリの配る量にも数えない。🔴 そのぶん**別立ての予算**(上限と下限)を下に置く。
- * 🔑 窓の小さな HTML / JS(`pdf/host.html` など 7 file)は**ふつうの配る物**で、precache に載る
+ * 🔑 窓の小さな HTML / JS(`pdf/host.html` など 11 file)は**ふつうの配る物**で、precache に載る
  *   (載せないと、オフラインで窓を開いたとき service worker が `index.html` へ退避して PKC をもう 1 枚開く)。
  * ⚠ 綴りの正本は `build/pdf-assets-plugin.ts` の `PDF_DIR`(`tests/dist-inspect.test.ts` が突き合わせる)。
  */
@@ -154,6 +154,11 @@ export const PDF_SHELL_FILES = [
   'pdf/doc-lease.js',
   'pdf/text-hits.js',
   'pdf/page-list.js',
+  // ページの編集(#275 段②-1b)── 計画 / 作り方 / worker / 棚への置き方
+  'pdf/page-edit.js',
+  'pdf/edit-core.js',
+  'pdf/edit-worker.js',
+  'pdf/edit-stage.js',
 ];
 
 /**
@@ -164,6 +169,11 @@ export const PDF_SHELL_FILES = [
 export const PDF_REQUIRED = [
   'pdf.min.mjs',
   'pdf.worker.min.mjs',
+  // ページの編集(#275 段②-1b)で新しい PDF を作る pdf-lib。⚠ 落ちても総量は約 520 KB しか動かず量では止まらない
+  //   ── 落ちた日は、保存を押した user の窓が「編集を始められません」と言うだけになる
+  'pdf-lib.min.js',
+  // pdf-lib の MIT ライセンス(再配布の条件。⚠ 落ちても量では止まらない)
+  'LICENSE-pdf-lib.md',
   'cmaps/Adobe-Japan1-UCS2.bcmap',
   'cmaps/90ms-RKSJ-H.bcmap',
   'cmaps/UniJIS-UTF16-H.bcmap',

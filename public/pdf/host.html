@@ -20,6 +20,8 @@
     使われない間(60 秒)も worker を畳む(`doc-lease.js`)── 描いた頁の絵は残り、まだ描いていない頁を描くときだけ開き直す。
   - **頁は PNG の `<img>` 1 枚**(描いたら焼く)。見えている頁の前後 2 頁だけ持ち、外れたら即 revoke。
   - **ページの一覧**(#275 段②-1a)は窓の左に固定幅(120px)。一覧の中で見えている頁の前後だけ、小さな PNG に焼き、外れたら即 revoke。
+  - **ページの編集**(#275 段②-1b)は一覧の中で並べ替え・回す・外す。保存を押したときだけ、窓の中の使い捨ての worker
+    (`edit-worker.js`。使われなければ畳む)が**新しい PDF**を作り、OPFS の棚へ置いて本体へ知らせる。元の PDF は書き換えない。
   - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
 
@@ -38,19 +40,62 @@
   #bar input { font: inherit; background: #222; color: #eee; border: 1px solid #555; border-radius: 3px;
     padding: 3px 6px }
   #pageno { width: 3.4em; text-align: right }
-  #query { width: 11em }
+  /* 帯が狭いときは、検索の欄が縮む(「別の PDF として保存」が出ても、右端の「ノートへ引用する」が切れない) */
+  #query { width: 11em; min-width: 5em }
   /* 結果の一言は窓の下に出す(帯に置くと字が切れて「何頁へ引いたか」が読めない) */
   #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
     max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee }
   #status:empty { display: none }
   #bar button[aria-pressed="true"] { background: #3d5a80; border-color: #8ab4ff }
   #scroller { position: fixed; inset: 38px 0 0 0; overflow: auto }
+  /* 編集中の案内の 1 行(#275 段②-1b)。出ている間は、その分だけ下の面を下げる */
+  #edit-bar { position: fixed; inset: 38px 0 auto 0; min-height: 26px; box-sizing: border-box; display: flex;
+    gap: 2px 8px; align-items: center; flex-wrap: wrap; padding: 3px 10px; background: #2b2a1c; border-bottom: 1px solid #5c5a2e;
+    color: #e6e2b8; z-index: 9; line-height: 1.4 }
+  #edit-bar[hidden] { display: none }
+  #edit-note { flex: 1 }
+  /* 引き継がれない物の行(元にあるときだけ。別の行に出す) */
+  #edit-warn { flex: 0 0 100% }
+  #edit-warn[hidden] { display: none }
+  #edit-bar button, #edit-save { font: inherit; cursor: pointer; background: #333; color: #eee;
+    border: 1px solid #555; border-radius: 3px; padding: 2px 9px }
+  #edit-save[hidden] { display: none }
+  /* ⚠ `#bar button` より強く書く(同じ強さだと後ろの規則に負けて、保存ボタンが他のボタンと見分けられない) */
+  #bar #edit-save { background: #3d5a80; border-color: #8ab4ff }
+  #edit-save:disabled, #edit-bar button:disabled { opacity: .45; cursor: default }
+  /* 案内の高さは窓の中で測る(`--edit-bar-h`。折り返しても重ならない) */
+  body[data-pkc-pdf-edited="on"] #scroller, body[data-pkc-pdf-edited="on"] #plist, body[data-pkc-pdf-edited="on"] #msg {
+    top: calc(38px + var(--edit-bar-h, 26px)) }
   /* ページの一覧(#275 段②-1a)。幅は固定の小ささ(読む幅を奪わない)。出し入れは帯のボタン */
   #plist { position: fixed; inset: 38px auto 0 0; width: 120px; overflow-y: auto; overflow-x: hidden;
     box-sizing: border-box; padding: 8px 0 24px; background: #151515; border-right: 1px solid #333;
     display: none; flex-direction: column; align-items: center; gap: 8px }
   body[data-pkc-pdf-list="on"] #plist { display: flex }
   body[data-pkc-pdf-list="on"] #scroller, body[data-pkc-pdf-list="on"] #msg { left: 120px }
+  /* 一覧の下に、使い方の 1 行を常に出す(触れないと出ない ↻ × の存在を、触れる前に知らせる) */
+  #plist-hint { position: fixed; left: 0; bottom: 0; width: 120px; height: 62px; box-sizing: border-box;
+    padding: 6px 8px; background: #151515; border-top: 1px solid #333; border-right: 1px solid #333;
+    color: #9a9a9a; font-size: 11px; line-height: 1.45; display: none; z-index: 3 }
+  body[data-pkc-pdf-list="on"] #plist-hint { display: block }
+  body[data-pkc-pdf-list="on"] #plist { bottom: 62px }
+  #plist { user-select: none; -webkit-user-select: none }
+  /* 1 行 = 項目のボタン + ↻ と ×(ページの編集。#275 段②-1b)。↻ × は触れる間だけ出す */
+  .thumb-cell { position: relative; flex: none; width: 104px; border-radius: 4px }
+  .thumb-cell[hidden] { display: none }
+  .thumb-act { all: unset; box-sizing: border-box; cursor: pointer; position: absolute; top: 6px; width: 22px;
+    height: 22px; line-height: 22px; text-align: center; border-radius: 3px; background: #000b; color: #eee;
+    font-size: 14px; opacity: .55; z-index: 2 }
+  .thumb-turn { right: 32px }
+  .thumb-drop { right: 8px }
+  .thumb-up { left: 8px }
+  .thumb-down { left: 32px }
+  .thumb-cell:hover .thumb-act, .thumb-cell:focus-within .thumb-act { opacity: 1 }
+  .thumb-act:hover { background: #3d5a80 }
+  .thumb-act:focus-visible { outline: 2px solid #8ab4ff; opacity: 1 }
+  /* ドラッグ中: 動かしているページは薄く、入る場所には線を出す */
+  .thumb-cell[data-pkc-dragging="true"] { opacity: .45 }
+  .thumb-cell[data-pkc-drop="before"] { box-shadow: 0 -5px 0 -2px #8ab4ff }
+  .thumb-cell[data-pkc-drop="after"] { box-shadow: 0 5px 0 -2px #8ab4ff }
   .thumb { all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 104px; padding: 4px 4px 3px;
     border: 2px solid transparent; border-radius: 4px; text-align: center; color: #aaa; font-size: 11px }
   .thumb:hover { background: #262626 }
@@ -102,8 +147,11 @@
   <button id="hit-next" type="button" title="次の一致へ">次の一致</button>
   <span id="hits"></span>
   <span class="sp"></span>
+  <button id="edit-save" type="button" hidden title="並べ替え・回転・外したページを反映した、新しい PDF を添付に加えます(元の PDF は変わりません)">別の PDF として保存</button>
   <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
 </div>
+<div id="edit-bar" hidden><span id="edit-note"></span><button id="edit-reset" type="button" title="まだ保存していない並べ替え・回転・外したページを、元に戻します">変更を元に戻す</button><span id="edit-warn" hidden></span></div>
+<div id="plist-hint">ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す</div>
 <nav id="plist" aria-label="ページの一覧"></nav>
 <div id="scroller"><div id="pages"></div></div>
 <div id="status" role="status"></div>
@@ -113,6 +161,8 @@
 <script src="./doc-lease.js"></script>
 <script src="./text-hits.js"></script>
 <script src="./page-list.js"></script>
+<script src="./page-edit.js"></script>
+<script src="./edit-stage.js"></script>
 <script type="module" src="./reader.js"></script>
 </body>
 </html>

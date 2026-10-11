@@ -79,6 +79,8 @@ import { appPdfReader } from '@adapter/ui/render/pdf-reader-setting';
 import { PdfReaderHost } from '@adapter/platform/pdf/pdf-window';
 import { openInPdfReader } from '@adapter/platform/pdf/open-in-reader';
 import { quoteIntoNote } from '@adapter/platform/pdf/quote-into-note';
+import { createSaveEdited, openPdfStageDir } from '@adapter/platform/pdf/save-edited';
+import { resolveCanonicalParents } from '@features/relation/tree';
 import { appPhoneLinks } from '@adapter/ui/render/phone-links';
 import { appDateLinks } from '@adapter/ui/render/date-links';
 import { appColorSwatch } from '@adapter/ui/render/color-swatch';
@@ -1807,10 +1809,50 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   `features/pdf/pdf-quote.ts` が持つ(`main.ts` は原文を読む test しか持てないので判断を置かない)。
    * 🔑 ノートへ書くのは**既存の追記**(`APPEND_TO_ENTRY`)── 新しい書込経路を作らない。
    */
+  /**
+   * 🔴 **窓で編集した PDF を、新しい添付にする**(#275 段②-1b)。⚠ 配線だけ ── 経路と守る 5 つは
+   *   `save-edited.ts`、置き場と画面を動かさないことは `attachOne` の `place`。
+   * 🔑 元の添付は触らない。同じフォルダへ新しい添付を 1 つ足し、つながりは張らず、読んでいるノートの画面も動かさない。
+   */
+  const pdfSaveEdited = createSaveEdited({
+    stage: () => openPdfStageDir(),
+    // ⚠ 昇格で変わるので呼ぶたびに読む(`officeSaveBack` と同じ)
+    isHolder: () => writerHolder,
+    canWrite: () => {
+      const phase = dispatcher.getState().phase;
+      return phase === 'ready' || phase === 'editing';
+    },
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    createAttachment: async ({ name, bytes, parentLid }) => {
+      let lid: string | null = null;
+      // ⚠ 断る側の門ではなく待つ側(user はもう保存を押している)── `officeSaveBack.createNote` と同じ
+      await withAssetGate.queued(async () => {
+        const attached = await attachOne(
+          dispatcher,
+          attachDeps,
+          {
+            name,
+            type: 'application/pdf',
+            size: bytes.byteLength,
+            blob: new Blob([bytes], { type: 'application/pdf' }),
+          },
+          undefined,
+          { parentLid, keepSelection: true },
+        );
+        lid = attached?.lid ?? null;
+      });
+      return lid;
+    },
+    notify: (text, openLid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
+  });
   let pdfHost: PdfReaderHost | null = null;
   const pdfReaderHost = (): PdfReaderHost => {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
+      onEdited: (session, key) => pdfSaveEdited.receive(session, key),
       onFellBack: (session) =>
         showStatus(`「${session.name}」は PDF ビューアで読めなかったため、ブラウザ標準の PDF 表示で開きました`, {
           kind: 'caution',

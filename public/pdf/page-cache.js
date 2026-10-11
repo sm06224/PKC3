@@ -52,6 +52,13 @@
     return this.map.has(page);
   };
 
+  /** 1 頁だけ返す(回したので描き直すとき)。持っていなければ何もしない。 */
+  PageCache.prototype.drop = function (page) {
+    if (!this.map.has(page)) return;
+    this.revoke(this.map.get(page));
+    this.map.delete(page);
+  };
+
   /** 残す頁(`Set<number>`)以外を全部返す。@returns 外した頁番号 */
   PageCache.prototype.retain = function (keep) {
     var dropped = [];

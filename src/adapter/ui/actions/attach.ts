@@ -236,6 +236,13 @@ export async function attachOne(
   deps: AttachDeps,
   item: AttachItem,
   known?: Set<string>,
+  /**
+   * 🔴 **置き場と、画面を動かさないこと**(#275 段②-1b ── 編集した PDF を、元の添付と同じフォルダへ)。
+   * ⚠ 省略 = これまでどおり(ルート。編集中だけ選択を動かさない)。
+   * - `parentLid`: 入れ先のフォルダ。ルートなら `null`。⚠ 辺は**フォルダの中に置く構造の辺だけ**(つながりは張らない)
+   * - `keepSelection`: `true` なら、読んでいるノートも選択も絞りも**動かさずに**作る(#683 の「切り出したら読んでいたノートが消えた」)
+   */
+  place?: { readonly parentLid: string | null; readonly keepSelection: boolean },
 ): Promise<AttachedOne | null> {
   let stored: StoredAsset;
   try {
@@ -255,7 +262,8 @@ export async function attachOne(
     body: attachmentBody({ name: item.name, mime, size: item.size, assetKey, hash }),
     edit: false, // 添付は editor に入らない(PKC2 の silent attach と同じ)
     // 🔴 編集中は選択も編集も動かさずに作る(#1085)
-    keepSelection: dispatcher.getState().phase === 'editing',
+    keepSelection: place?.keepSelection === true || dispatcher.getState().phase === 'editing',
+    ...(place?.parentLid != null ? { parentLid: place.parentLid, relationId: generateLid() } : {}),
   });
   // 🔴 **作れたことを確かめてから「作れた」と言う。** `CREATE_ENTRY` の reducer は
   //    `phase !== 'ready'` を**黙って捨てる** ── 確かめないと、Office の保存を

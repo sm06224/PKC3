@@ -117,8 +117,13 @@ const DIST = positional[1]
  * サイズを守らせる規律ではない(user 指示 2026-08-03)。mermaid 12 の既定の配置
  * `elk` の chunk(1,456 KB / gzip 453 KB)が増えた分で、実測 10858 KB(約 600 KB の余裕)。
  * ⚠ **撤廃はしない**。
+ *
+ * 🔴 **2026-10-11(#275 段②-1b)に 11500 → 12000 KB へ引き上げた** ── 通常の増加である(誤取込ではない)。
+ * ページの編集の窓の JS(`public/pdf/` 直下の 11 file。precache に載る)が約 40 KB 増え、実測 11494 KB /
+ * 残量 6.1 KB(0.1%)だった。pdf-lib 本体(525 KB)は precache に載らず、別立ての `pdf/lib/` に入る。
+ * ⚠ **撤廃はしない**(誤取込 1 本は今も止まる)。
  */
-const SHIPPED_CAP_KB = 11500;
+const SHIPPED_CAP_KB = 12000;
 
 /**
  * 配る量の下限。KB。⚠ **cap だけでは片側しか見ていない** ── entry chunk を

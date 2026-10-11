@@ -19,6 +19,8 @@ const { PageCache, windowOf } = self.PkcPdfPageCache;
 const { DocLease } = self.PkcPdfDocLease;
 const textHits = self.PkcPdfTextHits;
 const { thumbWanted, pickNext, currentChange } = self.PkcPdfPageList;
+const pageEdit = self.PkcPdfPageEdit;
+const editStage = self.PkcPdfEditStage;
 
 /** 見えている頁の前後に、この数だけ先に描く。 */
 const RADIUS = 2;
@@ -33,6 +35,10 @@ const HEARTBEAT_MS = 3000;
 const THUMB_W = 94;
 /** 一覧で見えている頁の前後に、この数だけ先に描く。 */
 const THUMB_RADIUS = 3;
+/** ページの編集の worker を、使われないまま畳むまでの時間(ms)。保存の直前の確かめと保存の間を跨がせる。 */
+const EDIT_IDLE_MS = 30000;
+/** ドラッグと見なす動き(px)。これ未満は押しただけ(そのページへ移る)。 */
+const DRAG_START_PX = 6;
 /** 一覧の絵を同時に持つ上限(100 頁の文書でも、これを超えて持たない)。 */
 const THUMB_LIVE = 40;
 
@@ -45,6 +51,11 @@ const statusEl = $('status');
 const quoteBtn = $('quote');
 const listEl = $('plist');
 const listBtn = $('toggle-list');
+const saveBtn = $('edit-save');
+const resetBtn = $('edit-reset');
+const editNote = $('edit-note');
+const editWarn = $('edit-warn');
+const editBar = $('edit-bar');
 
 const ch = new BroadcastChannel(wire.CHANNEL);
 const send = (kind, payload) => ch.postMessage(wire.envelope(kind, token, payload));
@@ -64,6 +75,8 @@ let lease = null;
 let ready = false;
 let total = 0;
 let blob = null;
+/** 本体が教えてくれた添付の名前(保存する PDF の名前の元)。 */
+let docName = '';
 let ownUrl = null;
 let started = false;
 let scale = 1;
@@ -102,6 +115,7 @@ ch.onmessage = (ev) => {
     void onDoc(m.payload);
   }
   else if (m.kind === 'focus-request') window.focus();
+  else if (m.kind === 'edit-result') onEditResult(m.payload);
   else if (m.kind === 'quote-result') {
     clearTimer(quoteTimer);
     quoteTimer = null;
@@ -112,7 +126,10 @@ ch.onmessage = (ev) => {
 async function onDoc(payload) {
   if (started) return;
   started = true;
-  if (typeof payload.name === 'string' && payload.name !== '') document.title = payload.name;
+  if (typeof payload.name === 'string' && payload.name !== '') {
+    document.title = payload.name;
+    docName = payload.name;
+  }
   if (typeof payload.url !== 'string') {
     state('failed');
     msgEl.textContent = wire.DOC_FAILED;
@@ -200,6 +217,7 @@ function fallBack() {
   ready = false;
   // 🔑 文書(= 解析 worker)を握っていれば畳む。待っている依頼は貸し出しが reject する
   if (lease !== null) lease.dispose();
+  disposeEdit();
   cache.clear();
   releaseThumbs();
   document.body.textContent = '';
@@ -361,14 +379,34 @@ async function drawPage(pdf, i, myGen) {
   page.cleanup();
 }
 
-// ───────── ページの一覧(#275 段②-1a)
+// ───────── ページの一覧(#275 段②-1a)と、ページの編集(段②-1b)
 
-/** 頁 → 一覧の 1 項目(ボタン) / 絵の入れ物。 */
+/** 頁 → 一覧の 1 項目(ボタン) / 絵の入れ物 / 行(ボタンと ↻ × を束ねる) / 位置の番号。 */
 const thumbItems = [];
 const thumbHolders = [];
+const thumbCells = [];
+const thumbNos = [];
+/** 頁 → 回した角度(0 / 90 / 180 / 270)。一覧の絵はこの角度で描く(読む頁は元のまま)。 */
+const thumbRot = [];
+/** 頁 → 元の向きでの縦横比(高さ / 幅)。まだ描いていない頁は 1 頁目を借りる。 */
+const pageRatio = [];
+/** いまの並び(`page-edit.js`)。一覧の見せ方と、保存で作る PDF の元。 */
+let items = [];
+/**
+ * 🔴 **基準の並び** = 最後に保存した並び(まだ保存していなければ元のまま)。「まだ保存していない変更」は
+ * これとの違いで見る ── 保存した後も保存ボタンを出し続けると、押し直すたびに同じ PDF の添付が増える。
+ */
+let baseline = [];
+/** 保存を送った並び(返事が来るまでの控え。時間切れの後に遅れて成功の返事が来たとき、基準にする)。 */
+let pendingBaseline = null;
+/** 頁 → 並びの中の位置(1 始まり)。0 = 外してある。 */
+const posByPage = [];
 /** 一覧の枠の中に見えている頁(IntersectionObserver が教える)。 */
 const thumbVisible = new Set();
 let thumbWantedSet = new Set();
+/** 描きたい頁を**並びの位置**で持つ(並べ替えると、頁番号の近さは見えている近さと別になる)。 */
+let thumbWantedPos = new Set();
+/** 一覧の中央の**位置**。 */
 let thumbCenter = 1;
 let thumbObserver = null;
 let thumbDraining = false;
@@ -380,9 +418,21 @@ let marked = 0;
 /** Tab で止まる項目(`tabindex=0` は 1 つだけ)。 */
 let tabStop = 1;
 
+/** 一覧の絵の入れ物の高さ。回してあれば縦横を入れ替える。 */
+function holderHeight(i) {
+  const r = pageRatio[i] || sizes[1].h / sizes[1].w;
+  return Math.round(THUMB_W * (thumbRot[i] % 180 === 0 ? r : 1 / r));
+}
+
 function buildThumbs() {
-  const ratio = sizes[1].h / sizes[1].w;
+  items = pageEdit.fresh(total);
+  baseline = items.slice();
   for (let i = 1; i <= total; i += 1) {
+    thumbRot[i] = 0;
+    posByPage[i] = i;
+    const cell = document.createElement('div');
+    cell.className = 'thumb-cell';
+    cell.setAttribute('data-thumb-cell', String(i));
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'thumb';
@@ -393,15 +443,58 @@ function buildThumbs() {
     item.tabIndex = i === 1 ? 0 : -1;
     const holder = document.createElement('span');
     holder.className = 'thumb-img';
-    holder.style.height = `${String(Math.round(THUMB_W * ratio))}px`;
+    holder.style.height = `${String(holderHeight(i))}px`;
     const no = document.createElement('span');
     no.className = 'thumb-no';
     no.textContent = String(i);
     item.append(holder, no);
+    // ↻(右へ 90° 回す)と ×(このページを外す)。Tab の止まり先にしない(キーは項目で R / Delete)
+    const turn = document.createElement('button');
+    turn.type = 'button';
+    turn.className = 'thumb-act thumb-turn';
+    turn.setAttribute('data-pkc-field', 'pdf-page-rotate');
+    turn.setAttribute('data-thumb-page', String(i));
+    turn.setAttribute('aria-label', `${String(i)} ページを右へ回す`);
+    turn.title = '右へ 90° 回す';
+    turn.tabIndex = -1;
+    turn.textContent = '↻';
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'thumb-act thumb-drop';
+    drop.setAttribute('data-pkc-field', 'pdf-page-remove');
+    drop.setAttribute('data-thumb-page', String(i));
+    drop.setAttribute('aria-label', `${String(i)} ページを外す`);
+    drop.title = 'このページを外す';
+    drop.tabIndex = -1;
+    drop.textContent = '×';
+    // ↑ ↓(ドラッグできない端末でも並べ替えられる)。Tab の止まり先にしない(キーは項目で Alt+↑↓)
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'thumb-act thumb-up';
+    up.setAttribute('data-pkc-field', 'pdf-page-up');
+    up.setAttribute('data-thumb-page', String(i));
+    up.setAttribute('aria-label', `${String(i)} ページを 1 つ上へ`);
+    up.title = '1 つ上へ';
+    up.tabIndex = -1;
+    up.textContent = '↑';
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'thumb-act thumb-down';
+    down.setAttribute('data-pkc-field', 'pdf-page-down');
+    down.setAttribute('data-thumb-page', String(i));
+    down.setAttribute('aria-label', `${String(i)} ページを 1 つ下へ`);
+    down.title = '1 つ下へ';
+    down.tabIndex = -1;
+    down.textContent = '↓';
+    cell.append(item, turn, drop, up, down);
     thumbItems[i] = item;
     thumbHolders[i] = holder;
-    listEl.append(item);
+    thumbCells[i] = cell;
+    thumbNos[i] = no;
+    listEl.append(cell);
   }
+  // 編集の上のバーは「変えていない」で始める(印も `off` で置く ── 窓の外から読める)
+  updateEditUi();
 }
 
 function clearThumb(i) {
@@ -416,6 +509,7 @@ function releaseThumbs() {
   }
   thumbVisible.clear();
   thumbWantedSet = new Set();
+  thumbWantedPos = new Set();
   thumbFailed.clear();
   for (const i of thumbCache.map.keys()) clearThumb(i);
   thumbCache.clear();
@@ -436,8 +530,9 @@ function watchThumbs() {
         else thumbVisible.delete(n);
       }
       if (thumbVisible.size > 0) {
-        const all = [...thumbVisible];
-        thumbCenter = Math.round((Math.min(...all) + Math.max(...all)) / 2);
+        // 位置で数える(並べ替えた後は、頁番号の真ん中と見えている真ん中が別になる)
+        const all = [...thumbVisible].map((p) => posByPage[p]).filter((k) => k > 0);
+        if (all.length > 0) thumbCenter = Math.round((Math.min(...all) + Math.max(...all)) / 2);
       }
       scheduleThumbs();
     },
@@ -448,7 +543,12 @@ function watchThumbs() {
 
 function scheduleThumbs() {
   if (!listOn || !ready) return;
-  thumbWantedSet = thumbWanted(thumbVisible, total, THUMB_RADIUS, THUMB_LIVE, thumbCenter);
+  const visiblePos = new Set();
+  thumbVisible.forEach((p) => {
+    if (posByPage[p] > 0) visiblePos.add(posByPage[p]);
+  });
+  thumbWantedPos = thumbWanted(visiblePos, items.length, THUMB_RADIUS, THUMB_LIVE, thumbCenter);
+  thumbWantedSet = new Set([...thumbWantedPos].map((k) => items[k - 1].page));
   for (const i of thumbCache.retain(thumbWantedSet)) clearThumb(i);
   void drainThumbs();
 }
@@ -467,8 +567,13 @@ async function drainThumbs() {
         await sleep(60);
         continue;
       }
-      const i = pickNext(thumbWantedSet, (p) => thumbCache.has(p) || thumbFailed.has(p), thumbCenter);
-      if (i === null) break;
+      const at = pickNext(
+        thumbWantedPos,
+        (k) => thumbCache.has(items[k - 1].page) || thumbFailed.has(items[k - 1].page),
+        thumbCenter,
+      );
+      if (at === null) break;
+      const i = items[at - 1].page;
       try {
         await lease.use((pdf) => drawThumb(pdf, i));
       } catch (e) {
@@ -491,9 +596,14 @@ async function drawThumb(pdf, i) {
   const page = await pdf.getPage(i);
   try {
     if (!listOn || !thumbWantedSet.has(i)) return;
-    const base = page.getViewport({ scale: 1 });
+    // 🔑 回してあるページは、その向きで描く(一覧の絵が、保存で作る PDF の向きと同じになる)
+    const turn = thumbRot[i];
+    const native = page.getViewport({ scale: 1 });
+    pageRatio[i] = native.height / native.width;
+    const rotation = (page.rotate + turn) % 360;
+    const base = page.getViewport({ scale: 1, rotation });
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const vp = page.getViewport({ scale: (THUMB_W * dpr) / base.width });
+    const vp = page.getViewport({ scale: (THUMB_W * dpr) / base.width, rotation });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.floor(vp.width));
     canvas.height = Math.max(1, Math.floor(vp.height));
@@ -506,14 +616,15 @@ async function drawThumb(pdf, i) {
     //    持ってもいない・失敗にも数えない頁が「次に描く頁」に選ばれ続け、描き直しが止まらない
     if (png === null) throw new Error('thumb toBlob failed');
     const url = URL.createObjectURL(png);
-    if (!listOn || !thumbWantedSet.has(i)) {
+    // 描いている間に回された絵は置かない(古い向き)── 次の周回で描き直される
+    if (!listOn || !thumbWantedSet.has(i) || thumbRot[i] !== turn) {
       URL.revokeObjectURL(url);
       return;
     }
     for (const e of thumbCache.put(i, url)) clearThumb(e);
     const holder = thumbHolders[i];
     holder.textContent = '';
-    holder.style.height = `${String(Math.round((THUMB_W * base.height) / base.width))}px`;
+    holder.style.height = `${String(holderHeight(i))}px`;
     const img = document.createElement('img');
     img.setAttribute('data-pkc-field', 'pdf-page-thumb-image');
     img.alt = '';
@@ -565,24 +676,59 @@ function setList(on, refit) {
 listBtn.addEventListener('click', () => {
   if (ready) setList(!listOn, true);
 });
-// 矢印 / Home / End で項目の間を動く(Enter / Space は項目のボタンが押されて、その頁へ移る)
+// 矢印 / Home / End で項目の間を動く(Enter / Space は項目のボタンが押されて、その頁へ移る)。
+// 🔑 動く順は**いまの並び**(並べ替えた後は、見えている順)。Alt+↑↓ は並べ替え、R は回す、Delete は外す
+// (ドラッグと同じ関数 `editMove` / `editRotate` / `editRemove` を通る)。
 listEl.addEventListener('keydown', (ev) => {
   const el = ev.target instanceof Element ? ev.target.closest('[data-thumb]') : null;
   if (el === null) return;
-  const at = Number(el.getAttribute('data-thumb'));
+  const page = Number(el.getAttribute('data-thumb'));
+  const at = posByPage[page] - 1;
+  if (at < 0) return;
+  const plain = !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey;
+  if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+    ev.preventDefault();
+    void editMove(page, at + (ev.key === 'ArrowUp' ? -1 : 1), true);
+    return;
+  }
+  if (plain && (ev.key === 'r' || ev.key === 'R')) {
+    ev.preventDefault();
+    void editRotate(page, true);
+    return;
+  }
+  if (plain && ev.key === 'Delete') {
+    ev.preventDefault();
+    void editRemove(page, true);
+    return;
+  }
   let to = at;
   if (ev.key === 'ArrowDown') to = at + 1;
   else if (ev.key === 'ArrowUp') to = at - 1;
-  else if (ev.key === 'Home') to = 1;
-  else if (ev.key === 'End') to = total;
+  else if (ev.key === 'Home') to = 0;
+  else if (ev.key === 'End') to = items.length - 1;
   else return;
   ev.preventDefault();
-  to = Math.max(1, Math.min(total, to));
-  setTabStop(to);
-  thumbItems[to].focus();
+  to = Math.max(0, Math.min(items.length - 1, to));
+  const next = items[to].page;
+  setTabStop(next);
+  thumbItems[next].focus();
 });
 listEl.addEventListener('click', (ev) => {
-  const el = ev.target instanceof Element ? ev.target.closest('[data-thumb]') : null;
+  // ドラッグを離した直後のクリックは、押したことにしない
+  if (Date.now() - dragEndedAt < 80) return;
+  const t = ev.target instanceof Element ? ev.target : null;
+  if (t === null) return;
+  const act = t.closest('.thumb-act');
+  if (act !== null) {
+    const which = Number(act.getAttribute('data-thumb-page'));
+    const field = act.getAttribute('data-pkc-field');
+    if (field === 'pdf-page-rotate') void editRotate(which, true);
+    else if (field === 'pdf-page-up') void editMove(which, posByPage[which] - 2, true);
+    else if (field === 'pdf-page-down') void editMove(which, posByPage[which], true);
+    else void editRemove(which, true);
+    return;
+  }
+  const el = t.closest('[data-thumb]');
   if (el === null) return;
   const n = Number(el.getAttribute('data-thumb'));
   setTabStop(n);
@@ -593,6 +739,469 @@ listEl.addEventListener('focusout', (ev) => {
   if (!(ev.relatedTarget instanceof Node) || !listEl.contains(ev.relatedTarget)) {
     if (marked >= 1) setTabStop(marked);
   }
+});
+
+// ───────── ページの編集(#275 段②-1b)── 並べ替え・回す・外す → 「別の PDF として保存」
+//
+// 🔴 画面で触るのは**並びの計画**(`items`、`page-edit.js`)だけで、読む頁(中央)は元の PDF のまま動かさない。
+// 保存を押したときだけ、窓の中の使い捨ての worker(`edit-worker.js`)が**新しい PDF**を作り、
+// OPFS の棚へ置いて本体へ知らせる(本体が新しい添付にする)。元の PDF は書き換えない。
+// 設計 doc: `docs/development/pdf-page-ops-design-2026-10.md`。
+
+/** 元の PDF にある、保存で引き継がれない物(最初の編集のときに pdf.js に尋ねる)。 */
+let editInfo = { outlines: false, form: false, signature: false };
+/** 編集できる形かの答え(最初の編集のとき 1 回だけ確かめる)。'ok' / 'encrypted' / 'unreadable' */
+let editVerdict = null;
+let editLease = null;
+let saving = false;
+let editTimer = null;
+let dragEndedAt = 0;
+
+const PREPARING = 'ページの編集を準備しています…';
+const SAVED_NOTE = '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます';
+const EDIT_MESSAGES = {
+  encrypted: 'パスワードで守られた PDF は、ページを編集できません',
+  unreadable: 'この PDF はページを編集できない形です',
+  worker: 'ページの編集を始められませんでした。もう一度試してください',
+  leaked: '外したページの内容を含めずには作れませんでした。保存していません',
+};
+
+function codeError(code) {
+  const e = new Error(`pdf-edit: ${code}`);
+  e.pkcCode = code;
+  return e;
+}
+
+/**
+ * ページ編集用の worker を 1 本立てる(`DocLease` が握る)。
+ * 🔴 畳むときに**待っている依頼を必ず reject する**(`kill`)── 捨てると `await` が永久に返らない。
+ * ⚠ bytes は transfer で渡し、結果も transfer で受ける(複製しない)。
+ */
+function openEditWorker() {
+  const worker = new Worker(new URL('./edit-worker.js', import.meta.url));
+  const pending = new Map();
+  let seq = 0;
+  let dead = false;
+  const kill = (code) => {
+    if (dead) return;
+    dead = true;
+    worker.terminate();
+    for (const p of pending.values()) p.reject(codeError(code));
+    pending.clear();
+  };
+  worker.onmessage = (ev) => {
+    const m = ev.data;
+    const p = pending.get(m.id);
+    if (p === undefined) return;
+    pending.delete(m.id);
+    if (m.ok) p.resolve(m);
+    else p.reject(codeError(m.code));
+  };
+  worker.onerror = () => kill('worker');
+  return {
+    kill,
+    call(msg, transfer) {
+      return new Promise((resolve, reject) => {
+        if (dead) {
+          reject(codeError('worker'));
+          return;
+        }
+        seq += 1;
+        pending.set(seq, { resolve, reject });
+        worker.postMessage({ ...msg, id: seq }, transfer);
+      });
+    },
+  };
+}
+
+/** worker へ 1 件頼む。bytes は Blob から**この都度**読み、worker へ渡して手放す。 */
+async function callEdit(op, job) {
+  if (editLease === null) {
+    editLease = new DocLease({ open: openEditWorker, close: (h) => h.kill('closed'), idleMs: EDIT_IDLE_MS });
+  }
+  const mine = editLease;
+  const buf = await blob.arrayBuffer();
+  try {
+    return await mine.use((h) => h.call({ op, bytes: buf, job }, [buf]));
+  } catch (e) {
+    const code = e && e.pkcCode;
+    if (code !== 'encrypted' && code !== 'unreadable' && code !== 'bad-job' && code !== 'leaked') {
+      // 立ち上がらなかった / 落ちた worker は握り直す(死んだものを貸し続けない)
+      mine.dispose();
+      if (editLease === mine) editLease = null;
+      throw codeError('worker');
+    }
+    throw e;
+  }
+}
+
+function disposeEdit() {
+  clearTimer(editTimer);
+  editTimer = null;
+  if (editLease !== null) editLease.dispose();
+  editLease = null;
+}
+
+/**
+ * 元の PDF にあるもの(しおり / 入力欄 / 電子署名)を pdf.js に尋ねる。
+ * ⚠ パスワード(暗号化)はここで尋ねない ── pdf-lib が読み込みの前に断る(`edit-core.js`)のが唯一の判定で、
+ *   二重に持つと、片方だけが古くなる(§7)。
+ */
+async function inspectDoc(doc) {
+  const out = { outlines: false, form: false, signature: false };
+  try {
+    const o = await doc.getOutline();
+    out.outlines = Array.isArray(o) && o.length > 0;
+  } catch {
+    // 尋ねられなくても編集は止めない(言わない字が増えるだけ)
+  }
+  try {
+    const f = await doc.getFieldObjects();
+    if (f !== null && typeof f === 'object') {
+      const fields = Object.values(f).flat();
+      out.signature = fields.some((x) => x && x.type === 'signature');
+      out.form = fields.some((x) => x && x.type !== 'signature');
+    }
+  } catch {
+    // 尋ねられなくても編集は止めない(言わない字が増えるだけ)
+  }
+  return out;
+}
+
+/** 編集できる形かを確かめる。@returns 'ok' / 'encrypted' / 'unreadable' / 'worker' */
+async function checkEditable() {
+  try {
+    const info = await lease.use(inspectDoc);
+    editInfo = info;
+  } catch (e) {
+    if (ready && e && e.openFailed) fallBack();
+    return 'worker';
+  }
+  try {
+    await callEdit('check');
+    return 'ok';
+  } catch (e) {
+    const code = e && e.pkcCode;
+    return code === 'encrypted' || code === 'unreadable' ? code : 'worker';
+  }
+}
+
+/** 編集してよいか(最初の 1 回だけ確かめ、答えを使い回す)。@returns `true` / 断ったら理由を窓の下に出して `false` */
+async function canEdit() {
+  if (!ready || saving) return false;
+  if (editVerdict === null) {
+    setStatus(PREPARING);
+    const v = await checkEditable();
+    // 立ち上がらなかった回は覚えない(次の操作でもう一度試す)
+    if (v !== 'worker') editVerdict = v;
+    if (!ready) return false;
+    if (v === 'ok') {
+      if (statusEl.textContent === PREPARING) setStatus('');
+      return true;
+    }
+    setStatus(EDIT_MESSAGES[v]);
+    return false;
+  }
+  if (editVerdict === 'ok') return true;
+  setStatus(EDIT_MESSAGES[editVerdict]);
+  return false;
+}
+
+/** 並びを画面に映す: 行の順・外した行の隠し・位置の番号・回した絵の描き直し・上のバー。 */
+function applyItems(focusPage) {
+  posByPage.fill(0);
+  items.forEach((it, k) => {
+    posByPage[it.page] = k + 1;
+  });
+  const frag = document.createDocumentFragment();
+  items.forEach((it, k) => {
+    const p = it.page;
+    thumbCells[p].hidden = false;
+    frag.append(thumbCells[p]);
+    thumbNos[p].textContent = String(k + 1);
+    thumbItems[p].setAttribute(
+      'aria-label',
+      k + 1 === p ? `${String(p)} ページへ` : `${String(p)} ページへ(いま ${String(k + 1)} 番目)`,
+    );
+    if (thumbRot[p] !== it.rot) {
+      // 回した(または元に戻した)ページは、新しい向きで描き直す
+      thumbRot[p] = it.rot;
+      clearThumb(p);
+      thumbCache.drop(p);
+      thumbFailed.delete(p);
+      thumbHolders[p].style.height = `${String(holderHeight(p))}px`;
+    }
+  });
+  for (let p = 1; p <= total; p += 1) {
+    if (posByPage[p] > 0) continue;
+    thumbCells[p].hidden = true;
+    thumbVisible.delete(p);
+    frag.append(thumbCells[p]);
+  }
+  // 並べ替えで要素を動かすと焦点が外れる ── 動かしたページへ戻す
+  listEl.append(frag);
+  if (items.length > 0) {
+    if (focusPage !== undefined && posByPage[focusPage] > 0) {
+      setTabStop(focusPage);
+      thumbItems[focusPage].focus();
+    } else if (!(posByPage[tabStop] > 0)) {
+      setTabStop(posByPage[marked] > 0 ? marked : items[0].page);
+    }
+  }
+  updateEditUi();
+  scheduleThumbs();
+}
+
+/** まだ保存していない変更があるか(基準 = 最後に保存した並び)。 */
+function isDirty() {
+  return !pageEdit.sameArrangement(items, baseline);
+}
+
+/** 上のバーと、窓の上の案内(編集中の 1 行 + 引き継がれない物の行)。 */
+function updateEditUi() {
+  const dirty = isDirty();
+  document.body.setAttribute('data-pkc-pdf-edited', dirty ? 'on' : 'off');
+  saveBtn.hidden = !dirty;
+  editBar.hidden = !dirty;
+  saveBtn.disabled = !dirty || !pageEdit.canSave(items) || saving;
+  resetBtn.disabled = saving;
+  editNote.textContent = dirty ? pageEdit.noteLine(items.length, total) : '';
+  // 引き継がれない物の行は、元にあるものがあるときだけ(無ければ行ごと出さない)
+  const warn = dirty && items.length > 0 ? pageEdit.warnLine(editInfo) : '';
+  editWarn.textContent = warn;
+  editWarn.hidden = warn === '';
+  syncBarHeight();
+}
+
+/** 案内の高さを測って、下の面(一覧 / 読む面 / 案内)の top を合わせる ── 折り返しても重ならない。 */
+function syncBarHeight() {
+  document.body.style.setProperty('--edit-bar-h', `${String(editBar.hidden ? 0 : editBar.offsetHeight)}px`);
+}
+if (typeof ResizeObserver === 'function') new ResizeObserver(syncBarHeight).observe(editBar);
+
+/** ↻ ── 右へ 90° 回す。 */
+async function editRotate(page, focus) {
+  if (!(await canEdit())) return;
+  const at = posByPage[page] - 1;
+  if (at < 0) return;
+  items = pageEdit.rotateAt(items, at);
+  applyItems(focus ? page : undefined);
+}
+
+/** × ── このページを外す。焦点は同じ位置の次のページへ。 */
+async function editRemove(page, focus) {
+  if (!(await canEdit())) return;
+  const at = posByPage[page] - 1;
+  if (at < 0) return;
+  items = pageEdit.removeAt(items, at);
+  const next = items.length === 0 ? undefined : items[Math.min(at, items.length - 1)].page;
+  applyItems(focus ? next : undefined);
+}
+
+/** 並べ替え(ドラッグも Alt+↑↓ もこの 1 本)。`to` = 取り出した後の並びの位置(0 始まり)。 */
+async function editMove(page, to, focus) {
+  if (!(await canEdit())) return;
+  const at = posByPage[page] - 1;
+  if (at < 0) return;
+  const next = pageEdit.moveTo(items, at, to);
+  if (next.every((it, k) => it === items[k])) return;
+  items = next;
+  applyItems(focus ? page : undefined);
+}
+
+resetBtn.addEventListener('click', () => {
+  if (!ready || saving) return;
+  items = baseline.slice();
+  applyItems();
+  setStatus('');
+});
+
+// ───────── ドラッグで並べ替える
+
+/** ドラッグの控え(`null` = していない)。 */
+let drag = null;
+
+/** ポインタの高さから、取り出した後の並びの何番目に入るか(0 始まり)。ドラッグ中のページ自身は数えない。 */
+function dropSlot(y) {
+  let slot = 0;
+  for (const it of items) {
+    if (it.page === drag.page) continue;
+    const r = thumbCells[it.page].getBoundingClientRect();
+    if (r.top + r.height / 2 < y) slot += 1;
+  }
+  return slot;
+}
+
+/** 入る場所に線を出す(`slot` = null で消す)。 */
+function showDrop(slot) {
+  for (const c of listEl.querySelectorAll('[data-pkc-drop]')) c.removeAttribute('data-pkc-drop');
+  if (slot === null) return;
+  const others = items.filter((it) => it.page !== drag.page);
+  if (others.length === 0) return;
+  if (slot < others.length) thumbCells[others[slot].page].setAttribute('data-pkc-drop', 'before');
+  else thumbCells[others[others.length - 1].page].setAttribute('data-pkc-drop', 'after');
+}
+
+function endDrag() {
+  if (drag !== null && drag.active) {
+    thumbCells[drag.page].removeAttribute('data-pkc-dragging');
+    try {
+      listEl.releasePointerCapture(drag.id);
+    } catch {
+      // 既に離れている
+    }
+  }
+  showDrop(null);
+  listEl.removeAttribute('data-pkc-pdf-dragging');
+  drag = null;
+}
+
+listEl.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0 || !ready || saving || !(ev.target instanceof Element)) return;
+  if (ev.target.closest('.thumb-act') !== null) return;
+  const cell = ev.target.closest('.thumb-cell');
+  if (cell === null) return;
+  drag = {
+    page: Number(cell.getAttribute('data-thumb-cell')),
+    x: ev.clientX,
+    y: ev.clientY,
+    id: ev.pointerId,
+    active: false,
+  };
+});
+listEl.addEventListener('pointermove', (ev) => {
+  if (drag === null || ev.pointerId !== drag.id) return;
+  if (!drag.active) {
+    if (Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) < DRAG_START_PX) return;
+    drag.active = true;
+    try {
+      listEl.setPointerCapture(ev.pointerId);
+    } catch {
+      // 取れなくても、枠の中での動きは追える
+    }
+    thumbCells[drag.page].setAttribute('data-pkc-dragging', 'true');
+    listEl.setAttribute('data-pkc-pdf-dragging', 'true');
+  }
+  // 枠の端に寄ったら、一覧を動かして遠くのページへ届くようにする
+  const r = listEl.getBoundingClientRect();
+  if (ev.clientY < r.top + 28) listEl.scrollTop -= 14;
+  else if (ev.clientY > r.bottom - 28) listEl.scrollTop += 14;
+  showDrop(dropSlot(ev.clientY));
+});
+listEl.addEventListener('pointerup', (ev) => {
+  if (drag === null || ev.pointerId !== drag.id) return;
+  const d = drag;
+  const slot = d.active ? dropSlot(ev.clientY) : -1;
+  endDrag();
+  if (!d.active) return;
+  dragEndedAt = Date.now();
+  void editMove(d.page, slot, false);
+});
+listEl.addEventListener('pointercancel', () => {
+  if (drag !== null) endDrag();
+});
+
+// ───────── 保存(別の PDF として)
+
+saveBtn.addEventListener('click', () => {
+  void saveEdited();
+});
+
+async function saveEdited() {
+  if (!ready || saving || !pageEdit.canSave(items) || !isDirty()) return;
+  saving = true;
+  updateEditUi();
+  setStatus('保存しています…');
+  try {
+    // 🔑 最初の編集のときに確かめてあるが、保存の直前にも通す(確かめていない経路から来ても断れる)
+    if (editVerdict === null) {
+      const v = await checkEditable();
+      if (v !== 'worker') editVerdict = v;
+      if (v !== 'ok') {
+        setStatus(EDIT_MESSAGES[v]);
+        saving = false;
+        updateEditUi();
+        return;
+      }
+    } else if (editVerdict !== 'ok') {
+      setStatus(EDIT_MESSAGES[editVerdict]);
+      saving = false;
+      updateEditUi();
+      return;
+    }
+    // 渡すのは**ページ番号の並びと回す角度だけ**(bytes は別に transfer)
+    const res = await callEdit('build', pageEdit.toJob(items));
+    const dir = await editStage.openDir();
+    if (dir === null) {
+      setStatus('この端末の保存領域を使えないため、保存できません');
+      saving = false;
+      updateEditUi();
+      return;
+    }
+    const sentItems = items.slice();
+    const staged = await editStage.stageBytes({
+      dir,
+      bytes: new Uint8Array(res.bytes),
+      name: pageEdit.outputName(docName),
+    });
+    // 🔴 返事が来なければ、「保存しています…」のまま固まらず断る(本体のリロード / 閉じ)
+    clearTimer(editTimer);
+    editTimer = setTimeout(() => {
+      editTimer = null;
+      saving = false;
+      lateOk = true;
+      setStatus(wire.EDIT_NO_REPLY);
+      updateEditUi();
+    }, wire.EDIT_TIMEOUT_MS);
+    // 返事(`edit-result`)が来るまで `saving` のまま
+    pendingBaseline = sentItems;
+    send('edited', { key: staged.key });
+  } catch (e) {
+    const code = e && e.pkcCode;
+    setStatus(EDIT_MESSAGES[code] || '保存できませんでした。もう一度押してください');
+    saving = false;
+    updateEditUi();
+  }
+}
+
+/**
+ * 本体の返事(新しい添付ができた / できなかった)。
+ * 🔴 できたら、**保存した並びを基準にする**(保存ボタンを隠す)── 押し直して同じ PDF の添付を増やさせない。
+ * 🔴 時間切れの後に**遅れて**届いた返事は、今の状態の字を上書きしない(基準だけ直す ── 添付はできているので)。
+ */
+let lateOk = false;
+function onEditResult(payload) {
+  const ok = payload.ok === true;
+  if (!saving) {
+    // 時間切れの後の遅い返事: 成功なら基準だけ直し、字は「確かめられませんでした」のときだけ置き換える
+    if (lateOk && ok && pendingBaseline !== null) {
+      baseline = pendingBaseline;
+      pendingBaseline = null;
+      lateOk = false;
+      if (statusEl.textContent === wire.EDIT_NO_REPLY) setStatus(SAVED_NOTE);
+      updateEditUi();
+    }
+    return;
+  }
+  clearTimer(editTimer);
+  editTimer = null;
+  saving = false;
+  lateOk = false;
+  if (ok && pendingBaseline !== null) {
+    baseline = pendingBaseline;
+    setStatus(SAVED_NOTE);
+  } else {
+    setStatus(typeof payload.message === 'string' && payload.message !== '' ? payload.message : '保存できませんでした。もう一度押してください');
+  }
+  pendingBaseline = null;
+  updateEditUi();
+}
+
+// 🔴 まだ保存していない変更があるまま窓を閉じる / 読み込み直すときだけ、ブラウザの確認を出す(変更が無ければ何も出さない)
+window.addEventListener('beforeunload', (ev) => {
+  if (!isDirty()) return;
+  ev.preventDefault();
+  ev.returnValue = '';
 });
 
 // ───────── 拡大縮小 / 頁送り
@@ -838,4 +1447,5 @@ window.addEventListener('pagehide', () => {
   releaseThumbs();
   if (ownUrl !== null) URL.revokeObjectURL(ownUrl);
   if (lease !== null) lease.dispose();
+  disposeEdit();
 });

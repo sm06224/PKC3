@@ -18,6 +18,7 @@ import {
   PDF_HOST_PATH,
   PDF_TAG,
   PdfReaderHost,
+  type PdfEditResult,
   type PdfLent,
   type PdfQuoteResult,
   type PdfSession,
@@ -31,6 +32,9 @@ interface Wire {
   TAG: string;
   QUOTE_MAX_BYTES: number;
   QUOTE_TOO_LONG: string;
+  QUOTE_TIMEOUT_MS: number;
+  EDIT_TIMEOUT_MS: number;
+  EDIT_NO_REPLY: string;
   envelope(kind: string, token: string, payload?: object): Record<string, unknown>;
   parse(data: unknown, token: string): { kind: string; payload: Record<string, unknown> } | null;
   checkQuote(text: string): string | null;
@@ -81,6 +85,7 @@ interface Rig {
   loadFailed: { session: PdfSession; reason: string }[];
   openFailed: PdfSession[];
   lateHello: PdfSession[];
+  edits: { session: PdfSession; key: string }[];
   clock: { t: number };
   /** 窓の側の端(実物の `reader-wire.js` で組む / 読む)。 */
   win: {
@@ -91,7 +96,10 @@ interface Rig {
   lent(url: string): PdfLent;
 }
 
-function rig(quoteResult: PdfQuoteResult = { ok: true, message: '引きました' }): Rig {
+function rig(
+  quoteResult: PdfQuoteResult = { ok: true, message: '引きました' },
+  editResult: PdfEditResult = { ok: true, message: '保存しました' },
+): Rig {
   const hub = new Hub();
   const clock = { t: 1_000_000 };
   const r = {
@@ -104,6 +112,7 @@ function rig(quoteResult: PdfQuoteResult = { ok: true, message: '引きました
     loadFailed: [] as Rig['loadFailed'],
     openFailed: [] as PdfSession[],
     lateHello: [] as PdfSession[],
+    edits: [] as Rig['edits'],
     clock,
   };
   const host = new PdfReaderHost({
@@ -115,6 +124,10 @@ function rig(quoteResult: PdfQuoteResult = { ok: true, message: '引きました
     onLoadFailed: (session, reason) => r.loadFailed.push({ session, reason }),
     onOpenFailed: (s) => r.openFailed.push(s),
     onLateHello: (s) => r.lateHello.push(s),
+    onEdited: (session, key) => {
+      r.edits.push({ session, key });
+      return Promise.resolve(editResult);
+    },
     makeChannel: (name) => {
       expect(name).toBe(PDF_CHANNEL);
       return hub.end();
@@ -279,6 +292,7 @@ describe('開く', () => {
       onLoadFailed: () => undefined,
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
+      onEdited: () => Promise.resolve({ ok: true, message: "" }),
       makeChannel: () => g.hub.end(),
       openWindow: () => {
         throw new Error('blocked');
@@ -356,6 +370,7 @@ describe('ノートへ引く', () => {
       onLoadFailed: () => undefined,
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
+      onEdited: () => Promise.resolve({ ok: true, message: "" }),
       makeChannel: () => g.hub.end(),
       openWindow: (url) => {
         g.opened.push({ url, features: '' });
@@ -385,6 +400,7 @@ describe('ノートへ引く', () => {
       onLoadFailed: () => undefined,
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
+      onEdited: () => Promise.resolve({ ok: true, message: "" }),
       makeChannel: () => g2.hub.end(),
       openWindow: () => undefined,
       baseUrl: 'https://example.test/',
@@ -439,6 +455,69 @@ describe('ノートへ引く', () => {
     g.win.send('quote', { text: 'a', page: '1' });
     g.win.send('quote', {});
     expect(g.quotes).toEqual([]);
+  });
+});
+
+describe('編集した PDF を保存する(#275 段②-1b)', () => {
+  it('窓が棚へ置いた鍵を送ると、本体が受け、結果を窓へ返す(窓の実物の envelope と繋ぐ)', async () => {
+    const g = rig(undefined, { ok: true, message: '「報告書 (編集).pdf」を添付に加えました' });
+    const s = openAndHello(g);
+    g.win.send('edited', { key: 'pabc123' });
+    await flush();
+    expect(g.edits).toEqual([{ session: s, key: 'pabc123' }]);
+    expect(g.win.received.find((m) => m.kind === 'edit-result')?.payload).toEqual({
+      ok: true,
+      message: '「報告書 (編集).pdf」を添付に加えました',
+    });
+  });
+
+  it('鍵の型が違う・空なら受けない(窓は同一 origin の別 realm)/ 本体が落ちても理由を窓へ返す', async () => {
+    const g = rig();
+    openAndHello(g);
+    g.win.send('edited', { key: 5 });
+    g.win.send('edited', { key: '' });
+    g.win.send('edited', {});
+    await flush();
+    expect(g.edits).toEqual([]);
+    expect(g.win.received.find((m) => m.kind === 'edit-result')).toBeUndefined();
+    // 本体の返事が reject しても、窓の「保存しています…」を残さない
+    const g2 = rig();
+    const host2 = new PdfReaderHost({
+      onQuote: () => Promise.resolve({ ok: true, message: '' }),
+      onEdited: () => Promise.reject(new Error('boom')),
+      onFellBack: () => undefined,
+      onLoadFailed: () => undefined,
+      onOpenFailed: () => undefined,
+      onLateHello: () => undefined,
+      makeChannel: () => g2.hub.end(),
+      openWindow: () => undefined,
+      baseUrl: 'https://example.test/',
+      newToken: () => 'edrej',
+    });
+    host2.open({ assetKey: 'k', name: 'a.pdf', lid: null, lent: g2.lent('blob:z') });
+    const win2 = g2.hub.end();
+    const got: Record<string, unknown>[] = [];
+    win2.onmessage = (ev) => got.push(ev.data as Record<string, unknown>);
+    win2.postMessage(wire.envelope('edited', 'edrej', { key: 'p1' }));
+    await flush();
+    host2.dispose();
+    const res = got.find((m) => m[PDF_TAG] === 'edit-result');
+    expect(res, '落ちた回に窓へ何も返していない').toBeDefined();
+    expect((res?.['payload'] as { ok: boolean }).ok).toBe(false);
+  });
+
+  it('他の窓宛て(知らない token)の「置いた」には、何も起きない', async () => {
+    const g = rig();
+    openAndHello(g);
+    g.hub.end().postMessage(wire.envelope('edited', 'someone-else', { key: 'p1' }));
+    await flush();
+    expect(g.edits).toEqual([]);
+  });
+
+  it('保存の返事を待つ上限が、本体の返事を待つ上限より長い(本体が先に理由つきで断れる)', () => {
+    expect(wire.EDIT_TIMEOUT_MS).toBeGreaterThan(wire.QUOTE_TIMEOUT_MS);
+    // 「保存できなかった」とは言い切らない(添付ができたかもしれない)
+    expect(wire.EDIT_NO_REPLY).toContain('確かめられませんでした');
   });
 });
 
@@ -513,26 +592,27 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
 
   it('⚠ 前提: 窓が送る種類・待つ種類を実際に拾えている(空振り防止)', () => {
     expect(new Set(sent).size).toBeGreaterThanOrEqual(7);
-    expect(new Set(awaited).size).toBe(3);
+    expect(new Set(awaited).size).toBe(4);
   });
 
-  it('窓が送る種類は、ちょうどこの 7 つ(増えたら本体の受け口と対で足す)', () => {
+  it('窓が送る種類は、ちょうどこの 8 つ(増えたら本体の受け口と対で足す)', () => {
     expect([...new Set(sent)].sort()).toEqual(
-      ['alive', 'closed', 'fell-back', 'hello', 'load-failed', 'loaded', 'quote'].sort(),
+      ['alive', 'closed', 'edited', 'fell-back', 'hello', 'load-failed', 'loaded', 'quote'].sort(),
     );
   });
 
-  it('窓が待つ種類は、本体が送る 3 つと同じ(doc / focus-request / quote-result)', async () => {
-    expect([...new Set(awaited)].sort()).toEqual(['doc', 'focus-request', 'quote-result']);
+  it('窓が待つ種類は、本体が送る 4 つと同じ(doc / edit-result / focus-request / quote-result)', async () => {
+    expect([...new Set(awaited)].sort()).toEqual(['doc', 'edit-result', 'focus-request', 'quote-result']);
     const g = rig();
     const s = openAndHello(g);
     g.host.focus(s.token);
     g.win.send('quote', { text: 'a', page: 1 });
+    g.win.send('edited', { key: 'p1' });
     await flush();
     expect(new Set(g.win.received.map((m) => m.kind))).toEqual(new Set(awaited));
   });
 
-  it('窓が送る 7 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', () => {
+  it('窓が送る 8 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', () => {
     const effects: Record<string, (g: Rig) => unknown> = {
       hello: (g) => g.win.received.some((m) => m.kind === 'doc'),
       alive: (g) => g.host.openTokenFor('k1') !== null,
@@ -540,6 +620,7 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
       'load-failed': (g) => g.loadFailed.length === 1,
       'fell-back': (g) => g.fellBack.length === 1,
       quote: (g) => g.quotes.length === 1,
+      edited: (g) => g.edits.length === 1,
       closed: (g) => g.host.openTokenFor('k1') === null,
     };
     for (const kind of new Set(sent)) {
@@ -553,7 +634,16 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
         g.win.received.length = 0;
         // 生きている扱いの猶予を過ぎさせてから送る(alive が効いたことだけを見る)
         if (kind === 'alive') g.clock.t += ALIVE_TTL_MS + 1;
-        g.win.send(kind, kind === 'quote' ? { text: 'a', page: 1 } : kind === 'load-failed' ? { reason: 'r' } : {});
+        g.win.send(
+          kind,
+          kind === 'quote'
+            ? { text: 'a', page: 1 }
+            : kind === 'load-failed'
+              ? { reason: 'r' }
+              : kind === 'edited'
+                ? { key: 'p1' }
+                : {},
+        );
       }
       expect(effects[kind]?.(g), `${kind} が本体で何も起こさない(受け口が無い)`).toBe(true);
     }
