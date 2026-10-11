@@ -10971,3 +10971,17 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='schedule-day-holiday'] {
   flex: 1;
 }
+
+/* #1407 埋め込み先のページの AI を許すページ: 入力欄と「追加」を 1 行に並べる。断った理由だけ色を付ける(色は情報にだけ) */
+[data-pkc-field='embed-origin-form'] {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+[data-pkc-field='embed-origin-input'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-pkc-field='embed-origin-result'][data-pkc-state='error'] {
+  color: var(--danger);
+}

@@ -110,7 +110,8 @@ import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
 import { createAgentEmbed } from '@adapter/transport/agent-embed';
-import { EmbedOriginsStore } from '@adapter/transport/embed-origins';
+import { appEmbedOrigins } from '@adapter/transport/embed-origins';
+import { wireEmbedOrigins } from '@adapter/transport/embed-origins-wiring';
 import { appFlags } from '@adapter/platform/flag-store';
 import {
   FLAG_CAPTURE,
@@ -2073,12 +2074,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const agentEmbed = createAgentEmbed({
     enabled: () => appFlags.isOn(FLAG_WEBMCP.name),
-    allowed: () => (appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : []),
+    allowed: () => (appFlags.isOn(FLAG_EMBED.name) ? appEmbedOrigins.list() : []),
     granted: () => appAgentOriginGrants.origins(),
     host: { document, navigator },
     buildTools: (from) => buildAgentTools({ ...agentToolBase, from }),
   });
   appAgentOriginGrants.onChange(() => agentEmbed.sync());
+  // 🔴 設定の「許すページ」の一覧を変えたら(画面でも別のタブでも)今すぐ効かせる(#1407)。判断は `embed-origins-wiring.ts`
+  wireEmbedOrigins(appEmbedOrigins, agentEmbed, window);
   agentEmbed.sync();
   window.addEventListener('pagehide', () => agentEmbed.stop());
   // ⚠ 戻るで復元されたとき(bfcache)は登録し直す ── しないと、次に台帳が変わるまで組み込み先から見えない
@@ -2091,7 +2094,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     enabled: appFlags.isOn(FLAG_EMBED.name) || capture !== null,
     origins: () =>
       // 🔑 **flag が下りていれば許可リストは空**(= 全部拒否)── 合図の門だけ開く
-      appFlags.isOn(FLAG_EMBED.name) ? new EmbedOriginsStore().list() : [],
+      appFlags.isOn(FLAG_EMBED.name) ? appEmbedOrigins.list() : [],
     ...(capture === null ? {} : { capture }),
     createEntry: createEntryFromOutside,
     agent: { ...agentEmbed, enabled: () => appFlags.isOn(FLAG_WEBMCP.name) },

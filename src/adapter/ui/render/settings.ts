@@ -68,6 +68,10 @@ import { createExternalImagesSection } from './settings/external-images';
 import { createSameOriginSection } from './settings/same-origin';
 import { createExtensionsSection } from './settings/extensions';
 import { createAgentsSection } from './settings/agents';
+import { appFlags } from '@adapter/platform/flag-store';
+import { FLAG_EMBED } from '@features/flags';
+import { createEmbedOriginsSection } from './settings/embed-origins';
+import { appEmbedOrigins, type EmbedOriginsStore } from '@adapter/transport/embed-origins';
 import { createOpenedHistorySection } from './settings/opened-history';
 import { createSearchHistorySection } from './settings/search-history';
 import { createCopyHistorySection } from './settings/copy-history';
@@ -207,6 +211,10 @@ export class SettingsRenderer {
      * ⚠ **末尾に足す**(すぐ上の戒めのとおり)。
      */
     private readonly agentOriginGrants: AgentOriginGrants = appAgentOriginGrants,
+    /**
+     * 🔴 **埋め込み先のページの AI を許すページの一覧**(#1407)。⚠ **末尾に足す**(すぐ上の戒めのとおり)。
+     */
+    private readonly embedOrigins: EmbedOriginsStore = appEmbedOrigins,
   ) {
     /**
      * 🔴 **節の登録表(#1382)── 並びが画面の並びである。** 節を足す = `settings/` に 1 file 足し、
@@ -245,6 +253,7 @@ export class SettingsRenderer {
       createSameOriginSection(sameOriginGrants),
       createExtensionsSection(extensionGrants),
       createAgentsSection(agentGrants, agentTabStatus, agentOriginGrants),
+      createEmbedOriginsSection(embedOrigins, () => appFlags.isOn(FLAG_EMBED.name)),
       createOpenedHistorySection(),
       createSearchHistorySection(),
       createCopyHistorySection(),

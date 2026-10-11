@@ -424,8 +424,24 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
     ).toBe(-32001);
     expect(await regOf(), '許していないのに WebMCP へ登録された').toEqual([]);
 
-    // ── 2. 許可リストに親を入れる(窓口は呼ぶたびに読む ── 張り直し不要) ──
-    await frame.evaluate((o) => localStorage.setItem('pkc3.embed-origins', JSON.stringify([o])), PARENT);
+    // ── 2. 許可リストに親を入れる ── 🔴 開発者ツールではなく、設定の画面から(#1407)。窓口は呼ぶたびに読む ──
+    //    後ろ(パス)の付いたアドレスを入れても origin に落ちる。断る入力は保存を変えず、理由が 1 行出る
+    //    ⚠ 設定の画面は**ここで開いたまま 5 まで閉じない**。2026-10-11 の実測(4/4 回): 「開く → 閉じる → AI がノートを
+    //      作る(3)→ 開き直す」の並びで、開き直した画面が自分で ~300ms 後に閉じた(アドレスの追加とは無関係 ──
+    //      開閉だけでも同じ。原因は未調査で、別件として報告した)。その並びを踏まない形にしてある
+    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    const embedInput = frame.locator('[data-pkc-field="embed-origin-input"]');
+    const embedResult = frame.locator('[data-pkc-field="embed-origin-result"]');
+    await embedInput.fill('http://example.com');
+    await frame.locator('[data-pkc-field="embed-origin-add"]').click();
+    await expect(embedResult, 'http:// を断る理由が出ていない').toContainText('https:// で始まるアドレスだけ');
+    expect(await ls('pkc3.embed-origins'), '断った入力が保存された').toBeNull();
+    expect((await rpc('tools/list'))?.error?.code, '断った入力で窓口が開いた').toBe(-32001);
+    await embedInput.fill(`${PARENT}/some/path?q=1`);
+    await frame.locator('[data-pkc-field="embed-origin-add"]').click();
+    await expect(embedResult).toHaveText(`${PARENT} として追加しました(アドレスの後ろは使いません)`);
+    expect(JSON.parse((await ls('pkc3.embed-origins')) ?? 'null'), '保存は origin だけ').toEqual([PARENT]);
+    await expect(frame.locator(`li[data-pkc-embed-origin="${PARENT}"]`)).toBeVisible();
     const hello = await rpc('pkc.hello');
     expect(hello?.result?.methods).toEqual(expect.arrayContaining(['tools/list', 'tools/call']));
     const list = await rpc('tools/list');
@@ -481,7 +497,7 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
     await expect(frameNote, '常に許したのにダイアログが出た').toBeHidden();
 
     // ── 5. 設定の一覧に親の origin の行 → 取り消す → 登録が畳まれる ──
-    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    // (設定の画面は 2 から開いたまま ── 上の ⚠ のとおり、ここでは開き直さない)
     const row = frame.locator(`li[data-pkc-agent-origin="${PARENT}"][data-pkc-agent-scope="read"]`);
     await expect(row, '設定の一覧に親の origin の行が出ていない').toBeVisible();
     await expect(row.locator('[data-pkc-field="agent-origin"]')).toHaveText(`${PARENT} のページの AI`);
@@ -504,9 +520,15 @@ window.rpc=(method,params,ms)=>new Promise(res=>{const id=++n;
     expect(JSON.stringify(afterRes)).toContain('ユーザーが許可しませんでした');
     expect(JSON.stringify(afterRes)).not.toContain(`${MARK} の本文`);
 
-    // ── 7. 許可リストから外せば、また窓口で断られる ──
-    await frame.evaluate(() => localStorage.setItem('pkc3.embed-origins', '[]'));
+    // ── 7. 許可リストから外せば、また窓口で断られる ── 🔴 設定の「一覧から外す」で(#1407)
+    await frame.locator('[data-pkc-action="set-view"][data-pkc-view="settings"]').click();
+    const embedRow = frame.locator(`li[data-pkc-embed-origin="${PARENT}"]`);
+    await expect(embedRow.locator('button')).toHaveText('一覧から外す');
+    await embedRow.locator('button').click();
+    await expect(embedRow, '外したのに一覧に残っている').toHaveCount(0);
+    expect(JSON.parse((await ls('pkc3.embed-origins')) ?? 'null')).toEqual([]);
     expect((await rpc('tools/list'))?.error?.code).toBe(-32001);
+    await frame.locator('[data-pkc-action="close-pane"]').click();
 
     expect(errors, 'pageerror が出た').toEqual([]);
   } finally {
