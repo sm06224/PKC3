@@ -86,3 +86,59 @@ export function resolveReadAnchor(
   }
   return null;
 }
+
+/**
+ * 🔴 **戻した後に塊の高さが変わったら、目印の位置へ合わせ直す**(#1525)。
+ *
+ * ⚠ 戻す瞬間(`resolveReadAnchor`)は、目印の塊が**まだ仮の高さ**だと「塊の中のずれ」が
+ *   塊の外へはみ出す(図は焼けるまで低い)── ブラウザのスクロールアンカーは**その時点で見えている
+ *   塊**を保つだけなので、後ろの塊に固定されて**元の行より後ろ**が出た
+ *   (実ブラウザ:図 40 個・約 2,000 行で +74 行、20,000 行で +1,572 行)。
+ * 🔑 器(本文)の高さが変わるたびに、目印の位置から送り量を引き直す。
+ * ⚠ **読んでいる人の手を奪わない** ── 送り・押下・キー・タッチが 1 度でも入ったら止める。
+ *   入らなくても {@link HOLD_MS} で止める(焼き上がりを待つ上限。常駐させない)。
+ */
+export const HOLD_MS = 8000;
+/** 合わせ直しの許容(px)。これ以下のずれでは書かない(書くと無用なスクロールが起きる)。 */
+export const HOLD_TOLERANCE_PX = 1;
+
+/** 合わせ直すか。`want` が取れない(目印が消えた)/ 許容内なら `null`。 */
+export function realignTarget(want: number | null, current: number): number | null {
+  if (want === null) return null;
+  return Math.abs(want - current) > HOLD_TOLERANCE_PX ? want : null;
+}
+
+export interface ReadAnchorHold {
+  dispose(): void;
+}
+
+const STOP_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+export function installReadAnchorHold(
+  host: HTMLElement,
+  scroller: HTMLElement,
+  anchor: ReadAnchor,
+  now: () => number = () => performance.now(),
+): ReadAnchorHold {
+  const t0 = now();
+  let done = false;
+  const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => realign());
+  const stop = (): void => {
+    if (done) return;
+    done = true;
+    ro?.disconnect();
+    for (const ev of STOP_EVENTS) scroller.removeEventListener(ev, stop, true);
+  };
+  function realign(): void {
+    if (done) return;
+    if (now() - t0 > HOLD_MS) {
+      stop();
+      return;
+    }
+    const to = realignTarget(resolveReadAnchor(host, scroller, anchor), scroller.scrollTop);
+    if (to !== null) scroller.scrollTop = to;
+  }
+  for (const ev of STOP_EVENTS) scroller.addEventListener(ev, stop, { capture: true, passive: true });
+  ro?.observe(host);
+  return { dispose: stop };
+}

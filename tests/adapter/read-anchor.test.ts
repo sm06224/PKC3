@@ -1,6 +1,12 @@
 /** @vitest-environment happy-dom */
-import { describe, expect, it } from 'vitest';
-import { captureReadAnchor, resolveReadAnchor } from '../../src/adapter/ui/render/read-anchor';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  captureReadAnchor,
+  HOLD_MS,
+  installReadAnchorHold,
+  realignTarget,
+  resolveReadAnchor,
+} from '../../src/adapter/ui/render/read-anchor';
 
 /** 塊を `heights` の高さで積んだ器(配置は差し込む ── happy-dom は持たない)。 */
 function board(heights: number[], lines: (number | null)[] = heights.map((_, i) => i * 3)) {
@@ -95,5 +101,64 @@ describe('読んでいた場所の目印 ── 端の形(#1490 レビュー)', 
   it('先頭より上へは戻さない(ずれが負でも 0 で止める)', () => {
     const { scroller, host } = board(Array(5).fill(100));
     expect(resolveReadAnchor(host, scroller, { line: 0, offset: -80 })).toBe(0);
+  });
+});
+
+describe('戻した後の合わせ直し(#1525)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('realignTarget:許容内・目印なしは書かない、外れていれば目印の位置', () => {
+    expect(realignTarget(null, 100)).toBeNull();
+    expect(realignTarget(100.5, 100)).toBeNull();
+    expect(realignTarget(1450, 100)).toBe(1450);
+  });
+
+  /** ResizeObserver の差し込み。`fire()` で「本文の高さが変わった」を撃つ。 */
+  function stubRO() {
+    const cbs: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          cbs.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    return () => cbs.forEach((cb) => cb());
+  }
+
+  it('目印の塊が低いうちに戻しても、高さが変わったら目印の位置へ引き直す', () => {
+    const fire = stubRO();
+    const { scroller, host, setHeights } = board(Array(20).fill(100));
+    // 行 30 の塊(index 10)が、戻した瞬間は 10px しかない(仮の高さ)
+    setHeights([...Array(10).fill(100), 10, ...Array(9).fill(100)]);
+    installReadAnchorHold(host, scroller, { line: 30, offset: 60 });
+    scroller.scrollTop = 1000 + 60; // 戻した直後の位置(塊の外へはみ出している)
+    setHeights(Array(20).fill(100)); // 図が焼けて 100px になった
+    fire();
+    expect(scroller.scrollTop).toBe(1060);
+  });
+
+  it('自分で送り始めたら、もう引き戻さない', () => {
+    const fire = stubRO();
+    const { scroller, host } = board(Array(20).fill(100));
+    installReadAnchorHold(host, scroller, { line: 30, offset: 0 });
+    scroller.scrollTop = 400;
+    scroller.dispatchEvent(new Event('wheel'));
+    fire();
+    expect(scroller.scrollTop).toBe(400);
+  });
+
+  it('時間が過ぎたら止まる(常駐させない)', () => {
+    const fire = stubRO();
+    const { scroller, host } = board(Array(20).fill(100));
+    let t = 0;
+    installReadAnchorHold(host, scroller, { line: 30, offset: 0 }, () => t);
+    t = HOLD_MS + 1;
+    scroller.scrollTop = 400;
+    fire();
+    expect(scroller.scrollTop).toBe(400);
   });
 });
