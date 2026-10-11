@@ -148,7 +148,7 @@ describe('本文の右クリック(#426 段② / #522)', () => {
       b.getAttribute('data-pkc-action'),
     );
     // ⚠ 「ここに板を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
-    expect(acts).toEqual(['add-place', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
+    expect(acts).toEqual(['add-place', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
      * ⚠ 本文を押したのに削除が出ると、消えるのは**選んでいるノート**である ──
@@ -511,6 +511,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      */
     expect(acts.slice(7), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
+      'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -552,6 +553,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     rightClick(r.para);
     expect(r.acts(), '段落の上でも見出しの物が出た').toEqual([
       'add-place',
+      'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
       'adopt-external-images',
     ]);
@@ -1650,6 +1652,100 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     // 対照群: 板でない囲みには出ない
     rightClick(r.q('p[data-pkc-source-line="5"]'));
     expect(r.acts()).not.toContain('raise-place');
+  });
+
+  /**
+   * 🔴 **テンプレートから板を置く / 位置と大きさ…**(#529 W4 / W2)── 配線(メニュー → 窓 → reducer)を通す。
+   * 書換の規則は `tests/features/place-template-rect.test.ts`、窓の検めは `place-rect-dialog.test.ts`。
+   * ⚠ ここが守るのは**「やめる」で依頼が 1 本も出ないこと**と、**窓の答えが押した板の行へ届くこと**。
+   */
+  it('🔴 「テンプレートから板を置く…」→ 行を選ぶと、押した座標で template つきの place-add になる。やめるなら何も書かない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    expect(r.label('add-place-template')).toBe('テンプレートから板を置く…');
+    r.press('add-place-template');
+    expect(asks, '窓の前に書いた').toHaveLength(0);
+    const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-place-template"]')];
+    expect(rows).toHaveLength(3);
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await settle();
+    expect(asks, 'やめたのに書いた').toHaveLength(0);
+
+    resetAppDialogForTest();
+    rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
+    r.press('add-place-template');
+    document.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-place-template"]')[2]!.click();
+    await settle();
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61, template: 'matrix2' } });
+  });
+
+  it('🔴 板の上の「位置と大きさ…」→ いまの値で開き、全角で決めると place-rect の依頼。やめるなら 1 本も出ない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    expect(r.label('place-rect')).toBe('位置と大きさ…');
+    r.press('place-rect');
+    const field = (k: string): HTMLInputElement =>
+      document.querySelector<HTMLInputElement>(`[data-pkc-place-rect-key="${k}"]`)!;
+    // 窓にいまの値(開き行 BOARD_OPEN の x=40 y=40 w=320 h=200)が入っている
+    expect(['x', 'y', 'w', 'h'].map((k) => field(k).value)).toEqual(['40', '40', '320', '200']);
+    field('x').value = '999';
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-cancel"]')!.click();
+    await settle();
+    expect(asks, 'やめたのに書いた').toHaveLength(0);
+
+    resetAppDialogForTest();
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.press('place-rect');
+    field('x').value = '１２０';
+    field('y').value = '３０';
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await settle();
+    expect(asks).toHaveLength(1);
+    // 🔑 刻印の 18 行目 + frontmatter 3 行 = 生の body の 21 行目(place-raise と同じ)
+    expect(asks[0]).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-rect', line: 21, openLine: BOARD_OPEN, rect: { x: 120, y: 30, w: 320, h: 200 } },
+    });
+  });
+
+  it('🔴 「位置と大きさ…」を開いている間に本文が動いたら、決めても書かない(別の板へ書かない)', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.press('place-rect');
+    const field = (k: string): HTMLInputElement =>
+      document.querySelector<HTMLInputElement>(`[data-pkc-place-rect-key="${k}"]`)!;
+    field('x').value = '120';
+    // 窓の間に、本文の先頭へ 1 行差し挟まれた(別のタブの書込・追記)
+    const ob = r.d.getState().openBody!;
+    // ⚠ いちばん危ない形:**同じ行番号に別の板の開き行が来る**(ずれた先が板でなければ reducer の門が断るので空振りする)
+    const lines = ob.body.split('\n');
+    const other = BOARD_OPEN.replace('x=40', 'x=900');
+    lines.splice(21, 0, other, ':::');
+    r.d.dispatch({ type: 'BODY_LOADED', lid: ob.lid, body: lines.join('\n') });
+    const before = r.d.getState().openBody!.body;
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await settle();
+    expect(asks, '本文が動いたのに、同じ行番号の板へ書いた').toHaveLength(0);
+    expect(r.d.getState().openBody!.body).toBe(before);
+  });
+
+  it('全部の欄を空のまま決めても、書換の依頼は出さない', async () => {
+    resetAppDialogForTest();
+    const r = rig();
+    const asks = asksOf(r.d);
+    rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    r.press('place-rect');
+    for (const k of ['x', 'y', 'w', 'h']) document.querySelector<HTMLInputElement>(`[data-pkc-place-rect-key="${k}"]`)!.value = '';
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await settle();
+    expect(asks).toHaveLength(0);
   });
 
   it('確認で「やめる」を押せば、何も書かない', async () => {

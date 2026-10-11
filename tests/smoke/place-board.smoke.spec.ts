@@ -1242,6 +1242,68 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   await expect(made, '消したのは繋いだ線だけでなければならない').toHaveCount(0);
   await expect(mine, '線を消したら付箋まで消えた').toHaveAttribute('id', '板1');
 
+  /**
+   * 🔴 **付箋を右クリック →「位置と大きさ…」**(#529 W2)── 数を入れて決めると、その付箋の
+   * x= y= w= h= が一度に書き換わる。**新しい起動は増やさない**(#820)── 置いたばかりの `mine` を使う。
+   * ⚠ 観測点は**本文から描き直された属性**(`data-pkc-x` など)。窓を閉じない断り・やめるで不変・
+   *   全角数字を、同じ筋書きの中で通す。
+   */
+  // ⚠ `mine` は x= の属性で引く locator なので、動かした後は当たらない ── 名前(`板1`)で引き直す
+  const named = page.locator('[data-pkc-region="detail"] [id="板1"]');
+  const dlg = page.locator('[data-pkc-region="app-dialog"][open]');
+  const rectField = (k: string): Locator => dlg.locator(`[data-pkc-place-rect-key="${k}"]`);
+  const openRect = async (): Promise<void> => {
+    const box = (await named.boundingBox())!;
+    await page.mouse.click(Math.floor(box.x + box.width / 2), Math.floor(box.y + box.height / 2), { button: 'right' });
+    await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="place-rect"]').click();
+    await expect(dlg, '位置と大きさの窓が開いていない').toBeVisible();
+  };
+  await openRect();
+  // いまの値が入って開く(対照群: 窓の欄が本文の値を映している)
+  await expect(rectField('x')).toHaveValue(expectX);
+  await expect(rectField('y')).toHaveValue(expectY);
+  await expect(rectField('w')).toHaveValue('240');
+  // やめる ── 打っても本文は変わらない
+  await rectField('x').fill('777');
+  await dlg.locator('[data-pkc-field="dialog-cancel"]').click();
+  await expect(dlg).toHaveCount(0);
+  await expect(named, 'やめたのに位置が変わった').toHaveAttribute('data-pkc-x', expectX);
+  // 通らない値 ── 窓は閉じず、理由が出る(負の数)
+  await openRect();
+  await rectField('x').fill('-5');
+  await dlg.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(dlg, '通らない値で窓が閉じた').toBeVisible();
+  await expect(dlg.locator('[data-pkc-field="place-rect-error"]')).toContainText('0 以上');
+  // 全角数字で直して決める → 本文が書き換わり、描き直された値が変わる
+  await rectField('x').fill('５００');
+  await rectField('y').fill('６００');
+  await rectField('w').fill('２６０');
+  await rectField('h').fill('１３０');
+  await dlg.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(dlg).toHaveCount(0);
+  await expect(named, '全角の x が書かれていない').toHaveAttribute('data-pkc-x', '500', { timeout: 5000 });
+  await expect(named).toHaveAttribute('data-pkc-y', '600');
+  await expect(named).toHaveAttribute('data-pkc-w', '260');
+  await expect(named).toHaveAttribute('data-pkc-h', '130');
+  await expect(named, '位置を変えたら名前が消えた').toHaveAttribute('id', '板1');
+  // 対照群: 他の板は動いていない
+  await expect(page.locator('[data-pkc-region="detail"] #p1')).toHaveAttribute('data-pkc-x', '120');
+
+  /**
+   * 🔴 **本文を右クリック →「テンプレートから板を置く…」→「付箋 4 枚」**(#529 W4)── 4 枚増える。
+   * ⚠ 数えるのは**描画が板として描いた塊**(`.pkc-place`)── 窓が「置きました」と言うだけでは足りない。
+   */
+  const framesBefore = await page.locator('[data-pkc-field="detail-body"] .pkc-place').count();
+  const hb2 = (await host.boundingBox())!;
+  await page.mouse.click(Math.floor(hb2.x + hb2.width - 60), Math.floor(hb2.y) + 200, { button: 'right' });
+  await menu.locator('[data-pkc-action="add-place-template"]').click();
+  await expect(dlg.locator('[data-pkc-field="pick-place-template"]')).toHaveCount(3);
+  await dlg.locator('[data-pkc-field="pick-place-template"]').first().click();
+  await expect(
+    page.locator('[data-pkc-field="detail-body"] .pkc-place'),
+    '「付箋 4 枚」で 4 枚増えていない',
+  ).toHaveCount(framesBefore + 4, { timeout: 5000 });
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

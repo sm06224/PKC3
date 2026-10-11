@@ -321,7 +321,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-11(#1376): N +2(`restore-draft` / `discard-draft`。起動したときの 1 行の「戻す」「消す」── 押した所から何も要らない。`apply-update` と同じ仕分け)。
     // ⚠ 2026-10-11(#683 段③): P1 +1(`draw-on-image`。画像の添付の「画像に描き込む」── 押した添付の key が要る。
     //   `view-asset` / `download-asset` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 191 });
+    // ⚠ 2026-10-11(#529 W2 / W4): N +2(`add-place-template` / `place-rect`。右クリックのメニューが座標や行を運ぶ ──
+    //   押した所から要る物はメニューの属性で、`add-place` / `raise-place` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 193 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

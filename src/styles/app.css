@@ -8978,6 +8978,19 @@ h3[data-pkc-section] {
   border-radius: var(--radius);
   padding: var(--s1) var(--s2);
 }
+/* 🔴 **位置と大きさ**(#529 W2)── 数 4 つの欄。幅は桁数ぶんだけ。断り文は文字の濃さでなく
+ * 太さで目立たせる(地は無彩色、色は情報にだけ)。 */
+[data-pkc-field='dialog-body'] [data-pkc-field='place-rect-input'] {
+  display: block;
+  width: 7em;
+  margin-top: var(--s1);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='place-rect-error'] {
+  margin: var(--s2) 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
 
 /* ── 器の中の「探して選ぶ」一覧(#474)────────────────────────
  * 🔴 **行は道具のボタンではなく、読む行である。**

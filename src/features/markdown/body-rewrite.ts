@@ -25,6 +25,8 @@ import { removeInsertedLines } from './append-target';
 import { replaceColorSpan } from './color-code';
 import {
   addPlace,
+  addPlaceTemplate,
+  setPlaceRect,
   connectPlaces,
   fenceMask,
   insideFence,
@@ -37,7 +39,9 @@ import {
   setPlaceStyle,
 } from './place-notation';
 import type { PlaceStyle } from './place-color';
+import type { PlaceRectValue } from './place-rect';
 import type { PlaceShape } from './place-shape';
+import type { PlaceTemplateId } from './place-template';
 import { readTags, withTagResult } from '../flavor/tags';
 import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
@@ -248,6 +252,21 @@ export type BodyRewrite =
       kind: 'place-add';
       x: number;
       y: number;
+      /**
+       * 🔴 **テンプレートから置く**(#529 W4)── 無ければ空の付箋 1 枚(これまでと同じ)。
+       * 置くのは既存の記法の枠(と線)で、(x, y) が左上になる。
+       */
+      template?: PlaceTemplateId;
+    }
+  | {
+      /**
+       * 🔴 **位置と大きさを数で入れる**(#529 W2「位置と大きさ…」)── 開き行の x= y= w= h= のうち
+       * **渡した札だけ**を一度に書く。`line` / `openLine` の意味と門は `place-move` と同じ。
+       */
+      kind: 'place-rect';
+      line: number;
+      openLine: string;
+      rect: PlaceRectValue;
     }
   | {
       /**
@@ -789,7 +808,12 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-line-remove') return removePlaceLine(body, rewrite);
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-style') return setPlaceStyle(body, rewrite, rewrite.style);
-  if (rewrite.kind === 'place-add') return addPlace(body, rewrite.x, rewrite.y);
+  if (rewrite.kind === 'place-add') {
+    return rewrite.template === undefined
+      ? addPlace(body, rewrite.x, rewrite.y)
+      : addPlaceTemplate(body, rewrite.x, rewrite.y, rewrite.template);
+  }
+  if (rewrite.kind === 'place-rect') return setPlaceRect(body, rewrite, rewrite.rect);
   if (rewrite.kind === 'place-connect') {
     return connectPlaces(body, {
       from: rewrite.from,

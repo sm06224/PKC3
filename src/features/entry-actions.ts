@@ -915,6 +915,8 @@ export function blockMenuActions(ctx: {
     // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
     //    下げる向きは触っていない板の行まで書き換えることになる
     { action: 'raise-place', label: '前へ出す' },
+    // 🔴 数で入れる(#529 W2)。⚠ 窓を開くだけ ── 「やめる」で本文は 1 byte も変わらない
+    { action: 'place-rect', label: '位置と大きさ…' },
     /**
      * 🔴 **形を変える**(#530 案 A。user 裁定 2026-09-14)── 置けるのが四角だけだと、
      *   「ここは判断」「ここは始まり」を図の中で書き分けられない。
@@ -1011,6 +1013,16 @@ export function placeLineMenuActions(ctx: {
  *   これは**本文を書き換える**物である(塊の物と同じ並びに置く)。
  */
 export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
+
+/**
+ * 🔴 **テンプレートから板を置く**(#529 W4)── 「ここに板を置く」の隣の入口。
+ * 押すと 3 つのテンプレートの窓が開き、選ぶと押した位置から本文の末尾へ置かれる。
+ * ⚠ 板の無いノートでも出る(`ADD_PLACE_ACTION` と同じ。1 枚目を置くと器が板になる)。
+ */
+export const ADD_PLACE_TEMPLATE_ACTION: EntryAction = {
+  action: 'add-place-template',
+  label: 'テンプレートから板を置く…',
+};
 
 /**
  * 🔴 **右クリックした表の形を変える**(#708 段②。user 裁定 2026-09-04)。
