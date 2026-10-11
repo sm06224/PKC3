@@ -12,6 +12,7 @@
  * ⚠ 期待値は**偽の台の寸法から**計算する(換算の式を test で写さない)。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DRAW_COLORS, strokeWidthFor, textFont, textSizeFor } from '../../src/features/asset/image-draw';
 import {
   OPENER_GONE_TEXT,
   openImageDrawWindow,
@@ -23,6 +24,10 @@ import {
 interface Rec {
   arcs: Array<[number, number]>;
   lines: Array<[number, number]>;
+  texts: Array<{ text: string; x: number; y: number; fill: string; font: string }>;
+  gets: Array<[number, number, number, number]>;
+  puts: Array<[number, number]>;
+  widths: number[];
 }
 
 let rec: Rec;
@@ -30,7 +35,7 @@ let blobOut: Blob | null;
 let toBlobCalls: number;
 
 beforeEach(() => {
-  rec = { arcs: [], lines: [] };
+  rec = { arcs: [], lines: [], texts: [], gets: [], puts: [], widths: [] };
   blobOut = new Blob([new Uint8Array([9])], { type: 'image/png' });
   toBlobCalls = 0;
   const ctx = {
@@ -44,9 +49,18 @@ beforeEach(() => {
     moveTo: () => undefined,
     lineTo: (x: number, y: number) => void rec.lines.push([x, y]),
     arc: (x: number, y: number) => void rec.arcs.push([x, y]),
-    stroke: () => undefined,
+    stroke: () => void rec.widths.push(ctx.lineWidth),
     fill: () => undefined,
     strokeRect: () => undefined,
+    font: '',
+    textBaseline: 'alphabetic',
+    fillText: (text: string, x: number, y: number) =>
+      void rec.texts.push({ text, x, y, fill: String(ctx.fillStyle), font: ctx.font }),
+    getImageData: (x: number, y: number, w: number, h: number) => {
+      rec.gets.push([x, y, w, h]);
+      return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
+    },
+    putImageData: (_d: unknown, x: number, y: number) => void rec.puts.push([x, y]),
     clearRect: () => undefined,
     drawImage: () => undefined,
   };
@@ -449,5 +463,237 @@ describe('窓そのもの', () => {
     expect(save).toBeGreaterThan(cancel + 3);
     // 保存は右の端
     expect(save).toBe(kids.length - 1);
+  });
+});
+
+/** 台を等倍で出す(枠 = 台の大きさ)。押した位置 = 台の座標。 */
+function actualSize(s: Setup): void {
+  s.canvas.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, width: s.canvas.width, height: s.canvas.height }) as DOMRect;
+}
+const textBox = (s: Setup): HTMLInputElement | null =>
+  s.w.document.querySelector<HTMLInputElement>('[data-pkc-field="image-draw-text-input"]');
+function keydown(el: HTMLElement, init: { key: string; isComposing?: boolean; keyCode?: number }): void {
+  const ev = new Event('keydown', { bubbles: true, cancelable: true });
+  Object.defineProperties(ev, {
+    key: { value: init.key },
+    isComposing: { value: init.isComposing ?? false },
+    keyCode: { value: init.keyCode ?? 0 },
+    shiftKey: { value: false },
+  });
+  el.dispatchEvent(ev);
+}
+function tapAt(s: Setup, x: number, y: number): void {
+  ptr(s.canvas, 'pointerdown', { id: 7, x, y });
+  ptr(s.canvas, 'pointerup', { id: 7, x, y });
+}
+
+describe('文字', () => {
+  it('🔴 押した所に入力欄が出て、Enter で確定すると押した所へ字が置かれ、保存できるようになる', async () => {
+    const s = await setup({ bitmap: { width: 200, height: 100 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+    tapAt(s, 30, 40);
+    const box = textBox(s)!;
+    expect(box).not.toBeNull();
+    box.value = 'ここを確認';
+    keydown(box, { key: 'Enter' });
+    expect(textBox(s)).toBeNull();
+    const t = rec.texts.at(-1)!;
+    expect([t.text, t.x, t.y]).toEqual(['ここを確認', 30, 40]);
+    expect(t.fill).toBe(DRAW_COLORS.red);
+    expect(t.font).toBe(textFont(Number(/^(\d+)px/.exec(t.font)![1])));
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', false);
+  });
+
+  it('🔴 日本語の変換中の Enter では確定しない(変換が済んだ Enter で確定する)', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    const box = textBox(s)!;
+    box.value = 'にほんご';
+    keydown(box, { key: 'Enter', isComposing: true });
+    keydown(box, { key: 'Enter', keyCode: 229 });
+    expect(textBox(s)).toBe(box); // まだ入力中
+    expect(rec.texts).toHaveLength(0);
+    box.value = '日本語';
+    keydown(box, { key: 'Enter' });
+    expect(rec.texts.at(-1)!.text).toBe('日本語');
+  });
+
+  it('Esc でやめると何も置かれない / 空のまま確定しても何も置かれない', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    textBox(s)!.value = 'やめる';
+    keydown(textBox(s)!, { key: 'Escape' });
+    expect(textBox(s)).toBeNull();
+    tapAt(s, 12, 12);
+    keydown(textBox(s)!, { key: 'Enter' });
+    expect(textBox(s)).toBeNull();
+    expect(rec.texts).toHaveLength(0);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+  });
+
+  it('打っている途中で保存を押す(押す前に入力欄から焦点が外れる)と、打った字が入った画像が保存される', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    const box = textBox(s)!;
+    box.value = '途中';
+    box.dispatchEvent(new Event('blur'));
+    click(s.q('image-draw-save'));
+    await flush();
+    expect(rec.texts.at(-1)!.text).toBe('途中');
+    expect(s.saves).toHaveLength(1);
+  });
+
+  it('🔴 打っている途中で窓を手放すと、入力欄も外れる', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    expect(textBox(s)).not.toBeNull();
+    s.closeWait();
+    await flush();
+    expect(textBox(s)).toBeNull();
+    expect([s.canvas.width, s.canvas.height]).toEqual([0, 0]);
+  });
+
+  it('🔴 打っている途中で別の所を押すと、打った字を置いてから次の入力欄を出す', async () => {
+    const s = await setup({ bitmap: { width: 200, height: 100 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    textBox(s)!.value = '一つ目';
+    // ⚠ 焦点が外れる(blur)を飛ばさない ── 押した処理だけで確定することを見る
+    tapAt(s, 80, 60);
+    expect(rec.texts.map((t) => [t.text, t.x, t.y]), '別の所を押しても前の字が置かれない').toEqual([['一つ目', 10, 10]]);
+    expect(s.w.document.querySelectorAll('[data-pkc-field="image-draw-text-input"]').length, '入力欄が 2 つ残った').toBe(1);
+  });
+
+  it('🔴 打っている最中の Ctrl+Z は、直前に描いた線を消さない', async () => {
+    const s = await setup();
+    actualSize(s);
+    stroke(s);
+    expect(s.q('image-draw-undo')).toHaveProperty('disabled', false);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 30, 30);
+    const box = textBox(s)!;
+    const ev = new Event('keydown', { bubbles: true, cancelable: true });
+    Object.defineProperties(ev, { key: { value: 'z' }, ctrlKey: { value: true }, metaKey: { value: false }, shiftKey: { value: false }, isComposing: { value: false }, keyCode: { value: 90 } });
+    box.dispatchEvent(ev);
+    expect(ev.defaultPrevented, '入力欄の打ち消しを潰した').toBe(false);
+    expect(s.q('image-draw-undo'), '線が消えた(元に戻すが押せなくなった)').toHaveProperty('disabled', false);
+    // 対照群: 入力欄の外の Ctrl+Z は線を消す
+    box.value = '';
+    keydown(box, { key: 'Escape' });
+    const ev2 = new Event('keydown', { bubbles: true, cancelable: true });
+    Object.defineProperties(ev2, { key: { value: 'z' }, ctrlKey: { value: true }, metaKey: { value: false }, shiftKey: { value: false } });
+    s.w.document.body.dispatchEvent(ev2);
+    expect(s.q('image-draw-undo'), '対照群: 入力欄の外の Ctrl+Z が効かない').toHaveProperty('disabled', true);
+  });
+
+  it('🔴 打ちかけの字があれば、保存を押せる / × で閉じるときに確認が出る', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    tapAt(s, 10, 10);
+    const box = textBox(s)!;
+    const fire = (): Event => {
+      const ev = new Event('beforeunload', { cancelable: true });
+      for (const f of s.w.listeners.get('beforeunload') ?? []) f(ev);
+      return ev;
+    };
+    expect(fire().defaultPrevented, '空の入力欄で確認が出た').toBe(false);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', true);
+    box.value = '打ちかけ';
+    box.dispatchEvent(new Event('input'));
+    expect(fire().defaultPrevented, '打ちかけの字があるのに確認なしで閉じる').toBe(true);
+    expect(s.q('image-draw-save'), '打ちかけの字があるのに保存を押せない').toHaveProperty('disabled', false);
+  });
+
+  it('🔴 「太い」を選ぶと、文字が大きく置かれる', async () => {
+    const s = await setup({ bitmap: { width: 400, height: 200 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    const place = (x: number): number => {
+      tapAt(s, x, 10);
+      textBox(s)!.value = 'a';
+      keydown(textBox(s)!, { key: 'Enter' });
+      return Number(/^(\d+(?:\.\d+)?)px/.exec(rec.texts.at(-1)!.font)![1]);
+    };
+    const thin = place(10);
+    click(s.q('image-draw-thickness-thick'));
+    const thick = place(50);
+    expect(thin).toBe(textSizeFor(400, 200, 'thin'));
+    expect(thick).toBe(textSizeFor(400, 200, 'thick'));
+    expect(thick).toBeGreaterThan(thin);
+  });
+
+  it('選んだ色で置かれる(青)', async () => {
+    const s = await setup();
+    actualSize(s);
+    click(s.q('image-draw-tool-text'));
+    click(s.q('image-draw-color-blue'));
+    tapAt(s, 10, 10);
+    textBox(s)!.value = 'a';
+    keydown(textBox(s)!, { key: 'Enter' });
+    expect(rec.texts.at(-1)!.fill).toBe(DRAW_COLORS.blue);
+  });
+});
+
+describe('モザイク', () => {
+  it('🔴 なぞった四角の範囲の画素を読んで書き戻す(台の外へはみ出す分は台の中へ収める)', async () => {
+    const s = await setup({ bitmap: { width: 200, height: 100 } });
+    actualSize(s);
+    click(s.q('image-draw-tool-mosaic'));
+    ptr(s.canvas, 'pointerdown', { id: 3, x: 50, y: 20 });
+    ptr(s.canvas, 'pointermove', { id: 3, x: 400, y: 60 }); // 台(200 幅)の外
+    ptr(s.canvas, 'pointerup', { id: 3, x: 400, y: 60 });
+    expect(rec.gets.at(-1)).toEqual([50, 20, 150, 40]);
+    expect(rec.puts.at(-1)).toEqual([50, 20]);
+    expect(s.q('image-draw-save')).toHaveProperty('disabled', false);
+  });
+});
+
+describe('色と太さ', () => {
+  it('🔴 「太い」を選ぶと、線が太く引かれる', async () => {
+    const s = await setup({ bitmap: { width: 400, height: 200 } });
+    actualSize(s);
+    stroke(s);
+    const thin = Math.max(...rec.widths);
+    click(s.q('image-draw-thickness-thick'));
+    rec.widths = [];
+    stroke(s);
+    expect(thin).toBe(strokeWidthFor(400, 200, 'thin'));
+    expect(rec.widths, '「太い」が線に届かない').toContain(strokeWidthFor(400, 200, 'thick'));
+  });
+
+  it('🔴 色は 4 つ、太さは 2 つのボタンがあり、選んだ物が aria-pressed に出る', async () => {
+    const s = await setup();
+    for (const c of ['red', 'black', 'blue', 'yellow']) expect(s.q(`image-draw-color-${c}`), c).not.toBeNull();
+    click(s.q('image-draw-color-yellow'));
+    expect(s.q('image-draw-color-yellow').getAttribute('aria-pressed')).toBe('true');
+    expect(s.q('image-draw-color-red').getAttribute('aria-pressed')).toBe('false');
+    expect(s.q('image-draw-thickness-thin').getAttribute('aria-pressed')).toBe('true');
+    click(s.q('image-draw-thickness-thick'));
+    expect(s.q('image-draw-thickness-thick').getAttribute('aria-pressed')).toBe('true');
+    expect(s.q('image-draw-thickness-thin').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('🔴 「選んでいる」を見た目に写す CSS が、道具・色・太さに同じ規則で効く', async () => {
+    const s = await setup();
+    const css = s.w.document.querySelector('style')!.textContent!;
+    expect(css).toContain('[data-pkc-field="image-draw-bar"] button[aria-pressed="true"]');
+    // 色・太さのボタンも、その規則が当たる「バーの中の button」である
+    for (const f of ['image-draw-color-blue', 'image-draw-thickness-thick', 'image-draw-tool-mosaic']) {
+      expect(s.q(f).closest('[data-pkc-field="image-draw-bar"]'), f).not.toBeNull();
+      expect(s.q(f).tagName).toBe('BUTTON');
+    }
   });
 });

@@ -246,5 +246,91 @@ test('🔴 画像に描き込む ── 描く・取り消す・新しい画像�
   expect(win3.isClosed()).toBe(false);
   await win3.close();
 
+  // ── 4 回目(段階 2):文字を置く・黄色・太い線・モザイクで隠す → 保存した画像に焼かれる ──
+  const png4 = await bluePng(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', { name: 'shot.png', mimeType: 'image/png', buffer: png4 });
+  await page
+    .locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: 'shot.png', hasNotText: '描き込み' })
+    .first()
+    .click();
+  const [win4] = await Promise.all([
+    page.waitForEvent('popup', { timeout: 10_000 }),
+    clickReal(page, '[data-pkc-action="draw-on-image"]'),
+  ]);
+  await win4.waitForSelector('[data-pkc-field="image-draw-canvas"]', { timeout: 5000 });
+  await expect.poll(() => win4.evaluate(() => document.querySelector<HTMLCanvasElement>('[data-pkc-field="image-draw-canvas"]')!.width)).toBe(240);
+
+  // 🔴 色・太さの「選んでいる」が見た目(計算後の背景色)に出る
+  const bg4 = (field: string): Promise<string> =>
+    win4.evaluate((f) => getComputedStyle(document.querySelector(`[data-pkc-field="${f}"]`)!).backgroundColor, field);
+  await win4.locator('[data-pkc-field="image-draw-color-yellow"]').click();
+  expect(await bg4('image-draw-color-yellow'), '選んだ色が選んでいない色と見分けられない').not.toBe(await bg4('image-draw-color-blue'));
+  await win4.locator('[data-pkc-field="image-draw-thickness-thick"]').click();
+  expect(await bg4('image-draw-thickness-thick')).not.toBe(await bg4('image-draw-thickness-thin'));
+
+  // 太い黄色のペン
+  await drag(win4, [20, 40], [120, 40]);
+  const yellow4 = (p: [number, number, number]): boolean => p[0] > 200 && p[1] > 150 && p[2] < 80;
+  expect(yellow4(await pixelOf(win4, 70, 40)), '黄色の線が描かれていない').toBe(true);
+  const thickRows = await win4.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('[data-pkc-field="image-draw-canvas"]')!;
+    const d = c.getContext('2d')!.getImageData(70, 0, 1, c.height).data;
+    let n = 0;
+    for (let y = 0; y < c.height; y++) if (d[y * 4]! > 200 && d[y * 4 + 1]! > 150 && d[y * 4 + 2]! < 80) n += 1;
+    return n;
+  });
+  expect(thickRows, '「太い」が細い線と同じ太さ').toBeGreaterThanOrEqual(4);
+
+  // 文字:押した所に入力欄 → 打つ → Enter(黒)
+  await win4.locator('[data-pkc-field="image-draw-color-black"]').click();
+  await win4.locator('[data-pkc-field="image-draw-tool-text"]').click();
+  const at = await screenOf(win4, 20, 90);
+  await win4.mouse.click(at.x, at.y);
+  const box = win4.locator('[data-pkc-field="image-draw-text-input"]');
+  await expect(box, '文字の入力欄が出ない').toBeVisible();
+  await expect(box).toBeFocused();
+  await win4.keyboard.type('ABCD');
+  await win4.keyboard.press('Enter');
+  await expect(box).toHaveCount(0);
+  const darkInText = await win4.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('[data-pkc-field="image-draw-canvas"]')!;
+    const d = c.getContext('2d')!.getImageData(20, 90, 100, 40).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i]! < 60 && d[i + 1]! < 60 && d[i + 2]! < 80) n += 1;
+    return n;
+  });
+  expect(darkInText, '置いた文字が台に描かれていない').toBeGreaterThan(20);
+
+  // モザイク:黄色の線の上をなぞると、線の色が元の色のまま残らない(升目の平均になる)
+  await win4.locator('[data-pkc-field="image-draw-tool-mosaic"]').click();
+  await drag(win4, [10, 20], [140, 60]);
+  const mixed = await win4.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('[data-pkc-field="image-draw-canvas"]')!;
+    const d = c.getContext('2d')!.getImageData(10, 20, 130, 40).data;
+    let pureYellow = 0;
+    let pureBlue = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i]! > 240 && d[i + 1]! > 190 && d[i + 2]! < 20) pureYellow += 1;
+      if (d[i]! === 0x30 && d[i + 1]! === 0x60 && d[i + 2]! === 0xc0) pureBlue += 1;
+    }
+    return { pureYellow, pureBlue };
+  });
+  expect(mixed.pureYellow, 'モザイクの後も元の黄色の画素が残っている').toBe(0);
+  // 線に重なった升目は、黄と青の平均(どちらでもない色)になる
+  expect(mixed.pureBlue, '全部が元の青のまま(升目が平均になっていない)').toBeLessThan(130 * 40);
+  const lineCell = await pixelOf(win4, 70, 40);
+  expect(yellow4(lineCell) || isBlue(lineCell), '線の位置が元の黄でも青でもない色になっていない').toBe(false);
+
+  // 保存 → 新しい添付に焼かれている(モザイクの範囲に元の黄色は無い)
+  const closed4 = win4.waitForEvent('close', { timeout: 10_000 });
+  await win4.locator('[data-pkc-field="image-draw-save"]').click();
+  await closed4;
+  const made4 = page.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: 'shot (描き込み).png' });
+  await expect(made4.first()).toBeVisible({ timeout: 10_000 });
+  await made4.first().click();
+  const after4 = await shownPixel(page, 70, 40);
+  expect(yellow4(after4.px), '保存した画像に、モザイクで隠した元の線が残っている').toBe(false);
+
+
   expect(errors).toEqual([]);
 });
