@@ -9,7 +9,7 @@
  *   3. ビットレートの式(元の実測 × 1.2、下限 = 画素数 × 0.8)の画質(出力 vs 元の同じフレームの PSNR / SSIM)と大きさ。
  *      符号化器の `configure` に倍率を掛けて、式の ×0.5 / ×1 / ×2 を同条件で突き合わせる(1080p のみ)
  *
- * 使い方: `node scripts/probes/video-trim-measure.mjs [--reps 3] [--seconds 16] [--wc-seconds 12] [--out file.json] [--only 360,1080,4k(接頭辞のコンマ区切り)] [--bisect none|mr|audio|quality|sync|mrsync] [--mr-opts JSON]`
+ * 使い方: `node scripts/probes/video-trim-measure.mjs [--reps 3] [--seconds 16] [--wc-seconds 12] [--out file.json] [--only 360,1080,4k(接頭辞のコンマ区切り)] [--bisect none|mr|audio|quality|sync|mrsync] [--lean(1080p@x1 の作り直しだけ。元の音と映像のずれ・画質は採らない)] [--mr-opts JSON]`
  *   `PKC3_CHROMIUM` でブラウザを差し替える(既定 `/opt/pw-browsers/chromium` = フル版)。
  * ⚠ 箱を静かにして回す(他の重い仕事と同時に回さない)。⚠ 合成の絵なので、実画面の録画の代表ではない。
  */
@@ -36,6 +36,7 @@ const PAIRS = [2, 6, 10, 14].filter((p) => p < SECONDS - 1);
 const PORT = Number(arg('port', '47693'));
 const MR_OPTS = JSON.parse(arg('mr-opts', '{"videoKeyFrameIntervalDuration":4000}'));
 const BISECT = arg('bisect', '');
+const LEAN = argv.includes('--lean');
 const WC_SECONDS = Number(arg('wc-seconds', '12'));
 
 async function bundle() {
@@ -244,11 +245,13 @@ async function connectBrowserCdp(port) {
       else w.res(d.result);
     }
   };
+  // 🔑 終わった Worker の session へ送ると返事が来ない(await が永久に残る)── 2 秒で諦める
   const send = (method, params = {}, sessionId) =>
     new Promise((res, rej) => {
       id += 1;
       waiting.set(id, { res, rej });
       ws.send(JSON.stringify({ id, method, params, sessionId }));
+      setTimeout(() => rej(new Error('cdp timeout')), 2000);
     });
   return { send, close: () => ws.close() };
 }
@@ -401,7 +404,7 @@ async function main() {
 
   // 元の音と映像のずれ(基準)
   out.srcSync = {};
-  for (const r of SOURCES.filter((x) => x.kind === 'mr')) {
+  for (const r of LEAN ? [] : SOURCES.filter((x) => x.kind === 'mr')) {
     out.srcSync[r.name] = [];
     for (let i = 0; i < REPS; i += 1) {
       const m = await page.evaluate(({ k }) => window.__p.measureSync(k, 'src', 1), { k: r.name });
@@ -417,7 +420,7 @@ async function main() {
     { src: '360p-mr', f: 1 },
     { src: '1080p-30', f: 0.5 },
     { src: '1080p-30', f: 2 },
-  ].filter((c) => has(c.src));
+  ].filter((c) => has(c.src) && (!LEAN || (c.f === 1 && c.src === '1080p-30')));
   const heapUsed = async () => (await cdp.send('Runtime.getHeapUsage')).usedSize;
   for (let rep = 0; rep < REPS; rep += 1) {
     // 並び順は rep ごとに回す(同じ設定がいつも同じ位置にならない)
@@ -476,7 +479,7 @@ async function main() {
       }
       out.runs.push(row);
       console.log('run', JSON.stringify(row));
-      if (!res.ok) continue;
+      if (!res.ok || LEAN) continue;
       const tailRel = res.info.tailFromMs === null ? null : (res.info.tailFromMs - r.startMs) / 1000;
       // 画質(同じ番号のフレームを元と突き合わせる)。継ぎ目(tailRel)の前後 2 枚ずつ
       const targets = (tailRel === null ? [0, 1, 3] : [0, 1, tailRel - 0.2, tailRel - 0.05, tailRel, tailRel + 0.05, tailRel + 2])
