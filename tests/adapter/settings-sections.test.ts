@@ -150,6 +150,8 @@ const ALL_IDS = [
   'same-origin',
   'extensions',
   'agents',
+  // 2026-10-11(#1407): 埋め込み先のページの AI を許すページの一覧(アドレスの追加・外す)を足した ── 節 +1
+  'embed-origins',
   'opened-history',
   'search-history',
   'copy-history',

@@ -79,6 +79,17 @@ interface Session {
   tools: ModelContextTool[];
 }
 
+/** 許可リストから外れた origin の道具が呼ばれたときの結果(例外ではなく、AI が理由を読める形で返す)。 */
+const NOT_ALLOWED_RESULT: ToolResult = {
+  isError: true,
+  content: [
+    {
+      type: 'text',
+      text: 'このページは、許可されたページの一覧から外れています。ユーザーに伝えてください。',
+    },
+  ],
+};
+
 function rpcError(code: number, message: string): Error {
   return Object.assign(new Error(message), { rpcCode: code });
 }
@@ -110,7 +121,16 @@ export function createAgentEmbed(deps: AgentEmbedDeps): AgentEmbed {
   const sessionOf = (origin: string): Session => {
     let s = sessions.get(origin);
     if (s === undefined) {
-      s = { controller: new AbortController(), tools: deps.buildTools(origin) };
+      // 🔴 道具の `execute` の先頭で**許可リストを見直す**(WebMCP に登録済みの道具は窓口を通らない ──
+      //    別のタブで一覧から外されても、登録が畳まれるまでの間に実行できてしまう)。門(`gate`)は「常に許す」の台帳しか見ない
+      const tools = deps.buildTools(origin).map(
+        (t): ModelContextTool => ({
+          ...t,
+          execute: (args, ctx) =>
+            allowedNow(origin) ? t.execute(args, ctx) : Promise.resolve(NOT_ALLOWED_RESULT),
+        }),
+      );
+      s = { controller: new AbortController(), tools };
       sessions.set(origin, s);
     }
     return s;
