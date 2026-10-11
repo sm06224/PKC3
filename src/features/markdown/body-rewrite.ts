@@ -29,14 +29,17 @@ import {
   setPlaceRect,
   connectPlaces,
   fenceMask,
+  groupPlaces,
   insideFence,
   movePlace,
+  movePlaces,
   raisePlace,
   removePlace,
   removePlaceLine,
   resizePlace,
   setPlaceShape,
   setPlaceStyle,
+  ungroupPlace,
 } from './place-notation';
 import type { PlaceStyle } from './place-color';
 import type { PlaceRectValue } from './place-rect';
@@ -168,6 +171,32 @@ export type BodyRewrite =
       openLine: string;
       x: number;
       y: number;
+    }
+  | {
+      /**
+       * 🔴 **グループの全員を一度に動かす**(#530 段⑤b)── 全員の x= / y= を **1 回の書込**で書く。
+       * ⚠ 1 枚でも開き行が byte 一致しなければ**1 枚も書かない**(途中で一部だけ動いた状態を作らない)。
+       * 各件の意味と門は `place-move` と同じ(`place-notation.ts` の `movePlaces`)。
+       */
+      kind: 'place-move-group';
+      moves: ReadonlyArray<{ line: number; openLine: string; x: number; y: number }>;
+    }
+  | {
+      /**
+       * 🔴 **付箋をグループにする**(#530 段⑤b)── 渡した付箋に同じ `group=グループN` を書く
+       * (名前は書く時点の本文から数える ── `groupPlaces`)。2 枚未満・1 枚でも門が外れたら断る。
+       */
+      kind: 'place-group';
+      members: ReadonlyArray<{ line: number; openLine: string }>;
+    }
+  | {
+      /**
+       * 🔴 **グループを解く**(#530 段⑤b)── 渡した付箋の**グループの全員**の `group=` を消す
+       * (位置は動かさない)。`line` / `openLine` の意味と門は `place-move` と同じ。
+       */
+      kind: 'place-ungroup';
+      line: number;
+      openLine: string;
     }
   | {
       /**
@@ -802,6 +831,9 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'repeat-done') return materializeRepeat(body, rewrite);
   if (rewrite.kind === 'repeat-move') return moveRepeatOccurrence(body, rewrite);
   if (rewrite.kind === 'place-move') return movePlace(body, rewrite);
+  if (rewrite.kind === 'place-move-group') return movePlaces(body, rewrite.moves);
+  if (rewrite.kind === 'place-group') return groupPlaces(body, rewrite.members);
+  if (rewrite.kind === 'place-ungroup') return ungroupPlace(body, rewrite);
   if (rewrite.kind === 'place-size') return resizePlace(body, rewrite);
   if (rewrite.kind === 'place-remove') return removePlace(body, rewrite);
   if (rewrite.kind === 'place-raise') return raisePlace(body, rewrite);

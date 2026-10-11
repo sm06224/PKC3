@@ -39,7 +39,14 @@ import {
   tsvFenceFromPlain,
   type TableFormat,
 } from '@features/markdown/table-convert';
-import { isPlaceOpen, placeRectOf, placeShapeAt, placeStyleAt } from '@features/markdown/place-notation';
+import {
+  isPlaceOpen,
+  placeGroupAt,
+  placeGroupItems,
+  placeRectOf,
+  placeShapeAt,
+  placeStyleAt,
+} from '@features/markdown/place-notation';
 import {
   parsePlaceColor,
   parseArrowSpell,
@@ -658,6 +665,7 @@ import {
   pickBodyIconInApp,
   pickArchiveInApp,
   pickCopyFormatInApp,
+  pickPlaceGroupInApp,
   pickPlaceRectInApp,
   pickPlaceTemplateInApp,
   pickScrapInApp,
@@ -3690,7 +3698,15 @@ function directiveBlockAt(
   host: HTMLElement,
   target: Element,
   fmBody: string,
-): { line: number; board: boolean; shape: PlaceShape | null; styled: boolean; size: PlaceSize } | null {
+): {
+  line: number;
+  board: boolean;
+  shape: PlaceShape | null;
+  styled: boolean;
+  size: PlaceSize;
+  group: string | null;
+  groupable: boolean;
+} | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
     const line = Number(el.getAttribute('data-pkc-source-line'));
@@ -3704,6 +3720,12 @@ function directiveBlockAt(
         // 🔑 色の札も**原文**から読む(#530 段④)── 描画・書き出しと同じ 1 本(`placeStyleAt`)
         styled: placeStyleAt(open)?.any === true,
         size: placeStyleAt(open)?.size ?? 'standard',
+        // 🔑 グループも**原文**から読む(#530 段⑤b)── 入っているか / まとめる相手が居るか(1 本: `placeGroupAt` / `placeGroupItems`)
+        group: placeGroupAt(open),
+        groupable:
+          placeGroupAt(open) === null &&
+          isPlaceOpen(open) &&
+          placeGroupItems(fmBody).filter((it) => it.group === null).length >= 2,
       };
     }
     el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
@@ -9146,6 +9168,55 @@ const ACTIONS: Record<string, ActionHandler> = {
           style: { size: read.size === 'standard' ? null : read.size },
         }),
       '文字の大きさを直してください',
+    );
+  },
+  /**
+   * 🔴 **付箋をグループにする**(#530 段⑤b。Gemini 裁定 2026-10-11 依頼 19 Q3)── 窓で板の付箋を選び、
+   * 「グループにする」で `GROUP_PLACES`(選んだ全部に同じ `group=` を 1 回の書込で書く)。
+   * 「やめる」/ `Escape` なら何も書かない。
+   * ⚠ 窓に並べるのは**グループに入っていない付箋**だけ(入っている付箋を黙って別のグループへ移さない)。
+   * ⚠ 窓が開いている間に本文が動いたら書かない(`place-rect` と同じ ── 同じ行番号に来た別の付箋へ書かない)。
+   */
+  'place-group': (dispatcher, target, _services, root) => {
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) => {
+        const ob = dispatcher.getState().openBody;
+        if (ob === null) return;
+        const items = placeGroupItems(ob.body).filter((it) => it.group === null);
+        if (items.length < 2) {
+          dispatcher.dispatch({ type: 'OP_NOTICE', message: 'グループにできる付箋が 2 枚以上ありません' });
+          return;
+        }
+        const bodyAtOpen = ob.body;
+        void pickPlaceGroupInApp(root, items, line).then((lines) => {
+          if (lines === null) return;
+          const now = dispatcher.getState().openBody;
+          if (now?.lid !== lid) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、グループにはしていません' });
+            return;
+          }
+          if (now.body !== bodyAtOpen) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、グループにはしていません(もう一度開いてください)' });
+            return;
+          }
+          dispatcher.dispatch({ type: 'GROUP_PLACES', lid, lines });
+        });
+      },
+      'グループにしてください',
+    );
+  },
+  /**
+   * 🔴 **グループを解く**(#530 段⑤b。置けるなら外せる)── 右クリックした付箋の**グループの全員**の
+   * `group=` を消す(位置は動かさない)。確認は要らない(もう一度「グループにする…」で戻せる)。
+   */
+  'place-ungroup': (dispatcher, target) => {
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) => dispatcher.dispatch({ type: 'UNGROUP_PLACE', lid, line }),
+      'グループを解いてください',
     );
   },
   /**
@@ -15364,7 +15435,14 @@ export function bindActions(
               chapterWindow: chapterable,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
-        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape, styled: block.styled, size: block.size })),
+        ...(block === null ? [] : blockMenuActions({
+          board: block.board,
+          shape: block.shape,
+          styled: block.styled,
+          size: block.size,
+          group: block.group,
+          groupable: block.groupable,
+        })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
          *   (`attrs`)── `carry` に混ぜると、表と関係の無い項目まで同じ属性を持ち、

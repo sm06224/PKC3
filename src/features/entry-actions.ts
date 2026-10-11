@@ -972,6 +972,10 @@ export function blockMenuActions(ctx: {
   readonly styled?: boolean;
   /** 🔴 いまの文字の大きさ(#530 段⑤a。札が無い / 読めない = `standard`)。省略 = 標準。 */
   readonly size?: PlaceSize;
+  /** 🔴 入っているグループの名前(#530 段⑤b。無い / 読めない = `null`)。省略 = 入っていない。 */
+  readonly group?: string | null;
+  /** 🔴 グループにできる付箋(グループに入っていない付箋)が板に 2 枚以上在るか(#530 段⑤b)。省略 = 無い。 */
+  readonly groupable?: boolean;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
@@ -1027,6 +1031,17 @@ export function blockMenuActions(ctx: {
       attrs: { [PLACE_STYLE_SIZE_ATTR]: sz },
       checked: (ctx.size ?? 'standard') === sz,
     })),
+    /**
+     * 🔴 **グループ**(#530 段⑤b。Gemini 裁定 2026-10-11 依頼 19 Q3)── 入っていない付箋には「グループにする…」、
+     *   入っている付箋には「グループを解く」(置けるなら外せる)。
+     * ⚠ どちらか**片方だけ**を出す ── 押しても何も起きない口を作らない(入っているのに「グループにする…」を出さない /
+     *   まとめる相手が 1 枚も居ない板に「グループにする…」を出さない)。
+     */
+    ...(ctx.group != null
+      ? [{ action: 'place-ungroup', label: 'グループを解く' }]
+      : ctx.groupable === true
+        ? [{ action: 'place-group', label: 'グループにする…' }]
+        : []),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }
