@@ -120,6 +120,7 @@ import {
 } from '@adapter/platform/chapter-window';
 import { visibleContacts } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
+import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
 import { isIconName } from '@features/icon/symbols';
@@ -13780,7 +13781,9 @@ export function bindActions(
       services.importFiles &&
       routeSt.phase === 'ready' &&
       !hasUnsavedTyping(routeSt) &&
-      files.every((f) => isMarkdownFileName(f.name) || isVcfFileName(f.name))
+      files.every(
+        (f) => isMarkdownFileName(f.name) || isVcfFileName(f.name) || isIcsFileName(f.name),
+      )
     ) {
       services.importFiles([...files]);
       return true;

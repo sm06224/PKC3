@@ -14,16 +14,19 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { isVcfFileName } from '@features/contact/vcard';
 import { isPptxFileName } from '@features/import/pptx-board';
+import { isIcsFileName } from '@features/schedule/ics-import';
 import { importPkc2File, type ImportDeps } from './import-pkc2';
 import { importMarkdownFiles } from './import-markdown';
 import { importVcfFiles } from './import-vcf';
 import { importPptxFiles } from './import-pptx';
+import { importIcsFiles } from './import-ics';
 
 /**
  * 選ばれたファイルを取り込む。
  *
  * - 全部 md → 1 件ずつ entry にする(段②)
  * - 全部 .vcf → 連絡先を 1 枚ずつノートにする(#278 段③)
+ * - 全部 .ics → 予定の一覧を 1 ノートにする(#855 段 D)
  * - 全部 .pptx → スライド 1 枚ずつ板のノートにする(#530 C)
  * - それ以外 → PKC2 経路(1 件ずつしか受けない)
  *
@@ -39,13 +42,15 @@ export async function importFiles(
   const md = files.filter((f) => isMarkdownFileName(f.name));
   const vcf = files.filter((f) => isVcfFileName(f.name));
   const pptx = files.filter((f) => isPptxFileName(f.name));
+  const ics = files.filter((f) => isIcsFileName(f.name));
   if (vcf.length === files.length) return importVcfFiles(dispatcher, deps, files);
   if (md.length === files.length) return importMarkdownFiles(dispatcher, deps, files);
   if (pptx.length === files.length) return importPptxFiles(dispatcher, deps, files);
-  if (md.length > 0 || vcf.length > 0 || pptx.length > 0) {
+  if (ics.length === files.length) return importIcsFiles(dispatcher, deps, files);
+  if (md.length > 0 || vcf.length > 0 || pptx.length > 0 || ics.length > 0) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: '種類の違うファイル(Markdown / vCard / PowerPoint / PKC2 の書き出し)は分けて取り込んでください',
+      error: '種類の違うファイル(Markdown / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください',
     });
     return null;
   }

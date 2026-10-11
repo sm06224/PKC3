@@ -110,6 +110,14 @@ describe('落とした file の行き先(#535 ①)', () => {
     expect(calls.attach, 'まだ添付へ回している').toHaveLength(0);
   });
 
+  it('🔴 `.ics` を落とすと、添付ではなく予定として**取り込む**(#855 段 D)', () => {
+    const { outside, calls } = setup();
+    outside.dispatchEvent(dropEvent([file('work.ics', 'text/calendar')]));
+    expect(calls.imported, '取込へ行っていない').toHaveLength(1);
+    expect(calls.imported[0]?.[0]?.name).toBe('work.ics');
+    expect(calls.attach, 'まだ添付へ回している').toHaveLength(0);
+  });
+
   it('🔴 `.md` も同じ(取込の振り分けが受ける 2 種は揃える)', () => {
     const { outside, calls } = setup();
     outside.dispatchEvent(dropEvent([file('note.md', 'text/markdown')]));

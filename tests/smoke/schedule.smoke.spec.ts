@@ -1340,5 +1340,55 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
   await expect(only(key(dayAt(2)), 'ジム'), '曜日の列: 書いていない曜日に出ている').toHaveCount(0);
   await expect(only(key(dayAt(1)), 'ジム'), '札に曜日の列が出ていない').toContainText('毎週');
 
+  /**
+   * 🔴 **.ics の取り込み**(#855 段 D)── 起動を増やさず、この道中に載せる。
+   * 「取り込む」を実際に押して .ics を選び、取り込んだ予定が**予定表の札として画面に出る**ところまで通す
+   * (unit は取込の実行部と札の読み手を別々に見るので、間の配線 ── 取込 → 再読込 → 走査 → 描画 ── は見ない)。
+   * 繰り返しは書いた曜日の 7 日後にも出る。読めない繰り返し(COUNT)は 1 回目だけで、取り消した予定は出ない。
+   */
+  const compact = (k: string): string => k.replace(/-/g, '');
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    `DTSTART;VALUE=DATE:${compact(today)}`,
+    `DTEND;VALUE=DATE:${compact(tomorrow)}`,
+    'RRULE:FREQ=WEEKLY',
+    'SUMMARY:取込の定例',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    `DTSTART;VALUE=DATE:${compact(today)}`,
+    'RRULE:FREQ=DAILY;COUNT=3',
+    'SUMMARY:取込の回数指定',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    `DTSTART;VALUE=DATE:${compact(today)}`,
+    'STATUS:CANCELLED',
+    'SUMMARY:取込の取り消し',
+    'END:VEVENT',
+    'END:VCALENDAR',
+    '',
+  ].join('\r\n');
+  expect(
+    await page.locator('[data-pkc-field="import-input"]').getAttribute('accept'),
+    'ピッカーが .ics を選ばせない',
+  ).toContain('.ics');
+  const chooser = page.waitForEvent('filechooser');
+  await clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="import-file"]');
+  await (await chooser).setFiles([{ name: '仕事.ics', mimeType: '', buffer: Buffer.from(ics, 'utf-8') }]);
+  await expect(page.locator('[data-pkc-region="status"]'), '取り込みの結果が出ない').toContainText(
+    '予定 2 件を取り込みました',
+    { timeout: 10_000 },
+  );
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('1 件は繰り返しを読めず 1 回目だけ入れました');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('1 件は取り消された予定なので入れていません');
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  await expect(only(today, '取込の定例'), '取り込んだ予定が予定表に出ない').toHaveCount(1);
+  await expect(only(today, '取込の定例'), '札に刻みが出ていない').toContainText('毎週');
+  await expect(only(key(dayAt(7)), '取込の定例'), '取り込んだ繰り返しが 7 日後に出ない').toHaveCount(1);
+  await expect(only(today, '取込の回数指定'), '読めない繰り返しの 1 回目が無い').toHaveCount(1);
+  await expect(only(tomorrow, '取込の回数指定'), '読めない繰り返しが繰り返されている').toHaveCount(0);
+  await expect(only(today, '取込の取り消し'), '取り消された予定が出ている').toHaveCount(0);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
