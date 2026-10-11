@@ -86,3 +86,80 @@ export function resolveReadAnchor(
   }
   return null;
 }
+
+
+/**
+ * 🔴 **戻した後に塊の高さが変わったら、目印の位置へ合わせ直す**(#1525)。
+ *
+ * ⚠ 戻す瞬間(`resolveReadAnchor`)は、目印の塊が**まだ仮の高さ**だと「塊の中のずれ」が
+ *   塊の外へはみ出す(図は焼けるまで低い)── ブラウザのスクロールアンカーは**その時点で見えている
+ *   塊**を保つだけなので、後ろの塊に固定されて**元の行より後ろ**が出た
+ *   (実ブラウザ:図 40 個・約 2,000 行で +74 行、20,000 行で +1,572 行)。
+ * 🔑 器(本文)の高さが変わるたびに、目印の位置から送り量を引き直す。
+ * ⚠ **読んでいる人の手・アプリ内の移動を奪わない** ── 止める条件は 3 つ:
+ *   ① 送り・押下・キー・タッチが**文書のどこかに**入った(目次・探す・リンク先の列など、器の外から始まる移動も含む。
+ *      `search-jump.ts` の `scrollToHit` と同じく `ownerDocument` で聞く)
+ *   ② **自分が書いていない送り**が起きた(`scrollIntoView` など、入力の無い移動)。
+ *      ⚠ 高さが変わった直後の送りはブラウザのスクロールアンカーの調整なので数えない
+ *   ③ {@link HOLD_MS} が過ぎた(焼き上がりを待つ上限。常駐させない)。
+ */
+export const HOLD_MS = 8000;
+/** 合わせ直しの許容(px)。これ以下のずれでは書かない(書くと無用なスクロールが起きる)。 */
+export const HOLD_TOLERANCE_PX = 1;
+
+/** 合わせ直すか。`want` が取れない(目印が消えた)/ 許容内なら `null`。 */
+export function realignTarget(want: number | null, current: number): number | null {
+  if (want === null) return null;
+  return Math.abs(want - current) > HOLD_TOLERANCE_PX ? want : null;
+}
+
+export interface ReadAnchorHold {
+  dispose(): void;
+}
+
+export const HOLD_STOP_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+export function installReadAnchorHold(
+  host: HTMLElement,
+  scroller: HTMLElement,
+  anchor: ReadAnchor,
+): ReadAnchorHold {
+  const doc = scroller.ownerDocument;
+  let done = false;
+  // 自分が最後に置いた送り量と、そのときの本文の高さ(②の見分けに使う)
+  let lastSet = scroller.scrollTop;
+  let lastHeight = scroller.scrollHeight;
+  const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => realign());
+  const timer = setTimeout(() => stop(), HOLD_MS);
+  function stop(): void {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    ro?.disconnect();
+    for (const ev of HOLD_STOP_EVENTS) doc.removeEventListener(ev, stop, true);
+    scroller.removeEventListener('scroll', onScroll);
+  }
+  function onScroll(): void {
+    if (done) return;
+    const h = scroller.scrollHeight;
+    if (h !== lastHeight) {
+      // 高さが変わった直後の送りは、ブラウザのスクロールアンカーの調整(次の合わせ直しで上書きする)
+      lastHeight = h;
+      return;
+    }
+    if (Math.abs(scroller.scrollTop - lastSet) > HOLD_TOLERANCE_PX) stop();
+  }
+  function realign(): void {
+    if (done) return;
+    const to = realignTarget(resolveReadAnchor(host, scroller, anchor), scroller.scrollTop);
+    if (to !== null) {
+      scroller.scrollTop = to;
+      lastSet = scroller.scrollTop; // ⚠ 書いた値ではなく、丸められた後の値
+    }
+    lastHeight = scroller.scrollHeight;
+  }
+  for (const ev of HOLD_STOP_EVENTS) doc.addEventListener(ev, stop, { capture: true, passive: true });
+  scroller.addEventListener('scroll', onScroll, { passive: true });
+  ro?.observe(host);
+  return { dispose: stop };
+}

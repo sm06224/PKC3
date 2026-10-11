@@ -167,7 +167,13 @@ import { humanBytes } from '@features/human-bytes';
  *   **型だけ**(`import type` なので、走る物には残らない)。
  */
 import { AssetLends } from './asset-lends';
-import { captureReadAnchor, resolveReadAnchor, type ReadAnchor } from './read-anchor';
+import {
+  captureReadAnchor,
+  installReadAnchorHold,
+  resolveReadAnchor,
+  type ReadAnchor,
+  type ReadAnchorHold,
+} from './read-anchor';
 
 /** 添付表示のための asset 面(main が AssetBlobStore を cid 束縛で注入)。 */
 export interface AssetLender {
@@ -575,6 +581,8 @@ export class DetailRenderer {
    *   (描いたばかりの DOM が要る)── `render()` はここへ予約するだけ。
    */
   private pendingSectionInstall: { key: string; draft: PartialDraft } | null = null;
+  /** 🔴 戻した位置を、塊の高さが変わっても目印に合わせ続ける(#1525)。送りが入ったら止まる。 */
+  private readAnchorHold: ReadAnchorHold | null = null;
   /** 🔴 長文ノートのページ先頭へ戻るフローティングボタン(#1121)。 */
   private backToTopHandle: BackToTopHandle | null = null;
   /** 🔴 長文ノート閲覧時の読書進捗バー(#1125)。 */
@@ -753,6 +761,8 @@ export class DetailRenderer {
     // 🔴 板に置いたノートの図・画像も返す(#529 W3-②)── 面を捨てるとき ObjectURL を残さない
     this.placeEmbeds.release();
     this.sectionEmbeds.release();
+    this.readAnchorHold?.dispose();
+    this.readAnchorHold = null;
     this.backToTopHandle?.dispose();
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
@@ -825,6 +835,8 @@ export class DetailRenderer {
     this.bodyKind = null;
     this.bodyView = EMPTY_VIEW;
     this.dropBarState();
+    this.readAnchorHold?.dispose();
+    this.readAnchorHold = null;
     this.backToTopHandle?.dispose();
     this.backToTopHandle = null;
     this.readingProgressHandle?.dispose();
@@ -1337,6 +1349,8 @@ export class DetailRenderer {
       } else {
         this.overviewSlot = null;
       }
+      this.readAnchorHold?.dispose();
+      this.readAnchorHold = null;
       this.backToTopHandle?.dispose();
       this.backToTopHandle = installBackToTop(this.scroller, this.region);
       this.readingProgressHandle?.dispose();
@@ -1813,6 +1827,12 @@ export class DetailRenderer {
       anchor && this.bodyHost !== null ? resolveReadAnchor(this.bodyHost, this.scroller, anchor) : null;
     this.scroller.scrollTop = byAnchor ?? top;
     if (this.bodyHost !== null) this.bodyHost.scrollLeft = left;
+    // 🔴 図が焼けて高さが変わったら目印へ合わせ直す(#1525)。目印で戻せたときだけ
+    this.readAnchorHold?.dispose();
+    this.readAnchorHold =
+      byAnchor !== null && anchor && this.bodyHost !== null
+        ? installReadAnchorHold(this.bodyHost, this.scroller, anchor)
+        : null;
     this.backToTopHandle?.update();
     this.readingProgressHandle?.update();
   }
