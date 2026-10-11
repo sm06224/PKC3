@@ -288,7 +288,8 @@ ${(e as Error).message}`,
     .toBeGreaterThanOrEqual(1);
 
   const mark = page.locator('[data-pkc-field="capture-trim"]');
-  await expect(mark, '押し方の案内が出ていない').toHaveText(trimMarkText(null, null));
+  // ⚠ 波形が焼けていると「波形をなぞっても選べます」が末尾に付く ── 前半の案内が出ていることを見る
+  await expect(mark, '押し方の案内が出ていない').toContainText(trimMarkText(null, null));
 
   /**
    * 🔴 **説明文の位置**(#683 の裁定 C)── 目印が 1 つも無いあいだは**ボタンより前**、
@@ -906,6 +907,95 @@ ${(e as Error).message}`,
   await expect(statusLine, '消したのに文字にできてしまう').toContainText(
     asrPath,
   );
+
+  /**
+   * ## 段⑧ ── **波形**(#1232、Gemini 裁定 = #1163 依頼 10 D)
+   *
+   * 🔴 **unit では原理的に届かない層**:本物の `AudioContext.decodeAudioData` → **本物のワーカー**で山を畳む →
+   *   canvas で焼いた PNG の `<img>` ── どれも happy-dom に無い。
+   * 🔑 観測点は **画面の絵そのもの**(焼いた `<img>` を canvas に写して、**列ごとの高さが平らでない**こと)と、
+   *   **実マウスのドラッグ**(`page.mouse`)が状態の印に入ること(`capture-trim` の字)。
+   * ⚠ 偽のマイクの音は拍ごとに鳴る信号 ── 「平らでない」は見られるが、**山の形の当たり具合**は言えない
+   *   (known PCM → 山は unit が持つ)。
+   * ⚠ **起動は増やさない** ── 同じ窓の続きで、文字起こしを足した元の録音(目盛り)と、切り出した録音(ドラッグ)を使う。
+   */
+  const waveOf = (row: Locator): Locator => row.locator('[data-pkc-region="capture-wave"]');
+  const ensurePlaying = async (row: Locator): Promise<void> => {
+    if ((await row.locator('[data-pkc-field="capture-play"]').count()) > 0)
+      await clickReal(page, row.locator('[data-pkc-field="capture-play"]'));
+    await expect(row.locator('[data-pkc-field="capture-media"]'), '再生機が出ていない').toBeVisible();
+  };
+
+  // ① 文字起こしの在る録音: 波形が出て、絵が平らでなく、時刻の行ごとに目盛りが付く
+  await ensurePlaying(originalRow);
+  const origImg = waveOf(originalRow).locator('img[data-pkc-field="capture-wave-img"]');
+  await expect(origImg, '波形の絵が出ていない(復号 → 山 → 焼き のどこかで止まっている)').toBeVisible({
+    timeout: 20_000,
+  });
+  const tall = await origImg.evaluate(async (img: HTMLImageElement) => {
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const g = c.getContext('2d')!;
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    const heights: number[] = [];
+    for (let x = 0; x < c.width; x += 1) {
+      let n = 0;
+      for (let y = 0; y < c.height; y += 1) if (d[(y * c.width + x) * 4 + 3]! > 0) n += 1;
+      heights.push(n);
+    }
+    return { w: c.width, h: c.height, max: Math.max(...heights), min: Math.min(...heights) };
+  });
+  expect(tall.w, '山の個数が 0').toBeGreaterThan(8);
+  expect(tall.max, `波形が平ら(音が山になっていない): ${JSON.stringify(tall)}`).toBeGreaterThan(tall.min + 3);
+  expect(
+    await waveOf(originalRow).locator('[data-pkc-field="capture-wave-tick"]').count(),
+    '文字起こしの時刻の行に目盛りが付いていない(録音の長さの内側の行が 1 本は在る)',
+  ).toBeGreaterThanOrEqual(1);
+
+  // ② 切り出した録音(2 秒): 押すとその位置から再生 → ドラッグで範囲 → 「この範囲で切り出す」で新しい録音が増える
+  await ensurePlaying(cutRow);
+  const cutWave = waveOf(cutRow);
+  await expect(cutWave.locator('img[data-pkc-field="capture-wave-img"]'), '切り出した録音の波形が出ていない').toBeVisible({
+    timeout: 20_000,
+  });
+  const box = (await cutWave.boundingBox())!;
+  const cutMs = Number(await cutWave.getAttribute('data-pkc-duration-ms'));
+  expect(cutMs, '波形の長さが録音の長さ(約 2 秒)と合わない').toBeGreaterThan(1500);
+  expect(cutMs).toBeLessThan(2700);
+  const midY = box.y + box.height / 2;
+  // 押すだけ: 80% の位置へ再生が移る(印は付かない)
+  await page.mouse.click(box.x + box.width * 0.8, midY);
+  await expect
+    .poll(() => cutRow.locator('[data-pkc-field="capture-media"]').evaluate((el: HTMLMediaElement) => el.currentTime), {
+      message: '波形を押しても再生位置が移らない',
+    })
+    .toBeGreaterThan((cutMs / 1000) * 0.6);
+  await expect(cutRow.locator('[data-pkc-field="capture-trim"]'), '押しただけで印が付いた').toContainText(trimMarkText(null, null));
+  // ドラッグ: 25% 〜 75%
+  await page.mouse.move(box.x + box.width * 0.25, midY);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, midY, { steps: 4 });
+  await page.mouse.move(box.x + box.width * 0.75, midY, { steps: 4 });
+  await page.mouse.up();
+  const trimText = cutRow.locator('[data-pkc-field="capture-trim"]');
+  await expect(trimText, 'ドラッグした範囲が印に入っていない').toHaveText(/^0:00〜0:0[1-2]\(0:0[0-2]\)$/);
+  // 範囲は波形の上にも映る(色を付けた帯が 25%〜75% 付近)
+  const rangeBox = (await cutWave.locator('[data-pkc-field="capture-wave-range"]').boundingBox())!;
+  expect(Math.abs(rangeBox.x - (box.x + box.width * 0.25)), '範囲の左端がドラッグした所と合わない').toBeLessThan(box.width * 0.04);
+  expect(Math.abs(rangeBox.width - box.width * 0.5), '範囲の幅がドラッグした幅と合わない').toBeLessThan(box.width * 0.06);
+  // 🔴 範囲の「選ばれている」見た目に、CSS の受け皿が在る(実ブラウザの計算後の色。属性だけでは見分けがつかない)
+  const rangeLook = await cutWave
+    .locator('[data-pkc-field="capture-wave-range"]')
+    .evaluate((el: HTMLElement) => ({ bg: getComputedStyle(el).backgroundColor, bl: getComputedStyle(el).borderLeftColor }));
+  expect(rangeLook.bg, `選んだ範囲に色が付いていない(${JSON.stringify(rangeLook)})`).not.toBe('rgba(0, 0, 0, 0)');
+  expect(rangeLook.bl, '範囲の縁に色が無い').not.toBe('rgba(0, 0, 0, 0)');
+  await clickReal(page, cutRow.locator('[data-pkc-field="capture-trim-run"]'));
+  await expect(rows, 'ドラッグで決めた範囲から、新しい録音が増えていない').toHaveCount(3, { timeout: 15_000 });
+  // ⚠ 済むまで待つ(走っている間に次の操作へ進むと、状態の行が切り出しの字で埋まる)
+  await expect(statusLine, '切り出しが済んでいない').toContainText('切り出しました', { timeout: 15_000 });
 
   /**
    * 🔴 **画面録画も、開いたら長さが出て終わりまで飛べる**(#952 A3 の残り)。

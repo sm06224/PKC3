@@ -37,6 +37,10 @@ import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
 import { appVoiceBoostRouter } from './voice-boost';
 import { ASR_TRANSCRIBE_LABEL, ASR_TRANSCRIBING_LABEL } from '@features/asr/asr-text';
+import { msToFrac, peakCountFor } from '@features/audio/waveform';
+import { appWaveSource, type WaveProvider } from '@adapter/platform/audio/wave-source';
+import { placeRange } from '../actions/wave-drag';
+import { bakeWavePng } from './wave-bake';
 
 /**
  * 借りている 1 件(押した行)。⚠ **同時に 1 つだけ**。
@@ -49,6 +53,25 @@ interface Playing {
   readonly url: string;
   readonly dispose: () => void;
 }
+
+/**
+ * 🔴 **焼いた波形 1 枚**(#1232)。⚠ **同時に 1 つだけ**(鳴らしている行のぶん)。
+ * `url` は ObjectURL ── 行が替わる / 面を閉じるときに revoke する(`dropWave`)。
+ */
+interface WaveBake {
+  readonly lid: string;
+  readonly url: string;
+  readonly durationMs: number;
+  /** 焼いたときの文字色。⚠ いまの色と違えば(テーマが変わった)焼き直す。 */
+  readonly color: string;
+}
+
+/** 波形の場所に出す字(場所は最初から 40px 取ってあるので、絵が届いても高さは動かない)。 */
+/** 説明文に足す案内(波形が出ていて、範囲がまだ無いとき)。 */
+export const WAVE_TRIM_HINT = '波形をなぞっても選べます。';
+const WAVE_LOADING_TEXT = '波形を作っています…';
+const waveFailedText = (trimmable: boolean): string =>
+  trimmable ? 'この音は波形を出せません(ボタンでは切り出せます)' : 'この音は波形を出せません';
 
 export class CapturesRenderer {
   private readonly host: HTMLElement;
@@ -75,6 +98,16 @@ export class CapturesRenderer {
    *   届いた側は**借りた瞬間に返す**(古い音が後から鳴らない)。
    */
   private token = 0;
+  /** 🔴 焼いた波形(鳴らしている行のぶんだけ。#1232)。 */
+  private wave: WaveBake | null = null;
+  /** ⚠ 波形の仕事を追っている行の lid(作成中 / 焼けた / 失敗のどれか。`null` = 追っていない)。 */
+  private waveLid: string | null = null;
+  private waveState: 'loading' | 'ready' | 'failed' = 'loading';
+  /** 🔑 仕事の世代。進めると、飛んでいる仕事の結果は全部捨てられる(A → B → A でも古い A が載らない)。 */
+  private waveGen = 0;
+  /** ⚠ state が「いま鳴らす」と言っている lid(古い結果を捨てる目印)。 */
+  private waveWant: string | null = null;
+  private readonly waveSource: WaveProvider | null;
 
   /**
    * @param onReady 借り終えたことを外へ知らせる口。⚠ **渡さないと器が出ない**
@@ -84,7 +117,9 @@ export class CapturesRenderer {
     host: HTMLElement,
     assets: AssetLender | null = null,
     onReady: () => void = () => {},
+    waveSource: WaveProvider | null = appWaveSource,
   ) {
+    this.waveSource = waveSource;
     this.host = host;
     this.assets = assets;
     this.onReady = onReady;
@@ -98,6 +133,7 @@ export class CapturesRenderer {
     this.borrowing = null;
     this.playing?.dispose();
     this.playing = null;
+    this.dropWave();
   }
 
   render(state: AppState): void {
@@ -113,6 +149,7 @@ export class CapturesRenderer {
     // ⚠ 描く直前に写す(`row` は state を受け取らない)
     this.trim = state.captureTrim;
     this.trimBusy = state.captureTrimBusy;
+    this.waveWant = state.capturePlayingLid;
     this.transcribeLid = state.captureTranscribeLid;
     /**
      * ⚠ **指紋に「失敗」を先に入れる**(`contacts.ts` の 2 巡目レビューで判明した形)
@@ -143,6 +180,7 @@ export class CapturesRenderer {
       // ⚠ 組み直さない回でも**印は追う**(state だけ動いて画面が変わらない、を作らない)
       this.syncTrimBar();
       this.syncTranscribe();
+      this.syncWave();
       return;
     }
     this.last = print;
@@ -174,6 +212,153 @@ export class CapturesRenderer {
     for (const item of shown) list.append(this.row(item));
     this.host.append(list);
     this.syncTranscribe();
+    this.syncWave();
+  }
+
+  /**
+   * 波形の仕事を全部畳む(焼いた ObjectURL を返す)。⚠ 別の行を鳴らす / 面を閉じる / やめる / 配色が変わる
+   *   ときに必ず通る。世代を進めるので、飛んでいる仕事の結果はここ以後すべて捨てられる。
+   */
+  private dropWave(): void {
+    if (this.wave !== null) URL.revokeObjectURL(this.wave.url);
+    this.wave = null;
+    this.waveLid = null;
+    this.waveState = 'loading';
+    this.waveGen += 1;
+  }
+
+  /** この行の波形が焼けているか(説明文の案内を出すかの判定。⚠ 失敗・作成中は false)。 */
+  private waveReady(lid: string): boolean {
+    return this.waveLid === lid && this.waveState === 'ready' && this.wave !== null;
+  }
+
+  /**
+   * 🔴 **波形の帯を、いまの state に合わせる**(#1232)。
+   *
+   * ⚠ **指紋に入れない**(`syncTrimBar` と同じ理由 ── 組み直すと `<audio>` が作り直されて音が止まる)。
+   * 🔑 作るのは**鳴らしている音の行 1 件だけ**。⚠ 一覧の全部を作ると、押していない録音の bytes を
+   *   全部借りて復号することになる(この面の冒頭の「bytes は押したときだけ」に反する)。
+   * 🔑 範囲の重ね描きは **state の印**(`captureTrim`)から置く ── ボタンで打った印もドラッグの印も同じ帯に映る。
+   * 🔑 **失敗した行は、行が替わるまで作り直さない**(`waveState === 'failed'`)── 読めない音を描くたびに復号し直さない。
+   * 🔑 **配色が変わったら焼き直す**(焼いたときの文字色を覚えておき、いまと違えば畳んで作り直す。
+   *   画像は色を焼き込んでいるので、テーマを替えても古い色のまま残る)。
+   */
+  private syncWave(): void {
+    const lid = this.waveWant;
+    const item = lid === null ? undefined : this.shown.find((i) => i.lid === lid);
+    const key = item?.kind === 'audio' ? item.assetKey : null;
+    if (item === undefined || key === null || key === undefined || this.assets === null || this.waveSource === null) {
+      this.dropWave();
+      return;
+    }
+    if (this.waveLid !== null && this.waveLid !== lid) this.dropWave();
+    if (this.waveState === 'ready' && this.wave !== null && this.wave.color !== this.waveColor()) this.dropWave();
+    if (this.waveLid === null) this.loadWave(item, key);
+    const wave = this.waveReady(item.lid) ? this.wave : null;
+    for (const strip of this.host.querySelectorAll<HTMLElement>('[data-pkc-region="capture-wave"]')) {
+      if (strip.getAttribute('data-pkc-capture-wave') !== lid) continue;
+      // 🔑 場所は最初から取ってある(40px)── 作っている間・失敗したときは字を出し、絵が届いても高さが動かない
+      const status = strip.querySelector<HTMLElement>('[data-pkc-field="capture-wave-status"]');
+      if (wave === null) {
+        strip.removeAttribute('data-pkc-duration-ms');
+        strip.removeAttribute('data-pkc-ticks');
+        // 🔑 前の絵(URL はもう返してある)・範囲・目盛りを残さない ── 壊れた画像が見えてしまう
+        for (const el of [...strip.children]) if (el !== status) el.remove();
+        if (status) {
+          status.hidden = false;
+          status.textContent =
+            this.waveState === 'failed' ? waveFailedText(strip.getAttribute('data-pkc-trimmable') === '1') : WAVE_LOADING_TEXT;
+        }
+        continue;
+      }
+      if (status) status.hidden = true;
+      strip.setAttribute('data-pkc-duration-ms', String(wave.durationMs));
+      if (strip.querySelector('img') === null) {
+        const img = document.createElement('img');
+        img.setAttribute('data-pkc-field', 'capture-wave-img');
+        img.alt = '';
+        img.draggable = false;
+        img.src = wave.url;
+        strip.prepend(img);
+        const range = document.createElement('div');
+        range.setAttribute('data-pkc-field', 'capture-wave-range');
+        range.hidden = true;
+        strip.append(range);
+        const label = document.createElement('span');
+        label.setAttribute('data-pkc-field', 'capture-wave-label');
+        label.hidden = true;
+        strip.append(label);
+      }
+      // 文字起こしの目盛り(本文の時刻の行ごとに 1 本)。⚠ 数が同じなら触らない
+      const times = item.transcriptMs ?? [];
+      if (strip.getAttribute('data-pkc-ticks') !== String(times.length)) {
+        for (const old of strip.querySelectorAll('[data-pkc-field="capture-wave-tick"]')) old.remove();
+        for (const ms of times) {
+          if (ms > wave.durationMs) continue;
+          const t = document.createElement('i');
+          t.setAttribute('data-pkc-field', 'capture-wave-tick');
+          t.style.left = `${(msToFrac(ms, wave.durationMs) * 100).toFixed(3)}%`;
+          strip.append(t);
+        }
+        strip.setAttribute('data-pkc-ticks', String(times.length));
+      }
+      const mark = this.trim !== null && this.trim.lid === lid ? this.trim : null;
+      placeRange(strip, mark?.startMs ?? null, mark?.endMs ?? null, wave.durationMs);
+    }
+  }
+
+  /** 焼くときの色(文字色)。⚠ テーマが変わるとこの値が変わる ── 焼いた画像の色と突き合わせる。 */
+  private waveColor(): string {
+    return getComputedStyle(this.host).color || '#666';
+  }
+
+  private loadWave(item: CaptureItem, assetKey: string): void {
+    const lid = item.lid;
+    this.waveLid = lid;
+    this.waveState = 'loading';
+    this.waveGen += 1;
+    const gen = this.waveGen;
+    /** 🔑 世代で見る(行の名前では見ない)── A → B → A と戻っても、最初の A の結果は捨てる。 */
+    const live = (): boolean => gen === this.waveGen;
+    const strip = [...this.host.querySelectorAll<HTMLElement>('[data-pkc-region="capture-wave"]')].find(
+      (e) => e.getAttribute('data-pkc-capture-wave') === lid,
+    );
+    const points = peakCountFor(strip?.clientWidth || this.host.clientWidth);
+    const fail = (): void => {
+      if (!live()) return;
+      this.waveState = 'failed';
+      this.syncWave();
+      this.syncWaveHint();
+    };
+    void (async () => {
+      let url: string | null = null;
+      try {
+        const blob = await this.assets!.getBlob(assetKey);
+        if (!live()) return;
+        if (blob === null) return fail();
+        const r = await this.waveSource!.load(assetKey, blob, points);
+        if (!live()) return;
+        if (r === null) return fail();
+        const color = this.waveColor();
+        url = await bakeWavePng(r.peaks, color);
+        // ⚠ 焼いている間に世代が進んだら、焼いた物はその場で捨てる(URL を残さない)
+        if (!live()) return;
+        if (url === null) return fail();
+        // 🔑 前の URL が残っていれば、置き換える前に返す(1 行につき生きている URL は常に 1 つ)
+        if (this.wave !== null) URL.revokeObjectURL(this.wave.url);
+        this.wave = { lid, url, durationMs: r.durationMs, color };
+        url = null;
+        this.waveState = 'ready';
+        this.syncWave();
+        // 説明文の「波形をなぞっても選べます」を出す(字だけ差し替える)
+        this.syncWaveHint();
+      } catch {
+        // 波形は添え物 ── 出せなくても聞く・切り出すは止めない
+        fail();
+      } finally {
+        if (url !== null) URL.revokeObjectURL(url);
+      }
+    })();
   }
 
   /**
@@ -309,6 +494,29 @@ export class CapturesRenderer {
     li.append(bar);
   }
 
+  /** 説明文の字。⚠ 波形の案内は帯を組み直さず字だけ差し替える(`syncWaveHint`)── 押そうとしている部品を作り替えない。 */
+  private trimAboutText(item: CaptureItem, startMs: number | null, endMs: number | null): string {
+    return (
+      trimMarkText(startMs, endMs, item.kind) +
+      (item.kind === 'audio' && startMs === null && endMs === null && this.waveReady(item.lid) ? WAVE_TRIM_HINT : '')
+    );
+  }
+
+  /**
+   * 🔴 波形が焼けた / 作れなかったとき、説明文の**字だけ**を差し替える(帯は組み直さない)。
+   * ⚠ 組み直すと「ここを始まりにする」などの部品が作り替わり、押そうとした瞬間に別物になる(実ブラウザ smoke が拾った)。
+   */
+  private syncWaveHint(): void {
+    const lid = this.playing?.lid ?? null;
+    if (lid === null) return;
+    const item = this.shown.find((i) => i.lid === lid);
+    if (item === undefined) return;
+    for (const about of this.host.querySelectorAll<HTMLElement>('[data-pkc-capture] [data-pkc-field="capture-trim"]')) {
+      if (about.closest('[data-pkc-capture]')?.getAttribute('data-pkc-capture') !== lid) continue;
+      about.textContent = this.trimAboutText(item, this.trim?.startMs ?? null, this.trim?.endMs ?? null);
+    }
+  }
+
   /** 帯の中身(印の 2 つ・切り出す・印を消す・いまの印の字)。 */
   private fillTrimBar(bar: HTMLElement, item: CaptureItem): void {
     if (!canTrimCapture(item)) return;
@@ -322,7 +530,11 @@ export class CapturesRenderer {
      */
     const about = document.createElement('span');
     about.setAttribute('data-pkc-field', 'capture-trim');
-    about.textContent = trimMarkText(startMs, endMs, item.kind);
+    /**
+     * 🔑 波形が出ていて、まだ範囲が無いときだけ「なぞっても選べます」を足す(出せなかったときは言わない ──
+     *   無い物を指す案内にしない)。帯は `syncTrimBar` が組み直すので、波形が焼けた / 失敗したときに追って変わる。
+     */
+    about.textContent = this.trimAboutText(item, startMs, endMs);
     if (trimNoteFirst(startMs, endMs)) bar.append(about);
     const mark = document.createElement('button');
     mark.type = 'button';
@@ -382,6 +594,31 @@ export class CapturesRenderer {
     if (!trimNoteFirst(startMs, endMs)) bar.append(about);
   }
 
+  /**
+   * 🔴 **波形の帯の器**(#1232)。中身(画像・範囲・目盛り)は波形が焼けたら `syncWave` が入れる ──
+   * 焼けるまで(読めない音は最後まで)は `hidden` で、場所を取らない。
+   * ⚠ ドラッグの受け手は `wave-drag.ts`(ここは `data-pkc-*` を置くだけ)。
+   */
+  private waveStrip(item: CaptureItem): HTMLElement {
+    const strip = document.createElement('div');
+    strip.setAttribute('data-pkc-region', 'capture-wave');
+    strip.setAttribute('data-pkc-capture-wave', item.lid);
+    strip.setAttribute('data-pkc-trimmable', canTrimCapture(item) ? '1' : '0');
+    strip.setAttribute('role', 'img');
+    strip.setAttribute('aria-label', '波形');
+    strip.title =
+      (canTrimCapture(item)
+        ? '波形です。ドラッグすると切り出す範囲を選べます。押すとその位置から再生します。'
+        : '波形です。押すとその位置から再生します。') +
+      ((item.transcriptMs ?? []).length > 0 ? '下の小さい線は文字起こしの時刻です。' : '');
+    // 🔑 場所は最初から取る(CSS の高さ 40px)── 作っている間は字、焼けたら絵に替わる
+    const status = document.createElement('span');
+    status.setAttribute('data-pkc-field', 'capture-wave-status');
+    status.textContent = WAVE_LOADING_TEXT;
+    strip.append(status);
+    return strip;
+  }
+
   private row(item: CaptureItem): HTMLLIElement {
     const li = document.createElement('li');
     li.setAttribute('data-pkc-capture', item.lid);
@@ -422,6 +659,7 @@ export class CapturesRenderer {
          *   聞くのは普通この面であって、本文に貼った後ではない。
          */
         appVoiceBoostRouter.watch(media);
+        if (item.kind === 'audio' && this.waveSource !== null) li.append(this.waveStrip(item));
         const stop = document.createElement('button');
         stop.type = 'button';
         stop.setAttribute('data-pkc-action', 'capture-stop');
@@ -437,6 +675,10 @@ export class CapturesRenderer {
         play.setAttribute('data-pkc-entry', item.lid);
         play.setAttribute('data-pkc-field', 'capture-play');
         play.textContent = item.kind === 'audio' ? '音を聞く' : '動画を見る';
+        if (item.kind === 'audio' && this.waveSource !== null)
+          play.title = canTrimCapture(item)
+            ? '聞くと、下に波形が出ます。波形をなぞると切り出す範囲を選べます。'
+            : '聞くと、下に波形が出ます。';
         li.append(play);
       }
     }

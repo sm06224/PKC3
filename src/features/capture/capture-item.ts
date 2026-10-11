@@ -23,6 +23,8 @@
  */
 import { readAttachmentMeta } from '../flavor/attachment-flavor';
 import { CAPTURE_LABEL } from '../asset/capture-text';
+import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
+import { transcriptTimesMs } from '../audio/waveform';
 
 /** 一覧に並べる 1 件。⚠ **原値を持つ**(丸めるのは描画器の仕事 ── §7)。 */
 export interface CaptureItem {
@@ -36,6 +38,11 @@ export interface CaptureItem {
   readonly assetKey: string | null;
   /** 音か動画か。⚠ **`audio/` / `video/` のどちらか**しかここへ来ない。 */
   readonly kind: 'audio' | 'video';
+  /**
+   * 文字起こしの各行の時刻(ms。#1232)。波形の上の目盛りに使う。⚠ 本文の時刻リンクと**同じ読み方**
+   * (`ELAPSED_LINE_HEAD` + `parseElapsed`)。無ければ空(目盛りを出さない)。省略 = 空。
+   */
+  readonly transcriptMs?: readonly number[];
 }
 
 /** 一覧に入れる元。⚠ `getBodies` の 1 往復で採れる形にしてある。 */
@@ -84,6 +91,7 @@ export function captureItemsFrom(sources: readonly CaptureSource[]): CaptureItem
       size: meta.size,
       assetKey: meta.assetKey,
       kind,
+      transcriptMs: transcriptTimesMs(s.body, ELAPSED_LINE_HEAD, parseElapsed),
     });
   }
   return out;
