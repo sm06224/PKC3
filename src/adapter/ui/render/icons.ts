@@ -218,6 +218,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'nav-forward': 'chevron-right',
   /** 画像を別窓で見る(#192)。⚠ 「開く」の仲間なので起動と同じ図案は使わない */
   'view-asset': 'grid',
+  /** 画像に描き込む(#683 段③)── 「編集」の鉛筆(`start-edit`)と取り違えないよう、絵を描く道具の図案。 */
+  'draw-on-image': 'palette',
   /** 関係(#185)── 足すのは plus、消すのは close(既存の意味と揃える)。 */
   'add-relation': 'plus',
   'remove-relation': 'close',

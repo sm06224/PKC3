@@ -319,7 +319,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-11(#1377): N +2(`bookmark-note-add` / `bookmark-note-remove`。右クリックの「ブックマークに入れる / 外す」──
     //   押した行は `rowLidOrSelected` が決める。`export-entry-markdown` と同じ仕分け)。
     // ⚠ 2026-10-11(#1376): N +2(`restore-draft` / `discard-draft`。起動したときの 1 行の「戻す」「消す」── 押した所から何も要らない。`apply-update` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 75, P2: 34, E: 26, V: 10, N: 191 });
+    // ⚠ 2026-10-11(#683 段③): P1 +1(`draw-on-image`。画像の添付の「画像に描き込む」── 押した添付の key が要る。
+    //   `view-asset` / `download-asset` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 191 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

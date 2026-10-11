@@ -386,7 +386,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
 const UNREGISTERED_POINT: readonly string[] = [
   // ⚠ 2026-10-02(#772 段②): `capture-transcribe`(「音/動画」の行の「文字にする」── 押した行が要る。`capture-play` と同じ)
   'append-at-heading', 'browse-archive', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
-  'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset',
+  'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset', 'draw-on-image',
   'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
   // ⚠ 2026-10-02(#1240): `edit-header-cell`(見出しの ✎ ── 押した見出しが要る。`edit-cell` と同じ)
   'edit-header-cell',
@@ -476,6 +476,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       unregistered: x.unregistered,
     }).toEqual({
       // ⚠ 2026-10-11(#1376): 起動したときの 1 行の「戻す」「消す」(`restore-draft` / `discard-draft`)で受け手 +2 ── 登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
+      // ⚠ 2026-10-11(#683 段③): 画像の添付の「画像に描き込む」(`draw-on-image`)で受け手 +1 ── 登記は増えない
+      //   (押し口は添付の詳細の 1 行にしか無く、鍵も持たない。押した添付の key が要る P1 ── `view-asset` と同じ置き場)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855): 予定を動かした直後の「元に戻す」(`schedule-undo-move`)で受け手 +1 ── 登記は増えない
       //   (押し口は予定の面の 1 行にしか無く、鍵も持たない。`undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-10(#1457): タグの色(`tag-color-pick` / `tag-color-clear`。押したバッジの名前が要る P1 ── `untag-entry` と同じ仕分け)で受け手 +2 ──
@@ -771,12 +774,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#1377): ノートのブックマーク(`bookmark-note-add` / `bookmark-note-remove`)を
       //   行の右クリックに登記して受け手 +2 / 登記 +2 / 両方 +2(`unregistered` は動かない)。
-      total: 402,
-      receivers: 336,
+      total: 403,
+      receivers: 337,
       registered: 111,
       both: 45,
       outsideActionsTable: 66,
-      unregistered: 291,
+      unregistered: 292,
     });
   });
 
