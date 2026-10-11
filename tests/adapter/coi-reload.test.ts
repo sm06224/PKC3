@@ -21,6 +21,7 @@ function deps(over: Partial<CoiReloadDeps> = {}): CoiReloadDeps & {
   return {
     isolated: false,
     jspi: true,
+    framed: false,
     hasActiveWorker: () => Promise.resolve(true),
     triedBefore: false,
     markTried: () => true,
@@ -44,6 +45,17 @@ describe('読み直すかどうか', () => {
     const d = deps({ jspi: false });
     expect(await reloadForIsolation(d)).toBe('not-needed');
     expect(d.reload).not.toHaveBeenCalled();
+  });
+
+  it('🔴 iframe の中では 1 度目から読み直さない(#1569: 読み直しても分離せず、画面が勝手に作り直される)', async () => {
+    const marked = vi.fn(() => true);
+    const d = deps({ framed: true, markTried: marked });
+    expect(await reloadForIsolation(d)).toBe('not-needed');
+    expect(d.reload).not.toHaveBeenCalled();
+    // 対照: 同じ条件で iframe でなければ読み直す(framed の門だけが効いている)
+    const c = deps({ framed: false });
+    expect(await reloadForIsolation(c)).toBe('reloaded');
+    expect(marked).not.toHaveBeenCalled();
   });
 
   it('🔴 1 度試していたら読み直さない(輪を作らない)', async () => {
@@ -87,7 +99,7 @@ describe('読み直すかどうか', () => {
 
   it('🔴 抜ける経路では SW を 1 度も待たない(通常経路に待ちを足さない)', async () => {
     const wait = vi.fn(() => Promise.resolve(true));
-    for (const over of [{ isolated: true }, { jspi: false }, { triedBefore: true }]) {
+    for (const over of [{ isolated: true }, { jspi: false }, { framed: true }, { triedBefore: true }]) {
       await reloadForIsolation(deps({ ...over, hasActiveWorker: wait }));
     }
     expect(wait).not.toHaveBeenCalled();
@@ -141,6 +153,25 @@ describe('環境からの採取', () => {
     ).toBe('reloaded');
     expect(reload).toHaveBeenCalledTimes(1);
     expect(s.data.get(COI_TRIED_KEY)).toBe('1');
+  });
+
+  it('🔴 採取: top が自分でなければ iframe(読み直さない)/ 自分なら最上位(読み直す)', async () => {
+    const run = async (g: typeof globalThis) => {
+      const reload = vi.fn();
+      const out = await applyIsolationReload({
+        registration: Promise.resolve({ active: {} }),
+        ready: null,
+        globals: g,
+        session: session(),
+        reload,
+      });
+      return { out, reloads: reload.mock.calls.length };
+    };
+    const top = {};
+    expect(await run(globals({ top }))).toEqual({ out: 'not-needed', reloads: 0 });
+    const self: Record<string, unknown> = { WebAssembly: { Suspending: function S() {} } };
+    self.top = self;
+    expect(await run(self as unknown as typeof globalThis)).toEqual({ out: 'reloaded', reloads: 1 });
   });
 
   it('印が残っていれば読み直さない', async () => {

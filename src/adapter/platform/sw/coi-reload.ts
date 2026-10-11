@@ -48,6 +48,19 @@ export interface CoiReloadDeps {
   /** `WebAssembly.Suspending` が在るか(= Office が動きうる環境か)。 */
   readonly jspi: boolean;
   /**
+   * 🔴 **別のページの iframe に入っているか**(#1569)。
+   *
+   * ⚠ 入れ物ごとに分離するのは**いちばん外のページ**で、iframe の中の文書は
+   *   自分が読み直しても分離しない(親が分離していなければ子は成り立たない。
+   *   親が分離していたなら子は COEP が無いと**そもそも読み込まれない**ので、
+   *   ここに来て「分離していない」は「親が分離していない」と同じ意味になる)。
+   * 🔑 つまり**読み直しは必ず空振りする**うえ、組み込み先のページを開くたびに
+   *   (セッションに印が無いので)**起動の 2〜3 秒後に画面が勝手に読み直される**。
+   *   実測: 設定を開いた直後に iframe が丸ごと作り直され、開いた設定が閉じ、
+   *   AI から頼まれた許可のダイアログも消えた。
+   */
+  readonly framed: boolean;
+  /**
    * 登録に **active な worker が居るか**を待って返す。
    *
    * ⚠ `navigator.serviceWorker.controller` ではない ── いま開いている文書が
@@ -83,6 +96,8 @@ export interface CoiReloadDeps {
 export async function reloadForIsolation(deps: CoiReloadDeps): Promise<CoiReloadOutcome> {
   if (deps.isolated) return 'isolated';
   if (!deps.jspi) return 'not-needed';
+  // ⚠ 順序: `triedBefore` より前 ── 組み込みでは**1 度目から**読み直さない
+  if (deps.framed) return 'not-needed';
   if (deps.triedBefore) return 'gave-up';
   if (!(await deps.hasActiveWorker())) return 'no-worker';
   // ⚠ **印を先に置き、置けたことを確かめてから**読み直す。逆順・確認なしだと
@@ -114,6 +129,7 @@ export const COI_TRIED_KEY = 'pkc3:coi-reload-tried';
 export function applyIsolationReload(env: CoiEnvironment): Promise<CoiReloadOutcome> {
   const g = env.globals as {
     crossOriginIsolated?: boolean;
+    top?: unknown;
     WebAssembly?: { Suspending?: unknown };
   };
   // ⚠ storage は投げることがある(storage 遮断)。読めなければ「試した」と見なす
@@ -127,6 +143,8 @@ export function applyIsolationReload(env: CoiEnvironment): Promise<CoiReloadOutc
   return reloadForIsolation({
     isolated: g.crossOriginIsolated === true,
     jspi: typeof g.WebAssembly?.Suspending === 'function',
+    // ⚠ cross-origin の親でも `top` の同一性比較は許される(中身は読まない)
+    framed: g.top != null && g.top !== g,
     hasActiveWorker: async () => {
       const reg = await env.registration;
       if (reg === null) return false; // 登録できていない ── ready は解決しない
