@@ -38,10 +38,11 @@
  *
  *   node scripts/operation-table.mjs          # 人が読む
  *   node scripts/operation-table.mjs --json   # test が読む
+ *   node scripts/operation-table.mjs --unregistered   # 名前で呼べない操作の一覧(JSON。#582 段③)
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { outlets, receivers } from './action-outlets.mjs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { codeOnlyForScan, outlets, receivers } from './action-outlets.mjs';
 import { classify } from './action-scope-survey.mjs';
 
 function repoRoot() {
@@ -263,7 +264,62 @@ export function summary() {
   };
 }
 
-if (process.argv[2] === '--json') {
+/**
+ * 🔴 **名前で呼べない操作の一覧**(#582 段③の下準備。`--unregistered`)。
+ *
+ * 1 件ごとに ①指さなくても呼べるか(`nameable` = 種別が `P1` でない)②押し所の
+ * `file:line`(描画側の綴りを `outlets()` と同じ 5 通りで探す)③そのすぐ後ろに在る
+ * 日本語の字(**候補**)を返す。
+ * ⚠ 字は**描画 file の中でその場で組まれる**ので、候補は機械の推測である ──
+ *   `null` は「引けていない」で「字が無い」ではない。正本は画面。
+ */
+const SITE_RES = [
+  /data-pkc-action['"]?\s*,\s*['"]([a-z0-9-]+)['"]/g,
+  /data-pkc-action=["']([a-z0-9-]+)["']/g,
+  /iconButton\(\s*'([a-z0-9-]+)'/g,
+  /\bbtn\(\s*'([a-z0-9-]+)'/g,
+  /\bentryBtn\(\s*'([a-z0-9-]+)'/g,
+  /action:\s*'([a-z0-9-]+)'/g,
+];
+function srcFiles(dir) {
+  const out = [];
+  for (const n of readdirSync(join(ROOT, dir))) {
+    const rel = join(dir, n);
+    if (statSync(join(ROOT, rel)).isDirectory()) out.push(...srcFiles(rel));
+    else if (/\.(ts|mjs|js)$/.test(n)) out.push(rel);
+  }
+  return out;
+}
+export function unregisteredList() {
+  const rows = table().filter((r) => r.receiver && r.books.length === 0);
+  const want = new Set(rows.map((r) => r.id));
+  const sites = new Map();
+  for (const f of srcFiles('src')) {
+    if (f.split(sep).join('/') === 'src/adapter/ui/actions/binder.ts') continue;
+    const t = codeOnlyForScan(rd(f));
+    const lineOf = (i) => t.slice(0, i).split('\n').length;
+    const file = relative('src', f).split(sep).join('/');
+    for (const re of SITE_RES) {
+      for (const m of t.matchAll(re)) {
+        if (!want.has(m[1])) continue;
+        const tail = t.slice(m.index, m.index + 500);
+        const lab = tail.match(/['"`>]([^'"`<>\n]*[\u3040-\u30ff\u4e00-\u9fff][^'"`<>\n]*)['"`<]/);
+        if (!sites.has(m[1])) sites.set(m[1], []);
+        sites.get(m[1]).push({ at: `${file}:${lineOf(m.index)}`, label: lab ? lab[1] : null });
+      }
+    }
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    arg: r.arg,
+    nameable: r.arg !== 'P1',
+    sites: sites.get(r.id) ?? [],
+  }));
+}
+
+if (process.argv[2] === '--unregistered') {
+  console.log(JSON.stringify(unregisteredList(), null, 2));
+} else if (process.argv[2] === '--json') {
   console.log(JSON.stringify({ summary: summary(), rows: table() }, null, 2));
 } else if (process.argv[1] && process.argv[1].endsWith('operation-table.mjs')) {
   const s = summary();

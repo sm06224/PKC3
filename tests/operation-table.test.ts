@@ -30,7 +30,8 @@
  */
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error -- CI script は素の .mjs(ビルド対象外)
-import { registries, summary, table } from '../scripts/operation-table.mjs';
+import { registries, summary, table, unregisteredList } from '../scripts/operation-table.mjs';
+import { readFileSync } from 'node:fs';
 
 interface Row {
   id: string;
@@ -937,5 +938,34 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 空振り防止 ── どちらかを空にしても上の 2 つは通る
     expect(UNREGISTERED_NAMEABLE.length, '在庫が空').toBeGreaterThan(100);
     expect(UNREGISTERED_POINT.length, '「真の点」が空').toBeGreaterThan(10);
+  });
+  /**
+   * 🔴 **`--unregistered` の一覧は、身元で pin した 2 つの箱と一致する**(#582 段③の下準備)。
+   *
+   * ⚠ 一覧の中身(場面・名前で呼ぶ意味)は人が付けた分類で、全数表
+   *   (`docs/development/operation-unregistered-2026-10.md`)に在る。ここでは
+   *   ①機械が出す一覧が `UNREGISTERED_NAMEABLE` と等値 ②全数表がその全部を持つ(増減したら落ちる)
+   *   ③押し所が「file:line」の形で引けている、を見る。
+   */
+  it('🔴 未登記の一覧(--unregistered)は在庫の箱と等値で、全数表がそれを覆う', () => {
+    type U = { id: string; arg: string | null; nameable: boolean; sites: { at: string }[] };
+    const list = (unregisteredList as () => U[])();
+    expect(list.map((r) => r.id).sort(), '一覧が未登記の身元と食い違っている').toEqual(
+      [...UNREGISTERED_NAMEABLE, ...UNREGISTERED_POINT].sort(),
+    );
+    const nameable = list.filter((r) => r.nameable).map((r) => r.id).sort();
+    expect(nameable, '指さなくても呼べる側が在庫の箱と食い違っている').toEqual([...UNREGISTERED_NAMEABLE].sort());
+    // ⚠ 押し所は「引けたもの」だけを見る(綴りを組み立てる口は静的に追えない)。引けた数が極端に減ったら鳴る
+    const sited = list.filter((r) => r.sites.length > 0);
+    expect(sited.length, '押し所が引けた数').toBeGreaterThan(list.length * 0.8);
+    for (const r of sited) {
+      for (const x of r.sites) expect(x.at, `${r.id} の押し所`).toMatch(/^[a-z0-9/.-]+\.ts:\d+$/);
+    }
+    // 全数表(付録)の行 = 在庫の箱。⚠ 表に載せ忘れた id / 消えた id のどちらでも落ちる
+    const doc = readFileSync('docs/development/operation-unregistered-2026-10.md', 'utf-8');
+    const inDoc = [...doc.matchAll(/^\| `([a-z0-9-]+)` \| (高|低) \|/gm)].map((m) => m[1]!).sort();
+    expect(inDoc, '全数表と在庫の箱が食い違っている(足した/消した id を表に反映する)').toEqual(
+      [...UNREGISTERED_NAMEABLE].sort(),
+    );
   });
 });
