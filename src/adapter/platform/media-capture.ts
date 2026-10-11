@@ -189,6 +189,34 @@ function pick(deps: CaptureDeps, kind: CaptureKind): (c: MediaStreamConstraints)
   return fn;
 }
 
+
+/**
+ * 🔴 **画面収録は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3。設計 doc §6)。
+ *
+ * 既定は約 4.4 秒間隔(Chrome 141 で実測)── あとから前後を削るとき、切り出しの
+ * 起点が最大でそのぶん手前へずれる。`videoKeyFrameIntervalDuration` で 2.0 秒に
+ * なる(同じ環境の実測)。⚠ 音だけの録音は映像が無いので渡さない。
+ * 知らない辞書メンバは読まれず無視されるので、対応の検出はしない。
+ * 投げる実装があれば、**指定なしで作り直す**(録れないよりは既定の間隔で録る)。
+ * ⚠ 器を作る 2 か所(最初と、切って次を起こすとき)が**必ずここを通る**。
+ */
+export const SCREEN_KEYFRAME_INTERVAL_MS = 2000;
+
+export function newRecorder(
+  Recorder: typeof MediaRecorder,
+  stream: MediaStream,
+  kind: CaptureKind,
+): MediaRecorder {
+  if (kind !== 'screen') return new Recorder(stream);
+  try {
+    return new Recorder(stream, {
+      videoKeyFrameIntervalDuration: SCREEN_KEYFRAME_INTERVAL_MS,
+    } as MediaRecorderOptions);
+  } catch {
+    return new Recorder(stream);
+  }
+}
+
 /**
  * 収録を始める。⚠ **断るときは理由つきで投げる**(権限拒否 / 非対応)。
  *
@@ -254,7 +282,7 @@ export async function startCapture(
    */
   let phase: 'recording' | 'rotating' | 'done' = 'recording';
 
-  let rec = new Recorder(stream);
+  let rec = newRecorder(Recorder, stream, kind);
 
   /**
    * いま積んでいる分を 1 本にして、**積み場を空ける**。
@@ -351,7 +379,7 @@ export async function startCapture(
      *   ができる。⚠ 順番を変えると、録音そのものが欠ける側の欠陥になる。
      */
     try {
-      rec = new Recorder(stream);
+      rec = newRecorder(Recorder, stream, kind);
       arm();
       rec.start(SLICE_MS);
     } catch {
