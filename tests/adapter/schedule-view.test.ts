@@ -266,12 +266,15 @@ describe('予定の面(#292 段③)', () => {
       e1: '- [x] 済んだ @2026-08-23\n- [ ] まだ @2026-08-23\n',
     });
     expect(groups(qa), '済んだ行が予定に残っている').toEqual(['今日(1)']);
-    const btn = q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!;
-    // ⚠ 押す前に**何件戻るか**が分かる(押しても何も起きないボタンを出さない)
-    expect(btn.textContent).toBe('済んだ予定も出す(1)');
+    const btn = q<HTMLInputElement>('[data-pkc-action="toggle-show-done"]')!;
+    // ⚠ 押す前に**何件戻るか**が分かる(押しても何も起きないチェックを出さない)
+    expect(btn.parentElement!.textContent).toBe('済み(1)');
+    expect(btn.checked, '旗が既定(出さない)なのにチェックが付いている').toBe(false);
     btn.click();
     await tick();
     expect(groups(qa), '押しても戻らない').toEqual(['今日(2)']);
+    expect(btn.checked, '旗が立ったのにチェックが外れている').toBe(true);
+    expect(btn.parentElement!.textContent).toBe('済み(1)'); // 件数は「済んでいる予定の数」のまま(出しても消えない)
     // ⚠ 対照群:もう一度押したら既定へ帰る(片道の切替になっていないこと)
     btn.click();
     await tick();
@@ -289,19 +292,19 @@ describe('予定の面(#292 段③)', () => {
     const a = setup({ e1: '- [ ] まだ @2026-08-23\n' });
     const rowA = a.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!;
     expect(rowA, '前提が崩れている(切替の行が無い)').not.toBeNull();
-    expect(a.q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!.hidden).toBe(true);
+    expect(a.q<HTMLInputElement>('[data-pkc-action="toggle-show-done"]')!.parentElement!.hidden).toBe(true);
     expect(rowA.hidden, '切替が 1 つも無いのに行が出ている(空の行が嵩む)').toBe(true);
     // 済んだ物が 1 つ在る → 「済んだ予定も出す」が出て、行も出る
     const b = setup({ e1: '- [ ] まだ @2026-08-23\n- [x] 済み @2026-08-23\n' });
     const rowB = b.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!;
-    expect(b.q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')!.hidden).toBe(false);
+    expect(b.q<HTMLInputElement>('[data-pkc-action="toggle-show-done"]')!.parentElement!.hidden).toBe(false);
     expect(rowB.hidden, '切替が出るのに行が隠れている(押せない)').toBe(false);
     // 🔑 残り 2 つの切替でも行は出る(着地前レビュー T3 ── 「済んだ」の項だけで決める変異を殺す)
     const c = setup({ e1: '- [ ] 日付なし\n' }); // 期限の無い予定だけ → 「期限の無い予定も出す」
-    expect(c.q<HTMLButtonElement>('[data-pkc-action="toggle-show-undated"]')!.hidden, '前提が崩れている').toBe(false);
+    expect(c.q<HTMLInputElement>('[data-pkc-action="toggle-show-undated"]')!.parentElement!.hidden, '前提が崩れている').toBe(false);
     expect(c.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!.hidden, '期限の無い予定の切替だけのとき行が隠れている').toBe(false);
     const d = setup({ e1: '- [ ] 片付けた @2026-08-23\n' }, {}, new Set(['e1'])); // 片付けたノートの予定だけ
-    expect(d.q<HTMLButtonElement>('[data-pkc-action="toggle-show-archived"]')!.hidden, '前提が崩れている').toBe(false);
+    expect(d.q<HTMLInputElement>('[data-pkc-action="toggle-show-archived"]')!.parentElement!.hidden, '前提が崩れている').toBe(false);
     expect(d.q<HTMLElement>('[data-pkc-field="schedule-toggles"]')!.hidden, '片付けた予定の切替だけのとき行が隠れている').toBe(false);
     // CSS 側に :has の規則が戻っていない(戻すと文書全体の再評価が復活する)── 注釈を落とし、規則単位で見る
     const css = readFileSync('src/styles/app.css', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -316,10 +319,70 @@ describe('予定の面(#292 段③)', () => {
     ).toBe(true);
   });
 
+  /**
+   * 🔴 **3 つの切替は「出すもの」1 つに畳まれ、脇の 1 行が「既定に加えて出しているもの」を言う**
+   * (#855。Gemini 裁定 = #1163 の依頼 10)。
+   * ⚠ 畳んでも**旗は前のまま** ── 3 つのチェックが、それぞれ**元と同じ旗**を反転する。
+   */
+  it('🔴 「出すもの」の中の 3 つのチェックは、それぞれ元と同じ旗を反転し、脇の 1 行がそれを言う', async () => {
+    const { d, q } = setup(
+      {
+        e1: '- [ ] まだ @2026-08-23\n- [x] 済み @2026-08-23\n- [ ] 日付なし\n- [ ] 片付け @2026-08-23\n',
+        e2: '- [ ] 片付けた @2026-08-24\n',
+      },
+      {},
+      new Set(['e2']),
+    );
+    const fold = q<HTMLDetailsElement>('[data-pkc-field="schedule-fold"]')!;
+    expect(fold.querySelector('summary')!.textContent, 'ボタンの字').toBe('出すもの');
+    const note = q<HTMLElement>('[data-pkc-field="schedule-fold-note"]')!;
+    const box = (a: string): HTMLInputElement =>
+      q<HTMLInputElement>(`[data-pkc-action="toggle-show-${a}"]`)!;
+    // 前提:3 つとも出ていて、既定では何も足していない(脇の 1 行は出ない)
+    for (const a of ['done', 'archived', 'undated'])
+      expect(box(a).parentElement!.hidden, `前提が崩れている(${a} が出ていない)`).toBe(false);
+    expect(note.hidden, '既定なのに脇の 1 行が出ている').toBe(true);
+    expect(note.textContent).toBe('');
+    // 1 つずつ:旗・チェック・脇の 1 行が揃って動く
+    const flags = (): [boolean, boolean, boolean] => {
+      const st = d.getState();
+      return [st.showDoneTasks, st.showArchived, st.showUndatedTasks];
+    };
+    box('done').click();
+    await tick();
+    expect(flags(), '「済み」が showDoneTasks だけを反転していない').toEqual([true, false, false]);
+    expect(note.textContent).toBe('済みも表示中');
+    expect(note.hidden).toBe(false);
+    box('undated').click();
+    await tick();
+    expect(flags()).toEqual([true, false, true]);
+    expect(note.textContent).toBe('済み・日付のないものも表示中');
+    box('archived').click();
+    await tick();
+    expect(flags()).toEqual([true, true, true]);
+    expect(note.textContent).toBe('済み・片付けたもの・日付のないものも表示中');
+    expect([box('done').checked, box('archived').checked, box('undated').checked]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    // 対照群:戻すと既定へ帰り、脇の 1 行は消える(片道にならない)
+    for (const a of ['done', 'archived', 'undated']) {
+      box(a).click();
+      await tick();
+    }
+    expect(flags()).toEqual([false, false, false]);
+    expect(note.hidden, '既定へ戻ったのに脇の 1 行が残っている').toBe(true);
+    // 旗を**別の口**(板の「完了」など)が動かしたときも、チェックは旗に追いつく(押した直後の見た目だけで合わせない)
+    d.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' });
+    expect(box('done').checked, '別の口で旗が立ったのにチェックが付かない').toBe(true);
+    expect(note.textContent).toBe('済みも表示中');
+  });
+
   /** ⚠ 済んだ物が 1 つも無ければ、戻す口は出さない(dead click を作らない)。 */
   it('済んだ予定が無ければ、切替は出さない', () => {
     const { q } = setup({ e1: '- [ ] まだ @2026-08-23\n' });
-    expect(q<HTMLButtonElement>('[data-pkc-action="toggle-show-done"]')?.hidden).toBe(true);
+    expect(q<HTMLInputElement>('[data-pkc-action="toggle-show-done"]')!.parentElement!.hidden).toBe(true);
   });
 
   /**

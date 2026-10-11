@@ -6070,32 +6070,83 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-note']:empty {
   display: none;
 }
-/* ⚠ 切替は 1 行に並べる(狭い列で縦に積むと嵩む) */
+/* ⚠ 「出すもの」と脇の 1 行は横に並べる(狭い列で縦に積むと嵩む) */
 [data-pkc-field='schedule-toggles'] {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--s3);
 }
 /* ⚠ 切替が 1 つも出ないときは行ごと `hidden`(`schedule.ts` が決める)── ここに
  *   `:not(:has(button:not([hidden])))` を書いてはいけない: 文書のどこで button が入っても
  *   `hidden` が動いても祖先が再評価され、長いノートの描き直しのたびに MAIN まで無効化が走る(#1467 段 3-d) */
-[data-pkc-field='schedule-undated'],
-[data-pkc-field='schedule-done'],
-[data-pkc-field='schedule-archived'] {
-  align-self: flex-start;
-  padding: 0;
-  font: inherit;
-  font-size: 11px;
+[data-pkc-field='schedule-fold'] {
+  position: relative;
+}
+/* 🔴 **「出すもの」= 3 つの切替を畳んだボタン**(#855)。印は今までの切替と同じ点線の下線。
+ *   `<summary>` の三角は消し、開いている間は `[open]` で濃くする(押している印を CSS に持つ) */
+[data-pkc-field='schedule-fold-button'] {
+  list-style: none;
+  font-size: var(--btn-fs-sm);
   color: var(--muted);
-  background: none;
-  border: none;
   border-bottom: 1px dotted var(--border);
   cursor: pointer;
 }
-[data-pkc-field='schedule-undated']:hover,
-[data-pkc-field='schedule-done']:hover,
-[data-pkc-field='schedule-archived']:hover {
+[data-pkc-field='schedule-fold-button']::-webkit-details-marker {
+  display: none;
+}
+[data-pkc-field='schedule-fold-button']:hover,
+[data-pkc-field='schedule-fold'][open] > [data-pkc-field='schedule-fold-button'] {
   color: var(--fg);
+}
+/* 開いた枠(中央を奪わない小さな枠。モーダルにしない)。切替の列を押し下げないよう重ねて出す */
+[data-pkc-field='schedule-fold-panel'] {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 11em;
+  padding: var(--s2) var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.15));
+}
+[data-pkc-field='schedule-option'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 11px;
+  color: var(--fg);
+  white-space: nowrap;
+  cursor: pointer;
+}
+[data-pkc-field='schedule-option'][hidden] {
+  display: none;
+}
+[data-pkc-field='schedule-fold-note'] {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-fold-note'][hidden] {
+  display: none;
+}
+/* 🔴 **土日の見出しは薄く沈める / 祝日は日付の数字を赤くする**(#855。名前は `title`)。
+ *   地は無彩色のまま(既存の `calendar-grid` の土日と同じ地の色)、赤は祝日という情報にだけ使う。
+ *   `--danger` はテーマごとに明るさを替えてある(明るいテーマでも暗いテーマでも地に対して読める) */
+[data-pkc-field='schedule-week'] > span[data-pkc-weekend],
+[data-pkc-field='schedule-weekview-heads'] > button[data-pkc-weekend],
+[data-pkc-field='schedule-day-head'][data-pkc-weekend] {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+[data-pkc-field='schedule-week'] > button[data-pkc-holiday],
+[data-pkc-field='schedule-weekview-heads'] > button[data-pkc-holiday] [data-pkc-field='schedule-weekview-date'],
+[data-pkc-field='schedule-day-label'][data-pkc-holiday] {
+  color: var(--danger);
 }
 [data-pkc-region='schedule-groups'] {
   display: flex;

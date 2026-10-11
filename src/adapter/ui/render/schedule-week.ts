@@ -37,6 +37,7 @@ import {
   weekHeading,
   type DaySlot,
 } from '@features/schedule/day-layout';
+import { holidayName } from '@features/schedule/jp-holidays';
 import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
 
 export interface WeekPaint {
@@ -215,6 +216,17 @@ export class ScheduleWeek {
       if (col.weekday.textContent !== label.weekday) col.weekday.textContent = label.weekday;
       if (col.date.textContent !== label.date) col.date.textContent = label.date;
       col.head.setAttribute('aria-label', `${label.date}(${label.weekday})を「日」で見る`);
+      // 🔴 土日の見出しは薄く沈め、祝日は日付の数字を赤くして名前を出す(#855)
+      if (label.weekday === '土' || label.weekday === '日') col.head.setAttribute('data-pkc-weekend', '');
+      else col.head.removeAttribute('data-pkc-weekend');
+      const holiday = holidayName(day);
+      if (holiday !== null) {
+        col.head.setAttribute('data-pkc-holiday', '');
+        col.head.title = holiday;
+      } else {
+        col.head.removeAttribute('data-pkc-holiday');
+        col.head.removeAttribute('title');
+      }
 
       const cardOf = (item: AgendaItem): HTMLElement => {
         const key = `${day} ${item.key}`;
