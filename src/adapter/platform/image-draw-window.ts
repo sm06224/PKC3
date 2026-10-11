@@ -236,7 +236,9 @@ async function build(
     for (const [k, b] of thicknessButtons) b.setAttribute('aria-pressed', String(k === thickness));
     undoBtn.disabled = saving || strokes.length === 0;
     // 線が 1 本も無いまま保存すると、元と同じ画像が増えるだけ
-    saveBtn.disabled = saving || !loaded || strokes.length === 0;
+    // ⚠ 打ちかけの文字があれば押せる(押すと確定してから保存する)
+    const typing = textInput !== null && textInput.value.trim() !== '';
+    saveBtn.disabled = saving || !loaded || (strokes.length === 0 && !typing);
     cancelBtn.disabled = saving;
     if (strokes.length === 0) confirmRow.hidden = true;
   };
@@ -351,7 +353,9 @@ async function build(
 
   // ---- 線があるまま × で閉じるときだけ、ブラウザの確認を出す ----
   win.addEventListener('beforeunload', (ev: Event) => {
-    if (leaving || released || strokes.length === 0) return;
+    // ⚠ 打ちかけの文字(まだ線の一覧に入っていない)も、失うものに数える
+    const typing = textInput !== null && textInput.value.trim() !== '';
+    if (leaving || released || (strokes.length === 0 && !typing)) return;
     ev.preventDefault();
     (ev as BeforeUnloadEvent).returnValue = '';
   });
@@ -418,6 +422,7 @@ async function build(
       }
     });
     input.addEventListener('blur', () => commitText());
+    input.addEventListener('input', () => sync());
     doc.body.append(input);
     textInput = input;
     input.focus();
@@ -510,6 +515,8 @@ async function build(
   canvas.addEventListener('lostpointercapture', (ev: PointerEvent) => end(ev, true));
 
   doc.addEventListener('keydown', (ev: KeyboardEvent) => {
+    // ⚠ 文字を打っている最中の Ctrl+Z は、入力欄の打ち消しに任せる(直前に描いた線を消さない)
+    if (ev.target === textInput) return;
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z' && !ev.shiftKey) {
       ev.preventDefault();
       undoBtn.click();
