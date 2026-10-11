@@ -17,6 +17,9 @@
  *     描くとき**黙って開き直す**(worker が 1 に戻る)。⚠ 60 秒は実時間では待てないので、窓の時計だけ差し替える
  *   ③′ ページの一覧(#275 段②-1a)── 窓の左に頁の数だけ小さな絵が並び、押すとその頁へ移り、いまの頁が光り、ボタンで隠す / 出す
  *   ④″ 文書内の検索の一致が **span 2 つにまたがる**とき、両方の span に**一致した範囲だけ**の強調が付く
+ *   ⑤″ ページの編集(#275 段②-1b)── キーボードだけで全部外す(0 ページは保存できない)→ 編集をやめる → 外す・回す・
+ *     ドラッグ・Alt+↑↓ → 「別の PDF として保存」で新しい添付が 1 つ増える(元と、読んでいた画面は動かない)→ できた PDF は
+ *     順・向き・外したページの字が依頼どおり / 元は 5 ページのまま / パスワード付きは読めて、編集は理由つきで断る
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
  *   という**切り替えの前後**が本命なので、対照群(切)と本命(入)を同じ起動の中で続けて見る必要がある
@@ -28,14 +31,26 @@
 import { expect, test } from '@playwright/test';
 import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
-/** 自作の PDF(`pages` 頁・Helvetica で `Hello page N marker<N>`)。xref の位置は組みながら数える。 */
-function buildPdf(pages: number): Buffer {
+/**
+ * 自作の PDF(`pages` 頁・Helvetica で `Hello page N marker<N>`)。xref の位置は組みながら数える。
+ * `opts.box` = 1 頁の大きさ(既定 400x400)/ `opts.outline` = しおりを 1 つ付ける(ページの編集の「引き継がれない物」の観測用)。
+ */
+function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boolean } = {}): Buffer {
+  const [bw, bh] = opts.box ?? [400, 400];
   const objs: string[] = [];
   const kids: string[] = [];
-  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
-  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
   const boldObj = 4 + pages * 2;
+  const outlinesObj = boldObj + 1;
+  const outlineItemObj = boldObj + 2;
+  objs[1] = opts.outline
+    ? `<< /Type /Catalog /Pages 2 0 R /Outlines ${String(outlinesObj)} 0 R >>`
+    : '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
   objs[boldObj] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>';
+  if (opts.outline) {
+    objs[outlinesObj] = `<< /Type /Outlines /First ${String(outlineItemObj)} 0 R /Last ${String(outlineItemObj)} 0 R /Count 1 >>`;
+    objs[outlineItemObj] = `<< /Title (Chapter) /Parent ${String(outlinesObj)} 0 R /Dest [4 0 R /Fit] >>`;
+  }
   for (let i = 0; i < pages; i += 1) {
     const pageObj = 4 + i * 2;
     kids.push(`${String(pageObj)} 0 R`);
@@ -44,7 +59,7 @@ function buildPdf(pages: number): Buffer {
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
     const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} marker${String(i + 1)}) Tj${split} ET`;
     objs[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R >>`;
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(bw)} ${String(bh)}] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R >>`;
     objs[pageObj + 1] = `<< /Length ${String(stream.length)} >>\nstream\n${stream}\nendstream`;
   }
   objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${String(pages)} >>`;
@@ -63,7 +78,17 @@ function buildPdf(pages: number): Buffer {
 
 const PAGES = 10;
 
+/**
+ * パスワードで守られた PDF(2 ページ・空白)。ユーザーのパスワードは空、オーナーのパスワードだけ設定 ──
+ * 読む側(pdf.js)は開けるが、ページの編集(pdf-lib)は暗号化として断る形。pypdf で AES-128 に暗号化した 1094 byte。
+ * ⚠ 自作(中身は空白のページ 2 枚)。
+ */
+const ENCRYPTED_PDF_BASE64 =
+  'JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPDM5MjVlNTJlY2M0YzkxN2ZlYjhlYzk0OGQ4YTliNzNlM2FjMjU1YWRmZmU2MTA5MmY0ZjVjZmFmOTIyZWJjNmE+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMgovS2lkcyBbIDQgMCBSIDUgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAzMDAgNDAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovVHlwZSAvUGFnZQovUmVzb3VyY2VzIDw8Cj4+Ci9NZWRpYUJveCBbIDAuMCAwLjAgMzAwIDQwMCBdCi9QYXJlbnQgMiAwIFIKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL1YgNAovUiA0Ci9MZW5ndGggMTI4Ci9QIDQyOTQ5NjcyOTIKL0ZpbHRlciAvU3RhbmRhcmQKL08gPDkxM2IwNzNmNWI2NTk1NGM4YjZkYTIyMTY5OTcxYTE3N2I3ZTZkOTRhMTA2ZmY3NWMwYzE2Mjk2YmMxNTQxMmU+Ci9VIDw4NTc3NDRkMDc0MmNhNTVhMmRmODc1NzE4Y2ZjM2IzNjI4YmY0ZTVlNGU3NThhNDE2NDAwNGU1NmZmZmEwMTA4PgovQ0YgPDwKL1N0ZENGIDw8Ci9BdXRoRXZlbnQgL0RvY09wZW4KL0NGTSAvQUVTVjIKL0xlbmd0aCAxNgo+Pgo+PgovU3RtRiAvU3RkQ0YKL1N0ckYgL1N0ZENGCj4+CmVuZG9iagp4cmVmCjAgNwowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDExMyAwMDAwMCBuIAowMDAwMDAwMTc4IDAwMDAwIG4gCjAwMDAwMDAyMjcgMDAwMDAgbiAKMDAwMDAwMDMyMSAwMDAwMCBuIAowMDAwMDAwNDE1IDAwMDAwIG4gCnRyYWlsZXIKPDwKL1NpemUgNwovUm9vdCAzIDAgUgovSW5mbyAxIDAgUgovSUQgWyA8MzkzOTM0NjEzNTMzMzk2MjY1MzQzMTY0NjY2MzMxMzE2NTM3NjUzNzM4NjUzMzMyMzkzNzY0MzYzNzMzNjU2Mz4gPDM5MzkzNDYxMzUzMzM5NjI2NTM0MzE2NDY2NjMzMTMxNjUzNzY1MzczODY1MzMzMjM5Mzc2NDM2MzczMzY1NjM+IF0KL0VuY3J5cHQgNiAwIFIKPj4Kc3RhcnR4cmVmCjcyMgolJUVPRgo=';
+
 test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノートへ引ける(設定で選んだ人だけ)', async ({ page, context }) => {
+  // ⑤″(ページの編集)を足して 1 本の物語が 28 秒を超えたので、既定の 30 秒を広げる(待ちを緩めたのではなく、通す道が増えた)
+  test.setTimeout(90_000);
   // ⚠ 窓の中の revoke を数える(描いた頁の ObjectURL を、外れたときに返しているか)。本体の側は数えない
   await context.addInitScript(() => {
     const w = window as unknown as { __revoked: string[]; __created: number };
@@ -441,6 +466,16 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
       timeout: 10_000,
     })
     .toContain('marker3 (p.3、見積.pdf)');
+
+  // 🔴 ページの編集の対照群: 元にしおり・入力欄・電子署名が 1 つも無い PDF では、引き継がれない物の字を出さない
+  await win.locator('.thumb-cell[data-thumb-cell="2"]').scrollIntoViewIfNeeded();
+  await clickReal(win, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
+  await expect(win.locator('#edit-note')).toContainText('9 / 10 ページ', { timeout: 15_000 });
+  const plainNote = await win.locator('#edit-note').innerText();
+  for (const w of ['しおり', '入力欄', '電子署名']) {
+    expect(plainNote, `元に ${w} が無いのに「${w}」と言っている`).not.toContain(w);
+  }
+  await expect(win.locator('#edit-warn'), '引き継がれない物が無いのに、その行が出ている').toBeHidden();
   await win.close();
 
   // ── ⑤′ 頁が多い文書の一覧(70 頁)── 持つ絵の数に上限があり、離れた頁の絵は返され、読み進めると光る項目が見える所へ動く ──
@@ -499,6 +534,289 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     )
     .toBe('ok');
   await big.close();
+
+
+  // ── ⑤″ ページの編集(#275 段②-1b)── 並べ替え・回す・外す → 「別の PDF として保存」で新しい添付が増える ──
+  //    fixture は自作の 5 ページ(縦長・しおり付き)。⚠ 窓ごとに頁の字(marker<頁>)が違うので、どのページが
+  //    どの順で入ったかを字で言える。縦長なので、回すと横長になるのを箱の縦横で見られる。
+  const ED_NAME = 'ページ編集.pdf';
+  const ED_OUT = 'ページ編集 (編集).pdf';
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: ED_NAME,
+    mimeType: 'application/pdf',
+    buffer: buildPdf(5, { box: [300, 400], outline: true }),
+  });
+  const entryNamed = (name: string) =>
+    page.locator('[data-pkc-action="select-entry"][data-pkc-entry]', { hasText: name });
+  await clickReal(page, entryNamed(ED_NAME));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', ED_NAME);
+  await expect(entryNamed(ED_OUT), '保存の前に編集後の添付がある(観測が空振り)').toHaveCount(0);
+  const [ed] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  const edErrors: string[] = [];
+  ed.on('pageerror', (e) => edErrors.push(e.message));
+  await ed.setViewportSize({ width: 1100, height: 900 });
+  await expect(ed.locator('[data-pkc-field="pdf-page-thumb"]')).toHaveCount(5, { timeout: 20_000 });
+  await expect(ed.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready');
+  const edImgs = ed.locator('[data-pkc-field="pdf-page-thumb-image"]');
+  await expect.poll(() => edImgs.count(), { message: '一覧の絵が揃わない', timeout: 20_000 }).toBe(5);
+  const shown = ed.locator('.thumb-cell:not([hidden])');
+  const order = (): Promise<string[]> =>
+    ed
+      .locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('data-thumb') ?? ''));
+  const labels = (): Promise<string[]> =>
+    ed.locator('.thumb-cell:not([hidden]) .thumb-no').evaluateAll((els) => els.map((e) => e.textContent ?? ''));
+  const holderBox = async (n: number): Promise<{ w: number; h: number }> => {
+    const b = await ed.locator(`.thumb-cell[data-thumb-cell="${String(n)}"] .thumb-img`).boundingBox();
+    return { w: b?.width ?? 0, h: b?.height ?? 0 };
+  };
+  const save = ed.locator('#edit-save');
+  const note = ed.locator('#edit-note');
+
+  // 何も変えていない間は、保存ボタンも案内の 1 行も出ない(対照群)
+  await expect(save, '何も変えていないのに「別の PDF として保存」が出ている').toBeHidden();
+  await expect(ed.locator('#edit-bar')).toBeHidden();
+  expect(await order()).toEqual(['1', '2', '3', '4', '5']);
+  // 🔴 使い方の 1 行が、触れる前から常に出ている(↻ × は触れないと出ない物ではない)
+  await expect(ed.locator('#plist-hint')).toBeVisible();
+  await expect(ed.locator('#plist-hint')).toHaveText('ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す');
+  const unloadAsks = (): Promise<boolean> =>
+    ed.evaluate(() => {
+      const e = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    });
+  expect(await unloadAsks(), '何も変えていないのに、閉じるときの確認が出る').toBe(false);
+  // ↻ × ↑ ↓ は触れる前から見える(0 でない不透明度)/ 触れるともっとはっきりする
+  await ed.mouse.move(700, 600);
+  const opacityOf = async (sel: string): Promise<number> =>
+    Number(await ed.locator(sel).evaluate((el) => getComputedStyle(el).opacity));
+  for (const f of ['pdf-page-rotate', 'pdf-page-remove', 'pdf-page-up', 'pdf-page-down']) {
+    const o = await opacityOf(`[data-pkc-field="${f}"][data-thumb-page="1"]`);
+    expect(o, `${f} が触れる前は見えない(タッチでは押せない)`).toBeGreaterThan(0.3);
+    expect(o).toBeLessThan(1);
+  }
+
+  // (a) キーボードだけで全部外す ── 1 つ外すごとに、焦点は同じ位置の次のページへ。全部外したら保存できない
+  await ed.focus('[data-pkc-field="pdf-page-thumb"][data-thumb="1"]');
+  for (let left = 4; left >= 0; left -= 1) {
+    await ed.keyboard.press('Delete');
+    await expect.poll(() => shown.count(), { message: 'Delete でページが外れない', timeout: 15_000 }).toBe(left);
+    if (left > 0) {
+      expect(
+        await ed.evaluate(() => document.activeElement?.getAttribute('data-thumb')),
+        '外した後の焦点が、残ったページに無い',
+      ).not.toBeNull();
+    }
+  }
+  await expect(save, '全部外したのに保存ボタンが消えている').toBeVisible();
+  await expect(save, '0 ページの PDF を保存できてしまう').toBeDisabled();
+  await expect(note).toContainText('すべてのページを外したので、保存できません');
+  // 「変更を元に戻す」で元に戻る(片道にしない)── 一覧も、保存ボタンも元どおり
+  await clickReal(ed, '#edit-reset');
+  await expect(shown).toHaveCount(5);
+  expect(await order()).toEqual(['1', '2', '3', '4', '5']);
+  await expect(save).toBeHidden();
+  await expect(ed.locator('body')).toHaveAttribute('data-pkc-pdf-edited', 'off');
+
+  // (b) 2 ページ目を外す(×)── 保存ボタンが出て、案内の 1 行は「しおりは引き継がれません」だけを言う
+  await clickReal(ed, '[data-pkc-field="pdf-page-remove"][data-thumb-page="2"]');
+  await expect(shown).toHaveCount(4);
+  expect(await order()).toEqual(['1', '3', '4', '5']);
+  expect(await labels(), '位置の番号が詰まっていない').toEqual(['1', '2', '3', '4']);
+  await expect(save).toBeVisible();
+  await expect(save).toBeEnabled();
+  await expect(save).toHaveText('別の PDF として保存');
+  await expect(note).toContainText('4 / 5 ページ');
+  await expect(note).toContainText('元の PDF は変わりません');
+  const warn = ed.locator('#edit-warn');
+  await expect(warn, '元にしおりがあるのに、引き継がれないと言っていない').toContainText('しおりは引き継がれません');
+  // 引き継がれない物は別の行(案内の 1 行には混ぜない)
+  expect(await note.innerText(), '案内の 1 行に、引き継がれない物の字が混ざっている').not.toContain('しおり');
+  const warnText = await warn.innerText();
+  expect(warnText, '元に入力欄が無いのに言っている').not.toContain('入力欄');
+  expect(warnText, '元に電子署名が無いのに言っている').not.toContain('電子署名');
+  expect(await unloadAsks(), '保存していない変更があるのに、閉じるときの確認が出ない').toBe(true);
+  // 🔴 案内が折り返しても、下の面と重ならない(窓を狭めて 2 行 + 折り返しにしても)
+  const noOverlap = async (label: string): Promise<void> => {
+    const bar = await ed.locator('#edit-bar').boundingBox();
+    const sc = await ed.locator('#scroller').boundingBox();
+    const pl = await ed.locator('#plist').boundingBox();
+    if (bar === null || sc === null || pl === null) throw new Error('位置が取れない');
+    expect(sc.y, `${label}: 読む面が案内に重なっている`).toBeGreaterThanOrEqual(bar.y + bar.height - 0.5);
+    expect(pl.y, `${label}: 一覧が案内に重なっている`).toBeGreaterThanOrEqual(bar.y + bar.height - 0.5);
+  };
+  await noOverlap('広い窓');
+  await ed.setViewportSize({ width: 520, height: 900 });
+  await expect
+    .poll(async () => (await ed.locator('#edit-bar').boundingBox())?.height ?? 0, { message: '狭めても案内が折り返さない(観測が空振り)' })
+    .toBeGreaterThan(40);
+  await noOverlap('狭い窓');
+  await ed.setViewportSize({ width: 1100, height: 900 });
+  // 保存ボタンは画面で見分けられる(属性ではなく、計算後の色が他のボタンと違う)
+  expect(await cssOf(save, 'background-color'), '保存ボタンが他のボタンと色で見分けられない').not.toBe(
+    await cssOf(ed.locator('#zoom-in'), 'background-color'),
+  );
+
+  // (c) 3 ページ目を右へ回す(↻)── 絵が縦長から横長になる。4 ページ目は R キーで 4 回(= 元の向き)
+  const before3 = await holderBox(3);
+  expect(before3.h, '回す前は縦長のはず(観測が空振り)').toBeGreaterThan(before3.w);
+  await clickReal(ed, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="3"]');
+  await expect
+    .poll(async () => (await holderBox(3)).w - (await holderBox(3)).h, { message: '回したページの絵が横長にならない', timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(
+      () => ed.locator('[data-thumb="3"] img').evaluate((el: HTMLImageElement) => el.naturalWidth > el.naturalHeight),
+      { message: '回したページの絵が描き直されていない(古い向きのまま)', timeout: 15_000 },
+    )
+    .toBe(true);
+  await ed.focus('[data-pkc-field="pdf-page-thumb"][data-thumb="4"]');
+  await ed.keyboard.press('r');
+  await expect
+    .poll(async () => (await holderBox(4)).w - (await holderBox(4)).h, { message: 'R キーで回らない', timeout: 15_000 })
+    .toBeGreaterThan(0);
+  for (let i = 0; i < 3; i += 1) await ed.keyboard.press('r');
+  await expect
+    .poll(async () => (await holderBox(4)).h - (await holderBox(4)).w, { message: '4 回回しても元の向きに戻らない', timeout: 15_000 })
+    .toBeGreaterThan(0);
+
+  // (d) 5 ページ目を先頭へドラッグ ── 入る場所に線が出て、離すと並びが替わる
+  const drag = async (from: number, to: number): Promise<void> => {
+    const a = await ed.locator(`[data-pkc-field="pdf-page-thumb"][data-thumb="${String(from)}"]`).boundingBox();
+    const b = await ed.locator(`[data-pkc-field="pdf-page-thumb"][data-thumb="${String(to)}"]`).boundingBox();
+    if (a === null || b === null) throw new Error('項目の位置が取れない');
+    await ed.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await ed.mouse.down();
+    await ed.mouse.move(a.x + a.width / 2, a.y + a.height / 2 - 20, { steps: 3 });
+    await ed.mouse.move(b.x + b.width / 2, b.y + 4, { steps: 8 });
+    await expect(ed.locator('[data-pkc-drop]'), 'ドラッグ中に入る場所の線が出ない').toHaveCount(1);
+    await ed.mouse.up();
+  };
+  await drag(5, 1);
+  await expect.poll(order, { message: 'ドラッグで並びが替わらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
+  expect(await labels()).toEqual(['1', '2', '3', '4']);
+  await expect(ed.locator('[data-pkc-drop]'), '離した後も線が残っている').toHaveCount(0);
+  // 離した直後のクリックは「押した」にならない(読む側が動かない)
+  expect(await ed.locator('#pageno').inputValue()).not.toBe('5');
+
+  // (e) キーボードだけでも並べ替えられる ── Alt+↑ / Alt+↓(同じ関数)。焦点は動かしたページに残る
+  await ed.focus('[data-pkc-field="pdf-page-thumb"][data-thumb="4"]');
+  await ed.keyboard.press('Alt+ArrowUp');
+  await expect.poll(order, { message: 'Alt+↑ で並びが替わらない', timeout: 10_000 }).toEqual(['5', '1', '4', '3']);
+  expect(await ed.evaluate(() => document.activeElement?.getAttribute('data-thumb')), '動かしたページから焦点が外れた').toBe('4');
+  await ed.keyboard.press('Alt+ArrowDown');
+  await expect.poll(order, { message: 'Alt+↓ で並びが戻らない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
+  // ↑ ↓ のボタン(ドラッグできない端末でも並べ替えられる)
+  await clickReal(ed, '[data-pkc-field="pdf-page-up"][data-thumb-page="3"]');
+  await expect.poll(order, { message: '↑ ボタンで 1 つ上がらない', timeout: 10_000 }).toEqual(['5', '3', '1', '4']);
+  await clickReal(ed, '[data-pkc-field="pdf-page-down"][data-thumb-page="3"]');
+  await expect.poll(order, { message: '↓ ボタンで 1 つ下がらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
+
+  // (f) 保存 ── 新しい添付が 1 つ増える。元の添付と、いま読んでいる画面は動かない
+  const originalDetail = await page.locator('[data-pkc-region="detail"]').innerText();
+  await clickReal(ed, '#edit-save');
+  await expect(ed.locator('#status'), '保存の結果が窓に出ない').toContainText(
+    '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます',
+    { timeout: 20_000 },
+  );
+  await expect(entryNamed(ED_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(ED_NAME).filter({ hasNotText: '(編集)' }), '元の添付が消えた').toHaveCount(1);
+  await expect(
+    page.locator('[data-pkc-action="view-asset"]'),
+    '保存で、いま読んでいたノートの画面が新しい添付へ動いた',
+  ).toHaveAttribute('data-pkc-asset-name', ED_NAME);
+  expect(await page.locator('[data-pkc-region="detail"]').innerText(), '保存で元のノートの表示が変わった').toBe(originalDetail);
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText(
+    `「${ED_OUT}」を元の PDF と同じフォルダの添付に加えました`,
+  );
+  // 🔴 保存した並びが新しい基準になる: 保存ボタンは消え、閉じる確認も出ない(押し直して同じ添付を増やさせない)
+  await expect(save, '保存した後も保存ボタンが残っている(押し直すと同じ PDF の添付が増える)').toBeHidden();
+  await expect(ed.locator('#edit-bar')).toBeHidden();
+  expect(await order()).toEqual(['5', '1', '3', '4']);
+  expect(await unloadAsks(), '保存した後なのに、閉じるときの確認が出る').toBe(false);
+  await expect(entryNamed(ED_OUT)).toHaveCount(1);
+  // 保存の後にまた変えれば、また保存でき、確認も出る / 「変更を元に戻す」は保存した並びへ戻る
+  await clickReal(ed, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="4"]');
+  await expect(save).toBeVisible();
+  expect(await unloadAsks()).toBe(true);
+  await clickReal(ed, '#edit-reset');
+  await expect(save).toBeHidden();
+  expect(await order(), '元に戻したら、保存した並びでなく元の並びへ戻っている').toEqual(['5', '1', '3', '4']);
+  expect((await holderBox(3)).w, '保存した向き(3 ページ目は横長)まで戻っていない').toBeGreaterThan((await holderBox(3)).h);
+  await ed.close();
+
+  // (g) できた PDF を開く ── 4 ページ。順は 5,1,3,4 / 3 番目だけ横長 / 外した 2 ページ目の字はどこにも無い
+  await clickReal(page, entryNamed(ED_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', ED_OUT);
+  const [out] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(out.locator('#pagecount')).toHaveText('/ 4', { timeout: 20_000 });
+  const textOf = (n: number) => out.locator(`.page[data-page="${String(n)}"] .textLayer`);
+  await expect(textOf(1)).toContainText('marker5', { timeout: 20_000 });
+  for (const [n, m] of [[2, 'marker1'], [3, 'marker3'], [4, 'marker4']] as const) {
+    await out.locator(`.page[data-page="${String(n)}"]`).scrollIntoViewIfNeeded();
+    await expect(textOf(n), `${String(n)} ページ目に ${m} が入っていない`).toContainText(m, { timeout: 20_000 });
+  }
+  const dims = async (n: number): Promise<{ w: number; h: number }> => {
+    const b = await out.locator(`.page[data-page="${String(n)}"]`).boundingBox();
+    return { w: b?.width ?? 0, h: b?.height ?? 0 };
+  };
+  const d3 = await dims(3);
+  expect(d3.w, '回したページ(できた PDF の 3 ページ目)が横長でない').toBeGreaterThan(d3.h);
+  for (const n of [1, 2, 4]) {
+    const d = await dims(n);
+    expect(d.h, `${String(n)} ページ目まで回っている`).toBeGreaterThan(d.w);
+  }
+  await out.fill('#query', 'marker2');
+  await out.press('#query', 'Enter');
+  await expect(out.locator('#hits'), '外したはずの 2 ページ目の字が、できた PDF に残っている').toContainText('見つかりません', {
+    timeout: 15_000,
+  });
+  // 元は変わっていない: 5 ページのまま、外したページの字も残っている
+  await out.close();
+  await clickReal(page, entryNamed(ED_NAME).filter({ hasNotText: '(編集)' }));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', ED_NAME);
+  const [orig] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(orig.locator('#pagecount')).toHaveText('/ 5', { timeout: 20_000 });
+  await orig.fill('#query', 'marker2');
+  await orig.press('#query', 'Enter');
+  await expect(orig.locator('#hits'), '元の PDF から 2 ページ目の字が消えている(元を書き換えた)').toContainText('1 / 1 件(2 ページ)', {
+    timeout: 15_000,
+  });
+  await orig.close();
+
+  // (h) パスワードで守られた PDF ── 読める。編集は断る(理由を言い、保存ボタンは出ない)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'パスワード付き.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(ENCRYPTED_PDF_BASE64, 'base64'),
+  });
+  await clickReal(page, entryNamed('パスワード付き.pdf'));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', 'パスワード付き.pdf');
+  const [enc] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(enc.locator('#pagecount'), 'パスワード付きの PDF が読めない(観測が空振り)').toHaveText('/ 2', { timeout: 20_000 });
+  expect(await enc.locator('[data-pkc-field="pdf-reader-fallback"]').count()).toBe(0);
+  await clickReal(enc, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="1"]');
+  await expect(enc.locator('#status')).toContainText('パスワードで守られた PDF は、ページを編集できません', { timeout: 15_000 });
+  await expect(enc.locator('#edit-save'), '編集できない PDF に保存ボタンが出ている').toBeHidden();
+  await expect(enc.locator('body')).toHaveAttribute('data-pkc-pdf-edited', 'off');
+  // 読む側は今までどおり: 2 ページ目へ移れる
+  await clickReal(enc, '[data-pkc-field="pdf-page-thumb"][data-thumb="2"]');
+  await expect(enc.locator('#pageno')).toHaveValue('2', { timeout: 10_000 });
+  await enc.close();
+  expect(edErrors, '編集の窓で例外が出た').toEqual([]);
 
   // ── ⑥ 読めない PDF ── 断り文を出さず、ブラウザ内蔵の表示へ退避する ──
   await page.setInputFiles('[data-pkc-field="attach-input"]', {

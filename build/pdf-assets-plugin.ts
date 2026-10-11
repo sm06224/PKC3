@@ -12,7 +12,7 @@ import { COI_HEADERS } from '../src/adapter/platform/sw/coi-headers.ts';
  * 裁定(Gemini、#275):設定で**選んだ人だけ**が PKC の画面で PDF を読む。既定はブラウザ内蔵の表示。
  * だから pdf.js 本体と日本語の cmap(合わせて数 MB)は**選んだ人が押したときだけ取りに行く**物で、
  * 全員が install で落とす precache に載せない(`shouldPrecache` が `pdf/lib/` を外す)。
- * 🔑 窓の小さな HTML / JS(`public/pdf/` 直下の 7 file)は**precache に載る** ── 載せないと、オフラインで窓を開いたとき
+ * 🔑 窓の小さな HTML / JS(`public/pdf/` 直下の 11 file)は**precache に載る** ── 載せないと、オフラインで窓を開いたとき
  *   service worker が `index.html` へ退避して**PKC をもう 1 枚開く**(マニュアルの窓と同じ穴)。載せておけば
  *   窓は開き、本体(`lib/`)が取れなくても**内蔵の表示へ自動で退避**する。
  * ⚠ 「配る量は気にしない」(不可侵指示 2026-08-03)は**全員が使う物**の話で、
@@ -29,6 +29,7 @@ import { COI_HEADERS } from '../src/adapter/platform/sw/coi-headers.ts';
  * | 配る | 理由 |
  * |---|---|
  * | `legacy/build/pdf.min.mjs` + `legacy/build/pdf.worker.min.mjs` | 本体と解析 worker(窓の中で動く。⚠ `legacy` の版 ── 下の `SINGLE` の注記) |
+ * | `pdf-lib.min.js` + `LICENSE-pdf-lib.md` | ページの編集(#275 段②-1b)で新しい PDF を作る。窓の中の使い捨ての worker(`public/pdf/edit-worker.js`)が `importScripts` で読む(MIT。選んだ人が編集したときだけ取りに行く) |
  * | `cmaps/*.bcmap` | 日本語など非 Latin の文字の対応表(無いと日本語の PDF が読めない) |
  * | `standard_fonts/*` | 埋め込みの無い標準書体の代替 |
  * | `wasm/{jbig2,openjpeg,qcms_bg}.wasm` | 画像の復号(スキャンの PDF) |
@@ -83,6 +84,12 @@ function pdfjsRoot(): string {
   return dirname(require.resolve('pdfjs-dist/build/pdf.min.mjs')).replace(/[\\/]build$/, '');
 }
 
+/** pdf-lib の実体の置き場(`node_modules/pdf-lib/dist/`)。⚠ `pdf-lib/package.json` は `exports` を持たないので、実在する file から割り出す。 */
+function pdfLibDist(): string {
+  const require = createRequire(import.meta.url);
+  return dirname(require.resolve('pdf-lib/dist/pdf-lib.min.js'));
+}
+
 /**
  * 配る file の一覧(`pdf/lib/` からの相対 → `node_modules` の実 path)。
  *
@@ -94,6 +101,10 @@ export function pdfLibFiles(): Map<string, string> {
   const root = pdfjsRoot();
   const out = new Map<string, string>();
   for (const [from, to] of SINGLE) out.set(to, join(root, from));
+  // ページの編集の pdf-lib(別の package。pdf.js と版も持ち主も別なので、規則を混ぜず 2 行で足す)
+  const dist = pdfLibDist();
+  out.set('pdf-lib.min.js', join(dist, 'pdf-lib.min.js'));
+  out.set('LICENSE-pdf-lib.md', join(dist, '..', 'LICENSE.md'));
   for (const { dir, keep } of TREES) {
     const names = readdirSync(join(root, dir)).filter(keep);
     if (names.length === 0) throw new Error(`pdf: ${dir}/ に配る物が 1 つも無い`);

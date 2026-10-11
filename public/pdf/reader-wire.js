@@ -29,10 +29,18 @@
    */
   var DOC_TIMEOUT_MS = 8000;
   var QUOTE_TIMEOUT_MS = 10000;
+  /**
+   * 編集した PDF を保存する返事を待つ上限(ms)。本体は新しい添付を作る(大きな PDF のハッシュと書き込み)ので、
+   * ノートへ引く返事より長く待つ。⚠ 本体側に時間切れは無い(作れたかどうかを返す)── 窓の側だけの歯止め。
+   */
+  var EDIT_TIMEOUT_MS = 60000;
   /** 文書が来なかった / 来ても読めなかったときの字。⚠ 窓の中で 3 か所が同じ字を言う。 */
   var DOC_FAILED = '文書を受け取れませんでした。PKC3 のウィンドウから、もう一度開いてください';
   /** ノートへ引く返事が来なかったときの字。 */
   var QUOTE_NO_REPLY = 'ノートへ引用できたか確かめられませんでした。PKC3 のウィンドウから、もう一度開いてください';
+
+  /** 保存の返事が来なかったときの字。⚠ 「保存できなかった」とは言い切らない(添付ができたかもしれない)。 */
+  var EDIT_NO_REPLY = '保存できたか確かめられませんでした。PKC3 のウィンドウで、添付が増えているか確かめてください';
 
   /** 窓 → 本体の封筒を組む(唯一の口)。 */
   function envelope(kind, token, payload) {
@@ -85,6 +93,8 @@
     QUOTE_TOO_LONG: QUOTE_TOO_LONG,
     DOC_TIMEOUT_MS: DOC_TIMEOUT_MS,
     QUOTE_TIMEOUT_MS: QUOTE_TIMEOUT_MS,
+    EDIT_TIMEOUT_MS: EDIT_TIMEOUT_MS,
+    EDIT_NO_REPLY: EDIT_NO_REPLY,
     DOC_FAILED: DOC_FAILED,
     QUOTE_NO_REPLY: QUOTE_NO_REPLY,
     envelope: envelope,

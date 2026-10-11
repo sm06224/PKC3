@@ -42,6 +42,13 @@ describe('pdfAssetsPlugin', () => {
     }
   });
 
+  it('🔴 ページの編集の pdf-lib 本体と、その MIT ライセンスを写す(ライセンスが落ちても量では止まらない)', () => {
+    expect(names.has(`${PDF_DIR}pdf-lib.min.js`)).toBe(true);
+    expect(names.has(`${PDF_DIR}LICENSE-pdf-lib.md`)).toBe(true);
+    expect(PDF_REQUIRED as string[]).toContain('pdf-lib.min.js');
+    expect(PDF_REQUIRED as string[], '検品が、ライセンスの落ちた一式を通してしまう').toContain('LICENSE-pdf-lib.md');
+  });
+
   it('全部 `pdf/lib/` の下へ置く(窓の小さな HTML / JS は public/pdf/ 直下から来る)', () => {
     for (const f of files) expect(f.fileName.startsWith(PDF_DIR), f.fileName).toBe(true);
   });

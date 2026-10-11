@@ -70,6 +70,8 @@ function boot(): void {
   evalScript('public/pdf/doc-lease.js', g);
   evalScript('public/pdf/text-hits.js', g);
   evalScript('public/pdf/page-list.js', g);
+  evalScript('public/pdf/page-edit.js', g);
+  evalScript('public/pdf/edit-stage.js', g);
   wire = g['PkcPdfWire'] as Wire;
   evalScript('public/pdf/reader.js', g);
   const found = FakeChannel.all[FakeChannel.all.length - 1];

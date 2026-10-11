@@ -24,6 +24,7 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
     onLoadFailed: () => undefined,
     onOpenFailed: () => undefined,
     onLateHello: () => undefined,
+    onEdited: () => Promise.resolve({ ok: true, message: "" }),
     makeChannel: () => ({
       postMessage: (d) => posted.push(d),
       close: () => undefined,
