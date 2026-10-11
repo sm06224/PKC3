@@ -2003,6 +2003,29 @@ test('🔴 添付の「参照をコピー」で、本文に貼れる形が手に
     '貼った参照が添付として出ない',
   ).toHaveCount(1, { timeout: 15000 });
 
+  /**
+   * 🔴 **添付の「リンクをコピー」で、開くと添付が出るリンクが手に入る**(2026-10-11)。
+   *   参照(本文に貼る)とは別の物 ── 添付の詳細へ戻ってコピーし、別のノートを開いてから、断片に入れて開く。
+   */
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: 'p.png' }).first().click();
+  const linkBtn = page.locator('[data-pkc-field="copy-asset-link"]');
+  await expect(linkBtn, '添付のリンクをコピーする導線が無い').toBeVisible({ timeout: 15000 });
+  await linkBtn.click();
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('添付のリンクをコピーしました', {
+    timeout: 10000,
+  });
+  const assetLink = await page.evaluate(() => navigator.clipboard.readText());
+  expect(assetLink, '添付のリンクの形になっていない').toMatch(/#pkc\?container=[^&]+&asset=[^&]+&owner=[^&]+$/);
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').filter({ hasNotText: 'p.png' }).first().click();
+  await expect(page.locator('[data-pkc-field="attachment-info"]'), '前提: 添付から離れていない').toHaveCount(0);
+  await page.evaluate((u) => {
+    window.location.hash = new URL(u).hash;
+  }, assetLink);
+  await expect(
+    page.locator('[data-pkc-field="attachment-info"]'),
+    '添付のリンクを開いても添付が出ない',
+  ).toBeVisible({ timeout: 15000 });
+
   expect(errors).toEqual([]);
 });
 

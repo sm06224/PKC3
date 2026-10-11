@@ -123,7 +123,7 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   /**
    * 🔴 **同じメニューの「Markdown で書き出す」で、本文がそのまま落ちる**(#1440)── 新しい起動を足さず、
    *   この道中に載せる。観測点は**落ちた file の中身と名前**(「落ち始めた」だけでは空の file でも通る)。
-   * ⚠ 右の列(情報ペイン)には**出ない**(右クリックと「操作を探す」だけ)── 対照群は隣の
+   * 🔴 右の列(情報ペイン)にも**出る**(2026-10-11 に反転。以前は「出ない」を pin していた)── 対照群は隣の
    *   「閲覧用 HTML」が右の列に出ていること(描けていることの証拠)。
    */
   await expect(
@@ -132,8 +132,8 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   ).toBeVisible();
   await expect(
     page.locator('[data-pkc-region="inspector"] [data-pkc-action="export-entry-markdown"]'),
-    '右の列に「Markdown で書き出す」が出ている',
-  ).toHaveCount(0);
+    '右の列に「Markdown で書き出す」が出ていない',
+  ).toBeVisible();
   const md = page.locator(
     '[data-pkc-region="context-menu"] [data-pkc-action="export-entry-markdown"]',
   );
@@ -147,6 +147,16 @@ test('🔴 右クリックのメニューにも「閲覧用 HTML」が並ぶ (#4
   expect(mdPath, 'file が落ちてきていない').not.toBeNull();
   expect(readFileSync(mdPath!, 'utf-8'), '本文がそのまま入っていない').toBe('本文。');
   expect(mdDownload.suggestedFilename(), '<題名>-<日付>.md で落ちていない').toMatch(/^handout-\d{8}\.md$/);
+
+  // 🔴 右の列の同じ口でも、同じ file が落ちる(2026-10-11。利用者は右クリックを知らなくても見つけられる)
+  const [paneDownload] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="inspector"] [data-pkc-action="export-entry-markdown"]'),
+  ]);
+  const panePath = await paneDownload.path();
+  expect(panePath, '右の列から file が落ちてきていない').not.toBeNull();
+  expect(readFileSync(panePath!, 'utf-8'), '右の列の書き出しで本文がそのまま入っていない').toBe('本文。');
+  expect(paneDownload.suggestedFilename()).toMatch(/^handout-\d{8}\.md$/);
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

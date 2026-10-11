@@ -53,7 +53,14 @@ function meta(lid: string, order: number, archetype = 'text'): EntryMeta {
 
 // ⚠ フォルダとスタックの行も置く ── 置かないと「フォルダにだけ出る」「スタックにだけ出る」
 //   項目の経路を 1 度も通らない(着地前レビューで 3 件の dead click が見つかった理由)
-const METAS = [meta('n1', 1), meta('n2', 2), meta('f1', 3, 'folder'), meta('s1', 4, STACK_ARCHETYPE)];
+const METAS = [
+  meta('n1', 1),
+  meta('n2', 2),
+  meta('f1', 3, 'folder'),
+  meta('s1', 4, STACK_ARCHETYPE),
+  // 添付のノート(`copy-asset-link` が出る行)── 置かないとこの項目の経路を 1 度も通らない
+  meta('a1', 5, 'attachment'),
+];
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -173,6 +180,21 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     expect(t.hasItem('start-edit'), '押した行と違うノートを編集する項目が出ている').toBe(false);
     expect(t.hasItem('delete-entry'), '空振り防止(メニューごと出ていない)').toBe(true);
     expect(t.hasItem('copy-entry-ref'), '空振り防止(メニューごと出ていない)').toBe(true);
+  });
+
+  /**
+   * 🔴 **`copy-asset-link` もこの分岐からは出さない**(2026-10-11)。添付の key は `openBody.lid === lid` の
+   *   本文からしか引けず、この分岐は `openBody` を動かさないので、出すと**押しても必ず断られる**。
+   * ⚠ 対照群: 左の列(フォルダのタブ)の同じ添付の行では出ている(項目そのものは添付に出る)。
+   */
+  it('🔴 添付の行でも、「添付のリンクをコピー」はこの分岐のメニューに出ない', () => {
+    const t = setupDual();
+    rightClick(t.listRow('a1'));
+    expect(t.hasItem('copy-asset-link'), '対照群: 左の列の添付の行に出ていない(前提が崩れている)').toBe(true);
+    document.body.querySelector(MENU)?.remove();
+    rightClick(t.dualRow('left', 'a1'));
+    expect(t.hasItem('copy-entry-ref'), '空振り防止(2 ペインのメニューが出ていない)').toBe(true);
+    expect(t.hasItem('copy-asset-link'), '必ず断られる項目が出ている').toBe(false);
   });
 
   it('🔴 「削除」は選んでいるノートではなく、押した行に効く', async () => {

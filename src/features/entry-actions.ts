@@ -50,7 +50,7 @@ export interface EntryAction {
    *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
-  readonly when?: 'folder' | 'linked' | 'stack' | 'bookmarkable' | 'bookmarked';
+  readonly when?: 'folder' | 'linked' | 'stack' | 'bookmarkable' | 'bookmarked' | 'attachment';
   /**
    * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**塊を持たない**
    *   (見出しの前後に置かれない ── `TASK_REPEAT_MENU_ACTION` のような単発の項目)。
@@ -121,6 +121,8 @@ const WHEN: Readonly<
 > = {
   folder: (ctx) => ctx.archetype === 'folder',
   linked: (ctx) => ctx.linkedFile !== null,
+  // 🔴 添付のノートだけ(添付のリンクは添付が無いと作れない ── 2026-10-11)
+  attachment: (ctx) => ctx.archetype === 'attachment',
   // 🔴 保存したスタック(#633 段③)── 綴りは flavor の 1 か所から引く
   stack: (ctx) => ctx.archetype === STACK_ARCHETYPE,
   // 🔴 入れる / 外すは**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
@@ -219,6 +221,19 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    *   {@link EntryAction.group} として残り、右の列では**間**(段 B)として効く。
    */
   { action: 'copy-entry-ref', label: '参照をコピー', group: 'copy' },
+  /**
+   * 🔴 **外から開けるリンク**(2026-10-11、利用者の報告「ノートやアセットに対するパーマネントリンク発行が
+   *   移植忘れ」)。⚠ 上の「参照をコピー」とは**別の物** ── あちらは別のノートの本文に貼って飛ぶ(`entry:`)、
+   *   こちらはブラウザやメールに貼ると、この PKC のこのノートが開く(`#pkc?container=…&entry=…`)。
+   * 🔑 PKC2 は「Copy link」を主導線にしていた。字は「リンク」(用語集 `STANDARD_TERMS`)── 説明で参照との違いを言う。
+   */
+  { action: 'copy-entry-link', label: 'リンクをコピー', group: 'copy' },
+  /**
+   * 🔴 **添付そのもののリンク**(`…&asset=<key>`)── 添付のノートを右クリックしたときだけ。
+   * ⚠ 右の列には置かない(`menuOnly`)── 添付の詳細に同じ字のボタンが在る(`detail.ts`)。
+   *   開くと、その添付を持つノートが出る。
+   */
+  { action: 'copy-asset-link', label: '添付のリンクをコピー', group: 'copy', when: 'attachment', menuOnly: true },
   { action: 'copy-plain-markdown', label: '素の Markdown をコピー', group: 'copy' },
   /**
    * 🔴 **付箋のように何枚でも開ける**(#685 段②、user 裁定 2026-09-04)。
@@ -307,13 +322,14 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   /**
    * 🔴 **本文そのままの 1 つの .md**(#1440)。
    *
-   * ⚠ **右クリックと「操作を探す」だけ**(`menuOnly`)── 右の列には置かない。書き出しの 5 つが
-   *   既に並んでいる所へ 6 つ目を足すと、毎日見る群れが長くなる(押す頻度の低い物の置き場ではない)。
+   * 🔴 **右の列にも並べる**(2026-10-11、利用者の報告「マークダウンで書き出す機能が右クリックにしかいない」)。
+   *   1 稿目は「押す頻度が低い」と見て右クリックと「操作を探す」だけにしていたが、**測った値ではなかった**
+   *   ── 見つけられない利用者が出た。`inspector.ts` の PDF の直後に置く。
    * ⚠ コレクションの `Markdown で書き出す`(zip・添付ごと)とは**別の物** ── あちらは全部、こちらは
    *   この 1 件の本文だけ(添付は入らない)。🔑 字は同じ形(`〜で書き出す`)に揃えた。
    * ⚠ 種類で絞らない(`when` なし)── 隣の閲覧用 HTML / Word と同じ。全部のノートの本文は Markdown である。
    */
-  { action: 'export-entry-markdown', label: 'Markdown で書き出す', group: 'export', menuOnly: true },
+  { action: 'export-entry-markdown', label: 'Markdown で書き出す', group: 'export' },
   /**
    * 🔴 **開いた元ファイルが在るときだけ出す**(#500 案 C)。
    *
@@ -1255,7 +1271,12 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    その loop に上書きされて一度も出ていない)。⚠ 字が同じ `copy-` が 2 つ並ぶので、
   //    **何が写るか**を書き分けないと選べない
   'copy-entry-ref':
-    'このノートへのリンクをコピーします。別のノートの本文に貼ると、押して飛べます',
+    'このノートの参照をコピーします。別のノートの本文に貼ると、押して飛べます',
+  // 🔴 **参照との違いを先に言う**(2026-10-11)── 貼る先が違う(本文 / ブラウザ・メール)
+  'copy-entry-link':
+    'このノートのリンクをコピーします。ブラウザやメールに貼ると、この PKC のこのノートが開きます',
+  'copy-asset-link':
+    'この添付のリンクをコピーします。ブラウザやメールに貼ると、この PKC のこの添付が開きます',
   'copy-plain-markdown':
     'PKC3 独自の記法を外した素の Markdown としてコピーします。他のツールへ貼るための形です',
   /**

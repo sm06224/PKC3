@@ -394,14 +394,18 @@ describe('右クリックの説明(#587 C-1)', () => {
       //    file 名の末尾を .pkc3-notes.zip に
       ['export-entry', 'cf003ab6'],
       ['export-entry-html', '9250f3ab'],
-      // 🔴 本文そのままの .md(#1440)── 右クリックだけ(menuOnly)
+      // 🔴 本文そのままの .md(#1440)。2026-10-11 から右の列にも並ぶ
       ['export-entry-markdown', 'd97ee74b'],
       ['export-folder', '1e3dc65f'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '027614c1'],
       ['export-entry-pdf', '6ec553e1'],
       ['adopt-external-images', '36c7974a'],
-      ['copy-entry-ref', '2614a326'],
+      // 🔴 2026-10-11: 「リンクをコピー」(外から開ける)を足したので、参照の説明から「リンク」の字を外した
+      //    (「参照」と「リンク」を説明で言い分けるため。何が動いたか:参照の説明の 1 語)
+      ['copy-entry-ref', 'e7017407'],
+      ['copy-entry-link', '568a72dc'],
+      ['copy-asset-link', '4b2ae0a9'],
       ['copy-plain-markdown', '73e9b322'],
       // 🔴 スタックに載せる(#633 段①、2026-09-05)── 帯の名前と押す字を同じ語にし、説明を持たせた
       ['pin-split', '9d9b023a'],
@@ -467,6 +471,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ブックマークの入れる / 外すは `bookmarked` を渡した文脈でだけ出る(#1377)
       ...entryMenuActions({ ...ALL, bookmarked: false }),
       ...entryMenuActions({ ...ALL, bookmarked: true }),
+      // 🔴 添付のリンクは添付のノートでだけ出る(2026-10-11)
+      ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
     ];
     const seen = new Set(rows.map((a) => a.action));
     // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている
@@ -702,9 +708,14 @@ describe('小窓の字と並び(#690 I1 / I2)', () => {
     for (const l of labels) expect(l, '「別の窓で開く」に戻っている').not.toBe('別の窓で開く');
   });
 
-  it('🔴 右クリックの並びは 参照をコピー / 素の Markdown / 別のウィンドウで開く', () => {
-    expect(ENTRY_MENU_ACTIONS.slice(0, 3).map((a) => a.action)).toEqual([
+  it('🔴 右クリックの並びは 参照 / リンク / 添付のリンク / 素の Markdown / 別のウィンドウで開く', () => {
+    // 🔑 2026-10-11: 写す物が増えた(外から開けるリンクのノート / 添付)。写す物は隣り合わせのまま、
+    //    「別のウィンドウで開く」はその後ろ(添付の行は添付のノートでだけ出る)
+    const names = ENTRY_MENU_ACTIONS.map((a) => a.action);
+    expect(names.slice(0, 5)).toEqual([
       'copy-entry-ref',
+      'copy-entry-link',
+      'copy-asset-link',
       'copy-plain-markdown',
       'open-note-window',
     ]);

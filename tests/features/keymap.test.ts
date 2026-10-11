@@ -205,7 +205,9 @@ describe('割当の検め', () => {
   // 🔴 #1440: このノートを Markdown で書き出す ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'export-note-markdown',
   // 🔴 #1452 案 1: マニュアルを別のウィンドウで開く ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'open-manual-window'];
+  'open-manual-window',
+  // 🔴 2026-10-11: このノートのリンクをコピー(外から開けるリンク)── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
+  'copy-entry-link'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

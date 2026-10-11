@@ -58,12 +58,15 @@ import type { BrowseMode } from '@adapter/ui/render/browse-mode';
 import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
+  dropAssetFromHash,
   dropViewFindFromHash,
   dropViewScheduleFromHash,
   dropViewFromHash,
   dropViewWindowToken,
   isHeadingAnchor,
   parseViewDeepLink,
+  formatExternalPermalink,
+  parseViewDeepLinkAsset,
   parseViewDeepLinkEntry,
   parseViewDeepLinkFind,
   parseViewDeepLinkSchedule,
@@ -97,6 +100,11 @@ export interface DeepLinkTarget {
    * ⚠ 残すと、栞や `F5` のたびに見せ方を奪う。省略可(古い test の的)。
    */
   readonly dropSchedule?: () => void;
+  /**
+   * 🔴 **添付の指定(`asset`)だけを落とす**(2026-10-11)。⚠ 履歴を積まない。
+   * ⚠ 開いた後に残すと、`F5` のたびに同じ添付へ戻される(ノートと違い、住所は添付に追随しない)。
+   */
+  readonly dropAsset?: () => void;
   /**
    * 🔴 **住所を、いま見ているノートへ書き換える**(#689 案 B、2026-09-04)。
    *
@@ -148,6 +156,14 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         null,
         '',
         `${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,
+      );
+    },
+    dropAsset: () => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${location.search}${dropAssetFromHash(location.hash)}`,
       );
     },
     dropSchedule: () => {
@@ -395,6 +411,19 @@ export interface DeepLinkWiring {
    */
   readonly selectEntry?: (containerId: string, lid: string) => void;
   /**
+   * 🔴 **この PKC の入れ物の id**(2026-10-11)。⚠ 渡すと、リンクが**別の PKC を指しているとき**
+   *   (共有で受け取ったリンクを、別のコピーで開いた)に**黙らず理由を出す**。
+   *   渡さない(古い test の的)と、従来どおり `selectEntry` 側が黙って捨てる。
+   */
+  readonly ownContainerId?: () => string | null;
+  /** 🔴 **この PKC にそのノートが在るか**(同上)。⚠ 無ければ「見つかりません」と言う。 */
+  readonly hasEntry?: (lid: string) => boolean;
+  /**
+   * 🔴 **添付を名指したリンクを開く**(`#pkc?container=…&asset=…`。2026-10-11)。
+   *   key → 添付ノートの逆引き(`findAssetOwner`)は非同期なので、見つからない理由も呼ばれる側が言う。
+   */
+  readonly selectAsset?: (assetKey: string, ownerLid: string | null) => void;
+  /**
    * 🔴 **「探す」で当たった語で、いま選んだノートの本文を塗って送る**(#1102 段①)。
    *
    * ⚠ **`selectEntry` の後**に呼ぶ(選んでいない物は塗れない)。⚠ 語は**使ったらアドレスから
@@ -457,6 +486,28 @@ export interface DeepLinkWiring {
   /** アドレスの断片が変わったら呼ばれる購読(返り値で解除)。 */
   readonly onHashChange?: (fn: () => void) => () => void;
   readonly target?: DeepLinkTarget;
+}
+
+/** 🔴 別の PKC を指すリンクを開いたときの理由(2026-10-11)。⚠ 黙って捨てると dead click になる。 */
+export const FOREIGN_ENTRY_LINK_MESSAGE =
+  'このリンクは別の PKC のノートを指しています(この PKC には開けません)';
+export const FOREIGN_ASSET_LINK_MESSAGE =
+  'このリンクは別の PKC の添付を指しています(この PKC には開けません)';
+export const NOT_READY_LINK_MESSAGE = 'PKC の準備ができていないため、このリンクを開けませんでした。開き終わってからもう一度試してください';
+export const MISSING_ENTRY_LINK_MESSAGE =
+  'このリンクのノートが見つかりません(削除された可能性があります)';
+
+/** ノートのリンクを開けない理由。⚠ 開けるなら `null`。材料が配線されていなければ判断しない。 */
+function linkProblem(wiring: DeepLinkWiring, containerId: string, lid: string): string | null {
+  const own = wiring.ownContainerId?.();
+  if (own === undefined) return null;
+  // 🔴 入れ物がまだ決まっていない(起動の途中)── 黙って捨てない。
+  //   実配線では `connectViewDeepLink` は `SYS_BOOTED` の後に呼ばれる(`startApp` が返ってから)ので来ないはずだが、
+  //   来たときに無言の dead click にしない
+  if (own === null) return NOT_READY_LINK_MESSAGE;
+  if (own !== containerId) return FOREIGN_ENTRY_LINK_MESSAGE;
+  if (wiring.hasEntry !== undefined && !wiring.hasEntry(lid)) return MISSING_ENTRY_LINK_MESSAGE;
+  return null;
 }
 
 /**
@@ -533,6 +584,13 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       holdEntry(here !== null);
       if (here !== null) {
         rememberEntryHash();
+        const why = linkProblem(wiring, here.containerId, here.lid);
+        if (why !== null) {
+          // 🔴 **黙って捨てない**(2026-10-11)── 共有されたリンクが開かないとき、理由が無いと
+          //   「壊れている」としか読めない
+          wiring.fail(why);
+          return;
+        }
         wiring.selectEntry?.(here.containerId, here.lid);
         /**
          * 🔴 **探していた語があれば、当たった所へ送って塗る**(#1102 段①)。
@@ -544,6 +602,22 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
           wiring.searchJump?.(here.lid, find);
           target.dropFind?.();
         }
+      }
+      /**
+       * 🔴 **添付を名指したリンク**(2026-10-11)。⚠ ノートと違って**断片を落とす**
+       *   (開いた添付に住所は追随しないので、残すと `F5` で引き戻される)。
+       */
+      const asset = parseViewDeepLinkAsset(target.hash);
+      if (asset !== null) {
+        const own = wiring.ownContainerId?.();
+        if (own === null) {
+          wiring.fail(NOT_READY_LINK_MESSAGE);
+        } else if (own !== undefined && own !== asset.containerId) {
+          wiring.fail(FOREIGN_ASSET_LINK_MESSAGE);
+        } else {
+          wiring.selectAsset?.(asset.assetKey, asset.ownerLid);
+        }
+        target.dropAsset?.();
       }
       return;
     }
@@ -649,4 +723,88 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
  */
 export function currentBaseUrl(): string {
   return typeof location === 'object' ? location.href.split('#')[0]! : '';
+}
+
+/**
+ * 🔴 **外から開けるリンク**(ノート / 添付)を組む唯一の口(2026-10-11)。
+ *
+ * ⚠ 「リンクをコピー」の 3 つの面(右クリック・情報ペイン・操作を探す)と添付の詳細が、
+ *   全部ここを通る ── `location` を読むのはこの file だけ(`currentBaseUrl`)。
+ * ⚠ 本文に貼る参照(`entry:` / `asset:`)とは**別物**: こちらはブラウザやメールに貼ると
+ *   この PKC のこの物が開く。組めないとき(入れ物 id が無い / 綴りが通らない)は `null`。
+ */
+export function entryPermalink(containerId: string | null, lid: string): string | null {
+  if (containerId === null) return null;
+  return formatExternalPermalink({
+    baseUrl: permalinkBaseUrl(),
+    kind: 'entry',
+    containerId,
+    targetId: lid,
+  });
+}
+
+export function assetPermalink(
+  containerId: string | null,
+  assetKey: string,
+  ownerLid: string | null = null,
+): string | null {
+  if (containerId === null) return null;
+  const url = formatExternalPermalink({
+    baseUrl: permalinkBaseUrl(),
+    kind: 'asset',
+    containerId,
+    targetId: assetKey,
+  });
+  // 🔴 持ち主の添付ノートも運ぶ(`owner`)。⚠ `entry=` ではない ── `parseExternalPermalink` は
+  //   entry と asset の併記を断る(どちらか一方)ので、本文に貼ったリンクが読めなくなる
+  if (url === null || ownerLid === null || !/^[A-Za-z0-9_-]+$/.test(ownerLid)) return url;
+  return `${url}&owner=${encodeURIComponent(ownerLid)}`;
+}
+
+/**
+ * 🔴 **外へ渡すリンクの base**(オリジン + パス)。⚠ `?query` は持たない ──
+ *   `currentBaseUrl` は `?pkc-flag=…` など**送り主の切替**まで運ぶので、受け取った人の PKC がその設定で立ち上がる。
+ *   `file://` は origin が `null` になるので、protocol + host + pathname で組む(host は空)。
+ */
+export function permalinkBaseUrl(): string {
+  if (typeof location !== 'object') return '';
+  return `${location.protocol}//${location.host}${location.pathname}`;
+}
+
+/**
+ * 🔴 **添付のリンクの行き先ノート**。持ち主として運ばれた lid が**本当にその添付を持っているとき**だけ
+ *   それを開く(同じ file を 2 つのノートに付けると key が同じなので、逆引きだけでは別のノートが開きうる)。
+ *   持っていない / 運ばれていない / 読めない → 逆引き。判断を `main.ts`(test が届かない)に置かない。
+ */
+export async function resolveAssetOwner(a: {
+  assetKey: string;
+  ownerLid: string | null;
+  /** その lid の添付 key(添付のノートでなければ `null`) */
+  assetKeyOf: (lid: string) => Promise<string | null>;
+  findOwner: (assetKey: string) => Promise<string | null>;
+}): Promise<string | null> {
+  if (a.ownerLid !== null) {
+    try {
+      if ((await a.assetKeyOf(a.ownerLid)) === a.assetKey) return a.ownerLid;
+    } catch {
+      // 読めなかった → 逆引きへ
+    }
+  }
+  return a.findOwner(a.assetKey);
+}
+
+/**
+ * 🔴 **リンクを開く配線のうち、この PKC の状態から決まる 3 つ**(`main.ts` はこれを広げて渡すだけ)。
+ *   `main.ts` はどの test からも実行されないので、ここに置いて挙動を test する
+ *   (入れ物の id / 居るノート / 添付を開くときの断りの字)。
+ */
+export function linkOpenerFor(app: {
+  dispatcher: { getState(): { cid: string | null; entryMetas: ReadonlyMap<string, unknown> } };
+  navigateAssetRef(assetKey: string, what?: '参照' | 'リンク', ownerLid?: string | null): void;
+}): Pick<DeepLinkWiring, 'ownContainerId' | 'hasEntry' | 'selectAsset'> {
+  return {
+    ownContainerId: () => app.dispatcher.getState().cid,
+    hasEntry: (lid) => app.dispatcher.getState().entryMetas.has(lid),
+    selectAsset: (assetKey, ownerLid) => app.navigateAssetRef(assetKey, 'リンク', ownerLid),
+  };
 }

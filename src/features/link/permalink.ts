@@ -382,6 +382,34 @@ export function parseViewDeepLinkEntry(
 }
 
 /**
+ * 🔴 **添付を名指したリンク**(`#pkc?container=<cid>&asset=<asset_key>`。2026-10-11)。
+ *
+ * ⚠ ノート(`parseViewDeepLinkEntry`)と**同じ作法**: `container` が要る(別の PKC の入れ物の
+ * 添付を、偶然の一致で開かない)。`entry` と併記されていたらノートを優先する(=ここでは `null`)。
+ * 🔑 作る側は `formatExternalPermalink({ kind: 'asset' })` ── 綴りの正本は 1 か所。
+ */
+export function parseViewDeepLinkAsset(
+  raw: string,
+): { containerId: string; assetKey: string; ownerLid: string | null } | null {
+  const params = hashParams(raw);
+  if (params === null) return null;
+  const containerId = params.get('container');
+  const assetKey = params.get('asset');
+  if (containerId === null || assetKey === null) return null;
+  if (params.get('entry') !== null) return null;
+  if (!TOKEN_RE.test(containerId) || !TOKEN_RE.test(assetKey)) return null;
+  // 🔴 `owner` = コピーしたときに見ていた添付ノート(添付の key は中身の hash なので、同じ file を
+  //   2 つのノートに付けると持ち主が 2 つになる ── 逆引きだけでは別のノートが開きうる)。綴りが通らなければ無かったことにする
+  const owner = params.get('owner');
+  return { containerId, assetKey, ownerLid: owner !== null && TOKEN_RE.test(owner) ? owner : null };
+}
+
+/** 断片から添付の指定(`asset`)だけを落とす(開いた後に残すと、`F5` のたびに同じ添付へ戻る)。 */
+export function dropAssetFromHash(raw: string): string {
+  return dropHashKeys(raw, ['asset', 'owner']);
+}
+
+/**
  * 🔴 **1 回限りの合図**(#300 段③ の直し、2026-08-22)。
  *
  * ## なぜ要るか ── 「名乗りを聞く」では誤爆する

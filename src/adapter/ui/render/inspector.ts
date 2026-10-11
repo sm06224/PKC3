@@ -1482,6 +1482,8 @@ export class InspectorRenderer {
     // ⚠ **並びは右クリックと揃える**(user 裁定 2026-09-04)── 毎日使う
     //    「参照」を動かさない(1 稿目は付箋を先頭に置いて全部を 1 つ下げた)
     entryBtn('copy-entry-ref');
+    // 🔴 外から開けるリンク(2026-10-11)── 「参照」の真横。字・説明は `ENTRY_MENU_ACTIONS` の 1 か所
+    entryBtn('copy-entry-link');
     /**
      * 🔴 **素の Markdown で写す**(#396)。
      *
@@ -1555,6 +1557,8 @@ export class InspectorRenderer {
      *   「PDF として保存」を選ぶ。⚠ だから文言に「保存します」と書かない。
      */
     entryBtn('export-entry-pdf');
+    // 🔴 本文そのままの .md(#1440)。2026-10-11 に右クリックだけから右の列にも並べた
+    entryBtn('export-entry-markdown');
     if (shape === 'entry+link') entryBtn('write-back-file');
     entryBtn('show-history');
     /**

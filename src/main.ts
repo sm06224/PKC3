@@ -380,6 +380,8 @@ import {
   announceOpenedWindow,
   connectViewDeepLink,
   currentBaseUrl,
+  linkOpenerFor,
+  resolveAssetOwner,
   isPurposeWindow,
   noteOpenElsewhereMessage,
   noteOpenedByUs,
@@ -432,6 +434,8 @@ export interface AppHandle {
    * ⚠ **断らない**版 ── 詳細は実装のコメント
    */
   importLaunchFiles(items: LaunchedItem[]): Promise<void>;
+  /** 🔴 添付の key から持ち主のノートを開く(`#pkc?…&asset=` のリンクが使う。断りの字は `what` で変わる)。 */
+  navigateAssetRef(assetKey: string, what?: '参照' | 'リンク', ownerLid?: string | null): void;
   /**
    * 「新しい版があります」を見せる(P7 段⑤)。押されたら `apply` を呼ぶ。
    * ⚠ 交代を頼むだけ ── 再読込は交代が済んでから(`watchForUpdate` の側)。
@@ -4355,24 +4359,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * 逆引きは storage worker(狭い判定 ── attachment の asset_key 等値)。
      * ⚠ 見つからないときは**黙らない**(整理済み等 ── 断りを出す)。
      */
-    navigateAssetRef: (assetKey) => {
+    navigateAssetRef: (assetKey, what = '参照', ownerLid = null) => {
       void (async () => {
         try {
-          const r = (await client.request({
-            op: 'findAssetOwner',
-            cid,
+          const found = await resolveAssetOwner({
             assetKey,
-          })) as { lid: string | null };
-          if (r.lid !== null) {
-            dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: r.lid });
+            ownerLid,
+            assetKeyOf: async (lid) => {
+              const body = (await client.request({ op: 'getBody', cid, lid })) as string | null;
+              return body === null ? null : readAttachmentMeta(body).assetKey || null;
+            },
+            findOwner: async (key) =>
+              ((await client.request({ op: 'findAssetOwner', cid, assetKey: key })) as { lid: string | null }).lid,
+          });
+          if (found !== null) {
+            dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found });
           } else {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: 'この参照の添付が見つかりません(整理された可能性)',
+              error: `この${what}の添付が見つかりません(整理された可能性)`,
             });
           }
         } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `参照を解決できません: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}を解決できません: ${String(e)}` });
         }
       })();
     },
@@ -4669,7 +4678,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     exportEntry: (lid) => void runExport({ entryLid: lid }),
     // 🔴 **このノートを、相手が開けるだけの 1 枚にする**(#491)
     exportEntryHtml: (lid) => void runExport({ entryLid: lid, as: 'html' }),
-    // 🔴 **本文そのままの 1 つの .md**(#1440)── 入口は右クリックと「操作を探す」だけ
+    // 🔴 **本文そのままの 1 つの .md**(#1440)── 入口は右クリック・右の列・「操作を探す」
     exportEntryMarkdown: (lid) => void runExport({ entryLid: lid, as: 'markdown' }),
     /**
      * 🔴 **このノートを別の窓で開く**(#685 段②、user 裁定 2026-09-04)。
@@ -5489,6 +5498,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatcher,
     storageVfs: init.vfs,
     importLaunchFiles,
+    navigateAssetRef: (assetKey, what, ownerLid) => services.navigateAssetRef?.(assetKey, what, ownerLid),
     presentUpdate: (apply) => updatePrompt.present(apply),
     presentAnnounce: () => announce.present(),
     // 🔴 起動のたびに軽く検める(#1007 段①)── 実体は `showStatus` の下
@@ -5594,6 +5604,8 @@ function bootstrap(): void {
           if (app.dispatcher.getState().cid !== containerId) return;
           app.dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
         },
+        // 🔴 **開けないリンクは理由を言う**(2026-10-11)── 判断は `deep-link.ts`(別の PKC / 居ないノート / 添付)
+        ...linkOpenerFor(app),
         /**
          * 🔴 **アプリの窓であることを、題名と `× 閉じる` に伝える**(段③ の直し)。
          * ⚠ 題名を変えるのは**タスクバーで見分けるため** ── 直す前は
