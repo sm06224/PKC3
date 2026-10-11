@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   captureReadAnchor,
   HOLD_MS,
+  HOLD_STOP_EVENTS,
+  HOLD_TOLERANCE_PX,
   installReadAnchorHold,
   realignTarget,
   resolveReadAnchor,
@@ -105,60 +107,120 @@ describe('読んでいた場所の目印 ── 端の形(#1490 レビュー)', 
 });
 
 describe('戻した後の合わせ直し(#1525)', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   it('realignTarget:許容内・目印なしは書かない、外れていれば目印の位置', () => {
     expect(realignTarget(null, 100)).toBeNull();
-    expect(realignTarget(100.5, 100)).toBeNull();
+    expect(realignTarget(100 + HOLD_TOLERANCE_PX, 100)).toBeNull();
     expect(realignTarget(1450, 100)).toBe(1450);
+    // 🔑 下限:許容が広すぎると、数 px のずれを直さない(5px は書く)
+    expect(realignTarget(105, 100)).toBe(105);
   });
 
-  /** ResizeObserver の差し込み。`fire()` で「本文の高さが変わった」を撃つ。 */
+  /** ResizeObserver の差し込み。`fire()` で「本文の高さが変わった」を撃つ。`live()` は observe 中の数。 */
   function stubRO() {
-    const cbs: Array<() => void> = [];
+    const cbs = new Map<object, () => void>();
     vi.stubGlobal(
       'ResizeObserver',
       class {
         constructor(cb: () => void) {
-          cbs.push(cb);
+          cbs.set(this, cb);
         }
         observe() {}
-        disconnect() {}
+        disconnect() {
+          cbs.delete(this);
+        }
       },
     );
-    return () => cbs.forEach((cb) => cb());
+    return { fire: () => [...cbs.values()].forEach((cb) => cb()), live: () => cbs.size };
+  }
+
+  /** 台:行 30 の塊(index 10)が、戻した瞬間は 10px しかない。`grow()` で 100px に焼けた状態にする。 */
+  function setup() {
+    const ro = stubRO();
+    const b = board(Array(20).fill(100));
+    b.setHeights([...Array(10).fill(100), 10, ...Array(9).fill(100)]);
+    b.scroller.scrollTop = 1060; // 戻した直後の位置(塊の外へはみ出している)
+    const hold = installReadAnchorHold(b.host, b.scroller, { line: 30, offset: 60 });
+    return { ...ro, ...b, hold, grow: () => b.setHeights(Array(20).fill(100)) };
   }
 
   it('目印の塊が低いうちに戻しても、高さが変わったら目印の位置へ引き直す', () => {
-    const fire = stubRO();
-    const { scroller, host, setHeights } = board(Array(20).fill(100));
-    // 行 30 の塊(index 10)が、戻した瞬間は 10px しかない(仮の高さ)
-    setHeights([...Array(10).fill(100), 10, ...Array(9).fill(100)]);
-    installReadAnchorHold(host, scroller, { line: 30, offset: 60 });
-    scroller.scrollTop = 1000 + 60; // 戻した直後の位置(塊の外へはみ出している)
-    setHeights(Array(20).fill(100)); // 図が焼けて 100px になった
-    fire();
-    expect(scroller.scrollTop).toBe(1060);
+    const t = setup();
+    t.grow();
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(1060);
+    // 対照:もう一度ずれたら、もう一度引き直す(1 回きりではない)
+    t.scroller.scrollTop = 1200;
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(1060);
   });
 
-  it('自分で送り始めたら、もう引き戻さない', () => {
-    const fire = stubRO();
-    const { scroller, host } = board(Array(20).fill(100));
-    installReadAnchorHold(host, scroller, { line: 30, offset: 0 });
-    scroller.scrollTop = 400;
-    scroller.dispatchEvent(new Event('wheel'));
-    fire();
-    expect(scroller.scrollTop).toBe(400);
+  it('5px のずれは書く(許容が広すぎない)', () => {
+    const t = setup();
+    t.grow();
+    t.scroller.scrollTop = 1055;
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(1060);
   });
 
-  it('時間が過ぎたら止まる(常駐させない)', () => {
-    const fire = stubRO();
-    const { scroller, host } = board(Array(20).fill(100));
-    let t = 0;
-    installReadAnchorHold(host, scroller, { line: 30, offset: 0 }, () => t);
-    t = HOLD_MS + 1;
-    scroller.scrollTop = 400;
-    fire();
-    expect(scroller.scrollTop).toBe(400);
+  it('止める入力の種類は 4 つ(期待値は実装の配列から作らない)', () => {
+    expect([...HOLD_STOP_EVENTS]).toEqual(['wheel', 'touchstart', 'pointerdown', 'keydown']);
+  });
+
+  it.each(['wheel', 'touchstart', 'pointerdown', 'keydown'])('文書のどこかに %s が入ったら、もう引き戻さない(器の外からでも)', (ev) => {
+    const t = setup();
+    // 器の外(文書)で起きた入力 ── 目次・探す・リンク先の列など
+    document.dispatchEvent(new Event(ev));
+    t.grow();
+    t.scroller.scrollTop = 400;
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(400);
+  });
+
+  it('自分が書いていない送り(入力の無い移動)が起きたら、もう引き戻さない', () => {
+    const t = setup();
+    t.scroller.scrollTop = 400; // scrollIntoView 等
+    t.scroller.dispatchEvent(new Event('scroll'));
+    t.grow();
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(400);
+  });
+
+  it('高さが変わった直後の送り(スクロールアンカーの調整)は数えない', () => {
+    const t = setup();
+    let sh = 5000;
+    Object.defineProperty(t.scroller, 'scrollHeight', { get: () => sh, configurable: true });
+    sh = 6000; // 高さが変わった
+    t.scroller.scrollTop = 1300; // ブラウザが調整した
+    t.scroller.dispatchEvent(new Event('scroll'));
+    t.grow();
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(1060);
+  });
+
+  it('時間が過ぎたら止まる(高さが変わらなくても。常駐させない)', () => {
+    vi.useFakeTimers();
+    const t = setup();
+    expect(t.live()).toBe(1);
+    vi.advanceTimersByTime(HOLD_MS + 1);
+    expect(t.live(), '時間切れで observer が残っている').toBe(0);
+    t.grow();
+    t.scroller.scrollTop = 400;
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(400);
+  });
+
+  it('dispose で observer も listener も外れる', () => {
+    const t = setup();
+    t.hold.dispose();
+    expect(t.live()).toBe(0);
+    t.grow();
+    t.scroller.scrollTop = 400;
+    t.fire();
+    expect(t.scroller.scrollTop).toBe(400);
   });
 });

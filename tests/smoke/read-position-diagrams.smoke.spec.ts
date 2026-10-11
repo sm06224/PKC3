@@ -91,12 +91,30 @@ for (const diagrams of [true, false]) {
     const last = samples[samples.length - 1]!;
     expect(last.line, `戻る前 ${before.line} 行の塊が、戻ると ${last.line} 行になった`).toBe(before.line);
     expect(Math.abs(last.offset - before.offset), '塊の中のずれが大きい').toBeLessThanOrEqual(8);
-    // 🔑 読んでいる人の手を奪わない:戻った後に自分で送ったら、合わせ直しで引き戻されない
-    await page.locator('[data-pkc-region="detail"]').hover();
-    await page.mouse.wheel(0, 600);
-    await page.waitForTimeout(600);
-    const moved = await firstVisible(page);
-    expect(moved.top, '自分で送ったのに引き戻された').toBeGreaterThan(last.top + 300);
+    // 🔑 読んでいる人の手を奪わない:もう一度別のノートへ移って戻り、**図がまだ焼けている最中**に自分で送る。
+    //    ⚠ 焼き上がった後(上の 8 秒後)に送っても、合わせ直しはもう止まっているので何も確かめていない
+    const row =
+      '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]:not([data-pkc-selected])';
+    await clickReal(page, row); // 別のノートへ
+    await clickReal(page, row); // 元のノートへ戻る
+    await expect
+      .poll(async () => (await firstVisible(page)).line, { timeout: 5000, intervals: [10] })
+      .toBeGreaterThan(0);
+    const back = await firstVisible(page);
+    await page.mouse.move(700, 400);
+    await page.mouse.wheel(0, 4000);
+    await expect
+      .poll(async () => (await firstVisible(page)).top, { timeout: 2000, intervals: [20] })
+      .toBeGreaterThan(back.top + 2000);
+    const wheeled = await firstVisible(page);
+    await page.waitForTimeout(3000);
+    const settled = await firstVisible(page);
+    console.log(`PROBE2 diagrams=${diagrams} back=${JSON.stringify(back)} wheeled=${JSON.stringify(wheeled)} settled=${JSON.stringify(settled)}`);
+    if (diagrams) {
+      // ⚠ 空振り防止:送った後に本文の高さが大きく動く場面であること(動かなければ、止める働きを何も確かめていない)
+      expect(settled.sh - wheeled.sh, '送った後に図が焼けて高さが動いていない').toBeGreaterThan(5000);
+    }
+    expect(settled.line, '自分で送ったのに、焼き上がりで元の塊へ引き戻された').toBeGreaterThan(before.line + 20);
     expect(errors).toEqual([]);
   });
 }
