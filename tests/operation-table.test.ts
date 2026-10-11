@@ -762,10 +762,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 398,
-      receivers: 332,
-      registered: 109,
-      both: 43,
+      // ⚠ 2026-10-11(#1377): ノートのブックマーク(`bookmark-note-add` / `bookmark-note-remove`)を
+      //   行の右クリックに登記して受け手 +2 / 登記 +2 / 両方 +2(`unregistered` は動かない)。
+      total: 400,
+      receivers: 334,
+      registered: 111,
+      both: 45,
       outsideActionsTable: 66,
       unregistered: 289,
     });
@@ -814,9 +816,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-03(#1017 C5): 「メッセージを開く」(`open-messages`)で `key` 79 → 80(鍵の既定は持たない)
     // ⚠ 2026-10-10(#1455 (b)): 右の列(`collectionPane`)が 4 → 5(`export-markdown-folder`)
     // ⚠ 2026-10-10(#1440): 行のメニューが 17 → 18(`export-entry-markdown`)、鍵が 82 → 83(`export-note-markdown`。鍵の既定は持たない)
+    // ⚠ 2026-10-11(#1377): 行のメニューが 18 → 20(`bookmark-note-add` / `bookmark-note-remove`)
     expect(s().perBook).toEqual({
       key: 83,
-      entry: 18,
+      entry: 20,
       body: 3,
       collection: 2,
       collectionPane: 5,

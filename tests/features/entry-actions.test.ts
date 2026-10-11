@@ -428,6 +428,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['rename-entry-begin', 'c951ee45'],
       ['move-to-folder', '26f9aeac'],
       ['create-in-folder', '80e07ad8'],
+      // 🔴 ノートのブックマーク(#1377)── 2 ペインの行のメニューだけ。入れる / 外すは対
+      ['bookmark-note-add', '42a11e66'],
+      ['bookmark-note-remove', '42b727a8'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -458,7 +461,13 @@ describe('右クリックの説明(#587 C-1)', () => {
   const ALL_STACK = { archetype: 'stack', linkedFile: 'メモ.md' } as const;
 
   it('🔴 出る項目は 1 つ残らず説明を持つ(足した人がここで気づく)', () => {
-    const rows = [...entryMenuActions(ALL), ...entryMenuActions(ALL_STACK)];
+    const rows = [
+      ...entryMenuActions(ALL),
+      ...entryMenuActions(ALL_STACK),
+      // 🔴 ブックマークの入れる / 外すは `bookmarked` を渡した文脈でだけ出る(#1377)
+      ...entryMenuActions({ ...ALL, bookmarked: false }),
+      ...entryMenuActions({ ...ALL, bookmarked: true }),
+    ];
     const seen = new Set(rows.map((a) => a.action));
     // ⚠ 空振り防止 ── 条件つきの行を含めて全部出ている
     expect([...seen].sort(), '条件つきの行が出ていない(台の前提が崩れている)').toEqual(
@@ -866,5 +875,36 @@ describe('リストを丸ごとそろえる字(#1173)', () => {
       expect(a.hint).toContain('繰り返し');
       expect(a.hint).toContain('履歴');
     }
+  });
+});
+
+describe('ノートのブックマーク(#1377)', () => {
+  const ids = (ctx: Parameters<typeof entryMenuActions>[0]): string[] =>
+    entryMenuActions(ctx)
+      .map((a) => a.action)
+      .filter((a) => a.startsWith('bookmark-note-'));
+
+  it('🔴 入れる / 外すは対 ── 入っていなければ「入れる」だけ、入っていれば「外す」だけ', () => {
+    expect(ids({ archetype: 'text', linkedFile: null, bookmarked: false })).toEqual(['bookmark-note-add']);
+    expect(ids({ archetype: 'text', linkedFile: null, bookmarked: true })).toEqual(['bookmark-note-remove']);
+  });
+
+  it('🔴 材料を渡さない面(ブックマークの見えない面)には出さない ── 入れたのに見えない口を作らない', () => {
+    expect(ids({ archetype: 'text', linkedFile: null })).toEqual([]);
+  });
+
+  it('字は「ブックマーク」で、削除より上・右の列には出さない(menuOnly)', () => {
+    const rows = entryMenuActions({ archetype: 'text', linkedFile: null, bookmarked: false });
+    expect(rows.find((a) => a.action === 'bookmark-note-add')?.label).toBe('ブックマークに入れる');
+    const off = entryMenuActions({ archetype: 'text', linkedFile: null, bookmarked: true });
+    expect(off.find((a) => a.action === 'bookmark-note-remove')?.label).toBe('ブックマークから外す');
+    const order = rows.map((a) => a.action);
+    expect(order.indexOf('bookmark-note-add')).toBeGreaterThan(-1);
+    expect(order.indexOf('bookmark-note-add')).toBeLessThan(order.indexOf('delete-entry'));
+    for (const a of ['bookmark-note-add', 'bookmark-note-remove'])
+      expect(
+        ENTRY_MENU_ACTIONS.find((x) => x.action === a)?.menuOnly,
+        `${a} が右の列にも出る`,
+      ).toBe(true);
   });
 });

@@ -50,7 +50,7 @@ export interface EntryAction {
    *   本文を読まないと決まらない条件をここへ入れると、右クリックした瞬間に
    *   worker を叩く経路がもう 1 本増える(§7)。
    */
-  readonly when?: 'folder' | 'linked' | 'stack';
+  readonly when?: 'folder' | 'linked' | 'stack' | 'bookmarkable' | 'bookmarked';
   /**
    * 🔴 **塊(見出し)の綴り**(#1029 段 C)。⚠ 書いていないものは**塊を持たない**
    *   (見出しの前後に置かれない ── `TASK_REPEAT_MENU_ACTION` のような単発の項目)。
@@ -104,6 +104,12 @@ export interface EntryMenuContext {
   readonly archetype: string | null;
   /** 開いた元ファイルの名前。⚠ 開いていなければ `null`。 */
   readonly linkedFile: string | null;
+  /**
+   * 🔴 **ブックマークに入っているか**(#1377)。⚠ **省く = この面では出さない**
+   *   (`undefined`)── ブックマークが見えるのは 2 ペインだけなので、帯の無い面で
+   *   入れても「入れたのに見えない」になる。2 ペインの行のメニューだけが渡す。
+   */
+  readonly bookmarked?: boolean;
 }
 
 /**
@@ -117,6 +123,9 @@ const WHEN: Readonly<
   linked: (ctx) => ctx.linkedFile !== null,
   // 🔴 保存したスタック(#633 段③)── 綴りは flavor の 1 か所から引く
   stack: (ctx) => ctx.archetype === STACK_ARCHETYPE,
+  // 🔴 入れる / 外すは**対**(#1377)── どちらか一方だけが出る。`undefined` はどちらも出さない
+  bookmarkable: (ctx) => ctx.bookmarked === false,
+  bookmarked: (ctx) => ctx.bookmarked === true,
 };
 
 /**
@@ -360,6 +369,17 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
   { action: 'rename-entry-begin', label: '名前を変える', group: 'this-one' },
   { action: 'move-to-folder', label: 'フォルダへ移す…', group: 'this-one' },
   { action: 'create-in-folder', label: 'この中に新しいノートを作る', group: 'this-one', when: 'folder' },
+  /**
+   * 🔴 **ノートをブックマークに入れる / 外す**(#1377。Gemini 裁定を user 委任で採用 =
+   *   #1163 のコメント。「ピン留め」という新機能は作らず、既に在るブックマークへノートを入れる)。
+   *
+   * ⚠ **対で置く**(置けるなら外せる)── 入っていれば「外す」だけ、入っていなければ「入れる」だけが出る。
+   * ⚠ **右クリックだけ・2 ペインの行だけ**(`menuOnly` + ctx の `bookmarked` を渡した面) ──
+   *   帯は 2 ペインにしか無いので、帯の無い面に出すと入れたのに見えない。右の列にも置かない。
+   * 🔑 置き場は削除の上(`TRAILING_ACTIONS` が削除を常に末尾へ回す)── 既存の並びを動かさない。
+   */
+  { action: 'bookmark-note-add', label: 'ブックマークに入れる', group: 'this-one', when: 'bookmarkable', menuOnly: true },
+  { action: 'bookmark-note-remove', label: 'ブックマークから外す', group: 'this-one', when: 'bookmarked', menuOnly: true },
   { action: 'delete-entry', label: 'ゴミ箱へ移す', group: 'remove' },
 ];
 
@@ -1177,6 +1197,9 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
    * 🔴 **付箋**(#685 段②)。⚠ 「何枚でも」を書く ── 1 枚しか開けないと
    *   思われると、押す前に諦める(user の要望は「マルチで」である)。
    */
+  // 🔴 ブックマーク(#1377)。⚠ 帯の在りかを言う ── 入れた後に「どこへ入ったか」が分かる
+  'bookmark-note-add': '2 ペインのブックマークに並べます(そこから押すと、このノートを開けます)',
+  'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
   'open-note-window':
     'このノートだけを別のウィンドウで開きます(何枚でも開けます。閉じれば消えます)',
   // 🔴 **左の列の道具 4 つ**(#632 段①)。⚠ 字は `shell.ts` のボタンの `title` と

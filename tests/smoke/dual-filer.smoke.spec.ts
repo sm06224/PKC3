@@ -877,5 +877,43 @@ test('🔴 下見に本文が出て、留めた場所は読み込み直しても
     '下見の出し入れが憶えられていない',
   ).toBeVisible();
 
+  /**
+   * ⑤ 🔴 **ノートもブックマークに入れられる**(#1377)── 右クリックで入れる → 同じバーに並ぶ →
+   *   **別のフォルダを見ていても**、押すとそのノートのある場所へ戻って行が選ばれる →
+   *   同じ右クリックの「外す」で外れる(置けるなら外せる)。
+   * ⚠ 読み込み直した直後は左がルート(ノートの行が見えている)。
+   */
+  const noteRow = page.locator(ROWS('left')).filter({ hasNotText: 'とめる場所' }).first();
+  await noteRow.click({ button: 'right' });
+  await expect(
+    page.locator('[data-pkc-region="context-menu"] [data-pkc-action="bookmark-note-remove"]'),
+    '入っていないのに「外す」が出ている',
+  ).toHaveCount(0);
+  await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="bookmark-note-add"]').click();
+  const noteMark = page.locator(
+    `${PANE('left')} [data-pkc-region="dual-bookmark"][data-pkc-bookmark-kind="note"]`,
+  );
+  await expect(noteMark, 'ノートがバーに並ばない').toHaveCount(1);
+  // 別のフォルダの中へ入ると、ノートの行は表に無い(押して戻れるかを見る前提)
+  await page.locator(ROWS('left')).filter({ hasText: 'とめる場所' }).first().dblclick();
+  await expect(noteRow, '前提が崩れている: フォルダの中でもノートの行が見えている').toHaveCount(0);
+  await noteMark.locator('[data-pkc-action="dual-bookmark-open"]').click();
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
+    '押してもノートの行が選ばれない',
+  ).toHaveCount(1);
+  await expect(
+    page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`),
+    '選ばれたのがノートではない',
+  ).not.toContainText('とめる場所');
+  // 置けるなら外せる ── 同じ右クリックに「外す」が出て、押すとバーから消える
+  await page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`).click({ button: 'right' });
+  await expect(
+    page.locator('[data-pkc-region="context-menu"] [data-pkc-action="bookmark-note-add"]'),
+    '入っているのに「入れる」が出ている',
+  ).toHaveCount(0);
+  await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="bookmark-note-remove"]').click();
+  await expect(noteMark, '外してもバーに残っている').toHaveCount(0);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

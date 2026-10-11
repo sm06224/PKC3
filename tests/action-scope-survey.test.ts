@@ -316,7 +316,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-10(#1457): P1 +2(`tag-color-pick` / `tag-color-clear`。押したバッジの名前が要る ── `untag-entry` と同じ仕分け)。
     // ⚠ 2026-10-11(#855): N +1(`schedule-undo-move`。予定を動かした直後の「元に戻す」── 押した所から何も要らない。
     //   持っている物は `schedule-undo.ts` が持つ。`undo-move` / `undo-append` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 75, P2: 34, E: 26, V: 10, N: 187 });
+    // ⚠ 2026-10-11(#1377): N +2(`bookmark-note-add` / `bookmark-note-remove`。右クリックの「ブックマークに入れる / 外す」──
+    //   押した行は `rowLidOrSelected` が決める。`export-entry-markdown` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 75, P2: 34, E: 26, V: 10, N: 189 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
