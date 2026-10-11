@@ -293,6 +293,7 @@ import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
 import { createImageDrawer } from '@adapter/ui/actions/image-draw';
 import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
+import { VideoClient } from '@adapter/platform/video/video-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
 import { decodeToMono16k } from '@adapter/platform/asr/asr-decode';
 import { AsrPackInstaller } from '@adapter/platform/asr/asr-pack-install';
@@ -3013,10 +3014,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 取り込みは収録と同じ **`queued`**(切り出しも取り直しが利かない)。
    */
   const audioClient = new AudioClient();
+  /**
+   * 🔴 **動画は別のワーカー**(#683 段②b-1)── 動画の長い仕事で音の切り出しを待たせない。
+   * 元の `Blob` は窓で読む(250MB を開かない)。始まりが手前へ戻るなら、切る前に確認する。
+   */
+  const videoClient = new VideoClient();
   const captureTrimmer = createCaptureTrimmer({
     dispatcher,
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     trim: (blob, startMs, endMs) => audioClient.trim(blob, startMs, endMs),
+    scanVideo: (blob, startMs, endMs) => videoClient.scan(blob, startMs, endMs),
+    cutVideo: (blob, scan, startMs, endMs) => videoClient.cut(blob, scan, startMs, endMs),
+    confirm: (message, opts) => ask(message, opts),
     attach: async (item) => {
       let out: Awaited<ReturnType<typeof attachOne>> = null;
       await withAssetGate.queued(async () => {

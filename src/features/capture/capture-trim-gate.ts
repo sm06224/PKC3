@@ -15,22 +15,43 @@
  */
 import type { CaptureItem } from './capture-item';
 
-/** 切り出せる形か。⚠ いまは**音の webm だけ**(設計 doc §6 の梯子の 1 段目)。 */
+/**
+ * 動画の mime の `codecs=` に書かれた名前(小文字)。⚠ 書かれていなければ空。
+ * 例: `video/webm;codecs=vp9,opus` → `['vp9', 'opus']`
+ */
+function codecsOf(mime: string): string[] {
+  const m = /codecs\s*=\s*"?([^";]+)"?/i.exec(mime);
+  if (m === null) return [];
+  return m[1]!.split(',').map((c) => c.trim().toLowerCase());
+}
+
+/**
+ * 切り出せる形か。⚠ **音の webm と、映像が VP8 の動画の webm**(設計 doc §5 の梯子)。
+ *
+ * 🔑 動画は mime に `codecs=` が書かれていて **VP8 が入っていなければ**出さない(VP9 / AV1 / H.264 は
+ *   キーフレームの印が違うので、この段では切らない)。書かれていないときは中を開くまで分からない
+ *   ── そのときは `webm-vp8.ts` の断り文が出る(粗い門と細かい門)。
+ */
 export function canTrimCapture(item: CaptureItem): boolean {
-  if (item.kind !== 'audio' || item.assetKey === null) return false;
-  return item.mime.split(';')[0]!.trim().toLowerCase() === 'audio/webm';
+  if (item.assetKey === null) return false;
+  const base = item.mime.split(';')[0]!.trim().toLowerCase();
+  if (item.kind === 'audio') return base === 'audio/webm';
+  if (base !== 'video/webm') return false;
+  const codecs = codecsOf(item.mime);
+  return codecs.length === 0 || codecs.includes('vp8');
 }
 
 /**
  * 切り出せない理由(押し所の代わりに出す 1 行)。⚠ **切り出せるなら `null`**。
  *
- * ⚠ **何も出さない場合が 2 つ在る** ── どちらも「切り出しの話が
- * そもそも画面に出ていない」ので、断り文だけが浮くのを避ける:
- * ①**動画**(いまは音だけが相手)②**中身の無い行**(聞く口も出ていない)。
+ * ⚠ **何も出さない場合が 1 つ在る** ── **中身の無い行**(聞く口も出ていない)は、
+ * 切り出しの話がそもそも画面に出ていないので、断り文だけが浮くのを避ける。
+ * 🔑 音と動画で字を分ける(「録音」と書いた字が動画の行に出ない)。
  */
 export function trimUnavailableText(item: CaptureItem): string | null {
   if (canTrimCapture(item)) return null;
-  if (item.kind !== 'audio') return null;
   if (item.assetKey === null) return null;
-  return 'この形の録音はまだ切り出せません。';
+  return item.kind === 'video'
+    ? 'この形の動画はまだ切り出せません。'
+    : 'この形の録音はまだ切り出せません。';
 }

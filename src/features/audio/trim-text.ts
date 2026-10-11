@@ -70,9 +70,15 @@ export function trimNoteFirst(startMs: number | null, endMs: number | null): boo
  * | 片方だけ | その時刻 + **もう片方を押してくれ** |
  * | 両方 | 範囲と、切り出したあとの長さ |
  */
-export function trimMarkText(startMs: number | null, endMs: number | null): string {
+export function trimMarkText(
+  startMs: number | null,
+  endMs: number | null,
+  kind: 'audio' | 'video' = 'audio',
+): string {
   if (startMs === null && endMs === null) {
-    return '聞きながら「ここを始まりにする」「ここを終わりにする」を押すと、その範囲だけを新しい録音にできます。';
+    return kind === 'video'
+      ? '見ながら「ここを始まりにする」「ここを終わりにする」を押すと、その範囲だけを新しい動画にできます。'
+      : '聞きながら「ここを始まりにする」「ここを終わりにする」を押すと、その範囲だけを新しい録音にできます。';
   }
   if (endMs === null)
     return `ここから ${elapsedText(startMs!)}。「ここを終わりにする」も押してください`;

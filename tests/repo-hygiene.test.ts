@@ -1533,7 +1533,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-11(#1376): `draft-recovery.smoke.spec.ts`(新設・test 4 本・起動 9 回)→ 518 → 522(戻す / 消す / ライブエディタ / IndexedDB の 20 件)。
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 516 の行を参照)。起動の予算は → 518。
     // ⚠ 2026-10-11(#683 段③): `image-draw.smoke.spec.ts`(新設・test 1 本・起動 1 つ)→ 522 → 523。起動の予算は 518 → 519(`scripts/smoke-budget.mjs` に理由)。
-    ).toBe(523);
+    // ⚠ 2026-10-11(#683 段②b-1): `media-capture.smoke.spec.ts` に 1 本足した(画面収録の前後を削る)→ 523 → 524。起動の予算は 519 → 520。
+    ).toBe(524);
   });
 });
 
