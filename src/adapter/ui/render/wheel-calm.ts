@@ -23,6 +23,10 @@
  *   ⓪ **編集中**(編集の箱を送った直後の「保存」が空振りする)
  *   ① **ボタンを押している間**(字をなぞって選んでいる最中にホイールで送る ── 蓋があると選択が止まる)
  *   ② **Ctrl / Meta を押している間**(ブラウザのズームで、送りではない)。
+ *   ③ 🔴 **段組みが効いている間**(user 報告 2026-10-11「段組み表示時にまともにスクロールできなくなる」)。
+ *      段組みは縦のホイールを本文の器の上でだけ横送りに読み替える(`read-columns.ts` の `installColumnWheel` が
+ *      `host.contains(ev.target)` を見る)ので、最初の送りで蓋が出ると、**2 回目からのホイールは蓋に当たって
+ *      器の外になり、横へ送れなくなる**。段組みは送りの向き自体が違うので、蓋は出さない。
  * ⚠ 蓋を出すのは **`wheel` の直後の `scroll` だけ**。位置の復元(`scrollTop = …`)・キーボード・スクロールバーの
  *   ドラッグは対象外 ── 復元の直後に押したボタンが空振りする、を作らないため。
  * ⚠ 最後のホイールから 150ms は、本文の字を押せない(送り終わった直後。指が離れて押すまでの間より短い、という見積り ──
@@ -31,6 +35,8 @@
  *   高さ 0 の枠なので、並びにも寸法にも出ない。他の物が後ろに足されたら、出すたびに最後へ戻す。
  */
 
+import { COLUMNS_ON_ATTR } from './read-columns';
+
 /** 蓋を入れる枠 / 蓋そのもの(CSS は `app.css`)。 */
 export const SHIELD_FIELD = 'wheel-shield';
 export const SHIELD_COVER_FIELD = 'wheel-shield-cover';
@@ -38,6 +44,11 @@ export const SHIELD_COVER_FIELD = 'wheel-shield-cover';
 export const SHIELD_ON_ATTR = 'data-pkc-shield-on';
 /** 最後のホイールから、蓋を外すまで(ms)。 */
 export const WHEEL_IDLE_MS = 150;
+
+/** 段組みが実際に効いているか(`data-pkc-columns-on` が器か、器の中に在る)。 */
+export function isColumnsOn(region: HTMLElement): boolean {
+  return region.hasAttribute(COLUMNS_ON_ATTR) || region.querySelector(`[${COLUMNS_ON_ATTR}]`) !== null;
+}
 
 /** 読む面が編集中か(`data-pkc-detail-mode="editor"` が器か、器の中に在る)。 */
 export function isEditing(region: HTMLElement): boolean {
@@ -81,6 +92,8 @@ export function installWheelCalm(region: HTMLElement): () => void {
     // ⚠ 編集中は蓋を出さない(smoke `read-columns` ⑤ が落ちて分かった):編集の箱を送った直後に
     //   「保存」を押すと、蓋に当たって空振りする。引っかかりが問題なのは読む面のほうである
     if (isEditing(region)) return;
+    // ⚠ 段組みの間も出さない(蓋が横送りのホイールを本文の器の外へ逸らす)
+    if (isColumnsOn(region)) return;
     shield ??= makeShield(region.ownerDocument);
     // 後ろに何かが足されていたら最後へ戻す(貼り付く位置は「末尾」で決まる)
     if (region.lastElementChild !== shield) region.append(shield);

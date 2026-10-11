@@ -17,6 +17,7 @@ import {
   SHIELD_ON_ATTR,
   WHEEL_IDLE_MS,
 } from '../../src/adapter/ui/render/wheel-calm';
+import { COLUMNS_ON_ATTR } from '../../src/adapter/ui/render/read-columns';
 
 describe('ホイールで送っている間の蓋', () => {
   let region: HTMLElement;
@@ -76,6 +77,18 @@ describe('ホイールで送っている間の蓋', () => {
     vi.advanceTimersByTime(WHEEL_IDLE_MS);
     roll();
     expect(on(), '読む面で蓋が出ない').toBe(true);
+  });
+
+  it('🔴 段組みが効いている間は蓋を出さない(2 回目からのホイールが蓋に当たって横へ送れなくなる)', () => {
+    const pane = region.firstElementChild as HTMLElement;
+    pane.setAttribute(COLUMNS_ON_ATTR, '');
+    roll();
+    expect(on(), '段組みなのに蓋が出た(2 回目のホイールが本文の器に届かない)').toBe(false);
+    // 対照群:段組みを外せば出る(門が常に閉じているのではない)
+    pane.removeAttribute(COLUMNS_ON_ATTR);
+    vi.advanceTimersByTime(WHEEL_IDLE_MS);
+    roll();
+    expect(on(), '1 段の読む面で蓋が出ない').toBe(true);
   });
 
   it('送り始めに付き、最後のホイールから 150ms で外れる', () => {
