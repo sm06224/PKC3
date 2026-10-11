@@ -199,6 +199,38 @@ describe('detail: 編集のあいだ読む面を持ち越す(#1467 段 5)', () =
     expect(root.querySelector('[data-pkc-action="start-edit"]')).not.toBeNull();
   });
 
+  it('🔴 戻るとき、焦点を持つ節点(押した保存ボタンの帯)は編集の面の中で最後に外す(#1467 段 6)', async () => {
+    const { root, detail, s0 } = await open();
+    const host = hostOf(root);
+    const editing = step(s0, { type: 'START_EDIT' });
+    await show(detail, editing);
+    const region = host.parentElement!;
+    const nameOf = (n: Node): string =>
+      (n as HTMLElement).getAttribute?.('data-pkc-field') ?? (n as HTMLElement).getAttribute?.('data-pkc-region') ?? n.nodeName;
+    const order = (): string[] => Array.from(region.childNodes).filter((n) => n !== host).map(nameOf);
+    const faces = order();
+    // 前提: 編集の面は帯より後ろに、重い物(本文の編集欄)を持つ。帯が先に並んでいる(= 素直に外すと帯が先に外れる)
+    expect(faces.indexOf('detail-toolbar'), '前提: 帯が無い').toBeGreaterThanOrEqual(0);
+    expect(faces.indexOf('editor-live'), '前提: 編集欄が無い').toBeGreaterThan(faces.indexOf('detail-toolbar'));
+    const commit = region.querySelector<HTMLElement>('[data-pkc-action="commit-edit"]')!;
+    commit.focus();
+    expect(document.activeElement, '前提: 保存ボタンが焦点を持っていない').toBe(commit);
+
+    const removed: string[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const r of records) for (const n of Array.from(r.removedNodes)) removed.push(nameOf(n));
+    });
+    watch.observe(region, { childList: true });
+    await show(detail, step(editing, { type: 'COMMIT_EDIT' }));
+    watch.disconnect();
+
+    const gone = removed.filter((n) => faces.includes(n));
+    expect(gone.length, '前提: 編集の面が外れていない').toBe(faces.length);
+    // 焦点を持つ節点を外すとブラウザはその場で配置を払う ── 重い編集欄が居るうちに外すと、その配置が丸ごと払われる
+    expect(gone[gone.length - 1], '焦点を持つ帯が最後に外れていない').toBe('detail-toolbar');
+    expect(gone.indexOf('editor-live'), '編集欄より後に外している').toBeLessThan(gone.indexOf('detail-toolbar'));
+  });
+
   it('🔴 段組みのとき器に inline の高さが書かれていても、持ち越しの間は 0 にし、戻すと元の値へ戻す', async () => {
     const { root, detail, s0 } = await open();
     const host = hostOf(root);
