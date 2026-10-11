@@ -2435,7 +2435,7 @@ describe('お知らせを何件読めるか(#751)', () => {
     expect(NOTICE_READABLE_TEXT, '字の組み立て方が変わった').toBe(`新しい ${NOTICE_SHOW_MAX} 件`);
     for (const f of [
       'src/adapter/ui/render/announce.ts',
-      'src/adapter/ui/render/settings.ts',
+      'src/adapter/ui/render/settings/notices.ts',
     ]) {
       const src = readFileSync(f, 'utf8');
       expect(src, `${f} が NOTICE_READABLE_TEXT を使っていない`).toContain('NOTICE_READABLE_TEXT');
