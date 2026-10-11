@@ -10,6 +10,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import {
+  PASTE_CONVERTED_MESSAGE,
+  PASTE_MESSAGE_COALESCE_MS,
+} from '../../src/features/markdown/paste-source';
 
 const DATA = 'data:image/png;base64,AAAA';
 
@@ -653,5 +657,166 @@ describe('選んだ字へ URL を貼る', () => {
     expect(dispatcher.getState().openBody?.body ?? '', 'state に届いていない').toBe(
       `[メモ](${URL1})`,
     );
+  });
+});
+
+/**
+ * 🔴 **Markdown に直して貼ったら、メッセージに 1 件残す**(#1379)。
+ * ⚠ 画面下の 1 行(`OP_NOTICE`)には出さない ── 貼るたびに割り込まない。
+ * ⚠ 字は固定。貼った中身は入らない(メッセージは中身を漏らさない)。
+ */
+describe('貼付の変換をメッセージに残す', () => {
+  const HTML = '<h2>秘密の見出し</h2><p>秘密の本文</p>';
+  type Left = Array<{ kind: string; source: string; text: string }>;
+  const posted = (): { left: Left; over: Partial<BinderServices> } => {
+    const left: Left = [];
+    return { left, over: { leaveMessage: (m) => void left.push(m) } };
+  };
+  const html = { 'text/html': HTML, 'text/plain': '秘密の見出し 秘密の本文' };
+
+  it('🔴 HTML を変換して貼ると、ちょうど 1 件・固定の文・中身なしで残る', () => {
+    const { left, over } = posted();
+    const { ta, dispatcher } = setup(over);
+    const notices: string[] = [];
+    dispatcher.onState((st) => {
+      if (st.notice) notices.push(st.notice);
+    });
+    ta.dispatchEvent(pasteEvent(html));
+    expect(ta.value, '変換が走っていない').toBe('## 秘密の見出し\n\n秘密の本文');
+    expect(left).toEqual([{ kind: 'result', source: '貼り付け', text: PASTE_CONVERTED_MESSAGE }]);
+    expect(JSON.stringify(left), '貼った中身が漏れている').not.toContain('秘密');
+    expect(notices, '画面下の 1 行に出している(割り込む)').toEqual([]);
+    expect(PASTE_CONVERTED_MESSAGE).toContain('Ctrl+Z');
+    expect(PASTE_CONVERTED_MESSAGE).toContain('Ctrl+Shift+V');
+    expect(PASTE_CONVERTED_MESSAGE.length, '80 字で切られると戻し方が欠ける').toBeLessThanOrEqual(80);
+  });
+
+  it('🔴 リッチテキスト(RTF)から直したときも 1 件', () => {
+    const { left, over } = posted();
+    const { ta } = setup(over);
+    ta.dispatchEvent(
+      pasteEvent({
+        'text/rtf': String.raw`{\rtf1\ansi{\stylesheet{\s1 heading 1;}}\pard\s1 見出し\par}`,
+        'text/plain': '見出し',
+      }),
+    );
+    expect(ta.value).toBe('# 見出し');
+    expect(left).toHaveLength(1);
+  });
+
+  it('🔴 平文の貼付(変換なし)では残さない', () => {
+    const { left, over } = posted();
+    const { ta } = setup(over);
+    const e = pasteEvent({ 'text/plain': 'ただの文字' });
+    ta.dispatchEvent(e);
+    expect(e.defaultPrevented, '対照: 横取りしていない').toBe(false);
+    expect(left).toEqual([]);
+  });
+
+  it('🔴 設定「変換しない」では、HTML が届いても残さない', () => {
+    const { left, over } = posted();
+    const { ta } = setup({ ...over, pasteSource: () => 'plain' });
+    ta.dispatchEvent(pasteEvent(html));
+    expect(left).toEqual([]);
+  });
+
+  it('🔴 続けて貼ると束ねる(5 秒以内は 1 件)/ 過ぎたらもう 1 件', () => {
+    const { left, over } = posted();
+    const { ta } = setup(over);
+    const now = vi.spyOn(Date, 'now');
+    try {
+      now.mockReturnValue(1_000_000);
+      ta.dispatchEvent(pasteEvent(html));
+      now.mockReturnValue(1_000_000 + PASTE_MESSAGE_COALESCE_MS - 1);
+      ta.dispatchEvent(pasteEvent(html));
+      expect(left, '束ねていない').toHaveLength(1);
+      now.mockReturnValue(1_000_000 + PASTE_MESSAGE_COALESCE_MS);
+      ta.dispatchEvent(pasteEvent(html));
+      expect(left, '間隔が空いたのに残していない').toHaveLength(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('🔴 「直した」ではない貼付(html のまま囲む設定)では残さない', () => {
+    const { left, over } = posted();
+    const { ta } = setup({ ...over, pasteSource: () => 'html-fence' });
+    ta.dispatchEvent(pasteEvent(html));
+    expect(ta.value, '対照: 囲みで差さっている').toContain('```html');
+    expect(left).toEqual([]);
+  });
+
+  it('🔴 パーマリンクの貼付(used = permalink)では残さない', () => {
+    const { left, over } = posted();
+    const { ta, dispatcher } = setup(over);
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'n1', archetype: 'text', title: '会議のメモ' });
+    ta.dispatchEvent(pasteEvent({ 'text/plain': 'pkc://c1/entry/n1' }));
+    expect(ta.value, '対照: 内部リンクに直っている').toBe('[会議のメモ](entry:n1)');
+    expect(left).toEqual([]);
+  });
+
+  it('🔴 タブ区切りの表の貼付(used = plain-table)では残さない', () => {
+    const { left, over } = posted();
+    const { ta } = setup(over);
+    ta.dispatchEvent(pasteEvent({ 'text/plain': '品名\t数\nりんご\t3' }));
+    expect(ta.value, '対照: 表の囲みで差さっている').toBe('```tsv\n品名\t数\nりんご\t3\n```');
+    expect(left).toEqual([]);
+  });
+
+  it('🔴 画像を資産にして待つ貼付は、差し込めた後で残す(待っている間は残さない)', async () => {
+    const { left, over } = posted();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { ta } = setup({
+      ...over,
+      adoptUrls: async (urls) => {
+        await gate;
+        return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), failures: [] };
+      },
+    });
+    ta.dispatchEvent(
+      pasteEvent({ 'text/html': `<h2>題</h2><img src="${DATA}" alt="ず">`, 'text/plain': '題' }),
+    );
+    expect(left, '差し込む前に「貼りました」と言っている').toEqual([]);
+    release();
+    await vi.waitFor(() => expect(ta.value).toContain('![ず](asset:k1)'));
+    expect(left).toHaveLength(1);
+  });
+
+  it('🔴 待っている間に欄が閉じて貼れなかったら、残さない(貼れていないのに「貼りました」としない)', async () => {
+    const { left, over } = posted();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { ta, dispatcher, errors } = setup({
+      ...over,
+      adoptUrls: async (urls) => {
+        await gate;
+        return { adopted: new Map(urls.map((u, i) => [u, `asset:k${i + 1}`])), failures: [] };
+      },
+    });
+    dispatcher.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e1', archetype: 'text', title: 'a' });
+    dispatcher.dispatch({ type: 'CREATE_ENTRY', lid: 'e2', archetype: 'text', title: 'b' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+    ta.dispatchEvent(
+      pasteEvent({ 'text/html': `<h2>題</h2><img src="${DATA}" alt="ず">`, 'text/plain': '題' }),
+    );
+    dispatcher.dispatch({ type: 'CANCEL_EDIT' });
+    dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: 'e2' });
+    dispatcher.dispatch({ type: 'BODY_LOADED', lid: 'e2', body: '' });
+    dispatcher.dispatch({ type: 'START_EDIT' });
+    release();
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+    expect(ta.value, '対照: 差し込んでいない').toBe('');
+    expect(left, '貼れていないのに残している').toEqual([]);
+  });
+
+  it('⚠ 口が無い配線でも貼付は成立する', () => {
+    const { ta } = setup();
+    ta.dispatchEvent(pasteEvent(html));
+    expect(ta.value).toBe('## 秘密の見出し\n\n秘密の本文');
   });
 });
