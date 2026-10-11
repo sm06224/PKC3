@@ -56,6 +56,7 @@ export async function importPptxFiles(
   const rows: EntryUpsert[] = [];
   const notes: string[] = [];
   let dropped = 0;
+  let rounded = 0;
   try {
     let order = deps.orderBase();
     for (const file of files) {
@@ -97,6 +98,7 @@ export async function importPptxFiles(
           continue;
         }
         dropped += slide.dropped;
+        rounded += slide.rounded;
         // 何も置けず題名も無いスライドはノートにしない(中身が無い)
         if (slide.placed === 0 && slide.title === null) continue;
         const title =
@@ -148,8 +150,14 @@ export async function importPptxFiles(
   if (last) deps.focus?.(last.lid);
   deps.imported?.(rows.map((r) => r.lid));
   if (dropped > 0) notes.push(`取り込めなかったものが ${dropped} 件ありました`);
+  // 🔴 文字の大きさを近い段へ丸めた付箋の数(#530 段⑤a)── 黙らない。丸めなかった付箋は数えない
+  if (rounded > 0) notes.push(`文字の大きさを近い段(小 / 標準 / 大 / 特大)に丸めた付箋が ${rounded} 枚ありました`);
   deps.report?.(notes);
   const head = `取り込み完了: 板 ${rows.length} 件`;
-  deps.notify?.(dropped > 0 ? `${head}(取り込めなかったもの ${dropped} 件)` : head);
+  const tails = [
+    ...(dropped > 0 ? [`取り込めなかったもの ${dropped} 件`] : []),
+    ...(rounded > 0 ? [`文字の大きさを丸めた付箋 ${rounded} 枚`] : []),
+  ];
+  deps.notify?.(tails.length > 0 ? `${head}(${tails.join('、')})` : head);
   return rows.length;
 }

@@ -13,6 +13,7 @@
  * | 線 | `stroke=` | 線の色 |
  * | 線 | `width=` | 太さ(px) |
  * | 線 | `arrow=` | 矢じり(`end` = 終わりに付ける / `both` = 両端に付ける。無ければ矢じりなし) |
+ * | 付箋 | `size=` | 文字の大きさ(`small` / `large` / `xlarge`。無ければ標準) |
  *
  * ## 🔴 値は**決まった綴りだけ**を受ける(素通しにしない)
  *
@@ -101,6 +102,64 @@ export function placeArrowOf(raw: unknown): PlaceArrow {
 }
 
 /**
+ * 🔴 **付箋の文字の大きさ**(#530 段⑤a。Gemini 裁定 2026-10-11 依頼 19 Q1)。
+ *
+ * 4 段(小 / 標準 / 大 / 特大)。名前と段の並びは**設定の「文字の大きさ」と同じ**(`text-scale.ts` の id)。
+ * 書き方は `size=small` / `size=large` / `size=xlarge`。⚠ **札が無い = 標準**(古いノートは 1 字も変えずに今までの見た目)。
+ * `standard` と書いても読める(= 札が無いのと同じ)が、画面から「標準」を選んだときは**札を消す**(`arrow=none` と同じ作法)。
+ * 🔑 画面の大きさは**絶対値ではなく倍率**(`app.css` の `em`)── 設定の文字の大きさを変えると付箋も追従する。
+ */
+export type PlaceSize = 'small' | 'standard' | 'large' | 'xlarge';
+
+/** ⚠ 空振り防止 ── 並びは右クリックの並びと同じ。 */
+export const PLACE_SIZES: readonly PlaceSize[] = ['small', 'standard', 'large', 'xlarge'];
+
+export type SizeRead =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ok'; readonly size: PlaceSize }
+  | { readonly kind: 'bad'; readonly raw: string };
+
+/** `size=large` を読む。⚠ 読めない字は `bad`(`placeSizeOf` は標準に倒す ── 本文は消さない)。 */
+export function parseSizeSpell(raw: unknown): SizeRead {
+  if (typeof raw !== 'string') return { kind: 'none' };
+  const v = raw.trim();
+  if (v === '') return { kind: 'none' };
+  const hit = PLACE_SIZES.find((a) => a === v);
+  return hit === undefined ? { kind: 'bad', raw: v } : { kind: 'ok', size: hit };
+}
+
+/** 画面・書き出しが使う読み方 ── 読めない / 無いは `standard`。⚠ 規則はここ 1 本(§7)。 */
+export function placeSizeOf(raw: unknown): PlaceSize {
+  const r = parseSizeSpell(raw);
+  return r.kind === 'ok' ? r.size : 'standard';
+}
+
+/**
+ * 書き出し(PowerPoint の `sz`、100 分の 1 pt)の段の表。⚠ 標準 1800 は今までの固定値(`pptx.ts` の `SZ.body`)。
+ * 🔑 「画面で何 px か」とは**換算しない**(画面の標準は設定で動く)── 段の**番号**を運ぶ。
+ */
+export const PLACE_SIZE_PPTX_SZ: Readonly<Record<PlaceSize, number>> = {
+  small: 1400,
+  standard: 1800,
+  large: 2700,
+  xlarge: 4000,
+};
+
+/** 取り込んだ `sz` に**いちばん近い段**(差の絶対値。同じ近さなら大きい側の段へ)。 */
+export function nearestPlaceSize(sz: number): PlaceSize {
+  let best: PlaceSize = 'standard';
+  let bestD = Infinity;
+  for (const k of PLACE_SIZES) {
+    const d = Math.abs(PLACE_SIZE_PPTX_SZ[k] - sz);
+    if (d < bestD || (d === bestD && PLACE_SIZE_PPTX_SZ[k] > PLACE_SIZE_PPTX_SZ[best])) {
+      best = k;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
  * 塗りの上に載せる字の色(`#1a1a1a` か `#ffffff`)。
  *
  * 🔴 **地の色が変わると、字の色も合わせないと読めなくなる** ── 暗いテーマの字は明るいので、
@@ -128,14 +187,16 @@ export interface PlaceStyle {
   readonly width?: number | null;
   /** 🔴 矢じり(線だけ)。`null` は札を**消す**(= 矢じりなし)。 */
   readonly arrow?: PlaceArrow | null;
+  /** 🔴 文字の大きさ(付箋だけ)。`null` / `standard` は札を**消す**(= 標準)。 */
+  readonly size?: PlaceSize | null;
 }
 
 /** 札の名前の全部。⚠ 並びが書き込みの順である(同じ本文を書くたびに札の並びが揺れない)。 */
-export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width', 'arrow'] as const;
+export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width', 'arrow', 'size'] as const;
 export type PlaceStyleKey = (typeof PLACE_STYLE_KEYS)[number];
 
 /** 付箋が持てる札 / 線が持てる札。⚠ 持てない札を渡されたら書かない(`place-notation.ts`)。 */
-export const BOARD_STYLE_KEYS: readonly PlaceStyleKey[] = ['fill', 'stroke'];
+export const BOARD_STYLE_KEYS: readonly PlaceStyleKey[] = ['fill', 'stroke', 'size'];
 export const LINE_STYLE_KEYS: readonly PlaceStyleKey[] = ['stroke', 'width', 'arrow'];
 
 /**
@@ -153,6 +214,8 @@ export function isPlaceStyle(value: unknown): value is PlaceStyle {
       if (v !== null && (typeof v !== 'number' || parsePlaceWidth(String(v)) === null)) return false;
     } else if (k === 'arrow') {
       if (v !== null && !PLACE_ARROWS.some((a) => a === v)) return false;
+    } else if (k === 'size') {
+      if (v !== null && !PLACE_SIZES.some((a) => a === v)) return false;
     } else {
       return false;
     }

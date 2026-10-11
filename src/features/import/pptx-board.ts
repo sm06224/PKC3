@@ -34,7 +34,14 @@ import {
   PRST_OF,
 } from '../export/pptx';
 import { parseXml, textOf, type XmlNode } from '../export/xml-lite';
-import { parsePlaceColor, parsePlaceWidth, PLACE_LINE_WIDTH_DEFAULT } from '../markdown/place-color';
+import {
+  nearestPlaceSize,
+  parsePlaceColor,
+  parsePlaceWidth,
+  PLACE_LINE_WIDTH_DEFAULT,
+  PLACE_SIZE_PPTX_SZ,
+  type PlaceSize,
+} from '../markdown/place-color';
 import { PLACE_EDGES, PLACE_ROUTES, type PlaceEdge, type PlaceRoute } from '../markdown/place-line';
 import { PLACE_SHAPES, type PlaceShape } from '../markdown/place-shape';
 
@@ -55,6 +62,11 @@ export interface PptxBoardSlide {
   readonly lines: number;
   /** 戻せなかったものの数。 */
   readonly dropped: number;
+  /**
+   * 🔴 文字の大きさを**近い段へ丸めた**付箋の数(#530 段⑤a)。⚠ 段の値(14 / 18 / 27 / 40 pt)と**ちょうど同じ**なら
+   * 数えない ── 自分が書き出した file は 0 になる。呼び側が件数を user に言う。
+   */
+  readonly rounded: number;
 }
 
 /** 名前の頭(`connectPlaces` が付ける名前と同じ。⚠ 日本語が使える)。 */
@@ -90,6 +102,8 @@ interface ShapeRead {
   readonly fill: string | null;
   readonly stroke: string | null;
   readonly text: string;
+  /** 🔴 文字の大きさの段と、丸めたか(#530 段⑤a)。`sz` がどこにも無ければ `null`。 */
+  readonly size: { readonly step: PlaceSize; readonly rounded: boolean } | null;
   /** 印を付けない素の字(題名に使う)。 */
   readonly plain: string;
 }
@@ -151,6 +165,33 @@ function paragraphOf(p: XmlNode): string {
   return escapeLine(runs);
 }
 
+/**
+ * 🔴 **付箋の文字の大きさ**(#530 段⑤a)── 字数でいちばん多い `sz` を採り、`normAutofit` の `fontScale` を掛けてから、
+ * **いちばん近い段**(`nearestPlaceSize`。段の値は書き出しの表 `PLACE_SIZE_PPTX_SZ` が正本)へ丸める。
+ * ⚠ 丸めは失われる情報なので `rounded` で言う(段の値とちょうど同じなら偽)。
+ * ⚠ `sz` を持つ run が 1 つも無ければ `null`(= 標準。数えない)。
+ */
+function readSize(tx: XmlNode): ShapeRead['size'] {
+  const chars = new Map<number, number>();
+  for (const p of kids(tx, 'p')) {
+    for (const r of kids(p, 'r')) {
+      const sz = int(kid(r, 'rPr')?.attrs.sz);
+      if (sz === null || sz <= 0) continue;
+      const n = foldBreaks(textOf(kid(r, 't') ?? { tag: '#text', attrs: {}, children: [] })).length;
+      chars.set(sz, (chars.get(sz) ?? 0) + n);
+    }
+  }
+  let best: number | null = null;
+  for (const [sz, n] of chars) {
+    if (best === null || n > chars.get(best)! || (n === chars.get(best)! && sz > best)) best = sz;
+  }
+  if (best === null) return null;
+  const fs = int(kid(kid(tx, 'bodyPr'), 'normAutofit')?.attrs.fontScale);
+  const scaled = fs !== null && fs > 0 ? Math.round((best * fs) / 100000) : best;
+  const step = nearestPlaceSize(scaled);
+  return { step, rounded: PLACE_SIZE_PPTX_SZ[step] !== scaled };
+}
+
 /** `<p:sp>` 1 つを読む。位置が無ければ `null`(= 戻せない図形)。 */
 function readShape(sp: XmlNode): ShapeRead | null {
   const nv = kid(sp, 'nvSpPr');
@@ -191,6 +232,7 @@ function readShape(sp: XmlNode): ShapeRead | null {
     fill: solidOf(spPr),
     stroke: solidOf(ln),
     text: paras.join('\n'),
+    size: readSize(tx),
     plain,
   };
 }
@@ -372,6 +414,8 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     // ⚠ 書き出しは四角以外に灰色の縁を必ず引く ── それと同じなら書かない(往復で色が増えない)
     const defaultEdge = s.shape !== 'rect' && s.stroke === LINE_DEFAULT_RGB;
     if (s.stroke !== null && !defaultEdge) attrs.push(`stroke=${s.stroke}`);
+    // 🔴 文字の大きさ(#530 段⑤a)── 標準は札を書かない(往復で札が増えない)
+    if (s.size !== null && s.size.step !== 'standard') attrs.push(`size=${s.size.step}`);
     blocks.push(`:::format{${attrs.join(' ')}}\n${s.text}${s.text === '' ? '' : '\n'}:::\n`);
   });
 
@@ -381,6 +425,7 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     placed: shapes.length,
     lines: wires.length,
     dropped: dropped + reshaped,
+    rounded: shapes.filter((s) => s.size?.rounded === true).length,
   };
 }
 

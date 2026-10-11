@@ -28,8 +28,11 @@
 import {
   PLACE_LINE_WIDTH_THICK,
   PLACE_LINE_WIDTH_THIN,
+  PLACE_SIZES,
   type PlaceArrow,
+  type PlaceSize,
 } from './markdown/place-color';
+import { TEXT_SCALES } from './text-scale';
 import {
   PLACE_SHAPES,
   PLACE_SHAPE_LABELS,
@@ -107,6 +110,16 @@ export const PLACE_STYLE_KEYS_ATTR = 'data-pkc-style-keys';
 export const PLACE_STYLE_WIDTH_ATTR = 'data-pkc-style-width';
 /** 🔴 矢じり(#530)── 項目が運ぶ値(`none` / `end` / `both`)。`none` は札を消す。 */
 export const PLACE_STYLE_ARROW_ATTR = 'data-pkc-style-arrow';
+/** 🔴 付箋の文字の大きさ(#530 段⑤a)── 項目が運ぶ値(`small` / `standard` / `large` / `xlarge`)。`standard` は札を消す。 */
+export const PLACE_STYLE_SIZE_ATTR = 'data-pkc-style-size';
+
+/**
+ * 付箋の文字の大きさの選択肢の字。⚠ 段の字(小 / 標準 / 大 / 特大)は**設定の「文字の大きさ」と同じ表**
+ * (`text-scale.ts`)から引く(綴りを写して増やさない ── 設定の字を直したらここも動く)。
+ */
+export const PLACE_SIZE_LABELS: Readonly<Record<PlaceSize, string>> = Object.fromEntries(
+  TEXT_SCALES.map((t) => [t.id, `文字の大きさ: ${t.label}`]),
+) as Record<PlaceSize, string>;
 
 /** 矢じりの選択肢の字(右クリックの並び)。⚠ 字の正本はここ 1 本 ── マニュアルもこの字で書く。 */
 export const PLACE_ARROW_LABELS: Readonly<Record<PlaceArrow, string>> = {
@@ -957,6 +970,8 @@ export function blockMenuActions(ctx: {
   readonly shape?: PlaceShape | null;
   /** 🔴 色の札(`fill=` / `stroke=`)が書かれているか(#530 段④。読めない値も数える)。 */
   readonly styled?: boolean;
+  /** 🔴 いまの文字の大きさ(#530 段⑤a。札が無い / 読めない = `standard`)。省略 = 標準。 */
+  readonly size?: PlaceSize;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
@@ -1002,6 +1017,16 @@ export function blockMenuActions(ctx: {
           },
         ]
       : []),
+    /**
+     * 🔴 **文字の大きさ**(#530 段⑤a。Gemini 裁定 2026-10-11 依頼 19 Q1)── 4 つを**いつも並べ**、いまの物に ✓。
+     * 🔑 「標準」は札を**消す**(置けるなら外せる)。
+     */
+    ...PLACE_SIZES.map((sz) => ({
+      action: 'place-size',
+      label: PLACE_SIZE_LABELS[sz],
+      attrs: { [PLACE_STYLE_SIZE_ATTR]: sz },
+      checked: (ctx.size ?? 'standard') === sz,
+    })),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }

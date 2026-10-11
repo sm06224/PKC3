@@ -103,6 +103,11 @@ export type DocxBlock =
       readonly fill?: string | null;
       readonly stroke?: string | null;
       /**
+       * 🔴 **文字の大きさ**(`size=`。#530 段⑤a)。読めた `small` / `large` / `xlarge` だけ運ぶ(標準 = 省く)。
+       * ⚠ Word は読まない(使うのは PowerPoint 側だけ)。省いた板は**今までの組み方を 1 byte も変えない**。
+       */
+      readonly size?: 'small' | 'large' | 'xlarge';
+      /**
        * 🔴 **その板の名前**(`:::format{#今日 .pkc-place …}` の `#今日`。#530 段③e)。
        * ⚠ 名前は**線の繋ぎ先**にしか使わない ── 無い板は指せないので `null`。
        * ⚠ Word は読まない(位置・形と同じで、使うのは PowerPoint 側だけ)。

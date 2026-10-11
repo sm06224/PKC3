@@ -475,6 +475,43 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await expect(blockMenu.locator('[data-pkc-action="place-color-clear"]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 
+  /**
+   * 🔴 **付箋の文字の大きさ**(#530 段⑤a)── 右クリックで 小 / 大 / 特大 → 標準。**新しい起動は増やさない**。
+   * ⚠ 見るのは**計算後の `font-size`** と**隣の付箋との比**(属性だけ見ると、受け皿の規則が無く画面が 1 ドットも
+   *   変わらない形を素通りする ── 矢じり・色と同じ)。比で持つので、設定の「文字の大きさ」(`--pkc-text-size`)を
+   *   変えても**倍率は変わらず、絶対値だけ追従する**ことまで同じ筋書きで見る。
+   */
+  const fontOf = (loc: Locator): Promise<number> => loc.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  const pickSize = async (label: string): Promise<void> => {
+    await p2.click({ button: 'right' });
+    await blockMenu.locator('button', { hasText: new RegExp(`^文字の大きさ: ${label}$`) }).click();
+  };
+  const ratio = async (): Promise<number> => (await fontOf(p2)) / (await fontOf(p1));
+  expect(await ratio(), '前提: 札が無い付箋どうしは同じ大きさ').toBeCloseTo(1, 3);
+  await p2.click({ button: 'right' });
+  await expect(blockMenu.locator('button[aria-checked="true"]'), '標準が選ばれた状態で開く').toHaveText('文字の大きさ: 標準');
+  expect(
+    await blockMenu.locator('button[aria-checked="true"]').evaluate((el) => getComputedStyle(el, '::before').content),
+    '選ばれている項目に ✓ が出ていない',
+  ).toBe('"✓"');
+  await page.keyboard.press('Escape');
+  for (const [label, spell, k] of [['大', 'large', 1.25], ['特大', 'xlarge', 1.6], ['小', 'small', 0.85]] as const) {
+    await pickSize(label);
+    await expect(p2, `${label}が本文に書き戻されていない`).toHaveAttribute('data-pkc-size', spell, { timeout: 5000 });
+    expect(await ratio(), `${label}: 隣の付箋の ${k} 倍になっていない`).toBeCloseTo(k, 2);
+  }
+  await expect(p1, '大きさが隣の付箋へ漏れた').not.toHaveAttribute('data-pkc-size', /.+/);
+  // 設定の「文字の大きさ」を特大(17px)にしたと同じ変数 ── 倍率は保ったまま、絶対値だけ追従する(絶対値で持っていないこと)
+  const small13 = await fontOf(p2);
+  await page.evaluate(() => document.body.style.setProperty('--pkc-text-size', '17px'));
+  expect(await fontOf(p2), '設定の文字の大きさに付箋の字が追従していない').toBeGreaterThan(small13 * 1.2);
+  expect(await ratio(), '設定を変えたら倍率が崩れた').toBeCloseTo(0.85, 2);
+  await page.evaluate(() => document.body.style.removeProperty('--pkc-text-size'));
+  // 🔴 標準へ戻せる(片道にしない)── 札が消え、隣の付箋と同じ大きさへ戻る
+  await pickSize('標準');
+  await expect(p2, '標準にしても size= が残っている').not.toHaveAttribute('data-pkc-size', /.+/, { timeout: 5000 });
+  expect(await ratio(), '標準へ戻したのに大きさが戻らない').toBeCloseTo(1, 3);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

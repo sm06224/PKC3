@@ -1,7 +1,7 @@
 # 名前で呼べない操作(未登記)の全数分類(#582 段③の下準備)
 
 > 出どころ:`node scripts/operation-table.mjs --unregistered`(2026-10-11、base `b1d8d9eb`)が出す 295 件のうち、
-> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件増えて **221**)を、場面で分けて「名前で呼ぶ意味」を付けた。
+> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件増えて **222**)を、場面で分けて「名前で呼ぶ意味」を付けた。
 > 手順と結論は `docs/development/operation-model-2026-08.md` §5.3「未登記 219 件の分類」。この file は**その全数表**である。
 
 ## 読み方
@@ -103,6 +103,7 @@
 | `place-shape-ellipse` | 低 | 楕円にする | `src/features/entry-actions.ts:930` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-shape-rect` | 低 | 四角にする | `src/features/entry-actions.ts:928` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-shape-round` | 低 | 角丸にする | `src/features/entry-actions.ts:929` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
+| `place-size` | 低 | 文字の大きさ: 小/標準/大/特大 | `src/features/entry-actions.ts:1025` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `raise-place` | 低 | 前へ出す | `src/features/entry-actions.ts:951` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `remove-place` | 低 | この板を消す | `src/features/entry-actions.ts:985` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `remove-place-line` | 低 | この線を消す | `src/features/entry-actions.ts:998` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |

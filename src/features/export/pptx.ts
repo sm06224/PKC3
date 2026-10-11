@@ -19,7 +19,9 @@ import {
   parsePlaceWidth,
   placeInkOf,
   PLACE_LINE_WIDTH_DEFAULT,
+  PLACE_SIZE_PPTX_SZ,
   type PlaceArrow,
+  type PlaceSize,
 } from '../markdown/place-color';
 import type { PlaceShape } from '../markdown/place-shape';
 import {
@@ -130,6 +132,11 @@ export interface BoardItem {
    */
   readonly fill?: string | null;
   readonly stroke?: string | null;
+  /**
+   * 🔴 **文字の大きさ**(#530 段⑤a)。⚠ 書いていなければ省く(**標準の付箋は今までと 1 byte も変わらない** ──
+   *   `sz="1800"`)。段 → `sz` の表は `PLACE_SIZE_PPTX_SZ` の 1 本(取り込みもこの表を引く)。
+   */
+  readonly size?: PlaceSize;
   readonly lines: readonly SlideLine[];
 }
 
@@ -364,6 +371,7 @@ export function splitIntoSlides(
           // 🔴 色は書いてあるときだけ運ぶ(#530 段④。色なしは今までと同じ形)
           ...(p.fill != null ? { fill: p.fill } : {}),
           ...(p.stroke != null ? { stroke: p.stroke } : {}),
+          ...(p.size !== undefined ? { size: p.size } : {}),
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -925,7 +933,8 @@ function boardShapes(
           h: Math.max(1, Math.round(h * EMU_PER_PX * k)),
         },
         it.lines
-          .map((l) => lineXml(l, SZ.body, linkOf, fillColor === null ? null : rgbOf(placeInkOf(fillColor))))
+          
+          .map((l) => lineXml(l, it.size === undefined ? SZ.body : PLACE_SIZE_PPTX_SZ[it.size], linkOf, fillColor === null ? null : rgbOf(placeInkOf(fillColor))))
           .join(''),
         't',
         it.shape,

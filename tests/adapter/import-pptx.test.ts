@@ -120,6 +120,37 @@ describe('importPptxFiles ── 実行部', () => {
     expect(h.notices.join('')).toContain('取り込めなかったもの 2 件');
   });
 
+  it('🔴 文字の大きさを近い段に丸めた付箋は枚数で言う(#530 段⑤a)。丸めなかった付箋・自分が書いた file は数えない', async () => {
+    const two = [place(0, 0, 200, 100), p('左'), place(400, 100, 200, 100), p('右')];
+    const rewrite = (to: string, nth: number) =>
+      exported(two).map((x) => {
+        if (x.name !== 'ppt/slides/slide1.xml') return x;
+        // 2 枚目の付箋(nth=2)の run だけを書き換える ── 1 枚目は段の値(18pt)のまま
+        let seen = 0;
+        return { ...x, text: x.text.replace(/ sz="1800"/g, (m) => (++seen === nth ? ` sz="${to}"` : m)) };
+      });
+    const h = harness();
+    const got = await importPptxFiles(h.d, h.deps, [await zipFile(rewrite('2400', 2))]);
+    expect(got).toBe(1);
+    expect(h.written[0]!.body).toContain('size=large');
+    expect(h.reported()).toEqual(['文字の大きさを近い段(小 / 標準 / 大 / 特大)に丸めた付箋が 1 枚ありました']);
+    expect(h.notices.join('')).toContain('文字の大きさを丸めた付箋 1 枚');
+    // 対照群 ── 自分が書き出した file(段の値のまま)は何も言わない
+    const clean = harness();
+    await importPptxFiles(clean.d, clean.deps, [await zipFile(exported(two))]);
+    expect(clean.reported()).toEqual([]);
+    expect(clean.notices.join('')).not.toContain('丸め');
+    // 取り込めなかった物と丸めた物が同時のとき、取り込み完了の 1 行に両方が出る
+    const both = harness();
+    const parts = rewrite('2400', 2).map((x) =>
+      x.name === 'ppt/slides/slide1.xml'
+        ? { ...x, text: x.text.replace('</p:spTree>', '<p:pic><p:nvPicPr/></p:pic></p:spTree>') }
+        : x,
+    );
+    await importPptxFiles(both.d, both.deps, [await zipFile(parts)]);
+    expect(both.notices.join('')).toContain('(取り込めなかったもの 1 件、文字の大きさを丸めた付箋 1 枚)');
+  });
+
   it('🔴 壊れた zip は断り、書込が 1 件も起きない', async () => {
     const h = harness();
     const got = await importPptxFiles(h.d, h.deps, [new File(['PK\u0003\u0004これは壊れている'.repeat(5)], 'x.pptx')]);
