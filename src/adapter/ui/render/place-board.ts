@@ -25,6 +25,7 @@
  */
 
 import { OVERLAY_ATTR } from './apply-blocks';
+import { closePlaceInline, positionPlaceInline } from './place-inline';
 import {
   anchorSpell,
   ANCHOR_DEN_MAX,
@@ -572,6 +573,7 @@ export function applyPlaceLayout(
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
+    closePlaceInline(host); // 付箋が 1 枚も無い ── 欄の行き先が無い(#529 W5)
     // ⚠ **前に引いた線を残さない** ── 板を全部消した本文で、線だけが宙に残る。
     //   🔑 ただし**線の宣言そのものには断りを出す** ── 板を全部消した user に
     //   「線の機能ごと無くなった」と読ませない(動線レビュー ①と同じ向き)。
@@ -733,5 +735,7 @@ export function applyPlaceLayout(
   host.style.minHeight = `${bottom + 40}px`;
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)
   restoreGripFocus(host);
+  // 🔴 付箋の上の欄(追記 / 題名)を付箋の今の位置へ(#529 W5。付箋の作り直し・移動を追う)
+  positionPlaceInline(host);
   return blocks.length;
 }

@@ -277,6 +277,10 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   ⚠ 2026-10-01(#530 段③d)で `remove-place-line`(右クリックした線を消す)も同じ理由で足した。
    */
   'place-color', 'place-color-clear', 'place-line-arrow', 'place-line-width', 'place-rect',
+  // ⚠ 2026-10-11(#529 W5): 付箋の上で書く 4 つ ── 追記(下端のボタン→欄→確定 / やめる)と題名(右クリック→欄)。
+  //   🔑 **名前で呼べないままにする理由**:対象は**押した付箋**(板の中のどの付箋か)で決まる ── パレットから
+  //   「追記」と呼んでも、どの付箋かが決まらない(ノートを選んで下の追記欄に書く道は既にある)。
+  'place-append-open', 'place-inline-cancel', 'place-inline-commit', 'place-rename-open',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round', 'place-size', 'place-group', 'place-ungroup',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
@@ -476,6 +480,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11(#529 W5): 板の付箋の上で書く 4 つ(`place-append-open` 付箋の下端の「追記」/ `place-rename-open` 付箋の右クリックの「題名を直す」/
+      //   `place-inline-commit` 欄の確定 / `place-inline-cancel` 欄をやめる)で受け手 +4 ── 登記は増えない
+      //   (押し口は付箋の中の 1 か所にしか無く、押した付箋が対象を運ぶ。`place-rect` と同じ置き場)。`receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#530): 板の線の右クリックの矢じり(`place-line-arrow`)で受け手 +1 ── 登記は増えない
       //   (押し口は線の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-width` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#530 段⑤b): 付箋の右クリックの「グループにする…」「グループを解く」(`place-group` / `place-ungroup`)で受け手 +2 ── 登記は増えない
@@ -791,12 +798,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 D): 予定の面の「予定を .ics で書き出す」(`export-schedule-ics`)で受け手 +1 ── 登記は増えない
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 413,
-      receivers: 347,
+      total: 417,
+      receivers: 351,
       registered: 113,
       both: 47,
       outsideActionsTable: 66,
-      unregistered: 300,
+      unregistered: 304,
     });
   });
 

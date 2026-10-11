@@ -1125,6 +1125,17 @@ export function placeLineMenuActions(ctx: {
 export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
 
 /**
+ * 🔴 **付箋の題名を、その場で直す**(#529 W5-b。Gemini 裁定 2026-10-11 依頼 18 Q3 = A)。
+ * 付箋の右クリックにだけ出す。⚠ 直すのは**置いたノート自身の題名**なので、一覧・ほかの板の付箋・
+ * リンクの表示も一緒に変わる ── 説明(`hint`)で先に言う。
+ */
+export const PLACE_RENAME_ACTION: EntryAction & { readonly hint: string } = {
+  action: 'place-rename-open',
+  label: '題名を直す',
+  hint: 'このノートの題名が変わります(一覧・ほかの板の付箋・リンクの表示も同じに変わります)',
+};
+
+/**
  * 🔴 **テンプレートから板を置く**(#529 W4)── 「ここに板を置く」の隣の入口。
  * 押すと 3 つのテンプレートの窓が開き、選ぶと押した位置から本文の末尾へ置かれる。
  * ⚠ 板の無いノートでも出る(`ADD_PLACE_ACTION` と同じ。1 枚目を置くと器が板になる)。

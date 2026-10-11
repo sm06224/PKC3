@@ -56,6 +56,8 @@ import {
   placeEmbeddable,
   type PlaceExcerpt,
 } from '@features/markdown/place-embed';
+import { isAppendable } from '@features/flavor/append-spec';
+import { syncPlaceAppendButton } from './place-inline';
 import { SQL_EMBED_ATTR } from '@features/markdown/sql-embed';
 import { AssetLends, type AssetLender } from './asset-lends';
 import { pruneScopes, type MermaidScope } from './mermaid-hydrate';
@@ -425,8 +427,11 @@ export class PlaceEmbeds {
       if (lid === '') continue;
       if (!embeddable(deps, lid)) {
         dropSlot(block);
+        syncPlaceAppendButton(block, lid, false);
         continue;
       }
+      // 🔴 付箋の下端の「追記」(#529 W5-a)── 追記できる型(ノート・ログ)だけ。中身がまだ読めていなくても出す
+      syncPlaceAppendButton(block, lid, isAppendable(deps.metaOf(lid)?.archetype));
       seen.add(lid);
       const ex = deps.excerptOf(lid);
       if (ex === undefined) {

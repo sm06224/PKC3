@@ -233,6 +233,14 @@ import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand
 import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
+import { appendAndSettle } from '@adapter/state/append-settle';
+import {
+  closePlaceInline,
+  openPlaceInline,
+  placeInlineOf,
+  placeInlineText,
+  showPlaceInlineNote,
+} from '../render/place-inline';
 import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
@@ -275,6 +283,7 @@ import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
   ADD_PLACE_ACTION,
+  PLACE_RENAME_ACTION,
   ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
@@ -2116,6 +2125,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'save-code-draft',
   'commit-edit',
   'append-entry',
+  // 🔑 板の付箋の上の追記 / 題名(#529 W5)── `append-entry` と同じ書込なので同じ門
+  'place-inline-commit',
   // ⚠ 選んだ全部の本文を書く(#402 ①)── 取込・書出しの最中に走らせない
   'bulk-tag-add',
   'bulk-tag-remove',
@@ -3523,6 +3534,149 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
 function menuStillFits(dispatcher: Dispatcher, target: Element): boolean {
   const was = target.getAttribute(MENU_LID_ATTR);
   return was === null || was === (dispatcher.getState().openBody?.lid ?? '');
+}
+
+/**
+ * 🔴 **そのノートを、別のタブ・窓が編集中か**(#529 W5。Gemini 裁定 2026-10-11 依頼 18 Q5 = A)。
+ *
+ * ⚠ 通すと、編集中のタブが保存したとき**そちらの内容で上書きされ**、足した字は履歴にだけ残る
+ *   (設計 `board-edit-in-place-design-2026-10.md` §3.2 の 5)。だから**断って理由を出し、打った字は欄に残す**。
+ * 🔑 問い合わせは**編集に入るときと同じ口**(`services.acquireEditLock`)── 判定を 2 本にしない(§7)。
+ *   取れたら**すぐ返す**(追記・改名は錠を握り続けない。握ると付箋 10 枚で 10 枚ぶん握る)。
+ * ⚠ **このタブが自分で編集中のノートは問い合わせない** ── 取り直して返すと自分の錠を手放す。
+ *   このタブの編集は reducer の門(`bodyWriteBlockReason`)が断る。
+ * ⚠ `unreachable`(メインのタブと通信できない)は**断らない** ── 「別のタブが編集中」とは別の事実で、
+ *   本体の追記欄も同じ状況では通る(新しい断りを板だけに足さない)。
+ */
+async function editedElsewhereReason(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  lid: string,
+): Promise<string | null> {
+  const lock = services.acquireEditLock;
+  if (!lock) return null;
+  const st = dispatcher.getState();
+  if ((st.phase === 'editing' && st.openBody?.lid === lid) || st.sectionDraft?.lid === lid) return null;
+  const grant = await lock(lid);
+  if (grant === 'granted') {
+    services.releaseEditLock?.(lid);
+    return null;
+  }
+  return grant === 'denied' ? EDIT_ELSEWHERE_ERROR : null;
+}
+
+/** 付箋の上の欄を確定する(追記 / 題名)。⚠ 断られたら**欄を閉じず、字を残して理由を言う**。 */
+async function commitPlaceInline(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  from: Element,
+): Promise<void> {
+  const el = from.closest<HTMLElement>('[data-pkc-field="place-inline"]');
+  if (el === null || el.hasAttribute('data-pkc-busy')) return;
+  const host = el.parentElement;
+  const lid = el.getAttribute('data-pkc-entry') ?? '';
+  const mode = el.getAttribute('data-pkc-mode');
+  if (host === null || lid === '') return;
+  const text = placeInlineText(el);
+  const title = text.replace(/\s+/g, ' ').trim();
+  const meta = dispatcher.getState().entryMetas.get(lid);
+  if (meta === undefined) {
+    showPlaceInlineNote(el, 'ノートが見つかりません(消されたかもしれません)');
+    return;
+  }
+  const refuse = (why: string): void => {
+    // 理由は画面の下の知らせにも出す(欄が見えない位置でも気づける)。字は欄に残す
+    dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+    if (el.isConnected) showPlaceInlineNote(el, why);
+  };
+  if (mode === 'rename') {
+    if (title === '') {
+      showPlaceInlineNote(el, '題名を入れてください');
+      return;
+    }
+    if (title === meta.title) {
+      closePlaceInline(host);
+      return;
+    }
+  } else {
+    if (text.trim() === '') {
+      showPlaceInlineNote(el, '足す字を入れてください');
+      return;
+    }
+    if (!isAppendable(meta.archetype)) {
+      refuse('このノートには追記できません(追記できるのはノートとログです)');
+      return;
+    }
+  }
+  el.setAttribute('data-pkc-busy', '');
+  try {
+    const elsewhere = await editedElsewhereReason(dispatcher, services, lid);
+    if (elsewhere !== null) {
+      refuse(elsewhere);
+      return;
+    }
+    if (mode === 'rename') {
+      dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title });
+      if (dispatcher.getState().entryMetas.get(lid)?.title !== title) {
+        refuse('いまは題名を直せません(取り込み中などです。終わってからもう一度お試しください)');
+        return;
+      }
+      if (el.isConnected) closePlaceInline(host);
+      return;
+    }
+    // 🔑 書くのは**本文の下の追記欄と同じ 1 本**(`APPEND_TO_ENTRY`)── 結末(書けた / 断られた)まで待つ
+    const r = await appendAndSettle(
+      dispatcher,
+      lid,
+      text,
+      appendHeadingFor(meta.archetype, new Date()),
+      10000,
+    );
+    if (r.ok) {
+      if (el.isConnected) closePlaceInline(host);
+      // 🔴 足したことを言い、「元に戻す」を出す(片道にしない)── 状態の行の「元に戻す」は
+      //   `noticeOpen` が `lastAppend.lid` と一致する知らせの隣に出る(`status-open.ts`)。
+      //   板の付箋は開いていないノートへ足すので、これが唯一の戻し方である。
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `『${meta.title}』の末尾に追記しました`, open: lid });
+      return;
+    }
+    refuse(
+      r.reason === 'timeout'
+        ? '書けたかどうか確かめられませんでした(ノートを開いて確かめてください。字は欄に残してあります)'
+        : (r.error ?? '追記できませんでした(いま保存中か、編集中です。少し待ってもう一度お試しください)'),
+    );
+  } finally {
+    el.removeAttribute('data-pkc-busy');
+  }
+}
+
+/** 押した付箋(`.pkc-place[data-pkc-place-entry]`)と、それを含む本文の器。 */
+function placeBlockOf(from: Element): { block: HTMLElement; host: HTMLElement; lid: string } | null {
+  const block = from.closest<HTMLElement>('.pkc-place[data-pkc-place-entry]');
+  const host = from.closest<HTMLElement>('[data-pkc-field="detail-body"]');
+  const lid = block?.getAttribute('data-pkc-place-entry') ?? '';
+  if (block === null || host === null || lid === '') return null;
+  return { block, host, lid };
+}
+
+/**
+ * 付箋の右クリックの「題名を直す」(#529 W5-b)。出せる付箋でなければ空。
+ * 受け手が読む値(`data-pkc-place-lid` / `-line`)は**この項目だけ**に載せる(`attrs`)。
+ */
+function placeRenameItem(dispatcher: Dispatcher, target: Element): MenuItem[] {
+  const hit = placeBlockOf(target);
+  if (hit === null) return [];
+  const st = dispatcher.getState();
+  if (st.entryMetas.get(hit.lid) === undefined || hit.lid === st.openBody?.lid) return [];
+  return [
+    {
+      ...PLACE_RENAME_ACTION,
+      attrs: {
+        'data-pkc-place-lid': hit.lid,
+        'data-pkc-place-line': hit.block.getAttribute('data-pkc-place-line') ?? '',
+      },
+    },
+  ];
 }
 
 /**
@@ -7574,6 +7728,59 @@ const ACTIONS: Record<string, ActionHandler> = {
     appSearchHistory.clear();
     paintSearchHistory(root);
     services.showStatus?.('検索した語の記録を消しました');
+  },
+  /**
+   * 🔴 **板の付箋の下端の「追記」**(#529 W5-a)── 押すと付箋の下に小さな欄が開く。
+   * ⚠ 追記先は**押した付箋のノート**(ボタンの `data-pkc-entry`)── `selectedLid` は読まない
+   *   (板では「選んでいるノート」と「付箋のノート」が別物)。書くのは `place-inline-commit` の 1 本。
+   */
+  'place-append-open': (dispatcher, target) => {
+    const hit = placeBlockOf(target);
+    const lid = target.getAttribute('data-pkc-entry') ?? '';
+    if (hit === null || lid === '') return;
+    const meta = dispatcher.getState().entryMetas.get(lid);
+    if (meta === undefined || !isAppendable(meta.archetype)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このノートには追記できません(追記できるのはノートとログです)' });
+      return;
+    }
+    openPlaceInline(hit.host, hit.block, 'append', lid, '');
+  },
+  /**
+   * 🔴 **付箋の右クリック「題名を直す」**(#529 W5-b)── 付箋の上に題名の欄が開く。
+   * 押した付箋は、メニューが運んだ `lid` と開き行の行番号(同じノートを 2 枚置いた回の取り違えを防ぐ)から引く。
+   */
+  'place-rename-open': (dispatcher, target, _services, root) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const lid = target.getAttribute('data-pkc-place-lid') ?? '';
+    const line = target.getAttribute('data-pkc-place-line');
+    const host = viewBodyHost(root);
+    if (host === null || lid === '') return;
+    const blocks = [...host.querySelectorAll<HTMLElement>('.pkc-place[data-pkc-place-entry]')].filter(
+      (b) => b.getAttribute('data-pkc-place-entry') === lid,
+    );
+    const block = blocks.find((b) => b.getAttribute('data-pkc-place-line') === line) ?? blocks[0];
+    const meta = dispatcher.getState().entryMetas.get(lid);
+    if (block === undefined || meta === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '付箋のノートが見つかりません(消されたかもしれません)' });
+      return;
+    }
+    openPlaceInline(host, block, 'rename', lid, meta.title);
+  },
+  'place-inline-commit': (dispatcher, target, services) => {
+    void commitPlaceInline(dispatcher, services, target);
+  },
+  /** 欄を閉じる(字は捨てる ── 確定前なのでノートは 1 バイトも変わらない)。 */
+  'place-inline-cancel': (_dispatcher, target) => {
+    const host = target.closest<HTMLElement>('[data-pkc-field="detail-body"]');
+    if (host === null) return;
+    const lid = placeInlineOf(host)?.getAttribute('data-pkc-entry') ?? '';
+    closePlaceInline(host);
+    // 焦点を付箋の「追記」へ返す(キーボードで来た人が迷子にならない)
+    for (const b of host.querySelectorAll<HTMLElement>('[data-pkc-field="place-append"]'))
+      if (b.getAttribute('data-pkc-entry') === lid) {
+        b.focus();
+        break;
+      }
   },
   'append-entry': (dispatcher, _target, _services, root) => {
     const s = dispatcher.getState();
@@ -13233,6 +13440,24 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing) return;
+    /**
+     * 🔴 **板の付箋の上の欄**(#529 W5)── Enter で確定 / Esc でやめる。
+     * ⚠ 追記は **Shift+Enter が改行**。題名は 1 行なので改行は入れない。
+     * ⚠ `isComposing` は上で弾き済みだが、Safari は変換を確定した Enter が `isComposing: false` で
+     *   届く(`keyCode` 229)── 日本語で書く人が打ち終わる前に飛ばないよう、これも見る。
+     */
+    if (field === 'place-inline-input') {
+      const mode = (ke.target as HTMLElement).closest('[data-pkc-field="place-inline"]')?.getAttribute('data-pkc-mode');
+      if (ke.key === 'Enter' && ke.keyCode !== 229 && (mode === 'rename' || !ke.shiftKey)) {
+        ke.preventDefault();
+        run('place-inline-commit', ke.target as HTMLElement);
+      } else if (ke.key === 'Escape') {
+        ke.preventDefault();
+        ke.stopPropagation();
+        run('place-inline-cancel', ke.target as HTMLElement);
+      }
+      return;
+    }
     // 🔴 添付の改名欄の Enter = 確定(#1264 §1)── 字が同じでもファイル名を揃える
     if (ke.key === 'Enter' && field === 'attachment-rename') {
       commitAttachmentName(ke.target);
@@ -15460,6 +15685,12 @@ export function bindActions(
               ...a,
               attrs: { [MENU_TASK_LINES_ATTR]: taskLines.join(',') },
             }))),
+        /**
+         * 🔴 **付箋の上なら「題名を直す」を頭に足す**(#529 W5-b)。⚠ 置いたノートが居る付箋だけ
+         *   (「(見つかりません)」の付箋・自分自身を置いた塊では出さない ── 押しても直せない口を出さない)。
+         *   相手は**押した付箋のノート**で、板のノート(`MENU_LID_ATTR`)ではない。
+         */
+        ...placeRenameItem(dispatcher, target),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
         ADD_PLACE_TEMPLATE_ACTION,

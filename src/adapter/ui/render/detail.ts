@@ -1181,6 +1181,21 @@ export class DetailRenderer {
   }
 
   /**
+   * 🔴 **置いたノートの題名が変わったら、付箋の題名のバーだけ当て直す**(#529 W5-b)。
+   * ⚠ 直す前は、置いたノートの題名を変えても(一覧・情報ペイン・別の窓から)**板を開き直すまで付箋の
+   *   バーが古い題名のまま**だった ── 付箋の上で題名を直せるようにしたので、直した字が付箋に出ないと
+   *   「効いていない」に見える。`applyPlaceLayout` は題名の変化を自分で見て当て直す(冪等)。
+   * ⚠ 板が 1 枚も無い本文では何もしない(`entryMetas` はよく動く ── 板でない本文の描画を増やさない)。
+   */
+  private syncPlaceTitles(): void {
+    const host = this.bodyHost;
+    const body = this.lastBody;
+    if (host === null || body === null || this.bodyKind !== 'md') return;
+    if (host.querySelector('.pkc-place[data-pkc-place-entry]') === null) return;
+    this.layoutPlace(host, body);
+  }
+
+  /**
    * 🔴 **板の置き(位置・大きさ・線)を、いま描いてある本文へ当てる**(冪等)。
    * ⚠ 描画の後(`paint`)と、添付ノートの抜粋が届いた回(`syncPlaceEmbeds`)の**2 か所が通る 1 本**
    *   ── 別々に書くと、「中身を出す塊」の判定が割れる(§7)。
@@ -1319,6 +1334,7 @@ export class DetailRenderer {
       this.metasRef = state.entryMetas;
       this.cidRef = selfContainerId(state);
       this.syncMissingLinks();
+      this.syncPlaceTitles();
     }
     /**
      * 🔴 **板のための抜粋が動いたら、本文は描き直さず中身の器だけ当て直す**(#529 W3-①)。
