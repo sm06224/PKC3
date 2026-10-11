@@ -73,6 +73,8 @@ interface Column {
   readonly head: HTMLButtonElement;
   readonly weekday: HTMLElement;
   readonly date: HTMLElement;
+  /** 祝日の名前(小さく薄い字)。祝日でない日は隠す。 */
+  readonly holiday: HTMLElement;
   readonly allDay: HTMLElement;
   readonly lane: HTMLElement;
 }
@@ -146,7 +148,10 @@ export class ScheduleWeek {
       weekday.setAttribute('data-pkc-field', 'schedule-weekview-weekday');
       const date = document.createElement('span');
       date.setAttribute('data-pkc-field', 'schedule-weekview-date');
-      headBtn.append(weekday, date);
+      const holidayText = document.createElement('span');
+      holidayText.setAttribute('data-pkc-field', 'schedule-weekview-holiday');
+      holidayText.hidden = true;
+      headBtn.append(weekday, date, holidayText);
       heads.append(headBtn);
 
       // ⚠ 札の器は一覧と同じ名前(`schedule-cards`)── 掴む・長押しの判定がこの名前の直下の札を見る
@@ -159,7 +164,7 @@ export class ScheduleWeek {
       lane.setAttribute('data-pkc-region', 'schedule-cards');
       lane.setAttribute('data-pkc-field', 'schedule-weekview-lane');
       lanes.append(lane);
-      this.columns.push({ head: headBtn, weekday, date, allDay, lane });
+      this.columns.push({ head: headBtn, weekday, date, holiday: holidayText, allDay, lane });
     }
     grid.append(lanes);
     this.scroller.append(grid);
@@ -223,7 +228,11 @@ export class ScheduleWeek {
       if (holiday !== null) {
         col.head.setAttribute('data-pkc-holiday', '');
         col.head.title = holiday;
+        if (col.holiday.textContent !== holiday) col.holiday.textContent = holiday;
+        col.holiday.hidden = false;
       } else {
+        col.holiday.textContent = '';
+        col.holiday.hidden = true;
         col.head.removeAttribute('data-pkc-holiday');
         col.head.removeAttribute('title');
       }

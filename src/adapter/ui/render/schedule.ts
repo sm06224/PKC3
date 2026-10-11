@@ -98,6 +98,11 @@ export function shownExtrasText(state: {
   return on.length === 0 ? '' : `${on.join('・')}も表示中`;
 }
 
+/** 「出すもの」のボタンの字。隠れている分が 1 件でもあれば `(N)` を添える(0 のときは付けない)。 */
+export function foldButtonText(hidden: number): string {
+  return hidden > 0 ? `出すもの(${hidden})` : '出すもの';
+}
+
 /** 落とし先を表す属性。⚠ **空文字 = 日付なし**(属性が無いのとは別物)。 */
 export const DROP_DATE = 'data-pkc-drop-date';
 
@@ -135,6 +140,7 @@ export class ScheduleRenderer {
      */
     fold: HTMLDetailsElement;
     foldNote: HTMLElement;
+    foldButton: HTMLElement;
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
@@ -273,9 +279,19 @@ export class ScheduleRenderer {
       dated.length + notes.length,
       groups.length,
     );
-    this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
-    this.paintDoneToggle(frame.done, state, all, filter);
-    this.paintArchivedToggle(frame.archived, state, all);
+    const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
+    const doneCount = this.paintDoneToggle(frame.done, state, all, filter);
+    const archivedCount = this.paintArchivedToggle(frame.archived, state, all);
+    /**
+     * 🔴 **「出すもの(N)」= いま隠れている分の合計**(#855。Gemini 裁定 = #1163 の依頼 12-C)。
+     * ⚠ 3 つのチェックと**同じ数**から足す(別に数え直すと、中の `(N)` と食い違う)。出している切替の分は隠れていないので足さない。
+     */
+    const hiddenTotal =
+      (state.showDoneTasks ? 0 : doneCount) +
+      (state.showArchived ? 0 : archivedCount) +
+      (state.showUndatedTasks ? 0 : undatedCount);
+    const foldLabel = foldButtonText(hiddenTotal);
+    if (frame.foldButton.textContent !== foldLabel) frame.foldButton.textContent = foldLabel;
     const foldText = shownExtrasText(state);
     if (frame.foldNote.textContent !== foldText) frame.foldNote.textContent = foldText;
     frame.foldNote.hidden = foldText === '';
@@ -456,9 +472,10 @@ export class ScheduleRenderer {
   }
 
   /** 「日付のない項目も出す」の切替。⚠ **押しても何も起きないボタンを出さない**。 */
-  private paintUndatedToggle(box: HTMLInputElement, state: AppState, undated: number): void {
+  private paintUndatedToggle(box: HTMLInputElement, state: AppState, undated: number): number {
     const show = undated > 0 || state.showUndatedTasks;
     setOption(box, show, state.showUndatedTasks, `日付のないもの(${undated})`);
+    return undated;
   }
 
   /**
@@ -471,7 +488,7 @@ export class ScheduleRenderer {
     state: AppState,
     all: readonly TaskCard[],
     filter: EntryFilter,
-  ): void {
+  ): number {
     // ⚠ 数えるのは**この面に出る条件を満たしたうえで済んでいる**もの
     const hidden = all.filter((c) => {
       if (!c.done) return false;
@@ -483,6 +500,7 @@ export class ScheduleRenderer {
     }).length;
     const show = hidden > 0 || state.showDoneTasks;
     setOption(box, show, state.showDoneTasks, `済み(${hidden})`);
+    return hidden;
   }
 
   /**
@@ -493,7 +511,7 @@ export class ScheduleRenderer {
     box: HTMLInputElement,
     state: AppState,
     all: readonly TaskCard[],
-  ): void {
+  ): number {
     // ⚠ 行の札とノートの予定の**両方**を数える(片方だけ数えると 0 件に見える)
     const lids = new Set<string>();
     for (const c of all) if (state.entryMetas.get(c.lid)?.archived === true) lids.add(c.lid);
@@ -501,6 +519,7 @@ export class ScheduleRenderer {
       if (m.archived && m.date !== null) lids.add(lid);
     const show = lids.size > 0 || state.showArchived;
     setOption(box, show, state.showArchived, `片付けたもの(${lids.size})`);
+    return lids.size;
   }
 
   /**
@@ -788,7 +807,7 @@ export class ScheduleRenderer {
     this.day.el.hidden = true;
     this.week.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, this.week.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, toggles, groups, modes, quickDate: qDate };
+    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

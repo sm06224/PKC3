@@ -70,4 +70,33 @@ describe('予定の面の祝日と土日(#855)', () => {
       false, true, true, true, false, false, false,
     ]);
   });
+
+  it('🔴 名前は字として出る(依頼 12-A):「日」と「週」の祝日の下に小さく出し、祝日でない日は隠す。小さな月は title だけ', () => {
+    const day = paint({ scheduleMode: 'day', scheduleDay: '2026-09-22' });
+    const dn = day.querySelector<HTMLElement>('[data-pkc-field="schedule-day-holiday"]')!;
+    expect(dn.textContent).toBe('国民の休日');
+    expect(dn.hidden).toBe(false);
+    const dayPlain = paint({ scheduleMode: 'day', scheduleDay: '2026-09-24' });
+    const dp = dayPlain.querySelector<HTMLElement>('[data-pkc-field="schedule-day-holiday"]')!;
+    expect([dp.textContent, dp.hidden]).toEqual(['', true]);
+
+    const week = paint({ scheduleMode: 'week', scheduleDay: '2026-09-22' });
+    const names = [...week.querySelectorAll<HTMLElement>('[data-pkc-field="schedule-weekview-holiday"]')];
+    expect(names.map((n) => n.textContent)).toEqual(['', '敬老の日', '国民の休日', '秋分の日', '', '', '']);
+    expect(names.map((n) => n.hidden)).toEqual([true, false, false, false, true, true, true]);
+    // 同じ描画器で週を替えても、前の週の名前が残らない
+    const region = document.createElement('div');
+    const r = new ScheduleRenderer(region, () => TODAY);
+    r.render({ ...initialState, scheduleMode: 'week', scheduleDay: '2026-09-22' });
+    r.render({ ...initialState, scheduleMode: 'week', scheduleDay: '2026-09-09' });
+    expect(
+      [...region.querySelectorAll('[data-pkc-field="schedule-weekview-holiday"]')].map((n) => n.textContent),
+    ).toEqual(['', '', '', '', '', '', '']);
+
+    // 小さな月は字を増やさない(title のみ)
+    const month = paint({ calendarMonth: { year: 2026, month: 9 } });
+    const grid = month.querySelector('[data-pkc-field="schedule-grid"]')!;
+    expect(grid.textContent).not.toContain('敬老の日');
+    expect(grid.querySelector('[data-pkc-field$="-holiday"]')).toBeNull();
+  });
 });
