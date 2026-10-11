@@ -323,7 +323,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   `view-asset` / `download-asset` と同じ仕分け)。
     // ⚠ 2026-10-11(#529 W2 / W4): N +2(`add-place-template` / `place-rect`。右クリックのメニューが座標や行を運ぶ ──
     //   押した所から要る物はメニューの属性で、`add-place` / `raise-place` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 193 });
+    // ⚠ 2026-10-11: N +2(`copy-entry-link` / `copy-asset-link`。右クリック・右の情報・添付の詳細の「リンクをコピー」──
+    //   押した行は `rowLidOrSelected` が決め、添付の key は押したボタン自身 / 開いている本文が運ぶ。`copy-entry-ref` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 195 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

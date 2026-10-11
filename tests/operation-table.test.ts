@@ -475,6 +475,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11: 「リンクをコピー」(`copy-entry-link`。登記 +1 / 受け手 +1 / 両方 +1)と「添付のリンクをコピー」
+      //   (`copy-asset-link`。行のメニューに登記 +1 / 受け手 +1 / 両方 +1)で `total` +2 / `receivers` +2 / `registered` +2 / `both` +2。
       // ⚠ 2026-10-11(#1376): 起動したときの 1 行の「戻す」「消す」(`restore-draft` / `discard-draft`)で受け手 +2 ── 登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-11(#683 段③): 画像の添付の「画像に描き込む」(`draw-on-image`)で受け手 +1 ── 登記は増えない
       //   (押し口は添付の詳細の 1 行にしか無く、鍵も持たない。押した添付の key が要る P1 ── `view-asset` と同じ置き場)。
@@ -777,10 +779,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-11(#529 W2 / W4): 「テンプレートから板を置く…」(`add-place-template`)と枠の「位置と大きさ…」(`place-rect`)で
       //   受け手 +2 ── 登記は増えない(押し口は本文 / 枠の右クリックの中にしか無く、押した座標や行をメニューが運ぶので名前だけでは呼べない。
       //   `add-place` / `raise-place` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
-      total: 405,
-      receivers: 339,
-      registered: 111,
-      both: 45,
+      total: 407,
+      receivers: 341,
+      registered: 113,
+      both: 47,
       outsideActionsTable: 66,
       unregistered: 294,
     });
@@ -794,6 +796,9 @@ describe('操作の全数台帳(#582 段①)', () => {
    */
   it('🔴 登記簿をまたぐ id は、名指しの 2 件だけ', () => {
     expect(s().sharedBooks).toEqual([
+      // ⚠ 2026-10-11: 「リンクをコピー」(外から開けるリンク)── 右クリックと右の情報の表(`entry`)と、
+      //    「操作を探す」(`key`)の両方に出す。受け手は情報ペインのボタン 1 つ(橋は `SHORTCUT_BUTTON`)
+      { id: 'copy-entry-link', books: ['key', 'entry'] },
       { id: 'cycle-read-columns', books: ['key', 'body'] },
       // ⚠ 2026-09-04(#690 I5): 鍵(Alt+Shift+W)と「操作を探す」から届くように
       //    `KEY_COMMANDS` にも登記した ── 受け手は情報ペインのボタン 1 つ(橋は `SHORTCUT_BUTTON`)
@@ -830,9 +835,10 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-10(#1455 (b)): 右の列(`collectionPane`)が 4 → 5(`export-markdown-folder`)
     // ⚠ 2026-10-10(#1440): 行のメニューが 17 → 18(`export-entry-markdown`)、鍵が 82 → 83(`export-note-markdown`。鍵の既定は持たない)
     // ⚠ 2026-10-11(#1377): 行のメニューが 18 → 20(`bookmark-note-add` / `bookmark-note-remove`)
+    // ⚠ 2026-10-11: 行のメニューが 20 → 22(`copy-entry-link` / `copy-asset-link`)、鍵が 83 → 84(`copy-entry-link`。鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 83,
-      entry: 20,
+      key: 84,
+      entry: 22,
       body: 3,
       collection: 2,
       collectionPane: 5,

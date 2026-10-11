@@ -70,6 +70,8 @@ function actionButtons(root: HTMLElement): HTMLButtonElement[] {
 const EXPECTED_ACTIONS: readonly string[] = [
   // 🔴 写す 2 つを隣に、その次に小窓(#690 I2、2026-09-04)── 右クリックと同じ並び
   'copy-entry-ref',
+  // 🔴 外から開けるリンク(2026-10-11)── 参照の隣
+  'copy-entry-link',
   'copy-plain-markdown',
   // 🔴 付箋(#685 段②、2026-09-04)── ⋯ と情報ペインの両方に出す
   'open-note-window',
@@ -82,6 +84,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry-docx',
   'export-entry-pptx',
   'export-entry-pdf',
+  // 🔴 本文そのままの .md(2026-10-11 から右の列にも)── PDF の直後
+  'export-entry-markdown',
   'show-history',
   // 🔴 左の列の整理 3 つ(#215)── 右クリックと同じ並び(履歴の下・削除の上)
   'rename-entry-begin',

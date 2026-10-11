@@ -699,7 +699,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)。
    *
-   * 🔑 本文をそのまま 1 つの .md にして落とす。入口は右クリックと「操作を探す」だけ(右の列には置かない)。
+   * 🔑 本文をそのまま 1 つの .md にして落とす。入口は右クリック・右の列(2026-10-11 から)・「操作を探す」。
    * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)。
    * ⚠ 実体は右クリックの `export-entry-markdown` と同じ(`services.exportEntryMarkdown`)── 口を 2 つ作らない。
    */
@@ -733,6 +733,21 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     whileTyping: true,
     note: 'マニュアルだけのウィンドウを開きます。編集中に押しても、書いている本文はそのままです',
     alias: 'マニュアル ヘルプ 説明書 使い方 ウィンドウ',
+  },
+  /**
+   * 🔴 **このノートのリンクをコピー**(2026-10-11、外から開けるリンク)。
+   *
+   * 🔑 右クリック・右の情報と**同じ字**(`entry-actions.ts` の `copy-entry-link`)── 受け手は情報ペインのボタン
+   *   (`binder.ts` の `SHORTCUT_BUTTON`)。本文に貼る「参照をコピー」とは別の物(説明で言い分ける)。
+   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)── 名前で呼ぶだけの操作。
+   */
+  {
+    id: 'copy-entry-link',
+    label: 'リンクをコピー', // ⚠ 字の正本は `entry-actions.ts`(同じ字であることを test が見る)
+    contexts: ['global'],
+    defaults: [],
+    note: 'ブラウザやメールに貼ると、この PKC のこのノートが開くリンクをコピーします(本文に貼る参照とは別です)',
+    alias: 'パーマリンク URL アドレス 共有 permalink',
   },
   /**
    * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5、2026-09-04)。

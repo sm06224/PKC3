@@ -197,6 +197,12 @@ test('🔴 参照をコピーして別のノートに貼ると、押してその
   const ref = await page.evaluate(() => navigator.clipboard.readText());
   expect(ref, '貼れる 1 行になっていない').toMatch(/^\[先週の議事録\]\(entry:.+\)$/);
 
+  // ②' 🔴 同じノートの「リンクをコピー」(2026-10-11)── ブラウザやメールに貼る形。参照とは別の物
+  await copyAndWait(page, 'copy-entry-link');
+  const permalink = await page.evaluate(() => navigator.clipboard.readText());
+  expect(permalink, 'ブラウザに貼れるリンクになっていない').toMatch(/#pkc\?container=[^&]+&entry=[^&]+$/);
+  expect(permalink, '参照(entry:)がコピーされている').not.toContain('](entry:');
+
   // ③ 別のノートに貼る
   await createEntry(page, 'text');
   const t2 = page.locator('[data-pkc-field="editor-title"]');
@@ -214,6 +220,23 @@ test('🔴 参照をコピーして別のノートに貼ると、押してその
   await expect(
     page.locator('[data-pkc-field="detail-body"]'),
     '押しても相手のノートが開かない',
+  ).toContainText('先週の中身', { timeout: 15_000 });
+
+  /**
+   * ⑤ 🔴 **コピーしたリンクを開くと、同じノートが開く**(2026-10-11)。いま居るのは「先週」なので、
+   *   いったん別のノート(今週)へ移ってから、アドレスの断片にリンクを入れる(貼って開くのと同じ入口)。
+   */
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '今週の会議' }).first().click();
+  await expect(page.locator('[data-pkc-field="detail-body"]'), '前提: 今週のノートに移れていない').toContainText(
+    '続き:',
+    { timeout: 15_000 },
+  );
+  await page.evaluate((u) => {
+    window.location.hash = new URL(u).hash;
+  }, permalink);
+  await expect(
+    page.locator('[data-pkc-field="detail-body"]'),
+    'リンクを開いても同じノートが開かない',
   ).toContainText('先週の中身', { timeout: 15_000 });
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

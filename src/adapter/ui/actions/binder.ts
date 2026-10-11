@@ -627,7 +627,8 @@ import {
 } from '@features/query/sql-local-file';
 import { duckDbNetworkNoteOf } from '@features/query/sql-guest-source';
 import { sqlMenuLabel } from '@features/query/sql-tip';
-import { ATTACHMENT_NAME_ATTR, attachmentFileName } from '@features/flavor/attachment-flavor';
+import { ATTACHMENT_NAME_ATTR, attachmentFileName, readAttachmentMeta } from '@features/flavor/attachment-flavor';
+import { assetPermalink, entryPermalink } from '@adapter/platform/deep-link';
 import { PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import {
   asSqlExportKind,
@@ -1622,7 +1623,7 @@ export interface BinderServices {
    * 添付の携帯参照(`pkc://<自分>/asset/<key>`)から**所有ノートへ飛ぶ**(#100 段②)。
    * ⚠ 見つからないときは黙らない(OP_FAILED で断る ── 無言の dead click を作らない)。
    */
-  navigateAssetRef?(assetKey: string): void;
+  navigateAssetRef?(assetKey: string, what?: '参照' | 'リンク', ownerLid?: string | null): void;
   /**
    * 編集権を取る(#177 多重タブ ── 同じノートの 2 枚目編集を止める)。
    * false = 別のタブが編集中。⚠ 判断(台帳)は storage proxy 側が持つ。
@@ -9987,7 +9988,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **字は `copyText` に渡す**(動線レビュー 欠陥 2)── ここで `showStatus` を
      *   撃っても、clipboard の `.then` が**12ms 後に上書きする**(実測)。
      */
-    services.copyText?.(ref, 'ノートへのリンクをコピーしました(本文に貼れます)');
+    services.copyText?.(ref, 'ノートの参照をコピーしました(本文に貼れます)');
     flashCopied(target);
   },
   /**
@@ -10105,6 +10106,55 @@ const ACTIONS: Record<string, ActionHandler> = {
         error: `外部の画像を取り込めませんでした(${e instanceof Error ? e.message : String(e)})`,
       });
     });
+  },
+  /**
+   * 🔴 **このノートの外から開けるリンクをコピー**(2026-10-11)。解決規則は `copy-entry-ref` と同じ
+   *   (`rowLidOrSelected`)。⚠ 組むのは `deep-link.ts` の `entryPermalink` 1 本 ── `location` を読むのはあちら。
+   * ⚠ 組めないときは黙らず理由を出す。
+   */
+  'copy-entry-link': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを選んでから押してください' });
+      return;
+    }
+    const url = entryPermalink(st.cid, lid);
+    if (url === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このノートのリンクを作れませんでした(この PKC のアドレスが読めません)' });
+      return;
+    }
+    services.copyText?.(url, 'ノートのリンクをコピーしました(ブラウザやメールに貼れます)');
+    flashCopied(target);
+  },
+  /**
+   * 🔴 **添付の外から開けるリンクをコピー**(2026-10-11)。key は押した要素(添付の詳細のボタン)が
+   *   持っていればそれ、無ければ(右クリック)**開いている添付ノートの本文**から引く。
+   */
+  'copy-asset-link': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    let key = target.closest<HTMLElement>('[data-pkc-asset-key]')?.getAttribute('data-pkc-asset-key') ?? null;
+    // 🔴 持ち主の添付ノート(同じ file を 2 つのノートに付けると key が同じ ── リンクに持ち主を載せる)
+    let owner: string | null =
+      target.closest<HTMLElement>('[data-pkc-asset-owner]')?.getAttribute('data-pkc-asset-owner') ?? null;
+    if (key === null || key === '') {
+      const lid = rowLidOrSelected(st, target);
+      owner = lid;
+      // ⚠ 本文は**開いているノートの物**でなければならない(別の添付の key を写さない)
+      const body = lid !== null && st.openBody?.lid === lid ? st.openBody.body : null;
+      key = body === null ? null : readAttachmentMeta(body).assetKey || null;
+      if (body === null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートを開き終わってからもう一度押してください' });
+        return;
+      }
+    }
+    const url = key === null ? null : assetPermalink(st.cid, key, owner);
+    if (url === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'この添付のリンクを作れませんでした(添付の実体が見つかりません)' });
+      return;
+    }
+    services.copyText?.(url, '添付のリンクをコピーしました(ブラウザやメールに貼れます)');
+    flashCopied(target);
   },
   'copy-asset-ref': (_dispatcher, target, services) => {
     // ⚠ 渡すのは**貼れる 1 行**(`![名前](asset:key)`)── 裸の `asset:key` を
@@ -11901,6 +11951,8 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    *   「操作を探す」は「いまこの操作のボタンが画面に出ていません」と正しく言う。
    */
   'open-note-window': '[data-pkc-field="inspector-actions"] [data-pkc-action="open-note-window"]',
+  // 🔴 外から開けるリンク(2026-10-11)── 情報ペインのボタンに限る(`open-note-window` と同じ理由)
+  'copy-entry-link': '[data-pkc-field="inspector-actions"] [data-pkc-action="copy-entry-link"]',
   'open-settings': '[data-pkc-action="set-view"][data-pkc-view="settings"]',
   'open-flags': '[data-pkc-action="set-view"][data-pkc-view="flags"]',
   'open-help': '[data-pkc-action="set-view"][data-pkc-view="help"]',
@@ -15247,6 +15299,9 @@ export function bindActions(
           (a) =>
             a.action !== 'move-to-folder' &&
             a.action !== 'copy-plain-markdown' &&
+            // 🔴 `copy-asset-link` も同じ理由(添付の key は `openBody.lid === lid` の本文からしか引けない ──
+            //   この分岐は `selectedLid` / `openBody` を動かさないので、押しても必ず断られる)
+            a.action !== 'copy-asset-link' &&
             a.action !== 'start-edit',
         )
         .map((a): MenuItem =>

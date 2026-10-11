@@ -119,6 +119,7 @@ import {
   type SandboxBlockedKind,
 } from '@features/markdown/external-images';
 import { MarkdownClient } from '@adapter/platform/render/markdown-client';
+import { ENTRY_ACTION_HINTS, ENTRY_ACTION_LABELS } from '@features/entry-actions';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -3205,6 +3206,20 @@ export class DetailRenderer {
       copy.title = '本文に貼ると、この添付がそこに出ます';
       copy.textContent = '参照をコピー';
       info.append(copy);
+      /**
+       * 🔴 **外から開けるリンク**(2026-10-11)── 「参照」は本文に貼る物、こちらはブラウザやメールに貼る物。
+       * ⚠ 字・説明は右クリックと同じ表(`ENTRY_MENU_ACTIONS` の `copy-asset-link`)から引く。
+       *   key は押した要素が持つ(`data-pkc-asset-key`)── 押してから選択が移っても別の添付にならない。
+       */
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.setAttribute('data-pkc-action', 'copy-asset-link');
+      link.setAttribute('data-pkc-field', 'copy-asset-link');
+      link.setAttribute('data-pkc-asset-key', meta.assetKey);
+      link.setAttribute('data-pkc-asset-owner', lid);
+      link.title = ENTRY_ACTION_HINTS['copy-asset-link']!;
+      link.textContent = ENTRY_ACTION_LABELS['copy-asset-link']!;
+      info.append(link);
       /**
        * 🔴 **詳細画面から起動する**(P10、user 指示 2026-08-05
        * 「HTML アセットの詳細画面から起動できない」)。

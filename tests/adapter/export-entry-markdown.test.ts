@@ -4,7 +4,7 @@
  *
  * 守るもの:①落ちる file の**名前**(題名 + 今日、拡張子 `.md`)②**本文が 1 バイトも変わらない**
  * (日本語・frontmatter・コードの囲み・CRLF)③**入らない添付を数えて言う**(0 件なら黙る)
- * ④編集中は**読む前に**断る ⑤入口が右クリックと「操作を探す」だけ(右の列には無い)。
+ * ④編集中は**読む前に**断る ⑤入口が右クリック・右の列(2026-10-11〜)・「操作を探す」の 3 つ。
  *
  * ⚠ ②の観測点は**落ちた Blob の中身**(`text()`)── 「ダウンロードが始まった」だけを見ると、
  *   空の file でも本文を整形した file でも通る。
@@ -147,7 +147,7 @@ describe('exportEntryMarkdown(#1440)', () => {
   });
 });
 
-describe('入口(#1440)── 右クリックと「操作を探す」だけ', () => {
+describe('入口(#1440)── 右クリック・右の列・「操作を探す」', () => {
   const meta = (lid: string, archetype: string): EntryMeta => ({
     lid,
     title: 't',
@@ -171,8 +171,10 @@ describe('入口(#1440)── 右クリックと「操作を探す」だけ', ()
     }
   });
 
-  it('🔴 右の列には出ない(menuOnly。実際に描いて確かめる)', () => {
-    expect(ENTRY_MENU_ACTIONS.find((a) => a.action === 'export-entry-markdown')?.menuOnly).toBe(true);
+  it('🔴 右の列にも出る(PDF の直後。実際に描いて確かめる)', () => {
+    // 2026-10-11 に反転: 以前は「右の列に出ない」を pin していた(利用者の報告で想定が外れた)。
+    // ⚠ 前処理・対照群も反転側で見直した ── 「出ている」を言うには、描けていること・位置・押せなくなることまで要る
+    expect(ENTRY_MENU_ACTIONS.find((a) => a.action === 'export-entry-markdown')?.menuOnly).not.toBe(true);
     const root = document.createElement('div');
     document.body.append(root);
     const inspector = new InspectorRenderer(buildShell(root).inspector);
@@ -182,13 +184,30 @@ describe('入口(#1440)── 右クリックと「操作を探す」だけ', ()
       metas: [meta('n1', 'text')],
       relations: [],
     }).state;
-    inspector.render(reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state);
-    const all = [...root.querySelectorAll('[data-pkc-region="inspector"] [data-pkc-action]')].map((e) =>
-      e.getAttribute('data-pkc-action'),
-    );
+    const selected = reduce(s, { type: 'SELECT_ENTRY', lid: 'n1' }).state;
+    inspector.render(selected);
+    const btns = (): HTMLButtonElement[] => [
+      ...root.querySelectorAll<HTMLButtonElement>('[data-pkc-region="inspector"] [data-pkc-action]'),
+    ];
+    const all = btns().map((e) => e.getAttribute('data-pkc-action'));
     // 対照群:隣の書き出しは出ている(描けていることの証拠)
-    expect(all, '右の列が描けていない(空振り)').toContain('export-entry-html');
-    expect(all, '右の列に出てしまっている').not.toContain('export-entry-markdown');
+    expect(all, '右の列が描けていない(空振り)').toContain('export-entry-pdf');
+    // 位置: PDF の直後(他の書き出しと同じ群れに並ぶ)
+    expect(all[all.indexOf('export-entry-pdf') + 1], 'PDF の直後に並んでいない').toBe('export-entry-markdown');
+    const md = btns().find((b) => b.getAttribute('data-pkc-action') === 'export-entry-markdown')!;
+    expect(md.hidden, '畳まれている').toBe(false);
+    expect(md.textContent).toContain('Markdown で書き出す');
+    expect(md.disabled, '読めるときに押せない').toBe(false);
+    // 編集中は他の書き出しと同じく押せなくなる(対照: PDF も同じ向き)
+    // ⚠ 本文が届いていないと `START_EDIT` は入らない(前提を assert して「前提が崩れている」と読める形にする)
+    const loaded = reduce(selected, { type: 'BODY_LOADED', lid: 'n1', body: '本文\n' }).state;
+    const editing = reduce(loaded, { type: 'START_EDIT' }).state;
+    expect(editing.phase, '編集に入れていない(台の前提が崩れている)').toBe('editing');
+    inspector.render(editing);
+    const pdf = btns().find((b) => b.getAttribute('data-pkc-action') === 'export-entry-pdf')!;
+    const md2 = btns().find((b) => b.getAttribute('data-pkc-action') === 'export-entry-markdown')!;
+    expect(pdf.disabled, '対照の PDF が編集中に押せる(前提が崩れている)').toBe(true);
+    expect(md2.disabled, '編集中に Markdown の書き出しが押せる').toBe(true);
   });
 
   it('🔴 「操作を探す」には鍵なしで 1 行出る', () => {
