@@ -592,7 +592,7 @@ describe('🔴 帯の置き場', () => {
     expect(
       FULL_WIDTH_AREAS,
       '全幅の帯を引けていない(空振り)。帯を増減したらこの数も直す',
-    ).toEqual(['capture', 'timers', 'alarms', 'announce', 'update', 'notices', 'status']);
+    ).toEqual(['capture', 'timers', 'alarms', 'announce', 'update', 'draft', 'notices', 'status']);
     /**
      * 🔴 **宣言した名前が、どれも基準の版面に出ていること**(2026-08-29 の着地前レビュー)。
      *
@@ -903,6 +903,8 @@ describe('お知らせの文面は固定(#220-7)', () => {
    *   意味は変えていない(言葉の置き換えだけ)ので、既読の user に再び見せる必要は無い。
    */
   const KNOWN: readonly [id: string, digest: string][] = [
+    /** ⚠ **#1376 で足した**(2026-10-11)。枠が満杯だったので、いちばん古い 1 件(`2026-10-03-recent-commands-palette`)を落とした ── 原本は `CHANGELOG.md`(2026-10-03 の節)。 */
+    ['2026-10-11-draft-recovery', 'f7d72beb'],
     /** ⚠ **#275 で足した**(2026-10-11)。枠が満杯だったので、いちばん古い 1 件(`2026-10-03-pdf-reader-offline-idle`)を落とした ── 原本は `CHANGELOG.md`(2026-10-03 の節)。 */
     ['2026-10-11-pdf-page-edit', '75c25fc7'],
     /** ⚠ **#683 で足した**(2026-10-11)。枠が満杯だったので、いちばん古い 1 件(`2026-10-03-duckdb-sqlite-fts`)を落とした ── 原本は `CHANGELOG.md`(2026-10-03 の節)。 */
@@ -1001,8 +1003,6 @@ describe('お知らせの文面は固定(#220-7)', () => {
     ['2026-10-03-asr-pack-shipped', '98de15b9'],
     /** ⚠ **#1228 で足した**(2026-10-03)。枠が満杯だったので、いちばん古い 1 件(`2026-10-02-attachment-guard`)を落とした ── 原本は `CHANGELOG.md`(2026-10-02 の節)。 */
     ['2026-10-03-office-shadow-restore', '74cabb00'],
-    /** ⚠ **#274 / #855 / #1017 / #530 / #682 で足した**(2026-10-03)。枠が満杯だったので、いちばん古い 1 件(`2026-10-02-color-swatch`)を落とした ── 原本は `CHANGELOG.md`(2026-10-02 の節)。 */
-    ['2026-10-03-recent-commands-palette', 'c4099dcc'],
     /**
      * ⚠ **#1006(中身を残して作り直す)で足した**(2026-09-18。user 裁定
      *   「全部消さずに建て直す」「『捨てる』の上に置く」)。

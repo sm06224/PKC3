@@ -106,6 +106,11 @@ export interface ShellRegions {
    * すると**両方出たときに重なる**。
    */
   announce: HTMLElement;
+  /**
+   * 🔴 **保存していない編集が残っているときの 1 行**(#1376)。
+   * ⚠ update / announce とは**別の行**(両方出たときに重ならないように)。既定は `hidden`。
+   */
+  draftOffer: HTMLElement;
 }
 
 /**
@@ -1151,6 +1156,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   announce.setAttribute('data-pkc-region', 'announce');
   announce.hidden = true;
 
+  // 既定は空(= 控えが無ければ行の高さは 0)
+  const draftOffer = document.createElement('section');
+  draftOffer.setAttribute('data-pkc-region', 'draft-offer');
+  draftOffer.hidden = true;
+
   /**
    * ⚠ **並びは画面の左から右**(grid の area 名と揃える)── 掴む帯は
    * 面と面の**あいだ**に置く。畳んでも残るのはここが shell の列だからである。
@@ -1180,6 +1190,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     alarms,
     announce,
     update,
+    draftOffer,
     notices,
     status,
   );
@@ -1238,5 +1249,6 @@ export function buildShell(root: HTMLElement): ShellRegions {
     notices,
     update,
     announce,
+    draftOffer,
   };
 }

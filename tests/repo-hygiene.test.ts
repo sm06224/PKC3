@@ -768,6 +768,13 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
      * draft が板に届く筋がそもそも存在しない。⚠ 追ったら 1 打鍵ごとに札を組み直す。
      */
     UPDATE_OPEN_BODY: '打鍵ごとの draft(編集中は板を開けないので届かない)',
+    /**
+     * 🔴 **2026-10-11(#1376)**:保存していない編集を戻して編集に入る(`restoreBody`)。
+     * ⚠ 入るのは**編集中の draft** であって保存された本文ではない ── `UPDATE_OPEN_BODY` と同じ理由で、
+     * 編集中は板を開けないので届く筋が無い(`baseline` / `persisted` は disk のまま。保存すれば `COMMIT_EDIT` の
+     * `buildPersist` が札を組み直す)。
+     */
+    START_EDIT: '戻した編集の draft(編集中は板を開けないので届かない。保存で buildPersist が組み直す)',
   };
 
   it('⚠ 前提: そういう case が実在する(空振り防止)', () => {
@@ -792,6 +799,8 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
       'ENTRY_BODY_REFRESHED',
       'ENTRY_RESTORED',
       'SECTION_SAVED',
+      // 2026-10-11(#1376): 保存していない編集を戻して入る `restoreBody`(EXEMPT の注記)
+      'START_EDIT',
       'UPDATE_OPEN_BODY',
     ]);
   });
@@ -805,7 +814,7 @@ describe('新しい本文が state に入る所は、札の組み直しを通る
    *   そのとき「本当に板へ届かないのか」を書く場所が目の前に出る。
    */
   it('🔴 除外してよいのは、板へ届かない本文だけ(逃げ道を増やせない)', () => {
-    expect(Object.keys(EXEMPT).sort()).toEqual(['UPDATE_OPEN_BODY']);
+    expect(Object.keys(EXEMPT).sort()).toEqual(['START_EDIT', 'UPDATE_OPEN_BODY']);
   });
 
   it('🔴 拾った case が全部 refreshTaskCards を通っている', () => {
@@ -1329,7 +1338,10 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    作っても読んでいるノートが動かない、2 枚目のタブには登録されない ── 配線の合成は unit では片側ずつしか見えない
     // ⚠ 2026-10-11(#1525): 図の多い長いノートで、別のノートを選んでから戻ると読んでいた塊が戻る spec を 1 本足した → 103 → 104。
     //    🔴 ここでしか見えない:図が焼けて高さが変わる(unit に版面は無い)ので、戻した位置のずれは実ブラウザでしか出ない
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(104);
+    // ⚠ 2026-10-11(#1376): 保存していない編集を次に開いたとき戻す spec を 1 本足した → 104 → 105。
+    //    🔴 ここでしか見えない:タブが死んだ後の次の起動で、IndexedDB の控えが読めて 1 行が出る / 戻すと編集欄に字と題名が入る
+    //    (本物の IndexedDB と本物の起動が要る。unit は置き場もタブの死も持たない)
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(105);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1516,7 +1528,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 510 の行を参照)。起動の予算は 509 → 510。
     // ⚠ 2026-10-11(#1386): `theme-boot.smoke.spec.ts` に 1 本足した(OS に合わせる)→ 516 → 517。起動の予算は 510 → 511。
     // ⚠ 2026-10-11(#1387): `print.smoke.spec.ts` に 1 本足した(暗い配色で刷る)→ 517 → 518。起動の予算は 511 → 512。
-    ).toBe(518);
+    // ⚠ 2026-10-11(#1376): `draft-recovery.smoke.spec.ts`(新設・test 4 本・起動 9 回)→ 518 → 522(戻す / 消す / ライブエディタ / IndexedDB の 20 件)。
+    //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 516 の行を参照)。起動の予算は → 518。
+    ).toBe(522);
   });
 });
 

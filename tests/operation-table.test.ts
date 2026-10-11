@@ -223,6 +223,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
   /**
+   * ⚠ **2026-10-11(#1376)で 2 件増やした** ── 起動したときの 1 行の「戻す」「消す」。
+   * 🔑 **名前で呼べないままにする理由**:1 行が出ている間だけ意味を持ち(出ていなければ何も起きない)、
+   *   消す側は取り消せない。パレットから 1 語で呼べる所に置かない(押し所は 1 行の 2 つのボタンだけ)。
+   */
+  'discard-draft', 'restore-draft',
+  /**
    * ⚠ **2026-09-17(#986 段③)** ── 入れ物ごと捨てる。
    * 🔑 **名前で呼べないままにする理由**:取り消せない操作を、パレットから
    *   1 語で呼べる所に置かない(押し所は設定の中の 1 つだけ)。
@@ -469,6 +475,7 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11(#1376): 起動したときの 1 行の「戻す」「消す」(`restore-draft` / `discard-draft`)で受け手 +2 ── 登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-11(#855): 予定を動かした直後の「元に戻す」(`schedule-undo-move`)で受け手 +1 ── 登記は増えない
       //   (押し口は予定の面の 1 行にしか無く、鍵も持たない。`undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-10(#1457): タグの色(`tag-color-pick` / `tag-color-clear`。押したバッジの名前が要る P1 ── `untag-entry` と同じ仕分け)で受け手 +2 ──
@@ -764,12 +771,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#1377): ノートのブックマーク(`bookmark-note-add` / `bookmark-note-remove`)を
       //   行の右クリックに登記して受け手 +2 / 登記 +2 / 両方 +2(`unregistered` は動かない)。
-      total: 400,
-      receivers: 334,
+      total: 402,
+      receivers: 336,
       registered: 111,
       both: 45,
       outsideActionsTable: 66,
-      unregistered: 289,
+      unregistered: 291,
     });
   });
 
