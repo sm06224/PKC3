@@ -168,6 +168,7 @@ body {
     'alarms   alarms   alarms   alarms   alarms'
     'announce announce announce announce announce'
     'update   update   update   update   update'
+    'draft    draft    draft    draft    draft'
     'notices  notices  notices  notices  notices'
     'status   status   status   status   status';
   height: 100%;
@@ -210,6 +211,7 @@ body {
     'alarms   alarms   alarms   alarms'
     'announce announce announce announce'
     'update   update   update   update'
+    'draft    draft    draft    draft'
     'notices  notices  notices  notices'
     'status   status   status   status';
 }
@@ -223,6 +225,7 @@ body {
     'alarms   alarms   alarms   alarms'
     'announce announce announce announce'
     'update   update   update   update'
+    'draft    draft    draft    draft'
     'notices  notices  notices  notices'
     'status   status   status   status';
 }
@@ -235,6 +238,7 @@ body {
     'alarms   alarms   alarms'
     'announce announce announce'
     'update   update   update'
+    'draft    draft    draft'
     'notices  notices  notices'
     'status   status   status';
 }
@@ -461,6 +465,9 @@ button[data-pkc-glyph]:disabled {
 }
 [data-pkc-region='update'] {
   grid-area: update;
+}
+[data-pkc-region='draft-offer'] {
+  grid-area: draft;
 }
 [data-pkc-region='notices'] {
   grid-area: notices;
@@ -7403,6 +7410,21 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='update-text'] {
   flex: 1;
 }
+/* 保存していない編集が残っているときの 1 行(#1376)。update と同じ作り ── 隣り合う行だが、
+ * 同時に出ることは稀で、出ても自分の行を持つので重ならない。色は地に敷かず面の色。 */
+[data-pkc-region='draft-offer'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+}
+[data-pkc-region='draft-offer'][hidden] {
+  display: none;
+}
+[data-pkc-field='draft-offer-text'] {
+  flex: 1;
+}
 /* ── 起動したときのお知らせ(P11)────────────────────
  * ⚠ **update と同じ色にしない** ── 隣り合う行なので、同じ地だと 1 枚の帯に見える。
  *   こちらは面の色(`surface-2`)で、色は使わない(「色は情報にだけ」)。
@@ -8134,6 +8156,7 @@ mark[data-pkc-diff-char='del'] {
       'alarms    alarms   alarms'
       'announce  announce announce'
       'update    update   update'
+      'draft     draft    draft'
       'notices   notices  notices'
       'status    status   status';
   }
@@ -8160,6 +8183,7 @@ mark[data-pkc-diff-char='del'] {
       'alarms    alarms   alarms'
       'announce  announce announce'
       'update    update   update'
+      'draft     draft    draft'
       'notices   notices  notices'
       'status    status   status';
   }
@@ -8175,6 +8199,7 @@ mark[data-pkc-diff-char='del'] {
       'alarms    alarms'
       'announce  announce'
       'update    update'
+      'draft     draft'
       'notices   notices'
       'status    status';
   }
@@ -8933,11 +8958,12 @@ h3[data-pkc-section] {
     'alarms'
     'announce'
     'update'
+    'draft'
     'notices'
     'status';
   /* ⚠ **`grid-template-areas` の直後に置く** ── `announce.test.ts` は
    *   「区画の行数と丈の数が合う / 伸びる行が `detail`」をこの並びで読む。 */
-  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto auto;
 }
 /**
  * 🔴 **3 面を重ね、いま出ていない面は `visibility: hidden` + `inert`**。
@@ -9730,6 +9756,7 @@ h3[data-pkc-section] {
   [data-pkc-region='status'],
   [data-pkc-region='notices'],
   [data-pkc-region='update'],
+  [data-pkc-region='draft-offer'],
   /* ⚠ お知らせも紙には要らない(P11)── 押せるものが無いのは他と同じ */
   [data-pkc-region='announce'],
   [data-pkc-field='detail-bar-slot'],

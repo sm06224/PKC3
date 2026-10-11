@@ -1665,6 +1665,12 @@ export interface BinderServices {
   setOpenInEdit?(on: boolean): void;
   /** 更新の案内を見送る(次に開いたときに再び出る)。 */
   dismissUpdate?(): void;
+  /**
+   * 🔴 **保存していない編集を戻す / 消す**(#1376)。起動したときの 1 行の 2 つのボタン。
+   * ⚠ 判断(編集中なら断る・開いて編集に入る)は `draft-offer.ts` ── binder は頼むだけ。
+   */
+  restoreDraft?(): void;
+  discardDraft?(): void;
   /** アーカイブ書出し(P6d)。 */
   exportArchive?(): void;
   /** 可搬 HTML の書出し(P6d 段③)。 */
@@ -2881,10 +2887,12 @@ function startEditAt(
   dispatcher: Dispatcher,
   services: BinderServices,
   atLine: number | null,
+  restoreBody?: string,
 ): void {
   const lid = dispatcher.getState().openBody?.lid ?? null;
   const dispatchStart = (): void =>
-    dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }) });
+    // ⚠ 1 行に保つ ── `edit-lock-gate.test.ts` が `dispatch({ type: 'START_EDIT'` の字面で入り口の数を数える
+    dispatcher.dispatch({ type: 'START_EDIT', ...(atLine === null ? {} : { atLine }), ...(restoreBody === undefined ? {} : { restoreBody }) });
   if (!services.acquireEditLock || lid === null) {
     const ready = services.settle?.() ?? null;
     if (ready === null) dispatchStart();
@@ -2899,6 +2907,19 @@ function startEditAt(
     if (!(st.phase === 'editing' && st.openBody?.lid === lid))
       services.releaseEditLock?.(lid);
   });
+}
+
+/**
+ * 🔴 **保存していない編集を戻して、編集に入る**(#1376)。入り口は `startEditAt` の 1 本のまま ──
+ * ロック・飛んでいる書込の待ち・入れたかの確認は帯の「編集」と同じ道を通る。
+ * ⚠ 本文は差し替えるだけで、書かない(保存を押すまで disk は動かない)。
+ */
+export function startEditRestoring(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  restoreBody: string,
+): void {
+  startEditAt(dispatcher, services, null, restoreBody);
 }
 
 /**
@@ -11187,6 +11208,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'dismiss-update': (_dispatcher, _target, services) => {
     services.dismissUpdate?.();
+  },
+  'restore-draft': (_dispatcher, _target, services) => {
+    services.restoreDraft?.();
+  },
+  'discard-draft': (_dispatcher, _target, services) => {
+    services.discardDraft?.();
   },
   /**
    * 「開く」で編集に入るかの設定(user 裁定 2026-08-18)。

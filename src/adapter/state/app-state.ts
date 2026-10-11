@@ -2557,6 +2557,11 @@ export type UserAction =
        * ⚠ 座標は**frontmatter を外した側** ── 読む面の `data-pkc-source-line` と同じ基準。
        */
       atLine?: number;
+      /**
+       * 🔴 **保存していない編集を戻して入る**(#1376)。本文だけを差し替える ──
+       * 基準(`baseline` / `persisted`)は disk のまま。⚠ 書かない(保存を押すまで disk は動かない)。
+       */
+      restoreBody?: string;
     }
   | { type: 'UPDATE_OPEN_BODY'; body: string }
   | { type: 'COMMIT_EDIT' }
@@ -6367,6 +6372,10 @@ function reduceCore(
         state: {
           ...state,
           phase: 'editing',
+          openBody:
+            action.restoreBody === undefined
+              ? state.openBody
+              : { ...state.openBody, body: action.restoreBody },
           revisionPanel: null,
           // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
           revisionPreview: null,

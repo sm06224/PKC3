@@ -188,6 +188,10 @@ import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
+import { createDraftOffer, type DraftOffer } from '@adapter/ui/render/draft-offer';
+import { connectDraftWriter } from '@adapter/platform/draft-writer';
+import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-store';
+import type { DraftClock } from '@features/draft/draft-recovery';
 import {
   messageKindForOpError,
   quotaCaution,
@@ -280,6 +284,7 @@ import {
   runChapterWindowAction,
   runGlobalCommand,
   repaintCommandList,
+  startEditRestoring,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
@@ -2936,6 +2941,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   if (followerConn === null) announceReservedLock(init);
 
+  /** 保存していない編集の 1 行(#1376)。起動が落ち着いてから作る(下の `SYS_BOOTED` の後)。 */
+  let draftOfferRef: DraftOffer | null = null;
+
   /** 更新の案内(P7 段⑤)。面と「押されたら何をするか」は render 側が持つ。 */
   const updatePrompt = createUpdatePrompt(regions.update, {
     // ⚠ 再読込は open editor の下書きを捨てる(本文は AppState にしか無い)。
@@ -3187,6 +3195,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (!ev.persisted) chapterWindows.orphanAll();
   });
 
+  /**
+   * 🔴 **保存していない編集の控えの置き場**(#1376)。⚠ `forgetLocal`(中身を消してまっさらにする / 建て直し)が
+   * 消せるよう、ここで 1 つ作る ── 新しい入れ物は別の cid なので、残すと古い本文が端末に残り続ける。
+   */
+  const draftStore = new IdbDraftStore();
+
   const services: BinderServices = {
     // 🔴 パソコンのフォルダ(#215)── 描画に渡したものと**同じ 1 つ**
     localFolder,
@@ -3319,6 +3333,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // ⚠ 消えたノート由来の断片を残さない(貼り付けの一覧にだけ本文が残る)
         forgetLocal: () => {
           appCopyHistory.clear();
+          // 🔴 保存していない編集の控えも消す(消えたノートの本文が端末に残らないように)
+          void draftStore.clearAll().catch(() => {});
         },
         announceWiped: () => wipedChannel.announce(target),
       }),
@@ -3379,6 +3395,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         forgetLocal: () => {
           appCopyHistory.clear();
+          // 🔴 保存していない編集の控えも消す(消えたノートの本文が端末に残らないように)
+          void draftStore.clearAll().catch(() => {});
         },
         announceWiped: () => wipedChannel.announce(target),
         ...(onProgress === undefined ? {} : { onProgress }),
@@ -4511,6 +4529,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     applyUpdate: () => updatePrompt.apply(),
     // ⚠ 見送っても待機中の worker は残るので、次に開いたときに再び出る
     dismissUpdate: () => updatePrompt.dismiss(),
+    // 保存していない編集が残っているときの 1 行(#1376)。⚠ 頼むだけ ── 判断は `draft-offer.ts`
+    restoreDraft: () => draftOfferRef?.restore(),
+    discardDraft: () => draftOfferRef?.discard(),
     // 📤 バックアップ書出し(P6d)。⚠ **asset gate の内側** ── 書出し中に添付が
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
     exportArchive: () => void runExport('archive'),
@@ -5143,6 +5164,59 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   if (appFilerFlatten.enabled()) {
     dispatcher.dispatch({ type: 'SET_FILER_FLATTEN', on: true });
+  }
+  /**
+   * 🔴 **編集中の字を端末に控え、次に開いたとき戻せるようにする**(#1376)。
+   *
+   * ⚠ 控えは**端末の中だけ**(IndexedDB `pkc3-drafts`)── container・書き出し・履歴・メッセージに
+   *   同乗しない(`draft-store.ts`)。⚠ 1 行を出すのは本体の窓だけ(付箋・別窓は出さない ──
+   *   同じ控えを 2 つの窓が聞くと、片方で戻したのにもう片方に残る)。控える側は全部の窓。
+   * ⚠ `SYS_BOOTED` の**後**に張る(前だと boot の最初の state を「編集に入った」と読む)。
+   */
+  {
+    const draftTab = crypto.randomUUID();
+    holdTabLock(draftTab);
+    const draftClock: DraftClock = {
+      now: () => Date.now(),
+      set: (fn, ms) => window.setTimeout(fn, ms),
+      clear: (h) => window.clearTimeout(h as number),
+    };
+    connectDraftWriter({
+      dispatcher,
+      store: draftStore,
+      cid,
+      tab: draftTab,
+      clock: draftClock,
+      readTitle: () =>
+        document.querySelector<HTMLInputElement>('[data-pkc-field="editor-title"]')?.value ?? null,
+      // 答えていない控えがあるノートは上書きしない / 編集が終わったことを 1 行へ伝える(#1376)
+      isPending: (lid) => draftOfferRef?.has(lid) === true,
+      onEnded: (lid, committed) => draftOfferRef?.editEnded(lid, committed),
+    });
+    if (heldViewWindow === null && !heldNoteWindow) {
+      draftOfferRef = createDraftOffer({
+        region: regions.draftOffer,
+        dispatcher,
+        store: draftStore,
+        cid,
+        tab: draftTab,
+        now: () => Date.now(),
+        liveTabs,
+        readBody: async (lid) =>
+          (await client.request({ op: 'getBodies', cid, lids: [lid] }))[0]?.body ?? null,
+        enterEdit: (body) => startEditRestoring(dispatcher, services, body),
+        setTitle: (title) => {
+          const set = (): void => {
+            const el = document.querySelector<HTMLInputElement>('[data-pkc-field="editor-title"]');
+            if (el) el.value = title;
+          };
+          set();
+          requestAnimationFrame(set);
+        },
+        say: showStatus,
+      });
+      void draftOfferRef.present();
+    }
   }
   /**
    * 🔑 **前に横へ留めたノートは、次に開いても留まっている**(#505 段②)。
