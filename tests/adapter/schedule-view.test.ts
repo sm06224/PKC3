@@ -334,7 +334,7 @@ describe('予定の面(#292 段③)', () => {
       new Set(['e2']),
     );
     const fold = q<HTMLDetailsElement>('[data-pkc-field="schedule-fold"]')!;
-    expect(fold.querySelector('summary')!.textContent, 'ボタンの字').toBe('出すもの');
+    expect(fold.querySelector('summary')!.textContent, 'ボタンの字').toBe('出すもの(3)');
     const note = q<HTMLElement>('[data-pkc-field="schedule-fold-note"]')!;
     const box = (a: string): HTMLInputElement =>
       q<HTMLInputElement>(`[data-pkc-action="toggle-show-${a}"]`)!;
@@ -377,6 +377,40 @@ describe('予定の面(#292 段③)', () => {
     d.dispatch({ type: 'TOGGLE_SHOW_DONE_TASKS' });
     expect(box('done').checked, '別の口で旗が立ったのにチェックが付かない').toBe(true);
     expect(note.textContent).toBe('済みも表示中');
+  });
+
+  /**
+   * 🔴 **「出すもの(N)」= いま隠れている 3 つ(済み・片付けたもの・日付のないもの)の合計**(#855、依頼 12-C)。
+   * 出した切替の分は引かれ、0 件なら括弧は付かない。
+   */
+  it('🔴 「出すもの」の括弧の数は、隠れている分の合計で、チェックを付けると減る', async () => {
+    const { q } = setup(
+      {
+        e1: '- [ ] まだ @2026-08-23\n- [x] 済み @2026-08-23\n- [ ] 日付なし\n',
+        e2: '- [ ] 片付けた @2026-08-24\n',
+      },
+      {},
+      new Set(['e2']),
+    );
+    const btn = q<HTMLElement>('[data-pkc-field="schedule-fold-button"]')!;
+    const box = (a: string): HTMLInputElement =>
+      q<HTMLInputElement>(`[data-pkc-action="toggle-show-${a}"]`)!;
+    const label = (a: string): number =>
+      Number(/\((\d+)\)/.exec(box(a).parentElement!.textContent ?? '')![1]);
+    const total = label('done') + label('archived') + label('undated');
+    expect(total, '前提:3 つとも隠れている物が在る').toBeGreaterThanOrEqual(3);
+    expect(btn.textContent).toBe(`出すもの(${total})`);
+    box('done').click();
+    await tick();
+    expect(btn.textContent, '出した分が引かれない').toBe(`出すもの(${total - label('done')})`);
+    box('archived').click();
+    await tick();
+    box('undated').click();
+    await tick();
+    expect(btn.textContent, '全部出したのに括弧が残る').toBe('出すもの');
+    box('done').click();
+    await tick();
+    expect(btn.textContent, '戻したら数が戻る').toBe(`出すもの(${label('done')})`);
   });
 
   /**

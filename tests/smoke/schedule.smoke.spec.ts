@@ -703,7 +703,8 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   const fold = pane.locator('[data-pkc-field="schedule-fold"]');
   const foldNote = pane.locator('[data-pkc-field="schedule-fold-note"]');
   const doneBox = pane.locator('[data-pkc-action="toggle-show-done"]');
-  await expect(fold.locator('summary'), 'ボタンの字').toHaveText('出すもの');
+  // 🔴 隠れている済みが 1 件(7 日後に済ませた行)あるので、ボタンに (1) が付く ── 付けると 0 になって括弧が消える(依頼 12-C)
+  await expect(fold.locator('summary'), 'ボタンの字に隠れている件数が出ていない').toHaveText('出すもの(1)');
   await expect(doneBox, '開く前なのに「済み」のチェックが見えている').toBeHidden();
   await expect(foldNote, '既定なのに脇の 1 行が出ている').toBeHidden();
   await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
@@ -715,6 +716,7 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await fold.locator('[data-pkc-field="schedule-option"]').filter({ hasText: '済み' }).locator('span').click();
   await expect(doneBox, '字を押して旗が 1 回反転していない').toBeChecked();
   await expect(foldNote, '済みを出したのに脇の 1 行が言わない').toHaveText('済みも表示中');
+  await expect(fold.locator('summary'), '済みを出したのに括弧の件数が減らない').toHaveText('出すもの');
   await expect(openNote, 'チェックの字を押したらノートが閉じた').toBeVisible();
   await expect(doneBox, '1 つ付けたら枠が閉じた').toBeVisible();
   // Esc は枠だけを閉じる(ノートは残る)。枠の外を押しても閉じる
@@ -746,6 +748,21 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   // 赤い(R が G・B より十分大きい)── 明るい地でも暗い地でも `--danger` は赤系
   const [r, g, b] = (await colorOf(holiday)).match(/\d+/g)!.map(Number) as [number, number, number];
   expect(r, `祝日の数字が赤くない(${r},${g},${b})`).toBeGreaterThan(Math.max(g, b) + 40);
+
+  /**
+   * 🔴 **祝日の名前が字として出る**(依頼 12-A)。左の列に「週」は無いので「日」で見る(「週」の同じ名前は unit)。
+   * 祝日の升目を押すと、その日の「日」が開く。名前は日付より小さく、薄い字(`--muted`)で出る ── 計算後の値で見る。
+   */
+  const holidayDate = (await holiday.getAttribute('data-pkc-drop-date'))!;
+  const holidayTitle = (await holiday.getAttribute('title'))!;
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="day"]');
+  await clickReal(page, `[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-grid"] button[data-pkc-drop-date="${holidayDate}"]`);
+  const dayName = pane.locator('[data-pkc-field="schedule-day-holiday"]');
+  await expect(dayName, '「日」の見出しに祝日の名前が字で出ていない').toHaveText(holidayTitle);
+  const dayLabel = pane.locator('[data-pkc-field="schedule-day-label"]');
+  const px = (loc: Locator) => loc.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+  expect(await px(dayName), '名前が日付の字より小さくない').toBeLessThan(await px(dayLabel));
+  expect(await colorOf(dayName), '名前が日付の字と同じ濃さ(薄くない)').not.toBe(await colorOf(dayLabel));
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

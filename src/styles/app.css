@@ -6214,6 +6214,26 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-day-label'][data-pkc-holiday] {
   color: var(--danger);
 }
+/* 🔴 **祝日の名前は小さく薄い字で出す**(#855。Gemini 裁定 = #1163 の依頼 12-A)。色は付けず、地の薄い字 + 既存の小さい字の大きさ。
+ *   月の小さなカレンダーは幅が無いので `title` だけのまま */
+[data-pkc-field='schedule-weekview-holiday'],
+[data-pkc-field='schedule-day-holiday'] {
+  font-size: var(--btn-fs-sm);
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+[data-pkc-field='schedule-weekview-holiday'] {
+  flex-basis: 100%;
+  text-align: center;
+}
+[data-pkc-field='schedule-weekview-holiday'][hidden],
+[data-pkc-field='schedule-day-holiday'][hidden] {
+  display: none;
+}
 [data-pkc-region='schedule-groups'] {
   display: flex;
   flex-direction: column;
@@ -6518,6 +6538,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-weekview-heads'] > button {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: var(--s2);
   padding: 2px 0;
@@ -10893,4 +10914,11 @@ h6:hover > .pkc-heading-anchor,
   [data-pkc-prose] :is(h1, h2, h3, h4, h5, h6) {
     scroll-margin-top: var(--pkc-detail-bar-h, 34px);
   }
+}
+/* 祝日の日の「日」は、名前を日付のすぐ隣に置く(日付の欄は縮め、余りは名前の欄が取る) */
+[data-pkc-field='schedule-day-label'][data-pkc-holiday] {
+  flex: 0 1 auto;
+}
+[data-pkc-field='schedule-day-holiday'] {
+  flex: 1;
 }

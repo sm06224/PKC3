@@ -68,6 +68,8 @@ export class ScheduleDay {
   private readonly next: HTMLButtonElement;
   private readonly todayBtn: HTMLButtonElement;
   private readonly label: HTMLElement;
+  /** 祝日の名前(小さく薄い字)。祝日でない日は隠す。 */
+  private readonly holidayText: HTMLElement;
   private readonly allDay: HTMLElement;
   private readonly allDayHost: HTMLElement;
   private readonly scroller: HTMLElement;
@@ -88,7 +90,10 @@ export class ScheduleDay {
     this.todayBtn = button('schedule-day-today', '今日', null);
     this.label = document.createElement('span');
     this.label.setAttribute('data-pkc-field', 'schedule-day-label');
-    head.append(this.prev, this.label, this.next, this.todayBtn);
+    this.holidayText = document.createElement('span');
+    this.holidayText.setAttribute('data-pkc-field', 'schedule-day-holiday');
+    this.holidayText.hidden = true;
+    head.append(this.prev, this.label, this.holidayText, this.next, this.todayBtn);
     this.headBar = head;
 
     this.allDay = document.createElement('div');
@@ -158,7 +163,11 @@ export class ScheduleDay {
     if (holiday !== null) {
       this.label.setAttribute('data-pkc-holiday', '');
       this.label.title = holiday;
+      if (this.holidayText.textContent !== holiday) this.holidayText.textContent = holiday;
+      this.holidayText.hidden = false;
     } else {
+      this.holidayText.textContent = '';
+      this.holidayText.hidden = true;
       this.label.removeAttribute('data-pkc-holiday');
       this.label.removeAttribute('title');
     }
