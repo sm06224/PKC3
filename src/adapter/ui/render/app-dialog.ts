@@ -55,6 +55,15 @@ import {
   type AgentAnswer,
   type AgentTarget,
 } from '@features/agent/agent-gate';
+import {
+  parsePlaceRect,
+  PLACE_RECT_KEYS,
+  PLACE_RECT_LABELS,
+  type PlaceRectInput,
+  type PlaceRectKey,
+  type PlaceRectValue,
+} from '@features/markdown/place-rect';
+import { PLACE_TEMPLATES, type PlaceTemplateId } from '@features/markdown/place-template';
 import { buildIconPalette, isTableIcon } from './icon-palette';
 import { diffLineEl } from './diff-line';
 
@@ -887,6 +896,101 @@ export function pickCopyFormatInApp(
       value: c.id,
       ...(c.separatorBefore === true ? { separatorBefore: true } : {}),
     })),
+  });
+}
+
+/**
+ * 🔴 **板のテンプレートを選ぶ**(#529 W4)。
+ *
+ * ⚠ 器は `pickCopyFormatInApp` と**同じ 1 本**(`pickRowInApp`)── 押した行がそのまま答え、
+ *   `Escape` / やめる / 外を押すと `null`(何も置かない)。
+ * ⚠ 何が並ぶかは `place-template.ts` の `PLACE_TEMPLATES` が正本 ── ここは並べるだけ。
+ */
+export function pickPlaceTemplateInApp(host: HTMLElement): Promise<PlaceTemplateId | null> {
+  return pickRowInApp<PlaceTemplateId>(host, {
+    title: 'テンプレートから板を置く',
+    field: 'pick-place-template',
+    indexAttr: 'data-pkc-place-template-index',
+    note: '押した位置から置きます。置いた後は、1 枚ずつ動かせます。',
+    rows: PLACE_TEMPLATES.map((t) => ({ label: `${t.label}(${t.note})`, value: t.id })),
+  });
+}
+
+/**
+ * 🔴 **枠の位置と大きさを数で入れる**(#529 W2「位置と大きさ…」)。
+ *
+ * 4 つの欄(x / y / 幅 / 高さ)に**いまの値**を入れて開く。「決める」で検め(`parsePlaceRect`)、
+ * 通れば値を返し、通らなければ**窓を閉じずに**理由を出して、その欄へ焦点を戻す。
+ * 「やめる」/ `Escape` / 外のクリックは `null`(何も書かない)。
+ *
+ * ⚠ 器は確認と同じ 1 つ(`promptInApp` と同じ作り)── 新しい部品を作らない。
+ * ⚠ 欄は `type="text"`(`type="number"` にしない)── 全角数字(`１２０`)を打てなくなり、
+ *   検めの理由(「整数で」)を出す前にブラウザが字を捨てる。
+ * 🔑 検めは「決める」の click を**器の onOk より先に**受けて止める(`stopImmediatePropagation`)
+ *   ── 閉じ口を 1 本に保ったまま、通らない間は閉じない。
+ *
+ * @param initial 欄に入れるいまの値(書かれていない札は空 = 空のまま決めれば変えない)
+ */
+export function pickPlaceRectInApp(
+  host: HTMLElement,
+  initial: PlaceRectInput,
+): Promise<PlaceRectValue | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '位置と大きさ';
+    f.body.textContent = '';
+    const inputs = new Map<PlaceRectKey, HTMLInputElement>();
+    for (const key of PLACE_RECT_KEYS) {
+      const label = document.createElement('label');
+      label.textContent = PLACE_RECT_LABELS[key];
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.setAttribute('inputmode', 'numeric');
+      input.setAttribute('data-pkc-field', 'place-rect-input');
+      input.setAttribute('data-pkc-place-rect-key', key);
+      input.value = initial[key];
+      input.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (ev.key !== 'Enter' || ev.isComposing) return;
+        ev.preventDefault();
+        f.ok.click();
+      });
+      label.append(input);
+      f.body.append(label);
+      inputs.set(key, input);
+    }
+    const error = document.createElement('p');
+    error.setAttribute('data-pkc-field', 'place-rect-error');
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    f.body.append(error);
+
+    let result: PlaceRectValue | null = null;
+    const onValidate = (ev: Event): void => {
+      const typed = {} as Record<PlaceRectKey, string>;
+      for (const key of PLACE_RECT_KEYS) typed[key] = inputs.get(key)!.value;
+      const parsed = parsePlaceRect(typed);
+      if (parsed.ok) {
+        result = parsed.rect;
+        return;
+      }
+      // ⚠ 通らない間は閉じない(器の onOk に届かせない)
+      ev.stopImmediatePropagation();
+      error.textContent = parsed.error;
+      error.hidden = false;
+      inputs.get(parsed.key)!.focus();
+    };
+    f.ok.addEventListener('click', onValidate);
+    f.ok.textContent = '決める';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+    const answered = open(f, 'cancel');
+    inputs.get('x')!.focus();
+    inputs.get('x')!.select();
+    const answer = await answered;
+    f.ok.removeEventListener('click', onValidate);
+    return answer === 'ok' ? result : null;
   });
 }
 

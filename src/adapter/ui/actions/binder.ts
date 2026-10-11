@@ -39,7 +39,7 @@ import {
   tsvFenceFromPlain,
   type TableFormat,
 } from '@features/markdown/table-convert';
-import { isPlaceOpen, placeShapeAt, placeStyleAt } from '@features/markdown/place-notation';
+import { isPlaceOpen, placeRectOf, placeShapeAt, placeStyleAt } from '@features/markdown/place-notation';
 import {
   parsePlaceColor,
   parsePlaceWidth,
@@ -264,6 +264,7 @@ import { paintCommandList } from '@adapter/ui/render/command-list';
 import {
   blockMenuActions,
   ADD_PLACE_ACTION,
+  ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
   PLACE_STYLE_WIDTH_ATTR,
@@ -647,6 +648,8 @@ import {
   pickBodyIconInApp,
   pickArchiveInApp,
   pickCopyFormatInApp,
+  pickPlaceRectInApp,
+  pickPlaceTemplateInApp,
   pickScrapInApp,
   pickSectionLeaveInApp,
   promptInApp,
@@ -8829,6 +8832,68 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'ADD_PLACE', lid: ob.lid, x, y });
   },
   /**
+   * 🔴 **テンプレートから板を置く**(#529 W4)── 窓で 1 つ選ぶと、`add-place` と同じ座標・同じ門
+   * (`ADD_PLACE`)で書く。「やめる」/ `Escape` なら何もしない。
+   * ⚠ 窓が開いている間に別のノートへ移ったら置かない(`ob.lid` を窓の前後で照らす)。
+   */
+  'add-place-template': (dispatcher, target, _services, root) => {
+    if (refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    const x = menuCarriedAt(target, MENU_X_ATTR);
+    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    if (ob === null || x === null || y === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const lid = ob.lid;
+    void pickPlaceTemplateInApp(root).then((template) => {
+      if (template === null) return;
+      if (dispatcher.getState().openBody?.lid !== lid) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、板は置いていません' });
+        return;
+      }
+      dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, template });
+    });
+  },
+  /**
+   * 🔴 **枠の位置と大きさを数で入れる**(#529 W2)── 窓に**いまの値**を入れて開き、「決める」で
+   * `SET_PLACE_RECT`(x= y= w= h= を一度に書く)。「やめる」/ `Escape` なら何も書かない。
+   * ⚠ 行の座標は `raise-place` と同じ(メニューが運んだ刻印 + frontmatter ぶん)。
+   * ⚠ 窓が開いている間に本文が動いたら、開き行の byte 一致の門(`place-notation.ts`)が断る
+   *   (別の枠に書かない)。
+   */
+  'place-rect': (dispatcher, target, _services, root) => {
+    const line = menuCarriedBlock(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const ob = dispatcher.getState().openBody;
+    if (ob === null) return;
+    const lid = ob.lid;
+    const at = line + frontmatterLineCount(ob.body);
+    const initial = placeRectOf(ob.body.split('\n')[at] ?? '');
+    if (initial === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '板が見つかりません(本文を開き直してください)' });
+      return;
+    }
+    // ⚠ 窓を開いた時点の本文を控える ── reducer の開き行の門は dispatch 時点の本文から行を取り直すので、
+    //   窓の間に本文が動く(別のタブ・追記)と、同じ行番号に来た**別の板**へ書いてしまう(着地前レビュー)
+    const bodyAtOpen = ob.body;
+    void pickPlaceRectInApp(root, initial).then((rect) => {
+      if (rect === null) return;
+      const now = dispatcher.getState().openBody;
+      if (now?.lid !== lid) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、位置と大きさは変えていません' });
+        return;
+      }
+      if (now.body !== bodyAtOpen) {
+        dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、位置と大きさは変えていません(もう一度開いてください)' });
+        return;
+      }
+      // 全部の欄を空のまま決めたら、何も変えない(書換の依頼を出さない)
+      if (Object.keys(rect).length === 0) return;
+      dispatcher.dispatch({ type: 'SET_PLACE_RECT', lid, line: at, rect });
+    });
+  },
+  /**
    * 🔴 **右クリックした板を消す**(#676)── 置けるなら消せる(user 指示 2026-08-23)。
    *
    * ⚠ 取り消せない(板の書換は履歴を伸ばさない amend)ので**確認を挟む**(`delete-entry` と
@@ -15061,6 +15126,7 @@ export function bindActions(
             }))),
         // 🔴 板を置く口は**いつも**出す(#676)── 押した座標は下の carry が運ぶ
         ADD_PLACE_ACTION,
+        ADD_PLACE_TEMPLATE_ACTION,
         ...body,
       ];
       /**

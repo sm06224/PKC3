@@ -192,7 +192,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
    */
   'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
-  'add-place', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
+  'add-place', 'add-place-template', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
   'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove',
   /**
@@ -275,7 +275,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 同じ理由で `raise-place` / `remove-place` も未登記である(並びを揃えた)。
    *   ⚠ 2026-10-01(#530 段③d)で `remove-place-line`(右クリックした線を消す)も同じ理由で足した。
    */
-  'place-color', 'place-color-clear', 'place-line-width',
+  'place-color', 'place-color-clear', 'place-line-width', 'place-rect',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
@@ -774,12 +774,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#1377): ノートのブックマーク(`bookmark-note-add` / `bookmark-note-remove`)を
       //   行の右クリックに登記して受け手 +2 / 登記 +2 / 両方 +2(`unregistered` は動かない)。
-      total: 403,
-      receivers: 337,
+      // ⚠ 2026-10-11(#529 W2 / W4): 「テンプレートから板を置く…」(`add-place-template`)と枠の「位置と大きさ…」(`place-rect`)で
+      //   受け手 +2 ── 登記は増えない(押し口は本文 / 枠の右クリックの中にしか無く、押した座標や行をメニューが運ぶので名前だけでは呼べない。
+      //   `add-place` / `raise-place` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
+      total: 405,
+      receivers: 339,
       registered: 111,
       both: 45,
       outsideActionsTable: 66,
-      unregistered: 292,
+      unregistered: 294,
     });
   });
 

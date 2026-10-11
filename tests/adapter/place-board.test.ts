@@ -854,6 +854,49 @@ describe('書換の門(MOVE_PLACE)', () => {
     expect(ev).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 30, y: 50 } });
   });
 
+  it('🔴 ADD_PLACE(テンプレートつき)── template を運ぶ place-add の依頼になる(#529 W4)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 30, y: 50, template: 'flow3' });
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-add', x: 30, y: 50, template: 'flow3' },
+    });
+  });
+
+  it('🔴 知らないテンプレートは書かない(境界では型が効かない)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 30, y: 50, template: 'nope' as never });
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
+  it('🔴 SET_PLACE_RECT ── 開き行を捕えた place-rect の依頼になる(#529 W2)', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: 5, y: 6, w: 70, h: 80 } });
+    const ev = events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(ev).toMatchObject({
+      lid: 'n1',
+      rewrite: { kind: 'place-rect', line: 0, rect: { x: 5, y: 6, w: 70, h: 80 } },
+    });
+    // 掴んだ時点の開き行を捕えている(書く直前の byte 一致の門に使う)
+    expect((ev as { rewrite: { openLine: string } }).rewrite.openLine).toContain('.pkc-place');
+  });
+
+  it('🔴 SET_PLACE_RECT ── 範囲外の値・板でない行・開いていない lid・編集中は書かない', () => {
+    const { d, events } = booted();
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { w: 0 } });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: -1 } });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { y: 1.5 } });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 2, rect: { x: 1 } });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n2', line: 0, rect: { x: 1 } });
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: 1 } });
+    const error = d.getState().error ?? '';
+    expect(error).toContain('編集を終了');
+    expect(error, '押した場所と文言が合っていない').toContain('位置と大きさ');
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
+  });
+
   it('🔴 板ではないノートにも置ける(1 枚目 ── 器が板になる仕様)', () => {
     const d = new Dispatcher();
     const events: DomainEvent[] = [];

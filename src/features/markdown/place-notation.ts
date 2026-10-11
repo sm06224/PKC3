@@ -35,6 +35,13 @@ import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
 import {
+  isPlaceRectNumber,
+  PLACE_RECT_KEYS,
+  type PlaceRectInput,
+  type PlaceRectValue,
+} from './place-rect';
+import { PLACE_TEMPLATES, placeTemplateBody, type PlaceTemplateId } from './place-template';
+import {
   BOARD_STYLE_KEYS,
   isPlaceStyle,
   LINE_STYLE_KEYS,
@@ -94,6 +101,18 @@ export function placeEntryLids(body: string): string[] {
     if (typeof entry === 'string' && entry !== '') out.push(entry);
   }
   return out;
+}
+
+/**
+ * 🔴 **その板の x= / y= / w= / h= の、いま書かれている字**(#529 W2 の窓に入れる値)。
+ * 板でなければ `null`。書かれていない札は空の字(窓で空のまま決めれば、その札は変えない)。
+ * 🔑 読むのは `placeOpenAttrs`(描画と同じ関数)の 1 本。
+ */
+export function placeRectOf(line: string): PlaceRectInput | null {
+  const attrs = placeOpenAttrs(line);
+  if (attrs === null) return null;
+  const s = (v: unknown): string => (typeof v === 'string' ? v : '');
+  return { x: s(attrs.kvs.x), y: s(attrs.kvs.y), w: s(attrs.kvs.w), h: s(attrs.kvs.h) };
 }
 
 /** 開き行が線の塊(`.pkc-line` のクラス札)か(#530 段③d。消す口が使う)。 */
@@ -206,6 +225,27 @@ export function movePlace(body: string, move: PlaceMove): string | null {
 export function resizePlace(body: string, resize: PlaceResize): string | null {
   if (!isCoord(resize.w) || !isCoord(resize.h)) return null;
   return spliceOpenLine(body, resize, { w: resize.w, h: resize.h });
+}
+
+/**
+ * 🔴 **位置と大きさを一度に書く**(#529 W2「位置と大きさ…」)── 開き行の x= / y= / w= / h= の
+ * うち**渡された札だけ**を書き換える。
+ *
+ * 🔑 `movePlace` + `resizePlace` を 2 回撃たない ── 1 回目で開き行が変わるので、2 回目の
+ *   「掴んだ時点の開き行」が byte 不一致になって**半分だけ書けた**状態を作る。門は同じ 1 本。
+ * ⚠ 値は窓の検め(`parsePlaceRect`)と**同じ規則**(`isPlaceRectNumber`)で再度検める ──
+ *   型は境界(postMessage / test の手組み)では効かない。1 つでも外れたら全体を断る(一部だけ書かない)。
+ * 🔑 渡された札が 0 個なら body をそのまま返す(書く物が無い ≠ 競合。窓の「決める」を空欄で押した形)。
+ */
+export function setPlaceRect(body: string, target: PlaceTarget, rect: PlaceRectValue): string | null {
+  const tokens: { x?: number; y?: number; w?: number; h?: number } = {};
+  for (const k of PLACE_RECT_KEYS) {
+    const v = rect[k];
+    if (v === undefined) continue;
+    if (!isPlaceRectNumber(k, v)) return null;
+    tokens[k] = v;
+  }
+  return spliceOpenLine(body, target, tokens);
 }
 
 /** 門を通してから開き行の札を差し替える(動かす / 大きさを変える の共通部)。 */
@@ -472,6 +512,40 @@ export function addPlace(body: string, x: number, y: number): string | null {
   const last = spans[spans.length - 1];
   if (last !== undefined && last.open) return null;
   const block = `:::format{.pkc-place x=${x} y=${y} w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`;
+  if (body === '') return block;
+  return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
+}
+
+/**
+ * 🔴 **板のテンプレートを (x, y) を左上にして足す**(#529 W4)── 本文の末尾に、既存の記法の
+ * 枠(と線)を書く。門・末尾の書き方は `addPlace` と同じ(閉じていない囲いの中へは書かない)。
+ *
+ * ⚠ 流れ図の枠の名前は本文で**使われていない `板N`** を取る(`connectPlaces` が付ける名前と同じ
+ *   規則 ── 線が別の枠を指さない)。取れなければ null(当て推量の名前を書かない)。
+ */
+export function addPlaceTemplate(
+  body: string,
+  x: number,
+  y: number,
+  id: PlaceTemplateId,
+): string | null {
+  if (!isCoord(x) || !isCoord(y)) return null;
+  const tpl = PLACE_TEMPLATES.find((t) => t.id === id);
+  if (tpl === undefined) return null;
+  const spans = scanContainers(body);
+  const last = spans[spans.length - 1];
+  if (last !== undefined && last.open) return null;
+  const taken = takenNames(body.split('\n'));
+  const names: string[] = [];
+  for (let i = 0; i < tpl.names; i += 1) {
+    const n = freeName(taken);
+    if (n === null) return null;
+    taken.add(n);
+    names.push(n);
+  }
+  const text = placeTemplateBody(id, x, y, names);
+  if (text === null) return null;
+  const block = `${text}\n`;
   if (body === '') return block;
   return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
 }

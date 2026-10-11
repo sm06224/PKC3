@@ -122,6 +122,8 @@ import type { TableFormat } from '@features/markdown/table-convert';
 import { isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
 import { isPlaceStyle, type PlaceStyle } from '@features/markdown/place-color';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
+import { isPlaceRectNumber, PLACE_RECT_KEYS, type PlaceRectValue } from '@features/markdown/place-rect';
+import { isPlaceTemplateId, type PlaceTemplateId } from '@features/markdown/place-template';
 import { sectionAt, sectionRange } from '@features/markdown/append-target';
 import { openCodeFenceAt } from '@features/markdown/code-fence-edit';
 import { frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -2630,7 +2632,12 @@ export type UserAction =
    *   (板の行を渡しても消えない)。
    */
   | { type: 'REMOVE_PLACE_LINE'; lid: string; line: number }
-  | { type: 'ADD_PLACE'; lid: string; x: number; y: number }
+  | { type: 'ADD_PLACE'; lid: string; x: number; y: number; template?: PlaceTemplateId }
+  /**
+   * 🔴 **位置と大きさを数で入れる**(#529 W2)── 開き行の x= y= w= h= のうち渡した札だけを一度に書く。
+   * 同じ門。値は reducer でも検める(窓の検めと同じ規則 ── 型は境界で効かない)。
+   */
+  | { type: 'SET_PLACE_RECT'; lid: string; line: number; rect: PlaceRectValue }
   /** 板を前へ出す(#676 段②)── 他の板の z= の最大 + 1 を書く。同じ門。 */
   | { type: 'RAISE_PLACE'; lid: string; line: number }
   /**
@@ -7698,10 +7705,26 @@ function reduceCore(
     case 'ADD_PLACE':
       return bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
-        shown !== null && isPlaceCoord(action.x) && isPlaceCoord(action.y)
-          ? { kind: 'place-add', x: action.x, y: action.y }
+        shown !== null &&
+        isPlaceCoord(action.x) &&
+        isPlaceCoord(action.y) &&
+        (action.template === undefined || isPlaceTemplateId(action.template))
+          ? action.template === undefined
+            ? { kind: 'place-add', x: action.x, y: action.y }
+            : { kind: 'place-add', x: action.x, y: action.y, template: action.template }
           : null,
       );
+    case 'SET_PLACE_RECT':
+      return bodyRewriteGate(state, action.lid, '、板の位置と大きさを変えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        for (const k of PLACE_RECT_KEYS) {
+          const v = action.rect[k];
+          if (v !== undefined && !isPlaceRectNumber(k, v)) return null;
+        }
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-rect', line: action.line, openLine, rect: action.rect };
+      });
     case 'RAISE_PLACE':
       return bodyRewriteGate(state, action.lid, '、板を前へ出してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
