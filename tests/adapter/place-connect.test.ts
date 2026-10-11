@@ -442,6 +442,10 @@ describe('引いた線は、右クリックで消せる(片道にしない。#53
       'place-color',
       'place-line-width',
       'place-line-width',
+      // 🔴 2026-10-11(#530): 矢じりの 3 択(矢じりなし / 終わりに付ける / 両端に付ける)が「消す」の前に並ぶ
+      'place-line-arrow',
+      'place-line-arrow',
+      'place-line-arrow',
       'remove-place-line',
     ]);
     expect(root.querySelector(`${MENU} [data-pkc-action="remove-place-line"]`)!.textContent).toBe('この線を消す');

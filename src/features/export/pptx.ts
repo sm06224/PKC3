@@ -19,6 +19,7 @@ import {
   parsePlaceWidth,
   placeInkOf,
   PLACE_LINE_WIDTH_DEFAULT,
+  type PlaceArrow,
 } from '../markdown/place-color';
 import type { PlaceShape } from '../markdown/place-shape';
 import {
@@ -166,6 +167,11 @@ export interface BoardLink {
    */
   readonly stroke?: string | null;
   readonly width?: number | null;
+  /**
+   * 🔴 **矢じり**(`arrow=`。#530)。`end` = 終わり(`to=` 側。`a:tailEnd`)/ `both` = 両端(`a:headEnd` も)。
+   * ⚠ 書いていなければ省く(**矢じりなしの線は今までと 1 byte も変わらない**)。
+   */
+  readonly arrow?: 'end' | 'both';
 }
 
 /**
@@ -346,6 +352,7 @@ export function splitIntoSlides(
             route: p.route,
             ...(p.stroke != null ? { stroke: p.stroke } : {}),
             ...(p.width != null ? { width: p.width } : {}),
+            ...(p.arrow !== undefined ? { arrow: p.arrow } : {}),
           });
           i += 1;
           continue;
@@ -850,7 +857,11 @@ function connectorXml(
    * 🔴 **線の色 / 太さ**(#530 段④)。⚠ 既定を置かない(`route` と同じ理由 ── 呼ぶ所は 1 か所で、
    *   書き忘れたら tsc が落ちる)。`null` の側は**今までの色と太さ**(808080 / 1.5pt)。
    */
-  look: { readonly stroke: string | null; readonly width: number | null },
+  look: {
+    readonly stroke: string | null;
+    readonly width: number | null;
+    readonly arrow: PlaceArrow;
+  },
 ): string {
   const rgb = rgbOf(look.stroke) ?? '808080';
   // 太さは px → EMU。⚠ 標準(2px)= 19050 は今までの値と同じ(`PLACE_LINE_WIDTH_DEFAULT` × 9525)
@@ -866,7 +877,16 @@ function connectorXml(
     + `<a:ext cx="${Math.max(1, Math.abs(p2.x - p1.x))}" `
     + `cy="${Math.max(1, Math.abs(p2.y - p1.y))}"/></a:xfrm>`
     + `<a:prstGeom prst="${CXN_PRST[route]}"><a:avLst/></a:prstGeom>`
-    + `<a:ln w="${wEmu}"><a:solidFill><a:srgbClr val="${rgb}"/></a:solidFill></a:ln>`
+    + `<a:ln w="${wEmu}"><a:solidFill><a:srgbClr val="${rgb}"/></a:solidFill>`
+    /**
+     * 🔴 **矢じり**(#530)── `a:headEnd` は線の**始まり**(`from=` 側)、`a:tailEnd` は**終わり**(`to=` 側)。
+     * ⚠ 順番は仕様で決まっている(塗り → 破線 → 接合 → `headEnd` → `tailEnd`)。入れ違えると PowerPoint が拒む。
+     * 🔑 `type="triangle"` は塗りつぶしの三角(画面の矢じりと同じ形)。矢じりなしは**何も書かない**
+     *   (`type="none"` を書き足すと、矢じりなしの線のバイト列が今までと変わる)。
+     */
+    + (look.arrow === 'both' ? '<a:headEnd type="triangle"/>' : '')
+    + (look.arrow === 'none' ? '' : '<a:tailEnd type="triangle"/>')
+    + '</a:ln>'
     + '</p:spPr></p:cxnSp>';
 }
 
@@ -979,7 +999,7 @@ function boardShapes(
           const r = parseRouteSpell(link.route);
           return r.kind === 'ok' ? r.route : 'straight';
         })(),
-        { stroke: link.stroke ?? null, width: link.width ?? null },
+        { stroke: link.stroke ?? null, width: link.width ?? null, arrow: link.arrow ?? 'none' },
       ),
     );
   }

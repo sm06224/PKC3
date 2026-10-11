@@ -25,7 +25,11 @@
  * ⚠ **pure module**。browser API を持たない。
  */
 
-import { PLACE_LINE_WIDTH_THICK, PLACE_LINE_WIDTH_THIN } from './markdown/place-color';
+import {
+  PLACE_LINE_WIDTH_THICK,
+  PLACE_LINE_WIDTH_THIN,
+  type PlaceArrow,
+} from './markdown/place-color';
 import {
   PLACE_SHAPES,
   PLACE_SHAPE_LABELS,
@@ -84,6 +88,13 @@ export interface EntryAction {
    *   `PLACE_STYLE_KEYS_ATTR` / `PLACE_STYLE_WIDTH_ATTR` の 1 本(綴りを写して増やさない)。
    */
   readonly attrs?: Readonly<Record<string, string>>;
+  /**
+   * 🔴 **いま選ばれている物**(#530 矢じり)── 「矢じりなし / 終わりに付ける / 両端に付ける」のように
+   *   **同じ事柄の選択肢**を並べるとき、いまの物に ✓ を付ける(押しても何も変わらない口を、
+   *   「出さない」のではなく「いまここ」と見せる ── 3 つ並んでいるから比べられる)。
+   * ⚠ 空(`undefined`)なら**付けない**(選択肢ではない項目の属性を数える検査を汚さない)。
+   */
+  readonly checked?: boolean;
 }
 
 /**
@@ -94,6 +105,15 @@ export interface EntryAction {
  */
 export const PLACE_STYLE_KEYS_ATTR = 'data-pkc-style-keys';
 export const PLACE_STYLE_WIDTH_ATTR = 'data-pkc-style-width';
+/** 🔴 矢じり(#530)── 項目が運ぶ値(`none` / `end` / `both`)。`none` は札を消す。 */
+export const PLACE_STYLE_ARROW_ATTR = 'data-pkc-style-arrow';
+
+/** 矢じりの選択肢の字(右クリックの並び)。⚠ 字の正本はここ 1 本 ── マニュアルもこの字で書く。 */
+export const PLACE_ARROW_LABELS: Readonly<Record<PlaceArrow, string>> = {
+  none: '矢じりなし',
+  end: '終わりに付ける',
+  both: '両端に付ける',
+};
 
 
 /**
@@ -1012,11 +1032,15 @@ export const REMOVE_PLACE_LINE_ACTION: EntryAction = {
  * @param ctx.stroke 線の色の札が書かれているか(読めない値も数える)
  * @param ctx.width いまの太さ(札が無い / 読めないは `null`)
  * @param ctx.widthWritten 太さの札が書かれているか(読めない値も数える)
+ * @param ctx.arrow いまの矢じり(札が無い / 読めない = `none`)。⚠ 3 つとも**いつも出す**(いまの物に ✓)
  */
+const PLACE_ARROW_ORDER: readonly PlaceArrow[] = ['none', 'end', 'both'];
+
 export function placeLineMenuActions(ctx: {
   readonly stroke: boolean;
   readonly width: number | null;
   readonly widthWritten: boolean;
+  readonly arrow: PlaceArrow;
 }): readonly EntryAction[] {
   const w = (n: number): Readonly<Record<string, string>> => ({ [PLACE_STYLE_WIDTH_ATTR]: String(n) });
   return [
@@ -1033,6 +1057,18 @@ export function placeLineMenuActions(ctx: {
     ...(ctx.widthWritten
       ? [{ action: 'place-line-width', label: '線の太さを標準に戻す', attrs: { [PLACE_STYLE_WIDTH_ATTR]: '' } }]
       : []),
+    /**
+     * 🔴 **矢じり**(#530。Gemini 裁定 2026-10-11 依頼 15)── 3 つを**いつも並べ**、いまの物に ✓ を付ける。
+     * ⚠ いまの太さと同じ物を出さない太さの口とは作法が違う ── これは「3 つから 1 つ選ぶ」物なので、
+     *   比べられるよう 3 つ見せる(押しても変わらない口は、✓ が「いまここ」と言う)。
+     * 🔑 「矢じりなし」は札を**消す**(置けるなら外せる)。
+     */
+    ...PLACE_ARROW_ORDER.map((a) => ({
+      action: 'place-line-arrow',
+      label: PLACE_ARROW_LABELS[a],
+      attrs: { [PLACE_STYLE_ARROW_ATTR]: a },
+      checked: ctx.arrow === a,
+    })),
     REMOVE_PLACE_LINE_ACTION,
   ];
 }

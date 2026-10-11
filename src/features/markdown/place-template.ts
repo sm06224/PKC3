@@ -80,8 +80,9 @@ export function placeTemplateBody(
     const h = 100;
     const step = w + 80;
     for (let i = 0; i < 3; i += 1) parts.push(frame(x + i * step, y, w, h, `手順 ${i + 1}`, names[i]!));
-    parts.push(`:::format{.pkc-line from=${names[0]!} to=${names[1]!}}\n:::`);
-    parts.push(`:::format{.pkc-line from=${names[1]!} to=${names[2]!}}\n:::`);
+    // 🔴 流れ図なので、最初から終わりに矢じりを付ける(#530。Gemini 裁定 2026-10-11 依頼 15)
+    parts.push(`:::format{.pkc-line from=${names[0]!} to=${names[1]!} arrow=end}\n:::`);
+    parts.push(`:::format{.pkc-line from=${names[1]!} to=${names[2]!} arrow=end}\n:::`);
   } else {
     // 見出しの帯を 1 本ぶん空けて、その右下に 2 × 2 の象限を置く
     const headW = 100;

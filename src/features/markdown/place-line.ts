@@ -38,6 +38,8 @@
  * 判断をあちらへ書くと **unit から永久に見えない**(CLAUDE.md §2)。
  */
 
+import { PLACE_LINE_WIDTH_DEFAULT, type PlaceArrow } from './place-color';
+
 /** 板 1 枚の場所と大きさ(器の左上が原点、px)。 */
 export interface PlaceRect {
   readonly x: number;
@@ -341,4 +343,97 @@ export function placeLineAnchorOf(raw: string | null): AnchorRead {
   if (rest === '') return { kind: 'none' };
   const a = parseAnchorSpell(rest);
   return a === null ? { kind: 'bad', raw: rest } : { kind: 'ok', anchor: a };
+}
+
+/**
+ * 🔴 **矢じりの形**(#530。Gemini 裁定 2026-10-11 依頼 15)。
+ *
+ * ## 何をしているか
+ *
+ * 線の**端点**に、**塗りつぶした三角**を 1 つ置く。向きは**その端で線が進んでいる向き**
+ * (まっすぐなら 2 点を結ぶ向き / 折れ線・曲線なら端点に着く最後の区間の向き)。
+ *
+ * ## 🔑 なぜ SVG の `<marker>` ではなく「自前の三角」か
+ *
+ * - `<marker>` の色は `context-stroke` が要る(古い描画器は黒く塗る)── 線の色を**変数**で
+ *   渡している(`--pkc-line-stroke`)この版では、三角を普通の `<path>` として置き、**同じ変数**で塗るほうが
+ *   確実に「線と同じ色」になる
+ * - 大きさは**線の太さに比例**させる(太い線に小さな三角が付くと、矢じりが線に埋もれる)
+ * - 描く形を `d` の字として持つので、**画面・印刷・別ウィンドウ**が同じ DOM から同じ形になる
+ *
+ * ⚠ 曲線(`curve`)の端の向きは**制御点から端点へ**(= 折れ線の最後の区間と同じ)。
+ *   制御点が曲がる線の上に在る(`placePathOf`)ので、折れ線の向きで曲線の接線と一致する。
+ * ⚠ 区間の長さが 0(`bend=` が端点に重なる)ときは**その前の区間**を見る ── 全部 0 なら矢じりは出さない。
+ */
+export interface PlaceArrowHeads {
+  /** 始まり側(`from=`)の三角の `d`。両端のときだけ。 */
+  readonly start: string | null;
+  /** 終わり側(`to=`)の三角の `d`。`end` と `both` のとき。 */
+  readonly end: string | null;
+}
+
+/** 矢じりの長さ(px)。⚠ 太さに比例 ── 標準(2px)で 12px、4px で 16px。 */
+export function arrowHeadLength(width: number): number {
+  return 8 + 2 * width;
+}
+
+/** 線が通る点の列(折れ線)── 矢じりの向きを決めるためだけに使う。 */
+function polylineOf(ln: PlaceLine, route: PlaceRoute, bend: PlaceBend | null): Array<readonly [number, number]> {
+  const a: readonly [number, number] = [ln.x1, ln.y1];
+  const z: readonly [number, number] = [ln.x2, ln.y2];
+  if (route === 'straight') return [a, z];
+  const b = bend ?? defaultBend(ln);
+  return b.axis === 'v'
+    ? [a, [b.at, ln.y1], [b.at, ln.y2], z]
+    : [a, [ln.x1, b.at], [ln.x2, b.at], z];
+}
+
+/** 三角の `d`。`tip` が先端、`dir` は外へ向かう単位ベクトル。 */
+function headPath(tip: readonly [number, number], dir: readonly [number, number], len: number): string {
+  const half = len * 0.4;
+  const bx = tip[0] - dir[0] * len;
+  const by = tip[1] - dir[1] * len;
+  const nx = -dir[1];
+  const ny = dir[0];
+  return (
+    `M ${n2(tip[0])} ${n2(tip[1])} `
+    + `L ${n2(bx + nx * half)} ${n2(by + ny * half)} `
+    + `L ${n2(bx - nx * half)} ${n2(by - ny * half)} Z`
+  );
+}
+
+/** 点列の端から見て、最初の「長さのある」区間の向き(外向きの単位ベクトル)。 */
+function outward(pts: ReadonlyArray<readonly [number, number]>, atEnd: boolean): readonly [number, number] | null {
+  const n = pts.length;
+  for (let k = 1; k < n; k += 1) {
+    const tip = atEnd ? pts[n - k]! : pts[k - 1]!;
+    const prev = atEnd ? pts[n - k - 1]! : pts[k]!;
+    const dx = tip[0] - prev[0];
+    const dy = tip[1] - prev[1];
+    const d = Math.hypot(dx, dy);
+    if (d > 0.001) return [dx / d, dy / d];
+  }
+  return null;
+}
+
+/**
+ * @param width 線の太さ(px)。`null` = 標準。
+ * @param arrow `none` は何も返さない(`start` も `end` も `null`)。
+ */
+export function placeArrowHeadsOf(
+  ln: PlaceLine,
+  route: PlaceRoute,
+  bend: PlaceBend | null,
+  arrow: PlaceArrow,
+  width: number | null,
+): PlaceArrowHeads {
+  if (arrow === 'none') return { start: null, end: null };
+  const len = arrowHeadLength(width ?? PLACE_LINE_WIDTH_DEFAULT);
+  const pts = polylineOf(ln, route, bend);
+  const e = outward(pts, true);
+  const st = arrow === 'both' ? outward(pts, false) : null;
+  return {
+    start: st === null ? null : headPath(pts[0]!, st, len),
+    end: e === null ? null : headPath(pts[pts.length - 1]!, e, len),
+  };
 }

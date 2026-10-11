@@ -19,7 +19,7 @@
  * ⚠ PKC2 は失敗を `console.warn` にしか書かず、user から見ると
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
-import { parsePlaceColor, parsePlaceWidth } from '@features/markdown/place-color';
+import { parsePlaceColor, parsePlaceWidth, placeArrowOf } from '@features/markdown/place-color';
 import { placeShapeOf } from '@features/markdown/place-shape';
 import {
   anchorSpell,
@@ -430,6 +430,8 @@ export function htmlToDocxBlocks(doc: Document): {
           const r = parseRouteSpell(el.getAttribute('data-pkc-route'));
           const lineStroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
           const lineWidth = parsePlaceWidth(el.getAttribute('data-pkc-width'));
+          // 🔴 矢じり(#530)── 読む規則は画面と同じ 1 本(`placeArrowOf`)。⚠ 読めた `end` / `both` だけ運ぶ
+          const lineArrow = placeArrowOf(el.getAttribute('data-pkc-arrow'));
           blocks.push({
             kind: 'place-line',
             from,
@@ -441,6 +443,7 @@ export function htmlToDocxBlocks(doc: Document): {
             // ⚠ **読めた物だけ運ぶ**(色なしの線の印は今までと 1 キーも変わらない)
             ...(lineStroke !== null ? { stroke: lineStroke } : {}),
             ...(lineWidth !== null ? { width: lineWidth } : {}),
+            ...(lineArrow !== 'none' ? { arrow: lineArrow } : {}),
           });
         }
         continue;

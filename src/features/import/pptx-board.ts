@@ -326,18 +326,35 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     const spPr = kid(c, 'spPr');
     const ea = edgeOf(shapes[a]!.shape, int(st?.attrs.idx));
     const eb = edgeOf(shapes[b]!.shape, int(en?.attrs.idx));
+    /**
+     * 🔴 **矢じり**(#530)── `a:tailEnd`(終わり)/ `a:headEnd`(始まり)の `type` が `none` 以外なら付いている。
+     * ⚠ 種類(三角・矢・ひし形…)は区別しない ── 画面の矢じりは塗りつぶしの三角 1 種類。
+     * 🔑 **始まりだけ**に付いた線は PKC3 に「始まりだけ」が無いので、**向きを入れ替えて** `to=` 側へ付ける
+     *   (見た目は同じ ── 矢じりが指す板が変わらない)。⚠ 接続点も一緒に入れ替える。
+     */
+    const lnEl = kid(spPr, 'ln');
+    const hasEnd = (tag: string): boolean => {
+      const t = kid(lnEl, tag)?.attrs.type;
+      return t !== undefined && t !== 'none';
+    };
+    const headArrow = hasEnd('headEnd');
+    const tailArrow = hasEnd('tailEnd');
+    const reverse = headArrow && !tailArrow;
+    const arrow: 'end' | 'both' | null = headArrow || tailArrow ? (headArrow && tailArrow ? 'both' : 'end') : null;
+    const [fromIdx, fromEdge, toIdx, toEdge] = reverse ? [b, eb, a, ea] : [a, ea, b, eb];
     const attrs = [
-      `from=${nameOf(a)}${ea === null ? '' : `:${ea}`}`,
-      `to=${nameOf(b)}${eb === null ? '' : `:${eb}`}`,
+      `from=${nameOf(fromIdx)}${fromEdge === null ? '' : `:${fromEdge}`}`,
+      `to=${nameOf(toIdx)}${toEdge === null ? '' : `:${toEdge}`}`,
     ];
     const route = routeOf(kid(spPr, 'prstGeom')?.attrs.prst ?? '');
     if (route !== null) attrs.push(`route=${route}`);
-    const ln = kid(spPr, 'ln');
+    const ln = lnEl;
     const stroke = solidOf(ln);
     if (stroke !== null && stroke !== LINE_DEFAULT_RGB) attrs.push(`stroke=${stroke}`);
     const wEmu = int(ln?.attrs.w);
     const width = wEmu === null ? null : parsePlaceWidth(String(Math.round(wEmu / EMU_PER_PX)));
     if (width !== null && width !== PLACE_LINE_WIDTH_DEFAULT) attrs.push(`width=${width}`);
+    if (arrow !== null) attrs.push(`arrow=${arrow}`);
     wires.push(`:::format{.pkc-line ${attrs.join(' ')}}\n:::\n`);
   }
 

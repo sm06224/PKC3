@@ -42,6 +42,7 @@ import {
 import { isPlaceOpen, placeRectOf, placeShapeAt, placeStyleAt } from '@features/markdown/place-notation';
 import {
   parsePlaceColor,
+  parseArrowSpell,
   parsePlaceWidth,
   type PlaceStyle,
 } from '@features/markdown/place-color';
@@ -268,6 +269,7 @@ import {
   ADD_PLACE_TEMPLATE_ACTION,
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
+  PLACE_STYLE_ARROW_ATTR,
   PLACE_STYLE_WIDTH_ATTR,
   bodyMenuActions,
   editingRowMenuActions,
@@ -9097,6 +9099,29 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   /**
+   * 🔴 **線の矢じりを選ぶ**(#530。Gemini 裁定 2026-10-11 依頼 15)── 項目が運ぶ値(`none` / `end` / `both`)を書く。
+   * 🔑 `none` は札を**消す**(`arrow=none` と書き足さない ── `place-line-width` の標準へ戻すと同じ作法)。
+   * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
+   */
+  'place-line-arrow': (dispatcher, target) => {
+    const raw = target.getAttribute(PLACE_STYLE_ARROW_ATTR);
+    if (raw === null) return;
+    const read = parseArrowSpell(raw);
+    if (read.kind !== 'ok') return;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) =>
+        dispatcher.dispatch({
+          type: 'SET_PLACE_STYLE',
+          lid,
+          line,
+          style: { arrow: read.arrow === 'none' ? null : read.arrow },
+        }),
+      '矢じりを直してください',
+    );
+  },
+  /**
    * 🔴 **線を消す**(#530 段③d)── 右クリックした線の開き行を消す。
    * 🔑 門は `remove-place` と同じ(身元 / phase)。確認は挟まない ── 線は 2 行の宣言で、
    *   消えても繋がれていた付箋は無傷、もう一度掴めば繋がる(板を消す重さとは違う)。
@@ -15134,6 +15159,7 @@ export function bindActions(
             stroke: lineStyle?.written.stroke === true,
             width: lineStyle?.width ?? null,
             widthWritten: lineStyle?.written.width === true,
+            arrow: lineStyle?.arrow ?? 'none',
           }),
           root.ownerDocument.activeElement,
           { [MENU_LID_ATTR]: lineOb.lid, [MENU_BLOCK_ATTR]: String(rel) },

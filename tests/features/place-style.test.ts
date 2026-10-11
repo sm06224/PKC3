@@ -117,7 +117,7 @@ describe('塗りの上の字の色(placeInkOf)── 境目の両側', () => {
  */
 describe('線の右クリックの太さの口(placeLineMenuActions)', () => {
   const labelsAt = (width: number | null): string[] =>
-    placeLineMenuActions({ stroke: false, width, widthWritten: width !== null }).map((a) => a.label);
+    placeLineMenuActions({ stroke: false, width, widthWritten: width !== null, arrow: 'none' }).map((a) => a.label);
 
   it('🔴 太さ 1 では「線を細くする」が出ない(対照:出るはずの 2 つの太さでは出る)', () => {
     expect(labelsAt(1), '押しても変わらない口が出た').not.toContain('線を細くする');
