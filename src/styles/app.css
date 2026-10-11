@@ -3997,6 +3997,20 @@ li[data-pkc-row-slot] {
   color: var(--pkc-place-ink, inherit);
   overflow: auto;
 }
+/* 🔴 **付箋の文字の大きさ**(#530 段⑤a。Gemini 裁定 2026-10-11 依頼 19 Q1)── 4 段のうち標準は札が無い(規則を置かない)。
+ *   ⚠ **倍率(`em`)で持つ** ── 親(`body`)の文字の大きさは設定の「文字の大きさ」(`--pkc-text-size`)なので、
+ *   設定を変えると付箋の小・大・特大も一緒に動く(絶対値で持たない)。見出し・箇条書きは `em` で
+ *   決まっているので、中身も同じ比率で動く。付箋の外形(`w=` `h=`)は変えない ── 収まらない分は `overflow: auto` で送れる。
+ *   ⚠ 読めない綴り(`size=huge`)は一致する規則が無く、標準のまま(本文は消さない)。 */
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-size='small'] {
+  font-size: 0.85em;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-size='large'] {
+  font-size: 1.25em;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-size='xlarge'] {
+  font-size: 1.6em;
+}
 /* 🔴 **板どうしを繋ぐ線**(#530 段③a)。
  *
  * ⚠ 層は `z-index` を持たない ── `place-board.ts` が**いちばん先頭へ置く**ので、

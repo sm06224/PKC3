@@ -43,7 +43,9 @@ import { isPlaceOpen, placeRectOf, placeShapeAt, placeStyleAt } from '@features/
 import {
   parsePlaceColor,
   parseArrowSpell,
+  parseSizeSpell,
   parsePlaceWidth,
+  type PlaceSize,
   type PlaceStyle,
 } from '@features/markdown/place-color';
 import type { PlaceShape } from '@features/markdown/place-shape';
@@ -270,6 +272,7 @@ import {
   placeLineMenuActions,
   PLACE_STYLE_KEYS_ATTR,
   PLACE_STYLE_ARROW_ATTR,
+  PLACE_STYLE_SIZE_ATTR,
   PLACE_STYLE_WIDTH_ATTR,
   bodyMenuActions,
   editingRowMenuActions,
@@ -3687,7 +3690,7 @@ function directiveBlockAt(
   host: HTMLElement,
   target: Element,
   fmBody: string,
-): { line: number; board: boolean; shape: PlaceShape | null; styled: boolean } | null {
+): { line: number; board: boolean; shape: PlaceShape | null; styled: boolean; size: PlaceSize } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
     const line = Number(el.getAttribute('data-pkc-source-line'));
@@ -3700,6 +3703,7 @@ function directiveBlockAt(
         shape: placeShapeAt(open),
         // 🔑 色の札も**原文**から読む(#530 段④)── 描画・書き出しと同じ 1 本(`placeStyleAt`)
         styled: placeStyleAt(open)?.any === true,
+        size: placeStyleAt(open)?.size ?? 'standard',
       };
     }
     el = el.parentElement?.closest('[data-pkc-source-line]') ?? null;
@@ -9119,6 +9123,29 @@ const ACTIONS: Record<string, ActionHandler> = {
           style: { arrow: read.arrow === 'none' ? null : read.arrow },
         }),
       '矢じりを直してください',
+    );
+  },
+  /**
+   * 🔴 **付箋の文字の大きさを選ぶ**(#530 段⑤a)── 項目が運ぶ値(`small` / `standard` / `large` / `xlarge`)を書く。
+   * 🔑 `standard` は札を**消す**(`size=standard` と書き足さない ── `place-line-arrow` の `none` と同じ作法)。
+   * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
+   */
+  'place-size': (dispatcher, target) => {
+    const raw = target.getAttribute(PLACE_STYLE_SIZE_ATTR);
+    if (raw === null) return;
+    const read = parseSizeSpell(raw);
+    if (read.kind !== 'ok') return;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) =>
+        dispatcher.dispatch({
+          type: 'SET_PLACE_STYLE',
+          lid,
+          line,
+          style: { size: read.size === 'standard' ? null : read.size },
+        }),
+      '文字の大きさを直してください',
     );
   },
   /**
@@ -15337,7 +15364,7 @@ export function bindActions(
               chapterWindow: chapterable,
               // 🔴 近道の字を右に添える(#587 C 案 2)── 見出しの項目だけ(塊 / 板 / 本文には無い)
             }).map(withShortcut)),
-        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape, styled: block.styled })),
+        ...(block === null ? [] : blockMenuActions({ board: block.board, shape: block.shape, styled: block.styled, size: block.size })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる
          *   (`attrs`)── `carry` に混ぜると、表と関係の無い項目まで同じ属性を持ち、

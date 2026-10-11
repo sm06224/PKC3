@@ -19,7 +19,7 @@
  * ⚠ PKC2 は失敗を `console.warn` にしか書かず、user から見ると
  *   「ボタンを押して何も起きない」が正常動作だった。
  */
-import { parsePlaceColor, parsePlaceWidth, placeArrowOf } from '@features/markdown/place-color';
+import { parsePlaceColor, parsePlaceWidth, placeArrowOf, placeSizeOf } from '@features/markdown/place-color';
 import { placeShapeOf } from '@features/markdown/place-shape';
 import {
   anchorSpell,
@@ -457,6 +457,8 @@ export function htmlToDocxBlocks(doc: Document): {
         walkBlocks(el);
         const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
         const stroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
+        // 🔴 文字の大きさ(#530 段⑤a)── 読む規則は画面と同じ 1 本(`placeSizeOf`)。標準は運ばない
+        const size = placeSizeOf(el.getAttribute('data-pkc-size'));
         blocks[at] = {
           kind: 'place',
           x: pxAttr(el, 'data-pkc-x') ?? 0,
@@ -468,6 +470,7 @@ export function htmlToDocxBlocks(doc: Document): {
           // 🔴 色(#530 段④)── 読む規則は画面と同じ 1 本。⚠ 読めた物だけ運ぶ(色なしは 1 キーも変わらない)
           ...(fill !== null ? { fill } : {}),
           ...(stroke !== null ? { stroke } : {}),
+          ...(size !== 'standard' ? { size } : {}),
           /**
            * 🔴 **板の名前**(#530 段③e)── 線の繋ぎ先はこれで引く。
            * ⚠ 名前の無い板は `null`(`id=""` は「書いていない」と同じ)。
