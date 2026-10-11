@@ -773,6 +773,18 @@ select:focus-visible {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/* 🔴 **選択肢のいまの物に ✓**(#530 矢じり)── 3 つ並んだ「どれか 1 つ」の項目だけ(`aria-checked`)。
+ *   字は `::before`(`textContent` を汚さない)。⚠ **選ばれていない物も同じ幅の空きを取る**
+ *   (取らないと、選ぶたびに字の頭がずれて読みにくい)。 */
+[data-pkc-region='context-menu'] button[aria-checked]::before {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  margin-left: -0.2em;
+}
+[data-pkc-region='context-menu'] button[aria-checked='true']::before {
+  content: '✓';
+}
 /* 🔴 **近道の字を項目の右に薄く出す**(#587 改善 C 案 2)。字は属性(`data-pkc-shortcut`)に
  *   持ち、`::after` で描く ── `textContent` を汚さない(項目の字を読む検査と読み上げは字だけ)。
  *   ⚠ ボタンは `inline-flex`(上の `button` の規則)なので `margin-left: auto` で右に寄る。
@@ -4020,6 +4032,15 @@ li[data-pkc-row-slot] {
    *   ⚠ `fill: none` は変数にしない(外すと曲線が塗り潰される ── 上の注記)。 */
   stroke: var(--pkc-line-stroke, var(--muted));
   stroke-width: var(--pkc-line-width, 2);
+}
+/* 🔴 **矢じり**(#530)── 線の隣に置く塗りつぶしの三角。色は線と同じ変数(`--pkc-line-stroke`)で塗る。
+ *   ⚠ 上の `fill: none` より詳しい選択子で `fill` を戻す(三角が空のままだと、縁だけの白抜きになる)。
+ *   縁(`stroke`)は同じ色で 1px ── 頂点が尖りすぎて細く消えるのを防ぐ。 */
+[data-pkc-field='place-lines'] path[data-pkc-line-head] {
+  fill: var(--pkc-line-stroke, var(--muted));
+  stroke: var(--pkc-line-stroke, var(--muted));
+  stroke-width: 1;
+  stroke-linejoin: round;
 }
 /* 🔴 **線を押さえる当たり**(#530 段③d)── 右クリックで「この線を消す」を出す相手。
  *

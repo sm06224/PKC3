@@ -276,7 +276,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 同じ理由で `raise-place` / `remove-place` も未登記である(並びを揃えた)。
    *   ⚠ 2026-10-01(#530 段③d)で `remove-place-line`(右クリックした線を消す)も同じ理由で足した。
    */
-  'place-color', 'place-color-clear', 'place-line-width', 'place-rect',
+  'place-color', 'place-color-clear', 'place-line-arrow', 'place-line-width', 'place-rect',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round',
   'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
@@ -476,6 +476,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11(#530): 板の線の右クリックの矢じり(`place-line-arrow`)で受け手 +1 ── 登記は増えない
+      //   (押し口は線の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-width` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11: 「リンクをコピー」(`copy-entry-link`。登記 +1 / 受け手 +1 / 両方 +1)と「添付のリンクをコピー」
       //   (`copy-asset-link`。行のメニューに登記 +1 / 受け手 +1 / 両方 +1)で `total` +2 / `receivers` +2 / `registered` +2 / `both` +2。
       // ⚠ 2026-10-11(#1376): 起動したときの 1 行の「戻す」「消す」(`restore-draft` / `discard-draft`)で受け手 +2 ── 登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
@@ -785,12 +787,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 D): 予定の面の「予定を .ics で書き出す」(`export-schedule-ics`)で受け手 +1 ── 登記は増えない
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 409,
-      receivers: 343,
+      total: 410,
+      receivers: 344,
       registered: 113,
       both: 47,
       outsideActionsTable: 66,
-      unregistered: 296,
+      unregistered: 297,
     });
   });
 

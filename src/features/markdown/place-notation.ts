@@ -47,6 +47,8 @@ import {
   LINE_STYLE_KEYS,
   parsePlaceColor,
   parsePlaceWidth,
+  placeArrowOf,
+  type PlaceArrow,
   PLACE_STYLE_KEYS,
   type PlaceStyle,
   type PlaceStyleKey,
@@ -385,7 +387,14 @@ export function setPlaceStyle(
     const v = style[k];
     if (v === undefined) continue;
     if (!allowed.includes(k)) return null;
-    entries.push([k, v === null ? null : k === 'width' ? String(v) : parsePlaceColor(v)!]);
+    // 🔴 矢じり: `none` は札を消す(「矢じりなし」= 札が無い。`none` と書き足さない)
+    const text =
+      v === null || v === 'none'
+        ? null
+        : k === 'width' || k === 'arrow'
+          ? String(v)
+          : parsePlaceColor(v)!;
+    entries.push([k, text]);
   }
   const next = spliceStyleLine(line, asLine ? 'pkc-line' : 'pkc-place', entries);
   if (next === null) return null;
@@ -399,6 +408,8 @@ export interface PlaceStyleRead {
   readonly fill: string | null;
   readonly stroke: string | null;
   readonly width: number | null;
+  /** 🔴 矢じり(線だけ。札が無い / 読めない = `none`)。読む規則は `placeArrowOf` の 1 本(§7)。 */
+  readonly arrow: PlaceArrow;
   /**
    * **その種類が持てる札のどれかが書かれているか**(値が読めなくても真)。
    * 🔑 右クリックの「色を外す」を出すかの判定 ── 読めない値(`fill=red`)も、外せなければ
@@ -423,11 +434,13 @@ export function placeStyleAt(line: string): PlaceStyleRead | null {
     fill: keys.includes('fill') ? parsePlaceColor(attrs.kvs.fill) : null,
     stroke: parsePlaceColor(attrs.kvs.stroke),
     width: keys.includes('width') ? parsePlaceWidth(attrs.kvs.width) : null,
+    arrow: keys.includes('arrow') ? placeArrowOf(attrs.kvs.arrow) : 'none',
     any: keys.some((k) => attrs.kvs[k] !== undefined),
     written: {
       fill: keys.includes('fill') && attrs.kvs.fill !== undefined,
       stroke: attrs.kvs.stroke !== undefined,
       width: keys.includes('width') && attrs.kvs.width !== undefined,
+      arrow: keys.includes('arrow') && attrs.kvs.arrow !== undefined,
     },
   };
 }

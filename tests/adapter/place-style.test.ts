@@ -331,6 +331,8 @@ describe('付箋の右クリック ── 塗りの色…', () => {
   });
 });
 
+const ARROW_LABELS = ['矢じりなし', '終わりに付ける', '両端に付ける'];
+
 describe('線の右クリック ── 色と太さ', () => {
   const lineHit = (host: Element): Element =>
     host.querySelector('[data-pkc-field="place-line-hits"] path')!;
@@ -338,14 +340,14 @@ describe('線の右クリック ── 色と太さ', () => {
   it('🔴 色なし・太さなしの線は「色…」「細く」「太く」+「消す」(最後)。外す口は出ない', () => {
     const { root, host } = rig(BOARD);
     rightClick(lineHit(host));
-    expect(labels(root)).toEqual(['色…', '線を細くする', '線を太くする', 'この線を消す']);
+    expect(labels(root)).toEqual(['色…', '線を細くする', '線を太くする', ...ARROW_LABELS, 'この線を消す']);
   });
 
   it('🔴 いまの太さと同じ物は出ない。太さが書かれていれば「標準に戻す」が出る', () => {
     const thick = BOARD.replace('to=b:left}', 'to=b:left width=4}');
     const { root, host } = rig(thick);
     rightClick(lineHit(host));
-    expect(labels(root)).toEqual(['色…', '線を細くする', '線の太さを標準に戻す', 'この線を消す']);
+    expect(labels(root)).toEqual(['色…', '線を細くする', '線の太さを標準に戻す', ...ARROW_LABELS, 'この線を消す']);
   });
 
   it('🔴 線の色が書かれていれば「色を外す」が出る', () => {
@@ -510,5 +512,138 @@ describe('色の受け皿(app.css)', () => {
     expect(b).toMatch(decl('stroke', 'var\\(--pkc-line-stroke, var\\(--muted\\)\\)'));
     expect(b).toMatch(decl('stroke-width', 'var\\(--pkc-line-width, 2\\)'));
     expect(b).toMatch(decl('fill', 'none'));
+  });
+});
+
+/**
+ * 🔴 **線の矢じり**(#530。Gemini 裁定 2026-10-11 依頼 15)── 右クリックで選ぶ・本文に書く・外す。
+ *
+ * 守る主張:
+ * 1. 3 つの選択肢が**いつも**並び、いまの物だけ `aria-checked="true"`(札が無い = 「矢じりなし」)
+ * 2. 選ぶと `arrow=end` / `arrow=both` が開き行に書かれ、「矢じりなし」は札を**消す**(片道にしない)
+ * 3. 書かれた線は画面に三角(`data-pkc-line-head`)が出る。矢じりなしの線には 1 つも出ない(対照群)
+ * 4. 編集中は書かず理由を言う / 属性を書き換えられた読めない値は書かない
+ */
+describe('線の矢じり', () => {
+  const lineHit = (host: Element): Element =>
+    host.querySelector('[data-pkc-field="place-line-hits"] path')!;
+  const withArrow = (a: string): string => BOARD.replace('to=b:left}', `to=b:left arrow=${a}}`);
+  const arrowItems = (root: Element): HTMLElement[] =>
+    items(root).filter((b) => b.getAttribute('data-pkc-action') === 'place-line-arrow');
+  const checkedOf = (root: Element): string[] =>
+    arrowItems(root)
+      .filter((b) => b.getAttribute('aria-checked') === 'true')
+      .map((b) => b.textContent ?? '');
+
+  it.each([
+    ['', '矢じりなし'],
+    ['end', '終わりに付ける'],
+    ['both', '両端に付ける'],
+  ])('🔴 arrow=%s の線は 3 つ並び、「%s」だけが選ばれている', (a, on) => {
+    const { root, host } = rig(a === '' ? BOARD : withArrow(a));
+    rightClick(lineHit(host));
+    expect(arrowItems(root).map((b) => b.textContent)).toEqual(ARROW_LABELS);
+    expect(arrowItems(root).every((b) => b.getAttribute('role') === 'menuitemradio')).toBe(true);
+    expect(checkedOf(root)).toEqual([on]);
+  });
+
+  it('🔴 読めない字(arrow=ned)は「矢じりなし」が選ばれている(描く規則と同じ)', () => {
+    const { root, host } = rig(withArrow('ned'));
+    // 読めない字の線は引かれない(理由が出る)ので、当たりの層が無い ── 層を使わず、読み手の規則を直に見る
+    expect(host.querySelector('[data-pkc-field="place-line-hits"] path')).toBeNull();
+    expect(root.querySelector('[data-pkc-field="place-line-note"]')?.textContent).toContain('矢じりに「ned」は使えません');
+  });
+
+  it('🔴 終わりに付ける → arrow=end が書かれる。両端 → arrow=both(他の札・他の行は 1 字も動かない)', () => {
+    const { root, host, asks } = rig(BOARD);
+    rightClick(lineHit(host));
+    arrowItems(root).find((b) => b.textContent === '終わりに付ける')!.click();
+    expect(rewriteOf(asks, 0)).toMatchObject({ kind: 'place-style', line: 8, style: { arrow: 'end' } });
+    const end = applyBodyRewrite(BOARD, rewriteOf(asks, 0))!;
+    expect(end.split('\n')[8]).toBe(':::format{.pkc-line from=a:right to=b:left arrow=end}');
+    expect(end.split('\n').slice(0, 8)).toEqual(BOARD.split('\n').slice(0, 8));
+
+    const again = rig(end);
+    rightClick(lineHit(again.host));
+    arrowItems(again.root).find((b) => b.textContent === '両端に付ける')!.click();
+    const both = applyBodyRewrite(end, rewriteOf(again.asks, 0))!;
+    // 札は 1 つだけ(重ならない)
+    expect(both.split('\n')[8]).toBe(':::format{.pkc-line from=a:right to=b:left arrow=both}');
+  });
+
+  it('🔴 矢じりなし → arrow= が消える(arrow=none と書き足さない)。色・太さは残る', () => {
+    const body = BOARD.replace('to=b:left}', 'to=b:left stroke=#2563eb arrow=both width=4}');
+    const { root, host, asks } = rig(body);
+    rightClick(lineHit(host));
+    arrowItems(root).find((b) => b.textContent === '矢じりなし')!.click();
+    expect(rewriteOf(asks, 0)).toMatchObject({ style: { arrow: null } });
+    const next = applyBodyRewrite(body, rewriteOf(asks, 0))!;
+    expect(next.split('\n')[8]).toBe(':::format{.pkc-line from=a:right to=b:left stroke=#2563eb width=4}');
+    expect(next).not.toContain('arrow');
+  });
+
+  it('🔴 描画: end は終わりの三角 1 つ / both は 2 つ / 札なしは 0(対照群)。線の印は arrow を焼く', () => {
+    const heads = (host: Element): string[] =>
+      [...host.querySelectorAll('[data-pkc-field="place-lines"] path[data-pkc-line-head]')].map(
+        (e) => e.getAttribute('data-pkc-line-head') ?? '',
+      );
+    const lineArrow = (host: Element): string | null =>
+      host.querySelector('[data-pkc-field="place-lines"] path[data-pkc-line-from]')?.getAttribute('data-pkc-line-arrow') ?? null;
+    const none = rig(BOARD);
+    expect(heads(none.host)).toEqual([]);
+    expect(lineArrow(none.host)).toBe('none');
+    const end = rig(withArrow('end'));
+    expect(heads(end.host)).toEqual(['end']);
+    expect(lineArrow(end.host)).toBe('end');
+    const both = rig(withArrow('both'));
+    expect(heads(both.host).sort()).toEqual(['end', 'start']);
+    // 三角は塗りつぶしの閉じた形(Z)── 線の `d` とは別物
+    const d = both.host.querySelector('path[data-pkc-line-head="end"]')!.getAttribute('d')!;
+    expect(d).toMatch(/^M [-\d.]+ [-\d.]+ L [-\d.]+ [-\d.]+ L [-\d.]+ [-\d.]+ Z$/);
+  });
+
+  it('🔴 矢じりは線と同じ色・太さの変数を持つ(色を付けた線に灰色の三角を付けない)', () => {
+    const body = BOARD.replace('to=b:left}', 'to=b:left stroke=#2563eb width=4 arrow=end}');
+    const { host } = rig(body);
+    const head = host.querySelector<SVGElement>('path[data-pkc-line-head="end"]')!;
+    const line = host.querySelector<SVGElement>('path[data-pkc-line-from]')!;
+    expect(head.style.getPropertyValue('--pkc-line-stroke')).toBe('#2563eb');
+    expect(head.style.getPropertyValue('--pkc-line-width')).toBe('4');
+    expect(head.style.getPropertyValue('--pkc-line-stroke')).toBe(line.style.getPropertyValue('--pkc-line-stroke'));
+  });
+
+  it('🔴 受け皿: 三角は線と同じ変数で塗りつぶす(fill: none の線の規則を上書きする)', () => {
+    const APP = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+    const b = blocksFor(APP, "[data-pkc-field='place-lines'] path[data-pkc-line-head]");
+    expect(b).toHaveLength(1);
+    expect(b[0]).toMatch(decl('fill', 'var\\(--pkc-line-stroke, var\\(--muted\\)\\)'));
+  });
+
+  it('🔴 編集中は書かず、理由を言う', () => {
+    const { root, host, d, asks } = rig(BOARD);
+    rightClick(lineHit(host));
+    d.dispatch({ type: 'START_EDIT' });
+    arrowItems(root).find((b) => b.textContent === '終わりに付ける')!.click();
+    expect(asks).toHaveLength(0);
+    expect(d.getState().error ?? '').toContain('矢じり');
+  });
+
+  it('⚠ 属性を書き換えられて読めない値になっても書かない', () => {
+    const { root, host, asks } = rig(BOARD);
+    rightClick(lineHit(host));
+    const btn = arrowItems(root).find((b) => b.textContent === '終わりに付ける')!;
+    btn.setAttribute('data-pkc-style-arrow', 'ned');
+    btn.click();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('🔴 reducer: 付箋の行に arrow は書かない(線だけの札)/ 読めない値は依頼を作らない', () => {
+    const { d, asks } = rig(BOARD);
+    d.dispatch({ type: 'SET_PLACE_STYLE', lid: 'n1', line: 8, style: { arrow: 'both' } });
+    expect(asks).toHaveLength(1);
+    d.dispatch({ type: 'SET_PLACE_STYLE', lid: 'n1', line: 8, style: { arrow: 'ned' as never } });
+    expect(asks, '読めない値で依頼を作った').toHaveLength(1);
+    // 付箋の行へは依頼は作られても、書き換えは断られる(持てない札)
+    expect(applyBodyRewrite(BOARD, { kind: 'place-style', line: 0, openLine: BOARD.split('\n')[0]!, style: { arrow: 'end' } })).toBeNull();
   });
 });

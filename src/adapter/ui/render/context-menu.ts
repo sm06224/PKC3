@@ -58,6 +58,13 @@ export interface MenuItem {
    */
   readonly attrs?: Readonly<Record<string, string>>;
   /**
+   * 🔴 **選択肢のうち、いま選ばれている物**(#530 矢じり)。⚠ 空(`undefined`)なら**付けない**
+   *   (`role` も `menuitem` のまま ── 選択肢ではない項目の属性を数える検査を汚さない)。
+   * 🔑 付けるときは `role="menuitemradio"` + `aria-checked`(true / false)。✓ の絵は CSS の
+   *   `::before`(`textContent` を汚さない)。
+   */
+  readonly checked?: boolean;
+  /**
    * 🔴 **押せない**(#1038 台帳③ C1)。⚠ 空(`undefined` / `false`)なら**付けない**
    *   (ネイティブの `disabled` が無ければ既定で押せる ── 属性の有無を数える検査を汚さない)。
    * 🔑 ネイティブの `<button disabled>` にする ── クリックも `Enter` も**ブラウザが
@@ -175,7 +182,12 @@ export function openContextMenu(
   for (const it of items) {
     const b = root.ownerDocument.createElement('button');
     b.setAttribute('data-pkc-action', it.action);
-    b.setAttribute('role', 'menuitem');
+    if (it.checked === undefined) {
+      b.setAttribute('role', 'menuitem');
+    } else {
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', it.checked ? 'true' : 'false');
+    }
     b.type = 'button';
     /**
      * ⚠ 押せない項目の理由は、下の説明欄が出す(`mouseover` / `focusin`)。

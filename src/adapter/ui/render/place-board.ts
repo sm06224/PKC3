@@ -32,6 +32,7 @@ import {
   parseRouteSpell,
   placeLineAnchorOf,
   placeLineOf,
+  placeArrowHeadsOf,
   placePathOf,
   placeLineTargetId,
   PLACE_ROUTES,
@@ -40,7 +41,14 @@ import {
   type PlaceRect,
   type PlaceRoute,
 } from '@features/markdown/place-line';
-import { parsePlaceColor, parsePlaceWidth, placeInkOf } from '@features/markdown/place-color';
+import {
+  parseArrowSpell,
+  parsePlaceColor,
+  parsePlaceWidth,
+  PLACE_ARROWS,
+  placeInkOf,
+  type PlaceArrow,
+} from '@features/markdown/place-color';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
 import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown/place-embed';
@@ -288,6 +296,13 @@ function routeTrouble(raw: string | null): string | null {
   return `線の通り方に「${r.raw}」は使えません: ${PLACE_ROUTES.join(' / ')} のどれかです`;
 }
 
+/** ⚠ 同上。`arrow=` の矢じり(#530)── 読めなければ名指しで断る(黙って矢じりなしに倒さない)。 */
+function arrowTrouble(raw: string | null): string | null {
+  const r = parseArrowSpell(raw);
+  if (r.kind !== 'bad') return null;
+  return `矢じりに「${r.raw}」は使えません: ${PLACE_ARROWS.join(' / ')} のどれかです(書かなければ矢じりなし)`;
+}
+
 /** ⚠ 同上。`bend=` は **v:(縦線の x)** か **h:(横線の y)** だけを受ける。 */
 function bendTrouble(raw: string | null): string | null {
   const b = parseBendSpell(raw);
@@ -379,6 +394,7 @@ function applyPlaceLines(
     readonly bend: PlaceBend | null;
     readonly stroke: string | null;
     readonly width: number | null;
+    readonly arrow: PlaceArrow;
     readonly pair: string;
   }> = [];
   for (const d of decls) {
@@ -386,13 +402,15 @@ function applyPlaceLines(
     const rawTo = d.getAttribute('data-pkc-to');
     const rawRoute = d.getAttribute('data-pkc-route');
     const rawBend = d.getAttribute('data-pkc-bend');
+    const rawArrow = d.getAttribute('data-pkc-arrow');
     const why =
       lineTrouble(rawFrom, byId)
       ?? lineTrouble(rawTo, byId)
       ?? anchorTrouble(rawFrom)
       ?? anchorTrouble(rawTo)
       ?? routeTrouble(rawRoute)
-      ?? bendTrouble(rawBend);
+      ?? bendTrouble(rawBend)
+      ?? arrowTrouble(rawArrow);
     if (why !== null) {
       ensureLineNote(d, why);
       continue;
@@ -420,6 +438,11 @@ function applyPlaceLines(
       // 🔴 色・太さ(#530 段④)── 読めない綴りは `null`(無視して既定で描く。本文は消さない)
       stroke: parsePlaceColor(d.getAttribute('data-pkc-stroke')),
       width: parsePlaceWidth(d.getAttribute('data-pkc-width')),
+      // 🔴 矢じり(#530)── 札が無い = なし。読めない綴りは上で断ってあるので、ここへ来るのは読めた物だけ
+      arrow: ((): PlaceArrow => {
+        const a = parseArrowSpell(rawArrow);
+        return a.kind === 'ok' ? a.arrow : 'none';
+      })(),
       // 🔑 向きに依らず同じ組として数える ── a→b と b→a は「同じ 2 枚の間」である
       pair: idFrom < idTo ? `${idFrom}\u0000${idTo}` : `${idTo}\u0000${idFrom}`,
     });
@@ -450,7 +473,23 @@ function applyPlaceLines(
     el.setAttribute('data-pkc-line-route', r.route);
     setStyleVar(el, '--pkc-line-stroke', r.stroke);
     setStyleVar(el, '--pkc-line-width', r.width === null ? null : String(r.width));
+    el.setAttribute('data-pkc-line-arrow', r.arrow);
     svg.append(el);
+    /**
+     * 🔴 **矢じりは線の隣に置く三角の `<path>`**(#530。形の理由は `placeArrowHeadsOf`)。
+     * ⚠ 線と**同じ色・太さの変数**を写す ── 写さないと、色を付けた線に灰色の矢じりが付く。
+     * 🔑 印は `data-pkc-line-head`(`start` / `end`)── 線の数を数える検査は `data-pkc-line-from` を持つ物だけを読む。
+     */
+    const heads = placeArrowHeadsOf(ln, r.route, r.bend, r.arrow, r.width);
+    for (const [side, dd] of [['start', heads.start], ['end', heads.end]] as const) {
+      if (dd === null) continue;
+      const head = document.createElementNS(SVG_NS, 'path');
+      head.setAttribute('d', dd);
+      head.setAttribute('data-pkc-line-head', side);
+      setStyleVar(head, '--pkc-line-stroke', r.stroke);
+      setStyleVar(head, '--pkc-line-width', r.width === null ? null : String(r.width));
+      svg.append(head);
+    }
     /**
      * 🔑 **押さえる層には、その線の開き行の行番号を焼く**(生の body 基準。`data-pkc-place-line`
      *   と同じ座標系 ── 描画が焼いた `data-pkc-source-line` + frontmatter ぶん)。

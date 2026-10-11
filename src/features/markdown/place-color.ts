@@ -12,6 +12,7 @@
  * | 付箋 | `stroke=` | 枠の色 |
  * | 線 | `stroke=` | 線の色 |
  * | 線 | `width=` | 太さ(px) |
+ * | 線 | `arrow=` | 矢じり(`end` = 終わりに付ける / `both` = 両端に付ける。無ければ矢じりなし) |
  *
  * ## 🔴 値は**決まった綴りだけ**を受ける(素通しにしない)
  *
@@ -66,6 +67,40 @@ export function parsePlaceWidth(raw: unknown): number | null {
 }
 
 /**
+ * 🔴 **線の矢じり**(#530。Gemini 裁定 2026-10-11 依頼 15)。
+ *
+ * 書き方は `arrow=end`(終わり = `to=` 側だけ)/ `arrow=both`(両端)。⚠ **札が無い = 矢じりなし**
+ * (古いノートは 1 字も変えずに今までの見た目)。`none` と書いても読める(= 札が無いのと同じ)が、
+ * 画面から「矢じりなし」を選んだときは**札を消す**(`width=` を標準へ戻すのと同じ作法)。
+ * ⚠ `to=` 側が「終わり」である ── 向きは `from=` → `to=`(PowerPoint の `tailEnd` が終わり側)。
+ */
+export type PlaceArrow = 'none' | 'end' | 'both';
+
+/** ⚠ 空振り防止 ── 一覧が空なら、綴りの検査は何も見ていない。並びは右クリックの並びと同じ。 */
+export const PLACE_ARROWS: readonly PlaceArrow[] = ['none', 'end', 'both'];
+
+/** 3 つに分ける(書いていない / 読めない / 読めた)── 線の通り方(`route=`)と同じ作法。 */
+export type ArrowRead =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ok'; readonly arrow: PlaceArrow }
+  | { readonly kind: 'bad'; readonly raw: string };
+
+/** `arrow=end` を読む。⚠ 読めない字は `bad`(黙って矢じりなしに倒さない)。 */
+export function parseArrowSpell(raw: unknown): ArrowRead {
+  if (typeof raw !== 'string') return { kind: 'none' };
+  const v = raw.trim();
+  if (v === '') return { kind: 'none' };
+  const hit = PLACE_ARROWS.find((a) => a === v);
+  return hit === undefined ? { kind: 'bad', raw: v } : { kind: 'ok', arrow: hit };
+}
+
+/** 画面・書き出しが使う読み方 ── 読めない / 無いは `none`。⚠ 規則はここ 1 本(§7)。 */
+export function placeArrowOf(raw: unknown): PlaceArrow {
+  const r = parseArrowSpell(raw);
+  return r.kind === 'ok' ? r.arrow : 'none';
+}
+
+/**
  * 塗りの上に載せる字の色(`#1a1a1a` か `#ffffff`)。
  *
  * 🔴 **地の色が変わると、字の色も合わせないと読めなくなる** ── 暗いテーマの字は明るいので、
@@ -91,15 +126,17 @@ export interface PlaceStyle {
   readonly fill?: string | null;
   readonly stroke?: string | null;
   readonly width?: number | null;
+  /** 🔴 矢じり(線だけ)。`null` は札を**消す**(= 矢じりなし)。 */
+  readonly arrow?: PlaceArrow | null;
 }
 
 /** 札の名前の全部。⚠ 並びが書き込みの順である(同じ本文を書くたびに札の並びが揺れない)。 */
-export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width'] as const;
+export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width', 'arrow'] as const;
 export type PlaceStyleKey = (typeof PLACE_STYLE_KEYS)[number];
 
 /** 付箋が持てる札 / 線が持てる札。⚠ 持てない札を渡されたら書かない(`place-notation.ts`)。 */
 export const BOARD_STYLE_KEYS: readonly PlaceStyleKey[] = ['fill', 'stroke'];
-export const LINE_STYLE_KEYS: readonly PlaceStyleKey[] = ['stroke', 'width'];
+export const LINE_STYLE_KEYS: readonly PlaceStyleKey[] = ['stroke', 'width', 'arrow'];
 
 /**
  * 渡された物が「書いてよい札」か(境界 ── postMessage / test の手組み)。
@@ -114,6 +151,8 @@ export function isPlaceStyle(value: unknown): value is PlaceStyle {
       if (v !== null && parsePlaceColor(v) === null) return false;
     } else if (k === 'width') {
       if (v !== null && (typeof v !== 'number' || parsePlaceWidth(String(v)) === null)) return false;
+    } else if (k === 'arrow') {
+      if (v !== null && !PLACE_ARROWS.some((a) => a === v)) return false;
     } else {
       return false;
     }

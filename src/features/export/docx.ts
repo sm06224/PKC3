@@ -144,6 +144,8 @@ export type DocxBlock =
        */
       readonly stroke?: string | null;
       readonly width?: number | null;
+      /** 🔴 矢じり(`arrow=`。#530)。`end` / `both`。無い・読めない = 省く(Word は読まない)。 */
+      readonly arrow?: 'end' | 'both';
     }
   | { readonly kind: 'table'; readonly rows: readonly (readonly DocxCell[])[] }
   /**
