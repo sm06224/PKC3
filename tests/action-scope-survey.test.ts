@@ -327,7 +327,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     //   押した行は `rowLidOrSelected` が決め、添付の key は押したボタン自身 / 開いている本文が運ぶ。`copy-entry-ref` と同じ仕分け)。
     // ⚠ 2026-10-11(#1559): N +1(`copy-section-link`。見出しの右クリックが運んだ行から見出しを引く ── 押した所からは何も要らない。
     //   `copy-section-ref` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 196 });
+    // ⚠ 2026-10-11(#855 段 D): N +1(`export-schedule-ics`。押した所から何も要らない ── 書き出す物は state から引く)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 197 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

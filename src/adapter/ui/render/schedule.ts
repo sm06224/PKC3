@@ -31,8 +31,6 @@
 import type { AppState } from '@adapter/state/app-state';
 import {
   buildAgenda,
-  itemOfCard,
-  itemOfNote,
   type AgendaGroup,
   type AgendaItem,
 } from '@features/schedule/agenda';
@@ -41,6 +39,7 @@ import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
+import { scheduleItemsOf } from './schedule-items';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
 import { ScheduleWeek } from './schedule-week';
@@ -222,35 +221,12 @@ export class ScheduleRenderer {
      * 🔑 札の相手は**行が載っているノート**である(予定の行そのものに種類は無い)。
      */
     const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
-    const all = state.taskScan?.cards ?? [];
     /**
-     * 🔑 **絞り込みは全部の面に同じ規則で効かせる**(判定は `matchesEntry` 1 か所)。
-     * ⚠ 片付けたノートの扱いも 1 か所(`showArchived`)── 面ごとに割らない。
+     * 🔑 **何を出すかは `scheduleItemsOf` 1 か所**(`.ics` の書き出しも同じ口を呼ぶ ── §7)。
+     * 絞り込み・片付けた・済んだ行の規則と、ノート 1 件が丸ごと予定のもの(frontmatter の `date:`、段④)もそこにある。
      */
-    const visible = all.filter((c) => {
-      const m = state.entryMetas.get(c.lid);
-      if (m === undefined) return false;
-      if (m.archived && !state.showArchived) return false;
-      // ⚠ 済んだ行は畳む(板の「完了」と同じ旗)── 予定の面は列が無いので**外す**
-      if (c.done && !state.showDoneTasks) return false;
-      return matchesEntry(m, filter);
-    });
+    const { all, visible, notes, items } = scheduleItemsOf(state);
     const dated = visible.filter((c) => c.date !== null);
-    /**
-     * 🔴 **ノート 1 件が丸ごと予定のものも束ねる**(段④)── frontmatter の `date:`。
-     * ⚠ 受けないと、中央のカレンダー(段⑤ で落とす)が消えた瞬間に
-     *   **`date:` を書いても どこにも出ない**(動線が 1 つ消える)。
-     * ⚠ 絞り込みと片付けの規則は行の札と**同じもの**を通す(面の中で割らない)。
-     */
-    const notes: AgendaItem[] = [];
-    for (const lid of state.order) {
-      const m = state.entryMetas.get(lid);
-      if (m === undefined || m.date === null) continue;
-      if (m.archived && !state.showArchived) continue;
-      if (!matchesEntry(m, filter)) continue;
-      notes.push(itemOfNote(m));
-    }
-    const items = [...visible.map(itemOfCard), ...notes];
     /**
      * 🔴 **済んだ回は「絞り込む前」の札から拾う**(#344 段②)。
      *
@@ -791,6 +767,19 @@ export class ScheduleRenderer {
     const toggles = document.createElement('div');
     toggles.setAttribute('data-pkc-field', 'schedule-toggles');
     toggles.append(fold, foldNote);
+    /**
+     * 🔴 **予定を .ics(iCalendar)で書き出す**(#855 段 D)。出るのは**いま一覧に出している予定**
+     * (「出すもの」の選びと検索の絞りが効く。日付のないものは外の予定表に置き場が無いので出ない)。
+     * ⚠ 押した 1 回だけ file を落とす ── 自動でどこかへ渡さない。
+     */
+    const exportIcs = document.createElement('button');
+    exportIcs.type = 'button';
+    exportIcs.setAttribute('data-pkc-action', 'export-schedule-ics');
+    exportIcs.setAttribute('data-pkc-field', 'schedule-export');
+    exportIcs.textContent = '予定を .ics で書き出す';
+    exportIcs.title =
+      'いま一覧に出している予定を、カレンダー形式(.ics)のファイル 1 つに書き出します。' +
+      '「出すもの」で隠している分と、日付のないものは入りません。繰り返しは繰り返しのまま入ります';
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
     /**
@@ -806,7 +795,7 @@ export class ScheduleRenderer {
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.day.el.hidden = true;
     this.week.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, toggles, this.day.el, this.week.el, groups);
+    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, this.day.el, this.week.el, groups);
     this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
