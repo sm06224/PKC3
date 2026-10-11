@@ -376,6 +376,19 @@ export type StorageRequest =
       session: string;
     }
   | {
+      /**
+       * 🔴 **PKC3 入り HTML に焼かれた DB の写しから、バックアップの材料を読む**(#1416)。
+       *
+       * ⚠ **いま開いているコレクションには一切触れない** ── 一時の `:memory:` の DB に画像を流し込み、
+       *   既存の読み口(`listEntryMetas` / `listBodies` / `listRelations` / `exportRevisionChain` /
+       *   `listAssetMetas` / `listTagColors`)を**そのまま**当てて返し、閉じる(読み口を 2 本目作らない)。
+       * 🔑 返すのは `.pkc3-full.zip` を組むのに要る材料だけ。添付の中身は DB に無い(HTML の別要素)。
+       * ⚠ 客の file を触る口なので `GUEST_OPS` に入れてある(壊れた画像を選んだだけで本体を止めない)。
+       */
+      op: 'readImageArchive';
+      image: Uint8Array;
+    }
+  | {
       op: 'upsertEntry';
       cid: string;
       entry: EntryUpsert;
@@ -710,6 +723,24 @@ export interface EncodedRevisionRow {
    * v1 のアーカイブは持たない(`null`)── その場合は検査しない。
    */
   contentHash: string | null;
+}
+
+/**
+ * PKC3 入り HTML の DB の写しから読んだ、バックアップ(`.pkc3-full.zip`)の材料(#1416)。
+ * ⚠ 全部が必須の field ── 省ける形にすると、worker が書き忘れても tsc が黙る
+ * (書き忘れは「つながりや履歴が黙って無い」側へ倒れる)。
+ */
+export interface ImageArchiveData {
+  cid: string;
+  title: string;
+  metas: EntryMetaRow[];
+  /** `metas` と同じ並び(`entry_order, lid`)。 */
+  bodies: Array<{ lid: string; body: string }>;
+  relations: RelationRow[];
+  assets: AssetMetaRow[];
+  tagColors: Array<{ tag: string; color: string }>;
+  /** ノートごとの履歴の鎖(保存形のまま。新しい → 古い)。 */
+  chains: Array<{ lid: string; rows: EncodedRevisionRow[] }>;
 }
 
 /** 復元する鎖 1 本。rows は **新しい → 古い**(rev_order の降順)。 */
@@ -1050,6 +1081,8 @@ export interface ResultMap {
   /** 表 1 つ分の NDJSON(#682 段④d)。⚠ 応答は **transfer で渡る**(ゼロコピー)。 */
   exportSqliteTable: SqliteExportedTable;
   closeSqliteExport: null;
+  /** PKC3 入り HTML の DB の写しから読んだバックアップの材料(#1416)。 */
+  readImageArchive: ImageArchiveData;
   runReadOnlySql: {
     columns: string[];
     rows: Array<Array<string | number | null>>;

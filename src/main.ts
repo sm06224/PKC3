@@ -2883,6 +2883,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        */
       confirmArchiveImport: (preview) =>
         ask(formatArchivePreviewMessage(preview), { okLabel: '取り込む', cancelLabel: 'やめる' }),
+      /**
+       * 🔴 **PKC3 入り HTML の中身を読む口**(#1416)。⚠ 渡すだけ ── 一時の DB で読むのも、
+       * いまのコレクションに触れないのも worker が持つ(判断を `main.ts` に置かない)。
+       */
+      readImageArchive: (image) => client.request({ op: 'readImageArchive', image }),
   };
 
   /**

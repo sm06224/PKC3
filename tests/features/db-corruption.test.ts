@@ -65,7 +65,13 @@ describe('壊れを見分ける(#971)', () => {
     const raw = 'この file は sqlite として読めませんでした(file is not a database)';
     expect(shouldFlagCorrupt('openSqlGuest', false, raw), '客の file で本体を止めた').toBe(false);
     // 🔴 DuckDB 用に写す口も**客の file を触る口**(#682 段④d)── 壊れた `.sqlite` を選んだだけで本体を止めない
-    for (const op of ['openSqliteExport', 'exportSqliteTable', 'closeSqliteExport']) {
+    for (const op of [
+      'openSqliteExport',
+      'exportSqliteTable',
+      'closeSqliteExport',
+      // PKC3 入り HTML の中身(客の画像)を読む口(#1416)
+      'readImageArchive',
+    ]) {
       expect(
         shouldFlagCorrupt(op, false, raw),
         `${op}: 客の file を DuckDB 用に写そうとして本体を止めた`,
@@ -140,6 +146,8 @@ describe('止める op の仕分け(#971)', () => {
     'openSqliteExport',
     'exportSqliteTable',
     'closeSqliteExport',
+    // PKC3 入り HTML の DB の写しを読む口(#1416)── 一時の DB で読むだけで、うちの DB には触らない
+    'readImageArchive',
     // 🔴 **救出の 2 つ**(#971 段③)── ここが止まると、壊れた DB から
     //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
     'checkIntegrity',

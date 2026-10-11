@@ -162,6 +162,8 @@ const GUEST_OPS: readonly string[] = [
   'openSqliteExport',
   'exportSqliteTable',
   'closeSqliteExport',
+  // PKC3 入り HTML の DB の写しを読む口(#1416)── 客の画像を一時の DB で読むだけ
+  'readImageArchive',
 ];
 
 /**

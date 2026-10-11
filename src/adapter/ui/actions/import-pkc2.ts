@@ -48,6 +48,12 @@ import {
   HASH_MAX_BYTES,
 } from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
+import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
+import {
+  portableArchiveName,
+  portableHtmlToArchive,
+  type ReadImageArchive,
+} from './import-portable';
 
 export interface ImportDeps {
   /**
@@ -173,6 +179,12 @@ export interface ImportDeps {
    *   やめるのは失敗ではない)
    */
   confirmArchiveImport?(preview: ArchivePreview): Promise<boolean>;
+  /**
+   * 🔴 **PKC3 入り HTML(`.pkc3.html`)の中身を読む口**(#1416)。⚠ **省略可** ── 渡さない配線では
+   * PKC3 入り HTML を断る(理由を言う)。渡すと、バックアップ(`.pkc3-full.zip`)の形に直して
+   * **同じ取り込みの道**へ流す(`import-portable.ts`)。
+   */
+  readImageArchive?: ReadImageArchive;
 }
 
 /** base64 → bytes。`fromBase64` があれば中間のバイナリ文字列を作らない。 */
@@ -342,8 +354,10 @@ function* batchChains(
 export async function importPkc2File(
   dispatcher: Dispatcher,
   deps: ImportDeps,
-  file: File,
+  inputFile: File,
 ): Promise<number | null> {
+  // 🔴 PKC3 入り HTML は、下で zip に直したものに差し替える(以降は zip と同じ道)
+  let file: File = inputFile;
   /**
    * 🔴 **進行中の字(「取込中…」)を出している間だけ true**(#1017 C5)。⚠ 直す前は、失敗しても
    *   やめても「取込中…」が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
@@ -372,9 +386,10 @@ export async function importPkc2File(
   const revStats = { added: 0, dropped: 0, skipped: 0 };
 
   try {
-    const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
-    const isZip = sniffMagic(head) === 'zip';
-    if (!isZip && detectPkc2Format(head, null, file.name) !== 'html') {
+    const head = new Uint8Array(await file.slice(0, PORTABLE_SNIFF_BYTES).arrayBuffer());
+    let isZip = sniffMagic(head) === 'zip';
+    const detected = isZip ? null : detectPkc2Format(head, null, file.name);
+    if (!isZip && detected !== 'html' && detected !== 'pkc3-html') {
       // ⚠ **受理するものを全部言う**(P8 段⑲)── かつては存在しない拡張子
       //    `.pkc2.zip` を名乗り、実際に受理している PKC3 のバックアップに触れていなかった。
       // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
@@ -382,12 +397,32 @@ export async function importPkc2File(
       return fail(
         `取り込めない形式です(${file.name})。PKC2 の書き出し(HTML / zip)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
-          'または .md を選んでください',
+          'PKC3 入り HTML(.pkc3.html)、または .md を選んでください',
       );
     }
 
     deps.notify?.('取り込み中…(ファイルを読んでいます)');
     progressShown = true;
+
+    // 🔴 **PKC3 入り HTML(#1416)**: 印で見分けた(`detectPkc2Format`)。中身を取り出して
+    //   バックアップ zip の形に直し、**ここから下は zip と同じ道**(確認 → 付け替え → 添付 → … → タグの色)を通る。
+    //   ⚠ 新しい取り込みの道は作らない。直せなかった理由はそのまま断り文にする
+    if (detected === 'pkc3-html') {
+      if (deps.readImageArchive === undefined) {
+        return fail(`${file.name}: この画面からは PKC3 入り HTML を取り込めません`);
+      }
+      try {
+        const zip = await portableHtmlToArchive(
+          await file.text(),
+          deps.readImageArchive,
+          new Date(),
+        );
+        file = new File([zip], portableArchiveName(file.name), { type: 'application/zip' });
+        isZip = true;
+      } catch (e) {
+        return fail(`${file.name}: ${reason(e)}`);
+      }
+    }
 
     // ── 入力の違いは「container をどう得るか」と「bytes をどこから取るか」だけ。
     // それ以降(変換 → asset → entries → 履歴 → 再読込)は **1 本の経路**に合流する
