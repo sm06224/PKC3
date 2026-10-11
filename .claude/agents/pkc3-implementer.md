@@ -24,6 +24,9 @@ pwd && git worktree list && git log --oneline -1
 3. 依頼文が前提にする物(直したはずの関数名 / 足したはずの file)を 1 つ grep する。無ければ何も走らせずに止まる
    ── ⚠ 「自分の箱に無い」を「repo に無い」と書かない(調査の結論の顔で返り、依頼者に存在しない手戻りをさせる)
 4. 報告に**どの sha で回したか**を必ず書く
+5. branch を作るなら名前は**作業ごとに固有**(`i<issue>-<主題>`)。`work` のような共通名で `checkout -B` しない
+   ── 他の担当と同じ branch を握り、他人の file が index に staged で現れる(2026-10-11、3 本で観測)。
+   commit の前に `git diff --cached --stat` で自分の file だけかを見る
 
 なぜ要るか(事故 2026-08-04 / 2026-09-25 #1045 / 2026-10-03 / 2026-10-04): `.claude/skills/subagent-scale/reference/agent-start.md`
 
