@@ -670,6 +670,81 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   });
   expect(plainCard.card, '色の無い付箋の題名の字の色が変わった(対照群)').toBe(plainCard.fg);
 
+  /**
+   * ── 🔴 **板の上から、置いたノートに書き足す・題名を直す**(#529 W5-a / W5-b。Gemini 裁定 2026-10-11 依頼 18)。
+   *
+   * 🔑 **新しい起動は増やさない**(#820)── この道中の続きで通す。相手は短いノート(`dflt`。長いほうは抜粋が
+   *   切れるので、足した字が枠に出るかを見られない)。
+   * ⚠ 実ブラウザでしか見られない所:①「追記」が乗せるまで**見えず押せない**(計算後の `opacity` と `pointer-events`)
+   *   ②欄が付箋の**直下**に出て付箋を覆わない ③足した字が**付箋の中に出る**(抜粋の追随は実機で未確認だった)
+   *   ④題名を直すと付箋の帯の字が変わる ⑤帯を押すとノートが開く(基本の動線)は変わらない。
+   */
+  const appendBtn = dflt.locator(':scope > [data-pkc-field="place-append"]');
+  const inlineBox = page.locator('[data-pkc-region="detail"] [data-pkc-field="place-inline"]');
+  const inlineInput = inlineBox.locator('[data-pkc-field="place-inline-input"]');
+  await page.mouse.move(2, 2);
+  await expect(appendBtn, '台の前提:「追記」が付箋に出ていない').toHaveCount(1);
+  await expect(appendBtn, 'ポインターが無いのに「追記」が見えている').toHaveCSS('opacity', '0');
+  await expect(appendBtn, '見えない「追記」が押せる').toHaveCSS('pointer-events', 'none');
+  await dflt.hover({ position: { x: 100, y: 100 } });
+  await expect(appendBtn, '乗せても「追記」が見えない').toHaveCSS('opacity', '1');
+  await expect(appendBtn).toHaveCSS('pointer-events', 'auto');
+  // 長いほうの付箋(相手のノート)は本文の抜粋が切れる ── こちらにも「追記」は出る(型で決まる)
+  await expect(big.locator(':scope > [data-pkc-field="place-append"]')).toHaveCount(1);
+  await appendBtn.click();
+  await expect(inlineBox, '押しても欄が開かない').toBeVisible();
+  await expect(inlineInput, '開いた欄に焦点が入っていない').toBeFocused();
+  const dBox = (await dflt.boundingBox())!;
+  const iBox = (await inlineBox.boundingBox())!;
+  expect(iBox.y, '欄が付箋の直下に出ていない(付箋を覆っているか、離れすぎている)').toBeGreaterThanOrEqual(dBox.y + dBox.height - 1);
+  expect(iBox.y, '欄が付箋から離れすぎている').toBeLessThan(dBox.y + dBox.height + 12);
+  expect(Math.abs(iBox.x - dBox.x), '欄が付箋の左端に揃っていない').toBeLessThan(2);
+  // 🔴 やめる ── Esc でノートは 1 字も変わらない
+  await inlineInput.fill('やめる字');
+  await page.keyboard.press('Escape');
+  await expect(inlineBox, 'Esc で欄が閉じない').toHaveCount(0);
+  await expect(dflt.locator(':scope > [data-pkc-field="place-body"]')).not.toContainText('やめる字');
+  // 🔴 打って Enter で足す ── 付箋の中に出る(選んでいるノートは板のまま)
+  await dflt.hover({ position: { x: 100, y: 100 } });
+  await appendBtn.click();
+  await inlineInput.fill('板から足した一行');
+  await page.keyboard.press('Enter');
+  await expect(inlineBox, '書けたのに欄が残っている').toHaveCount(0);
+  await expect(
+    dflt.locator(':scope > [data-pkc-field="place-body"]'),
+    '足した字が付箋の中に出ない(書けていない / 描き直されていない)',
+  ).toContainText('板から足した一行');
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
+    '追記しただけで、選んでいるノートが付箋の相手に替わった',
+  ).toHaveText('板');
+  // 🔴 元に戻せる(片道にしない)── 本文の下の追記欄と同じ「追記を元に戻す」
+  const undo = page.locator('[data-pkc-action="undo-append"]:visible').first();
+  await expect(undo, '追記を元に戻す口が出ない').toBeVisible();
+  await undo.click();
+  await expect(
+    dflt.locator(':scope > [data-pkc-field="place-body"]'),
+    '元に戻したのに足した字が残っている',
+  ).not.toContainText('板から足した一行');
+  // 🔴 右クリック → 題名を直す
+  await dflt.locator(':scope > [data-pkc-field="place-card"]').click({ button: 'right' });
+  await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="place-rename-open"]').click();
+  await expect(inlineInput, '題名の欄に焦点が入っていない').toBeFocused();
+  await expect(inlineInput, '題名の欄にいまの題名が入っていない').toHaveValue('短いノート');
+  await inlineInput.fill('短いノート(改)');
+  await page.keyboard.press('Enter');
+  await expect(dflt.locator(':scope > [data-pkc-field="place-card"]'), '題名が付箋の帯に出ない').toHaveText('短いノート(改)');
+  await expect(
+    page.locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: '短いノート(改)' }),
+    '一覧の題名も変わる(同じノートを指す全部)',
+  ).toHaveCount(1);
+  // 戻す(後ろの検査は元の題名で引く)
+  await dflt.locator(':scope > [data-pkc-field="place-card"]').click({ button: 'right' });
+  await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="place-rename-open"]').click();
+  await inlineInput.fill('短いノート');
+  await page.keyboard.press('Enter');
+  await expect(dflt.locator(':scope > [data-pkc-field="place-card"]')).toHaveText('短いノート');
+
   // 🔴 大きさ:w= h= は固定、省略は既定(320 × 240)── 中身(長い本文)で伸びない
   const bb = (await big.boundingBox())!;
   expect([Math.round(bb.width), Math.round(bb.height)], 'w= h= で固定されていない').toEqual([240, 100]);

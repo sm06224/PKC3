@@ -770,6 +770,20 @@ describe('描画: 元のノートの書込に追随する', () => {
     expect(slotOf(r, 'p1')).toBe(before);
   });
 
+  it('🔴 置いたノートの題名を直すと、付箋の題名のバーも変わる(板を開き直さなくてよい)。他の付箋のバーは触らない(#529 W5-b)', async () => {
+    const r = await rig();
+    const card = (id: string): HTMLElement =>
+      block(r, id).querySelector<HTMLElement>(':scope > [data-pkc-field="place-card"]')!;
+    const p1Before = card('p1').textContent;
+    const p2Card = card('p2');
+    const title0 = p2Card.textContent;
+    expect(title0, '台の前提:題名が出ていない').not.toBe('');
+    await r.apply({ type: 'RENAME_ENTRY_TITLE', lid: 'n2', title: '直した題名' });
+    await settle();
+    expect(card('p2').textContent, '付箋のバーが古い題名のまま').toBe('直した題名');
+    expect(card('p1').textContent, '対照群:別の付箋のバーが変わった').toBe(p1Before);
+  });
+
   it('🔑 描き直し(同じ本文)を何度繰り返しても、器は 1 つ・頼み直さない', async () => {
     const r = await rig();
     for (let i = 0; i < 3; i += 1) await r.again();

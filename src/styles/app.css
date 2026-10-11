@@ -4342,6 +4342,68 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
 }
+/* 🔴 **付箋の下端の「追記」**(#529 W5-a)── 押すと付箋の下に小さな欄が開く(`place-inline.ts`)。
+ *
+ * 🔑 **出し方はコード枠のコピーボタンと同じ**:ポインターを合わせたとき(キーボードで来たときも)に出し、
+ *   指で触る端末(`@media (hover: none)`)では最初から出す ── 判定を `(hover: none)` 1 つにするのも同じ理由
+ *   (マウスを繋いだタブレットのように片方だけ真の端末で消えない)。
+ * ⚠ 隠している間は `pointer-events: none` ── `opacity: 0` だけだと**見えないのに押せる**
+ *   (指で付箋の下端に触れただけで欄が開く)。右下の大きさの持ち手(16px)とは重ならないよう左に寄せる。 */
+.pkc-place > [data-pkc-field='place-append'] {
+  position: absolute;
+  left: 6px;
+  bottom: 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.8em;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+.pkc-place:hover > [data-pkc-field='place-append'],
+.pkc-place > [data-pkc-field='place-append']:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pkc-place > [data-pkc-field='place-append']:hover {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+}
+/* 付箋の上の欄(追記 / 題名)── 板の器の直下に重ねる。位置は `place-inline.ts` が付箋から当てる。
+ * 無彩色の地に枠だけ(色は情報にだけ)。付箋(`z=` で積む)より必ず上。 */
+[data-pkc-field='place-inline'] {
+  position: absolute;
+  z-index: 10000;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+}
+[data-pkc-field='place-inline'] [data-pkc-field='place-inline-input'] {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+[data-pkc-field='place-inline'] [data-pkc-field='place-inline-note'] {
+  margin: 2px 0;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+[data-pkc-field='place-inline'] [data-pkc-field='place-inline-row'] {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
 /* 🔴 **置いたノートの中身**(#529 W3-①)── 題名の帯の下に、読み取り専用で出す。
  *
  * 🔑 高さは `w=` / `h=` か既定(`place-embed.ts`)で**固定**してある ── 中身では伸びない。
@@ -9524,6 +9586,13 @@ h3[data-pkc-section] {
  *   マウスを繋いだタブレットのように**片方だけ真**の端末で消える。
  */
 @media (hover: none) {
+  /* 🔴 付箋の下端の「追記」(#529 W5-a)── 指で触る端末では最初から出す(出し方の理由は素の規則の注釈)。
+   * ⚠ 規則を足す場所はこの既存の `@media` の中 ── ファイルの前のほうに新しい `@media` を足すと、
+   *   `announce.test.ts` が「最初の `@media` より前」を素の規則として読むので、それより後ろが全部切れる。 */
+  .pkc-place > [data-pkc-field='place-append'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
   .pkc-md-rendered .pkc-md-copy-btn,
   .pkc-md-rendered .pkc-render-toggle {
     opacity: 1;
