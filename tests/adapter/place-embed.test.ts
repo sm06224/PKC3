@@ -5,7 +5,7 @@
  * ## 守る主張(画面で起きること)
  *
  * 1. 題名の帯の下に、置いたノートの本文(文・表・チェック)が出る
- * 2. 🔴 **押せるものが増えていない**:チェックは押せず、表のセルは打てない(旗を渡していない)。
+ * 2. 🔴 **押せるものが増えていない**:押せるのはチェックだけ(#529 W5-c。置いたノートの原文の行で焼く)。表のセルは打てない(旗を渡していない)。
  *    帯と「続きは元のノートで」だけが、元のノートを開く
  * 3. 大きさは `w=` `h=` で固定、省略時は既定(中身で伸びない)
  * 4. 長い本文は先頭から切って「続きは元のノートで」(切る量は暫定 = W3-③ で測る)。超えなければ出ない
@@ -642,7 +642,7 @@ describe('描画: 題名の帯 + 置いたノートの中身', () => {
     expect(slot.textContent).toContain('買い出し'); // 見出し(行になっている)
   });
 
-  it('🔴 押せるものが増えていない:チェックは押せず、表のセルは打てない(旗が渡っていない)', async () => {
+  it('🔴 押せるものが増えていない:押せるのはチェックだけ(置いたノートの原文の行で)。表のセルは打てない', async () => {
     const r = await rig();
     // 対照群 ── 板のノート自身のチェックは、押せる形で描かれている(この台が旗を立てていること)
     expect(
@@ -650,16 +650,51 @@ describe('描画: 題名の帯 + 置いたノートの中身', () => {
       '台の前提:板のノート自身のチェックが押せる形になっていない',
     ).toBeGreaterThan(0);
     const slot = slotOf(r, 'p1')!;
-    expect(slot.querySelector('[data-pkc-action="toggle-task"]'), '置いたノートのチェックが押せる').toBeNull();
+    // 置いたノート(n1)の `- [ ] 牛乳` は原文の 4 行目(0 始まり)、`- [x] 卵` は 5 行目
+    const wired = [...slot.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-task"]')];
+    expect(
+      wired.map((e) => e.getAttribute('data-pkc-task-line')),
+      '付箋のチェックが置いたノートの行を指していない',
+    ).toEqual(['4', '5']);
     expect(slot.querySelector('[data-pkc-action="edit-cell"]'), '置いたノートの表が打てる').toBeNull();
     for (const cb of slot.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      expect(cb.disabled, 'チェックが無効になっていない').toBe(true);
+      expect(cb.disabled, 'チェックが押せない形になっている').toBe(false);
     // 行番号が焼かれていない(右クリックや目次が板のノートの行と取り違えない)
     expect(slot.querySelector('[data-pkc-source-line]')).toBeNull();
-    expect(slot.querySelector('[data-pkc-task-line]')).toBeNull();
-    // 押し口は「元のノートへ飛ぶ」だけ
+    // 押し口は「元のノートへ飛ぶ」とチェックだけ
     for (const el of slot.querySelectorAll('[data-pkc-action]'))
-      expect(['select-entry', 'navigate-entry-ref']).toContain(el.getAttribute('data-pkc-action'));
+      expect(['select-entry', 'navigate-entry-ref', 'toggle-task']).toContain(el.getAttribute('data-pkc-action'));
+  });
+
+  it('🔴 実際の描画経路(DetailRenderer)でも、付箋のチェックの行は置いたノートの原文の行(設定行のぶんを足す)', async () => {
+    const body = '---\ntags: x\n---\n# 見出し\n\n- [ ] 牛乳\n- [x] 卵\n';
+    const lines = body.split('\n');
+    const r = await rig({ ...BODIES, n1: body });
+    const wired = [...slotOf(r, 'p1')!.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-task"]')];
+    expect(wired.map((e) => e.getAttribute('data-pkc-task-line'))).toEqual([
+      String(lines.indexOf('- [ ] 牛乳')),
+      String(lines.indexOf('- [x] 卵')),
+    ]);
+    expect(lines.indexOf('- [ ] 牛乳'), '台の前提:設定行のぶんがずれていない').toBe(5);
+  });
+
+  it('🔴 設定行の行数だけが変わったとき(本文の字は同じ)、付箋は新しい行を焼き直す', async () => {
+    const one = '---\na: 1\n---\n- [ ] x\n';
+    const two = '---\na: 1\nb: 2\n---\n- [ ] x\n';
+    const r = await rig({ ...BODIES, n1: one });
+    const lineOf = (): string | null =>
+      slotOf(r, 'p1')!.querySelector('[data-pkc-action="toggle-task"]')!.getAttribute('data-pkc-task-line');
+    expect(lineOf()).toBe('3');
+    await r.apply({ type: 'PLACE_BODY_LOADED', lid: 'n1', body: two } as never);
+    expect(lineOf(), '設定行が 1 行増えたのに、古い行番号のまま').toBe('4');
+  });
+
+  it('🔴 設定行の行数だけが違う 2 つの抜粋は、同じ抜粋として扱わない(状態が古い行番号を抱え込まない)', () => {
+    const a = excerptOf('---\na: 1\n---\n- [ ] x\n', 'text');
+    const b = excerptOf('---\na: 1\nb: 2\n---\n- [ ] x\n', 'text');
+    expect(a.text, '台の前提:字は同じ').toBe(b.text);
+    expect(sameExcerpt(a, b)).toBe(false);
+    expect(sameExcerpt(a, excerptOf('---\na: 1\n---\n- [ ] x\n', 'text'))).toBe(true);
   });
 
   it('🔴 見出しは見出しでなく、id は枠の接頭辞つき(板のノートの目次・ジャンプと衝突しない)', async () => {

@@ -7,10 +7,17 @@
  * ## 何が起きるか(画面の言葉)
  *
  * 題名の帯の下に、置いたノートの本文(文・表・チェック)が出る。**押して変えられる物は
- * 1 つも無い**(チェックは押せず、表のセルは打てない)── 題名の帯を押すと、今の窓で
+ * 1 つも無い**(表のセルは打てない。チェックだけは例外 ── 下の W5-c)── 題名の帯を押すと、今の窓で
  * そのノートが開く。長い本文は途中で切れ、末尾の「続きは元のノートで」を押すと同じく開く。
  *
- * ## ⚠ 読み取り専用は「旗を渡さない」ことで成り立つ
+ * ## 🔴 付箋の中のチェックは押せる(#529 W5-c。Gemini 裁定 2026-10-11 依頼 18 Q4 = A)
+ *
+ * 押すと**置いたノートの本文**の `- [ ]` / `- [x]` が反転する(板のノートは 1 バイトも変わらない)。
+ * 書くのは読む面と同じ `toggle-task`(`TOGGLE_TASK`)── 書換器を 2 本にしない。行番号は
+ * 抜粋が持つ `lineOffset`(剥がした設定行の行数)を足した**そのノートの原文の行**で焼く。
+ * どのノートかは binder が付箋の枠(`data-pkc-place-entry`)から引く(`selectedLid` ではない)。
+ *
+ * ## ⚠ それ以外は読み取り専用で、「旗を渡さない」ことで成り立つ
  *
  * 描画器は `interactiveTasks` / `interactiveCells` / `interactiveCodeBlocks` / `interactiveTags` /
  * `interactiveDates` を**渡されたときだけ**押せる形で出す(書き出し・印刷と同じ作り)。
@@ -82,6 +89,8 @@ export const PLACE_ATTACHMENT_IMAGE = 'place-attachment-image';
 const BLOCK_SELECTOR = '.pkc-format-block.pkc-place[data-pkc-place-entry]';
 
 /** 画面の字(続き・PDF)── ⚠ 使わない語(`ui-terms.ts`)を避けている。 */
+/** 押せないチェックの理由(原文のどの行か決められなかった印)。 */
+export const PLACE_TASK_LOCKED_HINT = 'このチェックは、ここからは押せません(ノートを開くと押せます)';
 export const PLACE_MORE_NOTE = '続きは元のノートで';
 export const PLACE_PDF_NOTE = 'PDF は元のノートで';
 
@@ -103,8 +112,12 @@ export interface PlaceEmbedDeps {
   readonly excerptOf: (lid: string) => PlaceExcerpt | undefined;
   /** ノートの題名と型(無い = 消えている)。 */
   readonly metaOf: (lid: string) => { readonly title: string; readonly archetype: string } | undefined;
-  /** 本文を HTML に描く口(ワーカー経由)。⚠ **押せる旗も行番号も渡さない設定**で呼ぶのは呼び側。 */
-  readonly render: (text: string) => Promise<string>;
+  /**
+   * 本文を HTML に描く口(ワーカー経由)。⚠ 呼び側が渡してよい旗は **`interactiveTasks` だけ**
+   * (#529 W5-c。表のセル・コード枠・タグ・日付は押せない)。行番号の旗(`sourceLineAnchors`)は渡さない。
+   * `lineOffset` = 剥がした設定行の行数 ── チェックの行番号を**そのノートの原文の行**で焼くために足す。
+   */
+  readonly render: (text: string, lineOffset: number) => Promise<string>;
   /** まだ持っていない本文を頼む(配線が `PLACE_BODIES_WANTED` を撃つ)。 */
   readonly wanted: (lids: readonly string[]) => void;
   /** 添付(画像)を借りる口。`null` = 添付の置き場が無い(借りられない画像は「見つからない」の印になる)。 */
@@ -197,6 +210,7 @@ export function sanitizeEmbedded(
   box: HTMLElement,
   titleOf: (lid: string) => string | null,
   ns: string,
+  keepTaskToggle = false,
 ): void {
   const doc = box.ownerDocument;
 
@@ -283,14 +297,20 @@ export function sanitizeEmbedded(
   // ⑤ 押せるのは「別のノートへ飛ぶ」だけ。それ以外の押し口(`data-pkc-action`)は外す
   for (const el of box.querySelectorAll('[data-pkc-action]')) {
     const action = el.getAttribute('data-pkc-action');
+    if (action === 'toggle-task' && keepTaskToggle) continue; // 🔴 付箋のチェックだけ押せる(#529 W5-c)
     if (action !== 'navigate-entry-ref' && action !== 'select-entry') el.removeAttribute('data-pkc-action');
   }
+  // 🔴 押せないまま残ったチェック(行を原文へ引けなかった物)は、理由を言う ── 黙って効かない印にしない
+  if (keepTaskToggle)
+    for (const cb of box.querySelectorAll('input.pkc-task-checkbox[disabled]'))
+      cb.setAttribute('title', PLACE_TASK_LOCKED_HINT);
 }
 
 /** 切り出しの鍵(同じ鍵では描き直さない)。 */
 function keyOf(ex: PlaceExcerpt): string {
   if (ex.att !== undefined) return `a\u0000${ex.att.kind}\u0000${ex.att.mime}\u0000${ex.att.key}`;
-  return `${ex.cut ? '1' : '0'}\u0000${ex.text}`;
+  // 🔑 行番号の足しも鍵に入れる(設定行だけが増減した回に、焼いた行番号が古いまま残らない)
+  return `${ex.cut ? '1' : '0'}\u0000${String(ex.lineOffset ?? 0)}\u0000${ex.text}`;
 }
 
 /**
@@ -466,7 +486,7 @@ export class PlaceEmbeds {
       if (slot.getAttribute(PENDING_ATTR) === key) continue; // 描いている最中
       slot.setAttribute(PENDING_ATTR, key);
       void deps
-        .render(ex.text)
+        .render(ex.text, ex.lineOffset ?? 0)
         .then((html) => {
           this.cache.set(lid, { key, html });
           // ⚠ もっと新しい鍵が来ている / 塊が差し替わった ── この結果は載せない
@@ -566,7 +586,7 @@ export class PlaceEmbeds {
     const doc = slot.ownerDocument;
     const box = doc.createElement('div');
     box.innerHTML = html;
-    sanitizeEmbedded(box, (l) => deps.metaOf(l)?.title ?? null, slot.getAttribute(PLACE_NS_ATTR) ?? '');
+    sanitizeEmbedded(box, (l) => deps.metaOf(l)?.title ?? null, slot.getAttribute(PLACE_NS_ATTR) ?? '', true);
     slot.textContent = '';
     slot.removeAttribute(PLACE_ATTACHMENT_ATTR);
     slot.append(...box.childNodes);

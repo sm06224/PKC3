@@ -110,6 +110,26 @@ const TASK_RUN = (s: ReturnType<typeof setup>): string[] =>
   s.labels().filter((l) => l.startsWith('task-run-'));
 
 describe('右クリックでチェックリストをそろえる(#1173)', () => {
+  it('🔴 板の付箋の中では出ない(#529 W5-c)── 付箋の行番号は置いたノートのもので、メニューの lid は板のもの。対照群:板自身の項目では出る', () => {
+    const s = setup(BODY);
+    const sticky = document.createElement('div');
+    sticky.className = 'pkc-place';
+    sticky.setAttribute('data-pkc-place-entry', 'n2');
+    const slot = document.createElement('div');
+    slot.setAttribute('data-pkc-field', 'place-body');
+    // 製品と同じ旗(行は置いたノートの原文の行)で描く ── 付箋の項目にも行番号が焼かれていることが前提
+    slot.innerHTML = renderMarkdown('- [ ] 付箋の項目\n- [ ] もう一つ', { interactiveTasks: true } as never);
+    sticky.append(slot);
+    s.host.append(sticky);
+    expect(slot.querySelector('input[data-pkc-task-line]'), '台の前提:付箋の項目に行番号が焼かれていない').not.toBeNull();
+    s.rightClickAt(slot.querySelector('li.pkc-task-item')!);
+    expect(TASK_RUN(s), '付箋の中で一括の項目が出ている(板の別の行を書き換える)').toEqual([]);
+    expect(s.events.some((e) => e.type === 'REQUEST_BODY_REWRITE')).toBe(false);
+    // 対照群:板自身の項目では出る
+    s.rightClickAt(s.itemText(0));
+    expect(TASK_RUN(s)).toHaveLength(2);
+  });
+
   it('🔴 項目の字を右クリックすると 2 つ出る(字は画面に出る物そのまま)', () => {
     const s = setup(BODY);
     s.rightClickAt(s.itemText(0));

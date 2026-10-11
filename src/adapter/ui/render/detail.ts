@@ -1121,14 +1121,17 @@ export class DetailRenderer {
       excerptOf: (l) => bodies.get(l),
       metaOf: (l) => metas.get(l),
       /**
-       * ⚠ **読み取り専用の設定で描く**:押せる旗(`interactive*`)も行番号(`sourceLineAnchors`)も
-       *   渡さない。外部画像は**同意が取れていない**ので許さない(置いたノートの同意は、
+       * ⚠ **読み取り専用の設定で描く**:押せる旗(`interactive*`。**チェックだけは別**、下の W5-c)も
+       *   行番号(`sourceLineAnchors`)も渡さない。外部画像は**同意が取れていない**ので許さない(置いたノートの同意は、
        *   板のノートのものではない)。
        */
-      render: (text) => {
+      render: (text, lineOffset) => {
         const opts = {
           ...readingRenderOptions(text, { allowExternalImages: false, currentContainerId: this.cidRef }),
           sourceLineAnchors: false,
+          // 🔴 付箋のチェックだけ押せる(#529 W5-c)。行は置いたノートの原文の行で焼く(設定行のぶんを足す)
+          interactiveTasks: true,
+          taskLineOffset: lineOffset,
         };
         return this.markdown.render(text, opts).catch(() => renderMarkdown(text, opts));
       },
