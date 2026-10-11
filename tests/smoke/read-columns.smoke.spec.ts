@@ -264,6 +264,28 @@ test('🔴 段組みにすると本文が段へ流れ、縦のホイールで横
       timeout: 5_000,
     })
     .toBeGreaterThan(0);
+  /**
+   * 🔴 **続けて回しても横へ送れ続ける**(user 報告 2026-10-11「段組み表示時にまともにスクロールできなくなる」)。
+   * ⚠ 1 回目は送れていた ── ホイールの間だけ出る蓋(`wheel-calm.ts`)が 1 回目の送りで出て、
+   *   **2 回目からのホイールが蓋に当たって本文の器の外になり**、横送りの読み替えが効かなくなっていた。
+   *   1 回だけ回す検査では緑のままだった。
+   */
+  /** ⚠ 端に着いたら送れないのは正しいので、端の手前にいる回だけ数える(空振り防止に 2 回は要る) */
+  let advanced = 0;
+  for (let i = 0; i < 3; i++) {
+    const g = await readGeom(page);
+    const before = g.scrollLeft;
+    if (before >= g.sW - g.cW - 1) break;
+    advanced++;
+    await page.mouse.wheel(0, 100);
+    await expect
+      .poll(async () => (await readGeom(page)).scrollLeft, {
+        message: `${String(i + 2)} 回目のホイールで横へ送れない(蓋に当たって本文の器に届いていない)`,
+        timeout: 3_000,
+      })
+      .toBeGreaterThan(before);
+  }
+  expect(advanced, '続けて回す検査が 1 回も走っていない(本文が短すぎる)').toBeGreaterThanOrEqual(2);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
