@@ -305,14 +305,39 @@ describe('設定画面の節の登録表(#1382)', () => {
         ['notices-enabled', stores.notices],
       ];
       renderer.render(initialState);
-      const before = rows.map(([f]) => checked(region, f));
       for (const [f, s] of rows) expect(checked(region, f), `${f}: 最初`).toBe(s.enabled());
-      for (const [, s] of rows) s.setEnabled(!s.enabled());
+      /**
+       * ⚠ **1 節ずつ**反転する(着地前レビュー)── 全部を同時に反転すると、既定値が同じ
+       *   2 節の store を取り違えても(missing-links ↔ code-collapse など)緑のまま通る。
+       *   その節だけが反転し、**他の行は動かない**ことを見る。
+       */
+      for (const [f, s] of rows) {
+        const before = rows.map(([g]) => checked(region, g));
+        s.setEnabled(!s.enabled());
+        renderer.render(initialState);
+        rows.forEach(([g], j) => {
+          const want = g === f ? !before[j] : before[j];
+          expect(checked(region, g), `${f} だけを反転したとき、${g}`).toBe(want);
+        });
+      }
+    });
+
+    it('段組みの節:読む面の幅に応じて「いまの画面では N 段で出ています」を書き直す(sync が映す)', () => {
+      const { region, renderer } = setup();
+      const host = document.createElement('div');
+      host.setAttribute('data-pkc-field', 'detail-body');
+      host.style.fontSize = '16px';
+      let width = 2400;
+      host.getBoundingClientRect = () => ({ width }) as DOMRect;
+      document.body.append(host);
+      const note = (): string =>
+        region.querySelector('[data-pkc-field="read-columns-effective"]')?.textContent ?? '';
+      chooseReadColumns(document.documentElement, '2');
       renderer.render(initialState);
-      rows.forEach(([f, s], i) => {
-        expect(checked(region, f), `${f}: 反転後`).toBe(s.enabled());
-        expect(checked(region, f), `${f}: 反転した`).toBe(!before[i]);
-      });
+      expect(note(), '広い面で 2 段').toContain('2 段で出ています');
+      width = 300;
+      renderer.render(initialState);
+      expect(note(), '狭い面では 1 段に畳んだと言う').toContain('狭いので');
     });
 
     it('選択欄・ボタン列の節:保存(または html の属性)を変えて render し直すと、選ばれている物が変わる', () => {
