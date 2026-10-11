@@ -370,7 +370,7 @@ export class PdfReaderHost {
         if (typeof key !== 'string' || key === '') return;
         const reply = (r: PdfEditResult): void => {
           try {
-            this.send('edit-result', token, { ok: r.ok, message: r.message });
+            this.send('edit-result', token, { ok: r.ok, message: r.message, key });
           } catch {
             // 待っている間に放送を閉じた(本体の入れ替わり)── 返す先が無いだけ
           }

@@ -254,6 +254,192 @@
     return n;
   }
 
+  // ───────── 🔴 共有された部品(Resources)から、選ばなかったページの部品を落とす
+  //
+  // `copyPages` は残すページの `/Resources` を**辞書ごと**写す。外したページと Resources を共有していると、
+  // その中の XObject(図・画像・Form)も道連れに出力へ入り、**外したページだけが使っていた絵や字が file に残る**
+  // (2026-10-11 の着地前レビューで実測: 共有 Resources の Form XObject に書いた字が、1 ページだけ残した出力に在った)。
+  // 残すページの content stream が**実際に使う名前**だけを残した別の Resources を作って付け替え、
+  // 付け替えて辿れなくなった物は出力から捨てる(`dropUnreachable`)。
+  // ⚠ 保証するのは **XObject / Pattern / Shading / Font / ExtGState**(ColorSpace・Properties・ProcSet はそのまま)。
+  // ⚠ 名前の拾い方は**多めに残す側**(content 中の `/名前` を全部「使う」と数える)── 足りないと残すページが壊れる。
+  // ⚠ content が読めない(未対応の圧縮)ときは刈らずに **leaked で断る**(漏れるより断る)。
+
+  var PRUNED = ['XObject', 'Pattern', 'Shading', 'Font', 'ExtGState'];
+
+  /** content の `/名前` を全部集める(生の綴りと、`#xx` を戻した綴りの両方)。 */
+  function addNames(set, bytes) {
+    var text = '';
+    for (var i = 0; i < bytes.length; i += 1) text += String.fromCharCode(bytes[i]);
+    var re = /\/([^\x00\t\n\f\r \/\[\]()<>{}%]+)/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      set.add(m[1]);
+      set.add(
+        m[1].replace(/#([0-9a-fA-F]{2})/g, function (_, h) {
+          return String.fromCharCode(parseInt(h, 16));
+        }),
+      );
+    }
+  }
+
+  function isUsed(set, nameObj) {
+    var raw = nameObj.asString().slice(1);
+    return set.has(raw) || (typeof nameObj.decodeText === 'function' && set.has(nameObj.decodeText()));
+  }
+
+  /** stream の展開した中身。読めなければ leaked で投げる。 */
+  function streamBytes(PDFLib, st) {
+    try {
+      if (st instanceof PDFLib.PDFRawStream) return PDFLib.decodePDFRawStream(st).decode();
+      if (typeof st.getUnencodedContents === 'function') return st.getUnencodedContents();
+      if (!st.dict.has(PDFLib.PDFName.of('Filter'))) return st.getContents();
+    } catch (e) {
+      /* 下で断る */
+    }
+    throw fail(CODES.leaked);
+  }
+
+  function isStream(PDFLib, o) {
+    return !!o && o.dict instanceof PDFLib.PDFDict && typeof o.getContents === 'function';
+  }
+
+  /** ページの content stream(1 本でも配列でも)。 */
+  function pageStreams(PDFLib, node) {
+    var c = node.lookup(PDFLib.PDFName.of('Contents'));
+    var out = [];
+    if (isStream(PDFLib, c)) out.push(c);
+    else if (c instanceof PDFLib.PDFArray) {
+      for (var i = 0; i < c.size(); i += 1) {
+        var one = c.lookup(i);
+        if (isStream(PDFLib, one)) out.push(one);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * `res`(Resources)を、`used` の名前だけ残した別の辞書にして `assign` で付け替える。
+   * 中で使う Form XObject は、自前の Resources があれば再帰で同じように刈り、無ければその中の名前も `used` に足す
+   * (持たない Form は呼び元の Resources を使うため)。
+   */
+  function pruneResources(PDFLib, ctx, res, used, seenForms, assign) {
+    var N = PDFLib.PDFName;
+    var D = PDFLib.PDFDict;
+    var xo = res.lookup(N.of('XObject'));
+    var walked = {};
+    var again = true;
+    while (again) {
+      again = false;
+      if (xo instanceof D) {
+        xo.entries().forEach(function (pair) {
+          var id = pair[0].asString();
+          if (walked[id] || !isUsed(used, pair[0])) return;
+          walked[id] = true;
+          var obj = xo.lookup(pair[0]);
+          if (!isStream(PDFLib, obj) || obj.dict.lookup(N.of('Subtype')) !== N.of('Form')) return;
+          var bytes = streamBytes(PDFLib, obj);
+          var own = obj.dict.lookup(N.of('Resources'));
+          if (own instanceof D) {
+            if (seenForms.has(obj)) return;
+            seenForms.add(obj);
+            var inner = new Set();
+            addNames(inner, bytes);
+            pruneResources(PDFLib, ctx, own, inner, seenForms, function (r) {
+              obj.dict.set(N.of('Resources'), r);
+            });
+          } else {
+            addNames(used, bytes);
+            again = true;
+          }
+        });
+      }
+    }
+    var fresh = ctx.obj({});
+    res.entries().forEach(function (pair) {
+      var key = pair[0];
+      var kind = key.asString().slice(1);
+      var sub = res.lookup(key);
+      if (PRUNED.indexOf(kind) === -1 || !(sub instanceof D)) {
+        fresh.set(key, pair[1]);
+        return;
+      }
+      var kept = ctx.obj({});
+      sub.entries().forEach(function (e) {
+        if (isUsed(used, e[0])) kept.set(e[0], e[1]);
+      });
+      fresh.set(key, kept);
+    });
+    assign(fresh);
+  }
+
+  function pruneOutputPage(PDFLib, ctx, node, seenForms) {
+    var res = node.Resources();
+    if (!(res instanceof PDFLib.PDFDict)) return;
+    var used = new Set();
+    pageStreams(PDFLib, node).forEach(function (st) {
+      addNames(used, streamBytes(PDFLib, st));
+    });
+    pruneResources(PDFLib, ctx, res, used, seenForms, function (r) {
+      node.set(PDFLib.PDFName.of('Resources'), r);
+    });
+  }
+
+  /** 文書の入口(Root / Info)から辿れる間接オブジェクトの参照の集まり。 */
+  function reachableRefs(PDFLib, ctx) {
+    var seen = new Set();
+    var stack = [ctx.trailerInfo.Root, ctx.trailerInfo.Info];
+    while (stack.length > 0) {
+      var o = stack.pop();
+      if (!o) continue;
+      if (o instanceof PDFLib.PDFRef) {
+        var k = o.toString();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        stack.push(ctx.lookup(o));
+      } else if (o instanceof PDFLib.PDFDict) {
+        o.entries().forEach(function (p) {
+          stack.push(p[1]);
+        });
+      } else if (o instanceof PDFLib.PDFArray) {
+        o.asArray().forEach(function (v) {
+          stack.push(v);
+        });
+      } else if (o.dict instanceof PDFLib.PDFDict) {
+        stack.push(o.dict);
+      }
+    }
+    return seen;
+  }
+
+  /** 辿れない間接オブジェクトの参照(読み直した文書の物は、保存の仕組みが作る ObjStm / XRef を除く)。 */
+  function unreachableRefs(PDFLib, ctx) {
+    var seen = reachableRefs(PDFLib, ctx);
+    var type = PDFLib.PDFName.of('Type');
+    var out = [];
+    ctx.enumerateIndirectObjects().forEach(function (pair) {
+      if (seen.has(pair[0].toString())) return;
+      var obj = pair[1];
+      if (obj && obj.dict instanceof PDFLib.PDFDict) {
+        var t = obj.dict.get(type);
+        if (t === PDFLib.PDFName.of('ObjStm') || t === PDFLib.PDFName.of('XRef')) return;
+      }
+      out.push(pair[0]);
+    });
+    return out;
+  }
+
+  /**
+   * 🔴 最後の門: 出力を読み直し、①Page 辞書が**残すページの数ちょうど**(孤立したページ = 外したページの中身が混ざっていない)
+   * ②文書の入口(Root / Info)から**辿れない間接オブジェクトが 1 つも無い**(どの道で入った物でも、残すページの持ち物でない物は渡さない)
+   * ことを確かめる。満たさなければ **leaked で投げる**。
+   */
+  async function verify(PDFLib, saved, pageCount) {
+    var again = await loadSource(PDFLib, saved);
+    if (countPageDicts(PDFLib, again) !== pageCount) throw fail(CODES.leaked);
+    if (unreachableRefs(PDFLib, again.context).length > 0) throw fail(CODES.leaked);
+  }
+
   /**
    * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate }`
    * @returns `Uint8Array`(⚠ 呼び側が transfer する。大きさぴったりの buffer)
@@ -286,15 +472,21 @@
       out.addPage(page);
     });
     links.restore(out, pages);
+    // 🔴 共有された Resources に乗って来た、選ばなかったページの部品を落とす(上の注釈)
+    var seenForms = new Set();
+    pages.forEach(function (page) {
+      pruneOutputPage(PDFLib, out.context, page.node, seenForms);
+    });
+    unreachableRefs(PDFLib, out.context).forEach(function (ref) {
+      out.context.delete(ref);
+    });
     var saved = await out.save();
-    // 🔴 最後の門: 出力を読み直し、Page 辞書が**残すページの数ちょうど**であること。孤立したページ(= 外したページの中身)が
-    //    1 つでも混ざっていたら、**渡さずに断る**(上の注釈の切り落としが届かない形への備え)
-    var again = await loadSource(PDFLib, saved);
-    if (countPageDicts(PDFLib, again) !== plan.order.length) throw fail(CODES.leaked);
+    // 🔴 最後の門(`verify`)── 出力を読み直して確かめる
+    await verify(PDFLib, saved, plan.order.length);
     // 🔑 transfer するので、buffer が大きさぴったりであること(余りを付けて渡さない)
     if (saved.byteOffset === 0 && saved.byteLength === saved.buffer.byteLength) return saved;
     return saved.slice();
   }
 
-  root.PkcPdfEditCore = { CODES: CODES, check: check, checkJob: checkJob, build: build };
+  root.PkcPdfEditCore = { CODES: CODES, check: check, checkJob: checkJob, build: build, verify: verify };
 })(typeof self !== 'undefined' ? self : this);

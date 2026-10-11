@@ -23,6 +23,7 @@ interface Core {
   check(lib: typeof PDFLib, bytes: Uint8Array): Promise<number>;
   checkJob(job: unknown, pageCount: number): { order: number[]; rotate: Record<number, number> };
   build(lib: typeof PDFLib, bytes: Uint8Array, job: unknown): Promise<Uint8Array>;
+  verify(lib: typeof PDFLib, bytes: Uint8Array, pageCount: number): Promise<void>;
 }
 
 function loadCore(): Core {
@@ -209,6 +210,162 @@ describe('🔴 外したページへのリンクから、外したページが�
     expect(code).toBe('leaked');
     // ⚠ 何も外さなくても、この形は pdf-lib が行き先のページを孤立した複製として写すので断る(安全側。ページ辞書に
     //   別のページへの参照を持つ PDF はまれ ── 保存できないときは理由を言う)
+  });
+});
+
+describe('🔴 選んだページを抜き出す(#275 段②-1c)── 選んだページだけが入り、選ばなかったページの中身は残らない', () => {
+  const D = 'MARK-DELTA-444';
+  const E = 'MARK-ECHO-555';
+
+  it('5 ページから 4 と 2 を(その順で・4 は回して)選ぶ: 出力は 2 ページで、選ばなかった 3 つの字は全 stream に無い。対照群で「ある」が見える', async () => {
+    const src = await sample([A, B, C, D, E]);
+    for (const m of [A, B, C, D, E]) expect(hasMark(src, m), `対照群: 元には ${m} が見える`).toBe(true);
+    const out = await core.build(PDFLib, src, { order: [4, 2], rotate: { 4: 90 } });
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(2);
+    expect(showsMark(await pageText(out, 0), D)).toBe(true);
+    expect(showsMark(await pageText(out, 1), B)).toBe(true);
+    expect(doc.getPage(0).getRotation().angle).toBe(90);
+    expect(doc.getPage(1).getRotation().angle).toBe(0);
+    for (const m of [A, C, E]) expect(hasMark(out, m), `選ばなかったページの字 ${m} が残っている`).toBe(false);
+  });
+
+  it('1 ページだけ選んでも作れる(1 ページの PDF)/ 0 ページは作らない(bad-job)', async () => {
+    const src = await sample([A, B, C]);
+    const out = await core.build(PDFLib, src, { order: [2], rotate: {} });
+    expect((await PDFLib.PDFDocument.load(out)).getPageCount()).toBe(1);
+    expect(hasMark(out, B)).toBe(true);
+    expect(hasMark(out, A) || hasMark(out, C)).toBe(false);
+    let code: string | undefined;
+    try {
+      await core.build(PDFLib, src, { order: [], rotate: {} });
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(code).toBe('bad-job');
+  });
+
+  it('🔴 選ばなかったページが別の道(ページ辞書の独自の項目)で選んだページから辿れるなら、渡さずに leaked で断る', async () => {
+    const src = await linked((p1, p3) => p1.node.set(PDFLib.PDFName.of('Foo'), p3.ref));
+    let code: string | undefined;
+    let out: Uint8Array | undefined;
+    try {
+      out = await core.build(PDFLib, src, { order: [1], rotate: {} });
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(out, '選ばなかったページを孤立して含んだまま渡した').toBeUndefined();
+    expect(code).toBe('leaked');
+  });
+});
+
+describe('🔴 共有された Resources から、選ばなかったページの部品が出力に残らない', () => {
+  const SECRET_FORM = 'SECRET-XOBJ-999';
+  const SECRET_IMG = 'SECRET-IMG-777';
+  const KEEP_FORM = 'KEEP-FORM-111';
+  const INNER = 'INNER-FORM-222';
+
+  /** 2 ページが**同じ Resources を共有**する。XObject: Secret(Form)/ Pic(画像)/ Keep(Form)。1 ページ目は Keep と Nest を使い、Nest の中で Inner を使う。 */
+  async function shared(): Promise<Uint8Array> {
+    const d = await PDFLib.PDFDocument.create();
+    const font = await d.embedFont(PDFLib.StandardFonts.Helvetica);
+    const p1 = d.addPage();
+    const p2 = d.addPage();
+    const ctx = d.context;
+    const form = (text: string, extra: Record<string, unknown> = {}): PDFLib.PDFRef =>
+      ctx.register(
+        ctx.stream(`BT /F1 12 Tf 10 10 Td (${text}) Tj ET`, { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 200, 50], ...extra }),
+      );
+    const inner = form(INNER);
+    const nest = ctx.register(
+      ctx.stream('/Inner Do', {
+        Type: 'XObject',
+        Subtype: 'Form',
+        BBox: [0, 0, 200, 50],
+        Resources: { XObject: { Inner: inner } },
+      }),
+    );
+    const secret = form(SECRET_FORM);
+    const keep = form(KEEP_FORM);
+    const pic = ctx.register(
+      ctx.stream(Buffer.from(SECRET_IMG, 'latin1'), {
+        Type: 'XObject',
+        Subtype: 'Image',
+        Width: 8,
+        Height: 2,
+        ColorSpace: 'DeviceGray',
+        BitsPerComponent: 8,
+      }),
+    );
+    const res = p1.node.Resources() as PDFLib.PDFDict;
+    res.set(PDFLib.PDFName.of('XObject'), ctx.obj({ Secret: secret, Pic: pic, Keep: keep, Nest: nest }));
+    p2.node.set(PDFLib.PDFName.of('Resources'), res); // 共有
+    p1.drawText('PAGE-ONE', { font });
+    p2.drawText('PAGE-TWO', { font });
+    // 1 ページ目の content の最後に、使う XObject を足す(ページ 2 は Secret と Pic を使う)
+    const add = (page: PDFLib.PDFPage, ops: string): void => {
+      page.node.addContentStream(ctx.register(ctx.stream(ops)));
+    };
+    add(p1, '/Keep Do /Nest Do');
+    add(p2, '/Secret Do /Pic Do');
+    return d.save({ useObjectStreams: false });
+  }
+
+  it('2 ページ目だけが使う Form と画像は、1 ページ目だけ抜き出した出力に無い。対照群: 元には見え、1 ページ目が使う物は残る(入れ子の Form の中身も)', async () => {
+    const src = await shared();
+    for (const m of [SECRET_FORM, SECRET_IMG, KEEP_FORM, INNER]) expect(hasMark(src, m), `対照群: 元には ${m} が見える`).toBe(true);
+    const out = await core.build(PDFLib, src, { order: [1], rotate: {} });
+    expect(hasMark(out, SECRET_FORM), '選ばなかったページだけが使う Form が残っている').toBe(false);
+    expect(Buffer.from(out).toString('latin1').includes(SECRET_IMG), '選ばなかったページだけが使う画像が残っている').toBe(false);
+    expect(hasMark(out, KEEP_FORM), '選んだページが使う Form まで落とした').toBe(true);
+    expect(hasMark(out, INNER), '選んだページが使う Form の中で使う Form まで落とした').toBe(true);
+    expect(hasMark(out, 'PAGE-ONE') || showsMark(await pageText(out, 0), 'PAGE-ONE')).toBe(true);
+    // 残した名前は、出力のページの Resources から実際に引ける
+    const doc = await PDFLib.PDFDocument.load(out);
+    const xo = (doc.getPage(0).node.Resources() as PDFLib.PDFDict).lookup(PDFLib.PDFName.of('XObject')) as PDFLib.PDFDict;
+    expect(xo.entries().map(([k]) => k.decodeText()).sort()).toEqual(['Keep', 'Nest']);
+  });
+
+  it('2 ページ目を選んだときは、2 ページ目が使う物(Secret・Pic)が残り、1 ページ目だけが使う物は残らない', async () => {
+    const src = await shared();
+    const out = await core.build(PDFLib, src, { order: [2], rotate: {} });
+    expect(hasMark(out, SECRET_FORM)).toBe(true);
+    expect(Buffer.from(out).toString('latin1').includes(SECRET_IMG)).toBe(true);
+    expect(hasMark(out, KEEP_FORM)).toBe(false);
+    expect(hasMark(out, INNER)).toBe(false);
+  });
+
+  it('🔴 content が読めない(未対応の圧縮)なら、刈らずに leaked で断る', async () => {
+    const src = await shared();
+    const doc = await PDFLib.PDFDocument.load(src);
+    const c = doc.getPage(0).node.Contents() as PDFLib.PDFArray;
+    const first = doc.context.lookup(c.get(0)) as PDFLib.PDFRawStream;
+    first.dict.set(PDFLib.PDFName.of('Filter'), PDFLib.PDFName.of('CCITTFaxDecode'));
+    const bad = await doc.save({ useObjectStreams: false });
+    let code: string | undefined;
+    try {
+      await core.build(PDFLib, bad, { order: [1], rotate: {} });
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(code).toBe('leaked');
+  });
+
+  it('🔴 門(verify): 文書の入口から辿れない間接オブジェクトが残っていたら leaked で断る / 無ければ通る(対照群)', async () => {
+    const d = await PDFLib.PDFDocument.create();
+    d.addPage();
+    const clean = await d.save({ useObjectStreams: false });
+    await expect(core.verify(PDFLib, clean, 1)).resolves.toBeUndefined();
+    d.context.register(d.context.stream('ORPHAN-OBJ-555'));
+    const dirty = await d.save({ useObjectStreams: false });
+    expect(hasMark(dirty, 'ORPHAN-OBJ-555'), '対照群: 孤立した物が file に在る').toBe(true);
+    let code: string | undefined;
+    try {
+      await core.verify(PDFLib, dirty, 1);
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(code).toBe('leaked');
   });
 });
 
