@@ -241,23 +241,22 @@ describe('始まりを戻す(snapVideoStart)', () => {
 });
 
 describe('確認の字(snapConfirm)── 文面は 2 通り・切り替えは 1 か所', () => {
-  it('🔴 いまの既定(interim):何秒早くなるか・押した所と実際の始まりを言う。ボタンは [切り出す][やめる]', () => {
+  it('🔴 いまの既定(ruled):細かく切れない環境が戻るときは裁定の文言そのまま(秒の行は既定で足さない)', () => {
     const c = snapConfirm(2500, 12_000);
-    expect(c.message).toBe('始まりを一番近い区切りに合わせて切り出します。始まりが約 2.5 秒早くなります(0:12 → 0:09)');
+    expect(c.message).toBe('お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します');
+    expect(c.message).toBe(SNAP_CONFIRM_RULED_TEXT);
+    expect(c.message).not.toMatch(/\d/);
     expect([c.okLabel, c.cancelLabel]).toEqual(['切り出す', 'やめる']);
     expect(c.snapBackSec).toBe(2.5);
-    // 裁定の文は、この段では事実と合わない(全部のブラウザが戻る)ので既定では出さない
-    expect(c.message).not.toContain('お使いのブラウザでは');
+    // 段②b-1 の間だけ使った文は、押した所ぴったりに切れる道ができたので既定では出さない
+    expect(c.message).not.toContain('始まりを一番近い区切りに合わせて');
   });
-  it('🔴 ruled:裁定の文言そのまま(秒の行は既定で足さない / フラグで足せる)', () => {
-    const plain = snapConfirm(2500, 12_000, { variant: 'ruled' });
-    expect(plain.message).toBe('お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します');
-    expect(plain.message).toBe(SNAP_CONFIRM_RULED_TEXT);
-    expect(plain.message).not.toMatch(/\d/);
+  it('🔴 interim(切り替えの口として残す):何秒早くなるか・押した所と実際の始まりを言う。秒の行は ruled に足せる', () => {
+    const interim = snapConfirm(2500, 12_000, { variant: 'interim' });
+    expect(interim.message).toBe('始まりを一番近い区切りに合わせて切り出します。始まりが約 2.5 秒早くなります(0:12 → 0:09)');
     const withSec = snapConfirm(2500, 12_000, { variant: 'ruled', secondsInRuled: true });
     expect(withSec.message.startsWith(SNAP_CONFIRM_RULED_TEXT)).toBe(true);
     expect(withSec.message).toContain('約 2.5 秒早くなります(0:12 → 0:09)');
-    expect([plain.okLabel, plain.cancelLabel]).toEqual(['切り出す', 'やめる']);
   });
   it('🔴 秒の字:10 秒未満は小数 1 桁・以上は整数・戻るのに 0.0 とは出さない', () => {
     expect(snapSecondsText(1500)).toBe('1.5');

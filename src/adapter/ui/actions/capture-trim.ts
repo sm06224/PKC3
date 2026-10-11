@@ -59,8 +59,17 @@ export interface CaptureTrimDeps {
    * ⚠ 断る理由は値で返る(例外にしない)。
    */
   readonly scanVideo: (blob: Blob, startMs: number, endMs: number) => Promise<VideoScanResult>;
-  /** 動画を切る口(走査の結果を使う)。出力は `Blob`(元の部品を指す = コピーしない)。 */
-  readonly cutVideo: (blob: Blob, scan: VideoScan, startMs: number, endMs: number) => Promise<VideoCutResult>;
+  /**
+   * 動画を切る口(走査の結果を使う)。出力は `Blob`(元の部品を指す = コピーしない)。
+   * `precise` = 押した所ぴったり(落ちたら何も作らず `preciseFailed` で返る)/ `snap` = 手前の区切りから。
+   */
+  readonly cutVideo: (
+    blob: Blob,
+    scan: VideoScan,
+    startMs: number,
+    endMs: number,
+    mode: 'precise' | 'snap',
+  ) => Promise<VideoCutResult>;
   /** 確認を出す口(アプリ自身の `<dialog>`)。⚠ `true` = 切り出す。 */
   readonly confirm: (message: string, opts: { okLabel: string; cancelLabel: string }) => Promise<boolean>;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
@@ -151,20 +160,35 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
             return;
           }
           /**
-           * 🔴 **始まりが押した所より手前になるときだけ、確認する**(裁定の文言。設計 doc §1.1)。
+           * 🔴 **押した所ぴったりに切れる環境(`precise`)では、確認を出さない**(段②b-2)。
+           * ⚠ 切れない環境(WebCodecs が無い / 実際に 1 枚通して動かない)と、**切っている途中で落ちたとき**だけ、
+           *   始まりが手前の区切りへ戻る ── そのとき**裁定の文言**で確認する(戻らない = 押した所がちょうど区切りなら出さない)。
            * ⚠ 「切り出しています…」を出したまま問うと、動いていないのに動いて見える ── 問う間は消す。
            * 🔑 やめたら**何も作らない・印も残す**(押し直せば同じものが作れる)。
            */
-          const ask = snapConfirm(scanned.snapBackMs, startMs);
-          if (ask.needed) {
-            deps.notify('');
-            const go = await deps.confirm(ask.message, { okLabel: ask.okLabel, cancelLabel: ask.cancelLabel });
-            if (!go) return;
-            announceRunning();
+          let out: VideoCutResult | null = null;
+          if (scanned.precise === 'ready') {
+            const tried = await deps.cutVideo(blob, scanned.scan, startMs, endMs, 'precise');
+            if (!tried.ok && 'preciseFailed' in tried) {
+              // 🔴 途中で落ちた:何も作られていない。手前の区切りへ回す(下で確認を出す)
+              out = null;
+            } else {
+              out = tried;
+            }
           }
-          const out = await deps.cutVideo(blob, scanned.scan, startMs, endMs);
+          if (out === null) {
+            const ask = snapConfirm(scanned.snapBackMs, startMs);
+            if (ask.needed) {
+              deps.notify('');
+              const go = await deps.confirm(ask.message, { okLabel: ask.okLabel, cancelLabel: ask.cancelLabel });
+              if (!go) return;
+              announceRunning();
+            }
+            out = await deps.cutVideo(blob, scanned.scan, startMs, endMs, 'snap');
+          }
           if (!out.ok) {
-            fail(VIDEO_TRIM_REFUSAL_TEXT[out.reason]);
+            // 'snap' の道は preciseFailed を返さない ── 返したら取り違え(黙って握りつぶさない)
+            fail('preciseFailed' in out ? '切り出せませんでした。' : VIDEO_TRIM_REFUSAL_TEXT[out.reason]);
             return;
           }
           made = {
@@ -172,7 +196,7 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
             size: out.blob.size,
             durationMs: out.durationMs,
             nameStartMs: out.snappedStartMs,
-            snapBackMs: scanned.snapBackMs,
+            snapBackMs: out.snapBackMs,
           };
         } else {
           const cut = await deps.trim(blob, startMs, endMs);

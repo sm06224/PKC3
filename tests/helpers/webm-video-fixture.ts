@@ -252,6 +252,10 @@ export interface ParsedBlock {
   /** 中身(トラック番号・相対時刻・旗を除いた分)。 */
   readonly payload: number[];
   readonly hasRef: boolean;
+  /** ブロックの旗(0x80 = SimpleBlock のキーフレーム)。 */
+  readonly flags: number;
+  /** 入れ物の種類(SimpleBlock = 'a3' / グループの中の Block = 'a1')。 */
+  readonly kind: 'a3' | 'a1';
 }
 
 export interface ParsedWebm {
@@ -333,6 +337,8 @@ export function parseWebm(b: Uint8Array): ParsedWebm {
           ms: (ctx.cluster ?? 0) + rel,
           payload: Array.from(b.subarray(body + tv.len + 3, body + sz.v)),
           hasRef: false,
+          flags: b[body + tv.len + 2]!,
+          kind: idHex as 'a3' | 'a1',
         });
       } else if (idHex === 'fb') {
         const last = blocks[blocks.length - 1]!;

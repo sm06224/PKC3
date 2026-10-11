@@ -74,7 +74,7 @@ describe('動画のワーカー口(VideoClient)', () => {
     expect(w.seen[0]!.payload.blob, 'Blob を写している').toBe(blob);
     w.respond(w.seen[0]!.id, { ok: false, reason: 'broken' });
     expect(await p).toEqual({ ok: false, reason: 'broken' });
-    drop(c.cut(blob, { videoTrack: 1 } as never, 100, 900));
+    drop(c.cut(blob, { videoTrack: 1 } as never, 100, 900, 'snap'));
     expect(w.seen[1]!.payload.op).toBe('cut');
     c.dispose();
   });
@@ -82,7 +82,7 @@ describe('動画のワーカー口(VideoClient)', () => {
   it('🔴 kill(dispose)されたら、待っている依頼は reject される(永久に待たない)', async () => {
     const c = mk();
     const p = c.scan(new Blob(['x']), 0, 1000);
-    const q = c.cut(new Blob(['x']), { videoTrack: 1 } as never, 0, 1000);
+    const q = c.cut(new Blob(['x']), { videoTrack: 1 } as never, 0, 1000, 'snap');
     c.dispose();
     await expect(p).rejects.toThrow(/video/);
     await expect(q).rejects.toThrow(/video/);
@@ -168,7 +168,7 @@ describe('動画の切り出しの中身(video-codec)── 実物を node で�
     expect(video[0]!.ms).toBe(0);
     expect(video).toHaveLength(21);
     // 1 本の入口(ワーカーもその場も通る `runVideoJob`)でも同じ大きさになる
-    const again = await runVideoJob({ op: 'cut', blob, scan: scanned.scan, startMs: 1550, endMs: 3050 });
+    const again = await runVideoJob({ op: 'cut', blob, scan: scanned.scan, startMs: 1550, endMs: 3050, mode: 'snap' });
     expect(again.ok && 'blob' in again && again.blob.size).toBe(cut.blob.size);
   });
 

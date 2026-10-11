@@ -1,13 +1,18 @@
 /**
- * 🔴 **画面収録(webm = VP8 の映像 + opus の音)の前後を削る**(#683 段②b-1。設計 doc
+ * 🔴 **画面収録(webm = VP8 の映像 + opus の音)の前後を削る**(#683 段②b-1・②b-2。設計 doc
  * `docs/development/video-trim-design-2026-10.md` §3・§4・§5)。
  *
- * ## 🔑 いちばん大事な性質 ── **映像を作り直さない・250MB を丸ごと読まない**
+ * ## 🔑 いちばん大事な性質 ── **映像の大半を作り直さない・250MB を丸ごと読まない**
  *
  * VP8 の差分フレームは**前のフレームが無いと絵にならない**ので、始まりは
- * 「押した所より手前の最も近いキーフレーム」へ戻す(= 始まりが少し**早く**なる)。
+ * 「押した所より手前の最も近いキーフレーム」へ戻す(= 始まりが少し**早く**なる ── 段②b-1・`planVideoTrim` の既定)。
  * そこから終わりまでは**元のバイトをそのまま繋ぐ**(`Blob.slice` の部品)だけで、
  * 変えるのは `Cluster` の `Timecode`(0 起点に直す)と `Info` の `Duration` だけである。
+ *
+ * 🔴 **段②b-2(押した所ぴったり)**:WebCodecs が使える環境では、押した所に表示されているフレームから
+ * 次のキーフレーム(K1)の手前までだけを**作り直し**(`precisePlanSpec` が範囲を決め、呼び側が復号 → 符号化して
+ * `HeadFrame` にする)、K1 から先は同じく元のバイトを繋ぐ(`planVideoTrim` の `head`)。作り直した頭は
+ * `SimpleBlock`(1 枚目だけキーフレームの旗)で、1 秒ごとの `Cluster` に詰める。
  *
  * | | |
  * |---|---|
@@ -88,6 +93,12 @@ export interface VideoBlock {
   readonly relPos: number;
   /** 映像のキーフレームか(音は `false`)。 */
   readonly key: boolean;
+  /**
+   * フレーム本体(トラック番号・相対時刻・旗の後ろ)の頭と尻(file 内の位置)。
+   * 🔑 段②b-2:作り直す塊を復号器へ渡すとき、`BlockGroup` の `ReferenceBlock` を含めずに本体だけを読むために持つ。
+   */
+  readonly dataStart: number;
+  readonly dataEnd: number;
 }
 
 export interface VideoCluster {
@@ -305,6 +316,8 @@ export async function scanWebmVideo(
     elStart: number;
     elEnd: number;
     relPos: number;
+    dataStart: number;
+    dataEnd: number;
     sig: { -readonly [K in keyof KeySignals]: KeySignals[K] };
   }
   const blocks: BlockDraft[] = [];
@@ -441,6 +454,8 @@ export async function scanWebmVideo(
           elStart: inGroup ? group!.start : pos,
           elEnd: inGroup ? group!.end : endPos,
           relPos: h.body + tn,
+          dataStart: h.body + tn + 3,
+          dataEnd: endPos,
           sig: { tag, inGroup, flagKey: !inGroup && (flags & 0x80) !== 0, ref: false },
         };
         blocks.push(draft);
@@ -479,6 +494,8 @@ export async function scanWebmVideo(
     elStart: b.elStart,
     elEnd: b.elEnd,
     relPos: b.relPos,
+    dataStart: b.dataStart,
+    dataEnd: b.dataEnd,
     key: b.track === videoTrack!.number && isKeyFrame(b.sig),
   }));
   const video = out.filter((b) => b.track === videoTrack!.number);
@@ -580,6 +597,10 @@ export interface TrimPlan {
   /** 元のバイトをそのまま繋いだ `Cluster` の数 / 組み直した数。 */
   readonly copiedClusters: number;
   readonly rebuiltClusters: number;
+  /** 始まりを押した所ぴったりに切ったか(段②b-2)。 */
+  readonly precise: boolean;
+  /** 作り直した(または頭として写した)映像フレームの数。 */
+  readonly headFrames: number;
 }
 
 export type PlanResult =
@@ -591,9 +612,140 @@ const CLUSTER_HEAD = concatBytes([hexBytes(ID_CLUSTER), UNKNOWN_SIZE]);
 /** block の相対時刻は 16 ビットの符号つき。 */
 const REL_MIN = -32768;
 const REL_MAX = 32767;
+/** 頭の `Cluster` を何ミリ秒ごとに切るか(MediaRecorder の約 1 秒に合わせる)。 */
+const HEAD_CLUSTER_MS = 1000;
 
 function timecodeElement(ms: number): Uint8Array {
   return element(ID_CLUSTER_TIMECODE, uintBytes(Math.max(0, Math.round(ms))));
+}
+
+/**
+ * 🔴 **押した所ぴったりに切るための「作り直す範囲」**(#683 段②b-2。設計 doc §3.1・§4.3)。
+ *
+ * 押した時刻に**表示されているフレーム**(= 時刻が押した所以下で最後の映像フレーム)から、次のキーフレーム(K1)の
+ * 手前までを作り直す。K1 から先は元のバイトのまま繋ぐ。
+ *
+ * - `decode` ── 復号に渡すブロック(K0 から。**差分は K0 から順に復号しないと絵にならない**)
+ * - `emit`   ── そのうち、符号化へ渡す(= 出力の頭になる)ブロック。`decode` の後ろ側
+ * - 🔑 押した所に表示されているフレームが**もうキーフレーム**なら作り直しは要らない(`reencode: false`):
+ *   そのフレームを頭に写し、次のフレームから先は元のバイトで繋ぐ(WebCodecs が無くても押した所ぴったり)
+ */
+export interface PreciseSpec {
+  /** 押した時刻(ミリ秒に丸めた値)。出力の 0。 */
+  readonly startMs: number;
+  readonly decode: readonly VideoBlock[];
+  readonly emit: readonly VideoBlock[];
+  /** 元のバイトのまま繋ぎ始める映像の時刻(元の時刻)。`null` = 繋ぐ所が無い(終わりまで頭に入る)。 */
+  readonly tailFromMs: number | null;
+  /** 復号して符号化し直す必要があるか。 */
+  readonly reencode: boolean;
+}
+
+/**
+ * @returns `null` = 押した所ぴったりの道は使えない(押した所が最初の映像フレームより手前・録画の外・
+ *   キーフレームが無い)── 呼び側は手前のキーフレームから切る道(`snapVideoStart`)へ回す。
+ */
+export function precisePlanSpec(scan: VideoScan, startMs: number, endMs: number): PreciseSpec | null {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || !(endMs > startMs)) return null;
+  const s = Math.max(0, Math.round(startMs));
+  if (s >= scan.sourceEndMs) return null;
+  const video = scan.blocks.filter((b) => b.track === scan.videoTrack);
+  let firstIdx = -1;
+  for (let i = 0; i < video.length; i += 1) {
+    if (video[i]!.ms <= s) firstIdx = i;
+    else break;
+  }
+  if (firstIdx < 0) return null;
+  const first = video[firstIdx]!;
+  if (first.key) {
+    const next = video[firstIdx + 1];
+    return {
+      startMs: s,
+      decode: [],
+      emit: [first],
+      tailFromMs: next !== undefined && next.ms < endMs ? next.ms : null,
+      reencode: false,
+    };
+  }
+  let k0 = -1;
+  for (let i = firstIdx; i >= 0; i -= 1) {
+    if (video[i]!.key) {
+      k0 = i;
+      break;
+    }
+  }
+  if (k0 < 0) return null;
+  let k1 = -1;
+  for (let i = firstIdx + 1; i < video.length; i += 1) {
+    if (video[i]!.key) {
+      k1 = i;
+      break;
+    }
+  }
+  const hasTail = k1 >= 0 && video[k1]!.ms < endMs;
+  let last = firstIdx;
+  const limit = hasTail ? k1 : video.length;
+  for (let i = firstIdx + 1; i < limit; i += 1) {
+    if (video[i]!.ms < endMs) last = i;
+    else break;
+  }
+  return {
+    startMs: s,
+    decode: video.slice(k0, last + 1),
+    emit: video.slice(firstIdx, last + 1),
+    tailFromMs: hasTail ? video[k1]!.ms : null,
+    reencode: true,
+  };
+}
+
+/** 符号化の設定(元の映像に合わせる)。 */
+export interface PreciseEncodeParams {
+  readonly width: number;
+  readonly height: number;
+  readonly bitrate: number;
+  readonly framerate: number;
+}
+
+/**
+ * 符号化の設定を、元の映像から決める(設計 doc §4.3 の 6・8)。
+ * 🔑 ビットレートは元の映像の**実測**(映像のバイト ÷ 映像の長さ)の 1.2 倍 ── 作り直しは 2 世代目なので少し高めに置く。
+ *   ⚠ 画面が止まる録画は実測が極端に低くなる(キーフレーム 1 枚が粗くなる)ので、画素数に比例した下限を置く。
+ *   ⚠ **画質が目に見えて違うかは未測**(この数式は仮り置き)。
+ */
+export function preciseEncodeParams(scan: VideoScan): PreciseEncodeParams {
+  const video = scan.blocks.filter((b) => b.track === scan.videoTrack);
+  let bytes = 0;
+  for (const b of video) bytes += b.dataEnd - b.dataStart;
+  const spanMs = video.length === 0 ? 0 : video[video.length - 1]!.ms - video[0]!.ms + scan.frameGapMs;
+  const measured = spanMs > 0 ? (bytes * 8 * 1000) / spanMs : 0;
+  const floor = Math.max(300_000, Math.round(scan.width * scan.height * 0.8));
+  const bitrate = Math.min(20_000_000, Math.max(floor, Math.round(measured * 1.2)));
+  const framerate = Math.min(60, Math.max(1, Math.round(1000 / scan.frameGapMs)));
+  return { width: scan.width, height: scan.height, bitrate, framerate };
+}
+
+/** 頭に入るフレーム(作り直した物、または写した物)。⚠ `ms` は**元の時刻**(出力では押した所を 0 に直す)。 */
+export interface HeadFrame {
+  readonly ms: number;
+  readonly bytes: Uint8Array;
+  readonly key: boolean;
+}
+
+export interface PreciseHead {
+  readonly frames: readonly HeadFrame[];
+  readonly tailFromMs: number | null;
+}
+
+/** トラック番号の可変長整数(1 バイトか 2 バイト)。 */
+function trackVint(n: number): Uint8Array {
+  if (n < 0x7f) return Uint8Array.of(0x80 | n);
+  return Uint8Array.of(0x40 | (n >> 8), n & 0xff);
+}
+
+interface HeadItem {
+  readonly ms: number;
+  readonly order: number;
+  readonly make: (rel: number) => Promise<Uint8Array> | Uint8Array;
 }
 
 /**
@@ -603,40 +755,93 @@ function timecodeElement(ms: number): Uint8Array {
  *   残りは**元のバイトの範囲**
  * - 頭と尻の `Cluster`(範囲をまたぐ物)= ブロック単位で拾い直し、相対時刻を書き換える
  *   (この 2 つだけは bytes をメモリに載せる。約 1 秒ぶん)
+ * - 🔑 `head` を渡すと**押した所ぴったり**(段②b-2):頭のフレーム(`SimpleBlock`)と、その間の音を新しい `Cluster`
+ *   に詰め、`head.tailFromMs` から先は元のバイトで繋ぐ。渡さないと手前のキーフレームから(段②b-1)
  */
 export async function planVideoTrim(
   src: ByteSource,
   scan: VideoScan,
   startMs: number,
   endMs: number,
+  head?: PreciseHead,
 ): Promise<PlanResult> {
   if (!Number.isFinite(endMs) || !(endMs > startMs)) return { ok: false, reason: 'empty-range' };
   const snap = snapVideoStart(scan, startMs);
   if (!snap.ok) return snap;
-  const t0 = snap.snappedStartMs;
+  const precise = head !== undefined;
+  const t0 = precise ? Math.max(0, Math.round(startMs)) : snap.snappedStartMs;
+  // 元のバイトを繋ぎ始める時刻(映像も音も)。⚠ 頭が終わりまで届くなら繋ぐ所は無い(無限大)
+  const tailFrom = precise ? (head.tailFromMs ?? Infinity) : t0;
 
   const byCluster: VideoBlock[][] = scan.clusters.map(() => []);
   for (const b of scan.blocks) byCluster[b.cluster]!.push(b);
 
-  const inRange = (b: VideoBlock): boolean => b.ms >= t0 && b.ms < endMs;
+  const inTail = (b: VideoBlock): boolean => b.ms >= tailFrom && b.ms < endMs;
   const clusterParts: OutputPart[] = [];
   let keptVideo = 0;
   let keptAudio = 0;
   let copied = 0;
   let rebuilt = 0;
+  let lastTc = 0;
+
+  if (precise) {
+    const items: HeadItem[] = [];
+    const vt = trackVint(scan.videoTrack);
+    for (const f of head.frames) {
+      keptVideo += 1;
+      const outMs = Math.max(0, f.ms - t0);
+      items.push({
+        ms: outMs,
+        order: 0,
+        make: (rel) => {
+          const body = concatBytes([vt, Uint8Array.of((rel >> 8) & 0xff, rel & 0xff, f.key ? 0x80 : 0x00), f.bytes]);
+          return element(ID_SIMPLE_BLOCK, body);
+        },
+      });
+    }
+    for (const b of scan.blocks) {
+      if (b.track === scan.videoTrack) continue;
+      if (!(b.ms >= t0 && b.ms < endMs && b.ms < tailFrom)) continue;
+      keptAudio += 1;
+      items.push({
+        ms: b.ms - t0,
+        order: 1,
+        make: async (rel) => {
+          const copy = new Uint8Array(await src.read(b.elStart, b.elEnd));
+          new DataView(copy.buffer, copy.byteOffset, copy.byteLength).setInt16(b.relPos - b.elStart, rel, false);
+          return copy;
+        },
+      });
+    }
+    items.sort((a, b) => a.ms - b.ms || a.order - b.order);
+    let i = 0;
+    while (i < items.length) {
+      const tc = items[i]!.ms;
+      const pieces: Uint8Array[] = [CLUSTER_HEAD, timecodeElement(tc)];
+      while (i < items.length && items[i]!.ms - tc < HEAD_CLUSTER_MS) {
+        const rel = items[i]!.ms - tc;
+        pieces.push(await items[i]!.make(rel));
+        i += 1;
+      }
+      rebuilt += 1;
+      lastTc = tc;
+      clusterParts.push({ kind: 'bytes', bytes: concatBytes(pieces) });
+    }
+  }
 
   for (let ci = 0; ci < scan.clusters.length; ci += 1) {
     const c = scan.clusters[ci]!;
     const all = byCluster[ci]!;
-    const kept = all.filter(inRange);
+    const kept = all.filter(inTail);
     if (kept.length === 0) continue;
     for (const b of kept) {
       if (b.track === scan.videoTrack) keptVideo += 1;
       else keptAudio += 1;
     }
-    const whole = c.tcMs >= t0 && kept.length === all.length;
+    const whole = c.tcMs >= tailFrom && kept.length === all.length;
     if (whole) {
       copied += 1;
+      lastTc = Math.max(lastTc, c.tcMs - t0);
       clusterParts.push({ kind: 'bytes', bytes: CLUSTER_HEAD });
       if (c.tcStart > c.bodyStart) clusterParts.push({ kind: 'slice', start: c.bodyStart, end: c.tcStart });
       clusterParts.push({ kind: 'bytes', bytes: timecodeElement(c.tcMs - t0) });
@@ -644,7 +849,9 @@ export async function planVideoTrim(
       continue;
     }
     rebuilt += 1;
-    const newTc = Math.max(0, c.tcMs - t0);
+    // 🔑 Cluster の時刻は戻らない(頭の Cluster より前の時刻を付けない)
+    const newTc = Math.max(0, c.tcMs - t0, lastTc);
+    lastTc = newTc;
     const pieces: Uint8Array[] = [CLUSTER_HEAD, timecodeElement(newTc)];
     for (const b of kept) {
       const copy = new Uint8Array(await src.read(b.elStart, b.elEnd));
@@ -703,12 +910,14 @@ export async function planVideoTrim(
       parts,
       byteLength: header.length + segmentHead.length + bodyLen,
       snappedStartMs: t0,
-      snapBackMs: snap.snapBackMs,
+      snapBackMs: precise ? 0 : snap.snapBackMs,
       durationMs,
       keptVideo,
       keptAudio,
       copiedClusters: copied,
       rebuiltClusters: rebuilt,
+      precise,
+      headFrames: precise ? head.frames.length : 0,
     },
   };
 }
