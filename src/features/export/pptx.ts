@@ -78,7 +78,7 @@ const inch = (v: number): number => Math.round(v * EMU_PER_INCH);
  * 🔴 **枠の表**(設計 doc §5)。docx は本文の流れに置くが、スライドは**箱の位置**が要る。
  * ⚠ **1 か所にまとめる** ── PKC2 は呼び出し地点ごとに数値を直書きしていた。
  */
-const FRAME = {
+export const FRAME = {
   /** 扉スライドの題名 / 副題。 */
   coverTitle: { x: inch(0.9), y: inch(2.4), w: inch(11.5), h: inch(1.6) },
   coverSubtitle: { x: inch(0.9), y: inch(4.1), w: inch(11.5), h: inch(0.9) },
@@ -97,7 +97,7 @@ const FRAME = {
 const SZ = { coverTitle: 4400, coverSubtitle: 2400, title: 3200, body: 1800, cell: 1400 } as const;
 
 /** px → EMU。⚠ 96dpi の px なら 9525 倍(docx と同じ換算)。 */
-const EMU_PER_PX = 9525;
+export const EMU_PER_PX = 9525;
 
 /** 箇条書きの深さの上限。⚠ 超えた分は最深に丸める(行ごと落とさない)。 */
 export const PPTX_LIST_DEPTH_MAX = 8;
@@ -194,7 +194,7 @@ function rgbOf(color: string | null | undefined): string | null {
  * **少しずれた所へ刺さる** ── 線は引けているので**見た目では気づけない**。
  * 🔑 `Record<PlaceShape, …>` で受ける ── 形を足して書き忘れたら tsc が落とす。
  */
-const CXN_IDX: Record<PlaceShape, Record<PlaceEdge, number>> = {
+export const CXN_IDX: Record<PlaceShape, Record<PlaceEdge, number>> = {
   rect: { top: 0, left: 1, bottom: 2, right: 3 },
   round: { top: 0, left: 1, bottom: 2, right: 3 },
   ellipse: { top: 0, left: 2, bottom: 4, right: 6 },
@@ -215,13 +215,13 @@ const CXN_IDX: Record<PlaceShape, Record<PlaceEdge, number>> = {
  *   **3 つとも `draw:start-shape` / `draw:end-shape` 付き**(= 繋がったまま)で、
  *   描かれた形が **`L` 1 本 / `L` 3 本 / `C`** と分かれることを見てから書いた。
  */
-const CXN_PRST: Record<PlaceRoute, string> = {
+export const CXN_PRST: Record<PlaceRoute, string> = {
   straight: 'straightConnector1',
   elbow: 'bentConnector3',
   curve: 'curvedConnector3',
 };
 
-const PRST_OF: Record<PlaceShape, string> = {
+export const PRST_OF: Record<PlaceShape, string> = {
   rect: 'rect',
   round: 'roundRect',
   ellipse: 'ellipse',

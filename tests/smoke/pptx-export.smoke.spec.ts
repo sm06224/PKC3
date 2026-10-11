@@ -132,6 +132,27 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
   ).toBe(true);
   // 🔴 読む画面に 1 文字も出ない字が、配る物にだけ現れていないこと(段③a の実害)
   expect(text, '画面に出ない字が書き出しに漏れている').not.toContain('線の中の見えない字');
+  /**
+   * 🔴 **書き出した .pptx を、そのまま取り込み直すと板が出る**(#530 C)。
+   * 🔑 **新しい起動は増やさない** ── 書き出しの筋書きの末尾へ伸ばす(落ちてきた file をそのまま渡す)。
+   * ⚠ 3 枚のスライドが 3 件のノートになり、いちばん最後(板のスライド)が開く。
+   *   観測点は**画面に出た付箋と線**(本文の字ではない)── 取り込んだ本文が
+   *   描画に受け入れられて初めて、付箋が 2 枚・線が 1 本出る。
+   *   名前は付け直される(`今日` / `明日` は PowerPoint に入らないので `板1` / `板2`)。
+   */
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: '書き出した板.pptx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    buffer: readFileSync(path!),
+  });
+  const boardCards = page.locator('[data-pkc-region="detail"] [id^="板"]');
+  await expect(boardCards, '取り込んだ板の付箋が 2 枚出ていない').toHaveCount(2, { timeout: 15_000 });
+  await expect(
+    page.locator('[data-pkc-field="place-lines"] path'),
+    '取り込んだ板の線が引かれていない（つなぎ先が戻っていない）',
+  ).toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('今日');
+  await expect(page.locator('[data-pkc-region="detail"]')).toContainText('明日');
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
