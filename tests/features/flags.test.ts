@@ -336,6 +336,8 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
       //   (key の取り出しは `permalink.ts` の `dropViewFindFromHash` であってここではない)
       '`${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,',
       // ⚠ 予定の見せ方の合図(`sched` / `day`。#855 段 A-2)だけを落とす口 ── 同じ作法で `search` は残す
+      // ⚠ ノートの中の場所(`fragment`。#1559)を開いた後に落とす口 ── 同じ作法で `search` は残す
+      '`${location.pathname}${location.search}${dropViewFragmentFromHash(location.hash)}`,',
       // ⚠ 添付を名指したリンク(`asset`。2026-10-11)を開いた後に落とす口 ── 同じ作法で `search` は残す
       '`${location.pathname}${location.search}${dropAssetFromHash(location.hash)}`,',
       '`${location.pathname}${location.search}${dropViewScheduleFromHash(location.hash)}`,',

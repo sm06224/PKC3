@@ -1257,7 +1257,7 @@ test('🔴 章の箱は段落と同じ左右端 / 取っ手は箱の中に残ら
  * ⚠ unit では原理的に届かない 2 つ:① 本物の clipboard を往復して**貼った字が記法として
  *   成立する**か ② `scrollIntoView` で見出しが**本当に版面の中に来る**か(happy-dom は採寸しない)。
  */
-test('🔴 見出しを右クリックして「章の参照をコピー」、貼って押すと見出しまで送られる (#579)', async ({
+test('🔴 見出しを右クリックして「章の参照をコピー」、貼って押すと見出しまで送られる (#579)。「章のリンクをコピー」は外から開いて光る (#1559)', async ({
   page,
   context,
 }) => {
@@ -1298,6 +1298,69 @@ test('🔴 見出しを右クリックして「章の参照をコピー」、貼
   await expect(page.locator('[data-pkc-region="status"]'), '見つからないと言われた').not.toContainText(
     '見出しが見つかりません',
   );
+
+  /**
+   * 🔴 **同じ見出しの「章のリンクをコピー」→ 別のノートを見ている所へ貼ったアドレスを開くと、見出しまで送って光らせる**(#1559)。
+   * ⚠ ログの行(日時の見出し)も同じ見出しの仕組みなので、道は同じ。unit では原理的に届かない 3 つ:
+   *   ①本物のアドレス(`location.hash`)の往復 ②送った先が版面に**来る** ③光る印に**見た目の規則が在る**(計算後の色)。
+   * 🔑 新しく起動しない(この test の続き)── アドレスの断片を書き換えて `hashchange` で開く。
+   */
+  await page.locator('[data-pkc-field="detail-body"]').evaluate((el) => (el.closest('[data-pkc-region="detail"]') as HTMLElement).scrollTo(0, 0));
+  const second = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await second.scrollIntoViewIfNeeded();
+  await second.click({ button: 'right' });
+  await page.locator(MENU).locator('button[data-pkc-action="copy-section-link"]').click();
+  await expect(page.locator('[data-pkc-region="status"]'), '写した合図が出ない').toContainText(
+    '章のリンクをコピーしました',
+  );
+  const url = await page.evaluate(() => navigator.clipboard.readText());
+  expect(url.split('#')[0], 'リンクに ? が付いている(送り主の切替を運ぶ)').not.toContain('?');
+  expect(url, '見出しを指していない').toContain('fragment=h%2F');
+  const linkHash = url.slice(url.indexOf('#'));
+  // 別のノートを見ている所から開く
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('別');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 🔑 保存が済んで編集が閉じてから開く(編集中は別のノートへ移れない ── 移れない理由は unit で見ている)
+  await expect(page.locator('[data-pkc-field="editor-title"]'), '編集が閉じない').toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' })).toHaveCount(0);
+  await page.evaluate((h) => {
+    const w = window as unknown as { __flashBg: string | null };
+    w.__flashBg = null;
+    new MutationObserver(() => {
+      const el = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"] h2[data-pkc-flash]');
+      if (el !== null && w.__flashBg === null) w.__flashBg = getComputedStyle(el).backgroundColor;
+    }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['data-pkc-flash'] });
+    location.hash = h;
+  }, linkHash);
+  const opened = page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 2 章' });
+  await expect(opened, 'リンクを開いても相手のノートが開かない').toBeVisible();
+  await page.waitForFunction(() => (window as unknown as { __flashBg: string | null }).__flashBg !== null);
+  const flashBg = await page.evaluate(() => (window as unknown as { __flashBg: string }).__flashBg);
+  await expect(opened, '光る印が外れない').not.toHaveAttribute('data-pkc-flash', 'true');
+  const plainBg = await opened.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(flashBg, '光る印に見た目の規則が無い(光らせたのに色が変わらない)').not.toBe(plainBg);
+  const landed = await opened.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const host = el.closest('[data-pkc-region="detail"]')!.getBoundingClientRect();
+    return r.top >= host.top - 1 && r.top < host.bottom;
+  });
+  expect(landed, '見出しまで送られていない(版面の外に居る)').toBe(true);
+  expect(await page.evaluate(() => location.hash), '開いた後も場所の指定が残っている').not.toContain('fragment=');
+
+  // 行が無い(見出しの字を直した・消した)リンクは、ノートを開いたうえで理由を出す
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('別 2');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 🔑 保存が済んで編集が閉じてから開く(編集中は別のノートへ移れない ── 移れない理由は unit で見ている)
+  await expect(page.locator('[data-pkc-field="editor-title"]'), '編集が閉じない').toHaveCount(0);
+  await page.evaluate((h) => {
+    location.hash = h.replace('fragment=h%2F%E7%AC%AC-2-%E7%AB%A0', 'fragment=h%2F%E6%B6%88%E3%81%88%E3%81%9F');
+  }, linkHash);
+  await expect(page.locator('[data-pkc-region="status"]'), '行が無いのに理由が出ない').toContainText(
+    'リンクの行が見つかりません',
+  );
+  await expect(page.locator('[data-pkc-field="detail-body"] h2', { hasText: '第 1 章' }), 'ノートまで開かなかった').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

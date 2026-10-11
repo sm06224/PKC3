@@ -43,6 +43,7 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { bodyBelowFrontmatter, frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
+import { parseViewDeepLinkEntry, parseViewDeepLinkFragment } from '../../src/features/link/permalink';
 
 const MENU = '[data-pkc-region="context-menu"]';
 
@@ -493,13 +494,15 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
     // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
     // ⚠ 7 つ目「この章を別のウィンドウで開く」は #1044 段4 で足した(見出しの物の最後)
-    expect(acts.slice(0, 7), '見出しの 7 つが出ていない').toEqual([
+    // ⚠ 「章のリンクをコピー」は #1559 で足した(「章の参照をコピー」の隣 ── 本文に貼る物と外へ貼る物)
+    expect(acts.slice(0, 8), '見出しの 8 つが出ていない').toEqual([
       'edit-section',
       'edit-from-heading',
       'append-at-heading',
       'toggle-heading-fold',
       'copy-chapter-md',
       'copy-section-ref',
+      'copy-section-link',
       'open-chapter-window',
     ]);
     /**
@@ -509,7 +512,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
      * 🔴 **条件つきの「取り込む」まで見る**(着地前レビュー 🔴3)── `BODY_MENU_ACTIONS`
      *   だけと突き合わせる変異は、fixture に外部画像が 0 枚だと素通りした。
      */
-    expect(acts.slice(7), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
+    expect(acts.slice(8), '本文のメニューが消えている / 取り込みが見出しの枝だけ落ちた').toEqual([
       'add-place',
       'add-place-template',
       ...BODY_MENU_ACTIONS.map((a) => a.action),
@@ -1342,7 +1345,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
   const NESTED = ':::section\n入れ子の中\n:::';
   const BOARD = ':::format{.pkc-place x=40 y=40 w=320 h=200 entry=n2}\n### 買い出し\n- 牛乳\n:::';
 
-  function rig(body = FULL) {
+  function rig(body = FULL, archetype = 'text') {
     document.body.textContent = '';
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
@@ -1369,7 +1372,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
         {
           lid: 'n1',
           title: '板の在るノート',
-          archetype: 'text',
+          archetype,
           created_at: null,
           updated_at: null,
           entry_order: 1,
@@ -1482,6 +1485,66 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     rightClick(h4);
     expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
     expect(r.acts(), '指す先の無い見出しに章の参照を出した').not.toContain('copy-section-ref');
+  });
+
+  /**
+   * 🔴 **章 / ログの行のリンクをコピー**(#1559)── ブラウザやメールに貼る URL。本文に貼る「参照」と**同じ見出し**を指す。
+   * ⚠ 期待する id は**描画が刻んだ物**から引く(`h.id`)。リンクの `fragment` を読み戻して等値で比べる。
+   */
+  const LOG = '## 2026-10-11 10:00:00\n\nはじめ\n\n## 2026-10-11 11:00:00 ★\n\nつぎ\n\n## 手書きの見出し\n\n段落\n';
+
+  it('🔴 章の右クリックに「章のリンクをコピー」が在り、押すと外へ貼れるリンクが渡る(`?` を運ばず、fragment は参照と同じ見出し)', () => {
+    const r = rig();
+    rightClick(r.q('h2[id="章"]'));
+    const a = r.acts();
+    expect(a, '「章のリンクをコピー」が出ていない').toContain('copy-section-link');
+    expect(r.label('copy-section-link')).toBe('章のリンクをコピー');
+    // 🔑 参照の隣(どちらも見出しを指す物)
+    expect(a.indexOf('copy-section-link')).toBe(a.indexOf('copy-section-ref') + 1);
+    r.press('copy-section-link');
+    expect(r.copied).toHaveLength(1);
+    const url = r.copied[0]!.text;
+    expect(url.split('#')[0], 'URL のクエリを運んでいる(送り主のフラグが受け手に移る)').not.toContain('?');
+    expect(parseViewDeepLinkEntry(url.slice(url.indexOf('#')))).toEqual({ containerId: 'c1', lid: 'n1' });
+    expect(parseViewDeepLinkFragment(url.slice(url.indexOf('#')))).toEqual({ kind: 'section', slug: '章' });
+    expect(r.copied[0]!.done).toBe('章のリンクをコピーしました(ブラウザやメールに貼れます)');
+  });
+
+  it('🔴 ログの行(日時の見出し)では「この行の…」と言い、リンクと参照が同じ見出しを指す', () => {
+    const r = rig(LOG, 'textlog');
+    const rows = [...r.host.querySelectorAll('h2')];
+    expect(rows.map((h) => h.id), '前提が崩れている: 見出しの id が 3 つ引けていない').toHaveLength(3);
+    const second = rows[1]!;
+    rightClick(second);
+    expect(r.label('copy-section-link')).toBe('この行のリンクをコピー');
+    expect(r.label('copy-section-ref')).toBe('この行の参照をコピー');
+    r.press('copy-section-link');
+    const url = r.copied[0]!.text;
+    const place = parseViewDeepLinkFragment(url.slice(url.indexOf('#')));
+    expect(place, '行のリンクの fragment が読み戻せない').toEqual({ kind: 'section', slug: second.id });
+    expect(r.copied[0]!.done).toBe('行のリンクをコピーしました(ブラウザやメールに貼れます)');
+    // 同じ行の「参照」も同じ id(本文に貼る物とリンクが食い違わない)
+    rightClick(second);
+    r.press('copy-section-ref');
+    expect(r.copied[1]!.text).toContain(`(entry:n1#h/${second.id})`);
+    expect(r.copied[1]!.text).toContain('2026-10-11 11:00:00');
+  });
+
+  it('⚠ 対照群 ── ログの中でも、日時でない見出しは「章」のまま / ログでないノートの日時の見出しも「章」', () => {
+    const r = rig(LOG, 'textlog');
+    rightClick(r.q('h2[id="手書きの見出し"]'));
+    expect(r.label('copy-section-link')).toBe('章のリンクをコピー');
+    expect(r.label('copy-section-ref')).toBe('章の参照をコピー');
+    const t = rig(LOG, 'text');
+    rightClick(t.host.querySelectorAll('h2')[0]!);
+    expect(t.label('copy-section-link'), 'ログでないノートを「行」と呼んだ').toBe('章のリンクをコピー');
+  });
+
+  it('⚠ 対照群 ── id の無い見出し(####)では「章のリンクをコピー」を出さない', () => {
+    const r = rig('## 章\n\n#### 深い\n\n段落\n');
+    rightClick(r.q('h4'));
+    expect(r.acts(), '本文のメニューが出ていない(台の空振り)').toContain('edit-from-heading');
+    expect(r.acts(), '指す先の無い見出しにリンクを出した').not.toContain('copy-section-link');
   });
 
   it('末尾の章は本文の末尾まで(板の中の `###` は章を閉じない)', () => {

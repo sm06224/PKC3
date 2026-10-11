@@ -240,7 +240,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'container-rebuild',
   'container-reset',
   'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-ref', 'copy-selection-md', 'create-date-note', 'db-check',
+  'copy-section-link', 'copy-section-ref', 'copy-selection-md', 'create-date-note', 'db-check',
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
@@ -779,12 +779,15 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-11(#529 W2 / W4): 「テンプレートから板を置く…」(`add-place-template`)と枠の「位置と大きさ…」(`place-rect`)で
       //   受け手 +2 ── 登記は増えない(押し口は本文 / 枠の右クリックの中にしか無く、押した座標や行をメニューが運ぶので名前だけでは呼べない。
       //   `add-place` / `raise-place` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
-      total: 407,
-      receivers: 341,
+      // ⚠ 2026-10-11(#1559): 見出し(ログの行を含む)の右クリックの「章のリンクをコピー」(`copy-section-link`)で受け手 +1 ──
+      //   登記は増えない(`copy-section-ref` と同じ置き場。行番号をメニューが運ぶので名前だけでは呼べない)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 408,
+      receivers: 342,
       registered: 113,
       both: 47,
       outsideActionsTable: 66,
-      unregistered: 294,
+      unregistered: 295,
     });
   });
 
