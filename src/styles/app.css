@@ -5343,6 +5343,72 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding: var(--s2);
   background: var(--surface);
 }
+/* 🔴 波形の帯(#1232)── 細い 1 本。高さは最初から取る(作っている間は字、焼けたら絵)。
+ * 色は地を汚さない(無彩色の線 + 範囲だけ強調色)。画像は焼いた PNG 1 枚(幅いっぱいに伸ばす)。 */
+[data-pkc-region='capture-wave'] {
+  position: relative;
+  height: 40px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  /* 横のドラッグは範囲選び、縦は一覧のスクロールに譲る(縦に動き出したらドラッグをやめる ── wave-drag.ts) */
+  touch-action: pan-y;
+  user-select: none;
+  cursor: crosshair;
+  overflow: hidden;
+}
+[data-pkc-field='capture-wave-status'] {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s2);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+[data-pkc-field='capture-wave-status'][hidden] {
+  display: none;
+}
+[data-pkc-field='capture-wave-img'] {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+[data-pkc-field='capture-wave-range'] {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  background: var(--accent-dim);
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  pointer-events: none;
+}
+[data-pkc-field='capture-wave-range'][hidden],
+[data-pkc-field='capture-wave-label'][hidden] {
+  display: none;
+}
+[data-pkc-field='capture-wave-label'] {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  padding: 0 4px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 11px;
+  pointer-events: none;
+}
+[data-pkc-field='capture-wave-tick'] {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--fg);
+  pointer-events: none;
+}
 /* ⚠ 名前は**行いっぱいの押せる場所**にする(`contact-name` と同じ理由 ──
  * 200px の列で字だけを的にすると狙いにくい)。 */
 [data-pkc-field='capture-name'] {

@@ -13,6 +13,7 @@
  * 切り替える(その時に計測してから)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
 import { lidOfNode } from './lid-of-node';
 import { isEditableColor } from '@features/markdown/color-code';
@@ -16615,6 +16616,8 @@ export function bindActions(
   listen(root, 'focusout', onRenameBlur);
   listen(doc, 'keydown', onShortcut);
   listen(root, 'keydown', onKeydown);
+  // 🔴 波形の上のドラッグ(#1232)── 印は既存の `SET_CAPTURE_TRIM_MARK` に入る
+  undo.push(bindWaveDrag(root, dispatcher));
   const teardownLinkPreview = setupLinkPreview(root, dispatcher, services);
   const teardownLightbox = setupLightbox(root);
   return () => {
