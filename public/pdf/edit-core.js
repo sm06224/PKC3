@@ -179,6 +179,8 @@
       return { idx: idx, rest: dest.asArray().slice(1) };
     }
     var dropped = 0;
+    // ⚠ 1 つの注釈が複数ページの Annots に入っている形は、先に処理したページを指し直す(仕様上は 1 注釈 1 ページ)
+    var owners = []; // 🔴 `/P`(注釈が属するページ)を外した注釈: { page(元の index), at(注釈の位置), popup(/Popup の側か) }
     var later = []; // 付け直す物: { page(元の index), at(注釈の位置), where: 'Dest' | 'A', to(行き先の元の index), rest }
     keptIdx.forEach(function (i) {
       var node = pages[i].node;
@@ -210,6 +212,20 @@
           dropped += 1;
           continue;
         }
+        // 🔴 `/P` は、ほかのアプリが注釈(ハイライトなど)を付けるときの標準の形。`copyPages` は `/P` を辿って
+        //    元のページをもう 1 枚写す(孤立したページ = 門に断られる / 外すページなら中身も残る)。
+        //    外して写し、写した後に**出力の自分のページ**を指し直す(`/P` の行き先は、属するページ以外にならない)
+        if (dict instanceof D) {
+          if (dict.has(N.of('P'))) {
+            dict.delete(N.of('P'));
+            owners.push({ page: i, at: keep.length, popup: false });
+          }
+          var pop = dict.lookup(N.of('Popup'));
+          if (pop instanceof D && pop.has(N.of('P'))) {
+            pop.delete(N.of('P'));
+            owners.push({ page: i, at: keep.length, popup: true });
+          }
+        }
         found.forEach(function (f) {
           // 参照を外す(写すときに辿らせない)。付け直しは写した後
           f.holder.delete(N.of(f.where === 'Dest' ? 'Dest' : 'D'));
@@ -226,6 +242,13 @@
       dropped: dropped,
       /** 写した後: 残すページへのリンクの行き先を、出力のページへ付ける。 */
       restore: function (out, outPages) {
+        owners.forEach(function (q) {
+          var annots = outPages[pos[q.page]].node.lookup(N.of('Annots'));
+          if (!(annots instanceof A)) return;
+          var dict = annots.lookup(q.at);
+          if (q.popup && dict instanceof D) dict = dict.lookup(N.of('Popup'));
+          if (dict instanceof D) dict.set(N.of('P'), outPages[pos[q.page]].ref);
+        });
         later.forEach(function (q) {
           var annots = outPages[pos[q.page]].node.lookup(N.of('Annots'));
           if (!(annots instanceof A)) return;
