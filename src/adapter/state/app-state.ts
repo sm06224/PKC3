@@ -2607,6 +2607,15 @@ export type UserAction =
    */
   | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
   /**
+   * 🔴 **グループの全員を一度に動かす**(#530 段⑤b)── 1 回の書込。1 枚でも門が外れたら 1 枚も書かない。
+   * 掴んだ時点の開き行は reducer が捕える(`MOVE_PLACE` と同じ)。
+   */
+  | { type: 'MOVE_PLACES'; lid: string; moves: ReadonlyArray<{ line: number; x: number; y: number }> }
+  /** 🔴 付箋をグループにする(#530 段⑤b)── `lines` は付箋の開き行(生の body の行番号)。2 枚以上。同じ門。 */
+  | { type: 'GROUP_PLACES'; lid: string; lines: readonly number[] }
+  /** 🔴 グループを解く(#530 段⑤b)── 渡した付箋のグループの全員の `group=` を消す。同じ門。 */
+  | { type: 'UNGROUP_PLACE'; lid: string; line: number }
+  /**
    * 🔴 **板を画面から作る・大きさを変える・消す**(#676。user 裁定 2026-09-04)。
    * ⚠ 3 つとも `MOVE_PLACE` と**同じ門**(`bodyRewriteGate`)を通る ── phase / 画面に出ている
    *   本文 / 開き行の捕捉を、case ごとに書き直さない(§7)。
@@ -7655,6 +7664,38 @@ function reduceCore(
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
+      });
+    case 'MOVE_PLACES':
+      return bodyRewriteGate(state, action.lid, '、板の付箋を動かしてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        if (action.moves.length === 0) return null;
+        const moves: Array<{ line: number; openLine: string; x: number; y: number }> = [];
+        for (const m of action.moves) {
+          if (!isPlaceCoord(m.x) || !isPlaceCoord(m.y)) return null;
+          const openLine = placeOpenLineOf(shown, m.line);
+          if (openLine === null) return null; // 1 枚でも読めなければ 1 枚も書かない
+          moves.push({ line: m.line, openLine, x: m.x, y: m.y });
+        }
+        return { kind: 'place-move-group', moves };
+      });
+    case 'GROUP_PLACES':
+      return bodyRewriteGate(state, action.lid, '、付箋をグループにしてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        if (action.lines.length < 2) return null;
+        const members: Array<{ line: number; openLine: string }> = [];
+        for (const line of action.lines) {
+          const openLine = placeOpenLineOf(shown, line);
+          if (openLine === null) return null;
+          members.push({ line, openLine });
+        }
+        return { kind: 'place-group', members };
+      });
+    case 'UNGROUP_PLACE':
+      return bodyRewriteGate(state, action.lid, '、グループを解いてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文の行番号は信じない
+        const openLine = placeOpenLineOf(shown, action.line);
+        if (openLine === null) return null;
+        return { kind: 'place-ungroup', line: action.line, openLine };
       });
     /**
      * 🔴 **板を画面から作る・大きさを変える・消す**(#676)── 3 つとも `MOVE_PLACE` と

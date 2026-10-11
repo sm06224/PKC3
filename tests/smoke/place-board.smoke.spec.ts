@@ -512,6 +512,66 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await expect(p2, '標準にしても size= が残っている').not.toHaveAttribute('data-pkc-size', /.+/, { timeout: 5000 });
   expect(await ratio(), '標準へ戻したのに大きさが戻らない').toBeCloseTo(1, 3);
 
+  /**
+   * 🔴 **付箋のグループ**(#530 段⑤b)── 右クリック →「グループにする…」→ 窓でチェック → 1 枚を実マウスで掴むと全員が動く。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に在る道中(`#p1` と `#p2` の間に線が引かれている)に足す。
+   * ⚠ 見るのは**本文から描き直された属性**(`data-pkc-x`)と**線の座標**(見た目だけ動いた形を素通りしない)と、
+   *   窓の行が**1 行ずつ並んでいる**こと(計算後の `display`。受け皿の規則が無いと全部が 1 行に潰れる)。
+   */
+  const dlg = page.locator('[data-pkc-region="app-dialog"][open]');
+  const lineD = async (): Promise<string> => (await line.getAttribute('d')) ?? '';
+  await p1.click({ button: 'right' });
+  await blockMenu.locator('button[data-pkc-action="place-group"]').click();
+  await expect(dlg, '「グループにする…」で窓が開かない').toBeVisible();
+  await expect(dlg.locator('[data-pkc-field="dialog-title"]')).toHaveText('グループにする');
+  const rows = dlg.locator('[data-pkc-field="place-group-row"]');
+  await expect(rows, '板の付箋が 1 枚ずつ並んでいない').toHaveCount(4);
+  expect(await rows.first().evaluate((el) => getComputedStyle(el).display), '行が 1 行ずつになっていない').toBe('flex');
+  const boxes = dlg.locator('[data-pkc-field="place-group-check"]');
+  expect(await boxes.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).checked)), '右クリックした付箋だけに最初から ✓')
+    .toEqual([true, false, false, false]);
+  // 1 枚だけでは決められない ── 閉じずに理由が出る(窓が残っている)
+  await dlg.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(dlg.locator('[data-pkc-field="place-group-error"]'), '1 枚で決められた / 理由が出ない').toBeVisible();
+  await boxes.nth(1).check();
+  await dlg.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(p1, 'グループにしても本文に書き戻されない').toHaveAttribute('data-pkc-group', 'グループ1', { timeout: 5000 });
+  await expect(p2).toHaveAttribute('data-pkc-group', 'グループ1');
+  await expect(page.locator('[data-pkc-region="detail"] [id="今日"]'), '選ばなかった付箋まで入った').not.toHaveAttribute('data-pkc-group', /.+/);
+  // 🔴 グループの 1 枚を実マウスで掴むと全員が動く(入っていない 今日 は動かない)── 離したとき 1 回の書込
+  const x1 = Number(await p1.getAttribute('data-pkc-x'));
+  const x2 = Number(await p2.getAttribute('data-pkc-x'));
+  const kyou = page.locator('[data-pkc-region="detail"] [id="今日"]');
+  const xKyou = await kyou.getAttribute('data-pkc-x');
+  const dBefore = await lineD();
+  // ⚠ p1 を動かした後は p2 が p1 の右端に重なり、p1 の ⠿ を覆う ── 仲間の p2 の ⠿ を掴む(どのメンバーを掴んでも全員が動く)
+  const gb = (await page.locator('#p2 [data-pkc-field="place-grip"]').boundingBox())!;
+  await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gb.x + gb.width / 2 + 50, gb.y + gb.height / 2 + 30, { steps: 5 });
+  // 掴んでいる間は見た目だけ全員が動く(掴んでいない p1 が手に付いてくる ── まだ本文は書き換わっていない)
+  await expect.poll(async () => p1.evaluate((el) => (el as HTMLElement).style.left), { message: '掴んでいる間に仲間が動かない' }).toBe(`${x1 + 50}px`);
+  await expect(p1, '掴んでいる間に本文を書いた').toHaveAttribute('data-pkc-x', String(x1));
+  await page.mouse.up();
+  await expect(p1, 'グループの 1 枚を動かしても本文に書き戻されない').toHaveAttribute('data-pkc-x', String(x1 + 50), { timeout: 5000 });
+  await expect(p2, '仲間が一緒に動いていない(本文に書かれていない)').toHaveAttribute('data-pkc-x', String(x2 + 50), { timeout: 5000 });
+  await expect(kyou, 'グループに入っていない付箋まで動いた').toHaveAttribute('data-pkc-x', xKyou!);
+  await expect.poll(lineD, { message: '全員が動いたのに線が追従していない', timeout: 5000 }).not.toBe(dBefore);
+  // 🔴 Esc で何も変えずに閉じる(キーボードだけで抜けられる)
+  await kyou.click({ button: 'right' });
+  await blockMenu.locator('button[data-pkc-action="place-group"]').click();
+  await expect(dlg).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dlg, 'Esc で窓が閉じない').toHaveCount(0);
+  await expect(kyou, 'Esc で閉じたのにグループになった').not.toHaveAttribute('data-pkc-group', /.+/);
+  // 🔴 解く(置けるなら外せる)── 全員の札が消え、位置はそのまま
+  await p1.click({ button: 'right' });
+  await expect(blockMenu.locator('button[data-pkc-action="place-group"]'), '入っている付箋に「グループにする…」が出ている').toHaveCount(0);
+  await blockMenu.locator('button[data-pkc-action="place-ungroup"]').click();
+  await expect(p1, '解いても札が残っている').not.toHaveAttribute('data-pkc-group', /.+/, { timeout: 5000 });
+  await expect(p2, '仲間の札が残っている').not.toHaveAttribute('data-pkc-group', /.+/);
+  await expect(p2, '解いたら位置が動いた').toHaveAttribute('data-pkc-x', String(x2 + 50));
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

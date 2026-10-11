@@ -17,6 +17,13 @@
  * `DRAG_SLOP` を越えるまでは「押した」扱い。動かした後の `click` は 1 回捨てる
  * (捨てないと、離した指の `click` が塊の中の押し物に落ちる)。
  *
+ * ## 🔴 グループは全員が一緒に動く(#530 段⑤b。Gemini 裁定 2026-10-11 依頼 19 Q3)
+ *
+ * 付箋の `group=`(描画が `data-pkc-group` に焼く)が同じ付箋を**どれか 1 枚の ⠿ で掴むと全員**が同じだけ動く。
+ * 書くのは離したとき**1 回**(`MOVE_PLACES` ── 途中で一部だけ動いた状態にならない)。取りやめ・断られたときは全員を戻す。
+ * ⚠ 動く向きの下限(左上が 0 を下回らない)は**全員で同じだけ**手前で止める(`clampGroupDelta`。形を崩さない)。
+ * ⚠ グループが動かすのは**位置だけ**(大きさの角を掴んだときは掴んだ 1 枚だけ)。
+ *
  * ## 矢印キーでも動く(#676 段②。「マウスだけで完結し、キーボードは近道」の逆側)
  *
  * ⠿ に焦点を当てて ← → ↑ ↓(Shift で 10px)。⚠ 1 押し = 1 書込にしない ── 書くと再描画で
@@ -26,6 +33,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
+import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
 import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
 
 /** 押すと掴むの境目(px)。 */
@@ -50,11 +58,20 @@ export const NUDGE_SETTLE_MS = 300;
 /** 矢印キーで動かしている最中の見た目(本文はまだ書いていない)。 */
 interface Nudge {
   readonly block: HTMLElement;
+  /** 🔴 同じグループの仲間(#530 段⑤b)。⚠ 無ければ空。 */
+  readonly others: readonly Member[];
   readonly startX: number;
   readonly startY: number;
   x: number;
   y: number;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** 🔴 グループで一緒に動く仲間 1 枚(掴んだ時点の位置つき)。 */
+interface Member {
+  block: HTMLElement;
+  readonly startX: number;
+  readonly startY: number;
 }
 
 interface Drag {
@@ -81,7 +98,34 @@ interface Drag {
   readonly startH: number;
   readonly attrW: boolean;
   readonly attrH: boolean;
+  /** 🔴 同じグループの仲間(#530 段⑤b)。位置を掴んだときだけ入る ── 無ければ空(今までと同じ)。 */
+  readonly others: Member[];
   moved: boolean;
+}
+
+/**
+ * 🔴 **同じグループの仲間**(#530 段⑤b)── 掴んだ塊と同じ `data-pkc-group` を持つ、同じ器の中の板の塊。
+ * 🔑 名前の読みは `parsePlaceGroup` の 1 本(書き込み側と同じ)。⚠ 属性値を CSS セレクタへ入れない
+ *   (名前に何が入っていてもエスケープ事故を起こさない)── 全部の塊を舐めて文字列で比べる。
+ * @param pending 離した直後(まだ描き直されていない)の掴み直しなら `true` ── 仲間の起点は属性(古い本文の値)ではなく
+ *   見えている位置(`style`)にする(主の塊を `pendingTo` から採るのと同じ向き)。
+ */
+function groupMates(block: HTMLElement, pending: boolean): Member[] {
+  const name = parsePlaceGroup(block.getAttribute('data-pkc-group'));
+  const host = block.parentElement;
+  if (name === null || host === null) return [];
+  const out: Member[] = [];
+  for (const el of host.querySelectorAll<HTMLElement>('.pkc-format-block.pkc-place')) {
+    if (el === block || parsePlaceGroup(el.getAttribute('data-pkc-group')) !== name) continue;
+    const seen = (v: string, attr: string): number =>
+      (pending ? Number.parseFloat(v) : Number.NaN) || Number(el.getAttribute(attr)) || 0;
+    out.push({
+      block: el,
+      startX: seen(el.style.left, 'data-pkc-x'),
+      startY: seen(el.style.top, 'data-pkc-y'),
+    });
+  }
+  return out;
 }
 
 /**
@@ -161,6 +205,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       startH: hAttr === null ? block.offsetHeight : Number(hAttr) || 0,
       attrW: wAttr !== null,
       attrH: hAttr !== null,
+      others:
+        grip.getAttribute('data-pkc-field') === 'place-size'
+          ? []
+          : groupMates(block, to !== null),
       moved: false,
     };
     try {
@@ -179,23 +227,34 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
    *   (描き直しの理由が別の塊の変更なら、この板の開き行は変わらない)。見つからなければ移さない。
    * 起点(掴んだ時点の位置・大きさ)は掴んだときの値のまま ── 動かした量は手の動きで決まる。
    */
-  const follow = (d: Drag): void => {
-    if (d.block.isConnected || d.host === null || !d.host.isConnected) return;
-    const id = d.block.id;
-    const line = d.block.getAttribute('data-pkc-source-line');
-    const blocks = d.host.querySelectorAll<HTMLElement>('.pkc-format-block.pkc-place');
+  const refind = (host: HTMLElement, old: HTMLElement): HTMLElement | null => {
+    const id = old.id;
+    const line = old.getAttribute('data-pkc-source-line');
+    const blocks = host.querySelectorAll<HTMLElement>('.pkc-format-block.pkc-place');
     for (const el of blocks) {
       const same =
         id !== '' ? el.id === id : line !== null && el.getAttribute('data-pkc-source-line') === line;
       if (!same) continue;
       // 見えている大きさ・位置を新しい要素へ写す(次の pointermove を待たずに、手の下へ戻す)
       for (const prop of ['left', 'top', 'width', 'height'] as const) {
-        const v = d.block.style.getPropertyValue(prop);
+        const v = old.style.getPropertyValue(prop);
         if (v !== '') el.style.setProperty(prop, v);
       }
-      d.block = el;
-      return;
+      return el;
     }
+    return null;
+  };
+  const follow = (d: Drag): void => {
+    if (d.host === null || !d.host.isConnected) return;
+    // 🔴 仲間も同じ(#530 段⑤b)── 掴んだ塊が無事でも、仲間だけ作り直されていることがある
+    for (const m of d.others) {
+      if (m.block.isConnected) continue;
+      const el = refind(d.host, m.block);
+      if (el !== null) m.block = el;
+    }
+    if (d.block.isConnected) return;
+    const el = refind(d.host, d.block);
+    if (el !== null) d.block = el;
   };
 
   const onPointerMove = (e: PointerEvent): void => {
@@ -210,8 +269,14 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       drag.block.style.height = `${Math.max(MIN_H, drag.startH + dy)}px`;
       return;
     }
-    drag.block.style.left = `${Math.max(0, drag.startX + dx)}px`;
-    drag.block.style.top = `${Math.max(0, drag.startY + dy)}px`;
+    // 🔑 グループは全員で同じだけ動く(形を崩さない)。1 枚だけなら今までと同じ `max(0, start + d)`
+    const c = clampGroupDelta([drag, ...drag.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy);
+    drag.block.style.left = `${drag.startX + c.dx}px`;
+    drag.block.style.top = `${drag.startY + c.dy}px`;
+    for (const m of drag.others) {
+      m.block.style.left = `${m.startX + c.dx}px`;
+      m.block.style.top = `${m.startY + c.dy}px`;
+    }
   };
 
   const restore = (d: Drag): void => {
@@ -224,6 +289,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     }
     d.block.style.left = `${d.startX}px`;
     d.block.style.top = `${d.startY}px`;
+    for (const m of d.others) {
+      m.block.style.left = `${m.startX}px`;
+      m.block.style.top = `${m.startY}px`;
+    }
   };
 
   /**
@@ -235,6 +304,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     d: Drag,
     action:
       | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
+      | { type: 'MOVE_PLACES'; lid: string; moves: ReadonlyArray<{ line: number; x: number; y: number }> }
       | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number },
   ): void => {
     if (pendingCleanup !== null) {
@@ -244,7 +314,11 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const block = d.block;
     pendingBlock = block;
     pendingTo =
-      action.type === 'MOVE_PLACE' ? { x: action.x, y: action.y } : { w: action.w, h: action.h };
+      action.type === 'MOVE_PLACE'
+        ? { x: action.x, y: action.y }
+        : action.type === 'MOVE_PLACES'
+          ? { x: action.moves[0]!.x, y: action.moves[0]!.y } // 先頭は掴んだ塊
+          : { w: action.w, h: action.h };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubs: (() => void)[] = [];
 
@@ -350,8 +424,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       registerPendingDrop(d, { type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
       return;
     }
-    const x = Math.max(0, Math.round(d.startX + dx));
-    const y = Math.max(0, Math.round(d.startY + dy));
+    // 🔑 グループは全員で同じだけ(`onPointerMove` と同じ `clampGroupDelta` ── 見た目と書く値を食い違わせない)
+    const c = clampGroupDelta([d, ...d.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy);
+    const x = Math.max(0, Math.round(d.startX + c.dx));
+    const y = Math.max(0, Math.round(d.startY + c.dy));
     // 🔑 取りやめ(元の位置へ戻して離す)は**何も書かず、何も言わない** ──
     //   dispatch すると「値が変わらない」が下流で競合の顔をする(UX レビュー所見 2)
     if (x === d.startX && y === d.startY) {
@@ -363,7 +439,25 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       restore(d);
       return;
     }
-    registerPendingDrop(d, { type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
+    if (d.others.length === 0) {
+      registerPendingDrop(d, { type: 'MOVE_PLACE', lid: t.lid, line: t.line, x, y });
+      return;
+    }
+    // 🔴 グループ: 全員の行を同じ引き方(`targetOf`)で引く ── 1 枚でも引けなければ 1 枚も書かない
+    const moves = [{ line: t.line, x, y }];
+    for (const m of d.others) {
+      const mt = targetOf(m.block);
+      if (mt === null || mt.lid !== t.lid) {
+        restore(d);
+        return;
+      }
+      moves.push({
+        line: mt.line,
+        x: Math.max(0, Math.round(m.startX + c.dx)),
+        y: Math.max(0, Math.round(m.startY + c.dy)),
+      });
+    }
+    registerPendingDrop(d, { type: 'MOVE_PLACES', lid: t.lid, moves });
   };
 
   const onPointerCancel = (): void => {
@@ -388,6 +482,10 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (n.timer !== null) clearTimeout(n.timer);
     n.block.style.left = `${n.startX}px`;
     n.block.style.top = `${n.startY}px`;
+    for (const m of n.others) {
+      m.block.style.left = `${m.startX}px`;
+      m.block.style.top = `${m.startY}px`;
+    }
   };
 
   /**
@@ -406,7 +504,18 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const lineRaw = n.block.getAttribute('data-pkc-place-line');
     const host = n.block.closest<HTMLElement>('.pkc-board-host');
     if (host !== null && lineRaw !== null) host.setAttribute(PLACE_FOCUS_ATTR, lineRaw);
-    dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x: n.x, y: n.y });
+    if (n.others.length === 0) {
+      dispatcher.dispatch({ type: 'MOVE_PLACE', lid: t.lid, line: t.line, x: n.x, y: n.y });
+      return;
+    }
+    // 🔴 グループ(#530 段⑤b)── 仲間も同じだけ動かして 1 回で書く。1 枚でも引けなければ 1 枚も書かない
+    const moves = [{ line: t.line, x: n.x, y: n.y }];
+    for (const m of n.others) {
+      const mt = targetOf(m.block);
+      if (mt === null || mt.lid !== t.lid) return;
+      moves.push({ line: mt.line, x: m.startX + (n.x - n.startX), y: m.startY + (n.y - n.startY) });
+    }
+    dispatcher.dispatch({ type: 'MOVE_PLACES', lid: t.lid, moves });
   }
 
   const onKeyDown = (e: KeyboardEvent): void => {
@@ -430,6 +539,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (nudge === null) {
       nudge = {
         block,
+        others: groupMates(block, false),
         startX: Number(block.getAttribute('data-pkc-x')) || 0,
         startY: Number(block.getAttribute('data-pkc-y')) || 0,
         x: 0,
@@ -439,10 +549,20 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       nudge.x = nudge.startX;
       nudge.y = nudge.startY;
     }
-    nudge.x = Math.max(0, nudge.x + dx);
-    nudge.y = Math.max(0, nudge.y + dy);
+    // 🔑 グループは全員で同じだけ(左上が 0 を下回らない ── 1 枚だけなら今までと同じ `max(0, …)`)
+    const c = clampGroupDelta(
+      [nudge, ...nudge.others].map((m) => ({ x: m.startX, y: m.startY })),
+      nudge.x + dx - nudge.startX,
+      nudge.y + dy - nudge.startY,
+    );
+    nudge.x = nudge.startX + c.dx;
+    nudge.y = nudge.startY + c.dy;
     block.style.left = `${nudge.x}px`;
     block.style.top = `${nudge.y}px`;
+    for (const m of nudge.others) {
+      m.block.style.left = `${m.startX + c.dx}px`;
+      m.block.style.top = `${m.startY + c.dy}px`;
+    }
     if (nudge.timer !== null) clearTimeout(nudge.timer);
     nudge.timer = setTimeout(commitNudge, NUDGE_SETTLE_MS);
   };

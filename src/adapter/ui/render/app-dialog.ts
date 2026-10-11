@@ -994,6 +994,93 @@ export function pickPlaceRectInApp(
   });
 }
 
+/** グループにする窓に並べる 1 枚(`place-notation.ts` の `PlaceGroupItem` から窓が要る分だけ)。 */
+export interface PlaceGroupChoice {
+  /** 付箋の開き行の行番号(**生の body**)。窓はこの値をそのまま返す。 */
+  readonly line: number;
+  /** 付箋の最初の 1 行(空なら「(空の付箋)」と出す)。 */
+  readonly label: string;
+}
+
+/**
+ * 🔴 **付箋をグループにする窓**(#530 段⑤b。Gemini 裁定 2026-10-11 依頼 19 Q3)。
+ *
+ * 板の付箋が**最初の 1 行**と一緒にチェックつきで並ぶ。右クリックした付箋(`preLine`)には最初から ✓。
+ * 「グループにする」で、チェックした付箋の行番号(並びは一覧の順)を返す。
+ * 2 枚未満のときは**窓を閉じずに**理由を出す(1 枚だけのグループは作らない)。
+ * 「やめる」/ `Escape` / 外のクリックは `null`(何も書かない)。
+ *
+ * ⚠ 器は確認と同じ 1 つ(`pickPlaceRectInApp` と同じ作り)── 新しい部品を作らない。
+ * 🔑 検めは「決める」の click を**器の onOk より先に**受けて止める(`stopImmediatePropagation`)。
+ * 🔑 Enter は焦点が欄(✓)にあるとき「決める」を押す ── ✓ は Space で切り替わる(ブラウザの既定)。
+ */
+export function pickPlaceGroupInApp(
+  host: HTMLElement,
+  items: readonly PlaceGroupChoice[],
+  preLine: number,
+): Promise<number[] | null> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = 'グループにする';
+    f.body.textContent = '';
+    const note = document.createElement('span');
+    note.setAttribute('data-pkc-field', 'place-group-note');
+    note.textContent = 'まとめる付箋を選びます。グループの付箋は、1 枚をドラッグすると全部が一緒に動きます。';
+    f.body.append(note);
+    const checks: Array<{ line: number; box: HTMLInputElement }> = [];
+    for (const it of items) {
+      const label = document.createElement('label');
+      label.setAttribute('data-pkc-field', 'place-group-row');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.setAttribute('data-pkc-field', 'place-group-check');
+      box.setAttribute('data-pkc-place-group-line', String(it.line));
+      box.checked = it.line === preLine;
+      box.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (ev.key !== 'Enter' || ev.isComposing) return;
+        ev.preventDefault();
+        f.ok.click();
+      });
+      const text = document.createElement('span');
+      text.textContent = it.label === '' ? '(空の付箋)' : it.label;
+      label.append(box, text);
+      f.body.append(label);
+      checks.push({ line: it.line, box });
+    }
+    const error = document.createElement('span');
+    error.setAttribute('data-pkc-field', 'place-group-error');
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    f.body.append(error);
+
+    let result: number[] | null = null;
+    const onValidate = (ev: Event): void => {
+      const lines = checks.filter((c) => c.box.checked).map((c) => c.line);
+      if (lines.length >= 2) {
+        result = lines;
+        return;
+      }
+      // ⚠ 通らない間は閉じない(器の onOk に届かせない)
+      ev.stopImmediatePropagation();
+      error.textContent = '2 枚以上の付箋にチェックを付けてください';
+      error.hidden = false;
+      (checks.find((c) => !c.box.checked) ?? checks[0])?.box.focus();
+    };
+    f.ok.addEventListener('click', onValidate);
+    f.ok.textContent = 'グループにする';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+    const answered = open(f, 'cancel');
+    // 🔑 焦点は**最初のチェック**へ(キーボードだけで Space → Enter で決められる)
+    (checks.find((c) => c.box.checked) ?? checks[0])?.box.focus();
+    const answer = await answered;
+    f.ok.removeEventListener('click', onValidate);
+    return answer === 'ok' ? result : null;
+  });
+}
+
 /**
  * 🔴 **繰り返しの回を動かすとき、1 回か全部かを聞く**(#855 決4。
  * user 裁定 2026-09-13「**1 回か全部か選択する(Outlook 模倣で OK)**」)。

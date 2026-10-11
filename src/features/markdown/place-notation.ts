@@ -405,6 +405,205 @@ export function setPlaceStyle(
   return at.lines.join('\n');
 }
 
+/**
+ * 🔴 **グループ**(#530 段⑤b。Gemini 裁定 2026-10-11 依頼 19 Q3)── 付箋の開き行の `group=名前`。
+ *
+ * 書き方は `:::format{.pkc-place x=40 y=40 group=グループ1}`。**同じ名前の付箋が 1 つのグループ**
+ * (囲む塊は採らない ── 本文は平らなまま。設計 `board-next-stage-design-2026-10.md` §2)。
+ * ⚠ 札が無い = グループに入っていない(古いノートは 1 字も変わらない)。
+ * ⚠ 名前は**字・数字・`_`・`-` だけ**(空白や引用符を含む字は読めない = 札が無いのと同じ。本文は消さない)。
+ * 🔑 読む規則は `parsePlaceGroup` の 1 本(画面のドラッグ・右クリック・書き込みが同じ関数を引く ── §7)。
+ */
+export const PLACE_GROUP_STEM = 'グループ';
+const GROUP_NAME_RE = /^[\p{L}\p{N}_-]+$/u;
+
+/** `group=` の値を読む。⚠ 読めない字 / 値なし / 空は `null`(グループに入っていない扱い)。 */
+export function parsePlaceGroup(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const v = raw.trim();
+  return GROUP_NAME_RE.test(v) ? v : null;
+}
+
+/** その行が付箋(線ではない板の塊)なら、入っているグループの名前(無い / 読めない = `null`)。 */
+export function placeGroupAt(line: string): string | null {
+  if (isLineOpen(line)) return null;
+  const attrs = placeOpenAttrs(line);
+  return attrs === null ? null : parsePlaceGroup(attrs.kvs.group);
+}
+
+/** グループにする窓に並べる 1 枚。 */
+export interface PlaceGroupItem {
+  /** 開き行の行番号(**生の body** の 0 始まり)。 */
+  readonly line: number;
+  readonly openLine: string;
+  /** 付箋の最初の 1 行(空なら空の字)。 */
+  readonly label: string;
+  /** 入っているグループ(無ければ `null`)。 */
+  readonly group: string | null;
+}
+
+/** 窓の一覧に出す最初の 1 行の長さの上限(字)。 */
+export const PLACE_GROUP_LABEL_MAX = 40;
+
+/**
+ * 🔴 **この本文の付箋を全部**(fence の外・線を除く)── グループにする窓の一覧と、動かす相手の探索の元。
+ * 🔑 「付箋か」は `isPlaceOpen`(描画と同じ関数)の 1 本。最初の 1 行は開き行の次の、空でない最初の行。
+ */
+export function placeGroupItems(body: string): PlaceGroupItem[] {
+  const fm = frontmatterLineCount(body);
+  const lines = body.split('\n');
+  const mask = fenceMask(lines, fm);
+  const out: PlaceGroupItem[] = [];
+  for (let i = fm; i < lines.length; i += 1) {
+    if (mask[i] === true) continue;
+    const open = lines[i]!;
+    if (!isPlaceOpen(open) || isLineOpen(open)) continue;
+    let label = '';
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const t = lines[j]!.trim();
+      if (t === ':::') break;
+      if (t !== '') {
+        label = t;
+        break;
+      }
+    }
+    if (label.length > PLACE_GROUP_LABEL_MAX) label = `${label.slice(0, PLACE_GROUP_LABEL_MAX)}…`;
+    out.push({ line: i, openLine: open, label, group: placeGroupAt(open) });
+  }
+  return out;
+}
+
+/** まだ使われていない `グループN`(N は 1 から)。⚠ 上限を置く(見つからなければ `null`)。 */
+function freeGroupName(taken: ReadonlySet<string>): string | null {
+  for (let i = 1; i <= AUTO_NAME_MAX; i += 1) {
+    const n = `${PLACE_GROUP_STEM}${i}`;
+    if (!taken.has(n)) return n;
+  }
+  return null;
+}
+
+/**
+ * 複数の開き行を**まとめて**検める(1 つでも外れたら `null` = 1 つも書かない)。
+ * 🔑 `placeLinesAt` を行ごとに呼ばない ── 1 回の走査で fence を数え、**全部を同じ lines に書く**
+ *   (途中で一部だけ書けた状態を作らない)。同じ行を 2 度指していても断る。
+ */
+function placeLinesAtAll(
+  body: string,
+  targets: readonly PlaceTarget[],
+  accept: (line: string) => boolean,
+): { lines: string[]; fm: number } | null {
+  if (targets.length === 0) return null;
+  const fm = frontmatterLineCount(body);
+  const lines = body.split('\n');
+  const mask = fenceMask(lines, fm);
+  const seen = new Set<number>();
+  for (const t of targets) {
+    if (!Number.isInteger(t.line) || t.line < fm || seen.has(t.line)) return null;
+    seen.add(t.line);
+    const l = lines[t.line];
+    if (l === undefined || l !== t.openLine || !accept(l) || mask[t.line] === true) return null;
+  }
+  return { lines, fm };
+}
+
+/**
+ * 🔴 **付箋をグループにする**(#530 段⑤b)── 渡した付箋の開き行に、同じ `group=グループN` を書く。
+ *
+ * - 名前は**使われていない最小の `グループN`**(本文に書かれている名前から数える)
+ * - 2 枚未満は断る(1 枚だけのグループは作らない)
+ * - 門は全部 `placeLinesAtAll`(行番号 + 開き行の byte 一致 + 付箋 + frontmatter の外 + fence の外)
+ * - すでに別のグループに入っている付箋は、新しいグループへ**移る**(札が差し替わる)
+ */
+export function groupPlaces(body: string, targets: readonly PlaceTarget[]): string | null {
+  if (targets.length < 2) return null;
+  const at = placeLinesAtAll(body, targets, (l) => isPlaceOpen(l) && !isLineOpen(l));
+  if (at === null) return null;
+  const mask = fenceMask(at.lines, at.fm);
+  const taken = new Set<string>();
+  for (let i = at.fm; i < at.lines.length; i += 1) {
+    if (mask[i] === true) continue;
+    const g = placeGroupAt(at.lines[i]!);
+    if (g !== null) taken.add(g);
+  }
+  const name = freeGroupName(taken);
+  if (name === null) return null;
+  for (const t of targets) {
+    const next = spliceStyleLine(at.lines[t.line]!, 'pkc-place', [['group', name]]);
+    if (next === null) return null;
+    at.lines[t.line] = next;
+  }
+  return at.lines.join('\n');
+}
+
+/**
+ * 🔴 **グループを解く**(#530 段⑤b。置けるなら外せる)── 渡した付箋の**グループの全員**から `group=` を消す。
+ * 🔑 全員を探すのは fence の外の付箋の開き行(同じ名前)── 位置は動かさない。
+ * ⚠ 渡した付箋が読めない `group=` を持つだけなら、その 1 枚の札だけ消す(他は巻き込まない)。
+ * 🔑 グループに入っていない付箋なら body をそのまま返す(書く物が無い ≠ 競合)。
+ */
+export function ungroupPlace(body: string, target: PlaceTarget): string | null {
+  const at = placeLinesAt(body, target, (l) => isPlaceOpen(l) && !isLineOpen(l));
+  if (at === null) return null;
+  const name = placeGroupAt(at.lines[target.line]!);
+  const mask = fenceMask(at.lines, at.fm);
+  let changed = false;
+  for (let i = at.fm; i < at.lines.length; i += 1) {
+    if (mask[i] === true) continue;
+    const l = at.lines[i]!;
+    if (!isPlaceOpen(l) || isLineOpen(l)) continue;
+    const mine = i === target.line;
+    if (!mine && (name === null || placeGroupAt(l) !== name)) continue;
+    const next = spliceStyleLine(l, 'pkc-place', [['group', null]]);
+    if (next === null || next === l) continue;
+    at.lines[i] = next;
+    changed = true;
+  }
+  return changed ? at.lines.join('\n') : body;
+}
+
+/** 複数の付箋を動かす 1 件(`PlaceMove` と同じ)。 */
+export type PlaceGroupMove = PlaceMove;
+
+/**
+ * 🔴 **グループの全員を一度に動かす**(#530 段⑤b)── 各付箋の x= / y= だけを書く。
+ * 🔑 **1 回の書込**(途中で一部だけ動いた状態にならない)── 1 枚でも門(開き行の byte 一致など)が外れたら
+ *   **1 枚も書かず `null`**。全員が元の位置のままなら body をそのまま返す。
+ */
+export function movePlaces(body: string, moves: readonly PlaceGroupMove[]): string | null {
+  for (const m of moves) if (!isCoord(m.x) || !isCoord(m.y)) return null;
+  const at = placeLinesAtAll(body, moves, isPlaceOpen);
+  if (at === null) return null;
+  let changed = false;
+  for (const m of moves) {
+    const l = at.lines[m.line]!;
+    const next = spliceTokens(l, { x: m.x, y: m.y });
+    if (next === null) return null;
+    if (next !== l) changed = true;
+    at.lines[m.line] = next;
+  }
+  return changed ? at.lines.join('\n') : body;
+}
+
+/**
+ * 🔴 **グループを掴んだときの動かす量**(画面の掴みと同じ規則の 1 本)。
+ * 全員の左上が 0 を下回らないよう、**全員で同じだけ**手前で止める(形を崩さない)。
+ * 1 枚だけのときは `max(0, start + d)` と同じ(今までの動き)。
+ */
+export function clampGroupDelta(
+  starts: ReadonlyArray<{ readonly x: number; readonly y: number }>,
+  dx: number,
+  dy: number,
+): { dx: number; dy: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const s of starts) {
+    minX = Math.min(minX, s.x);
+    minY = Math.min(minY, s.y);
+  }
+  if (starts.length === 0) return { dx, dy };
+  return { dx: Math.max(dx, -minX), dy: Math.max(dy, -minY) };
+}
+
 /** 開き行に付いている色・太さ。⚠ 読めない値は `null`(描く側が無視する物と同じ規則)。 */
 export interface PlaceStyleRead {
   readonly fill: string | null;
@@ -479,7 +678,7 @@ function setStyleToken(attrs: string, key: string, value: string): string {
 function spliceStyleLine(
   line: string,
   cls: string,
-  entries: ReadonlyArray<readonly [PlaceStyleKey, string | null]>,
+  entries: ReadonlyArray<readonly [string, string | null]>,
 ): string | null {
   const attrs = formatOpenAttrs(line, cls);
   if (attrs === null) return null;
