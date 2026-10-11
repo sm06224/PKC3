@@ -686,3 +686,74 @@ describe('🔴 長さを容器へ書く(#952 A3)', () => {
     });
   });
 });
+
+/**
+ * 🔴 **画面収録は、キーフレームを約 2 秒ごとに置く**(#683 段②b-3)。
+ *
+ * ⚠ 器を作る口は 2 つ(最初 / 切って次を起こすとき)── 両方で見る。
+ *   `new` に渡された**第 2 引数そのもの**を記録する fake で見る。
+ */
+function optionRecorder(rejectOptions = false): {
+  Recorder: typeof MediaRecorder;
+  calls: Array<unknown>;
+  last: () => { push: (n: number) => void };
+} {
+  const calls: Array<unknown> = [];
+  let inst: { push: (n: number) => void } | null = null;
+  class R {
+    state = 'inactive';
+    mimeType = 'video/webm';
+    ondataavailable: ((e: BlobEvent) => void) | null = null;
+    onstop: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(_s: MediaStream, options?: unknown) {
+      calls.push(options);
+      if (rejectOptions && options !== undefined) throw new TypeError('unsupported option');
+      inst = {
+        push: (n: number) =>
+          this.ondataavailable?.({ data: new Blob(['x'.repeat(n)]) } as BlobEvent),
+      };
+    }
+    start(): void {
+      this.state = 'recording';
+    }
+    stop(): void {
+      if (this.state === 'inactive') throw new Error('InvalidStateError');
+      this.state = 'inactive';
+      this.onstop?.();
+    }
+  }
+  return { Recorder: R as unknown as typeof MediaRecorder, calls, last: () => inst! };
+}
+
+describe('🔴 画面収録のキーフレーム間隔(#683 段②b-3)', () => {
+  it('画面収録は最初の器にも、切って起こす次の器にも 2000ms を渡す', async () => {
+    const o = optionRecorder();
+    const { d } = deps({ Recorder: o.Recorder });
+    await startCapture('screen', d, { partBytes: 25, maxMs: HOURS12 });
+    o.last().push(30); // 切る → 次の器
+    expect(o.calls, '器が 2 つ作られていない').toHaveLength(2);
+    for (const c of o.calls) {
+      expect(c).toEqual({ videoKeyFrameIntervalDuration: 2000 });
+    }
+  });
+
+  it('対照群 ── 音だけの録音には渡さない(最初も次も)', async () => {
+    const o = optionRecorder();
+    const { d } = deps({ Recorder: o.Recorder });
+    await startCapture('audio', d, { partBytes: 25, maxMs: HOURS12 });
+    o.last().push(30);
+    expect(o.calls).toHaveLength(2);
+    expect(o.calls).toEqual([undefined, undefined]);
+  });
+
+  it('指定で投げる実装なら、指定なしで作り直して録れる', async () => {
+    const o = optionRecorder(true);
+    const { d } = deps({ Recorder: o.Recorder });
+    const h = await startCapture('screen', d, { partBytes: 1_000_000, maxMs: HOURS12 });
+    // 1 回目は指定つき(投げた)→ 2 回目は指定なし
+    expect(o.calls).toEqual([{ videoKeyFrameIntervalDuration: 2000 }, undefined]);
+    o.last().push(9);
+    expect((await h.stop())!.size, '作り直した器で録れていない').toBe(9);
+  });
+});
