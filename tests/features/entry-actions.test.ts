@@ -398,7 +398,7 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['export-entry-markdown', 'd97ee74b'],
       ['export-folder', '1e3dc65f'],
       ['export-entry-docx', '93906675'],
-      ['export-entry-pptx', '5424c220'],
+      ['export-entry-pptx', '027614c1'],
       ['export-entry-pdf', '6ec553e1'],
       ['adopt-external-images', '36c7974a'],
       ['copy-entry-ref', '2614a326'],
