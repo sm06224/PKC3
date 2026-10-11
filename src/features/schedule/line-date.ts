@@ -59,7 +59,7 @@ import {
   isScheduleTimeRange,
 } from './schedule-date';
 import {
-  REPEAT_WORDS,
+  repeatWord,
   SUBSTITUTE_WORD,
   readRepeatTail,
   readSubstituteTail,
@@ -378,7 +378,7 @@ export function formatLineDate(
    *   詰めても通る(`repeat.ts` の `REPEAT_TAIL`)が、**書きは整える**
    *   (この file の頭「読みは緩く、書きは整える」)。
    */
-  if (repeat !== undefined && repeat !== null) return `${head} ${REPEAT_WORDS[repeat]}`;
+  if (repeat !== undefined && repeat !== null) return `${head} ${repeatWord(repeat)}`;
   /**
    * 🔴 **振替は刻みの代わりに尻へ付く**(#855 決4)。⚠ 期間にも付けない ──
    *   読む側が期間の枝で読まないので、書けば往復で消える。

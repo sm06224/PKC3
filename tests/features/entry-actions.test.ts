@@ -100,7 +100,7 @@ describe('右クリックに出す操作', () => {
     expect(dead, '受け手のいない操作をメニューに出している(押しても無言)').toEqual([]);
     // ⚠ 空振り防止 ── 足した表が空なら、上の走査は増えていないのと同じ
     expect(TILE_MENU_ACTIONS.length, 'タイルのメニューが空(空振り)').toBeGreaterThanOrEqual(2);
-    expect(repeatMenuActions(null).length, '刻みの一覧が空(空振り)').toBe(4);
+    expect(repeatMenuActions(null).length, '刻みの一覧が空(空振り)').toBe(5);
     expect(
       APP_GROUP_MENU_ACTIONS.length,
       'グループの見出しのメニューが空(空振り)',
@@ -759,9 +759,10 @@ describe('表の形を変える字(#708)', () => {
  */
 describe('繰り返しの一覧(#855 段 0)', () => {
   it('🔴 いまの刻みは出さない / 繰り返していなければ「やめる」も出さない', () => {
-    expect(repeatMenuActions(null).map((a) => a.label)).toEqual(['毎日', '毎週', '毎月', '毎年']);
+    expect(repeatMenuActions(null).map((a) => a.label)).toEqual(['毎日', '毎週', '隔週', '毎月', '毎年']);
     expect(repeatMenuActions('week').map((a) => a.label)).toEqual([
       '毎日',
+      '隔週',
       '毎月',
       '毎年',
       'この繰り返しをやめる',
@@ -770,7 +771,7 @@ describe('繰り返しの一覧(#855 段 0)', () => {
 
   it('🔴 どの項目も、刻みの綴りを属性で持つ(「やめる」は空)', () => {
     const items = repeatMenuActions('week');
-    expect(items.map((a) => a.attrs[REPEAT_ATTR])).toEqual(['day', 'month', 'year', '']);
+    expect(items.map((a) => a.attrs[REPEAT_ATTR])).toEqual(['day', 'biweek', 'month', 'year', '']);
     // ⚠ 空振り防止 ── 属性の名前そのものが変わったら落ちる
     expect(REPEAT_ATTR).toBe('data-pkc-repeat');
   });

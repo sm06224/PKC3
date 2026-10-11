@@ -833,6 +833,30 @@ describe('繰り返し(#344 段②)', () => {
     expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('毎週');
   });
 
+  it('🔴 隔週は 2 週おきに札が出て、札に「隔週」と出る(#855)', () => {
+    const { root } = setup({ [BIN]: '- [ ] 定例 @2026-08-23 隔週\n' });
+    expect(cardsOf(root, '2026-08-23')).toHaveLength(1);
+    expect(cardsOf(root, '2026-09-06')).toHaveLength(1);
+    // ⚠ 対照群 ── 毎週ならここにも出る
+    expect(cardsOf(root, '2026-08-30'), '1 週後にも出ている(毎週になっている)').toHaveLength(0);
+    const card = cardsOf(root, '2026-09-06')[0]!;
+    expect(card.getAttribute('data-pkc-task-repeat')).toBe('biweek');
+    expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('隔週');
+  });
+
+  it('🔴 曜日の列は列の曜日だけに札が出る / その日の札を押すとその日ぶんの行が増える(#855)', async () => {
+    const { root, store } = setup({ [BIN]: '- [ ] ジム @2026-08-23 毎週 月水金\n' });
+    for (const day of ['2026-08-24', '2026-08-26', '2026-08-28', '2026-08-31'])
+      expect(cardsOf(root, day), `${day} に札が無い`).toHaveLength(1);
+    for (const day of ['2026-08-25', '2026-08-27', '2026-08-29'])
+      expect(cardsOf(root, day), `${day} に出てはいけない`).toHaveLength(0);
+    const card = cardsOf(root, '2026-08-26')[0]!;
+    expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('毎週 月水金');
+    card.querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!.click();
+    await tick(20);
+    expect(store[BIN]).toBe('- [ ] ジム @2026-08-23 毎週 月水金\n- [x] ジム @2026-08-26\n');
+  });
+
   /**
    * 🔴 **押すと、規則の行ではなく「その日ぶんの行」が増える**。
    * ⚠ 規則の行の印を押してしまうと**以後の回が全部消える**ので、
@@ -1250,8 +1274,8 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
     const units = [...root.querySelectorAll('[data-pkc-region="context-menu"] button')].map(
       (b) => b.textContent,
     );
-    // ⚠ いまは繰り返していない ── 4 つ出て、「この繰り返しをやめる」は出ない
-    expect(units).toEqual(['毎日', '毎週', '毎月', '毎年']);
+    // ⚠ いまは繰り返していない ── 5 つ出て、「この繰り返しをやめる」は出ない
+    expect(units).toEqual(['毎日', '毎週', '隔週', '毎月', '毎年']);
     press(root, '毎週');
     await tick(20);
     expect(store['e1'], '本文に刻みが書かれていない').toBe('- [ ] ゴミ出し @2026-08-25 毎週\n');
@@ -1266,7 +1290,7 @@ describe('札の右クリックから繰り返しを付け替える(#855 段 0)'
       (b) => b.textContent,
     );
     // ⚠ **いまの刻みは出さない**(押しても何も起きない項目を並べない)
-    expect(units).toEqual(['毎日', '毎月', '毎年', 'この繰り返しをやめる']);
+    expect(units).toEqual(['毎日', '隔週', '毎月', '毎年', 'この繰り返しをやめる']);
     press(root, 'この繰り返しをやめる');
     await tick(20);
     expect(store['e1'], '日付まで消えた').toBe('- [ ] ゴミ出し @2026-08-25\n');

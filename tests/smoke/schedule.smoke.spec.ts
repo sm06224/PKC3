@@ -1283,6 +1283,18 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
   await ta.fill(`- [ ] 体操 @${longAgo} 毎日`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
+  /**
+   * 🔴 **隔週と曜日の列**(#855)── 起動を増やさず、この道中に載せる。
+   * 隔週は「今日 → 14 日後」(7 日後には出ない)/ `毎週 月水金` 型は書いた曜日の日にだけ出る。
+   */
+  const dayAt = (n: number): Date => new Date(now.getFullYear(), now.getMonth(), now.getDate() + n);
+  const wd = (n: number): string => '日月火水木金土'[dayAt(n).getDay()]!;
+  await createEntry(page, 'text');
+  await ta.fill(
+    `- [ ] 定例 @${today} 隔週\n- [ ] ジム @${today} 毎週 ${wd(0)}、${wd(1)}、${wd(3)}`,
+  );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+
   await clickReal(page, '[data-pkc-browse="schedule"]');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');
   const cardsOn = (date: string) =>
@@ -1291,13 +1303,22 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
     );
 
   // 🔴 直す前はここが **0** だった(開始日から数え上げて上限に当たり、1 件も出ない)
-  await expect(cardsOn(today), '今日の札が無い(古い開始の毎日が展開されていない)').toHaveCount(1);
-  await expect(cardsOn(today), '札に刻みが出ていない').toContainText('毎日');
+  const only = (date: string, text: string) => cardsOn(date).filter({ hasText: text });
+  await expect(only(today, '体操'), '今日の札が無い(古い開始の毎日が展開されていない)').toHaveCount(1);
+  await expect(only(today, '体操'), '札に刻みが出ていない').toContainText('毎日');
   /**
    * 🔑 **明日も出る**(対照群)── 「たまたま今日 1 枚だけ出た」と区別する。
    * ⚠ これが無いと、窓の起点だけ特別扱いする実装でも緑になる。
    */
-  await expect(cardsOn(tomorrow), '明日の札が無い(1 日ぶんしか展開していない)').toHaveCount(1);
+  await expect(only(tomorrow, '体操'), '明日の札が無い(1 日ぶんしか展開していない)').toHaveCount(1);
+
+  await expect(only(key(dayAt(14)), '定例'), '隔週: 14 日後の札が無い').toHaveCount(1);
+  await expect(only(key(dayAt(7)), '定例'), '隔週: 7 日後に出ている(毎週になっている)').toHaveCount(0);
+  await expect(only(today, 'ジム'), '曜日の列: 今日の札が無い').toHaveCount(1);
+  await expect(only(key(dayAt(1)), 'ジム'), '曜日の列: 書いた曜日の札が無い').toHaveCount(1);
+  await expect(only(key(dayAt(3)), 'ジム'), '曜日の列: 書いた曜日の札が無い').toHaveCount(1);
+  await expect(only(key(dayAt(2)), 'ジム'), '曜日の列: 書いていない曜日に出ている').toHaveCount(0);
+  await expect(only(key(dayAt(1)), 'ジム'), '札に曜日の列が出ていない').toContainText('毎週');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
