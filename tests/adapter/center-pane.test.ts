@@ -553,3 +553,33 @@ describe('ヘルプから出たら、面に伝わる(#531 H3)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **編集のまま別の画面へ出たら、持ち越した読む面を捨てる**(#1467 段 5)。
+ *
+ * 編集のあいだ読む面は隠して持ち越す(戻るとき描き直さないため)。持ち越しの寿命は「その編集が終わるまで」で、
+ * 別の画面を見ている間まで節点を常駐させない(2026-07-27 の「生成物のライフサイクル終端での即破棄」)。
+ * ⚠ 捨てるのは読む面の控えだけ ── 編集の面と、打っている最中の字は残る。
+ */
+describe('編集のまま別の画面へ出る(#1467 段 5)', () => {
+  it('🔴 持ち越しが捨てられ、編集は続く / 別の画面から戻っても編集の面が残る / 対照群: 出る前は持っている', async () => {
+    const { d, root, q } = setup([meta('n1')], { n1: '# 見出し\n\n本文の段落' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(30);
+    d.dispatch({ type: 'START_EDIT' });
+    await tick(30);
+    expect(d.getState().phase, '前提: 編集に入っていない').toBe('editing');
+    // 対照群 ── 編集のあいだは持ち越している(これが無いと「捨てた」が空振りで通る)
+    expect(root.querySelectorAll('[data-pkc-held]').length, '前提: 読む面を持ち越していない').toBe(1);
+
+    showView(d, 'settings');
+    await tick(30);
+    expect(root.querySelectorAll('[data-pkc-held]').length, '別の画面へ出たのに持ち越しが残っている').toBe(0);
+    expect(d.getState().phase, '編集が止まった').toBe('editing');
+
+    showView(d, 'detail');
+    await tick(30);
+    expect(q('[data-pkc-field="editor-title"]'), '戻ったら編集の面が無い').not.toBeNull();
+    expect(root.querySelectorAll('[data-pkc-held]').length).toBe(0);
+  });
+});

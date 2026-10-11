@@ -77,6 +77,113 @@ async function makeLongNote(page: Page): Promise<void> {
   await expectRoom(page, '本文');
 }
 
+/**
+ * 🔴 **編集に入って変更なしで保存しても、読む面が同じ節点・同じ高さ・同じ位置で戻る**(#1467 段 5)。
+ *
+ * 編集のあいだ読む面は捨てずに隠して持ち越す(`content-visibility: hidden`)。戻るとき本文と設定が同じなら、
+ * ワーカーを呼ばず同じ節点を戻すだけ ── 見え方を変えない約束なので、**高さと位置が 1px も動かない**ことを見る。
+ * ⚠ 20,000 行の所要時間はここでは見ない(この台は 280 塊)。測ったのは `docs/development/long-note-open-save-2026-10.md` §6。
+ * ⚠ 検査の起動を増やさない ── 既存の長いノートの道中(この test)に足す。
+ */
+async function keepReadingViewAcrossEdit(page: Page): Promise<void> {
+  const host = '[data-pkc-field="detail-body"]';
+  // 読んでいる途中の位置にしておく(先頭のままだと「位置を戻せた」が空振りになる)
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!.scrollTop = 1500;
+  });
+  await page.waitForTimeout(300);
+  const before = await page.evaluate((sel) => {
+    const d = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    const h = document.querySelector<HTMLElement>(sel)!;
+    // 見えている先頭の塊の目印と、その塊の画面上の位置
+    const blocks = Array.from(h.children) as HTMLElement[];
+    const top = d.getBoundingClientRect().top;
+    const idx = blocks.findIndex((b) => b.getBoundingClientRect().bottom > top + 1);
+    (window as unknown as Record<string, unknown>)['__keepBlock'] = blocks[idx];
+    return {
+      sh: d.scrollHeight,
+      st: Math.round(d.scrollTop),
+      blocks: blocks.length,
+      idx,
+      off: Math.round(blocks[idx]!.getBoundingClientRect().top - top),
+    };
+  }, host);
+  expect(before.st, '前提: 読む位置を動かせていない').toBeGreaterThan(1000);
+  expect(before.idx, '前提: 先頭の塊を引けていない').toBeGreaterThan(0);
+
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-region="editor-live"]')).toBeVisible();
+  // 編集中: 持ち越した器は在るが、本文の器としては拾われず、場所も取らず、描かれない
+  const held = await page.evaluate(() => {
+    const els = document.querySelectorAll<HTMLElement>('[data-pkc-held]');
+    const h = els[0];
+    return {
+      n: els.length,
+      body: document.querySelectorAll('[data-pkc-field="detail-body"]:not([data-pkc-held])').length,
+      cv: h === undefined ? '' : getComputedStyle(h).contentVisibility,
+      height: h === undefined ? -1 : Math.round(h.getBoundingClientRect().height),
+    };
+  });
+  expect(held.n, '読む面を持ち越していない').toBe(1);
+  expect(held.body, '持ち越した器が本文の器として拾われる').toBe(0);
+  expect(held.cv, '持ち越した器が隠れていない').toBe('hidden');
+  expect(held.height, '持ち越した器が編集の面の場所を取っている').toBe(0);
+
+  // 変更なしで保存 ── 押した瞬間から、表示が戻って描き終えるまでを測る
+  await page.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        w['__keepT0'] = e.timeStamp;
+      },
+      { capture: true, once: true },
+    );
+  });
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="append-input"]')).toBeVisible();
+  await expect(page.locator(host)).toHaveAttribute('data-pkc-painted', /.+/);
+  const ms = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const t0 = (window as unknown as Record<string, number>)['__keepT0']!;
+            resolve(Math.round(performance.now() - t0));
+          }),
+        );
+      }),
+  );
+  await page.waitForTimeout(500);
+  const after = await page.evaluate((sel) => {
+    const d = document.querySelector<HTMLElement>('[data-pkc-region="detail"]')!;
+    const h = document.querySelector<HTMLElement>(sel)!;
+    const blk = (window as unknown as Record<string, unknown>)['__keepBlock'] as HTMLElement;
+    const blocks = Array.from(h.children) as HTMLElement[];
+    const top = d.getBoundingClientRect().top;
+    return {
+      sh: d.scrollHeight,
+      st: Math.round(d.scrollTop),
+      blocks: blocks.length,
+      same: blocks.includes(blk),
+      off: Math.round(blk.getBoundingClientRect().top - top),
+      held: document.querySelectorAll('[data-pkc-held]').length,
+      cv: getComputedStyle(h).contentVisibility,
+      field: h.getAttribute('data-pkc-field'),
+    };
+  }, host);
+  expect(after.same, '読む面の塊が作り直されている(同じ節点を戻していない)').toBe(true);
+  expect(after.held, '持ち越しの印が残っている').toBe(0);
+  expect(after.cv, '戻したのに隠れたまま').toBe('visible');
+  expect(after.blocks).toBe(before.blocks);
+  expect(after.sh, '保存の前後で scrollHeight が食い違う').toBe(before.sh);
+  expect(after.st, '保存の前後で送り位置が食い違う').toBe(before.st);
+  expect(after.off, '見えている先頭の塊の位置が食い違う').toBe(before.off);
+  test.info().annotations.push({ type: 'keep-view-ms', description: String(ms) });
+  // 緩い tripwire(この台は 280 塊)── 秒の単位でかかるなら描き直している
+  expect(ms, `戻るまでに ${ms} ms`).toBeLessThan(1500);
+}
+
 test('🔴 別の窓が追記しても、こちらの読んでいた場所は動かない (#782)', async ({
   page,
   context,
@@ -129,6 +236,7 @@ test('🔴 自分の窓で末尾に追記すると、足した字が見える所
   const errors = collectPageErrors(page);
   // ⚠ 「送れる本文であること」は `makeLongNote` が待って保証する(空振り防止)
   await makeLongNote(page);
+  await keepReadingViewAcrossEdit(page);
   // ⚠ **上のほうを読んでいる状態**にする ── 足した字は本文のいちばん下なので、
   //    ここが下に居ると「送らなくても見えている」で空振りする
   await page.evaluate(() => {

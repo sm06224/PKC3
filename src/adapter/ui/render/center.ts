@@ -319,6 +319,12 @@ export class CenterRouter {
        *   速やかに破棄」)。⚠ 返さないと、面を切り替えただけで常駐が積み上がる。
        */
       if (this.lastPane === 'captures') this.captures.dispose();
+      /**
+       * 🔴 **編集のまま別の画面へ出たら、持ち越した読む面を捨てる**(#1467 段 5)。
+       * ⚠ 持ち越しは「その編集が終わるまで」の物 ── 別の画面を見ている間まで節点を常駐させない
+       *   (戻ったとき編集は続いているが、読む面は保存か取り消しの後に今までどおり描く)。
+       */
+      if (this.lastPane === 'detail') this.detail.releaseHeld();
       this.lastPane = view;
     }
     // 🔑 帯は**本文以外のとき**だけ出す(本文は「閉じる」対象ではない)

@@ -329,7 +329,7 @@ import {
 import { appQueryKey } from '@adapter/ui/render/query-key-store';
 // 🔴 ▼ で選んだ「作る種類」を端末側に覚える(#1045)
 import { appCreateKind } from '@adapter/ui/render/create-kind';
-import { PAINTED_ATTR } from '@adapter/ui/render/detail';
+import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { openView } from '@adapter/ui/render/open-view';
 import {
   CLOSE_VIEW_WINDOW_REFUSED,
@@ -1924,9 +1924,7 @@ function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void 
 
 /** 読む面の描画済み本文(コピーの書式付き / 選択範囲が読む)。 */
 function viewBodyHost(root: HTMLElement): HTMLElement | null {
-  return root.querySelector<HTMLElement>(
-    '[data-pkc-region="detail"] [data-pkc-field="detail-body"]',
-  );
+  return root.querySelector<HTMLElement>(`[data-pkc-region="detail"] ${BODY_HOST_SELECTOR}`);
 }
 
 /**
@@ -2702,7 +2700,7 @@ function appendTargetBlock(
   slug: string,
 ): { host: HTMLElement; block: Element } | null {
   const body = dispatcher.getState().openBody?.body ?? null;
-  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
   if (body === null || host === null) return null;
   // ⚠ 「末尾」は文書のいちばん後ろ ── 行数を渡せば、どの塊よりも後ろになる
   const at = slug === '' ? body.split('\n').length : resolveAppendAt(body, slug);
@@ -3032,7 +3030,7 @@ function withSectionDraftLeave<T = void>(
   },
 ): 'sync' | 'async' {
   const code = isCodeDraft(draft);
-  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
   const current = host === null ? null : partialDraftBoxText(host, draft);
   const dirty = current !== null && current !== draft.original;
   const cancel = (): void => {
@@ -3712,7 +3710,7 @@ function headingForAction(root: HTMLElement, target: Element): Element | null {
   if (direct !== null) return direct;
   const line = menuCarriedLine(target);
   if (line === null) return null;
-  const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+  const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
   return host === null ? null : headingAtSourceLine(host, line);
 }
 
@@ -5058,7 +5056,7 @@ async function waitPainted(
    */
   const bodyHost = (): HTMLElement | null =>
     detail.querySelector<HTMLElement>(
-      '[data-pkc-field="detail-body-host"], [data-pkc-field="detail-body"]',
+      `[data-pkc-field="detail-body-host"], ${BODY_HOST_SELECTOR}`,
     );
   const painted = (): boolean => {
     const host = bodyHost();
@@ -6216,7 +6214,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'save-section-draft': (dispatcher, _target, _services, root) => {
     const lid = dispatcher.getState().sectionDraft?.lid ?? null;
     if (lid === null) return;
-    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
     const text = host === null ? null : sectionBoxText(host);
     if (text === null) return;
     dispatcher.dispatch({ type: 'SAVE_SECTION_DRAFT', text });
@@ -6236,7 +6234,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'save-code-draft': (dispatcher, _target, _services, root) => {
     const lid = dispatcher.getState().sectionDraft?.lid ?? null;
     if (lid === null) return;
-    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
     const text = host === null ? null : codeBoxText(host);
     if (text === null) return;
     dispatcher.dispatch({ type: 'SAVE_CODE_DRAFT', text });
@@ -8707,7 +8705,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = menuCarriedLine(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
-    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
     const heading = host === null ? null : headingAtSourceLine(host, line);
     const ob = dispatcher.getState().openBody;
     if (host === null || heading === null || ob === null) {
@@ -8737,7 +8735,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = menuCarriedLine(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
-    const host = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]');
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
     const heading =
       host === null
         ? null
@@ -14457,7 +14455,7 @@ export function bindActions(
    *
    * @returns `null` = 本文の上ではない / 受けない所
    */
-  const BODY_DROP_HOST = '[data-pkc-field="detail-body"], [data-pkc-field="split-body"]';
+  const BODY_DROP_HOST = `${BODY_HOST_SELECTOR}, [data-pkc-field="split-body"]`;
   const bodyDropAt = (
     de: DragEvent,
   ): {

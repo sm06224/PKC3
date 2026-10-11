@@ -325,6 +325,24 @@ test('🔴 段組みで送った位置が、編集から戻っても残る (#505
     })
     .toBe(sent);
 
+  /**
+   * 🔴 **戻った後もホイールで送れる**(#1467 段5:戻るとき読む面を描き直さず持ち越した器を戻す)。
+   * ⚠ 持ち越した器が段組みの横送りの判定から外れたままだと、戻った面が**読めるのに送れない**。
+   *   左へ 2 回(端の手前なので必ず動く)回して、毎回減ることを見る。
+   */
+  const box = await host.boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  for (let i = 0; i < 2; i++) {
+    const before = (await readGeom(page)).scrollLeft;
+    await page.mouse.wheel(0, -100);
+    await expect
+      .poll(async () => (await readGeom(page)).scrollLeft, {
+        message: `編集から戻った後、${String(i + 1)} 回目のホイールで送れない`,
+        timeout: 3_000,
+      })
+      .toBeLessThan(before);
+  }
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
