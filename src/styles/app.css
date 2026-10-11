@@ -2699,6 +2699,32 @@ li[data-pkc-row-slot] {
 }
 
 /**
+ * 🔴 **ホイールで送っている間だけ、読む面に透明な蓋をかぶせる**(#1467。付け外しは `wheel-calm.ts`)。
+ * 目的:送っている最中の「カーソルの下は何か」の引き直しを、本文の要素を辿らずに蓋で止める。
+ * ⚠ 枠は高さ 0・下端に貼り付き(`sticky; bottom: 0`)── 読む面(`flex` の縦並び)の最後の子で、寸法にも並びにも出ない。
+ * ⚠ 蓋は枠の上へ向かって画面 1 枚ぶん(`100vh`。読む面の外へはみ出した分は面が切る)。**印が付くまで `display: none`**。
+ * ⚠ `pointer-events: none` を本文にかける形にしない ── `pointer-events` は継承するので、付け外しのたびに
+ *   本文の全要素のスタイルが引き直される(20,000 行で 1 回 200〜400 ms。実測)。
+ */
+[data-pkc-field='wheel-shield'] {
+  position: sticky;
+  bottom: 0;
+  flex: none;
+  width: 100%;
+  height: 0;
+}
+[data-pkc-field='wheel-shield-cover'] {
+  display: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 100vh;
+}
+[data-pkc-field='wheel-shield'][data-pkc-shield-on] > [data-pkc-field='wheel-shield-cover'] {
+  display: block;
+}
+
+/**
  * 🔴 **本文の中に書いたタグ行**(#550 段③。user 要望「タグはバッジ化して表示が必要」)。
  *
  * ⚠ **色は使わない**(user 指示 2026-08-03「地は無彩色、色は情報にだけ使う」)──

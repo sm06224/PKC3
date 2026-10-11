@@ -89,6 +89,69 @@ test('🔴 短い面を開いて戻ると、読んでいた場所に戻る (U-4)
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await page.waitForTimeout(700);
   expect(await top(), '2 巡目で古い位置に固定された').toBe(2500);
+
+  /**
+   * 🔴 **ホイールで送っている間だけ、透明な蓋が一番手前に来る**(#1467。`wheel-calm.ts`)。
+   * ⚠ 蓋の効き目(本文を辿らずに hit-test が止まる)は「その点の一番手前が蓋であること」で見る。
+   *   見た目と寸法が変わらないこと・送り終われば押せることも同じ道中で見る(unit は版面も hit-test も持たない)。
+   */
+  const pt = { x: 720, y: 450 };
+  const probe = async (): Promise<{ cover: boolean; inBody: boolean }> =>
+    page.evaluate(({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      return {
+        cover: el?.closest('[data-pkc-field="wheel-shield-cover"]') !== null && el !== null,
+        inBody: el?.closest('[data-pkc-field="detail-body"]') != null,
+      };
+    }, pt);
+  expect(await page.locator('[data-pkc-field="wheel-shield"]').count(), 'ホイールの前から蓋の枠が在る').toBe(0);
+  const before = await probe();
+  expect(before, '送る前は本文が一番手前').toEqual({ cover: false, inBody: true });
+  await page.mouse.move(pt.x, pt.y);
+  // ⚠ 蓋は「ホイールの後の最初の scroll」で出る(wheel の中では出さない)── 送りが始まるまで数フレーム要るので、
+  //   続けて送ってから(最後のホイールの直後に)見る
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, 60);
+    await page.waitForTimeout(30);
+  }
+  expect(await probe(), '送っている間、蓋が一番手前に来ない(hit-test が本文を辿る)').toEqual({ cover: true, inBody: false });
+  // 蓋は読む面の下端に貼り付いている(面の外の列 ── 左の一覧・右の情報 ── まで覆わない / 送っても画面の中に居る)
+  const rects = await page.evaluate((sel) => {
+    const r = document.querySelector<HTMLElement>(sel)!.getBoundingClientRect();
+    const c = document.querySelector<HTMLElement>('[data-pkc-field="wheel-shield-cover"]')!.getBoundingClientRect();
+    const f = document.querySelector<HTMLElement>('[data-pkc-field="wheel-shield"]')!.getBoundingClientRect();
+    return { dFrame: Math.abs(f.bottom - r.bottom), dBottom: Math.abs(c.bottom - r.bottom), dLeft: Math.abs(c.left - r.left), dRight: Math.abs(c.right - r.right) };
+  }, box);
+  expect(rects.dFrame, '蓋の枠が下端に貼り付いていない(文書の末尾に居る。途中まで送ると蓋が画面の外)').toBeLessThan(2);
+  expect(rects.dBottom, '蓋の下端が読む面の下端と合っていない(貼り付いていない)').toBeLessThan(20);
+  expect(Math.max(rects.dLeft, rects.dRight), '蓋の横幅が読む面と合っていない(隣の列まで覆う)').toBeLessThan(20);
+  await page.waitForTimeout(400);
+  expect(await probe(), '送り終わっても蓋が残っている(本文が押せない)').toEqual({ cover: false, inBody: true });
+  // 蓋は見えず、寸法も変えない
+  const shield = await page.evaluate((sel) => {
+    const frame = document.querySelector<HTMLElement>('[data-pkc-field="wheel-shield"]')!;
+    const cover = frame.firstElementChild as HTMLElement;
+    const r = document.querySelector<HTMLElement>(sel)!;
+    return {
+      frameH: frame.getBoundingClientRect().height,
+      coverDisplay: getComputedStyle(cover).display,
+      last: r.lastElementChild === frame,
+      sh: r.scrollHeight,
+    };
+  }, box);
+  expect(shield, '蓋の枠が高さを持った / 蓋が出たまま / 末尾でない').toMatchObject({ frameH: 0, coverDisplay: 'none', last: true });
+  expect(shield.sh, '蓋の枠が文書の高さを変えた').toBe(size.sh);
+  // 送り終わった後の押しが本文に届く(蓋に吸われない)
+  await page.evaluate(() => {
+    (window as unknown as { __hit: Element[] }).__hit = [];
+    document.addEventListener('click', (e) => (window as unknown as { __hit: Element[] }).__hit.push(e.target as Element), { capture: true });
+  });
+  await page.mouse.click(pt.x, pt.y);
+  const hit = await page.evaluate(() => {
+    const t = (window as unknown as { __hit: Element[] }).__hit[0];
+    return t === undefined ? null : { cover: t.closest('[data-pkc-field="wheel-shield-cover"]') !== null, inBody: t.closest('[data-pkc-field="detail-body"]') !== null };
+  });
+  expect(hit, '送り終わった後の押しが本文に届かない').toEqual({ cover: false, inBody: true });
   expect(errors, 'page error が出た').toEqual([]);
 });
 

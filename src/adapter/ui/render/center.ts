@@ -14,6 +14,7 @@ import { SettingsRenderer } from './settings';
 import { FlagsRenderer } from './flags';
 import { HelpRenderer } from './help';
 import { QueryRenderer } from './query';
+import { installWheelCalm } from './wheel-calm';
 import { ScrollMemory } from './scroll-memory';
 import { DualFilerRenderer } from './dual-filer';
 import { ScheduleRenderer } from './schedule';
@@ -211,6 +212,8 @@ export class CenterRouter {
     this.bar.append(close);
     region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);
+    // 🔑 ホイールで送っている間は本文を当たり判定の外へ(#1467。長いノートの hit-test を省く)
+    installWheelCalm(region);
     /**
      * ⚠ **`now` は板にも渡す**(2026-08-23)。札の日付は「今年なら `MM/DD`」で
      *   出すので、渡さないと test が**年を跨いだ日に落ちる**
