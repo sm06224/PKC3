@@ -139,6 +139,9 @@ port の規則(並行に回す・変異試験で回す):
 PKC3_SMOKE_PORT=<他と被らない番号> CI=1 npx playwright test -c tests/smoke/playwright.config.ts <spec>
 ```
 
+- 🔴 **`npx playwright` を直に叩かず、`npm run test:smoke -- <spec>` で回す**(2026-10-11)。直に叩くと
+  別の `headless_shell` の path を見て `Executable doesn't exist` で落ちた(製品の不具合ではない)。
+  環境変数は同じく前置きでよい:`PKC3_SMOKE_PORT=N CI=1 npm run test:smoke -- <spec>`
 - `CI=1` は、既に上がっている preview を**使い回させない**ため
 - `PKC3_SMOKE_PORT` / `PKC3_PLAIN_PORT` / `PKC3_SUBPATH_PORT` の **3 つを agent ごとに固有**にし、
   **10 刻み**(4825x / 4826x …)で帯ごと渡す(config は `PORT + 1` / `PORT + 2` も握る)。

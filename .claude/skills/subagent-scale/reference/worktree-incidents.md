@@ -444,6 +444,23 @@ agent は `cd <自分の worktree>` で `No such file or directory` を見て止
 (この日がまさにそれだった ── 4 本とも同じ字面だった)。
 🔑 **検算は 1 つ:いま飛んでいる依頼文を並べて、branch 名が全部違うか。**
 
+## 🔴 branch 名 `work` を全員に配ると、他人の変更が index に staged で現れる(2026-10-11)
+
+⚠ 上の節は `x` の例だが、**`work` のように「それらしい名前」でも同じ**である。
+
+実例:実装の依頼文の段 0 に `git checkout -B work origin/main` と書いて 3 本(#1407 / #529 / #530)を
+並行に投げた。🔴 **3 つの worktree が同じ `work` を作り**、ある worktree の index に**他の担当の
+31〜37 file が staged で現れた**(1 本は気づいて切り離し、残りは `git status` を見て初めて分かった)。
+⚠ `git add -A` / `git commit -a` をしていたら、**他人の変更を自分の commit に混ぜていた**。
+
+| | |
+|---|---|
+| 🔴 **見分け方** | 自分が触っていない file が `git status` に staged で出る。`git log` の先頭が自分のものでない |
+| 🔑 **直し方** | 段 0 の branch 名を**作業ごとに固有**にする:`i<issue>-<主題>`(例 `i1407-pptx-import`)。`work` / `x` / `main2` を書かない |
+| ⚠ **commit の前に** | `git diff --cached --stat` で、**自分が触った file だけ**かを見る(違えば index を空にして足し直す。他人の worktree には触らない) |
+
+🔑 検算は上の節と同じ:**飛んでいる依頼文を並べて、branch 名が全部違うか。**
+
 ## 🔴 worktree の**置き場所**も agent ごとに違う名前にし、**作ったことを外から確かめる**(2026-09-25、#1045)
 
 ⚠ 上の branch 名の節は `refs` の衝突だが、こちらは**作業ツリーそのもの**を取り違えた。
