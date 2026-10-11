@@ -265,7 +265,7 @@ export class CapturesRenderer {
    * |---|---|
    * | 切り出せない形 | **口を出さず、理由を 1 行**(押しても断るだけの口を作らない) |
    * | 印が片方だけ | 「切り出す」を**出さない** ── 押しても範囲が決まらない |
-   * | 動画 | 何も出さない(いまは音だけ) |
+   * | 動画 | 音と同じ(映像が VP8 の webm だけ。他は理由を 1 行) |
    */
   /**
    * 🔴 **印の帯だけを差し替える**(#683 段②a)。
@@ -322,7 +322,7 @@ export class CapturesRenderer {
      */
     const about = document.createElement('span');
     about.setAttribute('data-pkc-field', 'capture-trim');
-    about.textContent = trimMarkText(startMs, endMs);
+    about.textContent = trimMarkText(startMs, endMs, item.kind);
     if (trimNoteFirst(startMs, endMs)) bar.append(about);
     const mark = document.createElement('button');
     mark.type = 'button';
@@ -334,7 +334,8 @@ export class CapturesRenderer {
      *   走っている物が終わった瞬間に `CLEAR_CAPTURE_TRIM` で**打ち直した印ごと消える**。
      */
     mark.disabled = this.trimBusy;
-    mark.title = 'いま鳴っている所を、切り出しの始まりにします。';
+    mark.title =
+      item.kind === 'video' ? 'いま見ている所を、切り出しの始まりにします。' : 'いま鳴っている所を、切り出しの始まりにします。';
     bar.append(mark);
 
     const until = document.createElement('button');
@@ -343,7 +344,8 @@ export class CapturesRenderer {
     until.setAttribute('data-pkc-field', 'capture-trim-end');
     until.textContent = 'ここを終わりにする';
     until.disabled = this.trimBusy;
-    until.title = 'いま鳴っている所を、切り出しの終わりにします。';
+    until.title =
+      item.kind === 'video' ? 'いま見ている所を、切り出しの終わりにします。' : 'いま鳴っている所を、切り出しの終わりにします。';
     bar.append(until);
 
     if (startMs !== null && endMs !== null) {
@@ -360,7 +362,9 @@ export class CapturesRenderer {
       run.disabled = this.trimBusy;
       run.title = this.trimBusy
         ? 'いま切り出しています。終わるまでお待ちください。'
-        : 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
+        : item.kind === 'video'
+          ? 'この範囲だけを新しい動画として保存します(元はそのまま残ります)。'
+          : 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
       bar.append(run);
 
       const clear = document.createElement('button');

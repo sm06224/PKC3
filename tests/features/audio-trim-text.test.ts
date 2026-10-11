@@ -78,6 +78,17 @@ describe('印の出方', () => {
     expect(trimMarkText(null, null)).toContain('「ここを終わりにする」');
   });
 
+  it('🔴 動画では「見ながら」「新しい動画」と言う(「録音」と書いた字を動画に出さない)', () => {
+    const v = trimMarkText(null, null, 'video');
+    expect(v).toContain('「ここを始まりにする」');
+    expect(v).toContain('新しい動画');
+    expect(v).not.toContain('録音');
+    // 音は今までどおり
+    expect(trimMarkText(null, null, 'audio')).toContain('新しい録音');
+    // 印が付いた後の字は音と動画で同じ(1 本の関数)
+    expect(trimMarkText(12_000, 65_000, 'video')).toBe(trimMarkText(12_000, 65_000));
+  });
+
   it('🔴 片方だけのときは、もう片方を押せと書く', () => {
     expect(trimMarkText(12_000, null)).toBe('ここから 0:12。「ここを終わりにする」も押してください');
     expect(trimMarkText(null, 65_000)).toBe('ここまで 1:05。「ここを始まりにする」も押してください');
@@ -108,14 +119,36 @@ describe('切り出せる形か(押し所を出す前の門)', () => {
 
   it('🔴 それ以外は出さない ── 押しても断るだけの口を作らない', () => {
     expect(canTrimCapture(item({ mime: 'audio/mp4' }))).toBe(false);
-    expect(canTrimCapture(item({ kind: 'video', mime: 'video/webm' }))).toBe(false);
+    expect(canTrimCapture(item({ kind: 'video', mime: 'video/mp4' }))).toBe(false);
     expect(canTrimCapture(item({ assetKey: null }))).toBe(false);
+    expect(canTrimCapture(item({ kind: 'video', mime: 'video/webm', assetKey: null }))).toBe(false);
   });
 
-  it('🔴 出せない理由は、音のときだけ書く', () => {
-    // ⚠ 動画と、中身の無い行には**字も出さない**(切り出しの話が画面に無い)
-    expect(trimUnavailableText(item({ kind: 'video', mime: 'video/webm' }))).toBeNull();
+  it('🔴 動画は webm で、映像が VP8 のもの(または何も書いていないもの)だけ切り出せる(#683 段②b-1)', () => {
+    const v = (mime: string) => item({ kind: 'video', mime });
+    expect(canTrimCapture(v('video/webm'))).toBe(true);
+    expect(canTrimCapture(v('video/webm;codecs=vp8,opus'))).toBe(true);
+    expect(canTrimCapture(v('video/webm; codecs="vp8, opus"')), '引用符つきで落ちている').toBe(true);
+    expect(canTrimCapture(v('VIDEO/WEBM;CODECS=VP8')), '大文字で落ちている').toBe(true);
+    // VP9 / AV1 / H.264 はキーフレームの印が違う ── 出さない
+    expect(canTrimCapture(v('video/webm;codecs=vp9,opus'))).toBe(false);
+    expect(canTrimCapture(v('video/webm;codecs=av1'))).toBe(false);
+    // ⚠ 音の mime を動画の行に当てても通らない(種類が食い違う)
+    expect(canTrimCapture(item({ kind: 'video', mime: 'audio/webm' }))).toBe(false);
+    expect(canTrimCapture(item({ kind: 'audio', mime: 'video/webm' }))).toBe(false);
+  });
+
+  it('🔴 出せない理由は、音と動画で字を分けて書く(中身の無い行には書かない)', () => {
+    // ⚠ 中身の無い行には**字も出さない**(切り出しの話が画面に無い)
     expect(trimUnavailableText(item({ assetKey: null }))).toBeNull();
+    expect(trimUnavailableText(item({ kind: 'video', mime: 'video/webm' })), '切れる動画に理由が出ている').toBeNull();
+    // 🔑 動画に「録音」と書かない
+    expect(trimUnavailableText(item({ kind: 'video', mime: 'video/mp4' }))).toBe(
+      'この形の動画はまだ切り出せません。',
+    );
+    expect(trimUnavailableText(item({ kind: 'video', mime: 'video/webm;codecs=vp9' }))).toBe(
+      'この形の動画はまだ切り出せません。',
+    );
     // 🔑 音なのに切り出せない形 = ここだけ理由を出す
     expect(trimUnavailableText(item({ mime: 'audio/mp4' }))).toBe(
       'この形の録音はまだ切り出せません。',

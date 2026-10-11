@@ -627,10 +627,37 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     expect(mark()?.disabled, '走っている間に印を打ち直せる').toBe(true);
   });
 
-  it('⚠ 動画には切り出しの字を 1 つも出さない(いまは音だけ)', async () => {
+  it('🔴 画面収録(VP8 の webm)にも、音と同じ押し所が出る ── 字は「動画」', async () => {
     const host = await paneReady(playing('b'));
-    expect(field(host, 'b', 'capture-trim-start')).toBeNull();
-    expect(field(host, 'b', 'capture-trim-note')).toBeNull();
+    expect(field(host, 'b', 'capture-trim-start'), '切れる動画に押し所が出ていない').not.toBeNull();
+    expect(field(host, 'b', 'capture-trim-end')).not.toBeNull();
+    expect(field(host, 'b', 'capture-trim-note'), '切れるのに理由が出ている').toBeNull();
+    const about = field(host, 'b', 'capture-trim')?.textContent ?? '';
+    expect(about).toContain('新しい動画');
+    expect(about, '動画の行に「録音」と出ている').not.toContain('録音');
+    expect(field(host, 'b', 'capture-trim-start')?.title).toContain('見ている');
+    // 対照群 ── 音の行は今までの字
+    const audio = await paneReady(playing('a'));
+    expect(field(audio, 'a', 'capture-trim')?.textContent).toContain('新しい録音');
+  });
+
+  it('🔴 切れない形の動画(VP9 / mp4)は、押し所を出さず理由を 1 行(動画の字)', async () => {
+    for (const mime of ['video/webm;codecs=vp9,opus', 'video/mp4']) {
+      const items = captureItemsFrom([{ lid: 'v', title: 'v', body: body('画面収録.webm', mime) }]);
+      const host = await paneReady({ captureItems: items, capturePlayingLid: 'v' });
+      expect(field(host, 'v', 'capture-trim-start'), `${mime}: 切れないのに押し所が出ている`).toBeNull();
+      expect(field(host, 'v', 'capture-trim-note')?.textContent).toBe('この形の動画はまだ切り出せません。');
+    }
+  });
+
+  it('🔴 動画でも、範囲が決まれば「この範囲で切り出す」が出て、字は「新しい動画」', async () => {
+    const p = pane(playing('b', { lid: 'b', startMs: 1000, endMs: 5000 }), lender());
+    await Promise.resolve();
+    await Promise.resolve();
+    p.paint();
+    const run = p.host.querySelector<HTMLButtonElement>('[data-pkc-field="capture-trim-run"]');
+    expect(run?.textContent).toBe('この範囲で切り出す');
+    expect(run?.title).toContain('新しい動画');
   });
 });
 

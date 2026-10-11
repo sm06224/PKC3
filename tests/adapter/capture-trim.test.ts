@@ -14,6 +14,8 @@ import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { captureItemsFrom } from '../../src/features/capture/capture-item';
 import type { AudioTrimResult } from '../../src/adapter/platform/audio/audio-codec';
+import type { VideoCutResult, VideoScanResult } from '../../src/adapter/platform/video/video-codec';
+import type { VideoScan } from '../../src/features/video/webm-vp8';
 import type { AttachItem } from '../../src/adapter/ui/actions/attach';
 import { sanitizeMessageText } from '../../src/features/message/message-log';
 
@@ -47,6 +49,22 @@ const cut = (): AudioTrimResult => ({
   sourceBytes: 38_456,
 });
 
+/** 動画の走査の答え(始まりが `snapBackMs` だけ手前へ戻る)。 */
+const scanned = (snapBackMs: number, startMs = 12_000): VideoScanResult => ({
+  ok: true,
+  scan: { videoTrack: 1 } as unknown as VideoScan,
+  snappedStartMs: startMs - snapBackMs,
+  snapBackMs,
+});
+const videoCut = (): VideoCutResult => ({
+  ok: true,
+  blob: new Blob([new Uint8Array(8)], { type: 'video/webm' }),
+  durationMs: 56_000,
+  snappedStartMs: 9_000,
+  keptVideo: 100,
+  keptAudio: 90,
+});
+
 function harness(
   over: Partial<Parameters<typeof createCaptureTrimmer>[0]> = {},
   stateOver: Partial<AppState> = {},
@@ -71,6 +89,9 @@ function harness(
     dispatcher,
     readBlob: vi.fn(async () => new Blob([new Uint8Array(16)], { type: 'audio/webm' })),
     trim: vi.fn(async () => cut()),
+    scanVideo: vi.fn(async () => scanned(3_000)),
+    cutVideo: vi.fn(async () => videoCut()),
+    confirm: vi.fn(async () => true),
     attach: vi.fn(async (item: AttachItem) => {
       attached.push(item);
       return { lid: 'new', assetKey: 'k-2', mime: item.type, hash: 'h' };
@@ -432,5 +453,128 @@ describe('進行中の字の後始末(#1017 C5)', () => {
     const h = harness();
     await h.trimmer.run('a', 1000, 1000);
     expect(h.notes, '出していない進行中の字を消す字を撃った').toEqual([]);
+  });
+});
+
+
+/**
+ * 🔴 **動画の切り出し**(#683 段②b-1)。
+ * ⚠ 守るのは user の受け取り:①始まりが手前へ戻るなら**切る前に裁定の文言で確認**する
+ *   ②やめたら**何も作らず・印も残す** ③戻らないなら**確認は出ない** ④断る理由は動画の字で出る。
+ */
+describe('動画を切り出す(#683 段②b-1)', () => {
+  const VIDEO = (): Partial<AppState> => ({ captureItems: ITEMS('video/webm') });
+
+  it('🔴 始まりが手前へ戻るなら、何秒早くなるかを言う確認が出てから切る', async () => {
+    const h = harness({}, VIDEO());
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.deps.confirm).toHaveBeenCalledTimes(1);
+    expect(h.deps.confirm).toHaveBeenCalledWith(
+      '始まりを一番近い区切りに合わせて切り出します。始まりが約 3.0 秒早くなります(0:12 → 0:09)',
+      { okLabel: '切り出す', cancelLabel: 'やめる' },
+    );
+    // 確認の後に切っている(順番)
+    const order = (f: unknown): number => (f as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0]!;
+    expect(order(h.deps.scanVideo)).toBeLessThan(order(h.deps.confirm));
+    expect(order(h.deps.confirm)).toBeLessThan(order(h.deps.cutVideo));
+    expect(h.attached).toHaveLength(1);
+    expect(h.deps.trim, '動画なのに音の道を通っている').not.toHaveBeenCalled();
+  });
+
+  it('🔴 [やめる] なら何も作らない(切りもしない)・印は残る', async () => {
+    const h = harness({ confirm: vi.fn(async () => false) }, VIDEO());
+    h.dispatcher.dispatch({ type: 'SET_CAPTURE_PLAYING', lid: 'a' });
+    h.dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'start', ms: 12_000 });
+    h.dispatcher.dispatch({ type: 'SET_CAPTURE_TRIM_MARK', edge: 'end', ms: 65_000 });
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.attached, 'やめたのに作っている').toHaveLength(0);
+    expect(h.deps.cutVideo, 'やめたのに切っている').not.toHaveBeenCalled();
+    expect(error(h.dispatcher), 'やめたのに失敗が出ている').toBeNull();
+    expect(h.dispatcher.getState().captureTrim, '印が消えた ── 押し直せなくなる').toEqual({
+      lid: 'a',
+      startMs: 12_000,
+      endMs: 65_000,
+    });
+    expect(h.trimmer.busy, '錠が残っている').toBe(false);
+    expect(h.dispatcher.getState().captureTrimBusy).toBe(false);
+    // 「切り出しています…」が残らない
+    expect(h.notes[h.notes.length - 1]).toBe('');
+  });
+
+  it('🔴 押した所がちょうどキーフレームなら、確認は出ない', async () => {
+    const h = harness({ scanVideo: vi.fn(async () => scanned(0)) }, VIDEO());
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.deps.confirm, '戻らないのに確認が出ている').not.toHaveBeenCalled();
+    expect(h.attached).toHaveLength(1);
+  });
+
+  it('🔴 動画の添付は元と同じ形(video/webm)・名前は実際に始まる所(手前へ戻った後)', async () => {
+    const h = harness({}, VIDEO());
+    await h.trimmer.run('a', 12_000, 65_000);
+    // 走査の答えは 12 秒 - 3 秒 = 9 秒始まり → 名前に 0:09
+    expect(h.attached[0]!.name).toBe('録音-2026-09-12-143000 (0:09〜1:05).webm');
+    expect(h.attached[0]!.type).toBe('video/webm');
+    expect(h.attached[0]!.size).toBe(8);
+    expect(h.attached[0]!.blob).toBeInstanceOf(Blob);
+    expect(h.notes[h.notes.length - 1]).toContain('(0:56)');
+    // 🔴 済んだ後の一行にも「何秒早く始まるか」が残る
+    expect(h.notes[h.notes.length - 1]).toContain('押した所より約 3.0 秒早く始まります');
+  });
+
+  it('🔴 戻らなかったなら、済んだ後の一行に「早く始まります」は付かない', async () => {
+    const h = harness({ scanVideo: vi.fn(async () => scanned(0)) }, VIDEO());
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.notes[h.notes.length - 1]).toContain('切り出しました');
+    expect(h.notes[h.notes.length - 1]).not.toContain('早く始まります');
+  });
+
+  it('🔴 切り出せない形は動画の字で断る(確認も切りも無し)', async () => {
+    const h = harness(
+      { scanVideo: vi.fn(async () => ({ ok: false as const, reason: 'not-vp8' as const })) },
+      VIDEO(),
+    );
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(error(h.dispatcher)).toBe('この動画は切り出しに対応していない映像の形式です。');
+    expect(h.deps.confirm).not.toHaveBeenCalled();
+    expect(h.deps.cutVideo).not.toHaveBeenCalled();
+  });
+
+  it('🔴 切る段で断られても、動画の字で出す', async () => {
+    const h = harness(
+      { cutVideo: vi.fn(async () => ({ ok: false as const, reason: 'broken' as const })) },
+      VIDEO(),
+    );
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(error(h.dispatcher)).toBe('この動画は途中までしか読めませんでした。');
+    expect(h.attached).toHaveLength(0);
+  });
+
+  it('🔴 中身が消えていたら「動画」と言う(「録音」と言わない)', async () => {
+    const h = harness({ readBlob: vi.fn(async () => null) }, VIDEO());
+    await h.trimmer.run('a', 0, 1000);
+    expect(error(h.dispatcher)).toBe('この動画の中身が見つかりませんでした。');
+  });
+
+  it('⚠ 音の行は走査も確認も通らない(動画の道に音を乗せない)', async () => {
+    const h = harness();
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(h.deps.scanVideo).not.toHaveBeenCalled();
+    expect(h.deps.confirm).not.toHaveBeenCalled();
+    expect(h.deps.trim).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 確認を待つ間も錠は掛かっている(2 本目は断る)', async () => {
+    let answer: (v: boolean) => void = () => {};
+    const h = harness({ confirm: vi.fn(() => new Promise<boolean>((r) => (answer = r))) }, VIDEO());
+    const first = h.trimmer.run('a', 12_000, 65_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.trimmer.busy).toBe(true);
+    await h.trimmer.run('a', 12_000, 65_000);
+    expect(error(h.dispatcher)).toContain('待ってください');
+    answer(false);
+    await first;
+    expect(h.trimmer.busy).toBe(false);
   });
 });

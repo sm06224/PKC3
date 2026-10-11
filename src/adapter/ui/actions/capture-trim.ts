@@ -25,7 +25,10 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { TRIM_REFUSAL_TEXT } from '@features/audio/webm-opus';
 import { trimmedCaptureName } from '@features/audio/trim-text';
 import { elapsedText } from '@features/elapsed-text';
+import { VIDEO_TRIM_REFUSAL_TEXT, type VideoScan } from '@features/video/webm-vp8';
+import { snapConfirm, snapDoneNote } from '@features/video/video-trim-text';
 import type { AudioTrimResult } from '@adapter/platform/audio/audio-codec';
+import type { VideoCutResult, VideoScanResult } from '@adapter/platform/video/video-codec';
 import type { AttachItem, AttachedOne } from './attach';
 import { canWriteBody } from './writable-queue';
 
@@ -51,6 +54,15 @@ export interface CaptureTrimDeps {
   readonly readBlob: (assetKey: string) => Promise<Blob | null>;
   /** 切る口(ワーカー)。⚠ **断る理由は値で返る**(例外にしない)。 */
   readonly trim: (blob: Blob, startMs: number, endMs: number) => Promise<AudioTrimResult>;
+  /**
+   * 🔴 **動画の走査**(#683 段②b-1)。始まりがどこへ戻るかを、**切る前に**知るための口。
+   * ⚠ 断る理由は値で返る(例外にしない)。
+   */
+  readonly scanVideo: (blob: Blob, startMs: number, endMs: number) => Promise<VideoScanResult>;
+  /** 動画を切る口(走査の結果を使う)。出力は `Blob`(元の部品を指す = コピーしない)。 */
+  readonly cutVideo: (blob: Blob, scan: VideoScan, startMs: number, endMs: number) => Promise<VideoCutResult>;
+  /** 確認を出す口(アプリ自身の `<dialog>`)。⚠ `true` = 切り出す。 */
+  readonly confirm: (message: string, opts: { okLabel: string; cancelLabel: string }) => Promise<boolean>;
   /** bytes を添付にする口。⚠ **`attachOne` を通す**(2 つ目の取込口を作らない)。 */
   readonly attach: (item: AttachItem) => Promise<AttachedOne | null>;
   /** 一時の知らせ(エラーの行とは別)。 */
@@ -88,9 +100,11 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
       const items = deps.dispatcher.getState().captureItems ?? [];
       const item = items.find((i) => i.lid === lid);
       if (item === undefined || item.assetKey === null) {
-        fail('この録音が見つかりませんでした。');
+        fail('この添付が見つかりませんでした。');
         return;
       }
+      // 🔑 「録音」と書いた字が動画の行にも出ない(種類は行が持つ)
+      const noun = item.kind === 'video' ? '動画' : '録音';
       if (!(endMs > startMs)) {
         fail('切り出す範囲を「ここを始まりにする」「ここを終わりにする」で決めてください。');
         return;
@@ -106,7 +120,12 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
       }
       running = true;
       mark(true);
-      deps.notify('切り出しています…');
+      /**
+       * ⚠ 「切り出しています…」を出す所は**ここ 1 か所**にする(動画は確認の後でもう一度出す)──
+       *   出す側を増やすと `status-lifetime.test.ts` の全数(終わりの合図の表)が増える。
+       */
+      const announceRunning = (): void => deps.notify('切り出しています…');
+      announceRunning();
       /**
        * 🔴 **完了の字を出したら true**(#1017 C5)。⚠ 直す前は、どの失敗の枝でも
        *   「切り出しています…」が画面下に**残った**。失敗の出口は `return` が 6 本あるので、
@@ -116,15 +135,60 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
       try {
         const blob = await deps.readBlob(item.assetKey);
         if (blob === null) {
-          fail('この録音の中身が見つかりませんでした。');
+          fail(`この${noun}の中身が見つかりませんでした。`);
           return;
         }
-        const cut = await deps.trim(blob, startMs, endMs);
-        if (!cut.ok) {
-          fail(TRIM_REFUSAL_TEXT[cut.reason]);
-          return;
+        /**
+         * 🔴 **切った結果を 1 つの形に揃える**(音は bytes / 動画は元の部品を指す `Blob`)。
+         * `nameStartMs` ── 名前に書く始まり。⚠ 動画は**実際に始まる所**(手前へ戻った後)を書く
+         *   (名前が「押した所」を言うと、中身とずれて見える)。
+         */
+        let made: { blob: Blob; size: number; durationMs: number; nameStartMs: number; snapBackMs: number };
+        if (item.kind === 'video') {
+          const scanned = await deps.scanVideo(blob, startMs, endMs);
+          if (!scanned.ok) {
+            fail(VIDEO_TRIM_REFUSAL_TEXT[scanned.reason]);
+            return;
+          }
+          /**
+           * 🔴 **始まりが押した所より手前になるときだけ、確認する**(裁定の文言。設計 doc §1.1)。
+           * ⚠ 「切り出しています…」を出したまま問うと、動いていないのに動いて見える ── 問う間は消す。
+           * 🔑 やめたら**何も作らない・印も残す**(押し直せば同じものが作れる)。
+           */
+          const ask = snapConfirm(scanned.snapBackMs, startMs);
+          if (ask.needed) {
+            deps.notify('');
+            const go = await deps.confirm(ask.message, { okLabel: ask.okLabel, cancelLabel: ask.cancelLabel });
+            if (!go) return;
+            announceRunning();
+          }
+          const out = await deps.cutVideo(blob, scanned.scan, startMs, endMs);
+          if (!out.ok) {
+            fail(VIDEO_TRIM_REFUSAL_TEXT[out.reason]);
+            return;
+          }
+          made = {
+            blob: out.blob,
+            size: out.blob.size,
+            durationMs: out.durationMs,
+            nameStartMs: out.snappedStartMs,
+            snapBackMs: scanned.snapBackMs,
+          };
+        } else {
+          const cut = await deps.trim(blob, startMs, endMs);
+          if (!cut.ok) {
+            fail(TRIM_REFUSAL_TEXT[cut.reason]);
+            return;
+          }
+          made = {
+            blob: new Blob([cut.bytes], { type: item.mime.split(';')[0]!.trim() }),
+            size: cut.bytes.byteLength,
+            durationMs: cut.durationMs,
+            nameStartMs: startMs,
+            snapBackMs: 0,
+          };
         }
-        const name = trimmedCaptureName(item.name, startMs, endMs);
+        const name = trimmedCaptureName(item.name, made.nameStartMs, endMs);
         /**
          * ⚠ **引数を落とす**(着地前レビュー 2-B)── `;codecs=opus` のまま持ち回ると、
          *   拡張子の逆引きに当たらず**書き出しの名前が `.bin` になる**(#205 と同じ形。
@@ -150,8 +214,8 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
           name,
           // 🔑 **元と同じ形**(裁定)── 入れ物も codec も変えないので mime も変えない
           type: mime,
-          size: cut.bytes.byteLength,
-          blob: new Blob([cut.bytes], { type: mime }),
+          size: made.size,
+          blob: made.blob.type === mime ? made.blob : made.blob.slice(0, made.blob.size, mime),
         });
         if (attached === null) {
           // 🔑 具体的な理由が既に出ていれば、それを残す(汎用の字で塗り潰さない)
@@ -181,7 +245,8 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
          */
         deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
         finished = true; // ⚠ 次の「切り出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)
-        deps.notify(`切り出しました:「${name}」(${elapsedText(cut.durationMs)})`);
+        // 🔑 戻ったときは、済んだ後の一行にも「何秒早く始まるか」を残す(確認で見た数字を後から確かめられる)
+        deps.notify(`切り出しました:「${name}」(${elapsedText(made.durationMs)})${snapDoneNote(made.snapBackMs)}`);
       } catch (e: unknown) {
         fail(`切り出せませんでした(${String(e)})`);
       } finally {
