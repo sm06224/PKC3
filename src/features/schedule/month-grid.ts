@@ -36,6 +36,27 @@ export function getMonthGrid(year: number, month: number): (number | null)[][] {
   return weeks;
 }
 
+/**
+ * 小さな月で「いま見ている所」に印を付ける日(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 1 / 5)。
+ *
+ * | 見せ方 | 印 |
+ * |---|---|
+ * | 一覧 | 無し(見ている日が無い) |
+ * | 日 | その日の升目 1 つ(`day`) |
+ * | 週 | その週の 7 日(`week` ── 行ごと色を付ける) |
+ *
+ * 🔑 判断はここ 1 か所(描き手は呼ぶだけ)。`shown` は見ている日(`YYYY-MM-DD`)。
+ */
+export function viewedMarks(
+  mode: 'list' | 'day' | 'week',
+  shown: string,
+  weekDays: readonly string[],
+): { readonly day: string | null; readonly week: readonly string[] } {
+  if (mode === 'day') return { day: shown, week: [] };
+  if (mode === 'week') return { day: null, week: weekDays };
+  return { day: null, week: [] };
+}
+
 /** YYYY-MM-DD の日付キー。 */
 export function dateKey(year: number, month: number, day: number): string {
   return `${year}-${pad2(month)}-${pad2(day)}`;

@@ -56,6 +56,8 @@ import { GRID_LANE_SELECTOR } from './schedule-drag';
 /** 作った枠(入力欄つき)。 */
 export const GRID_CREATE_FIELD = 'schedule-create-box';
 export const GRID_CREATE_INPUT_FIELD = 'schedule-create-input';
+/** 作りかけの枠の右端の ×(#855)。押すと書かずに畳む(Esc と同じ ── 預かりも消える)。 */
+export const GRID_CREATE_CANCEL_FIELD = 'schedule-create-cancel';
 
 interface Press {
   readonly lane: HTMLElement;
@@ -197,7 +199,24 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
       // 空なら畳む / 字があれば残す(打った字を失わない)
       if (box?.input === input && input.value.trim() === '') closeBox();
     });
-    el.append(label, input);
+    /**
+     * 🔴 **マウスだけで閉じられる ×**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 9)。
+     * ⚠ 閉じ方は `Esc` と同じ 1 本(`closeBox`)── 字を打っていても、押したら捨てる
+     *   (押す物は「作るのをやめる」だけで、打った字を残す動きは Enter と焦点の外れが持つ)。
+     *   預かり(`parked`)は枠が開いた時点で `openBox` が消している ── 開いている枠の × で消す物は無い。
+     * 印は `::before`(`app.css`)、名前は `aria-label`。
+     */
+    const cancelBtn = doc.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.setAttribute('data-pkc-field', GRID_CREATE_CANCEL_FIELD);
+    cancelBtn.setAttribute('aria-label', '予定を作るのをやめる');
+    cancelBtn.title = '作らずにやめます';
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeBox();
+    });
+    el.append(label, input, cancelBtn);
     lane.append(el);
     box = { el, input, lane, date, startMin, endMin };
     input.focus();

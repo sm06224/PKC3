@@ -5993,6 +5993,18 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-color: var(--fg);
   font-weight: 700;
 }
+/* 🔴 **いま「日」で見ている日**(#855)── 今日の線(1px の枠)とは別に、**選択色の 2px の縁取り**で示す
+ *   (今日と重なっても見分けられる)。色は情報にだけ使う: 選んでいる物 = 選択色。 */
+[data-pkc-field='schedule-week'] > button[data-pkc-viewed] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  font-weight: 700;
+}
+/* 🔴 **いま「週」で見ている週**(#855)── 行ごと薄い選択色の地。字の色は変えない(読めるまま) */
+[data-pkc-field='schedule-week'][data-pkc-viewed-week] {
+  background: var(--accent-dim);
+  border-radius: var(--radius);
+}
 /* 予定のある日は**点**(件数は出さない ── 升目が読めなくなる) */
 [data-pkc-field='schedule-week'] > button[data-pkc-has]::after {
   content: '';
@@ -6009,6 +6021,12 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-drop-date][data-pkc-dropping] {
   outline: 2px solid var(--fg);
   outline-offset: -2px;
+}
+/* 🔴 **予定の窓の中では、左の列の「週」を隠す**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 4)。
+ *   左の「週」は別のウィンドウを開くボタンで、週の窓の中では今いるこの窓と重なる(中央の面の「週」は残す)。
+ *   印(`data-pkc-held-view`)は `view-window.ts` の `markHeldView` が付ける。 */
+[data-pkc-held-view='schedule'] [data-pkc-browse-pane] [data-pkc-field='schedule-modes'] [data-pkc-mode='week'] {
+  display: none;
 }
 [data-pkc-field='schedule-note'] {
   margin: 0;
@@ -6504,8 +6522,16 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   pointer-events: none;
 }
 
+/* 🔴 **空いた所は十字のカーソル**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 8)── ここをドラッグすると
+ *   予定の枠が作れる、という手がかり。札(`grab`)・縁の取っ手(`ns-resize`)・作りかけの枠(`default`)は
+ *   それぞれ自分のカーソルを持つので、十字になるのは何も無い所だけ。 */
+[data-pkc-field='schedule-day-lane'],
+[data-pkc-field='schedule-weekview-lane'] {
+  cursor: crosshair;
+}
 /* 空いた所をドラッグして作った予定の枠(#855 段 B-2)。位置は影と同じ変数から。入力欄を中に持つ */
 [data-pkc-field='schedule-create-box'] {
+  cursor: default;
   position: absolute;
   box-sizing: border-box;
   left: 0;
@@ -6528,6 +6554,34 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 1 時間に満たない枠は時刻の字を隠す(時刻は title / aria-label に残る)── 入力欄を全部見せるため */
 [data-pkc-field='schedule-create-box'][data-pkc-short] > [data-pkc-field='schedule-create-label'] {
   display: none;
+}
+/* 🔴 作りかけの枠を**マウスだけで閉じる ×**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 9)。
+ *   枠の右端に置く(短い枠の入力欄を覆わない小ささ)。印は字で置かない ── `::before`(名前は `aria-label`)。 */
+[data-pkc-field='schedule-create-cancel'] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+[data-pkc-field='schedule-create-cancel']::before {
+  content: '×';
+}
+[data-pkc-field='schedule-create-cancel']:hover {
+  color: var(--fg);
+  background: var(--surface-2);
+}
+/* ⚠ 入力欄の右端を × に譲る(重なって打てなくならないように) */
+[data-pkc-field='schedule-create-box'] > [data-pkc-field='schedule-create-input'] {
+  width: calc(100% - 18px);
 }
 [data-pkc-field='schedule-create-input'] {
   box-sizing: border-box;

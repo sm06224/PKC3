@@ -405,3 +405,18 @@ export function closeViewWindow(deps: CloseViewWindowDeps): CloseViewWindowResul
 /** `'refused'` のときに出す理由。⚠ **次に何をすればよいか**まで書く。 */
 export const CLOSE_VIEW_WINDOW_REFUSED =
   'このウィンドウはブラウザの制限で閉じられません(ブラウザのウィンドウ枠にある × で閉じてください)。本文に戻りました';
+
+/**
+ * 🔴 **この窓が、どの面のために開いた窓か**を、文書の印にする(#855。Gemini 裁定 = #1163 の
+ * コメント 6104130726 の 4)。
+ *
+ * 予定の窓の左の列には「一覧 / 日 / 週」が出るが、左の「週」は**別のウィンドウを開く**ボタン ──
+ * 週の窓の中では、いま見ているこの窓そのものと重なるので隠す(`app.css` が `data-pkc-held-view`
+ * を読む)。⚠ 判断は CSS の 1 規則(印を見るだけ)── ここは印を付け外しするだけ。
+ * `view === null`(アプリの窓ではない)なら印を外す。
+ */
+export const HELD_VIEW_ATTR = 'data-pkc-held-view';
+export function markHeldView(el: Element, view: string | null): void {
+  if (view === null) el.removeAttribute(HELD_VIEW_ATTR);
+  else el.setAttribute(HELD_VIEW_ATTR, view);
+}

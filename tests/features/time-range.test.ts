@@ -532,6 +532,8 @@ describe('本文を書き換えても、幅は 1 byte も変わらない', () =>
     let written: string | null = null;
     const stub = {
       getState: () => state,
+      // 動かした直後の「元に戻す」(#855)が書込の ack を待つために聞く
+      onState: () => () => undefined,
       dispatch: (action: Parameters<typeof reduce>[1]) => {
         const r = reduce(state, action);
         state = r.state;

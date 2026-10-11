@@ -279,7 +279,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-day-go', 'schedule-mode',
   'schedule-nav', 'schedule-quick-add',
-  'schedule-today', 'schedule-week-pick',
+  'schedule-today', 'schedule-undo-move', 'schedule-week-pick',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
    *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
@@ -469,6 +469,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       outsideActionsTable: x.outsideActionsTable.length,
       unregistered: x.unregistered,
     }).toEqual({
+      // ⚠ 2026-10-11(#855): 予定を動かした直後の「元に戻す」(`schedule-undo-move`)で受け手 +1 ── 登記は増えない
+      //   (押し口は予定の面の 1 行にしか無く、鍵も持たない。`undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-10(#1457): タグの色(`tag-color-pick` / `tag-color-clear`。押したバッジの名前が要る P1 ── `untag-entry` と同じ仕分け)で受け手 +2 ──
       //   登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-10(#1441): ログの日付の行(`toggle-log-day`)で受け手 +1 ── 登記は増えない(押し口は本文の日付の行にしか無い)。
@@ -760,12 +762,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-02(#215 段①②): 左の列の「PC」のタブの押し口 4 つ(`pc-pick-folder` / `pc-cut-folder` / `pc-more` /
       //   `pc-open-file`)で受け手 +4 ── 登記は増えない(押し口はタブの中にしか無く、鍵も持たない)。
       //   `receivers` +4 / `total` +4 / `unregistered` +4。
-      total: 397,
-      receivers: 331,
+      total: 398,
+      receivers: 332,
       registered: 109,
       both: 43,
       outsideActionsTable: 66,
-      unregistered: 288,
+      unregistered: 289,
     });
   });
 

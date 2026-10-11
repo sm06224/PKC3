@@ -36,7 +36,7 @@ import {
   type AgendaGroup,
   type AgendaItem,
 } from '@features/schedule/agenda';
-import { getMonthGrid, dateKey } from '@features/schedule/month-grid';
+import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-grid';
 import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
@@ -228,7 +228,7 @@ export class ScheduleRenderer {
     const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
 
     // 🔑 点は**束から**引く(下の docstring)── 期間の展開を 2 か所で決めない
-    this.paintMonth(frame, state, today, groups);
+    this.paintMonth(frame, state, today, groups, viewedMarks(mode, shown, weekOf(shown) ?? weekOf(today) ?? []));
     frame.note.textContent = this.noteText(
       state,
       all.length + notes.length,
@@ -326,6 +326,8 @@ export class ScheduleRenderer {
     state: AppState,
     today: string,
     groups: readonly AgendaGroup[],
+    /** 🔴 いま見ている日 / 週(#855。`viewedMarks`)── 升目と行に印を付ける。 */
+    marks: ReturnType<typeof viewedMarks>,
   ): void {
     const at = this.now();
     const year = state.calendarMonth?.year ?? at.getFullYear();
@@ -353,6 +355,9 @@ export class ScheduleRenderer {
     for (const week of getMonthGrid(year, month)) {
       const row = document.createElement('div');
       row.setAttribute('data-pkc-field', 'schedule-week');
+      // 🔴 見ている週は行ごと色を付ける(月外の空き枠も含めて 1 行 ── 週の途中で月が替わっても帯が切れない)
+      if (week.some((d) => d !== null && marks.week.includes(dateKey(year, month, d))))
+        row.setAttribute('data-pkc-viewed-week', '');
       for (const day of week) {
         if (day === null) {
           // ⚠ 月外は**空の枠**(落とせない)── 落とせるように見せない
@@ -370,6 +375,8 @@ export class ScheduleRenderer {
         cell.textContent = String(day);
         if (key === today) cell.setAttribute('data-pkc-today', '');
         if (has.has(key)) cell.setAttribute('data-pkc-has', '');
+        // 🔴 「日」で見ている日の升目(#855)── 押した結果がその場で見える
+        if (key === marks.day) cell.setAttribute('data-pkc-viewed', '');
         row.append(cell);
       }
       frame.grid.append(row);

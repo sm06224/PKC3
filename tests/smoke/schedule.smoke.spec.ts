@@ -459,9 +459,13 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
   await page
     .locator('[data-pkc-field="editor-body"]')
     .fill(
-      [`- [ ] 予定 A @${D0}`, `- [ ] 予定 B @${D0} 09:00`, `- [ ] 予定 C @${D0} 14:00`].join(
-        '\n',
-      ),
+      [
+        `- [ ] 予定 A @${D0}`,
+        `- [ ] 予定 B @${D0} 09:00`,
+        `- [ ] 予定 C @${D0} 14:00`,
+        // 🔴 30 日ぶんの長い一覧(動かした直後の「元に戻す」が、一覧の末尾でなく画面の下にあることを見る)
+        ...Array.from({ length: 30 }, (_, i) => `- [ ] 先の予定 ${i + 1} @${inMonth(BASE_DAY + 6 + i)}`),
+      ].join('\n'),
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-browse="schedule"]');
@@ -491,6 +495,48 @@ test('🔴 予定のある日とない日で、小さな月の升目の高さが
     new Set(all).size,
     `升目の高さが揃っていない(落とし先がずれる): ${JSON.stringify(heights)}`,
   ).toBe(1);
+
+  /**
+   * 🔴 **長い一覧(30 日ぶん)で札を小さな月へドロップしても、「元に戻す」は画面の中にある**
+   * (#855 の動線レビュー)。⚠ 1 行を一覧の末尾に置くと、長い一覧では画面の外になる ──
+   * 画面の下の知らせの隣なら、一覧の長さに関わらず見える。押すと元の日へ戻る。
+   * 起動を増やさない ── この道中の続き。
+   */
+  const listPane = page.locator('[data-pkc-browse-pane="schedule"]');
+  const firstCard = listPane
+    .locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D0}"] [data-pkc-entry]`)
+    .filter({ hasText: '予定 A' });
+  await expect(firstCard).toHaveCount(1);
+  const lastCard = listPane.locator('[data-pkc-entry]').filter({ hasText: '先の予定 30' });
+  await expect(lastCard, '前提: 長い一覧になっていない').toHaveCount(1);
+  const lastBottom = await lastCard.evaluate((e) => e.getBoundingClientRect().bottom);
+  expect(lastBottom, '前提: 一覧の末尾が画面の中にある(長くなっていない)').toBeGreaterThan(
+    page.viewportSize()!.height,
+  );
+  const fromBox = (await firstCard.boundingBox())!;
+  const toBox = (await listPane
+    .locator(`[data-pkc-field="schedule-week"] > button[data-pkc-drop-date="${D5}"]`)
+    .boundingBox())!;
+  await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + toBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+  const longUndo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(longUndo, '長い一覧で動かしたのに、「元に戻す」が出ていない').toBeVisible();
+  const lb = (await longUndo.boundingBox())!;
+  expect(lb.y >= 0 && lb.y + lb.height <= page.viewportSize()!.height, '「元に戻す」が画面の外にある').toBe(true);
+  /**
+   * 🔴 **スクロールでは降ろさない**(つまみのドラッグ・なぞって探す動き ── 以前は押した瞬間に降ろしていた)。
+   * ⚠ 本物のホイールで一覧を送っても、「元に戻す」は残る。
+   */
+  await listPane.hover();
+  await page.mouse.wheel(0, 300);
+  await expect(longUndo, '一覧をスクロールしたら「元に戻す」が消えた').toBeVisible();
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(
+    listPane.locator(`[data-pkc-region="schedule-group"][data-pkc-drop-date="${D0}"] [data-pkc-entry]`).filter({ hasText: '予定 A' }),
+    '「元に戻す」を押したのに、元の日へ戻らない',
+  ).toHaveCount(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -796,6 +842,29 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
       .locator(`[data-pkc-action="schedule-mode"][data-pkc-mode="${mode}"]`)
       .evaluate((e) => getComputedStyle(e).backgroundColor);
   expect(await bg('day'), '押している「日」が「一覧」と同じ色').not.toBe(await bg('list'));
+  /**
+   * 🔴 **小さな月で、いま「日」で見ている日の升目に印が付き、見た目の規則(縁取り)が実際に効く**
+   * (#855。Gemini 裁定 = #1163 のコメント 6104130726 の 1)。⚠ 属性が付いただけでは「付けた」しか言えない ──
+   * CSS に受け皿が無いと画面で見分けられないので、計算後の縁取りで見る(印の無い升目が対照群)。
+   */
+  const miniCell = (d: string) =>
+    pane.locator(`[data-pkc-field="schedule-week"] > button[data-pkc-drop-date="${d}"]`);
+  const ring = (loc: Locator) =>
+    loc.evaluate((e) => {
+      const c = getComputedStyle(e);
+      return { style: c.outlineStyle, width: c.outlineWidth, color: c.outlineColor };
+    });
+  await expect(miniCell(value), '「日」で見ている日の升目に印が付いていない').toHaveAttribute(
+    'data-pkc-viewed',
+    '',
+  );
+  const viewedRing = await ring(miniCell(value));
+  expect(viewedRing.style, '見ている日の升目に縁取りが効いていない').toBe('solid');
+  expect(viewedRing.width).toBe('2px');
+  const otherCell = pane
+    .locator('[data-pkc-field="schedule-week"] > button[data-pkc-drop-date]:not([data-pkc-viewed])')
+    .first();
+  expect((await ring(otherCell)).style, '印の無い升目にも縁取りが付いている(対照群)').toBe('none');
 
   /**
    * 🔴 **目盛りの上で札を 2 時間下へドラッグすると 16:00..17:00 になり、下の縁を 30 分引くと 17:30 になる**
@@ -811,17 +880,38 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await expect(whenOf, '前提: 札が 14:00〜15:00 と出ている').toHaveText('14:00〜15:00');
   const grab = (await dayCard.boundingBox())!;
   const gx = grab.x + grab.width * 0.6;
-  await page.mouse.move(gx, grab.y + 12);
-  await page.mouse.down();
-  await page.mouse.move(gx, grab.y + 12 + 30, { steps: 5 });
-  // 動かしている間: 動かす先に影が出て、時刻の字を言う
-  await page.mouse.move(gx, grab.y + 12 + 80, { steps: 8 });
-  await expect(
-    pane.locator('[data-pkc-field="schedule-drag-ghost"]'),
-    '動かしている間、動かす先の影が出ていない',
-  ).toHaveText('16:00〜17:00');
-  await page.mouse.up();
-  await expect(whenOf, '2 時間下へ動かしたのに、時刻が 16:00〜17:00 にならない').toHaveText('16:00〜17:00');
+  /** 札を 2 時間下へ動かす(14:00 → 16:00)。「元に戻す」の前後で 2 度使う。 */
+  const dragTwoHoursDown = async (): Promise<void> => {
+    const b = (await dayCard.boundingBox())!;
+    await page.mouse.move(gx, b.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(gx, b.y + 12 + 30, { steps: 5 });
+    // 動かしている間: 動かす先に影が出て、時刻の字を言う
+    await page.mouse.move(gx, b.y + 12 + 80, { steps: 8 });
+    await expect(
+      pane.locator('[data-pkc-field="schedule-drag-ghost"]'),
+      '動かしている間、動かす先の影が出ていない',
+    ).toHaveText('16:00〜17:00');
+    await page.mouse.up();
+    await expect(whenOf, '2 時間下へ動かしたのに、時刻が 16:00〜17:00 にならない').toHaveText('16:00〜17:00');
+  };
+  await dragTwoHoursDown();
+  /**
+   * 🔴 **動かした直後に「元に戻す」の 1 行が出て、押すと元の時刻へ戻る**(#855。Gemini 裁定 = #1163 の
+   * コメント 6104130726 の 6)。⚠ 起動を増やさない ── 動かした道中の続きで、戻して、もう一度動かす。
+   * 観測点は札の字(本文を走査し直して出る)と、1 行の出入り。
+   */
+  const undoBtn = page.locator('[data-pkc-field="status-undo"]');
+  await expect(undoBtn, '動かした直後に画面の下の「元に戻す」が出ていない').toBeVisible();
+  await expect(undoBtn).toHaveText('元に戻す');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('16:00〜17:00 へ動かしました');
+  // 見える所に出る(窓の外へ押し出されて、出ているのに読めない、を作らない)
+  const undoBox = (await undoBtn.boundingBox())!;
+  expect(undoBox.y + undoBox.height, '「元に戻す」が画面の外にある').toBeLessThanOrEqual(page.viewportSize()!.height);
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(whenOf, '「元に戻す」を押したのに、時刻が 14:00〜15:00 に戻らない').toHaveText('14:00〜15:00');
+  await expect(undoBtn, '押した後も「元に戻す」が残っている').toBeHidden();
+  await dragTwoHoursDown();
   await expect(pane.locator('[data-pkc-field="schedule-drag-ghost"]'), '離したのに影が残っている').toHaveCount(0);
   const movedBox = (await dayCard.boundingBox())!;
   const gridBox2 = (await pane.locator('[data-pkc-field="schedule-day-grid"]').boundingBox())!;
@@ -850,6 +940,23 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   });
   const laneBox = (await pane.locator('[data-pkc-field="schedule-day-lane"]').boundingBox())!;
   const cx = laneBox.x + laneBox.width * 0.25;
+  /**
+   * 🔴 **空いた所に載せると十字のカーソル / 札の上は掴む手**(#855。Gemini 裁定 = #1163 のコメント
+   * 6104130726 の 8)。⚠ 本物の当たり判定(`elementFromPoint`)の下の要素の、計算後の `cursor` で見る。
+   */
+  const cursorAt = (x: number, y: number) =>
+    page.evaluate(
+      ([px, py]) => {
+        const el = document.elementFromPoint(px!, py!);
+        return el === null ? null : getComputedStyle(el).cursor;
+      },
+      [x, y],
+    );
+  expect(await cursorAt(cx, laneBox.y + 400), '空いた所が十字のカーソルになっていない').toBe('crosshair');
+  expect(
+    await dayCard.evaluate((e) => getComputedStyle(e).cursor),
+    '札の上まで十字になっている(掴めることが分からなくなる)',
+  ).toBe('grab');
   await page.mouse.move(cx, laneBox.y + 400);
   await page.mouse.down();
   await page.mouse.move(cx, laneBox.y + 400 + 20, { steps: 4 });
@@ -894,8 +1001,19 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   await page.mouse.dblclick(lane2.x + lane2.width * 0.25, lane2.y + 480); // 12:00
   await expect(createInput, 'ダブルクリックの 30 分の枠に入力欄が見えていない').toBeVisible();
   await insideLane();
-  await page.keyboard.press('Escape');
-  await expect(createInput).toHaveCount(0);
+  /**
+   * 🔴 **枠の右端の × で、マウスだけで作るのをやめられる**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 9)。
+   * ⚠ × が入力欄に重なって打てなくならないこと(右端の外側にあること)も見る。
+   */
+  const cancelX = pane.locator('[data-pkc-field="schedule-create-cancel"]');
+  await expect(cancelX, '作りかけの枠に × が無い').toBeVisible();
+  const xBox = (await cancelX.boundingBox())!;
+  const inBox = (await createInput.boundingBox())!;
+  const frameBox = (await pane.locator('[data-pkc-field="schedule-create-box"]').boundingBox())!;
+  expect(xBox.x, '× が入力欄に重なっている').toBeGreaterThanOrEqual(inBox.x + inBox.width - 1);
+  expect(xBox.x + xBox.width, '× が枠の右端からはみ出している').toBeLessThanOrEqual(frameBox.x + frameBox.width + 1);
+  await clickReal(page, '[data-pkc-field="schedule-create-cancel"]');
+  await expect(createInput, '× を押したのに枠が残っている').toHaveCount(0);
   const lane3 = (await laneEl.boundingBox())!;
   await page.mouse.move(lane3.x + lane3.width * 0.25, lane3.y + 480);
   await page.mouse.down();
@@ -945,6 +1063,50 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   // 🔑 左の列で 16:00..17:30 に動かした後なので、開いた窓にもその時刻で出る(動かしたことが保存されている)
   expect(weekBox.y - weekGrid.y, '札が 16:00 の高さ(16 × 40px)にない').toBeGreaterThan(639);
   expect(weekBox.y - weekGrid.y).toBeLessThan(641);
+  /**
+   * 🔴 **小さな月で、いま見ている週の行に色が付き、他の行には付かない**(#855。Gemini 裁定 = #1163 の
+   * コメント 6104130726 の 5)。⚠ 属性ではなく**計算後の背景色**で見る(CSS に受け皿が無いと、付けた印が
+   * 画面で 1 つも見分けられない)。帯の升目は、窓が見せている 7 日のうちの日である(別の週に付いていない)。
+   */
+  const viewedRow = centre.locator('[data-pkc-field="schedule-week"][data-pkc-viewed-week]');
+  await expect(viewedRow, '見ている週の行が 1 行になっていない').toHaveCount(1, { timeout: 20_000 });
+  const plainRow = centre
+    .locator('[data-pkc-field="schedule-week"]:not([data-pkc-viewed-week])')
+    .filter({ has: week.locator('button') })
+    .first();
+  const bgOf = (loc: Locator) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(await bgOf(plainRow), '印の無い行に地の色が付いている(対照群)').toBe('rgba(0, 0, 0, 0)');
+  expect(await bgOf(viewedRow), '見ている週の行に色が付いていない').not.toBe('rgba(0, 0, 0, 0)');
+  const shownDays = await centre
+    .locator('[data-pkc-field="schedule-weekview-lane"]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-drop-date')));
+  const rowDays = await viewedRow
+    .locator('button')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-drop-date')));
+  expect(rowDays.length, '帯の行に日の升目が無い').toBeGreaterThan(0);
+  expect(
+    rowDays.every((d) => shownDays.includes(d)),
+    '帯が、窓が見せている週と別の週に付いている',
+  ).toBe(true);
+  /**
+   * 🔴 **窓の中では左の列の「週」が隠れ、中央の「週」は残る**(#855。Gemini 裁定 = #1163 のコメント
+   * 6104130726 の 4)。⚠ 左の列が最初から見えない窓では `toBeHidden` が CSS と無関係に通ってしまうので、
+   * **計算後の `display`** で見る(同じ行の「日」が対照群 ── 要素は在って、「週」だけが `none`)。
+   */
+  const leftModes = week.locator(
+    '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-modes"]',
+  );
+  await expect(leftModes, '窓の左の列に見せ方の行が無い(前提)').toHaveCount(1);
+  const displayOf = (mode: string) =>
+    leftModes
+      .locator(`[data-pkc-mode="${mode}"]`)
+      .evaluate((e) => getComputedStyle(e).display);
+  expect(await displayOf('week'), '窓の左の列の「週」が隠れていない').toBe('none');
+  expect(await displayOf('day'), '左の列の「日」まで隠れている(対照群)').not.toBe('none');
+  await expect(
+    centre.locator('[data-pkc-action="schedule-mode"][data-pkc-mode="week"]'),
+    '窓の中央の「週」まで消えている',
+  ).toBeVisible();
   // 7 列は横に並ぶ(縦に積まれていない)
   const laneBoxes = await weekLanes.evaluateAll((els) =>
     els.map((e) => {
@@ -982,6 +1144,29 @@ test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499
   ).toHaveText('17:00〜18:30', { timeout: 20_000 });
   // 合図は使ったらアドレスから外れる(栞や F5 に焼き付かない)
   expect(week.url(), '見せ方の合図がアドレスに残っている').not.toContain('sched=');
+  /**
+   * 🔴 **同じ週のウィンドウが開いているときに、左の「週」をもう一度押すと、窓は増えず、理由が出る**
+   * (#855。Gemini 裁定 = #1163 のコメント 6104130726 の 3)。⚠ 「前に出る」が実機で手前に来るかは
+   * headless では測れない(`note-window-registry.ts`)── 見るのは**窓が増えないこと + 理由が出ること**の 2 つ
+   * (片方だけだと「黙って何もしない」実装でも緑になる)。
+   */
+  const pagesBefore = context.pages().length;
+  await page.bringToFront();
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '同じ週の窓を開き直そうとしたのに、理由が出ていない(押しても何も起きないに見える)',
+  ).toContainText('すでに別のウィンドウ');
+  expect(context.pages().length, '同じ週の窓が 2 枚開いた').toBe(pagesBefore);
+  /**
+   * 🔴 **見つからないとき、もう一度押すと新しく開く**(行き止まりを作らない。10 秒以内の 2 度目)。
+   */
+  const secondPopup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
+  const second = await secondPopup;
+  await expect(second.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  expect(context.pages().length, '2 度目の押下で新しい窓が開いていない').toBe(pagesBefore + 1);
+  await second.close();
   expect(weekErrors, `page error: ${weekErrors.join(' / ')}`).toEqual([]);
   await week.close();
 

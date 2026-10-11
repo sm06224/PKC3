@@ -94,6 +94,7 @@ export interface StatusUndoState {
 }
 
 import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
+import { scheduleUndoShown } from './schedule-undo';
 import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/today-note';
 
 /**
@@ -145,15 +146,23 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     state.noticeOpen !== null &&
     state.lastAppend.lid === state.noticeOpen &&
     state.notice === shownLine;
-  const show = move || append;
+  /**
+   * 🔴 **予定を動かした直後の「元に戻す」**(#855)。出す条件は 1 つ ── いま出ている 1 行が、その 1 手の
+   * 知らせそのもの(`scheduleUndoShown`)。別の知らせが上書きしたら畳む(「開く」と同じ作法)。
+   */
+  const schedule = !move && !append && scheduleUndoShown(shownLine);
+  const show = move || append || schedule;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
   //    `data-pkc-action` だけ替えて字を「元に戻す」で固定すると、追記を戻す回に
   //    「移動を元に戻す」という**起きることと違う字**が出る。
   if (show) {
-    btn.setAttribute('data-pkc-action', move ? 'undo-move' : 'undo-append');
-    btn.textContent = move ? '移動を元に戻す' : '追記を元に戻す';
+    btn.setAttribute(
+      'data-pkc-action',
+      schedule ? 'schedule-undo-move' : move ? 'undo-move' : 'undo-append',
+    );
+    btn.textContent = schedule ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;
