@@ -764,6 +764,26 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(await px(dayName), '名前が日付の字より小さくない').toBeLessThan(await px(dayLabel));
   expect(await colorOf(dayName), '名前が日付の字と同じ濃さ(薄くない)').not.toBe(await colorOf(dayLabel));
 
+  /**
+   * 🔴 **予定を .ics で書き出す**(#855 段 D。起動は増やさない ── この道中の続き)。
+   * 押すと file が落ち、中身がカレンダー形式で、毎週の規則が繰り返しのまま入り、
+   * 済ませた回(7 日後)が例外日として外れている。名前は端末の暦日(非 ASCII では無いが、属性ではなく中身で見る)。
+   */
+  const exportBtn = pane.locator('[data-pkc-action="export-schedule-ics"]');
+  await expect(exportBtn, '「予定を .ics で書き出す」が見えない').toBeVisible();
+  await expect(exportBtn).toHaveText('予定を .ics で書き出す');
+  const icsDownload = page.waitForEvent('download');
+  await exportBtn.click();
+  const icsFile = await icsDownload;
+  expect(icsFile.suggestedFilename(), 'file 名が pkc-schedule-<日付>.ics でない').toMatch(/^pkc-schedule-\d{4}-\d{2}-\d{2}\.ics$/);
+  const chunks: Buffer[] = [];
+  for await (const c of (await icsFile.createReadStream()) as AsyncIterable<Buffer>) chunks.push(c);
+  const icsText = Buffer.concat(chunks).toString('utf-8');
+  expect(icsText.startsWith('BEGIN:VCALENDAR\r\n'), 'カレンダー形式で始まっていない').toBe(true);
+  expect(icsText, '毎週の規則が繰り返しのまま入っていない').toContain('RRULE:FREQ=WEEKLY');
+  expect(icsText, '済ませた回が例外日として外れていない').toMatch(/EXDATE[^\r\n]*:\d{8}/);
+  expect(icsText, '予定の題名が入っていない').toContain('SUMMARY:ゴミ出し');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 /**

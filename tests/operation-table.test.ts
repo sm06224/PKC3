@@ -246,7 +246,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
   'dual-sort', 'dual-tab-add', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
-  'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
+  'export-schedule-ics', 'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
   'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
@@ -782,12 +782,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-11(#1559): 見出し(ログの行を含む)の右クリックの「章のリンクをコピー」(`copy-section-link`)で受け手 +1 ──
       //   登記は増えない(`copy-section-ref` と同じ置き場。行番号をメニューが運ぶので名前だけでは呼べない)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 408,
-      receivers: 342,
+      // ⚠ 2026-10-11(#855 段 D): 予定の面の「予定を .ics で書き出す」(`export-schedule-ics`)で受け手 +1 ── 登記は増えない
+      //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 409,
+      receivers: 343,
       registered: 113,
       both: 47,
       outsideActionsTable: 66,
-      unregistered: 295,
+      unregistered: 296,
     });
   });
 

@@ -340,7 +340,9 @@ import { flashCopied, handleCopyMdBlock } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { formatTarget } from './format-target';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
-import { isRepeatUnit } from '@features/schedule/repeat';
+import { isRepeatUnit, materializedDates } from '@features/schedule/repeat';
+import { buildIcs, resolveIcsZone } from '@features/schedule/ics';
+import { scheduleItemsOf } from '@adapter/ui/render/schedule-items';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
@@ -9519,6 +9521,63 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({
       type: 'OP_NOTICE',
       message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)${bad}`,
+    });
+  },
+  /**
+   * 🔴 **予定を .ics(iCalendar)で書き出す**(#855 段 D)。
+   * 🔑 出るのは**いま予定の面が出している分だけ** ── 面の描画と**同じ 1 つ**の口
+   *   (`scheduleItemsOf`)を呼ぶ(§7。「出すもの」で隠した分や検索の絞りが、
+   *   書き出しだけ効かない、を作らない)。日付のない予定は外の予定表に置き場が無いので出ない。
+   * 🔑 繰り返しは規則(RRULE)のまま出し、済ませた回は外す(`materializedDates` ── 面と同じ材料)。
+   */
+  'export-schedule-ics': (dispatcher) => {
+    const st = dispatcher.getState();
+    const shown = scheduleItemsOf(st);
+    const now = new Date();
+    const res = buildIcs(shown.items, {
+      stamp: now,
+      // 🔑 端末の時刻帯:Asia/Tokyo だけ VTIMEZONE を同梱、他は UTC に直す(`ics.ts` の頭)
+      zone: resolveIcsZone(
+        (() => {
+          try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone;
+          } catch {
+            return undefined;
+          }
+        })(),
+        (date, time) => {
+          const d = new Date(
+            Number(date.slice(0, 4)),
+            Number(date.slice(5, 7)) - 1,
+            Number(date.slice(8, 10)),
+            Number(time.slice(0, 2)),
+            Number(time.slice(3, 5)),
+          );
+          return -d.getTimezoneOffset();
+        },
+      ),
+      noteTitle: (lid) => st.entryMetas.get(lid)?.title,
+      skip: materializedDates(shown.all),
+    });
+    if (res.count === 0) {
+      // ⚠ 無言で空の file を落とさない(export-vcards と同じ向き)
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error:
+          res.skipped > 0
+            ? `書き出せる予定がありません(日付や時刻が読めない予定が ${res.skipped} 件あります)`
+            : '書き出せる予定がありません(日付を書いた予定が、いま一覧に出ていません)',
+      });
+      return;
+    }
+    downloadBlob(
+      `pkc-schedule-${dayStamp(now)}.ics`,
+      new Blob([res.text], { type: 'text/calendar' }),
+    );
+    const bad = res.skipped > 0 ? `。日付や時刻が読めない ${res.skipped} 件は入っていません` : '';
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message: `予定 ${res.count} 件を書き出しました(いま一覧に出している分です。日付のないものは入りません)${bad}`,
     });
   },
   /**

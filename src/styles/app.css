@@ -6143,6 +6143,21 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   align-items: flex-start;
   gap: var(--s3);
 }
+/* 🔑 「予定を .ics で書き出す」(#855 段 D)。「出すもの」と同じ静かな字(色は情報にだけ) */
+[data-pkc-field='schedule-export'] {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-export']:hover {
+  color: var(--fg);
+}
 /* ⚠ 切替が 1 つも出ないときは行ごと `hidden`(`schedule.ts` が決める)── ここに
  *   `:not(:has(button:not([hidden])))` を書いてはいけない: 文書のどこで button が入っても
  *   `hidden` が動いても祖先が再評価され、長いノートの描き直しのたびに MAIN まで無効化が走る(#1467 段 3-d) */
