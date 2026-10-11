@@ -19,7 +19,7 @@
  */
 import type { AgendaItem } from '@features/schedule/agenda';
 import { formatListDate } from '@features/datetime/stored-date';
-import { REPEAT_WORDS } from '@features/schedule/repeat';
+import { repeatWord } from '@features/schedule/repeat';
 import { formatTimeSpan } from '@features/schedule/schedule-date';
 
 /**
@@ -191,7 +191,7 @@ export function patchTaskCard(
      *   出さないと、user は**押したら何が起きるか**を予測できない
      *   (押すと規則の行ではなく、その日ぶんの行が増える)。
      */
-    const every = data.repeat === null ? '' : REPEAT_WORDS[data.repeat];
+    const every = data.repeat === null ? '' : repeatWord(data.repeat);
     const label = every === '' ? head : head === '' ? every : `${head} ${every}`;
     if (when.textContent !== label) when.textContent = label;
     when.hidden = label === '';

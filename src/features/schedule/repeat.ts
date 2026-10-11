@@ -8,13 +8,16 @@
  * | `@2026-08-31 毎週` | 8/31(月)から**毎週月曜**。⚠ 曜日は**開始日から取る** |
  * | `@2026-08-31..2026-12-31 毎週` | 🔑 終わりは**既存の `..`** ── 「8/31 から 12/31 まで、毎週」 |
  * | `毎日` / `毎月` / `毎年` | 同じ形 |
+| `@2026-08-31 隔週` | 🔑 **2 週ごと**(8/31 → 9/14 → 9/28 …)。起点は**開始日**(`毎週` と同じ) |
+| `@2026-08-31 毎週 月水金` | 🔑 **曜日の列**。月・水・金に出る(2 つ以上書いたときだけ。区切りは `、` `,` `，` `・` も可) |
  *
  * 🔑 **終了条件の記法を新しく作らない。** `..` は既に「開始と終わり」を表しており、
  * そこに刻みが付くだけである。⚠ 刻みの語が無ければこれまでどおり
  * 「その期間ずっと」の意味で、**既存の本文の意味は 1 つも変わらない**。
  *
- * 🔑 **曜日を書かせない。** `毎週月曜` のような語を解くと、日本語・英語・略記の
- * 表が要る ── 開始日が月曜なら「毎週」で足りる。
+ * 🔑 **曜日は書かなくてよい**(開始日から取る)。`毎週月曜` のような語は解かない
+ * (日本語・英語・略記の表が要る)。複数の曜日だけ、`毎週 月水金` と 1 字ずつ書ける
+ * (#855。⚠ 直後が字のとき ── `毎週 日報` / `毎週 月曜` ── は曜日として読まない)。
  *
  * ## 🔴 pure module ── 時計も DOM も持たない
  *
@@ -34,19 +37,50 @@ import { storedDateParts } from '@features/datetime/stored-date';
 import { pad2 } from '@features/datetime/datetime-format';
 
 /** 刻み。⚠ **並びが画面の並び**(短い順)。 */
-export const REPEAT_UNITS = ['day', 'week', 'month', 'year'] as const;
-export type RepeatUnit = (typeof REPEAT_UNITS)[number];
+export const REPEAT_UNITS = ['day', 'week', 'biweek', 'month', 'year'] as const;
+export type BaseRepeatUnit = (typeof REPEAT_UNITS)[number];
+
+/**
+ * 🔴 **曜日の列**(`毎週 月水金`)。綴りは `days:135`(月=1 … 日=7 を昇順で並べた数字)。
+ * 🔑 刻みを 1 つの文字列に収める ── 札の属性(`data-pkc-task-repeat`)・書き換えの受け渡しが
+ *   すべて `RepeatUnit` 1 本で通っているので、**型を増やさずに**載せる。
+ */
+export type WeekdaysUnit = `days:${string}`;
+export type RepeatUnit = BaseRepeatUnit | WeekdaysUnit;
 
 /**
  * 画面に出す語 ⇄ 刻み。
  * ⚠ **user に `week` と見せない**(`relationLabel` と同じ作法)。
  */
-export const REPEAT_WORDS: Readonly<Record<RepeatUnit, string>> = {
+export const REPEAT_WORDS: Readonly<Record<BaseRepeatUnit, string>> = {
   day: '毎日',
   week: '毎週',
+  biweek: '隔週',
   month: '毎月',
   year: '毎年',
 };
+
+/** 曜日の字 ⇄ 数字(月=1 … 日=7)。⚠ 並びが書きの並び(月から)。 */
+const WEEKDAY_CHARS = '月火水木金土日';
+
+const WEEKDAYS_PREFIX = 'days:';
+
+/** 曜日の列の中身(`days:135` → [1,3,5])。列でなければ `null`。 */
+export function weekdaysOf(unit: RepeatUnit): readonly number[] | null {
+  if (!unit.startsWith(WEEKDAYS_PREFIX)) return null;
+  const digits = unit.slice(WEEKDAYS_PREFIX.length);
+  return /^[1-7]{2,7}$/.test(digits) ? [...digits].map(Number) : null;
+}
+
+/**
+ * 🔴 **画面と本文に出す語**(`毎週 月水金` もここ 1 本)。
+ * ⚠ 呼び側が `REPEAT_WORDS[unit]` を引かない ── 曜日の列は表に無い。
+ */
+export function repeatWord(unit: RepeatUnit): string {
+  const days = weekdaysOf(unit);
+  if (days === null) return REPEAT_WORDS[unit as BaseRepeatUnit];
+  return `${REPEAT_WORDS.week} ${days.map((d) => WEEKDAY_CHARS[d - 1]).join('')}`;
+}
 
 /**
  * 語から刻みを読む。知らない語なら `null`。
@@ -61,10 +95,12 @@ export const REPEAT_WORDS: Readonly<Record<RepeatUnit, string>> = {
  * ⚠ `null`(属性が無い)も受けて `false` を返す ── 呼び側に 2 段の判定を書かせない。
  */
 export function isRepeatUnit(raw: string | null): raw is RepeatUnit {
-  return raw !== null && (REPEAT_UNITS as readonly string[]).includes(raw);
+  if (raw === null) return false;
+  if ((REPEAT_UNITS as readonly string[]).includes(raw)) return true;
+  return weekdaysOf(raw as RepeatUnit) !== null;
 }
 
-export function repeatUnitOf(word: string): RepeatUnit | null {
+export function repeatUnitOf(word: string): BaseRepeatUnit | null {
   for (const u of REPEAT_UNITS) if (REPEAT_WORDS[u] === word) return u;
   return null;
 }
@@ -81,7 +117,26 @@ export function repeatUnitOf(word: string): RepeatUnit | null {
  *
  * @param rest 日付(期間・時刻を含む)の**直後**から行末まで
  */
-const REPEAT_TAIL = /^[ \t]*(毎[日週月年])/;
+const REPEAT_TAIL = /^[ \t]*(毎[日週月年]|隔週)/;
+
+/**
+ * 🔴 **`毎週` の直後の曜日の列**(`毎週 月水金` / `毎週 月、水、金`)。
+ *
+ * ⚠ **読み始める条件を絞る 3 つの門**(`毎週 日報` `毎週 月曜` のような普通の文を食べないため):
+ *  ① **2 つ以上**の曜日が要る ── `毎週 月` 1 つなら、これまでどおり「毎週 + 字」
+ *  ② 列の**直後が字でない**(末尾・空白・句読点・括弧)── `毎週 日報` `毎週 月曜` の
+ *     「日」「月」は曜日として食べない。🔑 **列は短く切らない**: 区切りの直後に曜日が続く形は
+ *     列全体で判定し、直後が字なら列としては読まない(`毎週 月、水、金曜に` を月水へ縮めて
+ *     金を黙って落とさない)。末尾の読点(`毎週 月水、会議`)は区切りではなく句読点なので、月水
+ *  ③ 重複を畳んで 2 つ未満なら読まない(`月月`)
+ * 区切りは `、` `,` `，` `・` `､` `･`(日本語入力のまま打った形)と空白。
+ *
+ * ⚠ **意味が変わる本文は在る**(正直に):これまで「毎週 + 字」だった `毎週 土日` /
+ *   `毎週 月・水 打合せ` / `毎週 月 水 会議` は、今回から曜日の列として読む。
+ *   `隔週の定例` のように「隔週」で始まる字も、今回から隔週の繰り返しとして読む。
+ */
+const WEEKDAY_TAIL =
+  /^[ \t]*([月火水木金土日](?:[ \t]*[,、，・､･][ \t]*[月火水木金土日]|[ \t]*[月火水木金土日])+)(?![ \t]*[,、，・､･]?[ \t]*[月火水木金土日])(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【])/;
 
 /**
  * 🔴 **振替の記法**(#855 決4。user 裁定 2026-09-13「1 回か全部か選択する」)。
@@ -145,7 +200,23 @@ export function readRepeatTail(rest: string): RepeatTail | null {
   if (m === null) return null;
   const unit = repeatUnitOf(m[1]!);
   // ⚠ 網に当たったのに表に無い語は**読まない**(表が正本 ── §7)
-  return unit === null ? null : { unit, length: m[0].length };
+  if (unit === null) return null;
+  if (unit === 'week') {
+    const after = rest.slice(m[0].length);
+    const w = WEEKDAY_TAIL.exec(after);
+    if (w !== null) {
+      const set = new Set<number>();
+      for (const ch of w[1]!) {
+        const at = WEEKDAY_CHARS.indexOf(ch);
+        if (at >= 0) set.add(at + 1);
+      }
+      if (set.size >= 2) {
+        const digits = [...set].sort((a, b) => a - b).join('');
+        return { unit: `${WEEKDAYS_PREFIX}${digits}` as WeekdaysUnit, length: m[0].length + w[0].length };
+      }
+    }
+  }
+  return { unit, length: m[0].length };
 }
 
 /**
@@ -164,10 +235,11 @@ export const REPEAT_MAX_OCCURRENCES = 200;
  * ⚠ 月末の寄せは `Date` に任せない ── `new Date(2026, 1, 31)` は **3/3** へ流れる
  *   (「翌月の 3 日」は user が書いた意味と違う)。**その月の末日で止める**。
  */
-export function occurrenceAt(anchor: string, unit: RepeatUnit, n: number): string | null {
+export function occurrenceAt(anchor: string, unit: BaseRepeatUnit, n: number): string | null {
   if (n === 0) return isScheduleDate(anchor) ? anchor : null;
   if (unit === 'day') return addDays(anchor, n);
   if (unit === 'week') return addDays(anchor, n * 7);
+  if (unit === 'biweek') return addDays(anchor, n * 14);
   const p = storedDateParts(anchor);
   if (p === null) return null;
   const y = Number(p.year);
@@ -195,11 +267,11 @@ export function occurrenceAt(anchor: string, unit: RepeatUnit, n: number): strin
  * 🔑 見積もりは刻みごとの算術で出し、**両側へ少しだけ直す** ── 月末の寄せ
  * (1/31 → 2/28)や端数で **±1 ずれる**ことがあるため。
  */
-function firstIndexFrom(anchor: string, unit: RepeatUnit, from: string): number {
+function firstIndexFrom(anchor: string, unit: BaseRepeatUnit, from: string): number {
   let n = 0;
-  if (unit === 'day' || unit === 'week') {
+  if (unit === 'day' || unit === 'week' || unit === 'biweek') {
     const gap = daysBetween(anchor, from);
-    if (gap !== null && gap > 0) n = Math.ceil(gap / (unit === 'week' ? 7 : 1));
+    if (gap !== null && gap > 0) n = Math.ceil(gap / (unit === 'week' ? 7 : unit === 'biweek' ? 14 : 1));
   } else {
     const a = storedDateParts(anchor);
     const f = storedDateParts(from);
@@ -221,6 +293,14 @@ function firstIndexFrom(anchor: string, unit: RepeatUnit, from: string): number 
     n += 1;
   }
   return n;
+}
+
+/** 曜日(月=1 … 日=7)。形が壊れていたら 0(どの列にも入らない)。 */
+function weekdayOf(date: string): number {
+  const p = storedDateParts(date);
+  if (p === null) return 0;
+  const d = new Date(Number(p.year), Number(p.month) - 1, Number(p.day)).getDay();
+  return d === 0 ? 7 : d;
 }
 
 export interface RepeatExpansion {
@@ -274,10 +354,31 @@ export function expandRepeat(input: {
    * 🔑 **窓の先頭から回す**(`firstIndexFrom`)── 空回りが無くなったので、
    *   回す数は「出す数 + 飛ばす数」で足りる(直す前は 1600 回で打ち切っていた)。
    */
-  const start = firstIndexFrom(anchor, unit, from);
   const spin = max + skip.size + 8;
+  const weekdays = weekdaysOf(unit);
+  if (weekdays !== null) {
+    /**
+     * 🔴 **曜日の列は日で回す**(回数では数えられない)。開始日より前は出さない。
+     * 回す日数は「出す数 + 飛ばす数」の 7 倍までで足りる(1 週に最低 2 日出る)。
+     */
+    let at: string | null = from < anchor ? anchor : from;
+    for (let i = 0; i < spin * 4 && at !== null; i += 1) {
+      if (at > stop) break;
+      if (!skip.has(at) && weekdays.includes(weekdayOf(at))) {
+        if (days.length >= max) {
+          truncated = true;
+          break;
+        }
+        days.push(at);
+      }
+      at = addDays(at, 1);
+    }
+    return { days, truncated };
+  }
+  const base = unit as BaseRepeatUnit;
+  const start = firstIndexFrom(anchor, base, from);
   for (let i = 0; i < spin; i += 1) {
-    const at = occurrenceAt(anchor, unit, start + i);
+    const at = occurrenceAt(anchor, base, start + i);
     if (at === null) break;
     if (at > stop) break;
     // ⚠ 保険 ── `firstIndexFrom` の直しが 4 回で届かなかったときだけ通る

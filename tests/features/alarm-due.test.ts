@@ -109,6 +109,24 @@ describe('帯の字(#280)', () => {
   });
 });
 
+/** 🔴 隔週と曜日の列も鳴る(#855)── 鳴る日と鳴らない日を 1 組ずつ。 */
+describe('隔週と曜日の列の回が鳴る(#855)', () => {
+  const win = (mo: number, d: number, h: number, m: number): number =>
+    new Date(2026, mo, d, h, m, 0, 0).getTime();
+
+  it('隔週: 2 週後に鳴り、1 週後には鳴らない', () => {
+    const c = card({ date: '2026-08-31', time: '09:00', repeat: 'biweek', text: '定例' });
+    expect(dueAlarms([c], win(8, 14, 8, 59), win(8, 14, 9, 0)), '2 週後に鳴らない').toHaveLength(1);
+    expect(dueAlarms([c], win(8, 7, 8, 59), win(8, 7, 9, 0)), '1 週後に鳴った(毎週になっている)').toHaveLength(0);
+  });
+
+  it('毎週 月水金: 水曜に鳴り、火曜には鳴らない', () => {
+    const c = card({ date: '2026-08-31', time: '09:00', repeat: 'days:135', text: 'ジム' });
+    expect(dueAlarms([c], win(8, 2, 8, 59), win(8, 2, 9, 0)), '水曜に鳴らない').toHaveLength(1);
+    expect(dueAlarms([c], win(8, 1, 8, 59), win(8, 1, 9, 0)), '火曜に鳴った').toHaveLength(0);
+  });
+});
+
 describe('🔴 繰り返しの回が鳴る(2026-09-12 に直した)', () => {
   /**
    * 🔴 直す前は **開始日にしか鳴らなかった** ── 見張りが読むのは「規則の行」

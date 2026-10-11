@@ -564,7 +564,7 @@ export const REPEAT_ATTR = 'data-pkc-repeat';
 export const TASK_REPEAT_MENU_ACTION: EntryAction & { readonly hint: string } = {
   action: 'open-repeat-menu',
   label: '予定を繰り返す…',
-  hint: 'この行を毎日・毎週・毎月・毎年にします(やめることもできます)',
+  hint: 'この行を毎日・毎週・隔週・毎月・毎年にします(やめることもできます)',
 };
 
 /**
