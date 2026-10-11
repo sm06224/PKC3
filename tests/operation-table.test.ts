@@ -187,15 +187,21 @@ const UNBRIDGED: readonly string[] = [
  */
 const UNREGISTERED_NAMEABLE: readonly string[] = [
   /**
+   * ⚠ **2026-10-11(#582 段③ 第 1 群)で、「高」のうち 1 件だけ登記しなかった** ── 「選択範囲をコピー」(`copy-selection-md`)。
+   *   一覧(パレット)を開いた瞬間に本文の選択が消え、画面のボタン自身も押せなくなる(実ブラウザで測った)ので、
+   *   登記しても一覧からは撃てない。選択を運ぶ設計が別に要る。
+   */
+  'copy-selection-md',
+  /**
    * ⚠ **2026-10-02(#772 段②)で 3 件増やした** ── 音声認識の部品を入れる / 消す / 途中でやめる。
    * 🔑 **名前で呼べないままにする理由**:`install-office-pack` / `remove-office-pack` と同じ ──
    *   押し口は設定の「音声認識」の中の 1 か所だけで、部品を取る(数十〜数百 MB)操作を
    *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
    */
   'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
-  'add-place', 'add-place-template', 'add-relation', 'add-tag', 'add-url-tile', 'adopt-external-images',
-  'adopt-link-icon', 'allow-external-images', 'append-entry', 'apply-plan', 'apply-settings',
-  'apply-update', 'attach-file', 'bulk-tag-add', 'bulk-tag-remove',
+  'add-place', 'add-place-template', 'add-url-tile', 'adopt-external-images',
+  'adopt-link-icon', 'allow-external-images', 'apply-plan', 'apply-settings',
+  'apply-update', 'bulk-tag-add', 'bulk-tag-remove',
   /**
    * ⚠ **2026-09-26(#1044 段2)で 2 件増やした** ── 章の欄の保存 / やめる。
    * 🔑 **名前で呼べないままにする理由**:どちらも「**いま開いている章の欄**」に
@@ -219,7 +225,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 `capture-play` / `capture-stop` と同じ扱いである(並びを揃えた)。
    */
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
-  'choose-office-pack', 'clear-copy-history', 'clear-entry-date', 'clear-entry-filter',
+  'choose-office-pack', 'clear-copy-history', 'clear-entry-filter',
   'clear-kind-filter', 'clear-opened-history', 'clear-search-history', 'clear-selection',
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
@@ -240,14 +246,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'container-rebuild',
   'container-reset',
-  'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 'copy-note-md', 'copy-note-rich',
-  'copy-section-link', 'copy-section-ref', 'copy-selection-md', 'create-date-note', 'db-check',
+  'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 
+  'copy-section-link', 'copy-section-ref', 'create-date-note', 'db-check',
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
   'dual-sort', 'dual-tab-add', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
-  'export-schedule-ics', 'export-settings', 'export-vcards', 'force-release', 'format-text', 'hide-history',
+  'export-vcards', 'force-release', 'format-text', 'hide-history',
   'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
@@ -257,7 +263,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   🔑 押した所から**何も要らない**(行き先は固定で、鍵も持たない。
    *   ⚠ 2026-10-08 までは `open-manual-window` も同じ仕分けだったが、#1452 案 1 で登記簿に載った)。
    */
-  'open-storage-check', 'open-system-notices', 'open-today',
+  'open-storage-check', 'open-system-notices', 
   'paste-many-copied',
   /**
    * ⚠ **2026-10-02(#215 段①②)で 3 件増やした** ── パソコンのフォルダを選ぶ / 切る / さらに表示。
@@ -283,14 +289,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'place-append-open', 'place-inline-cancel', 'place-inline-commit', 'place-rename-open',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round', 'place-size', 'place-group', 'place-ungroup',
-  'purge-trash', 'raise-place', 'refresh-query', 'remove-office-pack', 'remove-place',
+  'purge-trash', 'raise-place', 'remove-office-pack', 'remove-place',
   'remove-place-line',
   // 🔴 2026-10-01(#918 段⑦): SQL の面で足した相手を外す口。外す相手の lid は押し口自身が運ぶ
   'remove-sql-source',
   'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-day-go', 'schedule-mode',
-  'schedule-nav', 'schedule-quick-add',
-  'schedule-today', 'schedule-undo-move', 'schedule-week-pick',
+  'schedule-nav', 
+  'schedule-undo-move', 'schedule-week-pick',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
    *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
@@ -334,7 +340,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   帯にしか無い押し所で、SQL の面を開いていないと出す先が無い。
    */
   'sql-er-connect-toggle',
-  'stack-save',
+  
   /**
    * ⚠ **2026-09-25(#1038 台帳③ C1)で在庫から抜けた** ── 行のメニュー
    *   (`ENTRY_MENU_ACTIONS`)に「編集」(`start-edit`)を足したので、`entry` book で
@@ -367,8 +373,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   state の旗が反転するだけ)。押し口は帯のボタンだけで、鍵も持たない。
    */
   'toggle-filer-flatten',
-  'toggle-plan-apply', 'toggle-show-archived', 'toggle-show-done',
-  'toggle-show-undated', 'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
+  'toggle-plan-apply', 
+  'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -376,7 +382,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * ⚠ **2026-10-03(#1017 C5)で `open-messages` を外した** ── 「メッセージを開く」を
    *   KEY_COMMANDS へ登記したので、未登記ではなくなった(登記の側の `both` に数える)。
    */
-  'export-messages', 'set-message-cap',
+  'set-message-cap',
 ];
 
 /**
@@ -483,6 +489,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-11(#529 W5): 板の付箋の上で書く 4 つ(`place-append-open` 付箋の下端の「追記」/ `place-rename-open` 付箋の右クリックの「題名を直す」/
       //   `place-inline-commit` 欄の確定 / `place-inline-cancel` 欄をやめる)で受け手 +4 ── 登記は増えない
       //   (押し口は付箋の中の 1 か所にしか無く、押した付箋が対象を運ぶ。`place-rect` と同じ置き場)。`receivers` +4 / `total` +4 / `unregistered` +4。
+      // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件(ノートの整理 8 / コピー・書き出し 4 / 予定 6)を `KEY_COMMANDS` へ登記した ──
+      //   受け手は既に在った(押し口は各面のボタン)ので `registered` +18 / `both` +18 / `unregistered` −18(`total` / `receivers` は動かない)。`open-messages`(#1017 C5)と同じ仕分け。
       // ⚠ 2026-10-11(#530): 板の線の右クリックの矢じり(`place-line-arrow`)で受け手 +1 ── 登記は増えない
       //   (押し口は線の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-width` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#530 段⑤b): 付箋の右クリックの「グループにする…」「グループを解く」(`place-group` / `place-ungroup`)で受け手 +2 ── 登記は増えない
@@ -800,10 +808,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       total: 417,
       receivers: 351,
-      registered: 113,
-      both: 47,
+      registered: 131,
+      both: 65,
       outsideActionsTable: 66,
-      unregistered: 304,
+      unregistered: 286,
     });
   });
 
@@ -855,8 +863,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-10(#1440): 行のメニューが 17 → 18(`export-entry-markdown`)、鍵が 82 → 83(`export-note-markdown`。鍵の既定は持たない)
     // ⚠ 2026-10-11(#1377): 行のメニューが 18 → 20(`bookmark-note-add` / `bookmark-note-remove`)
     // ⚠ 2026-10-11: 行のメニューが 20 → 22(`copy-entry-link` / `copy-asset-link`)、鍵が 83 → 84(`copy-entry-link`。鍵の既定は持たない)
+    // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件を登記(`add-tag` ほか)で `key` 84 → 102(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 84,
+      key: 102,
       entry: 22,
       body: 3,
       collection: 2,

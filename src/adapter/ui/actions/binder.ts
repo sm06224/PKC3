@@ -243,7 +243,7 @@ import {
 } from '../render/place-inline';
 import { splitTags } from '@features/flavor/tags';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
-import { COLUMN_PANES, isPaneId } from '@features/pane-visibility';
+import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import {
   canEnterScope,
@@ -4900,6 +4900,8 @@ export function runGlobalCommand(
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
   if (btn === null) return false;
+  // 🔴 行ごと隠してある間は「効かない」(#582 段③。`PALETTE_HIDDEN_OK` の注釈)
+  if (!PALETTE_HIDDEN_OK.has(cmd) && btn.closest('[hidden]') !== null) return false;
   /**
    * 🔴 **「押せるか」は `disabled` まで見る**(#425 段①)。
    *
@@ -4928,7 +4930,38 @@ export function runGlobalCommand(
     if (why !== null && why !== '') notify(why);
     return true;
   }
+  if (focusFieldFirst(cmd, btn, root, notify)) return true;
   btn.click();
+  return true;
+}
+
+/**
+ * 🔴 **欄が空なら、欄へ移って理由を言う**(#582 段③。`PALETTE_FIELD_FIRST` の注釈)。
+ * @returns 欄へ移した(= ボタンは押さない)か
+ */
+function focusFieldFirst(
+  cmd: string,
+  btn: HTMLElement,
+  root: HTMLElement,
+  notify: (text: string, opts?: StatusOptions) => void,
+): boolean {
+  const ask = PALETTE_FIELD_FIRST[cmd];
+  if (ask === undefined) return false;
+  const field = btn.parentElement?.querySelector<HTMLInputElement | HTMLTextAreaElement>(ask.field) ?? null;
+  // ⚠ 欄が見つからないときはボタンを押す(受け手が「入力してください」と言う ── 黙らない)
+  if (field === null || field.value.trim() !== '') return false;
+  /**
+   * 🔑 畳んでいるなら先に戻す(`focus-search` と同じ作法。畳んだペインは DOM に残るので、
+   *   戻さずに焦点を入れると**見えない欄に入って何も起きない**)。スマホは列が無いので触らない。
+   */
+  if (ask.pane !== null && !appPhone.isPhone()) {
+    const hidden = appPanes.getHidden();
+    if (hidden.includes(ask.pane)) {
+      applyPaneVisibility(root, appPanes.setHidden(hidden.filter((x) => x !== ask.pane)));
+    }
+  }
+  field.focus();
+  notify(ask.say, CAUTION);
   return true;
 }
 
@@ -12441,6 +12474,66 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    * ここに載っていても「操作を探す」には出ない(意図どおり)。
    */
   'close-pane': '[data-pkc-action="close-pane"]',
+  /**
+   * 🔴 **名前で呼べなかった「高」の操作 18 件**(#582 段③ 第 1 群。🟣 Gemini の回答 = #1163 の依頼 16)。
+   *
+   * 🔑 **命令 id = 押しボタンの `data-pkc-action`** ── 受け手は画面のボタンそのもの(押し方を増やさない)。
+   *   「押せるか」もボタン次第:画面に無い間(別の面にいる / ノートを選んでいない)は押せず、理由は
+   *   `keymap.ts` の `note` が言う。⚠ 全部、押した点から何も読まない(`ACTIONS` の受け手を読んで確かめた:
+   *   読むのは `target` ならボタン自身の属性 / `root` から引く欄だけ)。
+   * ⚠ `hidden` の中のボタンは「押せない」と読む(例外 2 件 = `PALETTE_HIDDEN_OK`)、
+   *   先に欄へ字を入れる物は `PALETTE_FIELD_FIRST`(どちらも下)。
+   */
+  'add-relation': '[data-pkc-action="add-relation"]',
+  'add-tag': '[data-pkc-action="add-tag"]',
+  'append-entry': '[data-pkc-action="append-entry"]',
+  'attach-file': '[data-pkc-action="attach-file"]',
+  'clear-entry-date': '[data-pkc-action="clear-entry-date"]',
+  'open-today': '[data-pkc-action="open-today"]',
+  'refresh-query': '[data-pkc-action="refresh-query"]',
+  'stack-save': '[data-pkc-action="stack-save"]',
+  'copy-note-md': '[data-pkc-action="copy-note-md"]',
+  'copy-note-rich': '[data-pkc-action="copy-note-rich"]',
+  'export-messages': '[data-pkc-action="export-messages"]',
+  'export-settings': '[data-pkc-action="export-settings"]',
+  'schedule-quick-add': '[data-pkc-action="schedule-quick-add"]',
+  'schedule-today': '[data-pkc-action="schedule-today"]',
+  'export-schedule-ics': '[data-pkc-action="export-schedule-ics"]',
+  'toggle-show-done': '[data-pkc-action="toggle-show-done"]',
+  'toggle-show-archived': '[data-pkc-action="toggle-show-archived"]',
+  'toggle-show-undated': '[data-pkc-action="toggle-show-undated"]',
+};
+
+/**
+ * 🔴 **ボタンが `hidden` の中に居るなら「いまは効かない」と読む**(#582 段③)。例外は下の 2 つだけ。
+ *
+ * ⚠ 器は在る(描き直しで使い回す / 面は `hidden` で常駐する)が、**見えていない間は押しても意味が無い**:
+ *   - 別の左のタブへ移った後の予定の面(**実ブラウザで測った**:タブを移しても予定の欄は DOM に残り、
+ *     `hidden` の中で「押せます」と出ていた)
+ *   - 日付が無ければ「日付を外す」/ 済み・片付け・日付なしが 0 件なら「出す・隠す」の切替は**行ごと隠してある**。
+ *     隠れたまま `click()` すると**見えない切替が動く**
+ * 🔑 判定は DOM の `hidden` 属性 1 つ(描く側が「出さない」を表す唯一の印)。
+ * ⚠ 例外 = 添付 / 今日のノート:同じボタンを**閉じたメニューの中にも**持つ(`shell.ts`)ので、
+ *   `hidden` の中の物が先に当たっても撃てる(メニューは開かなくてよい)。
+ */
+const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-today']);
+
+/**
+ * 🔴 **先に欄へ字を入れる操作は、欄が空なら「欄へ移る」** (#582 段③)。
+ *
+ * ⚠ 押しボタンは**欄の中身を読んで**動く(タグ・つなぐ先・追記・予定の字)。名前で呼んだだけでは
+ *   欄は空なので、ボタンをそのまま押すと「入力してください」と出るだけで**欄はどこにあるか分からない**。
+ * 🔑 だから空のときだけ、欄を見える所へ出して焦点を入れる(字が入っていればボタンをそのまま押す ──
+ *   ボタンと同じ action が走る)。欄は**ボタンと同じ親**の中に在る(`querySelector` の範囲を狭めて、
+ *   別の面の同名の欄を拾わない)。
+ */
+const PALETTE_FIELD_FIRST: Readonly<
+  Record<string, { readonly field: string; readonly pane: PaneId | null; readonly say: string }>
+> = {
+  'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを足す」を押してください' },
+  'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを足す」を押してください' },
+  'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「本文に追記する」を押してください' },
+  'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を足す」を押してください' },
 };
 
 /** 整える 5 つ(#1233)。⚠ 命令 id(`keymap.ts`)→ 整え方(`text-tidy.ts`)。 */
