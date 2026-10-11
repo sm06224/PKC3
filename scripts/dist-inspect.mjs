@@ -159,6 +159,8 @@ export const PDF_SHELL_FILES = [
   'pdf/edit-core.js',
   'pdf/edit-worker.js',
   'pdf/edit-stage.js',
+  // ハイライト(#275 段②-2)── 選んだ字の位置から注釈の座標を作る計画
+  'pdf/highlight.js',
 ];
 
 /**

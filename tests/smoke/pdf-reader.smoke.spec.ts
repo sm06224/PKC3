@@ -23,6 +23,11 @@
  *   ⑤‴ ページを選んで抜き出す(#275 段②-1c)── 0 件では押せない → Ctrl+クリック / Shift+クリック / Ctrl+Space・Shift+↑↓ / Esc で選ぶ
  *     (選んだページは画面で見分けられる)→ 「選んだページを別の PDF にする」で新しい添付が 1 つ増える(元と、読んでいた画面は動かない)
  *     → できた PDF は選んだ 2 ページだけ・順と向きは一覧のとおり・選ばなかったページの字は無い
+ *   ⑤⁗ ハイライト(#275 段②-2b/c)── 字を選ぶまで「ハイライト」と色は押せない → 色(黄・緑・青・ピンク)を選んで付けると、その色で字の上に
+ *     乗算で重なる(絵には焼かれない)→ 付けたハイライトも、他のアプリが付けたハイライトも、押すと「ハイライトを外す」が出て外れ
+ *     (外すと決めた物は破線で見分けられ、もう一度押すとやめられる)→ 「別の PDF として保存」で新しい添付が増える(元は変わらない)
+ *     → できた PDF を開くと、付けた緑が絵に焼かれていて、外した物は無い → 保存した PDF のハイライトも外せる。
+ *     上のバーは、窓が狭くて入りきらないとき 2 行になり、「ノートへ引用する」が切れない
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
  *   という**切り替えの前後**が本命なので、対照群(切)と本命(入)を同じ起動の中で続けて見る必要がある
@@ -36,15 +41,17 @@ import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
 /**
  * 自作の PDF(`pages` 頁・Helvetica で `Hello page N marker<N>`)。xref の位置は組みながら数える。
- * `opts.box` = 1 頁の大きさ(既定 400x400)/ `opts.outline` = しおりを 1 つ付ける(ページの編集の「引き継がれない物」の観測用)。
+ * `opts.box` = 1 頁の大きさ(既定 400x400)/ `opts.outline` = しおりを 1 つ付ける(ページの編集の「引き継がれない物」の観測用)/
+ * `opts.highlight` = 1 頁目の字に**他のアプリが付けた形**のハイライト(`/P` つき・外観なし)を 1 つ付ける(#275 段②-2c の「外す」の観測用)。
  */
-function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boolean } = {}): Buffer {
+function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boolean; highlight?: boolean } = {}): Buffer {
   const [bw, bh] = opts.box ?? [400, 400];
   const objs: string[] = [];
   const kids: string[] = [];
   const boldObj = 4 + pages * 2;
   const outlinesObj = boldObj + 1;
   const outlineItemObj = boldObj + 2;
+  const annotObj = opts.outline ? boldObj + 3 : boldObj + 1;
   objs[1] = opts.outline
     ? `<< /Type /Catalog /Pages 2 0 R /Outlines ${String(outlinesObj)} 0 R >>`
     : '<< /Type /Catalog /Pages 2 0 R >>';
@@ -61,9 +68,15 @@ function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boole
     //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
     const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} marker${String(i + 1)}) Tj${split} ET`;
+    const annots = opts.highlight && i === 0 ? ` /Annots [${String(annotObj)} 0 R]` : '';
     objs[pageObj] =
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(bw)} ${String(bh)}] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R >>`;
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(bw)} ${String(bh)}] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R${annots} >>`;
     objs[pageObj + 1] = `<< /Length ${String(stream.length)} >>\nstream\n${stream}\nendstream`;
+  }
+  if (opts.highlight) {
+    // 1 頁目の 1 行目(x=40・基準線 y=300・24pt)を囲む黄色のハイライト。外観(/AP)は持たない ── 読み手(pdf.js)が自分で描く
+    objs[annotObj] =
+      '<< /Type /Annot /Subtype /Highlight /Rect [40 294 200 324] /QuadPoints [40 324 200 324 40 294 200 294] /C [1 1 0] /F 4 /P 4 0 R /Contents (other-app-highlight) >>';
   }
   objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${String(pages)} >>`;
   let out = '%PDF-1.4\n';
@@ -91,7 +104,7 @@ const ENCRYPTED_PDF_BASE64 =
 
 test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノートへ引ける(設定で選んだ人だけ)', async ({ page, context }) => {
   // ⑤″(ページの編集)を足して 1 本の物語が 28 秒を超えたので、既定の 30 秒を広げる(待ちを緩めたのではなく、通す道が増えた)
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   // ⚠ 窓の中の revoke を数える(描いた頁の ObjectURL を、外れたときに返しているか)。本体の側は数えない
   await context.addInitScript(() => {
     const w = window as unknown as { __revoked: string[]; __created: number };
@@ -964,6 +977,281 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(enc.locator('#pageno')).toHaveValue('2', { timeout: 10_000 });
   await enc.close();
   expect(edErrors, '編集の窓で例外が出た').toEqual([]);
+
+  // ── ⑤⁗ ハイライト(#275 段②-2b/c)── 字を選んで色を付ける → 付いたハイライトを押して外す → 保存 → 開き直すと反映されている ──
+  //    fixture は自作の 3 ページ。1 頁目の 1 行目に**他のアプリが付けた形**のハイライト(`/P` つき)が 1 つ付いている。
+  const HL_NAME = 'ハイライト.pdf';
+  const HL_OUT = 'ハイライト (編集).pdf';
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: HL_NAME,
+    mimeType: 'application/pdf',
+    buffer: buildPdf(3, { highlight: true }),
+  });
+  await clickReal(page, entryNamed(HL_NAME));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', HL_NAME);
+  await expect(entryNamed(HL_OUT), '保存の前に編集後の添付がある(観測が空振り)').toHaveCount(0);
+  const openHl = async (): Promise<typeof win> => {
+    const [w] = await Promise.all([
+      context.waitForEvent('page', { timeout: 15_000 }),
+      clickReal(page, '[data-pkc-action="view-asset"]'),
+    ]);
+    await w.setViewportSize({ width: 1100, height: 900 });
+    await expect(w.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready', { timeout: 20_000 });
+    return w;
+  };
+  const hw = await openHl();
+  const hwErrors: string[] = [];
+  hw.on('pageerror', (e) => hwErrors.push(e.message));
+  const pageLayer = (w: typeof hw, n: number) => w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-highlight-layer"]`);
+  const existingOn = (w: typeof hw, n: number) =>
+    w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-highlight-existing"]`);
+  const newOn = (w: typeof hw, n: number) => w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-highlight-new"]`);
+  for (const n of [1, 2, 3]) await expect(pageLayer(hw, n), `${String(n)} ページ目にハイライトの層が出ない`).toBeAttached({ timeout: 20_000 });
+  // 他のアプリが付けたハイライトは、押せる印として重なっている(1 頁目だけ)/ 何も選んでいない間は、ボタンは押せない
+  await expect(existingOn(hw, 1), '元のハイライトが読まれていない').toHaveCount(1);
+  await expect(existingOn(hw, 2)).toHaveCount(0);
+  const hlBtn = hw.locator('#hl-apply');
+  const swatch = (id: string) => hw.locator(`#bar button.swatch[data-hl-color="${id}"]`);
+  await expect(hlBtn).toHaveText('ハイライト');
+  await expect(hlBtn, '何も選んでいないのにハイライトが押せる').toBeDisabled();
+  for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeDisabled();
+  await expect(hw.locator('#edit-save')).toBeHidden();
+  // 帯に収まらないときは 2 行に折り返し、右端の「ノートへ引用する」も「ハイライト」も窓の外へ切れず、読む面に重ならない
+  //   (既定の窓の幅 1000 でも、広い窓 1400 でも。1400 では 1 行のまま ── 折り返しは要るときだけ)
+  const barGeometry = async (): Promise<{ right: number; barBottom: number; scrollerTop: number; barH: number; width: number }> =>
+    hw.evaluate(() => {
+      const r = (id: string): DOMRect => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
+      return {
+        right: Math.max(r('quote').right, r('hl-apply').right),
+        barBottom: r('bar').bottom,
+        scrollerTop: r('scroller').top,
+        barH: r('bar').height,
+        width: window.innerWidth,
+      };
+    });
+  for (const [w, wraps] of [
+    [1000, true],
+    [1100, true],
+    [1500, false],
+  ] as const) {
+    await hw.setViewportSize({ width: w, height: 900 });
+    await expect
+      .poll(async () => (await barGeometry()).right <= w, { message: `幅 ${String(w)} で「ノートへ引用する」が窓の外へ切れている` })
+      .toBe(true);
+    const g = await barGeometry();
+    expect(g.scrollerTop, `幅 ${String(w)} で、帯が読む面に重なっている`).toBeGreaterThanOrEqual(g.barBottom - 1);
+    expect(g.barH > 45, `幅 ${String(w)}: 折り返しの有無が想定と違う(帯の高さ ${String(g.barH)})`).toBe(wraps);
+  }
+  await hw.setViewportSize({ width: 1100, height: 900 });
+  // 幅を変えると、窓は 200ms 後に幅合わせで頁を描き直す ── 字の層が作り直される前に選ぶと選びが消えるので、描き直しを待つ
+  await hw.waitForTimeout(600);
+  for (const n of [1, 2, 3]) await expect(hw.locator(`.page[data-page="${String(n)}"] .textLayer span`).first()).toBeAttached({ timeout: 15_000 });
+  // 色のボタン: 4 色が窓の色の表どおりに見え、押された色(既定は黄)は枠の色で見分けられる
+  const cssOfHw = (loc: ReturnType<typeof swatch>, prop: string): Promise<string> =>
+    loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+  expect(await cssOfHw(swatch('yellow'), 'background-color')).toBe('rgb(255, 235, 51)');
+  expect(await cssOfHw(swatch('green'), 'background-color')).toBe('rgb(115, 230, 115)');
+  expect(await cssOfHw(swatch('blue'), 'background-color')).toBe('rgb(128, 199, 255)');
+  expect(await cssOfHw(swatch('pink'), 'background-color')).toBe('rgb(255, 140, 199)');
+  await expect(swatch('yellow')).toHaveAttribute('aria-pressed', 'true');
+  expect(await cssOfHw(swatch('yellow'), 'border-top-color'), '押された色が、押されていない色と見分けられない').not.toBe(
+    await cssOfHw(swatch('green'), 'border-top-color'),
+  );
+
+  /** `n` ページ目の 1 つ目の字の塊を選ぶ(選びの複製を残す ── ボタンを押す間に選びが消えても読める)。 */
+  const selectFirstSpan = async (n: number): Promise<void> => {
+    await hw.locator(`.page[data-page="${String(n)}"] .textLayer span`).first().waitFor({ state: 'attached', timeout: 15_000 });
+    await hw.evaluate((k) => {
+      const el = document.querySelector(`.page[data-page="${String(k)}"] .textLayer span`);
+      if (el === null) throw new Error('字の層が無い');
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      sel?.addRange(r);
+    }, n);
+  };
+  const pixelAt = (w: typeof hw, n: number, from: 'existing' | 'new'): Promise<number[]> =>
+    w.evaluate(
+      async ([k, kind]) => {
+        const box = document.querySelector(`.page[data-page="${String(k)}"]`);
+        const img = box?.querySelector('img');
+        const mark = box?.querySelector(`[data-pkc-field="pdf-highlight-${String(kind)}"]`);
+        if (!box || !img || !mark) throw new Error('絵かハイライトの印が無い');
+        const bb = box.getBoundingClientRect();
+        const mb = mark.getBoundingClientRect();
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const ctx = c.getContext('2d');
+        if (ctx === null) throw new Error('canvas が無い');
+        ctx.drawImage(img, 0, 0);
+        const ratio = img.naturalWidth / bb.width;
+        // ハイライトの左端のすぐ内側・真ん中の高さ(字の左の余白 ── 字の黒に当たらない)
+        const x = Math.round((mb.left - bb.left + 1.5) * ratio);
+        const y = Math.round((mb.top - bb.top + mb.height / 2) * ratio);
+        return Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+      },
+      [n, from] as const,
+    );
+
+  // (a) 2 頁目の字を選ぶ → 緑を選ぶ → ハイライト ── 選びの上に緑が付き、案内の行と保存ボタンが出る
+  await selectFirstSpan(2);
+  await expect(hlBtn, '字を選んでもハイライトが押せない').toBeEnabled();
+  await expect(hw.locator('#quote'), '同じ選びから引用もできる').toBeEnabled();
+  for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeEnabled();
+  await clickReal(hw, '#bar button.swatch[data-hl-color="green"]');
+  await expect(swatch('green')).toHaveAttribute('aria-pressed', 'true');
+  await expect(swatch('yellow')).toHaveAttribute('aria-pressed', 'false');
+  await expect(newOn(hw, 2), '付ける前から付いている(観測が空振り)').toHaveCount(0);
+  await clickReal(hw, '#hl-apply');
+  await expect(newOn(hw, 2), '字を選んで押したのに、ハイライトが付かない').not.toHaveCount(0);
+  expect(await newOn(hw, 2).first().evaluate((el) => getComputedStyle(el).backgroundColor), '選んだ色(緑)で付いていない').toBe(
+    'rgb(115, 230, 115)',
+  );
+  expect(await newOn(hw, 2).first().evaluate((el) => getComputedStyle(el).mixBlendMode), '字を隠す(乗算でない)').toBe('multiply');
+  // 付いた位置は選んだ字の上(字の層の span と重なる)
+  const spanBox = await hw.locator('.page[data-page="2"] .textLayer span').first().boundingBox();
+  const markBox = await newOn(hw, 2).first().boundingBox();
+  expect(markBox !== null && spanBox !== null && markBox.x < spanBox.x + spanBox.width && markBox.x + markBox.width > spanBox.x).toBe(true);
+  expect(Math.abs((markBox?.y ?? 0) + (markBox?.height ?? 0) / 2 - ((spanBox?.y ?? 0) + (spanBox?.height ?? 0) / 2))).toBeLessThan(
+    spanBox?.height ?? 0,
+  );
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 1 件付けています');
+  await expect(hw.locator('#edit-save'), '付けたのに保存ボタンが出ない').toBeVisible();
+  await expect(hw.locator('#edit-save')).toBeEnabled();
+  // 絵に焼かれていない(保存の前は、窓が重ねて見せるだけ ── 絵の同じ場所はまだ白い。対照: 元のハイライトは黄色く焼かれている)
+  expect(await pixelAt(hw, 2, 'new'), '保存の前なのに、絵の側が緑になっている').toEqual([255, 255, 255]);
+  const origPx = await pixelAt(hw, 1, 'existing');
+  expect(origPx[0]! > 200 && origPx[1]! > 200 && origPx[2]! < 140, `元のハイライトが黄色く描かれていない(${origPx.join(',')})`).toBe(true);
+  // 同じ範囲にもう一度付けても重ならない(色の取り替え): 青にして押し直す → 1 件のまま、色だけ青
+  await clickReal(hw, '#bar button.swatch[data-hl-color="blue"]');
+  await clickReal(hw, '#hl-apply');
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 1 件付けています');
+  expect(await newOn(hw, 2).first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(128, 199, 255)');
+  // 緑へ戻す(この後の保存で緑を確かめる)
+  await clickReal(hw, '#bar button.swatch[data-hl-color="green"]');
+  await clickReal(hw, '#hl-apply');
+  expect(await newOn(hw, 2).first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(115, 230, 115)');
+
+  // (b) 3 頁目にピンクで付け、押して「ハイライトを外す」── 付けた分は外れて、案内の数が戻る(色は窓の間覚えている)
+  await hw.locator('.page[data-page="3"]').scrollIntoViewIfNeeded();
+  await selectFirstSpan(3);
+  await clickReal(hw, '#bar button.swatch[data-hl-color="pink"]');
+  await clickReal(hw, '#hl-apply');
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 2 件付けています');
+  await expect(newOn(hw, 3)).not.toHaveCount(0);
+  await expect(hw.locator('#hl-pop'), '押す前から「外す」が出ている').toBeHidden();
+  const clickCenter = async (w: typeof hw, loc: ReturnType<typeof existingOn>): Promise<void> => {
+    const b = await loc.first().boundingBox();
+    if (b === null) throw new Error('印の位置が取れない');
+    await w.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+  };
+  await clickCenter(hw, newOn(hw, 3));
+  await expect(hw.locator('#hl-pop'), '付いたハイライトを押しても「外す」が出ない').toBeVisible();
+  await expect(hw.locator('#hl-remove')).toHaveText('ハイライトを外す');
+  await clickReal(hw, '#hl-remove');
+  await expect(newOn(hw, 3), '外したのに残っている').toHaveCount(0);
+  await expect(hw.locator('#hl-pop')).toBeHidden();
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 1 件付けています');
+  await expect(newOn(hw, 2), '外していない 2 頁目のハイライトまで消えた').not.toHaveCount(0);
+
+  // (c) 他のアプリが付けたハイライトを押す → 外す(破線で見分けられる)→ もう一度押してやめる(片道にしない)→ また外す
+  await hw.locator('.page[data-page="1"]').scrollIntoViewIfNeeded();
+  await clickCenter(hw, existingOn(hw, 1));
+  await expect(hw.locator('#hl-remove')).toHaveText('ハイライトを外す');
+  await expect(existingOn(hw, 1).first()).not.toHaveAttribute('data-pkc-removed', 'true');
+  expect(await existingOn(hw, 1).first().evaluate((el) => getComputedStyle(el).outlineStyle), '外す前から破線が付いている').toBe('none');
+  await clickReal(hw, '#hl-remove');
+  await expect(existingOn(hw, 1).first()).toHaveAttribute('data-pkc-removed', 'true');
+  expect(await existingOn(hw, 1).first().evaluate((el) => getComputedStyle(el).outlineStyle), '外すと決めたハイライトが見分けられない(破線が無い)').toBe('dashed');
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 1 件付け、1 件外しています');
+  await clickCenter(hw, existingOn(hw, 1));
+  await expect(hw.locator('#hl-remove')).toHaveText('ハイライトを外すのをやめる');
+  await clickReal(hw, '#hl-remove');
+  await expect(existingOn(hw, 1).first()).not.toHaveAttribute('data-pkc-removed', 'true');
+  await expect(hw.locator('#edit-note')).toContainText('ハイライトを 1 件付けています');
+  await expect(hw.locator('#edit-note')).not.toContainText('外しています');
+  await clickCenter(hw, existingOn(hw, 1));
+  await clickReal(hw, '#hl-remove');
+  await expect(existingOn(hw, 1).first()).toHaveAttribute('data-pkc-removed', 'true');
+  // 外すを出したあと、Esc で消える
+  await clickCenter(hw, existingOn(hw, 1));
+  await expect(hw.locator('#hl-pop')).toBeVisible();
+  await hw.keyboard.press('Escape');
+  await expect(hw.locator('#hl-pop')).toBeHidden();
+
+  // (d) 保存 ── 新しい添付が 1 つ増える。元の添付は残り、読んでいた画面は動かない / 保存した後は保存ボタンが消える
+  const hlDetail = await page.locator('[data-pkc-region="detail"]').innerText();
+  const unloadAsksHw = (w: typeof hw): Promise<boolean> =>
+    w.evaluate(() => {
+      const e = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    });
+  expect(await unloadAsksHw(hw), '保存していないハイライトがあるのに、閉じるときの確認が出ない').toBe(true);
+  await clickReal(hw, '#edit-save');
+  await expect(hw.locator('#status'), '保存の結果が窓に出ない').toContainText('保存しました', { timeout: 20_000 });
+  await expect(entryNamed(HL_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(HL_NAME).filter({ hasNotText: '(編集)' }), '元の添付が消えた').toHaveCount(1);
+  await expect(page.locator('[data-pkc-action="view-asset"]'), '保存で、読んでいたノートの画面が動いた').toHaveAttribute('data-pkc-asset-name', HL_NAME);
+  expect(await page.locator('[data-pkc-region="detail"]').innerText()).toBe(hlDetail);
+  await expect(hw.locator('#edit-save'), '保存した後も保存ボタンが残っている').toBeHidden();
+  expect(await unloadAsksHw(hw), '保存した後なのに、閉じるときの確認が出る').toBe(false);
+  // 保存した後も、窓には付けたハイライトが見え続ける(窓の絵には焼かれていないので、重ねたまま)
+  await expect(newOn(hw, 2)).not.toHaveCount(0);
+  expect(hwErrors, 'ハイライトの窓で例外が出た').toEqual([]);
+  await hw.close();
+  // 元の PDF は変わっていない: 開き直しても、1 頁目の元のハイライトはそのまま・2 頁目には何も付いていない
+  const again = await openHl();
+  await expect(pageLayer(again, 2)).toBeAttached({ timeout: 20_000 });
+  await expect(existingOn(again, 1), '元の PDF から他のアプリのハイライトが消えている(元を書き換えた)').toHaveCount(1);
+  await expect(existingOn(again, 2), '元の PDF に 2 頁目のハイライトが付いている(元を書き換えた)').toHaveCount(0);
+  await again.close();
+
+  // (e) できた PDF を開く ── 2 頁目の緑のハイライトが PDF の中に在り(絵にも焼かれて緑に見える)、
+  //     3 頁目のピンク(外した)は無く、1 頁目の元のハイライト(外した)も無い
+  await clickReal(page, entryNamed(HL_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', HL_OUT);
+  const saved = await openHl();
+  for (const n of [1, 2, 3]) await expect(pageLayer(saved, n)).toBeAttached({ timeout: 20_000 });
+  await expect(existingOn(saved, 2), '保存した PDF に、付けたハイライトが入っていない').not.toHaveCount(0);
+  await expect(existingOn(saved, 3), '外したはずのピンクが保存した PDF に在る').toHaveCount(0);
+  await expect(existingOn(saved, 1), '外したはずの他のアプリのハイライトが保存した PDF に在る').toHaveCount(0);
+  await expect(saved.locator('#edit-save'), '開いただけなのに保存ボタンが出ている').toBeHidden();
+  await expect
+    .poll(() => saved.locator('.page[data-page="2"] img').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), {
+      message: '2 頁目の絵が読み込まれていない',
+      timeout: 15_000,
+    })
+    .toBe(true);
+  const greenPx = await pixelAt(saved, 2, 'existing');
+  expect(
+    greenPx[1]! > greenPx[0]! + 60 && greenPx[1]! > greenPx[2]! + 60,
+    `保存した PDF の 2 頁目が緑に描かれていない(${greenPx.join(',')})`,
+  ).toBe(true);
+
+  // (f) 保存した PDF のハイライトも外せる(2 頁目の緑を押す → 外す → 保存)── 名前は元と同じ「(編集)」のまま、もう 1 つ増える
+  await saved.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  await clickCenter(saved, existingOn(saved, 2));
+  await expect(saved.locator('#hl-remove')).toHaveText('ハイライトを外す');
+  await clickReal(saved, '#hl-remove');
+  await expect(saved.locator('#edit-note')).toContainText('ハイライトを 1 件外しています');
+  await clickReal(saved, '#edit-save');
+  await expect(saved.locator('#status')).toContainText('保存しました', { timeout: 20_000 });
+  await expect(entryNamed(HL_OUT), '外して保存した PDF が増えていない').toHaveCount(2, { timeout: 10_000 });
+  await saved.close();
+  // 2 つのうち、片方は 2 頁目にハイライトが 1 つ(最初の保存)、もう片方は 0(外して保存)── 順には依らない
+  const counts: number[] = [];
+  for (const i of [0, 1]) {
+    await clickReal(page, entryNamed(HL_OUT).nth(i));
+    await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', HL_OUT);
+    const w = await openHl();
+    await expect(pageLayer(w, 2)).toBeAttached({ timeout: 20_000 });
+    counts.push(await existingOn(w, 2).count());
+    await w.close();
+  }
+  expect(counts.map((c) => (c > 0 ? 1 : 0)).sort(), '外して保存した PDF から 2 頁目のハイライトが消えていない').toEqual([0, 1]);
 
   // ── ⑥ 読めない PDF ── 断り文を出さず、ブラウザ内蔵の表示へ退避する ──
   await page.setInputFiles('[data-pkc-field="attach-input"]', {

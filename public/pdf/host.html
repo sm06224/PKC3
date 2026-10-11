@@ -23,6 +23,8 @@
   - **ページの編集**(#275 段②-1b)は一覧の中で並べ替え・回す・外す。保存を押したときだけ、窓の中の使い捨ての worker
     (`edit-worker.js`。使われなければ畳む)が**新しい PDF**を作り、OPFS の棚へ置いて本体へ知らせる。元の PDF は書き換えない。
   - **ページの抜き出し**(#275 段②-1c)は、一覧で選んだページだけを新しい PDF にする(同じ worker・同じ棚・同じ門)。
+  - **ハイライト**(#275 段②-2)は、字を選んで「ハイライト」+ 色(黄・緑・青・ピンク)で付け、付いたハイライト(他のアプリで付けた物も)を
+    押して「ハイライトを外す」。保存はページの編集と**同じ 1 本**(同じ worker・同じ棚・同じ門)で、新しい PDF の添付になる。元の PDF は変わらない。
   - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
 
@@ -32,8 +34,10 @@
   :root { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ddd;
     font: 13px system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif; }
-  #bar { position: fixed; inset: 0 0 auto 0; height: 38px; display: flex; gap: 6px; align-items: center;
-    padding: 0 10px; background: #000c; z-index: 10; white-space: nowrap; overflow: hidden }
+  /* 帯の高さは窓の中で測る(`--bar-h`)。ボタンが増えて 1 行に収まらないときは、2 行に折り返す
+     (右端の「ノートへ引用する」が窓の外へ切れて押せなくならない)。1 行に収まる広さなら今までと同じ 38px */
+  #bar { position: fixed; inset: 0 0 auto 0; min-height: 38px; box-sizing: border-box; display: flex; flex-wrap: wrap;
+    gap: 4px 6px; align-items: center; padding: 4px 10px; background: #000c; z-index: 10; white-space: nowrap }
   #bar .sp { flex: 1 }
   #bar button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
     border-radius: 3px; padding: 3px 9px }
@@ -48,9 +52,23 @@
     max-width: 80%; padding: 6px 14px; border-radius: 4px; background: #000d; color: #eee }
   #status:empty { display: none }
   #bar button[aria-pressed="true"] { background: #3d5a80; border-color: #8ab4ff }
-  #scroller { position: fixed; inset: 38px 0 0 0; overflow: auto }
+  /* ハイライトの色のボタン(#275 段②-2b)。背景の色は窓の JS が色の表から付ける。押された色は白い枠で見分ける
+     (⚠ 上の `aria-pressed` の青は背景を塗るので、色のボタンには使わない) */
+  #bar button.swatch { width: 22px; height: 22px; padding: 0; border: 2px solid #555; border-radius: 50% }
+  #bar button.swatch[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 2px #000, 0 0 0 3px #fff }
+  /* 付けたハイライトの層(絵の上・字の層の下。押せるかどうかは窓の JS が位置で調べる) */
+  .hl-layer { position: absolute; inset: 0; pointer-events: none }
+  .hl-layer > div { position: absolute; box-sizing: border-box }
+  .hl-layer > [data-pkc-field="pdf-highlight-new"] { mix-blend-mode: multiply }
+  /* 外すと決めた(元から付いていた)ハイライト: 薄く覆って破線で囲む */
+  .hl-layer > [data-pkc-removed="true"] { outline: 2px dashed #d33; background: rgba(255, 255, 255, .55) }
+  #hl-pop { position: fixed; z-index: 20; padding: 4px; background: #000e; border: 1px solid #555; border-radius: 4px }
+  #hl-pop[hidden] { display: none }
+  #hl-pop button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
+    border-radius: 3px; padding: 3px 9px }
+  #scroller { position: fixed; inset: var(--bar-h, 38px) 0 0 0; overflow: auto }
   /* 編集中の案内の 1 行(#275 段②-1b)。出ている間は、その分だけ下の面を下げる */
-  #edit-bar { position: fixed; inset: 38px 0 auto 0; min-height: 26px; box-sizing: border-box; display: flex;
+  #edit-bar { position: fixed; inset: var(--bar-h, 38px) 0 auto 0; min-height: 26px; box-sizing: border-box; display: flex;
     gap: 2px 8px; align-items: center; flex-wrap: wrap; padding: 3px 10px; background: #2b2a1c; border-bottom: 1px solid #5c5a2e;
     color: #e6e2b8; z-index: 9; line-height: 1.4 }
   #edit-bar[hidden] { display: none }
@@ -68,9 +86,9 @@
   #edit-save:disabled, #edit-bar button:disabled { opacity: .45; cursor: default }
   /* 案内の高さは窓の中で測る(`--edit-bar-h`。折り返しても重ならない) */
   body[data-pkc-pdf-edited="on"] #scroller, body[data-pkc-pdf-edited="on"] #plist, body[data-pkc-pdf-edited="on"] #msg {
-    top: calc(38px + var(--edit-bar-h, 26px)) }
+    top: calc(var(--bar-h, 38px) + var(--edit-bar-h, 26px)) }
   /* ページの一覧(#275 段②-1a)。幅は固定の小ささ(読む幅を奪わない)。出し入れは帯のボタン */
-  #plist { position: fixed; inset: 38px auto 0 0; width: 120px; overflow-y: auto; overflow-x: hidden;
+  #plist { position: fixed; inset: var(--bar-h, 38px) auto 0 0; width: 120px; overflow-y: auto; overflow-x: hidden;
     box-sizing: border-box; padding: 8px 0 24px; background: #151515; border-right: 1px solid #333;
     display: none; flex-direction: column; align-items: center; gap: 8px }
   body[data-pkc-pdf-list="on"] #plist { display: flex }
@@ -115,7 +133,7 @@
   .page { position: relative; background: #fff; box-shadow: 0 0 0 1px #0006; flex: none }
   .page img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-select: none;
     pointer-events: none }
-  #msg { position: fixed; inset: 38px 0 0 0; display: grid; place-content: center; text-align: center;
+  #msg { position: fixed; inset: var(--bar-h, 38px) 0 0 0; display: grid; place-content: center; text-align: center;
     padding: 24px; line-height: 1.8; opacity: .85 }
   #msg[hidden] { display: none }
   object { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #1b1b1b }
@@ -156,12 +174,14 @@
   <span class="sp"></span>
   <button id="edit-save" type="button" hidden title="並べ替え・回転・外したページを反映した、新しい PDF を添付に加えます(元の PDF は変わりません)">別の PDF として保存</button>
   <button id="extract" type="button" disabled title="一覧で選んだページ(Ctrl+クリック・Shift+クリックで複数)だけを、新しい PDF として添付に加えます(元の PDF は変わりません)">選んだページを別の PDF にする</button>
+  <button id="hl-apply" type="button" disabled title="選んだ字にハイライトを付けます(色は右の丸いボタンで選びます)。付いたハイライトを押すと「ハイライトを外す」が出ます">ハイライト</button>
   <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
 </div>
 <div id="edit-bar" hidden><span id="edit-note"></span><button id="edit-reset" type="button" title="まだ保存していない並べ替え・回転・外したページを、元に戻します">変更を元に戻す</button><button id="edit-unpick" type="button" title="一覧で選んだページの選びを、すべて外します(Esc でも外せます)">選びを外す</button><span id="edit-warn" hidden></span></div>
 <div id="plist-hint">ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl+クリックで選ぶ</div>
 <nav id="plist" aria-label="ページの一覧"></nav>
 <div id="scroller"><div id="pages"></div></div>
+<div id="hl-pop" hidden><button id="hl-remove" type="button">ハイライトを外す</button></div>
 <div id="status" role="status"></div>
 <div id="msg">読み込んでいます…</div>
 <script src="./reader-wire.js"></script>
@@ -170,6 +190,7 @@
 <script src="./text-hits.js"></script>
 <script src="./page-list.js"></script>
 <script src="./page-edit.js"></script>
+<script src="./highlight.js"></script>
 <script src="./edit-stage.js"></script>
 <script type="module" src="./reader.js"></script>
 </body>
