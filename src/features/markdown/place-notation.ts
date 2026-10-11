@@ -56,6 +56,7 @@ import {
   type PlaceStyleKey,
 } from './place-color';
 import { parseAnchorSpell } from './place-line';
+import { placeRotateOf } from './place-rotate';
 import { isPlaceShape, placeShapeOf, type PlaceShape } from './place-shape';
 import { blockSpanAt, scanContainers } from './source-blocks';
 
@@ -390,10 +391,11 @@ export function setPlaceStyle(
     if (v === undefined) continue;
     if (!allowed.includes(k)) return null;
     // 🔴 矢じり / 文字の大きさ: `none` / `standard` は札を消す(「矢じりなし」= 札が無い。`none` と書き足さない)
+    // 🔴 回転: `0` も札を消す(回していない = 札が無い。`rotate=0` と書き足さない)
     const text =
-      v === null || v === 'none' || v === 'standard'
+      v === null || v === 'none' || v === 'standard' || (k === 'rotate' && v === 0)
         ? null
-        : k === 'width' || k === 'arrow' || k === 'size'
+        : k === 'width' || k === 'arrow' || k === 'size' || k === 'rotate'
           ? String(v)
           : parsePlaceColor(v)!;
     entries.push([k, text]);
@@ -613,12 +615,14 @@ export interface PlaceStyleRead {
   readonly arrow: PlaceArrow;
   /** 🔴 文字の大きさ(付箋だけ。札が無い / 読めない = `standard`)。読む規則は `placeSizeOf` の 1 本(§7)。 */
   readonly size: PlaceSize;
+  /** 🔴 回転(付箋だけ。度 0〜359。札が無い / 読めない = `0`)。読む規則は `placeRotateOf` の 1 本(§7)。 */
+  readonly rotate: number;
   /**
    * **その種類が持てる札のどれかが書かれているか**(値が読めなくても真)。
    * 🔑 右クリックの「色を外す」を出すかの判定 ── 読めない値(`fill=red`)も、外せなければ
    *   画面に出ない札が本文に残り続ける。
-   * ⚠ **文字の大きさ(`size=`)は数えない** ── 「色を外す」は色の札しか消さないので、`size=` だけの付箋で
-   *   出すと押しても何も起きない(無言の dead click)。大きさは `written.size` で見る。
+   * ⚠ **文字の大きさ(`size=`)・回転(`rotate=`)は数えない** ── 「色を外す」は色の札しか消さないので、`size=` だけの付箋で
+   *   出すと押しても何も起きない(無言の dead click)。大きさは `written.size`、回転は `written.rotate` で見る。
    */
   readonly any: boolean;
   /** 札ごとの「書かれているか」(読めない値も真)。⚠ 持てない札は常に `false`。 */
@@ -641,13 +645,15 @@ export function placeStyleAt(line: string): PlaceStyleRead | null {
     width: keys.includes('width') ? parsePlaceWidth(attrs.kvs.width) : null,
     arrow: keys.includes('arrow') ? placeArrowOf(attrs.kvs.arrow) : 'none',
     size: keys.includes('size') ? placeSizeOf(attrs.kvs.size) : 'standard',
-    any: keys.some((k) => k !== 'size' && attrs.kvs[k] !== undefined),
+    rotate: keys.includes('rotate') ? placeRotateOf(attrs.kvs.rotate) : 0,
+    any: keys.some((k) => k !== 'size' && k !== 'rotate' && attrs.kvs[k] !== undefined),
     written: {
       fill: keys.includes('fill') && attrs.kvs.fill !== undefined,
       stroke: attrs.kvs.stroke !== undefined,
       width: keys.includes('width') && attrs.kvs.width !== undefined,
       arrow: keys.includes('arrow') && attrs.kvs.arrow !== undefined,
       size: keys.includes('size') && attrs.kvs.size !== undefined,
+      rotate: keys.includes('rotate') && attrs.kvs.rotate !== undefined,
     },
   };
 }

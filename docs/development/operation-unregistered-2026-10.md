@@ -1,7 +1,7 @@
 # 名前で呼べない操作(未登記)の全数分類(#582 段③の下準備)
 
 > 出どころ:`node scripts/operation-table.mjs --unregistered`(2026-10-11、base `b1d8d9eb`)が出す 295 件のうち、
-> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件増えて **228**。第 1 群で 18 件を登記して **210**)を、場面で分けて「名前で呼ぶ意味」を付けた。
+> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件、#530 段⑤d の回転 `place-rotate` で 1 件増えて **229**。第 1 群で 18 件を登記して **211**)を、場面で分けて「名前で呼ぶ意味」を付けた。
 > 手順と結論は `docs/development/operation-model-2026-08.md` §5.3「未登記 219 件の分類」。この file は**その全数表**である。
 
 ## 読み方
@@ -126,6 +126,7 @@
 | `place-line-width` | 低 | 線を太くする/細くする/標準に戻す | `src/features/entry-actions.ts:1028`<br>`src/features/entry-actions.ts:1031` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-rect` | 低 | 位置と大きさ… | `src/features/entry-actions.ts:953` | 数値を入れる窓が要る |
 | `place-rename-open` | 低 | 題名を直す | `src/features/entry-actions.ts:1093` | 右クリックした付箋のノートを、押した項目が運ぶ(どの付箋かが決まらないと呼べない) |
+| `place-rotate` | 低 | 右に回す/左に回す/回転を解く | `src/features/entry-actions.ts:1063` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-shape-arrow` | 低 | 矢印にする | `src/features/entry-actions.ts:932` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-shape-diamond` | 低 | ひし形にする | `src/features/entry-actions.ts:931` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |
 | `place-shape-ellipse` | 低 | 楕円にする | `src/features/entry-actions.ts:930` | 右クリックした位置・行・塊を、押した項目が運ぶ(仕分けは N だが実は点を指す) |

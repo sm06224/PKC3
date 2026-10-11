@@ -289,6 +289,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'place-append-open', 'place-inline-cancel', 'place-inline-commit', 'place-rename-open',
   'place-shape-arrow', 'place-shape-diamond', 'place-shape-ellipse', 'place-shape-rect',
   'place-shape-round', 'place-size', 'place-group', 'place-ungroup',
+  // ⚠ 2026-10-11(#530 段⑤d): 付箋の右クリックの「右に回す / 左に回す / 回転を解く」。`place-size` と同じ置き場(対象の行はメニューが運ぶ)
+  'place-rotate',
   'purge-trash', 'raise-place', 'remove-office-pack', 'remove-place',
   'remove-place-line',
   // 🔴 2026-10-01(#918 段⑦): SQL の面で足した相手を外す口。外す相手の lid は押し口自身が運ぶ
@@ -497,6 +499,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-size` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-11(#530 段⑤a): 付箋の右クリックの文字の大きさ(`place-size`)で受け手 +1 ── 登記は増えない
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-arrow` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-11(#530 段⑤d): 付箋の右クリックの「右に回す / 左に回す / 回転を解く」(`place-rotate`)で受け手 +1 ── 登記は増えない
+      //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-size` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11: 「リンクをコピー」(`copy-entry-link`。登記 +1 / 受け手 +1 / 両方 +1)と「添付のリンクをコピー」
       //   (`copy-asset-link`。行のメニューに登記 +1 / 受け手 +1 / 両方 +1)で `total` +2 / `receivers` +2 / `registered` +2 / `both` +2。
       // ⚠ 2026-10-11(#1376): 起動したときの 1 行の「戻す」「消す」(`restore-draft` / `discard-draft`)で受け手 +2 ── 登記は増えない。`receivers` +2 / `total` +2 / `unregistered` +2。
@@ -806,12 +810,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 D): 予定の面の「予定を .ics で書き出す」(`export-schedule-ics`)で受け手 +1 ── 登記は増えない
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 417,
-      receivers: 351,
+      total: 418,
+      receivers: 352,
       registered: 131,
       both: 65,
       outsideActionsTable: 66,
-      unregistered: 286,
+      unregistered: 287,
     });
   });
 

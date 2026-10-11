@@ -335,7 +335,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-11(#530 段⑤b): N +2(`place-group` / `place-ungroup`。付箋の右クリックのグループ ── 対象の行はメニューが運ぶ。`place-size` と同じ仕分け)。
     // ⚠ 2026-10-11(#529 W5): N +4(`place-append-open` / `place-rename-open` / `place-inline-commit` / `place-inline-cancel`。板の付箋の上で書く 4 つ ──
     //   押した所から運ぶのは付箋のノートの lid と欄の字で、`target` は器の取得と欄の探しにしか使わない。`place-rect` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 205 });
+    // ⚠ 2026-10-11(#530 段⑤d): N +1(`place-rotate`。付箋の右クリックの「右に回す / 左に回す / 回転を解く」── 押した所から運ぶのは押した結果の角度だけで、
+    //   対象の行はメニューが運ぶ。`place-size` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 206 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

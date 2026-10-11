@@ -16,6 +16,7 @@
  * ⚠ ここは**描くだけ**。書く(`APPEND_TO_ENTRY` / `RENAME_ENTRY_TITLE`)のは binder の受け手。
  */
 
+import { placeRotateOf, rotatedBounds } from '@features/markdown/place-rotate';
 import { OVERLAY_ATTR } from './apply-blocks';
 
 export const PLACE_APPEND_FIELD = 'place-append';
@@ -182,7 +183,13 @@ export function positionPlaceInline(host: Element): void {
   const h = block.offsetHeight > 0 ? block.offsetHeight : num(block.style.height);
   const w = block.offsetWidth > 0 ? block.offsetWidth : num(block.style.width);
   const mode = el.getAttribute('data-pkc-mode');
-  el.style.left = `${left}px`;
-  el.style.top = `${mode === 'append' ? top + h : top}px`;
-  if (w > 0) el.style.width = `${w}px`;
+  /**
+   * 🔴 回した付箋は**回した外接四角**に重ねる(#530 段⑤d)── `left` / `top` / 幅 / 高さは回す前の四角なので、
+   * そのまま使うと追記欄が傾いた付箋の角に食い込む / 離れる。回していなければ今までと同じ式。
+   */
+  const rot = placeRotateOf(block.getAttribute('data-pkc-rotate'));
+  const b = rot === 0 ? { x: left, y: top, w, h } : rotatedBounds({ x: left, y: top, w, h }, rot);
+  el.style.left = `${b.x}px`;
+  el.style.top = `${mode === 'append' ? b.y + b.h : b.y}px`;
+  if (b.w > 0) el.style.width = `${b.w}px`;
 }

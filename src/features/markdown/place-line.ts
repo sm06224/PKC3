@@ -39,13 +39,20 @@
  */
 
 import { PLACE_LINE_WIDTH_DEFAULT, type PlaceArrow } from './place-color';
+import { rotatePointAround } from './place-rotate';
 
-/** 板 1 枚の場所と大きさ(器の左上が原点、px)。 */
+/**
+ * 板 1 枚の場所と大きさ(器の左上が原点、px)。
+ *
+ * 🔴 `rot` は回転(度、右回り。#530 段⑤d)── **`x` `y` `w` `h` は回す前の四角のまま**で、`rot` を持つ四角は
+ *   「中心の周りに `rot` 度回した四角」を表す。無い / 0 = 回していない(今までと 1 バイトも変わらない)。
+ */
 export interface PlaceRect {
   readonly x: number;
   readonly y: number;
   readonly w: number;
   readonly h: number;
+  readonly rot?: number;
 }
 
 /**
@@ -98,8 +105,20 @@ export function anchorRatio(a: PlaceAnchor): number {
   return a.num / a.den;
 }
 
-/** その接続点の座標。 */
+/**
+ * その接続点の座標。
+ *
+ * 🔴 回した付箋(`r.rot`)は、**回す前の辺の点を中心の周りに回した座標**を返す(#530 段⑤d、設計 §5 A)──
+ *   辺は「付箋の中の向き」なので、`right@1/4` は回した付箋の右辺を指し、90° 回すと画面の下側から出る。
+ *   画面・ER 図・PowerPoint の書き出しが**この 1 本**を引く(§7)。
+ */
 export function anchorPoint(r: PlaceRect, a: PlaceAnchor): { x: number; y: number } {
+  const p = unrotatedAnchorPoint(r, a);
+  if (r.rot === undefined || r.rot === 0) return p;
+  return rotatePointAround(p.x, p.y, r.x + r.w / 2, r.y + r.h / 2, r.rot);
+}
+
+function unrotatedAnchorPoint(r: PlaceRect, a: PlaceAnchor): { x: number; y: number } {
   const t = anchorRatio(a);
   if (a.edge === 'top') return { x: r.x + r.w * t, y: r.y };
   if (a.edge === 'bottom') return { x: r.x + r.w * t, y: r.y + r.h };
