@@ -18,6 +18,7 @@ const wire = self.PkcPdfWire;
 const { PageCache, windowOf } = self.PkcPdfPageCache;
 const { DocLease } = self.PkcPdfDocLease;
 const textHits = self.PkcPdfTextHits;
+const { thumbWanted, pickNext, currentChange } = self.PkcPdfPageList;
 
 /** 見えている頁の前後に、この数だけ先に描く。 */
 const RADIUS = 2;
@@ -28,6 +29,12 @@ const SCALE_MAX = 5;
 /** 1 枚の絵の画素の上限(これを超えるなら解像度を落とす)。 */
 const MAX_PIXELS = 16 * 1024 * 1024;
 const HEARTBEAT_MS = 3000;
+/** ページの一覧の絵の幅(CSS px)。一覧の幅(120px)に収まる小ささ。 */
+const THUMB_W = 94;
+/** 一覧で見えている頁の前後に、この数だけ先に描く。 */
+const THUMB_RADIUS = 3;
+/** 一覧の絵を同時に持つ上限(100 頁の文書でも、これを超えて持たない)。 */
+const THUMB_LIVE = 40;
 
 const token = location.hash.replace(/^#/, '');
 const $ = (id) => document.getElementById(id);
@@ -36,6 +43,8 @@ const pagesEl = $('pages');
 const msgEl = $('msg');
 const statusEl = $('status');
 const quoteBtn = $('quote');
+const listEl = $('plist');
+const listBtn = $('toggle-list');
 
 const ch = new BroadcastChannel(wire.CHANNEL);
 const send = (kind, payload) => ch.postMessage(wire.envelope(kind, token, payload));
@@ -79,6 +88,8 @@ const clearTimer = (h) => {
 };
 
 const cache = new PageCache(MAX_LIVE, (url) => URL.revokeObjectURL(url));
+/** ページの一覧の絵の置き場。⚠ 読む頁の置き場(`cache`)とは別 ── 小さな絵が読む頁を押し出さない。 */
+const thumbCache = new PageCache(THUMB_LIVE, (url) => URL.revokeObjectURL(url));
 
 // ───────── 文書を受け取る
 
@@ -145,9 +156,13 @@ async function openPdf() {
       first.cleanup();
     });
     buildBoxes();
+    buildThumbs();
     msgEl.hidden = true;
     ready = true;
     state('ready');
+    // 一覧は既定で出す(読む幅を取られたくない人は、帯のボタンで隠せる)── 幅合わせの前に出す(幅が変わるので)
+    listBtn.disabled = false;
+    setList(true, false);
     $('pagecount').textContent = `/ ${String(total)}`;
     fitWidth();
   } catch {
@@ -186,6 +201,7 @@ function fallBack() {
   // 🔑 文書(= 解析 worker)を握っていれば畳む。待っている依頼は貸し出しが reject する
   if (lease !== null) lease.dispose();
   cache.clear();
+  releaseThumbs();
   document.body.textContent = '';
   ownUrl = URL.createObjectURL(blob);
   const obj = document.createElement('object');
@@ -249,6 +265,7 @@ function refresh() {
     if (b.top <= line && b.bottom >= line) current = i;
   }
   if (document.activeElement !== $('pageno')) $('pageno').value = String(current);
+  markCurrent(current);
   let want = windowOf(first, last, total, RADIUS);
   if (want.size > MAX_LIVE) {
     // 縮小して一度に多く見えるとき: いまの頁に近い順に MAX_LIVE 頁だけ
@@ -343,6 +360,240 @@ async function drawPage(pdf, i, myGen) {
   }
   page.cleanup();
 }
+
+// ───────── ページの一覧(#275 段②-1a)
+
+/** 頁 → 一覧の 1 項目(ボタン) / 絵の入れ物。 */
+const thumbItems = [];
+const thumbHolders = [];
+/** 一覧の枠の中に見えている頁(IntersectionObserver が教える)。 */
+const thumbVisible = new Set();
+let thumbWantedSet = new Set();
+let thumbCenter = 1;
+let thumbObserver = null;
+let thumbDraining = false;
+/** 描けなかった頁(同じ頁を描き直し続けない。一覧を隠すと忘れる)。 */
+const thumbFailed = new Set();
+let listOn = false;
+/** いま光らせている頁(0 = どこも光らせていない)。 */
+let marked = 0;
+/** Tab で止まる項目(`tabindex=0` は 1 つだけ)。 */
+let tabStop = 1;
+
+function buildThumbs() {
+  const ratio = sizes[1].h / sizes[1].w;
+  for (let i = 1; i <= total; i += 1) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'thumb';
+    item.setAttribute('data-pkc-field', 'pdf-page-thumb');
+    item.setAttribute('data-thumb', String(i));
+    item.setAttribute('aria-label', `${String(i)} ページへ`);
+    // 🔑 Tab の止まり先は 1 つ(いまの頁)。項目の間は矢印で動く(`listEl` の keydown)
+    item.tabIndex = i === 1 ? 0 : -1;
+    const holder = document.createElement('span');
+    holder.className = 'thumb-img';
+    holder.style.height = `${String(Math.round(THUMB_W * ratio))}px`;
+    const no = document.createElement('span');
+    no.className = 'thumb-no';
+    no.textContent = String(i);
+    item.append(holder, no);
+    thumbItems[i] = item;
+    thumbHolders[i] = holder;
+    listEl.append(item);
+  }
+}
+
+function clearThumb(i) {
+  if (thumbHolders[i]) thumbHolders[i].textContent = '';
+}
+
+/** 絵を全部返して、見張りも止める(隠したとき / 窓を閉じるとき / 内蔵の表示へ退避するとき)。 */
+function releaseThumbs() {
+  if (thumbObserver !== null) {
+    thumbObserver.disconnect();
+    thumbObserver = null;
+  }
+  thumbVisible.clear();
+  thumbWantedSet = new Set();
+  thumbFailed.clear();
+  for (const i of thumbCache.map.keys()) clearThumb(i);
+  thumbCache.clear();
+}
+
+function watchThumbs() {
+  if (typeof IntersectionObserver !== 'function') {
+    // 見張りが無い環境: 先頭の数枚だけ描く(全部は描かない)
+    for (let i = 1; i <= Math.min(total, 8); i += 1) thumbVisible.add(i);
+    scheduleThumbs();
+    return;
+  }
+  thumbObserver = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        const n = Number(e.target.getAttribute('data-thumb'));
+        if (e.isIntersecting) thumbVisible.add(n);
+        else thumbVisible.delete(n);
+      }
+      if (thumbVisible.size > 0) {
+        const all = [...thumbVisible];
+        thumbCenter = Math.round((Math.min(...all) + Math.max(...all)) / 2);
+      }
+      scheduleThumbs();
+    },
+    { root: listEl, rootMargin: '120px 0px' },
+  );
+  for (let i = 1; i <= total; i += 1) thumbObserver.observe(thumbItems[i]);
+}
+
+function scheduleThumbs() {
+  if (!listOn || !ready) return;
+  thumbWantedSet = thumbWanted(thumbVisible, total, THUMB_RADIUS, THUMB_LIVE, thumbCenter);
+  for (const i of thumbCache.retain(thumbWantedSet)) clearThumb(i);
+  void drainThumbs();
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 描く頁を 1 枚ずつ(読む頁の描きを先にして、その合間に)。 */
+async function drainThumbs() {
+  if (thumbDraining) return;
+  thumbDraining = true;
+  try {
+    for (;;) {
+      if (!listOn || !ready) break;
+      // 読んでいる頁の描きが先 ── 終わるまで待つ
+      if (inflight.size > 0) {
+        await sleep(60);
+        continue;
+      }
+      const i = pickNext(thumbWantedSet, (p) => thumbCache.has(p) || thumbFailed.has(p), thumbCenter);
+      if (i === null) break;
+      try {
+        await lease.use((pdf) => drawThumb(pdf, i));
+      } catch (e) {
+        thumbFailed.add(i);
+        if (!ready) break;
+        if (e && e.openFailed) {
+          fallBack();
+          break;
+        }
+      }
+      // 🔑 1 枚ごとにメインスレッドを返す(入力と描画を止めない)
+      await sleep(0);
+    }
+  } finally {
+    thumbDraining = false;
+  }
+}
+
+async function drawThumb(pdf, i) {
+  const page = await pdf.getPage(i);
+  try {
+    if (!listOn || !thumbWantedSet.has(i)) return;
+    const base = page.getViewport({ scale: 1 });
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const vp = page.getViewport({ scale: (THUMB_W * dpr) / base.width });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.floor(vp.width));
+    canvas.height = Math.max(1, Math.floor(vp.height));
+    await page.render({ canvas, viewport: vp }).promise;
+    const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
+    canvas.width = 0;
+    canvas.height = 0;
+    // 🔴 絵にできなかった頁は**失敗として投げる**(呼び側が `thumbFailed` に覚える)── 黙って返すと、
+    //    持ってもいない・失敗にも数えない頁が「次に描く頁」に選ばれ続け、描き直しが止まらない
+    if (png === null) throw new Error('thumb toBlob failed');
+    const url = URL.createObjectURL(png);
+    if (!listOn || !thumbWantedSet.has(i)) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    for (const e of thumbCache.put(i, url)) clearThumb(e);
+    const holder = thumbHolders[i];
+    holder.textContent = '';
+    holder.style.height = `${String(Math.round((THUMB_W * base.height) / base.width))}px`;
+    const img = document.createElement('img');
+    img.setAttribute('data-pkc-field', 'pdf-page-thumb-image');
+    img.alt = '';
+    img.src = url;
+    holder.append(img);
+  } finally {
+    page.cleanup();
+  }
+}
+
+/** Tab の止まり先を `n` の項目だけにする(roving tabindex)。 */
+function setTabStop(n) {
+  if (tabStop >= 1 && tabStop !== n) thumbItems[tabStop].tabIndex = -1;
+  thumbItems[n].tabIndex = 0;
+  tabStop = n;
+}
+
+/** いまの頁の項目を光らせる(`aria-current`。見た目は host.html の `.thumb[aria-current]`)。 */
+function markCurrent(n) {
+  const ch = currentChange(marked, n, total);
+  if (ch === null) return;
+  if (ch.off !== null) thumbItems[ch.off].removeAttribute('aria-current');
+  thumbItems[ch.on].setAttribute('aria-current', 'true');
+  marked = ch.on;
+  // 一覧の中で操作している最中は、Tab の止まり先を奪わない
+  if (!listEl.contains(document.activeElement)) setTabStop(ch.on);
+  // 読み進めて光る頁が一覧の外へ出たら、最小限だけ動かして見えるところに置く
+  if (listOn) thumbItems[ch.on].scrollIntoView({ block: 'nearest' });
+}
+
+/**
+ * 一覧を出す / 隠す。出し入れで読む幅が変わるので、「幅に合わせる」の最中なら合わせ直す。
+ * @param {boolean} on
+ * @param {boolean} refit  幅を合わせ直すか(最初の 1 回は、この後すぐ合わせるので false)
+ */
+function setList(on, refit) {
+  listOn = on;
+  document.body.setAttribute('data-pkc-pdf-list', on ? 'on' : 'off');
+  listBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  if (on) {
+    watchThumbs();
+    thumbItems[current].scrollIntoView({ block: 'center' });
+  } else {
+    releaseThumbs();
+  }
+  if (refit && fitMode && total >= 1) fitWidth();
+}
+
+listBtn.addEventListener('click', () => {
+  if (ready) setList(!listOn, true);
+});
+// 矢印 / Home / End で項目の間を動く(Enter / Space は項目のボタンが押されて、その頁へ移る)
+listEl.addEventListener('keydown', (ev) => {
+  const el = ev.target instanceof Element ? ev.target.closest('[data-thumb]') : null;
+  if (el === null) return;
+  const at = Number(el.getAttribute('data-thumb'));
+  let to = at;
+  if (ev.key === 'ArrowDown') to = at + 1;
+  else if (ev.key === 'ArrowUp') to = at - 1;
+  else if (ev.key === 'Home') to = 1;
+  else if (ev.key === 'End') to = total;
+  else return;
+  ev.preventDefault();
+  to = Math.max(1, Math.min(total, to));
+  setTabStop(to);
+  thumbItems[to].focus();
+});
+listEl.addEventListener('click', (ev) => {
+  const el = ev.target instanceof Element ? ev.target.closest('[data-thumb]') : null;
+  if (el === null) return;
+  const n = Number(el.getAttribute('data-thumb'));
+  setTabStop(n);
+  goPage(n);
+});
+// 一覧から出たら、Tab の止まり先をいまの頁へ戻す(操作の最中は動かさなかった分)
+listEl.addEventListener('focusout', (ev) => {
+  if (!(ev.relatedTarget instanceof Node) || !listEl.contains(ev.relatedTarget)) {
+    if (marked >= 1) setTabStop(marked);
+  }
+});
 
 // ───────── 拡大縮小 / 頁送り
 
@@ -584,6 +835,7 @@ setInterval(() => send('alive', {}), HEARTBEAT_MS);
 window.addEventListener('pagehide', () => {
   send('closed', {});
   cache.clear();
+  releaseThumbs();
   if (ownUrl !== null) URL.revokeObjectURL(ownUrl);
   if (lease !== null) lease.dispose();
 });
