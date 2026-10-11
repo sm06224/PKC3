@@ -811,6 +811,12 @@ export async function gotoCollectionPane(page: Page): Promise<void> {
   //   書いてある**(`setHashEntry`)ので、そのまま読み直すと boot が選び直す
   //   (実測 2026-09-21: print の spec だけ `collection-pane` が hidden のままだった)。
   //   だから**住所から先に落とす**(`history.replaceState` は読み込みを起こさない)。
+  // 🔴 **読み直す前に、書込が disk に着くのを待つ**(#1066、2026-10-11)。
+  //   ⚠ 直前に題名を確定した spec では、改名の書込が飛んでいる最中に読み直していた ──
+  //   負荷のある箱では書込より先に page が落ち、**題名だけが既定へ戻った DB** を
+  //   次の画面(書き出し)が写していた(輪の記録:`renameEntry` の応答が
+  //   次の `page-load` より後に来ていた)。`writesLanded` の注釈と同じ穴である。
+  await writesLanded(page);
   await page.evaluate(() => {
     history.replaceState(null, '', location.pathname + location.search);
   });
