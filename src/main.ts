@@ -287,6 +287,7 @@ import {
   runGlobalCommand,
   repaintCommandList,
   startEditRestoring,
+  jumpToLinkedSection,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
@@ -5615,6 +5616,9 @@ function bootstrap(): void {
         //    ⚠ 選んだ後に呼ばれる ── 判断(選んでいる物か / 編集中でないか)は reducer が持つ
         searchJump: (lid, find) =>
           app.dispatcher.dispatch({ type: 'SEARCH_JUMP_START', lid, query: find }),
+        // 🔴 **ログの 1 行(見出し)のリンクを開く**(#1559)。⚠ 判断(選べたか / 見出しが無いか)は binder の
+        //    `jumpToLinkedSection` ── 描き終わりを待つので非同期。ここは呼ぶだけ
+        sectionJump: (lid, slug) => void jumpToLinkedSection(app.dispatcher, root, lid, slug),
         // 🔴 **予定の面を「週」で開く**(#855 段 A-2)── 左の列の「週」が別のウィンドウで開いたとき
         // ⚠ 判断は `schedule-deep-link.ts`(test される)── ここは呼ぶだけ
         scheduleView: (mode, day) => applyScheduleDeepLink(app.dispatcher, mode, day),

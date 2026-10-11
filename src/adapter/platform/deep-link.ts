@@ -69,6 +69,9 @@ import {
   parseViewDeepLinkAsset,
   parseViewDeepLinkEntry,
   parseViewDeepLinkFind,
+  parseViewDeepLinkFragment,
+  dropViewFragmentFromHash,
+  SECTION_FRAGMENT_PREFIX,
   parseViewDeepLinkSchedule,
   parseViewWindowToken,
   setHashEntry,
@@ -95,6 +98,11 @@ export interface DeepLinkTarget {
    * ⚠ 省略可(古い test の的)── 無ければ落とせないだけで、他は壊れない。
    */
   readonly dropFind?: () => void;
+  /**
+   * 🔴 **ノートの中の場所(`fragment`)だけを落とす**(#1559)。⚠ **履歴を積まない**(`replaceState`)。
+   * ⚠ 残すと、栞や `F5` のたびに同じ行へ飛ばされる(添付の指定と同じ理由)。省略可(古い test の的)。
+   */
+  readonly dropFragment?: () => void;
   /**
    * 🔴 **予定の見せ方の合図(`sched` / `day`)だけを落とす**(#855 段 A-2)。⚠ 履歴を積まない。
    * ⚠ 残すと、栞や `F5` のたびに見せ方を奪う。省略可(古い test の的)。
@@ -156,6 +164,14 @@ export function windowDeepLinkTarget(): DeepLinkTarget {
         null,
         '',
         `${location.pathname}${location.search}${dropViewFindFromHash(location.hash)}`,
+      );
+    },
+    dropFragment: () => {
+      if (typeof history !== 'object' || typeof location !== 'object') return;
+      history.replaceState(
+        null,
+        '',
+        `${location.pathname}${location.search}${dropViewFragmentFromHash(location.hash)}`,
       );
     },
     dropAsset: () => {
@@ -432,6 +448,13 @@ export interface DeepLinkWiring {
    */
   readonly searchJump?: (lid: string, find: string) => void;
   /**
+   * 🔴 **ノートの中の見出し(ログの 1 行)へ送って光らせる**(#1559)── `fragment=h/<見出しの id>` のリンク。
+   *
+   * ⚠ **`selectEntry` の後**に呼ぶ。⚠ 見出しが無い(字を直した / 消した)・ノートを開けなかったときの
+   *   理由は**呼ばれる側が言う**(描き終わりを待ってから探すので非同期)。⚠ 使ったらアドレスから外す。
+   */
+  readonly sectionJump?: (lid: string, slug: string) => void;
+  /**
    * 🔴 **予定の面を「週」で開く**(#855 段 A-2)── 左の列の「週」が別のウィンドウで開くとき運ぶ合図。
    * ⚠ 面が `schedule` のときだけ呼ぶ。**面を開いた後**に呼ぶ(見せ方は面の状態)。
    *   使ったらアドレスから外す(`DeepLinkTarget.dropSchedule`)。
@@ -494,6 +517,12 @@ export const FOREIGN_ENTRY_LINK_MESSAGE =
 export const FOREIGN_ASSET_LINK_MESSAGE =
   'このリンクは別の PKC の添付を指しています(この PKC には開けません)';
 export const NOT_READY_LINK_MESSAGE = 'PKC の準備ができていないため、このリンクを開けませんでした。開き終わってからもう一度試してください';
+/** 🔴 `fragment` が読めない綴りのとき(PKC2 の `log/<id>` など)。ノートは開く ── 場所だけ言う。 */
+export const UNREADABLE_PLACE_MESSAGE =
+  'このリンクの場所の指定は読めませんでした(ノートだけ開きました。ログの行を指すリンクは、この PKC で作り直してください)';
+/** 🔴 ノートを指さずに場所だけを指すリンク(`fragment` だけ / 面を開くリンクに付いた)。 */
+export const PLACE_WITHOUT_NOTE_MESSAGE =
+  'このリンクにはノートの指定が無いため、行や章の場所だけでは開けません';
 export const MISSING_ENTRY_LINK_MESSAGE =
   'このリンクのノートが見つかりません(削除された可能性があります)';
 
@@ -553,10 +582,29 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
    */
   let entryHash: string | null = null;
   const rememberEntryHash = (): void => {
-    if (parseViewDeepLinkEntry(target.hash) !== null) entryHash = target.hash;
+    // 🔑 場所(`fragment`)は控えない ── 戻す先に残すと、見出しへ飛ぶたびに同じ行へ引き戻される
+    if (parseViewDeepLinkEntry(target.hash) !== null) entryHash = dropViewFragmentFromHash(target.hash);
+  };
+
+  /**
+   * 🔴 **住所の `entry` に、最後に「合っている」と分かっているノート**(#1559 着地前レビュー)。
+   *   読んだ住所の entry か、追随で書いた entry。⚠ 追随は**選択が実際に変わったとき**だけ、
+   *   かつ**住所をこちらが書き換えていないとき**だけ書く ── 保存の完了などで状態の通知は何度も来るので、
+   *   リンクを貼った直後(`hashchange` が届く前)に古い選択を書き戻すと、リンクの `entry` が潰れて
+   *   別のノートが開く。
+   */
+  let followed: string | null = null;
+
+  /** 開く先のノートが無い断片に `fragment` が付いていたら、理由を出して落とす。 */
+  const dropOrphanPlace = (): void => {
+    if (parseViewDeepLinkFragment(target.hash) === null) return;
+    wiring.fail(PLACE_WITHOUT_NOTE_MESSAGE);
+    target.dropFragment?.();
   };
 
   const apply = (): void => {
+    const named = parseViewDeepLinkEntry(target.hash);
+    if (named !== null) followed = named.lid;
     const read = readViewDeepLink(target);
     if (read === null) {
       /**
@@ -602,6 +650,20 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
           wiring.searchJump?.(here.lid, find);
           target.dropFind?.();
         }
+        /**
+         * 🔴 **ノートの中の場所があれば、そこへ送って光らせる**(#1559)。
+         * ⚠ **読めない綴りは黙らない**(ノートは開いている ── 場所だけ言う)。
+         * ⚠ 取ったらすぐ落とす(`F5` のたびに同じ行へ戻さない ── 添付の指定と同じ作法)。
+         */
+        const place = parseViewDeepLinkFragment(target.hash);
+        if (place !== null) {
+          if (place.kind === 'section') wiring.sectionJump?.(here.lid, place.slug);
+          else wiring.fail(UNREADABLE_PLACE_MESSAGE);
+          target.dropFragment?.();
+        }
+      } else {
+        // 🔴 ノートの指定が無い断片の場所指定も黙って残さない(開く先が無い ── 理由を言って落とす)
+        dropOrphanPlace();
       }
       /**
        * 🔴 **添付を名指したリンク**(2026-10-11)。⚠ ノートと違って**断片を落とす**
@@ -622,6 +684,8 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       return;
     }
     if ('view' in read) {
+      // 🔴 面を開くリンクの場所指定は使い道が無い ── 黙って残さず、理由を言って落とす
+      dropOrphanPlace();
       hold(read.view);
       // ⚠ 面を指しているなら付箋ではない(題名は `onHold` が面の名前で書く)
       holdEntry(false);
@@ -699,6 +763,11 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
    */
   const offSelect = wiring.onSelectedEntry((containerId, lid) => {
     if (lid === null) return;
+    // 🔴 変わっていない選択では書かない / 住所をこちらが書き換えていない(リンクが貼られた)ときも書かない
+    if (lid === followed) return;
+    const cur = parseViewDeepLinkEntry(target.hash);
+    if (followed !== null && cur !== null && cur.lid !== followed) return;
+    followed = lid;
     target.setEntry(containerId, lid);
     // 🔑 追随した先が、次に見出しへ飛んだときの「戻す先」になる(#693)──
     //    控え直さないと、ノートを移った後の飛びで**最初のノートの住所**へ戻る
@@ -740,6 +809,22 @@ export function entryPermalink(containerId: string | null, lid: string): string 
     kind: 'entry',
     containerId,
     targetId: lid,
+  });
+}
+
+/**
+ * 🔴 **ノートの中の 1 か所(見出し = ログの 1 行)を指すリンク**(#1559)。
+ *   `entryPermalink` に `fragment=h/<見出しの id>` を足した形 ── 綴りは本文の参照(`entry:<lid>#h/<id>`)と同じ。
+ *   ⚠ base の作法(`?query` を運ばない)は `entryPermalink` と同じ 1 本(`permalinkBaseUrl`)。
+ */
+export function sectionPermalink(containerId: string | null, lid: string, slug: string): string | null {
+  if (containerId === null || slug === '') return null;
+  return formatExternalPermalink({
+    baseUrl: permalinkBaseUrl(),
+    kind: 'entry',
+    containerId,
+    targetId: lid,
+    fragment: `${SECTION_FRAGMENT_PREFIX}${slug}`,
   });
 }
 

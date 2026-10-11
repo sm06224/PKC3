@@ -29,6 +29,17 @@ export function formatHeadingTimestamp(iso: string): string {
   );
 }
 
+/** ログの 1 行の見出しの字(`formatHeadingTimestamp` が書く形。取り込み時の ` ★` 付きも含む)。 */
+const LOG_ROW_HEADING_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}( ★)?$/;
+
+/**
+ * 🔴 **ログの 1 行の見出しか**(#1559)。⚠ ログ(`textlog`)の `##` で、字が日時の形のものだけ ──
+ *   ログの中に user が書いた別の見出しは「章」のまま。判定はここ 1 本(右クリックの字と、行のリンクの理由が読む)。
+ */
+export function isLogRowHeading(archetype: string | undefined, level: number, text: string): boolean {
+  return archetype === 'textlog' && level === 2 && LOG_ROW_HEADING_RE.test(text.trim());
+}
+
 export const textlogFlavor: FlavorSpec = {
   archetype: 'textlog',
   /**

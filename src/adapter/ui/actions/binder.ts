@@ -628,7 +628,8 @@ import {
 import { duckDbNetworkNoteOf } from '@features/query/sql-guest-source';
 import { sqlMenuLabel } from '@features/query/sql-tip';
 import { ATTACHMENT_NAME_ATTR, attachmentFileName, readAttachmentMeta } from '@features/flavor/attachment-flavor';
-import { assetPermalink, entryPermalink } from '@adapter/platform/deep-link';
+import { assetPermalink, entryPermalink, sectionPermalink } from '@adapter/platform/deep-link';
+import { isLogRowHeading } from '@features/flavor/textlog-flavor';
 import { PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import {
   asSqlExportKind,
@@ -2504,6 +2505,31 @@ function moveTile(dispatcher: Dispatcher, target: HTMLElement, by: -1 | 1): void
   const lid = target.getAttribute('data-pkc-tile');
   if (lid === null || lid === '') return;
   dispatcher.dispatch({ type: 'MOVE_APP_TILE', lid, target: { kind: 'step', by } });
+}
+
+/**
+ * 🔴 **右クリックが運んだ行の見出しを引く**(#1559 で `copy-section-ref` から取り出した)。
+ *   直下の見出しを先に、外れたら刻印で深く探す(引用や `:::` の中にも id は刻まれる)。
+ *   ⚠ 「参照」と「リンク」が**同じ見出しを指す**ための 1 本 ── 引き方を 2 つに分けない(§7)。
+ */
+function carriedHeading(host: HTMLElement | null, line: number): Element | null {
+  if (host === null) return null;
+  return (
+    headingAtSourceLine(host, line) ??
+    [...host.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(
+      (h) => h.getAttribute('data-pkc-source-line') === String(line),
+    ) ??
+    null
+  );
+}
+
+/** 見出しの字。⚠ 畳みのボタンを除いて読む(`textContent` は `<button>` を含む)。 */
+function headingPlainText(heading: Element): string {
+  return [...heading.childNodes]
+    .filter((n) => !(n instanceof Element && n.matches('button')))
+    .map((n) => n.textContent ?? '')
+    .join('')
+    .trim();
 }
 
 /**
@@ -5110,6 +5136,7 @@ async function tocJump(
   target: HTMLElement,
   slug: string,
   notFound?: string,
+  flash = false,
 ): Promise<void> {
     if (dispatcher.getState().viewMode !== 'detail') {
       dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
@@ -5161,6 +5188,34 @@ async function tocJump(
     const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
     hit.scrollIntoView({ block: 'start' });
+    // 🔴 外から来たリンクは**着いた先を光らせる**(#1559)── 本文のリンクや目次は押した user が行き先を知っている
+    if (flash) flashCopied(hit);
+}
+
+/** 🔴 外から開けるリンクの行き先が見つからないときの理由(#1559)。⚠ ノートは開けている。 */
+export const LINK_SECTION_MISSING_MESSAGE =
+  'リンクの行が見つかりません(行の日時を直した、または消した可能性があります。ノートは開きました)';
+
+/**
+ * 🔴 **外から開けるリンク(`fragment=h/<見出しの id>`)の行き先へ送って光らせる**(#1559)。
+ *
+ * ⚠ ノートを選んだ後に呼ばれる(`deep-link.ts` の `sectionJump`)。選べていなければ(編集中など)
+ *   理由を出す ── 飛び先が無いまま黙ると dead click になる。飛ぶ機構は目次・本文の参照と**同じ `tocJump` 1 本**。
+ */
+export async function jumpToLinkedSection(
+  dispatcher: Dispatcher,
+  root: HTMLElement,
+  lid: string,
+  slug: string,
+): Promise<void> {
+  if (dispatcher.getState().selectedLid !== lid) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'ノートを開けなかったため、リンクの行まで移れませんでした(編集中なら保存してからもう一度開いてください)',
+    });
+    return;
+  }
+  await tocJump(dispatcher, root, slug, LINK_SECTION_MISSING_MESSAGE, true);
 }
 
 /**
@@ -8737,14 +8792,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
-    const heading =
-      host === null
-        ? null
-        : (headingAtSourceLine(host, line) ??
-          [...host.querySelectorAll('h1,h2,h3,h4,h5,h6')].find(
-            (h) => h.getAttribute('data-pkc-source-line') === String(line),
-          ) ??
-          null);
+    const heading = carriedHeading(host, line);
     const st = dispatcher.getState();
     // ⚠ 相手は**開いている本文**(`copy-chapter-md` と同じ)── 見出しは openBody の描画である
     const lid = target.getAttribute(MENU_LID_ATTR) || st.openBody?.lid;
@@ -8763,18 +8811,57 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
       return;
     }
-    // ⚠ 見出しの字は畳みのボタンを除いて読む(`textContent` は `<button>` を含む)
-    const text = [...heading.childNodes]
-      .filter((n) => !(n instanceof Element && n.matches('button')))
-      .map((n) => n.textContent ?? '')
-      .join('')
-      .trim();
+    const text = headingPlainText(heading);
     const title = st.entryMetas.get(lid)?.title ?? '';
     const label = title === '' ? text : `${title} / ${text}`;
     services.copyText(
       formatSectionLink(label, lid, heading.id),
       '章へのリンクをコピーしました(本文に貼れます)',
     );
+  },
+  /**
+   * 🔴 **その章 / ログの行を指す、外へ貼れるリンクを写す**(#1559)。
+   *
+   * 貼れるのは `<アドレス>#pkc?container=…&entry=<lid>&fragment=h/<見出しの id>` ── ブラウザやメールに貼ると、
+   * この PKC のそのノートを開いて**その見出しまで送り、光らせる**(`deep-link.ts` → `jumpToLinkedSection`)。
+   * ⚠ 本文に貼る「参照」(`copy-section-ref`)とは**別物**。見出しの引き方も id も同じ(`carriedHeading`、描画が刻んだ `h.id`)。
+   * ⚠ 組めない / 引けないときは理由を出す(押した瞬間にメニューは畳まれる ── 黙ると dead click)。
+   */
+  'copy-section-link': (dispatcher, target, services) => {
+    const line = menuCarriedLine(target);
+    if (line === null || refuseStaleMenu(dispatcher, target)) return;
+    const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+    const host = root.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+    const heading = carriedHeading(host, line);
+    const st = dispatcher.getState();
+    const lid = target.getAttribute(MENU_LID_ATTR) || st.openBody?.lid;
+    if (heading === null || lid === undefined || lid === '') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '見出しを読めませんでした(本文を開き直してください)' });
+      return;
+    }
+    const row = isLogRowHeading(
+      st.entryMetas.get(lid)?.archetype,
+      headingLevel(heading),
+      headingPlainText(heading),
+    );
+    const what = row ? 'この行' : 'この章';
+    if (heading.id === '') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `この見出しには参照できる ID が無いので、${what}のリンクを作れません(# 〜 ### の見出しで使えます)`,
+      });
+      return;
+    }
+    const url = sectionPermalink(st.cid, lid, heading.id);
+    if (url === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}のリンクを作れませんでした(この PKC のアドレスが読めません)` });
+      return;
+    }
+    if (services.copyText === undefined) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、コピーできません。再読み込みしてください' });
+      return;
+    }
+    services.copyText(url, `${row ? '行' : '章'}のリンクをコピーしました(ブラウザやメールに貼れます)`);
   },
   /**
    * 🔴 **`:::` の塊(囲み / 板)を原文の Markdown でまるごと写す**(#677)。
@@ -15139,6 +15226,12 @@ export function bindActions(
               appendable: level >= 1 && level <= 3 && appendModeOf(dispatcher.getState()).kind === 'ready',
               // 🔴 章の参照(#579)── 描画が id を刻んだ見出しだけ(`#`〜`###`)
               linkable: heading.id !== '',
+              // 🔴 ログの日時の見出しは「行」と呼ぶ(#1559)── 判定は `isLogRowHeading` 1 本
+              logRow: isLogRowHeading(
+                ob === null ? undefined : dispatcher.getState().entryMetas.get(ob.lid)?.archetype,
+                level,
+                headingPlainText(heading),
+              ),
               /**
                * 🔴 **章だけ編集(#1044 段2)**。⚠ `appendable` は使えない
                *   (append-mode の可否は archetype に依存するが、章だけ編集はどの

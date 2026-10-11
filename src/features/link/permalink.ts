@@ -404,6 +404,34 @@ export function parseViewDeepLinkAsset(
   return { containerId, assetKey, ownerLid: owner !== null && TOKEN_RE.test(owner) ? owner : null };
 }
 
+/** 見出しを指す `fragment` の頭。⚠ 本文の参照(`entry:<lid>#h/<id>`)の `#` 以降と同じ綴り。 */
+export const SECTION_FRAGMENT_PREFIX = 'h/';
+
+/**
+ * 🔴 **ノートの中の場所を名指したリンク**(`…&entry=<lid>&fragment=h/<見出しの id>`。#1559)。
+ *
+ * ログの 1 行(`## <日時>` の節)は、本文では**見出し**である。ログの行に ID は無い(本文は Markdown で、
+ * 行の識別は見出しの id)ので、本文に貼る参照(`entry:<lid>#h/<id>`)と**同じ綴り**を `fragment` に載せる
+ * (新しい記法を作らない)。`h/` 以外の綴り(PKC2 の `log/<id>` など)は `unknown` で返す ── 呼び側が
+ * 「ノートは開けたが場所は読めなかった」と理由を出せるように、黙って捨てない。
+ * ⚠ 値は整えない(取り出すだけ)。空 / 無いは `null`。
+ */
+export function parseViewDeepLinkFragment(
+  raw: string,
+): { kind: 'section'; slug: string } | { kind: 'unknown'; raw: string } | null {
+  const fragment = hashParams(raw)?.get('fragment') ?? null;
+  if (fragment === null || fragment === '') return null;
+  if (fragment.startsWith(SECTION_FRAGMENT_PREFIX) && fragment.length > SECTION_FRAGMENT_PREFIX.length) {
+    return { kind: 'section', slug: fragment.slice(SECTION_FRAGMENT_PREFIX.length) };
+  }
+  return { kind: 'unknown', raw: fragment };
+}
+
+/** 断片から場所の指定(`fragment`)だけを落とす(開いた後に残すと、`F5` のたびに同じ行へ戻る)。 */
+export function dropViewFragmentFromHash(raw: string): string {
+  return dropHashKeys(raw, ['fragment']);
+}
+
 /** 断片から添付の指定(`asset`)だけを落とす(開いた後に残すと、`F5` のたびに同じ添付へ戻る)。 */
 export function dropAssetFromHash(raw: string): string {
   return dropHashKeys(raw, ['asset', 'owner']);

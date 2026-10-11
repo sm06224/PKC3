@@ -791,6 +791,10 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
  * 無かった)。#579(user 裁定 2026-09-04)で `entry:<lid>#h/<見出しの id>` の形が
  * 入ったので、ここにも出す(下の注記)。
  */
+/** ログの行の見出しでの「参照をコピー」の字(「章」を「行」に替える ── 他は同じ項目)。 */
+export const SECTION_REF_LABEL_ROW = 'この行の参照をコピー';
+export const SECTION_LINK_LABEL_ROW = 'この行のリンクをコピー';
+
 export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
   /**
    * 🔴 **その章だけを、読む面のその場で編集する**(#1044 段2。裁定 Q1 = 両方置く)。
@@ -815,6 +819,11 @@ export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
    *   `####` 以下に出すと、押しても指す先が無い(`headingMenuActions` の `linkable`)。
    */
   { action: 'copy-section-ref', label: '章の参照をコピー' },
+  /**
+   * 🔴 **章を指すリンクを写す**(#1559)── ブラウザやメールに貼ると、この PKC のこの章が開く。
+   * ⚠ 上の「参照」は**本文に貼る**物、こちらは**外へ貼る**物(用語集の「リンク」と「参照」)。
+   */
+  { action: 'copy-section-link', label: '章のリンクをコピー' },
   /**
    * 🔴 **その章を、読むだけの別のウィンドウで開く**(#1044 段4。裁定 Q3「読むだけ」)。
    * ⚠ 「書きながら同じノートの別の章を横に置いて読む」ための物 ── 書くのはいまのウィンドウの
@@ -861,6 +870,11 @@ export function headingMenuActions(ctx: {
   readonly linkable: boolean;
   readonly sectionEditable: boolean;
   readonly chapterWindow: boolean;
+  /**
+   * 🔴 **ログの 1 行の見出しか**(#1559)。⚠ 字だけが変わる(「章」→「行」)── ログの日時の見出しを
+   *   user は「章」と呼ばない。判定は `isLogRowHeading` 1 本。省略可(古い呼び側は「章」のまま)。
+   */
+  readonly logRow?: boolean;
 }): readonly EntryAction[] {
   const out: EntryAction[] = [];
   if (ctx.sectionEditable) out.push({ action: 'edit-section', label: 'この章を編集する' });
@@ -880,7 +894,11 @@ export function headingMenuActions(ctx: {
     out.push({ action: 'copy-chapter-md', label: 'この章をコピー' });
   }
   // 🔴 章の参照(#579)── 畳めるかとは無関係(引用や `:::` の中の見出しにも id は刻まれる)
-  if (ctx.linkable) out.push({ action: 'copy-section-ref', label: '章の参照をコピー' });
+  if (ctx.linkable) {
+    out.push({ action: 'copy-section-ref', label: ctx.logRow === true ? SECTION_REF_LABEL_ROW : '章の参照をコピー' });
+    // 🔴 外へ貼るリンク(#1559)── 参照と同じ条件(id を持つ見出しだけ)で隣に並べる
+    out.push({ action: 'copy-section-link', label: ctx.logRow === true ? SECTION_LINK_LABEL_ROW : '章のリンクをコピー' });
+  }
   // 🔴 章の別ウィンドウ(#1044 段4)── 章の欄と同じ形の条件(書けるかどうかには依らない)
   if (ctx.chapterWindow)
     out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで開く' });
