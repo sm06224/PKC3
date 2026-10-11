@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
@@ -14,6 +14,8 @@ import {
   asrModelDir,
   asrModelFloorBytes,
 } from '../../src/features/asr/asr-parts';
+import { SNAP_CONFIRM_RULED_TEXT } from '../../src/features/video/video-trim-text';
+import { scanWebmVideo } from '../../src/features/video/webm-vp8';
 import { createHash } from 'node:crypto';
 
 /**
@@ -967,22 +969,50 @@ ${(e as Error).message}`,
 
 
 /**
- * 🔴 **画面収録の前後を削る**(#683 段②b-1。設計 doc §10.2)。
+ * 🔴 **画面収録の前後を削る**(#683 段②b-1 → ②b-2。設計 doc §10.2)。
  *
  * 🔴 **unit では原理的に届かない層**:本物の `MediaRecorder` が吐いた VP8 の webm を、**ワーカーで窓読みして**
  *   元の部品で繋ぎ直した物を、**ブラウザが本当に再生できる**こと(`<video>.duration` が有限・映像が出る・進む)。
+ *   ②b-2 では加えて、**本物の `VideoDecoder` / `VideoEncoder`** が作り直した頭(新しいキーフレーム)を
+ *   Chrome が再生できること ── 偽物では原理的に言えない。
  *
  * ⚠ **上の道中に載せなかった**(`scripts/smoke-budget.mjs` に理由を書いた) ── あの 1 本は既に
  *   30 秒の枠の手前まで使っており、足すと**時間切れ**になった(実測: 36〜43 秒)。
  *   timeout を引き上げて隠さず、別の 1 本にした。
- * ⚠ 録画は 3〜4 秒しかなく、キーフレームは先頭の 1 枚だけ(既定の間隔は約 4.4 秒)。だから
- *   **途中を始まりにすると必ず先頭へ戻る** = 確認が出る(戻らない道は unit が持つ)。
- * ⚠ 実測: この偽の画面は止まっているので、映像のフレームは**最初の 0.4 秒に 9 枚**しか出ない
- *   (音は最後まで)。実機の「画面が止まった録画」と同じ形で、切り出しの終わりの判定が
- *   映像だけを見ていると「録画の外」と断られた(直した欠陥)。
+ * 🔑 偽の画面(`--use-fake-ui-for-media-stream`)の絵は **Chromium が作る見本**(動く円と時刻の字)で、フレームごとに
+ *   変わる ── 切り出した動画の**最初のフレーム**が、元の動画の**押した所のフレーム**と同じかを、絵の見比べで言う。
  */
-test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/切り出す → 再生できる (#683 段②b-1)', async ({ page }) => {
-  const errors = collectPageErrors(page);
+/**
+ * 🔴 動画の「いま映っているフレーム」を 64×36 の灰色にして返す(フレームの見分けに使う)。
+ *
+ * ⚠ 偽の画面の中身は **Chromium が作る見本の絵**(動く円と時刻の字)で、ページの絵ではない ── ページに札を載せても
+ *   録れない(実測)。だから「押した所のフレームから始まっている」は、**元の動画を前後の時刻で止めて撮った絵と、
+ *   切り出した動画の最初の絵を見比べる**形で言う(OCR を使わず、フレームごとに変わる円の位置で見分ける)。
+ * ⚠ 引数の関数は**外の変数を持たない**(Playwright が関数の字をそのまま渡す)。
+ */
+function grabFrame(el: HTMLVideoElement): number[] {
+  const W = 64;
+  const H = 36;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true })!;
+  g.drawImage(el, 0, 0, W, H);
+  const d = g.getImageData(0, 0, W, H).data;
+  const out: number[] = [];
+  for (let i = 0; i < W * H; i += 1) out.push(0.3 * d[i * 4]! + 0.59 * d[i * 4 + 1]! + 0.11 * d[i * 4 + 2]!);
+  return out;
+}
+
+/** 2 枚の絵の違い(画素の差の平均)。 */
+function frameDistance(a: readonly number[], b: readonly number[]): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i += 1) sum += Math.abs(a[i]! - b[i]!);
+  return sum / a.length;
+}
+
+/** 画面を 9 秒以上録って止め(区切りが録れる間隔は録画ごとに揺れる ── 約 2 秒のときも 4 秒のときもあるので、2 つ目の区切りが確実に入る長さまで録る)、一覧に出た行と再生機を返す(2 つの test で同じ道を通る)。 */
+async function recordScreenForTrim(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   // ⚠ 録画は「開いているノート」へ入る ── 開いていないと押しても帯が出ない。編集を確定してから録る
@@ -996,29 +1026,9 @@ test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/�
   const status = page.locator('[data-pkc-field="capture-status"]');
   await clickReal(page, '[data-pkc-field="start-screen-capture"]');
   await expect(bar, '画面録画を押しても帯が出ない').toBeVisible();
-  /**
-   * 🔴 **5 秒以上録り、画面を動かし続ける**(#1534 で画面収録のキーフレームは約 2 秒ごと)。
-   * ⚠ 偽の画面は止まっているので、そのままでは映像のフレームが最初の 0.4 秒にしか出ず、2 秒の位置にキーフレームが
-   *   できない(実測)。画面が変わり続けるよう、ページの色を 50ms ごとに替える ── 録るのはこの画面である。
-   */
-  await page.evaluate(() => {
-    const d = document.createElement('div');
-    d.id = 'smoke-anim';
-    d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:0.4';
-    document.body.append(d);
-    let n = 0;
-    (window as unknown as { __anim: number }).__anim = window.setInterval(() => {
-      n += 1;
-      d.style.background = `hsl(${(n * 37) % 360} 80% 50%)`;
-    }, 50);
-  });
-  await expect(status, '画面録画が 5 秒まで録れていない').toContainText(/中 0:0[5-9]/, { timeout: 30_000 });
+  await expect(status, '画面録画が 9 秒まで録れていない').toContainText(/中 0:(09|1\d)/, { timeout: 30_000 });
   await clickReal(page, '[data-pkc-field="stop-capture"]');
   await expect(bar, '画面録画を止めたのに帯が残っている').toBeHidden();
-  await page.evaluate(() => {
-    window.clearInterval((window as unknown as { __anim: number }).__anim);
-    document.getElementById('smoke-anim')?.remove();
-  });
   // 🔴 **保存が済んでから一覧を開く** ── この面の一覧はタブを開いた瞬間に 1 度集めるだけなので、
   //   止めた直後に開くと、まだ入っていない添付を取りこぼす(上の 1 本目でも間欠で出た形)
   await expect(
@@ -1039,7 +1049,6 @@ test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/�
   expect(Number.isFinite(durNum), `画面録画の長さが出ない(${durNum})`).toBe(true);
   expect(durNum).toBeGreaterThan(4.5);
 
-  const rowsNow = await page.locator('[data-pkc-capture]').count();
   const seekVideo = async (to: number): Promise<number> => {
     await screenMedia.evaluate(
       async (el: HTMLVideoElement, t) =>
@@ -1059,68 +1068,88 @@ test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/�
       .toBe(false);
     return screenMedia.evaluate((el: HTMLVideoElement) => el.currentTime);
   };
-  const vNote = screenRow.locator('[data-pkc-field="capture-trim"]');
-  await expect(vNote, '動画の行に切り出しの案内が出ていない').toHaveText(trimMarkText(null, null, 'video'));
-  const vStart = await seekVideo(2.5);
-  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-start"]'));
-  const vEnd = await seekVideo(Math.min(4.5, durNum - 0.4));
-  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-end"]'));
-  expect(vEnd, `終わり(${vEnd})が始まり(${vStart})より後ろにない`).toBeGreaterThan(vStart + 0.5);
-
-  const dialog = page.locator('[data-pkc-region="app-dialog"]');
-  // 🔴 [やめる]:確認は出るが、何も作らない・印は残る
-  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
-  await expect(dialog, '始まりが手前へ戻るのに確認が出ない').toBeVisible({ timeout: 15_000 });
   /**
-   * 確認の字:何秒早くなるか・押した所と実際の始まり(M:SS → M:SS)を言う(この段は全部のブラウザが区切りへ戻る)。
-   * 🔑 実際の始まりは、録画ごとの区切りの位置で決まる ── 書き出し側(2 秒ごと)に合わせれば 0:02 だが、
-   *   実測では**区切りが 2 秒に出ない録画が混ざった**(9 回中 4 回ほど。偽の画面の更新が不規則なため)。
-   *   その場合は先頭へ戻る = 道は違うが検査は有効なので、**押した値でなく確認の字から**始まりを読み、
-   *   2 秒に出たかを annotation に残す。
+   * 🔴 **範囲を、録れた動画の区切り(キーフレーム)から決める**。⚠ 固定の 2.5 秒だと、区切りがちょうどそこに来た録画
+   *   (実測:間欠で出る)で「押した所がもう区切り = 作り直しが要らない」道へ入り、検査したい道を通らない。
+   * 始まり = ある区切りの 0.5 秒後(= 押した所は塊の途中で、作り直しが要る)、終わり = 次の区切りの 0.4 秒後
+   * (= 作り直した頭の後ろに、元のバイトで繋ぐ部分が残る)。
    */
-  const confirmText = (await dialog.locator('[data-pkc-field="dialog-body"]').textContent()) ?? '';
-  const said0 = confirmText.match(
-    /^始まりを一番近い区切りに合わせて切り出します。始まりが約 (\d+(?:\.\d)?) 秒早くなります\(0:0(\d) → 0:0(\d)\)$/,
-  );
-  expect(said0, `確認の字が決めた形でない(${confirmText})`).not.toBeNull();
-  const snappedSec = Number(said0![3]);
-  test.info().annotations.push({ type: '区切りが 2 秒に出たか', description: String(snappedSec > 0) });
-  await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('切り出す');
-  await expect(dialog.locator('[data-pkc-field="dialog-cancel"]')).toHaveText('やめる');
-  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
-  await expect(dialog, 'やめたのに確認が残っている').toBeHidden();
-  // 作っていない(増えていない)・印は残っている・もう押せる
-  await page.waitForTimeout(600);
-  expect(await page.locator('[data-pkc-capture]').count(), 'やめたのに動画が増えた').toBe(rowsNow);
-  await expect(vNote, 'やめたら印が消えた ── 押し直せなくなる').toContainText('〜');
-  await expect(screenRow.locator('[data-pkc-field="capture-trim-run"]'), 'やめた後に押せない').toBeEnabled();
-
-  // 🔴 [切り出す]:動画が 1 件増える(元も残る)
-  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
-  await expect(dialog).toBeVisible({ timeout: 15_000 });
-  await clickReal(page, '[data-pkc-field="dialog-ok"]');
-  await expect(page.locator('[data-pkc-capture]'), '切り出した動画が一覧に増えていない').toHaveCount(rowsNow + 1, {
-    timeout: 20_000,
+  const b64 = await screenMedia.evaluate(async (el: HTMLVideoElement) => {
+    const buf = new Uint8Array(await (await fetch(el.src)).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+    return btoa(bin);
   });
-  // 🔑 始まりは 2.5 秒ではなく、その手前の区切りになる = 名前に確認の字で言った始まりが入る
-  const cutVideoRow = page
-    .locator('[data-pkc-capture]', { hasText: new RegExp(`\\(0:0${snappedSec}〜`) })
-    .filter({ hasText: '画面収録' });
-  await expect(cutVideoRow, '名前に範囲(区切りへ戻った始まり)が入っていない').toHaveCount(1);
-  // 元の行も残っている
-  await expect(page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first()).toBeVisible();
+  const srcBytes = Buffer.from(b64, 'base64');
+  const scanned = await scanWebmVideo(
+    { size: srcBytes.length, read: async (a, b) => new Uint8Array(srcBytes.subarray(a, b)) },
+    1e9,
+  );
+  if (!scanned.ok) throw new Error(`録った動画を走査できない: ${scanned.reason}`);
+  const keys = scanned.scan.keyMs;
+  let startSec = Number.NaN;
+  let endSec = Number.NaN;
+  for (let i = 0; i + 1 < keys.length; i += 1) {
+    const k0 = keys[i]!;
+    const k1 = keys[i + 1]!;
+    if (k1 - k0 >= 1000 && (k1 + 400) / 1000 <= durNum - 0.4) {
+      startSec = (k0 + 500) / 1000;
+      endSec = (k1 + 400) / 1000;
+      break;
+    }
+  }
+  if (!Number.isFinite(startSec)) throw new Error(`切り出しの範囲を決められる区切りが録れていない(区切り ${keys.join(',')} / 長さ ${durNum})`);
+  test.info().annotations.push({ type: '録れた動画の区切り(ミリ秒)/ 切り出す範囲(秒)', description: `${keys.join(',')} / ${startSec}〜${endSec}` });
+  return { screenRow, screenMedia, durNum, seekVideo, startSec, endSec };
+}
 
-  /**
-   * 🔴 **出力を実ブラウザで検める**(Cluster の Timecode の付け替えと、頭の Cluster の相対時刻の書き換えを通る:
-   *   始まりは区切り(約 2 秒)で、Cluster の途中にある)。
-   * ⚠ 見るのは**切り出した file そのもの**(別の `<video>` に読み込んで)── 画面の器の読み込み具合ではない。
-   *   ①長さが有限で範囲に近い ②最初のフレームが描ける ③中ほどへ飛べる(Cluster の時刻が繋がっている)
-   *   ④音が復号される(`webkitAudioDecodedByteCount`)⑤映像も復号される・再生が進む。
-   */
-  await clickReal(page, cutVideoRow.locator('[data-pkc-field="capture-play"]'));
-  const cutMedia = cutVideoRow.locator('video[data-pkc-field="capture-media"]');
-  await expect(cutMedia, '切り出した動画の再生機が出ない').toBeVisible();
-  const cutProbe = await cutMedia.evaluate(async (el: HTMLVideoElement) => {
+/** 任意の `<video>` を `to` 秒で止める(再生機の `seeked` を待つ)。 */
+async function seekThere(video: Locator, to: number): Promise<number> {
+  await expect
+    .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState), { message: '再生機が読み込めていない' })
+    .toBeGreaterThanOrEqual(2);
+  await video.evaluate(
+    async (el: HTMLVideoElement, t) =>
+      new Promise<void>((done) => {
+        el.pause();
+        if (Math.abs(el.currentTime - t) < 0.001) {
+          done();
+          return;
+        }
+        el.addEventListener('seeked', () => done(), { once: true });
+        el.currentTime = t;
+      }),
+    to,
+  );
+  return video.evaluate((el: HTMLVideoElement) => el.currentTime);
+}
+
+/** 動画を `to` 秒で止め、そのとき映っているフレームを撮る(描画が追い付くまで、2 回続けて同じになるのを待つ)。 */
+async function frameAt(
+  video: Locator,
+  seek: (to: number) => Promise<number>,
+  to: number,
+): Promise<number[]> {
+  await seek(to);
+  let last: number[] = [];
+  let cur: number[] = [];
+  await expect
+    .poll(
+      async () => {
+        cur = await video.evaluate(grabFrame);
+        const same = last.length > 0 && frameDistance(last, cur) === 0;
+        last = cur;
+        return same;
+      },
+      { message: `${to} 秒のフレームが安定して撮れない`, timeout: 8000 },
+    )
+    .toBe(true);
+  return cur;
+}
+
+/** 切り出した動画そのものを別の `<video>` に読み込んで検める(画面の器の読み込み具合ではない)。 */
+async function probeCutFile(cutMedia: Locator) {
+  return cutMedia.evaluate(async (el: HTMLVideoElement) => {
     const bytes = await (await fetch(el.src)).arrayBuffer();
     const probe = document.createElement('video') as HTMLVideoElement & {
       webkitAudioDecodedByteCount?: number;
@@ -1170,15 +1199,189 @@ test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/�
     URL.revokeObjectURL(probe.src);
     return { ...meta, decoded, firstFrame, played, advanced, audioBytes, videoBytes, mid, midLanded, size: bytes.byteLength };
   });
+}
+
+test('🔴 画面収録を押した所ぴったりに切り出せる:確認が出ない → 最初のフレームが押した所 → 再生できる (#683 段②b-2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  const { screenRow, screenMedia, seekVideo, startSec, endSec } = await recordScreenForTrim(page);
+  const rowsNow = await page.locator('[data-pkc-capture]').count();
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+
+  const vNote = screenRow.locator('[data-pkc-field="capture-trim"]');
+  await expect(vNote, '動画の行に切り出しの案内が出ていない').toHaveText(trimMarkText(null, null, 'video'));
+  /**
+   * 🔑 元の動画を、押す所(始まり)とその前後(0.06 秒ごと ±3)で止めて、そのとき映っているフレームを撮っておく
+   *   (0.06 秒 = フレームの間隔 0.05 秒より少し長い ── 隣どうしが同じフレームにならない)。
+   * ⚠ **切り出す前に撮る** ── 切り出した動画を開くと、元の動画の再生機は消える。
+   */
+  const STEP = 0.06;
+  const around: number[][] = [];
+  for (let k = -3; k <= 3; k += 1) around.push(await frameAt(screenMedia, seekVideo, startSec + k * STEP));
+  const vStart = await seekVideo(startSec);
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-start"]'));
+  const vEnd = await seekVideo(endSec);
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-end"]'));
+  expect(vEnd, `終わり(${vEnd})が始まり(${vStart})より後ろにない`).toBeGreaterThan(vStart + 0.5);
+
+  // 🔴 [切り出す]:**確認が出ない**まま動画が 1 件増える(元も残る)
+  const t0 = Date.now();
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
+  await expect(page.locator('[data-pkc-capture]'), '切り出した動画が一覧に増えていない(確認で止まっていないか)').toHaveCount(
+    rowsNow + 1,
+    { timeout: 20_000 },
+  );
+  const elapsedMs = Date.now() - t0;
+  test.info().annotations.push({ type: '押してから一覧に増えるまで(ミリ秒)', description: String(elapsedMs) });
+  await expect(dialog, '押した所ぴったりに切れる環境で確認が出ている').toBeHidden();
+  // 🔑 名前は**押した所**(M:SS)── 手前の区切りへ戻っていない
+  const cutVideoRow = page
+    .locator('[data-pkc-capture]', { hasText: new RegExp(`\\(0:${String(Math.floor(vStart)).padStart(2, '0')}〜`) })
+    .filter({ hasText: '画面収録' });
+  await expect(cutVideoRow, '名前に範囲(押した所の始まり)が入っていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-capture]', { hasText: '画面収録' }).first()).toBeVisible();
+
+  /**
+   * 🔴 **出力を実ブラウザで検める**。
+   *   ①長さが有限で 終わり − 始まり(±0.15 秒)②最初のフレームが描ける ③**最初のフレームの札の番号が、押した所の
+   *   番号と ±1 以内**(= 始まりが押した所のフレーム。手前の区切りからでも、後ろの区切りからでもない)
+   *   ④中ほどへ飛べる(作り直した頭と元のバイトの継ぎ目で時刻が繋がっている)⑤音と映像が復号され、再生が進む。
+   */
+  await clickReal(page, cutVideoRow.locator('[data-pkc-field="capture-play"]'));
+  const cutMedia = cutVideoRow.locator('video[data-pkc-field="capture-media"]');
+  await expect(cutMedia, '切り出した動画の再生機が出ない').toBeVisible();
+  const cutProbe = await probeCutFile(cutMedia);
   const said = JSON.stringify(cutProbe);
   expect(Number.isFinite(cutProbe.duration), `切り出した動画の長さが有限でない(${said})`).toBe(true);
-  // 始まりは区切り(snappedSec 秒台)へ戻っている ── 長さ ≒ 終わり(vEnd)- 始まり(snappedSec 〜 +1 秒)
-  expect(cutProbe.duration, `長さが押した範囲と合わない(${said} / 終わり ${vEnd} / 始まり ${snappedSec} 秒台)`).toBeGreaterThan(
-    vEnd - snappedSec - 1.2,
+  expect(
+    Math.abs(cutProbe.duration - (vEnd - vStart)),
+    `長さが 終わり − 始まり と合わない(${said} / 終わり ${vEnd} / 始まり ${vStart})`,
+  ).toBeLessThanOrEqual(0.15);
+  expect([cutProbe.w, cutProbe.h].every((n) => n > 0), `映像の大きさが読めない(${said})`).toBe(true);
+  expect(cutProbe.decoded, '映像の最初のフレームが出ない').toBe(true);
+  expect(cutProbe.firstFrame, '最初のフレームを描けない').toBe(true);
+  /**
+   * 🔴 **最初のフレームが押した所のフレーム**:切り出した動画を先頭で止めて撮った絵が、元の動画の
+   *   「押した所の前後 ±3 枚」のうち**どれに最も近いか**を見る。⚠ 近いのが 0(押した所)か ±1 なら合格。
+   * 🔑 見分けられる台であること(= 隣のフレームどうしが、再エンコードの粗さより大きく違う)を先に確かめる。
+   */
+  const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
+  const dists = around.map((f) => frameDistance(firstFrame, f));
+  const nearest = dists.indexOf(Math.min(...dists)) - 3;
+  const adjacent = frameDistance(around[3]!, around[4]!);
+  test.info().annotations.push({
+    type: '最初のフレームと、押した所の前後(-3〜+3)の絵の違い / いちばん近い位置 / 隣どうしの違い',
+    description: `${dists.map((d) => d.toFixed(2)).join(' ')} / ${nearest} / ${adjacent.toFixed(2)}`,
+  });
+  expect(adjacent, '空振り防止:隣のフレームどうしが同じ絵になっている(見分けられない台)').toBeGreaterThan(0.05);
+  expect(
+    Math.abs(nearest),
+    `最初のフレームが押した所のフレームでない(いちばん近い位置 ${nearest} / ${dists.map((d) => d.toFixed(2)).join(' ')})`,
+  ).toBeLessThanOrEqual(1);
+  expect(cutProbe.played, 'ブラウザが再生を断った').toBe(true);
+  expect(cutProbe.advanced, '再生が進まない').toBeGreaterThan(0.3);
+  expect(cutProbe.audioBytes, `音が復号されていない(${said})`).toBeGreaterThan(0);
+  expect(cutProbe.videoBytes, `映像が復号されていない(${said})`).toBeGreaterThan(0);
+  expect(Number.isNaN(cutProbe.midLanded), `中ほど(${cutProbe.mid} 秒)へ飛べない(${said})`).toBe(false);
+  expect(Math.abs(cutProbe.midLanded - cutProbe.mid), `中ほどへ飛んだ先がずれている(${said})`).toBeLessThan(0.5);
+  expect(cutProbe.size).toBeGreaterThan(0);
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **細かく切れない環境(WebCodecs 無し)では、裁定の文言で確認 → 手前の区切りから切り出す**(#683 段②b-2)。
+ *
+ * ⚠ この箱の Chromium は WebCodecs を持つので、**起動の前に**メインとワーカーの両方から消す
+ *   (`VideoEncoder` / `VideoDecoder`)── ワーカーは `new Worker` を包み、動画のワーカーだけ読み込む前に消す。
+ *   🔑 消えていなければ上の 1 本と同じく確認が出ず、この test は「確認が出ない」で落ちる(空振りしない)。
+ * ⚠ 起動を共有できない(消すのは起動の前)── 別の 1 本にした理由は `scripts/smoke-budget.mjs`。
+ */
+test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確認 → やめる/切り出す → 手前の区切りから再生できる (#683 段②b-2)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    delete w['VideoEncoder'];
+    delete w['VideoDecoder'];
+    const Orig = window.Worker;
+    class StrippedWorker extends Orig {
+      constructor(url: string | URL, opts?: WorkerOptions) {
+        const abs = new URL(String(url), location.href).href;
+        if (!/video-worker/.test(abs)) {
+          super(url, opts);
+          return;
+        }
+        /**
+         * ⚠ 読み込みが終わる前に届いた依頼を**落とさない**(モジュールのワーカーは、先頭の `await` が終わるまで
+         *   `onmessage` が無い)── 仮の受け口で溜めておき、本物の受け口が付いたら順に渡す。
+         */
+        const src = [
+          'delete globalThis.VideoEncoder; delete globalThis.VideoDecoder;',
+          'const held = []; const temp = (e) => held.push(e); self.onmessage = temp;',
+          `await import(${JSON.stringify(abs)});`,
+          'const real = self.onmessage; if (real && real !== temp) for (const e of held) real.call(self, e);',
+        ].join('\n');
+        super(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })), { ...opts, type: 'module' });
+      }
+    }
+    window.Worker = StrippedWorker as unknown as typeof Worker;
+  });
+  const { screenRow, screenMedia, seekVideo, startSec, endSec } = await recordScreenForTrim(page);
+  expect(await page.evaluate(() => typeof (window as unknown as { VideoEncoder?: unknown }).VideoEncoder), '消せていない').toBe(
+    'undefined',
+  );
+  const rowsNow = await page.locator('[data-pkc-capture]').count();
+  // 押した所(始まり)のフレームを、切り出す前に撮っておく(切り出した動画を開くと、元の再生機は消える)
+  const pressedFrame = await frameAt(screenMedia, seekVideo, startSec);
+  const vStart = await seekVideo(startSec);
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-start"]'));
+  const vEnd = await seekVideo(endSec);
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-end"]'));
+
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  // 🔴 [やめる]:確認は出るが、何も作らない・印は残る
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
+  await expect(dialog, '細かく切れないのに確認が出ない').toBeVisible({ timeout: 15_000 });
+  // 裁定の文言そのまま(秒の行は既定で足さない)
+  await expect(dialog.locator('[data-pkc-field="dialog-body"]')).toHaveText(SNAP_CONFIRM_RULED_TEXT);
+  await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('切り出す');
+  await expect(dialog.locator('[data-pkc-field="dialog-cancel"]')).toHaveText('やめる');
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(dialog, 'やめたのに確認が残っている').toBeHidden();
+  await page.waitForTimeout(600);
+  expect(await page.locator('[data-pkc-capture]').count(), 'やめたのに動画が増えた').toBe(rowsNow);
+  const vNote = screenRow.locator('[data-pkc-field="capture-trim"]');
+  await expect(vNote, 'やめたら印が消えた ── 押し直せなくなる').toContainText('〜');
+  await expect(screenRow.locator('[data-pkc-field="capture-trim-run"]'), 'やめた後に押せない').toBeEnabled();
+
+  // 🔴 [切り出す]:動画が 1 件増える(元も残る)
+  await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await expect(page.locator('[data-pkc-capture]'), '切り出した動画が一覧に増えていない').toHaveCount(rowsNow + 1, {
+    timeout: 20_000,
+  });
+  // 🔑 始まりは押した所ではなく、その手前の区切り(約 2 秒ごと)── 名前の始まりから読む
+  const cutVideoRow = page.locator('[data-pkc-capture]', { hasText: /\(0:\d\d〜/ }).filter({ hasText: '画面収録' });
+  await expect(cutVideoRow, '名前に範囲(区切りへ戻った始まり)が入っていない').toHaveCount(1);
+  const snappedSec = Number(((await cutVideoRow.textContent()) ?? '').match(/\(0:(\d\d)〜/)![1]);
+  expect(snappedSec, '手前へ戻っていない').toBeLessThanOrEqual(Math.floor(vStart));
+
+  await clickReal(page, cutVideoRow.locator('[data-pkc-field="capture-play"]'));
+  const cutMedia = cutVideoRow.locator('video[data-pkc-field="capture-media"]');
+  await expect(cutMedia, '切り出した動画の再生機が出ない').toBeVisible();
+  const cutProbe = await probeCutFile(cutMedia);
+  const said = JSON.stringify(cutProbe);
+  expect(Number.isFinite(cutProbe.duration), `切り出した動画の長さが有限でない(${said})`).toBe(true);
+  // 始まりは区切りへ戻る ── 長さ ≒ 終わり − 区切り(押した所より長い)
+  expect(cutProbe.duration, `長さが押した範囲と合わない(${said} / 終わり ${vEnd} / 始まり ${vStart})`).toBeGreaterThan(
+    vEnd - vStart - 0.15,
   );
   expect(cutProbe.duration).toBeLessThan(vEnd - snappedSec + 0.4);
-  // ⚠ 区切りが 2 秒に出た録画では、先頭まで戻っていない(Cluster の途中から始まる道を通った)
-  if (snappedSec > 0) expect(cutProbe.duration, `先頭まで戻っている ${said}`).toBeLessThan(vEnd - 0.8);
+  // 手前から始まる = 最初のフレームは、押した所のフレームではない(区切りは 2 秒おき。押した所と同じ絵なら戻っていない)
+  const firstFrame = await frameAt(cutMedia, (to) => seekThere(cutMedia, to), 0);
+  const distToPressed = frameDistance(firstFrame, pressedFrame);
+  test.info().annotations.push({ type: '最初のフレームと押した所の絵の違い', description: distToPressed.toFixed(2) });
+  expect(distToPressed, '手前の区切りから始まっていない(最初のフレームが押した所と同じ絵)').toBeGreaterThan(0.5);
   expect([cutProbe.w, cutProbe.h].every((n) => n > 0), `映像の大きさが読めない(${said})`).toBe(true);
   expect(cutProbe.decoded, '映像の最初のフレームが出ない').toBe(true);
   expect(cutProbe.firstFrame, '最初のフレームを描けない').toBe(true);
@@ -1188,7 +1391,6 @@ test('🔴 画面収録の前後を削れる:戻るなら確認 → やめる/�
   expect(cutProbe.videoBytes, `映像が復号されていない(${said})`).toBeGreaterThan(0);
   expect(Number.isNaN(cutProbe.midLanded), `中ほど(${cutProbe.mid} 秒)へ飛べない(${said})`).toBe(false);
   expect(Math.abs(cutProbe.midLanded - cutProbe.mid), `中ほどへ飛んだ先がずれている(${said})`).toBeLessThan(0.5);
-  expect(cutProbe.size).toBeGreaterThan(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

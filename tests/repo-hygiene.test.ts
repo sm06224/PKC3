@@ -1534,7 +1534,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 516 の行を参照)。起動の予算は → 518。
     // ⚠ 2026-10-11(#683 段③): `image-draw.smoke.spec.ts`(新設・test 1 本・起動 1 つ)→ 522 → 523。起動の予算は 518 → 519(`scripts/smoke-budget.mjs` に理由)。
     // ⚠ 2026-10-11(#683 段②b-1): `media-capture.smoke.spec.ts` に 1 本足した(画面収録の前後を削る)→ 523 → 524。起動の予算は 519 → 520。
-    ).toBe(524);
+    // ⚠ 2026-10-11(#683 段②b-2): `media-capture.smoke.spec.ts` の上の 1 本を押した所ぴったりの道へ作り替え、WebCodecs を消した起動の 1 本を足した → 524 → 525。
+    //    起動の予算は 520 のまま(字面で数えるので、同じ録画の段取り `recordScreenForTrim` を通る 2 本目は数に出ない。`scripts/smoke-budget.mjs` に理由)。
+    ).toBe(525);
   });
 });
 

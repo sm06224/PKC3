@@ -3024,7 +3024,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     readBlob: (assetKey) => blobs.get(cid, assetKey),
     trim: (blob, startMs, endMs) => audioClient.trim(blob, startMs, endMs),
     scanVideo: (blob, startMs, endMs) => videoClient.scan(blob, startMs, endMs),
-    cutVideo: (blob, scan, startMs, endMs) => videoClient.cut(blob, scan, startMs, endMs),
+    cutVideo: (blob, scan, startMs, endMs, mode) => videoClient.cut(blob, scan, startMs, endMs, mode),
     confirm: (message, opts) => ask(message, opts),
     attach: async (item) => {
       let out: Awaited<ReturnType<typeof attachOne>> = null;
