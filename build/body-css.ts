@@ -298,6 +298,28 @@ function declsFor(src: ReadonlyMap<string, string>, want: ReadonlySet<string>): 
   return out.length === 0 ? '' : `${out.join(';')};`;
 }
 
+/**
+ * 紙で白地に戻す色(#1387)。⚠ `src/styles/app.css` 末尾の `@media print` の
+ * `:root[data-pkc-theme]` と同じ集合。強調の色(`--accent*`)も入れる ── リンクの字は暗い配色では白地で読めない。
+ */
+export const PAPER_TOKENS: readonly string[] = [
+  '--bg',
+  '--surface',
+  '--surface-2',
+  '--surface-hover',
+  '--fg',
+  '--muted',
+  '--border',
+  '--accent',
+  '--accent-fg',
+  '--accent-dim',
+  '--accent-dim-fg',
+  '--danger',
+  '--warn',
+  '--code-key',
+  '--code-lit',
+];
+
 /** 板・線の色と太さ(`place-board.ts` が要素へ置く)。⚠ トークンではないので焼かない。 */
 const PLACE_INLINE_VARS: readonly string[] = [
   '--pkc-place-fill',
@@ -350,6 +372,15 @@ export function extractBodyCss(appCss: string, tokensCss: string): BodyCss {
   if (invariant !== '') parts.push(`:root{${invariant}}`);
   // ⚠ 暗い環境では dark を当てる ── 静的に light で潰すと白箱に白文字になる(実測)
   if (dark !== '') parts.push(`@media (prefers-color-scheme:dark){:root{${dark}}}`);
+  /**
+   * 🔴 **暗い環境で刷っても、紙は白地に濃い字**(#1387)。アプリの `@media print` と同じ向き。
+   * ⚠ 強調の色(`--accent` ほか)も戻す(リンクの字)。⚠ 後ろに置く(同じ `:root` なので順で勝つ)。
+   * ⚠ `light` の値を焼くので、`PAPER_TOKENS` のうち本文が実際に使う物だけが出る。
+   */
+  const paper = declsFor(tokens.light, new Set([...vars].filter((v) => PAPER_TOKENS.includes(v))));
+  if (dark !== '' && paper !== '') {
+    parts.push(`@media print and (prefers-color-scheme:dark){:root{${paper}}}`);
+  }
   for (const [key, group] of byContext) {
     const body = group.map((r) => `${r.selector}{${r.body}}`).join('');
     if (key === '') {

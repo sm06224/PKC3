@@ -14,7 +14,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { auditBodyCss, extractBodyCss, isBodyRule, parseRules } from '../../build/body-css';
+import {
+  PAPER_TOKENS,
+  auditBodyCss,
+  extractBodyCss,
+  isBodyRule,
+  parseRules,
+} from '../../build/body-css';
 
 const APP = readFileSync('src/styles/app.css', 'utf8');
 const TOKENS = readFileSync('src/styles/tokens.css', 'utf8');
@@ -525,5 +531,72 @@ describe('焼いた文字列の検品', () => {
     const base = ok();
     const css = `${base.css}.pkc-md-rendered p::after{content:'</style><b>x'}`;
     expect(auditBodyCss({ ...base, css }).join('\n')).toContain('style が早期終了');
+  });
+});
+
+/**
+ * 🔴 印刷は、どの配色でも白地に濃い字(#1387)。
+ *
+ * 守るもの:①アプリの `@media print` の上書きが `PAPER_TOKENS` と同じ集合・同じ値(ライトの値)
+ * ②焼いた書き出し HTML にも、暗い環境で刷るとき用の層が**暗い層より後ろに**ある
+ * ③どちらも強調の色(`--accent`)を戻す(リンクの字が白地で読めるように。図は PNG なので別)。
+ */
+describe('🔴 印刷は白地に濃い字(#1387)', () => {
+  // 注釈を落としてから探す ── 解説コメントの中の字に満たされない
+  const appCode = APP.replace(/\/\*[\s\S]*?\*\//g, '');
+  const printStart = appCode.lastIndexOf('@media print {');
+  const lightValue = (name: string): string | undefined => {
+    const open = TOKENS.indexOf(":root,\n:root[data-pkc-theme='light'] {");
+    const block = TOKENS.slice(open, TOKENS.indexOf('}', open));
+    return new RegExp(`${name}:\\s*([^;]+);`).exec(block)?.[1]?.trim();
+  };
+  const paperBlock = (): string => {
+    const at = appCode.indexOf(':root[data-pkc-theme] {', printStart);
+    expect(printStart, '末尾の @media print が無い').toBeGreaterThan(0);
+    expect(at, '印刷の節に :root[data-pkc-theme] の上書きが無い').toBeGreaterThan(printStart);
+    return appCode.slice(at, appCode.indexOf('}', at));
+  };
+
+  /**
+   * 🔴 期待する集合は **tokens.css の暗い配色が上書きしている変数**から作る(`PAPER_TOKENS` からは作らない)。
+   * ⚠ `PAPER_TOKENS` から作ると、暗い配色に変数を足した日に、印刷の節も `PAPER_TOKENS` も
+   *   一緒に古くなって緑のままになる。除くのは紙で戻す意味が無い 2 つだけ(影と、白固定の箱)。
+   */
+  const darkPaletteVars = (): Set<string> => {
+    const out = new Set<string>();
+    let blocks = 0;
+    for (const m of TOKENS.matchAll(/:root\[data-pkc-theme='([a-z-]+)'\] \{([^}]*)\}/g)) {
+      if (!m[2]!.includes('color-scheme: dark')) continue;
+      blocks++;
+      for (const v of m[2]!.matchAll(/(--[\w-]+):/g)) out.add(v[1]!);
+    }
+    expect(blocks, '暗い配色が 6 つ未満(この検査は空振り)').toBeGreaterThanOrEqual(6);
+    for (const skip of ['--shadow', '--sandbox-bg']) out.delete(skip);
+    return out;
+  };
+
+  it('アプリ側:戻す変数の集合が、暗い配色が上書きしている変数と等しく、値はライトと同じ', () => {
+    const block = paperBlock();
+    const got = [...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]);
+    expect(got.map(([k]) => k).sort(), '暗い配色の変数と集合が違う').toEqual([...darkPaletteVars()].sort());
+    expect(got.map(([k]) => k).sort(), 'PAPER_TOKENS と集合が違う').toEqual([...PAPER_TOKENS].sort());
+    for (const [k, v] of got) {
+      // --bg だけは紙の白(ライトの地は薄い灰色)
+      const want = k === '--bg' ? '#ffffff' : lightValue(k!);
+      expect(want, `${k} のライトの値が tokens.css から読めない(この検査は空振り)`).toBeTruthy();
+      expect(v, `${k} がライトの値と違う`).toBe(want);
+    }
+    expect(block, '明るい側へ戻していない').toContain('color-scheme: light');
+  });
+
+  it('書き出し側:暗い環境で刷るときの層が暗い層より後ろに在り、強調の色を含まない', () => {
+    const dark = OUT.css.indexOf('@media (prefers-color-scheme:dark){:root{');
+    const paper = OUT.css.indexOf('@media print and (prefers-color-scheme:dark){:root{');
+    expect(dark, '暗い層が無い').toBeGreaterThan(0);
+    expect(paper, '紙の層が無い').toBeGreaterThan(dark);
+    const block = OUT.css.slice(paper, OUT.css.indexOf('}}', paper));
+    expect(block).toContain(`--fg:${lightValue('--fg')}`);
+    // リンクの字は --accent ── 暗い配色の明るい値を紙に出さない
+    expect(block, '強調の色(リンクの字)を戻していない').toContain(`--accent:${lightValue('--accent')}`);
   });
 });

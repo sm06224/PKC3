@@ -285,6 +285,40 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
   );
   expect(own.toggleRight, '切替の右に 24px の空きが残っている').toBe('2px');
 
+  /**
+   * 🔴 **暗い環境で刷っても、配った HTML は白地に濃い字・読めるリンク**(#1387)。
+   * ⚠ 対照群 = 同じ暗い環境の画面(字は明るい・リンクも明るい)。これが暗くない回は
+   *   「刷っても暗くない」が空振りで通る。観測点は枠の字(`body` の色 = `color-scheme` 由来)、
+   *   本文のリンクの字、`color-scheme` の解決値。リンクは白地に WCAG 4.5 以上。
+   */
+  const paperProbe = (): Promise<{ text: string; link: string; scheme: string }> =>
+    viewer.evaluate(() => ({
+      text: getComputedStyle(document.body).color,
+      link: getComputedStyle(document.querySelector('#body a[href^="https"]')!).color,
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+    }));
+  const lumOf = (c: string): number => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+    expect(m, `色が読めない: ${c}`).not.toBeNull();
+    const [r, g, b] = [1, 2, 3].map((i) => {
+      const x = Number(m![i]) / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  await viewer.emulateMedia({ media: 'screen', colorScheme: 'dark' });
+  const darkScreen = await paperProbe();
+  expect(lumOf(darkScreen.text), '暗い環境の画面で枠の字が明るくない(この検査は空振り)').toBeGreaterThan(0.5);
+  expect(lumOf(darkScreen.link), '暗い環境の画面でリンクが明るくない(この検査は空振り)').toBeGreaterThan(0.1);
+  await viewer.emulateMedia({ media: 'print', colorScheme: 'dark' });
+  const darkPaper = await paperProbe();
+  expect(darkPaper.scheme, '紙で color-scheme が light に戻っていない').toBe('light');
+  expect(lumOf(darkPaper.text), `紙の枠の字が濃くない: ${darkPaper.text}`).toBeLessThan(0.1);
+  expect(
+    1.05 / (lumOf(darkPaper.link) + 0.05),
+    `紙のリンクが白地で読めない: ${darkPaper.link}`,
+  ).toBeGreaterThanOrEqual(4.5);
+
   await viewer.close();
   expect(errors, errors.join('\n')).toEqual([]);
 });

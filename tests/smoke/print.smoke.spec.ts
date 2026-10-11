@@ -23,6 +23,7 @@
  *    紙で効く規則を観測するには `setViewportSize(794×1123)` が要る。
  */
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -337,3 +338,72 @@ test('🔴 A5(559px)の紙でも、一覧ページのまま刷って本文が出
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
+
+/**
+ * 🔴 暗い配色のまま刷っても、紙は白地に濃い字で、リンクも読める(#1387)。
+ *
+ * 全部の暗い配色を 1 回の起動で回す(配色は CSS の属性 1 つなので、属性を差し替えて測る)。
+ * 観測点は計算後の色。⚠ 画面側(対照群)でも同じ要素を測る ── 画面が暗くない回は
+ * 「刷っても暗くない」が空振りで通るので、先に「画面では地が暗く字が明るい」を assert する。
+ * リンクは WCAG のコントラスト比で見る(白地に 4.5 以上)。直す前は terminal 1.34 / nord 2.00 /
+ * dracula 2.41 / solarized-dark 2.64 / github-dark 3.10 / dark 4.04 / retro 2.08 だった。
+ */
+test('🔴 暗い配色で刷ると、地は白・字は濃く、リンクは白地で読める(全部の暗い配色)', async ({
+  page,
+}) => {
+  // 暗い配色の一覧は tokens.css から引く(手で並べると、配色を足した日に漏れる)
+  const tokens = readFileSync('src/styles/tokens.css', 'utf8');
+  const darkIds = [...tokens.matchAll(/:root\[data-pkc-theme='([a-z-]+)'\] \{([^}]*)\}/g)]
+    .filter((m) => m[2]!.includes('color-scheme: dark'))
+    .map((m) => m[1]!);
+  expect(darkIds.length, '暗い配色が 6 つ未満(この検査は空振り)').toBeGreaterThanOrEqual(6);
+
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.click();
+  await ta.fill('紙に出る本文\n\n[リンク](https://example.com/)\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  const sample = (): Promise<{ bg: string; text: string; link: string }> =>
+    page.evaluate(() => {
+      const host = document.querySelector('[data-pkc-field="detail-body"]')!;
+      return {
+        bg: getComputedStyle(document.body).backgroundColor,
+        text: getComputedStyle(host.querySelector('p')!).color,
+        link: getComputedStyle(host.querySelector('a')!).color,
+      };
+    });
+  const rgb = (c: string): number[] => {
+    const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+    expect(m, `色が読めない: ${c}`).not.toBeNull();
+    return [Number(m![1]), Number(m![2]), Number(m![3])];
+  };
+  const lum = (c: string): number => {
+    const [r, g, b] = rgb(c).map((v) => {
+      const x = v / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrastOnWhite = (c: string): number => 1.05 / (lum(c) + 0.05);
+
+  await page.setViewportSize(A4);
+  for (const id of darkIds) {
+    await page.emulateMedia({ media: 'screen' });
+    await page.evaluate((t) => document.documentElement.setAttribute('data-pkc-theme', t), id);
+    const screen = await sample();
+    expect(lum(screen.bg), `${id}: 画面で地が暗くない(この検査は空振り)`).toBeLessThan(0.1);
+    expect(lum(screen.text), `${id}: 画面で字が明るくない(この検査は空振り)`).toBeGreaterThan(0.3);
+
+    await page.emulateMedia({ media: 'print' });
+    const paper = await sample();
+    expect(lum(paper.bg), `${id}: 紙の地が白くない: ${paper.bg}`).toBeGreaterThan(0.9);
+    expect(contrastOnWhite(paper.text), `${id}: 紙の字が薄い: ${paper.text}`).toBeGreaterThan(7);
+    expect(
+      contrastOnWhite(paper.link),
+      `${id}: 紙のリンクが白地で読めない: ${paper.link}`,
+    ).toBeGreaterThanOrEqual(4.5);
+  }
+});

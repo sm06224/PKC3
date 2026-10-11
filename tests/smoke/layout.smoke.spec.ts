@@ -860,9 +860,11 @@ test('🔴 配色を選ぶと実際に色が変わる(全テーマ)', async ({ p
   // ⚠ 配色は**設定の画面**にある(user 指示 2026-08-03「普段から必要ではない」)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   const select = page.locator('[data-pkc-field="theme-select"]');
-  const ids = await select.evaluate((el) =>
-    [...(el as HTMLSelectElement).options].map((o) => o.value),
-  );
+  // ⚠ 'auto'(OS に合わせる)は配色ではない ── 選ぶと OS の明暗の配色になるので、
+  //    色の重複検査の外に置く(専用の検査は theme-boot.smoke.spec.ts)
+  const ids = (
+    await select.evaluate((el) => [...(el as HTMLSelectElement).options].map((o) => o.value))
+  ).filter((id) => id !== 'auto');
   expect(ids.length, '配色が少なすぎる').toBeGreaterThanOrEqual(9);
 
   const seen = new Map<string, string>();

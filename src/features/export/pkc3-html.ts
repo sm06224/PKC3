@@ -230,6 +230,8 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
 /* ── 印刷(F-1)。⚠ 画面用の grid と 100vh をほどくのが本題 ── ほどかないと
    1 ページ目だけ出て残りが切れる(main が overflow:auto のスクロール箱なので) */
 @media print{
+  /* 🔴 紙は白地に濃い字(#1387)── 暗い環境でも light dark のままだと、枠の字が白で出る */
+  :root{color-scheme:light}
   body{display:block;height:auto;overflow:visible;font-size:10.5pt;line-height:1.6}
   nav{display:none}
   main{overflow:visible;padding:0}

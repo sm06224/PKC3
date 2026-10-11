@@ -7,14 +7,19 @@
  * 「一度も選んでいないのに初回起動時の OS 設定で固定される」状態だった。
  * 実測: OS=dark で初回起動 → `stored:'dark'` → OS を light に戻しても dark のまま。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   THEMES,
   applyTheme,
   chooseTheme,
   initialTheme,
+  isTheme,
+  isThemeChoice,
   otherTheme,
+  readThemeChoice,
+  resolveTheme,
+  syncThemeFollow,
 } from '../../src/adapter/ui/render/theme';
 
 const KEY = 'pkc3.theme';
@@ -22,6 +27,112 @@ const KEY = 'pkc3.theme';
 beforeEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute('data-pkc-theme');
+});
+
+/** `matchMedia('(prefers-color-scheme: dark)')` の偽物。listener の出入りを数える。 */
+function fakeMatchMedia(initialDark: boolean) {
+  const listeners = new Set<(e: { matches: boolean }) => void>();
+  const state = { dark: initialDark };
+  const mql = {
+    get matches() {
+      return state.dark;
+    },
+    addEventListener: (type: string, fn: (e: { matches: boolean }) => void) => {
+      if (type === 'change') listeners.add(fn);
+    },
+    removeEventListener: (type: string, fn: (e: { matches: boolean }) => void) => {
+      if (type === 'change') listeners.delete(fn);
+    },
+  };
+  vi.stubGlobal('matchMedia', () => mql);
+  return {
+    listeners,
+    setOs(dark: boolean) {
+      state.dark = dark;
+      for (const fn of [...listeners]) fn({ matches: dark });
+    },
+  };
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('🔴 「OS に合わせる」(#1386)', () => {
+  const html = (): string | null => document.documentElement.getAttribute('data-pkc-theme');
+
+  it('resolveTheme: auto は OS の明暗で light / dark、配色を選んでいれば OS を見ない', () => {
+    expect(resolveTheme('auto', true)).toBe('dark');
+    expect(resolveTheme('auto', false)).toBe('light');
+    expect(resolveTheme('nord', false)).toBe('nord');
+    expect(resolveTheme('light', true)).toBe('light');
+  });
+
+  it('auto は配色ではない(THEMES に入れない / 保存値としては受ける)', () => {
+    expect(isTheme('auto')).toBe(false);
+    expect(THEMES.some((t) => (t.id as string) === 'auto')).toBe(false);
+    expect(isThemeChoice('auto')).toBe(true);
+    expect(isThemeChoice('nord')).toBe(true);
+    expect(isThemeChoice('bogus')).toBe(false);
+  });
+
+  it('何も保存していなければ auto、壊れた値も auto、保存した配色はそのまま', () => {
+    expect(readThemeChoice()).toBe('auto');
+    localStorage.setItem(KEY, 'bogus');
+    expect(readThemeChoice()).toBe('auto');
+    localStorage.setItem(KEY, 'nord');
+    expect(readThemeChoice()).toBe('nord');
+  });
+
+  it('auto を選ぶと保存され、OS の今の明暗で当たり、起動時の答えも OS に従う', () => {
+    fakeMatchMedia(true);
+    chooseTheme(document.documentElement, 'auto');
+    expect(localStorage.getItem(KEY)).toBe('auto');
+    expect(html()).toBe('dark');
+    expect(initialTheme(false)).toBe('light');
+    expect(initialTheme(true)).toBe('dark');
+  });
+
+  it('🔴 auto の間は OS の切り替えに付いていく(再読み込み無し)', () => {
+    const os = fakeMatchMedia(false);
+    chooseTheme(document.documentElement, 'auto');
+    expect(html()).toBe('light');
+    os.setOs(true);
+    expect(html()).toBe('dark');
+    os.setOs(false);
+    expect(html()).toBe('light');
+    // 保存は変わらない(OS の変化を「選んだ」ことにしない)
+    expect(localStorage.getItem(KEY)).toBe('auto');
+  });
+
+  it('🔴 別の配色を選ぶと listener を外し、OS が変わっても動かない', () => {
+    const os = fakeMatchMedia(false);
+    chooseTheme(document.documentElement, 'auto');
+    expect(os.listeners.size).toBe(1);
+    chooseTheme(document.documentElement, 'dracula');
+    expect(os.listeners.size).toBe(0);
+    os.setOs(true);
+    expect(html()).toBe('dracula');
+  });
+
+  it('auto を繰り返し選んでも listener は 1 つしか増えない / 起動時の syncThemeFollow も同じ', () => {
+    const os = fakeMatchMedia(false);
+    chooseTheme(document.documentElement, 'auto');
+    chooseTheme(document.documentElement, 'auto');
+    syncThemeFollow(document.documentElement);
+    expect(os.listeners.size).toBe(1);
+  });
+
+  it('何も保存していない起動(= auto)でも OS に付いていく / 配色を保存していれば聞かない', () => {
+    const os = fakeMatchMedia(false);
+    syncThemeFollow(document.documentElement);
+    expect(os.listeners.size).toBe(1);
+    os.setOs(true);
+    expect(html()).toBe('dark');
+    localStorage.setItem(KEY, 'nord');
+    syncThemeFollow(document.documentElement);
+    expect(os.listeners.size).toBe(0);
+  });
 });
 
 describe('配色', () => {
