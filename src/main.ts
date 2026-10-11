@@ -290,6 +290,8 @@ import {
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
 import { createCaptureService } from '@adapter/ui/actions/capture';
 import { createCaptureTrimmer } from '@adapter/ui/actions/capture-trim';
+import { createImageDrawer } from '@adapter/ui/actions/image-draw';
+import { openImageDrawWindow } from '@adapter/platform/image-draw-window';
 import { AudioClient } from '@adapter/platform/audio/audio-client';
 import { AsrClient } from '@adapter/platform/asr/asr-client';
 import { decodeToMono16k } from '@adapter/platform/asr/asr-decode';
@@ -3026,6 +3028,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
 
   /**
+   * 🔴 **画像に描き込む**(#683 段③。裁定は #1163)。段取りは `image-draw.ts`、窓は
+   * `image-draw-window.ts`。ここは口を渡すだけ(CLAUDE.md §2:この file はどの test からも
+   * 実行されない)。⚠ 取り込みは録音の切り出しと同じ `attachOne` の 1 本(門の中で待つ側)。
+   */
+  const imageDrawer = createImageDrawer({
+    dispatcher,
+    readBlob: (assetKey) => blobs.get(cid, assetKey),
+    // 🔴 置き場は PDF の保存(`save-edited`)と同じ:元の添付と同じフォルダ
+    parentOf: (lid) => {
+      const st = dispatcher.getState();
+      return resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+    },
+    attach: async (item, place) => {
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        out = await attachOne(dispatcher, attachDeps, item, undefined, place);
+      });
+      return out;
+    },
+    openWindow: (args) => openImageDrawWindow(args),
+    notify: showStatus,
+  });
+
+  /**
    * 🔴 **音声認識(録った音を文字にする)**(#772 段②。裁定 2026-10-01 = 端末の中だけ)。
    * 段取りは `capture-transcribe.ts` が持ち、ここは口を渡すだけ(CLAUDE.md §2:この file は
    * どの test からも実行されない)。
@@ -3521,6 +3547,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         }
       }
       return out;
+    },
+    drawOnImage: (assetKey, name, mime, lid) => {
+      void imageDrawer.run(assetKey, name, mime, lid);
     },
     viewAsset: (assetKey, name, mime, lid) => {
       void (async () => {

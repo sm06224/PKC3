@@ -10,6 +10,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer, type AssetLender } from '../../src/adapter/ui/render/detail';
+import { ACTION_ICONS } from '../../src/adapter/ui/render/icons';
 import { ExtensionGrants } from '../../src/adapter/platform/extension-grants';
 import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import { appOfficePack } from '../../src/adapter/ui/render/office-entry-view';
@@ -493,6 +494,45 @@ describe('PDF の添付(窓内 + 別窓)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
     await tick(20);
     expect(q('[data-pkc-action="view-asset"]'), 'zip に別窓の導線が出ている').toBeNull();
+  });
+
+  /**
+   * 🔴 **「画像に描き込む」は描ける画像にだけ出て、押した添付の身元を運ぶ**(#683 段③)。
+   * ⚠ 出すか出さないかの判定は `canDrawOnImage` の 1 本 ── SVG(大きさが不定)と PDF には出さない。
+   */
+  it('🔴 描ける画像には「画像に描き込む」が出て、鍵・名前・種類を運ぶ', async () => {
+    const body = attachmentBody({ name: '地図.jpg', mime: 'image/jpeg', size: 9, assetKey: 'ast-jpg' });
+    const { d, q } = setup({ a1: body, a2: '# text' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    const draw = q('[data-pkc-action="draw-on-image"]');
+    expect(draw, '画像に「画像に描き込む」が無い').not.toBeNull();
+    expect(draw!.getAttribute('data-pkc-asset-key')).toBe('ast-jpg');
+    expect(draw!.getAttribute('data-pkc-asset-name')).toBe('地図.jpg');
+    expect(draw!.getAttribute('data-pkc-asset-mime')).toBe('image/jpeg');
+    expect(draw!.textContent).toBe('画像に描き込む');
+    // 🔴 押した添付のノートを運ぶ(新しい画像を元と同じフォルダへ入れる起点)
+    expect(draw!.getAttribute('data-pkc-target-lid')).toBe('a1');
+    expect(draw!.getAttribute('title')).toContain('同じフォルダ');
+    // 「編集」の鉛筆と取り違えない図案
+    expect(ACTION_ICONS['draw-on-image']).toBeDefined();
+    expect(ACTION_ICONS['draw-on-image']).not.toBe(ACTION_ICONS['start-edit']);
+    expect(
+      draw!.querySelector('[data-pkc-icon]')?.getAttribute('data-pkc-symbol') ?? '',
+      '図案が付いていない(ACTION_ICONS の鍵がずれている)',
+    ).not.toBe('');
+  });
+
+  it('描けない種類(SVG・PDF)には「画像に描き込む」を出さない(押せない導線を置かない)', async () => {
+    for (const [mime, name] of [
+      ['image/svg+xml', 'a.svg'],
+      ['application/pdf', 'a.pdf'],
+    ] as const) {
+      const { d, q } = setup({ a1: attachmentBody({ name, mime, size: 9, assetKey: 'ast-x' }), a2: '# text' }, lender);
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+      await tick(20);
+      expect(q('[data-pkc-action="draw-on-image"]'), `${mime} に描き込みの導線が出ている`).toBeNull();
+    }
   });
 });
 

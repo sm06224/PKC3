@@ -95,6 +95,7 @@ import {
   undo,
 } from '@features/markdown/edit-journal';
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton, markPrimary } from './icons';
+import { canDrawOnImage } from '@features/asset/image-draw';
 // 🔑 目印の表は**共有の 1 本**(2026-09-13)── 絵の一覧・「なし」・いま選んでいる物の
 //    示し方は、この面と小窓で**同じ物**を使う(2 か所に散らさない ── §7)
 // ⚠ 件数(「アイコンから選ぶ(49)」)も**同じ file から採る**(#770 ④)── 字で書くと絵を
@@ -2997,6 +2998,22 @@ export class DetailRenderer {
           ? 'PDF を別のウィンドウで開きます(大きく開くのでページを読めます)'
           : '画像を別のウィンドウで開きます(本文を書きながら見られます)';
         info.append(view);
+      }
+      /**
+       * 🔴 **画像に描き込む**(#683 段③)。出すのは**描ける種類の画像だけ**
+       * (押せない導線を置かない)。判定は `canDrawOnImage` の 1 本。
+       * 保存は新しい添付で、元の画像は変わらない。
+       */
+      if (canDrawOnImage(meta.mime)) {
+        const draw = iconButton('draw-on-image', '画像に描き込む');
+        draw.setAttribute('data-pkc-asset-key', meta.assetKey);
+        draw.setAttribute('data-pkc-asset-name', meta.name || '画像');
+        draw.setAttribute('data-pkc-asset-mime', meta.mime);
+        // 🔴 押した添付のノート(新しい画像を元と同じフォルダへ入れる起点)
+        markTargetLid(draw, lid);
+        draw.title =
+          '別のウィンドウで画像に線・矢印・四角を描き込み、元の画像と同じフォルダに新しい画像として加えます(元の画像はそのまま残ります)';
+        info.append(draw);
       }
       if (isAppMime(meta.mime)) {
         /**

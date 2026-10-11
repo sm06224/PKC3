@@ -1382,6 +1382,12 @@ export interface BinderServices {
    */
   viewAsset?(assetKey: string, name: string, mime: string, lid?: string): void;
   /**
+   * 🔴 **画像に描き込む**(#683 段③)。別ウィンドウで描き、新しい画像として保存する。
+   * ⚠ 実体は main.ts(窓と添付の取り込み口を持つ)── binder は**呼ぶだけ**。
+   * ⚠ `mime` は**押した要素が運ぶ**(`viewAsset` と同じ理由)。
+   */
+  drawOnImage?(assetKey: string, name: string, mime: string, lid?: string): void;
+  /**
    * 🔴 **画面に出ている絵を、別窓で大きく見る**(#527。user 指示 2026-08-28
    * 「**別ウィンドウで実寸で開いて拡大縮小できるようにしてほしい**」)。
    *
@@ -10087,6 +10093,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 押した添付のノート(属性が無ければ選択へ落ちる ── 他の口と同じ作法)
     const lid = targetLid(dispatcher, target);
     if (key) services.viewAsset?.(key, name, mime, lid ?? undefined);
+  },
+  /** 🔴 **画像に描き込む**(#683 段③)。判断は `image-draw.ts`、窓は `image-draw-window.ts`。 */
+  'draw-on-image': (dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    const name = target.getAttribute('data-pkc-asset-name') ?? '画像';
+    const mime = target.getAttribute('data-pkc-asset-mime') ?? '';
+    // 🔴 押した添付のノート(置き場のフォルダを引く起点。属性が無ければ選択へ落ちる ── 他の口と同じ作法)
+    const lid = targetLid(dispatcher, target);
+    if (key) services.drawOnImage?.(key, name, mime, lid ?? undefined);
   },
   'dismiss-notices': (_dispatcher, _target, services) => {
     services.dismissNotices?.();

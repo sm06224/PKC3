@@ -1341,7 +1341,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-11(#1376): 保存していない編集を次に開いたとき戻す spec を 1 本足した → 104 → 105。
     //    🔴 ここでしか見えない:タブが死んだ後の次の起動で、IndexedDB の控えが読めて 1 行が出る / 戻すと編集欄に字と題名が入る
     //    (本物の IndexedDB と本物の起動が要る。unit は置き場もタブの死も持たない)
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(105);
+    // ⚠ 2026-10-11(#683 段③): 画像に描き込む spec を 1 本足した → 105 → 106。
+    //    🔴 ここでしか見えない:別ウィンドウの canvas に実際に描いた画素と、保存した画像・元の画像の画素の比較は happy-dom に無い
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(106);
     expect(
       counts.reduce((a, b) => a + b, 0),
       'smoke の test が増減した(足したらこの数を直す)',
@@ -1530,7 +1532,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-11(#1387): `print.smoke.spec.ts` に 1 本足した(暗い配色で刷る)→ 517 → 518。起動の予算は 511 → 512。
     // ⚠ 2026-10-11(#1376): `draft-recovery.smoke.spec.ts`(新設・test 4 本・起動 9 回)→ 518 → 522(戻す / 消す / ライブエディタ / IndexedDB の 20 件)。
     //    既存の道中には載せられない(`scripts/smoke-budget.mjs` の 516 の行を参照)。起動の予算は → 518。
-    ).toBe(522);
+    // ⚠ 2026-10-11(#683 段③): `image-draw.smoke.spec.ts`(新設・test 1 本・起動 1 つ)→ 522 → 523。起動の予算は 518 → 519(`scripts/smoke-budget.mjs` に理由)。
+    ).toBe(523);
   });
 });
 
