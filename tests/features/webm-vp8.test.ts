@@ -19,6 +19,7 @@ import {
   snapDoneNote,
   snapSecondsText,
   SNAP_CONFIRM_RULED_TEXT,
+  ruledWithSeconds,
 } from '../../src/features/video/video-trim-text';
 import {
   assembleParts,
@@ -241,11 +242,13 @@ describe('始まりを戻す(snapVideoStart)', () => {
 });
 
 describe('確認の字(snapConfirm)── 文面は 2 通り・切り替えは 1 か所', () => {
-  it('🔴 いまの既定(ruled):細かく切れない環境が戻るときは裁定の文言そのまま(秒の行は既定で足さない)', () => {
+  it('🔴 いまの既定(ruled):細かく切れない環境が戻るときは裁定の文言 + 秒の行(🟣 依頼 8 の字そのまま)', () => {
     const c = snapConfirm(2500, 12_000);
-    expect(c.message).toBe('お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します');
-    expect(c.message).toBe(SNAP_CONFIRM_RULED_TEXT);
-    expect(c.message).not.toMatch(/\d/);
+    expect(c.message).toBe('お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します。始まりが約 2.5 秒早くなります');
+    expect(c.message).toBe(ruledWithSeconds(2500));
+    expect(c.message.startsWith(SNAP_CONFIRM_RULED_TEXT)).toBe(true);
+    // 秒の行を外した形(切り替えの口)は裁定の文言だけ
+    expect(snapConfirm(2500, 12_000, { variant: 'ruled', secondsInRuled: false }).message).toBe(SNAP_CONFIRM_RULED_TEXT);
     expect([c.okLabel, c.cancelLabel]).toEqual(['切り出す', 'やめる']);
     expect(c.snapBackSec).toBe(2.5);
     // 段②b-1 の間だけ使った文は、押した所ぴったりに切れる道ができたので既定では出さない
@@ -256,7 +259,7 @@ describe('確認の字(snapConfirm)── 文面は 2 通り・切り替えは 1
     expect(interim.message).toBe('始まりを一番近い区切りに合わせて切り出します。始まりが約 2.5 秒早くなります(0:12 → 0:09)');
     const withSec = snapConfirm(2500, 12_000, { variant: 'ruled', secondsInRuled: true });
     expect(withSec.message.startsWith(SNAP_CONFIRM_RULED_TEXT)).toBe(true);
-    expect(withSec.message).toContain('約 2.5 秒早くなります(0:12 → 0:09)');
+    expect(withSec.message).toBe(`${SNAP_CONFIRM_RULED_TEXT}。始まりが約 2.5 秒早くなります`);
   });
   it('🔴 秒の字:10 秒未満は小数 1 桁・以上は整数・戻るのに 0.0 とは出さない', () => {
     expect(snapSecondsText(1500)).toBe('1.5');

@@ -1358,8 +1358,10 @@ test('🔴 細かく切れない環境(WebCodecs 無し)は裁定の文言で確
   // 🔴 [やめる]:確認は出るが、何も作らない・印は残る
   await clickReal(page, screenRow.locator('[data-pkc-field="capture-trim-run"]'));
   await expect(dialog, '細かく切れないのに確認が出ない').toBeVisible({ timeout: 15_000 });
-  // 裁定の文言そのまま(秒の行は既定で足さない)
-  await expect(dialog.locator('[data-pkc-field="dialog-body"]')).toHaveText(SNAP_CONFIRM_RULED_TEXT);
+  // 裁定の文言 + 秒の行(🟣 依頼 8)
+  await expect(dialog.locator('[data-pkc-field="dialog-body"]')).toHaveText(
+    new RegExp(`^${SNAP_CONFIRM_RULED_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}。始まりが約 [0-9.]+ 秒早くなります$`),
+  );
   await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('切り出す');
   await expect(dialog.locator('[data-pkc-field="dialog-cancel"]')).toHaveText('やめる');
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');

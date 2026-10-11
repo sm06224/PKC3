@@ -14,7 +14,8 @@
  * | `ruled`(**いまの既定**) | 細かく切れない環境が手前の区切りへ戻るとき | 裁定の文言: 「お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します」 |
  * | `interim` | 段②b-1 の間だけ使った文(**いまは使わない**。切り替えの口として残す) | 「始まりを一番近い区切りに合わせて切り出します。始まりが約 N 秒早くなります(M:SS → M:SS)」 |
  *
- * 🔑 `ruled` にも「約 N 秒早くなります」を足せる(`SNAP_SECONDS_IN_RULED`、既定は足さない ── Gemini の回答待ち。#1163)。
+ * 🔑 `ruled` には「始まりが約 N 秒早くなります」を足す(`SNAP_SECONDS_IN_RULED`。🟣 依頼 8 で採択 ── #1163。
+ *   字は裁定のまま:「…切り出します。始まりが約 N 秒早くなります」。押した所と実際の始まりの時刻は足さない)。
  * ボタンはどちらも [切り出す] [やめる]。
  *
  * ⚠ 文の組み立ては**この file だけ**にする。
@@ -26,7 +27,7 @@ export type SnapConfirmVariant = 'interim' | 'ruled';
 /** 確認の文面の切り替え(1 か所)。 */
 export const SNAP_CONFIRM_VARIANT: SnapConfirmVariant = 'ruled';
 /** `ruled` の文面に「約 N 秒早くなります」の行を足すか。 */
-export const SNAP_SECONDS_IN_RULED = false;
+export const SNAP_SECONDS_IN_RULED = true;
 
 /** 裁定の文言(`ruled`)。 */
 export const SNAP_CONFIRM_RULED_TEXT = 'お使いのブラウザでは先頭を細かく切れません。一番近い区切りから切り出します';
@@ -72,7 +73,7 @@ export function snapConfirm(
   const range = `${elapsedText(pressedMs)} → ${elapsedText(snappedMs)}`;
   const interim = `始まりを一番近い区切りに合わせて切り出します。始まりが約 ${n} 秒早くなります(${range})`;
   const ruled = secondsInRuled
-    ? `${SNAP_CONFIRM_RULED_TEXT}。始まりが約 ${n} 秒早くなります(${range})`
+    ? ruledWithSeconds(snapBackMs)
     : SNAP_CONFIRM_RULED_TEXT;
   return {
     needed: snapBackMs > 0,
@@ -81,6 +82,11 @@ export function snapConfirm(
     cancelLabel: 'やめる',
     snapBackSec: snapBackMs / 1000,
   };
+}
+
+/** 裁定の文言 + 秒の行(🟣 依頼 8 の字そのまま)。 */
+export function ruledWithSeconds(snapBackMs: number): string {
+  return `${SNAP_CONFIRM_RULED_TEXT}。始まりが約 ${snapSecondsText(snapBackMs)} 秒早くなります`;
 }
 
 /** 切り出しが済んだときの状態の行に足す一言(戻らなかったら空)。 */

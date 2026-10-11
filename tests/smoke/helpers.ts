@@ -780,6 +780,12 @@ export function expectMainGapUnderBudget(label: string, m: MainGapSample): void 
       ` topAt=[${(m.topAt ?? []).join(',')}]` +
       ` longtask=${m.longtasks == null ? 'n/a' : `[${m.longtasks.map((t) => `${t.at}+${t.dur}`).join(',')}]`}`,
   );
+  // 🔑 通った回も落ちた回も、測った値を報告(annotations)に残す(#878 ①)。
+  //    ⚠ 門ではない ── 分布を全量の報告から読むための記録で、判定は下の expect が正本
+  test.info().annotations.push({
+    type: 'main-thread-gap',
+    description: `${label}: maxGap=${m.maxGap}ms control=${m.base}ms budget=${MAIN_GAP_BUDGET_MS}ms`,
+  });
   // ⚠ 空振り防止 ── 心拍が回っていなければ最大欠測は 0 になり、門は常に通る
   expect(m.ticks, `${label}: 心拍が取れていない(計器が死んでいる)`).toBeGreaterThan(5);
   expect(m.baseTicks, `${label}: 対照群の心拍が取れていない(比べる相手が無い)`).toBeGreaterThan(5);

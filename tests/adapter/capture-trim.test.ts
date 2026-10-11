@@ -18,7 +18,7 @@ import type { VideoCutResult, VideoScanResult } from '../../src/adapter/platform
 import type { VideoScan } from '../../src/features/video/webm-vp8';
 import type { AttachItem } from '../../src/adapter/ui/actions/attach';
 import { sanitizeMessageText } from '../../src/features/message/message-log';
-import { SNAP_CONFIRM_RULED_TEXT } from '../../src/features/video/video-trim-text';
+import { ruledWithSeconds } from '../../src/features/video/video-trim-text';
 
 const body = (name: string, mime: string): string =>
   ['---', `attachment.name: ${name}`, `attachment.mime: ${mime}`, 'attachment.size: 2048', 'attachment.asset_key: k-1', '---', ''].join('\n');
@@ -472,14 +472,16 @@ describe('進行中の字の後始末(#1017 C5)', () => {
  *   ②やめたら**何も作らず・印も残す** ③戻らないなら**確認は出ない** ④断る理由は動画の字で出る。
  */
 describe('動画を切り出す(#683 段②b-1)', () => {
+  /** 細かく切れない環境の確認(既定の台は 3 秒戻る)── 裁定の文言 + 秒の行。 */
+  const SNAP_CONFIRM_RULED_TEXT_3S = ruledWithSeconds(3_000);
   const VIDEO = (): Partial<AppState> => ({ captureItems: ITEMS('video/webm') });
 
   it('🔴 始まりが手前へ戻るなら、何秒早くなるかを言う確認が出てから切る', async () => {
     const h = harness({}, VIDEO());
     await h.trimmer.run('a', 12_000, 65_000);
     expect(h.deps.confirm).toHaveBeenCalledTimes(1);
-    // 🔴 細かく切れない環境が戻るときは、裁定の文言(秒の行は既定で足さない)
-    expect(h.deps.confirm).toHaveBeenCalledWith(SNAP_CONFIRM_RULED_TEXT, { okLabel: '切り出す', cancelLabel: 'やめる' });
+    // 🔴 細かく切れない環境が戻るときは、裁定の文言 + 秒の行(🟣 依頼 8)
+    expect(h.deps.confirm).toHaveBeenCalledWith(SNAP_CONFIRM_RULED_TEXT_3S, { okLabel: '切り出す', cancelLabel: 'やめる' });
     // 確認の後に切っている(順番)
     const order = (f: unknown): number => (f as { mock: { invocationCallOrder: number[] } }).mock.invocationCallOrder[0]!;
     expect(order(h.deps.scanVideo)).toBeLessThan(order(h.deps.confirm));
@@ -621,7 +623,7 @@ describe('動画を押した所ぴったりに切り出す(#683 段②b-2)', () 
     const h = harness({ scanVideo: vi.fn(async () => scanned(3_000, 12_000, 'needs-codec')) }, VIDEO());
     await h.trimmer.run('a', 12_000, 65_000);
     expect(h.deps.confirm).toHaveBeenCalledTimes(1);
-    expect(callsOf(h.deps.confirm)[0]![0]).toBe(SNAP_CONFIRM_RULED_TEXT);
+    expect(callsOf(h.deps.confirm)[0]![0]).toBe(ruledWithSeconds(3_000));
     const calls = callsOf(h.deps.cutVideo);
     expect(calls).toHaveLength(1);
     expect(calls[0]![4], '切れない環境が細かい道を試している').toBe('snap');
@@ -641,7 +643,7 @@ describe('動画を押した所ぴったりに切り出す(#683 段②b-2)', () 
     ).toEqual(['precise', 'snap']);
     // 確認は 1 回・落ちた「後」で出る(落ちる前には出ない)
     expect(h.deps.confirm).toHaveBeenCalledTimes(1);
-    expect(callsOf(h.deps.confirm)[0]![0]).toBe(SNAP_CONFIRM_RULED_TEXT);
+    expect(callsOf(h.deps.confirm)[0]![0]).toBe(ruledWithSeconds(3_000));
     expect(orderOf(cutVideo, 0)).toBeLessThan(orderOf(h.deps.confirm, 0));
     expect(orderOf(h.deps.confirm, 0)).toBeLessThan(orderOf(cutVideo, 1));
     expect(h.attached, '落ちた回の分が添付になっている').toHaveLength(1);
