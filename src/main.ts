@@ -401,6 +401,7 @@ import {
   openOrRaiseWeekWindow,
   weekAnnounceKey,
   weekWindowKey,
+  monthWindowKey,
 } from '@adapter/platform/schedule-deep-link';
 import { dateKey } from '@features/schedule/month-grid';
 import { openView, openViewHere } from '@adapter/ui/render/open-view';
@@ -1766,7 +1767,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const announceWeek = (): void => {
     const st = dispatcher.getState();
     scheduleRegistry.announce(
-      weekAnnounceKey(heldViewWindow, st.scheduleMode, st.scheduleDay, todayKey()),
+      weekAnnounceKey(heldViewWindow, st.scheduleMode, st.scheduleDay, todayKey(), st.calendarMonth ?? null),
     );
   };
   dispatcher.onState(() => {
@@ -4755,8 +4756,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     openScheduleWindow: (mode, day) =>
       // 🔴 同じ週の窓が開いているなら、開かずに前に出す(#855)── 判断は `openOrRaiseWeekWindow`
       void openOrRaiseWeekWindow({
-        // 🔑 台帳に載るのは「週」の窓だけ(「月」の窓は名乗らない ── 押すたびに新しく開く)
-        key: mode === 'week' ? weekWindowKey(day, todayKey()) : null,
+        // 🔑 週は週の最初の日、月は今月で台帳を引く(新しく開く月の窓は今月から始まる)
+        key: mode === 'week' ? weekWindowKey(day, todayKey()) : monthWindowKey(null, todayKey()),
         whereIs: (k) => scheduleRegistry.whereIs(k),
         raise: (k) => scheduleRegistry.raise(k),
         reserve: (k) => scheduleRegistry.reserve(k),

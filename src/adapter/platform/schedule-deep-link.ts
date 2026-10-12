@@ -48,6 +48,21 @@ export function weekWindowKey(day: string | null, today: string): string | null 
   return first === undefined ? null : `week ${first}`;
 }
 
+/**
+ * 月の窓の台帳の鍵(`month 2026-10`)。⚠ 月の窓が出すのは `calendarMonth`(無ければ今月)なので、鍵も同じ所から作る。
+ * 押す側は `calendarMonth` を渡さない(新しく開く窓は今月から始まる)。読めない今日は `null`。
+ */
+export function monthWindowKey(
+  calendarMonth: { readonly year: number; readonly month: number } | null,
+  today: string,
+): string | null {
+  if (calendarMonth !== null) return `month ${calendarMonth.year}-${String(calendarMonth.month).padStart(2, '0')}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(today) ? `month ${today.slice(0, 7)}` : null;
+}
+
+export const MONTH_WINDOW_ALREADY =
+  'この月は、すでに別のウィンドウで開いています(見つからないときは、もう一度押すと新しく開きます)';
+
 export const WEEK_WINDOW_ALREADY =
   'この週は、すでに別のウィンドウで開いています(見つからないときは、もう一度押すと新しく開きます)';
 
@@ -66,8 +81,12 @@ export function weekAnnounceKey(
   scheduleMode: 'list' | 'day' | 'week' | 'month',
   scheduleDay: string | null,
   today: string,
+  calendarMonth: { readonly year: number; readonly month: number } | null = null,
 ): string | null {
-  if (heldView !== 'schedule' || scheduleMode !== 'week') return null;
+  if (heldView !== 'schedule') return null;
+  // 🔴 「月」の窓も名乗る ── 左の列の「月」を 2 度押して 2 枚にしない(#855)
+  if (scheduleMode === 'month') return monthWindowKey(calendarMonth, today);
+  if (scheduleMode !== 'week') return null;
   return weekWindowKey(scheduleDay, today);
 }
 
@@ -91,6 +110,11 @@ export function resetWeekRaiseMemory(): void {
   raisedAt.clear();
 }
 
+/** 「すでに開いています」の字。⚠ 鍵の頭(`week ` / `month `)で週と月を言い分ける。 */
+function alreadyText(key: string): string {
+  return key.startsWith('month ') ? MONTH_WINDOW_ALREADY : WEEK_WINDOW_ALREADY;
+}
+
 /** @returns `'raised'` = 開いている窓へ頼んだ(新しい窓は開かない) / `'opened'` = 窓を開いた。 */
 export function openOrRaiseWeekWindow(deps: WeekWindowDeps): 'raised' | 'opened' {
   const key = deps.key;
@@ -104,13 +128,13 @@ export function openOrRaiseWeekWindow(deps: WeekWindowDeps): 'raised' | 'opened'
         if (!again) {
           raisedAt.set(key, deps.now());
           deps.raise(key);
-          deps.notice(WEEK_WINDOW_ALREADY);
+          deps.notice(alreadyText(key));
           return 'raised';
         }
         // 2 度目(探しても見つからなかった)── 新しく開く。記憶は捨てる(3 度目は、また最初から)
         raisedAt.delete(key);
       } else {
-        deps.notice(WEEK_WINDOW_ALREADY);
+        deps.notice(alreadyText(key));
         return 'raised';
       }
     }
