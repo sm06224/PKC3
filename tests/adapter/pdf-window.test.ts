@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   ALIVE_TTL_MS,
+  ATTACH_LEND_TTL_MS,
   HELLO_TIMEOUT_MS,
   PDF_CHANNEL,
   PDF_HOST_PATH,
@@ -34,6 +35,7 @@ interface Wire {
   QUOTE_TOO_LONG: string;
   QUOTE_TIMEOUT_MS: number;
   EDIT_TIMEOUT_MS: number;
+  ATTACH_TIMEOUT_MS: number;
   EDIT_NO_REPLY: string;
   envelope(kind: string, token: string, payload?: object): Record<string, unknown>;
   parse(data: unknown, token: string): { kind: string; payload: Record<string, unknown> } | null;
@@ -86,6 +88,8 @@ interface Rig {
   openFailed: PdfSession[];
   lateHello: PdfSession[];
   edits: { session: PdfSession; key: string }[];
+  /** 本体が「この collection の PDF の添付」として返す一覧(test が書き換える)と、貸した鍵の控え。 */
+  attach: { items: { key: string; name: string; size: number | null }[]; lends: string[] };
   clock: { t: number };
   /** 窓の側の端(実物の `reader-wire.js` で組む / 読む)。 */
   win: {
@@ -113,6 +117,7 @@ function rig(
     openFailed: [] as PdfSession[],
     lateHello: [] as PdfSession[],
     edits: [] as Rig['edits'],
+    attach: { items: [], lends: [] } as Rig['attach'],
     clock,
   };
   const host = new PdfReaderHost({
@@ -127,6 +132,13 @@ function rig(
     onEdited: (session, key) => {
       r.edits.push({ session, key });
       return Promise.resolve(editResult);
+    },
+    listAttachments: () => Promise.resolve(r.attach.items),
+    // 本物(`main.ts`)と同じく、一覧に無い鍵は貸さない(窓の鍵を信用しない)
+    lendAttachment: (key) => {
+      if (!r.attach.items.some((i) => i.key === key)) return Promise.resolve(null);
+      r.attach.lends.push(key);
+      return Promise.resolve({ url: `blob:att-${key}`, dispose: () => r.disposed.push(`blob:att-${key}`) });
     },
     makeChannel: (name) => {
       expect(name).toBe(PDF_CHANNEL);
@@ -293,6 +305,8 @@ describe('開く', () => {
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
       onEdited: () => Promise.resolve({ ok: true, message: "" }),
+      listAttachments: () => Promise.resolve([]),
+      lendAttachment: () => Promise.resolve(null),
       makeChannel: () => g.hub.end(),
       openWindow: () => {
         throw new Error('blocked');
@@ -371,6 +385,8 @@ describe('ノートへ引く', () => {
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
       onEdited: () => Promise.resolve({ ok: true, message: "" }),
+      listAttachments: () => Promise.resolve([]),
+      lendAttachment: () => Promise.resolve(null),
       makeChannel: () => g.hub.end(),
       openWindow: (url) => {
         g.opened.push({ url, features: '' });
@@ -401,6 +417,8 @@ describe('ノートへ引く', () => {
       onOpenFailed: () => undefined,
       onLateHello: () => undefined,
       onEdited: () => Promise.resolve({ ok: true, message: "" }),
+      listAttachments: () => Promise.resolve([]),
+      lendAttachment: () => Promise.resolve(null),
       makeChannel: () => g2.hub.end(),
       openWindow: () => undefined,
       baseUrl: 'https://example.test/',
@@ -487,6 +505,8 @@ describe('編集した PDF を保存する(#275 段②-1b)', () => {
     const host2 = new PdfReaderHost({
       onQuote: () => Promise.resolve({ ok: true, message: '' }),
       onEdited: () => Promise.reject(new Error('boom')),
+      listAttachments: () => Promise.resolve([]),
+      lendAttachment: () => Promise.resolve(null),
       onFellBack: () => undefined,
       onLoadFailed: () => undefined,
       onOpenFailed: () => undefined,
@@ -520,6 +540,133 @@ describe('編集した PDF を保存する(#275 段②-1b)', () => {
     expect(wire.EDIT_TIMEOUT_MS).toBeGreaterThan(wire.QUOTE_TIMEOUT_MS);
     // 「保存できなかった」とは言い切らない(添付ができたかもしれない)
     expect(wire.EDIT_NO_REPLY).toContain('確かめられませんでした');
+  });
+});
+
+describe('添付から選ぶ(#275 結合)', () => {
+  it('窓が一覧を頼むと、この collection の PDF の添付の一覧を返す(鍵・名前・大きさだけ)', async () => {
+    const g = rig();
+    g.attach.items = [
+      { key: 'ka', name: '会議B.pdf', size: 1200 },
+      { key: 'kb', name: '契約.pdf', size: null },
+    ];
+    openAndHello(g);
+    g.win.send('attach-list');
+    await flush();
+    const res = g.win.received.find((m) => m.kind === 'attach-list-result');
+    expect(res?.payload).toEqual({
+      ok: true,
+      items: [
+        { key: 'ka', name: '会議B.pdf', size: 1200 },
+        { key: 'kb', name: '契約.pdf', size: null },
+      ],
+    });
+  });
+
+  it('一覧を作れなかったら、窓を待たせず ok:false を返す', async () => {
+    const g = rig();
+    const g2 = rig();
+    const host2 = new PdfReaderHost({
+      onQuote: () => Promise.resolve({ ok: true, message: '' }),
+      onEdited: () => Promise.resolve({ ok: true, message: '' }),
+      listAttachments: () => Promise.reject(new Error('boom')),
+      lendAttachment: () => Promise.resolve(null),
+      onFellBack: () => undefined,
+      onLoadFailed: () => undefined,
+      onOpenFailed: () => undefined,
+      onLateHello: () => undefined,
+      makeChannel: () => g2.hub.end(),
+      openWindow: () => undefined,
+      baseUrl: 'https://example.test/',
+      newToken: () => 'lsrej',
+    });
+    host2.open({ assetKey: 'k', name: 'a.pdf', lid: null, lent: g.lent('blob:z') });
+    const win2 = g2.hub.end();
+    const got: Record<string, unknown>[] = [];
+    win2.onmessage = (ev) => got.push(ev.data as Record<string, unknown>);
+    win2.postMessage(wire.envelope('attach-list', 'lsrej', {}));
+    await flush();
+    host2.dispose();
+    const res = got.find((m) => m[PDF_TAG] === 'attach-list-result');
+    expect(res, '落ちた回に窓へ何も返していない').toBeDefined();
+    expect(res?.['payload']).toEqual({ ok: false, items: [] });
+  });
+
+  it('選んだ添付は、貸した URL を窓へ渡し、窓が握った合図(attach-got)で返す', async () => {
+    const g = rig();
+    g.attach.items = [{ key: 'ka', name: '会議B.pdf', size: 10 }];
+    openAndHello(g);
+    g.win.send('attach-get', { key: 'ka' });
+    await flush();
+    const res = g.win.received.find((m) => m.kind === 'attach-get-result');
+    expect(res?.payload).toEqual({ ok: true, key: 'ka', url: 'blob:att-ka' });
+    // 窓が握る前は返さない
+    expect(g.disposed).not.toContain('blob:att-ka');
+    g.win.send('attach-got', { key: 'ka' });
+    expect(g.disposed).toEqual(['blob:att-ka']);
+    // 2 度目の合図で二重に返さない
+    g.win.send('attach-got', { key: 'ka' });
+    expect(g.disposed).toEqual(['blob:att-ka']);
+  });
+
+  it('🔴 一覧に無い鍵(PDF でない添付・他の collection・でたらめ)は貸さない ── 窓の鍵を信用しない', async () => {
+    const g = rig();
+    g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
+    openAndHello(g);
+    g.win.send('attach-get', { key: 'someone-elses-photo' });
+    await flush();
+    expect(g.attach.lends).toEqual([]);
+    const res = g.win.received.find((m) => m.kind === 'attach-get-result');
+    expect(res?.payload).toEqual({ ok: false, key: 'someone-elses-photo', url: null });
+  });
+
+  it('鍵の型が違う・空・長すぎるなら受けない', async () => {
+    const g = rig();
+    g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
+    openAndHello(g);
+    g.win.send('attach-get', { key: 5 });
+    g.win.send('attach-get', { key: '' });
+    g.win.send('attach-get', { key: 'k'.repeat(300) });
+    g.win.send('attach-get', {});
+    await flush();
+    expect(g.attach.lends).toEqual([]);
+    expect(g.win.received.find((m) => m.kind === 'attach-get-result')).toBeUndefined();
+  });
+
+  it('窓が握る合図を送らなくても、時間が来たら返す(貸しっぱなしにしない)', async () => {
+    const g = rig();
+    g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
+    openAndHello(g);
+    g.win.send('attach-get', { key: 'ka' });
+    await flush();
+    expect(g.disposed).toEqual([]);
+    const t = g.timers.find((x) => x.ms === ATTACH_LEND_TTL_MS && x.live);
+    expect(t, '時間切れの時計が掛かっていない').toBeDefined();
+    t?.fn();
+    expect(g.disposed).toEqual(['blob:att-ka']);
+  });
+
+  it('窓が閉じたら、貸している添付も返す / 借りる待ちの間に窓が閉じたら貸さずに返す', async () => {
+    const g = rig();
+    g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
+    openAndHello(g);
+    g.win.send('attach-get', { key: 'ka' });
+    await flush();
+    g.win.send('closed');
+    expect(g.disposed).toContain('blob:att-ka');
+    // 閉じた後に届いた貸し出しは、窓へ渡さず返す
+    const g2 = rig();
+    g2.attach.items = [{ key: 'kb', name: 'b.pdf', size: 1 }];
+    openAndHello(g2);
+    g2.win.send('attach-get', { key: 'kb' });
+    g2.win.send('closed');
+    await flush();
+    expect(g2.disposed).toContain('blob:att-kb');
+    expect(g2.win.received.find((m) => m.kind === 'attach-get-result')).toBeUndefined();
+  });
+
+  it('窓の側の待つ上限が、貸し出しの時計より短い(窓が諦めた後に貸しっぱなしが残らない)', () => {
+    expect(wire.ATTACH_TIMEOUT_MS).toBeLessThan(ATTACH_LEND_TTL_MS);
   });
 });
 
@@ -594,27 +741,44 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
 
   it('⚠ 前提: 窓が送る種類・待つ種類を実際に拾えている(空振り防止)', () => {
     expect(new Set(sent).size).toBeGreaterThanOrEqual(7);
-    expect(new Set(awaited).size).toBe(4);
+    expect(new Set(awaited).size).toBe(6);
   });
 
-  it('窓が送る種類は、ちょうどこの 8 つ(増えたら本体の受け口と対で足す)', () => {
+  it('窓が送る種類は、ちょうどこの 11 個(増えたら本体の受け口と対で足す)', () => {
     expect([...new Set(sent)].sort()).toEqual(
-      ['alive', 'closed', 'edited', 'fell-back', 'hello', 'load-failed', 'loaded', 'quote'].sort(),
+      [
+        'alive',
+        'attach-get',
+        'attach-got',
+        'attach-list',
+        'closed',
+        'edited',
+        'fell-back',
+        'hello',
+        'load-failed',
+        'loaded',
+        'quote',
+      ].sort(),
     );
   });
 
-  it('窓が待つ種類は、本体が送る 4 つと同じ(doc / edit-result / focus-request / quote-result)', async () => {
-    expect([...new Set(awaited)].sort()).toEqual(['doc', 'edit-result', 'focus-request', 'quote-result']);
+  it('窓が待つ種類は、本体が送る 6 つと同じ', async () => {
+    expect([...new Set(awaited)].sort()).toEqual(
+      ['attach-get-result', 'attach-list-result', 'doc', 'edit-result', 'focus-request', 'quote-result'].sort(),
+    );
     const g = rig();
+    g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
     const s = openAndHello(g);
     g.host.focus(s.token);
     g.win.send('quote', { text: 'a', page: 1 });
     g.win.send('edited', { key: 'p1' });
+    g.win.send('attach-list');
+    g.win.send('attach-get', { key: 'ka' });
     await flush();
     expect(new Set(g.win.received.map((m) => m.kind))).toEqual(new Set(awaited));
   });
 
-  it('窓が送る 8 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', () => {
+  it('窓が送る 11 種を 1 つずつ本体へ通し、どれも「無視」されない(受け口が在る)', async () => {
     const effects: Record<string, (g: Rig) => unknown> = {
       hello: (g) => g.win.received.some((m) => m.kind === 'doc'),
       alive: (g) => g.host.openTokenFor('k1') !== null,
@@ -623,6 +787,9 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
       'fell-back': (g) => g.fellBack.length === 1,
       quote: (g) => g.quotes.length === 1,
       edited: (g) => g.edits.length === 1,
+      'attach-list': (g) => g.win.received.some((m) => m.kind === 'attach-list-result'),
+      'attach-get': (g) => g.win.received.some((m) => m.kind === 'attach-get-result'),
+      'attach-got': (g) => g.disposed.includes('blob:att-ka'),
       closed: (g) => g.host.openTokenFor('k1') === null,
     };
     for (const kind of new Set(sent)) {
@@ -632,8 +799,14 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
         g.win.token = (g.opened[0]?.url ?? '').split('#')[1] ?? '';
         g.win.send('hello');
       } else {
+        g.attach.items = [{ key: 'ka', name: 'a.pdf', size: 1 }];
         openAndHello(g);
         g.win.received.length = 0;
+        // 窓が握った合図は、貸している添付があって初めて効く
+        if (kind === 'attach-got') {
+          g.win.send('attach-get', { key: 'ka' });
+          await flush();
+        }
         // 生きている扱いの猶予を過ぎさせてから送る(alive が効いたことだけを見る)
         if (kind === 'alive') g.clock.t += ALIVE_TTL_MS + 1;
         g.win.send(
@@ -644,9 +817,12 @@ describe('種類の突合 ── reader.js の原文が送る / 待つ種類を�
               ? { reason: 'r' }
               : kind === 'edited'
                 ? { key: 'p1' }
-                : {},
+                : kind === 'attach-get' || kind === 'attach-got'
+                  ? { key: 'ka' }
+                  : {},
         );
       }
+      await flush();
       expect(effects[kind]?.(g), `${kind} が本体で何も起こさない(受け口が無い)`).toBe(true);
     }
   });

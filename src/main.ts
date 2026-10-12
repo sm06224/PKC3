@@ -79,6 +79,7 @@ import { appInlineCodeCopy } from '@adapter/ui/render/inline-code-copy';
 import { appPdfReader } from '@adapter/ui/render/pdf-reader-setting';
 import { PdfReaderHost } from '@adapter/platform/pdf/pdf-window';
 import { openInPdfReader } from '@adapter/platform/pdf/open-in-reader';
+import { pdfAttachmentsOf } from '@features/pdf/pdf-attachments';
 import { quoteIntoNote } from '@adapter/platform/pdf/quote-into-note';
 import { createSaveEdited, openPdfStageDir } from '@adapter/platform/pdf/save-edited';
 import { resolveCanonicalParents } from '@features/relation/tree';
@@ -1877,12 +1878,29 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     notify: (text, openLid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
   });
+  /**
+   * 🔴 **PDF の窓の「添付から選ぶ」に出す、この collection の PDF の添付**(#275 結合)。⚠ 配線だけ ──
+   * 一覧の規則は `features/pdf/pdf-attachments.ts`。題名は `entryMetas`、種類と鍵は添付ノートの本文(`getBodies` を 1 回)。
+   */
+  const listPdfAttachments = async (): Promise<ReturnType<typeof pdfAttachmentsOf>> => {
+    const titles = new Map<string, string>();
+    for (const m of dispatcher.getState().entryMetas.values()) {
+      if (m.archetype === 'attachment') titles.set(m.lid, m.title);
+    }
+    if (titles.size === 0) return [];
+    const rows = await client.request({ op: 'getBodies', cid, lids: [...titles.keys()] });
+    return pdfAttachmentsOf(rows.map((r) => ({ title: titles.get(r.lid) ?? '', body: r.body })));
+  };
   let pdfHost: PdfReaderHost | null = null;
   const pdfReaderHost = (): PdfReaderHost => {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) =>
         quoteIntoNote(dispatcher, session, text, page, showStatus, undefined, editLockPort),
       onEdited: (session, key) => pdfSaveEdited.receive(session, key),
+      listAttachments: listPdfAttachments,
+      // 🔴 窓の鍵を信用しない ── 一覧(この collection の PDF の添付)に在る鍵だけ貸す
+      lendAttachment: async (key) =>
+        (await listPdfAttachments()).some((a) => a.key === key) ? blobs.lendObjectUrl(cid, key) : null,
       onFellBack: (session) =>
         showStatus(`「${session.name}」は PDF ビューアで読めなかったため、ブラウザ標準の PDF 表示で開きました`, {
           kind: 'caution',

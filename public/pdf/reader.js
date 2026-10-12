@@ -64,6 +64,10 @@ const editWarn = $('edit-warn');
 const editBar = $('edit-bar');
 const appendBtn = $('append-pdf');
 const appendFile = $('append-file');
+const appendMenu = $('append-menu');
+const appendFromNote = $('append-from-note');
+const appendFromFile = $('append-from-file');
+const appendPick = $('append-pick');
 
 const ch = new BroadcastChannel(wire.CHANNEL);
 const send = (kind, payload) => ch.postMessage(wire.envelope(kind, token, payload));
@@ -84,7 +88,8 @@ let ready = false;
 let total = 0;
 /**
  * 一覧のページの総数 = 元の PDF のページ数 + 足した PDF のページ数(#275 結合)。足したページの通し番号は `total` の次から。
- * ⚠ 読む面(中央)・検索・ハイライトは元の PDF の `total` ページだけ ── 足したページは一覧にだけ在る(保存して初めて読める)。
+ * 🔑 読む面(中央)には足したページも並ぶ(元の PDF の後ろに続けて読める。足した PDF の貸し出しで描く)。
+ * ⚠ 検索・ハイライト・文字の選び(引用)は元の PDF の `total` ページだけ ── 足したページは絵として読むだけ(保存して初めて文字も選べる)。
  */
 let grand = 0;
 /** 「変更を元に戻す」で捨てた、足した PDF のページ数(案内の分母から引く ── 戻した後に「3 / 5 ページ」と出ないように)。 */
@@ -136,6 +141,8 @@ ch.onmessage = (ev) => {
   }
   else if (m.kind === 'focus-request') window.focus();
   else if (m.kind === 'edit-result') onEditResult(m.payload);
+  else if (m.kind === 'attach-list-result') onAttachList(m.payload);
+  else if (m.kind === 'attach-get-result') void onAttachGet(m.payload);
   else if (m.kind === 'quote-result') {
     clearTimer(quoteTimer);
     quoteTimer = null;
@@ -203,7 +210,7 @@ async function openPdf() {
     // 一覧は既定で出す(読む幅を取られたくない人は、帯のボタンで隠せる)── 幅合わせの前に出す(幅が変わるので)
     listBtn.disabled = false;
     setList(true, false);
-    $('pagecount').textContent = `/ ${String(total)}`;
+    $('pagecount').textContent = `/ ${String(grand)}`;
     fitWidth();
   } catch {
     fallBack();
@@ -262,13 +269,16 @@ function fallBack() {
 // ───────── 頁の箱と描き
 
 function buildBoxes() {
-  for (let i = 1; i <= total; i += 1) {
-    const box = document.createElement('div');
-    box.className = 'page';
-    box.setAttribute('data-page', String(i));
-    boxes[i] = box;
-    pagesEl.append(box);
-  }
+  for (let i = 1; i <= total; i += 1) makeBox(i);
+}
+
+/** 中央の頁の箱を 1 つ作って並べる(元のページも、足したページも同じ作り)。 */
+function makeBox(i) {
+  const box = document.createElement('div');
+  box.className = 'page';
+  box.setAttribute('data-page', String(i));
+  boxes[i] = box;
+  pagesEl.append(box);
 }
 
 function sizeBox(i) {
@@ -285,14 +295,16 @@ function clearBox(i) {
 }
 
 function resizeAll() {
-  for (let i = 1; i <= total; i += 1) sizeBox(i);
+  for (let i = 1; i <= grand; i += 1) sizeBox(i);
 }
 
 function visibleRange() {
   const r = scroller.getBoundingClientRect();
   let first = 0;
   let last = 0;
-  for (let i = 1; i <= total; i += 1) {
+  for (let i = 1; i <= grand; i += 1) {
+    // 外した PDF の箱は畳んである(`hidden`)── 数えない
+    if (boxes[i].hidden) continue;
     const b = boxes[i].getBoundingClientRect();
     if (b.bottom >= r.top && b.top <= r.bottom) {
       if (first === 0) first = i;
@@ -315,7 +327,8 @@ function refresh() {
   }
   if (document.activeElement !== $('pageno')) $('pageno').value = String(current);
   markCurrent(current);
-  let want = windowOf(first, last, total, RADIUS);
+  let want = windowOf(first, last, grand, RADIUS);
+  for (const i of [...want]) if (boxes[i].hidden) want.delete(i);
   if (want.size > MAX_LIVE) {
     // 縮小して一度に多く見えるとき: いまの頁に近い順に MAX_LIVE 頁だけ
     want = new Set([...want].sort((a, b) => Math.abs(a - current) - Math.abs(b - current)).slice(0, MAX_LIVE));
@@ -332,12 +345,16 @@ async function renderPage(i) {
   inflight.set(i, myGen);
   try {
     // 🔑 描いている間は「飛んでいる依頼」── その間は解析 worker を畳まない(`doc-lease.js`)
-    await lease.use((pdf) => drawPage(pdf, i, myGen));
+    // 元の PDF のページは元の PDF の貸し出しで、足したページはその PDF の貸し出しで描く
+    const from = i <= total ? null : addedOf(i);
+    if (i > total && from === null) return;
+    if (from === null) await lease.use((pdf) => drawPage(pdf, i, i, myGen, null));
+    else await from.lease.use((pdf) => drawPage(pdf, i - from.first + 1, i, myGen, from));
   } catch (e) {
     // 内蔵の表示へ退避した後に落ちた依頼(貸し出しが reject した)は、黙って捨てる
     if (!ready) return;
     // 読めていた文書を、アイドルの後に開き直せなかった ── 頁が空のまま残るより、内蔵の表示で読める形にする
-    if (e && e.openFailed) {
+    if (e && e.openFailed && i <= total) {
       fallBack();
       return;
     }
@@ -348,9 +365,11 @@ async function renderPage(i) {
   }
 }
 
-async function drawPage(pdf, i, myGen) {
-  const page = await pdf.getPage(i);
-  if (myGen !== gen) return;
+/** @param local その PDF の中のページ番号 @param i 通し番号(箱・絵の置き場の鍵) */
+async function drawPage(pdf, local, i, myGen, owner) {
+  const page = await pdf.getPage(local);
+  // 描いている間に、その PDF が外された(通し番号は別の PDF に使い回される)── 置かない
+  if (myGen !== gen || addedOf(i) !== owner) return;
   const vp = page.getViewport({ scale });
   sizes[i] = { w: vp.width / scale, h: vp.height / scale };
   sizeBox(i);
@@ -369,14 +388,14 @@ async function drawPage(pdf, i, myGen) {
     transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0],
   }).promise;
   // 元の PDF に付いているハイライト(外すために押せる印を重ねる材料)。絵には焼き込まれている
-  const annots = await loadHighlights(page);
+  const annots = i > total ? [] : await loadHighlights(page);
   const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
   canvas.width = 0;
   canvas.height = 0;
   if (png === null) return;
   const url = URL.createObjectURL(png);
-  if (myGen !== gen || !wanted.has(i)) {
+  if (myGen !== gen || !wanted.has(i) || !boxes[i] || addedOf(i) !== owner) {
     URL.revokeObjectURL(url);
     page.cleanup();
     return;
@@ -387,9 +406,14 @@ async function drawPage(pdf, i, myGen) {
   box.style.setProperty('--total-scale-factor', String(scale));
   const img = document.createElement('img');
   img.setAttribute('data-pkc-field', 'pdf-page-image');
-  img.alt = `${String(i)} ページ`;
+  img.alt = pageName(i);
   img.src = url;
   box.append(img);
+  // 足したページは絵として読むだけ(文字の選び・検索・ハイライトは元の PDF の分だけ)
+  if (i > total) {
+    page.cleanup();
+    return;
+  }
   pageVp[i] = vp;
   existing[i] = annots;
   paintMarks(i);
@@ -506,6 +530,16 @@ function makeThumbCell(i) {
   no.className = 'thumb-no';
   no.textContent = String(i);
   item.append(holder, no);
+  // 足したページは、どの PDF から来たかを絵の下に小さく言う(元のページは何も足さない)
+  const from = i > total ? addedOf(i) : null;
+  if (from !== null) {
+    const src = document.createElement('span');
+    src.className = 'thumb-src';
+    src.setAttribute('data-pkc-field', 'pdf-page-source');
+    src.textContent = from.name;
+    src.title = from.name;
+    item.append(src);
+  }
   // ↻(右へ 90° 回す)と ×(このページを外す)。Tab の止まり先にしない(キーは項目で R / Delete)
   const turn = document.createElement('button');
   turn.type = 'button';
@@ -632,10 +666,17 @@ async function drainThumbs() {
       const i = items[at - 1].page;
       // 元の PDF のページは元の PDF の貸し出しで、足したページはその PDF の貸し出しで描く
       const from = i <= total ? null : addedOf(i);
+      if (i > total && from === null) {
+        // 外した PDF のページ(貸し出しは返してある)── 描かない
+        thumbFailed.add(i);
+        continue;
+      }
       try {
-        if (from === null) await lease.use((pdf) => drawThumb(pdf, i, i));
-        else await from.lease.use((pdf) => drawThumb(pdf, i - from.first + 1, i));
+        if (from === null) await lease.use((pdf) => drawThumb(pdf, i, i, null));
+        else await from.lease.use((pdf) => drawThumb(pdf, i - from.first + 1, i, from));
       } catch (e) {
+        // 描いている間に、その PDF が外された(通し番号は別の PDF に使い回される)── 失敗に数えない
+        if (i > total && addedOf(i) !== from) continue;
         thumbFailed.add(i);
         if (!ready) break;
         // 元の PDF を開き直せないときだけ内蔵の表示へ。足した PDF が開けないのは、その PDF のページの絵が出ないだけ
@@ -652,11 +693,11 @@ async function drainThumbs() {
   }
 }
 
-/** @param local その PDF の中のページ番号 @param i 通し番号(一覧の状態の鍵) */
-async function drawThumb(pdf, local, i) {
+/** @param local その PDF の中のページ番号 @param i 通し番号(一覧の状態の鍵) @param owner 描く PDF(元の PDF = null) */
+async function drawThumb(pdf, local, i, owner) {
   const page = await pdf.getPage(local);
   try {
-    if (!listOn || !thumbWantedSet.has(i)) return;
+    if (!listOn || !thumbWantedSet.has(i) || addedOf(i) !== owner) return;
     // 🔑 回してあるページは、その向きで描く(一覧の絵が、保存で作る PDF の向きと同じになる)
     const turn = thumbRot[i];
     const native = page.getViewport({ scale: 1 });
@@ -678,7 +719,7 @@ async function drawThumb(pdf, local, i) {
     if (png === null) throw new Error('thumb toBlob failed');
     const url = URL.createObjectURL(png);
     // 描いている間に回された絵は置かない(古い向き)── 次の周回で描き直される
-    if (!listOn || !thumbWantedSet.has(i) || thumbRot[i] !== turn) {
+    if (!listOn || !thumbWantedSet.has(i) || thumbRot[i] !== turn || addedOf(i) !== owner) {
       URL.revokeObjectURL(url);
       return;
     }
@@ -705,7 +746,7 @@ function setTabStop(n) {
 
 /** いまの頁の項目を光らせる(`aria-current`。見た目は host.html の `.thumb[aria-current]`)。 */
 function markCurrent(n) {
-  const ch = currentChange(marked, n, total);
+  const ch = currentChange(marked, n, grand);
   if (ch === null) return;
   if (ch.off !== null) thumbItems[ch.off].removeAttribute('aria-current');
   thumbItems[ch.on].setAttribute('aria-current', 'true');
@@ -809,6 +850,11 @@ listEl.addEventListener('click', (ev) => {
   if (ev.detail === 0 && Date.now() - keyPickedAt < 500) return;
   const t = ev.target instanceof Element ? ev.target : null;
   if (t === null) return;
+  const rm = t.closest('[data-pkc-field="pdf-source-remove"]');
+  if (rm !== null) {
+    removeSourceOf(addedByFirst(Number(rm.getAttribute('data-source-first'))));
+    return;
+  }
   const act = t.closest('.thumb-act');
   if (act !== null) {
     const which = Number(act.getAttribute('data-thumb-page'));
@@ -831,11 +877,6 @@ listEl.addEventListener('click', (ev) => {
   }
   if (ev.shiftKey) {
     void pickRange(selAnchor >= 1 && posByPage[selAnchor] > 0 ? selAnchor : n, n, false);
-    return;
-  }
-  if (n > total) {
-    // 足したページは一覧にだけ在る(読む面は元の PDF のまま)── 何も起きないように見えないよう、1 行言う
-    setStatus('足したページは、保存すると読めます。一覧で並べ替え・回す・外すができます');
     return;
   }
   goPage(n);
@@ -1045,9 +1086,14 @@ function applyItems(focusPage) {
   // 外したページは選びから落ちる(外した後に「選んだページ」へ入っていると、user が思っていない物を抜き出す)
   selected = pageEdit.pruneSel(selected, items);
   const frag = document.createDocumentFragment();
+  // 足した PDF の見出し: 前の置き場から外し、いまの並びで先に出るページの前へ置き直す
+  for (const a of added) if (a.headEl) a.headEl.remove();
+  const headAt = new Map(pageEdit.sourceHeadings(items, added).map((h) => [h.page, h.k]));
   items.forEach((it, k) => {
     const p = it.page;
     thumbCells[p].hidden = false;
+    const head = headAt.get(p);
+    if (head !== undefined) frag.append(headingOf(added[head]));
     frag.append(thumbCells[p]);
     thumbNos[p].textContent = String(k + 1);
     paintSelected(p);
@@ -1179,7 +1225,140 @@ function disposeAdded() {
   for (const a of added) a.lease.dispose();
 }
 
+/** 一覧の見出しの `data-source-first`(通し番号の先頭)から、足した PDF を引く。 */
+function addedByFirst(first) {
+  return added.find((a) => a.first === first) || null;
+}
+
+/**
+ * 足した PDF の見出し(一覧の、その PDF の最初のページの前)。「会議B.pdf(3 ページ)」と、× = この PDF のページをすべて外す。
+ * 作るのは 1 回だけ ── 置き場所は `applyItems` が毎回決める(並べ替えた後は、いまの並びで先に出るページの前)。
+ */
+function headingOf(a) {
+  if (a.headEl) return a.headEl;
+  const el = document.createElement('div');
+  el.className = 'src-head';
+  el.setAttribute('data-pkc-field', 'pdf-source-heading');
+  el.setAttribute('data-source-first', String(a.first));
+  const label = document.createElement('span');
+  label.className = 'src-head-label';
+  label.textContent = pageEdit.headingText(a.name, a.count);
+  label.title = a.name;
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'src-head-drop';
+  x.setAttribute('data-pkc-field', 'pdf-source-remove');
+  x.setAttribute('data-source-first', String(a.first));
+  x.setAttribute('aria-label', `「${a.name}」のページをすべて外す`);
+  x.title = 'この PDF のページをすべて外す';
+  x.textContent = '×';
+  el.append(label, x);
+  a.headEl = el;
+  return el;
+}
+
+/**
+ * 保存前に足した PDF を捨てた扱いにする(貸し出しを返し、`added` から外し、中央の箱と一覧の項目を片づける)。
+ * 🔑 **末尾の PDF なら通し番号を取り戻す**(箱も項目も作り直さず消す ── 足し直したページが「4 ページ目」から始まる)。
+ *    途中の PDF は番号を飛ばしたまま畳む(後ろの PDF の番号を振り直さない)── 案内の分母から引く。
+ */
+function dropAddedView(a) {
+  a.dropped = true;
+  a.lease.dispose();
+  const k = added.indexOf(a);
+  if (k >= 0) added.splice(k, 1);
+  if (a.headEl) a.headEl.remove();
+  const end = a.first + a.count - 1;
+  for (let i = a.first; i <= end; i += 1) {
+    clearBox(i);
+    cache.drop(i);
+    thumbCache.drop(i);
+    clearThumb(i);
+    thumbVisible.delete(i);
+    thumbFailed.delete(i);
+  }
+  if (end !== grand) {
+    droppedPages += a.count;
+    for (let i = a.first; i <= end; i += 1) boxes[i].hidden = true;
+    return;
+  }
+  for (let i = a.first; i <= end; i += 1) {
+    if (thumbObserver !== null) thumbObserver.unobserve(thumbItems[i]);
+    boxes[i].remove();
+    thumbCells[i].remove();
+  }
+  for (const arr of [thumbItems, thumbHolders, thumbCells, thumbNos, thumbRot, pageRatio, boxes, posByPage, layers, pageVp, existing, sizes]) {
+    if (arr.length > a.first) arr.length = a.first;
+  }
+  grand = a.first - 1;
+  // 消した項目を指していた印を外す(次の描画で選び直される)
+  if (tabStop > grand) tabStop = 0;
+  if (marked > grand) marked = 0;
+  if (selAnchor > grand) selAnchor = 0;
+  if (current > grand) current = grand;
+  $('pagecount').textContent = `/ ${String(grand)}`;
+}
+
+/**
+ * 足した PDF のページを**全部**外す(別の場所へ動かしたページも)。保存していない PDF は足したこと自体を取り消す
+ * (`added` からも外す ── bytes は送らない)。保存した PDF のページを外したときは、ふつうの「外す」と同じ(元に戻せる)。
+ */
+function removeSourceOf(a) {
+  if (a === null || !ready || saving) return;
+  const k = added.indexOf(a);
+  if (k < 0) return;
+  const r = pageEdit.removeSource(items, added, k);
+  items = r.items;
+  const saved = baseline.some((it) => it.page >= a.first && it.page < a.first + a.count);
+  if (!saved) dropAddedView(a);
+  applyItems();
+  refresh();
+  setStatus(`「${a.name}」のページをすべて外しました`);
+}
+
+// ───────── 足し方を選ぶ(「添付から選ぶ…」/「パソコンのファイルを選ぶ…」)
+
+function hideAppendMenu() {
+  appendMenu.hidden = true;
+  appendPick.hidden = true;
+  appendPick.textContent = '';
+  appendBtn.setAttribute('aria-expanded', 'false');
+  clearTimer(attachTimer);
+  attachTimer = null;
+}
+
+function showAppendMenu() {
+  const r = appendBtn.getBoundingClientRect();
+  // 押したボタンの右端にそろえる(ボタンは帯の右寄りに在る ── 左端にそろえると、一覧が出たとき窓の外へはみ出す)
+  appendMenu.style.right = `${String(Math.max(4, Math.floor(document.documentElement.clientWidth - r.right)))}px`;
+  appendMenu.style.top = `${String(Math.floor(r.bottom + 4))}px`;
+  appendPick.hidden = true;
+  appendPick.textContent = '';
+  appendMenu.hidden = false;
+  appendBtn.setAttribute('aria-expanded', 'true');
+}
+
 appendBtn.addEventListener('click', () => {
+  if (!ready || saving) return;
+  if (appendMenu.hidden) showAppendMenu();
+  else hideAppendMenu();
+});
+// 外を押したら閉じる(メニューの中と「PDF を足す」自身は除く)/ Esc でも閉じる
+document.addEventListener('pointerdown', (ev) => {
+  if (appendMenu.hidden) return;
+  const t = ev.target instanceof Node ? ev.target : null;
+  if (t !== null && (appendMenu.contains(t) || appendBtn.contains(t))) return;
+  hideAppendMenu();
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !appendMenu.hidden) {
+    hideAppendMenu();
+    appendBtn.focus();
+  }
+});
+
+appendFromFile.addEventListener('click', () => {
+  hideAppendMenu();
   if (!ready || saving) return;
   appendFile.value = '';
   appendFile.click();
@@ -1189,6 +1368,94 @@ appendFile.addEventListener('change', () => {
   appendFile.value = '';
   if (file) void appendPdf(file);
 });
+
+/** 本体の返事を待つ時計(`wire.ATTACH_TIMEOUT_MS`)と、いま借りようとしている添付の鍵。 */
+let attachTimer = null;
+let attachWanted = null;
+
+appendFromNote.addEventListener('click', () => {
+  if (!ready || saving) return;
+  appendPick.hidden = false;
+  appendPick.textContent = '';
+  const wait = document.createElement('div');
+  wait.className = 'append-note';
+  wait.textContent = '添付の PDF を探しています…';
+  appendPick.append(wait);
+  clearTimer(attachTimer);
+  attachTimer = setTimeout(() => {
+    attachTimer = null;
+    appendPick.textContent = '';
+    const msg = document.createElement('div');
+    msg.className = 'append-note';
+    msg.textContent = pageEdit.attachRefusal('no-reply');
+    appendPick.append(msg);
+  }, wire.ATTACH_TIMEOUT_MS);
+  send('attach-list', {});
+});
+
+/** 本体が教えてくれた、この collection の PDF の添付の一覧を、メニューの下に並べる。 */
+function onAttachList(payload) {
+  if (appendMenu.hidden || appendPick.hidden) return;
+  clearTimer(attachTimer);
+  attachTimer = null;
+  appendPick.textContent = '';
+  const list = Array.isArray(payload.items) ? payload.items : [];
+  if (payload.ok !== true || list.length === 0) {
+    const msg = document.createElement('div');
+    msg.className = 'append-note';
+    msg.textContent = pageEdit.attachRefusal(payload.ok === true ? 'empty' : 'failed');
+    appendPick.append(msg);
+    return;
+  }
+  for (const it of list) {
+    if (typeof it.key !== 'string' || typeof it.name !== 'string') continue;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'append-item';
+    b.setAttribute('data-pkc-field', 'pdf-append-attachment');
+    b.setAttribute('data-attach-key', it.key);
+    b.textContent = pageEdit.attachLabel(it.name, typeof it.size === 'number' ? it.size : null);
+    b.title = it.name;
+    b.addEventListener('click', () => {
+      if (!ready || saving) return;
+      attachWanted = { key: it.key, name: it.name };
+      hideAppendMenu();
+      setStatus(`「${it.name}」を読み込んでいます…`);
+      clearTimer(attachTimer);
+      attachTimer = setTimeout(() => {
+        attachTimer = null;
+        attachWanted = null;
+        setStatus(pageEdit.attachRefusal('no-reply'));
+      }, wire.ATTACH_TIMEOUT_MS);
+      send('attach-get', { key: it.key });
+    });
+    appendPick.append(b);
+  }
+}
+
+/** 選んだ添付の bytes を借りられた(貸された URL から取る)── あとは「パソコンのファイル」と同じ道で足す。 */
+async function onAttachGet(payload) {
+  const want = attachWanted;
+  if (want === null || payload.key !== want.key) return;
+  attachWanted = null;
+  clearTimer(attachTimer);
+  attachTimer = null;
+  if (payload.ok !== true || typeof payload.url !== 'string') {
+    setStatus(pageEdit.attachRefusal('failed'));
+    return;
+  }
+  let file = null;
+  try {
+    const res = await fetch(payload.url);
+    if (!res.ok) throw new Error(`status ${String(res.status)}`);
+    file = new File([await res.blob()], want.name, { type: 'application/pdf' });
+  } catch {
+    setStatus(pageEdit.attachRefusal('failed'));
+  }
+  // 🔑 Blob を握った(または取れなかった)── 本体は貸した URL をここで返す
+  send('attach-got', { key: want.key });
+  if (file !== null) await appendPdf(file);
+}
 
 /** 選んだ PDF の読めるかを確かめて、ページを一覧の最後に足す。読めなければ何も変えない。 */
 async function appendPdf(file) {
@@ -1215,8 +1482,12 @@ async function appendPdf(file) {
   grand += count;
   for (let i = entry.first; i < entry.first + count; i += 1) {
     makeThumbCell(i);
+    // 中央の読む面にも並べる(元の PDF の後ろに続けて読める)
+    makeBox(i);
+    sizeBox(i);
     if (thumbObserver !== null) thumbObserver.observe(thumbItems[i]);
   }
+  $('pagecount').textContent = `/ ${String(grand)}`;
   items = pageEdit.appendPages(items, entry.first, count);
   // 足したページが見えるように、一覧を出して末尾へ寄せる
   if (!listOn) setList(true, true);
@@ -1290,10 +1561,9 @@ resetBtn.addEventListener('click', () => {
   if (!ready || saving) return;
   items = baseline.slice();
   // 保存前に足した PDF は捨てた扱い(基準に 1 枚も無い物だけ)── 一覧からは消え、案内の分母にも数えない
-  for (const a of added) {
-    if (a.dropped || baseline.some((it) => it.page >= a.first && it.page < a.first + a.count)) continue;
-    a.dropped = true;
-    droppedPages += a.count;
+  for (const a of [...added].reverse()) {
+    if (baseline.some((it) => it.page >= a.first && it.page < a.first + a.count)) continue;
+    dropAddedView(a);
   }
   marks = hlBase.marks.slice();
   removals = new Map(hlBase.removals);
@@ -1554,9 +1824,9 @@ function applyScale(next) {
   scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, next));
   gen += 1;
   cache.clear();
-  for (let i = 1; i <= total; i += 1) clearBox(i);
+  for (let i = 1; i <= grand; i += 1) clearBox(i);
   resizeAll();
-  boxes[anchor].scrollIntoView({ block: 'start' });
+  if (!boxes[anchor].hidden) boxes[anchor].scrollIntoView({ block: 'start' });
   refresh();
 }
 
@@ -1572,7 +1842,8 @@ function zoomBy(factor) {
 
 function goPage(n) {
   if (total < 1 || !Number.isFinite(n)) return;
-  const p = Math.max(1, Math.min(total, Math.floor(n)));
+  const p = Math.max(1, Math.min(grand, Math.floor(n)));
+  if (boxes[p].hidden) return;
   boxes[p].scrollIntoView({ block: 'start' });
   refresh();
 }

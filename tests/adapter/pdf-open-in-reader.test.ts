@@ -25,6 +25,8 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
     onOpenFailed: () => undefined,
     onLateHello: () => undefined,
     onEdited: () => Promise.resolve({ ok: true, message: "" }),
+    listAttachments: () => Promise.resolve([]),
+    lendAttachment: () => Promise.resolve(null),
     makeChannel: () => ({
       postMessage: (d) => posted.push(d),
       close: () => undefined,

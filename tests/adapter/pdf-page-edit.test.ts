@@ -37,6 +37,15 @@ interface Api {
   sourcesFor(list: Item[], added: { first: number; count: number }[]): { sources: { first: number; count: number }[]; used: number[] };
   appendRefusal(code: unknown): string;
   appendedNote(name: string, count: number): string;
+  removeSource(
+    items: Item[],
+    added: { first: number; count: number }[],
+    k: number,
+  ): { items: Item[]; added: { first: number; count: number }[] };
+  sourceHeadings(items: Item[], added: { first: number; count: number }[]): { page: number; k: number }[];
+  headingText(name: string, count: number): string;
+  attachRefusal(code: string): string;
+  attachLabel(name: string, size: number | null): string;
 }
 
 function load(): Api {
@@ -321,6 +330,74 @@ describe('別の PDF を足す(#275 結合)── 通し番号で元のページ
     // 1 枚でも残っていれば使う / 元のページだけなら何も使わない
     expect(api.sourcesFor(api.fresh(3).concat([{ page: 5, rot: 0 }]), added).used).toEqual([0]);
     expect(api.sourcesFor(api.fresh(3), added)).toEqual({ sources: [], used: [] });
+  });
+
+  it('removeSource: 足した PDF のページを全部外す(別の場所へ動かしたページも)/ added からも落とす / 範囲外は何もしない', () => {
+    const added = [
+      { first: 4, count: 2 },
+      { first: 6, count: 3 },
+    ];
+    // 1 つ目の PDF のページ(4)を元のページの間へ動かしておく
+    const moved = api.moveTo(api.appendPages(api.fresh(3), 4, 5), 3, 1);
+    expect(pages(moved)).toEqual([1, 4, 2, 3, 5, 6, 7, 8]);
+    const r = api.removeSource(moved, added, 0);
+    expect(pages(r.items)).toEqual([1, 2, 3, 6, 7, 8]);
+    expect(r.added).toEqual([{ first: 6, count: 3 }]);
+    // 元の入力は変えない
+    expect(added).toHaveLength(2);
+    expect(pages(moved)).toEqual([1, 4, 2, 3, 5, 6, 7, 8]);
+    // 回してあるページの向きは、残るページでは保たれる
+    const turned = api.rotateAt(api.appendPages(api.fresh(2), 3, 2), 3);
+    expect(api.removeSource(turned, [{ first: 3, count: 2 }], 0).items).toEqual(api.fresh(2));
+    expect(api.removeSource(moved, added, 1).items.map((i) => i.page)).toEqual([1, 4, 2, 3, 5]);
+    // 範囲の外 ── 同じ内容の写し
+    for (const k of [-1, 2]) {
+      const same = api.removeSource(moved, added, k);
+      expect(same.items).toEqual(moved);
+      expect(same.items).not.toBe(moved);
+      expect(same.added).toEqual(added);
+    }
+    // 外した結果は、送る PDF からも落ちる(bytes を送らない)
+    const kept = api.removeSource(moved, added, 0);
+    expect(api.sourcesFor(kept.items, kept.added).sources).toEqual([{ first: 6, count: 3 }]);
+  });
+
+  it('sourceHeadings: 各 PDF の最初に出るページの前に 1 つ ── 並べ替えたら先に出る側 / 残っていない PDF は出さない', () => {
+    const added = [
+      { first: 4, count: 2 },
+      { first: 6, count: 3 },
+    ];
+    const list = api.appendPages(api.fresh(3), 4, 5);
+    expect(api.sourceHeadings(list, added)).toEqual([
+      { page: 4, k: 0 },
+      { page: 6, k: 1 },
+    ]);
+    // 元のページだけなら見出しは無い
+    expect(api.sourceHeadings(api.fresh(3), added)).toEqual([]);
+    // 2 つ目の PDF の 8 ページ目を先頭へ動かすと、2 つ目の見出しはそこ(いまの並びで先に出る側)
+    const moved = api.moveTo(list, 7, 0);
+    expect(api.sourceHeadings(moved, added)).toEqual([
+      { page: 8, k: 1 },
+      { page: 4, k: 0 },
+    ]);
+    // 1 つ目を全部外せば、1 つ目の見出しは消える
+    const cut = list.filter((it) => it.page < 4 || it.page > 5);
+    expect(api.sourceHeadings(cut, added)).toEqual([{ page: 6, k: 1 }]);
+  });
+
+  it('見出しの字は「名前(N ページ)」/ 添付の一覧の 1 行は大きさを添える', () => {
+    expect(api.headingText('会議B.pdf', 3)).toBe('会議B.pdf(3 ページ)');
+    expect(api.attachLabel('契約.pdf', null)).toBe('契約.pdf');
+    expect(api.attachLabel('a.pdf', 500)).toBe('a.pdf(500 B)');
+    expect(api.attachLabel('a.pdf', 2048)).toBe('a.pdf(2 KB)');
+    expect(api.attachLabel('a.pdf', 1.25 * 1024 * 1024)).toBe('a.pdf(1.3 MB)');
+  });
+
+  it('添付から選ぶの断り: 無い / 取れない / 読めない ── 画面の字に造語を使わず、3 つが別の字', () => {
+    const t = ['empty', 'no-reply', 'failed'].map((c) => api.attachRefusal(c));
+    expect(new Set(t).size).toBe(3);
+    expect(t[0]).toContain('PDF の添付はありません');
+    expect(t[2]).toContain('何も変えていません');
   });
 
   it('断りの字: 暗号化 / 読めない / ほか ── どれも「何も変えていません」と言う', () => {
