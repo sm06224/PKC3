@@ -48,6 +48,8 @@ import { addDays } from '@features/datetime/date-math';
 import { createTaskCard, patchItemColor, patchTaskCard } from './task-card';
 import { currentTagColors } from './tag-color';
 import { noteColorVar } from '@features/schedule/item-color';
+import { leadLabel, SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
+import { appScheduleNotify } from './schedule-notify';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -149,6 +151,12 @@ export class ScheduleRenderer {
     notes: HTMLElement;
     notesList: HTMLElement;
     notesSignature: string;
+    /**
+     * 🔴 **予定の知らせ**(#855 20-C)。「知らせる時間」(`.ics` のアラーム)と「見逃した予定を知らせるか」。
+     * 好みは端末の保存(`schedule-notify.ts`)にあり、ここは映すだけ。
+     */
+    lead: HTMLSelectElement;
+    missed: HTMLInputElement;
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
@@ -228,6 +236,11 @@ export class ScheduleRenderer {
     this.last = next;
 
     const frame = this.ensureFrame();
+    // 🔴 知らせの好みを映す(押された値は binder が保存する ── ここは読み戻すだけ)
+    const leadValue = String(appScheduleNotify.lead());
+    if (frame.lead.value !== leadValue) frame.lead.value = leadValue;
+    const missedOn = appScheduleNotify.missedOn();
+    if (frame.missed.checked !== missedOn) frame.missed.checked = missedOn;
     /**
      * ⚠ **種類の絞りもこの面に効かせる**(#411)── 効かせないと、札を押した
      *   まま予定タブへ移ったときに**そこだけ全部出る**。user からは
@@ -873,6 +886,42 @@ export class ScheduleRenderer {
     exportIcs.title =
       'いま一覧に出している予定を、カレンダー形式(.ics)のファイル 1 つに書き出します。' +
       '「出すもの」で隠している分と、日付のないものは入りません。繰り返しは繰り返しのまま入ります';
+    /**
+     * 🔴 **予定の知らせ**(#855 20-C)。閉じている間は鳴らせないので、①書き出す `.ics` にアラームを入れ(外の予定表が鳴らす)、
+     * ②次に開いたとき見逃した予定を 1 行で言う。⚠ 終日の予定には付けない・数えない(始まる瞬間が無い)。
+     * 器は「出すもの」と同じ `<details>`(中央を奪わない小さな枠)。
+     */
+    const notify = document.createElement('details');
+    notify.setAttribute('data-pkc-field', 'schedule-notify');
+    const notifySummary = document.createElement('summary');
+    notifySummary.textContent = '知らせ';
+    notifySummary.title = '予定を .ics で書き出すときのアラームと、次に開いたときの「見逃した予定」の知らせを決めます';
+    const leadLabelEl = document.createElement('label');
+    leadLabelEl.setAttribute('data-pkc-field', 'schedule-option');
+    leadLabelEl.append('知らせる時間: ');
+    const lead = document.createElement('select');
+    lead.setAttribute('data-pkc-field', 'schedule-lead');
+    lead.setAttribute('data-pkc-action', 'set-schedule-lead');
+    lead.title = '書き出す .ics に入れるアラームです。時刻のある予定だけに付き、終日の予定には付きません';
+    for (const n of SCHEDULE_LEAD_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = leadLabel(n);
+      lead.append(o);
+    }
+    leadLabelEl.append(lead);
+    const missedLabelEl = document.createElement('label');
+    missedLabelEl.setAttribute('data-pkc-field', 'schedule-option');
+    const missed = document.createElement('input');
+    missed.type = 'checkbox';
+    missed.setAttribute('data-pkc-field', 'schedule-missed');
+    missed.setAttribute('data-pkc-action', 'set-schedule-missed');
+    missed.title = '閉じている間に始まった、時刻のある予定の件数を、次に開いたときに 1 行で知らせます(終日の予定は数えません)';
+    missedLabelEl.append(missed, ' 次に開いたとき、見逃した予定を知らせる');
+    const notifyPanel = document.createElement('div');
+    notifyPanel.setAttribute('data-pkc-field', 'schedule-notify-panel');
+    notifyPanel.append(leadLabelEl, missedLabelEl);
+    notify.append(notifySummary, notifyPanel);
     const groups = document.createElement('div');
     groups.setAttribute('data-pkc-region', 'schedule-groups');
     /**
@@ -888,8 +937,8 @@ export class ScheduleRenderer {
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.day.el.hidden = true;
     this.week.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, this.day.el, this.week.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', toggles, groups, modes, quickDate: qDate };
+    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, notify, this.day.el, this.week.el, groups);
+    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

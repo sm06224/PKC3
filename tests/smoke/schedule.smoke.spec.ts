@@ -785,6 +785,33 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(icsText, '予定の題名が入っていない').toContain('SUMMARY:ゴミ出し');
 
   /**
+   * 🔴 **.ics のアラームと「知らせる時間」**(#855 20-C。起動は増やさない ── この道中の続き)。
+   * 既定は 15 分前で、時刻つきの予定に VALARM が入る。「知らせ」を開いて 30分前 / なし を選ぶと、次の書き出しに効く
+   * (選んだ値が保存され、書き出しがそれを読む ── 属性ではなく落ちた file の中身で見る)。
+   */
+  const exportText = async (): Promise<string> => {
+    const dl = page.waitForEvent('download');
+    await exportBtn.click();
+    const parts: Buffer[] = [];
+    for await (const c of (await (await dl).createReadStream()) as AsyncIterable<Buffer>) parts.push(c);
+    return Buffer.concat(parts).toString('utf-8');
+  };
+  expect(icsText, '既定の 15 分前のアラームが入っていない').toContain('BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:ゴミ出し\r\nTRIGGER:-PT15M\r\nEND:VALARM');
+  const notify = pane.locator('[data-pkc-field="schedule-notify"]');
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-notify"] > summary');
+  const leadSel = notify.locator('[data-pkc-field="schedule-lead"]');
+  await expect(leadSel, '「知らせる時間」が開いても見えない').toBeVisible();
+  await expect(leadSel, '既定が 15分前になっていない').toHaveValue('15');
+  await expect(notify.locator('[data-pkc-field="schedule-missed"]'), '見逃した予定の知らせが既定で入になっていない').toBeChecked();
+  await leadSel.selectOption('30');
+  const ics30 = await exportText();
+  expect(ics30, '選んだ 30分前が書き出しに効いていない').toContain('TRIGGER:-PT30M');
+  expect(ics30, '前の値(15分前)が残っている').not.toContain('TRIGGER:-PT15M');
+  await leadSel.selectOption('0');
+  expect(await exportText(), '「なし」でもアラームが入っている').not.toContain('VALARM');
+  await leadSel.selectOption('15');
+
+  /**
    * 🔴 **予定の左の縦線とノートごとの出し入れ**(#855 20-A。起動は増やさない ── この道中の続き)。
    * 属性ではなく**計算後の影**で見る(CSS に受け皿が無いと、付けた印が画面で見分けられない)。
    * ノートの一覧は 2 ノート以上のときだけ出るので、2 つ目のノートを足してから見る。
@@ -817,6 +844,47 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(hiddenLabel, '外した予定の数がボタンに出ていない').toMatch(/^出すもの\(\d+\)$/);
   await fold.locator('[data-pkc-action="toggle-schedule-note"]').first().click();
   await expect(allCards, 'チェックを戻しても予定が戻らない').toHaveCount(before);
+
+  /**
+   * 🔴 **次に開いたとき、見逃した予定を 1 行で言う**(#855 20-C。起動は増やさない ── 同じ context の読み直し)。
+   * 「前に開いていた時刻」を 2 日前に差し替えて読み直す(閉じる合図の `pagehide` が時刻を進めるので、
+   * 読み直した先の文書の頭で差し替える)。昨日の 12:00 の予定が「見逃した」になり、帯に 1 行が出て、
+   * 「予定表を開く」で左の予定のタブへ移り、1 行は畳まれる。終日・済みは数えない(その対照も同じ読み直しで見る)。
+   */
+  const yesterday = key(new Date(at.getFullYear(), at.getMonth(), at.getDate() - 1));
+  await createEntry(page, 'text');
+  await ta.fill(
+    `- [ ] 昨日の会議 @${yesterday} 12:00\n- [x] 済んだ会議 @${yesterday} 13:00\n- [ ] 昨日の終日 @${yesterday}`,
+  );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 保存が済んでから読み直す(読み直しで書きかけを捨てない)
+  await expect(page.locator('[data-pkc-action="start-edit"]'), '保存が済んでいない').toBeVisible();
+  const cid = await page.locator('[data-pkc-container]').first().getAttribute('data-pkc-container');
+  expect(cid, '器の id が読めない').not.toBeNull();
+  const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  await page.addInitScript(
+    ({ cid: c, at: t }) => {
+      // 読み直した文書の頭で 1 回だけ差し替える(app の起動より前)
+      if (sessionStorage.getItem('smoke-missed-seeded') === '1') return;
+      sessionStorage.setItem('smoke-missed-seeded', '1');
+      localStorage.setItem('pkc3.schedule-last-open', JSON.stringify({ [c as string]: t }));
+    },
+    { cid, at: twoDaysAgo },
+  );
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 15_000 });
+  const missedLine = page.locator('[data-pkc-field="missed-line"]');
+  await expect(missedLine, '見逃した予定の 1 行が出ない').toBeVisible({ timeout: 15_000 });
+  // 昨日の 12:00 の 1 件(済み・終日は数えない)。毎週の 09:30 は今日の回が始まっていれば加わる(2 日前以降に他の回は無い)
+  const todayRuleStarted = Date.now() > new Date(at.getFullYear(), at.getMonth(), at.getDate(), 9, 30).getTime();
+  await expect(missedLine.locator('[data-pkc-field="missed-text"]')).toHaveText(
+    `見逃した予定が ${todayRuleStarted ? 2 : 1} 件あります`,
+  );
+  const missedColor = await missedLine.locator('[data-pkc-field="missed-text"]').evaluate((e) => getComputedStyle(e).color);
+  expect(missedColor, '1 行の字が読めない色(地と同じ)').not.toBe('rgba(0, 0, 0, 0)');
+  await clickReal(page, '[data-pkc-action="open-missed-schedule"]');
+  await expect(missedLine, '「予定表を開く」を押しても 1 行が残る').toBeHidden();
+  await expect(page.locator('[data-pkc-browse-pane="schedule"]'), '左の予定のタブが開かない').toBeVisible();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

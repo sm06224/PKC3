@@ -67,6 +67,9 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
   { key: 'pkc3.paste-source', label: '貼り付けの判定' },
   { key: 'pkc3.query-key', label: '集計のグループ化' },
   { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },
+  // ⚠ 予定の知らせの好み 2 つ(#855 20-C)。別の端末でも同じ意味になる(何分前に知らせたいかは人に付く)
+  { key: 'pkc3.schedule-lead', label: '予定表を書き出すときの知らせる時間' },
+  { key: 'pkc3.schedule-missed', label: '次に開いたとき見逃した予定を知らせるか' },
   /**
    * ⚠ **人に付く好み**である(#772 段① B)── 「声を聞き取りやすくしたい」かどうかは
    *   端末の事情ではなく、**聞く人の耳**に付く(`pkc3.alarm` と同じ考え方)。
@@ -159,6 +162,10 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
  *   何のための禁止かを書く」)。
  */
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
+  {
+    key: 'pkc3.schedule-last-open',
+    why: 'この端末でコレクションを最後に開いていた時刻(#855 20-C)。コレクションごとの id で持つ端末の事実なので、運ぶと別の端末の「見逃した」を間違えて数える',
+  },
   {
     key: 'pkc3.split-lids',
     why: '中身が ID そのもの(#505 段②)。別の端末・別のコレクションへ運ぶと、そこにいないノートを指す枠が復活する。並べ方は運べても「どのノートか」は運べない',

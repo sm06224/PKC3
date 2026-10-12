@@ -231,6 +231,11 @@ export function clampUntil(until: string): string | null {
   return until;
 }
 
+/** 開始の何分前か → TRIGGER の値(`-PT15M` / `-PT1H`)。 */
+export function alarmTrigger(minutes: number): string {
+  return minutes % 60 === 0 ? `-PT${minutes / 60}H` : `-PT${minutes}M`;
+}
+
 export interface IcsOptions {
   /** DTSTAMP に使う「いま」。⚠ 呼び側が渡す。 */
   readonly stamp: Date;
@@ -242,6 +247,12 @@ export interface IcsOptions {
    * 渡さないと、済ませた回が外の予定表にもう一度出る。
    */
   readonly skip?: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * 🔴 **何分前に知らせるか**(#855 20-C。`0` / 渡さない = アラームを付けない)。
+   * 付けるのは**時刻つきの予定だけ** ── 終日は「始まる瞬間」が無いので付けない。
+   * ⚠ 閉じている間はアプリが鳴らせないので、外の予定表に鳴らしてもらう。
+   */
+  readonly alarmMinutes?: number;
 }
 
 export interface IcsResult {
@@ -269,6 +280,7 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
   let skipped = 0;
   let usesTokyo = false;
   const stamp = utcStamp(opts.stamp);
+  const alarmMinutes = opts.alarmMinutes ?? 0;
   const offsetAt = (date: string, time: string): number =>
     zone.kind === 'tokyo' ? TOKYO_OFFSET : zone.offsetMinutes(date, time);
 
@@ -355,9 +367,20 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
       }
     }
 
-    ev.push(`SUMMARY:${escapeText(it.text.trim() === '' ? '(題名なし)' : it.text)}`);
+    const summary = it.text.trim() === '' ? '(題名なし)' : it.text;
+    ev.push(`SUMMARY:${escapeText(summary)}`);
     const title = it.line === null ? undefined : opts.noteTitle?.(it.lid);
     if (title !== undefined && title !== '') ev.push(`DESCRIPTION:${escapeText(`ノート: ${title}`)}`);
+    // 🔴 アラーム(RFC 5545 §3.6.6)。⚠ 時刻つきだけ。DISPLAY は DESCRIPTION が必須
+    if (timed && alarmMinutes > 0) {
+      ev.push(
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${escapeText(summary)}`,
+        `TRIGGER:${alarmTrigger(alarmMinutes)}`,
+        'END:VALARM',
+      );
+    }
     ev.push('END:VEVENT');
     lines.push(...ev);
     count += 1;

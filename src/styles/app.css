@@ -7974,6 +7974,15 @@ mark[data-pkc-diff-char='del'] {
   list-style: none;
   flex-wrap: wrap;
 }
+/* 🔴 見逃した予定の 1 行(#855 20-C)。鳴っている予定の帯の中に置く。字は静かに(濃くしない) */
+[data-pkc-field='missed-line'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+[data-pkc-field='missed-line'][hidden] {
+  display: none;
+}
 /* ⚠ 項目の形は timer と同じ規則にまとめた(上)── 2 か所に書かない(§7)。 */
 [data-pkc-field='alarm-label'] {
   color: var(--fg);
