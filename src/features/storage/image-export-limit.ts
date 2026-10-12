@@ -87,12 +87,13 @@ export function looksOutOfMemory(err: unknown): boolean {
  * |---|---|---|
  * | **取り込み**(`features/import/portable-html.ts`) | **HTML ファイル全体**(`File.text()`) | 🔴 効く(DB 画像を割っても、ファイル全体は 1 本) |
  * | **開く**(`portable-boot.ts`)の DB 画像 | 3MiB ごとの要素 1 つ | 効かない(割ってある。割る前の版が焼いた 1 本物は効く) |
- * | **開く**(`portable-assets.ts`)の添付 | 添付 1 件の `textContent` | 🔴 効く(割っていない) |
+ * | **開く**(`portable-assets.ts`)の添付 | 3MiB ごとの要素 1 つ | 効かない(割ってある。#1416 §7-4d。割る前の版が焼いた 1 本物は効く) |
  *
  * ⚠ だから**ここの門は残している**(安全側)。ただし理由は「開けない」だけではない ──
  *   DB 画像は**開く**ことはできても、**取り込み直せない** 1 枚になりうる。
  *   門の数は DB 画像の bytes を base64 にした字数で見ており、ファイル全体(アプリ本体 約 12MB と
  *   添付を足した字数)ではないので、**ファイル全体の上限そのものではない**(近似)。
+ *   添付は断らない。合計(雛形 + DB 画像 + 添付)が超えたら全部焼いて 1 度だけ警告する(`notImportableBackMessage`)。
  *
  * ## 実測(2026-09-16、この箱の V8)
  *
@@ -145,7 +146,7 @@ export function tooBigToReadBack(bytes: number): boolean {
  *   こちらは「**焼けるが開けない**」であり、**user にとって別の出来事**である
  *   (あちらは何も起きていない / こちらは放っておくと**壊れたバックアップが残る**)。
  *
- * @param what 何が大きすぎたか(「いまの中身」「添付」など、user の言葉で)
+ * @param what 何が大きすぎたか(「いまの中身」など、user の言葉で)
  */
 export function tooBigToReadBackMessage(what: string, bytes: number): string {
   return (
@@ -155,5 +156,22 @@ export function tooBigToReadBackMessage(what: string, bytes: number): string {
     'このまま作ると、ファイルはできても、開けない・取り込み直せないことがあります。' +
     '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
+  );
+}
+
+/**
+ * 焼いた **ファイル全体**が、取り込み直すときに読める上限を超えたときの字(#1416 §7-4d)。
+ *
+ * ⚠ 添付は割って焼くので、**開く**ことは大きさで詰まらない ── 中身は 1 つも落としていない。
+ *   詰まるのは取り込み直し(`File.text()` が 1 本の文字列にする)だけなので、**開けることを先に言う**。
+ * ⚠ `tooBigToReadBackMessage` と混ぜない(あちらは「焼かなかった」、こちらは「全部焼いた」)。
+ * @param chars 焼いたファイルのおよその字数(≒ bytes)
+ */
+export function notImportableBackMessage(chars: number): string {
+  return (
+    `この PKC3 入り HTML(約 ${humanBytes(chars)})は開けますが、PKC3 に取り込み直せないことがあります` +
+    `(取り込み直すときに読める上限は、ファイル全体で約 ${humanBytes(MAX_EMBED_TEXT_CHARS)}です)。` +
+    'データを移すときは、左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
+    'こちらは大きさで止まりません。'
   );
 }

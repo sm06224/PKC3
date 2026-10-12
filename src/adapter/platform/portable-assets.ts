@@ -5,7 +5,7 @@
  * (設計 doc §4.2 ── bytes を sqlite の wasm メモリに通さないための分離)。
  * だから可搬バンドルは bytes も焼き、起動時にここで器へ戻す。
  *
- * ## ⚠ 1 件ずつ流す
+ * ## ⚠ 1 件ずつ流す(1 件が大きいときは要素ごとにも)
  *
  * 全部いっぺんに復号すると、**添付の総量ぶんが同時に heap に載る**。
  * 🔑 1 件ごとに「復号 → 器へ put → **その `<script>` を DOM から外す**」まで
@@ -16,6 +16,8 @@
  * 器に既に在る key は飛ばす(節点だけ外す)── 再読込のたびに全添付を
  * 書き直すと、起動が添付の量に比例して遅くなる。
  */
+
+import { decodeImageParts, groupAssetParts } from '@features/portable/bundle';
 
 export const ASSET_SELECTOR = 'script[data-pkc-asset]';
 
@@ -30,14 +32,6 @@ export interface RestoreAssetsResult {
   readonly skipped: number;
   /** 読めなかった数。⚠ **黙って 0 に畳まない**(呼び側が user へ出す)。 */
   readonly failed: number;
-}
-
-function decodeBase64(text: string): ArrayBuffer {
-  const bin = atob(text);
-  const buf = new ArrayBuffer(bin.length);
-  const out = new Uint8Array(buf);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return buf;
 }
 
 export async function restoreEmbeddedAssets(
@@ -62,29 +56,65 @@ export async function restoreEmbeddedAssets(
   let restored = 0;
   let skipped = 0;
   let failed = 0;
-  for (const el of nodes) {
-    const key = el.getAttribute('data-pkc-asset') ?? '';
-    const mime = el.getAttribute('data-pkc-asset-mime') || 'application/octet-stream';
-    const text = (el.textContent ?? '').trim();
-    // 🔑 **先に外す** ── 以下のどこで落ちても、base64 の文字列は残さない
-    el.remove();
+  /**
+   * 🔴 **添付は 3MiB ごとの要素に割って焼いてある**(#1416 §7-4d。割る前の版の 1 要素 = 1 件も読める)。
+   * 文書の順に**塊**(同じ key の続き)にして、1 件ずつ「復号 → 器へ put → 要素を外す」。
+   * 揃っているか(欠け・重複・順の乱れ)は、中身を読む前に印だけで見る ── 揃っていなければその 1 件だけ `failed`。
+   */
+  const items = nodes.map((el) => ({
+    key: el.getAttribute('data-pkc-asset') ?? '',
+    mark: el.getAttribute('data-pkc-asset-part') ?? '',
+  }));
+  for (const run of groupAssetParts(items)) {
+    const els = nodes.slice(run.start, run.start + run.count);
+    const key = items[run.start]!.key;
+    const mime = els[0]!.getAttribute('data-pkc-asset-mime') || 'application/octet-stream';
+    // 🔑 要素を外す口は 1 つ ── 以下のどこで落ちても、base64 の文字列は残さない
+    const drop = (): void => {
+      for (const el of els) {
+        el.textContent = '';
+        el.remove();
+      }
+    };
     if (key === '') {
+      drop();
       failed++;
       continue;
     }
+    /**
+     * 🔴 **器に在る key は、揃っているかを見る前に飛ばす** ── 器の中身が正で、この HTML の添付は使わない。
+     * 途切れた写しを開き直すたびに「読み込めませんでした」を出すと、もう直っているものを user に心配させる。
+     */
     if (have.has(key)) {
+      drop();
       skipped++;
       continue;
     }
-    if (text === '') {
+    if (run.broken !== null) {
+      drop();
       failed++;
       continue;
     }
     try {
-      await sink.put(cid, key, new Blob([decodeBase64(text)], { type: mime }));
+      // 読んだ要素は**その場で**外す(復号は 1 本へ直に書く。`decodeImageParts` は貯めない)
+      const bytes = decodeImageParts(
+        els.map((el) => () => {
+          const t = el.textContent ?? '';
+          el.textContent = '';
+          el.remove();
+          return t;
+        }),
+      );
+      if (bytes === null) {
+        failed++; // 空の添付は戻さない(割る前の版と同じ)
+        continue;
+      }
+      await sink.put(cid, key, new Blob([bytes as unknown as BlobPart], { type: mime }));
       restored++;
     } catch {
       failed++;
+    } finally {
+      drop();
     }
   }
   return { restored, skipped, failed };

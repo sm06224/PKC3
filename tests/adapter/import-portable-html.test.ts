@@ -580,4 +580,94 @@ describe('大きい要素の base64 を小分けに復号する', () => {
     expect(same(got.image, image), '画像が違う').toBe(true);
     expect(same(new Uint8Array(await got.assets.get('ast-big')!.arrayBuffer()), asset), '添付が違う').toBe(true);
   });
+
+  describe('🔴 割って焼いた添付 (#1416 §7-4d)', () => {
+    const asset3 = (html: string): RegExpMatchArray[] => [
+      ...html.matchAll(/(<script [^>]*data-pkc-asset="ast-big"[^>]*>)([^<]*)(<\/script>)/g),
+    ];
+
+    it('3 要素(最後に端数)の添付が 1 バイトも違わず戻る', async () => {
+      const asset = rand(IMAGE_PART_BYTES * 2 + 13);
+      const html = await bake(rand(10), asset);
+      expect(asset3(html), '前提: 3 要素に割れている').toHaveLength(3);
+      const back = new Uint8Array(await readPortableHtml(html).assets.get('ast-big')!.arrayBuffer());
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
+    it('ちょうど 2 × IMAGE_PART_BYTES の添付(端数なし。最後の要素に = が出ない)が 1 バイトも違わず戻る', async () => {
+      const asset = rand(IMAGE_PART_BYTES * 2);
+      const html = await bake(rand(10), asset);
+      expect(asset3(html), '前提: 2 要素に割れている').toHaveLength(2);
+      const back = new Uint8Array(await readPortableHtml(html).assets.get('ast-big')!.arrayBuffer());
+      expect(back.length).toBe(asset.length);
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
+    it('欠け・順の乱れ・途中の短い要素は、短い添付として読まず断る(key を名指し)', async () => {
+      const html = await bake(rand(10), rand(IMAGE_PART_BYTES * 2 + 13));
+      const els = asset3(html);
+      const missing = html.replace(els[1]![0], '');
+      expect(missing.length, '前提: 取り除けている').toBeLessThan(html.length);
+      expect(() => readPortableHtml(missing)).toThrow(/添付「ast-big」.*番号が合いません/);
+      const swapped = html.replace(els[0]![0], '@@A@@').replace(els[1]![0], els[0]![0]).replace('@@A@@', els[1]![0]);
+      expect(swapped, '前提: 入れ替わっている').not.toBe(html);
+      expect(() => readPortableHtml(swapped)).toThrow(/添付「ast-big」.*番号が合いません/);
+      const body = els[1]![2]!;
+      const cut = html.replace(els[1]![0], els[1]![1] + body.slice(0, body.length - 4) + els[1]![3]);
+      expect(cut.length, '前提: 縮んでいる').toBeLessThan(html.length);
+      expect(() => readPortableHtml(cut)).toThrow(/添付「ast-big」の中身の 2 個目が途中で欠けています/);
+    });
+
+    it('割った添付の一部が base64 でなくなったら、後ろの添付ごと黙って落とさず言う', async () => {
+      const html = await bake(rand(10), rand(IMAGE_PART_BYTES + 13));
+      const el = asset3(html)[1]!;
+      const broken = html.replace(el[0], el[1] + el[2]!.slice(0, 8) + '!!!!' + el[2]!.slice(8) + el[3]);
+      expect(broken, '前提: 書き換わっている').not.toBe(html);
+      expect(() => readPortableHtml(broken)).toThrow(/添付「ast-big」の一部が読み取れません.*2 個目/);
+    });
+
+    it('割る前の版が焼いた 1 本物(印なしの大きい 1 要素)も、今も読める', async () => {
+      const asset = rand(IMAGE_PART_BYTES * 2 + 13);
+      const html = await bake(rand(10), asset);
+      const els = asset3(html);
+      // 3 要素の中身を 1 本に繋ぐ(途中の要素に = は出ないので、繋いでも正しい base64)
+      const legacyOpen = els[0]![1]!.replace(/ data-pkc-asset-part="[^"]*"/, '');
+      expect(legacyOpen, '前提: 印が外れている').not.toContain('data-pkc-asset-part');
+      let legacy = html;
+      els.forEach((e, i) => {
+        legacy = legacy.replace(e[0], i === 0 ? legacyOpen + els.map((x) => x[2]).join('') + e[3] : '');
+      });
+      expect(asset3(legacy), '前提: 1 要素になっている').toHaveLength(1);
+      const back = new Uint8Array(await readPortableHtml(legacy).assets.get('ast-big')!.arrayBuffer());
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
+    it('同じ key が 2 度入っていたら、文書の後ろのものが残る(割る前の版と同じ)', async () => {
+      const first = rand(IMAGE_PART_BYTES + 3);
+      const second = rand(IMAGE_PART_BYTES + 9);
+      const a = await bake(rand(10), first);
+      const b = await bake(rand(10), second);
+      // b の添付の要素(2 個)を a の添付の要素の直後へ移す
+      const grab = (h: string): string => asset3(h).map((m) => m[0]).join('');
+      const dup = a.replace(grab(a), grab(a) + grab(b));
+      expect(asset3(dup), '前提: 4 要素になっている').toHaveLength(4);
+      const back = new Uint8Array(await readPortableHtml(dup).assets.get('ast-big')!.arrayBuffer());
+      expect(same(back, second), '後ろの添付が残っていない').toBe(true);
+    });
+
+    it('改行・空白が混ざった割った添付でも戻る / 0 バイトの添付は空のまま戻る', async () => {
+      const asset = rand(IMAGE_PART_BYTES + 5);
+      const html = await bake(rand(10), asset);
+      const spaced = html.replace(
+        /(data-pkc-asset="ast-big"[^>]*>)([A-Za-z0-9+/=]+)(<\/script>)/g,
+        (_m, open: string, b64: string, close: string) => open + b64.replace(/(.{76})/g, '$1\n') + ' \n' + close,
+      );
+      expect(spaced.length, '前提: 空白を混ぜられている').toBeGreaterThan(html.length);
+      const back = new Uint8Array(await readPortableHtml(spaced).assets.get('ast-big')!.arrayBuffer());
+      expect(same(back, asset), '添付が違う').toBe(true);
+      const empty = readPortableHtml(await bake(rand(10), new Uint8Array(0))).assets.get('ast-big');
+      expect(empty, '0 バイトの添付が消えた').toBeDefined();
+      expect(empty!.size).toBe(0);
+    });
+  });
 });

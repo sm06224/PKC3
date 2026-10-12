@@ -16,7 +16,7 @@ import {
   ASSET_SELECTOR,
   restoreEmbeddedAssets,
 } from '../../src/adapter/platform/portable-assets';
-import type { PortableBundle } from '../../src/features/portable/bundle';
+import { IMAGE_PART_BYTES, type PortableBundle } from '../../src/features/portable/bundle';
 
 const OLD: PortableBundle = { id: 'pkcb-template', exportedAt: 0 };
 const NEW: PortableBundle = { id: 'pkcb-0011223344556677', exportedAt: 1_700_000_000_000 };
@@ -124,5 +124,112 @@ describe('#400 段④ ── 書き出したものが、そのまま起動で読
       failed: 0,
     });
     expect(Array.from(takeEmbeddedImage(doc).image!)).toEqual([1, 2]);
+  });
+
+  describe('🔴 割って焼いた添付 (#1416 §7-4d)', () => {
+    const B = IMAGE_PART_BYTES;
+    const rand = (n: number): number[] => {
+      const out = new Array<number>(n);
+      let x = 0x9e3779b9;
+      for (let i = 0; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        out[i] = x & 0xff;
+      }
+      return out;
+    };
+    const bytesOf = async (b: Blob): Promise<number[]> => Array.from(new Uint8Array(await b.arrayBuffer()));
+
+    it('3 要素の添付が、小さい添付と並んでいても、1 バイトも違わず器へ戻り、要素は全部外れる', async () => {
+      const big = rand(B * 2 + 7);
+      const doc = await build(new Uint8Array([1]), [
+        { key: 'ast-small', mime: 'image/png', bytes: [1, 2, 3] },
+        { key: 'ast-big', mime: 'application/pdf', bytes: big },
+        { key: 'ast-tail', mime: 'image/png', bytes: [4] },
+      ]);
+      expect(doc.querySelectorAll(ASSET_SELECTOR), '前提: 割れている').toHaveLength(5);
+      const s = sink();
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 3, skipped: 0, failed: 0 });
+      expect(doc.querySelectorAll(ASSET_SELECTOR)).toHaveLength(0);
+      const got = s.map.get(`${CID}:ast-big`)!.blob;
+      expect(got.type).toBe('application/pdf');
+      expect(await bytesOf(got), '添付が違う').toEqual(big);
+      expect(await bytesOf(s.map.get(`${CID}:ast-small`)!.blob)).toEqual([1, 2, 3]);
+      expect(await bytesOf(s.map.get(`${CID}:ast-tail`)!.blob)).toEqual([4]);
+    }, 30_000);
+
+    it('🔴 揃っていない添付はその 1 件だけ failed(器に何も書かない)。前後の添付は戻る', async () => {
+      const doc = await build(new Uint8Array([1]), [
+        { key: 'ast-a', mime: 'image/png', bytes: [1] },
+        { key: 'ast-big', mime: 'image/png', bytes: rand(B * 2 + 7) },
+        { key: 'ast-z', mime: 'image/png', bytes: [2] },
+      ]);
+      // 真ん中の要素(1/3)を取り除く
+      const mid = doc.querySelector('script[data-pkc-asset-part="1/3"]')!;
+      mid.remove();
+      const s = sink();
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 2, skipped: 0, failed: 1 });
+      expect(s.map.has(`${CID}:ast-big`), '欠けた添付を書いた').toBe(false);
+      expect(doc.querySelectorAll(ASSET_SELECTOR), '要素が残った').toHaveLength(0);
+    });
+
+    it('途中の要素が短い添付は、後ろをずらして読まず failed', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B * 2 + 7) }]);
+      const el = doc.querySelector('script[data-pkc-asset-part="1/3"]')!;
+      el.textContent = (el.textContent ?? '').slice(4);
+      const s = sink();
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 0, failed: 1 });
+      expect(s.map.size).toBe(0);
+    });
+
+    it('器に在る key は、割った要素ぜんぶを外して飛ばす', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B + 3) }]);
+      const s = sink();
+      await s.put(CID, 'ast-big', new Blob(['already']));
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 1, failed: 0 });
+      expect(await s.map.get(`${CID}:ast-big`)!.blob.text()).toBe('already');
+      expect(doc.querySelectorAll(ASSET_SELECTOR)).toHaveLength(0);
+    });
+
+    it('🔴 器に在る key は、中身を読まずに飛ばす(textContent を読むと投げる要素で見る)', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B + 3) }]);
+      let reads = 0;
+      for (const el of doc.querySelectorAll(ASSET_SELECTOR)) {
+        Object.defineProperty(el, 'textContent', {
+          get() {
+            reads++;
+            throw new Error('読んではいけない');
+          },
+          set() {},
+          configurable: true,
+        });
+      }
+      const s = sink();
+      await s.put(CID, 'ast-big', new Blob(['already']));
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 1, failed: 0 });
+      expect(reads, '器に在るのに中身を読んだ').toBe(0);
+      expect(doc.querySelectorAll(ASSET_SELECTOR)).toHaveLength(0);
+    });
+
+    it('🔴 器に在る key は、途切れた写しでも failed にしない(開き直すたびに警告を出さない)', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B * 2 + 7) }]);
+      doc.querySelector('script[data-pkc-asset-part="1/3"]')!.remove();
+      const s = sink();
+      await s.put(CID, 'ast-big', new Blob(['already']));
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 1, failed: 0 });
+    });
+
+    it('割る前の版の 1 本物(印なしの大きい 1 要素)も戻る', async () => {
+      const big = rand(B * 2 + 7);
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: big }]);
+      const els = [...doc.querySelectorAll(ASSET_SELECTOR)];
+      els[0]!.textContent = els.map((e) => e.textContent).join('');
+      els[0]!.removeAttribute('data-pkc-asset-part');
+      els.slice(1).forEach((e) => e.remove());
+      const s = sink();
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 1, skipped: 0, failed: 0 });
+      expect(await bytesOf(s.map.get(`${CID}:ast-big`)!.blob)).toEqual(big);
+    }, 30_000);
   });
 });

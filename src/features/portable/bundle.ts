@@ -110,16 +110,55 @@ const PART_MARK_RE = /^(\d{1,9})\/(\d{1,9})$/;
  * @param marks `data-pkc-db-image` の値を文書の順に並べたもの(属性が無ければ呼ばない)
  * @returns 揃っていれば `null`、欠け・重複・順の乱れ・形の違いがあれば理由(画面に出せる字)
  */
-export function checkImageParts(marks: readonly string[]): string | null {
+export function checkImageParts(marks: readonly string[], label = 'DB の中身'): string | null {
   if (marks.length === 0) return null;
   if (marks.length === 1 && marks[0] === '') return null; // 割る前の版の 1 本物
   for (let i = 0; i < marks.length; i++) {
     const m = PART_MARK_RE.exec(marks[i]!);
     if (m === null || Number(m[1]) !== i || Number(m[2]) !== marks.length) {
-      return `DB の中身が ${marks.length} 個に分かれて入っていますが、${i + 1} 個目の番号が合いません(途中で切れた・混ざったファイルかもしれません)`;
+      return `${label}が ${marks.length} 個に分かれて入っていますが、${i + 1} 個目の番号が合いません(途中で切れた・混ざったファイルかもしれません)`;
     }
   }
   return null;
+}
+
+/**
+ * 添付の要素の並び(文書の順)を、**1 件ずつの塊**に分ける(#1416 §7-4d)。
+ *
+ * 添付も DB 画像と同じく `IMAGE_PART_BYTES` ごとに割って焼く。割った添付の要素は
+ * `data-pkc-asset-part="<番号>/<総数>"` を持ち、**同じ key が続く**。値の無いものは割る前の版が焼いた 1 本物
+ * (1 要素 = 1 件)。起動(`portable-assets.ts`)と取り込み(`import/portable-html.ts`)が**同じ規則**で塊にする。
+ * @param items 文書の順の (key, 印)。印は `data-pkc-asset-part` の値(無ければ空)
+ * @returns 塊ごとの { start, count, broken }。`broken` は揃っていない理由(揃っていれば `null`)
+ */
+export function groupAssetParts(
+  items: ReadonlyArray<{ readonly key: string; readonly mark: string }>,
+): Array<{ start: number; count: number; broken: string | null }> {
+  const out: Array<{ start: number; count: number; broken: string | null }> = [];
+  let i = 0;
+  while (i < items.length) {
+    const first = items[i]!;
+    if (first.mark === '') {
+      out.push({ start: i, count: 1, broken: null });
+      i++;
+      continue;
+    }
+    // 同じ key で印のある要素が続く間が、この塊の候補
+    let run = 1;
+    while (i + run < items.length && items[i + run]!.key === first.key && items[i + run]!.mark !== '') run++;
+    const m = PART_MARK_RE.exec(first.mark);
+    // 先頭が 0/N なら、総数 N までを取る(余りは次の塊 = 先頭が 0 でないので断られる)
+    const total = m !== null && Number(m[1]) === 0 ? Number(m[2]) : run;
+    const count = Math.max(1, Math.min(run, total));
+    const marks = items.slice(i, i + count).map((x) => x.mark);
+    out.push({
+      start: i,
+      count,
+      broken: checkImageParts(marks, `添付「${first.key}」の中身`) ?? (count < total ? '途中で切れています' : null),
+    });
+    i += count;
+  }
+  return out;
 }
 
 /** 1 要素に入る base64 の字数(`IMAGE_PART_BYTES` の 4/3)。 */
@@ -140,9 +179,13 @@ const stripSpace = (t: string): string => (/\s/.test(t) ? t.replace(/\s+/g, '') 
  *   ③ 読んだ文字列は呼び側が `read()` の中で手放す(この関数は貯めない)
  * @param reads 文書の順に、各要素の base64 を返す口(⚠ 呼ぶのは 1 回ずつ。最後の要素だけ先に呼ぶ)
  * @returns 全部空なら `null`(割る前の版の空の要素 = 画像なし)
+ * @param label 断り文に出す名前(添付なら「添付「key」の中身」)
  * @throws 途中の要素が `IMAGE_PART_BYTES` ちょうどでない / 空の部分がある / base64 でない
  */
-export function decodeImageParts(reads: ReadonlyArray<() => string>): Uint8Array | null {
+export function decodeImageParts(
+  reads: ReadonlyArray<() => string>,
+  label = 'DB の中身',
+): Uint8Array | null {
   const n = reads.length;
   if (n === 0) return null;
   const last = stripSpace(reads[n - 1]!().trim());
@@ -168,7 +211,7 @@ export function decodeImageParts(reads: ReadonlyArray<() => string>): Uint8Array
     // 🔴 途中の要素は**ちょうど** `IMAGE_PART_BYTES`。短い・長い要素を黙って詰めると、後ろが前へずれて別の画像になる
     if (text.length !== IMAGE_PART_CHARS) {
       throw new Error(
-        `DB の中身の ${k + 1} 個目が途中で欠けています(想定 ${IMAGE_PART_CHARS} 字、実際 ${text.length} 字)`,
+        `${label}の ${k + 1} 個目が途中で欠けています(想定 ${IMAGE_PART_CHARS} 字、実際 ${text.length} 字)`,
       );
     }
     put(text, k * IMAGE_PART_BYTES, (k + 1) * IMAGE_PART_BYTES);

@@ -12,6 +12,7 @@ import {
   looksOutOfMemory,
   MAX_EMBED_TEXT_CHARS,
   base64Length,
+  notImportableBackMessage,
   tooBigToReadBack,
   tooBigToReadBackMessage,
 } from '../../src/features/storage/image-export-limit';
@@ -19,6 +20,7 @@ import {
   COLLECTION_COMMANDS,
   SETTINGS_COMMANDS,
 } from '../../src/adapter/ui/render/commands';
+import { humanBytes } from '../../src/features/human-bytes';
 import { archiveSuffix } from '../../src/features/export/archive-kind';
 
 describe('詰まったときの字(#971 段④)', () => {
@@ -144,6 +146,16 @@ describe('読み戻せる大きさか(#996)', () => {
  *   **両方そのままで緑**になる(CLAUDE.md §1「期待値は別の観測から作る」)。
  *   だから **`COMMANDS` から label を引く**。
  */
+describe('取り込み直せない警告の上限は、ファイル全体の上限そのもの', () => {
+  it('🔴 ファイル全体の上限(約 512 MB)を言う。1 件ぶんの 3/4 ではない', () => {
+    expect(humanBytes(MAX_EMBED_TEXT_CHARS)).toBe('512.0 MB');
+    const s = notImportableBackMessage(600 * 1024 * 1024);
+    expect(s).toContain('上限は、ファイル全体で約 512.0 MB');
+    expect(s, '384 MB(3/4)を言っている').not.toContain('384');
+    expect(s).toContain('600.0 MB');
+  });
+});
+
 describe('断り文が指すボタンは、画面に在る(2026-09-16)', () => {
   const archiveLabel = (): string => {
     // ⚠ **両方の一覧から探す** ── 命令が左の列から設定へ移った日に、
@@ -162,6 +174,7 @@ describe('断り文が指すボタンは、画面に在る(2026-09-16)', () => {
     for (const [name, s] of [
       ['確保できなかった側', imageTooBigMessage(5_000_000_000)],
       ['読み戻せない側', tooBigToReadBackMessage('いまの中身', 500 * 1024 * 1024)],
+      ['全体が取り込み直せない側', notImportableBackMessage(500 * 1024 * 1024)],
     ] as const) {
       expect(s, `${name}: 画面に無い名前で送っている`).toContain(label);
     }
