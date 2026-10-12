@@ -108,8 +108,14 @@ describe('ディープリンクの合図(sched / day)', () => {
     ).not.toContain('day=');
   });
 
-  it('🔴 読めない値は無視する(week 以外・空・合図なし)', () => {
-    expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=month')).toBeNull();
+  it('🔴 「月」の合図も往復する(#855。左の列の「月」が別のウィンドウで開くときの合図)', () => {
+    const url = formatViewDeepLink(BASE, 'schedule', { schedule: { mode: 'month', day: '2026-10-07' } })!;
+    expect(url).toBe(`${BASE}#pkc?view=schedule&sched=month&day=2026-10-07`);
+    expect(parseViewDeepLinkSchedule(url.slice(url.indexOf('#')))).toEqual({ mode: 'month', day: '2026-10-07' });
+  });
+
+  it('🔴 読めない値は無視する(week / month 以外・空・合図なし)', () => {
+    expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=year')).toBeNull();
     expect(parseViewDeepLinkSchedule('#pkc?view=schedule&sched=')).toBeNull();
     expect(parseViewDeepLinkSchedule('#pkc?view=schedule&day=2026-10-07')).toBeNull();
     expect(parseViewDeepLinkSchedule('')).toBeNull();

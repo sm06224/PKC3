@@ -232,6 +232,7 @@
 | `set-schedule-lead` | 低 | 知らせる時間 | `src/adapter/ui/render/schedule.ts:904` | 書き出す .ics のアラームの時間。選んだ値を押した欄から読む |
 | `set-schedule-missed` | 低 | 次に開いたとき、見逃した予定を知らせる | `src/adapter/ui/render/schedule.ts:918` | チェック欄の値を押した欄から読む |
 | `schedule-undo-move` | 低 | 元に戻す | `src/adapter/ui/render/schedule-undo.ts:126` | 動かした直後の知らせに付く一時ボタン |
+| `schedule-print` | 低 | 印刷 | `src/adapter/ui/render/schedule.ts:757` | 予定表の上の帯のボタン。いま見ている範囲(月・週・日・一覧)だけを紙に出す。押した面から範囲を引く |
 | `schedule-week-pick` | 低 | (週の日の見出し) | `src/adapter/ui/render/schedule-week.ts:146` | 押した日を指す |
 
 ## 本文の整形

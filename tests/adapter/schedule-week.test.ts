@@ -254,12 +254,12 @@ describe('広い面の「週」', () => {
     expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(1);
   });
 
-  it('押している見せ方は「週」だけが true', () => {
+  it('押している見せ方は「週」だけが true(広い面は「月」も並ぶ)', () => {
     const { qa, showWeek } = setup({});
     showWeek();
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
-    ).toEqual([['一覧', 'false'], ['日', 'false'], ['週', 'true']]);
+    ).toEqual([['一覧', 'false'], ['日', 'false'], ['週', 'true'], ['月', 'false']]);
   });
 });
 
@@ -324,7 +324,7 @@ describe('左の列の「週」', () => {
     expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(1);
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => b.getAttribute('aria-pressed')),
-    ).toEqual(['true', 'false', 'false']);
+    ).toEqual(['true', 'false', 'false', 'false']);
   });
 
   it('🔴 小さな月の日: 左の列は自分の見せ方で決める(広い面が「週」でも、一覧なら日を動かさず束へ送る)', () => {
@@ -509,7 +509,7 @@ describe('開いた窓の起動(deep-link)', () => {
     };
     connectViewDeepLink({
       openView: (m) => log.push(`open:${m}`),
-      ...(withSchedule ? { scheduleView: (m: 'week', day: string | null) => log.push(`sched:${m}:${day}`) } : {}),
+      ...(withSchedule ? { scheduleView: (m: 'week' | 'month', day: string | null) => log.push(`sched:${m}:${day}`) } : {}),
       fail: (m) => log.push(`fail:${m}`),
       onViewChange: () => () => {},
       onSelectedEntry: () => () => {},
@@ -533,7 +533,9 @@ describe('開いた窓の起動(deep-link)', () => {
 
   it('対照群: 合図が無い / 読めない / 別の面では当てない', () => {
     expect(boot('#pkc?view=schedule&w=tok')).toEqual(['open:schedule']);
-    expect(boot('#pkc?view=schedule&sched=month')).toEqual(['open:schedule']);
+    expect(boot('#pkc?view=schedule&sched=year')).toEqual(['open:schedule']);
+    // 「月」の合図は読める(#855。左の列の「月」が別のウィンドウで開くときの合図)
+    expect(boot('#pkc?view=schedule&sched=month')).toEqual(['open:schedule', 'sched:month:null', 'dropSchedule']);
     expect(boot('#pkc?view=calendar&sched=week')).not.toContain('sched:week:null');
   });
 

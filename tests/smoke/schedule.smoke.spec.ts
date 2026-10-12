@@ -1499,3 +1499,176 @@ test('🔴 4 年前から「毎日」と書いた行が、今日の予定に出�
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+
+/**
+ * 🔴 **予定の「月」と「印刷」**(#855。Gemini 裁定 = #1163 の依頼 30 の Q1 / Q2)。
+ *
+ * ## ⚠ なぜ新しく起動するのか(`scripts/smoke-budget.mjs`)
+ *
+ * 既存の「週」の道中は別のウィンドウで終わり、数の assert(`toHaveCount`)が並ぶ。同じ日へ 5 件置くと
+ * あちらの数の意味が変わる(別の主張を混ぜる)ので、起動を 1 つ使う。
+ *
+ * ## unit では届かない層
+ *
+ * - 左の列の「月」が**本物の別ウィンドウ**で立ち上がり、合図(`sched=month`)を読んで「月」になるか
+ * - 升に題名が 3 件まで・「ほか N 件」が実際の高さで収まり、押せて、その日の「日」へ移るか
+ * - 「印刷」で `beforeprint` が飛ぶ瞬間に、範囲の印が付いているか
+ * - 🔴 **紙の組み**(`@media print`)── 範囲の外が落ち、範囲が 1 枚の高さに収まるか。
+ *   `page.emulateMedia({ media: 'print' })` の計算後の値で見る(印の属性を見るだけでは、CSS の受け皿が無くても緑になる)
+ */
+test('🔴 予定の「月」: 左の列から別ウィンドウで開き、題名は 3 件まで・ほか N 件で「日」へ。印刷は範囲だけ (#855)', async ({
+  page,
+  context,
+}) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await gotoApp(page);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  await createEntry(page, 'text');
+  await page
+    .locator('[data-pkc-field="editor-body"]')
+    .fill(
+      ['朝の確認', '昼の打合せ', '夕方の連絡', '夜の準備', '深夜の整理']
+        .map((t) => `- [ ] ${t} @${today}`)
+        .join('\n'),
+    );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const pane = page.locator('[data-pkc-browse-pane="schedule"]');
+  await expect(
+    pane.locator('[data-pkc-action="schedule-mode"][data-pkc-mode="month"]'),
+    '左の列に「月」が無い',
+  ).toBeVisible();
+
+  const popupP = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-action="schedule-mode"][data-pkc-mode="month"]');
+  const win = await popupP;
+  const winErrors = collectPageErrors(win);
+  await expect(win.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  const centre = win.locator('[data-pkc-view-pane="schedule"]');
+  const cells = centre.locator('[data-pkc-field="schedule-monthview-cell"]');
+  await expect(
+    centre.locator('[data-pkc-region="schedule-monthview"]'),
+    '開いた窓が「月」で立ち上がっていない',
+  ).toBeVisible({ timeout: 20_000 });
+  const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  await expect(cells, '今月の日数ぶんの升が出ていない').toHaveCount(days);
+  // 左の列の見せ方は変わらない(中央を奪っていない)
+  expect(
+    await pane.locator('[data-pkc-action="schedule-mode"][aria-pressed="true"]').getAttribute('data-pkc-mode'),
+    '左の列の「月」が左の見せ方を変えた',
+  ).toBe('list');
+
+  const todayCell = centre.locator(`[data-pkc-field="schedule-monthview-cell"][data-pkc-drop-date="${today}"]`);
+  await expect(todayCell.locator('[data-pkc-entry]'), '題名が 3 件ではない').toHaveCount(3, { timeout: 20_000 });
+  const more = todayCell.locator('[data-pkc-field="schedule-monthview-more"]');
+  await expect(more, '4 件目から「ほか 2 件」が出ていない').toHaveText('ほか 2 件');
+  // 縦線の色(情報)と、升の外にはみ出していないこと(実際の高さ)
+  expect(await todayCell.locator('[data-pkc-entry]').first().getAttribute('data-pkc-item-color')).toBe('note');
+  const cellBox = (await todayCell.boundingBox())!;
+  const moreBox = (await more.boundingBox())!;
+  expect(moreBox.y + moreBox.height, '「ほか N 件」が升の外にはみ出している').toBeLessThanOrEqual(
+    cellBox.y + cellBox.height + 1,
+  );
+
+  /**
+   * 🔴 **印刷 ── 範囲の印は `beforeprint` の瞬間に付いている**(2 つのブラウザで成り立つ唯一の点:
+   * headless_shell は before / after を同期に飛ばし、chrome は before だけ)。
+   */
+  await win.evaluate(() => {
+    const snap = (): { attr: string | null; ranges: (string | null)[] } => ({
+      attr: document.documentElement.getAttribute('data-pkc-print'),
+      ranges: [...document.querySelectorAll('[data-pkc-print-range]')].map((e) => e.getAttribute('data-pkc-region')),
+    });
+    const g = globalThis as unknown as Record<string, unknown[]>;
+    g.__seen = []; // beforeprint の瞬間(1 回目の印刷だけ ── 同じ窓の 2 回目以降の print() は、この headless では event を飛ばさない)
+    g.__called = []; // window.print() が呼ばれた瞬間(押すたびに採れる)
+    window.addEventListener('beforeprint', () => g.__seen!.push(snap()));
+    const orig = window.print.bind(window);
+    window.print = (): void => {
+      g.__called!.push(snap());
+      orig();
+    };
+  });
+  type Snap = { attr: string | null; ranges: string[] };
+  const seenOf = (): Promise<Snap[]> => win.evaluate(() => (globalThis as unknown as Record<string, Snap[]>).__seen!);
+  const calledOf = (): Promise<Snap[]> => win.evaluate(() => (globalThis as unknown as Record<string, Snap[]>).__called!);
+  await clickReal(win, '[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-print"]');
+  await expect.poll(async () => (await seenOf()).length, '「印刷」を押しても beforeprint が来ない').toBeGreaterThan(0);
+  expect((await seenOf())[0], '月の範囲だけに印が付いていない').toEqual({
+    attr: 'schedule',
+    ranges: ['schedule-monthview'],
+  });
+
+  /**
+   * 🔴 **紙の組み**: 印を付けて print 媒体で計算させる ── 範囲だけが見え、ほかの画面は落ち、1 枚の高さに収まる。
+   * ⚠ 印は印刷が飛ばした `afterprint`(headless_shell)で外れているので、ここで付け直して測る。
+   */
+  const paper = async (rangeSel: string): Promise<Record<string, unknown>> => {
+    await win.emulateMedia({ media: 'print' });
+    try {
+      return await win.evaluate((sel) => {
+        const range = document.querySelector<HTMLElement>(sel)!;
+        range.setAttribute('data-pkc-print-range', '');
+        document.documentElement.setAttribute('data-pkc-print', 'schedule');
+        const shown = (q: string): boolean => {
+          const e = document.querySelector<HTMLElement>(q);
+          return e !== null && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        };
+        const out = {
+          rangeShown: shown(sel),
+          pageHeight: Math.round(document.documentElement.scrollHeight),
+          toolbar: shown('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-toolbar"]'),
+          leftPane: shown('[data-pkc-browse-pane="schedule"]'),
+          inspector: shown('[data-pkc-region="inspector"]'),
+          groups: shown('[data-pkc-region="schedule-groups"]'),
+          bg: getComputedStyle(document.body).backgroundColor,
+          title: shown('[data-pkc-field="schedule-monthview-cell"] [data-pkc-entry]'),
+        };
+        range.removeAttribute('data-pkc-print-range');
+        document.documentElement.removeAttribute('data-pkc-print');
+        return out;
+      }, rangeSel);
+    } finally {
+      await win.emulateMedia({ media: 'screen' });
+    }
+  };
+  const m = await paper('[data-pkc-view-pane="schedule"] [data-pkc-region="schedule-monthview"]');
+  expect(m.rangeShown, `紙に月の範囲が出ていない: ${JSON.stringify(m)}`).toBe(true);
+  expect(m.title, '紙の月に題名が出ていない').toBe(true);
+  expect(m.toolbar, '紙に予定表の上の帯が出ている').toBe(false);
+  expect(m.leftPane, '紙に左のペインの予定表が出ている').toBe(false);
+  expect(m.inspector, '紙に右の列が出ている').toBe(false);
+  expect(m.groups, '紙に日ごとの一覧が出ている').toBe(false);
+  expect(m.bg, '紙の地が白でない').toBe('rgb(255, 255, 255)');
+  expect(m.pageHeight as number, `月が A4 縦(約 1120px)に収まらない: ${JSON.stringify(m)}`).toBeLessThanOrEqual(1120);
+
+  // 🔴 「ほか 2 件」を押すと、その日の「日」へ移る(月は離れる)
+  await clickReal(
+    win,
+    `[data-pkc-field="schedule-monthview-cell"][data-pkc-drop-date="${today}"] [data-pkc-field="schedule-monthview-more"]`,
+  );
+  await expect(centre.locator('[data-pkc-region="schedule-day"]'), '「ほか N 件」で「日」が開かない').toBeVisible();
+  await expect(centre.locator('[data-pkc-region="schedule-monthview"]')).toBeHidden();
+  await expect(
+    centre.locator('[data-pkc-region="schedule-day"] [data-pkc-entry]'),
+    '「日」に 5 件そろっていない',
+  ).toHaveCount(5);
+
+  // 日・週の範囲も、それぞれ自分の器だけに印が付く(月以外の対照群)
+  await clickReal(win, '[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-print"]');
+  await expect.poll(async () => (await calledOf()).length).toBe(2);
+  expect((await calledOf())[1]!.ranges, '「日」の範囲に印が付いていない').toEqual(['schedule-day']);
+  await clickReal(win, '[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
+  await clickReal(win, '[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-print"]');
+  await expect.poll(async () => (await calledOf()).length).toBe(3);
+  expect((await calledOf())[2]!.ranges, '「週」の範囲に印が付いていない').toEqual(['schedule-weekview']);
+  const w = await paper('[data-pkc-view-pane="schedule"] [data-pkc-region="schedule-weekview"]');
+  expect(w.rangeShown, `紙に週の範囲が出ていない: ${JSON.stringify(w)}`).toBe(true);
+  expect(w.pageHeight as number, `週が A4 縦(約 1120px)に収まらない: ${JSON.stringify(w)}`).toBeLessThanOrEqual(1120);
+
+  expect(winErrors, `page error: ${winErrors.join(' / ')}`).toEqual([]);
+  await win.close();
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});

@@ -459,7 +459,7 @@ export interface DeepLinkWiring {
    * ⚠ 面が `schedule` のときだけ呼ぶ。**面を開いた後**に呼ぶ(見せ方は面の状態)。
    *   使ったらアドレスから外す(`DeepLinkTarget.dropSchedule`)。
    */
-  readonly scheduleView?: (mode: 'week', day: string | null) => void;
+  readonly scheduleView?: (mode: 'week' | 'month', day: string | null) => void;
   /**
    * 🔴 **いま断片が指している面が変わったら呼ばれる**(#300 段③ の直し)。
    *

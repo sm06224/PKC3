@@ -509,22 +509,23 @@ export function parseViewDeepLinkFind(raw: string): string | null {
 }
 
 /**
- * 🔴 **予定の面を「週」で開く合図**(`sched=week`、任意で `day=YYYY-MM-DD`。#855 段 A-2)。
+ * 🔴 **予定の面を「週」「月」で開く合図**(`sched=week` / `sched=month`、任意で `day=YYYY-MM-DD`。#855 段 A-2)。
  *
  * 左の列は狭くて 7 日を並べられないので、「週」は別のウィンドウで開く ── 開いた窓が起動で読んで
  * 見せ方を「週」にする。⚠ 使ったらアドレスから外す(`dropViewScheduleFromHash`)── 栞や `F5` に
  * 焼き付くと、次に開くたびに見せ方を奪う(頼んでいない見え方の変更)。
- * ⚠ 受けるのは `week` だけ。日付は実在する日だけ(`2026-02-30` は捨てる ── 別の日へ寄せない)。
+ * ⚠ 受けるのは `week` / `month` だけ。日付は実在する日だけ(`2026-02-30` は捨てる ── 別の日へ寄せない)。
  *   読めない値は丸ごと `null`(半分だけ拾わない)。
  */
 export function parseViewDeepLinkSchedule(
   raw: string,
-): { readonly mode: 'week'; readonly day: string | null } | null {
+): { readonly mode: 'week' | 'month'; readonly day: string | null } | null {
   const params = hashParams(raw);
-  if (params === null || params.get('sched') !== 'week') return null;
+  const mode = params?.get('sched');
+  if (params === null || (mode !== 'week' && mode !== 'month')) return null;
   const day = params.get('day');
-  if (day === null || day === '') return { mode: 'week', day: null };
-  return isScheduleDay(day) ? { mode: 'week', day } : { mode: 'week', day: null };
+  if (day === null || day === '') return { mode, day: null };
+  return isScheduleDay(day) ? { mode, day } : { mode, day: null };
 }
 
 /** 🔴 **予定の見せ方の合図だけを落とす**(#855 段 A-2)。⚠ `container` / `entry` / `view` は残す。 */
@@ -633,7 +634,7 @@ export interface ViewDeepLinkInput {
    * 🔴 **予定の面を開く見せ方**(`sched` / `day`。#855 段 A-2)。⚠ 面が `schedule` のときだけ運ぶ
    * (他の面には意味が無い)。`day` は実在する日だけ。
    */
-  readonly schedule?: { readonly mode: 'week'; readonly day: string | null };
+  readonly schedule?: { readonly mode: 'week' | 'month'; readonly day: string | null };
 }
 
 export function formatViewDeepLink(

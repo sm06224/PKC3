@@ -204,7 +204,7 @@ export interface ViewWindowDeps {
    * 🔴 **予定の面を「週」で開く**(#855 段 A-2)。⚠ 面が `schedule` のときだけ使う。
    * 窓が出なかったときの退避は**しない**(左の列は狭くて 7 日を並べられない ── 理由だけ出す)。
    */
-  readonly schedule?: { readonly mode: 'week'; readonly day: string | null };
+  readonly schedule?: { readonly mode: 'week' | 'month'; readonly day: string | null };
 }
 
 /**

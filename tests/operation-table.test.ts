@@ -299,7 +299,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'remove-sql-source',
   'rename-attachment', 'reset-app-group-order', 'reset-flags',
   'reset-office-profile', 'retry-persist', 'schedule-day-go', 'schedule-mode',
-  'schedule-nav', 
+  'schedule-nav', 'schedule-print',
   'schedule-undo-move', 'schedule-week-pick',
   // ⚠ 2026-10-12(#855 20-C): 予定の知らせ ── 見逃した予定の 1 行の「予定表を開く」「閉じる」と、予定表の「知らせ」の 2 つの設定
   //   (知らせる時間 / 次に開いたとき知らせるか)。押し口は予定の面・鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場
@@ -821,12 +821,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」(`copy-selection-md`)1 件を登記 ── 受け手は前から在った(読む面のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。
       // ⚠ 2026-10-12(#855 20-C): 予定の知らせの受け手 4 件(`set-schedule-lead` / `set-schedule-missed` / `open-missed-schedule` / `dismiss-missed`)── 登記なし。`total` / `receivers` / `unregistered` +4。
-      total: 423,
-      receivers: 357,
+      // ⚠ 2026-10-12(#855 Q2): 予定表の「印刷」(`schedule-print`)で受け手 +1 ── 登記は増えない(押し口は予定の面にしか無く、鍵も持たない。`export-schedule-ics` と同じ置き場)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 424,
+      receivers: 358,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 256,
+      unregistered: 257,
     });
   });
 

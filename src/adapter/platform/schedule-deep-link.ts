@@ -11,14 +11,14 @@ import { weekOf } from '@features/schedule/day-layout';
 export interface ScheduleDispatch {
   readonly dispatch: (
     action:
-      | { type: 'SET_SCHEDULE_MODE'; mode: 'week' }
+      | { type: 'SET_SCHEDULE_MODE'; mode: 'week' | 'month' }
       | { type: 'SET_SCHEDULE_DAY'; date: string },
   ) => void;
 }
 
 export function applyScheduleDeepLink(
   target: ScheduleDispatch,
-  mode: 'week',
+  mode: 'week' | 'month',
   day: string | null,
 ): void {
   target.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
@@ -63,7 +63,7 @@ export const WEEK_REPEAT_PRESS_MS = 10_000;
  */
 export function weekAnnounceKey(
   heldView: string | null,
-  scheduleMode: 'list' | 'day' | 'week',
+  scheduleMode: 'list' | 'day' | 'week' | 'month',
   scheduleDay: string | null,
   today: string,
 ): string | null {
