@@ -413,7 +413,7 @@ export async function importPkc2File(
       }
       try {
         const zip = await portableHtmlToArchive(
-          await file.text(),
+          file,
           deps.readImageArchive,
           new Date(),
         );

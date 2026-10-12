@@ -7,7 +7,7 @@
  * 「確認 → 衝突する ID の付け替え → 添付 → ノート → つながり → 履歴 → タグの色」へ進む 1 本の道を持つ。
  * PKC3 入り HTML の中身(DB の画像 + 添付)は、**その道の入口に合う zip に直して渡す**だけにする:
  *
- * 1. HTML の全文から DB の画像と添付を取り出す(`features/import/portable-html.ts`)
+ * 1. HTML から DB の画像と添付を取り出す(`features/import/portable-html.ts`)
  * 2. DB の画像を、**一時の DB で**読む(worker の `readImageArchive`。いま開いているコレクションには触れない)
  * 3. 書き出しと同じ `writeArchive` で `.pkc3-full.zip` を作る(書き出し側の規則をそのまま使う)
  *
@@ -15,7 +15,7 @@
  */
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { archiveFileName } from '@features/export/archive-kind';
-import { readPortableHtml } from '@features/import/portable-html';
+import { readPortableHtmlBlob } from '@features/import/portable-html';
 import type { ImageArchiveData } from '@adapter/platform/storage/protocol';
 
 /** DB の画像 → バックアップの材料(worker に頼む口)。 */
@@ -43,15 +43,15 @@ export function portableArchiveSource(
 }
 
 /**
- * PKC3 入り HTML の全文 → `.pkc3-full.zip` の Blob。
+ * PKC3 入り HTML(file) → `.pkc3-full.zip` の Blob。⚠ 全文を字にしない(窓で読む ── `readPortableHtmlBlob`)。
  * @throws 印が無い / 最後まで書き込まれていない / 中身が読めない / ノートが 1 件も無い
  */
 export async function portableHtmlToArchive(
-  html: string,
+  html: Blob,
   read: ReadImageArchive,
   now: Date,
 ): Promise<Blob> {
-  const parts = readPortableHtml(html);
+  const parts = await readPortableHtmlBlob(html);
   const data = await read(parts.image);
   if (data.metas.length === 0) {
     throw new Error('この PKC3 入り HTML には、取り込めるノートが 1 件も入っていません');
