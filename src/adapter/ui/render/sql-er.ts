@@ -36,6 +36,98 @@ import { erColumnLabel, erHeadLabel, erLayout } from '@features/query/er-layout'
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/**
+ * 🔴 **描き直しをまたいで持ち越す物**(#918 段⑤d)。
+ *
+ * ⚠ `paintSqlEr` は呼ばれるたびに中身を**作り直す**ので、何もしないと次の 3 つが毎回消える
+ *   (実ブラウザで測った ── 列を Enter で押すと `activeElement` が `BODY` になった):
+ *   ① **鍵盤の焦点**(Tab で辿ってきた位置。Enter のたびに先頭へ戻される)
+ *   ② **図を転がした位置**(列を押すたびに左上へ戻る)
+ *   ③ **掴んで変えた高さ**(押すたびに初期の高さへ戻る ── 片道の操作)
+ * 🔑 焦点は**要素の同一性ではなく、押し所が持つ名前**(表 / 列 / 線の 4 つ)で引き直す。
+ */
+/** 掴んで変えた高さ(インライン style)と転がした位置。⚠ 呼ぶ側が持つ可変の置き場。 */
+export interface ErSizeMemory {
+  height: string;
+  left: number;
+  top: number;
+}
+
+export interface ErFocusKey {
+  readonly field: string;
+  readonly name: string;
+  readonly col: string;
+  readonly from: string;
+  readonly fromcol: string;
+  readonly to: string;
+  readonly tocol: string;
+}
+
+const FOCUS_ATTRS = {
+  name: 'data-pkc-name',
+  col: 'data-pkc-col',
+  from: 'data-pkc-from',
+  fromcol: 'data-pkc-fromcol',
+  to: 'data-pkc-to',
+  tocol: 'data-pkc-tocol',
+} as const;
+
+/** 図の中で焦点を持つ要素の「名前」。⚠ 図の外・押し所でない物は `null`。 */
+export function erFocusKeyOf(host: HTMLElement, el: Element | null): ErFocusKey | null {
+  if (el === null || !host.contains(el)) return null;
+  const field = el.getAttribute('data-pkc-field') ?? '';
+  if (field === '' || el.tagName !== 'BUTTON') return null;
+  const at = (a: string): string => el.getAttribute(a) ?? '';
+  return {
+    field,
+    name: at(FOCUS_ATTRS.name),
+    col: at(FOCUS_ATTRS.col),
+    from: at(FOCUS_ATTRS.from),
+    fromcol: at(FOCUS_ATTRS.fromcol),
+    to: at(FOCUS_ATTRS.to),
+    tocol: at(FOCUS_ATTRS.tocol),
+  };
+}
+
+/** 名前から押し所を引き直す。⚠ 全部の属性が一致する物だけ(同じ表の別の列を拾わない)。 */
+export function erFindByKey(host: HTMLElement, key: ErFocusKey): HTMLElement | null {
+  for (const el of host.querySelectorAll<HTMLElement>('button[data-pkc-field]')) {
+    if (el.getAttribute('data-pkc-field') !== key.field) continue;
+    const same = (Object.keys(FOCUS_ATTRS) as (keyof typeof FOCUS_ATTRS)[]).every(
+      (k) => (el.getAttribute(FOCUS_ATTRS[k]) ?? '') === key[k],
+    );
+    if (same) return el;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **矢印キーで辿る先**(#918 段⑤d)。⚠ Tab だけだと、表が 10 個・列が 80 個の図は
+ *   80 回押さないと奥の表に着かない。
+ * - 上 / 下:**同じ四角の中**で 1 つ前 / 次(表の名前 → 列 → 列 …)。端では動かない(折り返さない)
+ * - 左 / 右:**1 つ前 / 次の四角の表の名前**へ(並びは図に置いた順)
+ * 🔑 線の札・「列をつなぐ」は対象外(`null`)── 位置で辿れる物ではなく、Tab で届く。
+ */
+export function erArrowTarget(host: HTMLElement, current: Element, key: string): HTMLElement | null {
+  const field = current.getAttribute('data-pkc-field');
+  if (field !== 'sql-er-table' && field !== 'sql-er-column') return null;
+  const box = current.closest<HTMLElement>('[data-pkc-field="sql-er-box"]');
+  if (box === null || !host.contains(box)) return null;
+  if (key === 'ArrowDown' || key === 'ArrowUp') {
+    const items = [...box.querySelectorAll<HTMLElement>('button[data-pkc-field="sql-er-table"],button[data-pkc-field="sql-er-column"]')];
+    const i = items.indexOf(current as HTMLElement);
+    if (i < 0) return null;
+    return items[key === 'ArrowDown' ? i + 1 : i - 1] ?? null;
+  }
+  if (key === 'ArrowRight' || key === 'ArrowLeft') {
+    const boxes = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="sql-er-box"]')];
+    const i = boxes.indexOf(box);
+    const next = boxes[key === 'ArrowRight' ? i + 1 : i - 1];
+    return next?.querySelector<HTMLElement>('button[data-pkc-field="sql-er-table"]') ?? null;
+  }
+  return null;
+}
+
 /** 1 段落を足す。⚠ 字が空なら**足さない**(空の行で場所を取らない)。 */
 function line(host: HTMLElement, field: string, text: string): void {
   if (text === '') return;
@@ -70,10 +162,29 @@ export function paintSqlEr(
    *   - `copyLine`:写せなかった表・ビュー(無ければ `''`)
    *   - `subject`:「この DB」/「この file」/「これらの file」(`erSubjectOf`)
    */
-  extra: { readonly copyLine?: string; readonly subject?: string } = {},
+  extra: {
+    readonly copyLine?: string;
+    readonly subject?: string;
+    /**
+     * 🔴 **掴んだ高さ・転がした位置の置き場**(呼ぶ側 = `SqlRenderer` が持つ)。⚠ 図の DOM には置かない ──
+     *   「採っています…」「断りの字だけ」や、畳んで開き直す間は図の DOM が無く、DOM に控えると消える。
+     */
+    readonly memory?: ErSizeMemory;
+  } = {},
 ): void {
   const copyLine = extra.copyLine ?? '';
   const doc = host.ownerDocument;
+  // 🔴 作り直す前に、持ち越す物を控える(上の `ErFocusKey` の注釈)
+  const memory = extra.memory ?? { height: '', left: 0, top: 0 };
+  const prevScroll = host.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]');
+  // ⚠ 図が在ったときだけ控え直す(図の無い回で 0 / 空に上書きしない)
+  if (prevScroll !== null) {
+    memory.height = prevScroll.style.height;
+    memory.left = prevScroll.scrollLeft;
+    memory.top = prevScroll.scrollTop;
+  }
+  // 焦点は「図から図への描き直し」だけ持ち越す(採り直し・畳み・開き直しをまたいでは戻さない)
+  const focusKey = prevScroll === null ? null : erFocusKeyOf(host, doc.activeElement);
   host.replaceChildren();
   host.hidden = !er.open;
   if (!er.open) return;
@@ -225,6 +336,18 @@ export function paintSqlEr(
 
   scroll.append(canvas);
   host.append(scroll);
+  /**
+   * 🔴 持ち越す(上の `ErFocusKey` の注釈)。⚠ 高さは**掴んで変えたときだけ**インラインに入る
+   *   (`resize` が書く)── 空なら CSS の初期値のまま。
+   */
+  if (memory.height !== '') scroll.style.height = memory.height;
+  scroll.scrollLeft = memory.left;
+  scroll.scrollTop = memory.top;
+  if (focusKey !== null) {
+    // 押した線の札が消えた(自分の線を消した)ときは、図の中の「列をつなぐ」へ
+    const again = erFindByKey(host, focusKey) ?? host.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]');
+    again?.focus({ preventScroll: true });
+  }
   /**
    * 🔴 **線が 1 本も無いなら、理由と次の一手を言う**(#918 段⑤d-3)。
    * ⚠ **図のすぐ下**に置く ── 「繋ぐ」の案内より先に読ませたい

@@ -5955,6 +5955,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-column'] {
   font-size: 12px;
 }
+/**
+ * 🔴 **焦点の輪は四角の内側に引く**(#918 段⑤d)。⚠ 既定(`button:focus-visible`)は外側に 1px 離して引くが、
+ *   四角は `overflow: hidden` なので**左右と下が切れて見えない**(実ブラウザで確かめた)。
+ */
+[data-pkc-field='sql-er-table']:focus-visible,
+[data-pkc-field='sql-er-column']:focus-visible {
+  outline-offset: -2px;
+}
 [data-pkc-field='sql-er-table']:hover,
 [data-pkc-field='sql-er-column']:hover,
 [data-pkc-field='sql-er-link']:hover {
