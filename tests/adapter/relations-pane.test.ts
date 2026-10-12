@@ -35,6 +35,13 @@ function meta(lid: string, title: string): EntryMeta {
   };
 }
 
+/** 相手の欄に焦点を当てる(候補はこのとき詰まる、#1087)。 */
+function focusTarget(root: HTMLElement): HTMLInputElement {
+  const t = root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]')!;
+  t.focus();
+  return t;
+}
+
 describe('関係の導線', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -145,6 +152,7 @@ describe('関係の導線', () => {
       meta(`n${i}`, `t${i}`),
     );
     const { root } = mounted(many);
+    focusTarget(root);
     const opts = [...root.querySelectorAll('#pkc-relation-candidates option')];
     expect(opts.length).toBe(RELATION_CANDIDATE_MAX + 1);
     expect(opts[opts.length - 1]!.getAttribute('value') ?? '').toContain('ほかに 4 件');
@@ -152,9 +160,33 @@ describe('関係の導線', () => {
 
   it('自分自身は候補に出ない(張れないものを見せない)', () => {
     const { root } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
+    focusTarget(root);
     const values = [...root.querySelectorAll('#pkc-relation-candidates option')].map((o) =>
       o.getAttribute('value'),
     );
     expect(values).toEqual(['い']);
+  });
+
+  it('🔴 候補は欄に焦点が当たるまで詰めない(選ぶたびに 200 個を作り直さない、#1087)', () => {
+    const { root, d } = mounted([meta('n1', 'あ'), meta('n2', 'い'), meta('n3', 'う')]);
+    const count = (): number => root.querySelectorAll('#pkc-relation-candidates option').length;
+    expect(count(), '触る前は空').toBe(0);
+    focusTarget(root);
+    expect(count()).toBe(2);
+    // 別のノートを選び直しても、欄に焦点が無ければ詰め直さない(古いままでよい)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    // ⚠ 次に触ったとき、自分(n2)が外れた最新の候補になる
+    focusTarget(root);
+    const values = [...root.querySelectorAll('#pkc-relation-candidates option')].map((o) =>
+      o.getAttribute('value'),
+    );
+    expect(values).toEqual(['あ', 'う']);
+    // 焦点が欄に在る間に選び直したら、その場で詰め直す(打っている最中に候補が古くならない)
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n3' });
+    expect(
+      [...root.querySelectorAll('#pkc-relation-candidates option')].map((o) =>
+        o.getAttribute('value'),
+      ),
+    ).toEqual(['あ', 'い']);
   });
 });

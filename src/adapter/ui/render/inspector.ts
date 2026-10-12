@@ -128,6 +128,8 @@ export class InspectorRenderer {
   private buttons: Buttons = new Map();
   /** 相手の候補(#185)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private candidates: HTMLDataListElement | null = null;
+  /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
+  private candidateSource: { metas: ReadonlyMap<string, EntryMeta>; lid: string } | null = null;
   /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private tagCandidates: HTMLDataListElement | null = null;
 
@@ -881,19 +883,18 @@ export class InspectorRenderer {
      * 相手の候補。⚠ **出し切れないときは件数を書く**(黙って切らない)。
      * ⚠ 自分自身は候補から外す(張れないものを見せない)。
      */
-    if (this.candidates) {
-      const others = [...state.entryMetas.values()].filter((m) => m.lid !== meta.lid);
-      this.candidates.textContent = '';
-      for (const m of others.slice(0, RELATION_CANDIDATE_MAX)) {
-        const opt = document.createElement('option');
-        opt.value = m.title;
-        this.candidates.append(opt);
-      }
-      if (others.length > RELATION_CANDIDATE_MAX) {
-        const more = document.createElement('option');
-        more.value = `(候補は ${RELATION_CANDIDATE_MAX} 件まで表示。ほかに ${others.length - RELATION_CANDIDATE_MAX} 件あります)`;
-        this.candidates.append(more);
-      }
+    /**
+     * 🔴 **候補は、欄に焦点が当たったときに詰める**(#1087)。
+     *
+     * 直す前はノートを選ぶたびに 200 個の `<option>` を作り直していた ── 平置き 3,000 行で
+     * 実ブラウザの trace を取ると、選ぶ 1 回あたり style の再計算が約 12ms・JS が約 25ms
+     * (`<input list>` が選択肢の増減のたびに無効化されるため)。⚠ 候補が見えるのは**欄を
+     * 触ったときだけ**なので、触る前に詰める理由が無い。
+     * ⚠ 焦点が既に欄に在るなら、その場で詰め直す(打っている最中に候補が古くならない)。
+     */
+    this.candidateSource = { metas: state.entryMetas, lid: meta.lid };
+    if (this.relAdd && this.relAdd.target.ownerDocument.activeElement === this.relAdd.target) {
+      this.fillCandidates();
     }
     /**
      * 🔴 **いま使われているタグを候補に出す**(#494 段②)。
@@ -1190,6 +1191,27 @@ export class InspectorRenderer {
     bar.add.title = editing ? withBlockedNote(base, blockedNote) : base;
   }
 
+  /**
+   * 相手の候補を詰める(#1087)。⚠ 自分自身は外す(張れないものを見せない)。
+   * ⚠ 出し切れないときは件数を書く(黙って切らない)。
+   */
+  private fillCandidates(): void {
+    const src = this.candidateSource;
+    if (!this.candidates || !src) return;
+    const others = [...src.metas.values()].filter((m) => m.lid !== src.lid);
+    this.candidates.textContent = '';
+    for (const m of others.slice(0, RELATION_CANDIDATE_MAX)) {
+      const opt = document.createElement('option');
+      opt.value = m.title;
+      this.candidates.append(opt);
+    }
+    if (others.length > RELATION_CANDIDATE_MAX) {
+      const more = document.createElement('option');
+      more.value = `(候補は ${RELATION_CANDIDATE_MAX} 件まで表示。ほかに ${others.length - RELATION_CANDIDATE_MAX} 件あります)`;
+      this.candidates.append(more);
+    }
+  }
+
   /** 器を組む(形が変わったときだけ呼ばれる)。 */
   private build(shape: Shape): void {
     this.region.textContent = '';
@@ -1409,6 +1431,8 @@ export class InspectorRenderer {
     const list = document.createElement('datalist');
     list.id = 'pkc-relation-candidates';
     this.candidates = list;
+    // 🔑 候補は触る前に詰めない(`paint` の注釈)。欄が作り直されたら listener も一緒に消える
+    target.addEventListener('focus', () => this.fillCandidates());
     const kind = document.createElement('select');
     kind.setAttribute('data-pkc-field', 'relation-kind');
     kind.setAttribute('aria-label', 'つながりの種類');
