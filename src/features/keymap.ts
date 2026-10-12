@@ -1011,7 +1011,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'すべて置換',
     contexts: ['global'],
     defaults: [],
-    note: '編集中の本文で、探す語を全部置き換えます。探す語が空なら、その欄へ移ります(置換の欄を開いているときだけ効きます)',
+    note: '編集中の本文で、探す語を全部置き換えます。探す語が空なら、その欄へ移ります(編集中に、置換の欄を開いているときだけ効きます)',
     alias: '置換 置き換え 一括 検索',
   },
   {
@@ -1091,7 +1091,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'お知らせを開く',
     contexts: ['global'],
     defaults: [],
-    note: 'これまでのお知らせを、システムの画面で開きます(編集中は効きません)',
+    note: 'これまでのお知らせを、システムの画面で開きます(「設定」のボタンが出ているときだけ効きます)',
     alias: 'お知らせ 通知 更新 変更点 バージョン',
   },
   {

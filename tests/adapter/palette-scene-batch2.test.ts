@@ -65,7 +65,7 @@ const BATCH2: readonly Row[] = [
   { id: 'storage-profile', source: R + 'commands.ts', scene: '「保存領域」を開いているとき' },
   { id: 'contacts-quick-add', source: R + 'contacts.ts', scene: '連絡先の画面を開いているとき', field: 'contacts-quick-name' },
   { id: 'export-vcards', source: R + 'contacts.ts', scene: '連絡先の画面を開いていて' },
-  { id: 'open-system-notices', source: R + 'help.ts', scene: '編集中は効きません' },
+  { id: 'open-system-notices', source: R + 'help.ts', scene: '「設定」のボタンが出ているとき' },
   { id: 'add-url-tile', source: R + 'launcher.ts', scene: 'アプリの画面を開いているとき', field: 'launcher-add-url' },
   { id: 'pc-pick-folder', source: R + 'pc-folder.ts', scene: 'PC のフォルダの画面を開いているとき' },
   { id: 'hide-history', source: R + 'detail.ts', scene: 'ノートの履歴を開いているとき' },
@@ -107,7 +107,7 @@ function mount(root: HTMLElement, row: Row, opts: { value?: string; hidden?: boo
   return b;
 }
 
-function setup() {
+function setup(editing = false) {
   document.body.innerHTML = '';
   resetAppDialogForTest();
   const root = document.createElement('div');
@@ -125,10 +125,18 @@ function setup() {
   bindActions(root, d, { showStatus: (t) => said.push(t) }, store);
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', '議事録')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+  if (editing) {
+    // ⚠ 編集に入れるのは「本文が読めている選択中のノート」だけ ── 3 手要る
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    if (d.getState().phase !== 'editing') throw new Error('前提が崩れている(編集に入れていない)');
+  }
   sent.length = 0;
   return { root, d, sent, said, store };
 }
 
+/** 編集中にしか効かない物(置換)は、編集中の台で組む。 */
+const ed = (id: string): boolean => id === 'replace-all';
 const noop = (): void => {};
 const run = (env: ReturnType<typeof setup>, id: string, dry = false): boolean =>
   runGlobalCommand(id, env.root, env.d, env.store, noop, (t) => env.said.push(t), dry);
@@ -169,35 +177,72 @@ describe('第 2 群 26 件の登記(#582 段③)', () => {
     }
   });
 
-  it('④ 一覧の字は、画面のボタンの字と同じ(source から引く ── 手で書いた期待値にしない)', () => {
+  /**
+   * 画面のボタンを**組んでいる所**(その action を属性として置く行の近く)を全部返す。
+   * ⚠ file 全体の `includes` にしない ── 別のボタンの字や注釈に満たされて、字が違っても緑になる。
+   * 組み方は 4 通り:`setAttribute('data-pkc-action', 'x')` / `action: 'x'` / `iconButton('x', …)` / `button('x', …)`。
+   */
+  const NEAR = 700;
+  const builtAt = (src: string, id: string): string[] => {
+    const re = new RegExp(`(?:data-pkc-action['"\`],\\s*|action:\\s*|iconButton\\(\\s*|button\\(\\s*)['"]${id}['"]`, 'g');
+    return [...src.matchAll(re)].map((m) => src.slice(Math.max(0, m.index! - NEAR), m.index! + NEAR));
+  };
+
+  it('④ 一覧の字は、そのボタンを組んでいる所の近くに在る画面の字と同じ(source から引く ── 手で書いた期待値にしない)', () => {
     for (const r of BATCH2) {
       const label = findCommand(r.id)?.label ?? '';
       expect(label, `${r.id} の字が空`).not.toBe('');
       const src = readFileSync(r.source, 'utf-8');
+      const spots = builtAt(src, r.id);
+      expect(spots.length, `${r.id}: 画面(${r.source})に、この action のボタンを組む所が無い`).toBeGreaterThan(0);
       const needle = r.screenText ?? label;
-      // 組み立てる字(vCard は件数つき / 2 ペインは「左に」「右に」が前に付く)は語そのもので見る。それ以外は引用符で囲んだ字そのもの
+      // 組み立てる字(vCard は件数つき / 2 ペインは「左に」「右に」が前に付く / 点検は定数)は語そのもので見る。それ以外は引用符で囲んだ字そのもの
       const loose = r.id === 'export-vcards' || r.id === 'dual-tab-add' || r.id === 'db-check';
-      const hit = loose ? src.includes(needle === label ? label : needle) : src.includes(`'${needle}'`);
+      const hit = spots.some((w) => (loose ? w.includes(needle) : w.includes(`'${needle}'`)));
       // 点検のボタンの字は定数から引かれる ── 一覧の字も同じ定数でなければならない
       if (r.id === 'db-check') expect(label, '点検の字が画面の定数と違う').toBe(DB_CHECK_LABEL);
-      expect(hit, `${r.id}: 画面(${r.source})に「${needle}」という字が無い`).toBe(true);
+      expect(hit, `${r.id}: そのボタンを組む所の近く(${r.source})に「${needle}」という字が無い`).toBe(true);
     }
-    // 一覧の字が画面の字そのものになっている物(screenText が別の物は上の表で名指し)
-    for (const r of BATCH2.filter((x) => x.screenText === undefined)) {
-      expect(findCommand(r.id)?.label.length).toBeGreaterThan(0);
+  });
+
+  it('④ 空振り防止:近くの字で見る門は、別のボタンの字では満たされない', () => {
+    // 同じ file の別のボタンの字(実在する)を、この action の字として渡すと外れる
+    const src = readFileSync(R + 'filer.ts', 'utf-8');
+    const spots = builtAt(src, 'show-trash');
+    expect(spots.length).toBeGreaterThan(0);
+    expect(spots.some((w) => w.includes("'ゴミ箱を開く'")), '前提:自分の字は近くに在る').toBe(true);
+    expect(spots.some((w) => w.includes("'選択を解除'")), '離れた別のボタンの字に満たされている').toBe(false);
+  });
+
+  it('D 欄の綴りと action の綴りは、画面を組む所に在る(binder の表と画面の食い違いで dead click にならない)', () => {
+    const binder = readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8');
+    for (const r of FIELD_FIRST) {
+      // binder の表(PALETTE_FIELD_FIRST)に、この欄の綴りが書いてある
+      expect(binder.includes(`'${r.id}': { field: '[data-pkc-field="${r.field}"]'`), `${r.id}: binder の表の欄が違う`).toBe(true);
+      // 画面を組む所に、同じ綴りの欄が在る(contacts は `contacts-quick-${field}` + `input('name'` で組む)
+      const src = readFileSync(r.source, 'utf-8');
+      const literal = new RegExp(`data-pkc-field['"\`],\\s*['"]${r.field}['"]`).test(src) ||
+        (src.includes(`'${r.field}'`) && src.includes('data-pkc-field'));
+      const m = /^(.+)-(name)$/.exec(r.field!);
+      const templated = m !== null && src.includes('`' + m[1] + '-${field}`') && src.includes(`input('${m[2]}'`);
+      expect(literal || templated, `${r.id}: 画面(${r.source})に欄 ${r.field} を組む所が無い`).toBe(true);
+    }
+    // 受け手の action も、画面で置いている(PLAIN は表と綴りが同じ ── ⑤ が見る)
+    for (const r of PLAIN) {
+      expect(builtAt(readFileSync(r.source, 'utf-8'), r.id).length, `${r.id}: 画面に action の綴りが無い`).toBeGreaterThan(0);
     }
   });
 
   it('① 一覧から呼ぶと、画面のボタンが 1 回押され、直接押したときと同じ dispatch 列になる', () => {
     for (const r of PLAIN) {
-      const viaBtn = setup();
+      const viaBtn = setup(ed(r.id));
       const b1 = mount(viaBtn.root, r, { value: 'x' });
       let n1 = 0;
       b1.addEventListener('click', () => n1++);
       b1.click();
       const direct = shape(viaBtn.sent);
 
-      const viaPalette = setup();
+      const viaPalette = setup(ed(r.id));
       const b2 = mount(viaPalette.root, r, { value: 'x' });
       let n2 = 0;
       b2.addEventListener('click', () => n2++);
@@ -227,7 +272,7 @@ describe('第 2 群 26 件の登記(#582 段③)', () => {
     };
     for (const [id, type] of Object.entries(EXPECT)) {
       const row = BATCH2.find((x) => x.id === id)!;
-      const env = setup();
+      const env = setup(ed(id));
       mount(env.root, row, { value: 'x' });
       expect(run(env, id)).toBe(true);
       expect(shape(env.sent), `${id}`).toContain(type);
@@ -257,7 +302,7 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
   });
 
   it('ボタンが在れば、押せるもの(PLAIN 24 件)が押せる(灰色が「在るのに押せない」になっていない)', () => {
-    const env = setup();
+    const env = setup(true);
     for (const r of PLAIN) mount(env.root, r, { value: 'x' });
     const rows = commandRowsFor(env.root, env.d, env.store, '', null);
     for (const r of PLAIN) expect(rows.find((x) => x.id === r.id)?.ready, r.id).toBe(true);
@@ -265,16 +310,33 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
 
   it('`hidden` の中に居るボタンは押せない ── 隠れた切替 / 別のタブへ移った後の面を「押せます」と言わない', () => {
     for (const r of PLAIN) {
-      const env = setup();
+      const env = setup(ed(r.id));
       mount(env.root, r, { hidden: true, value: 'x' });
       expect(rowOf(env, r.id)?.ready, `${r.id}: 隠れているのに押せる顔`).toBe(false);
       expect(run(env, r.id), `${r.id}: 隠れているのに走った`).toBe(false);
       expect(env.sent, `${r.id}: 隠れた物が動いた`).toEqual([]);
       // 対照群:同じボタンを隠さなければ押せる(隠した効果であることを見る)
-      const ok = setup();
+      const ok = setup(ed(r.id));
       mount(ok.root, r, { value: 'x' });
       expect(rowOf(ok, r.id)?.ready, `${r.id}: 隠さなくても押せない(対照群が崩れている)`).toBe(true);
     }
+  });
+
+  it('すべて置換は編集中にしか効かない ── 置換の欄が開いたまま残っていても、編集中でなければ灰色(REPLACE_IN_BODY が黙って捨てる)', () => {
+    const row = BATCH2.find((x) => x.id === 'replace-all')!;
+    const idle = setup(false);
+    mount(idle.root, row, { value: 'a' });
+    const r = rowOf(idle, 'replace-all');
+    expect(r?.ready, '編集中でないのに押せる顔').toBe(false);
+    expect(r?.why, '真の理由(編集中に使う)が出ていない').toContain('編集中に');
+    expect(run(idle, 'replace-all'), '編集中でないのに走った').toBe(false);
+    expect(idle.sent, '編集中でないのに何かを撃った').toEqual([]);
+    // 対照群:同じ台で編集に入れば押せて、置換の action が出る
+    const editing = setup(true);
+    mount(editing.root, row, { value: 'a' });
+    expect(rowOf(editing, 'replace-all')?.ready).toBe(true);
+    expect(run(editing, 'replace-all')).toBe(true);
+    expect(shape(editing.sent)).toContain('REPLACE_IN_BODY');
   });
 
   it('`disabled` のボタンは押せない(理由はボタン自身が持つ)', () => {
@@ -296,7 +358,7 @@ describe('③ 欄が先に要る 3 件:空なら欄へ移り、字が入って�
 
   it.each(FIELD_FIRST.map((r) => r.id))('%s', (id) => {
     const row = BATCH2.find((x) => x.id === id)!;
-    const env = setup();
+    const env = setup(ed(id));
     const btn = mount(env.root, row, { value: '' });
     let pressed = 0;
     btn.addEventListener('click', () => pressed++);
@@ -307,7 +369,7 @@ describe('③ 欄が先に要る 3 件:空なら欄へ移り、字が入って�
     expect(env.said.length, `${id}: 何も言わない`).toBe(1);
     expect(env.said[0]).toContain(findCommand(id)?.label ?? '?');
 
-    const env2 = setup();
+    const env2 = setup(ed(id));
     const btn2 = mount(env2.root, row, { value: 'あ' });
     let pressed2 = 0;
     btn2.addEventListener('click', () => pressed2++);
@@ -317,7 +379,7 @@ describe('③ 欄が先に要る 3 件:空なら欄へ移り、字が入って�
 
   it.each(FIELD_FIRST.map((r) => r.id))('%s: 別の面に同名の空の欄が先に居ても、押したボタンと同じ親の欄を見る', (id) => {
     const row = BATCH2.find((x) => x.id === id)!;
-    const env = setup();
+    const env = setup(ed(id));
     const decoy = document.createElement('input');
     decoy.setAttribute('data-pkc-field', row.field!);
     env.root.append(decoy);
@@ -361,20 +423,6 @@ describe('⑥ 特例 2 件', () => {
     expect(run(env, 'open-system-notices')).toBe(true);
     expect(shape(env.sent), '一覧から呼んだ列が、ヘルプの押し口と違う').toEqual(shape(viaHelp.sent));
     expect(scroll, 'お知らせの節へ送っていない').toHaveBeenCalledTimes(1);
-
-    // 設定のボタンが押せない間(編集中)は、押せない + 走らない
-    const blocked = setup();
-    const g2 = document.createElement('button');
-    g2.setAttribute('data-pkc-action', 'set-view');
-    g2.setAttribute('data-pkc-view', 'settings');
-    g2.disabled = true;
-    g2.setAttribute('data-pkc-blocked', '編集中です。保存かキャンセルをしてください');
-    blocked.root.append(g2);
-    const r = rowOf(blocked, 'open-system-notices');
-    expect(r?.ready).toBe(false);
-    expect(r?.why).toContain('編集中です');
-    expect(run(blocked, 'open-system-notices')).toBe(false);
-    expect(blocked.sent).toEqual([]);
   });
 
   it('タブを足す:焦点の在る側のボタンを押す(左右に同じボタンが居ても、いつも左にならない)', () => {

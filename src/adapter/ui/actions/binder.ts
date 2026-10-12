@@ -4722,11 +4722,12 @@ export function runGlobalCommand(
   /**
    * 🔴 **お知らせを開く**(#582 段③ 第 2 群)── 押しボタンはヘルプの面の中にしか無く、面は開くまで組まれない
    *   (`open-manual-window` と同じ事情)。実体は `open-system-notices` の受け手と同じ `openSystemNotices` 1 本。
-   * ⚠ 「システム」を開けるかは**画面の「設定」ボタン**が決める(編集中は押せない ── `open-settings` と同じ門)。
+   * ⚠ 「システム」を開けるかは**画面の「設定」ボタンが出ているか**で決める(`open-settings` と同じ受け手。編集中も開ける ──
+   *   `settings` は `ASIDE_PANES` に居るので、実ブラウザでも編集中に開いた)。押せない理由を持つ `disabled` の状態は無い。
    */
   if (cmd === 'open-system-notices') {
     const gate = root.querySelector<HTMLElement>(SHORTCUT_BUTTON['open-settings']!);
-    if (gate === null || (gate instanceof HTMLButtonElement && gate.disabled)) return false;
+    if (gate === null) return false;
     if (dry) return true;
     prevent();
     openSystemNotices(dispatcher, root);
@@ -4930,6 +4931,13 @@ export function runGlobalCommand(
    *   2 つ目の判定を作らずに済む(CLAUDE.md §7)。
    */
   if (cmd === 'close-pane' && dispatcher.getState().viewMode === 'detail') return false;
+  /**
+   * 🔴 **「すべて置換」は編集中にしか効かない**(#582 段③ 第 2 群の着地前レビュー)。
+   * ⚠ 置換の欄は保存した後も開いたまま残る(`REPLACE_IN_BODY` は `phase !== 'editing'` で黙って捨てる)ので、
+   *   ボタンが画面に在るだけでは「押せる」と言えない。理由は `keymap.ts` の `note`(編集中に使う)が言う。
+   * ⚠ ここは**押せるか**だけ ── 受け手(`replace-all` の本文)には触れない。
+   */
+  if (cmd === 'replace-all' && dispatcher.getState().phase !== 'editing') return false;
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);
@@ -5086,8 +5094,7 @@ export function commandRowsFor(
     if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
     // 「マニュアルを別のウィンドウで開く」(#1452 案 1)── 押せないのは配線が無い版だけ(phase では断らない)
     if (id === 'open-manual-window') return ROOT_SERVICES.get(root)?.openManualWindow === undefined ? MANUAL_WINDOW_STALE : null;
-    // 「お知らせを開く」(#582 段③)は押しボタンを持たない ── 「システム」を開く門(設定のボタン)の理由を使う
-    const sel = SHORTCUT_BUTTON[id === 'open-system-notices' ? 'open-settings' : id];
+    const sel = SHORTCUT_BUTTON[id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
   };
