@@ -253,6 +253,36 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await mouseIcon.click();
   await expect(dialog).toBeHidden();
   await expect(liveRow, 'マウスで開いたら、アイコンが本文の先頭に入った').toHaveValue(`hello:${mouseIconName}: world`);
+  /**
+   * ⑩-b 🔴 **左の探す欄の `>` から呼んでも、1 面の行の「打っていた場所」に入る**(#582)。
+   * ⚠ 同じ起動の続き。探す欄を押すと行が確定して消える(前提として確かめる)── 消えた行を開き直して caret を戻してから入れる。
+   *   日付(小窓が同期で開く)とアイコン(選ぶ一覧が非同期で出る)の 2 つを見る。
+   */
+  const leftFilter = page.locator('[data-pkc-field="entry-filter"]');
+  const callFromLeft = async (q: string, cmd: string): Promise<void> => {
+    await caretAt('hello world', 5);
+    await clickReal(page, '[data-pkc-field="entry-filter"]');
+    await expect(liveRow, '前提: 探す欄を押したら行が確定して消える').toHaveCount(0);
+    await leftFilter.fill(q);
+    const rowBtn = page.locator(`[data-pkc-region="sidebar"] [data-pkc-command="${cmd}"]`);
+    await expect(rowBtn, `左の一覧に「${q}」が出ていない`).toBeEnabled();
+    await rowBtn.click();
+  };
+  await callFromLeft('>日付を入れる', 'insert-date');
+  await page.locator('[data-pkc-field="pick-shortcut"]').first().click();
+  await page.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(dialog).toBeHidden();
+  await expect(liveRow, '左の探す欄から呼んだ日付が、打っていた場所に入っていない').toHaveValue(
+    /^hello @\d{4}-\d{2}-\d{2} world$/u,
+  );
+  await callFromLeft('>アイコンを入れる', 'insert-icon');
+  const leftIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
+  const leftIconName = await leftIcon.getAttribute('data-pkc-icon-name');
+  await leftIcon.click();
+  await expect(dialog).toBeHidden();
+  await expect(liveRow, '左の探す欄から呼んだアイコンが、打っていた場所に入っていない').toHaveValue(
+    `hello:${leftIconName}: world`,
+  );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   /**
@@ -573,6 +603,20 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
   await colIcon.click();
   await expect(dialog).toBeHidden();
   await expect(ta, '2 列でマウスで開いたら、アイコンが本文の先頭に入った').toHaveValue(`hello:${colIconName}: world`);
+
+  /** 2 列の編集は欄が残るので、左の探す欄の `>` からも(開き直しの手前の道を通らず)打っていた場所に入る(#582。壊していないことの対照群)。 */
+  await ta.fill('hello world');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
+  await clickReal(page, '[data-pkc-field="entry-filter"]');
+  await page.locator('[data-pkc-field="entry-filter"]').fill('>アイコンを入れる');
+  await page.locator('[data-pkc-region="sidebar"] [data-pkc-command="insert-icon"]').click();
+  const leftColIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
+  const leftColIconName = await leftColIcon.getAttribute('data-pkc-icon-name');
+  await leftColIcon.click();
+  await expect(dialog).toBeHidden();
+  await expect(ta, '2 列で左の探す欄から呼んだアイコンが、打っていた場所に入っていない').toHaveValue(
+    `hello:${leftColIconName}: world`,
+  );
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

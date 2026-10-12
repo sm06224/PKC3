@@ -135,7 +135,13 @@ import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
 import { isIconName } from '@features/icon/symbols';
-import { insertBlockText, insertText, OWN_MEANING } from '@adapter/ui/render/row-swap';
+import {
+  insertBlockText,
+  insertText,
+  OWN_MEANING,
+  ROW_REOPEN_EVENT,
+  type RowReopenDetail,
+} from '@adapter/ui/render/row-swap';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import {
   HOLD_ATTR,
@@ -5089,6 +5095,64 @@ export function commandRowsFor(
   ).filter((r) => r.id !== 'open-palette');
 }
 
+/**
+ * 🔴 **1 面のライブ編集で、左の探す欄へ焦点が移る直前の「打っていた行」**(#582)。
+ *
+ * ⚠ 探す欄を押すと焦点が外れて行は確定し、`row-source` が DOM から消える ── そのままでは `>` の一覧から
+ *   「日付を入れる」などを選んでも書き込む欄が無い。消える前に、どの行の・どの字で・どこに caret が居たかを控える。
+ * ⚠ 控えるのは**行が探す欄へ焦点を渡した瞬間だけ**(それ以外の blur では捨てる ── 古い控えで別の場所へ入れない)。
+ */
+interface LiveRowMemo {
+  readonly root: HTMLElement;
+  readonly lid: string;
+  readonly line: number;
+  readonly source: string;
+  readonly start: number;
+  readonly end: number;
+}
+let liveRowMemo: LiveRowMemo | null = null;
+/** 控えを取り出して捨てる。⚠ `>` の一覧の行を押したら、どの命令でも**まず捨てる**(次の別の操作が古い控えを拾わない)。 */
+function takeLiveRowMemo(): LiveRowMemo | null {
+  const m = liveRowMemo;
+  liveRowMemo = null;
+  return m;
+}
+/** 控えを持ったまま居てよい場所(探す欄と、その一覧の行)。 */
+const MEMO_KEEP = '[data-pkc-field="entry-filter"],[data-pkc-action="run-command-row"]';
+
+/**
+ * 🔴 **左の `>` の一覧から「打っている場所に入れる」操作を呼ぶ前に、1 面の行を開き直して caret を戻す**(#582)。
+ *
+ * @returns `true` = 呼び側がそのまま実行してよい(欄が在る / 開き直せた)。`false` = 実行しない(理由は出した。
+ *   予約に回ったときは着弾後に `run` を呼ぶ ── 同期とは限らない)
+ * ⚠ 控えと違う行が開いたとき(本文が変わった / 別のノート / 面が違う)は `FIELD_CHANGED` で断る。
+ *   戻し方は「操作を探す」(`openPaletteFor`)と同じく**範囲を setSelectionRange で戻す**1 本 ── 欄の側(`RowSwap.finishRestore`)が持つ。
+ */
+function reopenLiveRowThen(env: CommandEnv, id: string, memo: LiveRowMemo | null, run: () => void): boolean {
+  if (!CARET_INSERT_TOOLS.has(id)) return true;
+  // 欄が在る(2 列の編集など)── 選択が欄に残っているので、そのまま実行する
+  if (memo === null || memo.root !== env.root || formatTarget(env.root) !== null) return true;
+  // 探す欄が `>` の一覧を出していないなら、この控えは今の操作のものではない(古い控えで行を開かない)
+  if (!env.dispatcher.getState().filterQuery.trimStart().startsWith('>')) return true;
+  const pane = env.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
+  if (pane === null || env.dispatcher.getState().openBody?.lid !== memo.lid) {
+    env.dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
+    return false;
+  }
+  const detail: RowReopenDetail = {
+    line: memo.line,
+    source: memo.source,
+    start: memo.start,
+    end: memo.end,
+    done: (ok) => {
+      if (ok) run();
+      else env.dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
+    },
+  };
+  pane.dispatchEvent(new CustomEvent<RowReopenDetail>(ROW_REOPEN_EVENT, { detail }));
+  return false;
+}
+
 /** 一覧を開いている間に、書き込む欄が組み直されたとき(記法 / 本文の欄へ当てる命令 / 打っている場所に入れる命令で共通)。 */
 const FIELD_CHANGED = '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)';
 
@@ -6384,11 +6448,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   'run-command-row': (dispatcher, target, services, root) => {
     const id = target.closest<HTMLElement>('[data-pkc-command]')?.getAttribute('data-pkc-command');
     if (id === null || id === undefined) return;
+    const memo = takeLiveRowMemo();
     const from = dispatcher.getState().filterQuery;
-    runCommandRow(
-      id,
-      { root, dispatcher, keymap: appKeymap, notify: (t, o) => services.showStatus?.(t, o) },
-      {
+    const env: CommandEnv = { root, dispatcher, keymap: appKeymap, notify: (t, o) => services.showStatus?.(t, o) };
+    const exec = (): void => {
+      runCommandRow(id, env, {
         onDone: () => {
           // 🔴 実行が**済んだ**ときだけ憶える(相手を選ぶ小窓をやめた回は呼ばれない)。
           //   ⚠ 鍵は label ではなく id(改名で変わらない)
@@ -6396,8 +6460,10 @@ const ACTIONS: Record<string, ActionHandler> = {
           if (dispatcher.getState().filterQuery === from)
             dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
         },
-      },
-    );
+      });
+    };
+    // 🔴 1 面のライブ編集では、探す欄を押した時点で行が消えている ── 開き直して caret を戻してから実行する(#582)
+    if (reopenLiveRowThen(env, id, memo, exec)) exec();
   },
   /**
    * 🔴 **コピーした物を選ぶ**(#678)── **もう一度コピーする**(その場へ差し込まない)。
@@ -17554,6 +17620,48 @@ export function bindActions(
   listen(root, 'focusin', onTagFocusIn);
   listen(root, 'focusin', onDualFocusIn);
   listen(root, 'focusout', onRenameBlur);
+  /**
+   * 🔴 **1 面の行が左の探す欄へ焦点を渡すとき、打っていた行を控える**(#582)。
+   * ⚠ `blur` を**捕まえる段**(capture)で聴く ── 行自身の `blur` が確定して `row-source` を DOM から外すより前に読むため
+   *   (外れた節点の `focusout` は root へ上がらない)。⚠ 探す欄以外へ移るときは**控えを捨てる**。
+   */
+  listen(
+    root,
+    'blur',
+    (ev) => {
+      const ta = ev.target;
+      if (!(ta instanceof HTMLTextAreaElement) || ta.getAttribute('data-pkc-field') !== 'row-source') {
+        // 探す欄自身の blur(一覧の行を押す途中)は控えを残す。それ以外の場所から焦点が動いたら古い控えは捨てる
+        if (!(ta instanceof HTMLElement) || ta.getAttribute('data-pkc-field') !== 'entry-filter') liveRowMemo = null;
+        else if (ev.relatedTarget instanceof Element && !ev.relatedTarget.closest(MEMO_KEEP)) liveRowMemo = null;
+        return;
+      }
+      const to = ev.relatedTarget;
+      const lineAttr = ta.getAttribute('data-pkc-row-line');
+      const line = lineAttr === null ? Number.NaN : Number(lineAttr);
+      const lid = dispatcher.getState().openBody?.lid ?? null;
+      liveRowMemo =
+        to instanceof HTMLElement &&
+        to.getAttribute('data-pkc-field') === 'entry-filter' &&
+        lid !== null &&
+        Number.isInteger(line)
+          ? { root, lid, line, source: ta.value, start: ta.selectionStart, end: ta.selectionEnd }
+          : null;
+    },
+    true,
+  );
+  /**
+   * 🔴 **探す欄とその一覧の外を押したら、控えを捨てる**(#582)。
+   * ⚠ 本文の余白のように**焦点を持てない所**を押しても blur は飛ばない ── 控えだけが残り、後の `>` が古い行を開いてしまう。
+   */
+  listen(
+    root,
+    'mousedown',
+    (ev) => {
+      if (liveRowMemo !== null && !(ev.target instanceof Element && ev.target.closest(MEMO_KEEP))) liveRowMemo = null;
+    },
+    true,
+  );
   listen(doc, 'keydown', onShortcut);
   listen(root, 'keydown', onKeydown);
   // 🔴 波形の上のドラッグ(#1232)── 印は既存の `SET_CAPTURE_TRIM_MARK` に入る

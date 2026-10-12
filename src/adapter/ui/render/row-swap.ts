@@ -241,10 +241,31 @@ export interface RowSwapUpdate {
  * `body` / `starts` / `ends` が古い座標なので、そのまま開かずにここへ積む。
  */
 type PendingOpen =
-  | { kind: 'line'; line: number; caret: 'start' | 'end' }
+  | { kind: 'line'; line: number; caret: 'start' | 'end'; restore?: RowRestore }
   | { kind: 'append' }
   | { kind: 'all' }
   | { kind: 'first' };
+
+/**
+ * 🔴 **行を開き直して、打っていた場所へ caret を戻す依頼**(#582。左の探す欄の `>` から「打っている場所に入れる」操作を呼ぶ道)。
+ * ⚠ 探す欄を押すと行は確定して消える。binder が控えた「どの行の・どの字で・どこに caret が居たか」を持ち込み、
+ *   **開いた行の原文が控えと同じときだけ**戻す(違えば別の行を開いたことになるので、閉じて `done(false)`)。
+ */
+export interface RowRestore {
+  /** 控えた行の原文(`row-source` の値)。 */
+  source: string;
+  start: number;
+  end: number;
+  /** 開けて戻せたか。⚠ 予約に回ったときは着弾後に呼ばれる(同期とは限らない)。 */
+  done: (ok: boolean) => void;
+}
+
+/** 行を開き直す依頼(`RowSwap` が面の要素で聴く)。 */
+export const ROW_REOPEN_EVENT = 'pkc-row-reopen';
+export interface RowReopenDetail extends RowRestore {
+  /** 控えた行の開始行(`row-source` の `data-pkc-row-line`。frontmatter を外した側)。 */
+  line: number;
+}
 
 interface Active {
   /** 塊の添字(`view.blocks` の中)。⚠ 描き直しのたびに引き直す。 */
@@ -324,6 +345,7 @@ export class RowSwap {
   private painted = false;
   private readonly onClick: (ev: Event) => void;
   private readonly onDown: (ev: Event) => void;
+  private readonly onReopen: (ev: Event) => void;
 
   constructor(
     private readonly host: HTMLElement,
@@ -337,6 +359,11 @@ export class RowSwap {
   ) {
     this.onClick = (ev: Event) => this.handleClick(ev as MouseEvent);
     this.onDown = (ev: Event) => this.handleDown(ev as MouseEvent);
+    this.onReopen = (ev: Event) => {
+      const d = (ev as CustomEvent<RowReopenDetail>).detail;
+      this.reopenAt(d.line, d);
+    };
+    this.host.addEventListener(ROW_REOPEN_EVENT, this.onReopen, false);
     // ⚠ バブリング段で聴く(アプリ内のリンク・トグルの既定を先に奪わない)
     this.host.addEventListener('click', this.onClick, false);
     /**
@@ -353,6 +380,8 @@ export class RowSwap {
   dispose(): void {
     this.host.removeEventListener('click', this.onClick, false);
     this.host.removeEventListener('mousedown', this.onDown, false);
+    this.host.removeEventListener(ROW_REOPEN_EVENT, this.onReopen, false);
+    this.setPending(null);
     /**
      * 🔴 **打ちかけの字を先に確定してから、欄を外す**(#1219)。
      *
@@ -410,6 +439,7 @@ export class RowSwap {
     const part = buildBlockPartition(blocks, ranges, body.split('\n').length, scanContainers(body));
     if (!part.ok) {
       // 🔴 **壊れた分割の上で編集させない**(設計 §7-9)── 呼び側が原文編集へ退避
+      this.setPending(null);
       return { ok: false, reason: part.reason, inserted: [] };
     }
     /**
@@ -676,6 +706,17 @@ export class RowSwap {
    * 予約を果たす(描き直しの着弾後)。⚠ **先に読んでから消す** ── 中で呼ぶ
    * `activateLine` / `appendRow` は `open()` 経由でもう一度消しに来る(無害)。
    */
+  /**
+   * 🔴 **予約を置く / 捨てる唯一の口**(#582)。置き換えられる・捨てられる予約が開き直しの依頼(`restore`)を運んでいたら、
+   * 依頼元が**永久に待たない**ように `done(false)` を返す(ここを通らない捨て方をすると、命令が黙って何も起きない)。
+   * ⚠ 果たす側(`openPending`)は予約を**取り出す**のであって捨てないので、直に `null` を書く。
+   */
+  private setPending(next: PendingOpen | null): void {
+    const old = this.pendingOpen;
+    this.pendingOpen = next;
+    if (old !== null && old.kind === 'line' && old.restore !== undefined) old.restore.done(false);
+  }
+
   private openPending(): void {
     const p = this.pendingOpen;
     if (p === null) return;
@@ -694,7 +735,58 @@ export class RowSwap {
     }
     const idx = this.blockIndexForLine(p.line);
     // 予約した行の持ち主が消えた(確定で塊が合体した等)── それ以上は追わない
-    if (idx !== null) this.activateLine(idx, p.caret);
+    let opened = idx !== null && this.activateLine(idx, p.caret);
+    if (p.restore !== undefined) {
+      /**
+       * 🔴 **控えた行が塊の一部(箇条書きの項目 / 表の行)だったとき**。塊ごと開いて原文が合わなければ、
+       * 同じ行から始まる項目 / 行を探して開き直す(`resolveSubUnit` の逆引き ── 同じ型の範囲の中で何番目か)。
+       */
+      if (opened && idx !== null && this.active !== null && this.active.source !== p.restore.source) {
+        // ⚠ 先に畳む ── 畳むと塊は作り直されるので、要素は畳んだ後に引く(前に引くと外れた要素を掴む)
+        this.restoreActive();
+        const el = this.subElementAtLine(idx, p.line);
+        opened = el !== null && this.activate(idx, el, 0, 0, 'start');
+      }
+      this.finishRestore(opened, p.restore);
+    }
+  }
+
+  /** その塊の中で、`line` から始まる表の行 / 箇条書きの項目の要素(無ければ null)。 */
+  private subElementAtLine(blockIndex: number, line: number): Element | null {
+    const root = this.unitElement(blockIndex);
+    const bs = this.starts[blockIndex];
+    const be = this.ends[blockIndex];
+    if (root === null || bs === undefined || be === undefined) return null;
+    for (const u of SUB_UNITS) {
+      const within = this.ranges.filter((r) => r.type === u.type && r.start >= bs && r.end <= be);
+      const k = within.findIndex((r) => r.start === line);
+      if (k < 0) continue;
+      const el = root.querySelectorAll(u.selector)[k];
+      if (el !== undefined) return el;
+    }
+    return null;
+  }
+
+  /** 開き直した行が控えと同じ原文なら caret を戻す。違えば**書かずに閉じる**(別の行の先頭へ入れない)。 */
+  private finishRestore(opened: boolean, r: RowRestore): void {
+    const a = this.active;
+    if (!opened || a === null || a.source !== r.source) {
+      // ⚠ 確定ではなく畳むだけ(開いた行は触っていない)
+      if (opened && a !== null) this.restoreActive();
+      r.done(false);
+      return;
+    }
+    a.textarea.setSelectionRange(r.start, r.end);
+    r.done(true);
+  }
+
+  /**
+   * 🔴 **控えた行を、caret ごと開き直す**(#582)。
+   * ⚠ 行数が変わる確定の直後(座標が古い窓)は開かずに予約へ回す ── 着弾後に `openPending` が果たす(`openAt` と同じ仕組み)。
+   */
+  reopenAt(line: number, restore: RowRestore): void {
+    this.setPending({ kind: 'line', line, caret: 'start', restore });
+    if (this.painted && this.staleAfter === null && this.active === null) this.openPending();
   }
 
   /**
@@ -709,7 +801,7 @@ export class RowSwap {
    * @param line 原文の行(0 始まり・**frontmatter を外した側**の座標)
    */
   openAt(line: number): void {
-    this.pendingOpen = { kind: 'line', line, caret: 'end' };
+    this.setPending({ kind: 'line', line, caret: 'end' });
   }
 
   /**
@@ -726,7 +818,7 @@ export class RowSwap {
    */
   openFirst(): boolean {
     if (!this.painted) {
-      this.pendingOpen = { kind: 'first' };
+      this.setPending({ kind: 'first' });
       return true;
     }
     for (let i = 0; i < this.starts.length; i += 1) {
@@ -766,7 +858,7 @@ export class RowSwap {
        */
       const line =
         blockStart + (blockStart > this.staleAfter.end ? this.staleAfter.delta : 0);
-      this.pendingOpen = { kind: 'line', line, caret: caretAt ?? 'start' };
+      this.setPending({ kind: 'line', line, caret: caretAt ?? 'start' });
       return true;
     }
 
@@ -827,7 +919,7 @@ export class RowSwap {
     if (this.active !== null && !this.commitActive()) return false;
     if (this.staleAfter !== null) {
       // 🔴 座標が古い窓 ── 古い body で末尾を数えない(着弾後に開く。`activate` と同じ)
-      this.pendingOpen = { kind: 'append' };
+      this.setPending({ kind: 'append' });
       return true;
     }
     const lines = this.body.split('\n');
@@ -883,7 +975,7 @@ export class RowSwap {
      * ⚠ 「片側を直したら対称の反対側を疑う」── 3 つの入口のうち 2 つだけ直っていた。
      */
     if (this.staleAfter !== null) {
-      this.pendingOpen = { kind: 'all' };
+      this.setPending({ kind: 'all' });
       return true;
     }
     if (this.view.blocks.length === 0) return this.appendRow();
@@ -1007,8 +1099,8 @@ export class RowSwap {
     /** 塊の中の何番目を開いているか(#423)。`null` = 塊ごと。 */
     sub?: { selector: string; k: number } | null;
   }): boolean {
-    // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)
-    this.pendingOpen = null;
+    // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)。⚠ 待たせている依頼が在れば断りを返す
+    this.setPending(null);
     const r = applyBlocks(this.host, o.withSlot.join(''), this.view, [o.blockIndex]);
     this.view = r.view;
     if (r.inserted.length > 0) this.cb.onInserted(r.inserted);
@@ -1018,6 +1110,8 @@ export class RowSwap {
 
     const ta = document.createElement('textarea');
     ta.setAttribute('data-pkc-field', 'row-source');
+    // 🔑 開き直す先の行(#582)。⚠ 描き直しで塊の添字は変わるので、行番号を欄が運ぶ
+    ta.setAttribute('data-pkc-row-line', String(o.startLine));
     // ⚠ 読み上げから見て無名にしない(2026-08-19 の全数監査)── 1 面編集は
     //    「いま開いている行」を編むので、本文全体と**別の名前**にする
     ta.setAttribute('aria-label', 'この行の原文');

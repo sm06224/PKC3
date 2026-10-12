@@ -26,7 +26,12 @@ vi.mock('../../src/adapter/ui/render/app-dialog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/adapter/ui/render/app-dialog')>();
   return { ...actual, isAppDialogOpen: () => dialogState.open || actual.isAppDialogOpen() };
 });
-import { RowSwap, blockWithSubSlot } from '../../src/adapter/ui/render/row-swap';
+import {
+  RowSwap,
+  ROW_REOPEN_EVENT,
+  blockWithSubSlot,
+  type RowReopenDetail,
+} from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { KEY_COMMANDS } from '../../src/features/keymap';
 
@@ -1815,5 +1820,243 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
     r.render('まるごと別の本文。\n\n二つめの段落。');
     expect(box(r.host), '閉じられていない(座標がずれた状態で編集が続く)').toBeNull();
     expect(r.notes.join('/'), '無言で閉じた').toContain('外から本文が変わった');
+  });
+});
+
+/**
+ * 🔴 **探す欄へ焦点を渡して消えた行を、caret ごと開き直す**(#582。左の `>` から「打っている場所に入れる」操作を呼ぶ道)。
+ *
+ * 守るもの:① 開いた行が `data-pkc-row-line` を運ぶ(binder が行番号を控える材料)② 控えた行を開き直して選択を戻す
+ * (event 経由 = binder が使う口)③ **控えの原文と違う行が開くなら、書かずに閉じて `done(false)`**(別の行の先頭へ入れない)
+ * ④ 行数が変わる確定の直後は予約に回り、着弾後に果たす(古い座標で開かない)。
+ */
+describe('RowSwap — 控えた行の開き直し(#582)', () => {
+  const reopen = (r: Rig, d: Partial<RowReopenDetail> & { done: (ok: boolean) => void }): void => {
+    const detail: RowReopenDetail = { line: 2, source: '最初の段落。', start: 3, end: 3, ...d };
+    r.host.dispatchEvent(new CustomEvent(ROW_REOPEN_EVENT, { detail }));
+  };
+
+  it('開いた行が、原文の行番号を欄に刻む', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    expect(box(r.host)!.getAttribute('data-pkc-row-line')).toBe('2');
+  });
+
+  it('控えた行を開き直し、caret を戻してから done(true)(event 経由)', () => {
+    const r = rig();
+    const done = vi.fn();
+    reopen(r, { done });
+    const ta = box(r.host);
+    expect(ta, '行が開いていない').not.toBeNull();
+    expect(ta!.value).toBe('最初の段落。');
+    expect([ta!.selectionStart, ta!.selectionEnd], 'caret が途中に戻っていない(端に置いたまま)').toEqual([3, 3]);
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(done).toHaveBeenCalledWith(true);
+    // 対照群: 選んだ範囲も戻る
+    const r2 = rig();
+    reopen(r2, { start: 1, end: 4, done: vi.fn() });
+    expect([box(r2.host)!.selectionStart, box(r2.host)!.selectionEnd]).toEqual([1, 4]);
+  });
+
+  it('🔴 控えの原文と違う行が開くなら、書かずに閉じて done(false)', () => {
+    const r = rig();
+    const done = vi.fn();
+    reopen(r, { source: '別の字になった行', done });
+    expect(box(r.host), '違う行を開いたまま残した').toBeNull();
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(done).toHaveBeenCalledWith(false);
+    expect(r.commits, '閉じるだけで書いてはいけない').toEqual([]);
+    expect(r.body()).toBe(DOC);
+    // 行の持ち主が居ない(範囲外)もそっと断る
+    const done2 = vi.fn();
+    reopen(r, { line: 999, done: done2 });
+    expect(done2).toHaveBeenCalledTimes(1);
+    expect(done2).toHaveBeenCalledWith(false);
+  });
+
+  it('🔴 行数が変わる確定の直後は、開かずに予約し、着弾後に果たす', () => {
+    const r = rig(DOC, true);
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const ta = box(r.host)!;
+    ta.value = '最初の段落。\n二行目を足した';
+    ta.dispatchEvent(new Event('blur')); // 探す欄へ移った = 確定(行数が 1 増える。描き直しはまだ来ない)
+    expect(r.commits).toHaveLength(1);
+    const done = vi.fn();
+    reopen(r, { source: '最初の段落。\n二行目を足した', start: 3, end: 3, done });
+    expect(box(r.host), '古い座標のまま開いた').toBeNull();
+    expect(done).not.toHaveBeenCalled();
+    r.flush();
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(done).toHaveBeenCalledWith(true);
+    expect(box(r.host)!.selectionStart).toBe(3);
+  });
+
+  it('dispose の後は聴かない', () => {
+    const r = rig();
+    r.swap.dispose();
+    const done = vi.fn();
+    reopen(r, { done });
+    expect(box(r.host)).toBeNull();
+    expect(done).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 🔴 **開き直しの依頼は、どの捨て方でも `done(false)` で断りが返る**(#582 着地前レビュー F1)。
+ * ⚠ 予約が黙って捨てられると、命令は「何も起きない」まま終わる(押したのに無反応)。捨て方は 7 通り ──
+ *   置き換え(別の開き直し / 別の予約 3 種)・`open()` が用済みにする・分割が組めなくなる・`dispose`。
+ * 🔑 全部 `setPending` 1 本を通る。1 つずつ「`done` がちょうど 1 回 false で呼ばれる」を見る。
+ */
+describe('RowSwap — 捨てられた予約は断りを返す(#582)', () => {
+  const ask = (host: HTMLElement, done: (ok: boolean) => void, line = 2): void => {
+    const detail: RowReopenDetail = { line, source: '最初の段落。', start: 0, end: 0, done };
+    host.dispatchEvent(new CustomEvent(ROW_REOPEN_EVENT, { detail }));
+  };
+  const once = (fn: ReturnType<typeof vi.fn>, why: string): void => {
+    expect(fn, why).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith(false);
+  };
+  /** 描き直しがまだ 1 度も来ていない RowSwap(予約が必ず溜まる)。 */
+  function unpainted(): { host: HTMLElement; swap: RowSwap } {
+    const host = document.createElement('div');
+    document.body.append(host);
+    return { host, swap: new RowSwap(host, { commit: vi.fn(), onInserted: () => {} }) };
+  }
+  /** 行数が変わる確定の直後(座標が古い窓)。 */
+  function stale(): Rig {
+    const r = rig(DOC, true);
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    box(r.host)!.value = '最初の段落。\n二行目を足した';
+    box(r.host)!.dispatchEvent(new Event('blur'));
+    return r;
+  }
+
+  it('別の開き直しに置き換えられた', () => {
+    const { host } = unpainted();
+    const first = vi.fn();
+    ask(host, first);
+    expect(first, '予約に回っていない(前提)').not.toHaveBeenCalled();
+    ask(host, vi.fn());
+    once(first, '置き換えられたのに断りが返らない');
+  });
+
+  it('openAt / openFirst / 古い窓での activate・appendRow・activateAll に置き換えられた', () => {
+    const a = unpainted();
+    const d1 = vi.fn();
+    ask(a.host, d1);
+    a.swap.openAt(0);
+    once(d1, 'openAt');
+    const b = unpainted();
+    const d2 = vi.fn();
+    ask(b.host, d2);
+    b.swap.openFirst();
+    once(d2, 'openFirst');
+    for (const [name, act] of [
+      ['activate', (r: Rig) => openClick(findByText(r.host, 'p', '最後の段落'))],
+      ['appendRow', (r: Rig) => void r.swap.appendRow()],
+      ['activateAll', (r: Rig) => void r.swap.activateAll()],
+    ] as const) {
+      const r = stale();
+      const d = vi.fn();
+      ask(r.host, d);
+      expect(d, `${name}: 古い窓で予約に回っていない(前提)`).not.toHaveBeenCalled();
+      act(r);
+      once(d, name);
+    }
+  });
+
+  it('別の行が開いて(open)用済みになった', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落')); // 行が開いている間の依頼は予約のまま残る
+    const d = vi.fn();
+    ask(r.host, d);
+    expect(d, '開いている間に即答した(前提)').not.toHaveBeenCalled();
+    openClick(findByText(r.host, 'p', '最後の段落'));
+    once(d, 'open() が予約を捨てたのに断りが返らない');
+  });
+
+  it('分割が組めなくなった(update が ok:false)', () => {
+    const r = rig(DOC, true);
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const d = vi.fn();
+    ask(r.host, d);
+    r.swap.commitActive();
+    const bad = [':::figure{id="あ い"}', '', '本文', '', ':::', '', 'あと', ''].join('\n');
+    const { html, ranges } = renderMarkdownWithRanges(bad);
+    const stalePending = stale(); // 古い窓の予約を作って、組めない本文を流す
+    const d2 = vi.fn();
+    ask(stalePending.host, d2);
+    expect(stalePending.swap.update(bad, html, ranges).ok).toBe(false);
+    once(d2, '組めない本文で予約が捨てられたのに断りが返らない');
+    void d;
+  });
+
+  it('dispose された', () => {
+    const { host, swap } = unpainted();
+    const d = vi.fn();
+    ask(host, d);
+    swap.dispose();
+    once(d, 'dispose');
+  });
+
+  it('対照群: 果たされた予約には断りを返さない(done は true の 1 回だけ)', () => {
+    const r = rig();
+    const d = vi.fn();
+    ask(r.host, d);
+    expect(d).toHaveBeenCalledTimes(1);
+    expect(d).toHaveBeenCalledWith(true);
+  });
+});
+
+/**
+ * 🔴 **塊の一部(箇条書きの項目 / 表の行)を開いていた行も、同じ項目 / 行を開き直す**(#582 着地前レビュー F3)。
+ * ⚠ 塊の根を開くと原文が合わず、必ず断られていた ── 項目・行そのものを探して開く(`resolveSubUnit` の逆引き)。
+ */
+describe('RowSwap — 項目・表の行の開き直し(#582)', () => {
+  const reopen = (r: Rig, d: RowReopenDetail): void => {
+    r.host.dispatchEvent(new CustomEvent(ROW_REOPEN_EVENT, { detail: d }));
+  };
+  const TASKS = ['- [ ] 一つめ', '- [ ] 二つめ', '- [ ] 三つめ'].join('\n');
+
+  it('3 項目のタスクリストの 2 つ目を、同じ項目のまま開く(1 つ目・3 つ目でも)', () => {
+    for (const [line, src] of [
+      [1, '- [ ] 二つめ'],
+      [0, '- [ ] 一つめ'],
+      [2, '- [ ] 三つめ'],
+    ] as const) {
+      const r = rig(TASKS);
+      const done = vi.fn();
+      reopen(r, { line, source: src, start: 8, end: 8, done });
+      expect(done, `${line} 行目: 断られた`).toHaveBeenCalledWith(true);
+      expect(box(r.host)!.value).toBe(src);
+      expect(box(r.host)!.selectionStart).toBe(8);
+      expect(r.swap.activeRange).toEqual({ start: line, end: line });
+    }
+  });
+
+  it('表の行(見出し行でない行)を同じ行のまま開く', () => {
+    const r = rig();
+    const done = vi.fn();
+    reopen(r, { line: 7, source: '| 3 | 4 |', start: 4, end: 4, done });
+    expect(done).toHaveBeenCalledWith(true);
+    expect(box(r.host)!.value).toBe('| 3 | 4 |');
+    expect(r.swap.activeRange).toEqual({ start: 7, end: 7 });
+  });
+
+  it('塊ごと開いていた行(1 項目目から全部)は、塊ごと開く(項目へ降りない)', () => {
+    const r = rig(TASKS);
+    const done = vi.fn();
+    reopen(r, { line: 0, source: TASKS, start: 3, end: 3, done });
+    expect(done).toHaveBeenCalledWith(true);
+    expect(box(r.host)!.value).toBe(TASKS);
+  });
+
+  it('項目の原文が控えと違えば、降りても断る(書かない)', () => {
+    const r = rig(TASKS);
+    const done = vi.fn();
+    reopen(r, { line: 1, source: '- [ ] 書き換わった', start: 0, end: 0, done });
+    expect(done).toHaveBeenCalledWith(false);
+    expect(box(r.host)).toBeNull();
+    expect(r.commits).toEqual([]);
   });
 });
