@@ -787,6 +787,20 @@ export class DetailRenderer {
    */
   private enterBody: (() => void) | null = null;
   /**
+   * 🔴 **外から本文が差し替わったとき、編集欄へ映す**(#1579)。
+   *
+   * 「すべて置換」などは state の本文だけを書き換える。編集の面は入りで 1 度だけ組み、
+   * 打鍵中は描き直さない(カーソル / 変換を壊すため)ので、**欄は古い字のまま**残り、
+   * 次に 1 字打つと**古い全文が state へ戻って置換が黙って消えた**。
+   * ⚠ 組んだ側(2 列 / 1 面 / 1 面の退避先)が名乗る(`enterBody` と同じ作法)。
+   *   引数は state の本文。**欄の内容と同じなら何もしない**(打鍵の echo で再入しない)。
+   * ⚠ ここから `onBodyChange` を撃たない ── 呼び元は render の最中で、撃つと
+   *   render の中から dispatch する形になる。state はもう新しい本文を持っている。
+   */
+  private syncBody: ((text: string) => void) | null = null;
+  /** `syncBody` を呼ぶかの判定に使う、直前に見た state の本文(編集の面の中だけ)。 */
+  private lastOpenBody: string | null = null;
+  /**
    * 書式の帯の説明の切替(#950 ①)が持つ `selectionchange` の購読。
    * ⚠ **編集を抜けるとき必ず外す**(`disposeLends`)── 編集セッションと同じ寿命。
    */
@@ -812,6 +826,7 @@ export class DetailRenderer {
     this.fenceTexts.clear();
     this.cancelPreview?.();
     this.cancelPreview = null;
+    this.syncBody = null;
     this.unwatchWrapHint?.();
     this.unwatchWrapHint = null;
     this.unwatchSelectionStats?.();
@@ -1374,7 +1389,20 @@ export class DetailRenderer {
     const editing = state.phase === 'editing' && state.openBody !== null;
     if (editing) {
       // 入力中の再描画はカーソル / IME を壊す ── 同一 entry の編集中は何もしない
-      if (this.mode === 'editor' && this.lastSelected === state.openBody!.lid) return;
+      if (this.mode === 'editor' && this.lastSelected === state.openBody!.lid) {
+        /**
+         * 🔴 外から本文が変わっていたら欄へ映す(#1579)。
+         * ⚠ 見るのは**state の本文が動いたとき**だけ。欄と state が食い違っているだけ
+         *   (打ちかけが state へ戻る前 / 面の出し入れ)で欄を state で上書きしない。
+         *   打鍵の echo は動いても欄と同じ字なので、`syncBody` 側の同値判定で何もしない。
+         */
+        const nowBody = state.openBody!.body;
+        if (nowBody !== this.lastOpenBody) {
+          this.lastOpenBody = nowBody;
+          this.syncBody?.(nowBody);
+        }
+        return;
+      }
       this.renderEditor(state);
       return;
     }
@@ -2371,6 +2399,7 @@ export class DetailRenderer {
     this.mode = 'editor';
     this.lastSelected = open.lid;
     this.lastBody = null;
+    this.lastOpenBody = open.body;
 
     // ⚠ 編集へ入る前の位置を覚える ── 保存して戻ったときに先頭へ飛ばさない。
     //    🔴 段組みでは送りが横 ── `left` を落とすと、編集から戻ると先頭へ飛ぶ(#505)。
@@ -2505,10 +2534,8 @@ export class DetailRenderer {
      *   (片方だけ畳むと、畳んでいない側から設定を壊せる ── CLAUDE.md §7)。
      * ⚠ 畳むのは**添付だけ**(普通のノートの情報の塊は今までどおり出る)。
      */
-    const folded =
-      state.entryMetas.get(open.lid)?.archetype === 'attachment'
-        ? foldAttachmentHead(open.body)
-        : null;
+    const isAttachment = state.entryMetas.get(open.lid)?.archetype === 'attachment';
+    const folded = isAttachment ? foldAttachmentHead(open.body) : null;
     if (liveEditorEnabled()) {
       this.renderLiveEditor(open.body, previewOpts, state.editOpenAt, folded);
       if (focusTitle) settleTitle();
@@ -2527,8 +2554,9 @@ export class DetailRenderer {
     ta.value = folded === null ? open.body : folded.rest;
     if (folded !== null) ta.setAttribute(HIDDEN_HEAD_ATTR, folded.head);
     /** 欄の字を**原文(設定の行込み)へ戻した**もの ── プレビューの材料は常にこちら。 */
+    let foldedNow = folded;
     const fullText = (): string =>
-      folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
+      foldedNow === null ? ta.value : joinHiddenHead(foldedNow.head, ta.value);
     // 🔴 空のとき薄い字で書き始めを案内する(#1221)。書けば消えるのは placeholder の仕様
     ta.placeholder = emptyBodyHint();
     this.enterBody = () => {
@@ -2636,6 +2664,25 @@ export class DetailRenderer {
     // 編集に入った直後は待たせない(**その場で 1 回**)
     follow.push(parseFrontmatter(fullText()).body, previewOpts);
     follow.flush();
+    /**
+     * 🔴 **外から来た本文を欄へ映す**(#1579)。畳んだ設定の行は**畳み直す**
+     * (置換の検索語が設定の行に当たっても、欄と属性が食い違わない)。
+     * ⚠ `input` を撃たない ── 撃つと binder が render の中から dispatch する。
+     *   プレビューは下の listener と同じ `follow` を直に押す。
+     */
+    this.syncBody = (text) => {
+      if (text === fullText()) return;
+      foldedNow = isAttachment ? foldAttachmentHead(text) : null;
+      if (foldedNow === null) {
+        ta.removeAttribute(HIDDEN_HEAD_ATTR);
+        ta.value = text;
+      } else {
+        ta.setAttribute(HIDDEN_HEAD_ATTR, foldedNow.head);
+        ta.value = foldedNow.rest;
+      }
+      follow.push(parseFrontmatter(text).body, previewOpts);
+      follow.flush();
+    };
     ta.addEventListener('input', () => {
       // ⚠ rAF で畳まない ── 畳み込みは follower(静穏 + 上限)が持つ。
       //    2 か所で畳むと、どちらが効いているか分からなくなる
@@ -3022,6 +3069,8 @@ export class DetailRenderer {
      * ⚠ 宣言が `onKey` より前に在るのは、`Ctrl+A` の側でも見るため(下記)。
      */
     let fellBack = false;
+    /** 退避先の欄へ外から来た本文を映す口(退避したときだけ入る)。 */
+    let syncFallBack: ((text: string) => void) | null = null;
     const onKey = (ev: KeyboardEvent): void => {
       if (!pane.isConnected) return;
       const t = ev.target;
@@ -3097,16 +3146,25 @@ export class DetailRenderer {
        * ⚠ **退避先でも畳む**(#1220)── ここだけ原文を丸ごと出すと、**この道から設定を壊せる**。
        *   繋ぎ直しは binder の 2 列と同じ `joinHiddenHead` 1 本。
        */
-      ta.value = folded === null ? body : folded.rest;
+      let curFold = folded;
+      ta.value = curFold === null ? body : curFold.rest;
       /**
        * ⚠ **印も付ける**(同じ `editor-body` の欄なので、binder の `input` も本文を書く)──
        *   付けないと、**そちらは畳んだ行を戻さずに state を説明だけで上書きする**
        *   (この test が最初に落ちた形)。
        */
-      if (folded !== null) ta.setAttribute(HIDDEN_HEAD_ATTR, folded.head);
+      if (curFold !== null) ta.setAttribute(HIDDEN_HEAD_ATTR, curFold.head);
+      // 🔴 外から来た本文(置換)を欄へ映す(#1579)。畳みは畳み直す
+      syncFallBack = (text) => {
+        body = text;
+        curFold = folded === null ? null : foldAttachmentHead(text);
+        if (curFold === null) ta.removeAttribute(HIDDEN_HEAD_ATTR);
+        else ta.setAttribute(HIDDEN_HEAD_ATTR, curFold.head);
+        ta.value = curFold === null ? text : curFold.rest;
+      };
       ta.addEventListener('input', () => {
         // ⚠ 退避先では**描き直さない**(原文をそのまま編集している面なので)
-        body = folded === null ? ta.value : joinHiddenHead(folded.head, ta.value);
+        body = curFold === null ? ta.value : joinHiddenHead(curFold.head, ta.value);
         this.onBodyChange?.(body);
       });
       note.textContent = `この本文は行ごとに編集できません(${reason})。原文で編集します`;
@@ -3163,6 +3221,31 @@ export class DetailRenderer {
     renderFmCard();
     follow.push(docOf(body, fmLines), previewOpts);
     follow.flush();
+
+    /**
+     * 🔴 **外から来た本文を、見えている文書と行の元へ映す**(#1579)。
+     *
+     * ⚠ `body` はこの面の閉包が持つ正本の写しで、確定のたびに**それを基に**継ぎ足して
+     *   state へ返す ── 写しが古いまま次の行を確定すると、**置換が消える**。
+     * 🔑 取り消しの履歴には全文の差し替えとして残す(Ctrl+Z で置換の前へ戻れる ──
+     *   片道の操作にしない)。開いている行は `swap.update` が閉じて理由を出す。
+     * ⚠ `setBody` を使わない(`onBodyChange` を撃つため)。出口の他の仕事は同じ。
+     */
+    this.syncBody = (text) => {
+      if (text === body) return;
+      if (fellBack) {
+        // 退避先は欄が 1 つの原文編集 ── 欄の値を差し替えるだけでよい
+        body = text;
+        syncFallBack?.(text);
+        return;
+      }
+      journal = record(journal, stepFor(body, 0, body.split('\n').length - 1, text));
+      body = text;
+      fmLines = frontmatterLineCount(body);
+      renderFmCard();
+      follow.push(docOf(body, fmLines), previewOpts);
+      follow.flush();
+    };
 
     this.cancelPreview = () => {
       document.removeEventListener('keydown', onKey);
