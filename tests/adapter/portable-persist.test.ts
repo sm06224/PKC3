@@ -10,6 +10,7 @@ import {
   IDLE_MS,
   MAX_WAIT_MS,
   PENDING_NOTICE_MS,
+  persistStatusText,
   type PersistState,
   type PortablePersist,
 } from '../../src/adapter/platform/storage/portable-persist';
@@ -207,25 +208,52 @@ describe('#400 段③ ── 書いてはいけないもの / 失敗の扱い', 
 });
 
 describe('#400 段③ ── 見え方', () => {
-  it('⚠ ふつうの打鍵では「保存待ち」を出さない(ちらつかせない)', async () => {
+  it('🔴 溜まった瞬間から「保存待ち」を出す(器に着かない窓の間、何も出ないのを防ぐ。#1589)', async () => {
     const h = harness();
     h.p.touch();
+    // ⚠ 時計を 1ms も進めていない ── 3 秒待ってから出す作りだと、この時点では何も出ない
+    expect(h.states.map((s) => s.kind)).toContain('pending');
+    expect(h.p.state().kind).toBe('pending');
     await h.advance(IDLE_MS);
-    expect(h.states.map((s) => s.kind)).not.toContain('pending');
+    expect(h.p.state().kind).toBe('idle');
   });
 
-  it('🔴 長く書けていないときだけ「保存待ち」を出す', async () => {
+  it('打鍵を重ねても、同じ状態では塗り直さない(状態行の DOM を打鍵ごとに書き換えない)', async () => {
+    const h = harness();
+    h.p.touch();
+    h.p.touch();
+    h.p.touch();
+    expect(h.states.filter((s) => s.kind === 'pending')).toHaveLength(1);
+    // 対照群:定数が 0 でなければ、この「出さない」は別の理由で成り立つ
+    expect(PENDING_NOTICE_MS).toBe(0);
+  });
+
+  it('🔴 失敗の知らせは、次の打鍵で「保存待ち」に上書きされない(点いたり消えたりしない)', async () => {
+    let fail = true;
     const h = harness({
       write: async () => {
-        throw new Error('まだ書けない');
+        if (fail) throw new Error('まだ書けない');
       },
     });
     h.p.touch();
     await h.advance(IDLE_MS);
-    // 失敗して溜まったまま、さらに打鍵が続く
-    h.tick(PENDING_NOTICE_MS);
+    expect(h.p.state().kind).toBe('error');
+    const before = h.states.length;
+    h.tick(PENDING_NOTICE_MS + 1);
+    h.p.touch(); // 失敗が続いている最中の打鍵
     h.p.touch();
-    expect(h.states.map((s) => s.kind)).toContain('pending');
+    expect(h.p.state().kind, '失敗の知らせが保存待ちに上書きされた').toBe('error');
+    expect(h.states.slice(before), 'この打鍵の後に状態が動いた').toEqual([]);
+    // 再試行(まだ失敗)の最中も「保存中」で塗りつぶさない
+    await h.advance(IDLE_MS);
+    expect(h.p.state().kind).toBe('error');
+    expect(h.states.slice(before).map((x) => x.kind)).not.toContain('saving');
+    // 対照群:書けたら idle へ戻る(error のまま固まらない)
+    fail = false;
+    h.p.touch();
+    await h.advance(IDLE_MS);
+    expect(h.p.state().kind).toBe('idle');
+    expect(h.states.at(-1)?.kind).toBe('idle');
   });
 
   it('dispose の後は timer も保存も動かない', async () => {
@@ -260,5 +288,100 @@ describe('#400 段③ ── 見え方', () => {
     await h.p.flush();
     expect(h.writes).toHaveLength(0);
     expect(h.exports).toHaveLength(0);
+  });
+});
+
+describe('#1589 ── 器に着いていない分が在るか(離れる確認の根拠)', () => {
+  /** `unsaved` の変化を拾うため、onUnsaved を持つ版を直接組む。 */
+  function build(over: {
+    write?: () => Promise<void>;
+    exportImage?: () => Promise<Uint8Array>;
+  } = {}) {
+    let clock = 1_000;
+    const timers: Array<{ at: number; fn: () => void; h: number }> = [];
+    let nextH = 1;
+    const changes: boolean[] = [];
+    const p = connectPortablePersist({
+      exportImage: over.exportImage ?? (async () => new Uint8Array(8).fill(1)),
+      write: over.write ?? (async () => undefined),
+      onState: () => undefined,
+      onUnsaved: (u) => changes.push(u),
+      now: () => clock,
+      setTimer: (fn, ms) => {
+        const h = nextH++;
+        timers.push({ at: clock + ms, fn, h });
+        return h;
+      },
+      clearTimer: (h) => {
+        const i = timers.findIndex((t) => t.h === h);
+        if (i >= 0) timers.splice(i, 1);
+      },
+    });
+    const fireTimers = async (): Promise<void> => {
+      const due = timers.splice(0);
+      for (const t of due) {
+        clock = Math.max(clock, t.at);
+        t.fn();
+      }
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+    return { p, changes, fireTimers };
+  }
+
+  it('🔴 溜まった瞬間 true → 1.2 秒の待ちの間も true → 器に着いたら false', async () => {
+    const b = build();
+    expect(b.p.unsaved()).toBe(false);
+    b.p.touch();
+    expect(b.p.unsaved(), '溜まっているのに「着いていない」と言わない').toBe(true);
+    expect(b.changes).toEqual([true]);
+    await b.fireTimers();
+    expect(b.p.unsaved(), '書き終わったのに true のまま').toBe(false);
+    // 変わったときだけ知らせる(打鍵のたびに叩かない)
+    expect(b.changes).toEqual([true, false]);
+  });
+
+  it('🔴 画像を書き出している最中(溜まりは空・走っている)も true', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const b = build({ write: () => gate });
+    b.p.touch();
+    const flushed = b.p.flush();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    // ⚠ ここで dirty は false(汲み出し済み)── `dirty` だけを見る作りだと false になって確認が消える
+    expect(b.p.unsaved(), '書いている最中なのに「着いた」と言っている').toBe(true);
+    release();
+    await flushed;
+    expect(b.p.unsaved()).toBe(false);
+  });
+
+  it('🔴 書けなかったぶんは true のまま(捨てない・確認も消えない)', async () => {
+    const b = build({
+      write: async () => {
+        throw new Error('QuotaExceededError');
+      },
+    });
+    b.p.touch();
+    await b.p.flush();
+    expect(b.p.state().kind).toBe('error');
+    expect(b.p.unsaved()).toBe(true);
+  });
+
+  it('dispose すると溜まりを捨てるので false を知らせる', () => {
+    const b = build();
+    b.p.touch();
+    b.p.dispose();
+    expect(b.p.unsaved()).toBe(false);
+    expect(b.changes).toEqual([true, false]);
+  });
+});
+
+describe('#1589 ── 状態行の字(persistStatusText)', () => {
+  it('pending / saving → 保存待ち、error → 理由つきの警告、idle → 空', () => {
+    expect(persistStatusText({ kind: 'pending' })).toBe('⏳ 保存待ち');
+    expect(persistStatusText({ kind: 'saving' })).toBe('⏳ 保存待ち');
+    expect(persistStatusText({ kind: 'error', why: 'QuotaExceededError' })).toBe(
+      '⚠ この端末に保存できませんでした(QuotaExceededError)',
+    );
+    expect(persistStatusText({ kind: 'idle' })).toBe('');
   });
 });

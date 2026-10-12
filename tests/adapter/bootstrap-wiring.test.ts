@@ -481,6 +481,30 @@ describe('書き出しの settle の配線', () => {
   });
 
   /**
+   * 🔴 **可搬版の「器に着いていない」も同じ確認へ繋がっている**(#1589)。
+   * ⚠ 保存領域への書込(`onWriting`)だけでは足りない ── 可搬版の保存は「1.2 秒待つ → 画像を書き出す →
+   *   器へ書く」で、sqlite への書込は一瞬で終わる。落ちると、追加直後に読み直したノートが
+   *   **確認も出ずに消える**(全 unit が緑のまま)。
+   */
+  it('🔴 可搬の未保存が beforeunload の確認へ繋がり、離れる瞬間に流し始める', () => {
+    // ⚠ 「在る」ことの主張 ── 注釈に満たされないよう、armPersist の本体だけを注釈を落として見る
+    const at = MAIN.indexOf('const armPersist = ');
+    const end = MAIN.indexOf('const persistHook', at);
+    expect(at, 'armPersist が無い').toBeGreaterThan(-1);
+    expect(end, 'armPersist の終わりの目印が無い').toBeGreaterThan(at);
+    const body = codeOnly(MAIN.slice(at, end));
+    expect(body, '可搬の未保存を確認へ渡していない').toContain(
+      "onUnsaved: (unsaved) => unloadGuard.setWriting(unsaved, 'portable')",
+    );
+    expect(body, '離れる瞬間に流し始めていない').toContain(
+      'unloadGuard.onLeave(() => void persist?.flush()',
+    );
+    expect(body, '状態行の字を persistStatusText から引いていない').toContain(
+      'persistState = persistStatusText(st)',
+    );
+  });
+
+  /**
    * 🔴 **PowerPoint の口が実際に繋がっている**(#187 段⑤)。
    *
    * ⚠ `main.ts` は **test から 1 度も実行されない**(原文を読む test しか無い)ので、

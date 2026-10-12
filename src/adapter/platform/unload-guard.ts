@@ -27,30 +27,52 @@ export interface UnloadTarget {
 }
 
 export interface UnloadGuard {
-  /** 書込が始まった(`true`)/ 飛んでいる分がすべて終わった(`false`)。 */
-  setWriting(writing: boolean): void;
+  /**
+   * 書込が始まった(`true`)/ 飛んでいる分がすべて終わった(`false`)。
+   * 🔴 **`source` ごとに数える**(省略 = 既定の 1 つ)── 持ち主が 2 つ(保存領域への書込 / 可搬版の
+   * 画像の書き出し)居るとき、片方が「終わった」と言っても**もう片方が書いている間は確認を残す**。
+   * ⚠ 1 つの真偽値を 2 者で上書きし合うと、先に終わった側が相手の確認を消す。
+   */
+  setWriting(writing: boolean, source?: string): void;
+  /**
+   * 「離れますか」を出す直前(= 書いている最中に離れようとしたとき)に呼ぶ口。
+   * 🔑 user が「留まる」を選んだとき、書込が少しでも早く着くように、溜まっている分をここで流し始める。
+   */
+  onLeave(fn: () => void): void;
 }
 
 export function createUnloadGuard(target: UnloadTarget): UnloadGuard {
-  let writing = false;
+  const sources = new Set<string>();
   let registered = false;
+  let leave: (() => void) | null = null;
   const onBeforeUnload = (ev: BeforeUnloadEvent): void => {
     // ⚠ 外し忘れの保険 ── 書いていなければ何もしない(確認を出さない)
-    if (!writing) return;
+    if (sources.size === 0) return;
+    // ⚠ 確認を出す側の失敗で、確認そのものを落とさない
+    try {
+      leave?.();
+    } catch {
+      /* 流し始められなくても、確認は出す */
+    }
     ev.preventDefault();
     // ⚠ 古いブラウザは `returnValue` に字が入っていることを「確認する」の合図にする
     ev.returnValue = '';
   };
   return {
-    setWriting(next: boolean): void {
-      writing = next;
-      if (next && !registered) {
+    setWriting(next: boolean, source = 'default'): void {
+      if (next) sources.add(source);
+      else sources.delete(source);
+      const writing = sources.size > 0;
+      if (writing && !registered) {
         target.addEventListener('beforeunload', onBeforeUnload);
         registered = true;
-      } else if (!next && registered) {
+      } else if (!writing && registered) {
         target.removeEventListener('beforeunload', onBeforeUnload);
         registered = false;
       }
+    },
+    onLeave(fn: () => void): void {
+      leave = fn;
     },
   };
 }
