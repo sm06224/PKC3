@@ -19,6 +19,7 @@ import {
   parseFrontmatter,
   extractVars,
 } from '@features/markdown/frontmatter';
+import { LONG_NOTE_ATTR, syncLongNote } from './long-note';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { isZipAttachment } from '@features/archive/zip-browse';
 import { hydrateMermaid, pruneScopes, type MermaidScope } from './mermaid-hydrate';
@@ -1733,6 +1734,7 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
+      this.bodyHost!.removeAttribute(LONG_NOTE_ATTR);
       this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title);
       if (keepPick !== null) this.refocusPick(keepPick);
       this.restoreScroll();
@@ -1918,6 +1920,8 @@ export class DetailRenderer {
          *   新しい字が欄を閉じるまで画面に出ない(打ったのに古い字のまま見える)。
          */
         const keptCell = captureCellInput(host);
+        // 🔴 **長大なノートだけ**、画面の外の塊の配置を飛ばす印を付ける(#1467)。⚠ 塊を入れる**前**に(最初の配置から効かせる)
+        syncLongNote(host, body);
         // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
         const applied = applyBlocks(host, html, this.bodyView);
         this.bodyView = applied.view;
@@ -3222,6 +3226,8 @@ export class DetailRenderer {
         // ⚠ 材料は**原文**(`body`)── 描いているのは情報を外した側なので、
         //    そちらからでは globals(frontmatter に書く)が 1 つも見えない
         applyDocumentGlobals(pane, extractDocumentGlobals(body));
+        // 🔴 長大なノートだけ、画面の外の塊の配置を飛ばす(#1467)。読む面と同じ判定 1 本
+        syncLongNote(pane, body);
       },
       (e) => {
         if (!pane.isConnected) return;
