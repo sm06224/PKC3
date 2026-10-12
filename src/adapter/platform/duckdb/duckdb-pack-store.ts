@@ -25,6 +25,7 @@
  * ⚠ ここは分割せず同じ tx に入れる ── quota で落ちるなら丸ごと落ちる。
  */
 import { DUCKDB_PACK_FILES } from '@features/query/duckdb-pack';
+import { sha256Hex } from '../storage/asset-key';
 
 const DB_NAME = 'pkc3-duckdb-pack';
 const FILES = 'files';
@@ -121,13 +122,6 @@ function isMeta(v: unknown): v is DuckDbPackMeta {
     && Array.isArray(m.files)
     && m.files.every(isFileMeta)
   );
-}
-
-/** 小文字 hex の SHA-256。 */
-async function sha256Hex(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export class DuckDbPackStore {

@@ -121,35 +121,6 @@ export function parseCardPresentation(
 }
 
 /**
- * Format a structured card presentation back to its canonical string
- * form. Returns `null` when the target violates v0 grammar or the
- * variant is unknown.
- *
- * `@[card](target)` is the default-variant canonical form. Variant
- * forms emit `@[card:<variant>](target)`.
- */
-export function formatCardPresentation(
-  input: CardPresentationInput,
-): string | null {
-  if (input === null || typeof input !== 'object') return null;
-  if (typeof input.target !== 'string') return null;
-  if (!isValidCardTarget(input.target)) return null;
-
-  const variant = input.variant ?? 'default';
-  if (
-    variant !== 'default' &&
-    !(VARIANT_WHITELIST as readonly string[]).includes(variant)
-  ) {
-    return null;
-  }
-
-  if (variant === 'default') {
-    return `@[card](${input.target})`;
-  }
-  return `@[card:${variant}](${input.target})`;
-}
-
-/**
  * True when `label` is a well-formed card presentation label (i.e.
  * the text that would appear inside the `[...]` of the markdown
  * link). Accepts `'card'` and `'card:<variant>'` for known variants.

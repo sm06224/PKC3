@@ -90,11 +90,6 @@ function highlightApi(): { registry: HighlightRegistry; Highlight: HighlightCtor
   return { registry: css.highlights, Highlight };
 }
 
-/** このブラウザは塗れるか(帯の注記と test の分岐に使う)。 */
-export function canHighlight(): boolean {
-  return highlightApi() !== null;
-}
-
 /**
  * 当たりを全部塗り、`current` 番目だけ強く塗る。
  * @returns 塗れたか(`false` = このブラウザは塗れない。送りは別に効く)

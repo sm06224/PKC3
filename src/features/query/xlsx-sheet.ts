@@ -199,12 +199,6 @@ export function columnIndexOf(ref: string): number | null {
   return n - 1;
 }
 
-/** 行番号(1 始まり)。⚠ 行も飛ぶので、こちらも番地から採る。 */
-export function rowNumberOf(ref: string): number | null {
-  const m = /(\d+)$/.exec(ref.trim());
-  return m === null ? null : Number(m[1]);
-}
-
 /**
  * 🔴 **シート 1 枚を格子にする**。
  *

@@ -25,6 +25,7 @@ import {
   type AsrPack,
   type AsrPackFile,
 } from '@features/asr/asr-parts';
+import { sha256Hex } from '../storage/asset-key';
 
 export class AsrPackError extends Error {
   constructor(message: string) {
@@ -98,11 +99,6 @@ export const SHA_VERIFY_MAX_BYTES = 32 * 1024 * 1024;
  * 溜めすぎると heap を食う。8MB なら 157MB の file でも heap に残るのは 8MB まで。
  */
 const GLUE_BYTES = 8 * 1024 * 1024;
-
-async function sha256Hex(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 /**
  * 1 file を流しながら取る。

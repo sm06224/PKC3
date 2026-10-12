@@ -195,9 +195,5 @@ export function assertPackComplete(names: Iterable<string>): void {
   }
 }
 
-/** 小文字 hex の SHA-256。 */
-export async function sha256Hex(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+/** 小文字 hex の SHA-256。実装は `storage/asset-key.ts` の 1 つだけ(ここは再 export)。 */
+export { sha256Hex } from '../storage/asset-key';

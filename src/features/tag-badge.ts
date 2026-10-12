@@ -43,8 +43,3 @@ export const DEFAULT_TAG_BADGE: TagBadge = 'chip';
 export function isTagBadge(v: unknown): v is TagBadge {
   return typeof v === 'string' && TAG_BADGES.some((s) => s.id === v);
 }
-
-/** 表から 1 つ引く。⚠ 知らない id は既定へ落ちる(呼び側で分岐させない)。 */
-export function tagBadgeSpec(id: TagBadge): TagBadgeSpec {
-  return TAG_BADGES.find((s) => s.id === id) ?? TAG_BADGES[0]!;
-}

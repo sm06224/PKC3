@@ -260,11 +260,6 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Return the full canonical id list — used by tests to assert coverage. */
-export function listSupportedLanguages(): readonly string[] {
-  return Object.keys(LANGS);
-}
-
 /** True iff the language (or any of its aliases) is highlightable. */
 export function isHighlightable(lang: string | null | undefined): boolean {
   const id = canonicalLang(lang);

@@ -26,7 +26,6 @@ const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford Base32
 const ENCODING_LEN = ENCODING.length; // 32
 const TIME_LEN = 10;
 const RANDOM_LEN = 16;
-const TOTAL_LEN = TIME_LEN + RANDOM_LEN; // 26
 const TIME_MAX = 2 ** 48 - 1;
 
 export interface LogIdOptions {
@@ -84,18 +83,4 @@ function encodeRandom(rand: () => number): string {
     out += ENCODING.charAt(idx < 0 ? 0 : idx);
   }
   return out;
-}
-
-/**
- * True when `id` matches the ULID shape (26 Crockford Base32 chars).
- *
- * Used by debugging / audit tooling only. Resolvers must **not**
- * gate on this — legacy IDs are equally valid addresses.
- */
-export function isUlid(id: string): boolean {
-  if (typeof id !== 'string' || id.length !== TOTAL_LEN) return false;
-  for (let i = 0; i < id.length; i++) {
-    if (ENCODING.indexOf(id.charAt(i)) === -1) return false;
-  }
-  return true;
 }
