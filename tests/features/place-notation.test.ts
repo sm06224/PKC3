@@ -20,6 +20,7 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
   connectPlaces,
   addPlace,
+  endsInsideOpenBlock,
   isPlaceOpen,
   placeEntryLids,
   movePlace,
@@ -357,6 +358,17 @@ describe('板の塊を足す(addPlace)(#676)', () => {
     expect(addPlace(':::note\nまだ書いている\n', 1, 1)).toBeNull();
     // 対照群 ── 閉じていれば足せる
     expect(addPlace('本文\n```js\nconst a = 1;\n```\n', 1, 1)).not.toBeNull();
+  });
+
+  it('🔴 断る条件と、画面が理由を言う条件は同じ 1 本(endsInsideOpenBlock)', () => {
+    for (const body of ['本文\n```js\nconst a = 1;\n', ':::note\nまだ書いている\n']) {
+      expect(endsInsideOpenBlock(body), body).toBe(true);
+      expect(addPlace(body, 1, 1), body).toBeNull();
+    }
+    for (const body of ['', '本文', '本文\n```js\nconst a = 1;\n```\n']) {
+      expect(endsInsideOpenBlock(body), body).toBe(false);
+      expect(addPlace(body, 1, 1), body).not.toBeNull();
+    }
   });
 
   it('負・小数の座標は null', () => {

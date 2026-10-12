@@ -1633,6 +1633,104 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
     '「付箋 4 枚」で 4 枚増えていない',
   ).toHaveCount(framesBefore + 4, { timeout: 5000 });
 
+  /**
+   * 🔴 **板の小さな欠陥 4 件**(#529。実ブラウザの計測 2026-10-02 / 2026-10-11)── 新しい起動は増やさない(#820)、この筋書きの続き。
+   *   ① 最小の高さ(40px)の画像は中身の高さが 0 だった ② `h=` の無い html 塊の高さを 160px の見積もりにしていた
+   *   (実寸 332px で板の外側が足りなかった)③ 別のノートへ移って戻ると、html 塊が 332 → 40px → 332px と一瞬縮んだ
+   *   ④ 閉じていないコードブロックで終わる本文では、板を置く 2 つの操作が黙って何も起きなかった。
+   * ⚠ 観測点は実寸(`getBoundingClientRect` / `offsetHeight`)── happy-dom は layout を持たない。
+   */
+  const lidOfTitle = async (title: string): Promise<string> => {
+    const lid = await page
+      .locator('[data-pkc-region="sidebar"] [data-pkc-entry]', { hasText: title })
+      .first()
+      .getAttribute('data-pkc-entry');
+    expect(lid, `前提が崩れている(${title} の lid が読めない)`).not.toBeNull();
+    return lid!;
+  };
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '小さな欠陥の写真');
+  await page.fill('[data-pkc-field="editor-body"]', '前の文');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.setInputFiles('[data-pkc-field="attach-input"]', { name: '小さな.png', mimeType: 'image/png', buffer: PNG_1X1 });
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  const smallAtt = await lidOfTitle('小さな.png');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '小さな欠陥の別ノート');
+  await page.fill('[data-pkc-field="editor-body"]', 'べつ');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const smallOther = await lidOfTitle('小さな欠陥の別ノート');
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '小さな欠陥の板');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    `:::format{#sm .pkc-place entry=${smallAtt} x=10 y=10 w=120 h=40}\n:::\n\n` +
+      `:::format{#md .pkc-place entry=${smallAtt} x=200 y=10 w=240 h=100}\n:::\n\n` +
+      ':::format{#hb .pkc-place x=10 y=200}\n```html\n<div style="height:300px;background:#cde">x</div>\n```\n:::\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const smallBoard = await lidOfTitle('小さな欠陥の板');
+  const smallDetail = page.locator('[data-pkc-region="detail"]');
+  // ① 最小の高さ(40px)でも画像の高さが 0 にならない。対照群:240×100 の枠は今までの余白のまま
+  const imgSm = smallDetail.locator('#sm [data-pkc-field="place-attachment-image"]');
+  const imgMd = smallDetail.locator('#md [data-pkc-field="place-attachment-image"]');
+  await expect(imgSm, '台の前提:最小の高さの枠に画像が出ていない').toHaveCount(1, { timeout: 15_000 });
+  await expect(imgMd).toHaveCount(1);
+  const imgH = async (loc: Locator): Promise<number> => loc.evaluate((e) => e.getBoundingClientRect().height);
+  expect(await imgH(imgSm), '最小の高さの枠で画像の高さが 0 のまま').toBeGreaterThan(10);
+  expect(await imgH(imgMd), '対照群:高い枠の画像が変わった(余白は今までのまま 44px)').toBe(44);
+  await expect(smallDetail.locator('#sm'), '低い枠に詰める印が付いていない').toHaveAttribute('data-pkc-place-compact', '');
+  await expect(smallDetail.locator('#md'), '高い枠に詰める印が付いている').not.toHaveAttribute('data-pkc-place-compact', '');
+  // ② html 塊(`h=` 無し)の実寸に板の外側が追従する(見積もり 160px ではなく、申告された実寸 + 40px)
+  const hbBlock = smallDetail.locator('#hb');
+  await expect.poll(async () => hbBlock.evaluate((e) => (e as HTMLElement).offsetHeight), { timeout: 15_000 }).toBeGreaterThan(200);
+  const fits = async (): Promise<{ min: number; need: number }> =>
+    hbBlock.evaluate((el) => {
+      const e = el as HTMLElement;
+      const hostEl = e.parentElement as HTMLElement;
+      return { min: parseFloat(hostEl.style.minHeight), need: e.offsetTop + e.offsetHeight + 40 };
+    });
+  await expect.poll(async () => (await fits()).min, { message: '板の外側が html 塊の実寸に追従していない', timeout: 5000 }).toBeGreaterThanOrEqual((await fits()).need);
+  // ③ 別のノートへ移って戻る間、html 塊が畳まれない(4ms ごとに高さを採る)
+  const tallBefore = await hbBlock.evaluate((e) => (e as HTMLElement).offsetHeight);
+  await page.evaluate(() => {
+    const w = window as unknown as { __hbSamples: number[] };
+    w.__hbSamples = [];
+    setInterval(() => {
+      const e = document.querySelector<HTMLElement>('#hb');
+      if (e) w.__hbSamples.push(e.offsetHeight);
+    }, 4);
+  });
+  await clickReal(page, `[data-pkc-region="sidebar"] [data-pkc-entry="${smallOther}"]`);
+  await expect(smallDetail.locator('#hb')).toHaveCount(0);
+  await clickReal(page, `[data-pkc-region="sidebar"] [data-pkc-entry="${smallBoard}"]`);
+  await expect(smallDetail.locator('#hb')).toHaveCount(1);
+  await page.waitForTimeout(600);
+  const hbSamples = await page.evaluate(() => (window as unknown as { __hbSamples: number[] }).__hbSamples);
+  expect(hbSamples.length, '台の前提:戻った後の高さが採れていない').toBeGreaterThan(20);
+  expect(Math.min(...hbSamples), `戻った直後に html 塊が畳まれた(採った高さ: ${[...new Set(hbSamples)].join(', ')})`).toBe(tallBefore);
+  // ④ 閉じていないコードブロックで終わる本文 ── 2 つの操作とも理由を言う(黙って何も起きない、をやめる)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '小さな欠陥の閉じない');
+  await page.fill('[data-pkc-field="editor-body"]', 'まえ\n\n```js\nconst a = 1;\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"][data-pkc-painted]').first()).toBeVisible();
+  const openBox = (await page.locator('[data-pkc-field="detail-body"]').boundingBox())!;
+  const refusal = page.locator('[data-pkc-region="status"]', { hasText: '板を置けません' });
+  await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
+  await menu.locator('[data-pkc-action="add-place"]').click();
+  await expect(refusal, '「ここに板を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
+  await expect(page.locator('[data-pkc-field="detail-body"] .pkc-place'), '閉じていない本文に板が書かれた').toHaveCount(0);
+  await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
+  await menu.locator('[data-pkc-action="add-place-template"]').click();
+  await dlg.locator('[data-pkc-field="pick-place-template"]').first().click();
+  await expect(refusal, '「テンプレートから板を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
+  await expect(page.locator('[data-pkc-field="detail-body"] .pkc-place')).toHaveCount(0);
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

@@ -119,7 +119,7 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
-import { isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
+import { endsInsideOpenBlock, isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
 import { isPlaceStyle, type PlaceStyle } from '@features/markdown/place-color';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { isPlaceRectNumber, PLACE_RECT_KEYS, type PlaceRectValue } from '@features/markdown/place-rect';
@@ -7767,8 +7767,8 @@ function reduceCore(
         if (openLine === null) return null;
         return { kind: 'place-remove', line: action.line, openLine };
       });
-    case 'ADD_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
+    case 'ADD_PLACE': {
+      const gated = bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
         shown !== null &&
         isPlaceCoord(action.x) &&
@@ -7779,6 +7779,19 @@ function reduceCore(
             : { kind: 'place-add', x: action.x, y: action.y, template: action.template }
           : null,
       );
+      /**
+       * 🔴 **末尾が閉じていないブロックの中なら、理由を言って断る**(#529)。
+       * ⚠ 板は本文の末尾に足すので、閉じていないコードブロックなどの中へ書くと板ではなく**コードの字**になる
+       *   (`addPlace` / `addPlaceTemplate` が断る ── 同じ `endsInsideOpenBlock`)。断りは書込側(effect)でも
+       *   出るが「本文が変わっているため」と**別の理由**を言うので、押した時点で本当の理由を言う。
+       */
+      if (gated.events.length > 0) {
+        const shown = screenBodyOf(state, action.lid);
+        if (shown !== null && endsInsideOpenBlock(shown))
+          return { state: { ...state, error: PLACE_OPEN_BLOCK_REFUSAL }, events: [] };
+      }
+      return gated;
+    }
     case 'SET_PLACE_RECT':
       return bodyRewriteGate(state, action.lid, '、板の位置と大きさを変えてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
@@ -10190,6 +10203,10 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
   if (state.openBody && state.openBody.lid === lid) return state.openBody.body;
   return state.splitBodies.get(lid) ?? null;
 }
+
+/** 末尾が閉じていないブロックの中へは板を置けない ── 押した時点で言う断り(#529)。 */
+export const PLACE_OPEN_BLOCK_REFUSAL =
+  '本文の最後のブロックが閉じていないため、板を置けません(ブロックを閉じてから置いてください)';
 
 /**
  * 🔴 **画面の本文から組む書換が共通で通る門**(#283 P4-b → #676 → #684)。

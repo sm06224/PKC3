@@ -4438,6 +4438,24 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-weight: 600;
   border-bottom: 1px solid var(--border);
 }
+/* 🔴 **低い枠(`h=` が 64px 未満)に置いたノートは、題名の帯と枠の余白を詰める**(#529)── 既定のままだと
+ *   枠の余白 16 + 帯の上の余白 14 + 帯 26(ボタンの高さ)= 56px を先に食い、最小の高さ 40px では中身(画像など)の
+ *   高さが 0 になって見えなかった。余白を減らし帯を 16px にして、残りを中身に渡す(40px で約 18px)。
+ *   64px 以上の枠は今までの余白のまま(印は `place-board.ts` が高さから付ける。置いたノートの枠だけ ── 付箋の余白は変えない)。
+ * ⚠ 帯は `button` の規則が高さを `--row-h` に固定している(`height` / `min-height` / `max-height` の 3 つ)── 3 つとも上書きする。 */
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-place-embedded][data-pkc-place-compact] {
+  padding: 2px 4px;
+}
+.pkc-place[data-pkc-place-embedded][data-pkc-place-compact] > [data-pkc-field='place-card'] {
+  height: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  margin-top: 0;
+  padding: 0 6px;
+  font-size: 0.85em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pkc-place > [data-pkc-field='place-body'] {
   flex: 1 1 auto;
   overflow: auto;

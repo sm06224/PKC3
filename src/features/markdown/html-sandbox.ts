@@ -203,6 +203,48 @@ export function buildHtmlSandboxIframe(
 }
 
 /**
+ * 🔴 **箱が最後に申告した高さ**(箱の id → px)。作り直された箱の**最初の高さ**に使う(#529)。
+ *
+ * 箱は `height:0` で作られ、読み込みが終わって高さを申告するまでの間(約 50ms)は**畳まれている**。
+ * 別のノートを選んで戻ると本文ごと描き直される(中身が同じでも箱は新しい要素)ので、その間だけ
+ * 周りの枠(板の塊は `min-height: 40px`)が 332px → 40px → 332px と縮んで戻っていた。
+ * 🔑 箱の id は中身と同じ字の何番目かから決まる(`stableKey`)── 中身が同じなら id も同じなので、前の高さを引ける。
+ * ⚠ 中身が変わった箱は id も変わるので引けず、今までどおり 0 から伸びる。
+ * ⚠ 上限を持つ(古い順に捨てる)── 本文を書き換えるたびに id が変わり、積もり続けるのを防ぐ。
+ */
+const sandboxHeights = new Map<string, number>();
+const SANDBOX_HEIGHTS_MAX = 200;
+
+export function rememberSandboxHeight(id: string, height: number): void {
+  if (id === '') return;
+  sandboxHeights.delete(id); // 入れ直して「新しい順」を保つ
+  sandboxHeights.set(id, height);
+  if (sandboxHeights.size > SANDBOX_HEIGHTS_MAX) {
+    const oldest = sandboxHeights.keys().next().value;
+    if (oldest !== undefined) sandboxHeights.delete(oldest);
+  }
+}
+
+/**
+ * 新しく DOM に入った要素の中の箱へ、前に申告された高さを当てる(畳まれた箱だけ)。
+ * ⚠ **描画 HTML には書かない** ── 差分描画(`applyBlocks`)は塊の HTML 文字列どうしを比べるので、
+ *   前の申告を HTML に焼くと「同じ箱」が毎回別物になり、本文を 1 字打つたびに箱が作り直されて読み直される。
+ */
+export function restoreSandboxHeights(inserted: readonly Element[]): void {
+  if (sandboxHeights.size === 0) return;
+  for (const el of inserted) {
+    const frames: HTMLElement[] = el.matches('iframe[data-pkc-html-render-id]')
+      ? [el as HTMLElement]
+      : [...el.querySelectorAll<HTMLElement>('iframe[data-pkc-html-render-id]')];
+    for (const f of frames) {
+      const h = sandboxHeights.get(f.getAttribute('data-pkc-html-render-id') ?? '');
+      // 畳まれた(`height:0`)箱だけ ── 申告済みの高さを上書きしない
+      if (h !== undefined && h > 0 && parseFloat(f.style.height) === 0) f.style.height = `${h}px`;
+    }
+  }
+}
+
+/**
  * 箱から届いた高さの申告を、**その箱にだけ**当てる。
  *
  * 🔴 **宛先は「名乗った id」ではなく「実際の送り主」で決める**(2026-08-06)。
@@ -235,7 +277,9 @@ export function installHtmlSandboxResizer(targetWindow: Window = window): () => 
     if (typeof data.height !== 'number') return;
     const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
     if (!iframe) return;
-    iframe.style.height = `${clampSandboxHeight(data.height)}px`;
+    const height = clampSandboxHeight(data.height);
+    iframe.style.height = `${height}px`;
+    rememberSandboxHeight(iframe.getAttribute('data-pkc-html-render-id') ?? '', height);
   };
   targetWindow.addEventListener('message', handler);
   return () => {

@@ -1769,3 +1769,129 @@ describe('配置の控え ── 同じ要素の属性がその場で変わっ�
     host.remove();
   });
 });
+
+describe('#529 小さな欠陥 4 件', () => {
+  const APP = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
+  function board(html: string): HTMLElement {
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    document.body.append(host);
+    return host;
+  }
+  const BLOCK = (attrs: string) =>
+    `<div class="pkc-format-block pkc-place" ${attrs} data-pkc-source-line="0">a</div>`;
+
+  it('🔴 1: 低い枠(h < 64)だけ題名の帯を詰める印が付き、高い枠・h を書いていない枠には付かない', () => {
+    const host = board(
+      [
+        BLOCK('id="s" data-pkc-x="0" data-pkc-y="0" data-pkc-w="120" data-pkc-h="40"'),
+        BLOCK('id="e" data-pkc-x="0" data-pkc-y="0" data-pkc-w="120" data-pkc-h="63"'),
+        BLOCK('id="b" data-pkc-x="0" data-pkc-y="0" data-pkc-w="120" data-pkc-h="64"'),
+        BLOCK('id="u" data-pkc-x="0" data-pkc-y="0"'),
+      ].join(''),
+    );
+    applyPlaceLayout(host, () => null, 0);
+    const has = (id: string) => host.querySelector(`#${id}`)!.hasAttribute('data-pkc-place-compact');
+    expect([has('s'), has('e'), has('b'), has('u')]).toEqual([true, true, false, false]);
+    // 大きさを書き換えたら印も追う(控えに当たって古い印を残さない)
+    host.querySelector('#s')!.setAttribute('data-pkc-h', '200');
+    applyPlaceLayout(host, () => null, 0);
+    expect(has('s'), '高くしたのに印が残っている').toBe(false);
+    host.remove();
+  });
+
+  it('🔴 1: 印の規則が CSS に在り、帯の高さ(ボタンの規則が固定する 3 つとも)・上の余白・枠の余白を既定より詰める', () => {
+    const card = blocksFor(
+      APP,
+      ".pkc-place[data-pkc-place-embedded][data-pkc-place-compact] > [data-pkc-field='place-card']",
+    ).join(';');
+    const px = (prop: string, rule: string): number => {
+      const m = new RegExp(`(?:^|[;\\s])${prop}:\\s*(\\d+)(?:px)?`).exec(rule);
+      expect(m, `${prop} を詰める規則が無い`).not.toBeNull();
+      return Number(m![1]);
+    };
+    // ⚠ 帯は `button` の規則が height / min-height / max-height を `--row-h` に固定している ── 1 つでも残ると帯が縮まない
+    for (const prop of ['height', 'min-height', 'max-height']) expect(px(prop, card)).toBeLessThan(26);
+    expect(px('margin-top', card)).toBeLessThan(14);
+    const frame = blocksFor(
+      APP,
+      '.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-place-embedded][data-pkc-place-compact]',
+    ).join(';');
+    expect(px('padding', frame), '枠の余白を詰める規則が無い').toBeLessThan(6);
+  });
+
+  it('🔴 2: h を書いていない枠は実寸で下端を見積もる(測れなければ今までの 160)', () => {
+    const host = board(BLOCK('id="u" data-pkc-x="10" data-pkc-y="100"'));
+    const u = host.querySelector<HTMLElement>('#u')!;
+    // 測れない(happy-dom は 0)→ 160 の見積もり: 100 + 160 + 40
+    applyPlaceLayout(host, () => null, 0);
+    expect(host.style.minHeight).toBe('300px');
+    // 実寸が 478(SQL の枠)→ 100 + 478 + 40
+    Object.defineProperty(u, 'offsetHeight', { value: 478, configurable: true });
+    applyPlaceLayout(host, () => null, 0);
+    expect(host.style.minHeight).toBe('618px');
+    host.remove();
+  });
+
+  it('🔴 2: 中身が後から伸びたら ResizeObserver が器の高さを測り直す', () => {
+    const callbacks: Array<() => void> = [];
+    const observed: Element[] = [];
+    class FakeRO {
+      constructor(cb: () => void) {
+        callbacks.push(cb);
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeRO);
+    try {
+      const host = board(
+        BLOCK('id="u" data-pkc-x="0" data-pkc-y="0"') +
+          BLOCK('id="f" data-pkc-x="0" data-pkc-y="0" data-pkc-w="50" data-pkc-h="50"'),
+      );
+      const u = host.querySelector<HTMLElement>('#u')!;
+      applyPlaceLayout(host, () => null, 0);
+      expect(host.style.minHeight).toBe('200px'); // 160 + 40(測れない)
+      // h を書いた枠は観察しない(大きさが本文で決まっている)
+      expect(observed).toEqual([u]);
+      Object.defineProperty(u, 'offsetHeight', { value: 374, configurable: true });
+      callbacks[callbacks.length - 1]!();
+      expect(host.style.minHeight, '伸びた塊に器の高さが追従していない').toBe('414px');
+      host.remove();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('🔴 4: 末尾が閉じていないブロックの中へは、「ここに板を置く」も「テンプレートから板を置く」も理由を言って断る', () => {
+    const boot = (body: string) => {
+      const d = new Dispatcher();
+      const events: DomainEvent[] = [];
+      d.onEvent((e) => events.push(e));
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '板')], relations: [] });
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+      d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body });
+      events.length = 0;
+      return { d, events };
+    };
+    for (const template of [undefined, 'flow3' as const]) {
+      const { d, events } = boot('本文\n```js\nconst a = 1;\n');
+      d.dispatch(
+        template === undefined
+          ? { type: 'ADD_PLACE', lid: 'n1', x: 1, y: 2 }
+          : { type: 'ADD_PLACE', lid: 'n1', x: 1, y: 2, template },
+      );
+      expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '閉じていない本文へ書く依頼が出た').toHaveLength(0);
+      const error = d.getState().error ?? '';
+      expect(error, `理由が出ていない(template=${String(template)})`).toContain('閉じていない');
+      expect(error).toContain('板を置けません');
+    }
+    // 対照群: 閉じていれば同じ操作が通る
+    const { d, events } = boot('本文\n```js\nconst a = 1;\n```\n');
+    d.dispatch({ type: 'ADD_PLACE', lid: 'n1', x: 1, y: 2 });
+    expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(1);
+    expect(d.getState().error ?? '').toBe('');
+  });
+});
