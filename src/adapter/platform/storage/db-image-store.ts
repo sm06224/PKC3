@@ -122,6 +122,24 @@ export function assertWritableImage(image: Uint8Array): void {
 }
 
 /**
+ * 書き終えた画像の buffer を**その場で手放す**(ゼロコピー・即破棄 ── 2026-07-27 の方針)。
+ *
+ * ⚠ 呼んでよいのは **IndexedDB の `put` が返った後**。⚠ 持ち主が自分だけの buffer(view が全体)に限る ──
+ *   他と共有する buffer を手放すと、共有している側が壊れる。⚠ `transfer` が無い環境では何もしない。
+ * 🔴 **渡した画像は 0 バイトになる** ── 呼び側は書いた後に読み直さない約束で `write` を呼ぶこと。
+ *   (記録の形は 1 件のまま。割って書くと旧い版の読み手が読めず、その後の編集で上書きする ── f2 §7-4e)
+ */
+export function releaseImage(image: Uint8Array): void {
+  const buf = image.buffer as ArrayBuffer & { transfer?: (n?: number) => ArrayBuffer };
+  if (image.byteOffset !== 0 || image.byteLength !== buf.byteLength) return;
+  try {
+    buf.transfer?.(0);
+  } catch {
+    // ⚠ 手放せないのは失敗ではない(メモリが少し長く残るだけ)
+  }
+}
+
+/**
  * 1 つのバンドルの器。
  *
  * ⚠ **器の名前は `bundleDbName` からしか作らない** ── `file://` では
@@ -158,9 +176,13 @@ export class DbImageStore {
     image: Uint8Array;
   }): Promise<void> {
     assertWritableImage(rec.image);
-    await tx(await this.need(), 'readwrite', (s) =>
-      s.put({ bundleId: this.bundleId, ...rec }, KEY),
-    );
+    await tx(await this.need(), 'readwrite', (s) => {
+      const req = s.put({ bundleId: this.bundleId, ...rec }, KEY);
+      // ⚠ `put` は値をその場で複製する(仕様の手順)── 返った後なら送り元は要らない。commit を待つ間に
+      //   画像 1 枚ぶんを握り続けない(#1416)
+      releaseImage(rec.image);
+      return req;
+    });
   }
 
   close(): void {

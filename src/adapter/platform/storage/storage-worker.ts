@@ -8,6 +8,7 @@
  * 内部完結 API のみを使う)/ 大きな値は保持しない。
  */
 import sqlite3InitModule, { type Database } from '@sqlite.org/sqlite-wasm';
+import { exportDbImage } from './db-image-export';
 import {
   DB_SCHEMA_VERSION,
   SCHEMA_DDL,
@@ -2593,6 +2594,39 @@ async function exportOneTable(
   return { name, columns, fks, ndjson, rows: out.rows, asText: watch.lossy, refused: null };
 }
 
+/**
+ * 🔴 **DB 画像を作る処理の外側**(#971 段④の残り / #1416)── `exportImage` が通る **1 か所**(確保の失敗を言い直す作法)。
+ *
+ * ⚠ ここは **DB を丸ごと**配列にするので、wasm(32bit)では数 GB を確保できない ──
+ *   user の保存領域が 4GB を超えたとき、**必ずここで詰まる**。直す前は素の error がそのまま出ていた。
+ * 🔑 **先回りして断らない** ── 確保できる上限は端末で変わるので、測っていない数で門を作ると
+ *   **通ったはずの端末で通らなくなる**。試して、失敗したときだけ**代わりの道**(一式の書き出し)へ送る。
+ */
+function runImageExport<T>(
+  make: (api: Parameters<typeof exportDbImage>[0], pointer: unknown) => T,
+): T {
+  const api = sqliteApi;
+  if (api === null) throw new Error('sqlite が初期化されていません');
+  const database = need();
+  let size: number | null = null;
+  try {
+    const pages = database.selectValue('PRAGMA page_count') as number | undefined;
+    const per = database.selectValue('PRAGMA page_size') as number | undefined;
+    if (typeof pages === 'number' && typeof per === 'number') size = pages * per;
+  } catch {
+    // ⚠ 測れなかった = 断る理由にしない(下で `null` として扱う)
+  }
+  try {
+    return make(
+      api as unknown as Parameters<typeof exportDbImage>[0],
+      (database as unknown as { pointer: unknown }).pointer,
+    );
+  } catch (e) {
+    if (looksOutOfMemory(e)) throw new Error(imageTooBigMessage(size), { cause: e });
+    throw e;
+  }
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
@@ -2640,36 +2674,13 @@ const handlers: Handlers = {
     await pool.wipeFiles();
     return { wiped: true, note: null };
   },
-  exportImage: () => {
-    const api = sqliteApi;
-    if (api === null) throw new Error('sqlite が初期化されていません');
-    const database = need();
+  exportImage: () => ({
     /**
-     * 🔴 **確保に失敗したときに、何が起きたかを言う**(#971 段④の残り)。
-     *
-     * ⚠ ここは **DB を丸ごと 1 本の配列**にするので、wasm(32bit)では
-     *   数 GB を確保できない ── user の保存領域が 4GB を超えたとき、
-     *   **必ずここで詰まる**。直す前は素の error がそのまま出ていた。
-     * 🔑 **先回りして断らない** ── 確保できる上限は端末で変わるので、
-     *   測っていない数で門を作ると**通ったはずの端末で通らなくなる**。
-     *   試して、失敗したときだけ**代わりの道**(一式の書き出し)へ送る。
+     * 🔴 **複製を 1 枚減らす**(#1416)── 判断は `db-image-export.ts`。memdb なら sqlite に
+     *   画像の複製を作らせず、wasm heap から直に写す(wasm heap は一度広がると縮まない)。
      */
-    let size: number | null = null;
-    try {
-      const pages = database.selectValue('PRAGMA page_count') as number | undefined;
-      const per = database.selectValue('PRAGMA page_size') as number | undefined;
-      if (typeof pages === 'number' && typeof per === 'number') size = pages * per;
-    } catch {
-      // ⚠ 測れなかった = 断る理由にしない(下で `null` として扱う)
-    }
-    const exportDb = api.capi.sqlite3_js_db_export as unknown as (p: unknown) => Uint8Array;
-    try {
-      return { image: exportDb((database as unknown as { pointer: unknown }).pointer) };
-    } catch (e) {
-      if (looksOutOfMemory(e)) throw new Error(imageTooBigMessage(size), { cause: e });
-      throw e;
-    }
-  },
+    image: runImageExport((api, ptr) => exportDbImage(api, ptr)),
+  }),
   /**
    * 🔴 **user が打った SQL を、読むだけで走らせる**(#681 段②)。
    *
@@ -4654,6 +4665,15 @@ async function quotaBlocks(op: string): Promise<boolean> {
  *   こちらからは**空になる**ので、ここへ入れる op は「返した後に自分が読み直さない」物に限る。
  */
 function transferablesOf(op: StorageRequest['op'], result: unknown): ArrayBuffer[] {
+  if (op === 'exportImage') {
+    /**
+     * 🔴 **DB 画像は DB の大きさそのもの**(#1416)。clone にすると worker 内で複製が 1 枚、
+     *   main で受け取る複製がもう 1 枚できる(150MB の DB で +300MB の山)。transfer なら 0 枚。
+     * ⚠ この op は返した後に画像を読み直さない(毎回 sqlite から作り直す)ので手放してよい。
+     */
+    const t = result as ResultMap['exportImage'];
+    return t.image.byteLength === 0 ? [] : [t.image.buffer as ArrayBuffer];
+  }
   if (op !== 'exportSqliteTable') return [];
   const t = result as ResultMap['exportSqliteTable'];
   return t.ndjson === null ? [] : [t.ndjson.buffer as ArrayBuffer];
