@@ -24,6 +24,7 @@ import {
   type PlaceSize,
 } from '../markdown/place-color';
 import type { PlaceShape } from '../markdown/place-shape';
+import { rotatedBounds } from '../markdown/place-rotate';
 import {
   anchorOf,
   parseAnchorSpell,
@@ -99,6 +100,9 @@ export const FRAME = {
 /** 文字の大きさ(1/100 pt。OOXML の `sz` は 100 倍)。 */
 const SZ = { coverTitle: 4400, coverSubtitle: 2400, title: 3200, body: 1800, cell: 1400 } as const;
 
+/** `<a:xfrm rot>` の単位(1 度 = 60000)。取り込みもこの定数を引く。 */
+export const PPTX_ROT_UNIT = 60000;
+
 /** px → EMU。⚠ 96dpi の px なら 9525 倍(docx と同じ換算)。 */
 export const EMU_PER_PX = 9525;
 
@@ -137,6 +141,14 @@ export interface BoardItem {
    *   `sz="1800"`)。段 → `sz` の表は `PLACE_SIZE_PPTX_SZ` の 1 本(取り込みもこの表を引く)。
    */
   readonly size?: PlaceSize;
+  /**
+   * 🔴 **回転(度、1〜359)と、入っているグループの名前**(#530 段⑤e・⑤c)。⚠ 無ければ省く
+   *   (**回していない / グループに入っていない板は今までと 1 byte も変わらない**)。
+   * 🔑 `x` `y` `w` `h` は**回す前の四角**のまま(画面の `transform: rotate` と同じ約束)── 回した後の座標は
+   *   `rotatedBounds` / `anchorPoint`(`place-line.ts`)の 1 本から引く(§7)。
+   */
+  readonly rotate?: number;
+  readonly group?: string;
   readonly lines: readonly SlideLine[];
 }
 
@@ -372,6 +384,8 @@ export function splitIntoSlides(
           ...(p.fill != null ? { fill: p.fill } : {}),
           ...(p.stroke != null ? { stroke: p.stroke } : {}),
           ...(p.size !== undefined ? { size: p.size } : {}),
+          ...(p.rotate !== undefined ? { rotate: p.rotate } : {}),
+          ...(p.group !== undefined ? { group: p.group } : {}),
           lines: inner.flatMap((x) => blockToLines(x)),
         });
         i += 1 + p.span;
@@ -548,6 +562,8 @@ function textBox(
    *   縁なし ── 色を付けた人は縁も見たい)。
    */
   paint?: { readonly fill?: string | null; readonly stroke?: string | null },
+  /** 🔴 回転(度。#530 段⑤e)。⚠ 0 / 省略は `rot` を書かない(回していない図形は今までと 1 byte も変わらない)。 */
+  rot?: number,
 ): string {
   const fillRgb = rgbOf(paint?.fill);
   const strokeRgb = rgbOf(paint?.stroke);
@@ -561,7 +577,8 @@ function textBox(
     fillRgb === null ? '<a:noFill/>' : `<a:solidFill><a:srgbClr val="${fillRgb}"/></a:solidFill>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xmlEscape(xmlSafe(name))}"/>`
     + `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`
-    + `<p:spPr><a:xfrm><a:off x="${frame.x}" y="${frame.y}"/>`
+    + `<p:spPr><a:xfrm${rot === undefined || rot === 0 ? '' : ` rot="${Math.round(rot) * PPTX_ROT_UNIT}"`}>`
+    + `<a:off x="${frame.x}" y="${frame.y}"/>`
     + `<a:ext cx="${frame.w}" cy="${frame.h}"/></a:xfrm>`
     + `<a:prstGeom prst="${PRST_OF[shape]}"><a:avLst/></a:prstGeom>${fill}${line}</p:spPr>`
     + `<p:txBody><a:bodyPr wrap="square" anchor="${anchor}"><a:normAutofit/></a:bodyPr>`
@@ -639,6 +656,12 @@ export function boardBounds(items: readonly BoardItem[]): {
   w: number;
   h: number;
   card: { w: number; h: number };
+  /**
+   * 🔴 **回した付箋が板の左上より外へ出た分**(0 以下。#530 段⑤e)。⚠ 回していない板は **0**(今までと同じ)。
+   * 出た分だけ原点を動かして書く ── 動かさないと、回した付箋の角がスライドの外へはみ出す。
+   */
+  left: number;
+  top: number;
 } {
   const ws = items.map((i) => i.w).filter((v): v is number => v !== null && v > 0);
   const hs = items.map((i) => i.h).filter((v): v is number => v !== null && v > 0);
@@ -648,11 +671,20 @@ export function boardBounds(items: readonly BoardItem[]): {
   };
   let right = 1;
   let bottom = 1;
+  let left = 0;
+  let top = 0;
   for (const it of items) {
-    right = Math.max(right, it.x + (it.w ?? card.w));
-    bottom = Math.max(bottom, it.y + (it.h ?? card.h));
+    // 🔴 回した付箋は、回した後の外接四角で測る(#530 段⑤e)。回していなければ `rotatedBounds` は同じ四角を返す
+    const r = rotatedBounds(
+      { x: it.x, y: it.y, w: it.w ?? card.w, h: it.h ?? card.h },
+      it.rotate ?? 0,
+    );
+    right = Math.max(right, r.x + r.w);
+    bottom = Math.max(bottom, r.y + r.h);
+    left = Math.min(left, r.x);
+    top = Math.min(top, r.y);
   }
-  return { w: right, h: bottom, card };
+  return { w: right - left, h: bottom - top, card, left, top };
 }
 
 function naturalH(b: SlideBox, w: number): number {
@@ -898,6 +930,68 @@ function connectorXml(
     + '</p:spPr></p:cxnSp>';
 }
 
+/**
+ * 🔴 **同じ `group=` の付箋を 1 つの `<p:grpSp>` にまとめる**(#530 段⑤c。設計 §3.3)。
+ *
+ * - 🔑 子の座標系は**恒等**(`chOff = off` / `chExt = ext` = 子の外接四角)── 子の `<a:xfrm>` はスライドの座標のまま書ける。
+ * - ⚠ グループが `spTree` の中で 1 かたまりになるので、**同じグループは最初の 1 枚の位置へ寄せて連続させる**
+ *   (別のグループの付箋が間に挟まる板で、重なりの順が画面とずれうる ── 実測していない)。
+ * - ⚠ **1 枚だけのグループは作らない**(`groupPlaces` が 2 枚未満を断るのと同じ)── ばらの `p:sp` のまま。
+ * - 回した付箋は**回した後の外接四角**を群の枠に含める。
+ * - 🔑 グループが 1 つも無い板は、渡された `shapes` をそのまま返す(今までと 1 byte も変わらない)。
+ */
+function groupShapes(
+  base: number,
+  items: readonly BoardItem[],
+  shapes: readonly string[],
+  frames: readonly Rect[],
+): string[] {
+  const members = new Map<string, number[]>();
+  items.forEach((it, n) => {
+    if (it.group === undefined) return;
+    const list = members.get(it.group);
+    if (list === undefined) members.set(it.group, [n]);
+    else list.push(n);
+  });
+  const out: string[] = [];
+  const done = new Set<string>();
+  let g = 0;
+  items.forEach((it, n) => {
+    const list = it.group === undefined ? undefined : members.get(it.group);
+    if (it.group === undefined || list === undefined || list.length < 2) {
+      out.push(shapes[n]!);
+      return;
+    }
+    if (done.has(it.group)) return;
+    done.add(it.group);
+    let x1 = Infinity;
+    let y1 = Infinity;
+    let x2 = -Infinity;
+    let y2 = -Infinity;
+    for (const m of list) {
+      const r = rotatedBounds(frames[m]!, items[m]!.rotate ?? 0);
+      x1 = Math.min(x1, r.x);
+      y1 = Math.min(y1, r.y);
+      x2 = Math.max(x2, r.x + r.w);
+      y2 = Math.max(y2, r.y + r.h);
+    }
+    const x = Math.round(x1);
+    const y = Math.round(y1);
+    const cx = Math.max(1, Math.round(x2 - x));
+    const cy = Math.max(1, Math.round(y2 - y));
+    g += 1;
+    out.push(
+      `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${base + 10000 + g}" name="${xmlEscape(xmlSafe(it.group))}"/>`
+      + `<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>`
+      + `<p:grpSpPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/>`
+      + `<a:chOff x="${x}" y="${y}"/><a:chExt cx="${cx}" cy="${cy}"/></a:xfrm></p:grpSpPr>`
+      + list.map((m) => shapes[m]!).join('')
+      + '</p:grpSp>',
+    );
+  });
+  return out;
+}
+
 function boardShapes(
   base: number,
   frame: Rect,
@@ -915,23 +1009,27 @@ function boardShapes(
   const usedH = Math.round(hEmu * k);
   const originX = frame.x + Math.max(0, Math.floor((frame.w - usedW) / 2));
   const originY = frame.y + Math.max(0, Math.floor((frame.h - usedH) / 2));
-  const out: string[] = [];
+  const shapes: string[] = [];
+  const frames: Rect[] = [];
   items.forEach((it, n) => {
     const w = it.w ?? box.card.w;
     const h = it.h ?? box.card.h;
     // 🔴 塗りが付いた付箋だけ、字の色も塗りに合わせる(`placeInkOf`)── 色なしは字に何も足さない
     const fillColor = parsePlaceColor(it.fill);
-    out.push(
+    // ⚠ `box.left` / `box.top` は回した付箋が左上より外へ出た分(回していない板は 0 = 今までと同じ座標)
+    const frameOf: Rect = {
+      x: originX + Math.round((it.x - box.left) * EMU_PER_PX * k),
+      y: originY + Math.round((it.y - box.top) * EMU_PER_PX * k),
+      w: Math.max(1, Math.round(w * EMU_PER_PX * k)),
+      h: Math.max(1, Math.round(h * EMU_PER_PX * k)),
+    };
+    frames.push(frameOf);
+    shapes.push(
       textBox(
         // ⚠ 番号は離す ── 題名(2)/ 本文(3)と衝突させない
         base + 100 + n,
         `付箋 ${n + 1}`,
-        {
-          x: originX + Math.round(it.x * EMU_PER_PX * k),
-          y: originY + Math.round(it.y * EMU_PER_PX * k),
-          w: Math.max(1, Math.round(w * EMU_PER_PX * k)),
-          h: Math.max(1, Math.round(h * EMU_PER_PX * k)),
-        },
+        frameOf,
         it.lines
           
           .map((l) => lineXml(l, it.size === undefined ? SZ.body : PLACE_SIZE_PPTX_SZ[it.size], linkOf, fillColor === null ? null : rgbOf(placeInkOf(fillColor))))
@@ -939,9 +1037,11 @@ function boardShapes(
         't',
         it.shape,
         { fill: it.fill, stroke: it.stroke },
+        it.rotate,
       ),
     );
   });
+  const out = groupShapes(base, items, shapes, frames);
   /**
    * 🔴 **線を引く**(#530 段③e)。
    *
@@ -966,11 +1066,15 @@ function boardShapes(
   });
   const rectOf = (n: number): { x: number; y: number; w: number; h: number } => {
     const it = items[n]!;
-    return { x: it.x, y: it.y, w: it.w ?? box.card.w, h: it.h ?? box.card.h };
+    // 🔴 回した付箋は `rot` を付けて渡す ── 線の端は `anchorPoint` が**回した辺の上**へ置く(§7。複製しない)
+    return {
+      x: it.x, y: it.y, w: it.w ?? box.card.w, h: it.h ?? box.card.h,
+      ...(it.rotate !== undefined && it.rotate !== 0 ? { rot: it.rotate } : {}),
+    };
   };
   const toEmu = (px: { x: number; y: number }): { x: number; y: number } => ({
-    x: originX + Math.round(px.x * EMU_PER_PX * k),
-    y: originY + Math.round(px.y * EMU_PER_PX * k),
+    x: originX + Math.round((px.x - box.left) * EMU_PER_PX * k),
+    y: originY + Math.round((px.y - box.top) * EMU_PER_PX * k),
   });
   const wires: string[] = [];
   let drawn = 0;

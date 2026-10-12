@@ -10,8 +10,10 @@
  * - 🔑 **対応表は書き出しの表から引く**(`PRST_OF` / `CXN_PRST` / `CXN_IDX`)── 逆向きの表を別に持つと、
  *   書き出し側だけ直したとき往復が静かにずれる(§7)。
  * - ⚠ **戻せなかったものは数える**(`dropped`)。黙って捨てない ── 呼び側が件数を user に言う。
- *   数える対象は、図(`p:pic`)・表(`p:graphicFrame`)・グループ(`p:grpSp`)・位置を持たない図形・
+ *   数える対象は、図(`p:pic`)・表(`p:graphicFrame`)・位置を持たない図形・
  *   両端が解決できない線。
+ * - 🔴 **グループ(`p:grpSp`)は開いて平らに読む**(#530 段⑤c)── 同じ `group=` を付ける。入れ子は内側だけ残す。
+ *   **回転(`rot`)も読む**(段⑤e)── 群の回転は子の位置と向きに合成する。
  * - ⚠ **PKC3 以外が作った .pptx も、読めた範囲だけ**戻す。
  *
  * ## 座標(EMU → px)
@@ -31,6 +33,7 @@ import {
   CXN_PRST,
   EMU_PER_PX,
   FRAME,
+  PPTX_ROT_UNIT,
   PRST_OF,
 } from '../export/pptx';
 import { parseXml, textOf, type XmlNode } from '../export/xml-lite';
@@ -43,6 +46,8 @@ import {
   type PlaceSize,
 } from '../markdown/place-color';
 import { PLACE_EDGES, PLACE_ROUTES, type PlaceEdge, type PlaceRoute } from '../markdown/place-line';
+import { parsePlaceGroup, PLACE_GROUP_STEM } from '../markdown/place-notation';
+import { rotatedBounds, rotatePointAround } from '../markdown/place-rotate';
 import { PLACE_SHAPES, type PlaceShape } from '../markdown/place-shape';
 
 /** 取込の振り分けが見る拡張子(`isVcfFileName` と同じ作法 ── 中身では決めない)。 */
@@ -67,6 +72,11 @@ export interface PptxBoardSlide {
    * 数えない ── 自分が書き出した file は 0 になる。呼び側が件数を user に言う。
    */
   readonly rounded: number;
+  /**
+   * 🔴 **近い形に直した**付箋の数(#530 段⑤c・⑤e)── 入れ子のグループ(内側の名前だけ残る)と、反転(`flipH` / `flipV`。向きは失われる)。
+   * ⚠ 呼び側が件数を user に言う。
+   */
+  readonly simplified: number;
 }
 
 /** 名前の頭(`connectPlaces` が付ける名前と同じ。⚠ 日本語が使える)。 */
@@ -106,6 +116,14 @@ interface ShapeRead {
   readonly size: { readonly step: PlaceSize; readonly rounded: boolean } | null;
   /** 印を付けない素の字(題名に使う)。 */
   readonly plain: string;
+  /** 🔴 回転(度、0〜359 の整数。#530 段⑤e)。回していなければ 0。 */
+  readonly rot: number;
+  /** 反転(`flipH` / `flipV`)が付いていたか。⚠ 読まない(数えて user へ言う)。 */
+  readonly flipped: boolean;
+  /** 🔴 入っているグループの通し番号(内側が勝つ)。無ければ `null`(#530 段⑤c)。 */
+  readonly group: number | null;
+  /** 入れ子の外側の群の名前を失った付箋か(内側の名前だけ残す。#530 段⑤c)。 */
+  readonly lostOuter: boolean;
 }
 
 /** `prst` → 板の形。⚠ **書き出しの表を裏返す**。知らない図形名は四角。 */
@@ -192,6 +210,58 @@ function readSize(tx: XmlNode): ShapeRead['size'] {
   return { step, rounded: PLACE_SIZE_PPTX_SZ[step] !== scaled };
 }
 
+/** `<a:xfrm rot>`(60000 分の 1 度)→ 度(整数、0〜359)。読めない / 0 は 0。 */
+function rotDegOf(xfrm: XmlNode | undefined): number {
+  const r = int(xfrm?.attrs.rot);
+  if (r === null) return 0;
+  return ((Math.round(r / PPTX_ROT_UNIT) % 360) + 360) % 360;
+}
+
+/**
+ * 🔴 **`<p:grpSp>` の座標の写し**(#530 段⑤c)── 子の座標 `c` は `off + (c − chOff) × ext / chExt` でスライドの座標へ戻す。
+ * 群が回っている(`rot`)ときは、子の**中心を群の中心の周りに回し**、子の向きに群の向きを足す(§3.3)。
+ * ⚠ 群の枠が読めない / 大きさが 0 なら恒等(写さない)。
+ */
+function groupTransform(grp: XmlNode): (s: ShapeRead) => ShapeRead {
+  const xfrm = kid(kid(grp, 'grpSpPr'), 'xfrm');
+  const off = kid(xfrm, 'off');
+  const ext = kid(xfrm, 'ext');
+  const chOff = kid(xfrm, 'chOff');
+  const chExt = kid(xfrm, 'chExt');
+  const ox = int(off?.attrs.x);
+  const oy = int(off?.attrs.y);
+  const ew = int(ext?.attrs.cx);
+  const eh = int(ext?.attrs.cy);
+  const cx0 = int(chOff?.attrs.x);
+  const cy0 = int(chOff?.attrs.y);
+  const cw = int(chExt?.attrs.cx);
+  const ch = int(chExt?.attrs.cy);
+  if (ox === null || oy === null || ew === null || eh === null
+    || cx0 === null || cy0 === null || cw === null || ch === null || cw <= 0 || ch <= 0) {
+    return (s) => s;
+  }
+  const sx = ew / cw;
+  const sy = eh / ch;
+  const grot = rotDegOf(xfrm);
+  return (s) => {
+    const w = s.rect.w * sx;
+    const h = s.rect.h * sy;
+    let x = ox + (s.rect.x - cx0) * sx;
+    let y = oy + (s.rect.y - cy0) * sy;
+    if (grot !== 0) {
+      const c = rotatePointAround(x + w / 2, y + h / 2, ox + ew / 2, oy + eh / 2, grot);
+      x = c.x - w / 2;
+      y = c.y - h / 2;
+    }
+    return {
+      ...s,
+      rect: { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) },
+      rot: (s.rot + grot) % 360,
+      flipped: s.flipped || xfrm?.attrs.flipH === '1' || xfrm?.attrs.flipV === '1',
+    };
+  };
+}
+
 /** `<p:sp>` 1 つを読む。位置が無ければ `null`(= 戻せない図形)。 */
 function readShape(sp: XmlNode): ShapeRead | null {
   const nv = kid(sp, 'nvSpPr');
@@ -234,6 +304,10 @@ function readShape(sp: XmlNode): ShapeRead | null {
     text: paras.join('\n'),
     size: readSize(tx),
     plain,
+    rot: rotDegOf(xfrm),
+    flipped: xfrm?.attrs.flipH === '1' || xfrm?.attrs.flipV === '1',
+    group: null,
+    lostOuter: false,
   };
 }
 
@@ -246,8 +320,17 @@ type Frame = { readonly x: number; readonly y: number; readonly w: number; reado
  * `E - f = floor((F + U) / 2)` ── `U` は `2(E - f) - F` か、その +1。
  * 🔑 板の大きさは px の整数 × 9525 なので、**9525 の倍数になる方**だけを採る(縮めた板は倍数にならない)。
  */
-function lengthFromEdge(edge: number, f: number, F: number): number | null {
+function lengthFromEdge(edge: number, f: number, F: number, loose: boolean): number | null {
   const base = 2 * (edge - f) - F;
+  /**
+   * 🔴 回した付箋がある板(#530 段⑤e)── 外接四角の右端・下端は 9525 の倍数にならない(15° の `sin` は割り切れない)。
+   * ⚠ 倍数かどうかの検めは外す(丸めた EMU の 1〜2 の誤差は px に直すと消える)。外すのは**回した付箋があるときだけ** ──
+   *   回していない板の検めは今までどおり(縮められた板・他アプリの file を「書き出しの板」と誤読しない)。
+   */
+  if (loose) {
+    const u = Math.round(base);
+    return u > 0 && u <= F + 2 ? Math.min(u, F) : null;
+  }
   for (const u of [base, base + 1]) {
     if (u > 0 && u <= F && u % EMU_PER_PX === 0) return u;
   }
@@ -255,19 +338,24 @@ function lengthFromEdge(edge: number, f: number, F: number): number | null {
 }
 
 /** 書き出しの枠の取り方から原点を逆算する。成り立たなければ `null`(呼び側が相対位置へ倒す)。 */
-function originFromExport(rects: readonly Rect[], frame: Frame): { x: number; y: number } | null {
+function originFromExport(
+  rects: readonly Rect[],
+  frame: Frame,
+  loose: boolean,
+): { x: number; y: number } | null {
   let right = -Infinity;
   let bottom = -Infinity;
   for (const r of rects) {
     right = Math.max(right, r.x + r.w);
     bottom = Math.max(bottom, r.y + r.h);
   }
-  const U = lengthFromEdge(right, frame.x, frame.w);
-  const H = lengthFromEdge(bottom, frame.y, frame.h);
+  const U = lengthFromEdge(right, frame.x, frame.w, loose);
+  const H = lengthFromEdge(bottom, frame.y, frame.h, loose);
   if (U === null || H === null) return null;
   // 左上の図形が板の外へ出ていたら、逆算が外れている
   const o = { x: right - U, y: bottom - H };
-  for (const r of rects) if (r.x < o.x || r.y < o.y) return null;
+  const slack = loose ? 2 : 0;
+  for (const r of rects) if (r.x < o.x - slack || r.y < o.y - slack) return null;
   return o;
 }
 
@@ -300,37 +388,57 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
   let dropped = 0;
   // 形を変えて(四角で)置いた数。⚠ 位置の逆算の可否(`pure`)には数えない
   let reshaped = 0;
-  const shapes: ShapeRead[] = [];
   const conns: XmlNode[] = [];
   let title: string | null = null;
   let hasBodyText = false;
-  for (const el of tree.children) {
-    if (el.tag === '#text') continue;
-    const t = local(el.tag);
-    if (t === 'sp') {
-      const s = readShape(el);
-      if (s === null) { dropped += 1; continue; }
-      if (s.isTitle) {
-        if (title === null) title = s.plain;
-        continue;
+  // 🔴 グループ(#530 段⑤c)── `<p:grpSp>` を**開いて平らに**読む。名前は後でまとめて決める(下の ⑤)
+  const groupNames: string[] = [];
+  const walk = (nodes: readonly XmlNode[], depth: number): ShapeRead[] => {
+    const got: ShapeRead[] = [];
+    for (const el of nodes) {
+      if (el.tag === '#text') continue;
+      const t = local(el.tag);
+      if (t === 'sp') {
+        const s = readShape(el);
+        if (s === null) { dropped += 1; continue; }
+        if (s.isTitle) {
+          if (title === null) title = s.plain;
+          continue;
+        }
+        if (s.isSub) continue;
+        if (s.reshaped) reshaped += 1;
+        if (s.name === '本文') hasBodyText = true;
+        got.push(s);
+      } else if (t === 'cxnSp') {
+        // ⚠ グループの中の線も読む(`id` はスライド内で一意 ── 引き方は変わらない)
+        conns.push(el);
+      } else if (t === 'grpSp') {
+        const gi = groupNames.length;
+        groupNames.push(kid(kid(el, 'nvGrpSpPr'), 'cNvPr')?.attrs.name ?? '');
+        const move = groupTransform(el);
+        for (const c of walk(el.children, depth + 1)) {
+          const m = move(c);
+          // 🔑 入れ子は内側が勝つ(`group=` は 1 枚に 1 つ)
+          got.push(m.group === null ? { ...m, group: gi } : { ...m, lostOuter: true });
+        }
+      } else if (t === 'pic' || t === 'graphicFrame' || t === 'contentPart') {
+        dropped += 1;
       }
-      if (s.isSub) continue;
-      if (s.reshaped) reshaped += 1;
-      if (s.name === '本文') hasBodyText = true;
-      shapes.push(s);
-    } else if (t === 'cxnSp') {
-      conns.push(el);
-    } else if (t === 'pic' || t === 'graphicFrame' || t === 'grpSp' || t === 'contentPart') {
-      dropped += 1;
     }
-  }
+    return got;
+  };
+  const shapes = walk(tree.children, 0);
   if (title === '') title = null;
 
   // ① 原点を決める
-  const rects = shapes.map((s) => s.rect);
   let origin = { x: 0, y: 0 };
-  if (rects.length > 0) {
-    origin = { x: Math.min(...rects.map((r) => r.x)), y: Math.min(...rects.map((r) => r.y)) };
+  if (shapes.length > 0) {
+    // 🔴 回した付箋は、回した後の外接四角で測る(#530 段⑤e)── 書き出しが外接四角で枠を取るので、逆算も合わせる
+    const turned = shapes.some((s) => s.rot !== 0);
+    const bounds = shapes.map((s) => rotatedBounds(s.rect, s.rot));
+    // ⚠ 座標は回す前の四角(`x=` `y=` と同じ約束)で書くので、相対位置の原点も**回す前の四角の最小**で取る。
+    //   回した後の外接四角の最小で取ると、原点と座標の基準が食い違い、回した付箋の隣との間隔が縮む
+    origin = { x: Math.min(...shapes.map((s) => s.rect.x)), y: Math.min(...shapes.map((s) => s.rect.y)) };
     // 書き出しの板のスライドは「題名(あれば)+ 板だけ」。他の図形(本文 / 図 / 表)が同居する枠は逆算しない
     const pure = !hasBodyText && dropped === 0;
     if (pure) {
@@ -340,7 +448,7 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
         const s = readShape(el);
         return s !== null && s.isTitle && s.rect.y === FRAME.coverTitle.y;
       });
-      const found = originFromExport(rects, sectionTitle ? FRAME.coverBody : FRAME.body);
+      const found = originFromExport(bounds, sectionTitle ? FRAME.coverBody : FRAME.body, turned);
       if (found !== null) origin = found;
     }
   }
@@ -400,6 +508,27 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     wires.push(`:::format{.pkc-line ${attrs.join(' ')}}\n:::\n`);
   }
 
+  // ⑤ グループの名前(#530 段⑤c)── 2 枚に満たない群は作らない(`groupPlaces` と同じ)。
+  //   名前は PowerPoint 側の名前が `parsePlaceGroup` で読めて、板の中で重ならないときだけ使い、それ以外は `グループN`
+  //   (使われていない最小の N)。⚠ 読める名前を先に全部確保してから番号を振る(番号が後の名前を奪わない)
+  const members = new Map<number, number>();
+  for (const s of shapes) if (s.group !== null) members.set(s.group, (members.get(s.group) ?? 0) + 1);
+  const taken = new Set<string>();
+  const groupOf = new Map<number, string>();
+  groupNames.forEach((raw, gi) => {
+    if ((members.get(gi) ?? 0) < 2) return;
+    const n = parsePlaceGroup(raw);
+    if (n !== null && !taken.has(n)) { taken.add(n); groupOf.set(gi, n); }
+  });
+  let seq = 0;
+  groupNames.forEach((_raw, gi) => {
+    if ((members.get(gi) ?? 0) < 2 || groupOf.has(gi)) return;
+    let n: string;
+    do { seq += 1; n = `${PLACE_GROUP_STEM}${seq}`; } while (taken.has(n));
+    taken.add(n);
+    groupOf.set(gi, n);
+  });
+
   // ④ 付箋
   const blocks: string[] = [];
   shapes.forEach((s, i) => {
@@ -416,6 +545,10 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     if (s.stroke !== null && !defaultEdge) attrs.push(`stroke=${s.stroke}`);
     // 🔴 文字の大きさ(#530 段⑤a)── 標準は札を書かない(往復で札が増えない)
     if (s.size !== null && s.size.step !== 'standard') attrs.push(`size=${s.size.step}`);
+    // 🔴 回転・グループ(#530 段⑤e・⑤c)── 回していない / 群に入っていないなら札を書かない(往復で札が増えない)
+    if (s.rot !== 0) attrs.push(`rotate=${s.rot}`);
+    const g = s.group === null ? undefined : groupOf.get(s.group);
+    if (g !== undefined) attrs.push(`group=${g}`);
     blocks.push(`:::format{${attrs.join(' ')}}\n${s.text}${s.text === '' ? '' : '\n'}:::\n`);
   });
 
@@ -426,6 +559,7 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     lines: wires.length,
     dropped: dropped + reshaped,
     rounded: shapes.filter((s) => s.size?.rounded === true).length,
+    simplified: shapes.filter((s) => s.flipped || s.lostOuter).length,
   };
 }
 
