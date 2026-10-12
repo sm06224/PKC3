@@ -51,6 +51,7 @@ import {
 } from '@adapter/ui/render/read-columns';
 import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
+import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
   paintStatusCreate,
   paintStatusMessages,
@@ -5679,6 +5680,8 @@ function bootstrap(): void {
       // PKC2 の教訓 ── 「#root 存在待ち」は HTML load 段階で通過して flake 化する
       root.setAttribute('data-pkc-boot', 'ready');
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)
+      // 🔴 数字の整形の初回の読み込み(11〜13ms)を、最初の操作の最中ではなく手が空いた時へ(#878)
+      scheduleNumberFormatWarmup(window);
       /**
        * 🔴 **起動のたびに、軽く検める**(#1007 段①)。⚠ **刻印の後**に始める ──
        *   起動を遅くしない。結末は DOM 属性に出す(smoke / probe の観測点 ──
