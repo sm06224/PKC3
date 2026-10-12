@@ -7850,6 +7850,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const text = input?.value ?? '';
     const noteLid: string = lid;
     /**
+     * 🔴 **追記先**(#395 段①)。空 = 末尾。⚠ 字・ノートと同じく**押した時点で読む**(問い合わせの間に
+     *   ノートや選択が替わっても、押した物が撃たれる)。印をそのまま渡す ── 行番号に直さない
+     *   (effect は disk から読み直すので、行番号は読み直した先で別の場所を指す)。
+     */
+    const target =
+      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
+    /**
      * 🔴 **別のタブ・窓が編集中のノートへは追記しない**(#529 W5-d。Gemini 裁定 Q5 = A)。
      * ⚠ 通すと編集中のタブの保存で上書きされ、足した字は履歴にだけ残る。**断って理由を出し、
      *   欄の字は残す**(撃たないので欄は消えない ── 欄を空にするのは書けたとき)。
@@ -7861,7 +7868,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 問い合わせの間に 2 回押されても 1 回しか撃たない
       if (input?.hasAttribute('data-pkc-busy')) return;
       input?.setAttribute('data-pkc-busy', '');
-      void editedElsewhereReason(dispatcher, services, lid)
+      // ⚠ 問い合わせの間は欄を読み取り専用にする ── 先打ちした字が、成功の「欄を空にする」で
+      //   黙って消えるのを防ぐ(撃つ字は押した時点の物なので、増えた字は撃たれない)
+      const wasReadOnly = input?.readOnly ?? false;
+      if (input) input.readOnly = true;
+      void editedElsewhereReason(dispatcher, services, noteLid)
         .then((why) => {
           if (why !== null) {
             dispatcher.dispatch({ type: 'OP_FAILED', error: why });
@@ -7869,7 +7880,17 @@ const ACTIONS: Record<string, ActionHandler> = {
           }
           sendAppend();
         })
-        .finally(() => input?.removeAttribute('data-pkc-busy'));
+        // 🔴 問い合わせが落ちても黙って捨てない(字は欄に残る)
+        .catch((e: unknown) => {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})`,
+          });
+        })
+        .finally(() => {
+          input?.removeAttribute('data-pkc-busy');
+          if (input) input.readOnly = wasReadOnly;
+        });
       return;
     }
     sendAppend();
@@ -7883,8 +7904,6 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ ここでは**印をそのまま渡す** ── 行番号に直さない。effect は disk から
      *   読み直すので、行番号は読み直した先で別の場所を指す。
      */
-    const target =
-      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
     /**
      * 🔑 **書いたものが見える所へ入るようにする**(#596 B)。
      *

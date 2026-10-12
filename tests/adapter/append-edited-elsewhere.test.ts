@@ -16,7 +16,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, reduce, type DomainEvent } from '../../src/adapter/state/app-state';
-import { appendUnlessEditedElsewhere } from '../../src/adapter/state/edited-elsewhere';
+import {
+  appendUnlessEditedElsewhere,
+  editedElsewhereReason,
+  elsewhereCheckNotNeeded,
+  makeEditLockPort,
+} from '../../src/adapter/state/edited-elsewhere';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { quoteIntoNote } from '../../src/adapter/platform/pdf/quote-into-note';
 import type { PdfSession } from '../../src/adapter/platform/pdf/pdf-window';
@@ -50,17 +55,24 @@ function panel(services: Partial<BinderServices>) {
   input.setAttribute('data-pkc-field', 'append-input');
   const btn = document.createElement('button');
   btn.setAttribute('data-pkc-action', 'append-entry');
-  root.append(input, btn);
+  const sel = document.createElement('select');
+  sel.setAttribute('data-pkc-field', 'append-target');
+  for (const v of ['', 'sec']) {
+    const o = document.createElement('option');
+    o.value = v;
+    sel.append(o);
+  }
+  root.append(input, btn, sel);
   document.body.append(root);
   const d = new Dispatcher();
   const events: DomainEvent[] = [];
   d.onEvent((e) => events.push(e));
   bindActions(root, d, { showStatus: () => {}, ...services });
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
   events.length = 0;
-  return { d, events, input, btn };
+  return { d, events, input, btn, sel };
 }
 
 describe('① 本文の下の追記欄(append-entry)', () => {
@@ -136,6 +148,160 @@ describe('① 本文の下の追記欄(append-entry)', () => {
     t.btn.click();
     await flush();
     expect(acquire).not.toHaveBeenCalled();
+  });
+});
+
+describe('① の続き ── 問い合わせの間に起きること', () => {
+  const deferred = () => {
+    let resolve!: (v: 'granted' | 'denied' | 'unreachable') => void;
+    let reject!: (e: unknown) => void;
+    const p = new Promise<'granted' | 'denied' | 'unreachable'>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { p, resolve, reject };
+  };
+
+  it('🔴 B: 追記先は押した時点の物を撃つ(問い合わせの間にノートが替わっても)', async () => {
+    const g = deferred();
+    const t = panel({ acquireEditLock: () => g.p, releaseEditLock: vi.fn() });
+    t.input.value = '字';
+    t.sel.value = 'sec';
+    t.btn.click();
+    t.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    t.sel.value = '';
+    g.resolve('granted');
+    await flush();
+    const r = requests(t.events);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.lid).toBe('n1');
+    expect(r[0]!.target, '押したときの追記先が失われた').toBe('sec');
+  });
+
+  it('🔴 C: 問い合わせの間は欄が読み取り専用で、終わったら戻る(先打ちの字が成功で消えない)', async () => {
+    const g = deferred();
+    const t = panel({ acquireEditLock: () => g.p, releaseEditLock: vi.fn() });
+    t.input.value = '字';
+    t.btn.click();
+    expect(t.input.readOnly, '問い合わせ中に打てる').toBe(true);
+    g.resolve('granted');
+    await flush();
+    expect(t.input.readOnly, '読み取り専用のまま').toBe(false);
+  });
+
+  it('C 対照群: 断られた回も読み取り専用は戻る', async () => {
+    const t = panel({ acquireEditLock: async () => 'denied', releaseEditLock: vi.fn() });
+    t.input.value = '字';
+    t.btn.click();
+    await flush();
+    expect(t.input.readOnly).toBe(false);
+  });
+
+  it('🔴 D: 問い合わせが落ちたら理由を出し、字は残り、読み取り専用も戻る(黙って捨てない)', async () => {
+    const t = panel({
+      acquireEditLock: () => Promise.reject(new Error('通信失敗')),
+      releaseEditLock: vi.fn(),
+    });
+    t.input.value = '残す字';
+    t.btn.click();
+    await flush();
+    expect(requests(t.events)).toHaveLength(0);
+    expect(t.d.getState().error ?? '').toContain('通信失敗');
+    expect(t.input.value).toBe('残す字');
+    expect(t.input.readOnly).toBe(false);
+    expect(t.input.hasAttribute('data-pkc-busy')).toBe(false);
+  });
+
+  it('🔴 A: 待つ間にこのタブが同じノートの編集に入ったなら、取れた錠を返さない(自分の編集の錠)', async () => {
+    const g = deferred();
+    const release = vi.fn();
+    const t = panel({});
+    const p = editedElsewhereReason(t.d, { acquireEditLock: () => g.p, releaseEditLock: release }, 'n1');
+    t.d.dispatch({ type: 'START_EDIT' });
+    expect(t.d.getState().phase).toBe('editing');
+    g.resolve('granted');
+    expect(await p).toBeNull();
+    expect(release, '自分の編集の錠を手放した').not.toHaveBeenCalled();
+  });
+
+  it('A 対照群: 編集に入っていなければ返す', async () => {
+    const g = deferred();
+    const release = vi.fn();
+    const t = panel({});
+    const p = editedElsewhereReason(t.d, { acquireEditLock: () => g.p, releaseEditLock: release }, 'n1');
+    g.resolve('granted');
+    await p;
+    expect(release).toHaveBeenCalledWith('n1');
+  });
+
+  it('A(板の経路): 付箋の追記を待つ間に編集へ入っても、錠を返さない', async () => {
+    // 板も同じ口(editedElsewhereReason)を通る ── 口の単体で上の 2 件が守っている。ここは binder の配線
+    const g = deferred();
+    const release = vi.fn();
+    const t = panel({ acquireEditLock: () => g.p, releaseEditLock: release });
+    t.input.value = '字';
+    t.btn.click();
+    t.d.dispatch({ type: 'START_EDIT' });
+    g.resolve('granted');
+    await flush();
+    expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe('F: 問い合わせが要らない回', () => {
+  const fake = (st: object) => ({ getState: () => st }) as never;
+  const port = { acquireEditLock: async () => 'granted' as const };
+  it('章の下書き(sectionDraft)が開いているノートは問い合わせない', () => {
+    const d = fake({ phase: 'ready', openBody: null, sectionDraft: { lid: 'n1' } });
+    expect(elsewhereCheckNotNeeded(d, port, 'n1')).toBe(true);
+    expect(elsewhereCheckNotNeeded(d, port, 'n2'), '別のノートまで飛ばした').toBe(false);
+  });
+  it('PDF: このタブが編集中のノートは問い合わせない', async () => {
+    const booted = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('att', 'attachment')], relations: [] }).state;
+    const d = new Dispatcher(booted);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'att' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'att', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    const acquire = vi.fn(async () => 'denied' as const);
+    await quoteIntoNote(d, { token: 't', assetKey: 'k', name: 'a.pdf', lid: 'att' }, '字', 1, vi.fn(), undefined, {
+      acquireEditLock: acquire,
+      releaseEditLock: vi.fn(),
+    });
+    expect(acquire).not.toHaveBeenCalled();
+  });
+  it('AI: このタブが編集中のノートは問い合わせない', () => {
+    const booted = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] }).state;
+    const d = new Dispatcher(booted);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    const acquire = vi.fn(async () => 'denied' as const);
+    void appendUnlessEditedElsewhere(d, { acquireEditLock: acquire, releaseEditLock: vi.fn() }, 'n1', '字', null, 1000);
+    expect(acquire).not.toHaveBeenCalled();
+  });
+});
+
+describe('E: makeEditLockPort(main.ts が使う錠の口)', () => {
+  it('取りに行く先は cid と lid、返す先も cid と lid。sync は呼ぶたびに読む', async () => {
+    const calls: string[] = [];
+    let cur = { tag: 'A' };
+    const mk = (tag: string) => ({
+      acquireEdit: async (cid: string, lid: string) => {
+        calls.push(`${tag}:acq:${cid}:${lid}`);
+        return 'denied' as const;
+      },
+      releaseEdit: (cid: string, lid: string) => {
+        calls.push(`${tag}:rel:${cid}:${lid}`);
+      },
+    });
+    const A = mk('A');
+    const B = mk('B');
+    const port = makeEditLockPort(() => (cur.tag === 'A' ? A : B), 'c9');
+    expect(await port.acquireEditLock('n1')).toBe('denied');
+    port.releaseEditLock('n1');
+    cur = { tag: 'B' };
+    await port.acquireEditLock('n2');
+    expect(calls).toEqual(['A:acq:c9:n1', 'A:rel:c9:n1', 'B:acq:c9:n2']);
   });
 });
 
@@ -228,6 +394,9 @@ describe('main.ts の配線(起動できないので字で pin する)', () => {
     .join('\n');
   it('AI の書き足しが同じ口(問い合わせつき)を通る', () => {
     expect(src).toMatch(/append: \(id: string, text: string, heading: string \| null\) =>\s*appendUnlessEditedElsewhere\(dispatcher, editLockPort,/);
+  });
+  it('錠の口は makeEditLockPort で組む(空の口に差し替えると断りが全部消える)', () => {
+    expect(src).toMatch(/const editLockPort: EditLockPort = makeEditLockPort\(\(\) => sync, cid\);/);
   });
   it('PDF の引用が同じ口(問い合わせつき)を通る', () => {
     expect(src).toMatch(/quoteIntoNote\(dispatcher, session, text, page, showStatus, undefined, editLockPort\)/);

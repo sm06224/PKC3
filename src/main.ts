@@ -105,7 +105,7 @@ import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
 import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
 import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transport/webmcp-tools';
-import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
+import { appendUnlessEditedElsewhere, makeEditLockPort, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
@@ -1823,12 +1823,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ブラウザの AI の書き足しが**同じ 1 本**を通る(`edited-elsewhere.ts`)。⚠ `sync` は昇格で実体が替わるので
    * **呼ぶたびに読む**(binder に渡す同名の 2 つと同じ作法)。
    */
-  const editLockPort: EditLockPort = {
-    acquireEditLock: (lid) => sync.acquireEdit(cid, lid),
-    releaseEditLock: (lid) => {
-      sync.releaseEdit(cid, lid);
-    },
-  };
+  const editLockPort: EditLockPort = makeEditLockPort(() => sync, cid);
   /**
    * 🔴 **PDF を PKC の画面で読む窓**(#275 段①。設定で選んだ人だけ ── 呼ぶのは `viewAsset`)。
    * ⚠ **最初に使うときまで作らない**(放送の口を使わない人に開かない)。窓の合図は全部ここへ来る。

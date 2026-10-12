@@ -24,12 +24,36 @@ export interface EditLockPort {
   releaseEditLock?(lid: string): void;
 }
 
+/** `TabSync` のうち錠の 2 つ(`store-proxy.ts`)。 */
+export interface EditLockSync {
+  acquireEdit(cid: string, lid: string): Promise<'granted' | 'denied' | 'unreachable'>;
+  releaseEdit(cid: string, lid: string): void;
+}
+
+/**
+ * 錠の口を組む(`main.ts` から取り出した ── 配線を test できるように)。
+ * ⚠ `sync` は昇格で実体が替わるので**呼ぶたびに読む**(`getSync`)。
+ */
+export function makeEditLockPort(getSync: () => EditLockSync, cid: string): Required<EditLockPort> {
+  return {
+    acquireEditLock: (lid) => getSync().acquireEdit(cid, lid),
+    releaseEditLock: (lid) => {
+      getSync().releaseEdit(cid, lid);
+    },
+  };
+}
+
 /**
  * 問い合わせが**要らない**か(同期)。口が無い / このタブが自分で編集中(章の下書き含む)。
  * ⚠ 要らないときは**同期のまま**書く ── 口の無い環境(unit)の追記を非同期に変えない。
  */
 export function elsewhereCheckNotNeeded(dispatcher: Dispatcher, port: EditLockPort, lid: string): boolean {
   if (!port.acquireEditLock) return true;
+  return ownsLocally(dispatcher, lid);
+}
+
+/** このタブが自分でそのノートを編集中(全文 / 章の下書き)。 */
+function ownsLocally(dispatcher: Dispatcher, lid: string): boolean {
   const st = dispatcher.getState();
   return (st.phase === 'editing' && st.openBody?.lid === lid) || st.sectionDraft?.lid === lid;
 }
@@ -43,7 +67,9 @@ export async function editedElsewhereReason(
   if (elsewhereCheckNotNeeded(dispatcher, port, lid)) return null;
   const grant = await port.acquireEditLock!(lid);
   if (grant === 'granted') {
-    port.releaseEditLock?.(lid);
+    // ⚠ 待っている間に**このタブが同じノートの編集に入った**なら、いま握っている錠は
+    //   その編集の物(同じ錠の取り直し)── 返すと自分の編集の錠を手放す
+    if (!ownsLocally(dispatcher, lid)) port.releaseEditLock?.(lid);
     return null;
   }
   return grant === 'denied' ? EDIT_ELSEWHERE_ERROR : null;
