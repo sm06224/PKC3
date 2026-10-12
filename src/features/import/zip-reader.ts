@@ -465,16 +465,31 @@ export interface BlobAssetSource {
   base64?: undefined;
 }
 
-/** 取り込みの本体が読む在り処 ── zip の entry か、既に在る Blob。 */
-export type ReadableAssetSource = AssetSource | BlobAssetSource;
+/**
+ * 開くまで作らない在り処(#1416。PKC3 入り HTML の添付)。大きさは読まずに分かり、`open` を呼んだ分だけ Blob を作る。
+ * ⚠ 確認の窓の前に全添付を Blob にしない(やめたときに何も重くならない / 同時に持つのを 1 件に保つ)ための形。
+ * 読み手の口(`readAssetSource` / `assetSourceSize`)は他の在り処と同じ。
+ */
+export interface LazyAssetSource {
+  /** 中身の大きさ(バイト)。 */
+  size: number;
+  open: () => Promise<Blob>;
+  /** 常に生バイト(base64 の字ではない)。 */
+  base64?: undefined;
+}
+
+/** 取り込みの本体が読む在り処 ── zip の entry か、既に在る Blob か、開くまで作らない Blob。 */
+export type ReadableAssetSource = AssetSource | BlobAssetSource | LazyAssetSource;
 
 /** `AssetSource` の中身を読む(ネストしていても正しい Blob から読む)。 */
 export async function readAssetSource(src: ReadableAssetSource): Promise<Blob> {
   if ('blob' in src) return src.blob;
+  if ('open' in src) return src.open();
   return readZipEntry(src.zip, src.entry);
 }
 
 /** 中身の大きさ(バイト)。⚠ 読まずに分かる ── 重い添付をヒープに載せるかの判定に使う。 */
 export function assetSourceSize(src: ReadableAssetSource): number {
-  return 'blob' in src ? src.blob.size : src.entry.uncompressedSize;
+  if ('blob' in src) return src.blob.size;
+  return 'open' in src ? src.size : src.entry.uncompressedSize;
 }

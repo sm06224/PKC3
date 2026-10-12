@@ -25,9 +25,15 @@
 import { PORTABLE_HEAD_SCAN } from '../export/portable-bundle';
 import {
   checkImageParts,
+  checkImageShapes,
+  decodeImagePart,
+  decodeImagePartBytes,
   decodeImageParts,
   groupAssetParts,
+  IMAGE_PART_BYTES,
   parseBundleTag,
+  shapeOfCounts,
+  type Base64Shape,
   type PortableBundle,
 } from '../portable/bundle';
 
@@ -77,6 +83,8 @@ interface ScanEl {
   readonly to: number;
   /** base64 の字。全文を持つ読み方では辿りで入れる。窓で読む方では空で、復号の直前に読む。 */
   body: string;
+  /** 窓で読む方だけ: 辿りの間に測った形(復号を遅らせても、壊れ方の判定は遅らせないため)。 */
+  shape: Base64Shape | undefined;
 }
 
 type ScanStep =
@@ -85,29 +93,113 @@ type ScanStep =
   | { readonly t: 'el'; readonly el: ScanEl; readonly next: number };
 
 /**
- * 後ろ向きの辿りの 1 歩。`text` は全文か、その後ろ側の窓。`base` は窓の先頭の全文での位置、`pos` は辿りの現在地(全文での位置)。
+ * 辿りが読む「窓」。全文を字で持つ読み方(`readPortableHtml`)は字、窓で読む読み方(`readPortableHtmlBlob`)は bytes。
+ * 🔴 **辿りの規則(`scanStep`)は 1 つ** ── 窓の持ち方が違うだけで、どの要素が差し込みで、どこで止まり、何を壊れとして断るかは同じ。
+ *   窓で読む方が字にしないのは、base64 の本体(数 MB)を字にして捨てると、ファイルと同じ量の字が回収されないまま常駐するため(#1416 の実測)。
+ */
+interface Hay {
+  at(i: number): number;
+  /** `<` の最後の位置(`from` 以前)。無ければ -1。 */
+  lastLt(from: number): number;
+  /** `>` の最初の位置(`from` 以降)。無ければ -1。 */
+  firstGt(from: number): number;
+  /** [end - 9, end) が `</script>` か。 */
+  closeBefore(end: number): boolean;
+  /** 開きタグの字(短い)。 */
+  tag(from: number, to: number): string;
+  /** [from, to) が base64(と空白)だけか。字を持つ読み方は字も返す。窓で読む読み方は形(`shape`)を返す。 */
+  body(from: number, to: number): { ok: boolean; text: string; shape?: Base64Shape };
+}
+
+/** 字の窓(全文を持つ読み方)。 */
+function textHay(text: string): Hay {
+  return {
+    at: (i) => text.charCodeAt(i),
+    lastLt: (from) => text.lastIndexOf('<', from),
+    firstGt: (from) => text.indexOf('>', from),
+    closeBefore: (end) => text.slice(end - SCRIPT_CLOSE.length, end) === SCRIPT_CLOSE,
+    tag: (from, to) => text.slice(from, to),
+    body: (from, to) => {
+      const t = text.slice(from, to);
+      return { ok: BASE64_BODY_RE.test(t), text: t };
+    },
+  };
+}
+
+// base64 の本体の 1 byte の種類(0 = base64 でも空白でもない / 1 = base64 の字 / 2 = 空白 / 3 = `=`)
+// ⚠ 空白は正規表現の `\s` の latin1 の範囲(TAB LF VT FF CR SP NBSP)── 字で読む方(`BASE64_BODY_RE`)と同じ集合
+const BYTE_KIND = (() => {
+  const k = new Uint8Array(256);
+  for (let c = 0x30; c <= 0x39; c++) k[c] = 1;
+  for (let c = 0x41; c <= 0x5a; c++) k[c] = 1;
+  for (let c = 0x61; c <= 0x7a; c++) k[c] = 1;
+  k[0x2b] = 1;
+  k[0x2f] = 1;
+  k[0x3d] = 3;
+  for (const c of [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0]) k[c] = 2;
+  return k;
+})();
+
+const LATIN1 = new TextDecoder('latin1');
+
+/** bytes の窓(窓で読む読み方)。base64 の本体は**字にせず**、1 byte ずつ見て形だけを測る。 */
+function bytesHay(bytes: Uint8Array): Hay {
+  return {
+    at: (i) => bytes[i]!,
+    lastLt: (from) => bytes.lastIndexOf(0x3c, from),
+    firstGt: (from) => bytes.indexOf(0x3e, from),
+    closeBefore: (end) => {
+      for (let i = 0; i < SCRIPT_CLOSE.length; i++) {
+        if (bytes[end - SCRIPT_CLOSE.length + i] !== SCRIPT_CLOSE.charCodeAt(i)) return false;
+      }
+      return true;
+    },
+    tag: (from, to) => LATIN1.decode(bytes.subarray(from, to)),
+    body: (from, to) => {
+      let chars = 0;
+      let firstEq = -1;
+      let last1 = 0;
+      let last2 = 0;
+      for (let i = from; i < to; i++) {
+        const c = bytes[i]!;
+        const k = BYTE_KIND[c]!;
+        if (k === 2) continue;
+        if (k === 0) return { ok: false, text: '' };
+        if (k === 3 && firstEq < 0) firstEq = chars;
+        chars++;
+        last2 = last1;
+        last1 = c;
+      }
+      const pad = last1 === 0x3d ? (last2 === 0x3d ? 2 : 1) : 0;
+      return { ok: true, text: '', shape: shapeOfCounts(chars, pad, firstEq) };
+    },
+  };
+}
+
+/**
+ * 後ろ向きの辿りの 1 歩。`hay` は全文か、その後ろ側の窓。`base` は窓の先頭の全文での位置、`pos` は辿りの現在地(全文での位置)。
  * ⚠ 全文を持つ読み方(`readPortableHtml`)と窓で読む読み方(`readPortableHtmlBlob`)の**両方がこの 1 つを通る**
  *   (どの要素が差し込みで、どこで止まり、何を壊れとして断るか ── 規則を 2 か所に持たない)。
  */
-function scanStep(text: string, base: number, pos: number): ScanStep {
+function scanStep(hay: Hay, base: number, pos: number): ScanStep {
   // 窓の先頭に当たった = 前に続きがあるかもしれない(全文なら、そこが本当の先頭 = 止まる)
   const edge: ScanStep = base > 0 ? { t: 'more' } : { t: 'stop' };
   let end = pos - base;
-  while (end > 0 && isSpace(text.charCodeAt(end - 1))) end--;
+  while (end > 0 && isSpace(hay.at(end - 1))) end--;
   if (end < SCRIPT_CLOSE.length) return edge;
-  if (text.slice(end - SCRIPT_CLOSE.length, end) !== SCRIPT_CLOSE) return { t: 'stop' };
+  if (!hay.closeBefore(end)) return { t: 'stop' };
   const closeAt = end - SCRIPT_CLOSE.length;
   // 🔑 中身は base64(`<` を含まない)なので、直前の `<` が開きタグの頭である。
   //   `lastIndexOf('<script')` だと、直前の要素(アプリ本体の JS)の**文字列の中**の同じ綴りに当たる
-  const start = text.lastIndexOf('<', closeAt - 1);
+  const start = hay.lastLt(closeAt - 1);
   if (start < 0) return edge;
-  const tagEnd = text.indexOf('>', start);
+  const tagEnd = hay.firstGt(start);
   if (tagEnd < 0 || tagEnd >= closeAt) return { t: 'stop' };
-  const tag = text.slice(start, tagEnd + 1);
-  const body = text.slice(tagEnd + 1, closeAt);
+  const tag = hay.tag(start, tagEnd + 1);
+  const body = hay.body(tagEnd + 1, closeAt);
   // 差し込まれた要素の中身は base64 だけ。そうでなければ別の要素の終わりに当たっている(止まる)
   const im = IMAGE_OPEN_RE.exec(tag);
-  if (!BASE64_BODY_RE.test(body)) {
+  if (!body.ok) {
     // 🔴 印が 番号/総数 の形の DB の中身の要素なのに base64 でない = 壊れた部分。「中身が見つかりません」と言い換えない。
     // ⚠ 印の値が空の形(割る前の版)は**見ない** ── 雛形のアプリ本体の JS が文字列として持つ綴りと同じで、
     //   辿りの終わり(差し込み領域の外)に当たったという合図でしかない
@@ -128,14 +220,16 @@ function scanStep(text: string, base: number, pos: number): ScanStep {
   const from = base + tagEnd + 1;
   const to = base + closeAt;
   const next = base + start;
+  const text = body.text;
+  const shape = body.shape;
   if (im !== null) {
-    return { t: 'el', el: { isImage: true, mark: im[1] ?? '', key: '', mime: '', from, to, body }, next };
+    return { t: 'el', el: { isImage: true, mark: im[1] ?? '', key: '', mime: '', from, to, body: text, shape }, next };
   }
   const am = ASSET_OPEN_RE.exec(tag);
   if (am === null) return { t: 'stop' }; // 書き出しが差し込んだ 2 種類以外に当たった = 差し込み領域の外
   return {
     t: 'el',
-    el: { isImage: false, mark: am[3] ?? '', key: am[1]!, mime: am[2]!, from, to, body },
+    el: { isImage: false, mark: am[3] ?? '', key: am[1]!, mime: am[2]!, from, to, body: text, shape },
     next,
   };
 }
@@ -163,12 +257,17 @@ function decodeAssetRun(els: readonly ScanEl[]): Blob {
     // 空の 1 要素 = 0 バイトの添付(割る前の版もそのまま取り込んでいた)
     return new Blob(bytes === null ? [] : [bytes as unknown as BlobPart], { type: first.mime });
   } catch (e) {
-    throw new PortableHtmlError(
-      e instanceof Error && /個目|空の部分/.test(e.message)
-        ? `${e.message}。このファイルは取り込めません`
-        : `埋め込まれた添付が読み取れない形になっています: ${key}`,
-    );
+    throw assetDecodeError(e, key);
   }
+}
+
+/** 添付の復号の失敗 → 画面に出す断り文。⚠ 全文で読む方・窓で読む方の**両方がこの 1 つ**を通る。 */
+function assetDecodeError(e: unknown, key: string): PortableHtmlError {
+  return new PortableHtmlError(
+    e instanceof Error && /個目|空の部分/.test(e.message)
+      ? `${e.message}。このファイルは取り込めません`
+      : `埋め込まれた添付が読み取れない形になっています: ${key}`,
+  );
 }
 
 /** DB の中身の要素の印が、1 つの画像として揃っているかを見る。揃っていなければ断る。 */
@@ -202,6 +301,35 @@ function decodeImage(imageEls: readonly ScanEl[]): Uint8Array {
 }
 
 /**
+ * `decodeImage` の窓で読む版: 要素を 1 つ読んでは、その場で 1 本の bytes の自分の置き場へ復号する(base64 の字を全部は持たない)。
+ * 断る形は辿りで測った形(`checkImageShapes`)で `decodeImage` と同じ文で断る。
+ */
+async function decodeImageBlob(blob: Blob, imageEls: readonly ScanEl[]): Promise<Uint8Array> {
+  let total: number | null;
+  try {
+    total = checkImageShapes(imageEls.map((p) => p.shape!));
+  } catch (e) {
+    throw new PortableHtmlError(
+      e instanceof Error && /個目|空の部分/.test(e.message)
+        ? `${e.message}。このファイルは取り込めません`
+        : '埋め込まれた中身が読み取れない形になっています',
+    );
+  }
+  if (total === null || total === 0) throw new PortableHtmlError(NO_IMAGE);
+  const out = new Uint8Array(total);
+  for (let k = 0; k < imageEls.length; k++) {
+    const e = imageEls[k]!;
+    const bytes = k < imageEls.length - 1 ? IMAGE_PART_BYTES : total - k * IMAGE_PART_BYTES;
+    const raw = await readBytes(blob, e.from, e.to);
+    out.set(
+      e.shape!.chars === raw.length ? decodeImagePartBytes(raw, bytes) : decodeImagePart(LATIN1.decode(raw), bytes),
+      k * IMAGE_PART_BYTES,
+    );
+  }
+  return out;
+}
+
+/**
  * PKC3 入り HTML の全文から、DB の中身と添付を取り出す。
  * ⚠ 全文を字として持つ読み方。**大きいファイルは `readPortableHtmlBlob`**(取り込みの道はそちら)。
  * @throws {PortableHtmlError} 印が無い / 最後まで書き込まれていない / 中身が読み取れない
@@ -216,8 +344,9 @@ export function readPortableHtml(text: string): PortableHtmlParts {
   // 後ろ向きに辿るので、DB の中身の要素は**文書の逆順**で集まる(最後に並べ直す)
   const imageEls: ScanEl[] = [];
   const assetEls: ScanEl[] = [];
+  const hay = textHay(text);
   for (;;) {
-    const step = scanStep(text, 0, pos);
+    const step = scanStep(hay, 0, pos);
     if (step.t !== 'el') break;
     (step.el.isImage ? imageEls : assetEls).push(step.el);
     pos = step.next;
@@ -274,7 +403,16 @@ async function lastIndexOfBodyClose(blob: Blob): Promise<number> {
   }
 }
 
-/** 最後の `</body>` から後ろ向きに辿って、差し込まれた要素(文書の順)を集める。字は窓の分だけ持つ。 */
+/** [from, to) を bytes にする。 */
+async function readBytes(blob: Blob, from: number, to: number): Promise<Uint8Array> {
+  return new Uint8Array(await blob.slice(from, to).arrayBuffer());
+}
+
+/**
+ * 最後の `</body>` から後ろ向きに辿って、差し込まれた要素(文書の順)を集める。
+ * 🔴 窓は**字にしない**(bytes のまま)。base64 の本体を字にして捨てると、ファイルと同じ量の字が回収されないまま
+ * 常駐した(実測: 432MB のファイルで renderer の JS ヒープが約 480MB)。本体は 1 byte ずつ見て形だけを測る。
+ */
 async function scanBlob(
   blob: Blob,
   bodyClose: number,
@@ -283,18 +421,18 @@ async function scanBlob(
   const assetEls: ScanEl[] = [];
   let pos = bodyClose;
   let base = Math.max(0, pos - WINDOW_CHARS);
-  let win = await readChars(blob, base, pos);
+  let win = await readBytes(blob, base, pos);
+  let hay = bytesHay(win);
   for (;;) {
-    const step = scanStep(win, base, pos);
+    const step = scanStep(hay, base, pos);
     if (step.t === 'more') {
       // 窓にまたがる要素 ── 前を足してやり直す。足す量は窓の大きさ以上(大きい 1 要素にも倍々で届く)
-      const nb = Math.max(0, base - Math.max(WINDOW_CHARS, win.length));
-      win = (await readChars(blob, nb, base)) + win.slice(0, pos - base);
-      base = nb;
+      base = Math.max(0, base - Math.max(WINDOW_CHARS, pos - base));
+      win = await readBytes(blob, base, pos);
+      hay = bytesHay(win);
       continue;
     }
     if (step.t === 'stop') break;
-    step.el.body = ''; // 窓の字を手放す(復号の直前に、その要素だけもう一度読む)
     (step.el.isImage ? imageEls : assetEls).push(step.el);
     pos = step.next;
   }
@@ -302,13 +440,63 @@ async function scanBlob(
   return { imageEls: imageEls.reverse(), assetEls: assetEls.reverse() };
 }
 
+/** 添付 1 件。中身は**開くまで復号しない**(`open` を呼んだ分だけ、その 1 件の分が要る)。 */
+export interface LazyPortableAsset {
+  readonly mime: string;
+  /** 復号後の bytes 数。⚠ 読まずに分かる(辿りで測った形から出す)。 */
+  readonly size: number;
+  /** 窓で読み直して復号し、Blob にする。呼ぶたびに作り直す。 */
+  open(): Promise<Blob>;
+}
+
+export interface PortableHtmlLazyParts {
+  readonly bundle: PortableBundle;
+  /** DB の中身(sqlite の画像)。 */
+  readonly image: Uint8Array;
+  /** 添付(key → 開くまで読まない中身)。 */
+  readonly assets: Map<string, LazyPortableAsset>;
+}
+
 /**
- * `readPortableHtml` と同じ結果を、**ファイルを窓で読んで**返す。同じ辿り(`scanStep`)・同じ復号
- * (`decodeAssetRun` / `decodeImage`)を通るので、何を取り出し何を断るかは変わらない。
- * 違うのは、字を同時にどれだけ持つかだけである。
+ * 1 件の添付(文書の順の要素の塊)を開く口。🔴 **base64 の字を 1 件ぶん持たない** ──
+ * 要素(`IMAGE_PART_BYTES` ごと)を 1 つ読み、その場で bytes にして Blob へ足し、字を手放す。
+ * 足し方は `new Blob([これまで, 今の要素])` ── これまでの Blob は**参照のまま**繋がるので、
+ * JS 側が同時に持つのは要素 1 つ分の字と bytes だけである(添付が何百 MB でも変わらない)。
+ */
+function lazyAsset(blob: Blob, els: readonly ScanEl[], total: number | null): LazyPortableAsset {
+  const mime = els[0]!.mime;
+  const n = els.length;
+  return {
+    mime,
+    size: total ?? 0,
+    async open(): Promise<Blob> {
+      let acc: Blob | null = null;
+      if (total !== null) {
+        for (let k = 0; k < n; k++) {
+          const e = els[k]!;
+          const bytes = k < n - 1 ? IMAGE_PART_BYTES : total - (n - 1) * IMAGE_PART_BYTES;
+          const raw = await readBytes(blob, e.from, e.to);
+          // 空白の混ざらない形(書き出しはこれ)は字にせず bytes のまま復号する。空白が混ざっていれば字にして畳む
+          const part =
+            e.shape!.chars === raw.length
+              ? decodeImagePartBytes(raw, bytes)
+              : decodeImagePart(LATIN1.decode(raw), bytes);
+          acc = new Blob(acc === null ? [part as unknown as BlobPart] : [acc, part as unknown as BlobPart]);
+        }
+      }
+      // 空の 1 要素 = 0 バイトの添付(割る前の版もそのまま取り込んでいた)
+      return new Blob(acc === null ? [] : [acc], { type: mime });
+    },
+  };
+}
+
+/**
+ * ファイルを窓で読んで、DB の中身と添付の**目録**を返す。添付の復号は**開くまでしない**(`LazyPortableAsset.open`)。
+ * 何を取り出し何を断るかは `readPortableHtml` と同じ ── 断り文・断る順番も同じ
+ * (復号が断る形は、辿りで測った形(`checkImageShapes`)で同じ所で断る)。
  * @throws {PortableHtmlError} `readPortableHtml` と同じ
  */
-export async function readPortableHtmlBlob(blob: Blob): Promise<PortableHtmlParts> {
+export async function openPortableHtmlBlob(blob: Blob): Promise<PortableHtmlLazyParts> {
   const bundle = sniffPortableHtml(
     new TextDecoder().decode(await blob.slice(0, PORTABLE_SNIFF_BYTES).arrayBuffer()),
   );
@@ -318,27 +506,44 @@ export async function readPortableHtmlBlob(blob: Blob): Promise<PortableHtmlPart
   const bodyClose = await lastIndexOfBodyClose(blob);
   if (bodyClose < 0) throw new PortableHtmlError(NO_END_BODY);
 
-  // ① 辿る ── 要素の位置と印だけを控える(字は窓の分しか持たず、辿りが終われば手放す)
+  // ① 辿る ── 要素の位置と印と形だけを控える(字は窓の分しか持たず、辿りが終われば手放す)
   const { imageEls, assetEls } = await scanBlob(blob, bodyClose);
 
-  // ② 添付は**文書の順に塊にし、後ろの塊から** 1 件ずつ読んで復号する(`readPortableHtml` と同じ順・同じ規則)
-  const load = async (els: readonly ScanEl[]): Promise<void> => {
-    for (const e of els) e.body = await readChars(blob, e.from, e.to);
-  };
-  const assets = new Map<string, Blob>();
+  // ② 添付は**文書の順に塊にし、後ろの塊から**目録にする(`readPortableHtml` と同じ順・同じ規則)
+  const assets = new Map<string, LazyPortableAsset>();
   const runs = groupAssetParts(assetEls);
   for (let r = runs.length - 1; r >= 0; r--) {
     const run = runs[r]!;
     const els = assetEls.slice(run.start, run.start + run.count);
-    if (assets.has(els[0]!.key)) continue; // 同じ key は後ろが勝つ ── 読まずに捨てる
+    const key = els[0]!.key;
+    if (assets.has(key)) continue; // 同じ key は後ろが勝つ ── 読まずに捨てる
     if (run.broken !== null) {
       throw new PortableHtmlError(`${run.broken}。このファイルは取り込めません`);
     }
-    await load(els);
-    assets.set(els[0]!.key, decodeAssetRun(els));
+    let total: number | null;
+    try {
+      total = checkImageShapes(
+        els.map((e) => e.shape!),
+        `添付「${key}」の中身`,
+      );
+    } catch (e) {
+      throw assetDecodeError(e, key);
+    }
+    assets.set(key, lazyAsset(blob, els, total));
   }
   // DB の中身は、揃っていないものを読む前に断る(`decodeImage` も同じ検査をする ── 順番は `readPortableHtml` と同じ)
   assertImageMarks(imageEls);
-  await load(imageEls);
-  return { bundle, image: decodeImage(imageEls), assets };
+  return { bundle, image: await decodeImageBlob(blob, imageEls), assets };
+}
+
+/**
+ * `readPortableHtml` と同じ結果を、**ファイルを窓で読んで**返す(添付は全部 Blob にして返す)。
+ * 取り込みの道は `openPortableHtmlBlob`(確認の後まで復号しない)── こちらは全件を開いて確かめたい側(test)のために残す。
+ * @throws {PortableHtmlError} `readPortableHtml` と同じ
+ */
+export async function readPortableHtmlBlob(blob: Blob): Promise<PortableHtmlParts> {
+  const lazy = await openPortableHtmlBlob(blob);
+  const assets = new Map<string, Blob>();
+  for (const [key, a] of lazy.assets) assets.set(key, await a.open());
+  return { bundle: lazy.bundle, image: lazy.image, assets };
 }

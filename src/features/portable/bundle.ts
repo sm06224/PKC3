@@ -197,15 +197,7 @@ export function decodeImageParts(
   const lastBytes = (last.length / 4) * 3 - pad;
   if (!Number.isInteger(lastBytes) || lastBytes <= 0) throw new Error('base64 の長さが合いません');
   const out = new Uint8Array((n - 1) * IMAGE_PART_BYTES + lastBytes);
-  const put = (text: string, at: number, limit: number): number => {
-    let off = at;
-    for (let i = 0; i < text.length; i += DECODE_STEP) {
-      const bin = atob(text.slice(i, i + DECODE_STEP));
-      if (off + bin.length > limit) throw new Error('中身が想定の大きさを超えています');
-      for (let j = 0; j < bin.length; j++) out[off++] = bin.charCodeAt(j);
-    }
-    return off - at;
-  };
+  const put = (text: string, at: number, limit: number): number => putBase64(out, text, at, limit);
   for (let k = 0; k < n - 1; k++) {
     const text = stripSpace(reads[k]!().trim());
     // 🔴 途中の要素は**ちょうど** `IMAGE_PART_BYTES`。短い・長い要素を黙って詰めると、後ろが前へずれて別の画像になる
@@ -217,6 +209,115 @@ export function decodeImageParts(
     put(text, k * IMAGE_PART_BYTES, (k + 1) * IMAGE_PART_BYTES);
   }
   put(last, (n - 1) * IMAGE_PART_BYTES, out.length);
+  return out;
+}
+
+/** `text`(空白を除いた base64)を `out[at..limit)` へ復号して書く。書いた bytes 数を返す。 */
+function putBase64(out: Uint8Array, text: string, at: number, limit: number): number {
+  let off = at;
+  for (let i = 0; i < text.length; i += DECODE_STEP) {
+    const bin = atob(text.slice(i, i + DECODE_STEP));
+    if (off + bin.length > limit) throw new Error('中身が想定の大きさを超えています');
+    for (let j = 0; j < bin.length; j++) out[off++] = bin.charCodeAt(j);
+  }
+  return off - at;
+}
+
+/**
+ * 1 要素の base64 を**復号せずに**測った形(#1416)。窓で読む取り込みが、辿りの間(字を持っている間)に採る。
+ * 復号は確認の後まで遅らせるが、**壊れ方の判定は遅らせない**(確認の前に断る文が変わらないように)。
+ */
+export interface Base64Shape {
+  /** 空白を除いた字数。 */
+  readonly chars: number;
+  /** 末尾の `=` の数(0〜2)。 */
+  readonly pad: number;
+  /** `atob` が受ける形か(`=` は末尾の 2 字までで、字数が合う)。 */
+  readonly ok: boolean;
+}
+
+export function shapeOfBase64(raw: string): Base64Shape {
+  const t = stripSpace(raw.trim());
+  const pad = t.endsWith('==') ? 2 : t.endsWith('=') ? 1 : 0;
+  return shapeOfCounts(t.length, pad, t.indexOf('='));
+}
+
+/** 字数・末尾の `=` の数・最初の `=` の位置(空白を除いた並びでの。無ければ -1)から形を決める。⚠ 字で測る方・bytes で測る方が同じ 1 つを通る。 */
+export function shapeOfCounts(chars: number, pad: number, firstEq: number): Base64Shape {
+  // atob(forgiving-base64): `=` は末尾の 2 字までで、あるなら字数が 4 の倍数。残りの字数が 4 で割って 1 余るものは受けない
+  const ok = (firstEq === -1 || firstEq === chars - pad) && (pad === 0 ? chars % 4 !== 1 : chars % 4 === 0);
+  return { chars, pad, ok };
+}
+
+/**
+ * `decodeImageParts` が**断る場面**を、復号せず形だけで先に判定する(#1416)。断る文・断る順番は同じ。
+ * @returns 復号後の総 bytes。全部空(割る前の版の空の要素)なら `null`
+ * @throws `decodeImageParts` が投げるものと同じ文(`atob` が断る形は文の無い `Error('base64')` ── 呼び側が一般の文へ言い換える)
+ */
+export function checkImageShapes(shapes: readonly Base64Shape[], label = 'DB の中身'): number | null {
+  const n = shapes.length;
+  if (n === 0) return null;
+  const last = shapes[n - 1]!;
+  if (last.chars === 0) {
+    if (n === 1) return null;
+    throw new Error('割られた中身のうち空の部分があります');
+  }
+  const lastBytes = (last.chars / 4) * 3 - last.pad;
+  if (!Number.isInteger(lastBytes) || lastBytes <= 0) throw new Error('base64 の長さが合いません');
+  for (let k = 0; k < n - 1; k++) {
+    const s = shapes[k]!;
+    if (s.chars !== IMAGE_PART_CHARS) {
+      throw new Error(`${label}の ${k + 1} 個目が途中で欠けています(想定 ${IMAGE_PART_CHARS} 字、実際 ${s.chars} 字)`);
+    }
+    if (!s.ok) throw new Error('base64');
+  }
+  if (!last.ok) throw new Error('base64');
+  return (n - 1) * IMAGE_PART_BYTES + lastBytes;
+}
+
+/**
+ * 割った 1 要素(`k` 番目)を、**その要素だけ**の bytes へ復号する(#1416)。`checkImageShapes` を通った形が前提。
+ * `bytes` はその要素が占める大きさ(途中は `IMAGE_PART_BYTES`、最後は端数)── 余った所は 0 のまま(`decodeImageParts` と同じ)。
+ */
+export function decodeImagePart(raw: string, bytes: number): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(bytes);
+  putBase64(out, stripSpace(raw.trim()), 0, bytes);
+  return out;
+}
+
+// base64 の字 → 6 bit(字でなければ 255)
+const B64_VALUE = (() => {
+  const t = new Uint8Array(256).fill(255);
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  for (let i = 0; i < 64; i++) t[abc.charCodeAt(i)] = i;
+  return t;
+})();
+
+/**
+ * `decodeImagePart` の bytes 版 ── base64 の字(ASCII の bytes。**空白を含まない**)を、字にせず直に復号する(#1416)。
+ * 数 MB の字を作って捨てると回収されないまま常駐するので、取り込みの道はこちらを使う。`checkImageShapes` を通った形が前提。
+ * 末尾の `=` の扱い・短く復号した残りが 0 のままになる点は `decodeImagePart`(= `atob` を通る版)と同じ。
+ */
+export function decodeImagePartBytes(src: Uint8Array, bytes: number): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(bytes);
+  let end = src.length;
+  while (end > 0 && src[end - 1] === 0x3d && src.length - end < 2) end--;
+  let o = 0;
+  let i = 0;
+  const full = end - (end % 4);
+  for (; i < full; i += 4) {
+    const n =
+      (B64_VALUE[src[i]!]! << 18) | (B64_VALUE[src[i + 1]!]! << 12) | (B64_VALUE[src[i + 2]!]! << 6) | B64_VALUE[src[i + 3]!]!;
+    out[o++] = n >> 16;
+    out[o++] = (n >> 8) & 255;
+    out[o++] = n & 255;
+  }
+  const rest = end - full; // 0 / 2 / 3(`=` を除いた残り)
+  if (rest >= 2) {
+    const n = (B64_VALUE[src[i]!]! << 18) | (B64_VALUE[src[i + 1]!]! << 12) | (rest === 3 ? B64_VALUE[src[i + 2]!]! << 6 : 0);
+    out[o] = n >> 16;
+    if (rest === 3) out[o + 1] = (n >> 8) & 255;
+  }
   return out;
 }
 

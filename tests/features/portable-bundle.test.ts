@@ -12,7 +12,10 @@ import {
   bundleLockName,
   bundleSqliteName,
   checkImageParts,
+  checkImageShapes,
   chooseImage,
+  decodeImagePart,
+  decodeImagePartBytes,
   decodeImageParts,
   groupAssetParts,
   IMAGE_PART_BYTES,
@@ -20,6 +23,8 @@ import {
   imagePartMark,
   isBundleId,
   parseBundleTag,
+  shapeOfBase64,
+  shapeOfCounts,
   type PortableBundle,
   type StoredImageMeta,
 } from '../../src/features/portable/bundle';
@@ -318,5 +323,122 @@ describe('復号の断り文の名前 (#1416 §7-4d)', () => {
       /添付「x」の中身の 1 個目が途中で欠けています/,
     );
     expect(() => decodeImageParts([() => full.slice(4), () => 'AAAA'])).toThrow(/DB の中身の 1 個目/);
+  });
+});
+
+describe('復号を遅らせる側の形の判定が、復号そのものと同じ答えを返す (#1416)', () => {
+  const b64 = (bytes: Uint8Array): string => {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    return btoa(bin);
+  };
+  const fill = (n: number, seed: number): Uint8Array => {
+    const a = new Uint8Array(n);
+    for (let i = 0; i < n; i++) a[i] = (i * 31 + seed) & 255;
+    return a;
+  };
+  const full = b64(fill(IMAGE_PART_BYTES, 1));
+  const tail = b64(fill(10, 3)); // 端数で = が出る
+  const mid = Math.floor(full.length / 2);
+
+  const middles: Array<[string, string]> = [
+    ['ちょうど', full],
+    ['短い', b64(fill(IMAGE_PART_BYTES - 3, 2))],
+    ['長い', b64(fill(IMAGE_PART_BYTES + 3, 2))],
+    ['中ほどに =', full.slice(0, mid) + '=' + full.slice(mid + 1)],
+    ['末尾が =(字数はちょうど)', full.slice(0, -1) + '='],
+    ['末尾が ==(字数はちょうど)', full.slice(0, -2) + '=='],
+    ['空', ''],
+    ['空白混じり(字数は空白を除けばちょうど)', full.slice(0, 100) + '\n ' + full.slice(100)],
+  ];
+  const lasts: Array<[string, string]> = [
+    ['端数', tail],
+    ['1 字足りない', tail.slice(0, -1)],
+    ['中ほどに =', tail.slice(0, 4) + '=' + tail.slice(5)],
+    ['==== で終わる', tail.slice(0, -4) + '===='],
+    ['空', ''],
+    ['空白だけ', ' \n'],
+    ['= だけ', '='],
+    ['A(1 字)', 'A'],
+    ['AA=(3 字で =)', 'AA='],
+    ['AAA(3 字)', 'AAA'],
+  ];
+
+  type Outcome = { ok: true; bytes: number[] | null } | { ok: false; kind: string };
+  /** `decodeImageParts` が断る文は、`atob` が断る形だけ文が環境で違う(DOMException)── 文の無い印 `base64` に畳んで比べる */
+  const kindOf = (e: unknown): string =>
+    e instanceof Error && /個目|空の部分|長さが合いません/.test(e.message) ? e.message : 'base64';
+
+  it('🔴 断るか通すか・断る文・断る順番・復号後の大きさが、全部 `decodeImageParts` と同じ(2 要素の総当たり + 1 要素)', () => {
+    let rejected = 0;
+    let accepted = 0;
+    const cases: Array<[string, string[]]> = [];
+    for (const [mn, m] of middles) for (const [ln, l] of lasts) cases.push([`途中=${mn} / 最後=${ln}`, [m, l]]);
+    for (const [ln, l] of lasts) cases.push([`1 要素=${ln}`, [l]]);
+    cases.push(['3 要素(ちょうど, ちょうど, 端数)', [full, full, tail]]);
+    cases.push(['3 要素(ちょうど, 短い, 端数)', [full, middles[1]![1], tail]]);
+    cases.push(['3 要素(中ほどに =, 短い, 端数)', [middles[3]![1], middles[1]![1], tail]]);
+    for (const [name, parts] of cases) {
+      let old: Outcome;
+      try {
+        const got = decodeImageParts(parts.map((p) => () => p));
+        old = { ok: true, bytes: got === null ? null : [got.length] };
+      } catch (e) {
+        old = { ok: false, kind: kindOf(e) };
+      }
+      let now: Outcome;
+      try {
+        const total = checkImageShapes(parts.map(shapeOfBase64));
+        now = { ok: true, bytes: total === null ? null : [total] };
+      } catch (e) {
+        now = { ok: false, kind: kindOf(e) };
+      }
+      expect(now, name).toEqual(old);
+      if (old.ok) accepted++;
+      else rejected++;
+    }
+    // 前提: 断る形も通す形も、どちらも実際に通っている(片側だけの総当たりにしない)
+    expect(rejected, '断る形が通っていない').toBeGreaterThan(30);
+    expect(accepted, '通す形が通っていない').toBeGreaterThan(5);
+  }, 60_000);
+
+  it('🔴 要素ごとの復号(字版・bytes 版)が、`decodeImageParts` の同じ位置の bytes と 1 バイトも違わない(末尾が = の途中の要素の 0 埋めも含む)', () => {
+    const lat = (t: string): Uint8Array => Uint8Array.from(t, (c) => c.charCodeAt(0));
+    for (const parts of [
+      [full, full, tail],
+      [middles[4]![1], full, tail], // 途中の要素の末尾が =(短く復号して残りが 0)
+      [middles[5]![1], tail],
+      [middles[7]![1], tail], // 空白混じり
+      [tail],
+    ]) {
+      const whole = decodeImageParts(parts.map((p) => () => p))!;
+      parts.forEach((p, k) => {
+        const size = k < parts.length - 1 ? IMAGE_PART_BYTES : whole.length - k * IMAGE_PART_BYTES;
+        const want = whole.subarray(k * IMAGE_PART_BYTES, k * IMAGE_PART_BYTES + size);
+        const byText = decodeImagePart(p, size);
+        expect(Buffer.compare(byText, want), `字版 ${k} 個目`).toBe(0);
+        // bytes 版は空白を含まない形が前提(空白は呼び側が字版へ回す)
+        if (!/\s/.test(p)) {
+          const byBytes = decodeImagePartBytes(lat(p), size);
+          expect(Buffer.compare(byBytes, want), `bytes 版 ${k} 個目`).toBe(0);
+        }
+      });
+    }
+  }, 60_000);
+
+  it('形の測り方: 字数は空白を除く / 末尾の = の数 / 最初の = の位置 / atob が受けるか', () => {
+    expect(shapeOfBase64('QUJD')).toEqual({ chars: 4, pad: 0, ok: true });
+    expect(shapeOfBase64(' QU\nJD ')).toEqual({ chars: 4, pad: 0, ok: true });
+    expect(shapeOfBase64('QQ==')).toEqual({ chars: 4, pad: 2, ok: true });
+    expect(shapeOfBase64('QUI=')).toEqual({ chars: 4, pad: 1, ok: true });
+    expect(shapeOfBase64('QQ=')).toEqual({ chars: 3, pad: 1, ok: false }); // 字数が 4 の倍数でない
+    expect(shapeOfBase64('Q=QQ')).toEqual({ chars: 4, pad: 0, ok: false }); // = が途中
+    expect(shapeOfBase64('Q')).toEqual({ chars: 1, pad: 0, ok: false }); // 4 で割って 1 余る
+    expect(shapeOfBase64('QUJDR')).toEqual({ chars: 5, pad: 0, ok: false });
+    expect(shapeOfBase64('QUJDRA')).toEqual({ chars: 6, pad: 0, ok: true }); // 4 で割って 2 余る(末尾の = なし)は atob が受ける
+    expect(shapeOfBase64('')).toEqual({ chars: 0, pad: 0, ok: true });
+    // 字で測る版と bytes で測る版が、同じ 1 つの判定(`shapeOfCounts`)を通る
+    expect(shapeOfCounts(4, 2, -1)).toEqual({ chars: 4, pad: 2, ok: true });
+    expect(shapeOfCounts(4, 2, 0)).toEqual({ chars: 4, pad: 2, ok: false });
   });
 });

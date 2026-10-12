@@ -236,4 +236,32 @@ describe('PKC3 入り HTML → Pkc3Archive: 以前の zip 経由の道と同じ�
     // 同じ Blob を指す = コピーしていない
     expect('blob' in src && src.blob).toBe(assets.get('ast-a'));
   });
+  it('🔴 開くまで作らない添付: 確認の概要と大きさは開かずに出て、開けば同じ bytes(Blob の道と同じ Pkc3Archive)', async () => {
+    const { data, assets, bytes } = fixture();
+    let opened = 0;
+    const lazy = new Map(
+      [...assets].map(([k, blob]) => [
+        k,
+        {
+          mime: blob.type,
+          size: blob.size,
+          open: async () => {
+            opened++;
+            return blob;
+          },
+        },
+      ]),
+    );
+    const eager = portableArchive(data, assets, NOW);
+    const a = portableArchive(data, lazy, NOW);
+    // 確認の概要(件数)・大きさは、開かずに Blob の道と同じ
+    expect(archivePreviewOf(a)).toEqual(archivePreviewOf(eager));
+    expect(archivePreviewOf(a).assetCount, '前提: 添付が数えられている').toBe(2);
+    for (const k of ['ast-a', 'ast-b']) expect(assetSourceSize(a.assetSources.get(k)!)).toBe(bytes.get(k)!.length);
+    expect(opened, '概要を出すだけで添付を開いた').toBe(0);
+    // 開けば同じ bytes。材料のほか(ノート・つながり・履歴・警告)も Blob の道と同じ
+    expect(await bytesOfAssets(a)).toEqual(await bytesOfAssets(eager));
+    expect(opened).toBe(2);
+    expect({ ...a, assetSources: null }).toEqual({ ...eager, assetSources: null });
+  });
 });

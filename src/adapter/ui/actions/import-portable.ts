@@ -30,7 +30,7 @@ import {
   type ArchiveEntry,
   type Pkc3Archive,
 } from '@features/export/pkc3-archive';
-import { readPortableHtmlBlob } from '@features/import/portable-html';
+import { openPortableHtmlBlob, type LazyPortableAsset } from '@features/import/portable-html';
 import type { ReadableAssetSource } from '@features/import/zip-reader';
 import type { ImageArchiveData } from '@adapter/platform/storage/protocol';
 
@@ -44,7 +44,7 @@ export type ReadImageArchive = (image: Uint8Array) => Promise<ImageArchiveData>;
  */
 export function portableArchive(
   data: ImageArchiveData,
-  assets: ReadonlyMap<string, Blob>,
+  assets: ReadonlyMap<string, Blob | LazyPortableAsset>,
   now: Date,
 ): Pkc3Archive {
   if (data.metas.length === 0) {
@@ -69,8 +69,10 @@ export function portableArchive(
   // 実体のある添付だけが「開ける添付」になる(目録に在って実体が無いものは assembleArchive が警告する)
   const sources = new Map<string, ReadableAssetSource>();
   for (const a of data.assets) {
-    const blob = assets.get(a.key);
-    if (blob) sources.set(a.key, { blob });
+    const got = assets.get(a.key);
+    if (got === undefined) continue;
+    // 🔑 開くまで復号しない添付は、そのまま遅延の在り処にする(確認の窓の前に Blob を作らない)
+    sources.set(a.key, got instanceof Blob ? { blob: got } : { size: got.size, open: () => got.open() });
   }
   const manifest: Pkc3Archive['manifest'] & { counts: Record<string, number> } = {
     format: ARCHIVE_FORMAT,
@@ -90,7 +92,8 @@ export function portableArchive(
 }
 
 /**
- * PKC3 入り HTML(file) → `Pkc3Archive`。⚠ 全文を字にしない(窓で読む ── `readPortableHtmlBlob`)。
+ * PKC3 入り HTML(file) → `Pkc3Archive`。⚠ 全文を字にしない(窓で読む ── `openPortableHtmlBlob`)。
+ * 🔑 添付は**確認の窓の後まで復号しない**(目録と大きさだけで窓が出る。やめれば何も重くならない)。
  * @throws 印が無い / 最後まで書き込まれていない / 中身が読めない / ノートが 1 件も無い
  */
 export async function portableHtmlToArchive(
@@ -98,7 +101,7 @@ export async function portableHtmlToArchive(
   read: ReadImageArchive,
   now: Date,
 ): Promise<Pkc3Archive> {
-  const parts = await readPortableHtmlBlob(html);
+  const parts = await openPortableHtmlBlob(html);
   const data = await read(parts.image);
   return portableArchive(data, parts.assets, now);
 }
