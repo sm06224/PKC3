@@ -69,6 +69,78 @@ describe('焼き込まれた画像', () => {
     expect(document.querySelector(IMAGE_SELECTOR)).toBeNull();
   });
 
+  it('🔴 割って焼いた画像(#1416 §7-4)は繋がって 1 バイトも違わず戻り、全部 DOM から外れる', () => {
+    const P = 3 * 1024 * 1024; // 途中の要素は IMAGE_PART_BYTES ちょうど
+    const bytes = (n: number, seed: number): Uint8Array => {
+      const a = new Uint8Array(n);
+      for (let i = 0; i < n; i++) a[i] = (i * 37 + seed) & 255;
+      return a;
+    };
+    const b64 = (a: Uint8Array): string => {
+      let bin = '';
+      for (let i = 0; i < a.length; i += 8192) bin += String.fromCharCode(...a.subarray(i, i + 8192));
+      return btoa(bin);
+    };
+    const p0 = bytes(P, 5);
+    const p1 = bytes(P, 9);
+    const p2 = bytes(10, 1);
+    const part = (i: number, a: Uint8Array) =>
+      `<script type="application/octet-stream;base64" data-pkc-db-image="${i}/3">${b64(a)}</script>`;
+    document.body.innerHTML = part(0, p0) + part(1, p1) + part(2, p2);
+    expect(document.querySelectorAll(IMAGE_SELECTOR).length).toBe(3); // 空振り防止
+    const held = Array.from(document.querySelectorAll(IMAGE_SELECTOR));
+    expect(held.every((e) => (e.textContent ?? '').length > 0)).toBe(true); // 空振り防止
+    const r = takeEmbeddedImage(document);
+    expect(r.failure).toBeNull();
+    const img = r.image!;
+    expect(img.byteLength).toBe(2 * P + 10);
+    expect(img.subarray(0, P).every((v, i) => v === p0[i])).toBe(true);
+    expect(img.subarray(P, 2 * P).every((v, i) => v === p1[i])).toBe(true);
+    expect(Array.from(img.subarray(2 * P))).toEqual(Array.from(p2));
+    expect(document.querySelector(IMAGE_SELECTOR)).toBeNull();
+    // 🔴 外した要素が base64 の Text node を握り続けない(外しただけでは文字列が手放されない)
+    for (const el of held) expect(el.textContent, '外した要素が base64 を握っている').toBe('');
+  });
+
+  it('🔴 割った要素が欠けていたら、黙って繋がず理由を返す(image は null、残りも外す)', () => {
+    const part = (i: number, n: number, b: number[]) =>
+      `<script type="application/octet-stream;base64" data-pkc-db-image="${i}/${n}">${btoa(
+        String.fromCharCode(...b),
+      )}</script>`;
+    // 3 つに割ったはずが、真ん中が無い
+    document.body.innerHTML = part(0, 3, [1, 2, 3]) + part(2, 3, [7, 8, 9]);
+    expect(document.querySelectorAll(IMAGE_SELECTOR).length).toBe(2); // 空振り防止
+    const r = takeEmbeddedImage(document);
+    expect(r.image).toBeNull();
+    expect(r.failure).toContain('読み取れない形');
+    expect(document.querySelector(IMAGE_SELECTOR)).toBeNull();
+  });
+
+  it('🔴 割った要素の途中が短く切れていたら、後ろをずらして繋がず「何個目が欠けている」と言う', () => {
+    const b64 = (n: number, seed: number): string => {
+      let bin = '';
+      for (let i = 0; i < n; i++) bin += String.fromCharCode((i * 7 + seed) & 255);
+      return btoa(bin);
+    };
+    const part = (i: number, text: string) =>
+      `<script type="application/octet-stream;base64" data-pkc-db-image="${i}/3">${text}</script>`;
+    const P = 3 * 1024 * 1024;
+    document.body.innerHTML = part(0, b64(P, 1)) + part(1, b64(P - 3, 2)) + part(2, b64(9, 3));
+    const r = takeEmbeddedImage(document);
+    expect(r.image).toBeNull();
+    expect(r.failure).toContain('2 個目が途中で欠けています');
+    expect(document.querySelector(IMAGE_SELECTOR)).toBeNull();
+  });
+
+  it('割った要素の一部が空なら失敗(空の部分を飛ばして短い画像を作らない)', () => {
+    document.body.innerHTML =
+      `<script type="application/octet-stream;base64" data-pkc-db-image="0/2">${btoa('abc')}</script>` +
+      '<script type="application/octet-stream;base64" data-pkc-db-image="1/2"> </script>';
+    const r = takeEmbeddedImage(document);
+    expect(r.image).toBeNull();
+    expect(r.failure).not.toBeNull();
+  });
+
   it('壊れた base64 でも DOM から外す(読めない物を抱え続けない)', () => {
     document.body.innerHTML =
       '<script type="application/octet-stream;base64" data-pkc-db-image>@@@</script>';

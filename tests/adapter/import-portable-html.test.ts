@@ -18,6 +18,7 @@ import type {
 } from '../../src/adapter/platform/storage/protocol';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { writePortableBundle } from '../../src/features/export/portable-bundle';
+import { IMAGE_PART_BYTES } from '../../src/features/portable/bundle';
 import { detectPkc2Format } from '../../src/features/import/detect-format';
 import { readPortableHtml, sniffPortableHtml } from '../../src/features/import/portable-html';
 
@@ -326,8 +327,9 @@ describe('PKC3 入り HTML の取り込み (#1416)', () => {
 
     it('中身(DB)の要素が無い', async () => {
       const { html } = shared;
-      const open = '<script type="application/octet-stream;base64" data-pkc-db-image>';
+      const open = '<script type="application/octet-stream;base64" data-pkc-db-image="0/1">';
       const from = html.lastIndexOf(open);
+      expect(from, '前提: 差し込まれた要素が見つかる').toBeGreaterThan(0);
       const stripped = html.slice(0, from) + html.slice(html.indexOf('</script>', from) + 9);
       expect(stripped.length, '前提: 取り除けている').toBeLessThan(html.length);
       const { d, deps: dd, seen } = deps();
@@ -339,7 +341,7 @@ describe('PKC3 入り HTML の取り込み (#1416)', () => {
     it('中身が sqlite として読めない', async () => {
       const { html } = shared;
       // ⚠ 差し込まれた(最後の)要素を差し替える ── 先頭に当たるのは雛形の JS の中の文字列
-      const at = html.lastIndexOf('data-pkc-db-image>') + 'data-pkc-db-image>'.length;
+      const at = html.lastIndexOf('data-pkc-db-image="0/1">') + 'data-pkc-db-image="0/1">'.length;
       const bad =
         html.slice(0, at) +
         btoa('this is not a sqlite database '.repeat(40)) +
@@ -505,6 +507,54 @@ describe('大きい要素の base64 を小分けに復号する', () => {
     return out.blob.text();
   }
 
+  it('🔴 割って焼いた画像(IMAGE_PART_BYTES を超える、3 要素)が 1 バイトも違わず戻る (#1416 §7-4)', async () => {
+    const image = rand(IMAGE_PART_BYTES * 2 + 11);
+    const html = await bake(image, rand(10));
+    expect([...html.matchAll(/data-pkc-db-image="([^"]*)"/g)].map((m) => m[1])).toEqual(['0/3', '1/3', '2/3']);
+    expect(same(readPortableHtml(html).image, image), '画像が違う').toBe(true);
+  });
+
+  it('🔴 割った要素が欠けた・順が乱れたファイルは、短い画像として読まず断る', async () => {
+    const html = await bake(rand(IMAGE_PART_BYTES * 2 + 11), rand(10));
+    const el = (i: number): RegExp => new RegExp(`<script [^>]*data-pkc-db-image="${i}/3">[^<]*</script>`);
+    const missingMiddle = html.replace(el(1), '');
+    expect(missingMiddle.length, '前提: 取り除けている').toBeLessThan(html.length);
+    expect(() => readPortableHtml(missingMiddle)).toThrow(/番号が合いません/);
+    const missingTail = html.replace(el(2), '');
+    expect(missingTail.length, '前提: 取り除けている').toBeLessThan(html.length);
+    expect(() => readPortableHtml(missingTail)).toThrow(/番号が合いません/);
+    // 並べ替え: 0 と 1 を入れ替える
+    const e0 = html.match(el(0))![0];
+    const e1 = html.match(el(1))![0];
+    const swapped = html.replace(e0, '@@A@@').replace(e1, e0).replace('@@A@@', e1);
+    expect(swapped, '前提: 入れ替わっている').not.toBe(html);
+    expect(() => readPortableHtml(swapped)).toThrow(/番号が合いません/);
+  });
+
+  it('🔴 途中の要素が短く切れたファイルは「何個目が欠けている」と断り、後ろをずらして読まない', async () => {
+    const html = await bake(rand(IMAGE_PART_BYTES * 2 + 11), rand(10));
+    const m = html.match(/(<script [^>]*data-pkc-db-image="1\/3">)([^<]*)(<\/script>)/)!;
+    const cut = html.replace(m[0], m[1]! + m[2]!.slice(0, m[2]!.length - 4) + m[3]!);
+    expect(cut.length, '前提: 縮んでいる').toBeLessThan(html.length);
+    expect(() => readPortableHtml(cut)).toThrow(/2 個目が途中で欠けています/);
+  });
+
+  it('🔴 最後の要素が base64 でなくなったら、「中身が見つかりません」ではなく壊れた部分を言う', async () => {
+    const html = await bake(rand(IMAGE_PART_BYTES + 11), rand(10));
+    const m = html.match(/(<script [^>]*data-pkc-db-image="1\/2">)([^<]*)(<\/script>)/)!;
+    const broken = html.replace(m[0], m[1]! + m[2]!.slice(0, 100) + '!!!!' + m[2]!.slice(100) + m[3]!);
+    expect(broken, '前提: 書き換わっている').not.toBe(html);
+    expect(() => readPortableHtml(broken)).toThrow(/DB の中身の一部が読み取れません.*2 個目/);
+    expect(() => readPortableHtml(broken)).not.toThrow(/見つかりません/);
+  });
+
+  it('割る前の版が焼いた 1 本物(印の値が無い)も、今も読める', async () => {
+    const image = rand(1000);
+    const legacy = (await bake(image, rand(10))).replace(/data-pkc-db-image="0\/1"/, 'data-pkc-db-image');
+    expect(legacy, '前提: 旧形に書き換わっている').toContain('data-pkc-db-image>');
+    expect(same(readPortableHtml(legacy).image, image), '画像が違う').toBe(true);
+  });
+
   it('🔴 小分けの単位(約 786 KB)を超える画像と添付(各 約 3 MiB)が、1 バイトも違わず戻る', async () => {
     const image = rand(3 * 1024 * 1024 + 1);
     const asset = rand(3 * 1024 * 1024 + 2);
@@ -521,7 +571,7 @@ describe('大きい要素の base64 を小分けに復号する', () => {
     const html = await bake(image, asset);
     // 要素の中身(base64)に、76 字ごとの改行と末尾の空白を混ぜる
     const spaced = html.replace(
-      /(data-pkc-(?:db-image|asset="ast-big"[^>]*)>)([A-Za-z0-9+/=]+)(<\/script>)/g,
+      /(data-pkc-(?:db-image="[^"]*"|asset="ast-big"[^>]*)>)([A-Za-z0-9+/=]+)(<\/script>)/g,
       (_m, open: string, b64: string, close: string) =>
         open + b64.replace(/(.{76})/g, '$1\n') + ' \n' + close,
     );

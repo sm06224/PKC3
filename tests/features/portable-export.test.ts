@@ -13,7 +13,11 @@ import {
   writePortableBundle,
 } from '../../src/features/export/portable-bundle';
 import { MAX_EMBED_TEXT_CHARS } from '../../src/features/storage/image-export-limit';
-import { parseBundleTag, type PortableBundle } from '../../src/features/portable/bundle';
+import {
+  IMAGE_PART_BYTES,
+  parseBundleTag,
+  type PortableBundle,
+} from '../../src/features/portable/bundle';
 import { archiveSuffix } from '../../src/features/export/archive-kind';
 
 const OLD: PortableBundle = { id: 'pkcb-template', exportedAt: 0 };
@@ -109,7 +113,7 @@ describe('中身を差し込む', () => {
       assets: nothing,
     });
     const html = await out.blob.text();
-    const b64 = html.match(/data-pkc-db-image>([^<]*)</)![1]!;
+    const b64 = html.match(/data-pkc-db-image="0\/1">([^<]*)</)![1]!;
     expect(Array.from(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))).toEqual(
       Array.from(image),
     );
@@ -129,11 +133,48 @@ describe('中身を差し込む', () => {
       assets: nothing,
     });
     const html = await out.blob.text();
-    const b64 = html.match(/data-pkc-db-image>([^<]*)</)![1]!;
+    const b64 = html.match(/data-pkc-db-image="0\/1">([^<]*)</)![1]!;
     const back = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     expect(back.byteLength).toBe(n);
     // 全部比べる(末尾だけ見ると、境目の狂いを見逃す)
     expect(back).toEqual(image);
+  });
+
+  it('🔴 大きい DB 画像は IMAGE_PART_BYTES ごとの <script> に割れ、印が 番号/総数 で並ぶ (#1416 §7-4)', async () => {
+    // ⚠ 1 本に入れると、開くとき HTML の読み手が二乗で遅くなる(150MB で 27 秒)── 割ることが本題
+    const n = IMAGE_PART_BYTES * 2 + 5; // 3 要素 + 端数(最後だけ `=` が出る)
+    const image = new Uint8Array(n);
+    for (let i = 0; i < n; i++) image[i] = (i * 131 + (i >> 8)) % 256;
+    const out = await writePortableBundle({ template: template(), bundle: NEW, image, assets: nothing });
+    const html = await out.blob.text();
+    const hits = [...html.matchAll(/data-pkc-db-image="([^"]*)">([^<]*)</g)];
+    expect(hits.map((m) => m[1])).toEqual(['0/3', '1/3', '2/3']);
+    // 割った単位が効いている(1 要素の字数 = 元 bytes の 4/3)
+    expect(hits[0]![2]!.length).toBe((IMAGE_PART_BYTES / 3) * 4);
+    expect(hits[1]![2]!.length).toBe((IMAGE_PART_BYTES / 3) * 4);
+    // `=` が出るのは最後の要素だけ(= 各要素を独立に復号できる)
+    expect(hits[0]![2]).not.toContain('=');
+    expect(hits[1]![2]).not.toContain('=');
+    expect(hits[2]![2]).toContain('=');
+    // 繋いで復号すると 1 バイトも違わない
+    const bin = atob(hits.map((m) => m[2]).join(''));
+    expect(bin.length).toBe(n);
+    // ⚠ 全部比べる(`toEqual` で 6MB の配列を比べると遅いので、字ごとに見て最初の食い違いだけ言う)
+    let firstDiff = -1;
+    for (let i = 0; i < n; i++) {
+      if (bin.charCodeAt(i) !== image[i]) {
+        firstDiff = i;
+        break;
+      }
+    }
+    expect(firstDiff, '最初に食い違う位置').toBe(-1);
+  });
+
+  it('IMAGE_PART_BYTES ちょうどの画像は 1 要素(境目で空の要素を作らない)', async () => {
+    const image = new Uint8Array(IMAGE_PART_BYTES).fill(9);
+    const out = await writePortableBundle({ template: template(), bundle: NEW, image, assets: nothing });
+    const marks = [...(await out.blob.text()).matchAll(/data-pkc-db-image="([^"]*)"/g)].map((m) => m[1]);
+    expect(marks).toEqual(['0/1']);
   });
 
   it('添付が key と mime つきで入る', async () => {
@@ -259,16 +300,16 @@ describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
         image: fakeSize(new Uint8Array([1]), 'byteLength', EDGE + 1),
         assets: nothing,
       }),
-    ).rejects.toThrow(/二度と開けません/);
+    ).rejects.toThrow(/取り込み直せない/);
   });
 
   /**
    * 🔴 **対照群 ── 門が「いつでも鳴っている」のではないこと。**
    *
-   * ⚠ 大きさを偽っているので、**門を抜けた先で本物の確保が落ちる**
-   *   (`new Blob([image])` が 384 MiB を積もうとする)。
-   * 🔑 だから見るのは「落ちたかどうか」ではなく「**どの字で落ちたか**」である ──
-   *   門が鳴っていれば断り文が出るし、抜けていれば確保の error が出る。
+   * ⚠ 大きさを偽っている(実体は 1 バイト)。画像を IMAGE_PART_BYTES ごとに割る作りになってからは、
+   *   門を抜けた先で確保が落ちず、**偽の大きさのまま書き出しが終わる**(割った要素の中身は空)。
+   * 🔑 だから見るのは「**断り文が出ていない**」ことと「**門の先まで進んで結果が返った**」こと
+   *   (`imageBytes` が偽の大きさで返る)── 門が鳴っていれば throw で、結果は返らない。
    */
   it('⚠ 境目ちょうどでは門が鳴らない(対照群)', async () => {
     const err: unknown = await writePortableBundle({
@@ -277,9 +318,9 @@ describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
       image: fakeSize(new Uint8Array([1]), 'byteLength', EDGE),
       assets: nothing,
     }).catch((e: unknown) => e);
-    expect(String(err), '境目ちょうどで門が鳴った').not.toContain('二度と開けません');
-    // ⚠ 空振り防止 ── 本当に門の先(確保)まで進んでいる
-    expect(String(err), '門の先まで進んでいない').toContain(String(EDGE));
+    expect(String(err), '境目ちょうどで門が鳴った').not.toContain('取り込み直せない');
+    // ⚠ 空振り防止 ── 本当に門の先まで進んでいる(門が鳴っていれば throw で、結果は返らない)
+    expect((err as { imageBytes?: number }).imageBytes, '門の先まで進んでいない').toBe(EDGE);
   });
 
   it('⚠ 普通の大きさは、これまでどおり最後まで焼ける(対照群)', async () => {

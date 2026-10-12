@@ -78,9 +78,21 @@ export function looksOutOfMemory(err: unknown): boolean {
  * 🔑 **その判断は、確保の上限については正しい**(端末で変わるので測れない)。
  * 🔴 **しかし天井は 2 つあって、もう 1 つを数え落としていた。**
  *
- * 焼き込んだ base64 は、読み戻すとき **1 本の JavaScript 文字列**になる
- * (`portable-boot.ts` の `textContent` / `portable-assets.ts` の `textContent`)。
+ * 焼き込んだ物は、読み戻すとき **1 本の JavaScript 文字列**になる経路が残っている。
  * ⚠ 文字列には**上限**があり、**これは端末で変わる種類の数ではなく、実測できる定数**である。
+ *
+ * ## 🔑 何が 1 本の文字列になるか(#1416 §7-4 で DB 画像を割ってから、場所によって違う)
+ *
+ * | 読む場所 | 1 本になる物 | この上限が効くか |
+ * |---|---|---|
+ * | **取り込み**(`features/import/portable-html.ts`) | **HTML ファイル全体**(`File.text()`) | 🔴 効く(DB 画像を割っても、ファイル全体は 1 本) |
+ * | **開く**(`portable-boot.ts`)の DB 画像 | 3MiB ごとの要素 1 つ | 効かない(割ってある。割る前の版が焼いた 1 本物は効く) |
+ * | **開く**(`portable-assets.ts`)の添付 | 添付 1 件の `textContent` | 🔴 効く(割っていない) |
+ *
+ * ⚠ だから**ここの門は残している**(安全側)。ただし理由は「開けない」だけではない ──
+ *   DB 画像は**開く**ことはできても、**取り込み直せない** 1 枚になりうる。
+ *   門の数は DB 画像の bytes を base64 にした字数で見ており、ファイル全体(アプリ本体 約 12MB と
+ *   添付を足した字数)ではないので、**ファイル全体の上限そのものではない**(近似)。
  *
  * ## 実測(2026-09-16、この箱の V8)
  *
@@ -138,9 +150,9 @@ export function tooBigToReadBack(bytes: number): boolean {
 export function tooBigToReadBackMessage(what: string, bytes: number): string {
   return (
     `${what}(${humanBytes(bytes)})は「PKC3 入り HTML」に入れられません。` +
-    'PKC3 入り HTML にした中身は、開くときに丸ごと 1 つの文字列として読み込む必要があり、' +
+    'PKC3 入り HTML にした中身は、開くときや取り込み直すときに丸ごと 1 つの文字列として読み込む必要があり、' +
     `そこに入る上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えています。` +
-    'このまま作ると、ファイルはできても二度と開けません。' +
+    'このまま作ると、ファイルはできても、開けない・取り込み直せないことがあります。' +
     '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );
