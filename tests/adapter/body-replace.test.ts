@@ -236,6 +236,53 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       expect(d.getState().openBody?.body, '打ったら置換が消えた').toBe('記録を書いた。記録。\nX');
     });
 
+    it('🔴 打鍵の echo では欄へ書き戻さない(value の代入 0 回・カーソルも動かない)', () => {
+      const { root, d } = editingWith('abc\n');
+      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+      const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
+      let writes = 0;
+      Object.defineProperty(ta, 'value', {
+        configurable: true,
+        get: () => desc.get!.call(ta) as string,
+        set: (v: string) => {
+          writes += 1;
+          desc.set!.call(ta, v);
+        },
+      });
+      for (const c of 'あいうえお') {
+        // テスト自身の代入は数えない(本物の setter を直に呼ぶ)
+        desc.set!.call(ta, desc.get!.call(ta) + c);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      expect(writes, '打鍵のたびに欄へ書き戻している(カーソルが飛ぶ)').toBe(0);
+      expect(d.getState().openBody?.body).toBe('abc\nあいうえお');
+      ta.setSelectionRange(2, 2);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      expect(ta.selectionStart).toBe(2);
+    });
+
+    it('🔴 続けて 2 回置換しても、2 回目の結果が欄に出る(元へ戻す置換でも)', () => {
+      const { root } = editingWith('ログ\n');
+      replaceAllIn(root, 'ログ', '記録');
+      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+      expect(ta.value).toBe('記録\n');
+      // ⚠ 元の本文へ戻す置換 ── 「前に見た本文」の控えが古いままだと、同じ字に見えて欄が動かない
+      replaceAllIn(root, '記録', 'ログ');
+      expect(ta.value, '2 回目の置換が欄に出ない').toBe('ログ\n');
+    });
+
+    it('🔴 探す語が畳んだ設定の行に当たっても、打つと置換後の設定の行が残る', () => {
+      const { root, d } = editingWith(ATT + '\n説明\n', 'attachment');
+      replaceAllIn(root, 'ast-1', 'ast-2');
+      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+      ta.value += 'X';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      const body = d.getState().openBody!.body;
+      expect(body, '畳んだ設定の行が古い値へ戻った').toContain('ast-2');
+      expect(body).not.toContain('ast-1');
+      expect(body.endsWith('説明\nX')).toBe(true);
+    });
+
     it('🔴 プレビューも置換後になる', async () => {
       const { root } = editingWith('ログ\n');
       replaceAllIn(root, 'ログ', '記録');
@@ -286,15 +333,23 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       expect(root.querySelector('[data-pkc-field="row-source"]')).not.toBeNull();
       replaceAllIn(root, 'ログ', '記録');
       await tick(60);
-      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
-      if (ta !== null) {
-        ta.value += 'X';
-        ta.blur();
-        await tick();
-      }
+      // 置換で本文が差し替わると、開いていた行は閉じる(古い行番号へ継ぎ足さないため)
+      expect(
+        root.querySelector('[data-pkc-field="row-source"]'),
+        '置換のあとも古い行の欄が開いたまま',
+      ).toBeNull();
+      expect(root.querySelector('[data-pkc-region="editor-live"]')!.textContent).toContain('記録一行目');
+      // 開き直して打つと、置換の上に積まれる
+      root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!.click();
+      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+      expect(ta.value).toContain('記録一行目');
+      ta.value += 'X';
+      ta.blur();
+      await tick();
       const body = d.getState().openBody?.body ?? '';
       expect(body, '置換が消えた').toContain('記録一行目');
       expect(body).toContain('記録二行目');
+      expect(body).toContain('X');
     });
 
     it('🔴 行に分けられず原文編集へ退避した欄にも映り、打っても置換が残る', async () => {
@@ -311,15 +366,57 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       expect(d.getState().openBody?.body, '打ったら置換が消えた').toContain('記録本文');
     });
 
-    it('🔴 取り消し(Ctrl+Z)で置換の前へ戻れる', async () => {
+    it('🔴 置換を押した直後の Ctrl+Z(焦点は「すべて置換」ボタン)で置換の前へ戻れる', async () => {
       const { root, d } = editingWith('ログ\n');
       await tick();
       replaceAllIn(root, 'ログ', '記録');
       await tick(60);
+      // ⚠ 撃つ先は document.body ではなく、実際に焦点の在るボタン(実ブラウザで届かなかった)
+      const btn = root.querySelector<HTMLElement>('[data-pkc-action="replace-all"]')!;
+      btn.focus();
+      const ev = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+      btn.dispatchEvent(ev);
+      expect(d.getState().openBody?.body, '置換を取り消せない').toBe('ログ\n');
+      expect(ev.defaultPrevented).toBe(true);
+    });
+
+    it('🔴 探す語の欄の Ctrl+Z は奪わない(欄の取り消しはブラウザ自前)', async () => {
+      const { root, d } = editingWith('ログ\n');
+      await tick();
+      replaceAllIn(root, 'ログ', '記録');
+      await tick(60);
+      const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')!;
+      const ev = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+      find.dispatchEvent(ev);
+      expect(d.getState().openBody?.body).toBe('記録\n');
+      expect(ev.defaultPrevented).toBe(false);
+    });
+
+    it('🔴 置換の帯のボタンで Ctrl+A を押しても「全文を編集」は奪わない', async () => {
+      const { root } = editingWith('ログ\n');
+      await tick();
+      replaceAllIn(root, 'ログ', '記録');
+      await tick(60);
+      const btn = root.querySelector<HTMLElement>('[data-pkc-action="replace-all"]')!;
+      btn.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      expect(root.querySelector('[data-pkc-field="row-source"]'), '帯から全文編集が開いた').toBeNull();
+    });
+
+    it('🔴 行の確定は取り消しの履歴に 1 件だけ(置換の echo で空の 1 手が積まれない)', async () => {
+      const { root, d } = editingWith('ログ\n');
+      await tick();
+      root.querySelector<HTMLButtonElement>('[data-pkc-field="edit-all"]')!.click();
+      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')!;
+      ta.value += 'Y';
+      ta.blur();
+      await tick();
+      expect(d.getState().openBody?.body).toBe('ログY\n');
       document.body.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }),
       );
-      expect(d.getState().openBody?.body).toBe('ログ\n');
+      expect(d.getState().openBody?.body, '1 回の Ctrl+Z で戻らない(空の履歴が積まれた)').toBe('ログ\n');
     });
   });
 });

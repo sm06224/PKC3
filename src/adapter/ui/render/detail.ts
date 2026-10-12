@@ -2537,7 +2537,7 @@ export class DetailRenderer {
     const isAttachment = state.entryMetas.get(open.lid)?.archetype === 'attachment';
     const folded = isAttachment ? foldAttachmentHead(open.body) : null;
     if (liveEditorEnabled()) {
-      this.renderLiveEditor(open.body, previewOpts, state.editOpenAt, folded);
+      this.renderLiveEditor(open.body, previewOpts, state.editOpenAt, folded, isAttachment);
       if (focusTitle) settleTitle();
       return;
     }
@@ -2759,6 +2759,8 @@ export class DetailRenderer {
      * ⚠ 畳むときは、情報の札の**編集口を出さない**(札から設定の行を壊せてしまう)。
      */
     folded: AttachmentFold | null = null,
+    /** 添付ノートか。⚠ 外から本文が来たとき畳み直す判定(2 列と同じ規則)。 */
+    isAttachment: boolean = folded !== null,
   ): void {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
@@ -3076,13 +3078,23 @@ export class DetailRenderer {
       const t = ev.target;
       if (t instanceof HTMLElement && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return;
       /**
+       * 🔴 **置換の帯のボタンに焦点が在るときの取り消し / やり直しも、この面の物にする**(#1579)。
+       * 「すべて置換」を押した直後は焦点がそのボタンに残る ── 通さないと、置換の直後の
+       * Ctrl+Z がどこにも届かず、置換を戻せない(実ブラウザで確認)。
+       * ⚠ 欄(`INPUT`)は上で返している(探す語の取り消しはブラウザ自前)。⚠ `Ctrl+A`
+       *   (全文を編集)は帯からは奪わない ── 下の `inReplaceBar` で undo / redo だけ通す。
+       */
+      const inReplaceBar =
+        t instanceof Element && t.closest('[data-pkc-region="replace-bar"]') !== null;
+      /**
        * ⚠ **この面のための打鍵か**を確かめる。`document` で聴いているので、
        * 左の列のボタンに焦点が在るときの `Ctrl+A` / `Ctrl+Z` まで奪ってしまう
        * ── 確定の直後は焦点が `<body>` に戻っているので、そこと面の中だけを見る。
        */
-      if (!(t === document.body || (t instanceof Node && pane.contains(t)))) return;
+      if (!(t === document.body || inReplaceBar || (t instanceof Node && pane.contains(t)))) return;
       const cmd = this.keymap.match(ev, 'live');
       if (cmd === null) return;
+      if (inReplaceBar && cmd !== 'undo' && cmd !== 'redo') return;
       /**
        * 🔴 **Ctrl+A で全文を 1 つの入力欄にする**(S6)── これで今日の 2 列の
        * 編集画面が 1 面の**縮退形**になる(別物の画面を 2 つ持たない)。
@@ -3157,7 +3169,7 @@ export class DetailRenderer {
       // 🔴 外から来た本文(置換)を欄へ映す(#1579)。畳みは畳み直す
       syncFallBack = (text) => {
         body = text;
-        curFold = folded === null ? null : foldAttachmentHead(text);
+        curFold = isAttachment ? foldAttachmentHead(text) : null;
         if (curFold === null) ta.removeAttribute(HIDDEN_HEAD_ATTR);
         else ta.setAttribute(HIDDEN_HEAD_ATTR, curFold.head);
         ta.value = curFold === null ? text : curFold.rest;
@@ -3234,8 +3246,7 @@ export class DetailRenderer {
     this.syncBody = (text) => {
       if (text === body) return;
       if (fellBack) {
-        // 退避先は欄が 1 つの原文編集 ── 欄の値を差し替えるだけでよい
-        body = text;
+        // 退避先は欄が 1 つの原文編集 ── 欄の値を差し替えるだけでよい(`body` は口の中で更新する)
         syncFallBack?.(text);
         return;
       }
