@@ -46,6 +46,13 @@ import { buildPressedButton } from './choice-buttons';
 import { chordHint } from './shortcut-hint';
 import { appKeymap, type KeymapStore } from './keymap';
 
+/**
+ * 🔴 **行がこれより多いとき、表を格子で組む**(#1087。CSS の `data-pkc-grid` の規則)。
+ * 画面の外の行を `content-visibility` で組まずに済ませる ── `<tr>` には効かないので格子にする。
+ * ⚠ 少ない行は今までの表のまま(費用が小さく、罫線が畳まれる表の 0.5px 単位の見た目を変えない)。
+ * 🔑 平置きの 3,000 件で「選ぶ」が 237〜250ms、100 行なら数 ms ── 境は費用が見え始める手前に置く。
+ */
+export const GRID_ROW_THRESHOLD = 300;
 
 
 export class FilerRenderer {
@@ -1260,6 +1267,11 @@ export class FilerRenderer {
       tbody = this.tbody;
     }
     this.reconcileRows(tbody, list, state, parentNames);
+    // ⚠ 行数は毎回変わる(絞り込み・平置き)ので、表は持ち越しても印は毎回合わせる
+    if (this.table !== null) {
+      if (list.length > GRID_ROW_THRESHOLD) this.table.setAttribute('data-pkc-grid', '');
+      else this.table.removeAttribute('data-pkc-grid');
+    }
     /**
      * 🔴 **本文の当たりを 200 件で切ったら、そう言う**(#813 段③-a。一覧タブの
      *   `entry-list-more` をここへ移した)。

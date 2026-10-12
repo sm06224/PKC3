@@ -7511,6 +7511,59 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='filer-table'] tbody tr:hover:not([data-pkc-marked]) td {
   background: var(--surface-hover);
 }
+/* 🔴 **見えない行は組まない**(#1087。平置き 3,000 件で「選ぶ」が 237〜250ms だった実体は、
+ * 画面の外の行まで毎回 style / layout / paint に載ること ── 実測 UpdateLayoutTree +
+ * Layout + PrePaint + Paint が 1 回に約 290ms)。
+ * ⚠ `content-visibility` は `<tr>`(table-row)に効かないので、行数が多いとき
+ *   (`data-pkc-grid`。`filer.ts` の `GRID_ROW_THRESHOLD`)だけ表を**格子**で組む
+ *   (`display: grid`)── 見た目は同じ(列の幅・行の高さ 26px・罫線)。行は DOM に全部残る
+ *   (ブラウザの Ctrl+F は画面の外の行も見つける)。
+ * ⚠ 少ないときは今までの表のまま ── 罫線が畳まれる表の 0.5px 単位の位置は、格子では
+ *   再現しきれない(小数の位置の行で、文字が 1px ずれる)。少ない行は組む費用が小さい。
+ * ⚠ 行の高さは**固定の 26px**(`--row-h` + 罫線)── 外れると、スクロールの長さが読み込みの
+ *   たびに動く。列は `th` の 4.4em(`th` は 11px)= 更新日の幅と同じ式。 */
+[data-pkc-region='filer-table'][data-pkc-grid],
+[data-pkc-region='filer-table'][data-pkc-grid] thead,
+[data-pkc-region='filer-table'][data-pkc-grid] tbody {
+  display: block;
+}
+[data-pkc-region='filer-table'][data-pkc-grid] tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(4.4 * 11px);
+  height: 26px;
+}
+[data-pkc-region='filer-table'][data-pkc-grid] tbody tr {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 26px;
+}
+/* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody tr:first-child {
+  height: 26.5px;
+  padding-top: 0.5px;
+}
+[data-pkc-region='filer-table'][data-pkc-grid] tbody {
+  padding-bottom: 0.5px;
+}
+[data-pkc-region='filer-table'][data-pkc-grid] th,
+[data-pkc-region='filer-table'][data-pkc-grid] td {
+  min-width: 0;
+  align-content: center;
+}
+/* 更新日の幅は格子の列が決める(上の `width: 4.4em` は表の列幅のための値) */
+[data-pkc-region='filer-table'][data-pkc-grid] th:last-child,
+[data-pkc-region='filer-table'][data-pkc-grid] td:last-child {
+  width: auto;
+}
+/* 文字の縦位置を、畳まれた罫線の表と同じ画素に合わせる(実ブラウザの画素で突き合わせた値) */
+[data-pkc-region='filer-table'][data-pkc-grid] th {
+  padding-top: calc(var(--s1) + 1px);
+}
+[data-pkc-region='filer-table'][data-pkc-grid] td:last-child {
+  padding-top: calc(var(--s1) + 1.5px);
+}
+[data-pkc-region='filer-table'][data-pkc-grid] tbody tr:first-child td:last-child {
+  padding-top: var(--s1);
+}
 [data-pkc-field='filer-empty'] {
   color: var(--muted);
   padding: var(--s3) 0;
