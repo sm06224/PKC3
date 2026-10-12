@@ -29,7 +29,7 @@
  *     → できた PDF を開くと、付けた緑が絵に焼かれていて、外した物は無い → 保存した PDF のハイライトも外せる。
  *     上のバーは、窓が狭くて入りきらないとき 2 行になり、「ノートへ引用する」が切れない
  *
- *   ⑤⁘ 別の PDF を後ろに足す(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を足すと一覧の最後に並び
+ *   ⑤⁘ 別の PDF を足す(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を足すと一覧の最後に並び
  *     (絵も出る)、保存ボタンが出る → 足したページを回して「別の PDF として保存」→ できた PDF は N+2 ページで、足した字が後ろに入り、向きも反映される
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
@@ -347,9 +347,9 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(item(3), 'Tab の止まり先がいまの頁でない').toHaveAttribute('tabindex', '0');
   await expect(item(2)).toHaveAttribute('tabindex', '-1');
   await win.focus('#hit-next');
-  // 上のバーで押せるのは「PDF を後ろに足す」(#275 結合)だけ ── 次の Tab で一覧へ入る
+  // 上のバーで押せるのは「PDF を足す」(#275 結合)だけ ── 次の Tab で一覧へ入る
   await win.keyboard.press('Tab');
-  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を後ろに足す」でない').toBe('append-pdf');
+  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), 'Tab がいまの頁の項目に着かない').toBe('3');
   await win.keyboard.press('ArrowDown');
@@ -988,7 +988,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await enc.close();
   expect(edErrors, '編集の窓で例外が出た').toEqual([]);
 
-  // ── ⑤⁘ 別の PDF を後ろに足す(#275 結合)── 3 ページの PDF に、自作の 2 ページを足して保存 → 5 ページの新しい添付 ──
+  // ── ⑤⁘ 別の PDF を足す(#275 結合)── 3 ページの PDF に、自作の 2 ページを足して保存 → 5 ページの新しい添付 ──
   //    足す PDF の字は `extra<頁>`(元の `marker<頁>` と見分ける)。新しい起動は足さない(同じ起動の中で通す)。
   const MG_NAME = '結合.pdf';
   const MG_OUT = '結合 (編集).pdf';
@@ -1010,7 +1010,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mg.locator('[data-pkc-field="pdf-page-thumb"]')).toHaveCount(3, { timeout: 20_000 });
   await expect(mg.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready');
   const mgAdd = mg.locator('#append-pdf');
-  await expect(mgAdd).toHaveText('PDF を後ろに足す');
+  await expect(mgAdd).toHaveText('PDF を足す');
   await expect(mgAdd).toBeEnabled();
   await expect(mgAdd).toHaveAttribute(
     'title',
@@ -1113,7 +1113,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeDisabled();
   await expect(hw.locator('#edit-save')).toBeHidden();
   // 帯に収まらないときは 2 行に折り返し、右端の「ノートへ引用する」も「ハイライト」も窓の外へ切れず、読む面に重ならない
-  //   (既定の窓の幅 1000 でも、広い窓 1800 でも。1800 では 1 行のまま ── 折り返しは要るときだけ)
+  //   (既定の窓の幅 1000 でも、広い窓 1600 でも。1600 では 1 行のまま ── 折り返しは要るときだけ)
   const barGeometry = async (): Promise<{ right: number; barBottom: number; scrollerTop: number; barH: number; width: number }> =>
     hw.evaluate(() => {
       const r = (id: string): DOMRect => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
@@ -1128,7 +1128,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const [w, wraps] of [
     [1000, true],
     [1100, true],
-    [1800, false], // 「PDF を後ろに足す」(#275 結合)を足したぶん、1 行に収まる幅が 1500 から 1800 に広がった
+    [1600, false], // 「PDF を足す」(#275 結合)を足したぶん、1 行に収まる幅が 1500 から 1550 前後へ広がった(実測)
   ] as const) {
     await hw.setViewportSize({ width: w, height: 900 });
     await expect

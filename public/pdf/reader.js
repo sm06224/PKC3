@@ -1160,7 +1160,7 @@ async function editMove(page, to, focus) {
   applyItems(focus ? page : undefined);
 }
 
-// ───────── 別の PDF を後ろに足す(#275 結合)
+// ───────── 別の PDF を足す(#275 結合)
 //
 // 選んだ PDF のページを、一覧の最後に「まだ保存していない変更」として並べる。並べ替え・回す・外す・選ぶは元のページと同じ
 // (通し番号の `page` で動く)。保存は「別の PDF として保存」の 1 本 ── `edit-core.js` が足した PDF からも、残すページだけを写す。
