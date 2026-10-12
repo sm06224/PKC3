@@ -46,6 +46,13 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  *   ③ **掴んで変えた高さ**(押すたびに初期の高さへ戻る ── 片道の操作)
  * 🔑 焦点は**要素の同一性ではなく、押し所が持つ名前**(表 / 列 / 線の 4 つ)で引き直す。
  */
+/** 掴んで変えた高さ(インライン style)と転がした位置。⚠ 呼ぶ側が持つ可変の置き場。 */
+export interface ErSizeMemory {
+  height: string;
+  left: number;
+  top: number;
+}
+
 export interface ErFocusKey {
   readonly field: string;
   readonly name: string;
@@ -155,21 +162,29 @@ export function paintSqlEr(
    *   - `copyLine`:写せなかった表・ビュー(無ければ `''`)
    *   - `subject`:「この DB」/「この file」/「これらの file」(`erSubjectOf`)
    */
-  extra: { readonly copyLine?: string; readonly subject?: string } = {},
+  extra: {
+    readonly copyLine?: string;
+    readonly subject?: string;
+    /**
+     * 🔴 **掴んだ高さ・転がした位置の置き場**(呼ぶ側 = `SqlRenderer` が持つ)。⚠ 図の DOM には置かない ──
+     *   「採っています…」「断りの字だけ」や、畳んで開き直す間は図の DOM が無く、DOM に控えると消える。
+     */
+    readonly memory?: ErSizeMemory;
+  } = {},
 ): void {
   const copyLine = extra.copyLine ?? '';
   const doc = host.ownerDocument;
   // 🔴 作り直す前に、持ち越す物を控える(上の `ErFocusKey` の注釈)
+  const memory = extra.memory ?? { height: '', left: 0, top: 0 };
   const prevScroll = host.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]');
-  const keep =
-    prevScroll === null
-      ? null
-      : {
-          height: prevScroll.style.height,
-          left: prevScroll.scrollLeft,
-          top: prevScroll.scrollTop,
-        };
-  const focusKey = erFocusKeyOf(host, doc.activeElement);
+  // ⚠ 図が在ったときだけ控え直す(図の無い回で 0 / 空に上書きしない)
+  if (prevScroll !== null) {
+    memory.height = prevScroll.style.height;
+    memory.left = prevScroll.scrollLeft;
+    memory.top = prevScroll.scrollTop;
+  }
+  // 焦点は「図から図への描き直し」だけ持ち越す(採り直し・畳み・開き直しをまたいでは戻さない)
+  const focusKey = prevScroll === null ? null : erFocusKeyOf(host, doc.activeElement);
   host.replaceChildren();
   host.hidden = !er.open;
   if (!er.open) return;
@@ -325,11 +340,9 @@ export function paintSqlEr(
    * 🔴 持ち越す(上の `ErFocusKey` の注釈)。⚠ 高さは**掴んで変えたときだけ**インラインに入る
    *   (`resize` が書く)── 空なら CSS の初期値のまま。
    */
-  if (keep !== null) {
-    if (keep.height !== '') scroll.style.height = keep.height;
-    scroll.scrollLeft = keep.left;
-    scroll.scrollTop = keep.top;
-  }
+  if (memory.height !== '') scroll.style.height = memory.height;
+  scroll.scrollLeft = memory.left;
+  scroll.scrollTop = memory.top;
   if (focusKey !== null) {
     // 押した線の札が消えた(自分の線を消した)ときは、図の中の「列をつなぐ」へ
     const again = erFindByKey(host, focusKey) ?? host.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]');

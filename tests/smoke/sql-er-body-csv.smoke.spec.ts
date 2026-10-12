@@ -364,12 +364,28 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await page.mouse.up();
   const grownH = (await erScroll.boundingBox())!.height;
   expect(grownH, '前提:掴んで高さが変わっていない').toBeGreaterThan(sizeBefore.height + 20);
-  const scrollable = await erScroll.evaluate((e) => {
-    e.scrollTop = 24;
-    e.scrollLeft = 24;
-    return { top: e.scrollTop, left: e.scrollLeft };
-  });
-  expect(scrollable.top, '前提:図が縦に転がせない(位置の持ち越しを見られない)').toBeGreaterThan(0);
+  // ⚠ 横にも転がせる幅にする(窓を狭める。引いた後 ── 角の掴み所は広い窓で測る)。転がせない図では位置の持ち越しを見られない
+  const viewportBefore = page.viewportSize()!;
+  await page.setViewportSize({ width: 520, height: viewportBefore.height });
+  /**
+   * 🔑 転がす位置は「転がせる量の半分」にする(固定値だと、量が足りない図で 0 に丸められる)。
+   * ⚠ 前提として両方向とも転がせることを assert する ── 転がせない図では、
+   *   持ち越しを外しても緑になる(0 のまま 0)。
+   */
+  const rolled = () => erScroll.evaluate((e) => ({ top: e.scrollTop, left: e.scrollLeft }));
+  const room = await erScroll.evaluate((e) => ({
+    v: e.scrollHeight - e.clientHeight,
+    h: e.scrollWidth - e.clientWidth,
+  }));
+  expect(room.v, '前提:図が縦に転がせない').toBeGreaterThan(8);
+  expect(room.h, '前提:図が横に転がせない').toBeGreaterThan(8);
+  await erScroll.evaluate((e, r) => {
+    e.scrollTop = Math.floor(r.v / 2);
+    e.scrollLeft = Math.floor(r.h / 2);
+  }, room);
+  const rolled0 = await rolled();
+  expect(rolled0.top, '前提:縦に転がっていない').toBeGreaterThan(2);
+  expect(rolled0.left, '前提:横に転がっていない').toBeGreaterThan(2);
 
   // ② 描き直しが起きる押し(「列をつなぐ」)を鍵盤で → 焦点が残る
   await page.evaluate(() => {
@@ -388,19 +404,19 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
     '前提:図が描き直されていない(持ち越しを見られない)',
   ).toBe(true);
   expect(await focusedInfo(), '描き直しで焦点が落ちた').toMatch(/^BUTTON\|sql-er-connect\|/);
+  expect(await rolled(), '図の描き直しで転がした位置が戻った').toEqual(rolled0);
   // 列を鍵盤で押す(繋ぐ入 → 起点が選ばれて描き直される)→ その列に焦点が残る
   const firstCol = csvBox.locator('[data-pkc-field="sql-er-column"]').first();
   const firstColName = await firstCol.getAttribute('data-pkc-col');
   await firstCol.focus();
+  const rolled1 = await rolled(); // 焦点が列に移って動いた分を含めた、押す直前の位置
   await page.keyboard.press('Enter');
   expect(await focusedInfo(), '列を押して描き直されたら焦点が落ちた').toBe(
     `BUTTON|sql-er-column|棚卸|${firstColName}`,
   );
   expect((await erScroll.boundingBox())!.height, '描き直しで掴んだ高さが戻った').toBeCloseTo(grownH, 0);
-  const rolledAfter = await erScroll.evaluate((e) => ({ top: e.scrollTop, left: e.scrollLeft }));
-  expect(rolledAfter.top, '描き直しで縦に転がした位置が戻った').toBeGreaterThan(0);
-  // ⚠ 横は、この図(幅が器に収まる)では転がせないことがある ── 転がせたときだけ見る(見ていない回は報告に書く)
-  if (scrollable.left > 0) expect(rolledAfter.left, '描き直しで横に転がした位置が戻った').toBe(scrollable.left);
+  expect(await rolled(), '描き直しで転がした位置が戻った(縦横とも同じ値のまま)').toEqual(rolled1);
+  await page.setViewportSize(viewportBefore);
   // 後始末:繋ぐを切に戻す(次の ③ は「繋ぐ」に関わらない)
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   await expect(connectBtn).toHaveAttribute('aria-pressed', 'false');

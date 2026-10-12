@@ -26,7 +26,7 @@ import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/
 import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
-import { erArrowTarget, paintSqlEr } from './sql-er';
+import { erArrowTarget, paintSqlEr, type ErSizeMemory } from './sql-er';
 import {
   duckDbOnlySourcesOf,
   isDuckDbReadableSource,
@@ -169,6 +169,8 @@ export class SqlRenderer {
   private erMine: SqlPageState['er']['mine'] | undefined = undefined;
   /** 図の見え方の指紋(開閉 / 採っている最中か / 断りの字 / 繋ぐ入切 / ここからの列)。 */
   private erKey = '';
+  /** 掴んで変えた高さと転がした位置(#918 段⑤d)。⚠ 図の DOM ではなくここに持つ ── 採り直し・畳み・開き直しをまたぐ。 */
+  private readonly erSize: ErSizeMemory = { height: '', left: 0, top: 0 };
   /**
    * 🔴 **手で高さを決めたか**(#918 段②b)。決めたら**そちらが強い** ──
    * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
@@ -805,7 +807,7 @@ export class SqlRenderer {
       this.erModel = p.er.model;
       this.erMine = p.er.mine;
       this.erKey = erKey;
-      paintSqlEr(this.erHost, p.er, { copyLine: erCopy, subject: erSubject });
+      paintSqlEr(this.erHost, p.er, { copyLine: erCopy, subject: erSubject, memory: this.erSize });
     }
     /**
      * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。

@@ -2818,6 +2818,102 @@ describe('表のつながり図(#918 段⑤)', () => {
     );
   });
 
+  it('🔴 線の札が複数あっても、描き直しで焦点が同じ札に残る。前の札が消えても取り違えない', async () => {
+    // 表を 1 つ足した版(同じ表どうしの線は引けないので、from だけ / to だけ違う札を作るのに 3 つ目の表が要る)
+    const threeTables = async (sql: string): Promise<SqlAnswer> => {
+      const a = await schemaReply(sql);
+      if (!sql.includes('pragma_table_info')) return a;
+      return { ...a, rows: [...a.rows, ['table', '注文', 0, 'id', 'INTEGER', 1, 1]] };
+    };
+    const { pane } = setup(threeTables);
+    erBtn(pane).click();
+    await settleEr();
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]')!.click();
+    const col = (t: string, c: string): HTMLElement =>
+      pane.querySelector<HTMLElement>(
+        `[data-pkc-field="sql-er-column"][data-pkc-name="${t}"][data-pkc-col="${c}"]`,
+      )!;
+    /**
+     * 🔑 札の 4 つの名前(from / fromcol / to / tocol)の**1 つだけ**が違う組を作る
+     *   (どれか 1 つを見落とす引き直しが、別の札を拾うように)。
+     *   宣言された線 D = 売上.客id → 客.id
+     *   A 売上.id → 客.id(D と fromcol だけ違う)/ E 売上.客id → 客.名前(D と tocol だけ違う)/
+     *   B 注文.id → 客.id(A と from だけ違う)/ C 売上.id → 注文.id(A と to だけ違う)
+     */
+    const pairs: [string, string, string, string][] = [
+      ['売上', 'id', '客', 'id'],
+      ['売上', '客id', '客', '名前'],
+      ['注文', 'id', '客', 'id'],
+      ['売上', 'id', '注文', 'id'],
+    ];
+    for (const [ft, fc, tt, tc] of pairs) {
+      col(ft, fc).click();
+      col(tt, tc).click();
+    }
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]')!.click(); // 繋ぐを切る
+    const chips = (): HTMLElement[] =>
+      [...pane.querySelectorAll<HTMLElement>('[data-pkc-field="sql-er-link"]')];
+    const nameOf = (e: Element): string =>
+      ['data-pkc-from', 'data-pkc-fromcol', 'data-pkc-to', 'data-pkc-tocol']
+        .map((a) => e.getAttribute(a))
+        .join('/');
+    // 前提:宣言された 1 本 + 自分で引いた 4 本が、名前の違う札として出ている
+    expect(new Set(chips().map(nameOf)).size, '前提:札が 5 つ別々に出ていない').toBe(5);
+
+    // ① 描き直しが起きる押し(「列をつなぐ」)で、どの札に焦点が在っても同じ札に残る
+    const connect = (): HTMLElement =>
+      pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]')!;
+    for (const name of chips().map(nameOf)) {
+      const el = chips().find((c) => nameOf(c) === name)!;
+      el.focus();
+      connect().click(); // ⚠ 押すたびに図が作り直されるので、押し所は毎回引き直す
+      connect().click();
+      expect(el.isConnected, `前提:描き直されていない(${name})`).toBe(false);
+      expect(nameOf(document.activeElement!), `別の札に焦点が移った(${name})`).toBe(name);
+    }
+
+    // ② 前の札が消えても、後ろの札に焦点が残る(自分の線の札を押すと消える)
+    const mine = (): HTMLElement[] => chips().filter((c) => c.getAttribute('data-pkc-mine') === 'true');
+    const first = mine()[0]!;
+    const second = mine()[1]!;
+    const keepName = nameOf(second);
+    second.focus();
+    first.click(); // 消す(= 描き直し)。焦点は 2 番目に在ったまま
+    expect(first.isConnected, '前提:1 番目が消えていない').toBe(false);
+    expect(mine().length, '前提:1 本減っていない').toBe(3);
+    expect(nameOf(document.activeElement!), '前の札を消したら焦点が別の札へ移った').toBe(keepName);
+  });
+
+  it('🔴 採り直し・畳んで開き直しをまたいでも、掴んだ高さが残る(焦点は戻さない)', async () => {
+    const { pane, pick } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const scrollOf = (): HTMLElement | null =>
+      pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]');
+    scrollOf()!.style.height = '137px';
+
+    // ① 畳んで開き直す(図の DOM が一度なくなる)
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-column"]')!.focus();
+    erBtn(pane).click();
+    expect(scrollOf(), '前提:畳んだら図の DOM が残っている').toBeNull();
+    erBtn(pane).click();
+    await settleEr();
+    expect(scrollOf()!.style.height, '畳んで開き直したら高さが戻った').toBe('137px');
+    expect(
+      pane.querySelector('[data-pkc-region="sql-er"]')!.contains(document.activeElement),
+      '開き直したときに、焦点まで勝手に戻した',
+    ).toBe(false);
+
+    // ② 相手を変えて採り直す(採っている間は図が無く、「採っています…」だけが出る)
+    scrollOf()!.style.height = '151px';
+    pick('db1');
+    expect(scrollOf(), '前提:採っている間に図が残っている(間に挟まる描き直しを通っていない)').toBeNull();
+    await settleEr();
+    await settleEr();
+    expect(scrollOf(), '前提:採り直した後に図が出ていない').not.toBeNull();
+    expect(scrollOf()!.style.height, '採り直しをまたいだら高さが戻った').toBe('151px');
+  });
+
   it('🔴 矢印キー:上下は同じ四角の中、左右は隣の四角の表の名前へ。端では動かない', async () => {
     const { pane } = setup(schemaReply);
     erBtn(pane).click();
