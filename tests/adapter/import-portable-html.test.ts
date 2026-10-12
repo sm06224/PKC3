@@ -312,6 +312,81 @@ describe('PKC3 入り HTML の取り込み (#1416)', () => {
     expect([...new Uint8Array(await [...g.seen.blobs.values()][0]!.arrayBuffer())]).toEqual([...ASSET_BYTES]);
   });
 
+  describe('🔴 ハッシュを取る上限(HASH_MAX_BYTES = 64MB)を超える添付も、遅延の在り処から入る (#1416)', () => {
+    // ⚠ 64MB の fixture は unit では作らない ── `hashMaxBytes` の口を添付(8 バイト)より下げて、
+    //   本物と同じ分岐(`import-pkc2.ts` の「閾値超は heap に載せず putBlob に Blob を直に渡す」)を踏む。
+    //   既存の閾値超の test(`import-pkc2.test.ts`)は zip の在り処と Blob の在り処しか通らず、
+    //   PKC3 入り HTML の遅延の在り処(`open` を呼んで初めて Blob になる)は 1 度も通っていなかった。
+    const range = (html: string): { from: number; to: number } => {
+      const open = html.indexOf('data-pkc-asset="' + ASSET_KEY + '"');
+      const from = html.indexOf('>', open) + 1;
+      const to = html.indexOf('</script>', from);
+      expect(open, '前提: 添付の要素が見つかる').toBeGreaterThan(0);
+      return { from, to };
+    };
+    const HASHED = /^ast-[0-9a-f]{64}$/;
+
+    async function runWith(hashMaxBytes: number | undefined) {
+      const { html } = shared;
+      const { from, to } = range(html);
+      const file = new SliceLog([html], 'over.pkc3.html');
+      const metas: Array<{ key: string; mime: string; size: number; hash: string | null }> = [];
+      const reported: string[] = [];
+      const r = deps({
+        ...(hashMaxBytes === undefined ? {} : { hashMaxBytes }),
+        putAssetMeta: async (m) => {
+          metas.push({ key: m.key, mime: m.mime ?? '', size: m.size, hash: m.hash ?? null });
+        },
+        report: (notes) => reported.push(...notes),
+      });
+      await importPkc2File(r.d, r.deps, file);
+      return {
+        seen: r.seen,
+        metas,
+        reported,
+        assetReads: file.reads.filter(([a, b]) => a === from && b === to).length,
+      };
+    }
+
+    it('閾値を超えると、採番 key・hash なしで入る。中身は 1 バイトも違わず、添付の範囲は 1 度だけ読む', async () => {
+      const o = await runWith(ASSET_BYTES.length - 1);
+
+      expect(o.seen.errors, '取り込みが失敗した').toEqual([]);
+      expect(o.seen.blobs.size).toBe(1);
+      const [key, blob] = [...o.seen.blobs.entries()][0]!;
+      // 🔑 content key(SHA-256)ではなく採番 key ── 重複排除の対象外の印
+      expect(key, '閾値超なのに content key で入った').not.toMatch(HASHED);
+      expect(key).toMatch(/^ast-/);
+      expect([...new Uint8Array(await blob.arrayBuffer())], '中身が違う').toEqual([...ASSET_BYTES]);
+      expect(o.metas).toEqual([
+        { key, mime: 'application/octet-stream', size: ASSET_BYTES.length, hash: null },
+      ]);
+      // 読むのは 1 度だけ(閾値超の道が「大きさを測るために開く」を足していない)
+      expect(o.assetReads, '添付の範囲を 0 回 / 2 回以上読んだ').toBe(1);
+      // 参照は採番 key へ写っている(本文の asset: が元の key のまま残っていない)
+      const n3 = o.seen.entries.find((e) => e.body.includes('asset:'))!;
+      expect(n3.body).toContain('asset:' + key);
+      expect(n3.body).not.toContain(ASSET_KEY);
+      // 「重複排除の対象外」は注意として user に届く(黙って外さない)
+      expect(o.reported.some((n) => n.includes('重複排除の対象外') && n.includes(ASSET_KEY))).toBe(true);
+    });
+
+    it('対照群: 閾値ちょうど(以下)・既定の閾値では、content key + hash で入り、注意は出ない', async () => {
+      const exact = await runWith(ASSET_BYTES.length);
+      const dflt = await runWith(undefined);
+      for (const [name, o] of [['ちょうど', exact], ['既定', dflt]] as const) {
+        expect(o.seen.blobs.size, name).toBe(1);
+        const [key] = [...o.seen.blobs.keys()];
+        expect(key, `${name}: 閾値以下なのに採番 key で入った`).toMatch(HASHED);
+        expect(o.metas, name).toEqual([
+          { key, mime: 'application/octet-stream', size: ASSET_BYTES.length, hash: key!.slice('ast-'.length) },
+        ]);
+        expect(o.reported.some((n) => n.includes('重複排除の対象外')), name).toBe(false);
+        expect(o.assetReads, name).toBe(1);
+      }
+    });
+  });
+
   it('🔴 いま開いているコレクションには触れない(写しを読んだ後も、元のノートはそのまま)', async () => {
     const { blob } = shared;
     // 画像を作った「後」に増えたノート ── 写しには入らず、読んだ後も消えない
