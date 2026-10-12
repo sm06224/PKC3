@@ -1,67 +1,104 @@
 /**
- * 🔴 **PKC3 入り HTML を取り込む前に、バックアップ(`.pkc3-full.zip`)の形へ直す**(#1416)。
+ * 🔴 **PKC3 入り HTML を取り込む前に、バックアップ(`Pkc3Archive`)の形へ直す**(#1416)。
  *
- * ## 🔑 新しい取り込みの道は作らない
+ * ## 🔑 新しい取り込みの道は作らない ── zip も作らない
  *
- * 取り込みの本体(`import-pkc2.ts`)は、バックアップ zip を読んで
+ * 取り込みの本体(`import-pkc2.ts`)は、バックアップを読んで
  * 「確認 → 衝突する ID の付け替え → 添付 → ノート → つながり → 履歴 → タグの色」へ進む 1 本の道を持つ。
- * PKC3 入り HTML の中身(DB の画像 + 添付)は、**その道の入口に合う zip に直して渡す**だけにする:
+ * その道の入口は `Pkc3Archive`(zip を読んだ後の形)である。PKC3 入り HTML の中身(DB の画像 + 添付)は、
+ * **その形に直して渡す**だけにする:
  *
  * 1. HTML から DB の画像と添付を取り出す(`features/import/portable-html.ts`)
  * 2. DB の画像を、**一時の DB で**読む(worker の `readImageArchive`。いま開いているコレクションには触れない)
- * 3. 書き出しと同じ `writeArchive` で `.pkc3-full.zip` を作る(書き出し側の規則をそのまま使う)
+ * 3. 書き出しと同じ写し(`toArchive*`)と、zip の読み取りと同じ検め(`assembleArchive`)で `Pkc3Archive` を組む
  *
+ * ⚠ 以前は 3 で `writeArchive` に zip を作らせ、それを読み戻していた ── **添付が 1 部ずつ余計に増え**
+ *   (432 MB の HTML で、取り込みの後半にブラウザ側が約 400 MB を抱えた)、読み戻しのために全添付を
+ *   もう一度なぞっていた。いまは添付の Blob をそのまま取り込みの本体へ渡す(`BlobAssetSource`)。
  * ⚠ 履歴は鎖のまま、タグの色は材料ごと運ぶ ── バックアップの取り込みと**同じ範囲**が戻る。
  */
-import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
-import { archiveFileName } from '@features/export/archive-kind';
+import {
+  ARCHIVE_FORMAT,
+  ARCHIVE_VERSION,
+  assembleArchive,
+  checkArchiveManifest,
+  toArchiveAsset,
+  toArchiveEntry,
+  toArchiveRelation,
+  toArchiveRevision,
+  type ArchiveContainerJson,
+  type ArchiveEntry,
+  type Pkc3Archive,
+} from '@features/export/pkc3-archive';
 import { readPortableHtmlBlob } from '@features/import/portable-html';
+import type { ReadableAssetSource } from '@features/import/zip-reader';
 import type { ImageArchiveData } from '@adapter/platform/storage/protocol';
 
 /** DB の画像 → バックアップの材料(worker に頼む口)。 */
 export type ReadImageArchive = (image: Uint8Array) => Promise<ImageArchiveData>;
 
-/** worker が返した材料を、`writeArchive` が読む口に嵌める。 */
-export function portableArchiveSource(
+/**
+ * worker が返した材料と添付 → `Pkc3Archive`(zip を介さない)。
+ * ⚠ 検め・警告・版の読み替えは zip の読み取りと**同じ `assembleArchive`** を通る。
+ * @throws ノートが 1 件も無い
+ */
+export function portableArchive(
   data: ImageArchiveData,
   assets: ReadonlyMap<string, Blob>,
-): ArchiveSource {
-  const chainOf = new Map(data.chains.map((c) => [c.lid, c.rows]));
-  return {
+  now: Date,
+): Pkc3Archive {
+  if (data.metas.length === 0) {
+    throw new Error('この PKC3 入り HTML には、取り込めるノートが 1 件も入っていません');
+  }
+  const metaOf = new Map(data.metas.map((m) => [m.lid, m]));
+  // 本文があって一覧にも在るものだけ(書き出しと同じ ── 一覧に無い本文は取り込まない)
+  const entries: ArchiveEntry[] = [];
+  for (const r of data.bodies) {
+    const m = metaOf.get(r.lid);
+    if (m) entries.push(toArchiveEntry(m, r.body));
+  }
+  const revisions = data.chains.flatMap((c) => c.rows.map((rv) => toArchiveRevision(c.lid, rv)));
+  const container: ArchiveContainerJson = {
+    entries,
+    relations: data.relations.map(toArchiveRelation),
+    revisions,
+    assets: data.assets.map(toArchiveAsset),
+    // 1 つも無ければ付けない(書き出しと同じ)
+    ...(data.tagColors.length > 0 ? { tagColors: data.tagColors } : {}),
+  };
+  // 実体のある添付だけが「開ける添付」になる(目録に在って実体が無いものは assembleArchive が警告する)
+  const sources = new Map<string, ReadableAssetSource>();
+  for (const a of data.assets) {
+    const blob = assets.get(a.key);
+    if (blob) sources.set(a.key, { blob });
+  }
+  const manifest: Pkc3Archive['manifest'] & { counts: Record<string, number> } = {
+    format: ARCHIVE_FORMAT,
+    version: ARCHIVE_VERSION,
+    exported_at: now.toISOString(),
     cid: data.cid,
     title: data.title,
-    listEntryMetas: async () => data.metas,
-    // 本文は既に全部あるので、1 回で渡して終える(`done: true`)
-    listBodies: async () => ({ rows: data.bodies, done: true }),
-    listRelations: async () => data.relations,
-    listAssetMetas: async () => data.assets,
-    getAssetBlob: async (key) => assets.get(key) ?? null,
-    listTagColors: async () => data.tagColors,
-    listRevisionLids: async () => data.chains.map((c) => c.lid),
-    getRevisionChain: async (lid) => chainOf.get(lid) ?? [],
+    counts: {
+      entries: entries.length,
+      relations: data.relations.length,
+      revisions: revisions.length,
+      assets: data.assets.length,
+    },
   };
+  checkArchiveManifest(manifest);
+  return assembleArchive(manifest, container, sources, []);
 }
 
 /**
- * PKC3 入り HTML(file) → `.pkc3-full.zip` の Blob。⚠ 全文を字にしない(窓で読む ── `readPortableHtmlBlob`)。
+ * PKC3 入り HTML(file) → `Pkc3Archive`。⚠ 全文を字にしない(窓で読む ── `readPortableHtmlBlob`)。
  * @throws 印が無い / 最後まで書き込まれていない / 中身が読めない / ノートが 1 件も無い
  */
 export async function portableHtmlToArchive(
   html: Blob,
   read: ReadImageArchive,
   now: Date,
-): Promise<Blob> {
+): Promise<Pkc3Archive> {
   const parts = await readPortableHtmlBlob(html);
   const data = await read(parts.image);
-  if (data.metas.length === 0) {
-    throw new Error('この PKC3 入り HTML には、取り込めるノートが 1 件も入っていません');
-  }
-  const out = await writeArchive(portableArchiveSource(data, parts.assets), now.toISOString());
-  return out.blob;
-}
-
-/** 取り込みの道に渡す file の名前(元の名前から `.html` を外して、バックアップの末尾を付ける)。 */
-export function portableArchiveName(htmlName: string): string {
-  const base = htmlName.replace(/\.pkc3\.html?$/i, '').replace(/\.html?$/i, '');
-  return archiveFileName(base === '' ? 'pkc3' : base, 'full');
+  return portableArchive(data, parts.assets, now);
 }

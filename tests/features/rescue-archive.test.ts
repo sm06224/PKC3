@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/export/pkc3-archive';
-import { readZipEntry } from '../../src/features/import/zip-reader';
+import { readAssetSource } from '../../src/features/import/zip-reader';
 import {
   rescueArchiveSource,
   rescueArchiveSummary,
@@ -128,7 +128,7 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
       'k1',
       'k2',
     ]);
-    const b1 = await readZipEntry(out.blob, got.assetSources.get('k1')!.entry);
+    const b1 = await readAssetSource(got.assetSources.get('k1')!);
     expect(await b1.text(), '添付の中身が別物になっている').toBe('PNGBYTES');
 
     /**

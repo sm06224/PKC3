@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readArchive, writeArchive } from '../../src/features/export/pkc3-archive';
-import { readZipEntry } from '../../src/features/import/zip-reader';
+import { readAssetSource } from '../../src/features/import/zip-reader';
 import {
   collectRescued,
   rebuildContainer,
@@ -335,7 +335,7 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
     const got = await readArchive(blob!);
     expect(got.entries.map((e) => e.title)).toEqual(THREE.map((r) => r.title));
     expect([...got.assetSources.keys()], '添付が zip に入っていない').toEqual(['k1']);
-    const bytes = await readZipEntry(blob!, got.assetSources.get('k1')!.entry);
+    const bytes = await readAssetSource(got.assetSources.get('k1')!);
     expect(await bytes.text()).toBe('PNGBYTES');
   });
 

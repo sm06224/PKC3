@@ -23,7 +23,11 @@ import { sniffMagic, detectPkc2Format } from '@features/import/detect-format';
 import { parsePkc2Html } from '@features/import/pkc2-html';
 import { decodeAsset } from '@adapter/platform/asset/asset-codec';
 import { readPkc2Package, peekZipFormat } from '@features/import/pkc2-package';
-import { peekArchivePreview, type ArchivePreview } from '@features/import/archive-preview';
+import {
+  archivePreviewOf,
+  peekArchivePreview,
+  type ArchivePreview,
+} from '@features/import/archive-preview';
 import { readTextBundle, readTextlogBundle } from '@features/import/pkc2-bundle';
 import { readContainerBundle, isBatchFormat } from '@features/import/pkc2-container-bundle';
 import {
@@ -35,8 +39,14 @@ import {
   readArchive,
   restoreArchive,
   ARCHIVE_FORMAT,
+  type Pkc3Archive,
 } from '@features/export/pkc3-archive';
-import { readAssetSource, type AssetSource } from '@features/import/zip-reader';
+import {
+  assetSourceSize,
+  readAssetSource,
+  type AssetSource,
+  type ReadableAssetSource,
+} from '@features/import/zip-reader';
 import {
   convertPkc2Container,
   remapAssetKeys,
@@ -49,11 +59,7 @@ import {
 } from '@adapter/platform/storage/asset-key';
 import { extractMeta } from '@features/flavor';
 import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
-import {
-  portableArchiveName,
-  portableHtmlToArchive,
-  type ReadImageArchive,
-} from './import-portable';
+import { portableHtmlToArchive, type ReadImageArchive } from './import-portable';
 
 export interface ImportDeps {
   /**
@@ -225,9 +231,9 @@ export function consumeBase64(a: { base64: string }): string {
  * 実体化されている ── 「最大の内側 ZIP 1 個」を保つには参照を切る側が要る。
  */
 function consumeSource(
-  map: Map<string, AssetSource> | null,
+  map: Map<string, ReadableAssetSource> | null,
   oldKey: string | null,
-): AssetSource | null {
+): ReadableAssetSource | null {
   if (map === null || oldKey === null) return null;
   const src = map.get(oldKey) ?? null;
   map.delete(oldKey);
@@ -243,10 +249,10 @@ function consumeSource(
  * 健全な複製が生き残っていた。畳み込みで冗長性まで捨てると PKC2 より弱くなる。
  */
 async function readWithFallback(
-  src: AssetSource,
+  src: ReadableAssetSource,
   alternates: readonly AssetSource[] | undefined,
   onFallback: (n: number) => void,
-): Promise<{ blob: Blob; src: AssetSource }> {
+): Promise<{ blob: Blob; src: ReadableAssetSource }> {
   try {
     return { blob: await readAssetSource(src), src };
   } catch (first) {
@@ -276,7 +282,7 @@ async function readWithFallback(
  * text/textlog bundle が書く**生バイト**と非互換(実物で確認、2026-08-02)。
  * 取り違えると base64 の文字列が添付として保存され、**開けないのに壊れて見えない**。
  */
-async function bytesOfSource(blob: Blob, src: AssetSource): Promise<Uint8Array<ArrayBuffer>> {
+async function bytesOfSource(blob: Blob, src: ReadableAssetSource): Promise<Uint8Array<ArrayBuffer>> {
   if (!src.base64) return new Uint8Array(await blob.arrayBuffer());
   return decodeBase64(await blob.text());
 }
@@ -356,8 +362,7 @@ export async function importPkc2File(
   deps: ImportDeps,
   inputFile: File,
 ): Promise<number | null> {
-  // 🔴 PKC3 入り HTML は、下で zip に直したものに差し替える(以降は zip と同じ道)
-  let file: File = inputFile;
+  const file: File = inputFile;
   /**
    * 🔴 **進行中の字(「取込中…」)を出している間だけ true**(#1017 C5)。⚠ 直す前は、失敗しても
    *   やめても「取込中…」が画面下に**残った**(エラーの行と並んで「まだ続いている」と読める)。
@@ -387,7 +392,7 @@ export async function importPkc2File(
 
   try {
     const head = new Uint8Array(await file.slice(0, PORTABLE_SNIFF_BYTES).arrayBuffer());
-    let isZip = sniffMagic(head) === 'zip';
+    const isZip = sniffMagic(head) === 'zip';
     const detected = isZip ? null : detectPkc2Format(head, null, file.name);
     if (!isZip && detected !== 'html' && detected !== 'pkc3-html') {
       // ⚠ **受理するものを全部言う**(P8 段⑲)── かつては存在しない拡張子
@@ -405,20 +410,16 @@ export async function importPkc2File(
     progressShown = true;
 
     // 🔴 **PKC3 入り HTML(#1416)**: 印で見分けた(`detectPkc2Format`)。中身を取り出して
-    //   バックアップ zip の形に直し、**ここから下は zip と同じ道**(確認 → 付け替え → 添付 → … → タグの色)を通る。
+    //   **バックアップを読んだ後の形(`Pkc3Archive`)に直し**、ここから下は zip と同じ道
+    //   (確認 → 付け替え → 添付 → … → タグの色)を通る。⚠ zip は作らない(添付が 1 部余計に増える)。
     //   ⚠ 新しい取り込みの道は作らない。直せなかった理由はそのまま断り文にする
+    let portable: Pkc3Archive | null = null;
     if (detected === 'pkc3-html') {
       if (deps.readImageArchive === undefined) {
         return fail(`${file.name}: この画面からは PKC3 入り HTML を取り込めません`);
       }
       try {
-        const zip = await portableHtmlToArchive(
-          file,
-          deps.readImageArchive,
-          new Date(),
-        );
-        file = new File([zip], portableArchiveName(file.name), { type: 'application/zip' });
-        isZip = true;
+        portable = await portableHtmlToArchive(file, deps.readImageArchive, new Date());
       } catch (e) {
         return fail(`${file.name}: ${reason(e)}`);
       }
@@ -432,14 +433,14 @@ export async function importPkc2File(
     let light = false;
     /** PKC3 のアーカイブ復元(convert を通さない ── body は既に PKC-Markdown)。 */
     let restored: ReturnType<typeof restoreArchive> | null = null;
-    let zipAssets: Map<string, AssetSource> | null = null;
+    let zipAssets: Map<string, ReadableAssetSource> | null = null;
     let zipAlternates: Map<string, AssetSource[]> | null = null;
     const preWarnings: string[] = [];
 
-    if (isZip) {
+    if (isZip || portable !== null) {
       // ⚠ 形式は **manifest.format** で決まる(拡張子でもファイル名でもない)。
       // ネストした ZIP でも各段でこれを呼ぶ ── 判別は 1 段ぶんしか効かない
-      const format = await peekZipFormat(file);
+      const format = portable !== null ? ARCHIVE_FORMAT : await peekZipFormat(file);
       // 📦 **自分の書出しを自分で読み戻す**(P6d)── バックアップの復元。
       // ⚠ PKC2 経路の convert を通さない(body は既に PKC-Markdown。通すと二重変換)
       if (format === ARCHIVE_FORMAT) {
@@ -447,7 +448,7 @@ export async function importPkc2File(
         // `peekZipFormat`(manifest.format)と同じ土台 ── file 名は見ないので、
         // 旧 `.pkc3.zip` でも同じ表が出る。`preview` が `null`(counts の無い
         // ごく古い manifest)のときは**確認せず素通し**する(壊すより通す)。
-        const preview = await peekArchivePreview(file);
+        const preview = portable !== null ? archivePreviewOf(portable) : await peekArchivePreview(file);
         if (preview && deps.confirmArchiveImport) {
           const proceed = await deps.confirmArchiveImport(preview);
           if (!proceed) {
@@ -456,7 +457,7 @@ export async function importPkc2File(
             return null;
           }
         }
-        const archive = await readArchive(file);
+        const archive = portable ?? (await readArchive(file));
         restored = restoreArchive(archive, {
           existingLids: await deps.existingLids(),
           existingRelationIds: deps.existingRelationIds(),
@@ -465,6 +466,10 @@ export async function importPkc2File(
           genRelationId: deps.genRelationId,
         });
         zipAssets = new Map(archive.assetSources);
+        // 🔑 添付の在り処は `zipAssets` だけが持つ(1 件ずつ読むたびに手放す)。元の表を残すと、
+        //   PKC3 入り HTML の添付 Blob が取り込みの最後まで解放されない
+        archive.assetSources.clear();
+        portable = null;
         preWarnings.push(...restored.warnings);
         container = null;
       } else if (format === null) {
@@ -586,7 +591,7 @@ export async function importPkc2File(
         // ⚠ **base64 の在り処はこの経路に乗せない**(段⑥)── そのまま putBlob すると
         // **base64 の文字列そのものが添付として保存される**(開けないファイルができ、
         // しかも「壊れている」とは見えない)。復号は下の共通経路で行う
-        if (src && !src.base64 && src.entry.uncompressedSize > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
+        if (src && !src.base64 && assetSourceSize(src) > (deps.hashMaxBytes ?? HASH_MAX_BYTES)) {
           // ⚠ 採番 key は `ast-<ms base36>-<6 桁 base36>` なので**同一 ms 内で
           // 衝突しうる**。衝突すると putBlob が後勝ちで上書きし、2 つの添付が
           // 同じ bytes を指す(無言のデータ消失)── convert 側は takenKeys で
@@ -608,7 +613,7 @@ export async function importPkc2File(
           await deps.putAssetMeta({
             key,
             mime: a.mime,
-            size: src.entry.uncompressedSize,
+            size: assetSourceSize(src),
             hash: null,
           });
           result.warnings.push(

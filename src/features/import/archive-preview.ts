@@ -25,7 +25,7 @@
  * ⚠ pure module。browser API は持たない(`Blob` は zip-reader.ts と同じ扱い)。
  */
 import { readZipDirectory, readZipText } from './zip-reader';
-import { ARCHIVE_FORMAT } from '../export/pkc3-archive';
+import { ARCHIVE_FORMAT, type Pkc3Archive } from '../export/pkc3-archive';
 
 export interface ArchivePreview {
   readonly noteCount: number;
@@ -62,6 +62,20 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
     assetCount,
     hasRelations: typeof counts.relations === 'number' && counts.relations > 0,
     hasRevisions: typeof counts.revisions === 'number' && counts.revisions > 0,
+  };
+}
+
+/**
+ * zip を介さずに組んだ `Pkc3Archive`(PKC3 入り HTML)の概要。⚠ `peekArchivePreview` と**同じ数え方**:
+ * ノートの件数は書き出しが刻む `manifest.counts.entries`(= 取り込むノートの数)、
+ * 添付は**実際に開ける**数(`assetSources`)。
+ */
+export function archivePreviewOf(archive: Pkc3Archive): ArchivePreview {
+  return {
+    noteCount: archive.entries.length,
+    assetCount: archive.assetSources.size,
+    hasRelations: archive.relations.length > 0,
+    hasRevisions: archive.revisions.length > 0,
   };
 }
 

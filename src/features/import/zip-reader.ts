@@ -454,7 +454,27 @@ export interface AssetSource {
   base64?: true;
 }
 
+/**
+ * zip を介さない在り処 = **既に Blob として在る**中身(#1416。PKC3 入り HTML の添付)。
+ * 読み手の口(`readAssetSource` / `assetSourceSize`)は zip の在り処と同じ ── 取り込みの本体は両方を区別しない。
+ * ⚠ 検算する CRC は無い(zip の中身ではないので、壊れの検出は HTML を読んだ側の検めが持つ)。
+ */
+export interface BlobAssetSource {
+  blob: Blob;
+  /** 常に生バイト(base64 の字ではない)。 */
+  base64?: undefined;
+}
+
+/** 取り込みの本体が読む在り処 ── zip の entry か、既に在る Blob。 */
+export type ReadableAssetSource = AssetSource | BlobAssetSource;
+
 /** `AssetSource` の中身を読む(ネストしていても正しい Blob から読む)。 */
-export async function readAssetSource(src: AssetSource): Promise<Blob> {
+export async function readAssetSource(src: ReadableAssetSource): Promise<Blob> {
+  if ('blob' in src) return src.blob;
   return readZipEntry(src.zip, src.entry);
+}
+
+/** 中身の大きさ(バイト)。⚠ 読まずに分かる ── 重い添付をヒープに載せるかの判定に使う。 */
+export function assetSourceSize(src: ReadableAssetSource): number {
+  return 'blob' in src ? src.blob.size : src.entry.uncompressedSize;
 }
