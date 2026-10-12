@@ -19,7 +19,8 @@ import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { ROW_REOPEN_EVENT, type RowReopenDetail } from '../../src/adapter/ui/render/row-swap';
+import { ROW_REOPEN_EVENT, RowSwap, type RowReopenDetail } from '../../src/adapter/ui/render/row-swap';
+import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 
@@ -58,6 +59,8 @@ function setup() {
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも'), meta('n2', '議事録')], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'hello world' });
+  // 左の探す欄が `>` の一覧を出している状態(実行時に確かめる)。⚠ 描き直しで焦点が動くので、面を組む前に済ませる
+  d.dispatch({ type: 'SET_ENTRY_FILTER', query: '>日付' });
 
   const detail = document.createElement('div');
   detail.setAttribute('data-pkc-region', 'detail');
@@ -261,5 +264,219 @@ describe('左の `>` から、1 面の行へ入れる操作を呼ぶ(#582)', () 
     a.runRow('insert-date');
     expect(a.asked).toHaveLength(1);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('控えの捨て方(#582 着地前レビュー F2)', () => {
+  const reattach = (a: ReturnType<typeof setup>): void => {
+    if (!a.detail.isConnected) a.root.append(a.detail);
+  };
+
+  it('🔴 本文の余白のような焦点を持てない所を押したら、控えを捨てる(後の `>` が古い行を開かない)', () => {
+    const a = setup();
+    a.leaveRowTo(a.filter);
+    // 余白を押す: mousedown は飛ぶが、焦点を持つ要素が無いので blur は飛ばない
+    a.detail.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    a.runRow('insert-date');
+    expect(a.asked, '余白を押した後の `>` が古い行を開いた').toEqual([]);
+  });
+
+  it('対照群: 探す欄・その一覧の行を押す mousedown では控えを捨てない', () => {
+    const a = setup();
+    a.leaveRowTo(a.filter);
+    a.filter.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'run-command-row');
+    a.root.append(btn);
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    a.runRow('insert-date');
+    expect(a.asked).toHaveLength(1);
+  });
+
+  it('🔴 探す欄が、一覧の外の物へ焦点を渡したら捨てる。一覧の行へ渡すなら残す', () => {
+    const a = setup();
+    a.leaveRowTo(a.filter);
+    const other = document.createElement('button');
+    a.root.append(other);
+    a.filter.dispatchEvent(new FocusEvent('blur', { bubbles: false, relatedTarget: other }));
+    a.runRow('insert-date');
+    expect(a.asked, '探す欄から別の所へ移ったのに控えが残った').toEqual([]);
+
+    const b = setup();
+    b.leaveRowTo(b.filter);
+    const listBtn = document.createElement('button');
+    listBtn.setAttribute('data-pkc-action', 'run-command-row');
+    b.root.append(listBtn);
+    b.filter.dispatchEvent(new FocusEvent('blur', { bubbles: false, relatedTarget: listBtn }));
+    b.runRow('insert-date');
+    expect(b.asked, '一覧の行へ移っただけで控えが消えた').toHaveLength(1);
+  });
+
+  it('🔴 `>` の一覧の行を押したら、どの命令でも控えを使い切る(次の別の操作が古い控えを拾わない)', () => {
+    const a = setup();
+    a.leaveRowTo(a.filter);
+    a.runRow('renumber-lists'); // 控えを使わない命令
+    expect(a.asked, '全文の道具で行を開き直した').toEqual([]);
+    reattach(a);
+    a.d.dispatch({ type: 'SET_ENTRY_FILTER', query: '>日付' });
+    reattach(a);
+    a.runRow('insert-date');
+    expect(a.asked, '前の操作を素通りした控えで、後の操作が行を開き直した').toEqual([]);
+  });
+
+  it('🔴 探す欄が `>` の一覧を出していないなら、控えがあっても開き直さない', () => {
+    const a = setup();
+    a.d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ふつうの語' });
+    reattach(a);
+    a.row.focus();
+    a.leaveRowTo(a.filter);
+    a.runRow('insert-date');
+    expect(a.asked).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **本物の `RowSwap` と `bindActions` を繋ぐ**(#582 着地前レビュー F6)。
+ * ⚠ 上の台は面の側を模している ── 控えた行番号・原文・caret が本物の行の開き直しと噛み合うか(段落 / 箇条書きの項目 /
+ *   行数が変わる確定の直後)は、ここでしか見えない。見るのは**入れた字が狙った行の狙った位置に着くこと**。
+ */
+describe('本物の RowSwap と繋ぐ(#582)', () => {
+  function live(body: string, defer = false) {
+    document.body.innerHTML = '';
+    resetAppDialogForTest();
+    const root = document.createElement('div');
+    document.body.append(root);
+    buildShell(root);
+    const d = new Dispatcher();
+    const refusals: string[] = [];
+    const rawDispatch = d.dispatch.bind(d);
+    d.dispatch = ((a: Dispatchable) => {
+      if (a.type === 'OP_FAILED') refusals.push((a as { error: string }).error);
+      return rawDispatch(a);
+    }) as typeof d.dispatch;
+    bindActions(root, d, {}, new KeymapStore());
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '>日付' });
+    const detail = document.createElement('div');
+    detail.setAttribute('data-pkc-region', 'detail');
+    const pane = document.createElement('div');
+    pane.setAttribute('data-pkc-region', 'editor-live');
+    detail.append(pane);
+    // 「日付を入れる」の受け手の代わり: 押した瞬間の caret に字を挿す(本物のボタンと同じく caret を読む)
+    const inserted: string[] = [];
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'insert-date');
+    btn.addEventListener('click', () => {
+      const ta = pane.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]');
+      if (ta === null) {
+        inserted.push('(欄なし)');
+        return;
+      }
+      ta.setRangeText('★', ta.selectionStart, ta.selectionEnd, 'end');
+      inserted.push(ta.value);
+    });
+    detail.append(btn);
+    root.append(detail);
+    let text = body;
+    let queued: string | null = null;
+    const render = (t: string): void => {
+      const { html, ranges } = renderMarkdownWithRanges(t);
+      swap.update(t, html, ranges);
+    };
+    const swap = new RowSwap(pane, {
+      commit: (s, e, t) => {
+        const lines = text.split('\n');
+        text = [...lines.slice(0, s), ...t.split('\n'), ...lines.slice(e + 1)].join('\n');
+        if (defer) queued = text;
+        else render(text);
+      },
+      onInserted: () => {},
+    });
+    render(text);
+    const filter = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
+    const rowTa = (): HTMLTextAreaElement | null => pane.querySelector('[data-pkc-field="row-source"]');
+    /** 行を開いて caret を置き、探す欄へ移り、一覧の「日付を入れる」を押す。 */
+    const openThenCallFromLeft = (target: Element, at: number): void => {
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+      const ta = rowTa()!;
+      expect(ta, '前提: 行が開かない').not.toBeNull();
+      ta.setSelectionRange(at, at);
+      return void ta;
+    };
+    const leaveToFilterAndRun = (): void => {
+      const ta = rowTa()!;
+      ta.dispatchEvent(new FocusEvent('blur', { bubbles: false, relatedTarget: filter })); // capture が控え、行自身の blur が確定
+      const b = document.createElement('button');
+      b.setAttribute('data-pkc-action', 'run-command-row');
+      b.setAttribute('data-pkc-command', 'insert-date');
+      root.append(b);
+      b.click();
+      b.remove();
+    };
+    return {
+      pane,
+      refusals,
+      inserted,
+      rowTa,
+      openThenCallFromLeft,
+      leaveToFilterAndRun,
+      body: () => text,
+      flush: () => {
+        if (queued !== null) {
+          const t = queued;
+          queued = null;
+          render(t);
+        }
+      },
+    };
+  }
+  const pOf = (pane: HTMLElement, t: string): Element =>
+    [...pane.querySelectorAll('p')].find((e) => e.textContent?.includes(t))!;
+  const liOf = (pane: HTMLElement, t: string): Element =>
+    [...pane.querySelectorAll('li')].find((e) => e.textContent?.includes(t))!;
+
+  it('段落の行: 途中の caret の位置に入る', () => {
+    const l = live('# 題\n\nhello world\n\n最後');
+    l.openThenCallFromLeft(pOf(l.pane, 'hello'), 5);
+    l.leaveToFilterAndRun();
+    expect(l.inserted).toEqual(['hello★ world']);
+    expect(l.rowTa()!.value).toBe('hello★ world');
+  });
+
+  it('箇条書きの 2 つ目の項目: その項目の caret の位置に入る(他の項目は動かない)', () => {
+    const l = live('- [ ] 一つめ\n- [ ] 二つめ\n- [ ] 三つめ');
+    l.openThenCallFromLeft(liOf(l.pane, '二つめ'), 8);
+    expect(l.rowTa()!.value, '前提: 項目だけが開いていない').toBe('- [ ] 二つめ');
+    l.leaveToFilterAndRun();
+    expect(l.inserted).toEqual(['- [ ] 二つ★め']);
+    expect(l.body()).toBe('- [ ] 一つめ\n- [ ] 二つめ\n- [ ] 三つめ');
+  });
+
+  it('🔴 予約中に別の行が開かれて予約が捨てられたら、黙らず「欄が変わった」で断る(押したのに無反応にしない)', () => {
+    const l = live('# 題\n\nhello\n\n最後', true);
+    l.openThenCallFromLeft(pOf(l.pane, 'hello'), 5);
+    const ta = l.rowTa()!;
+    ta.value = 'hello\nworld';
+    l.leaveToFilterAndRun(); // 行数が変わる確定 → 予約
+    expect(l.refusals, '予約に回っていない(前提)').toEqual([]);
+    // 着弾前に別の塊を開く(予約は用済みとして捨てられる)
+    pOf(l.pane, '最後').dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
+    expect(l.refusals).toEqual([FIELD_CHANGED]);
+    expect(l.inserted, '断ったのに入れた').toEqual([]);
+  });
+
+  it('🔴 行数が変わる確定の直後(描き直しが着弾する前)でも、着弾後に狙った行の caret に入る', () => {
+    const l = live('# 題\n\nhello\n\n最後', true);
+    l.openThenCallFromLeft(pOf(l.pane, 'hello'), 5);
+    const ta = l.rowTa()!;
+    ta.value = 'hello\nworld'; // 打って行数が増えた
+    ta.setSelectionRange(11, 11);
+    l.leaveToFilterAndRun();
+    expect(l.inserted, '着弾前に押した(古い座標の行へ入る)').toEqual([]);
+    l.flush();
+    expect(l.inserted, '着弾後に入っていない').toEqual(['hello\nworld★']);
+    expect(l.body()).toBe('# 題\n\nhello\nworld\n\n最後');
   });
 });

@@ -5111,6 +5111,14 @@ interface LiveRowMemo {
   readonly end: number;
 }
 let liveRowMemo: LiveRowMemo | null = null;
+/** 控えを取り出して捨てる。⚠ `>` の一覧の行を押したら、どの命令でも**まず捨てる**(次の別の操作が古い控えを拾わない)。 */
+function takeLiveRowMemo(): LiveRowMemo | null {
+  const m = liveRowMemo;
+  liveRowMemo = null;
+  return m;
+}
+/** 控えを持ったまま居てよい場所(探す欄と、その一覧の行)。 */
+const MEMO_KEEP = '[data-pkc-field="entry-filter"],[data-pkc-action="run-command-row"]';
 
 /**
  * 🔴 **左の `>` の一覧から「打っている場所に入れる」操作を呼ぶ前に、1 面の行を開き直して caret を戻す**(#582)。
@@ -5120,12 +5128,12 @@ let liveRowMemo: LiveRowMemo | null = null;
  * ⚠ 控えと違う行が開いたとき(本文が変わった / 別のノート / 面が違う)は `FIELD_CHANGED` で断る。
  *   戻し方は「操作を探す」(`openPaletteFor`)と同じく**範囲を setSelectionRange で戻す**1 本 ── 欄の側(`RowSwap.finishRestore`)が持つ。
  */
-function reopenLiveRowThen(env: CommandEnv, id: string, run: () => void): boolean {
+function reopenLiveRowThen(env: CommandEnv, id: string, memo: LiveRowMemo | null, run: () => void): boolean {
   if (!CARET_INSERT_TOOLS.has(id)) return true;
-  const memo = liveRowMemo;
-  liveRowMemo = null;
   // 欄が在る(2 列の編集など)── 選択が欄に残っているので、そのまま実行する
   if (memo === null || memo.root !== env.root || formatTarget(env.root) !== null) return true;
+  // 探す欄が `>` の一覧を出していないなら、この控えは今の操作のものではない(古い控えで行を開かない)
+  if (!env.dispatcher.getState().filterQuery.trimStart().startsWith('>')) return true;
   const pane = env.root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]');
   if (pane === null || env.dispatcher.getState().openBody?.lid !== memo.lid) {
     env.dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
@@ -6440,6 +6448,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'run-command-row': (dispatcher, target, services, root) => {
     const id = target.closest<HTMLElement>('[data-pkc-command]')?.getAttribute('data-pkc-command');
     if (id === null || id === undefined) return;
+    const memo = takeLiveRowMemo();
     const from = dispatcher.getState().filterQuery;
     const env: CommandEnv = { root, dispatcher, keymap: appKeymap, notify: (t, o) => services.showStatus?.(t, o) };
     const exec = (): void => {
@@ -6454,7 +6463,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
     };
     // 🔴 1 面のライブ編集では、探す欄を押した時点で行が消えている ── 開き直して caret を戻してから実行する(#582)
-    if (reopenLiveRowThen(env, id, exec)) exec();
+    if (reopenLiveRowThen(env, id, memo, exec)) exec();
   },
   /**
    * 🔴 **コピーした物を選ぶ**(#678)── **もう一度コピーする**(その場へ差し込まない)。
@@ -17624,6 +17633,7 @@ export function bindActions(
       if (!(ta instanceof HTMLTextAreaElement) || ta.getAttribute('data-pkc-field') !== 'row-source') {
         // 探す欄自身の blur(一覧の行を押す途中)は控えを残す。それ以外の場所から焦点が動いたら古い控えは捨てる
         if (!(ta instanceof HTMLElement) || ta.getAttribute('data-pkc-field') !== 'entry-filter') liveRowMemo = null;
+        else if (ev.relatedTarget instanceof Element && !ev.relatedTarget.closest(MEMO_KEEP)) liveRowMemo = null;
         return;
       }
       const to = ev.relatedTarget;
@@ -17637,6 +17647,18 @@ export function bindActions(
         Number.isInteger(line)
           ? { root, lid, line, source: ta.value, start: ta.selectionStart, end: ta.selectionEnd }
           : null;
+    },
+    true,
+  );
+  /**
+   * 🔴 **探す欄とその一覧の外を押したら、控えを捨てる**(#582)。
+   * ⚠ 本文の余白のように**焦点を持てない所**を押しても blur は飛ばない ── 控えだけが残り、後の `>` が古い行を開いてしまう。
+   */
+  listen(
+    root,
+    'mousedown',
+    (ev) => {
+      if (liveRowMemo !== null && !(ev.target instanceof Element && ev.target.closest(MEMO_KEEP))) liveRowMemo = null;
     },
     true,
   );
