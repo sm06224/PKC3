@@ -33,6 +33,10 @@ interface Api {
   extractName(name: string): string;
   pickNote(count: number): string;
   replyMatches(pending: { key: string } | null, payload: unknown): boolean;
+  appendPages(items: Item[], first: number, count: number): Item[];
+  sourcesFor(list: Item[], added: { first: number; count: number }[]): { sources: { first: number; count: number }[]; used: number[] };
+  appendRefusal(code: unknown): string;
+  appendedNote(name: string, count: number): string;
 }
 
 function load(): Api {
@@ -287,5 +291,51 @@ describe('本体の返事を依頼に突き合わせる(#275 段②-1c)', () => 
     expect(api.replyMatches({ key: 'pA' }, { ok: true, key: 5 })).toBe(false);
     expect(api.replyMatches({ key: 'pA' }, null)).toBe(false);
     expect(api.replyMatches(null, { ok: true, key: 'pA' })).toBe(false);
+  });
+});
+
+describe('別の PDF を後ろに足す(#275 結合)── 通し番号で元のページと同じ操作ができる', () => {
+  it('足したページは並びの最後に、回していない形で付く / 元の並びは書き換えない', () => {
+    const base = api.fresh(3);
+    const next = api.appendPages(base, 4, 2);
+    expect(next).toEqual([...base, { page: 4, rot: 0 }, { page: 5, rot: 0 }]);
+    expect(base).toHaveLength(3);
+    // 元のページと同じ関数で動く(回す・並べ替え・外す)── 依頼は通し番号で書かれる
+    const worked = api.removeAt(api.moveTo(api.rotateAt(next, 4), 4, 0), 1);
+    expect(api.toJob(worked)).toEqual({ order: [5, 2, 3, 4], rotate: { 5: 90 } });
+    // 足しただけで「保存していない変更」になる(保存ボタンが出る)/ 足す前の並び(基準)に戻せば変更なし
+    expect(api.sameArrangement(next, base)).toBe(false);
+    expect(api.sameArrangement(base, base.slice())).toBe(true);
+  });
+
+  it('sourcesFor: ページが残っている PDF だけを、使う順に挙げる(使わない PDF の bytes は送らない)', () => {
+    const added = [
+      { first: 4, count: 2 },
+      { first: 6, count: 3 },
+    ];
+    const list = api.appendPages(api.fresh(3), 4, 5);
+    expect(api.sourcesFor(list, added)).toEqual({ sources: added, used: [0, 1] });
+    // 1 つ目の PDF のページを全部外す → 2 つ目だけ(添字は added の何番目か)
+    const cut = list.filter((it) => it.page < 4 || it.page > 5);
+    expect(api.sourcesFor(cut, added)).toEqual({ sources: [{ first: 6, count: 3 }], used: [1] });
+    // 1 枚でも残っていれば使う / 元のページだけなら何も使わない
+    expect(api.sourcesFor(api.fresh(3).concat([{ page: 5, rot: 0 }]), added).used).toEqual([0]);
+    expect(api.sourcesFor(api.fresh(3), added)).toEqual({ sources: [], used: [] });
+  });
+
+  it('断りの字: 暗号化 / 読めない / ほか ── どれも「何も変えていません」と言う', () => {
+    expect(api.appendRefusal('encrypted')).toContain('パスワードで守られた PDF は足せません');
+    expect(api.appendRefusal('unreadable')).toContain('PDF として読めないため足せません');
+    expect(api.appendRefusal(undefined)).toContain('もう一度試してください');
+    for (const c of ['encrypted', 'unreadable', 'worker']) expect(api.appendRefusal(c)).toContain('何も変えていません');
+    expect(new Set(['encrypted', 'unreadable', 'worker'].map((c) => api.appendRefusal(c))).size).toBe(3);
+  });
+
+  it('足せた知らせは、名前・ページ数・保存の入口を言う(「別の PDF として保存」は画面のボタンの字)', () => {
+    const t = api.appendedNote('資料.pdf', 2);
+    expect(t).toContain('「資料.pdf」の 2 ページ');
+    expect(t).toContain('「別の PDF として保存」');
+    const host = readFileSync('public/pdf/host.html', 'utf-8');
+    expect(host).toContain('>別の PDF として保存</button>');
   });
 });

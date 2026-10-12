@@ -168,6 +168,14 @@ export function noticeDate(id: string): string {
  */
 export const NOTICES: readonly Notice[] = [
   {
+    id: '2026-10-12-pdf-append',
+    title: 'PDF のページを、別の PDF の後ろに足せるようになりました',
+    items: [
+      'PDF ビューアの上のバーの「PDF を後ろに足す」で別の PDF を選ぶと、そのページが一覧の最後に並びます。',
+      '足したページも並べ替え・回転・外すができ、「別の PDF として保存」で新しい添付になります。元の PDF と足した PDF は変わりません。パスワード付きの PDF は足せません。',
+    ],
+  },
+  {
     id: '2026-10-12-portable-attachment-fast',
     title: 'PKC3 入り HTML の大きい添付も速く開きます',
     items: [
@@ -592,14 +600,9 @@ export const NOTICES: readonly Notice[] = [
       '「週」のウィンドウの中では、左のペインの「週」は隠れます(中央の「週」は残ります)。',
     ],
   },
-  {
-    id: '2026-10-11-paste-message',
-    title: 'Web や Word から貼った字の変換が、メッセージに残るようになりました',
-    items: [
-      'Web や Word から書式つきで貼った字を Markdown に直して貼ると、システムのメッセージに 1 件残ります。画面下には出ないので、貼る手を止められません。',
-      '元に戻すのは Ctrl+Z、書式なしで貼るのは Ctrl+Shift+V です。貼った字の中身はメッセージに入りません。',
-    ],
-  },
+  // ⚠ 2026-10-12(275): 枠を超えたので
+  //    `2026-10-11-paste-message` を登記表から落とした ──
+  //    **原本は CHANGELOG.md に在る**(2026-10-11 の節)
   // ⚠ 2026-10-12(1416): 枠を超えたので
   //    `2026-10-11-pdf-page-list` を登記表から落とした ──
   //    **原本は CHANGELOG.md に在る**(2026-10-11 の節)

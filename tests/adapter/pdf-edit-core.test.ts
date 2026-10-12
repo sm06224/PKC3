@@ -21,8 +21,11 @@ import { describe, expect, it } from 'vitest';
 interface Core {
   CODES: { encrypted: string; unreadable: string; badJob: string };
   check(lib: typeof PDFLib, bytes: Uint8Array): Promise<number>;
-  checkJob(job: unknown, pageCount: number): { order: number[]; rotate: Record<number, number> };
-  build(lib: typeof PDFLib, bytes: Uint8Array, job: unknown): Promise<Uint8Array>;
+  checkJob(
+    job: unknown,
+    pageCount: number,
+  ): { order: number[]; rotate: Record<number, number>; sources: { first: number; count: number }[] };
+  build(lib: typeof PDFLib, bytes: Uint8Array, job: unknown, extras?: Uint8Array[]): Promise<Uint8Array>;
   verify(lib: typeof PDFLib, bytes: Uint8Array, pageCount: number): Promise<void>;
 }
 
@@ -574,6 +577,179 @@ describe('出力のページの並びと向き', () => {
   });
 });
 
+// ───────── 別の PDF を後ろに足す(#275 結合)── 複数の文書から、残すページだけを 1 つの新しい文書へ
+
+const X1 = 'MARK-XRAY-901';
+const X2 = 'MARK-YANKEE-902';
+const X3 = 'MARK-ZULU-903';
+
+describe('🔴 複数の文書を 1 つの出力へ(通し番号: 元の PDF が 1〜N、足した PDF がその次から)', () => {
+  const codeOf = async (p: Promise<unknown>): Promise<string | undefined> => {
+    try {
+      await p;
+    } catch (e) {
+      return (e as { pkcCode?: string }).pkcCode;
+    }
+    return undefined;
+  };
+
+  it('ページ数は N+M / 並びは order のとおり(元と足した PDF を混ぜられる)/ 各ページの字がその位置に在る', async () => {
+    const main = await sample([A, B, C]);
+    const extra = await sample([X1, X2]);
+    const out = await core.build(PDFLib, main, { order: [1, 2, 3, 4, 5], rotate: {}, sources: [{ first: 4, count: 2 }] }, [extra]);
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(5);
+    const want = [A, B, C, X1, X2];
+    for (let i = 0; i < want.length; i += 1) expect(showsMark(await pageText(out, i), want[i] as string), `${String(i + 1)} ページ目`).toBe(true);
+    // 混ぜて並べ替える(足したページを先頭へ、元のページの間へ)
+    const mixed = await core.build(PDFLib, main, { order: [5, 1, 4, 3], rotate: {}, sources: [{ first: 4, count: 2 }] }, [extra]);
+    const got = await PDFLib.PDFDocument.load(mixed);
+    expect(got.getPageCount()).toBe(4);
+    const want2 = [X2, A, X1, C];
+    for (let i = 0; i < want2.length; i += 1) expect(showsMark(await pageText(mixed, i), want2[i] as string), `混ぜた ${String(i + 1)} ページ目`).toBe(true);
+    // ページの大きさも付いてくる(元: 300/310/320 ── 足した: 300/310)
+    expect(got.getPages().map((p) => p.getWidth())).toEqual([310, 300, 300, 320]);
+  });
+
+  it('向きが保たれる: 足したページを回すと足し算 / 足した PDF 元の向き(90)にも足し算 / 元のページの回しは元のまま', async () => {
+    const main = await sample([A, B], [0, 270]);
+    const extra = await sample([X1, X2], [90, 0]);
+    const out = await core.build(
+      PDFLib,
+      main,
+      { order: [1, 2, 3, 4], rotate: { 2: 90, 3: 90, 4: 180 }, sources: [{ first: 3, count: 2 }] },
+      [extra],
+    );
+    const doc = await PDFLib.PDFDocument.load(out);
+    // 元 [0, 270+90=0] / 足した [90+90=180, 0+180=180]
+    expect(doc.getPages().map((p) => p.getRotation().angle)).toEqual([0, 0, 180, 180]);
+  });
+
+  it('🔴 外したページの中身は、元の PDF からも足した PDF からも出力に入らない ── 対照群で「ある」が見える', async () => {
+    const main = await sample([A, B, C]);
+    const extra = await sample([X1, X2, X3]);
+    // 対照群: 全部残せば 6 つとも見える(読み取りが空振りしていない)
+    const all = await core.build(PDFLib, main, { order: [1, 2, 3, 4, 5, 6], rotate: {}, sources: [{ first: 4, count: 3 }] }, [extra]);
+    for (const m of [A, B, C, X1, X2, X3]) expect(hasMark(all, m), `対照群で ${m} が見えない`).toBe(true);
+    // 元の 2 ページ目と、足した PDF の 1・3 ページ目を外す
+    const out = await core.build(PDFLib, main, { order: [1, 3, 5], rotate: {}, sources: [{ first: 4, count: 3 }] }, [extra]);
+    expect((await PDFLib.PDFDocument.load(out)).getPageCount()).toBe(3);
+    for (const m of [A, C, X2]) expect(hasMark(out, m), `${m} が無い`).toBe(true);
+    for (const m of [B, X1, X3]) expect(hasMark(out, m), `外したページの字 ${m} が file に残っている`).toBe(false);
+  });
+
+  it('足した PDF のページを 1 枚も残さなければ、その PDF の中身は出力に入らない(sources にあっても)', async () => {
+    const main = await sample([A, B]);
+    const extra = await sample([X1, X2]);
+    const out = await core.build(PDFLib, main, { order: [2, 1], rotate: {}, sources: [{ first: 3, count: 2 }] }, [extra]);
+    expect(hasMark(out, X1) || hasMark(out, X2)).toBe(false);
+    expect(hasMark(out, A) && hasMark(out, B)).toBe(true);
+  });
+
+  it('🔴 オブジェクト番号が衝突する 2 つの文書でも混ざらない: 2 つとも同じ番号のページ・フォント・内容を持つ', async () => {
+    const main = await sample([A, B]);
+    const extra = await sample([X1, X2]);
+    const m = await PDFLib.PDFDocument.load(main);
+    const e = await PDFLib.PDFDocument.load(extra);
+    // 前提: 同じ番号の Page 辞書が両方に在り、その中身(字)は違う ── 衝突していることを test 自身が確かめる
+    const pageRefs = (d: PDFLib.PDFDocument): string[] => d.getPages().map((p) => String(p.ref));
+    expect(pageRefs(m), '前提: 2 つの文書のページ辞書の番号が重なっていない').toEqual(pageRefs(e));
+    const out = await core.build(PDFLib, main, { order: [3, 1, 4, 2], rotate: {}, sources: [{ first: 3, count: 2 }] }, [extra]);
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(4);
+    // 出力のページ辞書は 4 枚とも別の参照で、字は取り違えていない
+    expect(new Set(doc.getPages().map((p) => String(p.ref))).size).toBe(4);
+    const want = [X1, A, X2, B];
+    for (let i = 0; i < want.length; i += 1) {
+      const t = await pageText(out, i);
+      expect(showsMark(t, want[i] as string), `${String(i + 1)} ページ目の字`).toBe(true);
+      for (const other of [A, B, X1, X2].filter((x) => x !== want[i])) expect(showsMark(t, other), `${String(i + 1)} ページ目に ${other} が混ざった`).toBe(false);
+    }
+  });
+
+  it('足した PDF のリンクが、足した PDF の外したページを指していても、そのページは出力に残らない(元の PDF と同じ道)', async () => {
+    const main = await sample(['MAIN-ONE-001', 'MAIN-TWO-002']);
+    const extra = await linked(); // 1 ページ目が 2・3 ページ目へのリンクを持つ(字は A・B・C)
+    // 足した PDF の 3 ページ目(C)を外す
+    const out = await core.build(PDFLib, main, { order: [1, 3, 4, 2], rotate: {}, sources: [{ first: 3, count: 3 }] }, [extra]);
+    expect((await PDFLib.PDFDocument.load(out)).getPageCount()).toBe(4);
+    expect(hasMark(out, A)).toBe(true);
+    expect(hasMark(out, B)).toBe(true);
+    expect(hasMark(out, C), '足した PDF の外したページの字が残っている').toBe(false);
+    // 対照群: 3 ページとも残せば C が見える
+    const kept = await core.build(PDFLib, main, { order: [1, 3, 4, 5], rotate: {}, sources: [{ first: 3, count: 3 }] }, [extra]);
+    expect(hasMark(kept, C)).toBe(true);
+  });
+
+  it('🔴 最後の門は足した PDF にも掛かる: 足した PDF の独自の項目が外したページへ繋がっていたら leaked で断る', async () => {
+    const main = await sample([A]);
+    const extra = await linked((p1, p3) => p1.node.set(PDFLib.PDFName.of('Foo'), p3.ref));
+    const job = { order: [1, 2, 3], rotate: {}, sources: [{ first: 2, count: 3 }] }; // 足した PDF の 1・2 ページ目だけ残す(3 を外す)
+    expect(await codeOf(core.build(PDFLib, main, job, [extra]))).toBe('leaked');
+  });
+
+  it('不正な依頼は bad-job: 足した範囲が元の次から始まらない / 重なる / 空 / extras の数が違う / ページ数が違う / 範囲の外 / 足したページへのハイライト', async () => {
+    const main = await sample([A, B]);
+    const extra = await sample([X1, X2]);
+    const ok = { order: [1, 3], rotate: {}, sources: [{ first: 3, count: 2 }] };
+    expect((await PDFLib.PDFDocument.load(await core.build(PDFLib, main, ok, [extra]))).getPageCount()).toBe(2);
+    const cases: Array<[string, unknown, Uint8Array[]]> = [
+      ['範囲が元の次から始まらない(間が空く)', { ...ok, order: [1, 4], sources: [{ first: 4, count: 2 }] }, [extra]],
+      ['範囲が元のページに重なる', { ...ok, sources: [{ first: 2, count: 2 }] }, [extra]],
+      ['範囲が重なる', { ...ok, sources: [{ first: 3, count: 2 }, { first: 4, count: 1 }] }, [extra, extra]],
+      ['count が 0', { ...ok, sources: [{ first: 3, count: 0 }] }, [extra]],
+      ['extras が足りない', ok, []],
+      ['extras が多い', ok, [extra, extra]],
+      ['実際のページ数と count が違う', { ...ok, sources: [{ first: 3, count: 3 }] }, [extra]],
+      ['order が範囲の外', { ...ok, order: [1, 5] }, [extra]],
+      ['足したページへのハイライト', { ...ok, highlights: [{ page: 3, rgb: [1, 1, 0], quads: [[0, 10, 10, 10, 0, 0, 10, 0]] }] }, [extra]],
+      ['足したページのハイライトを外す', { ...ok, removals: [{ page: 3, id: '14R' }] }, [extra]],
+    ];
+    for (const [why, job, extras] of cases) expect(await codeOf(core.build(PDFLib, main, job, extras)), why).toBe('bad-job');
+  });
+
+  it('足した PDF が暗号化 / 読めないときは種類つきで断る(元の PDF と同じ)', async () => {
+    const main = await sample([A]);
+    const enc = await PDFLib.PDFDocument.create();
+    enc.addPage();
+    enc.context.trailerInfo.Encrypt = enc.context.register(enc.context.obj({ Filter: 'Standard' }));
+    const job = { order: [1, 2], rotate: {}, sources: [{ first: 2, count: 1 }] };
+    expect(await codeOf(core.build(PDFLib, main, job, [await enc.save()]))).toBe('encrypted');
+    expect(await codeOf(core.build(PDFLib, main, job, [new TextEncoder().encode('x')]))).toBe('unreadable');
+  });
+
+  it('checkJob: sources が無い依頼は今までどおり / 足したページは order に入れられる', () => {
+    expect(core.checkJob({ order: [1, 2], rotate: {} }, 2).sources).toEqual([]);
+    expect(core.checkJob({ order: [3, 1], rotate: { 3: 90 }, sources: [{ first: 3, count: 1 }] }, 2).sources).toEqual([{ first: 3, count: 1 }]);
+    expect(() => core.checkJob({ order: [3], rotate: {} }, 2)).toThrow();
+  });
+
+  it('worker(edit-worker.js)── extras を受けて、足した PDF を含む出力を返す', async () => {
+    const w = bootWorker();
+    const main = await sample([A, B]);
+    const extra = await sample([X1, X2]);
+    const cut = (u: Uint8Array): ArrayBuffer => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+    const r = await w.send({
+      id: 9,
+      op: 'build',
+      bytes: cut(main),
+      extras: [cut(extra)],
+      job: { order: [1, 4], rotate: { 4: 90 }, sources: [{ first: 3, count: 2 }] },
+    });
+    expect(r.ok).toBe(true);
+    const out = new Uint8Array(r.bytes as ArrayBuffer);
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(2);
+    expect(doc.getPages().map((p) => p.getRotation().angle)).toEqual([0, 90]);
+    expect(hasMark(out, X2) && hasMark(out, A)).toBe(true);
+    expect(hasMark(out, B) || hasMark(out, X1)).toBe(false);
+    // extras を付けずに sources を言う依頼は断る(bad-job)
+    expect(
+      await w.send({ id: 10, op: 'build', bytes: cut(main), job: { order: [1, 3], rotate: {}, sources: [{ first: 3, count: 2 }] } }),
+    ).toMatchObject({ ok: false, code: 'bad-job' });
+  });
+});
+
 describe('断る ── 種類つきで投げる(窓が user の言葉にする)', () => {
   const codeOf = async (p: Promise<unknown>): Promise<string | undefined> => {
     try {
@@ -656,13 +832,14 @@ function bootWorker(): { send(msg: object): Promise<WorkerReply>; loaded: string
       const before = replies.length;
       // 🔴 依頼は **vm の中で作る**。本物の worker は構造化複製で自分の realm の Array / Object を受け取る ──
       //    外の realm の配列をそのまま渡すと、pdf-lib の `instanceof Array` の検めが落ちる(test の人工物)
-      const m = msg as { id: number; op: string; bytes: ArrayBuffer; job?: unknown };
+      const m = msg as { id: number; op: string; bytes: ArrayBuffer; job?: unknown; extras?: ArrayBuffer[] };
+      sandbox['__extras'] = m.extras;
       sandbox['__id'] = m.id;
       sandbox['__op'] = m.op;
       sandbox['__bytes'] = m.bytes;
       sandbox['__job'] = JSON.stringify(m.job ?? null);
       await (vm.runInContext(
-        'onmessage({ data: { id: __id, op: __op, bytes: __bytes, job: JSON.parse(__job) } })',
+        'onmessage({ data: { id: __id, op: __op, bytes: __bytes, job: JSON.parse(__job), extras: __extras } })',
         ctx,
       ) as Promise<void>);
       expect(replies.length, '返事が 1 つも出ていない').toBe(before + 1);

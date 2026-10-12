@@ -74,6 +74,49 @@
     return { order: order, rotate: rotate };
   }
 
+  // ───────── 別の PDF を後ろに足す(#275 結合)
+  //
+  // 足した PDF のページには**通し番号**を付ける: 元の PDF が 1〜total、足した 1 つ目がその次から、2 つ目がさらにその次から。
+  // 並べ替え・回す・外す・選ぶは、通し番号の `page` でそのまま動く(どの PDF のページかは `edit-core.js` の `sources` が引く)。
+
+  /** 足したページ(通し番号 `first` から `count` 枚、回していない)を並びの最後に付けた新しい並び。 */
+  function appendPages(items, first, count) {
+    var out = items.slice();
+    for (var i = 0; i < count; i += 1) out.push({ page: first + i, rot: 0 });
+    return out;
+  }
+
+  /**
+   * 依頼に付ける `sources` と、実際に送る足した PDF。足した PDF の一覧 `added`(`{ first, count }` の並び)のうち、
+   * `list` にページが 1 枚でも残っている物だけ ── 使わない PDF の bytes は worker へ渡さない。
+   * @returns {{ sources: {first:number,count:number}[], used: number[] }}  `used` = `added` の何番目か
+   */
+  function sourcesFor(list, added) {
+    var sources = [];
+    var used = [];
+    added.forEach(function (a, k) {
+      var hit = list.some(function (it) {
+        return it.page >= a.first && it.page < a.first + a.count;
+      });
+      if (!hit) return;
+      sources.push({ first: a.first, count: a.count });
+      used.push(k);
+    });
+    return { sources: sources, used: used };
+  }
+
+  /** 足した PDF の断り(窓の下に出す一行)。`code` は `edit-core.js` の断りの種類。 */
+  function appendRefusal(code) {
+    if (code === 'encrypted') return 'パスワードで守られた PDF は足せません。何も変えていません';
+    if (code === 'unreadable') return 'PDF として読めないため足せません。何も変えていません';
+    return 'PDF を足せませんでした。もう一度試してください。何も変えていません';
+  }
+
+  /** 足せた知らせ。 */
+  function appendedNote(name, count) {
+    return '「' + String(name) + '」の ' + String(count) + ' ページを後ろに足しました。「別の PDF として保存」で新しい添付になります';
+  }
+
   /** 保存できるか(0 ページの PDF は作らない)。 */
   function canSave(items) {
     return items.length >= 1;
@@ -203,6 +246,10 @@
     moveTo: moveTo,
     isChanged: isChanged,
     toJob: toJob,
+    appendPages: appendPages,
+    sourcesFor: sourcesFor,
+    appendRefusal: appendRefusal,
+    appendedNote: appendedNote,
     canSave: canSave,
     outputName: outputName,
     sameArrangement: sameArrangement,
