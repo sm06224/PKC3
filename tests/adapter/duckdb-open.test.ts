@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 /** 打たれた SQL と、取りに行った URL を並べる場所。 */
 const sql: string[] = [];
 const registered: { name: string; bytes: number }[] = [];
+const copied: string[] = [];
 
 vi.mock('@duckdb/duckdb-wasm', () => {
   class FakeDb {
@@ -32,6 +33,10 @@ vi.mock('@duckdb/duckdb-wasm', () => {
     }));
     registerFileBuffer = vi.fn(async (name: string, bytes: Uint8Array) => {
       registered.push({ name, bytes: bytes.byteLength });
+    });
+    copyFileToBuffer = vi.fn(async (name: string) => {
+      copied.push(name);
+      return new Uint8Array([7, 7]);
     });
     dropFile = vi.fn(async () => undefined);
     terminate = vi.fn(async () => undefined);
@@ -58,6 +63,7 @@ describe('🔴 開いた直後に拡張を読み込む(#682 段④b)', () => {
   afterEach(() => {
     sql.length = 0;
     registered.length = 0;
+    copied.length = 0;
     vi.unstubAllGlobals();
   });
 
@@ -69,6 +75,8 @@ describe('🔴 開いた直後に拡張を読み込む(#682 段④b)', () => {
     expect(sql).toEqual([
       'SET autoinstall_known_extensions=false',
       'SET autoload_known_extensions=false',
+      // 🔴 書き出し用に許す path は、塞ぐ前(= 器を起こす所)で掛ける(#918 段⑥。塞いだ後は変えられない ── 実測)
+      "SET allowed_paths=['pkc-export.parquet','tmp_pkc-export.parquet']",
       "SET custom_extension_repository='https://x.test/app/duckdb/ext'",
       'INSTALL parquet',
       'LOAD parquet',
@@ -124,7 +132,20 @@ describe('🔴 開いた直後に拡張を読み込む(#682 段④b)', () => {
     expect(
       sql.filter((q) => q.startsWith('INSTALL') || q.startsWith('LOAD ') || q.includes('repository')),
     ).toEqual([]);
-    // ⚠ 空振り防止 ── 門の 2 行は打たれている(この test が何も通っていないわけではない)
-    expect(sql).toHaveLength(2);
+    // ⚠ 空振り防止 ── 門の 3 行(自動取得 2 つ + 書き出し用の許可。#918 段⑥)は打たれている
+    expect(sql).toHaveLength(3);
+  });
+
+  /**
+   * 🔴 **実体の取っ手が、書かれた file を取り出せる**(#918 段⑥)。
+   * ⚠ `DuckDbHandle.readFile` は省ける形なので、ここを書き忘れても tsc は黙る ──
+   *   そのとき画面は「この版では書き出せません」と言い続ける(上流に在るのに使っていない)。
+   */
+  it('🔴 readFile は上流の copyFileToBuffer へ繋がっている', async () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    const handle = await open();
+    expect(handle.readFile, '取り出す口が無い').toBeTypeOf('function');
+    await expect(handle.readFile?.('pkc-export.parquet')).resolves.toEqual(new Uint8Array([7, 7]));
+    expect(copied).toEqual(['pkc-export.parquet']);
   });
 });

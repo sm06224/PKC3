@@ -19,6 +19,7 @@
  * `tests/duckdb-gate.test.ts` が `src` の全数走査で 0 件を留めている。
  */
 import type { DuckDbHandle } from './duckdb-lease';
+import { DUCKDB_ALLOW_EXPORT_SQL } from '@features/query/duckdb-export';
 
 export interface OpenDuckDbInput {
   /** wasm の在り処(同一オリジンの相対)。 */
@@ -127,6 +128,13 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
   await conn.query('SET autoinstall_known_extensions=false');
   await conn.query('SET autoload_known_extensions=false');
   /**
+   * 🔴 **塞ぐ前に、書いてよい path を 2 つに絞る**(#918 段⑥。Parquet の書き出し)。
+   * ⚠ 塞いだ後は変えられない(実測)── だから**ここ**(器を起こす所)で掛ける。許すのは書き出し用の
+   *   固定の 2 つだけで、他の path は塞ぎのまま断られる(`duckdb-export.ts` の ③)。
+   * ⚠ 拡張を読み込む前に掛けてよい ── この設定は外を塞ぐまで何も変えない。
+   */
+  await conn.query(DUCKDB_ALLOW_EXPORT_SQL);
+  /**
    * 🔴 **門を掛けた後に読み込む**(#682 段④b)。⚠ 順番が要る ──
    * 先に読み込むと、その間だけ自動取得が生きている(外へ出る窓が開く)。
    */
@@ -143,6 +151,13 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
     drop: async (name: string) => {
       // ⚠ 無い名前は上流が投げる ── 外すだけなので飲む(`put` の先頭と同じ作法)
       await db.dropFile(name).catch(() => undefined);
+    },
+    readFile: async (name: string) => {
+      /**
+       * 🔴 **`COPY … TO` が器の中へ書いた file の中身**(#918 段⑥)。⚠ 呼び側(`DuckDbLease.runFile`)が
+       *   直後に必ず `drop` する(器の中の file と取り出した bytes で同じ中身を持ち続けない)。
+       */
+      return await db.copyFileToBuffer(name);
     },
     query: async (sql: string) => {
       const table = await conn.query(sql);

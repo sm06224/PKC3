@@ -36,6 +36,13 @@ export interface DuckDbHandle {
    */
   drop(name: string): Promise<void>;
   query(sql: string): Promise<DuckDbRaw>;
+  /**
+   * 🔴 **器の中で書かれた file の中身を取り出す**(#918 段⑥。`COPY … TO` が書いた Parquet)。
+   * ⚠ 取り出した後、`runFile` が**すぐ `drop` する**(書かれた file と取り出した bytes で 2 回持たない)。
+   * ⚠ **省ける**(古い取っ手には無い)── 無いときは `runFile` が理由を言って断る。
+   *   🔑 実体を作る `openDuckDb` が持っていることは `tests/adapter/duckdb-open.test.ts` が見る。
+   */
+  readFile?(name: string): Promise<Uint8Array>;
   /** 畳む。⚠ 例外を投げても貸し出しは「畳んだ」ものとして進む(下の理由)。 */
   terminate(): Promise<void>;
 }
@@ -157,6 +164,52 @@ export class DuckDbLease {
    * (`opening` を共有するので、`open` は 1 度しか走らない)。
    */
   async run(job: DuckDbJob): Promise<DuckDbRaw> {
+    return this.exec(job, async (h) => {
+      const answer =
+        job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
+      /**
+       * ⚠ **通ってから立てる**(落ちた回は何も作っていない)。
+       * ⚠ **取っ手が同じときだけ** ── 時間の門で畳まれた器は `forget` が `held` を下ろしている。
+       */
+      if (job.hold === true && this.handle === h) this.held = true;
+      return answer;
+    });
+  }
+
+  /**
+   * 🔴 **打って、器の中で書かれた file を取り出して、すぐ捨てる**(#918 段⑥。Parquet の書き出し)。
+   *
+   * ⚠ 器を起こす / 相手を差し込む / 飛んでいる間は畳まない、は `run` と**同じ 1 本**(`exec`)を通る ──
+   *   別の道を作らない(§7)。
+   * 🔴 **`file` は成功しても失敗しても必ず外す**(`finally`)── 不可侵指示 2026-07-27「生成物は
+   *   ライフサイクル終端で即破棄」。書いた file は器の中(worker のメモリ)にあり、外さないと
+   *   取り出した bytes と**同じ中身を 2 回持つ**。
+   * 🔑 時間の門(`maxMs`)は **statements 全体**に掛ける(足した文が時計の外に出ない)。
+   * ⚠ `hold` は立てない(書き出しは器の中に何も残さない読み取り)。
+   */
+  async runFile(
+    job: Omit<DuckDbJob, 'sql' | 'hold'>,
+    spec: { readonly statements: readonly string[]; readonly file: string },
+  ): Promise<Uint8Array> {
+    return this.exec({ ...job, sql: '' }, async (h) => {
+      const read = h.readFile?.bind(h);
+      if (read === undefined) {
+        throw new Error('このバージョンでは DuckDB の結果をファイルに書き出せません。再読み込みしてください');
+      }
+      const work = (async (): Promise<Uint8Array> => {
+        try {
+          for (const statement of spec.statements) await h.query(statement);
+          return await read(spec.file);
+        } finally {
+          // ⚠ 無い名前を渡しても落ちない作り(`DuckDbHandle.drop`)── 書く前に落ちた回でも安全
+          await h.drop(spec.file);
+        }
+      })();
+      return job.maxMs === undefined ? await work : await this.race(h, work, job.maxMs, DUCKDB_TOO_LONG);
+    });
+  }
+
+  private async exec<T>(job: DuckDbJob, body: (h: DuckDbHandle) => Promise<T>): Promise<T> {
     this.cancelIdle();
     this.flying += 1;
     try {
@@ -197,14 +250,7 @@ export class DuckDbLease {
         // ⚠ **入れ終わってから控える** ── 先に控えると、落ちた回に「入っている」と嘘をつく
         this.loadedKey = job.data.key;
       }
-      const answer =
-        job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
-      /**
-       * ⚠ **通ってから立てる**(落ちた回は何も作っていない)。
-       * ⚠ **取っ手が同じときだけ** ── 時間の門で畳まれた器は `forget` が `held` を下ろしている。
-       */
-      if (job.hold === true && this.handle === h) this.held = true;
-      return answer;
+      return await body(h);
     } finally {
       this.flying -= 1;
       /**

@@ -672,13 +672,14 @@ import { assetPermalink, entryPermalink, sectionPermalink } from '@adapter/platf
 import { isLogRowHeading } from '@features/flavor/textlog-flavor';
 import { PC_DIRECTORY_NOTE } from '@features/local-folder/folder-entries';
 import {
-  asSqlExportKind,
-  SQL_EXPORT_KINDS,
+  asSqlExportChoice,
+  sqlExportChoices,
   sqlExportFileName,
   sqlExportFileText,
   sqlExportLabel,
   sqlExportMime,
 } from '@features/query/sql-export';
+import { sqlEngineOf } from '@features/query/sql-engine';
 import {
   alertInApp,
   confirmInApp,
@@ -11931,7 +11932,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     openContextMenu(
       root,
       { x: rect.left, y: rect.bottom },
-      SQL_EXPORT_KINDS.map((kind) => ({
+      // 🔴 Parquet は DuckDB で引いた読む SQL の答えのときだけ並ぶ(`sqlExportChoices` の 1 本 ── #918 段⑥)
+      sqlExportChoices(sqlEngineOf(p), p.ranSql).map((kind) => ({
         action: 'sql-export-pick',
         label: sqlExportLabel(kind),
         attrs: { 'data-pkc-sql-export': kind },
@@ -11940,12 +11942,21 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   'sql-export-pick': (dispatcher, target) => {
-    const kind = asSqlExportKind(target.getAttribute('data-pkc-sql-export'));
+    const kind = asSqlExportChoice(target.getAttribute('data-pkc-sql-export'));
     // ⚠ 読めない印は黙って捨てる(器を作り直す前の押しが飛んでくる)
     if (kind === null) return;
     const p = dispatcher.getState().sqlPage;
     if (p.ranSql === '' || p.columns.length === 0) return;
     const name = sqlExportFileName(new Date(), p.guest?.name ?? null, kind);
+    /**
+     * 🔴 **Parquet は字ではなく DuckDB の器が書く**(#918 段⑥)── ここで file は作らず、依頼を出す。
+     * ⚠ 終わりを言う(`SQL_SAVED` / `SQL_SAVE_FAILED`)のは effect 層 ── ここで言うと、まだ書けていないのに
+     *   「書き出しました」と出る。
+     */
+    if (kind === 'parquet') {
+      dispatcher.dispatch({ type: 'SQL_EXPORT_PARQUET', fileName: name });
+      return;
+    }
     /**
      * ⚠ **字は heap に長く置かない**(不可侵指示 2026-07-27)── 作ってすぐ `Blob` へ移し、
      *   `downloadBlob` が寿命の終端で `ObjectURL` を revoke する。

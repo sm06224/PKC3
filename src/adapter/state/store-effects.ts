@@ -609,6 +609,27 @@ export function connectStoreEffects(
       copy?: DuckDbCopyReport;
     }>;
     /**
+     * 🔴 **DuckDB の答えを Parquet の bytes にする口**(#918 段⑥)。⚠ `runDuckDbSql` と**同じ器**を使う。
+     * ⚠ 渡されなければ**機能が減るだけ** ── 押すと「この版では書き出せません」と理由を言う
+     *   (黙って別の形で書かない)。
+     * 🔑 返した bytes は**呼び側(この file)が Blob へ移してすぐ手放す**。
+     */
+    exportDuckDbParquet?: (input: {
+      sql: string;
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
+      /** 🔴 器が表を読み込み始めた合図(`runDuckDbSql` と同じ。画面の「時間がかかります」)。 */
+      onLoad: () => void;
+    }) => Promise<Uint8Array>;
+    /**
+     * 🔴 **できた file を user の手元へ落とす口**(#918 段⑥)。⚠ 渡されなければ `exportDuckDbParquet` も使えない
+     *   (落とす先が無い ── 押した時点で理由を言う)。
+     * 🔑 `ObjectURL` の寿命は実装が持つ(`download.ts` が終端で revoke ── 不可侵指示 2026-07-27)。
+     */
+    downloadFile?: (fileName: string, blob: Blob) => void;
+    /**
      * 🔴 **DuckDB の器の中の構造を採る口**(#918)。⚠ `runDuckDbSql` と**同じ器**を使う(同じ相手の組なら
      *   差し込み直さない)。渡されなければ**機能が減るだけ** ── つながり図・構造ノートが
      *   「この版では採れません」と断る(黙って空の図を出さない)。
@@ -1281,6 +1302,45 @@ export function connectStoreEffects(
             error: `構造を取得できませんでした(${raw})`,
           });
         });
+        break;
+      }
+      /**
+       * 🔴 **答えを Parquet の file にして落とす**(#918 段⑥)。
+       * ⚠ 終わりは必ず `SQL_SAVED` か `SQL_SAVE_FAILED`(どちらも `running` を降ろす)── 降ろし忘れると以後押せない。
+       */
+      case 'REQUEST_SQL_EXPORT_PARQUET': {
+        const exporter = opts.exportDuckDbParquet;
+        const download = opts.downloadFile;
+        const inputs = duckInputsOf(ev);
+        if (exporter === undefined || download === undefined || inputs === null) {
+          dispatcher.dispatch({
+            type: 'SQL_SAVE_FAILED',
+            error: 'このタブの PKC3 が古いままのため、Parquet に書き出せません。再読み込みしてください',
+          });
+          break;
+        }
+        const { fileName } = ev;
+        void exporter({
+          sql: ev.sql,
+          sources: inputs,
+          onLoad: () => {
+            if (disposed) return;
+            // ⚠ この回は `runToken` を進めない ── 合図の札は**いまの `runToken`**を読む(構造の書き出しと同じ)
+            dispatcher.dispatch({ type: 'SQL_DUCK_LOADING', token: dispatcher.getState().sqlPage.runToken });
+          },
+        }).then(
+          (bytes) => {
+            if (disposed) return;
+            // ⚠ bytes は Blob へ移したら手放す(この関数の外へ持ち出さない)
+            download(fileName, new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/vnd.apache.parquet' }));
+            dispatcher.dispatch({ type: 'SQL_SAVED', title: fileName, kind: 'file' });
+          },
+          (e: unknown) => {
+            if (disposed) return;
+            const raw = e instanceof Error ? e.message : String(e);
+            dispatcher.dispatch({ type: 'SQL_SAVE_FAILED', error: `Parquet に書き出せませんでした(${raw})` });
+          },
+        );
         break;
       }
       case 'REQUEST_SQL_RUN': {

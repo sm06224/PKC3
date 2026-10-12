@@ -67,6 +67,7 @@ import {
   type SqliteExportedTable,
 } from '@features/query/sqlite-ndjson';
 import { duckDbWriteKind } from '@features/query/duckdb-write';
+import { DUCKDB_EXPORT_FILE, parquetCopyOf } from '@features/query/duckdb-export';
 import {
   DUCKDB_SCHEMA_COLUMNS_SQL,
   DUCKDB_SCHEMA_FK_SQL,
@@ -510,6 +511,44 @@ export class DuckDbRunner {
     return this.serial(() => {
       this.dropStaleRefused();
       return this.runNow(input);
+    });
+  }
+
+  /**
+   * 🔴 **いまの答えを Parquet にして、bytes を返す**(#918 段⑥)。
+   *
+   * ⚠ **user の `COPY` は通さない**(`duckdb-guard.ts` はそのまま)── 書き先を決めるのは**こちら**で、
+   *   `parquetCopyOf` が包んだ 1 文だけを、**書き出し用に許した path**(`DUCKDB_ALLOW_EXPORT_SQL`)へ打つ。
+   * 🔑 器は `run` と**同じ鍵**(同じ相手なら差し込み直さない)。⚠ 器が畳まれていたら**最初から写し直す**
+   *   (問い合わせをもう一度走らせるので、`ranSql` が読む表が器に要る)。
+   * 🔴 書いた file は成功しても失敗しても外す(`DuckDbLease.runFile`)。返した bytes は呼び側が Blob へ移して
+   *   手放す(この層は握らない)。
+   * ⚠ 断る文(書き込みの SQL / `EXPLAIN` …)は**ここでも検め直す** ── 受け口の手前で通っていても、
+   *   書き出しの口が自分で守る(画面の判定と同じ 1 本 = `parquetCopyOf`)。
+   */
+  exportParquet(input: {
+    readonly sql: string;
+    readonly sources: readonly DuckDbInputSource[];
+    readonly onLoad?: () => void;
+  }): Promise<Uint8Array> {
+    return this.serial(async () => {
+      this.dropStaleRefused();
+      if (input.sources.length === 0) throw new Error('調べる対象がありません');
+      const copy = parquetCopyOf(input.sql);
+      if (!copy.ok) throw new Error(copy.why);
+      const multi = input.sources.length > 1;
+      return await this.lease
+        .runFile(
+          {
+            maxMs: DUCKDB_MAX_MS,
+            loadMaxMs: DUCKDB_LOAD_MAX_MS,
+            data: this.dataOf(input.sources, input.onLoad),
+          },
+          { statements: [copy.statement], file: DUCKDB_EXPORT_FILE },
+        )
+        .catch((e: unknown) => {
+          throw this.withRefused(e, multi);
+        });
     });
   }
 
