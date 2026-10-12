@@ -20,7 +20,12 @@ import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { writePortableBundle } from '../../src/features/export/portable-bundle';
 import { IMAGE_PART_BYTES } from '../../src/features/portable/bundle';
 import { detectPkc2Format } from '../../src/features/import/detect-format';
-import { readPortableHtml, sniffPortableHtml } from '../../src/features/import/portable-html';
+import {
+  readPortableHtml,
+  readPortableHtmlBlob,
+  WINDOW_CHARS,
+  sniffPortableHtml,
+} from '../../src/features/import/portable-html';
 
 type Op = StorageRequest['op'];
 
@@ -668,6 +673,157 @@ describe('大きい要素の base64 を小分けに復号する', () => {
       const empty = readPortableHtml(await bake(rand(10), new Uint8Array(0))).assets.get('ast-big');
       expect(empty, '0 バイトの添付が消えた').toBeDefined();
       expect(empty!.size).toBe(0);
+    });
+  });
+
+  /**
+   * 🔴 **窓で読む読み方(`readPortableHtmlBlob`)は、全文を字にして読む読み方と同じ結果を返す**(#1416 の残件)。
+   *
+   * 取り込みの道は `file.text()`(全文を UTF-16 に復号 = 実測でファイルの約 4.5 倍の常駐)をやめて窓で読む。
+   * 両者は `scanStep` / `decodeAssetRun` / `decodeImage` を共有するが、**窓の継ぎ目・位置の数え方**だけが別なので、
+   * 「同じファイルに同じ答え(取り出す物も、断り文も)」を見る。
+   */
+  describe('🔴 窓で読む読み方が、全文で読む読み方と同じ答えを返す', () => {
+    const WINDOW = WINDOW_CHARS;
+
+    /** 日本語を含む雛形(UTF-8 の多バイト字が差し込み領域の前に在っても、位置がずれない)。 */
+    const JP_TEMPLATE = TEMPLATE.replace(
+      '<div data-pkc-slot="root"></div>',
+      '<div data-pkc-slot="root">ノートを読み込んでいます…</div><script>var m="日本語の文字列 ✓";</script>',
+    );
+
+    async function bakeMany(
+      template: string,
+      image: Uint8Array,
+      assets: ReadonlyArray<{ key: string; bytes: Uint8Array }>,
+    ): Promise<string> {
+      const out = await writePortableBundle({
+        template,
+        bundle: { id: 'pkcb-bigdecode01', exportedAt: 1 },
+        image,
+        assets: (async function* () {
+          for (const a of assets)
+            yield { key: a.key, mime: 'application/octet-stream', blob: new Blob([a.bytes as BlobPart]) };
+        })(),
+      });
+      return out.blob.text();
+    }
+
+    type Outcome =
+      | { ok: true; image: number[]; assets: Array<[string, number[]]> }
+      | { ok: false; message: string };
+
+    async function outcome(read: () => Promise<ReturnType<typeof readPortableHtml>>): Promise<Outcome> {
+      try {
+        const p = await read();
+        const assets: Array<[string, number[]]> = [];
+        for (const [k, b] of p.assets) assets.push([k, [...new Uint8Array(await b.arrayBuffer())]]);
+        return { ok: true, image: [...p.image], assets };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    }
+
+    /** 同じ html に、2 つの読み方が同じ答えを返す。返った答えを返す(呼び側が「期待した形か」を見る)。 */
+    async function bothAgree(html: string): Promise<Outcome> {
+      const whole = await outcome(async () => readPortableHtml(html));
+      const windowed = await outcome(() => readPortableHtmlBlob(new Blob([html])));
+      expect(windowed, '窓で読む読み方と全文で読む読み方の答えが違う').toEqual(whole);
+      return whole;
+    }
+
+    it('🔴 窓(8 MiB)を何度もまたぐ大きさ(添付 5 件 + 画像)が、全文と同じ bytes で戻る', async () => {
+      const assets = [0, 1, 2, 3, 4].map((i) => ({ key: `ast-${i}`, bytes: rand(IMAGE_PART_BYTES + 100 + i) }));
+      const html = await bakeMany(JP_TEMPLATE, rand(IMAGE_PART_BYTES + 7), assets);
+      // 前提: 差し込み領域が窓より大きい(= 窓の継ぎ目を本当にまたぐ)
+      expect(html.length, '前提: 窓を 2 つ以上またぐ大きさ').toBeGreaterThan(WINDOW * 2);
+      const got = await readPortableHtmlBlob(new Blob([html]));
+      expect([...got.assets.keys()].sort()).toEqual(assets.map((a) => a.key));
+      for (const a of assets) {
+        const back = new Uint8Array(await got.assets.get(a.key)!.arrayBuffer());
+        expect(same(back, a.bytes), `${a.key} の中身が違う`).toBe(true);
+      }
+      const o = await bothAgree(html);
+      expect(o.ok, '前提: 読めている').toBe(true);
+    }, 60_000);
+
+    it('🔴 窓より大きい 1 要素(割る前の版の 1 本物)も、窓を広げて読める', async () => {
+      const asset = rand(Math.floor(WINDOW * 0.8)); // base64 で窓の約 1.07 倍
+      const html = await bake(rand(10), asset);
+      const els = [...html.matchAll(/(<script [^>]*data-pkc-asset="ast-big"[^>]*>)([^<]*)(<\/script>)/g)];
+      const legacyOpen = els[0]![1]!.replace(/ data-pkc-asset-part="[^"]*"/, '');
+      let legacy = html;
+      els.forEach((e, i) => {
+        legacy = legacy.replace(e[0], i === 0 ? legacyOpen + els.map((x) => x[2]).join('') + e[3] : '');
+      });
+      expect(els.length, '前提: 割ってある').toBeGreaterThan(1);
+      expect(legacy.match(/data-pkc-asset="ast-big"/g), '前提: 1 要素になっている').toHaveLength(1);
+      expect(legacy.length, '前提: 1 要素が窓より大きい').toBeGreaterThan(WINDOW);
+      const back = new Uint8Array(
+        await (await readPortableHtmlBlob(new Blob([legacy]))).assets.get('ast-big')!.arrayBuffer(),
+      );
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
+    it('🔴 壊れたファイルは、全文で読む読み方と同じ断り文で断る(欠け・順の乱れ・途中の短い要素・base64 でない・同じ key の二重)', async () => {
+      const html = await bake(rand(IMAGE_PART_BYTES * 2 + 11), rand(IMAGE_PART_BYTES * 2 + 13));
+      const img = (i: number): RegExp => new RegExp(`<script [^>]*data-pkc-db-image="${i}/3">[^<]*</script>`);
+      const ast = [...html.matchAll(/(<script [^>]*data-pkc-asset="ast-big"[^>]*>)([^<]*)(<\/script>)/g)];
+      const cases: Array<[string, string, RegExp]> = [
+        ['画像の中が欠け', html.replace(img(1), ''), /番号が合いません/],
+        ['添付の中が欠け', html.replace(ast[1]![0], ''), /添付「ast-big」.*番号が合いません/],
+        [
+          '画像の途中が短い',
+          html.replace(
+            html.match(/(<script [^>]*data-pkc-db-image="1\/3">)([^<]*)(<\/script>)/)![0],
+            (m) => m.replace(/(.{4})<\/script>$/, '</script>'),
+          ),
+          /2 個目が途中で欠けています/,
+        ],
+        [
+          '添付が base64 でない',
+          html.replace(ast[1]![0], ast[1]![1] + ast[1]![2]!.slice(0, 8) + '!!!!' + ast[1]![2]!.slice(8) + ast[1]![3]),
+          /添付「ast-big」の一部が読み取れません/,
+        ],
+        ['終わりの </body> が無い', html.replace(/<\/body>(?![\s\S]*<\/body>)/, ''), /最後まで書き込まれていません/],
+        ['印が無い', html.replace('data-pkc-bundle', 'data-x'), /PKC3 入り HTML ではありません/],
+      ];
+      for (const [name, broken, expected] of cases) {
+        expect(broken, `前提(${name}): 書き換わっている`).not.toBe(html);
+        const o = await bothAgree(broken);
+        expect(o.ok, `${name}: 読めてしまった`).toBe(false);
+        expect(o.ok ? '' : o.message, name).toMatch(expected);
+      }
+    });
+
+    it('🔴 最後の </body> が窓の継ぎ目にまたがっていても見つかる(後ろに窓 1 つぶんの余白が続くファイル)', async () => {
+      const asset = rand(1000);
+      const html = await bake(rand(10), asset);
+      const at = html.lastIndexOf('</body>');
+      // </body> が、末尾の窓の手前 3 字から始まる位置に来る余白(窓の継ぎ目を 7 字のうち 3 字がまたぐ)
+      const tail = html.length - at - '</body>'.length;
+      const padded = html.slice(0, at + '</body>'.length) + ' '.repeat(WINDOW - 4 - tail) + html.slice(at + '</body>'.length);
+      expect(padded.length - padded.lastIndexOf('</body>'), '前提: 継ぎ目をまたぐ位置にある').toBe(WINDOW + 3);
+      const back = new Uint8Array(
+        await (await readPortableHtmlBlob(new Blob([padded]))).assets.get('ast-big')!.arrayBuffer(),
+      );
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
+    it('同じ key が 2 度入っていたら、窓で読んでも文書の後ろのものが残る', async () => {
+      const first = rand(IMAGE_PART_BYTES + 3);
+      const second = rand(IMAGE_PART_BYTES + 9);
+      const a = await bake(rand(10), first);
+      const b = await bake(rand(10), second);
+      const grab = (h: string): string =>
+        [...h.matchAll(/(<script [^>]*data-pkc-asset="ast-big"[^>]*>)([^<]*)(<\/script>)/g)].map((m) => m[0]).join('');
+      const dup = a.replace(grab(a), grab(a) + grab(b));
+      const o = await bothAgree(dup);
+      expect(o.ok).toBe(true);
+      const back = new Uint8Array(
+        await (await readPortableHtmlBlob(new Blob([dup]))).assets.get('ast-big')!.arrayBuffer(),
+      );
+      expect(same(back, second), '後ろの添付が残っていない').toBe(true);
     });
   });
 });
