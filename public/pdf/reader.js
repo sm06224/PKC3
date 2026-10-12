@@ -87,6 +87,8 @@ let total = 0;
  * ⚠ 読む面(中央)・検索・ハイライトは元の PDF の `total` ページだけ ── 足したページは一覧にだけ在る(保存して初めて読める)。
  */
 let grand = 0;
+/** 「変更を元に戻す」で捨てた、足した PDF のページ数(案内の分母から引く ── 戻した後に「3 / 5 ページ」と出ないように)。 */
+let droppedPages = 0;
 /** 足した PDF(#275 結合): `{ first, count, name, blob, lease }`。`first` = 通し番号の先頭 / `lease` = 一覧の絵を描く pdf.js の貸し出し。 */
 const added = [];
 let blob = null;
@@ -191,6 +193,7 @@ async function openPdf() {
       first.cleanup();
     });
     grand = total;
+    droppedPages = 0;
     buildBoxes();
     buildThumbs();
     msgEl.hidden = true;
@@ -1102,7 +1105,7 @@ function updateEditUi() {
   unpickBtn.hidden = picked < 1;
   unpickBtn.disabled = saving;
   const notes = [];
-  if (arrangeDirty) notes.push(pageEdit.noteLine(items.length, grand));
+  if (arrangeDirty) notes.push(pageEdit.noteLine(items.length, grand - droppedPages));
   if (isHlDirty()) {
     const c = hlCounts();
     notes.push(hl.note(c.added, c.removed, !arrangeDirty));
@@ -1286,6 +1289,12 @@ unpickBtn.addEventListener('click', () => {
 resetBtn.addEventListener('click', () => {
   if (!ready || saving) return;
   items = baseline.slice();
+  // 保存前に足した PDF は捨てた扱い(基準に 1 枚も無い物だけ)── 一覧からは消え、案内の分母にも数えない
+  for (const a of added) {
+    if (a.dropped || baseline.some((it) => it.page >= a.first && it.page < a.first + a.count)) continue;
+    a.dropped = true;
+    droppedPages += a.count;
+  }
   marks = hlBase.marks.slice();
   removals = new Map(hlBase.removals);
   hideHlPop();

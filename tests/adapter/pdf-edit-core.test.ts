@@ -708,6 +708,24 @@ describe('🔴 複数の文書を 1 つの出力へ(通し番号: 元の PDF が
     for (const [why, job, extras] of cases) expect(await codeOf(core.build(PDFLib, main, job, extras)), why).toBe('bad-job');
   });
 
+  it('🔴 2 つ足して混ぜる: 中身を取り違えない / 並べ替え・外す・回すが PDF ごとに効く(ページ数が同じ 2 つ)', async () => {
+    const main = await sample([A]);
+    const one = await sample([X1, X2]); // 2〜3
+    const two = await sample([X3, C]); // 4〜5
+    const out = await core.build(
+      PDFLib,
+      main,
+      { order: [5, 1, 3, 4], rotate: { 4: 90 }, sources: [{ first: 2, count: 2 }, { first: 4, count: 2 }] },
+      [one, two],
+    );
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(4);
+    const want = [C, A, X2, X3];
+    for (let i = 0; i < want.length; i += 1) expect(showsMark(await pageText(out, i), want[i] as string), `${String(i + 1)} ページ目`).toBe(true);
+    expect(doc.getPages().map((p) => p.getRotation().angle)).toEqual([0, 0, 0, 90]);
+    expect(hasMark(out, X1), '外した 1 つ目の PDF の 1 ページ目が残っている').toBe(false);
+  });
+
   it('🔴 範囲の間が空いてもよい: 先に足した PDF を全部外した / 元に戻してから足し直した(送るのは残っている PDF だけ)', async () => {
     const main = await sample([A, B]);
     const extra = await sample([X1, X2]);
