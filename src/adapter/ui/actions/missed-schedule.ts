@@ -4,7 +4,7 @@
  * 手順は 4 つ(順番が効く):
  * 1. **前に開いていた時刻を読む**(このコレクション・この端末の分)── ⚠ 進める**前**に読む
  * 2. **いま開いていることを憶える**(以後も刻みで進める ── 閉じた時刻の近似)
- * 3. 前の時刻が無い(この端末で初めて)/ 設定が切 → **何もしない**
+ * 3. 前の時刻が無い(この端末でこのコレクションの予定表を使ったことが無い)/ 設定が切 → **何もしない**(走査も頼まない)
  * 4. 予定の札が集まったら `missedItems` で数え、1 件以上なら**帯の 1 行 + メッセージ**で言う
  *
  * ## ⚠ 二重に知らせない
@@ -15,7 +15,7 @@
  *   開いていた間の予定を「見逃した」と数える。
  *
  * ⚠ **予定を数えるために全走査を頼む**(`REFRESH_TASK_SCAN`)。走査は storage worker の中で、
- *   チェック項目を持つノートだけに絞られる(`task-cards.ts`)。**初めて開いた端末・設定が切の端末では頼まない**。
+ *   チェック項目を持つノートだけに絞られる(`task-cards.ts`)。**予定表を使ったことが無い端末・設定が切の端末では頼まない**。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
@@ -53,38 +53,61 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
 
   const lastOpen = deps.store.lastOpen(deps.cid); // ⚠ 進める前に読む
   const startedAt = now();
-  deps.store.stampOpen(deps.cid, startedAt);
-  const untick = tick(() => deps.store.stampOpen(deps.cid, now()));
-
+  let untick: (() => void) | null = null;
   let unsub: (() => void) | null = null;
+  let unsubUse: (() => void) | null = null;
   const done = (): void => {
     unsub?.();
     unsub = null;
   };
+  /** 刻みを張る(時刻を進め続ける ── 見逃しの区間と開いている間の知らせが重ならない根拠)。 */
+  const beat = (): void => {
+    if (untick !== null) return;
+    untick = tick(() => deps.store.stampOpen(deps.cid, now()));
+  };
 
-  if (lastOpen !== null && deps.store.missedOn()) {
-    const check = (): boolean => {
-      const st = deps.dispatcher.getState();
-      if (st.taskScanFailed) return true; // 集められなかった ── 黙って終える
-      if (st.taskScan === null) return false;
-      const n = missedItems(st.taskScan.cards, lastOpen, startedAt).length;
-      if (n > 0) {
-        deps.paint(n);
-        deps.post(missedLabel(n));
-      }
-      return true;
-    };
-    unsub = deps.dispatcher.onState(() => {
-      if (check()) done();
+  if (lastOpen === null) {
+    /**
+     * 🔴 **このコレクションで予定表を使ったことが無い端末は、何も払わない**(予定を使わない人に全走査を負わせない
+     * ── `app-state.ts` の方針)。記録が無い = 使っていない。時刻も書かず、走査も頼まない。
+     * 予定の走査が頼まれた(= 予定表が開かれた)最初の時点から記録を始める。次の起動から見逃しを数える。
+     */
+    unsubUse = deps.dispatcher.onEvent((e) => {
+      if (e.type !== 'REQUEST_TASK_SCAN') return;
+      deps.store.stampOpen(deps.cid, now());
+      beat();
+      unsubUse?.();
+      unsubUse = null;
     });
-    deps.dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
-    // 既に集まっていた場合(onState は次の変化まで来ない)
-    if (check()) done();
+  } else {
+    deps.store.stampOpen(deps.cid, startedAt);
+    beat();
+    if (deps.store.missedOn()) {
+      const check = (): boolean => {
+        const st = deps.dispatcher.getState();
+        if (st.taskScanFailed) return true; // 集められなかった ── 黙って終える
+        if (st.taskScan === null) return false;
+        const n = missedItems(st.taskScan.cards, lastOpen, startedAt).length;
+        if (n > 0) {
+          deps.paint(n);
+          deps.post(missedLabel(n));
+        }
+        return true;
+      };
+      unsub = deps.dispatcher.onState(() => {
+        if (check()) done();
+      });
+      deps.dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+      // 既に集まっていた場合(onState は次の変化まで来ない)
+      if (check()) done();
+    }
   }
 
   return {
     stop(): void {
-      untick();
+      untick?.();
+      unsubUse?.();
+      unsubUse = null;
       done();
     },
   };

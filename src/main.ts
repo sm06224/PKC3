@@ -3176,7 +3176,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     paint: (n) => paintMissedLine(root, n),
     post: (text) => appMessagePost.post({ kind: 'result', source: 'schedule', text }),
   });
-  const stampOpenNow = (): void => appScheduleNotify.stampOpen(cid, Date.now());
+  // ⚠ 記録がある(= 予定表を使ったことがある)コレクションだけ進める。無いのに書くと「使っていない」が崩れる
+  const stampOpenNow = (): void => {
+    if (appScheduleNotify.lastOpen(cid) !== null) appScheduleNotify.stampOpen(cid, Date.now());
+  };
   window.addEventListener('pagehide', stampOpenNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') stampOpenNow();

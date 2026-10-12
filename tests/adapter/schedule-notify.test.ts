@@ -153,20 +153,63 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     expect(t.painted).toEqual([2]);
   });
 
-  it('🔴 この端末で初めて開いたときは何も出さず、時刻だけ憶える(走査も頼まない)', () => {
+  it('🔴 予定表を使ったことが無い端末は、何も出さず・時刻も書かず・走査も頼まない(予定を使わない人に全走査を負わせない)', () => {
     const store = new ScheduleNotifyStore(fakeStorage());
     const r = rig(BODY);
     const events: string[] = [];
     r.d.onEvent((e) => events.push(e.type));
     const painted: number[] = [];
+    const posted: string[] = [];
+    let beats = 0;
     startMissedWatch({
       dispatcher: r.d, store, cid: 'c1', now: () => ms(12, 13, 0),
-      paint: (n) => painted.push(n), post: () => undefined, tick: () => () => undefined,
+      paint: (n) => painted.push(n), post: (t) => posted.push(t),
+      tick: () => {
+        beats += 1;
+        return () => undefined;
+      },
     });
     r.setScan();
+    // 予定表と関係のない操作(イベントが出るもの)では、記録を始めない
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    r.d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'day' });
     expect(painted).toEqual([]);
+    expect(posted).toEqual([]);
     expect(events).not.toContain('REQUEST_TASK_SCAN');
-    expect(store.lastOpen('c1')).toBe(ms(12, 13, 0));
+    expect(store.lastOpen('c1')).toBeNull();
+    expect(beats, '使っていないコレクションに刻みを張っている').toBe(0);
+  });
+
+  it('🔴 予定表を 1 度開く(走査が頼まれる)と記録が始まり、次の起動から普通に数える', () => {
+    const st = fakeStorage();
+    const store = new ScheduleNotifyStore(st);
+    const r = rig(BODY);
+    let beats = 0;
+    let clock = ms(12, 8, 0);
+    startMissedWatch({
+      dispatcher: r.d, store, cid: 'c1', now: () => clock,
+      paint: () => undefined, post: () => undefined,
+      tick: () => {
+        beats += 1;
+        return () => undefined;
+      },
+    });
+    expect(store.lastOpen('c1')).toBeNull();
+    r.d.dispatch({ type: 'REFRESH_TASK_SCAN' }); // 予定表を開いたときに頼まれる走査
+    expect(store.lastOpen('c1')).toBe(ms(12, 8, 0));
+    expect(beats).toBe(1);
+    r.d.dispatch({ type: 'REFRESH_TASK_SCAN' }); // 2 回目で刻みを二重に張らない
+    expect(beats).toBe(1);
+    // 次の起動(13:00)── 普通の動き
+    clock = ms(12, 13, 0);
+    const painted: number[] = [];
+    const next = rig(BODY);
+    startMissedWatch({
+      dispatcher: next.d, store: new ScheduleNotifyStore(st), cid: 'c1', now: () => clock,
+      paint: (n) => painted.push(n), post: () => undefined, tick: () => () => undefined,
+    });
+    next.setScan();
+    expect(painted).toEqual([2]);
   });
 
   it('🔴 設定が切なら何も出さず、走査も頼まない(時刻は進める)', () => {
@@ -203,6 +246,7 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
 
   it('🔑 刻みで時刻を進める(開いている間の予定を、次の起動で見逃しに数えない)', () => {
     const store = new ScheduleNotifyStore(fakeStorage());
+    store.stampOpen('c1', ms(12, 7, 0)); // 予定表を使ったことがあるコレクション
     let fire: () => void = () => undefined;
     let clock = ms(12, 8, 0);
     const r = rig(BODY);

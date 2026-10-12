@@ -861,7 +861,10 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await expect(page.locator('[data-pkc-action="start-edit"]'), '保存が済んでいない').toBeVisible();
   const cid = await page.locator('[data-pkc-container]').first().getAttribute('data-pkc-container');
   expect(cid, '器の id が読めない').not.toBeNull();
-  const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  // 🔴 予定表を開いたこの端末では、記録が始まっている(使ったことが無いコレクションには書かない ── 全走査を負わせない)
+  const recorded = await page.evaluate(() => localStorage.getItem('pkc3.schedule-last-open'));
+  expect(recorded, '予定表を開いたのに「前に開いていた時刻」の記録が始まっていない').toContain(cid as string);
+  const twoDaysAgo =Date.now() - 2 * 24 * 60 * 60 * 1000;
   await page.addInitScript(
     ({ cid: c, at: t }) => {
       // 読み直した文書の頭で 1 回だけ差し替える(app の起動より前)
