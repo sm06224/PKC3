@@ -109,9 +109,11 @@
   function checkSources(list, pageCount) {
     if (list === undefined || list === null) return [];
     if (!Array.isArray(list) || list.length > MAX_SOURCES) throw fail(CODES.badJob);
+    // ⚠ 範囲の間が空くのは正しい(足した PDF のページを全部外した / 「変更を元に戻す」の後に足し直した ── その PDF は送らない)。
+    //   求めるのは「元の PDF の後ろ・前から順・重ならない」だけ(ページ番号から属する PDF を引くので、間は困らない)
     var next = pageCount + 1;
     return list.map(function (s) {
-      if (!s || !Number.isInteger(s.first) || !Number.isInteger(s.count) || s.count < 1 || s.first !== next) throw fail(CODES.badJob);
+      if (!s || !Number.isInteger(s.first) || !Number.isInteger(s.count) || s.count < 1 || s.first < next) throw fail(CODES.badJob);
       next = s.first + s.count;
       return { first: s.first, count: s.count };
     });

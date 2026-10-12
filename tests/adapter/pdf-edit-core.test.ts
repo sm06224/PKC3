@@ -688,13 +688,13 @@ describe('🔴 複数の文書を 1 つの出力へ(通し番号: 元の PDF が
     expect(await codeOf(core.build(PDFLib, main, job, [extra]))).toBe('leaked');
   });
 
-  it('不正な依頼は bad-job: 足した範囲が元の次から始まらない / 重なる / 空 / extras の数が違う / ページ数が違う / 範囲の外 / 足したページへのハイライト', async () => {
+  it('不正な依頼は bad-job: 足した範囲が前後逆 / 重なる / 空 / extras の数が違う / ページ数が違う / 範囲の外 / 足したページへのハイライト', async () => {
     const main = await sample([A, B]);
     const extra = await sample([X1, X2]);
     const ok = { order: [1, 3], rotate: {}, sources: [{ first: 3, count: 2 }] };
     expect((await PDFLib.PDFDocument.load(await core.build(PDFLib, main, ok, [extra]))).getPageCount()).toBe(2);
     const cases: Array<[string, unknown, Uint8Array[]]> = [
-      ['範囲が元の次から始まらない(間が空く)', { ...ok, order: [1, 4], sources: [{ first: 4, count: 2 }] }, [extra]],
+      ['範囲が前後逆', { ...ok, order: [1, 3, 5], sources: [{ first: 5, count: 2 }, { first: 3, count: 2 }] }, [extra, extra]],
       ['範囲が元のページに重なる', { ...ok, sources: [{ first: 2, count: 2 }] }, [extra]],
       ['範囲が重なる', { ...ok, sources: [{ first: 3, count: 2 }, { first: 4, count: 1 }] }, [extra, extra]],
       ['count が 0', { ...ok, sources: [{ first: 3, count: 0 }] }, [extra]],
@@ -706,6 +706,17 @@ describe('🔴 複数の文書を 1 つの出力へ(通し番号: 元の PDF が
       ['足したページのハイライトを外す', { ...ok, removals: [{ page: 3, id: '14R' }] }, [extra]],
     ];
     for (const [why, job, extras] of cases) expect(await codeOf(core.build(PDFLib, main, job, extras)), why).toBe('bad-job');
+  });
+
+  it('🔴 範囲の間が空いてもよい: 先に足した PDF を全部外した / 元に戻してから足し直した(送るのは残っている PDF だけ)', async () => {
+    const main = await sample([A, B]);
+    const extra = await sample([X1, X2]);
+    // 1 つ目に足した PDF(3〜4)を全部外し、2 つ目(5〜6)だけ残した形 ── 画面が送る依頼そのもの
+    const out = await core.build(PDFLib, main, { order: [1, 6, 5], rotate: {}, sources: [{ first: 5, count: 2 }] }, [extra]);
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(3);
+    expect(hasMark(out, X1)).toBe(true);
+    expect(hasMark(out, B)).toBe(false);
   });
 
   it('足した PDF が暗号化 / 読めないときは種類つきで断る(元の PDF と同じ)', async () => {
