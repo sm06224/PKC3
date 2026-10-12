@@ -72,6 +72,7 @@ function boot(): void {
   evalScript('public/pdf/page-list.js', g);
   evalScript('public/pdf/page-edit.js', g);
   evalScript('public/pdf/highlight.js', g);
+  evalScript('public/pdf/notes.js', g);
   evalScript('public/pdf/edit-stage.js', g);
   wire = g['PkcPdfWire'] as Wire;
   evalScript('public/pdf/reader.js', g);
@@ -254,5 +255,20 @@ describe('ハイライトのボタン(#275 段②-2b)── 上のバーの「�
     ($('hl-apply') as HTMLButtonElement).click();
     expect($('status').textContent).toBe('');
     expect(sentKinds().filter((k) => k !== 'hello')).toEqual([]);
+  });
+});
+
+describe('付箋とペンのボタン(#275)── 「ハイライト」の手前に並ぶ', () => {
+  it('「付箋」「ペン」が「ハイライト」の手前に並び、文書が読めるまでは押せず、押しても道具は選ばれない', () => {
+    boot();
+    const bar = [...$('bar').children].map((el) => el.id);
+    expect(bar.slice(bar.indexOf('note-tool'), bar.indexOf('hl-apply') + 1)).toEqual(['note-tool', 'pen-tool', 'hl-apply']);
+    for (const id of ['note-tool', 'pen-tool']) {
+      expect(($(id) as HTMLButtonElement).disabled, `${id} は文書が読めるまで押せない`).toBe(true);
+      ($(id) as HTMLButtonElement).click();
+      expect($(id).getAttribute('aria-pressed')).toBe('false');
+    }
+    expect(document.body.getAttribute('data-pkc-pdf-tool'), '道具の印は付かない').toBeNull();
+    expect($('status').textContent).toBe('');
   });
 });

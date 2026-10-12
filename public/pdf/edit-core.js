@@ -91,13 +91,18 @@
     });
     var highlights = checkHighlights(job.highlights, seen);
     var removals = checkRemovals(job.removals, seen);
+    var notes = checkNotes(job.notes, seen);
+    var strokes = checkStrokes(job.strokes, seen);
     // ハイライトの付け外しは元の PDF のページだけ(足した PDF のページには付けも外しもしない)
-    if (highlights.concat(removals).some(function (x) { return x.page > pageCount; })) throw fail(CODES.badJob);
+    // 付箋・ペンも同じ(足したページには付けない)
+    if (highlights.concat(removals, notes, strokes).some(function (x) { return x.page > pageCount; })) throw fail(CODES.badJob);
     return {
       order: job.order.slice(),
       rotate: rotate,
       highlights: highlights,
       removals: removals,
+      notes: notes,
+      strokes: strokes,
       sources: sources,
     };
   }
@@ -122,6 +127,9 @@
   /** 上限(1 つの依頼で付ける・外すハイライトの数、1 つが持つ行の数)。手違いの検出であって、使い方の上限ではない。 */
   var MAX_MARKS = 5000;
   var MAX_QUADS = 2000;
+  /** 付箋の字の長さ / 1 本の線の数の数(x と y を並べた数)の上限(手違いの検出)。 */
+  var MAX_NOTE_CHARS = 2000;
+  var MAX_PATH_NUMS = 200000;
   /** 足せる PDF の数(手違いの検出)。 */
   var MAX_SOURCES = 200;
 
@@ -156,10 +164,49 @@
     var seenId = {};
     list.forEach(function (r) {
       if (!r || !Number.isInteger(r.page) || r.page < 1 || !/^\d+R\d*$/.test(String(r.id))) throw fail(CODES.badJob);
+      // 外す物の種類(省略はハイライト)。付箋(`/Text`)も外せる
+      var kind = r.kind === undefined ? 'highlight' : r.kind;
+      if (kind !== 'highlight' && kind !== 'note') throw fail(CODES.badJob);
       var key = r.page + ':' + r.id;
       if (!kept[r.page] || seenId[key]) return;
       seenId[key] = true;
-      out.push({ page: r.page, id: String(r.id) });
+      out.push({ page: r.page, id: String(r.id), kind: kind });
+    });
+    return out;
+  }
+
+  /** 付ける付箋 `{ page, rect: [x0,y0,x1,y1], text }` を確かめる。不正なら `bad-job`。残すページに無い物は捨てる。 */
+  function checkNotes(list, kept) {
+    if (list === undefined || list === null) return [];
+    if (!Array.isArray(list) || list.length > MAX_MARKS) throw fail(CODES.badJob);
+    var out = [];
+    list.forEach(function (n) {
+      if (!n || !Number.isInteger(n.page) || n.page < 1) throw fail(CODES.badJob);
+      if (!Array.isArray(n.rect) || n.rect.length !== 4 || !n.rect.every(isNum)) throw fail(CODES.badJob);
+      if (typeof n.text !== 'string' || n.text === '' || n.text.length > MAX_NOTE_CHARS) throw fail(CODES.badJob);
+      if (kept[n.page]) out.push({ page: n.page, rect: n.rect.slice(), text: n.text });
+    });
+    return out;
+  }
+
+  /** 付けるペンの線 `{ page, rgb, width, paths: [[x,y,x,y…]…] }` を確かめる。不正なら `bad-job`。残すページに無い物は捨てる。 */
+  function checkStrokes(list, kept) {
+    if (list === undefined || list === null) return [];
+    if (!Array.isArray(list) || list.length > MAX_MARKS) throw fail(CODES.badJob);
+    var out = [];
+    list.forEach(function (s) {
+      if (!s || !Number.isInteger(s.page) || s.page < 1) throw fail(CODES.badJob);
+      if (!Array.isArray(s.rgb) || s.rgb.length !== 3 || !s.rgb.every(function (c) { return isNum(c) && c >= 0 && c <= 1; })) {
+        throw fail(CODES.badJob);
+      }
+      if (!isNum(s.width) || s.width <= 0 || s.width > 100) throw fail(CODES.badJob);
+      if (!Array.isArray(s.paths) || s.paths.length < 1 || s.paths.length > MAX_QUADS) throw fail(CODES.badJob);
+      s.paths.forEach(function (p) {
+        if (!Array.isArray(p) || p.length < 4 || p.length % 2 !== 0 || p.length > MAX_PATH_NUMS || !p.every(isNum)) throw fail(CODES.badJob);
+      });
+      if (kept[s.page]) {
+        out.push({ page: s.page, rgb: s.rgb.slice(), width: s.width, paths: s.paths.map(function (p) { return p.slice(); }) });
+      }
     });
     return out;
   }
@@ -360,7 +407,8 @@
    * ⚠ 一緒に抜く物: そのハイライトの吹き出し(`/Popup`)。残すと `/Parent` をたどって `copyPages` が
    *   外したはずのハイライトをもう一度写す。⚠ ハイライトへの返信(`/IRT` が指している注釈)は**残す**(コメントには触らない)
    *   が、`/IRT` だけ外す(残すと同じ理由で外したハイライトが戻る)。
-   * ⚠ 見つからない(id が合わない / ハイライトでない)ときは**黙って通さず `bad-highlight` で断る**
+   * 🔑 外せるのは**ハイライトと付箋(`/Text`)**。`kind` が選ぶ(省略はハイライト)── 種類が違う注釈は外さず、断る。
+   * ⚠ 見つからない(id が合わない / 種類が合わない)ときは**黙って通さず `bad-highlight` で断る**
    *   (外したつもりのハイライトが出力に残ると、user は消えたと思って人に渡す)。
    * @returns 抜いた数
    */
@@ -388,7 +436,7 @@
         for (var j = 0; j < annots.size(); j += 1) {
           if (refKey(annots.get(j)) !== want) continue;
           var dict = annots.lookup(j);
-          if (!(dict instanceof D) || dict.lookup(N.of('Subtype')) !== N.of('Highlight')) break;
+          if (!(dict instanceof D) || dict.lookup(N.of('Subtype')) !== N.of(r.kind === 'note' ? 'Text' : 'Highlight')) break;
           hit = true;
           drop[want] = true;
           gone[want] = true;
@@ -471,6 +519,117 @@
           Rect: box,
           QuadPoints: flat,
           C: h.rgb,
+          CA: 1,
+          F: 4,
+          AP: { N: ap },
+        }),
+      );
+      var annots = page.node.lookup(N.of('Annots'));
+      if (annots instanceof PDFLib.PDFArray) annots.push(annot);
+      else page.node.set(N.of('Annots'), ctx.obj([annot]));
+    });
+  }
+
+  /**
+   * 🔴 **付ける付箋を、出力のページに足す**(`/Text` + 外観 `/AP`)。`/Contents` は UTF-16 の文字列(日本語が読める)。
+   * `/Name /Comment`、`/F 4`(印刷する)。外観は小さな紙の絵(他のビューアが自前の絵を描かなくても見える)。
+   * `/P` は付けない(ハイライトと同じ理由)。
+   */
+  function addNotes(PDFLib, out, pages, plan) {
+    if (plan.notes.length === 0) return;
+    var ctx = out.context;
+    var N = PDFLib.PDFName;
+    var posOf = {};
+    plan.order.forEach(function (p, i) {
+      posOf[p] = i;
+    });
+    plan.notes.forEach(function (n) {
+      var page = pages[posOf[n.page]];
+      var x0 = n.rect[0];
+      var y0 = n.rect[1];
+      var w = n.rect[2] - x0;
+      var h = n.rect[3] - y0;
+      // 外観は BBox = Rect の原点つきで、紙(薄い黄)+ 枠 + 3 本の線を描く
+      var ap = ctx.register(
+        ctx.stream(
+          '1 0.96 0.62 rg ' + fmt(x0) + ' ' + fmt(y0) + ' ' + fmt(w) + ' ' + fmt(h) + ' re f ' +
+            '0.35 0.3 0.1 RG 0.6 w ' + fmt(x0 + 0.3) + ' ' + fmt(y0 + 0.3) + ' ' + fmt(w - 0.6) + ' ' + fmt(h - 0.6) + ' re S ' +
+            [0.3, 0.5, 0.7]
+              .map(function (t) {
+                return fmt(x0 + w * 0.2) + ' ' + fmt(y0 + h * t) + ' m ' + fmt(x0 + w * 0.8) + ' ' + fmt(y0 + h * t) + ' l S';
+              })
+              .join(' '),
+          { Type: 'XObject', Subtype: 'Form', BBox: n.rect.slice() },
+        ),
+      );
+      var annot = ctx.register(
+        ctx.obj({
+          Type: 'Annot',
+          Subtype: 'Text',
+          Rect: n.rect.slice(),
+          Contents: PDFLib.PDFHexString.fromText(n.text),
+          Name: 'Comment',
+          C: [1, 0.96, 0.62],
+          F: 4,
+          Open: false,
+          AP: { N: ap },
+        }),
+      );
+      var annots = page.node.lookup(N.of('Annots'));
+      if (annots instanceof PDFLib.PDFArray) annots.push(annot);
+      else page.node.set(N.of('Annots'), ctx.obj([annot]));
+    });
+  }
+
+  /**
+   * 🔴 **付けるペンの線を、出力のページに足す**(`/Ink` + 外観 `/AP`)。線は丸い端・丸い継ぎ目で、太さは `/BS /W`。
+   * 外観の BBox は線を囲む長方形に太さの半分を足した物(`/Rect` と同じ)。
+   */
+  function addStrokes(PDFLib, out, pages, plan) {
+    if (plan.strokes.length === 0) return;
+    var ctx = out.context;
+    var N = PDFLib.PDFName;
+    var posOf = {};
+    plan.order.forEach(function (p, i) {
+      posOf[p] = i;
+    });
+    plan.strokes.forEach(function (s) {
+      var page = pages[posOf[s.page]];
+      var minX = Infinity;
+      var minY = Infinity;
+      var maxX = -Infinity;
+      var maxY = -Infinity;
+      var draw = [];
+      s.paths.forEach(function (p) {
+        var cmd = [];
+        for (var i = 0; i < p.length; i += 2) {
+          minX = Math.min(minX, p[i]);
+          maxX = Math.max(maxX, p[i]);
+          minY = Math.min(minY, p[i + 1]);
+          maxY = Math.max(maxY, p[i + 1]);
+          cmd.push(fmt(p[i]) + ' ' + fmt(p[i + 1]) + (i === 0 ? ' m' : ' l'));
+        }
+        draw.push(cmd.join(' ') + ' S');
+      });
+      var pad = s.width / 2 + 0.5;
+      var box = [minX - pad, minY - pad, maxX + pad, maxY + pad];
+      var ap = ctx.register(
+        ctx.stream('1 J 1 j ' + fmt(s.width) + ' w ' + s.rgb.map(fmt).join(' ') + ' RG ' + draw.join(' '), {
+          Type: 'XObject',
+          Subtype: 'Form',
+          BBox: box,
+        }),
+      );
+      var annot = ctx.register(
+        ctx.obj({
+          Type: 'Annot',
+          Subtype: 'Ink',
+          Rect: box,
+          InkList: s.paths.map(function (p) {
+            return p.slice();
+          }),
+          C: s.rgb.slice(),
+          BS: { Type: 'Border', W: s.width, S: 'S' },
           CA: 1,
           F: 4,
           AP: { N: ap },
@@ -681,7 +840,7 @@
   }
 
   /**
-   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate, sources?, highlights?, removals? }`
+   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate, sources?, highlights?, removals?, notes?, strokes? }`
    * @param extras 足した PDF の bytes(`job.sources` と同じ数・同じ順 ── 各 PDF のページ数は `count` と一致すること)
    * @returns `Uint8Array`(⚠ 呼び側が transfer する。大きさぴったりの buffer)
    *
@@ -745,6 +904,8 @@
     });
     // 付けるハイライトは、写した後の出力のページへ(`restore` が注釈の位置を使い終えた後)
     addHighlights(PDFLib, out, pages, plan);
+    addNotes(PDFLib, out, pages, plan);
+    addStrokes(PDFLib, out, pages, plan);
     // 🔴 共有された Resources に乗って来た、選ばなかったページの部品を落とす(上の注釈)
     var seenForms = new Set();
     pages.forEach(function (page) {

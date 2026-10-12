@@ -25,6 +25,8 @@
   - **ページの抜き出し**(#275 段②-1c)は、一覧で選んだページだけを新しい PDF にする(同じ worker・同じ棚・同じ門)。
   - **ハイライト**(#275 段②-2)は、字を選んで「ハイライト」+ 色(黄・緑・青・ピンク)で付け、付いたハイライト(他のアプリで付けた物も)を
     押して「ハイライトを外す」。保存はページの編集と**同じ 1 本**(同じ worker・同じ棚・同じ門)で、新しい PDF の添付になる。元の PDF は変わらない。
+  - **付箋とペン**(#275)は、上のバーの「付箋」でページのどこかを押して字を入れ(Enter で付ける・Esc でやめる)、「ペン」でページの上をなぞる。
+    付いた付箋は小さな印で、重ねると字が出て、押すと「直す / 外す」。保存はハイライトと**同じ 1 本**(PDF 本来の注釈 `/Text` と `/Ink` として新しい PDF に書く)。
   - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
 
@@ -64,6 +66,29 @@
   .hl-layer > [data-pkc-removed="true"] { outline: 2px dashed #d33; background: rgba(255, 255, 255, .55) }
   #hl-pop { position: fixed; z-index: 20; padding: 4px; background: #000e; border: 1px solid #555; border-radius: 4px }
   #hl-pop[hidden] { display: none }
+  /* 付箋とペン(#275)。道具を選んでいる間だけ、ページの上に押さえの層を敷く(字の選びより優先)。付箋の印は層の上 */
+  .tool-layer { position: absolute; inset: 0; z-index: 3; display: none; touch-action: none }
+  body[data-pkc-pdf-tool="note"] .tool-layer { display: block; cursor: crosshair }
+  body[data-pkc-pdf-tool="pen"] .tool-layer { display: block; cursor: crosshair }
+  .ink-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: visible }
+  .note-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none }
+  .note-layer > div { position: absolute; box-sizing: border-box; pointer-events: auto; cursor: pointer }
+  /* 付けた付箋の印(薄い黄の紙。元から付いていた付箋は絵に焼かれているので透明で重ね、押せるだけにする) */
+  .note-layer > [data-pkc-field="pdf-note-new"] { background: #fff5a0; border: 1px solid #5a4d1a; border-radius: 2px;
+    background-image: linear-gradient(#5a4d1a, #5a4d1a), linear-gradient(#5a4d1a, #5a4d1a), linear-gradient(#5a4d1a, #5a4d1a);
+    background-size: 60% 1px, 60% 1px, 60% 1px; background-position: 50% 30%, 50% 50%, 50% 70%; background-repeat: no-repeat }
+  .note-layer > [data-pkc-removed="true"] { outline: 2px dashed #d33; background: rgba(255, 255, 255, .55) }
+  #note-pop { position: fixed; z-index: 20; display: flex; gap: 4px; padding: 4px; background: #000e; border: 1px solid #555; border-radius: 4px }
+  #note-pop[hidden] { display: none }
+  #note-pop button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
+    border-radius: 3px; padding: 3px 9px }
+  #note-input-wrap { position: fixed; z-index: 25; padding: 4px; background: #000e; border: 1px solid #555; border-radius: 4px }
+  #note-input-wrap[hidden] { display: none }
+  #note-input { font: inherit; width: 18em; max-width: 60vw; background: #222; color: #eee; border: 1px solid #555;
+    border-radius: 3px; padding: 3px 6px }
+  #note-tip { position: fixed; z-index: 22; max-width: 24em; padding: 4px 8px; background: #000e; color: #eee;
+    border: 1px solid #555; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none }
+  #note-tip[hidden] { display: none }
   #hl-pop button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
     border-radius: 3px; padding: 3px 9px }
   /* 「PDF を足す」の足し方の選び(添付から / パソコンのファイルから)。押した位置の下に出す */
@@ -196,6 +221,8 @@
   <input id="append-file" type="file" accept="application/pdf,.pdf" hidden>
   <button id="edit-save" type="button" hidden title="並べ替え・回転・外したページを反映した、新しい PDF を添付に加えます(元の PDF は変わりません)">別の PDF として保存</button>
   <button id="extract" type="button" disabled title="一覧で選んだページ(Ctrl+クリック・Shift+クリックで複数)だけを、新しい PDF として添付に加えます(元の PDF は変わりません)">選んだページを別の PDF にする</button>
+  <button id="note-tool" type="button" disabled aria-pressed="false" title="ページのどこかを押して、そこに付箋を付けます(字の無いページにも付けられます)。もう一度押すと付箋をやめます">付箋</button>
+  <button id="pen-tool" type="button" disabled aria-pressed="false" title="ページの上をなぞって線を書きます(色は右の丸いボタンで選びます)。もう一度押すとペンをやめます">ペン</button>
   <button id="hl-apply" type="button" disabled title="選んだ字にハイライトを付けます(色は右の丸いボタンで選びます)。付いたハイライトを押すと「ハイライトを外す」が出ます">ハイライト</button>
   <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
 </div>
@@ -205,6 +232,9 @@
 <div id="scroller"><div id="pages"></div></div>
 <div id="append-menu" hidden><button id="append-from-note" type="button" title="このコレクションの添付にある PDF から選びます">添付から選ぶ…</button><button id="append-from-file" type="button" title="パソコンにある PDF のファイルを選びます">パソコンのファイルを選ぶ…</button><div id="append-pick" hidden></div></div>
 <div id="hl-pop" hidden><button id="hl-remove" type="button">ハイライトを外す</button></div>
+<div id="note-pop" hidden><button id="note-edit" type="button">直す</button><button id="note-remove" type="button">外す</button></div>
+<div id="note-input-wrap" hidden><input id="note-input" type="text" maxlength="1000" autocomplete="off" aria-label="付箋の字" placeholder="付箋の字(Enter で付ける・Esc でやめる)"></div>
+<div id="note-tip" hidden></div>
 <div id="status" role="status"></div>
 <div id="msg">読み込んでいます…</div>
 <script src="./reader-wire.js"></script>
@@ -214,6 +244,7 @@
 <script src="./page-list.js"></script>
 <script src="./page-edit.js"></script>
 <script src="./highlight.js"></script>
+<script src="./notes.js"></script>
 <script src="./edit-stage.js"></script>
 <script type="module" src="./reader.js"></script>
 </body>

@@ -29,6 +29,9 @@
  *     → できた PDF を開くと、付けた緑が絵に焼かれていて、外した物は無い → 保存した PDF のハイライトも外せる。
  *     上のバーは、窓が狭くて入りきらないとき 2 行になり、「ノートへ引用する」が切れない
  *
+ *   ⑤⁗′ 付箋とペン(#275)── 「付箋」→ ページの余白を押す → 字を入れる(変換中の Enter では付かない)→ Enter → 印が出る → 重ねると字が出る → 印を押して
+ *     「直す」→「外す」→「ペン」で色を選んでなぞる → 線 → 線を押して「外す」→ 保存 → できた PDF を開き直すと付箋も線も在る(付箋は直せる・戻せる)
+ *
  *   ⑤⁘ 別の PDF を足す(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を足すと一覧の最後に並び
  *     (絵も出る)、保存ボタンが出る → 足したページを回して「別の PDF として保存」→ できた PDF は N+2 ページで、足した字が後ろに入り、向きも反映される
  *
@@ -347,9 +350,13 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(item(3), 'Tab の止まり先がいまの頁でない').toHaveAttribute('tabindex', '0');
   await expect(item(2)).toHaveAttribute('tabindex', '-1');
   await win.focus('#hit-next');
-  // 上のバーで押せるのは「PDF を足す」(#275 結合)だけ ── 次の Tab で一覧へ入る
+  // 上のバーで押せるのは「PDF を足す」(#275 結合)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.id), '「PDF を足す」の次の止まり先が「付箋」でない').toBe('note-tool');
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.id), '「付箋」の次の止まり先が「ペン」でない').toBe('pen-tool');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), 'Tab がいまの頁の項目に着かない').toBe('3');
   await win.keyboard.press('ArrowDown');
@@ -1159,7 +1166,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeDisabled();
   await expect(hw.locator('#edit-save')).toBeHidden();
   // 帯に収まらないときは 2 行に折り返し、右端の「ノートへ引用する」も「ハイライト」も窓の外へ切れず、読む面に重ならない
-  //   (既定の窓の幅 1000 でも、広い窓 1600 でも。1600 では 1 行のまま ── 折り返しは要るときだけ)
+  //   (既定の窓の幅 1000 でも、広い窓 1800 でも。1800 では 1 行のまま ── 折り返しは要るときだけ)
   const barGeometry = async (): Promise<{ right: number; barBottom: number; scrollerTop: number; barH: number; width: number }> =>
     hw.evaluate(() => {
       const r = (id: string): DOMRect => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
@@ -1174,7 +1181,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const [w, wraps] of [
     [1000, true],
     [1100, true],
-    [1600, false], // 「PDF を足す」(#275 結合)を足したぶん、1 行に収まる幅が 1500 から 1550 前後へ広がった(実測)
+    [1800, false], // 「PDF を足す」(#275 結合)で 1 行に収まる幅が 1500 から 1550 前後へ、「付箋」「ペン」(#275)でさらに広がった(1600 で 2 行になるのを実測)
   ] as const) {
     await hw.setViewportSize({ width: w, height: 900 });
     await expect
@@ -1394,6 +1401,278 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     await w.close();
   }
   expect(counts.map((c) => (c > 0 ? 1 : 0)).sort(), '外して保存した PDF から 2 頁目のハイライトが消えていない').toEqual([0, 1]);
+
+  // ── ⑤⁗′ 付箋とペン(#275)── 「付箋」→ ページのどこかを押す → 字を入れる → Enter → 印が出る → 重ねると字が出る → 押して「直す」→「外す」
+  //    →「ペン」でなぞる → 線が出る → 保存 → できた PDF を開き直しても付箋も線も在る(PDF 本来の注釈として入っている)──
+  //    fixture は自作の 2 ページ(字のある頁。押す場所は字の無い余白 ── 字の無いページでも付けられることの代わりに、層は字の層と独立)
+  const NT_NAME = '付箋とペン.pdf';
+  const NT_OUT = '付箋とペン (編集).pdf';
+  const NOTE_A = '見積を取る';
+  const NOTE_A2 = '見積は来週';
+  const NOTE_B = '保存する付箋';
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: NT_NAME,
+    mimeType: 'application/pdf',
+    buffer: buildPdf(2),
+  });
+  await clickReal(page, entryNamed(NT_NAME));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', NT_NAME);
+  const openNt = async (): Promise<typeof win> => {
+    const [w] = await Promise.all([
+      context.waitForEvent('page', { timeout: 15_000 }),
+      clickReal(page, '[data-pkc-action="view-asset"]'),
+    ]);
+    await w.setViewportSize({ width: 1100, height: 900 });
+    await expect(w.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready', { timeout: 20_000 });
+    return w;
+  };
+  const nw = await openNt();
+  const ntErrors: string[] = [];
+  nw.on('pageerror', (e) => ntErrors.push(e.message));
+  const noteNew = (w: typeof nw, n: number) => w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-note-new"]`);
+  const noteOld = (w: typeof nw, n: number) => w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-note-existing"]`);
+  const inkOn = (w: typeof nw, n: number) => w.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-ink"]`);
+  for (const n of [1, 2]) await expect(nw.locator(`.page[data-page="${String(n)}"] [data-pkc-field="pdf-tool-layer"]`)).toBeAttached({ timeout: 20_000 });
+  // 道具のボタン: 「付箋」「ペン」が「ハイライト」の手前に並び、読めたので押せる / まだ何も選んでいない
+  const noteTool = nw.locator('#note-tool');
+  const penTool = nw.locator('#pen-tool');
+  await expect(noteTool).toHaveText('付箋');
+  await expect(penTool).toHaveText('ペン');
+  await expect(noteTool).toBeEnabled();
+  await expect(penTool).toBeEnabled();
+  await expect(noteTool).toHaveAttribute('aria-pressed', 'false');
+  await expect(nw.locator('#note-input-wrap'), '押す前から字の欄が出ている').toBeHidden();
+  // 字を選んでいない間、色は押せない(ペンを選ぶまで)
+  await expect(nw.locator('#bar button.swatch[data-hl-color="blue"]')).toBeDisabled();
+  const pageBox = async (w: typeof nw, n: number): Promise<{ x: number; y: number; width: number; height: number }> => {
+    const b = await w.locator(`.page[data-page="${String(n)}"]`).boundingBox();
+    if (b === null) throw new Error('ページの位置が取れない');
+    return b;
+  };
+
+  // (a) 付箋を選ぶ ── 押されている印が見分けられる(押していないペンと背景の色が違う)→ ページの余白を押す → 字の欄 → 変換中の Enter では付かない → Enter で付く
+  await clickReal(nw, '#note-tool');
+  await expect(noteTool).toHaveAttribute('aria-pressed', 'true');
+  expect(await noteTool.evaluate((el) => getComputedStyle(el).backgroundColor), '選んでいる「付箋」が、選んでいない「ペン」と見分けられない').not.toBe(
+    await penTool.evaluate((el) => getComputedStyle(el).backgroundColor),
+  );
+  await expect(nw.locator('body')).toHaveAttribute('data-pkc-pdf-tool', 'note');
+  await nw.locator('.page[data-page="1"]').scrollIntoViewIfNeeded();
+  const p1 = await pageBox(nw, 1);
+  const spot = { x: p1.x + p1.width * 0.55, y: p1.y + p1.height * 0.7 }; // 字の無い余白
+  await nw.mouse.click(spot.x, spot.y);
+  const noteInput = nw.locator('#note-input');
+  await expect(noteInput, '押した場所に字の欄が出ない').toBeVisible();
+  await expect(noteInput).toBeFocused();
+  const inputBox = await noteInput.boundingBox();
+  expect(inputBox !== null && Math.abs(inputBox.x - spot.x) < 40 && Math.abs(inputBox.y - spot.y) < 40, '字の欄が押した場所の近くに出ていない').toBe(true);
+  await nw.keyboard.insertText(NOTE_A);
+  // 🔴 日本語入力の変換を確定する Enter(isComposing)では付けない
+  await noteInput.evaluate((el) => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }));
+  });
+  await expect(noteInput, '変換の確定の Enter で付いてしまった').toBeVisible();
+  await expect(noteNew(nw, 1)).toHaveCount(0);
+  await nw.keyboard.press('Enter');
+  await expect(nw.locator('#note-input-wrap'), 'Enter で字の欄が閉じない').toBeHidden();
+  await expect(noteNew(nw, 1), 'Enter で付箋の印が出ない').toHaveCount(1);
+  await expect(nw.locator('#edit-note')).toContainText('付箋を 1 件付けています');
+  await expect(nw.locator('#edit-save'), '付箋を付けたのに保存ボタンが出ない').toBeVisible();
+  // 印は押した場所に在り、押せる大きさ
+  const ntMarkBox = await noteNew(nw, 1).first().boundingBox();
+  expect(ntMarkBox !== null && ntMarkBox.width >= 14 && ntMarkBox.height >= 14, '付箋の印が小さすぎる').toBe(true);
+  // 場所はページの中での位置で見る(付箋が付くと上に案内の行が出て、ページ全体が下がる)
+  const p1Now = await pageBox(nw, 1);
+  const relX = (ntMarkBox?.x ?? 0) - p1Now.x - (spot.x - p1.x);
+  const relY = (ntMarkBox?.y ?? 0) - p1Now.y - (spot.y - p1.y);
+  expect(Math.abs(relX) < 8 && Math.abs(relY) < 8, `印が押した場所にない(ページの中で ${String(relX)},${String(relY)} ずれ)`).toBe(true);
+  // 読む幅は縮まない(横の欄を足していない)
+  expect((await pageBox(nw, 1)).width, '付箋で読む幅が変わった').toBeCloseTo(p1.width, 0);
+
+  // (b) 印に重ねると字が出る / 離すと消える
+  const center = async (loc: ReturnType<typeof noteNew>): Promise<{ x: number; y: number }> => {
+    const b = await loc.first().boundingBox();
+    if (b === null) throw new Error('印の位置が取れない');
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  await expect(nw.locator('#note-tip')).toBeHidden();
+  const c1 = await center(noteNew(nw, 1));
+  await nw.mouse.move(c1.x, c1.y);
+  await expect(nw.locator('#note-tip'), '重ねても字が出ない').toBeVisible();
+  await expect(nw.locator('#note-tip')).toHaveText(NOTE_A);
+  await nw.mouse.move(c1.x + 200, c1.y - 100);
+  await expect(nw.locator('#note-tip'), '離しても字が残っている').toBeHidden();
+
+  // (c) Esc でやめる ── 別の場所を押して字を打っても、Esc なら付かない(道具は選んだまま)
+  await nw.mouse.click(p1.x + p1.width * 0.2, p1.y + p1.height * 0.85);
+  await expect(noteInput).toBeVisible();
+  await nw.keyboard.insertText('やめる字');
+  await nw.keyboard.press('Escape');
+  await expect(nw.locator('#note-input-wrap')).toBeHidden();
+  await expect(noteNew(nw, 1), 'Esc でやめたのに付箋が増えた').toHaveCount(1);
+  await expect(noteTool, 'Esc で字の欄だけやめるはずが、道具まで外れた').toHaveAttribute('aria-pressed', 'true');
+
+  // (d) 印を押す ── 「直す / 外す」(道具を選んだままでも押せる)→ 直す → 字が変わる
+  await nw.mouse.click(c1.x, c1.y);
+  await expect(nw.locator('#note-pop'), '付箋の印を押しても「直す / 外す」が出ない').toBeVisible();
+  await expect(nw.locator('#note-edit')).toHaveText('直す');
+  await expect(nw.locator('#note-remove')).toHaveText('外す');
+  await clickReal(nw, '#note-edit');
+  await expect(noteInput).toBeVisible();
+  await expect(noteInput, '直すのに今の字が入っていない').toHaveValue(NOTE_A);
+  await noteInput.fill(NOTE_A2);
+  await nw.keyboard.press('Enter');
+  await expect(noteNew(nw, 1)).toHaveCount(1);
+  await expect(noteNew(nw, 1).first()).toHaveAttribute('data-note-text', NOTE_A2);
+  await nw.mouse.move(c1.x, c1.y);
+  await expect(nw.locator('#note-tip')).toHaveText(NOTE_A2);
+  // 直しても「付けた 1 件」のまま(保存した状態からは 1 件増えただけ)
+  await expect(nw.locator('#edit-note')).toContainText('付箋を 1 件付けています');
+
+  // (e) 外す ── 印が消え、案内も保存ボタンも元に戻る(何も変えていない状態)
+  await nw.mouse.click(c1.x, c1.y);
+  await clickReal(nw, '#note-remove');
+  await expect(noteNew(nw, 1), '外したのに印が残っている').toHaveCount(0);
+  await expect(nw.locator('#note-pop')).toBeHidden();
+  await expect(nw.locator('#edit-save'), '付箋を全部外したのに保存ボタンが残っている').toBeHidden();
+
+  // (f) 保存に残す付箋を、もう一度付ける(2 ページ目に付ける ── 別のページでも付く)
+  await nw.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  const p2 = await pageBox(nw, 2);
+  const spot2 = { x: p2.x + p2.width * 0.6, y: p2.y + p2.height * 0.75 };
+  await nw.mouse.click(spot2.x, spot2.y);
+  await expect(noteInput).toBeVisible();
+  await nw.keyboard.insertText(NOTE_B);
+  await nw.keyboard.press('Enter');
+  await expect(noteNew(nw, 2)).toHaveCount(1);
+
+  // (g) ペン ── 付箋の道具は外れ、色が押せるようになる(字を選んでいなくても)→ 青を選んでなぞる → 線が出る
+  await clickReal(nw, '#pen-tool');
+  await expect(penTool).toHaveAttribute('aria-pressed', 'true');
+  await expect(noteTool, 'ペンを選んだのに付箋が選ばれたまま').toHaveAttribute('aria-pressed', 'false');
+  await expect(nw.locator('body')).toHaveAttribute('data-pkc-pdf-tool', 'pen');
+  await expect(nw.locator('#bar button.swatch[data-hl-color="blue"]'), 'ペンを選んでも色が押せない').toBeEnabled();
+  await clickReal(nw, '#bar button.swatch[data-hl-color="blue"]');
+  await nw.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  const q2 = await pageBox(nw, 2);
+  const from = { x: q2.x + q2.width * 0.15, y: q2.y + q2.height * 0.2 };
+  const to = { x: q2.x + q2.width * 0.7, y: q2.y + q2.height * 0.3 };
+  await expect(inkOn(nw, 2)).toHaveCount(0);
+  await nw.mouse.move(from.x, from.y);
+  await nw.mouse.down();
+  await nw.mouse.move((from.x + to.x) / 2, from.y - 20, { steps: 6 });
+  await nw.mouse.move(to.x, to.y, { steps: 6 });
+  await nw.mouse.up();
+  await expect(inkOn(nw, 2), 'なぞったのに線が出ない').toHaveCount(1);
+  expect(await inkOn(nw, 2).first().getAttribute('stroke'), '選んだ色(青)で書けていない').toBe('rgb(128,199,255)');
+  await expect(nw.locator('#edit-note')).toContainText('付箋を 1 件付け、ペンの線を 1 本書いています');
+  // 線のあった場所は、押せる大きさの外には広がらない(窓の中だけ ── 絵には焼かれていない)
+  const ink = await inkOn(nw, 2).first().boundingBox();
+  expect(ink !== null && ink.width > 100, '線の幅が、なぞった長さに足りない').toBe(true);
+
+  // (h) 線を押す(道具を外してから)── 「外す」だけが出る / 外せる / もう一度書き直す(保存に残す)
+  await nw.keyboard.press('Escape'); // 字を入れていないときの Esc は道具をやめる
+  await expect(penTool).toHaveAttribute('aria-pressed', 'false');
+  await expect(nw.locator('body')).not.toHaveAttribute('data-pkc-pdf-tool', /.+/);
+  const onLine = await inkOn(nw, 2).first().evaluate((el: SVGPolylineElement) => {
+    // 線の途中の点(窓の座標)を画面の座標に直す
+    const pts = el.getAttribute('points')?.split(' ').map((p) => p.split(',').map(Number)) ?? [];
+    const k = pts[Math.floor(pts.length / 2)];
+    const svg = el.ownerSVGElement as SVGSVGElement;
+    const r = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return k === undefined ? null : { x: r.left + (k[0] as number) * (r.width / vb.width), y: r.top + (k[1] as number) * (r.height / vb.height) };
+  });
+  expect(onLine, '線の点が読めない').not.toBeNull();
+  await nw.mouse.click((onLine as { x: number }).x, (onLine as { y: number }).y);
+  await expect(nw.locator('#note-pop'), '線を押しても「外す」が出ない').toBeVisible();
+  await expect(nw.locator('#note-edit'), '線に「直す」は無い').toBeHidden();
+  await clickReal(nw, '#note-remove');
+  await expect(inkOn(nw, 2), '外したのに線が残っている').toHaveCount(0);
+  // 書き直す(保存に残す線)
+  await clickReal(nw, '#pen-tool');
+  await nw.mouse.move(from.x, from.y);
+  await nw.mouse.down();
+  await nw.mouse.move(to.x, to.y, { steps: 10 });
+  await nw.mouse.up();
+  await expect(inkOn(nw, 2)).toHaveCount(1);
+  await nw.keyboard.press('Escape');
+  const inkFrac = await inkOn(nw, 2).first().evaluate((el: SVGPolylineElement) => {
+    const pts = el.getAttribute('points')?.split(' ').map((p) => p.split(',').map(Number)) ?? [];
+    const svg = el.ownerSVGElement as SVGSVGElement;
+    const vb = svg.viewBox.baseVal;
+    const k = pts[Math.floor(pts.length / 2)] ?? [0, 0];
+    return { fx: (k[0] as number) / vb.width, fy: (k[1] as number) / vb.height };
+  });
+
+  // (i) 保存 ── 新しい添付が 1 つ増え、元の添付は残る
+  await expect(nw.locator('#edit-note')).toContainText('付箋を 1 件付け、ペンの線を 1 本書いています');
+  await expect(entryNamed(NT_OUT), '保存の前に編集後の添付がある(観測が空振り)').toHaveCount(0);
+  await clickReal(nw, '#edit-save');
+  await expect(nw.locator('#status'), '保存の結果が窓に出ない').toContainText('保存しました', { timeout: 20_000 });
+  await expect(entryNamed(NT_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(entryNamed(NT_NAME).filter({ hasNotText: '(編集)' }), '元の添付が消えた').toHaveCount(1);
+  expect(ntErrors, '付箋とペンの窓で例外が出た').toEqual([]);
+  await nw.close();
+
+  // (j) できた PDF を開き直す ── 付箋(他のアプリの付箋と同じ「元から付いている」印)も線(絵に焼かれている)も在る
+  await clickReal(page, entryNamed(NT_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', NT_OUT);
+  const sv = await openNt();
+  await expect(sv.locator('.page[data-page="2"] [data-pkc-field="pdf-tool-layer"]')).toBeAttached({ timeout: 20_000 });
+  await expect(noteOld(sv, 2), '保存した PDF に付箋が入っていない').toHaveCount(1, { timeout: 15_000 });
+  await expect(noteOld(sv, 1), '外した付箋が保存した PDF に在る').toHaveCount(0);
+  await expect(sv.locator('#edit-save'), '開いただけなのに保存ボタンが出ている').toBeHidden();
+  await sv.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => sv.locator('.page[data-page="2"] img').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0), {
+      message: '2 ページ目の絵が読み込まれていない',
+      timeout: 15_000,
+    })
+    .toBe(true);
+  const oc = await center(noteOld(sv, 2));
+  await sv.mouse.move(oc.x, oc.y);
+  await expect(sv.locator('#note-tip'), '保存した付箋に重ねても字が出ない').toHaveText(NOTE_B);
+  // 線は PDF の中に在り、絵に焼かれて青く見える(書いた線の途中の点の近く)
+  const bluePx = await sv.locator('.page[data-page="2"]').evaluate(async (box, f) => {
+    const img = box.querySelector('img') as HTMLImageElement;
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    if (ctx === null) throw new Error('canvas が無い');
+    ctx.drawImage(img, 0, 0);
+    const cx = Math.round(f.fx * c.width);
+    const cy = Math.round(f.fy * c.height);
+    let best = 0;
+    for (let dy = -6; dy <= 6; dy += 1) {
+      for (let dx = -6; dx <= 6; dx += 1) {
+        const d = ctx.getImageData(cx + dx, cy + dy, 1, 1).data;
+        best = Math.max(best, (d[2] ?? 0) - (d[0] ?? 0));
+      }
+    }
+    return best;
+  }, inkFrac);
+  expect(bluePx > 60, `保存した PDF に、青い線が描かれていない(青さ ${String(bluePx)})`).toBe(true);
+
+  // (k) 保存した PDF の付箋も「直す / 外す」できる ── 直す = 元の付箋を外す印(破線)+ 直した付箋が付く。変更を元に戻すと両方戻る
+  await sv.mouse.move(oc.x + 150, oc.y - 120);
+  await sv.mouse.click(oc.x, oc.y);
+  await expect(sv.locator('#note-pop')).toBeVisible();
+  await clickReal(sv, '#note-edit');
+  await expect(sv.locator('#note-input')).toHaveValue(NOTE_B);
+  await sv.locator('#note-input').fill('直した付箋');
+  await sv.keyboard.press('Enter');
+  await expect(noteOld(sv, 2).first()).toHaveAttribute('data-pkc-removed', 'true');
+  expect(await noteOld(sv, 2).first().evaluate((el) => getComputedStyle(el).outlineStyle), '外すと決めた付箋が見分けられない(破線が無い)').toBe('dashed');
+  await expect(noteNew(sv, 2)).toHaveCount(1);
+  await expect(noteNew(sv, 2).first()).toHaveAttribute('data-note-text', '直した付箋');
+  await expect(sv.locator('#edit-note')).toContainText('付箋を 1 件付け、付箋を 1 件外し');
+  await clickReal(sv, '#edit-reset');
+  await expect(noteNew(sv, 2), '変更を元に戻したのに、直した付箋が残っている').toHaveCount(0);
+  await expect(noteOld(sv, 2).first()).not.toHaveAttribute('data-pkc-removed', 'true');
+  await expect(sv.locator('#edit-save')).toBeHidden();
+  await sv.close();
 
   // ── ⑥ 読めない PDF ── 断り文を出さず、ブラウザ内蔵の表示へ退避する ──
   await page.setInputFiles('[data-pkc-field="attach-input"]', {
