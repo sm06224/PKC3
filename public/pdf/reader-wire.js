@@ -34,6 +34,8 @@
    * ノートへ引く返事より長く待つ。⚠ 本体側に時間切れは無い(作れたかどうかを返す)── 窓の側だけの歯止め。
    */
   var EDIT_TIMEOUT_MS = 60000;
+  /** 添付の一覧 / 添付の bytes を借りる返事を待つ上限(ms)。本体側の貸し出しの時計(`ATTACH_LEND_TTL_MS`)より短くする。 */
+  var ATTACH_TIMEOUT_MS = 10000;
   /** 文書が来なかった / 来ても読めなかったときの字。⚠ 窓の中で 3 か所が同じ字を言う。 */
   var DOC_FAILED = '文書を受け取れませんでした。PKC3 のウィンドウから、もう一度開いてください';
   /** ノートへ引く返事が来なかったときの字。 */
@@ -94,6 +96,7 @@
     DOC_TIMEOUT_MS: DOC_TIMEOUT_MS,
     QUOTE_TIMEOUT_MS: QUOTE_TIMEOUT_MS,
     EDIT_TIMEOUT_MS: EDIT_TIMEOUT_MS,
+    ATTACH_TIMEOUT_MS: ATTACH_TIMEOUT_MS,
     EDIT_NO_REPLY: EDIT_NO_REPLY,
     DOC_FAILED: DOC_FAILED,
     QUOTE_NO_REPLY: QUOTE_NO_REPLY,

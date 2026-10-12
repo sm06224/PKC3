@@ -1014,9 +1014,10 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mgAdd).toBeEnabled();
   await expect(mgAdd).toHaveAttribute(
     'title',
-    '別の PDF を選んで、そのページをこの PDF の後ろに足します。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
+    '別の PDF を選んで、そのページをこの PDF の後ろに足します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
   );
-  const mgThumbs = mg.locator('[data-pkc-field="pdf-page-thumb"]');
+  // 外した(隠した)項目は数えない ── 見えている項目だけ
+  const mgThumbs = mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]');
   // 読めない PDF / パスワード付きは断る ── 窓の下に理由が出て、一覧も保存ボタンも変わらない
   await mg.setInputFiles('#append-file', { name: '壊れ.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a pdf') });
   await expect(mg.locator('#status')).toContainText('PDF として読めないため足せません。何も変えていません', { timeout: 15_000 });
@@ -1028,8 +1029,45 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は足せません。何も変えていません', { timeout: 15_000 });
   await expect(mgThumbs, '断ったのに一覧が増えた').toHaveCount(3);
   await expect(mg.locator('#edit-save'), '断ったのに保存ボタンが出ている').toBeHidden();
-  // 足す ── ボタンから選ぶ窓が開き、選んだ 2 ページが一覧の最後に並ぶ
-  const [chooser] = await Promise.all([mg.waitForEvent('filechooser', { timeout: 10_000 }), clickReal(mg, '#append-pdf')]);
+  // 足し方の選び(#275 結合・裁定 Q2): 「PDF を足す」は 2 つの選び方を出す。外を押す / Esc で閉じる
+  const mgMenu = mg.locator('#append-menu');
+  const mgHeads = mg.locator('[data-pkc-field="pdf-source-heading"]');
+  await expect(mgMenu, '押す前からメニューが出ている').toBeHidden();
+  await clickReal(mg, '#append-pdf');
+  await expect(mgMenu).toBeVisible();
+  await expect(mg.locator('#append-from-note')).toHaveText('添付から選ぶ…');
+  await expect(mg.locator('#append-from-file')).toHaveText('パソコンのファイルを選ぶ…');
+  await mg.keyboard.press('Escape');
+  await expect(mgMenu, 'Esc でメニューが閉じない').toBeHidden();
+  // ── 添付から選ぶ(Q2)── この collection の PDF の添付が一覧に出る。いま開いている「結合.pdf」(3 ページ)を足してみる
+  await clickReal(mg, '#append-pdf');
+  await clickReal(mg, '#append-from-note');
+  const mgPick = mg.locator('[data-pkc-field="pdf-append-attachment"]', { hasText: MG_NAME });
+  await expect(mgPick, '添付の PDF の一覧に、この collection の PDF が出ない').toHaveCount(1, { timeout: 15_000 });
+  await clickReal(mg, mgPick);
+  await expect(mgMenu, '選んだらメニューが閉じる').toBeHidden();
+  await expect(mgThumbs, '添付から足した 3 ページが一覧に並ばない').toHaveCount(6, { timeout: 20_000 });
+  await expect(mg.locator('#status')).toContainText('「結合.pdf」の 3 ページを後ろに足しました');
+  // 見出し(Q1)と、絵の下の元の PDF の名前(Q4)
+  await expect(mgHeads).toHaveCount(1);
+  await expect(mgHeads.locator('.src-head-label')).toHaveText('結合.pdf(3 ページ)');
+  await expect(mg.locator('[data-pkc-field="pdf-page-source"]'), '足した 3 ページに元の PDF の名前が出ない').toHaveCount(3);
+  await expect(mg.locator('[data-pkc-field="pdf-page-source"]').first()).toHaveText('結合.pdf');
+  await expect(mg.locator('[data-thumb="1"] [data-pkc-field="pdf-page-source"]'), '元のページに名前が出ている').toHaveCount(0);
+  // 見出しは、足した PDF の最初のページの直前に在る
+  expect(
+    await mgHeads.evaluate((el) => el.nextElementSibling?.getAttribute('data-thumb-cell')),
+    '見出しが足した PDF の最初のページの前に無い',
+  ).toBe('4');
+  // × = この PDF のページをすべて外す(元の 3 ページだけに戻り、保存ボタンも消える)
+  await clickReal(mg, '[data-pkc-field="pdf-source-remove"]');
+  await expect(mgHeads, '× を押しても見出しが残る').toHaveCount(0);
+  await expect(mg.locator('.thumb-cell:not([hidden])'), '× を押しても足したページが残る').toHaveCount(3);
+  await expect(mg.locator('#edit-save'), '足したページを全部外したのに保存ボタンが残る').toBeHidden();
+  await expect(mg.locator('#status')).toContainText('「結合.pdf」のページをすべて外しました');
+  // ── パソコンのファイルを選ぶ(Q2)── 選んだ 2 ページが一覧の最後に並ぶ
+  await clickReal(mg, '#append-pdf');
+  const [chooser] = await Promise.all([mg.waitForEvent('filechooser', { timeout: 10_000 }), clickReal(mg, '#append-from-file')]);
   expect(await chooser.isMultiple(), '1 つだけ選ぶ').toBe(false);
   await chooser.setFiles({
     name: '足す.pdf',
@@ -1037,6 +1075,14 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     buffer: buildPdf(2, { box: [300, 400], prefix: 'extra' }),
   });
   await expect(mgThumbs, '足した 2 ページが一覧に並ばない').toHaveCount(5, { timeout: 15_000 });
+  await expect(mgHeads.locator('.src-head-label'), '見出しが「名前(N ページ)」でない').toHaveText('足す.pdf(2 ページ)');
+  // 中央で読める(Q3): 足したページの絵を押すと、元のページと同じに大きく出る(保存前)
+  await clickReal(mg, '[data-pkc-field="pdf-page-thumb"][data-thumb="4"]');
+  const mgBig = mg.locator('.page[data-page="4"] [data-pkc-field="pdf-page-image"]');
+  await expect(mgBig, '足したページが中央に出ない').toBeVisible({ timeout: 20_000 });
+  await expect(mgBig).toBeInViewport();
+  await expect(mg.locator('#pageno'), '中央の頁の番号が足したページでない').toHaveValue('4');
+  expect((await mgBig.boundingBox())?.width ?? 0, '足したページの絵が小さすぎる(サムネイルのまま)').toBeGreaterThan(200);
   await expect(mg.locator('#status')).toContainText('「足す.pdf」の 2 ページを後ろに足しました');
   await expect(mg.locator('#edit-save'), '足したのに保存ボタンが出ない').toBeVisible();
   await expect(mg.locator('#edit-note')).toContainText('編集中(5 / 5 ページ)');

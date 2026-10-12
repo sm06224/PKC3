@@ -72,6 +72,24 @@ export interface PdfEditResult {
   readonly message: string;
 }
 
+/**
+ * 窓の「PDF を足す → 添付から選ぶ」に出す、この collection の PDF の添付 1 件(#275)。
+ * ⚠ 窓へ渡すのは**題名と大きさと鍵だけ**(bytes は `attach-get` で貸した URL から取る)。
+ */
+export interface PdfAttachmentItem {
+  /** 添付の鍵(`attach-get` で bytes を借りるとき、そのまま返ってくる)。 */
+  readonly key: string;
+  readonly name: string;
+  readonly size: number | null;
+}
+
+/** 窓が借りた添付の URL を、窓が `attach-got` と言わないまま放っておいたときに返すまでの時間。 */
+export const ATTACH_LEND_TTL_MS = 30000;
+/** 窓へ渡す一覧の件数の上限(放送の大きさの歯止め)。 */
+export const ATTACH_LIST_MAX = 500;
+/** `attach-get` の鍵として受ける長さの上限。 */
+const ATTACH_KEY_MAX = 256;
+
 interface Broadcaster {
   postMessage(data: unknown): void;
   close(): void;
@@ -90,6 +108,16 @@ export interface PdfReaderDeps {
    * 🔴 **Promise** ── 「できた」は新しい添付が作れてから返す。失敗しても理由を返す(窓を待たせ続けない)。
    */
   readonly onEdited: (session: PdfSession, key: string) => Promise<PdfEditResult>;
+  /**
+   * 🔴 **窓が「添付から選ぶ」を開いた**(#275 結合)。この collection の PDF の添付の一覧を返す。
+   * ⚠ 一覧に載せるかの判断(PDF か・自分自身を含めるか)は呼び側(`main.ts` → `features/pdf/pdf-attachments.ts`)が持つ。
+   */
+  readonly listAttachments: () => Promise<readonly PdfAttachmentItem[]>;
+  /**
+   * 🔴 **窓が、選んだ添付の bytes を借りたい**。貸せるのは**一覧にある PDF の添付だけ**(呼び側が最後の門 ── 窓の鍵を信用しない)。
+   * 無ければ `null`。⚠ 貸した URL は窓が `attach-got` と言うか、`ATTACH_LEND_TTL_MS` 経つか、窓が閉じたときに本体が返す。
+   */
+  readonly lendAttachment: (key: string) => Promise<PdfLent | null>;
   /** 窓が読めず、内蔵の表示へ退避した(断り文は出さない。状態の行へ 1 行)。 */
   readonly onFellBack: (session: PdfSession) => void;
   /** 窓が文書を取れなかった(貸した URL が既に無い等)。 */
@@ -128,6 +156,8 @@ interface Live {
   lentDisposed: boolean;
   lastAliveAt: number;
   helloTimer: unknown;
+  /** 窓へ貸している添付の URL(`attach-get`)。鍵 → 貸し出しと、返す時計。 */
+  readonly attachLends: Map<string, { lent: PdfLent; timer: unknown }>;
 }
 
 export class PdfReaderHost {
@@ -222,6 +252,7 @@ export class PdfReaderHost {
       // 開いた直後は「生きている」側に置く(同じ添付を続けて押しても 2 枚目を開かない)
       lastAliveAt: this.now(),
       helloTimer: null,
+      attachLends: new Map(),
     };
     this.lives.set(token, live);
     live.helloTimer = this.setTimer(() => {
@@ -251,6 +282,7 @@ export class PdfReaderHost {
     for (const l of [...this.lives.values()]) {
       if (l.helloTimer !== null) this.clearTimer(l.helloTimer);
       this.release(l);
+      this.releaseAttach(l);
     }
     this.lives.clear();
     this.gone.clear();
@@ -267,6 +299,32 @@ export class PdfReaderHost {
       l.lent.dispose();
     } catch {
       // 戻せなかっただけ ── 呼び側を落とさない
+    }
+  }
+
+  /** 窓へ貸している添付の URL を、全部返す(窓が閉じたとき / 本体が畳まれるとき)。 */
+  private releaseAttach(l: Live): void {
+    for (const [, a] of l.attachLends) {
+      this.clearTimer(a.timer);
+      try {
+        a.lent.dispose();
+      } catch {
+        // 戻せなかっただけ
+      }
+    }
+    l.attachLends.clear();
+  }
+
+  /** 窓へ貸した添付 1 件を返す(`attach-got` / 時間切れ)。 */
+  private releaseAttachOne(l: Live, key: string): void {
+    const a = l.attachLends.get(key);
+    if (a === undefined) return;
+    l.attachLends.delete(key);
+    this.clearTimer(a.timer);
+    try {
+      a.lent.dispose();
+    } catch {
+      // 戻せなかっただけ
     }
   }
 
@@ -380,9 +438,73 @@ export class PdfReaderHost {
         );
         return;
       }
+      case 'attach-list': {
+        const reply = (body: { ok: boolean; items: readonly PdfAttachmentItem[] }): void => {
+          try {
+            this.send('attach-list-result', token, body);
+          } catch {
+            // 待っている間に放送を閉じた ── 返す先が無いだけ
+          }
+        };
+        void this.deps.listAttachments().then(
+          (items) =>
+            reply({
+              ok: true,
+              items: items
+                .slice(0, ATTACH_LIST_MAX)
+                .map((i) => ({ key: i.key, name: i.name, size: i.size })),
+            }),
+          () => reply({ ok: false, items: [] }),
+        );
+        return;
+      }
+      case 'attach-get': {
+        const key = payload['key'];
+        if (typeof key !== 'string' || key === '' || key.length > ATTACH_KEY_MAX) return;
+        const refuse = (): void => {
+          try {
+            this.send('attach-get-result', token, { ok: false, key, url: null });
+          } catch {
+            // 待っている間に放送を閉じた
+          }
+        };
+        void this.deps.lendAttachment(key).then((lent) => {
+          if (lent === null) {
+            refuse();
+            return;
+          }
+          // 待っている間に窓が閉じた / 畳まれた ── 貸さずに返す
+          if (this.lives.get(token) !== live) {
+            try {
+              lent.dispose();
+            } catch {
+              // 戻せなかっただけ
+            }
+            return;
+          }
+          this.releaseAttachOne(live, key);
+          live.attachLends.set(key, {
+            lent,
+            timer: this.setTimer(() => this.releaseAttachOne(live, key), ATTACH_LEND_TTL_MS),
+          });
+          try {
+            this.send('attach-get-result', token, { ok: true, key, url: lent.url });
+          } catch {
+            this.releaseAttachOne(live, key);
+          }
+        }, refuse);
+        return;
+      }
+      case 'attach-got': {
+        // 🔑 窓が bytes を握った ── ここが貸した URL の寿命の終端
+        const key = payload['key'];
+        if (typeof key === 'string') this.releaseAttachOne(live, key);
+        return;
+      }
       case 'closed':
         if (live.helloTimer !== null) this.clearTimer(live.helloTimer);
         this.release(live);
+        this.releaseAttach(live);
         this.lives.delete(token);
         // 窓の F5 は同じ token で名乗り直す ── 控えておき、黙らず答える
         this.remember(token, { session: live.session, openFailed: false });

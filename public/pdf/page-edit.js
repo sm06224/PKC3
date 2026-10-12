@@ -105,11 +105,74 @@
     return { sources: sources, used: used };
   }
 
+  /**
+   * 足した PDF `added[k]` のページを、並びから**全部**外す(別の場所へ動かしたページも)。`added` からも `k` 番目を落とす
+   * (使わない PDF の bytes は worker へ渡さない)。範囲の外の `k` なら、どちらも同じ内容の写しを返す。
+   * @returns {{ items: {page:number,rot:number}[], added: {first:number,count:number}[] }}
+   */
+  function removeSource(items, added, k) {
+    if (!(k >= 0 && k < added.length)) return { items: items.slice(), added: added.slice() };
+    var a = added[k];
+    return {
+      items: items.filter(function (it) {
+        return !(it.page >= a.first && it.page < a.first + a.count);
+      }),
+      added: added.filter(function (_, i) {
+        return i !== k;
+      }),
+    };
+  }
+
+  /**
+   * 並びの中で、足した PDF ごとの**見出しを置く位置**。各 PDF の**並びの中で最初に出てくるページ**の前(並べ替えた後は、
+   * いまの並びで先に出る側)。ページが 1 枚も残っていない PDF は出さない。
+   * @returns {{ page: number, k: number }[]}  `page` = 見出しの直後に来るページ(通し番号)/ `k` = `added` の何番目か
+   */
+  function sourceHeadings(items, added) {
+    var out = [];
+    var seen = {};
+    items.forEach(function (it) {
+      for (var k = 0; k < added.length; k += 1) {
+        var a = added[k];
+        if (it.page >= a.first && it.page < a.first + a.count) {
+          if (!seen[k]) {
+            seen[k] = true;
+            out.push({ page: it.page, k: k });
+          }
+          return;
+        }
+      }
+    });
+    return out;
+  }
+
+  /** 見出しの字。例: `会議B.pdf(3 ページ)`。 */
+  function headingText(name, count) {
+    return String(name) + '(' + String(count) + ' ページ)';
+  }
+
   /** 足した PDF の断り(窓の下に出す一行)。`code` は `edit-core.js` の断りの種類。 */
   function appendRefusal(code) {
     if (code === 'encrypted') return 'パスワードで守られた PDF は足せません。何も変えていません';
     if (code === 'unreadable') return 'PDF として読めないため足せません。何も変えていません';
     return 'PDF を足せませんでした。もう一度試してください。何も変えていません';
+  }
+
+  /** 「添付から選ぶ」の断り(窓の下に出す一行、または一覧の代わりに出す一行)。 */
+  function attachRefusal(code) {
+    if (code === 'empty') return 'このコレクションに、PDF の添付はありません';
+    if (code === 'no-reply') return '添付の PDF を取得できませんでした。PKC3 のウィンドウから、もう一度開いてください';
+    return '添付の PDF を読み込めませんでした。もう一度試してください。何も変えていません';
+  }
+
+  /** 「添付から選ぶ」の一覧の 1 行。大きさが分かれば後ろに添える(例: `会議B.pdf(1.2 MB)`)。 */
+  function attachLabel(name, size) {
+    if (typeof size !== 'number' || !(size >= 0)) return String(name);
+    var text;
+    if (size < 1024) text = String(size) + ' B';
+    else if (size < 1024 * 1024) text = String(Math.round(size / 1024)) + ' KB';
+    else text = (Math.round((size / (1024 * 1024)) * 10) / 10).toFixed(1) + ' MB';
+    return String(name) + '(' + text + ')';
   }
 
   /** 足せた知らせ。 */
@@ -248,6 +311,11 @@
     toJob: toJob,
     appendPages: appendPages,
     sourcesFor: sourcesFor,
+    removeSource: removeSource,
+    sourceHeadings: sourceHeadings,
+    headingText: headingText,
+    attachRefusal: attachRefusal,
+    attachLabel: attachLabel,
     appendRefusal: appendRefusal,
     appendedNote: appendedNote,
     canSave: canSave,

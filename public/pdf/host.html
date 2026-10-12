@@ -66,6 +66,17 @@
   #hl-pop[hidden] { display: none }
   #hl-pop button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
     border-radius: 3px; padding: 3px 9px }
+  /* 「PDF を足す」の足し方の選び(添付から / パソコンのファイルから)。押した位置の下に出す */
+  #append-menu { position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; min-width: 14em; max-width: 24em;
+    padding: 4px; background: #000e; border: 1px solid #555; border-radius: 4px }
+  #append-menu[hidden], #append-pick[hidden] { display: none }
+  #append-menu button { font: inherit; cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
+    border-radius: 3px; padding: 4px 9px; text-align: left }
+  #append-menu button:hover { background: #3d5a80 }
+  #append-pick { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin-top: 4px;
+    padding-top: 4px; border-top: 1px solid #444 }
+  #append-pick .append-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #append-pick .append-note { padding: 4px 6px; color: #bbb }
   #scroller { position: fixed; inset: var(--bar-h, 38px) 0 0 0; overflow: auto }
   /* 編集中の案内の 1 行(#275 段②-1b)。出ている間は、その分だけ下の面を下げる */
   #edit-bar { position: fixed; inset: var(--bar-h, 38px) 0 auto 0; min-height: 26px; box-sizing: border-box; display: flex;
@@ -110,6 +121,15 @@
   .thumb-drop { right: 8px }
   .thumb-up { left: 8px }
   .thumb-down { left: 32px }
+  /* 足した PDF の見出し(その PDF の最初のページの前)と、足したページの絵の下の元の PDF の名前 */
+  .src-head { flex: none; width: 104px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 3px 4px;
+    background: #26354d; border-radius: 3px; color: #cfe0ff; font-size: 11px; line-height: 1.3 }
+  .src-head-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  .src-head-drop { all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 18px; height: 18px; line-height: 18px;
+    text-align: center; border-radius: 3px; background: #000b; color: #eee; font-size: 13px }
+  .src-head-drop:hover { background: #8a2b2b }
+  .src-head-drop:focus-visible { outline: 2px solid #8ab4ff }
+  .thumb-src { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #8fa6c8 }
   .thumb-cell:hover .thumb-act, .thumb-cell:focus-within .thumb-act { opacity: 1 }
   .thumb-act:hover { background: #3d5a80 }
   .thumb-act:focus-visible { outline: 2px solid #8ab4ff; opacity: 1 }
@@ -172,7 +192,7 @@
   <button id="hit-next" type="button" title="次の一致へ">次の一致</button>
   <span id="hits"></span>
   <span class="sp"></span>
-  <button id="append-pdf" type="button" disabled title="別の PDF を選んで、そのページをこの PDF の後ろに足します。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)">PDF を足す</button>
+  <button id="append-pdf" type="button" disabled aria-haspopup="true" aria-expanded="false" title="別の PDF を選んで、そのページをこの PDF の後ろに足します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)">PDF を足す</button>
   <input id="append-file" type="file" accept="application/pdf,.pdf" hidden>
   <button id="edit-save" type="button" hidden title="並べ替え・回転・外したページを反映した、新しい PDF を添付に加えます(元の PDF は変わりません)">別の PDF として保存</button>
   <button id="extract" type="button" disabled title="一覧で選んだページ(Ctrl+クリック・Shift+クリックで複数)だけを、新しい PDF として添付に加えます(元の PDF は変わりません)">選んだページを別の PDF にする</button>
@@ -183,6 +203,7 @@
 <div id="plist-hint">ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl+クリックで選ぶ</div>
 <nav id="plist" aria-label="ページの一覧"></nav>
 <div id="scroller"><div id="pages"></div></div>
+<div id="append-menu" hidden><button id="append-from-note" type="button" title="このコレクションの添付にある PDF から選びます">添付から選ぶ…</button><button id="append-from-file" type="button" title="パソコンにある PDF のファイルを選びます">パソコンのファイルを選ぶ…</button><div id="append-pick" hidden></div></div>
 <div id="hl-pop" hidden><button id="hl-remove" type="button">ハイライトを外す</button></div>
 <div id="status" role="status"></div>
 <div id="msg">読み込んでいます…</div>
