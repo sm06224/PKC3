@@ -4720,6 +4720,19 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **お知らせを開く**(#582 段③ 第 2 群)── 押しボタンはヘルプの面の中にしか無く、面は開くまで組まれない
+   *   (`open-manual-window` と同じ事情)。実体は `open-system-notices` の受け手と同じ `openSystemNotices` 1 本。
+   * ⚠ 「システム」を開けるかは**画面の「設定」ボタン**が決める(編集中は押せない ── `open-settings` と同じ門)。
+   */
+  if (cmd === 'open-system-notices') {
+    const gate = root.querySelector<HTMLElement>(SHORTCUT_BUTTON['open-settings']!);
+    if (gate === null || (gate instanceof HTMLButtonElement && gate.disabled)) return false;
+    if (dry) return true;
+    prevent();
+    openSystemNotices(dispatcher, root);
+    return true;
+  }
+  /**
    * 🔴 **メッセージを開く**(#1017 C5)── 押しボタンを持たない(状態の行の押し口は未読のときだけ
    *   出る)ので、特例で直に開く。⚠ **編集中 / 失敗の画面では開かない**(reducer が断る遷移 ──
    *   `MESSAGES_READ`)。押せるふりをして黙って何も起きない行にしない:`dry` では偽(= 一覧は
@@ -4957,6 +4970,17 @@ export function runGlobalCommand(
 }
 
 /**
+ * 🔴 **お知らせの節を開く**(ヘルプの「お知らせを開く」と「操作を探す」の**唯一の実体**。§7)。
+ * ⚠ `dispatch` は同期なので、`openView` が返った時点で「システム」は描き終わっている ── その後に節を探せる。
+ */
+function openSystemNotices(dispatcher: Dispatcher, root: HTMLElement): void {
+  openView(dispatcher, 'settings');
+  root
+    .querySelector<HTMLElement>('[data-pkc-region="settings-notices-section"]')
+    ?.scrollIntoView({ block: 'start' });
+}
+
+/**
  * 🔴 **欄が空なら、欄へ移って理由を言う**(#582 段③。`PALETTE_FIELD_FIRST` の注釈)。
  * @returns 欄へ移した(= ボタンは押さない)か
  */
@@ -5062,7 +5086,8 @@ export function commandRowsFor(
     if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
     // 「マニュアルを別のウィンドウで開く」(#1452 案 1)── 押せないのは配線が無い版だけ(phase では断らない)
     if (id === 'open-manual-window') return ROOT_SERVICES.get(root)?.openManualWindow === undefined ? MANUAL_WINDOW_STALE : null;
-    const sel = SHORTCUT_BUTTON[id];
+    // 「お知らせを開く」(#582 段③)は押しボタンを持たない ── 「システム」を開く門(設定のボタン)の理由を使う
+    const sel = SHORTCUT_BUTTON[id === 'open-system-notices' ? 'open-settings' : id];
     if (sel === undefined) return null;
     return root.querySelector(sel)?.getAttribute(HINT_BLOCKED) ?? null;
   };
@@ -11222,12 +11247,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `CenterRouter.render` が既に「システム」を描いている ── `system-jump` と
    *   違い、押した時点ではまだ settings pane に居ないので `root` から探す。
    */
-  'open-system-notices': (dispatcher, _target, _services, root) => {
-    openView(dispatcher, 'settings');
-    root
-      .querySelector<HTMLElement>('[data-pkc-region="settings-notices-section"]')
-      ?.scrollIntoView({ block: 'start' });
-  },
+  'open-system-notices': (dispatcher, _target, _services, root) => openSystemNotices(dispatcher, root),
   /**
    * 🔴 **保存が止まった断り書きから、「システム」の「保存領域の点検」へ**(#1010 B)。
    *
@@ -12563,6 +12583,41 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'toggle-show-done': '[data-pkc-action="toggle-show-done"]',
   'toggle-show-archived': '[data-pkc-action="toggle-show-archived"]',
   'toggle-show-undated': '[data-pkc-action="toggle-show-undated"]',
+  /**
+   * 🔴 **名前で呼べなかった「高」の操作 第 2 群**(#582 段③。第 1 群と同じ作法 ── 命令 id = 押しボタンの
+   *   `data-pkc-action`、受け手は画面のボタンそのもの)。⚠ 全部、押した点から何も読まない
+   *   (`ACTIONS` の受け手を 1 件ずつ読んで確かめた:読むのは「ボタン自身の属性」か「`root` / 親から引く欄」だけ)。
+   * ⚠ 見送った 3 件は `docs/development/operation-unregistered-2026-10.md` に理由つきで残す:
+   *   `insert-diagram` / `insert-icon` は**打っている場所(キャレット)に入れる**ので、一覧を閉じた直後の位置が先頭(0,0)に戻って
+   *   本文の先頭に入る(実ブラウザで測った)── 範囲を控えて戻す経路(`EDITOR_RUN`)を通さない限り撃てない。
+   *   `dual-delete` は `filer-trash`(鍵あり・2 ペインでも効く)が同じ実体を通している。
+   */
+  'renumber-lists': '[data-pkc-action="renumber-lists"]',
+  'sort-tasks': '[data-pkc-action="sort-tasks"]',
+  'run-sql': '[data-pkc-action="run-sql"]',
+  'sql-er-toggle': '[data-pkc-action="sql-er-toggle"]',
+  'sql-schema-to-note': '[data-pkc-action="sql-schema-to-note"]',
+  'sql-to-note': '[data-pkc-action="sql-to-note"]',
+  'start-audio-capture': '[data-pkc-action="start-audio-capture"]',
+  'start-screen-capture': '[data-pkc-action="start-screen-capture"]',
+  'start-timer': '[data-pkc-action="start-timer"]',
+  'clear-selection': '[data-pkc-action="clear-selection"]',
+  'show-trash': '[data-pkc-action="show-trash"]',
+  'hide-trash': '[data-pkc-action="hide-trash"]',
+  'replace-all': '[data-pkc-action="replace-all"]',
+  'search-jump-next': '[data-pkc-action="search-jump-next"]',
+  'search-jump-prev': '[data-pkc-action="search-jump-prev"]',
+  // ⚠ 2 ペインは**焦点の在る側**のタブ(左右に同じボタンが居る。順に当てると、いつも左になる)
+  'dual-tab-add': '[data-pkc-region="dual-pane"][data-pkc-focused] [data-pkc-action="dual-tab-add"]',
+  'clear-kind-filter': '[data-pkc-action="clear-kind-filter"]',
+  'toggle-filer-flatten': '[data-pkc-action="toggle-filer-flatten"]',
+  'db-check': '[data-pkc-action="db-check"]',
+  'storage-profile': '[data-pkc-action="storage-profile"]',
+  'contacts-quick-add': '[data-pkc-action="contacts-quick-add"]',
+  'export-vcards': '[data-pkc-action="export-vcards"]',
+  'add-url-tile': '[data-pkc-action="add-url-tile"]',
+  'pc-pick-folder': '[data-pkc-action="pc-pick-folder"]',
+  'hide-history': '[data-pkc-action="hide-history"]',
 };
 
 /**
@@ -12595,6 +12650,10 @@ const PALETTE_FIELD_FIRST: Readonly<
   'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを足す」を押してください' },
   'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「本文に追記する」を押してください' },
   'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を足す」を押してください' },
+  // 第 2 群(#582 段③)── 欄はボタンと同じ親の中に居る
+  'replace-all': { field: '[data-pkc-field="replace-find"]', pane: null, say: '探す語をここに入れてから、「すべて置換」を押してください' },
+  'contacts-quick-add': { field: '[data-pkc-field="contacts-quick-name"]', pane: null, say: '足す連絡先の名前をここに入れてから、「連絡先を足す」を押してください' },
+  'add-url-tile': { field: '[data-pkc-field="launcher-add-url"]', pane: null, say: '足すリンクのアドレスをここに入れてから、「リンクを足す」を押してください' },
 };
 
 /** 整える 5 つ(#1233)。⚠ 命令 id(`keymap.ts`)→ 整え方(`text-tidy.ts`)。 */

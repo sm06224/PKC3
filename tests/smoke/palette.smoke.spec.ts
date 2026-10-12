@@ -180,6 +180,43 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     .poll(() => listed.count(), { message: '今日のノートが作られていない' })
     .toBe(listedBefore + 1);
 
+  /**
+   * ⑨ 🔴 **場面ごとに足した操作 第 2 群(#582 段③)が、実ブラウザで走る**。
+   * ⚠ 同じ起動の続き(新しい起動を足さない)。見るのは 3 つ(どれも「押すのと同じことが起きる」):
+   *   ア ゴミ箱を開く → 閉じる(フォルダの一覧の中のボタンを撃つ。往復で元へ戻る)
+   *   イ 時間を計る(ノートを開いている間だけ意味がある ── 今日のノートが開いている)
+   *   ウ お知らせを開く(押しボタンはヘルプの中にしか無い特例 ── ヘルプを開かずに「システム」のお知らせの節へ着く)
+   */
+  await ask('ゴミ箱を開く');
+  await expect(rowOf('show-trash'), 'フォルダの一覧を開いているのに押せない').toBeEnabled();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('[data-pkc-action="hide-trash"]'), 'ゴミ箱が開いていない').toBeVisible();
+  await ask('ゴミ箱を閉じる');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('[data-pkc-action="show-trash"]'), 'ゴミ箱が閉じていない').toBeVisible();
+
+  await ask('時間を計る');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '時間を計り始めていない(ボタンと同じ受け手に届いていない)',
+  ).toContainText('計り始めました');
+
+  expect(
+    await page.locator('[data-pkc-region="settings-notices-section"]').isVisible(),
+    '前提が崩れている(お知らせの節が最初から見えている)',
+  ).toBe(false);
+  await ask('お知らせを開く');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.locator('[data-pkc-region="settings-notices-section"]'),
+    'ヘルプを開かずに、お知らせの節へ着かない',
+  ).toBeVisible();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 

@@ -1034,6 +1034,11 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   中にしか無く、面は開くまで組まれないので、root に結んだ services から直に呼ぶ特例。
        */
       'open-manual-window',
+      /**
+       * ⚠ 2026-10-11 に足した(#582 段③ 第 2 群)── お知らせを開く。押しボタンはヘルプの面の中にしか無く、面は開くまで
+       *   組まれないので、ヘルプの押し口と同じ `openSystemNotices` を直に呼ぶ特例(`open-manual-window` と同じ事情)。
+       */
+      'open-system-notices',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

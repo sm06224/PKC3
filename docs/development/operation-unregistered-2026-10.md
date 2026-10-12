@@ -1,7 +1,7 @@
 # 名前で呼べない操作(未登記)の全数分類(#582 段③の下準備)
 
 > 出どころ:`node scripts/operation-table.mjs --unregistered`(2026-10-11、base `b1d8d9eb`)が出す 295 件のうち、
-> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件、#530 段⑤d の回転 `place-rotate` で 1 件増えて **229**。第 1 群で 18 件を登記して **211**)を、場面で分けて「名前で呼ぶ意味」を付けた。
+> 押した点を指さなくても呼べる側(`nameable` = 仕分けが `P1` でない)**219 件**(分類の後に #1562 で 1 件、#530 の矢じり `place-line-arrow` で 1 件、#530 段⑤a の文字の大きさ `place-size` で 1 件、#530 段⑤b のグループ `place-group` / `place-ungroup` で 2 件、#529 W5 の付箋の上で書く 4 つで 4 件、#530 段⑤d の回転 `place-rotate` で 1 件増えて **229**。第 1 群で 18 件を登記して **211**、第 2 群で 26 件を登記して **185**)を、場面で分けて「名前で呼ぶ意味」を付けた。
 > 手順と結論は `docs/development/operation-model-2026-08.md` §5.3「未登記 219 件の分類」。この file は**その全数表**である。
 
 ## 読み方
@@ -18,25 +18,25 @@
 | ノートの整理 | 20 | 0 | 20 | (第 1 群で登記した ── 下の「登記した 18 件」) ／ 低: この整理案を適用 / タグを付ける |
 | コピー・書き出し | 7 | 0 | 7 | (第 1 群で 4 件を登記した) ／ 低: 選択範囲をコピー / このブロックをコピー / この章をコピー |
 | 予定 | 5 | 0 | 5 | (第 1 群で登記した) ／ 低: (前の日/次の日) / やること ほか |
-| SQL | 12 | 4 | 8 | SQL を実行 / 構造を見る / 構造をノートへ書き出す ／ 低: ○○ を外す / どのエンジンで実行するか |
-| 本文の整形 | 5 | 4 | 1 | 図を入れる / アイコンを入れる / 番号を振り直す ／ 低: (整形バーの書式ボタン) |
-| 録音・録画・時間 | 10 | 3 | 7 | 録音する / 画面を録画する / 時間を計る ／ 低: 再生をやめる / 選んだ範囲を消す |
-| ゴミ箱・選択 | 5 | 3 | 2 | 選択を解除 / ゴミ箱を閉じる / ゴミ箱を開く ／ 低: まとめてゴミ箱へ移す / ゴミ箱を空にする |
-| 検索・置換 | 4 | 3 | 1 | すべて置換 / ›(次の一致へ) / ‹(前の一致へ) ／ 低: ×(一致の表示を閉じる) |
-| 2 ペインファイラ | 15 | 2 | 13 | ゴミ箱 / タブを足す ／ 低: (戻る) / (ブックマーク) |
-| 表示の切り替え・絞り | 11 | 2 | 9 | 種類の絞りを外す / 中まで全部出す ／ 低: 絞りを外す / (閲覧の切り替え) |
-| 保存領域・保守 | 5 | 2 | 3 | ノートの保存データを確認する / 容量を調べる ／ 低: ノートの保存データを作り直す / ノートの保存データを初期化する |
-| 連絡先 | 2 | 2 | 0 | 連絡先を足す / vCard で書き出す |
-| 設定 | 33 | 1 | 32 | お知らせを開く ／ 低: コピーの履歴を消す / 最近開いた記録を消す |
-| アプリ | 12 | 1 | 11 | リンクを足す(一覧の「+」) ／ 低: 並べ替えを終える / アプリを開く |
-| 取り込み・外部 | 8 | 1 | 7 | PC のフォルダを選ぶ ／ 低: 外部画像を取り込む / リンク先のアイコンを取り込む |
-| 履歴・版 | 3 | 1 | 2 | 履歴を閉じる ／ 低: この版を閉じる / いまの本文と比べる |
+| SQL | 8 | 0 | 8 | (第 2 群で 4 件を登記した) ／ 低: ○○ を外す / どのエンジンで実行するか |
+| 本文の整形 | 3 | 0 | 3 | (第 2 群で 2 件を登記した) ／ 低: 図を入れる / アイコンを入れる / (整形バーの書式ボタン) |
+| 録音・録画・時間 | 7 | 0 | 7 | (第 2 群で 3 件を登記した) ／ 低: 再生をやめる / 選んだ範囲を消す |
+| ゴミ箱・選択 | 2 | 0 | 2 | (第 2 群で 3 件を登記した) ／ 低: まとめてゴミ箱へ移す / ゴミ箱を空にする |
+| 検索・置換 | 1 | 0 | 1 | (第 2 群で 3 件を登記した) ／ 低: ×(一致の表示を閉じる) |
+| 2 ペインファイラ | 14 | 0 | 14 | (第 2 群で 1 件を登記した) ／ 低: ゴミ箱 / (戻る) / (ブックマーク) |
+| 表示の切り替え・絞り | 9 | 0 | 9 | (第 2 群で 2 件を登記した) ／ 低: 絞りを外す / (閲覧の切り替え) |
+| 保存領域・保守 | 3 | 0 | 3 | (第 2 群で 2 件を登記した) ／ 低: ノートの保存データを作り直す / ノートの保存データを初期化する |
+| 連絡先 | 0 | 0 | 0 | (第 2 群で 2 件とも登記した) |
+| 設定 | 32 | 0 | 32 | (第 2 群で 1 件を登記した) ／ 低: コピーの履歴を消す / 最近開いた記録を消す |
+| アプリ | 11 | 0 | 11 | (第 2 群で 1 件を登記した) ／ 低: 並べ替えを終える / アプリを開く |
+| 取り込み・外部 | 7 | 0 | 7 | (第 2 群で 1 件を登記した) ／ 低: 外部画像を取り込む / リンク先のアイコンを取り込む |
+| 履歴・版 | 2 | 0 | 2 | (第 2 群で 1 件を登記した) ／ 低: この版を閉じる / いまの本文と比べる |
 | 確認画面・カード・帯の中のボタン | 18 | 0 | 18 | (なし) ／ 低: 外部の画像をこのノートで読み込む / 設定を適用 |
 | 板 | 14 | 0 | 14 | (なし) ／ 低: ここに板を置く / テンプレートから板を置く… |
 | 部品を取る | 7 | 0 | 7 | (なし) ／ 低: (取り込み中のやめる) / (Office の部品を選ぶ) |
 | 章・コードの編集箱 | 4 | 0 | 4 | (なし) ／ 低: コードの編集をやめる / 章の編集をやめる |
 | スマホ幅専用 | 2 | 0 | 2 | (なし) ／ 低: このノートの操作を開く / ← 一覧へ戻る ほか |
-| **合計** | **202** | **29** | **173** | |
+| **合計** | **176** | **0** | **176** | |
 
 ## ノートの整理
 
@@ -103,12 +103,57 @@
 | `toggle-show-done` | 登記済み | 済んだ行 | (下記) | `src/adapter/ui/render/schedule.ts:774` |
 | `toggle-show-undated` | 登記済み | 日付のない項目 | (下記) | `src/adapter/ui/render/schedule.ts:772` |
 
-- 🔑 一覧の字(`keymap.ts` の `label`)は押しボタンの字と同じ(`tests/adapter/palette-scene-batch.test.ts` が source から引いて突き合わせる)。**違うのは 4 件**:
+- 🔑 一覧の字(`keymap.ts` の `label`)は押しボタンの字と同じ(`tests/adapter/palette-scene-batch.test.ts` が source から引いて突き合わせる)。**違うのは 5 件**:
   `toggle-show-*` の 3 件(画面の字は件数つきの「済み(3)」「片付けたもの(2)」「日付のないもの(5)」で、一覧に出すには「出す・隠す」の動詞が要る。頭の語は画面と同じ)/
   `attach-file`(画面は帯の「添付」と、`⋯` のメニューの「添付する」の 2 つ ── 後者に合わせた)。
   ⚠ 元の表の `schedule-today` の「今月に戻る/今日」は、後ろの「今日」が日・週の表示の `schedule-day-go` のボタンなので、`schedule-today` の字は「今月に戻る」だけである。
 - 🔑 押せる条件は**ボタンが画面に在るか**:別の画面にいる間 / ノートを選んでいない間は、一覧が「いまは押せません ── 〜のときだけ効きます」と言う。
   行ごと隠してある間(日付が無い / 済み・片付け・日付なしが 0 件)も押せない。
+
+## 登記した 26 件(#582 段③ 第 2 群、2026-10-11)
+
+第 1 群と同じ作法(命令 id = 押しボタンの `data-pkc-action`、受け手は画面のボタンそのもの = `SHORTCUT_BUTTON`、鍵なし)で、残りの「高」のうち 26 件を登記した。
+**登記する前に 1 件ずつ実ブラウザで「一覧から呼ぶと、画面のボタンと同じことが起きる」を確かめた**(確かめられなかった 3 件は下の「足さなかった 3 件」)。
+
+| 操作 | 状態 | 画面の字(元の表) | 押し所 |
+|---|---|---|---|
+| `renumber-lists` | 登記済み | 番号を振り直す | `src/adapter/ui/render/format-bar.ts:191` |
+| `sort-tasks` | 登記済み | 完了した項目を末尾へ移す | `src/adapter/ui/render/format-bar.ts:213` |
+| `run-sql` | 登記済み | SQL を実行 | `src/adapter/ui/render/sql.ts:248` |
+| `sql-er-toggle` | 登記済み | 構造を見る | `src/adapter/ui/render/sql.ts:329` |
+| `sql-schema-to-note` | 登記済み | 構造をノートへ書き出す | `src/adapter/ui/render/sql.ts:304` |
+| `sql-to-note` | 登記済み | ノートへ書き出す | `src/adapter/ui/render/sql.ts:261` |
+| `start-audio-capture` | 登記済み | 録音する | `src/adapter/ui/render/shell.ts:645`<br>`src/adapter/ui/render/shell.ts:649` |
+| `start-screen-capture` | 登記済み | 画面を録画する | `src/adapter/ui/render/shell.ts:652`<br>`src/adapter/ui/render/shell.ts:656` |
+| `start-timer` | 登記済み | 時間を計る | `src/adapter/ui/render/shell.ts:667`<br>`src/adapter/ui/render/shell.ts:671` |
+| `clear-selection` | 登記済み | 選択を解除 | `src/adapter/ui/render/filer.ts:487` |
+| `hide-trash` | 登記済み | ゴミ箱を閉じる | `src/adapter/ui/render/filer.ts:1204` |
+| `show-trash` | 登記済み | ゴミ箱を開く | `src/adapter/ui/render/filer.ts:1192` |
+| `replace-all` | 登記済み | すべて置換 | `src/adapter/ui/render/shell.ts:857` |
+| `search-jump-next` | 登記済み | ›(次の一致へ) | `src/adapter/ui/render/search-jump.ts:240` |
+| `search-jump-prev` | 登記済み | ‹(前の一致へ) | `src/adapter/ui/render/search-jump.ts:238` |
+| `clear-kind-filter` | 登記済み | 種類の絞りを外す | `src/adapter/ui/render/kind-bar.ts:128` |
+| `toggle-filer-flatten` | 登記済み | 中まで全部出す | `src/adapter/ui/render/filer.ts:957` |
+| `db-check` | 登記済み | ノートの保存データを確認する | `src/adapter/ui/render/commands.ts:542` |
+| `storage-profile` | 登記済み | 容量を調べる | `src/adapter/ui/render/commands.ts:479` |
+| `contacts-quick-add` | 登記済み | 連絡先を足す | `src/adapter/ui/render/contacts.ts:94` |
+| `export-vcards` | 登記済み | vCard で書き出す | `src/adapter/ui/render/contacts.ts:190` |
+| `dual-tab-add` | 登記済み | タブを足す | `src/adapter/ui/render/dual-filer.ts:1124` |
+| `add-url-tile` | 登記済み | リンクを足す(一覧の「+」) | `src/adapter/ui/render/launcher.ts:129` |
+| `pc-pick-folder` | 登記済み | PC のフォルダを選ぶ | `src/adapter/ui/render/pc-folder.ts:113` |
+| `open-system-notices` | 登記済み | お知らせを開く | `src/adapter/ui/render/help.ts:626` |
+| `hide-history` | 登記済み | 履歴を閉じる | `src/adapter/ui/render/detail.ts:4193` |
+
+- 🔑 一覧の字(`keymap.ts` の `label`)は画面のボタンの字。**違うのは 4 件**:`start-audio-capture`(画面は帯の「録音」とメニューの「録音する」の 2 つ ── 後者)/ `start-screen-capture`(同じく「画面を録画する」)/ `search-jump-next`・`search-jump-prev`(画面は「›」「‹」だけで、読み上げ名の「次の一致へ」「前の一致へ」)/ `sort-tasks`(元の表の「完了した項目を末尾へ移す」は機械が拾った候補で、画面の字は「完了項目を末尾へ」)。
+- 🔑 押せる条件は**ボタンが画面に在るか**(第 1 群と同じ)。例外が 2 つ:`open-system-notices` は押しボタンがヘルプの中にしか無いので、`open-manual-window` と同じ特例で、ヘルプの押し口と同じ `openSystemNotices` を直に呼ぶ(「設定」のボタンが押せない間 = 編集中は押せない)/ `dual-tab-add` は左右に同じボタンが居るので、**焦点の在る側**のボタンを引く(`[data-pkc-focused]`)。
+- 🔑 欄が先に要る 3 件(`replace-all` の探す語 / `contacts-quick-add` の名前 / `add-url-tile` のアドレス)は、欄が空ならその欄へ移る(`PALETTE_FIELD_FIRST`)。
+- 🔑 録音・録画・時間は、ノートを開いていないと**ボタンが押せる顔のまま**、押すと画面のボタンと同じ断り(「ノートを開いてから押してください」)が出る。灰色にはならない(ボタン自身が押せるため)。
+- 🔑 検索の「次へ / 前へ」は、帯が出ている**ノートの別ウィンドウ**の「操作を探す」から呼べる(主ウィンドウには帯が無いので灰色)。
+
+### 足さなかった 3 件
+
+- `insert-diagram` / `insert-icon`:打っている場所に入れる操作で、一覧を閉じた直後の位置が先頭に戻る(実ブラウザで、`hello world` の 5 字目で呼んだらアイコンが先頭に入った / 選んでいた範囲は読めず、図の種類を聞かれた)。`format-bold` などの記法は、開いたときの範囲を控えて戻す経路(`EDITOR_RUN`)を通っている。同じ経路を通すなら足せる ── 次の群の課題。
+- `dual-delete`:`filer-trash`(ゴミ箱へ移す)が同じ実体を通っている。
 
 ## 板
 
@@ -152,20 +197,14 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `insert-diagram` | 高 | 図を入れる | `src/adapter/ui/render/format-bar.ts:251` | 本文への挿入。整形バーの日常操作 |
-| `insert-icon` | 高 | アイコンを入れる | `src/adapter/ui/render/format-bar.ts:172` | 同上 |
-| `renumber-lists` | 高 | 番号を振り直す | `src/adapter/ui/render/format-bar.ts:191` | 本文の整え。整形バーの日常操作 |
-| `sort-tasks` | 高 | 完了した項目を末尾へ移す | `src/adapter/ui/render/format-bar.ts:213` | 本文の整え。整形バーの日常操作 |
+| `insert-diagram` | 低 | 図を入れる | `src/adapter/ui/render/format-bar.ts:251` | 🔴 第 2 群で登記を試みて外した:打っている場所(キャレット)に入れるので、一覧を閉じた直後に位置が先頭へ戻り、本文の先頭に入る(実ブラウザで測った)。範囲を控えて戻す経路(`EDITOR_RUN`)が要る |
+| `insert-icon` | 低 | アイコンを入れる | `src/adapter/ui/render/format-bar.ts:172` | 🔴 同上(アイコンも打っている場所に入る。実ブラウザで先頭に入るのを測った) |
 | `format-text` | 低 | (整形バーの書式ボタン) | `src/adapter/ui/render/format-bar.ts:40` | 書式の種類を押したボタンから読む。書式ごとの命令が既に別に在る |
 
 ## SQL
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `run-sql` | 高 | SQL を実行 | `src/adapter/ui/render/sql.ts:248` | SQL の面の主操作 |
-| `sql-er-toggle` | 高 | 構造を見る | `src/adapter/ui/render/sql.ts:329` | SQL 面の表示切り替え |
-| `sql-schema-to-note` | 高 | 構造をノートへ書き出す | `src/adapter/ui/render/sql.ts:304` | SQL の結果をノートにする |
-| `sql-to-note` | 高 | ノートへ書き出す | `src/adapter/ui/render/sql.ts:261` | 同上 |
 | `remove-sql-source` | 低 | ○○ を外す | `src/adapter/ui/render/sql.ts:672` | 押した対象(行)を指す |
 | `set-sql-engine` | 低 | どのエンジンで実行するか | `src/adapter/ui/render/sql.ts:280` | 選んだ値を読む |
 | `set-sql-source` | 低 | 調べる対象 | `src/adapter/ui/render/sql.ts:271` | 選んだ値を読む |
@@ -179,9 +218,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `start-audio-capture` | 高 | 録音する | `src/adapter/ui/render/shell.ts:645`<br>`src/adapter/ui/render/shell.ts:649` | 日常操作(作る操作の並び) |
-| `start-screen-capture` | 高 | 画面を録画する | `src/adapter/ui/render/shell.ts:652`<br>`src/adapter/ui/render/shell.ts:656` | 同上 |
-| `start-timer` | 高 | 時間を計る | `src/adapter/ui/render/shell.ts:667`<br>`src/adapter/ui/render/shell.ts:671` | 日常操作 |
 | `capture-stop` | 低 | 再生をやめる | `src/adapter/ui/render/captures.ts:665` | 再生中にしか出ないボタン |
 | `capture-trim-clear` | 低 | 選んだ範囲を消す | `src/adapter/ui/render/captures.ts:584` | 切り出しの範囲指定の途中 |
 | `capture-trim-end` | 低 | ここを終わりにする | `src/adapter/ui/render/captures.ts:555` | 同上(再生位置を読む) |
@@ -194,9 +230,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `clear-selection` | 高 | 選択を解除 | `src/adapter/ui/render/filer.ts:487` | まとめ操作の選択を外す |
-| `hide-trash` | 高 | ゴミ箱を閉じる | `src/adapter/ui/render/filer.ts:1204` | ゴミ箱の開閉 |
-| `show-trash` | 高 | ゴミ箱を開く | `src/adapter/ui/render/filer.ts:1192` | ゴミ箱の開閉 |
 | `delete-selected` | 低 | まとめてゴミ箱へ移す | `src/adapter/ui/render/filer.ts:482` | 選択が前提。確認を伴う |
 | `purge-trash` | 低 | ゴミ箱を空にする | `src/adapter/ui/render/filer.ts:1210` | 取り消せない。確認を伴う |
 
@@ -204,17 +237,12 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `replace-all` | 高 | すべて置換 | `src/adapter/ui/render/shell.ts:857` | 検索置換の実行 |
-| `search-jump-next` | 高 | ›(次の一致へ) | `src/adapter/ui/render/search-jump.ts:240` | 検索で一致を巡る日常操作(帯の中だが探す人が居る) |
-| `search-jump-prev` | 高 | ‹(前の一致へ) | `src/adapter/ui/render/search-jump.ts:238` | 同上 |
 | `search-jump-end` | 低 | ×(一致の表示を閉じる) | `src/adapter/ui/render/search-jump.ts:242` | 検索の一致帯の中のボタン |
 
 ## 表示の切り替え・絞り
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `clear-kind-filter` | 高 | 種類の絞りを外す | `src/adapter/ui/render/kind-bar.ts:128` | 種類の絞りを解除。絞りが掛かった状態からの日常操作 |
-| `toggle-filer-flatten` | 高 | 中まで全部出す | `src/adapter/ui/render/filer.ts:957` | ファイラの表示の切り替え |
 | `clear-entry-filter` | 低 | 絞りを外す | `src/adapter/ui/render/captures.ts:202`<br>`src/adapter/ui/render/contacts.ts:168` | 絞りが掛かっているときだけ出る欄内のボタン |
 | `set-browse` | 低 | (閲覧の切り替え) | `src/adapter/ui/render/shell.ts:315` | 選んだ値を押したボタンから読む |
 | `set-entry-sort` | 低 | 一覧の並び順 | `src/adapter/ui/render/shell.ts:431` | 選んだ値を読む |
@@ -229,8 +257,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `db-check` | 高 | ノートの保存データを確認する | `src/adapter/ui/render/commands.ts:542` | 保存領域の点検。保守の入口として探す人が居る |
-| `storage-profile` | 高 | 容量を調べる | `src/adapter/ui/render/commands.ts:479` | 保存領域の測定。探す人が居る |
 | `container-rebuild` | 低 | ノートの保存データを作り直す | `src/adapter/ui/render/commands.ts:341` | 保存データを作り直す。確認つきの保守 |
 | `container-reset` | 低 | ノートの保存データを初期化する | `src/adapter/ui/render/commands.ts:364` | 取り消せない全消去。パレットに置かない |
 | `storage-vacuum` | 低 | 縮める | `src/adapter/ui/render/commands.ts:272` | 保守。確認や待ちを伴う |
@@ -239,15 +265,12 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `contacts-quick-add` | 高 | 連絡先を足す | `src/adapter/ui/render/contacts.ts:94` | 連絡先の面の日常操作 |
-| `export-vcards` | 高 | vCard で書き出す | `src/adapter/ui/render/contacts.ts:190` | 連絡先の面の書き出し |
 
 ## 2 ペインファイラ
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `dual-delete` | 高 | ゴミ箱 | `src/adapter/ui/render/dual-filer.ts:224` | 同上 |
-| `dual-tab-add` | 高 | タブを足す | `src/adapter/ui/render/dual-filer.ts:1124` | 2 ペインのタブ操作 |
+| `dual-delete` | 低 | ゴミ箱 | `src/adapter/ui/render/dual-filer.ts:224` | 🔴 第 2 群で登記しなかった:`filer-trash`(ゴミ箱へ移す。鍵あり、文脈は 2 ペインでも効く)が同じ実体(`dual-delete`)を通している |
 | `dual-back` | 低 | (戻る) | `src/adapter/ui/render/dual-filer.ts:672` | 同じ実体を、登録済みの別の id(dual-… の命令)が既に通している |
 | `dual-bookmark` | 低 | (ブックマーク) | `src/adapter/ui/render/dual-filer.ts:674` | 2 ペインの中。動的描画 |
 | `dual-copy` | 低 | コピー | `src/adapter/ui/render/dual-filer.ts:172` | 同じ実体を、登録済みの別の id(dual-… の命令)が既に通している |
@@ -266,7 +289,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `add-url-tile` | 高 | リンクを足す(一覧の「+」) | `src/adapter/ui/render/launcher.ts:129` | アプリ一覧へ足す日常操作 |
 | `end-tile-reorder` | 低 | 並べ替えを終える | `src/adapter/ui/render/launcher.ts:258`<br>`src/features/entry-actions.ts:649` | 並べ替え中にしか出ない |
 | `launch-asset` | 低 | アプリを開く | `src/adapter/ui/render/detail.ts:3286` | 開いている添付アプリを開く(添付詳細の中) |
 | `launch-asset-extension` | 低 | ノート一覧を見せて開く | `src/adapter/ui/render/detail.ts:3318` | 開き方の選択肢の 1 つ(設定値の揺れ) |
@@ -283,7 +305,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `pc-pick-folder` | 高 | PC のフォルダを選ぶ | `src/adapter/ui/render/pc-folder.ts:113` | 取り込みの入口(ブラウザの選択を開く) |
 | `adopt-external-images` | 低 | 外部画像を取り込む | `src/adapter/ui/render/inspector.ts:1518`<br>`src/features/entry-actions.ts:709` | ノートごとの一度きりの整理。情報ペイン/メニューから届く |
 | `adopt-link-icon` | 低 | リンク先のアイコンを取り込む | `src/adapter/ui/render/detail.ts:4334` | 外へ取りに行く一度きりの操作。詳細欄の中 |
 | `pc-cut-folder` | 低 | (PC フォルダの切り取り) | `src/adapter/ui/render/pc-folder.ts:152` | PC フォルダの面の中。動的描画 |
@@ -296,7 +317,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `open-system-notices` | 高 | お知らせを開く | `src/adapter/ui/render/help.ts:626` | ヘルプからお知らせを開く入口 |
 | `clear-copy-history` | 低 | コピーの履歴を消す | `src/adapter/ui/actions/copy-history-menu.ts:63`<br>`src/adapter/ui/render/settings/copy-history.ts:52` | 履歴の削除(取り消せない確認つきの設定欄) |
 | `clear-opened-history` | 低 | 最近開いた記録を消す | `src/adapter/ui/render/settings/opened-history.ts:33` | 履歴の削除(設定欄) |
 | `clear-search-history` | 低 | 検索した語の記録を消す | `src/adapter/ui/render/settings/search-history.ts:29` | 履歴の削除(設定欄) |
@@ -334,7 +354,6 @@
 
 | 操作 | 名前で呼ぶ意味 | 画面の字 | 押し所 | 理由 |
 |---|---|---|---|---|
-| `hide-history` | 高 | 履歴を閉じる | `src/adapter/ui/render/detail.ts:4193` | 履歴を開閉する。開く側は既に登録済み |
 | `hide-revision-preview` | 低 | この版を閉じる | `src/adapter/ui/render/detail.ts:4122` | 版のプレビュー中にしか出ない |
 | `set-revision-compare` | 低 | いまの本文と比べる | `src/adapter/ui/render/detail.ts:4132` | 選んだ値を読む |
 
