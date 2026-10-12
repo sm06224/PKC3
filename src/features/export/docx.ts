@@ -108,6 +108,12 @@ export type DocxBlock =
        */
       readonly size?: 'small' | 'large' | 'xlarge';
       /**
+       * 🔴 **回転(度、1〜359)と、入っているグループの名前**(`rotate=` / `group=`。#530 段⑤c・⑤e)。
+       * ⚠ 回していない / グループに入っていない付箋は省く(**今までの組み方を 1 byte も変えない**)。Word は読まない。
+       */
+      readonly rotate?: number;
+      readonly group?: string;
+      /**
        * 🔴 **その板の名前**(`:::format{#今日 .pkc-place …}` の `#今日`。#530 段③e)。
        * ⚠ 名前は**線の繋ぎ先**にしか使わない ── 無い板は指せないので `null`。
        * ⚠ Word は読まない(位置・形と同じで、使うのは PowerPoint 側だけ)。

@@ -156,14 +156,14 @@ describe('🔴 戻せなかったものは件数で数える(黙って捨てな�
     + `<p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="1905000" cy="952500"/></a:xfrm>`
     + `<a:prstGeom prst="${prst}"/></p:spPr><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
 
-  it('図・表・グループを 1 つずつ数える', () => {
+  it('図・表を 1 つずつ数える(グループは開いて読むので数えない ── #530 段⑤c。空の grpSp は読む物が無いだけ)', () => {
     const xml = wrap(
       sp(2, 0, 0)
       + '<p:pic><p:nvPicPr/></p:pic><p:graphicFrame/><p:grpSp/><p:graphicFrame/>',
     );
     const got = readPptxSlide(xml);
     expect(got.placed).toBe(1);
-    expect(got.dropped).toBe(4);
+    expect(got.dropped).toBe(3);
   });
 
   it('位置を持たない図形と、両端が解決できない線を数える', () => {
