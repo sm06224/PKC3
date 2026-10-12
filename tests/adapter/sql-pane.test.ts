@@ -2761,6 +2761,113 @@ describe('表のつながり図(#918 段⑤)', () => {
     expect(erNote(pane), '足せたのに前の断りが残っている').toBe('');
   });
 
+  /**
+   * 🔴 **描き直しをまたいで、焦点・転がした位置・掴んで変えた高さが残る**(#918 段⑤d)。
+   * ⚠ 実ブラウザで測った事実:列に Enter を打つと `activeElement` が `BODY` になっていた。
+   * 🔑 「足せません」の回は `er.note` が変わり図が作り直される ── 描き直しが**起きる**場面で見る
+   *   (起きない場面で見ると、持ち越していなくても緑になる)。
+   */
+  it('🔴 押して図が描き直されても、鍵盤の焦点と掴んだ高さが残る', async () => {
+    const { pane, type } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    type('update t set a = 1');
+    const scroll = pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]')!;
+    scroll.style.height = '137px';
+    const col = pane.querySelector<HTMLElement>(
+      '[data-pkc-field="sql-er-column"][data-pkc-name="売上"][data-pkc-col="金額"]',
+    )!;
+    col.focus();
+    expect(document.activeElement, '前提:焦点が列に在る').toBe(col);
+    col.click();
+    // 前提:本当に描き直された(古い要素は捨てられている)
+    expect(erNote(pane), '前提:断りが出て図が描き直されている').toContain('足せません');
+    expect(col.isConnected, '前提:古い列の要素が残っている = 描き直していない').toBe(false);
+    const now = document.activeElement as HTMLElement;
+    expect(now.getAttribute('data-pkc-field'), '焦点が列から外れた').toBe('sql-er-column');
+    expect(now.getAttribute('data-pkc-name')).toBe('売上');
+    expect(now.getAttribute('data-pkc-col'), '同じ表の別の列に焦点が移った').toBe('金額');
+    expect(
+      pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]')!.style.height,
+      '掴んで変えた高さが初期に戻った',
+    ).toBe('137px');
+  });
+
+  it('🔴 焦点を持つ線の札が消えたら、図の中の「列をつなぐ」へ(BODY へ落とさない)', async () => {
+    const { pane } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const connect = pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]')!;
+    connect.click();
+    const cols = (t: string, c: string): HTMLElement =>
+      pane.querySelector<HTMLElement>(
+        `[data-pkc-field="sql-er-column"][data-pkc-name="${t}"][data-pkc-col="${c}"]`,
+      )!;
+    cols('売上', '金額').click();
+    cols('客', '名前').click();
+    const mine = pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-link"][data-pkc-mine="true"]');
+    expect(mine, '前提:自分で引いた線の札が出ている').not.toBeNull();
+    mine!.focus();
+    mine!.click();
+    expect(
+      pane.querySelector('[data-pkc-field="sql-er-link"][data-pkc-mine="true"]'),
+      '前提:線が消えている',
+    ).toBeNull();
+    expect(document.activeElement?.getAttribute('data-pkc-field'), '焦点が BODY へ落ちた').toBe(
+      'sql-er-connect',
+    );
+  });
+
+  it('🔴 矢印キー:上下は同じ四角の中、左右は隣の四角の表の名前へ。端では動かない', async () => {
+    const { pane } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const boxes = [...pane.querySelectorAll<HTMLElement>('[data-pkc-field="sql-er-box"]')];
+    expect(boxes.length, '前提:四角が 3 つ').toBe(3);
+    const head = (b: HTMLElement): HTMLElement =>
+      b.querySelector<HTMLElement>('[data-pkc-field="sql-er-table"]')!;
+    const key = (el: HTMLElement, k: string): boolean =>
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    const items = [...boxes[0]!.querySelectorAll<HTMLElement>('button')];
+    expect(items.length, '前提:最初の四角は表の名前 + 列').toBeGreaterThan(2);
+
+    head(boxes[0]!).focus();
+    expect(key(head(boxes[0]!), 'ArrowDown'), '押しが取り消されていない(図が一緒に転がる)').toBe(false);
+    expect(document.activeElement, '下で次の列へ行かない').toBe(items[1]);
+    key(items[1]!, 'ArrowDown');
+    expect(document.activeElement).toBe(items[2]);
+    key(items[2]!, 'ArrowUp');
+    expect(document.activeElement, '上で前の列へ戻らない').toBe(items[1]);
+
+    // 端:先頭で上 → 動かない(折り返さない)
+    head(boxes[0]!).focus();
+    expect(key(head(boxes[0]!), 'ArrowUp'), '扱わない押しまで取り消している').toBe(true);
+    expect(document.activeElement).toBe(head(boxes[0]!));
+    // 端:最後の列で下 → 動かない
+    const last = items[items.length - 1]!;
+    last.focus();
+    key(last, 'ArrowDown');
+    expect(document.activeElement, '最後の列で下を押したら外へ出た').toBe(last);
+
+    // 左右:隣の四角の表の名前へ。端では動かない
+    items[2]!.focus();
+    key(items[2]!, 'ArrowRight');
+    expect(document.activeElement, '右で隣の四角の表の名前へ行かない').toBe(head(boxes[1]!));
+    key(head(boxes[1]!), 'ArrowLeft');
+    expect(document.activeElement).toBe(head(boxes[0]!));
+    key(head(boxes[0]!), 'ArrowLeft');
+    expect(document.activeElement, '先頭の四角で左を押したら動いた').toBe(head(boxes[0]!));
+    head(boxes[2]!).focus();
+    key(head(boxes[2]!), 'ArrowRight');
+    expect(document.activeElement, '最後の四角で右を押したら動いた').toBe(head(boxes[2]!));
+
+    // 修飾キー付きは奪わない(ブラウザ・OS の操作)
+    head(boxes[0]!).focus();
+    const mod = new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true });
+    head(boxes[0]!).dispatchEvent(mod);
+    expect(document.activeElement, 'Alt+矢印まで奪った').toBe(head(boxes[0]!));
+  });
+
   it('🔴 調べる相手を変えたら、前の図を持ち越さない', async () => {
     const { pane, pick, runReadOnlySql } = setup(schemaReply);
     erBtn(pane).click();

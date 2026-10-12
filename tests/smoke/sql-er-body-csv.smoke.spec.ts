@@ -320,6 +320,92 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   );
 
   /**
+   * ── ②b 🔴 **鍵盤で辿れて、描き直されても位置が残る**(#918 段⑤d)。
+   *
+   * ⚠ 新しい起動は増やさない ── ②の続き(図が開いたまま・繋ぐは切)で見る。
+   * 🔑 見るのは 4 つ:① 矢印キーで四角の中を辿れる(Tab だけだと奥の表に着かない)
+   * ② 押して図が**実際に描き直された**後も焦点が残る(以前は `BODY` へ落ちた)
+   * ③ 掴んで変えた高さ・転がした位置が描き直しで戻らない ④ 焦点の輪が四角に切られない
+   * ⚠ ②③は描き直しが**起きる**押し所(「列をつなぐ」)で見る ── 起きない押し所では持ち越していなくても緑になる。
+   */
+  const focusedInfo = (): Promise<string> =>
+    page.evaluate(() => {
+      const e = document.activeElement as HTMLElement | null;
+      return e === null
+        ? 'null'
+        : `${e.tagName}|${e.getAttribute('data-pkc-field') ?? ''}|${e.getAttribute('data-pkc-name') ?? ''}|${e.getAttribute('data-pkc-col') ?? ''}`;
+    });
+  await csvBox.locator('[data-pkc-field="sql-er-table"]').focus();
+  await page.keyboard.press('ArrowDown');
+  expect(await focusedInfo(), '矢印の下で、四角の最初の列へ行かない').toMatch(
+    /^BUTTON\|sql-er-column\|棚卸\|/,
+  );
+  await page.keyboard.press('ArrowUp');
+  expect(await focusedInfo(), '矢印の上で、表の名前へ戻らない').toBe('BUTTON|sql-er-table|棚卸|');
+  await page.keyboard.press('ArrowLeft');
+  expect(await focusedInfo(), '矢印の左で、隣の四角(本文の表は最後の四角)の表の名前へ行かない').toMatch(
+    /^BUTTON\|sql-er-table\|(?!棚卸)/,
+  );
+  // ④ 輪:内側に引いている(四角は overflow:hidden なので、外側だと切れる)
+  const ring = await page.evaluate(() => {
+    const cs = getComputedStyle(document.activeElement as HTMLElement);
+    return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth), offset: parseFloat(cs.outlineOffset) };
+  });
+  expect(ring.style, '焦点の輪が出ていない').not.toBe('none');
+  expect(ring.width, '焦点の輪に太さが無い').toBeGreaterThan(0);
+  expect(ring.offset, '焦点の輪が四角の外側にあり、切られる').toBeLessThan(0);
+
+  // ③ 掴んで高さを変える(実際に引く)+ 転がす
+  const erScroll = page.locator('[data-pkc-field="sql-er-scroll"]');
+  const sizeBefore = (await erScroll.boundingBox())!;
+  await page.mouse.move(sizeBefore.x + sizeBefore.width - 4, sizeBefore.y + sizeBefore.height - 4);
+  await page.mouse.down();
+  await page.mouse.move(sizeBefore.x + sizeBefore.width - 4, sizeBefore.y + sizeBefore.height + 60, { steps: 5 });
+  await page.mouse.up();
+  const grownH = (await erScroll.boundingBox())!.height;
+  expect(grownH, '前提:掴んで高さが変わっていない').toBeGreaterThan(sizeBefore.height + 20);
+  const scrollable = await erScroll.evaluate((e) => {
+    e.scrollTop = 24;
+    e.scrollLeft = 24;
+    return { top: e.scrollTop, left: e.scrollLeft };
+  });
+  expect(scrollable.top, '前提:図が縦に転がせない(位置の持ち越しを見られない)').toBeGreaterThan(0);
+
+  // ② 描き直しが起きる押し(「列をつなぐ」)を鍵盤で → 焦点が残る
+  await page.evaluate(() => {
+    (window as unknown as { __erMarker?: Element }).__erMarker = document.querySelector('[data-pkc-field="sql-er-box"]')!;
+  });
+  await page.locator('[data-pkc-field="sql-er-connect"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pkc-field="sql-er-connect"]'), '繋ぐが入にならない').toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(
+    await page.evaluate(
+      () => document.querySelector('[data-pkc-field="sql-er-box"]') !== (window as unknown as { __erMarker?: Element }).__erMarker,
+    ),
+    '前提:図が描き直されていない(持ち越しを見られない)',
+  ).toBe(true);
+  expect(await focusedInfo(), '描き直しで焦点が落ちた').toMatch(/^BUTTON\|sql-er-connect\|/);
+  // 列を鍵盤で押す(繋ぐ入 → 起点が選ばれて描き直される)→ その列に焦点が残る
+  const firstCol = csvBox.locator('[data-pkc-field="sql-er-column"]').first();
+  const firstColName = await firstCol.getAttribute('data-pkc-col');
+  await firstCol.focus();
+  await page.keyboard.press('Enter');
+  expect(await focusedInfo(), '列を押して描き直されたら焦点が落ちた').toBe(
+    `BUTTON|sql-er-column|棚卸|${firstColName}`,
+  );
+  expect((await erScroll.boundingBox())!.height, '描き直しで掴んだ高さが戻った').toBeCloseTo(grownH, 0);
+  const rolledAfter = await erScroll.evaluate((e) => ({ top: e.scrollTop, left: e.scrollLeft }));
+  expect(rolledAfter.top, '描き直しで縦に転がした位置が戻った').toBeGreaterThan(0);
+  // ⚠ 横は、この図(幅が器に収まる)では転がせないことがある ── 転がせたときだけ見る(見ていない回は報告に書く)
+  if (scrollable.left > 0) expect(rolledAfter.left, '描き直しで横に転がした位置が戻った').toBe(scrollable.left);
+  // 後始末:繋ぐを切に戻す(次の ③ は「繋ぐ」に関わらない)
+  await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
+  await expect(connectBtn).toHaveAttribute('aria-pressed', 'false');
+
+  /**
    * ── ③ 🔴 **受けられなかった理由が、画面に届いている**(#980)。
    *
    * ⚠ 単体(`storage-worker.test.ts`)は `why` に理由が入ることを見ているが、

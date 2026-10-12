@@ -26,7 +26,7 @@ import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/
 import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
-import { paintSqlEr } from './sql-er';
+import { erArrowTarget, paintSqlEr } from './sql-er';
 import {
   duckDbOnlySourcesOf,
   isDuckDbReadableSource,
@@ -333,6 +333,19 @@ export class SqlRenderer {
     const erHost = document.createElement('div');
     erHost.setAttribute('data-pkc-region', 'sql-er');
     erHost.hidden = true;
+    /**
+     * 🔴 **矢印キーで四角と列を辿る**(#918 段⑤d)。⚠ 器は作り直さない(中身だけ作り直す)ので、
+     *   聞くのはここ 1 か所でよい。決め方は `erArrowTarget`。
+     */
+    erHost.addEventListener('keydown', (ev) => {
+      if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+      const cur = ev.target instanceof Element ? ev.target : null;
+      if (cur === null) return;
+      const to = erArrowTarget(erHost, cur, ev.key);
+      if (to === null) return;
+      ev.preventDefault();
+      to.focus();
+    });
 
     const history = document.createElement('button');
     history.type = 'button';
