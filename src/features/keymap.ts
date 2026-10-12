@@ -250,6 +250,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+F'],
     note: '左の一覧の絞り込み欄にフォーカスを移します(ヘルプを開いている間は、ブラウザの検索が出ます)',
+    alias: '探す 検索 本文ごと探す',
   },
   /**
    * 🔴 **別のウィンドウ・面を閉じる**(#1042 C3。裁定 2026-09-25 Q3 = A)。
