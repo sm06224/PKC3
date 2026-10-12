@@ -36,6 +36,12 @@ export interface PortablePersistDeps {
   /** 器へ書く。⚠ commit まで待つこと。 */
   write: (rec: { savedAt: number; image: Uint8Array }) => Promise<void>;
   onState: (s: PersistState) => void;
+  /**
+   * 🔴 **「まだ器に着いていない分が在る」かどうかが変わった**(`unsaved()` の変化)。
+   * ⚠ `pending` / `saving` の表示とは別物 ── 表示は遅らせてよいが、**離れる確認はこちらで出す**
+   *   (1.2 秒の待ちも、画像を書き出している最中も、器には着いていない)。
+   */
+  onUnsaved?: (unsaved: boolean) => void;
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (h: unknown) => void;
@@ -46,6 +52,11 @@ export interface PortablePersist {
   touch(): void;
   /** 溜まっているものを全部書き切る。⚠ 飛んでいる保存も待つ。 */
   flush(): Promise<void>;
+  /**
+   * 🔴 **器に着いていない分が在るか**(溜まっている / 書いている最中 / 失敗して溜めたまま)。
+   * ⚠ 「溜まっている」だけを見ると、画像を書き出している最中に閉じたとき確認が消える。
+   */
+  unsaved(): boolean;
   /** いまの見え方(test の観測点 ── `onState` を数えるだけだと順番が見えない)。 */
   state(): PersistState;
   dispose(): void;
@@ -60,10 +71,23 @@ export const IDLE_MS = 1_200;
 export const MAX_WAIT_MS = 15_000;
 /**
  * 「⏳ 保存待ち」を出し始めるまで。
- * ⚠ 打鍵のたびに 1.2 秒だけ出しては消える帯は**ちらつくだけで読めない** ──
- *   出すのは「**普通より長く待っている**」ときに限る。
+ * 🔴 **0 = 溜まった瞬間から出す。** 以前は 3 秒だったが、器に着かない窓は
+ *   `IDLE_MS`(1.2 秒)+ 画像の書き出し・書込(DB が大きいほど長い)で、**3 秒より短い窓の間は
+ *   一度も出なかった**(#1589: 追加直後に読み直すとノートが消えるのに、何も出ていなかった)。
+ * ⚠ ちらつき対策の遅延は、窓の間に何も出ない代償に見合わない。同じ状態では塗り直さない
+ *   (`setState`)ので、打鍵のたびに DOM は書き換えない。
  */
-export const PENDING_NOTICE_MS = 3_000;
+export const PENDING_NOTICE_MS = 0;
+
+/**
+ * 状態行に出す字(`main.ts` はこれを繋ぐだけ ── どの test からも実行されないため、判断はここに置く)。
+ * ⚠ 画像を書き出している最中(`saving`)も、器にはまだ着いていない ── 出し続ける(#1589)。
+ */
+export function persistStatusText(st: PersistState): string {
+  if (st.kind === 'error') return `⚠ この端末に保存できませんでした(${st.why})`;
+  if (st.kind === 'pending' || st.kind === 'saving') return '⏳ 保存待ち';
+  return '';
+}
 
 export function connectPortablePersist(deps: PortablePersistDeps): PortablePersist {
   const now = deps.now ?? (() => Date.now());
@@ -77,6 +101,16 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
   let timer: unknown = null;
   let disposed = false;
   let state: PersistState = { kind: 'idle' };
+  let lastUnsaved = false;
+
+  const isUnsaved = (): boolean => dirty || running !== null;
+  /** ⚠ 変わったときだけ知らせる(打鍵ごとに離れる確認の登録・解除を叩かない)。 */
+  const notifyUnsaved = (): void => {
+    const now_ = isUnsaved();
+    if (now_ === lastUnsaved) return;
+    lastUnsaved = now_;
+    deps.onUnsaved?.(now_);
+  };
 
   const setState = (s: PersistState): void => {
     // ⚠ 同じ状態で塗り直さない(状態行の DOM を打鍵ごとに書き換えない)
@@ -103,7 +137,11 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
     if (!dirty) return;
     const waited = now() - dirtySince;
     const delay = Math.max(0, Math.min(IDLE_MS, MAX_WAIT_MS - waited));
-    if (waited >= PENDING_NOTICE_MS) setState({ kind: 'pending' });
+    /**
+     * 🔴 **失敗の知らせは、器へ書けるまで消さない。** `PENDING_NOTICE_MS = 0` だと、失敗した後の
+     *   次の打鍵ごとに「保存待ち」へ上書きされ、**警告が点いたり消えたりする**(失敗は続いている)。
+     */
+    if (waited >= PENDING_NOTICE_MS && state.kind !== 'error') setState({ kind: 'pending' });
     timer = setTimer(() => {
       timer = null;
       void flush().catch(() => undefined);
@@ -118,7 +156,8 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
   async function drain(): Promise<void> {
     while (dirty) {
       dirty = false;
-      setState({ kind: 'saving' });
+      // ⚠ 再試行の最中も、直前の失敗の知らせを「保存中」で塗りつぶさない(書けたときに idle へ戻す)
+      if (state.kind !== 'error') setState({ kind: 'saving' });
       let image: Uint8Array;
       try {
         image = await deps.exportImage();
@@ -161,6 +200,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
       if (running === null) {
         const p = drain().finally(() => {
           if (running === p) running = null;
+          notifyUnsaved();
         });
         running = p;
       }
@@ -178,8 +218,10 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
         dirtySince = now();
       }
       arm();
+      notifyUnsaved();
     },
     flush,
+    unsaved: isUnsaved,
     state: () => state,
     dispose(): void {
       disposed = true;
@@ -191,6 +233,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
        */
       dirty = false;
       disarm();
+      notifyUnsaved();
     },
   };
 }

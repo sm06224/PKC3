@@ -1362,7 +1362,13 @@ describe('§9「困ったとき」の引用が画面の字と一致する(#697)'
      *   通ってしまう(CLAUDE.md §1「guard を file 名指しで書かない」)。
      * 🔑 だから**字を出しうる file を並べて数える**。⚠ 増えたらここへ足す。
      */
-    const kinds = ['src/main.ts', 'src/features/storage/storage-notice.ts']
+    // (#1589)「この端末に保存できませんでした」は `main.ts` から `portable-persist.ts` の
+    //   `persistStatusText` へ出した(判断を test できる所へ)── 数える先に足しただけで、種類は増減していない
+    const kinds = [
+      'src/main.ts',
+      'src/features/storage/storage-notice.ts',
+      'src/adapter/platform/storage/portable-persist.ts',
+    ]
       .map((f) => codeOnly(readFileSync(f, 'utf-8')))
       .flatMap((t) => [...t.matchAll(/[`'"]⚠ /g)]).length;
     expect(kinds, '⚠ で始まる status の種類が変わった(§9 の表を直す)').toBe(5);
@@ -2478,6 +2484,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-10-12(1589)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-11 の節に原本
+     */
+    '配色に「OS に合わせる」を足しました',
     /**
      * ⚠ **2026-10-12(529)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-11 の節に原本

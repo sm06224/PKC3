@@ -156,6 +156,7 @@ import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
 import { exportPortable } from '@adapter/ui/actions/export-portable';
 import {
   connectPortablePersist,
+  persistStatusText,
   type PortablePersist,
 } from '@adapter/platform/storage/portable-persist';
 import { ProxyStoreClient, StoreProxyHost } from '@adapter/platform/storage/store-proxy';
@@ -893,15 +894,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       write: ({ savedAt, image }) =>
         portable.store.write({ exportedAt: portable.bundle.exportedAt, savedAt, image }),
       onState: (st) => {
-        persistState =
-          st.kind === 'error'
-            ? `⚠ この端末に保存できませんでした(${st.why})`
-            : st.kind === 'pending'
-              ? '⏳ 保存待ち'
-              : '';
+        persistState = persistStatusText(st);
         repaintStatus();
       },
+      /**
+       * 🔴 **器に着くまでの間に離れようとしたら「離れますか」**(#1589)。可搬版の保存は
+       *   「溜めて 1.2 秒待つ → 画像を書き出す → 器へ書く」で、**どの段で閉じても**消える。
+       *   ⚠ 保存領域への書込(`onWriting`)とは別の持ち主 ── `'portable'` の名前で数える。
+       */
+      onUnsaved: (unsaved) => unloadGuard.setWriting(unsaved, 'portable'),
     });
+    /** 🔑 「離れますか」を出す瞬間から流し始める(user が留まれば、その分だけ早く着く)。 */
+    unloadGuard.onLeave(() => void persist?.flush().catch(() => undefined));
     /**
      * 🔴 **閉じる前に流す。** ⚠ `beforeunload` だけに頼らない ── モバイルでは
      *   飛ばないことがある。`visibilitychange`(hidden)が唯一ほぼ確実な合図で、

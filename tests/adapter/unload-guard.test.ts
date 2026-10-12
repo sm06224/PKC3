@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stubStamps } from '../helpers/store-stamps';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { createUnloadGuard } from '../../src/adapter/platform/unload-guard';
+import { connectPortablePersist } from '../../src/adapter/platform/storage/portable-persist';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -97,6 +98,86 @@ describe('離れるときの確認は、書き込みの最中だけ', () => {
     expect(fire(fake).prevented).toBe(true);
     guard.setWriting(false);
     expect(fire(fake).prevented, '外れていない登録が、書いていないのに確認を出した').toBe(false);
+  });
+});
+
+describe('#1589 ── 持ち主が 2 つ(保存領域への書込 / 可搬版の画像の書き出し)', () => {
+  it('🔴 片方が終わっても、もう片方が書いている間は確認を残す', () => {
+    const guard = createUnloadGuard(window);
+    guard.setWriting(true, 'portable');
+    guard.setWriting(true); // 保存領域への書込
+    guard.setWriting(false); // 先に終わったのは保存領域の側
+    expect(fire(window).prevented, '可搬の書込が残っているのに確認が消えた').toBe(true);
+    guard.setWriting(false, 'portable');
+    expect(fire(window).prevented, '両方終わったのに確認が出る').toBe(false);
+  });
+
+  it('🔴 可搬だけが書いているときも確認が出る(対照群:誰も書いていなければ出ない)', () => {
+    const guard = createUnloadGuard(window);
+    expect(fire(window).prevented).toBe(false);
+    guard.setWriting(true, 'portable');
+    expect(fire(window).prevented).toBe(true);
+    guard.setWriting(false, 'portable');
+    expect(fire(window).prevented).toBe(false);
+  });
+
+  it('🔴 確認を出す瞬間に onLeave が呼ばれる / 書いていなければ呼ばれない', () => {
+    const guard = createUnloadGuard(window);
+    let n = 0;
+    guard.onLeave(() => n++);
+    fire(window);
+    expect(n, '書いていないのに流し始めた').toBe(0);
+    guard.setWriting(true, 'portable');
+    const r = fire(window);
+    expect(n, '離れようとしたのに流し始めない').toBe(1);
+    expect(r.prevented).toBe(true);
+    guard.setWriting(false, 'portable');
+  });
+
+  it('onLeave が落ちても確認は出す', () => {
+    const guard = createUnloadGuard(window);
+    guard.onLeave(() => {
+      throw new Error('流せない');
+    });
+    guard.setWriting(true, 'portable');
+    expect(fire(window).prevented).toBe(true);
+    guard.setWriting(false, 'portable');
+  });
+});
+
+describe('🔑 実物の可搬の保存とつないで(#1589)', () => {
+  it('🔴 溜まっている間と書いている間は確認が出て、器に着いたら出ない / 離れる瞬間に流し始める', async () => {
+    const guard = createUnloadGuard(window);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let writes = 0;
+    const p = connectPortablePersist({
+      exportImage: async () => new Uint8Array(8).fill(1),
+      write: async () => {
+        writes++;
+        await gate;
+      },
+      onState: () => undefined,
+      onUnsaved: (u) => guard.setWriting(u, 'portable'),
+    });
+    guard.onLeave(() => void p.flush().catch(() => undefined));
+
+    expect(fire(window).prevented, '何も溜まっていないのに確認が出る').toBe(false);
+    p.touch(); // 1.2 秒の待ちの間(タイマーは進めない)
+    expect(writes).toBe(0);
+    const r = fire(window);
+    expect(r.prevented, '溜まっているのに確認が出ない(#1589 の再現)').toBe(true);
+    expect((r.event as BeforeUnloadEvent).returnValue).toBe('');
+    // 🔑 離れようとした瞬間に、待たずに書き始めている
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(writes, '離れようとしたのに、流し始めていない').toBe(1);
+    // 書いている最中(溜まりは空)も確認は残る
+    expect(fire(window).prevented, '書いている最中に確認が消えた').toBe(true);
+    release();
+    await p.flush();
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(fire(window).prevented, '器に着いたのに確認が出る').toBe(false);
+    p.dispose();
   });
 });
 
