@@ -62,6 +62,9 @@ import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown
  */
 const PLACE_FALLBACK_W = 120;
 const PLACE_FALLBACK_H = 40;
+/** 枠がこの高さ(px)より低いとき、題名の帯の余白を詰める印(`app.css` の `[data-pkc-place-compact]`)。 */
+export const PLACE_COMPACT_BELOW_H = 64;
+const PLACE_COMPACT_ATTR = 'data-pkc-place-compact';
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 
@@ -559,16 +562,53 @@ interface HostLayoutCache {
 const blockCaches = new WeakMap<HTMLElement, BlockLayoutCache>();
 const hostLayouts = new WeakMap<HTMLElement, HostLayoutCache>();
 
+/** `h=` を書いていない枠の、実寸が測れないときの高さの見積もり(px)。 */
+const PLACE_UNSIZED_H = 160;
+
 /**
  * 🔴 板 1 枚の下端(板の高さの見積もり。設計 §4.2 #6)。回した付箋は**回した外接四角**の下端で見積もる
  * (回す前の `y + h` だと、傾いた角が器の外へはみ出す)。`h` を書いていない付箋は今までどおり 160。
  */
 function boxBottom(x: number, y: number, w: number | null, h: number | null, rot: number): number {
-  const hh = h ?? 160;
+  const hh = h ?? PLACE_UNSIZED_H;
   if (rot === 0) return y + hh;
   // ⚠ 限界: `w=` を書いていない付箋の幅は実寸でなく最小幅(`PLACE_FALLBACK_W`)で見積もる ── 実際に広ければ、下端の見積もりは足りないことがある
   const b = rotatedBounds({ x, y, w: w ?? PLACE_FALLBACK_W, h: hh }, rot);
   return Math.max(y + hh, b.y + b.h);
+}
+
+/** `h=` を書いていない塊 1 枚(下端を実寸で見積もる材料)。 */
+interface UnsizedBox {
+  readonly el: HTMLElement;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number | null;
+  readonly rot: number;
+}
+
+const unsizedObservers = new WeakMap<HTMLElement, ResizeObserver>();
+
+/**
+ * 🔴 **板の器の最小の高さを当てる**(#529)。`h=` のある塊は書いた高さ、無い塊は**実寸**(`offsetHeight`)。
+ * ⚠ 実寸が測れない所(happy-dom は 0 を返す / 隠れた面)は今までの見積もり(160)へ落ちる ── 0 を信じると下端が潰れる。
+ * 🔑 中身が後から伸びる塊は、伸びるたびに測り直す(`ResizeObserver`)── 描いた直後の高さは iframe がまだ 0 のことがある。
+ */
+function trackUnsized(host: HTMLElement, fixedBottom: number, unsized: readonly UnsizedBox[]): void {
+  const apply = (): void => {
+    let bottom = fixedBottom;
+    for (const u of unsized) {
+      const measured = u.el.offsetHeight;
+      bottom = Math.max(bottom, boxBottom(u.x, u.y, u.w, measured > 0 ? measured : null, u.rot));
+    }
+    host.style.minHeight = `${bottom + 40}px`;
+  };
+  apply();
+  unsizedObservers.get(host)?.disconnect();
+  unsizedObservers.delete(host);
+  if (unsized.length === 0 || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(apply);
+  for (const u of unsized) ro.observe(u.el);
+  unsizedObservers.set(host, ro);
 }
 
 /**
@@ -592,6 +632,8 @@ export function applyPlaceLayout(
   const blocks = [...host.querySelectorAll<HTMLElement>(PLACE_SELECTOR)];
   if (blocks.length === 0) {
     hostLayouts.delete(host);
+    unsizedObservers.get(host)?.disconnect();
+    unsizedObservers.delete(host);
     host.classList.remove('pkc-board-host');
     host.style.removeProperty('min-height');
     host.removeAttribute(PLACE_FOCUS_ATTR); // 返す先が無い ── 印だけ残さない
@@ -642,6 +684,7 @@ export function applyPlaceLayout(
   const nextTitles = new Map<string, string | null>();
   const nextEmbedsMap = new Map<string, boolean>();
   let bottom = 0;
+  const unsized: UnsizedBox[] = [];
 
   for (const el of blocks) {
     const x = intAttr(el, 'data-pkc-x') ?? 0;
@@ -681,7 +724,8 @@ export function applyPlaceLayout(
       prev.placed === placed &&
       prev.line === line
     ) {
-      bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
+      if (useH === null) unsized.push({ el, x, y, w: useW, rot });
+      else bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
       continue;
     }
 
@@ -697,6 +741,9 @@ export function applyPlaceLayout(
     else el.style.removeProperty('width');
     if (useH !== null) el.style.height = `${useH}px`;
     else el.style.removeProperty('height');
+    // 🔴 低い枠は題名の帯の余白を詰める(#529)── 既定の余白(上 14 + 内側 8 + 字 + 罫)だけで 40px を食い、中身が高さ 0 になる
+    if (useH !== null && useH < PLACE_COMPACT_BELOW_H) el.setAttribute(PLACE_COMPACT_ATTR, '');
+    else el.removeAttribute(PLACE_COMPACT_ATTR);
     if (z !== null) el.style.zIndex = String(z);
     else el.style.removeProperty('z-index');
 
@@ -733,7 +780,8 @@ export function applyPlaceLayout(
     ensureGrip(el);
     ensureSizeHandle(el);
     if (placed !== '') ensureCard(el, placed, resolveTitle);
-    bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
+    if (useH === null) unsized.push({ el, x, y, w: useW, rot });
+    else bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
 
     blockCaches.set(el, {
       id: el.id,
@@ -760,7 +808,9 @@ export function applyPlaceLayout(
   // 🔑 **線は板を置いた後に引く**(位置が当たっていないと行き先が決まらない)
   applyPlaceLines(host, blocks, lineOffset);
   // ⚠ いちばん下の塊まで scroll で届く高さを器に持たせる(絶対配置は流れに乗らない)
-  host.style.minHeight = `${bottom + 40}px`;
+  //   🔑 `h=` を書いていない塊は**実寸**で見る(測れなければ見積もり)。中身が後から伸びる塊(html / SQL / グラフ)は
+  //   `ResizeObserver` が追って測り直す(#529)。
+  trackUnsized(host, bottom, unsized);
   // 🔑 口を作り直した**後**に返す(前に返すと、返した先が次の行で差し替わる)
   restoreGripFocus(host);
   // 🔴 付箋の上の欄(追記 / 題名)を付箋の今の位置へ(#529 W5。付箋の作り直し・移動を追う)

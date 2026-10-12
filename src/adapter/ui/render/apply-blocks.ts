@@ -20,6 +20,7 @@
  * 面倒を見る(全体に掛け直すと、生きている `<img>` の ObjectURL を revoke する)。
  */
 import { splitTopLevelBlocks, diffBlocks } from '@features/markdown/html-blocks';
+import { restoreSandboxHeights } from '@features/markdown/html-sandbox';
 
 /** いま面に出ているもの。⚠ **呼び側が持ち回る**(DOM から読み直さない)。 */
 export interface BlockView {
@@ -193,6 +194,18 @@ function patchSegment(
  *   普通の経路で入れ替える ── それが「差し替える / 元に戻す」当の操作である。
  */
 export function applyBlocks(
+  host: HTMLElement,
+  html: string,
+  view: BlockView,
+  pin: readonly number[] = [],
+): ApplyResult {
+  const r = applyBlocksInner(host, html, view, pin);
+  // 🔴 作り直された HTML の箱は高さ 0 から始まる ── 前に申告された高さを戻す(#529)。HTML には焼かない(上の理由)
+  restoreSandboxHeights(r.inserted);
+  return r;
+}
+
+function applyBlocksInner(
   host: HTMLElement,
   html: string,
   view: BlockView,

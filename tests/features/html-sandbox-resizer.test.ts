@@ -7,7 +7,11 @@ import {
   HTML_SANDBOX_MAX_HEIGHT,
   resolveSandboxSender,
   clampSandboxHeight,
+  buildHtmlSandboxIframe,
+  rememberSandboxHeight,
+  restoreSandboxHeights,
 } from '../../src/features/markdown/html-sandbox';
+import { applyBlocks, EMPTY_VIEW } from '../../src/adapter/ui/render/apply-blocks';
 
 /**
  * 箱を 1 つ置く。
@@ -158,5 +162,81 @@ describe('🔴 送り主の同一性(なりすましを通さない)', () => {
     );
     // ⚠ origin を条件に足していない(sandbox の箱では "null" になり判定に使えない)
     expect(viewer, '閲覧側が origin を判定に使っている').not.toMatch(/ev\.origin\s*[!=]==/);
+  });
+});
+
+describe('#529 作り直された箱が 0 から伸びない(別のノートへ移って戻ったときの縮み)', () => {
+  const frame = (content: string) => buildHtmlSandboxIframe(content, '', 0);
+  const idOf = (html: string) => /data-pkc-html-render-id="([^"]+)"/.exec(html)![1]!;
+  /** 箱の送り主を差して高さを申告させる(`post` と同じ。申告元は実物の contentWindow) */
+  function report(host: HTMLElement, id: string, height: number): void {
+    const f = host.querySelector<HTMLIFrameElement>(`iframe[data-pkc-html-render-id="${id}"]`)!;
+    const win = { boxId: id };
+    Object.defineProperty(f, 'contentWindow', { value: win, configurable: true });
+    post({ type: HTML_SANDBOX_RESIZE_MSG_TYPE, id, height }, win);
+  }
+
+  it('🔴 申告された高さを憶え、同じ中身の箱が新しく入った直後に当てる(332 → 0 → 332 を作らない)', () => {
+    const off = installHtmlSandboxResizer();
+    const html = `<p>前</p>\n${frame('<b>この中身は 332px になる</b>')}`;
+    const id = idOf(html);
+    const first = document.createElement('div');
+    document.body.append(first);
+    applyBlocks(first, html, EMPTY_VIEW);
+    expect(first.querySelector<HTMLElement>('iframe')!.style.height, '最初は畳まれている').toBe('0px');
+    report(first, id, 332);
+    expect(first.querySelector<HTMLElement>('iframe')!.style.height).toBe('332px');
+
+    // 別のノートへ移って戻った ── 新しい器に新しい要素として描き直される
+    const second = document.createElement('div');
+    document.body.append(second);
+    applyBlocks(second, html, EMPTY_VIEW);
+    expect(second.querySelector<HTMLElement>('iframe')!.style.height, '作り直された箱が 0 から始まっている').toBe('332px');
+
+    // 中身の違う箱は憶えを引かない(別の箱に前の高さを当てない)
+    const other = document.createElement('div');
+    document.body.append(other);
+    applyBlocks(other, frame('<i>別の中身</i>'), EMPTY_VIEW);
+    expect(other.querySelector<HTMLElement>('iframe')!.style.height).toBe('0px');
+    off();
+    first.remove();
+    second.remove();
+    other.remove();
+  });
+
+  it('🔴 描画 HTML には高さを焼かない ── 憶えた後でも本文の別の所を打って、箱が作り直されない', () => {
+    const off = installHtmlSandboxResizer();
+    const box = frame('<b>焼かない</b>');
+    const host = document.createElement('div');
+    document.body.append(host);
+    const v1 = applyBlocks(host, `<p>a</p>\n${box}`, EMPTY_VIEW);
+    report(host, idOf(box), 120);
+    const iframe = host.querySelector('iframe')!;
+    const v2 = applyBlocks(host, `<p>ab</p>\n${box}`, v1.view);
+    expect(host.querySelector('iframe'), '箱が作り直された(読み直されて中身が一度消える)').toBe(iframe);
+    expect(v2.replaced).toBe(1);
+    expect(iframe.style.height, '申告済みの高さが畳み直された').toBe('120px');
+    off();
+    host.remove();
+  });
+
+  it('申告済みの高さは上書きしない(畳まれた箱だけに当てる)', () => {
+    rememberSandboxHeight('pkc-html-render-keep', 50);
+    const host = document.createElement('div');
+    host.innerHTML = '<iframe data-pkc-html-render-id="pkc-html-render-keep" style="height:200px"></iframe>';
+    restoreSandboxHeights([host]);
+    expect(host.querySelector('iframe')!.style.height).toBe('200px');
+  });
+
+  it('憶えは上限を持つ(古い順に捨てる)', () => {
+    for (let i = 0; i < 260; i += 1) rememberSandboxHeight(`pkc-html-render-cap${i}`, 10 + i);
+    const probe = (i: number) => {
+      const host = document.createElement('div');
+      host.innerHTML = `<iframe data-pkc-html-render-id="pkc-html-render-cap${i}" style="height:0"></iframe>`;
+      restoreSandboxHeights([host]);
+      return host.querySelector('iframe')!.style.height;
+    };
+    expect(probe(0), '古い憶えが残り続けている').toBe('0px');
+    expect(probe(259)).toBe('269px');
   });
 });

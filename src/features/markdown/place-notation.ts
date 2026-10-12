@@ -724,6 +724,18 @@ export const NEW_PLACE_W = 240;
 export const NEW_PLACE_H = 120;
 
 /**
+ * 🔴 **本文の末尾が、閉じていない囲い(fence / `:::`)の中か**(#529)。
+ *
+ * 末尾に板を足す 2 つの口(`addPlace` / `addPlaceTemplate`)が断る条件の**1 本**。
+ * ⚠ 画面の側(`ADD_PLACE` の門)も同じ関数で見て、**断った理由を言う**(断る側と言う側を別に書かない ── §7)。
+ */
+export function endsInsideOpenBlock(body: string): boolean {
+  const spans = scanContainers(body);
+  const last = spans[spans.length - 1];
+  return last !== undefined && last.open;
+}
+
+/**
  * 🔴 **板の塊を 1 つ足す**(#676)── 本文の末尾に、空の塊を書く。
  *
  * ⚠ **行番号を持たない** ── 足す先は常に末尾で、他の行は 1 byte も動かない。
@@ -734,9 +746,7 @@ export const NEW_PLACE_H = 120;
  */
 export function addPlace(body: string, x: number, y: number): string | null {
   if (!isCoord(x) || !isCoord(y)) return null;
-  const spans = scanContainers(body);
-  const last = spans[spans.length - 1];
-  if (last !== undefined && last.open) return null;
+  if (endsInsideOpenBlock(body)) return null;
   const block = `:::format{.pkc-place x=${x} y=${y} w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`;
   if (body === '') return block;
   return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
@@ -758,9 +768,7 @@ export function addPlaceTemplate(
   if (!isCoord(x) || !isCoord(y)) return null;
   const tpl = PLACE_TEMPLATES.find((t) => t.id === id);
   if (tpl === undefined) return null;
-  const spans = scanContainers(body);
-  const last = spans[spans.length - 1];
-  if (last !== undefined && last.open) return null;
+  if (endsInsideOpenBlock(body)) return null;
   const taken = takenNames(body.split('\n'));
   const names: string[] = [];
   for (let i = 0; i < tpl.names; i += 1) {
