@@ -168,6 +168,8 @@ export interface PlaceLine {
   readonly y2: number;
   readonly from: PlaceAnchor;
   readonly to: PlaceAnchor;
+  /** 出る側の付箋の回転(度。#530 段⑤d)── 曲がる軸を決めるときだけ読む。無い / 0 = 回していない。 */
+  readonly fromRot?: number;
 }
 
 /**
@@ -228,7 +230,15 @@ export function placeLineOf(from: PlaceRect, to: PlaceRect, pin: PlacePin = {}):
   const b = pin.to ?? anchorOf(bestB, num, den);
   const p = anchorPoint(from, a);
   const q = anchorPoint(to, b);
-  return { x1: p.x, y1: p.y, x2: q.x, y2: q.y, from: a, to: b };
+  return {
+    x1: p.x,
+    y1: p.y,
+    x2: q.x,
+    y2: q.y,
+    from: a,
+    to: b,
+    ...(from.rot !== undefined && from.rot !== 0 ? { fromRot: from.rot } : {}),
+  };
 }
 
 /**
@@ -294,7 +304,13 @@ export function parseBendSpell(raw: string | null): BendRead {
  *   出た直後に板の中へ戻る形になる(辺から離れる向きに折らないと通れない)。
  */
 function defaultBend(ln: PlaceLine): PlaceBend {
-  return ln.from.edge === 'left' || ln.from.edge === 'right'
+  /**
+   * 🔴 回した付箋(#530 段⑤d)── 辺は付箋の中の向きなので、画面で線が出る向きは**辺の向きを付箋の回転ぶん回した物**。
+   * 90° 回した付箋の `right` は画面の下へ出る。いちばん近い 90° に丸めて、横向き(0 / 180)か縦向き(90 / 270)かで軸を決める。
+   */
+  const base = { right: 0, bottom: 90, left: 180, top: 270 }[ln.from.edge];
+  const dir = (((base + Math.round((ln.fromRot ?? 0) / 90) * 90) % 360) + 360) % 360;
+  return dir === 0 || dir === 180
     ? { axis: 'v', at: (ln.x1 + ln.x2) / 2 }
     : { axis: 'h', at: (ln.y1 + ln.y2) / 2 };
 }

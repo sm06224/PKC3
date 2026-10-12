@@ -113,7 +113,8 @@ export function unrotatePoint(r: Box, deg: number, px: number, py: number): { x:
  * ⚠ 中心の周りで回っているので `w` `h` だけ変えると**反対側の角が動く** ── PowerPoint と同じに、
  *   付箋の左上の角(掴んだ角の反対側)が**画面で動かない**ように `x` `y` も返す。
  * ⚠ 下限(`minW` `minH`)で止まったときも、実際に伸びた分で左上を固定する(下限を越えて引いても角が飛ばない)。
- * ⚠ 返す `x` `y` は 0 以上へ丸める(記法の下限)── 0 を下回る分は左上の角がわずかに動くが、書けない値は書かない。
+ * ⚠ `x` `y` は 0 を下回れない(記法の下限)。下回るときは**丸めず、伸び縮みの量(dw dh)を同じ比で手前まで減らす** ──
+ *   丸めると左上の角が画面で飛ぶ(90° で x=30 から +100 引くと 70px)。減らした分、付箋は引いた量より少なく伸びる。
  */
 export function resizeRotated(
   start: Box,
@@ -128,15 +129,26 @@ export function resizeRotated(
   const ldy = -dx * sin + dy * cos;
   const w = Math.max(min.w, start.w + ldx);
   const h = Math.max(min.h, start.h + ldy);
-  const dw = w - start.w;
-  const dh = h - start.h;
+  let dw = w - start.w;
+  let dh = h - start.h;
   // 中心の移動 = 付箋の向きでの (dw/2, dh/2) を回した物。左上の角 = 中心 − (w/2, h/2) を回した物が不動になる
+  // x' = x + dw·(cos−1)/2 − dh·sin/2 / y' = y + dw·sin/2 + dh·(cos−1)/2(dw dh について線形)
+  const ax = (dw * (cos - 1)) / 2 - (dh * sin) / 2;
+  const ay = (dw * sin) / 2 + (dh * (cos - 1)) / 2;
+  let t = 1;
+  if (ax < 0 && start.x + ax < 0) t = Math.min(t, start.x / -ax);
+  if (ay < 0 && start.y + ay < 0) t = Math.min(t, start.y / -ay);
+  if (t < 1) {
+    dw *= t;
+    dh *= t;
+  }
   const cxMove = (dw / 2) * cos - (dh / 2) * sin;
   const cyMove = (dw / 2) * sin + (dh / 2) * cos;
   return {
+    // ⚠ 丸めの誤差(−1e-13)だけを 0 へ寄せる ── 上で手前に止めてあるので、ここで角は飛ばない
     x: Math.max(0, start.x - dw / 2 + cxMove),
     y: Math.max(0, start.y - dh / 2 + cyMove),
-    w,
-    h,
+    w: start.w + dw,
+    h: start.h + dh,
   };
 }

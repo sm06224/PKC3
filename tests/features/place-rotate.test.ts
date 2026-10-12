@@ -8,7 +8,7 @@
  * 4. 角の伸縮: 付箋の向きで伸び、反対側の角(左上)が画面で動かない
  */
 import { describe, expect, it } from 'vitest';
-import { anchorOf, anchorPoint, placeLineOf } from '../../src/features/markdown/place-line';
+import { anchorOf, anchorPoint, placeLineOf, placePathOf } from '../../src/features/markdown/place-line';
 import { nearestEdge, topPlaceAt } from '../../src/features/markdown/place-handles';
 import { setPlaceStyle, placeStyleAt } from '../../src/features/markdown/place-notation';
 import {
@@ -101,6 +101,22 @@ describe('rotate= を書く(setPlaceStyle)', () => {
     },
   );
 
+  it('🔴 読めない値(rotate=abc)の上へ書くと、札は 1 つだけ(重ならない)。他の札は残る', () => {
+    const open = ':::format{#a .pkc-place x=0 y=0 rotate=abc fill=#ffe08a}';
+    const b = [open, 'x', ':::', ''].join('\n');
+    const next = setPlaceStyle(b, { line: 0, openLine: open }, { rotate: 45 })!;
+    expect(next.split('\n')[0]).toBe(':::format{#a .pkc-place x=0 y=0 rotate=45 fill=#ffe08a}');
+  });
+
+  it('🔴 札が重なっている(rotate=5 rotate=9)ときも、書けば 1 つに畳まれ、解けば両方消える', () => {
+    const open = ':::format{#a .pkc-place x=0 y=0 rotate=5 rotate=9}';
+    const b = [open, 'x', ':::', ''].join('\n');
+    const next = setPlaceStyle(b, { line: 0, openLine: open }, { rotate: 45 })!;
+    expect(next.split('\n')[0]).toBe(':::format{#a .pkc-place x=0 y=0 rotate=45}');
+    const cleared = setPlaceStyle(b, { line: 0, openLine: open }, { rotate: null })!;
+    expect(cleared.split('\n')[0]).toBe(':::format{#a .pkc-place x=0 y=0}');
+  });
+
   it('🔴 線には書けない(線は回さない。持てない札は断る)', () => {
     const LINE = ':::format{.pkc-line from=a:right to=b:left}';
     const lb = [LINE, ':::', ''].join('\n');
@@ -122,6 +138,32 @@ describe('rotate= を書く(setPlaceStyle)', () => {
       rotate: 0,
       written: { rotate: false },
     });
+  });
+});
+
+describe('曲がる線の軸は、出る辺の画面での向きで決まる', () => {
+  const a = { x: 0, y: 0, w: 100, h: 100 };
+  const b = { x: 300, y: 300, w: 100, h: 100 };
+  const axisOf = (rot: number | undefined, edge: 'right' | 'bottom' | 'left' | 'top'): 'v' | 'h' => {
+    const ln = placeLineOf(rot === undefined ? a : { ...a, rot }, b, { from: anchorOf(edge) });
+    // 折れ線の2つ目の点: 縦線(axis v)なら x が曲がる位置・y は出口のまま
+    const d = placePathOf(ln, 'elbow');
+    const nums = d.split(/[^\d.-]+/).filter((t) => t !== '').map(Number);
+    return nums[3] === nums[1] ? 'v' : 'h';
+  };
+  it('回していない: right から出ると縦線で折れる(axis v)/ bottom から出ると横線(axis h)', () => {
+    expect(axisOf(undefined, 'right')).toBe('v');
+    expect(axisOf(undefined, 'bottom')).toBe('h');
+  });
+  it('🔴 90° 回した付箋の right は画面の下へ出る → 横線(h)。bottom は画面の左へ出る → 縦線(v)', () => {
+    expect(axisOf(90, 'right')).toBe('h');
+    expect(axisOf(90, 'bottom')).toBe('v');
+  });
+  it('180° は向きが逆なだけで軸は同じ / 270° は 90° と同じ軸 / 45° は 90° へ丸める', () => {
+    expect(axisOf(180, 'right')).toBe('v');
+    expect(axisOf(270, 'right')).toBe('h');
+    expect(axisOf(45, 'right')).toBe('h');
+    expect(axisOf(30, 'right')).toBe('v');
   });
 });
 
@@ -267,11 +309,8 @@ describe('回した付箋の角の伸縮(resizeRotated)', () => {
     expect(out.h).toBe(40);
     const before = topLeft(start, 30);
     const after = topLeft(out, 30);
-    // 0 未満へ丸めた分(x y が負になる場合)以外は動かない ── ここでは 0 以上のまま収まる
-    if (out.x > 0 && out.y > 0) {
-      near(after.x, before.x, 1e-6);
-      near(after.y, before.y, 1e-6);
-    }
+    near(after.x, before.x, 1e-6);
+    near(after.y, before.y, 1e-6);
   });
 
   it('x y は 0 を下回らない(記法の下限)', () => {
@@ -279,5 +318,32 @@ describe('回した付箋の角の伸縮(resizeRotated)', () => {
     const out = resizeRotated(near0, 45, -60, 90, min);
     expect(out.x).toBeGreaterThanOrEqual(0);
     expect(out.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it('🔴 x が 0 に近い 90° の付箋を引き過ぎても、左上の角は飛ばない(丸めずに伸びを手前で止める)', () => {
+    const s0 = { x: 30, y: 100, w: 200, h: 100 };
+    // 画面の下へ 100: 付箋の向きで幅 +100 → 丸めなら x が -20 → 0 に飛ぶ(角が 20px)
+    const out = resizeRotated(s0, 90, 0, 100, min);
+    const before = topLeft(s0, 90);
+    const after = topLeft(out, 90);
+    near(after.x, before.x, 1e-6);
+    near(after.y, before.y, 1e-6);
+    // 止めた分だけ、引いた量(+100)より少なく伸びている(x = 30 が尽きる 60)
+    near(out.w, 260);
+    expect(out.x).toBeGreaterThanOrEqual(0);
+    expect(out.y).toBeGreaterThanOrEqual(0);
+    // 余裕があれば止めない(対照群): x=300 なら +100 まるごと伸びる
+    expect(resizeRotated({ ...s0, x: 300 }, 90, 0, 100, min).w).toBe(300);
+  });
+
+  it.each([30, 90, 135, 200, 300])('🔴 %i°: 端に寄った付箋をどの向きへ引いても、左上の角は動かない', (deg) => {
+    for (const [dx, dy] of [[100, 100], [-80, 120], [150, -90], [-200, -200], [0, 300]] as const) {
+      const s1 = { x: 20, y: 15, w: 200, h: 100 };
+      const out = resizeRotated(s1, deg, dx, dy, min);
+      const a = topLeft(s1, deg);
+      const b = topLeft(out, deg);
+      near(b.x, a.x, 1e-6);
+      near(b.y, a.y, 1e-6);
+    }
   });
 });

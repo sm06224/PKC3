@@ -566,6 +566,7 @@ const hostLayouts = new WeakMap<HTMLElement, HostLayoutCache>();
 function boxBottom(x: number, y: number, w: number | null, h: number | null, rot: number): number {
   const hh = h ?? 160;
   if (rot === 0) return y + hh;
+  // ⚠ 限界: `w=` を書いていない付箋の幅は実寸でなく最小幅(`PLACE_FALLBACK_W`)で見積もる ── 実際に広ければ、下端の見積もりは足りないことがある
   const b = rotatedBounds({ x, y, w: w ?? PLACE_FALLBACK_W, h: hh }, rot);
   return Math.max(y + hh, b.y + b.h);
 }
