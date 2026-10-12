@@ -255,11 +255,6 @@ export function detectPrecise(api: CodecApi | null = nativeCodecApi()): Promise<
   return p;
 }
 
-/** 切っている途中で落ちた環境を「使えない」に倒す(以後の切り出しで同じ失敗を繰り返さない)。 */
-export function markPreciseBroken(api: CodecApi | null = nativeCodecApi()): void {
-  if (api !== null) detectCache.set(api, Promise.resolve(false));
-}
-
 /**
  * 🔴 **作り直しが落ちた後に、環境がまだ使えるかを測り直す**(小さい 1 枚をもう一度通す)。
  *

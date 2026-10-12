@@ -892,28 +892,6 @@ function parseScalar(raw: string): string | number | boolean | null {
 }
 
 /**
- * Public helper: 単一の scalar 文字列(graphical editor の input value 等)を
- * frontmatter 値型に解釈する。`parseFlatYaml` 内の scalar 解釈と同一規則。
- */
-export function parseFrontmatterScalar(
-  raw: string,
-): string | number | boolean | null {
-  return parseScalar(raw.trim());
-}
-
-/**
- * Public helper: returns the `kind` discriminator if present and valid.
- * Filer subset profiles look this up to decide which entries belong
- * to the `book-base` / `youtube-base` / etc. query.
- */
-export function getFrontmatterKind(body: string): string | null {
-  const { meta, found } = parseFrontmatter(body);
-  if (!found) return null;
-  const kind = meta['kind'];
-  return typeof kind === 'string' && kind.length > 0 ? kind : null;
-}
-
-/**
  * L-? M-7(2026-05-08、wave-10-2 Phase 2):frontmatter から `vars.*` を
  * 抽出して flat `Record<string, string>` に正規化する helper。本文の
  * `{{vars.name}}` 展開で使う(`renderMarkdown(text, { vars })` 経由)。

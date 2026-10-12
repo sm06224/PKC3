@@ -293,15 +293,6 @@ export const ACTION_TONES: Readonly<Record<string, IconTone>> = {
   'purge-orphan-assets': 'danger',
 };
 
-/**
- * 🔑 **種別を iconKey として引ける形**(P10 の分割ボタン用)。
- * `iconButton(action, label, 'archetype:text')` で種類の図案が出る ──
- * 表を 2 つ持たずに `ARCHETYPE_ICONS` を使い回す。
- */
-export function archetypeIconKey(archetype: string): string {
-  return `archetype:${archetype}`;
-}
-
 /** 種別 → 図案(一覧のチップ)。⚠ 未知の archetype は `dot`。 */
 export const ARCHETYPE_ICONS: Readonly<Record<string, IconName>> = {
   text: 'page',

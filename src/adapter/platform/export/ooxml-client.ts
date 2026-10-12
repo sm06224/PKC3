@@ -44,11 +44,6 @@ function leaseOf(): WorkerLease {
   return lease;
 }
 
-/** ワーカーが生きているか(計測と test の観測点)。 */
-export function ooxmlWorkerAlive(): boolean {
-  return lease?.alive ?? false;
-}
-
 /**
  * 塊 → `.docx` / `.pptx` の Blob。
  * ⚠ **失敗したらその場で組み直す** ── ワーカーの事故で「押しても何も落ちてこない」
