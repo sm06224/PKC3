@@ -50,7 +50,7 @@ import { windowFolderWritePicker } from '@adapter/platform/md-folder-export';
 //    ここで独自に parse していた頃は、一覧に日付を出すときに規則が 2 つに増えた
 import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-date';
 // 居場所の解決は `features/relation/tree` が正本(ファイラの帯・パンくずと共有)
-import { readTags, sameTag } from '@features/flavor/tags';
+import { sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
 import { listTaskItems } from '@features/markdown/task-count';
@@ -170,6 +170,26 @@ export class InspectorRenderer {
    * (空の目次を毎回畳み直さない)。⚠ ノートを切り替えて器を組み直す(`build`)ときは手放す。
    */
   private toc: { body: string | null; headings: ReturnType<typeof extractHeadingsFromMarkdown> } | null = null;
+
+  /**
+   * 🔴 **タグの走査結果**(#1087)── `imgCount` と同じ作り。本文の字を鍵に 1 つだけ憶える。
+   * 「タグ」の行・本文中タグの行・候補の除外・書けるかの判定が、描き直しのたびに本文を
+   * 4 回走査していた(`readTags` ×2 / `collectEntryTags` / `frontmatterProblem`)。
+   * ⚠ 本文が読めなくなったら(`null`)手放す ── 大きい本文を常駐させない。
+   */
+  private tagScan: {
+    body: string;
+    view: ReturnType<typeof collectEntryTags>;
+    problem: ReturnType<typeof frontmatterProblem>;
+  } | null = null;
+
+  /** 本文の字が同じなら前回の走査を使い回す。`view.doc` は `readTags(body)` と同じ物。 */
+  private scanTags(body: string): NonNullable<InspectorRenderer['tagScan']> {
+    if (this.tagScan !== null && this.tagScan.body === body) return this.tagScan;
+    const scan = { body, view: collectEntryTags(body), problem: frontmatterProblem(body) };
+    this.tagScan = scan;
+    return scan;
+  }
 
   /**
    * 🔴 **説明文の空の添付に出す「元の file 名」**(#1207 I4)。
@@ -448,10 +468,12 @@ export class InspectorRenderer {
      * - **frontmatter が壊れていない** ── 閉じの `---` を失っている本文に
      *   書き足すと #284 系の実害を広げる(直してから触る)
      */
+    const tagScan = tagBody === null ? null : this.scanTags(tagBody);
+    if (tagScan === null) this.tagScan = null;
     const canWriteTags =
       tagBody !== null &&
       state.phase === 'ready' &&
-      frontmatterProblem(tagBody)?.kind !== 'unreadable';
+      tagScan?.problem?.kind !== 'unreadable';
     /**
      * 🔴 **理由(`title`)は行そのものに置く**(#494 で器を割ったときに 1 度落とした)。
      *
@@ -461,8 +483,7 @@ export class InspectorRenderer {
      */
     const tagRow = this.rows.get('inspector-tags');
     if (tagBox) {
-      const body = tagBody;
-      const tags = body === null ? null : readTags(body);
+      const tags = tagScan === null ? null : tagScan.view.doc;
       /**
        * 🔴 **読めていないときに「無し」と断定しない**(#284)。
        *
@@ -476,7 +497,7 @@ export class InspectorRenderer {
        *   `warnings.some(...)` を書き直さない(判定を 2 か所にしない)。
        * ⚠ 行は狭いので、**画面には短く / 理由は `title` に**(タグの札と同じ作法)。
        */
-      const problem = body === null ? null : frontmatterProblem(body);
+      const problem = tagScan === null ? null : tagScan.problem;
       tagBox.textContent = '';
       tagRow?.removeAttribute('title');
       /**
@@ -574,7 +595,7 @@ export class InspectorRenderer {
      */
     const bodyTagBox = this.rows.get('inspector-body-tags');
     if (bodyTagBox) {
-      const view = tagBody === null ? null : collectEntryTags(tagBody);
+      const view = tagScan === null ? null : tagScan.view;
       bodyTagBox.textContent = '';
       const dt = bodyTagBox.previousElementSibling;
       const empty = view === null || view.inBody.length === 0;
@@ -887,7 +908,7 @@ export class InspectorRenderer {
      *   ── ここで頼むと、ノートを選び替えるたびに全走査が走る。
      */
     if (this.tagCandidates) {
-      const mine = new Set(tagBody === null ? [] : readTags(tagBody));
+      const mine = new Set(tagScan === null ? [] : tagScan.view.doc);
       this.tagCandidates.textContent = '';
       for (const t of state.tagSuggestions ?? []) {
         if (mine.has(t)) continue;
