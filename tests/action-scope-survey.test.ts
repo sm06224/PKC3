@@ -338,7 +338,9 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-11(#530 段⑤d): N +1(`place-rotate`。付箋の右クリックの「右に回す / 左に回す / 回転を解く」── 押した所から運ぶのは押した結果の角度だけで、
     //   対象の行はメニューが運ぶ。`place-size` と同じ仕分け)。
     // ⚠ 2026-10-12(#855 20-A): N +1(`toggle-schedule-note`。予定の「出すもの」の中のノートごとのチェック ── 押した行が lid を運ぶ。`schedule-week-pick` と同じ置き場)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 207 });
+    // ⚠ 2026-10-12(#855 20-C): N +4(`dismiss-missed` / `open-missed-schedule` / `set-schedule-lead` / `set-schedule-missed`。見逃した予定の 1 行の 2 つのボタンと、
+    //   予定表の「知らせ」の選択とチェック ── 押した所から何も要らない(値は押した欄自身を読む)。`dismiss-alarm` / `set-alarm-enabled` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 211 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

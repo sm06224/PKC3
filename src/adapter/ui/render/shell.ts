@@ -15,6 +15,7 @@ import { collectionBarButton, collectionBarItems } from './collection-bar';
 // 🔴 前回選んだ「作る種類」を覚える(#1045)
 import { appCreateKind } from './create-kind';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
+import { missedLabel } from '@features/schedule/schedule-notify';
 import { BROWSE_ICONS, iconButton, iconSpan, markBarTile, markPrimary } from './icons';
 import { COLUMN_PANES, PANE_LABELS } from '@features/pane-visibility';
 import { PHONE_BAR_REGION, PHONE_RETURN_REGION } from './phone-layout';
@@ -241,10 +242,38 @@ function childByAttr(list: HTMLElement, attr: string, value: string): HTMLElemen
  * ⚠ **タイマーと同じ行にしない** ── 3 本計っていると、鳴った知らせが
  *   横へ押し出されて**見えなくなる**(知らせは押し出されてはいけない)。
  */
+/** 「見逃した予定」の行が畳まれている(または無い)か。 */
+function missedLineHidden(bar: HTMLElement): boolean {
+  const line = bar.querySelector<HTMLElement>('[data-pkc-field="missed-line"]');
+  return line === null || Boolean(line.hidden);
+}
+
+/**
+ * 🔴 **次に開いたとき、見逃した予定を 1 行で言う**(#855 20-C)。鳴っている予定の帯と**同じ枠**に置く
+ * (「いま起きていること」を探す場所を分けない)。`count` が 0 なら行を畳む。
+ * ⚠ 鳴っている予定が出ているときは、その帯を畳まない(`paintAlarmBar` が両方を見る)。
+ */
+export function paintMissedLine(root: HTMLElement, count: number): void {
+  const bar = root.querySelector<HTMLElement>('[data-pkc-region="alarm-bar"]');
+  if (bar === null) return;
+  const line = bar.querySelector<HTMLElement>('[data-pkc-field="missed-line"]');
+  if (line === null) return;
+  line.hidden = count <= 0;
+  const text = line.querySelector<HTMLElement>('[data-pkc-field="missed-text"]');
+  if (text !== null) text.textContent = count <= 0 ? '' : missedLabel(count);
+  const list = bar.querySelector<HTMLElement>('[data-pkc-field="alarm-list"]');
+  bar.hidden = Boolean(line.hidden) && (list === null || list.children.length === 0);
+}
+
+/** 帯の「閉じる」を押したあと、行を畳んで、鳴っている予定が無ければ帯ごと畳む。 */
+export function dismissMissedLine(root: HTMLElement): void {
+  paintMissedLine(root, 0);
+}
+
 export function paintAlarmBar(root: HTMLElement, due: readonly AlarmDue[]): void {
   const bar = root.querySelector<HTMLElement>('[data-pkc-region="alarm-bar"]');
   if (bar === null) return;
-  bar.hidden = due.length === 0;
+  bar.hidden = due.length === 0 && missedLineHidden(bar);
   const label = bar.querySelector<HTMLElement>('[data-pkc-field="alarm-label"]');
   if (label !== null) label.textContent = due.length === 0 ? '' : alarmBarLabel(due.length);
   const list = bar.querySelector<HTMLElement>('[data-pkc-field="alarm-list"]');
@@ -1139,7 +1168,21 @@ export function buildShell(root: HTMLElement): ShellRegions {
   alarmLabel.setAttribute('data-pkc-field', 'alarm-label');
   const alarmList = document.createElement('ul');
   alarmList.setAttribute('data-pkc-field', 'alarm-list');
-  alarms.append(alarmLabel, alarmList);
+  // 🔴 見逃した予定の 1 行(#855 20-C)。「開く」と「閉じる」は対(片道にしない)。字だけのボタン
+  const missedLine = document.createElement('span');
+  missedLine.setAttribute('data-pkc-field', 'missed-line');
+  missedLine.hidden = true;
+  const missedText = document.createElement('span');
+  missedText.setAttribute('data-pkc-field', 'missed-text');
+  // ⚠ 同じ帯の「予定のノートを開く」「知らせを閉じる」と絵を揃える(絵の有無が混ざらない ── bar-icon-parity)
+  const missedOpen = iconButton('open-missed-schedule', '予定表を開く', 'open-alarm');
+  missedOpen.setAttribute('data-pkc-field', 'missed-open');
+  missedOpen.title = '左のペインの予定表を開きます';
+  const missedClose = iconButton('dismiss-missed', '知らせを閉じる', 'dismiss-alarm');
+  missedClose.setAttribute('data-pkc-field', 'missed-close');
+  missedClose.title = 'この知らせを閉じます(予定は変わりません)';
+  missedLine.append(missedText, missedOpen, missedClose);
+  alarms.append(alarmLabel, alarmList, missedLine);
 
   // 既定は空(= 何も出さない)。注意が出たときだけ中身が入る
   const notices = document.createElement('section');

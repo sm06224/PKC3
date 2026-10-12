@@ -187,7 +187,7 @@ import {
   isUnknownOpError,
   resolveContainerCompat,
 } from '@adapter/platform/storage/resolve-container-compat';
-import { buildShell, paintAlarmBar, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
+import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
 import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
@@ -310,6 +310,8 @@ import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capt
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
 import { createAlarmService } from '@adapter/ui/actions/alarm';
+import { startMissedWatch } from '@adapter/ui/actions/missed-schedule';
+import { appScheduleNotify } from '@adapter/ui/render/schedule-notify';
 import { createChime } from '@adapter/platform/chime';
 import { appAlarmEnabled } from '@adapter/ui/render/alarm-enabled';
 import { appVoiceBoost, appVoiceBoostRouter } from '@adapter/ui/render/voice-boost';
@@ -3162,6 +3164,27 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   alarmService.start();
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
+  /**
+   * 🔴 **次に開いたとき、見逃した予定を 1 行で言う**(#855 20-C)。段取りは `missed-schedule.ts`。
+   * ⚠ 時刻は**このコレクション・この端末**に持つ(ノートには入れない)。閉じる合図(`pagehide` /
+   *   `hidden`)でも進める ── 刻みだけだと、閉じる直前の最大 15 秒に始まった予定を見逃しに数える。
+   */
+  const missedWatch = startMissedWatch({
+    dispatcher,
+    store: appScheduleNotify,
+    cid,
+    paint: (n) => paintMissedLine(root, n),
+    post: (text) => appMessagePost.post({ kind: 'result', source: 'schedule', text }),
+  });
+  // ⚠ 記録がある(= 予定表を使ったことがある)コレクションだけ進める。無いのに書くと「使っていない」が崩れる
+  const stampOpenNow = (): void => {
+    if (appScheduleNotify.lastOpen(cid) !== null) appScheduleNotify.stampOpen(cid, Date.now());
+  };
+  window.addEventListener('pagehide', stampOpenNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') stampOpenNow();
+  });
+  void missedWatch;
 
   /**
    * 🔴 **タイルを起動する ── 配線は 1 か所**(#884 段②)。

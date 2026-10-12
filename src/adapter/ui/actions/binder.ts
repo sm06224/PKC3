@@ -106,7 +106,7 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
-import { paintSearchHistory } from '@adapter/ui/render/shell';
+import { dismissMissedLine, paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -380,6 +380,7 @@ import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-
 import { isRepeatUnit, materializedDates } from '@features/schedule/repeat';
 import { buildIcs, resolveIcsZone } from '@features/schedule/ics';
 import { scheduleItemsOf } from '@adapter/ui/render/schedule-items';
+import { appScheduleNotify } from '@adapter/ui/render/schedule-notify';
 import { copyMarkdownAndHtml, copyPlainText } from '@adapter/platform/clipboard';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口・字は 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
@@ -10272,6 +10273,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       ),
       noteTitle: (lid) => st.entryMetas.get(lid)?.title,
       skip: materializedDates(shown.all),
+      // 🔴 アラーム(#855 20-C)── 時刻つきの予定だけ。「なし」= 0
+      alarmMinutes: appScheduleNotify.lead(),
     });
     if (res.count === 0) {
       // ⚠ 無言で空の file を落とさない(export-vcards と同じ向き)
@@ -12216,6 +12219,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'set-open-in-edit': (_dispatcher, target, services) => {
     if (target instanceof HTMLInputElement) services.setOpenInEdit?.(target.checked);
+  },
+  /**
+   * 🔴 **`.ics` に入れるアラームの時間**(#855 20-C)。⚠ 選べる値以外は `setLead` が既定へ丸める。
+   * 保存は端末の好み(`schedule-notify.ts`)── state は動かさない。
+   */
+  'set-schedule-lead': (_dispatcher, target) => {
+    if (target instanceof HTMLSelectElement) appScheduleNotify.setLead(Number(target.value));
+  },
+  /** 🔴 **次に開いたとき、見逃した予定を知らせるか**(#855 20-C)。⚠ 押した後の値を保存する。 */
+  'set-schedule-missed': (_dispatcher, target) => {
+    if (target instanceof HTMLInputElement) appScheduleNotify.setMissedOn(target.checked);
+  },
+  /**
+   * 🔴 **見逃した予定の知らせから、予定表へ移る**(#855 20-C)。⚠ 開いたら片付ける(`open-alarm` と同じ ──
+   * 開いたのに残っていると「押しても消えない」と読まれる)。移る口は左のタブの切替 1 本(`setBrowse`)。
+   */
+  'open-missed-schedule': (_dispatcher, _target, services, root) => {
+    services.setBrowse?.('schedule');
+    dismissMissedLine(root);
+  },
+  /** 🔴 **「見逃した予定」の知らせを閉じる**(#855 20-C)。本文にも予定にも触れない。 */
+  'dismiss-missed': (_dispatcher, _target, _services, root) => {
+    dismissMissedLine(root);
   },
   'set-alarm-enabled': (_dispatcher, target, services) => {
     // ⚠ checkbox の**押した後**の値を渡す(binder は state を持たない)

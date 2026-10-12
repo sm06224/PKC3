@@ -301,6 +301,9 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'reset-office-profile', 'retry-persist', 'schedule-day-go', 'schedule-mode',
   'schedule-nav', 
   'schedule-undo-move', 'schedule-week-pick',
+  // ⚠ 2026-10-12(#855 20-C): 予定の知らせ ── 見逃した予定の 1 行の「予定表を開く」「閉じる」と、予定表の「知らせ」の 2 つの設定
+  //   (知らせる時間 / 次に開いたとき知らせるか)。押し口は予定の面・鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場
+  'dismiss-missed', 'open-missed-schedule', 'set-schedule-lead', 'set-schedule-missed',
   /**
    * ⚠ **2026-10-01(#1102 段①)で 3 件増やした** ── 「探す」から送った本文の、前 / 次の当たりへ・
    *   塗りを消す。🔑 **名前で呼べないままにする理由**:`close-lightbox` と同じ ── 「探す」から
@@ -496,6 +499,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-size` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-11(#530 段⑤a): 付箋の右クリックの文字の大きさ(`place-size`)で受け手 +1 ── 登記は増えない
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-arrow` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-12(#855 20-C): 予定の知らせ 4 つ(`dismiss-missed` / `open-missed-schedule` / `set-schedule-lead` / `set-schedule-missed`)で受け手 +4 ── 登記は増えない
+      //   (押し口は予定の面と鳴っている予定の帯の中にしか無く、鍵も持たない。`dismiss-alarm` / `set-alarm-enabled` と同じ置き場)。`receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#530 段⑤d): 付箋の右クリックの「右に回す / 左に回す / 回転を解く」(`place-rotate`)で受け手 +1 ── 登記は増えない
       //   (押し口は付箋の右クリックにしか無く、対象の行はメニューが運ぶ。`place-size` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11: 「リンクをコピー」(`copy-entry-link`。登記 +1 / 受け手 +1 / 両方 +1)と「添付のリンクをコピー」
@@ -815,12 +820,13 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は予定の面の中にしか無く、鍵も持たない。押した行が lid を運ぶ ── `schedule-week-pick` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」(`copy-selection-md`)1 件を登記 ── 受け手は前から在った(読む面のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。
-      total: 419,
-      receivers: 353,
+      // ⚠ 2026-10-12(#855 20-C): 予定の知らせの受け手 4 件(`set-schedule-lead` / `set-schedule-missed` / `open-missed-schedule` / `dismiss-missed`)── 登記なし。`total` / `receivers` / `unregistered` +4。
+      total: 423,
+      receivers: 357,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 252,
+      unregistered: 256,
     });
   });
 
