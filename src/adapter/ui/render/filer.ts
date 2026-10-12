@@ -12,9 +12,9 @@
  * 差分規律: scope・一覧内容が変わったときだけ table を作り直す。選択だけの
  * 変化(scope 不変)は data-pkc-selected の属性 patch のみ(P3-7b review #2 ──
  * 15k 平置き root で選択 1 クリック = 60,009 createElement の反例を封鎖)。
- * ⚠ 既知の限界: 一覧変化時の rebuild は O(scope 直下)で、平置き container の
- * root scope では「scope 直下 = 全 entry」になる。keyed 行再利用(sidebar 方式)
- * は P6 import で平置き大 container が現実になった時に計測してから入れる。
+ * 🔑 一覧が変わったときも、表と**変わっていない行の node は持ち越す**(#1087。keyed 行再利用)。
+ * 直す前は平置き container の root scope(= 全 entry)で 1 件足すだけで全行を作り直し、
+ * 5,700 件で 2.7 秒・renderer が約 +120〜185 MB 膨らんでいた(`docs/development/long-list-add-2026-10.md`)。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
@@ -51,6 +51,14 @@ import { appKeymap, type KeymapStore } from './keymap';
 export class FilerRenderer {
   private readonly region: HTMLElement;
   private readonly rows = new Map<string, HTMLTableRowElement>();
+  /**
+   * 🔴 **表と行の node は、作り直さずに持ち越す**(#1087。5,700 件で「1 件足す」と 2.7 秒・
+   * 約 +120〜185 MB の一時増だった ── 全行を作り直していたため)。
+   * ⚠ `rowSigs` は**行が出している材料**の指紋(`rowSignature`)── 同じなら node をそのまま使う。
+   */
+  private table: HTMLTableElement | null = null;
+  private tbody: HTMLTableSectionElement | null = null;
+  private readonly rowSigs = new Map<string, string>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   /**
    * 画面に出る材料の指紋(参照ではなく内容)。⚠ **この面が実際に描くものだけ**を
@@ -680,6 +688,169 @@ export class FilerRenderer {
     }
   }
 
+  /**
+   * 行が出している材料の指紋(#1087)。⚠ `buildRow` が読む物と**同じ**でなければならない ──
+   * 足りないと古い字の行が残り、多いと持ち越せない。選択と印は**含めない**(`reconcileRows` が
+   * 属性だけを合わせる ── 行の node を作り直さずに済ませる)。
+   */
+  private rowSignature(
+    m: EntryMeta,
+    renaming: boolean,
+    parentName: string | undefined,
+    year: number,
+  ): string {
+    return [
+      m.title,
+      m.archetype,
+      formatListDate(m.updatedAt, year),
+      formatStoredDate(m.updatedAt, ''),
+      renaming ? 'r' : '',
+      parentName ?? '',
+    ].join('\u0000');
+  }
+
+  /** 1 行を組む。⚠ 材料を増やしたら `rowSignature` も同じだけ増やす。 */
+  private buildRow(
+    m: EntryMeta,
+    state: AppState,
+    marked: ReadonlySet<string>,
+    parentName: string | undefined,
+  ): HTMLTableRowElement {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-pkc-entry', m.lid);
+    tr.setAttribute('data-pkc-action', 'select-entry');
+    tr.setAttribute('data-pkc-archetype', m.archetype);
+    /**
+     * 🔴 **掴んで動かす**(#240 段④。user 指示 2026-08-17「D&D を導入すること」)。
+     * ⚠ 落とし先は**フォルダの行**と**パンくず**の 2 つ ── 行の**上半分 / 下半分**に
+     * 落とすと並べ替えになる(#215。判定は `binder.ts` の `reorderTargetOf`)。
+     * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
+     */
+    tr.setAttribute('draggable', 'true');
+    /**
+     * 🔴 **行に焦点を持たせる**(user 裁定 2026-08-18「OS のファイラに似せる」)。
+     * ⚠ 焦点が無いと `Enter` / `Delete` を**どこで効かせるか**が決まらない ──
+     *   面をまたいで効かせると、#240 の着地前レビューで踏んだ「見えない所で
+     *   印が増える」を繰り返す。押した行が焦点を持つのが OS と同じ形である。
+     * ⚠ `-1` にする(Tab の巡回には入れない)── 行が何百件も在るので、
+     *   Tab で 1 行ずつ辿らせるのは動線として悪い。
+     */
+    tr.tabIndex = -1;
+    if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
+    /**
+     * 🔴 **スマートフォルダにも落とせる**(#421 段①。user 裁定 2026-08-26)。
+     * ⚠ 印は `folder` と**別の値**にする ── 落ちた結果が違う(移すのではなく、
+     *   **条件のタグが本文に付く**)ので、同じ印にすると受け手が見分けられない。
+     */
+    else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
+    if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
+    // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
+    paintRowMark(tr, marked.has(m.lid));
+    const name = document.createElement('td');
+    name.setAttribute('data-pkc-field', 'title');
+    // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
+    //    連結していたので、題名の文字列そのものが figure を含んでいた
+    //    (絞り込み・突合・読み上げが全部それを題名として扱う)
+    // 🔑 **全部の種別に図案を出す**(一覧と同じ規則)── フォルダだけ出していた頃は
+    //    他の種別が無印で、種別の列も畳まれていたので**何のノートか分からなかった**
+    const chip = iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'dot');
+    chip.setAttribute('data-pkc-chip', m.archetype);
+    chip.title = archetypeLabel(m.archetype);
+    if (m.lid === state.renamingLid) {
+      /**
+       * 🔴 **その場で名前を打ち替える**(#215 ── 2 ペインの `dual-rename` を左の列へ写した)。
+       * ⚠ 綴り(`row-rename`)は一覧タブの行と**同じ** ── binder の鍵(Enter / Esc)と
+       *   focusout の受け手が 1 本で両方を拾う(面ごとに受け手を作らない。§7)。
+       * ⚠ 焦点と全選択は表を組み終えた後に当てる(`render` の末尾)。
+       */
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = m.title;
+      input.setAttribute('data-pkc-field', 'row-rename');
+      input.setAttribute('data-pkc-entry', m.lid);
+      input.setAttribute('aria-label', '新しい名前');
+      name.append(chip, input);
+    } else {
+      name.append(chip, document.createTextNode(m.title));
+            if (parentName !== undefined) {
+        /**
+         * 🔴 **題名の右に、小さく薄く**(#813)。⚠ 色は**情報にだけ**(`--muted` 1 色・新色なし)。
+         * ⚠ 長いときは**親の名前の側**を `…` で切る(題名を切らない ── CSS)。
+         * ⚠ `row-rename` の入力欄の行には添えない(打ち替え中は欄だけ)。
+         */
+        const hint = document.createElement('span');
+        hint.setAttribute('data-pkc-field', 'parent-name');
+        hint.textContent = `─ ${parentName}`;
+        name.append(hint);
+        name.title = `${m.title}(${parentName} の中)`;
+      }
+    }
+    const updated = document.createElement('td');
+    // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
+    updated.setAttribute('data-pkc-field', 'updated');
+    // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
+    // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
+    //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
+    //    hover の `title` に出す(一覧の行と同じ作法)
+    updated.textContent = formatListDate(m.updatedAt, new Date().getFullYear());
+    const full = formatStoredDate(m.updatedAt, '');
+    if (full) updated.title = `更新 ${full}`;
+    tr.append(name, updated);
+    return tr;
+  }
+
+  /**
+   * 🔴 **行を持ち越して並べ直す**(#1087)。
+   *
+   * - 指紋が同じ行は **node をそのまま使う**(作り直さない ── 5,700 件の追加で 2.7 秒・
+   *   +120〜185 MB だった実体)。選択と印は属性だけ合わせる。
+   * - 消えた行・指紋が変わった行は外し、新しい行は**入るべき位置へ差し込む**
+   *   (並びが同じなら 1 回も動かさない)。
+   * ⚠ 行の node を作り直さない → 掴んでいる手の下の行が消えない(#270 と同じ向き)。
+   */
+  private reconcileRows(
+    tbody: HTMLTableSectionElement,
+    list: readonly EntryMeta[],
+    state: AppState,
+    parentNames: ReadonlyMap<string, string>,
+  ): void {
+    const year = new Date().getFullYear();
+    const marked = new Set(state.selection);
+    const nextRows = new Map<string, HTMLTableRowElement>();
+    const nextSigs = new Map<string, string>();
+    const ordered: HTMLTableRowElement[] = [];
+    for (const m of list) {
+      const parentName = parentNames.get(m.lid);
+      const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, year);
+      let tr = this.rows.get(m.lid);
+      if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
+        const sel = m.lid === state.selectedLid;
+        if (tr.hasAttribute('data-pkc-selected') !== sel) {
+          if (sel) tr.setAttribute('data-pkc-selected', '');
+          else tr.removeAttribute('data-pkc-selected');
+        }
+        const mk = marked.has(m.lid);
+        if (tr.hasAttribute('data-pkc-marked') !== mk) paintRowMark(tr, mk);
+      } else {
+        tr = this.buildRow(m, state, marked, parentName);
+      }
+      nextRows.set(m.lid, tr);
+      nextSigs.set(m.lid, sig);
+      ordered.push(tr);
+    }
+    const keep = new Set<Node>(ordered);
+    for (const tr of this.rows.values()) if (!keep.has(tr)) tr.remove();
+    let cursor: ChildNode | null = tbody.firstChild;
+    for (const tr of ordered) {
+      if (tr === cursor) cursor = cursor.nextSibling;
+      else tbody.insertBefore(tr, cursor);
+    }
+    this.rows.clear();
+    for (const [lid, tr] of nextRows) this.rows.set(lid, tr);
+    this.rowSigs.clear();
+    for (const [lid, sig] of nextSigs) this.rowSigs.set(lid, sig);
+  }
+
   render(state: AppState): void {
     this.paintRefusedTags(state);
     /**
@@ -873,8 +1044,20 @@ export class FilerRenderer {
     // 🔑 **面ごと組み直す前に**打ちかけの字を捕まえる(器ごと作り直すので、
     //    `renderMoveBar` の中では**もう読めない**)
     this.captureBarInputs();
-    this.region.textContent = '';
-    this.rows.clear();
+    /**
+     * 🔴 **表だけは残して、周りを作り直す**(#1087)。表を外して付け直すと、5,700 行ぶんの
+     * スタイル計算とレイアウトを払い直す ── 帯・パンくず・ゴミ箱は小さいので作り直してよい。
+     */
+    const keptTable = this.table !== null && this.table.parentNode === this.region ? this.table : null;
+    if (keptTable === null) {
+      this.region.textContent = '';
+      this.table = null;
+      this.tbody = null;
+      this.rows.clear();
+      this.rowSigs.clear();
+    } else {
+      for (const c of [...this.region.childNodes]) if (c !== keptTable) c.remove();
+    }
 
     // breadcrumb: root / …祖先… / scope
     const crumb = document.createElement('nav');
@@ -990,7 +1173,8 @@ export class FilerRenderer {
         crumb.append(flat);
       }
     }
-    this.region.append(crumb);
+    if (keptTable === null) this.region.append(crumb);
+    else this.region.insertBefore(crumb, keptTable);
     /**
      * 🔴 **操作の帯は表の「下」に置く**(#240 段①〜③ の実装中に実測で判明)。
      *
@@ -1003,126 +1187,50 @@ export class FilerRenderer {
     this.moveBar = document.createElement('div');
     this.moveBar.setAttribute('data-pkc-region', 'filer-move');
 
-    const table = document.createElement('table');
-    table.setAttribute('data-pkc-region', 'filer-table');
-    table.setAttribute('aria-multiselectable', 'true');
-    /**
-     * 🔴 **表そのものにも焦点を置けるようにする**(2026-08-18 の着地前レビュー 8)。
-     * 空のフォルダには置く先の行が無いので、ここが `filer` 文脈の鍵の受け皿になる。
-     * ⚠ **`-1`** ── Tab の巡回には入れない(15,000 件の平置きで巡回に入ると
-     *   Tab を数千回押すことになる)。⚠ **binder では書かない** ── 直す前は
-     *   `focusFirstRow()` の中で付けていたので、**その関数を 1 度通るまで
-     *   表に焦点が入らなかった**(= マウスだけの user は鍵の面へ入れない)。
-     */
-    /**
-     * 🔴 **`0`**(2026-08-18)── お知らせで「**マウスを使わずに行までたどり着けます**」と
-     * 配ったのに、直す前は表も行も `-1` で **Tab の巡回に入らず**、焦点は
-     * マウスで 1 回押さないと作れなかった(= 配った約束が嘘だった)。
-     * ⚠ **行は `-1` のまま** ── 15,000 件の平置きを巡回に入れると Tab を数千回
-     *   押すことになる。入口は**表 1 つ**で、そこから ↑↓ で送る。
-     */
-    table.tabIndex = 0;
-    const thead = document.createElement('thead');
-    const hr = document.createElement('tr');
-    // 🔴 **種別の列は持たない**(P9 段③)。以前は 3 列作って `display: none` で
-    //    2 列を畳んでいた ── 見出しが約束した「種別 / 更新日」が**どちらも
-    //    画面に出ていなかった**(実測: 幅 0px)。しかも種別が見えないので、
-    //    このタブは「一覧」と同じ題名の並びに見えていた(かぶりの実体)。
-    //    種別は**行の頭の図案**が示し(一覧と同じ規則)、列は更新日だけ残す
-    for (const h of ['名前', '更新日']) {
-      const th = document.createElement('th');
-      th.textContent = h;
-      hr.append(th);
-    }
-    thead.append(hr);
-    const tbody = document.createElement('tbody');
-    for (const m of list) {
-      const tr = document.createElement('tr');
-      tr.setAttribute('data-pkc-entry', m.lid);
-      tr.setAttribute('data-pkc-action', 'select-entry');
-      tr.setAttribute('data-pkc-archetype', m.archetype);
+    let tbody: HTMLTableSectionElement;
+    if (keptTable === null || this.tbody === null) {
+      const table = document.createElement('table');
+      table.setAttribute('data-pkc-region', 'filer-table');
+      table.setAttribute('aria-multiselectable', 'true');
       /**
-       * 🔴 **掴んで動かす**(#240 段④。user 指示 2026-08-17「D&D を導入すること」)。
-       * ⚠ 落とし先は**フォルダの行**と**パンくず**の 2 つ ── 行の**上半分 / 下半分**に
-       * 落とすと並べ替えになる(#215。判定は `binder.ts` の `reorderTargetOf`)。
-       * ⚠ `draggable` は行そのものに置く(セルに置くと掴む場所が読めない)。
+       * 🔴 **表そのものにも焦点を置けるようにする**(2026-08-18 の着地前レビュー 8)。
+       * 空のフォルダには置く先の行が無いので、ここが `filer` 文脈の鍵の受け皿になる。
+       * ⚠ **`-1`** ── Tab の巡回には入れない(15,000 件の平置きで巡回に入ると
+       *   Tab を数千回押すことになる)。⚠ **binder では書かない** ── 直す前は
+       *   `focusFirstRow()` の中で付けていたので、**その関数を 1 度通るまで
+       *   表に焦点が入らなかった**(= マウスだけの user は鍵の面へ入れない)。
        */
-      tr.setAttribute('draggable', 'true');
       /**
-       * 🔴 **行に焦点を持たせる**(user 裁定 2026-08-18「OS のファイラに似せる」)。
-       * ⚠ 焦点が無いと `Enter` / `Delete` を**どこで効かせるか**が決まらない ──
-       *   面をまたいで効かせると、#240 の着地前レビューで踏んだ「見えない所で
-       *   印が増える」を繰り返す。押した行が焦点を持つのが OS と同じ形である。
-       * ⚠ `-1` にする(Tab の巡回には入れない)── 行が何百件も在るので、
-       *   Tab で 1 行ずつ辿らせるのは動線として悪い。
+       * 🔴 **`0`**(2026-08-18)── お知らせで「**マウスを使わずに行までたどり着けます**」と
+       * 配ったのに、直す前は表も行も `-1` で **Tab の巡回に入らず**、焦点は
+       * マウスで 1 回押さないと作れなかった(= 配った約束が嘘だった)。
+       * ⚠ **行は `-1` のまま** ── 15,000 件の平置きを巡回に入れると Tab を数千回
+       *   押すことになる。入口は**表 1 つ**で、そこから ↑↓ で送る。
        */
-      tr.tabIndex = -1;
-      if (m.archetype === 'folder') tr.setAttribute('data-pkc-drop', 'folder');
-      /**
-       * 🔴 **スマートフォルダにも落とせる**(#421 段①。user 裁定 2026-08-26)。
-       * ⚠ 印は `folder` と**別の値**にする ── 落ちた結果が違う(移すのではなく、
-       *   **条件のタグが本文に付く**)ので、同じ印にすると受け手が見分けられない。
-       */
-      else if (m.archetype === SMART_ARCHETYPE) tr.setAttribute('data-pkc-drop', 'smart');
-      if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
-      // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
-      paintRowMark(tr, state.selection.includes(m.lid));
-      const name = document.createElement('td');
-      name.setAttribute('data-pkc-field', 'title');
-      // ⚠ 図案は**題名の文字列に混ぜない**(P9 段③)。以前は '📁 ' を題名の頭に
-      //    連結していたので、題名の文字列そのものが figure を含んでいた
-      //    (絞り込み・突合・読み上げが全部それを題名として扱う)
-      // 🔑 **全部の種別に図案を出す**(一覧と同じ規則)── フォルダだけ出していた頃は
-      //    他の種別が無印で、種別の列も畳まれていたので**何のノートか分からなかった**
-      const chip = iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'dot');
-      chip.setAttribute('data-pkc-chip', m.archetype);
-      chip.title = archetypeLabel(m.archetype);
-      if (m.lid === state.renamingLid) {
-        /**
-         * 🔴 **その場で名前を打ち替える**(#215 ── 2 ペインの `dual-rename` を左の列へ写した)。
-         * ⚠ 綴り(`row-rename`)は一覧タブの行と**同じ** ── binder の鍵(Enter / Esc)と
-         *   focusout の受け手が 1 本で両方を拾う(面ごとに受け手を作らない。§7)。
-         * ⚠ 焦点と全選択は表を組み終えた後に当てる(`render` の末尾)。
-         */
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = m.title;
-        input.setAttribute('data-pkc-field', 'row-rename');
-        input.setAttribute('data-pkc-entry', m.lid);
-        input.setAttribute('aria-label', '新しい名前');
-        name.append(chip, input);
-      } else {
-        name.append(chip, document.createTextNode(m.title));
-        const parentName = parentNames.get(m.lid);
-        if (parentName !== undefined) {
-          /**
-           * 🔴 **題名の右に、小さく薄く**(#813)。⚠ 色は**情報にだけ**(`--muted` 1 色・新色なし)。
-           * ⚠ 長いときは**親の名前の側**を `…` で切る(題名を切らない ── CSS)。
-           * ⚠ `row-rename` の入力欄の行には添えない(打ち替え中は欄だけ)。
-           */
-          const hint = document.createElement('span');
-          hint.setAttribute('data-pkc-field', 'parent-name');
-          hint.textContent = `─ ${parentName}`;
-          name.append(hint);
-          name.title = `${m.title}(${parentName} の中)`;
-        }
+      table.tabIndex = 0;
+      const thead = document.createElement('thead');
+      const hr = document.createElement('tr');
+      // 🔴 **種別の列は持たない**(P9 段③)。以前は 3 列作って `display: none` で
+      //    2 列を畳んでいた ── 見出しが約束した「種別 / 更新日」が**どちらも
+      //    画面に出ていなかった**(実測: 幅 0px)。しかも種別が見えないので、
+      //    このタブは「一覧」と同じ題名の並びに見えていた(かぶりの実体)。
+      //    種別は**行の頭の図案**が示し(一覧と同じ規則)、列は更新日だけ残す
+      for (const h of ['名前', '更新日']) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        hr.append(th);
       }
-      const updated = document.createElement('td');
-      // ⚠ 目印を付ける ── 日付だけの変化はここを差し替えて済ませる(#270)
-      updated.setAttribute('data-pkc-field', 'updated');
-      // ⚠ 生の SQLite UTC 文字列(`2026-08-03 13:11:39`)を出さない。
-      // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
-      //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
-      //    hover の `title` に出す(一覧の行と同じ作法)
-      updated.textContent = formatListDate(m.updatedAt, new Date().getFullYear());
-      const full = formatStoredDate(m.updatedAt, '');
-      if (full) updated.title = `更新 ${full}`;
-      tr.append(name, updated);
-      tbody.append(tr);
-      this.rows.set(m.lid, tr);
+      thead.append(hr);
+      const fresh = document.createElement('tbody');
+      table.append(thead, fresh);
+      this.region.append(table);
+      this.table = table;
+      this.tbody = fresh;
+      tbody = fresh;
+    } else {
+      tbody = this.tbody;
     }
-    table.append(thead, tbody);
-    this.region.append(table);
+    this.reconcileRows(tbody, list, state, parentNames);
     /**
      * 🔴 **本文の当たりを 200 件で切ったら、そう言う**(#813 段③-a。一覧タブの
      *   `entry-list-more` をここへ移した)。
@@ -1256,7 +1364,8 @@ export class FilerRenderer {
         sameRow ??
         firstRow ??
         this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
-      back?.focus();
+      // 🔑 持ち越した行に焦点が在るままなら触らない(`focus()` は見える位置へ動かす ── #1087)
+      if (back !== null && this.region.ownerDocument.activeElement !== back) back.focus();
     }
     /**
      * ⚠ **描いた直後に焦点と全選択**(#215。2 ペインの `renderRows` と同じ)── これが無いと、
