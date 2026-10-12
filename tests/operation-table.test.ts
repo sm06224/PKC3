@@ -194,12 +194,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * ⚠ **2026-10-12(#582 段③ 第 3 群)で、残した 3 件のうち `insert-diagram` / `insert-icon` の 2 件を登記して在庫から抜いた** ──
    *   一覧を開いたときの範囲を戻してから押す経路(`openPaletteFor`)を足したので撃てる。`dual-delete` はいまも同じ理由で残る。
    */
-  /**
-   * ⚠ **2026-10-11(#582 段③ 第 1 群)で、「高」のうち 1 件だけ登記しなかった** ── 「選択範囲をコピー」(`copy-selection-md`)。
-   *   一覧(パレット)を開いた瞬間に本文の選択が消え、画面のボタン自身も押せなくなる(実ブラウザで測った)ので、
-   *   登記しても一覧からは撃てない。選択を運ぶ設計が別に要る。
-   */
-  'copy-selection-md',
+  // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 'copy-selection-md'(選択範囲をコピー)は登記して在庫から抜いた。
+  //   「操作を探す」を開く前に読む面の選択を字として控え、選んだらその字をコピーする(第 1 群で見送った理由「開いた瞬間に選択が消える」を、控えで解いた)。
   /**
    * ⚠ **2026-10-02(#772 段②)で 3 件増やした** ── 音声認識の部品を入れる / 消す / 途中でやめる。
    * 🔑 **名前で呼べないままにする理由**:`install-office-pack` / `remove-office-pack` と同じ ──
@@ -817,12 +813,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `KEY_COMMANDS` へ登記した ── 受け手は既に在った(押し口は画面のボタン)ので `registered` +7 / `both` +7 / `unregistered` −7(`total` / `receivers` は動かない)。
       // ⚠ 2026-10-12(#855 20-A): 予定の「出すもの」の中のノートごとのチェック(`toggle-schedule-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は予定の面の中にしか無く、鍵も持たない。押した行が lid を運ぶ ── `schedule-week-pick` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」(`copy-selection-md`)1 件を登記 ── 受け手は前から在った(読む面のボタン)ので
+      //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。
       total: 419,
       receivers: 353,
-      registered: 166,
-      both: 100,
+      registered: 167,
+      both: 101,
       outsideActionsTable: 66,
-      unregistered: 253,
+      unregistered: 252,
     });
   });
 
@@ -878,8 +876,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-11(#582 段③ 第 2 群): 「高」の 26 件を登記(`run-sql` / `start-timer` / `show-trash` ほか)で `key` 102 → 128(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる 2 件(`insert-diagram` / `insert-icon`)を登記で `key` 128 → 130(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件(`stop-capture` / `capture-stop` / `capture-trim-*` / `search-jump-end`)を登記で `key` 130 → 137(鍵の既定は持たない)
+    // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」を登記で `key` 137 → 138(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 137,
+      key: 138,
       entry: 22,
       body: 3,
       collection: 2,

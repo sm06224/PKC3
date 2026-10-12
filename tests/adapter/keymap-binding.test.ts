@@ -1039,6 +1039,11 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   組まれないので、ヘルプの押し口と同じ `openSystemNotices` を直に呼ぶ特例(`open-manual-window` と同じ事情)。
        */
       'open-system-notices',
+      /**
+       * ⚠ 2026-10-12 に足した(#582 段③ 依頼 22 の Q3 = A)── 選択範囲をコピー。押しボタンは選択が消えると押せなくなるので、
+       *   「操作を探す」を開く前に控えた字(`paletteSelection`)を読む特例。
+       */
+      'copy-selection-md',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

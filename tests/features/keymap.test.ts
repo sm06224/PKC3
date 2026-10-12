@@ -217,7 +217,9 @@ describe('割当の検め', () => {
   // 🔴 #582 段③ 第 3 群: 打っている場所に入れる 2 件 ── 「操作を探す」から呼ぶ(開いたときの範囲を戻してから押す)。鍵は user が設定で割り当てる
   'insert-diagram', 'insert-icon',
   // 🔴 #582 段③ 第 4 群: 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'stop-capture', 'capture-stop', 'capture-trim-start', 'capture-trim-end', 'capture-trim-run', 'capture-trim-clear', 'search-jump-end'];
+  'stop-capture', 'capture-stop', 'capture-trim-start', 'capture-trim-end', 'capture-trim-run', 'capture-trim-clear', 'search-jump-end',
+  // 🔴 #582 段③(Gemini の回答 = #1163 の依頼 22 の Q3 = A): 選択範囲をコピー ── 「操作を探す」を開く前の読む面の選択をコピーする。鍵は user が設定で割り当てる
+  'copy-selection-md'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

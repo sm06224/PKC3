@@ -29,9 +29,13 @@ import {
   type KeyCommand,
   type KeymapBindings,
 } from '@features/keymap';
+import { sceneOf } from './scene-labels';
 
 /** 押せない行の理由に必ず付く頭。⚠ **押せる行には付かない**(見分けの印)。 */
 export const NOT_READY_PREFIX = 'いまは押せません。';
+
+/** 押せない理由が他に無いときの最後の字。⚠ 出てよいのは「説明を持たない命令」だけ(test が全数で見る)。 */
+export const GENERIC_NOT_READY = 'いまこの操作のボタンが画面に出ていません';
 
 /** 一覧の 1 行。 */
 export interface PaletteRow {
@@ -47,6 +51,11 @@ export interface PaletteRow {
    * 押せるときは `note`(無ければ空)。
    */
   readonly why: string;
+  /**
+   * 🔴 **場面の名前**(行の右端に薄く出す。`scene-labels.ts` の表から引く)。
+   * ⚠ 表に無い id は空(何も出さない)── 全 id が持つことは test が見る。
+   */
+  readonly scene?: string;
 }
 
 /**
@@ -115,7 +124,7 @@ function reasonOf(
     return `${NOT_READY_PREFIX}${where}にいるときだけ効きます`;
   }
   const note = cmd.note ?? '';
-  return note === '' ? `${NOT_READY_PREFIX}いまこの操作のボタンが画面に出ていません` : `${NOT_READY_PREFIX}${note}`;
+  return note === '' ? `${NOT_READY_PREFIX}${GENERIC_NOT_READY}` : `${NOT_READY_PREFIX}${note}`;
 }
 
 /**
@@ -168,6 +177,7 @@ export function paletteRows(
         label: cmd.label,
         keys: (bindings[cmd.id] ?? cmd.defaults).map((b) => chordLabel(b, mac)),
         ready: ok,
+        scene: sceneOf(cmd.id) ?? '',
         why: ok ? (cmd.note ?? '') : reasonOf(
               cmd,
               blockedReason(cmd.id),

@@ -266,8 +266,8 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
     }
   });
 
-  it('「選択範囲をコピー」は登記していない(一覧を開いた瞬間に選択が消えるので、撃てない行になる)', () => {
-    expect(findCommand('copy-selection-md')).toBeNull();
+  it('「選択範囲をコピー」は登記したが、押しボタンは受け手にしない(選択が消えると押せないので、控えた字を読む特例 ── tests/adapter/palette-copy-selection.test.ts)', () => {
+    expect(findCommand('copy-selection-md')).not.toBeNull();
     expect(SHORTCUT_BUTTON['copy-selection-md']).toBeUndefined();
   });
 

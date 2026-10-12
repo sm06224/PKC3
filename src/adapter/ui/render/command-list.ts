@@ -22,7 +22,7 @@ export const COMMAND_LIST_EMPTY = 'その名前の操作はありません。別
 
 /** 描いた物の指紋。⚠ 並び・押せるか・理由・割当を全部含める(1 つ落とすと、変わっても描き直さない)。 */
 function shapeOf(rows: readonly PaletteRow[], recent: readonly PaletteRow[]): string {
-  const of = (xs: readonly PaletteRow[]) => xs.map((r) => [r.id, r.label, r.keys, r.ready, r.why]);
+  const of = (xs: readonly PaletteRow[]) => xs.map((r) => [r.id, r.label, r.keys, r.ready, r.why, r.scene]);
   // ⚠ 「最近使った」の節に居るか否かも指紋に入れる(同じ行が節の中へ動いても描き直す)
   return JSON.stringify([of(recent), of(rows)]);
 }
@@ -73,6 +73,13 @@ export function paintCommandList(
       keys.setAttribute('data-pkc-field', 'command-keys');
       keys.textContent = r.keys.join(' / ');
       btn.append(keys);
+    }
+    if (r.scene !== undefined && r.scene !== '') {
+      // 🔑 パレットと同じ場面の名前(行の右端に薄く)
+      const scene = document.createElement('span');
+      scene.setAttribute('data-pkc-field', 'command-scene');
+      scene.textContent = r.scene;
+      btn.append(scene);
     }
     if (r.why !== '') {
       const why = document.createElement('span');

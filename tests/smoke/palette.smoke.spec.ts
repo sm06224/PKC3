@@ -152,6 +152,11 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect(rowOf('schedule-quick-add').locator('[data-pkc-field="palette-why"]')).toContainText(
     '予定の画面を開いているとき',
   );
+  // 🔴 場面の名前(#582 段③)── 灰色の行にも右端に出る(押せない行を場面で見分けられる)
+  await expect(
+    rowOf('schedule-quick-add').locator('[data-pkc-field="palette-scene"]'),
+    '押せない行に場面の名前が出ていない',
+  ).toHaveText('予定');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
 
@@ -159,6 +164,29 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await ask('タグを足す');
   await expect(rowOf('add-tag'), 'ノートを選んでいるのに押せない').toBeEnabled();
   await expect(page.locator('[data-pkc-field="palette-row"]').first()).toHaveAttribute('data-pkc-command', 'add-tag');
+  /**
+   * 🔴 **場面の名前に見た目の規則が在る**(属性が付いているだけでは「付けた」しか言わない ── 実ブラウザの計算後の値で見る)。
+   *   ア 行の名前とは別の控えめな色 イ 行の右端に寄っている(名前の直後ではない)
+   */
+  const sceneLook = await rowOf('add-tag').evaluate((row) => {
+    const scene = row.querySelector('[data-pkc-field="palette-scene"]');
+    const label = row.querySelector('[data-pkc-field="palette-label"]');
+    if (scene === null || label === null) return null;
+    const sr = scene.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    return {
+      text: scene.textContent,
+      sceneColor: getComputedStyle(scene).color,
+      labelColor: getComputedStyle(label).color,
+      gapToRight: rr.right - sr.right,
+      gapFromLabel: sr.left - label.getBoundingClientRect().right,
+    };
+  });
+  expect(sceneLook, '行に場面の名前が出ていない').not.toBeNull();
+  expect(sceneLook!.text).toBe('ノート');
+  expect(sceneLook!.sceneColor, '場面の名前が行の名前と同じ色(控えめになっていない)').not.toBe(sceneLook!.labelColor);
+  expect(sceneLook!.gapToRight, '場面の名前が行の右端に寄っていない').toBeLessThan(40);
+  expect(sceneLook!.gapFromLabel, '場面の名前が名前の直後に詰まっている(右端へ寄せる規則が効いていない)').toBeGreaterThan(60);
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
   await expect(tagField, '欄が空なのに、欄へ移っていない').toBeFocused();
@@ -284,6 +312,41 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     `hello:${leftIconName}: world`,
   );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
+
+  /**
+   * ⑨-0 🔴 **「選択範囲をコピー」を「操作を探す」から呼ぶ**(#582 段③ 依頼 22 の Q3 = A)。
+   * ⚠ 同じ起動の続き(新しい起動を足さない)。直前に確定した 1 面のノートを読んでいる。実ブラウザで見るのは 3 つ:
+   *   ア 選択が無いときは灰色 + 理由 イ 本文の中を選んでから開くと押せる(開いた瞬間に選択が消えても、開く前の字を控えている)
+   *   ウ 選ぶと本物のクリップボードに **Markdown の原文**が入る
+   */
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await expect(page.locator('[data-pkc-field="detail-body"] p').first(), '前提が崩れている(読む面に本文が無い)').toBeVisible();
+  await page.evaluate(() => document.getSelection()?.removeAllRanges());
+  await ask('選択範囲をコピー');
+  await expect(rowOf('copy-selection-md'), '選択が無いのに押せる').toBeDisabled();
+  await expect(rowOf('copy-selection-md').locator('[data-pkc-field="palette-why"]')).toContainText(
+    '本文の中を選択してから呼んでください',
+  );
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  // 読む面の先頭の段落の「hello」を選ぶ(原文では `hello` ── 後ろの `:アイコン:` は含まない)
+  await page.evaluate(() => {
+    const p = document.querySelector('[data-pkc-field="detail-body"] p')!;
+    const t = p.firstChild!;
+    const r = document.createRange();
+    r.setStart(t, 0);
+    r.setEnd(t, 5);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(r);
+  });
+  await ask('選択範囲をコピー');
+  await expect(rowOf('copy-selection-md'), '本文の中を選んでから開いたのに押せない').toBeEnabled();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()), { message: '選んだ範囲が本物のクリップボードに入っていない' })
+    .toBe('hello');
 
   /**
    * ⑨ 🔴 **場面ごとに足した操作 第 2 群(#582 段③)が、実ブラウザで走る**。
