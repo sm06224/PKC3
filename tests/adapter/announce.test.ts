@@ -904,7 +904,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /** ⚠ **#529 で足した**(2026-10-12)。枠が満杯だったので、いちばん古い 1 件(`2026-10-11-read-position-diagrams`)を落とした ── 原本は `CHANGELOG.md`(2026-10-11 の節)。 */
-    ['2026-10-12-schedule-add-elsewhere', '37bfbf0f'],
+    ['2026-10-12-schedule-add-elsewhere', '349f743e'],
     /** ⚠ **#582 で足した**(2026-10-12)。枠が満杯だったので、いちばん古い 1 件(`2026-10-10-asr-quiet-repeat`)を落とした ── 原本は `CHANGELOG.md`(2026-10-10 の節)。 */
     ['2026-10-12-palette-left-live', '8e433ca7'],
     /** ⚠ **#918 で足した**(2026-10-12)。枠が満杯だったので、いちばん古い 1 件(`2026-10-10-tag-color`)を落とした ── 原本は `CHANGELOG.md`(2026-10-10 の節)。 */
