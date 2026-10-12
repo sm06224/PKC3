@@ -14,6 +14,7 @@ import {
   checkImageParts,
   chooseImage,
   decodeImageParts,
+  groupAssetParts,
   IMAGE_PART_BYTES,
   IMAGE_PART_CHARS,
   imagePartMark,
@@ -263,5 +264,59 @@ describe('割った DB 画像を 1 本へ直に復号する (#1416 §7-4)', () =
     const one = fill(1000, 5);
     const spaced = b64(one).replace(/(.{76})/g, '$1\n') + ' \n';
     expect(Array.from(decodeImageParts([() => spaced])!)).toEqual(Array.from(one));
+  });
+});
+
+describe('添付の要素を 1 件ずつの塊にする (#1416 §7-4d)', () => {
+  const m = (n: number): string[] => Array.from({ length: n }, (_, i) => imagePartMark(i, n));
+  const items = (key: string, marks: string[]) => marks.map((mark) => ({ key, mark }));
+
+  it('割る前の版(印なし)は 1 要素 = 1 件。割った版は同じ key の続きが 1 件', () => {
+    const all = [...items('a', ['']), ...items('b', m(3)), ...items('c', ['']), ...items('d', m(1))];
+    expect(groupAssetParts(all)).toEqual([
+      { start: 0, count: 1, broken: null },
+      { start: 1, count: 3, broken: null },
+      { start: 4, count: 1, broken: null },
+      { start: 5, count: 1, broken: null },
+    ]);
+    expect(groupAssetParts([])).toEqual([]);
+  });
+
+  it('🔴 総数を超えた余りの要素は、黙って受けず断る', () => {
+    const extra = groupAssetParts(items('a', [...m(2), imagePartMark(1, 2)]));
+    expect(extra[0]!.broken).toBeNull();
+    expect(extra[1]!.broken, '余りの要素を黙って受けている').not.toBeNull();
+  });
+
+  it('🔴 欠け・順の乱れ・先頭が 0 でない・総数まで届かない は理由を返し、key を名指しする', () => {
+    const mm = m(4);
+    const cases: Record<string, string[]> = {
+      途中が欠けた: [mm[0]!, mm[1]!, mm[3]!],
+      末尾が欠けた: mm.slice(0, 3),
+      先頭が欠けた: mm.slice(1),
+      順が乱れた: [mm[0]!, mm[2]!, mm[1]!, mm[3]!],
+    };
+    for (const [name, marks] of Object.entries(cases)) {
+      const g = groupAssetParts(items('ast-x', marks));
+      expect(
+        g.some((x) => x.broken !== null && x.broken.includes('添付「ast-x」')),
+        name,
+      ).toBe(true);
+    }
+  });
+
+  it('別の key の要素は、同じ塊に入れない', () => {
+    const g = groupAssetParts([...items('a', ['0/2']), ...items('b', ['1/2'])]);
+    expect(g.every((x) => x.broken !== null)).toBe(true);
+  });
+});
+
+describe('復号の断り文の名前 (#1416 §7-4d)', () => {
+  it('label を渡すと、断り文は添付の名前で言う(DB の中身と言わない)', () => {
+    const full = 'A'.repeat((IMAGE_PART_BYTES / 3) * 4);
+    expect(() => decodeImageParts([() => full.slice(4), () => 'AAAA'], '添付「x」の中身')).toThrow(
+      /添付「x」の中身の 1 個目が途中で欠けています/,
+    );
+    expect(() => decodeImageParts([() => full.slice(4), () => 'AAAA'])).toThrow(/DB の中身の 1 個目/);
   });
 });

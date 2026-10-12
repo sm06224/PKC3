@@ -87,12 +87,13 @@ export function looksOutOfMemory(err: unknown): boolean {
  * |---|---|---|
  * | **取り込み**(`features/import/portable-html.ts`) | **HTML ファイル全体**(`File.text()`) | 🔴 効く(DB 画像を割っても、ファイル全体は 1 本) |
  * | **開く**(`portable-boot.ts`)の DB 画像 | 3MiB ごとの要素 1 つ | 効かない(割ってある。割る前の版が焼いた 1 本物は効く) |
- * | **開く**(`portable-assets.ts`)の添付 | 添付 1 件の `textContent` | 🔴 効く(割っていない) |
+ * | **開く**(`portable-assets.ts`)の添付 | 3MiB ごとの要素 1 つ | 効かない(割ってある。#1416 §7-4d。割る前の版が焼いた 1 本物は効く) |
  *
  * ⚠ だから**ここの門は残している**(安全側)。ただし理由は「開けない」だけではない ──
  *   DB 画像は**開く**ことはできても、**取り込み直せない** 1 枚になりうる。
  *   門の数は DB 画像の bytes を base64 にした字数で見ており、ファイル全体(アプリ本体 約 12MB と
  *   添付を足した字数)ではないので、**ファイル全体の上限そのものではない**(近似)。
+ *   添付は**これまでに焼いた分との合計**(雛形 + DB 画像 + 添付)で見る(`tooBigToImportMessage`)。
  *
  * ## 実測(2026-09-16、この箱の V8)
  *
@@ -153,6 +154,22 @@ export function tooBigToReadBackMessage(what: string, bytes: number): string {
     'PKC3 入り HTML にした中身は、開くときや取り込み直すときに丸ごと 1 つの文字列として読み込む必要があり、' +
     `そこに入る上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えています。` +
     'このまま作ると、ファイルはできても、開けない・取り込み直せないことがあります。' +
+    '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
+    'こちらは大きさで止まりません。取り込み直すこともできます。'
+  );
+}
+
+/**
+ * 添付を入れると **ファイル全体が取り込み直せなくなる** ときの字(#1416 §7-4d)。
+ *
+ * ⚠ `tooBigToReadBackMessage` と混ぜない ── あちらは「1 つの中身が大きすぎる」、こちらは
+ *   「**1 件ずつは小さくても、足した全体**が、取り込み直すときに読める上限を超える」。
+ *   添付は割って焼くので、**開く**ことは大きさで詰まらない(詰まるのは取り込み直しだけ)。
+ */
+export function tooBigToImportMessage(what: string, bytes: number): string {
+  return (
+    `${what}(${humanBytes(bytes)})を入れると、「PKC3 入り HTML」のファイル全体が、` +
+    `取り込み直すときに読める上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えるため、入れていません。` +
     '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。取り込み直すこともできます。'
   );

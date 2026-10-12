@@ -23,7 +23,13 @@
  *   「読めたつもりで 0 件」にしない)。
  */
 import { PORTABLE_HEAD_SCAN } from '../export/portable-bundle';
-import { checkImageParts, decodeImageParts, parseBundleTag, type PortableBundle } from '../portable/bundle';
+import {
+  checkImageParts,
+  decodeImageParts,
+  groupAssetParts,
+  parseBundleTag,
+  type PortableBundle,
+} from '../portable/bundle';
 
 /** 先頭から読む長さ(バイト)。印は `PORTABLE_HEAD_SCAN` 字以内だが、多バイト文字の分だけ余裕を持つ。 */
 export const PORTABLE_SNIFF_BYTES = 16384;
@@ -33,7 +39,7 @@ const BUNDLE_TAG_RE = /<script type="application\/json" data-pkc-bundle>([^<]*)<
 const IMAGE_OPEN_RE =
   /^<script type="application\/octet-stream;base64" data-pkc-db-image(?:="([^"]*)")?>$/;
 const ASSET_OPEN_RE =
-  /^<script type="application\/octet-stream;base64" data-pkc-asset="([A-Za-z0-9._-]{1,128})" data-pkc-asset-mime="([^"]*)">$/;
+  /^<script type="application\/octet-stream;base64" data-pkc-asset="([A-Za-z0-9._-]{1,128})" data-pkc-asset-mime="([^"]*)"(?: data-pkc-asset-part="([^"]*)")?>$/;
 const SCRIPT_CLOSE = '</script>';
 const BASE64_BODY_RE = /^[A-Za-z0-9+/=\s]*$/;
 
@@ -50,31 +56,6 @@ export function sniffPortableHtml(headText: string): PortableBundle | null {
 }
 
 const isSpace = (c: number): boolean => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
-
-/** base64 を小分けにして復号する(巨大な中間文字列を 1 本作らない)。 */
-function decodeBase64Chunked(b64: string): Uint8Array {
-  // 空白・改行を除く(混ざると、小分けの境目が 4 字の倍数からずれて、`atob` が黙って部分復号する)
-  const text = /\s/.test(b64) ? b64.replace(/\s+/g, '') : b64;
-  // 3 の倍数ごとに区切るので、4 字の倍数で切る
-  const STEP = 4 * 262144;
-  const parts: Uint8Array[] = [];
-  let total = 0;
-  for (let i = 0; i < text.length; i += STEP) {
-    const bin = atob(text.slice(i, i + STEP));
-    const bytes = new Uint8Array(bin.length);
-    for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
-    parts.push(bytes);
-    total += bytes.length;
-  }
-  if (parts.length === 1) return parts[0]!;
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
-  }
-  return out;
-}
 
 export interface PortableHtmlParts {
   readonly bundle: PortableBundle;
@@ -102,7 +83,7 @@ export function readPortableHtml(text: string): PortableHtmlParts {
   }
   // 後ろ向きに辿るので、DB の中身の要素は**文書の逆順**で集まる(最後に並べ直す)
   const imageParts: Array<{ mark: string; body: string }> = [];
-  const assets = new Map<string, Blob>();
+  const assetEls: Array<{ key: string; mime: string; mark: string; body: string }> = [];
   for (;;) {
     let end = pos;
     while (end > 0 && isSpace(text.charCodeAt(end - 1))) end--;
@@ -127,6 +108,13 @@ export function readPortableHtml(text: string): PortableHtmlParts {
           `DB の中身の一部が読み取れません(${Number(im[1]!.split('/')[0]) + 1} 個目が base64 の形になっていません)。このファイルは取り込めません`,
         );
       }
+      // 🔴 割った添付の部分も同じ ── base64 でない部分を「差し込み領域の外」と読んで、後ろの添付ごと黙って落とさない
+      const ap = ASSET_OPEN_RE.exec(tag);
+      if (ap !== null && /^\d+\/\d+$/.test(ap[3] ?? '')) {
+        throw new PortableHtmlError(
+          `添付「${ap[1]!}」の一部が読み取れません(${Number(ap[3]!.split('/')[0]) + 1} 個目が base64 の形になっていません)。このファイルは取り込めません`,
+        );
+      }
       break;
     }
     if (im !== null) {
@@ -134,18 +122,47 @@ export function readPortableHtml(text: string): PortableHtmlParts {
     } else {
       const am = ASSET_OPEN_RE.exec(tag);
       if (am === null) break; // 書き出しが差し込んだ 2 種類以外に当たった = 差し込み領域の外
-      const [, key, mime] = am;
-      if (!assets.has(key!)) {
-        try {
-          assets.set(key!, new Blob([decodeBase64Chunked(body) as unknown as BlobPart], { type: mime! }));
-        } catch {
-          throw new PortableHtmlError(`埋め込まれた添付が読み取れない形になっています: ${key!}`);
-        }
-      }
+      assetEls.push({ key: am[1]!, mime: am[2]!, mark: am[3] ?? '', body });
     }
     pos = start;
   }
   imageParts.reverse();
+  assetEls.reverse();
+  // 🔑 添付は**文書の順に塊にし、後ろの塊から**読む(同じ key が 2 度あれば後ろが勝つ ── 割る前の版と同じ)
+  const assets = new Map<string, Blob>();
+  const runs = groupAssetParts(assetEls);
+  for (let r = runs.length - 1; r >= 0; r--) {
+    const run = runs[r]!;
+    const first = assetEls[run.start]!;
+    const els = assetEls.slice(run.start, run.start + run.count);
+    const key = first.key;
+    if (assets.has(key)) {
+      for (const e of els) e.body = '';
+      continue;
+    }
+    if (run.broken !== null) {
+      throw new PortableHtmlError(`${run.broken}。このファイルは取り込めません`);
+    }
+    try {
+      // 読んだ要素は配列から手放す。割る前の版の 1 本物(1 要素)も同じ口で読む
+      const bytes = decodeImageParts(
+        els.map((e) => () => {
+          const b = e.body;
+          e.body = '';
+          return b;
+        }),
+        `添付「${key}」の中身`,
+      );
+      // 空の 1 要素 = 0 バイトの添付(割る前の版もそのまま取り込んでいた)
+      assets.set(key, new Blob(bytes === null ? [] : [bytes as unknown as BlobPart], { type: first.mime }));
+    } catch (e) {
+      throw new PortableHtmlError(
+        e instanceof Error && /個目|空の部分/.test(e.message)
+          ? `${e.message}。このファイルは取り込めません`
+          : `埋め込まれた添付が読み取れない形になっています: ${key}`,
+      );
+    }
+  }
   const broken = checkImageParts(imageParts.map((p) => p.mark));
   if (broken !== null) {
     throw new PortableHtmlError(`${broken}。このファイルは取り込めません`);

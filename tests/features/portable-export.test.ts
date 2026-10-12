@@ -361,3 +361,73 @@ describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
     expect(out.warnings).toEqual([]);
   });
 });
+
+/**
+ * 🔴 **添付も 3MiB ごとの `<script>` に割って焼く**(#1416 §7-4d)。
+ */
+describe('添付を割って焼く (#1416 §7-4d)', () => {
+  const bake = async (size: number, key = 'ast-big'): Promise<string> => {
+    const out = await writePortableBundle({
+      template: template(),
+      bundle: NEW,
+      image: new Uint8Array([1, 2, 3]),
+      assets: (async function* () {
+        yield { key, mime: 'image/png', blob: new Blob([new Uint8Array(size)]) };
+      })(),
+    });
+    return out.blob.text();
+  };
+  const assetMarks = (html: string): Array<string | undefined> =>
+    [...html.matchAll(/<script [^>]*data-pkc-asset="ast-big"[^>]*>/g)].map(
+      (m) => /data-pkc-asset-part="([^"]*)"/.exec(m[0])?.[1],
+    );
+
+  it('🔴 3MiB を超える添付は、同じ key の要素に 番号/総数 を付けて割る', async () => {
+    const html = await bake(IMAGE_PART_BYTES * 2 + 11);
+    expect(assetMarks(html)).toEqual(['0/3', '1/3', '2/3']);
+  });
+
+  it('🔴 3MiB ちょうど以下は 1 要素で、割る前の版と同じ形(印なし = 古い取り込み口でも読める)', async () => {
+    expect(assetMarks(await bake(IMAGE_PART_BYTES))).toEqual([undefined]);
+    expect(assetMarks(await bake(IMAGE_PART_BYTES + 1))).toEqual(['0/2', '1/2']);
+    expect(assetMarks(await bake(5))).toEqual([undefined]);
+    // 0 バイトも 1 要素(以前と同じ)
+    expect(assetMarks(await bake(0))).toEqual([undefined]);
+  });
+
+  describe('🔴 残る天井は「ファイル全体」── 添付 1 件ではなく合計で見る', () => {
+    const IMG = 10 * 1024 * 1024;
+    const base64Len = (b: number): number => Math.ceil(b / 3) * 4;
+    const run = async (assetBytes: number) => {
+      const blob = new Blob([new Uint8Array([9])]);
+      Object.defineProperty(blob, 'size', { value: assetBytes, configurable: true });
+      expect(blob.size, '大きさを偽れていない').toBe(assetBytes);
+      return writePortableBundle({
+        template: template(),
+        bundle: NEW,
+        image: new Uint8Array(IMG),
+        assets: (async function* () {
+          yield { key: 'ast-big', mime: 'image/png', blob };
+        })(),
+      });
+    };
+    const room = MAX_EMBED_TEXT_CHARS - base64Len(IMG);
+
+    it('DB 画像を足すと上限を超える添付は、1 件だけで見れば通る大きさでも落として名指しする', async () => {
+      const bytes = Math.floor(((room + 1_000_000) * 3) / 4);
+      expect(bytes, '前提: 1 件だけなら通る大きさ').toBeLessThan(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4));
+      const out = await run(bytes);
+      expect(out.assets, '超える添付を焼いた').toBe(0);
+      expect(out.warnings).toHaveLength(1);
+      expect(out.warnings[0]).toContain('ast-big');
+      expect(out.warnings[0]).toContain(archiveSuffix('full'));
+      expect(out.warnings[0], '取り込み直しの話をしていない').toContain('取り込み直す');
+    });
+
+    it('対照群: 余裕のある大きさは焼ける(門が いつでも鳴っている のではない)', async () => {
+      const out = await run(Math.floor(((room - 1_000_000) * 3) / 4));
+      expect(out.assets).toBe(1);
+      expect(out.warnings).toEqual([]);
+    });
+  });
+});

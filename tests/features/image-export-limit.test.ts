@@ -12,6 +12,7 @@ import {
   looksOutOfMemory,
   MAX_EMBED_TEXT_CHARS,
   base64Length,
+  tooBigToImportMessage,
   tooBigToReadBack,
   tooBigToReadBackMessage,
 } from '../../src/features/storage/image-export-limit';
@@ -162,6 +163,7 @@ describe('断り文が指すボタンは、画面に在る(2026-09-16)', () => {
     for (const [name, s] of [
       ['確保できなかった側', imageTooBigMessage(5_000_000_000)],
       ['読み戻せない側', tooBigToReadBackMessage('いまの中身', 500 * 1024 * 1024)],
+      ['全体が取り込み直せない側', tooBigToImportMessage('添付「a」', 500 * 1024 * 1024)],
     ] as const) {
       expect(s, `${name}: 画面に無い名前で送っている`).toContain(label);
     }
