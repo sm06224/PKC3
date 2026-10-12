@@ -611,7 +611,7 @@ function openViewTile(
    */
   focusSearch: () => boolean,
   /** 🔴 予定の面を「週」で開く合図(#855 段 A-2)。⚠ 渡すと窓が出なかったとき退避しない。 */
-  schedule?: { mode: 'week'; day: string | null },
+  schedule?: { mode: 'week' | 'month'; day: string | null },
 ): Promise<unknown> {
   return openViewInWindow(view, {
     ...(schedule === undefined ? {} : { schedule }),
@@ -4755,7 +4755,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     openScheduleWindow: (mode, day) =>
       // 🔴 同じ週の窓が開いているなら、開かずに前に出す(#855)── 判断は `openOrRaiseWeekWindow`
       void openOrRaiseWeekWindow({
-        key: weekWindowKey(day, todayKey()),
+        // 🔑 台帳に載るのは「週」の窓だけ(「月」の窓は名乗らない ── 押すたびに新しく開く)
+        key: mode === 'week' ? weekWindowKey(day, todayKey()) : null,
         whereIs: (k) => scheduleRegistry.whereIs(k),
         raise: (k) => scheduleRegistry.raise(k),
         reserve: (k) => scheduleRegistry.reserve(k),

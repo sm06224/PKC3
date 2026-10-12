@@ -6256,7 +6256,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 🔴 **予定の窓の中では、左の列の「週」を隠す**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 4)。
  *   左の「週」は別のウィンドウを開くボタンで、週の窓の中では今いるこの窓と重なる(中央の面の「週」は残す)。
  *   印(`data-pkc-held-view`)は `view-window.ts` の `markHeldView` が付ける。 */
-[data-pkc-held-view='schedule'] [data-pkc-browse-pane] [data-pkc-field='schedule-modes'] [data-pkc-mode='week'] {
+[data-pkc-held-view='schedule'] [data-pkc-browse-pane] [data-pkc-field='schedule-modes'] [data-pkc-mode='week'],
+[data-pkc-held-view='schedule'] [data-pkc-browse-pane] [data-pkc-field='schedule-modes'] [data-pkc-mode='month'] {
   display: none;
 }
 [data-pkc-field='schedule-note'] {
@@ -10371,6 +10372,48 @@ h3[data-pkc-section] {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  /* 🔴 **予定表の印刷 ── 「印刷」を押した範囲だけを、白い紙 1 枚に**(#855。Gemini 裁定 = #1163 の依頼 30 の Q2)。
+   *   押した時に `binder.ts` の `schedule-print` が、範囲に `data-pkc-print-range`、文書に `data-pkc-print="schedule"` を付ける
+   *   (紙が済んだら外す)。範囲を含まない・範囲の中でもない要素を全部落とし、範囲を含む入れ物は一枚の流れに戻す。
+   *   時間の目盛りは 1 時間を縮めて 1 枚に収める(画面の `--day-hour` は 40px)。⚠ 紙の向きは印刷画面で選ぶ。 */
+  html[data-pkc-print='schedule'] body *:not(:has([data-pkc-print-range])):not([data-pkc-print-range]):not([data-pkc-print-range] *) {
+    display: none !important;
+  }
+  html[data-pkc-print='schedule'] body *:has([data-pkc-print-range]) {
+    display: block !important;
+    position: static !important;
+    visibility: visible !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: none !important;
+  }
+  [data-pkc-print-range] {
+    --day-hour: 20px;
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  [data-pkc-print-range] [data-pkc-field='schedule-day-scroll'],
+  [data-pkc-print-range] [data-pkc-field='schedule-weekview-scroll'],
+  [data-pkc-print-range] [data-pkc-field='schedule-weekview-wrap'] {
+    max-height: none;
+    overflow: visible;
+  }
+  [data-pkc-print-range] [data-pkc-field='schedule-day-head'] button,
+  [data-pkc-print-range] [data-pkc-field='schedule-weekview-head'] button,
+  [data-pkc-print-range] [data-pkc-field='schedule-monthview-head'] button,
+  [data-pkc-print-range] [data-pkc-field='task-unschedule'],
+  [data-pkc-print-range] [data-pkc-field='task-resize'],
+  [data-pkc-print-range] .pkc-task-checkbox {
+    display: none !important;
+  }
+  [data-pkc-print-range] [data-pkc-field='schedule-monthview-cell'],
+  [data-pkc-print-range] [data-pkc-field='schedule-monthview-blank'] {
+    min-height: 5.5rem;
+  }
 }
 
 /**
@@ -11238,6 +11281,162 @@ h6:hover > .pkc-heading-anchor,
 }
 [data-pkc-field='schedule-day-holiday'] {
   flex: 1;
+}
+
+/* ── 予定の「月」(#855。Gemini 裁定 = #1163 の依頼 30 の Q1)────────────────
+ * 1 か月を大きな升目で見る。札は一覧と同じ札(`schedule-cards` の直下)なので、押す・掴んで日へ落とす・縦線の色は
+ * 一覧の規則がそのまま効く。ここが足すのは升目の置き場所と、**升に収めるための小さな札**(題名を 1 行に・出どころのノート名と
+ * 「予定から外す」は出さない ── 外す口は「日」「一覧」に残る)。地は無彩色、色は縦線・祝日・今日の線にだけ使う。 */
+[data-pkc-region='schedule-monthview'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='schedule-monthview-head'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='schedule-monthview-label'] {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+[data-pkc-field='schedule-monthview-head'] button {
+  padding: 0 var(--s2);
+  font: inherit;
+  font-size: var(--btn-fs-bar);
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-monthview-head'] button:hover {
+  color: var(--fg);
+}
+[data-pkc-field='schedule-monthview-weekdays'] {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+}
+[data-pkc-field='schedule-monthview-weekdays'] > span {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+[data-pkc-field='schedule-monthview-weekdays'] > span[data-pkc-weekend] {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+[data-pkc-field='schedule-monthview-body'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+[data-pkc-field='schedule-monthview-week'] {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+}
+[data-pkc-field='schedule-monthview-cell'],
+[data-pkc-field='schedule-monthview-blank'] {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 7.5rem;
+  background: var(--surface);
+}
+[data-pkc-field='schedule-monthview-blank'] {
+  background: var(--surface-2);
+}
+[data-pkc-field='schedule-monthview-cell'] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--s1);
+  overflow: hidden;
+}
+[data-pkc-field='schedule-monthview-cell'][data-pkc-weekend] {
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+}
+[data-pkc-field='schedule-monthview-cell-head'] {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s1);
+  min-width: 0;
+}
+[data-pkc-field='schedule-monthview-num'] {
+  padding: 0 4px;
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.4;
+  color: var(--fg);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='schedule-monthview-num']:hover {
+  background: var(--surface-2);
+}
+/* 🔑 今日は線で示す(小さな月・「週」と同じ作法) */
+[data-pkc-field='schedule-monthview-cell'][data-pkc-today] > [data-pkc-field='schedule-monthview-cell-head'] > [data-pkc-field='schedule-monthview-num'] {
+  border-color: var(--fg);
+  font-weight: 700;
+}
+/* 🔴 祝日は日付の数字を赤く、名前は小さく薄い字で(「日」「週」と同じ。赤は祝日という情報にだけ) */
+[data-pkc-field='schedule-monthview-cell'][data-pkc-holiday] > [data-pkc-field='schedule-monthview-cell-head'] > [data-pkc-field='schedule-monthview-num'] {
+  color: var(--danger);
+}
+[data-pkc-field='schedule-monthview-holiday'] {
+  min-width: 0;
+  font-size: var(--btn-fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-field='schedule-monthview-holiday'][hidden],
+[data-pkc-field='schedule-monthview-more'][hidden] {
+  display: none;
+}
+/* 升に収める小さな札: 題名は 1 行(長いときは省略)/ 出どころのノート名と外す口は出さない */
+[data-pkc-field='schedule-monthview-cards'] > [data-pkc-entry] {
+  grid-template-columns: auto 1fr;
+  padding: 0 var(--s1);
+}
+[data-pkc-field='schedule-monthview-cards'] [data-pkc-field='line'] {
+  font-size: 11px;
+}
+[data-pkc-field='schedule-monthview-cards'] [data-pkc-field='text'] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-field='schedule-monthview-cards'] [data-pkc-field='note'],
+[data-pkc-field='schedule-monthview-cards'] [data-pkc-field='task-unschedule'] {
+  display: none;
+}
+[data-pkc-field='schedule-monthview-more'] {
+  align-self: flex-start;
+  padding: 0 var(--s1);
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted var(--border);
+  cursor: pointer;
+}
+[data-pkc-field='schedule-monthview-more']:hover {
+  color: var(--fg);
 }
 
 /* #1407 埋め込み先のページの AI を許すページ: 入力欄と「追加」を 1 行に並べる。断った理由だけ色を付ける(色は情報にだけ) */

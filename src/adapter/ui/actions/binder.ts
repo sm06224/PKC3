@@ -1856,7 +1856,7 @@ export interface BinderServices {
    * ⚠ **同期に呼べること**(`window.open` は click の gesture の中でしか通らない)。
    * @param day いま見ている日(`null` = 今日)── 開いた窓が同じ週を見せる
    */
-  openScheduleWindow?(mode: 'week', day: string | null): void;
+  openScheduleWindow?(mode: 'week' | 'month', day: string | null): void;
   /**
    * 🔴 **その見出しの章を、読むだけの別のウィンドウで開く**(#1044 段4)。
    * ⚠ **同期で**窓を掴むこと(user の操作の続きでしか開けない)。
@@ -8753,7 +8753,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
     const mode = target.getAttribute('data-pkc-mode');
-    if (mode !== 'list' && mode !== 'day' && mode !== 'week') return;
+    if (mode !== 'list' && mode !== 'day' && mode !== 'week' && mode !== 'month') return;
     /**
      * 🔴 **左の列の「週」は、別のウィンドウで開く**(#855 段 A-2)。左の列は狭く、7 日を並べると
      *   1 日が読めなくなる ── 左の見せ方(一覧 / 日)は変えない。窓が出なかったときの理由は
@@ -8761,12 +8761,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   state ではない(別窓の中央の面は同じ state でも 7 日を並べる)。
      */
     const narrow = target.closest('[data-pkc-browse-pane]') !== null;
-    if (mode === 'week' && narrow) {
+    if ((mode === 'week' || mode === 'month') && narrow) {
       if (services.openScheduleWindow === undefined) {
         dispatcher.dispatch({ type: 'OP_FAILED', error: '別のウィンドウを開けませんでした' });
         return;
       }
-      services.openScheduleWindow('week', dispatcher.getState().scheduleDay);
+      services.openScheduleWindow(mode, dispatcher.getState().scheduleDay);
       return;
     }
     // 🔴 狭い面は自分の見せ方(`scheduleNarrowMode`)を持つ ── 中央の見せ方を巻き込まない
@@ -8777,8 +8777,42 @@ const ACTIONS: Record<string, ActionHandler> = {
     dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode });
   },
   /**
+   * 🔴 **印刷 ── いま見ている範囲だけを紙に出す**(#855。Gemini 裁定 = #1163 の依頼 30 の Q2)。
+   *
+   * 範囲の決め方は**見えている物**で決める(見せ方の state を読み直さない ── 狭い面と広い面で持ち主が違う):
+   * 「日」「週」「月」の器のうち隠れていないもの、無ければ日ごとの一覧。印は `data-pkc-print-range`、
+   * 文書の側の印は `data-pkc-print`(`app.css` 末尾の `@media print` が、この 2 つで「範囲の外」を落とす)。
+   * ⚠ 印は紙が済んだら外す(`afterprint`)。外し忘れると、次にノートを刷ったとき予定表が出る。
+   * 🔑 ブラウザの印刷を呼ぶだけ ── PDF にするか紙に出すかは user が印刷画面で選ぶ(ノートの「PDF」と同じ)。
+   */
+  'schedule-print': (_dispatcher, target) => {
+    const face = scheduleFaceOf(target);
+    if (face === null) return;
+    const doc = target.ownerDocument;
+    const win = doc.defaultView;
+    if (win === null) return;
+    const range =
+      face.querySelector<HTMLElement>(
+        '[data-pkc-region="schedule-monthview"]:not([hidden]), [data-pkc-region="schedule-weekview"]:not([hidden]), [data-pkc-region="schedule-day"]:not([hidden])',
+      ) ?? face.querySelector<HTMLElement>('[data-pkc-region="schedule-groups"]');
+    if (range === null) return;
+    for (const old of doc.querySelectorAll('[data-pkc-print-range]')) old.removeAttribute('data-pkc-print-range');
+    range.setAttribute('data-pkc-print-range', '');
+    doc.documentElement.setAttribute('data-pkc-print', 'schedule');
+    win.addEventListener(
+      'afterprint',
+      () => {
+        doc.documentElement.removeAttribute('data-pkc-print');
+        range.removeAttribute('data-pkc-print-range');
+      },
+      { once: true },
+    );
+    win.print();
+  },
+  /**
    * 「週」の曜日の見出しを押したら、その日の「日」へ(#855 段 A-2)。行き先は描画時に焼いてある
    * (`data-pkc-day-to`)。⚠ 空 = 今日(今日に追従する状態)。
+   * 🔑 「月」の升目の日付の数字と「ほか N 件」(#855)も**同じ行き先・同じ動き**なのでこの口を使う(口を増やさない)。
    */
   'schedule-week-pick': (dispatcher, target) => {
     const to = target.getAttribute('data-pkc-day-to');
@@ -8822,6 +8856,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     const narrowFace = target.closest('[data-pkc-browse-pane]') !== null;
     const shown = narrowFace ? st.scheduleNarrowMode : st.scheduleMode;
     if (shown === 'day' || shown === 'week') {
+      dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
+      return;
+    }
+    /**
+     * 🔴 **「月」では、小さな月の日を押すとその日の「日」へ移る**(#855)。大きな升目は同じ月を既に全部見せているので、
+     *   「束へ送る」(一覧の束は隠れている)も「見ている日を動かす」(升目に印が無い)も、押しても何も起きない。
+     *   押した日を読むには「日」へ移るのが最短で、升目の日付の数字・「ほか N 件」(`schedule-week-pick`)と同じ行き先。
+     */
+    if (shown === 'month') {
+      dispatcher.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'day' });
       dispatcher.dispatch({ type: 'SET_SCHEDULE_DAY', date });
       return;
     }

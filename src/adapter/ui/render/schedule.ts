@@ -43,6 +43,7 @@ import { scheduleItemsOf } from './schedule-items';
 import { buildPressedButton } from './choice-buttons';
 import { ScheduleDay } from './schedule-day';
 import { ScheduleWeek } from './schedule-week';
+import { ScheduleMonth } from './schedule-month';
 import { weekOf } from '@features/schedule/day-layout';
 import { addDays } from '@features/datetime/date-math';
 import { createTaskCard, patchItemColor, patchTaskCard } from './task-card';
@@ -171,6 +172,8 @@ export class ScheduleRenderer {
   private readonly day = new ScheduleDay(DROP_DATE);
   /** 「週」の描き手(#855 段 A-2)。広い面だけで描く(左の列は別のウィンドウで開く)。同じく隠すだけで捨てない。 */
   private readonly week = new ScheduleWeek(DROP_DATE);
+  /** 「月」の描き手(#855)。広い面だけで描く。同じく隠すだけで捨てない。 */
+  private readonly monthView = new ScheduleMonth(DROP_DATE);
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
@@ -270,6 +273,7 @@ export class ScheduleRenderer {
     const mode = narrow ? state.scheduleNarrowMode : state.scheduleMode;
     const dayMode = mode === 'day';
     const weekMode = mode === 'week';
+    const monthMode = mode === 'month';
     const shown = state.scheduleDay ?? today;
     const skip = materializedDates(all);
     const groups = buildAgenda(items, today, state.showUndatedTasks, { skip });
@@ -327,6 +331,7 @@ export class ScheduleRenderer {
     }
     this.day.el.hidden = !dayMode;
     this.week.el.hidden = !weekMode;
+    this.monthView.el.hidden = !monthMode;
     /**
      * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
      *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
@@ -362,6 +367,17 @@ export class ScheduleRenderer {
         isThisWeek: weekDays[0] !== undefined && weekDays[0] === thisWeek[0],
       });
     } else this.week.leave();
+    if (monthMode) {
+      this.monthView.paint({
+        year: state.calendarMonth?.year ?? at.getFullYear(),
+        month: state.calendarMonth?.month ?? at.getMonth() + 1,
+        today,
+        itemsOf: (d) => dayItems(items, d, skip),
+        titleOf: (lid) => state.entryMetas.get(lid)?.title ?? '',
+        selectedLid: state.selectedLid,
+        thisYear: at.getFullYear(),
+      });
+    } else this.monthView.leave();
     if (dayMode) {
       this.day.paint({
         day: shown,
@@ -375,7 +391,7 @@ export class ScheduleRenderer {
     } else this.day.leave();
     this.paintGroups(
       frame.groups,
-      dayMode || weekMode ? groups.filter((g) => g.date === null) : groups,
+      dayMode || weekMode || monthMode ? groups.filter((g) => g.date === null) : groups,
       state,
     );
   }
@@ -730,7 +746,19 @@ export class ScheduleRenderer {
     todayBtn.type = 'button';
     todayBtn.setAttribute('data-pkc-action', 'schedule-today');
     todayBtn.textContent = '今月に戻る';
-    bar.append(nav('‹', -1), month, nav('›', 1), todayBtn);
+    /**
+     * 🔴 **いま見ている範囲を紙に出す**(#855。Gemini 裁定 = #1163 の依頼 30 の Q2)。
+     * 出るのは見せ方ごとの範囲だけ(月 = 大きな升目 / 週 = 1 週間の目盛り / 日 = その日 / 一覧 = 日ごとの一覧)。
+     * 何を残すかは押した時に `binder.ts` が決め、紙の組みは `app.css` 末尾の `@media print` にある。
+     * ⚠ 字は「印刷」(ノートの「PDF」と同じ、ブラウザの印刷画面を開くだけ)。
+     */
+    const printBtn = document.createElement('button');
+    printBtn.type = 'button';
+    printBtn.setAttribute('data-pkc-action', 'schedule-print');
+    printBtn.setAttribute('data-pkc-field', 'schedule-print');
+    printBtn.textContent = '印刷';
+    printBtn.title = 'いま見ている範囲(月・週・日・一覧)だけを、白い紙 1 枚に収めて印刷します';
+    bar.append(nav('‹', -1), month, nav('›', 1), todayBtn, printBtn);
     /**
      * 🔴 **見せ方 2 つ ── 一覧 / 日**(#855 段 A-1)。既定は一覧(いままでの見え方)。
      * ⚠ 押している側は `aria-pressed` + 濃さ(`data-pkc-choice-btn` の規則)で示す。
@@ -750,8 +778,17 @@ export class ScheduleRenderer {
             ? '別のウィンドウで、1 週間を時間の目盛りに並べて開きます'
             : '1 週間を時間の目盛りに並べて見ます',
         ],
+        [
+          'month',
+          '月',
+          // 🔑 左の列は 7 列の升目を並べる幅が無い ── 「週」と同じく別のウィンドウで開く
+          this.region.hasAttribute('data-pkc-browse-pane')
+            ? '別のウィンドウで、1 か月を日ごとの欄に分けて開きます'
+            : '1 か月を、日ごとの欄に分けて見ます',
+        ],
       ] as const
-    ).map(([mode, label, title]) =>
+    )
+      .map(([mode, label, title]) =>
       buildPressedButton({
         action: 'schedule-mode',
         dataAttr: 'data-pkc-mode',
@@ -937,7 +974,8 @@ export class ScheduleRenderer {
     this.region.setAttribute('data-pkc-region', 'schedule');
     this.day.el.hidden = true;
     this.week.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, notify, this.day.el, this.week.el, groups);
+    this.monthView.el.hidden = true;
+    this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, groups);
     this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
