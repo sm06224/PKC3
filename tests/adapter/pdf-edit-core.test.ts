@@ -543,6 +543,215 @@ describe('🔴 共有された Resources から、選ばなかったページの
   });
 });
 
+describe('🔴 共有された Resources の ColorSpace / Properties / 注釈の外観も、選ばなかったページの物は残らない(#275)', () => {
+  const S_ICC = 'SECRET-ICC-111';
+  const K_ICC = 'KEEP-ICC-112';
+  const S_PROP = 'SECRET-PROP-221';
+  const K_PROP = 'KEEP-PROP-222';
+  const INLINE_ICC = 'INLINE-ICC-333';
+  const NEST_ICC = 'NEST-ICC-334';
+  const IMG_ICC = 'IMGCS-ICC-335';
+  const S_FORMCS = 'SECRET-FORMCS-444';
+  const K_FORMCS = 'KEEP-FORMCS-445';
+  const ANNOT_ICC = 'ANNOT-ICC-555';
+  const S_APCS = 'SECRET-APCS-556';
+  const DEF_ICC = 'DEFAULT-RGB-ICC-666';
+  const S_GS = 'SECRET-GS-777';
+  const S_SHADE = 'SECRET-SHADING-888';
+
+  const names = (dict: PDFLib.PDFDict | undefined, kind: string): string[] => {
+    const sub = dict?.lookup(PDFLib.PDFName.of(kind));
+    return sub instanceof PDFLib.PDFDict ? sub.entries().map(([k]) => k.decodeText()).sort() : [];
+  };
+
+  /** 2 ページが同じ Resources を共有。1 ページ目だけが使う物と、2 ページ目だけが使う物(Secret 系)を、種類ごとに用意する。 */
+  async function shared(): Promise<Uint8Array> {
+    const d = await PDFLib.PDFDocument.create();
+    const font = await d.embedFont(PDFLib.StandardFonts.Helvetica);
+    const p1 = d.addPage();
+    const p2 = d.addPage();
+    const ctx = d.context;
+    const icc = (mark: string): PDFLib.PDFRef => ctx.register(ctx.stream(Buffer.from(mark, 'latin1'), { N: 3, Alternate: 'DeviceRGB' }));
+    const iccCs = (mark: string): PDFLib.PDFArray => ctx.obj([PDFLib.PDFName.of('ICCBased'), icc(mark)]) as PDFLib.PDFArray;
+    const prop = (mark: string): PDFLib.PDFDict => ctx.obj({ Name: PDFLib.PDFString.of(mark) }) as PDFLib.PDFDict;
+    // 入れ子の Form(自前の Resources 無し → 呼び元の ColorSpace を使う)/ 自前の Resources を持つ Form
+    const nest = ctx.register(ctx.stream('/CsNest cs 0 0 1 1 re f', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 10, 10] }));
+    const formOwn = ctx.register(
+      ctx.stream('/CsFormKeep cs 0 0 1 1 re f', {
+        Type: 'XObject',
+        Subtype: 'Form',
+        BBox: [0, 0, 10, 10],
+        Resources: { ColorSpace: { CsFormKeep: iccCs(K_FORMCS), CsFormSecret: iccCs(S_FORMCS) } },
+      }),
+    );
+    // 画像: `/ColorSpace /CsImg`(名前で呼び元の ColorSpace を引く)
+    const pic = ctx.register(
+      ctx.stream(Buffer.from([0, 0, 0]), {
+        Type: 'XObject',
+        Subtype: 'Image',
+        Width: 1,
+        Height: 1,
+        ColorSpace: 'CsImg',
+        BitsPerComponent: 8,
+      }),
+    );
+    const res = p1.node.Resources() as PDFLib.PDFDict;
+    res.set(
+      PDFLib.PDFName.of('ColorSpace'),
+      ctx.obj({
+        CsKeep: iccCs(K_ICC),
+        CsSecret: iccCs(S_ICC),
+        CsInline: iccCs(INLINE_ICC),
+        CsNest: iccCs(NEST_ICC),
+        CsImg: iccCs(IMG_ICC),
+        CsAnnot: iccCs(ANNOT_ICC),
+        // 既定の色空間は content に名前が出ないまま効く ── 常に残す
+        DefaultRGB: iccCs(DEF_ICC),
+        // 配列の中の名前: CsIdx は CsBase を土台にする(Indexed の base を名前で引く書き方)
+        CsIdx: ctx.obj([PDFLib.PDFName.of('Indexed'), PDFLib.PDFName.of('CsBase'), 1, PDFLib.PDFHexString.of('000000FFFFFF')]),
+        CsBase: iccCs('BASE-ICC-336'),
+      }),
+    );
+    res.set(PDFLib.PDFName.of('Properties'), ctx.obj({ PKeep: prop(K_PROP), PSecret: prop(S_PROP) }));
+    res.set(PDFLib.PDFName.of('ExtGState'), ctx.obj({ GKeep: { CA: 0.5 }, GSecret: { Type: 'ExtGState', Font: [], CA: 0.25, Desc: PDFLib.PDFString.of(S_GS) } }));
+    res.set(PDFLib.PDFName.of('Shading'), ctx.obj({ ShSecret: { ShadingType: 2, ColorSpace: 'DeviceRGB', Coords: [0, 0, 1, 1], Desc: PDFLib.PDFString.of(S_SHADE), Function: { FunctionType: 2, Domain: [0, 1], N: 1 } } }));
+    res.set(PDFLib.PDFName.of('XObject'), ctx.obj({ Nest: nest, FormOwn: formOwn, Pic: pic }));
+    p2.node.set(PDFLib.PDFName.of('Resources'), res); // 共有
+    p1.drawText('PAGE-ONE', { font });
+    p2.drawText('PAGE-TWO', { font });
+    const add = (page: PDFLib.PDFPage, ops: string): void => {
+      page.node.addContentStream(ctx.register(ctx.stream(ops)));
+    };
+    add(
+      p1,
+      '/CsKeep cs 0.1 sc 0 0 5 5 re f /CsIdx cs 0 sc 0 0 1 1 re f /GKeep gs /PKeep << /X 1 >> BDC EMC /Nest Do /FormOwn Do /Pic Do ' +
+        'BI /W 1 /H 1 /BPC 8 /CS /CsInline ID \u0000 EI',
+    );
+    // 2 ページ目: Secret 系だけを使う(Properties は `/名前 BDC`、色空間は cs / CS)
+    add(p2, '/CsSecret cs 0.2 sc 0 0 5 5 re f /GSecret gs /ShSecret sh /PSecret BDC EMC');
+    // 1 ページ目の注釈: 外観に Resources 無し(ページの CsAnnot を使う)/ 自前の Resources を共有 dict から持つ外観
+    const ap1 = ctx.register(ctx.stream('/CsAnnot cs 0 0 1 1 re f', { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 10, 10] }));
+    const ap2 = ctx.register(
+      ctx.stream('/CsApKeep cs 0 0 1 1 re f', {
+        Type: 'XObject',
+        Subtype: 'Form',
+        BBox: [0, 0, 10, 10],
+        Resources: { ColorSpace: { CsApKeep: iccCs('APKEEP-ICC-557'), CsApSecret: iccCs(S_APCS) } },
+      }),
+    );
+    const annot = (ap: PDFLib.PDFRef): PDFLib.PDFRef =>
+      ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect: [0, 0, 10, 10], F: 4, AP: { N: ap } }));
+    p1.node.set(PDFLib.PDFName.of('Annots'), ctx.obj([annot(ap1), annot(ap2)]));
+    return d.save({ useObjectStreams: false });
+  }
+
+  const outRes = async (bytes: Uint8Array, i: number): Promise<PDFLib.PDFDict> =>
+    (await PDFLib.PDFDocument.load(bytes)).getPage(i).node.Resources() as PDFLib.PDFDict;
+
+  it('2 ページ目だけが使う ColorSpace(ICC)・Properties・ExtGState・Shading は 1 ページ目だけ抜き出した出力に無い。対照群: 元には全部見え、1 ページ目が使う物は残る', async () => {
+    const src = await shared();
+    const rawText = (b: Uint8Array): string => allStreamText(b);
+    for (const m of [S_ICC, K_ICC, S_PROP, K_PROP, S_GS, S_SHADE, S_FORMCS, S_APCS]) {
+      expect(rawText(src).includes(m), `対照群: 元には ${m} が見える`).toBe(true);
+    }
+    const out = await core.build(PDFLib, src, { order: [1], rotate: {} });
+    const text = rawText(out);
+    for (const m of [S_ICC, S_PROP, S_GS, S_SHADE, S_FORMCS, S_APCS]) {
+      expect(text.includes(m), `選ばなかったページだけが使う物 ${m} が残っている`).toBe(false);
+    }
+    for (const m of [K_ICC, K_PROP, K_FORMCS, 'APKEEP-ICC-557']) {
+      expect(text.includes(m), `選んだページが使う物 ${m} まで落とした`).toBe(true);
+    }
+    const res = await outRes(out, 0);
+    expect(names(res, 'Properties')).toEqual(['PKeep']);
+    expect(names(res, 'ExtGState')).toEqual(['GKeep']);
+    expect(names(res, 'Shading')).toEqual([]);
+    // 2 ページ目を選んだときは逆になる
+    const out2 = await core.build(PDFLib, src, { order: [2], rotate: {} });
+    expect(rawText(out2).includes(S_ICC)).toBe(true);
+    expect(rawText(out2).includes(K_ICC)).toBe(false);
+    expect(names(await outRes(out2, 0), 'Properties')).toEqual(['PSecret']);
+  });
+
+  it('ColorSpace: 使う名前(cs)・インライン画像の /CS・入れ子の Form・画像の /ColorSpace 名・配列の中の名前・既定の色空間は残り、CsSecret だけが消える', async () => {
+    const out = await core.build(PDFLib, await shared(), { order: [1], rotate: {} });
+    const res = await outRes(out, 0);
+    expect(names(res, 'ColorSpace')).toEqual(['CsAnnot', 'CsBase', 'CsImg', 'CsIdx', 'CsInline', 'CsKeep', 'CsNest', 'DefaultRGB'].sort());
+    for (const m of [INLINE_ICC, NEST_ICC, IMG_ICC, ANNOT_ICC, DEF_ICC, 'BASE-ICC-336']) {
+      expect(allStreamText(out).includes(m), `${m} を落とした`).toBe(true);
+    }
+  });
+
+  it('入れ子の Form が自前の Resources を持つなら、その中の ColorSpace も刈る(使う名前だけ残る)', async () => {
+    const out = await core.build(PDFLib, await shared(), { order: [1], rotate: {} });
+    const doc = await PDFLib.PDFDocument.load(out);
+    const xo = (doc.getPage(0).node.Resources() as PDFLib.PDFDict).lookup(PDFLib.PDFName.of('XObject')) as PDFLib.PDFDict;
+    const form = xo.lookup(PDFLib.PDFName.of('FormOwn')) as PDFLib.PDFRawStream;
+    expect(names(form.dict.lookup(PDFLib.PDFName.of('Resources')) as PDFLib.PDFDict, 'ColorSpace')).toEqual(['CsFormKeep']);
+  });
+
+  it('残す注釈の外観: 自前の Resources は刈り(使わない名前が消える)、Resources を持たない外観はページの Resources の名前を残す', async () => {
+    const out = await core.build(PDFLib, await shared(), { order: [1], rotate: {} });
+    const doc = await PDFLib.PDFDocument.load(out);
+    const annots = doc.getPage(0).node.lookup(PDFLib.PDFName.of('Annots')) as PDFLib.PDFArray;
+    const apOf = (i: number): PDFLib.PDFRawStream => {
+      const a = annots.lookup(i) as PDFLib.PDFDict;
+      return (a.lookup(PDFLib.PDFName.of('AP')) as PDFLib.PDFDict).lookup(PDFLib.PDFName.of('N')) as PDFLib.PDFRawStream;
+    };
+    expect(apOf(0).dict.has(PDFLib.PDFName.of('Resources'))).toBe(false);
+    expect(names(apOf(1).dict.lookup(PDFLib.PDFName.of('Resources')) as PDFLib.PDFDict, 'ColorSpace')).toEqual(['CsApKeep']);
+  });
+
+  it('門(verify): 使われない名前が Resources に残った出力は leaked で断る / 刈り済みの出力は通る(対照群)', async () => {
+    const src = await shared();
+    const clean = await core.build(PDFLib, src, { order: [1], rotate: {} });
+    await expect(core.verify(PDFLib, clean, 1)).resolves.toBeUndefined();
+    // 刈っていない版(1 ページ目だけを removePage の道で作る ── 辿れる物は全部あるが、使われない名前が表に残る)
+    const doc = await PDFLib.PDFDocument.load(src);
+    doc.removePage(1);
+    const dirty = await doc.save({ useObjectStreams: false });
+    let code: string | undefined;
+    try {
+      await core.verify(PDFLib, dirty, 1);
+    } catch (e) {
+      code = (e as { pkcCode?: string }).pkcCode;
+    }
+    expect(code).toBe('leaked');
+  });
+
+  it('門の種類ごと: ColorSpace だけ / Properties だけが余っても leaked で断る(片方の門が死んでも気づく)', async () => {
+    const make = async (kind: 'ColorSpace' | 'Properties'): Promise<Uint8Array> => {
+      const d = await PDFLib.PDFDocument.create();
+      const p = d.addPage();
+      const ctx = d.context;
+      const res = p.node.Resources() as PDFLib.PDFDict;
+      res.set(PDFLib.PDFName.of(kind), ctx.obj({ Unused: kind === 'ColorSpace' ? [PDFLib.PDFName.of('ICCBased'), ctx.register(ctx.stream('X-ICC'))] : { A: 1 } }));
+      p.node.addContentStream(ctx.register(ctx.stream('0 0 1 1 re f')));
+      return d.save({ useObjectStreams: false });
+    };
+    for (const kind of ['ColorSpace', 'Properties'] as const) {
+      let code: string | undefined;
+      try {
+        await core.verify(PDFLib, await make(kind), 1);
+      } catch (e) {
+        code = (e as { pkcCode?: string }).pkcCode;
+      }
+      expect(code, `${kind} が余っているのに通った`).toBe('leaked');
+    }
+  });
+
+  it('2 ページとも選べば、それぞれが使う名前は両方残る(ページごとの刈り込みが他方を壊さない)', async () => {
+    const out = await core.build(PDFLib, await shared(), { order: [1, 2], rotate: {} });
+    const doc = await PDFLib.PDFDocument.load(out);
+    expect(doc.getPageCount()).toBe(2);
+    expect(names(doc.getPage(0).node.Resources() as PDFLib.PDFDict, 'ColorSpace')).toContain('CsKeep');
+    const r2 = doc.getPage(1).node.Resources() as PDFLib.PDFDict;
+    expect(names(r2, 'ColorSpace')).toContain('CsSecret'); // 2 ページ目が使うので、2 ページ目には残る
+    expect(names(r2, 'ColorSpace')).not.toContain('CsKeep');
+    expect(names(doc.getPage(0).node.Resources() as PDFLib.PDFDict, 'ColorSpace')).not.toContain('CsSecret');
+  });
+});
+
 describe('出力のページの並びと向き', () => {
   it('order どおりの並び / 回したページだけ向きが変わる', async () => {
     const src = await sample([A, B, C]);
