@@ -572,6 +572,116 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await expect(p2, '仲間の札が残っている').not.toHaveAttribute('data-pkc-group', /.+/);
   await expect(p2, '解いたら位置が動いた').toHaveAttribute('data-pkc-x', String(x2 + 50));
 
+  /**
+   * 🔴 **付箋を回す**(#530 段⑤d)── 右クリックの「右に回す」を 15° ずつ押して、45° と 90° で次の 3 つを実ブラウザで見る。
+   * 🔑 **新しい起動は増やさない**(#820 の規律)── 既に在る道中(`#p1` → `#p2` の線)に足す。
+   * ⚠ 見るのは **ブラウザ自身が計算した `transform` の行列**であって、属性ではない(受け皿が無く画面が 1 ドットも変わらない
+   *   形を素通りしない)。線の端・角は、**その行列から別に求めた回した四角**と突き合わせる(実装の式を写さない ── 別の観測)。
+   *   ① 計算後の `transform` が `rotate(θ)` の行列である ② 線の終点(p2 側)が、回した四角の辺の上に在る(浮かない)
+   *   ③ 角の伸縮が付箋の向きで効き、掴んだ角の反対側の角が画面で動かない。
+   */
+  const matrixOf = (loc: Locator): Promise<number[]> =>
+    loc.evaluate((el) => {
+      const t = getComputedStyle(el).transform;
+      return t === 'none' ? [1, 0, 0, 1, 0, 0] : t.replace(/^matrix\(|\)$/g, '').split(',').map(Number);
+    });
+  /** 回した四角の 4 つの角(client 座標)── ブラウザが計算した行列から出す。 */
+  const cornersOf = (loc: Locator): Promise<Array<[number, number]>> =>
+    loc.evaluate((el) => {
+      const h = el as HTMLElement;
+      const t = getComputedStyle(h).transform;
+      const m = t === 'none' ? [1, 0, 0, 1, 0, 0] : t.replace(/^matrix\(|\)$/g, '').split(',').map(Number);
+      const r = h.getBoundingClientRect(); // 回した四角の外接四角 ── 中心は回転の軸と同じ
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const w = h.offsetWidth;
+      const hh = h.offsetHeight;
+      return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([sx, sy]): [number, number] => [
+        cx + m[0]! * (sx * w / 2) + m[2]! * (sy * hh / 2),
+        cy + m[1]! * (sx * w / 2) + m[3]! * (sy * hh / 2),
+      ]);
+    });
+  /** 線の終点(p2 側)から、回した四角の周(4 辺)までの最短距離(px)。浮いていれば大きくなる。 */
+  const endGap = async (): Promise<number> => {
+    const d = (await line.getAttribute('d')) ?? '';
+    const nums = d.split(/[^\d.-]+/).filter((t) => t !== '').map(Number);
+    const host = await line.evaluate((el) => {
+      const hostEl = el.closest('.pkc-board-host') as HTMLElement;
+      const r = hostEl.getBoundingClientRect();
+      return { x: r.left + hostEl.clientLeft - hostEl.scrollLeft, y: r.top + hostEl.clientTop - hostEl.scrollTop };
+    });
+    const ex = host.x + nums[nums.length - 2]!;
+    const ey = host.y + nums[nums.length - 1]!;
+    const cs = await cornersOf(p2);
+    let best = Infinity;
+    for (let i = 0; i < 4; i += 1) {
+      const [ax, ay] = cs[i]!;
+      const [bx, by] = cs[(i + 1) % 4]!;
+      const len2 = (bx - ax) ** 2 + (by - ay) ** 2;
+      const t = Math.max(0, Math.min(1, ((ex - ax) * (bx - ax) + (ey - ay) * (by - ay)) / len2));
+      best = Math.min(best, Math.hypot(ex - (ax + t * (bx - ax)), ey - (ay + t * (by - ay))));
+    }
+    return best;
+  };
+  const turn = async (label: string): Promise<void> => {
+    await p2.click({ button: 'right' });
+    await blockMenu.locator('button', { hasText: new RegExp(`^${label}$`) }).click();
+  };
+  await p2.click({ button: 'right' });
+  await expect(blockMenu.locator('button[data-pkc-action="place-rotate"]'), '回していない付箋は「右に回す」「左に回す」の 2 つだけ').toHaveCount(2);
+  await page.keyboard.press('Escape');
+  expect(await matrixOf(p2), '前提: 札が無い付箋は回っていない').toEqual([1, 0, 0, 1, 0, 0]);
+  expect(await endGap(), '前提(回す前): 線の終点が付箋の辺の上に在る').toBeLessThan(1.5);
+  for (const k of [1, 2, 3, 4, 5, 6]) {
+    await turn('右に回す');
+    await expect(p2, `${15 * k}° が本文に書き戻されていない`).toHaveAttribute('data-pkc-rotate', String(15 * k), { timeout: 5000 });
+    if (k === 3 || k === 6) {
+      const th = (15 * k * Math.PI) / 180;
+      const m = await matrixOf(p2);
+      expect(m[0], `${15 * k}°: 計算後の transform が回転の行列でない`).toBeCloseTo(Math.cos(th), 3);
+      expect(m[1]).toBeCloseTo(Math.sin(th), 3);
+      expect(m[2]).toBeCloseTo(-Math.sin(th), 3);
+      expect(m[3]).toBeCloseTo(Math.cos(th), 3);
+      // 回しても枠(left / top / width / height)は回す前のまま
+      expect(await p2.evaluate((el) => [(el as HTMLElement).offsetWidth, (el as HTMLElement).offsetHeight]), '回したら枠の大きさが変わった').toEqual([200, 120]);
+      await expect.poll(endGap, { message: `${15 * k}°: 線の終点が回した付箋の辺から浮いている`, timeout: 5000 }).toBeLessThan(1.5);
+    }
+  }
+  // 🔑 隣の付箋 p1 は回っていない(1 枚ずつ)
+  expect(await matrixOf(p1), '隣の付箋まで回った').toEqual([1, 0, 0, 1, 0, 0]);
+  /**
+   * 🔴 角の伸縮 ── 90° の付箋の「付箋の右下の角」(画面では左下)を実マウスで掴み、画面の下へ 40px 引く。
+   *   付箋の向きでは幅が 40 伸びる(w=240)。反対側の角(付箋の左上 = 画面の右上)は画面で動かない。
+   */
+  const topLeftBefore = (await cornersOf(p2))[0]!;
+  const rx0 = Number(await p2.getAttribute('data-pkc-x'));
+  const ry0 = Number(await p2.getAttribute('data-pkc-y'));
+  const handle = p2.locator(':scope > [data-pkc-field="place-size"]');
+  const hb = (await handle.boundingBox())!;
+  // 持ち手は回した四角の「付箋の右下の角」にいちばん近い(角から少し内側に居るので、距離ではなく 4 つの角のどれに近いかで見る)
+  const handleAt = [hb.x + hb.width / 2, hb.y + hb.height / 2] as const;
+  const dists = (await cornersOf(p2)).map(([cx, cy]) => Math.hypot(handleAt[0] - cx, handleAt[1] - cy));
+  expect(dists.indexOf(Math.min(...dists)), `大きさの持ち手が回した付箋の右下の角に無い(角までの距離 ${dists.map(Math.round).join(' / ')})`).toBe(2);
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + 40, { steps: 5 });
+  await page.mouse.up();
+  await expect(p2, '付箋の向きで幅が伸びていない(画面の下へ引いたのに w が 240 でない)').toHaveAttribute('data-pkc-w', '240', { timeout: 5000 });
+  await expect(p2).toHaveAttribute('data-pkc-h', '120');
+  // 反対側の角を動かさないよう x y も書かれる(90° で幅 +40: 中心が付箋の向きへ 20 動く = 画面の下へ 20、幅の増分の左右 −20)
+  await expect(p2, '反対側の角を動かさないための x が書かれていない').toHaveAttribute('data-pkc-x', String(rx0 - 20));
+  await expect(p2, '反対側の角を動かさないための y が書かれていない').toHaveAttribute('data-pkc-y', String(ry0 + 20));
+  const topLeftAfter = (await cornersOf(p2))[0]!;
+  expect(Math.abs(topLeftAfter[0] - topLeftBefore[0]), '掴んだ角の反対側が横に動いた').toBeLessThan(1.5);
+  expect(Math.abs(topLeftAfter[1] - topLeftBefore[1]), '掴んだ角の反対側が縦に動いた').toBeLessThan(1.5);
+  await expect.poll(endGap, { message: '伸縮の後、線の終点が辺から浮いている', timeout: 5000 }).toBeLessThan(1.5);
+  // 🔴 回転を解く(置けるなら外せる)── 札が消え、transform が無くなる。枠は伸ばした大きさのまま
+  await p2.click({ button: 'right' });
+  await blockMenu.locator('button', { hasText: /^回転を解く$/ }).click();
+  await expect(p2, '解いても rotate= が残っている').not.toHaveAttribute('data-pkc-rotate', /.+/, { timeout: 5000 });
+  expect(await matrixOf(p2), '解いたのに transform が残っている').toEqual([1, 0, 0, 1, 0, 0]);
+  await expect(p2).toHaveAttribute('data-pkc-w', '240');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 

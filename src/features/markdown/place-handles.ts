@@ -25,6 +25,7 @@ import {
   type PlaceEdge,
   type PlaceRect,
 } from './place-line';
+import { unrotatePoint } from './place-rotate';
 
 /**
  * 点(板の左上を基準にしない、器の座標)にいちばん近い辺。
@@ -33,6 +34,13 @@ import {
  *   マウスを動かしていないのに、描き直すたびに出る辺が変わりうる。
  */
 export function nearestEdge(r: PlaceRect, px: number, py: number): PlaceEdge {
+  // 🔴 回した付箋(#530 段⑤d)── 画面の点を**付箋の中の座標へ逆に回して**から辺と比べる
+  //   (辺は付箋の中の向き。回さないと、マウスを乗せた辺と違う辺に判定される)
+  if (r.rot !== undefined && r.rot !== 0) {
+    const q = unrotatePoint(r, r.rot, px, py);
+    px = q.x;
+    py = q.y;
+  }
   const d: Record<PlaceEdge, number> = {
     top: Math.abs(py - r.y),
     right: Math.abs(r.x + r.w - px),
@@ -92,7 +100,9 @@ export function topPlaceAt<T>(
   let best: PlaceDrop<T> | null = null;
   for (const c of cands) {
     const r = c.rect;
-    if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) continue;
+    // 🔴 回した付箋(#530 段⑤d)── 点を逆に回してから回さない四角と比べる(角の外側の誤爆・内側の取りこぼしを防ぐ)
+    const q = r.rot === undefined || r.rot === 0 ? { x: px, y: py } : unrotatePoint(r, r.rot, px, py);
+    if (q.x < r.x || q.x > r.x + r.w || q.y < r.y || q.y > r.y + r.h) continue;
     if (best === null || c.z >= best.z) best = c;
   }
   return best;

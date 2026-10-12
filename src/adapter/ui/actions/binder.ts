@@ -47,6 +47,7 @@ import {
   placeShapeAt,
   placeStyleAt,
 } from '@features/markdown/place-notation';
+import { parsePlaceRotate } from '@features/markdown/place-rotate';
 import {
   parsePlaceColor,
   parseArrowSpell,
@@ -289,6 +290,7 @@ import {
   PLACE_STYLE_KEYS_ATTR,
   PLACE_STYLE_ARROW_ATTR,
   PLACE_STYLE_SIZE_ATTR,
+  PLACE_STYLE_ROTATE_ATTR,
   PLACE_STYLE_WIDTH_ATTR,
   bodyMenuActions,
   editingRowMenuActions,
@@ -3874,6 +3876,8 @@ function directiveBlockAt(
   size: PlaceSize;
   group: string | null;
   groupable: boolean;
+  rotate: number;
+  rotated: boolean;
 } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
@@ -3888,6 +3892,9 @@ function directiveBlockAt(
         // 🔑 色の札も**原文**から読む(#530 段④)── 描画・書き出しと同じ 1 本(`placeStyleAt`)
         styled: placeStyleAt(open)?.any === true,
         size: placeStyleAt(open)?.size ?? 'standard',
+        // 🔴 回転(#530 段⑤d)── これも原文から読む(描画・書き出しと同じ 1 本)
+        rotate: placeStyleAt(open)?.rotate ?? 0,
+        rotated: placeStyleAt(open)?.written.rotate === true,
         // 🔑 グループも**原文**から読む(#530 段⑤b)── 入っているか / まとめる相手が居るか(1 本: `placeGroupAt` / `placeGroupItems`)
         group: placeGroupAt(open),
         groupable:
@@ -9488,6 +9495,29 @@ const ACTIONS: Record<string, ActionHandler> = {
       target,
       (lid, line) => dispatcher.dispatch({ type: 'UNGROUP_PLACE', lid, line }),
       'グループを解いてください',
+    );
+  },
+  /**
+   * 🔴 **付箋を回す**(#530 段⑤d)── 項目が運ぶ値(押した結果の角度、0〜359)を書く。
+   * 🔑 `0` は札を**消す**(`rotate=0` と書き足さない ── `place-size` の `standard` と同じ作法)。
+   * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
+   */
+  'place-rotate': (dispatcher, target) => {
+    const raw = target.getAttribute(PLACE_STYLE_ROTATE_ATTR);
+    if (raw === null) return;
+    const deg = parsePlaceRotate(raw);
+    if (deg === null) return;
+    placeStyleWrite(
+      dispatcher,
+      target,
+      (lid, line) =>
+        dispatcher.dispatch({
+          type: 'SET_PLACE_STYLE',
+          lid,
+          line,
+          style: { rotate: deg === 0 ? null : deg },
+        }),
+      '付箋の回転を直してください',
     );
   },
   /**
@@ -15791,6 +15821,8 @@ export function bindActions(
           size: block.size,
           group: block.group,
           groupable: block.groupable,
+          rotate: block.rotate,
+          rotated: block.rotated,
         })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる

@@ -32,6 +32,7 @@ import {
   type PlaceArrow,
   type PlaceSize,
 } from './markdown/place-color';
+import { stepPlaceRotate } from './markdown/place-rotate';
 import { TEXT_SCALES } from './text-scale';
 import {
   PLACE_SHAPES,
@@ -112,6 +113,8 @@ export const PLACE_STYLE_WIDTH_ATTR = 'data-pkc-style-width';
 export const PLACE_STYLE_ARROW_ATTR = 'data-pkc-style-arrow';
 /** 🔴 付箋の文字の大きさ(#530 段⑤a)── 項目が運ぶ値(`small` / `standard` / `large` / `xlarge`)。`standard` は札を消す。 */
 export const PLACE_STYLE_SIZE_ATTR = 'data-pkc-style-size';
+/** 🔴 付箋の回転(#530 段⑤d)── 項目が運ぶ値は**押した結果の角度**(度、0〜359。`0` は札を消す)。 */
+export const PLACE_STYLE_ROTATE_ATTR = 'data-pkc-style-rotate';
 
 /**
  * 付箋の文字の大きさの選択肢の字。⚠ 段の字(小 / 標準 / 大 / 特大)は**設定の「文字の大きさ」と同じ表**
@@ -120,6 +123,11 @@ export const PLACE_STYLE_SIZE_ATTR = 'data-pkc-style-size';
 export const PLACE_SIZE_LABELS: Readonly<Record<PlaceSize, string>> = Object.fromEntries(
   TEXT_SCALES.map((t) => [t.id, `文字の大きさ: ${t.label}`]),
 ) as Record<PlaceSize, string>;
+
+/** 付箋の回転の字(右クリック)。⚠ 字の正本はここ 1 本 ── マニュアルもこの字で書く。 */
+export const PLACE_ROTATE_RIGHT_LABEL = '右に回す';
+export const PLACE_ROTATE_LEFT_LABEL = '左に回す';
+export const PLACE_ROTATE_CLEAR_LABEL = '回転を解く';
 
 /** 矢じりの選択肢の字(右クリックの並び)。⚠ 字の正本はここ 1 本 ── マニュアルもこの字で書く。 */
 export const PLACE_ARROW_LABELS: Readonly<Record<PlaceArrow, string>> = {
@@ -976,6 +984,10 @@ export function blockMenuActions(ctx: {
   readonly group?: string | null;
   /** 🔴 グループにできる付箋(グループに入っていない付箋)が板に 2 枚以上在るか(#530 段⑤b)。省略 = 無い。 */
   readonly groupable?: boolean;
+  /** 🔴 いまの回転(度。#530 段⑤d。札が無い / 読めない = 0)。省略 = 0。 */
+  readonly rotate?: number;
+  /** 🔴 `rotate=` の札が書かれているか(読めない値・`rotate=0` も真)。「回転を解く」を出す条件。 */
+  readonly rotated?: boolean;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
@@ -1042,6 +1054,30 @@ export function blockMenuActions(ctx: {
       : ctx.groupable === true
         ? [{ action: 'place-group', label: 'グループにする…' }]
         : []),
+    /**
+     * 🔴 **回す**(#530 段⑤d。Gemini 裁定 2026-10-11 依頼 19 Q2)── 15° ずつ。項目が運ぶのは**押した結果の角度**
+     * (押した所から現在値を読み直さない ── メニューを出した時点の本文が正本)。
+     * 🔑 「回転を解く」は**回した付箋にだけ**(札が書かれているときだけ。置けるなら外せる)。
+     */
+    {
+      action: 'place-rotate',
+      label: PLACE_ROTATE_RIGHT_LABEL,
+      attrs: { [PLACE_STYLE_ROTATE_ATTR]: String(stepPlaceRotate(ctx.rotate ?? 0, 1)) },
+    },
+    {
+      action: 'place-rotate',
+      label: PLACE_ROTATE_LEFT_LABEL,
+      attrs: { [PLACE_STYLE_ROTATE_ATTR]: String(stepPlaceRotate(ctx.rotate ?? 0, -1)) },
+    },
+    ...(ctx.rotated === true
+      ? [
+          {
+            action: 'place-rotate',
+            label: PLACE_ROTATE_CLEAR_LABEL,
+            attrs: { [PLACE_STYLE_ROTATE_ATTR]: '0' },
+          },
+        ]
+      : []),
     { action: 'remove-place', label: 'この板を消す' },
   ];
 }

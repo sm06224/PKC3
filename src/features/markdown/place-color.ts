@@ -14,6 +14,7 @@
  * | 線 | `width=` | 太さ(px) |
  * | 線 | `arrow=` | 矢じり(`end` = 終わりに付ける / `both` = 両端に付ける。無ければ矢じりなし) |
  * | 付箋 | `size=` | 文字の大きさ(`small` / `large` / `xlarge`。無ければ標準) |
+ * | 付箋 | `rotate=` | 回転(度、右回り、0〜359 の整数。無ければ回さない。規則は `place-rotate.ts`) |
  *
  * ## 🔴 値は**決まった綴りだけ**を受ける(素通しにしない)
  *
@@ -29,6 +30,8 @@
  * ## ⚠ pure module
  * browser API を使わない(`features` 層)。画面は `place-board.ts`、書き出しは `pptx.ts` が読む。
  */
+
+import { parsePlaceRotate } from './place-rotate';
 
 /** 受ける綴り。⚠ `#` + 16 進の **3 桁 / 6 桁ちょうど**(4 桁・8 桁の透明度つきは受けない)。 */
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -189,14 +192,16 @@ export interface PlaceStyle {
   readonly arrow?: PlaceArrow | null;
   /** 🔴 文字の大きさ(付箋だけ)。`null` / `standard` は札を**消す**(= 標準)。 */
   readonly size?: PlaceSize | null;
+  /** 🔴 回転(付箋だけ。度、0〜359 の整数)。`null` / `0` は札を**消す**(= 回さない)。 */
+  readonly rotate?: number | null;
 }
 
 /** 札の名前の全部。⚠ 並びが書き込みの順である(同じ本文を書くたびに札の並びが揺れない)。 */
-export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width', 'arrow', 'size'] as const;
+export const PLACE_STYLE_KEYS = ['fill', 'stroke', 'width', 'arrow', 'size', 'rotate'] as const;
 export type PlaceStyleKey = (typeof PLACE_STYLE_KEYS)[number];
 
 /** 付箋が持てる札 / 線が持てる札。⚠ 持てない札を渡されたら書かない(`place-notation.ts`)。 */
-export const BOARD_STYLE_KEYS: readonly PlaceStyleKey[] = ['fill', 'stroke', 'size'];
+export const BOARD_STYLE_KEYS: readonly PlaceStyleKey[] = ['fill', 'stroke', 'size', 'rotate'];
 export const LINE_STYLE_KEYS: readonly PlaceStyleKey[] = ['stroke', 'width', 'arrow'];
 
 /**
@@ -216,6 +221,8 @@ export function isPlaceStyle(value: unknown): value is PlaceStyle {
       if (v !== null && !PLACE_ARROWS.some((a) => a === v)) return false;
     } else if (k === 'size') {
       if (v !== null && !PLACE_SIZES.some((a) => a === v)) return false;
+    } else if (k === 'rotate') {
+      if (v !== null && (typeof v !== 'number' || parsePlaceRotate(String(v)) === null)) return false;
     } else {
       return false;
     }

@@ -39,13 +39,20 @@
  */
 
 import { PLACE_LINE_WIDTH_DEFAULT, type PlaceArrow } from './place-color';
+import { rotatePointAround } from './place-rotate';
 
-/** 板 1 枚の場所と大きさ(器の左上が原点、px)。 */
+/**
+ * 板 1 枚の場所と大きさ(器の左上が原点、px)。
+ *
+ * 🔴 `rot` は回転(度、右回り。#530 段⑤d)── **`x` `y` `w` `h` は回す前の四角のまま**で、`rot` を持つ四角は
+ *   「中心の周りに `rot` 度回した四角」を表す。無い / 0 = 回していない(今までと 1 バイトも変わらない)。
+ */
 export interface PlaceRect {
   readonly x: number;
   readonly y: number;
   readonly w: number;
   readonly h: number;
+  readonly rot?: number;
 }
 
 /**
@@ -98,8 +105,20 @@ export function anchorRatio(a: PlaceAnchor): number {
   return a.num / a.den;
 }
 
-/** その接続点の座標。 */
+/**
+ * その接続点の座標。
+ *
+ * 🔴 回した付箋(`r.rot`)は、**回す前の辺の点を中心の周りに回した座標**を返す(#530 段⑤d、設計 §5 A)──
+ *   辺は「付箋の中の向き」なので、`right@1/4` は回した付箋の右辺を指し、90° 回すと画面の下側から出る。
+ *   画面・ER 図・PowerPoint の書き出しが**この 1 本**を引く(§7)。
+ */
 export function anchorPoint(r: PlaceRect, a: PlaceAnchor): { x: number; y: number } {
+  const p = unrotatedAnchorPoint(r, a);
+  if (r.rot === undefined || r.rot === 0) return p;
+  return rotatePointAround(p.x, p.y, r.x + r.w / 2, r.y + r.h / 2, r.rot);
+}
+
+function unrotatedAnchorPoint(r: PlaceRect, a: PlaceAnchor): { x: number; y: number } {
   const t = anchorRatio(a);
   if (a.edge === 'top') return { x: r.x + r.w * t, y: r.y };
   if (a.edge === 'bottom') return { x: r.x + r.w * t, y: r.y + r.h };
@@ -149,6 +168,8 @@ export interface PlaceLine {
   readonly y2: number;
   readonly from: PlaceAnchor;
   readonly to: PlaceAnchor;
+  /** 出る側の付箋の回転(度。#530 段⑤d)── 曲がる軸を決めるときだけ読む。無い / 0 = 回していない。 */
+  readonly fromRot?: number;
 }
 
 /**
@@ -209,7 +230,15 @@ export function placeLineOf(from: PlaceRect, to: PlaceRect, pin: PlacePin = {}):
   const b = pin.to ?? anchorOf(bestB, num, den);
   const p = anchorPoint(from, a);
   const q = anchorPoint(to, b);
-  return { x1: p.x, y1: p.y, x2: q.x, y2: q.y, from: a, to: b };
+  return {
+    x1: p.x,
+    y1: p.y,
+    x2: q.x,
+    y2: q.y,
+    from: a,
+    to: b,
+    ...(from.rot !== undefined && from.rot !== 0 ? { fromRot: from.rot } : {}),
+  };
 }
 
 /**
@@ -275,7 +304,13 @@ export function parseBendSpell(raw: string | null): BendRead {
  *   出た直後に板の中へ戻る形になる(辺から離れる向きに折らないと通れない)。
  */
 function defaultBend(ln: PlaceLine): PlaceBend {
-  return ln.from.edge === 'left' || ln.from.edge === 'right'
+  /**
+   * 🔴 回した付箋(#530 段⑤d)── 辺は付箋の中の向きなので、画面で線が出る向きは**辺の向きを付箋の回転ぶん回した物**。
+   * 90° 回した付箋の `right` は画面の下へ出る。いちばん近い 90° に丸めて、横向き(0 / 180)か縦向き(90 / 270)かで軸を決める。
+   */
+  const base = { right: 0, bottom: 90, left: 180, top: 270 }[ln.from.edge];
+  const dir = (((base + Math.round((ln.fromRot ?? 0) / 90) * 90) % 360) + 360) % 360;
+  return dir === 0 || dir === 180
     ? { axis: 'v', at: (ln.x1 + ln.x2) / 2 }
     : { axis: 'h', at: (ln.y1 + ln.y2) / 2 };
 }

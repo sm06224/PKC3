@@ -583,3 +583,52 @@ describe('配線(main.ts)', () => {
     expect(src, '取り込みが無い').toMatch(/from '@adapter\/ui\/render\/place-connect'/);
   });
 });
+
+/**
+ * 🔴 **回した付箋につなぐ**(#530 段⑤d)── ● ⊕ の位置・乗せた辺・掴んだ線の始点・離した先が、回した四角で決まる。
+ * 左の付箋(0,0 / 100×60、中心 (50,30))を 90° 回すと、付箋の右辺は画面の下(y=80)に来る。
+ */
+describe('回した付箋(rotate=90)につなぐ', () => {
+  const ROT = TWO.replace('x=0 y=0 w=100 h=60}', 'x=0 y=0 w=100 h=60 rotate=90}');
+
+  it('🔴 画面の下側に乗せると「右の辺」に ● ⊕ が出て、位置も回した辺の上(下側)にある', () => {
+    const { host, left } = rig(ROT);
+    hover(left, 50, 78); // 回す前の四角では下辺のすぐ内側 ── 付箋の中では右辺
+    expect(anchors(host, 'dot'), '乗せた辺が付箋の中の向きで判定されていない').toEqual(['right']);
+    expect([dot(host).style.left, dot(host).style.top]).toEqual(['50px', '80px']);
+    const plus = handles(host).filter((h) => h.getAttribute('data-pkc-handle') === 'plus');
+    expect(plus.map((h) => h.style.left).sort()).toEqual(['35px', '65px']);
+    expect(plus.every((h) => h.style.top === '80px')).toBe(true);
+  });
+
+  it('🔴 対照群: 回していない付箋の同じ点(50,78)は下の辺', () => {
+    const { host, left } = rig();
+    hover(left, 50, 58);
+    expect(anchors(host, 'dot')).toEqual(['bottom']);
+  });
+
+  it('🔴 掴んだ仮の線は、回した ● から始まる', () => {
+    const { host, left } = rig(ROT);
+    hover(left, 50, 78);
+    down(dot(host), 50, 80);
+    move(150, 150);
+    expect(document.querySelector(GHOST)!.querySelector('path')!.getAttribute('d')).toBe('M 50 80 L 150 150');
+    up(150, 150);
+  });
+
+  it('🔴 回した付箋の上で離す: 回した四角の内側は当たり、回す前の四角だけの所は外れ。辺は付箋の中の向きで書く', () => {
+    const body = TWO.replace('x=300 y=0 w=100 h=60}', 'x=300 y=0 w=100 h=60 rotate=90}'); // 右の付箋: 画面では 320..380 × -20..80
+    const miss = rig(body);
+    hover(miss.left, 96, 30);
+    down(dot(miss.host), 100, 30);
+    move(310, 30);
+    up(310, 30); // 回す前の四角の中・回した四角の外
+    expect(miss.asks, '回す前の四角で当たりを取っている').toHaveLength(0);
+    const hit = rig(body);
+    hover(hit.left, 96, 30);
+    down(dot(hit.host), 100, 30);
+    move(350, 75);
+    up(350, 75); // 回す前の四角の外・回した四角の内側(画面の下側 = 付箋の右辺)
+    expect(hit.asks[0]).toMatchObject({ rewrite: { kind: 'place-connect', fromAnchor: 'right', toAnchor: 'right' } });
+  });
+});

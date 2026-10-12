@@ -52,6 +52,7 @@ import {
 } from '@features/markdown/place-color';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
+import { placeRotateOf, rotatedBounds } from '@features/markdown/place-rotate';
 import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown/place-embed';
 
 /**
@@ -246,12 +247,19 @@ function ensureCard(
 export function rectOf(el: HTMLElement): PlaceRect {
   const w = el.offsetWidth;
   const h = el.offsetHeight;
-  return {
+  const rect = {
     x: intAttr(el, 'data-pkc-x') ?? 0,
     y: intAttr(el, 'data-pkc-y') ?? 0,
     w: w > 0 ? w : (intAttr(el, 'data-pkc-w') ?? PLACE_FALLBACK_W),
     h: h > 0 ? h : (intAttr(el, 'data-pkc-h') ?? PLACE_FALLBACK_H),
   };
+  /**
+   * 🔴 回した付箋は `rot`(度)を添える(#530 段⑤d)── `offsetWidth` / `offsetHeight` は `transform` の影響を受けないので
+   *   `w` `h` は**回す前の四角のまま**。線の端・辺の判定・離した先の当たりは、これを引く 1 本(`place-line.ts`)が回す。
+   *   読む規則は `placeRotateOf` の 1 本(画面の `transform` と同じ)。回していなければ `rot` を足さない(今までと同じ形)。
+   */
+  const rot = placeRotateOf(el.getAttribute('data-pkc-rotate'));
+  return rot === 0 ? rect : { ...rect, rot };
 }
 
 /**
@@ -532,6 +540,8 @@ interface BlockLayoutCache {
   readonly fill: string | null;
   readonly ink: string | null;
   readonly stroke: string | null;
+  /** 🔴 回転(度。#530 段⑤d)── 無いと `rotate=` だけ変えた再描画が差分判定で飛ばされる */
+  readonly rot: number;
   readonly placed: string;
   /** 掴んで離したときに書き戻す開き行(`data-pkc-place-line`)── ⚠ 古いまま残すと別の行に書く */
   readonly line: string | null;
@@ -548,6 +558,18 @@ interface HostLayoutCache {
 
 const blockCaches = new WeakMap<HTMLElement, BlockLayoutCache>();
 const hostLayouts = new WeakMap<HTMLElement, HostLayoutCache>();
+
+/**
+ * 🔴 板 1 枚の下端(板の高さの見積もり。設計 §4.2 #6)。回した付箋は**回した外接四角**の下端で見積もる
+ * (回す前の `y + h` だと、傾いた角が器の外へはみ出す)。`h` を書いていない付箋は今までどおり 160。
+ */
+function boxBottom(x: number, y: number, w: number | null, h: number | null, rot: number): number {
+  const hh = h ?? 160;
+  if (rot === 0) return y + hh;
+  // ⚠ 限界: `w=` を書いていない付箋の幅は実寸でなく最小幅(`PLACE_FALLBACK_W`)で見積もる ── 実際に広ければ、下端の見積もりは足りないことがある
+  const b = rotatedBounds({ x, y, w: w ?? PLACE_FALLBACK_W, h: hh }, rot);
+  return Math.max(y + hh, b.y + b.h);
+}
 
 /**
  * 描画済みの本文に、板の配置を当てる。⚠ **描画のたびに呼ぶ**(冪等)。
@@ -637,6 +659,7 @@ export function applyPlaceLayout(
     const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
     const ink = fill === null ? null : placeInkOf(fill);
     const stroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
+    const rot = placeRotateOf(el.getAttribute('data-pkc-rotate'));
     const src = intAttr(el, 'data-pkc-source-line');
     const line = src !== null ? String(src + lineOffset) : null;
     const title = placed !== '' ? resolveTitle(placed) : null;
@@ -654,10 +677,11 @@ export function applyPlaceLayout(
       prev.fill === fill &&
       prev.ink === ink &&
       prev.stroke === stroke &&
+      prev.rot === rot &&
       prev.placed === placed &&
       prev.line === line
     ) {
-      bottom = Math.max(bottom, y + (useH ?? 160));
+      bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
       continue;
     }
 
@@ -680,6 +704,9 @@ export function applyPlaceLayout(
     setStyleVar(el, '--pkc-place-fill', fill);
     setStyleVar(el, '--pkc-place-ink', ink);
     setStyleVar(el, '--pkc-place-stroke', stroke);
+    // 🔴 回転(#530 段⑤d)── 中心の周りに回す(`transform-origin` は既定の中心)。`left` / `top` / `width` / `height` は変えない
+    if (rot !== 0) el.style.transform = `rotate(${rot}deg)`;
+    else el.style.removeProperty('transform');
 
     /**
      * 🔑 **開き行の行番号**(生の body 基準)を焼く ── 掴んで離したとき、
@@ -706,7 +733,7 @@ export function applyPlaceLayout(
     ensureGrip(el);
     ensureSizeHandle(el);
     if (placed !== '') ensureCard(el, placed, resolveTitle);
-    bottom = Math.max(bottom, y + (useH ?? 160));
+    bottom = Math.max(bottom, boxBottom(x, y, useW, useH, rot));
 
     blockCaches.set(el, {
       id: el.id,
@@ -718,6 +745,7 @@ export function applyPlaceLayout(
       fill,
       ink,
       stroke,
+      rot,
       placed,
       line,
     });

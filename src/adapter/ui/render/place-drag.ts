@@ -34,6 +34,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
+import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
 import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
 
 /** 押すと掴むの境目(px)。 */
@@ -98,6 +99,11 @@ interface Drag {
   readonly startH: number;
   readonly attrW: boolean;
   readonly attrH: boolean;
+  /**
+   * 🔴 掴んだ付箋の回転(度。#530 段⑤d)。回していれば(≠ 0)、角の伸縮は**付箋の向き**で効かせ、
+   * 反対側の角が動かないよう `x` `y` も一緒に書く(`resizeRotated`)。0 は今までと同じ道。
+   */
+  readonly rot: number;
   /** 🔴 同じグループの仲間(#530 段⑤b)。位置を掴んだときだけ入る ── 無ければ空(今までと同じ)。 */
   readonly others: Member[];
   moved: boolean;
@@ -164,7 +170,11 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
    * 「本文に書けた」の印として読む側が居る(smoke の観測点も同じ)。離した時点で書くと、
    * 書込が飛んでいる間に「もう書けた」と読まれ、続けて頼んだ書換(形を変える等)が断られる(#1481)。
    */
-  let pendingTo: { x: number; y: number } | { w: number; h: number } | null = null;
+  let pendingTo:
+    | { x: number; y: number }
+    | { w: number; h: number }
+    | { x: number; y: number; w: number; h: number }
+    | null = null;
   let pendingCleanup: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
@@ -205,6 +215,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
       startH: hAttr === null ? block.offsetHeight : Number(hAttr) || 0,
       attrW: wAttr !== null,
       attrH: hAttr !== null,
+      rot: placeRotateOf(block.getAttribute('data-pkc-rotate')),
       others:
         grip.getAttribute('data-pkc-field') === 'place-size'
           ? []
@@ -265,6 +276,15 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (!drag.moved && Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
     drag.moved = true;
     if (drag.mode === 'size') {
+      if (drag.rot !== 0) {
+        // 🔴 回した付箋(#530 段⑤d)── 付箋の向きで伸ばし、掴んだ角の反対側(左上)を画面で動かさない
+        const r = resizeRotated(sizeStart(drag), drag.rot, dx, dy, { w: MIN_W, h: MIN_H });
+        drag.block.style.width = `${r.w}px`;
+        drag.block.style.height = `${r.h}px`;
+        drag.block.style.left = `${r.x}px`;
+        drag.block.style.top = `${r.y}px`;
+        return;
+      }
       drag.block.style.width = `${Math.max(MIN_W, drag.startW + dx)}px`;
       drag.block.style.height = `${Math.max(MIN_H, drag.startH + dy)}px`;
       return;
@@ -279,8 +299,19 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     }
   };
 
+  const sizeStart = (d: Drag): { x: number; y: number; w: number; h: number } => ({
+    x: d.startX,
+    y: d.startY,
+    w: d.startW,
+    h: d.startH,
+  });
+
   const restore = (d: Drag): void => {
     if (d.mode === 'size') {
+      if (d.rot !== 0) {
+        d.block.style.left = `${d.startX}px`;
+        d.block.style.top = `${d.startY}px`;
+      }
       if (d.attrW) d.block.style.width = `${d.startW}px`;
       else d.block.style.removeProperty('width');
       if (d.attrH) d.block.style.height = `${d.startH}px`;
@@ -305,7 +336,9 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     action:
       | { type: 'MOVE_PLACE'; lid: string; line: number; x: number; y: number }
       | { type: 'MOVE_PLACES'; lid: string; moves: ReadonlyArray<{ line: number; x: number; y: number }> }
-      | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number },
+      | { type: 'RESIZE_PLACE'; lid: string; line: number; w: number; h: number }
+      // 🔴 回した付箋の伸縮は位置も一緒に書く(#530 段⑤d。`SET_PLACE_RECT` ── 新しい書換の口は要らない)
+      | { type: 'SET_PLACE_RECT'; lid: string; line: number; rect: { x: number; y: number; w: number; h: number } },
   ): void => {
     if (pendingCleanup !== null) {
       pendingCleanup();
@@ -318,7 +351,9 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
         ? { x: action.x, y: action.y }
         : action.type === 'MOVE_PLACES'
           ? { x: action.moves[0]!.x, y: action.moves[0]!.y } // 先頭は掴んだ塊
-          : { w: action.w, h: action.h };
+          : action.type === 'SET_PLACE_RECT'
+            ? action.rect
+            : { w: action.w, h: action.h };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubs: (() => void)[] = [];
 
@@ -409,6 +444,22 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     const dx = e.clientX - d.startClientX;
     const dy = e.clientY - d.startClientY;
     if (d.mode === 'size') {
+      if (d.rot !== 0) {
+        const r = resizeRotated(sizeStart(d), d.rot, dx, dy, { w: MIN_W, h: MIN_H });
+        const rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) };
+        // 🔑 取りやめ(元の大きさへ戻して離す)は書かない
+        if (rect.x === d.startX && rect.y === d.startY && rect.w === d.startW && rect.h === d.startH) {
+          restore(d);
+          return;
+        }
+        const t = targetOf(d.block);
+        if (t === null) {
+          restore(d);
+          return;
+        }
+        registerPendingDrop(d, { type: 'SET_PLACE_RECT', lid: t.lid, line: t.line, rect });
+        return;
+      }
       const w = Math.max(MIN_W, Math.round(d.startW + dx));
       const h = Math.max(MIN_H, Math.round(d.startH + dy));
       // 🔑 取りやめ(元の大きさへ戻して離す)は書かない ── 位置と同じ理由(下)
