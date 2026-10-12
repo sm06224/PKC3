@@ -28,7 +28,7 @@ import { base64Chunks } from './pkc3-html';
 import {
   MAX_EMBED_TEXT_CHARS,
   base64Length,
-  tooBigToImportMessage,
+  notImportableBackMessage,
   tooBigToReadBack,
   tooBigToReadBackMessage,
 } from '../storage/image-export-limit';
@@ -166,13 +166,10 @@ export async function writePortableBundle(args: {
      * 🔴 **残る天井は「ファイル全体」** ── 開く側は要素ごとに読む(割ってあるので 1 件の大きさでは詰まらない)が、
      * **取り込み直す側は HTML ファイル全体を 1 本の文字列にする**(`File.text()`)ので、上限は
      * 雛形 + DB 画像 + 添付の全部を足した字数に効く。⚠ 添付 1 件の大きさではなく**これまでに焼いた分との合計**で見る。
-     * 🔑 **落として続ける**(1 件のために残り全部を失わせない)。⚠ ただし**名指しで言う**。
+     * 🔑 **落とさない** ── 開くことが本命で、割ってあれば大きさに関わらず開ける。超えたら
+     *   **全部焼いたうえで、最後に 1 度だけ**「開けるが取り込み直せないことがある」と言う(下)。
      */
     const addChars = base64Length(a.blob.size) + nParts * (openTag(0).length + '</script>'.length);
-    if (fileChars + addChars > MAX_EMBED_TEXT_CHARS) {
-      warnings.push(tooBigToImportMessage(`添付「${a.key}」`, a.blob.size));
-      continue;
-    }
     fileChars += addChars;
     for (let p = 0; p < nParts; p++) {
       parts.push(openTag(p));
@@ -182,6 +179,9 @@ export async function writePortableBundle(args: {
     }
     assets++;
   }
+
+  // 🔴 取り込み直せない大きさになったら、**1 度だけ**言う(添付は 1 件も落としていない)
+  if (fileChars > MAX_EMBED_TEXT_CHARS) warnings.push(notImportableBackMessage(fileChars));
 
   parts.push(stamped.slice(cut));
   return {

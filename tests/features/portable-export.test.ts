@@ -334,20 +334,18 @@ describe('🔴 読み戻せない大きさを焼かせない(#996)', () => {
     expect(out.warnings).toEqual([]);
   });
 
-  it('🔴 大きすぎる添付は、その 1 件だけ落として名指しで言う', async () => {
+  it('🔴 巨大な添付も落とさず焼き(割ってあるので開ける)、取り込み直せない大きさだと 1 度だけ言う', async () => {
     const out = await writePortableBundle({
       template: template(),
       bundle: NEW,
       image: new Uint8Array([1, 2, 3]),
       assets: oneAsset(fakeSize(new Blob([new Uint8Array([9])]), 'size', EDGE + 1)),
     });
-    // 🔑 **残りは焼けている**(1 件のために全部を失わせない)
-    expect(out.assets, 'その添付を焼いてしまった').toBe(0);
+    expect(out.assets, '添付を落とした').toBe(1);
     expect(out.warnings).toHaveLength(1);
-    expect(out.warnings[0], '名指ししていない').toContain('a1b2c3d4');
+    expect(out.warnings[0], '開けることを言っていない').toContain('開けます');
     expect(out.warnings[0], '代わりの道を書いていない').toContain(archiveSuffix('full'));
-    // ⚠ 1 枚そのものは出来ている ── 開ける
-    expect(await out.blob.text()).toContain(`"id":"${NEW.id}"`);
+    expect(await out.blob.text()).toContain('data-pkc-asset="a1b2c3d4"');
   });
 
   it('⚠ 普通の大きさの添付は、これまでどおり焼ける(対照群)', async () => {
@@ -395,7 +393,7 @@ describe('添付を割って焼く (#1416 §7-4d)', () => {
     expect(assetMarks(await bake(0))).toEqual([undefined]);
   });
 
-  describe('🔴 残る天井は「ファイル全体」── 添付 1 件ではなく合計で見る', () => {
+  describe('🔴 残る天井は「ファイル全体」── 超えても落とさず、警告する', () => {
     const IMG = 10 * 1024 * 1024;
     const base64Len = (b: number): number => Math.ceil(b / 3) * 4;
     const run = async (assetBytes: number) => {
@@ -413,15 +411,38 @@ describe('添付を割って焼く (#1416 §7-4d)', () => {
     };
     const room = MAX_EMBED_TEXT_CHARS - base64Len(IMG);
 
-    it('DB 画像を足すと上限を超える添付は、1 件だけで見れば通る大きさでも落として名指しする', async () => {
+    it('🔴 合計が取り込み直せる上限を超えても、添付は落とさず焼き、警告は 1 度だけ(開けることを先に言う)', async () => {
       const bytes = Math.floor(((room + 1_000_000) * 3) / 4);
       expect(bytes, '前提: 1 件だけなら通る大きさ').toBeLessThan(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4));
       const out = await run(bytes);
-      expect(out.assets, '超える添付を焼いた').toBe(0);
+      expect(out.assets, '添付を落とした').toBe(1);
       expect(out.warnings).toHaveLength(1);
-      expect(out.warnings[0]).toContain('ast-big');
-      expect(out.warnings[0]).toContain(archiveSuffix('full'));
-      expect(out.warnings[0], '取り込み直しの話をしていない').toContain('取り込み直す');
+      expect(out.warnings[0], '開けることを言っていない').toContain('開けます');
+      expect(out.warnings[0], '取り込み直しの話をしていない').toContain('取り込み直せない');
+      expect(out.warnings[0], '代わりの道を書いていない').toContain(archiveSuffix('full'));
+      expect(out.warnings[0], '大きさを言っていない').toMatch(/約 \d/);
+      expect(await out.blob.text(), '添付の要素が無い').toContain('data-pkc-asset="ast-big"');
+    });
+
+    it('🔴 添付が複数でも、警告は 1 度だけで、全部焼く', async () => {
+      const blob = (n: number): Blob => {
+        const b = new Blob([new Uint8Array([9])]);
+        Object.defineProperty(b, 'size', { value: n, configurable: true });
+        return b;
+      };
+      const half = Math.floor(((room / 2 + 1_000_000) * 3) / 4);
+      const out = await writePortableBundle({
+        template: template(),
+        bundle: NEW,
+        image: new Uint8Array(IMG),
+        assets: (async function* () {
+          yield { key: 'ast-a', mime: 'image/png', blob: blob(half) };
+          yield { key: 'ast-b', mime: 'image/png', blob: blob(half) };
+          yield { key: 'ast-c', mime: 'image/png', blob: blob(5) };
+        })(),
+      });
+      expect(out.assets).toBe(3);
+      expect(out.warnings).toHaveLength(1);
     });
 
     it('対照群: 余裕のある大きさは焼ける(門が いつでも鳴っている のではない)', async () => {

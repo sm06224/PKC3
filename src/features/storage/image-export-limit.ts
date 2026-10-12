@@ -93,7 +93,7 @@ export function looksOutOfMemory(err: unknown): boolean {
  *   DB 画像は**開く**ことはできても、**取り込み直せない** 1 枚になりうる。
  *   門の数は DB 画像の bytes を base64 にした字数で見ており、ファイル全体(アプリ本体 約 12MB と
  *   添付を足した字数)ではないので、**ファイル全体の上限そのものではない**(近似)。
- *   添付は**これまでに焼いた分との合計**(雛形 + DB 画像 + 添付)で見る(`tooBigToImportMessage`)。
+ *   添付は断らない。合計(雛形 + DB 画像 + 添付)が超えたら全部焼いて 1 度だけ警告する(`notImportableBackMessage`)。
  *
  * ## 実測(2026-09-16、この箱の V8)
  *
@@ -160,17 +160,18 @@ export function tooBigToReadBackMessage(what: string, bytes: number): string {
 }
 
 /**
- * 添付を入れると **ファイル全体が取り込み直せなくなる** ときの字(#1416 §7-4d)。
+ * 焼いた **ファイル全体**が、取り込み直すときに読める上限を超えたときの字(#1416 §7-4d)。
  *
- * ⚠ `tooBigToReadBackMessage` と混ぜない ── あちらは「1 つの中身が大きすぎる」、こちらは
- *   「**1 件ずつは小さくても、足した全体**が、取り込み直すときに読める上限を超える」。
- *   添付は割って焼くので、**開く**ことは大きさで詰まらない(詰まるのは取り込み直しだけ)。
+ * ⚠ 添付は割って焼くので、**開く**ことは大きさで詰まらない ── 中身は 1 つも落としていない。
+ *   詰まるのは取り込み直し(`File.text()` が 1 本の文字列にする)だけなので、**開けることを先に言う**。
+ * ⚠ `tooBigToReadBackMessage` と混ぜない(あちらは「焼かなかった」、こちらは「全部焼いた」)。
+ * @param chars 焼いたファイルのおよその字数(≒ bytes)
  */
-export function tooBigToImportMessage(what: string, bytes: number): string {
+export function notImportableBackMessage(chars: number): string {
   return (
-    `${what}(${humanBytes(bytes)})を入れると、「PKC3 入り HTML」のファイル全体が、` +
-    `取り込み直すときに読める上限(約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))})を超えるため、入れていません。` +
-    '代わりに 左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
-    'こちらは大きさで止まりません。取り込み直すこともできます。'
+    `この PKC3 入り HTML(約 ${humanBytes(chars)})は開けますが、PKC3 に取り込み直せないことがあります` +
+    `(取り込み直すときに読める上限は約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))}です)。` +
+    'データを移すときは、左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
+    'こちらは大きさで止まりません。'
   );
 }
