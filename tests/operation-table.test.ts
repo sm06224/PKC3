@@ -191,6 +191,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   ゴミ箱・選択 3 / 検索・置換 3 / 2 ペイン 1 / 表示の絞り 2 / 保存領域 2 / 連絡先 2 / お知らせ 1 / アプリ 1 / 取り込み 1 / 履歴 1。
    *   **残した 3 件**(「高」だが撃てない):`insert-diagram` / `insert-icon`(打っている場所に入れるので、一覧を閉じた直後に位置が先頭へ戻って
    *   本文の先頭に入る ── 実ブラウザで測った)/ `dual-delete`(`filer-trash` が同じ実体を通している)。
+   * ⚠ **2026-10-12(#582 段③ 第 3 群)で、残した 3 件のうち `insert-diagram` / `insert-icon` の 2 件を登記して在庫から抜いた** ──
+   *   一覧を開いたときの範囲を戻してから押す経路(`openPaletteFor`)を足したので撃てる。`dual-delete` はいまも同じ理由で残る。
    */
   /**
    * ⚠ **2026-10-11(#582 段③ 第 1 群)で、「高」のうち 1 件だけ登記しなかった** ── 「選択範囲をコピー」(`copy-selection-md`)。
@@ -260,7 +262,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
   'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
   'force-release', 'format-text', 
-  'hide-revision-preview', 'insert-diagram', 'insert-icon', 'install-office-pack',
+  'hide-revision-preview', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
@@ -806,12 +808,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#855 段 D): 予定の面の「予定を .ics で書き出す」(`export-schedule-ics`)で受け手 +1 ── 登記は増えない
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる `insert-diagram` / `insert-icon` の 2 件を `KEY_COMMANDS` へ登記した ──
+      //   受け手は既に在った(押し口は書式の帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。
       total: 418,
       receivers: 352,
-      registered: 157,
-      both: 91,
+      registered: 159,
+      both: 93,
       outsideActionsTable: 66,
-      unregistered: 261,
+      unregistered: 259,
     });
   });
 
@@ -865,8 +869,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-11: 行のメニューが 20 → 22(`copy-entry-link` / `copy-asset-link`)、鍵が 83 → 84(`copy-entry-link`。鍵の既定は持たない)
     // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件を登記(`add-tag` ほか)で `key` 84 → 102(鍵の既定は持たない)
     // ⚠ 2026-10-11(#582 段③ 第 2 群): 「高」の 26 件を登記(`run-sql` / `start-timer` / `show-trash` ほか)で `key` 102 → 128(鍵の既定は持たない)
+    // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる 2 件(`insert-diagram` / `insert-icon`)を登記で `key` 128 → 130(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 128,
+      key: 130,
       entry: 22,
       body: 3,
       collection: 2,

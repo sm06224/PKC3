@@ -10,7 +10,7 @@
  *  ④ **字は画面のボタンの字と同じ**(source から引く ── 期待値を手で書かない)。
  *  ⑤ **鍵は付けない**・命令 id は押しボタンの `data-pkc-action` と同じ綴り。
  *  ⑥ **特例 2 件**:`open-system-notices`(押しボタンが無い ── ヘルプの押し口と同じ実体)/ `dual-tab-add`(焦点の側)。
- *  ⑦ **足さなかった 3 件**は登記されていない(実ブラウザで撃てないと測った理由が消えるまで)。
+ *  ⑦ **足さなかった 1 件**(第 3 群で他の 2 件は登記した)は登記されていない(実ブラウザで撃てないと測った理由が消えるまで)。
  */
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -170,8 +170,10 @@ describe('第 2 群 26 件の登記(#582 段③)', () => {
     expect(new Set(KEY_COMMANDS.map((c) => c.id)).size).toBe(KEY_COMMANDS.length);
   });
 
-  it('⑦ 足さなかった 3 件は登記していない(撃てないと測った理由が残っている間は足さない)', () => {
-    for (const id of ['insert-diagram', 'insert-icon', 'dual-delete']) {
+  it('⑦ 足さなかった 1 件は登記していない(撃てないと測った理由が残っている間は足さない)', () => {
+    // ⚠ 2026-10-12(第 3 群):`insert-diagram` / `insert-icon` は、一覧を開いたときの範囲を戻す経路を足して登記した
+    //   (`palette-scene-batch3.test.ts`)。残るのは `dual-delete`(`filer-trash` が同じ実体を通している)だけ。
+    for (const id of ['dual-delete']) {
       expect(findCommand(id), `${id} を登記した(理由は operation-unregistered 表)`).toBeNull();
       expect(SHORTCUT_BUTTON[id], `${id} の受け手を足した`).toBeUndefined();
     }

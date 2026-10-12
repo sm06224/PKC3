@@ -5089,6 +5089,9 @@ export function commandRowsFor(
   ).filter((r) => r.id !== 'open-palette');
 }
 
+/** 一覧を開いている間に、書き込む欄が組み直されたとき(記法 / 本文の欄へ当てる命令 / 打っている場所に入れる命令で共通)。 */
+const FIELD_CHANGED = '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)';
+
 /**
  * 🔴 **操作を名前で探す面を開く**(#425 段①)。
  *
@@ -5139,6 +5142,29 @@ export function openPaletteFor(
     if (picked === null) return;
     // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
     /**
+     * 🔴 **「打っている場所に入れる」操作は、開いたときの範囲を戻してから押す**(#582 段③ 第 3 群)。
+     *
+     * ⚠ 一覧を閉じた直後の欄は、器が焦点を返す瞬間に選択が `0,0` へ戻っている(上の `range` の注釈と同じ事象)。
+     *   画面のボタン(日付 / ノートリンク / テンプレート / 図 / アイコン)は押した瞬間の `selectionStart` を読むので、
+     *   戻さずに押すと**本文の先頭に入る**。実ブラウザで、`hello world` の 5 字目で一覧から「日付を入れる」を呼んだら
+     *   `@2026-10-12hello world` になった(1 面の行・2 列の欄とも。`insert-date` / `insert-snippet` は第 1 群から登記済みで、同じ穴を持っていた)。
+     * 🔑 戻すのは**押す前の 1 回だけ**でよい ── 日付 / ノート / テンプレート / 図 / アイコンは、押した瞬間に範囲を控えてから
+     *   自分の小窓を開く(小窓の後に戻すのは各自の仕事。`at` を握っている)ので、小窓をまたいでも先頭には入らない。
+     * ⚠ 控えた欄が消えていたら、押さずに理由を出す(組み直された別の欄の先頭へ入れない ── 下の記法と同じ門)。
+     * ⚠ 集合は `CARET_TOOLS` の 1 本(判定を 2 か所に持たない)。
+     */
+    if (target !== null && range !== null && CARET_TOOLS.has(picked)) {
+      if (!target.isConnected) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
+        return;
+      }
+      /**
+       * ⚠ 焦点は戻さない(`EDITOR_RUN` の経路と違う所)── 器が閉じるときに既に返しており、各ボタンは挿す前に自分で
+       *   `focus()` する。ここに `focus()` を足しても変異試験で SURVIVED(unit・実ブラウザの両方)だったので、書かない。
+       */
+      target.setSelectionRange(range.start, range.end);
+    }
+    /**
      * ⚠ **この 2 行は「正しさ」を守っていない ── 意図を書くための門である**
      *   (2026-08-26、変異試験 P7 / P9 が SURVIVED で教えた)。
      *   ① 全域で当たった命令は `FORMAT_OF` に載っていないので、`return` を外しても
@@ -5166,10 +5192,7 @@ export function openPaletteFor(
      */
     if (target === null) return;
     if (!target.isConnected) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)',
-      });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
       return;
     }
     /**
@@ -12613,10 +12636,8 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    * 🔴 **名前で呼べなかった「高」の操作 第 2 群**(#582 段③。第 1 群と同じ作法 ── 命令 id = 押しボタンの
    *   `data-pkc-action`、受け手は画面のボタンそのもの)。⚠ 全部、押した点から何も読まない
    *   (`ACTIONS` の受け手を 1 件ずつ読んで確かめた:読むのは「ボタン自身の属性」か「`root` / 親から引く欄」だけ)。
-   * ⚠ 見送った 3 件は `docs/development/operation-unregistered-2026-10.md` に理由つきで残す:
-   *   `insert-diagram` / `insert-icon` は**打っている場所(キャレット)に入れる**ので、一覧を閉じた直後の位置が先頭(0,0)に戻って
-   *   本文の先頭に入る(実ブラウザで測った)── 範囲を控えて戻す経路(`EDITOR_RUN`)を通さない限り撃てない。
-   *   `dual-delete` は `filer-trash`(鍵あり・2 ペインでも効く)が同じ実体を通している。
+   * ⚠ 見送った 3 件のうち `insert-diagram` / `insert-icon` は第 3 群(下)で足した。残りの `dual-delete` は
+   *   `filer-trash`(鍵あり・2 ペインでも効く)が同じ実体を通している(`docs/development/operation-unregistered-2026-10.md`)。
    */
   'renumber-lists': '[data-pkc-action="renumber-lists"]',
   'sort-tasks': '[data-pkc-action="sort-tasks"]',
@@ -12644,6 +12665,13 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'add-url-tile': '[data-pkc-action="add-url-tile"]',
   'pc-pick-folder': '[data-pkc-action="pc-pick-folder"]',
   'hide-history': '[data-pkc-action="hide-history"]',
+  /**
+   * 🔴 **第 3 群:打っている場所に入れる 2 件**(#582 段③)。第 2 群では「一覧を閉じた直後に位置が先頭へ戻る」ので見送った。
+   *   いまは `openPaletteFor` が開いたときの範囲を戻してから押す(`CARET_TOOLS` の物は全部)ので撃てる。
+   *   ⚠ 受け手は画面のボタンそのもの(`insert-date` などと同じ)。選んだ範囲があれば図は囲み、無ければ種類を聞く(ボタンの作り)。
+   */
+  'insert-diagram': '[data-pkc-action="insert-diagram"]',
+  'insert-icon': '[data-pkc-action="insert-icon"]',
 };
 
 /**
