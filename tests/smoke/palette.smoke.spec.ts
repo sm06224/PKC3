@@ -241,6 +241,18 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   expect(linked.startsWith('hello'), `リンクが先頭に入った: ${linked}`).toBe(true);
   expect(linked.endsWith('world'), `後ろの字が動いた: ${linked}`).toBe(true);
   expect(linked.length, 'リンクが入っていない').toBeGreaterThan('hello world'.length);
+  // マウスで「操作を探す」のボタンを押して開く(焦点が欄からボタンへ移る道)── 開いたときの caret の位置へ入る
+  await caretAt('hello world', 5);
+  await clickReal(page, '[data-pkc-action="open-palette"]');
+  await expect(dialog, 'マウスで操作を探すが開かない').toBeVisible();
+  await page.locator('[data-pkc-field="palette-filter"]').fill('アイコンを入れる');
+  await expect(rowOf('insert-icon'), 'マウスで開くと、本文を打っている間なのに押せない').toBeEnabled();
+  await page.keyboard.press('Enter');
+  const mouseIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
+  const mouseIconName = await mouseIcon.getAttribute('data-pkc-icon-name');
+  await mouseIcon.click();
+  await expect(dialog).toBeHidden();
+  await expect(liveRow, 'マウスで開いたら、アイコンが本文の先頭に入った').toHaveValue(`hello:${mouseIconName}: world`);
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   /**
@@ -541,6 +553,26 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
     '別のウィンドウを開いたら編集が終わった(読む形に戻った)',
   ).toHaveCount(0);
   await manualWin.close();
+
+  /**
+   * 🔴 **2 列の編集でも、マウスで操作を探すを開いて「アイコンを入れる」を呼ぶと、打っていた場所に入る**(#582 段③ 第 3 群)。
+   * ⚠ 同じ起動の続き。ボタンを押すと焦点が欄からボタンへ移る道(キーで開く道は上で見た)。
+   */
+  await ta.fill('hello world');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
+  await clickReal(page, '[data-pkc-action="open-palette"]');
+  await expect(dialog, 'マウスで操作を探すが開かない(2 列)').toBeVisible();
+  await filter.fill('アイコンを入れる');
+  await expect(
+    page.locator('[data-pkc-field="palette-row"][data-pkc-command="insert-icon"]'),
+    'マウスで開くと押せない(2 列)',
+  ).toBeEnabled();
+  await page.keyboard.press('Enter');
+  const colIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
+  const colIconName = await colIcon.getAttribute('data-pkc-icon-name');
+  await colIcon.click();
+  await expect(dialog).toBeHidden();
+  await expect(ta, '2 列でマウスで開いたら、アイコンが本文の先頭に入った').toHaveValue(`hello:${colIconName}: world`);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -5133,6 +5133,17 @@ export function openPaletteFor(
    */
   const range =
     target === null ? null : { start: target.selectionStart, end: target.selectionEnd };
+  /**
+   * 🔴 **範囲を戻す先は、焦点が欄に無くても引く**(#582 段③ 第 3 群の着地前レビュー)。
+   *
+   * ⚠ 「操作を探す」のボタンをマウスで押すと、焦点はボタンへ移る(`mousedown` の既定を止めてあるが、押し方は他にも在る)。
+   *   そのとき `target` は `null` なので、戻さずに押すと**本文の先頭に入り、一覧は押せる顔のまま**だった。
+   * 🔑 開いた瞬間の欄の範囲は、焦点を失っても欄に残っている(`selectionStart` は焦点と無関係)── 帯のボタンを直接押したときと同じ欄・同じ範囲。
+   * ⚠ 記法(`target`)の「本文の欄に居るときだけ押せる」判定は変えない。ここは範囲を戻す先だけ。
+   */
+  const restoreField = target ?? formatTarget(root);
+  const restoreRange =
+    restoreField === null ? null : { start: restoreField.selectionStart, end: restoreField.selectionEnd };
   const rows = (query: string) => commandRowsFor(root, dispatcher, keymap, query, target);
   /**
    * 🔴 **「操作を探す」も、左の `>` と同じ「最近使った操作」を使う**(#274 Q3 = A)。⚠ 記録は 1 つ
@@ -5151,10 +5162,11 @@ export function openPaletteFor(
      * 🔑 戻すのは**押す前の 1 回だけ**でよい ── 日付 / ノート / テンプレート / 図 / アイコンは、押した瞬間に範囲を控えてから
      *   自分の小窓を開く(小窓の後に戻すのは各自の仕事。`at` を握っている)ので、小窓をまたいでも先頭には入らない。
      * ⚠ 控えた欄が消えていたら、押さずに理由を出す(組み直された別の欄の先頭へ入れない ── 下の記法と同じ門)。
-     * ⚠ 集合は `CARET_TOOLS` の 1 本(判定を 2 か所に持たない)。
+     * ⚠ 集合は `CARET_INSERT_TOOLS`(`CARET_TOOLS` から全文の道具を除いた物。1 本)。全文の道具(番号 / 完了項目)は範囲を読まず、
+     *   これまでどおり押す側が欄を引き直す(欄が消えていても断らない)。
      */
-    if (target !== null && range !== null && CARET_TOOLS.has(picked)) {
-      if (!target.isConnected) {
+    if (restoreField !== null && restoreRange !== null && CARET_INSERT_TOOLS.has(picked)) {
+      if (!restoreField.isConnected) {
         dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
         return;
       }
@@ -5162,7 +5174,7 @@ export function openPaletteFor(
        * ⚠ 焦点は戻さない(`EDITOR_RUN` の経路と違う所)── 器が閉じるときに既に返しており、各ボタンは挿す前に自分で
        *   `focus()` する。ここに `focus()` を足しても変異試験で SURVIVED(unit・実ブラウザの両方)だったので、書かない。
        */
-      target.setSelectionRange(range.start, range.end);
+      restoreField.setSelectionRange(restoreRange.start, restoreRange.end);
     }
     /**
      * ⚠ **この 2 行は「正しさ」を守っていない ── 意図を書くための門である**
@@ -13007,6 +13019,16 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * 🔴 **「操作を探す」から呼ぶとき、開いたときの範囲を戻してから押す命令**(#582 段③ 第 3 群)。
+ * 押した瞬間に欄の `selectionStart` を読んで、その位置へ入れる道具だけ。
+ * ⚠ 全文の道具(`renumber-lists` / `sort-tasks`)は範囲を読まない ── 戻す必要が無く、欄が消えていても押す側が引き直すので、断らない。
+ * ⚠ `format-text` は一覧に登記が無い(記法は `FORMAT_OF` の別の道)── 入れない。
+ */
+export const CARET_INSERT_TOOLS: ReadonlySet<string> = new Set(
+  [...CARET_TOOLS].filter((id) => id !== 'renumber-lists' && id !== 'sort-tasks' && id !== 'format-text'),
+);
+
+/**
  * 🔴 **記法を当てられる欄か**(#425 段②-b)。
  * ⚠ **欄の名前で見る**(面ではなく)── 2 列の本文と 1 面の行は別の面に在るが、
  *   どちらも記法を受ける。⚠ 題名は受けない(題名に太字を入れても意味が無い)。
@@ -13502,6 +13524,11 @@ export function bindActions(
     const el = (ev.target as HTMLElement | null)?.closest<HTMLElement>('[data-pkc-action]');
     const act = el?.getAttribute('data-pkc-action');
     if (act !== null && act !== undefined && CARET_TOOLS.has(act)) ev.preventDefault();
+    /**
+     * 🔴 **「操作を探す」のボタンも焦点を奪わない**(#582 段③ 第 3 群の着地前レビュー)。奪うと、開いたときの焦点が本文の欄でなくなり、
+     *   本文の欄に居るときだけ押せる記法・計算が灰色になる。押したあとの焦点は器が決める(閉じるとき、開いたときの欄へ返す)。
+     */
+    if (act === 'open-palette') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {
