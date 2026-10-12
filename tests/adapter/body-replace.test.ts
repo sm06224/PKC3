@@ -271,16 +271,31 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       expect(ta.value, '2 回目の置換が欄に出ない').toBe('ログ\n');
     });
 
-    it('🔴 探す語が畳んだ設定の行に当たっても、打つと置換後の設定の行が残る', () => {
+    it('🔴 探す語が畳んだ設定の行にだけ当たるときは、何も置換されず設定の行も動かない(#1579 Q1 = A)', () => {
       const { root, d } = editingWith(ATT + '\n説明\n', 'attachment');
       replaceAllIn(root, 'ast-1', 'ast-2');
-      const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
-      ta.value += 'X';
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-      const body = d.getState().openBody!.body;
-      expect(body, '畳んだ設定の行が古い値へ戻った').toContain('ast-2');
-      expect(body).not.toContain('ast-1');
-      expect(body.endsWith('説明\nX')).toBe(true);
+      expect(d.getState().openBody!.body, '見えない設定の行が書き換わった').toBe(ATT + '\n説明\n');
+      expect(d.getState().error ?? '', '0 件のはずが置換された顔').toContain('見つかりませんでした');
+    });
+
+    it('🔴 設定の行と説明の両方に探す語が在っても、説明だけが置換され、件数も説明の分だけ(#1579 Q1 = A)', () => {
+      const body = attachmentBody({ name: 'pdf-report.pdf', mime: 'application/pdf', size: 1, assetKey: 'ast-1' }) + '\npdf の説明 pdf\n';
+      const { root, d } = editingWith(body, 'attachment');
+      expect(body.toLowerCase().split('pdf').length - 1, '前提:設定の行にも当たる語').toBeGreaterThan(2);
+      replaceAllIn(root, 'pdf', 'PDF');
+      const after = d.getState().openBody!.body;
+      const head = foldAttachmentHead(body)!.head;
+      expect(after.startsWith(head), '設定の行が 1 byte でも動いた').toBe(true);
+      expect(after.slice(head.length)).toBe('PDF の説明 PDF\n');
+      expect(d.getState().error).toBe('2 件を置き換えました');
+    });
+
+    it('対照群:添付でない通常のノートは、先頭の情報の塊にも当たる(従来どおり)', () => {
+      const body = '---\ntags: pdf\n---\npdf 本文\n';
+      const { root, d } = editingWith(body, 'text');
+      replaceAllIn(root, 'pdf', 'PDF');
+      expect(d.getState().openBody!.body).toBe('---\ntags: PDF\n---\nPDF 本文\n');
+      expect(d.getState().error).toBe('2 件を置き換えました');
     });
 
     it('🔴 プレビューも置換後になる', async () => {
