@@ -29,6 +29,9 @@
  *     → できた PDF を開くと、付けた緑が絵に焼かれていて、外した物は無い → 保存した PDF のハイライトも外せる。
  *     上のバーは、窓が狭くて入りきらないとき 2 行になり、「ノートへ引用する」が切れない
  *
+ *   ⑤⁘ 別の PDF を足す(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を足すと一覧の最後に並び
+ *     (絵も出る)、保存ボタンが出る → 足したページを回して「別の PDF として保存」→ できた PDF は N+2 ページで、足した字が後ろに入り、向きも反映される
+ *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
  *   という**切り替えの前後**が本命なので、対照群(切)と本命(入)を同じ起動の中で続けて見る必要がある
  *   (別々に起動すると、同じ添付・同じノートでの差を見ていることにならない)。
@@ -41,10 +44,14 @@ import { clickReal, collectPageErrors, gotoApp } from './helpers';
 
 /**
  * 自作の PDF(`pages` 頁・Helvetica で `Hello page N marker<N>`)。xref の位置は組みながら数える。
+ * `opts.prefix` = 頁の字の目印の頭(既定 `marker` ── 足した PDF の字を元の PDF の字と見分けるとき `extra`)/
  * `opts.box` = 1 頁の大きさ(既定 400x400)/ `opts.outline` = しおりを 1 つ付ける(ページの編集の「引き継がれない物」の観測用)/
  * `opts.highlight` = 1 頁目の字に**他のアプリが付けた形**のハイライト(`/P` つき・外観なし)を 1 つ付ける(#275 段②-2c の「外す」の観測用)。
  */
-function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boolean; highlight?: boolean } = {}): Buffer {
+function buildPdf(
+  pages: number,
+  opts: { box?: [number, number]; outline?: boolean; highlight?: boolean; prefix?: string } = {},
+): Buffer {
   const [bw, bh] = opts.box ?? [400, 400];
   const objs: string[] = [];
   const kids: string[] = [];
@@ -67,7 +74,7 @@ function buildPdf(pages: number, opts: { box?: [number, number]; outline?: boole
     // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を足す:「split」+「match」。
     //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
-    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} marker${String(i + 1)}) Tj${split} ET`;
+    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} ${opts.prefix ?? 'marker'}${String(i + 1)}) Tj${split} ET`;
     const annots = opts.highlight && i === 0 ? ` /Annots [${String(annotObj)} 0 R]` : '';
     objs[pageObj] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(bw)} ${String(bh)}] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R${annots} >>`;
@@ -340,6 +347,9 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(item(3), 'Tab の止まり先がいまの頁でない').toHaveAttribute('tabindex', '0');
   await expect(item(2)).toHaveAttribute('tabindex', '-1');
   await win.focus('#hit-next');
+  // 上のバーで押せるのは「PDF を足す」(#275 結合)だけ ── 次の Tab で一覧へ入る
+  await win.keyboard.press('Tab');
+  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.getAttribute('data-thumb')), 'Tab がいまの頁の項目に着かない').toBe('3');
   await win.keyboard.press('ArrowDown');
@@ -978,6 +988,92 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await enc.close();
   expect(edErrors, '編集の窓で例外が出た').toEqual([]);
 
+  // ── ⑤⁘ 別の PDF を足す(#275 結合)── 3 ページの PDF に、自作の 2 ページを足して保存 → 5 ページの新しい添付 ──
+  //    足す PDF の字は `extra<頁>`(元の `marker<頁>` と見分ける)。新しい起動は足さない(同じ起動の中で通す)。
+  const MG_NAME = '結合.pdf';
+  const MG_OUT = '結合 (編集).pdf';
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: MG_NAME,
+    mimeType: 'application/pdf',
+    buffer: buildPdf(3, { box: [300, 400] }),
+  });
+  await clickReal(page, entryNamed(MG_NAME));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', MG_NAME);
+  await expect(entryNamed(MG_OUT), '足す前に編集後の添付がある(観測が空振り)').toHaveCount(0);
+  const [mg] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  const mgErrors: string[] = [];
+  mg.on('pageerror', (e) => mgErrors.push(e.message));
+  await mg.setViewportSize({ width: 1100, height: 900 });
+  await expect(mg.locator('[data-pkc-field="pdf-page-thumb"]')).toHaveCount(3, { timeout: 20_000 });
+  await expect(mg.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready');
+  const mgAdd = mg.locator('#append-pdf');
+  await expect(mgAdd).toHaveText('PDF を足す');
+  await expect(mgAdd).toBeEnabled();
+  await expect(mgAdd).toHaveAttribute(
+    'title',
+    '別の PDF を選んで、そのページをこの PDF の後ろに足します。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
+  );
+  const mgThumbs = mg.locator('[data-pkc-field="pdf-page-thumb"]');
+  // 読めない PDF / パスワード付きは断る ── 窓の下に理由が出て、一覧も保存ボタンも変わらない
+  await mg.setInputFiles('#append-file', { name: '壊れ.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a pdf') });
+  await expect(mg.locator('#status')).toContainText('PDF として読めないため足せません。何も変えていません', { timeout: 15_000 });
+  await mg.setInputFiles('#append-file', {
+    name: 'パスワード付き.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(ENCRYPTED_PDF_BASE64, 'base64'),
+  });
+  await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は足せません。何も変えていません', { timeout: 15_000 });
+  await expect(mgThumbs, '断ったのに一覧が増えた').toHaveCount(3);
+  await expect(mg.locator('#edit-save'), '断ったのに保存ボタンが出ている').toBeHidden();
+  // 足す ── ボタンから選ぶ窓が開き、選んだ 2 ページが一覧の最後に並ぶ
+  const [chooser] = await Promise.all([mg.waitForEvent('filechooser', { timeout: 10_000 }), clickReal(mg, '#append-pdf')]);
+  expect(await chooser.isMultiple(), '1 つだけ選ぶ').toBe(false);
+  await chooser.setFiles({
+    name: '足す.pdf',
+    mimeType: 'application/pdf',
+    buffer: buildPdf(2, { box: [300, 400], prefix: 'extra' }),
+  });
+  await expect(mgThumbs, '足した 2 ページが一覧に並ばない').toHaveCount(5, { timeout: 15_000 });
+  await expect(mg.locator('#status')).toContainText('「足す.pdf」の 2 ページを後ろに足しました');
+  await expect(mg.locator('#edit-save'), '足したのに保存ボタンが出ない').toBeVisible();
+  await expect(mg.locator('#edit-note')).toContainText('編集中(5 / 5 ページ)');
+  await expect
+    .poll(() => mg.locator('[data-pkc-field="pdf-page-thumb-image"]').count(), { message: '足したページの絵が出ない', timeout: 20_000 })
+    .toBe(5);
+  expect(
+    await mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-thumb'))),
+  ).toEqual(['1', '2', '3', '4', '5']);
+  // 足したページも、元のページと同じに回せる(最後の 1 枚を右へ 90°)
+  await clickReal(mg, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="5"]');
+  await clickReal(mg, '#edit-save');
+  await expect(mg.locator('#status'), '保存の結果が窓に出ない').toContainText('保存しました', { timeout: 20_000 });
+  await expect(entryNamed(MG_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
+  await expect(mg.locator('#edit-save'), '保存した後も保存ボタンが残っている').toBeHidden();
+  await mg.close();
+  expect(mgErrors, '足す窓で例外が出た').toEqual([]);
+  // できた PDF: 5 ページ ── 元の 3 ページの後ろに足した 2 ページ。足した最後の 1 枚は横長
+  await clickReal(page, entryNamed(MG_OUT));
+  await expect(page.locator('[data-pkc-action="view-asset"]')).toHaveAttribute('data-pkc-asset-name', MG_OUT);
+  const [mo] = await Promise.all([
+    context.waitForEvent('page', { timeout: 15_000 }),
+    clickReal(page, '[data-pkc-action="view-asset"]'),
+  ]);
+  await expect(mo.locator('#pagecount'), '足した PDF のページ数が N+2 でない').toHaveText('/ 5', { timeout: 20_000 });
+  for (const [n, m] of [[1, 'marker1'], [3, 'marker3'], [4, 'extra1'], [5, 'extra2']] as const) {
+    await mo.locator(`.page[data-page="${String(n)}"]`).scrollIntoViewIfNeeded();
+    await expect(mo.locator(`.page[data-page="${String(n)}"] .textLayer`), `${String(n)} ページ目に ${m} が入っていない`).toContainText(m, {
+      timeout: 20_000,
+    });
+  }
+  const mo5 = await mo.locator('.page[data-page="5"]').boundingBox();
+  expect(mo5?.width ?? 0, '足したページを回したのに、できた PDF で横長でない').toBeGreaterThan(mo5?.height ?? 0);
+  const mo4 = await mo.locator('.page[data-page="4"]').boundingBox();
+  expect(mo4?.height ?? 0, '回していない足したページまで回っている').toBeGreaterThan(mo4?.width ?? 0);
+  await mo.close();
+
   // ── ⑤⁗ ハイライト(#275 段②-2b/c)── 字を選んで色を付ける → 付いたハイライトを押して外す → 保存 → 開き直すと反映されている ──
   //    fixture は自作の 3 ページ。1 頁目の 1 行目に**他のアプリが付けた形**のハイライト(`/P` つき)が 1 つ付いている。
   const HL_NAME = 'ハイライト.pdf';
@@ -1017,7 +1113,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const id of ['yellow', 'green', 'blue', 'pink']) await expect(swatch(id)).toBeDisabled();
   await expect(hw.locator('#edit-save')).toBeHidden();
   // 帯に収まらないときは 2 行に折り返し、右端の「ノートへ引用する」も「ハイライト」も窓の外へ切れず、読む面に重ならない
-  //   (既定の窓の幅 1000 でも、広い窓 1400 でも。1400 では 1 行のまま ── 折り返しは要るときだけ)
+  //   (既定の窓の幅 1000 でも、広い窓 1600 でも。1600 では 1 行のまま ── 折り返しは要るときだけ)
   const barGeometry = async (): Promise<{ right: number; barBottom: number; scrollerTop: number; barH: number; width: number }> =>
     hw.evaluate(() => {
       const r = (id: string): DOMRect => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
@@ -1032,7 +1128,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const [w, wraps] of [
     [1000, true],
     [1100, true],
-    [1500, false],
+    [1600, false], // 「PDF を足す」(#275 結合)を足したぶん、1 行に収まる幅が 1500 から 1550 前後へ広がった(実測)
   ] as const) {
     await hw.setViewportSize({ width: w, height: 900 });
     await expect

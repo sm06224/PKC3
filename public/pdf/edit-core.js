@@ -9,6 +9,7 @@
  * (文字の流れ)が file に残る**(2026-10-10 実測 ── 全 stream を展開すると外したページの字がそのまま在った)。
  * user は「外した」ページが消えたと思って人に渡すので、**A は使わない**。
  * 並べ替えと回すだけでも **B 1 本**にする(どちらの道を通ったかで引き継がれる物が変わると、規則が読めない)。
+ * 🔑 足した PDF(#275 結合)も**同じ B**: 文書ごとに残すページだけを同じ新しい文書へ写す(通し番号は `checkSources`)。
  * ⚠ B は文書全体の設定(しおり・入力欄・電子署名)を引き継がない ── 画面が保存の前に 1 行で言う(`page-edit.js` の `noteLine`)。
  * 引き継ぐのは題名・作成者・件名・キーワード・作成日時(`copyInfo`)。
  *
@@ -72,9 +73,12 @@
    */
   function checkJob(job, pageCount) {
     if (!job || !Array.isArray(job.order) || job.order.length < 1) throw fail(CODES.badJob);
+    var sources = checkSources(job.sources, pageCount);
     var seen = {};
     job.order.forEach(function (p) {
-      if (!Number.isInteger(p) || p < 1 || p > pageCount || seen[p]) throw fail(CODES.badJob);
+      if (!Number.isInteger(p) || p < 1 || seen[p]) throw fail(CODES.badJob);
+      // 元の PDF のページ、または足した PDF のページ(`sources` が教える範囲)だけ
+      if (p > pageCount && !sources.some(function (s) { return p >= s.first && p < s.first + s.count; })) throw fail(CODES.badJob);
       seen[p] = true;
     });
     var rotate = {};
@@ -85,17 +89,41 @@
       if (!seen[p] || !Number.isInteger(d) || d % 90 !== 0) throw fail(CODES.badJob);
       rotate[p] = ((d % 360) + 360) % 360;
     });
+    var highlights = checkHighlights(job.highlights, seen);
+    var removals = checkRemovals(job.removals, seen);
+    // ハイライトの付け外しは元の PDF のページだけ(足した PDF のページには付けも外しもしない)
+    if (highlights.concat(removals).some(function (x) { return x.page > pageCount; })) throw fail(CODES.badJob);
     return {
       order: job.order.slice(),
       rotate: rotate,
-      highlights: checkHighlights(job.highlights, seen),
-      removals: checkRemovals(job.removals, seen),
+      highlights: highlights,
+      removals: removals,
+      sources: sources,
     };
+  }
+
+  /**
+   * 足した PDF の範囲 `[{ first, count }]`(#275 結合)。ページ番号は**通し番号**: 元の PDF が 1〜`pageCount`、
+   * 足した 1 つ目がその次から `count` ページ、2 つ目がさらにその次から ……。範囲は昇順・隙間なく、`pageCount` の次から始まる。
+   */
+  function checkSources(list, pageCount) {
+    if (list === undefined || list === null) return [];
+    if (!Array.isArray(list) || list.length > MAX_SOURCES) throw fail(CODES.badJob);
+    // ⚠ 範囲の間が空くのは正しい(足した PDF のページを全部外した / 「変更を元に戻す」の後に足し直した ── その PDF は送らない)。
+    //   求めるのは「元の PDF の後ろ・前から順・重ならない」だけ(ページ番号から属する PDF を引くので、間は困らない)
+    var next = pageCount + 1;
+    return list.map(function (s) {
+      if (!s || !Number.isInteger(s.first) || !Number.isInteger(s.count) || s.count < 1 || s.first < next) throw fail(CODES.badJob);
+      next = s.first + s.count;
+      return { first: s.first, count: s.count };
+    });
   }
 
   /** 上限(1 つの依頼で付ける・外すハイライトの数、1 つが持つ行の数)。手違いの検出であって、使い方の上限ではない。 */
   var MAX_MARKS = 5000;
   var MAX_QUADS = 2000;
+  /** 足せる PDF の数(手違いの検出)。 */
+  var MAX_SOURCES = 200;
 
   function isNum(n) {
     return typeof n === 'number' && isFinite(n);
@@ -653,39 +681,68 @@
   }
 
   /**
-   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate, highlights?, removals? }`
+   * 新しい PDF を作る。@param bytes 元の PDF @param job `{ order, rotate, sources?, highlights?, removals? }`
+   * @param extras 足した PDF の bytes(`job.sources` と同じ数・同じ順 ── 各 PDF のページ数は `count` と一致すること)
    * @returns `Uint8Array`(⚠ 呼び側が transfer する。大きさぴったりの buffer)
+   *
+   * 🔴 **足した PDF も、元の PDF と同じ道**(新しい文書へ、残すページだけを `copyPages` で写す)を通る ── 文書ごとに
+   * リンクの付け替えを済ませて写し、最後に `order` の順に並べる。外したページの中身・辿れない物は、
+   * 全部の文書をまとめた出力に対して最後の門(`verify`)が断る。
    */
-  async function build(PDFLib, bytes, job) {
+  async function build(PDFLib, bytes, job, extras) {
     var src = await loadSource(PDFLib, bytes);
     var plan = checkJob(job, src.getPageCount());
-    // 🔴 外すと言われたハイライトを、先に残すページの並びから抜く(`prepareLinks` が注釈の位置を数える前に)
+    var more = Array.isArray(extras) ? extras : [];
+    if (more.length !== plan.sources.length) throw fail(CODES.badJob);
+    // 文書 0 = 元の PDF / 文書 1〜 = 足した PDF。`docs[d].first` = 通し番号の先頭
+    var docs = [{ doc: src, first: 1, count: src.getPageCount() }];
+    for (var d = 0; d < more.length; d += 1) {
+      var one = await loadSource(PDFLib, more[d]);
+      if (one.getPageCount() !== plan.sources[d].count) throw fail(CODES.badJob);
+      docs.push({ doc: one, first: plan.sources[d].first, count: plan.sources[d].count });
+    }
+    function where(p) {
+      for (var k = docs.length - 1; k >= 0; k -= 1) if (p >= docs[k].first) return { d: k, idx: p - docs[k].first };
+      return { d: 0, idx: p - 1 };
+    }
+    // 🔴 外すと言われたハイライトを、先に残すページの並びから抜く(`prepareLinks` が注釈の位置を数える前に。元の PDF だけ)
     dropHighlights(PDFLib, src, plan.removals);
+    // 文書ごとに、残すページ(出力の順)
+    var keptBy = docs.map(function () {
+      return [];
+    });
+    plan.order.forEach(function (p) {
+      var w = where(p);
+      keptBy[w.d].push(w.idx);
+    });
     // 🔴 `copyPages` の前に、リンクの注釈が持つページの参照を扱う(でないと外したページが孤立して出力に入る)
-    var links = prepareLinks(
-      PDFLib,
-      src,
-      plan.order.map(function (p) {
-        return p - 1;
-      }),
-    );
+    var links = docs.map(function (e, k) {
+      return keptBy[k].length === 0 ? null : prepareLinks(PDFLib, e.doc, keptBy[k]);
+    });
     var out = await PDFLib.PDFDocument.create();
     copyInfo(src, out);
-    var pages = await out.copyPages(
-      src,
-      plan.order.map(function (p) {
-        return p - 1;
-      }),
-    );
-    pages.forEach(function (page, i) {
-      var turn = plan.rotate[plan.order[i]] || 0;
+    var copied = [];
+    for (var c = 0; c < docs.length; c += 1) {
+      copied.push(keptBy[c].length === 0 ? [] : await out.copyPages(docs[c].doc, keptBy[c]));
+    }
+    var cursor = docs.map(function () {
+      return 0;
+    });
+    var pages = plan.order.map(function (p) {
+      var w = where(p);
+      var page = copied[w.d][cursor[w.d]];
+      cursor[w.d] += 1;
+      var turn = plan.rotate[p] || 0;
       if (turn !== 0) {
         var now = page.getRotation().angle;
         page.setRotation(PDFLib.degrees((((now + turn) % 360) + 360) % 360));
       }
       out.addPage(page);
+      return page;
     });
-    links.restore(out, pages);
+    links.forEach(function (l, k) {
+      if (l !== null) l.restore(out, copied[k]);
+    });
     // 付けるハイライトは、写した後の出力のページへ(`restore` が注釈の位置を使い終えた後)
     addHighlights(PDFLib, out, pages, plan);
     // 🔴 共有された Resources に乗って来た、選ばなかったページの部品を落とす(上の注釈)
