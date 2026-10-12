@@ -15,7 +15,13 @@
  *   (CLAUDE.md §2「どの test からも実行されない file に、判断を書かない」)。
  */
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  TRASH_OFFER_MS,
+  clearTrashOffer,
+  offerTrashUndo,
+  takeTrashUndo,
+} from '../../src/adapter/ui/render/trash-undo';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import {
   paintStatusCreate,
@@ -312,5 +318,71 @@ describe('保存が止まった断り書きの隣の「ノートの保存デー�
     } finally {
       HTMLElement.prototype.scrollIntoView = original;
     }
+  });
+});
+
+/**
+ * 🔴 **ゴミ箱へ移した直後の「元に戻す」**(#1087 流れ 29)。
+ *
+ * ① 出ている 1 行が移した知らせそのものなら出て、押し先は `undo-trash`・字は「元に戻す」
+ * ② ⚠ 別の知らせに上書きされたら畳む(「コピーしました」の隣に残ると、コピーが戻ると読まれる)
+ * ③ ⚠ 7 秒で降ろす(知らせごと)
+ * ④ ⚠ 材料を持たなければ、同じ字が出ていても出さない(押しても何も起きない口を作らない)
+ */
+describe('知らせの隣の「元に戻す」── ゴミ箱へ移した直後(#1087 流れ 29)', () => {
+  const none = { lastMove: null, notice: null, lastAppend: null, noticeOpen: null };
+  const undoBtn = (): HTMLElement => {
+    const b = document.createElement('button');
+    b.hidden = true;
+    b.setAttribute('data-pkc-action', 'undo-move');
+    return b;
+  };
+  const dispatcherWith = (): Dispatcher => {
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
+    return d;
+  };
+
+  it('🔴 ① 移した知らせなら出て、undo-trash へ繋がる。② 別の知らせが来たら畳む', () => {
+    clearTrashOffer();
+    const d = dispatcherWith();
+    offerTrashUndo(d, [{ lid: 'a', title: '猫' }]);
+    const line = d.getState().notice ?? '';
+    expect(line).toBe('「猫」をゴミ箱へ移しました');
+    const b = undoBtn();
+    paintStatusUndo(b, { ...none, notice: line }, line);
+    expect(b.hidden, '戻す口が出ない(片道になっている)').toBe(false);
+    expect(b.getAttribute('data-pkc-action'), '押すと別の物が戻る').toBe('undo-trash');
+    expect(b.textContent).toBe('元に戻す');
+    paintStatusUndo(b, { ...none, notice: 'コピーしました' }, 'コピーしました');
+    expect(b.hidden, '別の知らせの隣に残っている').toBe(true);
+    clearTrashOffer();
+  });
+
+  it('⚠ ③ 7 秒で知らせごと降ろす', () => {
+    vi.useFakeTimers();
+    try {
+      clearTrashOffer();
+      const d = dispatcherWith();
+      offerTrashUndo(d, [
+        { lid: 'a', title: '猫' },
+        { lid: 'b', title: '犬' },
+      ]);
+      expect(d.getState().notice, '複数は件数で言う').toBe('2 件をゴミ箱へ移しました');
+      vi.advanceTimersByTime(TRASH_OFFER_MS - 1);
+      expect(d.getState().notice, '早すぎる').not.toBeNull();
+      vi.advanceTimersByTime(2);
+      expect(d.getState().notice, '知らせが居残っている').toBeNull();
+      expect(takeTrashUndo(), '降ろした後も戻す材料を持っている').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⚠ ④ 材料が無いのに同じ字が出ていても、口は出さない', () => {
+    clearTrashOffer();
+    const b = undoBtn();
+    paintStatusUndo(b, { ...none, notice: '「猫」をゴミ箱へ移しました' }, '「猫」をゴミ箱へ移しました');
+    expect(b.hidden).toBe(true);
   });
 });

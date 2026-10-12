@@ -4,11 +4,12 @@
  * 削除(確認)/ rename。binder → dispatcher → renderer → fake store を通す。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
-import { answerDialog } from './dialog-helper';
+import { openDialog } from './dialog-helper';
+import { clearTrashOffer, currentTrashOffer } from '../../src/adapter/ui/render/trash-undo';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
@@ -70,6 +71,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   /** 🔴 題名だけの書換(#178)。⚠ **本物の意味論を真似る** ── 本文に触らない。 */
   const renamed: Array<{ lid: string; title: string }> = [];
   const reordered: Array<{ lid: string; entryOrder: number }> = [];
+  const trash: Record<string, string> = {};
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => store[lid] ?? null,
@@ -90,7 +92,18 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
     },
     deleteEntry: async (lid) => {
       deleted.push(lid);
+      // 🔑 本物と同じく、消した本文はゴミ箱(履歴)に残る ── 「元に戻す」の材料
+      trash[lid] = store[lid] ?? '';
       delete store[lid];
+    },
+    // ⚠ 本物の意味論:ゴミ箱 = 「entries に居ない entry_lid」。復元(persist)で居るようになれば一覧から消える
+    listTrash: async () =>
+      Object.keys(trash)
+        .filter((lid) => !(lid in store))
+        .map((lid) => ({ id: `rev-${lid}`, entry_lid: lid, created_at: null, title: `t-${lid}`, archetype: 'text' })),
+    getRevision: async (revId) => {
+      const lid = revId.replace(/^rev-/, '');
+      return lid in trash ? { body: trash[lid]!, title: `t-${lid}`, archetype: 'text' } : null;
     },
     setEntryParent: async () => {},
   });
@@ -283,14 +296,16 @@ describe('create (P3-7a)', () => {
 
 describe('delete (P3-7a)', () => {
   /**
-   * 🔴 **確認はアプリ自身のダイアログになった**(#299 段②、2026-08-21)。
-   * ⚠ ここに在った `setConfirm`(`window.confirm` の差し替え)は**もう効かない** ──
-   *   native は 1 度も呼ばれない。押す口はページの中に在るので、`answerDialog` で押す。
-   * 🔑 これが差し替えの目的である ── 確認の枝は、いままで unit から
-   *   **1 度も実行されていなかった**(happy-dom に `confirm` が無いため)。
+   * 🔴 **確認は出さず、移したあとに「元に戻す」を出す**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q3)。
+   * ⚠ かつての 5 本(確認 OK / 待っている間に編集が始まる / 対象が消える / キャンセル …)は、
+   *   確認という**窓が無くなった**ので成り立たない ── 窓の間に前提が崩れる経路ごと消えた。
+   *   代わりに「押した瞬間の前提(編集中)」と「戻せること」を見る。
    */
+  // ⚠ 戻す材料は module の 1 つ(直前の 1 回だけ持つ)── it をまたいで持ち越さない
+  beforeEach(() => clearTrashOffer());
+  const undoOffer = async () => currentTrashOffer();
 
-  it('確認 OK で削除 ── 行が消え、選択が隣へ移り、store の掃除 op が走る', async () => {
+  it('🔴 押すと確認なしで消え、「『題名』をゴミ箱へ移しました」が出て、選択が隣へ移り、store の掃除 op が走る', async () => {
     const { d, q, qa, deleted } = setup(
       [meta('a', 1), meta('b', 2), meta('c', 3)],
       { a: 'A', b: 'B', c: 'C' },
@@ -298,92 +313,70 @@ describe('delete (P3-7a)', () => {
     q<HTMLElement>('[data-pkc-entry="b"]')!.click();
     await tick();
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
-    await answerDialog('ok');
     await tick(20);
+    expect(openDialog(), '確認が出ている(出さない裁定)').toBeNull();
     expect(qa('[data-pkc-entry="b"]')).toHaveLength(0);
     expect(deleted).toEqual(['b']);
-    // 同 index の次(c)へ選択が移り、body が読まれている
     expect(d.getState().selectedLid).toBe('c');
     expect(d.getState().openBody?.body).toBe('C');
+    expect(d.getState().notice, '移したことを言っていない').toBe('「t-b」をゴミ箱へ移しました');
+    expect((await undoOffer())?.lids, '戻す材料を持っていない').toEqual(['b']);
   });
 
-  /**
-   * 🔴 **確認を待っている間に前提が崩れたら、理由を出して撃たない**(#308)。
-   *
-   * 自前の確認は**答えが後から返る**ので「開いてから答えるまで」の窓が在る
-   * (native の `confirm` はレンダラごと止めていたので、この窓は**置き換えで
-   * 新しく生まれた**)。⚠ 直す前は再確認せずに撃ち、reducer が
-   * `phase !== 'ready'` で黙って捨てるので、**「はい」と答えたのに
-   * 1 ドットも変わらず理由も出なかった**。
-   *
-   * ⚠ この test は #299(自前ダイアログ)より前は**書けなかった** ──
-   *   happy-dom に `window.confirm` が無く、確認の枝が 1 度も実行されなかった。
-   */
-  it('🔴 待っている間に編集が始まったら、消さずに理由を出す', async () => {
+  it('🔴 編集中は消さずに理由を出す(確認より前に断る ── 無言にしない)', async () => {
     const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
     await tick();
-    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
-
-    // 待っている間に編集が始まる(別タブ / 非同期 ack でも同じ形)
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '前提が崩れている(編集中になっていない)').toBe('editing');
-
-    await answerDialog('ok');
+    // ⚠ 編集中は描き直しで押し口が外れうる ── 受け手を直に押す(別窓・メニューから届く形)
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'delete-entry');
+    document.body.firstElementChild!.append(btn);
+    btn.click();
     await tick(20);
-
-    expect(deleted, '前提が崩れていたのに消した').toHaveLength(0);
+    expect(deleted).toHaveLength(0);
     expect(d.getState().entryMetas.has('a')).toBe(true);
-    // 🔴 **無言で捨てない** ── 理由が出る
     expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
       '編集を終了してからゴミ箱へ移してください',
     );
+    expect(await undoOffer(), '消していないのに「元に戻す」を持っている').toBeNull();
   });
 
-  /**
-   * 🔴 **対照群**(空振り防止)── 前提が崩れていなければ、今までどおり消える。
-   * ⚠ これが落ちるなら、上は「断った」のではなく**別の理由で消えなかった**だけ。
-   */
-  it('対照群: 前提が崩れていなければ、確認 OK で消える', async () => {
-    const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
-    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+  it('🔴 「元に戻す」を押すと、消したノートが本文ごと戻る', async () => {
+    const { d, q, qa, store } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: 'B' });
+    q<HTMLElement>('[data-pkc-entry="b"]')!.click();
     await tick();
     q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
-    await answerDialog('ok');
     await tick(20);
-    expect(deleted, '対照群が消えていない(ハーネスが壊れている)').toEqual(['a']);
-    expect(d.getState().error ?? '', '消えたのに理由が出ている').not.toContain('編集を終了');
+    expect(d.getState().entryMetas.has('b'), '前提: 消えている').toBe(false);
+    // 画面の下の「元に戻す」(shell の status-undo)は paintStatusUndo が出し入れする。ここは受け手を直に押す
+    const undo = document.createElement('button');
+    undo.setAttribute('data-pkc-action', 'undo-trash');
+    document.body.firstElementChild!.append(undo);
+    undo.click();
+    await tick(40);
+    expect(d.getState().entryMetas.has('b'), '戻っていない').toBe(true);
+    expect(store['b'], '本文が戻っていない').toBe('B');
+    expect(qa('[data-pkc-entry="b"]').length, '行が画面に戻っていない').toBeGreaterThan(0);
+    expect(d.getState().notice).toBe('ゴミ箱から元に戻しました');
+    expect(await undoOffer(), '戻したあとも持っている(2 度押せる)').toBeNull();
   });
 
-  /**
-   * 🔴 **待っている間に対象が消えた場合**(別タブ / 取込)。
-   * ⚠ 黙って何も起きないのではなく、**もう無いことを言う**。
-   */
-  it('🔴 待っている間に対象が消えたら、その旨を出す', async () => {
-    const { d, q, deleted } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: 'B' });
+  it('⚠ 戻せる時間(7 秒)が過ぎたら知らせごと降ろす', async () => {
+    const { d, q } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
     await tick();
-    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
-
-    // 別の経路で先に消えた(取込は entry を総入れ替えする)
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('b', 2)], relations: [] });
-
-    await answerDialog('ok');
-    await tick(20);
-
-    expect(deleted, 'もう無いものを消しに行った').toHaveLength(0);
-    expect(d.getState().error ?? '', '無言で捨てた').toContain('もうありません');
-  });
-
-  it('確認キャンセルなら何もしない', async () => {
-    const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
-    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
-    await tick();
-    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
-    await answerDialog('cancel');
-    await tick();
-    expect(deleted).toHaveLength(0);
-    expect(d.getState().entryMetas.has('a')).toBe(true);
+    vi.useFakeTimers();
+    try {
+      q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+      expect(await undoOffer(), '前提: 出ている').not.toBeNull();
+      vi.advanceTimersByTime(7001);
+      expect(await undoOffer()).toBeNull();
+      expect(d.getState().notice, '知らせが居残っている').toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

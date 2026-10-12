@@ -14,7 +14,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
-import { answerDialog, dialogMessage } from './dialog-helper';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -238,16 +237,31 @@ describe('画面(フォルダの面)', () => {
     expect(rowOf('c').hasAttribute('data-pkc-marked'), '外した印が残っている').toBe(false);
   });
 
-  it('🔴 まとめての帯は 2 件以上のときだけ出る', () => {
+  /**
+   * 🔴 **1 件のときはタグの欄だけ、2 件以上でゴミ箱へ・移す…も**(#1087 流れ 29 Q4 / Q5。
+   * Gemini 裁定 = #1163 への依頼 29)。
+   * ⚠ 1 件の「ゴミ箱へ」「移す…」は行の右クリックとパンくずが持つので、同じ帯に 2 つ目を作らない。
+   */
+  it('🔴 まとめての帯は 1 件ならタグの欄だけ、2 件以上でゴミ箱へ・移す…も出る', () => {
     const filer = new FilerRenderer(region);
     let s = reduce(booted(), { type: 'SELECT_ENTRY', lid: 'a' }).state;
     filer.render(s);
-    expect(region.querySelector('[data-pkc-field="filer-bulk"]')).toBeNull();
+    const one = region.querySelector('[data-pkc-field="filer-bulk"]');
+    expect(one, '1 件でタグの欄の帯が出ない').not.toBeNull();
+    expect(one!.querySelector('[data-pkc-field="bulk-tag"]'), '1 件でタグの欄が無い').not.toBeNull();
+    expect(one!.querySelector('[data-pkc-action="delete-selected"]'), '1 件でゴミ箱へが出ている').toBeNull();
+    expect(one!.querySelector('[data-pkc-action="move-to-folder"]'), '1 件で移す…が出ている').toBeNull();
     s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state;
     filer.render(s);
     const bulk = region.querySelector('[data-pkc-field="filer-bulk"]');
     expect(bulk, '2 件選んでも帯が出ない').not.toBeNull();
     expect(bulk!.textContent).toContain('2 件');
+    // 🔴 「移す…」は右クリックの「フォルダへ移す…」と同じ受け手(`move-to-folder`)── 道を 2 通りにしない。
+    //    ⚠ 印の 1 件目を運ぶ(帯は行の外なので、運ばないと開いているノートへ落ちる)
+    const mv = bulk!.querySelector<HTMLElement>('[data-pkc-action="move-to-folder"]');
+    expect(mv, '2 件で「移す…」が出ない').not.toBeNull();
+    expect(mv!.textContent).toBe('移す…');
+    expect(['a', 'b'], '印の外の行を運んでいる').toContain(mv!.getAttribute('data-pkc-entry'));
     // ⚠ **完全削除は一括で撃たせない**(戻せない操作をまとめて撃てるようにしない)
     expect(bulk!.querySelector('[data-pkc-action="purge-trash"]')).toBeNull();
     expect(bulk!.querySelector('[data-pkc-action="delete-selected"]')).not.toBeNull();
@@ -438,10 +452,11 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     s = reduce(s, { type: 'SET_ENTRY_FILTER', query: 'zz' }).state;
     filer.render(s);
     expect(region.querySelectorAll('[data-pkc-region="filer-table"] tbody tr')).toHaveLength(1);
-    expect(
-      region.querySelector('[data-pkc-field="filer-bulk"]'),
-      '画面に印が 1 つしか無いのに帯が出ている',
-    ).toBeNull();
+    // 🔴 画面に印が 1 つしか無いので、2 件以上の物(ゴミ箱へ・移す…)は出ない。1 件の帯は「1 件」と言う
+    const bar = region.querySelector('[data-pkc-field="filer-bulk"]');
+    expect(bar?.querySelector('[data-pkc-field="filer-bulk-count"]')?.textContent, '見えない印まで数えている').toContain('1 件');
+    expect(bar?.querySelector('[data-pkc-action="delete-selected"]'), '画面に印が 1 つしか無いのにゴミ箱へが出ている').toBeNull();
+    expect(bar?.querySelector('[data-pkc-action="move-to-folder"]'), '画面に印が 1 つしか無いのに移す…が出ている').toBeNull();
   });
 
   it('🔴 絞り込みで見えなくなった行は、まとめて削除でも消えない', async () => {
@@ -470,9 +485,10 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
       '絞り込みが効いていない(この test は空振り)',
     ).toHaveLength(1);
     del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    // 🔴 **確認を押すまで消えない**(#299 段②)。⚠ 件数は**見えている 1 件**である
-    expect(dialogMessage(), '確認の件数が画面に無い行まで数えている').toMatch(/1\s*件/);
-    await answerDialog('ok');
+    // 🔴 確認は出さない(#1087 流れ 29)。⚠ 消える・知らせる数は**見えている 1 件**である(題名つき = 1 件の言い方)
+    expect(d.getState().notice ?? '', '知らせの件数が画面に無い行まで数えている').toMatch(
+      /^「.+」をゴミ箱へ移しました$/,
+    );
     expect(d.getState().entryMetas.has('b'), '画面に無い行がゴミ箱へ入った').toBe(true);
     expect(d.getState().entryMetas.has('a'), '見えている印は消えるはず').toBe(false);
 
@@ -481,9 +497,9 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'c' });
     d.dispatch({ type: 'TOGGLE_SELECT', lid: 'd' });
     del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await answerDialog('ok');
     expect(d.getState().entryMetas.has('c')).toBe(false);
     expect(d.getState().entryMetas.has('d')).toBe(false);
+    expect(d.getState().notice, '複数件は件数で言う').toBe('2 件をゴミ箱へ移しました');
   });
 
   it('🔴 印が全部見えなくなっているとき、押しても黙らない(理由を出す)', () => {
@@ -745,7 +761,6 @@ describe('フォルダの表の鍵', () => {
     const { d, row, clickRow, press } = screen();
     clickRow('a');
     press('Delete', row('a'));
-    await answerDialog('ok');
     expect(d.getState().entryMetas.has('a'), '1 件目が消えていない(空振り)').toBe(false);
     const now = document.activeElement as HTMLElement;
     expect(
@@ -754,7 +769,6 @@ describe('フォルダの表の鍵', () => {
     ).not.toBeNull();
     clickRow('b');
     press('Delete', now);
-    await answerDialog('ok');
     expect(d.getState().entryMetas.has('b'), '2 回目の Delete が効かない').toBe(false);
   });
 

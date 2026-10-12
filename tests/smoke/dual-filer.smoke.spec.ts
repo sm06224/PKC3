@@ -1,6 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
-  answerAppDialog,
   clickReal,
   collectPageErrors,
   createEntry,
@@ -592,7 +591,7 @@ test('🔴 Space は印を付けて 1 行下へ(ページは動かない)', asyn
  *   (押した対象を user が数え直せる)③**却下したら 1 行も減らない**。
  *   ③ が無いと「開いてさえいれば緑」になり、**却下を無視して消す**変異が生き延びる。
  */
-test('🔴 2 ペインの Delete は確認を開き、却下すれば消えない (#299)', async ({ page }) => {
+test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#299 / #1087)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -610,21 +609,22 @@ test('🔴 2 ペインの Delete は確認を開き、却下すれば消えな�
   await rows.first().click();
 
   /**
-   * ── ① 却下する ── 開いたことと、文言に件数が出ることを見る。
-   * 🔴 **確認は「アプリの中の要素」になった**(#299 段②)── `page.on('dialog')` は
-   *   もう 1 度も発火しない。⚠ そのぶん**押した所と閉じたことを直接見られる**
-   *   (native のモーダルはレンダラを止めるので CDP から触れなかった)。
+   * ── ① 確認なしで移る ── 画面の下に知らせと「元に戻す」が出て、押すと戻る。
+   * 🔴 **確認は出さない**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q3)。
    */
   await page.keyboard.press('Delete');
-  const seen = await answerAppDialog(page, 'cancel');
-  expect(seen, `確認の文言に件数が出ていない: ${seen}`).toMatch(/1\s*件/);
-  // ⚠ 却下したのだから **1 行も減らない**
-  await expect(rows, '却下したのに消えた').toHaveCount(before);
+  await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
+  await expect(rows, '押したのに消えていない').toHaveCount(before - 1);
+  await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
+    'ゴミ箱へ移しました',
+  );
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(rows, '元に戻しても行が戻らない').toHaveCount(before);
 
-  // ── ② 受け入れる ── 今度は本当に減る
+  // ── ② もう一度消す ── 戻したあとも、行を選べば同じ鍵で消える(戻した行は選ばれていない)
+  await rows.first().click();
   await page.keyboard.press('Delete');
-  await answerAppDialog(page, 'ok');
-  await expect(rows, '受け入れたのに消えていない').toHaveCount(before - 1);
+  await expect(rows, 'もう一度消えていない').toHaveCount(before - 1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

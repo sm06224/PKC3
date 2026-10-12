@@ -31,7 +31,6 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
-import { answerDialog } from './dialog-helper';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -163,7 +162,6 @@ describe('スマホの「⋯」メニューも、開いた瞬間のノートに�
     p.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     expect(p.d.getState().selectedLid, '前提が崩れている(選択が動いていない)').toBe('n2');
     p.press('delete-entry');
-    await answerDialog('ok');
     await tick();
     expect(p.d.getState().entryMetas.has('n1'), '⋯ を開いた時のノート(n1)が残っている').toBe(false);
     expect(p.d.getState().entryMetas.has('n2'), '選択が動いた先(n2)まで消えた').toBe(true);
@@ -226,7 +224,6 @@ describe('行の右クリックメニューは、開いた瞬間の行に効く(
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     expect(r.d.getState().selectedLid, '前提が崩れている(選択が動いていない)').toBe('n2');
     r.press('delete-entry');
-    await answerDialog('ok');
     await tick();
     expect(r.d.getState().entryMetas.has('n1'), '開いた行(n1)が残っている').toBe(false);
     expect(
@@ -258,7 +255,6 @@ describe('行の右クリックメニューは、開いた瞬間の行に効く(
       b.setAttribute('data-pkc-menu-lid', '');
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     r.press('delete-entry');
-    await answerDialog('ok');
     await tick();
     expect(
       r.deleted,
@@ -270,7 +266,6 @@ describe('行の右クリックメニューは、開いた瞬間の行に効く(
     const r = setup();
     rightClick(r.row('n1'));
     r.press('delete-entry');
-    await answerDialog('ok');
     await tick();
     expect(r.d.getState().entryMetas.has('n1'), '選択を動かしていないのに消えなかった').toBe(false);
     expect(r.deleted).toEqual(['n1']);

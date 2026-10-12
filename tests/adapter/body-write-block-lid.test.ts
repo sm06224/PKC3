@@ -520,7 +520,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
   });
 
   /**
-   * 🔴 **残り 34 件は今回の対象外**。理由は 4 つに分かれる:
+   * 🔴 **残り 35 件は今回の対象外**。理由は 4 つに分かれる:
    * ① **lid で 1 件に絞れない**(複数の lid・全件・app 全体に効く ──
    *    選択 / フィルタ / 一覧の並び替え / タイル・グループの並び替え 等)
    * ② **本文の書換ではない**(削除・関係・タグ・履歴・ゴミ箱・スマート集計・
@@ -537,10 +537,13 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
    * ⑤ 🔴 **`SET_REVISION_COMPARE`(#1231 段①)は読むだけ**(履歴の差分の「くらべる相手」── ②の
    *    `PREVIEW_REVISION` と同じ側)。⚠ 編集を始めると履歴の面は畳まれて選択欄ごと無いので、
    *    `phase !== 'ready'` で黙っても dead click にならない
+   * ⑥ 🔴 **`UNDO_TRASH`(#1087 流れ 29)は「ゴミ箱へ移した直後の元に戻す」** ── ②の `RESTORE_TRASH` と同じ側
+   *    (ゴミ箱の復元。lid は移した全部で 1 件に絞れない)。⚠ `phase !== 'ready'` の黙りは reducer だけで、
+   *    押し口(`undo-trash`)が先に理由を出す(`restore-trash` と同じ作り)ので dead click にならない
    * ⚠ このリストが増減したら、それは①C6 の対象を増やした ②既存の case を
    *   書き換えた、のどちらかである ── どちらでもここを書き直す。
    */
-  it('残り 34 件は変わっていない(増減があれば、この一覧を見直す)', () => {
+  it('残り 35 件は変わっていない(増減があれば、この一覧を見直す)', () => {
     const silent = silentPhaseOnlyCases(STATE);
     const known = [
       'ADD_RELATION',
@@ -577,6 +580,7 @@ describe('無言で捨てる case の全数 pin ── C6 / #1043', () => {
       'SMART_TAGS',
       'START_EDIT',
       'TOGGLE_SELECT',
+      'UNDO_TRASH',
     ].sort();
     expect([...silent].sort()).toEqual(known);
   });

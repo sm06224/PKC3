@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { answerAppDialog, gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors } from './helpers';
 
 /**
  * 整理の面(#240 段①〜⑤。user 指示 2026-08-17
@@ -171,6 +171,19 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
   const bulk = page.locator('[data-pkc-field="filer-bulk"]');
   await expect(bulk).toBeVisible();
   await expect(bulk).toContainText('2 件');
+  /**
+   * 🔴 **2 件以上のバーに「移す…」が出て、押すと右クリックの「移す…」と同じ小さな画面が開く**
+   * (#1087 流れ 29 Q4。Gemini 裁定 = #1163 への依頼 29)。題名に件数が出る = 印の全部が相手。
+   */
+  const bulkMove = bulk.locator('[data-pkc-field="bulk-move"]');
+  await expect(bulkMove, '2 件で「移す…」が出ない').toBeVisible();
+  await expect(bulkMove).toHaveText('移す…');
+  await clickReal(page, '[data-pkc-field="bulk-move"]');
+  const moveDialog = page.locator('[data-pkc-region="app-dialog"][open]');
+  await expect(moveDialog, '小さな画面が開かない').toBeVisible();
+  await expect(moveDialog.locator('[data-pkc-field="dialog-title"]')).toHaveText('2 件を移す');
+  await page.keyboard.press('Escape');
+  await expect(moveDialog, '閉じない').toHaveCount(0);
 
   /**
    * ③ 範囲選択(Shift)は**見えている並び**で採る ── 起点は最後に押した行。
@@ -189,16 +202,32 @@ test('🔴 まとめて選んで、まとめてゴミ箱へ入る', async ({ pag
 
   /**
    * ④ まとめてゴミ箱へ。
-   * 🔴 **確認は「アプリの中の要素」になった**(#299 段②)── `page.on('dialog')` は
-   *   もう 1 度も発火しない。⚠ native のモーダルはレンダラを止めるので、
-   *   CDP から見ると「画面が固まった」と区別が付かなかった(それが差し替えの理由)。
+   * 🔴 **確認は出さない**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q3)── 押したらそのまま移り、
+   *   画面の下に「2 件をゴミ箱へ移しました」と **元に戻す** が出る。
+   * ⚠ 件数を**知らせの文言で**見る(1 件ずつ n 回言う実装に戻ったら落ちる)。
    */
+  await rows.nth(0).click();
+  // 🔴 1 件だけ選んでいるときも、タグの欄は出る。ゴミ箱へ・移す…は 2 件以上のとき(#1087 流れ 29 Q5)
+  await expect(bulk.locator('[data-pkc-field="bulk-tag"]'), '1 件でタグの欄が見えない').toBeVisible();
+  await expect(bulk.locator('[data-pkc-action="delete-selected"]')).toHaveCount(0);
+  await expect(bulk.locator('[data-pkc-field="bulk-move"]')).toHaveCount(0);
+  await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+  await clickReal(page, '[data-pkc-action="delete-selected"]');
+  await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
+  await expect(rows, 'まとめて消えていない').toHaveCount(1);
+  await expect(page.locator('[data-pkc-region="status"]'), '件数を言っていない').toContainText(
+    '2 件をゴミ箱へ移しました',
+  );
+  const undo = page.locator('[data-pkc-field="status-undo"]');
+  await expect(undo, '「元に戻す」が出ていない').toBeVisible();
+  await expect(undo).toHaveText('元に戻す');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(rows, '元に戻しても 3 件に戻らない').toHaveCount(3);
+  // ⚠ 戻した後にもう一度消す(以下は「消えた後」の続き)
   await rows.nth(0).click();
   await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
   await clickReal(page, '[data-pkc-action="delete-selected"]');
-  // ⚠ 件数を**確認の文言でも**見る(1 件ずつ n 回聞く実装に戻ったら落ちる)
-  expect(await answerAppDialog(page, 'ok'), '確認が件数で聞いていない').toContain('2 件');
-  await expect(rows, 'まとめて消えていない').toHaveCount(1);
+  await expect(rows, 'もう一度まとめて消えていない').toHaveCount(1);
 
   // ⑤ 🔴 **戻せる**(ゴミ箱へ入っただけ)
   await clickReal(page, '[data-pkc-action="show-trash"]');
@@ -533,7 +562,9 @@ test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', asyn
   // ④ Delete でゴミ箱へ(確認は**アプリの中**の口を押す ── #299 段②)
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr[data-pkc-archetype="text"]');
   await page.keyboard.press('Delete');
-  expect(await answerAppDialog(page, 'ok'), '確認が出ていない').toContain('ゴミ箱へ移し');
+  await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
+    'ゴミ箱へ移しました',
+  );
   await expect(rows, 'ゴミ箱へ入っていない').toHaveCount(1);
 
   /**
@@ -555,6 +586,10 @@ test('🔴 Enter で入り、Backspace で戻り、Delete でゴミ箱へ', asyn
     }),
     '消したら焦点が表の外へ落ちた(次の鍵が届かない)',
   ).toBe('ある');
+
+  // ⑥ 🔴 Delete の後の「元に戻す」(#1087 流れ 29)── 押すと行が戻る
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(rows, '元に戻しても行が戻らない').toHaveCount(2);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

@@ -278,6 +278,9 @@ import {
   type DualSide,
 } from '@features/relation/dual-pane';
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
+import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
+import { isTouchOnly } from '@adapter/ui/render/touch-device';
+import { offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -2348,6 +2351,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'delete-entry',
   'restore-revision',
   'restore-trash',
+  // 🔴 ゴミ箱へ移した直後の「元に戻す」(#1087 流れ 29)── `restore-trash` と同じ復元なので同じ門
+  'undo-trash',
   'purge-trash',
   /**
    * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
@@ -4411,7 +4416,7 @@ function deleteFrom(
      * 🔴 **見えている行に絞る**(着地前レビュー 2)。印は行が見えなくなっても
      * 残る(絞り込みで消えた / 別タブが消した)ので、素で消すと**画面に無いものが
      * ゴミ箱へ入る**。⚠ 帯に出す数(`filer.ts`)と**同じ規則**を通す ──
-     * 食い違うと「2 件をゴミ箱へ移しますか?」と聞いて 3 件動かす形になる。
+     * 食い違うと「2 件をゴミ箱へ移しました」と言って 3 件動かす形になる。
      */
     const lids = operationTargets(rows, selection, cursor);
     if (lids.length === 0) {
@@ -4433,26 +4438,16 @@ function deleteFrom(
       });
       return;
     }
-    confirmThen(
-      root,
-      `選んでいる ${lids.length} 件をゴミ箱へ移しますか?`,
-      { okLabel: 'ゴミ箱へ移す', danger: true },
+    /**
+     * 🔴 **確認は出さない。移したあとに「元に戻す」を出す**(#1087 流れ 29。1 件の `delete-entry` と同じ)。
+     * ⚠ 居ない分は `DELETE_ENTRIES` が黙って落とす ── 知らせの件数・戻す対象は**実際に消えた分**で数える。
+     */
+    const titleOf = new Map(lids.map((l) => [l, st.entryMetas.get(l)?.title ?? l]));
+    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+    const after = dispatcher.getState();
+    offerTrashUndo(
       dispatcher,
-      /**
-       * ⚠ 待っている間に **①編集が始まる ②対象が消える**(別タブ / 取込)。
-       * 🔑 一部だけ消えたときは**数えて言う** ── 黙って残りを消さない
-       *   (この file の「落としたものは数えて言う」に揃える)。
-       */
-      () => {
-        const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
-        const alive = lids.filter((l) => st.entryMetas.has(l));
-        if (alive.length === 0) return '選んでいたものは、もうありません';
-        if (alive.length !== lids.length)
-          return `${lids.length - alive.length} 件が既にありません。選び直してください`;
-        return null;
-      },
-      () => dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids }),
+      lids.filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l)).map((l) => ({ lid: l, title: titleOf.get(l) ?? l })),
     );
 }
 
@@ -6934,17 +6929,39 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' }),
     );
   },
-  'open-today': (dispatcher, _target, services) => {
+  'open-today': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') return;
     if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
     const title = todayNoteTitle(new Date());
     const found = findTodayNote(st.entryMetas.values(), title);
+    /**
+     * 🔴 **「今日」を押したあとのカーソル**(#1087 流れ 29)。
+     * - 既に在る → 選んで、本文の下の**追記欄**へ(畳んでいれば一時的に開く ── `append-at-heading` と同じ道)
+     * - まだ無い → 作って、**本文**へ(題名は日付のまま。他の作り方は今までどおり題名へ)
+     * ⚠ 叶えるのは描く側(`append-box.ts` / `detail.ts`)── 本文の到着や編集欄の組み終えを待つため。
+     */
     if (found) {
+      requestAppendFocus(found.lid);
+      revealAppendPane(root);
       dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found.lid });
+      /**
+       * ⚠ 既に今日のノートを開いているとき、`SELECT_ENTRY` は状態を変えない ── 描き直しが来ず、
+       *   描く側(`append-box.ts`)が頼みを引き取る機会が無い。その場合だけここで叶える
+       *   (描き直しが来た回は、描く側が引き取り済みなので `takeAppendFocus` は偽になり二重に当てない)。
+       */
+      const now = dispatcher.getState();
+      if (
+        now.selectedLid === found.lid &&
+        appendModeOf(now).kind === 'ready' &&
+        takeAppendFocus(found.lid) &&
+        !isTouchOnly()
+      )
+        root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')?.focus();
       return;
     }
     const lid = generateLid();
+    requestBodyFocus(lid);
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype: 'text',
@@ -7536,7 +7553,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (dispatcher.getState().relations !== before)
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
   },
-  'delete-entry': (dispatcher, target, _services, root) => {
+  'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
@@ -7570,19 +7587,15 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   着地している ── **必要以上に怖がらせる側の嘘**を出荷していた。
      * ⚠ 「戻せる」ことは `docs/manual.md` §6 にも書いてある(そちらが正しかった)。
      */
-    confirmThen(
-      root,
-      `「${title}」をゴミ箱へ移しますか?`,
-      { okLabel: 'ゴミ箱へ移す', danger: true },
-      dispatcher,
-      () => {
-        const st = dispatcher.getState();
-        if (st.phase !== 'ready') return `${phaseBlockReason(st.phase)}ゴミ箱へ移してください`;
-        if (!st.entryMetas.has(lid)) return `「${title}」は、もうありません`;
-        return null;
-      },
-      () => dispatcher.dispatch({ type: 'DELETE_ENTRY', lid }),
-    );
+    /**
+     * 🔴 **確認は出さない。移したあとに「元に戻す」を出す**(#1087 流れ 29。Gemini 裁定 = #1163 への
+     *   依頼 29 の回答 Q3)。ゴミ箱へ移すのは戻せる操作なので、毎回の確認は手数だけを増やしていた。
+     *   画面の下に「『題名』をゴミ箱へ移しました」と **元に戻す** を数秒出す(`trash-undo.ts`)。
+     * ⚠ 上の `phase` の断りは、確認より前ではなく**実行より前**に残している(無言の拒否を作らない)。
+     */
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
+    dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
+    if (!dispatcher.getState().entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }]);
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
@@ -7980,6 +7993,21 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'undo-move': (dispatcher) => {
     dispatcher.dispatch({ type: 'UNDO_MOVE' });
+  },
+  /**
+   * 🔴 **ゴミ箱へ移した直後の「元に戻す」**(#1087 流れ 29)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 編集中などで戻せないときは**黙らない**(`restore-trash` と同じ断り)。
+   */
+  'undo-trash': (dispatcher) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
+      return;
+    }
+    const lids = takeTrashUndo();
+    if (lids === null) return;
+    dispatcher.dispatch({ type: 'UNDO_TRASH', lids });
+    dispatcher.dispatch({ type: 'OP_NOTICE', message: 'ゴミ箱から元に戻しました' });
   },
   /**
    * 🔴 **予定を動かした直後の「元に戻す」**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 6)。

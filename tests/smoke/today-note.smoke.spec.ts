@@ -31,10 +31,38 @@ test('🔴 「今日」を押すと今日の日付のノートが開き、2 度�
   await expect(title.first(), '今日の日付のノートが開いていない').toHaveValue(
     new RegExp(today),
   );
+  /**
+   * 🔴 **作った直後のカーソルは本文**(題名は日付のまま)(#1087 流れ 29 Q1。Gemini 裁定 = #1163 への依頼 29)。
+   * ⚠ 他の作り方(「ノートを作る」)は今までどおり題名に当たる ── 「今日」だけが本文。
+   */
+  // ⚠ ライブエディタの行は描き終えてから焦点を取る(実測: 押した直後は body、100ms 以内に行の入力欄)── 待って見る
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const el = document.activeElement as HTMLElement | null;
+          if (el === null) return 'なし';
+          if (el.matches('[data-pkc-field="editor-title"]')) return '題名';
+          const editable =
+            el instanceof HTMLTextAreaElement ||
+            el instanceof HTMLInputElement ||
+            el.isContentEditable;
+          return editable && el.closest('[data-pkc-region="detail"]') !== null ? '本文' : 'その他';
+        }),
+      { message: 'カーソルが本文の編集欄に入らない(題名ではなく本文であるべき)' },
+    )
+    .toBe('本文');
 
   // 編集を確定してから、もう一度押す
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await clickReal(page, '[data-pkc-bar-tile][data-pkc-action="open-today"]');
+  // 🔴 既にある日は、カーソルが本文の下の追記欄に入る
+  await expect(page.locator('[data-pkc-field="append-input"]'), 'カーソルが追記欄に無い').toBeFocused();
+
+  // 🔴 キー(Alt+T)でも同じ ── 焦点を外してから押しても、追記欄へ戻る(#1087 流れ 29 Q2)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Alt+t');
+  await expect(page.locator('[data-pkc-field="append-input"]'), 'Alt+T で追記欄に入らない').toBeFocused();
 
   /**
    * 🔴 **2 度目で増えない**(その日の入れ物は 1 つ)。

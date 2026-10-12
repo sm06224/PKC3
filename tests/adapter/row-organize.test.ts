@@ -286,6 +286,32 @@ describe('名前を変える ── 行の題名の所で打ち替える(#215)',
 });
 
 describe('移す… ── 入れ先のフォルダを選ぶ(#215)', () => {
+  it('🔴 2 件以上選んだときのバーの「移す…」も、右クリックと同じ小さな画面を開き、印の全部が動く(#1087 流れ 29 Q4)', async () => {
+    const r = setup();
+    r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n2' });
+    r.d.dispatch({ type: 'TOGGLE_SELECT', lid: 'n3' });
+    await tick();
+    const btn = r.root.querySelector<HTMLElement>('[data-pkc-field="bulk-move"]');
+    expect(btn, 'バーに「移す…」が無い').not.toBeNull();
+    expect(btn!.textContent).toBe('移す…');
+    btn!.click();
+    await tick();
+    const dialog = [...document.querySelectorAll<HTMLDialogElement>('dialog')].find((x) => x.open);
+    expect(dialog, '入れ先を選ぶ画面が出ていない').toBeDefined();
+    expect(dialog!.querySelector('[data-pkc-field="dialog-title"]')?.textContent).toBe('3 件を移す');
+    dialog!
+      .querySelector<HTMLElement>('[data-pkc-field="entry-pick-row"][data-pkc-lid="f1"]')!
+      .click();
+    await tick();
+    expect(
+      getStructuralChildren('f1', r.d.getState().entryMetas, r.d.getState().relations)
+        .map((m) => m.lid)
+        .sort(),
+      '印の全部が入っていない',
+    ).toEqual(['n1', 'n2', 'n3']);
+  });
+
   it('🔴 印が 3 件あれば、その全部が選んだフォルダへ入る(disk への要求まで)', async () => {
     const r = setup();
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

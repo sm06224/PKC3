@@ -14,7 +14,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
-import { answerDialog, dialogMessage } from './dialog-helper';
+import { openDialog } from './dialog-helper';
+import { currentTrashOffer } from '../../src/adapter/ui/render/trash-undo';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -1500,11 +1501,10 @@ describe('2 ペインのキーボード操作(#273)', () => {
     press('right', 'b', 'ArrowDown'); // 右で 'f2' を選ぶ…ではなく行を作る
     d.dispatch({ type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' });
     press('right', 'c', 'Delete');
-    // 🔴 **確認が出る**(#299 段②)── 押すまで 1 件も消えない
-    expect(d.getState().entryMetas.has('c'), '確認の前に消えている').toBe(true);
-    expect(dialogMessage(), '確認の文言に件数が出ていない').toMatch(/1\s*件/);
-    await answerDialog('ok');
+    // 🔴 **確認は出さない**(#1087 流れ 29)── 押したら消え、「元に戻す」の材料を持つ
+    expect(openDialog(), '確認が出ている(出さない裁定)').toBeNull();
     expect(d.getState().entryMetas.has('c'), 'このペインの印が消えていない').toBe(false);
+    expect(currentTrashOffer()?.lids, '戻す材料が移した 1 件になっていない').toEqual(['c']);
     expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた(画面に無いものが消えた)').toBe(
       true,
     );
@@ -1519,41 +1519,16 @@ describe('2 ペインのキーボード操作(#273)', () => {
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'c', mode: 'set' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await answerDialog('ok');
     expect(d.getState().entryMetas.has('c'), 'ボタンで消えていない').toBe(false);
     expect(d.getState().entryMetas.has('a'), '左の列の印まで消えた').toBe(true);
   });
 
   /**
-   * 🔴 **確認を待っている間に対象が消えたら、数えて言う**(#308)。
-   *
-   * ⚠ 黙って残りを消すと、user は「一部が消えなかった」ことに気づけない。
-   *   この repo の「落としたものは数えて言う」に揃える。
-   * ⚠ 直す前は再確認そのものが無く、**reducer が黙って捨てて**いた。
+   * ⚠ かつてここに在った「確認を待っている間に対象が消えたら、数えて言う」(#308)は、
+   *   確認の窓が無くなった(#1087 流れ 29)ので成り立たない ── 窓の間に前提が崩れる経路ごと消えた。
+   *   押した時点で表に居ない印は消す相手に入らない規則は `multi-select.test.ts`
+   *   (「絞り込みで見えなくなった行は、まとめて削除でも消えない」)が持つ。
    */
-  it('🔴 待っている間に一部が消えたら、黙って残りを消さない', async () => {
-    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
-    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
-    expect(d.getState().dual.left.selection.length, '前提が崩れている').toBe(2);
-
-    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
-    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-
-    // 待っている間に片方だけ消える(別タブ / 取込は entry を総入れ替えする)
-    d.dispatch({
-      type: 'SYS_BOOTED',
-      cid: 'c1',
-      metas: METAS.filter((m) => m.lid !== 'a'),
-      relations: RELS,
-    });
-
-    await answerDialog('ok');
-
-    expect(d.getState().entryMetas.has('b'), '黙って残りを消した').toBe(true);
-    expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
-      '既にありません',
-    );
-  });
 
   /**
    * 🔴 **対照群**(空振り防止)── 何も崩れていなければ、今までどおり消える。
@@ -1563,9 +1538,9 @@ describe('2 ペインのキーボード操作(#273)', () => {
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
     const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await answerDialog('ok');
     expect(d.getState().entryMetas.has('a'), '対照群が消えていない').toBe(false);
     expect(d.getState().entryMetas.has('b'), '対照群が消えていない').toBe(false);
+    expect(d.getState().notice, '複数件は件数で言う').toBe('2 件をゴミ箱へ移しました');
   });
 
   /**

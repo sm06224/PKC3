@@ -341,7 +341,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-12(#855 20-C): N +4(`dismiss-missed` / `open-missed-schedule` / `set-schedule-lead` / `set-schedule-missed`。見逃した予定の 1 行の 2 つのボタンと、
     //   予定表の「知らせ」の選択とチェック ── 押した所から何も要らない(値は押した欄自身を読む)。`dismiss-alarm` / `set-alarm-enabled` と同じ仕分け)。
     // ⚠ 2026-10-12(#855 Q2): N +1(`schedule-print`。予定表の「印刷」── 押した所から運ぶのは面だけ(範囲は見えている器から引く)。`export-schedule-ics` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 212 });
+    // ⚠ 2026-10-12(#1087 流れ 29): N +1(`undo-trash`。ゴミ箱へ移した直後の「元に戻す」── 押した所から何も要らない。直前の 1 手は module が持つ。`undo-move` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 213 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {
