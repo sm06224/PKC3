@@ -36,7 +36,7 @@ import {
 } from '@features/schedule/day-layout';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { addDays } from '@features/datetime/date-math';
-import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
+import { createTaskCard, patchItemColor, patchTaskCard, placeCardInGrid } from './task-card';
 
 export interface DayPaint {
   /** 見る日(`YYYY-MM-DD`)。 */
@@ -199,6 +199,7 @@ export class ScheduleDay {
         patchTaskCard(node.card, item, title, p.year, false);
         node.data = item;
       }
+      patchItemColor(node.card, item);
       if (item.lid === p.selectedLid) node.card.setAttribute('data-pkc-selected', '');
       else node.card.removeAttribute('data-pkc-selected');
       return node.card;

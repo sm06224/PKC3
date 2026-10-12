@@ -38,7 +38,7 @@ import {
   type DaySlot,
 } from '@features/schedule/day-layout';
 import { holidayName } from '@features/schedule/jp-holidays';
-import { createTaskCard, patchTaskCard, placeCardInGrid } from './task-card';
+import { createTaskCard, patchItemColor, patchTaskCard, placeCardInGrid } from './task-card';
 
 export interface WeekPaint {
   /** 見せる 7 日(`YYYY-MM-DD`。日曜始まり)。 */
@@ -249,6 +249,7 @@ export class ScheduleWeek {
           patchTaskCard(node.card, item, title, p.year, false);
           node.data = item;
         }
+        patchItemColor(node.card, item);
         if (item.lid === p.selectedLid) node.card.setAttribute('data-pkc-selected', '');
         else node.card.removeAttribute('data-pkc-selected');
         return node.card;

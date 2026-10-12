@@ -118,6 +118,26 @@ describe('配色トークン', () => {
     }
   });
 
+  /**
+   * 🔴 **予定の左の縦線の色**(#855 20-A)── `--note-1` 〜 `--note-8` が、全テーマで地に対して見えること。
+   * 明るい地と暗い地で同じ色は使えない(両立する色が無い)ので、テーマごとに明暗の組を持つ。
+   * 縦線は UI 部品なので 3:1(WCAG の非文字)。
+   */
+  it.each(THEMES.map((t) => t.id))('🔴 %s の予定の縦線の色 8 つが、地の上で見える(3:1)', (theme) => {
+    const tok = tokensOf(theme);
+    for (let n = 1; n <= 8; n++) {
+      const c = tok[`--note-${n}`];
+      expect(c, `${theme}: --note-${n} が無い`).toBeTruthy();
+      for (const bg of ['--surface', '--surface-2']) {
+        const ratio = contrast(c!, tok[bg]!);
+        expect(
+          ratio,
+          `${theme}: --note-${n}(${c!}) on ${bg}(${tok[bg]!}) = ${ratio.toFixed(2)}:1(要 3:1)`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
   it('🔴 明暗の宣言が実際の明るさと合っている', () => {
     // ⚠ `color-scheme` を取り違えると、スクロールバーや既定の入力欄だけが
     // 逆の明るさで出る(部分的にちぐはぐになる)

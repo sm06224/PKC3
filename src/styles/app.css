@@ -6325,6 +6325,40 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='schedule-option'][hidden] {
   display: none;
 }
+/* 🔴 **「出すもの」のノートの一覧**(#855 20-A)── ノートごとの出し入れ。多いときは枠の中で縦に送る。
+ *   見出しの下に細い線を引き、3 つの切替と見分ける。色の小さな四角は、そのノートの縦線の色 */
+[data-pkc-field='schedule-notes'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border);
+}
+[data-pkc-field='schedule-notes-list'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  max-height: 14em;
+  overflow-y: auto;
+}
+[data-pkc-field='schedule-notes'][hidden] {
+  display: none;
+}
+[data-pkc-field='schedule-notes-head'] {
+  font-size: 10px;
+  color: var(--muted);
+}
+[data-pkc-field='schedule-note-swatch'] {
+  flex: none;
+  width: 3px;
+  height: 1em;
+  background: var(--pkc-item-color, transparent);
+}
+[data-pkc-field='schedule-note-name'] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16em;
+}
 [data-pkc-field='schedule-fold-note'] {
   font-size: 11px;
   line-height: 1.6;
@@ -6432,6 +6466,13 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   grid-column: 2;
   color: var(--muted);
   font-size: 10px;
+}
+/* 🔴 **予定の左の縦線**(#855。Gemini 裁定 = #1163 の依頼 20-A)。色は情報にだけ使う ── 地は無彩色のまま、
+ *   縦線だけに色を置く。色は `item-color.ts` が決めて `--pkc-item-color` に入れる(行のタグの色 > ノートの色)。
+ *   `box-shadow` の内側の影で描く ── 札の大きさ・位置・`border` を 1px も動かさない(一覧 / 日 / 週で同じ書き方)。
+ *   選んだ札は `[data-pkc-selected]` が地と枠の色を替えるが、縦線は別の層なので消えない */
+[data-pkc-entry][data-pkc-item-color] {
+  box-shadow: inset 3px 0 0 var(--pkc-item-color, transparent);
 }
 /* 済んだ札は**色ではなく線**で示す */
 [data-pkc-region='schedule-cards'] [data-pkc-task-done] [data-pkc-field='text'] {
@@ -10046,6 +10087,14 @@ h3[data-pkc-section] {
     --warn: #7a4a00;
     --code-key: #1f4bb8;
     --code-lit: #0a6b52;
+    --note-1: #c2410c;
+    --note-2: #a16207;
+    --note-3: #15803d;
+    --note-4: #0e7490;
+    --note-5: #1d4ed8;
+    --note-6: #7e22ce;
+    --note-7: #be185d;
+    --note-8: #64748b;
     color-scheme: light;
   }
   /* 🔴 音の再生機の貼り付きは紙には要らない(#1232 段 b)── 解かないと、紙の送りで頭に重なる */

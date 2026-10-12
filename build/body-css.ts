@@ -318,6 +318,15 @@ export const PAPER_TOKENS: readonly string[] = [
   '--warn',
   '--code-key',
   '--code-lit',
+  // 予定の左の縦線(#855)。暗い配色は明るい色を持つので、紙には濃い側へ戻す
+  '--note-1',
+  '--note-2',
+  '--note-3',
+  '--note-4',
+  '--note-5',
+  '--note-6',
+  '--note-7',
+  '--note-8',
 ];
 
 /** 板・線の色と太さ(`place-board.ts` が要素へ置く)。⚠ トークンではないので焼かない。 */

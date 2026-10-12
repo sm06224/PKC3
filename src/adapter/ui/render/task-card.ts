@@ -21,6 +21,8 @@ import type { AgendaItem } from '@features/schedule/agenda';
 import { formatListDate } from '@features/datetime/stored-date';
 import { repeatWord } from '@features/schedule/repeat';
 import { formatTimeSpan } from '@features/schedule/schedule-date';
+import { resolveItemColor } from '@features/schedule/item-color';
+import { currentTagColors } from './tag-color';
 
 /**
  * 札の器を作る(中身は `patchTaskCard` が入れる)。
@@ -117,6 +119,22 @@ export function createTaskCard(data: AgendaItem): HTMLElement {
  */
 export function placeCardInGrid(card: HTMLElement, inGrid: boolean): void {
   if (card.draggable === inGrid) card.draggable = !inGrid;
+}
+
+/**
+ * 🔴 **札の左の縦線の色を合わせる**(#855。Gemini 裁定 = #1163 の依頼 20-A)。
+ *
+ * 色の決め方は `item-color.ts` 1 本(行のタグの色 > ノートの色)。ここは**札に焼く**だけ ──
+ * `--pkc-item-color`(CSS が縦線に使う)と、どちらの色かを言う `data-pkc-item-color`(`tag` / `note`)。
+ * ⚠ **`patchTaskCard` の内では呼ばない**(呼び側は札のデータが変わらない描き直しで `patchTaskCard` を飛ばす)。
+ *   タグの色を設定で変えても札のデータは同じなので、**毎回の描き直しで呼ぶ**(同じ値なら何も書かない)。
+ */
+export function patchItemColor(card: HTMLElement, data: AgendaItem): void {
+  const c = resolveItemColor(data, currentTagColors());
+  if (card.style.getPropertyValue('--pkc-item-color') !== c.color)
+    card.style.setProperty('--pkc-item-color', c.color);
+  if (card.getAttribute('data-pkc-item-color') !== c.from)
+    card.setAttribute('data-pkc-item-color', c.from);
 }
 
 /**
