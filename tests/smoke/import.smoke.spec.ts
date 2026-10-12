@@ -797,6 +797,60 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
     '---\ntitle: 正本\nnested:\n  a: 1\n---\n本文\n',
   );
 
+  // 🔴 #1087 行が多いフォルダの表は、画面の外の行を組まない(格子 + `content-visibility`)。
+  // ⚠ 起動を足さず、この道中へ載せた(smoke の起動の予算)── 同じ画面で md を 320 件足す。
+  // 見るのは「届いている(計算後の値)」と「行が user の操作に応える」の 2 つ。画素の一致は
+  // 手元の撮影で見た(変更前後の画像の差)── ここは**壊れたら鳴る**側だけを持つ。
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+  const bulk = Array.from({ length: 320 }, (_, i) => ({
+    name: `bulk-${String(i).padStart(3, '0')}.md`,
+    mimeType: '',
+    buffer: Buffer.from(`# bulk ${i}\n`, 'utf-8'),
+  }));
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles(bulk);
+  await expect(rows, '320 件足した行が出ない(2 件 + 320 件)').toHaveCount(322, { timeout: 60000 });
+  const table = page.locator('[data-pkc-region="filer-table"]');
+  await expect(table, '行が多いのに格子の印が付いていない').toHaveAttribute('data-pkc-grid', '');
+  const look = await page.evaluate(() => {
+    const t = document.querySelector<HTMLElement>('[data-pkc-region="filer-table"]')!;
+    const trs = [...t.querySelectorAll<HTMLElement>('tbody tr')];
+    const body = trs[3]!;
+    const th2 = t.querySelector<HTMLElement>('thead th:last-child')!.getBoundingClientRect();
+    const td2 = body.querySelector<HTMLElement>('td:last-child')!.getBoundingClientRect();
+    const cs = getComputedStyle(body);
+    return {
+      display: cs.display,
+      cv: cs.contentVisibility,
+      height: body.getBoundingClientRect().height,
+      // 見出しの列と行の列が揃っている(格子の列が表の列と同じ幅・同じ位置)
+      thX: th2.x,
+      tdX: td2.x,
+      thW: th2.width,
+      tdW: td2.width,
+      all: trs.length,
+    };
+  });
+  expect(look.display, '行が格子になっていない').toBe('grid');
+  expect(look.cv, '行に content-visibility: auto が効いていない').toBe('auto');
+  expect(Math.abs(look.height - 26), `行の高さが 26px から動いている(${look.height})`).toBeLessThan(0.6);
+  expect(Math.abs(look.thX - look.tdX), '見出しと行の「更新日」の列の位置が揃っていない').toBeLessThan(0.6);
+  expect(Math.abs(look.thW - look.tdW), '見出しと行の「更新日」の列の幅が揃っていない').toBeLessThan(0.6);
+  // 画面の外の行も DOM に全部ある(ブラウザの検索が見つけられる)
+  expect(look.all).toBe(322);
+  // 画面の外の行へも、押して届く(スクロールして押す)── 最後の行を選べる
+  const last = rows.last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(last, '遠くの行を押しても選べない').toHaveAttribute('data-pkc-selected', /.*/);
+  // ↑ で 1 つ上の行へ焦点が動く(キーボードの近道が格子でも効く)
+  const lastLid = await last.getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowUp');
+  const focusedLid = await page.evaluate(() =>
+    (document.activeElement as HTMLElement | null)?.getAttribute('data-pkc-entry') ?? null,
+  );
+  expect(focusedLid, '↑ を押しても別の行へ焦点が動かない').not.toBe(lastLid);
+  expect(focusedLid, '↑ の先が行ではない').not.toBeNull();
+
   expect(errors).toEqual([]);
 });
 
