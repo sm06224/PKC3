@@ -3431,6 +3431,9 @@ const MENU_TASK_LINES_ATTR = 'data-pkc-menu-task-lines';
  *   `disabled` の箱には無いので、そこでは出ない)。
  */
 function taskRunLinesAt(target: Element, host: HTMLElement | null): number[] | null {
+  // 🔴 付箋の中(#529 W5-c)── 行番号は置いたノートの行で、メニューが運ぶ lid は板のもの。
+  //    出すと板のノートの別の行を書き換える。付箋の中には一括の項目を出さない
+  if (target.closest('[data-pkc-field="place-body"]') !== null) return null;
   const li = target.closest('li.pkc-task-item');
   if (li === null || host === null || !host.contains(li)) return null;
   const list = li.closest('ul, ol');
@@ -3648,6 +3651,17 @@ async function commitPlaceInline(
   } finally {
     el.removeAttribute('data-pkc-busy');
   }
+}
+
+/**
+ * 🔴 **付箋の中身(`place-body`)の中のチェックなら、置いたノートの lid**(#529 W5-c)。それ以外は `null`。
+ * ⚠ 引くのは付箋の枠の `data-pkc-place-entry` ── 板のノートの lid でも `selectedLid` でもない。
+ */
+function placedTaskLidOf(from: Element): string | null {
+  const slot = from.closest('[data-pkc-field="place-body"]');
+  if (slot === null) return null;
+  const lid = slot.closest('.pkc-place[data-pkc-place-entry]')?.getAttribute('data-pkc-place-entry') ?? '';
+  return lid === '' ? null : lid;
 }
 
 /** 押した付箋(`.pkc-place[data-pkc-place-entry]`)と、それを含む本文の器。 */
@@ -8292,7 +8306,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to });
     });
   },
-  'toggle-task': (dispatcher, target) => {
+  'toggle-task': (dispatcher, target, services) => {
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);
     if (raw === null || !Number.isInteger(line) || line < 0) return;
@@ -8310,7 +8324,13 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   `data-pkc-split-lid` を焼くので、`data-pkc-entry` だけを見ていると
      *   **主の枠のノートへ落ちる**。引き方は `lid-of-node.ts` の 1 か所へ寄せた。
      */
-    const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
+    /**
+     * 🔴 **板の付箋の中のチェックは、付箋が置いたノートの行**(#529 W5-c)。
+     * ⚠ 付箋の枠は `data-pkc-entry` を持たない ── `lidOfNode` に任せると**板のノート自身**へ落ち、
+     *   板の同じ行番号を書き換える(いちばん静かなデータ破壊)。だから付箋の枠から先に引く。
+     */
+    const placedLid = placedTaskLidOf(target);
+    const lid = placedLid ?? lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
     if (lid === null || lid === undefined) return;
     /**
      * 🔴 **断りは lid で判定する**(C6 / #1043)。⚠ 直す前は `phase` だけを見ており、
@@ -8320,6 +8340,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}チェックしてください` });
+      return;
+    }
+    if (placedLid !== null) {
+      // 🔴 別のタブ・窓が**そのノートを編集中**なら断る(追記・題名と同じ門。押した印は動かさない)
+      void editedElsewhereReason(dispatcher, services, placedLid).then((why) => {
+        if (why !== null) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+          return;
+        }
+        dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line });
+      });
       return;
     }
     /**

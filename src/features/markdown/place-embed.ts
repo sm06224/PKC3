@@ -12,7 +12,7 @@
  * 設計 doc §6 / §8 の W3。覆す条件(PKC2 の transclusion が持っていた制約)を引き継ぐ:
  * **深さ ≤ 1**(置いたノートの中の板は展開せず題名だけの行へ降ろす)/ **id は枠ごとの接頭辞つきで残す**
  * (`place-<n>-`。素の id だと host の目次ジャンプと衝突する ── `adapter/ui/render/place-embed.ts` の
- * `sanitizeEmbedded`)/ チェック・表は**読み取り専用**(押せる旗を渡さない)/
+ * `sanitizeEmbedded`)/ 表は**読み取り専用**(押せる旗を渡さない)・チェックだけ押せる(#529 W5-c)/
  * **自分自身を置いた塊は展開しない**(循環は深さ ≤ 1 が既に止める)。
  *
  * ## 🔑 ここが持つのは「画面に出す量・大きさ」の定数と、型で決める関数だけ
@@ -21,7 +21,7 @@
  * **同じ値・同じ判定**を読む(§7 ── 2 か所に書かない)。数の根拠は
  * `docs/development/place-embed-measure-2026-10.md`(W3-③ の実測)。
  */
-import { bodyBelowFrontmatter } from './frontmatter';
+import { bodyBelowFrontmatter, frontmatterLineCount } from './frontmatter';
 import { readAttachmentMeta } from '../flavor/attachment-flavor';
 import { assetPreviewKind } from '../asset/asset-preview-kind';
 
@@ -111,6 +111,13 @@ export interface PlaceExcerpt {
    * ⚠ 「読み込んでいます」のまま止めないための印。書込が届けば(`syncShownBodies`)通常の抜粋に戻る。
    */
   readonly gone?: true;
+  /**
+   * 🔴 **`text` の先頭が、ノートの原文の何行目か**(0 始まり。#529 W5-c)── 剥がした設定行(frontmatter)の行数。
+   * ⚠ 付箋の中のチェックを押すと**そのノートの原文の行**を書き換える(受け手は原文を splice する)ので、
+   *   描く側はこの値を行番号に足して焼く(本文の面の `taskLineOffset` と同じ 1 つの規則)。
+   * 設定行が無ければ**付かない**(0 と同じ)。見出しの節の抜粋には**付かない**(節は押せない)。
+   */
+  readonly lineOffset?: number;
 }
 
 /**
@@ -149,7 +156,8 @@ export function sameExcerpt(a: PlaceExcerpt, b: PlaceExcerpt): boolean {
     a.att?.mime === b.att?.mime &&
     a.att?.kind === b.att?.kind &&
     a.missing === b.missing &&
-    a.gone === b.gone
+    a.gone === b.gone &&
+    (a.lineOffset ?? 0) === (b.lineOffset ?? 0)
   );
 }
 
@@ -170,7 +178,9 @@ export function excerptOf(body: string, archetype?: string): PlaceExcerpt {
     if (meta.assetKey === null || (kind !== 'image' && kind !== 'pdf')) return { text: '', cut: false };
     return { text: '', cut: false, att: { key: meta.assetKey, mime: meta.mime, kind } };
   }
-  return clipText(bodyBelowFrontmatter(body));
+  const ex = clipText(bodyBelowFrontmatter(body));
+  const lineOffset = frontmatterLineCount(body);
+  return lineOffset > 0 ? { ...ex, lineOffset } : ex;
 }
 
 /**

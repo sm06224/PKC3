@@ -643,7 +643,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   await expect(bigBody.locator('table')).toHaveCount(1);
   const cb = bigBody.locator('input[type="checkbox"]');
   await expect(cb, '台の前提:チェックが出ていない').toHaveCount(1);
-  await expect(cb, 'チェックが押せる形で出ている').toBeDisabled();
+  await expect(cb, '付箋の中のチェックが押せる形で出ていない(#529 W5-c)').toBeEnabled();
   await expect(dflt.locator(':scope > [data-pkc-field="place-body"]')).toContainText('みじかい本文');
 
   /**
@@ -798,8 +798,20 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // 🔴 チェックの枠を押しても、何も書かれない(開き直した相手のチェックは空のまま)
-  await cb.click({ force: true });
+  /**
+   * 🔴 **付箋の中のチェックを押すと、置いたノートの本文が書き換わる**(#529 W5-c。Gemini 裁定 2026-10-11 依頼 18 Q4 = A)。
+   * ⚠ 実ブラウザでしか見られない所:押した印が付箋の中で**付いたままになる**(読む面と同じく、描き直された
+   *   付箋が置いたノートの新しい本文から出る)/ 選んでいるノートは**板のまま**(押しただけで置いたノートへ移らない)/
+   *   開き直した相手のノートの本文にも**同じ印が付いている**(書き換わったのは置いたノート)。
+   * 🔑 対照群:押す前は相手のチェックが空であることを、先に見る。
+   */
+  await expect(cb, '台の前提:押す前からチェックが付いている').not.toBeChecked();
+  await cb.click();
+  await expect(cb, '押したチェックが付箋の中で付かない(書けていない / 描き直されていない)').toBeChecked();
+  await expect(
+    page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
+    'チェックを押しただけで、選んでいるノートが付箋の相手に替わった',
+  ).toHaveText('板');
   await clickReal(page, '#big [data-pkc-field="place-card"]');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-title"]'),
@@ -807,8 +819,8 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   ).toHaveText('相手のノート');
   await expect(
     page.locator('[data-pkc-region="detail"] [data-pkc-field="detail-body"] input.pkc-task-checkbox'),
-    '板から押したチェックが相手に書かれた',
-  ).not.toBeChecked();
+    '板から押したチェックが相手に書かれていない',
+  ).toBeChecked();
 
   /**
    * ── 🔴 **図・画像・添付ノート・同じノート 2 枚**(#529 W3-②)。
