@@ -12,7 +12,7 @@ import {
   ARCHIVE_FORMAT,
   type ArchiveSource,
 } from '../../src/features/export/pkc3-archive';
-import { readZipEntry, readZipDirectory } from '../../src/features/import/zip-reader';
+import { readAssetSource, readZipEntry, readZipDirectory } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf } from './zip-fixture';
 
 const enc = new TextEncoder();
@@ -171,7 +171,7 @@ describe('アーカイブ ZIP — round-trip', () => {
     const got = await readArchive(out.blob);
 
     expect(got.assets).toEqual([{ key: 'k1', mime: 'image/png', size: 8, hash: 'abc' }]);
-    const blob = await readZipEntry(out.blob, got.assetSources.get('k1')!.entry);
+    const blob = await readAssetSource(got.assetSources.get('k1')!);
     expect(await blob.text()).toBe('PNGBYTES');
     expect(got.warnings).toEqual([]);
   });
@@ -370,7 +370,7 @@ describe('アーカイブ ZIP — 常駐量の性質', () => {
     const out = await writeArchive(src, NOW);
     const got = await readArchive(out.blob);
     for (const k of ['a', 'b']) {
-      const blob = await readZipEntry(out.blob, got.assetSources.get(k)!.entry);
+      const blob = await readAssetSource(got.assetSources.get(k)!);
       expect(await blob.text()).toBe('AAAA');
     }
   });

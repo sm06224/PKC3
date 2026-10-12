@@ -21,8 +21,13 @@
  * 自然に拒否する。**PKC2 の形に寄せる制約が無いので素直な形を選べる。**
  */
 import { ZipWriter, type ZipPart } from './zip-writer';
-import { readZipDirectory, readZipText, ZipReadError } from '../import/zip-reader';
-import { createWarnCollector } from './warn-cap';
+import {
+  readZipDirectory,
+  readZipText,
+  ZipReadError,
+  type ReadableAssetSource,
+} from '../import/zip-reader';
+import { createWarnCollector, type WarnCollector } from './warn-cap';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
@@ -168,6 +173,67 @@ export interface ArchiveResult {
   counts: { entries: number; relations: number; revisions: number; assets: number };
 }
 
+/**
+ * 🔑 **書き出し行 → アーカイブの形**への写し ── 書き出し(`writeArchive`)と、PKC3 入り HTML の取り込み
+ * (`import-portable.ts`。zip を作らず直に `Pkc3Archive` を組む)が**同じ 1 つ**を通る。
+ * 規則(null の正規化・field の名前)を 2 か所に持たない。
+ */
+type EntryMetaRowLike = Awaited<ReturnType<ArchiveSource['listEntryMetas']>>[number];
+type RelationRowLike = Awaited<ReturnType<ArchiveSource['listRelations']>>[number];
+type AssetMetaRowLike = Awaited<ReturnType<ArchiveSource['listAssetMetas']>>[number];
+type RevisionRowLike = Awaited<ReturnType<ArchiveSource['getRevisionChain']>>[number];
+
+export function toArchiveEntry(m: EntryMetaRowLike, body: string): ArchiveEntry {
+  return {
+    lid: m.lid,
+    title: m.title,
+    archetype: m.archetype,
+    createdAt: m.created_at,
+    updatedAt: m.updated_at,
+    entryOrder: m.entry_order,
+    status: m.status,
+    date: m.date,
+    archived: m.archived !== 0,
+    body,
+  };
+}
+
+export function toArchiveRelation(r: RelationRowLike): ArchiveRelation {
+  return {
+    id: r.id,
+    fromLid: r.from_lid,
+    toLid: r.to_lid,
+    kind: r.kind,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function toArchiveRevision(lid: string, rv: RevisionRowLike): ArchiveRevision {
+  return {
+    id: `${lid}#${rv.revOrder}`,
+    entryLid: lid,
+    revOrder: rv.revOrder,
+    createdAt: rv.createdAt,
+    title: rv.title,
+    archetype: rv.archetype,
+    kind: rv.kind,
+    snapshot: rv.snapshot,
+    // 🔴 復元側の噛み合わせ検査に使う ── **落とすと検査が丸ごと無効化される**
+    contentHash: rv.contentHash,
+  };
+}
+
+export function toArchiveAsset(a: AssetMetaRowLike): ArchiveAsset {
+  return {
+    key: a.key,
+    // 読み手に「null かも」を持ち回らせない ── 書出しの時点で決める
+    mime: a.mime ?? 'application/octet-stream',
+    size: a.size ?? 0,
+    hash: a.hash,
+  };
+}
+
 const j = (v: unknown): string => JSON.stringify(v);
 
 /**
@@ -203,18 +269,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
         warn.add('orphan-body', '一覧に無いノートの注意', `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`);
         continue;
       }
-      const e: ArchiveEntry = {
-        lid: m.lid,
-        title: m.title,
-        archetype: m.archetype,
-        createdAt: m.created_at,
-        updatedAt: m.updated_at,
-        entryOrder: m.entry_order,
-        status: m.status,
-        date: m.date,
-        archived: m.archived !== 0,
-        body: r.body,
-      };
+      const e = toArchiveEntry(m, r.body);
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
     }
@@ -231,14 +286,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   const relations = await src.listRelations();
   parts.push('],"relations":[');
   relations.forEach((r, i) => {
-    const rel: ArchiveRelation = {
-      id: r.id,
-      fromLid: r.from_lid,
-      toLid: r.to_lid,
-      kind: r.kind,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    };
+    const rel = toArchiveRelation(r);
     parts.push(i === 0 ? j(rel) : `,${j(rel)}`);
   });
 
@@ -250,18 +298,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
     // 復元しており、`kind: 'patch'` の行に全文が入る = **中身と食い違う**
     // アーカイブを書いていた(復元を実装した瞬間に壊れる)
     for (const rv of await src.getRevisionChain(lid)) {
-      const rev: ArchiveRevision = {
-        id: `${lid}#${rv.revOrder}`,
-        entryLid: lid,
-        revOrder: rv.revOrder,
-        createdAt: rv.createdAt,
-        title: rv.title,
-        archetype: rv.archetype,
-        kind: rv.kind,
-        snapshot: rv.snapshot,
-        // 🔴 復元側の噛み合わせ検査に使う ── **落とすと検査が丸ごと無効化される**
-        contentHash: rv.contentHash,
-      };
+      const rev = toArchiveRevision(lid, rv);
       parts.push(revCount === 0 ? j(rev) : `,${j(rev)}`);
       revCount++;
     }
@@ -271,13 +308,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   const assetMetas = await src.listAssetMetas();
   parts.push('],"assets":[');
   assetMetas.forEach((a, i) => {
-    const meta: ArchiveAsset = {
-      key: a.key,
-      // 読み手に「null かも」を持ち回らせない ── 書出しの時点で決める
-      mime: a.mime ?? 'application/octet-stream',
-      size: a.size ?? 0,
-      hash: a.hash,
-    };
+    const meta = toArchiveAsset(a);
     parts.push(i === 0 ? j(meta) : `,${j(meta)}`);
   });
   // 🔴 タグの色(#1457)── 1 つも無ければキーごと書かない(旧い読み手にも同じ形のまま)
@@ -344,7 +375,7 @@ export interface Pkc3Archive {
   /** タグの色(#1457)。無いバックアップ・読めない要素は空 / 落とす(`warnings` で言う)。 */
   tagColors: TagColorEntry[];
   /** asset key → bytes(**まだ読んでいない**。adapter が 1 件ずつ流す)。 */
-  assetSources: Map<string, { zip: Blob; entry: import('../import/zip-reader').ZipEntry }>;
+  assetSources: Map<string, ReadableAssetSource>;
   warnings: string[];
 }
 
@@ -369,6 +400,33 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
     if (e instanceof ZipReadError) throw e;
     throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
+  checkArchiveManifest(manifest);
+
+  let c: ArchiveContainerJson;
+  try {
+    c = JSON.parse(await readZipText(zip, only(CONTAINER))) as ArchiveContainerJson;
+  } catch (e) {
+    if (e instanceof ZipReadError) throw e;
+    throw new ZipReadError(`バックアップの中のノートのデータ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
+  }
+  checkArchiveContainer(c); // ⚠ 添付の目録(下)より先に断る ── 断る順番は変えない
+  const assetSources = new Map<string, ReadableAssetSource>();
+  for (const e of dir) {
+    if (e.isDirectory || !e.name.startsWith(ASSET_PREFIX)) continue;
+    const key = e.name.slice(ASSET_PREFIX.length);
+    if (key === '' || key.includes('/')) {
+      warn.add('stray-file', '想定外のファイル', `assets/ の中の想定外のファイルを無視しました: ${e.name}`);
+      continue;
+    }
+    if (assetSources.has(key)) throw new ZipReadError(`添付の ID が重複しています: ${key}`);
+    assetSources.set(key, { zip, entry: e });
+  }
+
+  return assembleArchive(manifest, c, assetSources, warnings, warn);
+}
+
+/** 構成定義(manifest)の形を検める。⚠ zip 経路と PKC3 入り HTML の経路が**同じ 1 つ**を通る。 */
+export function checkArchiveManifest(manifest: Pkc3Archive['manifest'] | undefined): void {
   if (manifest?.format !== ARCHIVE_FORMAT) {
     throw new ZipReadError(
       `PKC3 のバックアップではありません(format=${String(manifest?.format)})`,
@@ -384,35 +442,39 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
       `PKC3 が読めるバックアップのバージョンは ${ARCHIVE_MIN_VERSION}〜${ARCHIVE_VERSION} です(このファイルは ${String(version)})`,
     );
   }
+}
 
-  let c: {
-    entries?: ArchiveEntry[];
-    relations?: ArchiveRelation[];
-    revisions?: ArchiveRevision[];
-    assets?: ArchiveAsset[];
-    tagColors?: unknown;
-  };
-  try {
-    c = JSON.parse(await readZipText(zip, only(CONTAINER))) as typeof c;
-  } catch (e) {
-    if (e instanceof ZipReadError) throw e;
-    throw new ZipReadError(`バックアップの中のノートのデータ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
-  }
+/** ノートの記載(entries)が無いものは断る。 */
+export function checkArchiveContainer(c: ArchiveContainerJson): asserts c is ArchiveContainerJson & { entries: ArchiveEntry[] } {
   if (!Array.isArray(c.entries)) {
     throw new ZipReadError(`バックアップの中のノートのデータ(${CONTAINER})に、ノート(entries)の記載がありません。別のバックアップファイルを選んでください`);
   }
+}
 
-  const assetSources = new Map<string, { zip: Blob; entry: import('../import/zip-reader').ZipEntry }>();
-  for (const e of dir) {
-    if (e.isDirectory || !e.name.startsWith(ASSET_PREFIX)) continue;
-    const key = e.name.slice(ASSET_PREFIX.length);
-    if (key === '' || key.includes('/')) {
-      warn.add('stray-file', '想定外のファイル', `assets/ の中の想定外のファイルを無視しました: ${e.name}`);
-      continue;
-    }
-    if (assetSources.has(key)) throw new ZipReadError(`添付の ID が重複しています: ${key}`);
-    assetSources.set(key, { zip, entry: e });
-  }
+/** `container.json` の中身(JSON として読んだ形)。 */
+export interface ArchiveContainerJson {
+  entries?: ArchiveEntry[];
+  relations?: ArchiveRelation[];
+  revisions?: ArchiveRevision[];
+  assets?: ArchiveAsset[];
+  tagColors?: unknown;
+}
+
+/**
+ * 🔑 **読んだ中身 → `Pkc3Archive`** の検めと整え。zip を読む `readArchive` と、zip を作らずに
+ * 直に組む PKC3 入り HTML の取り込みが、**この 1 つ**を通る(検め・警告・版の読み替えを 2 か所に持たない)。
+ * ⚠ `manifest` は `checkArchiveManifest` を通した後のものを渡す。
+ */
+export function assembleArchive(
+  manifest: Pkc3Archive['manifest'],
+  c: ArchiveContainerJson,
+  assetSources: Map<string, ReadableAssetSource>,
+  warnings: string[],
+  /** 同じ注意の畳みを zip の目録の注意と共有するときに渡す(無ければここで作る)。 */
+  warn: WarnCollector = createWarnCollector(warnings),
+): Pkc3Archive {
+  const version = manifest.version;
+  checkArchiveContainer(c);
 
   // manifest のカウンタと中身を照合する(PKC2 は読んでさえいなかった)
   const counts = (manifest as { counts?: Record<string, number> }).counts ?? {};
