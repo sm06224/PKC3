@@ -1445,6 +1445,13 @@ export function pickCommandInApp(
           keys.textContent = r.keys.join(' / ');
           btn.append(keys);
         }
+        if (r.scene !== undefined && r.scene !== '') {
+          // 🔑 場面の名前は行の右端に薄く 1 語(見出しの節は作らない ── 絞り込みが探し方の主役)
+          const scene = document.createElement('span');
+          scene.setAttribute('data-pkc-field', 'palette-scene');
+          scene.textContent = r.scene;
+          btn.append(scene);
+        }
         if (r.why !== '') {
           const why = document.createElement('span');
           why.setAttribute('data-pkc-field', 'palette-why');

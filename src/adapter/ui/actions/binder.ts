@@ -4561,8 +4561,25 @@ export const ROW_HOST_SELECTOR = ROW_HOST_REGIONS.map((r) => `[data-pkc-region="
  */
 const ROOT_SERVICES = new WeakMap<HTMLElement, BinderServices>();
 
+/** 「選択範囲をコピー」を、控えた選択が無いまま呼んだときの理由。 */
+const SELECTION_FIRST = '本文の中を選択してから呼んでください';
+
 /** 配線が落ちた版で「マニュアルを別のウィンドウで開く」を押したときの字(押しボタンと特例で同じ 1 つ)。 */
 const MANUAL_WINDOW_STALE = 'このタブの PKC3 が古いままのため、マニュアルのウィンドウを開けません。再読み込みしてください';
+
+/**
+ * 🔴 **「操作を探す」を開いた瞬間の、読む面の選択**(Markdown の原文)。#582 段③ の「選択範囲をコピー」が読む。
+ *
+ * ⚠ 一覧を開くと読む面の選択は消える(実ブラウザで測った)ので、開く前に**字として**控える。
+ *   ⚠ Range は持たない ── 描き直しで節点が消えても、控えた字は変わらない。
+ * ⚠ 閉じたら必ず捨てる(`openPaletteFor` の `finally`)── 古い選択で次の呼び出しがコピーしない。
+ * ⚠ `root` を添える ── 別の root(test が何百も作る)の控えを拾わない。
+ */
+interface PaletteSelection {
+  readonly root: HTMLElement;
+  readonly text: string;
+}
+let paletteSelection: PaletteSelection | null = null;
 
 export function runGlobalCommand(
   cmd: string,
@@ -4826,6 +4843,27 @@ export function runGlobalCommand(
     return true;
   }
   /**
+   * 🔴 **選択範囲をコピー**(#582 段③。🟣 Gemini の回答 = #1163 の依頼 22 の Q3 = A)── 「操作を探す」を開いた瞬間に控えた
+   *   読む面の選択(Markdown の原文)をコピーする。押しボタン(`copy-selection-md`)は選択が消えると押せなくなるので、
+   *   一覧からは `SHORTCUT_BUTTON` ではなく控え(`paletteSelection`)を読む特例にする。
+   * ⚠ **控えが無ければ押せない**(`dry` では偽 = 一覧が「本文の中を選択してから呼んでください」と灰色で言う)。
+   *   鍵・左の `>` の一覧には控えが無いので、いつも押せない側になる(選択が消えた後に呼べる顔をしない)。
+   * ⚠ 控えているのは**字**であって Range ではない ── 描き直しで節点が消えても、開いたときの選択をそのままコピーできる。
+   */
+  if (cmd === 'copy-selection-md') {
+    const memo = paletteSelection;
+    if (memo === null || memo.root !== root) return false;
+    if (dry) return true;
+    prevent();
+    const btn = root.querySelector<HTMLElement>('[data-pkc-action="copy-selection-md"]');
+    void copyPlainText(memo.text).then((ok) => {
+      if (!ok) dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+      else if (btn !== null) flashCopied(btn);
+      else notify('選択範囲をコピーしました');
+    });
+    return true;
+  }
+  /**
    * 🔴 **このノートを Markdown で書き出す**(#1440)── 押しボタンを持たないので特例で直に呼ぶ。
    * 実体は右クリックの `export-entry-markdown` と同じ `services.exportEntryMarkdown`(`ROOT_SERVICES` から引く)。
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
@@ -5072,6 +5110,8 @@ export function commandRowsFor(
   keymap: KeymapStore,
   query: string,
   target: HTMLTextAreaElement | null,
+  /** 🔴 「操作を探す」の面から呼んでいるか(左の `>` の一覧は偽)。「選択範囲をコピー」の押せない理由の言い方が変わる。 */
+  inPalette = false,
 ): readonly PaletteRow[] {
   const ready = new Set<string>();
   for (const c of KEY_COMMANDS) {
@@ -5119,6 +5159,9 @@ export function commandRowsFor(
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
     if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
+    // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
+    if (id === 'copy-selection-md')
+      return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;
     // 「マニュアルを別のウィンドウで開く」(#1452 案 1)── 押せないのは配線が無い版だけ(phase では断らない)
     if (id === 'open-manual-window') return ROOT_SERVICES.get(root)?.openManualWindow === undefined ? MANUAL_WINDOW_STALE : null;
     const sel = SHORTCUT_BUTTON[id];
@@ -5256,7 +5299,16 @@ export function openPaletteFor(
   const restoreField = target ?? formatTarget(root);
   const restoreRange =
     restoreField === null ? null : { start: restoreField.selectionStart, end: restoreField.selectionEnd };
-  const rows = (query: string) => commandRowsFor(root, dispatcher, keymap, query, target);
+  /**
+   * 🔴 **読む面の選択を、開く前に字として控える**(#582 段③「選択範囲をコピー」)。
+   * ⚠ 一覧が開くと選択は消える。ここで読むのは**開く操作の同期の中**(まだ選択が残っている間)。閉じたら `finally` で捨てる。
+   */
+  const selBody = dispatcher.getState().openBody?.body;
+  const selHost = viewBodyHost(root);
+  const selText = selBody !== undefined && selHost !== null ? selectedMarkdown(selHost, selBody) : null;
+  const selMemo: PaletteSelection | null = selText === null ? null : { root, text: selText };
+  paletteSelection = selMemo;
+  const rows = (query: string) => commandRowsFor(root, dispatcher, keymap, query, target, true);
   /**
    * 🔴 **「操作を探す」も、左の `>` と同じ「最近使った操作」を使う**(#274 Q3 = A)。⚠ 記録は 1 つ
    *   (`appRecentCommands`)── 開くたびに保存を引く(別のタブで使った物も出る)。
@@ -5335,6 +5387,9 @@ export function openPaletteFor(
       return;
     }
     if (applyFormatTo(target, picked, range ?? undefined, notify)) appRecentCommands.push(picked);
+  }).finally(() => {
+    // 控えは閉じたら捨てる(別の呼び出しが古い選択をコピーしない)。別の開き直しが上書き済みなら触らない
+    if (paletteSelection === selMemo) paletteSelection = null;
   });
 }
 

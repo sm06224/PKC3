@@ -841,6 +841,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: 'コピー 書式 リッチ HTML Word メール 貼り付け',
   },
   {
+    id: 'copy-selection-md',
+    label: '選択範囲をコピー',
+    contexts: ['global'],
+    defaults: [],
+    note: '読んでいる本文で選んだ範囲を、Markdown の原文のままコピーします(本文の中を選択してから「操作を探す」を開いたときだけ効きます)',
+    alias: 'コピー 選択 範囲 マークダウン md 原文 クリップボード',
+  },
+  {
     id: 'export-messages',
     label: 'メッセージを書き出す',
     contexts: ['global'],

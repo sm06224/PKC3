@@ -9234,6 +9234,18 @@ h3[data-pkc-section] {
   font-size: 11px;
   white-space: nowrap;
 }
+/* 場面の名前(「ノート」「予定」…)は行の右端に薄く 1 語。割当が在れば割当の右、無ければ名前の直後から右端へ寄せる。
+ * 色は既存の控えめな字(`--muted`)── 新しい色は足さない。 */
+[data-pkc-field='palette-scene'],
+[data-pkc-field='command-scene'] {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+[data-pkc-field='palette-label'] + [data-pkc-field='palette-scene'],
+[data-pkc-field='command-label'] + [data-pkc-field='command-scene'] {
+  margin-inline-start: auto;
+}
 [data-pkc-field='palette-why'],
 [data-pkc-field='command-why'],
 [data-pkc-field='entry-pick-kind'] {
