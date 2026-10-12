@@ -105,7 +105,7 @@ import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
 import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
 import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transport/webmcp-tools';
-import { appendAndSettle } from '@adapter/state/append-settle';
+import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
@@ -1819,6 +1819,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   const showStatus = (text: string, opts?: StatusOptions): void => statusNotices!.show(text, opts);
   /**
+   * 🔴 別のタブ・窓が編集中のノートへ書き足さないための問い合わせ口(#529 W5-d)。本文の下の追記欄・PDF の窓・
+   * ブラウザの AI の書き足しが**同じ 1 本**を通る(`edited-elsewhere.ts`)。⚠ `sync` は昇格で実体が替わるので
+   * **呼ぶたびに読む**(binder に渡す同名の 2 つと同じ作法)。
+   */
+  const editLockPort: EditLockPort = {
+    acquireEditLock: (lid) => sync.acquireEdit(cid, lid),
+    releaseEditLock: (lid) => {
+      sync.releaseEdit(cid, lid);
+    },
+  };
+  /**
    * 🔴 **PDF を PKC の画面で読む窓**(#275 段①。設定で選んだ人だけ ── 呼ぶのは `viewAsset`)。
    * ⚠ **最初に使うときまで作らない**(放送の口を使わない人に開かない)。窓の合図は全部ここへ来る。
    * ⚠ ここは**配線だけ**である ── 開く / 渡す / 受ける作法は `PdfReaderHost`、引く先と形は
@@ -1867,7 +1878,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let pdfHost: PdfReaderHost | null = null;
   const pdfReaderHost = (): PdfReaderHost => {
     pdfHost ??= new PdfReaderHost({
-      onQuote: (session, text, page) => quoteIntoNote(dispatcher, session, text, page, showStatus),
+      onQuote: (session, text, page) =>
+        quoteIntoNote(dispatcher, session, text, page, showStatus, undefined, editLockPort),
       onEdited: (session, key) => pdfSaveEdited.receive(session, key),
       onFellBack: (session) =>
         showStatus(`「${session.name}」は PDF ビューアで読めなかったため、ブラウザ標準の PDF 表示で開きました`, {
@@ -2065,7 +2077,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     createEntry: createEntryFromOutside,
     // 🔴 書き足しは既存の追記の 1 本(PDF の「ノートへ引く」と同じ `appendAndSettle`)
     append: (id: string, text: string, heading: string | null) =>
-      appendAndSettle(dispatcher, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
+      appendUnlessEditedElsewhere(dispatcher, editLockPort, id, text, heading, AGENT_APPEND_SETTLE_TIMEOUT_MS),
     gate: agentGate,
   };
   /**
