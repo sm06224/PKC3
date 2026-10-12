@@ -660,11 +660,17 @@
   // (2026-10-11 の着地前レビューで実測: 共有 Resources の Form XObject に書いた字が、1 ページだけ残した出力に在った)。
   // 残すページの content stream が**実際に使う名前**だけを残した別の Resources を作って付け替え、
   // 付け替えて辿れなくなった物は出力から捨てる(`dropUnreachable`)。
-  // ⚠ 保証するのは **XObject / Pattern / Shading / Font / ExtGState**(ColorSpace・Properties・ProcSet はそのまま)。
+  // ⚠ 保証するのは **XObject / Pattern / Shading / Font / ExtGState / ColorSpace / Properties**(ProcSet はそのまま ── 名前を持たない)。
+  //   ColorSpace(ICC プロファイルを持ちうる)と Properties(BDC / DP の印の属性。名前・情報を持ちうる)は、外したページだけが
+  //   使っていた物が共有 Resources に乗って来る(#275)。残すページの注釈の外観(`/AP`)の部品も同じ道で刈る。
+  // ⚠ ColorSpace の `DefaultGray` / `DefaultRGB` / `DefaultCMYK` は content に名前が出ないまま効くので、**常に残す**。
+  //   画像 XObject の `/ColorSpace /名前` と、残す ColorSpace の配列の中の名前も「使う」と数える(多めに残す側)。
   // ⚠ 名前の拾い方は**多めに残す側**(content 中の `/名前` を全部「使う」と数える)── 足りないと残すページが壊れる。
   // ⚠ content が読めない(未対応の圧縮)ときは刈らずに **leaked で断る**(漏れるより断る)。
 
-  var PRUNED = ['XObject', 'Pattern', 'Shading', 'Font', 'ExtGState'];
+  var PRUNED = ['XObject', 'Pattern', 'Shading', 'Font', 'ExtGState', 'ColorSpace', 'Properties'];
+  /** content に名前が出ないまま効く部品(ColorSpace の既定)。 */
+  var IMPLICIT = { ColorSpace: ['DefaultGray', 'DefaultRGB', 'DefaultCMYK'] };
 
   /** content の `/名前` を全部集める(生の綴りと、`#xx` を戻した綴りの両方)。 */
   function addNames(set, bytes) {
@@ -721,12 +727,14 @@
    * `res`(Resources)を、`used` の名前だけ残した別の辞書にして `assign` で付け替える。
    * 中で使う Form XObject は、自前の Resources があれば再帰で同じように刈り、無ければその中の名前も `used` に足す
    * (持たない Form は呼び元の Resources を使うため)。
+   * @returns 落とした部品の数(出力の読み直しで 0 であることが、最後の門の一部)
    */
   function pruneResources(PDFLib, ctx, res, used, seenForms, assign) {
     var N = PDFLib.PDFName;
     var D = PDFLib.PDFDict;
     var xo = res.lookup(N.of('XObject'));
     var walked = {};
+    var dropped = 0;
     var again = true;
     while (again) {
       again = false;
@@ -736,6 +744,11 @@
           if (walked[id] || !isUsed(used, pair[0])) return;
           walked[id] = true;
           var obj = xo.lookup(pair[0]);
+          if (isStream(PDFLib, obj) && obj.dict.lookup(N.of('Subtype')) === N.of('Image')) {
+            // 画像の `/ColorSpace /名前` は、呼び元の Resources の ColorSpace を引くことがある(多めに残す)
+            var ics = obj.dict.lookup(N.of('ColorSpace'));
+            if (ics instanceof PDFLib.PDFName) used.add(ics.asString().slice(1));
+          }
           if (!isStream(PDFLib, obj) || obj.dict.lookup(N.of('Subtype')) !== N.of('Form')) return;
           var bytes = streamBytes(PDFLib, obj);
           var own = obj.dict.lookup(N.of('Resources'));
@@ -744,13 +757,33 @@
             seenForms.add(obj);
             var inner = new Set();
             addNames(inner, bytes);
-            pruneResources(PDFLib, ctx, own, inner, seenForms, function (r) {
+            dropped += pruneResources(PDFLib, ctx, own, inner, seenForms, function (r) {
               obj.dict.set(N.of('Resources'), r);
             });
           } else {
             addNames(used, bytes);
             again = true;
           }
+        });
+      }
+    }
+    // 残す ColorSpace の配列の中の名前(`[/Indexed /Cs2 ...]` など)も使う印に数える(固定点まで)
+    var cs = res.lookup(N.of('ColorSpace'));
+    if (cs instanceof D) {
+      var grew = true;
+      while (grew) {
+        grew = false;
+        cs.entries().forEach(function (e) {
+          var nm = e[0].asString().slice(1);
+          if (!isUsed(used, e[0]) && IMPLICIT.ColorSpace.indexOf(nm) === -1) return;
+          var v = cs.lookup(e[0]);
+          if (!(v instanceof PDFLib.PDFArray)) return;
+          v.asArray().forEach(function (x) {
+            if (x instanceof PDFLib.PDFName && !used.has(x.asString().slice(1))) {
+              used.add(x.asString().slice(1));
+              grew = true;
+            }
+          });
         });
       }
     }
@@ -765,23 +798,71 @@
       }
       var kept = ctx.obj({});
       sub.entries().forEach(function (e) {
-        if (isUsed(used, e[0])) kept.set(e[0], e[1]);
+        var implicit = (IMPLICIT[kind] || []).indexOf(e[0].asString().slice(1)) !== -1;
+        if (implicit || isUsed(used, e[0])) kept.set(e[0], e[1]);
+        else dropped += 1;
       });
       fresh.set(key, kept);
     });
     assign(fresh);
+    return dropped;
   }
 
+  /** 注釈の外観(`/AP` の /N /R /D。状態ごとの辞書も)の Form stream。 */
+  function annotAppearances(PDFLib, node) {
+    var N = PDFLib.PDFName;
+    var out = [];
+    var annots = node.lookup(N.of('Annots'));
+    if (!(annots instanceof PDFLib.PDFArray)) return out;
+    for (var i = 0; i < annots.size(); i += 1) {
+      var a = annots.lookup(i);
+      if (!(a instanceof PDFLib.PDFDict)) continue;
+      var ap = a.lookup(N.of('AP'));
+      if (!(ap instanceof PDFLib.PDFDict)) continue;
+      ['N', 'R', 'D'].forEach(function (k) {
+        var v = ap.lookup(N.of(k));
+        if (isStream(PDFLib, v)) out.push(v);
+        else if (v instanceof PDFLib.PDFDict) {
+          v.entries().forEach(function (p) {
+            var one = v.lookup(p[0]);
+            if (isStream(PDFLib, one)) out.push(one);
+          });
+        }
+      });
+    }
+    return out;
+  }
+
+  /** @returns 落とした部品の数 */
   function pruneOutputPage(PDFLib, ctx, node, seenForms) {
-    var res = node.Resources();
-    if (!(res instanceof PDFLib.PDFDict)) return;
+    var N = PDFLib.PDFName;
     var used = new Set();
+    var dropped = 0;
     pageStreams(PDFLib, node).forEach(function (st) {
       addNames(used, streamBytes(PDFLib, st));
     });
-    pruneResources(PDFLib, ctx, res, used, seenForms, function (r) {
-      node.set(PDFLib.PDFName.of('Resources'), r);
+    // 残す注釈の外観: 自前の Resources があればそこを刈り、無ければページの Resources を使うので名前をページへ足す
+    annotAppearances(PDFLib, node).forEach(function (ap) {
+      var bytes = streamBytes(PDFLib, ap);
+      var own = ap.dict.lookup(N.of('Resources'));
+      if (own instanceof PDFLib.PDFDict) {
+        if (seenForms.has(ap)) return;
+        seenForms.add(ap);
+        var inner = new Set();
+        addNames(inner, bytes);
+        dropped += pruneResources(PDFLib, ctx, own, inner, seenForms, function (r) {
+          ap.dict.set(N.of('Resources'), r);
+        });
+      } else {
+        addNames(used, bytes);
+      }
     });
+    var res = node.Resources();
+    if (!(res instanceof PDFLib.PDFDict)) return dropped;
+    dropped += pruneResources(PDFLib, ctx, res, used, seenForms, function (r) {
+      node.set(N.of('Resources'), r);
+    });
+    return dropped;
   }
 
   /** 文書の入口(Root / Info)から辿れる間接オブジェクトの参照の集まり。 */
@@ -837,6 +918,13 @@
     var again = await loadSource(PDFLib, saved);
     if (countPageDicts(PDFLib, again) !== pageCount) throw fail(CODES.leaked);
     if (unreachableRefs(PDFLib, again.context).length > 0) throw fail(CODES.leaked);
+    // 部品の表(Resources)に、使われない名前が残っていないこと(もう一度刈って 0 件。読み直した使い捨ての文書の上で)
+    var seenForms = new Set();
+    var left = 0;
+    again.getPages().forEach(function (page) {
+      left += pruneOutputPage(PDFLib, again.context, page.node, seenForms);
+    });
+    if (left > 0) throw fail(CODES.leaked);
   }
 
   /**
