@@ -458,10 +458,36 @@ test('🔴 塊を跨ぐ Ctrl+Z が実機で効く(行の中は OS の取り消�
   await expect(live).toContainText('最初の段落。');
   await expect(page.locator('[data-pkc-field="row-note"]')).toContainText('取り消しました');
 
-  // ③ 保存して閲覧に戻っても、取り消した後の本文になっている(画面だけの嘘ではない)
+  /**
+   * 🔴 **「すべて置換」の結果が編集欄に映る**(#1579)。新しく起動せず、この道中に足す。
+   * 置換 → 見えている文書が置き換わる → 焦点は置換のボタンのまま Ctrl+Z で置換の前へ戻る
+   * → もう一度置換 → 行を開いて打つ → 保存。**置換が消えない**こと。
+   */
+  const replaceAll = async (find: string, to: string): Promise<void> => {
+    await page.locator('[data-pkc-field="replace-find"]').fill(find);
+    await page.locator('[data-pkc-field="replace-with"]').fill(to);
+    await clickReal(page, '[data-pkc-action="replace-all"]');
+  };
+  await clickReal(page, '[data-pkc-action="toggle-replace"]');
+  await replaceAll('段落', '節');
+  await expect(live).toContainText('最初の節。');
+  await expect(live).not.toContainText('最初の段落。');
+  await page.keyboard.press('Control+z');
+  await expect(live, '置換の直後の Ctrl+Z で置換の前へ戻らない').toContainText('最初の段落。');
+  await replaceAll('段落', '節');
+  await expect(live).toContainText('最初の節。');
+  await live.getByText('最初の節。').click();
+  await expect(row).toBeVisible();
+  await page.keyboard.press('End');
+  await page.keyboard.type('X');
+  await page.keyboard.press('Tab');
+  await expect(row).toHaveCount(0);
+
+  // ③ 保存して閲覧に戻っても、置換と打った字が残っている(画面だけの嘘ではない)
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   const shown = page.locator('[data-pkc-field="detail-body"]');
-  await expect(shown).toContainText('最初の段落。');
+  await expect(shown).toContainText('最初の節。X');
+  await expect(shown).not.toContainText('段落');
   await expect(shown).not.toContainText('1 回目。');
   expect(errors).toEqual([]);
 });
