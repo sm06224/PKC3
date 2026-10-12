@@ -235,6 +235,8 @@ import { abbrBeforeCaret } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
+// 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
+import { editedElsewhereReason, elsewhereCheckNotNeeded } from '@adapter/state/edited-elsewhere';
 import {
   closePlaceInline,
   openPlaceInline,
@@ -3539,35 +3541,6 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
 function menuStillFits(dispatcher: Dispatcher, target: Element): boolean {
   const was = target.getAttribute(MENU_LID_ATTR);
   return was === null || was === (dispatcher.getState().openBody?.lid ?? '');
-}
-
-/**
- * 🔴 **そのノートを、別のタブ・窓が編集中か**(#529 W5。Gemini 裁定 2026-10-11 依頼 18 Q5 = A)。
- *
- * ⚠ 通すと、編集中のタブが保存したとき**そちらの内容で上書きされ**、足した字は履歴にだけ残る
- *   (設計 `board-edit-in-place-design-2026-10.md` §3.2 の 5)。だから**断って理由を出し、打った字は欄に残す**。
- * 🔑 問い合わせは**編集に入るときと同じ口**(`services.acquireEditLock`)── 判定を 2 本にしない(§7)。
- *   取れたら**すぐ返す**(追記・改名は錠を握り続けない。握ると付箋 10 枚で 10 枚ぶん握る)。
- * ⚠ **このタブが自分で編集中のノートは問い合わせない** ── 取り直して返すと自分の錠を手放す。
- *   このタブの編集は reducer の門(`bodyWriteBlockReason`)が断る。
- * ⚠ `unreachable`(メインのタブと通信できない)は**断らない** ── 「別のタブが編集中」とは別の事実で、
- *   本体の追記欄も同じ状況では通る(新しい断りを板だけに足さない)。
- */
-async function editedElsewhereReason(
-  dispatcher: Dispatcher,
-  services: BinderServices,
-  lid: string,
-): Promise<string | null> {
-  const lock = services.acquireEditLock;
-  if (!lock) return null;
-  const st = dispatcher.getState();
-  if ((st.phase === 'editing' && st.openBody?.lid === lid) || st.sectionDraft?.lid === lid) return null;
-  const grant = await lock(lid);
-  if (grant === 'granted') {
-    services.releaseEditLock?.(lid);
-    return null;
-  }
-  return grant === 'denied' ? EDIT_ELSEWHERE_ERROR : null;
 }
 
 /** 付箋の上の欄を確定する(追記 / 題名)。⚠ 断られたら**欄を閉じず、字を残して理由を言う**。 */
@@ -7868,13 +7841,60 @@ const ACTIONS: Record<string, ActionHandler> = {
         break;
       }
   },
-  'append-entry': (dispatcher, _target, _services, root) => {
+  'append-entry': (dispatcher, _target, services, root) => {
     const s = dispatcher.getState();
     const lid = s.selectedLid;
     const archetype = lid ? s.entryMetas.get(lid)?.archetype : undefined;
     if (!lid || !isAppendable(archetype)) return;
     const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
     const text = input?.value ?? '';
+    const noteLid: string = lid;
+    /**
+     * 🔴 **追記先**(#395 段①)。空 = 末尾。⚠ 字・ノートと同じく**押した時点で読む**(問い合わせの間に
+     *   ノートや選択が替わっても、押した物が撃たれる)。印をそのまま渡す ── 行番号に直さない
+     *   (effect は disk から読み直すので、行番号は読み直した先で別の場所を指す)。
+     */
+    const target =
+      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
+    /**
+     * 🔴 **別のタブ・窓が編集中のノートへは追記しない**(#529 W5-d。Gemini 裁定 Q5 = A)。
+     * ⚠ 通すと編集中のタブの保存で上書きされ、足した字は履歴にだけ残る。**断って理由を出し、
+     *   欄の字は残す**(撃たないので欄は消えない ── 欄を空にするのは書けたとき)。
+     * 🔑 問い合わせは板の付箋の追記と**同じ 1 本**(`editedElsewhereReason`)。
+     * ⚠ 字が空の回・口が無い環境・このタブが自分で編集中の回は**問い合わせずに従来どおり同期で撃つ**
+     *   (空は reducer が断る。自分の錠は取り直すと手放す)。
+     */
+    if (text.trim() !== '' && !elsewhereCheckNotNeeded(dispatcher, services, lid)) {
+      // ⚠ 問い合わせの間に 2 回押されても 1 回しか撃たない
+      if (input?.hasAttribute('data-pkc-busy')) return;
+      input?.setAttribute('data-pkc-busy', '');
+      // ⚠ 問い合わせの間は欄を読み取り専用にする ── 先打ちした字が、成功の「欄を空にする」で
+      //   黙って消えるのを防ぐ(撃つ字は押した時点の物なので、増えた字は撃たれない)
+      const wasReadOnly = input?.readOnly ?? false;
+      if (input) input.readOnly = true;
+      void editedElsewhereReason(dispatcher, services, noteLid)
+        .then((why) => {
+          if (why !== null) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+            return;
+          }
+          sendAppend();
+        })
+        // 🔴 問い合わせが落ちても黙って捨てない(字は欄に残る)
+        .catch((e: unknown) => {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})`,
+          });
+        })
+        .finally(() => {
+          input?.removeAttribute('data-pkc-busy');
+          if (input) input.readOnly = wasReadOnly;
+        });
+      return;
+    }
+    sendAppend();
+    function sendAppend(): void {
     // ⚠ **空判定をここに持たない**(P8 段⑧ の変異試験で判明)── reducer が
     // 同じ判定を持っており、3 か所(binder / reducer / `appendBlock`)が互いに
     // 救い合って**どれ 1 つ消しても test が緑**だった。判定は下 2 つに寄せる:
@@ -7884,8 +7904,6 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ ここでは**印をそのまま渡す** ── 行番号に直さない。effect は disk から
      *   読み直すので、行番号は読み直した先で別の場所を指す。
      */
-    const target =
-      root.querySelector<HTMLSelectElement>('[data-pkc-field="append-target"]')?.value ?? '';
     /**
      * 🔑 **書いたものが見える所へ入るようにする**(#596 B)。
      *
@@ -7900,14 +7918,15 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     revealAppendTarget(dispatcher, root, target);
     // 🔴 **着いたら足した所へ送る**(#782 B)── ⚠ 撃つ**前**に張る(着地を見逃さない)
-    jumpWhenAppended(dispatcher, root, lid, target);
+    jumpWhenAppended(dispatcher, root, noteLid, target);
     dispatcher.dispatch({
       type: 'APPEND_TO_ENTRY',
-      lid,
+      lid: noteLid,
       text,
       heading: appendHeadingFor(archetype!, new Date()),
       target: target === '' ? null : target,
     });
+    }
   },
   /**
    * 🔴 **強制解放**(user 指示 2026-08-03「競合ロックと強制解放も念頭に」)。

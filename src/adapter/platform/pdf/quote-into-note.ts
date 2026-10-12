@@ -13,7 +13,8 @@
  *   ⚠ 結末が来ない回(強制解放・本体の入れ替わり)は**時間切れ**で断る(窓を待たせ続けない)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { appendAndSettle, REAL_APPEND_TIMERS, type AppendTimers } from '@adapter/state/append-settle';
+import { REAL_APPEND_TIMERS, type AppendTimers } from '@adapter/state/append-settle';
+import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { formatPdfQuote, resolveQuoteTarget } from '@features/pdf/pdf-quote';
 import type { PdfQuoteResult, PdfSession } from './pdf-window';
 
@@ -37,6 +38,8 @@ export async function quoteIntoNote(
   /** 本体の状態の行へ出す口(**disk に着いたときだけ**呼ぶ)。 */
   note: (text: string) => void,
   timers: QuoteTimers = REAL_APPEND_TIMERS,
+  /** 🔴 別のタブが編集中のノートへは引かない(#529 W5-d)。口が無い環境は問い合わせない。 */
+  lock: EditLockPort = {},
 ): Promise<PdfQuoteResult> {
   const st = dispatcher.getState();
   if (session.lid === null) return { ok: false, message: '引用先のノートが分かりません' };
@@ -45,8 +48,9 @@ export async function quoteIntoNote(
   if (meta === undefined) return { ok: false, message: '引用先のノートが見つかりません' };
   const block = formatPdfQuote(text, page, session.name);
   if (block === null) return { ok: false, message: '引用する字が選ばれていません' };
-  // 🔑 書き足しと結末待ちは `appendAndSettle` 1 本(ブラウザの AI の書き足しと同じ口。§7)
-  const r = await appendAndSettle(dispatcher, target, block, null, QUOTE_SETTLE_TIMEOUT_MS, timers);
+  // 🔑 書き足しと結末待ちは `appendAndSettle` 1 本(ブラウザの AI の書き足しと同じ口。§7)。
+  //   その前に「別のタブが編集中か」を問う(断ったら何も書かず、理由を窓へ返す ── `refused`)
+  const r = await appendUnlessEditedElsewhere(dispatcher, lock, target, block, null, QUOTE_SETTLE_TIMEOUT_MS, timers);
   if (r.ok) {
     const message = `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)`;
     // 🔑 言うのは、disk に着いてから(窓にも状態の行にも同じ字)
