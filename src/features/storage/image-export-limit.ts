@@ -146,7 +146,7 @@ export function tooBigToReadBack(bytes: number): boolean {
  *   こちらは「**焼けるが開けない**」であり、**user にとって別の出来事**である
  *   (あちらは何も起きていない / こちらは放っておくと**壊れたバックアップが残る**)。
  *
- * @param what 何が大きすぎたか(「いまの中身」「添付」など、user の言葉で)
+ * @param what 何が大きすぎたか(「いまの中身」など、user の言葉で)
  */
 export function tooBigToReadBackMessage(what: string, bytes: number): string {
   return (
@@ -170,7 +170,7 @@ export function tooBigToReadBackMessage(what: string, bytes: number): string {
 export function notImportableBackMessage(chars: number): string {
   return (
     `この PKC3 入り HTML(約 ${humanBytes(chars)})は開けますが、PKC3 に取り込み直せないことがあります` +
-    `(取り込み直すときに読める上限は約 ${humanBytes(Math.floor((MAX_EMBED_TEXT_CHARS * 3) / 4))}です)。` +
+    `(取り込み直すときに読める上限は、ファイル全体で約 ${humanBytes(MAX_EMBED_TEXT_CHARS)}です)。` +
     'データを移すときは、左のペインの バックアップ(.pkc3-full.zip) をお使いください。' +
     'こちらは大きさで止まりません。'
   );

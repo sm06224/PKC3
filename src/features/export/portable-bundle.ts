@@ -72,6 +72,8 @@ export interface PortableBundleResult {
   /** 焼いた添付の数(⚠ **0 件は「測っていない次元」**なので呼び側が見る)。 */
   readonly assets: number;
   readonly imageBytes: number;
+  /** 焼いたファイル全体のおよその字数(取り込み直しの上限の見積もり)。⚠ 実際より多め(枠の見積もり)。 */
+  readonly estimatedChars: number;
 }
 
 /**
@@ -189,5 +191,6 @@ export async function writePortableBundle(args: {
     warnings,
     assets,
     imageBytes: image.byteLength,
+    estimatedChars: fileChars,
   };
 }

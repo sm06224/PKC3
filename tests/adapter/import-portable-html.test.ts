@@ -594,6 +594,15 @@ describe('大きい要素の base64 を小分けに復号する', () => {
       expect(same(back, asset), '添付が違う').toBe(true);
     });
 
+    it('ちょうど 2 × IMAGE_PART_BYTES の添付(端数なし。最後の要素に = が出ない)が 1 バイトも違わず戻る', async () => {
+      const asset = rand(IMAGE_PART_BYTES * 2);
+      const html = await bake(rand(10), asset);
+      expect(asset3(html), '前提: 2 要素に割れている').toHaveLength(2);
+      const back = new Uint8Array(await readPortableHtml(html).assets.get('ast-big')!.arrayBuffer());
+      expect(back.length).toBe(asset.length);
+      expect(same(back, asset), '添付が違う').toBe(true);
+    });
+
     it('欠け・順の乱れ・途中の短い要素は、短い添付として読まず断る(key を名指し)', async () => {
       const html = await bake(rand(10), rand(IMAGE_PART_BYTES * 2 + 13));
       const els = asset3(html);

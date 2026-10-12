@@ -76,14 +76,23 @@ export async function restoreEmbeddedAssets(
         el.remove();
       }
     };
-    if (key === '' || run.broken !== null) {
+    if (key === '') {
       drop();
       failed++;
       continue;
     }
+    /**
+     * 🔴 **器に在る key は、揃っているかを見る前に飛ばす** ── 器の中身が正で、この HTML の添付は使わない。
+     * 途切れた写しを開き直すたびに「読み込めませんでした」を出すと、もう直っているものを user に心配させる。
+     */
     if (have.has(key)) {
       drop();
       skipped++;
+      continue;
+    }
+    if (run.broken !== null) {
+      drop();
+      failed++;
       continue;
     }
     try {

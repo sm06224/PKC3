@@ -393,6 +393,26 @@ describe('添付を割って焼く (#1416 §7-4d)', () => {
     expect(assetMarks(await bake(0))).toEqual([undefined]);
   });
 
+  it('🔴 ファイル全体の見積もりは、実際の長さ以上で、枠の見積もり(DB 画像の要素ごと 120 字)ぶんしかずれない', async () => {
+    // 本物に近い大きさの雛形(約 12MB)── 雛形の長さを数え落とす変異が、小さい雛形では見えない
+    const big = template({ body: `<div>${'x'.repeat(12 * 1024 * 1024)}</div>` });
+    const image = new Uint8Array(IMAGE_PART_BYTES + 5); // 2 要素
+    const out = await writePortableBundle({
+      template: big,
+      bundle: NEW,
+      image,
+      assets: (async function* () {
+        yield { key: 'ast-big', mime: 'image/png', blob: new Blob([new Uint8Array(IMAGE_PART_BYTES * 2 + 1)]) };
+        yield { key: 'ast-two', mime: 'image/png', blob: new Blob([new Uint8Array(7)]) };
+      })(),
+    });
+    const actual = (await out.blob.text()).length;
+    expect(out.estimatedChars, '実際より少なく見積もっている').toBeGreaterThanOrEqual(actual);
+    // 画像の要素の枠(実際は約 85 字)を 120 と多めに見ているだけ。添付の枠は正確
+    expect(out.estimatedChars - actual, '見積もりが実際から離れている').toBeLessThanOrEqual(2 * 40);
+    expect(actual, '前提: 雛形が効いている').toBeGreaterThan(12 * 1024 * 1024);
+  });
+
   describe('🔴 残る天井は「ファイル全体」── 超えても落とさず、警告する', () => {
     const IMG = 10 * 1024 * 1024;
     const base64Len = (b: number): number => Math.ceil(b / 3) * 4;

@@ -192,6 +192,34 @@ describe('#400 段④ ── 書き出したものが、そのまま起動で読
       expect(doc.querySelectorAll(ASSET_SELECTOR)).toHaveLength(0);
     });
 
+    it('🔴 器に在る key は、中身を読まずに飛ばす(textContent を読むと投げる要素で見る)', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B + 3) }]);
+      let reads = 0;
+      for (const el of doc.querySelectorAll(ASSET_SELECTOR)) {
+        Object.defineProperty(el, 'textContent', {
+          get() {
+            reads++;
+            throw new Error('読んではいけない');
+          },
+          set() {},
+          configurable: true,
+        });
+      }
+      const s = sink();
+      await s.put(CID, 'ast-big', new Blob(['already']));
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 1, failed: 0 });
+      expect(reads, '器に在るのに中身を読んだ').toBe(0);
+      expect(doc.querySelectorAll(ASSET_SELECTOR)).toHaveLength(0);
+    });
+
+    it('🔴 器に在る key は、途切れた写しでも failed にしない(開き直すたびに警告を出さない)', async () => {
+      const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: rand(B * 2 + 7) }]);
+      doc.querySelector('script[data-pkc-asset-part="1/3"]')!.remove();
+      const s = sink();
+      await s.put(CID, 'ast-big', new Blob(['already']));
+      expect(await restoreEmbeddedAssets(doc, CID, s)).toEqual({ restored: 0, skipped: 1, failed: 0 });
+    });
+
     it('割る前の版の 1 本物(印なしの大きい 1 要素)も戻る', async () => {
       const big = rand(B * 2 + 7);
       const doc = await build(new Uint8Array([1]), [{ key: 'ast-big', mime: 'image/png', bytes: big }]);
