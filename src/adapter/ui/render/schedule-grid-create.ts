@@ -37,7 +37,8 @@
  * ページが隠れた / `lostpointercapture` / マウスのボタンが離れているのに move が来た。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { addScheduleItem } from '@adapter/ui/actions/binder';
+import { addScheduleItemChecked } from '@adapter/ui/actions/binder';
+import type { EditLockPort } from '@adapter/state/edited-elsewhere';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import {
   createSlot,
@@ -87,7 +88,11 @@ const cancelRaf = (id: unknown): void => {
  * root へ 1 度だけ配線する(`installScheduleGridDrag` と同じ作法)。
  * @returns 外す関数。アプリ本体では外さない(同寿命)が、test は外せる必要がある。
  */
-export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatcher): () => void {
+export function installScheduleGridCreate(
+  root: HTMLElement,
+  dispatcher: Dispatcher,
+  lockPort: EditLockPort = {},
+): () => void {
   const doc = root.ownerDocument;
   const win = doc.defaultView;
   let press: Press | null = null;
@@ -138,13 +143,27 @@ export function installScheduleGridCreate(root: HTMLElement, dispatcher: Dispatc
       return;
     }
     // 🔑 書く口は予定の面の「足す」と同じ 1 本。通ったときだけ欄を畳む(断られたら打った字を残す)
-    const ok = addScheduleItem(dispatcher, {
-      text,
-      date: b.date,
-      time: formatMinutes(b.startMin),
-      timeEnd: formatMinutes(b.endMin),
+    // 🔴 別のタブが今日のノートを編集中なら断る(#529 W5-d)。その回は**仮の枠を畳む**(書かないので
+    //   理由だけが出る。別のタブの編集が終わるまで居座らせない)。問い合わせの間は欄を読み取り専用にし、
+    //   2 回目の Enter は撃たない(二重送信の門)
+    if (b.input.hasAttribute('data-pkc-busy')) return;
+    const result = addScheduleItemChecked(
+      dispatcher,
+      lockPort,
+      { text, date: b.date, time: formatMinutes(b.startMin), timeEnd: formatMinutes(b.endMin) },
+      () => box === b,
+    );
+    if (typeof result === 'boolean') {
+      if (result) closeBox();
+      return;
+    }
+    b.input.setAttribute('data-pkc-busy', '');
+    b.input.readOnly = true;
+    void result.then(() => {
+      b.input.removeAttribute('data-pkc-busy');
+      b.input.readOnly = false;
+      if (box === b) closeBox(); // 待つ間に畳まれていたら(Esc / ×)何もしない ── 書かれてもいない
     });
-    if (ok) closeBox();
   };
   /** 預かりがあるとき、新しい枠を作り始めるのを断る(理由を出す)。断ったら true。 */
   const refuseWhileParked = (): boolean => {

@@ -242,7 +242,11 @@ import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
 // 🔑 別のタブが編集中かの問い合わせは 1 本(#529 W5-d ── 板の付箋・本文の下の追記欄・PDF・AI が同じ口を通る)
-import { editedElsewhereReason, elsewhereCheckNotNeeded } from '@adapter/state/edited-elsewhere';
+import {
+  editedElsewhereReason,
+  elsewhereCheckNotNeeded,
+  type EditLockPort,
+} from '@adapter/state/edited-elsewhere';
 import {
   closePlaceInline,
   openPlaceInline,
@@ -762,6 +766,50 @@ function randomSuffix(): string {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   }
   return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
+/**
+ * 🔴 **別のタブ・窓が今日のノートを編集中なら、予定を足さない**(#529 W5-d の続き。Gemini 裁定 Q5 = A)。
+ * 予定の面の「足す」と目盛りの作成(`schedule-grid-create`)の**共通の入口**。
+ *
+ * ⚠ 通すと編集中のタブの保存で上書きされ、足した行は履歴にだけ残る。**断って理由を出し、`false` を返す**
+ *   (呼び側は欄の字を残す)。問い合わせは追記の口と**同じ 1 本**(`editedElsewhereReason`)。
+ * 🔑 **問い合わせが要る回だけ非同期**(今日のノートが既に在る・口が有る・このタブが自分で編集中でない)。
+ *   それ以外(ノートがまだ無い = 誰も編集できない / 口の無い環境 / 字が空 / 読み込み中)は
+ *   **従来どおり同期で {@link addScheduleItem} を呼ぶ**。
+ * @param stillWanted 問い合わせの間に呼び側が「もう要らない」になったか(枠が畳まれた等)。要らなければ書かない。
+ */
+export function addScheduleItemChecked(
+  dispatcher: Dispatcher,
+  port: EditLockPort,
+  item: Parameters<typeof addScheduleItem>[1],
+  stillWanted: () => boolean = () => true,
+): boolean | Promise<boolean> {
+  const st = dispatcher.getState();
+  const noteLid =
+    (st.phase === 'ready' || st.phase === 'editing') && item.text.trim() !== ''
+      ? (findTodayNote(st.entryMetas.values(), todayNoteTitle(new Date()))?.lid ?? null)
+      : null;
+  if (noteLid === null || elsewhereCheckNotNeeded(dispatcher, port, noteLid)) {
+    return addScheduleItem(dispatcher, item);
+  }
+  return editedElsewhereReason(dispatcher, port, noteLid).then(
+    (why) => {
+      if (!stillWanted()) return false;
+      if (why !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+        return false;
+      }
+      return addScheduleItem(dispatcher, item);
+    },
+    // 🔴 問い合わせが落ちても黙って捨てない(字は欄に残る)
+    (e: unknown) => {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `予定を足せませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})`,
+      });
+      return false;
+    },
+  );
 }
 /**
  * 🔴 **予定を 1 行、今日のノートの末尾へ足す**(#402 ② の「予定の面から足す」/ #855 段 B-2 の
@@ -6725,11 +6773,26 @@ const ACTIONS: Record<string, ActionHandler> = {
     const textEl = face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]');
     const date =
       face?.querySelector<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')?.value ?? '';
-    // 🔑 書く口は目盛りのドラッグ作成(`schedule-grid-create`)と**同じ 1 本**(`addScheduleItem`)
-    const ok = addScheduleItem(dispatcher, { text: textEl?.value ?? '', date });
+    // 🔑 書く口は目盛りのドラッグ作成(`schedule-grid-create`)と**同じ 1 本**(`addScheduleItemChecked`)
+    // ⚠ 問い合わせの間に 2 回押されても 1 回しか撃たない(#529 W5-d)。欄は読み取り専用にして、
+    //   先打ちした字が成功の「欄を空にする」で黙って消えるのを防ぐ
+    if (textEl?.hasAttribute('data-pkc-busy')) return;
+    const result = addScheduleItemChecked(dispatcher, services, { text: textEl?.value ?? '', date });
     // 通ったときだけ欄を空にする(#1051。理由は `addScheduleItem` の中)
-    if (textEl && ok) textEl.value = '';
-    void services;
+    if (typeof result === 'boolean') {
+      if (textEl && result) textEl.value = '';
+      return;
+    }
+    if (textEl) {
+      textEl.setAttribute('data-pkc-busy', '');
+      textEl.readOnly = true;
+    }
+    void result.then((ok) => {
+      if (!textEl) return;
+      textEl.removeAttribute('data-pkc-busy');
+      textEl.readOnly = false;
+      if (ok) textEl.value = '';
+    });
   },
   /**
    * 🔴 **連絡先の面から、その場で 1 件足す**(#278 段③。user 裁定 2026-09-04)。
