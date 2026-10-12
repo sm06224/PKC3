@@ -1,9 +1,10 @@
 /**
  * 🔴 **長大なノートの「画面の外を描かない」印と、飛んだ後の合わせ直し**(#1467、裁定 21 = A)。
  *
- * 印 `data-pkc-long-note` を本文の器(読む面 `detail-body` / ライブエディタ `editor-live`)に付けると、
+ * 印 `data-pkc-long-note` を**読む面の本文の器**(`detail-body`)に付けると、
  * CSS(`app.css`)が直下の塊に `content-visibility: auto` を掛ける。判定は
  * `features/markdown/long-note.ts` の 1 本 ── **5,000 行以下のノートには印を付けない**。
+ * ⚠ **ライブエディタ(`editor-live`)には付けない** ── 付けると打鍵の応答が悪くなる(`detail.ts` の注記)。
  *
  * ⚠ 画面の外の塊は**見積もりの高さ**(`contain-intrinsic-block-size: auto …`)で並ぶ。描かれて初めて実寸になる
  *   (`auto` で憶える)ので、**離れた塊へ飛ぶと、飛び先の周りが描かれた瞬間に位置がずれる**。

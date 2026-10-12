@@ -3226,8 +3226,8 @@ export class DetailRenderer {
         // ⚠ 材料は**原文**(`body`)── 描いているのは情報を外した側なので、
         //    そちらからでは globals(frontmatter に書く)が 1 つも見えない
         applyDocumentGlobals(pane, extractDocumentGlobals(body));
-        // 🔴 長大なノートだけ、画面の外の塊の配置を飛ばす(#1467)。読む面と同じ判定 1 本
-        syncLongNote(pane, body);
+        // ⚠ ライブエディタには `data-pkc-long-note` を付けない(#1467)。付けると打鍵の応答が悪くなる
+        //   (20,000 行の実測:p50 28 → 33 ms、p95 43 → 55 ms)。編集中は塊を普通に配置する。
       },
       (e) => {
         if (!pane.isConnected) return;
