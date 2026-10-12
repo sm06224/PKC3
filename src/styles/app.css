@@ -2171,6 +2171,21 @@ button[data-pkc-primary] [data-pkc-icon] {
   border: 1px solid var(--border);
   flex: 1;
 }
+/* ── 長大なノート(5,000 行超)── 画面の外の塊の配置を飛ばす(#1467、裁定 21 = A)────
+ * 20,000 行のノートは、開くたびに本文全体の style + layout(約 0.75 秒)を払っていた。
+ * ⚠ 掛けるのは**読む面だけ**。ライブエディタ(`editor-live`)には付けない ── 打鍵の応答が悪くなる。
+ * ⚠ 塊の中の子の余白が塊の外へ出なくなるので、リスト・引用・コード枠の前後の間隔がわずかに広がる(5,000 行超のみ)。
+ * 印 `data-pkc-long-note` は 5,000 行を超えたときだけ `long-note.ts` が付ける ── **以下のノートは 1 ピクセルも変わらない**。
+ * ⚠ 見積もりの高さは `contain-intrinsic-block-size: auto <見積もり>`。描かれた塊は実寸を憶える(`auto`)。
+ *   飛ぶ口(目次・探す・追記)は描画の後に 1 度だけ合わせ直す(`long-note.ts` の `settleJump`)。
+ * ⚠ 段組み(横送り)では塊の並びが縦ではないので掛けない。印刷は全部描く(file 末尾の `@media print`)。 */
+[data-pkc-long-note] > * {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 4.5rem;
+}
+[data-pkc-columns-on] [data-pkc-long-note] > * {
+  content-visibility: visible;
+}
 /* 行の器。⚠ **高さを固定しない**(中身に合わせて伸びる) */
 [data-pkc-row-slot] {
   display: block;
@@ -10068,6 +10083,10 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
+  /* 🔴 **長大なノートも紙には全部描く**(#1467)── 画面の外を飛ばす規則(`[data-pkc-long-note]`)を紙では外す */
+  [data-pkc-long-note] > * {
+    content-visibility: visible;
+  }
   /**
    * 🔴 **紙は、どの配色でも白地に濃い字**(#1387)。
    *

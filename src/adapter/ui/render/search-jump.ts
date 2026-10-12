@@ -23,6 +23,7 @@
  *   (2026-07-27「速やかな破棄」)。
  */
 import { findHitSpans, findTerms } from '@features/filter/search-hits';
+import { settleJump } from './long-note';
 
 /** 当たった語の塗り(全部)。⚠ `app.css` の `::highlight(pkc-search-hit)` と同じ字。 */
 export const HIT_HIGHLIGHT = 'pkc-search-hit';
@@ -157,6 +158,8 @@ export function scrollToHit(scroller: HTMLElement, host: HTMLElement, range: Ran
     scroller.scrollTop += rect.top - (frame.top + scroller.clientHeight * LAND_RATIO);
   };
   go();
+  // 🔴 長大なノートは、当たりの周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
+  settleJump(range.startContainer.parentElement ?? host, go);
   const doc = host.ownerDocument;
   let done = false;
   const stop = (): void => {

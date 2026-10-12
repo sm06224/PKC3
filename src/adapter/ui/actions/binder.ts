@@ -31,6 +31,7 @@ import {
 } from '../render/heading-fold';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
+import { settleJump } from '../render/long-note';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import {
@@ -2932,7 +2933,10 @@ function jumpWhenAppended(
       const hit = appendTargetBlock(dispatcher, root, slug);
       if (hit === null) return;
       revealBlock(hit.host, hit.block);
-      hit.block.scrollIntoView({ block: 'nearest' });
+      const goBlock = (): void => hit.block.scrollIntoView({ block: 'nearest' });
+      goBlock();
+      // 🔴 長大なノートは、飛び先の周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
+      settleJump(hit.block, goBlock);
     })();
   });
 }
@@ -5633,7 +5637,10 @@ async function tocJump(
      */
     const foldHost = foldHostOf(hit) ?? hit.parentElement;
     if (foldHost !== null) revealBlock(foldHost, hit);
-    hit.scrollIntoView({ block: 'start' });
+    const goHeading = (): void => hit.scrollIntoView({ block: 'start' });
+    goHeading();
+    // 🔴 長大なノートは、飛び先の周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
+    settleJump(hit, goHeading);
     // 🔴 外から来たリンクは**着いた先を光らせる**(#1559)── 本文のリンクや目次は押した user が行き先を知っている
     if (flash) flashCopied(hit);
 }
@@ -5724,6 +5731,8 @@ async function jumpToAssetUse(
 function scrollSettled(host: HTMLElement, el: HTMLElement): void {
   const go = (): void => el.scrollIntoView({ block: 'center' });
   go();
+  // 🔴 長大なノートは、飛び先の周りが描かれて実寸になった後に 1 度だけ合わせ直す(#1467)
+  settleJump(el, go);
   let done = false;
   const stop = (): void => {
     if (done) return;
