@@ -12,6 +12,7 @@
  * ⚠ happy-dom に `indexedDB` は無いので、`office-pack-store.test.ts` と同じ流儀で
  *   **主張に必要な順序だけ**を再現する最小の偽物を差す(依存を増やさない)。
  */
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DuckDbPackStore,
@@ -160,6 +161,17 @@ describe('DuckDbPackStore', () => {
     }
     // ⚠ 同じ hash が並んでいたら「計算していない」に等しい ── 中身が違えば違う
     expect(new Set(meta.files.map((f) => f.sha256)).size).toBe(meta.files.length);
+  });
+
+  it('🔴 sha256 は中身の本物の SHA-256 ── 別の実装(node:crypto)と全 file で一致する(#1087)', async () => {
+    installFakeIdb('commit');
+    const pack = completePack();
+    const meta = await new DuckDbPackStore().writeAll(pack, { version: 'v1' });
+    expect(meta.files.length, '比べる file が 0 件').toBeGreaterThan(0);
+    for (const f of meta.files) {
+      const bytes = Buffer.from(await pack.get(f.name)!.arrayBuffer());
+      expect(f.sha256, `${f.name} の sha256`).toBe(createHash('sha256').update(bytes).digest('hex'));
+    }
   });
 
   it('🔴 tx が abort したら writeAll は失敗し、「入っている」と名乗らない', async () => {

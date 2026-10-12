@@ -39,6 +39,10 @@ async function hexDigest(data: BufferSource): Promise<string> {
     .join('');
 }
 
+/**
+ * 小文字 hex の SHA-256(64 字)。⚠ **ここが唯一の実装** ── Office / 音声認識 / DuckDB の
+ * 一式の検めもここを使う(#1087。以前は 4 か所に同じ式が在った)。
+ */
 export async function sha256Hex(blob: Blob): Promise<string> {
   return hexDigest(await blob.arrayBuffer());
 }
