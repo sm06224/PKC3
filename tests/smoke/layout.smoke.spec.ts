@@ -1045,6 +1045,31 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
     '絞り込んだ結果を途中から見せている',
   ).toBeLessThan(30);
 
+  // ④ 🔴 1 件足しても、既存の行は作り直されず、位置も動かない(#1087)
+  //    ── 直す前は全行を作り直していた(5,700 件で 2.7 秒・約 +185〜190 MB)。起動を増やさず、同じ道中に足す。
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
+  await expect(rows).toHaveCount(32);
+  await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
+  const parked2 = await host.evaluate((el) => el.scrollTop);
+  expect(parked2, 'park した位置が先頭のまま(観測の前提が崩れている)').toBeGreaterThan(20);
+  // 行の node に目印を付けて、足した後も同じ node かを見る(作り直されると目印が消える)
+  await rows.nth(10).evaluate((el) => el.setAttribute('data-probe-kept', '1'));
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('足した 1 件');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(rows).toHaveCount(33);
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '足した 1 件' }),
+  ).toBeVisible();
+  expect(
+    await page.locator('[data-pkc-region="filer-table"] [data-probe-kept="1"]').count(),
+    '1 件足しただけで既存の行を作り直した',
+  ).toBe(1);
+  expect(
+    Math.abs((await host.evaluate((el) => el.scrollTop)) - parked2),
+    '1 件足したら、見ていた位置が動いた',
+  ).toBeLessThan(30);
+
   expect(errors).toEqual([]);
 });
 
