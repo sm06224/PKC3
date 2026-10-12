@@ -2016,6 +2016,40 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, '引いた後に、書き込みの知らせが残っている').not.toContainText('消えます');
 
   /**
+   * ⑤-e2 🔴 **DuckDB の答えを Parquet で書き出す**(#918 段⑥)。
+   *
+   * ## 🔑 ここでしか言えないこと
+   *
+   * ⚠ node の engine は `COPY … TO` を**手元の file**へ書く(`tests/duckdb-parquet-export.test.ts`)が、
+   *   ブラウザは**器の中の memory**に書く ── 別の経路である。🔴 言えるのは実ブラウザだけ:
+   *   ①**外を塞いだ後の器**で、許した path(`allowed_paths`)にだけ `COPY` が通る
+   *   ②`copyFileToBuffer` で取り出せる ③できた file を**本物のブラウザが受け取る**。
+   * ⚠ **名前は見ない**(この headless Chromium は非 ASCII の download 名を捨てる)── 見るのは**中身**
+   *   (先頭と末尾が `PAR1` = Parquet の印)。
+   * 🔑 **新しい起動は増やさない**(#820)── ⑤-e の続き(DuckDB の器に作った表 `made` が在る)。
+   *   ⚠ 直前の答えは `SELECT count(*) AS n FROM made` ── 器に**作った表**を引く SQL なので、
+   *   「書き出しが同じ器で、もう一度その SQL を走らせている」ことも同時に見える。
+   */
+  await clickReal(page, '[data-pkc-field="sql-to-file"]');
+  const parquetMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(parquetMenu.locator('button'), 'DuckDB の答えなのに Parquet が並んでいない').toHaveCount(4);
+  await expect(parquetMenu.locator('button').nth(3), '4 つ目が Parquet でない').toContainText('Parquet');
+  const parquetStarted = page.waitForEvent('download', { timeout: 60_000 });
+  await clickReal(page, parquetMenu.locator('button').nth(3));
+  const parquetFile = await parquetStarted;
+  const parquetPath = await parquetFile.path();
+  expect(parquetPath, 'Parquet の file が落ちてこない').toBeTruthy();
+  const parquetBytes = await readFile(parquetPath, null);
+  expect(parquetBytes.length, 'Parquet が空').toBeGreaterThan(8);
+  expect(parquetBytes.subarray(0, 4).toString('latin1'), '先頭が PAR1 でない').toBe('PAR1');
+  expect(parquetBytes.subarray(parquetBytes.length - 4).toString('latin1'), '末尾が PAR1 でない').toBe('PAR1');
+  await expect(note, '書き出したことを画面で言っていない').toContainText('というファイルに書き出しました');
+  // 🔑 書き出しの後も器は生きている(作った表を引ける ── 書き出しが器を壊していない)
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT count(*) AS n FROM made');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(sqlTable.locator('tbody td'), '書き出しの後で、作った表が引けない').toHaveText(['2'], { timeout: 60_000 });
+
+  /**
    * ⑤-f 🔴 **2 つの file を並べて、1 つの SQL で JOIN する**(#918 段⑦。Gemini 裁定 2026-10-01)。
    *
    * ## 🔑 ここでしか言えないこと

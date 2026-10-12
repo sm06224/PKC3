@@ -369,7 +369,7 @@ export class SqlRenderer {
     toFile.setAttribute('data-pkc-action', 'sql-export-menu');
     toFile.setAttribute('data-pkc-field', 'sql-to-file');
     toFile.textContent = 'ファイルへ書き出す';
-    toFile.title = 'いま出ている結果を、ファイルに書き出します(CSV / TSV / JSON)';
+    toFile.title = 'いま出ている結果を、ファイルに書き出します(CSV / TSV / JSON。DuckDB で引いた結果は Parquet も)';
     /**
      * 🔴 **選び所を帯の先頭へ**(#992 ④。Gemini の裁定 2026-10-01 = 答え A)。
      * ⚠ 直す前は `履歴` の右(6 個のボタンの向こう側)で、user が**最初にやること**

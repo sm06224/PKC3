@@ -12,6 +12,7 @@ import { DEFAULT_ENTRY_SORT, NATURAL_DESC, type EntrySort } from '@features/filt
 import { checkReadOnlySql } from '@features/query/sql-guard';
 import { checkDuckDbRunSql, duckDbWriteKind } from '@features/query/duckdb-write';
 import { DEFAULT_SQL_ENGINE, sqlEngineOf, type SqlEngine } from '@features/query/sql-engine';
+import { parquetCopyOf } from '@features/query/duckdb-export';
 import { schemaModel, type Grid, type SchemaLink, type SchemaModel } from '@features/query/schema-digest';
 import { isSystemMessageLid } from '@features/message/message-log';
 import { erSql, type ErAction } from '@features/query/er-sql';
@@ -2389,6 +2390,13 @@ export type UserAction =
    */
   | { type: 'SQL_SAVE_FAILED'; error: string }
   /**
+   * 🔴 **いま出ている答えを Parquet の file にしてほしい**(#918 段⑥)。
+   * ⚠ `fileName` は**押した側が作る**(`sqlExportFileName` ── 日付の時計を reducer に持たせない)。
+   * 🔑 書くのは字ではなく**DuckDB の器**(打った SQL をもう一度走らせて `COPY` する ── 型を保つため)。
+   *   終わりを言うのは `SQL_SAVED` / `SQL_SAVE_FAILED`(降ろし忘れると以後押せない ── 構造の書き出しと同じ)。
+   */
+  | { type: 'SQL_EXPORT_PARQUET'; fileName: string }
+  /**
    * 🔴 **調べる相手を選ぶ**(#681 段③ の 2 つ目)。`lid` が空 = この PKC のノート。
    * ⚠ 選び直しは**前の相手を必ず手放す**(常駐メモリを返す)。
    */
@@ -3605,6 +3613,18 @@ export type DomainEvent =
       guest?: boolean;
       /** 🔴 DuckDB の器から採る(#918)。⚠ `REQUEST_SQL_SCHEMA` と同じ意味・同じ形。 */
       duck?: { lid: string; name: string };
+      duckExtra?: readonly { lid: string; name: string }[];
+    }
+  /**
+   * 🔴 **答えを Parquet にして書き出してほしい**(#918 段⑥)。
+   * ⚠ **打つ字は `sql`(= 走らせた字)**。相手は `REQUEST_SQL_RUN` と**同じ形**(`duck` が 1 件目 / `duckExtra` が 2 件目以降)。
+   * ⚠ DuckDB の器でしか書けないので `engine` は持たない(出す側が DuckDB のときだけ出す)。
+   */
+  | {
+      type: 'REQUEST_SQL_EXPORT_PARQUET';
+      sql: string;
+      fileName: string;
+      duck: { lid: string; name: string };
       duckExtra?: readonly { lid: string; name: string }[];
     }
   /** 取り込んだ `.sqlite` を開く / 手放す(#681 段③ の 2 つ目)。 */
@@ -5038,6 +5058,42 @@ function reduceCore(
       // ⚠ 範囲の外は黙って捨てる(一覧を組み直す前の押しが飛んでくる)
       if (action.at < 0 || action.at >= p.history.length) return { state, events: [] };
       return { state: { ...state, sqlPage: goHistory(p, action.at, p.historyAt) }, events: [] };
+    }
+    /**
+     * 🔴 **答えを Parquet にする**(#918 段⑥)。
+     * ⚠ 走っている間は**受けない**(`SQL_SCHEMA_TO_NOTE` と同じ ── 2 本走らせると同じ file が 2 つ落ちる)。
+     * 🔑 `running` を立てるので、終わりを言う 2 つ(`SQL_SAVED` / `SQL_SAVE_FAILED`)が必ず降ろす。
+     * ⚠ 出す側(選び所)は DuckDB で引いた読む SQL の答えのときしか Parquet を出さないが、**選び所を開いたまま
+     *   相手や engine を替えた押し**が飛んでくる ── 受け口でも同じ判定(`parquetCopyOf`)で断り、**理由を画面へ出す**
+     *   (黙って捨てると押した人には「壊れている」と「押せていない」の区別が付かない)。
+     */
+    case 'SQL_EXPORT_PARQUET': {
+      const p = state.sqlPage;
+      if (p.running) return { state, events: [] };
+      const refuse = (error: string): ReduceResult => ({
+        state: { ...state, sqlPage: { ...p, error, saved: '' } },
+        events: [],
+      });
+      if (p.ranSql === '' || p.columns.length === 0) return refuse('先に SQL を実行してください');
+      if (sqlEngineOf(p) !== 'duckdb' || p.guest === null) {
+        return refuse('Parquet は DuckDB で引いた答えだけ書き出せます');
+      }
+      const copy = parquetCopyOf(p.ranSql);
+      if (!copy.ok) return refuse(copy.why);
+      return {
+        state: { ...state, sqlPage: { ...p, running: true, duckLoading: false, error: '', saved: '' } },
+        events: [
+          {
+            type: 'REQUEST_SQL_EXPORT_PARQUET',
+            sql: p.ranSql,
+            fileName: action.fileName,
+            duck: { lid: p.guest.lid, name: p.guest.name },
+            ...(p.extraGuests.length > 0
+              ? { duckExtra: p.extraGuests.map((g) => ({ lid: g.lid, name: g.name })) }
+              : {}),
+          },
+        ],
+      };
     }
     case 'SQL_SCHEMA_TO_NOTE': {
       if (state.sqlPage.running) return { state, events: [] };

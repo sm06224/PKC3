@@ -230,6 +230,27 @@ function setup(
     return { tables: ['売上', '客'], bytes: image.byteLength, truncated: false };
   });
   const closeSqlGuest = vi.fn(async () => null);
+  /**
+   * 🔴 **DuckDB の答えを Parquet にする口と、落とす口**(#918 段⑥)。⚠ 実物は DuckDB の器と `<a download>` ──
+   *   ここは「**どの字・どの相手の組で頼まれ、どんな名前・種別の file が渡ったか**」を控える fake。
+   */
+  const exportDuckDbParquet = vi.fn(
+    async (input: {
+      sql: string;
+      sources: readonly {
+        source: DuckDbReadableGuestSource;
+        readBytes: () => Promise<Uint8Array | null>;
+      }[];
+      onLoad: () => void;
+    }) => {
+      void input;
+      return new Uint8Array([0x50, 0x41, 0x52, 0x31]);
+    },
+  );
+  const downloadFile = vi.fn((fileName: string, blob: Blob) => {
+    void fileName;
+    void blob;
+  });
   const readAssetBytes = vi.fn(async (key: string) =>
     key === 'ast-ng' ? null : key === 'ast-csv-broken' ? new Uint8Array([]) : new Uint8Array([1, 2, 3, 4]),
   );
@@ -290,7 +311,9 @@ function setup(
               localSqlFileSize: (lid: string) => sqlLocalFileSize(lid),
             }),
         // 🔴 DuckDB の口(#682 段②)── 実物は別ワーカー。ここは**渡された引数**だけを見る
-        ...(opts.withDuck === false ? {} : { runDuckDbSql, schemaDuckDb }),
+        ...(opts.withDuck === false
+          ? {}
+          : { runDuckDbSql, schemaDuckDb, exportDuckDbParquet, downloadFile }),
       });
   // 🔑 帯の下の 1 行に出す知らせを控える(#992 ①)
   const said: string[] = [];
@@ -402,6 +425,8 @@ function setup(
     tipText,
     effects,
     runDuckDbSql,
+    exportDuckDbParquet,
+    downloadFile,
     duckSeen,
     schemaDuckDb,
     schemaSeen,
@@ -5381,5 +5406,110 @@ describe('🔴 進捗とつながり図の主語(D1 / D8)', () => {
     addAttached(s, 'db7');
     await settle();
     expect(zeroOf(s.pane)).toContain('これらのファイルは、表どうしのつながり');
+  });
+});
+
+/**
+ * 🔴 **DuckDB で引いた答えを Parquet で書き出す**(#918 段⑥)。
+ *
+ * 🔑 観測点は**下流まで**通す ── 並ぶ(押す口が在る)・押すと頼みが飛ぶ(相手と字)・
+ *   できた file が**名前と種別つきで**落ちる・終わりを画面が言う、まで。
+ * ⚠ 実物の engine で書けること・読み戻せることは `tests/duckdb-parquet-export.test.ts`、
+ *   実ブラウザの通しは `tests/smoke/attach.smoke.spec.ts` が見る(ここは配線)。
+ */
+describe('🔴 Parquet で書き出す(#918 段⑥)', () => {
+  /** 書き出しの形の一覧(開いた帯の項目)。 */
+  const menuItems = (root: HTMLElement): HTMLElement[] => [
+    ...root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button'),
+  ];
+  const PARQUET_LABEL = 'Parquet(列の型を保って渡す)';
+
+  async function duckAnswer(sql = 'SELECT * FROM csv') {
+    const s = setup();
+    s.pick('db4');
+    await settle();
+    s.pickEngine('duckdb');
+    s.type(sql);
+    s.runBtn.click();
+    await settle();
+    return s;
+  }
+
+  it('🔴 DuckDB で引いた答えには Parquet が並び、押すと相手と字を添えて頼み、file が落ちる', async () => {
+    const { pane, root, exportDuckDbParquet, downloadFile, note, d } = await duckAnswer();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!.click();
+    const items = menuItems(root);
+    expect(items.map((i) => i.textContent), 'CSV / TSV / JSON の後ろに Parquet が並んでいない').toEqual([
+      'CSV(表計算で開く)',
+      'TSV(タブ区切り)',
+      'JSON(プログラムで読む)',
+      PARQUET_LABEL,
+    ]);
+    items[3]!.click();
+    // 押した直後は「書いている最中」── 走らせる印を立てている(終わりを言う 2 つが降ろす)
+    expect(d.getState().sqlPage.running, '書いている最中の印が立っていない').toBe(true);
+    await settle();
+
+    expect(exportDuckDbParquet, '頼みが飛んでいない').toHaveBeenCalledTimes(1);
+    const asked = exportDuckDbParquet.mock.calls[0]![0];
+    expect(asked.sql, '走らせた字ではない').toBe('SELECT * FROM csv');
+    expect(asked.sources.map((x) => x.source.name), '相手の組が違う').toEqual(['売上.csv']);
+    expect(await asked.sources[0]!.readBytes(), '相手の中身を読める形で頼まれていない').not.toBeNull();
+
+    expect(downloadFile, 'file が落ちていない').toHaveBeenCalledTimes(1);
+    const [name, blob] = downloadFile.mock.calls[0]!;
+    expect(name, '拡張子が .parquet でない').toMatch(/\.parquet$/);
+    expect(name, '相手の名前が入っていない').toContain('売上.csv');
+    expect(blob.type).toBe('application/vnd.apache.parquet');
+    expect(Array.from(new Uint8Array(await blob.arrayBuffer())), '中身が渡っていない').toEqual([0x50, 0x41, 0x52, 0x31]);
+
+    expect(d.getState().sqlPage.running, '終わったのに走っている印が降りていない').toBe(false);
+    expect(note(), '書き出したことを画面で言っていない').toContain('というファイルに書き出しました');
+  });
+
+  it('🔴 書けなかった回は、理由を言い、走っている印が残らない', async () => {
+    const { pane, root, exportDuckDbParquet, downloadFile, note, d } = await duckAnswer();
+    exportDuckDbParquet.mockRejectedValueOnce(new Error('断られた'));
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!.click();
+    menuItems(root)[3]!.click();
+    await settle();
+    expect(downloadFile, '落ちたのに file を渡している').not.toHaveBeenCalled();
+    expect(d.getState().sqlPage.running, '落ちた後も走っている印が残っている').toBe(false);
+    expect(note(), '理由が出ていない').toContain('Parquet に書き出せませんでした(断られた)');
+  });
+
+  it('🔴 sqlite で引いた答えには並べない(対照群: 一覧そのものは開く)', async () => {
+    const { pane, root, type, runBtn } = setup(async () => answer(['a'], [[1]]));
+    type('select 1');
+    runBtn.click();
+    await settle();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!.click();
+    expect(menuItems(root), '空振り防止 ── 一覧そのものは開いている').toHaveLength(3);
+    expect(menuItems(root).map((i) => i.textContent ?? '')).not.toContain(PARQUET_LABEL);
+  });
+
+  it('🔴 DuckDB でも書き込みの答えには並べない', async () => {
+    const s = setup();
+    s.runDuckDbSql.mockResolvedValueOnce({ columns: ['Count'], rows: [[3]], truncated: false, ms: 1 });
+    s.pick('db4');
+    await settle();
+    s.pickEngine('duckdb');
+    s.type('CREATE TABLE 集計 AS SELECT * FROM csv');
+    s.runBtn.click();
+    await settle();
+    s.pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!.click();
+    expect(menuItems(s.root).map((i) => i.textContent ?? '')).not.toContain(PARQUET_LABEL);
+  });
+
+  it('🔴 選び所を開いたまま sqlite へ替えて押した Parquet は、理由を言い、頼みを飛ばさない', async () => {
+    const { pane, root, d, pickEngine, exportDuckDbParquet, note } = await duckAnswer();
+    pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!.click();
+    const parquet = menuItems(root)[3]!;
+    pickEngine('sqlite');
+    parquet.click();
+    await settle();
+    expect(exportDuckDbParquet, 'engine が替わったのに DuckDB へ頼んでいる').not.toHaveBeenCalled();
+    expect(d.getState().sqlPage.running).toBe(false);
+    expect(note(), '黙って捨てている').toContain('Parquet は DuckDB で引いた答えだけ書き出せます');
   });
 });

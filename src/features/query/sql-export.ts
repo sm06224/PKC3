@@ -17,6 +17,8 @@
  * 🔑 だから file では `csv` / `tsv` は**空**、`json` は **`null`** にする。
  */
 import { csvEscapeField } from '../markdown/csv-table';
+import { canExportParquet } from './duckdb-export';
+import type { SqlEngine } from './sql-engine';
 
 /** 書き出せる形。⚠ 増やすときは `SQL_EXPORT_KINDS` にも足す(一覧が正本)。 */
 export type SqlExportKind = 'csv' | 'tsv' | 'json';
@@ -27,10 +29,30 @@ export type SqlExportKind = 'csv' | 'tsv' | 'json';
  */
 export const SQL_EXPORT_KINDS: readonly SqlExportKind[] = ['csv', 'tsv', 'json'];
 
+/**
+ * 🔴 **Parquet は「書き出しの選び所」にだけ在る形である**(#918 段⑥)。
+ *
+ * ⚠ `SqlExportKind`(csv / tsv / json)に混ぜない ── あちらは**画面に出ている答えの字を file にする**形で、
+ *   `sqlExportFileText` が 1 つの字に組む。Parquet は**型を保つ**ために、答えの字ではなく
+ *   **打った SQL を DuckDB の器の中でもう一度走らせて** 書く(`duckdb-export.ts`)── 字には組めない。
+ *   混ぜると、`sqlExportFileText(…, 'parquet')` が呼べてしまう(呼べて、黙って別の物を返す)。
+ */
+export type SqlExportChoice = SqlExportKind | 'parquet';
+
+/**
+ * 🔴 **いまの答えで選べる書き出しの形**(並びが画面の並びの正本)。
+ * ⚠ Parquet は **DuckDB で引いた、読む SQL の答え**のときだけ ── sqlite の道では出さない
+ *   (押せる印があるのに何も起きない口を作らない)。判定は `canExportParquet` の 1 本。
+ */
+export function sqlExportChoices(engine: SqlEngine, ranSql: string): readonly SqlExportChoice[] {
+  return engine === 'duckdb' && canExportParquet(ranSql) ? [...SQL_EXPORT_KINDS, 'parquet'] : SQL_EXPORT_KINDS;
+}
+
 /** 画面に出す字(拡張子ではなく、**何ができるか**で書く)。 */
-export function sqlExportLabel(kind: SqlExportKind): string {
+export function sqlExportLabel(kind: SqlExportChoice): string {
   if (kind === 'csv') return 'CSV(表計算で開く)';
   if (kind === 'tsv') return 'TSV(タブ区切り)';
+  if (kind === 'parquet') return 'Parquet(列の型を保って渡す)';
   return 'JSON(プログラムで読む)';
 }
 
@@ -39,10 +61,16 @@ export function asSqlExportKind(raw: string | null): SqlExportKind | null {
   return SQL_EXPORT_KINDS.find((k) => k === raw) ?? null;
 }
 
+/** 受け口で使う(Parquet を含む選び所用)。読めない字は捨てる。 */
+export function asSqlExportChoice(raw: string | null): SqlExportChoice | null {
+  return raw === 'parquet' ? 'parquet' : (SQL_EXPORT_KINDS.find((k) => k === raw) ?? null);
+}
+
 /** file に付ける種別。⚠ `text/csv` を tsv に使い回さない(受け手が区切りを推測する)。 */
-export function sqlExportMime(kind: SqlExportKind): string {
+export function sqlExportMime(kind: SqlExportChoice): string {
   if (kind === 'csv') return 'text/csv;charset=utf-8';
   if (kind === 'tsv') return 'text/tab-separated-values;charset=utf-8';
+  if (kind === 'parquet') return 'application/vnd.apache.parquet';
   return 'application/json;charset=utf-8';
 }
 
@@ -124,7 +152,7 @@ function two(n: number): string {
 export function sqlExportFileName(
   now: Date,
   where: string | null,
-  kind: SqlExportKind,
+  kind: SqlExportChoice,
 ): string {
   const stamp = `${String(now.getFullYear())}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}${two(now.getMinutes())}`;
   const safe = (where ?? 'この PKC3').replace(/[\\/:*?"<>|]/g, '_');

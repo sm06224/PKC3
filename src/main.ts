@@ -5172,6 +5172,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   (どの test からも実行されない ── CLAUDE.md §2)。上の `runDuckDbSql` と**同じ器**。
      */
     schemaDuckDb: (input) => duckDbRunner.schema(input.sources, input.onLoad),
+    /**
+     * 🔴 **DuckDB の答えを Parquet にして落とす口**(#918 段⑥)。⚠ 判断(包み方 / 書き出し用に許した path /
+     *   書いた file の即破棄)は `duckdb-export.ts` と `DuckDbRunner.exportParquet` が持つ ── この file は繋ぐだけ
+     *   (どの test からも実行されない ── CLAUDE.md §2)。上の `runDuckDbSql` と**同じ器**。
+     */
+    exportDuckDbParquet: (input) => duckDbRunner.exportParquet(input),
+    downloadFile: (fileName, blob) => {
+      downloadBlob(fileName, blob);
+    },
   });
   /**
    * 🔴 **索引の片づけを、書込が落ち着いたときに自動で打つ**(#999 段③。Gemini 裁定 A)。
