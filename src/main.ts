@@ -1260,7 +1260,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **「日」「週」の目盛りの空いた所をドラッグして、予定を作る配線**(#855 段 B-2)。
    * ⚠ 札の上で始めたドラッグは受けない(上の `installScheduleGridDrag` の仕事)。外さない(アプリと同寿命)。
    */
-  installScheduleGridCreate(root, dispatcher);
+  installScheduleGridCreate(root, dispatcher, makeEditLockPort(() => sync, cid));
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に
