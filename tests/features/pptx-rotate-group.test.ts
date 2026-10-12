@@ -330,19 +330,21 @@ describe('🔴 往復(板 → .pptx → 板)', () => {
     expect(n(as[0]!, 'y')).toBe(0);
   });
 
-  it('板の左上より外へ出る回転でも、付箋どうしの位置関係は保たれ、座標は負にならない', () => {
+  it('🔴 板の左上より外へ出る回転は、取り込むと全体が出た分(ここでは下へ 50px)動く。付箋どうしの位置関係は保たれ、座標は負にならない', () => {
     // 0,0 の付箋を 90° → 見た目は上へ 50px はみ出す
     const got = readPptxSlide(slideOf([...note(0, 0, 200, 100, 'A', { rotate: 90 }), ...note(300, 200, 200, 100, 'B')]));
     const as = attrsOf(got.body);
     expect(as.length).toBe(2);
     expect(n(as[0]!, 'y')).toBeGreaterThanOrEqual(0);
+    // 出た分(50px)だけ全体が動く。⚠ 絶対位置は戻らない(設計 doc の実装メモ)
+    expect(Math.abs(n(as[0]!, 'y') - 50), '全体が出た分動く').toBeLessThanOrEqual(TOL);
     // 元の差 (300, 200) が保たれる
     expect(Math.abs(n(as[1]!, 'x') - n(as[0]!, 'x') - 300)).toBeLessThanOrEqual(TOL);
     expect(Math.abs(n(as[1]!, 'y') - n(as[0]!, 'y') - 200)).toBeLessThanOrEqual(TOL);
     expect(as[0]).toContain('rotate=90');
   });
 
-  it('グループ名が付いていない / 読めない名前の群は、取り込みで グループN になる(札が 1 つ以上増えない)', () => {
+  it('読める名前(日本語)の群は、その名前のまま戻る', () => {
     const got = readPptxSlide(slideOf([
       ...note(40, 40, 200, 100, 'a', { group: 'チーム' }),
       ...note(300, 40, 200, 100, 'b', { group: 'チーム' }),
@@ -432,8 +434,39 @@ describe('🔴 取り込み ── <p:grpSp> を開いて平らにする', () =>
     expect(as.length).toBe(4);
     expect(as.filter((a) => a.includes('group=Inner')).length).toBe(2);
     expect(as.filter((a) => a.includes('group=Outer')).length, '外側の直接の子').toBe(2);
-    expect(got.simplified, '入れ子 1 つ').toBe(1);
+    expect(got.simplified, '外側の名前を失った内側の 2 枚').toBe(2);
     expect(got.dropped).toBe(0);
+  });
+
+  it.each([[''], ['a b'], ['a/b']])('🔴 読めない名前(%j)の群は グループ1 になる(名前をそのまま書かない)', (raw) => {
+    const got = readPptxSlide(wrap(
+      grp(raw, { off: [0, 0], ext: [1, 1], ...IDENT }, sp(2, 0, 0) + sp(3, 2000000, 0)),
+    ));
+    const as = attrsOf(got.body);
+    expect(as.length).toBe(2);
+    expect(as.every((a) => /group=グループ1(\s|$)/.test(a)), as.join('|')).toBe(true);
+  });
+
+  it('🔴 反転した群は反転を読まず、中の付箋の枚数で数える(2 枚)', () => {
+    const flipped = grp('G', { off: [0, 0], ext: [1, 1], ...IDENT }, sp(2, 0, 0) + sp(3, 2000000, 0))
+      .replace('<a:xfrm>', '<a:xfrm flipH="1">');
+    expect(flipped).toContain('flipH');
+    const got = readPptxSlide(wrap(flipped + sp(4, 0, 3000000)));
+    expect(got.simplified, '群の中の 2 枚。群の外の 1 枚は数えない').toBe(2);
+  });
+
+  it.each([
+    [' rot="18000000"', 5400000, 30], // 300° + 90° = 390° → 30
+    [' rot="-900000"', 16200000, 255], // −15°(345°)+ 270° = 615° → 255
+    [' rot="18000000"', -5400000, 210], // 300° + (−90° = 270°) = 570° → 210
+    [' rot="5400000"', 16200000, 0], // 90° + 270° = 360° → 回していない(札を書かない)
+  ])('🔴 子の向き%s + 群の向き%i → rotate=%i(mod 360 で合成)', (childRot, groupRot, want) => {
+    const got = readPptxSlide(wrap(
+      grp('G', { off: [0, 0], ext: [1, 1], ...IDENT, rot: groupRot }, sp(2, 0, 0, 1000000, 500000, '', childRot) + sp(3, 2000000, 0)),
+    ));
+    const first = attrsOf(got.body)[0]!;
+    if (want === 0) expect(first).not.toContain('rotate=');
+    else expect(first).toContain(`rotate=${want}`);
   });
 
   it('🔴 同じ名前の群は 2 つ目から グループN。読める名前の グループ1 を番号が奪わない', () => {
@@ -504,6 +537,19 @@ describe('🔴 取り込み ── rot を rotate= に戻す', () => {
     [' rot="21590000"', null], // 359.83° → 360 = 0
   ])('%s → rotate=%s(0 は札を書かない)', (attr, want) => {
     expect(rotOf(attr)).toBe(want);
+  });
+
+  it('🔴 回した付箋があっても、本文などが同居して相対位置で読むときは、付箋どうしの間隔が保たれる', () => {
+    // 200×50 を 90° 回した付箋(x=0)と x=300 の付箋 ── 回した後の外接四角で原点を取ると、間隔が 225 に縮む
+    const box = (id: number, name: string, x: number, attr: string): string =>
+      `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>`
+      + `<p:spPr><a:xfrm${attr}><a:off x="${x}" y="0"/><a:ext cx="1905000" cy="476250"/></a:xfrm>`
+      + `<a:prstGeom prst="rect"/></p:spPr><p:txBody><a:p><a:r><a:t>t</a:t></a:r></a:p></p:txBody></p:sp>`;
+    const got = readPptxSlide(wrap(box(2, 's2', 0, ' rot="5400000"') + box(3, 's3', 300 * 9525, '') + box(4, '本文', 600 * 9525, '')));
+    const xs = [...got.body.matchAll(/\.pkc-place x=(\d+)/g)].map((m) => Number(m[1]));
+    expect(xs.length).toBe(3);
+    expect(xs[0]).toBe(0);
+    expect(xs[1], '回した付箋の隣との間隔').toBe(300);
   });
 
   it('反転(flipH / flipV)は読まず、直した付箋の数に足す', () => {

@@ -122,6 +122,8 @@ interface ShapeRead {
   readonly flipped: boolean;
   /** 🔴 入っているグループの通し番号(内側が勝つ)。無ければ `null`(#530 段⑤c)。 */
   readonly group: number | null;
+  /** 入れ子の外側の群の名前を失った付箋か(内側の名前だけ残す。#530 段⑤c)。 */
+  readonly lostOuter: boolean;
 }
 
 /** `prst` → 板の形。⚠ **書き出しの表を裏返す**。知らない図形名は四角。 */
@@ -305,6 +307,7 @@ function readShape(sp: XmlNode): ShapeRead | null {
     rot: rotDegOf(xfrm),
     flipped: xfrm?.attrs.flipH === '1' || xfrm?.attrs.flipV === '1',
     group: null,
+    lostOuter: false,
   };
 }
 
@@ -390,7 +393,6 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
   let hasBodyText = false;
   // 🔴 グループ(#530 段⑤c)── `<p:grpSp>` を**開いて平らに**読む。名前は後でまとめて決める(下の ⑤)
   const groupNames: string[] = [];
-  let nested = 0;
   const walk = (nodes: readonly XmlNode[], depth: number): ShapeRead[] => {
     const got: ShapeRead[] = [];
     for (const el of nodes) {
@@ -411,14 +413,13 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
         // ⚠ グループの中の線も読む(`id` はスライド内で一意 ── 引き方は変わらない)
         conns.push(el);
       } else if (t === 'grpSp') {
-        if (depth > 0) nested += 1;
         const gi = groupNames.length;
         groupNames.push(kid(kid(el, 'nvGrpSpPr'), 'cNvPr')?.attrs.name ?? '');
         const move = groupTransform(el);
         for (const c of walk(el.children, depth + 1)) {
           const m = move(c);
           // 🔑 入れ子は内側が勝つ(`group=` は 1 枚に 1 つ)
-          got.push(m.group === null ? { ...m, group: gi } : m);
+          got.push(m.group === null ? { ...m, group: gi } : { ...m, lostOuter: true });
         }
       } else if (t === 'pic' || t === 'graphicFrame' || t === 'contentPart') {
         dropped += 1;
@@ -435,7 +436,9 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     // 🔴 回した付箋は、回した後の外接四角で測る(#530 段⑤e)── 書き出しが外接四角で枠を取るので、逆算も合わせる
     const turned = shapes.some((s) => s.rot !== 0);
     const bounds = shapes.map((s) => rotatedBounds(s.rect, s.rot));
-    origin = { x: Math.min(...bounds.map((r) => r.x)), y: Math.min(...bounds.map((r) => r.y)) };
+    // ⚠ 座標は回す前の四角(`x=` `y=` と同じ約束)で書くので、相対位置の原点も**回す前の四角の最小**で取る。
+    //   回した後の外接四角の最小で取ると、原点と座標の基準が食い違い、回した付箋の隣との間隔が縮む
+    origin = { x: Math.min(...shapes.map((s) => s.rect.x)), y: Math.min(...shapes.map((s) => s.rect.y)) };
     // 書き出しの板のスライドは「題名(あれば)+ 板だけ」。他の図形(本文 / 図 / 表)が同居する枠は逆算しない
     const pure = !hasBodyText && dropped === 0;
     if (pure) {
@@ -556,7 +559,7 @@ export function readPptxSlide(xml: string): PptxBoardSlide {
     lines: wires.length,
     dropped: dropped + reshaped,
     rounded: shapes.filter((s) => s.size?.rounded === true).length,
-    simplified: nested + shapes.filter((s) => s.flipped).length,
+    simplified: shapes.filter((s) => s.flipped || s.lostOuter).length,
   };
 }
 
