@@ -22,6 +22,7 @@ const { thumbWanted, pickNext, currentChange } = self.PkcPdfPageList;
 const pageEdit = self.PkcPdfPageEdit;
 const editStage = self.PkcPdfEditStage;
 const hl = self.PkcPdfHighlight;
+const nt = self.PkcPdfNotes;
 
 /** 見えている頁の前後に、この数だけ先に描く。 */
 const RADIUS = 2;
@@ -63,6 +64,14 @@ const editNote = $('edit-note');
 const editWarn = $('edit-warn');
 const editBar = $('edit-bar');
 const appendBtn = $('append-pdf');
+const noteBtn = $('note-tool');
+const penBtn = $('pen-tool');
+const notePop = $('note-pop');
+const noteEditBtn = $('note-edit');
+const noteRemoveBtn = $('note-remove');
+const noteInputWrap = $('note-input-wrap');
+const noteInput = $('note-input');
+const noteTip = $('note-tip');
 const appendFile = $('append-file');
 const appendMenu = $('append-menu');
 const appendFromNote = $('append-from-note');
@@ -113,6 +122,8 @@ const layers = [];
 /** 頁 → 描いたときの viewport(ハイライトの座標を PDF ⇄ 窓で行き来する)/ 元の PDF に付いていたハイライト(`getAnnotations`)。 */
 const pageVp = [];
 const existing = [];
+/** 頁 → 元の PDF に付いている付箋(`/Text`。ほかのアプリで付けた物も。外すために押せる印の材料)。 */
+const existingNotes = [];
 /** 頁 → いま描いている世代。 */
 const inflight = new Map();
 let wanted = new Set();
@@ -291,6 +302,7 @@ function clearBox(i) {
   layers[i] = undefined;
   pageVp[i] = undefined;
   existing[i] = undefined;
+  existingNotes[i] = undefined;
   if (boxes[i]) boxes[i].textContent = '';
 }
 
@@ -389,6 +401,7 @@ async function drawPage(pdf, local, i, myGen, owner) {
   }).promise;
   // 元の PDF に付いているハイライト(外すために押せる印を重ねる材料)。絵には焼き込まれている
   const annots = i > total ? [] : await loadHighlights(page);
+  const noteAnnots = i > total ? [] : await loadNotes(page);
   const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   // 🔑 焼いたら canvas は即手放す(絵は PNG の `<img>` が持つ)
   canvas.width = 0;
@@ -416,6 +429,7 @@ async function drawPage(pdf, local, i, myGen, owner) {
   }
   pageVp[i] = vp;
   existing[i] = annots;
+  existingNotes[i] = noteAnnots;
   paintMarks(i);
   const layer = document.createElement('div');
   layer.className = 'textLayer';
@@ -1146,15 +1160,21 @@ function updateEditUi() {
   // 🔴 選んだページが 0 件では押せない(0 ページの PDF は作らない)
   extractBtn.disabled = !ready || saving || !pageEdit.canExtract(items, selected);
   appendBtn.disabled = !ready || saving;
+  noteBtn.disabled = !ready || saving;
+  penBtn.disabled = !ready || saving;
   resetBtn.hidden = !dirty;
   resetBtn.disabled = saving;
   unpickBtn.hidden = picked < 1;
   unpickBtn.disabled = saving;
   const notes = [];
   if (arrangeDirty) notes.push(pageEdit.noteLine(items.length, grand - droppedPages));
-  if (isHlDirty()) {
+  if (isMarkDirty()) {
     const c = hlCounts();
-    notes.push(hl.note(c.added, c.removed, !arrangeDirty));
+    notes.push(hl.note(c.added, c.removed, !arrangeDirty && !isAnnDirty()));
+  }
+  if (isAnnDirty()) {
+    const c = annCounts();
+    notes.push(nt.note(c.notes, c.strokes, !arrangeDirty));
   }
   if (picked > 0) notes.push(pageEdit.pickNote(picked));
   editNote.textContent = notes.join(' ');
@@ -1567,7 +1587,11 @@ resetBtn.addEventListener('click', () => {
   }
   marks = hlBase.marks.slice();
   removals = new Map(hlBase.removals);
+  notes = hlBase.notes.slice();
+  strokes = hlBase.strokes.slice();
+  noteRemovals = new Map(hlBase.noteRemovals);
   hideHlPop();
+  hideNoteInput();
   repaintMarks();
   applyItems();
   setStatus('');
@@ -1710,16 +1734,16 @@ async function submitBuild(list, name, kind) {
       return;
     }
     // 渡すのは**ページ番号の並びと回す角度・ハイライトの座標と色・外す注釈の id だけ**(bytes は別に transfer)
-    const hlJob = hl.toJob(
-      marks,
-      removals,
-      list.map((it) => it.page),
-    );
+    const order = list.map((it) => it.page);
+    const hlJob = hl.toJob(marks, removals, order);
+    const annJob = nt.toJob(notes, strokes, (id) => hl.colorOf(id).rgb, order);
+    // 外す付箋は、外すハイライトと同じ列に `kind: 'note'` で並べる(worker が種類に合う注釈だけを外す)
+    hlJob.removals = hlJob.removals.concat(nt.removalsJob(noteRemovals, order));
     // 足した PDF は、ページが 1 枚でも残っている物だけ送る(送るのも transfer)
     const mine = pageEdit.sourcesFor(list, added);
     const res = await callEdit(
       'build',
-      { ...pageEdit.toJob(list), ...hlJob, sources: mine.sources },
+      { ...pageEdit.toJob(list), ...hlJob, ...annJob, sources: mine.sources },
       { extras: mine.used.map((k) => added[k].blob) },
     );
     const dir = await editStage.openDir();
@@ -1749,7 +1773,16 @@ async function submitBuild(list, name, kind) {
       kind,
       baseline: kind === 'save' ? list : null,
       // 保存した時点のハイライト(できたら、これが新しい基準になる)
-      hlBase: kind === 'save' ? { marks: marks.slice(), removals: new Map(removals) } : null,
+      hlBase:
+        kind === 'save'
+          ? {
+              marks: marks.slice(),
+              removals: new Map(removals),
+              notes: notes.slice(),
+              strokes: strokes.slice(),
+              noteRemovals: new Map(noteRemovals),
+            }
+          : null,
     };
     send('edited', { key: staged.key });
   } catch (e) {
@@ -2014,7 +2047,8 @@ const swatches = [];
 function setSelButtons(on) {
   quoteBtn.disabled = !on;
   hlBtn.disabled = !on;
-  for (const b of swatches) b.disabled = !on;
+  // 色のボタンは、字を選んだときと、ペンを選んでいる間も押せる(同じ 4 色)
+  for (const b of swatches) b.disabled = !(on || tool === 'pen');
 }
 
 const isBarButton = (el) => el === quoteBtn || el === hlBtn || swatches.includes(el);
@@ -2070,7 +2104,7 @@ let marks = [];
 /** 外すと決めた、元の PDF に付いていたハイライト `Map<"頁:id", { page, id }>`。 */
 let removals = new Map();
 /** 最後に保存した時点の `marks` / `removals`。「まだ保存していない変更」はこれとの違いで見る。 */
-let hlBase = { marks: [], removals: new Map() };
+let hlBase = { marks: [], removals: new Map(), notes: [], strokes: [], noteRemovals: new Map() };
 /** 選んだ色(窓を閉じるまで覚える)。 */
 let hlColor = hl.DEFAULT_COLOR;
 let uidSeq = 0;
@@ -2078,8 +2112,29 @@ let uidSeq = 0;
 let hlTarget = null;
 let hlPopScroll = 0;
 
-function isHlDirty() {
+function isMarkDirty() {
   return !hl.sameMarks(marks, hlBase.marks) || !hl.sameRemovals(removals, hlBase.removals);
+}
+
+/** 付箋とペンに、まだ保存していない変更があるか(付けた・直した・外した)。 */
+function isAnnDirty() {
+  return (
+    !nt.sameUids(notes, hlBase.notes) ||
+    !nt.sameStrokes(strokes, hlBase.strokes) ||
+    !hl.sameRemovals(noteRemovals, hlBase.noteRemovals)
+  );
+}
+
+function isHlDirty() {
+  return isMarkDirty() || isAnnDirty();
+}
+
+/** 案内に出す数(付箋: 付けた / 外した、ペンの線: 書いた / 外した)。 */
+function annCounts() {
+  const n = nt.diffCount(notes, hlBase.notes);
+  let goneExisting = 0;
+  for (const k of noteRemovals.keys()) if (!hlBase.noteRemovals.has(k)) goneExisting += 1;
+  return { notes: { added: n.added, removed: n.removed + goneExisting }, strokes: nt.diffCount(strokes, hlBase.strokes) };
 }
 
 /** 案内に出す数: 保存した状態に無い付けた数 / 保存した状態から外した数。 */
@@ -2175,6 +2230,7 @@ function paintMarks(i) {
     }
   }
   img.after(layer);
+  paintNotes(i);
 }
 
 /** いま絵になっている頁のハイライトの層を作り直す。 */
@@ -2269,6 +2325,7 @@ hlBtn.addEventListener('click', () => {
 function hideHlPop() {
   hlTarget = null;
   hlPop.hidden = true;
+  hideNotePop();
 }
 
 function showHlPop(el, x, y) {
@@ -2298,6 +2355,14 @@ pagesEl.addEventListener('pointerdown', (ev) => {
 
 pagesEl.addEventListener('click', (ev) => {
   if (!ready) return;
+  // 付箋 / ペンの道具を選んでいる間は、ハイライトの「外す」を出さない(押した位置は道具が使う)。
+  // ただし付箋の印は道具を選んだままでも押せる(「直す / 外す」を出す)
+  if (tool !== null) {
+    const m = ev.target instanceof Element ? ev.target.closest('.note-layer > div') : null;
+    hideHlPop();
+    if (m !== null) showNotePopFor(m, ev.clientX, ev.clientY);
+    return;
+  }
   // 🔑 見分けは**選びの有無ではなく動き**で ── 付けた直後の字は選ばれたままなので、その上を押した click でも「外す」を出す。
   //    ドラッグで字を選んだ後の click(押した位置から動いている)と、ダブルクリック(単語を選ぶ)は、押したことにしない
   const moved = hlDown !== null && Math.hypot(ev.clientX - hlDown.x, ev.clientY - hlDown.y) > 4;
@@ -2309,6 +2374,19 @@ pagesEl.addEventListener('click', (ev) => {
   const box = t === null ? null : t.closest('.page');
   if (box === null) {
     hideHlPop();
+    return;
+  }
+  // 付箋の印 / ペンの線を押したときは、そちらの「直す / 外す」(ハイライトの「外す」は出さない)
+  const mark = t.closest('.note-layer > div');
+  if (mark !== null) {
+    hideHlPop();
+    showNotePopFor(mark, ev.clientX, ev.clientY);
+    return;
+  }
+  const stroke = strokeUnder(box, ev.clientX, ev.clientY);
+  if (stroke !== null) {
+    hideHlPop();
+    showNotePop({ kind: 'stroke', uid: stroke.uid }, ev.clientX, ev.clientY);
     return;
   }
   const hit = [...box.querySelectorAll(':scope > .hl-layer > div')].filter((el) => {
@@ -2324,10 +2402,13 @@ pagesEl.addEventListener('click', (ev) => {
 });
 // 読み進めたら畳む(押した場所から離れる)。⚠ ほんの少しの動き(押した直後の位置合わせ)では畳まない
 scroller.addEventListener('scroll', () => {
-  if (hlTarget !== null && Math.abs(scroller.scrollTop - hlPopScroll) > 8) hideHlPop();
+  if ((hlTarget !== null || noteTarget !== null) && Math.abs(scroller.scrollTop - hlPopScroll) > 8) hideHlPop();
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') hideHlPop();
+  if (ev.key !== 'Escape') return;
+  hideHlPop();
+  // 字を入れていないときの Esc は、選んでいる道具をやめる
+  if (tool !== null && noteDraft === null) setTool(null);
 });
 
 hlPopBtn.addEventListener('click', () => {
@@ -2356,6 +2437,386 @@ async function removeTarget() {
   repaintMarks();
   updateEditUi();
 }
+
+// ───────── 付箋とペン(#275)── ページのどこかを押して付箋を付ける・なぞって線を書く
+//
+// 🔴 ハイライトと**同じ作り**: 画面で触るのは計画(`notes` / `strokes` / 外す元の付箋 `noteRemovals`)だけで、PDF は保存を押すまで
+// 書き換えない。保存はページの編集と同じ 1 本(`submitBuild`)で、新しい PDF に PDF 本来の注釈(`/Text` と `/Ink`)として入る。
+// 座標の計算は `notes.js`(取り出して test できる形)。
+
+/** 付けた付箋 `{ uid, page, rect(PDF の座標), text }` / 書いた線 `{ uid, page, color, pts(PDF の座標) }` / 外す元の付箋 `Map<"頁:id", { page, id }>`。 */
+let notes = [];
+let strokes = [];
+let noteRemovals = new Map();
+/** 選んでいる道具(`null` / 'note' / 'pen')。 */
+let tool = null;
+/** 字を入れている付箋(`null` = 入れていない)。 */
+let noteDraft = null;
+/** 「直す / 外す」を出している対象(`null` = 出していない)。 */
+let noteTarget = null;
+
+/** 元の PDF のそのページに付いている付箋(読めなければ 0 件)。字の無い付箋(返信・吹き出しだけ)は対象にしない。 */
+async function loadNotes(page) {
+  try {
+    const type = pdfjs.AnnotationType?.TEXT ?? 1;
+    const list = await page.getAnnotations();
+    return list
+      .filter((a) => a.annotationType === type && typeof a.id === 'string' && hl.parseAnnotId(a.id) !== null && !a.inReplyTo)
+      .map((a) => ({ id: a.id, rect: Array.from(a.rect), text: String(a.contentsObj?.str ?? a.contents ?? '') }))
+      .filter((n) => n.text.trim() !== '');
+  } catch {
+    return [];
+  }
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** 頁 `i` に、押さえの層(道具を選んでいる間だけ見える)・ペンの線の層・付箋の印の層を重ねる(`paintMarks` から呼ぶ)。 */
+function paintNotes(i) {
+  const box = boxes[i];
+  const vp = pageVp[i];
+  if (!box || !vp) return;
+  for (const c of ['tool-layer', 'ink-layer', 'note-layer']) {
+    const old = box.querySelector(`:scope > .${c}`);
+    if (old !== null) old.remove();
+  }
+  const pressLayer = document.createElement('div');
+  pressLayer.className = 'tool-layer';
+  pressLayer.setAttribute('data-pkc-field', 'pdf-tool-layer');
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ink-layer');
+  svg.setAttribute('data-pkc-field', 'pdf-ink-layer');
+  svg.setAttribute('viewBox', `0 0 ${String(vp.width)} ${String(vp.height)}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+  for (const s of strokes) {
+    if (s.page !== i) continue;
+    const line = document.createElementNS(SVG_NS, 'polyline');
+    line.setAttribute('data-pkc-field', 'pdf-ink');
+    line.setAttribute('data-ink-uid', String(s.uid));
+    line.setAttribute('data-hl-color', s.color);
+    line.setAttribute('points', s.pts.map((p) => vp.convertToViewportPoint(p[0], p[1]).join(',')).join(' '));
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', cssRgb(hl.colorOf(s.color).rgb));
+    line.setAttribute('stroke-width', String(nt.PEN_WIDTH * (vp.scale ?? scale)));
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke-linejoin', 'round');
+    svg.append(line);
+  }
+  const layer = document.createElement('div');
+  layer.className = 'note-layer';
+  layer.setAttribute('data-pkc-field', 'pdf-note-layer');
+  const place = (el, rect) => {
+    const b = nt.viewportBox(rect, (x, y) => vp.convertToViewportPoint(x, y));
+    el.style.left = `${String(b.left)}px`;
+    el.style.top = `${String(b.top)}px`;
+    el.style.width = `${String(b.width)}px`;
+    el.style.height = `${String(b.height)}px`;
+  };
+  for (const e of existingNotes[i] || []) {
+    const el = document.createElement('div');
+    el.setAttribute('data-pkc-field', 'pdf-note-existing');
+    el.setAttribute('data-note-id', e.id);
+    el.setAttribute('data-note-text', e.text);
+    if (noteRemovals.has(`${String(i)}:${e.id}`)) el.setAttribute('data-pkc-removed', 'true');
+    place(el, e.rect);
+    layer.append(el);
+  }
+  for (const n of notes) {
+    if (n.page !== i) continue;
+    const el = document.createElement('div');
+    el.setAttribute('data-pkc-field', 'pdf-note-new');
+    el.setAttribute('data-note-uid', String(n.uid));
+    el.setAttribute('data-note-text', n.text);
+    place(el, n.rect);
+    layer.append(el);
+  }
+  box.append(pressLayer, svg, layer);
+}
+
+/** 道具を選ぶ / やめる(同じ道具をもう一度押すとやめる)。 */
+function setTool(next) {
+  const to = tool === next ? null : next;
+  tool = to;
+  cancelNoteInput();
+  hideHlPop();
+  if (to === null) document.body.removeAttribute('data-pkc-pdf-tool');
+  else document.body.setAttribute('data-pkc-pdf-tool', to);
+  noteBtn.setAttribute('aria-pressed', to === 'note' ? 'true' : 'false');
+  penBtn.setAttribute('aria-pressed', to === 'pen' ? 'true' : 'false');
+  setSelButtons(lastSel !== null);
+  if (to === 'note') setStatus('付箋を付けたい場所を押してください');
+  else if (to === 'pen') setStatus('ページの上をなぞって線を書けます。色は右の丸いボタンで選びます');
+  else setStatus('');
+}
+noteBtn.addEventListener('click', () => {
+  if (ready && !saving) setTool('note');
+});
+penBtn.addEventListener('click', () => {
+  if (ready && !saving) setTool('pen');
+});
+
+// ── 付箋: 押した場所に字の欄を出す
+
+function placeFixed(el, x, y) {
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  el.style.left = `${String(Math.max(4, Math.min(x, window.innerWidth - w - 4)))}px`;
+  el.style.top = `${String(Math.max(4, Math.min(y, window.innerHeight - h - 4)))}px`;
+}
+
+function openNoteInput(draft, value, x, y) {
+  hideHlPop();
+  noteDraft = draft;
+  noteInput.value = value;
+  noteInputWrap.hidden = false;
+  placeFixed(noteInputWrap, x, y);
+  noteInput.focus();
+}
+
+function hideNoteInput() {
+  noteDraft = null;
+  noteInputWrap.hidden = true;
+}
+
+/** 字の欄をやめる(付けない)。 */
+function cancelNoteInput() {
+  if (noteDraft === null) return;
+  hideNoteInput();
+}
+
+pagesEl.addEventListener('click', (ev) => {
+  if (!ready || saving || tool !== 'note') return;
+  const t = ev.target instanceof Element ? ev.target : null;
+  if (t === null || !t.classList.contains('tool-layer')) return;
+  const box = t.closest('.page');
+  if (box === null) return;
+  const page = Number(box.getAttribute('data-page'));
+  const vp = pageVp[page];
+  if (!vp) return;
+  const b = box.getBoundingClientRect();
+  const at = nt.clientToViewport(ev.clientX, ev.clientY, b, { width: vp.width, height: vp.height });
+  // 🔑 場所は押した瞬間に PDF の座標へ直す(字を入れている間に拡大縮小しても、押した場所のまま)
+  const rect = nt.noteRect(at[0], at[1], (x, y) => vp.convertToPdfPoint(x, y));
+  openNoteInput({ kind: 'new', page, rect }, '', ev.clientX, ev.clientY);
+});
+
+noteInput.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    // 🔴 日本語入力の変換を確定する Enter では付けない
+    if (ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    void commitNote();
+  } else if (ev.key === 'Escape') {
+    ev.preventDefault();
+    ev.stopPropagation();
+    cancelNoteInput();
+  }
+});
+// 欄の外を押したら、字が入っていれば付ける(入っていなければやめる)── 打った字を黙って捨てない
+noteInput.addEventListener('blur', () => {
+  if (noteDraft !== null) void commitNote();
+});
+
+async function commitNote() {
+  const d = noteDraft;
+  if (d === null) return;
+  const text = nt.cleanText(noteInput.value);
+  hideNoteInput();
+  if (text === null || !ready || saving) return;
+  if (!(await canEdit())) return;
+  if (saving) return;
+  uidSeq += 1;
+  if (d.kind === 'new') {
+    notes = nt.addNote(notes, { uid: uidSeq, page: d.page, rect: d.rect, text });
+    setStatus('付箋を付けました。「別の PDF として保存」で新しい PDF になります');
+  } else if (d.kind === 'edit-new') {
+    if (!notes.some((n) => n.uid === d.uid)) return;
+    notes = nt.editNote(notes, d.uid, text, uidSeq);
+    setStatus('付箋を直しました');
+  } else {
+    // 元の PDF に付いていた付箋を直す = それを外して、同じ場所に直した付箋を付ける
+    noteRemovals.set(`${String(d.page)}:${d.id}`, { page: d.page, id: d.id });
+    notes = nt.addNote(notes, { uid: uidSeq, page: d.page, rect: d.rect, text });
+    setStatus('付箋を直しました。「別の PDF として保存」で新しい PDF になります');
+  }
+  repaintMarks();
+  updateEditUi();
+}
+
+// ── 付箋の印に重ねると字が出る
+
+pagesEl.addEventListener('mouseover', (ev) => {
+  const t = ev.target instanceof Element ? ev.target.closest('.note-layer > div') : null;
+  if (t === null) return;
+  noteTip.textContent = t.getAttribute('data-note-text') ?? '';
+  noteTip.hidden = false;
+  const r = t.getBoundingClientRect();
+  placeFixed(noteTip, r.left, r.bottom + 4);
+});
+pagesEl.addEventListener('mouseout', (ev) => {
+  const t = ev.target instanceof Element ? ev.target.closest('.note-layer > div') : null;
+  if (t !== null) noteTip.hidden = true;
+});
+
+// ── 付箋の印 / ペンの線を押す → 「直す / 外す」
+
+function hideNotePop() {
+  noteTarget = null;
+  notePop.hidden = true;
+  noteTip.hidden = true;
+}
+
+function showNotePop(target, x, y) {
+  noteTarget = target;
+  const removed = target.kind === 'note-existing' && noteRemovals.has(`${String(target.page)}:${target.id}`);
+  noteEditBtn.hidden = target.kind === 'stroke' || removed;
+  noteRemoveBtn.textContent = removed ? '外すのをやめる' : '外す';
+  noteTip.hidden = true;
+  notePop.hidden = false;
+  hlPopScroll = scroller.scrollTop;
+  placeFixed(notePop, x + 6, y + 6);
+}
+
+function showNotePopFor(mark, x, y) {
+  const page = Number(mark.closest('.page').getAttribute('data-page'));
+  const text = mark.getAttribute('data-note-text') ?? '';
+  if (mark.getAttribute('data-pkc-field') === 'pdf-note-new') {
+    showNotePop({ kind: 'note-new', page, uid: Number(mark.getAttribute('data-note-uid')), text }, x, y);
+  } else {
+    const id = mark.getAttribute('data-note-id') ?? '';
+    const e = (existingNotes[page] || []).find((n) => n.id === id);
+    if (e === undefined) return;
+    showNotePop({ kind: 'note-existing', page, id, text, rect: e.rect }, x, y);
+  }
+}
+
+/** 押した位置の下にある、書いた線(いちばん上 = 後から書いた物)。 */
+function strokeUnder(box, cx, cy) {
+  const page = Number(box.getAttribute('data-page'));
+  const vp = pageVp[page];
+  if (!vp) return null;
+  const b = box.getBoundingClientRect();
+  const at = nt.clientToViewport(cx, cy, b, { width: vp.width, height: vp.height });
+  // 線の太さの半分 + 押しやすさの余裕(窓の px)
+  const tol = (nt.PEN_WIDTH * (vp.scale ?? scale)) / 2 + 5;
+  for (let k = strokes.length - 1; k >= 0; k -= 1) {
+    const s = strokes[k];
+    if (s.page !== page) continue;
+    if (nt.strokeHit(s.pts.map((p) => vp.convertToViewportPoint(p[0], p[1])), at[0], at[1], tol)) return s;
+  }
+  return null;
+}
+
+noteEditBtn.addEventListener('click', () => {
+  const t = noteTarget;
+  hideNotePop();
+  if (t === null || t.kind === 'stroke' || !ready || saving) return;
+  const mark = pagesEl.querySelector(
+    t.kind === 'note-new'
+      ? `[data-pkc-field="pdf-note-new"][data-note-uid="${String(t.uid)}"]`
+      : `[data-pkc-field="pdf-note-existing"][data-note-id="${t.id}"]`,
+  );
+  const r = mark === null ? { left: 80, bottom: 80 } : mark.getBoundingClientRect();
+  const draft = t.kind === 'note-new' ? { kind: 'edit-new', uid: t.uid } : { kind: 'edit-existing', page: t.page, id: t.id, rect: t.rect };
+  openNoteInput(draft, t.text, r.left, r.bottom + 4);
+});
+
+noteRemoveBtn.addEventListener('click', () => {
+  void removeNoteTarget();
+});
+
+async function removeNoteTarget() {
+  const t = noteTarget;
+  hideNotePop();
+  if (t === null || !ready || saving) return;
+  if (t.kind === 'stroke') {
+    strokes = strokes.filter((s) => s.uid !== t.uid);
+    setStatus('線を外しました');
+  } else if (t.kind === 'note-new') {
+    notes = nt.removeNote(notes, t.uid);
+    setStatus('付箋を外しました');
+  } else {
+    if (!(await canEdit())) return;
+    if (saving) return;
+    const key = `${String(t.page)}:${t.id}`;
+    if (noteRemovals.has(key)) {
+      noteRemovals.delete(key);
+      setStatus('付箋を外すのをやめました');
+    } else {
+      noteRemovals.set(key, { page: t.page, id: t.id });
+      setStatus('付箋を外します。「別の PDF として保存」で新しい PDF から消えます');
+    }
+  }
+  repaintMarks();
+  updateEditUi();
+}
+
+// ── ペン: ページの上をなぞる
+
+/** なぞっている線 `{ id, page, box, vp, pts(窓の座標), line(<polyline>) }`(`null` = なぞっていない)。 */
+let pen = null;
+
+pagesEl.addEventListener('pointerdown', (ev) => {
+  if (!ready || saving || tool !== 'pen' || ev.button !== 0) return;
+  const t = ev.target instanceof Element ? ev.target : null;
+  if (t === null || !t.classList.contains('tool-layer')) return;
+  const box = t.closest('.page');
+  const page = box === null ? 0 : Number(box.getAttribute('data-page'));
+  const vp = pageVp[page];
+  const svg = box === null ? null : box.querySelector(':scope > .ink-layer');
+  if (!vp || svg === null) return;
+  try {
+    t.setPointerCapture(ev.pointerId);
+  } catch {
+    // 取れなくても、枠の中での動きは追える
+  }
+  const line = document.createElementNS(SVG_NS, 'polyline');
+  line.setAttribute('fill', 'none');
+  line.setAttribute('stroke', cssRgb(hl.colorOf(hlColor).rgb));
+  line.setAttribute('stroke-width', String(nt.PEN_WIDTH * (vp.scale ?? scale)));
+  line.setAttribute('stroke-linecap', 'round');
+  line.setAttribute('stroke-linejoin', 'round');
+  svg.append(line);
+  pen = { id: ev.pointerId, page, box, vp, pts: [], line };
+  penPoint(ev);
+  ev.preventDefault();
+});
+
+function penPoint(ev) {
+  const b = pen.box.getBoundingClientRect();
+  pen.pts.push(nt.clientToViewport(ev.clientX, ev.clientY, b, { width: pen.vp.width, height: pen.vp.height }));
+  pen.line.setAttribute('points', pen.pts.map((p) => p.join(',')).join(' '));
+}
+
+pagesEl.addEventListener('pointermove', (ev) => {
+  if (pen === null || ev.pointerId !== pen.id) return;
+  penPoint(ev);
+});
+
+async function penEnd(ev, cancelled) {
+  if (pen === null || ev.pointerId !== pen.id) return;
+  const p = pen;
+  pen = null;
+  p.line.remove();
+  if (cancelled || p.pts.length === 0) return;
+  // 🔑 PDF の座標へは離した瞬間に直す(確かめを待つ間に拡大縮小しても、書いた場所のまま)
+  const pts = nt.strokeToPdf(p.pts, (x, y) => p.vp.convertToPdfPoint(x, y));
+  if (!(await canEdit())) return;
+  if (saving) return;
+  uidSeq += 1;
+  strokes = strokes.concat([{ uid: uidSeq, page: p.page, color: hlColor, pts }]);
+  repaintMarks();
+  updateEditUi();
+  setStatus('線を書きました。「別の PDF として保存」で新しい PDF になります');
+}
+pagesEl.addEventListener('pointerup', (ev) => {
+  void penEnd(ev, false);
+});
+pagesEl.addEventListener('pointercancel', (ev) => {
+  void penEnd(ev, true);
+});
 
 // ───────── 生死
 
