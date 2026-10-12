@@ -187,6 +187,12 @@ const UNBRIDGED: readonly string[] = [
  */
 const UNREGISTERED_NAMEABLE: readonly string[] = [
   /**
+   * ⚠ **2026-10-11(#582 段③ 第 2 群)で、「高」の 26 件を登記して在庫から抜いた** ── SQL 4 / 本文の整形 2 / 録音・録画・時間 3 /
+   *   ゴミ箱・選択 3 / 検索・置換 3 / 2 ペイン 1 / 表示の絞り 2 / 保存領域 2 / 連絡先 2 / お知らせ 1 / アプリ 1 / 取り込み 1 / 履歴 1。
+   *   **残した 3 件**(「高」だが撃てない):`insert-diagram` / `insert-icon`(打っている場所に入れるので、一覧を閉じた直後に位置が先頭へ戻って
+   *   本文の先頭に入る ── 実ブラウザで測った)/ `dual-delete`(`filer-trash` が同じ実体を通している)。
+   */
+  /**
    * ⚠ **2026-10-11(#582 段③ 第 1 群)で、「高」のうち 1 件だけ登記しなかった** ── 「選択範囲をコピー」(`copy-selection-md`)。
    *   一覧(パレット)を開いた瞬間に本文の選択が消え、画面のボタン自身も押せなくなる(実ブラウザで測った)ので、
    *   登記しても一覧からは撃てない。選択を運ぶ設計が別に要る。
@@ -199,7 +205,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   パレットから 1 語で呼べる所に置かない(どの部品かは押したボタン自身が運ぶ)。
    */
   'cancel-asr-install', 'install-asr-part', 'remove-asr-part',
-  'add-place', 'add-place-template', 'add-url-tile', 'adopt-external-images',
+  'add-place', 'add-place-template', 'adopt-external-images',
   'adopt-link-icon', 'allow-external-images', 'apply-plan', 'apply-settings',
   'apply-update', 'bulk-tag-add', 'bulk-tag-remove',
   /**
@@ -226,7 +232,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-filter',
-  'clear-kind-filter', 'clear-opened-history', 'clear-search-history', 'clear-selection',
+  'clear-opened-history', 'clear-search-history', 
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
   'close-lightbox',
   /**
@@ -246,15 +252,15 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    */
   'container-rebuild',
   'container-reset',
-  'contacts-quick-add', 'copy-block-md', 'copy-chapter-md', 
-  'copy-section-link', 'copy-section-ref', 'create-date-note', 'db-check',
+  'copy-block-md', 'copy-chapter-md', 
+  'copy-section-link', 'copy-section-ref', 'create-date-note', 
   'delete-selected', 'deny-external-images',
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
-  'dual-sort', 'dual-tab-add', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
-  'export-vcards', 'force-release', 'format-text', 'hide-history',
-  'hide-revision-preview', 'hide-trash', 'insert-diagram', 'insert-icon', 'install-office-pack',
+  'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
+  'force-release', 'format-text', 
+  'hide-revision-preview', 'insert-diagram', 'insert-icon', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
   'move-order-up', 'mute-announce', 'next-announce',
   // ⚠ 2026-10-08(#1452 案 1): `open-manual-window` は登記簿に載った(名前で呼べる)のでここから外れた
@@ -263,16 +269,17 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   🔑 押した所から**何も要らない**(行き先は固定で、鍵も持たない。
    *   ⚠ 2026-10-08 までは `open-manual-window` も同じ仕分けだったが、#1452 案 1 で登記簿に載った)。
    */
-  'open-storage-check', 'open-system-notices', 
+  'open-storage-check', 
   'paste-many-copied',
   /**
    * ⚠ **2026-10-02(#215 段①②)で 3 件増やした** ── パソコンのフォルダを選ぶ / 切る / さらに表示。
    * 🔑 **名前で呼べないままにする理由**:押し口は「PC」のタブの中の 1 個所だけで、
-   *   タブを開いていないと意味が無い(`sql-er-toggle` と同じ ── 出す先が無い)。
-   *   ⚠ 「フォルダを選ぶ…」は user の操作の流れの中で呼ぶ必要があり、パレットの Enter は
-   *   その流れに乗らない可能性がある(実測していない)ので、登記は見送る。
+   *   タブを開いていないと意味が無い(出す先が無い)。
+   *   ⚠ 2026-10-11(#582 段③ 第 2 群)で「フォルダを選ぶ…」(`pc-pick-folder`)だけ登記した ──
+   *   パレットの Enter でも、フォルダの選択画面は操作の流れの中で呼ばれる(実ブラウザで測った:
+   *   `showDirectoryPicker` の呼び出し時に `navigator.userActivation.isActive` が真)。残りは出す先が無いまま。
    */
-  'pc-cut-folder', 'pc-dir-note', 'pc-more', 'pc-pick-folder', 'pc-refresh-folder',
+  'pc-cut-folder', 'pc-dir-note', 'pc-more', 'pc-refresh-folder',
   'phone-menu', 'phone-page', 'pick-app-icon', 'pick-create-kind',
   /**
    * ⚠ **2026-09-14(#530 案 A)で 5 件増やした** ── 板の形(四角 / 角丸 / 丸 /
@@ -295,8 +302,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'remove-place-line',
   // 🔴 2026-10-01(#918 段⑦): SQL の面で足した相手を外す口。外す相手の lid は押し口自身が運ぶ
   'remove-sql-source',
-  'rename-attachment', 'renumber-lists', 'replace-all', 'reset-app-group-order', 'reset-flags',
-  'reset-office-profile', 'retry-persist', 'run-sql', 'schedule-day-go', 'schedule-mode',
+  'rename-attachment', 'reset-app-group-order', 'reset-flags',
+  'reset-office-profile', 'retry-persist', 'schedule-day-go', 'schedule-mode',
   'schedule-nav', 
   'schedule-undo-move', 'schedule-week-pick',
   /**
@@ -305,14 +312,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   本文へ送った直後の帯が出ている間だけ意味を持つ(出ていなければ、呼んでも何も動かない)。
    *   帯の外から呼ぶ道は `Esc`(`deselect-entry` の 1 段目)が持つ。
    */
-  'search-jump-end', 'search-jump-next', 'search-jump-prev',
+  'search-jump-end', 
   'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
   'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-color-swatch', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit', 'set-pdf-reader',
   'set-missing-links', 'set-open-place', 'set-page-format', 'set-paste-source', 'set-phone-links', 'set-prose-align',
   'set-query-key', 'set-read-columns', 'set-relative-days', 'set-revision-compare', 'set-sql-engine', 'set-sql-source', 'set-sql-text', 'set-tag-badge',
   'set-text-scale', 'set-theme', 'set-too-narrow-enabled', 'set-view', 'set-voice-boost',
-  'show-trash', 'skip-to', 'sort-tasks',
+  'skip-to', 
   'smart-cond-add', 'smart-evict', 'smart-field',
   /**
    * ⚠ **2026-09-14(#918 段②a)で 1 件増やした** ── 前に打った SQL の一覧を出す
@@ -325,21 +332,14 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * ⚠ **2026-09-14(#918 段④)で 2 件増やした** ── 答えを file へ書き出す
    *   (出す口 `sql-export-menu` と、形を選ぶ口 `sql-export-pick`)。
    *   ⚠ **名前で呼べないままにする理由**:どちらも「**いま出ている答え**」に効くので、
-   *   SQL の面を開いて走らせていないと意味が無い(`sql-to-note` と同じ仕分け)。
+   *   SQL の面を開いて走らせていないと意味が無い(結果を使う点は `sql-to-note` と同じ。そちらは第 2 群で登記した)。
    */
-  'sql-export-menu', 'sql-export-pick', 'sql-schema-to-note', 'sql-to-note',
-  /**
-   * ⚠ **2026-09-15(#918 段⑤)で 1 件増やした** ── つながり図を開く / 閉じる。
-   *   ⚠ **名前で呼べないままにする理由**:SQL の面を開いていないと出す先が無い
-   *   (`sql-schema-to-note` と同じ仕分け)。🔑 押した 1 つは要らないので、
-   *   こちら(在庫)の側である ── 図の中の 3 つは `UNREGISTERED_POINT` に居る。
-   */
-  'sql-er-toggle',
+  'sql-export-menu', 'sql-export-pick', 
   /**
    * ⚠ **2026-09-16(#918 段⑤d-1)で 1 件増やした** ── 「繋ぐ」モードの入切
    *   (外部キーの宣言が無い DB でも、自分でキーどうしを繋げるようにする)。
-   *   ⚠ **名前で呼べないままにする理由**:`sql-er-toggle` と同じ ── つながり図の
-   *   帯にしか無い押し所で、SQL の面を開いていないと出す先が無い。
+   *   ⚠ **名前で呼べないままにする理由**:つながり図の帯にしか無い押し所で、
+   *   図(`sql-er-toggle`。第 2 群で登記)を開いていないと出す先が無い。
    */
   'sql-er-connect-toggle',
   
@@ -348,8 +348,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   (`ENTRY_MENU_ACTIONS`)に「編集」(`start-edit`)を足したので、`entry` book で
    *   名前が引けるようになった(受け手は前から在った ── 本文の上のボタン)。
    */
-  'start-audio-capture', 'start-screen-capture', 'start-tile-reorder',
-  'start-timer', 'stop-capture', 'storage-profile', 'storage-vacuum', 'swap-open', 'table-to-csv',
+  'start-tile-reorder',
+  'stop-capture', 'storage-vacuum', 'swap-open', 'table-to-csv',
   'table-to-markdown',
   /**
    * ⚠ **2026-10-01(#1173)** ── 右クリックしたチェックリストを丸ごとそろえる 2 つ。
@@ -369,12 +369,6 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 `toggle-pane` / `toggle-heading-fold` と同じ仕分け(N・押した所から
    *   何も要らない。開くか閉じるかは `plan-apply-box` の `hidden` だけで決まる)。
    */
-  /**
-   * ⚠ **2026-10-01(#813 段②)** ── フォルダの面の帯の「中まで全部出す」の入り切り。
-   * 🔑 `toggle-show-archived` と同じ仕分け(N・押した所から何も要らない。押すたびに
-   *   state の旗が反転するだけ)。押し口は帯のボタンだけで、鍵も持たない。
-   */
-  'toggle-filer-flatten',
   'toggle-plan-apply', 
   'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
   /**
@@ -493,6 +487,8 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は付箋の中の 1 か所にしか無く、押した付箋が対象を運ぶ。`place-rect` と同じ置き場)。`receivers` +4 / `total` +4 / `unregistered` +4。
       // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件(ノートの整理 8 / コピー・書き出し 4 / 予定 6)を `KEY_COMMANDS` へ登記した ──
       //   受け手は既に在った(押し口は各面のボタン)ので `registered` +18 / `both` +18 / `unregistered` −18(`total` / `receivers` は動かない)。`open-messages`(#1017 C5)と同じ仕分け。
+      // ⚠ 2026-10-11(#582 段③ 第 2 群): 名前で呼べなかった「高」の 26 件(SQL 4 / 本文の整形 2 / 録音・録画・時間 3 / ゴミ箱・選択 3 / 検索・置換 3 / 2 ペイン 1 / 表示の絞り 2 / 保存領域 2 / 連絡先 2 / お知らせ 1 / アプリ 1 / 取り込み 1 / 履歴 1)を `KEY_COMMANDS` へ登記した ──
+      //   受け手は既に在った(`open-system-notices` はヘルプの中の押し口と同じ `openSystemNotices` を直に呼ぶ特例)ので `registered` +26 / `both` +26 / `unregistered` −26(`total` / `receivers` は動かない)。
       // ⚠ 2026-10-11(#530): 板の線の右クリックの矢じり(`place-line-arrow`)で受け手 +1 ── 登記は増えない
       //   (押し口は線の右クリックにしか無く、対象の行はメニューが運ぶ。`place-line-width` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-11(#530 段⑤b): 付箋の右クリックの「グループにする…」「グループを解く」(`place-group` / `place-ungroup`)で受け手 +2 ── 登記は増えない
@@ -812,10 +808,10 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       total: 418,
       receivers: 352,
-      registered: 131,
-      both: 65,
+      registered: 157,
+      both: 91,
       outsideActionsTable: 66,
-      unregistered: 287,
+      unregistered: 261,
     });
   });
 
@@ -868,8 +864,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-11(#1377): 行のメニューが 18 → 20(`bookmark-note-add` / `bookmark-note-remove`)
     // ⚠ 2026-10-11: 行のメニューが 20 → 22(`copy-entry-link` / `copy-asset-link`)、鍵が 83 → 84(`copy-entry-link`。鍵の既定は持たない)
     // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件を登記(`add-tag` ほか)で `key` 84 → 102(鍵の既定は持たない)
+    // ⚠ 2026-10-11(#582 段③ 第 2 群): 「高」の 26 件を登記(`run-sql` / `start-timer` / `show-trash` ほか)で `key` 102 → 128(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 102,
+      key: 128,
       entry: 22,
       body: 3,
       collection: 2,
