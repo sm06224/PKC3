@@ -128,7 +128,7 @@ describe('読み戻せる大きさか(#996)', () => {
     const s = tooBigToReadBackMessage('いまの中身', 500 * 1024 * 1024);
     expect(s, '大きさを書いていない').toContain('500.0 MB');
     expect(s, '代わりの道を書いていない').toContain(archiveSuffix('full'));
-    expect(s, '何が起きるか書いていない').toContain('二度と開けません');
+    expect(s, '何が起きるか書いていない').toContain('取り込み直せない');
     // ⚠ **確保に失敗した側の字と混ざっていない**(user にとって別の出来事)
     expect(s, '確保の話と混ざっている').not.toContain('確保できませんでした');
   });

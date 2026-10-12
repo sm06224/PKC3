@@ -23,13 +23,15 @@
  *   「読めたつもりで 0 件」にしない)。
  */
 import { PORTABLE_HEAD_SCAN } from '../export/portable-bundle';
-import { parseBundleTag, type PortableBundle } from '../portable/bundle';
+import { checkImageParts, decodeImageParts, parseBundleTag, type PortableBundle } from '../portable/bundle';
 
 /** 先頭から読む長さ(バイト)。印は `PORTABLE_HEAD_SCAN` 字以内だが、多バイト文字の分だけ余裕を持つ。 */
 export const PORTABLE_SNIFF_BYTES = 16384;
 
 const BUNDLE_TAG_RE = /<script type="application\/json" data-pkc-bundle>([^<]*)<\/script>/;
-const IMAGE_OPEN = '<script type="application/octet-stream;base64" data-pkc-db-image>';
+// 割った版は `data-pkc-db-image="<番号>/<総数>"`、割る前の版は属性の値が無い(#1416 §7-4)
+const IMAGE_OPEN_RE =
+  /^<script type="application\/octet-stream;base64" data-pkc-db-image(?:="([^"]*)")?>$/;
 const ASSET_OPEN_RE =
   /^<script type="application\/octet-stream;base64" data-pkc-asset="([A-Za-z0-9._-]{1,128})" data-pkc-asset-mime="([^"]*)">$/;
 const SCRIPT_CLOSE = '</script>';
@@ -98,7 +100,8 @@ export function readPortableHtml(text: string): PortableHtmlParts {
         '書き出し直すか、バックアップ(.pkc3-full.zip)から取り込んでください',
     );
   }
-  let image: Uint8Array | null = null;
+  // 後ろ向きに辿るので、DB の中身の要素は**文書の逆順**で集まる(最後に並べ直す)
+  const imageParts: Array<{ mark: string; body: string }> = [];
   const assets = new Map<string, Blob>();
   for (;;) {
     let end = pos;
@@ -114,16 +117,20 @@ export function readPortableHtml(text: string): PortableHtmlParts {
     const tag = text.slice(start, tagEnd + 1);
     const body = text.slice(tagEnd + 1, closeAt);
     // 差し込まれた要素の中身は base64 だけ。そうでなければ別の要素の終わりに当たっている(止まる)
-    if (!BASE64_BODY_RE.test(body)) break;
-    if (tag === IMAGE_OPEN) {
-      if (image !== null) {
-        throw new PortableHtmlError('中身(DB)が 2 つ入っています。このファイルは取り込めません');
+    const im = IMAGE_OPEN_RE.exec(tag);
+    if (!BASE64_BODY_RE.test(body)) {
+      // 🔴 印が 番号/総数 の形の DB の中身の要素なのに base64 でない = 壊れた部分。「中身が見つかりません」と言い換えない。
+      // ⚠ 印の値が空の形(割る前の版)は**見ない** ── 雛形のアプリ本体の JS が文字列として持つ綴りと同じで、
+      //   辿りの終わり(差し込み領域の外)に当たったという合図でしかない
+      if (im !== null && /^\d+\/\d+$/.test(im[1] ?? '')) {
+        throw new PortableHtmlError(
+          `DB の中身の一部が読み取れません(${Number(im[1]!.split('/')[0]) + 1} 個目が base64 の形になっていません)。このファイルは取り込めません`,
+        );
       }
-      try {
-        image = decodeBase64Chunked(body);
-      } catch {
-        throw new PortableHtmlError('埋め込まれた中身が読み取れない形になっています');
-      }
+      break;
+    }
+    if (im !== null) {
+      imageParts.push({ mark: im[1] ?? '', body });
     } else {
       const am = ASSET_OPEN_RE.exec(tag);
       if (am === null) break; // 書き出しが差し込んだ 2 種類以外に当たった = 差し込み領域の外
@@ -137,6 +144,28 @@ export function readPortableHtml(text: string): PortableHtmlParts {
       }
     }
     pos = start;
+  }
+  imageParts.reverse();
+  const broken = checkImageParts(imageParts.map((p) => p.mark));
+  if (broken !== null) {
+    throw new PortableHtmlError(`${broken}。このファイルは取り込めません`);
+  }
+  let image: Uint8Array | null;
+  try {
+    // 読んだ要素は配列から手放す(残すのはファイル全体の文字列の切り出しだけ)
+    image = decodeImageParts(
+      imageParts.map((p, i) => () => {
+        const b = p.body;
+        imageParts[i] = { mark: p.mark, body: '' };
+        return b;
+      }),
+    );
+  } catch (e) {
+    throw new PortableHtmlError(
+      e instanceof Error && /個目|空の部分/.test(e.message)
+        ? `${e.message}。このファイルは取り込めません`
+        : '埋め込まれた中身が読み取れない形になっています',
+    );
   }
   if (image === null || image.byteLength === 0) {
     throw new PortableHtmlError(

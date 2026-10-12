@@ -11,7 +11,12 @@ import {
   bundleDbName,
   bundleLockName,
   bundleSqliteName,
+  checkImageParts,
   chooseImage,
+  decodeImageParts,
+  IMAGE_PART_BYTES,
+  IMAGE_PART_CHARS,
+  imagePartMark,
   isBundleId,
   parseBundleTag,
   type PortableBundle,
@@ -164,5 +169,99 @@ describe('どちらの中身を開くか', () => {
       chooseImage({ bundle: B, stored: stored({ bundleId: 'pkcb-ffffffffff' }), embeddedBytes: 1 }),
     ])
       expect(c.why.length).toBeGreaterThan(4);
+  });
+});
+
+describe('DB 画像を割った要素の印 (#1416 §7-4)', () => {
+  const marks = (n: number): string[] => Array.from({ length: n }, (_, i) => imagePartMark(i, n));
+
+  it('揃っていれば null(1 要素・複数要素・割る前の版の 1 本物)', () => {
+    expect(checkImageParts([])).toBeNull();
+    expect(checkImageParts([''])).toBeNull(); // 割る前の版
+    expect(checkImageParts(marks(1))).toBeNull();
+    expect(checkImageParts(marks(5))).toBeNull();
+  });
+
+  it('🔴 欠け・重複・順の乱れ・総数の食い違い・形の違いは理由を返す(黙って繋がない)', () => {
+    const m = marks(4);
+    const bad: Record<string, string[]> = {
+      途中が欠けた: [m[0]!, m[1]!, m[3]!],
+      末尾が欠けた: m.slice(0, 3),
+      先頭が欠けた: m.slice(1),
+      重複: [m[0]!, m[1]!, m[1]!, m[3]!],
+      順が乱れた: [m[0]!, m[2]!, m[1]!, m[3]!],
+      総数が違う: [imagePartMark(0, 2), imagePartMark(1, 3)],
+      割る前の版が2本: ['', ''],
+      割る前の版が割った版に混ざる: ['', m[1]!],
+      形が違う: ['a/b', 'c'],
+    };
+    for (const [name, v] of Object.entries(bad)) {
+      const why = checkImageParts(v);
+      expect(why, name).not.toBeNull();
+      expect(why, name).toContain('番号が合いません');
+    }
+  });
+});
+
+describe('割った DB 画像を 1 本へ直に復号する (#1416 §7-4)', () => {
+  const b64 = (bytes: Uint8Array): string => {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    return btoa(bin);
+  };
+  const fill = (n: number, seed: number): Uint8Array => {
+    const a = new Uint8Array(n);
+    for (let i = 0; i < n; i++) a[i] = (i * 31 + seed) & 255;
+    return a;
+  };
+
+  it('🔴 割る単位は 3 の倍数(各要素を独立に復号できる)で、16MiB 以下(64MB で二乗が戻る実測)', () => {
+    expect(IMAGE_PART_BYTES % 3).toBe(0);
+    expect(IMAGE_PART_BYTES).toBeLessThanOrEqual(16 * 1024 * 1024);
+    expect(IMAGE_PART_BYTES).toBeGreaterThan(0);
+    expect(IMAGE_PART_CHARS).toBe((IMAGE_PART_BYTES / 3) * 4);
+  });
+
+  it('3 要素(最後に端数)を 1 バイトも違わず 1 本へ復号し、読み口は 1 回ずつ呼ぶ', () => {
+    const a = fill(IMAGE_PART_BYTES, 1);
+    const b = fill(IMAGE_PART_BYTES, 2);
+    const c = fill(7, 3); // 端数 → `=` が出る
+    const calls: number[] = [];
+    const texts = [b64(a), b64(b), b64(c)];
+    expect(texts[2]).toContain('=');
+    const got = decodeImageParts(
+      texts.map((t, i) => () => {
+        calls.push(i);
+        return t;
+      }),
+    )!;
+    expect(got.byteLength).toBe(IMAGE_PART_BYTES * 2 + 7);
+    expect(got.subarray(0, IMAGE_PART_BYTES).every((v, i) => v === a[i])).toBe(true);
+    expect(got.subarray(IMAGE_PART_BYTES, IMAGE_PART_BYTES * 2).every((v, i) => v === b[i])).toBe(true);
+    expect(Array.from(got.subarray(IMAGE_PART_BYTES * 2))).toEqual(Array.from(c));
+    expect([...calls].sort()).toEqual([0, 1, 2]);
+    // 一度に総 bytes ちょうどの 1 本(余りの無い buffer = 後で切り詰める複製が要らない)
+    expect(got.buffer.byteLength).toBe(got.byteLength);
+  });
+
+  it('🔴 途中の要素が短い・長いと、黙って詰めず理由で断る(後ろが前へずれて別の画像になる)', () => {
+    const full = b64(fill(IMAGE_PART_BYTES, 1));
+    const tail = b64(fill(10, 3));
+    const short = b64(fill(IMAGE_PART_BYTES - 3, 2));
+    const long = b64(fill(IMAGE_PART_BYTES + 3, 2));
+    expect(() => decodeImageParts([() => full, () => short, () => tail])).toThrow(/2 個目が途中で欠けています/);
+    expect(() => decodeImageParts([() => short, () => full, () => tail])).toThrow(/1 個目が途中で欠けています/);
+    expect(() => decodeImageParts([() => full, () => long, () => tail])).toThrow(/2 個目/);
+    // 対照: ちょうどなら通る
+    expect(decodeImageParts([() => full, () => full, () => tail])!.byteLength).toBe(IMAGE_PART_BYTES * 2 + 10);
+  });
+
+  it('空・1 本物・空白混じり', () => {
+    expect(decodeImageParts([])).toBeNull();
+    expect(decodeImageParts([() => '  \n'])).toBeNull(); // 割る前の版の空
+    expect(() => decodeImageParts([() => b64(fill(IMAGE_PART_BYTES, 1)), () => ' '])).toThrow(/空の部分/);
+    const one = fill(1000, 5);
+    const spaced = b64(one).replace(/(.{76})/g, '$1\n') + ' \n';
+    expect(Array.from(decodeImageParts([() => spaced])!)).toEqual(Array.from(one));
   });
 });

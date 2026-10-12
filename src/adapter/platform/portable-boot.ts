@@ -15,7 +15,9 @@
  */
 import {
   bundleSqliteName,
+  checkImageParts,
   chooseImage,
+  decodeImageParts,
   parseBundleTag,
   type ImageChoice,
   type PortableBundle,
@@ -69,22 +71,40 @@ function embeddedBytesOf(el: Element): number {
  * (外に在ると、起動ごと止まる)。
  */
 export function takeEmbeddedImage(doc: Document): EmbeddedTake {
-  const el = doc.querySelector(IMAGE_SELECTOR);
-  if (el === null) return { image: null, failure: null };
+  const els = Array.from(doc.querySelectorAll(IMAGE_SELECTOR));
+  if (els.length === 0) return { image: null, failure: null };
+  // 読めないほど大きいときの断り文に使う。⚠ 要素を外す前に数える(`textContent` は読まない)
+  const embeddedBytes = els.reduce((n, e) => n + embeddedBytesOf(e), 0);
   try {
-    const text = (el.textContent ?? '').trim();
-    if (text === '') return { image: null, failure: null };
-    const bin = atob(text);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return { image: out.byteLength > 0 ? out : null, failure: null };
+    /**
+     * 🔴 **画像は複数の `<script>` に割って焼いてある**(#1416 §7-4。割る前の版の 1 本物も読める)。
+     * 揃っているか(欠け・重複・順の乱れ)を、**中身を読む前に**印だけで見る。
+     */
+    const broken = checkImageParts(els.map((e) => e.getAttribute('data-pkc-db-image') ?? ''));
+    if (broken !== null) {
+      return {
+        image: null,
+        failure: `この HTML ファイルに埋め込まれた中身が読み取れない形になっています(${broken})`,
+      };
+    }
+    // 🔑 1 要素ずつ読み、**読んだ直後に要素を外して中身も空にする**(base64 の文字列を要素ごとに手放す。
+    //    外しただけでは、要素が子の Text node を握り続ける)。復号は `decodeImageParts` が 1 本へ直に書く
+    const image = decodeImageParts(
+      els.map((el) => () => {
+        const t = el.textContent ?? '';
+        el.textContent = '';
+        el.remove();
+        return t;
+      }),
+    );
+    return { image, failure: null };
   } catch (e) {
     if (e instanceof RangeError) {
       return {
         image: null,
         failure:
           'この HTML ファイルに埋め込まれた中身が大きすぎて、このブラウザでは読み戻せません' +
-          `(約 ${humanBytes(embeddedBytesOf(el))})。バックアップ(.pkc3-full.zip など)から取り込んでください`,
+          `(約 ${humanBytes(embeddedBytes)})。バックアップ(.pkc3-full.zip など)から取り込んでください`,
       };
     }
     return {
@@ -92,7 +112,7 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
       failure: `この HTML ファイルに埋め込まれた中身が読み取れない形になっています(${String(e)})`,
     };
   } finally {
-    el.remove();
+    for (const el of els) el.remove();
   }
 }
 

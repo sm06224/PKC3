@@ -253,7 +253,7 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
     /<script type="application\/json" data-pkc-bundle>([^<]*)<\/script>/.exec(bytes)?.[1] ?? null;
   const imagePayloads = [
     ...bytes.matchAll(
-      /<script type="application\/octet-stream;base64" data-pkc-db-image>([^<]*)<\/script>/g,
+      /<script type="application\/octet-stream;base64" data-pkc-db-image(?:="[^"]*")?>([^<]*)<\/script>/g,
     ),
   ].map((mm) => mm[1]!.trim().length);
   let bundleId: string | null = null;

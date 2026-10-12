@@ -29,7 +29,7 @@ import {
   tooBigToReadBack,
   tooBigToReadBackMessage,
 } from '../storage/image-export-limit';
-import type { PortableBundle } from '../portable/bundle';
+import { IMAGE_PART_BYTES, imagePartMark, type PortableBundle } from '../portable/bundle';
 
 /**
  * 印を探す範囲。⚠ **これを広げてはいけない** ── 広げると、畳んだ JS の中の
@@ -119,10 +119,21 @@ export async function writePortableBundle(args: {
   const parts: BlobPart[] = [stamped.slice(0, cut)];
   const warnings: string[] = [];
 
-  parts.push('<script type="application/octet-stream;base64" data-pkc-db-image>');
-  for await (const chunk of base64Chunks(new Blob([image as unknown as BlobPart])))
-    parts.push(new Blob([chunk]));
-  parts.push('</script>');
+  /**
+   * 🔴 **DB 画像は `IMAGE_PART_BYTES` ごとの `<script>` に割る**(#1416 §7-4)。1 本に入れると、
+   * 開くとき HTML の読み手が二乗で遅くなる(150MB の DB で 27 秒。割ると読み込みは大きさに比例)。
+   * 印は `data-pkc-db-image="<番号>/<総数>"` ── 読み戻す側が欠けと順の乱れを見分ける。
+   */
+  const partCount = Math.ceil(image.byteLength / IMAGE_PART_BYTES);
+  for (let p = 0; p < partCount; p++) {
+    parts.push(
+      `<script type="application/octet-stream;base64" data-pkc-db-image="${imagePartMark(p, partCount)}">`,
+    );
+    const slice = image.subarray(p * IMAGE_PART_BYTES, (p + 1) * IMAGE_PART_BYTES);
+    for await (const chunk of base64Chunks(new Blob([slice as unknown as BlobPart])))
+      parts.push(new Blob([chunk]));
+    parts.push('</script>');
+  }
 
   let assets = 0;
   for await (const a of args.assets) {
