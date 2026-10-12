@@ -20,12 +20,21 @@ export interface ScheduleItems {
   readonly notes: readonly AgendaItem[];
   /** 面が束ねる材料(`visible` の札 + `notes`)。 */
   readonly items: readonly AgendaItem[];
+  /**
+   * 🔴 **「出すもの」のノートの一覧の材料**(#855 20-A)。ノートごとの、**いま出ている予定の数**
+   * (隠しているノートは「隠さなければ出る数」)。予定の無いノートは載せない。
+   */
+  readonly byNote: readonly { readonly lid: string; readonly count: number }[];
+  /** ノートを隠したせいで出ていない予定の数(「出すもの(N)」に足す)。他の絞りで出ない分は数えない。 */
+  readonly hiddenByNote: number;
 }
 
 export function scheduleItemsOf(state: AppState): ScheduleItems {
   const filter = entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter);
   const all = state.taskScan?.cards ?? [];
-  const visible = all.filter((c) => {
+  const hiddenNotes = new Set(state.scheduleHiddenNotes);
+  // ⚠ ノートを隠す前の札(他の絞りは掛けてある)── 「出すもの」のノートの一覧と、隠した数がここから出る
+  const unhidden = all.filter((c) => {
     const m = state.entryMetas.get(c.lid);
     if (m === undefined) return false;
     if (m.archived && !state.showArchived) return false;
@@ -33,13 +42,29 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (c.done && !state.showDoneTasks) return false;
     return matchesEntry(m, filter);
   });
+  const visible = unhidden.filter((c) => !hiddenNotes.has(c.lid));
   const notes: AgendaItem[] = [];
+  const noteItems: AgendaItem[] = [];
   for (const lid of state.order) {
     const m = state.entryMetas.get(lid);
     if (m === undefined || m.date === null) continue;
     if (m.archived && !state.showArchived) continue;
     if (!matchesEntry(m, filter)) continue;
-    notes.push(itemOfNote(m));
+    noteItems.push(itemOfNote(m));
   }
-  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes] };
+  for (const n of noteItems) if (!hiddenNotes.has(n.lid)) notes.push(n);
+  // 🔑 日付の無い札は「日付のないもの」を出しているときだけ数える(出ていない物を「隠した」とは言わない)
+  const counts = new Map<string, number>();
+  let hiddenByNote = 0;
+  for (const c of unhidden) {
+    if (c.date === null && !state.showUndatedTasks) continue;
+    counts.set(c.lid, (counts.get(c.lid) ?? 0) + 1);
+    if (hiddenNotes.has(c.lid)) hiddenByNote++;
+  }
+  for (const n of noteItems) {
+    counts.set(n.lid, (counts.get(n.lid) ?? 0) + 1);
+    if (hiddenNotes.has(n.lid)) hiddenByNote++;
+  }
+  const byNote = [...counts].map(([lid, count]) => ({ lid, count }));
+  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes], byNote, hiddenByNote };
 }

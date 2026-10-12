@@ -45,7 +45,9 @@ import { ScheduleDay } from './schedule-day';
 import { ScheduleWeek } from './schedule-week';
 import { weekOf } from '@features/schedule/day-layout';
 import { addDays } from '@features/datetime/date-math';
-import { createTaskCard, patchTaskCard } from './task-card';
+import { createTaskCard, patchItemColor, patchTaskCard } from './task-card';
+import { currentTagColors } from './tag-color';
+import { noteColorVar } from '@features/schedule/item-color';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -140,6 +142,13 @@ export class ScheduleRenderer {
     fold: HTMLDetailsElement;
     foldNote: HTMLElement;
     foldButton: HTMLElement;
+    /**
+     * 🔴 **「出すもの」の中のノートの一覧**(#855 20-A)。ノートごとにチェックがあり、外すとそのノートの予定が面から外れる。
+     * `signature` は中身の指紋(同じなら DOM に触らない ── 開いている最中に作り直さない)。
+     */
+    notes: HTMLElement;
+    notesList: HTMLElement;
+    notesSignature: string;
     /** 切替 3 つの行(1 つも出ないときは行ごと隠す ── `[hidden]`。CSS の `:has()` には頼らない、#1467 段 3-d) */
     toggles: HTMLElement;
     groups: HTMLElement;
@@ -164,6 +173,8 @@ export class ScheduleRenderer {
     showArchived: boolean;
     showDone: boolean;
     showUndated: boolean;
+    hiddenNotes: AppState['scheduleHiddenNotes'];
+    tagColors: ReturnType<typeof currentTagColors>;
     calendarMonth: AppState['calendarMonth'];
     mode: AppState['scheduleMode'];
     shownDay: string | null;
@@ -196,6 +207,9 @@ export class ScheduleRenderer {
       showArchived: state.showArchived,
       showDone: state.showDoneTasks,
       showUndated: state.showUndatedTasks,
+      // 🔴 隠したノートと、タグの色も指紋(縦線の色が変わる ── 入れないと描き直さない)
+      hiddenNotes: state.scheduleHiddenNotes,
+      tagColors: currentTagColors(),
       calendarMonth: state.calendarMonth,
       // 🔴 見せ方と見ている日も指紋(入れないと「日」を押しても描き直さない)
       mode: narrow ? state.scheduleNarrowMode : state.scheduleMode,
@@ -225,7 +239,7 @@ export class ScheduleRenderer {
      * 🔑 **何を出すかは `scheduleItemsOf` 1 か所**(`.ics` の書き出しも同じ口を呼ぶ ── §7)。
      * 絞り込み・片付けた・済んだ行の規則と、ノート 1 件が丸ごと予定のもの(frontmatter の `date:`、段④)もそこにある。
      */
-    const { all, visible, notes, items } = scheduleItemsOf(state);
+    const { all, visible, notes, items, byNote, hiddenByNote } = scheduleItemsOf(state);
     const dated = visible.filter((c) => c.date !== null);
     /**
      * 🔴 **済んだ回は「絞り込む前」の札から拾う**(#344 段②)。
@@ -254,6 +268,7 @@ export class ScheduleRenderer {
       all.length + notes.length,
       dated.length + notes.length,
       groups.length,
+      hiddenByNote,
     );
     const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
     const doneCount = this.paintDoneToggle(frame.done, state, all, filter);
@@ -265,7 +280,9 @@ export class ScheduleRenderer {
     const hiddenTotal =
       (state.showDoneTasks ? 0 : doneCount) +
       (state.showArchived ? 0 : archivedCount) +
-      (state.showUndatedTasks ? 0 : undatedCount);
+      (state.showUndatedTasks ? 0 : undatedCount) +
+      // 🔴 ノートを隠したせいで出ていない予定(上の 3 つとは重ならない ── 数えるのは他の絞りを通った分だけ)
+      hiddenByNote;
     const foldLabel = foldButtonText(hiddenTotal);
     if (frame.foldButton.textContent !== foldLabel) frame.foldButton.textContent = foldLabel;
     const foldText = shownExtrasText(state);
@@ -279,8 +296,12 @@ export class ScheduleRenderer {
      *   1,000 件の無効化を予約していた(trace、追記 1 回)。この行の中身を知っているのはここなので、
      *   ここで `hidden` を決める。
      */
+    this.paintNoteList(frame, state, byNote);
     const anyToggle =
-      !optionOf(frame.undated).hidden || !optionOf(frame.done).hidden || !optionOf(frame.archived).hidden;
+      !optionOf(frame.undated).hidden ||
+      !optionOf(frame.done).hidden ||
+      !optionOf(frame.archived).hidden ||
+      !frame.notes.hidden;
     if (frame.toggles.hidden !== !anyToggle) frame.toggles.hidden = !anyToggle;
     /**
      * 一覧は日ごとの束、「日」は 1 日の目盛り。⚠ 「日」のときも**日付のない束**は一覧の器に残す
@@ -428,7 +449,13 @@ export class ScheduleRenderer {
   /**
    * 状態の 1 行。⚠ **「まだ」「駄目だった」「無い」「切った」を区別する**。
    */
-  private noteText(state: AppState, total: number, dated: number, groups: number): string {
+  private noteText(
+    state: AppState,
+    total: number,
+    dated: number,
+    groups: number,
+    hiddenByNote: number,
+  ): string {
     if (state.taskScanFailed)
       return '予定を集められませんでした。タブを開き直すともう一度試します。';
     if (state.taskScan === null) return '予定を集めています…';
@@ -441,10 +468,62 @@ export class ScheduleRenderer {
      * ⚠ 書かないと user は「チェックを書いたのに何も出ない」と読み、
      *   **書き方が分からないまま詰まる**(既定で畳んだ側の責任である)。
      */
+    // 🔴 ノートを隠したせいで 1 件も出ていないときは、そう言う(「日付を書いてください」と読ませない)
+    if (groups === 0 && hiddenByNote > 0)
+      return '「出すもの」でノートを外しているため、予定が出ていません。';
     if (dated === 0 && !state.showUndatedTasks)
       return '日付を書いた予定がまだありません。「- [ ] やること @2026-08-25」のように書くか、日を押して書式バーの「日付」から入れてください。';
     if (groups === 0) return '絞り込みに当てはまる予定がありません。';
     return '';
+  }
+
+  /**
+   * 🔴 **「出すもの」の中のノートの一覧**(#855。Gemini 裁定 = #1163 の依頼 20-A「このカレンダーだけ」)。
+   *
+   * 予定のあるノートを 1 行ずつ並べ、チェックを外すとそのノートの予定が面から外れる(ノートは消えない)。
+   * 行頭の細い四角は、そのノートの縦線の色(行にタグの色があるときはタグの色が勝つ)。
+   * ⚠ **選ぶ物が無い一覧は出さない**(予定を持つノートが 2 件に満たなければ枠ごと隠す)。
+   * ⚠ 隠したノートは、予定が 0 件に見えても**一覧に残す**(戻す口を消さない ── 片道にしない)。
+   */
+  private paintNoteList(
+    frame: NonNullable<ScheduleRenderer['frame']>,
+    state: AppState,
+    byNote: readonly { readonly lid: string; readonly count: number }[],
+  ): void {
+    const hidden = new Set(state.scheduleHiddenNotes);
+    // 隠したが予定が 0 件になったノート(検索の絞りで外れた等)は、隠したままなので載せる
+    const rows = byNote.map((n) => ({ ...n, title: state.entryMetas.get(n.lid)?.title ?? '' }));
+    rows.sort((a, b) => a.title.localeCompare(b.title, 'ja') || (a.lid < b.lid ? -1 : 1));
+    const sig = rows
+      .map((r) => `${r.lid}\t${r.title}\t${r.count}\t${hidden.has(r.lid) ? 1 : 0}`)
+      .join('\n');
+    // 🔑 ノートが 1 つしか無いなら出さない(1 つを隠しても「全部隠す」になるだけ ── 選ぶ物が無い)。隠した後も 2 つ以上のまま残る
+    const show = rows.length >= 2;
+    if (frame.notes.hidden !== !show) frame.notes.hidden = !show;
+    if (frame.notesSignature === sig) return;
+    frame.notesSignature = sig;
+    const list = frame.notesList;
+    list.textContent = '';
+    for (const r of rows) {
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !hidden.has(r.lid);
+      // ⚠ 口(`data-pkc-action`)は字で書く(`tests/action-outlets.test.ts` が静的に追う)
+      box.setAttribute('data-pkc-action', 'toggle-schedule-note');
+      box.setAttribute('data-pkc-note-lid', r.lid);
+      box.setAttribute('data-pkc-field', 'schedule-note-toggle');
+      const swatch = document.createElement('span');
+      swatch.setAttribute('data-pkc-field', 'schedule-note-swatch');
+      swatch.style.setProperty('--pkc-item-color', noteColorVar(r.lid));
+      const name = document.createElement('span');
+      name.setAttribute('data-pkc-field', 'schedule-note-name');
+      name.textContent = `${r.title === '' ? '(無題)' : r.title}(${r.count})`;
+      name.title = r.title;
+      const label = document.createElement('label');
+      label.setAttribute('data-pkc-field', 'schedule-option');
+      label.append(box, swatch, name);
+      list.append(label);
+    }
   }
 
   /** 「日付のない項目も出す」の切替。⚠ **押しても何も起きないボタンを出さない**。 */
@@ -612,6 +691,7 @@ export class ScheduleRenderer {
         patchTaskCard(card, data, title, year, false);
         this.cardData.set(key, data);
       }
+      patchItemColor(card, data);
       if (data.lid === state.selectedLid) card.setAttribute('data-pkc-selected', '');
       else card.removeAttribute('data-pkc-selected');
       if (cursor === card) cursor = card.nextSibling;
@@ -755,10 +835,23 @@ export class ScheduleRenderer {
     const summary = document.createElement('summary');
     summary.setAttribute('data-pkc-field', 'schedule-fold-button');
     summary.textContent = '出すもの';
-    summary.title = '済み・片付けたもの・日付のないものを、一覧に出すかどうかを選びます';
+    summary.title = '済み・片付けたもの・日付のないもの・ノートごとの予定を、出すかどうかを選びます';
     const panel = document.createElement('div');
     panel.setAttribute('data-pkc-field', 'schedule-fold-panel');
-    panel.append(optionOf(done), optionOf(archived), optionOf(undated));
+    /**
+     * 🔴 **ノートごとの出し入れ**(#855 20-A「このカレンダーだけ」)。3 つの切替の下に、予定のあるノートを 1 行ずつ並べる。
+     * 外したノートの予定は面から外れる(ノートそのものは消えない)。見出しは字だけ(押せない)。
+     */
+    const notes = document.createElement('div');
+    notes.setAttribute('data-pkc-field', 'schedule-notes');
+    notes.hidden = true;
+    const notesHead = document.createElement('span');
+    notesHead.setAttribute('data-pkc-field', 'schedule-notes-head');
+    notesHead.textContent = 'ノート';
+    const notesList = document.createElement('div');
+    notesList.setAttribute('data-pkc-field', 'schedule-notes-list');
+    notes.append(notesHead, notesList);
+    panel.append(optionOf(done), optionOf(archived), optionOf(undated), notes);
     fold.append(summary, panel);
     // 🔑 既定に加えて出しているものを 1 行で言う(何も加えていないときは出さない)
     const foldNote = document.createElement('span');
@@ -796,7 +889,7 @@ export class ScheduleRenderer {
     this.day.el.hidden = true;
     this.week.el.hidden = true;
     this.region.append(bar, modeRow, quick, grid, note, toggles, exportIcs, this.day.el, this.week.el, groups);
-    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, toggles, groups, modes, quickDate: qDate };
+    this.frame = { month, grid, note, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', toggles, groups, modes, quickDate: qDate };
     return this.frame;
   }
 }

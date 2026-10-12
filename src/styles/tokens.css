@@ -42,6 +42,15 @@
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #1f4bb8;
   --code-lit: #0a6b52;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #c2410c;
+  --note-2: #a16207;
+  --note-3: #15803d;
+  --note-4: #0e7490;
+  --note-5: #1d4ed8;
+  --note-6: #7e22ce;
+  --note-7: #be185d;
+  --note-8: #64748b;
   --shadow: 0 2px 6px rgb(0 0 0 / 12%);
   --sandbox-bg: #ffffff;
   color-scheme: light;
@@ -64,6 +73,15 @@
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #8ab4f8;
   --code-lit: #7fd1b0;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 0 0 / 45%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -87,6 +105,15 @@
   /* コードの色(地は `--surface-2` = `pre` の背景)。Primer の keyword / string */
   --code-key: #cf222e;
   --code-lit: #0a3069;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #c2410c;
+  --note-2: #a16207;
+  --note-3: #15803d;
+  --note-4: #0e7490;
+  --note-5: #1d4ed8;
+  --note-6: #7e22ce;
+  --note-7: #be185d;
+  --note-8: #64748b;
   --shadow: 0 2px 6px rgb(31 35 40 / 12%);
   --sandbox-bg: #ffffff;
   color-scheme: light;
@@ -109,6 +136,15 @@
   /* コードの色(地は `--surface-2`)。Primer dark の keyword / string */
   --code-key: #ff7b72;
   --code-lit: #a5d6ff;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(1 4 9 / 60%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -132,6 +168,15 @@
   /* コードの色(地は `--surface-2`)。green/cyan を暗く ── 公式値は地に対して 2.6:1 */
   --code-key: #5f6f00;
   --code-lit: #186a63;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #c2410c;
+  --note-2: #a16207;
+  --note-3: #15803d;
+  --note-4: #0e7490;
+  --note-5: #1d4ed8;
+  --note-6: #7e22ce;
+  --note-7: #be185d;
+  --note-8: #64748b;
   --shadow: 0 2px 6px rgb(7 54 66 / 14%);
   --sandbox-bg: #ffffff;
   color-scheme: light;
@@ -154,6 +199,15 @@
   /* コードの色(地は `--surface-2`)。green/cyan を明るく ── 公式値は 3.3:1 */
   --code-key: #a5bc22;
   --code-lit: #4fc4ba;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 20 26 / 55%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -177,6 +231,15 @@
   /* コードの色(地は `--surface-2`)。Dracula の Pink / Yellow */
   --code-key: #ff79c6;
   --code-lit: #f1fa8c;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 0 0 / 50%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -200,6 +263,15 @@
   /* コードの色(地は `--surface-2`)。nord9 / nord14 を明るく ── 公式値は 3.2:1 */
   --code-key: #9fc0dd;
   --code-lit: #b5cfa0;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 0 0 / 45%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -223,6 +295,15 @@
   /* コードの色(地は `--surface-2` = `pre` の背景)*/
   --code-key: #7fdc8f;
   --code-lit: #d8c07a;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 0 0 / 55%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;
@@ -247,6 +328,15 @@
   /* コードの色(地は `--surface-2`) */
   --code-key: #e8a840;
   --code-lit: #b9cf92;
+  /* 予定の左の縦線(ノートごとの自動の色)。地(--surface / --surface-2)に対して 3:1 以上 */
+  --note-1: #fb923c;
+  --note-2: #facc15;
+  --note-3: #4ade80;
+  --note-4: #22d3ee;
+  --note-5: #60a5fa;
+  --note-6: #c084fc;
+  --note-7: #f472b6;
+  --note-8: #94a3b8;
   --shadow: 0 2px 6px rgb(0 0 0 / 55%);
   --sandbox-bg: #ffffff;
   color-scheme: dark;

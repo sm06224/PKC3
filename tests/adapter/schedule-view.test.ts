@@ -30,6 +30,8 @@ import { taskCardsOf } from '../../src/features/schedule/task-cards';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { answerDialog, cancelDialogRows, openDialog } from './dialog-helper';
+import { applyTagColors } from '../../src/adapter/ui/render/tag-color';
+import { noteColorVar } from '../../src/features/schedule/item-color';
 
 const TODAY = new Date(2026, 7, 23); // 2026-08-23(日)
 
@@ -1420,5 +1422,129 @@ describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
     expect(r.events, '知らない lid で本文を書きに行った').toEqual([]);
     // ⚠ **理由は出さない** ── 押した物が消えているので、言うことが無い
     expect(r.state.error).toBeNull();
+  });
+});
+
+/**
+ * 🔴 **予定の左の縦線の色と、「出すもの」のノートの一覧**(#855。Gemini 裁定 = #1163 の依頼 20-A「両方」)。
+ * 色の決め方そのもの(タグ > ノート)は `tests/features/schedule-item-color.test.ts` が見る。
+ * ここが見るのは**繋がり** ── 札に色が焼かれるか / チェックを外すと予定が面から消えて括弧の数に入るか。
+ */
+describe('予定の縦線の色とノートごとの出し入れ(#855 20-A)', () => {
+  const colorOf = (card: HTMLElement): string => card.style.getPropertyValue('--pkc-item-color');
+  const BODIES = {
+    e1: '- [ ] 打合せ @2026-08-23 14:00 #仕事 資料\n- [ ] 散歩 @2026-08-23\n',
+    e2: '- [ ] 買い物 @2026-08-24\n',
+  };
+  type Q = <T extends HTMLElement = HTMLElement>(s: string) => T | null;
+  const noteBox = (q: Q, lid: string): HTMLInputElement =>
+    q<HTMLInputElement>(`[data-pkc-action="toggle-schedule-note"][data-pkc-note-lid="${lid}"]`)!;
+  const foldText = (q: Q): string => q('[data-pkc-field="schedule-fold-button"]')!.textContent!;
+
+  it('🔴 行に色を決めたタグがあればタグの色、無ければノートの色が、札の縦線に焼かれる', () => {
+    applyTagColors(document, [{ tag: '仕事', color: '#aa3300' }]);
+    try {
+      const { qa } = setup(BODIES);
+      const cards = qa('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');
+      const by = (t: string): HTMLElement =>
+        cards.find((c) => c.querySelector('[data-pkc-field="text"]')!.textContent!.includes(t))!;
+      expect(cards, '前提:札が 3 枚出ている').toHaveLength(3);
+      // タグの行
+      expect(colorOf(by('打合せ'))).toBe('#aa3300');
+      expect(by('打合せ').getAttribute('data-pkc-item-color')).toBe('tag');
+      // タグの無い行は、同じノートでもノートの色(同じノートの 2 行目はタグの色に引きずられない)
+      expect(colorOf(by('散歩'))).toBe(noteColorVar('e1'));
+      expect(by('散歩').getAttribute('data-pkc-item-color')).toBe('note');
+      // 別のノートは、そのノートの色
+      expect(colorOf(by('買い物'))).toBe(noteColorVar('e2'));
+    } finally {
+      applyTagColors(document, []);
+    }
+  });
+
+  it('🔴 設定でタグの色を変えると、描き直しで縦線が追いつく(札のデータは同じでも)', () => {
+    const { d, qa } = setup(BODIES);
+    const card = (): HTMLElement =>
+      qa('[data-pkc-region="schedule-cards"] > [data-pkc-entry]').find((c) =>
+        c.textContent!.includes('打合せ'),
+      )!;
+    // 前提:色を決めていないタグは、ノートの色のまま
+    expect(colorOf(card())).toBe(noteColorVar('e1'));
+    try {
+      applyTagColors(document, [{ tag: '仕事', color: '#112233' }]);
+      // 何か状態が動いて描き直される(ここでは選択)
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+      expect(colorOf(card()), '色を決めたのに縦線が古いまま').toBe('#112233');
+    } finally {
+      applyTagColors(document, []);
+    }
+  });
+
+  it('🔴 「出すもの」のノートの一覧は、予定のあるノートを並べ、外すとそのノートの予定が面から消える', async () => {
+    const { q, qa, d } = setup(BODIES);
+    const rows = qa('[data-pkc-action="toggle-schedule-note"]');
+    expect(rows.map((r) => r.getAttribute('data-pkc-note-lid')).sort()).toEqual(['e1', 'e2']);
+    expect(rows.every((r) => (r as HTMLInputElement).checked), '既定は全部出ている').toBe(true);
+    expect(foldText(q), '何も隠していない').toBe('出すもの');
+    expect(groups(qa)).toEqual(['今日(2)', '明日(1)']);
+    noteBox(q, 'e1').click();
+    await tick();
+    expect(d.getState().scheduleHiddenNotes).toEqual(['e1']);
+    // e1 の 2 件が消え、e2 だけが残る
+    expect(groups(qa)).toEqual(['明日(1)']);
+    expect(noteBox(q, 'e1').checked, 'チェックが外れていない').toBe(false);
+    expect(noteBox(q, 'e2').checked, '関係ないノートまで外れた').toBe(true);
+    // 隠した 2 件が「出すもの(N)」に入る
+    expect(foldText(q)).toBe('出すもの(2)');
+    // 片道にしない:隠したノートも一覧に残り、戻せる
+    noteBox(q, 'e1').click();
+    await tick();
+    expect(groups(qa)).toEqual(['今日(2)', '明日(1)']);
+    expect(foldText(q)).toBe('出すもの');
+  });
+
+  it('🔴 全部のノートを外したら、「日付を書いてください」ではなく外していることを言う', async () => {
+    const { q } = setup({ e1: '- [ ] 散歩 @2026-08-23\n', e2: '- [ ] 買い物 @2026-08-23\n' });
+    noteBox(q, 'e1').click();
+    noteBox(q, 'e2').click();
+    await tick();
+    expect(q('[data-pkc-field="schedule-note"]')!.textContent).toContain('ノートを外している');
+    expect(foldText(q)).toBe('出すもの(2)');
+  });
+
+  it('🔴 隠したノートの済みの予定は、括弧に二重に数えない(隠した数は「出る予定」だけ)', async () => {
+    const { q } = setup({
+      e1: '- [ ] 散歩 @2026-08-23\n- [x] 済 @2026-08-23\n',
+      e2: '- [ ] 買い物 @2026-08-24\n',
+    });
+    // 済みは隠れているので、括弧は「済み 1」だけ
+    expect(foldText(q)).toBe('出すもの(1)');
+    noteBox(q, 'e1').click();
+    await tick();
+    // ノートを隠すと「散歩」が加わり、済み 1 は済みのまま = 計 2(重ならない)
+    expect(foldText(q)).toBe('出すもの(2)');
+  });
+
+  it('🔴 ノート 1 件が丸ごと予定のもの(前書きの date:)も、ノートを外すと面から消えて括弧に入る', async () => {
+    const { q, qa } = setup({ e1: '日付だけ持つノート\n', e2: '- [ ] 買い物 @2026-08-24\n' }, { e1: '2026-08-23' });
+    expect(groups(qa), '前提:ノート 1 件の予定と行の予定が両方出ている').toEqual(['今日(1)', '明日(1)']);
+    noteBox(q, 'e1').click();
+    await tick();
+    expect(groups(qa), '外したノートの前書きの予定が残っている').toEqual(['明日(1)']);
+    expect(foldText(q)).toBe('出すもの(1)');
+  });
+
+  it('⚠ 予定の無いノートは一覧に載らない / 予定のあるノートが 1 つなら一覧ごと出ない', () => {
+    const one = setup({ e1: '- [ ] 散歩 @2026-08-23\n', e3: '日付のない文章だけ\n' });
+    expect(one.q('[data-pkc-field="schedule-notes"]')!.hidden, '選ぶ物が無いのに一覧が出ている').toBe(true);
+    const two = setup({
+      e1: '- [ ] 散歩 @2026-08-23\n',
+      e2: '- [ ] 買い物 @2026-08-24\n',
+      e3: '日付のない文章だけ\n',
+    });
+    expect(two.q('[data-pkc-field="schedule-notes"]')!.hidden).toBe(false);
+    expect(
+      two.qa('[data-pkc-action="toggle-schedule-note"]').map((r) => r.getAttribute('data-pkc-note-lid')).sort(),
+    ).toEqual(['e1', 'e2']);
   });
 });

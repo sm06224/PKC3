@@ -784,6 +784,40 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   expect(icsText, '済ませた回が例外日として外れていない').toMatch(/EXDATE[^\r\n]*:\d{8}/);
   expect(icsText, '予定の題名が入っていない').toContain('SUMMARY:ゴミ出し');
 
+  /**
+   * 🔴 **予定の左の縦線とノートごとの出し入れ**(#855 20-A。起動は増やさない ── この道中の続き)。
+   * 属性ではなく**計算後の影**で見る(CSS に受け皿が無いと、付けた印が画面で見分けられない)。
+   * ノートの一覧は 2 ノート以上のときだけ出るので、2 つ目のノートを足してから見る。
+   */
+  await clickReal(page, '[data-pkc-action="schedule-mode"][data-pkc-mode="list"]');
+  const todayCard = cardsOn(today).first();
+  await expect(todayCard, '縦線の確認に使う札が無い').toHaveCount(1);
+  const shadowOf = (loc: Locator) => loc.evaluate((e) => getComputedStyle(e).boxShadow);
+  const bar = await shadowOf(todayCard);
+  expect(bar, '札の左に縦線の影が付いていない').toMatch(/rgb/);
+  expect(bar, '縦線が内側の 3px になっていない').toMatch(/inset/);
+  expect(bar, '縦線が 3px の幅になっていない').toMatch(/3px/);
+  const cardBg = await todayCard.evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(bar, '縦線の色が札の地と同じ(見分けられない)').not.toContain(cardBg);
+
+  await createEntry(page, 'text');
+  await ta.fill(`- [ ] 散歩 @${today}`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-browse="schedule"]');
+  const allCards = pane.locator('[data-pkc-region="schedule-cards"] > [data-pkc-entry]');
+  const noteRows = pane.locator('[data-pkc-action="toggle-schedule-note"]');
+  await expect(noteRows, '予定のあるノートが 2 つなのに一覧が 2 行にならない').toHaveCount(2);
+  const before = await allCards.count();
+  expect(before, '前提:札が 2 枚以上ある').toBeGreaterThanOrEqual(2);
+  await clickReal(page, '[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-fold-button"]');
+  await expect(noteRows.first(), '「出すもの」を押してもノートの一覧が開かない').toBeVisible();
+  await fold.locator('[data-pkc-action="toggle-schedule-note"]').first().click();
+  await expect(allCards, 'チェックを外したノートの予定が残っている').not.toHaveCount(before);
+  const hiddenLabel = await fold.locator('summary').textContent();
+  expect(hiddenLabel, '外した予定の数がボタンに出ていない').toMatch(/^出すもの\(\d+\)$/);
+  await fold.locator('[data-pkc-action="toggle-schedule-note"]').first().click();
+  await expect(allCards, 'チェックを戻しても予定が戻らない').toHaveCount(before);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 /**
@@ -862,8 +896,10 @@ test('🔴 札にマウスを乗せると × が出て、押すと予定から�
  *   (unit は欄の値と本文までを見る)。
  */
 test('🔴 予定の面で「足す」を押すと、今日の束に出る (#499)', async ({ page, context }) => {
+  // ⚠ 高さ 960(以前は 900): ノートが 2 つ以上になると「出すもの」の行が出て(#855 20-A)目盛りが下がる。900 のままだと下へのドラッグで
+  //   影が出なかった(高さを足すと通る ── 画面の外を押していたと推定。札の位置は測っていない)
   const errors = collectPageErrors(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 960 });
   await gotoApp(page);
   await clickReal(page, '[data-pkc-browse="schedule"]');
   const pane = page.locator('[data-pkc-browse-pane="schedule"]');

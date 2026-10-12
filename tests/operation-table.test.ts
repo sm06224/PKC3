@@ -370,6 +370,11 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   何も要らない。開くか閉じるかは `plan-apply-box` の `hidden` だけで決まる)。
    */
   'toggle-plan-apply', 
+  /**
+   * ⚠ **2026-10-12(#855)** ── 予定の「出すもの」の中の、ノートごとのチェック。
+   * 🔑 押した行が lid を運ぶ(`schedule-week-pick` と同じ置き場。仕分けは N だが実は押した行を指す)。
+   */
+  'toggle-schedule-note',
   'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
@@ -808,14 +813,16 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (`export-vcards` と同じ置き場。押し口は予定の面にしか無く、鍵も持たない)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる `insert-diagram` / `insert-icon` の 2 件を `KEY_COMMANDS` へ登記した ──
       //   受け手は既に在った(押し口は書式の帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。
-      total: 418,
-      receivers: 352,
       // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件(`stop-capture` / `capture-stop` / `capture-trim-*` 4)+ 検索の帯を閉じる 1 件(`search-jump-end`)の 7 件を
       //   `KEY_COMMANDS` へ登記した ── 受け手は既に在った(押し口は画面のボタン)ので `registered` +7 / `both` +7 / `unregistered` −7(`total` / `receivers` は動かない)。
+      // ⚠ 2026-10-12(#855 20-A): 予定の「出すもの」の中のノートごとのチェック(`toggle-schedule-note`)で受け手 +1 ── 登記は増えない
+      //   (押し口は予定の面の中にしか無く、鍵も持たない。押した行が lid を運ぶ ── `schedule-week-pick` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 419,
+      receivers: 353,
       registered: 166,
       both: 100,
       outsideActionsTable: 66,
-      unregistered: 252,
+      unregistered: 253,
     });
   });
 

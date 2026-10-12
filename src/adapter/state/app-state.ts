@@ -1573,6 +1573,14 @@ export interface AppState {
    * ⚠ 保存しない(その場の見え方)。
    */
   showUndatedTasks: boolean;
+  /**
+   * 🔴 **予定の面で、予定を隠しているノート**(#855。Gemini 裁定 = #1163 の依頼 20-A「このカレンダーだけ」)。
+   *
+   * 「出すもの」のノートの一覧で外したノートの lid。空 = どのノートも隠していない(既定)。
+   * ⚠ **ノートそのものは隠さない**(左の一覧にも検索にも出る)── 予定の面から**そのノートの予定を外す**だけ。
+   * ⚠ 保存しない(その場の見え方)── `showDoneTasks` / `showUndatedTasks` と同じ扱い。
+   */
+  scheduleHiddenNotes: readonly string[];
   /** 選択 entry の履歴 panel(P5b)。開いた時点のスナップショット ── 選択遷移 /
    *  編集開始 / view 切替で畳む。boot で revisions に触れない原則の受け皿。 */
   revisionPanel: { lid: string; items: readonly RevisionItem[] } | null;
@@ -2190,6 +2198,7 @@ export const initialState: AppState = {
   showArchived: false,
   showDoneTasks: false,
   showUndatedTasks: false,
+  scheduleHiddenNotes: [],
   revisionPanel: null,
   revisionPreview: null,
   notice: null,
@@ -2965,6 +2974,8 @@ export type UserAction =
   /** 板の「完了」を開く / 畳む(2026-08-20。設計 doc §4-4)。 */
   | { type: 'TOGGLE_SHOW_DONE_TASKS' }
   | { type: 'TOGGLE_SHOW_UNDATED_TASKS' }
+  /** 予定の面で、そのノートの予定を隠す / 出す(「出すもの」のノートの一覧)。 */
+  | { type: 'TOGGLE_SCHEDULE_NOTE'; lid: string }
   | { type: 'RETRY_PERSIST' }
   /** lid / title は binder が生成して渡す(reducer は純粋のまま ── Date を呼ばない)。
    *  body 省略時は flavor seed。edit:false は「作って選択するだけ」(添付取込等 ──
@@ -8241,6 +8252,19 @@ function reduceCore(
        *   **戻ってくるまで盤面が空になる**(押した手応えが消える)。
        */
       return { state: { ...state, showUndatedTasks: !state.showUndatedTasks }, events: [] };
+    case 'TOGGLE_SCHEDULE_NOTE': {
+      // ⚠ 走査は頼み直さない(隠すのは描画側の絞り)。選択も動かさない
+      const hidden = state.scheduleHiddenNotes;
+      return {
+        state: {
+          ...state,
+          scheduleHiddenNotes: hidden.includes(action.lid)
+            ? hidden.filter((l) => l !== action.lid)
+            : [...hidden, action.lid],
+        },
+        events: [],
+      };
+    }
     case 'BODY_PERSISTED': {
       /**
        * 🔴 **留めた枠にも同じノートが出ていることがある**(#505 段②)。

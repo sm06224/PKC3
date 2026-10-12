@@ -8618,6 +8618,16 @@ const ACTIONS: Record<string, ActionHandler> = {
   'toggle-show-undated': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' }),
   /**
+   * 🔴 **予定の面で、そのノートの予定を隠す / 出す**(#855。Gemini 裁定 = #1163 の依頼 20-A)。
+   * 「出すもの」のノートの一覧の 1 行 1 行が押し口で、**どのノートかは行が持つ**(`data-pkc-note-lid`)。
+   * ⚠ ノートそのものは隠さない(予定の面から外すだけ)。
+   */
+  'toggle-schedule-note': (dispatcher, target) => {
+    const lid = target.getAttribute('data-pkc-note-lid');
+    if (lid === null || lid === '') return;
+    dispatcher.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid });
+  },
+  /**
    * 予定の面の月送り。⚠ **遷移先は描画時に焼いてある**(`data-pkc-nav-*`)──
    * binder に「いま表示している月」の別ソース(実時刻)を持たせない。
    */
