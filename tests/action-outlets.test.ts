@@ -114,6 +114,12 @@ const UNRESOLVED: readonly string[] = [
   'sql-export-pick',
   'sql-history-pick',
   'toggle-todo',
+  /**
+   * ⚠ **2026-10-12(#1087 流れ 29)で 1 件増えた** ── ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)。
+   * 🔑 押し所は `status-open.ts` の `paintStatusUndo` が **`data-pkc-action` を実行時に書き換える**
+   *   (`undo-move` / `schedule-undo-move` と同じ器)ので、静的な字が `undo-trash` の形では source に無い。
+   */
+  'undo-trash',
   'view-big',
 ];
 

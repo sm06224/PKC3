@@ -3150,6 +3150,11 @@ export type UserAction =
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
   | { type: 'RESTORE_TRASH'; entryLid: string; revId: string }
+  /**
+   * 🔴 **ゴミ箱へ移した直後の「元に戻す」**(#1087 流れ 29)。移した全部に `RESTORE_TRASH` を撃つ
+   * (履歴の id は効果層がゴミ箱の一覧から引く)。⚠ ゴミ箱に居ない分は黙って落とす。
+   */
+  | { type: 'UNDO_TRASH'; lids: readonly string[] }
   | { type: 'PURGE_TRASH' }
   /**
    * 🔴 **2 ペインタブファイラの操作**(#241 段⑥。user 指示 2026-08-17)。
@@ -4012,6 +4017,7 @@ export type DomainEvent =
       entryOrder: number;
     }
   | { type: 'REQUEST_TRASH_LIST' }
+  | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[] }
   | {
       /** ゴミ箱からの復元(entry 再作成)。entryOrder は reduce 時に採番。 */
       type: 'REQUEST_TRASH_RESTORE';
@@ -9141,6 +9147,12 @@ function reduceCore(
           },
         ],
       };
+    }
+    case 'UNDO_TRASH': {
+      // ⚠ 起点で断る(`RESTORE_TRASH` と同じ ── 章の欄が開いている間は復元が選択を動かす)
+      if (state.phase !== 'ready' || action.lids.length === 0) return { state, events: [] };
+      if (state.sectionDraft !== null) return sectionDraftBlockedResult(state);
+      return { state, events: [{ type: 'REQUEST_TRASH_UNDO', lids: action.lids }] };
     }
     case 'PURGE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };

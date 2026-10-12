@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor, answerAppDialog } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, expectReachable, useSplitEditor } from './helpers';
 import { peek, withStateOnFail } from './state-dump';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
@@ -276,7 +276,6 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
    *   CSS を持たないので、受け皿の規則が在るかは実ブラウザでしか見えない)。
    */
   await clickReal(page, '[data-pkc-action="delete-entry"]');
-  await answerAppDialog(page, 'ok');
   await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("リンク元")');
   const missing = page.locator('[data-pkc-field="detail-body"] a[data-pkc-link-missing]');
   await expect(missing, '先のノートを捨てたのに、リンクに印が付いていない').toHaveCount(1);
@@ -358,7 +357,6 @@ test('🔴 本文の entry: リンクを押すと、そのノートが開く(遷
 
   // 対照群 ── また捨てれば付く(「一度外れたら二度と付かない」ではない)
   await clickReal(page, '[data-pkc-action="delete-entry"]');
-  await answerAppDialog(page, 'ok');
   await expect(
     pinned.locator('a[data-pkc-link-missing]'),
     '捨て直したのに、留めた枠の点線が付かない',

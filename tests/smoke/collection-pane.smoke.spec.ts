@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
 
 /**
  * 🔴 **何も選んでいない = コレクションを選んでいる**(#1017 段④a)。
@@ -128,7 +128,6 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   await clickReal(page, '[data-pkc-region="filer-table"] tbody tr');
   await expect(page.locator('[data-pkc-field="inspector-title"]')).toBeVisible();
   await clickReal(page, '[data-pkc-action="delete-entry"]');
-  await answerAppDialog(page, 'ok');
   await expect(
     page.locator('[data-pkc-field="collection-pane"]'),
     'コレクション面へ戻っていない',

@@ -209,7 +209,8 @@ describe('割当の検め', () => {
   // 🔴 2026-10-11: このノートのリンクをコピー(外から開けるリンク)── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
   'copy-entry-link',
   // 🔴 #582 段③ 第 1 群(Gemini の回答 = #1163 依頼 16): 名前で呼べなかった「高」の 18 件 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'add-relation', 'add-tag', 'append-entry', 'attach-file', 'clear-entry-date', 'open-today', 'refresh-query', 'stack-save',
+  // ⚠ 2026-10-12(#1087 流れ 29): 18 件のうち open-today だけ既定 Alt+T を持つようになったので、この一覧から外した(他の 17 件は鍵なし)
+  'add-relation', 'add-tag', 'append-entry', 'attach-file', 'clear-entry-date', 'refresh-query', 'stack-save',
   'copy-note-md', 'copy-note-rich', 'export-messages', 'export-settings',
   'schedule-quick-add', 'schedule-today', 'export-schedule-ics', 'toggle-show-done', 'toggle-show-archived', 'toggle-show-undated',
   // 🔴 #582 段③ 第 2 群: 名前で呼べなかった「高」の 26 件 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる

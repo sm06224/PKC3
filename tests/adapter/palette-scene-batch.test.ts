@@ -118,7 +118,8 @@ describe('第 1 群 18 件の登記(#582 段③)', () => {
     for (const id of BATCH) {
       const c = findCommand(id);
       expect(c, `${id} が KEY_COMMANDS に無い`).toBeDefined();
-      expect(c?.defaults, `${id} に鍵が付いている`).toEqual([]);
+      // ⚠ 2026-10-12(#1087 流れ 29): 18 件のうち `open-today` だけは既定 Alt+T を持つ(他の 17 件は鍵なし)
+      expect(c?.defaults, `${id} に鍵が付いている`).toEqual(id === 'open-today' ? ['Alt+T'] : []);
       expect(c?.contexts, `${id} は全域`).toEqual(['global']);
       expect(SHORTCUT_BUTTON[id], `${id} の受け手(押しボタン)が無い`).toBe(`[data-pkc-action="${id}"]`);
       expect((c?.note ?? '').length, `${id} に説明(押せない理由を兼ねる)が無い`).toBeGreaterThan(0);

@@ -374,7 +374,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 押した行が lid を運ぶ(`schedule-week-pick` と同じ置き場。仕分けは N だが実は押した行を指す)。
    */
   'toggle-schedule-note',
-  'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'use-copied',
+  'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'undo-trash', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -823,12 +823,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       // ⚠ 2026-10-12(#855 20-C): 予定の知らせの受け手 4 件(`set-schedule-lead` / `set-schedule-missed` / `open-missed-schedule` / `dismiss-missed`)── 登記なし。`total` / `receivers` / `unregistered` +4。
       // ⚠ 2026-10-12(#855 Q2): 予定表の「印刷」(`schedule-print`)で受け手 +1 ── 登記は増えない(押し口は予定の面にしか無く、鍵も持たない。`export-schedule-ics` と同じ置き場)。
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 424,
-      receivers: 358,
+      // ⚠ 2026-10-12(#1087 流れ 29): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)で受け手 +1 ── 登記は増えない
+      //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`schedule-undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      total: 425,
+      receivers: 359,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 257,
+      unregistered: 258,
     });
   });
 

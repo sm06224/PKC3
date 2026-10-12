@@ -33,7 +33,6 @@ import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { paneOf } from '../../src/features/relation/dual-pane';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { stubStamps } from '../helpers/store-stamps';
-import { answerDialog } from './dialog-helper';
 import { STACK_ARCHETYPE } from '../../src/features/flavor/stack-flavor';
 
 function meta(lid: string, order: number, archetype = 'text'): EntryMeta {
@@ -203,7 +202,7 @@ describe('2 ペインの表の行を右クリックしても、2 ペインを抜
     t.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
     rightClick(t.dualRow('left', 'n1'));
     t.press('delete-entry');
-    await answerDialog('ok');
+    // ⚠ 確認は出さない(#1087 流れ 29)── 押したらそのまま移る
     await tick();
     expect(t.d.getState().entryMetas.has('n1'), '押した行(n1)が残っている').toBe(false);
     expect(

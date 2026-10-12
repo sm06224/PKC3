@@ -374,11 +374,12 @@ describe('#402 ① 断り方', () => {
     expect(s.q<HTMLInputElement>('[data-pkc-field="bulk-tag"]')!.value).toBe('');
   });
 
-  it('⚠ 帯は 2 件以上のときだけ出る(1 件は「居場所」の帯と役割が重なる)', async () => {
+  it('⚠ 1 件でもタグの欄は出る(#1087 流れ 29 Q5)。2 件以上で件数は複数になる', async () => {
     const s = setup({ e1: 'あ\n', e2: 'い\n' });
     mark(s, ['e1']);
     await tick();
-    expect(s.q('[data-pkc-field="bulk-tag"]'), '1 件で帯が出ている').toBeNull();
+    expect(s.q('[data-pkc-field="bulk-tag"]'), '1 件でタグの欄が出ない').not.toBeNull();
+    expect(s.q('[data-pkc-field="filer-bulk-count"]')?.textContent).toContain('1 件');
     mark(s, ['e2']);
     await tick();
     expect(s.q('[data-pkc-field="bulk-tag"]')).not.toBeNull();

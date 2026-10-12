@@ -82,6 +82,7 @@ import { installCodeBox, syncCodeBoxSaving } from './code-box';
 import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
 import { RowSwap } from './row-swap';
+import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffCounts, diffRows, shortStamp } from '@features/revision/diff-view';
 import { sideRows } from '@features/revision/diff-side';
@@ -2464,7 +2465,14 @@ export class DetailRenderer {
      * ⚠ 当てるのは**組み終えた後**(下の `focusTitle`)── 先に当てると、後ろの
      *   `ta.focus()` が奪う。`?? null` は手組みの fixture(`freshLid` を持たない)への備え。
      */
-    const focusTitle = (state.freshLid ?? null) === open.lid && !isTouchOnly();
+    const isFreshOpen = (state.freshLid ?? null) === open.lid;
+    /**
+     * 🔴 **「今日」で作ったノートだけ、題名ではなく本文へ**(#1087 流れ 29)。題名は日付のまま。
+     * ⚠ 札は作った直後(`isFreshOpen`)のときだけ引き取る ── 他の作り方は今までどおり題名へ。
+     */
+    const wantsBody = isFreshOpen && takeBodyFocus(open.lid);
+    const focusTitle = isFreshOpen && !wantsBody && !isTouchOnly();
+    const focusBody = wantsBody && !isTouchOnly();
     const settleTitle = (): void => {
       titleInput.focus();
       titleInput.select();
@@ -2543,6 +2551,7 @@ export class DetailRenderer {
     if (liveEditorEnabled()) {
       this.renderLiveEditor(open.body, previewOpts, state.editOpenAt, folded, isAttachment);
       if (focusTitle) settleTitle();
+      else if (focusBody) (this.enterBody as (() => void) | null)?.(); // ⚠ renderLiveEditor が名乗る(TS は代入を追えない)
       return;
     }
     const split = document.createElement('div');
@@ -2698,6 +2707,7 @@ export class DetailRenderer {
       for (const sc of scopes.splice(0)) sc.dispose();
     };
     if (focusTitle) settleTitle();
+    else if (focusBody) this.enterBody?.();
     else ta.focus();
   }
 

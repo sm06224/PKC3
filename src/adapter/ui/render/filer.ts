@@ -491,7 +491,13 @@ export class FilerRenderer {
      *    食い違うと、確認の文言が嘘になる。
      */
     const marks = state.selection.filter((lid) => this.rows.has(lid));
-    if (marks.length > 1) {
+    /**
+     * 🔴 **1 件を選んでいるときも、タグの欄は出す**(#1087 流れ 29。Gemini 裁定 = #1163 への依頼 29 の Q5)。
+     * ⚠ 出すのは**数・タグの欄と付け外し・選択の解除**だけ。ゴミ箱へ移す・フォルダへ移す…は 2 件以上のときだけ
+     *   (1 件の移動は行の右クリックと、パンくずの「フォルダへ移す…」が持っている ── 同じ帯に 2 つ目を作らない)。
+     */
+    if (marks.length >= 1) {
+      const multi = marks.length > 1;
       const bulk = document.createElement('div');
       bulk.setAttribute('data-pkc-field', 'filer-bulk');
       const count = document.createElement('span');
@@ -530,7 +536,21 @@ export class FilerRenderer {
       add.title = `選んでいる ${marks.length} 件の本文に、打ったタグを足します(井桁を付けて空白で並べると、まとめて足せます)`;
       const off = iconButton('bulk-tag-remove', 'タグを外す');
       off.title = `選んでいる ${marks.length} 件の本文から、打ったタグを消します(井桁を付けて空白で並べると、まとめて外せます)`;
-      bulk.append(count, del, tag, add, off, clear);
+      /**
+       * 🔴 **まとめて「移す…」**(#1087 流れ 29 Q4)。押し先は右クリックの「フォルダへ移す…」と**同じ
+       *   `move-to-folder` 1 本**(探して選ぶ小さい窓)── 移す道を 2 通り憶えさせない。
+       * ⚠ 印の 1 件目を `data-pkc-entry` に持たせる ── 帯は行の中に居ないので、持たせないと
+       *   「いま開いているノート」へ落ちて、印の外のノートを相手にしうる(窓は印の全部を動かす)。
+       */
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.setAttribute('data-pkc-field', 'bulk-move');
+      move.setAttribute('data-pkc-action', 'move-to-folder');
+      move.setAttribute('data-pkc-entry', marks[0] ?? '');
+      move.textContent = '移す…';
+      move.title = `選んでいる ${marks.length} 件を、別のフォルダへ移します(探して選ぶ小さな画面が開きます)`;
+      if (multi) bulk.append(count, del, move, tag, add, off, clear);
+      else bulk.append(count, tag, add, off, clear);
       host.append(bulk);
     }
 

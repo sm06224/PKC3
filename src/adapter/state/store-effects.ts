@@ -3035,6 +3035,30 @@ export function connectStoreEffects(
           }
         });
         break;
+      case 'REQUEST_TRASH_UNDO':
+        /**
+         * 🔴 **移した直後の「元に戻す」**(#1087 流れ 29)。ゴミ箱の一覧から該当の履歴を引き、
+         * 既存の `RESTORE_TRASH` を 1 件ずつ撃つ(復元の経路を 2 本にしない)。
+         * ⚠ 列に並べる = 先に積まれた削除の後で一覧を読む。居ない分(空にされた等)は黙って落とす。
+         */
+        enqueue(async () => {
+          if (disposed) return;
+          try {
+            const rows = await store.listTrash();
+            if (disposed) return;
+            for (const lid of ev.lids) {
+              const row = rows.find((r) => r.entry_lid === lid);
+              if (row) dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid: lid, revId: row.id });
+            }
+          } catch (e) {
+            if (!disposed)
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `元に戻せませんでした: ${String(e)}`,
+              });
+          }
+        });
+        break;
       case 'REQUEST_TRASH_RESTORE':
         enqueue(async () => {
           if (disposed) return;

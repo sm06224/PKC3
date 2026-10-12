@@ -3,7 +3,7 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { answerAppDialog, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -117,9 +117,8 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await expect(panel).toHaveCount(0); // 復元で panel は畳まれる
 
   // ── P5b: 削除 → ゴミ箱 → 復元(sidebar に戻る)──
-  // 確認は**アプリの中**の口を押す(#299 段② ── native は 1 度も開かない)
+  // 確認は出さない(#1087 流れ 29)── 押したらそのまま移る
   await clickReal(page, '[data-pkc-action="delete-entry"]');
-  await answerAppDialog(page, 'ok');
   await expect(
     page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]'),
   ).toHaveCount(0);

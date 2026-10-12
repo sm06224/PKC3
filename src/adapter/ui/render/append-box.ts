@@ -20,6 +20,7 @@ import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
 import { CANCEL_EDIT_HINT, COMMIT_EDIT_HINT, iconButton } from './icons';
+import { takeAppendFocus } from './focus-request';
 import { refoldPeeked } from './pane-visibility';
 import { sizeTextareaToContent } from './row-swap';
 import { hintTitle } from './shortcut-hint';
@@ -292,6 +293,7 @@ export class AppendBoxRenderer {
     if (mode.kind === this.last) {
       // ⚠ 種類が同じなら DOM を触らない ── ただし焦点の約束は**器に触らずに**果たす
       this.focusIfPending(mode);
+      this.focusIfRequested(mode);
       return;
     }
     this.last = mode.kind;
@@ -323,6 +325,19 @@ export class AppendBoxRenderer {
     }
     // ⚠ **器を出した後**に当てる ── `hidden` のままの欄には焦点が乗らない
     this.focusIfPending(mode);
+    this.focusIfRequested(mode);
+  }
+
+  /**
+   * 🔴 **「今日」で既に在るノートを選んだあと、追記欄にカーソルを置く**(#1087 流れ 29)。
+   * ⚠ 上の `focusIfPending` と違い、**押した本人の頼み**なので焦点がどこに在っても置く
+   *   (「今日」を押した直後は、題名の探す欄などに焦点が残っていることがある)。
+   * ⚠ 指で触るだけの端末では置かない(ソフトキーボードが本文を隠す ── 編集の題名と同じ規則)。
+   */
+  private focusIfRequested(mode: AppendMode): void {
+    if (mode.kind !== 'ready' || !takeAppendFocus(mode.lid)) return;
+    if (isTouchOnly()) return;
+    this.input.focus();
   }
 
   /**

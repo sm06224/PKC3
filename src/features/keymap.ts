@@ -805,7 +805,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     id: 'open-today',
     label: '今日のノートを開く',
     contexts: ['global'],
-    defaults: [],
+    defaults: ['Alt+T'],
     note: '今日の日付のノートを開きます。無ければ作ります',
     alias: '今日 日記 デイリー 日付ノート',
   },
