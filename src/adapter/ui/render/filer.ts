@@ -69,6 +69,7 @@ export class FilerRenderer {
   private lastSignature: string | null = null;
   /** 日付だけの指紋。⚠ 本体の指紋と**別に**持つ(混ぜると建て直しに戻る ── #270)。 */
   private lastDates: string | null = null;
+  private dateMemo: { metas: ReadonlyMap<string, EntryMeta>; year: number; sig: string } | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
   private lastScopeLid: string | null = null;
@@ -634,11 +635,21 @@ export class FilerRenderer {
    */
   private dateSignature(state: AppState): string {
     const year = new Date().getFullYear();
+    /**
+     * 🔑 **同じ `entryMetas` と同じ年なら、前の答えを返す**(#1087 性能調査 §5)。
+     * ⚠ 選ぶだけの描画でも毎回全件(3,000 件で約 12 ms)を回していた。`entryMetas` は
+     *   reducer が**必ず新しい Map** で差し替える(その場で書き換えない)ので、参照が同じなら
+     *   中身も同じ。年は日付の字を変えうる(年をまたぐと `MM/DD` ⇔ `YYYY/MM/DD`)ので鍵に入れる。
+     */
+    if (this.dateMemo !== null && this.dateMemo.metas === state.entryMetas && this.dateMemo.year === year)
+      return this.dateMemo.sig;
     const parts: string[] = [];
     for (const m of state.entryMetas.values()) {
       parts.push(m.lid, formatListDate(m.updatedAt, year));
     }
-    return parts.join(String.fromCharCode(0));
+    const sig = parts.join(String.fromCharCode(0));
+    this.dateMemo = { metas: state.entryMetas, year, sig };
+    return sig;
   }
 
   /**
