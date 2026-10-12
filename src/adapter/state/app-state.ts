@@ -179,6 +179,7 @@ import { toggleKind } from '@features/filter/kind-filter';
 import { normalizeFindQuery } from '@features/filter/search-hits';
 import { STRUCTURAL, type RelationKind } from '@features/relation/kinds';
 import { replaceAll } from '@features/markdown/body-replace';
+import { foldAttachmentHead, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
 import {
   excerptOf,
   PLACE_BODY_CAP,
@@ -6426,9 +6427,21 @@ function reduceCore(
      */
     case 'REPLACE_IN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
-      const { body, count } = replaceAll(state.openBody.body, action.find, action.replace, {
+      /**
+       * 🔴 **添付ノートは、画面に出ていない設定の行を置換の外に置く**(#1579 Q1 = A)。
+       * ⚠ 設定の行(`attachment.*`)は編集欄に畳まれて見えない。そこへ当てると、
+       *   見えない所が書き換わって添付が壊れる。切り方は編集欄と同じ `foldAttachmentHead` 1 本。
+       *   件数も見える本文だけを数える(`replaceAll` の返す count をそのまま使う)。
+       */
+      const fold =
+        state.entryMetas.get(state.openBody.lid)?.archetype === 'attachment'
+          ? foldAttachmentHead(state.openBody.body)
+          : null;
+      const done = replaceAll(fold === null ? state.openBody.body : fold.rest, action.find, action.replace, {
         caseSensitive: action.caseSensitive === true,
       });
+      const count = done.count;
+      const body = fold === null ? done.body : joinHiddenHead(fold.head, done.body);
       if (count === 0)
         return {
           state: { ...state, error: `「${action.find}」は本文に見つかりませんでした` },

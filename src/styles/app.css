@@ -5909,6 +5909,18 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: 4px;
   padding: var(--s2);
 }
+/* 「高さ」ボタン(#918 Q2)。図の右下。 */
+[data-pkc-field='sql-er-height'] {
+  align-self: flex-end;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
 [data-pkc-field='sql-er-canvas'] {
   position: relative;
 }

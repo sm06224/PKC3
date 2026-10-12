@@ -2793,6 +2793,36 @@ describe('表のつながり図(#918 段⑤)', () => {
     ).toBe('137px');
   });
 
+  it('🔴 「高さ」ボタン:小 → 中 → 大 → 小 と変わり、描き直しをまたいで残る(#918 Q2)', async () => {
+    const { pane } = setup(schemaReply);
+    erBtn(pane).click();
+    await settleEr();
+    const btn = (): HTMLButtonElement =>
+      pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-er-height"]')!;
+    const scroll = (): HTMLElement => pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-scroll"]')!;
+    expect(btn().tagName, '本物の button').toBe('BUTTON');
+    expect(btn().textContent).toBe('高さ');
+    expect(scroll().style.height, '前提:まだ掴んでも押してもいない').toBe('');
+    expect(btn().title).toContain('いま: 中');
+    // 初めは「中」扱い → 大 → 小 → 中
+    const seen: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      btn().click();
+      seen.push(scroll().style.height);
+    }
+    expect(seen).toEqual(['480px', '120px', '240px']);
+    // 描き直し(列を押すと図が作り直される)をまたいで残る
+    btn().click(); // 大
+    pane.querySelector<HTMLElement>('[data-pkc-field="sql-er-connect"]')!.click();
+    expect(scroll().style.height, '描き直しで初期の高さへ戻った').toBe('480px');
+    expect(btn().title).toContain('いま: 大');
+    expect(btn().title, '次の段を言う').toContain('次: 小');
+    // 掴んで変えた中途半端な高さは、いちばん近い段から数える
+    scroll().style.height = '130px';
+    btn().click();
+    expect(scroll().style.height).toBe('240px');
+  });
+
   it('🔴 焦点を持つ線の札が消えたら、図の中の「列をつなぐ」へ(BODY へ落とさない)', async () => {
     const { pane } = setup(schemaReply);
     erBtn(pane).click();

@@ -53,6 +53,33 @@ export interface ErSizeMemory {
   top: number;
 }
 
+/**
+ * 🔴 **図の高さを 3 段で切り替える**(#918 Q2 = B)。掴んで変える道(`resize`)の**もう 1 つの口**で、
+ * 掴めない人・キーボードの人のためのボタン。⚠ 書く先は掴んだときと同じ `memory.height`(インライン style)1 つ。
+ */
+export const ER_HEIGHT_STEPS = [
+  { label: '小', px: 120 },
+  { label: '中', px: 240 },
+  { label: '大', px: 480 },
+] as const;
+
+/** 今の高さ(インライン style。空 = 初期の高さ)がどの段か。掴んで変えた中途半端な高さは、いちばん近い段に寄せる。 */
+export function erHeightStepOf(height: string): number {
+  const px = Number.parseFloat(height);
+  // 空(初期の 30vh)は「中」と数える
+  if (height === '' || !Number.isFinite(px)) return 1;
+  let best = 0;
+  for (let i = 1; i < ER_HEIGHT_STEPS.length; i++) {
+    if (Math.abs(ER_HEIGHT_STEPS[i]!.px - px) < Math.abs(ER_HEIGHT_STEPS[best]!.px - px)) best = i;
+  }
+  return best;
+}
+
+/** 次の段(小 → 中 → 大 → 小)。 */
+export function erNextHeightStep(height: string): number {
+  return (erHeightStepOf(height) + 1) % ER_HEIGHT_STEPS.length;
+}
+
 export interface ErFocusKey {
   readonly field: string;
   readonly name: string;
@@ -337,10 +364,34 @@ export function paintSqlEr(
   scroll.append(canvas);
   host.append(scroll);
   /**
+   * 🔴 **「高さ」ボタン**(#918 Q2 = B)。図の右下。押すたびに 小 → 中 → 大 → 小。
+   * ⚠ 本物の `<button>`(Tab + Enter / Space)。書く先は掴んだ高さと同じ `memory.height` で、
+   *   描き直しをまたいで残る。⚠ ここは binder を通さず直に結ぶ(図の DOM の中で閉じる操作で、state を動かさない)。
+   */
+  const heightBtn = doc.createElement('button');
+  heightBtn.type = 'button';
+  heightBtn.setAttribute('data-pkc-field', 'sql-er-height');
+  heightBtn.textContent = '高さ';
+  const paintHeightTitle = (): void => {
+    const now = erHeightStepOf(scroll.style.height);
+    const next = erNextHeightStep(scroll.style.height);
+    heightBtn.title = `図の高さを変えます(いま: ${ER_HEIGHT_STEPS[now]!.label} → 次: ${ER_HEIGHT_STEPS[next]!.label})`;
+    heightBtn.setAttribute('data-pkc-height-step', ER_HEIGHT_STEPS[now]!.label);
+  };
+  heightBtn.addEventListener('click', () => {
+    const next = erNextHeightStep(scroll.style.height);
+    const h = `${String(ER_HEIGHT_STEPS[next]!.px)}px`;
+    scroll.style.height = h;
+    memory.height = h;
+    paintHeightTitle();
+  });
+  host.append(heightBtn);
+  /**
    * 🔴 持ち越す(上の `ErFocusKey` の注釈)。⚠ 高さは**掴んで変えたときだけ**インラインに入る
    *   (`resize` が書く)── 空なら CSS の初期値のまま。
    */
   if (memory.height !== '') scroll.style.height = memory.height;
+  paintHeightTitle();
   scroll.scrollLeft = memory.left;
   scroll.scrollTop = memory.top;
   if (focusKey !== null) {
