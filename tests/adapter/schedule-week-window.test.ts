@@ -19,6 +19,8 @@ import {
   resetWeekRaiseMemory,
   weekAnnounceKey,
   weekWindowKey,
+  monthWindowKey,
+  MONTH_WINDOW_ALREADY,
 } from '../../src/adapter/platform/schedule-deep-link';
 import { createNoteRegistry } from '../../src/adapter/platform/note-window-registry';
 import { HELD_VIEW_ATTR, markHeldView } from '../../src/adapter/platform/view-window';
@@ -69,6 +71,37 @@ describe('weekAnnounceKey(週の窓が名乗る条件)', () => {
     expect(weekAnnounceKey('schedule', 'list', null, '2026-10-01')).toBeNull();
     expect(weekAnnounceKey(null, 'week', '2026-10-07', '2026-10-01'), '予定の窓でないのに名乗った').toBeNull();
     expect(weekAnnounceKey('contacts', 'week', '2026-10-07', '2026-10-01')).toBeNull();
+  });
+});
+
+describe('月の窓も名乗る(#855 ── 左の列の「月」を 2 度押して 2 枚にしない)', () => {
+  it('🔴 「月」の窓は、出している月で名乗る(月を送れば鍵も変わる)', () => {
+    expect(weekAnnounceKey('schedule', 'month', null, '2026-10-12')).toBe('month 2026-10');
+    expect(weekAnnounceKey('schedule', 'month', null, '2026-10-12', { year: 2026, month: 3 })).toBe('month 2026-03');
+    expect(weekAnnounceKey('contacts', 'month', null, '2026-10-12'), '予定の窓でないのに名乗った').toBeNull();
+  });
+  it('押す側の鍵は今月(新しく開く月の窓は今月から始まる)/ 読めない今日は載せない', () => {
+    expect(monthWindowKey(null, '2026-01-31')).toBe('month 2026-01');
+    expect(monthWindowKey(null, 'bad')).toBeNull();
+    expect(monthWindowKey({ year: 2026, month: 12 }, '2026-01-31')).toBe('month 2026-12');
+  });
+  it('🔴 月の窓が開いているなら、開かずに「この月は…」と言う(週の字と取り違えない)', () => {
+    const calls: string[] = [];
+    const open = vi.fn(() => Promise.resolve('window' as unknown));
+    const r = openOrRaiseWeekWindow({
+      key: 'month 2026-10',
+      whereIs: () => 'other',
+      raise: (k) => calls.push(`raise ${k}`),
+      reserve: (k) => calls.push(`reserve ${k}`),
+      release: (k) => calls.push(`release ${k}`),
+      open,
+      notice: (m) => calls.push(`notice ${m}`),
+      now: () => 0,
+    });
+    expect(r).toBe('raised');
+    expect(open).not.toHaveBeenCalled();
+    expect(calls).toEqual(['raise month 2026-10', `notice ${MONTH_WINDOW_ALREADY}`]);
+    expect(MONTH_WINDOW_ALREADY).toContain('この月は');
   });
 });
 
@@ -247,6 +280,9 @@ describe('main.ts の配線(どの unit からも実行されない ── 原�
     const announce = main.indexOf('const announceWeek = (): void => {');
     expect(announce, 'announceWeek が見つからない').toBeGreaterThan(-1);
     expect(main.slice(announce, announce + 400)).toContain('weekAnnounceKey(heldViewWindow, st.scheduleMode');
+    // 🔴 月の窓は出している月(calendarMonth)で名乗る / 押す側は今月で引く(#855)
+    expect(main.slice(announce, announce + 400)).toContain('st.calendarMonth ?? null');
+    expect(main).toContain(": monthWindowKey(null, todayKey()),");
     expect(main, '状態が動くたびに名乗っていない').toContain('announceWeek();');
   });
 });
