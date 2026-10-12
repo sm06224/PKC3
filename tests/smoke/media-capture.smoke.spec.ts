@@ -47,6 +47,24 @@ test.use({
   },
 });
 
+/**
+ * 🔴 **「操作を探す」から命令を呼ぶ**(#582 段③ 第 4 群)。画面のボタンを押すのと同じ結果になることを、
+ * 呼ぶ側だけ差し替えて既存の assert でそのまま見る(新しい起動を足さない)。
+ * ⚠ 押せない行(灰色)なら Enter は何も起こさない ── 行が押せることを先に見る。
+ */
+async function viaPalette(page: Page, command: string, label: string): Promise<void> {
+  const dialog = page.locator('[data-pkc-region="app-dialog"]');
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, `${label}: 操作を探すが開かない`).toBeVisible();
+  await page.locator('[data-pkc-field="palette-filter"]').fill(label);
+  await expect(
+    page.locator(`[data-pkc-field="palette-row"][data-pkc-command="${command}"]`),
+    `${label}: 画面にボタンが在るのに一覧で押せない`,
+  ).toBeEnabled();
+  await page.keyboard.press('Enter');
+  await expect(dialog, `${label}: Enter のあと一覧が閉じていない`).toBeHidden();
+}
+
 test('🔴 録音を止めると本文に入り、その場で聞ける (#413 段①②)', async ({ page }) => {
   const errors = collectPageErrors(page);
   /**
@@ -143,7 +161,8 @@ test('🔴 録音を止めると本文に入り、その場で聞ける (#413 �
     timeout: 20_000,
   });
 
-  await clickReal(page, '[data-pkc-field="stop-capture"]');
+  // 🔴 一覧から止める(#582 段③ 第 4 群)── 画面のボタンと同じく、帯が消えて本文に入る(下の assert が同じ)
+  await viaPalette(page, 'stop-capture', '収録を止める');
   await expect(bar, '止めたのに帯が残っている').toBeHidden();
 
   // ③ 🔴 **開いていたノートのまま**(添付が奪った選択が戻っている)
@@ -362,7 +381,8 @@ ${(e as Error).message}`,
   };
 
   const at0 = await seek(1.0);
-  await clickReal(page, '[data-pkc-field="capture-trim-start"]');
+  // 🔴 一覧から印を付ける(#582 段③ 第 4 群)── 一覧を開いても、止めた再生機の位置は動かない(下の assert が同じ)
+  await viaPalette(page, 'capture-trim-start', 'ここを始まりにする');
   await expect(mark, '「ここから」の印が付いていない').toContainText('ここから 0:01');
   expect(await noteBeforeButtons(), '目印を付けたのに、説明文が前に居座っている').toBe(false);
   /**
@@ -378,7 +398,7 @@ ${(e as Error).message}`,
     .toBeCloseTo(at0, 1);
 
   const at1 = await seek(3.0);
-  await clickReal(page, '[data-pkc-field="capture-trim-end"]');
+  await viaPalette(page, 'capture-trim-end', 'ここを終わりにする');
   // ⚠ **押した後も止まったまま**(押す前後で位置が動いていないことを、その場で採る)
   const after = await player.evaluate((el: HTMLMediaElement) => ({
     currentTime: el.currentTime,
@@ -390,7 +410,17 @@ ${(e as Error).message}`,
   ).toBeCloseTo(at1, 1);
   await expect(mark, '両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
 
-  await clickReal(page, '[data-pkc-field="capture-trim-run"]');
+  // 🔴 一覧から「選んだ範囲を消す」→ 印が空に戻る → 同じ範囲を一覧から付け直す(#582 段③ 第 4 群)
+  await viaPalette(page, 'capture-trim-clear', '選んだ範囲を消す');
+  await expect(mark, '一覧から消したのに印が残っている').toContainText(trimMarkText(null, null));
+  await seek(1.0);
+  await viaPalette(page, 'capture-trim-start', 'ここを始まりにする');
+  await seek(3.0);
+  await viaPalette(page, 'capture-trim-end', 'ここを終わりにする');
+  await expect(mark, '付け直した両方の印がそろっていない').toContainText('0:01〜0:03(0:02)');
+
+  // 切り出すのも一覧から(押したのと同じく、一覧に 1 件増える ── 下の assert が同じ)
+  await viaPalette(page, 'capture-trim-run', 'この範囲で切り出す');
 
   // 🔴 **一覧に 1 件増え、元も残っている**(上書きしない ── 裁定)
   await expect(rows, '切り出したものが一覧に増えていない').toHaveCount(2, { timeout: 15_000 });
@@ -474,6 +504,11 @@ ${(e as Error).message}`,
   // ⚠ **元より小さい**(丸ごと写していない)。⚠ 0 でないことも見る(空振り防止)
   expect(cutInfo.bytes, '大きさを測れていない(復号の後に読んでいる)').toBeGreaterThan(0);
   expect(cutInfo.bytes, '切り出したのに元と同じ大きさ').toBeLessThan(38_000);
+
+  // 🔴 一覧から「再生をやめる」── 器が外れ、聞く入り口が戻る(#582 段③ 第 4 群。下の段⑥は「聞く」から始められる)
+  await viaPalette(page, 'capture-stop', '再生をやめる');
+  await expect(cutRow.locator('[data-pkc-field="capture-media"]'), '再生をやめたのに器が残っている').toHaveCount(0);
+  await expect(cutRow.locator('[data-pkc-field="capture-play"]'), '再生をやめたのに「聞く」が戻らない').toHaveCount(1);
 
   /**
    * ## 段⑥ ── **聞きやすくする を入れても、音が止まらない**(#772 段① B)

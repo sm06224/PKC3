@@ -224,15 +224,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   と同じ(いま開いているコード枠の欄に効くので、開いていないと意味が無い)。
    */
   'cancel-code-draft', 'save-code-draft',
-  'capture-stop',
   /**
-   * ⚠ **2026-09-14(#683 段②a)で 4 件増やした** ── 録った音の前後を削る
-   *   (印を付ける 2 つ・消す・切り出す)。⚠ **名前で呼べないままにする理由**:
-   *   印は**いま鳴っている所**の時刻なので、**鳴らしていなければ意味を持たない**
-   *   ── パレットから「ここから」と呼んでも、何時何分が入るのか決まらない。
-   * 🔑 `capture-play` / `capture-stop` と同じ扱いである(並びを揃えた)。
+   * ⚠ **2026-10-12(#582 段③ 第 4 群)で、`capture-stop` と切り出しの 4 件(`capture-trim-*`)を登記して在庫から抜いた** ──
+   *   2026-09-14(#683 段②a)は「印はいま鳴っている所の時刻なので、鳴らしていなければ意味を持たない」を理由に残していたが、
+   *   ボタンは**再生中の 1 行にしか居ない**(鳴らしていなければ画面に無く、一覧では灰色 + 理由)ので、
+   *   一覧から呼んだときに時刻が決まらない場面は無い。実ブラウザで画面のボタンと同じ時刻が入ることを測った。
    */
-  'capture-trim-clear', 'capture-trim-end', 'capture-trim-run', 'capture-trim-start',
   'choose-office-pack', 'clear-copy-history', 'clear-entry-filter',
   'clear-opened-history', 'clear-search-history', 
   // ⚠ 2026-09-28(#1099): 'close-lightbox' はライトボックスが開いている間だけ意味を持つので未登記。
@@ -314,7 +311,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   本文へ送った直後の帯が出ている間だけ意味を持つ(出ていなければ、呼んでも何も動かない)。
    *   帯の外から呼ぶ道は `Esc`(`deselect-entry` の 1 段目)が持つ。
    */
-  'search-jump-end', 
+  // ⚠ 2026-10-12(#582 段③ 第 4 群): 'search-jump-end' は登記して在庫から抜いた(`search-jump-next` / `-prev` と同じ帯の閉じるボタン)。
   'select-entry', 'set-alarm-enabled', 'set-app-group', 'set-app-icon',
   'set-app-open-target', 'set-browse', 'set-code-collapse', 'set-color-swatch', 'set-column-rule', 'set-date-links', 'set-editor-mode', 'set-entry-date',
   'set-entry-sort', 'set-external-images', 'set-flag', 'set-inline-code-copy', 'set-notices-enabled', 'set-open-in-edit', 'set-pdf-reader',
@@ -351,7 +348,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    *   名前が引けるようになった(受け手は前から在った ── 本文の上のボタン)。
    */
   'start-tile-reorder',
-  'stop-capture', 'storage-vacuum', 'swap-open', 'table-to-csv',
+  // ⚠ 2026-10-12(#582 段③ 第 4 群): 'stop-capture' は登記して在庫から抜いた(収録中の帯の「収録を止める」)。
+  'storage-vacuum', 'swap-open', 'table-to-csv',
   'table-to-markdown',
   /**
    * ⚠ **2026-10-01(#1173)** ── 右クリックしたチェックリストを丸ごとそろえる 2 つ。
@@ -812,10 +810,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   受け手は既に在った(押し口は書式の帯のボタン)ので `registered` +2 / `both` +2 / `unregistered` −2(`total` / `receivers` は動かない)。
       total: 418,
       receivers: 352,
-      registered: 159,
-      both: 93,
+      // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件(`stop-capture` / `capture-stop` / `capture-trim-*` 4)+ 検索の帯を閉じる 1 件(`search-jump-end`)の 7 件を
+      //   `KEY_COMMANDS` へ登記した ── 受け手は既に在った(押し口は画面のボタン)ので `registered` +7 / `both` +7 / `unregistered` −7(`total` / `receivers` は動かない)。
+      registered: 166,
+      both: 100,
       outsideActionsTable: 66,
-      unregistered: 259,
+      unregistered: 252,
     });
   });
 
@@ -870,8 +870,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-11(#582 段③ 第 1 群): 名前で呼べなかった「高」の 18 件を登記(`add-tag` ほか)で `key` 84 → 102(鍵の既定は持たない)
     // ⚠ 2026-10-11(#582 段③ 第 2 群): 「高」の 26 件を登記(`run-sql` / `start-timer` / `show-trash` ほか)で `key` 102 → 128(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる 2 件(`insert-diagram` / `insert-icon`)を登記で `key` 128 → 130(鍵の既定は持たない)
+    // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件(`stop-capture` / `capture-stop` / `capture-trim-*` / `search-jump-end`)を登記で `key` 130 → 137(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 130,
+      key: 137,
       entry: 22,
       body: 3,
       collection: 2,

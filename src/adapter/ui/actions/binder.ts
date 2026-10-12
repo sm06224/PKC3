@@ -12813,6 +12813,19 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    */
   'insert-diagram': '[data-pkc-action="insert-diagram"]',
   'insert-icon': '[data-pkc-action="insert-icon"]',
+  /**
+   * 🔴 **録音・録画の最中と切り出し、検索の帯 7 件 第 4 群**(#582 段③。第 1〜3 群と同じ作法 ── 命令 id = 押しボタンの
+   *   `data-pkc-action`、受け手は画面のボタンそのもの)。⚠ 切り出しの端は、受け手が**押したボタンと同じ行**の再生器から
+   *   時刻を読む(`markTrim`)── ボタンは再生中の 1 行にしか居ないので、順に当てても別の行を指さない。
+   * ⚠ 見送った 1 件:`discard-capture`(収録を残さずにやめる)は取り消せない。収録中の帯に常に出ているので、名前で呼ぶ意味も薄い。
+   */
+  'stop-capture': '[data-pkc-action="stop-capture"]',
+  'capture-stop': '[data-pkc-action="capture-stop"]',
+  'capture-trim-start': '[data-pkc-action="capture-trim-start"]',
+  'capture-trim-end': '[data-pkc-action="capture-trim-end"]',
+  'capture-trim-run': '[data-pkc-action="capture-trim-run"]',
+  'capture-trim-clear': '[data-pkc-action="capture-trim-clear"]',
+  'search-jump-end': '[data-pkc-action="search-jump-end"]',
 };
 
 /**

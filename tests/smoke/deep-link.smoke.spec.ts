@@ -449,8 +449,17 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   await expect(win.locator('[data-pkc-field="search-jump-count"]'), '端で回っていない').toHaveText('1/2 件');
   await inView('回って 1 件目');
 
-  // × で、塗りも帯も消える
-  await clickReal(win, '[data-pkc-action="search-jump-end"]');
+  /**
+   * × で、塗りも帯も消える ── 🔴 **「操作を探す」から呼んで閉じる**(#582 段③ 第 4 群)。
+   * ⚠ 画面の × を押すのと同じ結果(塗りも帯も消える)を、下の同じ assert で見る。起動は足さない(同じ窓の続き)。
+   */
+  await win.keyboard.press('Control+Shift+P');
+  await expect(win.locator('[data-pkc-region="app-dialog"]'), '開いた窓で操作を探すが開かない').toBeVisible();
+  await win.locator('[data-pkc-field="palette-filter"]').fill('一致の表示を閉じる');
+  const endRow = win.locator('[data-pkc-field="palette-row"][data-pkc-command="search-jump-end"]');
+  await expect(endRow, '帯が出ているのに「一致の表示を閉じる」が押せない').toBeEnabled();
+  await win.keyboard.press('Enter');
+  await expect(win.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
   expect((await hits()).all, '× を押しても塗りが残っている').toBe(0);
   await expect(win.locator('[data-pkc-field="search-jump-count"]')).toBeHidden();
   const bare = await win.screenshot({ clip });
