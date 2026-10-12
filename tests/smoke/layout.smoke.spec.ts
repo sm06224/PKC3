@@ -1046,7 +1046,7 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   ).toBeLessThan(30);
 
   // ④ 🔴 1 件足しても、既存の行は作り直されず、位置も動かない(#1087)
-  //    ── 直す前は全行を作り直していた(5,700 件で 2.7 秒・約 +120〜185 MB)。起動を増やさず、同じ道中に足す。
+  //    ── 直す前は全行を作り直していた(5,700 件で 2.7 秒・約 +185〜190 MB)。起動を増やさず、同じ道中に足す。
   await page.locator('[data-pkc-field="entry-filter"]').fill('');
   await expect(rows).toHaveCount(32);
   await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));

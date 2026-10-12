@@ -6,7 +6,7 @@
  *
  * フォルダの表は、`entryMetas` の指紋が動くたびに `region.textContent = ''` で
  * **全行を作り直して**いた。平置き 5,700 件で「ノートを 1 件足す」と、
- * クリックから新しい行が見えるまで **2.7 秒**・renderer が **約 +120〜185 MB** 膨らんだ
+ * クリックから新しい行が見えるまで **2.7 秒**・renderer が **約 +185〜190 MB** 膨らんだ
  * (実ブラウザ・n=3。`docs/development/long-list-add-2026-10.md`)。
  *
  * ## 🔑 直し
@@ -18,7 +18,7 @@
  * (並び・選択・印・題名)。下の it は 2 つの向きを必ず対で持つ。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EntryMeta } from '../../src/core/model/entry-meta';
+import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
@@ -233,6 +233,10 @@ describe('一覧が変わっても、変わっていない行の node は持ち�
     render(withMetas(s0, [{ ...BASE[0]!, updatedAt: at }, BASE[1]!, BASE[2]!]));
 
     expect(dateOf('a'), '日付が変わったのに古い字を持ち越した').toBe('01/02');
+    expect(
+      row('a')!.querySelector<HTMLElement>('[data-pkc-field="updated"]')!.title,
+      '日付の title が古いまま',
+    ).toContain('01/02');
   });
 
   it('対照群: 焦点のある行が消えたら、表へ戻す(body に落とさない)', () => {
@@ -244,5 +248,112 @@ describe('一覧が変わっても、変わっていない行の node は持ち�
     render(withMetas(s0, [BASE[0]!, BASE[2]!]));
 
     expect(document.activeElement).toBe(pane.querySelector('table'));
+  });
+
+  /**
+   * 🔴 **名前を打ち替えている行の node は動かさない**(レビュー Y1)。焦点のある node を
+   * `insertBefore` で動かすと focusout が出て、打ちかけの名前が確定される(実ブラウザで実測)。
+   */
+  it('🔴 名前を打ち替えている行は、並びが変わっても node ごと動かさない(欄・字・焦点が残る)', () => {
+    const { render, row, order, pane } = setup();
+    let s = booted(BASE);
+    render(s);
+    s = reduce(s, { type: 'ROW_RENAME_BEGIN', lid: 'b' }).state;
+    render(s);
+    const r = row('b')!;
+    const input = r.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]')!;
+    expect(input, '前提が崩れている(欄が出ていない)').toBeTruthy();
+    expect(document.activeElement, '前提が崩れている(欄に焦点が無い)').toBe(input);
+    input.value = '打ちかけ';
+    const tbody = pane.querySelector('tbody')!;
+    const mo = new MutationObserver(() => {});
+    mo.observe(tbody, { childList: true });
+
+    // b が先頭へ来る並び替え(手前の a が後ろへ回る)
+    render(withMetas(s, [meta('a', 2), meta('b', 1), meta('c', 3)]));
+
+    const moved = mo.takeRecords().flatMap((m) => [...m.addedNodes, ...m.removedNodes]);
+    mo.disconnect();
+    expect(order(), '並びが変わっていない').toEqual(['b', 'a', 'c']);
+    expect(moved.includes(r), '打ち替え中の行の node を動かした(焦点が外れて確定される)').toBe(false);
+    expect(row('b')).toBe(r);
+    expect(input.value).toBe('打ちかけ');
+    expect(document.activeElement, '欄から焦点が外れた').toBe(input);
+  });
+
+  it('🔴 打ち替え中に一覧が変わっても、全選択し直さない(次の打鍵が字を置き換えない)', () => {
+    const { render, row } = setup();
+    let s = booted(BASE);
+    render(s);
+    s = reduce(s, { type: 'ROW_RENAME_BEGIN', lid: 'b' }).state;
+    render(s);
+    const input = row('b')!.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]')!;
+    expect(document.activeElement, '前提が崩れている').toBe(input);
+    const spy = vi.spyOn(input, 'select');
+
+    render(withMetas(s, [...BASE, meta('d', 4)]));
+
+    expect(spy, '一覧が変わるたびに全選択し直している').not.toHaveBeenCalled();
+    expect(row('b')!.querySelector('[data-pkc-field="row-rename"]')).toBe(input);
+  });
+
+  it('対照群: 打ち替えが始まった回は焦点と全選択が当たる(終わって次に始めても当たる)', () => {
+    const { render, row } = setup();
+    let s = booted(BASE);
+    render(s);
+    for (const lid of ['b', 'c']) {
+      s = reduce(s, { type: 'ROW_RENAME_BEGIN', lid }).state;
+      render(s);
+      const input = row(lid)!.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]')!;
+      expect(document.activeElement, `${lid}: 始まったのに焦点が欄に無い`).toBe(input);
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd, `${lid}: 全選択されていない`).toBe(input.value.length);
+      s = reduce(s, { type: 'ROW_RENAME_END' }).state;
+      render(s);
+      expect(row(lid)!.querySelector('[data-pkc-field="row-rename"]'), '終わったのに欄が残る').toBeNull();
+    }
+  });
+
+  it('🔴 打ち替えの始まりと終わりで、その行は作り直される(欄が出て、消える)', () => {
+    const { render, row } = setup();
+    let s = booted(BASE);
+    render(s);
+    const plain = row('b')!;
+    s = reduce(s, { type: 'ROW_RENAME_BEGIN', lid: 'b' }).state;
+    render(s);
+    const editing = row('b')!;
+    expect(editing, '始まったのに行を持ち越した(欄が出ない)').not.toBe(plain);
+    s = reduce(s, { type: 'ROW_RENAME_END' }).state;
+    render(s);
+    expect(row('b'), '終わったのに行を持ち越した(欄が残る)').not.toBe(editing);
+    expect(row('b')!.querySelector('input')).toBeNull();
+  });
+
+  it('🔴 「中まで全部出す」の親の名前: 親の名前が変わったら、孫の行の添え字も新しくなる', () => {
+    const { render, row } = setup();
+    const rel = (id: string, f: string, t: string): Relation => ({
+      id,
+      fromLid: f,
+      toLid: t,
+      kind: 'structural',
+      createdAt: null,
+      updatedAt: null,
+    });
+    const metas = [meta('f1', 1, 'そと', 'folder'), meta('f2', 2, 'なか', 'folder'), meta('x', 3, 'ひと')];
+    let s = reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas,
+      relations: [rel('r1', 'f1', 'f2'), rel('r2', 'f2', 'x')],
+    }).state;
+    s = { ...s, filerFlatten: true };
+    render(s);
+    const hint = (l: string) =>
+      row(l)?.querySelector('[data-pkc-field="parent-name"]')?.textContent ?? null;
+    expect(hint('x'), '前提が崩れている(親の名前が出ていない)').toContain('なか');
+
+    render(withMetas(s, [metas[0]!, meta('f2', 2, 'あらた', 'folder'), metas[2]!]));
+
+    expect(hint('x'), '親の名前が変わったのに古い添え字が残った').toContain('あらた');
   });
 });

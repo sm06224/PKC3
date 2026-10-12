@@ -14,7 +14,7 @@
  * 15k 平置き root で選択 1 クリック = 60,009 createElement の反例を封鎖)。
  * 🔑 一覧が変わったときも、表と**変わっていない行の node は持ち越す**(#1087。keyed 行再利用)。
  * 直す前は平置き container の root scope(= 全 entry)で 1 件足すだけで全行を作り直し、
- * 5,700 件で 2.7 秒・renderer が約 +120〜185 MB 膨らんでいた(`docs/development/long-list-add-2026-10.md`)。
+ * 5,700 件で 2.7 秒・renderer が約 +185〜190 MB 膨らんでいた(`docs/development/long-list-add-2026-10.md`)。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { TAG_INPUT_FIELDS, type AppState, type TagInputField } from '@adapter/state/app-state';
@@ -53,7 +53,7 @@ export class FilerRenderer {
   private readonly rows = new Map<string, HTMLTableRowElement>();
   /**
    * 🔴 **表と行の node は、作り直さずに持ち越す**(#1087。5,700 件で「1 件足す」と 2.7 秒・
-   * 約 +120〜185 MB の一時増だった ── 全行を作り直していたため)。
+   * 約 +185〜190 MB の一時増だった ── 全行を作り直していたため)。
    * ⚠ `rowSigs` は**行が出している材料**の指紋(`rowSignature`)── 同じなら node をそのまま使う。
    */
   private table: HTMLTableElement | null = null;
@@ -74,6 +74,8 @@ export class FilerRenderer {
   private lastScopeLid: string | null = null;
   /** 名前を打ち替えている行(#215)。⚠ 指紋に入れる ── 入れないと入力欄が出ない。 */
   private lastRenaming: string | null = null;
+  /** 焦点と全選択を当て終えた名前の打ち替え(1 回だけ当てる ── 打っている最中に選び直さない)。 */
+  private renameFocused: string | null = null;
   /** 印(複数選択)の指紋。⚠ 参照ではなく**中身**で見る(配列は毎回作り直される)。 */
   private lastMarks = '';
   /** ⚠ 絞り込みも指紋の一部(review M-3 ── 絞り込み中にファイラだけ全件出ていた)。 */
@@ -690,7 +692,10 @@ export class FilerRenderer {
 
   /**
    * 行が出している材料の指紋(#1087)。⚠ `buildRow` が読む物と**同じ**でなければならない ──
-   * 足りないと古い字の行が残り、多いと持ち越せない。選択と印は**含めない**(`reconcileRows` が
+   * 足りないと古い字の行が残り、多いと持ち越せない。
+   * ⚠ 更新日の `title`(`formatStoredDate`)は入れない ── 日付(年月日)だけの関数で、
+   *   `formatListDate` と同じ `updatedAt` から決まる(年は両方 `year` が決める)。入れても
+   *   外しても結果が同じ(変異試験で等価と確かめた)。時刻は両方とも出さない。選択と印は**含めない**(`reconcileRows` が
    * 属性だけを合わせる ── 行の node を作り直さずに済ませる)。
    */
   private rowSignature(
@@ -703,7 +708,6 @@ export class FilerRenderer {
       m.title,
       m.archetype,
       formatListDate(m.updatedAt, year),
-      formatStoredDate(m.updatedAt, ''),
       renaming ? 'r' : '',
       parentName ?? '',
     ].join('\u0000');
@@ -803,7 +807,7 @@ export class FilerRenderer {
    * 🔴 **行を持ち越して並べ直す**(#1087)。
    *
    * - 指紋が同じ行は **node をそのまま使う**(作り直さない ── 5,700 件の追加で 2.7 秒・
-   *   +120〜185 MB だった実体)。選択と印は属性だけ合わせる。
+   *   +185〜190 MB だった実体)。選択と印は属性だけ合わせる。
    * - 消えた行・指紋が変わった行は外し、新しい行は**入るべき位置へ差し込む**
    *   (並びが同じなら 1 回も動かさない)。
    * ⚠ 行の node を作り直さない → 掴んでいる手の下の行が消えない(#270 と同じ向き)。
@@ -840,8 +844,22 @@ export class FilerRenderer {
     }
     const keep = new Set<Node>(ordered);
     for (const tr of this.rows.values()) if (!keep.has(tr)) tr.remove();
+    const renamingRow = state.renamingLid === null ? undefined : nextRows.get(state.renamingLid);
     let cursor: ChildNode | null = tbody.firstChild;
     for (const tr of ordered) {
+      /**
+       * 🔴 **名前を打ち替えている行の node は動かさない**(#1087 のレビュー)。焦点のある node を
+       * `insertBefore` で動かすと焦点が外れ、`focusout` が**打ちかけの名前を確定**してしまう
+       * (chromium・headless_shell とも実測)。その行の手前に居る行を末尾へ退けて、行は動かさず、
+       * 退けた行は後の周回で正しい位置へ入る。
+       */
+      if (tr === renamingRow && tr.parentNode === tbody) {
+        while (cursor !== null && cursor !== tr) {
+          const next: ChildNode | null = cursor.nextSibling;
+          tbody.append(cursor);
+          cursor = next;
+        }
+      }
       if (tr === cursor) cursor = cursor.nextSibling;
       else tbody.insertBefore(tr, cursor);
     }
@@ -1365,17 +1383,28 @@ export class FilerRenderer {
         firstRow ??
         this.region.querySelector<HTMLElement>('[data-pkc-region="filer-table"]');
       // 🔑 持ち越した行に焦点が在るままなら触らない(`focus()` は見える位置へ動かす ── #1087)
-      if (back !== null && this.region.ownerDocument.activeElement !== back) back.focus();
+      //    ⚠ 「行の中の欄」(名前の打ち替え)に焦点が在るときも同じ ── 行へ焦点を奪い返さない
+      const active = this.region.ownerDocument.activeElement;
+      if (back !== null && !(active instanceof Node && back.contains(active))) back.focus();
     }
     /**
      * ⚠ **描いた直後に焦点と全選択**(#215。2 ペインの `renderRows` と同じ)── これが無いと、
      * 押した直後に user が自分でクリックし直す羽目になる(OS のファイラは打てる状態で出る)。
      * ⚠ 上の焦点の戻しより**後**に置く ── 前に置くと、戻しが行へ焦点を奪い返す。
      */
-    if (state.renamingLid !== null) {
+    /**
+     * 🔴 **始まった回だけ**(#1087 のレビュー)。行を持ち越すようになったので、打っている最中の
+     * 再描画でも欄は生きている ── 毎回 `select()` すると、次の打鍵が打ちかけの字を置き換える。
+     */
+    if (state.renamingLid === null) this.renameFocused = null;
+    else if (state.renamingLid !== this.renameFocused) {
       const input = this.region.querySelector<HTMLInputElement>('[data-pkc-field="row-rename"]');
-      input?.focus();
-      input?.select();
+      // ⚠ 欄がまだ出ていない回(別のフォルダへ入る前)は印を付けない ── 出た回に当てる
+      if (input !== null) {
+        this.renameFocused = state.renamingLid;
+        input.focus();
+        input.select();
+      }
     }
   }
 }
