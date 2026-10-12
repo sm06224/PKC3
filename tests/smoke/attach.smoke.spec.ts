@@ -1666,6 +1666,18 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(erRect.width, `四角に幅が無い: ${JSON.stringify(erRect)}`).toBeGreaterThan(80);
   expect(erRect.height, `四角に高さが無い: ${JSON.stringify(erRect)}`).toBeGreaterThan(30);
 
+  // 🔴 「高さ」ボタン(#918 Q2)── 押すと図の高さが変わり、描き直し(「列をつなぐ」)をまたいで残る。新しい起動は増やさない
+  const erScroll = page.locator('[data-pkc-field="sql-er-scroll"]');
+  const hBefore = (await erScroll.boundingBox())!.height;
+  await clickReal(page, '[data-pkc-field="sql-er-height"]');
+  await expect
+    .poll(async () => (await erScroll.boundingBox())!.height, '「高さ」を押しても図の高さが変わらない')
+    .not.toBe(hBefore);
+  const hAfter = (await erScroll.boundingBox())!.height;
+  await clickReal(page, '[data-pkc-field="sql-er-connect"]');
+  await clickReal(page, '[data-pkc-field="sql-er-connect"]');
+  expect((await erScroll.boundingBox())!.height, '描き直しで高さが元へ戻った').toBeCloseTo(hAfter, 0);
+
   // 🔑 欄を空にしてから押す ── 「空 + 表」が `select * from 表` になる道である
   await page.fill('[data-pkc-field="sql-input"]', '');
   await clickReal(page, '[data-pkc-field="sql-er-table"]');
