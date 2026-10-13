@@ -57,7 +57,7 @@ function myers(a: readonly string[], b: readonly string[]): Step[] | null {
   const maxD = Math.min(MAX_EDIT_DISTANCE, n + m);
   const size = 2 * maxD + 1;
   const offset = maxD;
-  let v = new Int32Array(size);
+  const v = new Int32Array(size);
   const trace: Int32Array[] = [];
 
   for (let d = 0; d <= maxD; d++) {
@@ -77,7 +77,7 @@ function myers(a: readonly string[], b: readonly string[]): Step[] | null {
       v[offset + k] = x;
       if (x >= n && y >= m) return backtrack(trace, a, b, offset);
     }
-    v = v.slice();
+    // ⚠ ここで `v` を写し直さない(#1087)── 段の初めに `trace` へ写しを積んでおり、`v` 本体はどこにも残らない
   }
   return null; // 予算超過
 }
