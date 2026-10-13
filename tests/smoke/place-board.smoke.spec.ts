@@ -903,7 +903,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
   });
   await bigBody.locator('[data-pkc-embedded-heading]').first().click({ button: 'right' });
   await expect(
-    page.locator('[data-pkc-region="context-menu"]').getByText('この板をコピー'),
+    page.locator('[data-pkc-region="context-menu"]').getByText('この付箋をコピー'),
     '中身の上の右クリックで板のメニューが出ない',
   ).toBeVisible();
   await page.keyboard.press('Escape');
@@ -1301,7 +1301,7 @@ test('🔴 entry= の塊は題名の帯 + 中身(読み取り専用)になり、
  * ⚠ unit(happy-dom)では器の rect が 0 なので、「器の左上からの差」という座標変換は
  *   実ブラウザでしか見えない(padding / 枠線 / スクロール位置が効く当の所)。
  */
-test('🔴 本文を右クリックして「ここに板を置く」と、押した位置に板が書かれる (#676)', async ({ page }) => {
+test('🔴 本文を右クリックして「ここに付箋を置く」と、押した位置に板が書かれる (#676)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1400, height: 900 });
   await gotoApp(page);
@@ -1723,7 +1723,7 @@ test('🔴 本文を右クリックして「ここに板を置く」と、押し
   const refusal = page.locator('[data-pkc-region="status"]', { hasText: '板を置けません' });
   await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
   await menu.locator('[data-pkc-action="add-place"]').click();
-  await expect(refusal, '「ここに板を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
+  await expect(refusal, '「ここに付箋を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
   await expect(page.locator('[data-pkc-field="detail-body"] .pkc-place'), '閉じていない本文に板が書かれた').toHaveCount(0);
   await page.mouse.click(Math.floor(openBox.x) + 400, Math.floor(openBox.y) + 10, { button: 'right' });
   await menu.locator('[data-pkc-action="add-place-template"]').click();

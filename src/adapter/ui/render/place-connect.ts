@@ -81,7 +81,7 @@ interface Drag {
   marked: HTMLElement | null;
 }
 
-/** 器(host)の座標へ写す ── 付箋の `x=` / `y=` と同じ座標系(`binder.ts` の「ここに板を置く」と同じ式)。 */
+/** 器(host)の座標へ写す ── 付箋の `x=` / `y=` と同じ座標系(`binder.ts` の「ここに付箋を置く」と同じ式)。 */
 function hostPoint(host: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
   const r = host.getBoundingClientRect();
   return {

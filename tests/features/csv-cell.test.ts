@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { parseCsv, csvEscapeField, type CsvPositions } from '../../src/features/markdown/csv-table';
-import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
+import { applyBodyRewrite, bodyRewriteRefusal } from '../../src/features/markdown/body-rewrite';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 describe('位置を採る', () => {
@@ -379,6 +379,17 @@ describe('行と列を足す / 消す(#418 段①)', () => {
 
   it('⚠ 末尾の列を消しても区切り字が余らない', () => {
     expect(shape(T, 1, 2, 'col', 'remove')).toBe('```csv\na,b\nd,e\n```');
+  });
+
+  it('🔴 断った理由を言える:最後の 1 行 / 1 列(「本文が変わっている」と取り違えない。2026-10-13)', () => {
+    const why = (body: string, line: number, col: number, what: 'row' | 'col') =>
+      bodyRewriteRefusal(body, { kind: 'csv-shape', line, col, what, mode: 'remove' });
+    expect(why('```csv\na,b\n```', 1, 0, 'row')).toBe('最後の 1 行は消せません');
+    expect(why('```csv\na\nb\n```', 1, 0, 'col')).toBe('最後の 1 列は消せません');
+    // 対照群:行番号が古い(当たらない)ときは理由を言わない ── 呼び側の「本文が変わっている」のまま
+    expect(why(T, 99, 0, 'row')).toBeNull();
+    // 対照群:消せるときも言わない
+    expect(why(T, 1, 0, 'row')).toBeNull();
   });
 
   it('🔴 最後の 1 列は消さない', () => {

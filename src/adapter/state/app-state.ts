@@ -7845,7 +7845,7 @@ function reduceCore(
         return { kind: 'place-line-remove', line: action.line, openLine };
       });
     case 'REMOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を消してください', (shown) => {
+      return bodyRewriteGate(state, action.lid, '、板の付箋を消してください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;

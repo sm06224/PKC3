@@ -35,6 +35,7 @@ import {
 } from '@features/markdown/append-target';
 import {
   applyBodyRewrite,
+  bodyRewriteRefusal,
   applyTagsToBody,
   applyTaskRun,
   taskRunNotice,
@@ -3653,7 +3654,10 @@ export function connectStoreEffects(
             if (newBody === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: '本文が変わっているため反映できませんでした(開き直してください)',
+                // 🔑 理由がはっきりしている断り(最後の 1 行 / 1 列)はその字で言う(#1087 の見直し 2026-10-13)
+                error:
+                  bodyRewriteRefusal(body, ev.rewrite) ??
+                  '本文が変わっているため反映できませんでした(開き直してください)',
               });
               return;
             }
@@ -3711,10 +3715,15 @@ export function connectStoreEffects(
                * 🔴 **リストをそろえる回だけ履歴に積む**(#1173)。⚠ 1 回で何件も動くので、
                *   間違えたら版から戻せる(「元に戻す」の知らせは段②)。他の書換(1 件の印・
                *   改名)は amend のまま ── 履歴を印の数だけ伸ばさない。
+               * 🔴 **表の行・列を消す回も積む**(#1087 の見直し 2026-10-13)── 1 回で 1 行 / 1 列ぶんの
+               *   セルが消え、確認も「元に戻す」も無い。隣の「＋」のつもりで押し違えたら、版から戻すしか無い。
                */
               {
                 expectHash: contentHash64Hex(body),
-                ...(ev.rewrite.kind === 'task-run' ? { checkpoint: true } : {}),
+                ...(ev.rewrite.kind === 'task-run' ||
+                (ev.rewrite.kind === 'csv-shape' && ev.rewrite.mode === 'remove')
+                  ? { checkpoint: true }
+                  : {}),
               },
             );
             if (stamps.conflict === true) {

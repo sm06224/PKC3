@@ -143,3 +143,32 @@ describe('リストをそろえる書込(#1173)', () => {
     expect(error).toContain('本文が変わっている');
   });
 });
+
+describe('表の行・列を消す書込も履歴に積む(#1087 の見直し 2026-10-13)', () => {
+  const TABLE = '```csv\na,b\nc,d\n```\n';
+
+  it('🔴 消す回は checkpoint: true ── 対照群の足す回は積まない', async () => {
+    const b = boot({ a: TABLE });
+    dispose = b.dispose;
+    // ── 対照群 ── 足す回は amend
+    b.d.dispatch({ type: 'SET_CSV_SHAPE', lid: 'a', line: 1, col: 0, what: 'row', mode: 'add' });
+    await tick();
+    expect(b.persists, '前提:足す回が書かれていない').toHaveLength(1);
+    expect(b.persists[0]!.opts?.checkpoint, '足す回まで履歴に積んでいる').toBeUndefined();
+    // ── 本体 ──
+    b.d.dispatch({ type: 'SET_CSV_SHAPE', lid: 'a', line: 1, col: 1, what: 'col', mode: 'remove' });
+    await tick();
+    expect(b.persists, '前提:消す回が書かれていない').toHaveLength(2);
+    expect(b.persists[1]!.opts?.checkpoint, '消す回が履歴に積まれていない').toBe(true);
+    expect(b.persists[1]!.opts?.expectHash).toEqual(expect.any(String));
+  });
+
+  it('🔴 最後の 1 行を消そうとしたら、その理由を言う(「本文が変わっている」と取り違えない)', async () => {
+    const b = boot({ a: '```csv\na,b\n```\n' });
+    dispose = b.dispose;
+    b.d.dispatch({ type: 'SET_CSV_SHAPE', lid: 'a', line: 1, col: 0, what: 'row', mode: 'remove' });
+    await tick();
+    expect(b.persists, '断ったのに書いた').toHaveLength(0);
+    expect(b.d.getState().error).toBe('最後の 1 行は消せません');
+  });
+});

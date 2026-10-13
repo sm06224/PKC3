@@ -148,7 +148,7 @@ describe('本文の右クリック(#426 段② / #522)', () => {
     const acts = [...s.menu()!.querySelectorAll('button[data-pkc-action]')].map((b) =>
       b.getAttribute('data-pkc-action'),
     );
-    // ⚠ 「ここに板を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
+    // ⚠ 「ここに付箋を置く」(#676)は本文を書き換える物なので `BODY_MENU_ACTIONS` の外 ── 塊の並びの位置
     expect(acts).toEqual(['add-place', 'add-place-template', ...BODY_MENU_ACTIONS.map((a) => a.action)]);
     /**
      * 🔴 **「削除」を出さない。**
@@ -1593,14 +1593,14 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(r.copied.map((c) => c.text), 'fence を塊と読んだ / 外側へ辿れていない').toEqual([NOTE]);
   });
 
-  it('🔴 板の題名札の上で右クリックしても、行のメニューにならず「この板をコピー」が出る', () => {
+  it('🔴 板の題名札の上で右クリックしても、行のメニューにならず「この付箋をコピー」が出る', () => {
     const r = rig();
     const card = r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]');
     rightClick(card);
     const acts = r.acts();
     expect(acts, '別ノートの行メニューが出た(削除が載っている)').not.toContain('delete-entry');
-    expect(acts, '「この板をコピー」が出ていない').toContain('copy-block-md');
-    expect(r.label('copy-block-md'), '板なのに「塊」と書いてある').toBe('この板をコピー');
+    expect(acts, '「この付箋をコピー」が出ていない').toContain('copy-block-md');
+    expect(r.label('copy-block-md'), '板なのに「塊」と書いてある').toBe('この付箋をコピー');
     // 🔴 開いているノートが切り替わっていない(板が消えていない)
     expect(r.d.getState().selectedLid, '題名札の右クリックで別ノートへ切り替わった').toBe('n1');
     r.press('copy-block-md');
@@ -1660,38 +1660,38 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
   }
 
-  it('🔴 本文の上に「ここに板を置く」が出て、押すと押した座標で place-add の依頼になる', () => {
+  it('🔴 本文の上に「ここに付箋を置く」が出て、押すと押した座標で place-add の依頼になる', () => {
     const r = rig();
     const asks = asksOf(r.d);
     // ⚠ happy-dom の器の rect は 0 なので、押した clientX/Y がそのまま器の座標になる
     rightClickAt(r.q('p[data-pkc-source-line="2"]'), 37, 61);
-    expect(r.acts(), '「ここに板を置く」が出ていない').toContain('add-place');
-    expect(r.label('add-place')).toBe('ここに板を置く');
+    expect(r.acts(), '「ここに付箋を置く」が出ていない').toContain('add-place');
+    expect(r.label('add-place')).toBe('ここに付箋を置く');
     r.press('add-place');
     expect(asks, '書換の依頼が 1 回出ていない').toHaveLength(1);
     expect(asks[0]).toMatchObject({ lid: 'n1', rewrite: { kind: 'place-add', x: 37, y: 61 } });
   });
 
-  it('板の無い段落だけのノートでも「ここに板を置く」は出る(1 枚目を置ける)', () => {
+  it('板の無い段落だけのノートでも「ここに付箋を置く」は出る(1 枚目を置ける)', () => {
     const r = rig('段落だけ\n');
     rightClick(r.q('p[data-pkc-source-line="0"]'));
     expect(r.acts()).toContain('add-place');
-    expect(r.acts(), '板が無いのに「この板を消す」が出た').not.toContain('remove-place');
+    expect(r.acts(), '板が無いのに「この付箋を消す」が出た').not.toContain('remove-place');
   });
 
-  it('🔴 板の上で「この板を消す」→ 確認で「この板を消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
+  it('🔴 板の上で「この付箋を消す」→ 確認で「この付箋を消す」→ 生の body の行番号で place-remove の依頼になる', async () => {
     resetAppDialogForTest();
     const r = rig();
     const asks = asksOf(r.d);
     rightClick(r.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
-    expect(r.acts(), '「この板を消す」が出ていない').toContain('remove-place');
-    expect(r.label('remove-place')).toBe('この板を消す');
+    expect(r.acts(), '「この付箋を消す」が出ていない').toContain('remove-place');
+    expect(r.label('remove-place')).toBe('この付箋を消す');
     // ⚠ 消すは末尾(勢いで押さない ── コピーの下)
     expect(r.acts().indexOf('remove-place')).toBeGreaterThan(r.acts().indexOf('copy-block-md'));
     r.press('remove-place');
     const ok = document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
     expect(ok, '確認が出ていない').not.toBeNull();
-    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('この板を消す');
+    expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('この付箋を消す');
     expect(asks, '確認の前に書いた').toHaveLength(0);
     ok!.click();
     await settle();
@@ -1822,16 +1822,16 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     expect(asks).toHaveLength(0);
   });
 
-  it('⚠ 段落・板でない囲みの上では「この板を消す」は出ない(対照群)', () => {
+  it('⚠ 段落・板でない囲みの上では「この付箋を消す」は出ない(対照群)', () => {
     const r = rig();
     rightClick(r.q('p[data-pkc-source-line="2"]'));
     expect(r.acts()).not.toContain('remove-place');
     rightClick(r.q('p[data-pkc-source-line="5"]'));
     expect(r.acts(), '囲みの上に塊の物が無い(台の空振り)').toContain('copy-block-md');
-    expect(r.acts(), '板でない囲みで「この板を消す」が出た').not.toContain('remove-place');
+    expect(r.acts(), '板でない囲みで「この付箋を消す」が出た').not.toContain('remove-place');
   });
 
-  it('🔴 編集中に「この板を消す」を押すと、確認を出さずに理由を出す', () => {
+  it('🔴 編集中に「この付箋を消す」を押すと、確認を出さずに理由を出す', () => {
     resetAppDialogForTest();
     const r = rig();
     const asks = asksOf(r.d);
