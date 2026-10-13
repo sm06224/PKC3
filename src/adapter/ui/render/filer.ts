@@ -53,6 +53,16 @@ import { appKeymap, type KeymapStore } from './keymap';
  * 🔑 平置きの 3,000 件で「選ぶ」が 237〜250ms、100 行なら数 ms ── 境は費用が見え始める手前に置く。
  */
 export const GRID_ROW_THRESHOLD = 300;
+/**
+ * 🔴 **格子のとき、行を 50 行ずつの `<tbody>` に分ける**(#1087)。
+ * ⚠ 行ごとに `content-visibility: auto` を付けると、ブラウザは**行の数だけ**見張りを張り、
+ *   描くたびに全部を判定する ── 3,000 件で本文を 200 字打つと、その判定だけで約 1.2 秒だった
+ *   (実測。一覧を隠すと消え、行の指定を外すと逆に倍になる)。塊ごとに付けると判定は 60 個で済み、
+ *   約 25 ms になった(同じ手順の A/B)。行は DOM に全部残る(画面の外の行もページ内検索で見つかる)。
+ */
+export const ROW_CHUNK = 50;
+/** 格子の行の高さ(CSS の 26px と同じ)── 塊の仮の高さに使う。 */
+const GRID_ROW_PX = 26;
 
 
 export class FilerRenderer {
@@ -65,6 +75,8 @@ export class FilerRenderer {
    */
   private table: HTMLTableElement | null = null;
   private tbody: HTMLTableSectionElement | null = null;
+  /** 行の塊(先頭は `tbody`)。格子でないときは 1 つだけ。 */
+  private chunks: HTMLTableSectionElement[] = [];
   private readonly rowSigs = new Map<string, string>();
   private lastMetas: ReadonlyMap<string, EntryMeta> | null = null;
   /**
@@ -907,8 +919,42 @@ export class FilerRenderer {
     const keep = new Set<Node>(ordered);
     for (const tr of this.rows.values()) if (!keep.has(tr)) tr.remove();
     const renamingRow = state.renamingLid === null ? undefined : nextRows.get(state.renamingLid);
+    const grid = ordered.length > GRID_ROW_THRESHOLD;
+    const size = grid ? ROW_CHUNK : Math.max(1, ordered.length);
+    const need = Math.max(1, Math.ceil(ordered.length / size));
+    if (this.chunks.length === 0) this.chunks.push(tbody);
+    while (this.chunks.length < need) {
+      const next = document.createElement('tbody');
+      this.chunks[this.chunks.length - 1]!.after(next);
+      this.chunks.push(next);
+    }
+    for (let c = 0; c < need; c += 1) {
+      const chunk = this.chunks[c]!;
+      const part = ordered.slice(c * size, (c + 1) * size);
+      this.placeRows(chunk, part, renamingRow);
+      // 🔑 まだ描いていない塊の仮の高さ(描いた後はブラウザが実寸を憶える ── `auto`)
+      if (grid) chunk.style.setProperty('contain-intrinsic-size', `auto ${part.length * GRID_ROW_PX}px`);
+      else chunk.style.removeProperty('contain-intrinsic-size');
+    }
+    // ⚠ 余った塊は空(残す行は全部どこかの塊へ入れ終えた / 消えた行は上で外した)
+    while (this.chunks.length > need) this.chunks.pop()!.remove();
+    this.rows.clear();
+    for (const [lid, tr] of nextRows) this.rows.set(lid, tr);
+    this.rowSigs.clear();
+    for (const [lid, sig] of nextSigs) this.rowSigs.set(lid, sig);
+  }
+
+  /**
+   * 1 つの塊の中を `part` の順に並べる(並びが同じなら 1 回も動かさない)。
+   * ⚠ 別の塊に在る行も `insertBefore` でここへ移る(塊をまたいだ並べ替え)。
+   */
+  private placeRows(
+    tbody: HTMLTableSectionElement,
+    part: readonly HTMLTableRowElement[],
+    renamingRow: HTMLTableRowElement | undefined,
+  ): void {
     let cursor: ChildNode | null = tbody.firstChild;
-    for (const tr of ordered) {
+    for (const tr of part) {
       /**
        * 🔴 **名前を打ち替えている行の node は動かさない**(#1087 のレビュー)。焦点のある node を
        * `insertBefore` で動かすと焦点が外れ、`focusout` が**打ちかけの名前を確定**してしまう
@@ -925,10 +971,6 @@ export class FilerRenderer {
       if (tr === cursor) cursor = cursor.nextSibling;
       else tbody.insertBefore(tr, cursor);
     }
-    this.rows.clear();
-    for (const [lid, tr] of nextRows) this.rows.set(lid, tr);
-    this.rowSigs.clear();
-    for (const [lid, sig] of nextSigs) this.rowSigs.set(lid, sig);
   }
 
   render(state: AppState): void {
@@ -1141,6 +1183,7 @@ export class FilerRenderer {
       this.region.textContent = '';
       this.table = null;
       this.tbody = null;
+      this.chunks = [];
       this.rows.clear();
       this.rowSigs.clear();
     } else {
@@ -1314,6 +1357,7 @@ export class FilerRenderer {
       this.region.append(table);
       this.table = table;
       this.tbody = fresh;
+      this.chunks = [fresh];
       tbody = fresh;
     } else {
       tbody = this.tbody;
