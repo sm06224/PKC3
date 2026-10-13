@@ -72,7 +72,7 @@ beforeEach(() => {
 const hashOf = (url: string): string => url.slice(url.indexOf('#'));
 
 /** 読む側の試験台(実物の `connectViewDeepLink` を、本物と同じ意味論の的で動かす)。 */
-function opener(hash: string, own: { cid: string | null; lids: string[] }) {
+function opener(hash: string, own: { cid: string | null; lids: string[] }, phase?: 'ready' | 'editing' | 'error') {
   const log: string[] = [];
   const target: DeepLinkTarget & { hash: string } = {
     hash,
@@ -96,6 +96,7 @@ function opener(hash: string, own: { cid: string | null; lids: string[] }) {
     selectEntry: (c, l) => log.push(`select:${c}:${l}`),
     ownContainerId: () => own.cid,
     hasEntry: (l) => own.lids.includes(l),
+    ...(phase === undefined ? {} : { phase: () => phase }),
     selectAsset: (k, owner) => log.push(`asset:${k}:${owner ?? '-'}`),
     fail: (m) => log.push(`fail:${m}`),
     onViewChange: () => () => {},
@@ -144,11 +145,30 @@ describe('開けないリンクは理由を言う(無言の dead click を作ら
     const o = opener('#pkc?container=other&entry=n1', { cid: 'c1', lids: ['n1'] });
     expect(o.log).toEqual([`fail:${FOREIGN_ENTRY_LINK_MESSAGE}`]);
     expect(FOREIGN_ENTRY_LINK_MESSAGE).toContain('別の PKC');
+    // 🔴 次の一手を言う(行き止まりにしない)
+    expect(FOREIGN_ENTRY_LINK_MESSAGE).toContain('送り主にノートを書き出して渡してもらってください');
+    expect(FOREIGN_ASSET_LINK_MESSAGE).toContain('送り主に添付を書き出して渡してもらってください');
   });
 
   it('🔴 居ないノート(同じ入れ物)', () => {
     const o = opener('#pkc?container=c1&entry=gone', { cid: 'c1', lids: ['n1'] });
     expect(o.log).toEqual([`fail:${MISSING_ENTRY_LINK_MESSAGE}`]);
+    // 🔴 戻す道(ゴミ箱の場所)を言う ── 「削除された可能性」だけでは次の一手が無い
+    expect(MISSING_ENTRY_LINK_MESSAGE).toContain('ゴミ箱にあれば戻せます');
+    expect(MISSING_ENTRY_LINK_MESSAGE).toContain('左のペインの「フォルダ」の中');
+  });
+
+  it('🔴 編集中に在るノートのリンクを押したら、理由を言って開かない(黙って捨てない)', () => {
+    const o = opener('#pkc?container=c1&entry=n1', { cid: 'c1', lids: ['n1'] }, 'editing');
+    expect(o.log).toEqual(['fail:編集を保存するか、編集をやめてからリンクのノートを開いてください']);
+  });
+
+  it('🔴 保存失敗中も理由を言う / 対照群: ready では開く', () => {
+    const e = opener('#pkc?container=c1&entry=n1', { cid: 'c1', lids: ['n1'] }, 'error');
+    expect(e.log).toHaveLength(1);
+    expect(e.log[0]).toMatch(/^fail:.+リンクのノートを開いてください$/);
+    const r = opener('#pkc?container=c1&entry=n1', { cid: 'c1', lids: ['n1'] }, 'ready');
+    expect(r.log).toEqual(['select:c1:n1']);
   });
 
   it('🔴 別の PKC の添付(開きに行かない)', () => {
@@ -309,7 +329,7 @@ describe('実配線(main.ts が渡す 3 つ)', () => {
     const navigate = vi.fn();
     const metas = new Map<string, unknown>([['n1', {}]]);
     const w = linkOpenerFor({
-      dispatcher: { getState: () => ({ cid: 'c9', entryMetas: metas }) },
+      dispatcher: { getState: () => ({ cid: 'c9', entryMetas: metas, phase: 'ready' as const }) },
       navigateAssetRef: navigate,
     });
     expect(w.ownContainerId!()).toBe('c9');

@@ -51,6 +51,7 @@ import { appKeymap, type KeymapStore } from './keymap';
 import { paintRowMark } from './selection-mark';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { appPhone } from './phone-layout';
+import { archetypeLabel } from '@features/flavor/archetype-label';
 import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } from './icons';
 // 🔴 タブの名乗りは左の列と同じ関数(#720)
 import { markTab, markTablist } from './tabs-a11y';
@@ -344,6 +345,13 @@ interface PaneFrame {
  *   `Delete` のような別名まで拾うと帯の意味が変わる。関数キーが 1 つも
  *   割り当てられていなければ、素直に先頭の割当を出す(無い、とは書かない)。
  */
+/** 行頭の種類の絵。⚠ 名前を hover で出す(左の一覧 `filer.ts` の chip と同じ `archetypeLabel`)。 */
+function kindIcon(archetype: string): HTMLElement {
+  const icon = iconSpan(ARCHETYPE_ICONS[archetype] ?? 'page');
+  icon.title = archetypeLabel(archetype);
+  return icon;
+}
+
 function barKey(id: string, keymap: KeymapStore): string {
   const list = keymap.getBindings()[id] ?? findCommand(id)?.defaults ?? [];
   const fn = list.find((c) => /^F(?:[1-9]|1[0-9]|2[0-4])$/.test(c));
@@ -1428,10 +1436,10 @@ export class DualFilerRenderer {
         input.setAttribute('data-pkc-field', 'dual-rename');
         input.setAttribute('data-pkc-entry', m.lid);
         input.setAttribute('aria-label', '新しい名前');
-        name.append(iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'), input);
+        name.append(kindIcon(m.archetype), input);
       } else {
         name.append(
-          iconSpan(ARCHETYPE_ICONS[m.archetype] ?? 'page'),
+          kindIcon(m.archetype),
           document.createTextNode(m.title),
         );
       }

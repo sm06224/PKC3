@@ -108,7 +108,7 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
-import { dismissMissedLine, paintSearchHistory } from '@adapter/ui/render/shell';
+import { createHintOf, dismissMissedLine, paintSearchHistory } from '@adapter/ui/render/shell';
 import type { EntryMeta } from '@core/model/entry-meta';
 import {
   filerRows,
@@ -147,6 +147,7 @@ import {
   type RowReopenDetail,
 } from '@adapter/ui/render/row-swap';
 import { INLINE_CODE_COPY_FAILED_EVENT } from '@adapter/ui/render/inline-code-copy';
+import { HEADING_ANCHOR_COPY_FAILED_EVENT } from '@adapter/ui/render/heading-anchor';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import {
   HOLD_ATTR,
@@ -348,7 +349,7 @@ import {
 } from '../render/context-menu';
 import { setupLinkPreview, closeLinkPreview } from '../render/link-preview';
 import { setupLightbox, openLightbox, closeLightbox } from '../render/lightbox';
-import { chordHint, HINT_BLOCKED } from '../render/shortcut-hint';
+import { chordHint, HINT_BASE, HINT_BLOCKED, setBlocked } from '../render/shortcut-hint';
 import { TARGET_LID_ATTR } from '../render/target-lid';
 import { sectionBoxText, SECTION_BOX_INPUT_FIELD, SECTION_BOX_REGION } from '../render/section-box';
 import { codeBoxText, CODE_BOX_INPUT_FIELD, CODE_BOX_REGION } from '../render/code-box';
@@ -11938,6 +11939,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 文言は**選んだ項目の文言**をそのまま使う(表を 2 つ持たない)
       const picked = target.querySelector('[data-pkc-field="label"]')?.textContent ?? archetype;
       if (label) label.textContent = `+ ${picked}`;
+      // 🔴 hover の説明も選んだ種類の名前にする(押せない理由が付いていれば残す)
+      run.setAttribute(HINT_BASE, createHintOf(picked));
+      setBlocked(run, run.getAttribute(HINT_BLOCKED));
       const icon = run.querySelector('[data-pkc-icon]');
       // ⚠ `textContent` で書かない ── 絵は CSS の `::before` が出すので、器の字を
       //    書き換えても 1 ドットも変わらない。差し替えるのは名前(`data-pkc-symbol`)
@@ -17595,6 +17599,10 @@ export function bindActions(
    * ⚠ 字は枠の ⧉ と同じ 1 つ(`copy-md-block.ts` の `COPY_FAILED`)。
    */
   listen(root, INLINE_CODE_COPY_FAILED_EVENT as keyof HTMLElementEventMap, () => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+  });
+  // 見出しの「#」(参照のコピー)も同じ字で言う
+  listen(root, HEADING_ANCHOR_COPY_FAILED_EVENT as keyof HTMLElementEventMap, () => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
   });
   /**

@@ -118,6 +118,11 @@ export interface ShellRegions {
  * 作れるもの。⚠ 封印中のものは出さない。
  * generic / opaque は PKC2 の 2026-04-26 audit で作成導線が撤去済み ── その判断を継ぐ。
  */
+/** 「作る」ボタンの説明。⚠ 種類の名前を言う(選び直すたび `pick-create-kind` も同じ関数で書き直す)。 */
+export function createHintOf(kindLabel: string): string {
+  return `${kindLabel}を新しく作ります`;
+}
+
 const CREATE_BUTTONS: readonly { archetype: string; label: string }[] = [
   { archetype: 'text', label: 'ノート' },
   { archetype: 'textlog', label: 'ログ' },
@@ -555,9 +560,11 @@ export function buildShell(root: HTMLElement): ShellRegions {
   // 🔴 **均一な正方形タイルにする**(#1054 段②)── 名前は残す(見た目だけ隠す)
   markBarTile(create);
   create.setAttribute('data-pkc-field', 'create-run');
-  create.setAttribute(HINT_BASE, 'この種類で新しく作ります');
+  // 🔴 説明は**種類の名前**を言う(選んだ種類が変わるたび `pick-create-kind` が書き直す)
+  const createHint = first ? createHintOf(first.label) : 'この種類で新しく作ります';
+  create.setAttribute(HINT_BASE, createHint);
   create.setAttribute(HINT_COMMAND, 'create-entry');
-  create.title = hintTitle('この種類で新しく作ります', 'create-entry');
+  create.title = hintTitle(createHint, 'create-entry');
   // ⚠ 種類は**ボタン自身**にも持たせる ── binder はこちらを先に見るので、
   //    `<select>` を読めない状況でも取り違えない
   if (first) create.setAttribute('data-pkc-archetype', first.archetype);

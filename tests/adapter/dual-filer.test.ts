@@ -223,6 +223,20 @@ describe('2 ペインの面(描画)', () => {
     document.body.append(region);
   });
 
+  it('🔴 行頭の種類の絵は hover で種類の名前を言う(左の一覧と同じ)', () => {
+    const r = new DualFilerRenderer(region);
+    r.render(booted());
+    const titles = [
+      ...region.querySelectorAll<HTMLElement>(
+        '[data-pkc-region="dual-table"] [data-pkc-entry] [data-pkc-icon]',
+      ),
+    ].map((e) => e.title);
+    expect(titles.length, '絵が 1 つも無い(空振り)').toBeGreaterThan(0);
+    expect(titles.every((t) => t !== ''), `名前の無い絵が在る: ${titles.join(',')}`).toBe(true);
+    expect(titles).toContain('フォルダ');
+    expect(titles).toContain('ノート');
+  });
+
   it('🔴 左右が別の場所を出す', () => {
     const r = new DualFilerRenderer(region);
     let s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
