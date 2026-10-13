@@ -7677,8 +7677,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   padding-block-end: var(--s3);
 }
 /* 🔴 **居場所を変える帯**(2026-08-05、user 報告「フォルダ整理のための導線がない」)。
- * パンくず(いま何処に居るか)の**すぐ下**に置く ── 「何処に居るか」と
- * 「何処へ動かすか」は同じ話なので、離すと別の機能に見える。 */
+ * **一覧の下**に置く(選んだ瞬間に帯が伸びても行が動かないように。
+ * filer.ts `moveBar` の注釈を見よ)。当初はパンくずのすぐ下に置いていた。 */
 [data-pkc-region='filer-move'] {
   margin-bottom: var(--s3);
   padding-bottom: var(--s2);

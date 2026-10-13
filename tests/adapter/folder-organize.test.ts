@@ -543,6 +543,18 @@ describe('フォルダ整理の導線(画面)', () => {
     pickCancel();
   });
 
+  it('🔴 移せるフォルダが 1 つも無く欄も空なら、「欄を空にする」とは言わず、ルートへ移せると言う', async () => {
+    const { startMove, pickRows, pickCancel } = setup([meta('n1', 1), meta('n2', 2)], []);
+    startMove('n1');
+    await tick();
+    const note = () =>
+      openDialog()?.querySelector<HTMLElement>('[data-pkc-field="entry-pick-note"]')?.textContent ?? '';
+    expect(pickRows(), '窓が出ていない(空振り)').not.toBeNull();
+    expect(pickRows()!.some((t) => t.startsWith('ルート(いちばん上)')), '案内が指す行が無い').toBe(true);
+    expect(note()).toBe('ここに移せるフォルダがありません(「ルート(いちばん上)」へは移せます)');
+    pickCancel();
+  });
+
   /**
    * 🔴 **いま入っているフォルダ自身を移す道**(#813)。
    * ⚠ 中に入ると**そのフォルダの行は表から消える**ので、行の右クリックでは動かせない
@@ -574,7 +586,9 @@ describe('フォルダ整理の導線(画面)', () => {
     const { q } = setup(METAS, []);
     // ⚠ #813 で「居場所」のプルダウンは外した ── 戻っていないことを見る
     expect(q('[data-pkc-field="move-target"]'), '外したプルダウンが戻っている').toBeNull();
-    expect(q('[data-pkc-field="filer-move-empty"]')?.textContent).toContain('選ぶと');
+    expect(q('[data-pkc-field="filer-move-empty"]')?.textContent).toBe(
+      '動かしたいものを選ぶと、ここで上下に並べ替えられます',
+    );
   });
 
   it('🔴 いま見ているフォルダの中に作れる(押してからルートに落ちない)', async () => {
@@ -778,6 +792,35 @@ describe('並べ替えの導線(画面)', () => {
     await tick();
     expect(nudge('up')!.disabled).toBe(false);
     expect(nudge('down')!.disabled, '末尾なのに「下へ」が押せる').toBe(true);
+  });
+
+  it('🔴 手動の順でないときは「上へ / 下へ」を押せなくして、理由を言う(見えない順を黙って動かさない)', async () => {
+    const { q, nudge, d, reordered } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n2"]')!.click();
+    await tick();
+    expect(nudge('up')!.disabled, '前提: 手動の順なら真ん中の行は押せる').toBe(false);
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
+    await tick();
+    for (const dir of ['up', 'down'] as const) {
+      expect(nudge(dir)!.disabled, `題名順なのに「${dir}」が押せる`).toBe(true);
+      expect(nudge(dir)!.title).toBe('並び順が「自分で並べた順」のときだけ動かせます');
+    }
+    // キーボードなどで押された場合も、順を動かさず同じ字で断る
+    nudge('up')!.disabled = false;
+    nudge('up')!.click();
+    await tick();
+    expect(reordered, '見えない並びを黙って書き換えた').toEqual([]);
+    expect(d.getState().error ?? '').toContain('並び順が「自分で並べた順」のときだけ動かせます');
+  });
+
+  it('🔴 2 ペインなど別の口で並び順が変わったら、左の並び順の欄も追従する', async () => {
+    const { root, d } = setup(METAS, []);
+    const sel = root.querySelector<HTMLSelectElement>('select[data-pkc-field="entry-sort"]')!;
+    expect(sel.value).toBe('manual');
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
+    expect(sel.value, '欄が「自分で並べた順」のまま古い').toBe('title');
+    d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'manual' });
+    expect(sel.value).toBe('manual');
   });
 
   it('🔴 選び直すと並べ替えも追従する(別のノートが動かない)', async () => {
@@ -1070,6 +1113,8 @@ describe('行の上半分 / 下半分に落とすと並べ替え(#215)', () => {
     edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), q('tbody [data-pkc-entry="n1"]')!, 102);
     await tick();
     expect(d.getState().error ?? '', '無言で捨てた').toContain('自分で並べた順');
+    // 指す先は、画面にある欄の名前(aria-label)で言う
+    expect(d.getState().error ?? '').toContain('「一覧の並び順」');
     expect(reordered).toEqual([]);
     expect(rows()).toEqual(before);
   });

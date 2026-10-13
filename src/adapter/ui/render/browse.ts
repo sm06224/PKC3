@@ -148,6 +148,8 @@ export class BrowseRouter {
    * ⚠ 隠す物は**この 3 つだけ**(探す欄・戻る進む・種類の札 `kind-bar` は別の作法で動く)。
    */
   private readonly hideWhileCommand: readonly HTMLElement[];
+  /** 左の「一覧の並び順」。⚠ 2 ペインの列見出しからも変わるので、描くたびに state へ合わせる。 */
+  private readonly sortSelect: HTMLSelectElement | null;
   /**
    * 🔴 **戻る「‹」/ 進む「›」**(#190)。⚠ **面に関係なく**ここが合わせる(#813 段③-a)。
    * 直す前は一覧の描画器だけが `disabled` を動かしていたので、**既定のフォルダのタブでは
@@ -197,6 +199,7 @@ export class BrowseRouter {
     this.last = initial;
     this.host = host;
     this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
+    this.sortSelect = sidebar.querySelector<HTMLSelectElement>('select[data-pkc-field="entry-sort"]');
     this.hideWhileCommand = [
       '[data-pkc-region="browse-tabs"]',
       '[data-pkc-field="entry-sort"]',
@@ -266,6 +269,10 @@ export class BrowseRouter {
   }
 
   render(state: AppState, mode: BrowseMode): void {
+    // 🔴 並び順の選択欄を state に合わせる(2 ペインの列見出しで変えたとき、欄が古いままだった)
+    if (this.sortSelect !== null && this.sortSelect.value !== state.entrySort) {
+      this.sortSelect.value = state.entrySort;
+    }
     // 🔑 面 = 探し方 × 「絞り込み中かどうか」。⚠ 絞り込んだ結果は先頭からが正しく、
     //    戻したときに元の位置へ帰るのが欲しい振る舞い
     // ⚠ **種類の絞りも「絞り込み中」に数える**(#411)── 数えないと、札を押した

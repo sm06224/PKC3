@@ -30,7 +30,7 @@ import { initialState, reduce, type AppState } from '../../src/adapter/state/app
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { answerDialog } from './dialog-helper';
+import { answerDialog, openDialog } from './dialog-helper';
 
 function meta(lid: string, order: number): EntryMeta {
   return {
@@ -193,6 +193,36 @@ describe('ゴミ箱を空にする ── 待っている間に編集が始ま�
     expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
       '編集を保存するか、編集をやめてから空に',
     );
+  });
+
+  it('🔴 編集中は、確認を出す前に断る(「はい」と答えてから断られない)', async () => {
+    const { d, btn } = mount();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(openDialog(), '断る前に確認が出ている').toBeNull();
+    expect(d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから空に');
+  });
+
+  it('確認の文に、空にするゴミ箱の件数が出る', async () => {
+    const { d, btn } = mount();
+    d.dispatch({
+      type: 'TRASH_LIST_LOADED',
+      items: [1, 2, 3].map((n) => ({
+        entryLid: `x${n}`,
+        revId: `r${n}`,
+        title: `t${n}`,
+        createdAt: null,
+        archetype: null,
+      })),
+    });
+    expect(d.getState().trashPanel?.items.length, '前提: ゴミ箱に 3 件').toBe(3);
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(document.body.textContent).toContain('ゴミ箱の 3 件を空にします');
+    await answerDialog('cancel');
   });
 
   /** 🔴 **対照群** ── 崩れていなければ確認 OK がそのまま通る(空振り防止)。 */

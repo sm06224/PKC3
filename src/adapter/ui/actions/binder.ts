@@ -2745,6 +2745,8 @@ function refuseNoTimer(dispatcher: Dispatcher): void {
   });
 }
 
+const ORDER_ONLY_MANUAL = '並び順が「自分で並べた順」のときだけ動かせます';
+
 /** 並べ替えの 2 つの向きで同じことをする(規則を 2 か所に書かない)。 */
 function moveOrder(
   dispatcher: Dispatcher,
@@ -2753,6 +2755,11 @@ function moveOrder(
 ): void {
   const lid = target.getAttribute('data-pkc-entry');
   if (!lid) return;
+  // 🔴 手動の順でないときは、見えない並びを黙って動かさない(押せない理由と同じ字を出す)
+  if (dispatcher.getState().entrySort !== 'manual') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: ORDER_ONLY_MANUAL });
+    return;
+  }
   dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction });
 }
 
@@ -9542,7 +9549,10 @@ const ACTIONS: Record<string, ActionHandler> = {
           items,
           note:
             folders.length === 0
-              ? 'あてはまるフォルダがありません(欄を空にするとルートへ出せます)'
+              ? q === ''
+                ? // 欄が空のときに「欄を空にすると」は誤り。この時はルートの行が出ている
+                  'ここに移せるフォルダがありません(「ルート(いちばん上)」へは移せます)'
+                : 'あてはまるフォルダがありません(欄を空にするとルートへ出せます)'
               : '',
         };
       },
@@ -13375,9 +13385,18 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   する。⚠ 直す前は `whenAbsent: false` で「確認が無い環境では通さない」と
      *   倒していたが、**その状態そのものが無くなった**(器はいつでも作れる)。
      */
+    // 🔴 編集中は、確認を出す前に断る(確認に「はい」と答えてから断られる形をやめる)
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}空にしてください` });
+      return;
+    }
+    const n = st.trashPanel?.items.length ?? null;
     confirmThen(
       root,
-      'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?',
+      n === null || n === 0
+        ? 'ゴミ箱を空にします(捨てたノートの履歴も消え、元に戻せません)。よろしいですか?'
+        : `ゴミ箱の ${n} 件を空にします(それぞれの履歴も消え、元に戻せません)。よろしいですか?`,
       { okLabel: 'ゴミ箱を空にする', danger: true },
       dispatcher,
       notWhileEditing(dispatcher, '空にしてください'),
@@ -16458,7 +16477,7 @@ export function bindActions(
     if (st.entrySort !== 'manual') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '並べ替えは「自分で並べた順」で並べているときだけ効きます(上の並び順を戻してください)',
+        error: '並べ替えは「自分で並べた順」のときだけ効きます(探す欄の隣の「一覧の並び順」を「自分で並べた順」にしてください)',
       });
       return;
     }
