@@ -147,6 +147,8 @@ describe('runExplicitPurge (P4b)', () => {
     await runExplicitPurge(deps);
     expect(asked).not.toHaveBeenCalled();
     expect(alerts[0]).toContain('どのノートからも使われていない添付はありません');
+    // 🔑 理由も言う(#1640 ⑤-A)── 消したのに減らないとき、ここが唯一の手掛かりになる
+    expect(alerts[0], '0 件の理由を言っていない').toContain('ゴミ箱・履歴に残っている添付は、使われているものとして数えます');
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
 
