@@ -266,3 +266,30 @@ describe('保存の後の選ぶだけの描画で、全件の指紋を作り直�
     expect(pane.textContent).toContain('別の名前');
   });
 });
+
+/**
+ * 🔴 **日付の字の控え(#1087)は、年が変わったら捨てる**。
+ * ⚠ 控えは「生の updatedAt → 画面の字」なので、年をまたぐと同じ値でも字が変わる
+ *   (`MM/DD` ⇔ `YYYY/MM/DD`)── 年を鍵に入れ忘れると、去年の字が残る。
+ */
+describe('#1087 一覧の日付の控え', () => {
+  it('🔴 年をまたいだら、同じ更新日でも年つきの字に変わる ── 対照群: 同じ年のうちは月/日', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 11, 31, 12, 0, 0));
+      const { render, dateOf } = setup();
+      let s = booted();
+      s = reduce(s, { type: 'ENTRY_STAMPED', lid: 'a', createdAt: '2026-05-01 03:04:05', updatedAt: '2026-05-01 03:04:05' }).state;
+      render(s);
+      expect(dateOf('a'), '前提: 同じ年は月/日').toBe('05/01');
+
+      vi.setSystemTime(new Date(2027, 0, 2, 12, 0, 0));
+      // 別のノートの刻みで entryMetas を新しくする(a の更新日は変えない)
+      s = stamped(s, 'b');
+      render(s);
+      expect(dateOf('a'), '年をまたいだのに去年の字が残った').toBe('2026/05/01');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

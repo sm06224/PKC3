@@ -76,6 +76,30 @@ export class FilerRenderer {
   private lastSignature: string | null = null;
   /** 日付だけの指紋。⚠ 本体の指紋と**別に**持つ(混ぜると建て直しに戻る ── #270)。 */
   private lastDates: string | null = null;
+  /**
+   * 日付の字の控え(生の `updatedAt` → 画面の字。#1087)。⚠ 検索で打つたびに `reconcileRows` が全行の
+   *   指紋を作り、そのたびに 3,000 件の日付を読み直していた(実測で 1 字あたりの JS の最大項目の 1 つ)。
+   *   年が変わったら、または件数の 2 倍を超えて古い値が溜まったら捨てる(`dual-filer.ts` と同じ作法)。
+   */
+  private dateText = new Map<string, string>();
+  private dateTextYear = 0;
+  /** 控えの上限の目安(`render` の入口で件数を入れる)。 */
+  private metaCount = 0;
+
+  private listDate(raw: string | null | undefined, year: number): string {
+    if (raw === null || raw === undefined || raw === '') return formatListDate(raw, year);
+    if (this.dateTextYear !== year || this.dateText.size > this.metaCount * 2 + 64) {
+      this.dateText.clear();
+      this.dateTextYear = year;
+    }
+    let text = this.dateText.get(raw);
+    if (text === undefined) {
+      text = formatListDate(raw, year);
+      this.dateText.set(raw, text);
+    }
+    return text;
+  }
+
   private dateMemo: { metas: ReadonlyMap<string, EntryMeta>; year: number; sig: string } | null = null;
   private lastRelations: readonly Relation[] | null = null;
   private lastSelected: string | null = null;
@@ -672,7 +696,7 @@ export class FilerRenderer {
       return this.dateMemo.sig;
     const parts: string[] = [];
     for (const m of state.entryMetas.values()) {
-      parts.push(m.lid, formatListDate(m.updatedAt, year));
+      parts.push(m.lid, this.listDate(m.updatedAt, year));
     }
     const sig = parts.join(String.fromCharCode(0));
     this.dateMemo = { metas: state.entryMetas, year, sig };
@@ -690,7 +714,7 @@ export class FilerRenderer {
       const m = state.entryMetas.get(lid);
       const cell = tr.querySelector<HTMLElement>('[data-pkc-field="updated"]');
       if (!m || !cell) continue;
-      cell.textContent = formatListDate(m.updatedAt, year);
+      cell.textContent = this.listDate(m.updatedAt, year);
       const full = formatStoredDate(m.updatedAt, '');
       if (full) cell.title = `更新 ${full}`;
       else cell.removeAttribute('title');
@@ -745,7 +769,7 @@ export class FilerRenderer {
     return [
       m.title,
       m.archetype,
-      formatListDate(m.updatedAt, year),
+      this.listDate(m.updatedAt, year),
       renaming ? 'r' : '',
       parentName ?? '',
     ].join('\u0000');
@@ -834,7 +858,7 @@ export class FilerRenderer {
     // 🔑 **一覧の行と同じ形**(今年は MM/DD)にする(P9 段③)── `YYYY/MM/DD` だと
     //    狭い列に収まらず `2026/08/` で切れていた(実測)。年まで見たいときは
     //    hover の `title` に出す(一覧の行と同じ作法)
-    updated.textContent = formatListDate(m.updatedAt, new Date().getFullYear());
+    updated.textContent = this.listDate(m.updatedAt, new Date().getFullYear());
     const full = formatStoredDate(m.updatedAt, '');
     if (full) updated.title = `更新 ${full}`;
     tr.append(name, updated);
@@ -908,6 +932,7 @@ export class FilerRenderer {
   }
 
   render(state: AppState): void {
+    this.metaCount = state.entryMetas.size;
     this.paintRefusedTags(state);
     /**
      * 🔴 **参照が変わっただけで作り直さない**(2026-08-06)。
