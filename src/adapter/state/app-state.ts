@@ -6510,6 +6510,13 @@ function reduceCore(
     case 'REPLACE_IN_BODY': {
       if (state.phase !== 'editing' || !state.openBody) return { state, events: [] };
       /**
+       * 🔴 **置換の結果は「結果」の知らせで言う。エラーの行に入れない**(#1087 の見直し 2026-10-13)。
+       * ⚠ 直す前は 3 つとも `error` に入れていたので、画面下に「エラー: 2 件を置き換えました」と出て、
+       *   メッセージには種類「問題」で積まれていた(成功したのに失敗の顔)。
+       * ⚠ 探す語が空のときは、空の鉤括弧(「」は本文に見つかりませんでした)ではなく、何を入れるかを言う。
+       */
+      if (action.find === '') return { state: { ...state, notice: '探す語を入れてください', noticeOpen: null, noticeCreate: null }, events: [] };
+      /**
        * 🔴 **添付ノートは、画面に出ていない設定の行を置換の外に置く**(#1579 Q1 = A)。
        * ⚠ 設定の行(`attachment.*`)は編集欄に畳まれて見えない。そこへ当てると、
        *   見えない所が書き換わって添付が壊れる。切り方は編集欄と同じ `foldAttachmentHead` 1 本。
@@ -6526,11 +6533,11 @@ function reduceCore(
       const body = fold === null ? done.body : joinHiddenHead(fold.head, done.body);
       if (count === 0)
         return {
-          state: { ...state, error: `「${action.find}」は本文に見つかりませんでした` },
+          state: { ...state, notice: `「${action.find}」は本文に見つかりませんでした`, noticeOpen: null, noticeCreate: null },
           events: [],
         };
       return {
-        state: { ...state, error: `${count} 件を置き換えました`, openBody: { ...state.openBody, body } },
+        state: { ...state, notice: `${count} 件を置き換えました`, noticeOpen: null, noticeCreate: null, openBody: { ...state.openBody, body } },
         events: [],
       };
     }
@@ -9786,6 +9793,19 @@ function reduceCore(
             state.entryMetas,
           ),
           error: null,
+          /**
+           * 🔴 **履歴から戻したら、戻したことを言う**(#1087 の見直し 2026-10-13)。
+           * ⚠ 直す前は履歴の一覧が畳まれるだけで、何も出なかった ── 押した人には
+           *   戻ったのか分からず、「戻したことも取り消せます」(マニュアル)の取り消し方も見えない。
+           * ⚠ ゴミ箱から戻したときは binder が「ゴミ箱から元に戻しました」を出すので、ここでは言わない。
+           */
+          ...(action.mode === 'revision'
+            ? {
+                notice: `「${action.meta.title}」を前の版に戻しました。取り消すときは、もう一度「履歴を開く」から戻す前の版を選んでください`,
+                noticeOpen: null,
+                noticeCreate: null,
+              }
+            : {}),
         },
         events: [],
       };

@@ -526,6 +526,22 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().relations.filter((x) => x.id === 'r1'), '同じ関係が 2 本になった').toHaveLength(1);
   });
 
+  it('🔴 履歴から戻したら、戻したことと取り消し方を言う / ゴミ箱から戻したときは言わない(binder が言う)', () => {
+    const d = bootWithFolder();
+    expect(d.getState().notice ?? null, '前提:知らせは出ていない').toBeNull();
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: '買い物' }), body: '戻した本文' });
+    expect(d.getState().notice).toBe(
+      '「買い物」を前の版に戻しました。取り消すときは、もう一度「履歴を開く」から戻す前の版を選んでください',
+    );
+    expect(d.getState().error).toBeNull();
+    const t = bootWithFolder();
+    t.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    const before = t.getState().notice ?? null;
+    t.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '' });
+    expect(t.getState().order, '前提:ゴミ箱から戻った').toContain('child');
+    expect(t.getState().notice ?? null, 'ゴミ箱から戻したのに履歴の文が出た').toBe(before);
+  });
+
   it('🔴 効果層が disk から関係を読み直して渡す(その entry のぶんだけ)', async () => {
     const seen: string[] = [];
     const d = bootWithFolder({
