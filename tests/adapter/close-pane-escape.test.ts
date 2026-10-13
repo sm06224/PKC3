@@ -38,7 +38,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
-import { CLOSE_VIEW_WINDOW_REFUSED, type CloseViewWindowResult } from '../../src/adapter/platform/view-window';
+import { CLOSE_NOTE_WINDOW_REFUSED, CLOSE_VIEW_WINDOW_REFUSED, type CloseViewWindowResult } from '../../src/adapter/platform/view-window';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 
 function meta(lid: string): EntryMeta {
@@ -197,7 +197,7 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
    * `boolean`(`=== 'closed'`)へ潰していたので、`'refused'` は `'not-a-window'`
    * と見分けが付かず、**黙って** `deselect-entry` が撃たれていた ── 窓は
    * 開いたままなのにノートだけ閉じ、「開いています」の放送と画面が食い違う。
-   * 🔑 いまは `close-pane` と同じ理由(`CLOSE_VIEW_WINDOW_REFUSED`)を出し、
+   * 🔑 いまは付箋の窓用の理由(`CLOSE_NOTE_WINDOW_REFUSED`。戻る先が無いので「本文に戻りました」を言わない)を出し、
    * `selectedLid` は触らない。
    */
   it('🔴 付箋が閉じられなかった(refused)ときは、理由を出して選択を保つ', () => {
@@ -209,7 +209,12 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
     m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     pressEscape();
     expect(m.d.getState().selectedLid, 'refused なのに deselect-entry が撃たれた').toBe('a');
-    expect(m.d.getState().error, '断り文が出ていない').toBe(CLOSE_VIEW_WINDOW_REFUSED);
+    expect(m.d.getState().error, '断り文が出ていない').toBe(CLOSE_NOTE_WINDOW_REFUSED);
+    // 🔴 ノートの窓に戻る先は無い ── 「本文に戻りました」と言わない(#1087)
+    expect(CLOSE_NOTE_WINDOW_REFUSED).not.toContain('本文に戻');
+    expect(CLOSE_NOTE_WINDOW_REFUSED).toContain('× で閉じてください');
+    // 対照群 ── 予定表・連絡先の窓は今のまま「本文に戻りました」
+    expect(CLOSE_VIEW_WINDOW_REFUSED).toContain('本文に戻りました');
   });
 
   /**

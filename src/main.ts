@@ -3086,7 +3086,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     attach: async (item) => {
       let out: Awaited<ReturnType<typeof attachOne>> = null;
       await withAssetGate.queued(async () => {
-        out = await attachOne(dispatcher, attachDeps, item);
+        // 🔴 収録の経路 ── 空き不足の字が「この収録は残っていません」になる
+        out = await attachOne(dispatcher, attachDeps, item, undefined, undefined, true);
       });
       return out;
     },

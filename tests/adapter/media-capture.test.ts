@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   pickClock,
   CaptureRefused,
+  captureStartFailedText,
   startCapture,
   type CaptureDeps,
   type CaptureEnd,
@@ -431,10 +432,41 @@ describe('🔴 黙って no-op にしない(#413)', () => {
     await expect(startCapture('screen', d, { partBytes: 1, maxMs: HOURS12 })).rejects.toThrow(/共有が許可されません/);
   });
 
-  it('⚠ 別の理由でも黙らない(名前を出す)', async () => {
-    const err = Object.assign(new Error('x'), { name: 'NotFoundError' });
+  it('🔴 例外名は日本語の理由に置き換わる(名前は画面に出ない)', async () => {
+    const names = ['NotAllowedError', 'NotFoundError', 'NotReadableError', 'AbortError', 'OverconstrainedError', 'SecurityError'];
+    for (const kind of ['audio', 'screen'] as const) {
+      const seen = new Set<string>();
+      for (const name of names) {
+        const err = Object.assign(new Error('x'), { name });
+        const { d } = deps({
+          getUserMedia: () => Promise.reject(err),
+          getDisplayMedia: () => Promise.reject(err),
+        });
+        const e = await startCapture(kind, d, { partBytes: 1, maxMs: HOURS12 }).catch((x: Error) => x);
+        const text = (e as Error).message;
+        expect(text, `${kind}/${name}: 例外名が画面に出ている`).not.toContain('Error');
+        expect(text, `${kind}/${name}: 汎用の字のまま`).not.toContain('収録を始められませんでした');
+        seen.add(text);
+      }
+      expect(seen.size, `${kind}: 理由が使い回されている`).toBe(names.length);
+    }
+  });
+
+  it('各理由の中身(マイク / 共有する物 / ほかのアプリ)と、許可の出し方', () => {
+    expect(captureStartFailedText('audio', 'NotFoundError', '')).toContain('マイクが見つかりません');
+    expect(captureStartFailedText('screen', 'NotFoundError', '')).toContain('共有する物が見つかりません');
+    expect(captureStartFailedText('audio', 'NotReadableError', '')).toContain('ほかのアプリが使っています');
+    // 許可の出し方は外部リンクの案内と同じ書き方(アドレスバーの右端で〜を許可してください)
+    expect(captureStartFailedText('audio', 'NotAllowedError', '')).toContain('アドレスバーの右端でマイクを許可してください');
+    expect(captureStartFailedText('screen', 'NotAllowedError', '')).toContain('アドレスバーの右端で画面の共有を許可してください');
+  });
+
+  it('⚠ 知らない名前は「収録を始められませんでした」+ 名前を括弧で残す', async () => {
+    const err = Object.assign(new Error('x'), { name: 'WeirdError' });
     const { d } = deps({ getUserMedia: () => Promise.reject(err) });
-    await expect(startCapture('audio', d, { partBytes: 1, maxMs: HOURS12 })).rejects.toThrow(/NotFoundError/);
+    await expect(startCapture('audio', d, { partBytes: 1, maxMs: HOURS12 })).rejects.toThrow('収録を始められませんでした(WeirdError)');
+    // 名前も無ければ message
+    expect(captureStartFailedText('audio', '', 'boom')).toBe('収録を始められませんでした(boom)');
   });
 
   it('🔴 対応していない環境では、そう言う', async () => {

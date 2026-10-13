@@ -29,6 +29,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CLOSE_VIEW_WINDOW_REFUSED,
+  POPUP_ALLOW_STEP,
   VIEW_WINDOW_ANNOUNCE_MS,
   VIEW_WINDOW_CHANNEL,
   VIEW_WINDOW_FEATURES,
@@ -196,8 +197,8 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
     expect(b.opened, '開こうとすらしていない').toHaveLength(1);
     expect(b.panes, '退避していない(押しても何も起きない)').toEqual(['dual']);
     expect(b.fails, '黙って退避した(user は窓が出ない理由を知れない)').toHaveLength(1);
-    // 🔑 **次に何をすればよいか**が書いてある(「ポップアップの許可」)
-    expect(b.fails[0]).toContain('ポップアップ');
+    // 🔑 **次に何をすればよいか**が書いてある(外部リンクの案内 `POPUP_HINT_TEXT` と同じ許可の出し方)
+    expect(b.fails[0]).toContain(POPUP_ALLOW_STEP);
     expect(b.fails[0], '開いた先を言っていない').toContain('この画面で開きました');
   });
 
@@ -240,7 +241,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
     );
     expect(b.fails[0], '次に何をすればよいか書いていない').toContain('編集を終えて');
     // 🔴 許可の話も同じ回に言う(2026-10-13)── 言われたとおり編集を終えて押し直すと、また塞がれて中央に開く
-    expect(b.fails[0], 'ポップアップの許可を言っていない').toContain('ポップアップの許可');
+    expect(b.fails[0], 'ポップアップの許可を言っていない').toContain(POPUP_ALLOW_STEP);
   });
 
   /**
@@ -473,7 +474,7 @@ describe('付箋の窓(view を指さない)', () => {
     expect(where, '面へ退避した(付箋に退避先は無い)').toBe('pane');
     expect(b.panes, '面を動かした').toEqual([]);
     expect(b.fails, '理由を出していない').toHaveLength(1);
-    expect(b.fails[0], 'ポップアップの許可に触れていない').toContain('ポップアップ');
+    expect(b.fails[0], 'ポップアップの許可に触れていない').toContain(POPUP_ALLOW_STEP);
     expect(b.fails[0], '開いてもいないのに「この画面で開きました」と言っている').not.toContain(
       'この画面で開きました',
     );
@@ -603,7 +604,8 @@ describe('押した瞬間の返事(#685 動線レビュー 欠陥 7)', () => {
     const b = bench({ answered: false });
     await openViewInWindow(null, { ...b.deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
     expect(b.notices.at(-1), '「開いています…」が出たまま理由が出ている').toBe('');
-    expect(b.fails[0], '理由が出ていない').toContain('ポップアップの許可');
+    expect(b.fails[0], '理由が出ていない').toContain(POPUP_ALLOW_STEP);
+    expect(b.fails[0], '直す前の言い方が残っている').not.toContain('許可を出してください');
   });
 
   /** ⚠ **面の窓でも同じ** ── 無反応 2.5 秒は付箋だけの話ではない。 */

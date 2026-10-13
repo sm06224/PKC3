@@ -757,6 +757,8 @@ describe('2 枚目を止めたときの字(#690 I3)', () => {
     const m = noteOpenElsewhereMessage('PKC3', 'ふたつめ');
     expect(m, '止めた理由が無い').toContain('すでに別のウィンドウで開いています');
     expect(m, 'どの窓か(題名)が無い').toContain('『ふたつめ — PKC3』');
+    // 🔴 台帳が古くて窓が見つからないときの出口(#1087)── 押し直すと開く
+    expect(m, '見つからないときの出口が無い').toContain('見つからないときは、もう一度押すと開きます');
     // ⚠ 形は `windowTitleFor` と同じ(タスクバーの字でそのまま探せる)
     expect(m).toContain(`『${windowTitleFor('PKC3', 'ふたつめ')}』`);
   });

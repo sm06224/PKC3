@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { PopupHintStore, POPUP_HINT_TEXT } from '../../src/adapter/ui/render/popup-hint';
+import { POPUP_ALLOW_STEP } from '../../src/adapter/platform/view-window';
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -98,5 +99,12 @@ describe('外部リンクの初回の案内 (依頼 69-B2)', () => {
     press(root, 'ext');
     expect(said).toEqual([POPUP_HINT_TEXT]);
     off();
+  });
+});
+
+describe('許可の出し方は、別窓が塞がれたときの字と同じ(#1087)', () => {
+  it('外部リンクの案内の許可の手順が、別窓の案内と一語も違わない', () => {
+    expect(POPUP_HINT_TEXT).toBe(`開かないときは、${POPUP_ALLOW_STEP}`);
+    expect(POPUP_ALLOW_STEP).toBe('アドレスバーの右端でポップアップを許可してください');
   });
 });
