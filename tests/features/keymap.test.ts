@@ -150,6 +150,8 @@ describe('割当の検め', () => {
 
   it('🔴 コピー・貼り付けなどは横取りさせない', () => {
     expect(validateBinding('create-entry', 'Mod+C', base)?.kind).toBe('refused');
+    // ⚠ Ctrl+W はタブを閉じる操作 ── 理由の字が当たっていること(#1087)
+    expect(validateBinding('create-entry', 'Mod+W', base)?.message).toContain('タブやウィンドウの操作');
     expect(validateBinding('create-entry', 'Mod+V', base)?.kind).toBe('refused');
     expect(validateBinding('create-entry', 'Mod+W', base)?.kind).toBe('refused');
   });
