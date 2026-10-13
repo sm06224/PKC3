@@ -6,7 +6,7 @@
  * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
-import { errorText } from '@features/error-text';
+import { bodySaveErrorText, errorText } from '@features/error-text';
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
@@ -1245,7 +1245,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SQL_ER_LOADED', token, columns, fks, counts, csv, copy });
         })().catch((e: unknown) => {
           if (disposed) return;
-          const raw = e instanceof Error ? e.message : String(e);
+          const raw = errorText(e);
           dispatcher.dispatch({
             type: 'SQL_ER_FAILED',
             token,
@@ -1311,7 +1311,7 @@ export function connectStoreEffects(
           dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
         })().catch((e: unknown) => {
           if (disposed) return;
-          const raw = e instanceof Error ? e.message : String(e);
+          const raw = errorText(e);
           dispatcher.dispatch({
             type: 'SQL_SAVE_FAILED',
             error: `構造を取得できませんでした(${raw})`,
@@ -1352,7 +1352,7 @@ export function connectStoreEffects(
           },
           (e: unknown) => {
             if (disposed) return;
-            const raw = e instanceof Error ? e.message : String(e);
+            const raw = errorText(e);
             dispatcher.dispatch({ type: 'SQL_SAVE_FAILED', error: `Parquet に書き出せませんでした(${raw})` });
           },
         );
@@ -1884,7 +1884,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'BODY_LOAD_FAILED',
                 lid: ev.lid,
-                error: String(e),
+                error: errorText(e),
               });
           }
         });
@@ -1909,7 +1909,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'BODY_LOAD_FAILED',
                 lid: ev.lid,
-                error: String(e),
+                error: errorText(e),
               });
           }
         });
@@ -2044,7 +2044,7 @@ export function connectStoreEffects(
               });
             stamp(ev.entry.lid, stamps);
           } catch (e) {
-            if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: String(e) });
+            if (!disposed) dispatcher.dispatch({ type: 'SYS_ERROR', error: bodySaveErrorText(e) });
           }
         });
         break;
@@ -2057,7 +2057,7 @@ export function connectStoreEffects(
             // UI からは既に消えている(楽観)── 失敗は通知し、reload で再出現する
             // (非破壊側に倒れる)
             if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+              dispatcher.dispatch({ type: 'OP_FAILED', error: errorText(e) });
           }
         });
         break;
@@ -2105,7 +2105,7 @@ export function connectStoreEffects(
             stamp(ev.lid, stamps);
           } catch (e) {
             if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: String(e) });
+              dispatcher.dispatch({ type: 'OP_FAILED', error: errorText(e) });
           }
         });
         break;
@@ -2355,7 +2355,7 @@ export function connectStoreEffects(
               if (row.lid === ev.lid) movedBody = next;
             }
           } catch (e) {
-            failed = String(e);
+            failed = errorText(e);
           }
           if (disposed) return;
           if (failed !== null)
@@ -3667,7 +3667,7 @@ export function connectStoreEffects(
               open: ev.to.lid,
             });
           } catch (e) {
-            fail(String(e));
+            fail(errorText(e));
           }
         });
         break;
@@ -3836,7 +3836,7 @@ export function connectStoreEffects(
                 error:
                   ev.rewrite.kind === 'attachment-name'
                     ? `ファイル名は変えられませんでした(${errorText(e)})`
-                    : String(e),
+                    : errorText(e),
               });
           }
         });

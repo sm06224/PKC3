@@ -900,6 +900,8 @@ interface PartialDraftWords {
   readonly noun: string;
   readonly saveVerb: string;
   readonly cancelVerb: string;
+  /** 開き直すときに押すボタンの字(章: 右クリックの項目 / コード: ✎ のボタン〔`markdown-render.ts` の title〕)。 */
+  readonly openVerb: string;
   /** あいまい(2 個以上一致)の理由の書き出し。 */
   readonly ambiguousLead: string;
 }
@@ -909,12 +911,14 @@ const PARTIAL_DRAFT_WORDS: Record<PartialDraftKind, PartialDraftWords> = {
     noun: '章',
     saveVerb: '章を保存する',
     cancelVerb: '章の編集をやめる',
+    openVerb: 'この章を編集する',
     ambiguousLead: 'この見出しの字が本文の中に複数あり',
   },
   code: {
     noun: 'コード',
     saveVerb: 'コードを保存する',
     cancelVerb: 'コードの編集をやめる',
+    openVerb: 'このコードを編集する',
     ambiguousLead: '同じ内容のコードブロックが本文の中に複数あり',
   },
 };
@@ -942,10 +946,12 @@ const PARTIAL_DRAFT_OWN_NOTES: ReadonlySet<string> = new Set([SECTION_DRAFT_NOTE
  *   **ここ 1 か所**に置き、効果層は import して使う(§7:文言を 2 か所に書かない)。
  * ⚠ `missing`(見出し / 枠が消えた)と `mismatch`(章:中身が違う)は**同じ字**にする ──
  *   どちらも「もう開いたときの前提が崩れている」で、user がすべきことは同じ
- *   (コピーして開き直す)。
+ *   (コピーして開き直す)。消えたときは開き直せないので、括弧で「ノートを編集する」へ逃がす(#1087)。
  */
 function partialDraftMismatchNote(kind: PartialDraftKind): string {
-  return `この${PARTIAL_DRAFT_WORDS[kind].noun}は別の場所で書き換えられました。書きかけをコピーしてから、開き直してください`;
+  const w = PARTIAL_DRAFT_WORDS[kind];
+  // 🔑 押す物を全部ボタンの字で言う(#1087)。書きかけは「やめる」で消えるので、コピーが先
+  return `この${w.noun}は別の場所で書き換えられました。書きかけを選んでコピーしてから、「${w.cancelVerb}」を押し、もう一度「${w.openVerb}」で開いてください(${w.noun}が見つからないときは、「ノートを編集する」で開いて貼り付けてください)`;
 }
 function partialDraftAmbiguousNote(kind: PartialDraftKind): string {
   const w = PARTIAL_DRAFT_WORDS[kind];

@@ -1,3 +1,6 @@
+/** 空きが足りないときの案内(ボタンの名前は画面の字〔`commands.ts`〕と揃える)。 */
+const QUOTA_JA = '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください';
+
 /**
  * 🔴 **例外を画面の字に添えるときの 1 か所**(#1087)。
  *
@@ -25,7 +28,7 @@ const ERROR_JA: readonly (readonly [RegExp, string])[] = [
    * ブラウザ / SQLite が出す「空きが無い」── PKC3 が投げる物ではないが、出たときに次の手が要る。
    * ⚠ ボタンの名前は画面の字(`commands.ts` の「使われていない添付を消す」)と揃える。
    */
-  [/QuotaExceededError|SQLITE_FULL|disk is full|quota (has been )?exceeded/i, '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください'],
+  [/QuotaExceededError|SQLITE_FULL|disk is full|quota (has been )?exceeded/i, QUOTA_JA],
 ];
 
 /** 英語の理由を、分かる物だけ日本語にする(分からない物はそのまま)。 */
@@ -38,4 +41,15 @@ export function errorText(e: unknown): string {
   // ⚠ ブラウザの DOMException は種類が name にだけ載る(message は「The quota has been exceeded.」など)
   if (e instanceof Error && e.name === 'QuotaExceededError') return errorMessageJa(`QuotaExceededError: ${e.message}`);
   return errorMessageJa(e instanceof Error ? e.message : String(e));
+}
+
+/**
+ * 本文の保存(`REQUEST_PERSIST`)が失敗したときの字(#1087)。
+ * 🔑 空きが足りない失敗だけ、空きを作った**後**の一手を足す ── 失敗した保存は自動では再送されず、
+ *   本文の上の「ノートを保存し直す」(`detail.ts`)を押すまで disk に届かない。
+ *   ⚠ `errorText` 本体には足さない(同じ文が、保存し直しのボタンが無い場面〔添付・書き出し〕にも出る)。
+ */
+export function bodySaveErrorText(e: unknown): string {
+  const text = errorText(e);
+  return text.includes(QUOTA_JA) ? `${text}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
 }
