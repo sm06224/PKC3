@@ -3209,7 +3209,12 @@ export type UserAction =
       tooLarge?: true;
     }
   | { type: 'HIDE_HISTORY' }
-  | { type: 'RESTORE_REVISION'; revId: string }
+  | {
+      type: 'RESTORE_REVISION';
+      revId: string;
+      /** 🔴 画面の下の「元に戻す」から来た復元(#1087)。知らせの字を変え、さらに「元に戻す」を重ねて出さない。 */
+      fromUndo?: true;
+    }
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
   | { type: 'RESTORE_TRASH'; entryLid: string; revId: string }
@@ -3441,6 +3446,8 @@ export type SystemCommand =
        * その版を指す。あると、画面の下の知らせの隣に「元に戻す」が出る(押すと同じ `RESTORE_REVISION`)。
        */
       undoRevId?: string;
+      /** 🔴 「元に戻す」から来た復元(#1087)。知らせを「戻す前の本文に戻しました」にし、「元に戻す」は重ねて出さない。 */
+      fromUndo?: true;
     }
   | { type: 'TRASH_PURGED'; purged: number }
   | {
@@ -4090,6 +4097,8 @@ export type DomainEvent =
       title: string;
       archetype: string;
       entryOrder: number;
+      /** 「元に戻す」から来た復元(`RESTORE_REVISION.fromUndo`)。 */
+      fromUndo?: true;
     }
   | { type: 'REQUEST_TRASH_LIST' }
   | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[] }
@@ -8956,10 +8965,7 @@ function reduceCore(
       if (fromLid === toLid) return { state, events: [] };
       if (!state.entryMetas.has(fromLid) || !state.entryMetas.has(toLid))
         return { state, events: [] };
-      const dup = state.relations.some(
-        (r) => r.fromLid === fromLid && r.toLid === toLid && r.kind === kind,
-      );
-      if (dup) return { state, events: [] };
+      if (hasSameRelation(state.relations, fromLid, toLid, kind)) return { state, events: [] };
       return {
         state: {
           ...state,
@@ -9170,6 +9176,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
+            ...(action.fromUndo === true ? { fromUndo: true as const } : {}),
           },
         ],
       };
@@ -9239,7 +9246,8 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `復元できません: 同じ ID のノートが既にあります(${action.entryLid})`,
+            // 🔴 内部の ID ではなく題名で言う(#1087)。user に見えない値を出さない
+            error: `復元できません: 同じ ID のノート「${state.entryMetas.get(action.entryLid)?.title ?? '(無題)'}」が既にあります`,
           },
           events: [],
         };
@@ -9880,14 +9888,30 @@ function reduceCore(
            * 🔴 **履歴から戻したら、戻したことを言う**(#1087 の見直し 2026-10-13)。
            * ⚠ 直す前は履歴の一覧が畳まれるだけで、何も出なかった ── 押した人には
            *   戻ったのか分からず、取り消し方(画面の下の「元に戻す」/ 履歴から戻す前の版を選ぶ)も見えない。
-           * ⚠ ゴミ箱から戻したときは binder が「ゴミ箱から元に戻しました」を出すので、ここでは言わない。
+           * 🔴 **ゴミ箱から戻したときも、ここで言う**(#1087)── 直す前は、移した直後の「元に戻す」(binder の `undo-trash`)
+           *   だけが「ゴミ箱から元に戻しました」を出し、**ゴミ箱の一覧の「ゴミ箱から戻す」は何も出なかった**。
+           *   戻った先のフォルダが分かるときは、その題名も言う(居場所は `relations` から引く ── `order` と同じく合流後の値)。
            */
+          ...(action.mode === 'trash'
+            ? {
+                notice: trashRestoredNotice(action.meta.lid, relations, entryMetas),
+                restoreUndo: null,
+                noticeOpen: null,
+                noticeCreate: null,
+              }
+            : {}),
           ...(action.mode === 'revision'
             ? {
-                notice: `「${action.meta.title}」を前の版に戻しました`,
+                // 🔴 「元に戻す」から来たときは、同じ字を出し続けない(#1087)。
+                //   さらに「元に戻す」を出すと、押すたびに同じ字のまま 2 つの本文を行き来する ──
+                //   もとの版は履歴に残っているので、続けて戻すのは履歴から選ぶ。
+                notice:
+                  action.fromUndo === true
+                    ? `「${action.meta.title}」を、戻す前の本文に戻しました`
+                    : `「${action.meta.title}」を前の版に戻しました`,
                 // ⚠ 知らせの字そのものも持つ ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す
                 restoreUndo:
-                  action.undoRevId === undefined
+                  action.undoRevId === undefined || action.fromUndo === true
                     ? null
                     : {
                         lid: action.meta.lid,
@@ -10193,6 +10217,34 @@ function insertByOrder(
   });
   out.splice(at < 0 ? out.length : at, 0, lid);
   return out;
+}
+
+/**
+ * 🔴 **ゴミ箱から戻した知らせ**(#1087)。字の頭は、移した直後の「元に戻す」(binder の `undo-trash`)と同じ。
+ * 戻った先のフォルダが今も在るときだけ、その題名を添える。
+ */
+function trashRestoredNotice(
+  lid: string,
+  relations: readonly Relation[],
+  metas: ReadonlyMap<string, EntryMeta>,
+): string {
+  const parent = relations.find((r) => r.kind === STRUCTURAL && r.toLid === lid);
+  const title = parent === undefined ? undefined : metas.get(parent.fromLid)?.title;
+  return title === undefined ? 'ゴミ箱から元に戻しました' : `ゴミ箱から元に戻しました(「${title}」の中)`;
+}
+
+/**
+ * 🔴 **同じ相手・同じ種類のつながりが既に在るか**(#1087)。⚠ `ADD_RELATION` が黙って捨てる判定と、
+ * binder が先回りして「既に同じつながりがあります」と言う判定は **この 1 本**(§7)── 2 本あると、
+ * 片方だけ直って「言ったのに足された / 言わないのに捨てられた」になる。
+ */
+export function hasSameRelation(
+  relations: readonly Relation[],
+  fromLid: string,
+  toLid: string,
+  kind: string,
+): boolean {
+  return relations.some((r) => r.fromLid === fromLid && r.toLid === toLid && r.kind === kind);
 }
 
 /** 同じ id は後着で上書きして合流(二重復元で関係が 2 本にならない)。 */

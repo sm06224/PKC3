@@ -1576,7 +1576,10 @@ describe('2 ペインのキーボード操作(#273)', () => {
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(d.getState().entryMetas.has('a'), '対照群が消えていない').toBe(false);
     expect(d.getState().entryMetas.has('b'), '対照群が消えていない').toBe(false);
-    expect(d.getState().notice, '複数件は件数で言う').toBe('2 件をゴミ箱へ移しました');
+    // 🔴 複数件は一般形のリンクの注意が添わる(#1087)
+    expect(d.getState().notice, '複数件は件数で言う').toBe(
+      '2 件をゴミ箱へ移しました(ほかのノートから張られたリンクは、戻すまで開けない場合があります)',
+    );
   });
 
   /**

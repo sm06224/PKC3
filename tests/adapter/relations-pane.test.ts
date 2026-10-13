@@ -189,4 +189,53 @@ describe('関係の導線', () => {
       ),
     ).toEqual(['あ', 'い']);
   });
+
+  it('🔴 201 件目以降の題名も、打てば候補に出る(先頭の 200 件で固定しない、#1087)', () => {
+    const many = Array.from({ length: RELATION_CANDIDATE_MAX + 50 }, (_, i) => meta(`n${i}`, `題${i}`));
+    const { root } = mounted(many);
+    const input = focusTarget(root);
+    const values = (): (string | null)[] =>
+      [...root.querySelectorAll('#pkc-relation-candidates option')].map((o) => o.getAttribute('value'));
+    expect(values(), '前提:焦点だけでは 201 件目が無い').not.toContain('題249');
+    input.value = '題249';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(values(), '打ったのに合うノートが出ない').toEqual(['題249']);
+    // 自分自身(n0 を選んでいる)は打っても出ない
+    input.value = '題0';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(values(), '自分自身が候補に出ている').not.toContain('題0');
+    // 消せば先頭の 200 件へ戻る
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(values().length).toBe(RELATION_CANDIDATE_MAX + 1);
+  });
+
+  it('🔴 開いているノート自身の題名は「見つかりません」ではなく「自分自身にはつなげません」(#1087)', () => {
+    const { root, d } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
+    root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]')!.value = 'あ';
+    root.querySelector<HTMLButtonElement>('[data-pkc-action="add-relation"]')!.click();
+    expect(d.getState().error).toBe('自分自身にはつなげません');
+    expect(d.getState().relations).toHaveLength(0);
+  });
+
+  it('🔴 同じ相手・同じ種類が既に在れば言い、欄は残す。種類が違えば足せる(#1087)', () => {
+    const { root, d } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
+    const name = root.querySelector<HTMLInputElement>('[data-pkc-field="relation-target"]')!;
+    const add = root.querySelector<HTMLButtonElement>('[data-pkc-action="add-relation"]')!;
+    name.value = 'い';
+    add.click();
+    expect(d.getState().relations, '前提:1 本目は足せる').toHaveLength(1);
+    expect(name.value, '前提:足せたら欄は空').toBe('');
+    name.value = 'い';
+    add.click();
+    expect(d.getState().error).toBe('既に同じつながりがあります');
+    expect(d.getState().relations, '2 本目が足されている').toHaveLength(1);
+    expect(name.value, '欄が空になっている').toBe('い');
+    // 対照群: 種類を変えれば別のつながり
+    const kind = root.querySelector<HTMLSelectElement>('[data-pkc-field="relation-kind"]')!;
+    const other = [...kind.options].find((o) => o.value !== d.getState().relations[0]!.kind)!;
+    kind.value = other.value;
+    add.click();
+    expect(d.getState().relations, '種類が違うのに断っている').toHaveLength(2);
+  });
 });

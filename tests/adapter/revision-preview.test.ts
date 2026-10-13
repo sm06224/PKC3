@@ -221,6 +221,22 @@ describe('#398 段② 戻す前に中身を見る', () => {
     expect(s.q('[data-pkc-field="revision-diff-summary"]')!.textContent).toBe('いまの本文とのちがい: +3 −1');
   });
 
+  it('🔴 見出しの数字に凡例の title が付く(向きが履歴の行と同じ。差が無いときは付けない。#1087)', async () => {
+    const s = setup({ now: '共通\n新1\n', old: '共通\n旧1\n旧2\n旧3\n' });
+    await openHistory(s);
+    s.q('[data-pkc-action="preview-revision"]')!.click();
+    await tick();
+    expect(s.q('[data-pkc-field="revision-diff-summary"]')!.getAttribute('title')).toBe(
+      '+ はこの版にだけある行 / − はいまの本文にだけある行',
+    );
+    const same = setup({ now: '共通\n', old: '共通\n' });
+    await openHistory(same);
+    same.q('[data-pkc-action="preview-revision"]')!.click();
+    await tick();
+    expect(same.q('[data-pkc-field="revision-diff-summary"]')!.textContent, '前提:差が無い').toBe('いまの本文と同じです');
+    expect(same.q('[data-pkc-field="revision-diff-summary"]')!.hasAttribute('title')).toBe(false);
+  });
+
   it('🔴 本文は押したときだけ読む(履歴を開いただけでは 1 件も読まない)', async () => {
     const s = setup();
     await openHistory(s);

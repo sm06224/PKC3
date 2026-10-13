@@ -88,6 +88,7 @@ import {
   blockedWithSuffix,
   hasAppGroupNote,
   hasUnsavedTyping,
+  hasSameRelation,
   appGroupIconName,
   appGroupOrderCount,
   hasAppGroupOrder,
@@ -261,7 +262,7 @@ import {
   placeInlineText,
   showPlaceInlineNote,
 } from '../render/place-inline';
-import { sameTag, splitTags } from '@features/flavor/tags';
+import { MAX_TAG_CHARS, overlongTagNames, sameTag, splitTags } from '@features/flavor/tags';
 import { TAGS_KEY } from '@features/query/group-by';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
@@ -289,7 +290,7 @@ import {
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
-import { offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
+import { LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
@@ -2256,6 +2257,19 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
  * ⚠ 本文の行に `#タグ` と書いてある分は、外す口が frontmatter だけを触るので残る
  *   (外す側の知らせが「まだそのタグが付いています」と言う)。
  */
+/**
+ * 🔴 **長すぎて付けられないタグの名前を言う**(#1087)。⚠ `splitTags` は `MAX_TAG_CHARS` 超を黙って捨てるので、
+ * 直す前は「足すタグを入力してください」と出たり、長いほうだけが消えたりしていた。
+ * 長い名前は頭の 10 字だけにして「…」で切る。断るのは打った字ぜんぶ(欄は残す)── 一部だけ付けて知らせを塗り潰さない。
+ */
+function overlongTagMessage(raw: string): string | null {
+  const names = overlongTagNames(raw);
+  if (names.length === 0) return null;
+  const head = (n: string): string => ([...n].length > 10 ? `${[...n].slice(0, 10).join('')}…` : n);
+  const more = names.length > 1 ? `(ほか ${names.length - 1} 件)` : '';
+  return `「${head(names[0]!)}」は ${MAX_TAG_CHARS} 字を超えるので付けられません${more}`;
+}
+
 async function queryTagBulk(
   dispatcher: Dispatcher,
   services: BinderServices,
@@ -2277,9 +2291,13 @@ async function queryTagBulk(
    *   丸めた名前では本当のタグを指せないので、同じく断る。
    */
   if (group.lids.length < group.total || tag.endsWith('…')) {
+    // 🔴 事実だけを言う(#1087)。⚠ 直す前は「ノートを絞ってから」と書いてあったが、集計の画面に絞る口は無い
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `タグ「${tag}」は ${group.total} 件のノートに付いていて、一度に${mode === 'rename' ? '変えられ' : '外せ'}ません。ノートを絞ってから行ってください`,
+      error:
+        group.lids.length < group.total
+          ? `タグ「${tag}」は ${group.total} 件のノートに付いていますが、一度に ${group.lids.length} 件までしか${mode === 'rename' ? '変えられ' : '外せ'}ません`
+          : `タグ「${tag}」は名前が長いので、ここからは${mode === 'rename' ? '変えられ' : '外せ'}ません`,
     });
     return;
   }
@@ -2293,6 +2311,11 @@ async function queryTagBulk(
       okLabel: '次へ',
     });
     if (typed === null) return;
+    const longMsg = overlongTagMessage(typed);
+    if (longMsg !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: longMsg });
+      return;
+    }
     const names = splitTags(typed);
     if (names.length !== 1) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '新しいタグの名前は 1 つだけ入力してください' });
@@ -2337,6 +2360,11 @@ function runBulkTag(
   const field = root.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]');
   // 🔑 **打った字を何個と読むかは `splitTags` 1 か所**(#637)──
   //   `#請求 #未払` と打てば 2 つ付く(本文のタグの行と同じ字である)
+  const longMsg = overlongTagMessage(field?.value ?? '');
+  if (longMsg !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: longMsg });
+    return;
+  }
   const tags = splitTags(field?.value ?? '');
   if (tags.length === 0) {
     // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
@@ -4713,10 +4741,15 @@ function deleteFrom(
     const titleOf = new Map(lids.map((l) => [l, st.entryMetas.get(l)?.title ?? l]));
     dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
     const after = dispatcher.getState();
+    const moved = lids
+      .filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l))
+      .map((l) => ({ lid: l, title: titleOf.get(l) ?? l }));
     offerTrashUndo(
       dispatcher,
-      lids.filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l)).map((l) => ({ lid: l, title: titleOf.get(l) ?? l })),
+      moved,
       leftAtRoot(st, after),
+      // 🔴 2 件以上のときは一般形を言う(参照元は選んでいる 1 件の分しか引けていないので、件数では言えない。#1087)
+      moved.length > 1 ? LINKED_FROM_SOME : '',
     );
 }
 
@@ -6719,6 +6752,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       (m) => m.title === name && m.lid !== fromLid,
     );
     if (hits.length === 0) {
+      // 🔴 いま開いているノート自身の題名は「見つかりません」ではなく、つなげない理由を言う(#1087)
+      if (state.entryMetas.get(fromLid)?.title === name) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: '自分自身にはつなげません' });
+        return;
+      }
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error: `「${name}」というノートが見つかりません`,
@@ -6735,6 +6773,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const kind = kindEl?.value ?? '';
     if (!isRelationKind(kind) || kind === STRUCTURAL) return;
+    // 🔴 同じ相手・同じ種類が既に在るときは、言う(欄は残す)。⚠ 判定は reducer と同じ 1 本(`hasSameRelation`)
+    if (hasSameRelation(state.relations, fromLid, hits[0]!.lid, kind)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '既に同じつながりがあります' });
+      return;
+    }
     dispatcher.dispatch({
       type: 'ADD_RELATION',
       id: generateLid(),
@@ -7484,6 +7527,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]');
     // 🔑 **打った字の読み方はどの欄でも同じ**(#637)── `#請求 #未払` で 2 条件
+    const longMsg = overlongTagMessage(field?.value ?? '');
+    if (longMsg !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: longMsg });
+      return;
+    }
     const tags = splitTags(field?.value ?? '');
     if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(帯は出ているのに何も起きない dead click になる)
@@ -7574,6 +7622,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔑 **既に壊れた名前は、読むときに繋ぎ直す**(`strandedHashWords`)──
      *   直す前に打った人のノートは、割り方を直しただけでは 1 個のままだからである。
      */
+    const longMsg = overlongTagMessage(field?.value ?? '');
+    if (longMsg !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: longMsg });
+      return;
+    }
     const tags = splitTags(field?.value ?? '');
     if (tags.length === 0) {
       // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
@@ -13399,7 +13452,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}復元してください` });
       return;
     }
-    dispatcher.dispatch({ type: 'RESTORE_REVISION', revId });
+    dispatcher.dispatch({
+      type: 'RESTORE_REVISION',
+      revId,
+      ...(target.getAttribute('data-pkc-undo') === '1' ? { fromUndo: true as const } : {}),
+    });
   },
   'write-back-file': (dispatcher, target, services) => {
     // 🔴 解決規則は `rowLidOrSelected` の 1 本(#877)

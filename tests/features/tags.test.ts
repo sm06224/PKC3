@@ -14,6 +14,7 @@ import {
   sameTag,
   normalizeTag,
   splitTags,
+  overlongTagNames,
   withTag,
   MAX_TAGS,
   MAX_TAG_CHARS,
@@ -444,5 +445,18 @@ describe('`tags:` の行の要素ごとの角括弧(#1428)', () => {
     const removed = applyBodyRewrite(added, { kind: 'tag', tags: ['c'], mode: 'remove' })!;
     expect(readTags(removed)).toEqual(['a', 'b']);
     expect(removed).not.toMatch(/\[a\]|\[b\]/u);
+  });
+});
+
+describe('長すぎて付けられない名前(#1087)', () => {
+  it('🔴 splitTags が黙って捨てる名前を、同じ割り方で返す(短いほうは返さない)', () => {
+    const long = 'あ'.repeat(MAX_TAG_CHARS + 1);
+    expect(splitTags(`#買い物 #${long}`)).toEqual(['買い物']);
+    expect(overlongTagNames(`#買い物 #${long}`)).toEqual([long]);
+    // 対照群: ちょうど上限は捨てない
+    const ok = 'あ'.repeat(MAX_TAG_CHARS);
+    expect(overlongTagNames(`#${ok}`)).toEqual([]);
+    expect(splitTags(`#${ok}`)).toEqual([ok]);
+    expect(overlongTagNames('')).toEqual([]);
   });
 });

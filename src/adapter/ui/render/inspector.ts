@@ -147,6 +147,11 @@ export class InspectorRenderer {
   private candidates: HTMLDataListElement | null = null;
   /** 相手の候補の元(#1087)。欄に焦点が当たったとき `fillCandidates` が読む。 */
   private candidateSource: { metas: ReadonlyMap<string, EntryMeta>; lid: string } | null = null;
+  /**
+   * 🔴 打った字で詰め直すための題名の一覧(#1087)。⚠ 打つたびに全ノートの題名を小文字へ直さない ──
+   * 作り直すのは `metas` の Map が替わったときだけ(題名の一覧を持つ側の作法と同じ)。
+   */
+  private candidateIndex: { metas: ReadonlyMap<string, EntryMeta>; items: { lid: string; title: string; lower: string }[] } | null = null;
   /** タグの候補(#494 段②)。⚠ 器は 1 度だけ組み、中身だけ差し替える。 */
   private tagCandidates: HTMLDataListElement | null = null;
 
@@ -1281,7 +1286,18 @@ export class InspectorRenderer {
   private fillCandidates(): void {
     const src = this.candidateSource;
     if (!this.candidates || !src) return;
-    const others = [...src.metas.values()].filter((m) => m.lid !== src.lid);
+    if (this.candidateIndex === null || this.candidateIndex.metas !== src.metas) {
+      this.candidateIndex = {
+        metas: src.metas,
+        items: [...src.metas.values()].map((m) => ({ lid: m.lid, title: m.title, lower: m.title.toLowerCase() })),
+      };
+    }
+    /**
+     * 🔴 **打った字に合うノートを、全部の中から詰める**(#1087)。⚠ 直す前は先頭の 200 件に固定で、
+     * 201 件目以降の題名は打っても候補に出なかった。上限(200)は今と同じ。
+     */
+    const q = (this.relAdd?.target.value ?? '').trim().toLowerCase();
+    const others = this.candidateIndex.items.filter((m) => m.lid !== src.lid && (q === '' || m.lower.includes(q)));
     this.candidates.textContent = '';
     for (const m of others.slice(0, RELATION_CANDIDATE_MAX)) {
       const opt = document.createElement('option');
@@ -1536,6 +1552,8 @@ export class InspectorRenderer {
     this.candidates = list;
     // 🔑 候補は触る前に詰めない(`paint` の注釈)。欄が作り直されたら listener も一緒に消える
     target.addEventListener('focus', () => this.fillCandidates());
+    // 🔴 打つたびに、打った字に合うノートへ詰め直す(先頭の 200 件で固定しない。#1087)
+    target.addEventListener('input', () => this.fillCandidates());
     const kind = document.createElement('select');
     kind.setAttribute('data-pkc-field', 'relation-kind');
     kind.setAttribute('aria-label', 'つながりの種類');

@@ -39,6 +39,13 @@ let pending: Pending | null = null;
  * 🔴 **フォルダを移したら、中のノートがどうなったかも言う**(#1087 の見直し 2026-10-13)── 中のノートは
  *   ゴミ箱へは入らず、親を失ってルートに出る。言わないと「中身ごと消えた」と読まれる。
  */
+/**
+ * 🔴 **まとめて移したときのリンクの注意**(#1087)。⚠ 参照元は選んでいる 1 件の分しか引けていない(`state.backlinks`)ので、
+ * 複数件のときは件数を言えない ── 「あるかもしれない」の一般形を言う(言わないと、議事録のリンクが点線になって後から気づく)。
+ * `trashMessage` の `linkedFrom` にこの字を渡すと、件数の形ではなくそのまま出す。
+ */
+export const LINKED_FROM_SOME = 'ほかのノートから張られたリンクは、戻すまで開けない場合があります';
+
 export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom = ''): string {
   const head = titles.length === 1 ? `「${titles[0]}」をゴミ箱へ移しました` : `${String(titles.length)} 件をゴミ箱へ移しました`;
   /**
@@ -47,7 +54,11 @@ export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom =
    */
   const notes = [
     ...(toRoot > 0 ? [`中のノート ${String(toRoot)} 件は消えずにルートに出ています`] : []),
-    ...(linkedFrom !== '' ? [`${linkedFrom}のノートからのリンクは、戻すまで開けません`] : []),
+    ...(linkedFrom === LINKED_FROM_SOME
+      ? [LINKED_FROM_SOME]
+      : linkedFrom !== ''
+        ? [`${linkedFrom}のノートからのリンクは、戻すまで開けません`]
+        : []),
   ];
   return notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
 }

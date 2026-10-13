@@ -4279,6 +4279,9 @@ function renderRevisionDiff(
       counts.added === 0 && counts.removed === 0
         ? other.same
         : `${other.name}とのちがい: +${counts.added} −${counts.removed}`;
+    // 🔴 数字の凡例(#1087)。履歴の行(`revisionDelta`)と同じ向き ── + は見ている版にだけある行 / − は比べている相手にだけある行
+    if (counts.added !== 0 || counts.removed !== 0)
+      label.title = `+ はこの版にだけある行 / − は${other.name}にだけある行`;
   } else {
     label.textContent = other.note ?? '';
   }

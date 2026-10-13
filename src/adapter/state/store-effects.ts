@@ -3044,6 +3044,7 @@ export function connectStoreEffects(
                 type: 'ENTRY_RESTORED',
                 mode: 'revision',
                 ...(undoRevId === undefined ? {} : { undoRevId }),
+                ...(ev.fromUndo === true ? { fromUndo: true as const } : {}),
                 meta: {
                   lid: ev.lid,
                   title,

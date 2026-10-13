@@ -198,8 +198,14 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
               : 'undo-append',
     );
     // ⚠ 版 id は復元の口だけが持つ(他の取り消しへ切り替えたら外す ── 古い id が残らない)
-    if (restore && ru !== null) btn.setAttribute('data-pkc-rev-id', ru.revId);
-    else btn.removeAttribute('data-pkc-rev-id');
+    if (restore && ru !== null) {
+      btn.setAttribute('data-pkc-rev-id', ru.revId);
+      // 🔴 「元に戻す」から来た復元と、履歴の「この版に戻す」を区別する(知らせの字が変わる)
+      btn.setAttribute('data-pkc-undo', '1');
+    } else {
+      btn.removeAttribute('data-pkc-rev-id');
+      btn.removeAttribute('data-pkc-undo');
+    }
     btn.textContent = trash || schedule || restore || dualMove ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;

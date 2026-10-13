@@ -499,7 +499,10 @@ describe('印が指すものと、画面に見えているもの(#240 着地前�
     del.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(d.getState().entryMetas.has('c')).toBe(false);
     expect(d.getState().entryMetas.has('d')).toBe(false);
-    expect(d.getState().notice, '複数件は件数で言う').toBe('2 件をゴミ箱へ移しました');
+    // 🔴 複数件は件数で言い、リンクの注意は一般形で添える(参照元は 1 件の分しか引けない。#1087)
+    expect(d.getState().notice, '複数件は件数で言う').toBe(
+      '2 件をゴミ箱へ移しました(ほかのノートから張られたリンクは、戻すまで開けない場合があります)',
+    );
   });
 
   it('🔴 印が全部見えなくなっているとき、押しても黙らない(理由を出す)', () => {

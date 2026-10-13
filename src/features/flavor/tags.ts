@@ -125,8 +125,21 @@ function dropUnpairedEdgeBrackets(t: string): string {
  *   欄だけに split を書くと、同じ字が場所によって 1 個にも 2 個にもなる。
  */
 export function splitTags(raw: string): string[] {
+  return readTagInput(raw).tags;
+}
+
+/**
+ * 🔴 **打った字のうち、長すぎて付けられない名前**(#1087)。
+ * ⚠ `splitTags` は `MAX_TAG_CHARS` 超を黙って捨てる ── 呼び側が「足すタグを入力してください」と
+ *   言ったり、長いほうだけが消えて短いほうが付いたりしていた。割り方は `splitTags` と同じ 1 か所を通す(§7)。
+ */
+export function overlongTagNames(raw: string): string[] {
+  return readTagInput(raw).tooLong;
+}
+
+function readTagInput(raw: string): { tags: string[]; tooLong: string[] } {
   const s = raw.trim();
-  if (s === '') return [];
+  if (s === '') return { tags: [], tooLong: [] };
   // 🔑 **井桁の並びかどうかは `hashRunWords` 1 か所**(#637 の着地前レビュー B)──
   //    ここに 2 本目の判定を書くと、同じ字が欄と `tags:` で別の個数になる
   const words = hashRunWords(s) ?? strandedHashWords(s);
@@ -151,6 +164,7 @@ export function splitTags(raw: string): string[] {
    */
   const parts = (words ?? [bare]).flatMap((w) => w.split(','));
   const out: string[] = [];
+  const tooLong: string[] = [];
   for (const part of parts) {
     // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
     //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
@@ -160,12 +174,16 @@ export function splitTags(raw: string): string[] {
     //    落ちて、括弧の無い名前の結果が変わる(括弧に触れない入力は 1 字も変えない)
     const stripped = onCore(part, (c) => dropUnpairedEdgeBrackets(listForm ? peelWrapped(c) : c));
     const t = normalize(stripped.replace(/[,、;；]+$/u, ''));
-    if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
+    if (t === '') continue;
+    if ([...t].length > MAX_TAG_CHARS) {
+      tooLong.push(t);
+      continue;
+    }
     if (out.some((x) => sameTag(x, t))) continue;
     out.push(t);
     if (out.length >= MAX_TAGS) break;
   }
-  return out;
+  return { tags: out, tooLong };
 }
 
 /**
