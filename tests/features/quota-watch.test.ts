@@ -1,3 +1,4 @@
+/** @vitest-environment happy-dom */
 /**
  * 🔴 **空きが尽きる前に言う**(#971 段②)。
  *
@@ -5,6 +6,7 @@
  *   逆へ倒れると、user は**いちばん危ない環境で安心する**。
  */
 import { describe, expect, it } from 'vitest';
+import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
 import {
   QUOTA_ALARM_RATIO,
   QUOTA_WARN_RATIO,
@@ -73,6 +75,17 @@ describe('画面に出す字(#971 段②)', () => {
     expect(s).toContain('「使われていない添付を消す」');
     expect(s).toContain('「バックアップ」');
     noMarkup(s);
+  });
+
+  /**
+   * 🔴 **注意の段でも、次の一手(押す場所)を書く**(#1087)。⚠ 直す前は「整理しておくと安全です」だけで、
+   * どこを押せば重いノートが分かるのかが無かった。ボタンの字は**画面から引く**(手で書かない)。
+   */
+  it('🔴 空きが少なくなってきたときも、重いノートを探す場所を言う(字は画面のボタンから引く)', () => {
+    const label = buildSettingsCommands().querySelector('[data-pkc-field="storage-profile-run"]')?.textContent;
+    expect(label, 'ボタンが画面に無い(空振り)').toBeTruthy();
+    const s = quotaText({ usage: 85 * GB, quota: 100 * GB });
+    expect(s).toContain(`システム → 保存領域 →「${label}」`);
   });
 
   it('⚠ 読めなかったときは、読めなかったと言う(0 と言わない)', () => {

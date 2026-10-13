@@ -300,10 +300,24 @@ function buildVacuumPanel(): HTMLElement {
  * 何を消す / 戻すかは `features/storage/container-{reset,rebuild}.ts` が持つ。
  * ここは**押し口だけ**である。
  */
+const REPAIR_SHOW_LABEL = '作り直す・初期化するボタンを表示';
+const REPAIR_HIDE_LABEL = '作り直す・初期化するボタンを隠す';
+
+/**
+ * 🔴 **開閉の押し口の字と `aria-expanded` を、開閉に合わせる**(#1087)。⚠ 開いているのに
+ * 「表示」のままだと、押すと何が起きるかが字から読めない。開閉の 2 か所
+ * (`toggle-container-repair` と、問題が見つかったときに開いた状態で出す所)が同じこの口を通る。
+ */
+export function setContainerRepairToggle(toggle: Element, open: boolean): void {
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const label = toggle.querySelector('[data-pkc-field="label"]');
+  if (label) label.textContent = open ? REPAIR_HIDE_LABEL : REPAIR_SHOW_LABEL;
+}
+
 function buildContainerRepair(): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  const toggle = iconButton('toggle-container-repair', '作り直す・初期化するボタンを表示');
+  const toggle = iconButton('toggle-container-repair', REPAIR_SHOW_LABEL);
   toggle.setAttribute('aria-expanded', 'false');
   toggle.title = 'ここを押すと、「作り直す」と「初期化する」の 2 つのボタンが出ます';
   frag.append(toggle);

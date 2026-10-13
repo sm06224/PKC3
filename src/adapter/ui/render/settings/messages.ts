@@ -78,13 +78,17 @@ export function createMessagesSection(region: HTMLElement): SettingsSection {
       exportBtn.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
       exportBtn.textContent = 'メッセージを書き出す';
       exportBtn.title = 'ノートの中身・題名・添付名は書き込まれません。バグ報告に貼れます。';
+      // 🔴 hover だけだと指で触る端末では読まれない ── 約束は画面に出しておく(#1087。45 字で 1 行に収まる)
+      const exportNote = buildSettingsNote(
+        'ノートの中身・題名・添付名は書き込まれません。バグ報告にはこのメッセージを貼ってください。',
+      );
 
       // ⚠ 保管件数が効くのはメッセージだけ ── 処理の記録の上限は別(#1087。数は定数から組む)
       const note = buildSettingsNote(
         `保管件数を超えると、古い知らせから消えます(処理の記録は ${JOB_CAP.toLocaleString('ja-JP')} 件まで)。`,
       );
 
-      wrap.append(open, openJobs, dl, exportBtn, note);
+      wrap.append(open, openJobs, dl, exportBtn, exportNote, note);
       return wrap;
     },
     /** ⚠ 未読は毎 state で変わりうる(器は触らない ── 字とボタンの列の押され方だけ差し替える)。 */

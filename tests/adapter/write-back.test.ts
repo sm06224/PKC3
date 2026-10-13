@@ -299,7 +299,7 @@ describe('元のファイルへ書き戻す', () => {
       write: async () => ({ ok: false, reason: 'ファイルへの書込を許可されませんでした' }),
     });
     await writeBackEntry(deps);
-    expect(said).toEqual(['fail:メモ.md: ファイルへの書込を許可されませんでした']);
+    expect(said).toEqual(['fail:「メモ.md」: ファイルへの書込を許可されませんでした']);
   });
 });
 

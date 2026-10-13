@@ -73,9 +73,9 @@ export async function importVcfFiles(
         folded.set(key, (folded.get(key) ?? 0) + 1);
       }
       for (const [key, n] of folded)
-        notes.push(n === 1 ? `${file.name}: ${key}` : `${file.name}: ${key}(${n} 枚)`);
+        notes.push(n === 1 ? `「${file.name}」: ${key}` : `「${file.name}」: ${key}(${n} 枚)`);
       if (parsed.cards.length === 0) {
-        notes.push(`${file.name}: 連絡先が 1 枚も読めませんでした`);
+        notes.push(`「${file.name}」: 連絡先が 1 枚も読めませんでした`);
         continue;
       }
       for (const card of parsed.cards) {
@@ -87,7 +87,7 @@ export async function importVcfFiles(
          */
         const title = note.title !== '' ? note.title : `連絡先 ${++unnamed}`;
         if (note.title === '')
-          notes.push(`${file.name}: 名前の無いカードに「${title}」と付けました`);
+          notes.push(`「${file.name}」: 名前の無いカードに「${title}」と付けました`);
         const ext = extractMeta('text', note.body);
         rows.push({
           lid: deps.genLid(),

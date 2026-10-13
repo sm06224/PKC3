@@ -217,7 +217,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
       // `readInnerBundles` が lid の重複自体は言うが、所属が落ちたことは別に言う
       if (childOf.has(b.main.lid)) {
         warnings.push(
-          `${b.filename}: ID が重複しているためフォルダ所属を復元できません(${b.main.lid})` +
+          `「${b.filename}」: ID が重複しているためフォルダ所属を復元できません(${b.main.lid})` +
             '。最上位に置きます',
         );
         continue;
@@ -262,7 +262,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   }
   for (const e of dir) {
     if (e.isDirectory || e.name === MANIFEST || inner.used.has(e.name)) continue;
-    warnings.push(`manifest に無いファイルを無視しました: ${e.name}`);
+    warnings.push(`manifest に無いファイルを無視しました: 「${e.name}」`);
   }
 
   return {

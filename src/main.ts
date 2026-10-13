@@ -202,6 +202,7 @@ import { connectDraftWriter } from '@adapter/platform/draft-writer';
 import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-store';
 import type { DraftClock } from '@features/draft/draft-recovery';
 import {
+  fixedHeadOfOpError,
   messageKindForOpError,
   quotaCaution,
   reservedLockCaution,
@@ -1916,7 +1917,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           kind: 'caution',
         }),
       onLoadFailed: (session) =>
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `PDF を開けませんでした: ${session.name}` }),
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `PDF を開けませんでした: 「${session.name}」` }),
       onOpenFailed: () =>
         dispatcher.dispatch({
           type: 'OP_FAILED',
@@ -2244,6 +2245,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         kind: messageKindForOpError(state.error),
         source: 'app',
         text: state.error,
+        // 🔴 アプリが書いた固定の断り文は括弧も字数も潰さない(案内のボタン名と次の一手を残す。#1087)
+        fixedHead: fixedHeadOfOpError(state.error),
       });
     } else if (state.error === null) {
       lastPostedError = null;
@@ -3674,7 +3677,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           if (!kind) {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `この種類は別のウィンドウで開けません: ${name}`,
+              error: `この種類は別のウィンドウで開けません: 「${name}」`,
             });
             return;
           }
@@ -3700,7 +3703,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           }
           const lent = await blobs.lendObjectUrl(cid, assetKey);
           if (!lent) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `添付が見つかりません: ${name}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `添付が見つかりません: 「${name}」` });
             return;
           }
           const win = await openAssetWindow({
@@ -3720,7 +3723,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付を開けませんでした(${name}): ${errorText(e)}`,
+            error: `添付を開けませんでした(「${name}」): ${errorText(e)}`,
           });
         }
       })();
@@ -3846,7 +3849,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         if (!lent) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付が見つかりません: ${name}`,
+            error: `添付が見つかりません: 「${name}」`,
           });
           return;
         }
@@ -3855,7 +3858,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `ダウンロードに失敗しました(${name}): ${errorText(e)}`,
+          error: `ダウンロードに失敗しました(「${name}」): ${errorText(e)}`,
         });
       }
     },

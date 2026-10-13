@@ -124,7 +124,7 @@ export async function readEntryBundleParts(
     if (e.isDirectory || !e.name.startsWith(ASSET_PREFIX)) continue;
     const key = e.name.slice(ASSET_PREFIX.length);
     if (key === '' || key.includes('/')) {
-      warnings.push(`assets/ の中の想定外のファイルを無視しました: ${e.name}`);
+      warnings.push(`assets/ の中の想定外のファイルを無視しました: 「${e.name}」`);
       continue;
     }
     if (assets.has(key)) {

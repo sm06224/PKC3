@@ -238,7 +238,7 @@ function mergeAssets(
       prev.source.entry.uncompressedSize !== a.source.entry.uncompressedSize
     ) {
       throw new ZipReadError(
-        `同じ添付 ID が違う中身で入っています(${key}: ${filename})。取り込めません`,
+        `同じ添付 ID が違う中身で入っています(${key}: 「${filename}」)。取り込めません`,
       );
     }
     // 🔑 **複製を控えに残す**(review M-5)。判定は中央ディレクトリの crc/size
@@ -250,7 +250,7 @@ function mergeAssets(
     if (prev.name !== a.name || prev.mime !== a.mime) {
       // bytes は同じなので畳めるが、見え方が変わる ── 黙って選ばない
       warnings.push(
-        `${filename}: 添付 ${key} の名前(${prev.name} / ${a.name})か種別` +
+        `「${filename}」: 添付 ${key} の名前(「${prev.name}」 / 「${a.name}」)か種別` +
           `(${prev.mime} / ${a.mime})がファイルごとに違います。先のほうを使います`,
       );
     }
@@ -277,7 +277,7 @@ export async function readInnerBundles(
   for (const e of dir) {
     if (e.isDirectory) continue;
     if (byName.has(e.name)) {
-      throw new ZipReadError(`同じ名前のファイルが 2 つあります: ${e.name}(この zip は読み取れません)`);
+      throw new ZipReadError(`同じ名前のファイルが 2 つあります: 「${e.name}」(この zip は読み取れません)`);
     }
     byName.set(e.name, e);
     const n = e.name.normalize('NFC');
@@ -309,7 +309,7 @@ export async function readInnerBundles(
     }
     // PKC2 は同じ filename が 2 回並ぶと**同じ内容を 2 回取り込んで**いた
     if (used.has(filename)) {
-      throw new ZipReadError(`manifest が同じファイルを 2 回並べています: ${filename}`);
+      throw new ZipReadError(`manifest が同じファイルを 2 回並べています: 「${filename}」`);
     }
     used.add(filename);
 
@@ -327,10 +327,10 @@ export async function readInnerBundles(
       // ── 原因に辿り着けない。正規化して引き直し、当たったら**言う**
       const hit = byNfc.get(filename.normalize('NFC'));
       if (!hit) {
-        throw new ZipReadError(`manifest にあるファイルが zip に入っていません: ${filename}`);
+        throw new ZipReadError(`manifest にあるファイルが zip に入っていません: 「${filename}」`);
       }
       warnings.push(
-        `${filename}: manifest.json と zip でファイル名の文字表記が違います(${hit.name} を使います)`,
+        `「${filename}」: manifest.json と zip でファイル名の文字表記が違います(「${hit.name}」を使います)`,
       );
       inner = hit;
     }
@@ -360,7 +360,7 @@ export async function readInnerBundles(
       // 「読めるところだけ読む」が悪いのは**黙って**やるからで、
       // どのファイルを何の理由で落としたかを言うなら静かではない
       failed.push(filename);
-      warnings.push(`${filename}: 取り込めませんでした: ${errorText(e)}`);
+      warnings.push(`「${filename}」: 取り込めませんでした: ${errorText(e)}`);
       continue;
     }
 
@@ -370,7 +370,7 @@ export async function readInnerBundles(
     // 食い違うのは組み立ての事故なので見せる
     const innerLid = parts.manifest.source_lid ?? '';
     if (typeof me.lid === 'string' && me.lid !== '' && innerLid !== '' && me.lid !== innerLid) {
-      warnings.push(`${filename}: manifest.json と中身で ID が違います(${me.lid} ≠ ${innerLid})`);
+      warnings.push(`「${filename}」: manifest.json と中身で ID が違います(${me.lid} ≠ ${innerLid})`);
     }
     const innerTitle = parts.manifest.source_title ?? '';
     if (
@@ -379,7 +379,7 @@ export async function readInnerBundles(
       innerTitle !== '' &&
       me.title !== innerTitle
     ) {
-      warnings.push(`${filename}: manifest.json と中身で題名が違います(${me.title} ≠ ${innerTitle})`);
+      warnings.push(`「${filename}」: manifest.json と中身で題名が違います(「${me.title}」 ≠ 「${innerTitle}」)`);
     }
 
     // 🔴 内側 lid の重複を**言う**(review H-1)。`readBundleParts` は
@@ -390,7 +390,7 @@ export async function readInnerBundles(
     const dupOf = lidSeen.get(parts.main.lid);
     if (dupOf !== undefined) {
       warnings.push(
-        `${filename}: 中身の ID が ${dupOf} と同じです(${parts.main.lid})` +
+        `「${filename}」: 中身の ID が ${dupOf} と同じです(${parts.main.lid})` +
           '。別のノートとして取り込みます',
       );
     } else {
@@ -404,7 +404,7 @@ export async function readInnerBundles(
         anyCompacted = true;
         continue;
       }
-      warnings.push(`${filename}: ${w}`);
+      warnings.push(`「${filename}」: ${w}`);
     }
     mergeAssets(assets, alternates, parts.assets, filename, warnings);
   }
@@ -482,7 +482,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   // manifest に無いファイル ── PKC2 は無言で捨てていた
   for (const e of dir) {
     if (e.isDirectory || e.name === MANIFEST || used.has(e.name)) continue;
-    warnings.push(`manifest に無いファイルを無視しました: ${e.name}`);
+    warnings.push(`manifest に無いファイルを無視しました: 「${e.name}」`);
   }
 
   // 🔴 「読めたつもりで 0 件」を作らない ── この repo が一番嫌う結果。

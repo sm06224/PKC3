@@ -94,6 +94,33 @@ export interface MessageSectionInput {
 }
 
 /**
+ * 🔴 **出所の画面の字**(内部の名前を英語のまま見せない)。
+ * `app` / `status` は「どこから」を言う意味が無いので空(出所を書かない)。
+ * ⚠ 表に無い名前(ワーカーの記録の lane 名・「貼り付け」など既に日本語のもの)はそのまま。
+ */
+export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
+  app: '',
+  status: '',
+  quota: '保存領域の空き',
+  storage: '保存先',
+  notice: 'お知らせ',
+  schedule: '予定',
+  'portable-boot': 'PKC3 入り HTML の起動',
+  'office-profile': 'Office',
+  'db-rescue-rebuild': 'ノートの保存データの作り直し',
+  'db-rescue-reset': 'ノートの保存データの初期化',
+  'storage-vacuum': '保存領域を縮める',
+  'storage-optimize': '索引の整理',
+  'force-release': '書き込みの強制終了',
+};
+
+export function messageSourceLabel(source: string): string {
+  return Object.prototype.hasOwnProperty.call(MESSAGE_SOURCE_LABEL, source)
+    ? (MESSAGE_SOURCE_LABEL[source] as string)
+    : source;
+}
+
+/**
  * 1 件の節を組む。
  *
  * ⚠ **見出しは `textlog-flavor.ts` と同じ形**(`## YYYY-MM-DD HH:mm:ss`)を使う ──
@@ -105,7 +132,9 @@ export interface MessageSectionInput {
 export function formatMessageSection(input: MessageSectionInput): string {
   const heading = `## ${formatHeadingTimestamp(input.at)}`;
   const label = MESSAGE_KIND_LABEL[input.kind];
-  return `${heading}\n**${label}** ${input.source}: ${input.text}\n\n`;
+  const source = messageSourceLabel(input.source);
+  // 出所が無い(`app` / `status`)ときは「種類 文」だけ ── 英語の内部名を画面に出さない
+  return source === '' ? `${heading}\n**${label}** ${input.text}\n\n` : `${heading}\n**${label}** ${source}: ${input.text}\n\n`;
 }
 
 /**
@@ -120,7 +149,16 @@ export function formatMessageSection(input: MessageSectionInput): string {
 const QUOTE_RE = /「[^」]*」|『[^』]*』/g;
 const MAX_MESSAGE_TEXT_LENGTH = 80;
 
-export function sanitizeMessageText(text: string): string {
+export function sanitizeMessageText(text: string, fixedHead = ''): string {
+  /**
+   * 🔴 **アプリが書いた固定の文は、そのまま通す**(#1087)。⚠ 括弧で潰すと、案内に出てくるボタンの名前
+   * (「容量の内訳」など ── user のデータではない)が「…」になり、80 字で切ると「次にすること」が落ちる。
+   * 先頭が `fixedHead` と一致するときだけ、その部分を通し、残り(生の例外の字など)は今までどおり潰して切る。
+   */
+  if (fixedHead !== '' && text.startsWith(fixedHead)) {
+    const rest = text.slice(fixedHead.length);
+    return fixedHead.replace(/\r?\n/g, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
+  }
   const collapsed = text.replace(QUOTE_RE, (m) => (m.charAt(0) === '「' ? '「…」' : '『…』'));
   const flattened = collapsed.replace(/\r?\n/g, ' ');
   return flattened.length > MAX_MESSAGE_TEXT_LENGTH

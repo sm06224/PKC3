@@ -137,6 +137,7 @@ import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
+import { setContainerRepairToggle } from '@adapter/ui/render/commands';
 import { isIconName } from '@features/icon/symbols';
 import {
   insertBlockText,
@@ -6622,7 +6623,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const box = root.querySelector<HTMLElement>('[data-pkc-field="container-repair-box"]');
     if (!box) return;
     box.hidden = !box.hidden;
-    target.setAttribute('aria-expanded', box.hidden ? 'false' : 'true');
+    setContainerRepairToggle(target, !box.hidden);
   },
   /**
    * 🔴 **全部置換**(#191)。⚠ 判定(編集中か / 何件当たるか)は**reducer 1 か所**。
@@ -11089,7 +11090,7 @@ const ACTIONS: Record<string, ActionHandler> = {
             '[data-pkc-action="toggle-container-repair"]',
           );
           if (repairBox) repairBox.hidden = false;
-          repairToggle?.setAttribute('aria-expanded', 'true');
+          if (repairToggle) setContainerRepairToggle(repairToggle, true);
         }
       },
       (e: unknown) => {

@@ -187,8 +187,8 @@ describe('素の md を取り込む', () => {
       mdFile('---\narchetype: nope\n---\n', 'b.md'),
     ]);
     const notes = h.reported().join('\n');
-    expect(notes).toContain('写真.md:');
-    expect(notes).toContain('b.md:');
+    expect(notes).toContain('「写真.md」:');
+    expect(notes).toContain('「b.md」:');
     expect(h.reported().length).toBe(2);
     // 1 行の status には件数だけ
     expect(h.notices.at(-1)).toContain('注意 2 件');

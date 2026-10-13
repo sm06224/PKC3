@@ -148,7 +148,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
     const m = ASSET_RE.exec(e.name);
     if (!m) {
       // PKC2 は `.bin` 以外を**無警告で無視**していた ── 黙って落とさない
-      warnings.push(`assets/ の中の想定外のファイルを無視しました: ${e.name}`);
+      warnings.push(`assets/ の中の想定外のファイルを無視しました: 「${e.name}」`);
       continue;
     }
     const key = m[1]!;
@@ -156,7 +156,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
     // `..` / 絶対パス / null バイト等は PKC3 では FS に書かないので traversal 自体は
     // 無害だが、key としては不正 ── PKC2 も `INVALID_ASSET_KEY` で弾いていた
     if (!VALID_KEY.test(key)) {
-      warnings.push(`添付の ID として不正な名前を無視しました: ${e.name}`);
+      warnings.push(`添付の ID として不正な名前を無視しました: 「${e.name}」`);
       continue;
     }
     if (assetSources.has(key)) {

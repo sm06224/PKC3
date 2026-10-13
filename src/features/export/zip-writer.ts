@@ -161,7 +161,7 @@ export class ZipWriter {
     if (name === '') throw new ZipWriteError('名前が空のファイルは書けません');
     // ⚠ 同名を許すと reader が「後勝ちで片方を静かに捨てる」形になる ── 出さない
     if (this.names.has(name)) {
-      throw new ZipWriteError(`同じ名前のファイルを 2 回書こうとしました: ${name}`);
+      throw new ZipWriteError(`同じ名前のファイルを 2 回書こうとしました: 「${name}」`);
     }
     const nameBytes = enc.encode(name);
     const { crc, size, bytes } = await measure(parts);

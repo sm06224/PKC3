@@ -33,11 +33,14 @@ import {
 import {
   EDIT_ELSEWHERE_ERROR,
   RESERVED_LOCK_CAUTION_TEXT,
+  fixedHeadOfOpError,
   messageKindForOpError,
   quotaCaution,
   reservedLockCaution,
 } from '../../src/features/message/caution-events';
 import { BANNED_TERMS } from '../../src/features/ui-terms';
+import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
+import { WRITE_QUOTA_REFUSAL } from '../../src/features/storage/write-quota';
 import {
   JOB_CAP,
   MESSAGE_CAP_DEFAULT,
@@ -94,13 +97,68 @@ describe('保存先の空きが少ない → 「注意」', () => {
     await flush();
     const req = appendMessage.mock.calls[0]?.[0] as { lid: string; section: string; cap: number };
     expect(req.lid).toBe(SYSTEM_MESSAGE_LID);
-    expect(req.section).toContain('**注意** quota');
+    expect(req.section).toContain('**注意** 保存領域の空き: ');
     expect(req.section).not.toContain('**問題**');
     // 保管件数の決まりに乗る(user の選んだ上限。処理の 5,000 件ではない)
     expect(req.cap).toBe(MESSAGE_CAP_DEFAULT);
     expect(req.cap).not.toBe(JOB_CAP);
     expect(countUnread(req.section, null)).toBe(1);
     expect(unread).toEqual([1]);
+  });
+});
+
+describe('固定の案内文は、案内のボタン名も「次にすること」も落とさずに積む(#1087)', () => {
+  const sectionOf = async (input: Parameters<MessagePost['post']>[0]): Promise<string> => {
+    const post = new MessagePost(new FakeSpool());
+    const appendMessage = vi.fn().mockResolvedValue(undefined);
+    post.attach({ cid: 'c1', appendMessage });
+    post.post(input);
+    await flush();
+    return (appendMessage.mock.calls[0]?.[0] as { section: string }).section;
+  };
+
+  it('🔴 空きが危ない注意: 80 字で切れず、「使われていない添付を消す」が「…」に潰れない', async () => {
+    const c = quotaCaution(at(QUOTA_ALARM_RATIO))!;
+    expect(c.text.length).toBeGreaterThan(80); // 切られる長さであること(空振り防止)
+    const section = await sectionOf(c);
+    expect(section).toContain(c.text);
+    expect(section).toContain('「使われていない添付を消す」');
+  });
+
+  it('🔴 書き込みの断り(OP_FAILED の固定文)も同じ ── 続く生の字だけ潰して切る', async () => {
+    const head = fixedHeadOfOpError(WRITE_QUOTA_REFUSAL);
+    expect(head).toBe(WRITE_QUOTA_REFUSAL);
+    const section = await sectionOf({ kind: 'problem', source: 'app', text: WRITE_QUOTA_REFUSAL, fixedHead: head });
+    expect(section).toContain(WRITE_QUOTA_REFUSAL);
+    expect(section).toContain('「容量の内訳」');
+    const corrupt = await sectionOf({
+      kind: 'problem',
+      source: 'app',
+      text: `${CORRUPT_REFUSAL}(open で検出: 「秘密.pdf」)`,
+      fixedHead: fixedHeadOfOpError(`${CORRUPT_REFUSAL}(open で検出: 「秘密.pdf」)`),
+    });
+    expect(corrupt).toContain(CORRUPT_REFUSAL);
+    expect(corrupt).not.toContain('秘密');
+  });
+
+  it('対照群: 固定の文でない OP_FAILED は頭が空 ── 括弧は潰れ、80 字で切れる', async () => {
+    expect(fixedHeadOfOpError('PDF を開けませんでした: 「秘密.pdf」')).toBe('');
+    expect(fixedHeadOfOpError(EDIT_ELSEWHERE_ERROR)).toBe(EDIT_ELSEWHERE_ERROR);
+    const section = await sectionOf({
+      kind: 'problem',
+      source: 'app',
+      text: `「秘密.pdf」${'あ'.repeat(120)}`,
+      fixedHead: '',
+    });
+    expect(section).not.toContain('秘密');
+    expect(section).toContain('…');
+  });
+
+  it('空きの注意と書き込みの強制終了の出所は、日本語で積まれる', async () => {
+    const lock = reservedLockCaution({ vfs: 'opfs-sahpool', reservedLockPatched: false, reservedLockUpstreamFixed: false })!;
+    const section = await sectionOf(lock);
+    expect(section).toContain('**注意** 保存先: ');
+    expect(section).toContain(lock.text);
   });
 });
 
@@ -213,7 +271,8 @@ describe('別のタブが同じノートを編集中 → 「注意」(binder か
     await flush();
     const req = appendMessage.mock.calls[0]?.[0] as { section: string; lid: string };
     expect(req.lid).toBe(SYSTEM_MESSAGE_LID);
-    expect(req.section).toContain('**注意** app');
+    expect(req.section).toContain('**注意** このノートは別のタブ');
+    expect(req.section).not.toContain('app:');
     // 文の括弧(…)は「…」ではないので潰されない(読める形で残る)
     expect(req.section).toContain('別のタブまたはウィンドウで編集中です');
   });
@@ -226,6 +285,10 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
   it('main.ts: OP_FAILED の種類を文で決め、固定の「問題」を書かない', () => {
     expect(main).toContain('kind: messageKindForOpError(state.error)');
     expect(main).not.toMatch(/kind:\s*'problem',\s*source:\s*'app',\s*text:\s*state\.error/);
+  });
+
+  it('main.ts: OP_FAILED の固定の断り文は、固定の頭を渡して積む(括弧と字数を潰さない。#1087)', () => {
+    expect(main).toMatch(/text:\s*state\.error,\s*fixedHead:\s*fixedHeadOfOpError\(state\.error\)/);
   });
 
   it('main.ts: 空きが少ないとき、メッセージへ積み、画面下の 1 行も今までどおり出す', () => {

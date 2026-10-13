@@ -98,7 +98,7 @@ export async function importMarkdownFiles(
       const parsed = readPlainMarkdown(await file.text(), file.name);
       // 注意は**どのファイルのものか**を言う ── 複数選択で「参照 3 件」とだけ
       // 出ても、どれを直せばいいのか分からない
-      for (const w of parsed.warnings) notes.push(`${file.name}: ${w}`);
+      for (const w of parsed.warnings) notes.push(`「${file.name}」: ${w}`);
       const ext = extractMeta(parsed.archetype, parsed.body);
       rows.push({
         lid: deps.genLid(),

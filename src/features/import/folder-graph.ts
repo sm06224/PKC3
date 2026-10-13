@@ -111,13 +111,13 @@ export function buildFolderGraph(
     const p = f.parentLid;
     if (p === null || p === '') continue; // export root
     if (p === f.lid) {
-      warnings.push(`自分自身を親にしているフォルダの親子関係を外しました: ${f.title}`);
+      warnings.push(`自分自身を親にしているフォルダの親子関係を外しました: 「${f.title}」`);
       continue;
     }
     if (!byLid.has(p)) {
       // PKC2 は「選択 entry の祖先」しか folders[] に入れないことがある ──
       // 親が居ないなら root 直下に置く。**黙って平坦にしない**(§4-K)
-      warnings.push(`親フォルダが書き出しに含まれていません: ${f.title}(最上位に置きます)`);
+      warnings.push(`親フォルダが書き出しに含まれていません: 「${f.title}」(最上位に置きます)`);
       continue;
     }
     parentOf.set(f.lid, p);

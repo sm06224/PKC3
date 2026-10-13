@@ -372,7 +372,7 @@ async function verifyStream(
 function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry): void {
   if (actualSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip のファイルサイズが内容一覧(中央ディレクトリ)と違います(${entry.name}: ${actualSize} ≠ ${entry.uncompressedSize})`,
+      `zip のファイルサイズが内容一覧(中央ディレクトリ)と違います(「${entry.name}」: ${actualSize} ≠ ${entry.uncompressedSize})`,
     );
   }
   if (actualCrc !== entry.crc32) {
@@ -380,7 +380,7 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
     // ⚠ 「entry の出所が違う」でも同じ症状になる(別 ZIP の entry を渡した等)ので、
     // user のデータを一方的に疑う文面にしない(改ざんをほのめかさない)
     throw new ZipReadError(
-      `zip の中身を最後まで読めませんでした(ダウンロードが途中で切れた可能性があります)(${entry.name})`,
+      `zip の中身を最後まで読めませんでした(ダウンロードが途中で切れた可能性があります)(「${entry.name}」)`,
     );
   }
 }
@@ -393,16 +393,16 @@ function assertIntegrity(actualCrc: number, actualSize: number, entry: ZipEntry)
  * どちらもピークは「返す 1 件」に有界。
  */
 export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
-  if (entry.isDirectory) throw new ZipReadError(`ディレクトリの中身は読めません: ${entry.name}`);
+  if (entry.isDirectory) throw new ZipReadError(`ディレクトリの中身は読めません: 「${entry.name}」`);
   if (entry.method !== 0 && entry.method !== 8) {
     throw new ZipReadError(
-      `未対応の圧縮方式です(method=${entry.method}): ${entry.name}。store か deflate のみ扱えます`,
+      `未対応の圧縮方式です(method=${entry.method}): 「${entry.name}」。store か deflate のみ扱えます`,
     );
   }
   // store は「圧縮後 = 圧縮前」が method 0 の定義。食い違いは目次の壊れ
   if (entry.method === 0 && entry.compressedSize !== entry.uncompressedSize) {
     throw new ZipReadError(
-      `zip の内容一覧(中央ディレクトリ)のサイズが合いません(${entry.name}: store なのに一致しません)`,
+      `zip の内容一覧(中央ディレクトリ)のサイズが合いません(「${entry.name}」: store なのに一致しません)`,
     );
   }
 
@@ -411,19 +411,19 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   // ⚠ local header の extra 長は **CD の extra 長と違ってよい**(Info-ZIP は実際に
   // 違う)── local 側の値でデータ開始位置を出すこと
   if (entry.localHeaderOffset + 30 > zip.size) {
-    throw new ZipReadError(`zip のヘッダが範囲外です: ${entry.name}`);
+    throw new ZipReadError(`zip のヘッダが範囲外です: 「${entry.name}」`);
   }
   const lh = new DataView(
     await zip.slice(entry.localHeaderOffset, entry.localHeaderOffset + 30).arrayBuffer(),
   );
   if (lh.getUint32(0, true) !== LOCAL_SIG) {
-    throw new ZipReadError(`zip のヘッダ署名が不正です: ${entry.name}`);
+    throw new ZipReadError(`zip のヘッダ署名が不正です: 「${entry.name}」`);
   }
   const start =
     entry.localHeaderOffset + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
   const end = start + entry.compressedSize;
   if (end > zip.size) {
-    throw new ZipReadError(`zip のデータが範囲外です: ${entry.name}`);
+    throw new ZipReadError(`zip のデータが範囲外です: 「${entry.name}」`);
   }
 
   const slice = zip.slice(start, end); // ← コピーしない
@@ -453,7 +453,7 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   } catch (e) {
     const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
     throw new ZipReadError(
-      `zip の圧縮データを展開できませんでした(${entry.name})${detail}`,
+      `zip の圧縮データを展開できませんでした(「${entry.name}」)${detail}`,
     );
   }
   assertIntegrity((state ^ 0xffffffff) >>> 0, size, entry);

@@ -4555,7 +4555,7 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
     addLocal(s, new File([new Uint8Array(8)], '帳簿.xlsx'));
     await settle();
     expect(chips(s.pane), '.xlsx が足せてしまっている').toEqual([]);
-    expect(s.note()).toContain('帳簿.xlsx は DuckDB で読めないので足せません');
+    expect(s.note()).toContain('「帳簿.xlsx」は DuckDB で読めないので足せません');
     expect(s.engineSel.value, '足せていないのに engine が動いた').toBe('sqlite');
     // 🔴 断った file の控えは手放す(File を握ったまま残さない)
     expect(seen).toHaveLength(1);
