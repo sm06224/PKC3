@@ -481,7 +481,18 @@ describe('表の升の中のリンク(#708 段④)', () => {
     setup(LINKED, 'ready');
     const link = document.querySelector<HTMLElement>('[data-pkc-field="detail-body"] a[href]');
     expect(link, '前提: 升の中にリンクが描かれていない').not.toBeNull();
-    link!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    /**
+     * ⚠ **既定の動作(ページの移動)だけを、最後に止める**(#1087)── 止めないと happy-dom が
+     *   `https://example.com/` を本当に取りに行き、全量の test の出力にネットワークの例外が常に残る
+     *   (本物の例外がそこに紛れる)。`window` の泡の段 = アプリの受け手が全部走った後なので、見ている物は変わらない。
+     */
+    const stopNav = (ev: Event): void => ev.preventDefault();
+    window.addEventListener('click', stopNav);
+    try {
+      link!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    } finally {
+      window.removeEventListener('click', stopNav);
+    }
     expect(
       document.querySelector('[data-pkc-field="cell-input"]'),
       'リンクを押したら升の入力欄が開いた',
