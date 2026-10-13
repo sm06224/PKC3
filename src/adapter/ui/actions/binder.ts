@@ -265,6 +265,8 @@ import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import {
   canEnterScope,
   getAncestorFolders,
+  getRootEntries,
+  getStructuralChildren,
   listMoveTargets,
   listSiblings,
   resolveCanonicalParents,
@@ -284,6 +286,7 @@ import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
 import { offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
+import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
@@ -982,6 +985,20 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
     // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
     flatten: false,
   });
+};
+
+/**
+ * 🔴 **そのペインに出ている行を全部選ぶ ── Ctrl+A と列見出しのチェックの実体は 1 本**(Gemini 裁定 = #1163 への依頼 62)。
+ * ⚠ 範囲は「見えている並び」の先頭から末尾(絞り込みで消えた行は入らない)。行が 0 件なら何も起きないので `false`。
+ */
+const dualSelectAll = (dispatcher: Dispatcher, side: DualSide): boolean => {
+  const rows = dualPaneRows(dispatcher.getState(), side);
+  const first = rows[0]?.lid;
+  const last = rows[rows.length - 1]?.lid;
+  if (first === undefined || last === undefined) return false;
+  dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: first, mode: 'set' });
+  if (last !== first) dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: last, mode: 'range' });
+  return true;
 };
 
 /**
@@ -2458,6 +2475,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'restore-trash',
   // 🔴 ゴミ箱へ移した直後の「元に戻す」(#1087 流れ 29)── `restore-trash` と同じ復元なので同じ門
   'undo-trash',
+  // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
+  'undo-dual-move',
   'purge-trash',
   /**
    * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
@@ -7385,6 +7404,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     const side = dualSide(target);
     if (side) dispatcher.dispatch({ type: 'DUAL_FOCUS', side });
   },
+  /**
+   * 🔴 **列見出しの「全部選ぶ」チェック**(Ctrl+A のマウス版。Gemini 裁定 = #1163 への依頼 62)。
+   * ⚠ 実体は Ctrl+A と同じ `dualSelectAll`。全部選んでいるときに押したら**選びを外す**(チェックの作法)。
+   */
+  'dual-select-all': (dispatcher, target) => {
+    const side = dualSide(target);
+    if (!side) return;
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}フォルダの操作をしてください` });
+      return;
+    }
+    dispatcher.dispatch({ type: 'DUAL_FOCUS', side });
+    const rows = dualPaneRows(st, side);
+    const marked = new Set(paneOf(st.dual, side).selection);
+    const all = rows.length > 0 && rows.every((m) => marked.has(m.lid));
+    if (all) dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
+    else dualSelectAll(dispatcher, side);
+  },
   'dual-row': (dispatcher, target) => {
     const side = dualSide(target);
     const lid = target.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry');
@@ -7634,6 +7672,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
       return;
     }
+    /**
+     * 🔴 **行き先に同じ題名のノートが既にあるか**(Gemini 裁定 = #1163 への依頼 62 の 5)── 数えるのは選んだ物(中身は数えない)。
+     * ⚠ 止めない(知らせに添えるだけ)。行き先の絞り込みで隠れている物も数える(見えていなくても在る)。
+     */
+    const toScopeLid = paneScope(paneOf(st.dual, to));
+    const existing = new Set(
+      (toScopeLid === null
+        ? getRootEntries(st.entryMetas, st.relations)
+        : getStructuralChildren(toScopeLid, st.entryMetas, st.relations)
+      ).map((m) => m.title),
+    );
     const steps = planCopy(
       lids,
       paneScope(paneOf(st.dual, to)),
@@ -7641,6 +7690,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       st.relations,
       generateLid,
     );
+    // ⚠ 数えるのは**できあがる題名**(同じ場所へのコピーは「のコピー」が付くので、ぶつからない)
+    const picked = new Set(lids);
+    const sameTitle = steps.filter((x) => picked.has(x.sourceLid) && existing.has(x.title)).length;
     void read(steps.map((s) => s.sourceLid)).then(
       (bodies) => {
         let missing = 0;
@@ -7688,10 +7740,15 @@ const ACTIONS: Record<string, ActionHandler> = {
           steps.length > count
             ? `${count} 件(中身を含め ${steps.length} 件)を「${where}」へコピーしました`
             : `${count} 件を「${where}」へコピーしました`;
+        const notes = [
+          ...(sameTitle > 0 ? [`うち ${String(sameTitle)} 件は、同じ題名のノートが既にあります`] : []),
+          ...(missing > 0 ? [`うち ${String(missing)} 件は本文を読めず、空で作りました`] : []),
+        ];
+        const said = notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
         if (missing > 0) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `${head}(うち ${missing} 件は本文を読めず、空で作りました)` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: said });
         } else {
-          services.showStatus?.(head);
+          services.showStatus?.(said);
         }
         dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
       },
@@ -7740,7 +7797,15 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const before = st.relations;
-    moveEntries(dispatcher, lids, to, services.showStatus);
+    /**
+     * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)── 動く前の親を控えておき、動いた物だけ戻せるようにする。
+     * ⚠ 知らせの字は `moveEntries` が組む 1 本をそのまま使う(別の綴りを作らない)。動かなかった回は従来どおり `showStatus` に出す。
+     */
+    const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
+    let said = '';
+    moveEntries(dispatcher, lids, to, (text) => {
+      said = text;
+    });
     /**
      * 🔴 **動いた回だけ印を外す**(着地前レビュー R1)。
      * ⚠ `moveEntries` は編集中・全件拒否で**何もせず返る**ので、無条件に外すと
@@ -7749,8 +7814,54 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   必ず踏む筋である)。
      * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
      */
-    if (dispatcher.getState().relations !== before)
+    if (dispatcher.getState().relations !== before) {
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+      const parentsAfter = resolveCanonicalParents(
+        dispatcher.getState().entryMetas,
+        dispatcher.getState().relations,
+      );
+      const moves = lids
+        .filter((lid) => (parentsBefore.get(lid) ?? null) !== (parentsAfter.get(lid) ?? null))
+        .map((lid) => ({
+          lid,
+          from: parentsBefore.get(lid) ?? null,
+          to: parentsAfter.get(lid) ?? null,
+        }));
+      if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
+      else if (said !== '') services.showStatus?.(said);
+    } else if (said !== '') services.showStatus?.(said);
+  },
+  /**
+   * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。口は `status-undo`(出し入れは `status-open.ts`)。
+   * ⚠ 新しい書込経路は作らない ── 動く前の親へ向けた `SET_ENTRY_PARENT` を 1 件ずつ撃つ。
+   *   移した後に別の場所へ動かした物は戻さない。編集中などで戻せないときは**黙らない**(`undo-trash` と同じ断り)。
+   */
+  'undo-dual-move': (dispatcher) => {
+    const phase = dispatcher.getState().phase;
+    if (phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
+      return;
+    }
+    const moves = takeDualMoveUndo();
+    if (moves === null) return;
+    const st = dispatcher.getState();
+    const parents = resolveCanonicalParents(st.entryMetas, st.relations);
+    let back = 0;
+    for (const m of moves) {
+      if (!st.entryMetas.has(m.lid)) continue;
+      if ((parents.get(m.lid) ?? null) !== m.to) continue;
+      // 元のフォルダがもう無ければルートへ戻す(居ない親へは入れられない)
+      const parentLid = m.from !== null && st.entryMetas.has(m.from) ? m.from : null;
+      dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid: m.lid, parentLid, relationId: generateLid() });
+      back += 1;
+    }
+    dispatcher.dispatch({
+      type: 'OP_NOTICE',
+      message:
+        back > 0
+          ? `${String(back)} 件を元の場所に戻しました`
+          : '戻せるものがありません(移した後に、別の場所へ動かしています)',
+    });
   },
   'delete-entry': (dispatcher, target) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
@@ -17955,16 +18066,7 @@ export function bindActions(
       carryDualFocus(to);
       return true;
     }
-    if (cmd === 'filer-select-all') {
-      const rows = dualRows(st, side);
-      const first = rows[0]?.lid;
-      const last = rows[rows.length - 1]?.lid;
-      if (first === undefined || last === undefined) return false;
-      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: first, mode: 'set' });
-      if (last !== first)
-        dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid: last, mode: 'range' });
-      return true;
-    }
+    if (cmd === 'filer-select-all') return dualSelectAll(dispatcher, side);
     if (cmd === 'filer-parent') {
       const scope = paneScope(paneOf(st.dual, side));
       if (scope === null) return false; // ルートで押しても何も起きない

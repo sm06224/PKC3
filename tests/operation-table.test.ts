@@ -253,7 +253,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
   'discard-capture', 'dismiss-announce', 'dismiss-notices', 'dismiss-update', 'dual-back',
   'dual-bookmark', 'dual-copy', 'dual-delete', 'dual-focus', 'dual-forward', 'dual-mkdir',
   'dual-mknote', 'dual-move', 'dual-preview-toggle', 'dual-rename-begin', 'dual-row',
-  'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
+  'dual-select-all', 'dual-sort', 'dual-tab-close', 'end-tile-reorder', 'enter-folder',
   'force-release', 'format-text', 
   'hide-revision-preview', 'install-office-pack',
   'launch-asset', 'launch-asset-extension', 'launch-asset-raw', 'move-order-down',
@@ -374,7 +374,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 押した行が lid を運ぶ(`schedule-week-pick` と同じ置き場。仕分けは N だが実は押した行を指す)。
    */
   'toggle-schedule-note',
-  'toggle-todo', 'undo-append', 'undo-import', 'undo-move', 'undo-trash', 'use-copied',
+  'toggle-todo', 'undo-append', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-trash', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -825,12 +825,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-12(#1087 流れ 29): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)で受け手 +1 ── 登記は増えない
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`schedule-undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 425,
-      receivers: 359,
+      // ⚠ 2026-10-13(#1163 依頼 62): 2 ペインの「全部選ぶ」(`dual-select-all`)と移した直後の「元に戻す」(`undo-dual-move`)で受け手 +2 ── 登記は増えない
+      //   (押し口は列見出しのチェックと画面の下の知らせの隣にしか無く、鍵も持たない)。`receivers` +2 / `total` +2 / `unregistered` +2。
+      total: 427,
+      receivers: 361,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 258,
+      unregistered: 260,
     });
   });
 

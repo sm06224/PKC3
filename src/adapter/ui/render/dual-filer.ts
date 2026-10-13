@@ -90,6 +90,25 @@ const scopeName = (lid: string | null, metas: AppState['entryMetas']): string =>
   lid === null ? 'ルート' : (metas.get(lid)?.title ?? '(無題)');
 
 /**
+ * 🔴 **同じ名前のタブには番号を添える**(Gemini 裁定 = #1163 への依頼 62 の 3)。
+ * 「+」で足したタブは、同じ場所を開くので名前が全部同じになり、どれがどれか読めなかった。
+ * ⚠ **名前がぶつかったときだけ**付ける(ぶつからないタブの字は変えない)。最初の 1 枚は素のまま、2 枚目から「②」「③」…。
+ * 🔑 番号は並びの順(左から数える)で、閉じて詰まれば振り直される。タブの上限(`MAX_TABS` = 12)までは丸数字で足りる。
+ */
+const TAB_NUMBERS = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫';
+export function tabLabels(names: readonly string[]): string[] {
+  const seen = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const n of names) total.set(n, (total.get(n) ?? 0) + 1);
+  return names.map((n) => {
+    const nth = (seen.get(n) ?? 0) + 1;
+    seen.set(n, nth);
+    if ((total.get(n) ?? 0) < 2 || nth === 1) return n;
+    return `${n} ${TAB_NUMBERS[nth - 1] ?? `(${String(nth)})`}`;
+  });
+}
+
+/**
  * 🔴 **列の定義**(2026-08-19 の作り直し)。
  *
  * ⚠ **名前の列にだけ幅を書かない** ── 残りを全部食わせる(Total Commander が
@@ -277,6 +296,11 @@ interface PaneFrame {
   otherMarks: HTMLElement;
   rows: Map<string, HTMLElement>;
   /**
+   * 🔴 **列見出しの「全部選ぶ」チェック**(Gemini 裁定 = #1163 への依頼 62 の 2)。⚠ 表を組み直すたびに作り直すので、
+   * 組んだ回に入れる(行が 0 件の回は `null`)。チェックの状態は選びの変化で**属性の付け替え**だけで塗る(表は組み直さない)。
+   */
+  selectAll: HTMLInputElement | null;
+  /**
    * 表の指紋 ── 変わったときだけ組み直す。
    * ⚠ **`null` は「まだ 1 度も描いていない」** ── `''` を初期値にすると、
    *   **空のフォルダ**(行 0 件 = 指紋も `''`)が「変わっていない」と読まれ、
@@ -296,6 +320,8 @@ interface PaneFrame {
    * 詰めると、印を塗り直すたびにカーソルまで動く(分けた意味が消える)。
    */
   cursor: string;
+  /** 件数の行の本体(相手の選びの添え書きを付ける前)。⚠ 添え書きは両方を描いた後で付ける(`paintOtherMarks`)。 */
+  footBase: string;
   /**
    * 🔴 **いま表に出ている印の数**(着地前レビュー R5)。
    * ⚠ 真ん中の操作の文言もここから読む ── 生の `selection.length` を使うと、
@@ -524,12 +550,15 @@ export class DualFilerRenderer {
      *   パソコンは相手の印が見えているので、言う理由が無い。
      */
     for (const side of SIDES) {
-      const solo = this.lastSolo === true && side === state.dual.focus;
-      this.paintOtherMarks(
-        frame.panes[side],
-        otherSide(side),
-        solo ? frame.panes[otherSide(side)].shownMarks : 0,
-      );
+      /**
+       * 🔴 **相手の選びが残っている件数は 1 か所で数える**(Gemini 裁定 = #1163 への依頼 62 の 1)── 焦点の側にだけ、相手の `shownMarks`。
+       * 1 枚ずつ(スマホ)は専用の行へ、2 枚見えている(パソコン)は件数の行の末尾へ。同じ数を 2 つの出し口が読む。
+       */
+      const here = side === state.dual.focus;
+      const n = here ? frame.panes[otherSide(side)].shownMarks : 0;
+      const solo = this.lastSolo === true;
+      this.paintOtherMarks(frame.panes[side], otherSide(side), solo ? n : 0);
+      this.paintFootOther(frame.panes[side], side, otherSide(side), solo ? 0 : n);
     }
     /**
      * 🔴 **焦点の側は「移す向き」そのもの**なので、必ず画面に出す
@@ -645,6 +674,20 @@ export class DualFilerRenderer {
         : '';
     if (frame.otherMarks.textContent !== text) frame.otherMarks.textContent = text;
     if (frame.otherMarks.hidden !== (n === 0)) frame.otherMarks.hidden = n === 0;
+  }
+
+  /**
+   * 🔴 **パソコンでも、相手のペインに選びが残っていることを件数の行で言う**(Gemini 裁定 = #1163 への依頼 62 の 1)。
+   * 例「左に 3 件選択中(元は右)」。⚠ 写す・移すの元は焦点の側(この行が付くペイン)なので、`(元は右)` で向きも言う。
+   * ⚠ 数は `paintOtherMarks`(スマホ)と同じ `shownMarks`。件数の行の本体は `footBase` に控えてあり、毎回そこから組み直す
+   *   (足したり外したりしても古い添え書きが残らない)。
+   */
+  private paintFootOther(frame: PaneFrame, side: DualSide, other: DualSide, n: number): void {
+    const text =
+      n > 0
+        ? `${frame.footBase} · ${SIDE_LABEL[other]}に ${String(n)} 件選択中(元は${SIDE_LABEL[side]})`
+        : frame.footBase;
+    if (frame.foot.textContent !== text) frame.foot.textContent = text;
   }
 
   private ensureFrame(): NonNullable<DualFilerRenderer['frame']> {
@@ -804,11 +847,13 @@ export class DualFilerRenderer {
       preview,
       otherMarks,
       rows: new Map(),
+      selectAll: null,
       signature: null,
       dates: null,
       marks: '',
       cursor: '',
       shownMarks: 0,
+      footBase: '',
       marksBarKey: '',
       previewKey: '',
     };
@@ -1079,6 +1124,16 @@ export class DualFilerRenderer {
     const shown = pane.selection.filter((lid) => frame.rows.has(lid)).length;
     frame.shownMarks = shown;
     /**
+     * 🔴 **「全部選ぶ」チェックは、いま表に出ている行の選び方から塗る**(全部 = 見えている行が全部。一部 = 途中の状態)。
+     * ⚠ 数えるのは `shown`(表に出ている選び)── 絞り込みで消えた選びを足さない(下の件数と同じ規則)。
+     */
+    if (frame.selectAll !== null) {
+      const all = rows.length > 0 && shown === rows.length;
+      const some = shown > 0 && !all;
+      if (frame.selectAll.checked !== all) frame.selectAll.checked = all;
+      if (frame.selectAll.indeterminate !== some) frame.selectAll.indeterminate = some;
+    }
+    /**
      * 🔴 **「全 N 件中 M 件を選択」**(2026-08-19。市井の情報行に合わせた)。
      * ⚠ 直す前は「N 件(M 件を選んでいます)」で、**選んでいないときは件数だけ**
      *   だった。古典は例外なく「選択 / 全体」を対で出す。
@@ -1137,12 +1192,13 @@ export class DualFilerRenderer {
       shown > 0
         ? `${rows.length} 件中 ${shown} 件を選択${markedPart === '' ? totalPart : markedPart}${here}`
         : `${rows.length} 件${totalPart}${here}`;
+    frame.footBase = text;
     if (frame.foot.textContent !== text) frame.foot.textContent = text;
     this.renderPreview(frame, side, state);
   }
 
   private renderTabs(host: HTMLElement, side: DualSide, state: AppState, pane: DualPaneState): void {
-    const names = pane.tabs.map((t) => scopeName(t.scopeLid, state.entryMetas));
+    const names = tabLabels(pane.tabs.map((t) => scopeName(t.scopeLid, state.entryMetas)));
     const sig = [String(pane.active), ...names].join(SEP);
     if (host.getAttribute('data-pkc-sig') === sig) return;
     host.setAttribute('data-pkc-sig', sig);
@@ -1264,6 +1320,7 @@ export class DualFilerRenderer {
   ): void {
     const year = new Date().getFullYear();
     frame.rows.clear();
+    frame.selectAll = null;
     frame.table.textContent = '';
     if (rows.length === 0) {
       /**
@@ -1311,6 +1368,22 @@ export class DualFilerRenderer {
       }
       th.textContent =
         col.label + (sort === col.sort ? SORT_MARK[sortDesc ? 'desc' : 'asc'] : '');
+      /**
+       * 🔴 **名前の列の左端に「全部選ぶ」チェック**(Ctrl+A のマウス版。Gemini 裁定 = #1163 への依頼 62 の 2)。
+       * ⚠ 列を 1 本足さず名前の見出しの中に置く(列幅の規則 ── 名前にだけ幅を書かない ── を崩さない)。
+       *   押し口は自分の `data-pkc-action` を持つので、見出し(並べ替え)の押下に流れない。
+       */
+      if (col.key === 'name') {
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.setAttribute('data-pkc-action', 'dual-select-all');
+        box.setAttribute('data-pkc-field', 'dual-select-all');
+        box.setAttribute('data-pkc-side', side);
+        box.title = '全部選ぶ';
+        box.setAttribute('aria-label', '全部選ぶ');
+        th.prepend(box);
+        frame.selectAll = box;
+      }
       hr.append(th);
     }
     thead.append(hr);

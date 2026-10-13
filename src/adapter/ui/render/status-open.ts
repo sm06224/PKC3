@@ -100,6 +100,7 @@ export interface StatusUndoState {
 import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
 import { scheduleUndoShown } from './schedule-undo';
 import { trashUndoShown } from './trash-undo';
+import { dualMoveUndoShown } from './dual-move-undo';
 import { dateNoteCreateLabel, dateNoteMissingNotice } from '@features/schedule/today-note';
 
 /**
@@ -170,7 +171,12 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
   const ru = state.restoreUndo ?? null;
   const restore =
     !move && !append && !schedule && !trash && ru !== null && shownLine === ru.notice && state.selectedLid === ru.lid;
-  const show = move || append || schedule || trash || restore;
+  /**
+   * 🔴 **2 ペインで移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。出す条件は 1 つ ── いま出ている 1 行が、
+   * その 1 手の知らせそのもの(`dualMoveUndoShown`)。別の知らせが上書きしたら畳む(ゴミ箱と同じ作法)。
+   */
+  const dualMove = !move && !append && !schedule && !trash && !restore && dualMoveUndoShown(shownLine);
+  const show = move || append || schedule || trash || restore || dualMove;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -181,6 +187,8 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
       'data-pkc-action',
       restore
         ? 'restore-revision'
+        : dualMove
+          ? 'undo-dual-move'
         : trash
           ? 'undo-trash'
           : schedule
@@ -192,7 +200,7 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
     // ⚠ 版 id は復元の口だけが持つ(他の取り消しへ切り替えたら外す ── 古い id が残らない)
     if (restore && ru !== null) btn.setAttribute('data-pkc-rev-id', ru.revId);
     else btn.removeAttribute('data-pkc-rev-id');
-    btn.textContent = trash || schedule || restore ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
+    btn.textContent = trash || schedule || restore || dualMove ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;
