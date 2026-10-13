@@ -72,6 +72,23 @@ export function storedInstantIso(value: string | null | undefined): string | nul
 }
 
 /**
+ * 🔴 **日時を、端末の時刻で `YYYY-MM-DD HH:MM[:SS]` に出す**(履歴の行・ゴミ箱の行・版の名前)。
+ *
+ * ⚠ 直す前は DB の字(`datetime('now')` = **UTC**)をそのまま出していたので、日本では
+ *   **9 時間前の時刻**が出ていた(15:30 に戻した版が `06:30`)── #709 で日付の欄は直したが、
+ *   日時をそのまま出す 3 か所が残っていた。
+ * 🔑 形は元の字に合わせる(秒が在れば秒まで)── 見た目の桁を変えず、時刻だけ端末へ直す。
+ * ⚠ 時刻を持たない / 読めない値は**そのまま**返す(字を落とさない)。空は `fallback`。
+ */
+export function formatStoredStamp(value: string | null | undefined, fallback = ''): string {
+  if (!value) return fallback;
+  const at = storedInstant(value);
+  if (at === null) return value;
+  const head = `${String(at.getFullYear())}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())} ${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(value) ? `${head}:${pad2(at.getSeconds())}` : head;
+}
+
+/**
  * 情報列などの**そのまま読む**場所向け(`YYYY/MM/DD`)。
  * 読めない値は `fallback`(既定 `—`)。⚠ 形が違う値は捨てずにそのまま出す ──
  * 「読めなかった」ことが見えるほうが、無かったことにするより良い。

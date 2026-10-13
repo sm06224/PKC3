@@ -18,9 +18,11 @@ import { join } from 'node:path';
 import {
   formatListDate,
   formatStoredDate,
+  formatStoredStamp,
   storedDateParts,
   storedInstantIso,
 } from '@features/datetime/stored-date';
+import { shortStamp } from '@features/revision/diff-view';
 
 /** `tz` の下で `fn` を回し、必ず元へ戻す。 */
 function withTZ<T>(tz: string, fn: () => T): T {
@@ -39,6 +41,33 @@ describe('DB の時刻を表示に落とす', () => {
     const at = new Date('2026-08-04T23:30:00Z');
     expect(withTZ('Asia/Tokyo', () => at.getDate()), 'JST に切り替わっていない').toBe(5);
     expect(withTZ('UTC', () => at.getDate()), 'UTC に切り替わっていない').toBe(4);
+  });
+
+  it('🔴 日時(履歴の行・ゴミ箱の行・版の名前)は端末の時刻で出る ── JST で 9 時間進む', () => {
+    // ⚠ 直す前は DB の字(UTC)をそのまま出していた:15:30 JST に戻した版が `06:30`
+    withTZ('Asia/Tokyo', () => {
+      expect(formatStoredStamp('2026-10-13 06:30:15')).toBe('2026-10-13 15:30:15');
+      expect(formatStoredStamp('2026-10-13 15:00:00')).toBe('2026-10-14 00:00:00'); // 日も繰り上がる
+      expect(formatStoredStamp('2026-10-13T06:30Z')).toBe('2026-10-13 15:30'); // 秒が無ければ秒を足さない
+    });
+    withTZ('UTC', () => {
+      expect(formatStoredStamp('2026-10-13 06:30:15'), '対照群:UTC の端末では字のまま').toBe('2026-10-13 06:30:15');
+    });
+    expect(formatStoredStamp(null)).toBe('');
+    expect(formatStoredStamp('', '—')).toBe('—');
+    expect(formatStoredStamp('読めない字'), '読めない字は落とさない').toBe('読めない字');
+    expect(formatStoredStamp('2026-10-13'), '時刻を持たない値はずらさない').toBe('2026-10-13');
+  });
+
+  it('🔴 版の名前(`版 7(…)`)の日時も端末の時刻で縮める', () => {
+    withTZ('Asia/Tokyo', () => {
+      expect(shortStamp('2026-10-13 06:30:15')).toBe('2026-10-13 15:30');
+    });
+    withTZ('UTC', () => {
+      expect(shortStamp('2026-10-13 06:30:15')).toBe('2026-10-13 06:30');
+    });
+    expect(shortStamp(null)).toBeNull();
+    expect(shortStamp('読めない字')).toBe('読めない字');
   });
 
   it('🔴 UTC の深夜は、端末の暦日で出る(JST では翌日、UTC ではその日)', () => {

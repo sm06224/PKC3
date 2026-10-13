@@ -85,6 +85,7 @@ import { RowSwap } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
+import { formatStoredStamp } from '@features/datetime/stored-date';
 import { sideRows } from '@features/revision/diff-side';
 import { sideRowEls } from './diff-line';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -4364,7 +4365,8 @@ function renderHistoryPanel(
     );
     open.title = 'この版の中身を、いまの本文とくらべて見ます(戻しません)';
     const text = document.createElement('span');
-    text.textContent = `#${item.revOrder} ${item.createdAt ?? ''} ${item.title ?? '(無題)'}`;
+    // 🔴 日時は端末の時刻で(DB の字は UTC ── `formatStoredStamp`)
+    text.textContent = `#${item.revOrder} ${formatStoredStamp(item.createdAt)} ${item.title ?? '(無題)'}`;
     open.append(text);
     const badge = diffBadge(item.added, item.removed);
     if (badge) open.append(badge);

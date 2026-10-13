@@ -11,6 +11,7 @@
  * 🔑 **新しい保存形は要らない** ── 差分は `diffLines`(既にある)で組む。
  * 🔑 **pure module**。DOM も store も知らない。
  */
+import { formatStoredStamp } from '@features/datetime/stored-date';
 import { diffLines, splitLines } from './line-patch';
 
 /** 見せる行 1 つ。⚠ `text` は**行末を含まない**(器が改行を持つ)。 */
@@ -126,6 +127,8 @@ export function diffCounts(from: string, to: string): { added: number; removed: 
  */
 export function shortStamp(createdAt: string | null): string | null {
   if (createdAt === null) return null;
-  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(createdAt);
+  // 🔴 端末の時刻へ直してから縮める(DB の字は UTC ── `formatStoredStamp` の docstring)
+  const local = formatStoredStamp(createdAt);
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(local);
   return m === null ? createdAt : `${m[1]} ${m[2]}`;
 }

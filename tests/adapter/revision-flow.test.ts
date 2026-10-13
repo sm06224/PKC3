@@ -151,6 +151,29 @@ describe('revision flow (P5b)', () => {
     expect(q('[data-pkc-field="history-panel"]')).toBeNull();
   });
 
+  it('🔴 ゴミ箱の行の日時は端末の時刻で出る(DB の字は UTC ── JST では 9 時間進む)', async () => {
+    const before = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+      const { d, q } = setup(
+        { e1: '# live' },
+        {
+          listTrash: async () => [
+            { id: 'r-t', entry_lid: 'gone1', created_at: '2026-10-13 06:30:15', title: '消した子', archetype: 'text' },
+          ],
+        },
+      );
+      d.dispatch({ type: 'SHOW_TRASH' });
+      await tick();
+      const row = q('[data-pkc-region="filer-trash"] [data-pkc-trash-entry="gone1"]');
+      expect(row, '前提:ゴミ箱の行が出ていない').not.toBeNull();
+      expect(row!.textContent, 'UTC の字のまま出た').toContain('2026-10-13 15:30:15');
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+
   it('ゴミ箱: 一覧 → 復元で entry が戻り選択される。lid 衝突は可視ブロック', async () => {
     const { d, log, q } = setup(
       { e1: '# live' },

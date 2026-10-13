@@ -37,7 +37,7 @@ import { normalizeQuery } from '@features/filter/title-filter';
 //    同じノートがフォルダ画面では「シート」、他の全画面では「表」と出ていた
 // ⚠ 日付の切り方は `features/datetime/stored-date` が正本(情報列・一覧の行と共有)。
 //    ここに 3 つ目の parse を置いていたので寄せた(規則は 1 つ ── CLAUDE.md)
-import { formatListDate, formatStoredDate } from '@features/datetime/stored-date';
+import { formatListDate, formatStoredDate, formatStoredStamp } from '@features/datetime/stored-date';
 import { ARCHETYPE_ICONS, iconButton, iconSpan } from './icons';
 // 🔑 空のときの「次の一手」の部品(#722 P2-13。かつては一覧タブと 2 か所で組まない形で共有していた)
 import { emptyStartActions } from './empty-start';
@@ -1472,7 +1472,7 @@ export class FilerRenderer {
         const text = document.createElement('span');
         text.textContent = `${t.title ?? '(無題)'}(${
           archetypeLabel(t.archetype ?? '')
-        } / ${t.createdAt ?? ''})`;
+        } / ${formatStoredStamp(t.createdAt)})`; // 🔴 端末の時刻で(DB の字は UTC)
         const restore = document.createElement('button');
         restore.type = 'button';
         restore.setAttribute('data-pkc-action', 'restore-trash');

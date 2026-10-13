@@ -119,6 +119,23 @@ describe('#398 段① 見分けがつく', () => {
     expect(badges, '増減が 1 つも出ていない').toEqual(['+12 −3']);
   });
 
+  it('🔴 行の日時は端末の時刻で出る(DB の字は UTC ── JST では 9 時間進む)', async () => {
+    const before = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+      expect(new Date('2026-08-22T10:31:00Z').getHours(), '前提:JST に切り替わっていない').toBe(19);
+      const s = setup();
+      await openHistory(s);
+      const rows = s.qa('[data-pkc-field="revision-open"]').map((e) => e.textContent ?? '');
+      expect(rows.length, '前提:履歴の行が出ていない').toBe(2);
+      expect(rows[0], 'UTC の字のまま出た').toContain('#7 2026-08-22 19:31 会議メモ');
+      expect(rows[1]).toContain('#6 2026-08-22 18:02 会議メモ');
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+
   it('🔴 数えられない版には何も出さない(0 と書くと「変わっていない」という嘘になる)', async () => {
     const s = setup();
     await openHistory(s);
