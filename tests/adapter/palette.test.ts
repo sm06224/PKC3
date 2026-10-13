@@ -133,6 +133,18 @@ describe('操作を名前で探す(#425 段①)', () => {
     ).toContain('操作はありません');
   });
 
+  it('🔴 並んだ行が全部灰色のとき、Enter で理由を出す(押しても何も起きない、にしない)', async () => {
+    const { root } = setup();
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    filter().value = 'ノートを閉じる';
+    filter().dispatchEvent(new Event('input', { bubbles: true }));
+    expect(rows().length, '前提: 行が無い').toBeGreaterThan(0);
+    expect(rows().every((b) => b.disabled), '前提: 押せる行が在る(何も開いていないので灰色のはず)').toBe(true);
+    filter().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(document.querySelector('[data-pkc-field="palette-none-ready"]')?.textContent ?? '').toContain('いま押せる操作がありません');
+  });
+
   describe('「いま押せるか」は画面から決まる', () => {
     /**
      * 🔴 **これが本題**(#425 の規律「押せない場面で黙らない」)。

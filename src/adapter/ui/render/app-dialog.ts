@@ -1489,7 +1489,20 @@ export function pickCommandInApp(
        * ⚠ `isComposing` の間は拾わない ── 変換確定の Enter で実行してしまう。
        */
       if (ev.key !== 'Enter' || ev.isComposing) return;
-      if (firstReady === null) return;
+      if (firstReady === null) {
+        /**
+         * 🔴 **並んでいる行が全部灰色のときも黙らない**(#1087 の見直し 2026-10-13)── Enter を押しても何も起きず、
+         *   何も言わなかった。⚠ 行が 1 つも無いときは上の「その名前の操作はありません」が既に言っているので足さない。
+         */
+        if (list.querySelector('[data-pkc-field="palette-empty"]') === null && list.querySelector('[data-pkc-field="palette-none-ready"]') === null) {
+          const note = document.createElement('p');
+          note.setAttribute('data-pkc-field', 'palette-none-ready');
+          note.textContent = 'いま押せる操作がありません。灰色の行に、押せない理由が出ています。';
+          list.prepend(note);
+        }
+        ev.preventDefault();
+        return;
+      }
       ev.preventDefault();
       firstReady.click();
     });

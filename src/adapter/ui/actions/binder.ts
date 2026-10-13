@@ -5221,7 +5221,12 @@ export function commandRowsFor(
       ready.add(c.id);
       continue;
     }
-    if (!c.contexts.includes('global')) continue;
+    /**
+     * 🔴 **「ノートを閉じる」(reading)と「画面を閉じる」(window)も、押せるかを聞く**(#1087 の見直し 2026-10-13)。
+     * ⚠ 直す前は全域の命令しか聞かなかったので、ノートを読んでいる最中でも「ノートを閉じる」が**いつも灰色**だった
+     *   (`runGlobalCommand` には 2 つとも「押せるか」だけ答える口が在り、選んだ後の実行もそこを通るのに、一覧が先に外していた)。
+     */
+    if (!c.contexts.some((ctx) => ctx === 'global' || ctx === 'reading' || ctx === 'window')) continue;
     if (runGlobalCommand(c.id, root, dispatcher, keymap, noop, noop, true)) ready.add(c.id);
   }
   /**

@@ -175,3 +175,33 @@ describe('⑤ 場面の名前に色の受け皿がある(CSS の規則)', () => 
     expect(code).toMatch(/\[data-pkc-field='command-label'\]\s*\+\s*\[data-pkc-field='command-scene'\][^{]*\{[^}]*margin-inline-start:\s*auto/);
   });
 });
+
+describe('「ノートを閉じる」は、ノートを読んでいるときに押せる(#1087 の見直し 2026-10-13)', () => {
+  it('🔴 開いていれば押せる / 開いていなければ灰色(直す前は、いつも灰色だった)', () => {
+    const { root, d, store } = setup();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: 'n1',
+          archetype: 'text',
+          createdAt: null,
+          updatedAt: null,
+          entryOrder: 0,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        },
+      ],
+      relations: [],
+    });
+    const readyOf = () => commandRowsFor(root, d, store, '', null).find((r) => r.id === 'deselect-entry')?.ready;
+    expect(readyOf(), '何も開いていないのに押せる').toBe(false);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    expect(d.getState().selectedLid, '前提: 開いていない').toBe('n1');
+    expect(readyOf(), 'ノートを読んでいるのに灰色').toBe(true);
+  });
+});
