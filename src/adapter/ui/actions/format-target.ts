@@ -19,8 +19,7 @@ export function editorBody(root: HTMLElement): HTMLTextAreaElement | null {
  * Ctrl+B/I/K が `editor-body` を探して**無言 no-op** だった(押しても何も
  * 起きず、理由もどこにも出ない)。
  * ⚠ 2 つは同時には存在しない(live ↔ 2 列は排他。live の退避は `editor-body`)。
- * ⚠ `writeBack` の `value` 直代入は行の中の Ctrl+Z を捨てる ── 行は Escape で
- * 丸ごと戻せるので、2 列の editor と同じ理由で受け入れる。
+ * ⚠ `writeBack` は `insertText` で変わった範囲だけを置き換える ── 行の中の Ctrl+Z で戻せる(#765)。
  */
 export function formatTarget(root: HTMLElement): HTMLTextAreaElement | null {
   return (

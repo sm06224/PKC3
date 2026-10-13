@@ -220,3 +220,24 @@ export function sortTasksByStatus(body: string): string {
   const nextBody = out.join('\n');
   return nextBody === body ? body : nextBody;
 }
+
+/**
+ * 本文にチェック項目(`- [ ]` / `- [x]`)が 1 つでも在るか。⚠ 読み方は `sortTasksByStatus` と同じ
+ * (fence の中は数えない)── 「無いから変わらなかった」と「揃っているから変わらなかった」を言い分ける。
+ */
+export function hasTaskItems(body: string): boolean {
+  if (body === '' || !body.includes('[')) return false;
+  let fence: { readonly ch: string; readonly len: number } | null = null;
+  for (const line of body.split('\n')) {
+    const f = FENCE.exec(line);
+    if (f !== null) {
+      const mark = f[1]!;
+      if (fence === null) fence = { ch: mark[0]!, len: mark.length };
+      else if (mark[0] === fence.ch && mark.length >= fence.len) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    if (TASK_MARKER.test(line)) return true;
+  }
+  return false;
+}
