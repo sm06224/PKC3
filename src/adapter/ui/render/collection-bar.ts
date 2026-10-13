@@ -14,6 +14,7 @@
  * ⚠ `data-pkc-action` の名前は**既存のまま**(受け手を増やさない)。
  */
 import { SEALED_VIEWS } from '@features/sealed';
+import { QUERY_ENTRY_NOTE } from '@features/keymap';
 import {
   HINT_ALSO_COMMAND,
   HINT_ALSO_SUFFIX,
@@ -161,7 +162,10 @@ export function collectionBarItems(): readonly CollectionBarItem[] {
       label,
       iconKey: `set-view:${view}`,
       view,
-      ...(command !== undefined ? { hint: { base: label, command } } : {}),
+      // 🔴 集計だけは、何が見られるかを 1 文添える(Gemini 依頼 65-4)
+      ...(command !== undefined
+        ? { hint: { base: view === 'query' ? `${label}。${QUERY_ENTRY_NOTE}` : label, command } }
+        : {}),
       group: 'app',
     });
   }

@@ -120,3 +120,16 @@ export const SHADOW_OPENED_NOTICE =
 
 /** 控えの版を頼まれたのに、控えが読めなかった(消えた / 空)。保存済みの版で開く。 */
 export const SHADOW_GONE_NOTICE = '一時保存した内容を読めませんでした。保存済みの版で開きます';
+
+/**
+ * 🔴 **一時保存の対象外の形式には、押す前に 1 行で言う**(Gemini 依頼 61-3、#1163 のコメント 6143814406 の回答 A)。
+ * 一時保存するのは .docx / .odt だけ(マニュアル「一時保存した内容を、次に開くときに戻せます」)。
+ * ⚠ .ods も対象外だが、案内の字は回答の書き方(.xlsx / .pptx)に合わせる。
+ */
+export const NO_SHADOW_NOTE = '.xlsx / .pptx は一時保存の対象外です。こまめに保存してください';
+
+/** この添付は、一時保存の対象外として 1 行の案内を出す形式か(.xlsx / .pptx)。 */
+export function needsNoShadowNote(fileName: string): boolean {
+  const name = fileName.trim().toLowerCase();
+  return name.endsWith('.xlsx') || name.endsWith('.pptx');
+}

@@ -240,6 +240,7 @@ describe('見えたときに引いて、表にする(実 worker)', () => {
     await vi.waitFor(() => expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('failed'));
     expect(noteOf(host)).toContain('SQL を実行できませんでした: ');
     expect(noteOf(host)).toContain('no_such_table');
+    expect(noteOf(host), '画面の失敗には試せる場所を添える').toContain('SQL で調べる画面(Alt + 7)で試せます');
     expect(host.querySelector('table')).toBeNull();
     expect(root.querySelector('pre code.language-sql')).not.toBeNull();
     hydrator.release();

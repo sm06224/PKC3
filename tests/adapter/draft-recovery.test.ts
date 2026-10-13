@@ -543,7 +543,7 @@ describe('draft-offer(起動のとき 1 行で聞く側)', () => {
     d.dispatch({ type: 'START_EDIT' });
     offer.restore();
     expect(say).toHaveBeenCalledWith(draftBusyNote(d.getState()));
-    expect(draftBusyNote(d.getState()), '編集中の理由が空').toContain('編集を終了してから');
+    expect(draftBusyNote(d.getState()), '編集中の理由が空').toContain('編集を保存するか、編集をやめてから');
     expect(store.map.size).toBe(1);
     expect(d.getState().openBody?.body).toBe(DISK);
   });

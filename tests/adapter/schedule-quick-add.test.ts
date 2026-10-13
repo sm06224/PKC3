@@ -260,7 +260,7 @@ describe('#1081 編集中の予定の「足す」', () => {
     s.q('[data-pkc-action="schedule-quick-add"]')!.click();
     await tick();
     expect(s.disk['t1'], '編集中のノートを裏で書き換えた').toBe('メモ\n');
-    expect(s.d.getState().error ?? '', '黙って断った').toContain('編集を終了してから');
+    expect(s.d.getState().error ?? '', '黙って断った').toContain('編集を保存するか、編集をやめてから');
     expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value, '断ったのに欄を空にした').toBe(
       '見積を出す',
     );

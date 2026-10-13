@@ -238,7 +238,7 @@ describe('帯の「保存…」(#633 段③)', () => {
     const saveEditing = root.querySelector<HTMLButtonElement>('[data-pkc-action="stack-save"]');
     expect(saveEditing?.disabled, '編集中なのに押せる顔をしている').toBe(true);
     // 🔑 字は `phaseBlockReason` の 1 か所から(C11b / #1045)── 直す前は「編集を
-    //   終えてから」と手で書いていたが、他の場所と「編集を終了してから」にそろえた
+    //   終えてから」と手で書いていたが、他の場所と「編集を保存するか、編集をやめてから」にそろえた
     expect(saveEditing?.title).toContain(phaseBlockReason('editing'));
   });
 

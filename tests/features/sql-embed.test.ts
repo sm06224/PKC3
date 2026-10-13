@@ -30,6 +30,7 @@ import {
   sqlEmbedAnswerHtml,
   sqlEmbedHostHtml,
   type SqlEmbedAnswer,
+  sqlEmbedFailureHtml,
 } from '../../src/features/markdown/sql-embed';
 import { cleanForClipboard } from '../../src/features/export/clipboard-html';
 
@@ -221,6 +222,24 @@ describe('答えの表(sqlEmbedAnswerHtml)', () => {
   it('受け取る天井で切ったときは、そう言う(「これで全部」と読ませない)', () => {
     const d = parse(sqlEmbedAnswerHtml(answer(5, true), 200, true));
     expect(d.textContent).toContain('先頭の 5 行までです');
+    expect(d.textContent, '続きの見方を言う').toContain(
+      '全部は SQL で調べる画面か、ノートへ書き出すと見られます',
+    );
+  });
+
+  it('書き出し(画面が無い)の打ち切りには、その画面の案内を付けない', () => {
+    const d = parse(sqlEmbedAnswerHtml(answer(5, true), 200, false));
+    expect(d.textContent).toContain('先頭の 5 行までです');
+    expect(d.textContent, '書き出した HTML に無い画面を指している').not.toContain('SQL で調べる画面');
+  });
+
+  it('引けなかった 1 行は、画面のときだけ「SQL で調べる画面(Alt + 7)」を添える', () => {
+    expect(parse(sqlEmbedFailureHtml('boom', true)).textContent).toBe(
+      'SQL を実行できませんでした: boom。SQL で調べる画面(Alt + 7)で試せます',
+    );
+    expect(parse(sqlEmbedFailureHtml('boom')).textContent, '書き出しには画面が無い').toBe(
+      'SQL を実行できませんでした: boom',
+    );
   });
 
   it('0 行は表ではなく 1 行の注記', () => {

@@ -281,7 +281,7 @@ describe('名前を変える ── 行の題名の所で打ち替える(#215)',
     r.root.append(b);
     b.click();
     expect(r.d.getState().renamingLid).toBeNull();
-    expect(r.errors.at(-1) ?? '').toContain('編集を終了してから');
+    expect(r.errors.at(-1) ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 });
 

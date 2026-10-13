@@ -12,11 +12,13 @@ import {
   SQL_RULES,
   copiedTableNames,
   sqlExampleText,
+  sqlMoreExamplesText,
   sqlPlaceholder,
   sqlTipText,
   TIP_TABLES_MAX,
 } from '../../src/features/query/sql-tip';
 import { checkDuckDbSql } from '../../src/features/query/duckdb-guard';
+import { checkReadOnlySql } from '../../src/features/query/sql-guard';
 
 const guest = (tables: string[]) => ({ name: '売上.sqlite', tables });
 
@@ -291,5 +293,27 @@ describe('🔴 DuckDB の案内へ並べる表は、写した表だけ(着地後
 
   it('ビューは表の一覧に影響しない(ビューは客の表に並ばない)', () => {
     expect(copiedTableNames(t, report(['notes'], true), false)).toEqual(['docs', 'notes', '大きい']);
+  });
+});
+
+describe('手本の下の 2 行目以降(Gemini 依頼 63-2)', () => {
+  it('🔴 ノートを調べているとき: 列の名前の案内と、種類ごとに数える例(GROUP BY)が出る', () => {
+    const t = sqlMoreExamplesText(null);
+    expect(t).toContain('列の名前は「構造を見る」で分かります');
+    expect(t).toContain('GROUP BY archetype');
+    expect(t, '例が 2 つ以上').toMatch(/例:[\s\S]*例:/);
+  });
+
+  it('対照群: 別の file を調べているとき、entries の例は出さない(打っても引けない)。案内の 1 行は出る', () => {
+    const t = sqlMoreExamplesText(guest(['売上']));
+    expect(t).toBe('列の名前は「構造を見る」で分かります');
+    expect(t).not.toContain('entries');
+  });
+
+  it('🔴 例の SQL は本物の規則(読むだけ・1 文)を通る', () => {
+    const t = sqlMoreExamplesText(null);
+    const sqls = t.split('\n').filter((l) => l.startsWith('例: ')).map((l) => l.slice(3));
+    expect(sqls.length).toBeGreaterThanOrEqual(2);
+    for (const sql of sqls) expect(checkReadOnlySql(sql).ok, sql).toBe(true);
   });
 });

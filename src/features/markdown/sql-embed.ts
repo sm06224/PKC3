@@ -61,6 +61,14 @@ export const SQL_EMBED_PAGE_ROWS = 200;
  * 画面に出す数ではない(5 ページぶん)。これを超えたら打ち切り、そう言う。
  */
 export const SQL_EMBED_FETCH_ROWS = 1000;
+
+/** 打ち切ったときの案内(画面だけ。Gemini 依頼 63-3)。 */
+export const SQL_EMBED_TRUNCATED_HINT = '。全部は SQL で調べる画面か、ノートへ書き出すと見られます';
+/**
+ * 引けなかったときの案内(画面だけ。Gemini 依頼 63-4)。
+ * ⚠ `Alt + 7` は `keymap.ts` の `view-sql` の既定割当(`Alt+7`)。割当を変えた人には外れるが、既定を言う。
+ */
+export const SQL_EMBED_FAILED_HINT = '。SQL で調べる画面(Alt + 7)で試せます';
 /**
  * 時間の天井(ms)。⚠ 別窓(follower)は本体タブへの依頼を 10 秒で諦める
  * (`SQL_MAX_MS` の注記)── それより**ずっと手前**で止める。
@@ -164,7 +172,11 @@ export function sqlEmbedAnswerHtml(
       out += note(`ほかに ${String(remaining)} 行あります(ここには ${String(shown)} 行まで出しています)`);
     }
   } else if (answer.truncated) {
-    out += note(`先頭の ${String(answer.rows.length)} 行までです(これより先は出していません)`);
+    out += note(
+      `先頭の ${String(answer.rows.length)} 行までです(これより先は出していません)` +
+        // 🔴 Gemini 依頼 63-3:続きの見方を言う。⚠ 書き出した HTML には「SQL で調べる画面」が無いので画面だけ
+        (interactive ? SQL_EMBED_TRUNCATED_HINT : ''),
+    );
   }
   return out;
 }
@@ -179,9 +191,13 @@ export function sqlEmbedPendingHtml(): string {
   return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(SQL_EMBED_PENDING_TEXT)}</p>`;
 }
 
-/** 引けなかったときの 1 行(原文のコード枠はそのまま残る)。 */
-export function sqlEmbedFailureHtml(why: string): string {
-  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`SQL を実行できませんでした: ${why}`)}</p>`;
+/**
+ * 引けなかったときの 1 行(原文のコード枠はそのまま残る)。
+ * @param interactive 画面のとき `true`(試せる場所を添える)。書き出しは `false`(その画面が無い)
+ */
+export function sqlEmbedFailureHtml(why: string, interactive = false): string {
+  const hint = interactive ? SQL_EMBED_FAILED_HINT : '';
+  return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`SQL を実行できませんでした: ${why}${hint}`)}</p>`;
 }
 
 /** 器の HTML を取り出す正規表現。⚠ `sqlEmbedHostHtml` が組む形と**同じ綴り**(門は test)。 */

@@ -592,7 +592,7 @@ describe('掴んで落とす(dragstart / dragover / drop)', () => {
     const target = s.block(19);
     rect(target, 500, 40);
     target.dispatchEvent(dragEv('drop', dt, 505));
-    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('ブロック');
     expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
@@ -845,7 +845,7 @@ describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', 
     const target = s.block(19);
     rect(target, 500, 40);
     target.dispatchEvent(dragEv('drop', dt, 505));
-    expect(s.d.getState().error ?? '').toContain('編集を終了');
+    expect(s.d.getState().error ?? '').toContain('編集を保存するか');
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('一覧の行');
     expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });

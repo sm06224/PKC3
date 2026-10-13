@@ -202,6 +202,13 @@ export interface KeyCommand {
  *
  * ⚠ **並び順がそのまま設定画面とヘルプの並び**である(面ごとに固まるよう並べる)。
  */
+/**
+ * 集計の入口の説明(Gemini 依頼 65-4、#1163 のコメント 6145748723 の回答 A)。
+ * ⚠ 「タグごとに何件あるか」を探す人が、集計(グループ化 = タグ)に辿り着けるようにする 1 文。
+ *   「集計」ボタンの説明(`collection-bar.ts`)と、操作を探すの説明(ここの `note`)の両方が使う。
+ */
+export const QUERY_ENTRY_NOTE = 'タグの一覧(何件ずつ)もここで見られます';
+
 export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 全域(document で受ける)
   {
@@ -558,7 +565,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+2', 'Mod+Alt+2'],
     whileTyping: true,
-    note: '文字を打っている間に効くのは Ctrl+Alt+2(Mac は ⌘+Alt+2)のほうです(本文を編集している間は、「編集を保存する」か「編集をやめる」を押すと開けます)',
+    note: `${QUERY_ENTRY_NOTE}。` + '文字を打っている間に効くのは Ctrl+Alt+2(Mac は ⌘+Alt+2)のほうです(本文を編集している間は、「編集を保存する」か「編集をやめる」を押すと開けます)',
   },
   {
     /**

@@ -209,7 +209,7 @@ describe('🔴 断るときは 1 件も書かない', () => {
     expect(h.d.getState().phase).not.toBe('ready');
     expect(await importMarkdownFiles(h.d, h.deps, [mdFile('# x\n')])).toBe(null);
     expect(h.opLog).toEqual([]);
-    expect(h.d.getState().error).toContain('編集を終了');
+    expect(h.d.getState().error).toContain('編集を保存するか');
   });
 
   it('ファイルが 0 件なら断る', async () => {

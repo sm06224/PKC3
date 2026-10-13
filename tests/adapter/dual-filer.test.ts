@@ -1181,7 +1181,7 @@ describe('2 ペインの配線(binder)', () => {
     expect(d.getState().phase, '前提が崩れている').toBe('editing');
     const before = d.getState().relations;
     click(region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!);
-    expect(d.getState().error).toContain('編集を終了してから');
+    expect(d.getState().error).toContain('編集を保存するか、編集をやめてから');
     expect(d.getState().relations, '編集中に動いた').toBe(before);
     /**
      * 🔴 **断られた回に印を消さない**(着地前レビュー R1)。
@@ -1790,7 +1790,7 @@ describe('2 ペインのキーボード操作(#273)', () => {
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '前提が崩れている').toBe('editing');
     press('right', 'b', 'ArrowDown');
-    expect(d.getState().error ?? '').toContain('編集を終了してから');
+    expect(d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 });
 

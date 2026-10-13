@@ -106,7 +106,7 @@ describe('断る場面', () => {
     expect(d.getState().phase, '編集中にできていない(前提が崩れた)').toBe('editing');
     const dp = deps();
     expect(await exportPortable(d, dp)).toBeNull();
-    expect(errors.join()).toContain('編集を終了してから');
+    expect(errors.join()).toContain('編集を保存するか、編集をやめてから');
     expect(dp.order, '断ったのに読みに行っている').toEqual([]);
   });
 

@@ -143,7 +143,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
-import { buildOfficeEntry, officeEntryOf } from './office-entry-view';
+import { buildOfficeEntry, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   assetPreviewKind,
@@ -3484,6 +3484,8 @@ export class DetailRenderer {
         lid,
       });
       if (office) info.append(office);
+      const saveNote = buildOfficeSaveNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
+      if (saveNote) info.append(saveNote);
     }
     host.append(info);
 

@@ -301,7 +301,7 @@ describe('🔴 配線 ── launch から entry ができるところまで', (
 
   it('🔴 編集中に launch しても**失われない**(ready になったら取り込む)', async () => {
     // OS の launch は一発限りで picker が出ない ── 断るとファイルは失われる
-    // (review H2:「編集を終了してから取り込んでください」で消えていた)
+    // (review H2:「編集を保存するか、編集をやめてから取り込んでください」で消えていた)
     const app = wiredApp();
     app.d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'e1', title: '編集中' });
     expect(app.d.getState().phase).not.toBe('ready');

@@ -140,6 +140,47 @@ describe('🔴 絞りで 0 件のとき、理由と戻り道を出す(#550)', ()
     expect(d.getState().filterQuery, '語の絞りも空になっていない').toBe('');
   });
 
+  /**
+   * 🔴 **1 件以上当たっている間も、一覧の上に外し口が出る**(Gemini 依頼 65-2)。
+   * 直す前は 0 件のときだけだった ── 当たっている間は探す欄の「×」か Esc しか無かった。
+   */
+  describe('絞り込み中の 1 行(Gemini 依頼 65-2)', () => {
+    const line = (root: HTMLElement): HTMLElement | null =>
+      root.querySelector<HTMLElement>('[data-pkc-field="filer-filter-line"]');
+
+    it('🔴 語で絞って 1 件以上当たっているとき「絞り込み中: ○○」と「絞りを外す」が出て、押すと外れる', () => {
+      const { root, d } = setupBound(three);
+      d.dispatch({ type: 'SET_ENTRY_FILTER', query: '買い物' });
+      expect(root.querySelectorAll('[data-pkc-region="filer-table"] tbody [data-pkc-entry]').length, '前提: 当たっている').toBe(1);
+      const el = line(root);
+      expect(el, '当たっているのに 1 行が出ない').not.toBeNull();
+      expect(el!.querySelector('[data-pkc-field="filer-filter-word"]')!.textContent).toBe('絞り込み中: 買い物');
+      // 🔑 表の「上」に在る(帯の下ではなく、一覧のすぐ上)
+      const table = root.querySelector('[data-pkc-region="filer-table"]')!;
+      expect(el!.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING, '表の後ろに出ている').toBeTruthy();
+      const btn = el!.querySelector<HTMLElement>('[data-pkc-action="clear-entry-filter"]')!;
+      expect(btn.textContent).toBe('絞りを外す');
+      btn.click();
+      expect(d.getState().filterQuery, '押しても外れない(dead click)').toBe('');
+      expect(line(root), '外したのに 1 行が残っている').toBeNull();
+    });
+
+    it('⚠ 対照群: 絞っていなければ出ない / 0 件のときは下の外し口だけで 2 つ出さない', () => {
+      const { root, d } = setupBound(three);
+      expect(line(root), '絞っていないのに出た').toBeNull();
+      d.dispatch({ type: 'SET_ENTRY_FILTER', query: '存在しない語' });
+      d.dispatch({ type: 'SET_SEARCH_HITS', query: '存在しない語', lids: [], truncated: false });
+      expect(line(root), '0 件なのに 1 行が出た(外し口が 2 つになる)').toBeNull();
+      expect(clear(root), '0 件の外し口が消えた').not.toBeNull();
+    });
+
+    it('⚠ 種類の札だけのときは出さない(見せる語が無い)', () => {
+      const { root, d } = setupBound(three);
+      d.dispatch({ type: 'TOGGLE_KIND_FILTER', archetype: 'text' });
+      expect(line(root)).toBeNull();
+    });
+  });
+
   it('⚠ ノートが 1 件も無く、絞ってもいないときは「絞りを外す」を出さない(外す物が無い)', () => {
     const { root } = setupBound([]);
     expect(clear(root), '外す物が無いのに「絞りを外す」を出した(dead click)').toBeNull();

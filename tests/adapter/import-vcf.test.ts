@@ -314,7 +314,7 @@ describe('振り分け(importFiles)', () => {
     root.querySelector('[data-pkc-region="shell"]')!.append(btn);
     btn.click();
     expect(opened, '編集中なのにファイル選択を開いた(選ぶ手間が無駄になる)').toBe(0);
-    expect(d.getState().error ?? '', '黙って開かなかった').toContain('編集を終了してから');
+    expect(d.getState().error ?? '', '黙って開かなかった').toContain('編集を保存するか、編集をやめてから');
 
     // ⚠ 対照群 ── 編集を終えれば開く(片道にしない)
     d.dispatch({ type: 'CANCEL_EDIT' });

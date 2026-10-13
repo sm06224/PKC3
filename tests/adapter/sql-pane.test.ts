@@ -1407,6 +1407,17 @@ describe('#837 の改善(K1 / K2 / K3)', () => {
     ).toBe(ex);
   });
 
+  it('🔴 手本の下に、列の名前の案内と集計の例が出る(相手を選ぶと集計の例は消え、案内は残る)', async () => {
+    const { pane, pick } = setup();
+    const more = (): string => pane.querySelector('[data-pkc-field="sql-example-more"]')?.textContent ?? '';
+    expect(more()).toContain('列の名前は「構造を見る」で分かります');
+    expect(more()).toContain('GROUP BY archetype');
+    pick('db1');
+    await settle();
+    expect(more(), '案内は相手によらず残る').toContain('列の名前は「構造を見る」で分かります');
+    expect(more(), 'file を調べているのに entries の例').not.toContain('GROUP BY archetype');
+  });
+
   it('🔴 K1 相手を選ぶと、消えない手本もその file のものになる', async () => {
     const { pane, pick } = setup();
     const before = pane.querySelector('[data-pkc-field="sql-example"]')?.textContent ?? '';

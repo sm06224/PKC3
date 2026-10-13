@@ -148,7 +148,7 @@ describe('日付を押す(open-date-note)', () => {
     sent.length = 0;
     link('2026-10-15').click();
     expect(d.getState().error, '黙って断った(押したのに何も出ない)').toBe(
-      '編集を終了してから2026-10-15 のノートを開いてください',
+      '編集を保存するか、編集をやめてから2026-10-15 のノートを開いてください',
     );
     expect(d.getState().selectedLid, '編集中に選択を動かした').toBe('other');
     expect(sent.some((a) => a.type === 'SELECT_ENTRY' && a.lid === 't')).toBe(false);
@@ -159,7 +159,7 @@ describe('日付を押す(open-date-note)', () => {
     edit();
     sent.length = 0;
     link('2026-10-15').click();
-    expect(d.getState().error).toBe('編集を終了してから2026-10-15 のノートを開いてください');
+    expect(d.getState().error).toBe('編集を保存するか、編集をやめてから2026-10-15 のノートを開いてください');
     expect(sent.some((a) => a.type === 'OP_NOTICE'), '編集中に「作る」を出した').toBe(false);
     expect(created(sent)).toEqual([]);
   });
@@ -245,7 +245,7 @@ describe('「○○のノートを作る」を押す(create-date-note)', () => {
     s.root.append(stale);
     stale.click();
     expect(created(s.sent), '編集の裏でノートを作った').toEqual([]);
-    expect(s.d.getState().error).toBe('編集を終了してから2026-10-15 のノートを開いてください');
+    expect(s.d.getState().error).toBe('編集を保存するか、編集をやめてから2026-10-15 のノートを開いてください');
   });
 
   it('🔴 取り込み・書き出しの最中は作らず、理由を言う(`CREATE_ENTRY` は即永続)', () => {

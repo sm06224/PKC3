@@ -1248,7 +1248,7 @@ describe('編集中の日付は、黙って捨てない(#516)', () => {
     expect(s.phase).toBe('editing'); // 前提の検算(台が editing になっていること)
     const add = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
     expect(add.events, '編集中に裏で書いた').toEqual([]);
-    expect(add.state.error, '黙って捨てた').toContain('編集を終了してから');
+    expect(add.state.error, '黙って捨てた').toContain('編集を保存するか、編集をやめてから');
     expect(add.state.error, '何をしようとしたのか言っていない').toContain('日付を付けて');
     const del = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: null });
     expect(del.state.error, '外すのに「付けて」と言った').toContain('日付を外して');
@@ -1265,10 +1265,10 @@ describe('編集中の日付は、黙って捨てない(#516)', () => {
 
   /**
    * 🔴 **`phase` は `editing` だけではない**(#516 の「小さな嘘」)。
-   * ⚠ `error`(保存に失敗したときの保護)で「編集を終了してから」と出すと、
+   * ⚠ `error`(保存に失敗したときの保護)で「編集を保存するか、編集をやめてから」と出すと、
    *   user は**存在しない編集を探す**。
    */
-  it('🔴 保存に失敗しているときは「編集を終了してから」と言わない', () => {
+  it('🔴 保存に失敗しているときは「編集を保存するか、編集をやめてから」と言わない', () => {
     // ⚠ error phase は「守るべき未達 commit が在る」ときだけ立つので、
     //    書いて → commit(まだ disk へ届いていない)→ SYS_ERROR、の順で作る
     let s = loadedA();
@@ -1278,7 +1278,7 @@ describe('編集中の日付は、黙って捨てない(#516)', () => {
     s = reduce(s, { type: 'SYS_ERROR', error: 'disk' }).state;
     expect(s.phase, '前提が崩れている(error phase になっていない)').toBe('error');
     const out = reduce(s, { type: 'SET_ENTRY_DATE', lid: 'a', date: '2026-09-01' });
-    expect(out.state.error, '編集していないのに「編集を終了」と言った').not.toContain('編集を終了');
+    expect(out.state.error, '編集していないのに「編集を終了」と言った').not.toContain('編集を保存するか');
     expect(out.state.error).toContain('「ノートを保存し直す」を押してから');
   });
 

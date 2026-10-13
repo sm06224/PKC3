@@ -242,7 +242,7 @@ describe('並べ替えモード(#857 段①b-2)', () => {
     expect(d.getState().phase, '前提が崩れている(編集に入れていない)').toBe('editing');
     longPress('a1');
     expect(d.getState().launcherReorder, '編集中でも入れてしまった').toBe(false);
-    expect(d.getState().error, '無言で断った').toContain('編集を終了してから');
+    expect(d.getState().error, '無言で断った').toContain('編集を保存するか、編集をやめてから');
   });
 
   /**

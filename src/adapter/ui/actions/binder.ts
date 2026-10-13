@@ -9343,7 +9343,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 直す前は `SELECT_ENTRY` を撃つだけで、別のノートを編集中だと reducer が黙って捨て、
      *   **帯の知らせだけが消えた**(開かず、理由も出ず、もう一度押す所も無い)。
      * 🔑 開く口は `selectEntryOrExplain`(リンクと同じ断り文)。⚠ そのノートを既に開いているなら
-     *   選び直さない(編集中のそのノートで「編集を終了してから開いて」と言わない)。
+     *   選び直さない(編集中のそのノートで「編集を保存するか、編集をやめてから開いて」と言わない)。
      */
     if (lid !== null && st.entryMetas.has(lid) && st.selectedLid !== lid) {
       const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -12782,7 +12782,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **選ばせる前に断る**(#535 ③)。
      *
      * ⚠ 直す前は picker を開き、user が file を選び終わった**後で**
-     *   `importVcfFiles` / `importMarkdownFiles` が「編集を終了してから」と断っていた
+     *   `importVcfFiles` / `importMarkdownFiles` が「編集を保存するか、編集をやめてから」と断っていた
      *   ── **選ぶ手間が丸ごと無駄**になる。これは #513 で右ペインの日付ピッカーに
      *   ついて直したのと**同じ形**である(そちらは「開く → 選ぶ → 確定」を完走させて
      *   から捨てていた)。
@@ -14962,7 +14962,7 @@ export function bindActions(
      *
      * 🔴 **編集中は倒さない**(着地前に自分の diff を読み直して見つけた回帰)。
      * ⚠ 取込は `phase !== 'ready'` を**断る**ので、倒すと編集中に `.md` を落とした人は
-     *   「編集を終了してから取り込んでください」を読まされる ── **これまでは
+     *   「編集を保存するか、編集をやめてから取り込んでください」を読まされる ── **これまでは
      *   添付できていた**ので、動線を 1 つ奪うことになる。
      * 🔑 だから**取込が受けられるときだけ**倒し、そうでなければ**これまでどおり**添付。
      *

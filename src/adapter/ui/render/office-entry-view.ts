@@ -25,6 +25,7 @@ import {
   type OfficeEntry,
 } from '@features/office/office-entry';
 import type { OfficePackMeta } from '@adapter/platform/office/office-pack';
+import { NO_SHADOW_NOTE, needsNoShadowNote } from '@features/office/office-shadow';
 import { iconButton } from './icons';
 
 /** 入口を決めるのに要る「いまの状態」。⚠ **同期で答えられる**ことが条件。 */
@@ -179,5 +180,21 @@ export function buildOfficeEntry(
   note.setAttribute('data-pkc-office-state', entry.kind);
   note.setAttribute('data-pkc-field', 'office-note');
   note.textContent = entry.reason;
+  return note;
+}
+
+/**
+ * 「Office で開く」の隣に出す 1 行(.xlsx / .pptx は一時保存の対象外)。**出さないときは `null`**。
+ * ⚠ 出すのは押せる入口(`open`)のときだけ ── 使えない・未設置のときは開けないので言う意味が無い。
+ */
+export function buildOfficeSaveNote(
+  att: OfficeAttachment,
+  avail: OfficeAvailabilitySource = appOfficePack,
+): HTMLElement | null {
+  if (officeEntryOf(att.name, att.mime, avail).kind !== 'open') return null;
+  if (!needsNoShadowNote(att.name)) return null;
+  const note = document.createElement('p');
+  note.setAttribute('data-pkc-field', 'office-save-note');
+  note.textContent = NO_SHADOW_NOTE;
   return note;
 }

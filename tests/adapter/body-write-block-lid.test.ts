@@ -72,7 +72,7 @@ describe('bodyWriteBlockReason(C6 / #1043) ── lid で判定する', () => {
   });
 
   it('editing + 編集中のノート自身 → 断る(前置きは編集中の字)', () => {
-    expect(bodyWriteBlockReason(editing(s0, 'n1'), 'n1')).toBe('編集を終了してから');
+    expect(bodyWriteBlockReason(editing(s0, 'n1'), 'n1')).toBe('編集を保存するか、編集をやめてから');
   });
 
   it('editing + 別ノート → 断らない(横に留めた枠を止めない)', () => {
@@ -192,7 +192,7 @@ describe('reducer の 9 case(TOGGLE_TODO_STATUS は形が違うので下に別�
         const s = editing(booted(metas), 'n1');
         const r = reduce(s, c.action('n1') as never);
         expect(r.events, '編集中のノート自身なのに書いた').toEqual([]);
-        expect(r.state.error ?? '').toContain('編集を終了してから');
+        expect(r.state.error ?? '').toContain('編集を保存するか、編集をやめてから');
       });
 
       it('④ error phase → 書かず、「ノートを保存し直す」の字(lid に関わらず)', () => {
@@ -230,7 +230,7 @@ describe('TOGGLE_TODO_STATUS ── C6 / #1043', () => {
     const s = editing(booted(metas), 'n1');
     const r = reduce(s, { type: 'TOGGLE_TODO_STATUS', lid: 'n1' } as never);
     expect(r.events).toEqual([]);
-    expect(r.state.error ?? '').toContain('編集を終了してから');
+    expect(r.state.error ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 
   it('④ error phase → 書かず、「ノートを保存し直す」の字', () => {
@@ -272,7 +272,7 @@ describe('bodyRewriteGate(板・本文の塊)── C6 / #1043', () => {
     const s = editing(booted(metas), 'n1');
     const r = reduce(s, move('n1') as never);
     expect(r.events).toEqual([]);
-    expect(r.state.error ?? '').toContain('編集を終了してから');
+    expect(r.state.error ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 
   it('④ error phase → 書かず、「ノートを保存し直す」の字', () => {
@@ -368,7 +368,7 @@ describe('#1051 ── 追記 / 元に戻す 2 つ / 外部画像の取り込み
         const before = spec.arm(editing(s0, 'n1'), 'n1');
         const out = run(before, spec.action('n1'));
         expect(out.events, '編集中のノートの本文を裏で書き換えた').toEqual([]);
-        expect(out.state.error, '黙って捨てた').toBe(`編集を終了してから${spec.suffix}`);
+        expect(out.state.error, '黙って捨てた').toBe(`編集を保存するか、編集をやめてから${spec.suffix}`);
         expect(spec.material(out.state), '断ったのに材料を捨てた(押し直せない)').toEqual(spec.material(before));
       });
 

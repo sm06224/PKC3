@@ -1839,7 +1839,7 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     r.d.dispatch({ type: 'START_EDIT' });
     r.press('remove-place');
     expect(document.querySelector('[data-pkc-field="dialog-ok"]'), '編集中なのに確認が出た').toBeNull();
-    expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(r.d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     expect(asks).toHaveLength(0);
   });
 });

@@ -365,7 +365,7 @@ describe('delete (P3-7a)', () => {
     expect(deleted).toHaveLength(0);
     expect(d.getState().entryMetas.has('a')).toBe(true);
     expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
-      '編集を終了してからゴミ箱へ移してください',
+      '編集を保存するか、編集をやめてからゴミ箱へ移してください',
     );
     expect(await undoOffer(), '消していないのに「元に戻す」を持っている').toBeNull();
   });
