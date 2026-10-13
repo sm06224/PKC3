@@ -959,7 +959,7 @@ export function blockMenuActions(ctx: {
    *   (受け手 `remove-place` が `confirmThen` で聞く)── 一覧の末尾に置く。
    */
   return [
-    { action: 'copy-block-md', label: 'この板をコピー' },
+    { action: 'copy-block-md', label: 'この付箋をコピー' },
     // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
     //    下げる向きは触っていない板の行まで書き換えることになる
     { action: 'raise-place', label: '前へ出す' },
@@ -1041,7 +1041,7 @@ export function blockMenuActions(ctx: {
           },
         ]
       : []),
-    { action: 'remove-place', label: 'この板を消す' },
+    { action: 'remove-place', label: 'この付箋を消す' },
   ];
 }
 
@@ -1121,7 +1121,7 @@ export function placeLineMenuActions(ctx: {
  * ⚠ `BODY_MENU_ACTIONS` には入れない ── あちらは「読んでいる見え方を変える」物の表で、
  *   これは**本文を書き換える**物である(塊の物と同じ並びに置く)。
  */
-export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに板を置く' };
+export const ADD_PLACE_ACTION: EntryAction = { action: 'add-place', label: 'ここに付箋を置く' };
 
 /**
  * 🔴 **付箋の題名を、その場で直す**(#529 W5-b。Gemini 裁定 2026-10-11 依頼 18 Q3 = A)。
@@ -1135,7 +1135,7 @@ export const PLACE_RENAME_ACTION: EntryAction & { readonly hint: string } = {
 };
 
 /**
- * 🔴 **テンプレートから板を置く**(#529 W4)── 「ここに板を置く」の隣の入口。
+ * 🔴 **テンプレートから板を置く**(#529 W4)── 「ここに付箋を置く」の隣の入口。
  * 押すと 3 つのテンプレートの窓が開き、選ぶと押した位置から本文の末尾へ置かれる。
  * ⚠ 板の無いノートでも出る(`ADD_PLACE_ACTION` と同じ。1 枚目を置くと器が板になる)。
  */

@@ -3488,7 +3488,7 @@ const MENU_LID_ATTR = 'data-pkc-menu-lid';
  */
 const MENU_BLOCK_ATTR = 'data-pkc-menu-block';
 /**
- * 🔴 **右クリックした所の、本文の器の中での座標**(#676「ここに板を置く」)。
+ * 🔴 **右クリックした所の、本文の器の中での座標**(#676「ここに付箋を置く」)。
  * 器(`detail-body`)の左上からの px ── 板の `x=` / `y=` と同じ座標系(絶対配置の基準は
  * 器の padding box なので、`getBoundingClientRect` の左上から**枠線ぶん**(`clientLeft`)を
  * 引き、器がスクロールしていればその分を足す)。
@@ -9999,7 +9999,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、板を消してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}、板の付箋を消してください` });
       return;
     }
     const ob = st.openBody;
@@ -10007,12 +10007,12 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = ob.lid;
     confirmThen(
       root,
-      'この板を本文から消しますか?(中に書いた字も消えます。取り消せません)',
-      { okLabel: 'この板を消す', danger: true },
+      'この付箋を本文から消しますか?(中に書いた字も消えます。取り消せません)',
+      { okLabel: 'この付箋を消す', danger: true },
       dispatcher,
       () => {
         const now = dispatcher.getState();
-        if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板を消してください`;
+        if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板の付箋を消してください`;
         if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
         return null;
       },
@@ -16219,7 +16219,7 @@ export function bindActions(
      * ⚠ 板の題名札(`place-board.ts` の `ensureCard`)は `select-entry` のために lid を
      *   持っている。ここで行と読むと `selectEntryOrExplain` が**そのノートへ切り替えて**
      *   板が消え、出るのは**別ノートの行メニュー**になる(押した物と効く先が食い違う)。
-     * 🔑 読む本文の中の物は下の本文の枝で受ける(板の上なら「この板をコピー」が出る)。
+     * 🔑 読む本文の中の物は下の本文の枝で受ける(板の上なら「この付箋をコピー」が出る)。
      */
     const hit = target.closest('[data-pkc-entry]');
     const row = hit !== null && hit.closest('[data-pkc-field="detail-body"]') !== null ? null : hit;

@@ -1401,6 +1401,34 @@ function rewriteCsvShape(
   body: string,
   rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
 ): string | null {
+  const r = csvShapeResult(body, rewrite);
+  return typeof r === 'string' ? r : null;
+}
+
+/** 断った理由(本文の字と混ざらないよう、字ではなく形で返す)。 */
+interface CsvShapeRefused {
+  readonly refused: 'last-row' | 'last-col';
+}
+
+/**
+ * 🔴 **書き換えを断った理由を、利用者の言葉で返す**(#1087 の見直し 2026-10-13)。
+ * ⚠ `applyBodyRewrite` の `null` は「本文が変わって行番号がずれた」と「最後の 1 行 / 1 列は消せない」の
+ *   両方だった ── 呼び側は前者の字(「本文が変わっているため反映できませんでした」)しか出せず、
+ *   最後の行の × を押した人に**在りもしない食い違い**を探させていた。
+ * @returns 理由がはっきりしている断りの字。分からなければ `null`(呼び側の今までの字のまま)
+ */
+export function bodyRewriteRefusal(body: string, rewrite: BodyRewrite): string | null {
+  if (rewrite.kind !== 'csv-shape') return null;
+  const r = csvShapeResult(body, rewrite);
+  if (r === null || typeof r === 'string') return null;
+  return r.refused === 'last-row' ? '最後の 1 行は消せません' : '最後の 1 列は消せません';
+}
+
+/** `rewriteCsvShape` の中身。書けたら新しい本文、断ったら理由、当たらなければ `null`。 */
+function csvShapeResult(
+  body: string,
+  rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+): string | CsvShapeRefused | null {
   const table = csvTableAt(body, rewrite.line);
   if (table === null) return null;
   const lines = splitLines(body);
@@ -1436,7 +1464,7 @@ function rewriteCsvShape(
   if (rewrite.what === 'row') {
     if (rewrite.mode === 'remove') {
       // ⚠ **最後の 1 行は消さない**(表ごと消えて CSV の原文に放り出される)
-      if (rows.length <= 1) return null;
+      if (rows.length <= 1) return { refused: 'last-row' };
       lines.splice(rewrite.line, 1);
       return lines.join(eol);
     }
@@ -1489,7 +1517,7 @@ function rewriteCsvShape(
    * 🔑 幅が 1 なら断る / それより広ければ、升の足りない行は**空の行になるだけ**
    *   (空の行は #780 で打てるようになったので、行き止まりにならない)。
    */
-  if (rewrite.mode === 'remove' && csvTableWidth(lines, table) <= 1) return null;
+  if (rewrite.mode === 'remove' && csvTableWidth(lines, table) <= 1) return { refused: 'last-col' };
   for (const { at, spans } of parsed) {
     const line = lines[at]!;
     // ⚠ 範囲は**前置きを剥がした字**の中の位置 ── 前置きのぶんだけずらして当てる
