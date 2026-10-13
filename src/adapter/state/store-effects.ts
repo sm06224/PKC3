@@ -6,6 +6,7 @@
  * 直列化する。worker handler が将来 async 化しても、app 側から見た op 順序は
  * ここで保証される(「init 以外は同期」という暗黙 invariant に依存しない)。
  */
+import { errorText } from '@features/error-text';
 import type { EntryStamps, EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta, type FlavorExtract } from '@features/flavor';
 import { PersistOnce, type PersistState } from '@adapter/platform/storage-persist';
@@ -2063,7 +2064,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `フォルダへの所属を変えられませんでした: ${String(e)}`,
+                error: `フォルダへの所属を変えられませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2114,7 +2115,7 @@ export function connectStoreEffects(
           try {
             await upsert({ id: ev.id, fromLid: ev.fromLid, toLid: ev.toLid, kind: ev.kind });
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを保存できません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを保存できません: ${errorText(e)}` });
           }
         });
         break;
@@ -2127,7 +2128,7 @@ export function connectStoreEffects(
           try {
             await remove(ev.id);
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを消せません: ${String(e)}` });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを消せません: ${errorText(e)}` });
           }
         });
         break;
@@ -2172,7 +2173,7 @@ export function connectStoreEffects(
               if (!disposed)
                 dispatcher.dispatch({
                   type: 'OP_FAILED',
-                  error: `並べ替えを保存できませんでした: ${String(e)}`,
+                  error: `並べ替えを保存できませんでした: ${errorText(e)}`,
                 });
             }
           });
@@ -2241,7 +2242,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの設定を保存できませんでした: ${String(e)}`,
+                error: `アプリの設定を保存できませんでした: ${errorText(e)}`,
               });
             fail();
             return;
@@ -2270,7 +2271,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの一覧を再読み込みできませんでした: ${String(e)}`,
+                error: `アプリの一覧を再読み込みできませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2381,7 +2382,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `アプリの一覧を再読み込みできませんでした: ${String(e)}`,
+                error: `アプリの一覧を再読み込みできませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2447,7 +2448,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `Office の保存を書き戻せませんでした: ${String(e)}`,
+                error: `Office の保存を書き戻せませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2540,7 +2541,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `グループの並べ替えを保存できませんでした: ${String(e)}`,
+                error: `グループの並べ替えを保存できませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2599,7 +2600,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `グループのアイコンを保存できませんでした: ${String(e)}`,
+                error: `グループのアイコンを保存できませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -2647,7 +2648,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `グループの設定の読込に失敗しました: ${String(e)}`,
+                error: `グループの設定の読込に失敗しました: ${errorText(e)}`,
               });
           }
         });
@@ -2675,7 +2676,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `ランチャーの読込に失敗しました: ${String(e)}`,
+                error: `ランチャーの読込に失敗しました: ${errorText(e)}`,
               });
           }
         });
@@ -2898,7 +2899,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `履歴の取得に失敗しました: ${String(e)}`,
+                error: `履歴の取得に失敗しました: ${errorText(e)}`,
               });
           }
         });
@@ -3062,7 +3063,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `ゴミ箱の取得に失敗しました: ${String(e)}`,
+                error: `ゴミ箱の取得に失敗しました: ${errorText(e)}`,
               });
           }
         });
@@ -3086,7 +3087,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `元に戻せませんでした: ${String(e)}`,
+                error: `元に戻せませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -3187,7 +3188,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `ゴミ箱を空にできませんでした: ${String(e)}`,
+                error: `ゴミ箱を空にできませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -3409,7 +3410,7 @@ export function connectStoreEffects(
             });
             stamp(ev.lid, stamps);
           } catch (e) {
-            fail(`章を保存できませんでした: ${String(e)}`);
+            fail(`章を保存できませんでした: ${errorText(e)}`);
           }
         });
         break;
@@ -3491,7 +3492,7 @@ export function connectStoreEffects(
             });
             stamp(ev.lid, stamps);
           } catch (e) {
-            fail(`コードを保存できませんでした: ${String(e)}`);
+            fail(`コードを保存できませんでした: ${errorText(e)}`);
           }
         });
         break;
@@ -3806,7 +3807,7 @@ export function connectStoreEffects(
                 type: 'OP_FAILED',
                 error:
                   ev.rewrite.kind === 'attachment-name'
-                    ? `ファイル名は変えられませんでした(${String(e)})`
+                    ? `ファイル名は変えられませんでした(${errorText(e)})`
                     : String(e),
               });
           }

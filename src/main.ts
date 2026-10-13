@@ -1,5 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
+import { errorText } from '@features/error-text';
 import { bootFailureText } from '@features/boot-failure-text';
 import './styles/app.css';
 /**
@@ -4442,7 +4443,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
           }
         } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}を解決できません: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}を解決できません: ${errorText(e)}` });
         }
       })();
     },

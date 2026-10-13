@@ -15,6 +15,7 @@
  * 並んだ変換済み全文」までを作り、逆向きパッチへの符号化は worker が行う。
  * I/O は一切しない(HTML/ZIP の読取り・bytes decode・書込は adapter 側)。
  */
+import { errorText } from '@features/error-text';
 import { getFlavor } from '../flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
 import {
@@ -331,7 +332,7 @@ export function convertPkc2Container(
     try {
       body = getFlavor(u.archetype).fromPkc2?.(src) ?? src;
     } catch (e) {
-      if (!quiet) warnings.push(`変換失敗(text として保持): ${u.lid}: ${String(e)}`);
+      if (!quiet) warnings.push(`変換失敗(text として保持): ${u.lid}: ${errorText(e)}`);
       body = src;
     }
     // ⑤ 参照書換: lid → textlog permalink → asset key の順。

@@ -392,7 +392,8 @@ const MOVED_VIEWS: Readonly<Record<string, BrowseMode>> = {
  * 引っ越しの案内。⚠ **どこへ行ったか**を書く(「使えません」で終わらせない)。
  */
 export const MOVED_MESSAGE =
-  'カレンダーとやることの板は、左のペインの「予定」に移りました。そちらを開きました';
+  // ⚠ 古いアドレスで来た人が探している名前(カレンダー / かんばん)で言う(#1087)
+  'カレンダーとかんばんは、左のペインの「予定」にまとまりました(チェックの付いた行が日付ごとに並びます)。そちらを開きました';
 
 export function unusableViewMessage(): string {
   /**

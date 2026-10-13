@@ -21,6 +21,7 @@
  * ⚠ **取り込み口は `attachOne` の 1 本**(`attach` として注入する)── 2 つ目を作らない。
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { TRIM_REFUSAL_TEXT } from '@features/audio/webm-opus';
 import { trimmedCaptureName } from '@features/audio/trim-text';
@@ -272,7 +273,7 @@ export function createCaptureTrimmer(deps: CaptureTrimDeps): CaptureTrimmer {
         // 🔑 戻ったときは、済んだ後の一行にも「何秒早く始まるか」を残す(確認で見た数字を後から確かめられる)
         deps.notify(`切り出しました:「${name}」(${elapsedText(made.durationMs)})${snapDoneNote(made.snapBackMs)}`);
       } catch (e: unknown) {
-        fail(`切り出せませんでした(${String(e)})`);
+        fail(`切り出せませんでした(${errorText(e)})`);
       } finally {
         if (!finished) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる

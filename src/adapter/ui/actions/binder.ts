@@ -12,6 +12,7 @@
  * string を作る ── GC churn が数字に出たら debounce / collect-at-commit へ
  * 切り替える(その時に計測してから)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
@@ -809,10 +810,11 @@ export function addScheduleItemChecked(
       return addScheduleItem(dispatcher, item);
     },
     // 🔴 問い合わせが落ちても黙って捨てない(字は欄に残る)
-    (e: unknown) => {
+    () => {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `予定を足せませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})`,
+        // ⚠ 例外の英語を画面に出さない / 次にすることを言う(#1087)
+        error: `予定を足せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください`,
       });
       return false;
     },
@@ -8325,7 +8327,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         .catch((e: unknown) => {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})`,
+            // 🔑 理由は残し(何が起きたかの手がかり)、次にすることを足す(#1087)
+            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})。欄の字は残っています。もう一度押してください`,
           });
         })
         .finally(() => {
@@ -10780,7 +10783,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       (e: unknown) => {
         sum.textContent = '';
         sum.hidden = true;
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${String(e)}` });
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${errorText(e)}` });
       },
     );
   },
@@ -10940,7 +10943,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           sum.hidden = true;
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `作り直せませんでした(何も消えていません): ${String(e)}`,
+            error: `作り直せませんでした(何も消えていません): ${errorText(e)}`,
           });
         }
       })
@@ -11078,7 +11081,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         } catch (e) {
           sum.textContent = '';
           sum.hidden = true;
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${errorText(e)}` });
         }
       });
   },
@@ -13318,7 +13321,14 @@ const EDITOR_RUN: Readonly<Record<string, (ta: HTMLTextAreaElement, notify: (t: 
    */
   'inline-calc': (ta, notify) => {
     const action = calcLineAction(ta.value, ta.selectionStart);
-    if (action === null) return;
+    /**
+     * 🔴 **頼まれて押したときは黙らない**(#1087)── 打っているとき(Enter)に式でない行で黙るのは正しいが、
+     *   ここは user が「計算して」と明示した。何も起きないと、押したのに効かないボタンになる。
+     */
+    if (action === null) {
+      notify('計算できませんでした(この行に計算できる式がありません)');
+      return;
+    }
     if (action.kind === 'why') {
       notify(action.text);
       return;

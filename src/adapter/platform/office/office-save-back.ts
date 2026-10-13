@@ -27,6 +27,7 @@
  *    ②起動時(`drainAll`)③編集が終わったとき(`retryDeferred`)。
  *    どれも同じ `takeOne` を通るので、二重取りは棚の有無で自然に止まる
  */
+import { errorText } from '@features/error-text';
 import {
   discardStaged,
   listStaged,
@@ -300,7 +301,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         try {
           out.push(await takeOne(dir, save));
         } catch (e) {
-          deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}): ${String(e)}`);
+          deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}): ${errorText(e)}`);
           out.push('failed');
         } finally {
           inFlight.delete(save.key);

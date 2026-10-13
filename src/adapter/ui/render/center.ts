@@ -208,7 +208,8 @@ export class CenterRouter {
     close.setAttribute('aria-label', '画面を閉じる');
     // ⚠ 字も出す ── 記号だけだと「何が閉じるのか」が読めない
     close.textContent = '× 画面を閉じる';
-    close.title = '閉じると本文へ戻ります';
+    // ⚠ 予定表・連絡先の別のウィンドウでは、ウィンドウごと閉じる(#1087)
+    close.title = '閉じると本文へ戻ります(別のウィンドウでは、ウィンドウごと閉じます)';
     this.bar.append(close);
     region.prepend(this.bar);
     this.scroll = new ScrollMemory(region);

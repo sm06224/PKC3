@@ -13,6 +13,7 @@
  * - `kind: 'app'` … 取り込んだ HTML。**添付そのものは開かない** ──
  *   隔離した外殻(`features/launcher/app-shell.ts`)に載せて開く
  */
+import { errorText } from '@features/error-text';
 import { buildLauncherAppShell, launcherAppBase } from '@features/launcher/app-shell';
 import { decodeHtml } from '@features/launcher/html-charset';
 import type { LauncherTile } from '@features/launcher/tiles';
@@ -362,7 +363,7 @@ export async function launchTile(
       }
     } catch (e) {
       win.close();
-      deps.fail(`「${tile.title}」を開けませんでした: ${String(e)}`);
+      deps.fail(`「${tile.title}」を開けませんでした: ${errorText(e)}`);
     }
   })();
 }

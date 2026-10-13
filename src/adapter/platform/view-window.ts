@@ -283,7 +283,8 @@ function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): voi
    *   開いたと言わない(「この画面で開きました」は嘘になる)── 見せ方も変えない。理由だけ出す。
    */
   if (deps.schedule !== undefined) {
-    deps.fail(`${why}。週で見るには、ポップアップの許可を出してください`);
+    // ⚠ 月も同じ入口を通る ── 押した見方の名前で言う(#1087)
+    deps.fail(`${why}。${deps.schedule.mode === 'month' ? '月' : '週'}で見るには、ポップアップの許可を出してください`);
     return;
   }
   /**
