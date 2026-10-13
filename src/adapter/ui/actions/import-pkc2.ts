@@ -789,6 +789,14 @@ export async function importPkc2File(
       ...(light ? ['添付の中身は含まれていない export です(light)'] : []),
     ];
     const revNote = revStats.added > 0 ? `(履歴 ${revStats.added} 版)` : '';
+    /**
+     * 🔴 **取り込んだ id を憶える**(#535 ② の漏れ。利用者目線の見直し 2026-10-13)── md / 連絡先 / 予定 /
+     *   pptx は憶えていたのに、ここ(PKC2 の書き出し・PKC3 のバックアップ)だけ憶えていなかった。
+     *   ⚠ 帰結は 2 つ:マニュアルが約束する「取り込みを取り消す」が出ない / **前の取り込みの取り消しが
+     *   残っていると、それが出る**(押すと前の取り込み分が消える)。⚠ `report` より先に呼ぶ ──
+     *   面の操作は `report` の中で `pending()` から組む。
+     */
+    deps.imported?.(rows.map((r) => r.lid));
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);

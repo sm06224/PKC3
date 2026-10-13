@@ -1689,3 +1689,38 @@ describe('同じものを 2 回取り込んだと気づく (#399 ②)', () => {
     expect(reportedNotes().join('\n')).not.toContain('同じ内容');
   });
 });
+
+/**
+ * 🔴 **取り込んだ id を憶える**(#535 ② の漏れ)── md / 連絡先 / 予定 / pptx は憶えていたのに、
+ *   PKC2 の書き出し・PKC3 のバックアップの取り込みだけ憶えていなかった。
+ *   ⚠ 憶えないと「取り込みを取り消す」が出ないうえ、前の取り込みの取り消しが残っていればそれが出る。
+ */
+describe('取り込みの戻り道(バックアップ / PKC2)', () => {
+  it('🔴 書いたノートの id を、面を組む(report)より先に憶える', async () => {
+    const { d, deps, written } = harness();
+    const order: string[] = [];
+    let remembered: readonly string[] = [];
+    const withUndo = {
+      ...deps,
+      imported: (lids: readonly string[]) => {
+        remembered = lids;
+        order.push('imported');
+      },
+      report: () => void order.push('report'),
+    };
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'いち', archetype: 'text', body: '本文\n' },
+          { lid: 'b', title: 'に', archetype: 'text', body: '本文 2\n' },
+        ],
+        assets: {},
+      },
+    });
+    await importPkc2File(d, withUndo, file);
+    expect(written.length, '前提: 2 件書けていない').toBe(2);
+    expect([...remembered].sort(), '憶えた id が書いたノートと違う').toEqual(written.map((w) => w.lid).sort());
+    expect(order, '面を組んだ後に憶えている(取り消しが出ない)').toEqual(['imported', 'report']);
+  });
+});
