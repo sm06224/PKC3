@@ -65,7 +65,7 @@ const BATCH2: readonly Row[] = [
   { id: 'storage-profile', source: R + 'commands.ts', scene: '「保存領域」を開いているとき' },
   { id: 'contacts-quick-add', source: R + 'contacts.ts', scene: '連絡先の画面を開いているとき', field: 'contacts-quick-name' },
   { id: 'export-vcards', source: R + 'contacts.ts', scene: '連絡先の画面を開いていて' },
-  { id: 'open-system-notices', source: R + 'help.ts', scene: '「設定」のボタンが出ているとき' },
+  { id: 'open-system-notices', source: R + 'help.ts', scene: '「システム」のボタンが出ているとき' },
   { id: 'add-url-tile', source: R + 'launcher.ts', scene: 'アプリの画面を開いているとき', field: 'launcher-add-url' },
   { id: 'pc-pick-folder', source: R + 'pc-folder.ts', scene: 'PC のフォルダの画面を開いているとき' },
   { id: 'hide-history', source: R + 'detail.ts', scene: 'ノートの履歴を開いているとき' },

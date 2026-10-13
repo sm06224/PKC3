@@ -462,7 +462,8 @@ export class HelpRenderer {
     const jumpKeysBtn = document.createElement('button');
     jumpKeysBtn.type = 'button';
     jumpKeysBtn.setAttribute('data-pkc-field', 'help-jump-keys');
-    jumpKeysBtn.textContent = 'キーボードショートカット一覧へ';
+    // 🔑 用語集の「ショートカットキー」と同じ語(#1087 の見直し 2026-10-13。下の節の見出しも「ショートカットキー」)
+    jumpKeysBtn.textContent = 'ショートカットキーの一覧へ';
     jumpKeysBtn.title = 'ショートカットキーの一覧(チートシート)へスクロールします';
     jumpKeysBtn.addEventListener('click', () => {
       this.scrollToKeys();
@@ -776,7 +777,12 @@ export class HelpRenderer {
     const heads = host.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6');
     const head = heads[section.index];
     if (head) {
-      head.scrollIntoView({ block: 'start' });
+      /**
+       * 🔴 **送り方は目次と同じ `jumpTo`**(#1087 の見直し 2026-10-13)── 直す前は素の `scrollIntoView` で、外側の画面まで動き、
+       *   **探した結果の一覧が画面の外へ出ていた**(次の結果へ移る道が見えなくなる)。`jumpTo` は外側を戻すので、一覧は残る。
+       * ⚠ 戻る表示は出さない ── 一覧が画面に残るので、もう一度押せば別の節へ行ける(目次と同じ理由)。
+       */
+      this.jumpTo(head, false);
       return;
     }
     /**

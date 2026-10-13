@@ -1156,7 +1156,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'お知らせを開く',
     contexts: ['global'],
     defaults: [],
-    note: 'これまでのお知らせを、システムの画面で開きます(「設定」のボタンが出ているときだけ効きます)',
+    note: 'これまでのお知らせを、システムの画面で開きます(「システム」のボタンが出ているときだけ効きます)',
     alias: 'お知らせ 通知 更新 変更点 バージョン',
   },
   {
