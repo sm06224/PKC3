@@ -1971,6 +1971,12 @@ export interface AppState {
    */
   lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
   /**
+   * 🔴 **履歴から戻した直後の「元に戻す」の材料**(依頼 68-1)── 戻す前の本文の版 id。
+   * ⚠ `lid` を持つ: 別のノートを選んだら出さない(他のノートの版を、いま開いているノートへ書かない)。
+   * ⚠ 1 手だけ持つ。次の復元・ノートの切り替えで出番が無くなる(出し入れは `status-open.ts`)。
+   */
+  restoreUndo?: { lid: string; revId: string; notice: string } | null;
+  /**
    * 🔴 **直前の塊の移動を、逆向きに撃つ指示**(#684 段①)── 「元に戻す」の材料。
    *
    * ⚠ `lastAppend` と違って**位置**を持つ(行の並びは同じ字が何度も出るので、字だけでは
@@ -3404,6 +3410,11 @@ export type SystemCommand =
        * ⚠ 履歴復元(`mode: 'revision'`)では entry が消えていないので不要(省略可)。
        */
       relations?: readonly Relation[];
+      /**
+       * 🔴 **履歴から戻す前の本文の版**(依頼 68-1)。復元は戻す前の本文を履歴に 1 件積むので、
+       * その版を指す。あると、画面の下の知らせの隣に「元に戻す」が出る(押すと同じ `RESTORE_REVISION`)。
+       */
+      undoRevId?: string;
     }
   | { type: 'TRASH_PURGED'; purged: number }
   | {
@@ -9118,7 +9129,7 @@ function reduceCore(
       // panel は畳む(復元で履歴が 1 件伸びるので開き直しが正)。meta snapshot は
       // 発火時捕獲(C-1 規律)
       return {
-        state: { ...state, revisionPanel: null, revisionPreview: null },
+        state: { ...state, revisionPanel: null, revisionPreview: null, restoreUndo: null },
         events: [
           {
             type: 'REQUEST_RESTORE',
@@ -9836,12 +9847,21 @@ function reduceCore(
           /**
            * 🔴 **履歴から戻したら、戻したことを言う**(#1087 の見直し 2026-10-13)。
            * ⚠ 直す前は履歴の一覧が畳まれるだけで、何も出なかった ── 押した人には
-           *   戻ったのか分からず、「戻したことも取り消せます」(マニュアル)の取り消し方も見えない。
+           *   戻ったのか分からず、取り消し方(画面の下の「元に戻す」/ 履歴から戻す前の版を選ぶ)も見えない。
            * ⚠ ゴミ箱から戻したときは binder が「ゴミ箱から元に戻しました」を出すので、ここでは言わない。
            */
           ...(action.mode === 'revision'
             ? {
-                notice: `「${action.meta.title}」を前の版に戻しました。取り消すときは、もう一度「履歴を開く」から戻す前の版を選んでください`,
+                notice: `「${action.meta.title}」を前の版に戻しました`,
+                // ⚠ 知らせの字そのものも持つ ── 画面の下に出ている字がこの知らせのときだけ「元に戻す」を出す
+                restoreUndo:
+                  action.undoRevId === undefined
+                    ? null
+                    : {
+                        lid: action.meta.lid,
+                        revId: action.undoRevId,
+                        notice: `「${action.meta.title}」を前の版に戻しました`,
+                      },
                 noticeOpen: null,
                 noticeCreate: null,
               }

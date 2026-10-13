@@ -537,6 +537,40 @@ describe('別窓の開き方(#685 着地前レビュー M2)', () => {
     ).toBe('noopener');
   });
 
+  /**
+   * 🔴 **右クリックで「別のウィンドウで開く」を選んだ回だけ、窓の大きさを足す**(依頼 69-B4)。
+   * ⚠ `noopener` は必ず残す(上の理由)。⚠ 選ばなければ(= ふだんの押下)今までどおり `noopener` だけ。
+   */
+  it('🔴 別のウィンドウを選んだ回は `noopener` に窓の指定が足される / 選ばなければ足されない(対照群)', () => {
+    const features: Array<string | undefined> = [];
+    const spy = vi
+      .spyOn(window, 'open')
+      .mockImplementation((_url?: string | URL, _name?: string, f?: string) => {
+        features.push(f);
+        return null;
+      });
+    try {
+      openViewWindowUrl('https://example.test/#a', 'window');
+      openViewWindowUrl('https://example.test/#a', 'tab');
+      openViewWindowUrl('https://example.test/#a');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(features[0], '`noopener` が落ちている').toContain('noopener');
+    expect(features[0], '窓の指定が足されていない').toContain('popup=yes');
+    expect(features[1], 'タブを選んだのに窓の指定が足された').toBe('noopener');
+    expect(features[2], '何も選ばない回が変わった').toBe('noopener');
+  });
+
+  it('🔴 選んだ開き方は、開く口まで届く(選ばなければ undefined のまま)', async () => {
+    const seen: Array<unknown> = [];
+    const b = bench({ answered: true });
+    const deps = { ...b.deps, open: (_u: string, t?: unknown) => void seen.push(t) };
+    await openViewInWindow(null, { ...deps, selected: () => ({ containerId: 'c1', lid: 'e1' }), openTarget: 'window' });
+    await openViewInWindow(null, { ...deps, selected: () => ({ containerId: 'c1', lid: 'e1' }) });
+    expect(seen).toEqual(['window', undefined]);
+  });
+
   /** ⚠ **値そのものも pin する** ── 呼び側 2 つが同じ物を使うことの錨。 */
   it('⚠ 開き方の値は 1 か所に在る', () => {
     expect(VIEW_WINDOW_FEATURES).toBe('noopener');

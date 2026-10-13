@@ -17,6 +17,7 @@ function stateOf(over: Partial<AppState>): AppState {
     viewMode: 'detail',
     selectedLid: 'a',
     openBody: { lid: 'a', body: '本文', baseline: '本文' },
+    entryMetas: new Map([['a', {}], ['other', {}]]),
     ...over,
   } as unknown as AppState;
 }
@@ -105,6 +106,52 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     h.push({ selectedLid: 'a', openBody: { lid: 'a', body: '本文' } as never });
     expect(await p).toBe('printed');
     expect(h.prints()).toBe(1);
+  });
+
+  /**
+   * 🔴 **刷るために動かした画面は、刷り終えたら元へ戻す**(依頼 71-3)。
+   * 一覧の行の「PDF で書き出す」は別のノートを選び直す ── 戻さないと見ていたノートが外れる。
+   */
+  it('🔴 別のノートを見ていたら、刷った後に元のノートへ戻す', async () => {
+    const h = harness({ selectedLid: 'other', openBody: { lid: 'other', body: 'x' } as never });
+    const p = printNote(h.deps, 'a');
+    h.push({ selectedLid: 'a', openBody: { lid: 'a', body: '本文' } as never });
+    expect(await p).toBe('printed');
+    expect(h.sent.at(-1), '刷った後に元のノートへ戻していない').toEqual({ type: 'SELECT_ENTRY', lid: 'other' });
+  });
+
+  it('🔴 別の面を見ていたら、刷った後にその面へ戻す(選択は戻す前に、面は最後に)', async () => {
+    const h = harness({ viewMode: 'query', selectedLid: 'other', openBody: { lid: 'other', body: 'x' } as never });
+    const p = printNote(h.deps, 'a');
+    h.push({ viewMode: 'detail', selectedLid: 'a', openBody: { lid: 'a', body: '本文' } as never });
+    await p;
+    const after = h.sent.slice(h.sent.findIndex((a) => a.type === 'SELECT_ENTRY') + 1);
+    expect(after, '選択と面の両方を戻していない').toEqual([
+      { type: 'SELECT_ENTRY', lid: 'other' },
+      { type: 'SET_VIEW_MODE', mode: 'query' },
+    ]);
+  });
+
+  it('⚠ 動かしていなければ、刷った後に何も撃たない(対照群)', async () => {
+    const h = harness({});
+    await printNote(h.deps, 'a');
+    expect(h.sent, '動かしていないのに画面を触った').toEqual([]);
+  });
+
+  it('⚠ 刷っている間に別の場所へ移っていたら、勝手に戻さない', async () => {
+    const h = harness({ selectedLid: 'other', openBody: { lid: 'other', body: 'x' } as never });
+    const deps = {
+      ...h.deps,
+      // 印刷の画面を開いている間に、user が別のノート(a 以外)へ移った
+      print: () => h.push({ selectedLid: 'third', openBody: { lid: 'third', body: 'y' } as never }),
+    };
+    const p = printNote(deps, 'a');
+    h.push({ selectedLid: 'a', openBody: { lid: 'a', body: '本文' } as never });
+    await p;
+    expect(
+      h.sent.filter((a) => a.type === 'SELECT_ENTRY' && (a as { lid: string }).lid === 'other'),
+      '移った先を元のノートで上書きした',
+    ).toEqual([]);
   });
 
   it('🔴 本文が来なければ刷らない(白紙を配らない)', async () => {

@@ -413,6 +413,9 @@ export function manualTile(): LauncherTile {
  */
 export const SELFHOST_TILE_LID = 'builtin:selfhost';
 
+/** 🔴 マウスを載せたときの説明(依頼 69-B3)── 押す前に、何が保存されるかを伝える。 */
+export const SELFHOST_TILE_HINT = '押すと、自分のパソコンで PKC3 を動かすための zip を作って保存します';
+
 export function selfhostTile(): LauncherTile {
   return {
     lid: SELFHOST_TILE_LID,

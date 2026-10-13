@@ -18,7 +18,7 @@
  * renderer は DOM を描くだけ、という規約。
  */
 import type { AppState } from '@adapter/state/app-state';
-import type { LauncherTile } from '@features/launcher/tiles';
+import { SELFHOST_TILE_HINT, type LauncherTile } from '@features/launcher/tiles';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { TILE_MENU_ACTIONS } from '@features/entry-actions';
 import { matchesTitle, normalizeQuery } from '@features/filter/title-filter';
@@ -564,6 +564,7 @@ export class LauncherRenderer {
       btn.append(where);
       btn.title = tile.url;
     }
+    if (tile.kind === 'selfhost') btn.title = SELFHOST_TILE_HINT;
     return btn;
   }
 }

@@ -164,14 +164,48 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     ]);
   });
 
-  /** ⚠ 対照群 ── 動かせない組み込みタイルの上では、この項目自体が出ない。 */
-  it('⚠ 組み込みタイルの上では出ない(動かせるタイルにだけ出す TILE_MENU_ACTIONS と同じ絞り)', () => {
-    const dual = region.querySelector<HTMLElement>('[data-pkc-tile^="builtin:"]');
+  /**
+   * 🔴 **組み込みアプリのタイルも、開き方の 2 項目だけは出す**(依頼 69-B4。Gemini 裁定 = #1163 への依頼 69 の回答)。
+   * ⚠ 並べ替えの項目は出さない(組み込みは動かせない)。⚠ 開き方が効くのは別のウィンドウで開く面のタイルだけ
+   *   ── マニュアル・Office・「自分のパソコンで動かす」は押しても何も変わらないので出さない。
+   */
+  it('🔴 組み込みの面のタイル(予定表など)は、開き方の 2 項目だけが出る(並べ替えは出ない)', () => {
+    chooseAppOpenTarget('window'); // 設定を窓にしても、組み込みの面の印はタブのまま
+    const dual = region.querySelector<HTMLElement>('[data-pkc-tile="builtin:dual"]');
     expect(dual, '前提が崩れている(組み込みタイルが描かれていない)').not.toBeNull();
     dual!.dispatchEvent(
       new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 }),
     );
-    expect(menuItem('tab'), '組み込みにまで出している').toBeNull();
-    expect(menuItem('window'), '組み込みにまで出している').toBeNull();
+    expect(menuItem('tab'), 'タブの項目が出ていない').not.toBeNull();
+    expect(menuItem('window'), '窓の項目が出ていない').not.toBeNull();
+    // 組み込みの面は設定に従わず、ふだんはいつもタブで開く ── 印はタブに付く(設定を窓にしても動かさない)
+    expect(menuItem('tab')!.textContent).toContain('(既定)');
+    expect(menuItem('window')!.textContent).not.toContain('(既定)');
+    expect(
+      root.querySelectorAll('[data-pkc-region="context-menu"] [data-pkc-action]').length,
+      '開き方の 2 項目以外が混ざっている(並べ替えなど)',
+    ).toBe(2);
+    menuItem('window')!.click();
+    expect(openTileAsCalls, '選んだ開き方が配線に届いていない').toEqual([{ lid: 'builtin:dual', target: 'window' }]);
+  });
+
+  it('⚠ 開き方を持たない組み込みタイル(マニュアル・自分のパソコンで動かす)には出さない(対照群)', () => {
+    for (const lid of ['builtin:manual', 'builtin:selfhost']) {
+      const el = region.querySelector<HTMLElement>(`[data-pkc-tile="${lid}"]`);
+      expect(el, `前提が崩れている(${lid} が描かれていない)`).not.toBeNull();
+      el!.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 }),
+      );
+      expect(menuItem('tab'), `${lid} に効かない選択肢を出している`).toBeNull();
+      expect(menuItem('window'), `${lid} に効かない選択肢を出している`).toBeNull();
+    }
+  });
+
+  it('🔴 「自分のパソコンで動かす」にマウスを載せると、押すと何が起きるかが出る(依頼 69-B3)', () => {
+    const el = region.querySelector<HTMLElement>('[data-pkc-tile="builtin:selfhost"]');
+    expect(el, '前提が崩れている').not.toBeNull();
+    expect(el!.title).toBe('押すと、自分のパソコンで PKC3 を動かすための zip を作って保存します');
+    // 対照群:ほかの組み込みタイルには、この説明が付いていない
+    expect(region.querySelector<HTMLElement>('[data-pkc-tile="builtin:manual"]')!.title).not.toContain('zip');
   });
 });

@@ -117,6 +117,10 @@ describe('editor flow (P3-5)', () => {
     ta.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
     );
+    // 🔴 打った内容があるので聞かれる(依頼 71-1)── 「捨てる」を答えて初めてやめる
+    await tick();
+    expect(q('[data-pkc-field="editor-body"]'), '聞かずにやめた').not.toBeNull();
+    document.querySelector<HTMLElement>('[data-pkc-field="dialog-ok"]')!.click();
     await tick();
     expect(q('[data-pkc-field="editor-body"]')).toBeNull();
     expect(q('[data-pkc-field="detail-body"]')?.textContent).toContain('原文');

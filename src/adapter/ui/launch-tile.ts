@@ -93,7 +93,8 @@ export interface LaunchDeps {
    *   「アプリの基本は別窓」)── 予定表が加わり、以後も面が増える。
    *   何が渡るかは `ViewMode` の綴りを持つ組み込みタイル(`tiles.ts`)で決まる。
    */
-  openView: (view: ViewMode) => void;
+  /** `target` は右クリックで選んだ「その 1 回だけ」の開き方(渡さなければ今までどおり)。 */
+  openView: (view: ViewMode, target?: AppOpenTarget) => void;
   /**
    * 🔴 **マニュアルを独立した窓で開く**(#645。user 要望 2026-08-31)。
    *
@@ -239,7 +240,7 @@ export async function launchTile(
     //      `tile.kind === 'dual'` と書くと、予定表を足した日にそこだけ下の
     //      `assetKey === undefined` へ落ちて**無言の dead click** になる。
     //    ⚠ `await` より前に呼ぶ ── `window.open` は gesture の中でしか通らない
-    deps.openView(tile.kind);
+    deps.openView(tile.kind, opts.openTarget);
     return;
   }
   if (tile.kind === 'manual') {

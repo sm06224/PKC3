@@ -168,6 +168,8 @@ describe('revision flow (P5b)', () => {
       const row = q('[data-pkc-region="filer-trash"] [data-pkc-trash-entry="gone1"]');
       expect(row, '前提:ゴミ箱の行が出ていない').not.toBeNull();
       expect(row!.textContent, 'UTC の字のまま出た').toContain('2026-10-13 15:30:15');
+      // 🔴 何の日時かを言う(依頼 68-2)── 「移した日」とも「最後に書いた日」とも読める素の日時にしない
+      expect(row!.textContent, '日時が何の日時か言っていない').toContain('最後の記録 2026-10-13 15:30:15');
     } finally {
       if (before === undefined) delete process.env.TZ;
       else process.env.TZ = before;
@@ -554,7 +556,7 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().notice ?? null, '前提:知らせは出ていない').toBeNull();
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: '買い物' }), body: '戻した本文' });
     expect(d.getState().notice).toBe(
-      '「買い物」を前の版に戻しました。取り消すときは、もう一度「履歴を開く」から戻す前の版を選んでください',
+      '「買い物」を前の版に戻しました',
     );
     expect(d.getState().error).toBeNull();
     const t = bootWithFolder();

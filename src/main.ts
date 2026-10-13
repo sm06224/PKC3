@@ -615,6 +615,8 @@ function openViewTile(
   focusSearch: () => boolean,
   /** 🔴 予定の面を「週」で開く合図(#855 段 A-2)。⚠ 渡すと窓が出なかったとき退避しない。 */
   schedule?: { mode: 'week' | 'month'; day: string | null },
+  /** 右クリックで選んだ「その 1 回だけ」の開き方(依頼 69-B4)。無ければ今までどおり。 */
+  openTarget?: AppOpenTarget,
 ): Promise<unknown> {
   return openViewInWindow(view, {
     ...(schedule === undefined ? {} : { schedule }),
@@ -622,6 +624,7 @@ function openViewTile(
     //    🔑 **口は `view-window.ts` の 1 つ**(着地前レビュー M2)── 手で書くと、
     //       片方から `noopener` が落ちた日に誰も鳴らない
     open: openViewWindowUrl,
+    ...(openTarget === undefined ? {} : { openTarget }),
     baseUrl: currentBaseUrl,
     // 🔴 **いま読んでいたノートを連れて行く**(段③ の直し)── 渡さないと、
     //    別窓のカレンダーは「ノートを選んでください」で立ち上がる
@@ -3263,8 +3266,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         //    何が来るかは `tiles.ts` の組み込みタイルが決める(`isViewMode(kind)`)。
         //    予定表の退避先は**左の列の「予定」タブ**(`openViewHere`)なので、
         //    タブを開く口(`services.setBrowse`)を渡す
-        openView: (view) =>
-          void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch),
+        openView: (view, target) =>
+          void openViewTile(dispatcher, cid, view, (m) => services.setBrowse?.(m), focusSearch, undefined, target),
         openManual: () => void openManualTile(dispatcher, markdown, showStatus),
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)

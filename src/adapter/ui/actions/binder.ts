@@ -322,6 +322,7 @@ import {
   tableConvertPickLabel,
   appGroupMenuActions,
   tileMenuActions,
+  tileOpenTargetMenuActions,
   TILE_OPEN_TARGET_ATTR,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
@@ -2010,6 +2011,39 @@ function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
  * 非 fresh の cancel は破棄の意味論どおり title input も捨てる。
  */
 function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
+  const s = dispatcher.getState();
+  const lid = s.openBody?.lid;
+  /**
+   * 🔴 **打った内容があるときは、捨てる前に聞く**(依頼 71-1)。変えていなければ聞かずにやめる。
+   * 「変えた」= 本文が編集を始めたときの内容と違う(`openBody.body !== baseline`)、または
+   * 既存ノートの題名欄が元の題名と違う。⚠ 作りたてのノート(`freshLid`)の題名は、やめても残す規則
+   * (下)なので数えない。窓が開いている間の Esc は窓が受けるので、二重に出ない(`cancelAsking` でも畳む)。
+   */
+  if (s.phase === 'editing' && lid && s.openBody !== null && !cancelAsking) {
+    const input = editorTitle(root);
+    const titleChanged =
+      s.freshLid !== lid && input !== null && input.value !== (s.entryMetas.get(lid)?.title ?? '');
+    if (s.openBody.body !== s.openBody.baseline || titleChanged) {
+      cancelAsking = true;
+      void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
+        (answer) => {
+          cancelAsking = false;
+          if (answer !== 'ok') return;
+          // 待つ間に編集が終わっていたら(別の窓の操作など)何もしない
+          if (dispatcher.getState().phase !== 'editing') return;
+          cancelNow(dispatcher, root);
+        },
+      );
+      return;
+    }
+  }
+  cancelNow(dispatcher, root);
+}
+
+/** 聞いている間の二重起動を防ぐ(Esc の連打)。 */
+let cancelAsking = false;
+
+function cancelNow(dispatcher: Dispatcher, root: HTMLElement): void {
   const s = dispatcher.getState();
   const lid = s.openBody?.lid;
   if (lid && s.freshLid === lid) {
@@ -16304,6 +16338,31 @@ export function bindActions(
           // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
           // 🔴 その 1 回だけの開き方(#884 段②)── いまの設定を先頭 2 項目に足す
           tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget()),
+          root.ownerDocument.activeElement,
+          { 'data-pkc-tile': tileLid },
+        );
+        return;
+      }
+    }
+
+    /**
+     * 🔴 **組み込みアプリのタイルの右クリック**(依頼 69-B4)── 出すのは「開き方」の 2 項目だけ。
+     * ⚠ 組み込みは並べ替えられない(掴めない)ので、並べ替えの項目は出さない(勧めてから断らない)。
+     * ⚠ 出すのは**開き方が効くタイルだけ**(別窓で開く面のタイル = `isViewMode`)。マニュアル・Office・
+     *   「自分のパソコンで動かす」は開き方を持たない(窓の作りが固定 / zip を落とすだけ)ので、
+     *   押しても何も変わらない選択肢を置かない。
+     * ⚠ 印は「ブラウザのタブ」に付ける ── 組み込みの面は設定の開き方に従わず、ふだんはいつもタブで開く。
+     */
+    const builtinHit = target.closest('[data-pkc-tile][data-pkc-tile-kind]:not([draggable="true"])');
+    if (builtinHit !== null) {
+      const tileLid = builtinHit.getAttribute('data-pkc-tile') ?? '';
+      const kind = builtinHit.getAttribute('data-pkc-tile-kind') ?? '';
+      if (tileLid !== '' && isViewMode(kind)) {
+        ev.preventDefault();
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          tileOpenTargetMenuActions('tab'),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );

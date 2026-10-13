@@ -1506,10 +1506,15 @@ export class FilerRenderer {
       for (const t of state.trashPanel.items) {
         const li = document.createElement('li');
         li.setAttribute('data-pkc-trash-entry', t.entryLid);
+        /**
+         * 🔴 **日時が何の日時かを言う**(依頼 68-2)。出るのはゴミ箱へ移した時点の**最後の記録**の時刻
+         * (`deleteEntry` が移す直前の本文を履歴に 1 件積む。直前の保存と同じ本文なら、その保存の時刻)。
+         * 字が無いと「移した日」と「最後に書いた日」のどちらにも読める。
+         */
         const text = document.createElement('span');
         text.textContent = `${t.title ?? '(無題)'}(${
           archetypeLabel(t.archetype ?? '')
-        } / ${formatStoredStamp(t.createdAt)})`; // 🔴 端末の時刻で(DB の字は UTC)
+        } / 最後の記録 ${formatStoredStamp(t.createdAt)})`; // 🔴 端末の時刻で(DB の字は UTC)。⚠ 字を足した理由は下
         const restore = document.createElement('button');
         restore.type = 'button';
         restore.setAttribute('data-pkc-action', 'restore-trash');

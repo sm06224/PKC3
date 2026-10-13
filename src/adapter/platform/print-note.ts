@@ -79,8 +79,18 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     return 'not-ready';
   }
 
-  if (deps.getState().viewMode !== 'detail') deps.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
-  if (deps.getState().selectedLid !== lid) deps.dispatch({ type: 'SELECT_ENTRY', lid });
+  /**
+   * 🔴 **刷るために動かした画面は、刷り終えたら元へ戻す**(依頼 71-3)。一覧の行の「PDF で書き出す」は
+   * 別のノートを選び直し、別の面を見ていれば中央を本文へ変える ── 戻さないと「書き出した」だけで
+   * 見ていたノートが外れる。⚠ 動かした物だけを戻す(動かしていない選択・面には触らない)。
+   */
+  const before0 = deps.getState();
+  const prevMode = before0.viewMode;
+  const prevLid = before0.selectedLid;
+  const movedMode = prevMode !== 'detail';
+  const movedLid = prevLid !== lid;
+  if (movedMode) deps.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+  if (movedLid) deps.dispatch({ type: 'SELECT_ENTRY', lid });
 
   if (!ready(deps.getState(), lid)) {
     const setTimer = deps.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
@@ -122,5 +132,16 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     }
   }
   deps.print();
+  /**
+   * 🔴 **`print()` が返ったのは、印刷の画面が閉じた後**(ブラウザの `window.print()` は閉じるまで返らない。
+   * 閉じた後の `afterprint` と同じ時点)。ここで戻す。
+   * ⚠ 戻すのは「まだ刷った画面のまま」のときだけ ── 待つ間に user が別の場所へ移っていたら動かさない。
+   */
+  const now = deps.getState();
+  if (now.phase === 'ready') {
+    if (movedLid && prevLid !== null && now.selectedLid === lid && now.entryMetas.has(prevLid))
+      deps.dispatch({ type: 'SELECT_ENTRY', lid: prevLid });
+    if (movedMode && now.viewMode === 'detail') deps.dispatch({ type: 'SET_VIEW_MODE', mode: prevMode });
+  }
   return 'printed';
 }

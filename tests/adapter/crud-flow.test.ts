@@ -256,6 +256,10 @@ describe('create (P3-7a)', () => {
     ta.value = '下書き';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     q<HTMLElement>('[data-pkc-action="cancel-edit"]')!.click(); // 残す(仕様)
+    // 🔴 打った内容があるので聞かれる(依頼 71-1)── 「捨てる」を答える
+    await tick();
+    document.querySelector<HTMLElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await tick();
     expect(d.getState().entryMetas.has(lid)).toBe(true);
     expect(d.getState().freshLid).toBeNull(); // 寿命は作成直後の編集セッション内
     // 再編集 → 無変更 Esc ── もう消えない
