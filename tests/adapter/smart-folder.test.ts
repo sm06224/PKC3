@@ -702,6 +702,8 @@ function setup(disk: Record<string, string>, times: Record<string, string> = {})
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => disk[lid] ?? null,
+    getBodies: async (lids) =>
+      lids.filter((l) => disk[l] !== undefined).map((l) => ({ lid: l, body: disk[l]! })),
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),

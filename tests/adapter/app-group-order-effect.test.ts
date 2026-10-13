@@ -68,6 +68,8 @@ interface Harness {
   d: Dispatcher;
   bodies: Record<string, string>;
   calls: PersistCall[];
+  /** 読みの往復(#1087)── 並べ替えは getBodies 1 回、getBody は 0 回。 */
+  reads: { getBody: number; getBodies: number };
   /** `store-effects.ts` の `onEvent` listener を直に撃つ。 */
   fire(ev: DomainEvent): void;
 }
@@ -81,6 +83,7 @@ interface Harness {
 function setup(initial: Record<string, string>, opts: { conflictOn?: string } = {}): Harness {
   const bodies: Record<string, string> = { ...initial };
   const calls: PersistCall[] = [];
+  const reads = { getBody: 0, getBodies: 0 };
   const bumped = new Set<string>();
   const d = new Dispatcher();
 
@@ -94,9 +97,14 @@ function setup(initial: Record<string, string>, opts: { conflictOn?: string } = 
 
   connectStoreEffects(d, {
     ...stubRevisionOps(),
-    getBody: async (lid: string) => bodies[lid] ?? null,
-    getBodies: async (lids: string[]) =>
-      lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! })),
+    getBody: async (lid: string) => {
+      reads.getBody++;
+      return bodies[lid] ?? null;
+    },
+    getBodies: async (lids: string[]) => {
+      reads.getBodies++;
+      return lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! }));
+    },
     renameEntry: async (): Promise<EntryStamps> => stubStamps(),
     reorderEntry: async (): Promise<EntryStamps> => stubStamps(),
     replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
@@ -135,6 +143,7 @@ function setup(initial: Record<string, string>, opts: { conflictOn?: string } = 
     d,
     bodies,
     calls,
+    reads,
     fire: (ev) => captured!(ev),
   };
 }
@@ -255,6 +264,24 @@ describe('④ 別の窓が先に書いていたら expectHash で弾き、途中
     expect(h.d.getState().error).toContain(
       '別のタブまたはウィンドウがグループのノートを書き換えたため、並べ替えを最後まで保存できませんでした',
     );
+  });
+});
+
+describe('#1087 読みは 1 往復にまとめる', () => {
+  it('🔴 3 行の並べ替えで getBodies は 1 回・getBody は 0 回、書込は 1 件ずつ', async () => {
+    const h = setup({ g1: appGroupSeed('A'), g2: appGroupSeed('B'), g3: appGroupSeed('C') });
+    h.fire({
+      type: 'REQUEST_APP_GROUP_ORDER',
+      rows: [
+        orderRow({ lid: 'g1', name: 'A', title: 'A', order: 1, entryOrder: 1 }),
+        orderRow({ lid: 'g2', name: 'B', title: 'B', order: 2, entryOrder: 2 }),
+        orderRow({ lid: 'g3', name: 'C', title: 'C', order: 3, entryOrder: 3 }),
+      ],
+    });
+    await tick(60);
+    expect(h.reads).toEqual({ getBody: 0, getBodies: 1 });
+    expect(h.calls.map((c) => c.lid)).toEqual(['g1', 'g2', 'g3']);
+    expect(h.calls.every((c) => c.expectHash !== undefined), '読んだ本文の指紋を添えていない').toBe(true);
   });
 });
 
