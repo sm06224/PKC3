@@ -15,6 +15,8 @@
  * | `noclick` | 開いた直後(版面を押さない。caret は先頭)に IME を流す |
  * | `click`   | 版面の本文を 1 回押してから IME を流す |
  * | `menu`    | 版面を押した後、メニューバーを Alt+E で開いて Escape で閉じ(焦点の往復)、それから IME を流す |
+ * | `menu-esc2` | `menu` と同じだが Escape を 1.5 秒あけて 2 回押す(1 回で焦点がメニューバーに残るなら、2 回目で文書へ戻るか) |
+ * | `menu-click` | `menu`(Escape 1 回)の後、`click` 腕と同じ点で版面を押してから IME を流す |
  * | `force`   | 版面を押した後、`<input>` を **page から `focus()`** してから IME を流す
  *               (「焦点さえ在れば下流は通る」の対照群。焦点が移らないことと下流が壊れていることを割る) |
  *
@@ -242,7 +244,7 @@ async function oneRound(arm, n) {
     if (!box) { r.undecidable = 'canvas が無い'; return r; }
     const clip = { x: box.x, y: box.y, width: box.w, height: box.h };
 
-    if (arm === 'click' || arm === 'force' || arm === 'menu' || arm === 'refocus' || arm === 'refocus-click') {
+    if (arm === 'click' || arm === 'force' || arm === 'menu' || arm === 'menu-esc2' || arm === 'menu-click' || arm === 'refocus' || arm === 'refocus-click') {
       // 本文の字の上(text.odt は 1 行目。Calc は A1 付近)
       await page.mouse.click(box.x + box.w * 0.3, box.y + box.h * 0.31);
       await page.waitForTimeout(2500);
@@ -269,7 +271,7 @@ async function oneRound(arm, n) {
       await page.waitForTimeout(1500);
       step('canvas を focus した', { deep: await deep() });
     }
-    if (arm === 'menu') {
+    if (arm === 'menu' || arm === 'menu-esc2' || arm === 'menu-click') {
       // 焦点の移動(メニューを開いて閉じる)で Qt の setFocusObject が再び走るか
       await page.keyboard.press('Alt+e');
       await page.waitForTimeout(1500);
@@ -277,6 +279,18 @@ async function oneRound(arm, n) {
       await page.keyboard.press('Escape');
       await page.waitForTimeout(1500);
       step('メニューを閉じた', { deep: await deep() });
+      if (arm === 'menu-esc2') {
+        // 2 回目の Escape(メニューバーに残った焦点が文書へ戻るか)
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1500);
+        step('2 回目の Escape の後', { deep: await deep() });
+      }
+      if (arm === 'menu-click') {
+        // 1 回の Escape の後に本文を押す(`click` 腕と同じ点)
+        await page.mouse.click(box.x + box.w * 0.3, box.y + box.h * 0.31);
+        await page.waitForTimeout(2500);
+        step('メニューを閉じた後に版面を押した', { deep: await deep() });
+      }
     }
     if (!(await alive())) { r.undecidable = '押した後に固まった'; return r; }
 
