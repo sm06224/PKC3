@@ -116,14 +116,17 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     expect(
       h.sent.filter((a) => a.type === 'OP_FAILED'),
       '黙って諦めた(user に理由が出ていない)',
-    ).toHaveLength(1);
+    ).toHaveLength(1);    // 🔑 押したボタンの名前で言う(画面に「印刷」というボタンは無い。#1087)
+    const err = h.sent.find((a) => a.type === 'OP_FAILED') as { error: string } | undefined;
+    expect(err?.error).toContain('PDF で書き出せませんでした');
   });
 
   it('🔴 編集中は刷らない(見えている 1 画面ぶんしか紙に出ない)', async () => {
     const h = harness({ phase: 'editing' });
     expect(await printNote(h.deps, 'a')).toBe('not-ready');
     expect(h.prints()).toBe(0);
-    expect(h.sent.map((a) => a.type), '理由を出していない').toContain('OP_FAILED');
+    expect(h.sent.map((a) => a.type), '理由を出していない').toContain('OP_FAILED');    const err = h.sent.find((a) => a.type === 'OP_FAILED') as { error: string } | undefined;
+    expect(err?.error).toContain('PDF で書き出してください');
   });
 
   it('⚠ 待ちを終えたら listener を外す(state が動くたびに刷りにいかない)', async () => {
