@@ -310,5 +310,15 @@ export function checkReadOnlySql(input: string): SqlCheck {
 export function sqlRunFailureText(raw: string): string {
   if (/readonly/i.test(raw)) return '書き込みはできません(ここは読むだけです)';
   if (/interrupt/i.test(raw)) return '時間がかかりすぎたので止めました(条件を絞ってください)';
+  /**
+   * 🔴 **よく出る 3 つは日本語で言い、次の手を添える**(#1087 の見直し 2026-10-13)── 直す前は sqlite の英語
+   *   (`near "FORM": syntax error` / `no such table: 売上`)がそのまま出て、何を直せばよいかが書いていなかった。
+   * ⚠ 元の英語は括弧で残す(上の 2 つと同じく「消しもしない」── 何が起きたかの手がかり)。
+   */
+  const table = /no such table:\s*(\S+)/i.exec(raw);
+  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  const column = /no such column:\s*(\S+)/i.exec(raw);
+  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  if (/syntax error/i.test(raw)) return `SQL の書き方に誤りがあります。綴りや区切りの記号を確かめてください(${raw})`;
   return raw;
 }

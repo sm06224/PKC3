@@ -33,6 +33,10 @@ describe('題名', () => {
 });
 
 describe('本文', () => {
+  it('🔴 開くたびに最新を出す書き方(sql embed)も案内する(#1087 の見直し 2026-10-13)', () => {
+    expect(sqlNoteBody(base)).toContain('1 行目を `sql embed` にしてください');
+  });
+
   it('🔴 打った SQL と答えの表が、両方残る', () => {
     const body = sqlNoteBody(base);
     expect(body, '打った SQL が残っていない').toContain('SELECT title, n FROM t');
