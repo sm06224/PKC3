@@ -132,7 +132,7 @@ describe('置換の配線', () => {
     d.dispatch({ type: 'START_EDIT' });
     fill(root, '存在しない語', 'x');
     press(root, 'replace-all');
-    expect(d.getState().error, '見つからなかったことを言っていない').toContain('見つかりません');
+    expect(d.getState().notice, '見つからなかったことを言っていない').toContain('見つかりません');
   });
 
   it('置き換えたら件数を言う', () => {
@@ -140,7 +140,28 @@ describe('置換の配線', () => {
     d.dispatch({ type: 'START_EDIT' });
     fill(root, 'ログ', '記録');
     press(root, 'replace-all');
-    expect(d.getState().error).toContain('2 件');
+    expect(d.getState().notice).toContain('2 件');
+  });
+
+  it('🔴 置き換えた知らせはエラーの行に入れない(「エラー: 2 件を置き換えました」にしない)', () => {
+    const { root, d } = editing('ログ ログ\n');
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().error, '前提:始める前にエラーは出ていない').toBeNull();
+    fill(root, 'ログ', '記録');
+    press(root, 'replace-all');
+    expect(d.getState().error, '成功したのにエラーの行に入った').toBeNull();
+    fill(root, '存在しない語', 'x');
+    press(root, 'replace-all');
+    expect(d.getState().error, '見つからなかっただけでエラーの行に入った').toBeNull();
+  });
+
+  it('🔴 探す語が空なら、空の鉤括弧ではなく何を入れるかを言う', () => {
+    const { root, d } = editing('ログ\n');
+    d.dispatch({ type: 'START_EDIT' });
+    fill(root, '', 'x');
+    press(root, 'replace-all');
+    expect(d.getState().notice).toBe('探す語を入れてください');
+    expect(d.getState().openBody?.body, '空の語で本文が変わった').toBe('ログ\n');
   });
 
   it('🔴 帯は既定で畳まれ、押すと開いて探す欄に焦点が来る', () => {
@@ -275,7 +296,7 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       const { root, d } = editingWith(ATT + '\n説明\n', 'attachment');
       replaceAllIn(root, 'ast-1', 'ast-2');
       expect(d.getState().openBody!.body, '見えない設定の行が書き換わった').toBe(ATT + '\n説明\n');
-      expect(d.getState().error ?? '', '0 件のはずが置換された顔').toContain('見つかりませんでした');
+      expect(d.getState().notice ?? '', '0 件のはずが置換された顔').toContain('見つかりませんでした');
     });
 
     it('🔴 設定の行と説明の両方に探す語が在っても、説明だけが置換され、件数も説明の分だけ(#1579 Q1 = A)', () => {
@@ -287,7 +308,7 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       const head = foldAttachmentHead(body)!.head;
       expect(after.startsWith(head), '設定の行が 1 byte でも動いた').toBe(true);
       expect(after.slice(head.length)).toBe('PDF の説明 PDF\n');
-      expect(d.getState().error).toBe('2 件を置き換えました');
+      expect(d.getState().notice).toBe('2 件を置き換えました');
     });
 
     it('対照群:添付でない通常のノートは、先頭の情報の塊にも当たる(従来どおり)', () => {
@@ -295,7 +316,7 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
       const { root, d } = editingWith(body, 'text');
       replaceAllIn(root, 'pdf', 'PDF');
       expect(d.getState().openBody!.body).toBe('---\ntags: PDF\n---\nPDF 本文\n');
-      expect(d.getState().error).toBe('2 件を置き換えました');
+      expect(d.getState().notice).toBe('2 件を置き換えました');
     });
 
     it('🔴 プレビューも置換後になる', async () => {

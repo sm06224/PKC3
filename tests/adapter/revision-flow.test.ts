@@ -151,6 +151,29 @@ describe('revision flow (P5b)', () => {
     expect(q('[data-pkc-field="history-panel"]')).toBeNull();
   });
 
+  it('🔴 ゴミ箱の行の日時は端末の時刻で出る(DB の字は UTC ── JST では 9 時間進む)', async () => {
+    const before = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+      const { d, q } = setup(
+        { e1: '# live' },
+        {
+          listTrash: async () => [
+            { id: 'r-t', entry_lid: 'gone1', created_at: '2026-10-13 06:30:15', title: '消した子', archetype: 'text' },
+          ],
+        },
+      );
+      d.dispatch({ type: 'SHOW_TRASH' });
+      await tick();
+      const row = q('[data-pkc-region="filer-trash"] [data-pkc-trash-entry="gone1"]');
+      expect(row, '前提:ゴミ箱の行が出ていない').not.toBeNull();
+      expect(row!.textContent, 'UTC の字のまま出た').toContain('2026-10-13 15:30:15');
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+
   it('ゴミ箱: 一覧 → 復元で entry が戻り選択される。lid 衝突は可視ブロック', async () => {
     const { d, log, q } = setup(
       { e1: '# live' },
@@ -524,6 +547,22 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
       relations: [R1],
     });
     expect(d.getState().relations.filter((x) => x.id === 'r1'), '同じ関係が 2 本になった').toHaveLength(1);
+  });
+
+  it('🔴 履歴から戻したら、戻したことと取り消し方を言う / ゴミ箱から戻したときは言わない(binder が言う)', () => {
+    const d = bootWithFolder();
+    expect(d.getState().notice ?? null, '前提:知らせは出ていない').toBeNull();
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: '買い物' }), body: '戻した本文' });
+    expect(d.getState().notice).toBe(
+      '「買い物」を前の版に戻しました。取り消すときは、もう一度「履歴を開く」から戻す前の版を選んでください',
+    );
+    expect(d.getState().error).toBeNull();
+    const t = bootWithFolder();
+    t.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    const before = t.getState().notice ?? null;
+    t.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '' });
+    expect(t.getState().order, '前提:ゴミ箱から戻った').toContain('child');
+    expect(t.getState().notice ?? null, 'ゴミ箱から戻したのに履歴の文が出た').toBe(before);
   });
 
   it('🔴 効果層が disk から関係を読み直して渡す(その entry のぶんだけ)', async () => {
