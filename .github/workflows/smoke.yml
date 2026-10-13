@@ -72,6 +72,14 @@ jobs:
       # ⚠ 3 つ合わせて全量。1 つだけ緑でも**全量が通ったことにはならない**
       - name: Visual smoke (${{ matrix.shard }}/3 ── headless_shell)
         run: npm run test:smoke -- --shard=${{ matrix.shard }}/3
+      # 🔑 落ちた回だけ、playwright の test-results(DOM の写し `error-context.md` と trace)を残す
+      #   ── CI でだけ落ちる test を、手元で再現できなくても読めるようにするため(#1087、2026-10-13)
+      - if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-results-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 7
 
   # 🔴 **もう 1 つのブラウザ**(2026-09-11 に夜から引っ越した)。
   #

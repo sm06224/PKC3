@@ -822,7 +822,10 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     }
   };
   const outlineOf = (n: number): Promise<string> => cssOf(cell(n), 'outline-color');
-  const widthOf = (n: number): Promise<string> => cssOf(cell(n), 'outline-width');
+  // ⚠ 描かれる太さ。`outline-style: none` のとき、計算後の `outline-width` は 0 とは限らない
+  //   (Chrome 153 では既定の 3px のまま返る ── 描かれていないので「枠が付いている」ではない)。style が none なら 0 と読む
+  const widthOf = async (n: number): Promise<string> =>
+    (await cssOf(cell(n), 'outline-style')) === 'none' ? '0px' : cssOf(cell(n), 'outline-width');
   const PICK_OUT = 'ページ編集 (抜き出し).pdf';
   // 0 件では押せない(対照群 ── 何も選んでいない)。案内の行も出ない
   await expect(extract).toHaveText('選んだページを別の PDF にする');
