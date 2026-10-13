@@ -26,7 +26,7 @@
  * 🔑 **pure module**。DOM も時計も持たない。
  */
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
-import { getRootEntries, getStructuralChildren } from '@features/relation/tree';
+import { buildStructuralChildrenIndex, getRootEntries } from '@features/relation/tree';
 
 /** 木が深すぎるときに打ち切る段数。⚠ 循環は `tree.ts` が既に断つが、念のため。 */
 export const MAX_STRUCTURE_DEPTH = 32;
@@ -78,6 +78,8 @@ export function structureLines(
   metas: ReadonlyMap<string, EntryMeta>,
   relations: readonly Relation[],
 ): StructureLine[] {
+  // 🔑 正準親の解決と並べ替えは 1 度だけ(#1087)── 節点ごとに解き直さない
+  const childrenOf = buildStructuralChildrenIndex(metas, relations);
   const out: StructureLine[] = [];
   const seen = new Set<string>();
   const walk = (m: EntryMeta, depth: number): void => {
@@ -99,7 +101,7 @@ export function structureLines(
       title: m.title,
       isFolder: m.archetype === 'folder',
     });
-    for (const c of getStructuralChildren(m.lid, metas, relations)) walk(c, depth + 1);
+    for (const c of childrenOf(m.lid)) walk(c, depth + 1);
   };
   for (const r of getRootEntries(metas, relations)) walk(r, 0);
   return out;

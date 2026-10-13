@@ -35,7 +35,7 @@ import {
   type AgendaItem,
 } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-grid';
-import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
+import type { TaskCard } from '@features/schedule/task-cards';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
@@ -177,7 +177,10 @@ export class ScheduleRenderer {
   private last: {
     scan: AppState['taskScan'];
     failed: boolean;
-    metas: AppState['entryMetas'];
+    /** 🔑 `entryMetas` の参照ではなく、**この面が読む列だけの指紋**(`metaSignature`)。 */
+    metas: string;
+    /** 予定の並び(`scheduleItemsOf` が `state.order` を辿る)── 参照で見る。 */
+    order: AppState['order'];
     filter: string;
     kindFilter: AppState['kindFilter'];
     hits: AppState['searchHits'];
@@ -194,6 +197,31 @@ export class ScheduleRenderer {
     today: string;
   } | null = null;
 
+  /** `metaSignature` の控え(同じ `entryMetas` の参照なら前の答えを返す)。 */
+  private metaMemo: { metas: AppState['entryMetas']; sig: string } | null = null;
+
+  /**
+   * 🔑 **この面が `entryMetas` から読む列だけの指紋**(#1087)。
+   * 保存の ack は `entryMetas` を**必ず新しい Map** に差し替え(`updatedAt` が動く)、参照で比べると
+   * **字が 1 つも変わらないのに** `scheduleItemsOf` と DOM の組み直しが毎回走る(3,000 件で約 39 ms)。
+   * ⚠ 読む列は `lid`(札の相手)/ `title`(行の題・絞り込み)/ `archetype`(種類の札)/
+   *   `date`(ノート丸ごとの予定)/ `archived`(片付けた)の 5 つ。`status` / `entryOrder` /
+   *   `bodyChars` / `createdAt` / `updatedAt` は読まない(並びは `state.order` を別に見る)。
+   *   ここに無い列をこの面が読み始めたら、**先にここへ足す**(足さないと描き直さない)。
+   * ⚠ 区切りは NUL のエスケープ(題名に現れない。生バイトで埋めない)。
+   * 🔑 同じ参照なら前の答え(選ぶだけの描画で全件を回さない)。
+   */
+  private metaSignature(metas: AppState['entryMetas']): string {
+    if (this.metaMemo !== null && this.metaMemo.metas === metas) return this.metaMemo.sig;
+    const SEP = '\u0000';
+    const parts: string[] = [];
+    for (const m of metas.values())
+      parts.push(m.lid, m.title, m.archetype, m.date ?? '', m.archived ? '1' : '0');
+    const sig = parts.join(SEP);
+    this.metaMemo = { metas, sig };
+    return sig;
+  }
+
   /** ⚠ `now` は test 注入用(既定は実時刻)── 面ごとに `new Date()` を読まない。 */
   constructor(region: HTMLElement, now: (() => Date) | undefined = undefined) {
     this.region = region;
@@ -208,7 +236,8 @@ export class ScheduleRenderer {
     const next = {
       scan: state.taskScan,
       failed: state.taskScanFailed,
-      metas: state.entryMetas,
+      metas: this.metaSignature(state.entryMetas),
+      order: state.order,
       filter: state.filterQuery,
       // 🔴 **種類の絞りも指紋**(#411)── 入れないと札を押しても描き直さない
       // ⚠ 鍵は `kindFilter`(`filerRows` へ渡す `kinds:` と**綴りを分ける**)──
@@ -981,5 +1010,3 @@ export class ScheduleRenderer {
   }
 }
 
-/** 上限に触れたことを画面に出すための参照(切ったら黙らない)。 */
-export const SCHEDULE_LIMITS = TASK_LIMITS;

@@ -772,8 +772,46 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await ed.keyboard.press('Alt+ArrowDown');
   await expect.poll(order, { message: 'Alt+↓ で並びが戻らない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
   // ↑ ↓ のボタン(ドラッグできない端末でも並べ替えられる)
+  /**
+   * ⚠ **CI でだけ ↑ が並びを変えない回がある**(#1087。手元の Chrome 153 では再現しない)。
+   *   失敗の写しは artifact に残るが、こちらの箱からは取りに行けないので、**押した物を log に出す**。
+   *   条件は弱めない ── 落ちたときに「何が押されたか」を字で返すだけ。
+   */
+  await ed.evaluate(() => {
+    const w = window as unknown as { __pkcLastClick?: string };
+    w.__pkcLastClick = '(クリックが届いていない)';
+    document.addEventListener(
+      'click',
+      (ev) => {
+        const t = ev.target instanceof Element ? ev.target : null;
+        const list = document.getElementById('plist');
+        w.__pkcLastClick = JSON.stringify({
+          field: t?.getAttribute('data-pkc-field') ?? null,
+          cls: t?.className ?? null,
+          page: t?.getAttribute('data-thumb-page') ?? t?.closest('[data-thumb]')?.getAttribute('data-thumb') ?? null,
+          detail: ev.detail,
+          xy: [ev.clientX, ev.clientY],
+          scrollTop: list?.scrollTop ?? null,
+        });
+      },
+      { capture: true, once: true },
+    );
+  });
   await clickReal(ed, '[data-pkc-field="pdf-page-up"][data-thumb-page="3"]');
-  await expect.poll(order, { message: '↑ ボタンで 1 つ上がらない', timeout: 10_000 }).toEqual(['5', '3', '1', '4']);
+  try {
+    await expect.poll(order, { message: '↑ ボタンで 1 つ上がらない', timeout: 10_000 }).toEqual(['5', '3', '1', '4']);
+  } catch (err) {
+    const seen = await ed.evaluate(() => ({
+      click: (window as unknown as { __pkcLastClick?: string }).__pkcLastClick ?? null,
+      status: document.getElementById('status')?.textContent ?? null,
+      up: (() => {
+        const b = document.querySelector('[data-pkc-field="pdf-page-up"][data-thumb-page="3"]')?.getBoundingClientRect();
+        return b ? [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] : null;
+      })(),
+      scrollTop: document.getElementById('plist')?.scrollTop ?? null,
+    }));
+    throw new Error(`${String(err)}\n押した物: ${JSON.stringify(seen)}`, { cause: err });
+  }
   await clickReal(ed, '[data-pkc-field="pdf-page-down"][data-thumb-page="3"]');
   await expect.poll(order, { message: '↓ ボタンで 1 つ下がらない', timeout: 10_000 }).toEqual(['5', '1', '3', '4']);
 

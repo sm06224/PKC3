@@ -836,43 +836,6 @@ export function noteToolActions(): readonly (EntryAction & { readonly hint: stri
 export const SECTION_REF_LABEL_ROW = 'この行の参照をコピー';
 export const SECTION_LINK_LABEL_ROW = 'この行のリンクをコピー';
 
-export const HEADING_MENU_ACTIONS: readonly EntryAction[] = [
-  /**
-   * 🔴 **その章だけを、読む面のその場で編集する**(#1044 段2。裁定 Q1 = 両方置く)。
-   * ⚠ 「ここから編集する」の**上**に置く(#1044 設計 doc §3)── 章 1 つを直したいだけの
-   *   ときに、画面ごと編集中へ切り替える道具より先に出す。「ここから編集する」は残す
-   *   (減らさない ── user 裁定 2026-08-07「記法を減らすことは動線を減らすこと」と同じ向き)。
-   */
-  { action: 'edit-section', label: 'この章を編集する' },
-  { action: 'edit-from-heading', label: 'ここから編集する' },
-  { action: 'append-at-heading', label: 'ここに追記する' },
-  { action: 'toggle-heading-fold', label: 'この見出しの中身を折りたたむ' },
-  /**
-   * 🔴 **章をまるごと原文で写す**(#677。user 裁定 2026-09-04)。
-   * ⚠ 下の「章の参照をコピー」とは別物 ── こちらは**記法を増やさない**。
-   *   写るのは見出しから次の同段以上の見出しの直前までの **Markdown の原文**である。
-   */
-  { action: 'copy-chapter-md', label: 'この章をコピー' },
-  /**
-   * 🔴 **章を指すリンクを写す**(#579。user 裁定 2026-09-04)── `[題名 / 見出し](entry:<lid>#h/<id>)`。
-   * ⚠ 「この章をコピー」の隣 ── どちらも clipboard へ写す物なので並べる。
-   * ⚠ 出るのは**id を持つ見出しだけ**(`#`〜`###` ── 描画が id を刻む深さ)。
-   *   `####` 以下に出すと、押しても指す先が無い(`headingMenuActions` の `linkable`)。
-   */
-  { action: 'copy-section-ref', label: '章の参照をコピー' },
-  /**
-   * 🔴 **章を指すリンクを写す**(#1559)── ブラウザやメールに貼ると、この PKC のこの章が開く。
-   * ⚠ 上の「参照」は**本文に貼る**物、こちらは**外へ貼る**物(用語集の「リンク」と「参照」)。
-   */
-  { action: 'copy-section-link', label: '章のリンクをコピー' },
-  /**
-   * 🔴 **その章を、読むだけの別のウィンドウで開く**(#1044 段4。裁定 Q3「読むだけ」)。
-   * ⚠ 「書きながら同じノートの別の章を横に置いて読む」ための物 ── 書くのはいまのウィンドウの
-   *   章の欄で(設計 doc §10)。
-   */
-  { action: 'open-chapter-window', label: 'この章を別のウィンドウで開く' },
-];
-
 /**
  * 見出しの上で出す物。
  *

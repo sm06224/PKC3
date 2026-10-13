@@ -765,14 +765,3 @@ function isScheduleDay(day: string): boolean {
   return isRealCalendarDate(day) && Number(day.slice(0, 4)) >= 1000;
 }
 
-/** @deprecated Use `PkcRefKind`. */
-export type PkcPermalinkKind = PkcRefKind;
-
-/** @deprecated Use `parsePortablePkcReference`. */
-export const parsePermalink = parsePortablePkcReference;
-
-/** @deprecated Use `formatPortablePkcReference`. */
-export const formatPermalink = formatPortablePkcReference;
-
-/** @deprecated Use `isSamePortableContainer`. */
-export const isSamePermalinkContainer = isSamePortableContainer;

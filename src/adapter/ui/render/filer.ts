@@ -965,6 +965,13 @@ export class FilerRenderer {
        */
       state.renamingLid !== this.lastRenaming ||
       (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
+    /**
+     * 🔑 **一覧が変わらなかったら、参照の控えだけ進める**(#1087)。
+     * ⚠ 保存の ack は `entryMetas` を新しい Map にするが、題名も並びも同じなら指紋は同じ ──
+     *   控えを進めないと、以後**選ぶだけの描画でも毎回** `metaSignature` を全件回す。
+     *   `listChanged` が false なら「参照が同じ」か「指紋が同じ」なので、進めても一覧は変わらない。
+     */
+    if (!listChanged) this.lastMetas = state.entryMetas;
     const selectionChanged = state.selectedLid !== this.lastSelected;
     // ⚠ 現在地は選択と**別に**変わる(#240 段①)── 指紋に入れないと、
     //    フォルダへ入っても表が組み直されない
