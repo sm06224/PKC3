@@ -916,6 +916,14 @@ test('🔴 バックアップ: 書き出して → 取り込み直すと中身�
   await clickReal(page, '[data-pkc-rev-order]:last-child [data-pkc-rev-id]');
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('古い本文');
 
+  // 🔴 **バックアップの取り込みも取り消せる**(#535 ② の漏れ)── 結果の欄に「取り込みを取り消す」が出て、
+  //   押すと**いま取り込んだ 2 件だけ**がゴミ箱へ入る(元の 2 件は残る)
+  const undo = page.locator('[data-pkc-action="undo-import"]');
+  await expect(undo, 'バックアップを取り込んだのに取り消しが出ない').toBeVisible();
+  await expect(undo).toHaveAttribute('title', /いま取り込んだ 2 件/);
+  await clickReal(page, '[data-pkc-action="undo-import"]');
+  await expect(rows, '取り消しても取り込んだ分が残っている').toHaveCount(2);
+
   expect(errors).toEqual([]);
 });
 
