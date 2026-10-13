@@ -45,21 +45,38 @@ const bare = (line: string): string => line.replace(/\r?\n$/, '');
  *   出すと、かえって読みにくい。
  */
 export function diffRows(from: string, to: string, context = 2): DiffRow[] {
+  return diffSummary(from, to, context).rows;
+}
+
+/**
+ * 🔑 **行のちがいと総量を、1 回の比較から返す**(#1087)── 同じ 2 本に `diffRows` と `diffCounts` を
+ *   別々に呼ぶと、行の比較(Myers)が 2 回走る。両方要る呼び手はこれを使う。
+ * ⚠ 総量は畳む**前**の ops から数える(`diffCounts` の注記と同じ)。
+ */
+export function diffSummary(
+  from: string,
+  to: string,
+  context = 2,
+): { rows: DiffRow[]; added: number; removed: number } {
   const src = splitLines(from);
   const rows: DiffRow[] = [];
   let i = 0;
+  let added = 0;
+  let removed = 0;
   for (const op of diffLines(from, to).ops) {
     if (typeof op === 'number') {
       if (op > 0) {
         for (let n = 0; n < op; n++) rows.push({ kind: 'same', text: bare(src[i++]!) });
       } else if (op < 0) {
+        removed += -op;
         for (let n = 0; n < -op; n++) rows.push({ kind: 'del', text: bare(src[i++]!) });
       }
     } else {
+      added += op.length;
       for (const line of op) rows.push({ kind: 'add', text: bare(line) });
     }
   }
-  return collapse(rows, context);
+  return { rows: collapse(rows, context), added, removed };
 }
 
 /** 変わっていない長い塊を `gap` へ畳む。 */

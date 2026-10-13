@@ -84,7 +84,7 @@ import { listAppendTargets, sectionRange } from '@features/markdown/append-targe
 import { RowSwap } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
-import { DIFF_FILE_TOO_LARGE_NOTE, diffCounts, diffRows, shortStamp } from '@features/revision/diff-view';
+import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
 import { sideRows } from '@features/revision/diff-side';
 import { sideRowEls } from './diff-line';
 import type { RenderedWithRanges } from '@adapter/platform/render/markdown-client';
@@ -4253,9 +4253,11 @@ function renderRevisionDiff(
   const head = document.createElement('div');
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'revision-diff-summary');
-  if (other.text !== null) {
+  // 🔑 行の比較は 1 回だけ(#1087)── 総量の字と左右の差分の両方がこの 1 回から出る
+  const summary = other.text === null ? null : diffSummary(other.text, preview.body);
+  if (summary !== null) {
     // ⚠ 左 = 相手 → 右 = この版
-    const counts = diffCounts(other.text, preview.body);
+    const counts = summary;
     label.textContent =
       counts.added === 0 && counts.removed === 0
         ? other.same
@@ -4294,7 +4296,7 @@ function renderRevisionDiff(
   pick.append(pickLabel);
   box.append(pick);
 
-  if (other.text === null) return box;
+  if (summary === null) return box;
 
   // ── 左右に並べた差分(同じ行は同じ高さ。狭いときは CSS が 1 列へ戻す)
   const cols = document.createElement('div');
@@ -4307,7 +4309,7 @@ function renderRevisionDiff(
   box.append(cols);
   const list = document.createElement('ul');
   list.setAttribute('data-pkc-diff-layout', 'side');
-  for (const row of sideRows(diffRows(other.text, preview.body))) list.append(...sideRowEls(row));
+  for (const row of sideRows(summary.rows)) list.append(...sideRowEls(row));
   box.append(list);
   return box;
 }

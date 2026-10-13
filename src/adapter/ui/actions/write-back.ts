@@ -20,7 +20,7 @@
  */
 
 import { isBlankBody } from '@features/markdown/frontmatter';
-import { DIFF_FILE_UNAVAILABLE_NOTE, diffCounts, diffRows } from '@features/revision/diff-view';
+import { DIFF_FILE_UNAVAILABLE_NOTE, diffSummary } from '@features/revision/diff-view';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '@adapter/platform/launched-files';
 import type { ConfirmDiff } from '../render/app-dialog';
 
@@ -78,8 +78,8 @@ export const WRITE_BACK_SAME_NOTE =
 export function buildWriteBackDiff(fileText: string | null, body: string): ConfirmDiff | null {
   if (fileText === null) return null;
   if (fileText === body) return { summary: WRITE_BACK_SAME_NOTE, rows: [], more: null };
-  const { added, removed } = diffCounts(fileText, body);
-  const all = diffRows(fileText, body);
+  // 🔑 行の比較は 1 回だけ(#1087)── 総量と行の両方をこの 1 回から出す
+  const { rows: all, added, removed } = diffSummary(fileText, body);
   const shown = all.slice(0, WRITE_BACK_DIFF_MAX_ROWS);
   let hidden = 0;
   for (const row of all.slice(WRITE_BACK_DIFF_MAX_ROWS)) hidden += row.kind === 'gap' ? (row.skipped ?? 0) : 1;
