@@ -68,7 +68,7 @@ export async function importPptxFiles(
       } catch (e) {
         if (e instanceof ZipReadError) {
           return fail(
-            `${file.name} を読めませんでした(PowerPoint のファイルではないか、中身を読み込めません。ノートは 1 件も追加されていません)`,
+            `「${file.name}」を読めませんでした(PowerPoint のファイルではないか、中身を読み込めません。ノートは 1 件も追加されていません)`,
           );
         }
         throw e;
@@ -77,7 +77,7 @@ export async function importPptxFiles(
       const slideNames = pptxSlideNames(dir.map((d) => d.name));
       if (slideNames.length === 0) {
         return fail(
-          `${file.name} は PowerPoint のファイルではありません(スライドが見つかりません。ノートは 1 件も追加されていません)`,
+          `「${file.name}」は PowerPoint のファイルではありません(スライドが見つかりません。ノートは 1 件も追加されていません)`,
         );
       }
       const used = slideNames.slice(0, SLIDES_MAX);

@@ -80,7 +80,7 @@ describe('openInPdfReader', () => {
     const g = rig(true, false);
     expect(await openInPdfReader(g.deps, pdf)).toBe(true);
     expect(g.opened).toEqual([]);
-    expect(g.fails).toEqual(['添付が見つかりません: a.pdf']);
+    expect(g.fails).toEqual(['添付が見つかりません: 「a.pdf」']);
   });
 
   it('入: 同じ添付の窓が生きていれば、2 枚目を開かず前へ出すよう頼む', async () => {
@@ -120,7 +120,7 @@ describe('openInPdfReader', () => {
   it('貸せなかった / 貸すのが落ちた回でも、印は外れる(次の押しが「もう開いています」で塞がれない)', async () => {
     const g = rig(true, false);
     await openInPdfReader(g.deps, pdf);
-    expect(g.fails).toEqual(['添付が見つかりません: a.pdf']);
+    expect(g.fails).toEqual(['添付が見つかりません: 「a.pdf」']);
     await openInPdfReader(g.deps, pdf);
     expect(g.fails).toHaveLength(2); // 2 回目も「借りに行った」(印で塞がれていない)
     expect(g.notes).toEqual([]);

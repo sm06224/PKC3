@@ -75,7 +75,7 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
     async run(assetKey: string, name: string, mime: string, lid?: string): Promise<void> {
       // 開けない種類は、窓を開く前に断る
       if (!canDrawOnImage(mime)) {
-        fail(`この種類の画像には描き込めません(対応は PNG・JPEG・WebP・BMP です): ${name}`);
+        fail(`この種類の画像には描き込めません(対応は PNG・JPEG・WebP・BMP です): 「${name}」`);
         return;
       }
       // 開いている窓があれば、開き直さず手前に出す(2 枚目の復号も待ちも作らない)

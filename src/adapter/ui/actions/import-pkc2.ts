@@ -403,7 +403,7 @@ export async function importPkc2File(
       // 🔴 **末尾は判定に使わない**(この分岐の上の `peekZipFormat` が manifest.format
       //   を読む)が、案内には**受ける全部**を書く(#1017 段④b。3 種 + 旧形式)。
       return fail(
-        `取り込めない形式です(${file.name})。PKC2 の書き出し(HTML / zip)か ` +
+        `取り込めない形式です(「${file.name}」)。PKC2 の書き出し(HTML / zip)か ` +
           `PKC3 のバックアップ(.pkc3-full.zip / .pkc3-notes.zip / .pkc3-part.zip / 旧 .pkc3.zip)、` +
           'PKC3 入り HTML(.pkc3.html)、.md / .vcf / .ics / .pptx を選んでください。' +
           '写真や PDF などは、取り込むのではなく添付で入れてください',
@@ -420,12 +420,12 @@ export async function importPkc2File(
     let portable: Pkc3Archive | null = null;
     if (detected === 'pkc3-html') {
       if (deps.readImageArchive === undefined) {
-        return fail(`${file.name}: この画面からは PKC3 入り HTML を取り込めません`);
+        return fail(`「${file.name}」: この画面からは PKC3 入り HTML を取り込めません`);
       }
       try {
         portable = await portableHtmlToArchive(file, deps.readImageArchive, new Date());
       } catch (e) {
-        return fail(`${file.name}: ${reason(e)}`);
+        return fail(`「${file.name}」: ${reason(e)}`);
       }
     }
 
@@ -479,7 +479,7 @@ export async function importPkc2File(
       } else if (format === null) {
         return fail(
           // ⚠ 内部の部品名(manifest.json)を出さない(#1087)
-          `${file.name}: ${NOT_PKC_ZIP_REFUSAL}`,
+          `「${file.name}」: ${NOT_PKC_ZIP_REFUSAL}`,
         );
       }
       const read = restored
@@ -505,7 +505,7 @@ export async function importPkc2File(
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
         // 🔑 まず user の言葉で言い、形式の名前は末尾の括弧へ(問い合わせのときの手がかり。#1087)
         return fail(
-          `${file.name}: この zip の中身は、このバージョンの PKC3 では取り込めない形式です。PKC3 を新しくしてから、もう一度お試しください(形式: ${format})`,
+          `「${file.name}」: この zip の中身は、このバージョンの PKC3 では取り込めない形式です。PKC3 を新しくしてから、もう一度お試しください(形式: ${format})`,
         );
       }
       if (read) {

@@ -228,7 +228,7 @@ export class MessagePost {
    * ⚠ `text` は user の入力や本文の断片を含みうる想定で扱う ── 必ずここで
    *   `sanitizeMessageText` を通す(呼び側に任せない。判断を 1 か所に置く)。
    */
-  post(input: { kind: MessageKind; source: string; text: string }): void {
+  post(input: { kind: MessageKind; source: string; text: string; fixedHead?: string }): void {
     /**
      * 🔴 **空の字は積まない**(#1017 C5)。⚠ 直す前は、進行中の字を消すための `notify('')` が
      *   `OP_NOTICE` 経由で**「結果」の空の節を 1 件**積んでいた(見出しと種類だけの行)。
@@ -242,7 +242,7 @@ export class MessagePost {
       at: new Date().toISOString(),
       kind: input.kind,
       source: input.source,
-      text: sanitizeMessageText(input.text),
+      text: sanitizeMessageText(input.text, input.fixedHead),
     });
     if (input.kind === 'caution' || input.kind === 'problem') {
       this.unread += 1;

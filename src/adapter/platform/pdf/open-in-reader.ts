@@ -46,7 +46,7 @@ export async function openInPdfReader(
   try {
     const lent = await deps.lend(args.assetKey);
     if (!lent) {
-      deps.fail(`添付が見つかりません: ${args.name}`);
+      deps.fail(`添付が見つかりません: 「${args.name}」`);
       return true;
     }
     host.open({ assetKey: args.assetKey, name: args.name, lid: args.lid, lent });

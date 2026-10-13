@@ -14,7 +14,9 @@
  * ⚠ 「問題」(操作が通らなかった)との境は **この 2 件だけ**を名指しする。
  *   他の `OP_FAILED` は今までどおり「問題」のまま。
  */
+import { CORRUPT_REFUSAL } from '../storage/db-corruption';
 import { quotaBootNotice, type QuotaEstimate } from '../storage/quota-watch';
+import { WRITE_QUOTA_REFUSAL } from '../storage/write-quota';
 import type { MessageKind } from './message-log';
 
 /**
@@ -35,12 +37,27 @@ export function messageKindForOpError(error: string): MessageKind {
   return error === EDIT_ELSEWHERE_ERROR ? 'caution' : 'problem';
 }
 
+/**
+ * 🔴 **アプリが書いた固定の文の頭**(#1087)── `sanitizeMessageText` の `fixedHead` へ渡す。
+ * 先頭が一致するあいだは括弧の潰しも 80 字の切りも掛けない(案内のボタン名と「次にすること」を残す)。
+ * ⚠ 一致しない文(生の例外が前に付く・他の断り)は今までどおり潰して切る。
+ * ⚠ `CORRUPT_REFUSAL` は後ろに `(op で検出: 生の例外)` が続きうる ── 続きの側は潰す・切るが効く。
+ */
+export function fixedHeadOfOpError(error: string): string {
+  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, CORRUPT_REFUSAL]) {
+    if (error.startsWith(head)) return head;
+  }
+  return '';
+}
+
 /** 積む 1 件(`MessagePost.post` へそのまま渡せる形)。 */
 export interface CautionPost {
   readonly kind: 'caution';
   /** 出所(固定の機能名。user の入力は含めない)。 */
   readonly source: string;
   readonly text: string;
+  /** 固定の文なので、全文を括弧の潰し・字数の切りから外す。 */
+  readonly fixedHead: string;
 }
 
 /**
@@ -50,7 +67,7 @@ export interface CautionPost {
  */
 export function quotaCaution(est: QuotaEstimate): CautionPost | null {
   const text = quotaBootNotice(est);
-  return text === '' ? null : { kind: 'caution', source: 'quota', text };
+  return text === '' ? null : { kind: 'caution', source: 'quota', text, fixedHead: text };
 }
 
 /**
@@ -75,5 +92,5 @@ export function reservedLockCaution(init: {
 }): CautionPost | null {
   if (init.vfs !== 'opfs-sahpool') return null;
   if (init.reservedLockPatched || init.reservedLockUpstreamFixed) return null;
-  return { kind: 'caution', source: 'storage', text: RESERVED_LOCK_CAUTION_TEXT };
+  return { kind: 'caution', source: 'storage', text: RESERVED_LOCK_CAUTION_TEXT, fixedHead: RESERVED_LOCK_CAUTION_TEXT };
 }

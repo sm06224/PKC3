@@ -176,5 +176,5 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   }
   const result = await deps.write(body);
   if (result.ok) deps.done(`書き戻しました: 「${deps.name}」`);
-  else deps.fail(`${deps.name}: ${result.reason}`);
+  else deps.fail(`「${deps.name}」: ${result.reason}`);
 }

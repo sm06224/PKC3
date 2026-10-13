@@ -136,11 +136,11 @@ export function checkAddSource(
   if (duckDbReadableSourceOf('', cand.name) === null) {
     return {
       ok: false,
-      why: `${cand.name} は DuckDB で読めないので足せません(足せるのは ${DUCKDB_ADDABLE_EXTS} です)`,
+      why: `「${cand.name}」は DuckDB で読めないので足せません(足せるのは ${DUCKDB_ADDABLE_EXTS} です)`,
     };
   }
   if (primary.lid === cand.lid || extras.some((e) => e.lid === cand.lid)) {
-    return { ok: false, why: `${cand.name} はもう並べてあります` };
+    return { ok: false, why: `「${cand.name}」はもう並べてあります` };
   }
   if (1 + extras.length >= SQL_MAX_SOURCES) {
     return { ok: false, why: `並べられるのは ${String(SQL_MAX_SOURCES)} つまでです` };

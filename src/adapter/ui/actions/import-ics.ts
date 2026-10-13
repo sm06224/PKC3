@@ -71,19 +71,19 @@ export async function importIcsFiles(
     for (const file of files) {
       if (file.size > ICS_IMPORT_MAX_BYTES) {
         return fail(
-          `${file.name} は大きすぎて取り込めません(${humanBytes(ICS_IMPORT_MAX_BYTES)} まで。ノートは 1 件も追加されていません)`,
+          `「${file.name}」は大きすぎて取り込めません(${humanBytes(ICS_IMPORT_MAX_BYTES)} まで。ノートは 1 件も追加されていません)`,
         );
       }
       const parsed = parseIcs(await file.text());
       if (parsed.overLimit) {
         return fail(
-          `${file.name} は予定が多すぎて取り込めません(${ICS_IMPORT_MAX_EVENTS} 件まで。ノートは 1 件も追加されていません)`,
+          `「${file.name}」は予定が多すぎて取り込めません(${ICS_IMPORT_MAX_EVENTS} 件まで。ノートは 1 件も追加されていません)`,
         );
       }
       for (const k of Object.keys(sum) as (keyof IcsCounts)[]) sum[k] += parsed.counts[k];
       if (parsed.events.length === 0) {
         const why = icsCountNotes(parsed.counts);
-        notes.push(`${file.name}: 取り込める予定が 1 件もありませんでした${why.length > 0 ? `(${why.join('、')})` : ''}`);
+        notes.push(`「${file.name}」: 取り込める予定が 1 件もありませんでした${why.length > 0 ? `(${why.join('、')})` : ''}`);
         continue;
       }
       const body = icsNoteBody(parsed.events);

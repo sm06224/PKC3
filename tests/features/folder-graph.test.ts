@@ -122,7 +122,7 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     const r = buildFolderGraph([F('A', 'A', 'じぶん')], new Map());
     expect(r.edges).toEqual([]);
     expect(r.warnings).toEqual([
-      '自分自身を親にしているフォルダの親子関係を外しました: じぶん',
+      '自分自身を親にしているフォルダの親子関係を外しました: 「じぶん」',
     ]);
   });
 
@@ -139,7 +139,7 @@ describe('buildFolderGraph — 壊れた入力を「直して見せる」', () =
     // a は root 直下、b は a の下 ── **残りの木は保つ**
     expect(parentOf(r)).toEqual({ b: 'a' });
     expect(r.warnings).toEqual([
-      '親フォルダが書き出しに含まれていません: ノート置き場(最上位に置きます)',
+      '親フォルダが書き出しに含まれていません: 「ノート置き場」(最上位に置きます)',
     ]);
   });
 

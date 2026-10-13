@@ -70,8 +70,33 @@ describe('formatMessageSection(段②a)', () => {
       text: '保存できませんでした',
     });
     expect(s).toMatch(/^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\n/);
-    expect(s).toContain('**問題** app: 保存できませんでした');
+    // 🔴 `app` は出所として言う意味が無いので書かない(英語の内部名を画面に出さない。#1087)
+    expect(s).toContain('**問題** 保存できませんでした');
+    expect(s).not.toContain('app:');
     expect(s.endsWith('\n\n')).toBe(true);
+  });
+
+  it('🔴 出所は日本語で書く(内部の英語名を出さない)/ 表に無い名前はそのまま', () => {
+    const at = '2026-09-21T05:11:22.000Z';
+    const line = (source: string): string =>
+      formatMessageSection({ at, kind: 'caution', source, text: 'x' }).split('\n')[1] ?? '';
+    expect(line('quota')).toBe('**注意** 保存領域の空き: x');
+    expect(line('storage')).toBe('**注意** 保存先: x');
+    expect(line('notice')).toBe('**注意** お知らせ: x');
+    expect(line('schedule')).toBe('**注意** 予定: x');
+    expect(line('portable-boot')).toBe('**注意** PKC3 入り HTML の起動: x');
+    expect(line('office-profile')).toBe('**注意** Office: x');
+    expect(line('db-rescue-rebuild')).toBe('**注意** ノートの保存データの作り直し: x');
+    expect(line('db-rescue-reset')).toBe('**注意** ノートの保存データの初期化: x');
+    expect(line('storage-vacuum')).toBe('**注意** 保存領域を縮める: x');
+    expect(line('force-release')).toBe('**注意** 書き込みの強制終了: x');
+    expect(line('status')).toBe('**注意** x');
+    // 処理の記録の lane 名・既に日本語の出所は触らない
+    expect(line('markdown-render')).toBe('**注意** markdown-render: x');
+    expect(line('貼り付け')).toBe('**注意** 貼り付け: x');
+    // 日本語にしても未読の数え方は変わらない(種類の太字を読むだけ)
+    const body = formatMessageSection({ at, kind: 'caution', source: 'quota', text: 'x' });
+    expect(countUnread(body, null)).toBe(1);
   });
 
   it('🔴 種類が変わると、字も変わる(貼り替えではないことを見る)', () => {
@@ -120,6 +145,24 @@ describe('sanitizeMessageText(中身を漏らさない。#7)', () => {
 
   it('括弧も改行も無い普通の文はそのまま', () => {
     expect(sanitizeMessageText('起動しました')).toBe('起動しました');
+  });
+
+  /**
+   * 🔴 **アプリが書いた固定の文は、頭が一致するあいだ潰さず切らない**(#1087)。
+   * ⚠ 潰すと案内のボタン名(「容量の内訳」)が「…」になり、80 字で切ると「次にすること」が落ちる。
+   */
+  it('🔴 固定の頭(fixedHead)は括弧も 80 字も通し、続きの生の字だけ潰して切る', () => {
+    const head = 'あ'.repeat(100) + 'システムの「容量の内訳」を開いてください。';
+    expect(sanitizeMessageText(head, head)).toBe(head);
+    // 続きは今までどおり
+    const withRaw = sanitizeMessageText(`${head}(検出: 「秘密.pdf」)`, head);
+    expect(withRaw.startsWith(head)).toBe(true);
+    expect(withRaw).toContain('「…」');
+    expect(withRaw).not.toContain('秘密');
+    // 頭が一致しない文には効かない(対照群 ── 固定の印を付ければ何でも通る穴にしない)
+    const other = sanitizeMessageText(`「秘密」${'い'.repeat(100)}`, head);
+    expect(other).not.toContain('秘密');
+    expect(other.endsWith('…')).toBe(true);
   });
 });
 

@@ -207,7 +207,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       // 大きさが meta と食い違う = 書きかけのまま `.json` が置かれた(壊れている)。
       // ⚠ 残しても永久に直らないので捨てる ── ただし**黙らない**
       await discardStaged(dir, save.key);
-      deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}: 中身が読めません)`);
+      deps.fail(`Office で保存した内容を取り込めませんでした(「${save.name}」: 中身が読めません)`);
       return 'failed';
     }
     // ⚠ **`ready` を先に見る。** 見ないと reducer に黙って捨てられ、
@@ -230,7 +230,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
       if (!local) {
-        deps.fail(`元のファイルへ保存できませんでした(${save.name})`);
+        deps.fail(`元のファイルへ保存できませんでした(「${save.name}」)`);
         deferred = true;
         return 'deferred';
       }
@@ -301,7 +301,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         try {
           out.push(await takeOne(dir, save));
         } catch (e) {
-          deps.fail(`Office で保存した内容を取り込めませんでした(${save.name}): ${errorText(e)}`);
+          deps.fail(`Office で保存した内容を取り込めませんでした(「${save.name}」): ${errorText(e)}`);
           out.push('failed');
         } finally {
           inFlight.delete(save.key);

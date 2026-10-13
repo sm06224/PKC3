@@ -79,7 +79,7 @@ export function quotaText(e: QuotaEstimate): string {
     );
   }
   if (level === 'warn') {
-    return `${head} 空きが少なくなってきました。重いノートから整理しておくと安全です。`;
+    return `${head} 空きが少なくなってきました。重いノートから整理しておくと安全です。システム → 保存領域 →「容量を調べる」で、重いノートを探せます。`;
   }
   return head;
 }

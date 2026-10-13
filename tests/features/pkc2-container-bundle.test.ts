@@ -339,7 +339,7 @@ describe('readContainerBundle — texts', () => {
     const got = await readContainerBundle(zip);
     expect([...got.assetSources.keys()]).toEqual(['k']);
     expect(got.warnings).toEqual([
-      'b.text.zip: 添付 k の名前(first.png / second.png)か種別(image/png / image/webp)がファイルごとに違います。先のほうを使います',
+      '「b.text.zip」: 添付 k の名前(「first.png」 / 「second.png」)か種別(image/png / image/webp)がファイルごとに違います。先のほうを使います',
     ]);
   });
 });
@@ -447,7 +447,7 @@ describe('readContainerBundle — textlogs', () => {
     // 🔑 1 件の事故で 100 件を失わない ── ただし**どのファイルを何故落としたか**を言う
     const got = await readContainerBundle(zip);
     expect((got.container as Synth).entries.map((e) => e.lid)).toEqual(['n1']);
-    expect(got.warnings[0]).toMatch(/g\.text\.zip: 取り込めませんでした.*pkc2-text-bundle/);
+    expect(got.warnings[0]).toMatch(/「g\.text\.zip」: 取り込めませんでした.*pkc2-text-bundle/);
     expect(got.warnings).toContain('1 件の書き出しファイルを取り込めませんでした(残りは取り込みます)');
   });
 
@@ -566,7 +566,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       ],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      'manifest に無いファイルを無視しました: stowaway.txt',
+      'manifest に無いファイルを無視しました: 「stowaway.txt」',
     ]);
   });
 
@@ -586,7 +586,7 @@ describe('readContainerBundle — 黙って落とさない', () => {
       ],
     );
     expect((await readContainerBundle(zip)).warnings).toEqual([
-      'a.text.zip: 添付の中身が書き出しファイルに入っていません: ast-gone',
+      '「a.text.zip」: 添付の中身が書き出しファイルに入っていません: ast-gone',
     ]);
   });
 
@@ -642,8 +642,8 @@ describe('readContainerBundle — 黙って落とさない', () => {
     );
     const got = await readContainerBundle(zip);
     expect(got.warnings).toEqual([
-      'a.text.zip: manifest.json と中身で ID が違います(ちがう ≠ n1)',
-      'a.text.zip: manifest.json と中身で題名が違います(ちがう題 ≠ 本当の題)',
+      '「a.text.zip」: manifest.json と中身で ID が違います(ちがう ≠ n1)',
+      '「a.text.zip」: manifest.json と中身で題名が違います(「ちがう題」 ≠ 「本当の題」)',
     ]);
     // 採るのは**中身**
     expect((got.container as Synth).entries[0]!.lid).toBe('n1');

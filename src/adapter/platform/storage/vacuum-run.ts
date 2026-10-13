@@ -45,7 +45,7 @@ export interface VacuumDeps {
   /** worker の `vacuum` を 1 回打つ。 */
   vacuum(): Promise<VacuumResult>;
   /** 処理の記録へ積む(`appMessagePost.post`)。 */
-  post(input: { kind: 'job'; source: string; text: string }): void;
+  post(input: { kind: 'job'; source: string; text: string; fixedHead?: string }): void;
   /** いま(ms)。既定は `Date.now`。 */
   now?: () => number;
 }
@@ -178,7 +178,8 @@ export class StorageVacuum {
       return { kind: 'done', text };
     } catch (e) {
       const text = vacuumFailedText(String(e));
-      d.post({ kind: 'job', source: VACUUM_SOURCE, text });
+      // 🔴 アプリが組んだ固定の理由なので、案内のボタン名を括弧で潰さない(#1087)
+      d.post({ kind: 'job', source: VACUUM_SOURCE, text, fixedHead: text });
       return { kind: 'failed', text };
     } finally {
       this.running = false;
