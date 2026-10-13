@@ -1072,14 +1072,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   window.addEventListener('pagehide', () => appMessagePost.flushJobBuffer());
   // boot と再読込は**同じ経路**で state を作る(取込後に別の作り方をしない ──
   // 分岐が増えると「取込直後だけ壊れる」型の差分が入る)
-  const loadSnapshot = async () => ({
-    metas: (await client.request({ op: 'listEntryMetas', cid })).map(
-      metaFromRow,
-    ),
-    relations: (await client.request({ op: 'listRelations', cid })).map(
-      relationFromRow,
-    ),
-  });
+  // 🔑 2 つは独立なので**同時に送る**(#1087)── 直列に待つと、往復 1 回ぶん起動と再読込が遅れる。
+  //   要求は id で待つので取り違えない(本体の StoreClient も follower の ProxyStoreClient も)。
+  const loadSnapshot = async () => {
+    const [metaRows, relationRows] = await Promise.all([
+      client.request({ op: 'listEntryMetas', cid }),
+      client.request({ op: 'listRelations', cid }),
+    ]);
+    return { metas: metaRows.map(metaFromRow), relations: relationRows.map(relationFromRow) };
+  };
   const { metas, relations } = await loadSnapshot();
 
   const dispatcher = new Dispatcher();
