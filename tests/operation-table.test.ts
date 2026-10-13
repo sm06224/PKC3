@@ -424,7 +424,7 @@ const UNREGISTERED_POINT: readonly string[] = [
   /**
    * ⚠ **2026-09-27(#1044 段4)で 1 件増やした** ── 章を別のウィンドウで。`edit-section` と
    *   同じ仕分け(押した見出しの行を `menuCarriedLine` が運ぶ ── パレットから
-   *   「この章を別のウィンドウで開く」と呼んでも、どの章かが決まらない)。
+   *   「この章を別のウィンドウで読む」と呼んでも、どの章かが決まらない)。
    */
   'open-chapter-window',
   'edit-from-heading', 'export-diagram', 'filter-by-tag', 'move-app-group-down',

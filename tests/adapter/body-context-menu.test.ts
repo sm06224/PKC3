@@ -493,7 +493,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 4 つ目「この章をコピー」は #677 で足した(既存の 3 つの**下**)
     // ⚠ 5 つ目「章の参照をコピー」は #579 で足した(写す 2 つを隣に)
     // ⚠ 「この章を編集する」は #1044 段2 で**頭**へ足した(「ここから編集する」の上)
-    // ⚠ 7 つ目「この章を別のウィンドウで開く」は #1044 段4 で足した(見出しの物の最後)
+    // ⚠ 7 つ目「この章を別のウィンドウで読む」は #1044 段4 で足した(見出しの物の最後)
     // ⚠ 「章のリンクをコピー」は #1559 で足した(「章の参照をコピー」の隣 ── 本文に貼る物と外へ貼る物)
     expect(acts.slice(0, 8), '見出しの 8 つが出ていない').toEqual([
       'edit-section',
@@ -732,7 +732,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ数え方(#1044 段2)
     expect(acts, '入れ子で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
     // ⚠ 章の別ウィンドウも同じ数え方(#1044 段4)── 出しても「見出しを読めません」になる
-    expect(acts, '入れ子で切り出せない「この章を別のウィンドウで開く」を出した').not.toContain(
+    expect(acts, '入れ子で切り出せない「この章を別のウィンドウで読む」を出した').not.toContain(
       'open-chapter-window',
     );
   });
@@ -750,7 +750,7 @@ describe('見出しの右クリック(#426 段② の残り)', () => {
     expect(acts, '入り先にできない見出しで追記の口を出した').not.toContain('append-at-heading');
     // ⚠ 章だけ編集も append-target.ts の scanHeadings と同じ `#`〜`###` 限り(#1044 段2)
     expect(acts, '`####` で切り出せない「この章を編集する」を出した').not.toContain('edit-section');
-    expect(acts, '`####` で切り出せない「この章を別のウィンドウで開く」を出した').not.toContain(
+    expect(acts, '`####` で切り出せない「この章を別のウィンドウで読む」を出した').not.toContain(
       'open-chapter-window',
     );
   });
@@ -2088,6 +2088,14 @@ describe('見出しの右クリック ── 章を別のウィンドウで(#104
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: HEAD_BODY_2 });
     return { root, d, a: root.querySelector('#h-a')!, b: root.querySelector('#h-b')! };
   }
+
+  it('🔴 窓は読むだけなので、メニューの字も「読む」(「開く」と書くと編集できる窓に読める)(#1087)', () => {
+    const r = rig2();
+    rightClick(r.a);
+    const btn = r.root.querySelector<HTMLElement>(`${MENU} [data-pkc-action="open-chapter-window"]`)!;
+    expect(btn.textContent).toContain('この章を別のウィンドウで読む');
+    expect(btn.textContent).not.toContain('開く');
+  });
 
   it('🔴 押すと、押した見出しの行とノートを渡す(2 つ目の見出しは 2 つ目の行)', () => {
     const calls: [string, number][] = [];

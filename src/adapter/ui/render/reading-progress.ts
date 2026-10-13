@@ -21,7 +21,7 @@ export function installReadingProgress(
   const wrapper = doc.createElement('div');
   wrapper.className = 'pkc-reading-progress';
   wrapper.setAttribute('role', 'progressbar');
-  wrapper.setAttribute('aria-label', '読書進捗');
+  wrapper.setAttribute('aria-label', '読み進み具合');
   wrapper.setAttribute('aria-valuemin', '0');
   wrapper.setAttribute('aria-valuemax', '100');
   wrapper.setAttribute('aria-valuenow', '0');

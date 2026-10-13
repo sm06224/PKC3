@@ -124,12 +124,30 @@ export function makeSlugCounter(): (text: string) => string {
 }
 
 /**
+ * 本文の目次(inspector の「目次」)を、**描かれた見出しに寄せる**ための追加の読み方(#1087)。
+ * ⚠ 既定(省く)は従来どおり ── 他の呼び手(章の追記先など)の出力は変えない。
+ */
+export interface ExtractHeadingsOptions {
+  /**
+   * 描画が捨てる部分(`:::comment` / `%%%` / `%%…%%`)を先に落とす関数。
+   * 🔑 注入にする ── 実体は markdown-render にあり、そこは本 file を import している(循環を避ける)
+   */
+  stripHidden?: (source: string) => string;
+  /** setext(`===` / `---` の下線)と、引用・リストの中の `#` 見出しも拾う(描画は拾っている) */
+  blockForms?: boolean;
+}
+
+/**
  * Extract h1–h3 headings from a raw markdown string.
  *
  * Intentionally ignores fenced code blocks (``` … ```).
  */
-export function extractHeadingsFromMarkdown(markdown: string): TocHeading[] {
+export function extractHeadingsFromMarkdown(
+  markdown: string,
+  opts?: ExtractHeadingsOptions,
+): TocHeading[] {
   if (!markdown) return [];
+  if (opts?.stripHidden) markdown = opts.stripHidden(markdown);
   const headings: TocHeading[] = [];
   const slugOf = makeSlugCounter();
   // 2026-05-09 hotfix(user バグレポ):TOC は **render と同じ前処理** を経たうえで
@@ -152,13 +170,34 @@ export function extractHeadingsFromMarkdown(markdown: string): TocHeading[] {
 
   const lines = body.split(/\r?\n/);
   let inFence = false;
+  const blockForms = opts?.blockForms === true;
+  // setext の本文候補(直前まで続く、記法を持たない行)
+  let para: string[] = [];
+  const headRe = blockForms
+    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+)\s*)*(#{1,3})\s+(.+?)\s*#*\s*$/
+    : /^ {0,3}(#{1,3})\s+(.+?)\s*#*\s*$/;
   for (const line of lines) {
     if (/^\s{0,3}(?:```|~~~)/.test(line)) {
       inFence = !inFence;
+      para = [];
       continue;
     }
     if (inFence) continue;
-    const m = /^ {0,3}(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (blockForms) {
+      const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
+      if (u && para.length > 0) {
+        const text = para.join(' ').trim();
+        para = [];
+        if (text) {
+          headings.push({ level: (u[1]![0] === '=' ? 1 : 2) as TocDepth, text, slug: slugOf(text) });
+        }
+        continue;
+      }
+      // 段落の素の行だけを溜める(記法の行・空行で切る)
+      if (line.trim() === '' || /^\s{0,3}(?:#|>|[-*+][ \t]|\d+[.)][ \t]|\||:::|%%|<)/.test(line)) para = [];
+      else para.push(line.trim());
+    }
+    const m = headRe.exec(line);
     if (!m) continue;
     const level = m[1]!.length as TocLevel;
     const text = m[2]!.trim();
@@ -367,7 +406,7 @@ export function renderStaticTocHtml(nodes: readonly TocNode[]): string {
     .join('');
   return (
     `<nav class="pkc-toc pkc-toc-preview" data-pkc-region="toc">` +
-    `<span class="pkc-toc-label">Contents</span>` +
+    `<span class="pkc-toc-label">目次</span>` +
     `<ul class="pkc-toc-list">${items}</ul>` +
     `</nav>`
   );

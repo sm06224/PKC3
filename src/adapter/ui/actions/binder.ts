@@ -5894,7 +5894,7 @@ async function waitPainted(
  * 🔑 **1 本にする**(§7)── 目次と添付で別々に書くと、片方だけ言い回しが変わる。
  */
 const JUMP_REFUSED_WHILE_EDITING =
-  '編集中は本文が表示されていないので移動できません(保存するか、2 ペインにしてください)';
+  '編集中は本文が表示されていないので移動できません(「編集を保存する」を押すか、システムの「編集の仕方」を「2 ペイン(原文とプレビュー)」にしてください)';
 
 /**
  * 🔴 **目次の行から本文の見出しへ飛ぶ**(#514 / #517)。
@@ -8616,6 +8616,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]');
     const text = input?.value ?? '';
     const noteLid: string = lid;
+    /**
+     * 🔴 **空のまま押した回は、黙らずに言う**(#1087)。⚠ 直す前は reducer が黙って捨てたので、
+     *   押しても何も起きない dead click だった。欄へ焦点を戻し、次にすることを出す
+     *   (エラーではないので `OP_FAILED` には載せない ── 注意の知らせ)。
+     */
+    if (text.trim() === '') {
+      input?.focus();
+      services.showStatus?.('追記する内容を打ってから、もう一度押してください', CAUTION);
+      return;
+    }
     /**
      * 🔴 **追記先**(#395 段①)。空 = 末尾。⚠ 字・ノートと同じく**押した時点で読む**(問い合わせの間に
      *   ノートや選択が替わっても、押した物が撃たれる)。印をそのまま渡す ── 行番号に直さない
@@ -15075,9 +15085,26 @@ export function bindActions(
      * 🔴 **章の欄にも書式の近道を効かせる**(#1044 段2。`row-source` と同じ形 ──
      *   2 本目の実装を書かない)。⚠ 書式のボタンの帯は出さない(設計 doc §3)が、
      *   近道は**全文編集と同じ表**(`FORMAT_OF` / `applyFormatTo`)を通す。
-     *   `Ctrl+S` / `Escape` はここでは受けない(押すのは 2 つのボタンのみ ──
-     *   `row-source` が `Ctrl+S`/`Escape` を渡さないのと同じ理由)。
+     *   `Escape` はここでは受けない(別の裁定待ち)。
+     * 🔴 **`Ctrl+S` / `Ctrl+Enter` は「章を保存する」/「コードを保存する」を押したのと同じ**(#1087)。
+     *   ⚠ 直す前は受けず、`preventDefault` もしないのでブラウザの「ページを保存」が開いた。
+     *   押すのは**同じ箱の保存ボタン**(新しい経路を作らない。保存中は `disabled` なので二重に撃たない)。
      */
+    if (
+      (field === SECTION_BOX_INPUT_FIELD || field === CODE_BOX_INPUT_FIELD) &&
+      (ke.ctrlKey || ke.metaKey) &&
+      !ke.altKey &&
+      !ke.shiftKey &&
+      (ke.key === 's' || ke.key === 'S' || ke.key === 'Enter')
+    ) {
+      ke.preventDefault();
+      const saveAction = field === SECTION_BOX_INPUT_FIELD ? 'save-section-draft' : 'save-code-draft';
+      (ke.target as HTMLElement)
+        .closest(`[data-pkc-region="${field === SECTION_BOX_INPUT_FIELD ? SECTION_BOX_REGION : CODE_BOX_REGION}"]`)
+        ?.querySelector<HTMLButtonElement>(`[data-pkc-action="${saveAction}"]`)
+        ?.click();
+      return;
+    }
     if (field === SECTION_BOX_INPUT_FIELD) {
       const sectionCmd = keymap.match(ke, 'row');
       if (sectionCmd === null || FORMAT_OF[sectionCmd] === undefined) return;

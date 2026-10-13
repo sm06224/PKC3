@@ -53,6 +53,7 @@ import { formatStoredDate, storedInstantIso } from '@features/datetime/stored-da
 import { sameTag } from '@features/flavor/tags';
 import { collectEntryTags } from '@features/flavor/entry-tags';
 import { extractHeadingsFromMarkdown } from '@features/markdown/markdown-toc';
+import { stripComments } from '@features/markdown/markdown-render';
 import { listTaskItems } from '@features/markdown/task-count';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
@@ -417,7 +418,13 @@ export class InspectorRenderer {
        *   全属性を毎回 `setAttr` で比べる(押すと別の見出しへ飛ぶ、を作らない)。
        */
       if (this.toc === null || this.toc.body !== body) {
-        const headings = body === null ? [] : extractHeadingsFromMarkdown(body);
+        const headings =
+          body === null
+            ? []
+            : extractHeadingsFromMarkdown(body, {
+                stripHidden: (s) => stripComments(s).transformed,
+                blockForms: true,
+              });
         this.toc = { body, headings };
         // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**(関係の図と同じ)
         const dt = tocBox.previousElementSibling;

@@ -284,7 +284,7 @@ describe('SECTION_SAVED / SECTION_SAVE_FAILED(#1044 段2 3巡目の修理、S1)'
       lid: 'n1',
       gen: s0.lockGen,
       heading: '決定事項',
-      error: 'この章は別の場所で書き換えられました ── 書きかけをコピーしてから、開き直してください',
+      error: SECTION_SAVE_MISMATCH_NOTE,
     });
     expect(r.state.sectionDraft, '断ったのに下書きが消えた').not.toBeNull();
     expect(r.state.sectionDraft!.saving, '保存中の印が解けていない').toBe(false);

@@ -129,6 +129,7 @@ describe('markdown-toc', () => {
       expect(html).toContain('class="pkc-toc pkc-toc-preview"');
       expect(html).toContain('href="#title-tag"');
       expect(html).toContain('Title &lt;Tag&gt;');
+      expect(html, '見出しの字が英語(他の面は「目次」)').toContain('>目次</span>');
     });
   });
 

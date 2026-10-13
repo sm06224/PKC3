@@ -912,7 +912,7 @@ export function headingMenuActions(ctx: {
   }
   // 🔴 章の別ウィンドウ(#1044 段4)── 章の欄と同じ形の条件(書けるかどうかには依らない)
   if (ctx.chapterWindow)
-    out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで開く' });
+    out.push({ action: 'open-chapter-window', label: 'この章を別のウィンドウで読む' });
   return out;
 }
 

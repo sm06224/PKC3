@@ -4043,7 +4043,7 @@ function buildTocNavsFromHtml(
       .join('');
     return (
       `<nav class="pkc-toc-formal pkc-toc-preview" data-pkc-region="toc-formal" data-pkc-toc-depth="${rec.depth}">` +
-      `<span class="pkc-toc-label">Contents</span>` +
+      `<span class="pkc-toc-label">目次</span>` +
       `<ul class="pkc-toc-list">${items}</ul>` +
       `</nav>`
     );
@@ -4979,7 +4979,7 @@ function applyAlignAttrs(
  * View source-preview-sync が `data-pkc-source-line` で逆引きする contract
  * を maintain、source-line ズレ bug を構造的に防止。
  */
-function stripComments(source: string, lineMapIn?: number[]): {
+export function stripComments(source: string, lineMapIn?: number[]): {
   transformed: string;
   lineMap: number[];
 } {
