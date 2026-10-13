@@ -2962,7 +2962,7 @@ export function connectStoreEffects(
             }
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `版を読み出せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+              error: `版を読み出せませんでした: ${errorText(e)}`,
             });
           }
         });
@@ -3038,7 +3038,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `戻せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+                error: `戻せませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -3172,7 +3172,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `戻せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+                error: `戻せませんでした: ${errorText(e)}`,
               });
           }
         });
@@ -3316,7 +3316,7 @@ export function connectStoreEffects(
             stamp(ev.lid, stamps);
           } catch (e) {
             // ⚠ 例外の前置き「Error:」を画面に出さない(#1087)
-            fail(`追記を保存できませんでした(${e instanceof Error ? e.message : String(e)})`);
+            fail(`追記を保存できませんでした(${errorText(e)})`);
           }
         });
         break;

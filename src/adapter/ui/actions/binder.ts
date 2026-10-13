@@ -8328,7 +8328,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           dispatcher.dispatch({
             type: 'OP_FAILED',
             // 🔑 理由は残し(何が起きたかの手がかり)、次にすることを足す(#1087)
-            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${e instanceof Error ? e.message : String(e)})。欄の字は残っています。もう一度押してください`,
+            error: `追記できませんでした(別のタブの編集を確かめられませんでした: ${errorText(e)})。欄の字は残っています。もう一度押してください`,
           });
         })
         .finally(() => {
@@ -11245,7 +11245,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       services.showStatus?.('');
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `外部の画像を取り込めませんでした(${e instanceof Error ? e.message : String(e)})`,
+        error: `外部の画像を取り込めませんでした(${errorText(e)})`,
       });
     });
   },
@@ -11864,7 +11864,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({
           type: 'OP_FAILED',
           // ⚠ 例外の前置き「Error:」は出さない / 次に何をするかを言う(#1087)
-          error: `メッセージを書き出せませんでした(${e instanceof Error ? e.message : String(e)})。もう一度押してください`,
+          error: `メッセージを書き出せませんでした(${errorText(e)})。もう一度押してください`,
         });
       });
   },

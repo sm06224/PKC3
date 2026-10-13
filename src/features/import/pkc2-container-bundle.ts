@@ -40,6 +40,7 @@
  * `pkc2-folder-export-bundle`(段⑤)/ `pkc2-entry-bundle`(段⑥)は**名指しで断る**。
  * 「読めるところだけ読む」は静かな欠損を作る。
  */
+import { errorText } from '@features/error-text';
 import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import {
   readZipDirectory,
@@ -359,7 +360,7 @@ export async function readInnerBundles(
       // 「読めるところだけ読む」が悪いのは**黙って**やるからで、
       // どのファイルを何の理由で落としたかを言うなら静かではない
       failed.push(filename);
-      warnings.push(`${filename}: 取り込めませんでした: ${e instanceof Error ? e.message : String(e)}`);
+      warnings.push(`${filename}: 取り込めませんでした: ${errorText(e)}`);
       continue;
     }
 

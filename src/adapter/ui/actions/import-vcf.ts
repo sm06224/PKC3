@@ -7,6 +7,7 @@
  * ⚠ **読めた分を書かずに終える**(部分的に書かない)── md 経路と同じ理由。
  * ⚠ 題名の無いカードは番号名(「連絡先 3」)を振る ── 黙って捨てない。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -102,7 +103,7 @@ export async function importVcfFiles(
     }
   } catch (e) {
     return fail(
-      `vCard を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
+      `vCard を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
   }
   if (rows.length === 0) {
@@ -113,7 +114,7 @@ export async function importVcfFiles(
     await deps.bulkUpsertEntries(rows);
   } catch (e) {
     await deps.reload().catch(() => {});
-    return fail(`取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`取り込みに失敗しました: ${errorText(e)}`);
   }
 
   await deps.reload();

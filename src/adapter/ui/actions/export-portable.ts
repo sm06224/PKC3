@@ -17,6 +17,7 @@
  * その雛形を取ってきて中身を差し込む ── ⚠ ブラウザの中で畳み直すと
  * **同じ規則が 2 か所**になる(CLAUDE.md §7)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
 import { safeName } from '@features/export/file-name';
@@ -137,6 +138,6 @@ export async function exportPortable(
     );
     return out.assets;
   } catch (e) {
-    return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`書き出しに失敗しました: ${errorText(e)}`);
   }
 }

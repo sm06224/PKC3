@@ -24,6 +24,7 @@
  * 何を受けるか(拡張子)も、どう entry にするかも `import-file.ts` / `plain-markdown.ts`
  * の規則がすでに持っている。**受け口が独自の判定を持つと宣言と実体がまた 3 つに割れる**。
  */
+import { errorText } from '@features/error-text';
 import type { LaunchedHandle } from './launched-files';
 
 /**
@@ -100,7 +101,7 @@ export function armLaunchQueue(
               items.push({ file: await handle.getFile(), handle });
             } catch (e) {
               // 1 件が読めなくても残りは開く。⚠ **黙って減らさない**
-              onError(`ファイルを読めませんでした: ${e instanceof Error ? e.message : String(e)}`);
+              onError(`ファイルを読めませんでした: ${errorText(e)}`);
             }
           }
           if (items.length === 0) return;
@@ -108,13 +109,13 @@ export function armLaunchQueue(
         } catch (e) {
           // ⚠ **unhandled rejection にしない**。ここで落ちると原因が
           // どこにも出ないまま「md を開いたのに何も起きない」になる
-          onError(`開けませんでした: ${e instanceof Error ? e.message : String(e)}`);
+          onError(`開けませんでした: ${errorText(e)}`);
         }
       })();
     });
   } catch (e) {
     // ⚠ 登録そのものが投げてもアプリは動く ── boot を道連れにしない
-    onError(`起動時のファイル受け取りを準備できませんでした: ${e instanceof Error ? e.message : String(e)}`);
+    onError(`起動時のファイル受け取りを準備できませんでした: ${errorText(e)}`);
     return { armed: false };
   }
   return { armed: true };

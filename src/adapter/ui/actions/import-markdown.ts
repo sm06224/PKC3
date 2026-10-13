@@ -8,6 +8,7 @@
  * ⚠ 本文は**原文のまま**書く。`readPlainMarkdown` は題名と archetype を読むために
  * frontmatter を parse するが、body には手を触れない(P6d 段④ の規律)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -112,7 +113,7 @@ export async function importMarkdownFiles(
     // 読めた分を書かずに終える ── 部分的に書くと「どこまで入ったか」が
     // user に分からないまま disk に残る(PKC2 経路は書込中の失敗なので事情が違う)
     return fail(
-      `Markdown を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
+      `Markdown を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
   }
 
@@ -121,7 +122,7 @@ export async function importMarkdownFiles(
   } catch (e) {
     await deps.reload().catch(() => {});
     return fail(
-      `取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      `取り込みに失敗しました: ${errorText(e)}`,
     );
   }
 

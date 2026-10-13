@@ -1995,7 +1995,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       },
     }).catch((e: unknown) => {
       // ⚠ 次にすることを先に言う。内部の file 名や HTTP の番号は括弧へ(#1087)
-      showStatus(`自分のパソコンで動かす zip を作れませんでした。ネットワークを確かめて、ページを再読み込みしてから、もう一度押してください(${e instanceof Error ? e.message : String(e)})`, {
+      showStatus(`自分のパソコンで動かす zip を作れませんでした。ネットワークを確かめて、ページを再読み込みしてから、もう一度押してください(${errorText(e)})`, {
         kind: 'problem',
       });
     });
@@ -2400,7 +2400,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         paint();
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `メインのタブへの切り替えに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+          error: `メインのタブへの切り替えに失敗しました: ${errorText(e)}`,
         });
       }
     });
@@ -3709,7 +3709,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付を開けませんでした(${name}): ${e instanceof Error ? e.message : String(e)}`,
+            error: `添付を開けませんでした(${name}): ${errorText(e)}`,
           });
         }
       })();
@@ -3798,7 +3798,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
           }
         } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${e instanceof Error ? e.message : String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${errorText(e)}` });
         }
       })();
     },
@@ -3844,7 +3844,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `ダウンロードに失敗しました(${name}): ${e instanceof Error ? e.message : String(e)}`,
+          error: `ダウンロードに失敗しました(${name}): ${errorText(e)}`,
         });
       }
     },
@@ -5013,7 +5013,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付の整理に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+            error: `添付の整理に失敗しました: ${errorText(e)}`,
           });
         }
       }),

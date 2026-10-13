@@ -6,6 +6,8 @@
  *   何が起きたか・データが無事か・どうすればよいかが読めなかった。
  * 🔑 原因が分かる物だけを日本語にする。分からない物は**詳細を消さない**(バグ報告の手がかり)。
  */
+import { errorMessageJa } from './error-text';
+
 const NEWER_DB = /db user_version (\d+) is newer than supported (\d+)/;
 
 export function bootFailureText(message: string): string {
@@ -16,5 +18,6 @@ export function bootFailureText(message: string): string {
       `(詳細: ${message})`
     );
   }
-  return `起動に失敗しました: ${message}`;
+  // 🔑 分かる英語は日本語にする(元の英語は括弧に残る ── errorMessageJa)
+  return `起動に失敗しました: ${errorMessageJa(message)}`;
 }
