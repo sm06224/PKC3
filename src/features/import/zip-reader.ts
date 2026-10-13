@@ -92,10 +92,43 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
+/**
+ * 🔑 **8 バイトずつ進める表**(slicing-by-8。#1087)── バックアップの書き出し・取り込みは全添付の
+ *   全バイトをここに通すので、1 バイトずつの表引きが主スレッドを長く握っていた。
+ *   `CRC8[k * 256 + b]` = 「b の後に 0 が k バイト続いたときの寄与」。`k = 0` は `CRC_TABLE` と同じ。
+ */
+const CRC8 = (() => {
+  const t = new Uint32Array(8 * 256);
+  t.set(CRC_TABLE);
+  for (let k = 1; k < 8; k++) {
+    for (let i = 0; i < 256; i++) {
+      const prev = t[(k - 1) * 256 + i]!;
+      t[k * 256 + i] = (CRC_TABLE[prev & 0xff]! ^ (prev >>> 8)) >>> 0;
+    }
+  }
+  return t;
+})();
+
 /** 逐次更新(初期値は `0xffffffff`)。streaming 検証のために公開している。 */
 export function crc32Update(state: number, bytes: Uint8Array): number {
   let c = state;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
+  let i = 0;
+  const n = bytes.length;
+  // 8 バイトずつ(端数は下の 1 バイトずつで畳む)── 結果は 1 バイトずつと同じ値
+  for (const end = n - (n % 8); i < end; i += 8) {
+    const lo = (c ^ (bytes[i]! | (bytes[i + 1]! << 8) | (bytes[i + 2]! << 16) | (bytes[i + 3]! << 24))) >>> 0;
+    const hi = bytes[i + 4]! | (bytes[i + 5]! << 8) | (bytes[i + 6]! << 16) | (bytes[i + 7]! << 24);
+    c =
+      CRC8[7 * 256 + (lo & 0xff)]! ^
+      CRC8[6 * 256 + ((lo >>> 8) & 0xff)]! ^
+      CRC8[5 * 256 + ((lo >>> 16) & 0xff)]! ^
+      CRC8[4 * 256 + (lo >>> 24)]! ^
+      CRC8[3 * 256 + (hi & 0xff)]! ^
+      CRC8[2 * 256 + ((hi >>> 8) & 0xff)]! ^
+      CRC8[256 + ((hi >>> 16) & 0xff)]! ^
+      CRC8[(hi >>> 24) & 0xff]!;
+  }
+  for (; i < n; i++) c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
   return c;
 }
 

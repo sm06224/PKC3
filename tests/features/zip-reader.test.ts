@@ -13,6 +13,7 @@ import {
   readZipText,
   readAssetSource,
   crc32,
+  crc32Update,
   ZipReadError,
 } from '../../src/features/import/zip-reader';
 import { buildZip, bytesOf } from './zip-fixture';
@@ -464,5 +465,50 @@ describe('zip-reader: 中央ディレクトリの呼び方は 1 つ(#1389)', () 
     for (const m of mentioning) {
       expect(m, '「zip の中央ディレクトリ」の形が残っている').toContain('内容一覧(中央ディレクトリ)');
     }
+  });
+});
+
+/**
+ * 🔴 **8 バイトずつ進める CRC は、1 バイトずつと同じ値**(#1087)。
+ * ⚠ 端数(8 で割り切れない長さ)と、途中で区切って続けて渡す形(stream)の両方を見る。
+ */
+describe('crc32Update(8 バイトずつ)', () => {
+  const T = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  const byteWise = (s: number, b: Uint8Array): number => {
+    let c = s;
+    for (let i = 0; i < b.length; i++) c = T[(c ^ b[i]!) & 0xff]! ^ (c >>> 8);
+    return c;
+  };
+  const bytes = (n: number): Uint8Array => {
+    const b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = (i * 131 + n * 7) & 0xff;
+    return b;
+  };
+
+  it('長さ 0〜70 と、いくつかの初期値で一致する', () => {
+    for (let n = 0; n <= 70; n++)
+      for (const s of [0xffffffff, 0, 0x12345678])
+        expect(crc32Update(s, bytes(n)) >>> 0, `長さ ${String(n)}`).toBe(byteWise(s, bytes(n)) >>> 0);
+  });
+
+  it('途中で区切って続けて渡しても、1 回で渡したのと同じ', () => {
+    const all = bytes(1000);
+    const whole = crc32Update(0xffffffff, all) >>> 0;
+    for (const cut of [1, 7, 8, 9, 333, 999]) {
+      const part = crc32Update(crc32Update(0xffffffff, all.subarray(0, cut)), all.subarray(cut));
+      expect(part >>> 0, `区切り ${String(cut)}`).toBe(whole);
+    }
+  });
+
+  it('既知の値:"123456789" の CRC-32 は 0xCBF43926', () => {
+    expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
   });
 });
