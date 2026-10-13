@@ -31,12 +31,13 @@
  *   「並べ替えると日付も変わる」ことに間接的に頼っていた(`folder-organize` の
  *   回帰 test が即座に捕まえた)。並び順は指紋に明示した。
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
+import { FilerRenderer } from '../../src/adapter/ui/render/filer';
 
 function meta(lid: string, order: number, title = 't-' + lid, archetype = 'text'): EntryMeta {
   return {
@@ -216,5 +217,52 @@ describe('2 ペインでも、刻みが返っただけでは建て直さない(#
     render(s);
 
     expect(row('left', 'a'), '更新順なのに建て直していない').not.toBe(before);
+  });
+});
+
+/**
+ * 🔴 **一覧が変わらなかった保存の後は、選ぶたびに全件の指紋を作り直さない**(#1087)。
+ * ⚠ 保存の ack は `entryMetas` を新しい Map にする(字数などが変わる)が、題名・種類・並びが同じなら
+ *   指紋は同じ。直す前は参照の控えを進めず、以後の描画のたびに `metaSignature` を全件回していた。
+ */
+describe('保存の後の選ぶだけの描画で、全件の指紋を作り直さない(#1087)', () => {
+  it('🔴 字数だけ変わった後、選び直しても metaSignature は呼ばれない', () => {
+    const { render, row } = setup();
+    let s = booted();
+    render(s);
+    const metas = new Map(s.entryMetas);
+    metas.set('a', { ...metas.get('a')!, bodyChars: 42 });
+    s = { ...s, entryMetas: metas };
+    render(s); // ここで 1 回だけ指紋を作り、同じと分かる
+    const spy = vi.spyOn(
+      FilerRenderer.prototype as unknown as { metaSignature: (st: AppState) => string },
+      'metaSignature',
+    );
+    try {
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'a' }).state;
+      render(s);
+      s = reduce(s, { type: 'SELECT_ENTRY', lid: 'f1' }).state;
+      render(s);
+      expect(spy, '一覧は変わっていないのに全件の指紋を作り直した').not.toHaveBeenCalled();
+      // 対照群:選択は画面に届いている
+      expect(row('f1')?.hasAttribute('data-pkc-selected'), '選択が画面に届いていない').toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('対照群: 字数の後で題名が変われば、ちゃんと建て直す', () => {
+    const { render, pane } = setup();
+    let s = booted();
+    render(s);
+    let metas = new Map(s.entryMetas);
+    metas.set('a', { ...metas.get('a')!, bodyChars: 42 });
+    s = { ...s, entryMetas: metas };
+    render(s);
+    metas = new Map(s.entryMetas);
+    metas.set('a', { ...metas.get('a')!, title: '別の名前' });
+    s = { ...s, entryMetas: metas };
+    render(s);
+    expect(pane.textContent).toContain('別の名前');
   });
 });

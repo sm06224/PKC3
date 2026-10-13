@@ -6,15 +6,6 @@
  * All formatters accept an optional Date for testability (default: now).
  */
 
-export interface FormatLocaleOptions {
-  locale?: string;
-  timeZone?: string;
-}
-
-function localizedDay(d: Date, opts?: FormatLocaleOptions): string {
-  return new Intl.DateTimeFormat(opts?.locale, { weekday: 'short', timeZone: opts?.timeZone }).format(d);
-}
-
 /**
  * Zero-pad a number to 2 digits (e.g. 5 → "05", 12 → "12").
  * Used across modules that format month / day / hour / minute /
@@ -35,11 +26,6 @@ export function formatDate(d: Date = new Date()): string {
   return `${pad4(d.getFullYear())}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
 }
 
-/** HH:mm:ss */
-export function formatTime(d: Date = new Date()): string {
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
 /**
  * 🔴 **ビルドの刻印**(`M/D HH:mm`。#789)。⚠ 月日は 0 詰めしない ── 版の字に
  * 添える短い印なので、`09/08` より `9/8` のほうが読みやすい。
@@ -52,8 +38,3 @@ export function formatBuildStamp(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-/** yy/MM/dd ddd */
-export function formatShortDate(d: Date = new Date(), opts?: FormatLocaleOptions): string {
-  const yy = pad2(d.getFullYear() % 100);
-  return `${yy}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${localizedDay(d, opts)}`;
-}

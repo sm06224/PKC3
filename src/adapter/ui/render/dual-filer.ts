@@ -1037,7 +1037,9 @@ export class DualFilerRenderer {
       return { chars, partial, hasBody };
     };
     const total = sumOf(rows);
-    const marked = sumOf(rows.filter((m) => pane.selection.includes(m.lid)));
+    // ⚠ 印は Set で引く(#1087)── 配列の includes だと全部に印を付けたとき行数の二乗になる
+    const markedLids = new Set(pane.selection);
+    const marked = sumOf(rows.filter((m) => markedLids.has(m.lid)));
     /**
      * ⚠ **1 件も数えられていないなら「—」** ── `0` と出すと「空だ」と読まれる
      *   (`formatBodyChars(null)` が同じ意味で使っている字に揃える)。

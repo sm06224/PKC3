@@ -35,43 +35,6 @@
  */
 
 /**
- * `:::` block directive の前後に blank line を正規化する(string-only 版)。
- *
- * 適用ルール:
- * 1. 全 `:::` 行(opener / closer)の **前** に blank line を挿入
- * 2. malformed `:::role{...<no close brace>$` 行の attrs を drop(寛容 parse)
- * 3. `:::role{...}` opener の **後** に blank line(content と分離)
- * 4. 3+ 連続 newline を 2 に collapse(冪等)
- *
- * **AST 経路用**:`src/features/ast/parse.ts` から呼ばれ、markdown-it に
- * 渡す前の文字列正規化だけが目的。LineMap thread は不要(AST 経路は
- * `data-pkc-source-line` を扱わない)。
- *
- * **冪等性**:複数回 適用しても同じ結果(2 回目以降は no-op)。
- */
-export function ensureBlankAroundColonBlocks(body: string): string {
-  // 全 `:::` 行(opener / closer)の **前** に blank line を挿入、
-  // 多重 newline は事後 collapse。これで `:::\n:::`(連続 closer)
-  // `}\n:::`(content + closer)`>quote\n:::`(blockquote lazy
-  // continuation + closer)すべて blank line で分離される。
-  let out = body.replace(/\n([ \t\u3000]*:::)/g, '\n\n$1');
-  // malformed `:::role{...<no close brace>$` 行は attrs を drop
-  // (寛容 parse、`author=` literal が content に漏れるのを防ぐ)
-  out = out.replace(
-    /^([ \t\u3000]*:::[a-zA-Z0-9_-]+)\{[^}\n]*$/gm,
-    '$1',
-  );
-  // `:::role{...}` opener の **後** に blank line(content と分離)
-  out = out.replace(
-    /^([ \t\u3000]*:::[a-zA-Z0-9_-]+(?:\{[^}\n]{0,200}\})?[ \t]*)\n([^\n])/gm,
-    '$1\n\n$2',
-  );
-  // 3+ 連続 newline を 2(blank line 1 個)に collapse
-  out = out.replace(/\n{3,}/g, '\n\n');
-  return out;
-}
-
-/**
  * `:::` block directive 前後 blank line 正規化(LineMap thread 版)。
  *
  * **markdown-render.ts 経路用**:Split View の source-preview-sync で

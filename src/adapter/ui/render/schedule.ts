@@ -35,7 +35,7 @@ import {
   type AgendaItem,
 } from '@features/schedule/agenda';
 import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-grid';
-import { TASK_LIMITS, type TaskCard } from '@features/schedule/task-cards';
+import type { TaskCard } from '@features/schedule/task-cards';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { materializedDates } from '@features/schedule/repeat';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
@@ -981,5 +981,3 @@ export class ScheduleRenderer {
   }
 }
 
-/** 上限に触れたことを画面に出すための参照(切ったら黙らない)。 */
-export const SCHEDULE_LIMITS = TASK_LIMITS;

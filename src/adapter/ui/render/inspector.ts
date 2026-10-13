@@ -185,6 +185,20 @@ export class InspectorRenderer {
     problem: ReturnType<typeof frontmatterProblem>;
   } | null = null;
 
+  /**
+   * 🔴 **本文が使っている添付の走査結果**(#1087)── `tagScan` と同じ作り。本文に `asset:` が在ると
+   * `listAssetUses` は本文全体を markdown として読むので、描き直しのたびに回さない。
+   * ⚠ 本文が読めなくなったら(`null`)手放す。
+   */
+  private assetScan: { body: string; uses: ReturnType<typeof listAssetUses> } | null = null;
+
+  private scanAssetUses(body: string): ReturnType<typeof listAssetUses> {
+    if (this.assetScan !== null && this.assetScan.body === body) return this.assetScan.uses;
+    const uses = listAssetUses(body);
+    this.assetScan = { body, uses };
+    return uses;
+  }
+
   /** 本文の字が同じなら前回の走査を使い回す。`view.doc` は `readTags(body)` と同じ物。 */
   private scanTags(body: string): NonNullable<InspectorRenderer['tagScan']> {
     if (this.tagScan !== null && this.tagScan.body === body) return this.tagScan;
@@ -435,7 +449,8 @@ export class InspectorRenderer {
     const assetBox = this.rows.get('inspector-assets');
     if (assetBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
-      const uses = body === null ? [] : listAssetUses(body);
+      if (body === null) this.assetScan = null;
+      const uses = body === null ? [] : this.scanAssetUses(body);
       assetBox.textContent = '';
       const dt = assetBox.previousElementSibling;
       const empty = uses.length === 0;
