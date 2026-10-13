@@ -57,6 +57,7 @@ import {
   withSmartTag,
   writeSmartSpec,
   type SmartCondResult,
+  type SmartField,
   type SmartQuery,
   type SmartSpec,
 } from '@features/smart/smart-spec';
@@ -967,6 +968,8 @@ export function connectStoreEffects(
     tag?: string,
     /** ⚠ 断られた字を戻す欄(#640 案 A)。足すときだけ渡す(外すときは欄に字が無い)。 */
     refusedInto?: TagInputField,
+    /** ⚠ 打つ欄(語)の断りをタグの字で言わないための印(#1087)。 */
+    refusedField?: SmartField,
   ): void => {
     enqueue(async () => {
       if (disposed) return;
@@ -975,7 +978,7 @@ export function connectStoreEffects(
         if (disposed || body === null) return;
         const res = apply(readSmartSpec(body));
         if (!res.ok) {
-          const why = smartCondError(res.reason, tag);
+          const why = smartCondError(res.reason, tag, refusedField);
           if (why !== null) {
             dispatcher.dispatch({ type: 'OP_FAILED', error: why });
             /**
@@ -1614,7 +1617,7 @@ export function connectStoreEffects(
         const t = ev.target;
         const field = ev.field;
         const value = ev.value;
-        writeSmartCond(t, (spec) => withSmartField(spec, field, value));
+        writeSmartCond(t, (spec) => withSmartField(spec, field, value), undefined, undefined, field);
         break;
       }
       case 'REQUEST_SMART_SCAN': {

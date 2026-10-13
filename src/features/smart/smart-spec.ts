@@ -485,8 +485,16 @@ export function smartFieldValue(spec: SmartSpec, field: SmartField): string {
 export function smartCondError(
   reason: 'unchanged' | 'limit' | 'invalid',
   tag?: string,
+  /**
+   * 🔴 **打つ欄の語**(`text`)の断りは、タグとは別の字で言う(#1087)。⚠ 直す前は語が
+   *   100 文字を超えても「そのタグは条件にできません(40 文字を超えています)」と出ていた
+   *   ── 押した欄は「語」で、数も違う。
+   */
+  field?: SmartField,
 ): string | null {
   if (reason === 'unchanged') return null;
+  if (reason === 'invalid' && field === 'text')
+    return `語は ${MAX_SMART_TEXT_CHARS} 文字までです(空の語は条件にできません)`;
   // ⚠ 名前は**打った字**をそのまま出す(正規化した綴りだと、打った字と読み合わせられない)
   const who = tag === undefined || tag === '' ? '' : `「${tag}」は足せませんでした。`;
   if (reason === 'limit')
