@@ -838,7 +838,8 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   // 🔑 画面外を組まない指定は 50 行の塊(tbody)に付く ── 行ごとだと行の数だけ見張りが張られる(#1087)
   expect(look.chunkCv, '塊に content-visibility: auto が効いていない').toBe('auto');
   expect(look.cv, '行にも content-visibility が残っている(行の数だけ見張りが張られる)').toBe('visible');
-  expect(look.contain, '行の閉じ込めが無い(文字が 1px ずれる)').toContain('layout');
+  // ⚠ ブラウザは `layout paint style` を同じ意味の `content` と返す
+  expect(look.contain, '行の閉じ込めが無い(文字が 1px ずれる)').toMatch(/^content$|layout/);
   expect(look.chunks, '322 行が 50 行ずつの塊に分かれていない').toBe(7);
   expect(Math.abs(look.height - 26), `行の高さが 26px から動いている(${look.height})`).toBeLessThan(0.6);
   expect(Math.abs(look.thX - look.tdX), '見出しと行の「更新日」の列の位置が揃っていない').toBeLessThan(0.6);
