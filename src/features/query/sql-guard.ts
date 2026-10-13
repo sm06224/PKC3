@@ -322,3 +322,19 @@ export function sqlRunFailureText(raw: string): string {
   if (/syntax error/i.test(raw)) return `SQL の書き方に誤りがあります。綴りや区切りの記号を確かめてください(${raw})`;
   return raw;
 }
+
+/**
+ * 🔴 **DuckDB の失敗を、画面に出せる字へ直す**(#1087)── `sqlRunFailureText` の DuckDB 版。
+ *
+ * 文面は同梱の duckdb-wasm の engine に実在する形だけを拾う(`Catalog Error: Table with name X does not exist!` /
+ *   `Binder Error: Referenced column "x" not found in FROM clause!` / `Parser Error: syntax error at or near "X"`)。
+ * ⚠ 当たらない文面は推測で直さず、そのまま返す。元の英語は括弧に残す(何が起きたかの手がかり)。
+ * 🔑 構文の誤りは sqlite と同じ分岐(`syntax error`)に任せる。
+ */
+export function duckRunFailureText(raw: string): string {
+  const table = /Table with name "?([^"\s]+)"? does not exist/i.exec(raw);
+  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  const column = /Referenced column "([^"]+)" not found/i.exec(raw);
+  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  return sqlRunFailureText(raw);
+}

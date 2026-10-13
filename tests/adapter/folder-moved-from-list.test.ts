@@ -122,6 +122,9 @@ describe('一覧から移した動線 — フォルダのタブ', () => {
     const clear = root.querySelector<HTMLElement>('[data-pkc-action="clear-entry-filter"]');
     expect(clear, '0 件なのに戻り道が無い').not.toBeNull();
     expect(clear!.closest('[hidden]'), '隠れた面のボタンを数えている').toBeNull();
+    // 🔴 外すと戻るのは「いまいる場所」であって、全部ではない(字が実際の動きと合っている)
+    expect(clear!.title).toBe('絞りを空にして、いまいる場所のノートに戻します');
+    expect(clear!.title, '全部出ると言っている').not.toContain('全部');
     clear!.click();
     expect(d.getState().filterQuery).toBe('');
   });

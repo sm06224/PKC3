@@ -96,13 +96,14 @@ export function importPanel(
  * 🔴 **取り込めなかった理由の面**(依頼 70-C1)── 成功のときの注意と**同じ面・同じ題**で、
  * 閉じるまで残す(画面下の 1 行は別のノートを選ぶと消えていた)。
  *
- * ⚠ **操作は付けない** ── 取り込めていないので、戻すものが無い。直前の取り込みの
- *   「取り込みを取り消す」を出すと、**今回の失敗の面から前の回を消せてしまう**。
+ * ⚠ **操作を付けるのは、途中まで書けた失敗だけ**(`action` を渡したときだけ)。1 件も書けていない失敗に
+ *   直前の取り込みの「取り込みを取り消す」を出すと、**今回の失敗の面から前の回を消せてしまう**。
+ *   途中まで書けた失敗は、書けた分の id を憶えた直後(`imported`)に呼ばれるので、出る取り消しは今回の分である。
  */
-export function importFailurePanel(message: string): {
+export function importFailurePanel(message: string, action: NoticeAction | null = null): {
   readonly title: string;
   readonly notes: readonly string[];
-  readonly action: null;
+  readonly action: NoticeAction | null;
 } {
-  return { title: importPanel([message], null).title, notes: [message], action: null };
+  return { title: importPanel([message], null).title, notes: [message], action };
 }

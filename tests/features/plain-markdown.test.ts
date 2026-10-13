@@ -268,6 +268,8 @@ describe('archetype', () => {
     const r = readPlainMarkdown('---\narchetype: nonexistent\n---\n', 'f.md');
     expect(r.archetype).toBe('text');
     expect(r.warnings.join('\n')).toContain('nonexistent');
+    // 🔴 画面に英語の内部語を出さない(archetype / text)
+    expect(r.warnings.join('\n')).toBe('前書きのノートの種類「nonexistent」は取り込めないので、ふつうのノートにしました');
   });
 
   it('指定が無ければ text', () => {
@@ -390,6 +392,7 @@ describe('frontmatter を読めなかったとき', () => {
     const huge = `---\ntitle: 正本\npad: "${'x'.repeat(20_000)}"\n---\n# 見出し\n`;
     const r = readPlainMarkdown(huge, 'f.md');
     expect(r.warnings.join('\n')).toContain('frontmatter');
+    expect(r.warnings.join('\n'), '先頭に英語の語だけの前置きが残っている').toMatch(/^前書き: /);
     expect(r.body).toBe(huge); // 本文は無傷
   });
 });

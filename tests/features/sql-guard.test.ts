@@ -7,7 +7,7 @@
  *   白名簿(先頭の語)で判定していることも見る。
  */
 import { describe, expect, it } from 'vitest';
-import { checkReadOnlySql, normalizeSqlInput, sqlRunFailureText, stripSqlNoise } from '../../src/features/query/sql-guard';
+import { checkReadOnlySql, normalizeSqlInput, sqlRunFailureText, duckRunFailureText, stripSqlNoise } from '../../src/features/query/sql-guard';
 
 const ok = (sql: string): boolean => checkReadOnlySql(sql).ok;
 const why = (sql: string): string => checkReadOnlySql(sql).why;
@@ -257,5 +257,27 @@ describe('よく出る失敗を日本語で言う(#1087 の見直し 2026-10-13)
 
   it('⚠ 知らない失敗はそのまま出す(手がかりを消さない)', () => {
     expect(sqlRunFailureText('disk I/O error')).toBe('disk I/O error');
+  });
+});
+
+describe('DuckDB の失敗も日本語で言う(#1087)', () => {
+  // 文面は同梱の duckdb-wasm の engine に実在する形(`%s with name %s does not exist!` / `Referenced column "%s" not found in FROM clause!` / `syntax error`)
+  it('🔴 表が無い・列が無い・書き方の誤りは sqlite と同じ形の日本語にし、元の英語は括弧で残す', () => {
+    const raw1 = 'Catalog Error: Table with name 売上 does not exist!\nDid you mean "sales"?';
+    const t = duckRunFailureText(raw1);
+    expect(t.startsWith('「売上」という表はありません'), t).toBe(true);
+    expect(t).toContain('「構造を見る」');
+    expect(t).toContain(`(${raw1})`);
+    const raw2 = 'Binder Error: Referenced column "金額" not found in FROM clause!\nCandidate bindings: "t.id"';
+    const c = duckRunFailureText(raw2);
+    expect(c.startsWith('「金額」という列はありません'), c).toBe(true);
+    expect(c).toContain(`(${raw2})`);
+    const s = duckRunFailureText('Parser Error: syntax error at or near "FORM"');
+    expect(s.startsWith('SQL の書き方に誤りがあります')).toBe(true);
+    expect(s).toContain('(Parser Error: syntax error at or near "FORM")');
+  });
+
+  it('⚠ 知らない文面は推測で直さず、そのまま出す', () => {
+    expect(duckRunFailureText('IO Error: Could not open file')).toBe('IO Error: Could not open file');
   });
 });

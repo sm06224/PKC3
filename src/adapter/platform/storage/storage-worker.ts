@@ -26,6 +26,7 @@ import type { EntryStamps, EntryUpsert } from './schema';
 import { contentHash64Hex } from './content-hash';
 import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } from './reserved-lock';
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
+import { errorText } from '@features/error-text';
 import { trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
@@ -2920,7 +2921,7 @@ const handlers: Handlers = {
       } catch (e) {
         // ⚠ **読めなかった器も閉じる**(下の sqlite 側と同じ理由)
         db.close();
-        throw new Error(`このファイルは ${src.kind} として読めませんでした(${String(e)})`, {
+        throw new Error(`このファイルは ${src.kind} として読めませんでした(${errorText(e)})`, {
           cause: e,
         });
       }
@@ -2942,7 +2943,7 @@ const handlers: Handlers = {
        *   振る舞いは変わらないが、断った回に器が残るのは「速やかな破棄」の逆である。
        */
       db.close();
-      throw new Error(`このファイルは sqlite の DB として読めませんでした(${String(e)})`, {
+      throw new Error(`このファイルは sqlite の DB として読めませんでした(${errorText(e)})`, {
         cause: e,
       });
     }
@@ -2997,7 +2998,7 @@ const handlers: Handlers = {
       } catch {
         // 次の回は新しい器を作る
       }
-      throw new Error(`このファイルは sqlite の DB として読めませんでした(${String(e)})`, {
+      throw new Error(`このファイルは sqlite の DB として読めませんでした(${errorText(e)})`, {
         cause: e,
       });
     }

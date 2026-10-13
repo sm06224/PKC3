@@ -20,6 +20,7 @@
  */
 import type { AppState, SearchPageState } from '@adapter/state/app-state';
 import { splitSnippet } from '@features/filter/search-snippet';
+import { parseSearchTerms } from '@features/filter/search-query';
 
 /**
  * 🔴 **行のボタンが持つ、探した語**(#1102 段①)。受け手(`binder.ts` の `open-note-window`)が
@@ -152,6 +153,10 @@ export class SearchRenderer {
     if (page.failed === 'stale') return 'このタブの PKC3 が古いままのため、探せません。再読み込みしてください';
     // ⚠ 古いタブと決めつけない(#1087)── 打ち直すと、もう一度探す
     if (page.failed === 'error') return '探せませんでした(探している途中で失敗しました)。語を打ち直すと、もう一度探します';
+    // 🔴 除く語(-メモ)だけでは探す物が無い(`planSearch` は 'none')── 「一致するノートはありません」と言うと、
+    //   ノートが無いように読める。語を足す案内を出す
+    const terms = parseSearchTerms(page.query);
+    if (terms.include.length === 0 && terms.exclude.length > 0) return '除く語だけでは探せません。探す語も打ってください';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) return `「${page.query}」に一致するノートはありません`;
     if (page.truncated)

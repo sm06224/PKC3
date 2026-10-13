@@ -221,6 +221,18 @@ describe('探す面(#680)', () => {
     expect(note()).toContain('「かい」に一致するノートはありません');
   });
 
+  it('🔴 除く語だけを打ったら、「一致なし」ではなく探す語を足す案内を出す', async () => {
+    const { type, note } = setup(() => ({ rows: [], truncated: false }));
+    type('-メモ');
+    await settle();
+    expect(note()).toBe('除く語だけでは探せません。探す語も打ってください');
+    expect(note(), 'ノートが無いように読める字を出している').not.toContain('一致するノートはありません');
+    // 対照群: 探す語が 1 つでもあれば従来どおり
+    type('かい -メモ');
+    await settle();
+    expect(note()).toContain('に一致するノートはありません');
+  });
+
   it('⚠ 空にしたら頼まず、結果も空に戻る', async () => {
     const { type, rows, searchDetail, note } = setup(() => ({
       rows: [row('n1', '会議メモ', 'k')],
