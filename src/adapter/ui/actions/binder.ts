@@ -1934,12 +1934,21 @@ export interface BinderServices {
 function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
   const label = archetypeLabel(archetype);
   let n = 0;
+  const titles = new Set<string>();
   for (const m of dispatcher.getState().entryMetas.values()) {
     if (m.archetype === archetype) n += 1;
+    titles.add(m.title);
   }
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return `${date} ${label} ${n + 1}`;
+  /**
+   * 🔴 **既に在る題名を作らない**(#1087 の見直し 2026-10-13)。⚠ 番号は「同じ種類の件数 + 1」なので、
+   *   古いノートを 1 件消すと件数が減り、**今日作った既存の題名と同じ題名**が出た(つながりを足すときに
+   *   「題名を分けてください」で止まる)。形(`日付 種類 n`)は変えず、空いている番号まで進める。
+   */
+  let k = n + 1;
+  while (titles.has(`${date} ${label} ${k}`)) k += 1;
+  return `${date} ${label} ${k}`;
 }
 
 /**
