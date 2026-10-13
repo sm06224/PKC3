@@ -2153,6 +2153,15 @@ function runBulkTag(
  *   同じ表から引く**(§7)── 直す前は `binder.ts` の 2 か所に**別々の条件**が
  *   書いてあり、片方だけ欄を足すと静かに食い違った(実際そうなっていた)。
  */
+/** その場で足す欄 → Enter で撃つ操作(ボタンと同じ action)。 */
+const QUICK_ADD_ENTER: ReadonlyMap<string, string> = new Map([
+  ['schedule-quick-text', 'schedule-quick-add'],
+  ['contacts-quick-name', 'contacts-quick-add'],
+  ['contacts-quick-tel', 'contacts-quick-add'],
+  ['contacts-quick-email', 'contacts-quick-add'],
+  ['contacts-quick-org', 'contacts-quick-add'],
+]);
+
 const TAG_INPUT_ADD: ReadonlyMap<string, string> = new Map([
   ['tag-add-input', 'add-tag'],
   ['bulk-tag', 'bulk-tag-add'],
@@ -14119,6 +14128,20 @@ export function bindActions(
         ke.preventDefault();
         ke.stopPropagation();
         run('place-inline-cancel', ke.target as HTMLElement);
+      }
+      return;
+    }
+    /**
+     * 🔴 **その場で足す欄は Enter で足せる**(#1087。タグの欄 #494 と同じ作法)──
+     *   直す前は欄が `<form>` の外で受け手も無く、Enter は**黙って捨てられて**いた
+     *   (打った後にボタンを探させる)。押すのはボタンと**同じ 1 つの action**。
+     * ⚠ Safari は変換を確定した Enter が `isComposing: false` で届く(`keyCode` 229)── これも見る。
+     */
+    const quickAdd = field === null ? undefined : QUICK_ADD_ENTER.get(field);
+    if (quickAdd !== undefined) {
+      if (ke.key === 'Enter' && ke.keyCode !== 229 && !ke.shiftKey && !ke.ctrlKey && !ke.metaKey && !ke.altKey) {
+        ke.preventDefault();
+        run(quickAdd, ke.target as HTMLElement);
       }
       return;
     }

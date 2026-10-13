@@ -271,3 +271,18 @@ describe('#278 段③ 2 面あるとき、押した面の欄を読む', () => {
     expect(s.persisted.map((e) => e.title), '中央で打った名前が書かれていない').toEqual(['中央の人']);
   });
 });
+
+/** 🔴 4 つの欄のどこで Enter を押しても、ボタンと同じく足す(#1087)。 */
+describe('#1087 連絡先の足す欄の Enter', () => {
+  for (const f of ['name', 'tel', 'email', 'org'] as const) {
+    it(`🔴 ${f} の欄で Enter → 足す`, async () => {
+      const s = setup();
+      type(s, { name: '佐藤花子', tel: '03-0000-0000', email: 'h@example.com', org: '社' });
+      const el = s.q<HTMLInputElement>(`[data-pkc-field="contacts-quick-${f}"]`)!;
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await tick();
+      expect(s.persisted, 'Enter で足されていない').toHaveLength(1);
+      expect(s.persisted[0]!.title).toBe('佐藤花子');
+    });
+  }
+});
