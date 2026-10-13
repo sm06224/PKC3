@@ -808,6 +808,26 @@ describe('フォルダの表の鍵', () => {
     expect(d.getState().selection, '現在地の外まで選んだ').toEqual(['n1']);
   });
 
+  /**
+   * 🔑 **1 キーで画面を 1 回だけ描き直す**(#1087)。⚠ 直す前は印を空にする / 付けるを
+   *   2 回撃っていたので、1 キーで 2 回描き直し、そのたびにスクロール位置の書き込みが
+   *   配置の計算を強いていた(実測で 1 キー約 2.3 ms)。
+   */
+  it('🔑 ↓ 1 回で、状態の知らせは 1 回(2 回描き直さない)── 起点もその行に立つ', () => {
+    const { d, clickRow, press } = screen();
+    const first = clickRow('f');
+    let notified = 0;
+    const off = d.onState(() => {
+      notified += 1;
+    });
+    press('ArrowDown', first);
+    off();
+    const after = d.getState();
+    expect(after.selection.length, '前提: 送った先が選ばれていない').toBe(1);
+    expect(notified, '1 キーで状態が 2 回以上動いた').toBe(1);
+    expect(after.selectionAnchor, '起点が送った行に立っていない').toBe(after.selection[0]);
+  });
+
   it('🔴 ↑↓ で行を送ると、印も一緒に動く(中央は開き直さない)', () => {
     /**
      * 🔴 user 裁定 2026-08-18「**行送りに上下キーを使うは提案通りで OK**」。
@@ -954,3 +974,34 @@ describe('フォルダの表の鍵', () => {
   });
 });
 
+
+describe('#1087 SELECT_ONLY(印をその 1 件だけにする)', () => {
+  const base = (): AppState =>
+    reduce(initialState, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        { lid: 'a', title: 'a', archetype: 'text', createdAt: null, updatedAt: null, entryOrder: 1, status: null, date: null, archived: false, bodyChars: null },
+        { lid: 'b', title: 'b', archetype: 'text', createdAt: null, updatedAt: null, entryOrder: 2, status: null, date: null, archived: false, bodyChars: null },
+      ],
+      relations: [],
+    }).state;
+
+  it('🔴 印が何件あっても、その 1 件だけになり、起点もそこに立つ', () => {
+    let s = base();
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'a' }).state;
+    s = reduce(s, { type: 'TOGGLE_SELECT', lid: 'b' }).state;
+    const next = reduce(s, { type: 'SELECT_ONLY', lid: 'a' }).state;
+    expect(next.selection).toEqual(['a']);
+    expect(next.selectionAnchor).toBe('a');
+  });
+
+  it('⚠ 編集中・無いノートでは何もしない(TOGGLE_SELECT と同じ門)── 同じなら state も同じ', () => {
+    const s = base();
+    expect(reduce(s, { type: 'SELECT_ONLY', lid: 'zz' }).state, '無いノートで動いた').toBe(s);
+    const editing = { ...s, phase: 'editing' as const };
+    expect(reduce(editing, { type: 'SELECT_ONLY', lid: 'a' }).state, '編集中に動いた').toBe(editing);
+    const once = reduce(s, { type: 'SELECT_ONLY', lid: 'a' }).state;
+    expect(reduce(once, { type: 'SELECT_ONLY', lid: 'a' }).state, '同じなのに新しい state を作った').toBe(once);
+  });
+});

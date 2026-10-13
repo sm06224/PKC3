@@ -3037,6 +3037,8 @@ export type UserAction =
   | { type: 'SELECT_RANGE'; lid: string }
   /** 印を全部外す。 */
   | { type: 'CLEAR_SELECTION' }
+  /** 印をその 1 件だけにし、起点もそこに立てる(#1087。`CLEAR_SELECTION` + `TOGGLE_SELECT` を 1 回の描き直しで)。 */
+  | { type: 'SELECT_ONLY'; lid: string }
   /**
    * 🔴 **いま出ている行をぜんぶ選ぶ**(user 裁定 2026-08-18「OS のファイラに似せる」)。
    * ⚠ 「全部」は **`entryMetas` の全件ではなく、いま表に出ている行**である ──
@@ -8471,6 +8473,19 @@ function reduceCore(
         state: { ...state, selection: rows, selectionAnchor: rows[rows.length - 1] ?? null },
         events: [],
       };
+    }
+    case 'SELECT_ONLY': {
+      /**
+       * 🔑 **一覧で ↑↓ を押したときの「印を空にしてから 1 件付ける」を 1 回で**(#1087)。
+       * ⚠ 直す前は `CLEAR_SELECTION` と `TOGGLE_SELECT` の 2 回撃っていたので、1 キーで画面を
+       *   2 回描き直し、そのたびにスクロール位置の書き込みが配置の計算を強いていた(実測)。
+       * ⚠ 門は `TOGGLE_SELECT` と同じ(編集中・無いノートは何もしない)。
+       */
+      if (state.phase !== 'ready') return { state, events: [] };
+      if (!state.entryMetas.has(action.lid)) return { state, events: [] };
+      if (state.selection.length === 1 && state.selection[0] === action.lid && state.selectionAnchor === action.lid)
+        return { state, events: [] };
+      return { state: { ...state, selection: [action.lid], selectionAnchor: action.lid }, events: [] };
     }
     case 'CLEAR_SELECTION': {
       if (state.selection.length === 0 && state.selectionAnchor === null)
