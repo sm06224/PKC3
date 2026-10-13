@@ -44,6 +44,7 @@ import {
   type SmartSpec,
 } from '../../src/features/smart/smart-spec';
 import { MAX_TAG_CHARS } from '../../src/features/flavor/tags';
+import { smartFlavor } from '../../src/features/flavor/smart-flavor';
 
 const withTags = (...tags: string[]): string =>
   `---\ntags: [${tags.join(', ')}]\n---\n本文\n`;
@@ -165,6 +166,16 @@ describe('条件を書く(#421 段①)', () => {
       `条件は ${String(MAX_SMART_TAGS)} つまでです(1 つ外してから足してください)`,
     );
     expect(smartCondError('unchanged', '買い物'), '黙ってよいのに言った').toBeNull();
+  });
+
+  it('🔴 語の断りは、タグの字ではなく語の字で言う(#1087)', () => {
+    const over = withSmartField(EMPTY_SMART, 'text', 'あ'.repeat(MAX_SMART_TEXT_CHARS + 1));
+    expect(over).toEqual({ ok: false, reason: 'invalid' });
+    const why = smartCondError('invalid', undefined, 'text') ?? '';
+    expect(why).toBe(`語は ${String(MAX_SMART_TEXT_CHARS)} 文字までです(空の語は条件にできません)`);
+    expect(why, 'タグの字が語に出ている').not.toContain('タグ');
+    // 対照群: 語でなければ従来のタグの字
+    expect(smartCondError('invalid', undefined, 'kind') ?? '').toContain('タグ');
   });
 
   it('🔴 タグとして受けられないものは invalid で、理由が出る', () => {
@@ -677,6 +688,14 @@ describe('スマートフォルダは期日と状態を持てる(#283 の (B))',
     expect(extractMeta(SMART_ARCHETYPE, next).date, '条件を触ったら期日が消えた').toBe(
       '2026-09-30',
     );
+  });
+
+  it('🔴 作った直後の説明文は、実在しない「右の条件」を指さない(#1087)', () => {
+    const text = smartFlavor.seed?.() ?? '';
+    expect(text, '画面に無い「右の条件」を指している').not.toContain('右の「条件」');
+    expect(text).toContain('一覧の上の条件バー');
+    expect(text).toContain('「条件に足す」');
+    expect(text, '2 行目の説明が消えた').toContain('ここに書いた文は説明として残ります');
   });
 
   it('⚠ 片付けの列は写さない(書いただけでノートが消えない)', () => {

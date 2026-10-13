@@ -341,7 +341,7 @@ export class FilerRenderer {
     const label = document.createElement('span');
     label.setAttribute('data-pkc-field', 'smart-why');
     if (hit === null) label.textContent = 'フォルダの中身を集めています…';
-    else if (hit.failed) label.textContent = 'このタブの PKC3 が古いままのため、集められません。再読み込みしてください';
+    else if (hit.failed) label.textContent = '集められませんでした。画面を再読み込みして、もう一度開いてください(それでも出るときは、PKC3 を閉じて開き直してください)';
     else if (isSmartEmpty(hit.spec))
       label.textContent = '条件を選んでください(まだ何も集めません)';
     else {
@@ -1438,6 +1438,14 @@ export class FilerRenderer {
        *   本文の結果が返るまで 0 件に見える。失敗したときは、題名だけで探したことを言う。
        */
       // ⚠ 「>」で始まる語(操作を探す)は本文を探さない ── 返事が来ないので「探しています」で止めない
+      const smartInside = scope !== null && scope.archetype === SMART_ARCHETYPE;
+      const smartHit = smartInside ? (state.smartHits.get(scope.lid) ?? null) : null;
+      const smartEmpty: string | null =
+        smartHit === null || smartHit.failed
+          ? null
+          : isSmartEmpty(smartHit.spec)
+            ? 'まだ条件がありません。上の「タグ」に入れて「条件に足す」を押してください'
+            : '条件に合うノートがありません(条件を外すか、別のタグにしてみてください)';
       const bodyPending =
         q !== '' && commandQueryOf(state.filterQuery) === null && state.searchHitsQuery !== state.filterQuery;
       empty.textContent =
@@ -1448,9 +1456,13 @@ export class FilerRenderer {
               ? '本文を探しています…'
               : '絞り込みに一致するものがありません'
           : scope
-            ? 'このフォルダは空です'
+            ? smartEmpty !== null
+              ? smartEmpty
+              : 'このフォルダは空です'
             : 'まだ何もありません';
-      this.region.append(empty);
+      // 🔴 スマートフォルダの中では「空です」と言わない(#1087)── 上の条件バーと二重になり、
+      //   「ここへ入れられる」と読める。集めている間・失敗は帯が言うので、ここは黙る。
+      if (!(smartInside && smartEmpty === null && !filtering)) this.region.append(empty);
       /**
        * 🔴 **絞りで 0 件になったときは、その場で外せる**(#813 段③-a。一覧タブの
        *   「絞りを外す」をここへ移した ── 連絡先・音/動画の面と同じ受け手)。

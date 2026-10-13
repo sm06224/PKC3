@@ -182,6 +182,37 @@ describe('中身は条件で決まる(#421 段①)', () => {
   });
 
   /**
+   * 🔴 **中では「空です」と言わない**(#1087)── 条件バーと二重になり、入れられると読める。
+   */
+  it('🔴 スマートフォルダの中の空は「空です」ではなく、次の一手を言う(#1087)', () => {
+    const r = mount();
+    const empty = (): string | null =>
+      region.querySelector('[data-pkc-field="filer-empty"]')?.textContent ?? null;
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    r.render(s);
+    expect(empty(), '集めている間は黙る').toBeNull();
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
+    r.render(s);
+    expect(empty()).toBe('まだ条件がありません。上の「タグ」に入れて「条件に足す」を押してください');
+    s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
+    r.render(s);
+    expect(empty()).toBe('条件に合うノートがありません(条件を外すか、別のタグにしてみてください)');
+    // 対照群: ふつうのフォルダは従来どおり
+    r.render(reduce(booted(), { type: 'SET_SCOPE', lid: 'f1' }).state);
+    expect(empty()).toBe(null); // f1 は子を持つので空ではない
+  });
+
+  it('🔴 集められなかった理由は、古い版だけの話にしない(#1087)', () => {
+    const r = mount();
+    let s = reduce(booted(), { type: 'SET_SCOPE', lid: 's1' }).state;
+    s = reduce(s, { type: 'SMART_SCAN_FAILED', lid: 's1' }).state;
+    r.render(s);
+    expect(why()).toContain('集められませんでした。画面を再読み込みして');
+    expect(why(), '3 つの原因のうち 1 つしか言っていない').not.toContain('古いまま');
+    expect(region.querySelector('[data-pkc-field="filer-empty"]'), '失敗の帯と二重').toBeNull();
+  });
+
+  /**
    * 🔴 **集めている最中に打った条件が、走査の返りで消えない**
    * (CI の smoke が 2 本落ちて判明。2026-08-26)。
    *

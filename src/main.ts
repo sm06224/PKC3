@@ -3146,7 +3146,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return out;
     },
     openWindow: (args) => openImageDrawWindow(args),
-    notify: showStatus,
+    notify: (text, openLid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
   });
 
   /**

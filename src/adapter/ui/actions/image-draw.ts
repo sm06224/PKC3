@@ -28,16 +28,21 @@ import type {
   ImageDrawWindowDeps,
 } from '@adapter/platform/image-draw-window';
 import { canDrawOnImage, drawnImageName } from '@features/asset/image-draw';
+import { phaseBlockReason, type AppPhase } from '@adapter/state/app-state';
 import type { AttachItem, AttachedOne } from './attach';
-import { canWriteBody } from './writable-queue';
 
 /**
- * 本文に書けないときの断り文。
- * ⚠ `canWriteBody` が断るのは「編集中」だけではない(読む画面でない間 / 別の書込の最中)──
- *   だから編集だけを言い切らない。
+ * 保存できないときの断り文。
+ * 🔑 断るのは「別の書込が錠を握っている間」だけ。編集中のノートが在っても保存できる
+ *   (作るのは新しい添付だけで、`keepSelection` で編集中のノートも開いている本文も動かさない。#1085 と同じ作法)。
  */
 export const IMAGE_DRAW_BUSY_TEXT =
-  'いまは保存できません(ノートを編集している間や、別の保存の最中です)。編集を終えるか少し待ってから、もう一度「新しい画像として保存」を押してください(描いた線は残しています)。';
+  '別の保存の最中です。少し待ってから、もう一度「新しい画像として保存」を押してください(描いた線は残しています)';
+
+/** 錠ではなく画面の状態で保存できないときの断り文(保存に失敗して止まっている / 読み込み中)。 */
+export function imageDrawPhaseBlockedText(phase: AppPhase): string {
+  return `${phaseBlockReason(phase) ?? ''}もう一度「新しい画像として保存」を押してください(描いた線は残しています)`;
+}
 
 /** 窓を開けなかったとき。⚠ 許可の出し方まで言う(他の窓の断り文と同じ言い方)。 */
 export const IMAGE_DRAW_POPUP_BLOCKED_TEXT =
@@ -56,8 +61,8 @@ export interface ImageDrawDeps {
   ) => Promise<AttachedOne | null>;
   /** 描き込みの窓を**同期で**開く口。開けなければ `null`。 */
   readonly openWindow: (deps: ImageDrawWindowDeps) => ImageDrawWindow | null;
-  /** 状態の知らせ(ステータスバー)。 */
-  readonly notify: (text: string) => void;
+  /** 結果の知らせ。`openLid` = 知らせの「開く」が指す、保存した添付のノート。 */
+  readonly notify: (text: string, openLid: string) => void;
 }
 
 export interface ImageDrawer {
@@ -112,7 +117,14 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
       }
       await win.start(blob, async (png: Blob): Promise<ImageDrawSaveResult> => {
         if (saving) return { ok: false, message: 'いま保存しています。終わるまで待ってください。' };
-        if (!canWriteBody(deps.dispatcher)) return { ok: false, message: IMAGE_DRAW_BUSY_TEXT };
+        // 🔑 編集中でも通す(`CREATE_ENTRY` は `keepSelection` なら editing を受ける)。断るのは書込の錠だけ
+        const phase = deps.dispatcher.getState().phase;
+        if (deps.dispatcher.getState().writeLock !== null) return { ok: false, message: IMAGE_DRAW_BUSY_TEXT };
+        // ⚠ 書込の錠でない理由(保存に失敗して止まっている / 読み込み中)は、その理由を言う ──
+        //   「別の保存の最中」と言い切ると、待っても通らない場面で待たせる
+        if (phase !== 'ready' && phase !== 'editing') {
+          return { ok: false, message: imageDrawPhaseBlockedText(phase) };
+        }
         saving = true;
         try {
           const newName = drawnImageName(name);
@@ -130,7 +142,7 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
               message: now !== null && now !== errorBefore ? now : '保存できませんでした。',
             };
           }
-          deps.notify(`描き込んだ画像を保存しました:「${newName}」`);
+          deps.notify(`描き込んだ画像を保存しました:「${newName}」`, attached.lid);
           return { ok: true };
         } finally {
           saving = false;

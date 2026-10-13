@@ -322,13 +322,17 @@ describe('保存', () => {
     const s = await setup();
     const save = s.q('image-draw-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
+    // 🔴 押せない理由を言う
+    expect(save.title).toBe('線・矢印・四角・文字・モザイクのどれかを描くと押せます');
     click(save);
     await flush();
     expect(s.saves, '線が無いのに保存が走った').toHaveLength(0);
     stroke(s);
     expect(save.disabled).toBe(false);
+    expect(save.title, '押せるのに理由が残っている').toBe('');
     click(s.q('image-draw-undo'));
     expect(save.disabled).toBe(true);
+    expect(save.title).toBe('線・矢印・四角・文字・モザイクのどれかを描くと押せます');
   });
 
   it('🔴 保存を断られても、窓は開いたまま線も残り、理由が出て押し直せる', async () => {
