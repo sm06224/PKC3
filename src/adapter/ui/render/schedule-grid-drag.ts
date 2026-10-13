@@ -56,6 +56,7 @@ import {
   GRID_LANE_SELECTOR,
   dropTaskCard,
   repeatMoveAction,
+  dispatchRepeatMove,
   type GrabbedTask,
 } from './schedule-drag';
 
@@ -512,7 +513,7 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         time,
         timeEnd,
       });
-      if (action !== null) dispatcher.dispatch(action);
+      dispatchRepeatMove(dispatcher, action, pick);
     });
   };
 
