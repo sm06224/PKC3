@@ -904,7 +904,7 @@ describe('お知らせの文面は固定(#220-7)', () => {
    */
   const KNOWN: readonly [id: string, digest: string][] = [
     /** ⚠ **#1087 で足した**(2026-10-13)。枠が満杯だったので、いちばん古い 1 件(`2026-10-12-place-pptx-rotate-group`)を落とした ── 原本は `CHANGELOG.md`(2026-10-12 の節)。 */
-    ['2026-10-13-palette-close-ready', '66a4fd90'],
+    ['2026-10-13-palette-close-ready', 'a15da24c'],
     /** ⚠ **#1087 で足した**(2026-10-13)。枠が満杯だったので、いちばん古い 1 件(`2026-10-12-palette-scenes-2`)を落とした ── 原本は `CHANGELOG.md`(2026-10-12 の節)。 */
     ['2026-10-13-storage-words', 'ddeb0939'],
     /** ⚠ **#1087 で足した**(2026-10-13)。枠が満杯だったので、いちばん古い 1 件(`2026-10-11-place-rotate`)を落とした ── 原本は `CHANGELOG.md`(2026-10-11 の節)。 */
