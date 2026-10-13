@@ -271,7 +271,8 @@ describe('bootstrap の配線', () => {
 
   it('boot 失敗を白画面にしない(理由を出す)', () => {
     expect(bootstrapBody()).toContain("'data-pkc-boot', 'error'");
-    expect(bootstrapBody()).toContain('起動に失敗しました');
+    // ⚠ 字は bootFailureText が組む(#1087)── ここは呼んでいることを見る
+    expect(bootstrapBody()).toContain('bootFailureText(message)');
   });
 });
 

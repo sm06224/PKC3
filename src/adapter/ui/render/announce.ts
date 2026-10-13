@@ -229,7 +229,7 @@ export function createAnnounce(
        *   移した(ヘルプには 1 行のリンクだけ残る)。「今後は出さない」の戻し道も
        *   #1017 段③-1 で「表示」から「お知らせ」の h3 へ移っている。
        */
-      `過去のお知らせは「システム」から${NOTICE_READABLE_TEXT}が読めます。「今後はお知らせを出さない」はシステムの「お知らせ」から戻せます。`;
+      `過去のお知らせは「システム」から${NOTICE_READABLE_TEXT}が読めます。戻すには、システムの「お知らせ」で「起動したときに新しいお知らせを出す」にチェックを入れます。`;
 
     const mute = document.createElement('button');
     mute.type = 'button';

@@ -4,6 +4,7 @@
  */
 import { currentMessageCap } from '@adapter/platform/message-post';
 import {
+  JOB_CAP,
   MESSAGE_CAP_OPTIONS,
   SYSTEM_JOB_LID,
   SYSTEM_MESSAGE_LID,
@@ -78,8 +79,9 @@ export function createMessagesSection(region: HTMLElement): SettingsSection {
       exportBtn.textContent = 'メッセージを書き出す';
       exportBtn.title = 'ノートの中身・題名・添付名は書き込まれません。バグ報告に貼れます。';
 
+      // ⚠ 保管件数が効くのはメッセージだけ ── 処理の記録の上限は別(#1087。数は定数から組む)
       const note = buildSettingsNote(
-        'アプリの知らせが溜まります(上限を超えると古い分から自動で消えます)。',
+        `保管件数を超えると、古い知らせから消えます(処理の記録は ${JOB_CAP.toLocaleString('ja-JP')} 件まで)。`,
       );
 
       wrap.append(open, openJobs, dl, exportBtn, note);

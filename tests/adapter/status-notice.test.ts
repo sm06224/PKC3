@@ -30,6 +30,22 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
 import { SYSTEM_MESSAGE_LID, sanitizeMessageText } from '../../src/features/message/message-log';
 import { attachmentNameRewriteNotice } from '../../src/features/markdown/body-rewrite';
+import type { EntryMeta } from '../../src/core/model/entry-meta';
+
+function meta(lid: string): EntryMeta {
+  return {
+    lid,
+    title: lid,
+    archetype: 'text',
+    createdAt: null,
+    updatedAt: null,
+    entryOrder: 1,
+    status: null,
+    date: null,
+    archived: false,
+    bodyChars: null,
+  };
+}
 
 class FakeSpool implements MessageSpool {
   async list(): Promise<ReadonlyArray<{ id: number; item: SpoolItem }>> {
@@ -408,7 +424,7 @@ describe('「未読 N 件」の押し口', () => {
       return raw(a);
     }) as typeof d.dispatch;
     bindActions(root, d);
-    return { regions, sent };
+    return { regions, sent, d };
   }
 
   it('🔴 未読 0 では出ない・字も空', () => {
@@ -433,6 +449,20 @@ describe('「未読 N 件」の押し口', () => {
     expect(regions.statusMessages.getAttribute('data-pkc-action')).toBe('open-messages');
     regions.statusMessages.click();
     expect(sent).toContainEqual({ type: 'MESSAGES_READ', lid: SYSTEM_MESSAGE_LID });
+  });
+
+  // 🔴 編集中は開けない ── 黙らずに理由を出し、開いていないのに既読にしない(#1087)
+  it('🔴 編集中に押すと理由が出て、既読にしない', () => {
+    const { regions, sent, d } = setup();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'x' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れた(編集に入っていない)').toBe('editing');
+    paintStatusMessages(regions.statusMessages, 2);
+    regions.statusMessages.click();
+    expect(sent.some((a) => a.type === 'MESSAGES_READ'), '編集中なのに開こうとした').toBe(false);
+    expect(d.getState().error ?? '').toContain('いまはメッセージを開けません');
   });
 });
 
