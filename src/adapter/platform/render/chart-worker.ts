@@ -46,13 +46,15 @@ function buildConfig(req: ChartJobRequest): Record<string, unknown> {
     given ?? palette.series[i % palette.series.length] ?? palette.text;
   const datasets = spec.datasets.map((d, i) => ({
     label: d.label,
-    data: [...d.data],
+    // 散布図は {x, y} の点をそのまま渡す(数の並びだと x が決まらない)
+    data: d.points ? d.points.map((p) => ({ x: p.x, y: p.y })) : [...d.data],
     borderColor: color(i, d.color),
     backgroundColor: color(i, d.color),
     // ⚠ 欠測は線を切る(0 に落として谷を作らない)
     spanGaps: false,
     borderWidth: 2,
-    pointRadius: spec.type === 'line' ? 2 : 0,
+    // ⚠ 散布図は点が絵そのもの ── 半径 0 だと何も見えない
+    pointRadius: spec.type === 'scatter' ? 4 : spec.type === 'line' ? 2 : 0,
   }));
   const axisType = spec.type === 'pie' || spec.type === 'doughnut' || spec.type === 'radar';
   return {
@@ -106,7 +108,8 @@ export async function renderChartPng(
   const h = Math.max(1, Math.round(req.height * req.dpr));
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('2d context を取れませんでした');
+  // ⚠ 書き方の間違いではなく端末の事情 ── 書き方の理由(「グラフを描けません: …」)とは分けて 1 文で出す
+  if (!ctx) throw new Error('この端末ではグラフを描けませんでした');
   // ⚠ 背景を塗る ── 透過のまま PNG にすると、ダークな配色で黒地に黒線になる
   ctx.fillStyle = req.palette.bg;
   ctx.fillRect(0, 0, w, h);
@@ -152,6 +155,7 @@ ctx.onmessage = (ev: MessageEvent): void => {
       ctx.postMessage({ id, ok: true, result }, [result.png]);
     })
     .catch((e: unknown) => {
-      ctx.postMessage({ id, ok: false, error: String(e).slice(0, 200) });
+      // ⚠ 「Error: 」の前置きを付けない(理由はそのまま画面の 1 行になる)
+      ctx.postMessage({ id, ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
     });
 };

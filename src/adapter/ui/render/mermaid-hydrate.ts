@@ -150,6 +150,8 @@ export interface DiagramKind {
   alt(source: string): string;
   /** 焼く。⚠ 貯める所は共通(`renderCachedPng`)。 */
   render(key: RasterKey): Promise<Raster>;
+  /** 描けたが取りこぼしがあるとき、絵の上に出す 1 行(`data-pkc-<name>-note`)。無ければ `null` / 未指定。 */
+  note?(source: string): string | null;
   /** 「図を保存」を出すか(SVG で書き出せる種類だけ)。 */
   savable: boolean;
 }
@@ -341,6 +343,10 @@ export function hydrateDiagrams(
         // ⚠ SVG で書き出せる種類だけ「保存」を出す(押せない導線を置かない)
         if (kind.savable) p.host.append(saveButton());
         p.host.setAttribute(`data-pkc-${kind.name}-state`, 'ready');
+        // 取りこぼし(上限で切った / 読めない系列を飛ばした)は絵の上に 1 行で知らせる
+        const note = kind.note?.(p.source) ?? null;
+        if (note === null) p.host.removeAttribute(`data-pkc-${kind.name}-note`);
+        else p.host.setAttribute(`data-pkc-${kind.name}-note`, note);
         // ⚠ **差し替えてから**前の URL を捨てる(生成物の寿命終端 ── 不可侵指示)
         const prev = urlOf.get(p.host);
         urlOf.set(p.host, url);

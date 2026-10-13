@@ -152,10 +152,39 @@ describe('chart の器を埋める(adapter 層)', () => {
     const { host, jobs } = await mount('{ これは JSON ではない');
     expect(host.getAttribute('data-pkc-chart-state')).toBe('failed');
     expect(host.getAttribute('data-pkc-chart-error') ?? '').toContain('JSON');
+    // 書き方の間違いの理由には前置きが付く(端末の都合の字と見分けるため。前置きは CSS ではなくここで付ける)
+    expect(host.getAttribute('data-pkc-chart-error') ?? '').toMatch(/^グラフを描けません: /);
     // ⚠ 例外の前置き「Error:」を画面に出さない(#1087)
     expect(host.getAttribute('data-pkc-chart-error') ?? '').not.toMatch(/^\w*Error:/);
     expect(host.querySelector('.pkc-chart-source'), '原文まで消した').not.toBeNull();
     expect(jobs.length, '読めないのにワーカーを起こした').toBe(0);
+  });
+
+  it('🔴 取りこぼしがあれば器に note が付き、無ければ付かない(R8)', async () => {
+    const many = JSON.stringify({
+      type: 'bar',
+      datasets: Array.from({ length: 14 }, (_, i) => ({ label: `s${i}`, data: [1] })),
+    });
+    const a = await mount(many);
+    expect(a.host.getAttribute('data-pkc-chart-state')).toBe('ready');
+    expect(a.host.getAttribute('data-pkc-chart-note') ?? '').toContain('12 本まで');
+    scope?.dispose();
+    scope = null;
+    const b = await mount('{"type":"bar","datasets":[{"label":"x","data":[1]}]}');
+    expect(b.host.getAttribute('data-pkc-chart-state')).toBe('ready');
+    expect(b.host.hasAttribute('data-pkc-chart-note'), '欠けていないのに note が付いた').toBe(false);
+  });
+
+  it('🔴 散布図の点がワーカーへ渡る(points)', async () => {
+    const { host, jobs } = await mount(
+      '{"type":"scatter","datasets":[{"label":"x","data":[{"x":1,"y":2},{"x":3,"y":4}]}]}',
+    );
+    expect(host.getAttribute('data-pkc-chart-state')).toBe('ready');
+    const payload = (jobs[0] as { payload: { spec: { datasets: { points?: unknown }[] } } }).payload;
+    expect(payload.spec.datasets[0]!.points).toEqual([
+      { x: 1, y: 2 },
+      { x: 3, y: 4 },
+    ]);
   });
 
   it('🔴 畳むと貸した URL を返す(生成物を残さない)', async () => {

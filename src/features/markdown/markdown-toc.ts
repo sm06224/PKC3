@@ -32,7 +32,7 @@ export interface TocEntryLike {
 }
 type Entry = TocEntryLike;
 import { buildTextlogDoc, type TextlogOrder } from '../textlog/textlog-doc';
-import { parseFrontmatter, extractVars } from './frontmatter';
+import { parseFrontmatter, extractVars, VAR_NAME_SOURCE } from './frontmatter';
 
 export type TocLevel = 1 | 2 | 3;
 
@@ -162,7 +162,7 @@ export function extractHeadingsFromMarkdown(
   let body = fm.body;
   const vars = extractVars(markdown);
   if (vars) {
-    body = body.replace(/\{\{\s*vars\.([A-Za-z_][\w-]*)\s*\}\}/g, (_m, key: string) =>
+    body = body.replace(new RegExp(`\\{\\{\\s*vars\\.(${VAR_NAME_SOURCE})\\s*\\}\\}`, 'gu'), (_m, key: string) =>
       Object.prototype.hasOwnProperty.call(vars, key) ? vars[key]! : `{{vars.${key}}}`,
     );
   }

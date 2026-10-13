@@ -892,6 +892,15 @@ function parseScalar(raw: string): string | number | boolean | null {
 }
 
 /**
+ * 差し込みの名前の字の範囲(`vars:` の子 / `vars.名前:` / `{{vars.名前}}` の**全部がこの 1 本**)。
+ * 先頭は文字(日本語を含む)・数字・`_`、続きはそれに結合記号と `-` を足したもの。
+ * ⚠ 数字の先頭も通す ── 通さないと `1番: …` の行で `vars:` の読みが**黙って止まり**、
+ *   下に書いた名前が全部「未定義」になる。
+ * ⚠ 使うときは必ず `u` 付きの RegExp で組む(`\p{…}` が要る)。定義と展開で別の規則を持たない。
+ */
+export const VAR_NAME_SOURCE = '[\\p{L}\\p{N}_][\\p{L}\\p{M}\\p{N}_-]*';
+
+/**
  * L-? M-7(2026-05-08、wave-10-2 Phase 2):frontmatter から `vars.*` を
  * 抽出して flat `Record<string, string>` に正規化する helper。本文の
  * `{{vars.name}}` 展開で使う(`renderMarkdown(text, { vars })` 経由)。
@@ -936,7 +945,7 @@ export function extractVars(body: string): Record<string, string> {
         j++;
         continue;
       }
-      const m = /^(\s+)([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(child);
+      const m = new RegExp(`^(\\s+)(${VAR_NAME_SOURCE})\\s*:\\s*(.*)$`, 'u').exec(child);
       if (!m) break;  // 非インデント or 不正形式 = nested 終了
       const key = m[2]!;
       const rawVal = m[3]!.trim();
@@ -948,7 +957,7 @@ export function extractVars(body: string): Record<string, string> {
 
   // 2. flat dot-notation 形式:`vars.X: value`
   for (const line of frontLines) {
-    const m = /^vars\.([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
+    const m = new RegExp(`^vars\\.(${VAR_NAME_SOURCE})\\s*:\\s*(.*)$`, 'u').exec(line);
     if (!m) continue;
     const key = m[1]!;
     const rawVal = m[2]!.trim();

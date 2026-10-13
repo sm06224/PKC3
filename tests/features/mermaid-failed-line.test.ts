@@ -36,6 +36,20 @@ describe('図が描けないときの 1 行', () => {
     expect(ruleBody(css, ".pkc-md-rendered [data-pkc-chart-state='failed']::before")).not.toBeNull();
   });
 
+  it('🔴 グラフ: 理由は属性の字そのまま(前置きは adapter が付ける)/ 取りこぼしの 1 行は ready のときだけ', () => {
+    const failed = ruleBody(css, ".pkc-md-rendered [data-pkc-chart-state='failed']::before");
+    expect(failed).not.toBeNull();
+    expect(failed!).toContain('content: attr(data-pkc-chart-error)');
+    expect(failed!, '前置きが CSS に残っている(端末の都合の理由にも付いてしまう)').not.toContain("'グラフを描けません");
+    const note = ruleBody(
+      css,
+      ".pkc-md-rendered [data-pkc-chart-state='ready'][data-pkc-chart-note]::before",
+    );
+    expect(note, '取りこぼしの 1 行の規則が無い').not.toBeNull();
+    expect(note!).toContain('attr(data-pkc-chart-note)');
+    expect(note!).toContain('display: block');
+  });
+
   it('マニュアルが同じ字を書いている', () => {
     expect(readFileSync('docs/manual.md', 'utf-8')).toContain(`**「${LINE}」**`);
   });
