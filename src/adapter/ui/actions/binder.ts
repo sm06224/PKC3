@@ -11770,14 +11770,24 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
       return;
     }
-    void read([lid]).then((bodies) => {
-      const body = bodies.get(lid) ?? '';
-      const today = dayStamp(new Date());
-      downloadBlob(
-        `${titleForMessageLid(lid)}-${today}.md`,
-        new Blob([body], { type: 'text/markdown' }),
-      );
-    });
+    /**
+     * 🔴 **書き出したこと・書き出せなかったことを言う**(#1087 の見直し 2026-10-13)── 直す前は成功しても何も言わず、
+     *   読めなかったときも黙って終わっていた。
+     */
+    void read([lid])
+      .then((bodies) => {
+        const body = bodies.get(lid) ?? '';
+        const today = dayStamp(new Date());
+        const name = `${titleForMessageLid(lid)}-${today}.md`;
+        downloadBlob(name, new Blob([body], { type: 'text/markdown' }));
+        services.showStatus?.(`メッセージを書き出しました(${name})`);
+      })
+      .catch((e: unknown) => {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `メッセージを書き出せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      });
   },
   'set-paste-source': (_dispatcher, target, services) => {
     // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)

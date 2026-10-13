@@ -69,6 +69,9 @@ describe('画面に出す字(#971 段②)', () => {
     const s = quotaText({ usage: 95 * GB, quota: 100 * GB });
     expect(s, '数が消えている').toContain('95 パーセント');
     expect(s, '何をすればよいか書いていない').toMatch(/添付を消す|バックアップ/);
+    // 🔴 押す場所まで言う(#1087 の見直し 2026-10-13)── ボタンの字と同じ字で
+    expect(s).toContain('「使われていない添付を消す」');
+    expect(s).toContain('「バックアップ」');
     noMarkup(s);
   });
 
