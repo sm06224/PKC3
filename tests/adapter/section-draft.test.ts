@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
+  blockedWithSuffix,
   bodyWriteBlockReason,
   guardSectionDraftTransition,
   hasUnsavedTyping,
@@ -1136,5 +1137,49 @@ describe('hasUnsavedTyping / unsavedTypingLidOf(#1044 段2、F-C)', () => {
     expect(s.phase, 'アプリ全体が編集中になった(前提が崩れている)').toBe('ready');
     expect(hasUnsavedTyping(s)).toBe(true);
     expect(unsavedTypingLidOf(s)).toBe('n1');
+  });
+});
+
+/**
+ * 🔴 **章の欄の断りは言い切りの文 ── 後ろへ「チェックしてください」を繋がない**(#1087)。
+ * ⚠ 直す前は 17 か所が `${blocked}チェックしてください` の形で、章の欄を開いたままチェックを押すと
+ *   「…押すと戻ります)チェックしてください」と文が壊れていた。
+ */
+describe('blockedWithSuffix(#1087)', () => {
+  it('章 / コードの欄の断りには続きを付けず、phase の前置きには付ける', () => {
+    expect(blockedWithSuffix(SECTION_DRAFT_NOTE, 'チェックしてください')).toBe(SECTION_DRAFT_NOTE);
+    expect(blockedWithSuffix('編集を終了してから', 'チェックしてください')).toBe('編集を終了してからチェックしてください');
+  });
+
+  it('🔴 章の欄を開いたままチェックを押すと、断りの字が壊れない(下流まで)', () => {
+    const s: AppState = {
+      ...booted(),
+      sectionDraft: { lid: 'n1', heading: '決定事項', original: 'x', saving: false },
+    };
+    const r = reduce(s, { type: 'TOGGLE_TASK', lid: 'n1', line: 0 });
+    expect(r.state.error).toBe(SECTION_DRAFT_NOTE);
+  });
+
+  it('🔴 断りに続きを手で繋ぐ箇所が src に残っていない(`bodyWriteBlockReason` の後の `${blocked}…`)', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const f of ['src/adapter/state/app-state.ts', 'src/adapter/ui/actions/binder.ts']) {
+      // ⚠ 注釈を落としてから見る(自分の説明に満たされない)
+      const code = readFileSync(f, 'utf8')
+        .split('\n')
+        .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l));
+      let fromBodyGate = false;
+      let seenGate = 0;
+      const bad: string[] = [];
+      for (const l of code) {
+        const m = /const blocked = (\w+)\(/.exec(l);
+        if (m) {
+          fromBodyGate = m[1] === 'bodyWriteBlockReason';
+          if (fromBodyGate) seenGate++;
+        }
+        if (fromBodyGate && l.includes('`${blocked}')) bad.push(l.trim());
+      }
+      expect(seenGate, `${f}: 前提が崩れた(門の呼び出しが見つからない)`).toBeGreaterThan(0);
+      expect(bad, f).toEqual([]);
+    }
   });
 });
