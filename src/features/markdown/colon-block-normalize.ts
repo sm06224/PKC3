@@ -56,6 +56,21 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   source: string,
   lineMapIn: number[],
 ): { transformed: string; lineMap: number[] } {
+  /**
+   * 🔴 **`:::` も `\r` も無い本文は、3 段とも何もしない**(#1087)。
+   * 3 つの正規表現(malformed / colonStart / opener)は全部 `:::` から始まる行にしか
+   * 当たらないので、`:::` が 1 つも無ければ**行は 1 字も変わらず、挿入も無い**。
+   * ⚠ 返す lineMap は遅い道と同じ式(`lineMapIn[i] ?? i`)で作る ── 入力の lineMap が
+   *   恒等とは限らない(コメント除去などで既にずれている)ので、`lineMapIn` を
+   *   そのまま返さない(同じ配列を共有しない)。
+   * ⚠ `\r` も除外に入れる(行末の `\r` が正規表現の `$` に絡む形を、この近道の外に置く)。
+   */
+  if (source.indexOf(':::') === -1 && source.indexOf('\r') === -1) {
+    const n = countLines(source);
+    const map: number[] = new Array<number>(n);
+    for (let i = 0; i < n; i++) map[i] = lineMapIn[i] ?? i;
+    return { transformed: source, lineMap: map };
+  }
   // Step 1: line 単位に分割、malformed opener attrs drop(in-place)
   const inLines = source.split('\n');
   const stage1Lines: string[] = [];
@@ -114,4 +129,11 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   // ところに自動 blank 追加など)は markdown-it 的に問題なし(2 個でも 3 個
   // でも paragraph separator として同 扱い)。
   return { transformed: stage3Lines.join('\n'), lineMap: stage3Map };
+}
+
+/** `source.split('\n').length` と同じ値(配列を作らずに数える)。 */
+function countLines(source: string): number {
+  let n = 1;
+  for (let i = source.indexOf('\n'); i !== -1; i = source.indexOf('\n', i + 1)) n++;
+  return n;
 }
