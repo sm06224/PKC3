@@ -208,6 +208,22 @@ describe('番号の振り直しが押せる #396', () => {
   });
 });
 
+describe('1 面のライブ編集の行では、全文の道具は触らず「全文を編集」へ案内する #1087', () => {
+  it.each([
+    ['renumber-lists', '1. あ\n5. い', '番号を振り直すには、「全文を編集」に切り替えてください'],
+    ['sort-tasks', '- [x] 済\n- [ ] 未', '完了項目を末尾へ移すには、「全文を編集」に切り替えてください'],
+  ])('🔴 %s:row-source の欄は書き換えず、行き先を言う(「揃っています」と偽らない)', (id, text, note) => {
+    const status: string[] = [];
+    const { root, sent } = setup({ showStatus: (t: string) => status.push(t) });
+    const ta = editor(root, text, 0, 'row-source');
+    sent.length = 0;
+    root.querySelector<HTMLElement>(`[data-pkc-action="${id}"]`)!.click();
+    expect(ta.value, '1 ブロックだけの欄を書き換えた').toBe(text);
+    expect(status).toEqual([note]);
+    expect(sent.find((a) => a.type === 'OP_FAILED'), '「編集中に押してください」は編集中の言い方ではない').toBeUndefined();
+  });
+});
+
 describe('素の Markdown で写せる #396', () => {
   it('🔴 押すと方言が落ちた本文が写る', () => {
     const copied: string[] = [];

@@ -72,3 +72,19 @@ describe('書式の帯の説明と字(#717)', () => {
     expect(h1.getAttribute('data-pkc-hint-command')).toBeNull();
   });
 });
+
+describe('道具の列の 4 ボタンの説明は、字の繰り返しではなく「押すと何が起きるか」(#1087)', () => {
+  const EXPECT: Record<string, string> = {
+    'insert-date': '日付を選んで、打っている場所に入れます',
+    'insert-entry-link': '別のノートを題名で探して、そこへのリンクを打っている場所に入れます',
+    'insert-snippet': 'テンプレートを一覧から選んで、打っている場所に入れます',
+    'toggle-replace': '編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます',
+  };
+  it.each(Object.entries(EXPECT))('🔴 %s:説明が文として載り、字(label)と同じではない', (action, text) => {
+    const b = buttons().find((x) => x.getAttribute('data-pkc-action') === action);
+    expect(b, `${action} のボタンが帯に無い`).toBeDefined();
+    expect(b!.title.startsWith(text), '説明が載っていない').toBe(true);
+    expect(b!.getAttribute('data-pkc-hint-base'), '鍵の併記を作り直す元の説明が違う').toBe(text);
+    expect(b!.title).not.toBe(b!.querySelector('[data-pkc-field="label"]')!.textContent);
+  });
+});
