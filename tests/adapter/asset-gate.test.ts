@@ -34,8 +34,10 @@ describe('createAssetGate', () => {
       ran.push('second');
     });
     expect(ran).toEqual(['first']); // 2 本目の body は**実行されない**
-    expect(d.getState().error).toMatch(/実行中です/);
-    expect(d.getState().error).toMatch(/選び直して/); // 捨てたことが分かる文言
+    expect(d.getState().error).toMatch(/動いています/);
+    // 捨てたことが分かる文言。⚠ 貼り付けもこの口を通るので「選び直す」とは言わない(2026-10-13)
+    expect(d.getState().error).toMatch(/もう一度お試しください/);
+    expect(d.getState().error).not.toMatch(/選び直/);
     expect(gate.busy).toBe(true);
 
     release();

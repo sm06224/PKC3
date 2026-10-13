@@ -4,6 +4,8 @@
  * ⚠ ここは**純関数だけ**。実際に縮めるのはワーカー(`asset-codec`)で、
  *   繋がりは `tests/adapter/attach-shrink.test.ts` が見る。
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   SHRINK_MAX_EDGE,
@@ -101,6 +103,18 @@ describe('縮める判断(#412)', () => {
       expect(q).toContain('1.4 MB');
       // 🔴 **戻せないことを言う**(不可逆な操作なので)
       expect(q, '戻せないことを言っていない').toContain('戻りません');
+    });
+
+    it('🔴 文の中で押させるボタンの字は、確認の窓に実在する(「いいえ」と書いて、ボタンが「そのまま」だった)', () => {
+      const q = shrinkQuestion(
+        { width: 4000, height: 3000, bytes: 12 * 1024 * 1024 },
+        { width: 2048, height: 1536, bytes: 1.4 * 1024 * 1024 },
+      );
+      // ⚠ 期待値を手で書かない ── 窓のボタンの字は main.ts の askShrink が渡す(そこから引く)
+      const main = readFileSync(join(__dirname, '../../src/main.ts'), 'utf8');
+      const m = /askShrink:[\s\S]{0,200}?cancelLabel: '([^']+)'/.exec(main);
+      expect(m, '前提:askShrink のボタンの字が読めない').not.toBeNull();
+      expect(q).toContain(`「${m![1]}」`);
     });
   });
 });
