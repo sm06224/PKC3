@@ -598,7 +598,8 @@ describe('2 ペインの面(描画)', () => {
       removeItem: (k) => void map.delete(k),
     });
     const r = new DualFilerRenderer(region, store);
-    r.render(booted());
+    const s0 = booted();
+    r.render(s0);
     /**
      * 🔴 **鍵は `title` の末尾の括弧から読む**(#1054 段②。旧「見える `cmd-key`
      *   の器」を廃した)。⚠ 全体が一致することを見る(部分一致だと、鍵が
@@ -622,7 +623,11 @@ describe('2 ペインの面(描画)', () => {
      */
     expect(store.addBinding('dual-move-to-other', 'F10')).toBeNull();
     store.removeBinding('dual-move-to-other', 'F6');
-    r.render(booted());
+    /**
+     * 🔴 **同じ state のまま描き直しても、キーの字は割当に追従する**(#1087)── 門はキーの字も材料に持つ。
+     *   ⚠ 同じ state を渡す ── 新しい state を渡すと、別の材料で門が開いて空振りする。
+     */
+    r.render(s0);
     expect(keyOf('dual-move'), '割当を変えても画面の字が変わらない').toBe('F10');
   });
 
@@ -733,8 +738,25 @@ describe('2 ペインの面(描画)', () => {
      */
     const armed: [string, (x: AppState) => AppState][] = [
       ['dual', (x) => ({ ...x, dual: reduce(x, { type: 'DUAL_TAB_ADD', side: 'left' }).state.dual })],
-      ['entryMetas', (x) => ({ ...x, entryMetas: new Map(x.entryMetas) })],
+      /**
+       * ⚠ 門(#1087)は参照ではなく**この面が読む列の指紋**で開く ── 中身が同じ新しい Map では
+       *   開かない(`dual-filer-gate.test.ts` が列ごとに見る)。ここは「題名が変わった Map では
+       *   歩く」(= entryMetas が門の材料に載っている)だけを見る。
+       */
+      [
+        'entryMetas',
+        (x) => {
+          const next = new Map(x.entryMetas);
+          next.set('a', { ...next.get('a')!, title: '別の題' });
+          return { ...x, entryMetas: next };
+        },
+      ],
       ['filterQuery', (x) => ({ ...x, filterQuery: 'あ' })],
+      /**
+       * 🔴 **スマートフォルダの当たりも門の材料**(#1087)── 門を指紋へ替える前は、保存のたびに
+       *   Map が新しくなって偶然開いていた。当たりだけが遅れて変わる回を取りこぼさない。
+       */
+      ['smartHits', (x) => ({ ...x, smartHits: new Map(x.smartHits) })],
       ['entrySort', (x) => ({ ...x, entrySort: 'title' })],
       /**
        * ⚠ **向きも門の材料**(2026-08-19、足したその日に踏んだ)── 入れないと
