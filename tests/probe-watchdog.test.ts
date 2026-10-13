@@ -48,6 +48,7 @@ const WATCHED = [
   'combo-popup-probe.mjs',
   'convert-to-probe.mjs',
   'dialog-crash-probe.mjs',
+  'ime-compose-probe.mjs',
   'ime-probe.mjs',
   'io-layer-probe.mjs',
   'ja-typography-probe.mjs',
