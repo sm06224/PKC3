@@ -25,6 +25,7 @@
  * (`body_length` が `entry_count` になるだけ)、payload が `body.md` →
  * `textlog.csv` に替わる。だから受理器も **payload の読み方だけ**が違う。
  */
+import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import {
   readZipDirectory,
   readZipText,
@@ -111,9 +112,7 @@ async function readBundleCommon(
   const warnings: string[] = [];
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 
   let manifest: Pkc2TextBundleManifest;

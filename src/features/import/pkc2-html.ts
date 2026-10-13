@@ -14,6 +14,7 @@
  * bytes として Blob へ直行させる ── 巨大な base64 文字列を feature 層に
  * 溜めない(PKC2 の +293MB 常駐と同型の穴を作らない)。
  */
+import { NOT_PKC2_HTML_REFUSAL } from './refusal-text';
 
 /** PKC2 の `#pkc-data` に入っている構造(必要な部分だけ)。 */
 export interface Pkc2Payload {
@@ -48,17 +49,17 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
 
   const meta = doc.getElementById('pkc-meta');
   if (!meta) {
-    throw new Pkc2ParseError('PKC2 の HTML ではありません(#pkc-meta が無い)');
+    throw new Pkc2ParseError(NOT_PKC2_HTML_REFUSAL);
   }
   let metaJson: unknown;
   try {
     metaJson = JSON.parse(meta.textContent ?? '');
   } catch {
-    throw new Pkc2ParseError('#pkc-meta を解釈できません');
+    throw new Pkc2ParseError('PKC2 の書き出しの情報を読めませんでした(ファイルの中身が欠けているかもしれません)');
   }
   const m = metaJson as { app?: unknown; schema?: unknown };
   if (m.app !== 'pkc2') {
-    throw new Pkc2ParseError(`PKC2 のファイルではありません(app=${String(m.app)})`);
+    throw new Pkc2ParseError(NOT_PKC2_HTML_REFUSAL);
   }
   // PKC2 の schema は全歴史を通じて 1(設計 doc §1)。未知の版は**明示 reject** ──
   // 「読めるところだけ読む」は静かなデータ欠損を作る
@@ -70,7 +71,7 @@ export function parsePkc2Html(html: string, parse: HtmlParse = defaultParse): Pk
 
   const data = doc.getElementById('pkc-data');
   if (!data) {
-    throw new Pkc2ParseError('PKC2 の書き出しデータが見つかりません(#pkc-data が無い)');
+    throw new Pkc2ParseError('PKC2 の書き出しの中身が見つかりませんでした(ファイルの中身が欠けているかもしれません)');
   }
   // PKC2 の退避は `json.replace(/<\/(script)/gi, '<\\/$1')` ── **JSON の `\/`
   // エスケープ**なので、復元は JSON.parse が行う。ここで文字列置換すると

@@ -505,4 +505,12 @@ describe('2 つ打ったときの知らせ(#637)', () => {
     await tick(60);
     expect(noticesOf(s)).toBe('1 件に付けました');
   });
+
+  // ⚠ 外したときは「に」ではなく「から」(#1087 ──「1 件に外しました」は日本語として誤り)
+  it('外したときの知らせは「1 件から外しました」', async () => {
+    const s = setup('---\ntags: [買い物, 家事]\n---\n本文\n');
+    s.root.querySelectorAll<HTMLElement>('[data-pkc-field="inspector-tag-off"]')[0]!.click();
+    await tick(60);
+    expect(noticesOf(s)).toBe('1 件から外しました');
+  });
 });

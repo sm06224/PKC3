@@ -21,7 +21,7 @@ import {
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { SearchRenderer } from '../../src/adapter/ui/render/search';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { initialState, viewModeLabel, type AppState } from '../../src/adapter/state/app-state';
+import { initialState, viewModeLabel, type AppState, type SearchPageState } from '../../src/adapter/state/app-state';
 import { homeTabOf } from '../../src/adapter/ui/render/browse-mode';
 import {
   SNIPPET_MARK_CLOSE,
@@ -287,10 +287,19 @@ describe('SearchRenderer 単体', () => {
   });
 
   it('⚠ 同じ state を 2 度描いても DOM を作り直さない(押す寸前の行を捨てない)', () => {
-    const page = { query: 'x', rowsQuery: 'x', truncated: false, failed: false, rows: [row('a', 't', 's')] };
+    const page: SearchPageState = { query: 'x', rowsQuery: 'x', truncated: false, failed: false, rows: [row('a', 't', 's')] };
     const { host, r } = paint(page);
     const before = host.querySelector('[data-pkc-search-row]');
     r.render({ ...initialState, searchPage: page } as AppState);
     expect(host.querySelector('[data-pkc-search-row]')).toBe(before);
+  });
+
+  it('🔴 探せなかった理由を取り違えない ── 古いタブのときだけ「再読み込み」を言う(#1087)', () => {
+    const base = { query: 'x', rowsQuery: 'x', truncated: false, rows: [] };
+    const stale = paint({ ...base, failed: 'stale' }).host.textContent ?? '';
+    expect(stale).toContain('古いまま');
+    const error = paint({ ...base, failed: 'error' }).host.textContent ?? '';
+    expect(error).toContain('探している途中で失敗しました');
+    expect(error, 'エラーで「古い」と決めつけている').not.toContain('古いまま');
   });
 });

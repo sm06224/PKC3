@@ -19,6 +19,7 @@
  * ⚠ **bytes はここで読まない**。返すのは「どの ZIP entry か」までで、実際の
  * 読取りは adapter が 1 件ずつ行って即 `putBlob` する(base64 を一切経由しない)。
  */
+import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import {
   readZipDirectory,
   readZipText,
@@ -61,9 +62,7 @@ const VALID_KEY = /^[A-Za-z0-9_.-]+$/;
 export async function peekZipFormat(zip: Blob): Promise<string | null> {
   const dir = await readZipDirectory(zip);
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
   const hits = dir.filter((e) => e.name === MANIFEST);
   if (hits.length !== 1) return null;
@@ -86,9 +85,7 @@ export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
   // 同じ入口に落ちてくる PKC2 由来でない ZIP を**名指しで**断る。
   // 「manifest.json が無い = 不明」に混ぜると user は原因を誤解する
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 
   const manifests = dir.filter((e) => e.name === MANIFEST);

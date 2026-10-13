@@ -160,5 +160,7 @@ describe('formatArchivePreviewMessage', () => {
     expect(msg).toContain('添付 2 件');
     expect(msg).toContain('つながり 有');
     expect(msg).toContain('履歴 無');
+    // 🔑 置き換えではなく足すことを、押す前に言う(#1087)
+    expect(msg).toContain('いまのノートに足します');
   });
 });

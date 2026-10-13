@@ -45,6 +45,7 @@ import { paintRowMark } from './selection-mark';
 import { buildPressedButton } from './choice-buttons';
 import { chordHint } from './shortcut-hint';
 import { appKeymap, type KeymapStore } from './keymap';
+import { commandQueryOf } from '@features/palette/command-query';
 
 /**
  * 🔴 **行がこれより多いとき、表を格子で組む**(#1087。CSS の `data-pkc-grid` の規則)。
@@ -1402,9 +1403,20 @@ export class FilerRenderer {
       // ⚠ 「空」と「絞り込みで消えた」を混ぜない(ランチャーと同じ理由)
       // ⚠ 種類の札だけで 0 件のときも「絞り込み」と言う(「空です」では外す口と食い違う)
       const filtering = q !== '' || state.kindFilter.size > 0;
+      /**
+       * 🔴 **本文の結果がまだ / 失敗のときは「無い」と言い切らない**(#1087)── 題名に当たらない語は、
+       *   本文の結果が返るまで 0 件に見える。失敗したときは、題名だけで探したことを言う。
+       */
+      // ⚠ 「>」で始まる語(操作を探す)は本文を探さない ── 返事が来ないので「探しています」で止めない
+      const bodyPending =
+        q !== '' && commandQueryOf(state.filterQuery) === null && state.searchHitsQuery !== state.filterQuery;
       empty.textContent =
         filtering
-          ? '絞り込みに一致するものがありません'
+          ? q !== '' && state.searchHitsFailed
+            ? '題名に一致するものはありません(本文は探せませんでした。語を打ち直すと、もう一度探します)'
+            : bodyPending
+              ? '本文を探しています…'
+              : '絞り込みに一致するものがありません'
           : scope
             ? 'このフォルダは空です'
             : 'まだ何もありません';

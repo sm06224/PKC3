@@ -40,6 +40,7 @@
  * `pkc2-folder-export-bundle`(段⑤)/ `pkc2-entry-bundle`(段⑥)は**名指しで断る**。
  * 「読めるところだけ読む」は静かな欠損を作る。
  */
+import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import {
   readZipDirectory,
   readZipEntry,
@@ -427,9 +428,7 @@ export async function readContainerBundle(zip: Blob): Promise<Pkc2ContainerBundl
   const warnings: string[] = [];
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 
   let manifest: Pkc2ContainerBundleManifest;

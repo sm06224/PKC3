@@ -267,7 +267,11 @@ export interface SearchPageState {
   readonly rows: readonly SearchDetailRow[];
   readonly rowsQuery: string;
   readonly truncated: boolean;
-  readonly failed: boolean;
+  /**
+   * 探せなかったか。⚠ 理由を 2 つに分ける(#1087)── `stale` = このタブが古く、探す口が無い
+   *   (再読み込みで直る)/ `error` = 探している途中で失敗した(再読み込みで直るとは限らない)。
+   */
+  readonly failed: false | 'stale' | 'error';
 }
 /**
  * 🔴 **SQL を打つ面の state**(#681 段②)。
@@ -1722,6 +1726,12 @@ export interface AppState {
    */
   searchHitsTruncated: boolean;
   /**
+   * 🔴 **本文の検索が失敗したか**(#1087)。⚠ 失敗を「0 件」と同じに見せると、左の一覧は
+   *   「一致するものがありません」と**言い切る**(本文に在る語を、無いと読ませる)。
+   * ⚠ `SET_ENTRY_FILTER` で `false` へ戻す(語を打ち直すと、もう一度探す)。
+   */
+  searchHitsFailed: boolean;
+  /**
    * 🔴 **探す面**(#680)。⚠ `filterQuery` と**別に持つ** ── 面の語で左の一覧を絞らない。
    *
    * - `query`: 欄に打った語(打鍵ごとに写す ── renderer は DOM から読まない)
@@ -2138,6 +2148,7 @@ export const initialState: AppState = {
   openedAt: new Map<string, number>(),
   searchHitsQuery: '',
   searchHitsTruncated: false,
+  searchHitsFailed: false,
   searchPage: { query: '', rows: [], rowsQuery: '', truncated: false, failed: false },
   sqlPage: {
     engine: DEFAULT_SQL_ENGINE,
@@ -2458,7 +2469,7 @@ export type UserAction =
   /** 🔴 DuckDB の器が表の読み込みを始めた(#682)。⚠ `token` = どの回か(古い回の合図は捨てる)。 */
   | { type: 'SQL_DUCK_LOADING'; token: number }
   /** 本文の当たりが SQL から返った(#181)。⚠ `query` は**どの問い合わせの答えか**。 */
-  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean }
+  | { type: 'SET_SEARCH_HITS'; query: string; lids: string[]; truncated: boolean; failed?: boolean }
   /**
    * 最近開いた記録が入れ替わった(#215 残り①)。
    * ⚠ **時刻は呼び側(effect)が読む** ── reducer は純粋なので `Date.now()` を持たない。
@@ -3278,7 +3289,7 @@ export type SystemCommand =
       truncated: boolean;
     }
   /** 探せなかった(#680)。⚠ 「まだ」と区別する ── 区別しないと永久に「探しています…」。 */
-  | { type: 'SEARCH_DETAIL_FAILED'; query: string }
+  | { type: 'SEARCH_DETAIL_FAILED'; query: string; stale: boolean }
   /** 効果層が読んだ入れ物の本文(#633 段③)── `LOAD_STACK` の続き。 */
   | { type: 'STACK_BODY_LOADED'; lid: string; body: string }
   | { type: 'BODY_LOADED'; lid: string; body: string }
@@ -4721,6 +4732,7 @@ function reduceCore(
           searchHitsQuery: '',
           // ⚠ 前の語の「ほかにもあります」を持ち越さない(#680)
           searchHitsTruncated: false,
+          searchHitsFailed: false,
           /**
            * 🔴 **絞り込んだら並べ替えモードは落とす**(#857 段①b-2)。
            * ⚠ 出ているのは絞った後のタイルだが、並び順の正本は**全件**なので、
@@ -4896,6 +4908,7 @@ function reduceCore(
           searchHits: new Set(action.lids),
           searchHitsQuery: action.query,
           searchHitsTruncated: action.truncated,
+          searchHitsFailed: action.failed === true,
         },
         events: [],
       };
@@ -5667,7 +5680,7 @@ function reduceCore(
       if (action.query !== state.searchPage.query) return { state, events: [] };
       // ⚠ 前の行は残す(消すと「失敗して空になった」に見える)── 印だけ立てる
       return {
-        state: { ...state, searchPage: { ...state.searchPage, rowsQuery: action.query, failed: true } },
+        state: { ...state, searchPage: { ...state.searchPage, rowsQuery: action.query, failed: action.stale ? 'stale' : 'error' } },
         events: [],
       };
     case 'SET_OPEN_EXTENSIONS':

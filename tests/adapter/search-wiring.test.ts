@@ -85,11 +85,38 @@ function setup(
   // 「ほかにもあります」の字(#680)。⚠ 左の列(sidebar の器)に絞って読む
   const more = () =>
     regions.sidebar.querySelector('[data-pkc-field="filer-more"]')?.textContent ?? null;
-  return { d, rows, searchEntries, more };
+  // 0 件のときの字(#1087)。⚠ 左の列に絞って読む
+  const empty = () =>
+    regions.sidebar.querySelector('[data-pkc-field="filer-empty"]')?.textContent ?? null;
+  return { d, rows, searchEntries, more, empty };
 }
 
 beforeEach(() => {
   document.body.innerHTML = '';
+});
+
+describe('本文の結果がまだ / 失敗のとき「無い」と言い切らない(#1087)', () => {
+  it('🔴 返事を待つ間は「探しています」、0 件と分かってから「一致するものがありません」', async () => {
+    const { d, empty } = setup(() => []);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
+    // ⚠ await しない ── 本文の返事はまだ来ていない
+    expect(empty()).toBe('本文を探しています…');
+    await tick();
+    expect(empty()).toBe('絞り込みに一致するものがありません');
+  });
+
+  it('🔴 本文の検索が失敗したら、題名だけで探したことを言う(黙って「無い」にしない)', async () => {
+    const { d, empty } = setup(() => {
+      throw new Error('database is locked');
+    });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'みかん' });
+    await tick();
+    expect(empty()).toContain('本文は探せませんでした');
+    expect(empty(), '失敗を 0 件と言い切っている').not.toContain('絞り込みに一致するものがありません');
+    // 🔑 打ち直すと、もう一度探す(失敗の字を持ち越さない)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ばなな' });
+    expect(empty()).toBe('本文を探しています…');
+  });
 });
 
 describe('全文検索の配線(#181)', () => {

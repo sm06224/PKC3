@@ -1036,17 +1036,27 @@ export function connectStoreEffects(
        */
       case 'REQUEST_SEARCH': {
         const search = store.searchEntries;
-        if (!search || ev.query.trim() === '') break;
+        if (ev.query.trim() === '') break;
         const q = ev.query;
+        /**
+         * ⚠ 検索の失敗でエラーの行を出さない ── 題名の絞り込みは効いたままで、user の操作は止まっていない。
+         * 🔴 ただし**失敗したことは state に残す**(#1087)── 残さないと、左の一覧は「一致するものが
+         *   ありません」と言い切るか、「本文を探しています…」のまま止まる。
+         */
+        const failed = (): void => {
+          if (!disposed)
+            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids: [], truncated: false, failed: true });
+        };
+        if (!search) {
+          failed();
+          break;
+        }
         void search(q).then(
           ({ lids, truncated }) => {
             if (disposed) return;
             dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids, truncated });
           },
-          () => {
-            /* ⚠ 検索の失敗で帯を出さない ── 題名の絞り込みは効いたままで、
-               user の操作は止まっていない(黙って減るのは「増えない」方向) */
-          },
+          failed,
         );
         break;
       }
@@ -1461,7 +1471,7 @@ export function connectStoreEffects(
         detailTimer = null;
         const q = ev.query;
         if (!ask) {
-          dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+          dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q, stale: true });
           break;
         }
         detailTimer = setTimeout(() => {
@@ -1473,7 +1483,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({ type: 'SET_SEARCH_DETAIL', query: q, rows, truncated });
             },
             () => {
-              if (!disposed) dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q });
+              if (!disposed) dispatcher.dispatch({ type: 'SEARCH_DETAIL_FAILED', query: q, stale: false });
             },
           );
         }, SEARCH_DETAIL_DEBOUNCE_MS);
@@ -2797,6 +2807,8 @@ export function connectStoreEffects(
            *   3 件が既に付いていたことも 1 件が失敗したことも消える。
            */
           const verb = ev.mode === 'add' ? '付けました' : '外しました';
+          // ⚠ 助詞も動詞と対で変える(#1087)──「1 件に外しました」は日本語として誤り
+          const particle = ev.mode === 'add' ? 'に' : 'から';
           const already = ev.mode === 'add' ? '既に付いていました' : '付いていませんでした';
           /**
            * 🔑 **1 つのときは、これまでと 1 文字も変えない**(#637)── 既存の pin
@@ -2814,7 +2826,7 @@ export function connectStoreEffects(
             const w = wroteBy.get(tag) ?? 0;
             const k = skippedBy.get(tag) ?? 0;
             // ⚠ 1 つのときは 0 件でも言う(押した手応えを消さない)
-            if (w > 0 || one) parts.push(`${label(tag)}${w} 件に${verb}`);
+            if (w > 0 || one) parts.push(`${label(tag)}${w} 件${particle}${verb}`);
             if (k > 0) parts.push(`${label(tag)}${k} 件は${already}`);
             /**
              * 🔴 **上限は別の字で言う**(#640)── 「既に付いていました」に混ぜると、
@@ -2827,7 +2839,9 @@ export function connectStoreEffects(
                 `${label(tag)}${lim} 件はタグが ${String(MAX_TAGS)} 個に達していて付きませんでした(1 つ外してから足してください)`,
               );
           }
-          if (failed > 0) parts.push(`${failed} 件は書けませんでした(別のタブまたはウィンドウが書き換えた可能性があります)`);
+          // ⚠ 理由は 2 つある(本文を読めなかった / 別のタブが書き換えた)── 片方に決めつけない(#1087)
+          if (failed > 0)
+            parts.push(`${failed} 件は書けませんでした(本文を読めなかったか、別のタブまたはウィンドウが書き換えた可能性があります)`);
           /**
            * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
            *   「外したのに、まだそのタグで集まる」= 壊れて見える。

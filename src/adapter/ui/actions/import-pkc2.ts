@@ -60,6 +60,7 @@ import {
 import { extractMeta } from '@features/flavor';
 import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
 import { portableHtmlToArchive, type ReadImageArchive } from './import-portable';
+import { NOT_PKC_ZIP_REFUSAL, isImportRefusal } from '@features/import/refusal-text';
 
 export interface ImportDeps {
   /**
@@ -475,7 +476,8 @@ export async function importPkc2File(
         container = null;
       } else if (format === null) {
         return fail(
-          `${file.name}: manifest.json が無い zip です。PKC2 の書き出しファイルを選んでください`,
+          // ⚠ 内部の部品名(manifest.json)を出さない(#1087)
+          `${file.name}: ${NOT_PKC_ZIP_REFUSAL}`,
         );
       }
       const read = restored
@@ -499,7 +501,10 @@ export async function importPkc2File(
                     : null;
       if (!read && !restored) {
         // 未対応の形式は**名指しで**断る(「不明」に混ぜると原因を誤解する)
-        return fail(`${format} の取り込みはまだ実装されていません(${file.name})`);
+        // 🔑 まず user の言葉で言い、形式の名前は末尾の括弧へ(問い合わせのときの手がかり。#1087)
+        return fail(
+          `${file.name}: この zip の中身は、このバージョンの PKC3 では取り込めない形式です。PKC3 を新しくしてから、もう一度お試しください(形式: ${format})`,
+        );
       }
       if (read) {
         const pkg = await read(file);
@@ -817,6 +822,8 @@ export async function importPkc2File(
         `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります): ${reason(e)}`,
       );
     }
+    // 🔑 対象外のファイルは壊れていない ── 「失敗しました」を前に付けず、断りとして出す(#1087)
+    if (isImportRefusal(reason(e))) return fail(reason(e));
     return fail(`取り込みに失敗しました: ${reason(e)}`);
   }
 }
