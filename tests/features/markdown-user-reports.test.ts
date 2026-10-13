@@ -415,7 +415,7 @@ describe('行頭アライン: 矢印の向きは意味を持たない(記法の�
      * 象形的な形の意味を持ち込ませる**ことになる(user 指摘: 思想的な破壊的変更)。
      */
     it('🔑 hint が center と「反対側」を名乗り、位置指定の正しい道を書く', () => {
-      expect(ALIGN_CANONICAL_HINT).toContain('center');
+      expect(ALIGN_CANONICAL_HINT).toContain('中央寄せ');
       // ⚠ 部分一致で `end` を禁じると `recommend` / `extended` で無関係に落ちる ──
       //    主張は「`align=end` を canonical として教えない」なので、その形で見る
       expect(ALIGN_CANONICAL_HINT, '旧意味(logical end)を canonical として教えている')
