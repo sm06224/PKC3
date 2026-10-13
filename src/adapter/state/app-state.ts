@@ -1776,6 +1776,12 @@ export interface AppState {
    */
   tagSuggestions: readonly string[] | null;
   /**
+   * 候補を集めたときの `entryMetas`(#1087 の見直し)。⚠ 本文に `#タグ` を書いて保存した・ノートを消した・
+   * 取り込んだ・別の窓が書いた、では `BODY_REWRITTEN` が走らず候補が古いまま残っていた。
+   * 🔑 それらは全部 `entryMetas` を新しい Map にするので、**参照が違えば集め直す**(経路を数えなくて済む)。
+   */
+  tagSuggestionsMetas: ReadonlyMap<string, EntryMeta> | null;
+  /**
    * 🔴 **カンバンの札**(#277 段②-b)。⚠ `null` = **まだ集めていない**(0 件ではない)。
    *
    * ⚠ 中身は**項目だけ**で、本文は 1 バイトも入らない ── 舐めるのは worker で、
@@ -2175,6 +2181,7 @@ export const initialState: AppState = {
   queryGroups: null,
   queryFailed: false,
   tagSuggestions: null,
+  tagSuggestionsMetas: null,
   taskScan: null,
   taskScanFailed: false,
   contactScan: null,
@@ -9867,12 +9874,14 @@ function reduceCore(
      *
      * ⚠ **既に持っていれば何もしない** ── 焦点が当たるたびに全ノートの
      *   frontmatter を舐めると、打つ気になった瞬間に画面が重くなる。
-     * 🔑 捨てるのは**タグを書いたとき**だけ(下の `BODY_REWRITTEN`)── だから
-     *   「付けたばかりのタグが候補に出ない」は起きない。
+       * 🔑 捨てるのは**タグを書いたとき**(下の `BODY_REWRITTEN`)と、**集めた後にノートの一覧が
+     *   変わったとき**(本文の `#タグ` を保存した・消した・取り込んだ ── `tagSuggestionsMetas`)。
      */
     case 'ASK_TAG_SUGGESTIONS': {
       if (state.phase !== 'ready') return { state, events: [] };
-      if (state.tagSuggestions !== null) return { state, events: [] };
+      // 🔑 集めた後にノートの一覧が変わっていたら集め直す(本文のタグ・消した・取り込んだ ── 上の注釈)
+      if (state.tagSuggestions !== null && state.tagSuggestionsMetas === state.entryMetas)
+        return { state, events: [] };
       return { state, events: [{ type: 'REQUEST_TAG_SUGGESTIONS' }] };
     }
     /**
@@ -9880,7 +9889,7 @@ function reduceCore(
      *   焦点が当たるたびに全走査が走る(#421 の `SMART_SCAN_FAILED` と同じ規律)。
      */
     case 'SET_TAG_SUGGESTIONS':
-      return { state: { ...state, tagSuggestions: action.tags }, events: [] };
+      return { state: { ...state, tagSuggestions: action.tags, tagSuggestionsMetas: state.entryMetas }, events: [] };
     /**
      * 🔴 **入らなかったタグを欄ごとに積む**(#640 案 A)。⚠ 同じ名前は 1 度だけ ──
      *   まとめて付ける経路は名前ごとに 1 回しか言わないが、二重に撃たれても欄に

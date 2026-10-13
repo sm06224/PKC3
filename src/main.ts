@@ -4571,7 +4571,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (!next.ok) {
         showStatus(
           next.reason === 'limit'
-            ? `色を付けられるタグは ${MAX_TAG_COLORS} 個までです。使わない色を外してから付けてください`
+            ? `色を付けられるタグは ${MAX_TAG_COLORS} 個までです。そのタグが付いたノートを開き、右のペインのタグの横の「色を外す」で使わない色を外してから付けてください`
             : 'この色は付けられません(#rrggbb の色だけ付けられます)',
         );
         return;
