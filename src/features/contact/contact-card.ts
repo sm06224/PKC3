@@ -280,7 +280,16 @@ export function sortContacts(cards: readonly ContactCard[]): ContactCard[] {
  * ⚠ 数字が 1 桁も無ければ `null`(押せない口を出さない)。
  */
 export function telHref(tel: string): string | null {
-  const digits = tel.replace(/[^\d+]/g, '');
+  /**
+   * 🔴 **番号の後ろに書いた字の中の数字を、番号に混ぜない**(#1087 の見直し 2026-10-13)。
+   * ⚠ 直す前は数字を全部つないでいたので、`03-1234-5678(内線 123)` は `tel:0312345678123`
+   *   (**別の番号**)になった。番号に使う字(数字・`+`・`-`・空白・括弧)が続く所までで切る。
+   * ⚠ 全角の数字も番号として読む(`\d` は半角しか当たらない ── 押せない字のままだった)。
+   */
+  const half = tel.normalize('NFKC');
+  // ⚠ 頭の飾り(`TEL:` など)は今までどおり読み飛ばす ── 最初の数字か `+` から、番号に使う字が続く所まで
+  const head = /[+\d][\d+\-\s()‐−―]*/.exec(half)?.[0] ?? '';
+  const digits = head.replace(/[^\d+]/g, '');
   return /\d/.test(digits) ? `tel:${digits}` : null;
 }
 

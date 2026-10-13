@@ -87,7 +87,16 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
   const paint = (): void => deps.onChange([...ringing.values()]);
 
   const sweep = (): void => {
-    if (!deps.enabled()) return;
+    /**
+     * 🔴 **切っている間は「見ていない」に戻す**(#1087 の見直し 2026-10-13)。
+     * ⚠ 直す前は `seenTo` を残したまま返していたので、数時間切ってから入れ直すと、
+     *   最初の確認が `(切る前の時刻, いま]` を見て、**切っていた間に過ぎた予定がまとめて鳴った**。
+     * 🔑 入れ直した時は起動と同じ扱い(下の「初回は『いま』までを見たことにする」)にする。
+     */
+    if (!deps.enabled()) {
+      seenTo = null;
+      return;
+    }
     const t = now();
     /**
      * 🔴 **初回は「いま」までを見たことにする**(鳴らさない)。

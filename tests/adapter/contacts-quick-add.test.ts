@@ -220,6 +220,23 @@ describe('#278 段③ 連絡先の面から足す', () => {
     expect(s.host.querySelectorAll('[data-pkc-contact]'), '連絡できないのに並んだ').toHaveLength(0);
   });
 
+  it('🔴 探す欄の語に当たらず一覧に出ないときは、そう伝える / 当たるときは黙る(2026-10-13)', async () => {
+    const s = setup();
+    s.d.dispatch({ type: 'SET_ENTRY_FILTER', query: '田中' });
+    type(s, { name: '佐藤', tel: '090-1111-2222' });
+    s.q('[data-pkc-action="contacts-quick-add"]')!.click();
+    await tick(40);
+    expect(s.persisted, '前提:ノートが作られていない').toHaveLength(1);
+    expect(s.d.getState().notice ?? '', '一覧に出ないのに黙っている').toContain('一覧には出ていません');
+    // 対照群:当たる名前なら言わない
+    const t = setup();
+    t.d.dispatch({ type: 'SET_ENTRY_FILTER', query: '田中' });
+    type(t, { name: '田中', tel: '090-3333-4444' });
+    t.q('[data-pkc-action="contacts-quick-add"]')!.click();
+    await tick(40);
+    expect(t.d.getState().notice ?? '').not.toContain('一覧には出ていません');
+  });
+
   /**
    * 🔴 **電話・メールの妥当性は書く側で弾かない** ── 原値のまま書く。押せない宛先を
    *   字のまま出す規則は `contacts.ts` が持つ(2 か所で判定しない)。

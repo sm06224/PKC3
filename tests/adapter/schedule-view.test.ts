@@ -1094,6 +1094,9 @@ describe('予定から外す(#498)', () => {
     // ⚠ 説明も**別物**(「ノートは消えない」を両方で言う)
     expect(one.title).toContain('ノートも本文も消えません');
     expect(rep.title).toContain('毎週');
+    // 🔴 説明も右クリックの「この繰り返しをやめる」(日付は残す)と同じ字に読めない(2026-10-13)── × は日付ごと外す
+    expect(rep.title).not.toContain('この繰り返しをやめ');
+    expect(rep.title).toContain('日付ごと');
   });
 
   /**

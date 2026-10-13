@@ -397,7 +397,12 @@ test('🔴 設定で配色と文字の大きさを変えて、もう一度押す
     win.locator(MAIN).evaluate((el) => {
       const top = el.scrollTop;
       const kids = [...el.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,td,th,pre')];
-      const first = kids.find((k) => (k as HTMLElement).offsetTop >= top - 2);
+      // ⚠ 短い塊(目次の 1 行・短い見出し)は見分けの材料にならないので飛ばす(2026-10-13)──
+      //   マニュアルに「## 音と動画を扱う」(7 字)を足したら、それが頭に来て下の空振り防止に当たった。
+      //   この test が見たいのは「読んでいた所が同じか」であって、どの塊かではない
+      const first = kids.find(
+        (k) => (k as HTMLElement).offsetTop >= top - 2 && (k.textContent ?? '').trim().length > 10,
+      );
       return { scrollTop: top, text: (first?.textContent ?? '').trim().slice(0, 50) };
     });
 

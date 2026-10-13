@@ -452,3 +452,47 @@ describe('🔴 role="link" のものは Enter / Space で押せる', () => {
 
 /** ⚠ 型だけ使う(未使用 import を避ける)。 */
 export type _Dispatchable = Dispatchable;
+
+/**
+ * 🔴 **鳴った予定の「予定のノートを開く」**(#1087 の見直し 2026-10-13)。
+ * ⚠ 直す前は `SELECT_ENTRY` を撃つだけで、別のノートを編集中だと reducer が黙って捨て、
+ *   帯の知らせだけが消えた(開かず、理由も出ず)。
+ */
+describe('🔴 鳴った予定を開く', () => {
+  function alarmButton(lid: string): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.setAttribute('data-pkc-action', 'open-alarm');
+    b.setAttribute('data-pkc-alarm', `k-${lid}`);
+    b.setAttribute('data-pkc-entry', lid);
+    root.append(b);
+    return b;
+  }
+
+  it('🔴 別のノートを編集中なら、理由を言い、帯の知らせは残す', () => {
+    const { dispatcher, lastError } = makeDispatcher({ phase: 'editing' });
+    const dismissed: string[] = [];
+    stop = bindActions(root, dispatcher, { dismissAlarm: (k) => dismissed.push(k) });
+    alarmButton('b').click();
+    expect(dispatcher.getState().selectedLid, '前提:編集中のノートのまま').toBe('a');
+    expect(lastError() ?? '', '無言で捨てた').toContain('予定のノートを開いてください');
+    expect(dismissed, '開けなかったのに帯の知らせを消した').toEqual([]);
+  });
+
+  it('対照群:読む画面なら開いて、帯の知らせを片付ける', () => {
+    const { dispatcher } = makeDispatcher();
+    const dismissed: string[] = [];
+    stop = bindActions(root, dispatcher, { dismissAlarm: (k) => dismissed.push(k) });
+    alarmButton('b').click();
+    expect(dispatcher.getState().selectedLid).toBe('b');
+    expect(dismissed).toEqual(['k-b']);
+  });
+
+  it('⚠ 編集中のそのノート自身なら、断らずに帯の知らせを片付ける', () => {
+    const { dispatcher, lastError } = makeDispatcher({ phase: 'editing' });
+    const dismissed: string[] = [];
+    stop = bindActions(root, dispatcher, { dismissAlarm: (k) => dismissed.push(k) });
+    alarmButton('a').click();
+    expect(lastError()).toBeNull();
+    expect(dismissed).toEqual(['k-a']);
+  });
+});
