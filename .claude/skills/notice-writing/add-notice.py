@@ -61,6 +61,12 @@ changelog = rd('CHANGELOG.md')
 if ("title: '%s'," % TITLE) in s or re.search(r'^#+ .*' + re.escape(TITLE) + r'\s*$', changelog, re.M):
     print('✗ 題名「%s」は過去のお知らせと同じ(1 file も書いていない)。題名を変える。' % TITLE)
     sys.exit(1)
+# 0d. id が既に使われているなら、書く前に止める ── 2026-10-13 に同じ日の別のお知らせと同じ id(`2026-10-13-attach-words`)を
+#     書き、announce の「配った文面が変わっていない」が落ちて初めて気づいた(既読の印は id で付くので、同じ id は届かない)。
+#     見るのは登記表と、落ちた分の控えが残る announce.test.ts の両方。
+if NEW_ID in ids or ("'%s'" % NEW_ID) in rd('tests/adapter/announce.test.ts'):
+    print('✗ id「%s」は既に使われている(1 file も書いていない)。id を変える。' % NEW_ID)
+    sys.exit(1)
 entry = "  {\n    id: '%s',\n    title: '%s',\n    items: [\n%s    ],\n  },\n" % (NEW_ID, TITLE, ''.join("      '%s',\n" % i for i in ITEMS))
 head = 'export const NOTICES: readonly Notice[] = [\n'
 assert s.count(head) == 1
