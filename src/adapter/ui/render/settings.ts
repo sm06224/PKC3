@@ -10,6 +10,7 @@
  * ⚠ ここは**めったに来ない場所**。だから常時見える帯からは外したが、
  * 押す導線そのものは畳まない(操作の帯に「設定」を置く)。
  */
+import { canPersistSettings, defaultSettingsStorage, SETTINGS_NOT_PERSISTED_TEXT } from './settings-persist-probe';
 import { SameOriginGrants } from '@adapter/platform/same-origin-grants';
 import { ExtensionGrants } from '@adapter/platform/extension-grants';
 import { AgentGrants, appAgentGrants } from '@adapter/platform/agent-grants';
@@ -337,6 +338,13 @@ export class SettingsRenderer {
     const configHead = document.createElement('h3');
     configHead.textContent = '設定';
     configSection.append(configHead);
+    // 🔴 保存できないブラウザでは、変えた設定が閉じると戻ることを先に言う(黙って約束を破らない。#1087)
+    if (!canPersistSettings(defaultSettingsStorage)) {
+      const note = document.createElement('p');
+      note.setAttribute('data-pkc-field', 'settings-not-persisted');
+      note.textContent = SETTINGS_NOT_PERSISTED_TEXT;
+      configSection.append(note);
+    }
 
     /**
      * 🔑 **表示**(見た目の好みだけ)── 外へ何が伝わるかの判断は「許可」に置く
