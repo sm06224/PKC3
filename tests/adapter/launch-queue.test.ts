@@ -339,8 +339,9 @@ describe('🔴 配線 ── launch から entry ができるところまで', (
     release();
     await settle();
     expect(app.written.map((e) => e.title)).toEqual(['待つ']);
-    // ⚠ 「もう一度選び直してください」で終わっていない
-    expect(app.d.getState().error ?? '').not.toContain('選び直して');
+    // ⚠ 断りの字(「…が動いています。…もう一度お試しください」)で終わっていない
+    //   (2026-10-13 に字を直した ── 古い字のままだと、この否定は常に通る空振りになる)
+    expect(app.d.getState().error ?? '').not.toContain('もう一度お試しください');
   });
 
   it('user のクリック起点の取り込みは今までどおり**断る**(選び直せる)', async () => {
@@ -348,7 +349,7 @@ describe('🔴 配線 ── launch から entry ができるところまで', (
     let release!: () => void;
     void app.gate(() => new Promise<void>((r) => (release = r)));
     await app.gate(async () => {}); // 2 本目 = 断られる
-    expect(app.d.getState().error).toContain('選び直して');
+    expect(app.d.getState().error).toContain('もう一度お試しください');
     release();
   });
 });

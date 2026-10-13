@@ -63,7 +63,9 @@ export function createAssetGate(dispatcher: Dispatcher): AssetGate {
       dispatcher.dispatch({
         type: 'OP_FAILED',
         error:
-          '添付の取り込み / 削除の処理が実行中です。完了してから、もう一度選び直してください',
+          // 🔴 貼り付けもこの口を通る(選び直す物が無い)ので「もう一度お試しください」(#1087 の見直し 2026-10-13)。
+          //    中身は「使われていない添付の整理」なので、「削除の処理」と呼ばない
+          '添付の取り込みか、使われていない添付の整理が動いています。終わってから、もう一度お試しください',
       });
       return;
     }

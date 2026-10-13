@@ -123,6 +123,6 @@ export function shrinkQuestion(
   return (
     `大きな画像です(${before.width}×${before.height} / ${humanBytes(before.bytes)})。\n` +
     `${after.width}×${after.height} / ${humanBytes(after.bytes)} に縮めて取り込みますか?\n` +
-    '⚠ 縮めると元の細かさは戻りません。そのままでよければ「いいえ」を選んでください。'
+    '⚠ 縮めると元の細かさは戻りません。そのままでよければ「そのまま」を選んでください。'
   );
 }
