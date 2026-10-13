@@ -84,7 +84,7 @@ describe('link-preview', () => {
       const card = renderPreviewCard(document, { kind: 'not-found' });
       expect(card.classList.contains('pkc-link-preview-empty')).toBe(true);
       expect(card.querySelector('.pkc-link-preview-not-found')?.textContent).toContain(
-        'このノートは存在しません',
+        'このノートは見つかりません(ゴミ箱にあれば戻せます)',
       );
     });
 
@@ -354,7 +354,7 @@ describe('link-preview', () => {
       expect(linkPreviewOpen(root)).toBe(true);
       const card = root.querySelector(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`);
       expect(card?.querySelector('.pkc-link-preview-not-found')?.textContent).toContain(
-        'このノートは存在しません',
+        'このノートは見つかりません(ゴミ箱にあれば戻せます)',
       );
 
       teardown();

@@ -215,7 +215,7 @@ export function htmlToDocxBlocks(doc: Document): {
       if (gone !== null) {
         skipped += 1;
         // ⚠ 段落の**中**に在った画像も、理由を文字として残す(黙って消さない)
-        pushRun(out, `［${gone.what} はコピーできませんでした: ${gone.why}］`, { ...style, italic: true });
+        pushRun(out, `［${gone.what} は入れられませんでした: ${gone.why}］`, { ...style, italic: true });
         continue;
       }
       if (tag === 'br') {

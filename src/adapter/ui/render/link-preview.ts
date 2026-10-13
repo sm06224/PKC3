@@ -10,6 +10,7 @@ import type { BinderServices } from '../actions/binder';
 import { parseLinkTarget } from '../../../features/entry-ref/link-target';
 import { archetypeLabel } from '../../../features/flavor/archetype-label';
 import { parseFrontmatter } from '../../../features/markdown/frontmatter';
+import { MISSING_LINK_TITLE } from './link-missing';
 
 export const LINK_PREVIEW_REGION = 'link-preview';
 export const HOVER_DELAY_MS = 300;
@@ -132,7 +133,9 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
     card.classList.add('pkc-link-preview-empty');
     const msg = doc.createElement('div');
     msg.className = 'pkc-link-preview-not-found';
-    msg.textContent = 'このノートは存在しません';
+    // 🔴 押す前の吹き出し(`MISSING_LINK_TITLE`)と同じ字(#1087 の見直し 2026-10-13)── 「存在しません」と言い切ると、
+    //    ゴミ箱に在るノートまで消えたと読める。2 つが同時に出るので、字が食い違うと矛盾して見える
+    msg.textContent = MISSING_LINK_TITLE;
     card.append(msg);
     return card;
   }

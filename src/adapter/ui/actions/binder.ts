@@ -4372,7 +4372,9 @@ function selectEntryOrExplain(
   if (!state.entryMetas.has(lid)) {
     // ⚠ `${what}のノート` と書かない ── what='ノート' の呼び手で
     //   「ノートのノートが見つかりません」になる(UX レビュー 2026-08-28)
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません` });
+    // 🔴 押す前の吹き出し(`MISSING_LINK_TITLE`)と同じ手掛かりを添える(#1087 の見直し 2026-10-13)──
+    //    押した後の字から「ゴミ箱にあれば戻せます」が消えると、どこを探せばよいかが分からない
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます)` });
     return false;
   }
   dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });

@@ -20,6 +20,7 @@
  *   tabindex="0"` なのに、Enter が効かなかった
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { MISSING_LINK_TITLE } from '../../src/adapter/ui/render/link-missing';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -147,6 +148,8 @@ describe('🔴 断るときは理由を出す', () => {
     // ⚠ **綴りは正しいが居ない** lid を使う(非 ASCII だと「読めません」側へ落ちる)
     entryLink('entry:zzz').click();
     expect(lastError(), '無言で断った').toContain('見つかりません');
+    // 🔴 押す前の吹き出しと同じ手掛かり(どこを探せばよいか)が、押した後の字にも残る
+    expect(lastError(), '押した後の字から、ゴミ箱の手掛かりが消えた').toContain(MISSING_LINK_TITLE.slice(MISSING_LINK_TITLE.indexOf('(')));
   });
 
   it('🔴 リンクの綴りが壊れているとき', () => {
