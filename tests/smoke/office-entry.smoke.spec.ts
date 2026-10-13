@@ -15,6 +15,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { gotoApp, collectPageErrors, clickReal } from './helpers';
+import { ALIVE_TTL_MS } from '../../src/adapter/platform/office/office-window';
 import {
   SHADOW_OPENED_NOTICE,
   SHADOW_OPEN_SAVED_LABEL,
@@ -205,9 +206,13 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
     const w = window as unknown as Record<string, unknown>;
     const docs: { bytes: number[]; token: string; fromShadow: boolean | null }[] = [];
     w.__docs = docs;
+    w.__closed = 0;
+    w.__aliveAt = Date.now();
     const listen = new BroadcastChannel('pkc3-office');
     listen.onmessage = (e) => {
       const d = e.data as { pkc3Office?: string; payload?: { bytes?: Uint8Array; token?: string; fromShadow?: boolean } };
+      if (d?.pkc3Office === 'closed') w.__closed = (w.__closed as number) + 1;
+      if (d?.pkc3Office === 'alive') w.__aliveAt = Date.now();
       if (d?.pkc3Office === 'document' && d.payload?.bytes) {
         docs.push({
           bytes: Array.from(d.payload.bytes),
@@ -221,6 +226,37 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   });
   const docs = (): Promise<{ bytes: number[]; token: string; fromShadow: boolean | null }[]> =>
     page.evaluate(() => (window as unknown as { __docs: never[] }).__docs);
+  /**
+   * 🔴 **窓を閉じたら、本体が「窓はもう無い」と見なすまで待つ**。⚠ 本体は窓が開いていそうな間(`isProbablyOpen`)は
+   *   「開く」を押されても、控えを訊かず・新しい窓も開かず、開いている窓へ頼むだけにする(2 つ立てない)。
+   *   「無い」と見なすのは ① 窓の `pagehide` が放つ「閉じた」放送を受けたとき ② 生存通知が `ALIVE_TTL_MS` 途絶えたとき の
+   *   どちらか早いほう。Playwright の `page.close()` は窓を落とすだけで、放送が必ず先に出る保証が無い
+   *   (負荷を掛けた実測で、放送が 5 秒待っても本体に来ない回があった)── そのときは ② になる。
+   *   閉じた直後に押すと、①②のどちらも来ていない本体を押すことになり、`:302` では訊く確認が出ず、`:315` では窓が開かない。
+   *   本体の受け口(`OfficeWindow.receive`)と同じ放送を、本体より後に作った受け口で数える。
+   *   ⚠ これは検査が先走っていた分の修正で、本体は変えていない(閉じ方が「放送なし」の窓を ALIVE_TTL_MS のあいだ
+   *   開いていると見なすのは設計どおり ── `isProbablyOpen` の注記「断定はできない」)。
+   */
+  const closeWindow = async (w: import('@playwright/test').Page): Promise<void> => {
+    const state = (): Promise<{ closed: number; silentMs: number }> =>
+      page.evaluate(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+        const g = window as unknown as { __closed: number; __aliveAt: number };
+        return { closed: g.__closed, silentMs: Date.now() - g.__aliveAt };
+      });
+    const before = (await state()).closed;
+    await w.close();
+    await expect
+      .poll(
+        async () => {
+          const st = await state();
+          // ② は本体の物差し(`ALIVE_TTL_MS`)に余裕を足して見る(本体と受け口で、受けた時刻が数 ms ずれる)
+          return st.closed > before || st.silentMs > ALIVE_TTL_MS + 300;
+        },
+        { message: '窓を閉じた後、本体が「窓はもう無い」と見なさない', timeout: ALIVE_TTL_MS + 10_000 },
+      )
+      .toBe(true);
+  };
   const windowAsks = (): Promise<void> =>
     page.evaluate(() => {
       (window as unknown as { __ask: BroadcastChannel }).__ask.postMessage({ pkc3Office: 'ready-for-document', payload: {} });
@@ -295,7 +331,7 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   await expect.poll(async () => (await docs()).length, { message: '文書が窓へ送られない' }).toBe(1);
   expect((await docs())[0], '控えの版が渡っていない').toEqual({ bytes: [7, 7, 7], token: lid, fromShadow: true });
   expect(await shelf(), '控えの版で開いただけで控えを消した(保存するまで残す)').toHaveLength(1);
-  await win1.close();
+  await closeWindow(win1);
 
   // ④ 保存済みの版で開く: 控えが消え、渡る bytes は保存済みの版
   await clickReal(page, open);
@@ -309,7 +345,7 @@ test('🔴 保存していない編集があれば、開く前に 2 択を訊く
   expect(saved.bytes, '保存済みの版が渡っていない').toEqual(Array.from(FAKE_DOCX));
   expect(saved.fromShadow, '保存済みの版に fromShadow が載った').toBeNull();
   expect(await shelf(), '保存済みの版で開いたのに控えが残っている').toEqual([]);
-  await win2.close();
+  await closeWindow(win2);
 
   // ⑤ 対照群: 控えが無ければ、訊かずに窓が開く
   const third = context.waitForEvent('page');

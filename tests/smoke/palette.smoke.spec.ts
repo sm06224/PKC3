@@ -250,6 +250,9 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await callByName('図を入れる', 'insert-diagram');
   await page.locator('[data-pkc-field="pick-diagram"]').first().click();
   await expect(dialog).toBeHidden();
+  // ⚠ 器が閉じる(`open` が外れる)のは、本文へ入る**より前**(`close` event は後の task で来て、答えを返してから書く)
+  //   ── 閉じたのを見た直後の読みは、負荷がかかると入る前の値を拾う。入るのを待ってから読む
+  await expect(liveRow, '図が入っていない').toHaveValue(/```mermaid/u);
   const diagramValue = await liveRow.inputValue();
   expect(diagramValue.startsWith('hello'), `図が先頭に入った: ${diagramValue}`).toBe(true);
   expect(diagramValue, '図が入っていない').toContain('```mermaid');
@@ -258,6 +261,8 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await caretAt('あいうえお', 1, 4);
   await callByName('図を入れる', 'insert-diagram');
   await expect(dialog).toBeHidden();
+  // ⚠ 上と同じ:パレットが閉じたのを見ても、命令が本文へ書くのはその後
+  await expect(liveRow, '選んだ範囲が図の囲みにならない').toHaveValue(/```mermaid/u);
   const wrapped = await liveRow.inputValue();
   expect(wrapped, `選んだ範囲(いうえ)が図の囲みになっていない: ${wrapped}`).toMatch(/^あ\n?```mermaid\nいうえ\n```\n?お$/u);
   // ノートリンク(前から登記済み。同じ穴)
@@ -265,6 +270,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await callByName('ノートリンクを入れる', 'insert-entry-link');
   await page.locator('[data-pkc-field="entry-pick-row"]').first().click();
   await expect(dialog).toBeHidden();
+  await expect(liveRow, 'リンクが入っていない').not.toHaveValue('hello world');
   const linked = await liveRow.inputValue();
   expect(linked.startsWith('hello'), `リンクが先頭に入った: ${linked}`).toBe(true);
   expect(linked.endsWith('world'), `後ろの字が動いた: ${linked}`).toBe(true);
