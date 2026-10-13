@@ -170,10 +170,19 @@ export interface PurgeFlowDeps {
  * (再走査で referenced)。将来 confirm を独自 async UI に替えても保険が残る。
  * 呼び出し側は attach と排他の in-flight gate を張ること(main.ts)。
  */
+/** 使われていない添付が 0 件のときの知らせ(理由つき)。 */
+export const ORPHAN_NONE_TEXT =
+  'どのノートからも使われていない添付はありません。添付のノート・ゴミ箱・履歴に残っている添付は、使われているものとして数えます';
+
 export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const first = await findOrphanAssets(deps.ports);
   if (first.keys.length === 0 && first.strays.length === 0) {
-    await deps.tell('どのノートからも使われていない添付はありません');
+    /**
+     * 🔑 **0 件の理由を言う**(#1640 ⑤-A)── 本文から画像の行を消しても、添付のノート・ゴミ箱・履歴(過去の版)に
+     *   その添付が残っていれば「使われている」と数える(`scanAssetRefs` が entries と revisions の両方を読む)。
+     *   理由が出ないと「消したのに減らない」の答えがどこにも無い。
+     */
+    await deps.tell(ORPHAN_NONE_TEXT);
     return;
   }
   const ok = await deps.ask(
