@@ -158,6 +158,18 @@ export function patchTaskCard(
     // 🔴 **指すのは原文の行番号**(索引ではない ── 別の行を書き換えないため)
     box.setAttribute('data-pkc-task-line', String(data.line));
     box.checked = data.done;
+    /**
+     * 🔴 繰り返しの回は、チェックしても元の行は済みにならず、その日の行が本文に増える ──
+     *   押す前に言う。⚠ 札は使い回されて繰り返しの有無が変わりうるので、作るときではなく**ここ**で毎回決める。
+     */
+    if (data.repeat !== null) {
+      const word = 'この日のぶんを済みにします(本文にその日の行が増えます)';
+      box.title = word;
+      box.setAttribute('aria-label', word);
+    } else {
+      box.removeAttribute('title');
+      box.setAttribute('aria-label', 'チェックを切り替え');
+    }
   }
   /**
    * 🔴 **ノート 1 件の予定であることを、札に出す**(段④)。

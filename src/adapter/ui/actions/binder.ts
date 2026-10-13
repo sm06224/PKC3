@@ -79,8 +79,8 @@ import { indentLines } from '@features/markdown/indent-assist';
 import { swapLines } from '@features/markdown/line-swap';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
-import { renumberLists } from '@features/markdown/list-renumber';
-import { sortTasksByStatus } from '@features/markdown/task-sort';
+import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
+import { hasTaskItems, sortTasksByStatus } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -2146,21 +2146,45 @@ function viewBodyHost(root: HTMLElement): HTMLElement | null {
  * プレビューも textarea の `input` で駆動しているので、これ 1 発で state と
  * 画面の両方が追いつく。
  *
- * ⚠ `value` の直代入はブラウザの取り消し履歴(Ctrl+Z)を捨てる。書式パネルは
- * 「保存 / キャンセル」で丸ごと戻せるので、ここでは受け入れる ── 取り消しを
- * 残すには `execCommand('insertText')` が要るが、経路が 2 本になる。
+ * 🔴 **書くのは `insertText`(= `execCommand`)で、変わった範囲だけ** ── `ta.value =` や
+ * `setRangeText` はブラウザの取り消し履歴(Ctrl+Z)を捨てる(#765)。書式バーのボタンも
+ * Ctrl+B などのショートカットキーも、ここを通るので、押した分だけ Ctrl+Z で戻せる。
+ * 字下げ(`runIndent`)・計算と同じ作法。
  */
 function writeBack(
   ta: HTMLTextAreaElement,
   next: { text: string; start: number; end: number },
   toBottom = false,
 ): void {
-  ta.value = next.text;
-  ta.setSelectionRange(next.start, next.end);
   ta.focus();
+  replaceChanged(ta, next.text);
+  ta.setSelectionRange(next.start, next.end);
   // 追記はカーソルが末尾 ── 見えていないと「押しても何も起きない」に見える
   if (toBottom) ta.scrollTop = ta.scrollHeight;
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/**
+ * 欄の本文を `nextText` に揃える。**前後で同じ字は触らず、違う真ん中だけ** `insertText` で置き換える
+ * (Ctrl+Z の履歴に載る)。`insertText` が `input` を撃つので、ここでは撃たない。
+ * 何も変わらないときだけ、以前と同じく `input` を 1 回撃つ(書き込み口の約束を保つ)。
+ */
+function replaceChanged(ta: HTMLTextAreaElement, nextText: string): void {
+  const cur = ta.value;
+  if (cur === nextText) {
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+  let head = 0;
+  const max = Math.min(cur.length, nextText.length);
+  while (head < max && cur[head] === nextText[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < max - head &&
+    cur[cur.length - 1 - tail] === nextText[nextText.length - 1 - tail]
+  )
+    tail += 1;
+  ta.setSelectionRange(head, cur.length - tail);
+  insertText(ta, nextText.slice(head, nextText.length - tail));
 }
 
 /**
@@ -7186,9 +7210,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     //   先打ちした字が成功の「欄を空にする」で黙って消えるのを防ぐ
     if (textEl?.hasAttribute('data-pkc-busy')) return;
     const result = addScheduleItemChecked(dispatcher, services, { text: textEl?.value ?? '', date });
+    /**
+     * 🔴 **日付なしで足した回は、見えない理由を 1 行言う**(欄を空にして足すと、「出すもの」で
+     *   日付のないものを出していない限り、足した予定がどこにも出ない)。出しているときは言わない。
+     */
+    const noteUndated = (): void => {
+      if (date === '' && !dispatcher.getState().showUndatedTasks)
+        services.showStatus?.(
+          '日付なしで足しました(「出すもの」で「日付のないもの」を選ぶと見られます)',
+        );
+    };
     // 通ったときだけ欄を空にする(#1051。理由は `addScheduleItem` の中)
     if (typeof result === 'boolean') {
       if (textEl && result) textEl.value = '';
+      if (result) noteUndated();
       return;
     }
     if (textEl) {
@@ -7199,7 +7234,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       if (!textEl) return;
       textEl.removeAttribute('data-pkc-busy');
       textEl.readOnly = false;
-      if (ok) textEl.value = '';
+      if (ok) {
+        textEl.value = '';
+        noteUndated();
+      }
     });
   },
   /**
@@ -9795,7 +9833,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   PKC3 のライブエディタは行ごとに欄を出すので、常時かけると
    *   **触っていない行が勝手に変わる**。
    * ⚠ 効く先は書式パネルと同じ 1 か所(`formatTarget`)── 2 列でも live でも動く。
-   * ⚠ **`value` 直代入をしない** ── Ctrl+Z の履歴を捨てるので `setRangeText`。
+   * ⚠ **`value` 直代入も `setRangeText` もしない** ── Ctrl+Z の履歴を捨てるので `insertText`(#765)。
    */
   'renumber-lists': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -9813,11 +9851,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     const next = renumberLists(ta.value);
     // ⚠ **変わらなかったことを言う** ── 押して無反応にしない
     if (next === ta.value) {
-      services.showStatus?.('番号はもう揃っています');
+      services.showStatus?.(
+        hasNumberedItems(ta.value) ? '番号はもう揃っています' : 'このノートに番号付きリストはありません',
+      );
       return;
     }
-    ta.setRangeText(next, 0, ta.value.length, 'end');
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
+    ta.focus();
+    replaceChanged(ta, next);
+    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('番号を振り直しました');
   },
   /**
@@ -9825,7 +9867,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *
    * 完了した項目（- [x]）を各リストブロックの末尾へ移動する。
    * 効く先は書式パネルと同じ 1 か所(formatTarget)── 2 列でも live でも動く。
-   * ⚠ setRangeText で Undo 履歴を保持する。
+   * ⚠ `insertText` で書く(Undo 履歴に載る。`setRangeText` は履歴を捨てる ── #765)。
    */
   'sort-tasks': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -9841,11 +9883,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const next = sortTasksByStatus(ta.value);
     if (next === ta.value) {
-      services.showStatus?.('完了項目は既に末尾に揃っています');
+      services.showStatus?.(
+        hasTaskItems(ta.value) ? '完了項目は既に末尾に揃っています' : 'このノートにチェック項目はありません',
+      );
       return;
     }
-    ta.setRangeText(next, 0, ta.value.length, 'end');
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
+    ta.focus();
+    replaceChanged(ta, next);
+    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('完了したチェック項目を末尾へ移動しました');
   },
   /**

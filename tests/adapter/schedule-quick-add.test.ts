@@ -20,7 +20,7 @@ import { APPEND_BUSY_NOTE } from '../../src/adapter/state/app-state';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { todayNoteTitle } from '../../src/features/schedule/today-note';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
@@ -47,7 +47,12 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(metas: EntryMeta[], bodies: Record<string, string>, now?: () => Date) {
+function setup(
+  metas: EntryMeta[],
+  bodies: Record<string, string>,
+  now?: () => Date,
+  services: BinderServices = {},
+) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -56,7 +61,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>, now?: () => D
   root.append(host);
   const sched = new ScheduleRenderer(host, now);
   d.onState((s) => sched.render(s));
-  bindActions(root, d);
+  bindActions(root, d, services);
   const disk = { ...bodies };
   const persisted: EntryUpsert[] = [];
   connectStoreEffects(d, {
@@ -407,5 +412,55 @@ describe('#1087 予定の足す欄の Enter', () => {
     enter(field);
     await tick();
     expect(s.disk['t1']).toContain('- [ ] へんかん');
+  });
+});
+
+describe('日付なしで足したときの知らせ', () => {
+  const NOTE = '日付なしで足しました(「出すもの」で「日付のないもの」を選ぶと見られます)';
+  const add = async (s: ReturnType<typeof setup>): Promise<void> => {
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+  };
+
+  it('🔴 日付を空にして足すと、見えない理由を 1 行言う', async () => {
+    const said: string[] = [];
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
+      showStatus: (t) => void said.push(t),
+    });
+    await tick();
+    type(s, 'あとでやる'); // 日付を空にする
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] あとでやる');
+    expect(said).toEqual([NOTE]);
+  });
+
+  it('⚠ 対照群:日付つきで足したときは言わない', async () => {
+    const said: string[] = [];
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
+      showStatus: (t) => void said.push(t),
+    });
+    await tick();
+    type(s, 'きょうやる', '2026-08-28');
+    await add(s);
+    expect(s.disk['t1']).toContain(`- [ ] きょうやる @2026-08-28`);
+    expect(said).toEqual([]);
+  });
+
+  it('⚠ 対照群:「日付のないもの」を出しているなら言わない / 足せなかった回も言わない', async () => {
+    const said: string[] = [];
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {
+      showStatus: (t) => void said.push(t),
+    });
+    await tick();
+    s.d.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' });
+    expect(s.d.getState().showUndatedTasks, '前提:日付のないものが出ていない').toBe(true);
+    type(s, 'みえている');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] みえている');
+    expect(said).toEqual([]);
+    s.d.dispatch({ type: 'TOGGLE_SHOW_UNDATED_TASKS' });
+    type(s, ''); // 字が空 = 足せない
+    await add(s);
+    expect(said, '足せなかったのに「足しました」と言った').toEqual([]);
   });
 });

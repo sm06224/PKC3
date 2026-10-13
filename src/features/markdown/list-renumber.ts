@@ -111,3 +111,21 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
   }
   return out.join(eol);
 }
+
+/**
+ * 本文に番号付きの項目が 1 つでも在るか。⚠ 読み方は `renumberLists` と同じ
+ * (fence の中は数えない)── 「無いから変わらなかった」と「揃っているから変わらなかった」を言い分ける。
+ */
+export function hasNumberedItems(body: string): boolean {
+  if (body === '' || !/\d+[.)]/.test(body)) return false;
+  let fence = '';
+  for (const line of body.split(/\r?\n/)) {
+    const nextFence = advanceFence(fence, line);
+    if (fence !== '' || nextFence !== '') {
+      fence = nextFence;
+      continue;
+    }
+    if (readItem(line) !== null) return true;
+  }
+  return false;
+}

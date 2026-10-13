@@ -174,7 +174,7 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
       expect(r, `${id} が一覧に無い`).toBeDefined();
       expect(r?.ready, `${id}: ボタンが無いのに押せる顔`).toBe(false);
       expect(r?.why.startsWith(NOT_READY_PREFIX), `${id}: 理由が無い`).toBe(true);
-      expect(r?.why, `${id}: 場面の言葉が理由に無い`).toContain('本文の整形バーが出ているとき');
+      expect(r?.why, `${id}: 場面の言葉が理由に無い`).toContain('本文の書式バーが出ているとき');
     }
     // 対照群:ボタンを組めば押せる。隠せば押せない。disabled も押せない
     const wrap = document.createElement('div');

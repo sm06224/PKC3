@@ -52,14 +52,19 @@ const LINE_DETECT: Readonly<Record<LinePrefix, RegExp>> = {
   h2: /^## /,
   h3: /^### /,
   quote: /^> /,
-  ul: /^- (?!\[[ x]\] )/,
-  ol: /^\d+\. /,
-  task: /^- \[[ x]\] /,
+  // 🔴 リストの 3 種は**字下げを保ったまま**判定する(入れ子の行で記号が二重にならない)。
+  //   チェックの `[x]` は大文字の `[X]` も済みとして受ける(`body-rewrite.ts` の `TASK_LINE` と同じ読み方)
+  ul: /^(\s*)- (?!\[[ xX]\](?:\s|$))/,
+  ol: /^(\s*)\d+\. /,
+  task: /^(\s*)- \[[ xX]\] /,
 };
+
+/** 字下げを保って記号を剥がす対象。 */
+const INDENT_KEPT: ReadonlySet<LinePrefix> = new Set<LinePrefix>(['ul', 'ol', 'task']);
 
 /** 行頭の印を落とす(どの種類でも)。⚠ 番号付きは `12. ` のような形もある。 */
 function stripMark(line: string): string {
-  return line.replace(/^(?:#{1,6} |> |- \[[ x]\] |[-*+] |\d+\. )/, '');
+  return line.replace(/^(?:#{1,6} |> |- \[[ xX]\] |[-*+] |\d+\. )/, '');
 }
 
 /** 選択が触れている行の範囲(行頭・行末まで広げる)。 */
@@ -81,9 +86,15 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
   const block = sel.text.slice(from, to);
   const lines = block.split('\n');
   const allMarked = lines.every((l) => detect.test(l));
+  const keep = INDENT_KEPT.has(kind);
   const next = lines
     .map((l, i) => {
-      if (allMarked) return l.replace(detect, '');
+      if (allMarked) return keep ? l.replace(detect, '$1') : l.replace(detect, '');
+      if (keep) {
+        const indent = /^\s*/.exec(l)![0];
+        const bare = stripMark(l.slice(indent.length));
+        return kind === 'ol' ? `${indent}${i + 1}. ${bare}` : `${indent}${mark}${bare}`;
+      }
       const bare = stripMark(l);
       // 番号付きは行ごとに数える(全部 `1.` だと読みにくい)
       return kind === 'ol' ? `${i + 1}. ${bare}` : `${mark}${bare}`;

@@ -835,6 +835,21 @@ describe('繰り返し(#344 段②)', () => {
     expect(card.querySelector('[data-pkc-field="when"]')?.textContent).toBe('毎週');
   });
 
+  it('🔴 繰り返しの回のチェックは「この日のぶん」と言う(押す前に分かる)。単発の札は言わない', () => {
+    const { root } = setup({ [BIN]: body + '- [ ] 単発 @2026-08-30\n' });
+    const cards = cardsOf(root, '2026-08-30');
+    const rep = cards.find((c) => c.hasAttribute('data-pkc-task-repeat'))!;
+    const one = cards.find((c) => !c.hasAttribute('data-pkc-task-repeat'))!;
+    expect(rep, '前提:繰り返しの札が出ていない').toBeDefined();
+    expect(one, '前提:単発の札が出ていない').toBeDefined();
+    const word = 'この日のぶんを済みにします(本文にその日の行が増えます)';
+    const boxOf = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-pkc-action="toggle-task"]')!;
+    expect(boxOf(rep).title).toBe(word);
+    expect(boxOf(rep).getAttribute('aria-label')).toBe(word);
+    expect(boxOf(one).getAttribute('aria-label'), '単発の札まで言い換えた').toBe('チェックを切り替え');
+    expect(boxOf(one).title).toBe('');
+  });
+
   it('🔴 隔週は 2 週おきに札が出て、札に「隔週」と出る(#855)', () => {
     const { root } = setup({ [BIN]: '- [ ] 定例 @2026-08-23 隔週\n' });
     expect(cardsOf(root, '2026-08-23')).toHaveLength(1);
