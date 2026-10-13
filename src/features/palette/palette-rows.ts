@@ -77,6 +77,21 @@ function fold(s: string): string {
  */
 function rankOf(cmd: KeyCommand, q: string): number | null {
   if (q === '') return 0;
+  /**
+   * 🔴 **空白で区切った語は、全部が当たる行だけ残す**(#1087 の見直し 2026-10-13)── 直す前は打った字全体を 1 つの塊として
+   *   探したので、「予定 書き出し」のように離れた 2 語を打つと何も当たらなかった。順位は、いちばん遠い当たり方に合わせる。
+   * ⚠ 1 語のときは今までどおり(下の 1 語の判定をそのまま使う)。
+   */
+  const words = q.split(/\s+/).filter((w) => w !== '');
+  if (words.length > 1) {
+    let worst = 0;
+    for (const w of words) {
+      const r = rankOf(cmd, w);
+      if (r === null) return null;
+      worst = Math.max(worst, r);
+    }
+    return worst;
+  }
   const label = fold(cmd.label);
   if (label.startsWith(q)) return 0;
   if (label.includes(q)) return 1;
