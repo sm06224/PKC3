@@ -204,3 +204,16 @@ describe('🔴 本文の欄が要る操作の理由(#1206 D3)', () => {
     expect(whyOf('format-ruby', rows)).toBe(`${NOT_READY_PREFIX}保存しています`);
   });
 });
+
+describe('2 語以上で探す(#1087 の見直し 2026-10-13)', () => {
+  it('🔴 空白で区切った語が全部当たる行を出す(離れていても・順番が違っても)', () => {
+    // 「字幕 書き出し」は alias の中で離れている(間に「文字起こし」)── 1 つの塊として探すと当たらない
+    expect(idsOf('字幕 書き出し')).toContain('export-transcript-srt');
+    expect(idsOf('書き出し 字幕')).toContain('export-transcript-srt');
+    expect(idsOf('字幕　書き出し'), '全角の空白でも割る').toContain('export-transcript-srt');
+  });
+
+  it('⚠ どれか 1 語でも当たらない行は出さない(全部の語で絞る)', () => {
+    expect(idsOf('字幕 ぬるぽ')).toEqual([]);
+  });
+});
