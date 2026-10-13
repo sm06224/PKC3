@@ -145,6 +145,7 @@ import {
   ROW_REOPEN_EVENT,
   type RowReopenDetail,
 } from '@adapter/ui/render/row-swap';
+import { INLINE_CODE_COPY_FAILED_EVENT } from '@adapter/ui/render/inline-code-copy';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import {
   HOLD_ATTR,
@@ -17205,6 +17206,13 @@ export function bindActions(
     run('rename-attachment', el);
   };
   listen(root, 'focusout', (ev) => commitAttachmentName(ev.target));
+  /**
+   * 🔴 **文中の `code` のコピーに失敗したら、画面下に言う**(#1163 依頼 72-2)。
+   * ⚠ 字は枠の ⧉ と同じ 1 つ(`copy-md-block.ts` の `COPY_FAILED`)。
+   */
+  listen(root, INLINE_CODE_COPY_FAILED_EVENT as keyof HTMLElementEventMap, () => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+  });
   /**
    * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。
    *

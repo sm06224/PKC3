@@ -18,6 +18,16 @@ const INLINE_CODE_TITLE = 'クリックでコピー';
 
 const KEY = 'pkc3.inline-code-copy';
 
+/**
+ * 🔴 **コピーできなかったことを外へ知らせる event**(#1163 依頼 72-2)。
+ *
+ * ⚠ 成功は光り方で分かるが、失敗は何も起きなかった ── 枠の ⧉ は「コピーできませんでした」と
+ *   言うのに、文中の `code` だけが黙っていた。
+ * ⚠ 描画の層は dispatch しない(層規約)── 泡立つ event を投げ、`bindActions` が root で受けて
+ *   画面下へ出す(押した `code` は root の中に在る)。
+ */
+export const INLINE_CODE_COPY_FAILED_EVENT = 'pkc-inline-code-copy-failed';
+
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage : null;
@@ -104,6 +114,7 @@ export function applyInlineCodeCopy(root: HTMLElement): void {
 
       void copyPlainText(raw).then((ok) => {
         if (ok) flashCopied(code);
+        else code.dispatchEvent(new CustomEvent(INLINE_CODE_COPY_FAILED_EVENT, { bubbles: true }));
       });
     };
     HANDLERS.set(code, onClick);

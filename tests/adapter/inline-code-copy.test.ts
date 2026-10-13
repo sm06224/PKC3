@@ -1,6 +1,12 @@
 /** @vitest-environment happy-dom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyInlineCodeCopy, INLINE_CODE_ATTR } from '../../src/adapter/ui/render/inline-code-copy';
+import {
+  applyInlineCodeCopy,
+  INLINE_CODE_ATTR,
+  INLINE_CODE_COPY_FAILED_EVENT,
+} from '../../src/adapter/ui/render/inline-code-copy';
+import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import * as clipboard from '../../src/adapter/platform/clipboard';
 
 describe('インラインコード（code）のワンクリックコピー(#1148)', () => {
@@ -87,5 +93,42 @@ describe('インラインコード（code）のワンクリックコピー(#1148
 
     code.click();
     expect(copySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 コピーできなかったら画面下に「コピーできませんでした」と出す(依頼 72-2)/ できたら出さない', async () => {
+    root.innerHTML = '<p><code>npm test</code></p>';
+    applyInlineCodeCopy(root);
+    const dispatcher = new Dispatcher();
+    const seen: unknown[] = [];
+    const spy = vi.spyOn(dispatcher, 'dispatch').mockImplementation((a) => {
+      seen.push(a);
+    });
+    bindActions(root, dispatcher);
+    const code = root.querySelector<HTMLElement>('code')!;
+
+    vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
+    code.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen.filter((a) => (a as { type: string }).type === 'OP_FAILED'), '対照群: できたら黙る').toHaveLength(0);
+
+    vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(false);
+    code.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toContainEqual({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+    spy.mockRestore();
+  });
+
+  it('失敗の event は泡立つ(root で受けられる)', async () => {
+    root.innerHTML = '<p><code>x</code></p>';
+    applyInlineCodeCopy(root);
+    const got = vi.fn();
+    root.addEventListener(INLINE_CODE_COPY_FAILED_EVENT, got);
+    vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(false);
+    root.querySelector<HTMLElement>('code')!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(got).toHaveBeenCalledTimes(1);
   });
 });

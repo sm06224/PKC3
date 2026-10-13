@@ -95,6 +95,7 @@ import { installAppendAutofold } from '@adapter/ui/render/append-autofold';
 import { appPaneSizes, applyPaneSizes } from '@adapter/ui/render/pane-size';
 import { appGroupFold } from '@adapter/ui/render/group-fold';
 import { installPaneResize } from '@adapter/ui/render/pane-resize';
+import { installEditorPrint } from '@adapter/ui/render/print-editing';
 import { installPlaceConnect } from '@adapter/ui/render/place-connect';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
 import { installScheduleDrag } from '@adapter/ui/render/schedule-drag';
@@ -1255,6 +1256,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyPaneSizes(root, appPaneSizes.get());
   /** 🔴 掴んで大きさを変える配線(#497)。⚠ 外さない(アプリと同寿命)。 */
   installPaneResize(root);
+  /** 🔴 編集中に刷っても、編集欄の中身を全部紙に出す(#1163 依頼 71-2)。⚠ 外さない(アプリと同寿命)。 */
+  installEditorPrint(window);
   /** 🔴 板の塊を掴んで動かす配線(#283 P4-b)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceDrag(root, dispatcher);
   /** 🔴 付箋に乗せて ● を掴み、別の付箋へ引いて繋ぐ配線(#530 段③d)。⚠ 外さない(アプリと同寿命)。 */
