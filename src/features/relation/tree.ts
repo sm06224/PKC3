@@ -50,22 +50,40 @@ export function resolveCanonicalParents(
   return parentOf;
 }
 
+/**
+ * 🔑 **親 → 子の索引を 1 度だけ作る**(#1087)。正準親の解決も並べ替えも**ここ 1 か所**で、
+ *   `getStructuralChildren`(1 件ぶん)と木を丸ごと歩く呼び手(構成のテキスト)が同じ口を通る
+ *   ── 並びの規則を 2 本にしない(§7)。
+ * ⚠ 木を歩く側が節点ごとに `getStructuralChildren` を呼ぶと、そのたびに正準親を解き直して
+ *   O(N·(R+N)) になる。歩く側はこの索引を 1 度作って引く。
+ * 返す関数は、子の無い lid にも空の配列を返す。
+ */
+export function buildStructuralChildrenIndex(
+  metas: ReadonlyMap<string, EntryMeta>,
+  relations: readonly Relation[],
+): (parentLid: string) => readonly EntryMeta[] {
+  const parentOf = resolveCanonicalParents(metas, relations);
+  const childrenOf = new Map<string, EntryMeta[]>();
+  for (const [child, parent] of parentOf) {
+    const m = metas.get(child);
+    if (!m) continue;
+    const list = childrenOf.get(parent);
+    if (list) list.push(m);
+    else childrenOf.set(parent, [m]);
+  }
+  // ⚠ 同値の tie は **lid** で決める(boot / 一覧と同じ規則 ── 揃えないと
+  //   並べ替えの「隣」がファイラの見た目と食い違う)
+  for (const list of childrenOf.values()) list.sort(byOrder);
+  return (parentLid) => childrenOf.get(parentLid) ?? [];
+}
+
 /** 親 folder 直下の子(正準親がその folder のもののみ、entryOrder 順)。 */
 export function getStructuralChildren(
   parentLid: string,
   metas: ReadonlyMap<string, EntryMeta>,
   relations: readonly Relation[],
 ): EntryMeta[] {
-  const parentOf = resolveCanonicalParents(metas, relations);
-  const out: EntryMeta[] = [];
-  for (const [child, parent] of parentOf) {
-    if (parent !== parentLid) continue;
-    const m = metas.get(child);
-    if (m) out.push(m);
-  }
-  // ⚠ 同値の tie は **lid** で決める(boot / 一覧と同じ規則 ── 揃えないと
-  //   並べ替えの「隣」がファイラの見た目と食い違う)
-  return out.sort(byOrder);
+  return [...buildStructuralChildrenIndex(metas, relations)(parentLid)];
 }
 
 /**
