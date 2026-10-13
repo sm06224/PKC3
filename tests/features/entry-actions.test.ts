@@ -392,11 +392,13 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['open-note-window', 'a3a6b9d4'],
       // 🔴 2026-09-21(#1017 段④b): バックアップ(このノート/このフォルダ)に改名・
       //    file 名の末尾を .pkc3-notes.zip に
-      ['export-entry', 'cf003ab6'],
+      // 🔴 2026-10-13(#1087): 説明に「履歴(過去の版)」が入ることを足した(実際に入る ── `single-entry-source.ts` の `getRevisionChain`)
+      ['export-entry', '80de8fd8'],
       ['export-entry-html', '9250f3ab'],
       // 🔴 本文そのままの .md(#1440)。2026-10-11 から右の列にも並ぶ
       ['export-entry-markdown', 'd97ee74b'],
-      ['export-folder', '1e3dc65f'],
+      // 🔴 2026-10-13(#1087): 同じ。フォルダの中のノートの履歴も入る(`folder-source.ts` の `getRevisionChain`)
+      ['export-folder', '4b51181e'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '027614c1'],
       ['export-entry-pdf', '6ec553e1'],

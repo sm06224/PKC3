@@ -53,3 +53,13 @@ export function bodySaveErrorText(e: unknown): string {
   const text = errorText(e);
   return text.includes(QUOTA_JA) ? `${text}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
 }
+
+/**
+ * 図の書き出し(SVG)が失敗したときの字(#1087)。
+ * 🔑 `String(e)` ではなく `errorText` を通す ── 「Error: …」の英語の前置きを付けず、分かる物は日本語にする。
+ * 🔑 長さの上限は 200 字(mermaid の構文エラーは何行にもなる)。⚠ 日本語の案内は `errorText` が前に置くので、
+ *   切れるのは末尾の原文のほうである。
+ */
+export function diagramExportErrorText(e: unknown): string {
+  return `図を書き出せませんでした: ${errorText(e).slice(0, 200)}`;
+}

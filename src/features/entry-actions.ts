@@ -1347,7 +1347,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'start-audio-capture': 'マイクで録音して、このノートに入れます',
   'start-screen-capture': '画面を録画して、このノートに入れます',
   'start-timer': 'このノートの作業時間を計ります(止めると本文に書きます)',
-  'export-entry': 'このノートの本文と添付を保存します(.pkc3-notes.zip)。取り込み直せます',
+  'export-entry': 'このノートの本文・添付・履歴(過去の版)を保存します(.pkc3-notes.zip)。取り込み直せます',
   // 🔴 **`export-entry` との違いを説明で言い切る**(#400 段④ と同じ作法)──
   //    どちらも「1 ノートを 1 file にする」ので、**何が違うか**を書かないと選べない
   'export-entry-html':
@@ -1355,7 +1355,7 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   // ⚠ **画面で起きることで書く**(user 指示 2026-08-21)── 「配下を再帰収集」ではなく
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':
-    '中のノートと添付を保存します(.pkc3-notes.zip)。取り込み直せます(外へのつながりは入りません)',
+    '中の本文・添付・履歴を保存します(.pkc3-notes.zip)。取り込み直せます。外へのつながりは入りません',
   // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
   //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、

@@ -47,5 +47,7 @@ describe('末尾の生成(#1017 段④b)', () => {
     expect(seen.size, '説明が使い回されている').toBe(3);
     // 🔑 §5 の検算:`.pkc3-part.zip` の説明は「つながり・履歴」の欠落に触れる
     expect(archiveKindContains('part')).toMatch(/つながり|履歴/);
+    // 🔴 .pkc3-notes.zip には履歴(過去の版)も入る(1 件・フォルダとも `getRevisionChain` を書く)── 説明が言う
+    expect(archiveKindContains('notes')).toContain('履歴');
   });
 });

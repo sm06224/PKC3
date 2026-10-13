@@ -38,6 +38,8 @@ describe('createAssetGate', () => {
     // 捨てたことが分かる文言。⚠ 貼り付けもこの口を通るので「選び直す」とは言わない(2026-10-13)
     expect(d.getState().error).toMatch(/もう一度お試しください/);
     expect(d.getState().error).not.toMatch(/選び直/);
+    // 門は取り込み・書き出し・整理で共通 ── 整理のせいにしない(書き出し中にもこの字が出る)
+    expect(d.getState().error).toMatch(/取り込み・書き出し・使われていない添付の整理のどれか/);
     expect(gate.busy).toBe(true);
 
     release();
