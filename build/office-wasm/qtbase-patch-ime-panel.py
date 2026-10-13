@@ -39,7 +39,7 @@ commit は **`a89ac4b88`「wasm: handle changes in inputMethodAccepted()」**(20
 
 ## 直し方(上流 6.10 の形にする)
 
-1. `update()` が `Qt::ImEnabled` の変化を拾い、`updateInputElement()` を呼ぶ
+1. `update()` が `Qt::ImEnabled` の変化を拾い、**main thread へ渡して** `updateInputElement()` を呼ぶ(#1438)
 2. `updateInputElement()` の先頭で `m_inputMethodAccepted` を**毎回取り直す**
 3. `m_visibleInputPanel` の門を**外す**(上流はメンバごと削除した。ここでは
    既定値を true にして門を無効化する ── `hideInputPanel()` の経路を壊さないため、
@@ -96,35 +96,36 @@ DIAG_REPLACE = """    const QWindow *focusWindow = QGuiApplication::focusWindow(
         + (m_inputMethodAccepted ? "-accept1" : "-accept0"));
     if (!m_focusObject || !focusWindow || !m_visibleInputPanel || !m_inputMethodAccepted) {"""
 
-# ── ① `update()` が ImEnabled の変化を拾う ──────────────────────────────
+# ── ① `update()` が ImEnabled の変化を拾う(#1438 で **メイン thread へ渡す形**にして戻した)──
 #
-# 🔴 **2026-08-16: この hunk を外した。文書を開くと固まる退行の原因だからである。**
+# 🔴 **2026-08-16: 1 稿目の hunk(`update()` から `updateInputElement()` を直接呼ぶ)は外した。
+# 文書を開くと固まる退行の原因だったからである。**
 #
 # 実測(対照群つき・決定的):
 #   pack lo-fb02e9d1fc62-run31890208793(**同じ LO sha・この patch 無し**) → 全段完走
 #   pack lo-fb02e9d1fc62-run31909586934(**同じ LO sha・この patch 有り**) → 文書を開くと固まる
-#   差は Qt patch だけなので、原因はここに在る。
-#
-# 症状: Start Center は健全。**文書を開いた瞬間**に CPU 100% で戻らなくなる
-#   (RSS は増えない = 割当ループではなく「戻ってこない」)。console は
+# 症状: 文書を開いた瞬間に CPU 100% で戻らなくなる。console は
 #   `Aborted(Assertion failed: invalid handle: 12)` / `RuntimeError: unreachable`。
+# 🔑 `invalid handle` は embind の handle を別スレッドから触ったときの形である(仮説。
+#   LO は `update()` を**自分の thread 文脈**から呼ぶので、そこで `m_inputElement`
+#   (= `emscripten::val`)を触るのが不正、と読んだ)。
 #
-# 🔑 **`invalid handle` は embind の handle を別スレッドから触ったときの形**である。
-#   ⚠ そして**同じ assert が、以前 LO 側から `QInputMethod::show()` を呼んで
-#   abort したとき**にも出ている(`patch-lo-qt-ime-show.py`、run31886407625)──
-#   「Qt の外の文脈から embind の val を触ると落ちる」という**同じ顔**である。
-#   LO は `update(Qt::ImQueryInput)` を**自分のスレッド文脈から毎キー**呼ぶので、
-#   そこから `updateInputElement()`(= `m_inputElement` という `emscripten::val`)を
-#   直接触るのが不正だった、というのが仮説。
-#   ⚠ **仮説である**(一致は因果の証拠ではない)── だからこの焼きで**この hunk だけ**を外す。
+# 🔴 **#1438 で戻した理由**: 外したままだと `m_inputMethodAccepted` が **永久に false** で、
+#   `<input>` に焦点が一度も移らない(CDP の IME は `<input>` に焦点が在れば文書に届く ── 実測)。
+#   LO は `WA_InputMethodEnabled` を **`setFocusObject()` の後**に立てる(`patch-lo-ime-update.py` が
+#   `inputMethod()->update(Qt::ImEnabled)` を撃つ)ので、`setFocusObject()` だけでは拾えない。
 #
-# 🔑 **外しても直る可能性は残っている**: `updateInputElement()` は `setFocusObject()`
-#   からも呼ばれるので、LO が `WA_InputMethodEnabled` を立てた**後の焦点移動**で
-#   ② の再取得が効けば、門を通れる。② と ③ はそのまま残す。
-#
-# 戻す条件: 「メインスレッドのときだけ DOM を触る」ガードを足した版で、
-#   文書が開けることを確かめてから。
-UNUSED_UPDATE_ANCHOR = """void QWasmInputContext::update(Qt::InputMethodQueries queries)""" 
+# 🔑 **直し方: `update()` では emval を 1 バイトも触らず、再評価と `updateInputElement()` を
+#   メイン(GUI)thread へ渡す。** `QMetaObject::invokeMethod(this, functor, Qt::QueuedConnection)`:
+#   - `this`(QWasmInputContext)は main thread で作られ、main に住む QObject である。
+#   - `QueuedConnection` は functor を `QMetaCallEvent` に包んで **receiver の thread の event queue に
+#     postEvent** する(`QCoreApplication::postEvent` は thread-safe)。functor は **receiver の thread
+#     = main** で走る。呼び元が LO の thread でも、main でも同じ(main から呼んでも 1 周遅れて走るだけ)。
+#   - 起こしは `QEventDispatcherWasm::wakeUp()` → 別 thread からは `runOnMainThreadAsync`
+#     (`qtbase-patch-wake-async.py` #1408 が非同期にしてある)なので、main が待っていても相互待ちにならない。
+#   - 渡した functor の中だけで `inputMethodAccepted()` と `updateInputElement()`(= emval)を触る。
+#   - `this` を context に渡すので、context が先に壊れたら functor は捨てられる(悪い参照にならない)。
+#   ⚠ 仮説である(compile も実行もこの箱では出来ない)── 焼いて `ime-compose-probe.mjs` で見る。
 UPDATE_ANCHOR = """void QWasmInputContext::update(Qt::InputMethodQueries queries)
 {
     qCDebug(qLcQpaWasmInputContext) << Q_FUNC_INFO << queries;
@@ -135,15 +136,16 @@ UPDATE_REPLACE = """void QWasmInputContext::update(Qt::InputMethodQueries querie
 {
     qCDebug(qLcQpaWasmInputContext) << Q_FUNC_INFO << queries;
 
-    // PKC3 #156(上流 6.10 の a89ac4b88 に相当): 受け付けの可否は
-    // setFocusObject() の後に変わりうる。変わったら入力要素を作り直す ──
-    // これが無いと、LO のように「focus が定まってから WA_InputMethodEnabled を
-    // 立てる」作りでは **永久に false のまま**になり、<input> が focus されない。
-    if ((queries & Qt::ImEnabled) && (inputMethodAccepted() != m_inputMethodAccepted)) {
-        if (m_focusObject && !preeditString().isEmpty())
-            commitPreeditAndClear();
-        updateInputElement();
-    }
+    // PKC3-IMEUPDATE(#1438): 受け付けの可否は setFocusObject() の後に変わりうる
+    // PKC3-IMEUPDATE: (LO は WA_InputMethodEnabled を後から立てる)。変わったら入力要素を取り直す。
+    // PKC3-IMEUPDATE: 🔴 ここは LO の thread から呼ばれうる ── emscripten::val(m_inputElement)を触らず、
+    // PKC3-IMEUPDATE: 再評価も updateInputElement() も **main thread へ渡して**そこで行う(直接呼ぶと invalid handle)。
+    if (queries.testFlag(Qt::ImEnabled)) { // PKC3-IMEUPDATE
+        QMetaObject::invokeMethod(this, [this]() { // PKC3-IMEUPDATE
+            if (inputMethodAccepted() != m_inputMethodAccepted) // PKC3-IMEUPDATE
+                updateInputElement(); // PKC3-IMEUPDATE
+        }, Qt::QueuedConnection); // PKC3-IMEUPDATE
+    } // PKC3-IMEUPDATE
     QPlatformInputContext::update(queries);
 }"""
 
@@ -178,9 +180,11 @@ def main() -> int:
     rc = patch(root / HEADER, HEAD_ANCHOR, HEAD_REPLACE, "panel-gate")
     if rc != 0:
         return rc
-    # ⚠ ① は外してある(上の注記 ── 文書を開くと固まる退行の原因)。
-    #    ② の再取得と ③ の門の無効化だけを当てる。
-    return patch(root / SRC, DIAG_ANCHOR, DIAG_REPLACE, "reread+diag")
+    rc = patch(root / SRC, DIAG_ANCHOR, DIAG_REPLACE, "reread+diag")
+    if rc != 0:
+        return rc
+    # ① は main thread へ渡す形で当てる(上の注記)。② の再取得より後に当てる(別の錨なので順不同でも当たる)
+    return patch(root / SRC, UPDATE_ANCHOR, UPDATE_REPLACE, "update-marshal")
 
 
 if __name__ == "__main__":
