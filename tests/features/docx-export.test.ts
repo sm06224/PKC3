@@ -188,6 +188,16 @@ describe('塊 → OOXML の写像', () => {
     expect(xml.includes('\u0007'), 'BEL が残っている').toBe(false);
   });
 
+  it('🔴 入れられなかった理由に「Word」と書かない(PowerPoint も同じ変換を通る)/ 外の画像には取り込む道を言う', () => {
+    // ⚠ 段落の中の画像は、段落の中に理由の字として残る / 段落の外の物は skipped の塊になる ── 両方を見る
+    const { blocks } = blocksOf('<p><img src="https://example.com/a.png" alt="図"></p><canvas></canvas>');
+    const all = JSON.stringify(blocks);
+    expect(all, '前提: 画像の理由が出ていない').toContain('画像「図」 は入れられませんでした');
+    expect(blocks.some((b) => b.kind === 'skipped'), '前提: 段落の外の物が無い').toBe(true);
+    expect(all, 'PowerPoint でも「Word」と言う').not.toContain('Word');
+    expect(all, '取り込む道を言っていない').toContain('「外部の画像を取り込む」');
+  });
+
   it('🔴 写せなかったものは、本文にも注意にも出る(黙って落とさない)', () => {
     const res = buildDocx(
       [

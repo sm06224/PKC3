@@ -302,6 +302,21 @@ describe('可搬 HTML', () => {
     expect(d.entries.map((e) => textOf(e.html).trim())).toEqual(entries.map((e) => e.body));
   });
 
+  it('🔴 入っていないノートへのリンクは、書き出すときに件数を言う(入っているノートへのリンクは数えない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '[あ](entry:n2) と [い](entry:zz) と [う](entry:zz#h)' }, { lid: 'n2', body: 'x' }] }),
+      NOW,
+    );
+    const d = await dataOf(out.blob);
+    expect(d.entries[0]!.html, '前提: ノート間リンクとして描かれていない').toContain('data-pkc-entry-ref="entry:n2"');
+    expect(out.warnings).toContain('このファイルに入っていないノートへのリンク 2 件は、押せない字だけになります');
+    const inside = await writePortableHtml(
+      source({ entries: [{ lid: 'n1', body: '[あ](entry:n2)' }, { lid: 'n2', body: 'x' }] }),
+      NOW,
+    );
+    expect(inside.warnings.some((w) => w.includes('入っていないノート')), '全部入っているのに言っている').toBe(false);
+  });
+
   it('🔴 entry 0 件なら断る', async () => {
     await expect(writePortableHtml(source({}), NOW)).rejects.toThrow(/1 件もありません/);
   });

@@ -416,6 +416,6 @@ describe('雛形を一覧から入れる(#196 / B-2 段②-b)', () => {
   it('🔴 雛形が無いときは、作り方を出す', async () => {
     await openMenu();
     const note = openDialog()?.querySelector('[data-pkc-field="pick-snippet-note"]')?.textContent;
-    expect(note, '作り方の案内が出ていない').toContain('作成');
+    expect(note, '作り方の案内が出ていない').toContain('選ぶと作れます');
   });
 });
