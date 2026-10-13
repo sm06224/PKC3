@@ -11,6 +11,7 @@
  *   (不可侵指示「重い処理はワーカーへ」の対象外)。ただし zip 爆弾に備え、1 枚が
  *   {@link SLIDE_XML_MAX} を超えるスライドは読まずに件数へ数える。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -120,7 +121,7 @@ export async function importPptxFiles(
     }
   } catch (e) {
     return fail(
-      `PowerPoint を読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
+      `PowerPoint を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
   }
   if (rows.length === 0) {
@@ -144,7 +145,7 @@ export async function importPptxFiles(
     await deps.bulkUpsertEntries(rows);
   } catch (e) {
     await deps.reload().catch(() => {});
-    return fail(`取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`取り込みに失敗しました: ${errorText(e)}`);
   }
 
   await deps.reload();

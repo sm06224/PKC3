@@ -5,6 +5,7 @@
  * ときは誰も test できず、「案内は出すが実行しない」という嘘が残っていた
  * (この file の test がそれを落とす)。段㉔ の `window-close.ts` と同じ理由。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from './dispatcher';
 import { isFullyReady, whenPhaseReady } from './wait-for-ready';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
@@ -69,7 +70,7 @@ export function reloadSnapshot(
       //   ここが timeout reject しうる。誰も受けない rejection にせず帯へ出す
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `一覧を取得し直せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        error: `一覧を取得し直せませんでした: ${errorText(e)}`,
       });
       return;
     }

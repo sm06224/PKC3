@@ -22,6 +22,7 @@
  * reducer が持つのは **見せる材料(ファイル名)だけ**。handle は不透明な
  * ブラウザ objects で、比較も複製もできない ── 純粋な reducer に混ぜない。
  */
+import { errorText } from '@features/error-text';
 
 /**
  * 🔴 **取り込んだ後にパソコン側で変わっていたときの字**(#1264 §2 欠陥 1。🟣 Gemini 裁定 2026-10-02)。
@@ -274,7 +275,7 @@ export async function writeBackFile(
   } catch (e) {
     return {
       ok: false,
-      reason: `書き込みの許可を確かめられませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `書き込みの許可を確かめられませんでした: ${errorText(e)}`,
     };
   }
 
@@ -284,7 +285,7 @@ export async function writeBackFile(
   } catch (e) {
     return {
       ok: false,
-      reason: `ファイルを開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `ファイルを開けませんでした: ${errorText(e)}`,
     };
   }
   try {
@@ -301,7 +302,7 @@ export async function writeBackFile(
     }
     return {
       ok: false,
-      reason: `書き戻せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `書き戻せませんでした: ${errorText(e)}`,
     };
   }
 }

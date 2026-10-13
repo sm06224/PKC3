@@ -9,6 +9,7 @@
  * - 🔑 メインスレッドで読む: 読むのは文字列の走査だけで重い計算が無い(ワーカー規律の対象外)。
  *   ただし大きすぎる file(`ICS_IMPORT_MAX_BYTES`)と予定が多すぎる file(`ICS_IMPORT_MAX_EVENTS`)は**断る**。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
@@ -101,7 +102,7 @@ export async function importIcsFiles(
     }
   } catch (e) {
     return fail(
-      `カレンダー形式のファイルを読めませんでした(ノートは 1 件も追加されていません): ${e instanceof Error ? e.message : String(e)}`,
+      `カレンダー形式のファイルを読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
   }
   if (rows.length === 0) {
@@ -116,7 +117,7 @@ export async function importIcsFiles(
     await deps.bulkUpsertEntries(rows);
   } catch (e) {
     await deps.reload().catch(() => {});
-    return fail(`取り込みに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`取り込みに失敗しました: ${errorText(e)}`);
   }
 
   await deps.reload();

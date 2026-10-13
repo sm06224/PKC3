@@ -8,6 +8,7 @@
  * ⚠ 書出しは **asset gate の内側**(取込 / 整理と排他)。書出し中に添付が
  * 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
@@ -220,7 +221,7 @@ export async function exportEntry(
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      error: `書き出しに失敗しました: ${errorText(e)}`,
     });
     return null;
   }
@@ -256,7 +257,7 @@ export async function exportFolder(
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      error: `書き出しに失敗しました: ${errorText(e)}`,
     });
     return null;
   }
@@ -447,7 +448,7 @@ export async function exportArchive(
     );
     return out.counts.entries;
   } catch (e) {
-    return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`書き出しに失敗しました: ${errorText(e)}`);
   }
 }
 
@@ -519,7 +520,7 @@ export function createMarkdownFolderFlow(
         if (isPickerCancel(e)) return;
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `書き出し先のフォルダを開けませんでした: ${e instanceof Error ? e.message : String(e)}`,
+          error: `書き出し先のフォルダを開けませんでした: ${errorText(e)}`,
         });
         return;
       }
@@ -574,7 +575,7 @@ export async function exportMarkdownToFolder(
       e instanceof FolderWriteError
         ? `『${e.path}』を書けませんでした(${e.message})${where}` +
           (e.mayRemain ? `。『${e.path}』は空のまま残っているかもしれません` : '')
-        : `${e instanceof Error ? e.message : String(e)}${where}`;
+        : `${errorText(e)}${where}`;
     dispatcher.dispatch({ type: 'OP_FAILED', error: `書き出しに失敗しました: ${what}` });
     return null;
   }
@@ -882,7 +883,7 @@ export async function exportEntryMarkdown(
     );
     return true;
   } catch (e) {
-    return fail(`書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`);
+    return fail(`書き出しに失敗しました: ${errorText(e)}`);
   }
 }
 
@@ -949,7 +950,7 @@ async function exportEntryOffice(
     return true;
   } catch (e) {
     return fail(
-      `${target.app} の書き出しに失敗しました: ${e instanceof Error ? e.message : String(e)}`,
+      `${target.app} の書き出しに失敗しました: ${errorText(e)}`,
     );
   }
 }

@@ -30,6 +30,7 @@
  * **黙って無駄が積もる**)。`close()` で購読も港も捨てる。
  */
 
+import { errorText } from '@features/error-text';
 import {
   EXT_READY_FLAG,
   deliveredMessage,
@@ -192,7 +193,7 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
             }
           },
           (e: unknown) => {
-            const why = `書き戻しに失敗しました: ${e instanceof Error ? e.message : String(e)}`;
+            const why = `書き戻しに失敗しました: ${errorText(e)}`;
             deps.onReject?.(why);
             try {
               port?.postMessage(writeResultMessage({ ok: false, why }));

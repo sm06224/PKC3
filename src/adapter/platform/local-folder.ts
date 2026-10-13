@@ -42,6 +42,7 @@
  * ⚠ ここでは `requestPermission` を撃たない ── 切れたら「もう一度フォルダを選んでください」
  * と言い、**選び直し**(= 押した流れの中の許可)へ誘う。
  */
+import { errorText } from '@features/error-text';
 import {
   FOLDER_PAGE,
   fileKindOf,
@@ -230,7 +231,7 @@ export class LocalFolder {
       this.slots = [];
       this.phase = 'failed';
       // ⚠ ブラウザの英語の理由は括弧へ。次にすることを先に言う(#1087)
-      this.message = `フォルダを開けませんでした。別のフォルダを選んでください(${e instanceof Error ? e.message : String(e)})`;
+      this.message = `フォルダを開けませんでした。別のフォルダを選んでください(${errorText(e)})`;
       this.changed();
       return;
     }
@@ -286,7 +287,7 @@ export class LocalFolder {
         return;
       }
       this.phase = 'failed';
-      this.message = `フォルダの中を読めませんでした。もう一度フォルダを選び直してください(${e instanceof Error ? e.message : String(e)})`;
+      this.message = `フォルダの中を読めませんでした。もう一度フォルダを選び直してください(${errorText(e)})`;
       this.changed();
       return;
     }
@@ -352,7 +353,7 @@ export class LocalFolder {
           return;
         }
         this.deps.fail(
-          `「${slot.name}」を読めませんでした。消されたか、名前が変わったかもしれません(${e instanceof Error ? e.message : String(e)})`,
+          `「${slot.name}」を読めませんでした。消されたか、名前が変わったかもしれません(${errorText(e)})`,
         );
         return;
       }

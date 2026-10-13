@@ -18,6 +18,7 @@
  *
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { viewModeLabel } from '@adapter/state/app-state';
 import type { AsrJob, AsrJobResult } from '@adapter/platform/asr/asr-run';
@@ -222,7 +223,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             `この端末のメモリが足りず、文字にできませんでした。ほかのタブを閉じるか、「${ASR_PARTS[0]!.label}」の一式でもう一度お試しください。`,
           );
         } else {
-          fail(`文字にできませんでした(${e instanceof Error ? e.message : String(e)})`);
+          fail(`文字にできませんでした(${errorText(e)})`);
         }
       } finally {
         if (progressShown) deps.notify('');
