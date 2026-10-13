@@ -1652,6 +1652,16 @@ describe('2 ペインのキーボード操作(#273)', () => {
     expect(d.getState().dual.renaming, '消えた相手の打ち替えが残っている').toBeNull();
   });
 
+  it('🔴 印が無ければ、カーソルの行の名前を変える(F2 とマニュアルと同じ ── #1087 の見直し 2026-10-13)', () => {
+    d.dispatch({ type: 'DUAL_SET_CURSOR', side: 'left', lid: 'a' });
+    expect(d.getState().dual.left.selection, '前提: 印が付いている').toEqual([]);
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-rename-begin"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    expect(d.getState().error, 'カーソルの行が在るのに断った').toBeNull();
+    expect(d.getState().dual.renaming?.lid).toBe('a');
+  });
+
   it('🔴 「名前を変える」は 1 件のときだけ(理由を出す)', () => {
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
     d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'b', mode: 'toggle' });
@@ -1794,10 +1804,12 @@ describe('2 ペインの写す(#273 段③)', () => {
   let d: Dispatcher;
   let region: HTMLElement;
   let asked: string[][] = [];
+  let statuses: string[] = [];
 
   beforeEach(() => {
     document.body.innerHTML = '';
     asked = [];
+    statuses = [];
     root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
     document.body.append(root);
@@ -1808,6 +1820,7 @@ describe('2 ペインの写す(#273 段③)', () => {
         asked.push([...lids]);
         return new Map(lids.map((l) => [l, `# 本文 ${l}`]));
       },
+      showStatus: (t: string) => void statuses.push(t),
     });
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: RELS });
     region = document.createElement('div');
@@ -1871,6 +1884,32 @@ describe('2 ペインの写す(#273 段③)', () => {
       st.relations.filter((r) => r.kind === 'structural' && r.fromLid === 'f1').length,
       '元の中身が減った',
     ).toBe(2);
+    // 🔴 件数は選んだ数で言い、中身は括弧で(#1087 の見直し 2026-10-13)
+    expect(statuses.at(-1)).toBe('1 件(中身を含め 3 件)を「ルート」へコピーしました');
+  });
+
+  it('🔴 反対側がスマートフォルダの中なら、写さずに本当の理由で断る(黙ってルートへ入れない ── #1087 の見直し 2026-10-13)', async () => {
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...METAS, meta('s1', 8, '絞り込み', 'smart' as never)], relations: RELS });
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 's1' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    const before = d.getState().entryMetas.size;
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(d.getState().entryMetas.size, 'スマートフォルダ宛てなのに作った').toBe(before);
+    expect(d.getState().error ?? '').toContain('スマートフォルダの中には入れられません');
+  });
+
+  it('🔴 成功はエラーの行に出さず、印を外す(もう一度押して同じ物を重ねない ── #1087 の見直し 2026-10-13)', async () => {
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+    region.querySelector<HTMLElement>('[data-pkc-field="dual-copy"]')!.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(d.getState().error, '成功したのにエラーの行に出した').toBeNull();
+    expect(statuses.at(-1)).toBe('1 件を「ルート」へコピーしました');
+    expect(d.getState().dual.left.selection, '印が残っている').toEqual([]);
   });
 });
 
