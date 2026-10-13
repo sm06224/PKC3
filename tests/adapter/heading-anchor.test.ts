@@ -6,6 +6,7 @@ import {
   extractHeadingText,
   buildHeadingLink,
   HEADING_ANCHOR_FIELD,
+  HEADING_ANCHOR_COPY_FAILED_EVENT,
 } from '../../src/adapter/ui/render/heading-anchor';
 
 describe('heading-anchor link copy (Issue #1124)', () => {
@@ -75,14 +76,14 @@ describe('heading-anchor link copy (Issue #1124)', () => {
 
       const btn1 = h1.querySelector<HTMLButtonElement>(`[data-pkc-field="${HEADING_ANCHOR_FIELD}"]`);
       expect(btn1).not.toBeNull();
-      expect(btn1?.getAttribute('aria-label')).toBe('「大見出し」への参照リンクをコピー');
+      expect(btn1?.getAttribute('aria-label')).toBe('「大見出し」への参照をコピー');
       // ボタン自身に textContent を置かず見出し文字列を汚さない（CSS ::before で表示）
       expect(btn1?.textContent).toBe('');
       expect(h1.textContent).toBe('大見出し');
 
       const btn2 = h2.querySelector<HTMLButtonElement>(`[data-pkc-field="${HEADING_ANCHOR_FIELD}"]`);
       expect(btn2).not.toBeNull();
-      expect(btn2?.getAttribute('aria-label')).toBe('「中見出し」への参照リンクをコピー');
+      expect(btn2?.getAttribute('aria-label')).toBe('「中見出し」への参照をコピー');
       expect(btn2?.textContent).toBe('');
     });
 
@@ -120,12 +121,29 @@ describe('heading-anchor link copy (Issue #1124)', () => {
 
       expect(copiedText).toBe('[インストール手順](entry:n1#install)');
       expect(btn.classList.contains('pkc-copied')).toBe(true);
-      expect(btn.getAttribute('title')).toBe('リンクをコピーしました！');
+      expect(btn.getAttribute('title')).toBe('参照をコピーしました');
 
       // Fast forward 1500ms
       vi.advanceTimersByTime(1500);
       expect(btn.classList.contains('pkc-copied')).toBe(false);
-      expect(btn.getAttribute('title')).toBe('見出しの参照リンクをコピー');
+      expect(btn.getAttribute('title')).toBe('見出しの参照をコピー(本文に貼ります)');
+    });
+
+    it('🔴 コピーに失敗したら、上へ合図を伝える(黙らない)', async () => {
+      const h2 = document.createElement('h2');
+      h2.id = 'x';
+      h2.textContent = '失敗';
+      root.append(h2);
+      applyHeadingAnchors(root, 'n1');
+      const btn = h2.querySelector<HTMLButtonElement>(`[data-pkc-field="${HEADING_ANCHOR_FIELD}"]`)!;
+      vi.spyOn(clipboard, 'copyPlainText').mockImplementation(async () => false);
+      let failed = 0;
+      root.addEventListener(HEADING_ANCHOR_COPY_FAILED_EVENT, () => failed++);
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(failed).toBe(1);
+      expect(btn.classList.contains('pkc-copied')).toBe(false);
     });
   });
 });

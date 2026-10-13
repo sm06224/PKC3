@@ -139,7 +139,7 @@ describe('ショートカットの説明', () => {
     const n = applyShortcutHints(root, k);
     expect(n, '説明を名乗るボタンが 1 つも無い(空振り)').toBeGreaterThanOrEqual(3);
     const create = root.querySelector<HTMLElement>('[data-pkc-field="create-run"]');
-    expect(create?.title).toBe('この種類で新しく作ります(Ctrl + N)');
+    expect(create?.title).toBe('ノートを新しく作ります(Ctrl + N)');
     const back = root.querySelector<HTMLElement>('[data-pkc-action="nav-back"]');
     expect(back?.title).toBe('前に見ていたノートへ戻ります(Alt + ←)');
   });

@@ -80,6 +80,29 @@ describe('選ぶと端末側に書かれ、次の起動でも戻る', () => {
   });
 });
 
+describe('hover の説明は、作る種類の名前を言う(#1087)', () => {
+  const base = (root: HTMLElement): string | null =>
+    runButton(root)?.getAttribute('data-pkc-hint-base') ?? null;
+
+  it('🔴 起動時: 既定の種類の名前 / ▼ で選ぶと title と hint-base の両方が変わる', () => {
+    const root = shell();
+    bind(root);
+    expect(base(root)).toBe('ノートを新しく作ります');
+    expect(runButton(root)?.title).toContain('ノートを新しく作ります');
+    createByUi(root, 'textlog');
+    expect(base(root), 'hint-base が選び直しに追随していない').toBe('ログを新しく作ります');
+    expect(runButton(root)?.title).toContain('ログを新しく作ります');
+    expect(runButton(root)?.title).not.toContain('ノートを');
+  });
+
+  it('🔴 次の起動でも覚えた種類の名前で言う', () => {
+    localStorage.setItem(KEY, 'textlog');
+    const root = shell();
+    expect(base(root)).toBe('ログを新しく作ります');
+    expect(runButton(root)?.title).toContain('ログを新しく作ります');
+  });
+});
+
 describe('知らない値・封じられた値は既定(+ ノート)へ落ちる', () => {
   it('版に無い値(知らない archetype)', () => {
     localStorage.setItem(KEY, 'kaboom');

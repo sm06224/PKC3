@@ -55,7 +55,7 @@
  * `#pkc?` で始まらないものは読まないので何もしない(断片も消さない)。
  */
 import type { BrowseMode } from '@adapter/ui/render/browse-mode';
-import { VIEW_MODES, isViewMode, type ViewMode } from '../state/app-state';
+import { VIEW_MODES, isViewMode, phaseBlockReason, type AppPhase, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
   dropAssetFromHash,
@@ -436,6 +436,11 @@ export interface DeepLinkWiring {
   /** 🔴 **この PKC にそのノートが在るか**(同上)。⚠ 無ければ「見つかりません」と言う。 */
   readonly hasEntry?: (lid: string) => boolean;
   /**
+   * 🔴 **いまの phase**(#1087)。⚠ 編集中・保存失敗中は `SELECT_ENTRY` が黙って捨てるので、
+   *   リンクを押しても何も起きない(dead click)。渡すと、そのとき理由を出す。
+   */
+  readonly phase?: () => AppPhase;
+  /**
    * 🔴 **添付を名指したリンクを開く**(`#pkc?container=…&asset=…`。2026-10-11)。
    *   key → 添付ノートの逆引き(`findAssetOwner`)は非同期なので、見つからない理由も呼ばれる側が言う。
    */
@@ -514,9 +519,9 @@ export interface DeepLinkWiring {
 
 /** 🔴 別の PKC を指すリンクを開いたときの理由(2026-10-11)。⚠ 黙って捨てると dead click になる。 */
 export const FOREIGN_ENTRY_LINK_MESSAGE =
-  'このリンクは別の PKC のノートを指しています(この PKC には開けません)';
+  'このリンクは別の PKC のノートを指しています(この PKC には開けません。送り主にノートを書き出して渡してもらってください)';
 export const FOREIGN_ASSET_LINK_MESSAGE =
-  'このリンクは別の PKC の添付を指しています(この PKC には開けません)';
+  'このリンクは別の PKC の添付を指しています(この PKC には開けません。送り主に添付を書き出して渡してもらってください)';
 export const NOT_READY_LINK_MESSAGE = 'PKC の準備ができていないため、このリンクを開けませんでした。開き終わってからもう一度試してください';
 /** 🔴 `fragment` が読めない綴りのとき(PKC2 の `log/<id>` など)。ノートは開く ── 場所だけ言う。 */
 export const UNREADABLE_PLACE_MESSAGE =
@@ -525,7 +530,7 @@ export const UNREADABLE_PLACE_MESSAGE =
 export const PLACE_WITHOUT_NOTE_MESSAGE =
   'このリンクにはノートの指定が無いため、行や章の場所だけでは開けません';
 export const MISSING_ENTRY_LINK_MESSAGE =
-  'このリンクのノートが見つかりません(削除された可能性があります)';
+  'このリンクのノートが見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)';
 
 /** ノートのリンクを開けない理由。⚠ 開けるなら `null`。材料が配線されていなければ判断しない。 */
 function linkProblem(wiring: DeepLinkWiring, containerId: string, lid: string): string | null {
@@ -537,6 +542,11 @@ function linkProblem(wiring: DeepLinkWiring, containerId: string, lid: string): 
   if (own === null) return NOT_READY_LINK_MESSAGE;
   if (own !== containerId) return FOREIGN_ENTRY_LINK_MESSAGE;
   if (wiring.hasEntry !== undefined && !wiring.hasEntry(lid)) return MISSING_ENTRY_LINK_MESSAGE;
+  // 🔴 ノートは在るが、編集中・保存失敗中は `SELECT_ENTRY` が黙って捨てる(app-state.ts)── 理由を言う
+  const phase = wiring.phase?.();
+  if (phase === 'editing' || phase === 'error') {
+    return `${phaseBlockReason(phase)}リンクのノートを開いてください`;
+  }
   return null;
 }
 
@@ -885,12 +895,13 @@ export async function resolveAssetOwner(a: {
  *   (入れ物の id / 居るノート / 添付を開くときの断りの字)。
  */
 export function linkOpenerFor(app: {
-  dispatcher: { getState(): { cid: string | null; entryMetas: ReadonlyMap<string, unknown> } };
+  dispatcher: { getState(): { cid: string | null; entryMetas: ReadonlyMap<string, unknown>; phase: AppPhase } };
   navigateAssetRef(assetKey: string, what?: '参照' | 'リンク', ownerLid?: string | null): void;
-}): Pick<DeepLinkWiring, 'ownContainerId' | 'hasEntry' | 'selectAsset'> {
+}): Pick<DeepLinkWiring, 'ownContainerId' | 'hasEntry' | 'phase' | 'selectAsset'> {
   return {
     ownContainerId: () => app.dispatcher.getState().cid,
     hasEntry: (lid) => app.dispatcher.getState().entryMetas.has(lid),
+    phase: () => app.dispatcher.getState().phase,
     selectAsset: (assetKey, ownerLid) => app.navigateAssetRef(assetKey, 'リンク', ownerLid),
   };
 }

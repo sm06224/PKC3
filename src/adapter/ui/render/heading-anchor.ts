@@ -10,6 +10,9 @@ import { flashCopied } from '../actions/copy-md-block';
 import { slugifyHeading } from '@features/markdown/markdown-toc';
 
 export const HEADING_ANCHOR_FIELD = 'heading-anchor';
+/** コピーに失敗したとき、ボタンから上へ伝える合図(binder が画面下に言う。`inline-code-copy.ts` と同じ作り)。 */
+export const HEADING_ANCHOR_COPY_FAILED_EVENT = 'pkc-heading-anchor-copy-failed';
+const ANCHOR_TITLE = '見出しの参照をコピー(本文に貼ります)';
 
 /**
  * 見出し要素から純粋なテキストを抽出する。
@@ -51,8 +54,8 @@ export function applyHeadingAnchors(root: Element, lid: string | null): void {
     btn.type = 'button';
     btn.className = 'pkc-heading-anchor';
     btn.setAttribute('data-pkc-field', HEADING_ANCHOR_FIELD);
-    btn.setAttribute('aria-label', `「${text}」への参照リンクをコピー`);
-    btn.setAttribute('title', '見出しの参照リンクをコピー');
+    btn.setAttribute('aria-label', `「${text}」への参照をコピー`);
+    btn.setAttribute('title', ANCHOR_TITLE);
 
     btn.addEventListener('click', (ev) => {
       ev.preventDefault();
@@ -60,13 +63,16 @@ export function applyHeadingAnchors(root: Element, lid: string | null): void {
 
       const link = buildHeadingLink(lid, slug, text);
       void copyPlainText(link).then((ok) => {
-        if (!ok) return;
+        if (!ok) {
+          btn.dispatchEvent(new CustomEvent(HEADING_ANCHOR_COPY_FAILED_EVENT, { bubbles: true }));
+          return;
+        }
         flashCopied(btn);
         btn.classList.add('pkc-copied');
-        btn.setAttribute('title', 'リンクをコピーしました！');
+        btn.setAttribute('title', '参照をコピーしました');
         setTimeout(() => {
           btn.classList.remove('pkc-copied');
-          btn.setAttribute('title', '見出しの参照リンクをコピー');
+          btn.setAttribute('title', ANCHOR_TITLE);
         }, 1500);
       });
     });
