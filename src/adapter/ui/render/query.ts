@@ -246,6 +246,20 @@ export class QueryRenderer {
       table.append(empty);
       return;
     }
+    /**
+     * 🔴 **覚えていた項目が、もうどのノートにも無いとき**(#1087 の見直し 2026-10-13)── 選んだ項目は端末に覚えて次も選ぶので、
+     *   その項目を書いたノートが全部無くなった後は、選ぶ欄が空のまま、表は全部のノートが「(未設定)」の 1 グループになっていた。
+     *   壊れたように見えるので、何が起きたかを言って、選び直させる。
+     * ⚠ 項目を多い順に切っている(`omittedKeys > 0`)ときは、切られただけかもしれないので言わない。
+     */
+    const known = state.queryKeys;
+    if (known !== null && known.omittedKeys === 0 && !known.keys.some((k) => k.key === state.queryKey)) {
+      const gone = document.createElement('p');
+      gone.setAttribute('data-pkc-field', 'query-empty');
+      gone.textContent = `「${state.queryKey === TAGS_KEY ? 'タグ' : state.queryKey}」を書いたノートがもうありません。上の「グループ化」で選び直してください`;
+      table.append(gone);
+      return;
+    }
     const groups = state.queryGroups;
     if (groups === null) {
       const wait = document.createElement('p');

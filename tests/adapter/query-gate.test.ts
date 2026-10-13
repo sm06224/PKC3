@@ -133,3 +133,30 @@ describe('集計の面の門', () => {
     expect(li.isConnected).toBe(true);
   });
 });
+
+describe('覚えていた項目のノートが無くなったとき(#1087 の見直し 2026-10-13)', () => {
+  const base = (keys: AppState['queryKeys']): AppState =>
+    ({
+      ...initialState,
+      queryKey: 'author',
+      queryKeys: keys,
+      queryGroups: { groups: [{ value: '(未設定)', total: 2, lids: [] }], omittedGroups: 0, scanned: 2 },
+    }) as unknown as AppState;
+  const emptyText = (state: AppState): string => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    new QueryRenderer(host).render(state);
+    return host.querySelector('[data-pkc-field="query-empty"]')?.textContent ?? '';
+  };
+
+  it('🔴 もうどのノートにも無いなら、そう言って選び直させる(全部が「(未設定)」の 1 グループに見せない)', () => {
+    expect(emptyText(base({ keys: [{ key: 'status', count: 2 }], omittedKeys: 0, scanned: 2 }))).toBe(
+      '「author」を書いたノートがもうありません。上の「グループ化」で選び直してください',
+    );
+  });
+
+  it('⚠ 項目を多い順に切っているときは言わない(切られただけかもしれない)/ 在るなら言わない', () => {
+    expect(emptyText(base({ keys: [{ key: 'status', count: 2 }], omittedKeys: 3, scanned: 2 }))).toBe('');
+    expect(emptyText(base({ keys: [{ key: 'author', count: 2 }], omittedKeys: 0, scanned: 2 }))).toBe('');
+  });
+});

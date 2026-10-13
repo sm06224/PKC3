@@ -814,7 +814,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '集計を数え直す',
     contexts: ['global'],
     defaults: [],
-    note: '書き換えた後の中身で、集計のノートを数え直します(集計のノートを開いているときだけ効きます)',
+    note: '書き換えた後の中身で、集計を数え直します(集計の画面を開いているときだけ効きます)',
     alias: '集計 クエリ 更新 再計算',
   },
   {
