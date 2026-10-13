@@ -11,6 +11,8 @@
 const ERROR_JA: readonly (readonly [RegExp, string])[] = [
   // store-client.ts ── 保存の係を止めた後(データを作り直す途中など)に書こうとした
   [/^store client terminated$/, '保存を担当する処理が止まっていたため、書き込めませんでした。ページを再読み込みしてください'],
+  // ブラウザが出す、通信が無い・届かないときの例外(Chrome / Edge。PKC3 が投げる物ではないが、雛形の取得などで画面に出る)
+  [/^Failed to fetch$/, 'ネットワークに接続できませんでした。つながるところで、もう一度押してください'],
   // storage-worker.ts の need() ── 起動が終わる前に頼んだ
   [/^storage worker not initialized$/, '保存の準備がまだ終わっていません。少し待ってから、もう一度お試しください'],
   // store-client.ts ── 保存の係そのものが起動できなかった

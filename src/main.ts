@@ -159,7 +159,7 @@ import {
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
 import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
-import { exportPortable } from '@adapter/ui/actions/export-portable';
+import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
 import {
   connectPortablePersist,
   persistStatusText,
@@ -4727,15 +4727,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
            * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
            *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
            */
-          fetchTemplate: async () => {
-            const res = await fetch(new URL('portable-template.html', document.baseURI));
-            if (!res.ok)
-              throw new Error(
-                `元になるファイルを取得できませんでした(HTTP ${res.status})。` +
-                  'この配布の形には、元になるファイルが同梱されていない可能性があります',
-              );
-            return res.text();
-          },
+          fetchTemplate: () => fetchPortableTemplate((u) => fetch(u), document.baseURI),
           exportImage: async () => (await client.request({ op: 'exportImage' })).image,
           listAssets: async () =>
             (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({

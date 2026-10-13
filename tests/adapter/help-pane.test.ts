@@ -111,6 +111,9 @@ describe('ヘルプの面', () => {
       region.querySelector('[data-pkc-field="help-version"]')?.textContent ?? '',
       '面が種別の刻印か日時を落としている(versionText を呼んでいる?)',
     ).toMatch(/\(開発版・\d+\/\d+ \d\d:\d\d\)/);
+    const verText = region.querySelector('[data-pkc-field="help-version"]')?.textContent ?? '';
+    expect(verText, '製品名が小文字の識別子のまま').toMatch(/^このバージョン: PKC3 v\d/);
+    expect(verText, '報告に添える案内が無い').toContain('不具合を報告するときは、この行を添えてください');
     /**
      * 🔴 **一覧はもう無い ── リンクだけ**(#1017 段③-2)。一覧の実体は
      * システムへ移した(下の describe「お知らせの一覧」を参照)。
