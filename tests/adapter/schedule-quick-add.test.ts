@@ -371,3 +371,41 @@ describe('#499 足すときの日付', () => {
     ).toBe('2026-09-10');
   });
 });
+
+/**
+ * 🔴 **「やること」欄は Enter で足せる**(#1087。タグの欄 #494 と同じ作法)。
+ * ⚠ 直す前は欄に受け手が無く、Enter は黙って捨てられていた。
+ */
+describe('#1087 予定の足す欄の Enter', () => {
+  const enter = (el: HTMLElement, init: KeyboardEventInit & { keyCode?: number } = {}): void => {
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+    if (init.keyCode !== undefined) Object.defineProperty(ev, 'keyCode', { value: init.keyCode });
+    el.dispatchEvent(ev);
+  };
+
+  it('🔴 Enter でボタンと同じく足す(欄は空になる)', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, 'エンターで足す', '2026-08-28');
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    enter(field);
+    await tick();
+    expect(s.disk['t1'], 'Enter で足されていない').toContain('- [ ] エンターで足す @2026-08-28');
+    expect(field.value).toBe('');
+  });
+
+  it('⚠ 変換を確定した Enter(keyCode 229)と Shift+Enter では足さない ── 対照群: 素の Enter は足す', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, 'へんかん', '2026-08-28');
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    enter(field, { keyCode: 229 });
+    enter(field, { shiftKey: true });
+    enter(field, { isComposing: true });
+    await tick();
+    expect(s.disk['t1'], '変換中・Shift の Enter で足した').toBe('メモ\n');
+    enter(field);
+    await tick();
+    expect(s.disk['t1']).toContain('- [ ] へんかん');
+  });
+});
