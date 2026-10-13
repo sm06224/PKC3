@@ -120,6 +120,11 @@ const UNRESOLVED: readonly string[] = [
    *   (`undo-move` / `schedule-undo-move` と同じ器)ので、静的な字が `undo-trash` の形では source に無い。
    */
   'undo-trash',
+  /**
+   * ⚠ **2026-10-13(#1163 依頼 62)で 1 件増えた** ── 2 ペインで移した直後の「元に戻す」(`undo-dual-move`)。
+   * 🔑 `undo-trash` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   */
+  'undo-dual-move',
   'view-big',
 ];
 
