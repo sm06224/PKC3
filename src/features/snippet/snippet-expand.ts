@@ -56,7 +56,6 @@ import { advanceFence } from '@features/markdown/list-renumber';
  *   PKC3 は既に `:::if{}` を持っている(こちらは**描画時**)。
  */
 export const SNIPPET_VARS = ['date', 'time', 'datetime', 'cursor'] as const;
-export type SnippetVar = (typeof SNIPPET_VARS)[number];
 
 /**
  * 印 1 つ。⚠ `${` から `}` まで(**閉じ括弧を含む**)── 選択がこの範囲なので、

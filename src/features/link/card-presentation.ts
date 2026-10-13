@@ -59,14 +59,6 @@ export interface ParsedCardPresentation {
   readonly raw: string;
 }
 
-/**
- * Formatter input. `variant` defaults to `'default'` when omitted.
- */
-export interface CardPresentationInput {
-  readonly target: string;
-  readonly variant?: CardVariant;
-}
-
 const CARD_RE = /^@\[card(?::([a-z]+))?\]\(([^)]*)\)$/;
 const VARIANT_WHITELIST: readonly CardVariant[] = [
   'compact',
