@@ -24,7 +24,7 @@ import type { SettingsSection } from './section';
 
 /** 「フラグがオフ」の知らせ。🔑 フラグの画面の字(`FLAG_EMBED.summary`)をそのまま引く。 */
 export function embedFlagOffText(): string {
-  return `フラグ「${FLAG_EMBED.summary}」がオフの間は、この一覧は使われません。オンにして再起動してください。`;
+  return `フラグ「${FLAG_EMBED.summary}」がオフの間は、この一覧は使われません。フラグの画面でオンにしてください(切り替えると自動で読み込み直します)。`;
 }
 
 export function createEmbedOriginsSection(
