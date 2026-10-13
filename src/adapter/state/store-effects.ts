@@ -2290,11 +2290,15 @@ export function connectStoreEffects(
            */
           let wrote = 0;
           try {
+            // 🔑 読みは 1 往復にまとめる(#1087)。⚠ 書込は 1 件ずつのまま、各書込は
+            //    ここで読んだ本文の `expectHash` で守られる(読みを早めても窓は広がらない)
+            const bodyRows = await store.getBodies(ev.rows.map((r) => r.lid));
+            if (disposed) return;
+            const bodyOf = new Map(bodyRows.map((r) => [r.lid, r.body]));
             for (const row of ev.rows) {
               // 🔴 **disk から読んで書き戻す**(`REQUEST_TILE_UPDATE` と同じ)──
               //    添付は開いていないことのほうが多く、開いていても古いことがある
-              const body = await store.getBody(row.lid);
-              if (disposed) return;
+              const body = bodyOf.get(row.lid) ?? null;
               if (body === null) {
                 failed = 'ノートが見つかりません';
                 break;
@@ -2485,10 +2489,13 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
+            // 🔑 読みは 1 往復にまとめる(#1087)。書込は 1 件ずつ・各々 `expectHash` で守る
+            const bodyRows = await store.getBodies(ev.rows.map((r) => r.lid));
+            if (disposed) return;
+            const bodyOf = new Map(bodyRows.map((r) => [r.lid, r.body]));
             for (const row of ev.rows) {
               if (disposed) return;
-              const body = await store.getBody(row.lid);
-              if (disposed) return;
+              const body = bodyOf.get(row.lid) ?? null;
               // ⚠ 消えていたら**その 1 件を飛ばす**(残りは進める ── 全部やめない)
               if (body === null) continue;
               const next = writeAppGroupOrder(body, row.order);
@@ -2706,10 +2713,20 @@ export function connectStoreEffects(
            *   user は**壊れている**と読む。🔑 だから**数えて言う**。
            */
           let stillInBody = 0;
+          // 🔑 読みは 1 往復にまとめる(#1087)。書込は 1 件ずつ・各々 `expectHash` で守る。
+          //    ⚠ 読めなかったときは、従来の「1 件ごとの読みが失敗」と同じく全件 failed に数える
+          let bodyOf = new Map<string, string>();
+          try {
+            const bodyRows = await store.getBodies(ev.targets.map((t) => t.lid));
+            bodyOf = new Map(bodyRows.map((r) => [r.lid, r.body]));
+          } catch {
+            /* 空のまま ── 下で 1 件ずつ failed に数える */
+          }
+          if (disposed) return;
           for (const t of ev.targets) {
             if (disposed) return;
             try {
-              const body = await store.getBody(t.lid);
+              const body = bodyOf.get(t.lid) ?? null;
               if (body === null) {
                 failed++;
                 continue;

@@ -77,9 +77,13 @@ function setup(
    */
   const acks: string[] = [];
   // ⚠ 包むのは **effects を繋ぐ前** ── 繋いだ後だと effect が握った参照が素のままになる
+  /** ⚠ 一覧の読込も getBodies を通る ── 欠落 / 落下は**並べ替えを始めた後**だけ起こす。 */
+  let moved = false;
+  let threw = false;
   const raw = d.dispatch.bind(d);
   d.dispatch = (a): void => {
     if ((a as { type?: string }).type === 'APP_TILE_SAVED') acks.push('x');
+    if ((a as { type?: string }).type === 'MOVE_APP_TILE') moved = true;
     raw(a);
   };
   connectStoreEffects(d, {
@@ -89,8 +93,17 @@ function setup(
       if (opts.throwOn === lid) throw new Error('worker が落ちた');
       return bodies[lid] ?? null;
     },
-    getBodies: async (lids) =>
-      lids.filter((l) => bodies[l] !== undefined).map((l) => ({ lid: l, body: bodies[l]! })),
+    // 🔑 getBody と同じ意味論(見つからない lid は出さない / 落ちる lid を含めば落ちる)
+    getBodies: async (lids) => {
+      // ⚠ 落ちるのは**並べ替えの読み 1 回だけ**(後の再読込まで落とすと別の文言になる)
+      if (moved && !threw && opts.throwOn !== undefined && lids.includes(opts.throwOn)) {
+        threw = true;
+        throw new Error('worker が落ちた');
+      }
+      return lids
+        .filter((l) => !(moved && opts.missingOn === l) && bodies[l] !== undefined)
+        .map((l) => ({ lid: l, body: bodies[l]! }));
+    },
     renameEntry: async () => stubStamps(),
     replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
     reorderEntry: async () => stubStamps(),

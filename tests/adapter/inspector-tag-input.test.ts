@@ -93,6 +93,8 @@ function setup(body: string) {
       };
     },
     getBody: async (lid) => disk[lid] ?? null,
+    getBodies: async (lids) =>
+      lids.filter((l) => disk[l] !== undefined).map((l) => ({ lid: l, body: disk[l]! })),
     deleteEntry: async () => {},
     setEntryParent: async () => {},
     renameEntry: async () => stubStamps(),
@@ -357,6 +359,8 @@ describe('タグの候補(#494 段②)', () => {
       ...stubRevisionOps(),
       // ⚠ `queryScan` を**渡さない**(古い worker が残っている端末の再現)
       getBody: async (lid) => disk[lid] ?? null,
+      getBodies: async (lids) =>
+        lids.filter((l) => disk[l] !== undefined).map((l) => ({ lid: l, body: disk[l]! })),
       deleteEntry: async () => {},
       setEntryParent: async () => {},
       renameEntry: async () => stubStamps(),

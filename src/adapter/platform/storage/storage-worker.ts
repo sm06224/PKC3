@@ -1589,6 +1589,12 @@ const UPSERT_SQL = `INSERT INTO entries
     body_tags = excluded.body_tags,
     body = excluded.body`;
 
+/**
+ * `UPSERT_SQL` に刻印の返却を足した版(#1087)。⚠ DO UPDATE に WHERE は無いので、
+ * 挿入でも更新でも**必ず 1 行返る**(書いた直後の行を読み直す SELECT の代わり)。
+ */
+const UPSERT_RETURNING_SQL = `${UPSERT_SQL} RETURNING created_at, updated_at`;
+
 function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
   return [
     cid,
@@ -2114,7 +2120,10 @@ function writeEntryRow(
       /* 履歴の維持失敗は本文の保存を巻き添えにしない */
     }
   }
-  database.exec({ sql: UPSERT_SQL, bind: bindUpsert(cid, entry) });
+  // 🔑 刻んだ時刻は書いた文から直接受ける(#1087。以前は同じ行を SELECT で読み直していた)
+  const stamped = database.selectObjects(UPSERT_RETURNING_SQL, bindUpsert(cid, entry))[0] as
+    | { created_at: string | null; updated_at: string | null }
+    | undefined;
   /**
    * 🔴 **同じ tx で居場所も張る**(#258)。
    * ⚠ 順序に **FK の制約は無い**(`schema.ts` の relations に FK は無い)── 行を先に
@@ -2127,10 +2136,6 @@ function writeEntryRow(
   // (実際に情報列が終日「—」になっていた)。⚠ 同 tx 内で読む ──
   // COMMIT の後に読むと、別タブの書込が割り込んだ値を返しうる。
   // ⚠ 主スレッド側で時刻を作らない(DB に無い値を画面に出すことになる)
-  const stamped = database.selectObjects(
-    'SELECT created_at, updated_at FROM entries WHERE cid = ? AND lid = ?',
-    [cid, entry.lid],
-  )[0] as { created_at: string | null; updated_at: string | null } | undefined;
   return {
     stamps: {
       createdAt: stamped?.created_at ?? null,
@@ -3224,16 +3229,24 @@ const handlers: Handlers = {
     return rows.length > 0 ? (rows[0]?.body as string) : null;
   },
   getBodies: (req) => {
-    // ⚠ postMessage を 1 回にするのが目的 ── SQL は 1 件ずつでよい
-    // (worker の中の N 回は往復ではない)。無い lid は結果に出さない
+    // ⚠ postMessage を 1 回にするのが目的。SQL は 500 件ずつの IN 句にまとめる
+    // (#1087。SQLITE_MAX_VARIABLE_NUMBER の下限 999 より小さく保つ)。
+    // 結果は req.lids の順・重複そのまま・無い lid は出さない(以前の 1 件ずつと同じ)
     const database = need();
+    const CHUNK = 500;
+    const found = new Map<string, string>();
+    for (let i = 0; i < req.lids.length; i += CHUNK) {
+      const part = req.lids.slice(i, i + CHUNK);
+      const rows = database.selectObjects(
+        `SELECT lid, body FROM entries WHERE cid = ? AND lid IN (${part.map(() => '?').join(',')})`,
+        [req.cid, ...part],
+      );
+      for (const r of rows) found.set(r.lid as string, r.body as string);
+    }
     const out: Array<{ lid: string; body: string }> = [];
     for (const lid of req.lids) {
-      const rows = database.selectObjects(
-        'SELECT body FROM entries WHERE cid = ? AND lid = ?',
-        [req.cid, lid],
-      );
-      if (rows.length > 0) out.push({ lid, body: rows[0]?.body as string });
+      const body = found.get(lid);
+      if (body !== undefined) out.push({ lid, body });
     }
     return out;
   },

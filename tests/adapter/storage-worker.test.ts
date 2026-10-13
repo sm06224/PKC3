@@ -3855,3 +3855,63 @@ describe('xCheckReservedLock の差し替え(#1218 F1)', () => {
     expect(init.reservedLockUpstreamFixed).toBe(false);
   });
 });
+
+describe('#1087 書いた行の刻印と getBodies の 1 文化', () => {
+  const metaOf = async (lid: string) =>
+    (await request({ op: 'listEntryMetas', cid: 'c1' })).find((m) => m.lid === lid);
+
+  it('🔴 upsertEntry の刻印は、挿入・更新・無変更のどれでも disk の行そのもの', async () => {
+    const ins = await write('st1', 'はじめ\n');
+    const m1 = await metaOf('st1');
+    expect(ins.createdAt, '挿入の刻印が空').toBeTruthy();
+    expect(ins.createdAt).toBe(m1?.created_at);
+    expect(ins.updatedAt).toBe(m1?.updated_at);
+
+    const upd = await write('st1', '書き換え\n');
+    const m2 = await metaOf('st1');
+    expect(upd.createdAt, '更新で作成時刻が変わった').toBe(m1?.created_at);
+    expect(upd.createdAt).toBe(m2?.created_at);
+    expect(upd.updatedAt).toBe(m2?.updated_at);
+
+    const same = await write('st1', '書き換え\n');
+    const m3 = await metaOf('st1');
+    expect(same.createdAt).toBe(m3?.created_at);
+    expect(same.updatedAt).toBe(m3?.updated_at);
+    expect(same.parentWritten).toBeUndefined();
+  });
+
+  it('🔴 getBodies は lids の順・重複・欠落をそのまま返す', async () => {
+    await write('gb1', 'B1');
+    await write('gb2', 'B2');
+    const got = await request({
+      op: 'getBodies',
+      cid: 'c1',
+      lids: ['gb2', 'nope', 'gb1', 'gb2', 'nope2'],
+    });
+    expect(got).toEqual([
+      { lid: 'gb2', body: 'B2' },
+      { lid: 'gb1', body: 'B1' },
+      { lid: 'gb2', body: 'B2' },
+    ]);
+    expect(await request({ op: 'getBodies', cid: 'c1', lids: [] })).toEqual([]);
+    // 別の入れ物のノートは混ざらない
+    expect(await request({ op: 'getBodies', cid: 'other', lids: ['gb1'] })).toEqual([]);
+  });
+
+  it.each([499, 500, 501, 1001])('🔴 getBodies は %i 件でも順序を保つ(500 件区切りの境界)', async (n) => {
+    // 7 件に 1 件だけ欠落させる ── 欠落が区切りをまたぎ、区切りの端の lid が実在する形にする
+    const lids = Array.from({ length: n }, (_, i) => `bulk${String(n)}-${String(i)}`);
+    await request({
+      op: 'bulkUpsertEntries',
+      cid: 'c1',
+      entries: lids.filter((_, i) => i % 7 !== 3).map((l) => entry(l, 'body:' + l)),
+    });
+    // 逆順 + 先頭の重複 ── 区切りごとの並びが結果の並びに漏れないこと
+    const asked = [lids[0]!, ...[...lids].reverse()];
+    const got = await request({ op: 'getBodies', cid: 'c1', lids: asked });
+    expect(got).toEqual(
+      asked.filter((l) => lids.indexOf(l) % 7 !== 3).map((l) => ({ lid: l, body: 'body:' + l })),
+    );
+    expect(got.length, '前提: 実在が空').toBeGreaterThan(0);
+  });
+});
