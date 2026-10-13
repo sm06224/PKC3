@@ -24,7 +24,7 @@
  * 判断が「どの test からも実行されない場所」に沈む(CLAUDE.md §2)。
  */
 
-import { buildNeighbourhood, type GraphEdge } from '@features/relation/neighbourhood';
+import { buildNeighbourhood, type GraphEdge, type TitleLookup } from '@features/relation/neighbourhood';
 import { relationLabel } from '@features/relation/kinds';
 
 /**
@@ -58,7 +58,7 @@ export interface RelationMapInput {
   readonly center: string;
   readonly depth: number;
   readonly edges: readonly GraphEdge[];
-  readonly titles: ReadonlyMap<string, string>;
+  readonly titles: TitleLookup;
 }
 
 /**

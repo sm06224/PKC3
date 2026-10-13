@@ -121,6 +121,22 @@ function withBlockedNote(base: string, note: string): string {
 }
 
 export class InspectorRenderer {
+  /** 「居場所」の祖先の題名(#1087)。鍵は選択 lid と `entryMetas` / `relations` の参照。 */
+  private chainMemo: {
+    lid: string;
+    metas: ReadonlyMap<string, EntryMeta>;
+    relations: AppState['relations'];
+    titles: string[];
+  } | null = null;
+  /** 関係の図を組んだときの入力(#1087)。同じなら組み直さない。 */
+  private mapMemo: {
+    box: HTMLElement;
+    lid: string;
+    metas: ReadonlyMap<string, EntryMeta>;
+    relations: AppState['relations'];
+    linkKey: string;
+    drawn: number;
+  } | null = null;
   /** 組み終わった器の先頭(`region` に繋がっているかで生存を判定する)。 */
   private head: HTMLElement | null = null;
   private shape: Shape | null = null;
@@ -369,9 +385,7 @@ export class InspectorRenderer {
      * ⚠ 解決は `features/relation/tree` の 1 本(パンくず・移動の帯と同規則)。
      * ⚠ root 直下は空文字ではなく **「ルート」**と書く ── 空欄は「不明」に見える。
      */
-    const chain = getAncestorFolders(meta.lid, state.entryMetas, state.relations)
-      .reverse()
-      .map((f) => f.title);
+    const chain = this.ancestorTitles(meta.lid, state.entryMetas, state.relations);
     this.setRow('inspector-folder', chain.length === 0 ? 'ルート' : chain.join(' / '));
     /**
      * 🔴 **タグを押せる札にする**(#182)。押すと**そのタグで探す** ── #181 で
@@ -875,20 +889,53 @@ export class InspectorRenderer {
           linkEdges.push({ fromLid: from, toLid: meta.lid, kind: BODY_LINK_KIND });
         }
       }
-      const drawn = renderRelationMap(mapBox, {
-        center: meta.lid,
-        depth: RELATION_MAP_DEPTH,
-        // ⚠ **居場所(親子)は出さない** ── 上の「関係」行と同じ判断である。
-        //    入れると図がフォルダの木になり、「つながり」を見に来た user が
-        //    見たい物(意味の関係)が埋もれる。
-        edges: [
-          ...state.relations
-            .filter((r) => r.kind !== STRUCTURAL)
-            .map((r) => ({ fromLid: r.fromLid, toLid: r.toLid, kind: r.kind })),
-          ...linkEdges,
-        ],
-        titles: new Map([...state.entryMetas].map(([lid, m]) => [lid, m.title])),
-      });
+      /**
+       * 🔴 **入力が前回と同じなら、図を組み直さない**(#1087)。打つたびに `UPDATE_OPEN_BODY` で
+       * 届くが、リンクが増減しない限り図の材料(辺・題名)は動かない。
+       * ⚠ 計算だけを省く ── 面全体の早期 return ではない(file 冒頭の dead click の戒め)。
+       *   図の節点は `data-pkc-action` の委譲で拾われ、組み直しの閉包は持たないので、
+       *   残した節点を押しても動く。
+       * 🔑 鍵は `relations` / `entryMetas` の**参照**(題名は meta から引く ── ENTRY_STAMPED は
+       *   meta を必ず新しい参照にするので、題名の変更は外れない)+ 本文リンクの辺。
+       */
+      const linkKey = linkEdges.map((e) => `${e.fromLid}>${e.toLid}`).join('\n');
+      const m = this.mapMemo;
+      let drawn: number;
+      if (
+        m !== null &&
+        m.box === mapBox &&
+        m.lid === meta.lid &&
+        m.metas === state.entryMetas &&
+        m.relations === state.relations &&
+        m.linkKey === linkKey
+      ) {
+        drawn = m.drawn;
+      } else {
+        const metas = state.entryMetas;
+        drawn = renderRelationMap(mapBox, {
+          center: meta.lid,
+          depth: RELATION_MAP_DEPTH,
+          // ⚠ **居場所(親子)は出さない** ── 上の「関係」行と同じ判断である。
+          //    入れると図がフォルダの木になり、「つながり」を見に来た user が
+          //    見たい物(意味の関係)が埋もれる。
+          edges: [
+            ...state.relations
+              .filter((r) => r.kind !== STRUCTURAL)
+              .map((r) => ({ fromLid: r.fromLid, toLid: r.toLid, kind: r.kind })),
+            ...linkEdges,
+          ],
+          // 全ノートの写しを作らない ── 引くのは図に載る数件だけ
+          titles: { has: (lid) => metas.has(lid), get: (lid) => metas.get(lid)?.title },
+        });
+        this.mapMemo = {
+          box: mapBox,
+          lid: meta.lid,
+          metas,
+          relations: state.relations,
+          linkKey,
+          drawn,
+        };
+      }
       // ⚠ `<dt>` は `<dd>` の直前 ── 値だけ畳むと**見出しだけ残る**
       const dt = mapBox.previousElementSibling;
       mapBox.hidden = drawn === 0;
@@ -1225,6 +1272,26 @@ export class InspectorRenderer {
       more.value = `(候補は ${RELATION_CANDIDATE_MAX} 件まで表示。ほかに ${others.length - RELATION_CANDIDATE_MAX} 件あります)`;
       this.candidates.append(more);
     }
+  }
+
+  /**
+   * 祖先の題名(根に近い順)。⚠ 解決は `getAncestorFolders` 1 本のまま ── 全 relation を
+   * 走査するので、打つたびに解き直さない(#1087)。
+   */
+  private ancestorTitles(
+    lid: string,
+    metas: ReadonlyMap<string, EntryMeta>,
+    relations: AppState['relations'],
+  ): string[] {
+    const c = this.chainMemo;
+    if (c !== null && c.lid === lid && c.metas === metas && c.relations === relations) {
+      return c.titles;
+    }
+    const titles = getAncestorFolders(lid, metas, relations)
+      .reverse()
+      .map((f) => f.title);
+    this.chainMemo = { lid, metas, relations, titles };
+    return titles;
   }
 
   /** 器を組む(形が変わったときだけ呼ばれる)。 */

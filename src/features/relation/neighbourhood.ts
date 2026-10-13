@@ -35,6 +35,12 @@ export interface PlacedNode {
   readonly y: number;
 }
 
+/** 題名の引き口。⚠ `Map` の写しを作らせないための最小の形(引くのは `has` / `get` だけ)。 */
+export interface TitleLookup {
+  has(lid: string): boolean;
+  get(lid: string): string | undefined;
+}
+
 export interface Neighbourhood {
   readonly nodes: readonly PlacedNode[];
   readonly edges: readonly GraphEdge[];
@@ -66,7 +72,7 @@ export function buildNeighbourhood(input: {
   readonly center: string;
   readonly depth: number;
   readonly edges: readonly GraphEdge[];
-  readonly titles: ReadonlyMap<string, string>;
+  readonly titles: TitleLookup;
   readonly maxNodes?: number;
 }): Neighbourhood {
   const { center, edges, titles } = input;
@@ -133,7 +139,7 @@ export function buildNeighbourhood(input: {
 function placeRings(
   order: readonly string[],
   ringOf: ReadonlyMap<string, number>,
-  titles: ReadonlyMap<string, string>,
+  titles: TitleLookup,
 ): PlacedNode[] {
   /** 環ごとの人数(角度を割るのに要る)。 */
   const counts = new Map<number, number>();
