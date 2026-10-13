@@ -113,7 +113,13 @@ export const COLLECTION_COMMANDS: readonly CollectionCommand[] = [
  *   `buildCollectionPane` が、この配列を描いた**直後**に手で組む。
  */
 export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
-  { action: 'export-html', label: '閲覧用 HTML で書き出す', title: '読むだけの HTML ファイルにまとめます' },
+  {
+    action: 'export-html',
+    label: '閲覧用 HTML で書き出す',
+    // 🔴 **全部入ることを言う**(#1087 の見直し 2026-10-13)── ノートを選んだときの同じ名前のボタンは 1 件だけなので、
+    //   社外へ 1 件渡すつもりで押すと全ノート入りになっていた
+    title: '全部のノートを、読むだけの HTML ファイル 1 つにまとめます(1 件だけ渡すときは、そのノートを選んでから押します)',
+  },
   {
     action: 'export-portable',
     label: 'PKC3 入り HTML で書き出す',

@@ -39,7 +39,7 @@ const BATCH4: readonly Row[] = [
   { id: 'capture-trim-start', source: R + 'captures.ts', scene: '一覧で再生しているとき', fires: null },
   { id: 'capture-trim-end', source: R + 'captures.ts', scene: '一覧で再生しているとき', fires: null },
   { id: 'capture-trim-run', source: R + 'captures.ts', scene: '始まりと終わりを選んであるとき', fires: null },
-  { id: 'capture-trim-clear', source: R + 'captures.ts', scene: '始まりと終わりを選んであるとき', fires: 'CLEAR_CAPTURE_TRIM' },
+  { id: 'capture-trim-clear', source: R + 'captures.ts', scene: '始まりか終わりを選んであるとき', fires: 'CLEAR_CAPTURE_TRIM' },
   { id: 'search-jump-end', source: R + 'search-jump.ts', scene: '一致した所を巡っているとき', fires: 'SEARCH_JUMP_END' },
 ];
 

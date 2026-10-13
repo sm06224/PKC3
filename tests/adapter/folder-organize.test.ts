@@ -905,6 +905,15 @@ describe('掴んで落とす(#240 段④)', () => {
     expect(status.at(-1), '押した数と合っていない').toBe('2 件を「t-f1」へ入れました');
   });
 
+  it('🔴 全部すでにそこに居たら「入れました」と言わない(動いていないのに動いたと言わない)', async () => {
+    const { q, d, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    const before = d.getState().relations;
+    q('tbody [data-pkc-entry="f1"]')!.dispatchEvent(dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'n1' })));
+    await tick();
+    expect(d.getState().relations, '前提: 何も動いていない').toBe(before);
+    expect(status.at(-1), '動いていないのに入れたと言っている').toBe('すでに「t-f1」に入っています');
+  });
+
   it('🔴 断られた分は件数に入れない(知らせと断りが食い違わない)', async () => {
     /**
      * 🔴 **知らせは「いまそこに在る数」を言う**(2026-08-18 の着地前レビュー M-3)。

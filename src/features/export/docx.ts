@@ -553,7 +553,7 @@ export function buildDocx(
     const kinds = new Map<string, number>();
     for (const s of skipped) kinds.set(s.what, (kinds.get(s.what) ?? 0) + 1);
     const detail = [...kinds].map(([what, n]) => `${what} ${n} 件`).join(' / ');
-    warnings.push(`Word にコピーできなかったものがあります(${detail})。本文にその場所を書きました`);
+    warnings.push(`Word に入れられなかったものがあります(${detail})。本文にその場所を書きました`);
   }
 
   return {

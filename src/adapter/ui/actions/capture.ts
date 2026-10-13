@@ -246,6 +246,12 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       // 🔑 分かれた回だけ印を付ける(1 本なら「元に戻す」は元から 1 回である)
       ...(tag === null ? {} : { batch: tag }),
     });
+    /**
+     * 🔑 **録ったものの一覧を集め直す**(2026-10-13 の見直し)── 一覧はタブを開いたときに 1 度集めるだけなので、
+     *   開いたまま録ると、いま録った物が出なかった(`capture-trim.ts` と同じ形)。
+     * ⚠ 集めていない(タブを 1 度も開いていない)なら撃たない ── 開いたときに集めるので要らない。
+     */
+    if (deps.dispatcher.getState().captureItems !== null) deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
     return true;
   };
 

@@ -67,6 +67,8 @@ const BODY_BATCH_BYTES = 4 * 1024 * 1024;
  * ⚠ 閲覧側の script は画面の字の検査に掛かる(日本語を含むリテラルなので)── 属性名と key は式で差す。
  */
 const NOTE_LINK_ATTR = 'data-pkc-entry-ref';
+/** 描いた本文の中のノート間リンク(閲覧側の `a[${NOTE_LINK_ATTR}]` と同じ物)。1 つ目の組がリンク先の lid。 */
+const NOTE_LINK_IN_HTML = /<a\b[^>]*\bdata-pkc-entry-ref="entry:([^"#]+)/g;
 const NOTE_ID_KEY = 'lid';
 
 
@@ -834,6 +836,12 @@ export async function writePortableHtml(
   const assetKeys = allAssets.map((a) => a.key).filter((k) => k !== '');
 
   let entryCount = 0;
+  /**
+   * 🔴 **入っていないノートへのリンクを数える**(#1087 の見直し 2026-10-13)── 閲覧側ではそのリンクを押せない字に
+   *   するが、渡す側には何も言っていなかった(会議メモは別ノートへのリンクが多い ── 渡してから気づく)。
+   */
+  const exportedLids = new Set<string>();
+  const linkTargets: string[] = [];
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
@@ -929,6 +937,8 @@ export async function writePortableHtml(
       };
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
+      exportedLids.add(m.lid);
+      for (const hit of html.matchAll(NOTE_LINK_IN_HTML)) linkTargets.push(hit[1]!);
     }
     if (chunk !== '') parts.push(new Blob([chunk]));
     if (done || !next) break;
@@ -946,6 +956,10 @@ export async function writePortableHtml(
 
   if (entryCount === 0) throw new Error('書き出せるノートが 1 件もありません');
 
+  const outside = linkTargets.filter((lid) => !exportedLids.has(lid)).length;
+  if (outside > 0) {
+    warnings.push(`このファイルに入っていないノートへのリンク ${outside} 件は、押せない字だけになります`);
+  }
   const assetMetas = allAssets.filter((a) => used.has(a.key));
   const skipped = allAssets.length - assetMetas.length;
   if (skipped > 0) {

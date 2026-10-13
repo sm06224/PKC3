@@ -23,6 +23,7 @@ import { parsePlaceColor, parsePlaceWidth, placeArrowOf, placeSizeOf } from '@fe
 import { parsePlaceGroup } from '@features/markdown/place-notation';
 import { placeRotateOf } from '@features/markdown/place-rotate';
 import { placeShapeOf } from '@features/markdown/place-shape';
+import { ADOPT_IMAGES_LABEL } from '@features/entry-actions';
 import {
   anchorSpell,
   parseRouteSpell,
@@ -95,12 +96,12 @@ function skippedName(el: Element): { what: string; why: string } | null {
     // ⚠ **添付の画像は別扱い**(#187 段②)── ここへ来るのは添付でない画像だけ
     return {
       what: alt !== '' ? `画像「${alt}」` : '画像',
-      why: '添付ではない画像は Word に入れていません',
+      why: `添付ではない画像は入れていません(ウェブ上の画像なら、右のペインの「${ADOPT_IMAGES_LABEL}」で取り込んでから書き出すと入ります)`,
     };
   }
-  if (tag === 'svg') return { what: '図(ベクタ)', why: 'このバージョンでは図を Word に入れていません' };
-  if (tag === 'iframe') return { what: '埋め込み枠', why: 'Word では動きません' };
-  if (tag === 'canvas') return { what: '描画領域', why: 'Word では動きません' };
+  if (tag === 'svg') return { what: '図(ベクタ)', why: 'このバージョンでは、この図は入れていません' };
+  if (tag === 'iframe') return { what: '埋め込み枠', why: '書き出したファイルでは動きません' };
+  if (tag === 'canvas') return { what: '描画領域', why: '書き出したファイルでは動きません' };
   return null;
 }
 

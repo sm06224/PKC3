@@ -393,7 +393,7 @@ export class CapturesRenderer {
       return '音と動画を集められませんでした(開き直すと試し直します)';
     if (state.captureItems === null) return '音と動画を集めています…';
     if (state.captureItems.length === 0)
-      return '音と動画はまだありません。左下の「録音」か「画面録画」で録ると、ここに並びます。';
+      return '音と動画はまだありません。左の「録音」か「画面録画」で録ると、ここに並びます。';
     if (shown === 0) return '絞り込みに一致するものがありません';
     return `${shown} 件`;
   }
@@ -578,7 +578,10 @@ export class CapturesRenderer {
           ? 'この範囲だけを新しい動画として保存します(元はそのまま残ります)。'
           : 'この範囲だけを新しい録音として保存します(元はそのまま残ります)。';
       bar.append(run);
+    }
 
+    // 🔑 片方だけ付けた印も消せるようにする(始まりだけ付けて、やめたくなったときの帰り道)
+    if (startMs !== null || endMs !== null) {
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.setAttribute('data-pkc-action', 'capture-trim-clear');

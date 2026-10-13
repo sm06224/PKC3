@@ -171,3 +171,11 @@ describe('壊れたときの口は、見える字で説明する(2026-09-17 / 20
     expect(note?.hidden, 'db-check-run の説明が隠れている').toBe(false);
   });
 });
+
+describe('何も選んでいないときの閲覧用 HTML(#1087 の見直し 2026-10-13)', () => {
+  it('🔴 全部のノートが入ることを説明に書く(1 件だけ渡すつもりで押させない)', () => {
+    const html = COLLECTION_PANE_COMMANDS.find((c) => c.action === 'export-html');
+    expect(html?.label, '前提: ノートを選んだときと同じ名前のボタン').toBe('閲覧用 HTML で書き出す');
+    expect(html?.title).toContain('全部のノート');
+  });
+});

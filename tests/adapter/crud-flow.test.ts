@@ -323,6 +323,22 @@ describe('delete (P3-7a)', () => {
     expect((await undoOffer())?.lids, '戻す材料を持っていない').toEqual(['b']);
   });
 
+  it('🔴 フォルダを移したら、中のノートがルートに出たことも言う(中身ごと消えたと読ませない)', async () => {
+    const { d, q } = setup(
+      [meta('f', 1, { archetype: 'folder' }), meta('n1', 2), meta('n2', 3), meta('x', 4)],
+      { f: '', n1: 'N1', n2: 'N2', x: 'X' },
+    );
+    d.dispatch({ type: 'SET_ENTRY_PARENT', lid: 'n1', parentLid: 'f', relationId: 'r1' });
+    d.dispatch({ type: 'SET_ENTRY_PARENT', lid: 'n2', parentLid: 'f', relationId: 'r2' });
+    expect(d.getState().relations, '前提: 中に 2 件入っていない').toHaveLength(2);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'f' });
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await tick(20);
+    expect(d.getState().entryMetas.has('n1'), '中のノートまで消えた').toBe(true);
+    expect(d.getState().notice).toBe('「t-f」をゴミ箱へ移しました(中のノート 2 件は消えずにルートに出ています)');
+  });
+
   it('🔴 編集中は消さずに理由を出す(確認より前に断る ── 無言にしない)', async () => {
     const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();

@@ -1022,6 +1022,21 @@ const dualTabIndex = (target: HTMLElement): number | null => {
   return Number(raw);
 };
 
+/**
+ * ゴミ箱へ移したフォルダの中に居て、**親を失ってルートに出た**ノートの数(#1087 の見直し 2026-10-13)。
+ * ⚠ 別のフォルダにも入っていたノートはそちらに残るので数えない(「ルートに出た」だけを言う)。
+ */
+const leftAtRoot = (before: AppState, after: AppState): number => {
+  const was = resolveCanonicalParents(before.entryMetas, before.relations);
+  const now = resolveCanonicalParents(after.entryMetas, after.relations);
+  let n = 0;
+  for (const [child, parent] of was) {
+    if (after.entryMetas.has(parent) || !after.entryMetas.has(child)) continue;
+    if (!now.has(child)) n += 1;
+  }
+  return n;
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
   lids: readonly string[],
@@ -1075,6 +1090,15 @@ const moveEntries = (
     parentLid === null
       ? 'ルート'
       : (dispatcher.getState().entryMetas.get(parentLid)?.title ?? 'フォルダ');
+  /**
+   * 🔴 **1 件も動いていないなら「入れました」と言わない**(#1087 の見直し 2026-10-13)── 同じフォルダへ
+   *   落とし直しても「1 件を入れました」と出て、何も動いていないのに動いたと言っていた。
+   * ⚠ 1 件でも動いた回は、既に居た分も数える(押した数と合わせる ── 下の件数の決まりはそのまま)。
+   */
+  if (moved === 0) {
+    report?.(`すでに「${where}」に入っています`);
+    return;
+  }
   report?.(`${moved + same} 件を「${where}」へ入れました`);
 };
 
@@ -4468,6 +4492,7 @@ function deleteFrom(
     offerTrashUndo(
       dispatcher,
       lids.filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l)).map((l) => ({ lid: l, title: titleOf.get(l) ?? l })),
+      leftAtRoot(st, after),
     );
 }
 
@@ -7655,8 +7680,10 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 上の `phase` の断りは、確認より前ではなく**実行より前**に残している(無言の拒否を作らない)。
      */
     if (!dispatcher.getState().entryMetas.has(lid)) return;
+    const before = dispatcher.getState();
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
-    if (!dispatcher.getState().entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }]);
+    const after = dispatcher.getState();
+    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after));
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
