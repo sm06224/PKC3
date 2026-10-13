@@ -252,4 +252,31 @@ describe('バックリンクの表示 (#348)', () => {
     s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: ['gone'], truncated: false }).state;
     expect(box(paint(s)).textContent).toContain('見つかりません');
   });
+
+  /** 🔴 見つからない相手は、押せる顔にしない(押しても何も起きない。#1087)。 */
+  it('🔴 見つからない相手は押せるボタンにしない', () => {
+    let s = reduce(booted(['a', 'b']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = reduce(s, { type: 'BACKLINKS_LOADED', lid: 'a', lids: ['gone', 'b'], truncated: false }).state;
+    const items = [...box(paint(s)).querySelectorAll<HTMLElement>('[data-pkc-field="inspector-backlink"]')];
+    expect(items).toHaveLength(2);
+    expect(items[0]!.textContent).toBe('(見つかりません)');
+    expect(items[0]!.tagName, 'ボタンのまま').not.toBe('BUTTON');
+    expect(items[0]!.hasAttribute('data-pkc-action')).toBe(false);
+    // 対照群 ── 実在する相手は押せる
+    expect(items[1]!.getAttribute('data-pkc-action')).toBe('select-entry');
+  });
+
+  it('🔴 つながりの相手が見つからないときも、押せないが「つながりを消す」は残る', () => {
+    let s = reduce(booted(['a']), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    s = {
+      ...s,
+      relations: [{ id: 'r1', fromLid: 'a', toLid: 'gone', kind: 'related' }] as unknown as AppState['relations'],
+    };
+    const r = paint(s);
+    const go = r.querySelector<HTMLElement>('[data-pkc-field="relation-target-link"]');
+    expect(go, '前提:つながりの行が出ていない').not.toBeNull();
+    expect(go!.textContent).toBe('(見つかりません)');
+    expect(go!.hasAttribute('data-pkc-action')).toBe(false);
+    expect(r.querySelector('[data-pkc-action="remove-relation"]'), '消す口が無くなった').not.toBeNull();
+  });
 });

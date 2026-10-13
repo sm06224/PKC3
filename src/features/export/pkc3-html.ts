@@ -495,7 +495,9 @@ try{
       if(!has(k)){
         var miss=document.createElement('code');miss.className='m';
         miss.setAttribute('data-pkc-asset-missing','');
-        miss.textContent='asset:'+k+'(添付が入っていません)';
+        // 🔴 内部の id を字にしない(#1087)。名前が分かれば名前で、id は title に退避する
+        miss.title='asset:'+k;
+        miss.textContent=names[k]?('「'+names[k]+'」の添付ファイルが、このファイルに入っていません'):'添付ファイルが、このファイルに入っていません';
         if(el.parentNode)el.parentNode.replaceChild(miss,el);
         return;
       }
@@ -540,7 +542,10 @@ try{
       }
       if(idp){a.href='#pe-'+at;return}
       a.href='#';
-      a.onclick=function(ev){ev.preventDefault();show(d.entries[at],btns[at])};
+      // 見出しへの参照(#h/…)は飛び先を運ぶ。見つからなければ先頭のまま
+      var hi=ref.indexOf('#h/');
+      var hid=hi<0?'':ref.slice(hi+3);
+      a.onclick=function(ev){ev.preventDefault();show(d.entries[at],btns[at],hid)};
     });
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
@@ -626,7 +631,7 @@ try{
     });
   }
 
-  function show(e,btn){
+  function show(e,btn,hid){
     release();
     dropAll();  // 紙用に組んだ全件は、読みに戻った時点で捨てる(ObjectURL も)
     document.getElementById('title').textContent=e.title;
@@ -642,6 +647,15 @@ try{
     }
     if(cur)cur.setAttribute('aria-current','false');
     cur=btn;btn.setAttribute('aria-current','true');
+    // 🔴 前のノートの読み位置を引き継がない(#1087)。スクロールするのは main
+    var mainEl=document.querySelector('main');
+    if(mainEl)mainEl.scrollTop=0;
+    if(hid){
+      var want=hid;
+      try{want=decodeURIComponent(hid)}catch(_x){}
+      var hl=box.querySelectorAll('h1,h2,h3');
+      for(var hj=0;hj<hl.length;hj++){if(hl[hj].id===want){hl[hj].scrollIntoView();break}}
+    }
   }
 
   // ── 全体を印刷(F-1)。全件を 1 つの document に組んで印刷し、**終わったら捨てる**

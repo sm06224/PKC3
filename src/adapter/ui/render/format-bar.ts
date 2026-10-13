@@ -102,9 +102,9 @@ export function buildFormatBar(): HTMLElement {
   const insertDate = document.createElement('button');
   insertDate.type = 'button';
   insertDate.setAttribute('data-pkc-action', 'insert-date');
-  insertDate.setAttribute(HINT_BASE, '日付を入れる');
+  insertDate.setAttribute(HINT_BASE, '日付を選んで、打っている場所に入れます');
   insertDate.setAttribute(HINT_COMMAND, 'insert-date');
-  insertDate.title = hintTitle('日付を入れる', 'insert-date');
+  insertDate.title = hintTitle('日付を選んで、打っている場所に入れます', 'insert-date');
   const insertDateLabel = document.createElement('span');
   insertDateLabel.setAttribute('data-pkc-field', 'label');
   insertDateLabel.textContent = '日付を入れる';
@@ -123,9 +123,9 @@ export function buildFormatBar(): HTMLElement {
   const insertEntryLink = document.createElement('button');
   insertEntryLink.type = 'button';
   insertEntryLink.setAttribute('data-pkc-action', 'insert-entry-link');
-  insertEntryLink.setAttribute(HINT_BASE, 'ノートへのリンク');
+  insertEntryLink.setAttribute(HINT_BASE, '別のノートを題名で探して、そこへのリンクを打っている場所に入れます');
   insertEntryLink.setAttribute(HINT_COMMAND, 'insert-entry-link');
-  insertEntryLink.title = hintTitle('ノートへのリンク', 'insert-entry-link');
+  insertEntryLink.title = hintTitle('別のノートを題名で探して、そこへのリンクを打っている場所に入れます', 'insert-entry-link');
   const insertEntryLinkLabel = document.createElement('span');
   insertEntryLinkLabel.setAttribute('data-pkc-field', 'label');
   insertEntryLinkLabel.textContent = 'ノートリンクを入れる';
@@ -144,9 +144,9 @@ export function buildFormatBar(): HTMLElement {
   const insertSnippet = document.createElement('button');
   insertSnippet.type = 'button';
   insertSnippet.setAttribute('data-pkc-action', 'insert-snippet');
-  insertSnippet.setAttribute(HINT_BASE, 'テンプレートを入れる');
+  insertSnippet.setAttribute(HINT_BASE, 'テンプレートを一覧から選んで、打っている場所に入れます');
   insertSnippet.setAttribute(HINT_COMMAND, 'insert-snippet');
-  insertSnippet.title = hintTitle('テンプレートを入れる', 'insert-snippet');
+  insertSnippet.title = hintTitle('テンプレートを一覧から選んで、打っている場所に入れます', 'insert-snippet');
   const insertSnippetLabel = document.createElement('span');
   insertSnippetLabel.setAttribute('data-pkc-field', 'label');
   insertSnippetLabel.textContent = 'テンプレートを入れる';
@@ -223,9 +223,9 @@ export function buildFormatBar(): HTMLElement {
   toggleReplace.type = 'button';
   toggleReplace.setAttribute('data-pkc-action', 'toggle-replace');
   toggleReplace.setAttribute('aria-expanded', 'false');
-  toggleReplace.setAttribute(HINT_BASE, '本文の置換');
+  toggleReplace.setAttribute(HINT_BASE, '編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます');
   toggleReplace.setAttribute(HINT_COMMAND, 'toggle-replace');
-  toggleReplace.title = hintTitle('本文の置換', 'toggle-replace');
+  toggleReplace.title = hintTitle('編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます', 'toggle-replace');
   const label = document.createElement('span');
   label.setAttribute('data-pkc-field', 'label');
   label.textContent = '置換の欄を開く / 閉じる';

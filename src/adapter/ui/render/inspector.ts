@@ -705,12 +705,15 @@ export class InspectorRenderer {
           const label = document.createElement('span');
           // ⚠ 向きを出す(→ / ←)── 出典と関連は向きで意味が変わる
           label.textContent = `${relationLabel(r.kind)} ${r.fromLid === meta.lid ? '→' : '←'} `;
-          const go = document.createElement('button');
-          go.type = 'button';
-          go.setAttribute('data-pkc-action', 'select-entry');
-          // ⚠ 属性名は既存の規約に合わせる(`select-entry` は `data-pkc-entry` を読む)
-          //    ── ここで別名を作ると、押しても動かない導線になる(実際 1 度作った)
-          go.setAttribute('data-pkc-entry', otherLid);
+          // 🔴 相手が消えていたら**押せる顔にしない**(#1087)── 押しても選べず、何も起きない
+          const go = document.createElement(other === undefined ? 'span' : 'button');
+          if (go instanceof HTMLButtonElement) go.type = 'button';
+          if (other !== undefined) {
+            go.setAttribute('data-pkc-action', 'select-entry');
+            // ⚠ 属性名は既存の規約に合わせる(`select-entry` は `data-pkc-entry` を読む)
+            //    ── ここで別名を作ると、押しても動かない導線になる(実際 1 度作った)
+            go.setAttribute('data-pkc-entry', otherLid);
+          }
           go.setAttribute('data-pkc-field', 'relation-target-link');
           // ⚠ 相手が消えていても**黙って空にしない**(何が壊れているか分かる形)
           go.textContent = other?.title ?? '(見つかりません)';
@@ -771,10 +774,14 @@ export class InspectorRenderer {
               // 🔑 **並びを決める**(Map の順は集めた順なので、画面が理由なく動く)
               .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
       for (const { lid, title } of inside) {
-        const go = document.createElement('button');
-        go.type = 'button';
-        go.setAttribute('data-pkc-action', 'select-entry');
-        go.setAttribute('data-pkc-entry', lid);
+        // 🔴 入れ物が見つからないときは押せる顔にしない(#1087)
+        const gone = !state.entryMetas.has(lid);
+        const go = document.createElement(gone ? 'span' : 'button');
+        if (go instanceof HTMLButtonElement) go.type = 'button';
+        if (!gone) {
+          go.setAttribute('data-pkc-action', 'select-entry');
+          go.setAttribute('data-pkc-entry', lid);
+        }
         go.setAttribute('data-pkc-field', 'inspector-smart-hit');
         go.textContent = title;
         smartBox.append(go);
@@ -792,17 +799,24 @@ export class InspectorRenderer {
       //    どちらも「**データが無い**」── 片方だけ見ると、部分的な state で落ちる
       if (!back || back.lid !== meta.lid) {
         backBox.textContent = '参照元を調べています…';
+      } else if (back.failed) {
+        // 🔴 調べられなかった(#1087)── 「調べています…」のまま固めず、次の手を言う
+        backBox.textContent = '参照元を調べられませんでした。ノートを選び直すと、もう一度調べます';
       } else if (back.lids.length === 0) {
         backBox.textContent = '無し';
       } else {
         for (const otherLid of back.lids) {
-          const go = document.createElement('button');
-          go.type = 'button';
-          go.setAttribute('data-pkc-action', 'select-entry');
-          go.setAttribute('data-pkc-entry', otherLid);
+          const otherTitle = state.entryMetas.get(otherLid)?.title;
+          // ⚠ 相手が消えていても**黙って空にしない**(関係と同じ言い方)。
+          //    ただし押しても開けないので、ボタンにしない(#1087)
+          const go = document.createElement(otherTitle === undefined ? 'span' : 'button');
+          if (go instanceof HTMLButtonElement) go.type = 'button';
+          if (otherTitle !== undefined) {
+            go.setAttribute('data-pkc-action', 'select-entry');
+            go.setAttribute('data-pkc-entry', otherLid);
+          }
           go.setAttribute('data-pkc-field', 'inspector-backlink');
-          // ⚠ 相手が消えていても**黙って空にしない**(関係と同じ言い方)
-          go.textContent = state.entryMetas.get(otherLid)?.title ?? '(見つかりません)';
+          go.textContent = otherTitle ?? '(見つかりません)';
           backBox.append(go);
         }
         if (back.truncated) {

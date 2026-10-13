@@ -1901,7 +1901,7 @@ export interface AppState {
    * ⚠ `lid` を一緒に持つ ── 選択を切り替えた直後に前のノートの結果が届いても、
    *   **別のノートの一覧を出さない**(遅れて届く答えは捨てる)。
    */
-  backlinks: { lid: string; lids: string[]; truncated: boolean } | null;
+  backlinks: { lid: string; lids: string[]; truncated: boolean; failed?: true } | null;
   /**
    * ランチャーのタイル(P7b 段⑩)。⚠ `null` = **まだ読んでいない**。
    * 元データは attachment の frontmatter で**常駐していない**ので、
@@ -3355,7 +3355,14 @@ export type SystemCommand =
    */
   | { type: 'PERSIST_STATE'; state: PersistState }
   /** 🔴 バックリンクが届いた(#348)。⚠ **どのノートの分か**を一緒に運ぶ。 */
-  | { type: 'BACKLINKS_LOADED'; lid: string; lids: string[]; truncated: boolean }
+  | {
+      type: 'BACKLINKS_LOADED';
+      lid: string;
+      lids: string[];
+      truncated: boolean;
+      /** 🔴 調べられなかった(#1087)。⚠ 「0 件」と区別する ── 混ぜると「無し」と嘘をつく */
+      failed?: true;
+    }
   | {
       /**
        * 🔴 **本文の構造化書換の ack**(#276 / #277 で `TODO_TOGGLED` から改名)。
@@ -8468,7 +8475,12 @@ function reduceCore(
         : {
             state: {
               ...state,
-              backlinks: { lid: action.lid, lids: action.lids, truncated: action.truncated },
+              backlinks: {
+                lid: action.lid,
+                lids: action.lids,
+                truncated: action.truncated,
+                ...(action.failed ? { failed: true as const } : {}),
+              },
             },
             events: [],
           };

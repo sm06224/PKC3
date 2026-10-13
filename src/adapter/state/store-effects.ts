@@ -1498,10 +1498,13 @@ export function connectStoreEffects(
        */
       case 'REQUEST_BACKLINKS': {
         const ask = store.findBacklinks;
-        // ⚠ 古い worker(未知の op)では**何も出さない** ── 帯は出さない。
-        //    「参照しているノート」は付随情報で、操作は止まっていない
-        if (!ask) break;
         const lid = ev.lid;
+        // 🔴 古い worker(未知の op)でも**「調べています…」のまま固めない**(#1087)。
+        //    調べられなかったと言う(選び直せば、もう一度調べる)
+        if (!ask) {
+          dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
+          break;
+        }
         /**
          * 🔴 **書込の後ろで走らせる**(2026-09-05、着地前レビュー ①-A)。
          * ⚠ 直す前は列の外で撃っていたので、**保存の直後に別のノートを選ぶと、
@@ -1515,7 +1518,9 @@ export function connectStoreEffects(
             const r = await ask(lid);
             if (!disposed) dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, ...r });
           } catch {
-            /* ⚠ 失敗しても黙る(付随情報なので、user の操作は止まっていない) */
+            /* ⚠ 操作は止めない(付随情報)。ただし**「調べています…」を残さない**(#1087) */
+            if (!disposed)
+              dispatcher.dispatch({ type: 'BACKLINKS_LOADED', lid, lids: [], truncated: false, failed: true });
           }
         });
         break;

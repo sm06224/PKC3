@@ -784,6 +784,85 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(outside?.textContent).toBe('外');
   });
 
+  it('🔴 別のノートへ移ると、読み位置は先頭に戻る(前のノートの途中から始まらない)(#1087)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [
+              { lid: 'n1', title: '一つ目', body: '長い本文\n' },
+              { lid: 'n2', title: '二つ目', body: '二つ目の本文\n' },
+            ],
+          }),
+          NOW,
+          (t) => Promise.resolve(renderMarkdown(t)),
+        )
+      ).blob,
+    );
+    const main = document.querySelector('main')!;
+    main.scrollTop = 400;
+    expect(main.scrollTop, '前提:happy-dom が scrollTop を保持しない').toBe(400);
+    document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
+    expect(document.getElementById('title')!.textContent, '前提:移れていない').toBe('二つ目');
+    expect(main.scrollTop).toBe(0);
+  });
+
+  it('🔴 entry:ID#h/見出し のリンクは、移ったあとその見出しへ飛ぶ(見出しが無ければ先頭のまま)(#1087)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [
+              {
+                lid: 'n1',
+                title: '一つ目',
+                body: '[節へ](entry:n2#h/%E7%AF%80%E3%81%A0) と [無い節](entry:n2#h/nothing)\n',
+              },
+              { lid: 'n2', title: '二つ目', body: '## 節だ\n\n本文\n\n## 別の節\n' },
+            ],
+          }),
+          NOW,
+          (t) => Promise.resolve(renderMarkdown(t)),
+        )
+      ).blob,
+    );
+    const calls: string[] = [];
+    (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = function (
+      this: Element,
+    ) {
+      calls.push(this.id);
+    };
+    const links = document.querySelectorAll<HTMLAnchorElement>('#body a[data-pkc-entry-ref]');
+    expect(links, '前提:リンクが描かれていない').toHaveLength(2);
+    links[0]!.click();
+    expect(document.getElementById('title')!.textContent).toBe('二つ目');
+    const h = [...document.querySelectorAll('#body h2')].find((x) => x.textContent === '節だ')!;
+    expect(h.id, '前提:見出しに id が無い').not.toBe('');
+    expect(calls).toEqual([h.id]);
+    // 見つからない見出し ── 移るだけで、飛ばない
+    document.querySelector<HTMLButtonElement>('#list button')!.click();
+    calls.length = 0;
+    document.querySelectorAll<HTMLAnchorElement>('#body a[data-pkc-entry-ref]')[1]!.click();
+    expect(document.getElementById('title')!.textContent).toBe('二つ目');
+    expect(calls).toEqual([]);
+  });
+
+  it('🔴 入っていない添付は、id ではなく「ファイルに入っていない」と言う(名前が分かれば名前を添える)(#1087)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({ entries: [{ lid: 'n1', title: '一つ目', body: '![図](asset:ast-gone)\n' }] }),
+          NOW,
+          (t) => Promise.resolve(renderMarkdown(t)),
+        )
+      ).blob,
+    );
+    const miss = document.querySelector<HTMLElement>('#body [data-pkc-asset-missing]');
+    expect(miss, '前提:欠けた添付の印が出ていない').not.toBeNull();
+    expect(miss!.textContent).toBe('添付ファイルが、このファイルに入っていません');
+    expect(miss!.title).toBe('asset:ast-gone');
+  });
+
   it('画像でない添付は保存できる導線にする(開けないまま黙らせない)', async () => {
     const body = '---\nattachment.name: memo.bin\nattachment.asset_key: ast-b\n---\n';
     await run(
@@ -887,11 +966,12 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(document.getElementById('body')!.textContent).toContain('以上');
   });
 
-  it('🔴 中身の無い参照は `asset:` のまま見せる(key だけ剥き出しにしない)', async () => {
+  it('🔴 中身の無い参照は黙って消さず、「入っていない」と言う(id は title へ。#1087 で字を改めた)', async () => {
     await run(
       (await writePortableHtml(source({ entries: [{ lid: 'n1', body: 'x![](asset:ast-none)y' }] }), NOW)).blob,
     );
-    expect(document.getElementById('body')!.textContent).toContain('asset:ast-none');
+    expect(document.getElementById('body')!.textContent).toContain('添付ファイルが、このファイルに入っていません');
+    expect(document.getElementById('body')!.textContent).not.toContain('asset:');
   });
 
   it('同じ添付を本文と frontmatter の両方が指しても 2 回描かない', async () => {

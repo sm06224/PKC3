@@ -9764,6 +9764,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   'renumber-lists': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const ta = formatTarget(root);
+    // 🔴 1 面のライブ編集の欄(`row-source`)は**押した 1 ブロックだけ**を持つ ── 全文の道具を
+    //   当てて「揃っています」と言うのは偽。欄が無いのに編集中(行を閉じた間)も同じ行き先を言う。
+    if (isLiveBlockField(ta) || (ta === null && dispatcher.getState().phase === 'editing')) {
+      services.showStatus?.(RENUMBER_LIVE_NOTE);
+      return;
+    }
     if (ta === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
       return;
@@ -9788,6 +9794,11 @@ const ACTIONS: Record<string, ActionHandler> = {
   'sort-tasks': (dispatcher, target, services) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const ta = formatTarget(root);
+    // 🔴 `renumber-lists` と同じ理由(ライブ編集の欄は 1 ブロックだけ)
+    if (isLiveBlockField(ta) || (ta === null && dispatcher.getState().phase === 'editing')) {
+      services.showStatus?.(SORT_TASKS_LIVE_NOTE);
+      return;
+    }
     if (ta === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '編集中に押してください' });
       return;
@@ -13816,6 +13827,12 @@ const SWAP_COMMANDS: ReadonlySet<string> = new Set(['move-line-up', 'move-line-d
 
 /** 🔑 画面のボタンの字(「全文を編集」)を引いて書く ── `detail.ts` の編集ボタンと同じ字。 */
 const ALIGN_TABLE_LIVE_NOTE = '表の列幅を揃えるには、「全文を編集」に切り替えてください';
+const RENUMBER_LIVE_NOTE = '番号を振り直すには、「全文を編集」に切り替えてください';
+const SORT_TASKS_LIVE_NOTE = '完了項目を末尾へ移すには、「全文を編集」に切り替えてください';
+/** 1 面のライブ編集の行の欄(押した 1 ブロックだけが入っている)か。 */
+function isLiveBlockField(ta: HTMLTextAreaElement | null): boolean {
+  return ta !== null && ta.getAttribute('data-pkc-field') === 'row-source';
+}
 
 /** 🔑 「この命令は本文の欄へ当てるか」に答える口は**ここ 1 つ**(§7)。 */
 function editorCommand(cmd: string): boolean {
