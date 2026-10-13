@@ -156,6 +156,9 @@ describe('いまどこに保存しているか(#811 の 2 番目)', () => {
   it('🔴 持ち歩ける 1 枚の HTML(選んだ memory)は、事故として言わない', () => {
     const line = storageWhereLine('memory', undefined);
     expect(line, '選んだ形を事故として告げている').not.toContain('⚠');
-    expect(line, '書き出しの案内が無い(それが唯一の残し方である)').toContain('書き出して');
+    // 🔴 持ち歩ける 1 枚の書込は、このブラウザの中に残る(`connectPortablePersist`)── 「このタブだけ」は偽
+    expect(line, '残ると言っていない').toContain('このブラウザの中');
+    expect(line, '残るのに「このタブだけ」と言っている').not.toContain('このタブだけ');
+    expect(line, '持ち出す手段(画面のボタンの名前)を言っていない').toContain('バックアップを書き出してください');
   });
 });

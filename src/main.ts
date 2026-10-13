@@ -1,6 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import { errorText } from '@features/error-text';
+import { APP_GROUP_REORDER_OK_LABEL } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
 import './styles/app.css';
 /**
@@ -158,7 +159,7 @@ import {
 import { bundleChannelName, bundleLockName } from '@features/portable/bundle';
 import { readBundle, resolvePortableStart, type PortableStart } from '@adapter/platform/portable-boot';
 import { restoreEmbeddedAssets } from '@adapter/platform/portable-assets';
-import { exportPortable } from '@adapter/ui/actions/export-portable';
+import { exportPortable, fetchPortableTemplate } from '@adapter/ui/actions/export-portable';
 import {
   connectPortablePersist,
   persistStatusText,
@@ -4406,7 +4407,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           root,
           `グループの並び順は、グループごとのノートに保存します。順番は全部のグループの位置がそろって決まるので、` +
             `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
-          { okLabel: 'タイルを並べ替える', cancelLabel: 'やめる' },
+          { okLabel: APP_GROUP_REORDER_OK_LABEL, cancelLabel: 'やめる' },
         )) === 'ok'
       );
     },
@@ -4726,15 +4727,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
            * ⚠ **雛形は同じ origin から取る** ── 押したときだけ取りに行く
            *   (SW の precache には載せない。載せると全 user が 6.5MB を先に落とす)。
            */
-          fetchTemplate: async () => {
-            const res = await fetch(new URL('portable-template.html', document.baseURI));
-            if (!res.ok)
-              throw new Error(
-                `元になるファイルを取得できませんでした(HTTP ${res.status})。` +
-                  'この配布の形には、元になるファイルが同梱されていない可能性があります',
-              );
-            return res.text();
-          },
+          fetchTemplate: () => fetchPortableTemplate((u) => fetch(u), document.baseURI),
           exportImage: async () => (await client.request({ op: 'exportImage' })).image,
           listAssets: async () =>
             (await client.request({ op: 'listAssetMetas', cid })).map((m) => ({

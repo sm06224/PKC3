@@ -7429,6 +7429,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   text-decoration: underline;
 }
 [data-pkc-field='launcher-loading'],
+[data-pkc-field='launcher-no-own'],
 [data-pkc-field='launcher-empty'] {
   margin: var(--s2);
   color: var(--muted);

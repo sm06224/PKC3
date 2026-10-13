@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { exportPortable, type PortableExportDeps } from '../../src/adapter/ui/actions/export-portable';
+import { exportPortable, fetchPortableTemplate, type PortableExportDeps } from '../../src/adapter/ui/actions/export-portable';
 import { createStatusNotices } from '../../src/adapter/ui/render/status-lifetime';
 import { parseBundleTag } from '../../src/features/portable/bundle';
 
@@ -160,17 +160,21 @@ describe('書き出す', () => {
     expect(dp.files[0]!.name).toBe('器-20260825.pkc3.html');
   });
 
-  it('🔴 添付の中身が見つからなければ名指しで注意する(黙って欠かさない)', async () => {
+  it('🔴 添付の中身が見つからなければ、件数を 1 行で注意する(黙って欠かさない・内部の id は出さない)', async () => {
     const { d } = booted();
     const dp = deps({
       listAssets: async () => [
         { key: 'ast-ok', mime: 'image/png' },
         { key: 'ast-gone', mime: 'image/png' },
+        { key: 'ast-gone2', mime: 'image/png' },
       ],
       getAsset: async (key) => (key === 'ast-ok' ? new Blob([new Uint8Array([7])]) : null),
     });
     expect(await exportPortable(d, dp), '在るほうまで落としている').toBe(1);
-    expect(dp.notes[0]!.join()).toContain('ast-gone');
+    expect(dp.notes[0], '2 件欠けたのに 1 行にまとまっていない').toEqual([
+      '添付 2 件の中身が見つからず、PKC3 入り HTML には入れられませんでした',
+    ]);
+    expect(dp.notes[0]!.join(), '内部の id が画面の字に出ている').not.toContain('ast-gone');
     // 🔑 書き出しは続く(1 件欠けたぶんで全部を失わせない)
     expect(dp.files).toHaveLength(1);
     expect(dp.said.join()).toContain('注意 1 件');
@@ -242,5 +246,31 @@ describe('進行中の字の後始末(#1017 C5)', () => {
     const dp = deps({ insideBundle: () => true });
     expect(await exportPortable(d, dp)).toBeNull();
     expect(dp.said, '出していない進行中の字を消す字を撃った').toEqual([]);
+  });
+});
+
+describe('雛形の取得の失敗(#1087)', () => {
+  const res = (status: number) => async () => ({ ok: status < 400, status, text: async () => 'T' });
+
+  it('🔴 404 は、次にすること(公開版を開く)を言い、HTTP の番号を見せない', async () => {
+    const e = await fetchPortableTemplate(res(404), 'https://x.test/').catch((x: Error) => x);
+    expect((e as Error).message).toContain('この PKC3 には入っていません');
+    expect((e as Error).message).toContain('公開版を開いて');
+    expect((e as Error).message).not.toContain('HTTP');
+  });
+
+  it('対照群: 404 以外の失敗は番号を残し、成功は本文を返す', async () => {
+    await expect(fetchPortableTemplate(res(500), 'https://x.test/')).rejects.toThrow('HTTP 500');
+    expect(await fetchPortableTemplate(res(200), 'https://x.test/')).toBe('T');
+  });
+
+  it('🔴 通信が無い(Failed to fetch)は、画面の字では日本語になる', async () => {
+    const { d, errors } = booted();
+    const dp = deps({
+      fetchTemplate: () =>
+        fetchPortableTemplate(() => Promise.reject(new TypeError('Failed to fetch')), 'https://x.test/'),
+    });
+    expect(await exportPortable(d, dp)).toBeNull();
+    expect(errors.join()).toContain('ネットワークに接続できませんでした');
   });
 });

@@ -118,9 +118,9 @@ describe('① よく開くサイトをアプリ一覧に足す (#401)', () => {
   });
 
   /** ⚠ 空状態の文言が**もう 1 本の道**を言う(行き止まりにしない)。 */
-  it('アプリが 0 件のときの案内に、この道が書いてある', () => {
+  it('自分のアプリが無いときの案内に、この道が書いてある', () => {
     const { region } = setup();
-    const empty = region.querySelector('[data-pkc-field="launcher-empty"]');
+    const empty = region.querySelector('[data-pkc-field="launcher-no-own"]');
     expect(empty?.textContent ?? '').toContain('アドレス');
   });
 });

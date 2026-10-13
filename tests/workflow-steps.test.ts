@@ -1790,8 +1790,10 @@ describe('#400 段④ ── 雛形を置く順番', () => {
   it('🔴 置き先の名前は、アプリが取りに行く名前と同じ', () => {
     // ⚠ 名前が食い違うと、押しても **404 で「書き出せません」**になる ──
     //   しかも CI は緑のままなので、user の報告でしか分からない
-    const app = readFileSync('src/main.ts', 'utf-8');
+    // 取りに行く名前は `fetchPortableTemplate`(export-portable.ts)へ移った(404 の字の判断をそこへ寄せたため)
+    const app = readFileSync('src/adapter/ui/actions/export-portable.ts', 'utf-8');
     expect(app, 'アプリが雛形を取りに行っていない').toContain("'portable-template.html'");
+    expect(readFileSync('src/main.ts', 'utf-8'), 'main が雛形の取得を通していない').toContain('fetchPortableTemplate(');
     for (const f of ['pages.yml', 'release.yml'])
       expect(readFileSync(join(DIR, f), 'utf-8'), `${f} が別の名前で置いている`).toContain(
         'portable-template.html',

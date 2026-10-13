@@ -51,6 +51,29 @@ export interface PortableExportDeps {
   mintId?(): string;
 }
 
+/**
+ * 🔴 **雛形(畳んだ 1 個の HTML)を取る**。失敗の字はここで決める(main.ts に判断を置かない)。
+ *
+ * - 404 = この PKC3 に雛形が同梱されていない配り方 ── user が次にすること(公開版を開く)を言う
+ * - 通信が無い(`Failed to fetch`)は例外のまま投げる ── 画面に出る手前の `errorText` が日本語にする
+ *
+ * @param fetchFn `fetch` 相当(test から差し替える)
+ */
+export async function fetchPortableTemplate(
+  fetchFn: (url: URL) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>,
+  baseURI: string,
+): Promise<string> {
+  const res = await fetchFn(new URL('portable-template.html', baseURI));
+  if (res.status === 404)
+    throw new Error(
+      'PKC3 入り HTML を作るのに必要なファイルが、この PKC3 には入っていません。' +
+        'インターネット上の公開版を開いて、書き出してください',
+    );
+  if (!res.ok)
+    throw new Error(`PKC3 入り HTML を作るのに必要なファイルを取得できませんでした(HTTP ${res.status})`);
+  return res.text();
+}
+
 /** ⚠ `isBundleId` を満たす形にする(`[a-z0-9]` で始まる 8〜64 字)。 */
 function defaultMintId(): string {
   const bytes = new Uint8Array(8);
@@ -106,7 +129,8 @@ export async function exportPortable(
       exportedAt: (deps.now?.() ?? new Date()).getTime(),
     };
 
-    const missing: string[] = [];
+    // 🔑 件数だけ数える ── 内部の id は画面の字にしない(user が読んで何もできない)
+    let missingCount = 0;
     /**
      * ⚠ **bytes を配列に貯めない** ── 1 件ずつ渡して、writer が
      *   その場で base64 → `Blob` にする(`pkc3-html.ts` の実測: 16MB の添付で
@@ -117,7 +141,7 @@ export async function exportPortable(
         const blob = await deps.getAsset(m.key);
         if (blob === null) {
           // 🔴 **黙って落とさない** ── 欠けたことを user に言う
-          missing.push(`添付の中身が見つかりませんでした: ${m.key}`);
+          missingCount += 1;
           continue;
         }
         yield { key: m.key, mime: m.mime, blob };
@@ -128,6 +152,10 @@ export async function exportPortable(
     const now = deps.now?.() ?? new Date();
     deps.download(`${safeName(deps.title)}-${stamp(now)}.pkc3.html`, out.blob);
 
+    const missing =
+      missingCount > 0
+        ? [`添付 ${missingCount} 件の中身が見つからず、PKC3 入り HTML には入れられませんでした`]
+        : [];
     const notes = [...missing, ...out.warnings];
     if (notes.length > 0) deps.report(notes);
     progressShown = false; // ⚠ 次の「書き出しました」が進行中の欄を空にする(`status-lifetime.ts` ── 結果は進行中の終わりでもある)

@@ -346,7 +346,8 @@ export class HelpRenderer {
      * 🔑 何のための数字かも書く ── 版を見る唯一の理由は**不具合の報告に添えること**である。
      */
     // ⚠ ここは**見せる字**なので `versionLine()`(日時つき)── 入れ替えの印は `versionText()`
-    ver.textContent = `このバージョン: ${versionLine()}(不具合の報告に添えてください)`;
+    // ⚠ 見せる字だけ「PKC3」と書く(`APP_ID` は識別子なので小文字のまま ── 他の読み手がいる)
+    ver.textContent = `このバージョン: PKC3${versionLine().slice(APP_ID.length)}。不具合を報告するときは、この行を添えてください`;
     body.append(ver);
 
     /**

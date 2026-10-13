@@ -19,6 +19,7 @@ describe('errorText(#1087)', () => {
       'ooxml: load failed',
       'asr: message deserialization failed',
       'revision restore failed (no base): n1',
+      'Failed to fetch',
     ];
     for (const raw of cases) {
       const t = errorMessageJa(raw);
