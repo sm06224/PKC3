@@ -229,7 +229,8 @@ export class LocalFolder {
       this.dir = null;
       this.slots = [];
       this.phase = 'failed';
-      this.message = `フォルダを開けませんでした: ${e instanceof Error ? e.message : String(e)}`;
+      // ⚠ ブラウザの英語の理由は括弧へ。次にすることを先に言う(#1087)
+      this.message = `フォルダを開けませんでした。別のフォルダを選んでください(${e instanceof Error ? e.message : String(e)})`;
       this.changed();
       return;
     }
@@ -285,7 +286,7 @@ export class LocalFolder {
         return;
       }
       this.phase = 'failed';
-      this.message = `フォルダの中を読めませんでした: ${e instanceof Error ? e.message : String(e)}`;
+      this.message = `フォルダの中を読めませんでした。もう一度フォルダを選び直してください(${e instanceof Error ? e.message : String(e)})`;
       this.changed();
       return;
     }
@@ -351,7 +352,7 @@ export class LocalFolder {
           return;
         }
         this.deps.fail(
-          `「${slot.name}」を読めませんでした(消されたか、名前が変わったかもしれません): ${e instanceof Error ? e.message : String(e)}`,
+          `「${slot.name}」を読めませんでした。消されたか、名前が変わったかもしれません(${e instanceof Error ? e.message : String(e)})`,
         );
         return;
       }
