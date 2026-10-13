@@ -6062,6 +6062,9 @@ function preprocessHeadingNumbers(text: string, start: number): string {
  */
 const SENTINEL_RANGE = /[\u{E110}-\u{E17F}]/gu;
 
+/** `SENTINEL_RANGE` と同じ範囲。`g` を持たない(`test` が lastIndex を持ち回らない)。 */
+const HAS_SENTINEL = /[\u{E110}-\u{E17F}]/u;
+
 /** 本文由来の sentinel を無効化する(文字数は変えない ── LineMap と列を動かさない)。 */
 export function neutralizeSentinels(text: string): string {
   // ⚠ `test` を使わない(`g` 付き正規表現は lastIndex を持ち回るので副作用になる)
@@ -6071,6 +6074,25 @@ export function neutralizeSentinels(text: string): string {
 export function renderMarkdown(
   text: string,
   opts: RenderMarkdownOptions = {},
+): string {
+  return renderMarkdownImpl(text, opts, true);
+}
+
+/**
+ * test 専用:post 段の「sentinel が無ければ飛ばす」近道を**使わずに**描く。
+ * 近道の有無で出力が 1 バイトも変わらないこと(#1087)を突き合わせるための口で、製品は呼ばない。
+ */
+export function renderMarkdownWithoutPostGuard(
+  text: string,
+  opts: RenderMarkdownOptions = {},
+): string {
+  return renderMarkdownImpl(text, opts, false);
+}
+
+function renderMarkdownImpl(
+  text: string,
+  opts: RenderMarkdownOptions,
+  usePostGuard: boolean,
 ): string {
   if (!text) return '';
   /**
@@ -6111,11 +6133,16 @@ export function renderMarkdown(
    *   排除しないと「押せるのに開けない」という dead click になる)。
    * ⚠ `mdCellGate` と同じ理由で `originalLines` から採る(書き戻す先と同じ字)。
    */
-  const closedFenceLines: ReadonlySet<number> = new Set(
-    allFences(text)
-      .filter((f) => !f.open)
-      .map((f) => f.start),
-  );
+  // ⚠ 読むのは `fenceEditable` だけで、そこは `interactiveCodeBlocks === true` でないと
+  //   見ない(その面は `detail.ts` だけ)── 要らない面では全文の柵走査をしない。
+  const closedFenceLines: ReadonlySet<number> =
+    opts.interactiveCodeBlocks === true
+      ? new Set(
+          allFences(text)
+            .filter((f) => !f.open)
+            .map((f) => f.start),
+        )
+      : new Set<number>();
   text = neutralizeSentinels(text);
   // PKC3: IR migration scaffolding(markdown.use_ir)は持ち込まない ──
   // flag 予算(最大 15)と凍結方針(正本 doc §10)。legacy pipeline 一本。
@@ -6406,6 +6433,17 @@ export function renderMarkdown(
     if (opts.sourceLineAnchors === true) tagSourceLines(tokens, lineMap);
     html = md.renderer.render(tokens, md.options, env);
   }
+  /**
+   * 🔴 **sentinel を 1 字も含まない HTML は、post 段を丸ごと飛ばす**(#1087)。
+   *
+   * 下の 12 段は**全部**、私用領域(`SENTINEL_RANGE` = U+E110〜U+E17F)の文字を
+   * 正規表現の必須の一部に持つ(読んで確かめた ── sentinel 無しで書き換える段は無い)。
+   * 入力側の PUA は `neutralizeSentinels` で U+FFFD に写してあるので、本文由来の字が
+   * ここへ届くことも無い。つまり sentinel が無ければ**どの段も 1 バイトも動かさない**。
+   * ⚠ 段を足すときは「sentinel 無しで HTML を書き換えない」を守る(守れない段はこの外に置く)。
+   * ⚠ `test` は `g` の無い別の正規表現で行う(`SENTINEL_RANGE` は `g` 付きで lastIndex を持つ)。
+   */
+  if (usePostGuard && !HAS_SENTINEL.test(html)) return html;
   // L-7:figure/table/equation sentinel → <figure>
   html = postProcessFigureSentinels(html);
   // reform-2026-05 PR-D:`:::quote{author=...}` sentinel → <blockquote class="pkc-quote-citation">

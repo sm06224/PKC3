@@ -131,21 +131,6 @@ export function formatPortablePkcReference(
   return fragment === undefined ? base : `${base}${fragment}`;
 }
 
-/**
- * True when a parsed Portable Reference targets the caller's own
- * container. Exact, case-sensitive comparison. Empty / non-string
- * `currentContainerId` returns `false` so a bootstrap glitch can
- * never silently flip cross-container content into local namespace.
- */
-export function isSamePortableContainer(
-  parsed: ParsedPortablePkcReference | ParsedExternalPermalink,
-  currentContainerId: string,
-): boolean {
-  if (typeof currentContainerId !== 'string') return false;
-  if (currentContainerId === '') return false;
-  return parsed.containerId === currentContainerId;
-}
-
 // ─────────────────────────────────────────────────────────────────
 // Form 3: External Permalink (`<base>#pkc?container=&entry=...`)
 // ─────────────────────────────────────────────────────────────────
@@ -746,16 +731,6 @@ export function convertPastedPermalink(
 function escapeLinkText(text: string): string {
   return text.replace(/([\\[\]])/g, '\\$1');
 }
-
-// ─────────────────────────────────────────────────────────────────
-// Deprecated aliases (pre-correction names, kept for back-compat)
-// ─────────────────────────────────────────────────────────────────
-
-/** @deprecated Use `ParsedPortablePkcReference`. */
-export type ParsedPermalink = ParsedPortablePkcReference;
-
-/** @deprecated Use `PortablePkcReferenceInput`. */
-export type PermalinkInput = PortablePkcReferenceInput;
 
 /**
  * 🔴 合図の `day` として受ける日(#855 段 A-2)。実在する日で、**年が 4 桁(1000 年以降)**。

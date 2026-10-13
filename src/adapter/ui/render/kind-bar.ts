@@ -48,6 +48,40 @@ export class KindBarRenderer {
   }
 
   /**
+   * 🔑 **入力の参照が同じなら数え直さない**(#1087)── 帯は状態が動くたびに描くので、選ぶ・打つ
+   *   だけの回にも全ノートを回していた。数えるのに使うのは `order` / `entryMetas` / `filterQuery` /
+   *   `searchHits` の 4 つだけで、reducer はどれもその場で書き換えない(変えるときは新しい値に差し替える)。
+   */
+  private kindMemo: {
+    order: AppState['order'];
+    metas: AppState['entryMetas'];
+    query: AppState['filterQuery'];
+    hits: AppState['searchHits'];
+    kinds: ReturnType<typeof kindCounts>;
+  } | null = null;
+
+  private countKinds(state: AppState): ReturnType<typeof kindCounts> {
+    const m = this.kindMemo;
+    if (
+      m !== null &&
+      m.order === state.order &&
+      m.metas === state.entryMetas &&
+      m.query === state.filterQuery &&
+      m.hits === state.searchHits
+    )
+      return m.kinds;
+    const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
+    const present: FilterTarget[] = [];
+    for (const lid of state.order) {
+      const meta = state.entryMetas.get(lid);
+      if (meta !== undefined && matchesEntry(meta, counted)) present.push(meta);
+    }
+    const kinds = kindCounts(present);
+    this.kindMemo = { order: state.order, metas: state.entryMetas, query: state.filterQuery, hits: state.searchHits, kinds };
+    return kinds;
+  }
+
+  /**
    * 🔴 **種類で絞る札**(#411)。
    *
    * ## 数える母集団 ── 「種類で絞る**前**、語で絞った**後**」
@@ -72,13 +106,7 @@ export class KindBarRenderer {
      *   のは `order` に居るものだけなので、`entryMetas` を数えると
      *   **画面に無いものまで札の数に入る**。
      */
-    const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
-    const present: FilterTarget[] = [];
-    for (const lid of state.order) {
-      const meta = state.entryMetas.get(lid);
-      if (meta !== undefined && matchesEntry(meta, counted)) present.push(meta);
-    }
-    const kinds = kindCounts(present);
+    const kinds = this.countKinds(state);
     /**
      * ⚠ **種類が 1 つしか無いなら札を出さない** ── 押しても何も変わらない札は
      *   dead click である(「絞れる」と言っておいて絞れない)。

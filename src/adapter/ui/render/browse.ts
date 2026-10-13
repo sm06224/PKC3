@@ -115,6 +115,7 @@ const BLOCKABLE_FIELDS: readonly string[] = [
   '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
   '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
 ];
+const BLOCKABLE_SELECTOR = BLOCKABLE_FIELDS.join(', ');
 
 export class BrowseRouter {
   private readonly panes: Record<BrowseMode, HTMLElement>;
@@ -240,7 +241,8 @@ export class BrowseRouter {
       '[data-pkc-field="create-blocked-note"]',
     );
     // 押せない理由を添える先を探す範囲 ── 左の列(帯 + 一覧)と、面の器(ファイラ)
-    this.roots = [sidebar, host];
+    // ⚠ 器が左の列の中に在るとき(既定の組み方)は左の列だけを歩く ── 2 つとも渡すと同じ要素を 2 度拾う(#1087)
+    this.roots = sidebar.contains(host) ? [sidebar] : [sidebar, host];
     this.kindBar = new KindBarRenderer(sidebar);
     this.filer = new FilerRenderer(this.panes.filer);
     // 🔴 取り込んだ絵を出すために貸し口を渡す(#856 段②)── 渡さなければ字と図案だけ出る
@@ -258,9 +260,8 @@ export class BrowseRouter {
   private blockables(): HTMLElement[] {
     const out: HTMLElement[] = [];
     if (this.createRun !== null) out.push(this.createRun);
-    for (const sel of BLOCKABLE_FIELDS)
-      for (const el of this.roots.flatMap((r) => [...r.querySelectorAll<HTMLElement>(sel)]))
-        out.push(el);
+    // 🔑 選択子は 1 本にまとめて 1 回で歩く(#1087)── 4 本 × 根の数だけ全体を歩いていた
+    for (const r of this.roots) for (const el of r.querySelectorAll<HTMLElement>(BLOCKABLE_SELECTOR)) out.push(el);
     return out;
   }
 

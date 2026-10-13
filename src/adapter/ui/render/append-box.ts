@@ -84,6 +84,8 @@ export class AppendBoxRenderer {
   private readonly row: HTMLElement;
   /** いま並べている追記先の指紋。⚠ 同じなら触らない(選んだ物が飛ばない)。 */
   private targetSig: string | null = null;
+  /** 前回見出しを拾った本文(同じ字なら拾い直さない)。 */
+  private targetBody: string | null = null;
   private readonly lockBar: HTMLElement;
   private readonly lockText: HTMLElement;
   private readonly resolve: HTMLElement;
@@ -386,6 +388,9 @@ export class AppendBoxRenderer {
   private paintTargets(body: string | null): void {
     // ⚠ 読めていない(`null`)= **触らない**。空の一覧に組み直さない
     if (body === null) return;
+    // 🔑 本文が前回と同じ字なら見出しを拾い直さない(#1087)── 状態が動くたびに本文全体を走査していた
+    if (body === this.targetBody) return;
+    this.targetBody = body;
     const heads = listAppendTargets(body);
     const sig = heads.map((h) => `${h.level}:${h.slug}:${h.text}`).join('\u0001');
     if (sig === this.targetSig) return;
