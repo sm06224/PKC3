@@ -1,5 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
+import { bootFailureText } from '@features/boot-failure-text';
 import './styles/app.css';
 /**
  * 🔴 **数式の書体**(#707)。KaTeX の CSS は 20 書体の `@font-face` を持ち、
@@ -5816,7 +5817,8 @@ function bootstrap(): void {
         'launchQueue' in window
           ? '\n(ファイルから開いた場合、そのファイルはまだ渡されていません。原因を直して再読み込みすると開きます)'
           : '';
-      showRootText(root, `起動に失敗しました: ${message}${handoff}`);
+      // 🔑 原因が分かる物は日本語で言う(判断は main.ts に置かない ── test から実行されないため)
+      showRootText(root, `${bootFailureText(message)}${handoff}`);
       // ⚠ boot が失敗しても登録はする ── 次回この人がオフラインで開けるかは
       // 登録が済んでいるかで決まる(段⑤ の意図。競合を避けて失敗側にも置いた)
       /**

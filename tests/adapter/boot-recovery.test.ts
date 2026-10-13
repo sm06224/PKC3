@@ -140,7 +140,9 @@ describe('配線(#115 は main.ts の失敗側に居る)', () => {
   it('🔴 起動失敗の経路から watchForUpdate と applyBootRecovery を呼んでいる', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync('src/main.ts', 'utf-8');
-    const failure = src.slice(src.indexOf('起動に失敗しました'));
+    const at = src.indexOf('bootFailureText(message)');
+    expect(at, '前提が崩れた(起動失敗の字を出す所が見つからない)').toBeGreaterThan(0);
+    const failure = src.slice(at);
     expect(failure, '失敗側で待機中の版を見ていない').toContain('watchForUpdate');
     expect(failure, '失敗側で乗り換えの判断をしていない').toContain('applyBootRecovery');
     expect(failure).toContain('bootFailed: true');

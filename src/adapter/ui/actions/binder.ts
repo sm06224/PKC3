@@ -5194,6 +5194,22 @@ function openMessagesNote(dispatcher: Dispatcher, lid: string): void {
 }
 
 /**
+ * 🔴 **押しボタンから開くときの門**(#1087)。⚠ 直す前は、編集中 / 保護中に「未読 N 件」や「メッセージを開く」を
+ *   押すと、reducer が黙って断るうえに、端末の既読の時刻だけ進んでいた(開いていないのに既読)。
+ * 🔑 理由は「操作を探す」の側と同じ `blockedActionNote` の 1 か所から引く(§7)。
+ */
+function openMessagesFromButton(dispatcher: Dispatcher, lid: string): void {
+  // ⚠ 断るのは reducer が断る 2 つ(編集中 / 保存に失敗)だけ ── 読み込み中は reducer が通すので、ここも通す
+  const phase = dispatcher.getState().phase;
+  const why = phase === 'editing' || phase === 'error' ? blockedActionNote(phase) : null;
+  if (why !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `いまはメッセージを開けません: ${why}` });
+    return;
+  }
+  openMessagesNote(dispatcher, lid);
+}
+
+/**
  * 🔴 **操作の一覧の行を組む口は 1 つ**(#274 段①)。
  *
  * ⚠ 操作のパレット(`openPaletteFor`)と、左の列の探す欄に `>` を打ったときの一覧が
@@ -11802,7 +11818,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-messages': (dispatcher, target) => {
     const lid = target.getAttribute('data-pkc-message-lid');
     if (lid === null || lid === '') return;
-    openMessagesNote(dispatcher, lid);
+    openMessagesFromButton(dispatcher, lid);
   },
   /**
    * 🔴 **メッセージの保管件数を選ぶ**(設計 doc §7、段②a)。
@@ -11844,7 +11860,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       .catch((e: unknown) => {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `メッセージを書き出せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+          // ⚠ 例外の前置き「Error:」は出さない / 次に何をするかを言う(#1087)
+          error: `メッセージを書き出せませんでした(${e instanceof Error ? e.message : String(e)})。もう一度押してください`,
         });
       });
   },
