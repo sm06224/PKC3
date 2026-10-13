@@ -25,6 +25,7 @@ import {
   type IcsCounts,
 } from '@features/schedule/ics-import';
 import type { MarkdownImportDeps } from './import-markdown';
+import { failImport } from './import-failure';
 
 const ZERO: IcsCounts = {
   cancelled: 0,
@@ -46,8 +47,7 @@ export async function importIcsFiles(
   files: readonly File[],
 ): Promise<number | null> {
   const fail = (msg: string): null => {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
-    return null;
+    return failImport(dispatcher, deps, msg);
   };
   const gate = (): string | null => {
     const st = dispatcher.getState();

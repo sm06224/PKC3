@@ -51,6 +51,7 @@ import { PaneVisibilityStore } from '@adapter/ui/render/pane-visibility';
 import { GroupFoldStore } from '@adapter/ui/render/group-fold';
 import { CreateKindStore } from '@adapter/ui/render/create-kind';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
+import { PopupHintStore } from '@adapter/ui/render/popup-hint';
 
 /**
  * 「保存が無い状態で書いて、読み直したら同じ値が返る」を 1 組で見る。
@@ -254,6 +255,17 @@ const CASES: readonly {
     make: () => {
       const s = new FilerFlattenStore(null);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
+    },
+    a: true,
+    b: false,
+  },
+  {
+    // ⚠ 既定が「まだ言っていない」の store ── a を true(言った)にして、控えが死んでいて
+    //   既定のまま読まれる実装を 1 回目の読みで捕まえる
+    name: 'PopupHintStore',
+    make: () => {
+      const s = new PopupHintStore(null);
+      return { write: (v) => s.setShown(v as boolean), read: () => s.shown() };
     },
     a: true,
     b: false,

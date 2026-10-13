@@ -5390,9 +5390,9 @@ interface TolerantInlinePattern {
  * 案内すると、寛容さを持たない説明的な形へ象形的な形の意味を持ち込ませてしまう。
  */
 export const ALIGN_CANONICAL_HINT =
-  '行頭 prefix `||`(center)/ `|>`(グローバルの寄せの反対側。`<|` `|<` `>|` も同じ)。' +
-  '文書の流れを変えるなら frontmatter の `direction` / `align` 宣言、' +
-  '位置を言葉で指定するなら formal `:::paragraph{align=left}`(right / center も可)';
+  '行頭の `||`(中央寄せ)か `|>`(グローバルの寄せの反対側。`<|` `|<` `>|` も同じ)。' +
+  '文書全体の流れを変えるなら、先頭の frontmatter に `direction` / `align` を書く。' +
+  '位置を言葉で指定するなら `:::paragraph{align=left}`(right / center も可)';
 
 const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
   {
@@ -5400,14 +5400,14 @@ const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
     name: 'lead',
     code: 'PKC2005',
     interpretedAs: 'lead-paragraph (large/styled first content)',
-    canonical: '普通の段落として書く(`==content==` で強調も可)',
+    canonical: '`==内容==` で強調した普通の段落',
   },
   {
     re: /:spacing:\{([^}]*?)\}/g,
     name: 'spacing',
     code: 'PKC2006',
     interpretedAs: 'blank-line spacer',
-    canonical: '`_<N>`(L-8 blank-line marker、`_2` = 2 行空ける)',
+    canonical: '行頭の `_2`(`_` に数字を続けると、その行数だけ空きます)',
   },
   {
     re: /:align:\{([^}]*?)\}/g,
@@ -5438,7 +5438,7 @@ const TOLERANT_INLINE_PATTERNS: ReadonlyArray<TolerantInlinePattern> = [
     name: 'quote',
     code: 'PKC2008',
     interpretedAs: 'attribution caption',
-    canonical: 'block `:::quote{author="…"} content :::`',
+    canonical: '`:::quote{author="…"} 内容 :::` のブロック',
   },
 ];
 
@@ -5463,6 +5463,12 @@ const ADMONITION_ALIASES: ReadonlySet<string> = new Set([
 const HALLUCINATION_BLOCK_DIRECTIVES: ReadonlySet<string> = new Set([]);
 
 const HALLUCINATION_BLOCK_SUGGESTION: Record<string, string> = {};
+/** 直し先が表に無いブロックのとき、hover に出す直し先(user に見える字)。 */
+const HALLUCINATION_BLOCK_FALLBACK = '`:::note` などの標準のブロック';
+/** 寛容に受け入れた書き方の hover に付ける、直し先の案内(user に見える字は 1 本に寄せる)。 */
+function tolerantFixTitle(fixedForm: string): string {
+  return `この書き方は、${fixedForm} の形に直すと確実に表示されます`;
+}
 
 /**
  * PR-2O(2026-05-10):standalone `:align:{position=X}` 行を line-based に検出、
@@ -5784,7 +5790,7 @@ function processHallucinatedDirectives(
       if (!silentWarnings && typeof console !== 'undefined' && console.warn) {
         console.warn(
           `[PKC1010] hallucinated block directive :::${name} detected. ` +
-          `代わりに ${HALLUCINATION_BLOCK_SUGGESTION[name] ?? 'spec §1.6 推奨形'} を使ってください。`,
+          `代わりに ${HALLUCINATION_BLOCK_SUGGESTION[name] ?? HALLUCINATION_BLOCK_FALLBACK} を使ってください。`,
         );
       }
       inBlockHallucination = { name, startIdx: out.length };
@@ -5834,8 +5840,8 @@ function postProcessHallucinatedDirectives(html: string): string {
       'g',
     ),
     (_match, name, content) => {
-      const suggestion = HALLUCINATION_BLOCK_SUGGESTION[name] ?? 'spec §1.6 推奨形';
-      const title = `未対応のブロック構文 :::${name}。spec §1.6 推奨形へ正規化してください(${suggestion})。`;
+      const suggestion = HALLUCINATION_BLOCK_SUGGESTION[name] ?? HALLUCINATION_BLOCK_FALLBACK;
+      const title = `:::${name} は未対応の書き方です。${tolerantFixTitle(suggestion)}`;
       return (
         `<div class="pkc-warning-hallucination-block pkc-warning-hallucination-block-${name}" ` +
         `data-pkc-warn-code="PKC1010" data-pkc-warn-name="${name}" ` +
@@ -5874,7 +5880,7 @@ function postProcessTolerantSentinels(html: string): string {
       const pat = TOLERANT_INLINE_PATTERNS.find((p) => p.name === name);
       if (!pat) return content;  // unknown — strip sentinel
       const canonical = pat.canonical.replace(/"/g, '&quot;');
-      const titleSuffix = `(canonical: ${canonical})`;
+      const fixTitle = tolerantFixTitle(canonical);
       switch (name) {
         case 'lead': {
           // markdown-it inline-parsed content をそのまま中に入れる
@@ -5882,7 +5888,7 @@ function postProcessTolerantSentinels(html: string): string {
             `<span class="pkc-lead" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="lead" ` +
             `data-pkc-canonical="${canonical}" ` +
-            `title="lead paragraph (寛容 parse)。${titleSuffix}">` +
+            `title="${fixTitle}">` +
             content +
             `</span>`
           );
@@ -5899,7 +5905,7 @@ function postProcessTolerantSentinels(html: string): string {
             `data-pkc-blank-count="${size}" aria-hidden="true" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="spacing" ` +
             `data-pkc-canonical="${canonical}" ` +
-            `title="${size} 行 spacing (寛容 parse)。${titleSuffix}"></div>`
+            `title="${size} 行の空きとして表示しています。${fixTitle}"></div>`
           );
         }
         case 'align': {
@@ -5921,7 +5927,7 @@ function postProcessTolerantSentinels(html: string): string {
             `data-pkc-align-next="${alignNext}" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="align" ` +
             `data-pkc-canonical="${canonical}" ` +
-            `title="align hint: ${alignNext} (寛容 parse)。${titleSuffix}">` +
+            `title="次の段落の寄せ(${alignNext})として扱っています。${fixTitle}">` +
             `[align: ${rawPos}]</span>`
           );
         }
@@ -5931,7 +5937,7 @@ function postProcessTolerantSentinels(html: string): string {
             `<small class="pkc-attribution" ` +
             `data-pkc-warn-code="${pat.code}" data-pkc-warn-name="quote" ` +
             `data-pkc-canonical="${canonical}" ` +
-            `title="attribution (寛容 parse)。${titleSuffix}">` +
+            `title="出典として表示しています。${fixTitle}">` +
             `— ${content}</small>`
           );
         }
@@ -6016,7 +6022,7 @@ function postProcessBlankLineMarkers(html: string): string {
     (_match, attrs, count, requested) => {
       const capped = parseInt(requested, 10) > parseInt(count, 10);
       const cappedAttr = capped
-        ? ` data-pkc-blank-capped="${requested}→${count}" title="_${requested} 指定は上限 ${count} 行に cap されました(N≦${count} で再指定可能)"`
+        ? ` data-pkc-blank-capped="${requested}→${count}" title="空ける行は ${count} 行までです(_${requested} は ${count} 行として表示しています)"`
         : '';
       // 🔴 **高さの元になる値は `style` で渡す**(2026-08-05)。CSS 側の規則は
       //    `height: calc(1.45em * var(--pkc-blank-count, 1))` で、**この変数**を読む。

@@ -8,6 +8,7 @@
  * ⚠ 本文は**原文のまま**書く。`readPlainMarkdown` は題名と archetype を読むために
  * frontmatter を parse するが、body には手を触れない(P6d 段④ の規律)。
  */
+import { failImport } from './import-failure';
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
@@ -30,6 +31,8 @@ export interface MarkdownImportDeps {
   notify?(message: string): void;
   /** **注意の全件**を渡す(1 行の status には埋もれる)。 */
   report?(notes: readonly string[]): void;
+  /** 🔴 失敗の理由を「取り込み時の注意」の面へ(`import-failure.ts`)。 */
+  reportFailure?(message: string): void;
   /**
    * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
    * 「開いたら何も起きずに終わる」)。
@@ -62,8 +65,7 @@ export async function importMarkdownFiles(
   files: readonly File[],
 ): Promise<number | null> {
   const fail = (msg: string): null => {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
-    return null;
+    return failImport(dispatcher, deps, msg);
   };
   const state = dispatcher.getState();
   /**

@@ -258,7 +258,8 @@ import {
   placeInlineText,
   showPlaceInlineNote,
 } from '../render/place-inline';
-import { splitTags } from '@features/flavor/tags';
+import { sameTag, splitTags } from '@features/flavor/tags';
+import { TAGS_KEY } from '@features/query/group-by';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
@@ -290,6 +291,7 @@ import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-mov
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
 import { appOpenInEdit, OpenInEditStore } from '@adapter/ui/render/open-in-edit';
+import { appPopupHint, isExternalNewTabLink, POPUP_HINT_TEXT, PopupHintStore } from '@adapter/ui/render/popup-hint';
 import {
   chordOf,
   findCommand,
@@ -300,6 +302,7 @@ import {
 } from '@features/keymap';
 import { paletteRows, type PaletteRow } from '@features/palette/palette-rows';
 import { commandQueryOf } from '@features/palette/command-query';
+import { normalizeFindQuery } from '@features/filter/search-hits';
 import { splitRecentRows } from '@features/palette/recent-commands';
 import { appRecentCommands } from '@adapter/platform/recent-commands-store';
 import { paintCommandList } from '@adapter/ui/render/command-list';
@@ -2212,6 +2215,93 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
  * ⚠ 2 つのボタンで**同じ関数**を通す ── 片方だけ相手の集合の採り方が変わる、
  *   という形を作らない(§7)。
  */
+/**
+ * 🔴 **集計(タグ)の組を、全ノートで付け替える / 外す**(Gemini 裁定、#1163 の依頼 65-1)。
+ *
+ * 書く口は増やさない ── `BULK_TAG`(まとめてタグを付ける / 外す。`add-tag` / `untag-entry` と同じ)へ
+ * 組の lid 全部を流す。付け替えは「外す → 付ける」の 2 通で、`enqueue` が順に走らせる。
+ *
+ * ⚠ **外してから付ける**(逆にしない)── 付けてから外すと、タグが上限に達しているノートは
+ *   付かないのに外れて、**タグが消える**。外してから付ければ、付かなかった分も古い名前のまま残らず
+ *   上限の問題も起きない。新しい名前が既にあるノートは「既に付いていました」で重ならない(統合)。
+ * ⚠ 組が抱える lid は上限(`QUERY_LIMITS.lidsPerGroup`)で切れていることがある ── 切れているときは
+ *   **一部だけ変えて「全部変えた」と読ませない**ために断る。
+ * ⚠ 本文の行に `#タグ` と書いてある分は、外す口が frontmatter だけを触るので残る
+ *   (外す側の知らせが「まだそのタグが付いています」と言う)。
+ */
+async function queryTagBulk(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  root: HTMLElement,
+  tag: string,
+  mode: 'rename' | 'remove',
+): Promise<void> {
+  const st = dispatcher.getState();
+  const verbWord = mode === 'rename' ? '付け替えて' : '外して';
+  if (st.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを${verbWord}ください` });
+    return;
+  }
+  const group = st.queryGroups?.groups.find((g) => g.value === tag);
+  if (tag === '' || group === undefined || st.queryKey !== TAGS_KEY) return;
+  const lids = group.lids.filter((lid) => st.entryMetas.has(lid));
+  /**
+   * 🔴 **切れた組は断る**(上限 500 件)。⚠ 長いタグ名は一覧の側で 80 字に丸めて「…」が付く ──
+   *   丸めた名前では本当のタグを指せないので、同じく断る。
+   */
+  if (group.lids.length < group.total || tag.endsWith('…')) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `タグ「${tag}」は ${group.total} 件のノートに付いていて、一度に${mode === 'rename' ? '変えられ' : '外せ'}ません。ノートを絞ってから行ってください`,
+    });
+    return;
+  }
+  if (lids.length === 0) return;
+  let next = '';
+  if (mode === 'rename') {
+    const typed = await promptInApp(root, {
+      title: 'タグの名前を変える',
+      label: `タグ「${tag}」(${lids.length} 件)の新しい名前`,
+      initial: tag,
+      okLabel: '次へ',
+    });
+    if (typed === null) return;
+    const names = splitTags(typed);
+    if (names.length !== 1) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '新しいタグの名前は 1 つだけ入力してください' });
+      return;
+    }
+    next = names[0]!;
+    // 同じ名前なら何も変わらない(押した手応えは言う)
+    if (sameTag(next, tag)) {
+      dispatcher.dispatch({ type: 'OP_NOTICE', message: `タグ「${tag}」の名前は変わりませんでした` });
+      return;
+    }
+  }
+  const message =
+    mode === 'rename'
+      ? `タグ「${tag}」を ${lids.length} 件のノートで「${next}」に変えます`
+      : `タグ「${tag}」を ${lids.length} 件のノートから全部外します`;
+  const answer = await confirmInApp(root, message, {
+    okLabel: mode === 'rename' ? '変える' : '外す',
+    cancelLabel: 'やめる',
+    danger: mode === 'remove',
+  });
+  if (answer !== 'ok') return;
+  // 待っている間に状態が変わったときは、もう一度見る(編集に入ったなら断る)
+  const now = dispatcher.getState();
+  if (now.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}タグを${verbWord}ください` });
+    return;
+  }
+  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
+  if (mode === 'rename') dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add' });
+  // 🔑 集計は書いた結果を映す ── 書込が着いてから数え直す
+  void Promise.resolve(services.settle?.() ?? null).then(() => {
+    dispatcher.dispatch({ type: 'REFRESH_QUERY' });
+  });
+}
+
 function runBulkTag(
   dispatcher: Dispatcher,
   root: HTMLElement,
@@ -2320,6 +2410,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   //    実体は `BULK_TAG` なので、上の 2 つと同じ門をくぐらせる
   'add-tag',
   'untag-entry',
+  // 🔑 集計(タグ)の組から、そのタグを全ノートで付け替える / 外す(依頼 65-1)── 実体は `BULK_TAG`
+  'query-tag-rename',
+  'query-tag-remove',
   // 🔑 スマートフォルダの条件と出し入れも**本文を書く**(#421 段①)
   'smart-cond-add',
   'smart-cond-remove',
@@ -4466,6 +4559,21 @@ function createDateNote(
   // 🔑 「作る」の口を畳む(知らせの字が変わると、`paintStatusCreate` が畳む)
   dispatcher.dispatch({ type: 'OP_NOTICE', message: `${date} のノートを作りました` });
   appPhone.showNote();
+}
+
+/**
+ * 🔴 **左の列の欄に語が入っているとき、別のウィンドウへ運ぶ語**(依頼 70-C2)。
+ *
+ * ⚠ 同じウィンドウで行を押した回は `startSearchJumpFromField` が塗る(#1102 段②)。ここは
+ *   **別のウィンドウで開く口**(行の 2 回押し / 「別のウィンドウで開く」)の分 ── 運ぶ語が無いと、
+ *   欄で探して開いたのに開いた先は塗られず、先頭から読み直すことになる。
+ * ⚠ `>` で始まる欄は操作を探している(本文の語ではない)── 運ばない。空の欄も運ばない(`undefined`)。
+ * ⚠ 整えるのは受け側と同じ `normalizeFindQuery`(判定を 2 か所に置かない)。
+ */
+export function leftFilterFind(filterQuery: string): string | undefined {
+  if (commandQueryOf(filterQuery) !== null) return undefined;
+  const q = normalizeFindQuery(filterQuery);
+  return q === '' ? undefined : q;
 }
 
 function selectEntryOrExplain(
@@ -7430,6 +7538,12 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
     runBulkTag(dispatcher, root, 'remove'),
+  // 🔴 集計(タグ)の組の「名前を変える」「全部外す」(依頼 65-1)。実体は `queryTagBulk`
+  // ⚠ 相手のタグは押した組が運ぶ(`data-pkc-tag`)── `untag-entry` と同じ置き場
+  'query-tag-rename': (dispatcher, target, services, root) =>
+    void queryTagBulk(dispatcher, services, root, target.getAttribute('data-pkc-tag') ?? '', 'rename'),
+  'query-tag-remove': (dispatcher, target, services, root) =>
+    void queryTagBulk(dispatcher, services, root, target.getAttribute('data-pkc-tag') ?? '', 'remove'),
   'delete-selected': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
@@ -12980,7 +13094,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 **「探す」の行は、探した語を運ぶ**(#1102 段①)── 受け側が当たった所へ送って塗る。
     //   ⚠ 語を持たない口(一覧の ⋯ など)は今までどおり `undefined`
     const find = target.getAttribute(FIND_ATTR);
-    services.openNoteWindow?.(lid, find === null || find === '' ? undefined : find);
+    // 🔑 語を持たない口は、左の列の欄の語を運ぶ(依頼 70-C2)── 「探す」の行の語が先
+    services.openNoteWindow?.(
+      lid,
+      find === null || find === ''
+        ? leftFilterFind(dispatcher.getState().filterQuery)
+        : find,
+    );
     /**
      * 🔴 **読んでいたノートへ戻す**(#685 動線レビュー 欠陥 2)。
      * ⚠ **開いた後に撃つ** ── `window.open` は gesture の中でしか通らないので、
@@ -13835,6 +13955,11 @@ export function bindActions(
    *   共有の 1 個を書き換えると、別の test に設定が漏れる。
    */
   openInEdit: OpenInEditStore = appOpenInEdit,
+  /**
+   * 🔴 **外部リンクを初めて押したときの案内を、言ったか**(依頼 69-B2)。
+   * ⚠ **test は自分で `new PopupHintStore(...)` して渡す**(`openInEdit` と同じ作法)。
+   */
+  popupHint: PopupHintStore = appPopupHint,
 ): () => void {
   // 🔑 押しボタンを持たない命令が services を引く口(#1452 案 1。`runGlobalCommand` の特例)
   ROOT_SERVICES.set(root, services);
@@ -16423,7 +16548,7 @@ export function bindActions(
      *   §10「置き換えの作法」)。⚠ **同期に呼ぶ** ── `window.open` は gesture の
      *   中でしか通らない。
      */
-    services.openNoteWindow?.(lid);
+    services.openNoteWindow?.(lid, leftFilterFind(dispatcher.getState().filterQuery));
   };
   /**
    * 🔴 **右クリックで、その行にできることを出す**(#426 段①)。
@@ -17299,6 +17424,17 @@ export function bindActions(
 
   listen(root, 'contextmenu', onContextMenu);
   listen(root, 'click', onClick);
+  /**
+   * 🔴 **外部リンクを初めて押したら、1 度だけ「開かないときは」を言う**(依頼 69-B2)。
+   * ⚠ リンクは止めない(`preventDefault` しない)── 開く人の動線を変えない。
+   * ⚠ 言ったことは先に憶える(`tellUser` が落ちても 2 度目を言わない)。
+   */
+  const onExternalLink = (ev: Event): void => {
+    if (popupHint.shown() || !isExternalNewTabLink(ev.target)) return;
+    popupHint.setShown(true);
+    tellUser(POPUP_HINT_TEXT);
+  };
+  listen(root, 'click', onExternalLink);
   /**
    * 🔴 **升を 2 回押すと、編集欄を開く**(#1240)── 見出しの升の入口。
    *

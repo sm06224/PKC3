@@ -5211,6 +5211,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+/* タグの組の「名前を変える」「全部外す」(依頼 65-1)。名前を伸ばして、件数と 2 つのボタンを右に寄せる */
+[data-pkc-region='query-group'] > summary > [data-pkc-field='query-group-name'] {
+  flex: 1;
+  min-width: 0;
+}
+[data-pkc-region='query-group'] > summary > button {
+  padding: 0 var(--s2);
+}
 [data-pkc-region='query-rows'] {
   margin: 0;
   padding: 0;

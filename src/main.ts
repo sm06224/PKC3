@@ -194,7 +194,7 @@ import {
 import { buildShell, paintAlarmBar, paintMissedLine, paintCaptureBar, paintTimerBar, showRootText } from '@adapter/ui/render/shell';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { showNotices, clearNotices } from '@adapter/ui/render/notices';
-import { createImportUndo, importPanel } from '@adapter/ui/actions/import-undo';
+import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/actions/import-undo';
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { createDraftOffer, type DraftOffer } from '@adapter/ui/render/draft-offer';
@@ -2918,6 +2918,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       report: (notes) => {
         const panel = importPanel(notes, importUndo.pending());
         showNotices(regions.notices, panel.title, notes, panel.action);
+      },
+      // 🔴 **取り込めなかった理由も同じ面へ**(依頼 70-C1)── 画面下の 1 行は別のノートを選ぶと消える
+      reportFailure: (message) => {
+        const panel = importFailurePanel(message);
+        showNotices(regions.notices, panel.title, panel.notes, panel.action);
       },
       // 🔴 **取り込んだ id を憶える**(#535 ②)── 戻せるのは直前の 1 回だけ
       imported: (lids) => importUndo.remember(lids),

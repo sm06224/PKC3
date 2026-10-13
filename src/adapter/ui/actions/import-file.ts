@@ -10,6 +10,7 @@
  * 拡張子で宣言しており、**宣言と実体を同じ規則で揃える**のが要点
  * (`tests/features/plain-markdown.test.ts` の parity test)。
  */
+import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { isVcfFileName } from '@features/contact/vcard';
@@ -48,18 +49,10 @@ export async function importFiles(
   if (pptx.length === files.length) return importPptxFiles(dispatcher, deps, files);
   if (ics.length === files.length) return importIcsFiles(dispatcher, deps, files);
   if (md.length > 0 || vcf.length > 0 || pptx.length > 0 || ics.length > 0) {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: '種類の違うファイル(Markdown / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください',
-    });
-    return null;
+    return failImport(dispatcher, deps, '種類の違うファイル(Markdown / vCard / カレンダー形式 / PowerPoint / PKC2 の書き出し)は分けて取り込んでください');
   }
   if (files.length > 1) {
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: 'バックアップや PKC2 の書き出しは 1 つずつ取り込んでください',
-    });
-    return null;
+    return failImport(dispatcher, deps, 'バックアップや PKC2 の書き出しは 1 つずつ取り込んでください');
   }
   return importPkc2File(dispatcher, deps, files[0]!);
 }

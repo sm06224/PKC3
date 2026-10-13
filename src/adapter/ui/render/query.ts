@@ -31,6 +31,9 @@ const UNSET_LABEL = '(未設定)';
 /** タグで集計したときの、タグが 1 つも無いノートの組の表示名(Gemini 依頼 66-2)。 */
 const NO_TAG_LABEL = '(タグなし)';
 /** 集計の表の上の 1 行(Gemini 依頼 66-1 の回答 C)。⚠ 「× 画面を閉じる」は `center.ts` の閉じるボタンの字。 */
+/** タグの組の操作の字(Gemini 依頼 65-1)。 */
+export const QUERY_TAG_RENAME_LABEL = '名前を変える';
+export const QUERY_TAG_REMOVE_LABEL = '全部外す';
 export const QUERY_ROW_HINT = '行を押すと選ばれます。本文は「× 画面を閉じる」で見られます';
 
 export class QueryRenderer {
@@ -318,6 +321,27 @@ export class QueryRenderer {
           ? `${group.total} 件(先頭 ${group.lids.length} 件)`
           : `${group.total} 件`;
       summary.append(name, count);
+      /**
+       * 🔴 **タグの組には「名前を変える」「全部外す」を出す**(Gemini 依頼 65-1)。
+       * ⚠ 「(タグなし)」の組には出さない(外す・変える相手のタグが無い)。⚠ タグ以外の項目の組にも出さない
+       *   (frontmatter の他の項目は、このアプリがタグのように書き換える口を持たない)。
+       * ⚠ 押したタグは `data-pkc-tag` が運ぶ(組の名前の字を読み直さない)。summary の中に置くが、
+       *   ボタンの押下は details の開閉を起こさない。
+       */
+      if (state.queryKey === TAGS_KEY && group.value !== UNSET) {
+        // ⚠ 押し口の名前は**字面で書く**(ヘルパーに名前を渡す形だと、`action-outlets` の静的な追跡が出口を見失う)
+        const rename = document.createElement('button');
+        rename.type = 'button';
+        rename.setAttribute('data-pkc-action', 'query-tag-rename');
+        rename.setAttribute('data-pkc-tag', group.value);
+        rename.textContent = QUERY_TAG_RENAME_LABEL;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.setAttribute('data-pkc-action', 'query-tag-remove');
+        remove.setAttribute('data-pkc-tag', group.value);
+        remove.textContent = QUERY_TAG_REMOVE_LABEL;
+        summary.append(rename, remove);
+      }
       box.append(summary);
 
       const list = document.createElement('ul');

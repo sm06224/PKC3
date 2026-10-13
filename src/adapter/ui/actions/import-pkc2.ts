@@ -10,6 +10,7 @@
  * 復号**前**の base64 も、使い終わったら参照を切って GC に返す(review M-9 ──
  * 「溜めない」だけでは不十分で、実測で asset 実体の 3.2 倍が常駐していた)。
  */
+import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
 import {
@@ -153,6 +154,8 @@ export interface ImportDeps {
    * 比例するので、全件を出せる面が要る。
    */
   report?(notes: readonly string[]): void;
+  /** 🔴 失敗の理由を「取り込み時の注意」の面へ(`import-failure.ts`)。 */
+  reportFailure?(message: string): void;
   /**
    * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
    * 「開いたら何も起きずに終わる」)。md 経路(`import-markdown.ts`)が使う。
@@ -377,8 +380,7 @@ export async function importPkc2File(
   };
   const fail = (msg: string): null => {
     clearProgress();
-    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
-    return null;
+    return failImport(dispatcher, deps, msg);
   };
   const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));
   const phase = dispatcher.getState().phase;
