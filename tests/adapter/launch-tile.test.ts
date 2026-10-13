@@ -292,6 +292,8 @@ describe('タイルの起動', () => {
     launchTile(appTile, h.deps);
     expect(h.failures).toHaveLength(1);
     expect(h.failures[0]).toContain('ポップアップ');
+    // 🔑 次に何をすればよいかまで言う(理由だけで終わらせない)
+    expect(h.failures[0]).toContain('許可してから、もう一度押してください');
   });
 
   it('中身が消えていたら窓を閉じて知らせる', async () => {

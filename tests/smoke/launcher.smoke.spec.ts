@@ -1319,7 +1319,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
     '「完了」を押しても「上へ / 下へ」が残っている',
   ).toHaveCount(0);
   await expect(lead, '「完了」を押しても元の文言に戻らない').toHaveText(
-    'アプリは 2 回押すと別のウィンドウで開きます',
+    'アプリは 2 回続けて押すと開きます',
   );
 
   /**
@@ -1369,7 +1369,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await expect(
     lead,
     'タブを離れて戻っても、文言が「2 回押すと開く」に戻らない',
-  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+  ).toHaveText('アプリは 2 回続けて押すと開きます');
 
   // モードが終わっているので、タイルは通常どおり 2 回押すと開く
   const pagesBeforeLeaveCheck = context.pages().length;
@@ -1480,7 +1480,7 @@ test('🔴 タイルを長押しすると並べ替えモードに入り、開か
   await expect(
     lead,
     'アドレスから引っ越した面を経由して戻っても、文言が「2 回押すと開く」に戻らない',
-  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+  ).toHaveText('アプリは 2 回続けて押すと開きます');
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });
@@ -2462,7 +2462,7 @@ test('🔴 組み込みタイルを押すと別窓が開き、本文の面は残
   await expect(
     page.locator('[data-pkc-field="launcher-lead"]'),
     '別の窓で開くと書いていない',
-  ).toHaveText('アプリは 2 回押すと別のウィンドウで開きます');
+  ).toHaveText('アプリは 2 回続けて押すと開きます');
 
   const popup = context.waitForEvent('page');
   /**

@@ -607,6 +607,8 @@ describe('URL のタイルの目印(#856 段①)', () => {
     expect(h.q('[data-pkc-field="app-register"]'), '効かないチェックが出ている').toBeNull();
     // 🔑 代わりに**なぜ一覧に出ているか**を字で出す(無言にしない)
     expect(h.q('[data-pkc-field="app-tile-why"]')?.textContent ?? '').toContain('アドレス');
+    // 🔑 外す道も字で言う(片道にしない ── 外すにはノートごとゴミ箱へ)
+    expect(h.q('[data-pkc-field="app-tile-why"]')?.textContent ?? '').toContain('ゴミ箱へ移して');
   });
 
   it('🔴 選んだ絵が本文に着地する(下流まで)', async () => {

@@ -129,7 +129,7 @@ export class LauncherRenderer {
     go.setAttribute('data-pkc-action', 'add-url-tile');
     go.setAttribute('data-pkc-field', 'launcher-add-go');
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    go.title = 'この一覧にリンクを 1 つ足します(足したリンクは別のウィンドウで開きます)';
+    go.title = 'この一覧にリンクを 1 つ足します(足したリンクは、システムの「アプリの開き方」で選んだ先に開きます)';
     go.textContent = 'リンクを足す';
     add.append(name, url, go);
 
@@ -245,7 +245,8 @@ export class LauncherRenderer {
     lead.textContent = reordering
       ? // ⚠ モード中は**開かない**ので、開く話を出したままにしない(嘘になる)
         `並べ替え中です。「${TILE_UP_LABEL}」「${TILE_DOWN_LABEL}」で動かします(押しても開きません)`
-      : 'アプリは 2 回押すと別のウィンドウで開きます';
+      : // ⚠ 開く先は「アプリの開き方」しだい(初めは新しいタブ)── 「別のウィンドウ」と言い切らない
+        'アプリは 2 回続けて押すと開きます';
     list.append(lead);
     /**
      * 🔴 **出口を必ず画面に置く**(#857 段①b-2)。
