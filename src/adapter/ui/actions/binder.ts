@@ -17432,10 +17432,9 @@ export function bindActions(
   };
 
   /** 表の中のその行(`data-pkc-entry` は user 由来ではないが、選択子に埋めない)。 */
+  // 🔑 属性の値で直接引く(#1087)── 直す前は 1 行探すたびに全行(3,000 件)を配列にして先頭から比べていた
   const rowEl = (lid: string): HTMLElement | null =>
-    Array.from(
-      root.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
-    ).find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
+    root.querySelector<HTMLElement>(`[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`);
 
   const focusRow = (lid: string): void => rowEl(lid)?.focus();
 
