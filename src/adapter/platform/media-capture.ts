@@ -218,6 +218,42 @@ export function newRecorder(
 }
 
 /**
+ * 🔴 **収録を始められなかったときの理由**(#1087)── ブラウザの例外名(`NotFoundError` …)を
+ * そのまま画面に出さず、日本語の理由と次にすることへ置き換える。
+ * ⚠ 許可の出し方は、外部リンクの案内(`popup-hint.ts`)と同じ書き方
+ *   (「アドレスバーの右端で〜を許可してください」)。
+ * ⚠ 知らない名前は理由を作らない ── 「収録を始められませんでした」だけにして、
+ *   名前は括弧で残す(バグ報告の手がかり)。
+ */
+export function captureStartFailedText(kind: CaptureKind, name: string, message: string): string {
+  const audio = kind === 'audio';
+  switch (name) {
+    case 'NotAllowedError':
+      return audio
+        ? 'マイクの許可がありません。アドレスバーの右端でマイクを許可してください'
+        : '画面の共有が許可されませんでした。もう一度押して共有する画面を選ぶか、アドレスバーの右端で画面の共有を許可してください';
+    case 'NotFoundError':
+      return audio
+        ? 'マイクが見つかりません。マイクをつないでから、もう一度押してください'
+        : '共有する物が見つかりません。共有できる画面やウィンドウがあるかを確かめて、もう一度押してください';
+    case 'NotReadableError':
+      return audio
+        ? 'マイクをほかのアプリが使っています。そのアプリを閉じてから、もう一度押してください'
+        : '画面を読み取れません。ほかのアプリが使っていないかを確かめて、もう一度押してください';
+    case 'AbortError':
+      return '収録を始める途中で中断されました。もう一度押してください';
+    case 'OverconstrainedError':
+      return audio
+        ? 'このマイクでは収録できません。ほかのマイクに切り替えて、もう一度押してください'
+        : 'この画面は収録できません。ほかの画面やウィンドウを選んで、もう一度押してください';
+    case 'SecurityError':
+      return 'ブラウザの設定で、このページでの収録が許されていません';
+    default:
+      return `収録を始められませんでした(${name || message})`;
+  }
+}
+
+/**
  * 収録を始める。⚠ **断るときは理由つきで投げる**(権限拒否 / 非対応)。
  *
  * 🔴 **ブラウザ側の「共有を停止」でも正しく終わる** ── track の `ended` を見る。
@@ -246,13 +282,7 @@ export async function startCapture(
     stream = await ask(kind === 'audio' ? { audio: true } : { video: true, audio: true });
   } catch (e) {
     const name = (e as { name?: string } | null)?.name ?? '';
-    throw new CaptureRefused(
-      name === 'NotAllowedError'
-        ? kind === 'audio'
-          ? 'マイクの許可がありません'
-          : '画面の共有が許可されませんでした'
-        : `収録を始められませんでした(${name || (e as Error).message})`,
-    );
+    throw new CaptureRefused(captureStartFailedText(kind, name, (e as Error | null)?.message ?? ''));
   }
 
   const chunks: Blob[] = [];

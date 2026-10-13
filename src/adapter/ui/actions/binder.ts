@@ -386,6 +386,7 @@ import { appCreateKind } from '@adapter/ui/render/create-kind';
 import { BODY_HOST_SELECTOR, PAINTED_ATTR } from '@adapter/ui/render/detail';
 import { openView } from '@adapter/ui/render/open-view';
 import {
+  CLOSE_NOTE_WINDOW_REFUSED,
   CLOSE_VIEW_WINDOW_REFUSED,
   type CloseViewWindowResult,
 } from '@adapter/platform/view-window';
@@ -15143,7 +15144,7 @@ export function bindActions(
         if (closed !== 'not-a-window') {
           ke.preventDefault();
           if (closed === 'refused')
-            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_NOTE_WINDOW_REFUSED });
         }
       }
       return;
@@ -18162,7 +18163,7 @@ export function bindActions(
         if (rcmd === 'deselect-entry' && closed !== 'not-a-window') {
           ke.preventDefault();
           if (closed === 'refused')
-            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_VIEW_WINDOW_REFUSED });
+            dispatcher.dispatch({ type: 'OP_FAILED', error: CLOSE_NOTE_WINDOW_REFUSED });
           return true;
         }
         return runGlobalCommand(rcmd, root, dispatcher, keymap, () => ke.preventDefault(), tellUser);

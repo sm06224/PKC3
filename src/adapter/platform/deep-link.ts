@@ -316,7 +316,9 @@ export function windowTitleFor(base: string, label: string | null): string {
  * @param title そのノートの題名(`entryMetas` から。無ければ `null`)
  */
 export function noteOpenElsewhereMessage(base: string, title: string | null): string {
-  return `このノートは、すでに別のウィンドウで開いています(『${windowTitleFor(base, title)}』)`;
+  // 🔑 台帳が古いこともある(閉じた窓が残っている)── 探しても見つからないときの出口を添える。
+  //    押し直すと点呼が打たれ、答えが無ければ台帳から捨てて新しく開く(`note-window-registry.ts`)
+  return `このノートは、すでに別のウィンドウで開いています(『${windowTitleFor(base, title)}』)。見つからないときは、もう一度押すと開きます`;
 }
 
 /**

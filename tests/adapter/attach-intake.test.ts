@@ -6,7 +6,7 @@ import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
-import { attachFiles, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
+import { attachFiles, attachOne, resolveMime, type AttachDeps } from '../../src/adapter/ui/actions/attach';
 import { dropCursor, putAssetIntoNote } from '../../src/adapter/ui/actions/asset-into-note';
 import { createWritableQueue } from '../../src/adapter/ui/actions/writable-queue';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
@@ -671,6 +671,26 @@ describe('attachFiles (P4a intake)', () => {
     // 🔴 user に読めない英語の前置き(「Error: 」)を混ぜない / 次にすることを言う(#1087 の見直し 2026-10-13)
     expect(d.getState().error, '英語の前置きが混ざっている').not.toContain('Error:');
     expect(d.getState().error, '空きの作り方を言っていない').toContain('「使われていない添付を消す」');
+  });
+
+  /**
+   * 🔴 **収録の経路だけ、空き不足の字が変わる**(#1087)。録った物は取り込めなかった時点で残らないので、
+   * 「もう一度お試しください」は嘘になる。添付(選び直せる)は今のまま ── 対照群を同じ it に置く。
+   */
+  it('🔴 空き不足: 収録の経路は「残っていません」、添付の経路は「もう一度」', async () => {
+    const mk = () => harness(async () => ({ usage: 90, quota: 100 }));
+    const item = { name: '録音.webm', type: 'audio/webm', size: 10, blob: new Blob(['0123456789']) };
+
+    const cap = mk();
+    expect(await attachOne(cap.d, cap.deps, item, undefined, undefined, true)).toBeNull();
+    expect(cap.d.getState().error, '収録なのに押し直しを促している').not.toContain('もう一度お試しください');
+    expect(cap.d.getState().error, '残っていない事実を言っていない').toContain('この収録は残っていません');
+    expect(cap.d.getState().error, '空きの作り方を言っていない').toContain('「使われていない添付を消す」');
+
+    const att = mk();
+    expect(await attachOne(att.d, att.deps, item)).toBeNull();
+    expect(att.d.getState().error, '対照群: 添付は選び直せる').toContain('もう一度お試しください');
+    expect(att.d.getState().error).not.toContain('残っていません');
   });
 
   /**

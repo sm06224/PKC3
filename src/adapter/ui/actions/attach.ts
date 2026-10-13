@@ -175,6 +175,15 @@ export interface StoredAsset {
 }
 
 /**
+ * 空き不足の知らせ。収録の経路(`fromCapture`)は録った物が残らないので、事実を言う。
+ */
+export function quotaShortMessage(name: string, fromCapture: boolean): string {
+  return fromCapture
+    ? `収録を保存する空き容量が不足しています: 「${name}」(この収録は残っていません。「使われていない添付を消す」で空きを作ってから、録り直してください)`
+    : `添付を保存する空き容量が不足しています: 「${name}」(「使われていない添付を消す」で空きを作ってから、もう一度お試しください)`;
+}
+
+/**
  * 🔴 **bytes を資産として置く**(2026-08-18 に `attachOne` から取り出した ── #250 で
  * **スクショの貼付**が同じ道を通るため)。
  *
@@ -189,6 +198,11 @@ export async function storeAsset(
   deps: AttachDeps,
   item: AttachItem,
   known?: Set<string>,
+  /**
+   * 🔴 **録った物か**(#1087)。録音・画面録画は取り込めなかった時点で bytes が残らない
+   *   ので、「もう一度お試しください」と言うと嘘になる。添付は選び直せるので今のまま。
+   */
+  fromCapture = false,
 ): Promise<StoredAsset> {
   // quota preflight ── 足りないときは黙って壊れる前に可視で止める
   if (deps.estimate) {
@@ -199,9 +213,7 @@ export async function storeAsset(
       est.quota - est.usage < item.size * 1.2
     ) {
       // 🔑 次にすることも言う(#1087 の見直し 2026-10-13)── 同じ原因で断る `WRITE_QUOTA_REFUSAL` と同じ向き
-      throw new Error(
-        `添付を保存する空き容量が不足しています: 「${item.name}」(「使われていない添付を消す」で空きを作ってから、もう一度お試しください)`,
-      );
+      throw new Error(quotaShortMessage(item.name, fromCapture));
     }
   }
 
@@ -247,10 +259,12 @@ export async function attachOne(
    * - `keepSelection`: `true` なら、読んでいるノートも選択も絞りも**動かさずに**作る(#683 の「切り出したら読んでいたノートが消えた」)
    */
   place?: { readonly parentLid: string | null; readonly keepSelection: boolean },
+  /** 収録(録音・画面録画)の経路から来たか。空き不足の字が変わる(`quotaShortMessage`)。 */
+  fromCapture = false,
 ): Promise<AttachedOne | null> {
   let stored: StoredAsset;
   try {
-    stored = await storeAsset(deps, item, known);
+    stored = await storeAsset(deps, item, known, fromCapture);
   } catch (e) {
     dispatcher.dispatch({ type: 'OP_FAILED', error: (e as Error).message });
     return null;

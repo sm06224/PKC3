@@ -29,7 +29,7 @@ import { appPanes } from '../../src/adapter/ui/render/pane-visibility';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { answerDialog, dialogMessage } from './dialog-helper';
 import {
-  CLOSE_VIEW_WINDOW_REFUSED,
+  CLOSE_NOTE_WINDOW_REFUSED,
   type CloseViewWindowResult,
 } from '../../src/adapter/platform/view-window';
 
@@ -730,7 +730,7 @@ describe('🔴 付箋の窓 ── 追記欄で Escape(#1042 段②)', () => {
     await tick();
     const input = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
     pressEscape(input);
-    expect(d.getState().error, '断り文が出ていない').toBe(CLOSE_VIEW_WINDOW_REFUSED);
+    expect(d.getState().error, '断り文が出ていない').toBe(CLOSE_NOTE_WINDOW_REFUSED);
   });
 });
 

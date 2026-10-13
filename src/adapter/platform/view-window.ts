@@ -212,6 +212,13 @@ export interface ViewWindowDeps {
 }
 
 /**
+ * 🔴 **ポップアップを止められたとき、許可の出し方**(#1087)。外部リンクの案内(`popup-hint.ts` の
+ * `POPUP_HINT_TEXT`)と**同じ字**にする ── 場面ごとに言い方が違うと、同じ操作の案内に見えない。
+ * 画面の字なので、`popup-hint.ts` はここから組む(1 か所)。
+ */
+export const POPUP_ALLOW_STEP = 'アドレスバーの右端でポップアップを許可してください';
+
+/**
  * 押した瞬間に出す字。⚠ **理由(`fail`)とは別の行**である(消える側)。
  *
  * 🔴 **「開いています」と言わない**(#685 動線レビュー 欠陥 4、2026-09-04)。
@@ -288,7 +295,7 @@ function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): voi
    */
   if (deps.schedule !== undefined) {
     // ⚠ 月も同じ入口を通る ── 押した見方の名前で言う(#1087)
-    deps.fail(`${why}。${deps.schedule.mode === 'month' ? '月' : '週'}で見るには、ポップアップの許可を出してください`);
+    deps.fail(`${why}。${deps.schedule.mode === 'month' ? '月' : '週'}で見るには、${POPUP_ALLOW_STEP}`);
     return;
   }
   /**
@@ -301,16 +308,16 @@ function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): voi
    *   (何も開いていない)。
    */
   if (view === null) {
-    deps.fail(`${why}。別のウィンドウで開くには、ポップアップの許可を出してください`);
+    deps.fail(`${why}。別のウィンドウで開くには、${POPUP_ALLOW_STEP}`);
     return;
   }
   const landed = deps.openInPane(view);
   deps.fail(
     landed
-      ? `${why}(この画面で開きました)。別のウィンドウで使うには、ポップアップの許可を出してください`
+      ? `${why}(この画面で開きました)。別のウィンドウで使うには、${POPUP_ALLOW_STEP}`
       : // 🔴 編集中で中央にも開けなかった回も、許可の話を先に言う(#1087 の見直し 2026-10-13)── 直す前は
         //    「編集を終えてから」だけで、言われたとおり押し直すとまた塞がれ、許可の話は 2 回目に初めて出た
-        `${why}。別のウィンドウで使うには、ポップアップの許可を出してください(この画面で開くなら、編集を終えてから、もう一度お試しください)`,
+        `${why}。別のウィンドウで使うには、${POPUP_ALLOW_STEP}(この画面で開くなら、編集を終えてから、もう一度お試しください)`,
   );
 }
 
@@ -412,6 +419,13 @@ export function closeViewWindow(deps: CloseViewWindowDeps): CloseViewWindowResul
 /** `'refused'` のときに出す理由。⚠ **次に何をすればよいか**まで書く。 */
 export const CLOSE_VIEW_WINDOW_REFUSED =
   'このウィンドウはブラウザの制限で閉じられません(ブラウザのウィンドウ枠にある × で閉じてください)。本文に戻りました';
+
+/**
+ * ノートの窓で Esc が効かなかったときの理由(#1087)。ノートの窓には「本文に戻る」先が無い
+ * (窓そのものが本文)ので、戻ったとは言わず、閉じ方だけを言う。
+ */
+export const CLOSE_NOTE_WINDOW_REFUSED =
+  'このウィンドウはブラウザの制限で閉じられません(ブラウザのウィンドウ枠にある × で閉じてください)';
 
 /**
  * 🔴 **この窓が、どの面のために開いた窓か**を、文書の印にする(#855。Gemini 裁定 = #1163 の

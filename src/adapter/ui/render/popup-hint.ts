@@ -16,9 +16,10 @@
  * - その端末で見せた事実なので、設定ファイルでは運ばない(`SKIPPED_KEYS`)。
  */
 
+import { POPUP_ALLOW_STEP } from '@adapter/platform/view-window';
+
 /** 言う字。⚠ 画面の字なので `ui-terms` の使わない語を避ける。 */
-export const POPUP_HINT_TEXT =
-  '開かないときは、アドレスバーの右端でポップアップを許可してください';
+export const POPUP_HINT_TEXT = `開かないときは、${POPUP_ALLOW_STEP}`;
 
 const KEY = 'pkc3.popup-hint-shown';
 
