@@ -326,7 +326,7 @@ describe('断るときは理由を出す(無言の操作拒否を作らない)',
      *   読み替えていた。`phase` には `error`(保存に失敗したときの保護)も
      *   `initializing` も在るので、**編集していない人に編集を探させる**嘘になる。
      */
-    expect(h.d.getState().error).toBe('編集を終了してから並べ替えられます');
+    expect(h.d.getState().error).toBe('編集を保存するか、編集をやめてから並べ替えられます');
     expect(h.tiles().map((t) => t.lid), '断ったのに画面だけ動いた').toEqual(['a', 'b']);
   });
 

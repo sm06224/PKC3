@@ -50,6 +50,7 @@
 import { formatViewDeepLink } from '../../features/link/permalink';
 import type { Broadcaster } from './storage/store-proxy';
 import type { ViewMode } from '../state/app-state';
+import { appWindowFeatures, type AppOpenTarget } from '../../features/launcher/open-target';
 
 /**
  * 合図が返るのを待つ猶予。⚠ **失敗した回だけ**この時間がかかる。
@@ -86,8 +87,9 @@ export const VIEW_WINDOW_FEATURES = 'noopener';
  * 手で `window.open` を書かない(上の理由)。
  * ⚠ 戻り値は捨てる ── `noopener` は**常に `null`** なので、開けたかは合図で見る。
  */
-export function openViewWindowUrl(url: string): void {
-  window.open(url, '_blank', VIEW_WINDOW_FEATURES);
+export function openViewWindowUrl(url: string, target: AppOpenTarget = 'tab'): void {
+  // 🔴 `target` は右クリックで選んだ「その 1 回だけ」の開き方(依頼 69-B4)。⚠ `noopener` は必ず残す
+  window.open(url, '_blank', appWindowFeatures(target, VIEW_WINDOW_FEATURES));
 }
 
 /**
@@ -156,7 +158,9 @@ function openChannel(make: MakeChannel | undefined): Broadcaster | null {
 
 export interface ViewWindowDeps {
   /** 窓を開く。⚠ `noopener` で開くこと(戻り値は見ない ── 常に `null`)。 */
-  readonly open: (url: string) => void;
+  readonly open: (url: string, target?: AppOpenTarget) => void;
+  /** 右クリックで選んだ「その 1 回だけ」の開き方(依頼 69-B4)。無ければ今までどおり。 */
+  readonly openTarget?: AppOpenTarget;
   /** 断片を除いたいまのアドレス。 */
   readonly baseUrl: () => string;
   /**
@@ -257,7 +261,7 @@ export async function openViewInWindow(
   }
   // 🔑 **聞く耳を先に張ってから開く** ── 逆にすると、速い窓の合図を取りこぼす
   const answered = deps.waitForOpen(token, VIEW_WINDOW_ANNOUNCE_MS);
-  deps.open(url);
+  deps.open(url, deps.openTarget);
   // 🔴 **押したことを画面に返す**(上の `notify`)── 待つのは失敗した回だけだが、
   //    その回は 2.5 秒まるごと無反応になる
   deps.notify?.(VIEW_WINDOW_OPENING);

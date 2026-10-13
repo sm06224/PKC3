@@ -165,7 +165,7 @@ describe('importIcsFiles ── 実行部', () => {
     h.d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '本文\n' });
     h.d.dispatch({ type: 'START_EDIT' });
     expect(await importIcsFiles(h.d, h.deps, [icsFile(wrap(TRIP))])).toBeNull();
-    expect(h.d.getState().error ?? '').toContain('編集を終了してから');
+    expect(h.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
     expect(h.written).toHaveLength(0);
     expect(h.written).toHaveLength(0);
   });
@@ -188,7 +188,7 @@ describe('importIcsFiles ── 実行部', () => {
     };
     expect(await importIcsFiles(h.d, h.deps, [f])).toBeNull();
     expect(h.written, '編集中に書いた').toHaveLength(0);
-    expect(h.d.getState().error ?? '').toContain('編集を終了してから');
+    expect(h.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 
   it('書込が失敗したら可視の失敗で終える', async () => {

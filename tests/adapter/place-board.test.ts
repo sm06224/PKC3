@@ -698,7 +698,7 @@ describe('書換の門(MOVE_PLACE)', () => {
     const { d, events } = booted();
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'MOVE_PLACE', lid: 'n1', line: 0, x: 1, y: 2 });
-    expect(d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     expect(d.getState().error ?? '', '押した場所と文言が合っていない').toContain('板');
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
@@ -892,7 +892,7 @@ describe('書換の門(MOVE_PLACE)', () => {
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: 1 } });
     const error = d.getState().error ?? '';
-    expect(error).toContain('編集を終了');
+    expect(error).toContain('編集を保存するか');
     expect(error, '押した場所と文言が合っていない').toContain('位置と大きさ');
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);
   });
@@ -925,7 +925,7 @@ describe('書換の門(MOVE_PLACE)', () => {
     d.dispatch({ type: 'START_EDIT' });
     d.dispatch(action);
     const error = d.getState().error ?? '';
-    expect(error, '理由が出ていない').toContain('編集を終了');
+    expect(error, '理由が出ていない').toContain('編集を保存するか');
     expect(error, '押した場所と文言が合っていない').toContain('板');
     expect(error, '操作の名前が文言に無い').toContain(word);
     expect(events.filter((e) => e.type === 'REQUEST_BODY_REWRITE')).toHaveLength(0);

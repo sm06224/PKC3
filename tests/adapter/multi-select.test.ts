@@ -747,7 +747,7 @@ describe('フォルダの表の鍵', () => {
     ] as const) {
       d.dispatch({ type: 'OP_FAILED', error: '' });
       press(key, table, over);
-      expect(d.getState().error ?? '', `${key} が無言で断られた`).toContain('編集を終了');
+      expect(d.getState().error ?? '', `${key} が無言で断られた`).toContain('編集を保存するか');
     }
     expect(d.getState().scopeLid, '編集中に現在地が動いた').toBe('f');
   });

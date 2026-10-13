@@ -258,7 +258,7 @@ describe('#278 段③ 連絡先の面から足す', () => {
     type(s, { name: '編集中', tel: '1' });
     s.q('[data-pkc-action="contacts-quick-add"]')!.click();
     await tick();
-    expect(s.d.getState().error ?? '').toContain('編集を終了してから');
+    expect(s.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
     expect(s.persisted, '編集中に書いた').toHaveLength(0);
   });
 });

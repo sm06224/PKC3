@@ -1148,7 +1148,7 @@ describe('hasUnsavedTyping / unsavedTypingLidOf(#1044 段2、F-C)', () => {
 describe('blockedWithSuffix(#1087)', () => {
   it('章 / コードの欄の断りには続きを付けず、phase の前置きには付ける', () => {
     expect(blockedWithSuffix(SECTION_DRAFT_NOTE, 'チェックしてください')).toBe(SECTION_DRAFT_NOTE);
-    expect(blockedWithSuffix('編集を終了してから', 'チェックしてください')).toBe('編集を終了してからチェックしてください');
+    expect(blockedWithSuffix('編集を保存するか、編集をやめてから', 'チェックしてください')).toBe('編集を保存するか、編集をやめてからチェックしてください');
   });
 
   it('🔴 章の欄を開いたままチェックを押すと、断りの字が壊れない(下流まで)', () => {

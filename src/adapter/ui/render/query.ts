@@ -28,12 +28,17 @@ import { QUERY_LIMITS, TAGS_KEY, UNSET } from '@features/query/group-by';
 
 /** 未設定の組の表示名。⚠ features は字を持たない(層規約)ので adapter が決める。 */
 const UNSET_LABEL = '(未設定)';
+/** タグで集計したときの、タグが 1 つも無いノートの組の表示名(Gemini 依頼 66-2)。 */
+const NO_TAG_LABEL = '(タグなし)';
+/** 集計の表の上の 1 行(Gemini 依頼 66-1 の回答 C)。⚠ 「× 画面を閉じる」は `center.ts` の閉じるボタンの字。 */
+export const QUERY_ROW_HINT = '行を押すと選ばれます。本文は「× 画面を閉じる」で見られます';
 
 export class QueryRenderer {
   private readonly region: HTMLElement;
   private frame: {
     picker: HTMLSelectElement;
     note: HTMLElement;
+    rowHint: HTMLElement;
     table: HTMLElement;
   } | null = null;
   /**
@@ -130,6 +135,8 @@ export class QueryRenderer {
     this.renderPicker(frame.picker, state);
     this.renderNote(frame.note, state);
     this.renderTable(frame.table, state);
+    // 🔴 行を押したときに起きることは、行が並んでいるときだけ言う(並んでいないのに言うと空振りの案内になる)
+    frame.rowHint.hidden = frame.table.querySelector('[data-pkc-region="query-group"]') === null;
   }
 
   /** 器は 1 度だけ作る(押す寸前のボタンを捨てない)。 */
@@ -162,10 +169,14 @@ export class QueryRenderer {
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'query-note');
+    const rowHint = document.createElement('p');
+    rowHint.setAttribute('data-pkc-field', 'query-row-hint');
+    rowHint.textContent = QUERY_ROW_HINT;
+    rowHint.hidden = true;
     const table = document.createElement('div');
     table.setAttribute('data-pkc-region', 'query-table');
-    this.region.append(head, note, table);
-    this.frame = { picker, note, table };
+    this.region.append(head, note, rowHint, table);
+    this.frame = { picker, note, rowHint, table };
     return this.frame;
   }
 
@@ -218,7 +229,18 @@ export class QueryRenderer {
     }
     if (keys === null) parts.push('集計を数えています…');
     else if (keys.scanned === 0) parts.push('ノートがまだありません');
-    else parts.push(`${keys.scanned} 件のノートを見ました`);
+    else {
+      /**
+       * 🔴 **項目を選んでいるときは、答えの数を直接言う**(Gemini 依頼 66-3 の回答 C)── 「12 件のノートを見ました」では
+       *   どれが何件か分からない。選んだ項目が目録に無いとき(書いたノートが消えた後)は、言える数が無いので従来の文に戻す。
+       */
+      const picked = state.queryKey === null ? undefined : keys.keys.find((k) => k.key === state.queryKey);
+      parts.push(
+        picked === undefined
+          ? `${keys.scanned} 件のノートを見ました`
+          : `${keys.scanned} 件のうち、${picked.key === TAGS_KEY ? 'タグ' : picked.key} を書いたのは ${picked.count} 件`,
+      );
+    }
     if (keys !== null && keys.omittedKeys > 0)
       parts.push(`項目は多い順に ${QUERY_LIMITS.keys} 個まで(あと ${keys.omittedKeys} 個)`);
     if (groups !== null && groups.omittedGroups > 0)
@@ -286,7 +308,8 @@ export class QueryRenderer {
       const summary = document.createElement('summary');
       const name = document.createElement('span');
       name.setAttribute('data-pkc-field', 'query-group-name');
-      name.textContent = group.value === UNSET ? UNSET_LABEL : group.value;
+      name.textContent =
+        group.value === UNSET ? (state.queryKey === TAGS_KEY ? NO_TAG_LABEL : UNSET_LABEL) : group.value;
       const count = document.createElement('span');
       count.setAttribute('data-pkc-field', 'query-group-count');
       // 🔴 **N 件中 M 件**(切ったことを組ごとにも言う)

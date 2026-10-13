@@ -759,7 +759,7 @@ describe('PowerPoint の出口(#187 段⑤)', () => {
     const d = deps(source({ getBody: async () => '本文' })) as unknown as ExportDeps;
     const { dispatcher, dispatched } = fakeDispatcher('editing');
     expect(await exportEntryPptx(dispatcher, d, 'n1')).toBe(false);
-    expect(dispatched[0]?.error, '断り文が出ていない').toContain('編集を終了');
+    expect(dispatched[0]?.error, '断り文が出ていない').toContain('編集を保存するか');
   });
 
   it('🔴 添付が ppt/media に入り、スライドがそれを指す', async () => {

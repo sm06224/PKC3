@@ -225,6 +225,59 @@ describe('集計の面(#184)', () => {
     expect(byName.get('実装')).toEqual(['e1']);
   });
 
+  it('🔴 タグで集計したときだけ、タグの無いノートの組は「(タグなし)」(Gemini 依頼 66-2)', async () => {
+    const { q, qa } = setup();
+    openQuery(qa);
+    await tick();
+    const picker = q<HTMLSelectElement>('[data-pkc-field="query-key"]')!;
+    const nameOfUnset = (): string[] =>
+      qa('[data-pkc-region="query-group"]')
+        .filter((g) => g.getAttribute('data-pkc-group') === '')
+        .map((g) => g.querySelector('[data-pkc-field="query-group-name"]')!.textContent ?? '');
+    picker.value = 'tags';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    expect(nameOfUnset(), '空の組が前提(台の空振り防止)').toHaveLength(1);
+    expect(nameOfUnset()).toEqual(['(タグなし)']);
+    // 対照群 ── 他の項目は従来どおり「(未設定)」
+    picker.value = 'author';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    expect(nameOfUnset()).toEqual(['(未設定)']);
+  });
+
+  it('🔴 項目を選ぶと見出しが「N 件のうち、○○ を書いたのは M 件」になる(選ぶ前は従来の文)', async () => {
+    const { q, qa } = setup();
+    openQuery(qa);
+    await tick();
+    const note = (): string => q('[data-pkc-field="query-note"]')!.textContent ?? '';
+    expect(note()).toContain('4 件のノートを見ました');
+    const picker = q<HTMLSelectElement>('[data-pkc-field="query-key"]')!;
+    picker.value = 'author';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    expect(note()).toContain('4 件のうち、author を書いたのは 3 件');
+    picker.value = 'tags';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    expect(note(), 'タグは日本語で言う').toContain('4 件のうち、タグ を書いたのは 2 件');
+  });
+
+  it('🔴 表の上に「行を押すと選ばれます…」が、行が並んでいるときだけ出る(Gemini 依頼 66-1)', async () => {
+    const { q, qa } = setup();
+    openQuery(qa);
+    await tick();
+    const hint = q('[data-pkc-field="query-row-hint"]')!;
+    expect(hint.textContent).toBe('行を押すと選ばれます。本文は「× 画面を閉じる」で見られます');
+    expect(hint.hidden, '行が無いのに案内が出ている').toBe(true);
+    const picker = q<HTMLSelectElement>('[data-pkc-field="query-key"]')!;
+    picker.value = 'author';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    expect(qa('[data-pkc-region="query-rows"] [data-pkc-entry]').length, '行が前提').toBeGreaterThan(0);
+    expect(hint.hidden).toBe(false);
+  });
+
   it('🔴 行を押すと選択が動き、面はここに留まる(かんばんと同じ規約)', async () => {
     const { d, q, qa } = setup();
     openQuery(qa);

@@ -382,7 +382,7 @@ describe('掴んで離すと、本文が書き換わる(#530 段③d)', () => {
     up(310, 32);
     expect(asks, '編集へ入った後で書いた').toHaveLength(0);
     // 🔑 黙って返さない ── 離した user に「何も起きなかった」と見せず、理由を声に出す(reducer 1 か所)
-    expect(d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     expect(d.getState().error ?? '', '押した場所と文言が合っていない').toContain('線');
     expect(document.querySelector(GHOST)).toBeNull();
   });

@@ -62,6 +62,7 @@ interface Harness {
   selfhostRuns: { n: number };
   /** ⚠ どの面へ切り替えたか(#276 で口が 1 本になった)。 */
   viewOpens: string[];
+  viewTargets: Array<string | undefined>;
   closeWindow: () => void;
   deps: Parameters<typeof launchTile>[1];
 }
@@ -80,6 +81,7 @@ function harness(
   const manualOpens = { n: 0 };
   const selfhostRuns = { n: 0 };
   const viewOpens: string[] = [];
+  const viewTargets: Array<string | undefined> = [];
   const win = fakeWindow();
   let release: (() => void) | null = null;
   let seq = 0;
@@ -95,6 +97,7 @@ function harness(
     manualOpens,
     selfhostRuns,
     viewOpens,
+    viewTargets,
     closeWindow: () => {
       win.closed = true;
       release?.();
@@ -129,8 +132,9 @@ function harness(
       openOffice: () => {
         officeOpens.n += 1;
       },
-      openView: (view) => {
+      openView: (view, target) => {
         viewOpens.push(view);
+        viewTargets.push(target);
         if (view === 'dual') dualOpens.n += 1;
       },
       openManual: () => {
@@ -505,7 +509,7 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    */
   it('🔴 組み込みタイルの押下が別窓へ行く(中央の面を占有しない)', () => {
     // ⚠ #680 で引数が増えて `=>` の後で折り返した ── 空白と改行を跨いで数える
-    const opens = [...MAIN.matchAll(/openView: \(view\) =>\s*void openViewTile\(/g)].length;
+    const opens = [...MAIN.matchAll(/openView: \(view(?:, target)?\) =>\s*void openViewTile\(/g)].length;
     expect(opens, 'タイルが別窓へ行っていない(中央の面を占有する)').toBe(2);
     /**
      * 🔴 **退避は「開く」であってトグルではない**(着地前レビュー 1、2026-08-22)。
@@ -564,6 +568,14 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
    * 🔑 `view-window.test.ts` と同じ規則(`isViewMode(kind)`)で組み込みを全数当てる ──
    *   名指しの一覧を書かない(面を足した日に、ここが自動で追随する)。
    */
+  it('🔴 右クリックで選んだ開き方は別窓の口へ届く / 選ばなければ undefined のまま(依頼 69-B4)', () => {
+    const tile: LauncherTile = { lid: 'builtin:dual', title: 'dual', group: '', kind: 'dual' };
+    const h = harness(null);
+    void launchTile(tile, h.deps, { openTarget: 'window' });
+    void launchTile(tile, h.deps);
+    expect(h.viewTargets).toEqual(['window', undefined]);
+  });
+
   it('🔴 面の名前を持つ組み込みは、どれも別窓の口へ行く(全数)', () => {
     const views = withBuiltinTiles([], { office: true }).filter((t) => isViewMode(t.kind));
     // ⚠ 空振り防止 ── 予定表が加わったので 2 枚以上

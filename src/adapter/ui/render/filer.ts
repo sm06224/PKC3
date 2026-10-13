@@ -1316,6 +1316,31 @@ export class FilerRenderer {
     if (keptTable === null) this.region.append(crumb);
     else this.region.insertBefore(crumb, keptTable);
     /**
+     * 🔴 **語で絞っている間は、一覧のすぐ上に「絞り込み中: ○○ [絞りを外す]」を出す**(Gemini 依頼 65-2、
+     *   #1163 のコメント 6145748723 の回答 A)。
+     * ⚠ 直す前は「絞りを外す」が **0 件のときだけ**出ていた ── 1 件以上当たっている間は、
+     *   外すには探す欄の「×」か Esc しか無く、指で触る端末では Esc の説明が出ない。
+     * ⚠ 出すのは**語が在って、1 件以上当たっているとき**だけ(0 件は下の「絞りを外す」が受け持つ。2 つ出さない)。
+     *   「>」で始まる語(操作を探す)は絞り込みではないので出さない。種類の札だけのときは見せる語が無いので出さない。
+     * ⚠ 受け手は 0 件のときと**同じ `clear-entry-filter`**(受け口を増やさない)。
+     */
+    if (q !== '' && list.length > 0 && commandQueryOf(state.filterQuery) === null) {
+      const line = document.createElement('div');
+      line.setAttribute('data-pkc-field', 'filer-filter-line');
+      const label = document.createElement('span');
+      label.setAttribute('data-pkc-field', 'filer-filter-word');
+      label.textContent = `絞り込み中: ${state.filterQuery.trim()}`;
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.setAttribute('data-pkc-action', 'clear-entry-filter');
+      off.setAttribute('data-pkc-field', 'filer-clear-filter-line');
+      off.textContent = '絞りを外す';
+      off.title = '絞り込みを空にして、ノートを全部出します。';
+      line.append(label, off);
+      if (keptTable === null) this.region.append(line);
+      else this.region.insertBefore(line, keptTable);
+    }
+    /**
      * 🔴 **操作の帯は表の「下」に置く**(#240 段①〜③ の実装中に実測で判明)。
      *
      * ⚠ 帯を表の**上**に置くと、**1 回目のクリックで帯が伸びて表が下へずれる** ──
@@ -1481,10 +1506,15 @@ export class FilerRenderer {
       for (const t of state.trashPanel.items) {
         const li = document.createElement('li');
         li.setAttribute('data-pkc-trash-entry', t.entryLid);
+        /**
+         * 🔴 **日時が何の日時かを言う**(依頼 68-2)。出るのはゴミ箱へ移した時点の**最後の記録**の時刻
+         * (`deleteEntry` が移す直前の本文を履歴に 1 件積む。直前の保存と同じ本文なら、その保存の時刻)。
+         * 字が無いと「移した日」と「最後に書いた日」のどちらにも読める。
+         */
         const text = document.createElement('span');
         text.textContent = `${t.title ?? '(無題)'}(${
           archetypeLabel(t.archetype ?? '')
-        } / ${formatStoredStamp(t.createdAt)})`; // 🔴 端末の時刻で(DB の字は UTC)
+        } / 最後の記録 ${formatStoredStamp(t.createdAt)})`; // 🔴 端末の時刻で(DB の字は UTC)。⚠ 字を足した理由は下
         const restore = document.createElement('button');
         restore.type = 'button';
         restore.setAttribute('data-pkc-action', 'restore-trash');

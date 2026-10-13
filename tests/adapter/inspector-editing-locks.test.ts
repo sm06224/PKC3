@@ -117,7 +117,7 @@ describe('編集中の右ペインの口(#513)', () => {
     input.value = 'い';
     add.disabled = false; // stale な DOM を再現(disabled が効かない経路)
     add.click();
-    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を終了');
+    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     // ⚠ 文言は押した場所と対で pin する(取り違え変異を殺す)
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('つながりを足');
     expect(s.d.getState().relations, '編集中に関係が作られた').toHaveLength(0);
@@ -130,7 +130,7 @@ describe('編集中の右ペインの口(#513)', () => {
     const set = s.q<HTMLButtonElement>('[data-pkc-action="set-entry-date"]');
     set.disabled = false;
     set.click();
-    expect(s.d.getState().error ?? '').toContain('編集を終了');
+    expect(s.d.getState().error ?? '').toContain('編集を保存するか');
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('日付を付け');
     // ⚠ 直す前はピッカーの全手順を完走させてから捨てていた ── 開かないことまで見る
     expect(document.querySelector('dialog'), '編集中なのにピッカーが開いた').toBeNull();
@@ -143,7 +143,7 @@ describe('編集中の右ペインの口(#513)', () => {
     const del = s.q<HTMLButtonElement>('[data-pkc-action="remove-relation"]');
     del.disabled = false;
     del.click();
-    expect(s.d.getState().error ?? '').toContain('編集を終了');
+    expect(s.d.getState().error ?? '').toContain('編集を保存するか');
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('つながりを消');
     expect(s.d.getState().relations, '編集中に関係が消えた').toHaveLength(1);
   });
@@ -154,7 +154,7 @@ describe('編集中の右ペインの口(#513)', () => {
     const clear = s.q<HTMLButtonElement>('[data-pkc-action="clear-entry-date"]');
     clear.disabled = false;
     clear.click();
-    expect(s.d.getState().error ?? '').toContain('編集を終了');
+    expect(s.d.getState().error ?? '').toContain('編集を保存するか');
     expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('日付を外');
     expect(s.d.getState().entryMetas.get('n1')!.date, '日付が外れた').toBe('2026-08-28');
   });
@@ -193,7 +193,7 @@ describe('編集中の右ペインの口(#513)', () => {
     clear.disabled = false;
     clear.click();
     const said = s.d.getState().error ?? '';
-    expect(said, '編集していないのに「編集を終了」と言った').not.toContain('編集を終了');
+    expect(said, '編集していないのに「編集を終了」と言った').not.toContain('編集を保存するか');
     expect(said, '押した場所と文言が合っていない').toContain('日付を外');
     /**
      * ⚠ **「本文が書き換わっていない」ことは、ここでは観測できない** ──

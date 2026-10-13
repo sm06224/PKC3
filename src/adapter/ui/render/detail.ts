@@ -143,7 +143,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
-import { buildOfficeEntry, officeEntryOf } from './office-entry-view';
+import { buildOfficeEntry, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   assetPreviewKind,
@@ -3484,6 +3484,8 @@ export class DetailRenderer {
         lid,
       });
       if (office) info.append(office);
+      const saveNote = buildOfficeSaveNote({ name: meta.name, mime: meta.mime, assetKey: meta.assetKey, lid });
+      if (saveNote) info.append(saveNote);
     }
     host.append(info);
 
@@ -4288,7 +4290,9 @@ function renderRevisionDiff(
   };
   addOption('current', 'いまの本文');
   // ⚠ 見ている版そのものとは比べない(同じ物どうしで「同じです」と出るだけ)
-  for (const it of items) if (it.id !== preview.revId) addOption(`rev:${it.id}`, revName(it));
+  // 🔴 並びは「いまの本文」→ 版の新しい順(依頼 68-3)。⚠ 一覧の並びに頼らず、版の通し番号で明示する
+  for (const it of [...items].sort((a, b) => b.revOrder - a.revOrder))
+    if (it.id !== preview.revId) addOption(`rev:${it.id}`, revName(it));
   // ⚠ PC のファイルは**結びついているノートだけ**(無いのに出すと、押しても読めない dead click)
   if (linked) addOption('file', 'PC のファイル');
   select.value =

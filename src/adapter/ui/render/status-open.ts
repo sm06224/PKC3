@@ -91,6 +91,10 @@ export interface StatusUndoState {
   readonly lastAppend: { readonly lid: string } | null;
   /** その知らせが指している行き先(`OP_NOTICE` の `open`)。 */
   readonly noticeOpen: string | null;
+  /** 履歴から戻した直後の「元に戻す」の材料(依頼 68-1)。省略 = 無い。 */
+  readonly restoreUndo?: { readonly lid: string; readonly revId: string; readonly notice: string } | null;
+  /** いま開いているノート(`restoreUndo` が別のノートの版なら出さない)。 */
+  readonly selectedLid?: string | null;
 }
 
 import { BLOCK_MOVED_NOTICE } from '@features/markdown/line-move';
@@ -157,7 +161,16 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
    * その 1 手の知らせそのもの(`trashUndoShown`)。別の知らせが上書きしたら畳む(「開く」と同じ作法)。
    */
   const trash = !move && !append && !schedule && trashUndoShown(shownLine);
-  const show = move || append || schedule || trash;
+  /**
+   * 🔴 **履歴から「この版に戻す」を押した直後の「元に戻す」**(依頼 68-1)。出す条件は 2 つ ──
+   * ①いま出ている 1 行が、その復元の知らせそのもの(`shownLine === ru.notice`。別の知らせが上書きしたら畳む)
+   * ②その版が**いま開いているノート**のもの(他のノートの版を書かない)。
+   * 押し先は新しい口を作らず、履歴の「この版に戻す」と同じ `restore-revision`(版 id を運ぶ)。
+   */
+  const ru = state.restoreUndo ?? null;
+  const restore =
+    !move && !append && !schedule && !trash && ru !== null && shownLine === ru.notice && state.selectedLid === ru.lid;
+  const show = move || append || schedule || trash || restore;
   // ⚠ **押し先も切り替える** ── 同じ器で 2 つの取り消しを出すので、
   //    字だけ出して受け手を替え忘れると「押すと別の物が戻る」になる
   // 🔴 **字も対象に合わせて切り替える**(#1046)── 器を 1 つで済ませているので、
@@ -166,9 +179,20 @@ export function paintStatusUndo(btn: HTMLElement, state: StatusUndoState, shownL
   if (show) {
     btn.setAttribute(
       'data-pkc-action',
-      trash ? 'undo-trash' : schedule ? 'schedule-undo-move' : move ? 'undo-move' : 'undo-append',
+      restore
+        ? 'restore-revision'
+        : trash
+          ? 'undo-trash'
+          : schedule
+            ? 'schedule-undo-move'
+            : move
+              ? 'undo-move'
+              : 'undo-append',
     );
-    btn.textContent = trash || schedule ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
+    // ⚠ 版 id は復元の口だけが持つ(他の取り消しへ切り替えたら外す ── 古い id が残らない)
+    if (restore && ru !== null) btn.setAttribute('data-pkc-rev-id', ru.revId);
+    else btn.removeAttribute('data-pkc-rev-id');
+    btn.textContent = trash || schedule || restore ? '元に戻す' : move ? '移動を元に戻す' : '追記を元に戻す';
   }
   if (btn.hidden !== !show) btn.hidden = !show;
   return show;

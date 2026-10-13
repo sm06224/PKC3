@@ -99,10 +99,10 @@ describe('編集中でも、ゴミ箱は開ける(#319)', () => {
 /**
  * 🔴 **動かす操作は、声に出して断る**(#319)。
  * ⚠ 断り文は `phaseBlockReason` の 1 か所から出る(C11b / #1045。直す前は
- *   `binder.ts` の既存 8 か所が手で「編集を終了してから…てください」を書いて
+ *   `binder.ts` の既存 8 か所が手で「編集を保存するか、編集をやめてから…てください」を書いて
  *   いたが、面ごとに書き分けない ── 「文言は押した場所と対で pin する」)。
  * 🔑 **字面ではなく実際に撃って見る**(2026-09-25 に直した)── 出どころが
- *   `phaseBlockReason` へ寄った時点で、handler の中に「編集を終了してから」の
+ *   `phaseBlockReason` へ寄った時点で、handler の中に「編集を保存するか、編集をやめてから」の
  *   **リテラル**は無くなる(実行時に組む)。source を grep する検査はそこで
  *   空振りする ── だから binder を本物どおり動かし、出てくる字を見る。
  */
@@ -134,7 +134,7 @@ describe('編集中の「戻す」「復元」は、理由を出して断る(#31
     const { d, root } = mount();
     press(root, 'restore-trash', { 'data-pkc-rev-id': 'r1', 'data-pkc-trash-lid': 'gone' });
     expect(d.getState().error, '編集中の断りが無い(無言で捨てる)').toContain(
-      '編集を終了してから戻してください',
+      '編集を保存するか、編集をやめてから戻してください',
     );
   });
 
@@ -142,7 +142,7 @@ describe('編集中の「戻す」「復元」は、理由を出して断る(#31
     const { d, root } = mount();
     press(root, 'restore-revision', { 'data-pkc-rev-id': 'r1' });
     expect(d.getState().error, '編集中の断りが無い(無言で捨てる)').toContain(
-      '編集を終了してから復元してください',
+      '編集を保存するか、編集をやめてから復元してください',
     );
   });
 
@@ -191,7 +191,7 @@ describe('ゴミ箱を空にする ── 待っている間に編集が始ま�
     await answerDialog('ok');
 
     expect(d.getState().error ?? '', '無言で捨てた(理由が出ていない)').toContain(
-      '編集を終了してから空に',
+      '編集を保存するか、編集をやめてから空に',
     );
   });
 
@@ -200,6 +200,6 @@ describe('ゴミ箱を空にする ── 待っている間に編集が始ま�
     const { d, btn } = mount();
     btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     await answerDialog('ok');
-    expect(d.getState().error ?? '', '崩れていないのに断った').not.toContain('編集を終了');
+    expect(d.getState().error ?? '', '崩れていないのに断った').not.toContain('編集を保存するか');
   });
 });

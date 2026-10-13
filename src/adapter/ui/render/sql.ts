@@ -52,6 +52,7 @@ import { humanBytes } from '@features/human-bytes';
 import {
   copiedTableNames,
   sqlExampleText,
+  sqlMoreExamplesText,
   sqlPlaceholder,
   sqlRulesText,
   sqlTipText,
@@ -146,6 +147,7 @@ export class SqlRenderer {
   private sourceKey: string | null = null;
   /** 打ち始めても消えない手本(#837 K1)。⚠ 器は 1 度しか組まないので控えを持つ。 */
   private example: HTMLElement | null = null;
+  private exampleMore: HTMLElement | null = null;
   /** 履歴の押し所(#918 段②a)。⚠ 憶えている字が無いうちは押させない。 */
   private history: HTMLButtonElement | null = null;
   /** file へ書き出す押し所(#918 段④)。⚠ 答えが無いうちは押させない。 */
@@ -415,6 +417,10 @@ export class SqlRenderer {
     const example = document.createElement('p');
     example.setAttribute('data-pkc-field', 'sql-example');
     example.textContent = sqlExampleText(null);
+    // 🔴 手本の下の 2 行目以降(列の名前の調べ方 / 種類ごとに数える例。Gemini 依頼 63-2)── 改行を保つ
+    const exampleMore = document.createElement('p');
+    exampleMore.setAttribute('data-pkc-field', 'sql-example-more');
+    exampleMore.textContent = sqlMoreExamplesText(null);
     /**
      * 🔴 **いま何番目を見ているか**(#918 段②a。user 裁定 2026-09-14
      *   「欄の下に 2/3 と出す」)。
@@ -470,7 +476,7 @@ export class SqlRenderer {
       layer.scrollTop = box.scrollTop;
       layer.scrollLeft = box.scrollLeft;
     });
-    head.append(title, erHost, wrap, historyNote, bar, extras, tip, rules, example);
+    head.append(title, erHost, wrap, historyNote, bar, extras, tip, rules, example, exampleMore);
     this.host.append(head, note, body);
     this.box = box;
     this.layer = layer;
@@ -479,6 +485,7 @@ export class SqlRenderer {
     this.source = source;
     this.engine = engine;
     this.example = example;
+    this.exampleMore = exampleMore;
     this.tip = tip;
     this.history = history;
     this.historyNote = historyNote;
@@ -891,6 +898,10 @@ export class SqlRenderer {
     const example = sqlExampleText(target, engine, more);
     if (this.example !== null && this.example.textContent !== example) {
       this.example.textContent = example;
+    }
+    const exampleMore = sqlMoreExamplesText(target, engine);
+    if (this.exampleMore !== null && this.exampleMore.textContent !== exampleMore) {
+      this.exampleMore.textContent = exampleMore;
     }
     if (!this.focused && !this.host.hidden) {
       this.focused = true;

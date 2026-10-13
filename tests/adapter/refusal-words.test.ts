@@ -186,12 +186,12 @@ describe('🔴 「確定」「取り消し」で出口を言う断り文が src 
 });
 
 /**
- * 🔴 **C11b(#1045)── 手書きの「編集を終了してから」/「編集を終えてから」を
+ * 🔴 **C11b(#1045)── 手書きの「編集を保存するか、編集をやめてから」/「編集を終えてから」を
  *   `phaseBlockReason` へ寄せた**。
  *
  * 直す前は src の**約 62 か所**が前置きを手で書いており、その多くは
  * `phase !== 'ready'` で断っていた ── だから**保存に失敗して止まっているとき
- * (編集していない)にも「編集を終了してから」と言っていた**(#516 と同じ
+ * (編集していない)にも「編集を保存するか、編集をやめてから」と言っていた**(#516 と同じ
  * 「存在しない編集を探させる」誤り)。
  *
  * 🔑 寄せなかったのは 2 か所だけ ── **等値で pin する**(直したら消さないと
@@ -202,7 +202,7 @@ describe('🔴 「確定」「取り消し」で出口を言う断り文が src 
  *   しか無く、`SET_VIEW_MODE` の条件を辿ってようやく `'editing'` だと分かる)
  */
 describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b / #1045)', () => {
-  const PHRASES = ['編集を終了してから', '編集を終えてから'] as const;
+  const PHRASES = ['編集を保存するか、編集をやめてから', '編集を終えてから'] as const;
   /** `phaseBlockReason` 自身の定義(ここが「1 か所」の本体。除外してよい)。 */
   const DEFINITION_FILE = 'src/adapter/state/app-state.ts';
   /** 寄せなかった 2 か所(理由は上のコメント)。ここだけ手書きの前置きが残ってよい。 */
@@ -234,7 +234,7 @@ describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b
       const code = codeOnly(readFileSync(f, 'utf8'));
       for (const phrase of PHRASES) {
         if (!code.includes(phrase)) continue;
-        if (rel === DEFINITION_FILE && phrase === '編集を終了してから') continue;
+        if (rel === DEFINITION_FILE && phrase === '編集を保存するか、編集をやめてから') continue;
         if (KNOWN_KEPT[rel] === phrase) continue;
         hits.push(`${rel}: ${phrase}`);
       }
@@ -286,7 +286,7 @@ describe('🔴 保存に失敗して止まったとき ── 代表 3 か所は
       const retry = labelOf(root, 'retry-persist');
       expect(err, `${action} が押せない理由を出していない(前提が崩れた)`).not.toBe('');
       expect(err, '押せる出口(再保存)を言っていない').toContain(retry);
-      expect(err, '存在しない編集を案内している').not.toContain('編集を終了');
+      expect(err, '存在しない編集を案内している').not.toContain('編集を保存するか');
       expect(err, '存在しない編集を案内している').not.toContain('編集を終えて');
     });
   }

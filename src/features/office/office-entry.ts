@@ -107,7 +107,7 @@ export function officeEntry(input: OfficeEntryInput): OfficeEntry {
   if (missing.length > 0) {
     return {
       kind: 'unsupported',
-      reason: `この環境では Office 表示を使えません(足りないもの: ${missing.join(' / ')})`,
+      reason: `Chrome か Edge で開いてください(このブラウザでは Office 表示を使えません。足りないもの: ${missing.join(' / ')})`,
       missing,
     };
   }

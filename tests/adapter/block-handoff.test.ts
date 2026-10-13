@@ -265,7 +265,7 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
     h.d.dispatch({ type: 'START_EDIT' });
     h.d.dispatch({ type: 'HANDOFF_BLOCK', fromLid: 'a', ...PARA_A, toLid: 'b', toBefore: null });
     await tick();
-    expect(h.d.getState().error ?? '').toContain('編集を終了');
+    expect(h.d.getState().error ?? '').toContain('編集を保存するか');
     expect(h.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('別のノート');
     expect(h.disk.get('b'), '編集中なのに書いた').toBe(B);
     h.d.dispatch({ type: 'CANCEL_EDIT' });

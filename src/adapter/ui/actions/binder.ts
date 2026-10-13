@@ -145,6 +145,7 @@ import {
   ROW_REOPEN_EVENT,
   type RowReopenDetail,
 } from '@adapter/ui/render/row-swap';
+import { INLINE_CODE_COPY_FAILED_EVENT } from '@adapter/ui/render/inline-code-copy';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import {
   HOLD_ATTR,
@@ -322,6 +323,7 @@ import {
   tableConvertPickLabel,
   appGroupMenuActions,
   tileMenuActions,
+  tileOpenTargetMenuActions,
   TILE_OPEN_TARGET_ATTR,
   TASK_REPEAT_MENU_ACTION,
   repeatMenuActions,
@@ -2010,6 +2012,39 @@ function defaultTitle(dispatcher: Dispatcher, archetype: string): string {
  * 非 fresh の cancel は破棄の意味論どおり title input も捨てる。
  */
 function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
+  const s = dispatcher.getState();
+  const lid = s.openBody?.lid;
+  /**
+   * 🔴 **打った内容があるときは、捨てる前に聞く**(依頼 71-1)。変えていなければ聞かずにやめる。
+   * 「変えた」= 本文が編集を始めたときの内容と違う(`openBody.body !== baseline`)、または
+   * 既存ノートの題名欄が元の題名と違う。⚠ 作りたてのノート(`freshLid`)の題名は、やめても残す規則
+   * (下)なので数えない。窓が開いている間の Esc は窓が受けるので、二重に出ない(`cancelAsking` でも畳む)。
+   */
+  if (s.phase === 'editing' && lid && s.openBody !== null && !cancelAsking) {
+    const input = editorTitle(root);
+    const titleChanged =
+      s.freshLid !== lid && input !== null && input.value !== (s.entryMetas.get(lid)?.title ?? '');
+    if (s.openBody.body !== s.openBody.baseline || titleChanged) {
+      cancelAsking = true;
+      void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
+        (answer) => {
+          cancelAsking = false;
+          if (answer !== 'ok') return;
+          // 待つ間に編集が終わっていたら(別の窓の操作など)何もしない
+          if (dispatcher.getState().phase !== 'editing') return;
+          cancelNow(dispatcher, root);
+        },
+      );
+      return;
+    }
+  }
+  cancelNow(dispatcher, root);
+}
+
+/** 聞いている間の二重起動を防ぐ(Esc の連打)。 */
+let cancelAsking = false;
+
+function cancelNow(dispatcher: Dispatcher, root: HTMLElement): void {
   const s = dispatcher.getState();
   const lid = s.openBody?.lid;
   if (lid && s.freshLid === lid) {
@@ -9343,7 +9378,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 直す前は `SELECT_ENTRY` を撃つだけで、別のノートを編集中だと reducer が黙って捨て、
      *   **帯の知らせだけが消えた**(開かず、理由も出ず、もう一度押す所も無い)。
      * 🔑 開く口は `selectEntryOrExplain`(リンクと同じ断り文)。⚠ そのノートを既に開いているなら
-     *   選び直さない(編集中のそのノートで「編集を終了してから開いて」と言わない)。
+     *   選び直さない(編集中のそのノートで「編集を保存するか、編集をやめてから開いて」と言わない)。
      */
     if (lid !== null && st.entryMetas.has(lid) && st.selectedLid !== lid) {
       const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -12782,7 +12817,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **選ばせる前に断る**(#535 ③)。
      *
      * ⚠ 直す前は picker を開き、user が file を選び終わった**後で**
-     *   `importVcfFiles` / `importMarkdownFiles` が「編集を終了してから」と断っていた
+     *   `importVcfFiles` / `importMarkdownFiles` が「編集を保存するか、編集をやめてから」と断っていた
      *   ── **選ぶ手間が丸ごと無駄**になる。これは #513 で右ペインの日付ピッカーに
      *   ついて直したのと**同じ形**である(そちらは「開く → 選ぶ → 確定」を完走させて
      *   から捨てていた)。
@@ -14962,7 +14997,7 @@ export function bindActions(
      *
      * 🔴 **編集中は倒さない**(着地前に自分の diff を読み直して見つけた回帰)。
      * ⚠ 取込は `phase !== 'ready'` を**断る**ので、倒すと編集中に `.md` を落とした人は
-     *   「編集を終了してから取り込んでください」を読まされる ── **これまでは
+     *   「編集を保存するか、編集をやめてから取り込んでください」を読まされる ── **これまでは
      *   添付できていた**ので、動線を 1 つ奪うことになる。
      * 🔑 だから**取込が受けられるときだけ**倒し、そうでなければ**これまでどおり**添付。
      *
@@ -16312,6 +16347,31 @@ export function bindActions(
     }
 
     /**
+     * 🔴 **組み込みアプリのタイルの右クリック**(依頼 69-B4)── 出すのは「開き方」の 2 項目だけ。
+     * ⚠ 組み込みは並べ替えられない(掴めない)ので、並べ替えの項目は出さない(勧めてから断らない)。
+     * ⚠ 出すのは**開き方が効くタイルだけ**(別窓で開く面のタイル = `isViewMode`)。マニュアル・Office・
+     *   「自分のパソコンで動かす」は開き方を持たない(窓の作りが固定 / zip を落とすだけ)ので、
+     *   押しても何も変わらない選択肢を置かない。
+     * ⚠ 印は「ブラウザのタブ」に付ける ── 組み込みの面は設定の開き方に従わず、ふだんはいつもタブで開く。
+     */
+    const builtinHit = target.closest('[data-pkc-tile][data-pkc-tile-kind]:not([draggable="true"])');
+    if (builtinHit !== null) {
+      const tileLid = builtinHit.getAttribute('data-pkc-tile') ?? '';
+      const kind = builtinHit.getAttribute('data-pkc-tile-kind') ?? '';
+      if (tileLid !== '' && isViewMode(kind)) {
+        ev.preventDefault();
+        openContextMenu(
+          root,
+          { x: ev.clientX, y: ev.clientY },
+          tileOpenTargetMenuActions('tab'),
+          root.ownerDocument.activeElement,
+          { 'data-pkc-tile': tileLid },
+        );
+        return;
+      }
+    }
+
+    /**
      * 🔴 **板どうしを繋ぐ線の上で右クリック**(#530 段③d)── 「この線を消す」。
      *
      * ⚠ 掴んで繋げる(`place-connect.ts`)なら、**画面から外せなければならない**(片道にしない)。
@@ -17146,6 +17206,13 @@ export function bindActions(
     run('rename-attachment', el);
   };
   listen(root, 'focusout', (ev) => commitAttachmentName(ev.target));
+  /**
+   * 🔴 **文中の `code` のコピーに失敗したら、画面下に言う**(#1163 依頼 72-2)。
+   * ⚠ 字は枠の ⧉ と同じ 1 つ(`copy-md-block.ts` の `COPY_FAILED`)。
+   */
+  listen(root, INLINE_CODE_COPY_FAILED_EVENT as keyof HTMLElementEventMap, () => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+  });
   /**
    * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。
    *

@@ -235,7 +235,7 @@ export class SqlEmbedHydrator {
           return;
         }
         this.pendingLine.delete(host);
-        host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e));
+        host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e), true);
         host.setAttribute('data-pkc-sql-embed-state', 'failed');
       },
     );

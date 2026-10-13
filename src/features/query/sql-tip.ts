@@ -325,3 +325,28 @@ export function sqlExampleText(
 ): string {
   return `例: ${sqlPlaceholder(target, engine, more)}`;
 }
+
+/**
+ * 🔴 **手本の下に出す 2 行目以降**(Gemini 依頼 63-2、#1163 のコメント 6145748723 の回答 C)。
+ *
+ * - 列の名前の調べ方(**どの相手でも**。「構造を見る」は相手が何でも出ている)
+ * - ノートを調べているとき(`target === null`)だけ、**種類ごとに数える集計の例**を足す
+ *   ⚠ 相手が file のときは表も列も file ごとに違うので、`entries` の例を出すと**打っても引けない**
+ *
+ * 🔑 例の SQL は `sqlite` で打てる形(`archetype` は `entries` の実在の列)。
+ */
+export const SQL_COLUMN_HINT = '列の名前は「構造を見る」で分かります';
+export const SQL_NOTE_EXAMPLES: readonly string[] = [
+  'SELECT archetype, count(*) AS 件数 FROM entries GROUP BY archetype ORDER BY 件数 DESC',
+  "SELECT title FROM entries WHERE title LIKE '%会議%' LIMIT 20",
+];
+export function sqlMoreExamplesText(
+  target: SqlTipTarget | null,
+  engine: SqlEngine = 'sqlite',
+): string {
+  const lines: string[] = [SQL_COLUMN_HINT];
+  if (target === null && engine === 'sqlite') {
+    for (const sql of SQL_NOTE_EXAMPLES) lines.push(`例: ${sql}`);
+  }
+  return lines.join('\n');
+}

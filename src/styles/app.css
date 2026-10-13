@@ -2127,6 +2127,10 @@ button[data-pkc-primary] [data-pkc-icon] {
  * (実測: 1280x800 で textarea が 525px で止まり、下に 260px の空白が残っていた) */
 /* ── 編集(左に原文・右にプレビュー)─────────────────
  * 🔑 3 列にしたので、中央を 2 分割すればプレビューは配置の片側として入る。 */
+/* 刷るときだけ使う、編集欄の全文の写し(#1163 依頼 71-2。`print-editing.ts`)── 画面には出さない */
+[data-pkc-field='editor-print'] {
+  display: none;
+}
 [data-pkc-region='editor-split'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -3535,6 +3539,18 @@ li[data-pkc-row-slot] {
 /* ⚠ 読めなかったときは**理由を見せる**(黙って原文だけ出さない) */
 .pkc-md-rendered [data-pkc-chart-state='failed']::before {
   content: 'グラフを描けません: ' attr(data-pkc-chart-error);
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+/**
+ * 図(mermaid)も同じ見え方にする(#1163 依頼 72-1)。⚠ 直す前は原文が残るだけで、読み込み中か
+ * 書き方の間違いかを見分けられなかった。英語の理由(`data-pkc-mermaid-error`)は出さない ──
+ * ふつうの人には読めない。
+ */
+.pkc-md-rendered [data-pkc-mermaid-state='failed']::before {
+  content: '図を描けません(書き方を確かめてください)';
   display: block;
   color: var(--muted);
   font-size: 12px;
@@ -5157,6 +5173,25 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   font-size: 11px;
   color: var(--muted);
 }
+[data-pkc-field='filer-filter-line'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: 12px;
+  color: var(--muted);
+}
+[data-pkc-field='filer-filter-word'] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-pkc-field='query-row-hint'] {
+  margin: 0 0 var(--s2);
+  font-size: 11px;
+  color: var(--muted);
+}
 [data-pkc-region='query-group'] {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -6094,6 +6129,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-tip'],
 [data-pkc-field='sql-rules'],
 [data-pkc-field='sql-example'],
+[data-pkc-field='sql-example-more'],
 [data-pkc-field='sql-history-note'],
 [data-pkc-field='sql-note'] {
   margin: 0;
@@ -6105,7 +6141,8 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  * ⚠ 地の文と同じ形だと**写す物に見えない** ── 欄に打つ字なので、等幅で出す。
  * 🔑 選んで写せるように `user-select` は既定のまま(触らない)。
  */
-[data-pkc-field='sql-example'] {
+[data-pkc-field='sql-example'],
+[data-pkc-field='sql-example-more'] {
   /* ⚠ 打つ欄(`sql-input`)と**同じ変数**を使う ── 手本と打つ字の形を分けない */
   font-family: var(--font-mono);
   white-space: pre-wrap;
@@ -10302,6 +10339,19 @@ h3[data-pkc-section] {
   [data-pkc-region='alarm-bar'],
   .pkc-render-toggle {
     display: none;
+  }
+  /* 🔴 **編集中に刷ったら、編集欄の中身を全部出す**(#1163 依頼 71-2)── 欄は 1 画面ぶんの箱なので
+   *    隠し、刷る直前に置いた全文の写し(`print-editing.ts`)を出す。プレビューは同じ中身なので出さない */
+  [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-field='editor-body'],
+  [data-pkc-region='editor-split']:has([data-pkc-field='editor-print']) [data-pkc-region='editor-preview'] {
+    display: none;
+  }
+  [data-pkc-field='editor-print'] {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: 11pt;
   }
   /* 🔴 **本文の中の再生機は別の規則にする**(#413 段②)。
    * ⚠ 上の一覧に混ぜると、**書き出す HTML へ焼かれない** ── 焼く判定は

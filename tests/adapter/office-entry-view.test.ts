@@ -27,6 +27,7 @@ import { attachmentBody } from '../../src/features/flavor/attachment-flavor';
 import {
   appOfficePack,
   buildOfficeEntry,
+  buildOfficeSaveNote,
   OfficePackState,
   type OfficeAvailabilitySource,
 } from '../../src/adapter/ui/render/office-entry-view';
@@ -98,6 +99,23 @@ describe('buildOfficeEntry(O3-c)', () => {
     expect(el.getAttribute('data-pkc-office-state')).toBe('unsupported');
     expect(el.textContent, '何が足りないかを言う').toContain('JSPI');
     expect(el.tagName).not.toBe('BUTTON');
+  });
+
+  it('🔴 .xlsx / .pptx は「一時保存の対象外」の 1 行が出る。.docx には出ない(対照群)', () => {
+    const xlsx = { ...DOCX, name: '集計.XLSX' };
+    const pptx = { ...DOCX, name: '発表.pptx' };
+    for (const att of [xlsx, pptx]) {
+      const el = buildOfficeSaveNote(att, avail(true))!;
+      expect(el.textContent).toBe('.xlsx / .pptx は一時保存の対象外です。こまめに保存してください');
+    }
+    expect(buildOfficeSaveNote(DOCX, avail(true)), '一時保存される形式に言わない').toBeNull();
+    expect(buildOfficeSaveNote(xlsx, avail(false)), '開けないときは言う意味が無い').toBeNull();
+  });
+
+  it('使えないブラウザの案内は「Chrome か Edge」が先頭、技術の名前は括弧の後ろ', () => {
+    const el = buildOfficeEntry(DOCX, avail(true, { ...OK, jspi: false }))!;
+    expect(el.textContent!.startsWith('Chrome か Edge で開いてください(')).toBe(true);
+    expect(el.textContent).toContain('JSPI');
   });
 
   it('Office でない添付には何も足さない', () => {

@@ -2997,6 +2997,18 @@ export function connectStoreEffects(
             // mismatch guard をフレーバー不変で単純化)
             const title = rev.title ?? ev.title;
             const ext = extractMeta(ev.archetype, rev.body);
+            // 戻す前の本文が積まれる版を見つけるため、書く前の「いちばん新しい版」を控える
+            const newestRev = async (): Promise<string | undefined> => {
+              try {
+                const rows = await store.listRevisionMetas(ev.lid);
+                let best: { id: string; rev_order: number } | undefined;
+                for (const r of rows) if (best === undefined || r.rev_order > best.rev_order) best = r;
+                return best?.id;
+              } catch {
+                return undefined;
+              }
+            };
+            const newestBefore = await newestRev();
             // 前進変異(P5 設計 §1): checkpoint で「現在の disk body」が履歴に
             // 積まれてから revision 内容が書かれる ── 復元の取り消しも履歴から戻れる
             const stamps = await store.persistEntry(
@@ -3012,10 +3024,18 @@ export function connectStoreEffects(
               },
               { checkpoint: true },
             );
+            /**
+             * 🔴 **「元に戻す」の行き先**(依頼 68-1)── 書く前と後で「いちばん新しい版」が変わっていれば、
+             * 増えた 1 件が戻す前の本文。⚠ 変わっていない(本文が同じで積まれなかった)なら渡さない
+             * ── 古い別の版へ「戻す」口を出さない。
+             */
+            const newestAfter = await newestRev();
+            const undoRevId = newestAfter !== undefined && newestAfter !== newestBefore ? newestAfter : undefined;
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
                 mode: 'revision',
+                ...(undoRevId === undefined ? {} : { undoRevId }),
                 meta: {
                   lid: ev.lid,
                   title,

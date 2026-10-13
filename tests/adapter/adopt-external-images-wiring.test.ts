@@ -281,7 +281,7 @@ describe('#1051 取りに行っている間に編集へ入ったとき', () => {
     expect(r.d.getState().phase, '前提: 編集に入れていない').toBe('editing');
     g.open();
     await vi.waitFor(() => expect(r.d.getState().error).toBeTruthy());
-    expect(r.d.getState().error, '断りの理由が違う').toBe('編集を終了してからもう一度取り込んでください');
+    expect(r.d.getState().error, '断りの理由が違う').toBe('編集を保存するか、編集をやめてからもう一度取り込んでください');
     expect(
       r.events.some((e) => e.type === 'REQUEST_BODY_REWRITE'),
       '編集中のノートの本文を裏で書き換えた',

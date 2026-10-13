@@ -469,7 +469,7 @@ describe('importPkc2File (P6b 実行部)', () => {
 
     expect(written).toHaveLength(0);
     expect(d.getState().phase).toBe('editing');
-    expect(d.getState().error).toMatch(/編集を終了/);
+    expect(d.getState().error).toMatch(/編集を保存するか/);
   });
 
   it('警告(端点不在の relation 等)は握りつぶさず可視化する ── ただし成功をエラーに見せない', async () => {

@@ -1413,7 +1413,7 @@ describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
     };
     const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' });
     expect(r.events, '編集中なのに本文を書きに行った').toEqual([]);
-    expect(r.state.error, '無言で捨てた').toContain('編集を終了してから');
+    expect(r.state.error, '無言で捨てた').toContain('編集を保存するか、編集をやめてから');
     // ⚠ 対照群 ── `ready` なら同じ 1 手が通る(門だけが効いていることの裏取り)
     expect(
       reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' }).events,

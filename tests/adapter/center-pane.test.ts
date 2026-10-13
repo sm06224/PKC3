@@ -208,7 +208,7 @@ describe('チェックの印(#277)', () => {
     await tick(20);
     expect(persisted, '編集中に裏で書き込んだ').toHaveLength(0);
     expect(store['n1'], '本文が変わった').toBe(BODY);
-    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を終了してから');
+    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を保存するか、編集をやめてから');
   });
 
   /**
@@ -281,7 +281,7 @@ describe('チェックの印(#277)', () => {
     await tick(20);
     expect(persisted, '編集中のノート自身へ枠から書いた').toHaveLength(0);
     expect(store['n1'], '編集中のノート自身が裏で書き換わった').toBe(BODY);
-    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を終了してから');
+    expect(d.getState().error ?? '', '無言で終わった').toContain('編集を保存するか、編集をやめてから');
   });
 
   /**

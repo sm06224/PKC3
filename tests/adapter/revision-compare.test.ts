@@ -61,6 +61,8 @@ interface Opts {
   /** PC のファイルの読み(省略 = 読む口が無い環境)。 */
   readLinkedFile?: (lid: string) => Promise<string | { tooLarge: true } | null>;
   bodies?: Record<string, string | null>;
+  /** 履歴の一覧を古い順で返す(並びを選択肢側で決めていることを見る)。 */
+  ascending?: boolean;
 }
 
 function setup(opts: Opts = {}) {
@@ -103,11 +105,14 @@ function setup(opts: Opts = {}) {
     replaceAssetRefs: () => Promise.reject(new Error('この test では使わない')),
     reorderEntry: w('reorderEntry'),
     persistEntry: w('persistEntry'),
-    listRevisionMetas: async () => [
-      { id: 'r7', rev_order: 7, created_at: '2026-08-22 10:31:05', title: '会議メモ', archetype: 'text' },
-      { id: 'r6', rev_order: 6, created_at: '2026-08-22T09:02:00Z', title: '会議メモ', archetype: 'text' },
-      { id: 'r5', rev_order: 5, created_at: null, title: '会議メモ', archetype: 'text' },
-    ],
+    listRevisionMetas: async () => {
+      const rows = [
+        { id: 'r7', rev_order: 7, created_at: '2026-08-22 10:31:05', title: '会議メモ', archetype: 'text' },
+        { id: 'r6', rev_order: 6, created_at: '2026-08-22T09:02:00Z', title: '会議メモ', archetype: 'text' },
+        { id: 'r5', rev_order: 5, created_at: null, title: '会議メモ', archetype: 'text' },
+      ];
+      return opts.ascending === true ? rows.reverse() : rows;
+    },
     revisionDiffStats: async () => [],
     getRevision: async (revId) => {
       reads.push(revId);
@@ -170,6 +175,22 @@ describe('#1231 段① くらべる相手', () => {
       // ⚠ 日時の無い版は番号だけ(空の括弧を出さない)
       ['rev:r5', '版 5'],
     ]);
+  });
+
+  /**
+   * 🔴 **並びは「いまの本文」→ 新しい版から古い版**(依頼 68-3)。⚠ 一覧が古い順で届いても同じになること
+   * (並びを一覧に任せていると、順の違う口から開いた日に選択肢の並びが入れ替わる)。
+   */
+  it('🔴 一覧が古い順で届いても、選択肢は「いまの本文」→ 新しい版の順', async () => {
+    const s = setup({ ascending: true });
+    await openPreview(s, 'r7');
+    expect([...select(s).options].map((o) => o.value)).toEqual(['current', 'rev:r6', 'rev:r5']);
+    // 対照群:別の版(いちばん古い r5)を開くと、残りの 2 つが新しい順で並ぶ
+    s.d.dispatch({ type: 'HIDE_REVISION_PREVIEW' });
+    await tick();
+    s.root.querySelector<HTMLElement>('[data-pkc-action="preview-revision"][data-pkc-rev-id="r5"]')!.click();
+    await tick();
+    expect([...select(s).options].map((o) => o.value)).toEqual(['current', 'rev:r7', 'rev:r6']);
   });
 
   it('🔴 ② 別の版を選ぶと、読み込みが積まれ(読んでいます…)、届いたら左右に出る', async () => {

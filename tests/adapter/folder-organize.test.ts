@@ -1107,7 +1107,7 @@ describe('居場所を変える口は 1 本(着地前レビュー 7)', () => {
     await tick();
     // ⚠ **窓すら開かない**(開いてから断ると、選ばせておいて捨てることになる)
     expect(pickRows(), '編集中なのに入れ先の窓が開いた').toBeNull();
-    expect(d.getState().error ?? '', '編集中に黙って捨てた').toContain('編集を終了');
+    expect(d.getState().error ?? '', '編集中に黙って捨てた').toContain('編集を保存するか');
     // 🔴 **動いていないのに画面だけ移動する**を作らない
     //    ⚠ この台は f1 の中に居るので、現在地は f1 の**まま**が正しい
     expect(d.getState().scopeLid, '動いていないのに現在地だけ動いた').toBe('f1');

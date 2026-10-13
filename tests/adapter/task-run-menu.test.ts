@@ -198,7 +198,7 @@ describe('右クリックでチェックリストをそろえる(#1173)', () => 
     const s = setup(BODY, 'editing');
     s.rightClickAt(s.itemText(0));
     s.press('task-run-done');
-    expect(s.d.getState().error, '断りの理由が画面に出ていない').toContain('編集を終了してから');
+    expect(s.d.getState().error, '断りの理由が画面に出ていない').toContain('編集を保存するか、編集をやめてから');
     expect(s.d.getState().error).toContain('完了にしてください');
     expect(s.events, '断ったのに書換を頼んだ').toEqual([]);
   });

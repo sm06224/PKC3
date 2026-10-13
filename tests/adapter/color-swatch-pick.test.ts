@@ -128,7 +128,7 @@ describe('断り方(#1224)', () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     const call = dispatch.mock.calls[0]![0] as { type: string; error: string };
     expect(call.type).toBe('OP_FAILED');
-    expect(call.error).toContain('編集を終了してから');
+    expect(call.error).toContain('編集を保存するか、編集をやめてから');
     expect(call.error).toContain('色を直してください');
   });
 
