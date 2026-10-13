@@ -8,6 +8,7 @@
 import type { Dispatcher } from '../../state/dispatcher';
 import type { BinderServices } from '../actions/binder';
 import { parseLinkTarget } from '../../../features/entry-ref/link-target';
+import { archetypeLabel } from '../../../features/flavor/archetype-label';
 import { parseFrontmatter } from '../../../features/markdown/frontmatter';
 
 export const LINK_PREVIEW_REGION = 'link-preview';
@@ -66,17 +67,9 @@ export interface PreviewCardOptions {
   externalDomain?: string;
 }
 
-function archetypeLabel(archetype?: string): string {
-  switch (archetype) {
-    case 'text':
-      return 'ノート';
-    case 'textlog':
-      return 'ログ';
-    case 'canvas':
-      return 'キャンバス';
-    default:
-      return archetype || 'ノート';
-  }
+/** 種別の名前は共有の 1 本から引く(自前の表を持つと、`folder` などの内部語が画面に出た)。 */
+function previewKindLabel(archetype?: string): string {
+  return archetype ? archetypeLabel(archetype) : 'ノート';
 }
 
 /**
@@ -160,7 +153,7 @@ export function renderPreviewCard(doc: Document, opts: PreviewCardOptions): HTML
   const badge = doc.createElement('span');
   badge.className = 'pkc-link-preview-archetype';
   badge.setAttribute('data-pkc-archetype', opts.archetype ?? 'text');
-  badge.textContent = archetypeLabel(opts.archetype);
+  badge.textContent = previewKindLabel(opts.archetype);
   header.append(badge);
 
   if (opts.date) {

@@ -393,6 +393,8 @@ export function setActionIcon(span: Element, action: string, name: IconName): vo
  * ここ 1 か所から引く(2 か所に書くと、片方だけ直る)。
  * ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)。
  */
+/** 編集の「保存」ボタンの字。`detail.ts` が同じ字を描く(`tests/adapter/silent-paths.test.ts` が描いたボタンと突き合わせる)。行の確定の案内もこの字で言う。 */
+export const COMMIT_EDIT_LABEL = '編集を保存する';
 export const COMMIT_EDIT_HINT = '本文を保存して編集を終えます';
 export const CANCEL_EDIT_HINT = '変更を捨てて編集を終えます';
 

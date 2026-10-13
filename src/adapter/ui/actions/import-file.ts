@@ -57,7 +57,7 @@ export async function importFiles(
   if (files.length > 1) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: 'PKC2 の書き出しは 1 つずつ取り込んでください',
+      error: 'バックアップや PKC2 の書き出しは 1 つずつ取り込んでください',
     });
     return null;
   }

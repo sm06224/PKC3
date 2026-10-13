@@ -4540,6 +4540,32 @@ const noop = (): void => {};
 const CAUTION: StatusOptions = { kind: 'caution' };
 
 /**
+ * 戻る・進む。⚠ 編集中などで選択が動かなかったときは、黙らずに理由を言う
+ * (reducer の `navHistory` は断ったとき何も返さない ── 規則は `SELECT_ENTRY` が持つので
+ * ここでは**動いたかどうかだけ**を見る)。前置きは他の断りと同じ `phaseBlockReason`。
+ */
+function navigateHistory(dispatcher: Dispatcher, dir: 'back' | 'forward'): void {
+  const before = dispatcher.getState();
+  dispatcher.dispatch({ type: 'NAV_HISTORY', dir });
+  const after = dispatcher.getState();
+  if (after.phase === 'ready' || after.selectedLid !== before.selectedLid) return;
+  dispatcher.dispatch({
+    type: 'OP_FAILED',
+    error: `${phaseBlockReason(after.phase)}${dir === 'back' ? '戻ってください' : '進んでください'}`,
+  });
+}
+
+/**
+ * 書式の帯・caret の道具が、書き込む先の欄(`formatTarget`)を見つけられなかったときの知らせ。
+ * ⚠ 1 画面の編集で本文の行がどれも開いていないと、欄が無く、押しても何も起きなかった。
+ *   全部の道具がここを通る(字を 1 か所に置く)。
+ */
+export const NO_FORMAT_TARGET_TEXT = '先に本文の行を押して、書く行を開いてください';
+function sayNoFormatTarget(services: { showStatus?(text: string, opts?: StatusOptions): void }): void {
+  services.showStatus?.(NO_FORMAT_TARGET_TEXT, CAUTION);
+}
+
+/**
  * 🔴 **行を持つ 2 つの器**(#1032 で 1 か所へ寄せた。「一覧」の器は #813 段③ で外した)。
  *
  * ⚠ 左の列の行は「フォルダ」(`filer-table`)/ 2 ペイン(`dual-table`)の**2 つ**が持つ。
@@ -6657,8 +6683,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     appCopyHistory.clear();
     services.showStatus?.('コピーした物を全部消しました');
   },
-  'nav-back': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'back' }),
-  'nav-forward': (dispatcher) => dispatcher.dispatch({ type: 'NAV_HISTORY', dir: 'forward' }),
+  'nav-back': (dispatcher) => navigateHistory(dispatcher, 'back'),
+  'nav-forward': (dispatcher) => navigateHistory(dispatcher, 'forward'),
   /** 一覧の並び順(#183)。⚠ 妥当性の判定は `isEntrySort` 1 か所。 */
   /**
    * 🔴 **種類で絞る札**(#411)。もう一度押すと外れる。
@@ -7749,9 +7775,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 挿す字は `insertionForLineDate` が作る ── ここで組み立てない(§7)。
    * ⚠ 挿すのは `insertText` ── **`Ctrl+Z` で戻せる**形にする。
    */
-  'insert-date': (_dispatcher, _target, _services, root) => {
+  'insert-date': (_dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
-    if (opened === null) return;
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
     /**
      * 🔴 **caret を先に控える**(2026-08-23、実ブラウザの smoke が見つけた)。
      *
@@ -7803,9 +7832,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 組み立ては `formatEntryLink` 1 本(§7 ── 段① の「参照をコピー」と同じ字)。
    * ⚠ 挿すのは `insertText` ── **`Ctrl+Z` で戻せる**形にする。
    */
-  'insert-entry-link': (dispatcher, _target, _services, root) => {
+  'insert-entry-link': (dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
-    if (opened === null) return;
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     /**
      * ⚠ **開いた時点の state を握らない** ── 打つたびに引き直す
@@ -7842,7 +7874,10 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'insert-snippet': (dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
-    if (opened === null) return;
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     const scan = dispatcher.getState().snippetScan;
     // ⚠ **開いた時点の一覧**を握る ── 選んでいる間に集め直されても、
@@ -7901,9 +7936,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   この関数を呼ぶ」と明記しているのに、ここで `wrapAsBlock` を直書きすると
    *   同じ判定が 2 か所に生える(CLAUDE.md §7。着地前レビュー ③)。
    */
-  'insert-diagram': (_dispatcher, _target, _services, root) => {
+  'insert-diagram': (_dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
-    if (opened === null) return;
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
     if (opened.selectionStart !== opened.selectionEnd) {
       const sel = { text: opened.value, start: opened.selectionStart, end: opened.selectionEnd };
       writeBack(opened, applyFormat(sel, 'mermaid'));
@@ -7938,9 +7976,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 入るのは**絵そのものではなく字**(`:home:`)── 保存も検索も原文のままなので、
    *   「home」で引ける(#853 の「検索に引っかかるか」)。
    */
-  'insert-icon': (_dispatcher, _target, _services, root) => {
+  'insert-icon': (_dispatcher, _target, services, root) => {
     const opened = formatTarget(root);
-    if (opened === null) return;
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     void pickBodyIconInApp(root).then((name) => {
       // ⚠ 空文字は来ない(「なし」を出していない)が、来ても**何もしない**
@@ -7960,7 +8001,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
     const ta = formatTarget(root);
-    if (!op || !ta) return;
+    if (!op) return;
+    if (!ta) {
+      sayNoFormatTarget(services);
+      return;
+    }
     writeBack(
       ta,
       applyFormatSaying(

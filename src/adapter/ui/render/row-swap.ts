@@ -48,6 +48,7 @@ import {
 } from '@features/boundary-step';
 // ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
 import { spliceLines } from '@features/markdown/edit-journal';
+import { COMMIT_EDIT_LABEL } from './icons';
 import { appKeymap, type KeymapStore } from './keymap';
 
 /**
@@ -204,6 +205,9 @@ const SUB_UNITS: readonly { selector: string; type: string }[] = [
   { selector: 'tr', type: 'tr_open' },
   { selector: 'li', type: 'list_item_open' },
 ];
+
+/** Ctrl+S / Ctrl+Enter で行を確定したときの案内(保存のボタンの字は `COMMIT_EDIT_LABEL`)。 */
+export const ROW_COMMITTED_NOT_SAVED_TEXT = `行を確定しました。ノートを保存するには『${COMMIT_EDIT_LABEL}』を押してください`;
 
 export interface RowSwapCallbacks {
   /**
@@ -1256,6 +1260,12 @@ export class RowSwap {
       if (cmd === 'row-commit') {
         ev.preventDefault();
         this.commitActive();
+        /**
+         * 🔴 **Ctrl+S / Ctrl+Enter は行を確定するだけで、ノートは保存しない**(挙動は変えない)。
+         * 保存したつもりの人に黙っていると、閉じるときに初めて気づく ── だから一言だけ言う。
+         * ⚠ Tab は言わない(行を渡り歩く普通の操作)。
+         */
+        if (ke.ctrlKey || ke.metaKey) this.cb.notify?.(ROW_COMMITTED_NOT_SAVED_TEXT);
         return;
       }
       /**

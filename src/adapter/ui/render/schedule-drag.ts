@@ -210,8 +210,27 @@ function moveRepeat(
   if (days === null || days === 0) return;
   void pickRepeatMoveInApp(host, days).then((pick) => {
     const action = repeatMoveAction(dispatcher.getState(), grabbed, line, from, dropDate, days, pick);
-    if (action !== null) dispatcher.dispatch(action);
+    dispatchRepeatMove(dispatcher, action, pick);
   });
+}
+
+/** 「全部動かす」で動かす先の規則が読めなかったときの断り文(「やめた」とは別 ── 黙らない)。 */
+export const REPEAT_MOVE_LOST_TEXT = 'どの予定か分からなくなりました。もう一度動かしてください';
+
+/**
+ * `repeatMoveAction` の結果を撃つ。⚠ `null` には 2 通り在る ──
+ * 「やめた」(`pick === null`。黙ってよい)と、答えは来たのに手を作れなかった(断る)。
+ */
+export function dispatchRepeatMove(
+  dispatcher: Dispatcher,
+  action: UserAction | null,
+  pick: 'one' | 'all' | null,
+): void {
+  if (action !== null) {
+    dispatcher.dispatch(action);
+    return;
+  }
+  if (pick !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: REPEAT_MOVE_LOST_TEXT });
 }
 
 /**

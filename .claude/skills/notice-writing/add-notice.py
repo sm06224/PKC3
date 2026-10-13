@@ -55,6 +55,12 @@ if not DROP_ID and len(ids) + 1 > cap:
     print('✗ 登記表が %d 件で枠(%d)に達している(1 file も書いていない)。' % (len(ids), cap))
     print('  いちばん古い entry を 5 番目の引数で落とす: %s' % ids[-1])
     sys.exit(1)
+# 0c. 題名が過去のお知らせと同じなら、書く前に止める ── 2026-10-13 に同じ題名を書き、docs-parity の
+#     「CHANGELOG の見出しが重複していない」が落ちて初めて気づいた。見るのは登記表と CHANGELOG の両方(落ちた分は CHANGELOG にだけ在る)。
+changelog = rd('CHANGELOG.md')
+if ("title: '%s'," % TITLE) in s or re.search(r'^#+ .*' + re.escape(TITLE) + r'\s*$', changelog, re.M):
+    print('✗ 題名「%s」は過去のお知らせと同じ(1 file も書いていない)。題名を変える。' % TITLE)
+    sys.exit(1)
 entry = "  {\n    id: '%s',\n    title: '%s',\n    items: [\n%s    ],\n  },\n" % (NEW_ID, TITLE, ''.join("      '%s',\n" % i for i in ITEMS))
 head = 'export const NOTICES: readonly Notice[] = [\n'
 assert s.count(head) == 1
