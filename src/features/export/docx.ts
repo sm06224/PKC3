@@ -443,7 +443,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
        * 「Word に写らなかったこと」に気づけない ── PKC2 で実際にそうなっていた。
        */
       return paragraph(
-        runXml({ text: `［${block.what} はコピーできませんでした: ${block.why}］`, italic: true }),
+        runXml({ text: `［${block.what} は入れられませんでした: ${block.why}］`, italic: true }),
         'PkcSkipped',
       );
   }

@@ -197,7 +197,7 @@ describe('塊 → OOXML の写像', () => {
       't',
       ISO,
     );
-    expect(part(res, 'word/document.xml')).toContain('コピーできませんでした');
+    expect(part(res, 'word/document.xml')).toContain('入れられませんでした');
     expect(res.warnings.join(' ')).toContain('画像 2 件');
     expect(res.counts.skipped).toBe(2);
   });
@@ -258,7 +258,7 @@ describe('HTML(画面と同じもの)→ 塊', () => {
     expect(skipped).toBe(1);
     const p = blocks[0] as Extract<DocxBlock, { kind: 'p' }>;
     expect(p.runs[0]!.text).toContain('図 1');
-    expect(p.runs[0]!.text).toContain('コピーできませんでした');
+    expect(p.runs[0]!.text).toContain('入れられませんでした');
   });
 
   it('🔴 知らない器の中へ降りる(囲みの中の塊が 1 つに潰れない)', () => {

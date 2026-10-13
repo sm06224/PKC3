@@ -62,6 +62,12 @@ export const HTML_VERSION = 1;
 const B64_CHUNK = 3 * 64 * 1024;
 /** 1 バッチで取る本文の目安。 */
 const BODY_BATCH_BYTES = 4 * 1024 * 1024;
+/**
+ * 閲覧側でノート間リンクを効かせるための名前(#1087 の見直し 2026-10-13)。
+ * ⚠ 閲覧側の script は画面の字の検査に掛かる(日本語を含むリテラルなので)── 属性名と key は式で差す。
+ */
+const NOTE_LINK_ATTR = 'data-pkc-entry-ref';
+const NOTE_ID_KEY = 'lid';
 
 
 export interface HtmlResult {
@@ -514,6 +520,26 @@ try{
     Array.prototype.forEach.call(box.querySelectorAll('[data-pkc-action="copy-md-block"]'),function(el){
       if(el.parentNode)el.parentNode.removeChild(el);
     });
+    // 🔴 **ノート間リンクを、このファイルの中で効かせる**(#1087 の見直し 2026-10-13)。
+    //    直す前はリンク先が書き換わらずに残り、押しても何も起きなかった(普通のリンクの見た目のまま)。
+    //    ⚠ このファイルに入っているノートだけを開く。入っていないノートへのリンクは字だけにする
+    //    (押せる顔で動かない物を残さない)。全体印刷では、そのノートの見出しへ飛ばす。
+    Array.prototype.forEach.call(box.querySelectorAll('a[${NOTE_LINK_ATTR}]'),function(a){
+      var ref=a.getAttribute('${NOTE_LINK_ATTR}')||'';
+      var nid=ref.slice(6).split('#')[0];
+      var at=Object.prototype.hasOwnProperty.call(noteAt,nid)?noteAt[nid]:-1;
+      if(at<0){
+        var sp=document.createElement('span');
+        sp.setAttribute('data-pkc-outside-note','');
+        sp.title='このファイルには入っていないノートです';
+        while(a.firstChild)sp.appendChild(a.firstChild);
+        if(a.parentNode)a.parentNode.replaceChild(sp,a);
+        return;
+      }
+      if(idp){a.href='#pe-'+at;return}
+      a.href='#';
+      a.onclick=function(ev){ev.preventDefault();show(d.entries[at],btns[at])};
+    });
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
@@ -572,6 +598,9 @@ try{
   }
 
   var list=document.getElementById('list'),cur=null;
+  // ノート間リンクの行き先 ── ノートの番号 → 一覧の何番目か / 一覧のボタン(下で作る)
+  var noteAt={},btns=[];
+  d.entries.forEach(function(e,i){if(e.${NOTE_ID_KEY})noteAt[e.${NOTE_ID_KEY}]=i});
   var toc=document.getElementById('toc'),tocEmpty=document.getElementById('tocempty');
   var ptoc=document.getElementById('ptoc'),all=document.getElementById('all');
 
@@ -706,6 +735,7 @@ try{
     var b=document.createElement('button');
     b.textContent=e.title||'(無題)';
     b.onclick=function(){show(e,b)};
+    btns.push(b);
     list.appendChild(b);
     if(i===0)setTimeout(function(){show(e,b)},0);
   });
