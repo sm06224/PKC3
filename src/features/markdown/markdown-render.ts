@@ -4743,12 +4743,45 @@ function processParagraphAlignDirective(
   return { transformed: out.join('\n'), alignMap, lineMap: lineMapOut };
 }
 
-function preprocessAlignPrefix(source: string, lineMapIn: number[]): {
+/** `\r` の無い本文の行数ぶん、遅い道と同じ式(`lineMapIn[i] ?? i`)で新しい配列を作る。 */
+function identityLineMap(source: string, lineMapIn: number[]): number[] {
+  let n = 1;
+  for (let i = source.indexOf('\n'); i !== -1; i = source.indexOf('\n', i + 1)) n++;
+  const map: number[] = new Array<number>(n);
+  for (let i = 0; i < n; i++) map[i] = lineMapIn[i] ?? i;
+  return map;
+}
+
+/**
+ * 🔴 **`|` も `__` も `＿` も `\r` も無い本文は、何もせず返す**(#1087)。
+ * 当たる正規表現は 2 つだけ ── `prefixRe`(5 形とも `|` を含む)と `indentRe`
+ * (`__` か `＿` で始まる)。どちらも当たらなければ、`currentAlign` は一度も立たず
+ * (= 空行を挿す枝に入らず)、全行がそのまま流れて alignMap / indentMap は空のまま。
+ * ⚠ `|` は 1 字でも見つかれば遅い道へ倒す(表の行など)。`_` 1 字は `__` ではないので倒さない。
+ * ⚠ `\r` は `splitLines`(`\r?\n`)が落とし `join('\n')` で CRLF が LF に変わるので、
+ *   近道の外に置く。返す lineMap は遅い道と同じ式(`lineMapIn[i] ?? i`)で作った新しい配列。
+ * `useGuard` は test 専用(false で近道を使わない)。
+ */
+export function preprocessAlignPrefix(source: string, lineMapIn: number[], useGuard = true): {
   stripped: string;
   alignMap: Map<number, AlignKind>;
   indentMap: Map<number, true>;
   lineMap: number[];
 } {
+  if (
+    useGuard
+    && source.indexOf('|') === -1
+    && source.indexOf('__') === -1
+    && source.indexOf('\uFF3F') === -1
+    && source.indexOf('\r') === -1
+  ) {
+    return {
+      stripped: source,
+      alignMap: new Map<number, AlignKind>(),
+      indentMap: new Map<number, true>(),
+      lineMap: identityLineMap(source, lineMapIn),
+    };
+  }
   const lines = splitLines(source);
   const alignMap = new Map<number, AlignKind>();
   // L-9(2026-05-08):行頭の `__`(半角 _ × 2)or `＿`(全角 _、U+FF3F)は
@@ -5212,10 +5245,22 @@ function processSectionBreaks(source: string): string {
  */
 const SECTION_BREAK_LINE_RE = new RegExp(`^${SECTION_OPEN}\\w[\\w-]*${SECTION_SEP}$`);
 
-function ensureBlankAroundSectionBreaks(
+/**
+ * 🔴 **`SECTION_OPEN` も `\r` も無い本文は、何もせず返す**(#1087)。
+ * 当たる行は `SECTION_BREAK_LINE_RE`(`SECTION_OPEN` で始まる行)だけなので、
+ * その字が 1 つも無ければ行は 1 字も変わらず、空行の挿入も無い。
+ * ⚠ `\r` は `splitLines` が落とし `join('\n')` で CRLF が LF に変わるので、近道の外に置く。
+ * 返す lineMap は遅い道と同じ式(`lineMapIn[i] ?? i`)で作った新しい配列。
+ * `useGuard` は test 専用(false で近道を使わない)。
+ */
+export function ensureBlankAroundSectionBreaks(
   source: string,
   lineMapIn: number[],
+  useGuard = true,
 ): { transformed: string; lineMap: number[] } {
+  if (useGuard && source.indexOf(SECTION_OPEN) === -1 && source.indexOf('\r') === -1) {
+    return { transformed: source, lineMap: identityLineMap(source, lineMapIn) };
+  }
   const inLines = splitLines(source);
   const out: string[] = [];
   const map: number[] = [];

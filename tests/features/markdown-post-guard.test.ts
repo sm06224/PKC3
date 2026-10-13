@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ensureBlankAroundSectionBreaks,
+  preprocessAlignPrefix,
   renderMarkdown,
   renderMarkdownWithoutPostGuard,
 } from '../../src/features/markdown/markdown-render';
@@ -121,5 +123,107 @@ describe('closedFenceLines は interactiveCodeBlocks のときだけ要る', () 
     const off = renderMarkdown(body);
     expect(on.split('data-pkc-action="edit-code-block"').length - 1).toBe(1);
     expect(off).not.toContain('edit-code-block');
+  });
+});
+
+/**
+ * 行頭の寄せ・字下げの前処理と、区切りの前後の空行(#1087)の近道。
+ * 守るもの:近道を使う/使わないで transformed と lineMap(と alignMap / indentMap)が一致し、
+ * lineMap は入力の配列を共有しないこと。入力の lineMap が恒等でない場合も一致すること。
+ * ⚠ 守っていないもの:速さ(別に測る)。
+ */
+const SB_OPEN = '\u{E120}';
+const SB_SEP = '\u{E121}';
+
+// 近道に入る本文(記法が無い)と、近い字を含んで遅い道へ倒れる本文の両方
+const NEAR_MISS: readonly string[] = [
+  'a',
+  'a\nb\nc',
+  '\n\n',
+  '# 見出し\n\n本文です。\n',
+  '- a\n- b\n',
+  '```ts\nconst x = 1;\n```\n',
+  '日本語の本文\n\n二段落目\n',
+  'snake_case と _single_ と a_b_c\n',
+  'a + b = c\n+ 1\n++ 2\n',
+  '1 > 0 と 0 < 1 と a|b\n',
+  '単独の | を含む\n',
+  '| a | b |\n|---|---|\n| 1 | 2 |\n',
+  '__bold__ と ___ と ＿全角\n',
+  '＿全角の字下げ\n',
+  '||中央\n\n|> 反対\n',
+  '   <| 空白つき\n>| x\n|< y\n',
+  'crlf1\r\ncrlf2\r\n\r\nend',
+  'lone\rcr\n',
+  `前\n${SB_OPEN}section${SB_SEP}\n後\n`,
+  `${SB_OPEN}cover${SB_SEP}\n${SB_OPEN}x${SB_SEP}`,
+  `${SB_OPEN}は単独\n`,
+  `a\r\n${SB_OPEN}section${SB_SEP}\r\nb`,
+  '',
+  '\n',
+];
+
+function mapsFor(src: string): number[][] {
+  const n = src.split(/\r?\n/).length;
+  return [
+    Array.from({ length: n }, (_, i) => i),
+    Array.from({ length: n }, (_, i) => i * 2 + 1),
+    [],
+  ];
+}
+
+describe('align prefix / section break の近道(#1087)', () => {
+  it('コーパスが 15 件以上で、近道に入る本文と倒れる本文の両方を含む', () => {
+    expect(NEAR_MISS.length).toBeGreaterThanOrEqual(15);
+    const fastAlign = NEAR_MISS.filter((s) => !/\||__|\uFF3F|\r/.test(s));
+    const fastSection = NEAR_MISS.filter((s) => !s.includes(SB_OPEN) && !s.includes('\r'));
+    expect(fastAlign.length).toBeGreaterThan(5);
+    expect(NEAR_MISS.length - fastAlign.length).toBeGreaterThan(5);
+    expect(fastSection.length).toBeGreaterThan(10);
+    expect(NEAR_MISS.length - fastSection.length).toBeGreaterThan(3);
+  });
+
+  for (const src of NEAR_MISS) {
+    for (const map of mapsFor(src)) {
+      it(`${JSON.stringify(src)} / lineMap ${JSON.stringify(map)}: 近道と遅い道が一致`, () => {
+        const a = preprocessAlignPrefix(src, map);
+        const aSlow = preprocessAlignPrefix(src, map, false);
+        expect(a.stripped).toBe(aSlow.stripped);
+        expect(a.lineMap).toEqual(aSlow.lineMap);
+        expect([...a.alignMap]).toEqual([...aSlow.alignMap]);
+        expect([...a.indentMap]).toEqual([...aSlow.indentMap]);
+        expect(a.lineMap).not.toBe(map);
+
+        const b = ensureBlankAroundSectionBreaks(src, map);
+        const bSlow = ensureBlankAroundSectionBreaks(src, map, false);
+        expect(b.transformed).toBe(bSlow.transformed);
+        expect(b.lineMap).toEqual(bSlow.lineMap);
+        expect(b.lineMap).not.toBe(map);
+      });
+    }
+  }
+
+  it('記法を含むと近道に入らず、変換が起きる(対照群)', () => {
+    const a = preprocessAlignPrefix('前\n||中央\n', [0, 1, 2]);
+    expect(a.stripped).toBe('前\n\n中央\n');
+    expect(a.alignMap.size).toBe(1);
+    const i = preprocessAlignPrefix('前\n__字下げ\n', [0, 1, 2]);
+    expect(i.indentMap.size).toBe(1);
+    const z = preprocessAlignPrefix('前\n＿字下げ\n', [0, 1, 2]);
+    expect(z.indentMap.size).toBe(1);
+    const b = ensureBlankAroundSectionBreaks(`a\n${SB_OPEN}x${SB_SEP}\nb`, [0, 1, 2]);
+    expect(b.transformed).toBe(`a\n\n${SB_OPEN}x${SB_SEP}\n\nb`);
+  });
+
+  it('CRLF は近道に入らず LF へ正規化される(近道が \\r を見ている)', () => {
+    expect(preprocessAlignPrefix('a\r\nb', [0, 1]).stripped).toBe('a\nb');
+    expect(ensureBlankAroundSectionBreaks('a\r\nb', [0, 1]).transformed).toBe('a\nb');
+  });
+
+  it('近道に入った入力は、入力 lineMap を新しい配列に写す(長い map は切り詰める)', () => {
+    const map = [5, 6, 7, 8];
+    const r = preprocessAlignPrefix('a\nb', map);
+    expect(r.lineMap).toEqual([5, 6]);
+    expect(ensureBlankAroundSectionBreaks('a\nb', map).lineMap).toEqual([5, 6]);
   });
 });
