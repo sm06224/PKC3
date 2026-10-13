@@ -67,7 +67,11 @@ describe('SEARCH_JUMP_START: 始まる条件', () => {
     expect(editing.notice, '前提: 直前まで知らせは無い').toBeNull();
     const r = reduce(editing, { type: 'SEARCH_JUMP_START', lid: 'a', query: '会議' });
     expect(r.state.searchJump, '塗らない').toBeNull();
-    expect(r.state.notice).toBe('編集を終えると、当たった所に色が付きます');
+    expect(r.state.notice).toBe('編集中は、当たった所に色を付けません。保存するか、やめてから、もう一度ノートを選んでください');
+    // 🔴 字が言う「もう一度選ぶ」で、本当に色が付く(字を実際の動きと合わせた ── 2026-10-13)
+    const done = reduce(r.state, { type: 'CANCEL_EDIT' }).state;
+    expect(done.phase, '前提: 編集を終えた').toBe('ready');
+    expect(done.searchJump, '編集を終えただけでは塗らない(字のとおり)').toBeNull();
     expect(r.state.phase, '編集は続く').toBe('editing');
   });
 
