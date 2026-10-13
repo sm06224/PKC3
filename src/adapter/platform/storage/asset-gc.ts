@@ -203,8 +203,13 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   const firstStrays = new Set(first.strays);
   const strays = second.strays.filter((k) => firstStrays.has(k));
   const r = await purgeAssets(deps.ports, keys, strays);
+  /**
+   * 🔑 **容量の内訳の数が古くなったことも言う**(#1087 の見直し 2026-10-13)── 内訳は「容量を調べる」を押したときにだけ
+   *   数えるので、消した後も「うち 120 MB は使われていません」がそのまま残り、読み返すと事実と違っていた。
+   */
   await deps.tell(
     `${r.deleted} 件を消しました` +
-      (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : ''),
+      (r.failed > 0 ? `(${r.failed} 件は失敗、再実行で回収されます)` : '') +
+      (r.deleted > 0 ? '。容量の内訳は、もう一度「容量を調べる」を押すと新しくなります' : ''),
   );
 }

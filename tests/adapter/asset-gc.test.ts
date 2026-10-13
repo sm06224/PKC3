@@ -196,6 +196,8 @@ describe('runExplicitPurge (P4b)', () => {
     // 消してよいのは「両方の走査で orphan」だった k-orphan-blob だけ
     expect(calls.filter((c) => c.startsWith('blob:'))).toEqual(['blob:k-orphan-blob']);
     expect(alerts[0]).toContain('1 件を消しました');
+    // 🔴 容量の内訳の数が古くなったことも言う(#1087 の見直し 2026-10-13)
+    expect(alerts[0]).toContain('もう一度「容量を調べる」を押すと新しくなります');
   });
 });
 
