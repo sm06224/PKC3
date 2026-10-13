@@ -637,7 +637,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   // 🔴 使い方の 1 行が、触れる前から常に出ている(↻ × は触れないと出ない物ではない)
   await expect(ed.locator('#plist-hint')).toBeVisible();
   await expect(ed.locator('#plist-hint')).toHaveText(
-    'ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl+クリックで選ぶ',
+    'ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl(Mac は ⌘)+クリックで選ぶ',
   );
   // 使い方の欄に字が収まっている(はみ出して切れていない)
   expect(
@@ -1027,7 +1027,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(enc.locator('#pagecount'), 'パスワード付きの PDF が読めない(観測が空振り)').toHaveText('/ 2', { timeout: 20_000 });
   expect(await enc.locator('[data-pkc-field="pdf-reader-fallback"]').count()).toBe(0);
   await clickReal(enc, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="1"]');
-  await expect(enc.locator('#status')).toContainText('パスワードで守られた PDF は、ページを編集できません', { timeout: 15_000 });
+  await expect(enc.locator('#status')).toContainText('パスワードで守られた PDF は、編集できません', { timeout: 15_000 });
   await expect(enc.locator('#edit-save'), '編集できない PDF に保存ボタンが出ている').toBeHidden();
   await expect(enc.locator('body')).toHaveAttribute('data-pkc-pdf-edited', 'off');
   // 読む側は今までどおり: 2 ページ目へ移れる

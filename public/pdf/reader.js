@@ -923,7 +923,7 @@ const PREPARING = 'ページの編集を準備しています…';
 const SAVED_NOTE = '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます';
 const EXTRACTED_NOTE = '選んだページを新しい PDF にしました。ノートの画面で「開く」を押すと開きます';
 const EDIT_MESSAGES = {
-  encrypted: 'パスワードで守られた PDF は、ページを編集できません',
+  encrypted: 'パスワードで守られた PDF は、編集できません(読むことはできます)',
   unreadable: 'この PDF はページを編集できない形です',
   worker: 'ページの編集を始められませんでした。もう一度試してください',
   leaked: '外したページ・選ばなかったページの内容を含めずには作れませんでした。保存していません',
@@ -2016,8 +2016,20 @@ async function search(q) {
 function stepHit(delta) {
   if (hitList.length === 0) return;
   hitIndex = (hitIndex + delta + hitList.length) % hitList.length;
-  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件(${String(hitList[hitIndex])} ページ)`;
-  goPage(hitList[hitIndex]);
+  const page = hitList[hitIndex];
+  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件(${String(page)} ページ)`;
+  goPage(page);
+  /*
+   * 🔴 一致した字そのものが見える所まで送る(#1087 の見直し 2026-10-13)。直す前はページの先頭へ送るだけで、
+   *   同じページに一致が 3 件あると「次の一致」を押しても数字だけ変わって画面が動かなかった。
+   *   ⚠ そのページの何番目の一致かを数え、描けている印(mark.hit)の同じ番目へ送る。まだ描けていない
+   *   ページ(印が無い)は今までどおりページの先頭のまま。
+   */
+  let nth = 0;
+  for (let j = 0; j < hitIndex; j += 1) if (hitList[j] === page) nth += 1;
+  const box = boxes[page];
+  const marks = box ? box.querySelectorAll('mark.hit') : [];
+  if (marks.length > 0) marks[Math.min(nth, marks.length - 1)].scrollIntoView({ block: 'center' });
 }
 
 $('query').addEventListener('keydown', (ev) => {
