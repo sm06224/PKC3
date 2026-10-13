@@ -168,7 +168,7 @@ export const FLAG_ASSET_INLINE = defineFlag('asset.inline', {
  */
 export const FLAG_EMBED = defineFlag('transport.embed', {
   default: false,
-  foldWhen: '埋め込み元(Bookmarklet / 拡張)が提供され、許可の管理がシステムに載ったら',
+  foldWhen: '埋め込み元(ブックマークレット / 拡張)が提供され、許可の管理がシステムに載ったら',
   summary: 'PKC3 を他のページに埋め込んだとき、埋め込み先のページからの依頼を受ける(既定は受けません)',
   needsRestart: true,
 });
@@ -253,7 +253,7 @@ export const FLAG_PASTE_INSPECT = defineFlag('paste.inspect', {
  */
 export const FLAG_WEBMCP = defineFlag('agent.webmcp', {
   default: false,
-  foldWhen: 'Chrome / Edge が flag なしで document.modelContext を提供したら(設定へ昇格)',
+  foldWhen: 'Chrome / Edge がフラグなしでブラウザの AI 用の機能を提供したら(設定へ昇格)',
   summary:
     'ブラウザの AI(WebMCP: ブラウザに付いている AI がページの機能を呼ぶための仕様)に、ノートを探す・作るツールを渡す。既定はオフ。使うときに許可を聞きます(探す・読むを許すと、当たったノートの本文が AI の提供元へ送られます)',
   needsRestart: true,

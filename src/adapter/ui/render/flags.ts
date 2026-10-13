@@ -192,7 +192,7 @@ export class FlagsRenderer {
       const n = registeredFlags().length;
       const changed = this.store.changedCount();
       this.summary.textContent =
-        `${n} / ${FLAG_BUDGET} 件を使用中` +
+        `切り替えられるもの ${n} 件(上限 ${FLAG_BUDGET})` +
         (changed > 0 ? `。うち ${changed} 個が既定と違います` : '');
     }
   }

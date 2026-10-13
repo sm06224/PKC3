@@ -14,7 +14,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { FlagsRenderer } from '../../src/adapter/ui/render/flags';
 import { appFlags, FlagStore } from '../../src/adapter/platform/flag-store';
-import { defineFlag, FLAG_BUDGET } from '../../src/features/flags';
+import { defineFlag, FLAG_BUDGET, FLAG_EMBED, FLAG_WEBMCP } from '../../src/features/flags';
+import { embedFlagOffText } from '../../src/adapter/ui/render/settings/embed-origins';
 
 // ⚠ この test 専用の宣言(`src` の予算には数えられない)
 const A = defineFlag('test.pane.a', {
@@ -51,10 +52,30 @@ describe('フラグの面', () => {
     expect(folds.some((t) => t.includes(A.foldWhen)), '畳む条件が画面に出ていない').toBe(true);
   });
 
-  it('⚠ 予算の残りが出る(15 枠のうち何個使ったか)', () => {
+  it('⚠ 件数は「切り替えられるもの N 件(上限 15)」── オンにした数に読めない形', () => {
     new FlagsRenderer(region, new FlagStore('')).render();
     const sum = region.querySelector('[data-pkc-field="flags-summary"]')?.textContent ?? '';
-    expect(sum, '予算が出ていない').toContain(`/ ${FLAG_BUDGET} 件`);
+    expect(sum, '上限が出ていない').toContain(`(上限 ${FLAG_BUDGET})`);
+    expect(sum).toMatch(/^切り替えられるもの \d+ 件/);
+    expect(sum, '「使用中」はオンの数に読める').not.toContain('使用中');
+  });
+
+  it('🔴 「廃止する条件」に英語の内部語(Bookmarklet / flag / document.modelContext)が出ない', () => {
+    new FlagsRenderer(region, new FlagStore('')).render();
+    const folds = [...region.querySelectorAll('[data-pkc-field="flag-fold"]')]
+      .map((e) => e.textContent ?? '')
+      .join('\n');
+    expect(folds.length, '畳む条件が 1 件も出ていない').toBeGreaterThan(0);
+    expect(folds).not.toMatch(/Bookmarklet|flag|modelContext/);
+    // 実物の宣言そのものも見る(画面に出ない宣言が混じっても気づく)
+    expect(`${FLAG_EMBED.foldWhen}${FLAG_WEBMCP.foldWhen}`).not.toMatch(/Bookmarklet|flag|modelContext/);
+  });
+
+  it('🔴 埋め込みの許可の節は、オンにする場所と自動で読み込み直すことを言う(「再起動してください」と言わない)', () => {
+    const t = embedFlagOffText();
+    expect(t).toContain('フラグの画面でオンにしてください');
+    expect(t).toContain('自動で読み込み直します');
+    expect(t).not.toContain('再起動');
   });
 
   it('切り替えると保存され、画面にも映る', () => {
