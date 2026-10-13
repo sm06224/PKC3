@@ -2230,8 +2230,14 @@ export const initialState: AppState = {
   messagesUnread: 0,
 };
 
-/** 🔴 編集中のノートへ「探す」から送られたとき、画面下に出す 1 行(#1206 D9)。 */
-export const SEARCH_JUMP_EDITING_NOTICE = '編集を終えると、当たった所に色が付きます';
+/**
+ * 🔴 編集中のノートへ「探す」から送られたとき、画面下に出す 1 行(#1206 D9)。
+ * ⚠ 2026-10-13 に字を直した(#1087 の見直し)── 直す前は「編集を終えると、当たった所に色が付きます」だったが、
+ *   この枝は `searchJump` を残さずに返るので、編集を終えても**色は付かない**(後から塗り直す所も無い)。
+ *   付けるには、編集を終えてからもう一度そのノートを選ぶ(`startSearchJumpFromField` が塗る)。
+ */
+export const SEARCH_JUMP_EDITING_NOTICE =
+  '編集中は、当たった所に色を付けません。保存するか、やめてから、もう一度ノートを選んでください';
 
 export type UserAction =
   /**
