@@ -217,7 +217,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+E'],
     // ⚠ 「編集」の押しボタンは**ノートを選んでいるときだけ**在る(着地前レビュー 8)
-    note: '選んでいるノートを編集する(ノートを選んでいるときだけ効きます。PKC2 の Ctrl+E と同じ手)',
+    note: '選んでいるノートを編集する(ノートを選んでいるときだけ効きます)',
   },
   /**
    * 🔴 **開いているノートを閉じて、コレクションへ戻る**(#1032。
@@ -604,7 +604,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+4', 'F12'],
     whileTyping: true,
-    note: 'PKC2 の F12(Flags Inspector)と同じ手',
+    note: '開発中の切り替え(フラグ)の画面へ移ります',
   },
   /**
    * 🔴 **操作を名前で探して実行する**(#425 段①)。
@@ -624,7 +624,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+Shift+P'],
     whileTyping: true,
-    note: 'できる操作を名前で絞り込んで、その場で実行します(PKC2 の Ctrl+Shift+P と同じ手)',
+    note: 'できる操作を名前で絞り込んで、その場で実行します',
   },
   /**
    * 🔴 **コピーした物**(#678。user 要望 2026-09-03「コピーをアプリ内で履歴する機能」)。
@@ -659,7 +659,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['F1', 'Alt+5', 'Mod+Shift+Slash'],
     whileTyping: true,
-    note: 'PKC2 の Ctrl+? と同じキーです。F1 は文字が入らないキーなので、文字を打っている間でも効きます',
+    note: 'F1 は文字が入らないキーなので、文字を打っている間でも効きます',
   },
   /**
    * 🔴 **メッセージを開く**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
@@ -1311,7 +1311,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+BracketLeft', 'Mod+Backslash'],
     whileTyping: true,
-    note: 'PKC2 の Ctrl+\\ と同じ手',
+    note: '左の一覧のペインを折りたたみます。もう一度押すと戻ります',
   },
   {
     id: 'toggle-inspector',
@@ -1320,7 +1320,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+BracketRight', 'Mod+Shift+Backslash'],
     whileTyping: true,
-    note: 'PKC2 の Ctrl+Shift+\\ と同じ手',
+    note: '右の情報のペインを折りたたみます。もう一度押すと戻ります',
   },
   /**
    * 🔴 **追記欄にも鍵とパレットの口を置く**(#609。2026-08-30)。
@@ -1357,7 +1357,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Mod+Alt+Backslash'],
     whileTyping: true,
-    note: 'PKC2 のフォーカスモードと同じ手',
+    note: '左右のペインを両方折りたたんで、本文だけにします。もう一度押すと戻ります',
   },
   /**
    * 🔴 **「戻る」は、居る場所で意味が変わる**(#273 残件)。
@@ -2013,7 +2013,8 @@ export function validateBinding(
     if (theirs.some((t) => sameChord(t, norm))) {
       return {
         kind: 'conflict',
-        message: `「${other.label}」と同じ割当です`,
+        // ⚠ どうすれば付くかまで言う(#1087 の見直し 2026-10-13)── 「同じ割当です」だけでは、先に向こうから外す、が分からない
+        message: `「${other.label}」に割り当て済みです。先にそちらの × で外してください`,
         withCommandId: other.id,
       };
     }

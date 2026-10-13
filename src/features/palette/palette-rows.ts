@@ -162,6 +162,8 @@ export function paletteRows(
     const chord = (bindings['open-palette'] ?? own?.defaults ?? [])
       .map((b) => chordLabel(b, mac))
       .join(' / ');
+    // ⚠ キーを全部外している人には、空のキーを挟まない(「本文の欄で  の…」と文が欠けた。#1087 の見直し 2026-10-13)
+    if (chord === '') return '本文の欄で『操作を探す』を開くと呼べます';
     return `本文の欄で ${chord} の『操作を探す』から呼べます`;
   };
   const hits: { row: PaletteRow; rank: number; order: number }[] = [];
