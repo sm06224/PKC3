@@ -235,6 +235,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '狭い画面の断り書きに OK を押したのは、その端末の画面幅を見て押した事実。別の端末では幅が違う(#687 E-1)',
   },
   {
+    key: 'pkc3.popup-hint-shown',
+    why: '外部リンクを初めて押したときの案内を、その端末で見せた事実(依頼 69-B2)。別の端末では、まだ見ていないことがある',
+  },
+  {
     key: 'pkc3.dual-bookmarks',
     why: 'ID を持つ。別の端末では別のノートを指す(あるいはどこも指さない)',
   },

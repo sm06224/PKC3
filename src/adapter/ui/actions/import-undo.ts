@@ -91,3 +91,18 @@ export function importPanel(
 ): { readonly title: string; readonly action: NoticeAction | null } {
   return { title: notes.length > 0 ? '取り込み時の注意' : '取り込みました', action };
 }
+
+/**
+ * 🔴 **取り込めなかった理由の面**(依頼 70-C1)── 成功のときの注意と**同じ面・同じ題**で、
+ * 閉じるまで残す(画面下の 1 行は別のノートを選ぶと消えていた)。
+ *
+ * ⚠ **操作は付けない** ── 取り込めていないので、戻すものが無い。直前の取り込みの
+ *   「取り込みを取り消す」を出すと、**今回の失敗の面から前の回を消せてしまう**。
+ */
+export function importFailurePanel(message: string): {
+  readonly title: string;
+  readonly notes: readonly string[];
+  readonly action: null;
+} {
+  return { title: importPanel([message], null).title, notes: [message], action: null };
+}

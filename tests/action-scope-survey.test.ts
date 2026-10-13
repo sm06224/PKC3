@@ -345,7 +345,8 @@ describe('#582 R1 ── 受け手の引数の仕分け', () => {
     // ⚠ 2026-10-13(#1163 依頼 62): N +2(`dual-select-all` = 2 ペインの列見出しの「全部選ぶ」/ `undo-dual-move` = 移した直後の「元に戻す」── どちらも押した所から何も要らない。`undo-trash` と同じ仕分け)。
     // ⚠ 2026-10-13(依頼 63-1 / 67-1 / 61-2): N +3(`sql-copy` / `back-to-help` / `open-system-office`。押した所から運ぶのは
     //   `sql-copy` のコピーの種類(ボタン自身の印)だけ、残る 2 つは何も要らない。`open-storage-check` と同じ仕分け)。
-    expect(counts()).toEqual({ P1: 76, P2: 34, E: 26, V: 10, N: 218 });
+    // ⚠ 2026-10-13(依頼 65-1): P1 +2(`query-tag-rename` / `query-tag-remove`。集計の各組の「名前を変える」「全部外す」── 押した組のタグが要る。`untag-entry` と同じ仕分け)。
+    expect(counts()).toEqual({ P1: 78, P2: 34, E: 26, V: 10, N: 218 });
   });
 
   it('🔴 名指しの錨 ── 件数が同じまま入れ替わっても落ちる', () => {

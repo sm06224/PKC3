@@ -15,6 +15,7 @@ import { contactOf } from '@features/contact/contact-card';
 import { parseVcf, vcfNoteOf } from '@features/contact/vcard';
 import { extractMeta } from '@features/flavor';
 import type { MarkdownImportDeps } from './import-markdown';
+import { failImport } from './import-failure';
 
 /**
  * .vcf を 1 枚ずつノートにする。**失敗は必ず可視**(OP_FAILED)で終える。
@@ -26,8 +27,7 @@ export async function importVcfFiles(
   files: readonly File[],
 ): Promise<number | null> {
   const fail = (msg: string): null => {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
-    return null;
+    return failImport(dispatcher, deps, msg);
   };
   const state = dispatcher.getState();
   /**

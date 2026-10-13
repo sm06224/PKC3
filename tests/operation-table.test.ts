@@ -401,6 +401,8 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
  *   ② 受け手が増えたとき、**どちらの箱に入れたか**を書かせる
  */
 const UNREGISTERED_POINT: readonly string[] = [
+  // ⚠ 2026-10-13(依頼 65-1): `query-tag-rename` / `query-tag-remove`(集計をタグで分けたときの各組の「名前を変える」「全部外す」── 押した組のタグが要る。`untag-entry` と同じ)
+  'query-tag-rename', 'query-tag-remove',
   // ⚠ 2026-10-02(#772 段②): `capture-transcribe`(「音/動画」の行の「文字にする」── 押した行が要る。`capture-play` と同じ)
   'append-at-heading', 'browse-archive', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
   'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset', 'draw-on-image',
@@ -835,12 +837,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は列見出しのチェックと画面の下の知らせの隣にしか無く、鍵も持たない)。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-13(依頼 63-1 / 67-1 / 61-2): 受け手 +3(`sql-copy` / `back-to-help` / `open-system-office`)── 登記は増えない(鍵を持たない画面のボタン)。
       //   `receivers` +3 / `total` +3 / `unregistered` +3。
-      total: 430,
-      receivers: 364,
+      // ⚠ 2026-10-13(依頼 65-1): 集計をタグで分けたときの各組の「名前を変える」「全部外す」(`query-tag-rename` / `query-tag-remove`)で受け手 +2 ── 登記は増えない
+      //   (押し口は集計の面の中にしか無く、押した組のタグが要る。`untag-entry` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
+      total: 432,
+      receivers: 366,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 263,
+      unregistered: 265,
     });
   });
 

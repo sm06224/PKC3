@@ -19,6 +19,7 @@ import { extractMeta } from '@features/flavor';
 import { readPptxSlide, pptxSlideNames } from '@features/import/pptx-board';
 import { readZipDirectory, readZipText, ZipReadError } from '@features/import/zip-reader';
 import type { MarkdownImportDeps } from './import-markdown';
+import { failImport } from './import-failure';
 
 /** 1 枚のスライド XML の上限(展開後)。普通のスライドは数十 KB。 */
 export const SLIDE_XML_MAX = 8 * 1024 * 1024;
@@ -37,8 +38,7 @@ export async function importPptxFiles(
   files: readonly File[],
 ): Promise<number | null> {
   const fail = (msg: string): null => {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
-    return null;
+    return failImport(dispatcher, deps, msg);
   };
   const state = dispatcher.getState();
   // ⚠ 門は md / vCard 経路と同じ(§7)
