@@ -1523,6 +1523,27 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(d.getState().error).toMatch(/pkc2-future-format/);
   });
 
+  it('[#1087] Markdown の zip は、更新では直らないと分かる字で断る(未知の形式は更新を案内する)', async () => {
+    const { d, deps, written } = harness();
+    const zip = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify({ format: 'pkc3-markdown', version: 1 })) },
+    ]);
+    expect(await importPkc2File(d, deps, new File([zip], 'a.md.zip'))).toBeNull();
+    expect(written).toHaveLength(0);
+    const err = d.getState().error ?? '';
+    expect(err).toMatch(/Markdown の zip はそのままでは取り込めません/);
+    expect(err).toMatch(/\.md を選んでください/);
+    // 更新しても直らないものに「新しくしてから」と言わない / 形式名も出さない
+    expect(err).not.toMatch(/新しくしてから|pkc3-markdown/);
+    // 対照群:未知の形式は従来どおり更新を案内する
+    const d2 = harness();
+    const z2 = await buildZip([
+      { name: 'manifest.json', bytes: bytesOf(JSON.stringify({ format: 'pkc2-future-format', version: 1 })) },
+    ]);
+    await importPkc2File(d2.d, d2.deps, new File([z2], 'b.zip'));
+    expect(d2.d.getState().error).toMatch(/新しくしてから/);
+  });
+
   it('[P6c] manifest.json の無い ZIP は可視で断る', async () => {
     const { d, deps, written } = harness();
     const zip = await buildZip([{ name: 'body.md', bytes: bytesOf('# x\n') }]);

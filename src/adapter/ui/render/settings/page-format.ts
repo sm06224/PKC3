@@ -28,7 +28,8 @@ export function createPageFormatSection(region: HTMLElement): SettingsSection {
       pselect.title =
         'フル HD を選ぶと読み幅の上限が外れ、画面の幅いっぱいまで広がります。' +
         '表・図・コードには読み幅の上限が掛かりませんが、段落と同じ左端に揃います。' +
-        '書き出した HTML は、書き出したときのページ設定のまま表示されます。';
+        '書き出した HTML は、書き出したときのページ設定のまま表示されます。' +
+        '既定は A4 縦です。';
       for (const f of PAGE_FORMATS) {
         const opt = document.createElement('option');
         opt.value = f.id;
@@ -36,7 +37,7 @@ export function createPageFormatSection(region: HTMLElement): SettingsSection {
         pselect.append(opt);
       }
       pd.append(pselect);
-      pd.append(buildSettingsNote('本文の読み幅と印刷の紙の大きさが決まります(既定は A4 縦)。'));
+      pd.append(buildSettingsNote('読み幅が決まります。印刷の紙は A4 / A3 のときだけ決まり、ほかはブラウザの既定です。'));
       return [pt, pd];
     },
     /**

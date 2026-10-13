@@ -1,3 +1,5 @@
+import { MD_FORMAT } from '@features/export/pkc3-markdown-zip';
+
 /**
  * 🔴 **取り込めない種類のファイルを選んだときの断り**(#1087)。
  *
@@ -21,4 +23,19 @@ const REFUSALS: ReadonlySet<string> = new Set([OFFICE_DOC_REFUSAL, NOT_PKC2_HTML
 /** 例外の字が「対象外の断り」か(= 「失敗しました」を前に付けない)。 */
 export function isImportRefusal(message: string): boolean {
   return REFUSALS.has(message);
+}
+
+/**
+ * 🔴 **読めない形の zip の断り**(#1087)。更新で直るもの(新しい版が作った zip)と、
+ * 直らないもの(Markdown の zip)を**言い分ける**。
+ *
+ * - ⚠ Markdown の zip(`.md.zip`)は取り込みの対象ではない ── 「PKC3 を新しくしてから」と言うと、
+ *   更新しても直らないものを待たせる。`.md` は 1 件ずつ「取り込む」から選べる(`shell.ts` の accept)。
+ * - 形式名は、更新で直る側の末尾の括弧にだけ残す(問い合わせの手がかり)。
+ */
+export function unreadableZipMessage(fileName: string, format: string): string {
+  if (format === MD_FORMAT) {
+    return `「${fileName}」: Markdown の zip はそのままでは取り込めません。展開して出てくる .md を選んでください`;
+  }
+  return `「${fileName}」: この zip の中身は、このバージョンの PKC3 では取り込めない形式です。PKC3 を新しくしてから、もう一度お試しください(形式: ${format})`;
 }

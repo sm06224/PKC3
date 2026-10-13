@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { errorMessageJa, errorText } from '../../src/features/error-text';
+import { diagramExportErrorText, errorMessageJa, errorText } from '../../src/features/error-text';
 
 describe('errorText(#1087)', () => {
   it('Error の前置きを付けず、中身だけを返す', () => {
@@ -52,5 +52,16 @@ describe('errorText(#1087)', () => {
     const lease = readFileSync('src/adapter/platform/worker-lease.ts', 'utf8');
     expect(lease).toContain(': spawn failed: ');
     expect(lease).toContain(": message deserialization failed`");
+  });
+
+  it('🔴 図の書き出しの失敗は「Error: 」を付けず、分かる英語は日本語にする / main.ts がこの口を通る', () => {
+    expect(diagramExportErrorText(new Error('Parse error on line 2'))).toBe('図を書き出せませんでした: Parse error on line 2');
+    expect(diagramExportErrorText(new Error('Failed to fetch'))).toContain('ネットワークに接続できませんでした');
+    expect(diagramExportErrorText(new Error('x'))).not.toContain('Error:');
+    expect(diagramExportErrorText(new Error('a'.repeat(500))).length).toBeLessThanOrEqual('図を書き出せませんでした: '.length + 200);
+    // main.ts はテストから実行されない ── 配線は原文で pin する
+    const main = readFileSync('src/main.ts', 'utf8');
+    expect(main).toContain('error: diagramExportErrorText(e),');
+    expect(main).not.toContain('図を書き出せませんでした: ${String(e)');
   });
 });

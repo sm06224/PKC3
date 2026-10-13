@@ -41,7 +41,7 @@ interface ArchiveKindSpec {
 
 const SPEC: Readonly<Record<ArchiveKind, ArchiveKindSpec>> = {
   full: { suffix: '.pkc3-full.zip', contains: 'ノート・添付・つながり・履歴 を全部' },
-  notes: { suffix: '.pkc3-notes.zip', contains: '本文と添付' },
+  notes: { suffix: '.pkc3-notes.zip', contains: '本文・添付・履歴(過去の版)' },
   part: {
     suffix: '.pkc3-part.zip',
     contains: '読めた分のノートと添付(つながり・履歴は入りません)',
