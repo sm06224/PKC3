@@ -411,6 +411,9 @@
 | `mute-announce` | 低 | 今後はお知らせを出さない | `src/adapter/ui/render/announce.ts:236` | お知らせカードの中のボタン |
 | `next-announce` | 低 | 次のお知らせを出す | `src/adapter/ui/render/announce.ts:159`<br>`src/adapter/ui/render/announce.ts:268` | お知らせカードの中のボタン |
 | `open-storage-check` | 低 | ノートの保存データの確認を開く | `src/adapter/ui/render/shell.ts:1043` | 保存が止まった断り書きの隣の一時ボタン |
+| `sql-copy` | 低 | 結果の表をコピー / 本文に貼る形でコピー | `src/adapter/ui/render/sql.ts:494` | 「SQL で調べる」の答えの表の上。⧉ は全行を表計算の形で、もう一方は打った SQL を `sql embed` の囲みで渡す(依頼 63-1) |
+| `back-to-help` | 低 | ヘルプへ戻る | `src/adapter/ui/render/settings.ts:497` | システムの「お知らせ」の見出しの隣。ヘルプから来たときだけ出る(依頼 67-1) |
+| `open-system-office` | 低 | システムを開く(Office の一式を取り込む場所へ) | `src/adapter/ui/render/detail.ts:4072` | Office の一式がまだ無いときの添付の画面(依頼 61-2) |
 | `restore-draft` | 低 | 戻す | `src/adapter/ui/render/draft-offer.ts:116` | 下書きの提案カードの中のボタン |
 | `retry-persist` | 低 | ノートを保存し直す | `src/adapter/ui/render/detail.ts:2167` | 保存失敗の帯の中のボタン |
 | `skip-to` | 低 | (本文へ移動) | `src/adapter/ui/render/shell.ts:1223` | アクセシビリティの先頭リンク |

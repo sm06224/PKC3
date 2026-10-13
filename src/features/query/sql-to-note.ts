@@ -22,6 +22,8 @@
  *   これは markdown の作法そのもので、読み手も同じ規則で閉じる。
  */
 import { csvEscapeField } from '@features/markdown/csv-table';
+import { sqlCellText } from '@features/markdown/sql-embed';
+import { tableToTsv } from '@features/markdown/table-copy';
 
 /** 表に書き出す値(worker から来る形)。 */
 export type SqlCell = string | number | null;
@@ -118,4 +120,35 @@ export function sqlNoteBody(p: {
     `> 開くたびに最新の結果を出したいときは、SQL を書いたブロックの 1 行目を \`sql embed\` にしてください(→ マニュアル「本文に SQL の結果を埋め込む」)。`,
   );
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * 🔴 **本文に貼る形**(依頼 63-1。Gemini 裁定 2026-10-13 = 推薦どおり)。
+ *
+ * ````
+ * ```sql embed
+ * <いま出ている結果を引いた SQL>
+ * ```
+ * ````
+ *
+ * を返す。⚠ 綴りは `sql-embed.ts` が読む形(1 行目 = `sql embed`)と同じ ── 柵の長さは
+ * `sqlNoteBody` と同じ `fenceMarkFor` で決める(SQL の中に ``` があっても囲みが閉じない)。
+ */
+export function sqlEmbedFence(sql: string): string {
+  const mark = fenceMarkFor(sql);
+  return `${mark}sql embed\n${sql}\n${mark}\n`;
+}
+
+/**
+ * 🔴 **答えの表を表計算に貼る形(TSV)**。⚠ 本文の表の ⧉ と**同じ組み立て**(`tableToTsv`)で、
+ * 値が無い升は `(なし)`(画面の表と同じ字)。
+ */
+export function sqlAnswerTsv(
+  columns: readonly string[],
+  rows: readonly (readonly SqlCell[])[],
+): string {
+  return tableToTsv([
+    { cells: columns, head: true },
+    ...rows.map((r) => ({ cells: r.map(sqlCellText), head: false })),
+  ]);
 }

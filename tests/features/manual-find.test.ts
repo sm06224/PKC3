@@ -132,3 +132,42 @@ describe('打った字を探す', () => {
     );
   });
 });
+
+/**
+ * 🔴 **当たった所の 1 行を添える**(依頼 67-2。Gemini 裁定 2026-10-13 = 推薦どおり)。
+ */
+describe('当たった所の 1 行(依頼 67-2)', () => {
+  const LONG = `${'あ'.repeat(40)}ルビ${'い'.repeat(40)}`;
+
+  it('🔴 本文の行を、当たりの前後で切って「…」を付ける(語は残る)', () => {
+    const hit = findInManual(`## 節\n${LONG}\n`, 'ルビ')[0]!;
+    expect(hit.excerpt).toContain('ルビ');
+    expect(hit.excerpt.startsWith('…'), '前を切ったのに「…」が無い').toBe(true);
+    expect(hit.excerpt.endsWith('…'), '後ろを切ったのに「…」が無い').toBe(true);
+    expect(hit.excerpt.length, '切れていない(行全体が出ている)').toBeLessThan(LONG.length / 2);
+  });
+
+  it('対照群:短い行は切らず「…」も付けない', () => {
+    const hit = findInManual('## 節\nルビを振る\n', 'ルビ')[0]!;
+    expect(hit.excerpt).toBe('ルビを振る');
+  });
+
+  it('🔴 題名にも本文にも当たる節は、本文の行を出す(題名は一覧の字に出ている)', () => {
+    const hit = findInManual('## ルビの話\n本文でもルビを使います\n', 'ルビ')[0]!;
+    expect(hit.excerpt).toBe('本文でもルビを使います');
+  });
+
+  it('題名だけに当たる節は、題名の行を出す(空にしない)', () => {
+    const hit = findInManual('## ルビの話\n関係ない本文\n', 'ルビ')[0]!;
+    expect(hit.excerpt).toBe('ルビの話');
+  });
+
+  it('記法の頭と強調の記号は落とす', () => {
+    const hit = findInManual('## 節\n- **ルビ**を振る\n', 'ルビ')[0]!;
+    expect(hit.excerpt).toBe('ルビを振る');
+  });
+
+  it('大小を無視して当てた行を出す', () => {
+    expect(findInManual('## s\nUse PKC here\n', 'pkc')[0]!.excerpt).toBe('Use PKC here');
+  });
+});

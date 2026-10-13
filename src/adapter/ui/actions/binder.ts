@@ -668,7 +668,7 @@ const adoptingLinkIcons = new Set<string>();
 let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
-import { sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
+import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
   addSourceLidOf,
@@ -5201,9 +5201,50 @@ export function runGlobalCommand(
  * ⚠ `dispatch` は同期なので、`openView` が返った時点で「システム」は描き終わっている ── その後に節を探せる。
  */
 function openSystemNotices(dispatcher: Dispatcher, root: HTMLElement): void {
+  /**
+   * 🔴 **ヘルプから来たときだけ、「← ヘルプへ戻る」を出す**(依頼 67-1。Gemini 裁定 2026-10-13 = 推薦どおり)。
+   * ⚠ 来た場所は**押した瞬間の表示**で決める(`viewMode === 'help'`)── 操作を探す・別の入口から開いた回は出さない。
+   * ⚠ 読んでいた位置(外側の転がり + マニュアルの転がり)を控える ── 面は隠れると転がりを失うことがあるので、戻るときに書き戻す。
+   */
+  const fromHelp = dispatcher.getState().viewMode === 'help';
+  helpReturn = fromHelp ? helpScrollOf(root) : null;
   openView(dispatcher, 'settings');
+  const back = root.querySelector<HTMLElement>('[data-pkc-field="settings-back-to-help"]');
+  if (back !== null) back.hidden = !fromHelp;
+  if (fromHelp) {
+    // ⚠ システムを離れたら畳む ── 次に別の入口から来たとき、古い「戻る」が残らない
+    const off = dispatcher.onState((st) => {
+      if (st.viewMode === 'settings') return;
+      off();
+      root
+        .querySelector<HTMLElement>('[data-pkc-field="settings-back-to-help"]')
+        ?.setAttribute('hidden', '');
+      helpReturn = null;
+    });
+  }
   root
     .querySelector<HTMLElement>('[data-pkc-region="settings-notices-section"]')
+    ?.scrollIntoView({ block: 'start' });
+}
+
+/** ヘルプを読んでいた位置(依頼 67-1)。⚠ 「ヘルプから来た」ときだけ入る。 */
+let helpReturn: { readonly outer: number; readonly manual: number } | null = null;
+
+function helpScrollOf(root: HTMLElement): { outer: number; manual: number } {
+  return {
+    outer: root.querySelector<HTMLElement>('[data-pkc-region="detail"]')?.scrollTop ?? 0,
+    manual: root.querySelector<HTMLElement>('[data-pkc-region="help-manual"]')?.scrollTop ?? 0,
+  };
+}
+
+/**
+ * 🔴 **システムの特定の節を開く**(依頼 61-2 の「システムを開く」)。`openSystemNotices` と同じ形
+ * (`openView` は同期で描き終えるので、その後に節を探せる)。
+ */
+function openSystemRegion(dispatcher: Dispatcher, root: HTMLElement, region: string): void {
+  openView(dispatcher, 'settings');
+  root
+    .querySelector<HTMLElement>(`[data-pkc-region="${region}"]`)
     ?.scrollIntoView({ block: 'start' });
 }
 
@@ -11941,6 +11982,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'open-system-notices': (dispatcher, _target, _services, root) => openSystemNotices(dispatcher, root),
   /**
+   * 🔴 **「← ヘルプへ戻る」**(依頼 67-1)── ヘルプから「お知らせを開く」で来たときだけ出る。
+   * 読んでいた位置へ戻す(`helpReturn`。位置を控えていない回は先頭のまま)。
+   */
+  'back-to-help': (dispatcher, _target, _services, root) => {
+    const keep = helpReturn;
+    helpReturn = null;
+    openView(dispatcher, 'help');
+    root
+      .querySelector<HTMLElement>('[data-pkc-field="settings-back-to-help"]')
+      ?.setAttribute('hidden', '');
+    if (keep === null) return;
+    const outer = root.querySelector<HTMLElement>('[data-pkc-region="detail"]');
+    if (outer !== null) outer.scrollTop = keep.outer;
+    const manual = root.querySelector<HTMLElement>('[data-pkc-region="help-manual"]');
+    if (manual !== null) manual.scrollTop = keep.manual;
+  },
+  /**
+   * 🔴 **Office の添付の画面から、一式を取り込む場所(システム → 保存領域 → Office 表示)へ**(依頼 61-2)。
+   * ⚠ 新しい仕組みを作らない ── `open-storage-check` と同じ形。
+   */
+  'open-system-office': (dispatcher, _target, _services, root) =>
+    openSystemRegion(dispatcher, root, 'settings-office'),
+  /**
    * 🔴 **保存が止まった断り書きから、「システム」の「保存領域の点検」へ**(#1010 B)。
    *
    * ⚠ 新しい仕組みを作らない ── `open-system-notices` と同じ形(`openView` は同期で
@@ -12368,6 +12432,20 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 読めない印は黙って捨てる(器を作り直す前の押しが飛んでくる)
     if (!Number.isInteger(at)) return;
     dispatcher.dispatch({ type: 'SQL_HISTORY_PICK', at });
+  },
+  /**
+   * 🔴 **答えの表のコピー 2 つ**(依頼 63-1)── ⧉(`table`)は表計算に貼る形、
+   * 「本文に貼る形でコピー」(`embed`)は打った SQL の `sql embed` の囲み。
+   * ⚠ 押しても画面が変わらないので、渡ったら光り、渡らなければ理由を出す(`finishCopy` = 他のコピーと同じ 1 本)。
+   * ⚠ 読むのは `state.sqlPage`(答えの全部の行)── 画面の表は窓で描くので、DOM を読むと見えている行しか渡らない。
+   */
+  'sql-copy': (dispatcher, target) => {
+    const p = dispatcher.getState().sqlPage;
+    // ⚠ 答えが無い回は何もしない(押せない印は renderer 側が畳んでいるが、鍵からも来うる)
+    if (p.ranSql === '' || p.columns.length === 0) return;
+    const kind = target.getAttribute('data-pkc-copy-kind');
+    if (kind === 'table') finishCopy(dispatcher, target, copyPlainText(sqlAnswerTsv(p.columns, p.rows)));
+    else if (kind === 'embed') finishCopy(dispatcher, target, copyPlainText(sqlEmbedFence(p.ranSql)));
   },
   'sql-to-note': (dispatcher) => {
     const state = dispatcher.getState();

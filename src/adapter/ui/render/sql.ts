@@ -152,6 +152,10 @@ export class SqlRenderer {
   private history: HTMLButtonElement | null = null;
   /** file へ書き出す押し所(#918 段④)。⚠ 答えが無いうちは押させない。 */
   private toFile: HTMLButtonElement | null = null;
+  /** 答えの表の上の「コピー」の行(依頼 63-1)。⚠ 答えが無いうちは畳む。 */
+  private copyBar: HTMLElement | null = null;
+  /** 「本文に貼る形でコピー」(依頼 63-1)。⚠ 本文の `sql embed` は **この PKC のノート**だけを引く。 */
+  private copyEmbed: HTMLButtonElement | null = null;
   /** いま何番目を見ているかの行(#918 段②a)。⚠ 空なら畳む。 */
   private historyNote: HTMLElement | null = null;
   /** つながり図の器(#918 段⑤)。⚠ 畳んでいる間は中を組まない。 */
@@ -477,7 +481,40 @@ export class SqlRenderer {
       layer.scrollLeft = box.scrollLeft;
     });
     head.append(title, erHost, wrap, historyNote, bar, extras, tip, rules, example, exampleMore);
-    this.host.append(head, note, body);
+    /**
+     * 🔴 **答えの表をコピーする 2 つの口**(依頼 63-1。Gemini 裁定 2026-10-13 = 推薦どおり)。
+     *
+     * > user の物語:本文に埋め込んだ SQL の表は、右上の ⧉ で表計算に貼れる。**SQL で調べる窓の表だけ**
+     * > 同じ口が無く、選んで貼るしかなかった。調べた SQL を本文に残したいときも、書き写すしかなかった。
+     *
+     * ⚠ ⧉ は本文の表と同じ字・同じ組み立て(`tableToTsv`)── ただし**窓で描くので、画面の表を読むと
+     *   見えている行しか渡らない**(`windowNote`)。だから渡すのは**答えの全部の行**(`copy-md-block` を
+     *   使い回さない理由)。
+     * ⚠ 答えが無いうちは行ごと畳む(押せるのに何も起きない口を作らない)。
+     */
+    const copyBar = document.createElement('div');
+    copyBar.setAttribute('data-pkc-field', 'sql-copy-bar');
+    copyBar.hidden = true;
+    const copyEmbed = document.createElement('button');
+    copyEmbed.type = 'button';
+    copyEmbed.setAttribute('data-pkc-action', 'sql-copy');
+    copyEmbed.setAttribute('data-pkc-copy-kind', 'embed');
+    copyEmbed.setAttribute('data-pkc-field', 'sql-copy-embed');
+    copyEmbed.textContent = '本文に貼る形でコピー';
+    copyEmbed.title = '打った SQL を、開くたびに最新の結果を出すブロック(sql embed)にしてコピーします';
+    const copyTable = document.createElement('button');
+    copyTable.type = 'button';
+    copyTable.className = 'pkc-md-copy-btn';
+    copyTable.setAttribute('data-pkc-action', 'sql-copy');
+    copyTable.setAttribute('data-pkc-copy-kind', 'table');
+    copyTable.setAttribute('data-pkc-field', 'sql-copy-table');
+    copyTable.setAttribute('aria-label', 'コピー');
+    copyTable.title = 'コピー(表計算に貼れます)';
+    copyTable.textContent = '⧉';
+    copyBar.append(copyEmbed, copyTable);
+    this.copyBar = copyBar;
+    this.copyEmbed = copyEmbed;
+    this.host.append(head, note, copyBar, body);
     this.box = box;
     this.layer = layer;
     this.run = run;
@@ -854,6 +891,14 @@ export class SqlRenderer {
       !p.running && p.ranSql !== '' && p.columns.length > 0 && duckDbWriteKind(p.ranSql) === null;
     if (this.save !== null) this.save.disabled = !canTakeAnswer;
     if (this.toFile !== null) this.toFile.disabled = !canTakeAnswer;
+    if (this.copyBar !== null) this.copyBar.hidden = !canTakeAnswer;
+    /**
+     * 🔴 **本文の `sql embed` はこの PKC のノート(sqlite)だけを引く**(`sql-embed.ts`)。⚠ 取り込んだ file や
+     *   DuckDB で引いた答えの SQL を貼っても、本文では `no such table` になる ── 押せるのに役に立たない口を
+     *   作らない。
+     */
+    if (this.copyEmbed !== null)
+      this.copyEmbed.disabled = sqlEngineOf(state.sqlPage) !== 'sqlite' || state.sqlPage.guest !== null;
     this.paintSource(state);
     this.paintExtras(state);
     /**

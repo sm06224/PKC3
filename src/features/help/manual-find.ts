@@ -52,6 +52,11 @@ export interface ManualHit {
   readonly section: ManualSection;
   /** その節に何か所あったか。 */
   readonly count: number;
+  /**
+   * 🔴 **当たった所の前後 1 行**(依頼 67-2。Gemini 裁定 2026-10-13 = 推薦どおり)。
+   * ⚠ 本文の行を優先する(題名はもう一覧の字に出ている)。当たりの前後を切り、切れた側は「…」。
+   */
+  readonly excerpt: string;
 }
 
 /** 一覧に出す節の上限。⚠ 超えた分は**数えたうえで**「あと N 節」と言う。 */
@@ -102,11 +107,19 @@ export function findInManual(text: string, query: string): readonly ManualHit[] 
   const hits: ManualHit[] = [];
   let cur: ManualSection = PREAMBLE;
   let count = 0;
+  /** 本文の最初の当たり / 見出しの当たり(本文に無いときの代わり)。 */
+  let bodyLine: string | null = null;
+  let headLine: string | null = null;
   let fence: string | null = null;
   let seen = 0;
   const flush = (): void => {
-    if (count > 0) hits.push({ section: cur, count });
+    if (count > 0) {
+      const line = bodyLine ?? headLine ?? '';
+      hits.push({ section: cur, count, excerpt: excerptOf(line, q) });
+    }
     count = 0;
+    bodyLine = null;
+    headLine = null;
   };
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -124,10 +137,34 @@ export function findInManual(text: string, query: string): readonly ManualHit[] 
       if (fence === null) fence = mark;
       else if (mark === fence) fence = null;
     }
-    count += occurrences(line.toLowerCase(), q);
+    const n = occurrences(line.toLowerCase(), q);
+    if (n > 0) {
+      if (HEADING.test(line) && fence === null && f === null) headLine ??= line;
+      else bodyLine ??= line;
+    }
+    count += n;
   }
   flush();
   return hits;
+}
+
+/** 抜き出しの片側の長さ(当たりの前後に残す字数)。 */
+export const MANUAL_EXCERPT_SIDE = 14;
+
+/**
+ * 当たりを含む 1 行を、当たりの前後で切って返す(切れた側に「…」)。
+ * ⚠ 記法の頭(見出しの `#` / 箇条書き / 引用)は落とす ── 星や記号が見えたまま出ない。
+ */
+export function excerptOf(line: string, q: string): string {
+  const text = line
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+\.\s+)/u, '')
+    .replace(/[*`_]/gu, '')
+    .trim();
+  const at = text.toLowerCase().indexOf(q.trim().toLowerCase());
+  if (at < 0) return text.length > MANUAL_EXCERPT_SIDE * 2 ? `${text.slice(0, MANUAL_EXCERPT_SIDE * 2)}…` : text;
+  const from = Math.max(0, at - MANUAL_EXCERPT_SIDE);
+  const to = Math.min(text.length, at + q.trim().length + MANUAL_EXCERPT_SIDE);
+  return `${from > 0 ? '…' : ''}${text.slice(from, to)}${to < text.length ? '…' : ''}`;
 }
 
 /** 源文の行数(素の原文で出したときの、送る比を出すのに使う)。 */
