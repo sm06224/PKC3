@@ -668,6 +668,9 @@ describe('attachFiles (P4a intake)', () => {
     expect(putBlobs).toHaveLength(0);
     expect(d.getState().error).toMatch(/空き容量/);
     expect(d.getState().phase).toBe('ready'); // 非致命
+    // 🔴 user に読めない英語の前置き(「Error: 」)を混ぜない / 次にすることを言う(#1087 の見直し 2026-10-13)
+    expect(d.getState().error, '英語の前置きが混ざっている').not.toContain('Error:');
+    expect(d.getState().error, '空きの作り方を言っていない').toContain('「使われていない添付を消す」');
   });
 
   /**
