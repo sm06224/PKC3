@@ -163,6 +163,10 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
  */
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
   {
+    key: 'pkc3.settings-probe',
+    why: '設定ではない(#1087)。この端末が設定を保存できるかを確かめるために書いて、すぐ消す値。残ることは無く、運ぶ物も無い',
+  },
+  {
     key: 'pkc3.schedule-last-open',
     why: 'この端末でコレクションを最後に開いていた時刻(#855 20-C)。コレクションごとの id で持つ端末の事実なので、運ぶと別の端末の「見逃した」を間違えて数える',
   },

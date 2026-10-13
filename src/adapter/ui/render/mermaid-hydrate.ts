@@ -354,7 +354,9 @@ export function hydrateDiagrams(
     } catch (e) {
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
-      p.host.setAttribute(`data-pkc-${kind.name}-error`, String(e).slice(0, 120));
+      // ⚠ 例外の前置き「Error:」を画面に出さない / 切るときは「…」で切ったと分かるようにする(#1087)
+      const why = e instanceof Error ? e.message : String(e);
+      p.host.setAttribute(`data-pkc-${kind.name}-error`, why.length > 120 ? `${why.slice(0, 119)}…` : why);
     } finally {
       if (inFlightKey.get(p.host) === currentKey) inFlightKey.delete(p.host);
     }

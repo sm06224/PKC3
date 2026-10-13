@@ -3211,7 +3211,7 @@ export function connectStoreEffects(
           try {
             const body = await store.getBody(ev.lid);
             if (disposed) return;
-            if (body === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
+            if (body === null) return fail('追記できません(ノートが見つかりません。ゴミ箱へ移されたかもしれません)');
             /**
              * 🔴 **読んでから書くまでの間に、別の窓が書いていたら足し直す**
              * (#178、2026-08-22)。
@@ -3282,7 +3282,7 @@ export function connectStoreEffects(
               // ⚠ **読み直してから**足し直す(古い基底で再送しない)
               const fresh = await store.getBody(ev.lid);
               if (disposed) return;
-              if (fresh === null) return fail(`追記できません(ノートが見つかりません: ${ev.lid})`);
+              if (fresh === null) return fail('追記できません(ノートが見つかりません。ゴミ箱へ移されたかもしれません)');
               attempt = await tryAppend(fresh);
               if (attempt === 'empty' || attempt === 'missing') return refuse(attempt);
               if (attempt.stamps.conflict === true)
@@ -3314,7 +3314,8 @@ export function connectStoreEffects(
             });
             stamp(ev.lid, stamps);
           } catch (e) {
-            fail(`追記を保存できませんでした: ${String(e)}`);
+            // ⚠ 例外の前置き「Error:」を画面に出さない(#1087)
+            fail(`追記を保存できませんでした(${e instanceof Error ? e.message : String(e)})`);
           }
         });
         break;

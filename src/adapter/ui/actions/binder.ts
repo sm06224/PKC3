@@ -84,6 +84,7 @@ import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
   bodyWriteBlockReason,
+  blockedWithSuffix,
   hasAppGroupNote,
   hasUnsavedTyping,
   appGroupIconName,
@@ -3876,7 +3877,7 @@ function applyTableFormat(
    */
   const blocked = bodyWriteBlockReason(st, st.openBody?.lid ?? '');
   if (blocked !== null) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表の形を変えてください` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表の形を変えてください`) });
     return;
   }
   /**
@@ -8544,7 +8545,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を打ってください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を打ってください`) });
       return;
     }
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
@@ -8748,7 +8749,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 断りは lid で判定する(C6 / #1043)── 別ノートの表は編集中でも触れる。
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}表を触ってください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を触ってください`) });
       return;
     }
     dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
@@ -8780,7 +8781,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (lid === null || lid === undefined) return;
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}色を直してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `色を直してください`) });
       return;
     }
     openColorPicker(target, from, (to) => {
@@ -8821,7 +8822,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}チェックしてください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `チェックしてください`) });
       return;
     }
     if (placedLid !== null) {
@@ -8832,7 +8833,14 @@ const ACTIONS: Record<string, ActionHandler> = {
           return;
         }
         dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line });
-      });
+      })
+        // 🔴 問い合わせが落ちても黙らない(追記と同じ作法 ── 押しても何も起きないボタンにしない。#1087)
+        .catch(() => {
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error: 'チェックできませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+          });
+        });
       return;
     }
     /**
@@ -10002,7 +10010,11 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (ob === null) return;
         const items = placeGroupItems(ob.body).filter((it) => it.group === null);
         if (items.length < 2) {
-          dispatcher.dispatch({ type: 'OP_NOTICE', message: 'グループにできる付箋が 2 枚以上ありません' });
+          // ⚠ 数えるのは「グループに入っていない付箋」── 何枚あっても全部グループ済みなら 0(理由を取り違えない。#1087)
+          dispatcher.dispatch({
+            type: 'OP_NOTICE',
+            message: 'グループに入っていない付箋が 2 枚以上ありません(グループに入っている付箋は、先にグループを解くと選べます)',
+          });
           return;
         }
         const bodyAtOpen = ob.body;

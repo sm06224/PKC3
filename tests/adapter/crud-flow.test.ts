@@ -443,7 +443,9 @@ describe('reducer edges (P3-7a)', () => {
     const s = boot([meta('a', 5)]);
     const dup = reduce(s, { type: 'CREATE_ENTRY', archetype: 'text', lid: 'a', title: 't' });
     expect(dup.state.entryMetas.size).toBe(1);
-    expect(dup.state.error).toMatch(/collision/);
+    expect(dup.state.error).toContain('ノートを作れませんでした');
+    // ⚠ 英語の内部文と ID を画面に出さない(#1087)
+    expect(dup.state.error).not.toMatch(/collision/);
     const ok = reduce(s, { type: 'CREATE_ENTRY', archetype: 'text', lid: 'n', title: 't' });
     expect(ok.state.entryMetas.get('n')?.entryOrder).toBe(6);
     expect(ok.state.order[ok.state.order.length - 1]).toBe('n');

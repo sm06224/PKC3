@@ -75,7 +75,7 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     //    変わらないと、user には「壊れている」としか見えない)
     // ⚠ 字は `phaseBlockReason` の 1 か所から(C11 / #1045)── 直す前は
     //   「確定するか取り消して」と、画面のどのボタンの字でもない出口を言っていた
-    deps.dispatch({ type: 'OP_FAILED', error: `${blocked}印刷してください` });
+    deps.dispatch({ type: 'OP_FAILED', error: `${blocked}PDF で書き出してください` });
     return 'not-ready';
   }
 
@@ -115,7 +115,8 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     if (!waited) {
       deps.dispatch({
         type: 'OP_FAILED',
-        error: '本文が届かないので印刷を中止しました(ノートを開き直してください)',
+        // ⚠ 押したボタンの名前で言う(画面に「印刷」というボタンは無い。#1087)
+        error: 'PDF で書き出せませんでした(本文を読み込めませんでした)。ノートを開き直して、もう一度押してください',
       });
       return 'timeout';
     }

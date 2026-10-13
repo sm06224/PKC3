@@ -37,6 +37,15 @@ description: PKC3 の PR を作ってから CI green 確認 → 自己監査 →
 バックアップが書き戻されて**直したはずの実装が巻き戻り**、そのまま commit して CI が
 赤くなった ── 手元では**スイープの前**に緑を見ていたので「通ったのに落ちた」に見える。
 
+### 🔴 push の前に、**CI と同じ口**(`node scripts/test-pr.mjs origin/main`)を回す(2026-10-13)
+
+1 日で PR の CI を 4 回赤くした(#1668 で 3 回 / #1669 で 1 回)。原因は 2 つ:
+① 画面の字を変えたのに、その字を待っている test を回さずに push した
+② `vitest run --changed origin/main` だけを回していた ── これは **import の辺で引ける test しか回さない**ので、
+   全数を走査する repo の検査(`settings-file.test.ts` の「仕分けていない鍵」など)は**手元で 1 度も走らない**。
+🔑 CI の PR gate が回すのは `scripts/test-pr.mjs`(変更した file の test **+ repo の全数検査**)。手元も**同じ口**で回す
+(5〜8 分。⚠ `--changed` に file を足すと、その file だけに絞られる ── 足さない)。
+
 ### 🔴 押し所(`data-pkc-action`)を足したら、**`tests/` を全部回す**
 
 ボタンを 1 つ足しただけで、等値で pin している検査 5 つに順に捕まり、CI を 2 回赤くした(2026-09-16)。

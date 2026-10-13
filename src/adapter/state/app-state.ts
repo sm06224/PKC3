@@ -1098,14 +1098,26 @@ export function bodyWriteBlockReason(state: AppState, lid: string): string | nul
 }
 
 /**
+ * 🔴 **`bodyWriteBlockReason` の断りに、操作ごとの続き(「チェックしてください」等)を付ける**(#1087)。
+ *
+ * ⚠ 断りは 2 つの形がある ── phase 由来は**前置き**(「編集を終了してから」)、章 / コードの欄は
+ *   **言い切りの文**(「章を編集中は使えません(…を押すと戻ります)」)。言い切りの後ろへ続きを
+ *   繋ぐと「…戻ります)チェックしてください」と文が壊れる(直す前は 17 か所がこの形だった)。
+ * 🔑 続きを付けるのは前置きのときだけ。呼び手は必ずここを通す(`${blocked}…` を手で組まない)。
+ */
+export function blockedWithSuffix(blocked: string, suffix: string): string {
+  return PARTIAL_DRAFT_OWN_NOTES.has(blocked) ? blocked : `${blocked}${suffix}`;
+}
+
+/**
  * 🔴 **`bodyWriteBlockReason` が断ったときの `ReduceResult` そのものを組む**
  *   (#1044 段2 5巡目の修理、U3)。
  *
  * ⚠ この門を通す呼び手のうち、**章の欄の断り文をそのまま `error` へ置く回**
  *   (`APPEND_TO_ENTRY` / `UNDO_APPEND` / `UNDO_MOVE` / `ADOPT_EXTERNAL_IMAGES`)だけが
- *   対象 ── 続きを付ける回(`${blocked}表を打ってください` 等)は元々
- *   `SECTION_DRAFT_NOTE` と一字一句一致しないので、いまも「章の欄自身の断り文」として
- *   消えない/引き継がれない(直す前と同じ振る舞い。範囲を広げない)。
+ *   対象 ── 続きを付ける回(`blockedWithSuffix(blocked, '表を打ってください')` 等)は
+ *   `sectionAdvisory` を立てないので、字が同じでも「章の欄自身の断り文」としては扱われない
+ *   (消えない/引き継がれない。直す前と同じ振る舞い。範囲を広げない)。
  * 🔴 **`suffix` は phase 由来の断りにだけ付ける**(#1051)。⚠ `bodyWriteBlockReason` は
  *   章の欄なら**言い切りの文**(「章を編集中は使えません(…)」)を、phase なら
  *   **前置き**(「編集を終了してから」)を返す ── 前置きだけを `error` に置くと
@@ -1124,7 +1136,7 @@ function bodyWriteBlockResult(state: AppState, lid: string, suffix: string): Red
   return {
     state: {
       ...state,
-      error: own ? blocked : `${blocked}${suffix}`,
+      error: blockedWithSuffix(blocked, suffix),
       ...(own ? { sectionAdvisory: blocked } : {}),
     },
     events: [],
@@ -7426,7 +7438,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${blocked}${action.date === null ? '行の予定を外してください' : '行に予定を付けてください'}`,
+            error: blockedWithSuffix(blocked, action.date === null ? '行の予定を外してください' : '行に予定を付けてください'),
           },
           events: [],
         };
@@ -7471,7 +7483,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${blocked}${action.repeat === null ? '繰り返しをやめられます' : '繰り返しにできます'}`,
+            error: blockedWithSuffix(blocked, action.repeat === null ? '繰り返しをやめられます' : '繰り返しにできます'),
           },
           events: [],
         };
@@ -7540,7 +7552,7 @@ function reduceCore(
      */
     case 'SET_CSV_CELL': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}表を打ってください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を打ってください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7568,7 +7580,7 @@ function reduceCore(
      */
     case 'SET_CSV_SHAPE': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}表を触ってください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を触ってください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7599,7 +7611,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}表の形を変えてください` }, events: [] };
+        return { state: { ...state, error: blockedWithSuffix(blocked, `表の形を変えてください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7622,7 +7634,7 @@ function reduceCore(
      */
     case 'TOGGLE_TASK': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}チェックしてください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `チェックしてください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7645,7 +7657,7 @@ function reduceCore(
      */
     case 'SET_COLOR_CODE': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: `${blocked}色を直してください` }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `色を直してください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7703,7 +7715,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${blocked}${action.to === 'done' ? '完了にしてください' : '未完了に戻してください'}`,
+            error: blockedWithSuffix(blocked, action.to === 'done' ? '完了にしてください' : '未完了に戻してください'),
           },
           events: [],
         };
@@ -7732,7 +7744,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}その日の分を済ませてください` }, events: [] };
+        return { state: { ...state, error: blockedWithSuffix(blocked, `その日の分を済ませてください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -7758,7 +7770,7 @@ function reduceCore(
       // ⚠ 断りは lid で判定する(C6 / #1043)
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}繰り返しの回を動かしてください` }, events: [] };
+        return { state: { ...state, error: blockedWithSuffix(blocked, `繰り返しの回を動かしてください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -8085,7 +8097,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: `${blocked}${action.date === null ? 'ノートの日付を外してください' : 'ノートに日付を付けてください'}`,
+            error: blockedWithSuffix(blocked, action.date === null ? 'ノートの日付を外してください' : 'ノートに日付を付けてください'),
           },
           events: [],
         };
@@ -8115,7 +8127,7 @@ function reduceCore(
     case 'TOGGLE_TODO_STATUS': {
       const blocked = bodyWriteBlockReason(state, action.lid);
       if (blocked !== null)
-        return { state: { ...state, error: `${blocked}状態を切り替えてください` }, events: [] };
+        return { state: { ...state, error: blockedWithSuffix(blocked, `状態を切り替えてください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta || meta.archetype !== 'todo') return { state, events: [] };
       const nextStatus = meta.status === 'done' ? 'open' : 'done';
@@ -8588,7 +8600,8 @@ function reduceCore(
       if (state.phase !== 'ready' && !(state.phase === 'editing' && keep)) return { state, events: [] };
       if (state.entryMetas.has(action.lid)) {
         return {
-          state: { ...state, error: `create: lid collision (${action.lid})` },
+          // ⚠ 英語の内部文と ID を画面に出さない(#1087)── 新しい ID は押すたびに作り直すので、もう一度で通る
+          state: { ...state, error: 'ノートを作れませんでした(同じ番号のノートがすでにありました)。もう一度押してください' },
           events: [],
         };
       }
@@ -10401,7 +10414,7 @@ function bodyRewriteGate(
   const blocked = bodyWriteBlockReason(state, lid);
   if (blocked !== null)
     return {
-      state: { ...state, error: `${blocked}${refusalSuffix}` },
+      state: { ...state, error: blockedWithSuffix(blocked, refusalSuffix) },
       events: [],
     };
   const meta = state.entryMetas.get(lid);
