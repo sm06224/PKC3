@@ -157,6 +157,36 @@ describe('アラート(#280)', () => {
     expect(b.chimes()).toBe(0);
   });
 
+  it('🔴 ④ 切っていた間に過ぎた予定は、入れ直してもまとめて鳴らない(2026-10-13)', () => {
+    // ⚠ 直す前は、切る前に見た時刻を覚えたままだったので、入れ直した最初の確認で
+    //   (切る前の時刻, いま] を見て、切っていた間の 14:00 が鳴った
+    const b = bench();
+    b.service.start();
+    b.advanceTo(13, 30);
+    b.beat();
+    b.setEnabled(false);
+    b.advanceTo(15, 0);
+    b.beat();
+    b.setEnabled(true);
+    b.advanceTo(15, 1);
+    b.beat();
+    expect(b.service.ringing(), '切っていた間に過ぎた予定が鳴った').toHaveLength(0);
+    expect(b.chimes()).toBe(0);
+  });
+
+  it('対照群:入れ直した後に来た時刻は鳴る', () => {
+    const b = bench({ cards: [card({ time: '16:00' })] });
+    b.service.start();
+    b.setEnabled(false);
+    b.advanceTo(15, 0);
+    b.beat();
+    b.setEnabled(true);
+    b.beat();
+    b.advanceTo(16, 0);
+    b.beat();
+    expect(b.service.ringing()).toHaveLength(1);
+  });
+
   it('🔴 ④ 途中で入にしたら、そこから効く(読み込み直さなくてよい)', () => {
     const b = bench({ enabled: false });
     b.service.start();

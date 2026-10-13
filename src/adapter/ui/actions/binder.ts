@@ -130,7 +130,7 @@ import {
   CHAPTER_DIAGRAM_INDEX_ATTR,
   CHAPTER_WINDOW_ACTIONS,
 } from '@adapter/platform/chapter-window';
-import { visibleContacts } from '@features/contact/contact-card';
+import { matchContact, visibleContacts, type ContactCard } from '@features/contact/contact-card';
 import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
@@ -6951,10 +6951,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 作れなかった回(lid 衝突 ── reducer が理由を立てる)は欄を消さない(打った字を失わせない)
     if (!dispatcher.getState().entryMetas.has(lid)) return;
     // ⚠ 連絡できない(電話もメールも無い)ノートはこの面に並ばない ── 黙らない
+    /**
+     * 🔴 **探す欄の語に当たらず一覧に出ないときも、黙らない**(下の else if。#1087 の見直し 2026-10-13)。
+     * ⚠ 直す前は欄が空になるだけで、足した人が一覧に出ず、知らせも無かった(「足したのに出てこない」)。
+     * 🔑 当たるかの判定は一覧と同じ `matchContact`(2 か所で判定しない)。
+     */
     if (tel === '' && email === '')
       dispatcher.dispatch({
         type: 'OP_NOTICE',
         message: `「${title}」を作りました(電話かメールを書くと連絡先に並びます)`,
+      });
+    else if (
+      !matchContact(
+        { name: title, org, tels: tel === '' ? [] : [tel], emails: email === '' ? [] : [email] } as unknown as ContactCard,
+        st.filterQuery,
+      )
+    )
+      dispatcher.dispatch({
+        type: 'OP_NOTICE',
+        message: `「${title}」を足しました(左の探す欄の語に当たらないので、一覧には出ていません)`,
       });
     for (const f of ['name', 'tel', 'email', 'org']) {
       const el = field(f);
@@ -9200,8 +9215,17 @@ const ACTIONS: Record<string, ActionHandler> = {
   'open-alarm': (dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-alarm');
     const lid = target.getAttribute('data-pkc-entry');
-    if (lid !== null && dispatcher.getState().entryMetas.has(lid)) {
-      dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
+    const st = dispatcher.getState();
+    /**
+     * 🔴 **開けないときは理由を言い、帯は残す**(#1087 の見直し 2026-10-13)。
+     * ⚠ 直す前は `SELECT_ENTRY` を撃つだけで、別のノートを編集中だと reducer が黙って捨て、
+     *   **帯の知らせだけが消えた**(開かず、理由も出ず、もう一度押す所も無い)。
+     * 🔑 開く口は `selectEntryOrExplain`(リンクと同じ断り文)。⚠ そのノートを既に開いているなら
+     *   選び直さない(編集中のそのノートで「編集を終了してから開いて」と言わない)。
+     */
+    if (lid !== null && st.entryMetas.has(lid) && st.selectedLid !== lid) {
+      const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+      if (!selectEntryOrExplain(dispatcher, lid, '予定のノート', root, services)) return;
     }
     if (key !== null) services.dismissAlarm?.(key);
   },

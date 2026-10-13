@@ -264,7 +264,9 @@ export function patchTaskCard(
     const why =
       data.repeat === null
         ? '予定から外します(ノートも本文も消えません。日付だけ外れます)'
-        : 'この繰り返しをやめます(本文の「@日付 毎週」が外れます。ノートは消えません)';
+        : // 🔴 × は日付ごと外す(#1087 の見直し 2026-10-13)── 「この繰り返しをやめます」だと、日付を残して繰り返しだけ外す
+          //    右クリックの「この繰り返しをやめる」と同じ操作に読める
+          '予定から外します(本文の「@日付 毎週」が日付ごと外れます。ノートは消えません)';
     if (off.title !== why) off.title = why;
   }
   const text = card.querySelector('[data-pkc-field="text"]');
