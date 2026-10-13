@@ -598,7 +598,8 @@ describe('2 ペインの面(描画)', () => {
       removeItem: (k) => void map.delete(k),
     });
     const r = new DualFilerRenderer(region, store);
-    r.render(booted());
+    const s0 = booted();
+    r.render(s0);
     /**
      * 🔴 **鍵は `title` の末尾の括弧から読む**(#1054 段②。旧「見える `cmd-key`
      *   の器」を廃した)。⚠ 全体が一致することを見る(部分一致だと、鍵が
@@ -623,15 +624,10 @@ describe('2 ペインの面(描画)', () => {
     expect(store.addBinding('dual-move-to-other', 'F10')).toBeNull();
     store.removeBinding('dual-move-to-other', 'F6');
     /**
-     * ⚠ 門(#1087)は `entryMetas` の**中身**で開く ── 以前は「新しい Map」というだけで開いたので、
-     *   この test は割当の変更だけで再描画されることに頼っていた。割当は門の材料ではない
-     *   (いまも、設定で変えただけでは次の state 変化まで古い字が残る ── 報告に書いた)ので、
-     *   ここでは**門を開く別の変化**(無関係なノートの題名)を添えて描く。
+     * 🔴 **同じ state のまま描き直しても、キーの字は割当に追従する**(#1087)── 門はキーの字も材料に持つ。
+     *   ⚠ 同じ state を渡す ── 新しい state を渡すと、別の材料で門が開いて空振りする。
      */
-    const reopened = booted();
-    const metas2 = new Map(reopened.entryMetas);
-    metas2.set('c', { ...metas2.get('c')!, title: 'う2' });
-    r.render({ ...reopened, entryMetas: metas2 });
+    r.render(s0);
     expect(keyOf('dual-move'), '割当を変えても画面の字が変わらない').toBe('F10');
   });
 
@@ -756,6 +752,11 @@ describe('2 ペインの面(描画)', () => {
         },
       ],
       ['filterQuery', (x) => ({ ...x, filterQuery: 'あ' })],
+      /**
+       * 🔴 **スマートフォルダの当たりも門の材料**(#1087)── 門を指紋へ替える前は、保存のたびに
+       *   Map が新しくなって偶然開いていた。当たりだけが遅れて変わる回を取りこぼさない。
+       */
+      ['smartHits', (x) => ({ ...x, smartHits: new Map(x.smartHits) })],
       ['entrySort', (x) => ({ ...x, entrySort: 'title' })],
       /**
        * ⚠ **向きも門の材料**(2026-08-19、足したその日に踏んだ)── 入れないと

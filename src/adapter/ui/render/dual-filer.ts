@@ -366,6 +366,13 @@ export class DualFilerRenderer {
    *   (CLAUDE.md §7「設定画面の値の同期」と同じ形)。
    */
   private lastBookmarks = '';
+  private lastSmartHits: AppState['smartHits'] | null = null;
+  private lastKeys = '';
+
+  /** 下の操作行に出るキーの字(割当を変えたら描き直す)。 */
+  private commandKeys(): string {
+    return COMMAND_ITEMS.map((it) => barKey(it.command, this.keymap)).join(SEP);
+  }
 
   constructor(
     region: HTMLElement,
@@ -469,9 +476,18 @@ export class DualFilerRenderer {
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
       state.searchHits === this.lastHits &&
+      /**
+       * 🔴 **スマートフォルダの当たりとキーの割当も門に載せる**(#1087)── 門を「Map が新しいか」から
+       *   読む列の指紋へ替えたので、保存のたびに偶然開いていた門が開かなくなった。これまで偶然に頼っていた
+       *   2 つ(スマートフォルダの中身 / 下の操作行のキーの字)は、ここで明示する。
+       */
+      state.smartHits === this.lastSmartHits &&
+      this.commandKeys() === this.lastKeys &&
       bookmarks.join(SEP) === this.lastBookmarks
     )
       return;
+    this.lastSmartHits = state.smartHits;
+    this.lastKeys = this.commandKeys();
     this.lastDual = state.dual;
     this.lastMetas = this.metaSignature(state);
     this.lastRelations = state.relations;
