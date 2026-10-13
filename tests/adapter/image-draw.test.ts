@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createImageDrawer,
   IMAGE_DRAW_BUSY_TEXT,
+  imageDrawPhaseBlockedText,
   IMAGE_DRAW_POPUP_BLOCKED_TEXT,
 } from '../../src/adapter/ui/actions/image-draw';
 import type {
@@ -59,6 +60,7 @@ function harness(
   } as AppState);
   const attached: Array<{ item: AttachItem; place: Place }> = [];
   const notes: string[] = [];
+  const noteOpens: string[] = [];
   const events: string[] = [];
   let saveFn: ((png: Blob) => Promise<ImageDrawSaveResult>) | null = null;
   const opened: ImageDrawWindowDeps[] = [];
@@ -99,9 +101,12 @@ function harness(
       };
       return win;
     },
-    notify: (t) => void notes.push(t),
+    notify: (t, openLid) => {
+      notes.push(t);
+      noteOpens.push(openLid);
+    },
   });
-  return { dispatcher, drawer, attached, notes, events, opened, wins, save: (b: Blob) => saveFn!(b) };
+  return { dispatcher, drawer, attached, notes, noteOpens, events, opened, wins, save: (b: Blob) => saveFn!(b) };
 }
 
 const png = (): Blob => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
@@ -145,6 +150,8 @@ describe('保存', () => {
     await h.drawer.run('k1', 'a.png', 'image/png', 'img');
     await h.save(png());
     expect(h.notes).toEqual(['描き込んだ画像を保存しました:「a (描き込み).png」']);
+    // 🔴 結果へ行く道:知らせの「開く」が、保存した添付(attach が返した lid)を指す
+    expect(h.noteOpens).toEqual(['new']);
   });
 });
 
@@ -194,12 +201,40 @@ describe('窓を開く', () => {
 });
 
 describe('断る道 ── 黙って終わらない', () => {
-  it('🔴 本文に書けないときは窓へ理由を返し、何も作らない(窓は開いたまま押し直せる)', async () => {
-    const h = harness({}, { phase: 'editing' } as Partial<AppState>);
+  it('🔴 別の保存の最中(writeLock)は窓へ理由を返し、何も作らない(窓は開いたまま押し直せる)', async () => {
+    const h = harness({}, { writeLock: { lid: 'memo' } } as Partial<AppState>);
     await h.drawer.run('k1', 'a.png', 'image/png', 'img');
     const r = await h.save(png());
     expect(r).toEqual({ ok: false, message: IMAGE_DRAW_BUSY_TEXT });
+    expect(IMAGE_DRAW_BUSY_TEXT).toBe(
+      '別の保存の最中です。少し待ってから、もう一度「新しい画像として保存」を押してください(描いた線は残しています)',
+    );
     expect(h.attached).toHaveLength(0);
+  });
+
+  it('🔴 保存に失敗して止まっている間は、錠ではなくその理由を言う(「別の保存の最中」と言い切らない)', async () => {
+    const h = harness({}, { phase: 'error' } as Partial<AppState>);
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img');
+    const r = await h.save(png());
+    expect(r).toEqual({ ok: false, message: imageDrawPhaseBlockedText('error') });
+    expect(r.ok ? '' : r.message).not.toContain('別の保存の最中');
+    expect(r.ok ? '' : r.message).toContain('もう一度「新しい画像として保存」を押してください');
+    expect(h.attached).toHaveLength(0);
+  });
+
+  it('🔴 別のノートを編集している間でも保存できる ── 編集中のノートと開いている本文は動かない', async () => {
+    const h = harness({}, {
+      phase: 'editing',
+      editingLid: 'memo',
+      openBody: { lid: 'memo', body: 'まだ打っている' },
+    } as unknown as Partial<AppState>);
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img');
+    expect(await h.save(png())).toEqual({ ok: true });
+    expect(h.attached).toHaveLength(1);
+    expect(h.attached[0]!.place.keepSelection).toBe(true);
+    const st = h.dispatcher.getState();
+    expect(st.phase).toBe('editing');
+    expect(st.openBody).toEqual({ lid: 'memo', body: 'まだ打っている' });
   });
 
   it('🔴 取り込みが落ちたら、先に出ていた具体的な理由を窓へ返す(汎用の字で塗り潰さない)', async () => {

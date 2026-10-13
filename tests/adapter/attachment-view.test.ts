@@ -514,6 +514,8 @@ describe('PDF の添付(窓内 + 別窓)', () => {
     // 🔴 押した添付のノートを運ぶ(新しい画像を元と同じフォルダへ入れる起点)
     expect(draw!.getAttribute('data-pkc-target-lid')).toBe('a1');
     expect(draw!.getAttribute('title')).toContain('同じフォルダ');
+    // 🔴 道具の全部を言う(文字・モザイクも描き込みの内)
+    expect(draw!.getAttribute('title')).toContain('線・矢印・四角・文字を描き込んだり、モザイクをかけたり');
     // 「編集」の鉛筆と取り違えない図案
     expect(ACTION_ICONS['draw-on-image']).toBeDefined();
     expect(ACTION_ICONS['draw-on-image']).not.toBe(ACTION_ICONS['start-edit']);

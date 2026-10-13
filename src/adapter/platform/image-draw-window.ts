@@ -240,6 +240,11 @@ async function build(
     // ⚠ 打ちかけの文字があれば押せる(押すと確定してから保存する)
     const typing = textInput !== null && textInput.value.trim() !== '';
     saveBtn.disabled = saving || !loaded || (strokes.length === 0 && !typing);
+    // 押せない理由を言う(何も描いていないときだけ。保存中・読み込み中は別の理由)
+    saveBtn.title =
+      !saving && loaded && strokes.length === 0 && !typing
+        ? '線・矢印・四角・文字・モザイクのどれかを描くと押せます'
+        : '';
     cancelBtn.disabled = saving;
     if (strokes.length === 0) confirmRow.hidden = true;
   };
