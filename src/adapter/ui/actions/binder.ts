@@ -12,6 +12,7 @@
  * string を作る ── GC churn が数字に出たら debounce / collect-at-commit へ
  * 切り替える(その時に計測してから)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bindWaveDrag } from './wave-drag';
 import { renameAttachmentAndFile, renameEntryFromRow } from './attachment-rename';
@@ -10782,7 +10783,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       (e: unknown) => {
         sum.textContent = '';
         sum.hidden = true;
-        dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${String(e)}` });
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `調べられませんでした: ${errorText(e)}` });
       },
     );
   },
@@ -10942,7 +10943,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           sum.hidden = true;
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `作り直せませんでした(何も消えていません): ${String(e)}`,
+            error: `作り直せませんでした(何も消えていません): ${errorText(e)}`,
           });
         }
       })
@@ -11080,7 +11081,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         } catch (e) {
           sum.textContent = '';
           sum.hidden = true;
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `初期化できませんでした: ${errorText(e)}` });
         }
       });
   },

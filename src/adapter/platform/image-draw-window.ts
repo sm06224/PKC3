@@ -37,6 +37,7 @@
  * - **モザイク**:四角でなぞった範囲を、粗い升目の平均色で塗る(元の画素は書き出した PNG に残らない)
  * - 選んでいる道具・色・太さは `aria-pressed` と、それを**見た目に写す CSS**の両方で示す
  */
+import { errorText } from '@features/error-text';
 import {
   DRAW_COLORS,
   clampPt,
@@ -547,7 +548,7 @@ async function build(
     try {
       result = await save(png);
     } catch (e) {
-      result = { ok: false, message: `保存できませんでした(${String(e)})` };
+      result = { ok: false, message: `保存できませんでした(${errorText(e)})` };
     }
     if (result.ok) {
       leave();

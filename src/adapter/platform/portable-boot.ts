@@ -13,6 +13,7 @@
  * 焼かれない**。`https://` 配信の `index.html` には無いので `readBundle` は `null` を
  * 返し、`main.ts` はいままでどおりの経路へ進む。
  */
+import { errorText } from '@features/error-text';
 import {
   bundleSqliteName,
   checkImageParts,
@@ -109,7 +110,7 @@ export function takeEmbeddedImage(doc: Document): EmbeddedTake {
     }
     return {
       image: null,
-      failure: `この HTML ファイルに埋め込まれた中身が読み取れない形になっています(${String(e)})`,
+      failure: `この HTML ファイルに埋め込まれた中身が読み取れない形になっています(${errorText(e)})`,
     };
   } finally {
     for (const el of els) el.remove();

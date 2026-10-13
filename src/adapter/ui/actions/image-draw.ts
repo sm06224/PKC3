@@ -20,6 +20,7 @@
  *
  * ⚠ **判定を `main.ts` へ出さない**(CLAUDE.md §2:あちらはどの test からも実行されない)。
  */
+import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import type {
   ImageDrawSaveResult,
@@ -102,7 +103,7 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
       try {
         blob = await deps.readBlob(assetKey);
       } catch (e) {
-        win.fail(`画像を読み込めませんでした(${String(e)})`);
+        win.fail(`画像を読み込めませんでした(${errorText(e)})`);
         return;
       }
       if (blob === null) {

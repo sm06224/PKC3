@@ -18,6 +18,7 @@
 /** ⚠ 綴りの正本。`public/office/host.html` の `PROFILE_KEY` と**同じ**でなければ
  *  ならず、`tests/adapter/office-profile.test.ts` が両者を突き合わせて pin する
  *  ── 片方だけ変えると「消したのに戻ってくる」形で静かに壊れる。 */
+import { errorText } from '@features/error-text';
 import { OFFICE_CHANNEL } from './office-window';
 import { appMessagePost } from '../message-post';
 
@@ -89,7 +90,7 @@ export function resetOfficeProfile(
   void macros.dropMacros().catch((e: unknown) => {
     console.warn('Office のマクロを消せませんでした', e);
     // ⚠ 例外の原文は `sanitizeMessageText` が 80 字で切る(§7)── ここでは組むだけ
-    postProblem(`Office のマクロを消せませんでした: ${String(e)}`);
+    postProblem(`Office のマクロを消せませんでした: ${errorText(e)}`);
   });
   if (announce) {
     try {
