@@ -487,6 +487,17 @@ export class SettingsRenderer {
     const noticeHead = document.createElement('h3');
     noticeHead.textContent = 'お知らせ';
     noticeSection.append(noticeHead);
+    /**
+     * 🔴 **ヘルプから来たときだけ出す「← ヘルプへ戻る」**(依頼 67-1)。⚠ 既定は畳む ── 出す・畳むは
+     *   `binder.ts` の `open-system-notices` が決める。見出しの隣へは `buildToc` が移す(`h3` の子にしない)。
+     */
+    const backToHelp = document.createElement('button');
+    backToHelp.type = 'button';
+    backToHelp.hidden = true;
+    backToHelp.setAttribute('data-pkc-action', 'back-to-help');
+    backToHelp.setAttribute('data-pkc-field', 'settings-back-to-help');
+    backToHelp.textContent = '← ヘルプへ戻る';
+    noticeSection.append(backToHelp);
     noticeSection.append(this.buildNoticeSection(noticeDl));
     body.append(noticeSection);
 
@@ -571,8 +582,12 @@ export class SettingsRenderer {
       back.textContent = '目次へ戻る';
       const wrap = document.createElement('div');
       wrap.setAttribute('data-pkc-field', 'settings-heading-row');
+      // 依頼 67-1:見出しの隣に置く物(ヘルプへ戻る)が節に在れば、一緒に移す
+      const beside = h.parentElement?.querySelector(':scope > [data-pkc-field="settings-back-to-help"]') ?? null;
       h.replaceWith(wrap);
-      wrap.append(h, back);
+      wrap.append(h);
+      if (beside !== null) wrap.append(beside);
+      wrap.append(back);
     });
     return nav;
   }

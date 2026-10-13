@@ -748,7 +748,20 @@ export class HelpRenderer {
     row.type = 'button';
     row.setAttribute('data-pkc-find-index', String(hit.section.index));
     // ⚠ 記法は落として出す(`**強調**` の星がそのまま見えないように)
-    row.textContent = `${hit.section.title.replace(/[*`_]/gu, '')}(${hit.count})`;
+    const title = document.createElement('span');
+    title.setAttribute('data-pkc-field', 'help-find-title');
+    title.textContent = `${hit.section.title.replace(/[*`_]/gu, '')}(${hit.count})`;
+    row.append(title);
+    /**
+     * 🔴 **題名の下に、当たった所の 1 行**(依頼 67-2。Gemini 裁定 2026-10-13 = 推薦どおり)。
+     * ⚠ 題名と別の要素にする ── 題名だけを読む所(`textContent` の突き合わせ)に混ぜない。
+     */
+    if (hit.excerpt !== '') {
+      const ex = document.createElement('span');
+      ex.setAttribute('data-pkc-field', 'help-find-excerpt');
+      ex.textContent = hit.excerpt;
+      row.append(ex);
+    }
     row.addEventListener('click', () => {
       void this.jumpToSection(hit.section);
     });

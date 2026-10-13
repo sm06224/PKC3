@@ -666,6 +666,27 @@ describe('preview を持たない添付', () => {
       expect(document.querySelector('[data-pkc-action="open-office"]')).toBeNull();
     });
 
+    it('🔴 一式がまだ無い .docx には「システムを開く」が出る(依頼 61-2)/ 入っている・動かない環境には出ない', async () => {
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue(OK_CAP);
+      appOfficePack.setMeta(null);
+      await noteOf(docxBody);
+      const go = document.querySelector<HTMLElement>('[data-pkc-action="open-system-office"]');
+      expect(go, '一式が無いのに取り込む場所へ行く口が無い').not.toBeNull();
+      expect(go!.textContent).toBe('システムを開く');
+      // 対照群:一式が入っている回は出さない(入口は「Office で開く」)
+      document.body.textContent = '';
+      appOfficePack.setMeta(PACK);
+      await noteOf(docxBody);
+      expect(document.querySelector('[data-pkc-action="open-system-office"]')).toBeNull();
+      // 対照群:この環境で動かない回は、取り込んでも開けないので出さない
+      document.body.textContent = '';
+      capSpy.mockRestore();
+      capSpy = vi.spyOn(appOfficePack, 'capability').mockReturnValue({ ...OK_CAP, jspi: false });
+      appOfficePack.setMeta(null);
+      await noteOf(docxBody);
+      expect(document.querySelector('[data-pkc-action="open-system-office"]')).toBeNull();
+    });
+
     it('対照群:この環境で Office が動かない .docx(入口が出ない)は、今までの字のまま', async () => {
       capSpy = vi
         .spyOn(appOfficePack, 'capability')

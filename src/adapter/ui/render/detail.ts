@@ -4063,6 +4063,20 @@ export class DetailRenderer {
               ? 'この種類は画面に出せません。システム → 保存領域 → Office 表示 で一式を取り込むと開けます(ダウンロードしても開けます)'
               : 'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください';
         host.append(p);
+        /**
+         * 🔴 **取り込む場所へ 1 回で行く**(依頼 61-2。Gemini 裁定 2026-10-13 = 推薦どおり)。
+         * ⚠ 場所の言葉(システム → 保存領域 → Office 表示)だけだと、user は 3 段たどる ──
+         *   一式が入っていない `setup` のときだけ、押せる入口を添える。
+         */
+        if (office === 'setup') {
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.setAttribute('data-pkc-action', 'open-system-office');
+          go.setAttribute('data-pkc-field', 'attachment-open-system-office');
+          go.textContent = 'システムを開く';
+          go.title = 'システム → 保存領域 → Office 表示 を開きます';
+          host.append(go);
+        }
         return;
       }
       /**

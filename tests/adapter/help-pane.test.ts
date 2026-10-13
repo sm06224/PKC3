@@ -903,6 +903,19 @@ describe('マニュアルの中を探す(#636)', () => {
     expect(countText(), '件数を出していない').toMatch(/か所/);
   });
 
+  it('🔴 結果の各行に、当たった語を含む 1 行が添えられる(依頼 67-2)', () => {
+    new HelpRenderer(region).render();
+    type('ルビ');
+    const all = rows();
+    expect(all.length, '前提:結果が無い').toBeGreaterThan(0);
+    for (const row of all) {
+      const title = row.querySelector('[data-pkc-field="help-find-title"]')?.textContent ?? '';
+      const ex = row.querySelector('[data-pkc-field="help-find-excerpt"]')?.textContent ?? '';
+      expect(title, '題名が「節の名前(件数)」でない').toMatch(/\(\d+\)$/);
+      expect(ex.toLowerCase(), `「${title}」に当たった語を含む 1 行が無い`).toContain('ルビ');
+    }
+  });
+
   it('🔴 見つからないときは、次の一手を書く(「0 件」で終わらせない)', () => {
     new HelpRenderer(region).render();
     type('そんな語はどこにもありません');

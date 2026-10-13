@@ -3492,7 +3492,8 @@ li[data-pkc-row-slot] {
 }
 /* 🔴 読む面のコピー(2026-08-08)も同じ合図で光る ── 合図の形を 2 つ作らない。
  * こちらは常時可視のボタンなので opacity は触らない(色だけが「渡った」の情報) */
-[data-pkc-field='detail-toolbar'] [data-pkc-flash] {
+[data-pkc-field='detail-toolbar'] [data-pkc-flash],
+[data-pkc-field='sql-copy-bar'] [data-pkc-flash] {
   background: var(--accent-dim);
   color: var(--accent-dim-fg);
   border-color: var(--accent);
@@ -6151,6 +6152,29 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 /* 断りの 1 行だけ色を持つ ── 出ていること自体が「直す所がある」の合図である */
 [data-pkc-field='sql-note'][data-pkc-sql-error='yes'] {
   color: var(--danger);
+}
+/* 🔴 **答えの表のコピーの行**(依頼 63-1)── 表の右上に寄せる。⧉ は本文の表の ⧉ と同じ大きさ・同じ枠
+ * (`.pkc-md-copy-btn`。あちらは本文の中でだけ効く規則なので、同じ値をここで持つ)。こちらは常に見える。 */
+[data-pkc-field='sql-copy-bar'] {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--s2);
+}
+[data-pkc-field='sql-copy-bar'][hidden] {
+  display: none;
+}
+[data-pkc-field='sql-copy-bar'] .pkc-md-copy-btn {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--btn-fs-bar);
+  line-height: 1;
+  cursor: pointer;
 }
 /* 🔴 **表は自分の中で横に流す** ── 面ごと横スクロールさせない(列は何本でも来る) */
 [data-pkc-field='sql-body'] {
@@ -8834,9 +8858,17 @@ mark[data-pkc-diff-char='del'] {
   justify-content: space-between;
   gap: var(--s3);
 }
-[data-pkc-field='settings-back-to-top'] {
+[data-pkc-field='settings-back-to-top'],
+[data-pkc-field='settings-back-to-help'] {
   font-size: 12px;
   color: var(--muted);
+}
+/* 見出しの隣に寄せる(「目次へ戻る」は右端のまま) */
+[data-pkc-field='settings-back-to-help'] {
+  margin-inline-end: auto;
+}
+[data-pkc-field='settings-back-to-help'][hidden] {
+  display: none;
 }
 /**
  * 🔴 **目次から飛んだ見出しが、上の閉じる帯(`pane-bar`、sticky・35px)の下に来る**
@@ -9035,6 +9067,27 @@ h3[data-pkc-section] {
   margin: 0 0 var(--s2);
 }
 
+/* 🔴 **探した結果の 1 行は、題名の下に小さく**(依頼 67-2)。⚠ 2 行になるので、ボタンの既定の高さを外す。 */
+[data-pkc-region='help-find-hits'] button {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  text-align: start;
+  justify-content: flex-start;
+}
+[data-pkc-region='help-find-hits'] [data-pkc-field='help-find-title'],
+[data-pkc-region='help-find-hits'] [data-pkc-field='help-find-excerpt'] {
+  display: block;
+}
+[data-pkc-region='help-find-hits'] [data-pkc-field='help-find-excerpt'] {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 [data-pkc-region='help-toc'] {
   max-height: 30vh;
   overflow: auto;
@@ -9076,27 +9129,30 @@ h3[data-pkc-section] {
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='1'] {
   font-weight: 600;
 }
+/* 🔴 **段で字の太さも変える**(依頼 67-3。Gemini 裁定 2026-10-13 = 推薦どおり):h2 = 太字・押し込み無し /
+   h3 = 並の太さ・1 段押し込み / h4 = 薄い色・更に押し込み。⚠ 色は新しく足さない(既存の `--muted` だけ)。 */
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='2'] {
-  padding-inline-start: var(--s4);
+  font-weight: 600;
 }
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='3'] {
-  padding-inline-start: var(--s5);
-  color: var(--muted);
+  padding-inline-start: var(--s4);
+  font-weight: 400;
 }
 /* 🔴 **`####` 以下も並ぶ**(2026-09-11、#531)。⚠ 段付けは **4 で止める** ──
    h5 / h6 を更に押し込むと、30vh の箱の中で見出しの字が折れて読めなくなる。
    ⚠ **3 段とも名指しする**(選択子リストで 1 つに書かない)── `data-pkc-level` の
    値ごとに在ることを検査が数えるので、まとめると「段 5 が無い」と読めてしまう。 */
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='4'] {
-  padding-inline-start: var(--s6);
+  padding-inline-start: var(--s5);
+  font-weight: 400;
   color: var(--muted);
 }
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='5'] {
-  padding-inline-start: var(--s6);
+  padding-inline-start: var(--s5);
   color: var(--muted);
 }
 [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'][data-pkc-level='6'] {
-  padding-inline-start: var(--s6);
+  padding-inline-start: var(--s5);
   color: var(--muted);
 }
 /**

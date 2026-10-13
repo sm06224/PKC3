@@ -374,6 +374,12 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 押した行が lid を運ぶ(`schedule-week-pick` と同じ置き場。仕分けは N だが実は押した行を指す)。
    */
   'toggle-schedule-note',
+  /**
+   * ⚠ **2026-10-13(依頼 63-1 / 67-1 / 61-2)で 3 件増えた** ── 「SQL で調べる」の結果のコピー 2 つ(`sql-copy`。種類は押したボタンの印)/
+   *   システムの「お知らせ」の「← ヘルプへ戻る」(`back-to-help`)/ Office の添付の「システムを開く」(`open-system-office`)。
+   * 🔑 どれも押し口は画面のボタン 1 か所にしか無く、鍵も持たない(`open-storage-check` と同じ置き場)。
+   */
+  'back-to-help', 'open-system-office', 'sql-copy',
   'toggle-todo', 'undo-append', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-trash', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
@@ -827,12 +833,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`schedule-undo-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-13(#1163 依頼 62): 2 ペインの「全部選ぶ」(`dual-select-all`)と移した直後の「元に戻す」(`undo-dual-move`)で受け手 +2 ── 登記は増えない
       //   (押し口は列見出しのチェックと画面の下の知らせの隣にしか無く、鍵も持たない)。`receivers` +2 / `total` +2 / `unregistered` +2。
-      total: 427,
-      receivers: 361,
+      // ⚠ 2026-10-13(依頼 63-1 / 67-1 / 61-2): 受け手 +3(`sql-copy` / `back-to-help` / `open-system-office`)── 登記は増えない(鍵を持たない画面のボタン)。
+      //   `receivers` +3 / `total` +3 / `unregistered` +3。
+      total: 430,
+      receivers: 364,
       registered: 167,
       both: 101,
       outsideActionsTable: 66,
-      unregistered: 260,
+      unregistered: 263,
     });
   });
 

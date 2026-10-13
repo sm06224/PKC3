@@ -113,14 +113,17 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
       blocksFor(text, `${ROW}[data-pkc-level='1']`).join('\n'),
       '大見出しが目立たない(段が平らになる)',
     ).toMatch(decl('font-weight', '600'));
-    // h2 / h3: 押し込みの深さで出す(⚠ h3 のほうが深いこと)
+    /**
+     * 🔴 **段で太さと押し込みを変える**(依頼 67-3。Gemini 裁定 2026-10-13 = 推薦どおり):
+     *   h2 = 太字・押し込み無し / h3 = 並の太さ・押し込み / h4 = 薄い色・更に押し込み。
+     */
     const l2 = blocksFor(text, `${ROW}[data-pkc-level='2']`).join('\n');
     const l3 = blocksFor(text, `${ROW}[data-pkc-level='3']`).join('\n');
-    expect(l2, '中見出しが押し込まれていない').toMatch(decl('padding-inline-start', 'var'));
+    expect(l2, '中見出しが太字でない').toMatch(decl('font-weight', '600'));
+    expect(l2, '中見出しが押し込まれている(押し込み無しが約束)').not.toMatch(/padding-inline-start/);
     expect(l3, '小見出しが押し込まれていない').toMatch(decl('padding-inline-start', 'var'));
-    const s2 = Number(/--s(\d)/.exec(l2)![1]);
+    expect(l3, '小見出しが太字のまま(段で太さが変わらない)').toMatch(decl('font-weight', '400'));
     const s3 = Number(/--s(\d)/.exec(l3)![1]);
-    expect(s3, '小見出しが中見出しより深く押し込まれていない(段が逆か同じ)').toBeGreaterThan(s2);
 
     /**
      * 🔴 **`####` 以下も段が要る**(2026-09-11、#531)── 目次が h4 以下まで並ぶように
@@ -140,11 +143,14 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
      * ⚠ 段 4 で新しく `--s6` を足したので、そこを名指しで留める。
      */
     const tokens = readFileSync('src/styles/tokens.css', 'utf-8');
-    for (const name of ['--s5', '--s6'])
+    for (const name of ['--s4', '--s5'])
       expect(tokens, `${name} が tokens.css に無い(押し込みが丸ごと効かない)`).toMatch(
         new RegExp(`${name}\\s*:`),
       );
 
+    const l4 = blocksFor(text, `${ROW}[data-pkc-level='4']`).join('\n');
+    expect(l4, '`####` が薄い色でない(段で濃さが変わらない)').toMatch(decl('color', 'var\\(--muted\\)'));
+    expect(l4, '`####` が太字のまま').toMatch(decl('font-weight', '400'));
     const s4 = depth('4');
     expect(s4, '`####` が小見出しより深く押し込まれていない(見分けが付かない)').toBeGreaterThan(
       s3,
