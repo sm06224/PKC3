@@ -1008,6 +1008,8 @@ export class FilerRenderer {
      */
     const datesChanged = this.dateSignature(state) !== this.lastDates;
     const sortedByDate = state.entrySort === 'updated';
+    // 🔑 指紋は 1 回だけ作る(下の控えでも使う。#1087)
+    const metasSig = state.entryMetas !== this.lastMetas ? this.metaSignature(state) : null;
     const listChanged =
       (datesChanged && sortedByDate) ||
       state.relations !== this.lastRelations ||
@@ -1031,7 +1033,7 @@ export class FilerRenderer {
        *   欄が出ない(state だけ動いて画面が嘘をつく ── `marksChanged` と同じ罠)。
        */
       state.renamingLid !== this.lastRenaming ||
-      (state.entryMetas !== this.lastMetas && this.metaSignature(state) !== this.lastSignature);
+      (metasSig !== null && metasSig !== this.lastSignature);
     /**
      * 🔑 **一覧が変わらなかったら、参照の控えだけ進める**(#1087)。
      * ⚠ 保存の ack は `entryMetas` を新しい Map にするが、題名も並びも同じなら指紋は同じ ──
@@ -1109,8 +1111,14 @@ export class FilerRenderer {
       return;
     }
 
+    /**
+     * 🔑 **ノートの一覧が前と同じなら、指紋は作り直さない**(#1087)。⚠ 検索で打つたびに、
+     *   一覧(`entryMetas`)は同じなのに全件の指紋を作り直していた(3,000 件で 1 字ごとの JS の上位)。
+     *   `lastMetas` と同じ参照のとき `lastSignature` はその一覧から作った値である
+     *   (控えを進める 2 か所は、どちらも「指紋が同じ」と確かめた後に進めている)。
+     */
+    if (state.entryMetas !== this.lastMetas) this.lastSignature = metasSig ?? this.metaSignature(state);
     this.lastMetas = state.entryMetas;
-    this.lastSignature = this.metaSignature(state);
     this.lastRelations = state.relations;
     this.lastSelected = state.selectedLid;
     this.lastScopeLid = scopeLid;

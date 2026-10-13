@@ -17432,10 +17432,9 @@ export function bindActions(
   };
 
   /** 表の中のその行(`data-pkc-entry` は user 由来ではないが、選択子に埋めない)。 */
+  // 🔑 属性の値で直接引く(#1087)── 直す前は 1 行探すたびに全行(3,000 件)を配列にして先頭から比べていた
   const rowEl = (lid: string): HTMLElement | null =>
-    Array.from(
-      root.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
-    ).find((el) => el.getAttribute('data-pkc-entry') === lid) ?? null;
+    root.querySelector<HTMLElement>(`[data-pkc-region="filer-table"] [data-pkc-entry="${CSS.escape(lid)}"]`);
 
   const focusRow = (lid: string): void => rowEl(lid)?.focus();
 
@@ -17825,11 +17824,11 @@ export function bindActions(
        * ⚠ **中央のノートは開き直さない** ── 開くのは `Enter` の仕事である
        *   (user 裁定 2026-08-18「Enter は閲覧を開始」)。`SELECT_ENTRY` を撃つと
        *   1 行送るたびに本文の読み直し(worker 往復)が起きる。
-       * 🔑 既存の 2 つで足りる ── 印を空にしてから 1 件付ける(規則を増やさない)。
-       *   これで起点(`selectionAnchor`)もその行に立つので、続く `Shift` が効く。
+       * 🔑 印を空にしてから 1 件付ける ── 起点(`selectionAnchor`)もその行に立つので、
+       *   続く `Shift` が効く。⚠ 1 回の dispatch で撃つ(`SELECT_ONLY`。2 回撃つと 1 キーで
+       *   2 回描き直す ── #1087 の実測)。
        */
-      dispatcher.dispatch({ type: 'CLEAR_SELECTION' });
-      dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid });
+      dispatcher.dispatch({ type: 'SELECT_ONLY', lid });
       focusRow(lid);
       return true;
     }
@@ -17843,8 +17842,7 @@ export function bindActions(
        * **押すたびに 1 件へ潰れて**積み上がらない(OS は現在行から伸びる)。
        */
       if (st.selectionAnchor === null && from !== null) {
-        dispatcher.dispatch({ type: 'CLEAR_SELECTION' });
-        dispatcher.dispatch({ type: 'TOGGLE_SELECT', lid: from });
+        dispatcher.dispatch({ type: 'SELECT_ONLY', lid: from });
       }
       dispatcher.dispatch({ type: 'SELECT_RANGE', lid });
       focusRow(lid);

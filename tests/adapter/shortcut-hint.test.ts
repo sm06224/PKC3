@@ -193,3 +193,30 @@ describe('編集の面の名前(読み上げ)', () => {
     }
   });
 });
+
+/** 🔑 押せない理由は、変わるときだけ書く(#1087。左の列は状態が動くたびに全部のボタンへ当てる)。 */
+describe('#1087 setBlocked は同じ値を書き直さない', () => {
+  it('🔑 同じ理由で 2 回当てても、属性の変更は 1 回 ── 対照群: 理由が変われば書く / 外せば外す', async () => {
+    const { setBlocked } = await import('../../src/adapter/ui/render/shortcut-hint');
+    const el = document.createElement('button');
+    document.body.append(el);
+    const seen: string[] = [];
+    const mo = new MutationObserver((recs) => {
+      for (const r of recs) if (r.attributeName === 'data-pkc-blocked') seen.push(String(r.oldValue));
+    });
+    mo.observe(el, { attributes: true, attributeOldValue: true });
+    setBlocked(el, '編集中です');
+    setBlocked(el, '編集中です');
+    await Promise.resolve();
+    // 記録は「変える前の値」── 1 回目は無かった(null)
+    expect(seen, '同じ理由を書き直した').toEqual(['null']);
+    setBlocked(el, '取り込み中です');
+    setBlocked(el, null);
+    setBlocked(el, null);
+    await Promise.resolve();
+    mo.disconnect();
+    expect(seen).toEqual(['null', '編集中です', '取り込み中です']);
+    expect(el.hasAttribute('data-pkc-blocked'), '外したのに理由が残る').toBe(false);
+    expect(el.disabled, '外したのに押せないまま').toBe(false);
+  });
+});

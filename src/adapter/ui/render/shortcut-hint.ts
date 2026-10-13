@@ -113,8 +113,12 @@ export function setBlocked(
   keymap: KeymapStore = appKeymap,
 ): void {
   const blocked = reason === null || reason === '' ? null : reason;
-  if (blocked === null) el.removeAttribute(HINT_BLOCKED);
-  else el.setAttribute(HINT_BLOCKED, blocked);
+  // 🔑 変わるときだけ書く(#1087)── 左の列は状態が動くたびに全部のボタンへ当てるので、
+  //    同じ値の書き込みでも属性の変更として毎回スタイルの見直しを起こしていた
+  if (el.getAttribute(HINT_BLOCKED) !== blocked) {
+    if (blocked === null) el.removeAttribute(HINT_BLOCKED);
+    else el.setAttribute(HINT_BLOCKED, blocked);
+  }
   if (el instanceof HTMLButtonElement && el.disabled !== (blocked !== null))
     el.disabled = blocked !== null;
   const base = el.getAttribute(HINT_BASE);
