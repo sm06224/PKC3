@@ -480,9 +480,20 @@ export function findOpenEnds(text: string): OpenEnd[] {
     }
   }
   const lines = splitLines(text);
+  /**
+   * 🔑 行 → 囲いの表を 1 回で作る(#1087)。⚠ 直す前は行ごとに `containerAtLine` で全部の囲いを
+   *   先頭から探していた(行数 × 囲いの数)── 行を確定するたびに本文全体を見るので、長い本文で効く。
+   *   後ろの囲いから書いて、**表の先に在る囲いが勝つ**(`containerAtLine` が最初に当たった物を返すのと同じ)。
+   */
+  const containerOf: (ContainerSpan | null)[] = new Array<ContainerSpan | null>(lines.length).fill(null);
+  for (let k = spans.length - 1; k >= 0; k -= 1) {
+    const sp = spans[k]!;
+    const last = Math.min(sp.end, lines.length - 1);
+    for (let l = Math.max(0, sp.start); l <= last; l += 1) containerOf[l] = sp;
+  }
   for (let i = 0; i < lines.length; i += 1) {
     // 囲いの中(fence)は数えない。`:::` の中身は普通の本文なので数える
-    const c = containerAtLine(spans, i);
+    const c = containerOf[i] ?? null;
     if (c && c.kind === 'fence') continue;
     if (c && c.kind === 'directive' && (i === c.start || i === c.end)) continue;
     for (const p of INLINE_PAIRS) {
