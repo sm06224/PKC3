@@ -18,11 +18,11 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 
 export interface ImportFailureDeps {
   /** 失敗の理由を、取り込みの注意の面へ出す。⚠ 面を持つ配線だけが渡す。 */
-  reportFailure?(message: string): void;
+  reportFailure?(message: string, undoable?: boolean): void;
 }
 
-export function failImport(dispatcher: Dispatcher, deps: ImportFailureDeps, msg: string): null {
-  if (deps.reportFailure !== undefined) deps.reportFailure(msg);
+export function failImport(dispatcher: Dispatcher, deps: ImportFailureDeps, msg: string, undoable = false): null {
+  if (deps.reportFailure !== undefined) deps.reportFailure(msg, undoable);
   else dispatcher.dispatch({ type: 'OP_FAILED', error: msg });
   return null;
 }

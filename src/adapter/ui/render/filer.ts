@@ -1340,7 +1340,7 @@ export class FilerRenderer {
       off.setAttribute('data-pkc-action', 'clear-entry-filter');
       off.setAttribute('data-pkc-field', 'filer-clear-filter-line');
       off.textContent = '絞りを外す';
-      off.title = '絞り込みを空にして、ノートを全部出します。';
+      off.title = '絞りを空にして、いまいる場所のノートに戻します';
       line.append(label, off);
       if (keptTable === null) this.region.append(line);
       else this.region.insertBefore(line, keptTable);
@@ -1476,7 +1476,7 @@ export class FilerRenderer {
         clear.setAttribute('data-pkc-action', 'clear-entry-filter');
         clear.setAttribute('data-pkc-field', 'filer-clear-filter');
         clear.textContent = '絞りを外す';
-        clear.title = '絞り込みを空にして、ノートを全部出します。';
+        clear.title = '絞りを空にして、いまいる場所のノートに戻します';
         this.region.append(clear);
       }
       /**

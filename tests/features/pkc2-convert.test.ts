@@ -171,7 +171,31 @@ describe('convertPkc2Container (P6a)', () => {
     const note = r2.entries.find((e) => e.title === 'ノート')!;
     expect(note.body).not.toContain('entry:a-todo'); // 参照は残らない…そもそも無いが
     expect(r2.relations[0]).toMatchObject({ fromLid: 'b-note', toLid: 'new-1' });
-    expect(r2.warnings.some((w) => w.includes('a-todo → new-1'))).toBe(true);
+    // 🔴 ノート 1 件ごとに「旧 → 新」を並べず、件数の 1 行に畳む
+    expect(r2.warnings.filter((w) => w.includes('ID が重なっていた'))).toEqual(['1 件のノートは ID が重なっていたので付け直しました']);
+    expect(r2.warnings.join('\n'), '内部の ID を画面に出している').not.toContain('a-todo');
+    // 対照群: 重なりが 2 件なら 1 行のまま件数だけ増える
+    const r3 = convertPkc2Container(FIXTURE, opts(['a-todo', 'b-note']));
+    expect(r3.warnings.filter((w) => w.includes('ID が重なっていた'))).toEqual(['2 件のノートは ID が重なっていたので付け直しました']);
+  });
+
+  it('🔴 古い形式の内蔵データの注意は、ID ではなく題名で言い、多いときは 1 行に畳む', () => {
+    const legacy = (lid: string, title: string) => ({
+      lid, title, archetype: 'attachment', body: '{"name":"o.bin","mime":"application/zip","data":"QUJD"}',
+    });
+    const one = convertPkc2Container(FIXTURE, opts());
+    expect(one.warnings.filter((w) => w.startsWith('古い形式の内蔵データを添付にしました'))).toEqual([
+      '古い形式の内蔵データを添付にしました: 「旧添付」',
+    ]);
+    const many = convertPkc2Container(
+      { ...FIXTURE, entries: [legacy('x1', '一'), legacy('x2', ''), legacy('x3', '三'), legacy('x4', '四'), legacy('x5', '五')], relations: [], revisions: [] },
+      opts(),
+    );
+    const lines = many.warnings.filter((w) => w.startsWith('古い形式の内蔵データを添付にしました'));
+    expect(lines, '5 件が 5 行に並んでいる').toEqual([
+      '古い形式の内蔵データを添付にしました: 「一」、題名の無いノート、「三」 ほか 2 件',
+    ]);
+    expect(many.warnings.join('\n'), '内部の ID が画面に出ている').not.toMatch(/x[1-5]/);
   });
 
   it('asset key の採番が衝突したら引き直す(無言の上書きを作らない)', () => {

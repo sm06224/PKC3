@@ -78,12 +78,20 @@ describe('取り込みの失敗を注意の面へ (依頼 70-C1)', () => {
     expect(region.querySelector('[data-pkc-action="undo-import"]')).toBeNull();
   });
 
+  it('🔴 途中まで書けた失敗だけ、面に「取り込みを取り消す」を付けられる(今回の分)', () => {
+    const region = document.createElement('div');
+    const act = { label: '取り込みを取り消す', action: 'undo-import', title: 'x' };
+    const p = importFailurePanel('3 件のノートまで取り込みました', act);
+    showNotices(region, p.title, p.notes, p.action);
+    expect(region.querySelector('[data-pkc-action="undo-import"]')?.textContent).toContain('取り込みを取り消す');
+  });
+
   it('🔴 main.ts: 失敗の口が面へ繋がっている', () => {
     const main = codeOnly(readFileSync('src/main.ts', 'utf-8'));
     const at = main.indexOf('reportFailure:');
     expect(at, 'reportFailure が配線されていない').toBeGreaterThan(-1);
     const block = main.slice(at, at + 300);
-    expect(block).toContain('importFailurePanel(message)');
+    expect(block).toContain('importFailurePanel(message, undoable === true ? importUndo.pending() : null)');
     expect(block).toContain('showNotices(regions.notices');
   });
 });

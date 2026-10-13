@@ -2924,8 +2924,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         showNotices(regions.notices, panel.title, notes, panel.action);
       },
       // 🔴 **取り込めなかった理由も同じ面へ**(依頼 70-C1)── 画面下の 1 行は別のノートを選ぶと消える
-      reportFailure: (message) => {
-        const panel = importFailurePanel(message);
+      reportFailure: (message, undoable) => {
+        const panel = importFailurePanel(message, undoable === true ? importUndo.pending() : null);
         showNotices(regions.notices, panel.title, panel.notes, panel.action);
       },
       // 🔴 **取り込んだ id を憶える**(#535 ②)── 戻せるのは直前の 1 回だけ

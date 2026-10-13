@@ -62,6 +62,8 @@ interface HarnessOptions {
   onBulkEntries?(d: Dispatcher): void;
   /** 履歴の書込を失敗させる(段の取り違えを検出する)。 */
   failRevisions?: boolean;
+  /** 失敗の面の口(`reportFailure`)を渡す ── 渡さない harness は従来どおり OP_FAILED に出る。 */
+  captureFailure?: boolean;
   /**
    * 🔴 既に在るノートの本文(#399 ②)。⚠ **渡さない harness では数えない** ──
    *   口が無い配線でも取込が壊れないことを、既存 41 件がそのまま見ている。
@@ -89,6 +91,8 @@ function harness(opts: HarnessOptions = {}) {
   const restoredChains: EncodedChainInput[] = [];
   let reloads = 0;
   let n = 0;
+  const importedCalls: string[][] = [];
+  const failures: Array<{ message: string; undoable: boolean | undefined }> = [];
 
   const d = new Dispatcher();
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [], relations: [] });
@@ -187,6 +191,10 @@ function harness(opts: HarnessOptions = {}) {
     },
     notify: (m) => notices.push(m),
     report: (n) => { reported = n; },
+    imported: (lids) => void importedCalls.push([...lids]),
+    ...(opts.captureFailure
+      ? { reportFailure: (message: string, undoable?: boolean) => void failures.push({ message, undoable }) }
+      : {}),
   };
   return {
     d,
@@ -201,6 +209,8 @@ function harness(opts: HarnessOptions = {}) {
     revChains,
     restoredChains,
     reloadCount: () => reloads,
+    importedCalls,
+    failures,
   };
 }
 
@@ -629,6 +639,37 @@ describe('importPkc2File (P6b 実行部)', () => {
     // 🔴 書込の途中で落ちたとき、「取込中…(N 件を書き込んでいます)」を消す(#1017 C5)
     expect(notices.some((n) => n.includes('件を書き込んでいます')), '前提が崩れた(書込の進行中を出していない)').toBe(true);
     expect(notices.at(-1), '失敗したのに進行中の字が残る').toBe('');
+  });
+
+  it('🔴 F1: 途中で失敗しても、書けた分の lid だけを憶え、失敗の面から取り消せる', async () => {
+    const { d, deps, written, importedCalls, failures } = harness({ failRelations: true, captureFailure: true });
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: 'a\n' },
+          { lid: 'b', title: 'b', archetype: 'text', body: 'b\n' },
+        ],
+        relations: [{ id: 'r1', from: 'a', to: 'b', kind: 'structural' }],
+      },
+      export_meta: {},
+    });
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(written.length, '前提: 2 件は書けている').toBe(2);
+    expect(importedCalls, '書けた分を憶えていない(片道)').toEqual([written.map((e) => e.lid)]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.undoable, '失敗の面に取り消しを付けていない').toBe(true);
+    expect(failures[0]!.message).toContain('取り込みを取り消す');
+    expect(failures[0]!.message).toContain('二重になります');
+  });
+
+  it('F1 対照群: 1 件も書けなかった失敗は何も憶えず、取り消しも付けない', async () => {
+    const { d, deps, importedCalls, failures } = harness({ captureFailure: true });
+    const file = new File(['<html>これは PKC2 の書き出しではない</html>'], 'x.html');
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(importedCalls).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.undoable).toBe(false);
   });
 
   it('[H-4] 取り込み中に編集が始まったら draft を殺さない(再読込を延期する)', async () => {

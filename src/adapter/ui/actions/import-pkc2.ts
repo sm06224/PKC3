@@ -10,6 +10,7 @@
  * 復号**前**の base64 も、使い終わったら参照を切って GC に返す(review M-9 ──
  * 「溜めない」だけでは不十分で、実測で asset 実体の 3.2 倍が常駐していた)。
  */
+import { errorText } from '@features/error-text';
 import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
@@ -155,7 +156,7 @@ export interface ImportDeps {
    */
   report?(notes: readonly string[]): void;
   /** 🔴 失敗の理由を「取り込み時の注意」の面へ(`import-failure.ts`)。 */
-  reportFailure?(message: string): void;
+  reportFailure?(message: string, undoable?: boolean): void;
   /**
    * 🔴 **取り込んだノートを画面に出す**(2026-08-05、user 報告
    * 「開いたら何も起きずに終わる」)。md 経路(`import-markdown.ts`)が使う。
@@ -378,11 +379,11 @@ export async function importPkc2File(
     if (progressShown) deps.notify?.('');
     progressShown = false;
   };
-  const fail = (msg: string): null => {
+  const fail = (msg: string, undoable = false): null => {
     clearProgress();
-    return failImport(dispatcher, deps, msg);
+    return failImport(dispatcher, deps, msg, undoable);
   };
-  const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+  const reason = (e: unknown): string => errorText(e);
   const phase = dispatcher.getState().phase;
   if (phase !== 'ready') {
     return fail(`${phaseBlockReason(phase)}取り込んでください`);
@@ -391,6 +392,9 @@ export async function importPkc2File(
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
   let entriesWritten = 0;
+  // 🔴 **disk に書けた lid だけ**(取り消しの対象)── 書けていない lid を消そうとしない。
+  //   `bulkUpsertEntries` が返った後にだけ埋める(途中で落ちた bulk は、どこまで書けたか分からないので空のまま)
+  let writtenLids: readonly string[] = [];
   const revStats = { added: 0, dropped: 0, skipped: 0 };
 
   try {
@@ -716,6 +720,7 @@ export async function importPkc2File(
     try {
       await deps.bulkUpsertEntries(rows);
       entriesWritten = rows.length;
+      writtenLids = rows.map((r) => r.lid);
       if (result.relations.length > 0) {
         stage = 'つながり';
         await deps.bulkUpsertRelations(result.relations);
@@ -772,10 +777,13 @@ export async function importPkc2File(
     } catch (e) {
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
+      // 🔴 書けた分は戻せるようにする(片道にしない)── `report` より先に憶える
+      if (entriesWritten > 0) deps.imported?.(writtenLids);
       return fail(
         entriesWritten > 0
-          ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります: ${reason(e)}`
+          ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります(「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`
           : `取り込みに失敗しました(ノートは 1 件も追加されていません): ${reason(e)}`,
+        entriesWritten > 0,
       );
     }
 
@@ -818,8 +826,10 @@ export async function importPkc2File(
   } catch (e) {
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
+      deps.imported?.(writtenLids);
       return fail(
-        `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります): ${reason(e)}`,
+        `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります。「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`,
+        true,
       );
     }
     // 🔑 対象外のファイルは壊れていない ── 「失敗しました」を前に付けず、断りとして出す(#1087)

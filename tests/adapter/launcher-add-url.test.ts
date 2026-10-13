@@ -187,3 +187,19 @@ describe('② 添付の名前を、その添付の画面から変える (#401)',
     void reduce;
   });
 });
+
+describe('アプリのタブで絞りが 0 件のとき、その場で外せる', () => {
+  it('🔴 「絞りを外す」が出て、押すと絞りが空になる / 絞りが無いときは出さない', () => {
+    const { d, r, q, region } = setup();
+    expect(region.querySelector('[data-pkc-action="clear-entry-filter"]'), '絞りが無いのに出ている').toBeNull();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ぜったいに無い名前zzz' });
+    r.render(d.getState());
+    expect(q('launcher-empty').textContent).toContain('一致するものがありません');
+    const btn = region.querySelector<HTMLButtonElement>('[data-pkc-action="clear-entry-filter"]');
+    expect(btn?.textContent, '0 件なのに外す道が無い').toBe('絞りを外す');
+    expect(btn?.title).not.toBe('');
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+    r.render(d.getState());
+    expect(region.querySelector('[data-pkc-action="clear-entry-filter"]')).toBeNull();
+  });
+});

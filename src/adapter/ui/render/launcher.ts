@@ -216,6 +216,18 @@ export class LauncherRenderer {
       empty.setAttribute('data-pkc-field', 'launcher-empty');
       empty.textContent = '絞り込みに一致するものがありません';
       list.append(empty);
+      /**
+       * 🔴 **行き止まりにしない**(連絡先・フォルダ・音と動画の面と同じ。受け手は `clear-entry-filter`)。
+       *   ⚠ 自分が打っていない語が探す欄に残っていることがある ── 外し方が画面から読み取れない。
+       *   この分岐は `q !== ''` のときだけなので、押しても何も起きない口にはならない。
+       */
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.setAttribute('data-pkc-action', 'clear-entry-filter');
+      clear.setAttribute('data-pkc-field', 'launcher-clear-filter');
+      clear.textContent = '絞りを外す';
+      clear.title = '一覧の絞り込みを空にして、アプリを全部出します。';
+      list.append(clear);
       return;
     }
 

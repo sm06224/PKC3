@@ -167,7 +167,7 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   const parsed = parseFrontmatter(text);
   // ⚠ cap 超過などで parse を諦めたときは `meta: {}` で返る ── **黙らせない**。
   // 題名や archetype が frontmatter にあるのに使われなかった、が静かに起きる
-  for (const w of parsed.warnings) warnings.push(`frontmatter: ${w.detail}`);
+  for (const w of parsed.warnings) warnings.push(`前書き: ${w.detail}`);
 
   const metaTitle = parsed.meta['title'];
   const heading = firstHeading(parsed.body);
@@ -186,7 +186,7 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   let archetype = 'text';
   if (typeof metaArchetype === 'string' && metaArchetype !== '') {
     if (ACCEPTED_ARCHETYPES.has(metaArchetype)) archetype = metaArchetype;
-    else warnings.push(`archetype "${metaArchetype}" は受けられないので text にしました`);
+    else warnings.push(`前書きのノートの種類「${metaArchetype}」は取り込めないので、ふつうのノートにしました`);
   }
 
   // ⚠ 走査は **原文**に対して行う ── frontmatter の値に書かれた `![](x.png)` は

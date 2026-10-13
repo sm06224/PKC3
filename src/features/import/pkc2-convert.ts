@@ -162,11 +162,29 @@ function validTimestamp(raw: string): string {
   return raw !== '' && !Number.isNaN(Date.parse(raw)) ? raw : '';
 }
 
+/** 注意の中で、ノートを指す字。ID ではなく題名で言う(題名が無ければ「題名の無いノート」)。 */
+function noteLabel(title: string): string {
+  return title === '' ? '題名の無いノート' : `「${title}」`;
+}
+
+/** 同じ理由のノートを 1 行に畳む(`import-vcf.ts` と同じ向き ── 件数が多くても行は増えない)。 */
+const FOLD_SHOW = 3;
+function foldNotes(reason: string, titles: readonly string[], suffix = ''): string | null {
+  if (titles.length === 0) return null;
+  const shown = titles.slice(0, FOLD_SHOW).map(noteLabel).join('、');
+  const rest = titles.length > FOLD_SHOW ? ` ほか ${titles.length - FOLD_SHOW} 件` : '';
+  return `${reason}: ${shown}${rest}${suffix}`;
+}
+
 export function convertPkc2Container(
   c: Pkc2Container,
   opts: ConvertOptions,
 ): ConvertResult {
   const warnings: string[] = [];
+  // 🔴 ノート 1 件ごとに 1 行ずつ並べない ── 集めておいて最後に 1 行へ畳む(F3)
+  let relabeledLids = 0;
+  const legacyInlined: string[] = [];
+  const convertFailed = new Map<string, string[]>();
   const rawEntries = Array.isArray(c.entries) ? c.entries : [];
   const assetsIn = c.assets && typeof c.assets === 'object' ? c.assets : {};
 
@@ -195,12 +213,13 @@ export function convertPkc2Container(
       if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
-      warnings.push(`ID が重複したので付け直しました: ${u.lid} → ${next}`);
+      relabeledLids++;
     } else {
       taken.add(u.lid);
       finalLidAt.push(u.lid);
     }
   }
+  if (relabeledLids > 0) warnings.push(`${relabeledLids} 件のノートは ID が重なっていたので付け直しました`);
   const finalLid = (lid: string): string => lidMap.get(lid) ?? lid;
 
   // ── asset keyMap(旧 3 系統 + 派生をすべて新 1 規則へ)
@@ -293,7 +312,7 @@ export function convertPkc2Container(
           }
           delete p.data;
           p.asset_key = newKey; // legacy は data 優先の規約だった ── bytes を正とする
-          if (!quiet) warnings.push(`古い形式の内蔵データを添付にしました: ${u.lid}`);
+          if (!quiet) legacyInlined.push(u.title);
         } else {
           const k = str(p.asset_key);
           if (k !== '' && keyMap.has(k)) p.asset_key = keyMap.get(k);
@@ -332,7 +351,10 @@ export function convertPkc2Container(
     try {
       body = getFlavor(u.archetype).fromPkc2?.(src) ?? src;
     } catch (e) {
-      if (!quiet) warnings.push(`変換失敗(text として保持): ${u.lid}: ${errorText(e)}`);
+      if (!quiet) {
+        const why = errorText(e);
+        convertFailed.set(why, [...(convertFailed.get(why) ?? []), u.title]);
+      }
       body = src;
     }
     // ⑤ 参照書換: lid → textlog permalink → asset key の順。
@@ -437,6 +459,13 @@ export function convertPkc2Container(
       .sort((a, b) => a.s.createdAt.localeCompare(b.s.createdAt) || a.i - b.i)
       .map((x) => x.s);
     revisionChains.push({ entryLid, snapshots: ordered });
+  }
+
+  const legacyNote = foldNotes('古い形式の内蔵データを添付にしました', legacyInlined);
+  if (legacyNote !== null) warnings.push(legacyNote);
+  for (const [why, titles] of convertFailed) {
+    const note = foldNotes('変換できなかったので本文のまま取り込みました', titles, `(${why})`);
+    if (note !== null) warnings.push(note);
   }
 
   return { entries, relations, assets: assetsOut, revisionChains, warnings };

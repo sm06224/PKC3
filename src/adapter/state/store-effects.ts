@@ -90,7 +90,7 @@ import type { SqliteExportedTable } from '@features/query/sqlite-ndjson';
 import { EMPTY_DUCK_COPY, copyDigestNotes, type DuckDbCopyReport } from '@features/query/duckdb-copy-report';
 // 🔴 手持ちのファイルも同じ選び所から開く(#854 段②)
 import { isSqlLocalFileLid } from '@features/query/sql-local-file';
-import { sqlRunFailureText } from '@features/query/sql-guard';
+import { duckRunFailureText, sqlRunFailureText } from '@features/query/sql-guard';
 import {
   captureItemsFrom,
   type CaptureSource,
@@ -1182,7 +1182,7 @@ export function connectStoreEffects(
             dispatcher.dispatch({
               type: 'SQL_GUEST_FAILED',
               lid,
-              error: e instanceof Error ? e.message : String(e),
+              error: errorText(e),
             });
           }
         });
@@ -1422,7 +1422,8 @@ export function connectStoreEffects(
                 type: 'SQL_RUN_FAILED',
                 token,
                 sql,
-                error: e instanceof Error ? e.message : String(e),
+                // 🔴 DuckDB の英語は、よく出る 3 つだけ日本語にする(元の文は括弧に残す)
+                error: duckRunFailureText(errorText(e)),
               });
             },
           );
