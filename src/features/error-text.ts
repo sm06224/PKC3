@@ -19,6 +19,11 @@ const ERROR_JA: readonly (readonly [RegExp, string])[] = [
   [/^[a-z-]+: (spawn failed|load failed$|message deserialization failed$)/, '裏で動く処理を起動できませんでした。ページを再読み込みして、もう一度お試しください'],
   // storage-worker.ts の版を読み出す所 ── 版の記録が欠けている / 壊れている
   [/^revision restore failed/, 'この版は読み出せませんでした(版の記録が欠けているか、読めない形になっています)'],
+  /**
+   * ブラウザ / SQLite が出す「空きが無い」── PKC3 が投げる物ではないが、出たときに次の手が要る。
+   * ⚠ ボタンの名前は画面の字(`commands.ts` の「使われていない添付を消す」)と揃える。
+   */
+  [/QuotaExceededError|SQLITE_FULL|disk is full|quota (has been )?exceeded/i, '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください'],
 ];
 
 /** 英語の理由を、分かる物だけ日本語にする(分からない物はそのまま)。 */
@@ -28,5 +33,7 @@ export function errorMessageJa(raw: string): string {
 }
 
 export function errorText(e: unknown): string {
+  // ⚠ ブラウザの DOMException は種類が name にだけ載る(message は「The quota has been exceeded.」など)
+  if (e instanceof Error && e.name === 'QuotaExceededError') return errorMessageJa(`QuotaExceededError: ${e.message}`);
   return errorMessageJa(e instanceof Error ? e.message : String(e));
 }

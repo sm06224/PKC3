@@ -27,8 +27,16 @@ describe('errorText(#1087)', () => {
     }
   });
 
+  it('🔴 空きが無いときは、次にすること(画面のボタンの名前)を言う', () => {
+    expect(errorMessageJa('SQLITE_FULL: database or disk is full')).toContain('使われていない添付を消す');
+    const q = new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    expect(errorText(q)).toContain('空き容量が足りません');
+    // ⚠ 案内するボタンが画面に実在する
+    expect(readFileSync('src/adapter/ui/render/commands.ts', 'utf8')).toContain("label: '使われていない添付を消す'");
+  });
+
   it('対照群: 知らない英語・ふつうの日本語はそのまま', () => {
-    expect(errorMessageJa('SQLITE_FULL')).toBe('SQLITE_FULL');
+    expect(errorMessageJa('SQLITE_CORRUPT')).toBe('SQLITE_CORRUPT');
     expect(errorMessageJa('通信失敗')).toBe('通信失敗');
   });
 
