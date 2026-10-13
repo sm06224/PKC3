@@ -737,6 +737,38 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(document.getElementById('body')!.textContent).not.toContain('attachment.asset_key');
   });
 
+  it('🔴 ノート間リンクは、このファイルの中のノートを開く / 入っていないノートへのリンクは字だけにする', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [
+              { lid: 'n1', title: '一つ目', body: '[次へ](entry:n2) と [外](entry:zz)\n' },
+              { lid: 'n2', title: '二つ目', body: '二つ目の本文\n' },
+            ],
+          }),
+          NOW,
+          (t) => Promise.resolve(renderMarkdown(t)),
+        )
+      ).blob,
+    );
+    expect(document.getElementById('title')!.textContent, '前提:先頭のノートが開いていない').toBe('一つ目');
+    const go = document.querySelector<HTMLAnchorElement>('#body a[data-pkc-entry-ref="entry:n2"]');
+    expect(go, '前提:ノート間リンクが描かれていない').not.toBeNull();
+    expect(go!.getAttribute('href'), 'entry: のまま残った(押しても何も起きない)').not.toMatch(/^entry:/);
+    go!.click();
+    expect(document.getElementById('title')!.textContent, '押しても開かない').toBe('二つ目');
+    expect(document.getElementById('body')!.textContent).toContain('二つ目の本文');
+    // 一覧の印も移る(押したノートが「いま見ている」になる)
+    const current = document.querySelector('#list [aria-current="true"]');
+    expect(current?.textContent).toBe('二つ目');
+    // 入っていないノート ── 押せる顔で残さない
+    document.querySelector<HTMLButtonElement>('#list button')!.click();
+    expect(document.querySelector('#body a[data-pkc-entry-ref="entry:zz"]'), '入っていないノートへのリンクが押せる顔で残った').toBeNull();
+    const outside = document.querySelector('#body [data-pkc-outside-note]');
+    expect(outside?.textContent).toBe('外');
+  });
+
   it('画像でない添付は保存できる導線にする(開けないまま黙らせない)', async () => {
     const body = '---\nattachment.name: memo.bin\nattachment.asset_key: ast-b\n---\n';
     await run(
