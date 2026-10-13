@@ -622,7 +622,16 @@ describe('2 ペインの面(描画)', () => {
      */
     expect(store.addBinding('dual-move-to-other', 'F10')).toBeNull();
     store.removeBinding('dual-move-to-other', 'F6');
-    r.render(booted());
+    /**
+     * ⚠ 門(#1087)は `entryMetas` の**中身**で開く ── 以前は「新しい Map」というだけで開いたので、
+     *   この test は割当の変更だけで再描画されることに頼っていた。割当は門の材料ではない
+     *   (いまも、設定で変えただけでは次の state 変化まで古い字が残る ── 報告に書いた)ので、
+     *   ここでは**門を開く別の変化**(無関係なノートの題名)を添えて描く。
+     */
+    const reopened = booted();
+    const metas2 = new Map(reopened.entryMetas);
+    metas2.set('c', { ...metas2.get('c')!, title: 'う2' });
+    r.render({ ...reopened, entryMetas: metas2 });
     expect(keyOf('dual-move'), '割当を変えても画面の字が変わらない').toBe('F10');
   });
 
@@ -733,7 +742,19 @@ describe('2 ペインの面(描画)', () => {
      */
     const armed: [string, (x: AppState) => AppState][] = [
       ['dual', (x) => ({ ...x, dual: reduce(x, { type: 'DUAL_TAB_ADD', side: 'left' }).state.dual })],
-      ['entryMetas', (x) => ({ ...x, entryMetas: new Map(x.entryMetas) })],
+      /**
+       * ⚠ 門(#1087)は参照ではなく**この面が読む列の指紋**で開く ── 中身が同じ新しい Map では
+       *   開かない(`dual-filer-gate.test.ts` が列ごとに見る)。ここは「題名が変わった Map では
+       *   歩く」(= entryMetas が門の材料に載っている)だけを見る。
+       */
+      [
+        'entryMetas',
+        (x) => {
+          const next = new Map(x.entryMetas);
+          next.set('a', { ...next.get('a')!, title: '別の題' });
+          return { ...x, entryMetas: next };
+        },
+      ],
       ['filterQuery', (x) => ({ ...x, filterQuery: 'あ' })],
       ['entrySort', (x) => ({ ...x, entrySort: 'title' })],
       /**

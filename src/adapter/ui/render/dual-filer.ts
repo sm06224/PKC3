@@ -334,7 +334,21 @@ export class DualFilerRenderer {
   private lastCommands = '';
   /** 入力の断面(参照で見る)。⚠ 下の門の材料 ── 増やしたらここにも足す。 */
   private lastDual: AppState['dual'] | null = null;
-  private lastMetas: AppState['entryMetas'] | null = null;
+  /** 🔑 `entryMetas` の参照ではなく、**この面が読む列だけの指紋**(`metaSignature`)。 */
+  private lastMetas: string | null = null;
+  /** `metaSignature` の控え(同じ `entryMetas`・年・並びの向きなら前の答えを返す)。 */
+  private metaMemo: {
+    metas: AppState['entryMetas'];
+    year: number;
+    byUpdated: boolean;
+    sig: string;
+  } | null = null;
+  /**
+   * 日付の字の控え(生の `updatedAt` → 画面の字)。⚠ 保存の ack では**1 件しか値が変わらない**ので、
+   * 残りは引き当てるだけで済む(3,000 件の日付解析が指紋の費用の大半だった)。年が変わったら、または件数の 2 倍を超えて古い値が溜まったら捨てる。
+   */
+  private dateText = new Map<string, string>();
+  private dateTextYear = 0;
   private lastRelations: AppState['relations'] | null = null;
   private lastFilter: string | null = null;
   private lastKinds: ReadonlySet<string> | null = null;
@@ -360,6 +374,57 @@ export class DualFilerRenderer {
     private readonly prefs: DualPrefsStore = appDualPrefs,
   ) {
     this.region = region;
+  }
+
+  /**
+   * 🔑 **この面が `entryMetas` から読む列だけの指紋**(#1087)。
+   * 保存の ack は `entryMetas` を**必ず新しい Map** に差し替え(`updatedAt` が動く)、参照で比べると
+   * 字が 1 つも変わらないのに `filerRows` を 2 ペイン分回していた(3,000 件で 1 描画 約 3.5 ms)。
+   * ⚠ 読む列は `lid` / `title`(行・帯・絞り込み・題名順)/ `archetype`(フォルダか・札・種類順)/
+   *   `entryOrder`(手動順・正準の親)/ `bodyChars`(大きさの列・大きさ順)/ `updatedAt` の 6 つ。
+   *   `createdAt` / `status` / `date` / `archived` は読まない。
+   *   ここに無い列をこの面が読み始めたら、**先にここへ足す**(足さないと描き直さない)。
+   * ⚠ `updatedAt` は**画面に出る形**(`formatListDate`)で入れる ── 同じ日の保存で字は変わらない。
+   *   ただし「更新」順のときは**生の値が並びを決める**ので、そのときだけ生の値を入れる。
+   * ⚠ 区切りは NUL(`SEP`)。同じ参照・年・向きなら前の答え(選ぶだけの描画で全件を回さない)。
+   */
+  private metaSignature(state: AppState): string {
+    const year = new Date().getFullYear();
+    const byUpdated = state.entrySort === 'updated';
+    const memo = this.metaMemo;
+    if (
+      memo !== null &&
+      memo.metas === state.entryMetas &&
+      memo.year === year &&
+      memo.byUpdated === byUpdated
+    )
+      return memo.sig;
+    if (this.dateTextYear !== year || this.dateText.size > state.entryMetas.size * 2 + 64) {
+      this.dateText.clear();
+      this.dateTextYear = year;
+    }
+    const dateOf = (raw: string | null): string => {
+      if (raw === null) return '';
+      let text = this.dateText.get(raw);
+      if (text === undefined) {
+        text = formatListDate(raw, year);
+        this.dateText.set(raw, text);
+      }
+      return text;
+    };
+    const parts: string[] = [];
+    for (const m of state.entryMetas.values())
+      parts.push(
+        m.lid,
+        m.title,
+        m.archetype,
+        String(m.entryOrder),
+        String(m.bodyChars),
+        byUpdated ? (m.updatedAt ?? '') : dateOf(m.updatedAt),
+      );
+    const sig = parts.join(SEP);
+    this.metaMemo = { metas: state.entryMetas, year, byUpdated, sig };
+    return sig;
   }
 
   render(state: AppState): void {
@@ -396,7 +461,7 @@ export class DualFilerRenderer {
       this.frame !== null &&
       !soloChanged &&
       state.dual === this.lastDual &&
-      state.entryMetas === this.lastMetas &&
+      this.metaSignature(state) === this.lastMetas &&
       state.relations === this.lastRelations &&
       state.filterQuery === this.lastFilter &&
       // 🔴 **種類の絞りも指紋**(#411)── 上と同じ理由
@@ -408,7 +473,7 @@ export class DualFilerRenderer {
     )
       return;
     this.lastDual = state.dual;
-    this.lastMetas = state.entryMetas;
+    this.lastMetas = this.metaSignature(state);
     this.lastRelations = state.relations;
     this.lastFilter = state.filterQuery;
     this.lastKinds = state.kindFilter;

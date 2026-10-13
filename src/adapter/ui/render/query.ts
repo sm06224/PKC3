@@ -44,7 +44,13 @@ export class QueryRenderer {
   private lastGroups: AppState['queryGroups'] = null;
   private lastKey: string | null = null;
   private lastSelected: string | null = null;
-  private lastMetas: AppState['entryMetas'] | null = null;
+  /** 🔑 `entryMetas` の参照ではなく、**この面が読む列だけの指紋**(`metaSignature`)。 */
+  private lastMetas: string | null = null;
+  private metaMemo: {
+    metas: AppState['entryMetas'];
+    groups: AppState['queryGroups'];
+    sig: string;
+  } | null = null;
   private lastFailed = false;
   /**
    * 🔑 **選択は Map で付け替える**(サイドバー / ファイラ / かんばんと同じ作法)。
@@ -65,19 +71,44 @@ export class QueryRenderer {
     this.region = region;
   }
 
+  /**
+   * 🔑 **この面が `entryMetas` から読む列だけの指紋**(#1087)。
+   * 保存の ack は `entryMetas` を必ず新しい Map に差し替え、参照で比べると表(最大 3,000 行)を
+   * **字が変わらないのに**毎回組み直していた。
+   * ⚠ 読むのは**組に載っている lid の題名と、在るか無いか**だけ(`title` と存在)。
+   *   他の列(`updatedAt` など)と、組に載っていないノートの変化は表に出ない。
+   *   ここに無い列をこの面が読み始めたら、**先にここへ足す**(足さないと描き直さない)。
+   * ⚠ 組(`queryGroups`)の差し替えは別の項で見ている。区切りは NUL のエスケープ。
+   */
+  private metaSignature(state: AppState): string {
+    const memo = this.metaMemo;
+    if (memo !== null && memo.metas === state.entryMetas && memo.groups === state.queryGroups)
+      return memo.sig;
+    const parts: string[] = [];
+    for (const group of state.queryGroups?.groups ?? [])
+      for (const lid of group.lids) {
+        const m = state.entryMetas.get(lid);
+        parts.push(m === undefined ? '\u0001' : m.title);
+      }
+    const sig = parts.join('\u0000');
+    this.metaMemo = { metas: state.entryMetas, groups: state.queryGroups, sig };
+    return sig;
+  }
+
   render(state: AppState): void {
+    const metaSig = this.metaSignature(state);
     const sameData =
       state.queryKeys === this.lastKeys &&
       state.queryGroups === this.lastGroups &&
       state.queryKey === this.lastKey &&
-      state.entryMetas === this.lastMetas &&
+      metaSig === this.lastMetas &&
       state.queryFailed === this.lastFailed;
     if (sameData && state.selectedLid === this.lastSelected) return;
     const selectionOnly = sameData;
     this.lastKeys = state.queryKeys;
     this.lastGroups = state.queryGroups;
     this.lastKey = state.queryKey;
-    this.lastMetas = state.entryMetas;
+    this.lastMetas = metaSig;
     this.lastFailed = state.queryFailed;
     const prevSelected = this.lastSelected;
     this.lastSelected = state.selectedLid;
