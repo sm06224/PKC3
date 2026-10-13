@@ -105,6 +105,7 @@ async function buildAndDownload(deps: SelfhostDeps): Promise<void> {
   }
   deps.download(selfhostZipName(deps.stamp()), zip.finish());
   deps.notify(
-    `zip をダウンロードしました。中の start-windows.cmd(Mac / Linux は start-mac-linux.sh)を開くと、${SELFHOST_ORIGIN} で使えます`,
+    // ⚠ Mac / Linux は .sh を 2 度押ししても動かないことがある(zip に実行してよい印を付けていない)── ターミナルで打つ形を言う(#1087)
+    `zip をダウンロードしました。中の start-windows.cmd を開くと(Mac / Linux はターミナルで sh start-mac-linux.sh と打つと)、${SELFHOST_ORIGIN} で使えます`,
   );
 }

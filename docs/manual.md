@@ -6083,7 +6083,7 @@ Office のタイルは取り込んだ端末にだけ出ます)。
 | パソコン | 開くもの | 追加で要るもの |
 |---|---|---|
 | **Windows** | `start-windows.cmd` を 2 度押し | ありません |
-| **Mac / Linux** | `start-mac-linux.sh` を 2 度押し(または端末で `sh start-mac-linux.sh`) | **Python 3** か **Node.js** のどちらか |
+| **Mac / Linux** | ターミナルで `sh start-mac-linux.sh` と打つ(2 度押しでは動かないことがあります) | **Python 3** か **Node.js** のどちらか |
 
 出てきた黒いウィンドウにアドレスが出るので、ブラウザで開いてください:
 

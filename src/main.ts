@@ -1993,7 +1993,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         builtAt: BUILT_AT,
       },
     }).catch((e: unknown) => {
-      showStatus(`自分のパソコンで動かす zip を作れませんでした: ${e instanceof Error ? e.message : String(e)}`, {
+      // ⚠ 次にすることを先に言う。内部の file 名や HTTP の番号は括弧へ(#1087)
+      showStatus(`自分のパソコンで動かす zip を作れませんでした。ネットワークを確かめて、ページを再読み込みしてから、もう一度押してください(${e instanceof Error ? e.message : String(e)})`, {
         kind: 'problem',
       });
     });
@@ -3402,7 +3403,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         showStatus(
           rang
             ? '予定の時刻に、この音で知らせます(PKC3 を開いている間だけです)'
-            : 'この端末では音を出せませんでした。時間になったら画面の下のステータスバーでお知らせします',
+            : 'この端末では音を出せませんでした。時間になったら画面の下にバーを出してお知らせします',
         );
       });
     },

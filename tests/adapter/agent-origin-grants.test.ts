@@ -161,7 +161,7 @@ describe('ダイアログの 1 行目が origin を名指しする', () => {
   it('from あり: origin がそのまま入る(切らない)/ なし: 従来の字', () => {
     expect(agentAskNote({ action: 'tags', from: A })).toContain(`${A} のページに組み込まれた AI が`);
     expect(agentAskNote({ action: 'append', title: 't', from: A })).toContain(`${A} のページに組み込まれた AI が、『t』の末尾`);
-    expect(agentAskNote({ action: 'tags' })).toContain('ブラウザの AI が、ノートを探して');
+    expect(agentAskNote({ action: 'tags' })).toContain('ブラウザの AI が、タグの一覧を見ようとしています');
     const long = `https://${'x'.repeat(80)}.test`;
     expect(agentAskNote({ action: 'read', title: 't', from: long })).toContain(long);
   });

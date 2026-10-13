@@ -104,7 +104,8 @@ export function agentAskNote(target: AgentTarget): string {
     case 'read':
       return `${who} が、『${agentLabel(target.title)}』を読もうとしています。許すと、そのノートの本文が AI の提供元へ送られます。`;
     case 'tags':
-      return `${who} が、ノートを探して読もうとしています。許すと、見つかったノートの本文が AI の提供元へ送られます。`;
+      // 🔑 頼まれたこと(タグの一覧)を先に言い、許す範囲が探す・読むと同じことを続ける(#1087)
+      return `${who} が、タグの一覧を見ようとしています。許すと、ノートを探して読むこともできるようになり、見つかったノートの本文が AI の提供元へ送られます。`;
     case 'create':
       return `${who} が、『${agentLabel(target.title)}』というノートを作ろうとしています。`;
     case 'append':
