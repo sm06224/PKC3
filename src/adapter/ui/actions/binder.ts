@@ -1037,6 +1037,18 @@ const leftAtRoot = (before: AppState, after: AppState): number => {
   return n;
 };
 
+/**
+ * ゴミ箱へ移したノートへリンクを張っていた、ほかのノートの数(字)。⚠ 参照元は選んでいるノートの分しか引いていない
+ * (`state.backlinks`)── 引けていなければ空(言わない)。打ち切られていたら「N 件以上」。
+ */
+const linkedFromText = (before: AppState, after: AppState, lid: string): string => {
+  const back = before.backlinks;
+  if (!back || back.lid !== lid) return '';
+  const n = back.lids.filter((l) => l !== lid && after.entryMetas.has(l)).length;
+  if (n === 0) return '';
+  return back.truncated ? `${String(n)} 件以上` : `${String(n)} 件`;
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
   lids: readonly string[],
@@ -4407,7 +4419,7 @@ function selectEntryOrExplain(
     //   「ノートのノートが見つかりません」になる(UX レビュー 2026-08-28)
     // 🔴 押す前の吹き出し(`MISSING_LINK_TITLE`)と同じ手掛かりを添える(#1087 の見直し 2026-10-13)──
     //    押した後の字から「ゴミ箱にあれば戻せます」が消えると、どこを探せばよいかが分からない
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます)` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)` });
     return false;
   }
   dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
@@ -7683,7 +7695,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const before = dispatcher.getState();
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
     const after = dispatcher.getState();
-    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after));
+    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after), linkedFromText(before, after, lid));
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。

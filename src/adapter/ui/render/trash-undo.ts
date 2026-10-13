@@ -39,9 +39,17 @@ let pending: Pending | null = null;
  * 🔴 **フォルダを移したら、中のノートがどうなったかも言う**(#1087 の見直し 2026-10-13)── 中のノートは
  *   ゴミ箱へは入らず、親を失ってルートに出る。言わないと「中身ごと消えた」と読まれる。
  */
-export function trashMessage(titles: readonly string[], toRoot = 0): string {
+export function trashMessage(titles: readonly string[], toRoot = 0, linkedFrom = ''): string {
   const head = titles.length === 1 ? `「${titles[0]}」をゴミ箱へ移しました` : `${String(titles.length)} 件をゴミ箱へ移しました`;
-  return toRoot > 0 ? `${head}(中のノート ${String(toRoot)} 件は消えずにルートに出ています)` : head;
+  /**
+   * 🔴 **ほかのノートから張られたリンクが開けなくなることも言う**(#1087 の見直し 2026-10-13)── 確認を出さないので、
+   *   議事録の側のリンクが点線になったことに後から気づいていた。⚠ 件数は呼び手が字で渡す(打ち切りのとき「N 件以上」)。
+   */
+  const notes = [
+    ...(toRoot > 0 ? [`中のノート ${String(toRoot)} 件は消えずにルートに出ています`] : []),
+    ...(linkedFrom !== '' ? [`${linkedFrom}のノートからのリンクは、戻すまで開けません`] : []),
+  ];
+  return notes.length > 0 ? `${head}(${notes.join(' / ')})` : head;
 }
 
 /** 持っている物を捨て、知らせがまだ載っていれば降ろす。 */
@@ -75,12 +83,13 @@ export function offerTrashUndo(
   dispatcher: Dispatcher,
   moved: readonly { readonly lid: string; readonly title: string }[],
   toRoot = 0,
+  linkedFrom = '',
 ): void {
   if (moved.length === 0) return;
   clearTrashOffer();
   const p: Pending = {
     lids: moved.map((m) => m.lid),
-    message: trashMessage(moved.map((m) => m.title), toRoot),
+    message: trashMessage(moved.map((m) => m.title), toRoot, linkedFrom),
     dispatcher,
     timer: null,
   };

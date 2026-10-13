@@ -339,6 +339,17 @@ describe('delete (P3-7a)', () => {
     expect(d.getState().notice).toBe('「t-f」をゴミ箱へ移しました(中のノート 2 件は消えずにルートに出ています)');
   });
 
+  it('🔴 ほかのノートからリンクされているノートを移したら、そのリンクが開けなくなることも言う', async () => {
+    const { d, q } = setup([meta('a', 1), meta('b', 2), meta('c', 3)], { a: 'A', b: 'B', c: 'C' });
+    q<HTMLElement>('[data-pkc-entry="b"]')!.click();
+    await tick();
+    d.dispatch({ type: 'BACKLINKS_LOADED', lid: 'b', lids: ['a', 'c'], truncated: false });
+    expect(d.getState().backlinks?.lids, '前提: 参照元を持っていない').toEqual(['a', 'c']);
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await tick(20);
+    expect(d.getState().notice).toBe('「t-b」をゴミ箱へ移しました(2 件のノートからのリンクは、戻すまで開けません)');
+  });
+
   it('🔴 編集中は消さずに理由を出す(確認より前に断る ── 無言にしない)', async () => {
     const { d, q, deleted } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
