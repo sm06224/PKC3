@@ -885,6 +885,30 @@ describe('RowSwap — 範囲差し替え(S6)', () => {
     }
   });
 
+  /** 🔑 対応しているかは窓ごとに 1 回だけ聞く(#1087。打鍵のたびに 2 回聞いていた)。 */
+  it('🔑 打鍵を重ねても、CSS.supports は最初の 1 回ぶん(2 回)しか呼ばない', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    let asked = 0;
+    vi.stubGlobal('CSS', {
+      supports: (p: string, v?: string) => {
+        asked += 1;
+        return p === 'field-sizing' && v === 'content';
+      },
+    });
+    try {
+      for (const v of ['い', 'いち', 'いち\nに', 'いち\nに\nさん']) {
+        ta.value = v;
+        ta.dispatchEvent(new Event('input'));
+      }
+      expect(ta.hasAttribute('data-pkc-autosize'), '前提: 任せる経路を通っていない').toBe(true);
+      expect(asked, '打鍵のたびに聞き直している').toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('field-sizing が効かないなら、これまでどおり rows を数える(対照群)', () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));

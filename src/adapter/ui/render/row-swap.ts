@@ -127,10 +127,21 @@ const AUTOSIZE_ATTR = 'data-pkc-autosize';
  * ⚠ **ありえない値に偽を返すことも見る** ── 版面を持たない環境(happy-dom)の `CSS.supports` は
  *   何を聞いても真を返すので、それだけで信じると「伸ばすのを任せたのに、誰も伸ばさない」形になる。
  */
+/**
+ * 答えの控え(`CSS` の object ごと。#1087)。⚠ 打鍵のたびに `CSS.supports` を 2 回呼んでいた
+ *   (実測で打鍵ごとの上位)── 同じ窓の答えは変わらない。object ごとなので、差し替えた `CSS`
+ *   (別の窓・test の差し替え)には新しく聞く。
+ */
+const fieldSizingAnswers = new WeakMap<object, boolean>();
+
 function fieldSizingSupported(ta: HTMLTextAreaElement): boolean {
   const css = ta.ownerDocument.defaultView?.CSS;
   if (typeof css?.supports !== 'function') return false;
-  return css.supports('field-sizing', 'content') && !css.supports('field-sizing', 'pkc-not-a-value');
+  const known = fieldSizingAnswers.get(css);
+  if (known !== undefined) return known;
+  const ok = css.supports('field-sizing', 'content') && !css.supports('field-sizing', 'pkc-not-a-value');
+  fieldSizingAnswers.set(css, ok);
+  return ok;
 }
 
 /**
