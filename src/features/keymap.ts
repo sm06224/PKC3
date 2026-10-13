@@ -2084,11 +2084,36 @@ export function matchCommand(
   bindings: KeymapBindings,
 ): string | null {
   if (chord === null) return null;
-  const s = chordToString(chord);
+  return chordIndexOf(bindings, context).get(chordToString(chord)) ?? null;
+}
+
+/**
+ * 割当 × 面 → 「正規化した和音 → コマンド id」の索引(#1087)。
+ * ⚠ 直す前は打鍵のたびに全コマンド(300 件超)の割当を `sameChord` で読み直していた(実測で
+ *   打鍵ごとの JS の上位)。割当の object は変わるたびに作り直される(`KeymapStore` の `cache`)ので、
+ *   **object ごとに**索引を憶える(WeakMap ── 古い割当と一緒に捨てられる)。
+ * 🔑 同じ和音が 2 つに当たるときは、**表の先に在るほう**を返す(直す前の `for … return` と同じ)。
+ */
+const chordIndexes = new WeakMap<KeymapBindings, Map<KeyContext, Map<string, string>>>();
+
+function chordIndexOf(bindings: KeymapBindings, context: KeyContext): Map<string, string> {
+  let byContext = chordIndexes.get(bindings);
+  if (byContext === undefined) {
+    byContext = new Map();
+    chordIndexes.set(bindings, byContext);
+  }
+  let index = byContext.get(context);
+  if (index !== undefined) return index;
+  index = new Map();
   for (const c of KEY_COMMANDS) {
     if (!c.contexts.includes(context)) continue;
-    const list = bindings[c.id] ?? c.defaults;
-    if (list.some((b) => sameChord(b, s))) return c.id;
+    for (const b of bindings[c.id] ?? c.defaults) {
+      const parsed = chordFromString(b);
+      if (parsed === null) continue;
+      const norm = chordToString(parsed);
+      if (!index.has(norm)) index.set(norm, c.id);
+    }
   }
-  return null;
+  byContext.set(context, index);
+  return index;
 }
