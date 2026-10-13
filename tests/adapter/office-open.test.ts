@@ -69,6 +69,7 @@ function make(opts: {
   installed?: boolean;
   cap?: OfficeCapability;
   asset?: Uint8Array | null | 'throw';
+  notes?: string[];
 } = {}) {
   const officeWindow = fakeWindow();
   const readAsset = vi.fn(async () => {
@@ -80,6 +81,7 @@ function make(opts: {
     isPackInstalled: () => opts.installed ?? true,
     readAsset,
     capability: () => opts.cap ?? OK,
+    ...(opts.notes ? { notify: (t: string) => void opts.notes!.push(t) } : {}),
   });
   return { opener, officeWindow, readAsset };
 }
@@ -186,6 +188,16 @@ describe('createOfficeOpener', () => {
     await readAsset.mock.results[0]!.value;
     await Promise.resolve();
     expect(officeWindow.provided, '空は渡さない').toEqual([]);
+  });
+
+  it('🔴 読み出せなかったら、そう言う(窓だけ開いて黙らない ── #1087 の見直し 2026-10-13)', async () => {
+    const notes: string[] = [];
+    const { opener, officeWindow, readAsset } = make({ asset: new Uint8Array(0), notes });
+    opener.open(DOCX);
+    await readAsset.mock.results[0]!.value;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(officeWindow.provided, '前提: 渡していない').toEqual([]);
+    expect(notes.some((n) => n.includes('の中身を読み出せませんでした')), '黙っている').toBe(true);
   });
 });
 

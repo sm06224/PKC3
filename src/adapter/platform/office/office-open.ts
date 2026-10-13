@@ -161,7 +161,11 @@ export function createOfficeOpener(deps: OfficeOpenerDeps): OfficeOpener {
       // 🔴 控えの版を頼まれたら先に読む。読めなければ保存済みの版へ戻る(開けなくしない)
       const shadowSrc = wantShadow ? await loadShadow(target) : null;
       const loaded = shadowSrc ?? (await load(target));
-      if (loaded === null) return;
+      if (loaded === null) {
+        // 🔴 **読み出せなかったことを言う**(#1087 の見直し 2026-10-13)── 窓は開いても文書が来ず、PKC3 の側は黙っていた
+        deps.notify?.(`「${target.name}」の中身を読み出せませんでした(添付が消えているか、読めない形です)`);
+        return;
+      }
       const { bytes, images } = loaded;
       const fromShadow = shadowSrc !== null;
       // 🔴 何で開くかを言う(#1228 段 2)。⚠ **開けた版**を言う ── 控えを頼まれて読めなかったときは、保存済みの版で開くと言う

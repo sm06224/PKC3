@@ -94,15 +94,10 @@ describe('officeEntry', () => {
     expect(e.kind).toBe('setup');
     expect(e.kind === 'setup' && e.reason).toContain(OFFICE_PACK_APPROX);
     /**
-     * 🔴 **無い場所を案内しない**(2026-08-11、O3-c)。設置の面は O6 でできる ──
-     * それまで「設定から」と書くと、user は**無い物を探す**
-     * (CLAUDE.md「マニュアルが撤去済みの場所を案内していない」と同じ型)。
-     * 🔑 O6 で面ができたら**この assert を裏返す**(場所を名指しする側へ)。
+     * 🔴 **取り込む場所を名指しする**(#1087 の見直し 2026-10-13。O3-c の予告どおり裏返した)。
+     * ⚠ 場所の言い方は、同じ添付の「画面に出せません」の文(`detail.ts`)と揃える ── 2 通りの言い方にしない。
      */
-    expect(
-      e.kind === 'setup' && e.reason,
-      'まだ無い設置の面を案内している',
-    ).not.toContain('設定');
+    expect(e.kind === 'setup' && e.reason, '取り込む場所を言っていない').toContain('システム → 保存領域 → Office 表示');
   });
 
   it('🔴 使えない環境は「未配備」より先に見る(77MB を無駄に取らせない)', () => {
