@@ -116,14 +116,11 @@ export function officeEntry(input: OfficeEntryInput): OfficeEntry {
       kind: 'setup',
       label: 'Office 表示を使えるようにする',
       /**
-       * ⚠ **無い場所を案内しない**(2026-08-11、O3-c)。ここは以前
-       * 「設定から入れてください」と書いていたが、**設置の導線はまだ無い**
-       * (O6)── 案内した先に何も無いのは、黙って何も起きないのと同じ実害である
-       * (CLAUDE.md「実体を作ってから導線を書く」)。
-       * 🔑 O6 で設置の面ができたら、**ここを場所付きの文へ戻す**
-       * (`tests/features/office-entry.test.ts` が場所の名指しを見張っている)。
+       * 🔴 **取り込む場所を名指しする**(#1087 の見直し 2026-10-13)── 以前は設置の面がまだ無かったので場所を書かなかった
+       *   (O3-c「無い場所を案内しない」)。面は `office-pack-panel.ts`(システム → 保存領域 → Office 表示)にできたので、
+       *   予告どおり場所付きの文へ戻す。同じ添付の「画面に出せません」の文(`detail.ts`)と同じ場所の言い方にする。
        */
-      reason: `Office 表示には一式(${OFFICE_PACK_APPROX})が要ります。まだ入っていません。`,
+      reason: `Office 表示には一式(${OFFICE_PACK_APPROX})が要ります。まだ入っていません。システム → 保存領域 → Office 表示 で取り込むと開けます。`,
     };
   }
   return { kind: 'open', label: 'Office で開く' };
