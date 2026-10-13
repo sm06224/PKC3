@@ -34,10 +34,14 @@ interface Pending {
 
 let pending: Pending | null = null;
 
-/** 画面に出す 1 行。1 件は題名つき、複数は件数。 */
-export function trashMessage(titles: readonly string[]): string {
-  if (titles.length === 1) return `「${titles[0]}」をゴミ箱へ移しました`;
-  return `${String(titles.length)} 件をゴミ箱へ移しました`;
+/**
+ * 画面に出す 1 行。1 件は題名つき、複数は件数。
+ * 🔴 **フォルダを移したら、中のノートがどうなったかも言う**(#1087 の見直し 2026-10-13)── 中のノートは
+ *   ゴミ箱へは入らず、親を失ってルートに出る。言わないと「中身ごと消えた」と読まれる。
+ */
+export function trashMessage(titles: readonly string[], toRoot = 0): string {
+  const head = titles.length === 1 ? `「${titles[0]}」をゴミ箱へ移しました` : `${String(titles.length)} 件をゴミ箱へ移しました`;
+  return toRoot > 0 ? `${head}(中のノート ${String(toRoot)} 件は消えずにルートに出ています)` : head;
 }
 
 /** 持っている物を捨て、知らせがまだ載っていれば降ろす。 */
@@ -70,12 +74,13 @@ export function currentTrashOffer(): {
 export function offerTrashUndo(
   dispatcher: Dispatcher,
   moved: readonly { readonly lid: string; readonly title: string }[],
+  toRoot = 0,
 ): void {
   if (moved.length === 0) return;
   clearTrashOffer();
   const p: Pending = {
     lids: moved.map((m) => m.lid),
-    message: trashMessage(moved.map((m) => m.title)),
+    message: trashMessage(moved.map((m) => m.title), toRoot),
     dispatcher,
     timer: null,
   };
