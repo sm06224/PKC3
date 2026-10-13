@@ -818,9 +818,13 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
     const th2 = t.querySelector<HTMLElement>('thead th:last-child')!.getBoundingClientRect();
     const td2 = body.querySelector<HTMLElement>('td:last-child')!.getBoundingClientRect();
     const cs = getComputedStyle(body);
+    const chunk = getComputedStyle(body.parentElement!);
     return {
       display: cs.display,
       cv: cs.contentVisibility,
+      contain: cs.contain,
+      chunkCv: chunk.contentVisibility,
+      chunks: t.querySelectorAll('tbody').length,
       height: body.getBoundingClientRect().height,
       // 見出しの列と行の列が揃っている(格子の列が表の列と同じ幅・同じ位置)
       thX: th2.x,
@@ -831,7 +835,11 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
     };
   });
   expect(look.display, '行が格子になっていない').toBe('grid');
-  expect(look.cv, '行に content-visibility: auto が効いていない').toBe('auto');
+  // 🔑 画面外を組まない指定は 50 行の塊(tbody)に付く ── 行ごとだと行の数だけ見張りが張られる(#1087)
+  expect(look.chunkCv, '塊に content-visibility: auto が効いていない').toBe('auto');
+  expect(look.cv, '行にも content-visibility が残っている(行の数だけ見張りが張られる)').toBe('visible');
+  expect(look.contain, '行の閉じ込めが無い(文字が 1px ずれる)').toContain('layout');
+  expect(look.chunks, '322 行が 50 行ずつの塊に分かれていない').toBe(7);
   expect(Math.abs(look.height - 26), `行の高さが 26px から動いている(${look.height})`).toBeLessThan(0.6);
   expect(Math.abs(look.thX - look.tdX), '見出しと行の「更新日」の列の位置が揃っていない').toBeLessThan(0.6);
   expect(Math.abs(look.thW - look.tdW), '見出しと行の「更新日」の列の幅が揃っていない').toBeLessThan(0.6);
