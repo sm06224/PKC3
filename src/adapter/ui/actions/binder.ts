@@ -17399,7 +17399,29 @@ export function bindActions(
      *   これで壊れていた)。
      */
     if (!root.isConnected) return;
-    if (ev.key !== 'Escape' || !contextMenuOpen(root)) return;
+    if (!contextMenuOpen(root)) return;
+    /**
+     * 🔴 **右クリックのメニューも ↑↓ / Home / End で項目を移れる**(#1087)。`onCreateMenuKey` と同じ形 ──
+     *   押せない項目は飛ばし、端は回る。焦点が項目の外に在るときは握らない。
+     */
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) {
+      const menu = root.querySelector<HTMLElement>('[data-pkc-region="context-menu"]');
+      const t = ev.target;
+      if (menu === null || !(t instanceof HTMLElement) || !menu.contains(t)) return;
+      const items = [...menu.querySelectorAll<HTMLButtonElement>('button[data-pkc-action]:not(:disabled)')];
+      if (items.length === 0) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      if (ev.key === 'Home') items[0]?.focus();
+      else if (ev.key === 'End') items[items.length - 1]?.focus();
+      else {
+        const idx = items.indexOf(root.ownerDocument.activeElement as HTMLButtonElement);
+        const dir = ev.key === 'ArrowDown' ? 1 : -1;
+        items[idx === -1 ? 0 : (idx + dir + items.length) % items.length]?.focus();
+      }
+      return;
+    }
+    if (ev.key !== 'Escape') return;
     closeContextMenu(root);
     /**
      * 🔴 **この 1 段だけを閉じ、後続の `document` の keydown 聞き手には渡さない**

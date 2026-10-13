@@ -147,6 +147,8 @@ function snapshotScroll(from: Element | null, stop: HTMLElement): Array<{ el: El
  * 🔑 **その `scroll` は、メニューを開いた「後に」動いたものか**(#875)。
  * @returns `true` = 開いた時点から**1px も動いていない**(= 閉じる理由が無い)
  */
+const restoreBase = new WeakMap<HTMLElement, Element | null>();
+
 export function scrollUnchangedSinceOpen(root: HTMLElement, target: EventTarget | null): boolean {
   const base = scrollBase.get(root);
   if (base === undefined) return false;
@@ -163,7 +165,9 @@ export function openContextMenu(
   carry: Readonly<Record<string, string>> = {},
 ): OpenMenu | null {
   if (items.length === 0) return null;
-  closeContextMenu(root);
+  // ⚠ 置き換えるときは焦点を返さない(直後に新しいメニューが先頭へ取る)
+  menuOf(root)?.remove();
+  restoreBase.delete(root);
 
   const el = root.ownerDocument.createElement('div');
   el.setAttribute('data-pkc-region', REGION);
@@ -332,6 +336,7 @@ export function openContextMenu(
    *   焦点の送りは**ここへ来る前に済んでいる**ので、いま読めば「送った後」の値になる。
    */
   scrollBase.set(root, snapshotScroll(restoreTo, root));
+  restoreBase.set(root, restoreTo);
 
   const close = (): void => {
     el.remove();
@@ -355,7 +360,22 @@ function menuOf(root: HTMLElement): Element | null {
 
 /** 出ているメニューを畳む(出ていなければ何もしない)。 */
 export function closeContextMenu(root: HTMLElement): void {
-  menuOf(root)?.remove();
+  const menu = menuOf(root);
+  if (menu === null) return;
+  /**
+   * 🔴 **閉じたら、開く前に居た所へ焦点を返す**(#1087)。⚠ `openContextMenu` が返す `close()` は
+   *   これをやるが、binder は `closeContextMenu(root)` で閉じるので、Esc でも項目を選んでも
+   *   焦点が <body> へ落ち、矢印キーが効かなくなっていた。
+   * ⚠ **奪わない** ── 焦点がメニューの中か <body> のときだけ返す(別の所を押して閉じたなら、
+   *   押した先が焦点を持っているのでそのまま)。
+   */
+  const doc = root.ownerDocument;
+  const active = doc.activeElement;
+  const mine = active === null || active === doc.body || menu.contains(active);
+  const back = restoreBase.get(root) ?? null;
+  restoreBase.delete(root);
+  menu.remove();
+  if (mine && back instanceof HTMLElement && back.isConnected) back.focus();
 }
 
 /** 出ているか。⚠ test と binder が同じ問いに 2 つの答えを持たないため。 */
