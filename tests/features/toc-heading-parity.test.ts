@@ -274,3 +274,11 @@ describe('目次と本文の見出しは同じ読み手から出る', () => {
     expect(totalItems, 'goldens の目次に項目が 1 つも無い').toBeGreaterThan(50);
   });
 });
+
+describe(':::toc の見出しラベル(#1087)', () => {
+  it('🔴 他の面(書き出し・情報ペイン)と同じ「目次」で、英語の Contents ではない', () => {
+    const html = renderMarkdown(':::toc\n:::\n\n# あ\n');
+    expect(html).toContain('<span class="pkc-toc-label">目次</span>');
+    expect(html).not.toContain('Contents');
+  });
+});

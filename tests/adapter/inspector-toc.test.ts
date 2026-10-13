@@ -31,6 +31,7 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { extractHeadingsFromMarkdown } from '../../src/features/markdown/markdown-toc';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 /**
  * 🔴 見出しの抽出の回数を数える(#1467 段 3-i)── 本文の字が同じ描き直しでは抽出しない、を pin する。
@@ -466,5 +467,58 @@ describe('描き直しを待ってから飛ぶ(#517)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * 🔴 目次の行は、**描かれた本文の見出し**と一致する(#1087)。
+ * 🔑 期待値は「描いた HTML の h1〜h3 の id」── 実装と同じ読み手から作らない。
+ */
+describe('目次の行 = 描かれた見出し(#1087)', () => {
+  const BODY2 = [
+    '# 表の章',
+    '',
+    ':::comment',
+    '## 隠れた節',
+    ':::',
+    '',
+    '%%%',
+    '## 隠れた節 2',
+    '%%%',
+    '',
+    '%%## 一行だけ隠す%%',
+    '',
+    '線の見出し',
+    '=====',
+    '',
+    '> ## 引用の中',
+    '',
+    '- ## 箇条の中',
+    '',
+    '## 重複',
+    '',
+    '## 重複',
+  ].join('\n');
+
+  function renderedIds(body: string): string[] {
+    const div = document.createElement('div');
+    div.innerHTML = renderMarkdown(body);
+    return [...div.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]')].map((h) => h.id);
+  }
+
+  it('🔴 隠したブロックの見出しは行にならず、setext・引用・リストの見出しは行になる', () => {
+    const { root } = setup(BODY2);
+    const labels = links(root).map((b) => b.textContent);
+    expect(labels).not.toContain('隠れた節');
+    expect(labels).not.toContain('隠れた節 2');
+    expect(labels).not.toContain('一行だけ隠す');
+    expect(labels).toContain('線の見出し');
+  });
+
+  it('🔴 行の印が、描かれた見出しの id と同じ順・同じ綴り(重複の連番も)', () => {
+    const { root } = setup(BODY2);
+    const slugs = links(root).map((b) => b.getAttribute('data-pkc-toc-slug'));
+    expect(renderedIds(BODY2).length, '描画側が 0 件では突合にならない').toBeGreaterThanOrEqual(5);
+    expect(slugs).toEqual(renderedIds(BODY2));
   });
 });

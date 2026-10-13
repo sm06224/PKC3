@@ -122,7 +122,7 @@ export function estimateReadingTime(markdown: string): ReadingTimeEstimate {
     const estimatedMinutes = cjkCount / 500 + wordCount / 200;
     const minutes = Math.max(1, Math.ceil(estimatedMinutes));
     const formattedChars = charCount.toLocaleString('ja-JP');
-    result = { minutes, charCount, label: `約 ${minutes} 分 (${formattedChars} 文字)` };
+    result = { minutes, charCount, label: `読了 約 ${minutes} 分 (${formattedChars} 文字)` };
   }
   return result;
 }

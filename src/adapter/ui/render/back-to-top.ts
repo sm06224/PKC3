@@ -32,8 +32,8 @@ export function installBackToTop(
   const button = doc.createElement('button');
   button.className = 'pkc-back-to-top';
   button.setAttribute('type', 'button');
-  button.setAttribute('aria-label', 'ページ先頭へ戻る');
-  button.setAttribute('title', 'ページ先頭へ戻る');
+  button.setAttribute('aria-label', '本文の先頭へ戻る');
+  button.setAttribute('title', '本文の先頭へ戻る');
 
   const icon = doc.createElement('span');
   icon.className = 'pkc-back-to-top-icon';

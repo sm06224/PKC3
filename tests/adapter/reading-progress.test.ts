@@ -27,7 +27,7 @@ describe('reading progress indicator (Issue #1125)', () => {
     expect(wrapper).not.toBeNull();
     expect(bar).not.toBeNull();
     expect(wrapper?.getAttribute('role')).toBe('progressbar');
-    expect(wrapper?.getAttribute('aria-label')).toBe('読書進捗');
+    expect(wrapper?.getAttribute('aria-label')).toBe('読み進み具合');
     expect(wrapper?.getAttribute('aria-valuenow')).toBe('0');
     expect(wrapper?.classList.contains('pkc-visible')).toBe(false);
     expect(bar?.style.width).toBe('0%');

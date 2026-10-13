@@ -27,8 +27,8 @@ describe('back-to-top floating button (Issue #1121)', () => {
 
     const btn = container.querySelector<HTMLButtonElement>('.pkc-back-to-top');
     expect(btn).not.toBeNull();
-    expect(btn?.getAttribute('aria-label')).toBe('ページ先頭へ戻る');
-    expect(btn?.getAttribute('title')).toBe('ページ先頭へ戻る');
+    expect(btn?.getAttribute('aria-label')).toBe('本文の先頭へ戻る');
+    expect(btn?.getAttribute('title')).toBe('本文の先頭へ戻る');
     expect(btn?.classList.contains('pkc-visible')).toBe(false);
 
     handle.dispose();
