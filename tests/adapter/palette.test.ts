@@ -43,7 +43,7 @@ const tick = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-function setup() {
+function setup(services: Parameters<typeof bindActions>[2] = {}) {
   document.body.innerHTML = '';
   resetAppDialogForTest();
   const root = document.createElement('div');
@@ -56,7 +56,7 @@ function setup() {
     sent.push(a);
     return raw(a);
   }) as typeof d.dispatch;
-  bindActions(root, d);
+  bindActions(root, d, services);
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
   sent.length = 0;
   return { root, d, sent };
@@ -388,6 +388,20 @@ describe('編集中の記法をパレットから入れる(#425 段②-b)', () =
     await tick();
     await tick();
     expect(ta.value, '計算にならないのに本文が変わった').toBe('2^3');
+  });
+
+  /** 🔴 **式の無い行で頼まれたら、黙らずに理由を出す**(#1087 ── 打っているときの Enter とは違い、user が明示した)。 */
+  it('🔴 式の無い行で選ぶと、計算できない理由が出る (#1087)', async () => {
+    const said: string[] = [];
+    const { root } = setup({ showStatus: (t: string) => said.push(t) });
+    const ta = editing(root, '締切', 2, 2);
+    root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+    await tick();
+    rowOf('inline-calc')!.click();
+    await tick();
+    await tick();
+    expect(ta.value, '本文が変わった').toBe('締切');
+    expect(said.join('\n'), '黙って何もしなかった').toContain('この行に計算できる式がありません');
   });
 
   /**

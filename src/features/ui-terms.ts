@@ -89,7 +89,7 @@ export const STANDARD_TERMS: readonly UiTerm[] = [
   { term: 'バックアップ', meaning: 'コレクションを丸ごと持ち出す操作・file' },
   { term: 'メッセージ', meaning: 'アプリが user に言うこと(型としては上の表を見よ)' },
   { term: 'ステータスバー', meaning: '画面の下に出る、いま何が起きているかの 1 行' },
-  { term: '画面', meaning: '中央の切り替え(予定表・かんばん・SQL など)。閉じるときは「画面を閉じる」で本文へ戻る' },
+  { term: '画面', meaning: '中央の切り替え(予定表・SQL など)。閉じるときは「画面を閉じる」で本文へ戻る' },
   { term: 'タブ', meaning: '左の列で切り替える見出し' },
   { term: 'メニュー', meaning: '右クリック等で開く選択肢の一覧' },
   { term: 'ボタン', meaning: '押すと操作が起きる部品' },
