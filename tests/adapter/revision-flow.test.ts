@@ -213,6 +213,9 @@ describe('revision flow (P5b)', () => {
     d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'e1', revId: 'r-t' });
     await tick();
     expect(d.getState().error).toContain('既にあります');
+    // 🔴 内部の ID ではなく、既にあるノートの題名で言う(#1087)
+    expect(d.getState().error).toContain(`「${d.getState().entryMetas.get('e1')!.title}」`);
+    expect(d.getState().error, '内部の ID が出ている').not.toMatch(/\(e1\)/);
   });
 
   it('編集中の着弾・同一 lid: draft 無傷 + diskAhead(無変更 cancel で復元内容が勝つ)', async () => {
@@ -487,6 +490,18 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     await tick();
   });
 
+  it('🔴 ゴミ箱から戻したら知らせを出し、戻った先のフォルダが分かれば言う(#1087)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '', relations: [{ id: "r1", kind: "structural", fromLid: "folder", toLid: "child", createdAt: null, updatedAt: null }] });
+    const folderTitle = d.getState().entryMetas.get('folder')!.title;
+    expect(d.getState().notice).toBe(`ゴミ箱から元に戻しました(「${folderTitle}」の中)`);
+    // 対照群: 居場所が無い(根)なら、字の頭だけ
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'z' });
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('z', { entryOrder: 3 }), body: '' });
+    expect(d.getState().notice).toBe('ゴミ箱から元に戻しました');
+  });
+
   it('🔴 並びの位置が戻る(末尾に飛ばない)', () => {
     const d = bootWithFolder();
     d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
@@ -551,7 +566,7 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().relations.filter((x) => x.id === 'r1'), '同じ関係が 2 本になった').toHaveLength(1);
   });
 
-  it('🔴 履歴から戻したら、戻したことと取り消し方を言う / ゴミ箱から戻したときは言わない(binder が言う)', () => {
+  it('🔴 履歴から戻したら、戻したことと取り消し方を言う / ゴミ箱から戻したときは履歴の文を出さない(ゴミ箱の文を出す)', () => {
     const d = bootWithFolder();
     expect(d.getState().notice ?? null, '前提:知らせは出ていない').toBeNull();
     d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('child', { entryOrder: 2, title: '買い物' }), body: '戻した本文' });
@@ -561,10 +576,9 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().error).toBeNull();
     const t = bootWithFolder();
     t.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });
-    const before = t.getState().notice ?? null;
     t.dispatch({ type: 'ENTRY_RESTORED', mode: 'trash', meta: meta('child', { entryOrder: 2 }), body: '' });
     expect(t.getState().order, '前提:ゴミ箱から戻った').toContain('child');
-    expect(t.getState().notice ?? null, 'ゴミ箱から戻したのに履歴の文が出た').toBe(before);
+    expect(t.getState().notice, 'ゴミ箱から戻したのに履歴の文が出た / 何も出ない').toBe('ゴミ箱から元に戻しました');
   });
 
   it('🔴 効果層が disk から関係を読み直して渡す(その entry のぶんだけ)', async () => {

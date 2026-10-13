@@ -513,4 +513,18 @@ describe('2 つ打ったときの知らせ(#637)', () => {
     await tick(60);
     expect(noticesOf(s)).toBe('1 件から外しました');
   });
+
+  it('🔴 41 字以上の名前は黙って捨てず、名前を頭だけ言って断る(欄は残し、短いほうも付けない。#1087)', async () => {
+    const s = setup('本文だけ\n');
+    const long = 'あ'.repeat(41);
+    type(s, `#買い物 #${long}`);
+    await tick();
+    expect(s.d.getState().error).toBe(`「${'あ'.repeat(10)}…」は 40 字を超えるので付けられません`);
+    expect(s.disk['n1'], '短いほうだけ付いている').toBe('本文だけ\n');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="tag-add-input"]')!.value, '欄が空になっている').toContain('買い物');
+    // 対照群: ちょうど 40 字は付く
+    type(s, 'い'.repeat(40));
+    await tick();
+    expect(s.disk['n1']).toContain('い'.repeat(40));
+  });
 });
