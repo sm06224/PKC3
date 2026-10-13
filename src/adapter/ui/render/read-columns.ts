@@ -397,7 +397,7 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
     noteFoldState(count <= 1 ? 'single' : 'folded', () =>
       count <= 1
         ? null
-        : `幅が足りないので段組みをやめました(${count} 段には ${Math.ceil(
+        : `幅が足りないので段組みをやめました(段組みには ${Math.ceil(
             minWidthForColumns(2, fp),
           )}px 以上の幅が要ります)`,
     );

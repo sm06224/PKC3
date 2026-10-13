@@ -68,7 +68,8 @@ function syncColumnsEffective(region: ParentNode, chosen: ReadColumns): void {
   if (eff <= 1) {
     el.textContent =
       `いまの画面は段組みには狭いので、ふつうの 1 段で表示しています` +
-      `(${count} 段には ${Math.ceil(minWidthForColumns(2, fontPx))}px 以上の幅が要ります)。`;
+      // ⚠ 数は 2 段ぶん ── 「N 段には」と書くと、その幅に広げても N 段にならない(#1087)
+      `(段組みには ${Math.ceil(minWidthForColumns(2, fontPx))}px 以上の幅が要ります)。`;
     return;
   }
   el.textContent =

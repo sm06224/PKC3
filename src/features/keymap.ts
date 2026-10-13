@@ -2001,7 +2001,8 @@ export function validateBinding(
     //    「コピー・貼り付けなど」だけでは user が「なぜ R が駄目か」を読めない
     return {
       kind: 'refused',
-      message: 'これはコピー・貼り付け・再読込・印刷などに使われる組み合わせです',
+      // ⚠ Ctrl+W / T / Q はタブ・ウィンドウの操作 ── 列挙から漏らすと「なぜ W が再読込なのか」と読まれる(#1087)
+      message: 'これはブラウザがコピー・貼り付け・タブやウィンドウの操作・再読込・印刷に使う組み合わせです',
     };
   }
   const me = findCommand(commandId);

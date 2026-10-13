@@ -9552,7 +9552,7 @@ function reduceCore(
        */
       if (meta.archetype === 'folder')
         return {
-          state: { ...state, notice: 'フォルダは横に並べられません(本文がありません)' },
+          state: { ...state, notice: 'フォルダはスタックに載せられません(本文がありません)' },
           events: [],
         };
       const pinned = pinSplitLid(state.splitLids, action.lid);
