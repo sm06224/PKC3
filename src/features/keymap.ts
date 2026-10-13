@@ -1036,7 +1036,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: '選んだ範囲を消す',
     contexts: ['global'],
     defaults: [],
-    note: '選んだ始まりと終わりを消します(始まりと終わりを選んであるときだけ効きます)',
+    note: '選んだ始まりと終わりを消します(始まりか終わりを選んであるときだけ効きます)',
     alias: '切り出し トリム 範囲 取り消し 録音 録画',
   },
   {

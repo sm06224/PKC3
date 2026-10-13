@@ -209,6 +209,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
             heading,
             target: null,
           });
+          // 🔑 波形の目盛り(文字起こしの時刻)は一覧が持つので、足したら集め直す(⚠ ここへ来るのは一覧から押したときだけ)
+          deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
           say(`「${item.name}」に文字起こしを足しました(${took})`);
         }, lid);
         if (held) {

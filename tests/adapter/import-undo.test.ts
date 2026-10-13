@@ -196,6 +196,7 @@ describe('消したノートを、集めた一覧から落とす', () => {
       taskScan: { cards: [{ lid: 'a' }, { lid: 'b' }], totalNotes: 2, scannedNotes: 2, truncated: false },
       contactScan: { cards: [{ lid: 'a' }, { lid: 'b' }], total: 2, truncated: false },
       snippetScan: { items: [{ lid: 'a' }, { lid: 'b' }], total: 2, truncated: false },
+      captureItems: [{ lid: 'a' }, { lid: 'b' }],
     } as never as AppState;
   };
 
@@ -204,6 +205,7 @@ describe('消したノートを、集めた一覧から落とす', () => {
     expect(state.taskScan?.cards.map((c) => c.lid), '予定に残っている').toEqual(['b']);
     expect(state.contactScan?.cards.map((c) => c.lid), '連絡先に残っている').toEqual(['b']);
     expect(state.snippetScan?.items.map((i) => i.lid), '雛形に残っている').toEqual(['b']);
+    expect(state.captureItems?.map((i) => i.lid), '録ったものの一覧に残っている').toEqual(['b']);
   });
 
   it('⚠ 一覧に載っていないノートを消しても、**同じ参照**のまま(描画の指紋を壊さない)', () => {
@@ -228,13 +230,15 @@ describe('消したノートを、集めた一覧から落とす', () => {
     expect(state.taskScan, '要らない作り直しをしている').toBe(before.taskScan);
     expect(state.contactScan).toBe(before.contactScan);
     expect(state.snippetScan).toBe(before.snippetScan);
+    expect(state.captureItems).toBe(before.captureItems);
   });
 
   it('⚠ 集めていない(null)ときは、そのまま null', () => {
-    const st = { ...base(), taskScan: null, contactScan: null, snippetScan: null } as AppState;
+    const st = { ...base(), taskScan: null, contactScan: null, snippetScan: null, captureItems: null } as AppState;
     const { state } = reduce(st, { type: 'DELETE_ENTRIES', lids: ['a'] });
     expect(state.taskScan).toBeNull();
     expect(state.contactScan).toBeNull();
     expect(state.snippetScan).toBeNull();
+    expect(state.captureItems).toBeNull();
   });
 });

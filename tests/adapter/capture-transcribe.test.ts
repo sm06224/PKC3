@@ -95,6 +95,17 @@ describe('文字にする(成功する道)', () => {
     expect(h.notes.at(-1)).toContain('文字起こしを足しました');
   });
 
+  it('🔴 足したら一覧を集め直す(波形の目盛りは一覧が持つ)', async () => {
+    const h = harness();
+    const scans: string[] = [];
+    h.dispatcher.onEvent((e) => {
+      if (e.type === 'REQUEST_CAPTURE_ITEMS') scans.push(e.type);
+    });
+    await h.tr.run('a');
+    expect(h.appends.length, '前提: 足していない').toBe(1);
+    expect(scans.length, '足したのに一覧の目盛りが古いまま').toBe(1);
+  });
+
   it('🔴 #1232 段 a: 時刻つきの区切りが在れば、1 行ずつ「時刻 字」で足す(見出しは同じ)', async () => {
     const h = harness({
       transcribe: vi.fn(async (): Promise<AsrJobResult> => ({

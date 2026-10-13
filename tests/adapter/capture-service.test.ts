@@ -285,6 +285,23 @@ describe('録音を止めると、開いていたノートに入る(#413)', () =
     expect(b.notices.some((n) => n.includes('本文のいちばん下に入れました')), '入れたことを言っていない').toBe(true);
   });
 
+  it('🔴 一覧を開いていたら、いま録った物が出るように集め直す / 開いていなければ集めない', async () => {
+    const scans = (events: DomainEvent[]): number => events.filter((e) => e.type === 'REQUEST_CAPTURE_ITEMS').length;
+    const closed = bench();
+    await closed.service.start('audio');
+    closed.service.stop();
+    await tick();
+    expect(appends(closed.events).length, '前提: 録ったものが入っていない').toBe(1);
+    expect(scans(closed.events), '一覧を開いていないのに集めている').toBe(0);
+
+    const open = bench();
+    open.d.dispatch({ type: 'SET_CAPTURE_ITEMS', items: [] });
+    await open.service.start('audio');
+    open.service.stop();
+    await tick();
+    expect(scans(open.events), '開いた一覧に、いま録った物が出ない').toBe(1);
+  });
+
   it('⚠ 添付にも渡している(名前・種類・大きさ)', async () => {
     const b = bench({ blob: new Blob(['abcde'], { type: 'audio/webm;codecs=opus' }) });
     await b.service.start('audio');

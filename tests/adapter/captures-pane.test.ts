@@ -476,6 +476,15 @@ describe('前後を削る ── 画面に何が出るか(#683 段②a)', () => 
     expect(field(host, 'a', 'capture-trim-run'), '範囲が決まっていないのに押せる').toBeNull();
   });
 
+  it('🔴 印が片方だけでも「印を消す」は出る(始まりだけ付けて、やめたくなったときの帰り道)', async () => {
+    const onlyStart = await paneReady(playing('a', { lid: 'a', startMs: 12_000, endMs: null }));
+    expect(field(onlyStart, 'a', 'capture-trim-clear'), '始まりだけのとき消す道が無い').not.toBeNull();
+    const onlyEnd = await paneReady(playing('a', { lid: 'a', startMs: null, endMs: 65_000 }));
+    expect(field(onlyEnd, 'a', 'capture-trim-clear'), '終わりだけのとき消す道が無い').not.toBeNull();
+    const none = await paneReady(playing('a'));
+    expect(field(none, 'a', 'capture-trim-clear'), '印が無いのに消す口が出ている').toBeNull();
+  });
+
   it('🔴 両方そろったら「切り出す」と「印を消す」が出る(片道にしない)', async () => {
     const host = await paneReady(playing('a', { lid: 'a', startMs: 12_000, endMs: 65_000 }));
     expect(field(host, 'a', 'capture-trim-run')?.textContent).toContain('切り出す');

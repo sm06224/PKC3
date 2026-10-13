@@ -10225,6 +10225,12 @@ function removeEntryFromState(
       contactScan: scanContact,
       snippetScan: scanSnippet,
       /**
+       * 🔴 **録ったものの一覧からも落とす**(#1087 の見直し 2026-10-13)── 上の 3 つと同じ形の穴だった。
+       *   「音/動画」タブを開いたまま録音のノートを消すと、行が残り、名前を押しても何も起きなかった。
+       */
+      captureItems:
+        state.captureItems === null ? null : (withoutLid(state.captureItems, lid) as CaptureItem[]),
+      /**
        * 🔴 **消したノートを留めたままにしない**(#505 段②)。
        * ⚠ 残すと、その枠は**開けない lid** を指したまま空で居座る。
        * 🔑 #535 ② で `taskScan` 系に同じ穴が在ったのと**同じ形**である ──
