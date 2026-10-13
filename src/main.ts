@@ -3706,7 +3706,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付を開けませんでした(${name}): ${String(e)}`,
+            error: `添付を開けませんでした(${name}): ${e instanceof Error ? e.message : String(e)}`,
           });
         }
       })();
@@ -3795,7 +3795,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             });
           }
         } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${String(e)}` });
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `絵を開けませんでした: ${e instanceof Error ? e.message : String(e)}` });
         }
       })();
     },
@@ -3841,7 +3841,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `ダウンロードに失敗しました(${name}): ${String(e)}`,
+          error: `ダウンロードに失敗しました(${name}): ${e instanceof Error ? e.message : String(e)}`,
         });
       }
     },
@@ -5010,7 +5010,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付の整理に失敗しました: ${String(e)}`,
+            error: `添付の整理に失敗しました: ${e instanceof Error ? e.message : String(e)}`,
           });
         }
       }),

@@ -888,7 +888,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   caseLabel.append(caseBox, document.createTextNode('大文字と小文字を区別'));
   replaceBar.append(caseLabel);
   const runReplace = iconButton('replace-all', 'すべて置換');
-  runReplace.title = '編集中の本文で、探す語を全部置き換えます';
+  runReplace.title = '編集中のこのノートの本文で、探す語を全部置き換えます(ほかのノートには効きません)';
   replaceBar.append(runReplace);
   /**
    * 🔴 **置換の切替は「編集の帯」へ**(2026-08-15、user 指示「ボタンがボタンすぎる /

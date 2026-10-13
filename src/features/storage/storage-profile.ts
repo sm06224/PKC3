@@ -117,7 +117,8 @@ export function profileSummary(result: StorageProfileResult): string {
     result.orphanBytes > 0
       ? `。うち ${humanBytes(result.orphanBytes)} は、どのノートからも使われていません(「使われていない添付を消す」で消せます)`
       : '';
-  return `${head}${orphan}。ブラウザが報告する使用量とは数え方が違います(こちらは添付の合計だけです)。`;
+  // 🔑 一覧が上位だけであることも言う(#1087 の見直し 2026-10-13)── 書かないと「重いノートはこれで全部」と読める
+  return `${head}${orphan}。ブラウザが報告する使用量とは数え方が違います(こちらは添付の合計だけです)。下の一覧は、重い順に ${String(PROFILE_TOP)} 件までです。`;
 }
 
 /**
@@ -126,7 +127,7 @@ export function profileSummary(result: StorageProfileResult): string {
  */
 export function sharedNote(lines: readonly ProfileLine[]): string {
   return lines.some((l) => l.shared)
-    ? '「共有」と付いた行は、同じ添付を別のノートとも使っています。片方を消しても減りません。'
+    ? '「(共有)」と付いた行は、同じ添付を別のノートとも使っています。片方を消しても減りません。'
     : '';
 }
 

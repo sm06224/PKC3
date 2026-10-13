@@ -32,7 +32,7 @@
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 
 /** 押す前に出す言葉(`ui-terms` の使わない語を含まない)。 */
-export const MISSING_LINK_TITLE = 'このノートは見つかりません(ゴミ箱にあれば戻せます)';
+export const MISSING_LINK_TITLE = 'このノートは見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)';
 
 export const MISSING_ATTR = 'data-pkc-link-missing';
 

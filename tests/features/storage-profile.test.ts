@@ -143,5 +143,13 @@ describe('合計の言い方', () => {
   it('🔴 共有が在れば「消しても減らない」と言う', () => {
     const n = sharedNote(profileLines(result([row('a', 100, 0, 1)]), metas));
     expect(n, '共有の意味が書いていない').toContain('減りません');
+    // 🔴 行に付く字そのもの(「(共有)」)で指す ── `profileLineText` と同じ字(#1087 の見直し 2026-10-13)
+    const shared = profileLines(result([row('a', 100, 0, 1)]), metas).find((l) => l.shared)!;
+    expect(profileLineText(shared), '前提: 行に「(共有)」が付いていない').toContain('(共有)');
+    expect(n).toContain('「(共有)」');
+  });
+
+  it('🔴 一覧が上位だけであることを言う(重いノートはこれで全部、と読ませない)', () => {
+    expect(profileSummary(result([row('a', 1024)]))).toContain(`重い順に ${String(PROFILE_TOP)} 件までです`);
   });
 });

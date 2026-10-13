@@ -197,7 +197,10 @@ export async function storeAsset(
       est.usage !== undefined &&
       est.quota - est.usage < item.size * 1.2
     ) {
-      throw new Error(`添付を保存する空き容量が不足しています: ${item.name}`);
+      // 🔑 次にすることも言う(#1087 の見直し 2026-10-13)── 同じ原因で断る `WRITE_QUOTA_REFUSAL` と同じ向き
+      throw new Error(
+        `添付を保存する空き容量が不足しています: ${item.name}(「使われていない添付を消す」で空きを作ってから、もう一度お試しください)`,
+      );
     }
   }
 
@@ -506,7 +509,7 @@ export async function attachFiles(
       } catch (e) {
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `添付の取り込みに失敗しました(${file.name}): ${String(e)}`,
+          error: `添付の取り込みに失敗しました(${file.name}): ${e instanceof Error ? e.message : String(e)}`,
         });
       }
     }

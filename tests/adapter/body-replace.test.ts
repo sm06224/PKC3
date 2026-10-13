@@ -155,6 +155,15 @@ describe('置換の配線', () => {
     expect(d.getState().error, '見つからなかっただけでエラーの行に入った').toBeNull();
   });
 
+  it('🔴 編集中でないときに「すべて置換」を押しても黙らない(本文は変えない)', () => {
+    const { root, d } = editing('ログ\n');
+    expect(d.getState().phase, '前提: 編集中になっている').toBe('ready');
+    fill(root, 'ログ', 'x');
+    press(root, 'replace-all');
+    expect(d.getState().openBody?.body, '編集中でないのに本文を変えた').toBe('ログ\n');
+    expect(d.getState().error).toBe('「すべて置換」は編集中のノートでだけ使えます(「ノートを編集する」を押してから)');
+  });
+
   it('🔴 探す語が空なら、空の鉤括弧ではなく何を入れるかを言う', () => {
     const { root, d } = editing('ログ\n');
     d.dispatch({ type: 'START_EDIT' });

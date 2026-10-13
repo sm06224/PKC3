@@ -964,7 +964,9 @@ export class ScheduleRenderer {
     notifySummary.title = '予定を .ics で書き出すときのアラームと、次に開いたときの「見逃した予定」の知らせを決めます';
     const leadLabelEl = document.createElement('label');
     leadLabelEl.setAttribute('data-pkc-field', 'schedule-option');
-    leadLabelEl.append('知らせる時間: ');
+    // 🔴 **.ics にだけ効くことを字で言う**(#1087 の見直し 2026-10-13)── 「知らせる時間: 15 分前」だけだと、
+    //   PKC3 の中で 15 分前に鳴ると読める(中の音は時刻ちょうど。説明はマウスを合わせたときにしか出ていなかった)
+    leadLabelEl.append('書き出す .ics の知らせる時間: ');
     const lead = document.createElement('select');
     lead.setAttribute('data-pkc-field', 'schedule-lead');
     lead.setAttribute('data-pkc-action', 'set-schedule-lead');

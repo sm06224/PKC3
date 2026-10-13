@@ -1037,6 +1037,18 @@ const leftAtRoot = (before: AppState, after: AppState): number => {
   return n;
 };
 
+/**
+ * ゴミ箱へ移したノートへリンクを張っていた、ほかのノートの数(字)。⚠ 参照元は選んでいるノートの分しか引いていない
+ * (`state.backlinks`)── 引けていなければ空(言わない)。打ち切られていたら「N 件以上」。
+ */
+const linkedFromText = (before: AppState, after: AppState, lid: string): string => {
+  const back = before.backlinks;
+  if (!back || back.lid !== lid) return '';
+  const n = back.lids.filter((l) => l !== lid && after.entryMetas.has(l)).length;
+  if (n === 0) return '';
+  return back.truncated ? `${String(n)} 件以上` : `${String(n)} 件`;
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
   lids: readonly string[],
@@ -4407,7 +4419,7 @@ function selectEntryOrExplain(
     //   「ノートのノートが見つかりません」になる(UX レビュー 2026-08-28)
     // 🔴 押す前の吹き出し(`MISSING_LINK_TITLE`)と同じ手掛かりを添える(#1087 の見直し 2026-10-13)──
     //    押した後の字から「ゴミ箱にあれば戻せます」が消えると、どこを探せばよいかが分からない
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます)` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}が見つかりません(ゴミ箱にあれば戻せます。ゴミ箱は左のペインの「フォルダ」の中です)` });
     return false;
   }
   dispatcher.dispatch({ type: 'SELECT_ENTRY', lid });
@@ -7683,7 +7695,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const before = dispatcher.getState();
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
     const after = dispatcher.getState();
-    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after));
+    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after), linkedFromText(before, after, lid));
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
@@ -11758,14 +11770,24 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、書き出せません。再読み込みしてください' });
       return;
     }
-    void read([lid]).then((bodies) => {
-      const body = bodies.get(lid) ?? '';
-      const today = dayStamp(new Date());
-      downloadBlob(
-        `${titleForMessageLid(lid)}-${today}.md`,
-        new Blob([body], { type: 'text/markdown' }),
-      );
-    });
+    /**
+     * 🔴 **書き出したこと・書き出せなかったことを言う**(#1087 の見直し 2026-10-13)── 直す前は成功しても何も言わず、
+     *   読めなかったときも黙って終わっていた。
+     */
+    void read([lid])
+      .then((bodies) => {
+        const body = bodies.get(lid) ?? '';
+        const today = dayStamp(new Date());
+        const name = `${titleForMessageLid(lid)}-${today}.md`;
+        downloadBlob(name, new Blob([body], { type: 'text/markdown' }));
+        services.showStatus?.(`メッセージを書き出しました(${name})`);
+      })
+      .catch((e: unknown) => {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: `メッセージを書き出せませんでした: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      });
   },
   'set-paste-source': (_dispatcher, target, services) => {
     // ⚠ `set-external-images` と同じ受け方(`<select>` でもボタンでも通す)

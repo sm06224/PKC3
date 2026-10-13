@@ -331,6 +331,8 @@ describe('画面:知らせの 1 行と、好みの 2 つ', () => {
     const sel = region.querySelector<HTMLSelectElement>('[data-pkc-field="schedule-lead"]')!;
     expect([...sel.options].map((o) => o.textContent)).toEqual(['なし', '5分前', '15分前', '30分前', '1時間前']);
     expect(sel.value).toBe('15');
+    // 🔴 .ics にだけ効くことを字で言う(PKC3 の中で 15 分前に鳴ると読ませない ── #1087 の見直し 2026-10-13)
+    expect(sel.closest('label')?.textContent ?? '').toContain('書き出す .ics の知らせる時間');
     sel.value = '30';
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     expect(appScheduleNotify.lead()).toBe(30);
