@@ -76,7 +76,7 @@ describe('雛形の一覧 (#196 / B-2 段②-b)', () => {
 describe('一覧の上に出す 1 行 (#196 / B-2 段②-b)', () => {
   it('🔴 まだ 1 件も無ければ、作り方を出す', () => {
     const note = snippetMenuNote(scan([]));
-    expect(note, '作り方が書いていない').toContain('作成');
+    expect(note, '作り方が書いていない').toContain('選ぶと作れます');
     expect(note).toContain('テンプレート');
   });
 
@@ -91,15 +91,20 @@ describe('一覧の上に出す 1 行 (#196 / B-2 段②-b)', () => {
    */
   it('🔴 集められなかったときは「作り方」を出さない', () => {
     const note = snippetMenuNote(null);
-    expect(note, '集められないのに「作れ」と言っている').not.toContain('作成');
+    expect(note, '集められないのに「作れ」と言っている').not.toContain('作れます');
     expect(note, '組み込みが使えることを言っていない').toContain('組み込み');
   });
 
   /** ⚠ 雛形の**ノートは在る**のに 1 件も載らない形(空 / 長すぎ)は、別の字で言う。 */
   it('⚠ ノートは在るのに載らないときは、そう言う', () => {
     const note = snippetMenuNote(scan([], { total: 3 }));
-    expect(note, '「まだ無い」と混ざっている').not.toContain('作成');
+    expect(note, '「まだ無い」と混ざっている').not.toContain('作れます');
     expect(note).toContain('長すぎ');
+  });
+
+  it('🔴 一部だけ載らなかったときも、その件数を言う(保存したのに無い、に見せない)', () => {
+    const note = snippetMenuNote(scan([item('s1', '住所', 'addr')], { total: 3 }));
+    expect(note).toBe('2 件のテンプレートは、中身が空か長すぎるので、この一覧に出していません。');
   });
 
   it('普通に 1 件以上あるときは何も出さない(邪魔しない)', () => {

@@ -105,6 +105,12 @@ export function snippetMenuNote(scan: SnippetScan | null): string {
   if (scan.items.length === 0 && scan.total > 0)
     return 'テンプレートのノートはありますが、中身が空か長すぎるので出せません。';
   if (scan.items.length === 0)
-    return 'まだ自分のテンプレートがありません。左上の作成から「テンプレート」を選ぶと作れます。';
+    return 'まだ自分のテンプレートがありません。左のペインの上の ▼ から「テンプレート」を選ぶと作れます。';
+  /**
+   * 🔴 **一部だけ載らなかったときも黙らない**(#1087 の見直し 2026-10-13)── 直す前は 0 件のときだけ言っていたので、
+   *   本文を書く前のテンプレートが 1 件だけ一覧から消え、「保存したのに無い」に見えた。
+   */
+  if (scan.total > scan.items.length)
+    return `${String(scan.total - scan.items.length)} 件のテンプレートは、中身が空か長すぎるので、この一覧に出していません。`;
   return '';
 }
