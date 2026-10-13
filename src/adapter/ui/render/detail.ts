@@ -4229,7 +4229,7 @@ function renderRevisionDiff(
         load.state === 'loading'
           ? '読んでいます…'
           : load.state === 'failed'
-            ? 'その版の本文を読めませんでした(履歴が整理された可能性があります)'
+            ? 'その版の本文を読めませんでした(1 つのノートの版は 100 件までで、超えると古い版から消えます)'
             : null,
     };
   } else {
@@ -4366,7 +4366,8 @@ function renderHistoryPanel(
     open.title = 'この版の中身を、いまの本文とくらべて見ます(戻しません)';
     const text = document.createElement('span');
     // 🔴 日時は端末の時刻で(DB の字は UTC ── `formatStoredStamp`)
-    text.textContent = `#${item.revOrder} ${formatStoredStamp(item.createdAt)} ${item.title ?? '(無題)'}`;
+    // 🔑 「版 N」で書く(比較先の欄・差分の見出しと同じ呼び方 ── #1087 の見直し 2026-10-13。直す前は行だけ「#N」)
+    text.textContent = `版 ${item.revOrder} ${formatStoredStamp(item.createdAt)} ${item.title ?? '(無題)'}`;
     open.append(text);
     const badge = diffBadge(item.added, item.removed);
     if (badge) open.append(badge);
@@ -4431,7 +4432,9 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     const why = document.createElement('p');
     why.setAttribute('data-pkc-field', 'app-tile-why');
     // ⚠ 文言は**起きていること**で書く(user 指示 2026-08-21)
-    why.textContent = 'アドレスが書いてあるので、アプリの一覧に出ています';
+    // 🔑 外す道も言う(タイルを消すのはノートごと消すこと ── 片道にしない)
+    why.textContent =
+      'アドレスが書いてあるので、アプリの一覧に出ています(一覧から外すには、このノートをゴミ箱へ移してください)';
     box.append(why);
   } else {
     const label = document.createElement('label');

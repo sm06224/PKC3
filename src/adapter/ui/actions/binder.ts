@@ -116,7 +116,7 @@ import {
 } from '@features/relation/filer-list';
 import { archetypeLabel } from '@features/flavor/archetype-label';
 import { HIDDEN_HEAD_ATTR, joinHiddenHead } from '@features/flavor/attachment-edit-fold';
-import { SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
+import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
   canApplySettings,
@@ -1047,6 +1047,19 @@ const linkedFromText = (before: AppState, after: AppState, lid: string): string 
   const n = back.lids.filter((l) => l !== lid && after.entryMetas.has(l)).length;
   if (n === 0) return '';
   return back.truncated ? `${String(n)} 件以上` : `${String(n)} 件`;
+};
+
+/**
+ * 反対側が開いている場所に、物を入れられないときの理由(入れられるなら `null`)。
+ * 🔴 **スマートフォルダの中には入れられない**(#1087 の見直し 2026-10-13)── reducer は親がフォルダでないと黙ってルートへ落とすので、
+ *   コピーはルートに入るのに「「スマートフォルダ名」へコピーしました」と言い、移すは「フォルダは自分の中へは入れられません」という
+ *   違う理由で断っていた。押す前に、本当の理由で断る。
+ */
+const notPlaceable = (st: AppState, scope: string | null): string | null => {
+  if (scope === null) return null;
+  const meta = st.entryMetas.get(scope);
+  if (meta?.archetype !== SMART_ARCHETYPE) return null;
+  return 'スマートフォルダの中には入れられません。反対側でフォルダかルートを開いてから押してください';
 };
 
 const moveEntries = (
@@ -6500,7 +6513,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const blocked = phaseBlockReason(dispatcher.getState().phase);
     if (blocked !== null) {
       // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}戻ってください` });
+      // 🔴 行き先で言い分ける(#1087 の見直し 2026-10-13)── 「情報」を押した人に「戻ってください」と言っていた
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}${page === 'info' ? '開いてください' : '戻ってください'}` });
       return;
     }
     if (page === 'info') {
@@ -7359,7 +7373,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}名前を変えてください` });
       return;
     }
-    const marked = paneOf(st.dual, side).selection;
+    /**
+     * 🔴 **印が無ければカーソルの行**(#1087 の見直し 2026-10-13)── F2(下の `dual-rename`)とマニュアル
+     *   (「チェックが無いときはカーソルの行が対象」)はそうなのに、ボタンだけ印しか見ず、キーボードで行を下りてから押すと
+     *   「名前を変えるものを選んでください」と断っていた。
+     */
+    const selected = paneOf(st.dual, side).selection;
+    const cursorLid = selected.length === 0 ? paneOf(st.dual, side).cursor : null;
+    const marked = cursorLid !== null ? [cursorLid] : selected;
     // ⚠ **1 件のときだけ** ── まとめて改名は「同じ名前が並ぶ」だけで意味が無い
     if (marked.length !== 1) {
       dispatcher.dispatch({
@@ -7554,6 +7575,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const to = otherSide(side);
+    const refusedPlace = notPlaceable(st, paneScope(paneOf(st.dual, to)));
+    if (refusedPlace !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
+      return;
+    }
     const steps = planCopy(
       lids,
       paneScope(paneOf(st.dual, to)),
@@ -7596,13 +7622,24 @@ const ACTIONS: Record<string, ActionHandler> = {
           toScope === null
             ? 'ルート'
             : (dispatcher.getState().entryMetas.get(toScope)?.title ?? 'フォルダ');
-        dispatcher.dispatch({
-          type: 'OP_FAILED',
-          error:
-            missing > 0
-              ? `${steps.length} 件を「${where}」へコピーしました(うち ${missing} 件は本文を読めず、空で作りました)`
-              : `${steps.length} 件を「${where}」へコピーしました`,
-        });
+        /**
+         * 🔴 **成功はエラーの行に出さない / 件数は選んだ数で言う / 印を外す**(#1087 の見直し 2026-10-13)。
+         * ⚠ 直す前は成功も `OP_FAILED` で出していたので、「エラー: 3 件を…へコピーしました」と出て、メッセージには「問題」で
+         *   積まれていた(隣の「移す」は普通の知らせ)。件数は中身まで数えた数で、選んだ数と合わなかった。印も残ったままで、
+         *   もう一度押すと同じ物がもう 1 組できた(「移す」は成功したら外す)。
+         * ⚠ 本文を読めなかった分があるときだけは、問題として残す(空で作った物がある)。
+         */
+        const count = lids.length;
+        const head =
+          steps.length > count
+            ? `${count} 件(中身を含め ${steps.length} 件)を「${where}」へコピーしました`
+            : `${count} 件を「${where}」へコピーしました`;
+        if (missing > 0) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: `${head}(うち ${missing} 件は本文を読めず、空で作りました)` });
+        } else {
+          services.showStatus?.(head);
+        }
+        dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side });
       },
       () => dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした(本文を読めません)' }),
     );
@@ -7643,6 +7680,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     const to = paneScope(paneOf(st.dual, otherSide(from)));
+    const refusedPlace = notPlaceable(st, to);
+    if (refusedPlace !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
+      return;
+    }
     const before = st.relations;
     moveEntries(dispatcher, lids, to, services.showStatus);
     /**

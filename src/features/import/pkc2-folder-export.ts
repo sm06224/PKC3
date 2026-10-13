@@ -25,6 +25,7 @@
  * | `.entry.zip`(v2) | **無言 skip**。件数表示とチェックボックス数が食い違う | 名指しで warning + 残りは取り込む(段⑥ で受理予定) |
  * | 添字 | preview は manifest 添字・取込は圧縮配列で、**選んだ entry が落ちる**実バグ | `main` と manifest entry を**組で持つ**(添字空間が存在しない) |
  */
+import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import { readZipDirectory, readZipText, ZipReadError } from './zip-reader';
 import {
   COMPACTED_WARNING,
@@ -100,9 +101,7 @@ export async function readFolderExportBundle(zip: Blob): Promise<Pkc2ContainerBu
   const warnings: string[] = [];
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 
   let manifest: Pkc2FolderExportManifest;

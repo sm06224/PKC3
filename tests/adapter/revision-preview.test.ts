@@ -128,8 +128,8 @@ describe('#398 段① 見分けがつく', () => {
       await openHistory(s);
       const rows = s.qa('[data-pkc-field="revision-open"]').map((e) => e.textContent ?? '');
       expect(rows.length, '前提:履歴の行が出ていない').toBe(2);
-      expect(rows[0], 'UTC の字のまま出た').toContain('#7 2026-08-22 19:31 会議メモ');
-      expect(rows[1]).toContain('#6 2026-08-22 18:02 会議メモ');
+      expect(rows[0], 'UTC の字のまま出た').toContain('版 7 2026-08-22 19:31 会議メモ');
+      expect(rows[1]).toContain('版 6 2026-08-22 18:02 会議メモ');
     } finally {
       if (before === undefined) delete process.env.TZ;
       else process.env.TZ = before;

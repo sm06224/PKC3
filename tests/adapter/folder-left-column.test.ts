@@ -96,6 +96,9 @@ describe('🔴 絞りで 0 件のとき、理由と戻り道を出す(#550)', ()
   it('🔴 絞って 0 件なら、そう言って戻り道を出す', () => {
     const { root, d } = setupBound(three);
     d.dispatch({ type: 'SET_ENTRY_FILTER', query: '存在しない語' });
+    // ⚠ 本文の結果が返るまでは「無い」と言い切らない(#1087)── この台に store は無いので、返事を手で渡す
+    expect(empty(root)?.textContent).toBe('本文を探しています…');
+    d.dispatch({ type: 'SET_SEARCH_HITS', query: '存在しない語', lids: [], truncated: false });
     expect(empty(root)?.textContent, '0 件の字が出ていない').toContain('絞り込みに一致するものがありません');
     expect(clear(root), '戻り道が無い').not.toBeNull();
   });

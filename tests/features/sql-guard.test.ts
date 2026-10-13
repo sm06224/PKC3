@@ -7,7 +7,7 @@
  *   白名簿(先頭の語)で判定していることも見る。
  */
 import { describe, expect, it } from 'vitest';
-import { checkReadOnlySql, normalizeSqlInput, stripSqlNoise } from '../../src/features/query/sql-guard';
+import { checkReadOnlySql, normalizeSqlInput, sqlRunFailureText, stripSqlNoise } from '../../src/features/query/sql-guard';
 
 const ok = (sql: string): boolean => checkReadOnlySql(sql).ok;
 const why = (sql: string): string => checkReadOnlySql(sql).why;
@@ -242,5 +242,20 @@ describe('絵文字を含む文字列', () => {
   it('絵文字を含んでも長さが変わらない', () => {
     const sql = "SELECT '\u{1f600}\u{1f601}' FROM t";
     expect(stripSqlNoise(sql)).toHaveLength(sql.length);
+  });
+});
+
+describe('よく出る失敗を日本語で言う(#1087 の見直し 2026-10-13)', () => {
+  it('🔴 表が無い / 列が無い / 書き方の誤りは、日本語と次の手を出し、元の英語は括弧で残す', () => {
+    const t = sqlRunFailureText('no such table: 売上');
+    expect(t.startsWith('「売上」という表はありません'), t).toBe(true);
+    expect(t).toContain('「構造を見る」');
+    expect(t).toContain('(no such table: 売上)');
+    expect(sqlRunFailureText('no such column: 金額').startsWith('「金額」という列はありません')).toBe(true);
+    expect(sqlRunFailureText('near "FORM": syntax error').startsWith('SQL の書き方に誤りがあります')).toBe(true);
+  });
+
+  it('⚠ 知らない失敗はそのまま出す(手がかりを消さない)', () => {
+    expect(sqlRunFailureText('disk I/O error')).toBe('disk I/O error');
   });
 });

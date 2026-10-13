@@ -88,11 +88,11 @@ describe('parsePkc2Html (P6b)', () => {
 
   it('PKC2 でない / 未対応 schema / 壊れた JSON は理由付きで失敗する', () => {
     expect(() => parsePkc2Html('<html><body>ただの HTML</body></html>')).toThrow(
-      /#pkc-meta が無い/,
+      /PKC2 の書き出しではない HTML/,
     );
     expect(() =>
       parsePkc2Html(pkc2Html({ container: minimalContainer }, { app: 'other', schema: 1 })),
-    ).toThrow(/PKC2 のファイルではありません/);
+    ).toThrow(/PKC2 の書き出しではない HTML/);
     expect(() =>
       parsePkc2Html(pkc2Html({ container: minimalContainer }, { app: 'pkc2', schema: 2 })),
     ).toThrow(/未対応の PKC2 schema/);

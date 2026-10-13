@@ -91,7 +91,7 @@ export class SearchRenderer {
       page.query,
       page.rowsQuery,
       page.truncated ? 't' : '',
-      page.failed ? 'f' : '',
+      page.failed === false ? '' : page.failed,
       page.rows.map((r) => `${r.lid}|${r.title}|${r.snippet}`).join('\u0001'),
     ].join('\u0002');
     if (print === this.last) return;
@@ -149,7 +149,9 @@ export class SearchRenderer {
    */
   private noteText(page: SearchPageState): string {
     if (page.query.trim() === '') return '語を打つと、題名と本文から探します。行を押すと、そのノートが別のウィンドウで開きます';
-    if (page.failed) return 'このタブの PKC3 が古いままのため、探せません。再読み込みしてください';
+    if (page.failed === 'stale') return 'このタブの PKC3 が古いままのため、探せません。再読み込みしてください';
+    // ⚠ 古いタブと決めつけない(#1087)── 打ち直すと、もう一度探す
+    if (page.failed === 'error') return '探せませんでした(探している途中で失敗しました)。語を打ち直すと、もう一度探します';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) return `「${page.query}」に一致するノートはありません`;
     if (page.truncated)

@@ -234,7 +234,7 @@ describe('② 押せないときは灰色 + 理由の 1 行', () => {
     const whyOf = (id: string): string => rows.find((x) => x.id === id)?.why ?? '';
     expect(whyOf('schedule-today')).toContain('予定の画面を開いているとき');
     expect(whyOf('add-tag')).toContain('ノートを選んでいるとき');
-    expect(whyOf('refresh-query')).toContain('集計のノートを開いているとき');
+    expect(whyOf('refresh-query')).toContain('集計の画面を開いているとき');
     expect(whyOf('copy-note-md')).toContain('ノートを読んでいるとき');
   });
 

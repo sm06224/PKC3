@@ -87,5 +87,7 @@ export function formatArchivePreviewMessage(preview: ArchivePreview): string {
     `添付 ${String(preview.assetCount)} 件`,
     `つながり ${preview.hasRelations ? '有' : '無'}`,
     `履歴 ${preview.hasRevisions ? '有' : '無'}`,
+    // 🔑 「バックアップ」は「元に戻る(置き換わる)」と読まれやすい ── 足すだけであることを押す前に言う(#1087)
+    '取り込むと、いまのノートに足します(いまのノートは消えず、置き換わりません)。',
   ].join('\n');
 }

@@ -265,3 +265,24 @@ describe('F: Ctrl+S / Ctrl+Enter は行を確定するだけ ── 保存のボ
     expect(notes).toEqual([]);
   });
 });
+
+describe('スマホの「情報」「← 一覧へ戻る」は、編集中に行き先で言い分ける(#1087 の見直し 2026-10-13)', () => {
+  it('🔴 「情報」は「開いてください」/ 一覧は「戻ってください」', () => {
+    const { root, d } = setup(['a']);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: 'x' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提: 編集中').toBe('editing');
+    const press = (page: string): void => {
+      const b = document.createElement('button');
+      b.setAttribute('data-pkc-action', 'phone-page');
+      b.setAttribute('data-pkc-page', page);
+      root.append(b);
+      b.click();
+    };
+    press('info');
+    expect(d.getState().error).toBe(`${phaseBlockReason('editing')}開いてください`);
+    press('list');
+    expect(d.getState().error).toBe(`${phaseBlockReason('editing')}戻ってください`);
+  });
+});

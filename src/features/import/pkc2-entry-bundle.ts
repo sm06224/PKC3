@@ -21,6 +21,7 @@
  * `entries` 表にも受け皿が無い(tags は「全 body = PKC-Markdown」の方針からすると
  * frontmatter へ入るべきだが、その規約はまだ決まっていない)。**取込時に件数を言う**。
  */
+import { OFFICE_DOC_REFUSAL } from './refusal-text';
 import { readZipDirectory, readZipText, ZipReadError, type AssetSource } from './zip-reader';
 import {
   MANIFEST,
@@ -63,9 +64,7 @@ export async function readEntryBundleParts(
   const warnings: string[] = [];
 
   if (dir.some((e) => e.name === '[Content_Types].xml')) {
-    throw new ZipReadError(
-      'これは Office 文書(.xlsx / .docx / .pptx)です。取り込み対象ではありません',
-    );
+    throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 
   let manifest: Pkc2EntryBundleManifest;

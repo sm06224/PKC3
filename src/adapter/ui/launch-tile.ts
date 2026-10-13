@@ -294,7 +294,9 @@ export async function launchTile(
   // 「塞がれた」と区別できず、この後の遷移もできない。代わりに **opener を切る**
   const win = deps.open('', appWindowFeatures(openTarget, ''));
   if (!win) {
-    deps.fail(`「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)`);
+    deps.fail(
+      `「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)。アドレスバーの右端でポップアップを許可してから、もう一度押してください`,
+    );
     return;
   }
   // 🔑 保存内容は**ここで**読む(同期・await より前)── 外殻に焼き込むので、

@@ -439,7 +439,9 @@ describe('importPkc2File (P6b 実行部)', () => {
       type: 'text/html',
     });
     expect(await importPkc2File(d, deps, stray)).toBeNull();
-    expect(d.getState().error).toMatch(/取り込みに失敗しました/);
+    // 🔑 対象外のファイルは壊れていない ──「失敗しました」ではなく断りとして出す(#1087)
+    expect(d.getState().error).toMatch(/PKC2 の書き出しではない HTML なので、取り込めません/);
+    expect(d.getState().error).not.toMatch(/取り込みに失敗しました/);
     expect(written).toHaveLength(0);
     // 🔴 「取込中…」を出した後で落ちたので、進行中の字を消す(#1017 C5)。⚠ 残ると「まだ続いている」と読める
     expect(notices[0], '前提が崩れた(進行中の字が先に出ていない)').toContain('取り込み中…');
@@ -1526,7 +1528,9 @@ describe('importPkc2File (P6b 実行部)', () => {
     const zip = await buildZip([{ name: 'body.md', bytes: bytesOf('# x\n') }]);
     expect(await importPkc2File(d, deps, new File([zip], 'x.zip'))).toBeNull();
     expect(written).toHaveLength(0);
-    expect(d.getState().error).toMatch(/manifest\.json が無い/);
+    expect(d.getState().error).toMatch(/PKC の書き出しではない zip/);
+    // ⚠ 内部のファイル名を出さない(#1087)
+    expect(d.getState().error).not.toMatch(/manifest/);
   });
 
   it('[P6c 段③] .text.zip を取り込む ── 合成 container が本経路に合流する', async () => {
@@ -1570,6 +1574,9 @@ describe('importPkc2File (P6b 実行部)', () => {
     const zip = await buildZip([{ name: '[Content_Types].xml', bytes: bytesOf('<Types/>') }]);
     expect(await importPkc2File(d, deps, new File([zip], 'sheet.xlsx'))).toBeNull();
     expect(d.getState().error).toMatch(/Office 文書/);
+    // 🔑 断りであって失敗ではない / pptx は取り込めることを言う(#1087)
+    expect(d.getState().error).not.toMatch(/取り込みに失敗しました/);
+    expect(d.getState().error).toContain('.pptx のファイルなら「取り込む」から取り込めます');
   });
 
   it('[P6c] 壊れた ZIP(CRC 不一致)は取り込まず可視で断る', async () => {
