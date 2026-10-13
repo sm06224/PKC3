@@ -25,7 +25,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
-import { GRID_ROW_THRESHOLD } from '../../src/adapter/ui/render/filer';
+import { GRID_ROW_THRESHOLD, ROW_CHUNK } from '../../src/adapter/ui/render/filer';
 
 function meta(i: number): EntryMeta {
   return {
@@ -109,14 +109,23 @@ const ruleOf = (sel: string) => CSS.filter((r) => r.sels.includes(sel)).map((r) 
 describe('格子の CSS(#1087)', () => {
   const G = "[data-pkc-region='filer-table'][data-pkc-grid]";
 
-  it('🔴 行ごとに content-visibility: auto と、固定の高さの見積もり', () => {
-    const body = ruleOf(`${G} tbody tr`);
-    expect(body, '空振り防止: 規則が読めていない').not.toBe('');
-    expect(body).toMatch(/content-visibility:\s*auto/);
-    // 見積もりの高さ = 行の高さ(外れると、スクロールの長さが動く)
-    expect(body).toMatch(/contain-intrinsic-size:\s*auto 26px/);
+  it('🔴 塊(tbody)ごとに content-visibility: auto、行は閉じ込めだけ(行ごとの見張りを張らせない)', () => {
+    const chunk = ruleOf(`${G} tbody`);
+    expect(chunk, '空振り防止: 規則が読めていない').not.toBe('');
+    expect(chunk).toMatch(/content-visibility:\s*auto/);
+    expect(chunk).toMatch(/contain-intrinsic-size:\s*auto 1300px/);
+    const row = ruleOf(`${G} tbody tr`);
+    expect(row, '空振り防止: 行の規則が読めていない').not.toBe('');
+    // ⚠ 行に付けると、行の数だけ見張りが張られる(3,000 件で 200 字に約 1.2 秒)
+    expect(row).not.toMatch(/content-visibility/);
+    // ⚠ 外すと文字が 1px 上へずれる(行の content-visibility が暗に付けていた閉じ込め)
+    expect(row).toMatch(/contain:\s*layout paint style/);
     expect(ruleOf(`${G} tr`)).toMatch(/height:\s*26px/);
     expect(ruleOf(`${G} tr`)).toMatch(/display:\s*grid/);
+    // 0.5px の足しは表全体の最初と最後だけ(塊ごとに足すと伸びる)
+    expect(ruleOf(`${G} tbody:first-of-type tr:first-child`)).toMatch(/height:\s*26\.5px/);
+    expect(ruleOf(`${G} tbody:last-of-type`)).toMatch(/padding-bottom:\s*0\.5px/);
+    expect(ruleOf(`${G} tbody tr:first-child`), '塊ごとに 0.5px 足す規則が残っている').toBe('');
   });
 
   it('🔴 格子は data-pkc-grid の下でだけ ── 少ない行の表(display: table)を奪わない', () => {
@@ -127,5 +136,55 @@ describe('格子の CSS(#1087)', () => {
         /display:\s*(grid|block)|content-visibility/.test(r.body),
     );
     expect(bare.map((r) => r.sels.join(', '))).toEqual([]);
+  });
+});
+
+describe('格子のとき、行を 50 行ずつの塊に分ける(#1087)', () => {
+  const lidsOf = (t: HTMLElement) =>
+    [...t.querySelectorAll('tbody tr')].map((tr) => tr.getAttribute('data-pkc-entry'));
+
+  it('🔴 3,001 行は 61 個の塊に、順番どおり、塊ごとに 50 行まで入る', () => {
+    const { render, table } = setup();
+    const n = 3001;
+    render(booted(metas(n)));
+    const t = table();
+    const bodies = [...t.querySelectorAll('tbody')];
+    expect(bodies.length).toBe(Math.ceil(n / ROW_CHUNK));
+    for (const b of bodies.slice(0, -1)) expect(b.children.length).toBe(ROW_CHUNK);
+    expect(bodies[bodies.length - 1]!.children.length).toBe(n % ROW_CHUNK || ROW_CHUNK);
+    expect(lidsOf(t)).toEqual(metas(n).map((m) => m.lid));
+    // 仮の高さは塊の行数ぶん
+    expect(bodies[0]!.style.getPropertyValue('contain-intrinsic-size')).toBe(`auto ${ROW_CHUNK * 26}px`);
+    expect(bodies[bodies.length - 1]!.style.getPropertyValue('contain-intrinsic-size')).toBe('auto 26px');
+  });
+
+  it('🔴 並びが塊をまたいで変わっても、行の node を持ち越して正しい塊・順番へ入る', () => {
+    const { render, table } = setup();
+    const n = 400;
+    const s0 = booted(metas(n));
+    render(s0);
+    const t = table();
+    const before = t.querySelector('tr[data-pkc-entry="n0"]');
+    // 逆順にする(先頭の行が最後の塊へ移る)
+    const reversed = metas(n).map((m) => ({ ...m, entryOrder: n - m.entryOrder }));
+    render(withMetas(s0, reversed));
+    expect(lidsOf(t)).toEqual([...metas(n)].reverse().map((m) => m.lid));
+    const bodies = [...t.querySelectorAll('tbody')];
+    expect(bodies.length).toBe(n / ROW_CHUNK);
+    for (const b of bodies) expect(b.children.length).toBe(ROW_CHUNK);
+    expect(t.querySelector('tr[data-pkc-entry="n0"]'), '行を作り直した').toBe(before);
+    expect(bodies[bodies.length - 1]!.lastElementChild).toBe(before);
+  });
+
+  it('🔴 境より少なくなったら、塊は 1 つに戻り、仮の高さも外れる ── 空の塊を残さない', () => {
+    const { render, table } = setup();
+    const s0 = booted(metas(GRID_ROW_THRESHOLD + 120));
+    render(s0);
+    expect(table().querySelectorAll('tbody').length, '前提: 塊に分かれていない').toBeGreaterThan(1);
+    render(withMetas(s0, metas(10)));
+    const bodies = [...table().querySelectorAll('tbody')];
+    expect(bodies.length).toBe(1);
+    expect(bodies[0]!.children.length).toBe(10);
+    expect(bodies[0]!.style.getPropertyValue('contain-intrinsic-size')).toBe('');
   });
 });

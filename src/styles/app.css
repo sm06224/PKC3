@@ -7551,16 +7551,25 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   grid-template-columns: minmax(0, 1fr) calc(4.4 * 11px);
   height: 26px;
 }
-[data-pkc-region='filer-table'][data-pkc-grid] tbody tr {
+/* 🔴 **組まずに済ませる単位は 50 行の塊**(`filer.ts` の `ROW_CHUNK`)── 行ごとに付けると、
+ * ブラウザが行の数だけ見張りを張り、本文を打つたびに全部を判定する(3,000 件で 200 字に約 1.2 秒)。
+ * 仮の高さは `filer.ts` が塊ごとに入れる(下の値は入る前の控え)。
+ * ⚠ 行の `contain` は消さない ── 行の `content-visibility: auto` が暗に付けていた閉じ込めで、
+ *   外すと文字が 1px 上へずれる(画素で突き合わせた)。 */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody {
   content-visibility: auto;
-  contain-intrinsic-size: auto 26px;
+  contain-intrinsic-size: auto 1300px;
 }
-/* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた */
-[data-pkc-region='filer-table'][data-pkc-grid] tbody tr:first-child {
+[data-pkc-region='filer-table'][data-pkc-grid] tbody tr {
+  contain: layout paint style;
+}
+/* 罫線が畳まれる表では、最初の行の上と最後の行の下に罫線の半分(0.5px)が足されていた。
+ * ⚠ 塊に分けても、足すのは**表全体の**最初と最後だけ(塊ごとに足すと 0.5px ずつ伸びる) */
+[data-pkc-region='filer-table'][data-pkc-grid] tbody:first-of-type tr:first-child {
   height: 26.5px;
   padding-top: 0.5px;
 }
-[data-pkc-region='filer-table'][data-pkc-grid] tbody {
+[data-pkc-region='filer-table'][data-pkc-grid] tbody:last-of-type {
   padding-bottom: 0.5px;
 }
 [data-pkc-region='filer-table'][data-pkc-grid] th,
@@ -7580,7 +7589,7 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-region='filer-table'][data-pkc-grid] td:last-child {
   padding-top: calc(var(--s1) + 1.5px);
 }
-[data-pkc-region='filer-table'][data-pkc-grid] tbody tr:first-child td:last-child {
+[data-pkc-region='filer-table'][data-pkc-grid] tbody:first-of-type tr:first-child td:last-child {
   padding-top: var(--s1);
 }
 [data-pkc-field='filer-empty'] {
