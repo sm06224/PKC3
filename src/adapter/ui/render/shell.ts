@@ -570,11 +570,15 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * いまは**この帯そのものが図案だけのタイル**になったので、隣の本体に頼らず
    * 自分の名前を持つ(見た目は隠すが、長押しメニュー・読み上げ・鍵の説明が読む)。
    */
-  const pick = iconButton('toggle-create-menu', '作る種類を選ぶ', 'create-menu');
+  /**
+   * ⚠ 名前は「選ぶだけ」に読めない字にする(#1087 の見直し 2026-10-13)── 直す前は「作る種類を選ぶ」だったが、
+   *   一覧で種類を押すと**その場で 1 件作って編集に入る**(`pick-create-kind`)。今日を開く・道具も並ぶ
+   */
+  const pick = iconButton('toggle-create-menu', '種類を選んで作る', 'create-menu');
   markBarTile(pick);
   pick.setAttribute('data-pkc-field', 'create-pick');
-  pick.title = '作る種類を選びます';
-  pick.setAttribute('aria-label', '作る種類を選ぶ');
+  pick.title = '種類を選んで作ります(押した種類で、その場で 1 件作ります)。今日を開く・添付・録音なども並びます';
+  pick.setAttribute('aria-label', '種類を選んで作る');
   pick.setAttribute('aria-expanded', 'false');
 
   /**
