@@ -117,12 +117,44 @@ export function openLightbox(
     closeLightbox(root);
   });
 
+  // 🔴 開く前の焦点を控え、✕ へ移す(#1087)。閉じるとき {@link closeLightbox} が返す
+  const doc2 = root.ownerDocument;
+  const prev = doc2.activeElement;
   root.append(overlay);
+  restoreBase.set(root, prev instanceof HTMLElement ? prev : null);
+  overlay.querySelector<HTMLElement>('.pkc-lightbox-close-btn')?.focus();
+  // ⚠ aria-modal の約束 ── Tab は中だけを巡る
+  overlay.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Tab') return;
+    const btns = [...overlay.querySelectorAll<HTMLElement>('button:not(:disabled)')];
+    if (btns.length === 0) return;
+    const first = btns[0]!;
+    const last = btns[btns.length - 1]!;
+    const act = doc2.activeElement;
+    if (ev.shiftKey && (act === first || !overlay.contains(act))) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && (act === last || !overlay.contains(act))) {
+      ev.preventDefault();
+      first.focus();
+    }
+  });
 }
+
+const restoreBase = new WeakMap<HTMLElement, HTMLElement | null>();
 
 /** ライトボックスを閉じる */
 export function closeLightbox(root: HTMLElement): void {
-  root.querySelector(`[data-pkc-region="${LIGHTBOX_REGION}"]`)?.remove();
+  const el = root.querySelector(`[data-pkc-region="${LIGHTBOX_REGION}"]`);
+  if (el === null) return;
+  const doc = root.ownerDocument;
+  const active = doc.activeElement;
+  // 焦点が中か <body> のときだけ返す(別の所へ移していたら奪わない)
+  const mine = active === null || active === doc.body || el.contains(active);
+  const back = restoreBase.get(root) ?? null;
+  restoreBase.delete(root);
+  el.remove();
+  if (mine && back !== null && back.isConnected) back.focus();
 }
 
 /** ライトボックスが表示中か */
