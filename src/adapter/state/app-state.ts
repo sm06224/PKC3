@@ -873,6 +873,19 @@ export const EDITING_NOTE = '編集中は使えません(「編集を保存す�
 export const APPEND_BUSY_NOTE = 'いま保存しています。少し待ってから、もう一度押してください';
 
 /**
+ * 🔴 **アプリの設定(登録 / グループ / アイコン)を、いま書けない理由**(無ければ `null`)。
+ * ⚠ `SET_APP_TILE` の門と、binder が「欄を元の値へ戻すか」を決める判定の**共通の 1 本**
+ *   (別々に書くと、断ったのに欄だけ新しい値のまま残る)。
+ * ⚠ `phase` を「編集中」と読み替えない(`phaseBlockReason` の戒め)。
+ */
+export function appTileRefusal(state: AppState, lid: string): string | null {
+  const blocked = phaseBlockReason(state.phase);
+  if (blocked !== null) return `${blocked}設定できます`;
+  if (state.writeLock || (state.tileWrite && state.tileWrite.lid !== lid)) return APPEND_BUSY_NOTE;
+  return null;
+}
+
+/**
  * 🔴 **「部分の下書き」の種類ごとの言葉**(#1044 段3)。
  *
  * ⚠ **章だけの下書き(#1044 段2)を、コード枠の下書きも持てるように一般化した** ──
@@ -6302,9 +6315,10 @@ function reduceCore(
       // ⚠ 書込が飛んでいる間は触らせない(追記と同じ規律)── 読んで書き戻す
       //    操作なので、途中に別の書込が挟まると片方が消える
       // ⚠ 追記が飛んでいる間は触らない(あちらは本文を丸ごと書き戻す)
-      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
-      // ⚠ **別のノートのタイル書込中も断る**(1 本しか数えていないので)
-      if (state.tileWrite && state.tileWrite.lid !== action.lid) return { state, events: [] };
+      // 🔴 **断るときは理由を出す**(並べ替え `MOVE_APP_TILE` と同じ)── 黙って捨てると、
+      //   欄には新しい値が残ったまま何も保存されない(押したのに効いていない)。
+      const refusal = appTileRefusal(state, action.lid);
+      if (refusal !== null) return { state: { ...state, error: refusal }, events: [] };
       if (!state.entryMetas.has(action.lid)) return { state, events: [] };
       const updates: Record<string, string | boolean | undefined> = {};
       // ⚠ **false は書かない**(PKC2 と同じ)── 既定値を明示的に持つと、

@@ -1,6 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import { errorText } from '@features/error-text';
+import { APP_GROUP_REORDER_OK_LABEL } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
 import './styles/app.css';
 /**
@@ -4406,7 +4407,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           root,
           `グループの並び順は、グループごとのノートに保存します。順番は全部のグループの位置がそろって決まるので、` +
             `まだノートの無い ${String(names.length)} つにも 1 枚ずつできます(${listed}${rest})。`,
-          { okLabel: 'タイルを並べ替える', cancelLabel: 'やめる' },
+          { okLabel: APP_GROUP_REORDER_OK_LABEL, cancelLabel: 'やめる' },
         )) === 'ok'
       );
     },

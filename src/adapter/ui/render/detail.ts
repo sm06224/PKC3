@@ -4462,6 +4462,7 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     check.setAttribute('data-pkc-field', 'app-register');
     markTargetLid(check, lid);
     check.checked = fm['attachment.registered_as_app'] === true;
+    check.defaultChecked = check.checked; // 断られたときの戻し先(binder の revertIfRefused)
     const text = document.createElement('span');
     text.textContent = 'アプリとして登録';
     label.append(check, text);
@@ -4486,6 +4487,7 @@ function appTileControls(rawBody: string, mime: string, lid: string): HTMLElemen
     input.placeholder = placeholder;
     input.size = size;
     input.value = typeof value === 'string' ? value : '';
+    input.defaultValue = input.value; // 断られたときの戻し先(binder の revertIfRefused)
     box.append(input);
   };
   // ⚠ グループ名は**並び順そのもの**(名前順に並ぶ)── placeholder でそう言う

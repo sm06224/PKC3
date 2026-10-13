@@ -117,7 +117,7 @@ export class LauncherRenderer {
     const name = document.createElement('input');
     name.type = 'text';
     name.setAttribute('data-pkc-field', 'launcher-add-name');
-    name.placeholder = '名前';
+    name.placeholder = '名前(省くとアドレスが名前になります)';
     name.setAttribute('aria-label', 'リンクの名前');
     const url = document.createElement('input');
     url.type = 'text';
@@ -209,19 +209,12 @@ export class LauncherRenderer {
      */
     const reordering = state.launcherReorder;
 
-    if (tiles.length === 0) {
+    if (tiles.length === 0 && q !== '') {
+      // ⚠ 「1 つも無い」は来ない(組み込みのタイルが必ず入る)── 来るのは絞り込みで消えたときだけ。
+      //   自分のアプリが無い案内は、一覧の末尾に出す(下の `launcher-no-own`)
       const empty = document.createElement('p');
       empty.setAttribute('data-pkc-field', 'launcher-empty');
-      // ⚠ **理由を分ける** ── 「1 つも無い」と「絞り込みで消えた」は別の話で、
-      // 一緒にすると user は「取り込めていないのか」と誤解する
-      empty.textContent =
-        state.launcherTiles.length === 0
-          ? // 🔴 **行き止まりにしない**(P8 段⑭)。かつては「PKC2 で登録したものが
-            //    出ます」とだけ書いていた ── PKC3 だけの user には**実行できない
-            //    指示**で、しかも当時は実際に登録する導線が無かった
-            // ⚠ **行き止まりにしない**(P8 段⑭)── いまは道が 2 本ある
-            'アプリがありません。HTML ファイルを添付すると、その添付の画面に「アプリとして登録」のチェックが出ます。よく開くサイトなら、上の欄に名前とアドレスを入れて「リンクを足す」を押してください'
-          : '絞り込みに一致するものがありません';
+      empty.textContent = '絞り込みに一致するものがありません';
       list.append(empty);
       return;
     }
@@ -412,6 +405,20 @@ export class LauncherRenderer {
         }
       }
       grid?.append(this.row(tile, state.selectedLid, canReorder, state.launcherPick, reordering));
+    }
+
+    /**
+     * 🔴 **自分のアプリがまだ無いときの案内**(行き止まりにしない ── P8 段⑭、#1087)。
+     * ⚠ かつては「一覧が空のとき」に出していたが、組み込みのタイルが必ず入るので**一度も出なかった**。
+     *   判定は「user が足したタイルが 1 つも無い」(`isMovableTile`)。絞り込み中は出さない
+     *   (絞った結果の話ではない)。
+     */
+    if (q === '' && !state.launcherTiles.some(isMovableTile)) {
+      const none = document.createElement('p');
+      none.setAttribute('data-pkc-field', 'launcher-no-own');
+      none.textContent =
+        '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の欄に名前とアドレスを入れて「リンクを足す」を押してください';
+      list.append(none);
     }
 
     /**

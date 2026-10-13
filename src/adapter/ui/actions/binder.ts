@@ -92,6 +92,7 @@ import {
   appGroupOrderCount,
   hasAppGroupOrder,
   isCodeDraft,
+  appTileRefusal,
   isViewMode,
   nextViewMode,
   phaseBlockReason,
@@ -6118,6 +6119,19 @@ function moveAppGroup(
 }
 
 /**
+ * 🔴 **断られた設定は、欄を保存してある値へ戻す**(#1087)。
+ * ⚠ 理由は reducer が帯に出すが、欄だけ新しい値のまま残ると「保存した」と読める
+ *   (本文が動かないので詳細は描き直されない)。`defaultChecked` / `defaultValue` は
+ *   描いたときの保存済みの値(`detail.ts` の添付の設定)。
+ * ⚠ 判定は reducer と同じ 1 本(`appTileRefusal`)。
+ */
+function revertIfRefused(dispatcher: Dispatcher, lid: string, input: HTMLInputElement): void {
+  if (appTileRefusal(dispatcher.getState(), lid) === null) return;
+  if (input.type === 'checkbox') input.checked = input.defaultChecked;
+  else input.value = input.defaultValue;
+}
+
+/**
  * 🔴 **色がまだ無い付箋の、色の窓の初めの色**(白 / 灰色に**見える**が、わざと 1 だけずらした値)。
  *
  * ⚠ `<input type="color">` は**値が開いたときから変わらなければ `change` を撃たない**(仕様)。
@@ -10573,18 +10587,24 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'toggle-app-tile': (dispatcher, target) => {
     const lid = targetLid(dispatcher, target);
-    if (lid && target instanceof HTMLInputElement)
+    if (lid && target instanceof HTMLInputElement) {
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, registered: target.checked });
+      revertIfRefused(dispatcher, lid, target);
+    }
   },
   'set-app-group': (dispatcher, target) => {
     const lid = targetLid(dispatcher, target);
-    if (lid && target instanceof HTMLInputElement)
+    if (lid && target instanceof HTMLInputElement) {
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, group: target.value.trim() });
+      revertIfRefused(dispatcher, lid, target);
+    }
   },
   'set-app-icon': (dispatcher, target) => {
     const lid = targetLid(dispatcher, target);
-    if (lid && target instanceof HTMLInputElement)
+    if (lid && target instanceof HTMLInputElement) {
       dispatcher.dispatch({ type: 'SET_APP_TILE', lid, icon: target.value.trim() });
+      revertIfRefused(dispatcher, lid, target);
+    }
   },
   /**
    * 🔴 **目印を絵から選ぶ**(#770 段②、2026-09-12)。
