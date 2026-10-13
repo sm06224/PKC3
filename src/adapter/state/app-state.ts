@@ -870,6 +870,19 @@ export const EDITING_NOTE = '編集中は使えません(「編集を保存す�
  * 🔑 並べ替えの同じ場面(`MOVE_APP_TILE` の「いま保存しています。少し待ってから、
  *   もう一度動かしてください」)と言い方を揃える。
  */
+/**
+ * 🔴 **ノートの行がもう無いときの 1 文**(#1087)。⚠ 画面に出る字なので 1 か所に置く。
+ * 直す前は `entry row missing` / `commit: unknown entry <lid>` のような英語と内部の id が
+ * そのままステータスに出ていた。別のウィンドウで消えた、が現実に起きる原因。
+ */
+export const ENTRY_GONE_NOTE = 'このノートはもう見つかりません(別のウィンドウで消えた可能性があります)';
+
+/**
+ * 🔴 **題名の欄を空にして確定したときの知らせ**(#1087)。⚠ 画面に出る字なので 1 か所に置く。
+ * 直す前は黙って元の題名に戻していた ── 保存した user には「空にしたのに戻った」だけが見える。
+ */
+export const EMPTY_TITLE_NOTE = '題名が空なので、元の題名のままにしました';
+
 export const APPEND_BUSY_NOTE = 'いま保存しています。少し待ってから、もう一度押してください';
 
 /**
@@ -4769,7 +4782,7 @@ function reduceCore(
       // phase は落とさない(読み失敗はアプリ死ではない ── 再クリックが retry)。
       // エラーは state に持つ: 次の成功 / 選択までステータスに残る
       return {
-        state: { ...state, error: `body load failed: ${action.error}` },
+        state: { ...state, error: action.error === ENTRY_GONE_NOTE ? ENTRY_GONE_NOTE : `本文を読み込めませんでした: ${action.error}` },
         events: [],
       };
     }
@@ -6682,7 +6695,7 @@ function reduceCore(
         // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
         // 来たら不変量違反。書かずに可視エラーで終える(黙って捨てない)
         return {
-          state: { ...state, phase: 'ready', error: `commit: unknown entry ${lid}` },
+          state: { ...state, phase: 'ready', error: ENTRY_GONE_NOTE },
           events: [],
         };
       }
@@ -6899,7 +6912,7 @@ function reduceCore(
       if (!meta) {
         // openBody は SELECT_ENTRY(存在検査済)経由でしか確立しない ── ここに
         // 来たら不変量違反(COMMIT_EDIT と同じ backstop)。
-        return { state: { ...state, error: `commit: unknown entry ${draft.lid}` }, events: [] };
+        return { state: { ...state, error: ENTRY_GONE_NOTE }, events: [] };
       }
       return {
         state: {
@@ -7083,7 +7096,7 @@ function reduceCore(
       }
       const meta = state.entryMetas.get(draft.lid);
       if (!meta) {
-        return { state: { ...state, error: `commit: unknown entry ${draft.lid}` }, events: [] };
+        return { state: { ...state, error: ENTRY_GONE_NOTE }, events: [] };
       }
       return {
         state: {
@@ -8829,7 +8842,9 @@ function reduceCore(
         return { state, events: [] };
       const meta = state.entryMetas.get(action.lid);
       const title = action.title.trim();
-      if (!meta || title === '' || title === meta.title) return { state, events: [] };
+      // 🔴 空は元のまま ── ただし**黙らず言う**(本文は触らない。保存の経路はこの後も同じ)
+      if (meta && title === '') return { state: { ...state, notice: EMPTY_TITLE_NOTE }, events: [] };
+      if (!meta || title === meta.title) return { state, events: [] };
       // title はローカルが唯一の知識源なので楽観更新(sidebar が即応)。
       // 永続化は effect が disk body を読んで行全体を書く(REQUEST_RENAME)。
       // 直後に COMMIT_EDIT が続く場合も、更新済み meta から行を組むので title は保たれる

@@ -1936,7 +1936,7 @@ describe('行の右クリックの「編集」(#1038 台帳③ C1)', () => {
     const editBtn = s.menu()!.querySelector('[data-pkc-action="start-edit"]') as HTMLButtonElement;
     expect(editBtn.disabled, '本文が届いているのに押せない').toBe(false);
     expect(editBtn.getAttribute('data-pkc-hint')).toBe(
-      'このノートの全文編集に入ります(題名欄と保存 / キャンセルが出ます)',
+      'このノートの編集に入ります(題名の欄と「編集を保存する」「編集をやめる」が出ます)',
     );
     editBtn.click();
     expect(s.dispatcher.getState().phase, '編集に入っていない').toBe('editing');

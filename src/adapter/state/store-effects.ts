@@ -108,6 +108,7 @@ import {
   sectionSaveFailureNote,
   codeSaveFailureNote,
   SECTION_SAVE_ANOTHER_WINDOW_NOTE,
+  ENTRY_GONE_NOTE,
   SECTION_SAVE_NOT_FOUND_NOTE,
   CODE_SAVE_NOT_FOUND_NOTE,
 } from './app-state';
@@ -1875,7 +1876,7 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'BODY_LOAD_FAILED',
                 lid: ev.lid,
-                error: 'entry row missing',
+                error: ENTRY_GONE_NOTE,
               });
               return;
             }
@@ -2099,7 +2100,7 @@ export function connectStoreEffects(
             if (stamps === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `rename: entry row missing (${ev.lid})`,
+                error: ENTRY_GONE_NOTE,
               });
               return;
             }
@@ -3685,7 +3686,7 @@ export function connectStoreEffects(
               // 行不在: 可視通知(非致命 ── アプリごと止めない)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `body rewrite: entry row missing (${ev.lid})`,
+                error: ENTRY_GONE_NOTE,
               });
               return;
             }

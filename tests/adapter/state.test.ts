@@ -4,6 +4,8 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { extractMeta } from '../../src/features/flavor';
 import {
+  EMPTY_TITLE_NOTE,
+  ENTRY_GONE_NOTE,
   VIEW_MODES,
   initialState,
   isAsidePane,
@@ -243,6 +245,26 @@ describe('reducer: lean aggregate', () => {
      */
     expect(reduce(editing, { type: 'COMMIT_EDIT' }).state.error, '正常な保存で断られた').toBeNull();
     expect(reduce(editing, { type: 'CANCEL_EDIT' }).state.error, '正常な取り消しで断られた').toBeNull();
+  });
+
+  it('🔴 題名を空にして保存しても、本文は保存され、題名は元のままで、その旨を知らせる(#1087)', () => {
+    let s = loadedA();
+    const before = s.entryMetas.get('a')?.title;
+    expect(before, '台に題名が無い').toBeTruthy();
+    expect(s.notice, '台がもう知らせを持っている').toBeNull();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: '# A2 本文' }).state;
+    const r = reduce(s, { type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '   ' });
+    expect(r.state.notice, '黙って戻している').toBe(EMPTY_TITLE_NOTE);
+    expect(r.state.entryMetas.get('a')?.title, '題名が変わった').toBe(before);
+    expect(r.events, '空の題名で改名が走った').toEqual([]);
+    // 本文は失われない ── 続く保存はこれまでどおり本文を書く
+    const c = reduce(r.state, { type: 'COMMIT_EDIT' });
+    expect(c.events.map((e) => e.type)).toContain('PERSIST_ENTRY');
+    expect(c.state.entryMetas.get('a')?.title).toBe(before);
+    // 対照群: 空でない・同じ題名では出さない
+    expect(reduce(s, { type: 'RENAME_ENTRY_TITLE', lid: 'a', title: before as string }).state.notice).toBeNull();
+    expect(reduce(s, { type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '新題名' }).state.notice).toBeNull();
   });
 
   it('COMMIT_EDIT emits PERSIST_ENTRY with the full row, and skips when unchanged', () => {
@@ -653,7 +675,7 @@ describe('effect layer: serialized store I/O', () => {
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await until(() => d.getState().error !== null);
-    expect(d.getState().error).toMatch(/entry row missing/); // state 駆動の可視エラー
+    expect(d.getState().error).toBe(ENTRY_GONE_NOTE); // state 駆動の可視エラー
     expect(d.getState().openBody).toBeNull(); // 「空のノート」に見せない
     off();
   });
