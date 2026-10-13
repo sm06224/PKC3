@@ -6513,7 +6513,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     const blocked = phaseBlockReason(dispatcher.getState().phase);
     if (blocked !== null) {
       // ⚠ 字は 1 か所から(C11 / #1045)── 直す前は「保存するか**取り消して**から」
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}戻ってください` });
+      // 🔴 行き先で言い分ける(#1087 の見直し 2026-10-13)── 「情報」を押した人に「戻ってください」と言っていた
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${blocked}${page === 'info' ? '開いてください' : '戻ってください'}` });
       return;
     }
     if (page === 'info') {
