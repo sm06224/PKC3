@@ -188,3 +188,33 @@ describe('格子のとき、行を 50 行ずつの塊に分ける(#1087)', () =>
     expect(bodies[0]!.style.getPropertyValue('contain-intrinsic-size')).toBe('');
   });
 });
+
+/**
+ * 🔑 **検索で打つたびに、全件の指紋を作り直さない**(#1087)。
+ * ⚠ ノートの一覧(entryMetas)が同じなら、前に作った指紋がそのまま使える ──
+ *   直す前は 1 字ごとに 3,000 件ぶん作り直していた(実測で 1 字ごとの JS の上位)。
+ */
+describe('#1087 一覧の指紋を作り直さない', () => {
+  it('🔑 絞りの字だけが変わる描画では、指紋を作らない ── 対照群: 題名が変われば作る', async () => {
+    const { vi } = await import('vitest');
+    const { FilerRenderer } = await import('../../src/adapter/ui/render/filer');
+    const { render, table } = setup();
+    let s = booted(metas(500));
+    render(s);
+    const spy = vi.spyOn(FilerRenderer.prototype as unknown as { metaSignature: () => string }, 'metaSignature');
+    try {
+      for (const q of ['t', 't1', 't12']) {
+        s = reduce(s, { type: 'SET_ENTRY_FILTER', query: q }).state;
+        render(s);
+      }
+      expect(s.filterQuery, '前提: 絞りの字が state に入っていない').toBe('t12');
+      expect(table().querySelectorAll('tbody tr').length, '前提: 絞っても行が減っていない(描き直していない)').toBeLessThan(500);
+      expect(spy, '絞りの字だけで指紋を作り直した').not.toHaveBeenCalled();
+      const changed = metas(500).map((m) => (m.lid === 'n1' ? { ...m, title: '新しい名前' } : m));
+      render(withMetas(s, changed));
+      expect(spy, '対照群: 一覧が変わったのに指紋を作っていない').toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
