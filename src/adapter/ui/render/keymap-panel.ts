@@ -210,6 +210,9 @@ export function buildKeymapPanel(
 
   function sync(): void {
     const bindings = store.getBindings();
+    // ⚠ 1 つも変えていなければ「すべて既定に戻す」も押せない(行ごとの「既定に戻す」と同じ。#1087 の見直し 2026-10-13)
+    const untouched = Object.keys(store.getOverrides()).length === 0;
+    if (resetAll.disabled !== untouched) resetAll.disabled = untouched;
     for (const cmd of KEY_COMMANDS) {
       const row = rows.get(cmd.id);
       if (!row) continue;

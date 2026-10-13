@@ -159,6 +159,8 @@ describe('割当の検め', () => {
     const clash = validateBinding('create-entry', 'Mod+E', base);
     expect(clash?.kind).toBe('conflict');
     expect(clash?.withCommandId).toBe('edit-entry');
+    // 🔴 どうすれば付くかまで言う(2026-10-13)── 相手の名前と、先に外すこと
+    expect(clash?.message).toContain('先にそちらの × で外してください');
     // 行の欄 と 2 列の編集欄 は同時に効かない ── `Escape` は両方の既定である
     expect(contextsOverlap(['row'], ['editor'])).toBe(false);
     expect(validateBinding('row-cancel', 'Escape', base)).toBeNull();

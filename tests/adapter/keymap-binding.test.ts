@@ -771,6 +771,25 @@ describe('設定の面(割り当て直す口)', () => {
     panel.dispose();
   });
 
+  it('🔴 1 つも変えていなければ「すべて既定に戻す」は押せない / 変えたら押せる(2026-10-13)', () => {
+    const store = new KeymapStore(fakeStorage());
+    const panel = buildKeymapPanel(store, document);
+    document.body.append(panel.root);
+    const all = panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
+    expect(all.disabled, '何も変えていないのに押せる(押しても何も起きない)').toBe(true);
+    store.removeBinding('create-entry', 'Mod+N');
+    expect(all.disabled, '変えたのに押せない').toBe(false);
+    all.click();
+    expect(all.disabled, '戻した後も押せる').toBe(true);
+    panel.dispose();
+  });
+
+  it('🔴 説明の字に PKC2 を出さない(PKC3 の利用者には通じない。2026-10-13)', () => {
+    for (const c of KEY_COMMANDS) {
+      expect(`${c.label} ${c.note ?? ''}`, c.id).not.toContain('PKC2');
+    }
+  });
+
   it('🔴 押してから打った鍵が割当になる', () => {
     const store = new KeymapStore(fakeStorage());
     const panel = buildKeymapPanel(store, document);

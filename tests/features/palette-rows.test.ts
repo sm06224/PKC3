@@ -185,6 +185,13 @@ describe('🔴 本文の欄が要る操作の理由(#1206 D3)', () => {
     expect(whyOf('format-ruby', ready), '押せる行に案内が付いた').not.toContain(NOT_READY_PREFIX);
   });
 
+  it('🔴 「操作を探す」のキーを全部外していても、文が欠けない(2026-10-13)', () => {
+    const none = { ...BINDINGS, 'open-palette': [] };
+    const rows = paletteRows('', none, NONE, false, () => null, editorOnly);
+    expect(whyOf('format-ruby', rows)).toBe(`${NOT_READY_PREFIX}本文の欄で『操作を探す』を開くと呼べます`);
+    expect(whyOf('format-ruby', rows), '空のキーを挟んだ').not.toContain('  ');
+  });
+
   it('🔴 ボタンが持っている押せない理由(編集中など)は案内より先に出る', () => {
     const rows = paletteRows(
       '',
