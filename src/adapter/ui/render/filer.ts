@@ -600,7 +600,7 @@ export class FilerRenderer {
       const hint = document.createElement('p');
       hint.setAttribute('data-pkc-field', 'filer-move-empty');
       // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
-      hint.textContent = '動かしたいものを選ぶと、ここでフォルダを変えられます';
+      hint.textContent = '動かしたいものを選ぶと、ここで上下に並べ替えられます';
       host.append(hint);
     } else {
       /**
@@ -649,6 +649,11 @@ export class FilerRenderer {
         b.disabled = at < 0 || (dir === 'up' ? at === 0 : at === siblings.length - 1);
         // ⚠ なぜ押せないかを言う(端に居ることは見た目から分からない)
         if (b.disabled) b.title = dir === 'up' ? 'すでに先頭です' : 'すでに末尾です';
+        // 🔴 手動の順でないと、動かしても見えない順を黙って書き換える(画面は変わらない)
+        if (state.entrySort !== 'manual') {
+          b.disabled = true;
+          b.title = '並び順が「自分で並べた順」のときだけ動かせます';
+        }
         nudge.append(b);
       }
       if (!filerFlattenNow(state)) host.append(nudge);
