@@ -397,6 +397,25 @@ describe('link-preview', () => {
       teardown();
     });
 
+    // 🔴 読めなかったら「読み込み中…」のまま止めない(#1087)
+    it('本文を読めなかったら、そう出す', async () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const anchor = document.createElement('a');
+      anchor.setAttribute('data-pkc-entry-ref', 'entry:n1');
+      root.append(anchor);
+      const readBodies = vi.fn().mockReturnValue(Promise.reject(new Error('worker gone')));
+      const teardown = setupLinkPreview(root, createMockDispatcher(), { readBodies });
+      anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      vi.advanceTimersByTime(HOVER_DELAY_MS);
+      const card = root.querySelector(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`);
+      expect(card?.querySelector('.pkc-link-preview-loading'), '前提が崩れた(読み込み中が出ていない)').not.toBeNull();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(card?.querySelector('.pkc-link-preview-body')?.textContent).toBe('(本文を読めませんでした)');
+      teardown();
+    });
+
     it('immediately uses openBody when target is the currently open note', () => {
       const root = document.createElement('div');
       document.body.append(root);

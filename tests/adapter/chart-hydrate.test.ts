@@ -152,6 +152,8 @@ describe('chart の器を埋める(adapter 層)', () => {
     const { host, jobs } = await mount('{ これは JSON ではない');
     expect(host.getAttribute('data-pkc-chart-state')).toBe('failed');
     expect(host.getAttribute('data-pkc-chart-error') ?? '').toContain('JSON');
+    // ⚠ 例外の前置き「Error:」を画面に出さない(#1087)
+    expect(host.getAttribute('data-pkc-chart-error') ?? '').not.toMatch(/^\w*Error:/);
     expect(host.querySelector('.pkc-chart-source'), '原文まで消した').not.toBeNull();
     expect(jobs.length, '読めないのにワーカーを起こした').toBe(0);
   });

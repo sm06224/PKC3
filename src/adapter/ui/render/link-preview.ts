@@ -438,7 +438,15 @@ export function setupLinkPreview(
           // 本文が入って高さが変わる可能性があるので位置を再調整
           positionPreviewCard(currentCard, activeAnchor, root);
         }
-      });
+      })
+        // 🔴 読めなかったら「読み込み中…」のまま止めない(#1087)
+        .catch(() => {
+          if (activeLid !== requestedLid || !activeAnchor?.isConnected) return;
+          const bodyEl = root
+            .querySelector<HTMLElement>(`[data-pkc-region="${LINK_PREVIEW_REGION}"]`)
+            ?.querySelector('.pkc-link-preview-body');
+          if (bodyEl) bodyEl.textContent = '(本文を読めませんでした)';
+        });
     }
   };
 
