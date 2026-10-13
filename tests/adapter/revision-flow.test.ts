@@ -138,7 +138,7 @@ describe('revision flow (P5b)', () => {
     expect(d.getState().revisionPanel?.items).toHaveLength(1);
     const panel = q('[data-pkc-field="history-panel"]')!;
     expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('#9');
+    expect(panel.textContent).toContain('版 9');
 
     d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-9' });
     await tick();

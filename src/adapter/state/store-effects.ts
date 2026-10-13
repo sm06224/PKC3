@@ -2925,7 +2925,7 @@ export function connectStoreEffects(
               }
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: 'その版の本文を読めませんでした(履歴が整理された可能性があります)',
+                error: 'その版の本文を読めませんでした(1 つのノートの版は 100 件までで、超えると古い版から消えます)',
               });
               return;
             }
@@ -2947,7 +2947,7 @@ export function connectStoreEffects(
             }
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `版の読み出しに失敗しました: ${String(e)}`,
+              error: `版を読み出せませんでした: ${e instanceof Error ? e.message : String(e)}`,
             });
           }
         });
@@ -2963,7 +2963,7 @@ export function connectStoreEffects(
             if (!rev) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: '復元対象の履歴が見つかりません',
+                error: '戻す版が履歴に見つかりません(1 つのノートの版は 100 件までで、超えると古い版から消えます)',
               });
               return;
             }
@@ -2973,7 +2973,7 @@ export function connectStoreEffects(
             if (current === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `restore: entry row missing (${ev.lid})`,
+                error: 'このノートが見つからないので、版に戻せません(ゴミ箱へ移した場合は、先にゴミ箱から戻してください)',
               });
               return;
             }
@@ -3023,7 +3023,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `復元に失敗しました: ${String(e)}`,
+                error: `戻せませんでした: ${e instanceof Error ? e.message : String(e)}`,
               });
           }
         });
@@ -3086,7 +3086,7 @@ export function connectStoreEffects(
             if (!rev) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: '復元対象の履歴が見つかりません',
+                error: 'ゴミ箱の中に、そのノートの版が見つかりません(ゴミ箱を空にした後かもしれません)',
               });
               return;
             }
@@ -3157,7 +3157,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `復元に失敗しました: ${String(e)}`,
+                error: `戻せませんでした: ${e instanceof Error ? e.message : String(e)}`,
               });
           }
         });

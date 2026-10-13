@@ -4229,7 +4229,7 @@ function renderRevisionDiff(
         load.state === 'loading'
           ? '読んでいます…'
           : load.state === 'failed'
-            ? 'その版の本文を読めませんでした(履歴が整理された可能性があります)'
+            ? 'その版の本文を読めませんでした(1 つのノートの版は 100 件までで、超えると古い版から消えます)'
             : null,
     };
   } else {
@@ -4366,7 +4366,8 @@ function renderHistoryPanel(
     open.title = 'この版の中身を、いまの本文とくらべて見ます(戻しません)';
     const text = document.createElement('span');
     // 🔴 日時は端末の時刻で(DB の字は UTC ── `formatStoredStamp`)
-    text.textContent = `#${item.revOrder} ${formatStoredStamp(item.createdAt)} ${item.title ?? '(無題)'}`;
+    // 🔑 「版 N」で書く(比較先の欄・差分の見出しと同じ呼び方 ── #1087 の見直し 2026-10-13。直す前は行だけ「#N」)
+    text.textContent = `版 ${item.revOrder} ${formatStoredStamp(item.createdAt)} ${item.title ?? '(無題)'}`;
     open.append(text);
     const badge = diffBadge(item.added, item.removed);
     if (badge) open.append(badge);
