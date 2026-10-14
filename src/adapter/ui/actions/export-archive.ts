@@ -15,10 +15,13 @@ import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive'
 import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
 import { looksCorrupt } from '@features/storage/db-corruption';
 import {
+  rescueArchiveDetail,
   rescueArchiveSource,
   noteRescueWritten,
   type RescueAssets,
   type RescuePick,
+  type RescueRelationsPick,
+  type RescueRevisionsPick,
 } from '@features/storage/rescue-archive';
 import {
   collectFenceAssetKeys,
@@ -94,6 +97,9 @@ export interface ExportDeps {
    */
   rescue?: {
     readonly pick: RescuePick;
+    /** 🔑 つながり・履歴を読む口(#1087)。⚠ 必須 ── 渡し忘れると、静かに入らなくなる。 */
+    readonly pickRelations: RescueRelationsPick;
+    readonly pickRevisions: RescueRevisionsPick;
     readonly assets?: RescueAssets;
   };
   /**
@@ -302,6 +308,9 @@ async function fallbackToRescueArchive(
     cid: deps.source.cid,
     title: deps.source.title,
     pick: deps.rescue.pick,
+    // 🔑 つながり・履歴も拾えた分は入れる(#1087。作り直しと同じ口)
+    pickRelations: deps.rescue.pickRelations,
+    pickRevisions: deps.rescue.pickRevisions,
     // 🔑 添付の bytes を一緒に入れる(#1005 と同じ実体)。⚠ 無ければ入れないだけ
     ...(deps.rescue.assets === undefined ? {} : { assets: deps.rescue.assets }),
   });
@@ -314,10 +323,8 @@ async function fallbackToRescueArchive(
    * 「済み」に見えてしまう)── だからここ(成功した後)でだけ呼ぶ。
    */
   noteRescueWritten(s, Date.now());
-  const gotBody = s.entries - s.bodyMissing;
-  // 🔑 §5 の検算:「`.pkc3-part.zip` を落としたときは必ず
-  // 『つながりと履歴は入っていません(N 件のうち M 件 / 添付 K 件)』を書く」
-  const detail = `つながりと履歴は入っていません(${s.entries} 件のうち ${gotBody} 件 / 添付 ${s.assets} 件)`;
+  // 🔑 §5 の検算:入れたなら件数で、読めなかったなら「入っていません」と言う(字の組みは 1 か所)
+  const detail = rescueArchiveDetail(s);
   return { out, name: archiveFileName(base, 'part'), detail };
 }
 

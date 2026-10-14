@@ -128,6 +128,22 @@ function fakeRescuePick(): (after: number, chunks: number) => Promise<RescuePage
   });
 }
 
+/** つながり・履歴を 1 行も返さない読み口(必須の口を満たすだけ。中身を見る test は別に作る)。 */
+const emptyPage = async () => ({
+  rows: [],
+  lastRowid: 0,
+  skipped: 0,
+  empty: 0,
+  maxRowid: 0,
+  done: true,
+});
+const noExtraPicks = { pickRelations: emptyPage, pickRevisions: emptyPage };
+/** つながり・履歴の表が読めない DB(索引の外でも読めない壊れ方)を模す。 */
+const failingPage = async (): Promise<never> => {
+  throw new Error('database disk image is malformed');
+};
+const brokenExtraPicks = { pickRelations: failingPage, pickRevisions: failingPage };
+
 describe('末尾の使い分け(#1017 段④b)', () => {
   it('🔴 コレクション全体は既定で .pkc3-full.zip', async () => {
     const { deps, downloaded } = baseDeps();
@@ -174,33 +190,80 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     // 本題 ── corrupt の綴りで落ち、rescue が渡っている
     const { deps, downloaded, notices } = baseDeps({
       source: fakeSource({ fail: 'database disk image is malformed' }),
-      rescue: { pick: fakeRescuePick() },
+      rescue: { pick: fakeRescuePick(), ...brokenExtraPicks },
     });
     const n = await exportArchive(readyDispatcher(), deps, 'archive');
     expect(n, '倒れた結果の件数を返していない').toBe(1);
     expect(downloaded).toHaveLength(1);
     expect(downloaded[0]!.name.endsWith('.pkc3-part.zip'), downloaded[0]!.name).toBe(true);
-    // 🔑 §5 の検算:通知に「入っていません」が出る
+    // 🔑 §5 の検算:読めなかったときは、通知に「入っていません」が出る
     const notified = notices.join('\n');
-    expect(notified, 'つながり・履歴が入っていないことを言っていない').toContain(
+    expect(notified, 'つながり・履歴が読めなかったことを言っていない').toContain(
+      'その分は入っていません',
+    );
+  });
+
+  /**
+   * 🔴 **拾えたつながり・履歴は zip に入れ、画面の字も「入れました」と言う**(#1087)。
+   * ⚠ 偽の「入っていません」を残さない ── 件数は入れた物の数と一致する。
+   */
+  it('🔴 つながり・履歴を拾えたら zip に入り、字は件数で言う(「入っていません」と言わない)', async () => {
+    const page = <T,>(rows: T[]) => async () => ({
+      rows,
+      lastRowid: 1,
+      skipped: 0,
+      empty: 0,
+      maxRowid: 1,
+      done: true,
+    });
+    const { deps, downloaded, notices } = baseDeps({
+      source: fakeSource({ fail: 'database disk image is malformed' }),
+      rescue: {
+        pick: fakeRescuePick(),
+        pickRelations: page([
+          { rowid: 1, cid: 'c1', id: 'rel1', fromLid: 'r1', toLid: 'r1', kind: 'semantic' },
+          // 一覧に無いノートへのつながりは入れない(作り直しと同じ扱い)
+          { rowid: 2, cid: 'c1', id: 'rel2', fromLid: 'r1', toLid: 'ghost', kind: 'semantic' },
+        ]),
+        pickRevisions: page([
+          {
+            rowid: 1,
+            cid: 'c1',
+            entryLid: 'r1',
+            revOrder: 1,
+            createdAt: null,
+            title: '旧題',
+            archetype: 'text',
+            kind: 'full',
+            snapshot: '旧本文',
+            contentHash: null,
+          },
+        ]),
+      },
+    });
+    await exportArchive(readyDispatcher(), deps, 'archive');
+    const notified = notices.join('\n');
+    expect(notified).toContain('つながり 1 件・履歴 1 版を入れました');
+    expect(notified, '入れたのに「入っていません」と言っている').not.toContain(
       'つながりと履歴は入っていません',
     );
+    expect(downloaded[0]!.name.endsWith('.pkc3-part.zip')).toBe(true);
   });
 
   it('🔴 Markdown も同じ理由で .pkc3-part.zip へ倒れる', async () => {
     const { deps, downloaded, notices } = baseDeps({
       source: fakeSource({ fail: 'sqlite result code 11' }),
-      rescue: { pick: fakeRescuePick() },
+      rescue: { pick: fakeRescuePick(), ...brokenExtraPicks },
     });
     await exportArchive(readyDispatcher(), deps, 'markdown');
     expect(downloaded[0]!.name.endsWith('.pkc3-part.zip')).toBe(true);
-    expect(notices.join('\n')).toContain('つながりと履歴は入っていません');
+    expect(notices.join('\n')).toContain('その分は入っていません');
   });
 
   it('⚠ corrupt でない失敗は倒れない(大きすぎる、を壊れていると偽らない)', async () => {
     const { deps } = baseDeps({
       source: fakeSource({ fail: 'RangeError: Invalid array buffer length' }),
-      rescue: { pick: fakeRescuePick() },
+      rescue: { pick: fakeRescuePick(), ...noExtraPicks },
     });
     const d = readyDispatcher();
     const n = await exportArchive(d, deps, 'archive');
@@ -222,7 +285,7 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     const pick = vi.fn(fakeRescuePick());
     const { deps } = baseDeps({
       source: fakeSource({ fail: 'database disk image is malformed' }),
-      rescue: { pick },
+      rescue: { pick, ...noExtraPicks },
     });
     const d = readyDispatcher();
     const n = await exportEntry(d, deps, 'a', 'archive');
@@ -249,7 +312,7 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     const pick = vi.fn(fakeRescuePick());
     const { deps, downloaded } = baseDeps({
       source: fakeSource({ fail: 'database disk image is malformed' }),
-      rescue: { pick },
+      rescue: { pick, ...noExtraPicks },
     });
     const d = readyDispatcher();
     const n = await exportArchive(d, deps, 'archive', [], 'notes');
@@ -294,7 +357,7 @@ describe('普通のバックアップも、「入れ物を捨てる」画面の�
     expect(lastRescueWritten()).toBeNull();
     const { deps } = baseDeps({
       source: fakeSource({ fail: 'database disk image is malformed' }),
-      rescue: { pick: fakeRescuePick() },
+      rescue: { pick: fakeRescuePick(), ...noExtraPicks },
     });
     await exportArchive(readyDispatcher(), deps, 'archive');
     expect(lastRescueWritten(), '拾い出しへ倒れた回を記録していない').not.toBeNull();

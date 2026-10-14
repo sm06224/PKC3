@@ -36,11 +36,13 @@
  * 🔑 **本文が来なかった lid を数えて外へ出す** ── 黙って空本文で埋めない
  *   (「拾えた件数」を「全部」と読ませない、という #971 段③ の規律と同じ向き)。
  *
- * ## 🚫 関係と履歴は拾わない ── ⚠ **添付は拾う**(#1005 で直した)
+ * ## 🔑 つながりと履歴も拾う(#1087。2026-10-14 の実測)
  *
- * 関係・履歴は**索引を使う形でしか引けない**ので、壊れた DB では同じ `rc 11` で落ちる
- * (`db-rescue.ts` の実測表)。だから**空で返し、拾えなかったと明記する**。
- * 🔴 **黙って 0 件にしない** ── user は「リンクが消えた」ことに気づけない。
+ * 以前は「索引を使う形でしか引けない」で空を返していた。🔴 索引だけ壊れた DB では、
+ * `NOT INDEXED` の表走査(`rescueRelations` / `rescueRevisions`)で読める。
+ * ⚠ 拾い方は作り直し(`container-rebuild.ts`)と**同じ口**(`collectRescuedExtras`)── 2 か所に書かない。
+ * 🔴 **読めなかった分は黙って 0 件にしない** ── 読めない区画・投げた・打ち切りは `extras.partial` で言う。
+ *   ⚠ 読む口が落ちても、本文と添付の書き出しは止めない。
  *
  * ## 🔴 添付を「拾えない」に混ぜていたのは誤りだった(user 指摘 2026-09-17)
  *
@@ -240,6 +242,159 @@ export function assetArchivePorts(
   };
 }
 
+/**
+ * 🔑 **1 周の輪を 1 か所で持つ**(ノート・つながり・履歴の 3 つが同じ守りを通る ── §7)。
+ *
+ * 🔴 止まる条件は 3 つ:①`done` ②位置が進まない ③🔴 **何も拾えない周が続く**(#1087。
+ *   `maxRowid` が読めない DB は `done` が立たず、位置だけが進み続けて**永久に終わらなかった**)。
+ */
+export async function drainPages<P extends RescuePagedBase & { readonly rows: readonly unknown[] }>(
+  pick: (after: number, chunks: number) => Promise<P>,
+  take: (page: P) => void,
+  onProgress?: (phase: 'pick' | 'write', seen: number, max: number | null) => void,
+): Promise<{ skipped: number; empty: number; truncated: boolean }> {
+  let skipped = 0;
+  let empty = 0;
+  let after = 0;
+  let idle = 0;
+  let truncated = false;
+  for (;;) {
+    const before = after;
+    const page = await pick(after, RESCUE_CHUNKS);
+    skipped += page.skipped;
+    empty += page.empty;
+    take(page);
+    after = page.lastRowid;
+    onProgress?.('pick', after, page.maxRowid);
+    if (page.done || page.lastRowid <= 0) break;
+    // 🔴 前へ進まない相手で回り続けない(拾い出しと同じ守り方)
+    if (after <= before) break;
+    idle = nextIdlePages(idle, page);
+    if (idle >= RESCUE_IDLE_PAGE_LIMIT) {
+      truncated = true;
+      break;
+    }
+  }
+  return { skipped, empty, truncated };
+}
+
+/** つながりと履歴の拾い出しの結果。 */
+export interface RescuedExtras {
+  /** 🔑 両端のノートが拾えたものだけ(片端が無いつながりは、戻しても宙に浮く)。 */
+  readonly relations: readonly RescuedRelation[];
+  /** 🔑 履歴を持つノートごとに、新しい → 古い。 */
+  readonly chains: ReadonlyMap<string, readonly RescuedRevision[]>;
+  readonly skipped: number;
+  readonly truncated: boolean;
+}
+
+/**
+ * 🔑 **つながりと履歴を拾う**(#1087)── 索引だけ壊れた DB では表走査で読める
+ * (2026-10-14 実測。`NOT INDEXED`)。
+ *
+ * ⚠ 拾えなくても落とさない ── 読めない分は `skipped` で言い、ノートの建て直しは続ける
+ *   (つながりが読めないだけで、読めるノートを捨てる理由は無い)。
+ * ⚠ 器の id が違う行・拾えなかったノートに付く行は捨てる(戻しても宙に浮く)。
+ */
+export async function collectRescuedExtras(
+  cid: string,
+  lids: ReadonlySet<string>,
+  picks: { relations: RescueRelationsPick; revisions: RescueRevisionsPick },
+): Promise<RescuedExtras> {
+  const relations: RescuedRelation[] = [];
+  const seenRel = new Set<string>();
+  const chains = new Map<string, RescuedRevision[]>();
+  const seenRev = new Set<string>();
+  let skipped = 0;
+  let truncated = false;
+  try {
+    const r = await drainPages(picks.relations, (page) => {
+      for (const x of page.rows) {
+        if (x.cid !== cid || !lids.has(x.fromLid) || !lids.has(x.toLid)) continue;
+        if (seenRel.has(x.id)) continue;
+        seenRel.add(x.id);
+        relations.push(x);
+      }
+    });
+    skipped += r.skipped;
+    truncated ||= r.truncated;
+  } catch {
+    skipped += 1;
+  }
+  try {
+    const r = await drainPages(picks.revisions, (page) => {
+      for (const x of page.rows) {
+        if (x.cid !== cid || !lids.has(x.entryLid)) continue;
+        const key = `${x.revOrder}:${x.entryLid}`;
+        if (seenRev.has(key)) continue;
+        seenRev.add(key);
+        const list = chains.get(x.entryLid) ?? [];
+        list.push(x);
+        chains.set(x.entryLid, list);
+      }
+    });
+    skipped += r.skipped;
+    truncated ||= r.truncated;
+  } catch {
+    skipped += 1;
+  }
+  // 保存形の並び(新しい → 古い)にそろえる
+  for (const list of chains.values()) list.sort((p, q) => q.revOrder - p.revOrder);
+  return { relations, chains, skipped, truncated };
+}
+
+
+/**
+ * 🔑 つながり・履歴の成果。⚠ `RescueStats.extras` が無い = **拾いに行っていない**(「0 件」と別物)。
+ */
+export interface ExtrasTally {
+  /** zip に入れたつながりの件数。 */
+  readonly relations: number;
+  /** zip に入れた履歴の版の数。 */
+  readonly revisions: number;
+  /** 🔴 読めない区画 / 読む口が落ちた / 途中で打ち切った、のどれかが在った。 */
+  readonly partial: boolean;
+}
+
+/** 拾えたつながり・履歴の数え方を 1 か所で持つ(拾い出しと作り直しが同じ字を出す)。 */
+export function extrasTally(x: RescuedExtras): ExtrasTally {
+  let revisions = 0;
+  for (const list of x.chains.values()) revisions += list.length;
+  return { relations: x.relations.length, revisions, partial: x.skipped > 0 || x.truncated };
+}
+
+/**
+ * 🔑 **つながり・履歴を zip へ入れる口を、ここ 1 か所で持つ**(`assetArchivePorts` と同じ形)。
+ * ⚠ 拾い出し(`rescueArchiveSource`)と作り直し(`rebuildArchiveSource`)の両方が使う。
+ * ⚠ `undefined` = 拾っていない → 空で返す(今までどおり)。
+ */
+export function extrasArchivePorts(
+  extras: RescuedExtras | undefined,
+): Pick<ArchiveSource, 'listRelations' | 'listRevisionLids' | 'getRevisionChain'> {
+  return {
+    listRelations: async () =>
+      (extras?.relations ?? []).map((r) => ({
+        id: r.id,
+        from_lid: r.fromLid,
+        to_lid: r.toLid,
+        kind: r.kind,
+        created_at: null,
+        updated_at: null,
+      })),
+    listRevisionLids: async () => [...(extras?.chains.keys() ?? [])],
+    getRevisionChain: async (lid) =>
+      (extras?.chains.get(lid) ?? []).map((r) => ({
+        revOrder: r.revOrder,
+        createdAt: r.createdAt,
+        title: r.title,
+        archetype: r.archetype,
+        kind: r.kind,
+        snapshot: r.snapshot,
+        contentHash: r.contentHash,
+      })),
+  };
+}
+
 /** 拾い出しの成果。⚠ **拾えなかった数を必ず連れて歩く**。 */
 export interface RescueStats {
   /** 一覧に載せた件数(1 周目)。 */
@@ -260,14 +415,19 @@ export interface RescueStats {
    */
   readonly assetMissing: number;
   /**
+   * 🔑 **つながり・履歴を zip に入れた成果**(#1087)。
+   * ⚠ **無い = 拾いに行っていない**(0 件と混ぜない ── 「入っていません」と言うのは無いときだけ)。
+   */
+  readonly extras?: ExtrasTally;
+  /**
    * 🔴 **何も拾えない周が続いて、途中で打ち切った**(#1087)。
    * ⚠ `true` のとき、拾えた件数は「全部」ではない(**その先に在ったかもしれない分**は読んでいない)。
    */
   readonly truncated?: boolean;
 }
 
-/** ⚠ 1 回に頼む区画の数(既存の拾い出しと同じ ── 大きくすると 1 応答が重い)。 */
-const CHUNKS = 20;
+/** ⚠ 1 回に頼む区画の数(拾い出しと作り直しで共通 ── 大きくすると 1 応答が重い)。 */
+export const RESCUE_CHUNKS = 20;
 
 /** 進み具合を外へ出す(画面が「止まった」と読まれないように)。 */
 export interface RescueProgress {
@@ -291,6 +451,12 @@ export function rescueArchiveSource(opts: {
    *   (今までどおり)── **壊れる方向へ倒れない**。
    */
   readonly assets?: RescueAssets;
+  /**
+   * 🔑 **つながり・履歴を読む口**(#1087)。⚠ 2 つそろって渡されたときだけ拾う
+   *   (渡さなければ今までどおり入れない ── `stats().extras` が無いことで「拾っていない」と言う)。
+   */
+  readonly pickRelations?: RescueRelationsPick;
+  readonly pickRevisions?: RescueRevisionsPick;
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   type Meta = Awaited<ReturnType<ArchiveSource['listEntryMetas']>>[number];
   const metas: Meta[] = [];
@@ -309,6 +475,8 @@ export function rescueArchiveSource(opts: {
   let bodyDone = false;
   /** 🔴 何も拾えない周が続いて打ち切った(#1087)。 */
   let truncated = false;
+  /** 🔑 拾えたつながり・履歴(#1087)。⚠ 一覧(1 周目)が済んでから拾う ── 宙に浮く行を除くため。 */
+  let extras: RescuedExtras | undefined;
 
   const drain = async (
     phase: 'meta' | 'body',
@@ -331,7 +499,7 @@ export function rescueArchiveSource(opts: {
        *   **起こらなくする**側で守る(§7「衝突は、起こらなくするほうが強い」)。
        */
       const before = after;
-      const page = await opts.pick(after, CHUNKS);
+      const page = await opts.pick(after, RESCUE_CHUNKS);
       take(page);
       if (phase === 'meta') {
         skipped += page.skipped;
@@ -368,6 +536,7 @@ export function rescueArchiveSource(opts: {
     listEntryMetas: async () => {
       metas.length = 0;
       known.clear();
+      extras = undefined;
       await drain('meta', (page) => {
         for (const r of page.rows) {
           // ⚠ 同じ lid が 2 度来たら後を捨てる(壊れた DB では起こりうる)
@@ -388,6 +557,13 @@ export function rescueArchiveSource(opts: {
           });
         }
       });
+      // 🔑 作り直しと同じ口で拾う。⚠ 読む口が落ちても投げない(`collectRescuedExtras` が数える)
+      if (opts.pickRelations !== undefined && opts.pickRevisions !== undefined) {
+        extras = await collectRescuedExtras(opts.cid, known, {
+          relations: opts.pickRelations,
+          revisions: opts.pickRevisions,
+        });
+      }
       return metas;
     },
     listBodies: async (_after, maxBytes) => {
@@ -444,11 +620,10 @@ export function rescueArchiveSource(opts: {
     },
     listAssetMetas: assetPorts.listAssetMetas,
     getAssetBlob: assetPorts.getAssetBlob,
-    // 🚫 下の 3 つは**sqlite にしか無く、索引を使う形でしか引けない**ので拾えない。
-    //    ⚠ 空で返すが、**拾えなかったことは `stats()` の外で必ず字にする**。
-    listRelations: async () => [],
-    listRevisionLids: async () => [],
-    getRevisionChain: async () => [],
+    // 🔑 つながりと履歴(#1087)。⚠ 一覧のあとで呼ばれる(`writeArchive` の順) ── 拾えた分だけ返す
+    listRelations: async () => extrasArchivePorts(extras).listRelations(),
+    listRevisionLids: async () => extrasArchivePorts(extras).listRevisionLids(),
+    getRevisionChain: async (lid) => extrasArchivePorts(extras).getRevisionChain(lid),
   };
 
   return {
@@ -459,9 +634,37 @@ export function rescueArchiveSource(opts: {
       empty,
       bodyMissing: metas.length - gotBody.size,
       ...assetPorts.stats(),
-      ...(truncated ? { truncated } : {}),
+      ...(extras === undefined ? {} : { extras: extrasTally(extras) }),
+      // 🔴 つながり・履歴を途中で打ち切った分も、拾えた件数を「全部」と読ませない
+      ...(truncated || extras?.truncated === true ? { truncated: true } : {}),
     }),
   };
+}
+
+/** 「つながり N 件・履歴 M 版」。⚠ どちらも 0 なら空(0 件を「入れました」と言わない)。 */
+function extrasPhrase(x: ExtrasTally): string {
+  const parts: string[] = [];
+  if (x.relations > 0) parts.push(`つながり ${x.relations} 件`);
+  if (x.revisions > 0) parts.push(`履歴 ${x.revisions} 版`);
+  return parts.join('・');
+}
+
+/**
+ * 🔴 **書き出し直後に画面下へ出す字**(`.pkc3-part.zip`)。
+ *
+ * ⚠ 「入っていません」と言うのは**拾いに行っていないときだけ**。入れたなら件数で言い、
+ *   読めなかったぶんは別に言う(偽の「入っていません」を残さない)。
+ */
+export function rescueArchiveDetail(s: RescueStats): string {
+  const gotBody = s.entries - s.bodyMissing;
+  const counts = `${s.entries} 件のうち ${gotBody} 件 / 添付 ${s.assets} 件`;
+  if (s.extras === undefined) return `つながりと履歴は入っていません(${counts})`;
+  const inEx = extrasPhrase(s.extras);
+  const head = inEx === '' ? 'つながりと履歴は見つかりませんでした' : `${inEx}を入れました`;
+  const partial = s.extras.partial
+    ? '。読み込めなかったつながり・履歴があり、その分は入っていません'
+    : '';
+  return `${head}(${counts})${partial}`;
 }
 
 /**
@@ -483,10 +686,18 @@ export function rescueArchiveSummary(s: RescueStats): string {
   if (s.assetMissing > 0) miss.push(`中身が取れなかった添付 ${s.assetMissing} 件`);
   // 🔴 途中で読み切れなくなった(#1087)── 拾えた件数を「全部」と読ませない
   if (s.truncated === true) miss.push('読み進められなくなり、途中で打ち切りました');
-  // 🔴 つながりと履歴は**この道では拾えない** ── 黙って 0 件にしない
-  const lost = '⚠ ノート同士のつながりと履歴は、この方法では戻せません。';
   const body = miss.length === 0 ? head : `${head}(${miss.join(' / ')})`;
-  return `${body}${got}。${lost}`;
+  // 🔴 拾いに行っていないとき(口が渡っていない)だけ「戻せません」と言う ── 黙って 0 件にしない
+  if (s.extras === undefined) {
+    return `${body}${got}。⚠ ノート同士のつながりと履歴は、この方法では戻せません。`;
+  }
+  // 🔑 拾えたぶんは件数で言い、読めなかったぶんは別に言う(入れたのに「入っていません」と言わない)
+  const inEx = extrasPhrase(s.extras);
+  const withEx = inEx === '' ? '' : `。${inEx}も入れました`;
+  const partial = s.extras.partial
+    ? '。読み込めなかったつながり・履歴があり、その分は入っていません'
+    : '';
+  return `${body}${got}${withEx}${partial}。`;
 }
 
 /**

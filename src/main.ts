@@ -2555,6 +2555,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          */
         rescue: {
           pick: (after, chunks) => client.request({ op: 'rescueEntries', afterRowid: after, chunks }),
+          // 🔑 つながり・履歴も同じく(#1087。作り直しの口と同じ op)
+          pickRelations: (after, chunks) =>
+            client.request({ op: 'rescueRelations', afterRowid: after, chunks }),
+          pickRevisions: (after, chunks) =>
+            client.request({ op: 'rescueRevisions', afterRowid: after, chunks }),
           assets: {
             listKeys: (c: string) => blobs.listKeys(c),
             get: (c: string, key: string) => blobs.get(c, key),

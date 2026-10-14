@@ -72,17 +72,22 @@ import { archiveSuffix } from '../export/archive-kind';
 import { humanBytes } from '../human-bytes';
 import {
   assetArchivePorts,
-  nextIdlePages,
-  RESCUE_IDLE_PAGE_LIMIT,
+  collectRescuedExtras,
+  drainPages,
+  extrasArchivePorts,
+  extrasTally,
   type RescueAssets,
+  type RescuedExtras,
   type RescuedRelation,
   type RescuedRevision,
-  type RescuePagedBase,
   type RescuePick,
   type RescueRelationsPick,
   type RescueRevisionsPick,
   type RescueStats,
 } from './rescue-archive';
+
+// ⚠ つながり・履歴の拾い方は拾い出しの zip と**同じ口**(`rescue-archive.ts`)── 既存の import 先を変えない
+export { collectRescuedExtras, type RescuedExtras };
 
 /**
  * 🔴 **保険の zip の呼び名**(#1017 段④b)。⚠ 以前はボタン名
@@ -111,9 +116,6 @@ export interface RebuiltEntry {
   readonly date: string | null;
   readonly archived: boolean;
 }
-
-/** ⚠ 1 回に頼む区画の数(拾い出しと同じ ── 2 通りの規則を作らない)。 */
-const CHUNKS = 20;
 
 /** 進み具合を外へ出す(画面が「止まった」と読まれないように)。 */
 export interface RebuildProgress {
@@ -148,107 +150,6 @@ export async function collectRescued(
     onProgress,
   );
   return { rows, ...got };
-}
-
-/**
- * 🔑 **1 周の輪を 1 か所で持つ**(ノート・つながり・履歴の 3 つが同じ守りを通る ── §7)。
- *
- * 🔴 止まる条件は 3 つ:①`done` ②位置が進まない ③🔴 **何も拾えない周が続く**(#1087。
- *   `maxRowid` が読めない DB は `done` が立たず、位置だけが進み続けて**永久に終わらなかった**)。
- */
-async function drainPages<P extends RescuePagedBase & { readonly rows: readonly unknown[] }>(
-  pick: (after: number, chunks: number) => Promise<P>,
-  take: (page: P) => void,
-  onProgress?: RebuildProgress,
-): Promise<{ skipped: number; empty: number; truncated: boolean }> {
-  let skipped = 0;
-  let empty = 0;
-  let after = 0;
-  let idle = 0;
-  let truncated = false;
-  for (;;) {
-    const before = after;
-    const page = await pick(after, CHUNKS);
-    skipped += page.skipped;
-    empty += page.empty;
-    take(page);
-    after = page.lastRowid;
-    onProgress?.('pick', after, page.maxRowid);
-    if (page.done || page.lastRowid <= 0) break;
-    // 🔴 前へ進まない相手で回り続けない(拾い出しと同じ守り方)
-    if (after <= before) break;
-    idle = nextIdlePages(idle, page);
-    if (idle >= RESCUE_IDLE_PAGE_LIMIT) {
-      truncated = true;
-      break;
-    }
-  }
-  return { skipped, empty, truncated };
-}
-
-/** つながりと履歴の拾い出しの結果。 */
-export interface RescuedExtras {
-  /** 🔑 両端のノートが拾えたものだけ(片端が無いつながりは、戻しても宙に浮く)。 */
-  readonly relations: readonly RescuedRelation[];
-  /** 🔑 履歴を持つノートごとに、新しい → 古い。 */
-  readonly chains: ReadonlyMap<string, readonly RescuedRevision[]>;
-  readonly skipped: number;
-  readonly truncated: boolean;
-}
-
-/**
- * 🔑 **つながりと履歴を拾う**(#1087)── 索引だけ壊れた DB では表走査で読める
- * (2026-10-14 実測。`NOT INDEXED`)。
- *
- * ⚠ 拾えなくても落とさない ── 読めない分は `skipped` で言い、ノートの建て直しは続ける
- *   (つながりが読めないだけで、読めるノートを捨てる理由は無い)。
- * ⚠ 器の id が違う行・拾えなかったノートに付く行は捨てる(戻しても宙に浮く)。
- */
-export async function collectRescuedExtras(
-  cid: string,
-  lids: ReadonlySet<string>,
-  picks: { relations: RescueRelationsPick; revisions: RescueRevisionsPick },
-): Promise<RescuedExtras> {
-  const relations: RescuedRelation[] = [];
-  const seenRel = new Set<string>();
-  const chains = new Map<string, RescuedRevision[]>();
-  const seenRev = new Set<string>();
-  let skipped = 0;
-  let truncated = false;
-  try {
-    const r = await drainPages(picks.relations, (page) => {
-      for (const x of page.rows) {
-        if (x.cid !== cid || !lids.has(x.fromLid) || !lids.has(x.toLid)) continue;
-        if (seenRel.has(x.id)) continue;
-        seenRel.add(x.id);
-        relations.push(x);
-      }
-    });
-    skipped += r.skipped;
-    truncated ||= r.truncated;
-  } catch {
-    skipped += 1;
-  }
-  try {
-    const r = await drainPages(picks.revisions, (page) => {
-      for (const x of page.rows) {
-        if (x.cid !== cid || !lids.has(x.entryLid)) continue;
-        const key = `${x.revOrder}:${x.entryLid}`;
-        if (seenRev.has(key)) continue;
-        seenRev.add(key);
-        const list = chains.get(x.entryLid) ?? [];
-        list.push(x);
-        chains.set(x.entryLid, list);
-      }
-    });
-    skipped += r.skipped;
-    truncated ||= r.truncated;
-  } catch {
-    skipped += 1;
-  }
-  // 保存形の並び(新しい → 古い)にそろえる
-  for (const list of chains.values()) list.sort((p, q) => q.revOrder - p.revOrder);
-  return { relations, chains, skipped, truncated };
 }
 
 /**
@@ -296,30 +197,8 @@ export function rebuildArchiveSource(opts: {
     }),
     listAssetMetas: assetPorts.listAssetMetas,
     getAssetBlob: assetPorts.getAssetBlob,
-    /**
-     * 🔑 つながりと履歴(#1087)。⚠ 以前は「索引を使う形でしか引けない」で空を返していたが、
-     *   `NOT INDEXED` の表走査なら読める(2026-10-14 実測)── 拾えた分は zip にも入れる。
-     */
-    listRelations: async () =>
-      (opts.extras?.relations ?? []).map((r) => ({
-        id: r.id,
-        from_lid: r.fromLid,
-        to_lid: r.toLid,
-        kind: r.kind,
-        created_at: null,
-        updated_at: null,
-      })),
-    listRevisionLids: async () => [...(opts.extras?.chains.keys() ?? [])],
-    getRevisionChain: async (lid) =>
-      (opts.extras?.chains.get(lid) ?? []).map((r) => ({
-        revOrder: r.revOrder,
-        createdAt: r.createdAt,
-        title: r.title,
-        archetype: r.archetype,
-        kind: r.kind,
-        snapshot: r.snapshot,
-        contentHash: r.contentHash,
-      })),
+    // 🔑 つながりと履歴(#1087)。⚠ 拾い出しの zip と**同じ口**(`extrasArchivePorts`)
+    ...extrasArchivePorts(opts.extras),
   };
   return {
     source,
@@ -330,6 +209,7 @@ export function rebuildArchiveSource(opts: {
       // 🔑 1 周なので「2 周目で本文が来なかった」が原理的に起きない
       bodyMissing: 0,
       ...assetPorts.stats(),
+      ...(opts.extras === undefined ? {} : { extras: extrasTally(opts.extras) }),
       ...(opts.truncated === true || opts.extras?.truncated === true ? { truncated: true } : {}),
     }),
   };
