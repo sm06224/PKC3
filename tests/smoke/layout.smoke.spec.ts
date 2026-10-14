@@ -1613,9 +1613,10 @@ test('🔴 何も選んでいない中央に案内が出る(白紙にしない)'
   const guide = page.locator('[data-pkc-field="detail-empty"]');
   await expect(guide).toBeVisible();
   // ⚠ 「何か出た」で止めない ── **次にどこを押すか**が書いてあること
-  // ⚠ **実際のボタンの文言**を指していること(P10 で「新規」→「+ ノート」)
-  await expect(guide).toContainText('+ ノート');
-  await expect(guide).toContainText('取り込む');
+  // ⚠ **実際のボタン**を指していること(P10 で「新規」→「+ ノート」。#1693 でバーのボタンが
+  //   絵だけになったので、場所と絵で言う形へ ──「左上の作るボタン」「左下の取り込むボタン」)
+  await expect(guide).toContainText('左上の作るボタン');
+  await expect(guide).toContainText('左下の取り込むボタン');
   const box = await guide.boundingBox();
   expect(box!.height, '案内が高さを持っていない').toBeGreaterThan(10);
 
