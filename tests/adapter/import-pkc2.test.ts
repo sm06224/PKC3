@@ -1793,3 +1793,71 @@ describe('取り込みの戻り道(バックアップ / PKC2)', () => {
     expect(order, '面を組んだ後に憶えている(取り消しが出ない)').toEqual(['imported', 'report']);
   });
 });
+
+/**
+ * 🔴 **バックアップを取り込み直すと lid が衝突して付け替わる ── 本文のリンクと履歴も付け替える**
+ * (#1087、バックアップ往復の見直し)。
+ * 直す前: つながりは複製を指すのに、本文の `entry:<lid>` は**既存の原本**を指したまま。
+ * しかも本文を書き換えると履歴の起点がずれるので、書き換えるなら鎖にも同じ付け替えを添える必要がある。
+ */
+describe('取り込みで付け替えた lid を、本文と履歴へ当てる', () => {
+  async function archiveWithLink(): Promise<File> {
+    const { writeArchive } = await import('../../src/features/export/pkc3-archive');
+    const meta = (lid: string, order: number) => ({
+      lid,
+      title: lid,
+      archetype: 'text',
+      created_at: null,
+      updated_at: null,
+      entry_order: order,
+      status: null,
+      date: null,
+      archived: 0,
+    });
+    const src = {
+      cid: 'c-src',
+      title: 'T',
+      listEntryMetas: async () => [meta('a1', 1), meta('b1', 2)],
+      listBodies: async () => ({
+        rows: [
+          { lid: 'a1', body: '[B へ](entry:b1)\n' },
+          { lid: 'b1', body: 'B の本文\n' },
+        ],
+        done: true,
+      }),
+      listRelations: async () => [],
+      listAssetMetas: async () => [],
+      getAssetBlob: async () => null,
+      listRevisionLids: async () => ['a1', 'b1'],
+      getRevisionChain: async () => [
+        { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: '古い版\n', contentHash: null },
+      ],
+    };
+    return new File([(await writeArchive(src, '2026-10-14T00:00:00.000Z')).blob], 'b.pkc3-full.zip');
+  }
+
+  it('🔴 衝突した lid を指すリンクは複製を指し、その鎖には書き出したときの本文と付け替えが添う', async () => {
+    // b1 だけが既存と衝突する(a1 は空いている)
+    const { d, deps, written, restoredChains } = harness({ existingLids: new Set(['b1']) });
+    expect(await importPkc2File(d, deps, await archiveWithLink())).toBe(2);
+
+    const b = written.find((w) => w.title === 'b1')!;
+    expect(b.lid, '前提: b1 が付け替わっていない').not.toBe('b1');
+    const a = written.find((w) => w.title === 'a1')!;
+    expect(a.body).toBe(`[B へ](entry:${b.lid})\n`);
+
+    const chainA = restoredChains.find((c) => c.entryLid === a.lid)!;
+    expect(chainA.rewrite?.tip, '鎖の起点が書き出したときの本文でない').toBe('[B へ](entry:b1)\n');
+    expect(chainA.rewrite?.remap.lids).toEqual([['b1', b.lid]]);
+    // 🔑 本文が変わらなかったノートの鎖には添えない(付け替えの検査を余計に通さない)
+    const chainB = restoredChains.find((c) => c.entryLid === b.lid)!;
+    expect(chainB.rewrite).toBeUndefined();
+  });
+
+  it('対照群: 衝突しなければリンクも鎖もそのまま', async () => {
+    const { d, deps, written, restoredChains } = harness();
+    await importPkc2File(d, deps, await archiveWithLink());
+    expect(written.find((w) => w.lid === 'a1')!.body).toBe('[B へ](entry:b1)\n');
+    expect(restoredChains.every((c) => c.rewrite === undefined)).toBe(true);
+  });
+});

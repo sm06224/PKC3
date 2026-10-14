@@ -54,6 +54,7 @@ import {
 import { assetRefsIn, scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { extractMeta } from '@features/flavor';
+import { remapImportedBody } from '@features/import/body-remap';
 import { readVersions, totalHistoryBytes } from '@features/flavor/attachment-versions';
 import { planSaveBack } from '@features/asset/asset-replace-plan';
 import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
@@ -1886,6 +1887,21 @@ function restoreOneChain(
   }> = [];
   let base = head.body; // 符号化の基準 = 1 つ新しい状態(先頭は tip)
   let prev = head.body; // 無変更の畳み込み用
+  /**
+   * 🔴 **戻す起点**(#1087、バックアップ往復の見直し)。ふだんは tip と同じ。取り込みで本文の ID を
+   *   付け替えた鎖だけ、**書き出したときの本文**から戻し、戻した各版に同じ付け替えを当てて積む。
+   * ⚠ 付け替えた tip から戻すと、書き換えた行が古い版にも残り hash が合わず、鎖ごと捨てていた。
+   * ⚠ 起点を差し替える前に「起点に付け替えを当てると、いまの tip になる」を確かめる ── 合わないなら
+   *   書き出し後に本文が変わっている(従来の「本文が書き出し時と違います」と同じ扱い)。
+   */
+  const rewrite = chain.rewrite;
+  let decodeBase = head.body;
+  if (rewrite !== undefined) {
+    if (remapImportedBody(rewrite.tip, rewrite.remap) !== head.body) {
+      throw new Error('履歴の起点が合いません。本文が書き出し時と違います');
+    }
+    decodeBase = rewrite.tip;
+  }
 
   let prevOrder = Number.POSITIVE_INFINITY;
   for (const r of chain.rows) {
@@ -1903,20 +1919,24 @@ function restoreOneChain(
     if (r.kind !== 'full' && r.kind !== 'patch') {
       throw new Error(`未対応の履歴の保存形です: ${r.kind}`);
     }
-    const state = materialize(
+    const original = materialize(
       { id: '', rev_order: r.revOrder, snapshot: r.snapshot, content_hash: null, kind: r.kind },
-      base,
+      decodeBase,
     );
+    decodeBase = original;
     // 🔴 **噛み合わせ検査**(review H-1)。`applyLinePatch` は行数さえ合えば通るので、
     // tip がズレた鎖・改竄されたパッチが**例外にならずに**通ってしまう。しかも
     // 書込側は decode 結果から hash を計算し直すので、以後 `getRevision` の
     // 整合性検査も通る = 誤りが自己証明されて固定される
-    const hash = contentHash64Hex(state);
-    if (r.contentHash !== null && hash !== r.contentHash) {
+    const originalHash = contentHash64Hex(original);
+    if (r.contentHash !== null && originalHash !== r.contentHash) {
       throw new Error(
         `履歴の順序が合いません(版 ${r.revOrder})。バックアップが読めない状態か、本文が書き出し時と違います`,
       );
     }
+    // 積むのは**付け替えた後**の版(tip と同じ規則)。hash も積む形で取り直す
+    const state = rewrite === undefined ? original : remapImportedBody(original, rewrite.remap);
+    const hash = rewrite === undefined ? originalHash : contentHash64Hex(state);
     // 「変更あり commit だけ刻む」= P5b の規律(取込経路と同じ)
     if (state === prev) {
       out.skippedNoChange++;

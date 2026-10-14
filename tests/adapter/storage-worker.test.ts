@@ -982,6 +982,66 @@ describe('P6e ── 鎖を書き出して復元する', () => {
     expect(await metasOf('ngDst')).toHaveLength(0);
   });
 
+  /**
+   * 🔴 **取り込みで本文の ID を付け替えた鎖も戻る**(#1087、バックアップ往復の見直し)。
+   * 添付の key が変わる(旧形式の key / 64MB 超)・lid が衝突して付け替わると、取り込んだ tip は
+   * 書き出したときと違う。直す前はその tip から戻していたので、古い版の hash が合わず**鎖ごと捨てていた**。
+   */
+  describe('取り込みで付け替えた本文の鎖', () => {
+    /** 付け替えの当たる行(8 行目)を全版に持ち、版の違いは 50 行目にだけ在る本文。 */
+    const linked = (mark: string): string =>
+      Array.from({ length: 200 }, (_, i) =>
+        i === 8 ? '![](asset:ast-old1) [B](entry:b1)\n' : i === 50 ? `行 ${i} ${mark}\n` : `行 ${i}\n`,
+      ).join('');
+    const remap = { assetKeys: [['ast-old1', 'h-new1']] as const, lids: [['b1', 'b9']] as const };
+    const rewritten = (mark: string): string =>
+      linked(mark).replace('asset:ast-old1', 'asset:h-new1').replace('entry:b1', 'entry:b9');
+
+    it('🔴 書き出したときの本文から戻し、戻した各版にも同じ付け替えを当てる', async () => {
+      await write('rw1', linked('初稿'));
+      await write('rw1', linked('二稿'), { checkpoint: true });
+      await write('rw1', linked('三稿'), { checkpoint: true });
+      const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'rw1' });
+      expect(chain.some((r) => r.kind === 'patch')).toBe(true); // パッチ経路を通っている
+
+      // 対照群: 付け替えを添えない(= 直す前の形)と、鎖ごと捨てられる
+      await write('rw1ng', rewritten('三稿'));
+      const ng = await request({
+        op: 'restoreRevisionChains',
+        cid: 'c1',
+        chains: [{ entryLid: 'rw1ng', rows: chain }],
+      });
+      expect(ng.added).toBe(0);
+      expect(ng.brokenChains.join()).toMatch(/順序が合いません/);
+
+      await write('rw1ok', rewritten('三稿'));
+      const ok = await request({
+        op: 'restoreRevisionChains',
+        cid: 'c1',
+        chains: [{ entryLid: 'rw1ok', rows: chain, rewrite: { tip: linked('三稿'), remap } }],
+      });
+      expect(ok.brokenChains).toEqual([]);
+      expect(ok.added).toBe(2);
+      // 戻った版は**付け替えた後**の字で、版の違いはそのまま
+      expect(await statesOf('rw1ok')).toEqual([rewritten('初稿'), rewritten('二稿')]);
+      // ⚠ 積んだ hash は付け替えた後の版のもの ── getRevision の整合性検査を通る(上の bodyOf が null でない)
+    });
+
+    it('🔴 起点に付け替えを当てても今の本文にならないなら、積まない(書き出し後に本文が変わった)', async () => {
+      await write('rw2', linked('A'));
+      await write('rw2', linked('B'), { checkpoint: true });
+      const chain = await request({ op: 'exportRevisionChain', cid: 'c1', entryLid: 'rw2' });
+      await write('rw2dst', rewritten('B') + '後から足した行\n');
+      const r = await request({
+        op: 'restoreRevisionChains',
+        cid: 'c1',
+        chains: [{ entryLid: 'rw2dst', rows: chain, rewrite: { tip: linked('B'), remap } }],
+      });
+      expect(r.added).toBe(0);
+      expect(r.brokenChains.join()).toMatch(/履歴の起点が合いません/);
+    });
+  });
+
   it('未対応の保存形は断る(生の JSON エラーを見せない)', async () => {
     await write('kd', doc('x'));
     const r = await request({

@@ -10,6 +10,7 @@ import type {
   GroupResult as QueryGroupResult,
   KeyResult as QueryKeyResult,
 } from '@features/query/group-by';
+import type { ImportRemap } from '@features/import/body-remap';
 import type { TaskScan } from '@features/schedule/task-cards';
 import type { ContactScan } from '@features/contact/contact-card';
 import type { SnippetScan } from '@features/snippet/snippet-table';
@@ -747,6 +748,14 @@ export interface ImageArchiveData {
 export interface EncodedChainInput {
   entryLid: string;
   rows: EncodedRevisionRow[];
+  /**
+   * 🔴 **取り込みで本文の ID を付け替えたとき**だけ付ける(#1087、バックアップ往復の見直し)。
+   * ⚠ 鎖は「書き出したときの本文」を起点に戻さないと噛み合わない ── 取り込んだ tip は添付の key や
+   *   `entry:` の lid が書き換わっているので、それを起点にすると古い版の hash が合わず、鎖ごと捨てられる。
+   * `tip` = 書き出したときの本文。worker は `tip` から戻し、戻した各版に `remap` を当てて積む。
+   * ⚠ 当てる規則は `remapImportedBody`(tip を書き換えた口と同じ 1 本)。
+   */
+  rewrite?: { tip: string; remap: ImportRemap };
 }
 
 /** importRevisionChains の結果(何が入って何が落ちたかを可視化する)。 */
