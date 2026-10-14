@@ -103,6 +103,11 @@ test('保存せずにタブを閉じて開き直すと 1 行出る。戻す → 
 
   // 🔴 戻しただけでは何も書いていない:やめれば元の本文に戻る
   await clickReal(next, '[data-pkc-action="cancel-edit"]');
+  // 戻した字は「打った内容」なので、やめる前に聞かれる(2f068705、依頼 71-1)。聞かれたうえで「編集をやめる」を選ぶ
+  await expect(next.locator('[data-pkc-region="app-dialog"]'), '打った内容を捨てるかが聞かれない').toContainText(
+    '打った内容を捨てますか',
+  );
+  await clickReal(next, '[data-pkc-field="dialog-ok"]');
   await expect(next.locator('[data-pkc-field="detail-body"]')).toContainText('牛乳');
   await expect(next.locator('[data-pkc-field="detail-body"]')).not.toContainText('パンを足した');
   // 🔴 やめても控えは残り、1 行がまた出る(戻した字を二度と戻せなくしない)
