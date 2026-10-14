@@ -683,6 +683,8 @@ export function connectStoreEffects(
   // 本文の全文検索の合流(REQUEST_SEARCH)── 飛んでいる 1 本と、その間に来た最新の語
   let searchInFlight = false;
   let searchPending: string | null = null;
+  // 書込の後の撃ち直しが待っている(#1087)── 飛んでいる語と同じでも送り直す
+  let searchAgain = false;
   /**
    * 🔴 **調べる相手の中身を読む、たった 1 か所**(#854 段② / #682 段②)。
    *
@@ -1056,6 +1058,16 @@ export function connectStoreEffects(
     });
     rescanColumnSmarts();
     /**
+     * 🔴 **絞っている語で、本文の検索を撃ち直す**(#1087)。⚠ 検索を撃つのは語を打ったときだけだった
+     *   ので、絞ったまま本文を書き換えると、**新しく当たるノートが出ない**(外れたノートも残る)。
+     *   検索は書込の列に載らないので、保存の直後に撃つと保存前の本文で走る ── バックリンクと同じ作法で
+     *   **書込の後ろ**に置く(`scanAfterWrites`。まとめて書いても 1 本に畳まれる)。語が空なら撃たない
+     *   (`REFRESH_SEARCH` の reducer が決める)。
+     */
+    scanAfterWrites('search', async () => {
+      if (!disposed) dispatcher.dispatch({ type: 'REFRESH_SEARCH' });
+    });
+    /**
      * 🔴 **連絡先の一覧を開いていれば、集め直す**(#1087)。⚠ 直す前は、タブを開いたままノート側で
      *   電話を直して保存しても一覧は古いままで、「vCard で書き出す」が**古い番号を書いていた**
      *   (新しく `tel:` を足したノートも出ない)。ここは行を書いた唯一の口なので 1 か所で足りる。
@@ -1101,6 +1113,7 @@ export function connectStoreEffects(
          */
         if (searchInFlight) {
           searchPending = q;
+          if (ev.again === true) searchAgain = true;
           break;
         }
         const run = (query: string): void => {
@@ -1108,8 +1121,10 @@ export function connectStoreEffects(
           const settle = (): void => {
             searchInFlight = false;
             const next = searchPending;
+            const again = searchAgain;
             searchPending = null;
-            if (next !== null && next !== query && !disposed) run(next);
+            searchAgain = false;
+            if (next !== null && (next !== query || again) && !disposed) run(next);
           };
           // 同期に投げられても飛行中の印を残さない(Promise の中で呼ぶ)
           void new Promise<Awaited<ReturnType<typeof search>>>((r) => r(search(query))).then(

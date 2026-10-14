@@ -1139,13 +1139,37 @@ const notPlaceable = (
   return `スマートフォルダの中には入れられません。${hint}`;
 };
 
+/**
+ * 🔴 **選んだ物のうち、祖先も選ばれている物は動かさない**(#1087)── 祖先と一緒に付いていく。
+ * ⚠ 語や種類で絞ると一覧は階層をまたいで平らに並ぶので、親フォルダ F とその中の D を両方選べる。
+ *   1 件ずつ移すと D だけが行き先の直下へ出て、F は空になる(複製の `planCopy` が既に持つ
+ *   「同じ組に祖先が居れば付いていく」と同じ向き)。祖先は親を辿って**どこまででも**見る
+ *   (間に選ばれていない物が挟まっていても付いていく)。
+ */
+const withoutSelectedDescendants = (st: AppState, lids: readonly string[]): string[] => {
+  const parentOf = resolveCanonicalParents(st.entryMetas, st.relations);
+  const picked = new Set(lids);
+  return lids.filter((lid) => {
+    const seen = new Set<string>([lid]);
+    let up = parentOf.get(lid);
+    while (up !== undefined && !seen.has(up)) {
+      if (picked.has(up)) return false;
+      seen.add(up);
+      up = parentOf.get(up);
+    }
+    return true;
+  });
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
-  lids: readonly string[],
+  allLids: readonly string[],
   parentLid: string | null,
   report?: (text: string) => void,
 ): void => {
-  if (lids.length === 0) return;
+  if (allLids.length === 0) return;
+  // ⚠ 数えるのは**実際に動かす物**だけ(付いていく物は数えない ── 知らせの件数と画面が合う)
+  const lids = withoutSelectedDescendants(dispatcher.getState(), allLids);
   const phase = dispatcher.getState().phase;
   if (phase !== 'ready') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}動かしてください` });
