@@ -22,7 +22,7 @@ UPDATE_UI_TERMS_DOC=1 npx vitest run tests/features/ui-terms-doc.test.ts
 
 <!-- ui-terms:generated:start -->
 
-### 造語(129 語)
+### 造語(130 語)
 
 | 使わない語 | 言い換え先 | 除く語(実在の複合語) |
 |---|---|---|
