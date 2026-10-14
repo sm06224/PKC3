@@ -187,7 +187,7 @@ import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, messagesReadAt } from '@adapter/platform/message-post';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
-import { countUnread, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
+import { countUnread, markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -215,6 +215,7 @@ import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-st
 import type { DraftClock } from '@features/draft/draft-recovery';
 import {
   fixedHeadOfOpError,
+  messageTextOfOpError,
   messageKindForOpError,
   quotaCaution,
   reservedLockCaution,
@@ -2283,7 +2284,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appMessagePost.post({
         kind: messageKindForOpError(state.error),
         source: 'app',
-        text: state.error,
+        text: messageTextOfOpError(state.error),
         // 🔴 アプリが書いた固定の断り文は括弧も字数も潰さない(案内のボタン名と次の一手を残す。#1087)
         fixedHead: fixedHeadOfOpError(state.error),
       });
@@ -3222,7 +3223,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       return out;
     },
-    openWindow: (args) => openImageDrawWindow(args),
+    // 🔴 描きかけの線が在る間は、主ウィンドウを閉じる・読み直すときに「離れますか」(#1087)。
+    //   ⚠ 窓ごとに持ち主の名前を分ける(1 枚を保存して閉じても、別の窓の描きかけの確認を消さない)。
+    openWindow: (args) =>
+      openImageDrawWindow({
+        ...args,
+        onDirty: (dirty) => unloadGuard.setWriting(dirty, `image-draw:${args.windowName}`),
+      }),
     notify: (text, openLid) => dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
   });
 
@@ -3723,7 +3730,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `添付の取り込みに失敗しました(「${name}」): ${errorText(e)}`,
+              error: `添付の取り込みに失敗しました(「${markName(name)}」): ${errorText(e)}`,
             });
           }
         }
@@ -3867,7 +3874,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         } catch (e) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: `添付を開けませんでした(「${name}」): ${errorText(e)}`,
+            error: `添付を開けませんでした(「${markName(name)}」): ${errorText(e)}`,
           });
         }
       })();
@@ -4002,7 +4009,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // IDB 障害等を unhandled rejection にしない(可視で終える)
         dispatcher.dispatch({
           type: 'OP_FAILED',
-          error: `ダウンロードに失敗しました(「${name}」): ${errorText(e)}`,
+          error: `ダウンロードに失敗しました(「${markName(name)}」): ${errorText(e)}`,
         });
       }
     },
@@ -5439,10 +5446,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   {
     const activeFlags = registeredFlags().filter((f) => appFlags.isOn(f.name)).length;
+    // 🔴 アプリが組んだ固定の文なので `fixedHead` で積む(切らない)。80 字で切ると、ブラウザ名の後半と幅が毎回欠けていた(#1087)。
+    //   ⚠ UA の全文は題名・本文ではない(ブラウザの名乗り)ので、バグ報告に要る手がかりとして全部残す。
+    const bootLine = `起動しました:バージョン ${versionText()} / 保存先 ${init.vfs} / フラグ ${String(activeFlags)} 個 / ブラウザ ${navigator.userAgent} / 幅 ${String(window.innerWidth)}px`;
     appMessagePost.post({
       kind: 'result',
       source: 'app',
-      text: `起動しました:バージョン ${versionText()} / 保存先 ${init.vfs} / フラグ ${String(activeFlags)} 個 / ブラウザ ${navigator.userAgent} / 幅 ${String(window.innerWidth)}px`,
+      text: bootLine,
+      fixedHead: bootLine,
     });
   }
   /**

@@ -14,6 +14,7 @@
  *   隔離した外殻(`features/launcher/app-shell.ts`)に載せて開く
  */
 import { errorText } from '@features/error-text';
+import { markName } from '@features/message/message-log';
 import { buildLauncherAppShell, launcherAppBase } from '@features/launcher/app-shell';
 import { decodeHtml } from '@features/launcher/html-charset';
 import type { LauncherTile } from '@features/launcher/tiles';
@@ -297,7 +298,7 @@ export async function launchTile(
   const win = deps.open('', appWindowFeatures(openTarget, ''));
   if (!win) {
     deps.fail(
-      `「${tile.title}」を開けませんでした(ブラウザがポップアップを塞いでいます)。アドレスバーの右端でポップアップを許可してから、もう一度押してください`,
+      `「${markName(tile.title)}」を開けませんでした(ブラウザがポップアップを塞いでいます)。アドレスバーの右端でポップアップを許可してから、もう一度押してください`,
     );
     return;
   }

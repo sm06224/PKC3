@@ -1412,7 +1412,8 @@ describe('取り込めなかった理由は、日本語で file 名つき(#1087 
       blob: new Blob(['x']),
     });
     expect(r, '失敗したのに作れたことになっている').toBeNull();
-    const err = h.d.getState().error ?? '';
+    // 名前の目印(幅の無い字)を除いた画面の字は、今までと同じ
+    const err = (h.d.getState().error ?? '').replace(/[\u2060\u2061]/g, '');
     expect(err).toContain('添付の取り込みに失敗しました(「大きい.png」)');
     expect(err, '空きが足りない案内が日本語になっていない').toContain('保存できる空き容量が足りません');
   });
@@ -1423,7 +1424,7 @@ describe('取り込めなかった理由は、日本語で file 名つき(#1087 
       throw new Error('disk exploded');
     };
     await attachOne(h.d, h.deps, { name: 'a.txt', type: 'text/plain', size: 1, blob: new Blob(['x']) });
-    expect(h.d.getState().error).toBe('添付の取り込みに失敗しました(「a.txt」): disk exploded');
+    expect((h.d.getState().error ?? '').replace(/[\u2060\u2061]/g, '')).toBe('添付の取り込みに失敗しました(「a.txt」): disk exploded');
   });
 });
 
