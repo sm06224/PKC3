@@ -3155,6 +3155,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
+    /**
+     * 🔴 **録っている間・預かっている間にタブを閉じる・読み直すと「離れますか」**(#1087)。
+     *   収録の bytes はメモリ上にだけ在り、閉じると 250MB ごとの区切り以後が消える。
+     *   ⚠ 判断は `capture.ts`、確認は `unload-guard.ts` ── ここは**繋ぐだけ**。
+     *   ⚠ 保存領域への書込・可搬の未保存とは別の持ち主 ── `'capture'` の名前で数える。
+     */
+    onActive: (active) => unloadGuard.setWriting(active, 'capture'),
   });
 
   /**

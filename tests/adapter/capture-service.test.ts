@@ -117,6 +117,8 @@ interface Bench {
   readonly events: DomainEvent[];
   readonly notices: string[];
   readonly lines: Array<string | null>;
+  /** `onActive` に来た値(変わったときだけ呼ばれる約束)。 */
+  readonly actives: boolean[];
   readonly attached: Array<{ name: string; type: string; size: number }>;
   readonly service: ReturnType<typeof createCaptureService>;
   /** 1 秒の刻みを**手で撃つ**(`setInterval` を待たない)。 */
@@ -195,6 +197,7 @@ function bench(
   });
   const notices: string[] = [];
   const lines: Array<string | null> = [];
+  const actives: boolean[] = [];
   const attached: Array<{ name: string; type: string; size: number }> = [];
   let beats: Array<() => void> = [];
   let live: ReturnType<typeof fakeCapture> | null = null;
@@ -232,6 +235,7 @@ function bench(
     },
     onChange: (line) => lines.push(line),
     notify: (t) => notices.push(t),
+    onActive: (a) => actives.push(a),
     now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
@@ -255,6 +259,7 @@ function bench(
     events,
     notices,
     lines,
+    actives,
     attached,
     service: createCaptureService(deps),
     beat: () => beats.forEach((f) => f()),
@@ -783,5 +788,85 @@ describe('🔴 長い収録は分けて入れる(#771)', () => {
     await tick();
     b.beat();
     expect(b.lines.at(-1), '切った後に何本目かを出していない').toMatch(/2 本目/);
+  });
+});
+
+/**
+ * 🔴 **録っている間・預かっている間は、閉じると消える**(#1087)。
+ * 収録の bytes はメモリ上にだけ在るので、`onActive` が真の間は「離れますか」の確認が要る。
+ * 配線(`main.ts` → `unloadGuard.setWriting(active, 'capture')`)は `bootstrap-wiring.test.ts` が見る。
+ */
+describe('🔴 収録が disk に着くまで、離れる確認を残す(#1087)', () => {
+  function edit(b: Bench): void {
+    b.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: '本文' });
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '編集に入っていない(前提が崩れている)').toBe('editing');
+  }
+
+  it('始める前は呼ばれない / 始めたら true / 止めて着いたら false(1 回ずつ)', async () => {
+    const b = bench();
+    expect(b.actives, '始める前に呼ばれた').toEqual([]);
+    await b.service.start('audio');
+    expect(b.actives, '録っているのに確認の合図が立っていない').toEqual([true]);
+    b.service.stop();
+    await tick();
+    expect(b.attached.length, '前提:取り込めている').toBe(1);
+    expect(b.actives, '着いたのに合図が残る / 途中で一度外れた').toEqual([true, false]);
+  });
+
+  it('権限を断られたら、確認は立たない', async () => {
+    const b = bench({ refuse: 'マイクが使えません' });
+    await b.service.start('audio');
+    expect(b.actives).toEqual([]);
+  });
+
+  it('🔴 取り込みの最中(添付を書いている間)は、止めた後も true のまま', async () => {
+    const b = bench({ holdAttach: true });
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    expect(b.service.line(), '前提:帯は畳まれている').toBeNull();
+    expect(b.actives, '帯が畳まれた途端に確認が外れた(まだ着いていない)').toEqual([true]);
+    b.release();
+    await tick();
+    expect(b.actives).toEqual([true, false]);
+  });
+
+  it('捨てたら、確認も外れる', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    b.service.discard();
+    expect(b.actives).toEqual([true, false]);
+  });
+
+  it('🔴 編集中に強制終了して預かった収録は、取り込まれるまで true', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    edit(b);
+    b.live()!.end('shared-ended');
+    await tick();
+    expect(b.service.line(), '前提:収録は終わっている').toBeNull();
+    expect(b.notices.join(''), '前提:預かっている').toMatch(/まだ入れていません/);
+    expect(b.actives, '預かっている(メモリ上だけ)のに確認が外れた').toEqual([true]);
+
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(b.attached.length, '前提:取り込まれた').toBe(1);
+    expect(b.actives, '取り込んだのに確認が残る').toEqual([true, false]);
+  });
+
+  it('🔴 切れた本と最後の本が両方預かられても、全部着くまで外れず、着いたら 1 度だけ外れる', async () => {
+    const b = bench();
+    await b.service.start('audio');
+    edit(b);
+    b.live()!.cut(new Blob(['part']));
+    await tick();
+    expect(b.attached, '前提:編集中なので取り込まれていない').toEqual([]);
+    b.live()!.end('shared-ended');
+    await tick();
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(b.attached.length, '前提:2 本とも入った').toBe(2);
+    expect(b.actives, '預かりの途中で外れた / 着いたのに残る').toEqual([true, false]);
   });
 });

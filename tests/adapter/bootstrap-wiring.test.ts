@@ -482,6 +482,23 @@ describe('書き出しの settle の配線', () => {
   });
 
   /**
+   * 🔴 **録っている間・預かっている間も同じ確認へ繋がっている**(#1087)。
+   * ⚠ 収録の bytes はメモリ上にだけ在る ── 落ちると、タブを閉じても確認が出ないまま
+   *   250MB の区切り以後が消える(`main.ts` は実行されないので全 unit が緑のまま)。
+   *   ⚠ 持ち主の名前は他と別(`'capture'`)── 同じ名前にすると先に終わった側が相手の確認を消す。
+   */
+  it('🔴 収録中・預かり中が beforeunload の確認へ、別の持ち主として繋がっている', () => {
+    const at = MAIN.indexOf('createCaptureService({');
+    expect(at, 'createCaptureService の呼び出しが無い').toBeGreaterThan(-1);
+    const end = MAIN.indexOf('\n  });', at);
+    expect(end, '呼び出しの終わりの目印が無い').toBeGreaterThan(at);
+    const body = codeOnly(MAIN.slice(at, end));
+    expect(body, '収録の出入りを確認へ渡していない').toContain(
+      "onActive: (active) => unloadGuard.setWriting(active, 'capture')",
+    );
+  });
+
+  /**
    * 🔴 **可搬版の「器に着いていない」も同じ確認へ繋がっている**(#1589)。
    * ⚠ 保存領域への書込(`onWriting`)だけでは足りない ── 可搬版の保存は「1.2 秒待つ → 画像を書き出す →
    *   器へ書く」で、sqlite への書込は一瞬で終わる。落ちると、追加直後に読み直したノートが

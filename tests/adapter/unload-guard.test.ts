@@ -121,6 +121,18 @@ describe('#1589 ── 持ち主が 2 つ(保存領域への書込 / 可搬版�
     expect(fire(window).prevented).toBe(false);
   });
 
+  it('🔴 収録(capture)も独立した持ち主 ── 3 者のうち 1 者でも残れば確認を残す(#1087)', () => {
+    const guard = createUnloadGuard(window);
+    guard.setWriting(true, 'capture');
+    guard.setWriting(true);
+    guard.setWriting(true, 'portable');
+    guard.setWriting(false);
+    guard.setWriting(false, 'portable');
+    expect(fire(window).prevented, '収録が残っているのに確認が消えた').toBe(true);
+    guard.setWriting(false, 'capture');
+    expect(fire(window).prevented, '全員終わったのに確認が出る').toBe(false);
+  });
+
   it('🔴 確認を出す瞬間に onLeave が呼ばれる / 書いていなければ呼ばれない', () => {
     const guard = createUnloadGuard(window);
     let n = 0;
