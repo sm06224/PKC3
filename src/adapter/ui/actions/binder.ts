@@ -2656,6 +2656,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-trash',
   // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
   'undo-dual-move',
+  // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
+  'undo-import',
   'purge-trash',
   /**
    * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする

@@ -41,6 +41,13 @@ export interface ImportUndoDeps {
   notify(message: string): void;
   /** 注意の面を畳む(戻した後に「取り消す」を残さない)。 */
   clear(): void;
+  /**
+   * 🔴 **いま消せるか**(#1087)── `DELETE_ENTRIES` は編集中に**黙って捨てられる**ので、
+   *   撃つ前に見る。⚠ 必須にしてある(配線を落としたら tsc が落とす)。
+   */
+  ready(): boolean;
+  /** 断る理由を出す(`OP_FAILED`)。 */
+  fail(message: string): void;
 }
 
 export interface ImportUndo {
@@ -68,6 +75,14 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
     },
     undo() {
       if (lids.length === 0) return;
+      /**
+       * 🔴 **編集中は断り、記憶は手放さない**(#1087)── 直す前は `DELETE_ENTRIES` が
+       *   黙って捨てられたのに「ゴミ箱へ入れました」と言い、記憶も忘れて**戻り道ごと消えていた**。
+       */
+      if (!deps.ready()) {
+        deps.fail('編集中は取り込みを取り消せません。編集を保存するか、編集をやめてから押してください');
+        return;
+      }
       deps.dispatch({ type: 'DELETE_ENTRIES', lids: [...lids] });
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];

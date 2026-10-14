@@ -534,6 +534,26 @@ describe('書き出しの settle の配線', () => {
  * ⚠ `main.ts` は原文 pin しか持てない層なので**弱いと自覚して使う**
  *   (CLAUDE.md「取り出せないものは原文 pin で妥協するが、弱いと自覚して使う」)。
  */
+describe('取込の relation id の配線(#1087)', () => {
+  /** `existingRelationIds` の配線だけを切り出す。 */
+  function wiring(): string {
+    const at = MAIN.indexOf('existingRelationIds: () =>');
+    expect(at, 'existingRelationIds の配線が無い').toBeGreaterThan(-1);
+    const end = MAIN.indexOf('orderBase:', at);
+    expect(end, '次の口が見つからない ── 切り出せていない').toBeGreaterThan(at);
+    return MAIN.slice(at, end);
+  }
+
+  it('🔴 DB の relation id を渡している(state だけに戻っていない)', () => {
+    const w = wiring();
+    expect(w, '判定が main.ts へ戻っている').toContain('collectExistingRelationIds({');
+    // ⚠ `.map((r) => r.id)` だけでは state 側の読みに満たされる ── DB の読みと続けて見る
+    expect(w, 'DB の辺を読んでいない ── ゴミ箱のフォルダの辺を上書きする').toContain(
+      "(await client.request({ op: 'listRelations', cid })).map((r) => r.id)",
+    );
+  });
+});
+
 describe('取込の衝突検査の配線(#328)', () => {
   /** `existingLids` の配線だけを切り出す(他所の一致に救われないように)。 */
   function existingLidsWiring(): string {

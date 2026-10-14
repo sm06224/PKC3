@@ -59,3 +59,26 @@ export async function collectExistingLids(src: LidSources): Promise<Set<string>>
   const [entryLids, revisionLids] = await Promise.all([src.entryLids(), src.revisionLids()]);
   return new Set<string>([...src.fromState(), ...entryLids, ...revisionLids]);
 }
+
+/**
+ * 🔴 **取込の衝突検査に渡す「既に使われている relation id」**(#1087、2026-10-14)。
+ *
+ * ⚠ `collectExistingLids` と**同じ理由で DB に問う**(片側だけ直っていた)。
+ *   ノートをゴミ箱へ入れても **relations の行は disk に残る**(戻したときに居場所を
+ *   戻すため ── `storage-worker.ts` の `deleteEntry`)が、画面の `state.relations` からは落ちる。
+ *   state だけを見ると、その id を「空き」と読み、取り込んだ辺が **ゴミ箱のノートの辺を
+ *   `ON CONFLICT DO UPDATE` で上書きする** ── ゴミ箱から戻したフォルダが、黙って空になる。
+ *
+ * 🔑 **和集合にする**(理由は `collectExistingLids` と同じ ── 遅れても再採番が増えるだけ)。
+ */
+export interface RelationIdSources {
+  /** state が持っている relation id(生きているノートの辺だけ)。 */
+  readonly fromState: () => Iterable<string>;
+  /** DB の relation id(ゴミ箱のノートの辺も含む)。 */
+  readonly dbIds: () => Promise<readonly string[]>;
+}
+
+export async function collectExistingRelationIds(src: RelationIdSources): Promise<Set<string>> {
+  const db = await src.dbIds();
+  return new Set<string>([...src.fromState(), ...db]);
+}
