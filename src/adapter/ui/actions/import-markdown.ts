@@ -68,7 +68,6 @@ export async function importMarkdownFiles(
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
   };
-  const state = dispatcher.getState();
   /**
    * 🔴 **章の欄が開いている間も断る**(#1044 段2 3巡目の修理、S3)。
    * ⚠ 章の欄は `phase` を `ready` のまま保つ(設計 doc §3)ので、
@@ -77,18 +76,20 @@ export async function importMarkdownFiles(
    *   この口は file picker(`import-input` の `change`)からも直に呼ばれるので、
    *   binder 側の振り分けを迂回しても、ここが最後の門になる。
    */
-  if (hasUnsavedTyping(state)) {
-    return fail(
-      state.phase === 'editing'
+  const gate = (): string | null => {
+    const state = dispatcher.getState();
+    if (hasUnsavedTyping(state)) {
+      return state.phase === 'editing'
         ? `${phaseBlockReason(state.phase)}取り込んでください`
-        : SECTION_DRAFT_NOTE,
-    );
-  }
-  // ⚠ `hasUnsavedTyping` は `editing` を既に拾っている ── ここで残るのは
-  //   `initializing` / `error`(読み込み中・保存に失敗して止まっている)
-  if (state.phase !== 'ready') {
-    return fail(`${phaseBlockReason(state.phase)}取り込んでください`);
-  }
+        : SECTION_DRAFT_NOTE;
+    }
+    // ⚠ `hasUnsavedTyping` は `editing` を既に拾っている ── ここで残るのは
+    //   `initializing` / `error`(読み込み中・保存に失敗して止まっている)
+    if (state.phase !== 'ready') return `${phaseBlockReason(state.phase)}取り込んでください`;
+    return null;
+  };
+  const blocked = gate();
+  if (blocked !== null) return fail(blocked);
   if (files.length === 0) return fail('取り込むファイルがありません');
 
   const notes: string[] = [];
@@ -119,6 +120,13 @@ export async function importMarkdownFiles(
       `Markdown を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
   }
+
+  /**
+   * 🔴 **読んでいる間に編集が始まったかもしれない ── 書く直前に門をもう一度通す**(#1087。ics / pptx と同じ)。
+   * ⚠ 直す前は書いてから反映を先送りし、「編集を終了すると反映されます」と「取り込み完了」が並んでいた。
+   */
+  const again = gate();
+  if (again !== null) return fail(again);
 
   try {
     await deps.bulkUpsertEntries(rows);
