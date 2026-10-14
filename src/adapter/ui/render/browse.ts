@@ -37,6 +37,7 @@ import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { setPrimary } from './icons';
 import { setBlocked } from './shortcut-hint';
+import { findCommand } from '@features/keymap';
 import { commandQueryOf } from '@features/palette/command-query';
 
 /**
@@ -313,8 +314,17 @@ export class BrowseRouter {
      *   **履歴そのもの**を指紋にする(押せないのに生きている = dead click を作らない)。
      */
     if (state.selectionHistory !== this.lastHistory) {
-      if (this.navBack) this.navBack.disabled = !canNavBack(state);
-      if (this.navForward) this.navForward.disabled = !canNavForward(state);
+      /**
+       * 🔴 **押せない理由を hover に出す**(#1087 L4)── 理由は操作の定義(`keymap.ts` の `whyNot`)の 1 か所から採る。
+       * ⚠ `disabled` だけだと、なぜ薄いのかがどこにも書かれない(`setBlocked` が 3 つ同時に動かす)。
+       */
+      if (this.navBack)
+        setBlocked(this.navBack, canNavBack(state) ? null : (findCommand('nav-back')?.whyNot ?? null));
+      if (this.navForward)
+        setBlocked(
+          this.navForward,
+          canNavForward(state) ? null : (findCommand('nav-forward')?.whyNot ?? null),
+        );
       this.lastHistory = state.selectionHistory;
     }
     /**

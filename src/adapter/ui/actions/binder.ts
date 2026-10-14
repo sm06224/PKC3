@@ -6371,7 +6371,7 @@ function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | '
  *   先頭から鳴っているので、**そう言う**(「先頭から再生してください」は、もう鳴っている物を押させる字だった)。
  *   ⚠ この判定は metadata が届いた後にだけ当てる(届く前は `duration` も `seekable` も空で、必ず真になる)。
  */
-const SEEK_NO_PLAYER = '再生機がまだ出ていません。添付が読めていないか、読み込みの途中です';
+const SEEK_NO_PLAYER = 'プレーヤーがまだ出ていません。添付が読めていないか、読み込みの途中です';
 const SEEK_UNSUPPORTED = 'この添付は途中へ移れないので、先頭から再生しています';
 /** metadata が届いた後に位置を確かめ直すときの許容(秒)── seek は目標ぴったりには止まらない */
 const SEEK_RESEEK_TOLERANCE_S = 0.5;
@@ -10720,6 +10720,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 空にはしない(無題の添付を作らない)── 元の字へ戻す
     if (title === '') {
       target.value = before;
+      // 🔴 黙って戻さない(#1087)── 戻した理由を、題名の改名と同じ言い方で出す
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '題名を入れてください' });
       return;
     }
     /**

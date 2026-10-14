@@ -187,7 +187,7 @@ export async function runExplicitPurge(deps: PurgeFlowDeps): Promise<void> {
   }
   const ok = await deps.ask(
     `どのノートからも使われていない添付 ${first.keys.length + first.strays.length} 件` +
-      `(${humanBytes(first.knownBytes)})を消します。よろしいですか?`,
+      `(${humanBytes(first.knownBytes)})を消します。消した添付は元に戻せません。よろしいですか?`,
   );
   if (!ok) return;
   const ready = await deps.isReady();

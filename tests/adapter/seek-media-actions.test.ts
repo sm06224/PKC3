@@ -121,7 +121,7 @@ describe('時刻を押す(seek-media)', () => {
     const { detail, notices } = setup();
     detail('15000', null).click();
     expect(notices(), '黙って終わった').toEqual([
-      '再生機がまだ出ていません。添付が読めていないか、読み込みの途中です',
+      'プレーヤーがまだ出ていません。添付が読めていないか、読み込みの途中です',
     ]);
   });
 

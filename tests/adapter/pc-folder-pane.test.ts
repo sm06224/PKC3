@@ -111,6 +111,10 @@ describe('つなぐ前 / 繋いだ後', () => {
     const { pane } = setup(async () => dir([]));
     const pick = q(pane, '[data-pkc-action="pc-pick-folder"]');
     expect(pick?.textContent).toBe('フォルダを選ぶ…');
+    // 🔴 取り込んだ Markdown は書き戻せる ── 「書き換えない」と言い切らない(#1087 L6)
+    expect(pick?.getAttribute('title')).toBe(
+      'パソコンのフォルダを選びます。選んだだけでは何も書き換えません。取り込んだ Markdown を書き戻すときは、そのつど確認が出ます',
+    );
     expect(pane.querySelectorAll('button')).toHaveLength(1);
     expect(q(pane, '[data-pkc-field="pc-list"]')).toBeNull();
   });

@@ -20,6 +20,7 @@ import {
   extractVars,
 } from '@features/markdown/frontmatter';
 import { LONG_NOTE_ATTR, syncLongNote } from './long-note';
+import { replaceOnMediaError } from './media-error';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { isZipAttachment } from '@features/archive/zip-browse';
 import { hydrateMermaid, pruneScopes, type MermaidScope } from './mermaid-hydrate';
@@ -3854,6 +3855,7 @@ export class DetailRenderer {
             /** ⚠ **中身は開くまで読まない**(長い収録を開くたびに丸ごと運ばない)。 */
             el.preload = 'metadata';
             el.src = lent.url;
+            replaceOnMediaError(el, kind, blob?.type ?? '', '上のリンクから保存して開いてください');
             a.after(el);
             // 🔑 **設定が入なら、出口を整える鎖へ通す**(#772 段① B)
             appVoiceBoostRouter.watch(el);
@@ -4108,12 +4110,15 @@ export class DetailRenderer {
         const img = document.createElement('img');
         img.setAttribute('data-pkc-field', 'attachment-media');
         img.src = lent.url;
+        // 🔴 読めない形式(.heic など)は壊れた画像で終わらせず、理由を 1 行出す(#1087)
+        replaceOnMediaError(img, 'image', retype?.mime ?? mime);
         host.append(img);
       } else if (kind === 'video' || kind === 'audio') {
         const media = document.createElement(kind);
         media.setAttribute('data-pkc-field', 'attachment-media');
         media.controls = true;
         media.src = lent.url;
+        replaceOnMediaError(media, kind, mime);
         host.append(media);
         // 🔴 音だけ貼り付く(`app.css`)── その高さを、見出しへ飛ぶ余白へ渡す(#1232 段 b)
         if (kind === 'audio') {

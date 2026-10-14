@@ -574,3 +574,63 @@ describe('配線の pin(原文)', () => {
     expect(main).toContain('rememberFilerFlatten');
   });
 });
+
+describe('🔴 左の列の字を、実際の動きに合わせる(#1087 L1 / L3 / L5)', () => {
+  const kindChips = (root: HTMLElement): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const b of root.querySelectorAll<HTMLElement>('[data-pkc-region="kind-bar"] [data-pkc-kind]'))
+      out[b.getAttribute('data-pkc-kind')!] = b.textContent ?? '';
+    return out;
+  };
+
+  it('🔴 L1: 種類のボタンの数は、いまの場所の表に出る件数(押したあとの件数)と同じ', async () => {
+    const { root, d, rows } = setup();
+    // 前提: ルートでは全 7 件(フォルダ 3 / ノート 4)── 数え方を変えても変わらない
+    expect(kindChips(root)).toMatchObject({ folder: expect.stringContaining('3'), text: expect.stringContaining('4') });
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    await tick();
+    // f1 の配下は f2 / b / a の 3 件(フォルダ 1 / ノート 2)。全ノート(フォルダ 3 / ノート 4)を数えていたら落ちる
+    const chips = kindChips(root);
+    expect(chips.folder, 'フォルダの数が、全ノートを数えている').toMatch(/1$/);
+    expect(chips.text, 'ノートの数が、全ノートを数えている').toMatch(/2$/);
+    // 押したあとに表へ出る行数が、ボタンの数と一致する
+    root.querySelector<HTMLElement>('[data-pkc-kind="text"]')!.click();
+    await tick();
+    expect(rows(), 'ボタンの数と、押したあとの行数が食い違う').toHaveLength(2);
+  });
+
+  it('🔴 L1: 種類を 1 つ押している間も、他の札の数は変わらない(戻す口を消さない)', async () => {
+    const { root, d } = setup();
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    await tick();
+    root.querySelector<HTMLElement>('[data-pkc-kind="text"]')!.click();
+    await tick();
+    const chips = kindChips(root);
+    expect(Object.keys(chips).sort(), '押した札だけが残って他が消えた').toEqual(['folder', 'text']);
+    expect(chips.folder).toMatch(/1$/);
+    expect(chips.text).toMatch(/2$/);
+  });
+
+  it('🔴 L3: 中まで全部出している間は、並べ替えの案内を出さない(上へ / 下への口が出ないため)', async () => {
+    const { q, toggle } = setup();
+    const hint = () => q('[data-pkc-field="filer-move-empty"]');
+    expect(hint()?.textContent, '対照群: 切のときは出ている').toBe('動かしたいものを選ぶと、ここで上下に並べ替えられます');
+    toggle()!.click();
+    await tick();
+    expect(hint(), '入のときに出ている').toBeNull();
+    toggle()!.click();
+    await tick();
+    expect(hint(), '切に戻したら出ない').not.toBeNull();
+  });
+
+  it('🔴 L5: 題名のセルに全文の説明が付く。入のときの孫以深は親の名前つきのまま', async () => {
+    const { pane, toggle } = setup();
+    const title = (lid: string) =>
+      pane.querySelector<HTMLElement>(`tbody [data-pkc-entry="${lid}"] [data-pkc-field="title"]`)!.title;
+    expect(title('x')).toBe('t-x');
+    toggle()!.click();
+    await tick();
+    expect(title('x'), '直下の行').toBe('t-x');
+    expect(title('b'), '孫以深の行').toBe('t-b(t-f2 の中)');
+  });
+});

@@ -137,6 +137,17 @@ describe('題名と一緒にファイル名が変わる', () => {
     expect(written.expectHash).toBe(contentHash64Hex(ATT));
   });
 
+  it('🔴 空にして確定したら、元の題名へ戻し、戻した理由を画面の下に言う(#1087 A5)', async () => {
+    const r = setup(ATT, { title: '請求書' });
+    expect(r.d.getState().error ?? null, '前提: 打つ前は何も出ていない').toBeNull();
+    await typeName(r, '   ');
+    const input = r.q<HTMLInputElement>('[data-pkc-action="rename-attachment"]')!;
+    expect(input.value, '元の題名へ戻っていない').toBe('請求書');
+    expect(r.d.getState().error).toBe('題名を入れてください');
+    expect(r.renames, '空の題名を書いた').toEqual([]);
+    expect(r.persists, '空の題名でファイル名を書いた').toHaveLength(0);
+  });
+
   it('画面の「ダウンロード」の名前も、書いた後の本文で新しい名前になる', async () => {
     const r = setup(ATT);
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
