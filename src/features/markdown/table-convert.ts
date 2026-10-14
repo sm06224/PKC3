@@ -668,7 +668,7 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
    *   🔑 右クリックから来た人にも同じ字で通る(▾ はどちらの端末にも出る)。
    */
   const instead =
-    '(表の右上の ▾ をもう一度開いて「Markdown の表」を選べば、本文はそのままコピーできます)';
+    '(表の右上の ▾ をもう一度開いて「Markdown の表でコピー」を選べば、本文はそのままコピーできます)';
   for (const [r, row] of at.rows.entries()) {
     for (const [c, cell] of row.cells.entries()) {
       /**
