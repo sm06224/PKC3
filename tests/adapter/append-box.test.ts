@@ -308,6 +308,61 @@ describe('追記(P8 段⑧)', () => {
       await tick();
       expect(inputOf(s.q).value).toBe('');
     });
+
+    describe('🔴 書込が飛んでいる間に別のノートへ移っても、結末は書いたノートの証拠で決める', () => {
+      async function writeThenAway() {
+        const s = two();
+        s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+        await tick();
+        const gate = s.hold();
+        type(s.q, 'A の字');
+        s.q('[data-pkc-action="append-entry"]')!.click();
+        await tick();
+        expect(s.d.getState().writeLock?.lid, '書込が飛んでいない').toBe('log');
+        s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+        await tick();
+        return { s, gate };
+      }
+
+      it('A の書込が失敗 → A へ戻ると A の字が残っている(B には出ない)', async () => {
+        const { s, gate } = await writeThenAway();
+        // ⚠ 書込が飛んでいる間は B の本文が読めない(読みは書込の後ろに並ぶ)── B の欄はまだ出ていない
+        expect(appendModeOf(s.d.getState()).kind).toBe('hidden');
+        gate.drop();
+        await tick();
+        expect(s.persisted).toHaveLength(0);
+        expect(appendModeOf(s.d.getState())).toEqual({ kind: 'ready', lid: 'log2' });
+        expect(inputOf(s.q).value, 'B の欄が消された').toBe('');
+        s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+        await tick();
+        expect(inputOf(s.q).value, '失敗した追記の字が消えた').toBe('A の字');
+      });
+
+      it('A の書込が成功 → A へ戻ると欄は空(二重に追記できる形で戻ってこない)', async () => {
+        const { s, gate } = await writeThenAway();
+        gate.pass();
+        await tick();
+        expect(s.persisted).toHaveLength(1);
+        expect(s.persisted[0]!.lid).toBe('log');
+        s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+        await tick();
+        expect(inputOf(s.q).value, '通った追記の字が戻ってきた').toBe('');
+      });
+
+      it('対照群: 移らずに待てば、通った時点で欄が空になる', async () => {
+        const s = two();
+        s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+        await tick();
+        const gate = s.hold();
+        type(s.q, 'A の字');
+        s.q('[data-pkc-action="append-entry"]')!.click();
+        await tick();
+        gate.pass();
+        await tick();
+        expect(s.persisted).toHaveLength(1);
+        expect(inputOf(s.q).value).toBe('');
+      });
+    });
   });
 });
 
