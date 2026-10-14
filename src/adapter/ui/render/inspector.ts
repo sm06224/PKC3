@@ -58,7 +58,8 @@ import { listTaskItems } from '@features/markdown/task-count';
 import { listAssetUses, type AssetUse } from '@features/asset/asset-refs-in-body';
 import { frontmatterProblem } from '@features/markdown/frontmatter';
 import { externalImageUrls } from '@features/asset/inline-url-adopt';
-import { formatBodyStats, formatTaskProgress } from '@features/stats/body-stats';
+import { formatBodyStatsFor, formatTaskProgress } from '@features/stats/body-stats';
+import { estimateReadingTime, type ReadingTimeEstimate } from '@features/markdown/reading-time';
 import {
   CREATABLE_KINDS,
   RELATION_LABELS,
@@ -141,6 +142,21 @@ export class InspectorRenderer {
     linkKey: string;
     drawn: number;
   } | null = null;
+  /**
+   * 🔴 **塗り直さなくてよい行の記憶**(#1087)。行ごとに「前回塗った入力(参照)」を持ち、同じなら
+   * 行の DOM に触らない ── 打つたびに描き直す面で、見た目の変わらない行を `textContent = ''` から
+   * 作り直していた(同じ node を毎回捨てて作る)。器を組み直したら手放す(`build`)。
+   * ⚠ 鍵に入れるのは**その行の見た目を決める入力だけ**。入れ忘れると「入力が変わったのに古い行」になる。
+   */
+  private readonly rowDeps = new Map<string, readonly unknown[]>();
+  private rowSame(name: string, deps: readonly unknown[]): boolean {
+    const prev = this.rowDeps.get(name);
+    return prev !== undefined && prev.length === deps.length && prev.every((d, i) => d === deps[i]);
+  }
+  /** 本文の分数の見積り(`imgCount` と同じ作り。字を鍵に 1 つ憶える)。 */
+  private statsEstimate: { body: string; estimate: ReadingTimeEstimate } | null = null;
+  /** 本文のリンク先(つながりの図の入力)。同じ作り。 */
+  private linkTargets: { body: string; cid: string | null | undefined; to: string[] } | null = null;
   /** 組み終わった器の先頭(`region` に繋がっているかで生存を判定する)。 */
   private head: HTMLElement | null = null;
   private shape: Shape | null = null;
@@ -258,6 +274,19 @@ export class InspectorRenderer {
     const uses = listAssetUses(body);
     this.assetScan = { body, uses };
     return uses;
+  }
+
+  /** 本文のリンク先。字(と cid)が同じなら前回を使い回し、編集中は止まってから読み直す(#1087)。 */
+  private bodyLinks(body: string, cid: string | null | undefined, stale: boolean): string[] {
+    const m = this.linkTargets;
+    if (m !== null && m.body === body && m.cid === cid) return m.to;
+    if (stale && m !== null && m.cid === cid) {
+      this.scanDeferred = true;
+      return m.to;
+    }
+    const to = bodyLinkTargets(body, cid);
+    this.linkTargets = { body, cid, to };
+    return to;
   }
 
   /** 本文の字が同じなら前回の走査を使い回す。`view.doc` は `readTags(body)` と同じ物。 */
@@ -547,10 +576,14 @@ export class InspectorRenderer {
      * ⚠ 同じ添付を何度使っていても 1 行(最初の出現へ飛ぶ)。
      */
     const assetBox = this.rows.get('inspector-assets');
-    if (assetBox) {
-      const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
-      if (body === null) this.assetScan = null;
-      const uses = body === null ? [] : this.scanAssetUses(body, stale);
+    const assetBody = assetBox && state.openBody?.lid === meta.lid ? state.openBody.body : null;
+    if (assetBody === null) this.assetScan = null;
+    const assetUses = assetBody === null ? [] : this.scanAssetUses(assetBody, stale);
+    // 同じ走査結果(参照)なら行は同じ見た目 ── 作り直さない(本文が無い回は `null` で鍵を揃える)
+    const assetDeps = [assetBody === null ? null : assetUses];
+    if (assetBox && !this.rowSame('assets', assetDeps)) {
+      this.rowDeps.set('assets', assetDeps);
+      const uses = assetUses;
       assetBox.textContent = '';
       const dt = assetBox.previousElementSibling;
       const empty = uses.length === 0;
@@ -599,7 +632,11 @@ export class InspectorRenderer {
      * 🔑 だから `title` は `dd`(行)、中身は `chips`(札の入れ物)と分ける。
      */
     const tagRow = this.rows.get('inspector-tags');
-    if (tagBox) {
+    // 札の見た目は「走査結果」と「外せるか」で決まる(同じなら作り直さない。色の「外す」は
+    // `syncTagColorControls` が生きた node を直す)
+    const tagDeps = [tagScan, canWriteTags];
+    if (tagBox && !this.rowSame('tags', tagDeps)) {
+      this.rowDeps.set('tags', tagDeps);
       const tags = tagScan === null ? null : tagScan.view.doc;
       /**
        * 🔴 **読めていないときに「無し」と断定しない**(#284)。
@@ -774,7 +811,9 @@ export class InspectorRenderer {
      * ⚠ 消すボタンを対で置く ── **作れて消せない導線は dead click の一種**。
      */
     const relBox = this.rows.get('inspector-relations');
-    if (relBox) {
+    const relDeps = [state.relations, state.entryMetas, meta.lid, editing, blockedNote];
+    if (relBox && !this.rowSame('relations', relDeps)) {
+      this.rowDeps.set('relations', relDeps);
       relBox.textContent = '';
       const mine = state.relations.filter(
         (r) => r.kind !== STRUCTURAL && (r.fromLid === meta.lid || r.toLid === meta.lid),
@@ -878,9 +917,11 @@ export class InspectorRenderer {
       if (dt instanceof HTMLElement) dt.hidden = inside.length === 0;
     }
     const backBox = this.rows.get('inspector-backlinks');
-    if (backBox) {
+    const back = state.backlinks;
+    const backDeps = [back, state.entryMetas, meta.lid];
+    if (backBox && !this.rowSame('backlinks', backDeps)) {
+      this.rowDeps.set('backlinks', backDeps);
       backBox.textContent = '';
-      const back = state.backlinks;
       // ⚠ `null`(まだ引いていない)と `undefined`(その field を持たない state)は
       //    どちらも「**データが無い**」── 片方だけ見ると、部分的な state で落ちる
       if (!back || back.lid !== meta.lid) {
@@ -979,9 +1020,11 @@ export class InspectorRenderer {
       const linkEdges: { fromLid: string; toLid: string; kind: string }[] = [];
       const openBody = state.openBody?.lid === meta.lid ? state.openBody.body : null;
       if (openBody !== null) {
-        for (const to of bodyLinkTargets(openBody, state.cid)) {
+        for (const to of this.bodyLinks(openBody, state.cid, stale)) {
           linkEdges.push({ fromLid: meta.lid, toLid: to, kind: BODY_LINK_KIND });
         }
+      } else {
+        this.linkTargets = null; // 本文を閉じたら手放す(常駐させない)
       }
       const backForMap = state.backlinks;
       if (backForMap && backForMap.lid === meta.lid) {
@@ -1098,8 +1141,25 @@ export class InspectorRenderer {
       const hide = isFolder || bodyChars === null;
       statsDd.hidden = hide;
       if (dt instanceof HTMLElement) dt.hidden = hide;
+      if (hide) this.statsEstimate = null;
       if (!hide) {
-        setText(statsDd, formatBodyStats(bodyChars, openedBody));
+        /**
+         * 🔴 **字数は毎回、分数は打鍵が止まってから**(#1087)。分数の元(`estimateReadingTime`)は
+         * 本文の全文を読む(400KB で毎打鍵 5〜8ms)。目次・チェック項目と同じく、編集中で前回の見積りが
+         * 在るときは**前回の分数を出したまま**、止まってから 1 回だけ読み直す。字数は `length` なので常に最新。
+         */
+        let estimate: ReadingTimeEstimate | null = null;
+        if (openedBody === null) {
+          this.statsEstimate = null;
+        } else {
+          if (stale && this.statsEstimate !== null && this.statsEstimate.body !== openedBody) {
+            this.scanDeferred = true;
+          } else if (this.statsEstimate?.body !== openedBody) {
+            this.statsEstimate = { body: openedBody, estimate: estimateReadingTime(openedBody) };
+          }
+          estimate = this.statsEstimate!.estimate;
+        }
+        setText(statsDd, formatBodyStatsFor(bodyChars, estimate));
       }
     }
     /**
@@ -1177,7 +1237,7 @@ export class InspectorRenderer {
     // 🔴 保存したスタックにだけ出す(#633 段③)── `export-folder` と同じ作法(消さずに畳む)
     const stackBtn = this.buttons.get('stack-load');
     if (stackBtn) stackBtn.hidden = meta.archetype !== STACK_ARCHETYPE;
-    this.paintAdoptImages(state, meta.lid);
+    this.paintAdoptImages(state, meta.lid, stale);
     for (const [action, b] of this.buttons) {
       /**
        * 🔴 **判定は `entryActionHint` 1 か所**(着地前レビュー 🔴2)。
@@ -1246,7 +1306,7 @@ export class InspectorRenderer {
    * ⚠ **枚数を文言に入れる** ── 押すとその数だけ外へ通信するので、規模を先に見せる。
    *   ⚠ 数えるのは**宛先の数**である(同じ URL が 2 回出ても 1)。
    */
-  private paintAdoptImages(state: AppState, lid: string): void {
+  private paintAdoptImages(state: AppState, lid: string, stale: boolean): void {
     const b = this.buttons.get('adopt-external-images');
     if (!b) return;
     const body = state.openBody?.lid === lid ? state.openBody.body : null;
@@ -1259,10 +1319,14 @@ export class InspectorRenderer {
       //   同じなので、test では守れない(守っているのは常駐メモリだけである)。
       this.imgCount = null;
     } else {
-      if (this.imgCount?.body !== body) {
+      // 🔴 編集中で前回の枚数が在るなら、前回の枚数を出したまま止まってから 1 回数え直す(#1087。
+      //   400KB で毎打鍵 6〜9ms ── 目次・チェック項目と同じ作り)
+      if (stale && this.imgCount !== null && this.imgCount.body !== body) {
+        this.scanDeferred = true;
+      } else if (this.imgCount?.body !== body) {
         this.imgCount = { body, count: externalImageUrls(body).length };
       }
-      count = this.imgCount.count;
+      count = this.imgCount!.count;
     }
     b.hidden = count === 0;
     if (count === 0) return;
@@ -1415,6 +1479,7 @@ export class InspectorRenderer {
     this.buttons = new Map();
     this.relAdd = null;
     this.editingNote = null;
+    this.rowDeps.clear();
     this.toc = null; // 器を組み直したら目次の記憶も手放す(新しい `<dd>` は空なので、同じ本文でも埋め直す)
 
     const head = document.createElement('div');
