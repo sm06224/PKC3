@@ -101,6 +101,7 @@ import {
   PLACE_LINE_REMOVE_OPEN_REFUSAL,
   PLACE_REMOVE_OPEN_REFUSAL,
   phaseBlockReason,
+  selectBlockReason,
   screenBodyOf,
   SECTION_DRAFT_NOTE,
   type AppState,
@@ -4879,7 +4880,7 @@ export function leftFilterFind(filterQuery: string): string | undefined {
   return q === '' ? undefined : q;
 }
 
-function selectEntryOrExplain(
+export function selectEntryOrExplain(
   dispatcher: Dispatcher,
   lid: string,
   what: string,
@@ -4888,10 +4889,13 @@ function selectEntryOrExplain(
 ): boolean {
   if (!leaveSectionDraftOrAsk(dispatcher, root, services, lid, what)) return false;
   const state = dispatcher.getState();
-  if (state.phase === 'editing') {
+  // 🔴 編集中だけでなく保存失敗中(`error`)も reducer が捨てる ── 判定は `selectBlockReason` の 1 本
+  //    (直す前は `editing` だけを断り、保存失敗中は続きの処理が原因違いの字を出していた)
+  const blocked = selectBlockReason(state.phase);
+  if (blocked !== null) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `${phaseBlockReason(state.phase)}${what}を開いてください`,
+      error: `${blocked}${what}を開いてください`,
     });
     return false;
   }

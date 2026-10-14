@@ -928,7 +928,7 @@ export class InspectorRenderer {
         backBox.textContent = '参照元を調べています…';
       } else if (back.failed) {
         // 🔴 調べられなかった(#1087)── 「調べています…」のまま固めず、次の手を言う
-        backBox.textContent = '参照元を調べられませんでした。ノートを選び直すと、もう一度調べます';
+        backBox.textContent = '参照元を調べられませんでした。ほかのノートを選んでから、このノートを選び直すと、もう一度調べます';
       } else if (back.lids.length === 0) {
         backBox.textContent = '無し';
       } else {

@@ -268,6 +268,13 @@ describe('面の走査は、飛んでいる書込を追い越さない', () => {
   });
 
   /**
+   * ⚠ 改名は、選んでいるノートの参照元の取り直し(`findBacklinks`、#1087)を 1 本付ける ──
+   *   この 2 本が見るのは `taskScan` の畳み方なので、参照元の走査は数えない
+   *   (参照元の取り直しは `tests/adapter/link-gates-1087.test.ts` が見る)。
+   */
+  const isTaskLane = (x: string): boolean => x !== 'findBacklinks';
+
+  /**
    * 🔴 **畳んでよいのは「読む範囲が同じ」ときだけ**(#759、2026-09-08。
    *   **フル smoke が 2 回落ちて分かった**)。
    *
@@ -298,8 +305,8 @@ describe('面の走査は、飛んでいる書込を追い越さない', () => {
     d.dispatch({ type: 'REFRESH_TASK_SCAN' });
     g.open();
     await flush();
-    expect(order, '後から積まれた書込を読む走査が 1 本も走っていない').toEqual([
-      ...before,
+    expect(order.filter(isTaskLane), '後から積まれた書込を読む走査が 1 本も走っていない').toEqual([
+      ...before.filter(isTaskLane),
       'write',
       'taskScan',
       'taskScan',
@@ -317,8 +324,8 @@ describe('面の走査は、飛んでいる書込を追い越さない', () => {
     for (let i = 0; i < 5; i += 1) d.dispatch({ type: 'REFRESH_TASK_SCAN' });
     g.open();
     await flush();
-    expect(order, '積み増しが 1 本に畳まれていない').toEqual([
-      ...before,
+    expect(order.filter(isTaskLane), '積み増しが 1 本に畳まれていない').toEqual([
+      ...before.filter(isTaskLane),
       'write',
       'taskScan',
       'taskScan',

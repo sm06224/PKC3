@@ -823,6 +823,19 @@ export function phaseBlockReason(phase: AppPhase): string | null {
 }
 
 /**
+ * 🔴 **ノートを開く(`SELECT_ENTRY`)を reducer が捨てる phase の断り文**(#1087)。
+ *
+ * ⚠ 捨てるのは `editing` と `error` の 2 つだけ(下の `SELECT_ENTRY`)── 読み込み中(`initializing`)は捨てない。
+ *   `phase !== 'ready'` で断ると、reducer が通す `initializing` まで断ってしまう(reducer と断りの条件がずれる)。
+ * 🔑 ノートを開く口(一覧 / リンク / 添付のリンク / アドレス)は、断るかどうかをここ 1 本で決める
+ *   (口ごとに `editing` だけを見ると、保存失敗中に原因違いの字が出る)。
+ * @returns 開けるなら `null`
+ */
+export function selectBlockReason(phase: AppPhase): string | null {
+  return phase === 'editing' || phase === 'error' ? phaseBlockReason(phase) : null;
+}
+
+/**
  * 🔴 **編集を終える操作(保存 / 取り消し)を捨てるときの断り文**(#723)。
  *
  * ## なぜ計器を置くのか
@@ -4483,6 +4496,19 @@ export function reduce(state: AppState, action: Dispatchable): ReduceResult {
   );
 }
 
+/** ノートの増減か、題名が変わったか(並び順・日付・保存の印だけの変化は含めない)。 */
+export function entryListChanged(
+  before: ReadonlyMap<string, EntryMeta>,
+  after: ReadonlyMap<string, EntryMeta>,
+): boolean {
+  if (before.size !== after.size) return true;
+  for (const [lid, m] of after) {
+    const b = before.get(lid);
+    if (b === undefined || b.title !== m.title) return true;
+  }
+  return false;
+}
+
 function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult {
   if (action.type === 'NAV_HISTORY') return navHistory(state, action.dir);
   const result = reduceCore(state, action);
@@ -4518,6 +4544,22 @@ function reduceWithHistory(state: AppState, action: Dispatchable): ReduceResult 
     if (result.state.selectedLid !== null)
       events = [...events, { type: 'REQUEST_BACKLINKS', lid: result.state.selectedLid }];
   }
+  /**
+   * 🔴 **選んだまま、ノートの増減・ゴミ箱・戻す・改名が起きたら、参照元を取り直す**(#1087)。
+   *
+   * ⚠ 直す前は選択が動いたときしか引かなかったので、参照元をゴミ箱へ移す / 戻す / 改名しても
+   *   情報ペインの「参照元」が古いまま残った。⚠ 保存のたびに `entryMetas` は作り直される
+   *   (`ENTRY_STAMPED`)── 打鍵ごとに引かないよう、**増減と題名が変わったときだけ**撃つ。
+   * 🔑 新しい待ち口は作らない ── 撃った先は選択が動いたときと同じ `scanAfterWrites`(書込の後ろ)。
+   *   前の答えは**残す**(消すと保存のたびに「調べています…」へ戻ってちらつく)。
+   */
+  if (
+    result.state.selectedLid !== null &&
+    result.state.selectedLid === state.selectedLid &&
+    result.state.entryMetas !== state.entryMetas &&
+    entryListChanged(state.entryMetas, result.state.entryMetas)
+  )
+    events = [...events, { type: 'REQUEST_BACKLINKS', lid: result.state.selectedLid }];
   if (
     history === result.state.selectionHistory &&
     dual === result.state.dual &&
