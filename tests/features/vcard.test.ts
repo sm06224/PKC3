@@ -65,9 +65,8 @@ describe('vCard 2.1 の素の種別(#1087)', () => {
       'BEGIN:VCARD',
       'VERSION:2.1',
       'FN:符号化の人',
-      'TEL;VOICE:03-0000-0000',
+      'TEL;VOICE;QUOTED-PRINTABLE:03-0000-0000',
       'EMAIL;INTERNET:a@example.com',
-      'NOTE;QUOTED-PRINTABLE:abc',
       'END:VCARD',
     ].join('\r\n');
     expect(parseVcf(v21).warnings).toEqual([]);
