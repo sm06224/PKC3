@@ -52,8 +52,8 @@ export function errorText(e: unknown): string {
  */
 export function bodySaveErrorText(e: unknown): string {
   const text = errorText(e);
-  // ⚠ worker の断り(`WRITE_QUOTA_REFUSAL`)は別の字なので、こちらも見る(#1087 S1)
-  const short = text.includes(QUOTA_JA) || text.includes(WRITE_QUOTA_REFUSAL);
+  // ⚠ worker の断り(`WRITE_QUOTA_REFUSAL`)は自分で「ノートを保存し直す」まで言うので、重ねて足さない(#1087 S1)
+  const short = text.includes(QUOTA_JA) && !text.includes(WRITE_QUOTA_REFUSAL);
   return short ? `${text.replace(/。$/, '')}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
 }
 

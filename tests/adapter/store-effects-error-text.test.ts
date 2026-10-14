@@ -98,11 +98,11 @@ describe('bodySaveErrorText / errorText', () => {
 });
 
 describe('bodySaveErrorText: worker の空き容量の断り(#1087 S1)', () => {
-  it('🔴 WRITE_QUOTA_REFUSAL にも、空きを作った後の一手を足す(二重の句点を作らない)', () => {
+  it('🔴 WRITE_QUOTA_REFUSAL は自分で「ノートを保存し直す」まで言うので、同じ一手を重ねて足さない', () => {
     const t = bodySaveErrorText(new Error(WRITE_QUOTA_REFUSAL));
     expect(t, '断りの本文が消えた').toContain('保存できる空き容量が足りません');
-    expect(t, '空きを作った後の一手が足されていない').toContain('。その後、本文の上の「ノートを保存し直す」を押してください');
-    expect(t).not.toContain('。。');
+    expect(t.split('ノートを保存し直す').length - 1, '同じ一手が 2 回出ている / 1 回も出ていない').toBe(1);
+    expect(t).not.toContain('。その後、本文の上の');
     // 対照群: 関係ない失敗には足さない
     expect(bodySaveErrorText(new Error('disk exploded'))).not.toContain('その後、本文の上の');
   });

@@ -130,7 +130,7 @@ describe('断り文(#971 段②)', () => {
       '消す操作は止めていません',
     );
     expect(WRITE_QUOTA_REFUSAL, 'タブの外で空きを作ることを言っていない').toContain('このタブの外');
-    expect(WRITE_QUOTA_REFUSAL, '保存し直しが先であることを言っていない').toContain('「ノートを保存し直す」を押すまで');
+    expect(WRITE_QUOTA_REFUSAL, '保存し直しが先であることを言っていない').toContain('「ノートを保存し直す」を押してください(押すまでは');
     expect(WRITE_QUOTA_REFUSAL, '次の一手が無い').toMatch(/容量の内訳|添付を消す/);
   });
 
