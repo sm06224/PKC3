@@ -355,7 +355,7 @@ describe('行と列を足す / 消す(#418 段①)', () => {
     col: number,
     what: 'row' | 'col',
     mode: 'add' | 'remove',
-  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, col, what, mode });
+  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, openLine: body.split('\n')[line] ?? '', col, what, mode });
 
   const T = '```csv\na,b,c\nd,e,f\n```';
 
@@ -385,7 +385,7 @@ describe('行と列を足す / 消す(#418 段①)', () => {
 
   it('🔴 断った理由を言える:最後の 1 行 / 1 列(「本文が変わっている」と取り違えない。2026-10-13)', () => {
     const why = (body: string, line: number, col: number, what: 'row' | 'col') =>
-      bodyRewriteRefusal(body, { kind: 'csv-shape', line, col, what, mode: 'remove' });
+      bodyRewriteRefusal(body, { kind: 'csv-shape', line, openLine: body.split('\n')[line] ?? '', col, what, mode: 'remove' });
     expect(why('```csv\na,b\n```', 1, 0, 'row')).toBe('最後の 1 行は消せません');
     expect(why('```csv\na\nb\n```', 1, 0, 'col')).toBe('最後の 1 列は消せません');
     // 対照群:行番号が古い(当たらない)ときは理由を言わない ── 呼び側の「本文が変わっている」のまま
@@ -491,6 +491,7 @@ describe('行・列の口を焼く(#418 段①)', () => {
       applyBodyRewrite(body, {
         kind: 'csv-shape',
         line: Number(add.line),
+        openLine: body.split('\n')[Number(add.line)]!,
         col: Number(add.col),
         what: 'row',
         mode: 'add',
@@ -641,7 +642,7 @@ describe('引用の中の csv の升を打つ(#775)', () => {
     col: number,
     what: 'row' | 'col',
     mode: 'add' | 'remove',
-  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, col, what, mode });
+  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, openLine: body.split('\n')[line] ?? '', col, what, mode });
 
   const Q = '> ```csv\n> 品名,数\n> りんご,3\n> ```\n';
 
@@ -757,7 +758,7 @@ describe('原文に無い升を打つ(#780)', () => {
     col: number,
     what: 'row' | 'col',
     mode: 'add' | 'remove',
-  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, col, what, mode });
+  ): string | null => applyBodyRewrite(body, { kind: 'csv-shape', line, openLine: body.split('\n')[line] ?? '', col, what, mode });
 
   /** 3 列の表。⚠ 2 行目は**升が 1 つしかない**(読み手は空の升を 2 つ足して描く)。 */
   const SHORT = '```csv\na,b,c\n1\n2,3,4\n```\n';

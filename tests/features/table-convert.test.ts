@@ -47,7 +47,7 @@ function blockSpans(body: string): Array<{ start: number; end: number }> {
 
 /** 形を変えた本文(`applyBodyRewrite` を通す ── 製品と同じ 1 本)。 */
 const convert = (body: string, line: number, to: 'markdown' | 'csv'): string | null =>
-  applyBodyRewrite(body, { kind: 'table-format', line, to });
+  applyBodyRewrite(body, { kind: 'table-format', line, openLine: body.split('\n')[line] ?? '', to });
 
 describe('表の形を変える(#708 段②)', () => {
   /**
@@ -598,7 +598,7 @@ describe('表の形を変える(#708 段②)', () => {
         expect(at, `${f.name}: 表を焼いているのに作り変えが出ない`).not.toBeNull();
         const to: TableFormat = at!.format === 'markdown' ? 'csv' : 'markdown';
 
-        const one = applyBodyRewrite(f.body, { kind: 'table-format', line, to });
+        const one = applyBodyRewrite(f.body, { kind: 'table-format', line, openLine: f.body.split('\n')[line]!, to });
         expect(one, `${f.name}: 出したのに書けない(押せる → 何も起きない)`).not.toBeNull();
         const want = f.grows === true ? [[['', ''], ...before[0]!]] : before;
         expect(grid(one!), `${f.name}: 作り変えで升の字が変わった`).toEqual(want);
@@ -614,6 +614,7 @@ describe('表の形を変える(#708 段②)', () => {
         const two = applyBodyRewrite(one!, {
           kind: 'table-format',
           line: backLines[0]!,
+          openLine: one!.split('\n')[backLines[0]!]!,
           to: at!.format,
         });
         expect(two, `${f.name}: 戻す口が出たのに書けない`).not.toBeNull();
@@ -666,7 +667,7 @@ describe('表の形を変える(#708 段②)', () => {
       const body = '前置き\n\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\n後書き\n';
       const lines = tableLines(body);
       expect(lines.length, '前提: 表が 2 つ焼かれていない').toBe(2);
-      const out = applyBodyRewrite(body, { kind: 'table-format', line: lines[0]!, to: 'csv' });
+      const out = applyBodyRewrite(body, { kind: 'table-format', line: lines[0]!, openLine: body.split('\n')[lines[0]!]!, to: 'csv' });
       expect(out, '引用の中の表を書けなかった').not.toBeNull();
       const src = body.split('\n');
       const got = out!.split('\n');

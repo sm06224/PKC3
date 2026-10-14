@@ -43,6 +43,7 @@ import {
 } from '@features/markdown/table-convert';
 import {
   isPlaceOpen,
+  placeBlockUnclosed,
   placeGroupAt,
   placeGroupItems,
   placeRectOf,
@@ -97,6 +98,8 @@ import {
   appTileRefusal,
   isViewMode,
   nextViewMode,
+  PLACE_LINE_REMOVE_OPEN_REFUSAL,
+  PLACE_REMOVE_OPEN_REFUSAL,
   phaseBlockReason,
   screenBodyOf,
   SECTION_DRAFT_NOTE,
@@ -111,6 +114,7 @@ import {
   shownCellLine,
   shownPlacedLine,
   noteCellWrite,
+  noteShapeWrite,
 } from '@adapter/state/shown-line';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
@@ -799,6 +803,41 @@ function randomSuffix(): string {
   }
   return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 }
+/**
+ * 🔴 **別のタブ・窓が編集中のノートへは、消す書換を撃たない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+ *
+ * ⚠ 通すと、編集中のタブの保存で上書きされ、消した結果は履歴にだけ残る(持ち出しなら、元からは既に切ってある)。
+ *   **断って理由を出す**。問い合わせが落ちたときも黙らない(押しても何も起きないボタンにしない)。
+ * 🔑 **問い合わせが要らない回は同期のまま撃つ**(口の無い環境・このタブが自分で編集中の回)。
+ *   ⚠ 撃つ側は {@link act}。押した瞬間の値は呼び手が先に捕える(待っている間に画面が替わっても、押した物を撃つ)。
+ * @param lids 確かめるノート(持ち出しは元と先の 2 つ)。⚠ 全部が通ったときだけ撃つ
+ * @param failed 問い合わせが落ちた回の字(次にすることを言う)
+ */
+function actUnlessEditedElsewhere(
+  dispatcher: Dispatcher,
+  port: EditLockPort,
+  lids: readonly string[],
+  failed: string,
+  act: () => void,
+): void {
+  if (lids.every((l) => elsewhereCheckNotNeeded(dispatcher, port, l))) {
+    act();
+    return;
+  }
+  void (async () => {
+    for (const l of lids) {
+      const why = await editedElsewhereReason(dispatcher, port, l);
+      if (why !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+        return;
+      }
+    }
+    act();
+  })().catch(() => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: failed });
+  });
+}
+
 /**
  * 🔴 **別のタブ・窓が今日のノートを編集中なら、予定を足さない**(#529 W5-d の続き。Gemini 裁定 Q5 = A)。
  * 予定の面の「足す」と目盛りの作成(`schedule-grid-create`)の**共通の入口**。
@@ -4300,7 +4339,16 @@ function applyTableFormat(
     dispatcher.dispatch({ type: 'OP_FAILED', error: why });
     return;
   }
-  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, to });
+  /**
+   * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+   *   同じノートの**別の表**(2 つ目の表を押したのに 1 つ目)が変わる。画面の本文から引き、引けなければ断る。
+   */
+  const openLine = shownBodyLine(st, ob.lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, openLine, to });
 }
 
 /**
@@ -9420,7 +9468,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 何をするかの判断は `body-rewrite.ts`(最後の 1 行 / 1 列は消さない、等)──
    *   ここは**押した所を渡すだけ**である。
    */
-  'shape-cell': (dispatcher, target) => {
+  'shape-cell': (dispatcher, target, services) => {
     const line = Number(target.getAttribute('data-pkc-cell-line'));
     const col = Number(target.getAttribute('data-pkc-cell-col'));
     const what = target.getAttribute('data-pkc-cell-what');
@@ -9436,7 +9484,30 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を触ってください`) });
       return;
     }
-    dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
+    /**
+     * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+     *   古い表示から押した「消す」が**1 行上の行**を消す。升を開くのと同じ口(`shownCellLine`)で引く。
+     *   引けなければ撃たずに断る。
+     */
+    const openLine = shownCellLine(st, lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
+    const fire = (): void => {
+      // 🔴 続けて押す次の操作のために、いま書く行の結果を覚えておく(升の `Tab` と同じ。`noteShapeWrite`)
+      noteShapeWrite(dispatcher.getState(), lid, { line, openLine, col, what, mode });
+      dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, openLine, col, what, mode });
+    };
+    /**
+     * 🔴 **消す回は、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門)。
+     * ⚠ 通すと編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回は従来どおり。
+     */
+    if (mode === 'remove') {
+      actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);
+      return;
+    }
+    fire();
   },
   /**
    * 🔴 **色の見本を押して、本文の色コードを選び直す**(#1224。Gemini 裁定 2026-10-01 Q2 = B)。
@@ -10639,9 +10710,20 @@ const ACTIONS: Record<string, ActionHandler> = {
         const ob = dispatcher.getState().openBody;
         const open = ob === null ? '' : (ob.body.split('\n')[line] ?? '');
         const cur = placeStyleAt(open)?.[key] ?? null;
+        // ⚠ 窓を開いた時点の本文を控える ── reducer の開き行の門は dispatch 時点の本文から行を取り直すので、
+        //   窓の間に別のタブが上の行を増減すると、同じ行番号に来た**別の付箋**を塗ってしまう(#1087)
+        const bodyAtOpen = ob?.body ?? null;
         openColorPicker(target, cur ?? (key === 'fill' ? PLACE_FILL_SEED : PLACE_STROKE_SEED), (to) => {
-          // ⚠ 窓が閉じるまでに本文が動いたかもしれない ── reducer が byte 一致で見直す
           if (parsePlaceColor(to) === null || to === cur) return;
+          const now = dispatcher.getState().openBody;
+          if (now?.lid !== lid) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、色は変えていません' });
+            return;
+          }
+          if (now.body !== bodyAtOpen) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、色は変えていません(もう一度開いてください)' });
+            return;
+          }
           dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } });
         });
       },
@@ -10819,6 +10901,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const ob = st.openBody;
     if (ob === null) return;
+    // 🔴 閉じていない線は消せない ── 押した時点で本当の理由を言う(reducer も同じ関数で見る。#1087)
+    if (placeBlockUnclosed(ob.body, line + frontmatterLineCount(ob.body))) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: PLACE_LINE_REMOVE_OPEN_REFUSAL });
+      return;
+    }
     dispatcher.dispatch({
       type: 'REMOVE_PLACE_LINE',
       lid: ob.lid,
@@ -10836,6 +10923,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const ob = st.openBody;
     if (ob === null) return;
     const lid = ob.lid;
+    // 🔴 閉じていない付箋は消せない ── **確認を出す前に**本当の理由を言う(reducer も同じ関数で見る。#1087)
+    if (placeBlockUnclosed(ob.body, line + frontmatterLineCount(ob.body))) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: PLACE_REMOVE_OPEN_REFUSAL });
+      return;
+    }
+    // ⚠ 確認を開いた時点の本文を控える ── 確認の間に別のタブが上の行を増減すると、同じ行番号は**別の付箋**を指す
+    const bodyAtOpen = ob.body;
     /**
      * 🔴 履歴に積む回なので「戻せる」と言う(#1087)。置いたノートの付箋は、消えるのが付箋の枠だけで
      * ノート自体は無傷 ── それも言う(開き行に `entry=` が在るかで分ける)。
@@ -10853,11 +10947,13 @@ const ACTIONS: Record<string, ActionHandler> = {
         const now = dispatcher.getState();
         if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板の付箋を消してください`;
         if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
+        // 🔴 確認の間に本文が動いたら書かない(`place-rect` / `place-group` と同じ。別の付箋を消さない)
+        if (now.openBody.body !== bodyAtOpen)
+          return '確認している間に本文が変わったので、付箋は消していません(もう一度消してください)';
         return null;
       },
       () => {
-        const body = dispatcher.getState().openBody?.body ?? '';
-        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(body) });
+        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(bodyAtOpen) });
       },
     );
   },
@@ -16403,7 +16499,13 @@ export function bindActions(
       const toLid = drop === null ? row!.lid : drop.lid;
       if (toLid !== lid) {
         if (!canPutIntoBody(toLid)) return;
-        dispatcher.dispatch({
+        /**
+         * 🔴 **別のタブ・窓が編集中のノートへは持っていかない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+         * ⚠ 通すと、元からは既に切ってあるのに、行き先は編集中のタブの保存で上書きされ、
+         *   塊が**両方の本文から消えて履歴にだけ残る**。元と先の**両方**を確かめる(元が編集中なら、
+         *   切った結果が上書きされて塊が二重になる)。
+         */
+        const handoff = {
           type: 'HANDOFF_BLOCK',
           fromLid: lid,
           start,
@@ -16411,7 +16513,14 @@ export function bindActions(
           toLid,
           toBefore: drop === null ? null : drop.toBefore,
           ...(drop === null ? {} : { anchor: drop.anchor }),
-        });
+        } as const;
+        actUnlessEditedElsewhere(
+          dispatcher,
+          services,
+          [toLid, lid],
+          'ブロックを移せませんでした(別のタブの編集を確かめられませんでした)。もう一度ドラッグしてください',
+          () => dispatcher.dispatch(handoff),
+        );
         return;
       }
       if (drop === null) return;
@@ -16471,7 +16580,8 @@ export function bindActions(
           .filter((x) => x !== '' && metas.has(x))
           .map((x) => formatEntryLink(metas.get(x)!.title, x));
         if (lines.length === 0) return;
-        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines });
+        // 🔴 落とした所の目印を渡す(#1087)── 書く直前に disk 側と突き合わせ、別の窓が行を足していれば断る
+        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines, anchor: at.anchor });
         return;
       }
       e.preventDefault();

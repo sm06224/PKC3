@@ -179,7 +179,7 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
       expect.objectContaining({
         type: 'REQUEST_BODY_REWRITE',
         lid: 'n1',
-        rewrite: { kind: 'table-format', line: 5, to: 'csv' },
+        rewrite: { kind: 'table-format', line: 5, openLine: '| 品名 | 数 |', to: 'csv' },
       }),
     ]);
   });
@@ -369,11 +369,11 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
    */
   it('🔴 編集中は、頼まれても reducer が受けない(門の 2 段目)', () => {
     const s = setup(MD, 'editing');
-    s.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, to: 'csv' } as never);
+    s.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, openLine: MD.split('\n')[2]!, to: 'csv' } as never);
     expect(s.events, '編集中なのに reducer が書換を頼んだ').toEqual([]);
     // 対照群 ── ready なら同じ頼みが通る(前提が崩れていないこと)
     const ok = setup(MD, 'ready');
-    ok.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, to: 'csv' } as never);
+    ok.d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 2, openLine: MD.split('\n')[2]!, to: 'csv' } as never);
     expect(ok.events.length, 'ready でも受けていない(前提が崩れている)').toBeGreaterThan(0);
   });
 
@@ -389,7 +389,7 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
    */
   it('🔴 表の形を変えた ack で、何ができるようになったかと戻し方が出る', () => {
     const s = setup(MD, 'ready');
-    const csv = applyBodyRewrite(MD, { kind: 'table-format', line: 2, to: 'csv' } as BodyRewrite)!;
+    const csv = applyBodyRewrite(MD, { kind: 'table-format', line: 2, openLine: MD.split('\n')[2]!, to: 'csv' } as BodyRewrite)!;
     expect(csv, '前提: 書き換わっていない').not.toBe(MD);
     const ack = (body: string, rewrite: BodyRewrite): void =>
       s.d.dispatch({
@@ -401,7 +401,7 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
         date: null,
         archived: false,
       } as never);
-    ack(csv, { kind: 'table-format', line: 2, to: 'csv' } as BodyRewrite);
+    ack(csv, { kind: 'table-format', line: 2, openLine: MD.split('\n')[2]!, to: 'csv' } as BodyRewrite);
     const note = s.d.getState().notice ?? '';
     expect(note, '何が起きたか出ていない').toContain('CSV の表');
     /**

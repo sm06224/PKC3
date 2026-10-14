@@ -293,6 +293,29 @@ export function removePlaceLine(body: string, target: PlaceTarget): string | nul
   return removeBlockAt(body, target, isLineOpen);
 }
 
+/** その行から始まる塊の範囲(frontmatter を剥いだ座標で取る ── `directiveBlockAt` と同じ座標系)。 */
+function placeBlockSpan(
+  lines: readonly string[],
+  fm: number,
+  line: number,
+): ReturnType<typeof blockSpanAt> {
+  return blockSpanAt(lines.slice(fm).join('\n'), line - fm);
+}
+
+/**
+ * 🔴 **その行から始まる塊が、閉じていないか**(#1087)── 消す書換(`removeBlockAt`)が断る条件の**1 本**。
+ *
+ * ⚠ 閉じていない塊は末尾まで飲んでいる(消すと**その下の本文が丸ごと消える**)ので断る。
+ *   画面の側(`REMOVE_PLACE` の門)も同じ関数で見て、**断った理由を言う**(断る側と言う側を別に書かない ── §7)。
+ *   言わないと「本文が変わっている」と出て、**開き直しても直らない**。
+ */
+export function placeBlockUnclosed(body: string, line: number): boolean {
+  const fm = frontmatterLineCount(body);
+  if (!Number.isInteger(line) || line < fm) return false;
+  const span = placeBlockSpan(body.split('\n'), fm, line);
+  return span !== null && span.open;
+}
+
 /** 塊を消す共通部(板 / 線)。⚠ 範囲の取り方・空行の扱いは 1 本。 */
 function removeBlockAt(
   body: string,
@@ -302,7 +325,7 @@ function removeBlockAt(
   const at = placeLinesAt(body, target, accept);
   if (at === null) return null;
   // ⚠ 範囲は frontmatter を剥いだ座標で取る(`directiveBlockAt` と同じ座標系)
-  const span = blockSpanAt(at.lines.slice(at.fm).join('\n'), target.line - at.fm);
+  const span = placeBlockSpan(at.lines, at.fm, target.line);
   if (span === null || span.open) return null;
   const start = target.line;
   const end = span.end + at.fm;
@@ -889,10 +912,26 @@ const AUTO_NAME_STEM = '板';
 /** ⚠ 上限を置く ── 見つからなければ**作らずに断る**(当て推量の名前を書かない)。 */
 const AUTO_NAME_MAX = 999;
 
-/** 本文で既に使われている名前(板・図・その他の `:::` の塊すべて)。 */
+/**
+ * 本文で既に使われている名前(板・図・その他の `:::` の塊すべて)。
+ *
+ * 🔴 **線が指している名前も「使用中」に数える**(#1087)。⚠ 繋いだ付箋を消しても**線の行は残る**
+ *   (`from=板1`)ので、塊の名前だけ数えると、空いた `板1` が次に繋ぐ付箋へ**使い回され**、
+ *   古い線が勝手に新しい付箋へ繋がる(見えない所で配線が変わる)。
+ *   `from=` / `to=` は `板1:right@1/4` のように接続点が付くので、**名前の部分**を数える。
+ */
 function takenNames(lines: readonly string[]): Set<string> {
   const out = new Set<string>();
   for (const l of lines) {
+    const line = formatOpenAttrs(l, 'pkc-line');
+    if (line !== null) {
+      for (const k of ['from', 'to'] as const) {
+        const v = line.kvs[k];
+        if (typeof v !== 'string' || v === '') continue;
+        out.add(v);
+        out.add(v.split(':')[0]!);
+      }
+    }
     const named = parseBlockDirectiveOpen(l.trim());
     if (named !== null) {
       if (named.attrs.id !== undefined) out.add(named.attrs.id);
@@ -989,9 +1028,8 @@ export function connectPlaces(body: string, c: PlaceConnect): string | null {
    */
   if (next === body && hasLineBetween(lines, a.fm, fromSpell, toSpell)) return body;
   // ⚠ 閉じていない塊の中へ足さない(`addPlace` と同じ門)
-  const spans = scanContainers(next);
-  const last = spans[spans.length - 1];
-  if (last !== undefined && last.open) return null;
+  // 🔑 断る条件は `addPlace` と同じ 1 本(画面の側 = `CONNECT_PLACE` の門も同じ関数で理由を言う)
+  if (endsInsideOpenBlock(next)) return null;
   const block = `:::format{.pkc-line from=${fromSpell} to=${toSpell}}\n:::\n`;
   return next + (next.endsWith('\n') ? '\n' : '\n\n') + block;
 }

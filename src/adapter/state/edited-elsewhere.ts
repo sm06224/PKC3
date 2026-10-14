@@ -13,7 +13,10 @@
  * 呼び手(追記の口の全数。W5-d で数えた): 板の付箋の追記・題名(`binder.ts`)/ 本文の下の追記欄(`append-entry`)/
  * PDF の「ノートへ引く」(`quote-into-note.ts`)/ ブラウザの AI の `pkc_append_note`(`main.ts`)/
  * 予定タブの「足す」と目盛りの作成(`addScheduleItemChecked`、`binder.ts`)/
- * 履歴の「この版に戻す」(`restore-revision`、`binder.ts`。#1087)。
+ * 履歴の「この版に戻す」(`restore-revision`、`binder.ts`。#1087)/
+ * 塊を別のノートへ持っていく「⠿」(元と先の両方。`actUnlessEditedElsewhere`、#1087)/
+ * 表の行・列を消す「×」(`shape-cell`。足す回は通さない。#1087)。
+ * ⚠ 板の付箋のドラッグ移動・削除には足していない(離した直後の体感が変わるので、見え方の判断待ち)。
  * 通さない口(理由は設計 doc §6 W5-d): 計時の記録・文字起こし・添付のドロップ。
  */
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';

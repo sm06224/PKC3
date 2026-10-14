@@ -120,7 +120,13 @@ import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
 import type { TableFormat } from '@features/markdown/table-convert';
-import { endsInsideOpenBlock, isLineOpen, isPlaceOpen, placeEntryLids } from '@features/markdown/place-notation';
+import {
+  endsInsideOpenBlock,
+  isLineOpen,
+  isPlaceOpen,
+  placeBlockUnclosed,
+  placeEntryLids,
+} from '@features/markdown/place-notation';
 import { isPlaceStyle, type PlaceStyle } from '@features/markdown/place-color';
 import { isPlaceShape, type PlaceShape } from '@features/markdown/place-shape';
 import { isPlaceRectNumber, PLACE_RECT_KEYS, type PlaceRectValue } from '@features/markdown/place-rect';
@@ -2837,9 +2843,10 @@ export type UserAction =
       refusal?: string;
       /**
        * 🔴 **落とした時の目印**(#684 段④)── 書く直前に disk 側で突き合わせる。
-       * ⚠ 省略 = 突き合わせない(段②:落としたその場で撃つので待ち時間が無い)。
+       * ⚠ **必須**(#1087)── 段②(一覧の行)も、落としてから書くまでに別の窓が行を足せば、
+       *   番号は別の所を指す。省ける形にすると、送り手が渡し忘れても tsc が黙る。
        */
-      anchor?: InsertAnchor;
+      anchor: InsertAnchor;
     }
   /**
    * 🔴 **直前の塊の移動を元に戻す**(#684 段①。user 指示 2026-08-23「片道の操作を作らない」)。
@@ -2931,6 +2938,8 @@ export type UserAction =
       type: 'SET_CSV_SHAPE';
       lid: string;
       line: number;
+      /** 🔴 押した時点のその行の中身(#1087)。`SET_CSV_CELL` の `openLine` と同じ。 */
+      openLine: string;
       col: number;
       what: 'row' | 'col';
       mode: 'add' | 'remove';
@@ -2940,7 +2949,7 @@ export type UserAction =
    * ⚠ `line` は**原文の行番号**(押した表のどの行でもよい)── 書き換える範囲は
    *   `table-convert.ts` が原文から引く(呼び手に範囲を決めさせない)。
    */
-  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; to: TableFormat }
+  | { type: 'SET_TABLE_FORMAT'; lid: string; line: number; openLine: string; to: TableFormat }
   /**
    * 🔴 **繰り返しの「その回」を済ませる**(#344 段②)。
    * ⚠ `TOGGLE_TASK` と**単位が違う** ── 規則の行の印は動かさず、
@@ -7737,6 +7746,7 @@ function reduceCore(
             rewrite: {
               kind: 'csv-shape',
               line: action.line,
+              openLine: action.openLine,
               col: action.col,
               what: action.what,
               mode: action.mode,
@@ -7765,7 +7775,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'table-format', line: action.line, to: action.to },
+            rewrite: { kind: 'table-format', line: action.line, openLine: action.openLine, to: action.to },
           },
         ],
       };
@@ -8000,33 +8010,51 @@ function reduceCore(
      * 🔑 **2 枚とも**開き行を捕える ── 片方だけだと、もう片方が別の塊でも書ける。
      */
     case 'CONNECT_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板を線でつないでください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const from = placeOpenLineOf(shown, action.line);
-        const to = placeOpenLineOf(shown, action.toLine);
-        if (from === null || to === null) return null;
-        return {
-          kind: 'place-connect',
-          from: { line: action.line, openLine: from },
-          to: { line: action.toLine, openLine: to },
-          fromAnchor: action.fromAnchor,
-          toAnchor: action.toAnchor,
-        };
-      });
+      return openBlockRefused(
+        state,
+        action.lid,
+        PLACE_CONNECT_OPEN_REFUSAL,
+        (shown) => endsInsideOpenBlock(shown),
+        bodyRewriteGate(state, action.lid, '、板を線でつないでください', (shown) => {
+          if (shown === null) return null; // 画面に無い本文の行番号は信じない
+          const from = placeOpenLineOf(shown, action.line);
+          const to = placeOpenLineOf(shown, action.toLine);
+          if (from === null || to === null) return null;
+          return {
+            kind: 'place-connect',
+            from: { line: action.line, openLine: from },
+            to: { line: action.toLine, openLine: to },
+            fromAnchor: action.fromAnchor,
+            toAnchor: action.toAnchor,
+          };
+        }),
+      );
     case 'REMOVE_PLACE_LINE':
-      return bodyRewriteGate(state, action.lid, '、線を消してください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = lineOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-line-remove', line: action.line, openLine };
-      });
+      return openBlockRefused(
+        state,
+        action.lid,
+        PLACE_LINE_REMOVE_OPEN_REFUSAL,
+        (shown) => placeBlockUnclosed(shown, action.line),
+        bodyRewriteGate(state, action.lid, '、線を消してください', (shown) => {
+          if (shown === null) return null; // 画面に無い本文の行番号は信じない
+          const openLine = lineOpenLineOf(shown, action.line);
+          if (openLine === null) return null;
+          return { kind: 'place-line-remove', line: action.line, openLine };
+        }),
+      );
     case 'REMOVE_PLACE':
-      return bodyRewriteGate(state, action.lid, '、板の付箋を消してください', (shown) => {
-        if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        const openLine = placeOpenLineOf(shown, action.line);
-        if (openLine === null) return null;
-        return { kind: 'place-remove', line: action.line, openLine };
-      });
+      return openBlockRefused(
+        state,
+        action.lid,
+        PLACE_REMOVE_OPEN_REFUSAL,
+        (shown) => placeBlockUnclosed(shown, action.line),
+        bodyRewriteGate(state, action.lid, '、板の付箋を消してください', (shown) => {
+          if (shown === null) return null; // 画面に無い本文の行番号は信じない
+          const openLine = placeOpenLineOf(shown, action.line);
+          if (openLine === null) return null;
+          return { kind: 'place-remove', line: action.line, openLine };
+        }),
+      );
     case 'ADD_PLACE': {
       const gated = bodyRewriteGate(state, action.lid, '、板を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
@@ -8102,7 +8130,16 @@ function reduceCore(
         if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(toBefore)) return null;
         const lines = shown.split('\n');
         if (start < 0 || end < start || end >= lines.length) return null;
-        return { kind: 'move-lines', start, end, toBefore, lines: lines.slice(start, end + 1) };
+        // 🔴 落とし先の行の中身も捕える(#1087)── 行数と等しい `toBefore` は末尾(`null`)、それ以外は範囲外
+        if (toBefore < 0 || toBefore > lines.length) return null;
+        return {
+          kind: 'move-lines',
+          start,
+          end,
+          toBefore,
+          lines: lines.slice(start, end + 1),
+          toBeforeLine: lines[toBefore] ?? null,
+        };
       });
     /**
      * 🔴 **本文の塊を、別のノートへ持っていく**(#684 段③)。
@@ -8186,8 +8223,8 @@ function reduceCore(
                 kind: 'insert-lines',
                 toBefore: action.toBefore,
                 lines: action.lines,
+                anchor: action.anchor,
                 ...(action.batch === undefined ? {} : { batch: action.batch }),
-                ...(action.anchor === undefined ? {} : { anchor: action.anchor }),
               }
             : null,
       );
@@ -8227,6 +8264,7 @@ function reduceCore(
               end: last.end,
               toBefore: last.toBefore,
               lines: last.lines,
+              toBeforeLine: last.toBeforeLine,
             },
           },
         ],
@@ -10615,9 +10653,41 @@ export function screenBodyOf(state: AppState, lid: string): string | null {
   return state.splitBodies.get(lid) ?? null;
 }
 
+/**
+ * 🔴 閉じていない付箋・線は消せない ── 押した時点で言う断り(#1087)。
+ * ⚠ 言わないと「本文が変わっているため反映できませんでした(開き直してください)」と出て、**開き直しても直らない**。
+ */
+export const PLACE_REMOVE_OPEN_REFUSAL =
+  'この付箋のブロックが閉じていないため、消せません(ブロックを閉じてから消してください)';
+export const PLACE_LINE_REMOVE_OPEN_REFUSAL =
+  'この線のブロックが閉じていないため、消せません(ブロックを閉じてから消してください)';
+/** 末尾が閉じていないブロックの中へは線を足せない ── 押した時点で言う断り(#1087。`ADD_PLACE` と同じ作法)。 */
+export const PLACE_CONNECT_OPEN_REFUSAL =
+  '本文の最後のブロックが閉じていないため、線でつなげません(ブロックを閉じてからつないでください)';
+
 /** 末尾が閉じていないブロックの中へは板を置けない ── 押した時点で言う断り(#529)。 */
 export const PLACE_OPEN_BLOCK_REFUSAL =
   '本文の最後のブロックが閉じていないため、板を置けません(ブロックを閉じてから置いてください)';
+
+/**
+ * 🔴 **書換が通る見込みのときだけ、閉じていないブロックの理由を言う**(#1087。`ADD_PLACE` の門と同じ形)。
+ *
+ * ⚠ 書込側(`place-notation.ts`)も同じ条件で断るが、出る字は「本文が変わっているため…(開き直してください)」で、
+ *   **開き直しても直らない**。だから押した時点で本当の理由を言う。判定は書込側と**同じ関数**を渡す(§7)。
+ * ⚠ `gated.events` が空(編集中の断り・行が板でない)のときは**そちらの理由を残す**。
+ */
+function openBlockRefused(
+  state: AppState,
+  lid: string,
+  refusal: string,
+  unclosed: (shown: string) => boolean,
+  gated: ReduceResult,
+): ReduceResult {
+  if (gated.events.length === 0) return gated;
+  const shown = screenBodyOf(state, lid);
+  if (shown !== null && unclosed(shown)) return { state: { ...state, error: refusal }, events: [] };
+  return gated;
+}
 
 /**
  * 🔴 **画面の本文から組む書換が共通で通る門**(#283 P4-b → #676 → #684)。

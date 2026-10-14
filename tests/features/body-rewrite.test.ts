@@ -498,6 +498,9 @@ describe('取り込んだ外部画像を当てる(#264 段①)', () => {
  * 5. 🔴 掴んだ時点の行と byte 一致しなければ書かない(別の窓の書込で行がずれた形)
  * 6. 差し込み(`insert-lines`)は前後に空行を補い、fence / `:::` の中・frontmatter には入れない
  */
+/** 落とし先(`toBefore` 行目)の、その本文での中身。`null` = 末尾(#1087 の `toBeforeLine`)。 */
+const lineAt = (body: string, i: number): string | null => body.split('\n')[i] ?? null;
+
 describe('本文の塊を動かす(#684 段① move-lines)', () => {
   const RAW = [
     '---', //          0
@@ -585,7 +588,7 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
       const to = tRaw === -1 ? selfOf(g) : tRaw;
       const want = expected(g, to);
       it(`${gName} → ${tName}: ${want}`, () => {
-        const move = { kind: 'move-lines' as const, ...g, toBefore: to };
+        const move = { kind: 'move-lines' as const, ...g, toBefore: to, toBeforeLine: lineAt(RAW, to) };
         const out = applyBodyRewrite(RAW, move);
         if (want === 'null') {
           expect(out).toBeNull();
@@ -624,30 +627,30 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
 
   it('🔴 掴んだ時点の行と byte 一致しなければ書かない(別の窓の書き込みで行がずれた形)', () => {
     const shifted = RAW.replace('段落 A', '段落 A(別の窓が直した)');
-    expect(applyBodyRewrite(shifted, { kind: 'move-lines', ...range(5, 5), toBefore: 29 })).toBeNull();
+    expect(applyBodyRewrite(shifted, { kind: 'move-lines', ...range(5, 5), toBefore: 29, toBeforeLine: lineAt(RAW, 29) })).toBeNull();
     // 対照群 ── 一致していれば動く
-    expect(applyBodyRewrite(RAW, { kind: 'move-lines', ...range(5, 5), toBefore: 29 })).not.toBeNull();
+    expect(applyBodyRewrite(RAW, { kind: 'move-lines', ...range(5, 5), toBefore: 29, toBeforeLine: lineAt(RAW, 29) })).not.toBeNull();
     // 行数が合わない(範囲だけ広げた)荷物も断る
     expect(
-      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 6, toBefore: 29, lines: ['段落 A'] }),
+      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 6, toBefore: 29, lines: ['段落 A'], toBeforeLine: lineAt(RAW, 29) }),
     ).toBeNull();
   });
 
   it('🔴 掴んだ塊が(別の窓の書き込みで)囲いの中へ移っていたら書かない', () => {
     // 段落 A の上に閉じない fence が現れた ── 5 行目は同じ字だがコードの字である
     const swallowed = RAW.replace('# 題\n', '```\n');
-    expect(applyBodyRewrite(swallowed, { kind: 'move-lines', ...range(5, 5), toBefore: 29 })).toBeNull();
+    expect(applyBodyRewrite(swallowed, { kind: 'move-lines', ...range(5, 5), toBefore: 29, toBeforeLine: lineAt(RAW, 29) })).toBeNull();
   });
 
   it('範囲外・整数でない座標は null', () => {
     expect(
-      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 5, toBefore: 31, lines: ['段落 A'] }),
+      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 5, toBefore: 31, lines: ['段落 A'], toBeforeLine: null }),
     ).toBeNull();
     expect(
-      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 5, toBefore: 7.5, lines: ['段落 A'] }),
+      applyBodyRewrite(RAW, { kind: 'move-lines', start: 5, end: 5, toBefore: 7.5, lines: ['段落 A'], toBeforeLine: null }),
     ).toBeNull();
     expect(
-      applyBodyRewrite(RAW, { kind: 'move-lines', start: 40, end: 40, toBefore: 5, lines: [''] }),
+      applyBodyRewrite(RAW, { kind: 'move-lines', start: 40, end: 40, toBefore: 5, lines: [''], toBeforeLine: lineAt(RAW, 5) }),
     ).toBeNull();
   });
 
@@ -658,11 +661,11 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
    *   終端の空要素を消すと、戻したときに末尾の改行が 1 byte 消える。
    */
   it('🔴 最後の塊(章 C)を先頭へ動かして戻すと byte 一致で戻る(終端の改行を消さない)', () => {
-    const move = { kind: 'move-lines' as const, ...range(26, 29), toBefore: 5 };
+    const move = { kind: 'move-lines' as const, ...range(26, 29), toBefore: 5, toBeforeLine: lineAt(RAW, 5) };
     const moved = moveLinesWithInverse(RAW, move)!;
     expect(moved.body.endsWith('\n'), '動かした本文の末尾の改行が消えた').toBe(true);
     expect(applyBodyRewrite(moved.body, { kind: 'move-lines', ...moved.inverse! }), '元に戻らない').toBe(RAW);
-    const tiny = moveLinesWithInverse('A\n\nB\n', { start: 2, end: 2, toBefore: 0, lines: ['B'] })!;
+    const tiny = moveLinesWithInverse('A\n\nB\n', { start: 2, end: 2, toBefore: 0, lines: ['B'], toBeforeLine: 'A' })!;
     expect(tiny.body).toBe('B\n\nA\n');
     expect(applyBodyRewrite(tiny.body, { kind: 'move-lines', ...tiny.inverse! })).toBe('A\n\nB\n');
   });
@@ -671,7 +674,7 @@ describe('本文の塊を動かす(#684 段① move-lines)', () => {
     const tight = 'A\nB\nC\n';
     // B を末尾へ ── 抜いた所は A と C が隣り合う(元から詰まっている所は詰めたまま)
     expect(
-      applyBodyRewrite(tight, { kind: 'move-lines', start: 1, end: 1, toBefore: 3, lines: ['B'] }),
+      applyBodyRewrite(tight, { kind: 'move-lines', start: 1, end: 1, toBefore: 3, lines: ['B'], toBeforeLine: '' }),
     ).toBe('A\nC\n\nB\n');
   });
 });
@@ -710,45 +713,45 @@ describe('本文へ行を差し込む(#684 段② insert-lines)', () => {
   const LINK = ['[相手](entry:n2)'];
 
   it('先頭・塊の間・末尾に入り、前後に空行を補う', () => {
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 0, lines: LINK })).toBe(
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 0, lines: LINK, anchor: null })).toBe(
       `[相手](entry:n2)\n\n${DOC}`,
     );
     // 段落の後(空行 3 の前)── 前は「段落」なので空行を補い、後は元の空行を使う
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 3, lines: LINK })).toBe(
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 3, lines: LINK, anchor: null })).toBe(
       ['# 題', '', '段落', '', '[相手](entry:n2)', '', '```', 'code', '```', '', ':::note', '中', ':::', ''].join(
         '\n',
       ),
     );
     // 末尾(終端の改行の前)
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 11, lines: LINK })).toBe(
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 11, lines: LINK, anchor: null })).toBe(
       `${DOC.slice(0, -1)}\n\n[相手](entry:n2)\n`,
     );
   });
 
   it('複数行は 1 塊で入る(改行区切りのまま)', () => {
     const two = ['[あ](entry:a)', '[い](entry:b)'];
-    expect(applyBodyRewrite('段落\n', { kind: 'insert-lines', toBefore: 0, lines: two })).toBe(
+    expect(applyBodyRewrite('段落\n', { kind: 'insert-lines', toBefore: 0, lines: two, anchor: null })).toBe(
       '[あ](entry:a)\n[い](entry:b)\n\n段落\n',
     );
   });
 
   it('🔴 fence の中・::: の中・frontmatter・範囲外には入れない(null)', () => {
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 5, lines: LINK }), 'fence の中').toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 6, lines: LINK }), 'fence の閉じの前').toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 9, lines: LINK }), '::: の中').toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 10, lines: LINK }), '::: の閉じの前').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 5, lines: LINK, anchor: null }), 'fence の中').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 6, lines: LINK, anchor: null }), 'fence の閉じの前').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 9, lines: LINK, anchor: null }), '::: の中').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 10, lines: LINK, anchor: null }), '::: の閉じの前').toBeNull();
     // 対照群 ── 閉じの次の行(11)は外なので入る / 開きの前(8)も外
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 11, lines: LINK })).not.toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 8, lines: LINK })).not.toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 11, lines: LINK, anchor: null })).not.toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 8, lines: LINK, anchor: null })).not.toBeNull();
     expect(
-      applyBodyRewrite(`---\na: 1\n---\n${DOC}`, { kind: 'insert-lines', toBefore: 1, lines: LINK }),
+      applyBodyRewrite(`---\na: 1\n---\n${DOC}`, { kind: 'insert-lines', toBefore: 1, lines: LINK, anchor: null }),
     ).toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 13, lines: LINK }), '行数を超える').toBeNull();
-    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 0, lines: [] }), '空の並び').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 13, lines: LINK, anchor: null }), '行数を超える').toBeNull();
+    expect(applyBodyRewrite(DOC, { kind: 'insert-lines', toBefore: 0, lines: [], anchor: null }), '空の並び').toBeNull();
   });
 
   it('閉じていない fence の後ろは全部「中」', () => {
-    expect(applyBodyRewrite('```\ncode\n', { kind: 'insert-lines', toBefore: 2, lines: LINK })).toBeNull();
+    expect(applyBodyRewrite('```\ncode\n', { kind: 'insert-lines', toBefore: 2, lines: LINK, anchor: null })).toBeNull();
   });
 });
 

@@ -41,6 +41,12 @@ export interface MoveLines {
   readonly toBefore: number;
   /** 掴んだ時点の `start..end` の行そのもの ── disk 側と一致しなければ書かない。 */
   readonly lines: readonly string[];
+  /**
+   * 🔴 **落とし先の行(`toBefore` 行目)の、落とした時点の中身**(#1087)。`null` = 末尾(その行が無い)。
+   * ⚠ 掴んだ塊(`lines`)だけを突き合わせると、**落とし先**は番号のままで、別の窓が上へ行を足していれば
+   *   塊は**違う所**へ入る(`insert-lines` の `anchor` と同じ穴)。disk 側の `toBefore` 行目が byte 一致しなければ書かない。
+   */
+  readonly toBeforeLine: string | null;
 }
 
 /**
@@ -196,6 +202,7 @@ export interface MovedLines {
  * 門(どれか 1 つでも外れたら `null` = 断る):
  * - `start` / `end` / `toBefore` が整数で、`fm <= start <= end < 行数`、`fm <= toBefore <= 行数`
  * - `start..end` の行が `lines` と byte 一致(別の窓の書込で行がずれていない)
+ * - `toBefore` 行目が `toBeforeLine` と byte 一致(落とし先も、落とした時点の行のまま)
  * - `start` が囲いの中でない / `toBefore` が囲いの中でない(`insertionBlocked`)
  *
  * 🔑 `toBefore` が `start..end+1` の中なら**取りやめ** ── `body` をそのまま返す。
@@ -215,6 +222,8 @@ export function moveLinesWithInverse(body: string, move: MoveLines): MovedLines 
   //    1 byte も変わらないので、「開き直してください」の赤帯を出す理由が無い
   if (toBefore >= start && toBefore <= end + 1) return { body, inverse: null };
   if (insertionBlocked(body, toBefore)) return null;
+  // 🔴 落とし先の行が、落とした時点の字のままか(`insertionBlocked` が `toBefore <= 行数` を保証済み)
+  if ((all[toBefore] ?? null) !== move.toBeforeLine) return null;
 
   const { chunk, from, to, rest } = cutChunk(all, fm, start, end);
   const removed = to - from + 1;
@@ -229,7 +238,14 @@ export function moveLinesWithInverse(body: string, move: MoveLines): MovedLines 
     inverse:
       next === body
         ? null
-        : { start: placed.start, end: placed.start + chunk.length - 1, toBefore: back, lines: chunk },
+        : {
+            start: placed.start,
+            end: placed.start + chunk.length - 1,
+            toBefore: back,
+            lines: chunk,
+            // 戻す先は「いま入った後の本文」の `back` 行目(`next` を基底に撃つ)
+            toBeforeLine: placed.lines[back] ?? null,
+          },
   };
 }
 

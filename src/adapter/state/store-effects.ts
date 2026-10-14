@@ -3745,7 +3745,7 @@ export function connectStoreEffects(
               type: 'BODY_REWRITTEN',
               lid: ev.to.lid,
               body: newTo,
-              rewrite: { kind: 'insert-lines', toBefore: at, lines: cut.chunk },
+              rewrite: { kind: 'insert-lines', toBefore: at, lines: cut.chunk, anchor: ev.to.anchor ?? null },
               /**
                * 🔴 **「元に戻す」の材料は入れない**(#684 段③)。
                * ⚠ 入れると、行き先で「元に戻す」を押した user が**塊を消す**ことになる

@@ -330,7 +330,7 @@ describe('#1051 ── 追記 / 元に戻す 2 つ / 外部画像の取り込み
     },
     {
       name: 'UNDO_MOVE',
-      arm: (s, lid) => ({ ...s, lastMove: { lid, start: 0, end: 1, toBefore: 2, lines: ['a'] } }),
+      arm: (s, lid) => ({ ...s, lastMove: { lid, start: 0, end: 1, toBefore: 2, lines: ['a'], toBeforeLine: null } }),
       action: () => ({ type: 'UNDO_MOVE' }),
       passed: (ev) => ev['type'] === 'REQUEST_BODY_REWRITE' && rewriteOf(ev) === 'move-lines',
       suffix: '移動を元に戻してください',

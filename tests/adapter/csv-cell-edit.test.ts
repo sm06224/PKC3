@@ -7,7 +7,8 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { resetCellChains } from '../../src/adapter/state/shown-line';
+import { resetCellChains, SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
+import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 
 /**
@@ -231,7 +232,7 @@ describe('行・列の口を押す(#418 段①)', () => {
     bindActions(root, dispatcher, {});
     btn.click();
     expect(dispatched).toEqual([
-      { type: 'SET_CSV_SHAPE', lid: 'n1', line: 1, col: 0, what: 'row', mode: 'add' },
+      { type: 'SET_CSV_SHAPE', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, what: 'row', mode: 'add' },
     ]);
   });
 
@@ -263,8 +264,84 @@ describe('行・列の口を押す(#418 段①)', () => {
     bindActions(root, dispatcher, {});
     btn.click();
     expect(dispatched).toEqual([
-      { type: 'SET_CSV_SHAPE', lid: 'other', line: 1, col: 0, what: 'row', mode: 'add' },
+      { type: 'SET_CSV_SHAPE', lid: 'other', line: 1, openLine: CSV_LINE, col: 0, what: 'row', mode: 'add' },
     ]);
+  });
+
+  /**
+   * 🔴 **押した時点のその行の中身を運ぶ**(#1087)。⚠ 行番号だけだと、別のタブが上へ行を足したあと、
+   *   古い表示から押した「消す」が 1 行上の行を消す。運ぶのは**画面の本文の行**(押した面の置き場から引く)。
+   */
+  it('🔴 押した行の中身を、画面の本文から引いて運ぶ(印に焼いた字ではない)', () => {
+    const { root, btn } = shapeRoot();
+    const { dispatcher, dispatched } = fake();
+    bindActions(root, dispatcher, {});
+    btn.click();
+    expect(dispatched[0]).toMatchObject({ type: 'SET_CSV_SHAPE', openLine: CSV_LINE });
+    expect(CSV_LINE, '台の前提:行の中身が空ではない').not.toBe('');
+  });
+
+  it('🔴 行の中身を引けなければ、撃たずに理由を出す(空文字を運ぶと「本文が変わっている」と嘘を言う)', () => {
+    const { root, btn } = shapeRoot();
+    btn.setAttribute('data-pkc-cell-line', '99'); // 画面の本文に無い行
+    const { dispatcher, dispatched } = fake();
+    bindActions(root, dispatcher, {});
+    btn.click();
+    expect(dispatched.filter((a) => a['type'] === 'SET_CSV_SHAPE'), '引けないのに撃った').toHaveLength(0);
+    expect(dispatched).toEqual([{ type: 'OP_FAILED', error: SHOWN_LINE_LOST }]);
+  });
+
+  /**
+   * 🔴 **消す回は、別のタブ・窓が編集中なら断る**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+   * ⚠ 通すと、編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回は従来どおり(問い合わせない)。
+   */
+  describe('消す回は別のタブの編集を確かめる', () => {
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+    const press = (mode: 'add' | 'remove', grant: 'granted' | 'denied' | 'unreachable') => {
+      const { root, btn } = shapeRoot();
+      btn.setAttribute('data-pkc-cell-mode', mode);
+      const { dispatcher, dispatched } = fake();
+      const asked: string[] = [];
+      const released: string[] = [];
+      bindActions(root, dispatcher, {
+        acquireEditLock: async (lid: string) => {
+          asked.push(lid);
+          return grant;
+        },
+        releaseEditLock: (lid: string) => void released.push(lid),
+      });
+      btn.click();
+      return { dispatched, asked, released };
+    };
+
+    it('🔴 別のタブが握っていたら、消さずに理由を出す', async () => {
+      const r = press('remove', 'denied');
+      await tick();
+      expect(r.asked, '問い合わせていない').toEqual(['n1']);
+      expect(r.dispatched.filter((a) => a['type'] === 'SET_CSV_SHAPE'), '握られているのに消した').toHaveLength(0);
+      expect(r.dispatched).toEqual([{ type: 'OP_FAILED', error: EDIT_ELSEWHERE_ERROR }]);
+    });
+
+    it('対照群:握られていなければ消す(錠は返す)', async () => {
+      const r = press('remove', 'granted');
+      await tick();
+      expect(r.dispatched).toEqual([
+        { type: 'SET_CSV_SHAPE', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, what: 'row', mode: 'remove' },
+      ]);
+      expect(r.released, '取った錠を返していない').toEqual(['n1']);
+    });
+
+    it('通信できない(unreachable)ときは断らない ── 別の事実なので新しい断りを足さない', async () => {
+      const r = press('remove', 'unreachable');
+      await tick();
+      expect(r.dispatched.map((a) => a['type'])).toEqual(['SET_CSV_SHAPE']);
+    });
+
+    it('⚠ 足す回は問い合わせない(消す回だけの門)', () => {
+      const r = press('add', 'denied');
+      expect(r.asked).toEqual([]);
+      expect(r.dispatched.map((a) => a['type'])).toEqual(['SET_CSV_SHAPE']);
+    });
   });
 
   it('⚠ 向きが読めない印は撃たない(壊れた属性で当てずっぽうに書かない)', () => {
