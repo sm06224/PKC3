@@ -17,6 +17,7 @@ import { readArchive, writeArchive } from '../../src/features/export/pkc3-archiv
 import { readAssetSource } from '../../src/features/import/zip-reader';
 import {
   collectRescued,
+  collectRescuedExtras,
   rebuildContainer,
   rebuildDoneMessage,
   rebuildExplainMessage,
@@ -25,7 +26,12 @@ import {
   type RebuildPorts,
   type RescuedRow,
 } from '../../src/features/storage/container-rebuild';
-import type { RescuePageLike } from '../../src/features/storage/rescue-archive';
+import {
+  RESCUE_IDLE_PAGE_LIMIT,
+  type RescuedRelation,
+  type RescuedRevision,
+  type RescuePageLike,
+} from '../../src/features/storage/rescue-archive';
 
 const NOW = '2026-09-18T00:00:00.000Z';
 
@@ -81,12 +87,68 @@ function harness(
     failReopen?: string;
     assets?: Map<string, Blob>;
     skippedPerPage?: number;
+    /** 🔑 壊れた DB から拾えるつながり・履歴・色（#1087）。 */
+    relations?: readonly RescuedRelation[];
+    revisions?: readonly RescuedRevision[];
+    tagColors?: Array<{ tag: string; color: string }>;
+    /** つながり・履歴の拾い出しで読めない区画がある。 */
+    extrasSkipped?: number;
   } = {},
-): { ports: RebuildPorts; calls: string[]; written: () => readonly { lid: string }[] } {
+): {
+  ports: RebuildPorts;
+  calls: string[];
+  written: () => readonly { lid: string }[];
+  /** 書き戻した物（#1087）。 */
+  wrote: {
+    relations: RescuedRelation[];
+    chains: Map<string, readonly RescuedRevision[]>;
+    assetMetas: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }>;
+    tagColors: Array<{ tag: string; color: string }>;
+  };
+} {
+  const wrote: {
+    relations: RescuedRelation[];
+    chains: Map<string, readonly RescuedRevision[]>;
+    assetMetas: Array<{ key: string; mime: string | null; size: number | null; hash: string | null }>;
+    tagColors: Array<{ tag: string; color: string }>;
+  } = { relations: [], chains: new Map(), assetMetas: [], tagColors: [] };
+  const onePage =
+    <R,>(rows: readonly R[]) =>
+    async (after: number) => ({
+      rows: after === 0 ? rows : [],
+      lastRowid: 1,
+      skipped: after === 0 ? (over.extrasSkipped ?? 0) : 0,
+      empty: 0,
+      maxRowid: 1,
+      done: true,
+    });
   const calls: string[] = [];
   let written: readonly { lid: string }[] = [];
   const idb = over.assets;
   const ports: RebuildPorts = {
+    pickRelations: onePage(over.relations ?? []),
+    pickRevisions: onePage(over.revisions ?? []),
+    readTagColors: async () => {
+      calls.push('readTagColors');
+      return over.tagColors ?? [];
+    },
+    writeRelations: async (_cid, relations) => {
+      calls.push('writeRelations');
+      wrote.relations = [...relations];
+    },
+    writeRevisions: async (_cid, chains) => {
+      calls.push('writeRevisions');
+      wrote.chains = new Map(chains);
+      return { added: [...chains.values()].reduce((n, c) => n + c.length, 0), broken: 0 };
+    },
+    writeAssetMetas: async (_cid, metas) => {
+      calls.push('writeAssetMetas');
+      wrote.assetMetas = [...metas];
+    },
+    writeTagColors: async (_cid, colors) => {
+      calls.push('writeTagColors');
+      wrote.tagColors = [...colors];
+    },
     pick: fakePick({
       ...(over.rows === undefined ? {} : { rows: over.rows }),
       ...(over.skippedPerPage === undefined ? {} : { skippedPerPage: over.skippedPerPage }),
@@ -142,7 +204,7 @@ function harness(
       calls.push('announceWiped');
     },
   };
-  return { ports, calls, written: () => written };
+  return { ports, calls, written: () => written, wrote };
 }
 
 describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
@@ -179,10 +241,17 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
       (c) => !c.startsWith('openContainer') && !c.startsWith('progress:'),
     );
     expect(order).toEqual([
+      // 🔴 色は捨てる前に読む（#1087。捨てた後の DB からは読めない）
+      'readTagColors',
       'saveArchive',
       'wipeStorage',
       'reopenStorage',
       'writeEntries:c-old:3',
+      // 🔴 つながり・履歴・添付の登録行・色は、ノートの後（#1087）
+      'writeRelations',
+      'writeRevisions',
+      'writeAssetMetas',
+      'writeTagColors',
       'announceWiped',
     ]);
   });
@@ -379,21 +448,24 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
   });
 
   /**
-   * 🔴 **押す前の窓と、終わった後の字が、同じ語で戻らない物を言う**(§7)。
+   * 🔴 **戻らない物の一覧は、いまは空である**(#1087）。
    *
-   * ⚠ 呼び名を 2 か所に手で書くと、片方だけ直した日に user は
-   *   「**別の物も消えた**」と読む ── だから `REBUILD_LOST` から引かせて、
-   *   ここで**両側に届いていること**を見る。
+   * ⚠ 「どのフォルダに入っていたか / つながり / 履歴」は、索引だけ壊れた DB なら表走査で読める
+   *   （2026-10-14 実測）ので、読めた分は戻す。空に戻したのが偽りでないことは、
+   *   下の「つながり・履歴・色が戻る」と、マニュアルの表との等値（docs-parity）が見ている。
+   * ⚠ 一覧に何か戻したら、押す前の窓と終わった後の字の**両方**がその語を言うこと。
    */
   it('🔴 戻らない物の呼び名が、押す前の窓と終わった後の字で揃っている', async () => {
-    // ⚠ 空振り防止 ── 一覧が空なら、下の for は 1 度も回らない
-    expect(REBUILD_LOST.length, '戻らない物の一覧が空').toBeGreaterThan(0);
     const before = rebuildExplainMessage({ notes: 3, assetsOnDisk: 2 });
     const after = rebuildDoneMessage(await rebuildContainer('c-old', 't', harness().ports));
     for (const lost of REBUILD_LOST) {
       expect(before, `押す前の窓が「${lost}」を言っていない`).toContain(lost);
       expect(after, `終わった後の字が「${lost}」を言っていない`).toContain(lost);
     }
+    // 🔑 空のとき「戻らないもの」の節を出さない（見出しだけが残る字にしない）
+    if (REBUILD_LOST.length === 0) expect(before).not.toContain('戻らないもの');
+    // 読めた分は戻ることを、押す前に言う
+    expect(before, '読めた分が戻ることを言っていない').toContain('読めた分');
   });
 
   /**
@@ -494,6 +566,10 @@ describe('🔴 捨てた後に落ちた回(#1006)', () => {
       outcome: 'storage-lost',
       rescued: { entries: 3, skipped: 0, empty: 0, bodyMissing: 0, assets: 0, assetBytes: 0, assetMissing: 0 },
       restored: 0,
+      relationsRestored: 0,
+      revisionsRestored: 0,
+      extrasPartial: false,
+      tagColorsRestored: 0,
       wiped: true,
       note: null,
       fallbackReason: null,
@@ -509,28 +585,266 @@ describe('🔴 捨てた後に落ちた回(#1006)', () => {
 });
 
 /**
- * 🔴 **戻ってきた画面がどう見えるかを、押す前に言う**(#1006 の動線レビューが出した)。
+ * 🔴 **戻った後の見え方を、先に言う**（#1006 → #1087）。
  *
- * ⚠ 「どのフォルダに入っていたか は戻りません」だけだと、user が意味を知るのは
- *   **戻った画面を見たとき**である ── そして**全部が根元に平らに並んだ画面**は、
- *   「直った」ではなく「**壊れた**」と読める。
- * ⚠ マニュアルには書いてあったが、**この窓だけを見て押す人**には届かない。
+ * ⚠ 以前は「全部が根元に平らに並ぶ」画面になるため、押す前にそう言っていた（#1006 の動線レビュー）。
+ *   つながりを拾って戻すようになったので、平らになるのは**読めなかった分だけ**になった。
+ *   ⚠ 字を残すと戻った画面と食い違うので、**読めない分は戻らない**ことを言う形に変えた。
  */
-describe('🔴 戻った後の見え方を、先に言う(#1006)', () => {
-  it('🔴 押す前の窓が「フォルダの外に並ぶ」と言う', () => {
+describe('🔴 戻った後の見え方を、先に言う（#1087）', () => {
+  it('🔴 押す前の窓が「読めない所があるときは戻らない」と言い、平らに並ぶとは言わない', () => {
     const m = rebuildExplainMessage({ notes: 3, assetsOnDisk: 0 });
-    expect(m, 'フォルダの外に並ぶことを言っていない').toContain('フォルダの外');
-    expect(m, 'フォルダそのものが残ることを言っていない').toContain('フォルダそのものは空で残ります');
+    expect(m, '読めない分が戻らないことを言っていない').toContain('その分は戻りません');
+    expect(m, '戻った画面と食い違う字が残っている').not.toContain('フォルダの外の一覧にまとめて');
   });
 
-  it('🔴 終わった後の字も、同じことを言う', async () => {
-    const line = rebuildDoneMessage(await rebuildContainer('c-old', 't', harness().ports));
-    expect(line, '戻った画面の見え方を言っていない').toContain('フォルダの外');
+  it('🔴 読めない区画があったとき、終わった後の字が「戻っていない」と言う（対照群つき）', async () => {
+    const partial = rebuildDoneMessage(
+      await rebuildContainer('c-old', 't', harness({ extrasSkipped: 2 }).ports),
+    );
+    expect(partial, '読めなかったつながり・履歴を黙っている').toContain('その分は戻っていません');
+    const clean = rebuildDoneMessage(await rebuildContainer('c-old', 't', harness().ports));
+    expect(clean, '全部読めたのに「戻っていない」と言っている').not.toContain('戻っていません');
   });
 
   it('🔴 押す前の窓が「途中で止められない」と言う', () => {
     expect(rebuildExplainMessage({ notes: 1, assetsOnDisk: 0 })).toContain(
       '途中で止めることはできません',
     );
+  });
+});
+
+const REL: RescuedRelation = {
+  rowid: 1,
+  cid: 'c-old',
+  id: 'r1',
+  fromLid: 'a1',
+  toLid: 'b2',
+  kind: 'structural',
+};
+const REV = (over: Partial<RescuedRevision>): RescuedRevision => ({
+  rowid: 1,
+  cid: 'c-old',
+  entryLid: 'a1',
+  revOrder: 1,
+  createdAt: '2026-09-01T00:00:00.000Z',
+  title: '牛乳を買う',
+  archetype: 'text',
+  kind: 'full',
+  snapshot: '古い本文',
+  contentHash: null,
+  ...over,
+});
+
+/**
+ * 🔴 **つながり・履歴・添付の登録行・タグの色が、作り直しの後に戻る**（#1087）。
+ *
+ * ⚠ 作り直しは sqlite を丸ごと捨てる。ノートだけを書き戻していたので、
+ *   ①添付の登録行（bytes は IndexedDB に残る）②タグの色（`settings` 表）③つながり・履歴は
+ *   **黙って消えていた**。画面は「添付 N 件はそのまま残っています」と言っていた。
+ */
+describe('🔴 つながり・履歴・添付の登録行・色が戻る（#1087）', () => {
+  it('🔴 添付の登録行を、IndexedDB に残った bytes から組み直す（hash は null）', async () => {
+    const h = harness({
+      assets: new Map([
+        ['k1', new Blob(['PNGBYTES'], { type: 'image/png' })],
+        ['k2', new Blob(['xyz'])],
+      ]),
+    });
+    await rebuildContainer('c-old', 't', h.ports);
+    expect(h.wrote.assetMetas, '登録行を戻していない（バックアップに添付が 0 件で出る）').toEqual([
+      { key: 'k1', mime: 'image/png', size: 8, hash: null },
+      // ⚠ 型が分からない物は null（でっち上げない）
+      { key: 'k2', mime: null, size: 3, hash: null },
+    ]);
+  });
+
+  it('🔴 捨てる前に読んだ色を、そのまま戻す', async () => {
+    const colors = [{ tag: '仕事', color: '#ff0000' }];
+    const h = harness({ tagColors: colors });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(h.wrote.tagColors).toEqual(colors);
+    expect(r.tagColorsRestored).toBe(1);
+    // 🔑 読むのは捨てる前
+    expect(h.calls.indexOf('readTagColors')).toBeLessThan(h.calls.indexOf('wipeStorage'));
+  });
+
+  it('🔴 色が読めなくても、建て直しは止めない', async () => {
+    const h = harness();
+    const ports: RebuildPorts = {
+      ...h.ports,
+      readTagColors: async () => {
+        throw new Error('settings が読めません');
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(r.tagColorsRestored).toBe(0);
+  });
+
+  it('🔴 つながり・履歴を戻し、件数を字で言う', async () => {
+    const h = harness({
+      relations: [REL],
+      // ⚠ 拾う順（行番号順）は古い → 新しい ── 保存形（新しい → 古い）への並べ直しを見る
+      revisions: [REV({ rowid: 1, revOrder: 1, snapshot: 'もっと古い' }), REV({ rowid: 2, revOrder: 2 })],
+    });
+    const r = await rebuildContainer('c-old', 't', h.ports);
+    expect(h.wrote.relations.map((x) => x.id)).toEqual(['r1']);
+    // 🔑 鎖は保存形の並び（新しい → 古い）
+    expect([...(h.wrote.chains.get('a1') ?? [])].map((x) => x.revOrder)).toEqual([2, 1]);
+    expect(r.relationsRestored).toBe(1);
+    expect(r.revisionsRestored).toBe(2);
+    const line = rebuildDoneMessage(r);
+    expect(line).toContain('つながり 1 件');
+    expect(line).toContain('履歴 2 版');
+    expect(r.extrasPartial).toBe(false);
+  });
+
+  it('🔴 拾ったつながり・履歴は、zip にも入る（保険の zip が先に落ちるので）', async () => {
+    let blob: Blob | null = null;
+    const h = harness({ relations: [REL], revisions: [REV({})] });
+    const ports: RebuildPorts = {
+      ...h.ports,
+      saveArchive: async (source) => {
+        blob = (await writeArchive(source, NOW)).blob;
+      },
+    };
+    await rebuildContainer('c-old', 't', ports);
+    const got = await readArchive(blob!);
+    expect(got.relations.map((x) => x.id), 'つながりが zip に入っていない').toEqual(['r1']);
+    expect(got.revisions?.length ?? 0, '履歴が zip に入っていない').toBeGreaterThan(0);
+  });
+
+  it('🔴 器の id が違う行・拾えなかったノートに付く行は、戻さない（宙に浮くので）', async () => {
+    const h = harness({
+      relations: [
+        REL,
+        { ...REL, id: 'other-cid', cid: 'someone-else' },
+        { ...REL, id: 'dangling', toLid: 'ghost' },
+      ],
+      revisions: [REV({}), REV({ rowid: 2, entryLid: 'ghost' }), REV({ rowid: 3, cid: 'x' })],
+    });
+    await rebuildContainer('c-old', 't', h.ports);
+    expect(h.wrote.relations.map((x) => x.id)).toEqual(['r1']);
+    expect([...h.wrote.chains.keys()]).toEqual(['a1']);
+    expect(h.wrote.chains.get('a1')).toHaveLength(1);
+  });
+
+  it('🔴 つながり・履歴の書き戻しが落ちたら write-failed（黙って減らさない）', async () => {
+    const h = harness({ relations: [REL] });
+    const ports: RebuildPorts = {
+      ...h.ports,
+      writeRelations: async () => {
+        throw new Error('relations が書けません');
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('write-failed');
+    expect(r.error).toContain('relations');
+  });
+
+  it('⚠ つながりの拾い出しが丸ごと落ちても、ノートは戻し、読めなかったと言う', async () => {
+    const h = harness();
+    const ports: RebuildPorts = {
+      ...h.ports,
+      pickRelations: async () => {
+        throw new Error('読めません');
+      },
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(r.restored).toBe(3);
+    expect(r.extrasPartial).toBe(true);
+  });
+});
+
+/**
+ * 🔴 **最大の行番号が読めないほど壊れた DB でも、拾い出しは終わる**（#1087）。
+ *
+ * ⚠ `maxRowid` が `null` のままだと `done` が永久に立たず、位置だけが進み続けて
+ *   「作り直す」も壊れたときのバックアップも**進捗の表示のまま固まっていた**。
+ */
+describe('🔴 拾い出しが終わらない形を打ち切る（#1087）', () => {
+  const endless = (calls: { n: number }) => async (after: number) => {
+    calls.n += 1;
+    // 必ず前へ進むが、何も拾えず、最大の行番号も分からず、終わらない
+    return { rows: [], lastRowid: after + 4000, skipped: 1, empty: 19, maxRowid: null, done: false };
+  };
+
+  it('🔴 collectRescued は有限回で終わり、打ち切ったことが結果に出る', async () => {
+    const calls = { n: 0 };
+    const r = await collectRescued(endless(calls));
+    expect(calls.n, '打ち切っていない（無限に回る形）').toBe(RESCUE_IDLE_PAGE_LIMIT);
+    expect(r.truncated, '打ち切ったことが結果に出ていない').toBe(true);
+    expect(r.rows).toEqual([]);
+  });
+
+  it('⚠ 対照群 ── 途中で拾えた回があれば、数え直す（拾えている相手を切らない）', async () => {
+    let n = 0;
+    const r = await collectRescued(async (after) => {
+      n += 1;
+      // 49 回空 → 1 回拾える → また 49 回空 …… を 3 周 → 最後は done
+      const hit = n % 50 === 0;
+      return {
+        rows: hit ? [{ rowid: after + 1, lid: `l${n}`, title: 't', archetype: 'text', body: 'b' }] : [],
+        lastRowid: after + 4000,
+        skipped: 0,
+        empty: 0,
+        maxRowid: n >= 150 ? 150 * 4000 : null,
+        done: n >= 150,
+      };
+    });
+    expect(r.truncated, '拾えている相手を打ち切った').toBe(false);
+    expect(r.rows.length).toBe(3);
+  });
+
+  it('⚠ 対照群 ── 最大の行番号が読めているときは、空の周が続いても数えない（done が終わらせる）', async () => {
+    let n = 0;
+    const r = await collectRescued(async (after) => {
+      n += 1;
+      return {
+        rows: [],
+        lastRowid: after + 4000,
+        skipped: 0,
+        empty: 20,
+        maxRowid: 400_000,
+        done: n >= 100,
+      };
+    });
+    expect(r.truncated, '読めている DB を切った').toBe(false);
+    expect(n).toBe(100);
+  });
+
+  it('🔴 つながり・履歴の拾い出しも、同じ守りで終わる', async () => {
+    const calls = { n: 0 };
+    const stub = endless(calls);
+    const x = await collectRescuedExtras('c', new Set(['a']), { relations: stub, revisions: stub });
+    expect(calls.n, 'どちらかが打ち切っていない').toBe(RESCUE_IDLE_PAGE_LIMIT * 2);
+    expect(x.truncated).toBe(true);
+  });
+
+  it('🔴 作り直しは打ち切っても進み、字で言う', async () => {
+    const calls = { n: 0 };
+    const h = harness();
+    const stuck = endless(calls);
+    const ports: RebuildPorts = {
+      ...h.ports,
+      // 最初の周だけ 3 件拾え、その後は最大の行番号が読めないまま何も出ない
+      pick: async (after) =>
+        after === 0
+          ? {
+              rows: THREE.map((r, i) => ({ rowid: i + 1, ...r })),
+              lastRowid: 4000,
+              skipped: 0,
+              empty: 0,
+              maxRowid: null,
+              done: false,
+            }
+          : stuck(after),
+    };
+    const r = await rebuildContainer('c-old', 't', ports);
+    expect(r.outcome).toBe('rebuilt');
+    expect(r.rescued.truncated).toBe(true);
+    expect(rebuildDoneMessage(r)).toContain('途中で打ち切りました');
   });
 });

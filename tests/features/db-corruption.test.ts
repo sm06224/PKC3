@@ -152,6 +152,9 @@ describe('止める op の仕分け(#971)', () => {
     //    何も取り出せなくなる。⚠ `rescueEntries` は読むだけ(`SELECT … NOT INDEXED`)
     'checkIntegrity',
     'rescueEntries',
+    // つながりと履歴の拾い出し(#1087)── 読むだけ。同じ理由で止めない
+    'rescueRelations',
+    'rescueRevisions',
     // 起動の検めの計画(#1007 段①)── 読むだけ(印と表の一覧)
     'integrityPlan',
     // 保存領域の太り具合(#999 段①)── 読むだけの数字(`checkIntegrity` と同じ扱い。

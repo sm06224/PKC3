@@ -2687,6 +2687,73 @@ function runImageExport<T>(
   }
 }
 
+/**
+ * 🔴 **壊れていても読める分だけ拾う、共通の走査**(#971 段③ / #1087)。
+ *
+ * ⚠ **表名は呼び側の定数だけ**(user の字を SQL に通さない)。⚠ 必ず `NOT INDEXED`。
+ * ⚠ **落ちた区画は飛ばして次へ進む**。⚠ `got`(区画に何か在ったか)は **raw の行数** ──
+ *   呼び側が `take` で除外しても数え直さない(壊れの診断を汚さない)。
+ */
+function rescueScan(
+  database: Database,
+  opts: {
+    readonly table: 'entries' | 'relations' | 'revisions';
+    readonly columns: string;
+    readonly afterRowid: number | undefined;
+    readonly chunks: number | undefined;
+    readonly take: (r: unknown[]) => void;
+  },
+): { lastRowid: number; skipped: number; empty: number; maxRowid: number | null; done: boolean } {
+  const after = Math.max(0, Math.floor(opts.afterRowid ?? 0));
+  const chunks = Math.max(1, Math.min(Math.floor(opts.chunks ?? 20), 200));
+  /**
+   * ⚠ 読めなければ `null` ── 進み具合が出せないだけで、拾うのは続けられる。
+   * ⚠ `catch` で `null` を代入し直さない(初期値のまま) ── lint が
+   *   「使われない代入」として落とす。
+   * 🔴 `null` のままだと `done` が立たない ── 呼び側(`collectRescued` など)が
+   *   「何も拾えない周が続いたら打ち切る」で守る(#1087)。
+   */
+  let maxRowid: number | null = null;
+  try {
+    const v = database.selectValue(`SELECT max(rowid) FROM ${opts.table} NOT INDEXED`);
+    maxRowid = v === null || v === undefined ? 0 : Number(v);
+  } catch {
+    /* 読めない = 進み具合を出さない(拾うのは続ける) */
+  }
+  let skipped = 0;
+  let empty = 0;
+  let lo = after + 1;
+  for (let c = 0; c < chunks; c += 1) {
+    const hi = lo + RESCUE_CHUNK - 1;
+    let got = 0;
+    try {
+      database.exec({
+        sql: `SELECT ${opts.columns} FROM ${opts.table} NOT INDEXED WHERE rowid BETWEEN ? AND ?`,
+        bind: [lo, hi],
+        rowMode: 'array',
+        callback: (r: unknown[]): void => {
+          got += 1;
+          opts.take(r);
+        },
+      });
+    } catch {
+      // ⚠ ここで throw しない ── 飛ばして先へ進むのが、この op の存在理由である
+      skipped += 1;
+    }
+    if (got === 0) empty += 1;
+    lo = hi + 1;
+    if (maxRowid !== null && lo > maxRowid) break;
+  }
+  const lastRowid = lo - 1;
+  return {
+    lastRowid,
+    skipped,
+    empty,
+    maxRowid,
+    done: maxRowid !== null && lastRowid >= maxRowid,
+  };
+}
+
 const handlers: Handlers = {
   init: (req) => init(req.dbName, req.journalMode, { memory: req.memory, image: req.image }),
   /**
@@ -4607,74 +4674,96 @@ const handlers: Handlers = {
    */
   rescueEntries: (req) => {
     const database = need();
-    const after = Math.max(0, Math.floor(req.afterRowid ?? 0));
-    const chunks = Math.max(1, Math.min(Math.floor(req.chunks ?? 20), 200));
-    /**
-     * ⚠ 読めなければ `null` ── 進み具合が出せないだけで、拾うのは続けられる。
-     * ⚠ `catch` で `null` を代入し直さない(初期値のまま) ── lint が
-     *   「使われない代入」として落とす。
-     */
-    let maxRowid: number | null = null;
-    try {
-      const v = database.selectValue('SELECT max(rowid) FROM entries NOT INDEXED');
-      maxRowid = v === null || v === undefined ? 0 : Number(v);
-    } catch {
-      /* 読めない = 進み具合を出さない(拾うのは続ける) */
-    }
     const rows: ResultMap['rescueEntries']['rows'] = [];
-    let skipped = 0;
-    let empty = 0;
-    let lo = after + 1;
-    for (let c = 0; c < chunks; c += 1) {
-      const hi = lo + RESCUE_CHUNK - 1;
-      let got = 0;
-      try {
-        /**
-         * 🔴 **拾い出しは system 領域のノートを出さない**(設計 doc §1.1、段①)。
-         *
-         * ⚠ **`WHERE` へは足さない** ── `got`(= 区画に何か在ったか)は
-         *   「空だった区画」という**壊れの診断**(`rescue-archive.ts` の
-         *   `miss.push`)に使われる。system のノートだけが並ぶ区画を `WHERE` で
-         *   落とすと、**壊れていないのに「空だった」と誤って数える**ことになる
-         *   (CLAUDE.md §1「後条件は確かめた事実の上にだけ書く」の逆 ── ここでは
-         *   「診断の材料を、除外の都合で減らさない」)。
-         * 🔑 だから **`got` は raw の行数のまま**、**`rows` へ積む段だけ**で選ぶ。
-         */
-        database.exec({
-          sql: `SELECT rowid, cid, lid, title, archetype, body, realm FROM entries NOT INDEXED
-                 WHERE rowid BETWEEN ? AND ?`,
-          bind: [lo, hi],
-          rowMode: 'array',
-          callback: (r: unknown[]): void => {
-            got += 1;
-            if (r[6] !== 'user') return;
-            rows.push({
-              rowid: Number(r[0]),
-              cid: String(r[1]),
-              lid: String(r[2]),
-              title: String(r[3]),
-              archetype: String(r[4]),
-              body: String(r[5] ?? ''),
-            });
-          },
+    /**
+     * 🔴 **拾い出しは system 領域のノートを出さない**(設計 doc §1.1、段①)。
+     *
+     * ⚠ **`WHERE` へは足さない** ── `got`(= 区画に何か在ったか)は
+     *   「空だった区画」という**壊れの診断**(`rescue-archive.ts` の
+     *   `miss.push`)に使われる。system のノートだけが並ぶ区画を `WHERE` で
+     *   落とすと、**壊れていないのに「空だった」と誤って数える**ことになる
+     *   (CLAUDE.md §1「後条件は確かめた事実の上にだけ書く」の逆 ── ここでは
+     *   「診断の材料を、除外の都合で減らさない」)。
+     * 🔑 だから **`got` は raw の行数のまま**(`rescueScan` が数える)、
+     *   **`rows` へ積む段だけ**で選ぶ。
+     */
+    const page = rescueScan(database, {
+      table: 'entries',
+      columns: 'rowid, cid, lid, title, archetype, body, realm',
+      afterRowid: req.afterRowid,
+      chunks: req.chunks,
+      take: (r) => {
+        if (r[6] !== 'user') return;
+        rows.push({
+          rowid: Number(r[0]),
+          cid: String(r[1]),
+          lid: String(r[2]),
+          title: String(r[3]),
+          archetype: String(r[4]),
+          body: String(r[5] ?? ''),
         });
-      } catch {
-        // ⚠ ここで throw しない ── 飛ばして先へ進むのが、この op の存在理由である
-        skipped += 1;
-      }
-      if (got === 0) empty += 1;
-      lo = hi + 1;
-      if (maxRowid !== null && lo > maxRowid) break;
-    }
-    const lastRowid = lo - 1;
-    return {
-      rows,
-      lastRowid,
-      skipped,
-      empty,
-      maxRowid,
-      done: maxRowid !== null && lastRowid >= maxRowid,
-    };
+      },
+    });
+    return { rows, ...page };
+  },
+  /**
+   * 🔴 **壊れていても読める分だけ、つながりを拾う**(#1087)。
+   *
+   * ⚠ 索引だけ壊れた DB では `NOT INDEXED` の表走査で読める(2026-10-14 実測:
+   *   `relations` の 3 つの索引と主キーの索引を潰した DB で、500 件中 500 件読めた。
+   *   索引を使う形の `WHERE cid=? AND from_lid=?` は rc 11)。
+   */
+  rescueRelations: (req) => {
+    const rows: ResultMap['rescueRelations']['rows'] = [];
+    const page = rescueScan(need(), {
+      table: 'relations',
+      columns: 'rowid, cid, id, from_lid, to_lid, kind',
+      afterRowid: req.afterRowid,
+      chunks: req.chunks,
+      take: (r) => {
+        rows.push({
+          rowid: Number(r[0]),
+          cid: String(r[1]),
+          id: String(r[2]),
+          fromLid: String(r[3]),
+          toLid: String(r[4]),
+          kind: String(r[5]),
+        });
+      },
+    });
+    return { rows, ...page };
+  },
+  /**
+   * 🔴 **壊れていても読める分だけ、履歴を保存形のまま拾う**(#1087)。
+   *
+   * ⚠ 復元は `restoreRevisionChains`(鎖を decode して通常の書込経路へ流す)── 移行専用の
+   *   書込経路は作らない。⚠ `snapshot` を運ぶので 1 区画ずつ刻む(`RESCUE_CHUNK`)。
+   */
+  rescueRevisions: (req) => {
+    const rows: ResultMap['rescueRevisions']['rows'] = [];
+    const page = rescueScan(need(), {
+      table: 'revisions',
+      columns:
+        'rowid, cid, entry_lid, rev_order, created_at, title, archetype, kind, snapshot, content_hash',
+      afterRowid: req.afterRowid,
+      chunks: req.chunks,
+      take: (r) => {
+        rows.push({
+          rowid: Number(r[0]),
+          cid: String(r[1]),
+          entryLid: String(r[2]),
+          revOrder: Number(r[3]),
+          createdAt: r[4] === null || r[4] === undefined ? null : String(r[4]),
+          title: r[5] === null || r[5] === undefined ? null : String(r[5]),
+          archetype: r[6] === null || r[6] === undefined ? null : String(r[6]),
+          // ⚠ NULL は 'full' 扱い(schema の規約。`exportRevisionChain` と同じ)
+          kind: r[7] === null || r[7] === undefined ? 'full' : String(r[7]),
+          snapshot: r[8] === null || r[8] === undefined ? '' : String(r[8]),
+          contentHash: r[9] === null || r[9] === undefined ? null : String(r[9]),
+        });
+      },
+    });
+    return { rows, ...page };
   },
   close: () => {
     // ⚠ 客の DB も一緒に手放す(閉じ忘れると、この worker が持ったまま消える)

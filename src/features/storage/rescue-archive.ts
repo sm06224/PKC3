@@ -83,6 +83,70 @@ export interface RescuePageLike {
 
 export type RescuePick = (afterRowid: number, chunks: number) => Promise<RescuePageLike>;
 
+/** 拾い出しの 1 ページの共通部分(`rows` 以外)。 */
+export interface RescuePagedBase {
+  readonly lastRowid: number;
+  readonly skipped: number;
+  readonly empty: number;
+  readonly maxRowid: number | null;
+  readonly done: boolean;
+}
+
+/** つながり 1 行(`storage-worker` の `rescueRelations`)。 */
+export interface RescuedRelation {
+  readonly rowid: number;
+  readonly cid: string;
+  readonly id: string;
+  readonly fromLid: string;
+  readonly toLid: string;
+  readonly kind: string;
+}
+
+/** 履歴 1 行(`rescueRevisions`)。⚠ `snapshot` は保存形のまま(全文ではなく逆向きパッチのことがある)。 */
+export interface RescuedRevision {
+  readonly rowid: number;
+  readonly cid: string;
+  readonly entryLid: string;
+  readonly revOrder: number;
+  readonly createdAt: string | null;
+  readonly title: string | null;
+  readonly archetype: string | null;
+  readonly kind: string;
+  readonly snapshot: string;
+  readonly contentHash: string | null;
+}
+
+export type RescueRelationsPick = (
+  afterRowid: number,
+  chunks: number,
+) => Promise<RescuePagedBase & { readonly rows: readonly RescuedRelation[] }>;
+
+export type RescueRevisionsPick = (
+  afterRowid: number,
+  chunks: number,
+) => Promise<RescuePagedBase & { readonly rows: readonly RescuedRevision[] }>;
+
+/**
+ * 🔴 **「何も拾えない周」が続いたら打ち切る**(#1087)。
+ *
+ * ⚠ 一番大きい行番号(`max(rowid)`)が読めないほど壊れた DB では `maxRowid` が `null` のままで、
+ *   `done` が**永久に立たない**。1 周は 20 区画 × 200 行 = **4000 行番号**を進むので、
+ *   何も出ない周が 50 回続く = **20 万行番号**を空のまま通り過ぎたことになる。
+ *   🔑 実在の PKC3 の DB でも、削除で空いた行番号がこれほど連続することは考えにくい
+ *   (測っていない ── 超える DB が出たら、拾えた分はそのまま使い、打ち切ったことを字にする)。
+ * ⚠ 数えるのは `maxRowid === null` の周だけ ── 読めているときは `done` が終わらせる
+ *   (長く空いた行番号を持つ健全な DB を、ここで切らない)。
+ */
+export const RESCUE_IDLE_PAGE_LIMIT = 50;
+
+/** 空の周が続いた数を進める。⚠ 判定は 1 か所(拾い出しの 2 つの輪と建て直しの 3 つの輪が使う)。 */
+export function nextIdlePages(
+  idle: number,
+  page: { readonly rows: readonly unknown[]; readonly maxRowid: number | null },
+): number {
+  return page.maxRowid === null && page.rows.length === 0 ? idle + 1 : 0;
+}
+
 /**
  * 🔑 **添付の実体を読む口**(#1005)。⚠ **sqlite を 1 度も通らない**
  * (`AssetBlobStore` は IndexedDB を直に読む)── だから壊れた DB でも拾える。
@@ -195,6 +259,11 @@ export interface RescueStats {
    * ⚠ **0 と混ぜない** ── 「添付が無い人」と「添付が読めなかった人」は別である。
    */
   readonly assetMissing: number;
+  /**
+   * 🔴 **何も拾えない周が続いて、途中で打ち切った**(#1087)。
+   * ⚠ `true` のとき、拾えた件数は「全部」ではない(**その先に在ったかもしれない分**は読んでいない)。
+   */
+  readonly truncated?: boolean;
 }
 
 /** ⚠ 1 回に頼む区画の数(既存の拾い出しと同じ ── 大きくすると 1 応答が重い)。 */
@@ -238,6 +307,8 @@ export function rescueArchiveSource(opts: {
   /** 2 周目の位置。⚠ `writeArchive` の `after` は使わない(こちらが rowid で進む)。 */
   let bodyAfter = 0;
   let bodyDone = false;
+  /** 🔴 何も拾えない周が続いて打ち切った(#1087)。 */
+  let truncated = false;
 
   const drain = async (
     phase: 'meta' | 'body',
@@ -246,6 +317,7 @@ export function rescueArchiveSource(opts: {
   ): Promise<void> => {
     let after = phase === 'meta' ? 0 : bodyAfter;
     let bytes = 0;
+    let idle = 0;
     for (;;) {
       /**
        * 🔴 **前へ進まない相手で回り続けない**(2026-09-16。**2 度目の直し**)。
@@ -275,6 +347,13 @@ export function rescueArchiveSource(opts: {
       }
       // 🔴 位置が 1 つも進まなかったら、そこで打ち切る(上の docstring)
       if (after <= before) {
+        if (phase === 'body') bodyDone = true;
+        break;
+      }
+      // 🔴 進んではいるが、何も拾えない周が続くなら打ち切る(#1087。`RESCUE_IDLE_PAGE_LIMIT`)
+      idle = nextIdlePages(idle, page);
+      if (idle >= RESCUE_IDLE_PAGE_LIMIT) {
+        truncated = true;
         if (phase === 'body') bodyDone = true;
         break;
       }
@@ -380,6 +459,7 @@ export function rescueArchiveSource(opts: {
       empty,
       bodyMissing: metas.length - gotBody.size,
       ...assetPorts.stats(),
+      ...(truncated ? { truncated } : {}),
     }),
   };
 }
@@ -401,6 +481,8 @@ export function rescueArchiveSummary(s: RescueStats): string {
   if (s.bodyMissing > 0) miss.push(`本文が読めなかったノート ${s.bodyMissing} 件`);
   // 🔴 **鍵は在るのに中身が取れなかった添付**は、黙って減らさない
   if (s.assetMissing > 0) miss.push(`中身が取れなかった添付 ${s.assetMissing} 件`);
+  // 🔴 途中で読み切れなくなった(#1087)── 拾えた件数を「全部」と読ませない
+  if (s.truncated === true) miss.push('読み進められなくなり、途中で打ち切りました');
   // 🔴 つながりと履歴は**この道では拾えない** ── 黙って 0 件にしない
   const lost = '⚠ ノート同士のつながりと履歴は、この方法では戻せません。';
   const body = miss.length === 0 ? head : `${head}(${miss.join(' / ')})`;

@@ -72,8 +72,15 @@ import { archiveSuffix } from '../export/archive-kind';
 import { humanBytes } from '../human-bytes';
 import {
   assetArchivePorts,
+  nextIdlePages,
+  RESCUE_IDLE_PAGE_LIMIT,
   type RescueAssets,
+  type RescuedRelation,
+  type RescuedRevision,
+  type RescuePagedBase,
   type RescuePick,
+  type RescueRelationsPick,
+  type RescueRevisionsPick,
   type RescueStats,
 } from './rescue-archive';
 
@@ -125,30 +132,123 @@ export interface RebuildProgress {
 export async function collectRescued(
   pick: RescuePick,
   onProgress?: RebuildProgress,
-): Promise<{ rows: RescuedRow[]; skipped: number; empty: number }> {
+): Promise<{ rows: RescuedRow[]; skipped: number; empty: number; truncated: boolean }> {
   const rows: RescuedRow[] = [];
   const seen = new Set<string>();
+  const got = await drainPages(
+    pick,
+    (page) => {
+      for (const r of page.rows) {
+        // ⚠ 同じ lid が 2 度来たら後を捨てる(壊れた DB では起こりうる)
+        if (seen.has(r.lid)) continue;
+        seen.add(r.lid);
+        rows.push({ lid: r.lid, title: r.title, archetype: r.archetype, body: r.body });
+      }
+    },
+    onProgress,
+  );
+  return { rows, ...got };
+}
+
+/**
+ * 🔑 **1 周の輪を 1 か所で持つ**(ノート・つながり・履歴の 3 つが同じ守りを通る ── §7)。
+ *
+ * 🔴 止まる条件は 3 つ:①`done` ②位置が進まない ③🔴 **何も拾えない周が続く**(#1087。
+ *   `maxRowid` が読めない DB は `done` が立たず、位置だけが進み続けて**永久に終わらなかった**)。
+ */
+async function drainPages<P extends RescuePagedBase & { readonly rows: readonly unknown[] }>(
+  pick: (after: number, chunks: number) => Promise<P>,
+  take: (page: P) => void,
+  onProgress?: RebuildProgress,
+): Promise<{ skipped: number; empty: number; truncated: boolean }> {
   let skipped = 0;
   let empty = 0;
   let after = 0;
+  let idle = 0;
+  let truncated = false;
   for (;;) {
     const before = after;
     const page = await pick(after, CHUNKS);
     skipped += page.skipped;
     empty += page.empty;
-    for (const r of page.rows) {
-      // ⚠ 同じ lid が 2 度来たら後を捨てる(壊れた DB では起こりうる)
-      if (seen.has(r.lid)) continue;
-      seen.add(r.lid);
-      rows.push({ lid: r.lid, title: r.title, archetype: r.archetype, body: r.body });
-    }
+    take(page);
     after = page.lastRowid;
     onProgress?.('pick', after, page.maxRowid);
     if (page.done || page.lastRowid <= 0) break;
     // 🔴 前へ進まない相手で回り続けない(拾い出しと同じ守り方)
     if (after <= before) break;
+    idle = nextIdlePages(idle, page);
+    if (idle >= RESCUE_IDLE_PAGE_LIMIT) {
+      truncated = true;
+      break;
+    }
   }
-  return { rows, skipped, empty };
+  return { skipped, empty, truncated };
+}
+
+/** つながりと履歴の拾い出しの結果。 */
+export interface RescuedExtras {
+  /** 🔑 両端のノートが拾えたものだけ(片端が無いつながりは、戻しても宙に浮く)。 */
+  readonly relations: readonly RescuedRelation[];
+  /** 🔑 履歴を持つノートごとに、新しい → 古い。 */
+  readonly chains: ReadonlyMap<string, readonly RescuedRevision[]>;
+  readonly skipped: number;
+  readonly truncated: boolean;
+}
+
+/**
+ * 🔑 **つながりと履歴を拾う**(#1087)── 索引だけ壊れた DB では表走査で読める
+ * (2026-10-14 実測。`NOT INDEXED`)。
+ *
+ * ⚠ 拾えなくても落とさない ── 読めない分は `skipped` で言い、ノートの建て直しは続ける
+ *   (つながりが読めないだけで、読めるノートを捨てる理由は無い)。
+ * ⚠ 器の id が違う行・拾えなかったノートに付く行は捨てる(戻しても宙に浮く)。
+ */
+export async function collectRescuedExtras(
+  cid: string,
+  lids: ReadonlySet<string>,
+  picks: { relations: RescueRelationsPick; revisions: RescueRevisionsPick },
+): Promise<RescuedExtras> {
+  const relations: RescuedRelation[] = [];
+  const seenRel = new Set<string>();
+  const chains = new Map<string, RescuedRevision[]>();
+  const seenRev = new Set<string>();
+  let skipped = 0;
+  let truncated = false;
+  try {
+    const r = await drainPages(picks.relations, (page) => {
+      for (const x of page.rows) {
+        if (x.cid !== cid || !lids.has(x.fromLid) || !lids.has(x.toLid)) continue;
+        if (seenRel.has(x.id)) continue;
+        seenRel.add(x.id);
+        relations.push(x);
+      }
+    });
+    skipped += r.skipped;
+    truncated ||= r.truncated;
+  } catch {
+    skipped += 1;
+  }
+  try {
+    const r = await drainPages(picks.revisions, (page) => {
+      for (const x of page.rows) {
+        if (x.cid !== cid || !lids.has(x.entryLid)) continue;
+        const key = `${x.revOrder}:${x.entryLid}`;
+        if (seenRev.has(key)) continue;
+        seenRev.add(key);
+        const list = chains.get(x.entryLid) ?? [];
+        list.push(x);
+        chains.set(x.entryLid, list);
+      }
+    });
+    skipped += r.skipped;
+    truncated ||= r.truncated;
+  } catch {
+    skipped += 1;
+  }
+  // 保存形の並び(新しい → 古い)にそろえる
+  for (const list of chains.values()) list.sort((p, q) => q.revOrder - p.revOrder);
+  return { relations, chains, skipped, truncated };
 }
 
 /**
@@ -166,6 +266,10 @@ export function rebuildArchiveSource(opts: {
   readonly skipped: number;
   readonly empty: number;
   readonly assets?: RescueAssets;
+  /** 🔑 拾えたつながりと履歴(#1087)。⚠ 省略 = 入れない(今までどおり)。 */
+  readonly extras?: RescuedExtras;
+  /** 🔴 ノートの拾い出しを途中で打ち切った(#1087)。 */
+  readonly truncated?: boolean;
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
@@ -192,10 +296,30 @@ export function rebuildArchiveSource(opts: {
     }),
     listAssetMetas: assetPorts.listAssetMetas,
     getAssetBlob: assetPorts.getAssetBlob,
-    // 🚫 つながりと履歴は **sqlite にしか無く、索引を使う形でしか引けない**
-    listRelations: async () => [],
-    listRevisionLids: async () => [],
-    getRevisionChain: async () => [],
+    /**
+     * 🔑 つながりと履歴(#1087)。⚠ 以前は「索引を使う形でしか引けない」で空を返していたが、
+     *   `NOT INDEXED` の表走査なら読める(2026-10-14 実測)── 拾えた分は zip にも入れる。
+     */
+    listRelations: async () =>
+      (opts.extras?.relations ?? []).map((r) => ({
+        id: r.id,
+        from_lid: r.fromLid,
+        to_lid: r.toLid,
+        kind: r.kind,
+        created_at: null,
+        updated_at: null,
+      })),
+    listRevisionLids: async () => [...(opts.extras?.chains.keys() ?? [])],
+    getRevisionChain: async (lid) =>
+      (opts.extras?.chains.get(lid) ?? []).map((r) => ({
+        revOrder: r.revOrder,
+        createdAt: r.createdAt,
+        title: r.title,
+        archetype: r.archetype,
+        kind: r.kind,
+        snapshot: r.snapshot,
+        contentHash: r.contentHash,
+      })),
   };
   return {
     source,
@@ -206,6 +330,7 @@ export function rebuildArchiveSource(opts: {
       // 🔑 1 周なので「2 周目で本文が来なかった」が原理的に起きない
       bodyMissing: 0,
       ...assetPorts.stats(),
+      ...(opts.truncated === true || opts.extras?.truncated === true ? { truncated: true } : {}),
     }),
   };
 }
@@ -237,6 +362,14 @@ export function rebuiltEntries(rows: readonly RescuedRow[]): RebuiltEntry[] {
 export interface RebuildPorts {
   /** 壊れた DB から拾う(1 周)。 */
   readonly pick: RescuePick;
+  /** 🔑 つながりと履歴を拾う(#1087)。⚠ 必須 ── 渡し忘れると、静かに戻らなくなる。 */
+  readonly pickRelations: RescueRelationsPick;
+  readonly pickRevisions: RescueRevisionsPick;
+  /**
+   * 🔴 **捨てる前に**タグの色を読む(#1087)。色は sqlite の `settings` 表にあり、捨てると消える。
+   * ⚠ 読めなければ空で返してよい(呼び側が握る)── 色が読めないだけで建て直しは止めない。
+   */
+  readTagColors(): Promise<Array<{ tag: string; color: string }>>;
   /** 🔑 添付の実体(IndexedDB)。⚠ 渡さなければ zip に添付が入らない。 */
   readonly assets?: RescueAssets;
   /** ① zip を手元へ落とす。⚠ **落ちたら例外**(何も消さずに止まる)。 */
@@ -249,6 +382,34 @@ export interface RebuildPorts {
   openContainer(cid: string, title: string): Promise<void>;
   /** ⑤ 拾ったノートを書き戻す。 */
   writeEntries(cid: string, entries: readonly RebuiltEntry[]): Promise<void>;
+  /** ⑤ つながりを書き戻す(#1087)。⚠ ノートの後(両端が居てから)。 */
+  writeRelations(cid: string, relations: readonly RescuedRelation[]): Promise<void>;
+  /**
+   * ⑤ 履歴の鎖を書き戻す(#1087)。⚠ ノートの後(鎖は tip = ノートの本文から遡る)。
+   * 返す `broken` = 噛み合わなくて捨てた鎖の数(黙って減らさない)。
+   */
+  writeRevisions(
+    cid: string,
+    chains: ReadonlyMap<string, readonly RescuedRevision[]>,
+  ): Promise<{ added: number; broken: number }>;
+  /**
+   * ⑤ 🔴 **添付の登録行を組み直す**(#1087)。
+   *
+   * ⚠ 作り直しは sqlite を丸ごと捨てるので `assets` 表も消える ── bytes は IndexedDB に
+   *   残っているのに、書き出し・容量の内訳は**登録行から**一覧を取るため、バックアップに
+   *   添付が 0 件で出ていた。呼び側は `metas`(`assetArchivePorts` と同じ組み方)を書くだけ。
+   */
+  writeAssetMetas(
+    cid: string,
+    metas: ReadonlyArray<{
+      key: string;
+      mime: string | null;
+      size: number | null;
+      hash: string | null;
+    }>,
+  ): Promise<void>;
+  /** ⑤ 🔴 捨てる前に読んだタグの色を戻す(#1087)。 */
+  writeTagColors(cid: string, colors: ReadonlyArray<{ tag: string; color: string }>): Promise<void>;
   /** 消えたノート由来の物をこの端末から落とす(コピー履歴など)。 */
   forgetLocal(): void;
   /** ⑥ 🔴 **最後に**他のタブへ知らせる。 */
@@ -285,6 +446,16 @@ export interface RebuildReport {
   readonly rescued: RescueStats;
   /** 実際に書き戻した件数。⚠ `rescued.entries` と**分けて持つ**。 */
   readonly restored: number;
+  /** 🔑 戻したつながり・履歴の版の数(#1087)。 */
+  readonly relationsRestored: number;
+  readonly revisionsRestored: number;
+  /**
+   * 🔴 つながり・履歴を**読み切れなかった**印(#1087)。読めない区画 / 噛み合わず捨てた鎖 /
+   * 途中で打ち切った、のどれかが在れば `true`。⚠ `true` のとき「戻りました」だけで終えない。
+   */
+  readonly extrasPartial: boolean;
+  /** 戻したタグの色の数(#1087)。 */
+  readonly tagColorsRestored: number;
   /** DB を file ごと捨てたか(`false` = もともとメモリ上だった)。 */
   readonly wiped: boolean;
   /** 捨てられなかったときの理由。 */
@@ -310,16 +481,32 @@ export async function rebuildContainer(
 ): Promise<RebuildReport> {
   // ① 拾う → zip を落とす。⚠ ここで落ちたら例外で抜ける(**まだ何も消していない**)
   const got = await collectRescued(ports.pick, ports.onProgress);
+  // 🔑 つながりと履歴も、ノートと同じ ① の段で拾う(捨てた後の DB からはもう読めない)
+  const extras = await collectRescuedExtras(cid, new Set(got.rows.map((r) => r.lid)), {
+    relations: ports.pickRelations,
+    revisions: ports.pickRevisions,
+  });
+  // 🔴 色は sqlite の `settings` 表 ── 捨てる前でないと読めない。読めなければ空(建て直しは止めない)
+  const tagColors = await ports.readTagColors().catch(() => []);
   const { source, stats } = rebuildArchiveSource({
     cid,
     title,
     rows: got.rows,
     skipped: got.skipped,
     empty: got.empty,
+    extras,
+    truncated: got.truncated,
     ...(ports.assets === undefined ? {} : { assets: ports.assets }),
   });
   await ports.saveArchive(source);
   const rescued = stats();
+  /** 戻していない間の値(① の後に返す 3 つの結末が使う)。 */
+  const none = {
+    relationsRestored: 0,
+    revisionsRestored: 0,
+    extrasPartial: extras.skipped > 0 || extras.truncated,
+    tagColorsRestored: 0,
+  };
 
   /**
    * 🔴 **ここから先では投げない**(#1006 の着地前レビューが出した)。
@@ -359,6 +546,7 @@ export async function rebuildContainer(
         outcome: 'memory-only',
         rescued,
         restored: 0,
+        ...none,
         wiped: wipe.wiped,
         note: wipe.note,
         fallbackReason: re.fallbackReason ?? '',
@@ -374,9 +562,28 @@ export async function rebuildContainer(
      *   **止まった**と読んで窓を閉じる ── 閉じられると書き戻しが途中で終わる)。
      */
     ports.onProgress?.('write', entries.length, entries.length);
+    let relationsRestored = 0;
+    let revisionsRestored = 0;
+    let brokenChains = 0;
+    let tagColorsRestored = 0;
     try {
       await ports.openContainer(cid, title);
       await ports.writeEntries(cid, entries);
+      // 🔴 つながりと履歴は**ノートの後**(履歴の鎖は、書き戻したノートの本文から遡る)
+      await ports.writeRelations(cid, extras.relations);
+      relationsRestored = extras.relations.length;
+      const rev = await ports.writeRevisions(cid, extras.chains);
+      revisionsRestored = rev.added;
+      brokenChains = rev.broken;
+      /**
+       * 🔴 **添付の登録行を組み直す**(#1087)。bytes は IndexedDB に残っているが、
+       * 書き出し・容量の内訳は登録行から一覧を取る ── 戻さないと添付が 0 件に見える。
+       * 🔑 組み方は拾い出しの zip と**同じ口**(`assetArchivePorts`)。hash は分からないので null。
+       */
+      await ports.writeAssetMetas(cid, await assetArchivePorts(cid, ports.assets).listAssetMetas());
+      // 🔴 捨てる前に読んだタグの色(#1087)
+      await ports.writeTagColors(cid, tagColors);
+      tagColorsRestored = tagColors.length;
     } catch (e) {
       ports.forgetLocal();
       ports.announceWiped();
@@ -384,6 +591,7 @@ export async function rebuildContainer(
         outcome: 'write-failed',
         rescued,
         restored: 0,
+        ...none,
         wiped: wipe.wiped,
         note: wipe.note,
         fallbackReason: null,
@@ -405,6 +613,10 @@ export async function rebuildContainer(
       outcome: 'rebuilt',
       rescued,
       restored: entries.length,
+      relationsRestored,
+      revisionsRestored,
+      extrasPartial: none.extrasPartial || brokenChains > 0,
+      tagColorsRestored,
       wiped: wipe.wiped,
       note: wipe.note,
       fallbackReason: null,
@@ -435,6 +647,7 @@ export async function rebuildContainer(
       outcome: 'storage-lost',
       rescued,
       restored: 0,
+      ...none,
       wiped: wipe.wiped,
       note: wipe.note,
       fallbackReason: null,
@@ -444,24 +657,27 @@ export async function rebuildContainer(
 }
 
 /**
- * 🔴 **戻らない物の呼び名を 1 か所で持つ**(#1006)。
+ * 🔴 **読めても戻らない物の呼び名を 1 か所で持つ**(#1006 → #1087 で空にした)。
  *
  * ⚠ 押す前の窓(`rebuildExplainMessage`)と、終わった後の字
  *   (`rebuildDoneMessage`)の**両方**に出る ── ⚠ 2 か所に手で書くと、
  *   片方だけ直した日に user は「**別の物も消えた**」と読む(§7)。
  *
- * ## ⚠ 「つながり」と丸めない
+ * ## 🔑 いまは空である ── 「戻らない」と書いていたのは実測で誤りだった
  *
- * 拾えるのは `entries` の行だけなので、戻らないのは**別の表に在る物**である ──
- * 居場所(`relations` の `structural`)/ 手で付けた関係 / `revisions`。
- * 🔑 フォルダそのものは archetype `folder` の**ノート**、タグは**本文の
- *   frontmatter** に在るので**残る** ── 消えるのは「どこに入っていたか」だけである。
+ * 直す前は「どのフォルダに入っていたか / ノート同士のつながり / 履歴」を戻らない物としていた
+ * (「索引を使う形でしか引けない」)。🔴 2026-10-14 に、索引を潰した DB で `NOT INDEXED` の
+ * 表走査が `relations` / `revisions` を **500 件中 500 件**読めることを実測した
+ * (索引を使う形は rc 11)── 読めた分は拾って戻す。
+ * ⚠ **読めなかった分**は戻らない ── それは固定の一覧ではなく**件数で出る**
+ * (`RebuildReport.extrasPartial`)ので、ここには置かない。
+ * ⚠ 戻らない物がまた出たら、ここへ足す(マニュアルの表と**等値**で pin してある)。
  */
-export const REBUILD_LOST: readonly string[] = [
-  'どのフォルダに入っていたか',
-  'ノート同士のつながり',
-  '履歴(前の版)',
-] as const;
+/**
+ * 🔴 **作り直しで戻らない物**(#1087)── ゴミ箱のノートとシステムのメッセージは拾い出しの対象に入っていない。
+ * ⚠ 空にすると窓が「全部戻る」と読める ── 戻す作りにするかは見え方の判断待ち(#1163 依頼 119-1)。
+ */
+export const REBUILD_LOST: readonly string[] = ['ゴミ箱のノート', 'システムのメッセージ'] as const;
 
 /**
  * 終わった後に画面へ出す字。
@@ -503,18 +719,26 @@ export function rebuildDoneMessage(r: RebuildReport): string {
   const miss: string[] = [];
   if (r.rescued.skipped > 0) miss.push(`読み込めなかった箇所 ${r.rescued.skipped}`);
   if (r.rescued.empty > 0) miss.push(`空だった箇所 ${r.rescued.empty}`);
+  // 🔴 打ち切ったときは、拾えた件数を「全部」と読ませない(#1087)
+  if (r.rescued.truncated === true) miss.push('読み進められなくなり、途中で打ち切りました');
   const head = `${r.restored} 件を戻しました${miss.length === 0 ? '' : `(${miss.join(' / ')})`}`;
   // 🔑 添付は「触っていない」と言う ── 数ではなく**事実**が知りたい所である
   const kept =
     r.rescued.assets > 0
       ? `。添付 ${r.rescued.assets} 件(${humanBytes(r.rescued.assetBytes)})はそのまま残っています`
       : '';
-  // 🔴 戻らなかった物は**黙って 0 件にしない**。⚠ 呼び名は `REBUILD_LOST` から引く
-  // ⚠ **押す前の窓と同じことを言う** ── 戻った画面の見え方は、ここでも 1 行要る
-  const lost =
-    `⚠ ${REBUILD_LOST.join('・')}は戻りません` +
-    '(ノートはフォルダの外の一覧にまとめて並びます)。';
-  return `${head}${kept}。${lost}読み込み直します。`;
+  // 🔑 つながり・履歴は**戻した件数**で言う。読み切れなかったときは、そう言う(黙って 0 件にしない)
+  const back: string[] = [];
+  if (r.relationsRestored > 0) back.push(`つながり ${r.relationsRestored} 件`);
+  if (r.revisionsRestored > 0) back.push(`履歴 ${r.revisionsRestored} 版`);
+  if (r.tagColorsRestored > 0) back.push(`タグの色 ${r.tagColorsRestored} 件`);
+  const backed = back.length === 0 ? '' : `。${back.join('・')}も戻しました`;
+  const lost = r.extrasPartial
+    ? '⚠ 読み込めなかったつながり・履歴があり、その分は戻っていません。'
+    : '';
+  // 🔴 戻らない物は呼び名を `REBUILD_LOST` から引く(押す前の窓と同じ語。§7)
+  const never = REBUILD_LOST.length === 0 ? '' : `${REBUILD_LOST.join('・')}は戻りません。`;
+  return `${head}${kept}${backed}。${lost}${never}読み込み直します。`;
 }
 
 /**
@@ -566,20 +790,21 @@ export function rebuildExplainMessage(opts: {
     `・いま一覧に出ている ${notes} 件のノート(題名・本文・タグ・チェック)`,
     attach,
     '・設定・見た目・ショートカットキーの割り当て・読んだお知らせの記録',
+    // 🔑 読めた分は戻す(#1087。2026-10-14 の実測で、索引だけ壊れた DB はこれらも読めた)
+    '・どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)・タグの色(読めた分)',
     '',
-    '戻らないもの',
-    // ⚠ 呼び名は `REBUILD_LOST` から引く ── 終わった後の字と食い違わせない
-    ...REBUILD_LOST.map((x) => `・${x}`),
-    'フォルダそのものとタグは、ノートの中にあるので残ります。',
+    // ⚠ 呼び名は `REBUILD_LOST` から引く ── 終わった後の字と食い違わせない(空なら節ごと出さない)
+    ...(REBUILD_LOST.length === 0
+      ? []
+      : ['戻らないもの', ...REBUILD_LOST.map((x) => `・${x}`), '']),
     /**
-     * 🔴 **戻ってきた画面がどう見えるかを、先に言う**(#1006 の動線レビューが出した)。
+     * 🔴 **読めない分は戻らないことを、先に言う**(#1087)。
      *
-     * ⚠ 「どのフォルダに入っていたか は戻りません」だけだと、user は
-     *   **戻った画面を見て初めて**それが何を意味するか分かる ── そして
-     *   **全部が根元に平らに並んだ画面**は「直った」ではなく「**壊れた**」と読める。
-     * 🔑 マニュアルには書いてあったが、**この窓だけを見て押す人**には届かない。
+     * ⚠ 以前は「戻した後は、ノートがフォルダの外の一覧にまとめて並びます」と言っていた
+     *   (#1006 の動線レビュー)。つながりを拾って戻すようになったので、並ぶのは
+     *   **読めなかった分だけ**になった ── 字を残すと、戻った画面と食い違う。
      */
-    '⚠ 戻した後は、ノートがフォルダの外の一覧にまとめて並びます(フォルダそのものは空で残ります)。',
+    '⚠ つながりや履歴の読めない所があるときは、その分は戻りません(戻した後の字に出ます)。',
     // ⚠ 見えている数 ≠ 在る数(壊れているときは一覧そのものが引けていないことがある)
     '⚠ 読めない所があるときは、一覧に出ていない分を集められないことがあります。',
     '',
