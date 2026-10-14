@@ -195,7 +195,7 @@ function moveRepeat(
     dispatcher.dispatch({ type: 'OP_FAILED', error });
   };
   if (dropDate === '') {
-    deny('繰り返しの予定は「日付なし」へは動かせません(カードの「予定から外す(繰り返しも外れます)」で外せます)');
+    deny('繰り返しの予定は「日付なし」へは動かせません(カードの右端の × を押すと外せます。繰り返しも外れます)');
     return;
   }
   const line = Number(grabbed.line);

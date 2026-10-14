@@ -34,7 +34,12 @@ import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
 import { tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
-import { applyTextScale, chosenTextScale, initialTextScale } from '@adapter/ui/render/text-scale';
+import {
+  applyTextScale,
+  chosenTextScale,
+  initialTextScale,
+  watchTextScaleFromOtherWindows,
+} from '@adapter/ui/render/text-scale';
 import { textScaleSpec } from '@features/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
@@ -219,7 +224,14 @@ import {
 import { portableManualPage } from '@adapter/platform/portable-manual';
 import { appNoticeStore } from '@adapter/platform/notice-store';
 import { NOTICES } from '@features/notice/notice-log';
-import { applyTheme, chooseTheme, initialTheme, isThemeChoice, syncThemeFollow } from '@adapter/ui/render/theme';
+import {
+  applyTheme,
+  chooseTheme,
+  initialTheme,
+  isThemeChoice,
+  syncThemeFollow,
+  watchThemeFromOtherWindows,
+} from '@adapter/ui/render/theme';
 import {
   applyProseAlign,
   chooseProseAlign,
@@ -1153,6 +1165,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyTheme(document.documentElement, bootTheme);
   // 「OS に合わせる」(何も保存していない場合を含む)なら、起動後の OS の切り替えにも付いていく
   syncThemeFollow(document.documentElement);
+  // 🔴 別のウィンドウで選んだ配色を、開いたままの自分にも当てる(#1087 S2)
+  watchThemeFromOtherWindows(document.documentElement, window);
   // 📄 紙面も**枠より先**(同じ理由 ── 後だと 42rem で 1 度組んでから広がる)。
   // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
@@ -1170,6 +1184,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   user が選んだときだけ。
    */
   applyTextScale(document.documentElement, initialTextScale());
+  watchTextScaleFromOtherWindows(document.documentElement, window);
   /**
    * 🔴 **段組みも枠より先**(#505 段①。理由は上と同じ)。
    * ⚠ **保存しない**(当てるだけ)── 保存は user が選んだときだけ。

@@ -1429,6 +1429,10 @@ describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
     const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' });
     expect(r.events, '編集中なのに本文を書きに行った').toEqual([]);
     expect(r.state.error, '無言で捨てた').toContain('編集を保存するか、編集をやめてから');
+    // 🔴 続きは「してください」(#1087 S3)── 「できます」だと案内ではなく状況の説明に読める
+    expect(r.state.error).toMatch(/繰り返しにしてください$/);
+    const off = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: null });
+    expect(off.state.error).toMatch(/繰り返しをやめてください$/);
     // ⚠ 対照群 ── `ready` なら同じ 1 手が通る(門だけが効いていることの裏取り)
     expect(
       reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' }).events,
@@ -1528,6 +1532,27 @@ describe('予定の縦線の色とノートごとの出し入れ(#855 20-A)', ()
     await tick();
     expect(q('[data-pkc-field="schedule-note"]')!.textContent).toContain('ノートを外している');
     expect(foldText(q)).toBe('出すもの(2)');
+  });
+
+  it('🔴 何も出ていない理由を言い分ける(#1087 S5)── 探す欄の語 / 済みを隠している / 本当に無い', async () => {
+    const { q, d } = setup({ e1: '- [x] 散歩 @2026-08-23\n' });
+    const note = () => q('[data-pkc-field="schedule-note"]')!.textContent;
+    // 済みだけが在り、既定で隠している → 「日付を書いた予定がまだありません」とは言わない
+    expect(note()).toContain('済んだ予定は隠れています');
+    expect(note()).toContain('出すもの');
+    expect(note()).not.toContain('日付を書いた予定がまだありません');
+    // 探す欄に語が在るときは、その語を理由にする(済みの案内より先)
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'zzz' });
+    await tick();
+    expect(note()).toBe('探す欄の語に合う予定がありません。');
+    // 🔑 対照群: 予定が本当に無いときは今までどおり書き方を案内する
+    const none = setup({ e9: 'ただの文\n' });
+    expect(none.q('[data-pkc-field="schedule-note"]')!.textContent).toContain('チェックボックスの行(- [ ] やること)がまだありません');
+  });
+
+  it('🔴 日付のある予定が無く、済みも無いときは、日付の書き方を案内する(#1087 S5 の対照群)', () => {
+    const { q } = setup({ e1: '- [ ] 散歩\n' });
+    expect(q('[data-pkc-field="schedule-note"]')!.textContent).toContain('日付を書いた予定がまだありません');
   });
 
   it('🔴 隠したノートの済みの予定は、括弧に二重に数えない(隠した数は「出る予定」だけ)', async () => {

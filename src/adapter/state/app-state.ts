@@ -7543,7 +7543,7 @@ function reduceCore(
         return {
           state: {
             ...state,
-            error: blockedWithSuffix(blocked, action.repeat === null ? '繰り返しをやめられます' : '繰り返しにできます'),
+            error: blockedWithSuffix(blocked, action.repeat === null ? '繰り返しをやめてください' : '繰り返しにしてください'),
           },
           events: [],
         };

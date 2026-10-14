@@ -652,7 +652,7 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
     out.push({
       action: 'set-task-repeat',
       label: REPEAT_WORDS[u],
-      hint: `この行を${REPEAT_WORDS[u]}くり返します(本文に「${REPEAT_WORDS[u]}」と書かれます)`,
+      hint: `この行を${REPEAT_WORDS[u]}繰り返します(本文に「${REPEAT_WORDS[u]}」と書かれます)`,
       attrs: { [REPEAT_ATTR]: u },
     });
   }
@@ -660,7 +660,7 @@ export function repeatMenuActions(current: RepeatUnit | null): RepeatMenuItem[] 
     out.push({
       action: 'set-task-repeat',
       label: 'この繰り返しをやめる',
-      hint: 'くり返しをやめます(日付は残ります。ノートも本文も消えません)',
+      hint: '繰り返しをやめます(日付は残ります。ノートも本文も消えません)',
       attrs: { [REPEAT_ATTR]: '' },
     });
   return out;

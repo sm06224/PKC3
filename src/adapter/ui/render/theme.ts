@@ -197,3 +197,28 @@ export function chooseTheme(target: HTMLElement, choice: ThemeChoice): void {
   applyTheme(target, resolveTheme(choice, osPrefersDark()));
   syncThemeFollow(target);
 }
+
+/**
+ * 🔴 **別のウィンドウで選んだ配色を、開いたままの自分にも当てる**(#1087 S2)。
+ *
+ * ⚠ 直す前は、配色を変えても**すでに開いている別ウィンドウ**(予定のウィンドウ・付箋など)は
+ *   読み込み直すまで古い配色のままだった。`storage` event は**書いた側以外**にだけ届くので、
+ *   自分が選んだ回に二重に当たることはない(`keymap.ts` の `watchOtherTabs` と同じ作法)。
+ * ⚠ **返り値で外す**(短命な購読は必ず外す)。
+ * 🔑 当て方は選んだときと同じ 2 手(`applyTheme` + `syncThemeFollow`)── 「OS に合わせる」への
+ *   切り替えも、他の配色への切り替えも、聞く・聞かないまで揃う。
+ */
+export function watchThemeFromOtherWindows(
+  target: HTMLElement,
+  win: Pick<Window, 'addEventListener' | 'removeEventListener'>,
+): () => void {
+  const onStorage = (ev: Event): void => {
+    const key = (ev as StorageEvent).key;
+    // ⚠ `key === null` は「全消し」(`localStorage.clear()`)── 既定へ戻るので、これも当て直す
+    if (key !== null && key !== THEME_STORAGE_KEY) return;
+    applyTheme(target, resolveTheme(readThemeChoice(), osPrefersDark()));
+    syncThemeFollow(target);
+  };
+  win.addEventListener('storage', onStorage);
+  return () => win.removeEventListener('storage', onStorage);
+}

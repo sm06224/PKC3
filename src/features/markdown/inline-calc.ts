@@ -723,7 +723,16 @@ export function calcLineAction(fullText: string, caretPos: number): CalcLineActi
     return { kind: 'insert', at: end, text: `${hasEq ? '' : '='}${formatCalcResult(v)}` };
   }
   const why = explainCalcMiss(probe, at);
-  return why === null ? null : { kind: 'why', text: why };
+  if (why === null) return null;
+  /**
+   * 🔴 **もう答えが付いている行**(`1200*1.1=1320`)── 足した `=` が古い `=` とぶつかって
+   *   「= は計算に使えません」と出ていた(#1087)。user が見たいのは「済んでいる」ことなので、そう言う。
+   * ⚠ 数と記号だけの行(`explainCalcMiss` が `= は計算に使えません` と答えた行)に限る ──
+   *   `締切=5` のような言葉の入った行は、そもそも `why` が `null` で、ここへ来ない。
+   */
+  if (!hasEq && why === '計算できませんでした(= は計算に使えません)' && /[=＝]\s*[-+]?[\d.,０-９．，]+\s*$/u.test(line))
+    return { kind: 'why', text: 'この行は計算済みです' };
+  return { kind: 'why', text: why };
 }
 
 /**
