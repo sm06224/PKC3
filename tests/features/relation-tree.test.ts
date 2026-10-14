@@ -151,3 +151,43 @@ describe('collectSubtreeLids — フォルダ 1 つとその配下', () => {
     expect([...collectSubtreeLids('t1', m, [rel('x', 't1', 't2')])]).toEqual(['t1']);
   });
 });
+
+describe('splitRestoredEdges(#1087 ゴミ箱の見直し)', () => {
+  const e = (id: string, from: string, to: string, kind = 'structural'): Relation => ({
+    id,
+    kind,
+    fromLid: from,
+    toLid: to,
+    createdAt: null,
+    updatedAt: null,
+  });
+
+  it('🔴 親の辺を先に入れ、輪を作る子の辺を捨てる', async () => {
+    const { splitRestoredEdges } = await import('../../src/features/relation/tree');
+    const r = splitRestoredEdges([e('rBX', 'B', 'X')], 'A', [e('rAB', 'A', 'B'), e('rXA', 'X', 'A')]);
+    expect(r.kept.map((x) => x.id)).toEqual(['rXA']);
+    expect(r.dropped.map((x) => x.id)).toEqual(['rAB']);
+  });
+
+  it('輪を作らない辺・居場所以外の辺はそのまま通す(対照群)', async () => {
+    const { splitRestoredEdges } = await import('../../src/features/relation/tree');
+    const r = splitRestoredEdges(
+      [e('rPQ', 'P', 'Q')],
+      'A',
+      [e('rXA', 'X', 'A'), e('rAB', 'A', 'B'), e('rL', 'B', 'A', 'semantic')],
+    );
+    expect(r.kept.map((x) => x.id).sort()).toEqual(['rAB', 'rL', 'rXA']);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('多重親のどれを通っても輪なら捨てる', async () => {
+    const { splitRestoredEdges } = await import('../../src/features/relation/tree');
+    // B の親は P と X の 2 つ。X → A を入れた後、A → B は X 経由で輪になる(B → X が在る)
+    const r = splitRestoredEdges(
+      [e('rPB', 'P', 'B'), e('rBX', 'B', 'X')],
+      'A',
+      [e('rXA', 'X', 'A'), e('rAB', 'A', 'B')],
+    );
+    expect(r.dropped.map((x) => x.id)).toEqual(['rAB']);
+  });
+});

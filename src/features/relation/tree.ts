@@ -366,3 +366,62 @@ export function reorderSibling(
     { lid: me.lid, entryOrder: other.entryOrder + (direction === 'up' ? -1 : 1) },
   ];
 }
+
+/**
+ * 🔴 **ゴミ箱から戻すときに合流させる辺のうち、輪を作るものを分ける**(#1087、ゴミ箱の見直し)。
+ *
+ * ⚠ なぜ要るか:ゴミ箱へ移しても disk の辺は残す(戻したら居場所が戻るように)が、画面の木からは落ちる。
+ *   そのため「X > A > B の A をゴミ箱へ → X を B の中へ移す」が通り(画面の木には X → A が無い)、
+ *   A を戻すと X → A → B → X の**輪**になる。輪に入ったフォルダはどれも「親を持つ」ので、
+ *   中身ごと一覧から消えていた。
+ * 🔑 入れる順は**戻すノートの親の辺 → 子の辺**。親を先に決め、後から輪を作る辺を捨てる
+ *   (上の例では A は X の中へ戻り、B は今居る場所に留まる)。
+ * ⚠ 判定は正準親ではなく**残っている親の辺すべて**で見る(多重親のどれを通っても輪は輪)。
+ *   居場所以外の辺(リンクなど)は木を作らないので、そのまま通す。
+ */
+export function splitRestoredEdges(
+  current: readonly Relation[],
+  restoredLid: string,
+  incoming: readonly Relation[],
+): { kept: Relation[]; dropped: Relation[] } {
+  const parents = new Map<string, Set<string>>();
+  const link = (from: string, to: string): void => {
+    const set = parents.get(to);
+    if (set === undefined) parents.set(to, new Set([from]));
+    else set.add(from);
+  };
+  for (const r of current) if (r.kind === STRUCTURAL && r.fromLid !== r.toLid) link(r.fromLid, r.toLid);
+  /** `target` が `start` 自身か、その祖先(親の辺をたどって届く)か。 */
+  const reaches = (start: string, target: string): boolean => {
+    const seen = new Set<string>();
+    const stack = [start];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (cur === target) return true;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      for (const p of parents.get(cur) ?? []) stack.push(p);
+    }
+    return false;
+  };
+  const ordered = [
+    ...incoming.filter((r) => r.toLid === restoredLid),
+    ...incoming.filter((r) => r.toLid !== restoredLid),
+  ];
+  const kept: Relation[] = [];
+  const dropped: Relation[] = [];
+  for (const r of ordered) {
+    if (r.kind !== STRUCTURAL) {
+      kept.push(r);
+      continue;
+    }
+    // 親 → 子 の辺は、子が親自身か親の祖先なら輪になる
+    if (r.fromLid === r.toLid || reaches(r.fromLid, r.toLid)) {
+      dropped.push(r);
+      continue;
+    }
+    link(r.fromLid, r.toLid);
+    kept.push(r);
+  }
+  return { kept, dropped };
+}

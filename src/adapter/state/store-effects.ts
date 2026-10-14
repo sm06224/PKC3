@@ -46,6 +46,7 @@ import {
 import { tableFormatDropsInfo } from '@features/markdown/table-convert';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
+import { splitRestoredEdges } from '@features/relation/tree';
 import {
   EMPTY_SMART,
   isSmartEmpty,
@@ -3228,6 +3229,19 @@ export function connectStoreEffects(
             } catch {
               /* 関係が読めなくても entry の復元は進める */
             }
+            /**
+             * 🔴 **輪を作る居場所の辺は戻さず、disk からも消す**(#1087、ゴミ箱の見直し。`splitRestoredEdges`)。
+             * ⚠ 画面だけで捨てると、次に開いたときに disk の辺が読まれて輪が戻る(フォルダが中身ごと消える)。
+             * ⚠ 判定と画面への合流の間に `await` を挟まない ── 間に移動が入ると、判定した木と合流先の木がずれる
+             *   (着地前レビュー)。disk から消すのは合流の**後**。
+             * ⚠ 画面が既に持っている辺(同じ id)は消さない ── 画面と disk がずれる。
+             * ⚠ 消せなくても復元は進める(画面には輪を入れない)。
+             */
+            const current = dispatcher.getState().relations;
+            const split = splitRestoredEdges(current, ev.entryLid, restored);
+            restored = split.kept;
+            const held = new Set(current.map((r) => r.id));
+            const toRemove = split.dropped.filter((r) => !held.has(r.id));
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',
@@ -3250,6 +3264,13 @@ export function connectStoreEffects(
               });
             // ⚠ `ENTRY_RESTORED` の後(meta を置き換えるため)
             stamp(ev.entryLid, stamps);
+            for (const r of toRemove) {
+              try {
+                await store.deleteRelation?.(r.id);
+              } catch {
+                /* 消せなくても画面には入れていない */
+              }
+            }
           } catch (e) {
             if (!disposed)
               dispatcher.dispatch({

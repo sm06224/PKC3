@@ -394,6 +394,30 @@ describe('delete (P3-7a)', () => {
     expect(await undoOffer(), '戻したあとも持っている(2 度押せる)').toBeNull();
   });
 
+  it('🔴 章の欄が開いていて戻せないときは「戻しました」と言わず、「元に戻す」も手放さない', async () => {
+    const { d, q } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: '# 見出し\nB' });
+    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await tick(20);
+    expect(d.getState().entryMetas.has('a'), '前提: 消えている').toBe(false);
+    q<HTMLElement>('[data-pkc-entry="b"]')!.click();
+    await tick(20);
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'b', line: 0 });
+    expect(d.getState().sectionDraft, '前提: 章の欄が開いていない').not.toBeNull();
+    expect(await undoOffer(), '前提: 「元に戻す」を持っていない').not.toBeNull();
+
+    const undo = document.createElement('button');
+    undo.setAttribute('data-pkc-action', 'undo-trash');
+    document.body.firstElementChild!.append(undo);
+    undo.click();
+    await tick(40);
+    expect(d.getState().entryMetas.has('a'), '前提: 断られずに戻った').toBe(false);
+    expect(d.getState().notice ?? '', 'ゴミ箱に残っているのに「戻しました」と言った').not.toContain('ゴミ箱から元に戻しました');
+    expect(d.getState().error ?? '', '断った理由が出ていない').not.toBe('');
+    expect(await undoOffer(), '断られたのに「元に戻す」を手放した').not.toBeNull();
+  });
+
   it('⚠ 戻せる時間(7 秒)が過ぎたら知らせごと降ろす', async () => {
     const { d, q } = setup([meta('a', 1)], { a: 'A' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
