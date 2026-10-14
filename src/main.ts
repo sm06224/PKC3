@@ -4125,7 +4125,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         if (body === null) {
           dispatcher.dispatch({
             type: 'OP_FAILED',
-            error: '添付が見つかりません(整理された可能性)',
+            error: '添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)',
           });
           return;
         }
@@ -4456,7 +4456,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           } else {
             dispatcher.dispatch({
               type: 'OP_FAILED',
-              error: `この${what}の添付が見つかりません(整理された可能性)`,
+              error: `この${what}の添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)`,
             });
           }
         } catch (e) {
