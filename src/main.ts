@@ -18,6 +18,7 @@ import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { createUnloadGuard } from '@adapter/platform/unload-guard';
 import {
+  bodyWriteBlockReason,
   hasUnsavedTyping,
   isAsidePane,
   phaseBlockReason,
@@ -117,7 +118,7 @@ import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
 import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
 import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transport/webmcp-tools';
-import { appendUnlessEditedElsewhere, makeEditLockPort, type EditLockPort } from '@adapter/state/edited-elsewhere';
+import { appendUnlessEditedElsewhere, editedElsewhereReason, makeEditLockPort, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
@@ -2494,8 +2495,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       run: (job) => (storeEffects ? storeEffects.run(job) : job()),
       phase: () => dispatcher.getState().phase,
       metaOf: (lid) => dispatcher.getState().entryMetas.get(lid) ?? null,
+      // 🔴 書く lid ごとの門 ── 追記などの口と同じ 2 本(章・コード欄の打ちかけ / 別のタブの編集)
+      bodyBlockReason: (lid) => bodyWriteBlockReason(dispatcher.getState(), lid),
+      editedElsewhere: (lid) => editedElsewhereReason(dispatcher, editLockPort, lid),
       getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
-      write: (entry, expectHash) =>
+      write: (entry, { expectHash, keepMeta }) =>
         client.request({
           op: 'upsertEntry',
           cid,
@@ -2504,6 +2508,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           checkpoint: true,
           keepLatest: REVISION_KEEP_LATEST,
           expectHash,
+          keepMeta,
         }),
       refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null }),
     });

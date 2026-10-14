@@ -1673,6 +1673,33 @@ describe('構造をノートへ(#918 段①)', () => {
     for (const q of seen) expect(q.trimStart().slice(0, 6).toLowerCase()).toBe('select');
   });
 
+  it('🔴 構造を集めている間に編集を始めたら、「保存しました」と言わない(#1087)', async () => {
+    const base = schemaReply();
+    let dRef: Dispatcher | null = null;
+    let started = false;
+    // 1 本目の問い合わせの最中に、user が別のノートの編集を始める
+    const reply = async (sql: string): Promise<SqlAnswer> => {
+      if (!started && dRef !== null) {
+        started = true;
+        dRef.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+        dRef.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '' });
+        dRef.dispatch({ type: 'START_EDIT' });
+      }
+      return base.reply(sql);
+    };
+    const { schemaBtn, persisted, d } = setup(reply);
+    dRef = d;
+    schemaBtn.click();
+    // ⚠ 終わりを言う 2 つ(SQL_SAVED / SQL_SAVE_FAILED)が `running` を降ろすまで回す(上限つき)
+    for (let i = 0; i < 20 && d.getState().sqlPage.running; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(d.getState().sqlPage.running, '前提: 終わっていない').toBe(false);
+    expect(started, '前提: 集めている間に編集へ入っていない').toBe(true);
+    expect(d.getState().phase, '前提が崩れている(編集に入っていない)').toBe('editing');
+    expect(persisted.length, '編集中なのにノートを作った').toBe(0);
+    expect(d.getState().sqlPage.saved, '作っていないのに「保存しました」と言った').toBe('');
+    expect(d.getState().sqlPage.error ?? '').toContain(blockedActionNote('editing')!);
+  });
+
   it('🔴 2 回押しても 1 枚(同じノートを 2 つ作らない)', async () => {
     const { reply } = schemaReply();
     const { schemaBtn, persisted } = setup(reply);

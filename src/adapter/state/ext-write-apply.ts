@@ -6,7 +6,9 @@
  *
  * ## 守ること 4 つ
  *
- * 1. ⚠ **編集中は 1 バイトも書かない** ── 画面の draft を裏から潰さない
+ * 1. ⚠ **編集中は 1 バイトも書かない** ── 画面の draft を裏から潰さない。
+ *    全文編集(phase)だけでなく、**書く lid ごとに**章・コード欄の打ちかけ(`bodyBlockReason`)と
+ *    別のタブ・ウィンドウでの編集(`editedElsewhere`)も通す。1 件でも断られたら**全体を断る**
  * 2. 🔴 **書く前に全部読んで、古くないかを検める** ── 1 件でも読めなければ
  *    **全体を断る**(部分適用を作らない)
  * 3. 🔴 **履歴へ積む**(`checkpoint`)── **別のアプリが書いた本文**なので、
@@ -34,7 +36,7 @@ import type { EntryMeta } from '@core/model/entry-meta';
 import type { ExtWriteOp } from '@features/extension/ext-write';
 import { extractMeta } from '@features/flavor';
 import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
-import { phaseBlockReason, type AppPhase } from '@adapter/state/app-state';
+import { blockedWithSuffix, phaseBlockReason, type AppPhase } from '@adapter/state/app-state';
 
 /** 書き込む 1 行(store の `upsertEntry` に渡す形)。 */
 export interface ExtWriteEntry {
@@ -56,11 +58,26 @@ export interface ExtWriteApplyDeps {
   run<T>(job: () => Promise<T>): Promise<T>;
   phase(): AppPhase;
   metaOf(lid: string): EntryMeta | null;
+  /**
+   * 🔴 そのノートの本文を**このタブが**書かせない理由(章・コード欄の打ちかけ。`bodyWriteBlockReason`)。通すなら `null`。
+   * ⚠ 必須 ── 無いと phase だけの門に戻る(optional にしない)。
+   */
+  bodyBlockReason(lid: string): string | null;
+  /**
+   * 🔴 そのノートを**別のタブ・ウィンドウが**編集中か(`editedElsewhereReason`)。断る理由、通すなら `null`。
+   * ⚠ 必須 ── 追記などの口は全部この門を通っている。
+   */
+  editedElsewhere(lid: string): Promise<string | null>;
   getBody(lid: string): Promise<string | null>;
   /** @returns `conflict: true` = 先を越された(1 バイトも書いていない)。 */
   write(
     entry: ExtWriteEntry,
-    expectHash: string,
+    /**
+     * `expectHash` = 読んだ本文の指紋。🔴 `keepMeta: true` = **題名・並びは disk の値を保つ**
+     * (画面が持つ題名・並びは古いことがある。`store-effects.ts` の本文だけ書く口と同じ)。
+     * ⚠ 判断はここ(取り出した側)に置く ── `main.ts` は test から走らない。
+     */
+    opts: { expectHash: string; keepMeta: true },
   ): Promise<{ conflict?: boolean } | null | undefined>;
   /** 画面の取り直し。⚠ **1 件も書いていなければ呼ばない**(呼び側が守る)。 */
   refresh(): Promise<void>;
@@ -85,6 +102,20 @@ export async function applyExtWriteOps(
         ok: false as const,
         why: `PKC3 側で${blocked}送ってください`,
       };
+    /*
+     * ── ⓪ 書く lid ごとの門。⚠ **読む前・書く前に全部**通し、1 件でも断られたら全体を断る
+     *    (半分だけ書かない ── 下の ① と同じ扱い)。
+     */
+    const lids = [...new Set(ops.map((op) => op.lid))];
+    for (const lid of lids) {
+      const draft = deps.bodyBlockReason(lid);
+      if (draft !== null)
+        return { ok: false as const, why: `PKC3 側で${blockedWithSuffix(draft, '送ってください')}` };
+    }
+    for (const lid of lids) {
+      const elsewhere = await deps.editedElsewhere(lid);
+      if (elsewhere !== null) return { ok: false as const, why: elsewhere };
+    }
     /**
      * ── ① 全部読む。⚠ **1 件でも読めなければ全体を断る**
      *    (半分だけ書いて「読めませんでした」は、いちばん分からない負け方)。
@@ -110,20 +141,33 @@ export async function applyExtWriteOps(
         };
       }
       const ext = extractMeta(meta.archetype, op.body);
-      const stamps = await deps.write(
-        {
-          lid: op.lid,
-          // ⚠ **題名は触らない** ── 語彙は `setBody` だけである
-          title: meta.title,
-          archetype: meta.archetype,
-          body: op.body,
-          entryOrder: meta.entryOrder,
-          status: ext.status,
-          date: ext.date,
-          archived: ext.archived,
-        },
-        contentHash64Hex(bases.get(op.lid)!),
-      );
+      let stamps: { conflict?: boolean } | null | undefined;
+      try {
+        stamps = await deps.write(
+          {
+            lid: op.lid,
+            // ⚠ **題名は触らない** ── 語彙は `setBody` だけである
+            title: meta.title,
+            archetype: meta.archetype,
+            body: op.body,
+            entryOrder: meta.entryOrder,
+            status: ext.status,
+            date: ext.date,
+            archived: ext.archived,
+          },
+          { expectHash: contentHash64Hex(bases.get(op.lid)!), keepMeta: true },
+        );
+      } catch (e) {
+        // 1 件も書けていないなら今までどおり投げる(件数を言うことが無い)
+        if (wrote === 0) throw e;
+        // ⚠ 途中で投げても、書けた件数は消さない(拡張にも user にも「どこまで進んだか」が要る)。
+        //   読み直しまで投げても、言うべきは件数のほう
+        await deps.refresh().catch(() => undefined);
+        return {
+          ok: false as const,
+          why: `書き込みに失敗しました(${wrote} 件まで書いて止めました)`,
+        };
+      }
       if (stamps?.conflict === true) {
         if (wrote > 0) await deps.refresh();
         return {
@@ -133,7 +177,17 @@ export async function applyExtWriteOps(
       }
       wrote += 1;
     }
-    if (wrote > 0) await deps.refresh();
+    if (wrote > 0) {
+      try {
+        await deps.refresh();
+      } catch {
+        // 書けてはいる ── 読み直しだけが落ちた。「失敗」一色にしない
+        return {
+          ok: false as const,
+          why: `${wrote} 件は書きましたが、画面を更新できませんでした(PKC3 を再読み込みしてください)`,
+        };
+      }
+    }
     return { ok: true as const, wrote };
   });
 }

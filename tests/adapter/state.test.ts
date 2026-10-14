@@ -671,6 +671,21 @@ describe('effect layer: serialized store I/O', () => {
     off();
   });
 
+  it('🔴 改名が書けなかったら、名前を保存できなかったと言う(元の字だけにしない。#1087)', async () => {
+    const d = new Dispatcher();
+    const store: StorePort = {
+      ...fakeStore([], { a: 'A' }),
+      renameEntry: () => Promise.reject(new Error('disk full')),
+    };
+    const off = connectStoreEffects(d, store);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '新しい名前' });
+    await until(() => d.getState().error !== null);
+    expect(d.getState().error).toContain('名前を保存できませんでした');
+    expect(d.getState().error).toContain('disk full');
+    off();
+  });
+
   it('missing row is a failure, not an empty body (S3-bud guard, review C\')', async () => {
     const d = new Dispatcher();
     const off = connectStoreEffects(d, fakeStore([], {})); // 行なし

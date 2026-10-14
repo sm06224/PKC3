@@ -2439,7 +2439,24 @@ const guestDbs = new Map<string, Database>();
 const GUEST_MAX = 4;
 
 /** 客の DB を 1 つ閉じて手放す。⚠ **二度呼ばれても落ちない**(外す口は 2 つある)。 */
+/**
+ * 🔴 **窓ごとの世代**(#1087)。閉じるたびに進める ── `openSqlGuest` は途中で待つ(xlsx を解く)ので、
+ *   待つ間に同じ窓で選び直す / 外すと、後から来た古い回が新しい客を上書きして閉じずに残していた
+ *   (常駐メモリ。しかも以後の問い合わせが、画面と違う相手へ飛ぶ)。
+ */
+const guestGen = new Map<string, number>();
+
+/** 開けた客を窓に置く。⚠ 待つ間に世代が進んでいたら(選び直し・外した)、自分を閉じて置かない。 */
+function registerGuest(key: string, gen: number, db: Database): void {
+  if ((guestGen.get(key) ?? 0) !== gen) {
+    db.close();
+    return;
+  }
+  guestDbs.set(key, db);
+}
+
 function closeGuest(key: string): void {
+  guestGen.set(key, (guestGen.get(key) ?? 0) + 1);
   const db = guestDbs.get(key);
   guestDbs.delete(key);
   try {
@@ -2985,6 +3002,7 @@ const handlers: Handlers = {
     if (api === null) throw new Error('sqlite が初期化されていません');
     // ⚠ **この窓の前の客だけ**を閉じる(ほかの窓の客は触らない ── #836)
     closeGuest(req.guest);
+    const myGen = guestGen.get(req.guest) ?? 0;
     /**
      * 🔴 **上限を超えたら、いちばん古い客から押し出す**(#836)。
      * ⚠ `Map` は入れた順を保つので、先頭が最古である。
@@ -3033,7 +3051,7 @@ const handlers: Handlers = {
           }
         }
         for (const t of built.tables) createGuestTable(db, t);
-        guestDbs.set(req.guest, db);
+        registerGuest(req.guest, myGen, db);
         return {
           tables: built.tables.map((t) => t.name),
           bytes: req.image.byteLength,
@@ -3056,7 +3074,7 @@ const handlers: Handlers = {
       const tables = (
         db.selectObjects(USER_TABLE_NAMES_SQL) as unknown as Array<{ name: string }>
       ).map((r) => r.name);
-      guestDbs.set(req.guest, db);
+      registerGuest(req.guest, myGen, db);
       return { tables, bytes: req.image.byteLength, truncated: false };
     } catch (e) {
       /**

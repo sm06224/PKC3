@@ -3860,6 +3860,19 @@ describe('添付の .xlsx を客の DB として開く(#854 段③)', () => {
     await request({ op: 'closeSqlGuest', guest: W });
   });
 
+  it('🔴 読み込みの途中で外したら、後から読み終えた本を置かない(#1087)', async () => {
+    const book = await buildXlsx([{ name: '売上', rows: [['品'], ['りんご']] }]);
+    // xlsx は途中で待つ ── その間に user が相手を外す
+    const opening = open(book);
+    await request({ op: 'closeSqlGuest', guest: W });
+    await opening;
+    await expect(runGuest('SELECT 1'), '外した後に、読み終えた本が居座った').rejects.toThrow(/開かれていません/);
+    // 対照群:外さなければ置かれる
+    await open(book);
+    expect((await runGuest('SELECT 品 FROM sheet1')).rows).toEqual([['りんご']]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
   it('🔴 読めない本は、その場で断る(常駐を残さない)', async () => {
     await expect(
       open(new TextEncoder().encode('ただの字')),
