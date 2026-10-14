@@ -123,7 +123,7 @@ function shared() {
     gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
     putBlob: put,
     putMeta: async (m) => void metas.push(m),
-    listMetas: async () => metas.map((m) => ({ key: m.key, size: m.size, hash: m.hash })),
+    listStoredBlobKeys: async () => [...blobs.keys()],
   };
 
   return { d, importDeps, attachDeps, blobs, metas, putLog, revChains };

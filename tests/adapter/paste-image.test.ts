@@ -381,7 +381,7 @@ describe('本物の添付を通したときの預かり(#250 → #668 B)', () =>
       gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
       putBlob: async (key) => void stored.push(key),
       putMeta: async () => {},
-      listMetas: async () => [],
+      listStoredBlobKeys: async () => [],
     };
     const dispatcher = new Dispatcher();
     bindActions(root, dispatcher, {

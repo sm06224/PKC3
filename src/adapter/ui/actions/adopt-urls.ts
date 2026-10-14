@@ -119,7 +119,7 @@ export async function adoptUrls(
   // ⚠ 整理(未参照 GC)と排他にする ── 本文へ差すのは put のあとなので、
   //   その窓で整理が走ると貼ったばかりの bytes を「使っていない」と数えて消す
   await deps.gate.queued(async () => {
-    const known = new Set((await deps.attach.listMetas().catch(() => [])).map((m) => m.key));
+    const known = new Set(await deps.attach.listStoredBlobKeys().catch(() => []));
     for (const url of urls) {
       let blob: Blob;
       try {
