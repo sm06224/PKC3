@@ -291,7 +291,7 @@ import {
 import { appPanes, applyPaneVisibility, refoldPeeked } from '@adapter/ui/render/pane-visibility';
 import { requestAppendFocus, requestBodyFocus, takeAppendFocus } from '@adapter/ui/render/focus-request';
 import { isTouchOnly } from '@adapter/ui/render/touch-device';
-import { LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
+import { currentTrashOffer, LINKED_FROM_SOME, offerTrashUndo, takeTrashUndo } from '@adapter/ui/render/trash-undo';
 import { offerDualMoveUndo, takeDualMoveUndo } from '@adapter/ui/render/dual-move-undo';
 import { appPhone } from '@adapter/ui/render/phone-layout';
 import { appKeymap, type KeymapStore } from '@adapter/ui/render/keymap';
@@ -8654,10 +8654,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}戻してください` });
       return;
     }
+    /**
+     * 🔴 **断られるときは、持っている物を手放さない**(#1087、ゴミ箱の見直し)。章の欄が開いている間は
+     *   reducer が断る(`UNDO_TRASH` → `sectionDraftBlockedResult`)── 直す前は先に手放してから撃ち、
+     *   断られても「ゴミ箱から元に戻しました」を出していた(ノートはゴミ箱に残るのに、戻ったと読める。
+     *   しかも「元に戻す」は消えている)。断りの字は reducer が出すので、ここは手放さずに撃つだけ。
+     */
+    if (dispatcher.getState().sectionDraft !== null) {
+      const offer = currentTrashOffer();
+      if (offer !== null) dispatcher.dispatch({ type: 'UNDO_TRASH', lids: offer.lids });
+      return;
+    }
     const lids = takeTrashUndo();
     if (lids === null) return;
+    // ⚠ 「戻しました」はここでは言わない ── 実際に戻ったとき(`ENTRY_RESTORED`)に reducer が言う
+    //   (戻った先のフォルダの題名つき。ゴミ箱の一覧から戻したときと同じ字)
     dispatcher.dispatch({ type: 'UNDO_TRASH', lids });
-    dispatcher.dispatch({ type: 'OP_NOTICE', message: 'ゴミ箱から元に戻しました' });
   },
   /**
    * 🔴 **予定を動かした直後の「元に戻す」**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 6)。

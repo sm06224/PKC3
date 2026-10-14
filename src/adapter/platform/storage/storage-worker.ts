@@ -3745,9 +3745,12 @@ const handlers: Handlers = {
         const hash = contentHash64Hex(row.body);
         const head = headRevision(database, req.cid, req.lid);
         if (head && head.content_hash === hash) {
+          // 🔴 **題名と種類も今の値にする**(#1087、ゴミ箱の見直し)── 本文を変えずに改名してから消すと、
+          //   頭の版は**改名前の題名**のままで、ゴミ箱の一覧にも、戻したノートにもその題名が出ていた
+          //   (戻すときの題名はこの行から読む)。改名は本文に触らない口(`renameEntry`)なので、ここで拾う
           database.exec({
-            sql: `UPDATE revisions SET snapshot = ?, kind = 'full' WHERE cid = ? AND id = ?`,
-            bind: [row.body, req.cid, head.id],
+            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ? WHERE cid = ? AND id = ?`,
+            bind: [row.body, row.title, row.archetype, req.cid, head.id],
           });
         } else {
           database.exec({

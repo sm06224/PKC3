@@ -46,6 +46,7 @@ import {
 import { tableFormatDropsInfo } from '@features/markdown/table-convert';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
+import { splitRestoredEdges } from '@features/relation/tree';
 import {
   EMPTY_SMART,
   isSmartEmpty,
@@ -3227,6 +3228,20 @@ export function connectStoreEffects(
                 }));
             } catch {
               /* 関係が読めなくても entry の復元は進める */
+            }
+            /**
+             * 🔴 **輪を作る居場所の辺は戻さず、disk からも消す**(#1087、ゴミ箱の見直し。`splitRestoredEdges`)。
+             * ⚠ 画面だけで捨てると、次に開いたときに disk の辺が読まれて輪が戻る(フォルダが中身ごと消える)。
+             * ⚠ 消せなくても復元は進める(画面には輪を入れない)。
+             */
+            const split = splitRestoredEdges(dispatcher.getState().relations, ev.entryLid, restored);
+            restored = split.kept;
+            for (const r of split.dropped) {
+              try {
+                await store.deleteRelation?.(r.id);
+              } catch {
+                /* 消せなくても画面には入れない */
+              }
             }
             if (!disposed)
               dispatcher.dispatch({

@@ -501,6 +501,19 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(await metasOf('e6')).toHaveLength(1);
   });
 
+  it('🔴 復元 → 改名 → 再削除で、ゴミ箱の題名が改名後になる(本文が同じでも)', async () => {
+    // 直す前: 頭の版の本文が同じだと全文化だけして題名を書き換えず、戻すと**改名前の題名**に戻っていた
+    await write('e6t', '# 同一\n');
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'e6t' });
+    await write('e6t', '# 同一\n'); // 復元相当
+    await request({ op: 'renameEntry', cid: 'c1', lid: 'e6t', title: '新しい題名' });
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'e6t' });
+    const trash = await request({ op: 'listTrash', cid: 'c1' });
+    const row = trash.find((t) => t.entry_lid === 'e6t')!;
+    expect(row.title).toBe('新しい題名');
+    expect(await metasOf('e6t'), '前提: 同じ本文の版を積み増していない(全文化の枝を通っていない)').toHaveLength(1);
+  });
+
   it('鎖の base が壊れたら可視エラー ── それらしい本文を返さない', async () => {
     // ⚠ 本文が小さいとパッチの方が大きくなり全文で保存される(= tip 非依存に
     // なって壊しようがない)。**実際にパッチが選ばれる大きさ**で試す ──

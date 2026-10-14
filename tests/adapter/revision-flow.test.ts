@@ -611,3 +611,72 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(s.relations.some((r) => r.id === 'rX'), '無関係な関係まで復活させた').toBe(false);
   });
 });
+
+/**
+ * 🔴 **ゴミ箱から戻したフォルダが、輪を作らない**(#1087、ゴミ箱の見直し)。
+ * X > A > B の A をゴミ箱へ → X を B の中へ移す(画面の木には X → A が無いので通る)→ A を戻す。
+ * 直す前は disk の X → A / A → B / B → X を全部合流させ、3 つのフォルダが中身ごと一覧から消えていた。
+ */
+describe('ゴミ箱から戻すとき、居場所の輪を作らない', () => {
+  const edge = (id: string, from: string, to: string) => ({
+    id,
+    kind: 'structural',
+    fromLid: from,
+    toLid: to,
+    createdAt: null,
+    updatedAt: null,
+  });
+
+  it('🔴 輪を作る辺は戻さず、disk からも消す。親の辺は戻る', async () => {
+    const removed: string[] = [];
+    const d = new Dispatcher();
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () => Promise.reject(new Error('使わない')),
+      reorderEntry: async () => stubStamps(),
+      persistEntry: async () => stubStamps(),
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      deleteRelation: async (id: string) => {
+        removed.push(id);
+      },
+      listRelations: async () => [
+        { id: 'rXA', kind: 'structural', from_lid: 'X', to_lid: 'A', created_at: null, updated_at: null },
+        { id: 'rAB', kind: 'structural', from_lid: 'A', to_lid: 'B', created_at: null, updated_at: null },
+        { id: 'rBX', kind: 'structural', from_lid: 'B', to_lid: 'X', created_at: null, updated_at: null },
+      ],
+      getRevision: async () => ({
+        id: 'r-A',
+        entry_lid: 'A',
+        rev_order: 1,
+        created_at: null,
+        title: 'A',
+        archetype: 'folder',
+        body: '',
+      }),
+    } as unknown as StorePort);
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        meta('X', { entryOrder: 0, archetype: 'folder' }),
+        meta('A', { entryOrder: 1, archetype: 'folder' }),
+        meta('B', { entryOrder: 2, archetype: 'folder' }),
+      ],
+      relations: [edge('rXA', 'X', 'A'), edge('rAB', 'A', 'B')],
+    });
+    d.dispatch({ type: 'DELETE_ENTRY', lid: 'A' });
+    d.dispatch({ type: 'SET_ENTRY_PARENT', lid: 'X', parentLid: 'B', relationId: 'rBX' });
+    expect(d.getState().relations.some((r) => r.fromLid === 'B' && r.toLid === 'X'), '前提: X を B の中へ移せていない').toBe(true);
+
+    d.dispatch({ type: 'RESTORE_TRASH', entryLid: 'A', revId: 'r-A' });
+    await tick(30);
+    const s = d.getState();
+    expect(s.entryMetas.has('A'), '前提: 戻っていない').toBe(true);
+    expect(s.relations.some((r) => r.fromLid === 'X' && r.toLid === 'A'), '親の辺が戻っていない').toBe(true);
+    expect(s.relations.some((r) => r.fromLid === 'A' && r.toLid === 'B'), '輪を作る辺を戻した').toBe(false);
+    expect(removed, '輪を作る辺を disk に残した(次に開くと輪が戻る)').toEqual(['rAB']);
+  });
+});

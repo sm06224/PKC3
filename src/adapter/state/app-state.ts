@@ -8898,8 +8898,11 @@ function reduceCore(
         // 🔴 **自分の子孫の中へは入れない**(輪ができて木でなくなる)。
         //    ⚠ 判定はここでやる ── worker は metas を持たないので木を知らない
         const parentOf = resolveCanonicalParents(state.entryMetas, state.relations);
-        for (let cur: string | undefined = parentLid; cur !== undefined; cur = parentOf.get(cur)) {
+        // ⚠ 訪問済みで止める ── disk に輪が残った器を開いたとき(#1087 ゴミ箱の見直し)に、ここで回り続けない
+        const walked = new Set<string>();
+        for (let cur: string | undefined = parentLid; cur !== undefined && !walked.has(cur); cur = parentOf.get(cur)) {
           if (cur === action.lid) return { state, events: [] };
+          walked.add(cur);
         }
       }
       // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
