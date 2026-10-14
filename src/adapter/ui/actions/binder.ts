@@ -124,6 +124,8 @@ import { HIDDEN_HEAD_ATTR, joinHiddenHead } from '@features/flavor/attachment-ed
 import { SMART_ARCHETYPE, SMART_FIELDS, type SmartField } from '@features/smart/smart-spec';
 import {
   buildSettingsFile as buildSettingsFileData,
+  settingsAppliedNote,
+  settingsTooLongToExport,
   canApplySettings,
   planSettingsImport,
   settingsChangeText,
@@ -10988,6 +10990,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       settingsFileName(today),
       new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }),
     );
+    // 🔴 長すぎて入らなかった設定を言う(#1087)── 黙って落とすと「全部持ち出した」と読まれる
+    const tooLong = settingsTooLongToExport(readSetting);
+    if (tooLong.length > 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
+      });
+    }
   },
   /**
    * 🔴 **連絡先を vCard で書き出す**(#278 段③)。
@@ -11121,12 +11131,14 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     if (!canApplySettings(plan)) return;
     let wrote = 0;
+    let failed = 0;
     for (const c of plan.changes) {
       try {
         localStorage.setItem(c.key, c.to);
         wrote += 1;
       } catch {
-        // ⚠ 1 件書けなくても残りは当てる(全部捨てるほうが害が大きい)
+        // ⚠ 1 件書けなくても残りは当てる(全部捨てるほうが害が大きい)── ただし数えて言う
+        failed += 1;
       }
     }
     paintSettingsPlan(root, null);
@@ -11138,7 +11150,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `設定を ${String(wrote)} 件入れました(画面に出るのは再読み込みしてからです)`,
+      error: settingsAppliedNote(wrote, failed),
     });
   },
   'apply-plan': (dispatcher, _target, services, root) => {

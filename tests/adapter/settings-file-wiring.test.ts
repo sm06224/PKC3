@@ -109,6 +109,26 @@ describe('設定の持ち出しの配線(#414)', () => {
     expect(msg, '読み直しが要ることを言っていない').toContain('再読み込み');
   });
 
+  /** 🔴 **書けなかった件数を言う**(#1087)── 全部書けなくても成功と同じ字にしない。 */
+  it('🔴 この端末に保存できなかった設定は、件数で言う', async () => {
+    const { root, sent } = setup();
+    await choose(root, fileText([{ key: 'pkc3.theme', value: 'dark' }]));
+    sent.length = 0;
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      apply(root).click();
+      await tick();
+    } finally {
+      spy.mockRestore();
+    }
+    const said = sent.find((a) => a.type === 'OP_FAILED');
+    const msg = said?.type === 'OP_FAILED' ? said.error : '';
+    expect(msg, '書けなかったことを言っていない').toContain('1 件はこの端末に保存できず');
+    expect(localStorage.getItem('pkc3.theme'), '前提: 書けていない').toBeNull();
+  });
+
   /** 🔴 **運ばない鍵は、file に書いてあっても書き込まない**(許可・フラグ)。 */
   it('🔴 運ばない鍵は、file に在っても書き込まない', async () => {
     const { root } = setup();
