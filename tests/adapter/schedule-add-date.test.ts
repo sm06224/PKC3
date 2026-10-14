@@ -43,10 +43,11 @@ describe('予定表の「足す」の日付(#1087)', () => {
 
   it('対照群: 正しい日付だけなら書く / 欄が空なら字の日付のまま書く', () => {
     const ok = boot();
-    expect(addScheduleItem(ok.d, { text: '見積', date: '2026-03-05' })).toBe(true);
+    // 頼んだ回は Promise(disk に着くまで待つ ── #1087)。断った回の同期 false と区別する
+    expect(addScheduleItem(ok.d, { text: '見積', date: '2026-03-05' })).toBeInstanceOf(Promise);
     expect(ok.appends().map((a) => (a as { text: string }).text)).toEqual(['- [ ] 見積 @2026-03-05']);
     const inText = boot();
-    expect(addScheduleItem(inText.d, { text: '見積 @2026-03-01', date: '' })).toBe(true);
+    expect(addScheduleItem(inText.d, { text: '見積 @2026-03-01', date: '' })).toBeInstanceOf(Promise);
     expect(inText.appends().map((a) => (a as { text: string }).text)).toEqual(['- [ ] 見積 @2026-03-01']);
   });
 });

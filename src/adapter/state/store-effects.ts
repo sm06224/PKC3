@@ -37,6 +37,7 @@ import {
 import {
   applyBodyRewrite,
   bodyRewriteRefusal,
+  isRepeatAlreadyDone,
   applyTagsToBody,
   applyTaskRun,
   taskRunNotice,
@@ -3815,6 +3816,15 @@ export function connectStoreEffects(
              * 描いた時の原文のものなので、その後の書換でずれていることがある。
              */
             const newBody = applyBodyRewrite(body, ev.rewrite);
+            if (newBody === null && isRepeatAlreadyDone(body, ev.rewrite)) {
+              /**
+               * 🔴 **もう済んでいる回に、「本文が変わっている」と言わない**。書込の返事の前に同じ回の
+               *   チェックを 2 度押すと、2 度目は同じ行を作ろうとして断られる ── 1 度目で書けているので、
+               *   開き直しても何も変わらない。押した結果は出ている(嘘の赤帯にしない)。
+               */
+              dispatcher.dispatch({ type: 'OP_NOTICE', message: 'この回はもう完了しています' });
+              return;
+            }
             if (newBody === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
