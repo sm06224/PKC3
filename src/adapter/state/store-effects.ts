@@ -37,6 +37,7 @@ import {
 import {
   applyBodyRewrite,
   bodyRewriteRefusal,
+  isRepeatAlreadyDone,
   applyTagsToBody,
   applyTaskRun,
   taskRunNotice,
@@ -682,6 +683,8 @@ export function connectStoreEffects(
   // 本文の全文検索の合流(REQUEST_SEARCH)── 飛んでいる 1 本と、その間に来た最新の語
   let searchInFlight = false;
   let searchPending: string | null = null;
+  // 書込の後の撃ち直しが待っている(#1087)── 飛んでいる語と同じでも送り直す
+  let searchAgain = false;
   /**
    * 🔴 **調べる相手の中身を読む、たった 1 か所**(#854 段② / #682 段②)。
    *
@@ -1030,7 +1033,7 @@ export function connectStoreEffects(
             date: ext.date,
             archived: ext.archived,
           },
-          { expectHash: contentHash64Hex(body) },
+          { keepMeta: true, expectHash: contentHash64Hex(body) },
         );
         if (disposed) return;
         // ⚠ **刻みを流す** ── 流さないと、条件を直しても一覧の「更新」が古いまま
@@ -1054,6 +1057,16 @@ export function connectStoreEffects(
       updatedAt: s.updatedAt,
     });
     rescanColumnSmarts();
+    /**
+     * 🔴 **絞っている語で、本文の検索を撃ち直す**(#1087)。⚠ 検索を撃つのは語を打ったときだけだった
+     *   ので、絞ったまま本文を書き換えると、**新しく当たるノートが出ない**(外れたノートも残る)。
+     *   検索は書込の列に載らないので、保存の直後に撃つと保存前の本文で走る ── バックリンクと同じ作法で
+     *   **書込の後ろ**に置く(`scanAfterWrites`。まとめて書いても 1 本に畳まれる)。語が空なら撃たない
+     *   (`REFRESH_SEARCH` の reducer が決める)。
+     */
+    scanAfterWrites('search', async () => {
+      if (!disposed) dispatcher.dispatch({ type: 'REFRESH_SEARCH' });
+    });
     /**
      * 🔴 **連絡先の一覧を開いていれば、集め直す**(#1087)。⚠ 直す前は、タブを開いたままノート側で
      *   電話を直して保存しても一覧は古いままで、「vCard で書き出す」が**古い番号を書いていた**
@@ -1100,6 +1113,7 @@ export function connectStoreEffects(
          */
         if (searchInFlight) {
           searchPending = q;
+          if (ev.again === true) searchAgain = true;
           break;
         }
         const run = (query: string): void => {
@@ -1107,8 +1121,10 @@ export function connectStoreEffects(
           const settle = (): void => {
             searchInFlight = false;
             const next = searchPending;
+            const again = searchAgain;
             searchPending = null;
-            if (next !== null && next !== query && !disposed) run(next);
+            searchAgain = false;
+            if (next !== null && (next !== query || again) && !disposed) run(next);
           };
           // 同期に投げられても飛行中の印を残さない(Promise の中で呼ぶ)
           void new Promise<Awaited<ReturnType<typeof search>>>((r) => r(search(query))).then(
@@ -2295,7 +2311,7 @@ export function connectStoreEffects(
                 date: ext.date,
                 archived: ext.archived,
               },
-              { expectHash: contentHash64Hex(body) },
+              { keepMeta: true, expectHash: contentHash64Hex(body) },
             );
             if (stamps.conflict === true) {
               dispatcher.dispatch({
@@ -2407,7 +2423,7 @@ export function connectStoreEffects(
                   date: ext.date,
                   archived: ext.archived,
                 },
-                { expectHash: contentHash64Hex(body) },
+                { keepMeta: true, expectHash: contentHash64Hex(body) },
               );
               if (disposed) return;
               if (stamps.conflict === true) {
@@ -2596,7 +2612,7 @@ export function connectStoreEffects(
                   date: ext.date,
                   archived: ext.archived,
                 },
-                { expectHash: contentHash64Hex(body) },
+                { keepMeta: true, expectHash: contentHash64Hex(body) },
               );
               if (disposed) return;
               if (stamps.conflict === true) {
@@ -2656,7 +2672,7 @@ export function connectStoreEffects(
                 date: ext.date,
                 archived: ext.archived,
               },
-              { expectHash: contentHash64Hex(body) },
+              { keepMeta: true, expectHash: contentHash64Hex(body) },
             );
             if (disposed) return;
             if (stamps.conflict === true) {
@@ -2785,7 +2801,15 @@ export function connectStoreEffects(
           const bump = (m: Map<string, number>, tag: string): void => {
             m.set(tag, (m.get(tag) ?? 0) + 1);
           };
-          let failed = 0;
+          /**
+           * 🔴 **書けなかった理由は 3 つに分けて数える**(#1087)。⚠ 直す前は 1 つの数に畳み、
+           *   固定の字「別のタブが書き換えた可能性」を出していた ── 空き不足で落ちたときも
+           *   別のタブのせいに見えた。
+           */
+          let unread = 0; // 本文を読めなかった
+          let conflicted = 0; // 読んでから書くまでに別のタブ・ウィンドウが書いた
+          let threw = 0; // 書込が例外で落ちた(空き不足など)
+          let firstThrown: string | null = null;
           /**
            * 🔴 **本文にも同じタグが書いてあると、外しても外れない**
            *   (2026-08-29 の動線レビューで確定)。
@@ -2798,13 +2822,13 @@ export function connectStoreEffects(
            */
           let stillInBody = 0;
           // 🔑 読みは 1 往復にまとめる(#1087)。書込は 1 件ずつ・各々 `expectHash` で守る。
-          //    ⚠ 読めなかったときは、従来の「1 件ごとの読みが失敗」と同じく全件 failed に数える
+          //    ⚠ 読めなかったときは、従来の「1 件ごとの読みが失敗」と同じく全件「読めなかった」に数える
           let bodyOf = new Map<string, string>();
           try {
             const bodyRows = await store.getBodies(ev.targets.map((t) => t.lid));
             bodyOf = new Map(bodyRows.map((r) => [r.lid, r.body]));
           } catch {
-            /* 空のまま ── 下で 1 件ずつ failed に数える */
+            /* 空のまま ── 下で 1 件ずつ「読めなかった」に数える */
           }
           if (disposed) return;
           for (const t of ev.targets) {
@@ -2812,7 +2836,7 @@ export function connectStoreEffects(
             try {
               const body = bodyOf.get(t.lid) ?? null;
               if (body === null) {
-                failed++;
+                unread++;
                 continue;
               }
               /**
@@ -2858,10 +2882,10 @@ export function connectStoreEffects(
                   date: ext.date,
                   archived: ext.archived,
                 },
-                { expectHash: contentHash64Hex(body) },
+                { keepMeta: true, expectHash: contentHash64Hex(body) },
               );
               if (stamps.conflict === true) {
-                failed++;
+                conflicted++;
                 continue;
               }
               tally();
@@ -2881,8 +2905,9 @@ export function connectStoreEffects(
                   date: ext.date,
                   archived: ext.archived,
                 });
-            } catch {
-              failed++;
+            } catch (e) {
+              threw++;
+              firstThrown ??= errorText(e);
             }
           }
           if (disposed) return;
@@ -2923,9 +2948,11 @@ export function connectStoreEffects(
                 `${label(tag)}${lim} 件はタグが ${String(MAX_TAGS)} 個に達していて付きませんでした(1 つ外してから足してください)`,
               );
           }
-          // ⚠ 理由は 2 つある(本文を読めなかった / 別のタブが書き換えた)── 片方に決めつけない(#1087)
-          if (failed > 0)
-            parts.push(`${failed} 件は書けませんでした(本文を読めなかったか、別のタブまたはウィンドウが書き換えた可能性があります)`);
+          // ⚠ 理由ごとに言う(#1087)── 例外の側は最初の 1 件の理由を添える(空き不足を別のタブのせいにしない)
+          if (unread > 0) parts.push(`${unread} 件は書けませんでした(本文を読めませんでした)`);
+          if (conflicted > 0)
+            parts.push(`${conflicted} 件は書けませんでした(別のタブまたはウィンドウが書き換えたためです)`);
+          if (threw > 0) parts.push(`${threw} 件は書けませんでした(${firstThrown ?? '理由は分かりません'})`);
           /**
            * 🔴 **外しきれていないことを言う**(2026-08-29)。⚠ 黙ると
            *   「外したのに、まだそのタグで集まる」= 壊れて見える。
@@ -3413,7 +3440,7 @@ export function connectStoreEffects(
                   date: ext.date,
                   archived: ext.archived,
                 },
-                { expectHash: contentHash64Hex(base) },
+                { keepMeta: true, expectHash: contentHash64Hex(base) },
               );
               return { stamps, newBody, ext, base };
             };
@@ -3528,7 +3555,7 @@ export function connectStoreEffects(
                   archived: ext.archived,
                 },
                 // 🔑 全文編集の保存と同じ形(checkpoint: true ── 章の書換えは文章の書換え)
-                { checkpoint: true, expectHash: contentHash64Hex(base) },
+                { checkpoint: true, keepMeta: true, expectHash: contentHash64Hex(base) },
               );
               return { ok: true, stamps, newBody: replaced.body, ext };
             };
@@ -3609,7 +3636,7 @@ export function connectStoreEffects(
                   archived: ext.archived,
                 },
                 // 🔑 全文編集の保存と同じ形(checkpoint: true ── 枠の書換えは文章の書換え)
-                { checkpoint: true, expectHash: contentHash64Hex(base) },
+                { checkpoint: true, keepMeta: true, expectHash: contentHash64Hex(base) },
               );
               return { ok: true, stamps, newBody: replaced.body, ext };
             };
@@ -3707,7 +3734,7 @@ export function connectStoreEffects(
                 date: toExt.date,
                 archived: toExt.archived,
               },
-              { expectHash: contentHash64Hex(toBody) },
+              { keepMeta: true, expectHash: contentHash64Hex(toBody) },
             );
             if (disposed) return;
             if (toStamps.conflict === true)
@@ -3744,7 +3771,7 @@ export function connectStoreEffects(
                 date: fromExt.date,
                 archived: fromExt.archived,
               },
-              { expectHash: contentHash64Hex(fromBody) },
+              { keepMeta: true, expectHash: contentHash64Hex(fromBody) },
             );
             if (disposed) return;
             if (fromStamps.conflict === true)
@@ -3815,6 +3842,15 @@ export function connectStoreEffects(
              * 描いた時の原文のものなので、その後の書換でずれていることがある。
              */
             const newBody = applyBodyRewrite(body, ev.rewrite);
+            if (newBody === null && isRepeatAlreadyDone(body, ev.rewrite)) {
+              /**
+               * 🔴 **もう済んでいる回に、「本文が変わっている」と言わない**。書込の返事の前に同じ回の
+               *   チェックを 2 度押すと、2 度目は同じ行を作ろうとして断られる ── 1 度目で書けているので、
+               *   開き直しても何も変わらない。押した結果は出ている(嘘の赤帯にしない)。
+               */
+              dispatcher.dispatch({ type: 'OP_NOTICE', message: 'この回はもう完了しています' });
+              return;
+            }
             if (newBody === null) {
               dispatcher.dispatch({
                 type: 'OP_FAILED',
@@ -3885,6 +3921,8 @@ export function connectStoreEffects(
                */
               {
                 expectHash: contentHash64Hex(body),
+                // 🔴 本文だけを書く(#1087)── 題名・並び・種類は disk の値を保つ
+                keepMeta: true,
                 ...(ev.rewrite.kind === 'task-run' ||
                 (ev.rewrite.kind === 'csv-shape' && ev.rewrite.mode === 'remove') ||
                 /**

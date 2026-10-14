@@ -173,11 +173,12 @@ describe('① 予定の面の「足す」', () => {
     s.detach();
   });
 
-  it('口が無い環境では従来どおり同期(boolean)で返る', () => {
+  it('口が無い環境では別のタブへの問い合わせを挟まず、すぐ書込を頼む', () => {
     const d = new Dispatcher();
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('t1', NOTE_TITLE)], relations: [] });
     const r = addScheduleItemChecked(d, {}, { text: 'x', date: '' });
-    expect(typeof r, '口が無いのに非同期になった').toBe('boolean');
+    // 頼んだ回は結末(disk に着く)まで待つので Promise(#1087)。⚠ 別のタブへの問い合わせは挟まない
+    expect(r).toBeInstanceOf(Promise);
   });
 });
 
@@ -235,11 +236,11 @@ describe('② 目盛りの作成(ダブルクリック / ドラッグ)', () => {
     s.detach();
   });
 
-  it('問い合わせが要らない回(口が無い)は従来どおり同期で書く', () => {
+  it('問い合わせが要らない回(口が無い)は、問い合わせの待ちを挟まず書く', async () => {
     const s = setup({});
     createViaGrid(s, '同期');
-    // 同期で撃たれる ── tick を待たずに枠が畳まれている
-    expect(s.root.querySelectorAll(BOX), '口が無いのに非同期になった').toHaveLength(0);
+    await tick();
+    expect(s.root.querySelectorAll(BOX), '枠が畳まれていない').toHaveLength(0);
     s.detach();
   });
 });

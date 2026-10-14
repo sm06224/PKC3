@@ -12,7 +12,7 @@
  * 観測点は **disk に着いた本文**(画面だけ変わって保存されない、を作らない)。
  */
 import { stubStamps } from '../helpers/store-stamps';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
@@ -52,6 +52,7 @@ function setup(
   bodies: Record<string, string>,
   now?: () => Date,
   services: BinderServices = {},
+  failWrite: boolean | 'hang' = false,
 ) {
   const root = document.createElement('div');
   document.body.append(root);
@@ -73,6 +74,9 @@ function setup(
     replaceAssetRefs: () => Promise.reject(new Error('使わない')),
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
+      // 追記が「頼めた」あとで失敗する回(空き不足・保存の失敗)を作る(#1087)
+      if (failWrite === 'hang' && e.lid === 't1') await new Promise<never>(() => {});
+      if (failWrite === true && e.lid === 't1') throw new Error('disk full');
       persisted.push(e);
       disk[e.lid] = e.body;
       return stubStamps();
@@ -462,5 +466,55 @@ describe('日付なしで足したときの知らせ', () => {
     type(s, ''); // 字が空 = 足せない
     await add(s);
     expect(said, '足せなかったのに「足しました」と言った').toEqual([]);
+  });
+});
+
+describe('🔴 #1087 書込が「頼めた」あとで失敗しても、打った字を失わない', () => {
+  const add = async (s: ReturnType<typeof setup>): Promise<void> => {
+    s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+    await tick();
+  };
+
+  it('書込が失敗する(APPEND_SETTLED が ok:false)と、欄の字が残り、理由が出る', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {}, true);
+    await tick();
+    const events: Array<{ ok: boolean }> = [];
+    s.d.onEvent((ev) => {
+      if (ev.type === 'APPEND_SETTLED') events.push({ ok: ev.ok });
+    });
+    type(s, '消えてはいけない', '2026-08-28');
+    await add(s);
+    expect(events, '前提:結末が ok:false で来た').toEqual([{ ok: false }]);
+    expect(s.disk['t1'], '前提:disk には着いていない').toBe('メモ\n');
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    expect(field.value, '書けなかったのに欄を空にした(打った字が消える)').toBe('消えてはいけない');
+    expect(field.readOnly, '欄が読み取り専用のまま').toBe(false);
+    expect(s.d.getState().error, '赤い字が出ていない').not.toBeNull();
+  });
+
+  it('結末が来ない(時間切れ = 着いたかもしれない)ときも欄の字は残す。重複より、字が消えるほうが損だから', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' }, undefined, {}, 'hang');
+    await tick();
+    vi.useFakeTimers();
+    try {
+      type(s, '着いたかもしれない', '2026-08-28');
+      s.q('[data-pkc-action="schedule-quick-add"]')!.click();
+      await vi.advanceTimersByTimeAsync(10_500);
+    } finally {
+      vi.useRealTimers();
+    }
+    const field = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
+    expect(field.value, '時間切れで欄を空にした').toBe('着いたかもしれない');
+    expect(field.readOnly, '欄が読み取り専用のまま').toBe(false);
+    expect(s.d.getState().error ?? '', '時間切れの理由が出ていない').toContain('確かめられませんでした');
+  });
+
+  it('対照群:成功すると、disk に着いてから欄が空になる', async () => {
+    const s = setup([meta('t1', { title: TODAY })], { t1: 'メモ\n' });
+    await tick();
+    type(s, 'ちゃんと足す', '2026-08-28');
+    await add(s);
+    expect(s.disk['t1']).toContain('- [ ] ちゃんと足す @2026-08-28');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!.value).toBe('');
   });
 });

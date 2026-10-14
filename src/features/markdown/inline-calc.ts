@@ -475,6 +475,20 @@ function trailingNumber(line: string): number | null {
  * `合計=` の合計。上へ、**空行(空白だけの行)に当たるまで**の各行の末尾の数を足す。
  * 数が 1 つも無ければ `null`。
  */
+/**
+ * 行の頭(`=` / `＝` より前)が合計の合図(`合計` / `sum`)か。⚠ 合図を見る門と、前の合計の行を足さない門の**同じ 1 本**(§7)。
+ */
+function isSumLabel(head: string): boolean {
+  const label = foldLetters(toHalfWidth(head)).replace(LIST_MARKER, '').trim().toLowerCase();
+  return label === '合計' || label === 'sum';
+}
+
+/** 前に出した合計の行(`合計=500`)か。⚠ `=` の後が答えの行だけ(`=` が無い行は見ない)。 */
+function isSumResultLine(raw: string): boolean {
+  const eq = toHalfWidth(raw).indexOf('=');
+  return eq >= 0 && isSumLabel(raw.slice(0, eq));
+}
+
 function sumAbove(fullText: string, lineStartIdx: number): number | null {
   let total = 0;
   let found = false;
@@ -483,6 +497,15 @@ function sumAbove(fullText: string, lineStartIdx: number): number | null {
     const start = lineStart(fullText, end); // ⚠ 素の lastIndexOf は先頭の空行で行頭を取り違える
     const raw = fullText.slice(start, end);
     if (raw.trim() === '') break; // ⚠ 空行で塊が切れる
+    /**
+     * 🔴 **前に出した合計の行は足さない**(#1087)── 足すと、合計の下に 1 行足して合計し直したとき
+     *   前の合計ぶんが二重に入る(300 + 200 → 合計=500、バナナ 150 → 合計= が 1150 になっていた)。
+     * ⚠ 答えの行(`基本単価*8=25600`)は今までどおり足す ── 外すのは合計の合図の行だけ。
+     */
+    if (isSumResultLine(raw)) {
+      end = start - 1;
+      continue;
+    }
     const n = trailingNumber(toHalfWidth(raw));
     if (n !== null) {
       total += n;
@@ -599,11 +622,7 @@ export function resolveInlineCalc(fullText: string, caretPos: number): InlineCal
 
   const ls = lineStart(fullText, caretPos);
   // ① 合計(⚠ 合図は行の頭から `合計` / `sum` だけ。箇条書きの印は外す)
-  const label = foldLetters(toHalfWidth(fullText.slice(ls, caretPos - 1)))
-    .replace(LIST_MARKER, '')
-    .trim()
-    .toLowerCase();
-  if (label === '合計' || label === 'sum') {
+  if (isSumLabel(fullText.slice(ls, caretPos - 1))) {
     const total = sumAbove(fullText, ls);
     if (total === null) return null;
     // ⚠ 直すのは合図の `＝` だけ(`合計` / `ｓｕｍ` は user の字)

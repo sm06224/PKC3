@@ -1072,6 +1072,33 @@ function materializeRepeat(
   body: string,
   rewrite: { line: number; date: string },
 ): string | null {
+  const made = repeatDoneLine(body, rewrite);
+  if (made === null || made.exists) return null;
+  made.lines.splice(rewrite.line + 1, 0, made.done);
+  return rejoinLines(body, made.lines);
+}
+
+/**
+ * 🔴 **その回が、既に実体の行になっているか**(二度押しの 2 度目に、嘘の理由を出さないための問い)。
+ *
+ * 🔑 `materializeRepeat` が `null` を返す理由は 2 つある ── ①行がずれた / 繰り返しの行でない
+ *   (本当に「本文が変わっている」)②**同じ回が既に書かれている**(書込の返事の前に 2 度押した。
+ *   1 度目で済んでいる)。呼び手が言い分けられるよう、②だけをここで答える。
+ *   判定は `materializeRepeat` と**同じ 1 本**(`repeatDoneLine`)── 別に書かない(§7)。
+ */
+export function isRepeatAlreadyDone(body: string, rewrite: BodyRewrite): boolean {
+  if (rewrite.kind !== 'repeat-done') return false;
+  return repeatDoneLine(body, rewrite)?.exists === true;
+}
+
+/**
+ * 「その回」の実体の行を作る。行がずれた / 繰り返しの行でない / 読めない日は `null`。
+ * `exists` = 作った字そのものが本文に既に在る。
+ */
+function repeatDoneLine(
+  body: string,
+  rewrite: { line: number; date: string },
+): { lines: string[]; done: string; exists: boolean } | null {
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
@@ -1103,9 +1130,7 @@ function materializeRepeat(
    * ⚠ 判定は**作った字そのもの**で見る ── 二度押しは同じ規則の行から
    *   同じ日を作るので、生まれる字は 1 バイトまで同じである(だから当たる)。
    */
-  if (lines.includes(done)) return null;
-  lines.splice(rewrite.line + 1, 0, done);
-  return rejoinLines(body, lines);
+  return { lines, done, exists: lines.includes(done) };
 }
 
 /**

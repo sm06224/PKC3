@@ -2651,6 +2651,12 @@ export type UserAction =
    */
   | { type: 'REFRESH_TASK_SCAN' }
   | { type: 'REFRESH_CONTACT_SCAN' }
+  /**
+   * 🔴 **本文の検索を、いまの語で撃ち直す**(#1087)。⚠ 書込・取込・別タブの変更の後に出る
+   * (`store-effects.ts` の `stamp`)。語が空なら何もしない。前の当たりは**消さない**(返るまで
+   * 一覧がちらつかない)。
+   */
+  | { type: 'REFRESH_SEARCH' }
   | { type: 'REFRESH_CAPTURE_SCAN' }
   | { type: 'REFRESH_SNIPPET_SCAN' }
   /**
@@ -3663,8 +3669,10 @@ export type DomainEvent =
   /**
    * 本文の全文検索を頼む(#181)。⚠ 本文は常駐していないので **SQL 側の仕事**。
    * 空文字は「絞り込み無し」── 受け手は問い合わせずに黙って終える。
+   * `again` は書込の後の撃ち直し(#1087)── 飛んでいる同じ語の問い合わせは書込の前の本文で走っているかもしれないので、
+   * 同じ語でも送り直す(打ち直して同じ語へ戻した回は従来どおり送り直さない)。
    */
-  | { type: 'REQUEST_SEARCH'; query: string }
+  | { type: 'REQUEST_SEARCH'; query: string; again?: true }
   /**
    * 探す面の検索を頼む(#680)。⚠ 受け手(effect)が **300ms 止まってから**叩く ──
    * 打鍵ごとに worker を叩かない。空文字は来ない(reducer が出さない)。
@@ -4635,6 +4643,8 @@ function reduceCore(
           ...(keepLid === null
             ? []
             : [{ type: 'REQUEST_BODY' as const, lid: keepLid }]),
+          // 🔴 取込・別タブの変更で本文が変わっている ── 絞っている語で撃ち直す(#1087)
+          ...searchRefreshEvents(state),
           ...(state.viewMode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN' as const, key: state.queryKey }]
             : []),
@@ -5888,6 +5898,8 @@ function reduceCore(
      */
     case 'REFRESH_CONTACT_SCAN':
       return { state, events: [{ type: 'REQUEST_CONTACT_SCAN' }] };
+    case 'REFRESH_SEARCH':
+      return { state, events: searchRefreshEvents(state) };
     /**
      * 🔴 **録ったものを集め直す**(#683 段①)。⚠ **毎回要求する**が、前の一覧は
      *   消さない(連絡先・アプリと同じ ── 集め直すたびに空白を出さない)。
@@ -10485,6 +10497,22 @@ function keepLinks(
     else dropped = true;
   }
   return dropped ? next : state.linkedFiles; // 変化が無いなら参照を保つ
+}
+
+/**
+ * 🔴 **書込・取込の後に撃ち直す検索**(#1087)。左の絞り込みの語(`filterQuery`)と、探す画面の語
+ * (`searchPage.query`)の 2 つが在る。⚠ 判定はここ 1 か所(`SET_ENTRY_FILTER` と同じ条件:
+ * 語が空 / `>` で始まる欄は撃たない)。前の当たりは消さない ── 返るまで一覧がちらつかない。
+ */
+function searchRefreshEvents(
+  state: AppState,
+): Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> {
+  const out: Array<{ type: 'REQUEST_SEARCH'; query: string; again?: true } | { type: 'REQUEST_SEARCH_DETAIL'; query: string }> = [];
+  if (normalizeQuery(state.filterQuery) !== '' && commandQueryOf(state.filterQuery) === null)
+    out.push({ type: 'REQUEST_SEARCH', query: state.filterQuery, again: true });
+  if (state.searchPage.query.trim() !== '')
+    out.push({ type: 'REQUEST_SEARCH_DETAIL', query: state.searchPage.query });
+  return out;
 }
 
 /**

@@ -846,8 +846,9 @@ export function addScheduleItemChecked(
  *   載るので、順序は保たれる。
  * ⚠ 面は切り替えない・編集にも入らない(眺めたまま足したい ── #300「補助が主の作業領域を奪わない」)。
  *
- * @returns 書込が通ったか。⚠ 断った回(理由は `OP_FAILED` で出ている)は `false` ── 呼び側は
- *   **通ったときだけ欄を空にする**(#1051。打った字を黙って捨てない)。
+ * @returns 同期の `false` = 書込を頼む前に断った(理由は `OP_FAILED` で出ている)。
+ *   `Promise` = 頼んだ。**disk に着いたら `true`、着かなかった / 着いたか分からないなら `false`**(理由は出ている)。
+ *   ⚠ 呼び側は **`true` のときだけ欄を空にする**(#1051 / #1087。打った字を黙って捨てない)。
  */
 export function addScheduleItem(
   dispatcher: Dispatcher,
@@ -858,7 +859,7 @@ export function addScheduleItem(
     readonly time?: string | null;
     readonly timeEnd?: string | null;
   },
-): boolean {
+): boolean | Promise<boolean> {
   const st = dispatcher.getState();
   /**
    * 🔴 **編集中でも、今日のノートが別のノートなら足せる**(#1081。user 裁定 2026-09-27「推奨で」)。
@@ -934,23 +935,33 @@ export function addScheduleItem(
     });
   }
   /**
-   * 🔴 **通ったときだけ欄を空にする**(#1051)。⚠ 直す前は撃った直後に必ず空にしていた
-   *   ── 前の追記の書込が返る前に押すと reducer が断る(直す前は**黙って**捨てていた)ので、
-   *   **打った字ごと消えていた**。
-   * 🔑 通ったかは reducer が錠を掛けたかで見る(断った回は錠が動かない)── 判定を
-   *   ここに 2 つ目として書かない(§7)。
+   * 🔴 **欄を空にしてよいのは、disk に着いたと分かったときだけ**(#1051 → #1087)。
+   * ⚠ 直す前は「reducer が錠を掛けた(= 頼めた)」で `true` を返していた ── 書込が**後で**失敗する回
+   *   (`APPEND_FAILED`: 空き不足・別のタブとの衝突・保存の失敗)も `true` で、欄が空になり、
+   *   **赤い字だけが出て打った字は戻らなかった**。
+   * 🔑 待ち方は新しく作らない ── PDF の引用・ブラウザの AI の書き足しと**同じ 1 本**(`appendAndSettle`)。
+   *   錠が動いたかの判定も、結末が来ない回の時間切れも、あちらが持つ(ここで数え直さない。§7)。
+   * ⚠ **時間切れ(着いたかもしれない)でも欄は残す**。理由は損の大きさ:字を残して重複して足されても
+   *   行を消せば済むが、空にしてしまうと**書けていなかった回に打った字を失う**(打ち直しになる)。
+   *   だから「分からない」は残す側へ倒し、理由を出す。
    */
-  const lockBefore = dispatcher.getState().writeLock;
-  dispatcher.dispatch({
-    type: 'APPEND_TO_ENTRY',
-    lid,
-    text: line,
-    heading: null,
-    // ⚠ 末尾へ足す(追記先の選択は本文の面の話 ── ここでは選ばせない)
-    target: null,
+  const r = appendAndSettle(dispatcher, lid, line, null, SCHEDULE_ADD_SETTLE_MS);
+  return r.then((o) => {
+    if (o.ok) return true;
+    if (o.reason === 'timeout') {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '書けたかどうか確かめられませんでした(今日のノートを開いて確かめてください。字は欄に残してあります)',
+      });
+    } else if (o.error === null) {
+      // 理由を立てずに断られた回(ノートが消えていた)── 黙って「足しました」にも「何も起きない」にもしない
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '今日のノートが見つかりません。もう一度押してください' });
+    }
+    return false;
   });
-  return dispatcher.getState().writeLock !== lockBefore;
 }
+/** 予定を足した書込の結末を待つ上限。他の呼び手(引用・AI の書き足し・章の欄)と同じ 10 秒。 */
+const SCHEDULE_ADD_SETTLE_MS = 10000;
 
 export function generateLid(): string {
   lidCounter += 1;
@@ -1128,13 +1139,37 @@ const notPlaceable = (
   return `スマートフォルダの中には入れられません。${hint}`;
 };
 
+/**
+ * 🔴 **選んだ物のうち、祖先も選ばれている物は動かさない**(#1087)── 祖先と一緒に付いていく。
+ * ⚠ 語や種類で絞ると一覧は階層をまたいで平らに並ぶので、親フォルダ F とその中の D を両方選べる。
+ *   1 件ずつ移すと D だけが行き先の直下へ出て、F は空になる(複製の `planCopy` が既に持つ
+ *   「同じ組に祖先が居れば付いていく」と同じ向き)。祖先は親を辿って**どこまででも**見る
+ *   (間に選ばれていない物が挟まっていても付いていく)。
+ */
+const withoutSelectedDescendants = (st: AppState, lids: readonly string[]): string[] => {
+  const parentOf = resolveCanonicalParents(st.entryMetas, st.relations);
+  const picked = new Set(lids);
+  return lids.filter((lid) => {
+    const seen = new Set<string>([lid]);
+    let up = parentOf.get(lid);
+    while (up !== undefined && !seen.has(up)) {
+      if (picked.has(up)) return false;
+      seen.add(up);
+      up = parentOf.get(up);
+    }
+    return true;
+  });
+};
+
 const moveEntries = (
   dispatcher: Dispatcher,
-  lids: readonly string[],
+  allLids: readonly string[],
   parentLid: string | null,
   report?: (text: string) => void,
 ): void => {
-  if (lids.length === 0) return;
+  if (allLids.length === 0) return;
+  // ⚠ 数えるのは**実際に動かす物**だけ(付いていく物は数えない ── 知らせの件数と画面が合う)
+  const lids = withoutSelectedDescendants(dispatcher.getState(), allLids);
   const phase = dispatcher.getState().phase;
   if (phase !== 'ready') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}動かしてください` });
