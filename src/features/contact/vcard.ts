@@ -173,6 +173,9 @@ const BLOB_CHARS = 2000;
  * ⚠ **パラメタと長さの両方**で見る ── `ENCODING` を書かない実装が在るので
  *   名乗りだけに頼らない。逆に長い散文(NOTE)は `default` へ来ないので巻き込まない。
  */
+/** vCard 2.1 の、`=` を持たない符号化の名前(種別ではない)。 */
+const BARE_ENCODINGS: ReadonlySet<string> = new Set(['QUOTED-PRINTABLE', 'BASE64', 'B', '8BIT', '7BIT']);
+
 function isEncodedBlob(params: readonly string[], value: string): boolean {
   const enc = params.some(
     (p) => p === 'ENCODING=B' || p === 'ENCODING=BASE64' || p === 'BASE64' || p === 'B',
@@ -444,8 +447,18 @@ export function parseVcf(text: string): VcfParseResult {
          * ⚠ PKC 自身の書き出しを読み直したときは黙る ── `TYPE=VOICE` /
          *   `TYPE=INTERNET` はこちらが書いた綴りなので、言うと嘘の狼になる。
          */
-        const types = prop.params.filter((p) => p.startsWith('TYPE='));
-        if (!cur.typeSaid && types.some((p) => p !== 'TYPE=VOICE' && p !== 'TYPE=INTERNET')) {
+        /**
+         * 🔴 **vCard 2.1 の素の種別も数える**(#1087)── 2.1 は `TEL;CELL:` / `TEL;HOME;VOICE:` /
+         *   `EMAIL;PREF;INTERNET:` のように `TYPE=` を付けない(Android や古い端末の書き出し)。
+         *   直す前は `TYPE=` で始まる物しか見ていなかったので、この形では**警告 0 件で区別が消えていた**。
+         * ⚠ 素の符号化の名前(`QUOTED-PRINTABLE` など)は種別ではないので数えない。
+         */
+        const types = prop.params.filter(
+          (p) => p.startsWith('TYPE=') || (!p.includes('=') && !BARE_ENCODINGS.has(p)),
+        );
+        const ours = (p: string): boolean =>
+          p === 'TYPE=VOICE' || p === 'TYPE=INTERNET' || p === 'VOICE' || p === 'INTERNET';
+        if (!cur.typeSaid && types.some((p) => !ours(p))) {
           cur.typeSaid = true;
           warnings.push(
             `${cardNo()} 枚目: 電話・メールの種別(携帯 / 自宅 / FAX など)は取り込めません`,
