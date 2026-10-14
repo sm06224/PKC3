@@ -236,7 +236,8 @@ export function createAnnounce(
     mute.setAttribute('data-pkc-action', 'mute-announce');
     mute.textContent = '今後はお知らせを出さない';
     /** ⚠ **戻し道をその場に書く**(押した後に探させない)。 */
-    mute.title = 'システムの「お知らせ」からいつでも戻せます';
+    mute.title =
+      '押すと、残りのお知らせも読んだことになります。システムの「お知らせ」で「起動したときに新しいお知らせを出す」にチェックを入れると、次の新しいお知らせから出ます(過去の分はそこで読めます)';
 
     foot.append(where, mute);
     region.append(foot);
