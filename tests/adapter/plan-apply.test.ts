@@ -142,6 +142,15 @@ describe('当てたとき', () => {
     expect(rel[0]!.fromLid).toBe('box');
   });
 
+  it('🔴 移せなかった移動は数えて言う(フォルダでないノートへの mv)(#1087)', () => {
+    const m = mount();
+    m.type('mv a box\nmv b a');
+    expect(m.errors(), '前提: 下見では断られていない').toEqual([]);
+    m.apply.click();
+    expect(m.d.getState().relations.filter((r) => r.toLid === 'b'), '前提: b は動いていない').toHaveLength(0);
+    expect(m.d.getState().error, '動かなかったのに黙っていた').toContain('1 件は移せませんでした');
+  });
+
   it('🔴 **フォルダを作って、そこへまとめて移す**が 1 回で通る', () => {
     const m = mount();
     m.type('mkdir "2026 年" as @g\nmv a @g\nmv b @g');

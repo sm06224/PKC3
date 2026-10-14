@@ -246,6 +246,24 @@ describe('配線(binder)', () => {
       expect(d.getState().notice).toBe('1 件を元の場所に戻しました');
     });
 
+    it('🔴 戻すと輪になる物は戻さず、戻したとも数えない(#1087)', () => {
+      // はこ(f1)の中のたな(f2)をルートへ出し、その後はこをたなの中へ入れた ── たなを はこ へ戻すと輪になる
+      d.dispatch({ type: 'CREATE_ENTRY', archetype: 'folder', lid: 'f2', title: 'たな', parentLid: 'f1', relationId: 'r2', edit: false });
+      d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' });
+      d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: null });
+      d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'f2', mode: 'set' });
+      click(region.querySelector('[data-pkc-field="dual-move"]')!);
+      expect(parentsOf('f2'), '前提: ルートへ出せていない').toEqual([]);
+      d.dispatch({ type: 'SET_ENTRY_PARENT', lid: 'f1', parentLid: 'f2', relationId: 'r3' });
+      expect(parentsOf('f1'), '前提: はこ が たな に入っていない').toEqual(['f2']);
+      const b = document.createElement('button');
+      b.setAttribute('data-pkc-action', 'undo-dual-move');
+      root.append(b);
+      click(b);
+      expect(parentsOf('f2'), '輪を作った').toEqual([]);
+      expect(d.getState().notice, '戻していないのに戻したと言った').not.toContain('元の場所に戻しました');
+    });
+
     it('🔴 何も動かなかった回(同じ場所への移し直し)では出さない', () => {
       d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
       click(region.querySelector('[data-pkc-field="dual-move"]')!); // 右もルート → もう居る

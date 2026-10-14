@@ -8173,8 +8173,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       if ((parents.get(m.lid) ?? null) !== m.to) continue;
       // 元のフォルダがもう無ければルートへ戻す(居ない親へは入れられない)
       const parentLid = m.from !== null && st.entryMetas.has(m.from) ? m.from : null;
+      const before = dispatcher.getState().relations;
       dispatcher.dispatch({ type: 'SET_ENTRY_PARENT', lid: m.lid, parentLid, relationId: generateLid() });
-      back += 1;
+      // 🔴 実際に動いた分だけ数える(#1087)── 元の場所がその後このノートの中へ入っていると、輪になるので断られる
+      if (dispatcher.getState().relations !== before) back += 1;
     }
     dispatcher.dispatch({
       type: 'OP_NOTICE',
@@ -11173,6 +11175,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (!canApplyPlan(plan)) return;
     /** この案で作ったフォルダ(`@名前` → いま作った lid)。 */
     const made = new Map<string, string>();
+    let refusedMoves = 0;
     for (const op of plan.ops) {
       if (op.kind === 'rename') {
         dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: op.lid, title: op.title });
@@ -11194,17 +11197,28 @@ const ACTIONS: Record<string, ActionHandler> = {
         if (op.alias !== null) made.set(op.alias, lid);
         continue;
       }
+      const now = dispatcher.getState();
+      if (alreadyThere(now, op.lid, parentLid)) continue;
+      const before = now.relations;
       dispatcher.dispatch({
         type: 'SET_ENTRY_PARENT',
         lid: op.lid,
         parentLid,
         relationId: generateLid(),
       });
+      // 🔴 断られた移動を数える(#1087)── `moveEntries` と同じ見方。直す前は数えずに全件「適用しました」と言っていた
+      if (dispatcher.getState().relations === before) refusedMoves += 1;
     }
     // 🔑 当てたら欄を空にする ── 残すと「もう一度押せる」ように見える(二重適用)
     ta.value = '';
     paintPlan(root, dispatcher, '');
-    services.showStatus?.(`整理案を適用しました(${plan.ops.length} 件)`);
+    services.showStatus?.(`整理案を適用しました(${plan.ops.length - refusedMoves} 件)`);
+    if (refusedMoves > 0) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `${String(refusedMoves)} 件は移せませんでした(行き先がフォルダではないか、フォルダを自分の中へ入れようとしています)`,
+      });
+    }
   },
   /**
    * 🔴 **何が容量を食っているか**(#415)。
