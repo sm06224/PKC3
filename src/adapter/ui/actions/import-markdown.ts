@@ -15,6 +15,7 @@ import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { readPlainMarkdown } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
+import { readImportText } from '@features/import/text-decode';
 
 /**
  * ⚠ `ImportDeps`(PKC2 経路)の**部分集合**として書く ── 呼び出し側が
@@ -95,7 +96,7 @@ export async function importMarkdownFiles(
   try {
     let order = deps.orderBase();
     for (const file of files) {
-      const parsed = readPlainMarkdown(await file.text(), file.name);
+      const parsed = readPlainMarkdown(await readImportText(file), file.name);
       // 注意は**どのファイルのものか**を言う ── 複数選択で「参照 3 件」とだけ
       // 出ても、どれを直せばいいのか分からない
       for (const w of parsed.warnings) notes.push(`「${file.name}」: ${w}`);

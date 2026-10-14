@@ -296,6 +296,16 @@ describe('ノートの本文', () => {
     expect(taskCardsOf('n', body)).toHaveLength(1);
   });
 
+  it('🔴 途中までにした予定は数えて言う(黙って切らない)', () => {
+    const long = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${'あ'.repeat(500)}`]);
+    expect(long.counts.shortened).toBe(1);
+    expect(icsCountNotes(long.counts).join('')).toContain('途中までを入れました');
+    // 対照群:短い説明は数えない
+    const short = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', 'DESCRIPTION:短い']);
+    expect(short.counts.shortened).toBe(0);
+    expect(icsCountNotes(short.counts).join('')).not.toContain('途中まで');
+  });
+
   it('長いメモは 300 字で丸める', () => {
     const body = icsNoteBody([ev({ description: 'あ'.repeat(500) })]);
     expect(body).toContain(`  - メモ: ${'あ'.repeat(300)}…`);
@@ -317,7 +327,7 @@ describe('ノートの本文', () => {
   });
 
   it('読めなかった数の文:0 の項目は言わない', () => {
-    const z = { cancelled: 0, repeatUnread: 0, invalid: 0, zoneUnknown: 0, spansDays: 0, overrides: 0, zoneRepeat: 0 };
+    const z = { cancelled: 0, repeatUnread: 0, invalid: 0, zoneUnknown: 0, spansDays: 0, overrides: 0, zoneRepeat: 0, shortened: 0 };
     expect(icsCountNotes(z)).toEqual([]);
     expect(icsCountNotes({ ...z, repeatUnread: 2 })).toEqual(['2 件は繰り返しを読めず 1 回目だけ入れました']);
     expect(icsCountNotes({ ...z, cancelled: 1, invalid: 3 })).toHaveLength(2);

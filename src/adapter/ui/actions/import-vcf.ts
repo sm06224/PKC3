@@ -16,6 +16,7 @@ import { parseVcf, vcfNoteOf } from '@features/contact/vcard';
 import { extractMeta } from '@features/flavor';
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
+import { readImportText } from '@features/import/text-decode';
 
 /**
  * .vcf を 1 枚ずつノートにする。**失敗は必ず可視**(OP_FAILED)で終える。
@@ -55,7 +56,7 @@ export async function importVcfFiles(
     /** 名前の無いカードに振る番号(⚠ 取り込んだ通し番号ではない ── 下の注記)。 */
     let unnamed = 0;
     for (const file of files) {
-      const parsed = parseVcf(await file.text());
+      const parsed = parseVcf(await readImportText(file));
       /**
        * 🔴 **同じ注意を 200 行並べない**(2 巡目の動線レビュー 2026-08-28)。
        *

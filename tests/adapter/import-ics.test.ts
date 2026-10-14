@@ -182,9 +182,10 @@ describe('importIcsFiles ── 実行部', () => {
     h.d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '本文\n' });
     const f = icsFile(wrap(TRIP));
     // 読み込みの最中に user が編集を始めた、を作る
-    f.text = async () => {
+    // ⚠ 取り込みは文字コードを見分けるためにバイトで読む(`readImportText`)── 読む口は `arrayBuffer`
+    f.arrayBuffer = async () => {
       h.d.dispatch({ type: 'START_EDIT' });
-      return wrap(TRIP);
+      return new TextEncoder().encode(wrap(TRIP)).buffer as ArrayBuffer;
     };
     expect(await importIcsFiles(h.d, h.deps, [f])).toBeNull();
     expect(h.written, '編集中に書いた').toHaveLength(0);

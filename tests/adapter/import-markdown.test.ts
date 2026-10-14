@@ -225,7 +225,8 @@ describe('🔴 断るときは 1 件も書かない', () => {
     // 呼ばれたこと自体(opLog)を見る
     const h = harness();
     const broken = mdFile('# 二\n', 'b.md');
-    Object.defineProperty(broken, 'text', {
+    // ⚠ 取り込みは文字コードを見分けるためにバイトで読む(`readImportText`)── 読む口は `arrayBuffer`
+    Object.defineProperty(broken, 'arrayBuffer', {
       value: () => Promise.reject(new Error('読めない')),
     });
     return importMarkdownFiles(h.d, h.deps, [mdFile('# 一\n', 'a.md'), broken]).then((r) => {

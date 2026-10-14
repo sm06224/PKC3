@@ -90,6 +90,12 @@ export interface IcsCounts {
   readonly overrides: number;
   /** 夏時間のあるタイムゾーンをまたぐ繰り返しの数(季節をまたぐと 1 時間ずれうる)。 */
   readonly zoneRepeat: number;
+  /**
+   * 🔴 **題名・場所・説明が長くて、途中までしか入れなかった数**(#1087、取り込みの見直し)。
+   * ⚠ 直す前は黙って切っていた(会議の招待の議題・パスコードが 300 字で止まり、注意も出なかった)。
+   *   この file の宣言は「読めない物を黙って落とさない」である。
+   */
+  readonly shortened: number;
 }
 
 export interface IcsParse {
@@ -477,7 +483,7 @@ const clean = (s: string): string => s.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}
 export function parseIcs(text: string, opts: IcsParseOptions = {}): IcsParse {
   const localZone = opts.localZone ?? defaultZone();
   const events: IcsEvent[] = [];
-  const c = { cancelled: 0, repeatUnread: 0, invalid: 0, zoneUnknown: 0, spansDays: 0, overrides: 0, zoneRepeat: 0 };
+  const c = { cancelled: 0, repeatUnread: 0, invalid: 0, zoneUnknown: 0, spansDays: 0, overrides: 0, zoneRepeat: 0, shortened: 0 };
 
   let inEvent = false;
   /** VEVENT の中の入れ子(VALARM など)の深さ。⚠ 中の行は予定の物ではない。 */
@@ -575,7 +581,16 @@ export function parseIcs(text: string, opts: IcsParseOptions = {}): IcsParse {
       const p = first(n);
       return p === undefined ? '' : unescapeText(p.value);
     };
-    const summary = cap(clean(textOf('SUMMARY')));
+    const rawSummary = clean(textOf('SUMMARY'));
+    const rawLocation = clean(textOf('LOCATION'));
+    const rawDescription = clean(textOf('DESCRIPTION'));
+    if (
+      Array.from(rawSummary).length > TEXT_MAX ||
+      Array.from(rawLocation).length > TEXT_MAX ||
+      rawDescription.length > DESCRIPTION_MAX
+    )
+      c.shortened += 1;
+    const summary = cap(rawSummary);
     events.push({
       date,
       time,
@@ -583,8 +598,8 @@ export function parseIcs(text: string, opts: IcsParseOptions = {}): IcsParse {
       until,
       repeat,
       summary: summary === '' ? '(題名なし)' : summary,
-      location: cap(clean(textOf('LOCATION'))),
-      description: cap(clean(textOf('DESCRIPTION'))),
+      location: cap(rawLocation),
+      description: cap(rawDescription),
     });
   };
 
@@ -694,5 +709,7 @@ export function icsCountNotes(c: IcsCounts): string[] {
   if (c.overrides > 0) out.push(`${c.overrides} 件は繰り返しの 1 回だけを変えた予定で、元の繰り返しと別に入れました`);
   if (c.cancelled > 0) out.push(`${c.cancelled} 件は取り消された予定なので入れていません`);
   if (c.invalid > 0) out.push(`${c.invalid} 件は日付を読めず入れていません`);
+  if (c.shortened > 0)
+    out.push(`${c.shortened} 件は題名・場所・説明が長いため、途中までを入れました(元のファイルは残しておいてください)`);
   return out;
 }
