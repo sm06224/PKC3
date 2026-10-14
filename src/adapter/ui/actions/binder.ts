@@ -160,6 +160,7 @@ import { isIconName } from '@features/icon/symbols';
 import {
   insertBlockText,
   insertText,
+  replaceChanged,
   OWN_MEANING,
   ROW_REOPEN_EVENT,
   type RowReopenDetail,
@@ -261,7 +262,7 @@ import {
   type TextSelection,
 } from '@features/markdown/text-ops';
 import { insertSnippet, nextSnippetSlot } from '@features/snippet/snippet-expand';
-import { abbrBeforeCaret } from '@features/snippet/snippet-table';
+import { abbrBeforeCaret, type SnippetItem } from '@features/snippet/snippet-table';
 import { snippetMenu, snippetMenuNote } from '@features/snippet/snippet-menu';
 import { appendHeadingFor, isAppendable } from '@features/flavor/append-spec';
 import { appendAndSettle } from '@adapter/state/append-settle';
@@ -737,6 +738,7 @@ import {
   pickSectionLeaveInApp,
   promptInApp,
   isAppDialogOpen,
+  whenAppDialogClosed,
   type ArchivePickRow,
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
@@ -2348,30 +2350,6 @@ function writeBack(
   ta.setSelectionRange(next.start, next.end);
   // 追記はカーソルが末尾 ── 見えていないと「押しても何も起きない」に見える
   if (toBottom) ta.scrollTop = ta.scrollHeight;
-}
-
-/**
- * 欄の本文を `nextText` に揃える。**前後で同じ字は触らず、違う真ん中だけ** `insertText` で置き換える
- * (Ctrl+Z の履歴に載る)。`insertText` が `input` を撃つので、ここでは撃たない。
- * 何も変わらないときだけ、以前と同じく `input` を 1 回撃つ(書き込み口の約束を保つ)。
- */
-function replaceChanged(ta: HTMLTextAreaElement, nextText: string): void {
-  const cur = ta.value;
-  if (cur === nextText) {
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    return;
-  }
-  let head = 0;
-  const max = Math.min(cur.length, nextText.length);
-  while (head < max && cur[head] === nextText[head]) head += 1;
-  let tail = 0;
-  while (
-    tail < max - head &&
-    cur[cur.length - 1 - tail] === nextText[nextText.length - 1 - tail]
-  )
-    tail += 1;
-  ta.setSelectionRange(head, cur.length - tail);
-  insertText(ta, nextText.slice(head, nextText.length - tail));
 }
 
 /**
@@ -6980,16 +6958,29 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'replace-all': (dispatcher, target) => {
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
-    const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
-    const replace =
-      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
     /**
-     * 🔴 **大小の区別を渡す**(#397 ①)。⚠ 直す前はここが無く、
-     *   純関数も reducer も対応しているのに**画面からは常に「区別しない」**だった。
+     * 🔴 **開いている行の打ちかけを、置換の前に state へ届ける**(`commit-edit` と同じ手当て)。
+     *
+     * ⚠ 直す前は届けずに置換していた ── 「操作を探す」や割り当てた鍵から撃つと焦点が行に居るので、
+     *   置換で本文が差し替わった瞬間に行が閉じ、**打ちかけの字が消えた**(帯のボタンを押したときは
+     *   `mousedown` で先に確定するので起きない)。
+     * ⚠ ダイアログが開いている間、行は確定を見送る(`RowSwap.commitActive`)。そのまま `blur` しても
+     *   確定しないので、**閉じてから**確定して置換を撃つ(閉じていればすぐ)。
+     * ⚠ 欄の値は確定の**後**に読む(待っている間に帯の欄を直されても、押した時点の値ではなく見えている値)。
      */
-    const caseSensitive =
-      root.querySelector<HTMLInputElement>('[data-pkc-field="replace-case"]')?.checked === true;
-    dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace, caseSensitive });
+    whenAppDialogClosed(() => {
+      settleRowEditor(root);
+      const find = root.querySelector<HTMLInputElement>('[data-pkc-field="replace-find"]')?.value ?? '';
+      const replace =
+        root.querySelector<HTMLInputElement>('[data-pkc-field="replace-with"]')?.value ?? '';
+      /**
+       * 🔴 **大小の区別を渡す**(#397 ①)。⚠ 直す前はここが無く、
+       *   純関数も reducer も対応しているのに**画面からは常に「区別しない」**だった。
+       */
+      const caseSensitive =
+        root.querySelector<HTMLInputElement>('[data-pkc-field="replace-case"]')?.checked === true;
+      dispatcher.dispatch({ type: 'REPLACE_IN_BODY', find, replace, caseSensitive });
+    });
   },
   /**
    * 🔴 **関係を足す**(#185)。⚠ 相手は**題名で指す**(lid は user に見えない)。
@@ -8685,7 +8676,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
       const ta = formatTarget(root);
       if (ta === null) return;
-      const title = dispatcher.getState().entryMetas.get(lid)?.title ?? '';
+      const meta = dispatcher.getState().entryMetas.get(lid);
+      /**
+       * 🔴 **選んでいる間に相手がゴミ箱へ移ったら、挿さずに理由を言う**。
+       * ⚠ 直す前は題名を `''` にして `[](entry:…)` を挿していた ── 画面には題名の無い
+       *   リンクが出て、押すと「見つかりません」になる(挿した本人は気づけない)。
+       */
+      if (meta === undefined) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+        return;
+      }
+      const title = meta.title;
       ta.focus();
       // ⚠ 範囲外は `setSelectionRange` が丸める(短くなっていても落ちない)
       ta.setSelectionRange(at.start, at.end);
@@ -14382,6 +14383,36 @@ function runTidy(ta: HTMLTextAreaElement, op: TidyOp, notify: (t: string) => voi
 }
 
 /**
+ * 🔴 **短縮語 + `Tab` の展開 / 次の `${…}` 印への移動**(#196 / B-2 段②)。2 列の本文の欄と、
+ * 1 面の行の入力欄の**両方**がこの 1 本を通る(判定を 2 か所に書かない)。
+ *
+ * ⚠ **短縮語が先、印が後** ── 短縮語はカーソルのすぐ手前(いま打った字)、印は本文の先に在る。
+ *   逆にすると、後ろに印が残るノートで短縮語を打った瞬間に、展開されずに遠くへ飛ぶ。
+ * ⚠ 何も当たらなければ `false`(呼び側は既定を止めない ── 2 列は焦点移動、1 面の行は行の確定)。
+ *
+ * @returns 展開した / 印を選んだ = `true`
+ */
+function runSnippetTab(
+  ta: HTMLTextAreaElement,
+  items: readonly SnippetItem[],
+): boolean {
+  const collapsed = ta.selectionStart === ta.selectionEnd;
+  const hit = collapsed ? abbrBeforeCaret(ta.value, ta.selectionStart, items) : null;
+  if (hit !== null) {
+    writeBack(
+      ta,
+      insertSnippet({ text: ta.value, start: hit.start, end: ta.selectionEnd }, hit.item.body, new Date()),
+    );
+    return true;
+  }
+  // ⚠ 次の印は**選択の終わりから**探す(いま選んでいる印をもう一度選ばない)
+  const slot = nextSnippetSlot(ta.value, ta.selectionEnd);
+  if (slot === null) return false;
+  ta.setSelectionRange(slot.start, slot.end);
+  return true;
+}
+
+/**
  * 🔴 **字下げを欄へ当てる、唯一の口**(#1166)── `Tab` の経路・鍵(`Ctrl+]` / `Ctrl+[`)・
  * 「操作を探す」の 3 つが同じ関数を通る(§7)。
  *
@@ -15727,26 +15758,9 @@ export function bindActions(
     if (field === 'editor-body' && ke.key === 'Tab' && !ke.shiftKey) {
       const ta = ke.target as HTMLTextAreaElement;
       const plainTab = !ke.ctrlKey && !ke.altKey && !ke.metaKey;
-      const items = dispatcher.getState().snippetScan?.items ?? [];
-      const collapsed = ta.selectionStart === ta.selectionEnd;
-      const hit = collapsed ? abbrBeforeCaret(ta.value, ta.selectionStart, items) : null;
-      if (hit !== null) {
+      // 🔑 短縮語 → 次の印の判定は `runSnippetTab` 1 か所(1 面の行の `Tab` も同じ口を通る)
+      if (runSnippetTab(ta, dispatcher.getState().snippetScan?.items ?? [])) {
         ke.preventDefault();
-        writeBack(
-          ta,
-          insertSnippet(
-            { text: ta.value, start: hit.start, end: ta.selectionEnd },
-            hit.item.body,
-            new Date(),
-          ),
-        );
-        return;
-      }
-      // ⚠ 次の印は**選択の終わりから**探す(いま選んでいる印をもう一度選ばない)
-      const slot = nextSnippetSlot(ta.value, ta.selectionEnd);
-      if (slot !== null) {
-        ke.preventDefault();
-        ta.setSelectionRange(slot.start, slot.end);
         return;
       }
       /**
@@ -19243,6 +19257,26 @@ export function bindActions(
     true,
   );
   listen(doc, 'keydown', onShortcut);
+  /**
+   * 🔴 **1 面(既定)の行の入力欄でも、短縮語 + `Tab` と `${…}` の `Tab` 送りを効かせる**(#1087)。
+   *
+   * ⚠ 行の欄は自分の `keydown`(`row-swap.ts`)が `Tab` を「行の確定」に使い、**対象の欄に直に付いている**。
+   *   ここ(`root` の bubble)では**もう確定された後**なので、**捕捉の段**(`capture`)で先に見る。
+   * ⚠ **当たるときだけ**握る ── 短縮語が手前に在るか、次の印が在るとき。当たらなければ何もせず、
+   *   今までどおり `Tab` は行の確定(次の行へ渡り歩く)になる。確定を奪わない。
+   * ⚠ 変換中(`isComposing`)の `Tab` は IME のもの。`Shift`/`Ctrl`/`Alt`/`Cmd` 付きも握らない
+   *   (2 列の欄が `Shift`+`Tab` を字下げ戻しに使うのと同じ)。
+   */
+  const onRowSnippetTab = (ev: Event): void => {
+    const ke = ev as KeyboardEvent;
+    if (ke.key !== 'Tab' || ke.isComposing || ke.shiftKey || ke.ctrlKey || ke.altKey || ke.metaKey) return;
+    const ta = ke.target;
+    if (!(ta instanceof HTMLTextAreaElement) || ta.getAttribute('data-pkc-field') !== 'row-source') return;
+    if (!runSnippetTab(ta, dispatcher.getState().snippetScan?.items ?? [])) return;
+    ke.preventDefault();
+    ke.stopPropagation();
+  };
+  listen(root, 'keydown', onRowSnippetTab, true);
   listen(root, 'keydown', onKeydown);
   // 🔴 波形の上のドラッグ(#1232)── 印は既存の `SET_CAPTURE_TRIM_MARK` に入る
   undo.push(bindWaveDrag(root, dispatcher));
