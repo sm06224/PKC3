@@ -1849,9 +1849,11 @@ describe('取り込みで付け替えた lid を、本文と履歴へ当てる',
     const chainA = restoredChains.find((c) => c.entryLid === a.lid)!;
     expect(chainA.rewrite?.tip, '鎖の起点が書き出したときの本文でない').toBe('[B へ](entry:b1)\n');
     expect(chainA.rewrite?.remap.lids).toEqual([['b1', b.lid]]);
-    // 🔑 本文が変わらなかったノートの鎖には添えない(付け替えの検査を余計に通さない)
+    // 🔴 いまの本文が変わらないノートの鎖にも添える ── **古い版だけ**が旧 lid を指していることがある
+    //    (b1 の今の本文に `entry:` は無いが、古い版が `entry:b1` を持っていても写せるように。着地前レビュー)
     const chainB = restoredChains.find((c) => c.entryLid === b.lid)!;
-    expect(chainB.rewrite).toBeUndefined();
+    expect(chainB.rewrite?.tip).toBe('B の本文\n');
+    expect(chainB.rewrite?.remap.lids).toEqual([['b1', b.lid]]);
   });
 
   it('対照群: 衝突しなければリンクも鎖もそのまま', async () => {

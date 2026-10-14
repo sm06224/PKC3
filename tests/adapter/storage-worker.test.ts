@@ -1027,6 +1027,28 @@ describe('P6e ── 鎖を書き出して復元する', () => {
       // ⚠ 積んだ hash は付け替えた後の版のもの ── getRevision の整合性検査を通る(上の bodyOf が null でない)
     });
 
+    it('🔴 付け替えた後に同じになる版は畳み、その後の版も付け替えた本文を基準に積む', async () => {
+      // 書き出した鎖(新しい → 古い):v2 = 今の本文と同じ字(付け替える前)/ v1 = 50 行目が違う
+      // ⚠ v2 は付け替えると今の本文と同じになる ── 「無変更で畳む」枝を通し、符号化の基準が
+      //   付け替えた後の字のまま進むかを見る(付け替える前の字を基準にすると、v1 が復元で化ける)
+      const tipSrc = linked('今');
+      const v1 = linked('むかし');
+      const rows = [
+        { revOrder: 2, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: tipSrc, contentHash: contentHash64Hex(tipSrc) },
+        { revOrder: 1, createdAt: null, title: null, archetype: null, kind: 'full', snapshot: v1, contentHash: contentHash64Hex(v1) },
+      ];
+      await write('rw3', rewritten('今'));
+      const r = await request({
+        op: 'restoreRevisionChains',
+        cid: 'c1',
+        chains: [{ entryLid: 'rw3', rows, rewrite: { tip: tipSrc, remap } }],
+      });
+      expect(r.brokenChains).toEqual([]);
+      expect(r.skippedNoChange).toBe(1);
+      expect(r.added).toBe(1);
+      expect(await statesOf('rw3')).toEqual([rewritten('むかし')]);
+    });
+
     it('🔴 起点に付け替えを当てても今の本文にならないなら、積まない(書き出し後に本文が変わった)', async () => {
       await write('rw2', linked('A'));
       await write('rw2', linked('B'), { checkpoint: true });

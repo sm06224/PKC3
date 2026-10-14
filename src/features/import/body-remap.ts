@@ -75,8 +75,9 @@ export function changedPairs(map: ReadonlyMap<string, string>): Array<readonly [
 
 /**
  * 🔑 本文を写す**唯一の口**。tip(取り込む本文)と、履歴から戻した各版の両方がここを通る。
- * ⚠ 順番は「lid → 添付」。添付の写しは token を全部見るので、先に当てると `entry:` の後ろの
- *   lid が偶然添付の旧 key と同じ字だったときに化ける(lid 側は `entry:` で狭く当てる)。
+ * ⚠ lid は `entry:` の直後だけを狭く当てる。添付の key は token を全部見る(取り込み前からの規則)ので、
+ *   lid と添付の旧 key が偶然同じ字なら、どちらの順でも化けうる ── 起きる確率は採番の形から極小。
+ * ⚠ コードの塊の中の `entry:<lid>`(リンクの書き方の説明など)も写す。区別しないのは添付の key と同じ。
  */
 export function remapImportedBody(body: string, remap: ImportRemap): string {
   let out = body;

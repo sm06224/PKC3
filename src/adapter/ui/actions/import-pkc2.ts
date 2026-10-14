@@ -693,11 +693,16 @@ export async function importPkc2File(
       assetKeys: changedPairs(keyMap),
       lids: 'lidRemap' in result ? result.lidRemap : [],
     };
-    /** 付け替えで本文が変わったノートの、書き出したときの本文(履歴の起点)。 */
+    /**
+     * 書き出したときの本文(履歴の起点)。⚠ 付け替えが 1 組でも在れば**全ノート**ぶん持つ ──
+     *   いまの本文に旧 ID が無くても、**古い版だけ**が旧 lid・旧 key を指していることがある
+     *   (本文が変わったノートだけに絞ると、その版は旧 ID のまま積まれる。着地前レビュー)。
+     *   文字列は `result.entries` と同じ参照なので、写しは作らない。
+     */
     const sourceTips = new Map<string, string>();
     const rows: EntryUpsert[] = result.entries.map((e) => {
       const body = isEmptyRemap(remap) ? e.body : remapImportedBody(e.body, remap);
-      if (body !== e.body) sourceTips.set(e.lid, e.body);
+      if (!isEmptyRemap(remap)) sourceTips.set(e.lid, e.body);
       const ext = extractMeta(e.archetype, body);
       return {
         lid: e.lid,
@@ -757,7 +762,7 @@ export async function importPkc2File(
         }
       }
       // アーカイブの復元(P6e)── 保存形の鎖をそのまま worker へ渡す。
-      // 🔴 **本文を付け替えたノートの鎖には、書き出したときの本文と付け替えを添える**(#1087)。
+      // 🔴 **付け替えが在る取り込みでは、鎖に書き出したときの本文と付け替えを添える**(#1087)。
       //    worker はその本文から戻し、戻した各版に同じ付け替えを当てて積む ── 付け替えた tip から
       //    戻すと古い版の hash が合わず、**鎖ごと捨てていた**(添付の key が変わった / lid が衝突した回)。
       // ⚠ パッチそのものは書き換えない(差分の行番号は書き出したときの本文に対するもの)
