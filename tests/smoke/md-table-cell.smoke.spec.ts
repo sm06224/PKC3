@@ -306,6 +306,26 @@ test('🔴 Tab で右、Enter で下へ、押し直さずに続けて打てる (
   await page.keyboard.press('Escape');
 
   /**
+   * 🔴 **並べ替えた表でも、Enter は「画面で見えている下の行」の升を開く**(#1087)。
+   * ⚠ 本文の行番号で次の行を選ぶと、並べ替えて下になった行(本文では上)から Enter が行き止まりになる。
+   *   見出しの「品名」を押して並べ替え、見えている 1 行目(c)から Enter ── 見えている 2 行目(りんご)が開く。
+   */
+  await page.locator('th[data-pkc-sort-direction]').first().click();
+  const sortedCells = page.locator(CELL);
+  await expect(sortedCells.nth(2), '前提が崩れた(並べ替えで c の行が上にならない)').toHaveText('c', {
+    timeout: 10_000,
+  });
+  await expect(sortedCells.nth(4), '前提が崩れた(見えている 2 行目が りんご でない)').toHaveText('りんご');
+  await sortedCells.nth(2).click();
+  await expect(input, '並べ替えた表の升が欄にならない').toBeVisible();
+  await expect(input).toHaveValue('c');
+  await page.keyboard.press('Enter');
+  await expect(input, '並べ替えた表で、見えている下の行の升が開かない').toHaveValue('りんご', {
+    timeout: 10_000,
+  });
+  await page.keyboard.press('Escape');
+
+  /**
    * 🔴 **読み込み直しても残る**(disk まで届いた証拠)。
    * ⚠ `Escape` で取り消した最後の 1 つ(`5`)は**入っていない**ことも見る ──
    *   移る道を足したせいで「やめる」が効かなくなっていないか。
