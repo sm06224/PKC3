@@ -502,6 +502,22 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
     expect(d.getState().notice).toBe('ゴミ箱から元に戻しました');
   });
 
+  it('🔴 履歴の復元が着く前に別のノートを選んでいたら、選択を奪い返さない(#1087)', () => {
+    const d = bootWithFolder();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    expect(d.getState().selectedLid, '前提: a を選んでいない').toBe('a');
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('z', { entryOrder: 3, title: '戻したノート' }), body: '古い版' });
+    const st = d.getState();
+    expect(st.selectedLid, '押したノートから、戻したノートへ引き戻された').toBe('a');
+    expect(st.openBody?.lid ?? 'a', '開いている本文を差し替えた').toBe('a');
+    expect(st.entryMetas.get('z')?.title, '戻したノートの題名が更新されていない').toBe('戻したノート');
+    expect(st.notice, '戻したことを言っていない').toBe('「戻したノート」を前の版に戻しました');
+    // 対照群: 戻したノートを選んだままなら、そのノートを開く
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'z' });
+    d.dispatch({ type: 'ENTRY_RESTORED', mode: 'revision', meta: meta('z', { entryOrder: 3, title: '戻したノート' }), body: 'さらに古い版' });
+    expect(d.getState().openBody?.body).toBe('さらに古い版');
+  });
+
   it('🔴 並びの位置が戻る(末尾に飛ばない)', () => {
     const d = bootWithFolder();
     d.dispatch({ type: 'DELETE_ENTRY', lid: 'child' });

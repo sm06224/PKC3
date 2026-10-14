@@ -9885,6 +9885,27 @@ function reduceCore(
       // 選択して結果を見せる。openBody は disk 確定値で確立(persisted = body)
       const entryMetas = new Map(state.entryMetas).set(action.meta.lid, action.meta);
       /**
+       * 🔴 **履歴の復元が着く前に別のノートを選んでいたら、選択を奪い返さない**(#1087)。
+       * ⚠ 直す前は無条件に `selectedLid` と `openBody` を差し替えていた ── 戻すを押した直後に別のノートを押すと、
+       *   押したノートが開かず、戻したノートへ引き戻されていた(押したのに何も起きないように見える)。
+       * 🔑 戻したこと自体は言う(書込は済んでいる)。並び・本文の画面は選んでいるノートのまま。
+       */
+      if (action.mode === 'revision' && state.selectedLid !== action.meta.lid) {
+        return {
+          state: {
+            ...state,
+            entryMetas,
+            taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
+            smartHits: refreshSmartHits(state.smartHits, action.meta.lid, action.body, state.entryMetas),
+            notice:
+              action.fromUndo === true
+                ? `「${action.meta.title}」を、戻す前の本文に戻しました`
+                : `「${action.meta.title}」を前の版に戻しました`,
+          },
+          events: [],
+        };
+      }
+      /**
        * 🔴 **元の位置へ戻す**(2026-08-06。user 報告 2-9)。
        *
        * 直す前は `[...state.order, lid]` = **末尾に飛んでいた**。並びの規則は
