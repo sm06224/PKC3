@@ -570,6 +570,45 @@ test('🔴 Space は印を付けて 1 行下へ(ページは動かない)', asyn
   await page.keyboard.press('Space');
   await expect(marked, '飛び飛びに選べていない').toHaveCount(2);
 
+  /**
+   * ⑥ 🔴 **行の「PDF で書き出す」は、押した行のノートを刷り、刷った後は見ていたノートへ戻る**
+   *   (#1087、`print-note.ts` の `restore`)。
+   * ⚠ 2 ペインの右クリックは**選択を動かさない**(`rowLidOrSelected` が行の lid を運ぶ)── だから
+   *   「A を選んだまま B の行から刷る」が成り立つ。一覧(`filer-table`)の右クリックは行を選んでしまい、
+   *   戻す相手が無い(= `context-menu.smoke` の #500 では戻しを見られない)。
+   * 🔑 観測点は本文の題名:刷る瞬間は押した行(あ)・面は本文へ(`hidden`)、刷った後は
+   *   選んでいたノート(う)・面は 2 ペインへ。⚠ 刷る瞬間は `beforeprint` で控える
+   *   (戻した後は見えない)。ノートの題名は上で `あ / い / う` と付けた。
+   */
+  const titleEl = page.locator('[data-pkc-field="detail-title"]');
+  const dualPane = page.locator('[data-pkc-view-pane="dual"]');
+  await expect(titleEl, '前提: 選んでいるノートが「う」ではない').toHaveText('う');
+  await expect(dualPane, '前提: 2 ペインが見えていない').toBeVisible();
+  await page.evaluate(() => {
+    const g = globalThis as unknown as Record<string, unknown>;
+    g.__printSeen = [];
+    window.addEventListener('beforeprint', () => {
+      (g.__printSeen as string[]).push(
+        `${document.querySelector('[data-pkc-field="detail-title"]')?.textContent ?? ''}|${
+          (document.querySelector('[data-pkc-view-pane="dual"]') as HTMLElement | null)?.hidden
+        }`,
+      );
+    });
+  });
+  await page.locator(ROWS('left')).first().click({ button: 'right' });
+  await page.locator('[data-pkc-region="context-menu"] [data-pkc-action="export-entry-pdf"]').click();
+  await expect
+    .poll(() => page.evaluate(() => (globalThis as unknown as Record<string, string[]>).__printSeen!.length), {
+      message: '印刷が始まらない',
+    })
+    .toBe(1);
+  expect(
+    await page.evaluate(() => (globalThis as unknown as Record<string, string[]>).__printSeen![0]),
+    '刷った瞬間が「押した行(あ)を本文で」になっていない',
+  ).toBe('あ|true');
+  await expect(titleEl, '刷った後に、選んでいたノート(う)へ戻っていない').toHaveText('う');
+  await expect(dualPane, '刷った後に、2 ペインの面へ戻っていない').toBeVisible();
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
