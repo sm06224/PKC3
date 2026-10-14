@@ -673,7 +673,11 @@ export async function rebuildContainer(
  * (`RebuildReport.extrasPartial`)ので、ここには置かない。
  * ⚠ 戻らない物がまた出たら、ここへ足す(マニュアルの表と**等値**で pin してある)。
  */
-export const REBUILD_LOST: readonly string[] = [] as const;
+/**
+ * 🔴 **作り直しで戻らない物**(#1087)── ゴミ箱のノートとシステムのメッセージは拾い出しの対象に入っていない。
+ * ⚠ 空にすると窓が「全部戻る」と読める ── 戻す作りにするかは見え方の判断待ち(#1163 依頼 119-1)。
+ */
+export const REBUILD_LOST: readonly string[] = ['ゴミ箱のノート', 'システムのメッセージ'] as const;
 
 /**
  * 終わった後に画面へ出す字。
@@ -732,7 +736,9 @@ export function rebuildDoneMessage(r: RebuildReport): string {
   const lost = r.extrasPartial
     ? '⚠ 読み込めなかったつながり・履歴があり、その分は戻っていません。'
     : '';
-  return `${head}${kept}${backed}。${lost}読み込み直します。`;
+  // 🔴 戻らない物は呼び名を `REBUILD_LOST` から引く(押す前の窓と同じ語。§7)
+  const never = REBUILD_LOST.length === 0 ? '' : `${REBUILD_LOST.join('・')}は戻りません。`;
+  return `${head}${kept}${backed}。${lost}${never}読み込み直します。`;
 }
 
 /**
