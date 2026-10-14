@@ -13553,7 +13553,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     void read(lid).then(done, () => done(null));
   },
-  'restore-revision': (dispatcher, target) => {
+  'restore-revision': (dispatcher, target, services) => {
     // 前進変異(復元前に現状が履歴に積まれる)なので confirm は要らない ──
     // 「復元の取り消し」も履歴から戻れる
     const revId = target.getAttribute('data-pkc-rev-id');
@@ -13570,10 +13570,29 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}復元してください` });
       return;
     }
-    dispatcher.dispatch({
-      type: 'RESTORE_REVISION',
-      revId,
-      ...(target.getAttribute('data-pkc-undo') === '1' ? { fromUndo: true as const } : {}),
+    const restore = (): void => {
+      dispatcher.dispatch({
+        type: 'RESTORE_REVISION',
+        revId,
+        ...(target.getAttribute('data-pkc-undo') === '1' ? { fromUndo: true as const } : {}),
+      });
+    };
+    /**
+     * 🔴 **別のタブ・窓が編集中なら断る**(#1087。追記・チェックの切り替えと同じ門 = `editedElsewhereReason`)。
+     * ⚠ 直す前は通していた ── 「前の版に戻しました」と出るのに、編集中のタブが保存するとそちらの字で上書きされ、
+     *   こちらの画面は黙ってその版へ変わっていた(戻した版は履歴にだけ残る)。
+     */
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) {
+      restore();
+      return;
+    }
+    void editedElsewhereReason(dispatcher, services, lid).then((reason) => {
+      if (reason !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: reason });
+        return;
+      }
+      restore();
     });
   },
   'write-back-file': (dispatcher, target, services) => {
