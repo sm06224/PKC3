@@ -9,6 +9,7 @@ import {
   findOrphanAssets,
   purgeAssets,
   purgeBlockReason,
+  refsInPendingTexts,
   runExplicitPurge,
   strayBlobKeys,
   type AssetGcPorts,
@@ -295,8 +296,8 @@ describe('器の無い bytes(#260)', () => {
       { storeKey: 'c-gone:b', cid: 'c-gone' },
       { storeKey: 'default:c', cid: 'default' },
     ];
-    expect(strayBlobKeys(all, ['c-mine'])).toEqual(['c-gone:b', 'default:c']);
-    expect(strayBlobKeys(all, ['c-mine', 'default'])).toEqual(['c-gone:b']);
+    expect(strayBlobKeys(all, ['c-mine'], true)).toEqual(['c-gone:b', 'default:c']);
+    expect(strayBlobKeys(all, ['c-mine', 'default'], true)).toEqual(['c-gone:b']);
   });
 
   /**
@@ -306,7 +307,29 @@ describe('器の無い bytes(#260)', () => {
    */
   it('🔴 器の一覧が空なら、1 件も残骸と言わない', () => {
     const all = [{ storeKey: 'c-mine:a', cid: 'c-mine' }];
-    expect(strayBlobKeys(all, []), '一覧を取り損ねた回に全部消しに行く').toEqual([]);
+    expect(strayBlobKeys(all, [], true), '一覧を取り損ねた回に全部消しに行く').toEqual([]);
+  });
+
+  /**
+   * 🔴 **保存先がメモリへ落ちた回は、1 件も残骸と言わない**(#1087、添付の見直し)。
+   * ⚠ その回の DB は空で、新しい器が 1 つだけ在る(一覧は空でない)。添付の bytes の置き場は別なので
+   *   本来の器の bytes はそのまま残っている ── 「一覧に無い器 = 残骸」と読むと、本来の添付を全部消していた。
+   */
+  it('🔴 まだ保存していない字(追記欄・編集の控え)の中の参照を拾う', () => {
+    const texts = ['追記の途中 ![](asset:k-paste)', '控えの本文 [資料](asset:k-draft)\n'];
+    expect(refsInPendingTexts(texts, ['k-paste', 'k-draft', 'k-unused']).sort()).toEqual(['k-draft', 'k-paste']);
+    // 対照群: 字が無ければ何も拾わない
+    expect(refsInPendingTexts([], ['k-paste'])).toEqual([]);
+  });
+
+  it('🔴 保存先がメモリへ落ちた回は、ほかの器の bytes を残骸と言わない', () => {
+    const all = [
+      { storeKey: 'c-real:a', cid: 'c-real' },
+      { storeKey: 'c-real:b', cid: 'c-real' },
+    ];
+    // 対照群: 本物の保存先なら、一覧に無い器の bytes は残骸
+    expect(strayBlobKeys(all, ['c-fresh'], true)).toEqual(['c-real:a', 'c-real:b']);
+    expect(strayBlobKeys(all, ['c-fresh'], false), '本来の器の添付を消しに行く').toEqual([]);
   });
 
   /**

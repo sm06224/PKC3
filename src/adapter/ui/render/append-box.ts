@@ -218,6 +218,18 @@ export class AppendBoxRenderer {
     return shell !== null && shell.style.getPropertyValue('--pkc-pane-append') !== '';
   }
 
+  /**
+   * 🔴 **まだ送っていない字の全部**(いま打っている欄 + 別のノートへ移るとき預かった分)。
+   * ⚠ 追記欄に画像を貼ると、bytes は置かれるが参照は**この字の中にしか無い**(送るまでノートに書かない)。
+   *   使われていない添付の整理はノートと履歴しか見ないので、ここを渡さないと貼った画像を消していた
+   *   (#1087、添付の見直し。`main.ts` の整理の口が読む)。
+   */
+  pendingTexts(): string[] {
+    const out = [...this.drafts.values()];
+    if (this.input.value !== '') out.push(this.input.value);
+    return out;
+  }
+
   private keepDraft(lid: string, text: string): void {
     if (text === '') this.drafts.delete(lid);
     else this.drafts.set(lid, text);

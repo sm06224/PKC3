@@ -191,6 +191,7 @@ import { countUnread, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
+  refsInPendingTexts,
   strayBlobKeys,
 } from '@adapter/platform/storage/asset-gc';
 import {
@@ -2722,10 +2723,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     replaceAsset: async (lid, save, bytes) => {
       if (dispatcher.getState().phase !== 'ready') return false;
       let ok = false;
+      let newKey = '';
       await withAssetGate.queued(async () => {
         const mime = resolveMime(save.name, '');
         const blob = new Blob([bytes]);
         const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
+        newKey = key;
         await blobs.put(cid, key, blob);
         await client.request({
           op: 'putAssetMeta',
@@ -2756,6 +2759,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const after = dispatcher.getState();
         ok = after.phase === 'ready' && after.entryMetas.get(lid)?.archetype === 'attachment';
       });
+      /**
+       * 🔴 **本当に書けたかを、disk のノートで確かめてから「取り込みました」と言う**(#1087、添付の見直し)。
+       * ⚠ 書くのは非同期の効果(`REQUEST_ASSET_REPLACE`)で、容量の拒否・DB の破損で落ちうる。
+       *   直す前は撃った直後に成功と返していたので、棚(書きかけの控え)を捨ててから失敗が出て、
+       *   新しい版の bytes はどのノートからも指されないまま次の整理で消えていた。
+       * ⚠ 待つのは門の**外**(効果の列が門を待つ形になっても固まらないように)。
+       * ⚠ 確かめられなければ成功と言わない(棚は残り、次に引き取れる)。
+       */
+      if (ok) {
+        try {
+          await storeEffects?.settled();
+          const body = await client.request({ op: 'getBody', cid, lid });
+          ok = typeof body === 'string' && body.includes(newKey);
+        } catch {
+          ok = false;
+        }
+      }
       return ok;
     },
     // 🔴 **作ったノートを窓へ教える**(#217)── 教えないと 2 回目の保存で
@@ -5011,17 +5031,31 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                   if (!isUnknownOpError(err)) throw err;
                   return [];
                 }
-                return strayBlobKeys(await blobs.listAll(), cids);
+                return strayBlobKeys(await blobs.listAll(), cids, init.vfs !== 'memory');
               },
               deleteStrayBlob: (storeKey: string) => blobs.deleteStoreKey(storeKey),
               scanReferenced: async (candidates: string[]) =>
-                (
-                  await client.request({
-                    op: 'scanAssetRefs',
-                    cid,
+                [
+                  ...(
+                    await client.request({
+                      op: 'scanAssetRefs',
+                      cid,
+                      candidates,
+                    })
+                  ).referenced,
+                  /**
+                   * 🔴 **まだ保存していない字の中の参照も「使っている」に数える**(#1087、添付の見直し)──
+                   *   追記欄に貼って送っていない画像と、端末に残った編集の控え(`refsInPendingTexts`)。
+                   * ⚠ 控えを読めなければ整理を止める(投げる)── 読めないまま消すと、控えの中の画像を消しうる。
+                   */
+                  ...refsInPendingTexts(
+                    [
+                      ...appendBox.pendingTexts(),
+                      ...(await draftStore.list(cid)).map((r) => r.body),
+                    ],
                     candidates,
-                  })
-                ).referenced,
+                  ),
+                ],
               deleteBlob: (key: string) => blobs.delete(cid, key),
               deleteMeta: async (key: string) => {
                 await client.request({ op: 'deleteAssetMeta', cid, key });
