@@ -182,6 +182,8 @@ describe('名前を変える', () => {
       ['remove', ['請求'], ['a', 'b']],
       ['add', ['請求書'], ['a', 'b']],
     ]);
+    // 🔴 2 回目(付ける)は 1 回目(外す)の知らせに続けて言う ── 上書きすると外せなかった件数が消える(#1087)
+    expect(bulks(s.sent).map((b) => (b as { afterPrevious?: boolean }).afterPrevious === true)).toEqual([false, true]);
   });
 
   it('同じ名前・名前が 2 つ以上・やめる、では撃たない', async () => {

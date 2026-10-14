@@ -3165,6 +3165,11 @@ export type UserAction =
        *   欄を持たない呼び手(札を外す `untag-entry` 等)は渡さない = 戻す先が無い。
        */
       field?: TagInputField;
+      /**
+       * 🔴 **前の知らせに続けて言う**(#1087)── 名前の変更は「外す」「付ける」の 2 回で、
+       *   2 回目の知らせが 1 回目を上書きしていた(外せなかった件数が消えていた)。
+       */
+      afterPrevious?: boolean;
     }
   /**
    * 🔴 **一時の知らせ**(#402 ①)。⚠ `OP_FAILED` と混ぜない ── あちらは赤い帯で、
@@ -4105,6 +4110,8 @@ export type DomainEvent =
       mode: 'add' | 'remove';
       /** ⚠ 入らなかった名前を戻す欄(#640)。無ければ戻さない。 */
       field?: TagInputField;
+      /** 🔴 前の知らせに続けて言う(`BULK_TAG.afterPrevious`)。 */
+      afterPrevious?: boolean;
       targets: readonly {
         lid: string;
         title: string;
@@ -9067,6 +9074,7 @@ function reduceCore(
             mode: action.mode,
             targets,
             ...(action.field === undefined ? {} : { field: action.field }),
+            ...(action.afterPrevious === true ? { afterPrevious: true } : {}),
           },
         ],
       };

@@ -2925,7 +2925,10 @@ export function connectStoreEffects(
            */
           if (stillInBody > 0)
             parts.push(`${stillInBody} 件は本文の中にも書いてあるので、まだそのタグが付いています`);
-          dispatcher.dispatch({ type: 'OP_NOTICE', message: parts.join(' / ') });
+          // 🔴 名前の変更の 2 回目は、1 回目(外す)の知らせに続けて言う ── 上書きすると外せなかった件数が消える(#1087)
+          const previous = ev.afterPrevious === true ? dispatcher.getState().notice : null;
+          const said = parts.join(' / ');
+          dispatcher.dispatch({ type: 'OP_NOTICE', message: previous ? `${previous} / ${said}` : said });
           /**
            * 🔴 **上限で入らなかった名前を欄へ戻す**(#640 案 A)── 知らせの字だけでは
            *   打ち直しになる。⚠ 「既に付いていた」は戻さない(入っている)。

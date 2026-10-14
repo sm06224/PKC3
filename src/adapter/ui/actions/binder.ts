@@ -2376,7 +2376,7 @@ async function queryTagBulk(
     return;
   }
   dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
-  if (mode === 'rename') dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add' });
+  if (mode === 'rename') dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add', afterPrevious: true });
   // 🔑 集計は書いた結果を映す ── 書込が着いてから数え直す
   void Promise.resolve(services.settle?.() ?? null).then(() => {
     dispatcher.dispatch({ type: 'REFRESH_QUERY' });
