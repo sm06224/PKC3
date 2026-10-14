@@ -480,6 +480,23 @@ describe('delete (P3-7a)', () => {
 });
 
 describe('rename (P3-7a)', () => {
+  it('🔴 編集中に別の所で名前を変えても、題名欄を触らずに保存すれば古い名前へ戻さない(#1087)', async () => {
+    const { d, q } = setup([meta('a', 1)], { a: '# 本文' });
+    q<HTMLElement>('[data-pkc-entry="a"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="start-edit"]')!.click();
+    const before = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!.value;
+    // 編集中に、2 ペインや別のタブがこのノートの名前を変えた
+    d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'a', title: 'よそで付けた名前' });
+    expect(d.getState().entryMetas.get('a')?.title, '前提: 名前が変わっていない').toBe('よそで付けた名前');
+    const field = q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
+    // 対照の前提:欄は始めたときの名前のまま(作り直されていれば、この test は何も見ていない)
+    expect(field.value).toBe(before);
+    q<HTMLElement>('[data-pkc-action="commit-edit"]')!.click();
+    await tick(20);
+    expect(d.getState().entryMetas.get('a')?.title, '保存で古い名前へ戻した').toBe('よそで付けた名前');
+  });
+
   it('editor の title input → 保存で sidebar と store に反映', async () => {
     const { d, q, persisted, renamed, store } = setup([meta('a', 1)], { a: '# 本文' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();

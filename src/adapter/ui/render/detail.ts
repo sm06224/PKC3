@@ -2443,6 +2443,8 @@ export class DetailRenderer {
     titleInput.setAttribute('data-pkc-field', 'editor-title');
     titleInput.setAttribute('aria-label', 'ノートの題名');
     titleInput.value = state.entryMetas.get(open.lid)?.title ?? '';
+    // 🔑 編集を始めたときの題名(#1087)── 保存で改名するのは、この欄の字が変わったときだけ(binder の `renameFromEditorInput`)
+    titleInput.setAttribute('data-pkc-title-base', titleInput.value);
     /**
      * 🔴 **題名で `Enter` = 本文へ**(#1221)。保存の近道(`Mod+Enter`)とは別 ──
      * 修飾キーが付いたら何もしない(`commit-edit` の鍵に譲る)。

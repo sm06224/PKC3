@@ -2306,11 +2306,17 @@ function settleRowEditor(root: HTMLElement): void {
  *  (楽観 meta 更新 → 直後の COMMIT_EDIT が新 title で行を組む。
  *  input が見つからなければ何もしない = 既存 title 維持 ── PKC2 の
  *  「title が消える」bug の防波堤と同じ向き)。 */
+/**
+ * 編集の題名欄の字で改名する。
+ * 🔴 **欄の字を変えていなければ改名しない**(#1087)── 編集中に 2 ペインや別のタブで同じノートの名前を変えると、
+ *   欄には始めたときの古い名前が残っているので、保存のたびに古い名前へ戻していた。
+ */
 function renameFromEditorInput(dispatcher: Dispatcher, root: HTMLElement): void {
   const input = editorTitle(root);
   const lid = dispatcher.getState().openBody?.lid;
-  if (input && lid)
-    dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
+  if (!input || !lid) return;
+  if (input.value === input.getAttribute('data-pkc-title-base')) return;
+  dispatcher.dispatch({ type: 'RENAME_ENTRY_TITLE', lid, title: input.value });
 }
 
 /** 読む面の描画済み本文(コピーの書式付き / 選択範囲が読む)。 */
