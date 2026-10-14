@@ -37,6 +37,7 @@ import {
 import { kindCounts, type KindCount } from '@features/filter/kind-filter';
 import { commandQueryOf } from '@features/palette/command-query';
 import { filerRows } from '@features/relation/filer-list';
+import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRowOptions } from '@adapter/state/list-view-options';
 import { kindFilterApplies, type BrowseMode } from './browse-mode';
 import { buildPressedButton } from './choice-buttons';
@@ -56,6 +57,7 @@ export class KindBarRenderer {
    */
   private kindMemo: {
     order: AppState['order'];
+    /** ⚠ 時刻だけ違う一覧に差し替わったら進める(書き換えるのは控えであって、答えではない)。 */
     metas: AppState['entryMetas'];
     query: AppState['filterQuery'];
     hits: AppState['searchHits'];
@@ -72,15 +74,22 @@ export class KindBarRenderer {
     if (
       m !== null &&
       m.order === state.order &&
-      m.metas === state.entryMetas &&
       m.query === state.filterQuery &&
       m.hits === state.searchHits &&
       m.mode === mode &&
       m.scope === state.scopeLid &&
       m.relations === state.relations &&
-      m.smartHits === state.smartHits
-    )
+      m.smartHits === state.smartHits &&
+      /**
+       * 🔑 **一覧の参照が違っても、違うのが時刻だけなら数え直さない**(#1087)。数えるのは
+       *   「どの行がどの種類か」で、時刻は使わない(並べ替えの鍵には使うが、数は並びに依らない)。
+       *   保存の ack は新しい Map を作るので、参照だけで見ると保存のたびに全件を数え直す。
+       */
+      (m.metas === state.entryMetas || stampChanges(m.metas, state.entryMetas) !== null)
+    ) {
+      m.metas = state.entryMetas;
       return m.kinds;
+    }
     let present: FilterTarget[];
     if (mode === 'filer') {
       /**

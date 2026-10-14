@@ -96,6 +96,41 @@ describe('種類の札の数え直し(#1087)', () => {
     expect(countSpy).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * 🔴 保存の ack(`ENTRY_STAMPED`)は一覧を新しい Map に差し替える。違うのが時刻だけなら数え直さない。
+   * 対照群は直下(題名・種類が変われば数え直す)と、上の「材料が 1 つでも変われば」が持つ。
+   */
+  it('🔴 時刻だけが違う新しい一覧(保存の ack)では、数え直さず、札も変わらない', () => {
+    const { bar, chips } = mount();
+    const s = boot();
+    bar.render(s, 'filer');
+    const before = chips();
+    countSpy.mockClear();
+    const metas = new Map(s.entryMetas);
+    metas.set('a', { ...metas.get('a')!, updatedAt: '2026-10-14 09:00:00' });
+    bar.render({ ...s, entryMetas: metas }, 'filer');
+    expect(countSpy).toHaveBeenCalledTimes(0);
+    expect(chips()).toEqual(before);
+  });
+
+  it('🔴 対照群: 時刻の次に種類も変わった一覧では、前の時刻だけの差し替えを足場にせず数え直す', () => {
+    const { bar, chips } = mount();
+    const s = boot();
+    bar.render(s, 'filer');
+    // ① 時刻だけ(数え直さない)で控えが新しい一覧へ進む
+    const stamped = new Map(s.entryMetas);
+    stamped.set('a', { ...stamped.get('a')!, updatedAt: '2026-10-14 09:00:00' });
+    bar.render({ ...s, entryMetas: stamped }, 'filer');
+    countSpy.mockClear();
+    // ② 次の一覧では種類が変わる ── 進めた控えとの比べで「違い」が見えること
+    const retyped = new Map(stamped);
+    retyped.set('c', { ...retyped.get('c')!, archetype: 'text' });
+    const before = chips();
+    bar.render({ ...s, entryMetas: retyped }, 'filer');
+    expect(countSpy).toHaveBeenCalledTimes(1);
+    expect(chips()).not.toEqual(before);
+  });
+
   it('🔴 並び(order)だけが変わっても数え直す(一覧から外れたノートは数えない)', () => {
     const { bar } = mount();
     const s = boot();
