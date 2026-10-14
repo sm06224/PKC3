@@ -35,6 +35,8 @@ import { renderMarkdown, type RenderMarkdownOptions } from '../markdown/markdown
 import { bakeSqlEmbeds, type SqlEmbedAnswer } from '../markdown/sql-embed';
 import { extractVars } from '../markdown/frontmatter';
 import { createWarnCollector } from './warn-cap';
+import { EXTERNAL_IMAGE_ATTR } from '../markdown/external-images';
+import { ADOPT_IMAGES_LABEL } from '@features/entry-actions';
 import {
   extractDocumentGlobals,
   extractHeadingNumberConfig,
@@ -71,6 +73,49 @@ const NOTE_LINK_ATTR = 'data-pkc-entry-ref';
 const NOTE_LINK_IN_HTML = /<a\b[^>]*\bdata-pkc-entry-ref="entry:([^"#]+)/g;
 const NOTE_ID_KEY = 'lid';
 
+
+/**
+ * 🔴 **開いた先で原文の字・空の枠になる物を数える**(#1087)。
+ *
+ * 閲覧側には mermaid / chart.js / KaTeX を積まない(上の script の注記)ので、図・グラフ・数式は
+ * **打った原文の字**で出て、読み込んでいない外部画像は**空の枠**になる。渡す側には何も言っていなかった
+ * (自分の画面では図が描けているので、気づけない)。⚠ **言うだけ** ── 図を焼き込むかは別の判断。
+ * 🔑 数えるのは**描いた HTML の中の器**(閲覧側がそう扱う属性そのもの)。⚠ 器の属性名は
+ * 閲覧側の script が拾う名前と**同じ文字列**(片方だけ変えると、数えた物と開いた先で起きることがずれる)。
+ * ⚠ タグの中の属性だけを見る(コードの中に属性名を書いた文は `<` が `&lt;` になるので当たらない)。
+ */
+const COUNT_ATTRS = {
+  mermaid: 'data-pkc-mermaid-src',
+  chart: 'data-pkc-chart-src',
+  math: 'data-pkc-math-src',
+  /** 外部の画像。⚠ 焼いた(設定が「常にオン」の)ときは `src` が付き、この属性は付かない = 数えない。 */
+  externalImage: EXTERNAL_IMAGE_ATTR,
+} as const;
+type CountKind = keyof typeof COUNT_ATTRS;
+
+function countContainers(html: string): Record<CountKind, number> {
+  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0 };
+  for (const kind of Object.keys(COUNT_ATTRS) as CountKind[]) {
+    const re = new RegExp(`<[a-zA-Z][^>]*\\s${COUNT_ATTRS[kind]}="`, 'g');
+    out[kind] = (html.match(re) ?? []).length;
+  }
+  return out;
+}
+
+/** 注意の文面(0 件の種類は出さない)。 */
+function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
+  const w: string[] = [];
+  if (n.mermaid > 0) w.push(`図(mermaid)${n.mermaid} 件は、開いた先では原文の字で出ます`);
+  if (n.chart > 0) w.push(`グラフ ${n.chart} 件は、開いた先では原文の字で出ます`);
+  if (n.math > 0) w.push(`数式 ${n.math} 件は、開いた先では打った字のまま出ます`);
+  if (n.externalImage > 0) {
+    w.push(
+      `外部の画像 ${n.externalImage} 件は、開いた先では空の枠になります` +
+        `(右のペインの「${ADOPT_IMAGES_LABEL}」で取り込んでから書き出すと入ります)`,
+    );
+  }
+  return w;
+}
 
 export interface HtmlResult {
   blob: Blob;
@@ -856,6 +901,8 @@ export async function writePortableHtml(
    */
   const exportedLids = new Set<string>();
   const linkTargets: string[] = [];
+  /** 開いた先で原文の字・空の枠になる物の数(#1087)。 */
+  const opened: Record<CountKind, number> = { mermaid: 0, chart: 0, math: 0, externalImage: 0 };
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
@@ -953,6 +1000,8 @@ export async function writePortableHtml(
       entryCount++;
       exportedLids.add(m.lid);
       for (const hit of html.matchAll(NOTE_LINK_IN_HTML)) linkTargets.push(hit[1]!);
+      const found = countContainers(html);
+      for (const k of Object.keys(found) as CountKind[]) opened[k] += found[k];
     }
     if (chunk !== '') parts.push(new Blob([chunk]));
     if (done || !next) break;
@@ -974,6 +1023,7 @@ export async function writePortableHtml(
   if (outside > 0) {
     warnings.push(`このファイルに入っていないノートへのリンク ${outside} 件は、押せない字だけになります`);
   }
+  warnings.push(...openedAsSourceNotices(opened));
   const assetMetas = allAssets.filter((a) => used.has(a.key));
   const skipped = allAssets.length - assetMetas.length;
   if (skipped > 0) {

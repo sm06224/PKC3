@@ -41,6 +41,7 @@ import { createWarnCollector } from './warn-cap';
 import { scanAssetRefsInto } from '@features/asset/asset-ref-scan';
 import { readVersions } from '@features/flavor/attachment-versions';
 import { humanBytes } from '@features/human-bytes';
+import { countNoteLinkSites, noteLinkNotice } from './note-link-notice';
 
 export const MD_FORMAT = 'pkc3-markdown';
 export const MD_VERSION = 1;
@@ -152,6 +153,27 @@ export function extForMime(mime: string | null): string {
   return EXT_BY_MIME[mime.split(';')[0]!.trim().toLowerCase()] ?? 'bin';
 }
 
+/** 表に無い種類の添付で、元のファイル名から拡張子を借りるときの長さの上限(`.torrent` `.heic` ほか 8 字まで)。 */
+const NAME_EXT_MAX = 8;
+
+/**
+ * 🔑 **元のファイル名の拡張子**(#1087)。表(`EXT_BY_MIME`)に無い種類(`.mov` / `.7z` / `.flac` / `.heic` …)が
+ * 全部 `.bin` になると、外で開けない。取れるのは**英数字だけ・長さに上限つき**の物だけ ──
+ * 取り出した字は書き出す file 名の一部になるので、記号・空白・パスの区切りを含む物は使わない。
+ * 取れなければ `null`(呼び側が `bin`)。
+ */
+export function extFromFileName(name: string | null | undefined): string | null {
+  if (typeof name !== 'string') return null;
+  const m = new RegExp(`\\.([A-Za-z0-9]{1,${NAME_EXT_MAX}})$`).exec(name.trim());
+  return m ? m[1]!.toLowerCase() : null;
+}
+
+/** 添付 1 件の拡張子: 種類の表 → 元のファイル名 → `bin`。 */
+export function extForAsset(mime: string | null, fileName: string | null | undefined): string {
+  const byMime = extForMime(mime);
+  return byMime !== 'bin' ? byMime : (extFromFileName(fileName) ?? 'bin');
+}
+
 /** Windows が**ファイル名として使えない**予約語(拡張子を付けても駄目)。 */
 const RESERVED = new Set([
   'con', 'prn', 'aux', 'nul',
@@ -247,13 +269,49 @@ function pkc3Meta(m: {
 function rewriteAssetLinks(
   text: string,
   resolve: (key: string) => string | undefined,
-): { text: string; openFence: string | null } {
+): { text: string; openFence: string | null; noteLinks: number } {
   const { sites, openFence } = scanLinks(text);
   const out = rewriteLinkDests(text, sites, (site) => {
     const m = /^asset:([A-Za-z0-9_.-]+)$/.exec(site.dest);
     return m ? resolve(m[1]!) : undefined;
   });
-  return { text: out, openFence };
+  // 🔑 ノートへのリンクは書き換えない(見え方の判断)── 同じ走査で**数えるだけ**(#1087)
+  return { text: out, openFence, noteLinks: countNoteLinkSites(sites) };
+}
+
+/**
+ * 添付の**元のファイル名**を、添付ノートの frontmatter(`attachment.asset_key` と、同じ prefix の `…name`)から引く。
+ * ⚠ 本文を 1 周余計に読むので、**表に無い種類の添付が在るときだけ**走る(`wanted` が空なら何も読まない)。
+ * 読むのは `parseFrontmatter` だけ ── 書き換えない。
+ */
+async function attachmentFileNames(
+  src: ArchiveSource,
+  wanted: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (wanted.size === 0) return out;
+  let after: { entryOrder: number; lid: string } | undefined;
+  for (;;) {
+    const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
+    for (const r of rows) {
+      const meta = parseFrontmatter(r.body).meta;
+      for (const [k, v] of Object.entries(meta)) {
+        if (!k.endsWith('asset_key') || typeof v !== 'string' || !wanted.has(v) || out.has(v)) continue;
+        const nm = meta[`${k.slice(0, -'asset_key'.length)}name`];
+        if (typeof nm === 'string' && nm !== '') out.set(v, nm);
+      }
+    }
+    if (done || !next) break;
+    if (
+      after !== undefined &&
+      !(next.entryOrder > after.entryOrder ||
+        (next.entryOrder === after.entryOrder && next.lid > after.lid))
+    ) {
+      throw new Error('本文の読み出しが進みません(カーソルが前進していません)');
+    }
+    after = next;
+  }
+  return out;
 }
 
 /**
@@ -298,16 +356,23 @@ export async function writeMarkdownTo(
   const assetMetas = await src.listAssetMetas();
   const names = new NameAllocator();
   const mimeOf = new Map(assetMetas.map((a) => [a.key, a.mime]));
+  // 🔑 表に無い種類の添付だけ、元のファイル名(添付ノートの frontmatter)から拡張子を借りる(#1087)
+  const fileNameOf = await attachmentFileNames(
+    src,
+    new Set(assetMetas.filter((a) => extForMime(a.mime) === 'bin').map((a) => a.key)),
+  );
   // ⚠ 名前は**大文字小文字を同一視して**一意にする(`AST-1` と `ast-1` は
   // macOS / Windows で同じファイル ── 片方が別の画像で上書きされる)
   const pathOf = new Map(
-    assetMetas.map((a) => [a.key, ASSET_DIR + names.claim(a.key, extForMime(a.mime))]),
+    assetMetas.map((a) => [a.key, ASSET_DIR + names.claim(a.key, extForAsset(a.mime, fileNameOf.get(a.key)))]),
   );
   const mdNames = new NameAllocator();
   const used = new Set<string>();
   /** 控え(`attachment.history` に載っている過去の版)の key。#213 の内訳に使う。 */
   const historyKeys = new Set<string>();
   let entryCount = 0;
+  /** 本文の中のノートへのリンク(`entry:…`)の数。外では開けないので最後に言う(#1087)。 */
+  let noteLinkCount = 0;
   let after: { entryOrder: number; lid: string } | undefined;
 
   for (;;) {
@@ -408,7 +473,8 @@ export async function writeMarkdownTo(
       // 「残骸は原文の suffix」という長さ演算が CRLF の本文で崩れ、
       // 切り出し位置がずれて**本文に 1 文字混入した**(実測で踏んだ)。
       // 宛先限定の書き換えなら frontmatter 部分を通しても実害が無い
-      const { text, openFence } = rewriteAssetLinks(r.body, (key) => pathOf.get(key));
+      const { text, openFence, noteLinks } = rewriteAssetLinks(r.body, (key) => pathOf.get(key));
+      noteLinkCount += noteLinks;
 
       // 書き換えられずに残った参照は**外では開けない** ── 黙って出さない
       ASSET_REF_RE.lastIndex = 0;
@@ -494,6 +560,8 @@ export async function writeMarkdownTo(
       `添付の過去の版 ${historyCount} 件・約 ${humanBytes(historyBytes)} を含みます`,
     );
   }
+  const noteLinkWarning = noteLinkNotice(noteLinkCount);
+  if (noteLinkWarning !== null) warnings.push(noteLinkWarning);
   const skipped = assetMetas.length - used.size;
   if (skipped > 0) {
     warnings.push(`どの本文からも参照されていない添付 ${skipped} 件は含めませんでした`);

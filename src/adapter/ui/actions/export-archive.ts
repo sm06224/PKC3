@@ -35,6 +35,7 @@ import { bakeSqlEmbeds, type SqlEmbedAnswer } from '@features/markdown/sql-embed
 import { DEFAULT_PAGE_FORMAT, type PageFormat } from '@features/page-format';
 import { DEFAULT_PROSE_ALIGN, type ProseAlign } from '@features/prose-align';
 import { writeMarkdownZip, writeMarkdownTo } from '@features/export/pkc3-markdown-zip';
+import { countNoteLinks, noteLinkNotice } from '@features/export/note-link-notice';
 import {
   createFreshSubfolder,
   folderSink,
@@ -882,9 +883,12 @@ export async function exportEntryMarkdown(
     const keys = (await deps.source.listAssetMetas()).map((a) => a.key);
     const n = assetRefsIn(body, keys).length;
     const notes = n > 0 ? [`添付 ${n} 件は入っていません(バックアップなら入ります)`] : [];
+    // 🔑 ノートへのリンクは外では開けない ── zip・フォルダと同じ数え方・同じ文面(`note-link-notice.ts`)。⚠ 本文は書き換えない
+    const linkNotice = noteLinkNotice(countNoteLinks(body));
+    if (linkNotice !== null) notes.push(linkNotice);
     deps.report(notes);
     deps.notify?.(
-      notes.length > 0 ? `Markdown で書き出しました。${notes[0]!}` : 'Markdown で書き出しました',
+      notes.length > 0 ? `Markdown で書き出しました。${notes.join('。')}` : 'Markdown で書き出しました',
     );
     return true;
   } catch (e) {

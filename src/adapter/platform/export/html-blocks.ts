@@ -67,6 +67,16 @@ function pushRun(out: DocxRun[], text: string, style: RunStyle): void {
   });
 }
 
+/** 中身の字を別の行にする要素(セル・項目の中で、前後の字とつながらないようにする)。 */
+const RUN_BREAK_TAGS: ReadonlySet<string> = new Set(['p', 'ul', 'ol', 'li', 'div']);
+
+/** 前に出した字が在って、改行で終わっていないときだけ改行を 1 つ入れる。 */
+function breakRun(out: DocxRun[], style: RunStyle): void {
+  const last = out[out.length - 1];
+  if (last === undefined || last.text.endsWith('\n')) return;
+  pushRun(out, '\n', style);
+}
+
 /** 見出しの階層。⚠ `h7` は無いので 6 に丸める(段落ごと落とさない)。 */
 /**
  * 板の位置の属性を読む(#530 段①)。⚠ 描画側(`place-board.ts` の `intAttr`)と
@@ -170,10 +180,35 @@ export function htmlToDocxBlocks(doc: Document): {
   const figures: { at: number; kind: string; source: string }[] = [];
   let skipped = 0;
 
+  /** 直前の兄弟が段落を作る要素か(後ろへ続く字を別の行にする合図)。 */
+  const afterBlock = (n: Node): boolean => {
+    const prev = n.previousSibling;
+    return prev !== null && prev.nodeType === 1 && RUN_BREAK_TAGS.has((prev as Element).tagName.toLowerCase());
+  };
+
   /** 要素の中の文字を走りへ(木を辿って装飾を受け継ぐ)。 */
   const collectRuns = (node: Node, style: RunStyle, out: DocxRun[]): void => {
     for (const child of Array.from(node.childNodes)) {
+      /**
+       * 🔴 **段落を作る要素の境目で改行を入れる**(セルや項目の中の `ul` / `p`)。
+       * 入れないと表のセルの中の箇条書き `a` `b` が `ab` につながる。⚠ 先頭と末尾には入れない
+       * (中身が空のときに空行を作らない)── 「前に出した字がある」ときだけ。
+       */
       if (child.nodeType === 3) {
+        /**
+         * 🔑 **塊と塊のあいだの、改行だけの字は捨てる**(markdown-it が要素の間に入れる整形。
+         * 捨てないと項目やセルの先頭・末尾に空白の走りが付く)。⚠ 字のある文や、
+         * 行内の要素どうしのあいだ(`<em>a</em>\n<em>b</em>`)の空白は残す。
+         */
+        const raw = child.textContent ?? '';
+        if (/^\s*$/.test(raw) && raw.includes('\n')) {
+          const before = child.previousSibling;
+          const after = child.nextSibling;
+          const edge = (n: Node | null): boolean =>
+            n === null || (n.nodeType === 1 && RUN_BREAK_TAGS.has((n as Element).tagName.toLowerCase()));
+          if (edge(before) || edge(after)) continue;
+        }
+        if (afterBlock(child)) breakRun(out, style);
         // ⚠ HTML の折り返しは**空白 1 つ**に潰す(markdown-it は行末で改行を入れる)
         pushRun(out, (child.textContent ?? '').replace(/\s*\n\s*/g, ' '), style);
         continue;
@@ -181,6 +216,14 @@ export function htmlToDocxBlocks(doc: Document): {
       if (child.nodeType !== 1) continue;
       const el = child as Element;
       const tag = el.tagName.toLowerCase();
+      if (afterBlock(child)) breakRun(out, style);
+      /**
+       * 🔴 **画面の道具は文書ではない**(`walkBlocks` と同じ)。コードの ⧉ と切替の ‹/› は
+       * 箇条書きの項目の中の fence にも付くので、ここで落とさないと項目の字に混ざる。
+       */
+      if (tag === 'button' || tag === 'input' || tag === 'label') continue;
+      if (el.classList.contains('pkc-md-copy-btn')) continue;
+      if (RUN_BREAK_TAGS.has(tag)) breakRun(out, style);
       const assetKey = el.tagName.toLowerCase() === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
       if (assetKey !== null && assetKey !== '') {
         /**
@@ -244,22 +287,48 @@ export function htmlToDocxBlocks(doc: Document): {
     return out;
   };
 
+  /** 項目の中で「字」ではなく独立した塊として出す子(コード枠・表・引用・見出し・図の器 …)。 */
+  const isItemBlock = (el: Element): boolean => {
+    const t = el.tagName.toLowerCase();
+    return (
+      t === 'pre' || t === 'table' || t === 'blockquote' || t === 'hr' || t === 'details' || t === 'div' ||
+      headingLevel(t) !== null || figureOf(el) !== null ||
+      el.classList.contains('pkc-render-slot') || el.getAttribute(MATH_ATTR) !== null
+    );
+  };
+
   /** 箇条書き(入れ子は `depth` で平らにする)。 */
   const walkList = (list: Element, depth: number, ordered: boolean): void => {
     for (const li of Array.from(list.children)) {
       if (li.tagName.toLowerCase() !== 'li') continue;
-      // ⚠ 子の `ul` / `ol` は**先に外す** ── 外さないと親の行に子の文字が混ざる
-      const nested = Array.from(li.children).filter((c) =>
-        ['ul', 'ol'].includes(c.tagName.toLowerCase()),
-      );
+      /**
+       * 🔴 **項目の中の入れ子の箇条書きと、コード枠・表などの塊は、項目の字から外す**。
+       * 外さないと親の行に子の文字が混ざる / コードや表が 1 行に潰れる。
+       * 外した物は**その項目の後ろへ、元の順に**別の塊として出す。
+       */
+      const kids = Array.from(li.children);
       const clone = li.cloneNode(true) as Element;
-      for (const c of Array.from(clone.children))
-        if (['ul', 'ol'].includes(c.tagName.toLowerCase())) c.remove();
+      const cloneKids = Array.from(clone.children);
+      const later: Element[] = [];
+      kids.forEach((k, i) => {
+        const t = k.tagName.toLowerCase();
+        if (t === 'ul' || t === 'ol' || isItemBlock(k)) {
+          later.push(k);
+          cloneKids[i]?.remove();
+        }
+      });
       const runs = runsOf(clone);
-      if (runs.length > 0 || nested.length === 0)
+      if (runs.length > 0 || later.length === 0)
         blocks.push({ kind: 'li', ordered, depth, runs });
-      for (const sub of nested)
-        walkList(sub, depth + 1, sub.tagName.toLowerCase() === 'ol');
+      for (const sub of later) {
+        const t = sub.tagName.toLowerCase();
+        if (t === 'ul' || t === 'ol') walkList(sub, depth + 1, t === 'ol');
+        else {
+          const holder = doc.createElement('div');
+          holder.appendChild(sub.cloneNode(true));
+          walkBlocks(holder);
+        }
+      }
     }
   };
 
@@ -303,10 +372,24 @@ export function htmlToDocxBlocks(doc: Document): {
         continue;
       }
       if (tag === 'blockquote') {
-        // ⚠ 引用の中の段落は**引用として**平らにする(入れ子は持たない)
-        const inner = Array.from(el.children).filter((c) => c.tagName.toLowerCase() === 'p');
-        if (inner.length === 0) blocks.push({ kind: 'quote', runs: runsOf(el) });
-        else for (const p of inner) blocks.push({ kind: 'quote', runs: runsOf(p) });
+        /**
+         * 🔴 **引用の中も、引用の外と同じ規則で降りる**(段落だけを拾うと、段落が 1 つでも在る引用では
+         * 箇条書き・コード・入れ子の引用・見出しが黙って消える)。
+         * ⚠ 引用は入れ子を持たない塊なので、字を持つ塊(段落・見出し)を `quote` に**置き換える**
+         * (添字が狂わないよう、その場で差し替える)。箇条書き・コード・表は元の塊のまま、引用の中の順に並ぶ。
+         */
+        if (el.children.length === 0) {
+          blocks.push({ kind: 'quote', runs: runsOf(el) });
+          continue;
+        }
+        const from = blocks.length;
+        walkBlocks(el);
+        for (let i = from; i < blocks.length; i++) {
+          const b = blocks[i]!;
+          if (b.kind === 'p') blocks[i] = { kind: 'quote', runs: b.runs };
+          else if (b.kind === 'h')
+            blocks[i] = { kind: 'quote', runs: b.runs.map((r) => ({ ...r, bold: true })) };
+        }
         continue;
       }
       if (tag === 'pre') {

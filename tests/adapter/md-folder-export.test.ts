@@ -234,6 +234,35 @@ describe('Markdown を PC のフォルダへ(#1455 (b))', () => {
     expect(Array.from(got.get('assets/ast-1.png')!)).toEqual(Array.from(PNG));
   });
 
+  it('🔴 ノートへのリンクの注意と、表に無い種類の添付の拡張子が、フォルダの書き出しにも届く(zip と同じ中身)', async () => {
+    const base = source();
+    const att = '---\nattachment.name: 旅行.mov\nattachment.asset_key: ast-mov\n---\n';
+    const src: ArchiveSource = {
+      ...base,
+      listEntryMetas: async () => [
+        ...(await base.listEntryMetas()),
+        { lid: 'c', title: '添付', archetype: 'attachment', created_at: null, updated_at: null, entry_order: 3, status: null, date: null, archived: 0 },
+      ],
+      listBodies: async () => ({
+        rows: [
+          { lid: 'a', body: '[別](entry:b) と [別 2](entry:c)\n' },
+          { lid: 'b', body: '牛乳\n' },
+          { lid: 'c', body: att },
+        ],
+        done: true,
+        next: { entryOrder: 3, lid: 'c' },
+      }),
+      listAssetMetas: async () => [{ key: 'ast-mov', mime: 'application/octet-stream', size: 1, hash: null }],
+      getAssetBlob: async () => new Blob([new Uint8Array([9])]),
+    };
+    const { dispatcher, deps, reported } = setup({ source: src });
+    const root = new FakeDir('選んだ場所');
+    await go(dispatcher, deps, pickerOf(root));
+    const got = [...root.dirs.values()][0]!.flat();
+    expect([...got.keys()], '拡張子が bin になっている').toContain('assets/ast-mov.mov');
+    expect(reported.flat()).toContain('ノートへのリンク 2 件は、書き出した先では開けません(リンクの字のまま残ります)');
+  });
+
   it('🔴 選んだフォルダの中に新しいサブフォルダを作り、もとの file は触らない / 同名は -2, -3', async () => {
     const { dispatcher, deps, notices } = setup();
     const root = new FakeDir('選んだ場所');
