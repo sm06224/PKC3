@@ -86,6 +86,30 @@ export function bodyWillChange(dispatcher: Dispatcher, lid: string): boolean {
   return s.writeLock !== null && s.writeLock.lid === lid;
 }
 
+/**
+ * 🔴 **いま預かっている書込の総数(全部の預かりの合計)**(#1087)。
+ * ⚠ 預かりはタブの中の物で、閉じると**黙って消える**(タイマーの記録・文字起こし・写真)。
+ *   `main.ts` が 0 → 1 以上で「離れますか」の確認に数える(`unload-guard.ts`)。
+ * 🔑 数えるのは**預かっている間だけ** ── 走り出した書込は、保存の側の「書き込み中」が数える。
+ */
+let heldTotal = 0;
+const heldListeners = new Set<(total: number) => void>();
+
+export function heldCount(): number {
+  return heldTotal;
+}
+
+/** 預かりの総数が変わるたびに呼ぶ。返り値は外す関数。 */
+export function onHeldChange(fn: (total: number) => void): () => void {
+  heldListeners.add(fn);
+  return () => heldListeners.delete(fn);
+}
+
+function bumpHeld(by: number): void {
+  heldTotal += by;
+  for (const fn of [...heldListeners]) fn(heldTotal);
+}
+
 export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
   const pending: Array<{ readonly run: () => void | Promise<void>; readonly lid: string | undefined }> = [];
   let unwatch: (() => void) | null = null;
@@ -148,6 +172,7 @@ export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
        */
       const [item] = pending.splice(at, 1);
       if (item === undefined) return;
+      bumpHeld(-1);
       await item.run();
       // ⚠ 残りは**また書けるようになってから** ── ここで続けて流すと元の穴に戻る
       if (pending.length === 0) return;
@@ -175,6 +200,7 @@ export function createWritableQueue(dispatcher: Dispatcher): WritableQueue {
       // ⚠ **積む**(1 枠にしない)── 編集の最中に 2 本目が終わることがあり、
       //    1 枠だと**先に預かったほうが黙って消える**
       pending.push({ run, lid });
+      bumpHeld(1);
       watch();
       return true;
     },

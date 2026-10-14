@@ -338,7 +338,8 @@ import { appAsrPack, applyAsrResult } from '@adapter/ui/render/asr-pack-panel';
 import { asrReadyFrom, createCaptureTranscriber } from '@adapter/ui/actions/capture-transcribe';
 import { writeBackEntry } from '@adapter/ui/actions/write-back';
 import { createTimerService } from '@adapter/ui/actions/timer';
-import { createAlarmService } from '@adapter/ui/actions/alarm';
+import { ALARM_SCAN_FAILED_TEXT, createAlarmService } from '@adapter/ui/actions/alarm';
+import { onHeldChange } from '@adapter/ui/actions/writable-queue';
 import { startMissedWatch } from '@adapter/ui/actions/missed-schedule';
 import { appScheduleNotify } from '@adapter/ui/render/schedule-notify';
 import { createChime } from '@adapter/platform/chime';
@@ -3269,6 +3270,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     applyAsrResult(appAsrPack, result, { notify: showStatus });
 
   /**
+   * 🔴 **預かっている書込(タイマーの記録・文字起こし・写真)があるうちは、タブを閉じる前に確認する**(#1087)。
+   *   預かりはタブの中の物で、閉じると黙って消える ── 録音中と同じ「離れますか」に数える。
+   */
+  onHeldChange((n) => unloadGuard.setWriting(n > 0, 'held-append'));
+  /**
    * 🔴 **タイマー**(#279)。段取りは `timer.ts` が持ち、ここは口を渡すだけ。
    * ⚠ 帯は**走っている間だけ**描き直される(`timer.ts` が刻みを張り外しする)──
    *   ここで `setInterval` を張らない(常駐を作らない ── 不可侵指示 2026-08-03)。
@@ -3294,6 +3300,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     onChange: (due) => paintAlarmBar(root, due),
     chime: alarmChime,
     enabled: () => appAlarmEnabled.enabled(),
+    /**
+     * 🔴 **鳴らすのは書き込みの本体(holder)のタブだけ**(#1087)。開いているタブの数だけ同じ予定が鳴るのを防ぐ。
+     * ⚠ 値は**読むたびに引く**(`writerHolder` は昇格で真になる)── 本体が閉じたら、残ったタブが引き継ぐ。
+     */
+    isRinger: () => writerHolder,
+    // 🔴 眠っていた間の予定は鳴らさず、見逃した予定として 1 件積む(設定が切なら積まない ── 次に開いたときの知らせと同じ)
+    post: (text) => {
+      if (text === ALARM_SCAN_FAILED_TEXT || appScheduleNotify.missedOn()) {
+        appMessagePost.post({ kind: 'result', source: 'schedule', text });
+      }
+    },
   });
   alarmService.start();
   if (appAlarmEnabled.enabled()) dispatcher.dispatch({ type: 'REFRESH_TASK_SCAN' });
@@ -3308,6 +3325,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     cid,
     paint: (n) => paintMissedLine(root, n),
     post: (text) => appMessagePost.post({ kind: 'result', source: 'schedule', text }),
+    // 🔴 役は本体のタブだけ(開いているタブの数だけ同じ知らせが出ない)
+    isRinger: () => writerHolder,
   });
   // ⚠ 記録がある(= 予定表を使ったことがある)コレクションだけ進める。無いのに書くと「使っていない」が崩れる
   const stampOpenNow = (): void => {
@@ -3497,6 +3516,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);
+      // 🔴 切入の直後に 1 度見る(#1087)── 入にした時刻から見る / 切にしたら見た位置を忘れる。次の刻み(最大 30 秒)を待たない
+      alarmService.check();
       if (!on) {
         alarmService.dismissAll();
         return;

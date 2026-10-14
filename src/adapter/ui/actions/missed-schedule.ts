@@ -24,6 +24,9 @@ import type { ScheduleNotifyStore } from '../render/schedule-notify';
 /** 開いている間、時刻を進める間隔。⚠ 短いほど「閉じた時刻」に近い(閉じる直前の予定を見逃しに数えない)。 */
 export const LAST_OPEN_TICK_MS = 15_000;
 
+/** 起動時に予定を数えられなかったとき。⚠ 黙ると「見逃した予定は無かった」と読まれる。 */
+export const MISSED_SCAN_FAILED_TEXT = '予定を数えられなかったので、見逃した予定をお知らせできません';
+
 export interface MissedWatchDeps {
   readonly dispatcher: Dispatcher;
   readonly store: ScheduleNotifyStore;
@@ -35,6 +38,14 @@ export interface MissedWatchDeps {
   readonly post: (text: string) => void;
   /** 刻みを張る口。返り値は外す関数。 */
   readonly tick?: (fn: () => void) => () => void;
+  /**
+   * 🔴 **このタブが知らせる役か**(#1087)── 開いているタブの数だけ同じ「見逃した予定」が出るのを防ぐ。
+   * 本体(holder)のタブだけが**前の時刻を進め、数え、言う**。省略 = 常に役(test)。
+   * ⚠ 役でないタブも**刻みで時刻は進める**(本体が閉じたあと、残ったタブが開いている間を
+   *   次の起動で「見逃した」と数えないため)。⚠ 起動時の時刻の書込は本体だけ ── 役でないタブが先に書くと、
+   *   本体が読む前に「前に開いていた時刻」が消える。
+   */
+  readonly isRinger?: () => boolean;
 }
 
 export interface MissedWatch {
@@ -51,6 +62,7 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
       return () => clearInterval(id);
     });
 
+  const ringer = deps.isRinger === undefined ? true : deps.isRinger();
   const lastOpen = deps.store.lastOpen(deps.cid); // ⚠ 進める前に読む
   const startedAt = now();
   let untick: (() => void) | null = null;
@@ -79,13 +91,20 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
       unsubUse?.();
       unsubUse = null;
     });
+  } else if (!ringer) {
+    // 🔴 役でないタブ ── 起動時の書込も数えも言いもしない(本体が 1 回だけ言う)。刻みは張る(時刻の進みは止めない)
+    beat();
   } else {
     deps.store.stampOpen(deps.cid, startedAt);
     beat();
     if (deps.store.missedOn()) {
       const check = (): boolean => {
         const st = deps.dispatcher.getState();
-        if (st.taskScanFailed) return true; // 集められなかった ── 黙って終える
+        if (st.taskScanFailed) {
+          // 🔴 集められなかった ── 数えられていないことを言う(「見逃しは無い」と読まれない)
+          deps.post(MISSED_SCAN_FAILED_TEXT);
+          return true;
+        }
         if (st.taskScan === null) return false;
         const n = missedItems(st.taskScan.cards, lastOpen, startedAt).length;
         if (n > 0) {

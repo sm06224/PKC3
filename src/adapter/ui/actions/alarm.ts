@@ -28,6 +28,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { dueAlarms, type AlarmDue } from '@features/alarm/alarm-due';
 import type { Chime } from '@adapter/platform/chime';
+import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
 
 export interface AlarmServiceDeps {
   readonly dispatcher: Dispatcher;
@@ -41,6 +42,14 @@ export interface AlarmServiceDeps {
   readonly tick?: (fn: () => void) => () => void;
   /** 知らせるか(設定)。⚠ **読むたびに引く** ── 途中で切られたら止まる。 */
   readonly enabled: () => boolean;
+  /**
+   * 🔴 **このタブが鳴らす役か**(#1087)。⚠ 開いているタブの数だけ同じ予定が鳴るのを防ぐ ──
+   *   鳴らすのは**書き込みの本体(holder)のタブだけ**(`main.ts` が `writerHolder` を渡す)。
+   *   本体が移ったら、**読むたびに**新しい本体が真になって引き継ぐ。省略 = 常に鳴らす(test)。
+   */
+  readonly isRinger?: () => boolean;
+  /** メッセージの集積地へ積む口(中身は件数と固定の字だけ ── 予定の字は書かない)。省略可。 */
+  readonly post?: (text: string) => void;
 }
 
 export interface AlarmService {
@@ -54,7 +63,23 @@ export interface AlarmService {
   dismissAll(): void;
   /** 鳴っているもの(帯が読む)。 */
   ringing(): readonly AlarmDue[];
+  /**
+   * 🔴 **いま 1 度見る**(#1087)。⚠ 設定を入にした直後に呼ぶ ── 呼ばないと、入にした時刻が
+   *   次の刻み(最大 30 秒)まで決まらず、その間に来た予定を取りこぼす。
+   */
+  check(): void;
 }
+
+/**
+ * 🔴 **この間隔を超えて空いたら、鳴らさない**(#1087)。
+ * 根拠:背面のタブの刻みは 1 分に 1 回まで間引かれる(Chrome の仕様)ので、ふだんの空きは最大 1 分強。
+ *   その倍の 2 分を超えたのは、端末が眠っていた・タブが凍っていたとき ── 復帰した瞬間に
+ *   眠っていた間の予定がまとめて鳴るのを防ぐ(代わりに「見逃した予定」として 1 件積む)。
+ */
+export const ALARM_MAX_GAP_MS = 120_000;
+
+/** 集計に失敗している間の知らせ。⚠ 鳴らない事実を黙らない。 */
+export const ALARM_SCAN_FAILED_TEXT = '予定を数えられなかったので、時間になってもお知らせできません';
 
 /**
  * 既定の刻み。⚠ **30 秒**にするのは、1 分の刻みだと**分の境目をまたぐ回が
@@ -83,6 +108,8 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
   let untick: (() => void) | null = null;
   /** 前回どこまで見たか。⚠ `null` = まだ 1 度も見ていない。 */
   let seenTo: number | null = null;
+  /** 集計の失敗を言ったか(立っている間に 1 回だけ言う)。 */
+  let failedTold = false;
 
   const paint = (): void => deps.onChange([...ringing.values()]);
 
@@ -110,6 +137,16 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
       return;
     }
     /**
+     * 🔴 **鳴らす役でないタブは鳴らさない**(#1087)── ただし**見た位置は進めておく**。
+     * ⚠ 1 刻み(30 秒)ぶん手前に寄せておくのは、本体が閉じて**このタブが引き継いだ回に、
+     *   本体が最後に見てから閉じるまでの予定を取りこぼさない**ため(どのタブも鳴らさない窓を作らない)。
+     *   代わりに引き継いだ直前の 1 刻み以内の予定は、本体も鳴らしていれば 2 度鳴りうる。
+     */
+    if (deps.isRinger !== undefined && !deps.isRinger()) {
+      seenTo = Math.max(seenTo, t - ALARM_TICK_MS);
+      return;
+    }
+    /**
      * ⚠ 時計が戻った(手動調整 / 休止からの復帰)── 見た位置を寄せ直すだけ。
      *
      * 🔑 **これは早期の脱出であって、門ではない**(変異試験 A10 で確かめた)──
@@ -123,10 +160,32 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
       seenTo = t;
       return;
     }
-    const scan = deps.dispatcher.getState().taskScan;
+    const st = deps.dispatcher.getState();
+    const scan = st.taskScan;
     const from = seenTo;
     seenTo = t;
+    /**
+     * 🔴 **数えられていないことを黙らない**(#1087)── 失敗が立っている間は時間になっても鳴らない。
+     *   user は「鳴る前提で予定を任せて失う」ので、立っている間に 1 回だけ集積地へ言う。
+     */
+    if (st.taskScanFailed) {
+      if (!failedTold) {
+        failedTold = true;
+        deps.post?.(ALARM_SCAN_FAILED_TEXT);
+      }
+    } else {
+      failedTold = false;
+    }
     if (scan === null) return;
+    /**
+     * 🔴 **長く空いたら鳴らさず、見逃した予定として 1 件積む**(#1087)── 眠っていた端末の復帰で、
+     *   過ぎた予定がまとめて鳴るのを防ぐ。字と口は次に開いたときの見逃しの知らせと同じ。
+     */
+    if (t - from > ALARM_MAX_GAP_MS) {
+      const n = missedItems(scan.cards, from, t).length;
+      if (n > 0) deps.post?.(missedLabel(n));
+      return;
+    }
     const due = dueAlarms(scan.cards, from, t).filter((d) => !rang.has(d.key));
     if (due.length === 0) return;
     for (const d of due) {
@@ -140,6 +199,8 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
 
   return {
     ringing: () => [...ringing.values()],
+
+    check: sweep,
 
     start() {
       if (untick !== null) return;
