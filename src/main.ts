@@ -5426,6 +5426,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 答えていない控えがあるノートは上書きしない / 編集が終わったことを 1 行へ伝える(#1376)
       isPending: (lid) => draftOfferRef?.has(lid) === true,
       onEnded: (lid, committed) => draftOfferRef?.editEnded(lid, committed),
+      // 🔴 保存の確認の前にノートを離れた控えは、書込の列が済んでから disk を読んで消す(#1087)
+      readDiskBody: async (lid) => {
+        await storeEffects?.settled();
+        return (await client.request({ op: 'getBody', cid, lid })) ?? null;
+      },
     });
     if (heldViewWindow === null && !heldNoteWindow) {
       draftOfferRef = createDraftOffer({
