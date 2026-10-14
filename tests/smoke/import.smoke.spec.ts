@@ -804,13 +804,26 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   // 見るのは「届いている(計算後の値)」と「行が user の操作に応える」の 2 つ。画素の一致は
   // 手元の撮影で見た(変更前後の画像の差)── ここは**壊れたら鳴る**側だけを持つ。
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+
+  // 🔴 #1087 Shift_JIS の file も、画面から取り込んで読める字になる(文字コードを見分けて読む)。
+  // ⚠ 起動を足さず、この道中へ載せた。直す前は UTF-8 固定で読み、題名が `�` だらけだった
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles([
+    {
+      name: 'sjis.md',
+      mimeType: '',
+      // 「# 山田 太郎」の Shift_JIS
+      buffer: Buffer.from([0x23, 0x20, 0x8e, 0x52, 0x93, 0x63, 0x20, 0x91, 0xbe, 0x98, 0x59, 0x0a]),
+    },
+  ]);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), 'Shift_JIS の題名が化けた').toHaveText('山田 太郎');
+
   const bulk = Array.from({ length: 320 }, (_, i) => ({
     name: `bulk-${String(i).padStart(3, '0')}.md`,
     mimeType: '',
     buffer: Buffer.from(`# bulk ${i}\n`, 'utf-8'),
   }));
   await page.locator('[data-pkc-field="import-input"]').setInputFiles(bulk);
-  await expect(rows, '320 件足した行が出ない(2 件 + 320 件)').toHaveCount(322, { timeout: 60000 });
+  await expect(rows, '320 件足した行が出ない(3 件 + 320 件)').toHaveCount(323, { timeout: 60000 });
   const table = page.locator('[data-pkc-region="filer-table"]');
   await expect(table, '行が多いのに格子の印が付いていない').toHaveAttribute('data-pkc-grid', '');
   const look = await page.evaluate(() => {
@@ -842,12 +855,12 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   expect(look.cv, '行にも content-visibility が残っている(行の数だけ見張りが張られる)').toBe('visible');
   // ⚠ ブラウザは `layout paint style` を同じ意味の `content` と返す
   expect(look.contain, '行の閉じ込めが無い(文字が 1px ずれる)').toMatch(/^content$|layout/);
-  expect(look.chunks, '322 行が 50 行ずつの塊に分かれていない').toBe(7);
+  expect(look.chunks, '323 行が 50 行ずつの塊に分かれていない').toBe(7);
   expect(Math.abs(look.height - 26), `行の高さが 26px から動いている(${look.height})`).toBeLessThan(0.6);
   expect(Math.abs(look.thX - look.tdX), '見出しと行の「更新日」の列の位置が揃っていない').toBeLessThan(0.6);
   expect(Math.abs(look.thW - look.tdW), '見出しと行の「更新日」の列の幅が揃っていない').toBeLessThan(0.6);
   // 画面の外の行も DOM に全部ある(ブラウザの検索が見つけられる)
-  expect(look.all).toBe(322);
+  expect(look.all).toBe(323);
   // 画面の外の行へも、押して届く(スクロールして押す)── 最後の行を選べる
   const last = rows.last();
   await last.scrollIntoViewIfNeeded();
