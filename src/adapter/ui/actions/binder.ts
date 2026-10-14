@@ -7885,6 +7885,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
+    // 🔴 打っている間に編集が始まったら、黙って欄を空にしない(reducer は捨てるので字だけ消える。#1087)
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを足してください` });
+      return;
+    }
     /**
      * 🔴 **`#買い物 #家事` と打てば 2 つ付く**(#637。user 裁定 2026-08-31)。
      *
@@ -7923,6 +7928,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     const tag = target.getAttribute('data-pkc-tag') ?? '';
     if (lid === null || tag === '') return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを外してください` });
+      return;
+    }
     dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags: [tag], mode: 'remove' });
   },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
