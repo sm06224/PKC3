@@ -452,6 +452,25 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
     return { h, bodyNow };
   }
 
+  it('🔴 入れる前にノートが消えたら、「本文のいちばん下に入れました」と言わない(#1087)', async () => {
+    const h = withOpenNote();
+    const putBlob = h.deps.putBlob;
+    const deps: AttachDeps = {
+      ...h.deps,
+      putBlob: async (key, blob) => {
+        h.d.dispatch({ type: 'DELETE_ENTRY', lid: 'n1' });
+        await putBlob(key, blob);
+      },
+    };
+    appendsSeen.length = 0;
+    await attachFiles(h.d, deps, [new File(['1'], 'gone.png', { type: 'image/png' })]);
+    await until(() => (h.d.getState().notice ?? '').includes('gone.png'));
+    expect(h.d.getState().entryMetas.has('n1'), '前提が崩れた: ノートが消えていない').toBe(false);
+    expect(appendsSeen.filter((a) => a.lid === 'n1'), '消えたノートへ入れる依頼が出ている').toEqual([]);
+    expect(h.d.getState().notice).not.toMatch(/いちばん下に入れました/);
+    expect(h.d.getState().notice).toMatch(/ノートが見つからなかったので本文には入れていません/);
+  });
+
   it('🔴 C 3 枚まとめて入れたら、「元に戻す」1 回で 3 行とも消える(#668)', async () => {
     const { h, bodyNow } = growingNote();
     appendsSeen.length = 0;

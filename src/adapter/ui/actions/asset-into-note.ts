@@ -30,6 +30,7 @@ import {
   type InsertPlace,
 } from '@features/markdown/line-move';
 import { bodyWillChange, type WritableQueue } from './writable-queue';
+import { dispatchAppend } from '@adapter/state/append-settle';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { appendableKindsLabel, isAppendable } from '@features/flavor/append-spec';
 import { archetypeLabel } from '@features/flavor/archetype-label';
@@ -360,7 +361,12 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
        *   `attach-intake.test.ts` の「途中と末尾が混ざっても…」が守る。
        */
       const keep = batch !== undefined && place?.placed !== true;
-      dispatcher.dispatch({
+      /**
+       * 🔴 **受けられなかった回は「入れました」と言わない**(#1087 の見直し)── 預かっている間に
+       *   ノートをゴミ箱へ移すと、reducer は理由を出さずに捨てる。⚠ 理由を出して断った回は
+       *   reducer の赤い字が出ているので重ねない(添付そのものは残っている)。
+       */
+      const r = dispatchAppend(dispatcher, {
         type: 'APPEND_TO_ENTRY',
         lid,
         text: ref,
@@ -368,6 +374,11 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
         target: null,
         ...(keep ? { batch } : {}),
       });
+      if (r === 'gone') {
+        notify(`${why}「${name}」は添付にしましたが、入れる先のノートが見つからなかったので本文には入れていません`);
+        return;
+      }
+      if (r === 'refused') return;
       notify(
         intoTitle === undefined
           ? `${why}「${name}」を本文のいちばん下に入れました`

@@ -39,6 +39,7 @@ import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
 import { createWritableQueue } from './writable-queue';
+import { dispatchAppend } from '@adapter/state/append-settle';
 
 /**
  * 🔴 **部品が無いとき、user に押させる場所を言う**。
@@ -203,13 +204,23 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          */
         const heading = transcriptHeading(now());
         const held = queue.push(() => {
-          deps.dispatcher.dispatch({
+          /**
+           * 🔴 **受けられなかった回は「足しました」と言わない**(#1087 の見直し)── 文字にしている間に
+           *   ノートをゴミ箱へ移すと、reducer は理由を出さずに捨てる。⚠ 理由を出して断った回
+           *   (書込中など)は reducer の赤い字が出ているので、ここでは重ねない。
+           */
+          const r = dispatchAppend(deps.dispatcher, {
             type: 'APPEND_TO_ENTRY',
             lid,
             text,
             heading,
             target: null,
           });
+          if (r === 'gone') {
+            say(`「${item.name}」の文字起こしは、書き先のノートが見つからなかったので足していません`);
+            return;
+          }
+          if (r === 'refused') return;
           // 🔑 波形の目盛り(文字起こしの時刻)は一覧が持つので、足したら集め直す(⚠ ここへ来るのは一覧から押したときだけ)
           deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
           say(`「${item.name}」に文字起こしを足しました(${took})`);

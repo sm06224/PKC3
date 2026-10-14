@@ -207,6 +207,9 @@ import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/a
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { createDraftOffer, type DraftOffer } from '@adapter/ui/render/draft-offer';
+import { BODY_HOST_SELECTOR } from '@adapter/ui/render/detail';
+import { SECTION_BOX_INPUT_FIELD, sectionBoxText } from '@adapter/ui/render/section-box';
+import { CODE_BOX_INPUT_FIELD, codeBoxText } from '@adapter/ui/render/code-box';
 import { connectDraftWriter, readAfterSettle } from '@adapter/platform/draft-writer';
 import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-store';
 import type { DraftClock } from '@features/draft/draft-recovery';
@@ -312,6 +315,7 @@ import {
   runGlobalCommand,
   repaintCommandList,
   startEditRestoring,
+  startPartialRestoring,
   jumpToLinkedSection,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
@@ -3155,6 +3159,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     onChange: (line) => paintCaptureBar(root, line),
     notify: showStatus,
+    /**
+     * 🔴 **録っている間・預かっている間にタブを閉じる・読み直すと「離れますか」**(#1087)。
+     *   収録の bytes はメモリ上にだけ在り、閉じると 250MB ごとの区切り以後が消える。
+     *   ⚠ 判断は `capture.ts`、確認は `unload-guard.ts` ── ここは**繋ぐだけ**。
+     *   ⚠ 保存領域への書込・可搬の未保存とは別の持ち主 ── `'capture'` の名前で数える。
+     */
+    onActive: (active) => unloadGuard.setWriting(active, 'capture'),
   });
 
   /**
@@ -5436,6 +5447,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 答えていない控えがあるノートは上書きしない / 編集が終わったことを 1 行へ伝える(#1376)
       isPending: (lid) => draftOfferRef?.has(lid) === true,
       onEnded: (lid, committed) => draftOfferRef?.editEnded(lid, committed),
+      // 章の欄 / コード枠の欄に打っている字も控える(#1728)。欄の字は state に無いので欄から読む
+      readPartText: () => {
+        const host = document.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+        return host === null ? null : (sectionBoxText(host) ?? codeBoxText(host));
+      },
+      isPartInput: (el) =>
+        el.getAttribute('data-pkc-field') === SECTION_BOX_INPUT_FIELD ||
+        el.getAttribute('data-pkc-field') === CODE_BOX_INPUT_FIELD,
+      isRestoring: (lid) => draftOfferRef?.isRestoring(lid) === true,
       // 🔴 保存の確認の前にノートを離れた控えは、書込の列が済んでから disk を読んで消す(#1087)
       readDiskBody: readAfterSettle(
         async () => {
@@ -5456,6 +5476,30 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         readBody: async (lid) =>
           (await client.request({ op: 'getBodies', cid, lids: [lid] }))[0]?.body ?? null,
         enterEdit: (body) => startEditRestoring(dispatcher, services, body),
+        enterPart: (kind, line) => startPartialRestoring(dispatcher, services, kind, line),
+        setPartText: (text) =>
+          new Promise<boolean>((resolve) => {
+          // 欄は開いた直後の描画で出る ── 出ていなければ 50ms ごとに最大 2 秒待つ(実ブラウザで 5 フレームでは足りなかった)。
+          // 入れたら `input` を撃つ
+          // (欄の高さが育ち、書き手が控えを取り直す)
+          const put = (tries: number): void => {
+            const host = document.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
+            const ta =
+              host?.querySelector<HTMLTextAreaElement>(
+                `[data-pkc-field="${SECTION_BOX_INPUT_FIELD}"], [data-pkc-field="${CODE_BOX_INPUT_FIELD}"]`,
+              ) ?? null;
+            if (ta === null) {
+              if (tries > 0) window.setTimeout(() => put(tries - 1), 50);
+              else resolve(false);
+              return;
+            }
+            ta.value = text;
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            resolve(true);
+          };
+          put(40);
+          }),
+        copyText: copyPlainText,
         setTitle: (title) => {
           const set = (): void => {
             const el = document.querySelector<HTMLInputElement>('[data-pkc-field="editor-title"]');

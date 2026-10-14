@@ -83,6 +83,14 @@ export interface CaptureServiceDeps {
   readonly partBytes?: number;
   /** 止める時間。⚠ test はここを短くして「12 時間で止まること」を見る。 */
   readonly maxMs?: number;
+  /**
+   * 🔴 **まだ disk に着いていない収録が在るか**(#1087)。⚠ 変わったときだけ呼ぶ。
+   * 収録中 / 取り込みの最中 / 編集が終わるまで預かっている間は `true`。
+   * 🔑 ここが `true` の間にタブを閉じると、メモリ上の収録が消える ── 呼び先(`main.ts`)は
+   *   これを「離れますか」の確認(`unload-guard.ts`)へ渡す。判断はこちらが持ち、
+   *   ブラウザの口(`beforeunload`)には触れない(この file を test から動かせるように)。
+   */
+  readonly onActive?: (active: boolean) => void;
 }
 
 export interface CaptureService {
@@ -137,6 +145,18 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
   let starting = false;
   /** 片付けの最中。⚠ 「止める」と自動停止が重なっても 1 回しか片付けない。 */
   let closing = false;
+  /**
+   * 🔴 **メモリ上にだけ在る収録の数**(#1087)。預かり中(`hold`)と、取り込みの最中の分。
+   * ⚠ 収録中(`handle`)とは別に数える ── 止めた後も、着くまでは閉じると消える。
+   */
+  let unsettled = 0;
+  let reportedActive = false;
+  const syncActive = (): void => {
+    const active = handle !== null || unsettled > 0;
+    if (active === reportedActive) return;
+    reportedActive = active;
+    deps.onActive?.(active);
+  };
 
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
 
@@ -169,6 +189,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     startedAt = null;
     batch = null;
     paint();
+    syncActive();
   };
 
   /**
@@ -268,9 +289,17 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     at: Date,
     tag: string | null,
   ): void => {
+    // 🔴 預かっている間は閉じると消える(#1087)── 取り込みが終わるまで数える
+    unsettled++;
+    syncActive();
     queue.push(async () => {
-      // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
-      if (!(await ingest(blob, kind, why, part, at, tag)) && part !== null) stopNoRoom(kind);
+      try {
+        // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
+        if (!(await ingest(blob, kind, why, part, at, tag)) && part !== null) stopNoRoom(kind);
+      } finally {
+        unsettled--;
+        syncActive();
+      }
     });
     deps.notify(`${why}${CAPTURE_LABEL[kind]}ファイルは、編集中なのでまだ入れていません。編集を終えると、開いているノートに入れます`);
   };
@@ -293,7 +322,15 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       hold(blob, kind, why, part, at, tag);
       return 'held';
     }
-    return (await ingest(blob, kind, why, part, at, tag)) ? 'in' : 'failed';
+    // 🔴 取り込みの最中も、着くまでは閉じると消える(#1087)
+    unsettled++;
+    syncActive();
+    try {
+      return (await ingest(blob, kind, why, part, at, tag)) ? 'in' : 'failed';
+    } finally {
+      unsettled--;
+      syncActive();
+    }
   };
 
   /**
@@ -347,6 +384,27 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     const at = startedAt ?? now();
     // 🔑 印は**分かれた回だけ** ── 1 本なら「元に戻す」は元から 1 回である
     const tag = before === 0 ? null : batch;
+    /**
+     * 🔴 **止めてから着くまで、確認を切らさない**(#1087)。⚠ `close()` が先に「収録なし」を
+     *   言うと、`deliver` が数え始めるまでの間(1 刻み)だけ確認が外れる。
+     */
+    unsettled++;
+    try {
+      await finishIn(h, why, kind, before, at, tag);
+    } finally {
+      unsettled--;
+      syncActive();
+    }
+  };
+
+  const finishIn = async (
+    h: CaptureHandle,
+    why: string,
+    kind: CaptureKind,
+    before: number,
+    at: Date,
+    tag: string | null,
+  ): Promise<void> => {
     const blob = await h.stop();
     close();
     if (blob === null || blob.size === 0) {
@@ -411,6 +469,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       batch = tag;
       untick = tick(paint);
       paint();
+      syncActive();
     },
     stop: () => {
       if (handle === null) return;

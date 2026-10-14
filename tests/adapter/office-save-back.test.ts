@@ -192,9 +192,12 @@ describe('🔴 作ったノートを窓へ返す(2 回目の保存が増えな�
    */
   it('🔴 束ねて差し替えになった保存は、その鍵でも返す', async () => {
     const h = harness();
-    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt' });
-    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt' });
-    expect(await h.sb.drainAll()).toBe(2);
+    // ⚠ 棚に同時に溜まった同じ文書は**新しい 1 件だけ**処理する(#1087)ので、
+    //    「束ねて差し替え」は**別々の引き取り**で見る(窓の放送は 1 件ずつ来る)
+    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt', at: 1 });
+    expect(await h.sb.receive('o1')).toBe('created');
+    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt', at: 2 });
+    expect(await h.sb.receive('o2')).toBe('replaced');
     expect(h.created).toEqual(['x.odt']);
     expect(h.replaced).toEqual(['new-lid']);
     expect(
@@ -249,16 +252,17 @@ describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノー
   it('編集明けの一括取り込みで、同じ文書はノート 1 件 + 差し替え', async () => {
     let ready = false;
     const h = harness({ canWrite: () => ready });
-    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/home/web_user/無題 1.odt' });
-    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/home/web_user/無題 1.odt' });
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/home/web_user/無題 1.odt', at: 1 });
     expect(await h.sb.receive('o1')).toBe('deferred');
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/home/web_user/無題 1.odt', at: 2 });
     expect(await h.sb.receive('o2')).toBe('deferred');
     expect(h.created, '編集中なのに作った').toEqual([]);
 
     ready = true;
-    expect(await h.sb.retryDeferred()).toBe(2);
+    // ⚠ #1087: 古い o1 は o2 が届いた時点で捨てられ、新しい 1 件だけがノートになる
+    expect(await h.sb.retryDeferred()).toBe(1);
     expect(h.created, '同じ文書なのにノートを 2 件作った').toEqual(['無題 1.odt']);
-    expect(h.replaced, '2 件目は差し替えのはず').toEqual(['new-lid']);
+    expect(h.replaced, '古い版で差し替えた').toEqual([]);
     expect(h.stage.keys(), '取り込んだのに棚に残っている').toEqual([]);
   });
 
@@ -271,9 +275,10 @@ describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノー
    */
   it('🔴 合言葉が死んでいても、この引き取りで作った先へ倒す', async () => {
     const h = harness({ readAttachment: async (lid) => (lid === 'new-lid' ? { assetKey: 'a' } : null) });
-    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
-    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone' });
-    expect(await h.sb.drainAll()).toBe(2);
+    h.stage.put({ key: 'o1', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone', at: 1 });
+    expect(await h.sb.receive('o1')).toBe('created');
+    h.stage.put({ key: 'o2', name: 'x.odt', path: '/work/x.odt', token: 'lid-gone', at: 2 });
+    expect(await h.sb.receive('o2')).toBe('replaced');
     expect(h.created, '死んだ合言葉を優先してノートを 2 件作った').toEqual(['x.odt']);
     expect(h.replaced).toEqual(['new-lid']);
   });
@@ -375,9 +380,11 @@ describe('🔴 編集中に溜まった同じ文書の保存を、1 件のノー
         return 'new-lid';
       },
     });
-    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt' });
-    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt' });
+    h.stage.put({ key: 'o1', name: '無題 1.odt', path: '/work/無題 1.odt', at: 1 });
     const a = h.sb.receive('o1');
+    // 1 件目が `createNote` で止まってから 2 件目を棚に置く(#1087: 先に置くと古い o1 は捨てられる)
+    await vi.waitFor(() => expect(calls).toBe(1));
+    h.stage.put({ key: 'o2', name: '無題 1.odt', path: '/work/無題 1.odt', at: 2 });
     const b = h.sb.receive('o2');
     release();
     expect([await a, await b]).toEqual(['created', 'replaced']);
@@ -707,6 +714,25 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     expect(h.created, '書けなかったのにノートを作った').toEqual([]);
   });
 
+  it('🔴 書けないままの撃ち直しで、同じ赤い字を何度も出さない / 書けたら次の失敗はまた言う(#1087)', async () => {
+    let ok = false;
+    const h = harness({ writeLocal: async () => ok });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    expect(h.fails, '1 度目は言う').toHaveLength(1);
+    await h.sb.retryDeferred();
+    await h.sb.retryDeferred();
+    expect(h.fails, '撃ち直しのたびに同じ字を出している').toHaveLength(1);
+    expect(h.stage.keys(), '撃ち直しで棚から消した').toContain('k1.json');
+    ok = true;
+    await h.sb.retryDeferred();
+    expect(h.stage.keys(), '書けたのに棚に残っている').not.toContain('k1.json');
+    ok = false;
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    await h.sb.receive('k1');
+    expect(h.fails, '書けた後の新しい失敗を黙った').toHaveLength(2);
+  });
+
   /**
    * ⚠ **対照群**。手元のファイルでない保存は、これまでどおり PKC のノートへ入る
    *   ── 置かないと「全部書き戻しへ落ちている」と区別がつかない。
@@ -776,5 +802,173 @@ describe('confirmSavedBack', () => {
         key: 'k',
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * 🔴 **古い保存が、新しい版を上書きしない**(#1087、データ消失)。
+ * 書けなかった保存 s1 が棚に残ったまま、次の保存 s2 が成功すると、後の掃除(`drainAll` /
+ * `retryDeferred`)が s1 の古い bytes を書いてしまう ── 手元のファイルは履歴にも無く戻せない。
+ * 「古い」は `listStaged` の順(`at` の昇順)。
+ */
+describe('同じ文書の古い保存を、新しい保存の後に書かない(#1087)', () => {
+  const OLD = new Uint8Array([1, 1, 1]);
+  const NEW = new Uint8Array([2, 2, 2]);
+
+  it('🔴 手元のファイル: s1 が拒否 → s2 が成功 → 後の掃除は s1 の bytes を書かない', async () => {
+    const file: number[][] = [];
+    let denied = true;
+    const h = harness({
+      writeLocal: async (_t, bytes) => {
+        if (denied) return 'denied';
+        file.push([...bytes]);
+        return true;
+      },
+    });
+    h.stage.put({ key: 's1', token: 'local:1', at: 1 }, OLD);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    h.stage.put({ key: 's2', token: 'local:1', at: 2 }, NEW);
+    denied = false;
+    expect(await h.sb.receive('s2')).toBe('replaced');
+    expect(h.stage.keys(), '古い保存が棚に残っている').toEqual([]);
+    await h.sb.retryDeferred();
+    await h.sb.drainAll();
+    expect(file, '古い版が新しい版の後に書かれた').toEqual([[2, 2, 2]]);
+  });
+
+  it('🔴 差し替え: s1 が false → s2 が true → 後の掃除は s1 で差し替えない', async () => {
+    const written: number[][] = [];
+    let failing = true;
+    const h = harness({
+      replaceAsset: async (_lid, _save, bytes) => {
+        if (failing) return false;
+        written.push([...bytes]);
+        return true;
+      },
+    });
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1 }, OLD);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2 }, NEW);
+    failing = false;
+    expect(await h.sb.receive('s2')).toBe('replaced');
+    await h.sb.retryDeferred();
+    await h.sb.drainAll();
+    expect(written).toEqual([[2, 2, 2]]);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 新規(合言葉なし): 同じ窓・同じ path の s1 が保留 → s2 で作成成功 → s1 では作らない', async () => {
+    let fail = true;
+    const h = harness({
+      createNote: async (save) => {
+        if (fail) return null;
+        h.created.push(save.name);
+        return 'new-lid';
+      },
+    });
+    h.stage.put({ key: 's1', name: 'a.odt', at: 1 }, OLD);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    h.stage.put({ key: 's2', name: 'a.odt', at: 2 }, NEW);
+    fail = false;
+    expect(await h.sb.receive('s2')).toBe('created');
+    await h.sb.drainAll();
+    expect(h.created, '同じ文書のノートが 2 件できた').toEqual(['a.odt']);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 棚に同じ文書が複数あるとき、drainAll は新しい 1 件だけを処理する(古い方は書かない)', async () => {
+    const file: number[][] = [];
+    const h = harness({
+      writeLocal: async (_t, bytes) => {
+        file.push([...bytes]);
+        return true;
+      },
+    });
+    h.stage.put({ key: 's2', token: 'local:1', at: 2 }, NEW);
+    h.stage.put({ key: 's1', token: 'local:1', at: 1 }, OLD);
+    await h.sb.drainAll();
+    expect(file).toEqual([[2, 2, 2]]);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 成功の後に棚へ現れた古い保存も捨てる(処理中に来た物)', async () => {
+    let slipped = false;
+    const h = harness({
+      writeLocal: async () => {
+        if (!slipped) {
+          slipped = true;
+          h.stage.put({ key: 's0', token: 'local:1', at: 1 }, OLD);
+        }
+        return true;
+      },
+    });
+    h.stage.put({ key: 's2', token: 'local:1', at: 2 }, NEW);
+    await h.sb.receive('s2');
+    expect(slipped, '前提: 処理中に古い保存を置けている').toBe(true);
+    expect(h.stage.keys(), '成功した保存より古い物が残っている').toEqual([]);
+  });
+
+  it('🔴 成功の後に棚へ現れた古い保存も捨てる ── 差し替え・新規の経路でも', async () => {
+    for (const via of ['replace', 'create'] as const) {
+      let slipped = false;
+      const slip = (): void => {
+        if (slipped) return;
+        slipped = true;
+        h.stage.put(
+          via === 'replace'
+            ? { key: 's0', token: 'lid-7', at: 1 }
+            : { key: 's0', name: 'a.odt', at: 1 },
+          OLD,
+        );
+      };
+      const h = harness({
+        replaceAsset: async () => {
+          slip();
+          return true;
+        },
+        createNote: async () => {
+          slip();
+          return 'new-lid';
+        },
+      });
+      h.stage.put(
+        via === 'replace' ? { key: 's2', token: 'lid-7', at: 2 } : { key: 's2', name: 'a.odt', at: 2 },
+        NEW,
+      );
+      await h.sb.receive('s2');
+      expect(slipped, `${via}: 前提`).toBe(true);
+      expect(h.stage.keys(), `${via}: 古い保存が残っている`).toEqual([]);
+    }
+  });
+
+  it('⚠ 別の文書の保存は捨てない(合言葉が違う / 窓が違う)', async () => {
+    const h = harness({ canWrite: () => false });
+    h.stage.put({ key: 'a', token: 'lid-1', at: 1 });
+    h.stage.put({ key: 'b', token: 'lid-2', at: 2 });
+    h.stage.put({ key: 'c', name: 'x.odt', win: 'w1', at: 3 });
+    h.stage.put({ key: 'd', name: 'x.odt', win: 'w2', at: 4 });
+    await h.sb.drainAll();
+    expect(h.stage.keys().filter((k) => k.endsWith('.json')).sort()).toEqual([
+      'a.json', 'b.json', 'c.json', 'd.json',
+    ]);
+  });
+
+  it('⚠ 対照群: 1 件だけ失敗した保存は、後で撃ち直されて書かれる(捨てない)', async () => {
+    const file: number[][] = [];
+    let denied = true;
+    const h = harness({
+      writeLocal: async (_t, bytes) => {
+        if (denied) return 'denied';
+        file.push([...bytes]);
+        return true;
+      },
+    });
+    h.stage.put({ key: 's1', token: 'local:1', at: 1 }, OLD);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    expect(h.stage.keys().length).toBeGreaterThan(0);
+    denied = false;
+    expect(await h.sb.retryDeferred()).toBe(1);
+    expect(file).toEqual([[1, 1, 1]]);
+    expect(h.stage.keys()).toEqual([]);
   });
 });

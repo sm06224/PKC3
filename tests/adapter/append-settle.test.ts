@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, reduce, type DomainEvent } from '../../src/adapter/state/app-state';
-import { appendAndSettle } from '../../src/adapter/state/append-settle';
+import { appendAndSettle, dispatchAppend } from '../../src/adapter/state/append-settle';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string, archetype: string): EntryMeta {
@@ -43,5 +43,26 @@ describe('appendAndSettle', () => {
     const req = events.find((e) => e.type === 'REQUEST_APPEND') as { heading?: string | null } | undefined;
     expect(req, '追記の依頼が出ていない').toBeDefined();
     expect(req!.heading).toBe('## 2026-10-10 12:00:00');
+  });
+
+  it('🔴 同じ理由で 2 度断られても、2 度目も理由を返す(字が前と同じでも、この依頼の理由である)', async () => {
+    const booted = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 'text')], relations: [] }).state;
+    const d = new Dispatcher({ ...booted, writeLock: { lid: 'other' } });
+    const first = await appendAndSettle(d, 'a', 'x', null, 1000, NO_TIMERS);
+    expect(first.ok).toBe(false);
+    const why = (first as { error: string | null }).error;
+    expect(why, '1 度目に理由が無い(前提が崩れている)').not.toBeNull();
+    const second = await appendAndSettle(d, 'a', 'y', null, 1000, NO_TIMERS);
+    expect(second).toEqual({ ok: false, reason: 'refused', error: why });
+  });
+});
+
+describe('dispatchAppend', () => {
+  it('受けた / 理由つきで断った / ノートが無い を見分ける', () => {
+    const booted = reduce(initialState, { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 'text')], relations: [] }).state;
+    const act = (lid: string) => ({ type: 'APPEND_TO_ENTRY' as const, lid, text: 'x', heading: null, target: null });
+    expect(dispatchAppend(new Dispatcher(booted), act('a'))).toBe('accepted');
+    expect(dispatchAppend(new Dispatcher({ ...booted, writeLock: { lid: 'other' } }), act('a'))).toBe('refused');
+    expect(dispatchAppend(new Dispatcher(booted), act('gone'))).toBe('gone');
   });
 });

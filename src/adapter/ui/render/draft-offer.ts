@@ -14,12 +14,18 @@
  */
 import type { Dispatcher } from '../../state/dispatcher';
 import { SECTION_DRAFT_NOTE, phaseBlockReason, type AppState } from '../../state/app-state';
+import { partOf } from '../../platform/draft-writer';
 import {
+  DRAFT_PART_NOUN,
   draftOfferLine,
+  draftPartOfferLine,
   isLiveDraft,
   judgeDraft,
+  sameDraftPart,
+  type DraftPart,
   type DraftRecord,
 } from '@features/draft/draft-recovery';
+import { judgePartDraft, locateDraftPart } from '@features/draft/draft-part';
 import type { DraftStore } from '../../platform/draft-store';
 
 export interface DraftOfferDeps {
@@ -40,6 +46,18 @@ export interface DraftOfferDeps {
   enterEdit(body: string): void;
   /** 題名の編集欄へ戻す(編集に入って欄が描かれてから呼ばれる)。 */
   setTitle(title: string): void;
+  /**
+   * 章の欄 / コード枠の欄を開く(#1728)。`line` は本文の行(frontmatter を剥がした側)── 入り口は
+   * `binder.ts` の `startPartialRestoring` の 1 本(ロック・書込待ちを通る)。⚠ 同期に開くとは限らない。
+   */
+  enterPart(kind: DraftPart['kind'], line: number): void;
+  /**
+   * 開いた欄へ打っていた字を入れる(欄が描かれてから呼ばれる)。入れられたら `true`。
+   * ⚠ 欄が出なかった(`false`)ときは「戻しました」と言わない ── 控えを残して理由を言う。
+   */
+  setPartText(text: string): Promise<boolean>;
+  /** 戻せない欄の字を、クリップボードへ渡す(書けたら `true`)。 */
+  copyText(text: string): Promise<boolean>;
   say(message: string): void;
   /** 編集に入れるまで待つ長さ(ms)。省略 = 10 秒。 */
   waitMs?: number;
@@ -59,6 +77,8 @@ export interface DraftOffer {
   text(): string | null;
   /** そのノートに、まだ答えていない控えがあるか(書き手が上書きしないために読む)。 */
   has(lid: string): boolean;
+  /** いま、そのノートの控えを戻して編集している最中か(書き手が、やめたとき誰の控えでも消すために読む)。 */
+  isRestoring(lid: string): boolean;
   /** 書き手から:編集が終わった。`committed` = 保存で終えた。 */
   editEnded(lid: string, committed: boolean): void;
 }
@@ -74,6 +94,16 @@ export const DRAFT_RESTORED_NOTE = '保存していない編集を戻しまし�
 /** 編集に入れなかったとき。控えは残してある。 */
 export const DRAFT_ENTER_FAILED_NOTE =
   `編集に入れませんでした。保存していない編集は残してあります。もう一度「${DRAFT_RESTORE_LABEL}」を押してください`;
+
+/** 欄の控えを戻せなかったとき(#1728)。打った字は渡してあり、控えも残してある。 */
+export function draftPartRefusedNote(kind: DraftPart['kind'], why: 'changed' | 'other' = 'changed'): string {
+  const lead = why === 'changed' ? `ノートの${DRAFT_PART_NOUN[kind]}が変わっている` : `別の${DRAFT_PART_NOUN[kind]}の編集を始めた`;
+  return `${lead}ため、戻せません。打った字をコピーしました。保存していない編集は「${DRAFT_DISCARD_LABEL}」を押すまで残してあります`;
+}
+export function draftPartCopyFailedNote(kind: DraftPart['kind'], why: 'changed' | 'other' = 'changed'): string {
+  const lead = why === 'changed' ? `ノートの${DRAFT_PART_NOUN[kind]}が変わっている` : `別の${DRAFT_PART_NOUN[kind]}の編集を始めた`;
+  return `${lead}ため、戻せません。打った字をコピーできませんでした。保存していない編集は残してあります。もう一度「${DRAFT_RESTORE_LABEL}」を押してください`;
+}
 
 /**
  * いま戻せない理由。⚠ 出口の字は画面に在るボタンの字から引く(`refusal-words.test.ts` が
@@ -107,7 +137,10 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       return;
     }
     const title = dispatcher.getState().entryMetas.get(head.draft.lid)?.title ?? head.draft.title;
-    shown = draftOfferLine(title, head.moved, queue.length - 1);
+    shown =
+      head.draft.part === undefined
+        ? draftOfferLine(title, head.moved, queue.length - 1)
+        : draftPartOfferLine(title, head.draft.part.kind, head.moved, queue.length - 1);
     const text = document.createElement('span');
     text.setAttribute('data-pkc-field', 'draft-offer-text');
     text.textContent = shown;
@@ -155,6 +188,16 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
         continue; // 読めなかった ── 控えは残す(次の起動で聞く)
       }
       const meta = dispatcher.getState().entryMetas.get(d.lid);
+      if (d.part !== undefined) {
+        // 欄の控え(#1728)── 欄が見つかり原文のままなら戻せる / 変わっていれば戻さない(字はコピーで渡す)
+        const pv = judgePartDraft({ ...d, part: d.part }, meta === undefined ? null : body);
+        if (pv === 'gone' || pv === 'same') {
+          await store.remove(cid, d.lid).catch(() => {});
+          continue;
+        }
+        out.push({ draft: d, moved: pv === 'moved' });
+        continue;
+      }
       const v = judgeDraft(d, body === null || meta === undefined ? null : { body, title: meta.title });
       if (v === 'gone' || v === 'same') {
         // 聞くことが無い控えは黙って片付ける
@@ -166,6 +209,12 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
     if (seq !== loadSeq) return; // 後から始まった読み直しが勝つ
     queue = out;
     paint();
+  };
+
+  /** 戻せない欄の字をコピーで渡す(#1728)。控えは消さない。 */
+  const refusePart = (d: DraftRecord, part: DraftPart, why: 'changed' | 'other' = 'changed'): void => {
+    const failed = (): void => deps.say(draftPartCopyFailedNote(part.kind, why));
+    deps.copyText(d.body).then((ok) => (ok ? deps.say(draftPartRefusedNote(part.kind, why)) : failed()), failed);
   };
 
   /** 開いて編集に入る ── 本文が届くのを待ってから入る(届く前の `START_EDIT` は弾かれる)。 */
@@ -191,16 +240,60 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       if (done) return;
       done = true;
       stopAll();
-      deps.setTitle(d.title);
-      deps.say(DRAFT_RESTORED_NOTE);
+      if (d.part === undefined) {
+        deps.setTitle(d.title);
+        deps.say(DRAFT_RESTORED_NOTE);
+        return;
+      }
+      void deps.setPartText(d.body).then(
+        (ok) => {
+          if (ok) {
+            deps.say(DRAFT_RESTORED_NOTE);
+            return;
+          }
+          // 欄が出なかった ── 「戻しました」と言わない。控えは残す
+          restoring = null;
+          paint();
+          deps.say(DRAFT_ENTER_FAILED_NOTE);
+        },
+        () => {
+          restoring = null;
+          paint();
+          deps.say(DRAFT_ENTER_FAILED_NOTE);
+        },
+      );
     };
-    const entered = (s: AppState): boolean => s.phase === 'editing' && s.openBody?.lid === d.lid;
+    /**
+     * 🔴 入れたか。欄の控えは**この控えの欄**(同じ見出し / 同じ枠 + 開いたときの原文)が開いたときだけ ──
+     * 開く口は非同期(ロック・書込待ち)なので、待つ間に同じノートの別の欄が開くと、字が別の欄へ入る。
+     */
+    const entered = (s: AppState): boolean => {
+      if (d.part === undefined) return s.phase === 'editing' && s.openBody?.lid === d.lid;
+      const sd = s.sectionDraft;
+      if (sd == null || sd.lid !== d.lid) return false;
+      const now = partOf(sd);
+      return sameDraftPart(now, d.part) && now.original === d.part.original;
+    };
     let entering = false;
     const tryEnter = (s: AppState): boolean => {
       if (entering) return true;
       if (s.selectedLid !== d.lid || s.openBody?.lid !== d.lid || s.phase !== 'ready') return false;
       entering = true;
-      deps.enterEdit(d.body);
+      if (d.part === undefined) {
+        deps.enterEdit(d.body);
+      } else {
+        // 🔴 待つ間に本文が変わっているかもしれない ── 開く直前に、いまの本文で探し直す
+        const loc = locateDraftPart(s.openBody.body, d.part);
+        if (!loc.ok) {
+          done = true;
+          stopAll();
+          restoring = null;
+          paint();
+          refusePart(d, d.part);
+          return true;
+        }
+        deps.enterPart(d.part.kind, loc.line);
+      }
       if (entered(dispatcher.getState())) succeed();
       return true;
     };
@@ -211,6 +304,15 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
         if (done) return;
         if (entered(s)) {
           succeed();
+          return;
+        }
+        if (d.part !== undefined && s.sectionDraft != null && s.sectionDraft.lid === d.lid) {
+          // 別の欄が開いた ── 字は入れず、打った字をコピーで渡す
+          done = true;
+          stopAll();
+          restoring = null;
+          paint();
+          refusePart(d, d.part, 'other');
           return;
         }
         if (tryEnter(s)) return;
@@ -242,6 +344,11 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
         deps.say(draftBusyNote(s));
         return;
       }
+      if (head.draft.part !== undefined && head.moved) {
+        // 🔴 欄が変わっている ── 書かない。打った字をコピーで渡し、控えは残す(1 行もそのまま)
+        refusePart(head.draft, head.draft.part);
+        return;
+      }
       restoring = head.draft;
       paint();
       openForEdit(head.draft);
@@ -255,10 +362,18 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
     },
     text: () => shown,
     has: (lid) => queue.some((q) => q.draft.lid === lid && q.draft !== restoring),
+    isRestoring: (lid) => restoring !== null && restoring.lid === lid,
     editEnded(lid, committed) {
       if (restoring !== null && restoring.lid === lid) {
         const r = restoring;
         restoring = null;
+        if (r.part !== undefined) {
+          // 欄の控え(#1728):保存でもやめても書き手が控えを消す(別の場所の操作で閉じられたときだけ残る ──
+          // それは次の起動で聞く)。取り消しの 1 行を戻さない
+          queue = queue.filter((q) => q.draft !== r);
+          skip.add(lid);
+          return;
+        }
         if (committed) {
           // 保存した ── 書き手が disk への到着を見て控えを消す。聞き直しにも出さない
           queue = queue.filter((q) => q.draft !== r);
