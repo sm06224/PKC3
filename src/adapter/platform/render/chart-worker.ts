@@ -44,12 +44,20 @@ function buildConfig(req: ChartJobRequest): Record<string, unknown> {
   const { spec, palette } = req;
   const color = (i: number, given?: string): string =>
     given ?? palette.series[i % palette.series.length] ?? palette.text;
+  // 🔴 pie / doughnut は「1 系列 = 全スライス同じ色」では見分けが付かない ──
+  //   スライスごと(labels の順)に系列色を巡らせる。系列が `color` を書いていればそれを優先
+  //   (その系列は 1 色になる ── 書いた人の指定)。凡例の色もこの配列に揃う。
+  const sliced = spec.type === 'pie' || spec.type === 'doughnut';
+  const colorsOf = (i: number, given?: string): string | string[] =>
+    sliced && given === undefined
+      ? spec.labels.map((_, k) => color(k))
+      : color(i, given);
   const datasets = spec.datasets.map((d, i) => ({
     label: d.label,
     // 散布図は {x, y} の点をそのまま渡す(数の並びだと x が決まらない)
     data: d.points ? d.points.map((p) => ({ x: p.x, y: p.y })) : [...d.data],
-    borderColor: color(i, d.color),
-    backgroundColor: color(i, d.color),
+    borderColor: colorsOf(i, d.color),
+    backgroundColor: colorsOf(i, d.color),
     // ⚠ 欠測は線を切る(0 に落として谷を作らない)
     spanGaps: false,
     borderWidth: 2,

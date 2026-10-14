@@ -253,7 +253,7 @@ export function pressCellToEdit(cell: HTMLElement): void {
  * 🔑 だから**同じ表の中の「印の在る升」だけ**を読み、その中で隣を選ぶ。
  *
  * - `right` / `left` … 画面の並び順で次 / 前(行の端では次 / 前の行へ回る)
- * - `down` / `up` … **同じ列**の、行番号がいちばん近い下 / 上の升(無ければ `null`)
+ * - `down` / `up` … **同じ列**の、画面の並び順で次 / 前の升(無ければ `null`。行番号では選ばない)
  *
  * ⚠ **`up` は後から足した**(着地前レビュー・動線 D4)── 1 稿目は `down` だけで、
  *   commit の説明文には「左と**上**を用意した」と書いていた ── **嘘だった**。
@@ -284,16 +284,13 @@ export function neighborCell(
   }
   const here = coord(from);
   if (here === null) return null;
-  const line = Number(here.line);
-  if (!Number.isFinite(line)) return null;
-  const down = dir === 'down';
-  let best: { el: HTMLElement; line: number } | null = null;
-  for (const el of cells) {
-    if (el.getAttribute('data-pkc-cell-col') !== here.col) continue;
-    const n = Number(el.getAttribute('data-pkc-cell-line'));
-    if (!Number.isFinite(n) || (down ? n <= line : n >= line)) continue;
-    // 🔑 いちばん近い側を採る(下なら最小、上なら最大)
-    if (best === null || (down ? n < best.line : n > best.line)) best = { el, line: n };
-  }
-  return best === null ? null : coord(best.el);
+  /**
+   * 🔴 **上下も左右と同じく、画面の並び(DOM の位置)で選ぶ**(#1087)。
+   * ⚠ 本文の行番号で「次に大きい行」を選ぶと、並べ替えた表(`table-sort.ts` は DOM の行を入れ替える)で
+   *   **見えている行と別の行**へ移る。同じ列の升だけを DOM の順に並べ、その中の前後を採る。
+   */
+  const sameCol = cells.filter((el) => el.getAttribute('data-pkc-cell-col') === here.col);
+  const idx = sameCol.indexOf(from);
+  const next = sameCol[idx + (dir === 'down' ? 1 : -1)];
+  return next === undefined || idx < 0 ? null : coord(next);
 }

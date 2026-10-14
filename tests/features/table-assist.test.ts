@@ -152,3 +152,58 @@ describe('🔴 caret が表の行に在るか(#1451。帯の「Tab で次のセ�
     expect(tableHits, '表の行が 1 つも通っていない').toBeGreaterThan(20);
   });
 });
+
+describe('🔴 見出し行の最後の升の Tab は、区切りの行の上へ行を入れない(#1087)', () => {
+  const insertOf = (v: string, caret: number): number => {
+    const res = tableOnTab(v, caret, false);
+    expect(res?.kind).toBe('insert-row');
+    return res?.kind === 'insert-row' ? res.insertPos : -1;
+  };
+
+  it('見出し行だけの表(区切りの後が空行 / 本文の終わり)── 新しい行は区切りの行の後ろへ', () => {
+    const v = '| a | b |\n| --- | --- |\n\nfoo';
+    const delimEnd = v.indexOf('\n\n');
+    expect(insertOf(v, 6), '空行が続く').toBe(delimEnd);
+    const tail = '| a | b |\n| --- | --- |';
+    expect(insertOf(tail, 6), '区切りで本文が終わる').toBe(tail.length);
+    // 区切りの直後に入れた結果が、見出し・区切り・新しい行の順になる
+    const res = tableOnTab(v, 6, false);
+    if (res?.kind !== 'insert-row') throw new Error('insert-row ではない');
+    const after = v.slice(0, res.insertPos) + res.text + v.slice(res.insertPos);
+    expect(after.split('\n').slice(0, 3)).toEqual(['| a | b |', '| --- | --- |', '|   |   |']);
+  });
+
+  it('対照群: データ行の後ろ(最後の升)は、いままでどおりその行の直後に入れる', () => {
+    const v = '| a | b |\n| --- | --- |\n| 1 | 2 |\n\nfoo';
+    expect(insertOf(v, v.indexOf('2'))).toBe(v.indexOf('\n\n'));
+  });
+
+  it('データ行の `| - | - |` を区切りとして飛ばさない(Tab の下り)', () => {
+    const v = '| a | b |\n| --- | --- |\n| 1 | 2 |\n| - | - |\n| 3 | 4 |';
+    const res = tableOnTab(v, v.indexOf('2'), false);
+    expect(res?.kind).toBe('navigate');
+    if (res?.kind === 'navigate') {
+      // 次の行(`| - | - |`)の 1 つ目の升へ移る。その先の `3` へ飛ばない
+      expect(v.slice(res.start, res.end)).toBe('-');
+      expect(res.start).toBe(v.indexOf('| - |') + 2);
+    }
+  });
+
+  it('データ行の `| - | - |` を区切りとして飛ばさない(Shift+Tab の上り)', () => {
+    const v = '| a | b |\n| --- | --- |\n| 1 | 2 |\n| - | - |\n| 3 | 4 |';
+    const res = tableOnTab(v, v.indexOf('3'), true);
+    expect(res?.kind).toBe('navigate');
+    if (res?.kind === 'navigate') {
+      expect(res.start, '`| - | - |` の最後の升').toBe(v.indexOf('| - | - |') + 6);
+      expect(v.slice(res.start, res.end)).toBe('-');
+    }
+  });
+
+  it('対照群: 本物の区切りは Tab の下りも Shift+Tab の上りも飛ばす', () => {
+    const v = '| a | b |\n| --- | --- |\n| 1 | 2 |';
+    const down = tableOnTab(v, v.indexOf('b'), false);
+    expect(down?.kind === 'navigate' && v.slice(down.start, down.end)).toBe('1');
+    const up = tableOnTab(v, v.indexOf('1'), true);
+    expect(up?.kind === 'navigate' && v.slice(up.start, up.end)).toBe('b');
+  });
+});

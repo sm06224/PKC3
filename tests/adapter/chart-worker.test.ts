@@ -82,6 +82,27 @@ describe('チャートのワーカー', () => {
     expect(ds.pointRadius).toBe(0);
   });
 
+  it('🔴 pie / doughnut はスライスごとに別の色(全部同じ色だと見分けが付かない)。色指定は優先、棒は系列 1 色のまま', async () => {
+    const dsOf = (): Record<string, unknown> =>
+      (seen.config!.data as { datasets: Array<Record<string, unknown>> }).datasets[0]!;
+    for (const type of ['pie', 'doughnut'] as const) {
+      await mod.renderChartPng(
+        req({ type, labels: ['a', 'b', 'c'], datasets: [{ label: 'x', data: [1, 2, 3] }] }),
+      );
+      // 系列色は 2 色 ── 3 つ目は巡る
+      expect(dsOf().backgroundColor, type).toEqual(['#111', '#222', '#111']);
+      expect(dsOf().borderColor, type).toEqual(['#111', '#222', '#111']);
+    }
+    await mod.renderChartPng(
+      req({ type: 'pie', labels: ['a', 'b'], datasets: [{ label: 'x', data: [1, 2], color: '#abc' }] }),
+    );
+    expect(dsOf().backgroundColor, '色の指定があればそれを優先').toBe('#abc');
+    await mod.renderChartPng(
+      req({ type: 'bar', labels: ['a', 'b'], datasets: [{ label: 'x', data: [1, 2] }] }),
+    );
+    expect(dsOf().backgroundColor, '対照群: 棒は系列の 1 色').toBe('#111');
+  });
+
   it('🔴 canvas が取れない端末では、端末の都合だと分かる 1 文で断る(英語の字を出さない)', async () => {
     hasContext = false;
     const spec = { type: 'bar', labels: [], datasets: [{ label: 'x', data: [1] }] } as const;

@@ -184,6 +184,7 @@ import {
   headingLine,
 } from '@features/markdown/append-target';
 import { waitSectionSaveSettled } from '@adapter/state/section-save-wait';
+import { typedCellNote } from '@adapter/state/store-effects';
 import { openCodeFenceAt, locateCodeFence } from '@features/markdown/code-fence-edit';
 import { isTextScale } from '@features/text-scale';
 import { chooseTextScale } from '@adapter/ui/render/text-scale';
@@ -820,6 +821,7 @@ function randomSuffix(): string {
  *   ⚠ 撃つ側は {@link act}。押した瞬間の値は呼び手が先に捕える(待っている間に画面が替わっても、押した物を撃つ)。
  * @param lids 確かめるノート(持ち出しは元と先の 2 つ)。⚠ 全部が通ったときだけ撃つ
  * @param failed 問い合わせが落ちた回の字(次にすることを言う)
+ * @param lostNote 断った回の字に添える一言(打った升の字を知らせに残す `typedCellNote` など)。既定は空
  */
 function actUnlessEditedElsewhere(
   dispatcher: Dispatcher,
@@ -827,6 +829,7 @@ function actUnlessEditedElsewhere(
   lids: readonly string[],
   failed: string,
   act: () => void,
+  lostNote: string = '',
 ): void {
   if (lids.every((l) => elsewhereCheckNotNeeded(dispatcher, port, l))) {
     act();
@@ -836,13 +839,13 @@ function actUnlessEditedElsewhere(
     for (const l of lids) {
       const why = await editedElsewhereReason(dispatcher, port, l);
       if (why !== null) {
-        dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+        dispatcher.dispatch({ type: 'OP_FAILED', error: why + lostNote });
         return;
       }
     }
     act();
   })().catch(() => {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: failed });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: failed + lostNote });
   });
 }
 
@@ -4338,7 +4341,18 @@ function applyTableFormat(
     dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
     return;
   }
-  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, openLine, to });
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートの表は、形を変えない**(#1087。行・列を消す回と同じ門)。
+   * ⚠ 通すと編集中のタブの保存で上書きされ、変えた結果は履歴にだけ残る。押した瞬間の値は上で捕えてある。
+   */
+  const lid = ob.lid;
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '表の形を変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid, line, openLine, to }),
+  );
 }
 
 /**
@@ -9261,7 +9275,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **双方向**(user 指示 2026-08-23)── 字を消して確定すれば**セルが空になる**。
    * ⚠ `Escape` は**取り消し**(押す前の字に戻す)── 片道にしない。
    */
-  'edit-cell': (dispatcher, target) => {
+  'edit-cell': (dispatcher, target, services) => {
     const line = Number(target.getAttribute('data-pkc-cell-line'));
     const col = Number(target.getAttribute('data-pkc-cell-col'));
     if (!Number.isInteger(line) || line < 0 || !Number.isInteger(col) || col < 0) return;
@@ -9378,7 +9392,19 @@ const ACTIONS: Record<string, ActionHandler> = {
        * ⚠ 隣の欄は書き戻しを待たずに開くので、画面の行はまだ書く前の物である。
        */
       noteCellWrite(dispatcher.getState(), lid, { line, openLine, col, value });
-      dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, openLine, col, value });
+      /**
+       * 🔴 **別のタブ・窓が編集中のノートへは、升の書換も撃たない**(#1087。行・列を消す回と同じ門)。
+       * ⚠ 通すと、編集中のタブの保存で上書きされる。**断るときは打った字を知らせに残す**
+       *   (欄はもう閉じている ── `typedCellNote`。書換の往復で落ちた回と同じ字)。
+       */
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度打ってください',
+        () => dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, openLine, col, value }),
+        typedCellNote({ kind: 'csv-cell', value }),
+      );
     };
     /**
      * 🔴 **確定して、隣の升の欄をそのまま開く**(#750 I1。user 裁定 2026-09-06)。
