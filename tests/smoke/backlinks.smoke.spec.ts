@@ -6,7 +6,7 @@
  * 押すと移れるか。⚠ worker(sqlite)を通るのは実ブラウザだけである。
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors, createEntry, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, modClickReal, collectPageErrors, createEntry, useSplitEditor } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -63,5 +63,49 @@ test('🔴 本文のリンクが「参照元」に出て、押すと移れる', 
     '押しても移れない',
   ).toContainText('参照する');
 
+  /**
+   * 🔴 **選んだまま、参照元の名前を変える / ゴミ箱へ移すと、「参照元」が追従する**(#1087)。
+   *
+   * ⚠ 上の道中の続きに載せる(新しく起動しない)。直す前は選択が動いたときしか引かなかったので、
+   *   的を選んだまま参照元を改名しても、ゴミ箱へ移しても、情報ペインの「参照元」は古いまま残った。
+   * 🔑 的(B)を選び直してから、**Ctrl+クリックで A の行に印だけ付けて**操作する(右クリック・普通のクリックは選択が A へ動くので使えない)。
+   */
+  await clickReal(page, `[data-pkc-entry="${lid}"]`);
+  await expect(link, '前提: 的を選び直しても参照元が出ない').toHaveCount(1);
+  const lidA = await link.getAttribute('data-pkc-entry');
+  expect(lidA, '前提: 参照元の lid が取れない').not.toBeNull();
+  const rowA = page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${lidA}"]`);
+  await expect(rowA, '前提: 参照元の行が一覧に無い').toHaveCount(1);
+
+  // ① 改名 ── 的を選んだまま、参照元の行の名前が新しくなる
+  //    (Ctrl+クリックは印だけ付けて選択を動かさない。F2 は印の付いた行の名前を打ち替える)
+  await modClickReal(page, rowA);
+  await page.keyboard.press('F2');
+  const input = page.locator('[data-pkc-field="row-rename"]');
+  await expect(input, '名前を変える欄が出ない').toBeVisible();
+  await input.fill('改名後の参照元');
+  await input.press('Enter');
+  await expect(
+    box.locator('[data-pkc-field="inspector-backlink"]'),
+    '改名したのに「参照元」の名前が古いまま',
+  ).toHaveText('改名後の参照元');
+  await expect(
+    page.locator('[data-pkc-region="inspector"]'),
+    '前提: 的の選択が動いている(この検査は選択が動かない所を測る)',
+  ).not.toContainText('改名後の参照元種類');
+
+  // ② ゴミ箱 ── 的を選んだまま参照元を捨てると、「参照元」から消える
+  await clickReal(page, '[data-pkc-action="delete-selected"]');
+  await expect(
+    box.locator('[data-pkc-field="inspector-backlink"]'),
+    'ゴミ箱へ移したのに「参照元」に残っている',
+  ).toHaveCount(0);
+
+  /**
+   * ⚠ ここまでの 2 つ(改名・ゴミ箱)は、`reduceWithHistory` の `REQUEST_BACKLINKS`(#1087)を外しても緑のまま
+   *   (変異 SURVIVED を実測)── 題名は一覧(`entryMetas`)から読み、消えた分は `removeEntryFromState` が
+   *   楽観で外すので、取り直しに頼らない。「元に戻す」は復元が選択を A へ動かすので、取り直しの分岐を通らない。
+   *   🔑 取り直しだけが効く場面は、選択を動かさずにリンク元が増える経路(別窓の書込など)で、実ブラウザの単窓では作れない。
+   */
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

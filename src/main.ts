@@ -319,6 +319,7 @@ import {
   startEditRestoring,
   startPartialRestoring,
   jumpToLinkedSection,
+  selectEntryOrExplain,
   type BinderServices,
 } from '@adapter/ui/actions/binder';
 import { ChapterWindows } from '@adapter/ui/chapter-windows';
@@ -415,7 +416,7 @@ import {
   connectViewDeepLink,
   currentBaseUrl,
   linkOpenerFor,
-  resolveAssetOwner,
+  openAssetOwner,
   isPurposeWindow,
   noteOpenElsewhereMessage,
   noteOpenedByUs,
@@ -4597,30 +4598,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 見つからないときは**黙らない**(整理済み等 ── 断りを出す)。
      */
     navigateAssetRef: (assetKey, what = '参照', ownerLid = null) => {
-      void (async () => {
-        try {
-          const found = await resolveAssetOwner({
-            assetKey,
-            ownerLid,
-            assetKeyOf: async (lid) => {
-              const body = (await client.request({ op: 'getBody', cid, lid })) as string | null;
-              return body === null ? null : readAttachmentMeta(body).assetKey || null;
-            },
-            findOwner: async (key) =>
-              ((await client.request({ op: 'findAssetOwner', cid, assetKey: key })) as { lid: string | null }).lid,
-          });
-          if (found !== null) {
-            dispatcher.dispatch({ type: 'SELECT_ENTRY', lid: found });
-          } else {
-            dispatcher.dispatch({
-              type: 'OP_FAILED',
-              error: `この${what}の添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)`,
-            });
-          }
-        } catch (e) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: `${what}を解決できません: ${errorText(e)}` });
-        }
-      })();
+      // 🔴 判断は `deep-link.ts` の `openAssetOwner`(この file はどの test からも実行されない)。
+      //    ノートを開く口は他のリンクと同じ `selectEntryOrExplain`(編集中の断り / 章の下書き / スマホ幅の本文ページ)
+      void openAssetOwner({
+        assetKey,
+        ownerLid,
+        what,
+        assetKeyOf: async (lid) => {
+          const body = (await client.request({ op: 'getBody', cid, lid })) as string | null;
+          return body === null ? null : readAttachmentMeta(body).assetKey || null;
+        },
+        findOwner: async (key) =>
+          ((await client.request({ op: 'findAssetOwner', cid, assetKey: key })) as { lid: string | null }).lid,
+        open: (lid) => {
+          selectEntryOrExplain(dispatcher, lid, 'この添付のノート', root, services);
+        },
+        fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+        errorText,
+      });
     },
     /**
      * 🖼 外部の画像(2026-08-06、user 裁定「常にオン / 常に確認 / 常にオフ」)。

@@ -66,7 +66,11 @@ describe('取込の再読込で、いま読んでいたノートを閉じない'
     expect(b.state.selectedLid, '読んでいたノートが閉じた').toBe('n1');
     // ⚠ 本文は**捨てて取り直す** ── 再読込で中身が変わっている可能性がある
     expect(b.state.openBody, '古い本文を持ち越している').toBeNull();
-    expect(b.events, '本文を取り直していない').toEqual([{ type: 'REQUEST_BODY', lid: 'n1' }]);
+    // ⚠ 一覧が変わった(n3 が増えた)ので、参照元も取り直す(#1087)── 本文と参照元の 2 つ
+    expect(b.events, '本文を取り直していない').toEqual([
+      { type: 'REQUEST_BODY', lid: 'n1' },
+      { type: 'REQUEST_BACKLINKS', lid: 'n1' },
+    ]);
   });
 
   it('🔴 別 container へ切り替えたら選択は捨てる(lid の偶然衝突で他人を開かない)', () => {

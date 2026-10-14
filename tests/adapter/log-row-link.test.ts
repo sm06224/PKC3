@@ -132,14 +132,15 @@ describe('読めない指定・開けないリンクで黙らない', () => {
     expect(o.log).toEqual(['select:c1:n42', `fail:${UNREADABLE_PLACE_MESSAGE}`, 'dropFragment']);
   });
 
+  // ⚠ 開けなかった回も場所の指定は落とす(#1087)── 残すと次に選んだ別のノートへ付いて回る
   it('🔴 別の PKC のリンクは送らず、ノートの理由だけを言う', () => {
     const url = sectionPermalink('other', 'n42', 'x')!;
-    expect(opener(hashOf(url), { cid: 'c1', lids: ['n42'] }).log).toEqual([`fail:${FOREIGN_ENTRY_LINK_MESSAGE}`]);
+    expect(opener(hashOf(url), { cid: 'c1', lids: ['n42'] }).log).toEqual([`fail:${FOREIGN_ENTRY_LINK_MESSAGE}`, 'dropFragment']);
   });
 
   it('🔴 居ないノートのリンクは送らず、ノートの理由だけを言う', () => {
     const url = sectionPermalink('c1', 'gone', 'x')!;
-    expect(opener(hashOf(url), { cid: 'c1', lids: ['n42'] }).log).toEqual([`fail:${MISSING_ENTRY_LINK_MESSAGE}`]);
+    expect(opener(hashOf(url), { cid: 'c1', lids: ['n42'] }).log).toEqual([`fail:${MISSING_ENTRY_LINK_MESSAGE}`, 'dropFragment']);
   });
 
   it('⚠ 送る配線が無い古い的でも、他は壊れない(選ぶし、指定は落とす)', () => {

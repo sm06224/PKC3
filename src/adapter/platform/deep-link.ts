@@ -55,7 +55,7 @@
  * `#pkc?` で始まらないものは読まないので何もしない(断片も消さない)。
  */
 import type { BrowseMode } from '@adapter/ui/render/browse-mode';
-import { VIEW_MODES, isViewMode, phaseBlockReason, type AppPhase, type ViewMode } from '../state/app-state';
+import { VIEW_MODES, isViewMode, selectBlockReason, type AppPhase, type ViewMode } from '../state/app-state';
 import { isSealedView } from '../../features/sealed';
 import {
   dropAssetFromHash,
@@ -546,9 +546,8 @@ function linkProblem(wiring: DeepLinkWiring, containerId: string, lid: string): 
   if (wiring.hasEntry !== undefined && !wiring.hasEntry(lid)) return MISSING_ENTRY_LINK_MESSAGE;
   // 🔴 ノートは在るが、編集中・保存失敗中は `SELECT_ENTRY` が黙って捨てる(app-state.ts)── 理由を言う
   const phase = wiring.phase?.();
-  if (phase === 'editing' || phase === 'error') {
-    return `${phaseBlockReason(phase)}リンクのノートを開いてください`;
-  }
+  const blocked = phase === undefined ? null : selectBlockReason(phase);
+  if (blocked !== null) return `${blocked}リンクのノートを開いてください`;
   return null;
 }
 
@@ -650,6 +649,12 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
           // 🔴 **黙って捨てない**(2026-10-11)── 共有されたリンクが開かないとき、理由が無いと
           //   「壊れている」としか読めない
           wiring.fail(why);
+          /**
+           * 🔴 **開けなかった回も、探していた語と場所は落とす**(#1087)── `entry` は残すが(住所は正しい)、
+           *   `find` / `fragment` を残すと、住所の追随が他の key を残すので**次に選んだ別のノートへ付いて回る**。
+           */
+          if (parseViewDeepLinkFind(target.hash) !== null) target.dropFind?.();
+          if (parseViewDeepLinkFragment(target.hash) !== null) target.dropFragment?.();
           return;
         }
         wiring.selectEntry?.(here.containerId, here.lid);
@@ -704,8 +709,11 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       holdEntry(false);
       // 🔑 **ノートが先、面が後**(上の docstring の理由)
       const here = parseViewDeepLinkEntry(target.hash);
-      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      // 🔴 ノートの門は付箋の枝と同じ 1 本(`linkProblem`)── 居ない / 編集中 / 別の PKC のときは選ばず、理由を言う(面は開く)
+      const why = here === null ? null : linkProblem(wiring, here.containerId, here.lid);
+      if (here !== null && why === null) wiring.selectEntry?.(here.containerId, here.lid);
       wiring.openView(read.view);
+      if (why !== null) wiring.fail(why);
       if (read.view === 'schedule') {
         const sched = parseViewDeepLinkSchedule(target.hash);
         if (sched !== null) {
@@ -724,10 +732,13 @@ export function connectViewDeepLink(wiring: DeepLinkWiring): () => void {
       hold(null);
       holdEntry(false);
       const here = parseViewDeepLinkEntry(target.hash);
-      if (here !== null) wiring.selectEntry?.(here.containerId, here.lid);
+      const why = here === null ? null : linkProblem(wiring, here.containerId, here.lid);
+      if (here !== null && why === null) wiring.selectEntry?.(here.containerId, here.lid);
       target.clearHash();
       wiring.openBrowse?.(read.moved);
       wiring.fail(MOVED_MESSAGE);
+      // 🔴 ノートを開けなかった理由は後に言う(最後に出る字が、user のやり直せる側)
+      if (why !== null) wiring.fail(why);
       return;
     }
     // ⚠ 使えない名前は**残す意味が無い**ので、その場で消す
@@ -857,6 +868,33 @@ export function assetPermalink(
   //   entry と asset の併記を断る(どちらか一方)ので、本文に貼ったリンクが読めなくなる
   if (url === null || ownerLid === null || !/^[A-Za-z0-9_-]+$/.test(ownerLid)) return url;
   return `${url}&owner=${encodeURIComponent(ownerLid)}`;
+}
+
+/**
+ * 🔴 **添付のリンクの「開く」の実体**(#1087)。⚠ 持ち主を探した後の**ノートを開く口は、他のリンクと同じ門**
+ *   (`open` = `selectEntryOrExplain`)を通す ── 直す前は `SELECT_ENTRY` を直に撃っていたので、編集中・保存失敗中に
+ *   押すと黙って捨てられ、章の下書きの確認も、スマホ幅の本文ページへの切り替えも通らなかった。
+ *   `main.ts` は test から走らないので、判断はここに置く。
+ * @param a.open ノートを開く(断る理由は呼ばれる側が言う)
+ * @param a.fail 見つからない / 解決できないときの理由の出し先
+ */
+export async function openAssetOwner(a: {
+  assetKey: string;
+  ownerLid: string | null;
+  what: '参照' | 'リンク';
+  assetKeyOf: (lid: string) => Promise<string | null>;
+  findOwner: (assetKey: string) => Promise<string | null>;
+  open: (lid: string) => void;
+  fail: (message: string) => void;
+  errorText: (e: unknown) => string;
+}): Promise<void> {
+  try {
+    const found = await resolveAssetOwner(a);
+    if (found !== null) a.open(found);
+    else a.fail(`この${a.what}の添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)`);
+  } catch (e) {
+    a.fail(`${a.what}を解決できません: ${a.errorText(e)}`);
+  }
 }
 
 /**
