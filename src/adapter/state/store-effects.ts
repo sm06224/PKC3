@@ -3179,6 +3179,20 @@ export function connectStoreEffects(
           try {
             const rows = await store.listTrash();
             if (disposed) return;
+            /**
+             * 🔴 **戻せなかった分を数えて言う**(#1087)── 直す前は、ゴミ箱を空にした後に押すと
+             *   何も起きず何も出なかった(「元に戻す」は消えるので、戻ったように見える)。
+             */
+            const missing = ev.lids.filter((lid) => !rows.some((r) => r.entry_lid === lid)).length;
+            if (missing > 0) {
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error:
+                  missing === ev.lids.length
+                    ? 'ゴミ箱から消えていたので、元に戻せませんでした'
+                    : `${missing} 件はゴミ箱から消えていたので、元に戻せませんでした`,
+              });
+            }
             for (const lid of ev.lids) {
               const row = rows.find((r) => r.entry_lid === lid);
               if (!row) continue;

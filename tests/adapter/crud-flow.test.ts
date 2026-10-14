@@ -106,6 +106,16 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
       return lid in trash ? { body: trash[lid]!, title: `t-${lid}`, archetype: 'text' } : null;
     },
     setEntryParent: async () => {},
+    // ⚠ 本物の意味論:ゴミ箱(entries に居ない lid の履歴)だけを処分する
+    purgeTrash: async () => {
+      let purged = 0;
+      for (const lid of Object.keys(trash)) {
+        if (lid in store) continue;
+        delete trash[lid];
+        purged++;
+      }
+      return { purged };
+    },
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas, relations: [] });
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
@@ -408,6 +418,24 @@ describe('delete (P3-7a)', () => {
     await tick(40);
     expect(d.getState().entryMetas.has('b'), '前提: 戻っていない').toBe(true);
     expect(d.getState().order, '末尾へ飛んだ ── 消す前の位置に戻っていない').toEqual(['a', 'b', 'c']);
+  });
+
+  it('🔴 ゴミ箱を空にした後に「元に戻す」を押したら、戻せなかったと言う(無言にしない。#1087)', async () => {
+    const { d, q } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: 'B' });
+    q<HTMLElement>('[data-pkc-entry="b"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await tick(20);
+    d.dispatch({ type: 'PURGE_TRASH' });
+    await tick(20);
+    expect(await undoOffer(), '前提: 空にしても「元に戻す」が残っている').not.toBeNull();
+    const undo = document.createElement('button');
+    undo.setAttribute('data-pkc-action', 'undo-trash');
+    document.body.firstElementChild!.append(undo);
+    undo.click();
+    await tick(40);
+    expect(d.getState().entryMetas.has('b'), '前提: 戻っていない').toBe(false);
+    expect(d.getState().error ?? '', '何も言わずに終わった').toContain('ゴミ箱から消えていたので、元に戻せませんでした');
   });
 
   it('🔴 章の欄が開いていて戻せないときは「戻しました」と言わず、「元に戻す」も手放さない', async () => {
