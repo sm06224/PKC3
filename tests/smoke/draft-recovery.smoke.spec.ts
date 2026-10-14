@@ -230,3 +230,52 @@ test('🔴 控えは 20 件まで:21 件目を書くと、いちばん古い 1 �
   expect(all.map((d) => d.at), '古い控えが落ちていない').not.toContain(1);
   expect(all.some((d) => d.cid !== 'seed' && d.body === TYPED), '今の控えが落ちた').toBe(true);
 });
+
+test('🔴 章の欄に打って保存せずに閉じ、開き直して「戻す」→ 同じ章の欄が開き、打った字が入る (#1728)', async ({
+  page,
+  context,
+}) => {
+  await useSplitEditor(page);
+  await gotoApp(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-body"]').fill('## 買い物\n牛乳\n\n## 予定\n会議\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  // 見出し「予定」を右クリック →「この章を編集する」
+  await page.locator('[data-pkc-field="detail-body"] h2', { hasText: '予定' }).click({ button: 'right' });
+  await page.locator('[data-pkc-region="context-menu"] button[data-pkc-action="edit-section"]').click();
+  const box = page.locator('[data-pkc-field="section-draft-input"]');
+  await expect(box, '章の箱が出ていない').toBeVisible();
+  const typed = '## 予定\n会議\nパンを足した\n';
+  await box.fill(typed);
+  // 控えが端末に届くまで(止まって 1 秒)── どの章か + 打った字
+  await expect
+    .poll(
+      async () =>
+        (await storedDrafts(page)).map((d) => {
+          const part = (d as unknown as { part?: { kind: string; heading: string } }).part;
+          return [d.body.trimEnd(), part?.kind, part?.heading];
+        }),
+      { timeout: 10_000 },
+    )
+    .toEqual([[typed.trimEnd(), 'section', '予定']]);
+  await page.close({ runBeforeUnload: false }); // 保存せずに死ぬ
+
+  const next = await context.newPage();
+  const errors = collectPageErrors(next);
+  await useSplitEditor(next);
+  await gotoApp(next);
+  const offer = next.locator('[data-pkc-region="draft-offer"]');
+  await expect(offer, '章の控えの 1 行が出ていない').toBeVisible({ timeout: 15_000 });
+  await expect(offer.locator('[data-pkc-field="draft-offer-text"]')).toHaveText(
+    /^保存していない章の編集が残っています\(.+\)$/,
+  );
+  await clickReal(next, '[data-pkc-action="restore-draft"]');
+  const boxNext = next.locator('[data-pkc-field="section-draft-input"]');
+  await expect(boxNext, '章の欄が開き直されていない').toBeVisible();
+  await expect(boxNext).toHaveValue(typed);
+  await expect(next.locator('[data-pkc-region="status"]')).toContainText('保存していない編集を戻しました');
+  // 🔴 戻しただけでは何も書いていない:読む面の「予定」の章は元のまま
+  await expect(next.locator('[data-pkc-field="detail-body"]')).not.toContainText('パンを足した');
+  expect(errors).toEqual([]);
+});

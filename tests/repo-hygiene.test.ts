@@ -1544,7 +1544,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-10-11(#1407 段⑥): `webmcp.smoke.spec.ts` に 1 本足した(組み込み先のページの AI)→ 526 → 527。起動の予算は 521 → 522(`scripts/smoke-budget.mjs` に理由)。
     // ⚠ 2026-10-12(#1467 段 6): `long-note.smoke.spec.ts` を 1 本足した(5,000 行超のノートだけ画面の外を飛ばす)→ 527 → 528。起動の予算は 522 → 523(`scripts/smoke-budget.mjs` に理由)。
     // ⚠ 2026-10-12(#855 Q1/Q2): `schedule.smoke.spec.ts` に 1 本足した(予定の「月」と「印刷」)→ 528 → 529。起動の予算は 523 → 524(`scripts/smoke-budget.mjs` に理由)。
-    ).toBe(529);
+    // ⚠ 2026-10-14(#1728): `draft-recovery.smoke.spec.ts` に 1 本足した(章の欄に打った字を開き直して戻す)→ 529 → 530。起動の予算は 524 → 526(`scripts/smoke-budget.mjs` に理由)。
+    ).toBe(530);
   });
 });
 

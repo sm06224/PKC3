@@ -5477,8 +5477,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           (await client.request({ op: 'getBodies', cid, lids: [lid] }))[0]?.body ?? null,
         enterEdit: (body) => startEditRestoring(dispatcher, services, body),
         enterPart: (kind, line) => startPartialRestoring(dispatcher, services, kind, line),
-        setPartText: (text) => {
-          // 欄は開いた直後の描画で出る ── 出ていなければ次の描画まで数回待つ。入れたら `input` を撃つ
+        setPartText: (text) =>
+          new Promise<boolean>((resolve) => {
+          // 欄は開いた直後の描画で出る ── 出ていなければ 50ms ごとに最大 2 秒待つ(実ブラウザで 5 フレームでは足りなかった)。
+          // 入れたら `input` を撃つ
           // (欄の高さが育ち、書き手が控えを取り直す)
           const put = (tries: number): void => {
             const host = document.querySelector<HTMLElement>(BODY_HOST_SELECTOR);
@@ -5487,14 +5489,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                 `[data-pkc-field="${SECTION_BOX_INPUT_FIELD}"], [data-pkc-field="${CODE_BOX_INPUT_FIELD}"]`,
               ) ?? null;
             if (ta === null) {
-              if (tries > 0) requestAnimationFrame(() => put(tries - 1));
+              if (tries > 0) window.setTimeout(() => put(tries - 1), 50);
+              else resolve(false);
               return;
             }
             ta.value = text;
             ta.dispatchEvent(new Event('input', { bubbles: true }));
+            resolve(true);
           };
-          put(5);
-        },
+          put(40);
+          }),
         copyText: copyPlainText,
         setTitle: (title) => {
           const set = (): void => {

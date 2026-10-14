@@ -14,12 +14,14 @@
  */
 import type { Dispatcher } from '../../state/dispatcher';
 import { SECTION_DRAFT_NOTE, phaseBlockReason, type AppState } from '../../state/app-state';
+import { partOf } from '../../platform/draft-writer';
 import {
   DRAFT_PART_NOUN,
   draftOfferLine,
   draftPartOfferLine,
   isLiveDraft,
   judgeDraft,
+  sameDraftPart,
   type DraftPart,
   type DraftRecord,
 } from '@features/draft/draft-recovery';
@@ -49,8 +51,11 @@ export interface DraftOfferDeps {
    * `binder.ts` の `startPartialRestoring` の 1 本(ロック・書込待ちを通る)。⚠ 同期に開くとは限らない。
    */
   enterPart(kind: DraftPart['kind'], line: number): void;
-  /** 開いた欄へ打っていた字を入れる(欄が描かれてから呼ばれる)。 */
-  setPartText(text: string): void;
+  /**
+   * 開いた欄へ打っていた字を入れる(欄が描かれてから呼ばれる)。入れられたら `true`。
+   * ⚠ 欄が出なかった(`false`)ときは「戻しました」と言わない ── 控えを残して理由を言う。
+   */
+  setPartText(text: string): Promise<boolean>;
   /** 戻せない欄の字を、クリップボードへ渡す(書けたら `true`)。 */
   copyText(text: string): Promise<boolean>;
   say(message: string): void;
@@ -91,11 +96,13 @@ export const DRAFT_ENTER_FAILED_NOTE =
   `編集に入れませんでした。保存していない編集は残してあります。もう一度「${DRAFT_RESTORE_LABEL}」を押してください`;
 
 /** 欄の控えを戻せなかったとき(#1728)。打った字は渡してあり、控えも残してある。 */
-export function draftPartRefusedNote(kind: DraftPart['kind']): string {
-  return `ノートの${DRAFT_PART_NOUN[kind]}が変わっているため、戻せません。打った字をコピーしました。保存していない編集は「${DRAFT_DISCARD_LABEL}」を押すまで残してあります`;
+export function draftPartRefusedNote(kind: DraftPart['kind'], why: 'changed' | 'other' = 'changed'): string {
+  const lead = why === 'changed' ? `ノートの${DRAFT_PART_NOUN[kind]}が変わっている` : `別の${DRAFT_PART_NOUN[kind]}の編集を始めた`;
+  return `${lead}ため、戻せません。打った字をコピーしました。保存していない編集は「${DRAFT_DISCARD_LABEL}」を押すまで残してあります`;
 }
-export function draftPartCopyFailedNote(kind: DraftPart['kind']): string {
-  return `ノートの${DRAFT_PART_NOUN[kind]}が変わっているため、戻せません。打った字をコピーできませんでした。保存していない編集は残してあります。もう一度「${DRAFT_RESTORE_LABEL}」を押してください`;
+export function draftPartCopyFailedNote(kind: DraftPart['kind'], why: 'changed' | 'other' = 'changed'): string {
+  const lead = why === 'changed' ? `ノートの${DRAFT_PART_NOUN[kind]}が変わっている` : `別の${DRAFT_PART_NOUN[kind]}の編集を始めた`;
+  return `${lead}ため、戻せません。打った字をコピーできませんでした。保存していない編集は残してあります。もう一度「${DRAFT_RESTORE_LABEL}」を押してください`;
 }
 
 /**
@@ -205,9 +212,9 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
   };
 
   /** 戻せない欄の字をコピーで渡す(#1728)。控えは消さない。 */
-  const refusePart = (d: DraftRecord, part: DraftPart): void => {
-    const failed = (): void => deps.say(draftPartCopyFailedNote(part.kind));
-    deps.copyText(d.body).then((ok) => (ok ? deps.say(draftPartRefusedNote(part.kind)) : failed()), failed);
+  const refusePart = (d: DraftRecord, part: DraftPart, why: 'changed' | 'other' = 'changed'): void => {
+    const failed = (): void => deps.say(draftPartCopyFailedNote(part.kind, why));
+    deps.copyText(d.body).then((ok) => (ok ? deps.say(draftPartRefusedNote(part.kind, why)) : failed()), failed);
   };
 
   /** 開いて編集に入る ── 本文が届くのを待ってから入る(届く前の `START_EDIT` は弾かれる)。 */
@@ -233,14 +240,40 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       if (done) return;
       done = true;
       stopAll();
-      if (d.part === undefined) deps.setTitle(d.title);
-      else deps.setPartText(d.body);
-      deps.say(DRAFT_RESTORED_NOTE);
+      if (d.part === undefined) {
+        deps.setTitle(d.title);
+        deps.say(DRAFT_RESTORED_NOTE);
+        return;
+      }
+      void deps.setPartText(d.body).then(
+        (ok) => {
+          if (ok) {
+            deps.say(DRAFT_RESTORED_NOTE);
+            return;
+          }
+          // 欄が出なかった ── 「戻しました」と言わない。控えは残す
+          restoring = null;
+          paint();
+          deps.say(DRAFT_ENTER_FAILED_NOTE);
+        },
+        () => {
+          restoring = null;
+          paint();
+          deps.say(DRAFT_ENTER_FAILED_NOTE);
+        },
+      );
     };
-    const entered = (s: AppState): boolean =>
-      d.part === undefined
-        ? s.phase === 'editing' && s.openBody?.lid === d.lid
-        : s.sectionDraft != null && s.sectionDraft.lid === d.lid;
+    /**
+     * 🔴 入れたか。欄の控えは**この控えの欄**(同じ見出し / 同じ枠 + 開いたときの原文)が開いたときだけ ──
+     * 開く口は非同期(ロック・書込待ち)なので、待つ間に同じノートの別の欄が開くと、字が別の欄へ入る。
+     */
+    const entered = (s: AppState): boolean => {
+      if (d.part === undefined) return s.phase === 'editing' && s.openBody?.lid === d.lid;
+      const sd = s.sectionDraft;
+      if (sd == null || sd.lid !== d.lid) return false;
+      const now = partOf(sd);
+      return sameDraftPart(now, d.part) && now.original === d.part.original;
+    };
     let entering = false;
     const tryEnter = (s: AppState): boolean => {
       if (entering) return true;
@@ -271,6 +304,15 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
         if (done) return;
         if (entered(s)) {
           succeed();
+          return;
+        }
+        if (d.part !== undefined && s.sectionDraft != null && s.sectionDraft.lid === d.lid) {
+          // 別の欄が開いた ── 字は入れず、打った字をコピーで渡す
+          done = true;
+          stopAll();
+          restoring = null;
+          paint();
+          refusePart(d, d.part, 'other');
           return;
         }
         if (tryEnter(s)) return;

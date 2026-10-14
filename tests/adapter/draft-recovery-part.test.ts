@@ -14,6 +14,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectDraftWriter } from '../../src/adapter/platform/draft-writer';
 import { MemoryDraftStore } from '../../src/adapter/platform/draft-store';
 import {
+  DRAFT_ENTER_FAILED_NOTE,
   DRAFT_RESTORED_NOTE,
   createDraftOffer,
   draftPartCopyFailedNote,
@@ -331,7 +332,17 @@ describe('draft-writer(欄に打った字を控える側)', () => {
 });
 
 describe('draft-offer(欄の控えを戻す側)', () => {
-  function offerSetup(opts: { disk?: string | null; screen?: string; copy?: (t: string) => Promise<boolean> } = {}) {
+  function offerSetup(
+    opts: {
+      disk?: string | null;
+      screen?: string;
+      copy?: (t: string) => Promise<boolean>;
+      /** 欄を開く口を差し替える(ロック待ちで遅れる開き方を作る)。 */
+      enterPart?: (kind: DraftPart['kind'], line: number) => void;
+      /** 字を入れる口の答え(既定 = 入れられた)。 */
+      put?: boolean;
+    } = {},
+  ) {
     const d = boot(opts.screen ?? NOTE);
     const store = new MemoryDraftStore();
     const region = document.createElement('section');
@@ -353,8 +364,20 @@ describe('draft-offer(欄の控えを戻す側)', () => {
       onEnded: (lid, committed) => holder.offer?.editEnded(lid, committed),
       isRestoring: (lid) => holder.offer?.isRestoring(lid) === true,
     });
-    const enterPart = vi.fn((kind: DraftPart['kind'], line: number) => {
-      d.dispatch(kind === 'code' ? { type: 'OPEN_CODE_DRAFT', lid: 'n1', line } : { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line });
+    const enterPart = vi.fn(
+      opts.enterPart ??
+        ((kind: DraftPart['kind'], line: number) => {
+          d.dispatch(
+            kind === 'code' ? { type: 'OPEN_CODE_DRAFT', lid: 'n1', line } : { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line },
+          );
+        }),
+    );
+    const setPartText = vi.fn(async (text: string) => {
+      if (opts.put === false) return false;
+      const sd = d.getState().sectionDraft;
+      const ta = putBox(sd != null && isCodeDraft(sd) ? CODE_FIELD : SECTION_FIELD, text);
+      type(ta, text);
+      return true;
     });
     const offer = createDraftOffer({
       region,
@@ -367,17 +390,13 @@ describe('draft-offer(欄の控えを戻す側)', () => {
       readBody: async (lid) => (lid === 'n1' ? (opts.disk === undefined ? NOTE : opts.disk) : '予定の本文'),
       enterEdit: vi.fn(),
       enterPart,
-      setPartText: (text) => {
-        const sd = d.getState().sectionDraft;
-        const ta = putBox(sd != null && isCodeDraft(sd) ? CODE_FIELD : SECTION_FIELD, text);
-        type(ta, text);
-      },
+      setPartText,
       copyText,
       setTitle: vi.fn(),
       say,
     });
     holder.offer = offer;
-    return { d, store, region, say, offer, copyText, enterPart, f, w };
+    return { d, store, region, say, offer, copyText, enterPart, setPartText, f, w };
   }
   const SECTION_ORIGINAL = '## 予定\n会議\n\n```js\nlet a = 1;\n```\n';
   const sectionDraft = (over: Partial<DraftRecord> = {}): DraftRecord => ({
@@ -419,6 +438,7 @@ describe('draft-offer(欄の控えを戻す側)', () => {
     expect(sd?.lid).toBe('n1');
     expect(sd != null && !isCodeDraft(sd) ? sd.heading : null).toBe('予定');
     expect(textarea()?.value).toBe(SECTION_ORIGINAL + '打った字\n');
+    await flush();
     expect(say).toHaveBeenCalledWith(DRAFT_RESTORED_NOTE);
     expect(events).not.toContain('REQUEST_SECTION_SAVE');
     expect(store.map.has(key), '欄に入れても控えは消さない(保存が着くまで)').toBe(true);
@@ -512,6 +532,52 @@ describe('draft-offer(欄の控えを戻す側)', () => {
     expect(copyText).toHaveBeenCalledTimes(1);
     expect(store.map.has(key)).toBe(true);
     expect(region.hidden, '止めたら 1 行を戻す').toBe(false);
+  });
+
+  it('🔴 開く口が遅れる間に同じノートの別の章が開いたら、字は別の章へ入れない:コピーで渡し、控えは残す', async () => {
+    // ロック待ちで OPEN が遅れる ── その間に利用者が先頭の章(# 買い物)を開く
+    const { d, store, offer, copyText, setPartText, say } = offerSetup({ enterPart: () => {} });
+    put(store, sectionDraft());
+    await offer.present();
+    offer.restore();
+    expect(d.getState().sectionDraft, '前提:まだ欄は開いていない').toBeNull();
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 0 });
+    const sd = d.getState().sectionDraft;
+    expect(sd != null && !isCodeDraft(sd) ? sd.heading : null, '前提:別の章が開いた').toBe('買い物');
+    await flush();
+    expect(setPartText, '別の章へ字を入れた').not.toHaveBeenCalled();
+    expect(copyText).toHaveBeenCalledWith(SECTION_ORIGINAL + '打った字\n');
+    expect(say).toHaveBeenCalledWith(draftPartRefusedNote('section', 'other'));
+    expect(say).not.toHaveBeenCalledWith(DRAFT_RESTORED_NOTE);
+    expect(store.map.has(key), '控えを消した').toBe(true);
+  });
+
+  it('🔴 同じ見出しでも原文が変わった章が開いたら、字を入れない(身元は見出し + 開いたときの原文)', async () => {
+    const { d, store, offer, copyText, setPartText } = offerSetup({ enterPart: () => {} });
+    put(store, sectionDraft());
+    await offer.present();
+    offer.restore();
+    // 開く口が遅れる間に、別の場所で「予定」の中身が書き換わって届く
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: NOTE.replace('会議', '別の会議') });
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: SECTION_LINE });
+    const sd = d.getState().sectionDraft;
+    expect(sd != null && !isCodeDraft(sd) ? sd.heading : null, '前提:同じ見出しの章が開いた').toBe('予定');
+    expect(sd?.original, '前提:原文は控えの物と違う').not.toBe(SECTION_ORIGINAL);
+    await flush();
+    expect(setPartText, '原文が変わった章へ字を入れた').not.toHaveBeenCalled();
+    expect(copyText).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 字を入れる口が入れられなかった(欄が出ない)なら「戻しました」と言わない。控えは残す', async () => {
+    const { store, offer, say, setPartText } = offerSetup({ put: false });
+    put(store, sectionDraft());
+    await offer.present();
+    offer.restore();
+    await flush();
+    expect(setPartText).toHaveBeenCalledTimes(1);
+    expect(say).not.toHaveBeenCalledWith(DRAFT_RESTORED_NOTE);
+    expect(say).toHaveBeenCalledWith(DRAFT_ENTER_FAILED_NOTE);
+    expect(store.map.has(key)).toBe(true);
   });
 
   it('コピーできなかったときは、そう言って控えを残す', async () => {
