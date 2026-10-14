@@ -207,7 +207,7 @@ import { createImportUndo, importFailurePanel, importPanel } from '@adapter/ui/a
 import { createUpdatePrompt } from '@adapter/ui/render/update-card';
 import { createAnnounce, announceServices } from '@adapter/ui/render/announce';
 import { createDraftOffer, type DraftOffer } from '@adapter/ui/render/draft-offer';
-import { connectDraftWriter } from '@adapter/platform/draft-writer';
+import { connectDraftWriter, readAfterSettle } from '@adapter/platform/draft-writer';
 import { IdbDraftStore, holdTabLock, liveTabs } from '@adapter/platform/draft-store';
 import type { DraftClock } from '@features/draft/draft-recovery';
 import {
@@ -5427,10 +5427,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       isPending: (lid) => draftOfferRef?.has(lid) === true,
       onEnded: (lid, committed) => draftOfferRef?.editEnded(lid, committed),
       // 🔴 保存の確認の前にノートを離れた控えは、書込の列が済んでから disk を読んで消す(#1087)
-      readDiskBody: async (lid) => {
-        await storeEffects?.settled();
-        return (await client.request({ op: 'getBody', cid, lid })) ?? null;
-      },
+      readDiskBody: readAfterSettle(
+        async () => {
+          await storeEffects?.settled();
+        },
+        async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+      ),
     });
     if (heldViewWindow === null && !heldNoteWindow) {
       draftOfferRef = createDraftOffer({

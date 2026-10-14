@@ -817,3 +817,29 @@ describe('main.ts の配線(main.ts はどの test からも実行されない �
     expect(main).toMatch(/heldViewWindow === null && !heldNoteWindow\) \{\s*draftOfferRef = createDraftOffer/);
   });
 });
+
+describe('readAfterSettle(#1087)', () => {
+  it('🔴 書込の列が済むのを待ってから読む(待たずに読むと、列に残った保存より先に古い本文を読む)', async () => {
+    const { readAfterSettle } = await import('../../src/adapter/platform/draft-writer');
+    const order: string[] = [];
+    let release!: () => void;
+    const settled = new Promise<void>((r) => (release = r));
+    const read = readAfterSettle(
+      async () => {
+        order.push('settle:start');
+        await settled;
+        order.push('settle:end');
+      },
+      async (lid) => {
+        order.push(`read:${lid}`);
+        return 'disk';
+      },
+    );
+    const p = read('n1');
+    await Promise.resolve();
+    expect(order, '待つ前に読んだ').toEqual(['settle:start']);
+    release();
+    expect(await p).toBe('disk');
+    expect(order).toEqual(['settle:start', 'settle:end', 'read:n1']);
+  });
+});

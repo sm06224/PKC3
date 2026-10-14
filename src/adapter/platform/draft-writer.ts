@@ -51,6 +51,21 @@ export interface DraftWriterDeps {
   win?: Window;
 }
 
+/**
+ * 🔴 **書込の列が済むのを待ってから disk を読む口**(`readDiskBody` の中身。#1087)。
+ * ⚠ 待たずに読むと、まだ列に残っている保存より先に古い本文を読み、保存済みの控えを残してしまう。
+ *   `main.ts` の配線は test から実行されないので、順番はここに置いて test する。
+ */
+export function readAfterSettle(
+  settle: () => Promise<void>,
+  read: (lid: string) => Promise<string | null>,
+): (lid: string) => Promise<string | null> {
+  return async (lid) => {
+    await settle();
+    return read(lid);
+  };
+}
+
 export interface DraftWriter {
   /** 待っている書込が全部済むまで待つ(test 用)。 */
   settled(): Promise<void>;
@@ -140,6 +155,8 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
   /**
    * disk を読みに行った lid(**1 つの保存につき 1 回だけ**読む)。⚠ 合わなかったときに消さないと、
    *   以後の状態の変化のたびに読み直しが飛ぶ(打つたびに worker を叩く)。次の編集で消す。
+   * ⚠ 合わなかった控えは**残す**(保存が落ちた / 後から再送で通った回も、次の起動で聞かれるだけで、
+   *   字は失われない ── 消す側へ倒さない)。
    */
   const checking = new Set<string>();
 

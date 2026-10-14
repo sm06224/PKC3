@@ -12,7 +12,8 @@ import { MUTATING_OPS, NOT_BROADCAST } from '../../src/adapter/platform/storage/
 function requestOps(): string[] {
   const src = readFileSync('src/adapter/platform/storage/protocol.ts', 'utf8');
   const start = src.indexOf('export type StorageRequest =');
-  const end = src.indexOf('\n\n', src.indexOf("op: 'close'", start));
+  // ⚠ 型の終わりは「次の export」で切る(最後の op の後ろに op を足しても検査の外に出ない)
+  const end = src.indexOf('\nexport ', start + 1);
   const block = src.slice(start, end);
   return [...new Set([...block.matchAll(/op: '([A-Za-z]+)'/g)].map((m) => m[1]!))].sort();
 }
