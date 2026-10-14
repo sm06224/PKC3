@@ -184,7 +184,7 @@ export async function applyExtWriteOps(
         // 書けてはいる ── 読み直しだけが落ちた。「失敗」一色にしない
         return {
           ok: false as const,
-          why: `${wrote} 件は書きましたが、画面を読み直せませんでした(開き直してください)`,
+          why: `${wrote} 件は書きましたが、画面を更新できませんでした(PKC3 を再読み込みしてください)`,
         };
       }
     }
