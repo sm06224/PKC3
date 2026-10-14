@@ -3181,7 +3181,14 @@ export function connectStoreEffects(
             if (disposed) return;
             for (const lid of ev.lids) {
               const row = rows.find((r) => r.entry_lid === lid);
-              if (row) dispatcher.dispatch({ type: 'RESTORE_TRASH', entryLid: lid, revId: row.id });
+              if (!row) continue;
+              const entryOrder = ev.orders?.[lid];
+              dispatcher.dispatch({
+                type: 'RESTORE_TRASH',
+                entryLid: lid,
+                revId: row.id,
+                ...(entryOrder !== undefined ? { entryOrder } : {}),
+              });
             }
           } catch (e) {
             if (!disposed)

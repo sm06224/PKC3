@@ -3249,12 +3249,18 @@ export type UserAction =
     }
   | { type: 'SHOW_TRASH' }
   | { type: 'HIDE_TRASH' }
-  | { type: 'RESTORE_TRASH'; entryLid: string; revId: string }
+  | {
+      type: 'RESTORE_TRASH';
+      entryLid: string;
+      revId: string;
+      /** 🔴 移す前の並び(「元に戻す」だけが知っている。#1087)。無ければ末尾へ。 */
+      entryOrder?: number;
+    }
   /**
    * 🔴 **ゴミ箱へ移した直後の「元に戻す」**(#1087 流れ 29)。移した全部に `RESTORE_TRASH` を撃つ
    * (履歴の id は効果層がゴミ箱の一覧から引く)。⚠ ゴミ箱に居ない分は黙って落とす。
    */
-  | { type: 'UNDO_TRASH'; lids: readonly string[] }
+  | { type: 'UNDO_TRASH'; lids: readonly string[]; orders?: Readonly<Record<string, number>> }
   | { type: 'PURGE_TRASH' }
   /**
    * 🔴 **2 ペインタブファイラの操作**(#241 段⑥。user 指示 2026-08-17)。
@@ -4141,7 +4147,7 @@ export type DomainEvent =
       fromUndo?: true;
     }
   | { type: 'REQUEST_TRASH_LIST' }
-  | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[] }
+  | { type: 'REQUEST_TRASH_UNDO'; lids: readonly string[]; orders?: Readonly<Record<string, number>> }
   | {
       /** ゴミ箱からの復元(entry 再作成)。entryOrder は reduce 時に採番。 */
       type: 'REQUEST_TRASH_RESTORE';
@@ -9299,9 +9305,10 @@ function reduceCore(
         };
       }
       const lastLid = state.order[state.order.length - 1];
-      const entryOrder = lastLid
-        ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1
-        : 1;
+      // 🔴 「元に戻す」は移す前の並びへ挿す(#1087)。ゴミ箱の一覧から戻すときは並びを知らないので末尾
+      const entryOrder =
+        action.entryOrder ??
+        (lastLid ? (state.entryMetas.get(lastLid)?.entryOrder ?? 0) + 1 : 1);
       return {
         state,
         events: [
@@ -9318,7 +9325,16 @@ function reduceCore(
       // ⚠ 起点で断る(`RESTORE_TRASH` と同じ ── 章の欄が開いている間は復元が選択を動かす)
       if (state.phase !== 'ready' || action.lids.length === 0) return { state, events: [] };
       if (state.sectionDraft !== null) return sectionDraftBlockedResult(state);
-      return { state, events: [{ type: 'REQUEST_TRASH_UNDO', lids: action.lids }] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_TRASH_UNDO',
+            lids: action.lids,
+            ...(action.orders ? { orders: action.orders } : {}),
+          },
+        ],
+      };
     }
     case 'PURGE_TRASH': {
       if (state.phase !== 'ready') return { state, events: [] };

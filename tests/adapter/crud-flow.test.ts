@@ -394,6 +394,22 @@ describe('delete (P3-7a)', () => {
     expect(await undoOffer(), '戻したあとも持っている(2 度押せる)').toBeNull();
   });
 
+  it('🔴 「元に戻す」は移す前の並びへ戻す(一覧の末尾へ飛ばさない。#1087)', async () => {
+    const { d, q } = setup([meta('a', 1), meta('b', 2), meta('c', 3)], { a: 'A', b: 'B', c: 'C' });
+    q<HTMLElement>('[data-pkc-entry="b"]')!.click();
+    await tick();
+    q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+    await tick(20);
+    expect(d.getState().order, '前提: 消えている').toEqual(['a', 'c']);
+    const undo = document.createElement('button');
+    undo.setAttribute('data-pkc-action', 'undo-trash');
+    document.body.firstElementChild!.append(undo);
+    undo.click();
+    await tick(40);
+    expect(d.getState().entryMetas.has('b'), '前提: 戻っていない').toBe(true);
+    expect(d.getState().order, '末尾へ飛んだ ── 消す前の位置に戻っていない').toEqual(['a', 'b', 'c']);
+  });
+
   it('🔴 章の欄が開いていて戻せないときは「戻しました」と言わず、「元に戻す」も手放さない', async () => {
     const { d, q } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: '# 見出し\nB' });
     q<HTMLElement>('[data-pkc-entry="a"]')!.click();
