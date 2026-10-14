@@ -13,6 +13,7 @@
  *   どちらも `table-convert.ts` の綴りを 1 行も参照しない。
  */
 import { describe, expect, it } from 'vitest';
+import { TABLE_COPY_CHOICES } from '../../src/features/markdown/table-copy';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import {
@@ -235,6 +236,15 @@ describe('表の形を変える(#708 段②)', () => {
     const ok = body.replace('=A2*B2', '200');
     expect(tableConvertRefusal(tableAt(ok, 0)!, 'markdown'), '式が無いのに断った').toBeNull();
     expect(convert(ok, 0, 'markdown'), '式が無いのに書き換えなかった').not.toBeNull();
+  });
+
+  it('🔴 断り文が案内する ▾ の選択肢は、実際の ▾ に在る字である(#1087。画面の字から引く)', () => {
+    const body = '```csv\n数,単価,計\n2,100,=A2*B2\n```\n';
+    const why = tableConvertRefusal(tableAt(body, 0)!, 'markdown')!;
+    const quoted = [...why.matchAll(/「([^」]+)」を選べば/gu)].map((m) => m[1]!);
+    expect(quoted, '前提が崩れている: ▾ の選択肢を案内していない').toHaveLength(1);
+    const labels = TABLE_COPY_CHOICES.map((c) => c.label);
+    expect(labels, `「${quoted[0]}」は ▾ に無い(行き止まりの案内)`).toContain(quoted[0]);
   });
 
   it('🔴 升の中に改行が在る csv も Markdown にできない ── 別の理由を返す', () => {
