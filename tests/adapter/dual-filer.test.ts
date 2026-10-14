@@ -1582,6 +1582,19 @@ describe('2 ペインのキーボード操作(#273)', () => {
     );
   });
 
+  it('🔴 1 件だけ移したときも、リンクが開けなくなることを言う(delete-entry と同じ字。#1087)', async () => {
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'c' });
+    d.dispatch({ type: 'BACKLINKS_LOADED', lid: 'c', lids: ['a'], truncated: false });
+    expect(d.getState().backlinks?.lid, '前提: 参照元を持っていない').toBe('c');
+    d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'c', mode: 'set' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-delete"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.has('c'), '前提: 消えていない').toBe(false);
+    expect(d.getState().notice ?? '', '1 件だとリンクの注意が出なかった').toContain(
+      '1 件のノートからのリンクは、戻すまで開けません',
+    );
+  });
+
   /**
    * 🔴 **その場で名前を打ち替える**(#273 段④。OS のファイラの F2)。
    * ⚠ 入力欄は **state 駆動**で出す ── DOM を直に差し替えると、別タブの保存が

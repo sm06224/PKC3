@@ -12,7 +12,8 @@
  *
  * 呼び手(追記の口の全数。W5-d で数えた): 板の付箋の追記・題名(`binder.ts`)/ 本文の下の追記欄(`append-entry`)/
  * PDF の「ノートへ引く」(`quote-into-note.ts`)/ ブラウザの AI の `pkc_append_note`(`main.ts`)/
- * 予定タブの「足す」と目盛りの作成(`addScheduleItemChecked`、`binder.ts`)。
+ * 予定タブの「足す」と目盛りの作成(`addScheduleItemChecked`、`binder.ts`)/
+ * 履歴の「この版に戻す」(`restore-revision`、`binder.ts`。#1087)。
  * 通さない口(理由は設計 doc §6 W5-d): 計時の記録・文字起こし・添付のドロップ。
  */
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';

@@ -402,3 +402,52 @@ describe('main.ts の配線(起動できないので字で pin する)', () => {
     expect(src).toMatch(/quoteIntoNote\(\s*dispatcher,\s*session,\s*text,\s*page,\s*\(message, openLid\) => dispatcher\.dispatch\(\{ type: 'OP_NOTICE', message, open: openLid \}\),\s*undefined,\s*editLockPort,?\s*\)/);
   });
 });
+
+/**
+ * 🔴 **履歴の「この版に戻す」も同じ門を通す**(#1087)。
+ * ⚠ 直す前は通していた ── 「前の版に戻しました」と出るのに、編集中のタブが保存するとそちらの字で上書きされ、
+ *   こちらの画面は黙ってその版へ変わっていた。
+ */
+describe('④ 履歴の「この版に戻す」(restore-revision)', () => {
+  function restorePanel(services: Partial<BinderServices>) {
+    document.body.textContent = '';
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'restore-revision');
+    btn.setAttribute('data-pkc-rev-id', 'rev-1');
+    root.append(btn);
+    document.body.append(root);
+    const d = new Dispatcher();
+    const sent: string[] = [];
+    const raw = d.dispatch.bind(d);
+    d.dispatch = ((a: { type: string }) => {
+      sent.push(a.type);
+      return raw(a as never);
+    }) as typeof d.dispatch;
+    bindActions(root, d, { showStatus: () => {}, ...services });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    sent.length = 0;
+    return { d, sent, btn };
+  }
+
+  it('🔴 別のタブが握っていたら戻さず、理由を出す', async () => {
+    const acquire = vi.fn(async () => 'denied' as const);
+    const p = restorePanel({ acquireEditLock: acquire, releaseEditLock: () => {} });
+    p.btn.click();
+    await flush();
+    expect(acquire).toHaveBeenCalledWith('n1');
+    expect(p.sent, '別のタブが編集中なのに戻した').not.toContain('RESTORE_REVISION');
+    expect(p.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
+  });
+
+  it('対照群: 取れたら戻し、錠は握り続けない', async () => {
+    const release = vi.fn();
+    const p = restorePanel({ acquireEditLock: async () => 'granted' as const, releaseEditLock: release });
+    p.btn.click();
+    await flush();
+    expect(p.sent).toContain('RESTORE_REVISION');
+    expect(release).toHaveBeenCalledWith('n1');
+  });
+});
