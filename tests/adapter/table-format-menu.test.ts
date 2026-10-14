@@ -676,6 +676,8 @@ describe('表の升で Tab / Enter を押す(#750 I1)', () => {
       selectedLid: 'n1',
       entryMetas: metasOf(['n1', 'n2']),
       openBody: { lid: 'n1', body: MD, baseline: MD, persisted: MD, diskAhead: false },
+      // 🔴 留めた枠が見ている本文(欄を開いた時点の行の中身はそこから引く ── #1087)
+      splitBodies: new Map([['n2', MD]]),
     });
     bindActions(root, d, {});
     const main = root.querySelector<HTMLElement>('[data-pkc-field="detail-body"]')!;

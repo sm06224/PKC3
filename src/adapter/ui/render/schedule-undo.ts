@@ -34,6 +34,7 @@ import {
 } from '@features/schedule/move-undo';
 import type { AppState, UserAction } from '@adapter/state/app-state';
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
 
 export type MoveTarget =
   | { readonly kind: 'task'; readonly lid: string; readonly line: number }
@@ -192,11 +193,16 @@ export function undoScheduleMove(
   const b = offer.before;
   if (offer.target.kind === 'entry')
     return { action: { type: 'SET_ENTRY_DATE', lid: offer.target.lid, date: b.date } };
+  // 🔴 戻す相手の行は「いま走査に見えている姿」── その原文を `openLine` に添える(#1087)。
+  //    動かした後に行が替わっていれば、上の `undoVerdict` が先に断っている
+  const openLine = shownCardLine(state, offer.target.lid, offer.target.line);
+  if (openLine === null) return { refusal: SHOWN_LINE_LOST };
   return {
     action: {
       type: 'SET_TASK_DATE',
       lid: offer.target.lid,
       line: offer.target.line,
+      openLine,
       date: b.date,
       time: b.time,
       timeEnd: b.timeEnd,

@@ -64,8 +64,8 @@ describe('同じ回の完了を 2 度書く(#1087)', () => {
       if (s.error !== null) seen.push(s.error);
     });
     // 書込の返事の前に 2 度(effect の直列 queue に 2 本載る)
-    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, date: '2026-10-02' });
-    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, date: '2026-10-02' });
+    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, openLine: RULE, date: '2026-10-02' });
+    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, openLine: RULE, date: '2026-10-02' });
     await tick();
     expect(h.writes(), '前提:1 度だけ書かれた').toBe(1);
     expect(h.disk.body.split('\n').filter((l) => l.includes('@2026-10-02')), '行が重複した').toHaveLength(1);
@@ -76,7 +76,7 @@ describe('同じ回の完了を 2 度書く(#1087)', () => {
   it('対照群:本当に本文が変わっていたら、今までどおり言う', async () => {
     // 行番号が指す先が繰り返しの行ではない(開いている間に本文が書き換わった)
     const h = boot('ただの文\n');
-    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, date: '2026-10-02' });
+    h.d.dispatch({ type: 'MATERIALIZE_REPEAT', lid: 'n1', line: 0, openLine: RULE, date: '2026-10-02' });
     await tick();
     expect(h.writes()).toBe(0);
     expect(h.d.getState().error ?? '').toContain(LIES);
@@ -85,7 +85,7 @@ describe('同じ回の完了を 2 度書く(#1087)', () => {
 });
 
 describe('isRepeatAlreadyDone(判定を直に当てる)', () => {
-  const rw = { kind: 'repeat-done' as const, line: 0, date: '2026-10-02' };
+  const rw = { kind: 'repeat-done' as const, line: 0, openLine: RULE, date: '2026-10-02' };
   it('書いた後の本文では true / 書く前・行違い・別の kind では false', () => {
     const before = `${RULE}\n`;
     const after = applyBodyRewrite(before, rw);
@@ -94,6 +94,6 @@ describe('isRepeatAlreadyDone(判定を直に当てる)', () => {
     expect(isRepeatAlreadyDone(before, rw)).toBe(false);
     expect(isRepeatAlreadyDone('ただの文\n', rw)).toBe(false);
     expect(isRepeatAlreadyDone(after!, { ...rw, line: 5 })).toBe(false);
-    expect(isRepeatAlreadyDone(after!, { kind: 'task', line: 0, checked: true } as never)).toBe(false);
+    expect(isRepeatAlreadyDone(after!, { kind: 'task', line: 0, openLine: RULE, checked: true } as never)).toBe(false);
   });
 });

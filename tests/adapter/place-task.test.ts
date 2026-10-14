@@ -72,6 +72,9 @@ async function rig(placedBody: string, services: Partial<BinderServices> = {}) {
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: METAS, relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
   d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: BOARD });
+  // 🔴 押した時点の行の中身は、板のための抜粋(`placeBodies`)から引く(#1087)── 描く側(下の `excerptOf`)と
+  //    同じ本文を state にも持たせる
+  d.dispatch({ type: 'PLACE_BODY_LOADED', lid: 'n2', body: placedBody });
   const ex = excerptOf(placedBody, 'text');
   const deps: PlaceEmbedDeps = {
     selfLid: 'n1',
@@ -110,10 +113,10 @@ describe('付箋の中のチェックを押す', () => {
     await flush();
     expect(t.rewrites()).toHaveLength(1);
     expect(t.rewrites()[0]!.lid).toBe('n2');
-    expect(t.rewrites()[0]!.rewrite).toEqual({ kind: 'task', line: 0 });
+    expect(t.rewrites()[0]!.rewrite).toEqual({ kind: 'task', line: 0, openLine: '- [ ] a' });
     b!.click();
     await flush();
-    expect(t.rewrites()[1]!.rewrite).toEqual({ kind: 'task', line: 1 });
+    expect(t.rewrites()[1]!.rewrite).toEqual({ kind: 'task', line: 1, openLine: '- [x] b' });
     // 対照群:板自身の項目は板(n1)へ撃たれる(付箋の分岐が本文の面を奪っていない)
     t.ownBox().click();
     await flush();
@@ -127,7 +130,7 @@ describe('付箋の中のチェックを押す', () => {
     expect(bodyBelowFrontmatter(body).startsWith('- [ ] a')).toBe(true);
     t.boxes('a')[0]!.click();
     await flush();
-    expect(t.rewrites()[0]!.rewrite).toEqual({ kind: 'task', line: 3 });
+    expect(t.rewrites()[0]!.rewrite).toEqual({ kind: 'task', line: 3, openLine: '- [ ] a' });
   });
 
   it('🔴 同じノートを 2 枚置いても、押した付箋のノートへ効く(どちらも n2)', async () => {

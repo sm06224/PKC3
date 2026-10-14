@@ -11,12 +11,18 @@ import { describe, expect, it } from 'vitest';
 import { readLineDate } from '../../src/features/schedule/line-date';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import {
-  applyBodyRewrite,
   applyTaskRun,
+  bodyLineAt,
   isTaskLine,
   taskRunNotice,
 } from '../../src/features/markdown/body-rewrite';
 import { moveLinesWithInverse } from '../../src/features/markdown/line-move';
+// 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)。
+//    行ずれの検査は実物に `openLine` を自分で渡して書く(`body-rewrite-open-line.test.ts`)
+import { applyOpened as applyBodyRewrite } from '../helpers/open-line';
+
+const applyRun = (body: string, targets: number[], to: 'done' | 'open') =>
+  applyTaskRun(body, targets, to, targets.map((n) => bodyLineAt(body, n) ?? ''));
 
 describe('チェックの印(#277)', () => {
   const DOC = ['# 題', '', '- [ ] やること', '- [x] 済んだこと', '', '本文'].join('\n');
@@ -987,7 +993,7 @@ describe('チェックリストをそろえる(#1173)', () => {
   ].join('\n');
 
   it('🔴 すべて完了にする ── 未完了だった行だけが動き、繰り返しの行は触らない', () => {
-    const r = applyTaskRun(LIST, [2, 3, 4, 5, 6], 'done');
+    const r = applyRun(LIST, [2, 3, 4, 5, 6], 'done');
     const out = r.body.split('\n');
     expect(out[2]).toBe('- [x] 歯ブラシ');
     expect(out[4]).toBe('  - [x] ケーブル');
@@ -1002,7 +1008,7 @@ describe('チェックリストをそろえる(#1173)', () => {
   });
 
   it('🔴 すべて未完了に戻す ── 混在していても全部外れる(入れ子の分も)', () => {
-    const r = applyTaskRun(LIST, [2, 3, 4, 5], 'open');
+    const r = applyRun(LIST, [2, 3, 4, 5], 'open');
     const out = r.body.split('\n');
     expect(out.slice(2, 6)).toEqual([
       '- [ ] 歯ブラシ',
@@ -1015,18 +1021,18 @@ describe('チェックリストをそろえる(#1173)', () => {
 
   it('🔴 繰り返しの行は「済み」でも触らない(未完了へ戻す側でも)', () => {
     const body = '- [x] ゴミ出し @2026-09-07 毎週\n- [x] 牛乳\n';
-    const r = applyTaskRun(body, [0, 1], 'open');
+    const r = applyRun(body, [0, 1], 'open');
     expect(r.body).toBe('- [x] ゴミ出し @2026-09-07 毎週\n- [ ] 牛乳\n');
     expect(r.skipped.repeat).toBe(1);
     // ⚠ 繰り返しでない日付つきの行は動く(日付があるだけでは飛ばさない)
-    const dated = applyTaskRun('- [ ] 歯医者 @2026-09-07\n', [0], 'done');
+    const dated = applyRun('- [ ] 歯医者 @2026-09-07\n', [0], 'done');
     expect(dated.body).toBe('- [x] 歯医者 @2026-09-07\n');
     expect(dated.skipped.repeat).toBe(0);
   });
 
   it('🔴 もう一度当てても同じ(同じ本文を返し、changed は 0)', () => {
-    const once = applyTaskRun(LIST, [2, 3, 4, 5, 6], 'done');
-    const twice = applyTaskRun(once.body, [2, 3, 4, 5, 6], 'done');
+    const once = applyRun(LIST, [2, 3, 4, 5, 6], 'done');
+    const twice = applyRun(once.body, [2, 3, 4, 5, 6], 'done');
     expect(twice.body).toBe(once.body);
     expect(twice.changed).toBe(0);
     expect(twice.skipped.repeat).toBe(1);
@@ -1035,7 +1041,7 @@ describe('チェックリストをそろえる(#1173)', () => {
   it('⚠ 項目でない行・範囲外・frontmatter の中は数えて飛ばす(別の行を書かない)', () => {
     const body = '---\ntags: [a]\n---\n- [ ] 牛乳\n普通の行\n';
     // 0..2 は frontmatter / 4 は散文 / 99 は範囲外 / -1 と 1.5 は行番号ではない
-    const r = applyTaskRun(body, [0, 1, 2, 3, 4, 99, -1, 1.5], 'done');
+    const r = applyRun(body, [0, 1, 2, 3, 4, 99, -1, 1.5], 'done');
     expect(r.body).toBe('---\ntags: [a]\n---\n- [x] 牛乳\n普通の行\n');
     expect(r.changed).toBe(1);
     expect(r.skipped.invalid).toBe(7);
@@ -1043,25 +1049,25 @@ describe('チェックリストをそろえる(#1173)', () => {
 
   it('🔴 fence の中の行は書かない(コードの例を書き換えない)', () => {
     const body = ['- [ ] 本物', '```md', '- [ ] コードの例', '```'].join('\n');
-    const r = applyTaskRun(body, [0, 2], 'done');
+    const r = applyRun(body, [0, 2], 'done');
     expect(r.body).toBe(['- [x] 本物', '```md', '- [ ] コードの例', '```'].join('\n'));
     expect(r.skipped.invalid).toBe(1);
   });
 
   it('同じ行を 2 度渡しても 1 件(二重に数えない)', () => {
-    const r = applyTaskRun('- [ ] あ\n', [0, 0], 'done');
+    const r = applyRun('- [ ] あ\n', [0, 0], 'done');
     expect(r.changed).toBe(1);
     expect(r.skipped).toEqual({ repeat: 0, invalid: 0 });
   });
 
   it('CRLF のノートで CRLF が保たれ、空白の入れ方も整形されない', () => {
     const crlf = '-   [ ]   ゆるい\r\n- [x] 済み\r\n';
-    expect(applyTaskRun(crlf, [0, 1], 'done').body).toBe('-   [x]   ゆるい\r\n- [x] 済み\r\n');
+    expect(applyRun(crlf, [0, 1], 'done').body).toBe('-   [x]   ゆるい\r\n- [x] 済み\r\n');
   });
 
   it('引用や番号つきの前置きでも効く(`task` と同じ規則を借りている)', () => {
     const body = '> - [ ] 引用の中\n1. [ ] 番号\n';
-    expect(applyTaskRun(body, [0, 1], 'done').body).toBe('> - [x] 引用の中\n1. [x] 番号\n');
+    expect(applyRun(body, [0, 1], 'done').body).toBe('> - [x] 引用の中\n1. [x] 番号\n');
   });
 
   describe('applyBodyRewrite の口(`task-run`)', () => {

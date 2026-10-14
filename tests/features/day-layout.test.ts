@@ -39,6 +39,7 @@ const item = (
     until: null,
     repeat: null,
     substitutes: null,
+    rawLine: '',
   }),
   key,
   ...over,

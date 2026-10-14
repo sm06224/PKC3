@@ -127,12 +127,24 @@ export type BodyRewrite =
        */
       kind: 'task-run';
       lines: readonly number[];
+      /**
+       * 🔴 **押した時点の各行の中身**(`lines` と同じ並び。#1087)。⚠ 行番号だけだと、別の窓が上へ 1 行足していれば
+       *   **押していない項目**が動く。disk 側の同じ行と byte 一致しない行は、**数えて飛ばす**(`skipped.invalid`)。
+       *   長さが `lines` と違えば全部飛ばす(運び忘れは断る側に倒れる)。
+       */
+      openLines: readonly string[];
       to: 'done' | 'open';
     }
   | {
       /** チェックの印を反転する。`line` は**原文の行番号**(0 始まり)。 */
       kind: 'task';
       line: number;
+      /**
+       * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ 1 行足していれば
+       *   **押していない項目**が切り替わる(留めた枠・予定の札は表示が古いまま残る)。disk 側の同じ行と
+       *   byte 一致しなければ書かない(`place-move` の `openLine` と同じ作法)。
+       */
+      openLine: string;
     }
   | {
       /**
@@ -313,6 +325,8 @@ export type BodyRewrite =
        */
       kind: 'csv-cell';
       line: number;
+      /** 🔴 **升を開いた時点のその行の中身**(#1087)。disk 側と byte 一致しなければ書かない(`task` と同じ)。 */
+      openLine: string;
       col: number;
       value: string;
     }
@@ -349,6 +363,8 @@ export type BodyRewrite =
        */
       kind: 'line-date';
       line: number;
+      /** 🔴 **掴んだ / 押した時点のその行の中身**(#1087)。disk 側と byte 一致しなければ書かない(`task` と同じ)。 */
+      openLine: string;
       /**
        * ⚠ `null` は**日付を外す**。
        * 🔴 **省くと「その行に書かれている日付をそのまま保つ」**(#855 段 0 の 3 つ目、
@@ -391,6 +407,8 @@ export type BodyRewrite =
        */
       kind: 'repeat-done';
       line: number;
+      /** 🔴 **押した時点の規則の行の中身**(#1087)。disk 側と byte 一致しなければ書かない(`task` と同じ)。 */
+      openLine: string;
       /** どの回か(`YYYY-MM-DD`)。⚠ 規則の行の日付ではない。 */
       date: string;
     }
@@ -412,6 +430,8 @@ export type BodyRewrite =
       kind: 'repeat-move';
       /** 規則の行。 */
       line: number;
+      /** 🔴 **掴んだ時点の規則の行の中身**(#1087)。disk 側と byte 一致しなければ書かない(`task` と同じ)。 */
+      openLine: string;
       /** どの回を動かすか(`YYYY-MM-DD`)。⚠ 規則の行の日付ではない。 */
       from: string;
       /** どこへ動かすか(`YYYY-MM-DD`)。 */
@@ -591,6 +611,16 @@ function getLine(body: string, lineIndex: number): string | undefined {
 }
 
 /**
+ * 🔴 **押した時点の行の中身を、画面の本文から取り出す**(#1087。`task` などの `openLine`)。
+ *
+ * ⚠ 書換の側が比べる行(`splitLines` の行 = 改行の `\r` を落とした字)と**同じ取り方**にする。
+ *   無い行は `null`(運び手は断る側に倒す ── 当てずっぽうの空文字を運ばない)。
+ */
+export function bodyLineAt(body: string, line: number): string | null {
+  return getLine(body, line) ?? null;
+}
+
+/**
  * 🔴 **リンク行を隣と入れ替える**(#633 段④)── 2 行以外は 1 byte も動かさない。
  *
  * ⚠ 門は 4 つ:①行が原文の範囲に在る ②`openLine` と byte 一致 ③その行がリンク行
@@ -667,6 +697,8 @@ export function applyTaskRun(
   body: string,
   targets: readonly number[],
   to: 'done' | 'open',
+  /** 🔴 押した時点の各行の中身(`targets` と同じ並び。#1087)。違う行・足りない行は `invalid` に数えて飛ばす。 */
+  openLines: readonly string[],
 ): TaskRunApplied {
   const lines = splitLines(body);
   const fm = frontmatterLineCount(body);
@@ -675,12 +707,21 @@ export function applyTaskRun(
   let repeat = 0;
   let invalid = 0;
   const seen = new Set<number>();
-  for (const at of targets) {
+  for (let k = 0; k < targets.length; k++) {
+    const at = targets[k]!;
     // ⚠ 同じ行を 2 度数えない(面が入れ子を二重に拾っても、数は 1 件)
     if (seen.has(at)) continue;
     seen.add(at);
     const line = lines[at];
-    if (!Number.isInteger(at) || at < fm || line === undefined || mask[at] === true) {
+    if (
+      !Number.isInteger(at) ||
+      at < fm ||
+      line === undefined ||
+      mask[at] === true ||
+      // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の項目を指す形。#1087)
+      openLines.length !== targets.length ||
+      openLines[k] !== line
+    ) {
       invalid++;
       continue;
     }
@@ -837,7 +878,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
      * ⚠ 項目として読めた行が **1 つも無い**ときは `null` = 断る(画面の行番号が古い)。
      *   ⚠ 読めた行が在って元から全部そろっていれば**同じ本文**を返す(= 書かない・言わない)。
      */
-    const r = applyTaskRun(body, rewrite.lines, rewrite.to);
+    const r = applyTaskRun(body, rewrite.lines, rewrite.to, rewrite.openLines);
     const valid = new Set(rewrite.lines).size - r.skipped.invalid;
     return valid <= 0 ? null : r.body;
   }
@@ -901,6 +942,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の項目を指す形。#1087)
+  if (line !== rewrite.openLine) return null;
   const m = TASK_LINE.exec(line);
   if (m === null) return null;
   const checked = m[2]!.toLowerCase() === 'x';
@@ -956,6 +999,7 @@ function rewriteLineDate(
   body: string,
   rewrite: {
     line: number;
+    openLine: string;
     date?: string | null;
     time?: string | null;
     until?: string | null;
@@ -966,6 +1010,8 @@ function rewriteLineDate(
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  // 🔴 押した時点の中身と違う行は書かない(`task` と同じ。#1087)
+  if (line !== rewrite.openLine) return null;
   if (!TASK_LINE.test(line)) return null;
   const found = readLineDate(line);
   let next: string;
@@ -1070,7 +1116,7 @@ function rewriteLineDate(
  */
 function materializeRepeat(
   body: string,
-  rewrite: { line: number; date: string },
+  rewrite: { line: number; openLine: string; date: string },
 ): string | null {
   const made = repeatDoneLine(body, rewrite);
   if (made === null || made.exists) return null;
@@ -1097,11 +1143,13 @@ export function isRepeatAlreadyDone(body: string, rewrite: BodyRewrite): boolean
  */
 function repeatDoneLine(
   body: string,
-  rewrite: { line: number; date: string },
+  rewrite: { line: number; openLine: string; date: string },
 ): { lines: string[]; done: string; exists: boolean } | null {
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  // 🔴 押した時点の中身と違う行は書かない(`task` と同じ。#1087)
+  if (line !== rewrite.openLine) return null;
   const m = TASK_LINE.exec(line);
   if (m === null) return null;
   const found = readLineDate(line);
@@ -1146,11 +1194,20 @@ function repeatDoneLine(
  */
 function moveRepeatOccurrence(
   body: string,
-  rewrite: { line: number; from: string; to: string; time?: string; timeEnd?: string | null },
+  rewrite: {
+    line: number;
+    openLine: string;
+    from: string;
+    to: string;
+    time?: string;
+    timeEnd?: string | null;
+  },
 ): string | null {
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  // 🔴 掴んだ時点の中身と違う行は書かない(`task` と同じ。#1087)
+  if (line !== rewrite.openLine) return null;
   if (!TASK_LINE.test(line)) return null;
   const found = readLineDate(line);
   // ⚠ 繰り返しの行でなければ**何もしない**(普通の項目は `kind: 'line-date'` の仕事)
@@ -1231,11 +1288,13 @@ function rewriteMdCell(
 
 function rewriteCsvCell(
   body: string,
-  rewrite: { line: number; col: number; value: string },
+  rewrite: { line: number; openLine: string; col: number; value: string },
 ): string | null {
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
+  // 🔴 升を開いた時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の行を指す形。`task` と同じ。#1087)
+  if (line !== rewrite.openLine) return null;
   const eol = detectEol(body);
   const table = csvTableAt(body, rewrite.line);
   /**

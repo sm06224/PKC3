@@ -3877,7 +3877,7 @@ export function connectStoreEffects(
             const runTo = ev.rewrite.kind === 'task-run' ? ev.rewrite.to : null;
             const run =
               ev.rewrite.kind === 'task-run' && runTo !== null
-                ? applyTaskRun(body, ev.rewrite.lines, runTo)
+                ? applyTaskRun(body, ev.rewrite.lines, runTo, ev.rewrite.openLines)
                 : null;
             if (newBody === body) {
               if (run !== null && runTo !== null && !disposed)
@@ -3895,7 +3895,10 @@ export function connectStoreEffects(
              *
              * 🔑 **ここは「当て直す」ではなく「断る」** ── `applyBodyRewrite` は
              * `kind: 'task'` / `'line-date'` で **行番号**を使い、その検査は
-             * 「その行が項目か」しか見ない。⚠ 別の窓が**行を 1 本足していた**ら、
+             * 「その行が項目か」と「押した時点の行の中身(`openLine`)と byte 一致か」(#1087)。
+             * ⚠ `openLine` が見るのは**画面が見ていた本文と、ここで読んだ本文**の食い違いで、
+             * 読んでから書くまでの間(ここ)の割り込みは見ない ── そこは `expectHash` の仕事である。
+             * ⚠ 別の窓が**行を 1 本足していた**ら、
              * 同じ番号は**別の項目**を指す ── 当て直すと**押していない項目が
              * 裏返る**。⚠ 追記(`REQUEST_APPEND`)が当て直してよいのは、あちらが
              * **見出しの名前**で当てていて、しかも user が打った字を捨てさせない

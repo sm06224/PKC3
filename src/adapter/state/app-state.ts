@@ -2855,6 +2855,12 @@ export type UserAction =
       type: 'SET_TASK_DATE';
       lid: string;
       line: number;
+      /**
+       * 🔴 **押した / 掴んだ時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ 1 行足したとき
+       *   古い表示から押した操作が**別の項目**を書き換える。運ぶのは押した面(`shown-line.ts` の 3 つのうち、
+       *   その面が見ている本文から引く)。書換は disk 側と byte 一致しなければ断る。
+       */
+      openLine: string;
       date: string | null;
       time?: string | null;
       /** 🔴 期間の終わり(#344 段①)。単日にするなら渡さないか `null`。 */
@@ -2876,19 +2882,26 @@ export type UserAction =
    *   面が独自の書込経路を持たない(§7)。
    * ⚠ `repeat: null` は**繰り返しをやめる**(日付は残る)。
    */
-  | { type: 'SET_TASK_REPEAT'; lid: string; line: number; repeat: RepeatUnit | null }
+  | { type: 'SET_TASK_REPEAT'; lid: string; line: number; openLine: string; repeat: RepeatUnit | null }
   /**
    * 🔴 **チェックの印を付け外しする**(#277)。`line` は**原文の行番号**。
    * ⚠ 索引(何番目のチェックか)ではなく**行**で指す ── 索引だと、数え方が
    *   描画側と原文側で 1 つでもずれた瞬間に**別の行を書き換える**。
    */
-  | { type: 'TOGGLE_TASK'; lid: string; line: number }
+  | { type: 'TOGGLE_TASK'; lid: string; line: number; openLine: string }
   /**
    * 🔴 **チェックリストを丸ごと「完了」/「未完了」へそろえる**(#1173)。
    * ⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本(`REQUEST_BODY_REWRITE`)を通る。
    *   `lines` は面が運ぶ**原文の行番号**の並び(判断は `body-rewrite.ts` の `applyTaskRun`)。
    */
-  | { type: 'SET_TASK_RUN'; lid: string; lines: readonly number[]; to: 'done' | 'open' }
+  | {
+      type: 'SET_TASK_RUN';
+      lid: string;
+      lines: readonly number[];
+      /** 🔴 押した時点の各行の中身(`lines` と同じ並び。#1087。`TOGGLE_TASK` の `openLine` と同じ理由)。 */
+      openLines: readonly string[];
+      to: 'done' | 'open';
+    }
   /**
    * 🔴 **本文の色コードを 1 つ書き換える**(#1224)。⚠ `TOGGLE_TASK` と**同じ形**:書換は 1 本
    *   (`REQUEST_BODY_REWRITE` の `kind: 'color'`)を通り、面が独自の書込経路を持たない(§7)。
@@ -2910,7 +2923,7 @@ export type UserAction =
    * ⚠ `line` は**原文の行番号**、`col` はその行の何番目のセルか。
    *   区切り字は**渡さない** ── 囲みの見出しから決まる(呼び手に決めさせない)。
    */
-  | { type: 'SET_CSV_CELL'; lid: string; line: number; col: number; value: string }
+  | { type: 'SET_CSV_CELL'; lid: string; line: number; openLine: string; col: number; value: string }
   /**
    * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
    */
@@ -2934,7 +2947,7 @@ export type UserAction =
    *   **その日ぶんの行を 1 本増やす**(理由は `body-rewrite.ts` の `repeat-done`)。
    * ⚠ `line` は**規則の行**、`date` は**押した回の日**である。
    */
-  | { type: 'MATERIALIZE_REPEAT'; lid: string; line: number; date: string }
+  | { type: 'MATERIALIZE_REPEAT'; lid: string; line: number; openLine: string; date: string }
   /**
    * 🔴 **繰り返しの「その回だけ」を別の日へ動かす**(#855 決4。
    * user 裁定 2026-09-13「1 回か全部か選択する(Outlook 模倣で OK)」)。
@@ -2950,6 +2963,12 @@ export type UserAction =
       type: 'MOVE_REPEAT_OCCURRENCE';
       lid: string;
       line: number;
+      /**
+       * 🔴 **押した / 掴んだ時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ 1 行足したとき
+       *   古い表示から押した操作が**別の項目**を書き換える。運ぶのは押した面(`shown-line.ts` の 3 つのうち、
+       *   その面が見ている本文から引く)。書換は disk 側と byte 一致しなければ断る。
+       */
+      openLine: string;
       from: string;
       to: string;
       /**
@@ -7578,6 +7597,7 @@ function reduceCore(
             rewrite: {
               kind: 'line-date',
               line: action.line,
+              openLine: action.openLine,
               date: action.date,
               ...(action.time === undefined ? {} : { time: action.time }),
               // ⚠ **渡されたときだけ**載せる(渡していないのに `null` を載せると、
@@ -7625,7 +7645,7 @@ function reduceCore(
              *   **その回の日**であって規則の開始日ではないので、渡すと
              *   **開始日がその回の日へずれる**(静かに予定がまるごと動く)。
              */
-            rewrite: { kind: 'line-date', line: action.line, repeat: action.repeat },
+            rewrite: { kind: 'line-date', line: action.line, openLine: action.openLine, repeat: action.repeat },
           },
         ],
       };
@@ -7688,6 +7708,7 @@ function reduceCore(
             rewrite: {
               kind: 'csv-cell',
               line: action.line,
+              openLine: action.openLine,
               col: action.col,
               value: action.value,
             },
@@ -7767,7 +7788,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'task', line: action.line },
+            rewrite: { kind: 'task', line: action.line, openLine: action.openLine },
           },
         ],
       };
@@ -7851,7 +7872,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'task-run', lines: action.lines, to: action.to },
+            rewrite: { kind: 'task-run', lines: action.lines, openLines: action.openLines, to: action.to },
           },
         ],
       };
@@ -7877,7 +7898,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'repeat-done', line: action.line, date: action.date },
+            rewrite: { kind: 'repeat-done', line: action.line, openLine: action.openLine, date: action.date },
           },
         ],
       };
@@ -7906,6 +7927,7 @@ function reduceCore(
             rewrite: {
               kind: 'repeat-move',
               line: action.line,
+              openLine: action.openLine,
               from: action.from,
               to: action.to,
               ...(action.time === undefined ? {} : { time: action.time }),

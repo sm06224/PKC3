@@ -154,6 +154,8 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
     return {
       lid,
       line: item.line,
+      // 🔴 押した / 掴んだ時点の行の中身(書換の `openLine`。#1087)
+      rawLine: item.rawLine,
       // 🔑 記法そのものは**札の字から外す** ── 日付は札の日付欄に出るので、
       //    残すと同じ日付が 1 枚の札に 2 回出る
       text: clipTaskText(when === null ? item.text : stripLineDate(item.text)),
@@ -242,6 +244,9 @@ function sameCards(a: readonly TaskCard[], b: readonly TaskCard[]): boolean {
     if (
       x.lid !== y.lid ||
       x.line !== y.line ||
+      // 🔴 **行の原文も見る**(#1087)── 見ないと、札に出ない部分(字下げ・記法の綴り)だけを書き換えたとき
+      //    「同じ」と判定され、**古い原文**が札に残る(押すと「本文が変わっている」と断られ続ける)
+      x.rawLine !== y.rawLine ||
       x.done !== y.done ||
       x.text !== y.text ||
       x.date !== y.date ||

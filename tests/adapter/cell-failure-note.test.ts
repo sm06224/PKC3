@@ -48,7 +48,7 @@ async function failWith(value: string): Promise<{ error: string; wrote: boolean 
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
-  d.dispatch({ type: 'SET_CSV_CELL', lid: 'n1', line: 0, col: 0, value });
+  d.dispatch({ type: 'SET_CSV_CELL', lid: 'n1', line: 0, openLine: 'ただの文', col: 0, value });
   await tick();
   return { error: d.getState().error ?? '', wrote };
 }

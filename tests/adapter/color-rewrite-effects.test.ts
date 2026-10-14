@@ -134,7 +134,7 @@ describe('色を選び直した知らせ(#1254 §2 欠陥 5)', () => {
   it('⚠ 色以外の書換(チェックの印)は、この知らせを出さない', async () => {
     const b = boot({ a: '- [ ] あ `#3b82f6`\n' });
     dispose = b.dispose;
-    b.d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    b.d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] あ `#3b82f6`' });
     await tick();
     expect(b.persists).toHaveLength(1);
     expect(b.notices).toEqual([]);

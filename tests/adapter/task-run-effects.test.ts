@@ -72,6 +72,16 @@ afterEach(() => {
   dispose = null;
 });
 
+/** 押した時点の行の中身(`openLines`)は、その時の本文から組む(#1087)。 */
+const run = (body: string, lines: number[], to: 'done' | 'open') =>
+  ({
+    type: 'SET_TASK_RUN' as const,
+    lid: 'a',
+    lines,
+    openLines: lines.map((i) => body.split('\n')[i] ?? ''),
+    to,
+  });
+
 const LIST = '- [ ] 歯ブラシ\n- [ ] 充電器\n- [ ] ゴミ出し @2026-09-07 毎週\n';
 
 describe('リストをそろえる書込(#1173)', () => {
@@ -80,12 +90,12 @@ describe('リストをそろえる書込(#1173)', () => {
     const b = boot(disk);
     dispose = b.dispose;
     // ── 対照群 ── 1 件の印は amend(`checkpoint` を渡さない)
-    b.d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    b.d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 歯ブラシ' });
     await tick();
     expect(b.persists).toHaveLength(1);
     expect(b.persists[0]!.opts?.checkpoint, '1 件の印まで履歴に積んでいる').toBeUndefined();
     // ── 本体 ──
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0, 1, 2], to: 'done' });
+    b.d.dispatch(run(LIST, [0, 1, 2], 'done'));
     await tick();
     expect(b.persists).toHaveLength(2);
     expect(b.persists[1]!.opts?.checkpoint, 'リストをそろえる回が履歴に積まれていない').toBe(true);
@@ -98,7 +108,7 @@ describe('リストをそろえる書込(#1173)', () => {
   it('🔴 繰り返しの行を飛ばしたら、その数を画面へ言う', async () => {
     const b = boot({ a: LIST });
     dispose = b.dispose;
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0, 1, 2], to: 'done' });
+    b.d.dispatch(run(LIST, [0, 1, 2], 'done'));
     await tick();
     expect(b.notices).toEqual(['2 件を完了にしました / 1 件は繰り返しなので触りませんでした']);
   });
@@ -106,7 +116,7 @@ describe('リストをそろえる書込(#1173)', () => {
   it('⚠ 飛ばした行が無ければ、知らせは出さない(画面の印が答えである)', async () => {
     const b = boot({ a: '- [ ] あ\n- [ ] い\n' });
     dispose = b.dispose;
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0, 1], to: 'done' });
+    b.d.dispatch(run('- [ ] あ\n- [ ] い\n', [0, 1], 'done'));
     await tick();
     expect(b.persists).toHaveLength(1);
     expect(b.notices).toEqual([]);
@@ -115,7 +125,7 @@ describe('リストをそろえる書込(#1173)', () => {
   it('🔴 元から全部そろっていれば書かないが、黙らない', async () => {
     const b = boot({ a: '- [x] あ\n- [x] い\n' });
     dispose = b.dispose;
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0, 1], to: 'done' });
+    b.d.dispatch(run('- [x] あ\n- [x] い\n', [0, 1], 'done'));
     await tick();
     expect(b.persists, '同じ本文を書き直している').toHaveLength(0);
     expect(b.notices).toEqual(['すべて完了になっています']);
@@ -124,7 +134,7 @@ describe('リストをそろえる書込(#1173)', () => {
   it('🔴 繰り返しの行しか無いリストでも、飛ばした数は言う(書かない回でも)', async () => {
     const b = boot({ a: '- [ ] ゴミ出し @2026-09-07 毎週\n' });
     dispose = b.dispose;
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0], to: 'done' });
+    b.d.dispatch(run('- [ ] ゴミ出し @2026-09-07 毎週\n', [0], 'done'));
     await tick();
     expect(b.persists).toHaveLength(0);
     expect(b.notices).toEqual(['1 件は繰り返しなので触りませんでした']);
@@ -137,7 +147,7 @@ describe('リストをそろえる書込(#1173)', () => {
     b.d.onState((s) => {
       error = s.error;
     });
-    b.d.dispatch({ type: 'SET_TASK_RUN', lid: 'a', lines: [0], to: 'done' });
+    b.d.dispatch(run('普通の行\n', [0], 'done'));
     await tick();
     expect(b.persists).toHaveLength(0);
     expect(error).toContain('本文が変わっている');

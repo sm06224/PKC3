@@ -23,6 +23,7 @@ import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
 import { installScheduleGridDrag } from '../../src/adapter/ui/render/schedule-grid-drag';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '../../src/adapter/ui/actions/long-press';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
@@ -532,11 +533,34 @@ describe('指・ペンは長押しで掴む(縦のスクロールを奪わない
         type: 'SET_TASK_DATE',
         lid: 'e1',
         line: 0,
+        openLine: '- [ ] 会議 @2026-08-23 14:00..15:00',
         date: '2026-08-23',
         time: '16:00',
         timeEnd: '17:00',
       },
     ]);
+    detach();
+  });
+
+  /**
+   * 🔴 **掴んでいる間に札が走査から消えたら、撃たずに断る**(#1087)。⚠ 札の行の中身(`rawLine`)が
+   *   書換の `openLine` になる ── 運べないのに撃つと、別の窓が足した行の番号違いを素通しする。
+   *   対照群は上の「長押しで掴んだ後は動かせる(指)」(走査に居れば撃たれる)。
+   */
+  it('🔴 掴んだ札が走査から消えていたら、離しても SET_TASK_DATE を撃たず理由を言う', () => {
+    vi.useFakeTimers();
+    const { laneCards, lanes, dispatched, detach, d } = setup(BODY, 'day');
+    const lane = lanes()[0]!;
+    pointer(laneCards()[0]!, 'pointerdown', 'touch', 560);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    pointer(lane, 'pointermove', 'touch', 560 + minPx(120));
+    d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: [], totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+    pointer(lane, 'pointerup', 'touch', 560 + minPx(120));
+    expect(dispatched.filter((a) => a.type === 'SET_TASK_DATE'), '運べないのに撃った').toEqual([]);
+    expect(d.getState().error, '黙って捨てた').toBe(SHOWN_LINE_LOST);
     detach();
   });
 
@@ -564,6 +588,7 @@ describe('書き込みの口(`SET_TASK_DATE` / `MOVE_REPEAT_OCCURRENCE`)', () =>
       type: 'SET_TASK_DATE',
       lid: 'e1',
       line: 0,
+      openLine: '- [ ] x',
       date: '2026-08-23',
       time: '16:15',
       timeEnd: '17:15',
@@ -574,10 +599,10 @@ describe('書き込みの口(`SET_TASK_DATE` / `MOVE_REPEAT_OCCURRENCE`)', () =>
       time: '16:15',
       timeEnd: '17:15',
     });
-    const without = reduce(s, { type: 'SET_TASK_DATE', lid: 'e1', line: 0, date: '2026-08-23', time: '16:15' });
+    const without = reduce(s, { type: 'SET_TASK_DATE', lid: 'e1', line: 0, openLine: '- [ ] x', date: '2026-08-23', time: '16:15' });
     const rw2 = without.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(rw2 && 'rewrite' in rw2 ? 'timeEnd' in rw2.rewrite : null, '渡していないのに timeEnd が載った').toBe(false);
-    const nul = reduce(s, { type: 'SET_TASK_DATE', lid: 'e1', line: 0, date: '2026-08-23', time: '16:15', timeEnd: null });
+    const nul = reduce(s, { type: 'SET_TASK_DATE', lid: 'e1', line: 0, openLine: '- [ ] x', date: '2026-08-23', time: '16:15', timeEnd: null });
     const rw3 = nul.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(rw3 && 'rewrite' in rw3 ? rw3.rewrite : null).toMatchObject({ timeEnd: null });
   });
@@ -588,6 +613,7 @@ describe('書き込みの口(`SET_TASK_DATE` / `MOVE_REPEAT_OCCURRENCE`)', () =>
       type: 'MOVE_REPEAT_OCCURRENCE',
       lid: 'e1',
       line: 0,
+      openLine: '- [ ] x',
       from: '2026-08-24',
       to: '2026-08-24',
       time: '16:00',
@@ -599,7 +625,7 @@ describe('書き込みの口(`SET_TASK_DATE` / `MOVE_REPEAT_OCCURRENCE`)', () =>
       time: '16:00',
       timeEnd: '17:00',
     });
-    const plain = reduce(s, { type: 'MOVE_REPEAT_OCCURRENCE', lid: 'e1', line: 0, from: '2026-08-24', to: '2026-08-25' });
+    const plain = reduce(s, { type: 'MOVE_REPEAT_OCCURRENCE', lid: 'e1', line: 0, openLine: '- [ ] x', from: '2026-08-24', to: '2026-08-25' });
     const rw2 = plain.events.find((e) => e.type === 'REQUEST_BODY_REWRITE');
     expect(rw2 && 'rewrite' in rw2 ? 'time' in rw2.rewrite : null, '渡していないのに time が載った').toBe(false);
   });

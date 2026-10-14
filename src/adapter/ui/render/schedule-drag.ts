@@ -94,6 +94,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bodyWriteBlockReason, type AppState, type UserAction } from '@adapter/state/app-state';
+import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
@@ -260,11 +261,16 @@ export function repeatMoveAction(
   slot?: { readonly time: string; readonly timeEnd: string | null },
 ): UserAction | null {
   if (pick === null) return null; // やめる
+  // 🔴 掴んだ時点(札が焼かれた時点)の規則の行の中身を添える(#1087)。引けなければ手を作らない
+  //    (呼び側が `REPEAT_MOVE_LOST_TEXT` で断る)
+  const openLine = shownCardLine(state, grabbed.lid, line);
+  if (openLine === null) return null;
   if (pick === 'one')
     return {
       type: 'MOVE_REPEAT_OCCURRENCE',
       lid: grabbed.lid,
       line,
+      openLine,
       from,
       to,
       ...(slot === undefined ? {} : { time: slot.time, timeEnd: slot.timeEnd }),
@@ -282,6 +288,7 @@ export function repeatMoveAction(
     type: 'SET_TASK_DATE',
     lid: grabbed.lid,
     line,
+    openLine,
     date: anchor,
     time: slot === undefined ? (card?.time ?? null) : slot.time,
     // 🔴 時刻の幅は、動かしたときだけ渡す(渡さなければ書かれた幅を保つ ── `rewriteLineDate`)
@@ -376,11 +383,20 @@ export function dropTaskCard(
    * ⚠ 繰り返しの回(`moveRepeat`)・ノート単位(`SET_ENTRY_DATE`)は既に同じ門を持つ。
    */
   if (card !== undefined && (card.date ?? null) === start && (card.until ?? null) === until) return;
+  /**
+   * 🔴 **掴んだ札が走査に居ない回は撃たずに断る**(#1087)。⚠ 札の行の中身(`rawLine`)が書換の
+   *   `openLine` になる ── 札が無ければ運べず、運ばずに撃つと別の窓が足した行の番号違いを素通しする。
+   */
+  if (card === undefined) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
   const refused = bodyWriteBlockReason(dispatcher.getState(), grabbed.lid) !== null;
   dispatcher.dispatch({
     type: 'SET_TASK_DATE',
     lid: grabbed.lid,
     line,
+    openLine: card.rawLine,
     date: start,
     // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
     time: card?.time ?? null,

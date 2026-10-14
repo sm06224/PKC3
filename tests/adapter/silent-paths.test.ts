@@ -204,9 +204,22 @@ describe('E: 繰り返しの予定を「全部動かす」で手が作れない�
 
   it('対照群: 「この回だけ」は手をそのまま撃ち、理由は出ない', () => {
     const { sent, dispatcher } = recorder();
-    const action = repeatMoveAction(emptyState, grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one');
+    // 規則の行の原文(`openLine`)を運べる = 札が走査に居る(#1087)
+    const scanned = {
+      taskScan: { cards: [{ lid: 'e1', line: 0, rawLine: '- [ ] 掃除 @2026-08-23 毎週' }] },
+    } as unknown as AppState;
+    const action = repeatMoveAction(scanned, grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one');
+    expect(action, '前提: 手が作れている').toMatchObject({ type: 'MOVE_REPEAT_OCCURRENCE' });
     dispatchRepeatMove(dispatcher, action, 'one');
     expect(sent).toEqual([action]);
+  });
+
+  it('🔴 「この回だけ」でも、札が走査に居なくて規則の行を運べないなら理由を出す(#1087)', () => {
+    const { sent, dispatcher } = recorder();
+    const action = repeatMoveAction(emptyState, grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one');
+    expect(action, '前提: 運べないので手が作れない').toBeNull();
+    dispatchRepeatMove(dispatcher, action, 'one');
+    expect(sent).toEqual([{ type: 'OP_FAILED', error: REPEAT_MOVE_LOST_TEXT }]);
   });
 });
 

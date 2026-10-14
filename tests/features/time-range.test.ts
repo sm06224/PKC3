@@ -26,7 +26,8 @@ import { formatTimeSpan, isScheduleTimeRange } from '../../src/features/schedule
 import { replaceTaskCards, taskCardsOf } from '../../src/features/schedule/task-cards';
 import { buildAgenda, itemOfCard, type AgendaItem } from '../../src/features/schedule/agenda';
 import { materializedDates } from '../../src/features/schedule/repeat';
-import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
+// 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)
+import { applyOpened as applyBodyRewrite } from '../helpers/open-line';
 import { patchTaskCard, createTaskCard } from '../../src/adapter/ui/render/task-card';
 import { dropTaskCard } from '../../src/adapter/ui/render/schedule-drag';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';

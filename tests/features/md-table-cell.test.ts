@@ -14,7 +14,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { applyBodyRewrite, type BodyRewrite } from '../../src/features/markdown/body-rewrite';
+// 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)
+import { applyOpened } from '../helpers/open-line';
 import {
   bodyBelowFrontmatter,
   frontmatterLineCount,
@@ -51,7 +52,7 @@ function grid(body: string): string[][] {
 }
 
 const write = (body: string, line: number, col: number, value: string): string | null =>
-  applyBodyRewrite(body, { kind: 'csv-cell', line, col, value } as BodyRewrite);
+  applyOpened(body, { kind: 'csv-cell', line, col, value });
 
 const MD = '# 覚書\n\n| 品名 | 数 |\n|---|---|\n| りんご | 3 |\n| みかん | 12 |\n';
 

@@ -136,7 +136,7 @@ describe('最初の書き込みで永続化を頼む (#347)', () => {
   it('🔴 書けたら頼む', async () => {
     const disk: Record<string, string> = { a: TASKS };
     boot(disk, [meta('a')]);
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 牛乳を買う' });
     await tick();
     expect(disk['a'], '前提: 書けていない(この test は何も測っていない)').toContain('- [x]');
     expect(persistCalls, '書けたのに永続化を頼んでいない').toBe(1);
@@ -145,9 +145,9 @@ describe('最初の書き込みで永続化を頼む (#347)', () => {
   it('🔴 2 回目以降は頼まない(保存のたびに user へ尋ねない)', async () => {
     const disk: Record<string, string> = { a: TASKS };
     boot(disk, [meta('a')]);
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 牛乳を買う' });
     await tick();
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 1 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 1, openLine: '- [ ] 郵便を出す' });
     await tick();
     expect(disk['a'], '前提: 2 回目が書けていない').toContain('- [x] 郵便');
     expect(persistCalls, '保存のたびに尋ねている').toBe(1);
@@ -158,7 +158,7 @@ describe('最初の書き込みで永続化を頼む (#347)', () => {
     const disk: Record<string, string> = { a: TASKS };
     const { race } = boot(disk, [meta('a')]);
     race('a', '- [ ] 割り込み\n' + TASKS);
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 牛乳を買う' });
     await tick();
     expect(persistCalls, '書いていないのに尋ねた').toBe(0);
   });
@@ -175,7 +175,7 @@ describe('読んで直して書き戻す経路が、別の窓の本文を消さ�
     const { race } = boot(disk, [meta('a')]);
     race('a', '- [ ] 割り込みで足した行\n' + TASKS);
 
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 牛乳を買う' });
     await tick();
 
     expect(disk['a'], '別の窓が書いた本文が消えた').toBe(
@@ -195,7 +195,7 @@ describe('読んで直して書き戻す経路が、別の窓の本文を消さ�
   it('⚠ 割り込みが無ければ、チェックはふつうに裏返る', async () => {
     const disk: Record<string, string> = { a: TASKS };
     boot(disk, [meta('a')]);
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'a', line: 0, openLine: '- [ ] 牛乳を買う' });
     await tick();
     expect(disk['a'], '対照群が届いていない ── 上の test は何も測っていない').toBe(
       '- [x] 牛乳を買う\n- [ ] 郵便を出す\n',

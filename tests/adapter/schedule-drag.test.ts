@@ -31,6 +31,7 @@ import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '../../src/adapter/ui/actions/
 import { cancelDialogRows } from './dialog-helper';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import type { AppState, UserAction } from '../../src/adapter/state/app-state';
+import { SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
 import type { TaskCard } from '../../src/features/schedule/task-cards';
 
 let root: HTMLElement;
@@ -40,6 +41,22 @@ let checkbox: HTMLInputElement | null;
 let unschedule: HTMLButtonElement;
 let dispatcher: Dispatcher;
 let dispatched: UserAction[];
+
+/** 台の札(e1 の 0 行目)が焼かれた時点の行。 */
+const SCAN_LINE = '- [ ] 見積を送る @2026-08-23';
+const SCAN_CARD: TaskCard = {
+  lid: 'e1',
+  line: 0,
+  text: '見積を送る',
+  done: false,
+  date: '2026-08-23',
+  time: null,
+  timeEnd: null,
+  until: null,
+  repeat: null,
+  substitutes: null,
+  rawLine: SCAN_LINE,
+};
 let detach: () => void;
 
 /**
@@ -109,6 +126,12 @@ beforeEach(() => {
   root.append(group23, group27);
 
   dispatcher = new Dispatcher();
+  // 🔴 札は走査から描かれる ── 掴んだ札の行の中身(`rawLine`)が書換の `openLine` になる(#1087)。
+  //    ⚠ 日付は束(2026-08-23)と揃える(「日付なしへ落とす」が「変わらない」で返らないように)
+  dispatcher.dispatch({
+    type: 'SET_TASK_SCAN',
+    scan: { cards: [SCAN_CARD], totalNotes: 1, scannedNotes: 1, truncated: false },
+  });
   dispatched = [];
   const origDispatch = dispatcher.dispatch.bind(dispatcher);
   dispatcher.dispatch = (a: UserAction) => {
@@ -206,7 +229,7 @@ describe('installScheduleDrag(#855 決1)', () => {
     expect(group27.hasAttribute('data-pkc-dropping'), '確定して動かしても光らない').toBe(true);
     pointer(group27, 'pointerup', 'touch', 200, 200);
     expect(dispatched).toEqual([
-      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, date: '2026-08-27', time: null, until: null },
+      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, openLine: SCAN_LINE, date: '2026-08-27', time: null, until: null },
     ]);
     // ⚠ 離したら光りは消える(次の無関係な drop に紛れない)
     expect(group27.hasAttribute('data-pkc-dropping'), '離しても光ったまま').toBe(false);
@@ -300,6 +323,8 @@ describe('installScheduleDrag(#855 決1)', () => {
    */
   describe('押した答えを 1 手へ翻訳する', () => {
     const grabbed = { lid: 'e1', line: '0', from: '2026-08-23', repeat: 'week' };
+    /** 規則の行が焼かれた時点の原文(`openLine` として運ばれる ── #1087)。 */
+    const RULE_LINE = '- [ ] x @2026-08-23 毎週';
     const state = (card: Partial<TaskCard> | null): AppState =>
       ({
         taskScan:
@@ -317,6 +342,7 @@ describe('installScheduleDrag(#855 決1)', () => {
                     until: null,
                     repeat: 'week',
                     substitutes: null,
+                    rawLine: RULE_LINE,
                     ...card,
                   },
                 ],
@@ -333,6 +359,7 @@ describe('installScheduleDrag(#855 決1)', () => {
         type: 'MOVE_REPEAT_OCCURRENCE',
         lid: 'e1',
         line: 0,
+        openLine: RULE_LINE,
         from: '2026-08-23',
         to: '2026-08-27',
       });
@@ -350,6 +377,7 @@ describe('installScheduleDrag(#855 決1)', () => {
         type: 'SET_TASK_DATE',
         lid: 'e1',
         line: 0,
+        openLine: RULE_LINE,
         date: '2026-08-27',
         time: null,
         until: null,
@@ -395,14 +423,25 @@ describe('installScheduleDrag(#855 決1)', () => {
      *   この対称の差が、2 つの枝が本当に別であることの印である。
      */
     it('⚠ 「全部」は開始が読めないと何もしない ── ただし「この回だけ」は動く', () => {
+      // 札は走査に居るが、日付が読めていない形
       expect(
-        repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all'),
+        repeatMoveAction(state({ date: null }), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all'),
         '開始が読めないのに規則を書き換えた',
       ).toBeNull();
       expect(
-        repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one'),
+        repeatMoveAction(state({ date: null }), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one'),
         'この回だけは開始が要らないのに、止まっている',
       ).not.toBeNull();
+    });
+
+    /**
+     * 🔴 **札が走査に居なければ、どちらも手を作らない**(#1087)。⚠ 規則の行の中身(`openLine`)を
+     *   運べない ── 運ばずに撃つと、別の窓が足した行の番号違いを素通しする。呼び側が理由を言う
+     *   (`dispatchRepeatMove` の `REPEAT_MOVE_LOST_TEXT`)。
+     */
+    it('🔴 札が走査に居なければ、「この回だけ」も「全部」も手を作らない', () => {
+      expect(repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'one')).toBeNull();
+      expect(repeatMoveAction(state(null), grabbed, 0, '2026-08-23', '2026-08-27', 4, 'all')).toBeNull();
     });
   });
 
@@ -448,7 +487,7 @@ describe('installScheduleDrag(#855 決1)', () => {
     pointer(undated, 'pointermove', 'touch', 200, 200);
     pointer(undated, 'pointerup', 'touch', 200, 200);
     expect(dispatched).toEqual([
-      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, date: null, time: null, until: null },
+      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, openLine: SCAN_LINE, date: null, time: null, until: null },
     ]);
   });
 
@@ -468,8 +507,26 @@ describe('installScheduleDrag(#855 決1)', () => {
     pointer(group27, 'pointermove', 'touch', 200, 200, 1);
     pointer(group27, 'pointerup', 'touch', 200, 200, 1);
     expect(dispatched).toEqual([
-      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, date: '2026-08-27', time: null, until: null },
+      { type: 'SET_TASK_DATE', lid: 'e1', line: 0, openLine: SCAN_LINE, date: '2026-08-27', time: null, until: null },
     ]);
+  });
+
+  /**
+   * 🔴 **掴んだ札が走査に居なければ、撃たずに断る**(#1087)。⚠ 札の行の中身(`rawLine`)が書換の
+   *   `openLine` になる ── 運べないのに撃つと、別の窓が足した行の番号違いを素通しする。
+   *   対照群は上の「日へ落とすと SET_TASK_DATE が飛ぶ」(走査に居れば撃たれる)。
+   */
+  it('🔴 札が走査に居ないときは、落としても SET_TASK_DATE を撃たず理由を言う', () => {
+    dispatcher.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: [], totalNotes: 1, scannedNotes: 1, truncated: false },
+    });
+    dispatched = [];
+    pressUntilArmed(card);
+    pointer(group27, 'pointermove', 'touch', 200, 200);
+    pointer(group27, 'pointerup', 'touch', 200, 200);
+    expect(dispatched.filter((a) => a.type === 'SET_TASK_DATE'), '運べないのに撃った').toEqual([]);
+    expect(dispatcher.getState().error, '黙って捨てた').toBe(SHOWN_LINE_LOST);
   });
 
   it('外したあとは何も配線されていない(dispose)', () => {

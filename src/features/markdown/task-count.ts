@@ -77,7 +77,7 @@ export const NO_TASKS: TaskCandidates = Object.freeze({ total: 0, done: 0 });
  */
 function walkTaskLines(
   body: string,
-  visit: (index: number, done: boolean, rest: string) => void,
+  visit: (index: number, done: boolean, rest: string, raw: string) => void,
 ): void {
   if (body === '' || !body.includes('[')) return;
   /** 開いている fence の文字と長さ。`null` = fence の外。 */
@@ -98,7 +98,7 @@ function walkTaskLines(
     const m = TASK.exec(line);
     if (m === null) continue;
     // ⚠ `m[0]` は末尾の 1 字(空白 or 行末)まで含む ── その次から先が中身
-    visit(i, m[1] !== ' ', line.slice(m[0].length));
+    visit(i, m[1] !== ' ', line.slice(m[0].length), raw);
   }
 }
 
@@ -127,6 +127,12 @@ export interface TaskItem {
   /** 印を除いた中身(前後の空白は落とす)。⚠ markdown の記法はそのまま。 */
   readonly text: string;
   readonly done: boolean;
+  /**
+   * 🔴 **その行の原文そのもの**(改行の `\r` は落とす。#1087)。⚠ 札を押した / 掴んだとき、書換へ
+   * 「押した時点の行の中身」(`openLine`)として運ぶ ── 行番号だけだと、別の窓が上へ 1 行足したとき
+   * 同じ番号が**別の項目**を指す。書換が比べる行(`splitLines` の行)と同じ取り方にする。
+   */
+  readonly rawLine: string;
 }
 
 /**
@@ -142,8 +148,8 @@ export interface TaskItem {
  */
 export function listTaskItems(body: string): TaskItem[] {
   const items: TaskItem[] = [];
-  walkTaskLines(body, (line, done, rest) => {
-    items.push({ line, text: rest.trim(), done });
+  walkTaskLines(body, (line, done, rest, raw) => {
+    items.push({ line, text: rest.trim(), done, rawLine: raw.endsWith('\r') ? raw.slice(0, -1) : raw });
   });
   return items;
 }
