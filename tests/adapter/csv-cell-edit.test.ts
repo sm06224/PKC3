@@ -7,6 +7,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { resetCellChains } from '../../src/adapter/state/shown-line';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 
 /**
@@ -67,6 +68,8 @@ function cellRoot(raw = 'あ', inner = 'あ'): { root: HTMLElement; cell: HTMLEl
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  // ⚠ 続けて打つための「直前に書いた行」の記憶は module 変数 ── test 同士で持ち越さない(同じ lid・行を使い回すため)
+  resetCellChains();
 });
 
 describe('セルを押すと、そのセルだけが入力欄になる(#418 段①)', () => {

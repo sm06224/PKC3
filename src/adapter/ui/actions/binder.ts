@@ -108,7 +108,9 @@ import {
   SHOWN_LINE_LOST,
   shownBodyLine,
   shownCardLine,
+  shownCellLine,
   shownPlacedLine,
+  noteCellWrite,
 } from '@adapter/state/shown-line';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
@@ -9182,7 +9184,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **欄を開いた時点のその行の中身**(#1087)。⚠ 確定は打ち終わった後 ── 打っている間に別の窓が
      *   上へ行を足していても、書換は「開いた時点の行」と disk 側を突き合わせて断る(別の行の升を書き換えない)。
      */
-    const openLine = shownBodyLine(st, lid, line);
+    const openLine = shownCellLine(st, lid, line);
     if (openLine === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
       return;
@@ -9267,6 +9269,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       const value = input.value;
       restore();
       if (value === before) return; // 変わっていなければ撃たない
+      /**
+       * 🔴 **続けて打つ次の升のために、いま書く行の結果を覚えておく**(`shownCellLine`)。
+       * ⚠ 隣の欄は書き戻しを待たずに開くので、画面の行はまだ書く前の物である。
+       */
+      noteCellWrite(dispatcher.getState(), lid, { line, openLine, col, value });
       dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, openLine, col, value });
     };
     /**
