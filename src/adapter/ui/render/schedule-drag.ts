@@ -370,6 +370,12 @@ export function dropTaskCard(
    *   期間の開始ではない(掴んだのが 3 日目なら、開始は落とした日の 2 日前になる)。
    */
   const start = shift === null || card?.date == null ? date : (addDays(card.date, shift) ?? date);
+  /**
+   * 🔴 **同じ日へ落とした回は何もしない**(#1087)── 掴んで離しただけでも起きる。撃つと書き換えは
+   *   「変わらない」を断りとして返し、「本文が変わっているため反映できませんでした」と**嘘の理由**が出ていた。
+   * ⚠ 繰り返しの回(`moveRepeat`)・ノート単位(`SET_ENTRY_DATE`)は既に同じ門を持つ。
+   */
+  if (card !== undefined && (card.date ?? null) === start && (card.until ?? null) === until) return;
   const refused = bodyWriteBlockReason(dispatcher.getState(), grabbed.lid) !== null;
   dispatcher.dispatch({
     type: 'SET_TASK_DATE',
