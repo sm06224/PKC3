@@ -5395,13 +5395,17 @@ export function runGlobalCommand(
    */
   if (btn instanceof HTMLButtonElement && btn.disabled) {
     const why = btn.getAttribute(HINT_BLOCKED);
-    if (why !== null && why !== '') notify(why);
+    // ⚠ 戻る / 進む は hover の理由(#1087 L4)を持つが、鍵では今までどおり黙る(上の注釈の連打)
+    if (why !== null && why !== '' && !QUIET_WHEN_BLOCKED.has(cmd)) notify(why);
     return true;
   }
   if (focusFieldFirst(cmd, btn, root, notify)) return true;
   btn.click();
   return true;
 }
+
+/** 押せないときに鍵で撃っても黙る操作(#761 の連打への配慮。理由はボタンの hover にだけ出す) */
+const QUIET_WHEN_BLOCKED: ReadonlySet<string> = new Set(['nav-back', 'nav-forward']);
 
 /**
  * 🔴 **お知らせの節を開く**(ヘルプの「お知らせを開く」と「操作を探す」の**唯一の実体**。§7)。

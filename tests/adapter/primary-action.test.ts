@@ -627,11 +627,10 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     root.remove();
   });
 
-  it('🔴 戻る・進むは、押せないあいだ理由を持ち、鍵で撃つと言う(#1087 L4)。押せるときは黙る(対照群)', () => {
+  it('⚠ 戻る・進むは、押せないあいだ hover に理由を持つが、鍵で撃っても黙る(#761 の連打 / #1087 L4)', () => {
     /**
-     * 🔑 かつてここは「nav-back は理由を持たないので黙るのが正しい」と対照群にしていた(#761)。
-     *   #1087 L4 で `keymap.ts` の `whyNot`(「戻る先がありません」)を載せたので、事実が動いた。
-     * ⚠ 一律に何か言う形になっていないこと ── 押せるとき(履歴があるとき)は理由が消え、何も言わない。
+     * 🔑 #1087 L4 で、押せない理由(`keymap.ts` の `whyNot`)を hover に出すようにした。
+     * ⚠ ただし鍵では黙る(#761):履歴が無いときの `Alt+←` まで喋ると、連打で字が出続ける。
      */
     const { root, d } = mount([meta('n1', 'あ'), meta('n2', 'い')]);
     const back = root.querySelector<HTMLButtonElement>('button[data-pkc-action="nav-back"]');
@@ -640,7 +639,8 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     expect(back!.getAttribute('data-pkc-blocked')).toBe('戻る先がありません');
     const said: string[] = [];
     runGlobalCommand('nav-back', root, d, appKeymap, () => {}, (t) => said.push(t));
-    expect(said, '押せないのに、理由を言っていない').toEqual(['戻る先がありません']);
+    expect(back!.title, 'hover に理由が無い').toContain('戻る先がありません');
+    expect(said, '連打で字が出続ける形に戻った').toEqual([]);
     // 対照群: 履歴ができたら理由は消え、鍵で撃っても何も言わない
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     expect(back!.disabled).toBe(false);
