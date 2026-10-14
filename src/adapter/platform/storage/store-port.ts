@@ -194,6 +194,8 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
         ...(opts?.parent ? { parent: opts.parent } : {}),
         // 🔴 読んだものと違っていたら書かせない(#178)── 省略時は last-write-wins
         ...(opts?.expectHash !== undefined ? { expectHash: opts.expectHash } : {}),
+        // 🔴 本文だけ書く(題名・並びは disk の値を保つ。#1087)
+        ...(opts?.keepMeta === true ? { keepMeta: true } : {}),
       }),
     /**
      * ノートを消す。⚠ **アプリの保存領域はここでは消さない**(P8 段⑳)。

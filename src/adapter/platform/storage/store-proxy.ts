@@ -57,9 +57,12 @@ export const EDIT_LOCK_TTL_MS = 300_000;
  * `resolveContainer` は `containers` へ INSERT しうるが、entries / relations を
  * 1 行も動かさないので他タブは描き直す必要が無い。そもそも `broadcastChanged` が
  * `if (!('cid' in req)) return;` で早期 return するため、入れても何も起きない。
- * ⚠ この集合の完全性を検める test は無い ── 足すときは「他タブの一覧が古くなるか」で判断する。
+ * 🔴 **完全性は test が見る**(#1087、複数タブの見直し)── `protocol.ts` の op は、この集合か
+ *   `NOT_BROADCAST`(放送しない理由つき)のどちらかに必ず在る(`tests/adapter/store-proxy-ops.test.ts`)。
+ *   直す前は Office の書き戻し(`replaceAssetRefs`)が漏れていて、他タブの本文が古いまま残り、
+ *   そのタブの保存が書き戻しを黙って巻き戻していた。
  */
-const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
+export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'upsertEntry',
   // ⚠ **足し忘れると、他タブの一覧に古い題名が残る**(#178)
   'renameEntry',
@@ -78,7 +81,65 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   // ⚠ **足し忘れると、他タブのタグの色が古いまま**(#1457)── 受け手は main.ts の `onRemoteChanged`
   //    (`listTagColors` を読み直す)。当たり先の lid は無い(`changedLids` は null)
   'putTagColor',
+  // ⚠ **足し忘れると、他タブの本文が古いまま残る**(#1087)── 添付を参照するノートを何件も書き換える。
+  //   当たり先は書く前に分からないので `changedLids` は null(全面の読み直し。保存のたびではなく稀)
+  'replaceAssetRefs',
 ]);
+
+/**
+ * **放送しない op と、その理由**(`MUTATING_OPS` の完全性の相方)。⚠ 新しい op を足したら、どちらかへ必ず入れる。
+ */
+export const NOT_BROADCAST: Readonly<Partial<Record<StorageRequest['op'], string>>> = {
+  init: '保存先を開くだけ',
+  close: '閉じるだけ',
+  openContainer: '器を開くだけ(中身は変えない)',
+  resolveContainer: '器の一覧に足すだけで、ノート・辺は動かない(broadcastChanged は cid を見て早期 return する)',
+  appendMessage: 'システムのメッセージ ── ノートの一覧に出ない。知らせのたびに他タブを読み直させない',
+  wipeStorage: '中身を消す ── 他タブへは別の口(onContainerWiped)で知らせる',
+  rescueEntries: '救出の読み出し(書かない)',
+  vacuum: '保存領域の詰め直し(中身は変えない)',
+  optimizeIndexes: '索引の作り直し(中身は変えない)',
+  integrityStamp: '検査した印を残すだけ',
+  checkIntegrity: '読むだけ',
+  integrityPlan: '読むだけ',
+  counts: '読むだけ',
+  contactScan: '読むだけ',
+  exportImage: '読むだけ',
+  exportRevisionChain: '読むだけ',
+  exportSqliteTable: '読むだけ',
+  findAssetOwner: '読むだけ',
+  findBacklinks: '読むだけ',
+  getBodies: '読むだけ',
+  getBody: '読むだけ',
+  getRevision: '読むだけ',
+  listAssetMetas: '読むだけ',
+  listBodies: '読むだけ',
+  listContainerIds: '読むだけ',
+  listEntryMetas: '読むだけ',
+  listRelations: '読むだけ',
+  listRevisionLids: '読むだけ',
+  listRevisionMetas: '読むだけ',
+  listSystemEntries: '読むだけ',
+  listTagColors: '読むだけ',
+  listTrash: '読むだけ',
+  queryScan: '読むだけ',
+  readImageArchive: '読むだけ',
+  revisionCounts: '読むだけ',
+  revisionDiffStats: '読むだけ',
+  runReadOnlySql: '読むだけ',
+  scanAssetRefs: '読むだけ',
+  searchDetail: '読むだけ',
+  searchEntries: '読むだけ',
+  smartScan: '読むだけ',
+  snippetScan: '読むだけ',
+  storageGauge: '読むだけ',
+  storageProfile: '読むだけ',
+  taskScan: '読むだけ',
+  openSqlGuest: '別の SQLite を読む口(この器を書かない)',
+  closeSqlGuest: '別の SQLite を閉じる',
+  openSqliteExport: '書き出し用の写しを開く(この器を書かない)',
+  closeSqliteExport: '書き出し用の写しを閉じる',
+};
 
 /** 変更の当たり先(null = 特定できない → 全面 refresh)。 */
 function changedLids(req: StorageRequest): string[] | null {

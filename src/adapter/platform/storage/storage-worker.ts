@@ -2098,12 +2098,20 @@ function writeEntryRow(
     keepLatest?: number;
     expectHash?: string;
     parent?: { parentLid: string | null; relationId: string };
+    keepMeta?: boolean;
   },
 ): { stamps: EntryStamps; conflict: boolean } {
   const old = database.selectObjects(
-    'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+    'SELECT title, archetype, entry_order, body FROM entries WHERE cid = ? AND lid = ?',
     [cid, entry.lid],
-  )[0] as { title: string; archetype: string; body: string } | undefined;
+  )[0] as { title: string; archetype: string; entry_order: number; body: string } | undefined;
+  /**
+   * 🔴 **本文だけを書く**(#1087、複数タブの見直し。`keepMeta`)── 既に在る行の題名・種類・並びは disk の値を保つ。
+   * ⚠ 同じ tx の中で読んだ値なので、別のタブの改名・並べ替えとの間に隙間が無い。
+   */
+  if (opts.keepMeta === true && old) {
+    entry = { ...entry, title: old.title, archetype: old.archetype, entryOrder: old.entry_order };
+  }
   /**
    * 🔴 **読んだものと違っていたら、1 バイトも書かない**(#178、2026-08-22)。
    *
@@ -3545,6 +3553,7 @@ const handlers: Handlers = {
         ...(req.keepLatest === undefined ? {} : { keepLatest: req.keepLatest }),
         ...(req.expectHash === undefined ? {} : { expectHash: req.expectHash }),
         ...(req.parent === undefined ? {} : { parent: req.parent }),
+        ...(req.keepMeta === true ? { keepMeta: true } : {}),
       });
       if (written.conflict) {
         database.exec('ROLLBACK'); // ⚠ 何も書いていないことを明示して閉じる
