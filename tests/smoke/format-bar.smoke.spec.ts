@@ -55,6 +55,13 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await clickReal(page, '[data-pkc-format="bold"]');
   await expect(ta).toHaveValue('強調したい');
 
+  // ④-b 🔴 #1087 ── 行を選んで(終わりが次の行の頭)箇条書きを押しても、選んでいない次の行には付かない
+  await ta.fill('一\n二\n三');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 4)); // 「一\n二\n」= 3 行目の頭まで
+  await clickReal(page, '[data-pkc-format="ul"]');
+  await expect(ta, '選んでいない 3 行目にも付いた').toHaveValue('- 一\n- 二\n三');
+  await ta.fill('強調したい');
+
   // ④' 🔴 #950 ① ── 選んでいるあいだだけ、表 / 図 / コードブロック / 数式の説明が
   //     「選んだ範囲を囲みます」になる(2 列の面。live の 1 面は live-editor.smoke が見る)。
   //     ⚠ 字と帯の高さは 1px も動かない

@@ -555,6 +555,21 @@ function detectEol(text: string): '\r\n' | '\n' {
 }
 
 /**
+ * 🔴 **行を組み直すとき、行ごとの改行コードを保つ**(#1087)。
+ * ⚠ 直す前は `detectEol` で 1 種類に揃えて `join` していたので、CRLF と LF が混ざったノート
+ *   (CRLF のファイルを取り込んで、追記欄で足した等)で 1 か所チェックすると、**全行の改行が CRLF に揃っていた**。
+ *   字は消えないが、本文の byte が操作と関係ない所まで変わる(「印の 1 文字だけを書き換える」と食い違う)。
+ * 🔑 行の数が変わっていなければ、元の改行をそのまま当てる。変わっていたら今までどおり揃える。
+ */
+function rejoinLines(body: string, lines: readonly string[]): string {
+  const seps = body.match(/\r?\n/g) ?? [];
+  if (seps.length !== lines.length - 1) return lines.join(detectEol(body));
+  let out = lines[0] ?? '';
+  for (let i = 1; i < lines.length; i++) out += seps[i - 1]! + lines[i]!;
+  return out;
+}
+
+/**
  * 🔴 **本文から指定行の字を取り出す**(#1097)。
  *
  * ⚠ `body.split('\n')` は全文を配列化するため、長大なノートで 1 行だけ
@@ -599,8 +614,7 @@ function moveLinkLine(
   if (!LINK_LINE.test(other) || insideFence(lines, fm, to)) return body;
   lines[rw.line] = other;
   lines[to] = cur;
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /**
@@ -687,7 +701,7 @@ export function applyTaskRun(
     changed++;
   }
   return {
-    body: changed === 0 ? body : lines.join(detectEol(body)),
+    body: changed === 0 ? body : rejoinLines(body, lines),
     changed,
     skipped: { repeat, invalid },
   };
@@ -897,8 +911,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
    */
   const at = m[1]!.length + 1; // `[` の次
   lines[rewrite.line] = line.slice(0, at) + (checked ? ' ' : 'x') + line.slice(at + 1);
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /**
@@ -1043,8 +1056,7 @@ function rewriteLineDate(
   }
   if (next === line) return null;
   lines[rewrite.line] = next;
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /**
@@ -1093,8 +1105,7 @@ function materializeRepeat(
    */
   if (lines.includes(done)) return null;
   lines.splice(rewrite.line + 1, 0, done);
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /**
@@ -1138,8 +1149,7 @@ function moveRepeatOccurrence(
     line.slice(found.end);
   if (lines.includes(moved)) return null;
   lines.splice(rewrite.line + 1, 0, moved);
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /** その行がチェック項目か(呼び側の事前判定用)。 */
@@ -1339,8 +1349,7 @@ function rewriteTableFormat(
     at.end - at.start + 1,
     ...splitLines(text).map((l) => at.quoteLead + l),
   );
-  const eol = detectEol(body);
-  return lines.join(eol);
+  return rejoinLines(body, lines);
 }
 
 /**
