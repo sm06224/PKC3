@@ -25,6 +25,7 @@
  *   不可侵指示 2026-08-03)
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { appendAndSettle } from '@adapter/state/append-settle';
 import type { StatusOptions } from '@adapter/ui/render/status-notice';
 import { isAppendable } from '@features/flavor/append-spec';
 import { workLogLine, workLogText, type TimerRun } from '@features/timer/timer-run';
@@ -52,6 +53,9 @@ export interface TimerService {
   /** 走っている計測(帯が読む)。 */
   runs(): readonly TimerRun[];
 }
+
+/** 書き足しの結末を待つ上限(ms)。ふつうは 1 秒かからない(待つのは保存の往復だけ)。 */
+const TIMER_SETTLE_MS = 10_000;
 
 /** 既定の 1 秒刻み。⚠ 走っていない間は**張らない**(常駐を作らない)。 */
 function intervalTick(fn: () => void): () => void {
@@ -101,15 +105,27 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
      * 🔴 **書き先(計っていたノート)を渡す**(#1081)── 編集中でも、計っていたのが
      *   編集中のノートと**別**なら待たせずに書く。同じノートなら、これまでどおり預かる。
      */
-    const held = queue.push(() => {
-      deps.dispatcher.dispatch({
-        type: 'APPEND_TO_ENTRY',
-        lid,
-        text: workLogLine(from, to),
-        heading: null,
-        target: null,
-      });
-      deps.notify(`「${run.title}」に${what}を書きました`);
+    const held = queue.push(async () => {
+      /**
+       * 🔴 **「書きました」は、disk に着いてから言う**(#1087)。直す前は撃った直後に無条件で言っていた ──
+       *   書き先が消えていると reducer は理由を出さずに捨てるので、**書けていないのに「書きました」**になった。
+       * ⚠ 断った回は**計った時間を字に出す**(user が失うのは時間である ── 上の「見つからない」と同じ)。
+       */
+      const r = await appendAndSettle(deps.dispatcher, lid, workLogLine(from, to), null, TIMER_SETTLE_MS);
+      if (r.ok) {
+        deps.notify(`「${run.title}」に${what}を書きました`);
+        return;
+      }
+      if (!deps.dispatcher.getState().entryMetas.has(lid)) {
+        deps.notify(`「${run.title}」が見つからないので本文に入れていません(${what})`, { kind: 'caution' });
+        return;
+      }
+      deps.notify(
+        r.reason === 'timeout'
+          ? `「${run.title}」に${what}が書けたかどうか確かめられませんでした(ノートを開いて確かめてください)`
+          : `「${run.title}」に${what}を書けませんでした(${r.error ?? 'いま保存中か、編集中です'})`,
+        { kind: 'caution' },
+      );
     }, lid);
     // ⚠ 預かった回は**そう言う**(押したのに何も起きていないように見せない)
     if (held) deps.notify(`「${run.title}」の${what}は、編集中なのでまだ書いていません。編集を終えると本文に入れます`);

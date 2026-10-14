@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { startMissedWatch } from '../../src/adapter/ui/actions/missed-schedule';
+import { MISSED_SCAN_FAILED_TEXT, startMissedWatch } from '../../src/adapter/ui/actions/missed-schedule';
 import { appScheduleNotify, ScheduleNotifyStore } from '../../src/adapter/ui/render/schedule-notify';
 import { ScheduleRenderer } from '../../src/adapter/ui/render/schedule';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
@@ -113,7 +113,13 @@ function rig(bodies: string): { d: Dispatcher; setScan: () => void } {
 
 const BODY = '- [ ] 朝会 @2026-10-12 09:00\n- [ ] 昼会 @2026-10-12 12:00\n- [x] 済み @2026-10-12 10:00\n- [ ] 終日 @2026-10-12\n';
 
-function watch(opts: { store: ScheduleNotifyStore; now: number; setScanAfter?: boolean; body?: string }) {
+function watch(opts: {
+  store: ScheduleNotifyStore;
+  now: number;
+  setScanAfter?: boolean;
+  body?: string;
+  isRinger?: () => boolean;
+}) {
   const r = rig(opts.body ?? BODY);
   const painted: number[] = [];
   const posted: string[] = [];
@@ -125,6 +131,7 @@ function watch(opts: { store: ScheduleNotifyStore; now: number; setScanAfter?: b
     paint: (n) => painted.push(n),
     post: (t) => posted.push(t),
     tick: () => () => undefined,
+    ...(opts.isRinger === undefined ? {} : { isRinger: opts.isRinger }),
   });
   return { ...r, painted, posted, w };
 }
@@ -242,6 +249,48 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     const t2 = watch({ store: store2, now: ms(12, 13, 0) });
     t2.d.dispatch({ type: 'TASK_SCAN_FAILED' });
     expect(t2.painted).toEqual([]);
+  });
+
+  it('🔴 集められなかったときは、黙らず「数えられなかった」と 1 回言う(#1087)', () => {
+    const store = new ScheduleNotifyStore(fakeStorage());
+    store.stampOpen('c1', ms(12, 8, 0));
+    const t = watch({ store, now: ms(12, 13, 0) });
+    t.d.dispatch({ type: 'TASK_SCAN_FAILED' });
+    t.d.dispatch({ type: 'TASK_SCAN_FAILED' });
+    expect(t.posted, '失敗を言っていない / 言い直している').toEqual([MISSED_SCAN_FAILED_TEXT]);
+  });
+
+  it('🔴 同じコレクションを 2 つのタブで開いても、見逃した予定を言うのは本体のタブの 1 つだけ(#1087)', () => {
+    const st = fakeStorage();
+    const store = new ScheduleNotifyStore(st);
+    store.stampOpen('c1', ms(12, 8, 0));
+    // 本体でないタブが先に起動しても、前に開いていた時刻を消さない(本体が読む前に進めない)
+    const follower = watch({ store, now: ms(12, 13, 0), isRinger: () => false });
+    const holder = watch({ store, now: ms(12, 13, 0), isRinger: () => true });
+    follower.setScan();
+    holder.setScan();
+    expect(follower.posted, '本体でないタブが言った').toEqual([]);
+    expect(follower.painted).toEqual([]);
+    expect(holder.posted, '本体のタブが言っていない').toEqual(['見逃した予定が 2 件あります']);
+  });
+
+  it('⚠ 本体でないタブも、刻みでは時刻を進める(本体が閉じたあとの起動で、開いていた間を見逃しに数えない)', () => {
+    const store = new ScheduleNotifyStore(fakeStorage());
+    store.stampOpen('c1', ms(12, 7, 0));
+    let fire: () => void = () => undefined;
+    let clock = ms(12, 8, 0);
+    startMissedWatch({
+      dispatcher: rig(BODY).d, store, cid: 'c1', now: () => clock, isRinger: () => false,
+      paint: () => undefined, post: () => undefined,
+      tick: (fn) => {
+        fire = fn;
+        return () => undefined;
+      },
+    });
+    expect(store.lastOpen('c1'), '本体でないタブが起動時に時刻を書いた').toBe(ms(12, 7, 0));
+    clock = ms(12, 9, 30);
+    fire();
+    expect(store.lastOpen('c1')).toBe(ms(12, 9, 30));
   });
 
   it('🔑 刻みで時刻を進める(開いている間の予定を、次の起動で見逃しに数えない)', () => {

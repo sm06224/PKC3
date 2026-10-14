@@ -18,11 +18,17 @@
  * ⑥ 🔴 **時計が戻っても壊れない**
  * ⑦ 🔴 **止めたら刻みを外す**(常駐を作らない)
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { TaskCard, TaskScan } from '../../src/features/schedule/task-cards';
-import { createAlarmService } from '../../src/adapter/ui/actions/alarm';
+import {
+  ALARM_MAX_GAP_MS,
+  ALARM_SCAN_FAILED_TEXT,
+  createAlarmService,
+} from '../../src/adapter/ui/actions/alarm';
+import { missedLabel } from '../../src/features/schedule/schedule-notify';
 
 function meta(lid: string): EntryMeta {
   return {
@@ -54,7 +60,9 @@ const card = (over: Partial<TaskCard> = {}): TaskCard =>
 
 const at = (h: number, m: number): number => new Date(2026, 7, 27, h, m, 0, 0).getTime();
 
-function bench(opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean } = {}) {
+function bench(
+  opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean; ringer?: () => boolean } = {},
+) {
   const d = new Dispatcher();
   let subs = 0;
   const realOnState = d.onState.bind(d);
@@ -77,11 +85,14 @@ function bench(opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean } =
     d.dispatch({ type: 'SET_TASK_SCAN', scan });
   }
 
+  /** 目標の時刻(`advanceTo`)と、サービスが読む時計。`beat()` は時計を目標まで 1 分ずつ歩かせる。 */
   let nowMs = at(13, 0);
+  let clock = nowMs;
   let beats: Array<() => void> = [];
   let chimes = 0;
   const painted: number[] = [];
   let on = opts.enabled ?? true;
+  const posts: string[] = [];
 
   const service = createAlarmService({
     dispatcher: d,
@@ -92,7 +103,7 @@ function bench(opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean } =
         return true;
       },
     },
-    now: () => nowMs,
+    now: () => clock,
     tick: (fn) => {
       beats.push(fn);
       return () => {
@@ -100,18 +111,41 @@ function bench(opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean } =
       };
     },
     enabled: () => on,
+    ...(opts.ringer === undefined ? {} : { isRinger: opts.ringer }),
+    post: (t) => posts.push(t),
   });
 
   return {
     d,
     service,
     painted,
+    posts,
     chimes: () => chimes,
     beats: () => beats.length,
     subs: () => subs,
     setEnabled: (v: boolean) => (on = v),
     advanceTo: (h: number, m: number) => (nowMs = at(h, m)),
-    beat: () => beats.forEach((b) => b()),
+    advanceMs: (ms: number) => (nowMs += ms),
+    /**
+     * 時計を目標まで **1 分ずつ**歩かせて刻む(ふつうの間引きの空きに収める ── 一度に何時間も飛ぶと
+     * 「眠っていた」扱いで鳴らさなくなったので、ふつうの経過はこちらで表す)。戻る方向は 1 回で寄せる。
+     */
+    beat: () => {
+      if (nowMs <= clock) {
+        clock = nowMs;
+        beats.forEach((b) => b());
+        return;
+      }
+      while (clock < nowMs) {
+        clock = Math.min(clock + 60_000, nowMs);
+        beats.forEach((b) => b());
+      }
+    },
+    /** 時計を目標へ **一度に**飛ばして 1 回だけ刻む(眠っていた端末の復帰)。 */
+    jump: () => {
+      clock = nowMs;
+      beats.forEach((b) => b());
+    },
   };
 }
 
@@ -272,5 +306,149 @@ describe('アラート(#280)', () => {
     b.service.dismissAll();
     expect(b.service.ringing()).toHaveLength(0);
     expect(b.painted.at(-1), '畳んだのに帯を描き直していない').toBe(0);
+  });
+
+  /**
+   * 🔴 ⑧ 開いているタブの数だけ同じ予定が鳴らない(#1087)。
+   *   2 つのサービス(= 2 つのタブ)を同じ時刻で回し、鳴らす役を持つ側だけが鳴らす。
+   */
+  it('🔴 ⑧ 2 つのタブで同じ時刻を回しても、鳴らすのは本体のタブの 1 つだけ', () => {
+    const tabA = bench({ ringer: () => true });
+    const tabB = bench({ ringer: () => false });
+    for (const t of [tabA, tabB]) t.service.start();
+    for (const t of [tabA, tabB]) {
+      t.advanceTo(14, 0);
+      t.beat();
+    }
+    expect(tabA.chimes() + tabB.chimes(), '同じ予定が 2 つのタブで鳴った').toBe(1);
+    expect(tabA.service.ringing(), '本体のタブが鳴らしていない(誰も鳴らさない窓)').toHaveLength(1);
+    expect(tabB.service.ringing(), '本体でないタブにも帯が出ている').toHaveLength(0);
+  });
+
+  it('🔴 ⑧ 本体が移ったら、新しい本体が引き継いで鳴らす(誰も鳴らさない窓を作らない)', () => {
+    let holder = false;
+    const b = bench({ ringer: () => holder });
+    b.service.start();
+    b.advanceTo(13, 59);
+    b.beat(); // 本体でない間(1 時間)も、見た位置は進む
+    holder = true; // 本体が閉じて、このタブが引き継いだ
+    b.advanceTo(14, 0);
+    b.jump(); // 引き継いだ直後の刻み(空きは 2 分以内)
+    expect(b.service.ringing(), '引き継いだのに鳴らない').toHaveLength(1);
+    expect(b.chimes()).toBe(1);
+    expect(b.posts, '引き継いだだけで見逃し扱いにした').toEqual([]);
+  });
+
+  it('🔴 ⑧ 本体でない間は、時間が来ても鳴らさない', () => {
+    const b = bench({ ringer: () => false });
+    b.service.start();
+    b.advanceTo(14, 0);
+    b.beat();
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.chimes()).toBe(0);
+    expect(b.service.ringing()).toHaveLength(0);
+  });
+
+  /**
+   * 🔴 ⑨ 眠っていた間の予定は、復帰した瞬間にまとめて鳴らさない(#1087)。
+   *   代わりに「見逃した予定」として 1 件、次に開いたときの知らせと同じ字で積む。
+   */
+  it('🔴 ⑨ 長い空き(眠っていた端末の復帰)では鳴らさず、見逃した予定として集積地に 1 件積む', () => {
+    const b = bench({ cards: [card({ line: 1, time: '14:00' }), card({ line: 2, time: '15:00' })] });
+    b.service.start();
+    b.advanceTo(16, 0); // 3 時間眠っていた
+    b.jump();
+    expect(b.chimes(), '復帰した瞬間に鳴った').toBe(0);
+    expect(b.service.ringing(), '復帰した瞬間に帯が出た').toHaveLength(0);
+    expect(b.posts, '見逃した予定が 1 件積まれていない').toEqual([missedLabel(2)]);
+    // 見た位置は寄せてある ── 次の刻みで同じ区間を数え直さない
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '同じ区間をもう一度積んだ').toHaveLength(1);
+  });
+
+  it('対照群:ふつうの間引き(1 分強の空き)なら、遅れても鳴る', () => {
+    const b = bench();
+    b.service.start();
+    b.advanceTo(13, 59);
+    b.beat();
+    b.advanceMs(ALARM_MAX_GAP_MS); // 空きがちょうど上限 ── 超えていない
+    b.jump();
+    expect(b.service.ringing(), '間引かれただけの回が鳴らない').toHaveLength(1);
+    expect(b.posts).toEqual([]);
+  });
+
+  it('境目:上限を 1ms でも超えたら鳴らさない', () => {
+    const b = bench();
+    b.service.start();
+    b.advanceTo(13, 59);
+    b.beat();
+    b.advanceMs(ALARM_MAX_GAP_MS + 1);
+    b.jump();
+    expect(b.service.ringing(), '上限を超えたのに鳴った').toHaveLength(0);
+    expect(b.posts).toEqual([missedLabel(1)]);
+  });
+
+  it('⚠ 長い空きでも、見逃しが 0 件なら何も積まない', () => {
+    const b = bench({ cards: [card({ time: '09:00' })] });
+    b.service.start();
+    b.advanceTo(16, 0);
+    b.jump();
+    expect(b.posts).toEqual([]);
+  });
+
+  /** 🔴 ⑩ 数えられていないことを黙らない(#1087)。 */
+  it('🔴 ⑩ 予定の集計に失敗している間は、1 回だけ「お知らせできません」と積む', () => {
+    const b = bench();
+    b.service.start();
+    b.d.dispatch({ type: 'TASK_SCAN_FAILED' });
+    expect(b.d.getState().taskScanFailed, '前提が崩れている ── 失敗が立っていない').toBe(true);
+    b.advanceMs(30_000);
+    b.beat();
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '失敗を 1 回だけ言う').toEqual([ALARM_SCAN_FAILED_TEXT]);
+    // 直ったら、また失敗したときに言い直す
+    b.d.dispatch({
+      type: 'SET_TASK_SCAN',
+      scan: { cards: [], totalNotes: 0, scannedNotes: 0, truncated: false },
+    });
+    b.advanceMs(30_000);
+    b.beat();
+    b.d.dispatch({ type: 'TASK_SCAN_FAILED' });
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts, '直った後の失敗を言っていない').toEqual([ALARM_SCAN_FAILED_TEXT, ALARM_SCAN_FAILED_TEXT]);
+  });
+
+  it('対照群:集計できているなら、失敗の知らせは積まない', () => {
+    const b = bench();
+    b.service.start();
+    b.advanceMs(30_000);
+    b.beat();
+    expect(b.posts).toEqual([]);
+  });
+
+  /** 🔴 ⑪ 入にした直後の最大 30 秒を見る(#1087)。 */
+  it('🔴 ⑪ 入にした直後に来た予定を、次の刻みを待たずに取りこぼさない', () => {
+    const b = bench({ enabled: false });
+    b.service.start(); // 切のまま刻みは張ってある
+    b.advanceTo(13, 59);
+    b.jump(); // 切の間の刻み(見た位置は持たない)
+    b.setEnabled(true);
+    b.service.check(); // 入にした直後(main.ts の setAlarmEnabled が呼ぶ)── 13:59 から見る
+    b.advanceTo(14, 0);
+    b.jump(); // 入にしてから最初の刻み ── 区間は (13:59, 14:00]
+    expect(b.service.ringing(), '入にした直後の予定を取りこぼした').toHaveLength(1);
+  });
+
+  /** ⚠ main.ts はどの test からも走らない ── 配線は原文で pin する(弱いと自覚して使う)。 */
+  it('🔴 ⑧ main.ts は、予定の知らせと見逃しの知らせの両方に「本体のタブだけ」を渡し、入にした直後に見る', () => {
+    const main = readFileSync('src/main.ts', 'utf-8');
+    expect(main.split('isRinger: () => writerHolder,').length - 1, '渡す先が 2 つ(鳴らす / 見逃し)').toBe(2);
+    const at = main.indexOf('setAlarmEnabled: (on) => {');
+    expect(at, '前提が崩れている ── setAlarmEnabled が無い').toBeGreaterThan(0);
+    expect(main.slice(at, at + 400), '入にした直後に見ていない').toContain('alarmService.check();');
   });
 });

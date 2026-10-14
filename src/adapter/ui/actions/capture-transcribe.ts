@@ -39,7 +39,10 @@ import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
 import { createWritableQueue } from './writable-queue';
-import { dispatchAppend } from '@adapter/state/append-settle';
+import { appendAndSettle } from '@adapter/state/append-settle';
+
+/** 書き足しの結末を待つ上限(ms)。ふつうは 1 秒かからない(待つのは保存の往復だけ)。 */
+const TRANSCRIBE_SETTLE_MS = 10_000;
 
 /**
  * 🔴 **部品が無いとき、user に押させる場所を言う**。
@@ -203,28 +206,35 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          * ⚠ 書けない間は預かる(捨てない)。預かったら**そう言う**。
          */
         const heading = transcriptHeading(now());
-        const held = queue.push(() => {
+        const write = async (): Promise<void> => {
           /**
-           * 🔴 **受けられなかった回は「足しました」と言わない**(#1087 の見直し)── 文字にしている間に
+           * 🔴 **「足しました」は、disk に着いてから言う**(#1087 の見直し)── 文字にしている間に
            *   ノートをゴミ箱へ移すと、reducer は理由を出さずに捨てる。⚠ 理由を出して断った回
            *   (書込中など)は reducer の赤い字が出ているので、ここでは重ねない。
+           *   受けた後に保存で落ちた回・結末が来なかった回も言う(黙って「足しました」にしない)。
            */
-          const r = dispatchAppend(deps.dispatcher, {
-            type: 'APPEND_TO_ENTRY',
-            lid,
-            text,
-            heading,
-            target: null,
-          });
-          if (r === 'gone') {
-            say(`「${item.name}」の文字起こしは、書き先のノートが見つからなかったので足していません`);
+          const r = await appendAndSettle(deps.dispatcher, lid, text, heading, TRANSCRIBE_SETTLE_MS);
+          if (!r.ok) {
+            if (!deps.dispatcher.getState().entryMetas.has(lid)) {
+              say(`「${item.name}」の文字起こしは、書き先のノートが見つからなかったので足していません`);
+            } else if (r.reason === 'timeout') {
+              say(`「${item.name}」の文字起こしが足せたかどうか確かめられませんでした。ノートを開いて確かめてください`);
+            } else if (r.reason === 'failed') {
+              say(`「${item.name}」の文字起こしを足せませんでした(${r.error ?? '保存できませんでした'})`);
+            }
             return;
           }
-          if (r === 'refused') return;
           // 🔑 波形の目盛り(文字起こしの時刻)は一覧が持つので、足したら集め直す(⚠ ここへ来るのは一覧から押したときだけ)
           deps.dispatcher.dispatch({ type: 'REFRESH_CAPTURE_SCAN' });
           say(`「${item.name}」に文字起こしを足しました(${took})`);
-        }, lid);
+        };
+        /**
+         * ⚠ その場で書ける回は**結末まで待ってから抜ける** ── 抜けた後に「足しました」を言うと、
+         *   `finally` の進行中の字を消す合図が先に出て、最後の字が逆になる。
+         */
+        let writing: Promise<void> = Promise.resolve();
+        const held = queue.push(() => (writing = write()), lid);
+        await writing;
         if (held) {
           say(`「${item.name}」の文字起こしは、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
         }

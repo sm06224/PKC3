@@ -42,7 +42,9 @@ function meta(lid: string, archetype: string, title: string): EntryMeta {
 
 const T0 = new Date(2026, 7, 27, 6, 40, 0).getTime();
 
-function bench(opts: { archetype?: string; select?: boolean; keepLock?: boolean } = {}) {
+function bench(
+  opts: { archetype?: string; select?: boolean; keepLock?: boolean; failAck?: string } = {},
+) {
   const d = new Dispatcher();
   /** ⚠ **見張りの本数を数える**(外し忘れは state からは見えない)。 */
   let subs = 0;
@@ -77,6 +79,11 @@ function bench(opts: { archetype?: string; select?: boolean; keepLock?: boolean 
   d.onEvent((e) => {
     if (e.type !== 'REQUEST_APPEND' || opts.keepLock === true) return;
     const { lid, gen } = e;
+    if (opts.failAck !== undefined) {
+      const error = opts.failAck;
+      queueMicrotask(() => d.dispatch({ type: 'APPEND_FAILED', lid, gen, error }));
+      return;
+    }
     queueMicrotask(() =>
       d.dispatch({
         type: 'ENTRY_APPENDED',
@@ -312,5 +319,49 @@ describe('タイマー(#279)', () => {
     b.d.dispatch({ type: 'CANCEL_EDIT' });
     await settle();
     expect(b.subs(), '書き終えたのに見張りが残っている').toBe(base);
+  });
+
+  /**
+   * 🔴 ⑦ 「書きました」は、書けたのを見てから言う(#1087)。
+   *   直す前は撃った直後に無条件で言っていたので、書き先が消えていても「書きました」になった。
+   */
+  it('🔴 ⑦ 預かっている間にノートが消えたら、「書きました」と言わず、計った時間を字に出す', async () => {
+    const b = bench();
+    b.service.start();
+    b.advance(7 * 60_000);
+    b.d.dispatch({ type: 'START_EDIT' });
+    expect(b.d.getState().phase, '前提が崩れている ── 編集に入れていない').toBe('editing');
+    b.service.stop('a');
+    expect(b.notices.join('\n'), '前提が崩れている ── 預かっていない').toContain('まだ書いていません');
+    // 編集を終えた直後(預かりが書きに行く前)にノートが消える
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    b.d.dispatch({ type: 'DELETE_ENTRY', lid: 'a' });
+    expect(b.d.getState().entryMetas.has('a'), '前提が崩れている ── ノートが消えていない').toBe(false);
+    await settle();
+    const text = b.notices.join('\n');
+    expect(text, '書けていないのに「書きました」と言った').not.toContain('を書きました');
+    expect(text, '見つからないことを言っていない').toContain('見つからないので本文に入れていません');
+    expect(text, '計った時間を字に出していない').toContain('(7:00)');
+  });
+
+  it('🔴 ⑦ 保存で落ちた回は、「書きました」と言わず、時間と理由を言う', async () => {
+    const b = bench({ failAck: '保存先が一杯です' });
+    b.service.start();
+    b.advance(3 * 60_000);
+    b.service.stop('a');
+    await settle();
+    const text = b.notices.join('\n');
+    expect(text, '落ちたのに「書きました」と言った').not.toContain('を書きました');
+    expect(text).toContain('(3:00)');
+    expect(text, '理由を言っていない').toContain('保存先が一杯です');
+  });
+
+  it('対照群:書けた回は、着いてから「書きました」と言う(1 回)', async () => {
+    const b = bench();
+    b.service.start();
+    b.advance(60_000);
+    b.service.stop('a');
+    await settle();
+    expect(b.notices.filter((t) => t.includes('を書きました'))).toHaveLength(1);
   });
 });

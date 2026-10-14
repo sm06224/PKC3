@@ -16,7 +16,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
-import { createWritableQueue } from '../../src/adapter/ui/actions/writable-queue';
+import { readFileSync } from 'node:fs';
+import {
+  createWritableQueue,
+  heldCount,
+  onHeldChange,
+} from '../../src/adapter/ui/actions/writable-queue';
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -269,5 +274,38 @@ describe('書き先を渡した預かり(#1081)', () => {
     h.unlock();
     await tick();
     expect(h.seen).toEqual(['n2:u', 'n2:x']);
+  });
+});
+
+/**
+ * 🔴 預かっている書込は、タブを閉じる確認に数える(#1087)。預かりはタブの中の物で、閉じると黙って消える
+ * (タイマーの記録・文字起こし・写真)。数えるのは預かっている間だけ ── 走り出した書込は保存の側が数える。
+ */
+describe('預かりの総数(離れる前の確認が読む)', () => {
+  it('🔴 預かると増え、流れ出すと減り、0 になったら 0 と伝える', async () => {
+    const h = harness();
+    const seenTotals: number[] = [];
+    const off = onHeldChange((n) => seenTotals.push(n));
+    const base = heldCount();
+    h.q.push(h.append('a')); // その場で走る(預からない)
+    expect(heldCount(), 'その場で走る物を数えた').toBe(base);
+    h.q.push(h.append('b'));
+    h.q.push(h.append('c'));
+    expect(heldCount(), '預かった物を数えていない').toBe(base + 2);
+    h.unlock();
+    await tick();
+    expect(heldCount(), '流れ出した物を数え続けている').toBe(base + 1);
+    h.unlock();
+    await tick();
+    expect(heldCount(), '全部流れたのに残っている').toBe(base);
+    expect(seenTotals, '増減を伝えていない').toEqual([base + 1, base + 2, base + 1, base]);
+    off();
+    h.q.push(h.append('d'));
+    expect(seenTotals, '外した後も伝えている').toHaveLength(4);
+  });
+
+  it('🔴 main.ts は、預かりが 1 件でもあるうち「離れますか」の確認を出す', () => {
+    const main = readFileSync('src/main.ts', 'utf-8');
+    expect(main).toContain("onHeldChange((n) => unloadGuard.setWriting(n > 0, 'held-append'));");
   });
 });

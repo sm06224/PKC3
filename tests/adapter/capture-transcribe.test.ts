@@ -61,6 +61,32 @@ function harness(
   dispatcher.onEvent((e) => {
     if (e.type === 'REQUEST_APPEND') appends.push({ lid: e.lid, heading: e.heading, text: e.text });
   });
+  /**
+   * ⚠ **書込が着いたことにする**(本物の worker の ack。§3「stub は本物の意味論を真似る」)── 「足しました」は
+   *   disk に着いてから言うので、ack が来ない台では永遠に言わない。`ackOn.fail` で「保存で落ちる」台も作れる。
+   */
+  const ackOn: { v: boolean; fail: string | null } = { v: true, fail: null };
+  dispatcher.onEvent((e) => {
+    if (e.type !== 'REQUEST_APPEND' || !ackOn.v) return;
+    const { lid, gen } = e;
+    if (ackOn.fail !== null) {
+      const error = ackOn.fail;
+      queueMicrotask(() => dispatcher.dispatch({ type: 'APPEND_FAILED', lid, gen, error }));
+      return;
+    }
+    queueMicrotask(() =>
+      dispatcher.dispatch({
+        type: 'ENTRY_APPENDED',
+        lid,
+        gen,
+        body: '本文',
+        status: null,
+        date: null,
+        archived: false,
+        inserted: null,
+      }),
+    );
+  });
   const notes: string[] = [];
   const lids: Array<string | null> = [];
   dispatcher.onState((s) => {
@@ -79,7 +105,17 @@ function harness(
     now: () => NOW,
     ...over,
   };
-  return { dispatcher, deps, appends, notes, lids, tr: createCaptureTranscriber(deps) };
+  const real = createCaptureTranscriber(deps);
+  /** ⚠ 預かりの書込は `run` の外で終わる ── 結末まで待ってから返す。 */
+  const tr = Object.create(real, {
+    run: {
+      value: async (lid: string) => {
+        await real.run(lid);
+        await new Promise((r) => setTimeout(r, 0));
+      },
+    },
+  }) as typeof real;
+  return { dispatcher, deps, appends, notes, lids, ackOn, tr };
 }
 
 const error = (d: Dispatcher): string | null => d.getState().error;
@@ -413,6 +449,23 @@ describe('部品の選び方', () => {
  *   消す字も撃たない(別の知らせを巻き込まない)。進行中のあとに**言う字**(字にならなかった / 預かった)は
  *   それが進行中の字を置き換えるので、消す字は撃たない。
  */
+describe('「足しました」は、着いてから言う(#1087)', () => {
+  it('🔴 受けた後に保存で落ちた回は、「足しました」と言わず、足せなかったと理由を言う', async () => {
+    const h = harness();
+    h.ackOn.fail = '保存先が一杯です';
+    await h.tr.run('a');
+    expect(h.appends, '前提が崩れている ── 書きに行っていない').toHaveLength(1);
+    expect(h.notes.some((t) => t.includes('文字起こしを足しました')), '落ちたのに「足しました」').toBe(false);
+    expect(h.notes.at(-1)).toMatch(/足せませんでした.*保存先が一杯です/);
+  });
+
+  it('対照群:着いた回は「足しました」を 1 回だけ言う', async () => {
+    const h = harness();
+    await h.tr.run('a');
+    expect(h.notes.filter((t) => t.includes('文字起こしを足しました'))).toHaveLength(1);
+  });
+});
+
 describe('進行中の字の後始末(#1017 C5)', () => {
   it.each([
     ['読めない音', { decode: vi.fn(async () => Promise.reject(new Error('EncodingError'))) }],
