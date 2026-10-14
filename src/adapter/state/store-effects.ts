@@ -2198,8 +2198,12 @@ export function connectStoreEffects(
             }
             stamp(ev.lid, stamps);
           } catch (e) {
+            // 🔴 何が書けなかったかを言う(#1087)── 画面の題名は新しいままなので、元の字だけでは改名できたと読まれる
             if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: errorText(e) });
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `名前を保存できませんでした(再読み込みすると元の名前に戻ります): ${errorText(e)}`,
+              });
           }
         });
         break;
