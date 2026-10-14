@@ -14,7 +14,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, gotoCollectionPane } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   // ⚠ 本文を入れる道具として全文 textarea を使うので、設定で split を明示する
@@ -56,8 +56,16 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
        * ⚠ 線の塊の中に**字**を入れてある ── 読む画面に 1 文字も出ない字が
        *   書き出しにだけ現れる、という段③a の実害をここで止める。
        */
+      // 🔴 板の直前の見出し(中身が無い)は、その板の題になる ── スライドは 3 枚のまま(取り込み後の題の順を見る)
+      '### 板の節',
+      '',
       ':::format{#今日 .pkc-place x=0 y=0 w=200 h=100}',
       '今日',
+      // 🔴 行頭に空白 4 つ ── 取り込み直したとき、字下げのコードの塊に化けないこと(#1746)
+      '',
+      '    字下げの行',
+      '',
+      '`  # 空白で始まる見出しの形の行`',
       ':::',
       '',
       ':::format{#明日 .pkc-place x=400 y=0 w=200 h=100}',
@@ -153,6 +161,31 @@ test('🔴 情報ペインの PowerPoint で .pptx が落ちてきて、見出�
   ).toHaveCount(1);
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('今日');
   await expect(page.locator('[data-pkc-region="detail"]')).toContainText('明日');
+  /**
+   * 🔴 **字下げの行 / 行頭が空白の行が、取り込んだ板の本文で字のまま読める**(#1746)。
+   * ⚠ 書き出しで字下げの空白は落ちる(コードの塊の行も 1 行の字になる)ので、取り込み側に残るのは
+   *   「字が付箋に入っている」ことと「コードの塊や見出しに化けていない」ことである。
+   * 🔑 コードの印(` ` `)の中の「空白 2 つ + `# …`」は、書き出すと行頭が空白の行になる ──
+   *   取り込み側の `escapeLine` が空白の後ろに守りを置かないと、付箋の中に見出しが出る。
+   */
+  const firstCard = boardCards.first();
+  await expect(firstCard, '字下げの行が付箋に入っていない').toContainText('字下げの行');
+  await expect(firstCard, '行頭が空白の行が字として読めない').toContainText('# 空白で始まる見出しの形の行');
+  await expect(firstCard.locator('pre, code'), '字下げの行がコードの塊に化けている').toHaveCount(0);
+  await expect(firstCard.locator('h1, h2, h3, h4, h5, h6'), '行頭が空白の `#` の行が見出しに化けている').toHaveCount(0);
+  /**
+   * 🔴 **取り込んだノートの題の順が、書き出したノートの見出しの順と同じ**(#1746。スライドは presentation の順で読む)。
+   * ⚠ 一覧は読み直してから見る(取り込み直後は左の一覧が空のことがある ── `gotoCollectionPane` の注釈)。
+   */
+  await gotoCollectionPane(page);
+  const titles = await page
+    .locator('[data-pkc-region="filer-table"] td[data-pkc-field="title"]')
+    .allTextContents();
+  const headings = ['扉の題', '節のタイトル', '板の節'];
+  expect(
+    titles.filter((t) => headings.includes(t)),
+    `取り込んだ題の順が見出しの順と違う(一覧: ${titles.join(' / ')})`,
+  ).toEqual(headings);
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
