@@ -2884,6 +2884,22 @@ describe('容量の内訳(#415)', () => {
     for (const r of p.rows) expect(r.assetBytes).not.toBe(250_000);
   });
 
+  it('🔴 ゴミ箱のノートが使っている添付は「使われていない」に数えない(整理と同じ規則。#1087)', async () => {
+    /**
+     * ⚠ 直す前は entries だけを見ていたので、ゴミ箱のノートの添付を「消せます」と案内し、
+     *   整理(revisions も保持扱い)は「使われていない添付はありません」と言っていた。
+     */
+    const before = (await profile()).orphanBytes;
+    await put('ast-trashed', 700_000);
+    await note('t1', '![](asset:ast-trashed)');
+    await request({ op: 'deleteEntry', cid: CID, lid: 't1' });
+    const after = await profile();
+    expect(after.rows.some((r) => r.lid === 't1'), '前提: ゴミ箱へ移っていない').toBe(false);
+    expect(after.orphanBytes - before, 'ゴミ箱の添付を「消せます」に数えた').toBe(0);
+    const keep = await request({ op: 'scanAssetRefs', cid: CID, candidates: ['ast-trashed'] });
+    expect(keep.referenced, '前提: 整理がゴミ箱の添付を保持していない').toEqual(['ast-trashed']);
+  });
+
   it('⚠ escape された参照も拾う(照合の正本と同じ規則)', async () => {
     /**
      * ⚠ `text.includes(key)` と書き直すと escape 済みの参照を落とす ──

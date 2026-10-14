@@ -4283,8 +4283,26 @@ const handlers: Handlers = {
         });
       },
     });
+    /**
+     * 🔴 **履歴とゴミ箱が使っている添付は「使われていない」に数えない**(#1087)。
+     * ⚠ 整理(`scanAssetRefs`)は revisions も保持扱いにする ── ここが entries しか見ないと、
+     *   ゴミ箱のノートの添付を「消せます」と案内したのに、整理は「使われていない添付はありません」と言う。
+     *   判定は整理と同じ `scanAssetRefsInto`(規則を写さない)。
+     */
+    const unused = new Set(keys.filter((k) => (refCount.get(k) ?? 0) === 0));
+    if (unused.size > 0) {
+      need().exec({
+        sql: 'SELECT snapshot FROM revisions WHERE cid = ?',
+        bind: [req.cid],
+        rowMode: '$snapshot',
+        callback: (row: unknown): false | void => {
+          if (unused.size === 0) return false;
+          scanAssetRefsInto(typeof row === 'string' ? row : '', unused, () => {});
+        },
+      });
+    }
     let orphanBytes = 0;
-    for (const [k, n] of size) if ((refCount.get(k) ?? 0) === 0) orphanBytes += n;
+    for (const k of unused) orphanBytes += size.get(k) ?? 0;
     return {
       rows: rows.map((r) => ({
         lid: r.lid,
