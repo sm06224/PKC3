@@ -297,6 +297,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
         // 🔴 預かった 1 本も、入らなければ録るのをやめる(下の `stopNoRoom` と同じ理由)
         if (!(await ingest(blob, kind, why, part, at, tag)) && part !== null) stopNoRoom(kind);
       } finally {
+        unsettled--;
         syncActive();
       }
     });
