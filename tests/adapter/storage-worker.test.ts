@@ -1945,16 +1945,35 @@ describe('バックリンク (#348)', () => {
     expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-self' })).lids).toEqual([]);
   });
 
-  /** ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。 */
+  /**
+   * ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。
+   * 🔴 台は**本物のゴミ箱**(`deleteEntry`)で作る ── 直す前は `archived: true` をゴミ箱の代わりに使い、
+   *   片付けた todo を参照元から外す誤りを固定していた(#1087)。
+   */
   it('⚠ ゴミ箱の中からの参照は出さない', async () => {
     await write('bl-t2', '的\n');
+    await write('bl-trashed', link('bl-t2'));
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids,
+      '前提: ゴミ箱へ移す前は出る',
+    ).toEqual(['bl-trashed']);
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'bl-trashed' });
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids).toEqual([]);
+  });
+
+  /** 🔴 **片付けた todo からの参照は出す**(一覧にも左の列の検索にも居る。#1087)。 */
+  it('🔴 片付けた todo からの参照は出す(ゴミ箱とは別物)', async () => {
+    await write('bl-t4', '的\n');
     await request({
       op: 'upsertEntry',
       cid: 'c1',
-      entry: entry('bl-trashed', link('bl-t2'), { archived: true }),
+      entry: entry('bl-archived', link('bl-t4'), { archived: true }),
       checkpoint: false,
     });
-    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids).toEqual([]);
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t4' })).lids,
+      '片付けた todo が参照元から黙って消えた',
+    ).toEqual(['bl-archived']);
   });
 
   /** ⚠ 別の器のノートは混ざらない。 */

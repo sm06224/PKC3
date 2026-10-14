@@ -266,12 +266,15 @@ describe('探す面の検索 searchDetail(#680)', () => {
 
   beforeAll(async () => {
     await call({ op: 'openContainer', cid: CID3, title: 't3' } as StorageRequest);
-    // a: 2 回 / b: 1 回(⚠ a と**同じ長さ**)/ e: 1 回だが長い / t: 題名だけ / z: ゴミ箱の中
+    // a: 2 回 / b: 1 回(⚠ a と**同じ長さ**)/ e: 1 回だが長い / t: 題名だけ
+    // y: ゴミ箱の中(本物の `deleteEntry`)/ z: 片付けた todo(`archived` ── ゴミ箱とは別物。#1087)
     await putIn('a', '会議メモ', '全文検索の話。全文検索の話。今日は晴れ。');
     await putIn('b', '買い物', '全文検索の話。りんごの話だ。今日は晴れ。');
     await putIn('e', '長文', 'あ'.repeat(300) + '全文検索' + 'い'.repeat(300));
     await putIn('t', '全文検索の題名', '本文には別の話しか無い。');
-    await putIn('z', '捨てた', '全文検索の話。ごみばこ固有語。', true);
+    await putIn('y', '捨てた', '全文検索の話。ごみばこ固有語。');
+    await call({ op: 'deleteEntry', cid: CID3, lid: 'y' } as StorageRequest);
+    await putIn('z', '片付けた', '片付け固有語の話。', true);
   }, 30_000);
 
   it('🔴 日本語 3 字以上で、当たった語を印で囲んだ抜粋が返る(実測 pin)', async () => {
@@ -323,12 +326,18 @@ describe('探す面の検索 searchDetail(#680)', () => {
   });
 
   it('🔴 ゴミ箱の中は返さない(行を押すと開くので、一覧に無い物を出さない)', async () => {
-    // ⚠ 前提: z は入っていて索引にも居る(`searchEntries` はゴミ箱を弾かない)
-    expect((await call({ op: 'searchEntries', cid: CID3, query: 'ごみばこ固有語' } as StorageRequest)) as object)
-      .toMatchObject({ lids: ['z'] });
     const { rows } = await detail('全文検索');
-    expect(rows.map((r) => r.lid), 'ゴミ箱の中が探す面に出た').not.toContain('z');
-    expect((await detail('ごみばこ固有語')).rows, 'ゴミ箱の中が探す面に出た(LIKE 側)').toEqual([]);
+    expect(rows.map((r) => r.lid), 'ゴミ箱の中が探す面に出た').not.toContain('y');
+    expect((await detail('ごみばこ固有語')).rows, 'ゴミ箱の中が探す面に出た').toEqual([]);
+    expect((await detail('ごみ')).rows, 'ゴミ箱の中が探す面に出た(LIKE 側)').toEqual([]);
+  });
+
+  it('🔴 片付けた todo は返す(左の列の検索と同じ結果にする。#1087)', async () => {
+    // ⚠ 前提: 左の列の検索には出る
+    expect((await call({ op: 'searchEntries', cid: CID3, query: '片付け固有語' } as StorageRequest)) as object)
+      .toMatchObject({ lids: ['z'] });
+    expect((await detail('片付け固有語')).rows.map((r) => r.lid), '片付けた todo が探す面から消えた').toEqual(['z']);
+    expect((await detail('片付')).rows.map((r) => r.lid), '片付けた todo が探す面から消えた(LIKE 側)').toEqual(['z']);
   });
 
   it('上限で切ったことを言う(searchEntries と同じ作法)── FTS 側と LIKE 側の両方', async () => {
