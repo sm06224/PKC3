@@ -323,6 +323,20 @@ describe('#402 ① 別の窓を踏まない', () => {
     expect(s.d.getState().notice ?? '', '書けなかったノートも「付けた」に数えた').toContain('1 件に付けました');
     expect(s.d.getState().notice ?? '').not.toContain('2 件に付けました');
   });
+
+  it('🔴 名前の変更の 2 回目は、1 回目の知らせ(外せなかった件数)を消さずに続けて言う(#1087)', async () => {
+    const s = setup({ e1: '---\ntags: [旧]\n---\nあ\n', e2: '---\ntags: [旧]\n---\nい\n' });
+    s.conflictOn.add('e1');
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['e1', 'e2'], tags: ['旧'], mode: 'remove' });
+    await tick();
+    // 2 回目(付ける)は書ける ── 2 回目の知らせだけを見ると「全部うまくいった」に見える場面
+    s.conflictOn.clear();
+    s.d.dispatch({ type: 'BULK_TAG', lids: ['e1', 'e2'], tags: ['新'], mode: 'add', afterPrevious: true });
+    await tick();
+    const msg = s.d.getState().notice ?? '';
+    expect(msg, '前提: 2 回目は 2 件とも付いた').toContain('2 件に付けました');
+    expect(msg, '1 回目の「書けなかった」が消えた').toContain('1 件は書けませんでした');
+  });
 });
 
 describe('#402 ① 画面に無いものは触らない', () => {
