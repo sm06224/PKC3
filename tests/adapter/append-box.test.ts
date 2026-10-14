@@ -236,7 +236,7 @@ describe('追記(P8 段⑧)', () => {
     expect(persisted).toHaveLength(1);
   });
 
-  it('選択が別のノートへ移ったら打ちかけを捨てる', async () => {
+  it('選択が別のノートへ移ったら、欄は空になる(打ちかけは持ち越さない)', async () => {
     const { d, q } = setup([meta('log', 'textlog'), meta('log2', 'textlog')], {
       log: 'a',
       log2: 'b',
@@ -247,6 +247,67 @@ describe('追記(P8 段⑧)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
     await tick();
     expect(q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!.value).toBe('');
+  });
+
+  describe('🔴 別のノートへ移っても、打ちかけは預かる(#1635 項 1)', () => {
+    const two = () =>
+      setup([meta('log', 'textlog'), meta('log2', 'textlog')], { log: 'a', log2: 'b' });
+    const inputOf = (q: ReturnType<typeof setup>['q']) =>
+      q<HTMLTextAreaElement>('[data-pkc-field="append-input"]')!;
+
+    it('A で打つ → B は空 → A へ戻ると A の字が出る', async () => {
+      const s = two();
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      type(s.q, 'A 宛て');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+      await tick();
+      expect(inputOf(s.q).value, 'B に A の字が出ている').toBe('');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      expect(inputOf(s.q).value).toBe('A 宛て');
+    });
+
+    it('B で打つ → A へ戻って追記 → A にだけ A の字が入り、B の預かりは残る', async () => {
+      const s = two();
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      type(s.q, 'A の字');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+      await tick();
+      type(s.q, 'B の字');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      expect(inputOf(s.q).value).toBe('A の字');
+      s.q('[data-pkc-action="append-entry"]')!.click();
+      await tick();
+      // 対照群: 追記は A にだけ、A の字だけが入る(B の字は他のノートへ入らない)
+      expect(s.persisted).toHaveLength(1);
+      expect(s.persisted[0]!.lid).toBe('log');
+      expect(s.persisted[0]!.body).toContain('A の字');
+      expect(s.persisted[0]!.body).not.toContain('B の字');
+      // 通った A の預かりは消え、B の預かりは残る
+      expect(inputOf(s.q).value).toBe('');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+      await tick();
+      expect(inputOf(s.q).value).toBe('B の字');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      expect(inputOf(s.q).value, '通った追記の字が戻ってきた').toBe('');
+    });
+
+    it('打った字を消して離れたノートは、戻ると空のまま', async () => {
+      const s = two();
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      type(s.q, '消す字');
+      inputOf(s.q).value = '';
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+      await tick();
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      expect(inputOf(s.q).value).toBe('');
+    });
   });
 });
 
