@@ -116,7 +116,7 @@ const BLOCKABLE_FIELDS: readonly string[] = [
   '[data-pkc-region="create-menu"] [data-pkc-action="pick-create-kind"]',
   '[data-pkc-region="create-menu"] [data-pkc-action="open-today"]',
 ];
-const BLOCKABLE_SELECTOR = BLOCKABLE_FIELDS.join(', ');
+export const BLOCKABLE_SELECTOR = BLOCKABLE_FIELDS.join(', ');
 
 export class BrowseRouter {
   private readonly panes: Record<BrowseMode, HTMLElement>;
@@ -265,7 +265,21 @@ export class BrowseRouter {
     const out: HTMLElement[] = [];
     if (this.createRun !== null) out.push(this.createRun);
     // 🔑 選択子は 1 本にまとめて 1 回で歩く(#1087)── 4 本 × 根の数だけ全体を歩いていた
-    for (const r of this.roots) for (const el of r.querySelectorAll<HTMLElement>(BLOCKABLE_SELECTOR)) out.push(el);
+    // 🔑 **一覧の行の中は歩かない**(#1087)。押せない理由を添える先は帯・メニュー・空の一覧の
+    //    案内であって、行(`<tbody>`)の中には 1 つも無い ── 全体への `querySelectorAll` は
+    //    状態が動くたび(編集の 1 打鍵ごとも)行の数に比例して全部の行を歩いていた。
+    //    ⚠ 見つかる物は同じ(`tests/adapter/browse-blockables-walk.test.ts` が全数で突き合わせる)。
+    for (const r of this.roots) {
+      const walker = r.ownerDocument.createTreeWalker(r, NodeFilter.SHOW_ELEMENT, {
+        acceptNode: (n) =>
+          n.nodeName === 'TBODY'
+            ? NodeFilter.FILTER_REJECT
+            : (n as Element).matches(BLOCKABLE_SELECTOR)
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_SKIP,
+      });
+      for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) out.push(n as HTMLElement);
+    }
     return out;
   }
 

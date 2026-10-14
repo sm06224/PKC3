@@ -23,6 +23,7 @@ import { filerFlattenNow, filerRowOptions } from '@adapter/state/list-view-optio
 //    「居場所」のプルダウンを外したときに、この面から要らなくなった ──
 //    どちらも `move-to-folder`(探して選ぶ窓)と D&D の側で生きている
 import { getAncestorFolders, listSiblings } from '@features/relation/tree';
+import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRows, flatParentNames } from '@features/relation/filer-list';
 import {
   SMART_ARCHETYPE,
@@ -693,6 +694,17 @@ export class FilerRenderer {
    *   どちらも「掴もうとしている手の下で表が作り直される」ことから来る。
    * 🔑 だから**日付だけの変化では建て直さない** ── セルの字を差し替える(`patchDates`)。
    */
+  private metaSignatureNow(state: AppState): string {
+    /**
+     * 🔑 **違うのが時刻だけなら、前の指紋をそのまま使う**(#1087)。指紋は `lid` / 題名 / 種類 / 並びだけで
+     * 作る(時刻は入れない)ので、`stampChanges` が `null` でなければ全件を回さなくても同じ文字列になる。
+     * ⚠ `lastMetas` と `lastSignature` は対で進む(下の控えの更新を見よ)── 控えが無い最初の回は全件で作る。
+     */
+    if (this.lastMetas !== null && this.lastSignature !== null && stampChanges(this.lastMetas, state.entryMetas) !== null)
+      return this.lastSignature;
+    return this.metaSignature(state);
+  }
+
   private metaSignature(state: AppState): string {
     // ⚠ 区切りは **NUL のエスケープ**(`\u0000`)── 題名には現れない文字なので
     //    「題名の途中が次の項目に見える」取り違えが起きない。
@@ -722,6 +734,19 @@ export class FilerRenderer {
      */
     if (this.dateMemo !== null && this.dateMemo.metas === state.entryMetas && this.dateMemo.year === year)
       return this.dateMemo.sig;
+    /**
+     * 🔑 **違うのが時刻だけで、画面の字(丸めた日付)も変わらないなら、前の答えを返す**(#1087)。
+     * ⚠ 保存の ack は新しい Map を作るので、上の参照比較は外れる ── 5,000 件の字を作り直すのは
+     *   「1 件の更新日時が同日に動いた」だけの回(いちばん多い回)である。丸めた字が 1 件でも
+     *   変わる回(日をまたいだ / 初めて日付が付いた)は、ここを通らず従来どおり全件で作る。
+     */
+    if (this.dateMemo !== null && this.dateMemo.year === year) {
+      const pairs = stampChanges(this.dateMemo.metas, state.entryMetas);
+      if (pairs !== null && pairs.every(([a, b]) => this.listDate(a.updatedAt, year) === this.listDate(b.updatedAt, year))) {
+        this.dateMemo = { metas: state.entryMetas, year, sig: this.dateMemo.sig };
+        return this.dateMemo.sig;
+      }
+    }
     const parts: string[] = [];
     for (const m of state.entryMetas.values()) {
       parts.push(m.lid, this.listDate(m.updatedAt, year));
@@ -1027,7 +1052,7 @@ export class FilerRenderer {
     const datesChanged = this.dateSignature(state) !== this.lastDates;
     const sortedByDate = state.entrySort === 'updated';
     // 🔑 指紋は 1 回だけ作る(下の控えでも使う。#1087)
-    const metasSig = state.entryMetas !== this.lastMetas ? this.metaSignature(state) : null;
+    const metasSig = state.entryMetas !== this.lastMetas ? this.metaSignatureNow(state) : null;
     const listChanged =
       (datesChanged && sortedByDate) ||
       state.relations !== this.lastRelations ||
@@ -1135,7 +1160,7 @@ export class FilerRenderer {
      *   `lastMetas` と同じ参照のとき `lastSignature` はその一覧から作った値である
      *   (控えを進める 2 か所は、どちらも「指紋が同じ」と確かめた後に進めている)。
      */
-    if (state.entryMetas !== this.lastMetas) this.lastSignature = metasSig ?? this.metaSignature(state);
+    if (state.entryMetas !== this.lastMetas) this.lastSignature = metasSig ?? this.metaSignatureNow(state);
     this.lastMetas = state.entryMetas;
     this.lastRelations = state.relations;
     this.lastSelected = state.selectedLid;
