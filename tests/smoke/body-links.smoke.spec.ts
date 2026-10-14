@@ -609,7 +609,12 @@ test('🔴 pkc:// の asset あては押すと所有ノート(添付)へ飛ぶ',
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'owner.png',
     mimeType: 'image/png',
-    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    // 読める画像にする(#1702 以降、読めない画像は attachment-media ごと理由の 1 行に差し替わる。
+    // 署名 8 バイトだけの偽 PNG だと、着いても添付の面が出ず、飛べていないように見える)
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
   });
   const dl = page.locator('[data-pkc-action="download-asset"]');
   await expect(dl).toBeVisible({ timeout: 15000 });
