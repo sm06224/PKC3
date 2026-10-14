@@ -93,6 +93,8 @@ export class AppendBoxRenderer {
   private readonly release: HTMLElement;
   private last: AppendMode['kind'] | null = null;
   private lastLid: string | null = null;
+  /** 別のノートへ移るとき預かった打ちかけ(lid → 字)。⚠ 空の字は持たない。 */
+  private readonly drafts = new Map<string, string>();
   /** 🔴 次に打てる状態で描いたとき、1 回だけ打つ欄へ焦点を入れる(下の `focusInputOnceReady`)。 */
   private focusPending = false;
 
@@ -215,6 +217,11 @@ export class AppendBoxRenderer {
     return shell !== null && shell.style.getPropertyValue('--pkc-pane-append') !== '';
   }
 
+  private keepDraft(lid: string, text: string): void {
+    if (text === '') this.drafts.delete(lid);
+    else this.drafts.set(lid, text);
+  }
+
   /** 打った行数に合わせて高さを揃える。手で決めた高さがあれば何もしない。 */
   private fitToContent(): void {
     if (this.isHandSized()) return;
@@ -252,7 +259,15 @@ export class AppendBoxRenderer {
      *   そこで正しく捨てられる(捨て損なわない)。
      */
     if (mode.kind !== 'hidden' && mode.lid !== this.lastLid) {
-      this.input.value = '';
+      /**
+       * 🔴 **欄は空にするが、打ちかけは捨てない**(#1635 項 1)。⚠ 直す前は、別のノートへ
+       *   移るたびに前のノートの打ちかけが黙って消えていた。
+       * 🔑 打ちかけは**ノート(lid)ごとに預かり**、戻ってきたそのノートの欄にだけ出す。
+       *   欄は移った先のノートの預かりで置き換えるので、**A 宛ての字が B へ追記されることは
+       *   ない**(上の「別のノートへ書いてしまわない」は守る)。
+       */
+      if (this.lastLid !== null) this.keepDraft(this.lastLid, this.input.value);
+      this.input.value = this.drafts.get(mode.lid) ?? '';
       this.fitToContent();
       this.lastLid = mode.lid;
     }
@@ -429,6 +444,8 @@ export class AppendBoxRenderer {
    */
   clear(): void {
     this.input.value = '';
+    // 通った(または空にした)ノートの預かりは要らない ── 戻ってきて古い字が出ない
+    if (this.lastLid !== null) this.drafts.delete(this.lastLid);
     this.fitToContent();
     if (!refoldPeeked(this.region)) this.input.focus();
   }
