@@ -10,7 +10,7 @@
  */
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { phaseBlockReason } from '@adapter/state/app-state';
+import { exportBlockedNote } from '@adapter/state/app-state';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
 import { looksCorrupt } from '@features/storage/db-corruption';
@@ -204,9 +204,9 @@ export async function exportEntry(
   // ガードが後ろにあると「30MB 読んでから編集中ですと言う」になる。
   // さらに、読みの途中で編集が確定すると body と鎖の基準 tip が別時刻になり、
   // 「読み → 編集 → 保存(ready へ戻る)→ ガード通過」で内部矛盾したアーカイブができる
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
     return null;
   }
   try {
@@ -243,9 +243,9 @@ export async function exportFolder(
   lid: string,
 ): Promise<number | null> {
   // ⚠ **読みの前**に断る(`exportEntry` と同じ理由 ── 30MB 読んでから断らない)
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}書き出してください` });
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
     return null;
   }
   try {
@@ -350,10 +350,8 @@ export async function exportArchive(
     return null;
   };
   // 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') {
-    return fail(`${phaseBlockReason(phase)}書き出してください`);
-  }
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) return fail(blocked);
 
   deps.notify?.(EXPORT_STARTING[kind]);
   progressShown = true;
@@ -499,8 +497,9 @@ export function createMarkdownFolderFlow(
       return;
     }
     const state = dispatcher.getState();
-    if (state.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(state.phase)}書き出してください` });
+    const blocked = exportBlockedNote(state, '書き出してください');
+    if (blocked !== null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
       return;
     }
     // ⚠ メタが読めている(起動済み)状態の件数。0 件なら選ばせない
@@ -544,6 +543,12 @@ export async function exportMarkdownToFolder(
   deps: ExportDeps,
   root: WritableDirLike,
 ): Promise<number | null> {
+  // 🔴 選ぶウィンドウを開いている間に章の欄などが開くことがある ── 書く直前にもう一度断る
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+    return null;
+  }
   deps.notify?.('Markdown をフォルダに書き出しています…');
   let sub: string | null = null;
   let sink: FolderSink | null = null;
@@ -863,8 +868,8 @@ export async function exportEntryMarkdown(
     return false;
   };
   // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) return fail(blocked);
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
@@ -903,8 +908,8 @@ async function exportEntryOffice(
     return false;
   };
   // ⚠ 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) return fail(blocked);
   // ⚠ **知らせを出す前に断る** ── 「書き出しています…」の直後に断り文が出ると、
   //    user には「途中で失敗した」に見える(実際は 1 バイトも読んでいない)
   const renderBody = deps.renderBody;

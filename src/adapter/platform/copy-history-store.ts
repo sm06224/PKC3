@@ -106,9 +106,12 @@ export class CopyHistoryStore {
    *   ── 呼び側はそれを user に言う(黙って捨てない)。
    */
   push(item: CopiedItem): boolean {
-    const next = pushCopied(this.list, item, COPY_HISTORY_MAX, COPY_HISTORY_BYTES_MAX);
+    // 🔴 **書く直前に保存を読み直して足す**(#1087)。起動時の写し(`this.list`)に足して全体を書くと、
+    //   別のタブが積んだ物が消える。⚠ 上限(件数・容量)は足した後の一覧に掛かる
+    const base = this.readNow();
+    const next = pushCopied(base, item, COPY_HISTORY_MAX, COPY_HISTORY_BYTES_MAX);
     // ⚠ 積まれなかった(空など)ときは書きに行かない ── 無駄な書込をしない
-    if (next.length === this.list.length && next[0]?.text === this.list[0]?.text) {
+    if (next.length === base.length && next[0]?.text === base[0]?.text) {
       this.list = next;
       return true;
     }
@@ -117,7 +120,13 @@ export class CopyHistoryStore {
 
   /** 1 件消す。 */
   drop(text: string): boolean {
-    return this.write(dropCopied(this.list, text));
+    // 🔴 push と同じ ── 読み直した一覧から消す(別のタブが積んだ物を巻き込まない)
+    return this.write(dropCopied(this.readNow(), text));
+  }
+
+  /** 書く直前の保存の中身(読めなければ空)。 */
+  private readNow(): CopiedItem[] {
+    return parse(this.storage.get(KEY));
   }
 
   /** 全部消す。 */

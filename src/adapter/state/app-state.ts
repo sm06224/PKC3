@@ -948,6 +948,22 @@ function partialDraftBlockedNote(kind: PartialDraftKind): string {
 export const SECTION_DRAFT_NOTE = partialDraftBlockedNote('section');
 export const CODE_DRAFT_NOTE = partialDraftBlockedNote('code');
 /**
+ * 🔴 **書き出し・印刷の入口の門**(#1087)。通せるなら `null`、断るならその字。
+ *
+ * 🔑 書き出しは**保存済みの本文**を読むので、全文編集の下書きだけでなく、章・コードの欄に
+ *   打ちかけた字も入らない(それでも「書き出しました」と出る)。{@link hasUnsavedTyping} を通し、
+ *   欄が開いているときは**欄の断り文**(章 / コードで字が違う)を出す ── 他の取り込み口と同じ作法。
+ * ⚠ 前置きは {@link phaseBlockReason} から。`verbPhrase` は「書き出してください」など。
+ */
+export function exportBlockedNote(state: AppState, verbPhrase: string): string | null {
+  if (state.phase !== 'ready') return `${phaseBlockReason(state.phase)}${verbPhrase}`;
+  // ここへ来るのは `ready` ── 残る打ちかけは章・コードの欄だけ(= {@link hasUnsavedTyping} の `sectionDraft` 側)。
+  // ⚠ 真偽で見る: phase だけの簡易な state(旧 test の台)でも、欄の無い形として通す
+  const draft = state.sectionDraft;
+  if (draft) return isCodeDraft(draft) ? CODE_DRAFT_NOTE : SECTION_DRAFT_NOTE;
+  return null;
+}
+/**
  * 🔴 **別のタブに編集を引き継がれたときの知らせ**(#1087 S3)。出口は**いま画面に在るボタンの字**で言う
  *   ── 全文編集中は「編集をやめる」、章・コードの欄だけが開いているときは「章の編集をやめる」など。
  */

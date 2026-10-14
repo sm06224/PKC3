@@ -32,9 +32,19 @@ const KEY = 'pkc3.flags';
 const URL_PARAM = 'pkc-flag';
 
 function readStored(): Record<string, boolean> {
+  return readStoredOrNull() ?? {};
+}
+
+/** 読めなかった(`localStorage` が投げた)ときだけ `null`。⚠ 鍵が無い・壊れているは `{}`(読めた)。 */
+function readStoredOrNull(): Record<string, boolean> | null {
+  let raw: string | null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw === null) return {};
+    raw = localStorage.getItem(KEY);
+  } catch {
+    return null;
+  }
+  if (raw === null) return {};
+  try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return {};
     const out: Record<string, boolean> = {};
@@ -45,14 +55,17 @@ function readStored(): Record<string, boolean> {
   }
 }
 
-function write(values: Readonly<Record<string, boolean>>): void {
+/** @returns 書けたか(読めない・容量超過は `false` ── この session では呼び側の控えが効く)。 */
+function write(values: Readonly<Record<string, boolean>>): boolean {
   try {
     const pruned = prunedForStorage(values);
     // ⚠ 空なら**鍵ごと消す**(空 object を残すと「触った跡」だけが残る)
     if (Object.keys(pruned).length === 0) localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, JSON.stringify(pruned));
+    return true;
   } catch {
     // 保存できないだけ。この session では効いている
+    return false;
   }
 }
 
@@ -150,8 +163,16 @@ export class FlagStore {
    * 呼び手はそれを user に伝えること(`isFromUrl` を見る)。
    */
   set(name: string, on: boolean): void {
-    this.stored = { ...this.stored, [name]: on };
-    write({ ...this.stored });
+    /*
+     * 🔴 **書く直前に保存を読み直し、このキーだけを書き換える**(#1087)。
+     * ⚠ 直す前は constructor で 1 度だけ読んだ `this.stored` に足して全体を書いていたので、
+     *   別のタブが後から保存した flag が、こちらの保存で**消えていた**(2 タブで別々の設定を変えると片方が消える)。
+     * ⚠ 読めない端末(`localStorage` が投げる)では読み直せないので、この session の控え(`this.stored`)に足す。
+     */
+    const base = readStoredOrNull() ?? this.stored;
+    const next = { ...base, [name]: on };
+    // 書けなかったときも、この session の中では効かせる(読み直しで自分の前の変更が消えない)
+    this.stored = write(next) ? next : { ...this.stored, ...next };
   }
 
   /**
