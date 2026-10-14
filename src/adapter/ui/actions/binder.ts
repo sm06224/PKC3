@@ -4785,7 +4785,8 @@ function deleteFrom(
       moved,
       leftAtRoot(st, after),
       // 🔴 2 件以上のときは一般形を言う(参照元は選んでいる 1 件の分しか引けていないので、件数では言えない。#1087)
-      moved.length > 1 ? LINKED_FROM_SOME : '',
+      // 🔴 1 件のときは `delete-entry` と同じ字(引けていれば件数)── 直す前は 1 件だと何も言わなかった(#1087)
+      moved.length > 1 ? LINKED_FROM_SOME : moved.length === 1 ? linkedFromText(st, after, moved[0]!.lid) : '',
     );
 }
 
