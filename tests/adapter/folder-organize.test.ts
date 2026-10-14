@@ -613,6 +613,46 @@ describe('フォルダ整理の導線(画面)', () => {
     ).toEqual([created]);
   });
 
+  it('🔴 スマートフォルダを見ているときは、「入ります」と言わず、作ったらルートにできたと言う', async () => {
+    const SM = [meta('f1', 1, 'folder'), meta('s1', 2, 'smart'), meta('n1', 3)];
+    const { root, q, d, status } = setup(SM, []);
+    d.dispatch({ type: 'SET_SCOPE', lid: 's1' });
+    await tick();
+    const where = q('[data-pkc-field="filer-create-target"]');
+    expect(where, '作る先の案内が出ていない').not.toBeNull();
+    expect(where!.textContent).toBe('ここは条件で集まる場所なので、作るとルートにできます');
+    expect(where!.textContent, '入らない先に「入ります」と言った').not.toContain('入ります');
+
+    const before = d.getState().entryMetas.size;
+    root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();
+    await tick();
+    expect(d.getState().entryMetas.size).toBe(before + 1);
+    expect(d.getState().relations, 'ルートに作られていない').toEqual([]);
+    expect(status.at(-1)).toBe('ここは条件で集まる場所なので、ルートに作りました');
+    // 対照群: ふつうのフォルダでは、この一言は出ない
+    status.length = 0;
+    d.dispatch({ type: 'SET_SCOPE', lid: 'f1' });
+    await tick();
+    root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();
+    await tick();
+    expect(status, 'ふつうのフォルダでルートに作ったと言った').toEqual([]);
+  });
+
+  it('🔴 左の列の名前の打ち替え: Safari の変換確定の Enter(keyCode 229)では確定しない', async () => {
+    const { q, d } = setup(METAS, []);
+    d.dispatch({ type: 'ROW_RENAME_BEGIN', lid: 'n1' });
+    await tick();
+    const input = q<HTMLInputElement>('[data-pkc-field="row-rename"]');
+    expect(input, '前提: 打ち替えの欄が出ていない').not.toBeNull();
+    input!.value = '変換中の字';
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('n1')?.title, '変換確定の Enter で確定した').toBe('t-n1');
+    expect(d.getState().renamingLid, '打ち替えが終わった').toBe('n1');
+    // 対照群: 普通の Enter なら確定する
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('n1')?.title).toBe('変換中の字');
+  });
+
   it('ルートに居るときの作成は、これまでどおりルートに作る', async () => {
     const { root, d } = setup(METAS, []);
     root.querySelector<HTMLElement>('[data-pkc-field="create-run"]')!.click();

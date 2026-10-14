@@ -3565,6 +3565,10 @@ li[data-pkc-row-slot] {
   font-size: 12px;
   margin-bottom: 4px;
 }
+/* 端末の都合で描けなかったとき(画像にできない / 描く場所が作れない)は、書き方のせいにしない */
+.pkc-md-rendered [data-pkc-mermaid-state='failed'][data-pkc-mermaid-device]::before {
+  content: 'この端末では図を描けませんでした';
+}
 
 /**
  * 🔴 **本文の `@2026-10-15`(押すとその日のノートを開く)**(#1169)。

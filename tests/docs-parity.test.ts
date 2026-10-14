@@ -729,7 +729,7 @@ describe('マニュアルと実装の突合', () => {
     expect(next, '節の終わりが見つからない(空振り)').toBeGreaterThan(head);
     const section = MANUAL.slice(head, next);
 
-    // ⚠ 実装が出す 4 通りを、実装から取る
+    // ⚠ 実装が出す 5 通りを、実装から取る
     const parse2 = takeFenceAsset('asset:a asset:b');
     const parseEmpty = takeFenceAsset('asset:');
     const missing = await readFenceAssetText(async () => null, 'k');
@@ -737,13 +737,15 @@ describe('マニュアルと実装の突合', () => {
       async () => ({ text: () => Promise.reject(new Error('x')) }) as unknown as Blob,
       'k',
     );
+    const loadFail = await readFenceAssetText(async () => { throw new Error('x'); }, 'k');
     const whys = [
+      loadFail.ok ? '' : loadFail.why,
       parse2.kind === 'invalid' ? parse2.why : '',
       parseEmpty.kind === 'invalid' ? parseEmpty.why : '',
       missing.ok ? '' : missing.why,
       notText.ok ? '' : notText.why,
     ];
-    expect(whys.filter((w) => w !== ''), '実装から理由を 4 通り取れていない(空振り)').toHaveLength(4);
+    expect(whys.filter((w) => w !== ''), '実装から理由を 5 通り取れていない(空振り)').toHaveLength(5);
 
     // 🔴 **表の 1 列目と「丸ごと」突き合わせる**(変異試験 M5 が SURVIVED で教えた)。
     // ⚠ `toContain` だと**部分一致で救われる** ── 製品を「字として読めません」から
@@ -2484,6 +2486,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-10-14(1087)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-13 の節に原本
+     */
+    'SQL のエラーの言い方',
     /**
      * ⚠ **2026-10-14(1087)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-13 の節に原本

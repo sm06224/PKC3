@@ -1603,6 +1603,33 @@ describe('2 ペインのキーボード操作(#273)', () => {
     expect(renameInput('left'), '確定したのに入力欄が残っている').toBeNull();
   });
 
+  it('🔴 Safari の変換確定の Enter(keyCode 229・isComposing:false)では名前を確定しない', () => {
+    press('left', 'a', 'F2');
+    const input = renameInput('left')!;
+    input.value = '変換中の字';
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+    expect(d.getState().entryMetas.get('a')?.title, '変換確定の Enter で名前が確定した').toBe('あ');
+    expect(renameInput('left'), '入力欄が閉じた').toBeTruthy();
+    // 対照群: 同じ欄で普通の Enter なら確定する
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+    expect(d.getState().entryMetas.get('a')?.title).toBe('変換中の字');
+  });
+
+  it('🔴 スマートフォルダを開いているペインでは、作らずに本当の理由で断る', () => {
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...METAS, meta('s1', 8, '絞り込み', 'smart' as never)], relations: RELS });
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: 's1' });
+    const before = d.getState().entryMetas.size;
+    for (const f of ['dual-mkdir', 'dual-mknote']) {
+      region.querySelector<HTMLElement>(`[data-pkc-field="${f}"]`)!.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      );
+    }
+    expect(d.getState().entryMetas.size, 'スマートフォルダの中なのに(ルートに)作った').toBe(before);
+    expect(d.getState().error ?? '').toContain('スマートフォルダの中には入れられません');
+    expect(d.getState().error ?? '', '「反対側」は作るときの案内ではない').not.toContain('反対側');
+  });
+
   it('🔴 Esc なら変えずに閉じる', () => {
     press('left', 'a', 'F2');
     const input = renameInput('left')!;
@@ -2049,6 +2076,18 @@ describe('2 ペインの掴んで落とす(#273 段⑤)', () => {
     pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'a' })));
     await tick();
     expect(parentOf('a'), '右のペインが開いている場所へ入っていない').toBe('f1');
+  });
+
+  it('🔴 スマートフォルダを開いているペインの地へ落としたら、本当の理由で断る(「自分の中へは」と言わない)', async () => {
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...METAS, meta('s1', 8, '絞り込み', 'smart' as never)], relations: RELS });
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 's1' });
+    expect(parentOf('a'), '前提: a はルート').toBeNull();
+    pane('right').dispatchEvent(dragEv('drop', dtStub({ [PKC_DRAG_DUAL]: 'x' })));
+    await tick();
+    expect(parentOf('x'), '前提が崩れている(動いた)').toBe('f1');
+    const err = d.getState().error ?? '';
+    expect(err).toContain('スマートフォルダの中には入れられません');
+    expect(err, '別の理由で断っている').not.toContain('自分の中へは');
   });
 
   it('🔴 ルートを開いているペインへ落とすと、フォルダから出る', async () => {

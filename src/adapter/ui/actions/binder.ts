@@ -1032,6 +1032,16 @@ const dualCreate = (
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}${what}を作ってください` });
     return;
   }
+  // 🔴 スマートフォルダの中には作れない(reducer は黙ってルートに作る ── 押したペインと違う所に出る)
+  const refusedPlace = notPlaceable(
+    st,
+    paneScope(paneOf(st.dual, side)),
+    'フォルダかルートを開いてから押してください',
+  );
+  if (refusedPlace !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
+    return;
+  }
   dispatcher.dispatch({
     type: 'CREATE_ENTRY',
     archetype,
@@ -1086,11 +1096,15 @@ const linkedFromText = (before: AppState, after: AppState, lid: string): string 
  *   コピーはルートに入るのに「「スマートフォルダ名」へコピーしました」と言い、移すは「フォルダは自分の中へは入れられません」という
  *   違う理由で断っていた。押す前に、本当の理由で断る。
  */
-const notPlaceable = (st: AppState, scope: string | null): string | null => {
+const notPlaceable = (
+  st: AppState,
+  scope: string | null,
+  hint = '反対側でフォルダかルートを開いてから押してください',
+): string | null => {
   if (scope === null) return null;
   const meta = st.entryMetas.get(scope);
   if (meta?.archetype !== SMART_ARCHETYPE) return null;
-  return 'スマートフォルダの中には入れられません。反対側でフォルダかルートを開いてから押してください';
+  return `スマートフォルダの中には入れられません。${hint}`;
 };
 
 const moveEntries = (
@@ -1103,6 +1117,13 @@ const moveEntries = (
   const phase = dispatcher.getState().phase;
   if (phase !== 'ready') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}動かしてください` });
+    return;
+  }
+  // 🔴 入れられない行き先かの判定は `notPlaceable` 1 本 ── 入口(2 ペインの背景・パンくず・移す・
+  //   メニュー)のどこから来ても、ここで同じ理由で断る(下の「自分の中へは入れられません」と取り違えない)
+  const refusedPlace = notPlaceable(dispatcher.getState(), parentLid);
+  if (refusedPlace !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
     return;
   }
   let moved = 0;
@@ -1196,6 +1217,10 @@ const createAndEdit = (
   if (dispatcher.getState().viewMode !== 'detail')
     dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
   const lid = generateLid();
+  // 🔴 スマートフォルダは「条件で集まる場所」── reducer は黙ってルートに作るので、作った後に 1 行で言う
+  const intoSmart =
+    parentLid !== null &&
+    dispatcher.getState().entryMetas.get(parentLid)?.archetype === SMART_ARCHETYPE;
   dispatcher.dispatch({
     type: 'CREATE_ENTRY',
     archetype,
@@ -1205,6 +1230,8 @@ const createAndEdit = (
     relationId: generateLid(),
     ...(OPENS_READABLE.includes(archetype) ? { edit: false } : {}),
   });
+  if (intoSmart && dispatcher.getState().entryMetas.has(lid))
+    services.showStatus?.('ここは条件で集まる場所なので、ルートに作りました');
   if (dispatcher.getState().phase === 'editing') void services.acquireEditLock?.(lid);
 };
 
@@ -17872,7 +17899,8 @@ export function bindActions(
      */
     if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="row-rename"]')) {
       const lid = el.getAttribute('data-pkc-entry');
-      if (ke.key === 'Enter' && lid !== null) {
+      // ⚠ Safari は変換を確定した Enter が `isComposing: false` / `keyCode` 229 で届く ── 確定と取り違えない
+      if (ke.key === 'Enter' && ke.keyCode !== 229 && lid !== null) {
         ke.preventDefault();
         commitRowRename(lid, el.value);
         return;
@@ -18003,7 +18031,8 @@ export function bindActions(
      */
     if (dualHost && el instanceof HTMLInputElement && el.matches('[data-pkc-field="dual-rename"]')) {
       const lid = el.getAttribute('data-pkc-entry');
-      if (ke.key === 'Enter' && lid !== null) {
+      // ⚠ Safari は変換を確定した Enter が `isComposing: false` / `keyCode` 229 で届く ── 確定と取り違えない
+      if (ke.key === 'Enter' && ke.keyCode !== 229 && lid !== null) {
         ke.preventDefault();
         commitDualRename(lid, el.value);
         return;

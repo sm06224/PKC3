@@ -47,6 +47,7 @@ vi.mock('../../src/adapter/ui/render/mermaid-raster', async (importOriginal) => 
   const real = await importOriginal<typeof import('../../src/adapter/ui/render/mermaid-raster')>();
   return {
     cacheKey: real.cacheKey,
+    DeviceRenderError: real.DeviceRenderError,
     renderToPng: vi.fn(async () => ({ png: new Blob(['png'], { type: 'image/png' }), cssWidth: 200 })),
     readPalette: () => ({
       bg: '#fff',

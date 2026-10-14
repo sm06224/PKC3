@@ -664,7 +664,11 @@ export class FilerRenderer {
       //    「いま見ているフォルダ」に入る(binder `create-entry`)
       const where = document.createElement('p');
       where.setAttribute('data-pkc-field', 'filer-create-target');
-      where.textContent = `新しく作るものは「${scope.title}」に入ります`;
+      // 🔴 スマートフォルダは条件で集まる場所 ── 作るとルートにできる(「入ります」と言うと嘘になる)
+      where.textContent =
+        scope.archetype === SMART_ARCHETYPE
+          ? 'ここは条件で集まる場所なので、作るとルートにできます'
+          : `新しく作るものは「${scope.title}」に入ります`;
       host.append(where);
     }
   }
