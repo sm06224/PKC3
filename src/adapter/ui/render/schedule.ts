@@ -520,7 +520,7 @@ export class ScheduleRenderer {
     if (state.taskScan.truncated)
       return `多いので途中まで出しています(候補のノートは ${state.taskScan.totalNotes} 件)。`;
     if (total === 0)
-      return 'チェックボックスの行(- [ ] やること)がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
+      return 'チェックリストの行(- [ ] やること)がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
     /**
      * 🔴 **「日付が無いから出ていない」を、はっきり書く。**
      * ⚠ 書かないと user は「チェックを書いたのに何も出ない」と読み、

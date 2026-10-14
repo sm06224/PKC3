@@ -1547,7 +1547,7 @@ describe('予定の縦線の色とノートごとの出し入れ(#855 20-A)', ()
     expect(note()).toBe('探す欄の語に合う予定がありません。');
     // 🔑 対照群: 予定が本当に無いときは今までどおり書き方を案内する
     const none = setup({ e9: 'ただの文\n' });
-    expect(none.q('[data-pkc-field="schedule-note"]')!.textContent).toContain('チェックボックスの行(- [ ] やること)がまだありません');
+    expect(none.q('[data-pkc-field="schedule-note"]')!.textContent).toContain('チェックリストの行(- [ ] やること)がまだありません');
   });
 
   it('🔴 日付のある予定が無く、済みも無いときは、日付の書き方を案内する(#1087 S5 の対照群)', () => {
