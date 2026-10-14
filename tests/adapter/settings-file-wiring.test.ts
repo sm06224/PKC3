@@ -13,7 +13,8 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
-import { SETTINGS_FILE_KIND } from '../../src/features/settings/settings-file';
+import { MAX_SETTING_CHARS, SETTINGS_FILE_KIND } from '../../src/features/settings/settings-file';
+import { SETTINGS_NOT_PERSISTED_TEXT } from '../../src/adapter/ui/render/settings-persist-probe';
 
 const tick = async (): Promise<void> => {
   await Promise.resolve();
@@ -168,6 +169,42 @@ describe('設定の持ち出しの配線(#414)', () => {
     await tick();
     expect(clicks, '空の file を落とした').toEqual([]);
     expect(sent.some((a) => a.type === 'OP_FAILED'), '無言で終えた').toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  /** 🔴 「まだありません」が偽になる 2 つの道(#1087)。 */
+  it('🔴 保存できないブラウザ / 長すぎる設定だけのときは、「まだありません」と言わない', async () => {
+    const errorOf = (sent: Dispatchable[]): string =>
+      (sent.find((a) => a.type === 'OP_FAILED') as { error: string } | undefined)?.error ?? '';
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    // 対照群:保存できて、本当に何も無い
+    let ctx = setup();
+    ctx.sent.length = 0;
+    ctx.root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
+    await tick();
+    expect(errorOf(ctx.sent)).toContain('持ち出せる設定がまだありません');
+
+    // 長すぎる設定だけが在る
+    ctx = setup();
+    localStorage.setItem('pkc3.theme', 'x'.repeat(MAX_SETTING_CHARS + 1));
+    ctx.sent.length = 0;
+    ctx.root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
+    await tick();
+    expect(errorOf(ctx.sent)).toContain('長すぎるので入りません');
+    expect(errorOf(ctx.sent)).not.toContain('まだありません');
+
+    // 保存できないブラウザ
+    ctx = setup();
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('private mode');
+    });
+    ctx.sent.length = 0;
+    ctx.root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
+    await tick();
+    spy.mockRestore();
+    expect(errorOf(ctx.sent)).toContain(SETTINGS_NOT_PERSISTED_TEXT);
+    expect(errorOf(ctx.sent)).not.toContain('まだありません');
     vi.restoreAllMocks();
   });
 
