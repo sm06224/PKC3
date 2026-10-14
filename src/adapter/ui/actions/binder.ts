@@ -43,6 +43,7 @@ import {
 } from '@features/markdown/table-convert';
 import {
   isPlaceOpen,
+  placeBlockUnclosed,
   placeGroupAt,
   placeGroupItems,
   placeRectOf,
@@ -97,6 +98,8 @@ import {
   appTileRefusal,
   isViewMode,
   nextViewMode,
+  PLACE_LINE_REMOVE_OPEN_REFUSAL,
+  PLACE_REMOVE_OPEN_REFUSAL,
   phaseBlockReason,
   screenBodyOf,
   SECTION_DRAFT_NOTE,
@@ -111,6 +114,7 @@ import {
   shownCellLine,
   shownPlacedLine,
   noteCellWrite,
+  noteShapeWrite,
 } from '@adapter/state/shown-line';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
@@ -800,6 +804,41 @@ function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 }
 /**
+ * 🔴 **別のタブ・窓が編集中のノートへは、消す書換を撃たない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+ *
+ * ⚠ 通すと、編集中のタブの保存で上書きされ、消した結果は履歴にだけ残る(持ち出しなら、元からは既に切ってある)。
+ *   **断って理由を出す**。問い合わせが落ちたときも黙らない(押しても何も起きないボタンにしない)。
+ * 🔑 **問い合わせが要らない回は同期のまま撃つ**(口の無い環境・このタブが自分で編集中の回)。
+ *   ⚠ 撃つ側は {@link act}。押した瞬間の値は呼び手が先に捕える(待っている間に画面が替わっても、押した物を撃つ)。
+ * @param lids 確かめるノート(持ち出しは元と先の 2 つ)。⚠ 全部が通ったときだけ撃つ
+ * @param failed 問い合わせが落ちた回の字(次にすることを言う)
+ */
+function actUnlessEditedElsewhere(
+  dispatcher: Dispatcher,
+  port: EditLockPort,
+  lids: readonly string[],
+  failed: string,
+  act: () => void,
+): void {
+  if (lids.every((l) => elsewhereCheckNotNeeded(dispatcher, port, l))) {
+    act();
+    return;
+  }
+  void (async () => {
+    for (const l of lids) {
+      const why = await editedElsewhereReason(dispatcher, port, l);
+      if (why !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+        return;
+      }
+    }
+    act();
+  })().catch(() => {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: failed });
+  });
+}
+
+/**
  * 🔴 **別のタブ・窓が今日のノートを編集中なら、予定を足さない**(#529 W5-d の続き。Gemini 裁定 Q5 = A)。
  * 予定の面の「足す」と目盛りの作成(`schedule-grid-create`)の**共通の入口**。
  *
@@ -1241,6 +1280,48 @@ const moveEntries = (
     return;
   }
   report?.(`${moved + same} 件を「${where}」へ入れました`);
+};
+
+/**
+ * 🔴 **移して、動いた物があれば「元に戻す」を出す ── 移す口 4 つ(F6 / ドラッグ / 「移す…」の選択窓 / 帯)の実体は 1 本**(#1087)。
+ *
+ * ⚠ 直す前は F6(`dual-move`)だけが「元に戻す」を出し、ドラッグで落としても「移す…」で選んでも出なかった ──
+ *   同じ「移す」なのに戻せる口が口によって違った(§7「片側にだけ作法が在る」)。
+ * 🔑 新しい仕組みは作らない: 動く前の親を控え、動いた物だけ `offerDualMoveUndo` に渡す。戻す条件
+ *   (いまの親が移した先の物だけ戻す)は `undo-dual-move` がそのまま持つ。
+ * 動いた回だけ `true` を返す(呼び側が「動いた回だけ印を外す」に使う)。
+ */
+const moveEntriesOfferingUndo = (
+  dispatcher: Dispatcher,
+  lids: readonly string[],
+  parentLid: string | null,
+  report?: (text: string) => void,
+): boolean => {
+  const st = dispatcher.getState();
+  const before = st.relations;
+  const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
+  let said = '';
+  moveEntries(dispatcher, lids, parentLid, (text) => {
+    said = text;
+  });
+  if (dispatcher.getState().relations === before) {
+    if (said !== '') report?.(said);
+    return false;
+  }
+  const parentsAfter = resolveCanonicalParents(
+    dispatcher.getState().entryMetas,
+    dispatcher.getState().relations,
+  );
+  const moves = lids
+    .filter((lid) => (parentsBefore.get(lid) ?? null) !== (parentsAfter.get(lid) ?? null))
+    .map((lid) => ({
+      lid,
+      from: parentsBefore.get(lid) ?? null,
+      to: parentsAfter.get(lid) ?? null,
+    }));
+  if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
+  else if (said !== '') report?.(said);
+  return true;
 };
 
 /**
@@ -4258,7 +4339,16 @@ function applyTableFormat(
     dispatcher.dispatch({ type: 'OP_FAILED', error: why });
     return;
   }
-  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, to });
+  /**
+   * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+   *   同じノートの**別の表**(2 つ目の表を押したのに 1 つ目)が変わる。画面の本文から引き、引けなければ断る。
+   */
+  const openLine = shownBodyLine(st, ob.lid, line);
+  if (openLine === null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+    return;
+  }
+  dispatcher.dispatch({ type: 'SET_TABLE_FORMAT', lid: ob.lid, line, openLine, to });
 }
 
 /**
@@ -8127,7 +8217,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 数えるのは**できあがる題名**(同じ場所へのコピーは「のコピー」が付くので、ぶつからない)
     const picked = new Set(lids);
     const sameTitle = steps.filter((x) => picked.has(x.sourceLid) && existing.has(x.title)).length;
-    void read(steps.map((s) => s.sourceLid)).then(
+    // 🔴 **読む前に、保存の書込が並んでいれば待つ**(#1087)。待たずに読むと、書込が disk に届く前の古い本文で
+    //    コピーが作られる(他の読み ── 本文を disk から読む口 ── は待っている。同じ作法に揃える)。
+    void Promise.resolve(services.settle?.() ?? null)
+      .then(() => read(steps.map((s) => s.sourceLid)))
+      .then(
       (bodies) => {
         let missing = 0;
         for (const step of steps) {
@@ -8143,6 +8237,23 @@ const ACTIONS: Record<string, ActionHandler> = {
             edit: false,
             ...(body === undefined ? {} : { body }),
           });
+        }
+        /**
+         * 🔴 **作れたかを見てから言う**(#1087)。編集中は `CREATE_ENTRY` が黙って捨てられる
+         *   (`app-state.ts`。コピーの読み待ちの間に編集へ入った場合)ので、dispatch の後に
+         *   実在を数える ── 作れていないのに「コピーしました」と言わない。
+         */
+        const madeCount = steps.filter((x) => dispatcher.getState().entryMetas.has(x.lid)).length;
+        if (madeCount < steps.length) {
+          const phase = dispatcher.getState().phase;
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error:
+              phase === 'ready'
+                ? 'コピーできませんでした(ノートを作れませんでした)'
+                : `${phaseBlockReason(phase)}コピーしてください`,
+          });
+          return;
         }
         /**
          * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
@@ -8230,16 +8341,6 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
       return;
     }
-    const before = st.relations;
-    /**
-     * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)── 動く前の親を控えておき、動いた物だけ戻せるようにする。
-     * ⚠ 知らせの字は `moveEntries` が組む 1 本をそのまま使う(別の綴りを作らない)。動かなかった回は従来どおり `showStatus` に出す。
-     */
-    const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
-    let said = '';
-    moveEntries(dispatcher, lids, to, (text) => {
-      said = text;
-    });
     /**
      * 🔴 **動いた回だけ印を外す**(着地前レビュー R1)。
      * ⚠ `moveEntries` は編集中・全件拒否で**何もせず返る**ので、無条件に外すと
@@ -8247,23 +8348,10 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   保存してから戻り、**選び直し**になる(この面は編集中でも開ける設計なので
      *   必ず踏む筋である)。
      * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
+     * 🔴 「元に戻す」の出し入れは `moveEntriesOfferingUndo`(移す口 4 つで 1 本)。
      */
-    if (dispatcher.getState().relations !== before) {
+    if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus))
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
-      const parentsAfter = resolveCanonicalParents(
-        dispatcher.getState().entryMetas,
-        dispatcher.getState().relations,
-      );
-      const moves = lids
-        .filter((lid) => (parentsBefore.get(lid) ?? null) !== (parentsAfter.get(lid) ?? null))
-        .map((lid) => ({
-          lid,
-          from: parentsBefore.get(lid) ?? null,
-          to: parentsAfter.get(lid) ?? null,
-        }));
-      if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
-      else if (said !== '') services.showStatus?.(said);
-    } else if (said !== '') services.showStatus?.(said);
   },
   /**
    * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。口は `status-undo`(出し入れは `status-open.ts`)。
@@ -9380,7 +9468,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 何をするかの判断は `body-rewrite.ts`(最後の 1 行 / 1 列は消さない、等)──
    *   ここは**押した所を渡すだけ**である。
    */
-  'shape-cell': (dispatcher, target) => {
+  'shape-cell': (dispatcher, target, services) => {
     const line = Number(target.getAttribute('data-pkc-cell-line'));
     const col = Number(target.getAttribute('data-pkc-cell-col'));
     const what = target.getAttribute('data-pkc-cell-what');
@@ -9396,7 +9484,30 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を触ってください`) });
       return;
     }
-    dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, col, what, mode });
+    /**
+     * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+     *   古い表示から押した「消す」が**1 行上の行**を消す。升を開くのと同じ口(`shownCellLine`)で引く。
+     *   引けなければ撃たずに断る。
+     */
+    const openLine = shownCellLine(st, lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
+    const fire = (): void => {
+      // 🔴 続けて押す次の操作のために、いま書く行の結果を覚えておく(升の `Tab` と同じ。`noteShapeWrite`)
+      noteShapeWrite(dispatcher.getState(), lid, { line, openLine, col, what, mode });
+      dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, openLine, col, what, mode });
+    };
+    /**
+     * 🔴 **消す回は、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門)。
+     * ⚠ 通すと編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回は従来どおり。
+     */
+    if (mode === 'remove') {
+      actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);
+      return;
+    }
+    fire();
   },
   /**
    * 🔴 **色の見本を押して、本文の色コードを選び直す**(#1224。Gemini 裁定 2026-10-01 Q2 = B)。
@@ -9902,7 +10013,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       { title },
     ).then((to) => {
       if (to === null) return;
-      moveEntries(dispatcher, lids, to === '' ? null : to, services.showStatus);
+      moveEntriesOfferingUndo(dispatcher, lids, to === '' ? null : to, services.showStatus);
     });
   },
   /**
@@ -10599,9 +10710,20 @@ const ACTIONS: Record<string, ActionHandler> = {
         const ob = dispatcher.getState().openBody;
         const open = ob === null ? '' : (ob.body.split('\n')[line] ?? '');
         const cur = placeStyleAt(open)?.[key] ?? null;
+        // ⚠ 窓を開いた時点の本文を控える ── reducer の開き行の門は dispatch 時点の本文から行を取り直すので、
+        //   窓の間に別のタブが上の行を増減すると、同じ行番号に来た**別の付箋**を塗ってしまう(#1087)
+        const bodyAtOpen = ob?.body ?? null;
         openColorPicker(target, cur ?? (key === 'fill' ? PLACE_FILL_SEED : PLACE_STROKE_SEED), (to) => {
-          // ⚠ 窓が閉じるまでに本文が動いたかもしれない ── reducer が byte 一致で見直す
           if (parsePlaceColor(to) === null || to === cur) return;
+          const now = dispatcher.getState().openBody;
+          if (now?.lid !== lid) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、色は変えていません' });
+            return;
+          }
+          if (now.body !== bodyAtOpen) {
+            dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、色は変えていません(もう一度開いてください)' });
+            return;
+          }
           dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } });
         });
       },
@@ -10779,6 +10901,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     const ob = st.openBody;
     if (ob === null) return;
+    // 🔴 閉じていない線は消せない ── 押した時点で本当の理由を言う(reducer も同じ関数で見る。#1087)
+    if (placeBlockUnclosed(ob.body, line + frontmatterLineCount(ob.body))) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: PLACE_LINE_REMOVE_OPEN_REFUSAL });
+      return;
+    }
     dispatcher.dispatch({
       type: 'REMOVE_PLACE_LINE',
       lid: ob.lid,
@@ -10796,6 +10923,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const ob = st.openBody;
     if (ob === null) return;
     const lid = ob.lid;
+    // 🔴 閉じていない付箋は消せない ── **確認を出す前に**本当の理由を言う(reducer も同じ関数で見る。#1087)
+    if (placeBlockUnclosed(ob.body, line + frontmatterLineCount(ob.body))) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: PLACE_REMOVE_OPEN_REFUSAL });
+      return;
+    }
+    // ⚠ 確認を開いた時点の本文を控える ── 確認の間に別のタブが上の行を増減すると、同じ行番号は**別の付箋**を指す
+    const bodyAtOpen = ob.body;
     /**
      * 🔴 履歴に積む回なので「戻せる」と言う(#1087)。置いたノートの付箋は、消えるのが付箋の枠だけで
      * ノート自体は無傷 ── それも言う(開き行に `entry=` が在るかで分ける)。
@@ -10813,11 +10947,13 @@ const ACTIONS: Record<string, ActionHandler> = {
         const now = dispatcher.getState();
         if (now.phase !== 'ready') return `${phaseBlockReason(now.phase)}、板の付箋を消してください`;
         if (now.openBody?.lid !== lid) return '別のノートに切り替わったので、板は消していません';
+        // 🔴 確認の間に本文が動いたら書かない(`place-rect` / `place-group` と同じ。別の付箋を消さない)
+        if (now.openBody.body !== bodyAtOpen)
+          return '確認している間に本文が変わったので、付箋は消していません(もう一度消してください)';
         return null;
       },
       () => {
-        const body = dispatcher.getState().openBody?.body ?? '';
-        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(body) });
+        dispatcher.dispatch({ type: 'REMOVE_PLACE', lid, line: line + frontmatterLineCount(bodyAtOpen) });
       },
     );
   },
@@ -10838,6 +10974,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「リンクを足したのに知らない画面が出た」になる。
    */
   'add-url-tile': (dispatcher, target, services) => {
+    // 🔴 編集中などは `CREATE_ENTRY` が黙って空振りする ── 作れないのに「足しました」と言わない(#1087)。
+    //    断り文の前置きは `contacts-quick-add` と同じ(`phaseBlockReason`)。欄の字は残す
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+      return;
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-name"]');
     const urlEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-url"]');
@@ -10862,14 +11005,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 名前を省いたらアドレスをそのまま名前にする(無題のタイルを作らない)
     const title = name === '' ? url : name;
+    const lid = generateLid();
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
-      lid: generateLid(),
+      lid,
       title,
       archetype: 'attachment',
       body: `---\nattachment.launcher_url: ${url}\n---\n`,
       edit: false,
     });
+    // ⚠ 作れなかった回(lid 衝突など ── reducer が理由を立てる)は「足しました」と言わず、欄も消さない(打った字を失わせない)
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
     // 🔑 **足したものがその場で出る** ── 読み直さないと、user は「押しても
     //    何も起きない」と読む(次に開いたときに出ても遅い)
     dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
@@ -16353,7 +16499,13 @@ export function bindActions(
       const toLid = drop === null ? row!.lid : drop.lid;
       if (toLid !== lid) {
         if (!canPutIntoBody(toLid)) return;
-        dispatcher.dispatch({
+        /**
+         * 🔴 **別のタブ・窓が編集中のノートへは持っていかない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+         * ⚠ 通すと、元からは既に切ってあるのに、行き先は編集中のタブの保存で上書きされ、
+         *   塊が**両方の本文から消えて履歴にだけ残る**。元と先の**両方**を確かめる(元が編集中なら、
+         *   切った結果が上書きされて塊が二重になる)。
+         */
+        const handoff = {
           type: 'HANDOFF_BLOCK',
           fromLid: lid,
           start,
@@ -16361,7 +16513,14 @@ export function bindActions(
           toLid,
           toBefore: drop === null ? null : drop.toBefore,
           ...(drop === null ? {} : { anchor: drop.anchor }),
-        });
+        } as const;
+        actUnlessEditedElsewhere(
+          dispatcher,
+          services,
+          [toLid, lid],
+          'ブロックを移せませんでした(別のタブの編集を確かめられませんでした)。もう一度ドラッグしてください',
+          () => dispatcher.dispatch(handoff),
+        );
         return;
       }
       if (drop === null) return;
@@ -16421,7 +16580,8 @@ export function bindActions(
           .filter((x) => x !== '' && metas.has(x))
           .map((x) => formatEntryLink(metas.get(x)!.title, x));
         if (lines.length === 0) return;
-        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines });
+        // 🔴 落とした所の目印を渡す(#1087)── 書く直前に disk 側と突き合わせ、別の窓が行を足していれば断る
+        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines, anchor: at.anchor });
         return;
       }
       e.preventDefault();
@@ -16904,7 +17064,7 @@ export function bindActions(
    * フォルダを自分の子孫へ落とす等、reducer が黙って捨てる形が在る。
    */
   const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
-    moveEntries(dispatcher, lids, parentLid, services.showStatus);
+    void moveEntriesOfferingUndo(dispatcher, lids, parentLid, services.showStatus);
   /**
    * 🔴 **落とした行の前 / 後へ並べ替える**(#215)。
    *

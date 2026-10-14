@@ -122,40 +122,102 @@ function withBodyLine(body: string, line: number, text: string): string | null {
 }
 
 /**
- * 升の確定を撃つ**直前**に呼ぶ ── この書換の結果の行を予測して、列の末尾へ足す。
+ * 書換を撃つ**直前**に呼ぶ ── この書換の結果の行を予測して、列の末尾へ足す。
  * ⚠ 予測は書換そのもの(`applyBodyRewrite`)で出す ── 規則を写さない(§7)。
  *   予測できなければ列を捨てる(断られる側に倒れる)。
+ * @returns 予測できた回は、書換の後の本文(他の行を足すのに使う)。できなければ `null`
  */
+function noteLineRewrite(
+  state: AppState,
+  lid: string,
+  line: number,
+  openLine: string,
+  rewrite: Parameters<typeof applyBodyRewrite>[1],
+  now: number,
+): string | null {
+  const key = cellChainKey(lid, line);
+  const shown = shownBodyLine(state, lid, line);
+  const body = screenBodyOf(state, lid);
+  if (shown === null || body === null) {
+    cellChains.delete(key);
+    return null;
+  }
+  const chain = liveCellChain(lid, line, shown, now) ?? [shown];
+  if (chain[chain.length - 1] !== openLine) {
+    cellChains.delete(key);
+    return null;
+  }
+  const staged = withBodyLine(body, line, openLine);
+  const next = staged === null ? null : applyBodyRewrite(staged, rewrite);
+  const nextLine = next === null ? null : bodyLineAt(next, line);
+  if (next === null || nextLine === null) {
+    cellChains.delete(key);
+    return null;
+  }
+  cellChains.set(key, {
+    lines: nextLine === chain[chain.length - 1] ? chain : [...chain, nextLine],
+    at: now,
+  });
+  return next;
+}
+
+/** 升の確定を撃つ**直前**に呼ぶ(表の升を続けて打つ)。 */
 export function noteCellWrite(
   state: AppState,
   lid: string,
   rewrite: { line: number; openLine: string; col: number; value: string },
   now: number = Date.now(),
 ): void {
-  const key = cellChainKey(lid, rewrite.line);
-  const shown = shownBodyLine(state, lid, rewrite.line);
-  const body = screenBodyOf(state, lid);
-  if (shown === null || body === null) {
-    cellChains.delete(key);
+  noteLineRewrite(state, lid, rewrite.line, rewrite.openLine, { kind: 'csv-cell', ...rewrite }, now);
+}
+
+/**
+ * 表の行・列の足し引きを撃つ**直前**に呼ぶ(#1087)。
+ *
+ * ## なぜ要るか
+ *
+ * 列を足すと**その行の字が変わる**。足した直後(書き戻しが画面に届く前)にもう一度押すと、
+ * 画面の行は書く前の物のままで、`openLine` は disk の行と食い違って断られる(二度押しが効かなくなる)。
+ * 升の `Tab` と同じ形なので、同じ仕組み(列に覚える)に乗せる。
+ *
+ * ⚠ **列の足し引きは他の行も変える** ── 表の全行の予測を覚える(行数が変わらないので、行番号はそのまま)。
+ * ⚠ **行を消す回は覚えない**:消した行の番号は**次の行の字**になる。覚えると、二度押しが
+ *   **続けて 2 行消す**。覚えなければ 2 度目は断られる(押した行はもう無い)。
+ * ⚠ **行を足す回**は下の行の番号が 1 つずつずれる ── 押した行の予測だけ覚える
+ *   (他の行は画面が書き戻されるまで、断られる側に倒れる)。
+ */
+export function noteShapeWrite(
+  state: AppState,
+  lid: string,
+  rewrite: { line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+  now: number = Date.now(),
+): void {
+  if (rewrite.what === 'row' && rewrite.mode === 'remove') {
+    cellChains.delete(cellChainKey(lid, rewrite.line));
     return;
   }
-  const chain = liveCellChain(lid, rewrite.line, shown, now) ?? [shown];
-  if (chain[chain.length - 1] !== rewrite.openLine) {
-    cellChains.delete(key);
-    return;
+  const before = screenBodyOf(state, lid);
+  const next = noteLineRewrite(
+    state,
+    lid,
+    rewrite.line,
+    rewrite.openLine,
+    { kind: 'csv-shape', ...rewrite },
+    now,
+  );
+  if (rewrite.what !== 'col' || before === null || next === null) return;
+  const was = before.split('\n');
+  const now2 = next.split('\n');
+  if (was.length !== now2.length) return;
+  for (let i = 0; i < was.length; i += 1) {
+    if (i === rewrite.line || was[i] === now2[i]) continue;
+    const key = cellChainKey(lid, i);
+    const old = bodyLineAt(before, i);
+    const fresh = bodyLineAt(next, i);
+    if (old === null || fresh === null) continue;
+    const chain = liveCellChain(lid, i, old, now) ?? [old];
+    cellChains.set(key, { lines: [...chain, fresh], at: now });
   }
-  const staged = withBodyLine(body, rewrite.line, rewrite.openLine);
-  const next =
-    staged === null ? null : applyBodyRewrite(staged, { kind: 'csv-cell', ...rewrite });
-  const nextLine = next === null ? null : bodyLineAt(next, rewrite.line);
-  if (nextLine === null) {
-    cellChains.delete(key);
-    return;
-  }
-  cellChains.set(key, {
-    lines: nextLine === chain[chain.length - 1] ? chain : [...chain, nextLine],
-    at: now,
-  });
 }
 
 /** test 用 ── 覚えている列を空にする。 */

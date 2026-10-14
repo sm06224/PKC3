@@ -43,6 +43,7 @@ import { bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { insertedLines } from '../../src/features/markdown/append-target';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
 import { blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 const PKC_BLOCK = 'application/x-pkc-block';
@@ -559,7 +560,7 @@ describe('掴んで落とす(dragstart / dragover / drop)', () => {
     expect(ev, '書換の依頼が出ていない').toBeDefined();
     expect(ev).toMatchObject({
       lid: 'n1',
-      rewrite: { kind: 'move-lines', start: 5, end: 5, toBefore: 22, lines: ['段落 A'] },
+      rewrite: { kind: 'move-lines', start: 5, end: 5, toBefore: 22, lines: ['段落 A'], toBeforeLine: '## 章 C' },
     });
     expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に印が残っている').toHaveLength(0);
   });
@@ -645,7 +646,14 @@ describe('掴んで落とす(dragstart / dragover / drop)', () => {
 });
 
 describe('元に戻す(UNDO_MOVE)', () => {
-  const MOVE = { kind: 'move-lines' as const, start: 5, end: 5, toBefore: 22, lines: ['段落 A'] };
+  const MOVE = {
+    kind: 'move-lines' as const,
+    start: 5,
+    end: 5,
+    toBefore: 22,
+    lines: ['段落 A'],
+    toBeforeLine: RAW.split('\n')[22] ?? null,
+  };
   const rewritten = (d: Dispatcher, body: string, rewrite = MOVE as Parameters<typeof applyBodyRewrite>[1]) =>
     d.dispatch({ type: 'BODY_REWRITTEN', lid: 'n1', body, rewrite, status: null, date: null, archived: false });
 
@@ -763,7 +771,13 @@ describe('一覧の行を本文へ落とすとリンクになる(#684 段②)', 
     expect(ev, '書換の依頼が出ていない').toBeDefined();
     expect(ev).toMatchObject({
       lid: 'n1',
-      rewrite: { kind: 'insert-lines', toBefore: 22, lines: ['[相手](entry:n2)'] },
+      // 🔴 落とした所の目印(落とした塊の開き行 = 生 22 行目 `## 章 C`)を運ぶ(#1087)
+      rewrite: {
+        kind: 'insert-lines',
+        toBefore: 22,
+        lines: ['[相手](entry:n2)'],
+        anchor: { line: 22, text: '## 章 C' },
+      },
     });
     expect(s.root.querySelectorAll('[data-pkc-drop-edge]'), '落とした後に印が残っている').toHaveLength(0);
     /**
@@ -1391,5 +1405,63 @@ describe('本文の塊を別のノートへ持っていく(#684 段③)', () => 
     row.dispatchEvent(dragEv('drop', dt, 5));
     expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF')).toHaveLength(0);
     expect(s.events.filter((e) => e.type === 'REQUEST_BODY_REWRITE'), '同じ本文の中の移動が飛んだ').toHaveLength(0);
+  });
+});
+
+/**
+ * 🔴 **別のタブ・窓が編集中のノートへは、塊を持っていかない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+ *
+ * ## user の物語
+ * 別ウィンドウでノート B を編集している。こちらで別のノート A の塊を「⠿」で B の本文へ持っていく。
+ * 通すと、**元の A からは既に切ってある**のに、B は編集中のウィンドウの保存で上書きされ、
+ * 塊が**両方の本文から消えて履歴にだけ残った**。断って理由を出し、何も動かさない。
+ * 元(掴んだ側)も確かめる ── 元が別窓で編集中なら切った結果が上書きされ、塊が二重になる。
+ */
+describe('持っていく前に、別のタブの編集を確かめる(#1087)', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+
+  function dropOnPinned(grant: (lid: string) => 'granted' | 'denied' | 'unreachable') {
+    const asked: string[] = [];
+    const released: string[] = [];
+    const s = setup({
+      acquireEditLock: async (lid: string) => {
+        asked.push(lid);
+        return grant(lid);
+      },
+      releaseEditLock: (lid: string) => void released.push(lid),
+    });
+    teardown = s.unbind;
+    const { host } = pinned(s);
+    const dt = s.grab();
+    const target = [...host.children].find(
+      (c): c is HTMLElement => c instanceof HTMLElement && c.getAttribute('data-pkc-source-line') === '2',
+    )!;
+    rect(target, 100, 20);
+    s.events.length = 0;
+    target.dispatchEvent(dragEv('drop', dt, 115));
+    return { s, asked, released };
+  }
+
+  it('🔴 行き先が別のタブで編集中なら、持っていかず理由を出す', async () => {
+    const { s, asked } = dropOnPinned((lid) => (lid === 'n2' ? 'denied' : 'granted'));
+    await tick();
+    expect(asked, '行き先を問い合わせていない').toContain('n2');
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF'), '編集中の行き先へ持っていった').toHaveLength(0);
+    expect(s.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
+  });
+
+  it('🔴 元(掴んだ側)が別のタブで編集中でも、持っていかない(切った結果が上書きされて塊が二重になる)', async () => {
+    const { s, asked } = dropOnPinned((lid) => (lid === 'n1' ? 'denied' : 'granted'));
+    await tick();
+    expect(asked, '元を問い合わせていない').toContain('n1');
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF')).toHaveLength(0);
+    expect(s.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
+  });
+
+  it('対照群:どちらも握られていなければ持っていく(取った錠は返す)', async () => {
+    const { s, released } = dropOnPinned(() => 'granted');
+    await tick();
+    expect(s.events.filter((e) => e.type === 'REQUEST_BLOCK_HANDOFF')).toHaveLength(1);
+    expect([...released].sort(), '取った錠を返していない').toEqual(['n1', 'n2']);
   });
 });

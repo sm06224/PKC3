@@ -2024,10 +2024,19 @@ export const REFUSED: readonly string[] = [
   //    (「再読込できないと直せない」と思う)
   'Mod+R',
   'Mod+P',
+  // 🔴 **再読込の別の鍵も同じ**(#1087)── `Mod+R` だけ断っても、`Ctrl+Shift+R`(キャッシュを捨てる再読込)と
+  //    `F5` / `Ctrl+F5` / `Shift+F5` を奪えた。ページが奪えるので、奪うと「再読込できない」と読まれる。
+  // ⚠ `F11`(全画面)は入れない ── 奪われても戻し道(Esc / ブラウザのメニュー)が残り、
+  //    「再読込できないと直せない」型の行き止まりにならない。F1〜F24 は素の鍵として割り当てられる(`bareAllowed`)ので、
+  //    入れる理由があるのは「奪うと戻せなくなる」鍵だけである。
+  'Mod+Shift+R',
+  'F5',
+  'Mod+F5',
+  'Shift+F5',
 ];
 
 export interface BindingProblem {
-  readonly kind: 'unreadable' | 'bare' | 'refused' | 'conflict';
+  readonly kind: 'unreadable' | 'bare' | 'refused' | 'conflict' | 'duplicate' | 'unsaved';
   readonly message: string;
   /** `conflict` のとき、ぶつかった相手。 */
   readonly withCommandId?: string;
@@ -2051,7 +2060,10 @@ export function validateBinding(
       message: 'Ctrl(⌘)か Alt と組み合わせてください。そのままだと文字が打てなくなります',
     };
   }
-  if (REFUSED.some((r) => sameChord(r, norm))) {
+  // ⚠ そのコマンド自身の既定は断らない ── 2 ペインの「反対側へコピー」の既定は `F5`(コマンダー式)で、
+  //   「自分の既定を自分の検査が落とす」を作らない(消した既定を戻す口が無くなる)。他のコマンドへの割当は断る
+  const ownDefault = findCommand(commandId)?.defaults.some((d) => sameChord(d, norm)) === true;
+  if (!ownDefault && REFUSED.some((r) => sameChord(r, norm))) {
     // ⚠ 文言は一覧と対(#697)── `Mod+R` / `Mod+P` はコピーでも貼り付けでもないので、
     //    「コピー・貼り付けなど」だけでは user が「なぜ R が駄目か」を読めない
     return {
@@ -2130,6 +2142,48 @@ export function resolveBindings(overrides: Readonly<Record<string, unknown>>): K
     out[c.id] = list;
   }
   return out;
+}
+
+/** 読み込んだ割当のうち、使えない 1 件。 */
+export interface UnusableBinding {
+  readonly commandId: string;
+  readonly chord: string;
+  readonly problem: BindingProblem;
+}
+
+/**
+ * 🔴 **保存や設定ファイルから来た割当にも、割り当てるときと同じ検査を通す**(#1087)。
+ * ⚠ 直す前は `resolveBindings` が書式だけを見ていたので、素の `B` で全域の操作が動く /
+ *   `Ctrl+R` を奪う / 同じ鍵の 2 件目が黙って死ぬ、が通った(割り当てる口は `validateBinding` を通すが、
+ *   保存と設定ファイルの口は通らなかった ── 片側にだけ門が在った形)。
+ * 🔑 使えない物は**使わないだけ**で消さない(呼び手が保存に残す ── 後で直せる)。
+ *   上書きを持たないコマンドの既定は検査しない。上書きの中にある**そのコマンド自身の既定**も信用する
+ *   (「自分の既定を自分の検査が落とす」を作らない)。
+ * 衝突は**先に処理した物が勝つ**(表の順)。まだ処理していない上書きの割当は、勝ち負けが決まるまで数えない。
+ */
+export function resolveUsableBindings(overrides: Readonly<Record<string, unknown>>): {
+  readonly bindings: KeymapBindings;
+  readonly unusable: readonly UnusableBinding[];
+} {
+  const all = resolveBindings(overrides);
+  const current: Record<string, readonly string[]> = {};
+  for (const c of KEY_COMMANDS) current[c.id] = Array.isArray(overrides[c.id]) ? [] : c.defaults;
+  const unusable: UnusableBinding[] = [];
+  for (const c of KEY_COMMANDS) {
+    if (!Array.isArray(overrides[c.id])) continue;
+    const kept: string[] = [];
+    current[c.id] = kept;
+    for (const chord of all[c.id] ?? []) {
+      if (c.defaults.some((d) => sameChord(d, chord))) {
+        kept.push(chord);
+        continue;
+      }
+      const problem = validateBinding(c.id, chord, current);
+      if (problem === null) kept.push(chord);
+      else unusable.push({ commandId: c.id, chord, problem });
+    }
+  }
+  return { bindings: current, unusable };
 }
 
 /**

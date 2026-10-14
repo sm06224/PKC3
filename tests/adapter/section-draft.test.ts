@@ -952,7 +952,7 @@ describe('元に戻す 2 つと外部画像の取り込みも、章の欄のノ�
     ['UNDO_APPEND', (s) => ({ ...s, lastAppend: { lid: 'n1', lines: ['足した行'] } }), { type: 'UNDO_APPEND' }],
     [
       'UNDO_MOVE',
-      (s) => ({ ...s, lastMove: { lid: 'n1', start: 0, end: 1, toBefore: 2, lines: ['a'] } }),
+      (s) => ({ ...s, lastMove: { lid: 'n1', start: 0, end: 1, toBefore: 2, lines: ['a'], toBeforeLine: null } }),
       { type: 'UNDO_MOVE' },
     ],
     [

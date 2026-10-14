@@ -107,7 +107,8 @@ describe('割当の保存', () => {
       },
     };
     const s = new KeymapStore(dead);
-    expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
+    // 割り当て自体はこの session で効く ── 書けなかったことだけを言う(#1087)
+    expect(s.addBinding('create-entry', 'Alt+M')?.kind).toBe('unsaved');
     expect(s.getBindings()['create-entry']).toEqual(['Mod+N', 'Alt+M']);
   });
 

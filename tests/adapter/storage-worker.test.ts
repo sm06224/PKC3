@@ -1267,6 +1267,56 @@ describe('🔴 居場所の張り替え(2026-08-05。フォルダ整理)', () =>
   });
 
   /**
+   * 🔴 **逆向きの移動で、フォルダが輪にならない**(#1087)。
+   * タブ A が X を Y の中へ、更新の届いていないタブ B が Y を X の中へ ── 画面側の輪の検査は
+   * 各タブの古い木しか見ないので、最後の砦は worker の tx の中(新しい親から祖先を辿る)。
+   */
+  describe('輪になる移動は断る(#1087)', () => {
+    const move = (lid: string, parentLid: string | null, relationId: string) =>
+      request({ op: 'setEntryParent', cid: 'c1', lid, parentLid, relationId });
+    const parentOf = async (lid: string) =>
+      (await relsOf(lid)).find((r) => r.kind === 'structural')?.from_lid ?? null;
+
+    it('X を Y の中へ入れた後に Y を X の中へ入れようとすると断られ、関係が輪にならない', async () => {
+      await write('cy-x', '# X\n');
+      await write('cy-y', '# Y\n');
+      await move('cy-x', 'cy-y', 'cy-1'); // タブ A: X を Y の中へ
+      await expect(move('cy-y', 'cy-x', 'cy-2'), '輪になる移動が通った').rejects.toThrow(/移そうとした先/);
+      expect(await parentOf('cy-x'), 'X の居場所が変わった').toBe('cy-y');
+      expect(await parentOf('cy-y'), 'Y が X の中に入った(輪)').toBeNull();
+    });
+
+    it('間に何段挟んでいても断る(孫の中へ入れる)', async () => {
+      await write('cz-a', '# A\n');
+      await write('cz-b', '# B\n');
+      await write('cz-c', '# C\n');
+      await move('cz-b', 'cz-a', 'cz-1');
+      await move('cz-c', 'cz-b', 'cz-2'); // A > B > C
+      await expect(move('cz-a', 'cz-c', 'cz-3')).rejects.toThrow(/移そうとした先/);
+      expect(await parentOf('cz-a')).toBeNull();
+    });
+
+    it('自分自身の中へも断る', async () => {
+      await write('cs-a', '# A\n');
+      await expect(move('cs-a', 'cs-a', 'cs-1')).rejects.toThrow(/移そうとした先/);
+      expect(await relsOf('cs-a')).toHaveLength(0);
+    });
+
+    it('対照群: 輪にならない移動は通る(兄弟の中へ / 外へ / 別の枝へ)', async () => {
+      await write('ck-p', '# P\n');
+      await write('ck-q', '# Q\n');
+      await write('ck-k', '# K\n');
+      await move('ck-k', 'ck-p', 'ck-1');
+      await move('ck-k', 'ck-q', 'ck-2'); // 別の枝へ
+      expect(await parentOf('ck-k')).toBe('ck-q');
+      await move('ck-p', 'ck-q', 'ck-3'); // 兄弟の中へ(K は Q の中に居るが、P は K の祖先ではない)
+      expect(await parentOf('ck-p')).toBe('ck-q');
+      await move('ck-p', null, 'ck-4'); // 外へ
+      expect(await parentOf('ck-p')).toBeNull();
+    });
+  });
+
+  /**
    * 🔴 **ぶつかった番号で、別のノートの居場所を黙って書き換えない**(#973)。
    *
    * ## 何が起きていたか

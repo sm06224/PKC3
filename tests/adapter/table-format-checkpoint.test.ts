@@ -59,7 +59,7 @@ async function run(
   });
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta], relations: [] });
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
-  d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 0, to });
+  d.dispatch({ type: 'SET_TABLE_FORMAT', lid: 'n1', line: 0, openLine: body.split('\n')[0]!, to });
   await tick();
   return { checkpoint: persisted[0]?.checkpoint, disk, count: persisted.length };
 }

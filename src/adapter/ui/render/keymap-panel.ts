@@ -193,7 +193,15 @@ export function buildKeymapPanel(
     sync();
     if (problem !== null) {
       const row = rows.get(target);
-      if (row) row.note.textContent = `${chordLabel(s)} は割り当てられません: ${problem.message}`;
+      if (row) {
+        // ⚠ 'duplicate' / 'unsaved' は「断った」ではない ── 前者は付いていて、後者は付けたが保存できなかった
+        row.note.textContent =
+          problem.kind === 'duplicate'
+            ? `${chordLabel(s)} は${problem.message}`
+            : problem.kind === 'unsaved'
+              ? `${chordLabel(s)} を割り当てました。${problem.message}`
+              : `${chordLabel(s)} は割り当てられません: ${problem.message}`;
+      }
     }
   };
 

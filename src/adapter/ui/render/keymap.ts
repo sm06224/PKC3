@@ -23,12 +23,15 @@ import {
   findCommand,
   KEY_COMMANDS,
   matchCommand,
-  resolveBindings,
+  resolveUsableBindings,
   validateBinding,
   type BindingProblem,
+  type UnusableBinding,
   type KeyContext,
   type KeymapBindings,
 } from '@features/keymap';
+
+import { SETTINGS_NOT_PERSISTED_TEXT } from './settings-persist-probe';
 
 const KEY = 'pkc3.keymap';
 
@@ -47,6 +50,15 @@ export class KeymapStore {
   /** 解決済みの割当。⚠ `null` = まだ読んでいない(遅延で 1 回だけ読む)。 */
   private cache: KeymapBindings | null = null;
   private overrides: Overrides | null = null;
+  private unusable: readonly UnusableBinding[] = [];
+  /**
+   * 🔴 **知らない id の割当**(新しい版で付いた物)。読むときは使わないが、書くときは**そのまま残す**(#1087)。
+   * ⚠ 同じオリジンの `/dev/` と `/` は保存を共有する ── 古い版でキーを 1 つ変えただけで、新しい版の割当を
+   *   消してはいけない。
+   */
+  private extras: Record<string, unknown> = {};
+  /** 🔴 直近の保存が書けなかった(= 憶えている側だけが正本)。このあいだは保存を読み直さない。 */
+  private unsaved = false;
   private readonly listeners = new Set<() => void>();
 
   constructor(
@@ -67,6 +79,7 @@ export class KeymapStore {
       if (se.key !== null && se.key !== KEY) return;
       this.cache = null;
       this.overrides = null;
+      this.unsaved = false;
       for (const fn of this.listeners) fn();
     };
     target.addEventListener('storage', onStorage);
@@ -82,8 +95,16 @@ export class KeymapStore {
   /** いま効いている割当(既定 + 上書き)。 */
   getBindings(): KeymapBindings {
     if (this.cache !== null) return this.cache;
-    this.cache = resolveBindings(this.readOverrides());
+    const r = resolveUsableBindings(this.readOverrides());
+    this.cache = r.bindings;
+    this.unusable = r.unusable;
     return this.cache;
+  }
+
+  /** 読み込んだ割当のうち、検査を通らず使っていない物(保存には残っている)。 */
+  getUnusable(): readonly UnusableBinding[] {
+    this.getBindings();
+    return this.unusable;
   }
 
   /** 上書きだけ(設定画面が「既定のままか」を出すのに使う)。 */
@@ -106,11 +127,21 @@ export class KeymapStore {
     const parsed = chordFromString(chord);
     if (parsed === null) return { kind: 'unreadable', message: 'このキーは割り当てられません' };
     const norm = chordToString(parsed);
+    // 🔴 同じタブの別の経路(設定ファイルの読み込み)が保存へ直に書いていても、古い憶えで上書きしない
+    this.refresh();
+    // 🔴 すでに付いているのに黙って終わらない(押した user には「何も起きなかった」と見える)
+    if ((this.getBindings()[commandId] ?? cmd.defaults).includes(norm)) {
+      return { kind: 'duplicate', message: 'もう割り当ててあります' };
+    }
     const problem = validateBinding(commandId, norm, this.getBindings());
     if (problem !== null) return problem;
-    const cur = [...(this.getBindings()[commandId] ?? cmd.defaults)];
+    // ⚠ 土台は**保存してある並び**(使えない割当も含む)── 使える物だけで書き直すと、使えない割当が保存から消える
+    const cur = [...(this.readOverrides()[commandId] ?? cmd.defaults)];
     if (!cur.includes(norm)) cur.push(norm);
-    this.write(commandId, cur);
+    if (!this.write(commandId, cur)) {
+      // 割り当て自体はこの session で効いている ── 書けなかったことだけを言う
+      return { kind: 'unsaved', message: SETTINGS_NOT_PERSISTED_TEXT };
+    }
     return null;
   }
 
@@ -124,12 +155,14 @@ export class KeymapStore {
     const parsed = chordFromString(chord);
     if (parsed === null) return;
     const norm = chordToString(parsed);
-    const cur = (this.getBindings()[commandId] ?? cmd.defaults).filter((c) => c !== norm);
+    this.refresh();
+    const cur = (this.readOverrides()[commandId] ?? cmd.defaults).filter((c) => c !== norm);
     this.write(commandId, cur);
   }
 
   /** そのコマンドを既定へ戻す。 */
   resetCommand(commandId: string): void {
+    this.refresh();
     const next = { ...this.readOverrides() };
     if (next[commandId] === undefined) return;
     delete next[commandId];
@@ -138,6 +171,7 @@ export class KeymapStore {
 
   /** 全部を既定へ戻す。 */
   resetAll(): void {
+    this.refresh();
     this.save({});
   }
 
@@ -151,44 +185,80 @@ export class KeymapStore {
     return matchCommand(chordOf(ev), context, this.getBindings());
   }
 
-  private write(commandId: string, chords: readonly string[]): void {
+  /**
+   * 保存を読み直して憶えを合わせる。⚠ **書く前に必ず通る**(#1087)── 憶えは起動時と `storage` event でしか
+   * 更新されないので、同じタブの別の経路(設定ファイルの読み込みは `localStorage` へ直に書く)が書いた分を
+   * 知らないまま書き直すと、読み込んだ割当が全部消えていた。
+   * 打鍵ごとには通らない(割り当て・外す・戻すの操作だけ)。
+   * ⚠ 読めないとき(保存が使えない / 直近の保存が書けていない)は憶えを正本にする。
+   */
+  private refresh(): void {
+    if (this.unsaved) return;
+    const loaded = this.load();
+    if (loaded === null) return;
+    this.overrides = loaded.known;
+    this.extras = loaded.extras;
+    this.cache = null;
+  }
+
+  private write(commandId: string, chords: readonly string[]): boolean {
     const cmd = findCommand(commandId);
-    if (cmd === null) return;
+    if (cmd === null) return true;
     const next = { ...this.readOverrides() };
     const same =
       chords.length === cmd.defaults.length && chords.every((c, i) => c === cmd.defaults[i]);
     // 既定と同じ並びに戻ったなら**上書きを消す**(保存に無駄な行を残さない)
     if (same) delete next[commandId];
     else next[commandId] = [...chords];
-    this.save(next);
+    return this.save(next);
   }
 
-  private save(next: Overrides): void {
+  /** @returns 保存に書けたか。⚠ 書けなくても、この session では効く(憶えている側が持つ)。 */
+  private save(next: Overrides): boolean {
     this.overrides = next;
-    this.cache = resolveBindings(next);
+    this.cache = null;
+    let ok = this.storage !== null;
     try {
-      if (Object.keys(next).length === 0) this.storage?.removeItem(KEY);
-      else this.storage?.setItem(KEY, JSON.stringify(next));
+      // ⚠ 知らない id はそのまま書き戻す(新しい版の割当を消さない)。既知の id は `next` が勝つ
+      const out: Record<string, unknown> = { ...this.extras, ...next };
+      if (Object.keys(out).length === 0) this.storage?.removeItem(KEY);
+      else this.storage?.setItem(KEY, JSON.stringify(out));
     } catch {
-      // 保存できないだけ ── この session では効いている(憶えている側が持つ)
+      ok = false;
     }
+    this.unsaved = !ok;
     for (const fn of this.listeners) fn();
+    return ok;
   }
 
   private readOverrides(): Overrides {
     if (this.overrides !== null) return this.overrides;
+    const loaded = this.load();
+    this.overrides = loaded?.known ?? {};
+    this.extras = loaded?.extras ?? {};
+    return this.overrides;
+  }
+
+  /** 保存を読む。`null` = 保存が読めない(使えない / 例外)。⚠ 壊れた中身は「何も無い」として返す。 */
+  private load(): { known: Overrides; extras: Record<string, unknown> } | null {
     let parsed: unknown;
     try {
-      const raw = this.storage?.getItem(KEY);
+      if (this.storage === null) return null;
+      const raw = this.storage.getItem(KEY);
       parsed = raw === null || raw === undefined ? null : JSON.parse(raw);
-    } catch {
-      parsed = null; // 壊れた保存で近道が全部死ぬのがいちばん困る ── 既定へ落ちる
+    } catch (e) {
+      if (e instanceof SyntaxError) parsed = null; // 壊れた保存で近道が全部死ぬのがいちばん困る ── 既定へ落ちる
+      else return null;
     }
-    const out: Overrides = {};
+    const known: Overrides = {};
+    const extras: Record<string, unknown> = {};
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      for (const c of KEY_COMMANDS) {
-        const v = (parsed as Record<string, unknown>)[c.id];
-        if (!Array.isArray(v)) continue;
+      const ids = new Set(KEY_COMMANDS.map((c) => c.id));
+      for (const [id, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!ids.has(id) || !Array.isArray(v)) {
+          extras[id] = v; // 知らない id / 形の違う値は触らずに残す
+          continue;
+        }
         const list: string[] = [];
         for (const item of v) {
           if (typeof item !== 'string') continue;
@@ -197,11 +267,10 @@ export class KeymapStore {
           const norm = chordToString(chord);
           if (!list.includes(norm)) list.push(norm);
         }
-        out[c.id] = list;
+        known[id] = list;
       }
     }
-    this.overrides = out;
-    return out;
+    return { known, extras };
   }
 }
 

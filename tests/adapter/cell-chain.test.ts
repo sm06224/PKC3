@@ -12,6 +12,7 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { initialState, type AppState, type UserAction } from '../../src/adapter/state/app-state';
 import {
   noteCellWrite,
+  noteShapeWrite,
   resetCellChains,
   shownCellLine,
 } from '../../src/adapter/state/shown-line';
@@ -80,6 +81,63 @@ describe('shownCellLine / noteCellWrite ── 自分が書いた行を先へ進
     noteCellWrite(s, 'e1', { line: LINE, openLine: L0, col: 0, value: 'りんご' }, 2);
     expect(shownCellLine(s, 'e1', LINE + 1, 3)).toBe('| c | d |');
     expect(shownCellLine(stateOf(BODY, 'e2'), 'e2', LINE, 3)).toBe(L0);
+  });
+});
+
+/**
+ * 🔴 **表の行・列の足し引きも、自分が直前に書いた行を数える**(#1087)。
+ *
+ * 列を足すとその行の字が変わる。書き戻しが画面に届く前に(ダブルクリックなど)もう一度押すと、
+ * 画面の行は書く前のままで `openLine` が disk と食い違い、2 度目が断られる ── 升の `Tab` と同じ形。
+ * ⚠ 行を**消す**回は覚えない:消した行の番号は次の行の字になるので、覚えると二度押しが**続けて 2 行消す**。
+ */
+describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () => {
+  const CSV = '```csv\na,b\nc,d\n```\n';
+  const shape = (over: Partial<{ line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' }>) => ({
+    line: 1,
+    openLine: 'a,b',
+    col: 0,
+    what: 'col' as const,
+    mode: 'add' as const,
+    ...over,
+  });
+
+  it('🔴 列を足した直後(書き戻し前)の二度押しは、足した後の行を openLine にする', () => {
+    const s = stateOf(CSV);
+    expect(shownCellLine(s, 'e1', 1, 0), '対照群(何も書いていない)').toBe('a,b');
+    noteShapeWrite(s, 'e1', shape({}), 0);
+    // 予測は disk に実際に書かれる行と一致する(書換そのもので出している)
+    const disk = applyBodyRewrite(CSV, { kind: 'csv-shape', ...shape({}) })!;
+    expect(shownCellLine(s, 'e1', 1, 1)).toBe(disk.split('\n')[1]);
+    expect(shownCellLine(s, 'e1', 1, 1)).toBe('a,,b');
+  });
+
+  it('🔴 列の足し引きは他の行も変える ── 表の全行の予測を覚える', () => {
+    const s = stateOf(CSV);
+    noteShapeWrite(s, 'e1', shape({}), 0);
+    expect(shownCellLine(s, 'e1', 2, 1), '押していない行の予測が無い').toBe('c,,d');
+    // 対照群:行を足す回は他の行の番号がずれるので、他の行は覚えない
+    resetCellChains();
+    noteShapeWrite(s, 'e1', shape({ what: 'row' }), 0);
+    expect(shownCellLine(s, 'e1', 2, 1)).toBe('c,d');
+  });
+
+  it('🔴 行を消す回は覚えない(二度押しが続けて 2 行消さない)', () => {
+    const s = stateOf(CSV);
+    noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'remove' }), 0);
+    expect(shownCellLine(s, 'e1', 1, 1), '消した行の番号に、次の行の予測を載せた').toBe('a,b');
+    // 対照群:行を足す回は押した行の字が変わらないので、そのまま
+    noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'add' }), 2);
+    expect(shownCellLine(s, 'e1', 1, 3)).toBe('a,b');
+  });
+
+  it('断られる書換(最後の列を消す)や、openLine が列の末尾でない回は覚えない', () => {
+    const one = stateOf('```csv\na\nb\n```\n');
+    noteShapeWrite(one, 'e1', shape({ openLine: 'a', mode: 'remove' }), 0);
+    expect(shownCellLine(one, 'e1', 1, 1)).toBe('a');
+    const s = stateOf(CSV);
+    noteShapeWrite(s, 'e1', shape({ openLine: '別の字' }), 0);
+    expect(shownCellLine(s, 'e1', 1, 1)).toBe('a,b');
   });
 });
 

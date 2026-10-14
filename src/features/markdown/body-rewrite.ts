@@ -343,6 +343,8 @@ export type BodyRewrite =
        */
       kind: 'csv-shape';
       line: number;
+      /** 🔴 **押した時点のその行の中身**(#1087)。disk 側と byte 一致しなければ書かない(`csv-cell` と同じ)。 */
+      openLine: string;
       col: number;
       what: 'row' | 'col';
       mode: 'add' | 'remove';
@@ -473,8 +475,10 @@ export type BodyRewrite =
        * 🔴 **落とした時の目印**(#684 段④)── `line` 行目が `text` のままでなければ書かない。
        * ⚠ 差し込みだけが錨を持っていなかった(兄弟は全部 byte 一致を検める)。
        *   段④ は落としてから書くまで待つので、番号だけでは別の行を指す。
+       * 🔴 **必須**(#1087)── 段② の一覧の行も、落としてから書くまでに別の窓が行を足せる。
+       *   `null` は**別のノートへ持っていった塊を行き先の末尾へ入れた ack**だけ(落とした所が無い)。
        */
-      anchor?: InsertAnchor;
+      anchor: InsertAnchor | null;
       /**
        * 🔴 **取り込みの回の印**(#684 段④)── 同じ印で入れた行は「元に戻す」1 回で
        *   まとめて消える(3 枚まとめて落とした写真は 1 手で戻る)。
@@ -510,6 +514,8 @@ export type BodyRewrite =
       end: number;
       toBefore: number;
       lines: readonly string[];
+      /** 🔴 落とし先の行の、落とした時点の中身(#1087)。`line-move.ts` の `MoveLines` と同じ。 */
+      toBeforeLine: string | null;
     }
   | {
       /**
@@ -540,6 +546,8 @@ export type BodyRewrite =
        */
       kind: 'table-format';
       line: number;
+      /** 🔴 **押した時点のその行の中身**(#1087)。同じノートに表が 2 つ在るとき、行がずれて別の表を変えない。 */
+      openLine: string;
       to: TableFormat;
     }
   | {
@@ -917,7 +925,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   // 🔑 塊の移動と差し込みは `line-move.ts` の 1 本(#684)── 取りやめは body をそのまま返す
   if (rewrite.kind === 'move-lines') return moveLines(body, rewrite);
   if (rewrite.kind === 'insert-lines')
-    return insertLines(body, rewrite.toBefore, rewrite.lines, rewrite.anchor);
+    return insertLines(body, rewrite.toBefore, rewrite.lines, rewrite.anchor ?? undefined);
   if (rewrite.kind === 'adopt-images') {
     /**
      * ⚠ **規則を書き直さない** ── 拾う側(`externalImageUrls`)と当てる側は
@@ -1409,8 +1417,10 @@ function csvTableWidth(
  */
 function rewriteTableFormat(
   body: string,
-  rewrite: { line: number; to: TableFormat },
+  rewrite: { line: number; openLine: string; to: TableFormat },
 ): string | null {
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の表を指す形。`task` と同じ。#1087)
+  if (splitLines(body)[rewrite.line] !== rewrite.openLine) return null;
   const at = tableAt(body, rewrite.line);
   if (at === null) return null;
   if (tableConvertRefusal(at, rewrite.to) !== null) return null;
@@ -1492,7 +1502,7 @@ function csvTableAt(
  */
 function rewriteCsvShape(
   body: string,
-  rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+  rewrite: { line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
 ): string | null {
   const r = csvShapeResult(body, rewrite);
   return typeof r === 'string' ? r : null;
@@ -1520,11 +1530,13 @@ export function bodyRewriteRefusal(body: string, rewrite: BodyRewrite): string |
 /** `rewriteCsvShape` の中身。書けたら新しい本文、断ったら理由、当たらなければ `null`。 */
 function csvShapeResult(
   body: string,
-  rewrite: { line: number; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
+  rewrite: { line: number; openLine: string; col: number; what: 'row' | 'col'; mode: 'add' | 'remove' },
 ): string | CsvShapeRefused | null {
   const table = csvTableAt(body, rewrite.line);
   if (table === null) return null;
   const lines = splitLines(body);
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の行を指す形。`csv-cell` と同じ。#1087)
+  if (lines[rewrite.line] !== rewrite.openLine) return null;
   const eol = detectEol(body);
   /**
    * 🔴 **引用の前置きを剥がしてから読む**(#775)── `rewriteCsvCell` と同じ作法。
