@@ -514,6 +514,45 @@ describe('revision chain (P5c ── 逆向き差分)', () => {
     expect(await metasOf('e6t'), '前提: 同じ本文の版を積み増していない(全文化の枝を通っていない)').toHaveLength(1);
   });
 
+  it('🔴 本文だけの保存(keepMeta)は、別のタブの改名・並べ替えを巻き戻さない', async () => {
+    // 直す前: 編集の保存は画面の古い題名・並びで行全体を書き、別のタブの改名を黙って戻していた
+    await write('km1', '本文 1\n');
+    await request({ op: 'renameEntry', cid: 'c1', lid: 'km1', title: '別のタブで付けた題名' });
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('km1', '本文 2\n', { title: '画面の古い題名', entryOrder: 99 }),
+      checkpoint: false,
+      keepMeta: true,
+    });
+    const m = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((x) => x.lid === 'km1')!;
+    expect(m.title).toBe('別のタブで付けた題名');
+    expect(m.entry_order, '並びを画面の古い値で上書きした').toBe(1);
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'km1' })).toBe('本文 2\n');
+
+    // 対照群: keepMeta を渡さない書き込み(作成・取り込みなど)は、渡した題名を書く
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('km1', '本文 3\n', { title: '渡した題名' }),
+      checkpoint: false,
+    });
+    const m2 = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((x) => x.lid === 'km1')!;
+    expect(m2.title).toBe('渡した題名');
+  });
+
+  it('本文だけの保存でも、行が無ければ渡した値で作る', async () => {
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry('km2', 'x\n', { title: '新しい' }),
+      checkpoint: false,
+      keepMeta: true,
+    });
+    const m = (await request({ op: 'listEntryMetas', cid: 'c1' })).find((x) => x.lid === 'km2')!;
+    expect(m.title).toBe('新しい');
+  });
+
   it('鎖の base が壊れたら可視エラー ── それらしい本文を返さない', async () => {
     // ⚠ 本文が小さいとパッチの方が大きくなり全文で保存される(= tip 非依存に
     // なって壊しようがない)。**実際にパッチが選ばれる大きさ**で試す ──

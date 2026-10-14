@@ -296,6 +296,8 @@ export interface StorePort {
        * **1 バイトも書かず** `conflict: true` を返す。⚠ 省略時は last-write-wins。
        */
       expectHash?: string;
+      /** 🔴 既に在る行の題名・種類・並びを保つ(本文だけ書く。#1087)。 */
+      keepMeta?: boolean;
     },
   ): Promise<EntryStamps>;
   /**
@@ -2079,6 +2081,7 @@ export function connectStoreEffects(
           try {
             const stamps = await store.persistEntry(ev.entry, {
               checkpoint: ev.checkpoint === true,
+              ...(ev.keepMeta === true ? { keepMeta: true } : {}),
               // ⚠ 居場所が在るなら**同じ tx で**書かせる(#258)
               ...(ev.parent ? { parent: ev.parent } : {}),
             });

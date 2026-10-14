@@ -332,6 +332,39 @@ describe('編集ロック', () => {
     nowMs = 301_000; // EDIT_LOCK_TTL_MS(5 分)超え・ping 無し
     expect(await host.acquireEdit('c1', 'n1')).toBe('granted');
   });
+
+  it('🔴 奪われたタブが戻ってきて生存確認を送ると、「編集権を失った」と知らされる(#1087)', async () => {
+    const hub = makeHub();
+    const real = makeFakeReal();
+    let nowMs = 0;
+    const host = new StoreProxyHost({
+      client: real.client,
+      init: INIT,
+      makeChannel: hub.make,
+      tabId: 'holder',
+      now: () => nowMs,
+    });
+    let ping: (() => void) | null = null;
+    const follower = await ProxyStoreClient.connect({
+      makeChannel: hub.make,
+      tabId: 'f1',
+      setIntervalFn: ((fn: () => void) => {
+        ping = fn;
+        return 0 as unknown as ReturnType<typeof setInterval>;
+      }) as unknown as typeof setInterval,
+    });
+    if (!follower) throw new Error('handshake failed');
+    const revoked: string[] = [];
+    follower.onEditRevoked((_c, lid) => void revoked.push(lid));
+    expect(await follower.acquireEdit('c1', 'n1')).toBe('granted');
+    nowMs = 301_000; // スリープで生存確認が止まった
+    expect(await host.acquireEdit('c1', 'n1'), '前提: 奪えていない').toBe('granted');
+    expect(ping, '前提: 生存確認の口を掴めていない').not.toBeNull();
+    ping!(); // 戻ってきて生存確認を送る
+    await drain();
+    expect(revoked, '奪われたことを知らされない(握っているつもりで編集を続ける)').toEqual(['n1']);
+    expect(follower.heldEditLocks()).toEqual([]);
+  });
 });
 
 describe('昇格(holder の死 → follower が実 worker へ乗り換える)', () => {
@@ -362,6 +395,28 @@ describe('昇格(holder の死 → follower が実 worker へ乗り換える)', 
     // 以後の書込が新実 client に届く
     await follower.request({ op: 'deleteEntry', cid: 'c1', lid: 'z' });
     expect(newReal.calls.map((r) => r.op)).toContain('deleteEntry');
+  });
+
+  it('🔴 乗り換えの途中の「編集」は許可しない(台帳を見ずに許すと、別のタブと同じノートを同時に編集できる)', async () => {
+    const { host, follower, hub } = await connectPair();
+    host.close();
+    const newReal = makeFakeReal();
+    let duringPromotion: string | null = null;
+    const promoted = follower.promote(async () => {
+      // 新しい host の台帳ができる前に「編集」を押す
+      duringPromotion = await follower.acquireEdit('c1', 'n1');
+      const h = new StoreProxyHost({
+        client: newReal.client,
+        init: INIT,
+        makeChannel: hub.make,
+        tabId: 'holder2',
+        heldLocks: follower.heldEditLocks(),
+      });
+      return { client: h.localClient(), init: INIT };
+    });
+    await promoted;
+    expect(duringPromotion, '乗り換えの途中に台帳を見ずに許可した').toBe('unreachable');
+    expect(follower.heldEditLocks(), '許可していないのに握ったことになっている').toEqual([]);
   });
 
   it('新 holder の名乗りで、残った follower の編集ロックが再主張される', async () => {

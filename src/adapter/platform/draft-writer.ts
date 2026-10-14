@@ -39,9 +39,31 @@ export interface DraftWriterDeps {
   isPending?(lid: string): boolean;
   /** 編集が終わった。`committed` = 保存で終えた(取り消しではない)。 */
   onEnded?(lid: string, committed: boolean): void;
+  /**
+   * 🔴 **書込の列が済んだ後の、disk のそのノートの本文**(#1087、複数タブの見直し)。
+   * ⚠ 保存の確認(`persisted`)は**開いているノート**でしか届かない ── 確認の前に別のノートへ移ると、
+   *   保存済みの控えが消えずに残り、次の起動で「保存していない編集」として出ていた。
+   *   移った後はこれで disk を読み、保存した字と同じなら控えを消す。省略 = 従来どおり待つだけ。
+   */
+  readDiskBody?(lid: string): Promise<string | null>;
   /** `input` / `pagehide` を拾う先。省略 = `document` / `window`。 */
   doc?: Document;
   win?: Window;
+}
+
+/**
+ * 🔴 **書込の列が済むのを待ってから disk を読む口**(`readDiskBody` の中身。#1087)。
+ * ⚠ 待たずに読むと、まだ列に残っている保存より先に古い本文を読み、保存済みの控えを残してしまう。
+ *   `main.ts` の配線は test から実行されないので、順番はここに置いて test する。
+ */
+export function readAfterSettle(
+  settle: () => Promise<void>,
+  read: (lid: string) => Promise<string | null>,
+): (lid: string) => Promise<string | null> {
+  return async (lid) => {
+    await settle();
+    return read(lid);
+  };
 }
 
 export interface DraftWriter {
@@ -130,12 +152,38 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     deps.onEnded?.(s.lid, committed);
   };
 
+  /**
+   * disk を読みに行った lid(**1 つの保存につき 1 回だけ**読む)。⚠ 合わなかったときに消さないと、
+   *   以後の状態の変化のたびに読み直しが飛ぶ(打つたびに worker を叩く)。次の編集で消す。
+   * ⚠ 合わなかった控えは**残す**(保存が落ちた / 後から再送で通った回も、次の起動で聞かれるだけで、
+   *   字は失われない ── 消す側へ倒さない)。
+   */
+  const checking = new Set<string>();
+
   /** 保存した本文が disk に届いたら控えを消す。 */
   const settleAwaiting = (st: AppState): void => {
     for (const [lid, { body, adopted }] of awaitingDisk) {
       if (st.openBody?.lid === lid && st.openBody.persisted === body) {
         awaitingDisk.delete(lid);
         enqueue(() => (adopted ? store.remove(cid, lid) : store.remove(cid, lid, tab)));
+        continue;
+      }
+      // 🔴 そのノートを離れた後は、確認が画面に届かない ── disk を読んで確かめる(`readDiskBody`)
+      if (st.openBody?.lid !== lid && deps.readDiskBody !== undefined && !checking.has(lid)) {
+        checking.add(lid);
+        void deps
+          .readDiskBody(lid)
+          .then((disk) => {
+            const still = awaitingDisk.get(lid);
+            // ⚠ 待っている間に同じノートの次の編集が始まったら触らない(控えは新しい編集のもの)
+            if (disk === body && still !== undefined && still.body === body) {
+              awaitingDisk.delete(lid);
+              enqueue(() => (adopted ? store.remove(cid, lid) : store.remove(cid, lid, tab)));
+            }
+          })
+          .catch(() => {
+            /* 読めなければ控えを残す(消す側へ倒さない) */
+          });
       }
     }
   };
@@ -155,6 +203,7 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
           lastTitle: startTitle,
         };
         awaitingDisk.delete(o.lid); // 次の編集が始まった ── 控えは新しい編集のもの。前の保存の到着では消さない
+        checking.delete(o.lid);
         lastBody = o.body;
         // 戻して入った回は、入った瞬間から控えを持つ(まだ打っていなくても落ちうる)
         if (o.body !== o.baseline) throttle.touch();

@@ -283,6 +283,8 @@ describe('reducer: lean aggregate', () => {
         // P5c: 変更ありの commit は checkpoint 付き(変更前 body の記録は worker が
         // 同 tx で行う ── event は「刻む意思」だけを運ぶ)
         checkpoint: true,
+        // 🔴 本文だけ書く(#1087)── 編集中は一覧の読み直しを先送りするので、題名・並びは古いことがある
+        keepMeta: true,
         entry: {
           lid: 'a',
           title: 't-a',

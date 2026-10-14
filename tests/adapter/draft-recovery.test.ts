@@ -149,6 +149,56 @@ describe('draft-writer(控える側)', () => {
     expect(store.map.size).toBe(0);
   });
 
+  it('🔴 保存の確認の前に別のノートへ移っても、disk に届いた控えは消える(#1087)', async () => {
+    const d = boot();
+    const store = new MemoryDraftStore();
+    const f = fakeClock();
+    const disk = new Map<string, string>();
+    let reads = 0;
+    const w = connectDraftWriter({
+      dispatcher: d, store, cid: CID, tab: 'A', clock: f.clock, readTitle: () => null,
+      readDiskBody: async (lid) => {
+        reads++;
+        return disk.get(lid) ?? null;
+      },
+    });
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: DISK + 'ab' });
+    await settle(f, w);
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    // 書込そのものは届いている(本物の `readDiskBody` は書込の列が済むのを待ってから読む)
+    disk.set('n1', DISK + 'ab');
+    // 確認(BODY_PERSISTED)の前に別のノートへ移る ── 画面は n1 の確認を受け取らない
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '予定\n' });
+    await new Promise((r) => setTimeout(r, 0));
+    await w.settled();
+    expect(store.map.size, '保存済みの控えが残り、次の起動で「保存していない編集」として出る').toBe(0);
+    // 読みに行くのは 1 つの保存につき 1 回だけ(状態が変わるたびに worker を叩かない)
+    const before = reads;
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(reads).toBe(before);
+  });
+
+  it('対照群: disk に届いていなければ(書込が落ちた)、ノートを離れても控えは残る', async () => {
+    const d = boot();
+    const store = new MemoryDraftStore();
+    const f = fakeClock();
+    const w = connectDraftWriter({
+      dispatcher: d, store, cid: CID, tab: 'A', clock: f.clock, readTitle: () => null,
+      readDiskBody: async () => DISK, // 古いまま
+    });
+    d.dispatch({ type: 'START_EDIT' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: DISK + 'ab' });
+    await settle(f, w);
+    d.dispatch({ type: 'COMMIT_EDIT' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    await new Promise((r) => setTimeout(r, 0));
+    await w.settled();
+    expect(store.map.size).toBe(1);
+  });
+
   it('確定した本文が着く前に次の編集が始まったら、新しい編集の控えを消さない', async () => {
     const { d, store, f, w } = setup();
     d.dispatch({ type: 'START_EDIT' });
@@ -765,5 +815,31 @@ describe('main.ts の配線(main.ts はどの test からも実行されない �
     expect(main).toMatch(/discardDraft:\s*\(\)\s*=>\s*draftOfferRef\?\.discard\(\)/);
     // 聞くのは本体の窓だけ(付箋・別窓は聞かない)
     expect(main).toMatch(/heldViewWindow === null && !heldNoteWindow\) \{\s*draftOfferRef = createDraftOffer/);
+  });
+});
+
+describe('readAfterSettle(#1087)', () => {
+  it('🔴 書込の列が済むのを待ってから読む(待たずに読むと、列に残った保存より先に古い本文を読む)', async () => {
+    const { readAfterSettle } = await import('../../src/adapter/platform/draft-writer');
+    const order: string[] = [];
+    let release!: () => void;
+    const settled = new Promise<void>((r) => (release = r));
+    const read = readAfterSettle(
+      async () => {
+        order.push('settle:start');
+        await settled;
+        order.push('settle:end');
+      },
+      async (lid) => {
+        order.push(`read:${lid}`);
+        return 'disk';
+      },
+    );
+    const p = read('n1');
+    await Promise.resolve();
+    expect(order, '待つ前に読んだ').toEqual(['settle:start']);
+    release();
+    expect(await p).toBe('disk');
+    expect(order).toEqual(['settle:start', 'settle:end', 'read:n1']);
   });
 });

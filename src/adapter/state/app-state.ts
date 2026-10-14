@@ -3919,6 +3919,12 @@ export type DomainEvent =
       /** true = 変更前の disk body を履歴に 1 件積む(P5c: 鎖の維持は worker)。 */
       checkpoint?: boolean;
       /**
+       * 🔴 **本文だけを書く(題名・種類・並びは disk の値を保つ)**(#1087、複数タブの見直し)。
+       * ⚠ 編集の保存は画面が持つ題名・並びで行を組むが、編集中の画面は一覧の読み直しを先送りする ──
+       *   その間に別のタブで改名・並べ替えると、保存がそれを**黙って巻き戻していた**。
+       */
+      keepMeta?: boolean;
+      /**
        * 🔴 **居場所も同じ tx で**(#258)。⚠ 作成を 2 手に割ると、行を書いた ack と
        * 辺の書込の間にタブを閉じたとき**親だけ飛ぶ**(ノートはルートに現れる)。
        */
@@ -6759,7 +6765,7 @@ function reduceCore(
          * ⚠ 入れ物でなければ `smartScanFor` が空を返す ── 普通の保存で走査は走らない。
          */
         events: [
-          { type: 'PERSIST_ENTRY', entry, checkpoint },
+          { type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true },
           ...smartScanFor(state, lid),
         ],
       };
@@ -6788,7 +6794,7 @@ function reduceCore(
           smartHits,
           openBody: { lid, body: baseline, baseline, persisted, diskAhead: false },
         },
-        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint }],
+        events: [{ type: 'PERSIST_ENTRY', entry, checkpoint, keepMeta: true }],
       };
     }
     case 'CANCEL_EDIT': {

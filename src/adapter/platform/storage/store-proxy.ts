@@ -57,9 +57,12 @@ export const EDIT_LOCK_TTL_MS = 300_000;
  * `resolveContainer` は `containers` へ INSERT しうるが、entries / relations を
  * 1 行も動かさないので他タブは描き直す必要が無い。そもそも `broadcastChanged` が
  * `if (!('cid' in req)) return;` で早期 return するため、入れても何も起きない。
- * ⚠ この集合の完全性を検める test は無い ── 足すときは「他タブの一覧が古くなるか」で判断する。
+ * 🔴 **完全性は test が見る**(#1087、複数タブの見直し)── `protocol.ts` の op は、この集合か
+ *   `NOT_BROADCAST`(放送しない理由つき)のどちらかに必ず在る(`tests/adapter/store-proxy-ops.test.ts`)。
+ *   直す前は Office の書き戻し(`replaceAssetRefs`)が漏れていて、他タブの本文が古いまま残り、
+ *   そのタブの保存が書き戻しを黙って巻き戻していた。
  */
-const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
+export const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   'upsertEntry',
   // ⚠ **足し忘れると、他タブの一覧に古い題名が残る**(#178)
   'renameEntry',
@@ -78,6 +81,72 @@ const MUTATING_OPS: ReadonlySet<StorageRequest['op']> = new Set([
   // ⚠ **足し忘れると、他タブのタグの色が古いまま**(#1457)── 受け手は main.ts の `onRemoteChanged`
   //    (`listTagColors` を読み直す)。当たり先の lid は無い(`changedLids` は null)
   'putTagColor',
+  // ⚠ **足し忘れると、他タブの本文が古いまま残る**(#1087)── 添付を参照するノートを何件も書き換える。
+  //   当たり先は書く前に分からないので `changedLids` は null(全面の読み直し。保存のたびではなく稀)
+  'replaceAssetRefs',
+]);
+
+/**
+ * **放送しない op**(`MUTATING_OPS` の完全性の相方)。⚠ 新しい op を足したら、どちらかへ必ず入れる。
+ * ⚠ 理由は字ではなく注釈で書く ── 製品の文字列に内部の語を置かない(`tests/features/ui-terms.test.ts`)。
+ */
+export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
+  // 保存先を開く / 閉じるだけ
+  'init',
+  'close',
+  'openContainer',
+  // 入れ物の一覧に足すだけで、ノートもつながりも動かない(broadcastChanged は cid を見て早期 return する)
+  'resolveContainer',
+  // システムのメッセージはノートの一覧に出ない。知らせのたびに他タブを読み直させない
+  'appendMessage',
+  // 中身を消す操作は、他タブへは onContainerWiped で知らせる
+  'wipeStorage',
+  // 中身を変えない保守(救出の読み出し / 詰め直し / 索引の作り直し / 検査の記録)
+  'rescueEntries',
+  'vacuum',
+  'optimizeIndexes',
+  'integrityStamp',
+  // 別の SQLite を読む / 書き出し用の複製を扱う(この入れ物を書かない)
+  'openSqlGuest',
+  'closeSqlGuest',
+  'openSqliteExport',
+  'closeSqliteExport',
+  // 読むだけ
+  'checkIntegrity',
+  'integrityPlan',
+  'counts',
+  'contactScan',
+  'exportImage',
+  'exportRevisionChain',
+  'exportSqliteTable',
+  'findAssetOwner',
+  'findBacklinks',
+  'getBodies',
+  'getBody',
+  'getRevision',
+  'listAssetMetas',
+  'listBodies',
+  'listContainerIds',
+  'listEntryMetas',
+  'listRelations',
+  'listRevisionLids',
+  'listRevisionMetas',
+  'listSystemEntries',
+  'listTagColors',
+  'listTrash',
+  'queryScan',
+  'readImageArchive',
+  'revisionCounts',
+  'revisionDiffStats',
+  'runReadOnlySql',
+  'scanAssetRefs',
+  'searchDetail',
+  'searchEntries',
+  'smartScan',
+  'snippetScan',
+  'storageGauge',
+  'storageProfile',
+  'taskScan',
 ]);
 
 /** 変更の当たり先(null = 特定できない → 全面 refresh)。 */
@@ -120,6 +189,8 @@ export type ProxyWire =
   | { kind: 'edit-res'; to: string; id: number; granted: boolean }
   | { kind: 'edit-release'; from: string; cid: string; lid: string }
   | { kind: 'edit-ping'; from: string; keys: string[] }
+  /** 🔴 握っていると思っている編集ロックが、もう別のタブのものになっている(#1087)。 */
+  | { kind: 'edit-revoked'; to: string; key: string }
   | { kind: 'editing-ask'; from: string; id: number }
   | { kind: 'editing-res'; to: string; id: number; editing: boolean }
   | { kind: 'bye'; from: string };
@@ -400,6 +471,15 @@ export class StoreProxyHost implements TabSync {
         for (const key of msg.keys) {
           const cur = this.locks.get(key);
           if (cur && cur.tab === msg.from) cur.seenAt = this.now();
+          /**
+           * 🔴 **もう別のタブのものなら、握っているつもりのタブに知らせる**(#1087、複数タブの見直し)。
+           * ⚠ 応答の無かったタブのロックは 5 分で移せる(`tryLock`)が、移したことを元のタブへ言う口が
+           *   無かった ── 戻ってきたタブは握っているつもりで編集を続け、2 つのタブが同じノートを編集できた。
+           * ⚠ 台帳に無いときは握り直させない ── 手放した直後に飛んでいた ping で握り直すと、
+           *   誰も編集していないのに 5 分ほかのタブが編集できなくなる。
+           */
+          else if (cur && cur.tab !== msg.from)
+            this.ch.postMessage({ kind: 'edit-revoked', to: msg.from, key } satisfies ProxyWire);
         }
         return;
       }
@@ -561,10 +641,15 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (this.terminated || this.state === 'dead') return Promise.resolve('unreachable');
     const key = lockKey(cid, lid);
     if (this.state !== 'channel') {
-      // 昇格後は自分が裁定者になっているはず ── 呼び側は host の TabSync に
-      // 乗り換えている(onPromoted)。ここへ来たら握って良い
-      this.heldEdits.set(key, { cid, lid });
-      return Promise.resolve('granted');
+      /**
+       * 🔴 **乗り換えの途中は許可しない**(#1087、複数タブの見直し)。
+       * ⚠ 乗り換えが済めば呼び側は host の TabSync に乗り換える(`onPromoted`)ので、ここへ来るのは
+       *   **乗り換えの途中**(新しい host の台帳ができる前・呼び側が乗り換える前)だけである。
+       *   直す前はここで台帳を見ずに許可していたので、旧本体の台帳でそのノートを握っていた別のタブと
+       *   **同じノートを同時に編集**できた(後に保存したほうが勝つ)。
+       * 🔑 「通信できない」と同じ顔で断る(編集させない側へ倒す。押し直せば新しい台帳で裁定される)。
+       */
+      return Promise.resolve('unreachable');
     }
     const id = this.nextId++;
     return new Promise((resolve) => {
@@ -768,6 +853,14 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         if (p.timer !== null) (this.deps.clearTimeoutFn ?? clearTimeout)(p.timer);
         if (msg.ok) p.resolve(msg.result);
         else p.reject(new Error(msg.error));
+        return;
+      }
+      case 'edit-revoked': {
+        if (msg.to !== this.id) return;
+        const held = this.heldEdits.get(msg.key);
+        if (!held) return;
+        this.heldEdits.delete(msg.key);
+        for (const fn of this.revokedListeners) fn(held.cid, held.lid);
         return;
       }
       case 'edit-res': {
