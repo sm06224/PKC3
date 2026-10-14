@@ -1261,12 +1261,14 @@ describe('ショートカットとマニュアルの突合(#256)', () => {
   it('🔴 割り当てられない組み合わせの一覧と断り文が、REFUSED と一致する', () => {
     const section = MANUAL.slice(MANUAL.indexOf('### 割り当てを変える'));
     expect(section.length, '「割り当てを変える」の節が無い').toBeGreaterThan(200);
-    const letters = REFUSED.map((r) => {
-      expect(r.startsWith('Mod+'), `REFUSED に Mod+ 以外の形が入った(${r})── 表の書き方を直す`).toBe(true);
-      return r.slice('Mod+'.length);
-    });
+    // Ctrl + 1 文字の形は 1 つの太字にまとめ、それ以外の形(再読み込みの別の綴り)は 1 つずつ太字で書く
+    const isLetter = (r: string): boolean => /^Mod\+[A-Z]$/.test(r);
+    const letters = REFUSED.filter(isLetter).map((r) => r.slice('Mod+'.length));
+    const others = REFUSED.filter((r) => !isLetter(r)).map((r) => r.replace(/Mod/g, 'Ctrl').split('+').join(' + '));
     expect(letters.length).toBeGreaterThan(6);
+    expect(others.length, '再読み込みの別の形(Ctrl+Shift+R / F5 …)が REFUSED に無い').toBeGreaterThanOrEqual(4);
     expect(section).toContain(`**Ctrl + ${letters.join(' / ')}**`);
+    for (const o of others) expect(section, `マニュアルに「${o}」が無い`).toContain(`**${o}**`);
     const refused = validateBinding('create-entry', 'Mod+R', {});
     expect(refused?.kind).toBe('refused');
     for (const word of ['再読込', '印刷']) {

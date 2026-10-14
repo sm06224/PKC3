@@ -10838,6 +10838,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   「リンクを足したのに知らない画面が出た」になる。
    */
   'add-url-tile': (dispatcher, target, services) => {
+    // 🔴 編集中などは `CREATE_ENTRY` が黙って空振りする ── 作れないのに「足しました」と言わない(#1087)。
+    //    断り文の前置きは `contacts-quick-add` と同じ(`phaseBlockReason`)。欄の字は残す
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+      return;
+    }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
     const nameEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-name"]');
     const urlEl = root.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-url"]');
@@ -10862,14 +10869,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 名前を省いたらアドレスをそのまま名前にする(無題のタイルを作らない)
     const title = name === '' ? url : name;
+    const lid = generateLid();
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
-      lid: generateLid(),
+      lid,
       title,
       archetype: 'attachment',
       body: `---\nattachment.launcher_url: ${url}\n---\n`,
       edit: false,
     });
+    // ⚠ 作れなかった回(lid 衝突など ── reducer が理由を立てる)は「足しました」と言わず、欄も消さない(打った字を失わせない)
+    if (!dispatcher.getState().entryMetas.has(lid)) return;
     // 🔑 **足したものがその場で出る** ── 読み直さないと、user は「押しても
     //    何も起きない」と読む(次に開いたときに出ても遅い)
     dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });

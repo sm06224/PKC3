@@ -24,6 +24,7 @@
  *
  * ⚠ **pure module**。`localStorage` も DOM も知らない(読み書きは adapter の仕事)。
  */
+import { resolveUsableBindings } from '@features/keymap';
 
 /** 1 件の設定。⚠ 値は保存されている**生の文字列**のまま運ぶ(解釈しない)。 */
 export interface SettingsEntry {
@@ -347,6 +348,11 @@ export interface SettingsPlan {
   readonly unknown: readonly string[];
   /** 🔴 **長すぎて入れない鍵**(1 件 `MAX_SETTING_CHARS` 字を超える)。黙って捨てない(#1087)。 */
   readonly tooLong: readonly string[];
+  /**
+   * 🔴 **読み込んでも使えないキーの割り当て**の件数(#1087)。割り当てるときと同じ検査(素のキー・
+   * 再読込などブラウザの鍵・同じ場所で効く操作との重なり)を通らなかった物。入ることは入るが、使われない。
+   */
+  readonly unusableBindings: number;
   /** 読めなかった理由。`null` なら読めた。 */
   readonly error: string | null;
 }
@@ -357,8 +363,22 @@ const EMPTY_PLAN: SettingsPlan = {
   refused: [],
   unknown: [],
   tooLong: [],
+  unusableBindings: 0,
   error: null,
 };
+
+const KEYMAP_KEY = 'pkc3.keymap';
+
+/** キー割り当ての保存の値(JSON)のうち、使えない割り当ての件数。読めない値は 0 件。 */
+function countUnusableBindings(value: string): number {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return 0;
+    return resolveUsableBindings(parsed as Record<string, unknown>).unusable.length;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * 読んだ JSON を「何が変わるか」に直す。
@@ -393,6 +413,7 @@ export function planSettingsImport(
   const unknown: string[] = [];
   const tooLong: string[] = [];
   let same = 0;
+  let unusableBindings = 0;
   const seen = new Set<string>();
   for (const item of list) {
     if (typeof item !== 'object' || item === null) continue;
@@ -421,8 +442,9 @@ export function planSettingsImport(
       continue;
     }
     changes.push({ key, label, from, to: value });
+    if (key === KEYMAP_KEY) unusableBindings += countUnusableBindings(value);
   }
-  return { changes, same, refused, unknown, tooLong, error: null };
+  return { changes, same, refused, unknown, tooLong, unusableBindings, error: null };
 }
 
 /**
@@ -451,6 +473,10 @@ export function settingsPlanNote(plan: SettingsPlan): string {
     parts.push(`${plan.unknown.length} 件はこのバージョンが知らない設定なので入れません`);
   if (plan.tooLong.length > 0)
     parts.push(`${plan.tooLong.length} 件は長すぎるので入れません(1 件 ${MAX_SETTING_CHARS.toLocaleString('en-US')} 字まで)`);
+  if (plan.unusableBindings > 0)
+    parts.push(
+      `ショートカットキーの割り当てのうち ${plan.unusableBindings} 件は、ブラウザが使うキーや他の操作とぶつかるため、入れても使われません`,
+    );
   return `${parts.join('。')}。`;
 }
 
