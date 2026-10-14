@@ -181,6 +181,8 @@ export type ProxyWire =
   | { kind: 'edit-res'; to: string; id: number; granted: boolean }
   | { kind: 'edit-release'; from: string; cid: string; lid: string }
   | { kind: 'edit-ping'; from: string; keys: string[] }
+  /** 🔴 握っていると思っている編集ロックが、もう別のタブのものになっている(#1087)。 */
+  | { kind: 'edit-revoked'; to: string; key: string }
   | { kind: 'editing-ask'; from: string; id: number }
   | { kind: 'editing-res'; to: string; id: number; editing: boolean }
   | { kind: 'bye'; from: string };
@@ -461,6 +463,15 @@ export class StoreProxyHost implements TabSync {
         for (const key of msg.keys) {
           const cur = this.locks.get(key);
           if (cur && cur.tab === msg.from) cur.seenAt = this.now();
+          /**
+           * 🔴 **もう別のタブのものなら、握っているつもりのタブに知らせる**(#1087、複数タブの見直し)。
+           * ⚠ 応答の無かったタブのロックは 5 分で移せる(`tryLock`)が、移したことを元のタブへ言う口が
+           *   無かった ── 戻ってきたタブは握っているつもりで編集を続け、2 つのタブが同じノートを編集できた。
+           * ⚠ 台帳に無いときは握り直させない ── 手放した直後に飛んでいた ping で握り直すと、
+           *   誰も編集していないのに 5 分ほかのタブが編集できなくなる。
+           */
+          else if (cur && cur.tab !== msg.from)
+            this.ch.postMessage({ kind: 'edit-revoked', to: msg.from, key } satisfies ProxyWire);
         }
         return;
       }
@@ -622,10 +633,15 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
     if (this.terminated || this.state === 'dead') return Promise.resolve('unreachable');
     const key = lockKey(cid, lid);
     if (this.state !== 'channel') {
-      // 昇格後は自分が裁定者になっているはず ── 呼び側は host の TabSync に
-      // 乗り換えている(onPromoted)。ここへ来たら握って良い
-      this.heldEdits.set(key, { cid, lid });
-      return Promise.resolve('granted');
+      /**
+       * 🔴 **乗り換えの途中は許可しない**(#1087、複数タブの見直し)。
+       * ⚠ 乗り換えが済めば呼び側は host の TabSync に乗り換える(`onPromoted`)ので、ここへ来るのは
+       *   **乗り換えの途中**(新しい host の台帳ができる前・呼び側が乗り換える前)だけである。
+       *   直す前はここで台帳を見ずに許可していたので、旧本体の台帳でそのノートを握っていた別のタブと
+       *   **同じノートを同時に編集**できた(後に保存したほうが勝つ)。
+       * 🔑 「通信できない」と同じ顔で断る(編集させない側へ倒す。押し直せば新しい台帳で裁定される)。
+       */
+      return Promise.resolve('unreachable');
     }
     const id = this.nextId++;
     return new Promise((resolve) => {
@@ -829,6 +845,14 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
         if (p.timer !== null) (this.deps.clearTimeoutFn ?? clearTimeout)(p.timer);
         if (msg.ok) p.resolve(msg.result);
         else p.reject(new Error(msg.error));
+        return;
+      }
+      case 'edit-revoked': {
+        if (msg.to !== this.id) return;
+        const held = this.heldEdits.get(msg.key);
+        if (!held) return;
+        this.heldEdits.delete(msg.key);
+        for (const fn of this.revokedListeners) fn(held.cid, held.lid);
         return;
       }
       case 'edit-res': {
