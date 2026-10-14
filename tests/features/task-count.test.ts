@@ -16,7 +16,9 @@
 import { describe, expect, it } from 'vitest';
 import { countTaskCandidates, listTaskItems } from '../../src/features/markdown/task-count';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
-import { applyBodyRewrite, isTaskLine } from '../../src/features/markdown/body-rewrite';
+import { isTaskLine } from '../../src/features/markdown/body-rewrite';
+// 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)
+import { applyOpened as applyBodyRewrite } from '../helpers/open-line';
 
 /** 🔑 **描く側の真値** ── 画面に出るチェック欄の数(自前で数え直さない)。 */
 function drawn(body: string): number {
@@ -189,14 +191,14 @@ describe('チェック項目を取り出す(#277 段②-b)', () => {
 
   it('中身を取り出す(印は落とし、前後の空白は削る)', () => {
     expect(listTaskItems('- [ ]   牛乳を買う  \n- [x] 卵\n')).toEqual([
-      { line: 0, text: '牛乳を買う', done: false },
-      { line: 1, text: '卵', done: true },
+      { line: 0, text: '牛乳を買う', done: false, rawLine: '- [ ]   牛乳を買う  ' },
+      { line: 1, text: '卵', done: true, rawLine: '- [x] 卵' },
     ]);
   });
 
   it('引用の中も取り出す(記号は剥がす)', () => {
     expect(listTaskItems('> - [x] 引用の中\n')).toEqual([
-      { line: 0, text: '引用の中', done: true },
+      { line: 0, text: '引用の中', done: true, rawLine: '> - [x] 引用の中' },
     ]);
   });
 
@@ -209,7 +211,7 @@ describe('チェック項目を取り出す(#277 段②-b)', () => {
   });
 
   it('中身が空でも札は出る(印だけの行)', () => {
-    expect(listTaskItems('- [ ]\n')).toEqual([{ line: 0, text: '', done: false }]);
+    expect(listTaskItems('- [ ]\n')).toEqual([{ line: 0, text: '', done: false, rawLine: '- [ ]' }]);
   });
 
   it('項目が無ければ空の配列', () => {

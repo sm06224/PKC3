@@ -19,7 +19,7 @@
  */
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { phaseBlockReason } from '@adapter/state/app-state';
+import { exportBlockedNote } from '@adapter/state/app-state';
 import { safeName } from '@features/export/file-name';
 import { dayStamp } from '@features/datetime/date-math';
 import { writePortableBundle } from '@features/export/portable-bundle';
@@ -101,8 +101,8 @@ export async function exportPortable(
     return null;
   };
   // 編集中は draft が disk と違う ── 「保存したつもりの本文」が入らない形を作らない
-  const phase = dispatcher.getState().phase;
-  if (phase !== 'ready') return fail(`${phaseBlockReason(phase)}書き出してください`);
+  const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
+  if (blocked !== null) return fail(blocked);
 
   /**
    * ⚠ **押せてしまうより、押した理由に答える。** ここを黙って失敗させると

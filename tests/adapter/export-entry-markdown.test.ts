@@ -123,6 +123,23 @@ describe('exportEntryMarkdown(#1440)', () => {
     expect(await h.files[0]!.blob.text()).toBe(body);
   });
 
+  it('🔴 ノートへのリンクは外では開けない ── 件数で言い、本文は書き換えない(添付の注意と並ぶ)', async () => {
+    const body = '[別のノート](entry:n2) と ![図](asset:ast-1)\n\n`[コード](entry:n3)`\n\n[もう一つ](entry:n4)';
+    const h = harness(source({ body, assets: ['ast-1'] }));
+    await exportEntryMarkdown(h.dispatcher, h.deps, 'n1');
+    const link = 'ノートへのリンク 2 件は、書き出した先では開けません(リンクの字のまま残ります)';
+    expect(h.reported).toEqual([['添付 1 件は入っていません(バックアップなら入ります)', link]]);
+    expect(h.told.at(-1), '画面下の知らせに両方が出ていない').toContain(link);
+    expect(h.told.at(-1)).toContain('添付 1 件は入っていません');
+    expect(await h.files[0]!.blob.text(), '本文を書き換えている').toBe(body);
+  });
+
+  it('対照群: ノートへのリンクが無ければ、その注意は出ない', async () => {
+    const h = harness(source({ body: '[外](https://example.com)' }));
+    await exportEntryMarkdown(h.dispatcher, h.deps, 'n1');
+    expect(h.reported).toEqual([[]]);
+  });
+
   it('🔴 編集中は store を 1 度も読まずに断り、file も落とさない', async () => {
     const getBody = vi.fn(async () => 'x');
     const h = harness(source({ body: 'x', getBody }), 'editing');

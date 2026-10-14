@@ -9,7 +9,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { parseCsv, csvEscapeField, type CsvPositions } from '../../src/features/markdown/csv-table';
-import { applyBodyRewrite, bodyRewriteRefusal } from '../../src/features/markdown/body-rewrite';
+import { bodyRewriteRefusal } from '../../src/features/markdown/body-rewrite';
+// 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)
+import { applyOpened as applyBodyRewrite } from '../helpers/open-line';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 describe('位置を採る', () => {

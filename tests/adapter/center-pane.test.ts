@@ -121,6 +121,39 @@ describe('チェックの印(#277)', () => {
     );
   });
 
+  /**
+   * 🔴 **古い表示から押しても、押していない項目は切り替わらない**(#1087)。
+   *
+   * > 窓 A で別のノートを編集中に、窓 B がこのノートのチェックリストの上へ 1 行足した。
+   * > 窓 A のこの表示は古いまま ── 「牛乳」を押したのに、行番号だけだと「割り込み」が切り替わっていた。
+   *
+   * 観測点は 2 つ:①押した時点の行の中身が書換に**載る**(`TOGGLE_TASK.openLine`)②disk が**動かない**。
+   * ⚠ 対照群は上の「押すと原文の印が反転し、保存まで届く」(割り込みが無ければ通る)。
+   */
+  it('🔴 古い表示から押すと、押した行の中身が運ばれ、別の項目は切り替わらず断られる', async () => {
+    const { d, q, persisted, store } = setup([meta('n1', { archetype: 'text', status: null })], {
+      n1: BODY,
+    });
+    const sent: Array<{ type: string; openLine?: string }> = [];
+    const raw = d.dispatch.bind(d);
+    d.dispatch = ((a: { type: string; openLine?: string }) => {
+      sent.push(a);
+      return raw(a as never);
+    }) as typeof d.dispatch;
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick(20);
+    // ── 別の窓が 2 行目へ「割り込み」を足した(この窓の表示は古いまま)
+    const disk = ['# 買い物', '', '- [ ] 割り込み', '- [ ] 牛乳', '- [x] 卵', '', 'ここは本文。'].join('\n');
+    store['n1'] = disk;
+    q<HTMLElement>('[data-pkc-action="toggle-task"][data-pkc-task-line="2"]')!.click();
+    await tick(20);
+    const toggle = sent.find((a) => a.type === 'TOGGLE_TASK');
+    expect(toggle?.openLine, '押した時点の行の中身が書換へ載っていない').toBe('- [ ] 牛乳');
+    expect(persisted, '押していない項目を書き換えた').toHaveLength(0);
+    expect(store['n1'], '別の窓の本文が動いた').toBe(disk);
+    expect(d.getState().error ?? '', '無言で終わった').toContain('反映できません');
+  });
+
   /** ⚠ もう一度押すと戻る(片道にしない)。 */
   it('もう一度押すと外れる', async () => {
     const { d, q, store } = setup([meta('n1', { archetype: 'text', status: null })], { n1: BODY });
@@ -232,6 +265,10 @@ describe('チェックの印(#277)', () => {
     d.dispatch({ type: 'START_EDIT' });
     await tick(20);
     expect(d.getState().phase, '前提が崩れている').toBe('editing');
+    // 🔴 枠に出ている本文は state が持つ(押した時点の行の中身はそこから引く ── #1087)
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n2' });
+    await tick(20);
+    expect(d.getState().splitBodies.get('n2'), '前提が崩れている(枠の本文が届いていない)').toBe(BODY);
     // ⚠ 横に留めた枠は `data-pkc-split-lid` を焼く(`lid-of-node.ts`)
     const stack = document.createElement('div');
     stack.setAttribute('data-pkc-split-lid', 'n2');
@@ -295,7 +332,7 @@ describe('チェックの印(#277)', () => {
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     await tick(20);
     // 見出しの行(チェックではない)を指す
-    d.dispatch({ type: 'TOGGLE_TASK', lid: 'n1', line: 0 });
+    d.dispatch({ type: 'TOGGLE_TASK', lid: 'n1', line: 0, openLine: '# 買い物' });
     await tick(20);
     expect(persisted, '当てずっぽうで書き込んだ').toHaveLength(0);
     expect(store['n1'], '本文が変わった').toBe(BODY);

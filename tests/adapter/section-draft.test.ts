@@ -1157,7 +1157,7 @@ describe('blockedWithSuffix(#1087)', () => {
       ...booted(),
       sectionDraft: { lid: 'n1', heading: '決定事項', original: 'x', saving: false },
     };
-    const r = reduce(s, { type: 'TOGGLE_TASK', lid: 'n1', line: 0 });
+    const r = reduce(s, { type: 'TOGGLE_TASK', lid: 'n1', line: 0, openLine: '- [ ] x' });
     expect(r.state.error).toBe(SECTION_DRAFT_NOTE);
   });
 

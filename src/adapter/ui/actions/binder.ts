@@ -104,6 +104,14 @@ import {
   type PartialDraft,
   type ViewMode,
 } from '@adapter/state/app-state';
+import {
+  SHOWN_LINE_LOST,
+  shownBodyLine,
+  shownCardLine,
+  shownCellLine,
+  shownPlacedLine,
+  noteCellWrite,
+} from '@adapter/state/shown-line';
 import { groupsNeedingNote, planGroupMove } from '@features/launcher/group-order';
 import { isMovableTile } from '@features/launcher/tile-order';
 import { filerFlattenNow, filerRowOptions, listViewOptions } from '@adapter/state/list-view-options';
@@ -4268,7 +4276,22 @@ function setTaskRun(dispatcher: Dispatcher, target: HTMLElement, to: 'done' | 'o
     .filter((n) => Number.isInteger(n) && n >= 0);
   const lid = target.getAttribute(MENU_LID_ATTR) ?? '';
   if (lines.length === 0 || lid === '') return;
-  dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, to });
+  /**
+   * 🔴 **押した時点の各行の中身を添える**(#1087)。⚠ 運ばれた行番号は右クリックで開いた時点の本文のもの ──
+   *   別の窓が上へ足していれば、番号は別の項目を指す。画面が見ている本文(リストは本文の面にしか出ない)から引く。
+   *   1 行でも引けなければ撃たずに断る(一部だけ空で運ぶと、その行が黙って飛ばされる)。
+   */
+  const st = dispatcher.getState();
+  const openLines: string[] = [];
+  for (const n of lines) {
+    const text = shownBodyLine(st, lid, n);
+    if (text === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
+    openLines.push(text);
+  }
+  dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, openLines, to });
 }
 
 function menuCarriedLine(target: Element): number | null {
@@ -9158,6 +9181,15 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
     if (target.querySelector('[data-pkc-field="cell-input"]') !== null) return;
     /**
+     * 🔴 **欄を開いた時点のその行の中身**(#1087)。⚠ 確定は打ち終わった後 ── 打っている間に別の窓が
+     *   上へ行を足していても、書換は「開いた時点の行」と disk 側を突き合わせて断る(別の行の升を書き換えない)。
+     */
+    const openLine = shownCellLine(st, lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
+    /**
      * 🔴 **字を選んでいる最中は開かない**(CLAUDE.md §10)。
      *
      * ⚠ 押せるようにする前、升は**ただの字**だった ── ドラッグで選んで
@@ -9237,7 +9269,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       const value = input.value;
       restore();
       if (value === before) return; // 変わっていなければ撃たない
-      dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, col, value });
+      /**
+       * 🔴 **続けて打つ次の升のために、いま書く行の結果を覚えておく**(`shownCellLine`)。
+       * ⚠ 隣の欄は書き戻しを待たずに開くので、画面の行はまだ書く前の物である。
+       */
+      noteCellWrite(dispatcher.getState(), lid, { line, openLine, col, value });
+      dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, openLine, col, value });
     };
     /**
      * 🔴 **確定して、隣の升の欄をそのまま開く**(#750 I1。user 裁定 2026-09-06)。
@@ -9433,6 +9470,23 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     /**
+     * 🔴 **押した時点のその行の中身を、押した面が見ている本文から引く**(#1087)。
+     * ⚠ 行番号だけだと、別の窓が上へ 1 行足したあと、古い表示(横に留めた枠・予定の札)から押した操作が
+     *   **押していない項目**を切り替える。面で見ている本文の置き場が違う ── 付箋は抜粋、予定の札は走査、
+     *   本文・枠は画面の本文(`shown-line.ts`)。引けなければ撃たずに断る。
+     * ⚠ 別のタブの編集を待つ前(= 押した瞬間)に引く ── 待っている間に表示が替わっても、押した物を運ぶ。
+     */
+    const openLine =
+      placedLid !== null
+        ? shownPlacedLine(st, placedLid, line)
+        : target.closest('article[data-pkc-entry]') !== null
+          ? shownCardLine(st, lid, line)
+          : shownBodyLine(st, lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
+    /**
      * 🔴 別のタブ・窓が**そのノートを編集中**なら断る(追記・題名と同じ門。押した印は動かさない)。
      * ⚠ 直す前は付箋の中のチェックだけがこの門を通り、普通のチェックと繰り返しの回は素通りだった ──
      *   付けた印は、編集中のタブが保存したときに上書きされて消えていた(#1087)。
@@ -9455,7 +9509,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         });
     };
     if (placedLid !== null) {
-      guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line }), placedLid);
+      guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line, openLine }), placedLid);
       return;
     }
     /**
@@ -9470,10 +9524,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     const rep = target.closest<HTMLElement>('[data-pkc-task-repeat]');
     const on = rep?.getAttribute('data-pkc-task-date') ?? '';
     if (rep !== null && on !== '') {
-      guarded(() => dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, date: on }), lid);
+      guarded(() => dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, openLine, date: on }), lid);
       return;
     }
-    guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line }), lid);
+    guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line, openLine }), lid);
   },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
@@ -13353,6 +13407,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
    */
   'unschedule-task': (dispatcher, target) => {
+    const st = dispatcher.getState();
     const card = target.closest<HTMLElement>('[data-pkc-entry]');
     const lid = card?.getAttribute('data-pkc-entry') ?? '';
     if (card === null || lid === '') return;
@@ -13366,11 +13421,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     const line = Number(raw);
     // ⚠ 読めなければ**何もしない**(当てずっぽうで別の行を書き換えない)
     if (raw === null || raw === undefined || !Number.isInteger(line)) return;
+    // 🔴 札が焼かれた時点の行の中身を添える(#1087)。引けなければ撃たずに断る
+    const openLine = shownCardLine(st, lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
     /**
      * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
      *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
      */
-    dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, date: null, until: null });
+    dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null });
   },
   /**
    * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
@@ -13417,10 +13478,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (key === null) return;
     // ⚠ 空文字は「やめる」── 属性に `null` は書けないので、こちらで戻す
     if (key !== '' && !isRepeatUnit(key)) return;
+    // 🔴 札が焼かれた時点の行の中身を添える(#1087)。引けなければ撃たずに断る
+    const openLine = shownCardLine(dispatcher.getState(), lid, line);
+    if (openLine === null) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+      return;
+    }
     dispatcher.dispatch({
       type: 'SET_TASK_REPEAT',
       lid,
       line,
+      openLine,
       repeat: key === '' ? null : key,
     });
   },

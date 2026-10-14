@@ -210,6 +210,7 @@ describe('一覧(agenda)に出る', () => {
       repeat: unit,
       timeEnd: null,
       substitutes: null,
+      rawLine: '',
     });
 
   it('隔週は 2 週おき', () => {

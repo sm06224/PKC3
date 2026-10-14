@@ -1057,6 +1057,7 @@ describe('カンバンの札(#277 段②-b)', () => {
       repeat: null,
       timeEnd: null,
       substitutes: null,
+      rawLine: `- [ ] ${c.text}`,
       ...c,
     })),
     totalNotes: 1,
@@ -1125,7 +1126,7 @@ describe('カンバンの札(#277 段②-b)', () => {
       type: 'BODY_REWRITTEN',
       lid: 'a',
       body: '- [x] 牛乳\n',
-      rewrite: { kind: 'task', line: 0 },
+      rewrite: { kind: 'task', line: 0, openLine: '- [ ] x' },
       status: null,
       date: null,
       archived: false,
@@ -1178,7 +1179,7 @@ describe('カンバンの札(#277 段②-b)', () => {
       type: 'BODY_REWRITTEN',
       lid: 'a',
       body: '- [x] x\n',
-      rewrite: { kind: 'task', line: 0 },
+      rewrite: { kind: 'task', line: 0, openLine: '- [ ] x' },
       status: null,
       date: null,
       archived: false,
@@ -1280,10 +1281,10 @@ describe('編集中の日付は、黙って捨てない(#516)', () => {
 
   it('🔴 行の予定 ── ノートの日付と呼び名を分ける(別のものを探させない)', () => {
     const s = editing();
-    const add = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, date: '2026-09-01', until: null });
+    const add = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, openLine: '- [ ] x', date: '2026-09-01', until: null });
     expect(add.events).toEqual([]);
     expect(add.state.error, '行なのに「ノートの」と言った').toContain('行に予定を付けて');
-    const del = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, date: null, until: null });
+    const del = reduce(s, { type: 'SET_TASK_DATE', lid: 'a', line: 0, openLine: '- [ ] x', date: null, until: null });
     expect(del.state.error).toContain('行の予定を外して');
   });
 

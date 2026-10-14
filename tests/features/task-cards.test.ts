@@ -31,6 +31,8 @@ describe('task-cards(札 = 本文のチェック項目)', () => {
     repeat: null,
     timeEnd: null,
     substitutes: null,
+    // 札が焼かれた時点の行の原文(差し替えの本文と同じ形 ── 同じ内容なら据え置くため)
+    rawLine: `- [${done ? 'x' : ' '}] ${text}`,
   });
 
   /**
@@ -190,6 +192,8 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     repeat: null,
     timeEnd: null,
     substitutes: null,
+    // 🔴 札が焼かれた時点の行の原文(`body()` が組む本文の行と同じ形 ── 同じ内容なら据え置くため)
+    rawLine: `- [${done ? 'x' : ' '}] ${text}`,
   });
   /** ⚠ 項目が **0 行目と 5 行目**に来る本文(下の `card(…, 0/5, …)` と揃える)。 */
   const body = (doneSecond: boolean, first = 'あ', second = 'う'): string =>
@@ -231,6 +235,22 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     const next = replaceTaskCards(before, 'a', '- [ ] ゴミ出し @2026-08-25 毎月\n');
     expect(next, '刻みが変わったのに据え置いた(古い刻みのまま残る)').not.toBe(before);
     expect(next[0]).toMatchObject({ date: '2026-08-25', repeat: 'month' });
+  });
+
+  /**
+   * 🔴 **行の原文だけが変わっても、据え置かない**(#1087)。
+   *
+   * ⚠ 字下げや記法の綴りだけを書き換えた回は、札の字・印・日付・刻みが**全部同じ**になる。見ないと
+   *   札が**古い原文**を持ち続け、押すと書換が「押した時点の行の中身が違う」と断り続ける(開き直すまで)。
+   * ⚠ 他の欄は 1 つも動かさない fixture にしてある(救い手が変わっただけ、を避ける)。
+   */
+  it('🔴 行の原文(字下げ)だけが変わっても、据え置かない', () => {
+    const before = taskCardsOf('a', '- [ ] あ\n');
+    expect(before[0]?.rawLine, '前提が崩れている').toBe('- [ ] あ');
+    const next = replaceTaskCards(before, 'a', '-   [ ] あ\n');
+    expect(next[0], '前提が崩れている ── 札の字・印が動いている').toMatchObject({ text: 'あ', done: false });
+    expect(next, '原文だけ変わったのに据え置いた(古い原文が札に残る)').not.toBe(before);
+    expect(next[0]?.rawLine).toBe('-   [ ] あ');
   });
 
   /** ⚠ 対照群 ── 本当に同じなら据え置く(上が「常に作り直す」で通らないように)。 */

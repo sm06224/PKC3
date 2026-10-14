@@ -135,15 +135,21 @@ export class NoticeStore {
   markSeen(ids: readonly string[], registry: readonly Notice[] = NOTICES): void {
     const live = new Set(recentNotices(registry).map((n) => n.id));
     const byId = (a: string, b: string): number => (a < b ? 1 : a > b ? -1 : 0);
-    const all = [...new Set([...this.seen, ...ids])];
+    /*
+     * 🔴 **書く直前に保存を読み直して足す**(#1087)。直す前は constructor で 1 度だけ読んだ
+     *   `this.seen` に足して全体を書いていたので、別のタブが後から付けた既読が**こちらの保存で消え**、
+     *   消えた分のお知らせが次の起動でまた出た。⚠ 和集合なので、どちらのタブの既読も残る。
+     */
+    const onDisk = this.readSeen();
+    const all = [...new Set([...onDisk, ...this.seen, ...ids])];
     const merged = [
       ...all.filter((id) => live.has(id)),
       ...all.filter((id) => !live.has(id)).sort(byId),
     ].slice(0, NOTICE_SEEN_MAX);
-    const same =
-      merged.length === this.seen.length && merged.every((v, i) => v === this.seen[i]);
-    if (same) return;
+    // ⚠ 「変わらないなら書かない」は**保存の中身**と比べる(自分の写しではなく)
+    const same = merged.length === onDisk.length && merged.every((v, i) => v === onDisk[i]);
     this.seen = merged;
+    if (same) return;
     this.storage.set(SEEN_KEY, JSON.stringify(merged));
   }
 }

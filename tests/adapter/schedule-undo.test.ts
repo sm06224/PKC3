@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
 import { taskCardsOf } from '../../src/features/schedule/task-cards';
 import { MOVE_OFFER_MS } from '../../src/features/schedule/move-undo';
+import { SHOWN_LINE_LOST } from '../../src/adapter/state/shown-line';
 import { dropTaskCard } from '../../src/adapter/ui/render/schedule-drag';
 import {
   MOVE_ACK_WAIT_MS,
@@ -252,6 +253,19 @@ describe('「元に戻す」を押す', () => {
     expect(r.body(), '前提: 動いている').not.toBe(original);
     r.dispatcher.dispatch((press(r) as { action: UserAction }).action);
     expect(r.body()).toBe(original);
+  });
+
+  /**
+   * 🔴 **戻す相手の札が走査に居ないときは、撃たずに理由を言う**(#1087)。⚠ 札の行の中身(`rawLine`)が
+   *   戻す書換の `openLine` になる。走査がまだ無い(`taskScan === null`)回は「変わったか分からない」ので
+   *   従来は戻す手を返していたが、運ぶ物が無いまま撃つと、別の窓が足した行の番号違いを素通しする。
+   *   対照群は直下までの「戻る」系(走査に居れば戻す手が返る)。
+   */
+  it('🔴 走査が無く札の行を運べないときは、戻す手を返さず理由を言う', () => {
+    const r = rig('- [ ] 会議 @2026-08-25 14:00');
+    drop(r, '0', '2026-08-25', '2026-08-27');
+    r.patch({ taskScan: null });
+    expect(press(r)).toEqual({ refusal: SHOWN_LINE_LOST });
   });
 
   it('🔴 「日付なし」へ外した直後の「元に戻す」で、日付・時刻・幅が戻る', () => {

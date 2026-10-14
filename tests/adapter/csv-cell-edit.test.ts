@@ -7,6 +7,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { resetCellChains } from '../../src/adapter/state/shown-line';
 import type { Dispatcher } from '../../src/adapter/state/dispatcher';
 
 /**
@@ -17,6 +18,13 @@ import type { Dispatcher } from '../../src/adapter/state/dispatcher';
  *   検めていないことになる**(§1「検査の主張そのものが成り立たない」)。
  *   横に留めた**別ノート**を検めたいときだけ `openBodyLid` を渡す。
  */
+/**
+ * 🔴 **画面が見ている本文**(#1087)。⚠ 欄を開いた時点の行の中身(`openLine`)は、画面の本文
+ *   (`openBody` / 横に留めた枠の `splitBodies`)の 1 行目(0 始まり)から引く ── 押したセルの行番号が 1。
+ */
+const CSV_LINE = 'あ,い';
+const CSV_BODY = `\`\`\`csv\n${CSV_LINE}\n\`\`\`\n`;
+
 function fake(phase = 'ready', openBodyLid: string | null = phase === 'editing' ? 'n1' : null) {
   const dispatched: Array<Record<string, unknown>> = [];
   return {
@@ -25,7 +33,11 @@ function fake(phase = 'ready', openBodyLid: string | null = phase === 'editing' 
       getState: () => ({
         phase,
         selectedLid: 'n1',
-        openBody: openBodyLid === null ? null : { lid: openBodyLid },
+        openBody: openBodyLid === null ? null : { lid: openBodyLid, body: CSV_BODY },
+        splitBodies: new Map([
+          ['n1', CSV_BODY],
+          ['other', CSV_BODY],
+        ]),
       }),
       dispatch: (a: Record<string, unknown>) => dispatched.push(a),
     } as unknown as Dispatcher,
@@ -56,6 +68,8 @@ function cellRoot(raw = 'あ', inner = 'あ'): { root: HTMLElement; cell: HTMLEl
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  // ⚠ 続けて打つための「直前に書いた行」の記憶は module 変数 ── test 同士で持ち越さない(同じ lid・行を使い回すため)
+  resetCellChains();
 });
 
 describe('セルを押すと、そのセルだけが入力欄になる(#418 段①)', () => {
@@ -88,7 +102,7 @@ describe('セルを押すと、そのセルだけが入力欄になる(#418 段�
     input(cell)!.value = '品名';
     input(cell)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(dispatched).toEqual([
-      { type: 'SET_CSV_CELL', lid: 'n1', line: 1, col: 0, value: '品名' },
+      { type: 'SET_CSV_CELL', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, value: '品名' },
     ]);
   });
 
@@ -99,7 +113,7 @@ describe('セルを押すと、そのセルだけが入力欄になる(#418 段�
     cell.click();
     input(cell)!.value = '';
     input(cell)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(dispatched).toEqual([{ type: 'SET_CSV_CELL', lid: 'n1', line: 1, col: 0, value: '' }]);
+    expect(dispatched).toEqual([{ type: 'SET_CSV_CELL', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, value: '' }]);
   });
 
   it('🔴 Escape は取り消し ── 撃たず、押す前の字に戻る', () => {
@@ -182,7 +196,7 @@ describe('セルを押すと、そのセルだけが入力欄になる(#418 段�
     input(cell)!.value = '直した';
     input(cell)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(dispatched).toEqual([
-      { type: 'SET_CSV_CELL', lid: 'other', line: 1, col: 0, value: '直した' },
+      { type: 'SET_CSV_CELL', lid: 'other', line: 1, openLine: CSV_LINE, col: 0, value: '直した' },
     ]);
   });
 
@@ -299,7 +313,7 @@ describe('升の原文は、描いた側から受け取る(#418 段①)', () => 
     input(cell)!.value = '**太字** と追記';
     input(cell)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(dispatched).toEqual([
-      { type: 'SET_CSV_CELL', lid: 'n1', line: 1, col: 0, value: '**太字** と追記' },
+      { type: 'SET_CSV_CELL', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, value: '**太字** と追記' },
     ]);
   });
 

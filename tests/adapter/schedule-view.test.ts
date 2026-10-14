@@ -1426,21 +1426,21 @@ describe('繰り返しを断る 2 つの門(#855 段 0)', () => {
       phase: 'editing',
       openBody: { lid: 'e1', body: 'x', baseline: 'x', persisted: 'x', diskAhead: false },
     };
-    const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' });
+    const r = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, openLine: '- [ ] x', repeat: 'week' });
     expect(r.events, '編集中なのに本文を書きに行った').toEqual([]);
     expect(r.state.error, '無言で捨てた').toContain('編集を保存するか、編集をやめてから');
     // 🔴 続きは「してください」(#1087 S3)── 「できます」だと案内ではなく状況の説明に読める
     expect(r.state.error).toMatch(/繰り返しにしてください$/);
-    const off = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: null });
+    const off = reduce(editing, { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, openLine: '- [ ] x', repeat: null });
     expect(off.state.error).toMatch(/繰り返しをやめてください$/);
     // ⚠ 対照群 ── `ready` なら同じ 1 手が通る(門だけが効いていることの裏取り)
     expect(
-      reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, repeat: 'week' }).events,
+      reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'e1', line: 0, openLine: '- [ ] x', repeat: 'week' }).events,
     ).toHaveLength(1);
   });
 
   it('⚠ 消えたノートでは何もしない(当てずっぽうで別の本文を書かない)', () => {
-    const r = reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'no-such', line: 0, repeat: 'week' });
+    const r = reduce(ready(), { type: 'SET_TASK_REPEAT', lid: 'no-such', line: 0, openLine: '- [ ] x', repeat: 'week' });
     expect(r.events, '知らない lid で本文を書きに行った').toEqual([]);
     // ⚠ **理由は出さない** ── 押した物が消えているので、言うことが無い
     expect(r.state.error).toBeNull();

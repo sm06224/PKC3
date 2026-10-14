@@ -692,7 +692,7 @@ describe('元に戻す(UNDO_MOVE)', () => {
     rewritten(s.d, moved);
     expect(s.d.getState().lastMove, '前提: 材料が入っている').not.toBeNull();
     // ⚠ 画面の本文はもう `moved` ── 次の ack はそこからの書換として届く
-    rewritten(s.d, `${moved}\n- [x] 済`, { kind: 'task', line: 0 });
+    rewritten(s.d, `${moved}\n- [x] 済`, { kind: 'task', line: 0, openLine: '- [ ] 済' });
     expect(s.d.getState().lastMove, '別の書換の後も残っている').toBeNull();
   });
 

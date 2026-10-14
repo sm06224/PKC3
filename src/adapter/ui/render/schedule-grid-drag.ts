@@ -37,6 +37,7 @@
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bodyWriteBlockReason } from '@adapter/state/app-state';
+import { SHOWN_LINE_LOST } from '@adapter/state/shown-line';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { daysBetween } from '@features/datetime/date-math';
 import {
@@ -490,7 +491,20 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
       const refused = bodyWriteBlockReason(st, g.task.lid) !== null;
       // 動かす前の姿は走査が持っている札から取る(中身の指紋もそこにある)。札が走査に無い回は出さない
       const card = st.taskScan?.cards.find((c) => c.lid === g.task.lid && c.line === line);
-      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid: g.task.lid, line, date, time, timeEnd });
+      // 🔴 札が走査に居ない回は撃たずに断る(#1087)── 札の行の中身が書換の `openLine` になる
+      if (card === undefined) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
+        return;
+      }
+      dispatcher.dispatch({
+        type: 'SET_TASK_DATE',
+        lid: g.task.lid,
+        line,
+        openLine: card.rawLine,
+        date,
+        time,
+        timeEnd,
+      });
       // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
       if (!refused && g.from !== '' && card !== undefined) {
         const before = slotOfCard(card);

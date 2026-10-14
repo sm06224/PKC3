@@ -170,7 +170,13 @@ describe('右クリックでチェックリストをそろえる(#1173)', () => 
         type: 'REQUEST_BODY_REWRITE',
         lid: 'n1',
         // 歯ブラシ(5)・充電器(6)・ケーブル(7)・予備(8)・繰り返し(9)。1. の別リスト(11)は入らない
-        rewrite: { kind: 'task-run', lines: [5, 6, 7, 8, 9], to: 'done' },
+        rewrite: {
+          kind: 'task-run',
+          lines: [5, 6, 7, 8, 9],
+          // 🔴 押した時点の各行の中身(#1087)── 画面の本文のその行そのもの
+          openLines: [5, 6, 7, 8, 9].map((i) => body.split('\n')[i]),
+          to: 'done',
+        },
       }),
     ]);
   });
@@ -181,7 +187,14 @@ describe('右クリックでチェックリストをそろえる(#1173)', () => 
     s.rightClickAt(s.itemText(2));
     s.press('task-run-open');
     expect(s.events).toEqual([
-      expect.objectContaining({ rewrite: { kind: 'task-run', lines: [4, 5], to: 'open' } }),
+      expect.objectContaining({
+        rewrite: {
+          kind: 'task-run',
+          lines: [4, 5],
+          openLines: [4, 5].map((i) => BODY.split('\n')[i]),
+          to: 'open',
+        },
+      }),
     ]);
   });
 
@@ -190,7 +203,9 @@ describe('右クリックでチェックリストをそろえる(#1173)', () => 
     s.rightClickAt(s.itemText(5));
     s.press('task-run-done');
     expect(s.events).toEqual([
-      expect.objectContaining({ rewrite: { kind: 'task-run', lines: [8], to: 'done' } }),
+      expect.objectContaining({
+        rewrite: { kind: 'task-run', lines: [8], openLines: [BODY.split('\n')[8]], to: 'done' },
+      }),
     ]);
   });
 
