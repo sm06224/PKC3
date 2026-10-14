@@ -71,6 +71,25 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
   ).toContainText('打ち合わせは水曜');
   await expect(pane, 'ノートを開いたら連絡先の面が消えた').toBeVisible();
 
+  /**
+   * 🔴 **連絡先を開いたまま、ノートの側で番号を直して保存すると、一覧も変わる**(#1087)。
+   * ⚠ 直す前は一覧が古いままで、「vCard で書き出す」が**古い番号を書いていた**
+   *   (集め直すのはタブを開いたときだけだった)。
+   */
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  // ⚠ 番号は frontmatter(「この文書の情報」の札)に在り、行の原文(row-source)には出ない。
+  //   札の「情報を編集」から直す(1 稿目は row-source へ全文を fill し、末尾へ別の frontmatter を追記しただけだった)
+  await clickReal(page, '[data-pkc-field="fm-edit"]');
+  await page
+    .locator('[data-pkc-field="fm-source"]')
+    .fill('---\ntel: 090-9999-0000\nemail: taro@example.com\norg: 例の会社\n---');
+  await clickReal(page, '[data-pkc-field="fm-commit"]');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(row, '保存したのに連絡先の一覧が古い番号のまま').toContainText('090-9999-0000', {
+    timeout: 10_000,
+  });
+  await expect(row).not.toContainText('090-1234-5678');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
