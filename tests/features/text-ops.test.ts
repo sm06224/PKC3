@@ -86,6 +86,15 @@ describe('囲む印', () => {
     expect(applyFormat({ text: '**強調**', start: 0, end: 8 }, 'bold').text).toBe('強調');
   });
 
+  it('🔴 選択の端の空白は囲まない(ダブルクリックで後ろの空白まで選ばれても太字になる。#1087)', () => {
+    expect(show(applyFormat(sel('hello |world |today'), 'bold'))).toBe('hello **|world|** today');
+    expect(show(applyFormat(sel('a| 強調　|b'), 'italic'))).toBe('a *|強調|*　b');
+    // 押し直すと外れる(縮めた選択のまま「外側に印がある」経路へ)
+    expect(applyFormat(applyFormat(sel('hello |world |today'), 'bold'), 'bold').text).toBe('hello world today');
+    // 対照群:空白だけの選択は縮めない
+    expect(applyFormat(sel('a|  |b'), 'bold').text).toBe('a**  **b');
+  });
+
   it('🔴 `**太字**` に斜体を掛けても太字が壊れない', () => {
     // 「先頭が印か」で判定していると `*太字*` に化けて**太字が消える**
     const inner = { text: '**太字**', start: 2, end: 4 };

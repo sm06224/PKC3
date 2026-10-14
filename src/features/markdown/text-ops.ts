@@ -142,7 +142,20 @@ function wrapped(before: number, after: number, len: number): boolean {
  * ⚠ 印は**同じ文字の繰り返し**であること(`**` / `*` / `` ` ``)を前提にしている。
  */
 export function toggleWrap(sel: TextSelection, mark: string): TextSelection {
-  const { text, start, end } = sel;
+  const { text } = sel;
+  /**
+   * 🔴 **選択の端の空白は囲まない**(#1087)── 英単語をダブルクリックすると後ろの空白まで選ばれる
+   *   (Windows の Chrome)ので、そのまま囲むと `**world **` になり、閉じの前が空白なので
+   *   太字にならず `**` が字のまま出ていた。⚠ 空白だけの選択はそのまま(縮めると選択が消える)。
+   */
+  let start = sel.start;
+  let end = sel.end;
+  while (start < end && /[ \t\u3000]/u.test(text[start]!)) start++;
+  while (end > start && /[ \t\u3000]/u.test(text[end - 1]!)) end--;
+  if (start === end) {
+    start = sel.start;
+    end = sel.end;
+  }
   const ch = mark[0]!;
   const len = mark.length;
   const inner = text.slice(start, end);
