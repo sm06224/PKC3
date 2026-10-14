@@ -567,6 +567,13 @@ export function restoreArchive(
   }>;
   /** 取り込む色(#1457)。⚠ いま付けている色は動かさない ── 足りない分だけ足すのは取込側。 */
   tagColors: TagColorEntry[];
+  /**
+   * 🔴 **付け替えた lid**(旧 → 新。変わった組だけ)。本文の `entry:<lid>` は**ここでは書き換えない** ──
+   *   取込側が添付の key と一緒に `remapImportedBody` 1 本で当てる(履歴の鎖にも同じ規則を当てるため。
+   *   ここで本文だけ書き換えると、鎖の起点がずれて履歴が全部落ちる)。
+   * ⚠ 当てないと、取り込んだノートのリンクが**複製ではなく既存の原本**を指す(つながりは複製を指すのに)。
+   */
+  lidRemap: Array<readonly [string, string]>;
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
@@ -600,7 +607,8 @@ export function restoreArchive(
       lid,
       title: e.title,
       archetype: e.archetype,
-      body: e.body, // ⚠ **変換しない**(既に PKC-Markdown)
+      // ⚠ **変換しない**(既に PKC-Markdown)。付け替えた lid の写しは取込側(上の `lidRemap`)
+      body: e.body,
       entryOrder: opts.orderBase + i + 1,
     };
   });
@@ -665,5 +673,7 @@ export function restoreArchive(
   }));
 
   warn.finish();
-  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, warnings };
+  const lidRemap: Array<readonly [string, string]> = [];
+  for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
+  return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, lidRemap, warnings };
 }

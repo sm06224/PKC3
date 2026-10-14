@@ -55,6 +55,12 @@ import {
   type RevisionChain,
 } from '@features/import/pkc2-convert';
 import {
+  changedPairs,
+  isEmptyRemap,
+  remapImportedBody,
+  type ImportRemap,
+} from '@features/import/body-remap';
+import {
   assetKeyFromHash,
   generateAssetKey,
   HASH_MAX_BYTES,
@@ -543,6 +549,8 @@ export async function importPkc2File(
           encodedChains: restored.revisionChains,
           /** 🔴 アーカイブ経路だけが持つ**タグの色**(#1457)。 */
           tagColors: restored.tagColors,
+          /** 🔴 アーカイブ経路だけが持つ**付け替えた lid**(本文の `entry:` を写す。下の `remap`)。 */
+          lidRemap: restored.lidRemap,
           warnings: [] as string[],
         }
       : convertPkc2Container(container as never, {
@@ -675,8 +683,26 @@ export async function importPkc2File(
       }
     }
 
+    /**
+     * 🔴 **本文に当てる付け替えは 1 つにまとめる**(#1087、バックアップ往復の見直し)── 添付の key と、
+     *   アーカイブで付け替えた lid。履歴の鎖にも**同じ**付け替えを当てる(下の `encoded`)ので、
+     *   規則は `remapImportedBody` 1 本に寄せる。
+     * ⚠ PKC2 の経路は lid を convert の中で写し終えている(`lidRemap` を持たない)。
+     */
+    const remap: ImportRemap = {
+      assetKeys: changedPairs(keyMap),
+      lids: 'lidRemap' in result ? result.lidRemap : [],
+    };
+    /**
+     * 書き出したときの本文(履歴の起点)。⚠ 付け替えが 1 組でも在れば**全ノート**ぶん持つ ──
+     *   いまの本文に旧 ID が無くても、**古い版だけ**が旧 lid・旧 key を指していることがある
+     *   (本文が変わったノートだけに絞ると、その版は旧 ID のまま積まれる。着地前レビュー)。
+     *   文字列は `result.entries` と同じ参照なので、写しは作らない。
+     */
+    const sourceTips = new Map<string, string>();
     const rows: EntryUpsert[] = result.entries.map((e) => {
-      const body = keyMap.size > 0 ? remapAssetKeys(e.body, keyMap) : e.body;
+      const body = isEmptyRemap(remap) ? e.body : remapImportedBody(e.body, remap);
+      if (!isEmptyRemap(remap)) sourceTips.set(e.lid, e.body);
       const ext = extractMeta(e.archetype, body);
       return {
         lid: e.lid,
@@ -736,20 +762,16 @@ export async function importPkc2File(
         }
       }
       // アーカイブの復元(P6e)── 保存形の鎖をそのまま worker へ渡す。
-      // ⚠ **パッチの中の asset key は書き換えられない**(差分を書き換えると壊れる)。
-      // PKC3 の key は content hash なので同じ bytes なら同じ key に落ちる =
-      // 通常は写像が恒等になる。恒等でなかったぶんだけ**言う**
-      const encoded = 'encodedChains' in result ? result.encodedChains : [];
+      // 🔴 **付け替えが在る取り込みでは、鎖に書き出したときの本文と付け替えを添える**(#1087)。
+      //    worker はその本文から戻し、戻した各版に同じ付け替えを当てて積む ── 付け替えた tip から
+      //    戻すと古い版の hash が合わず、**鎖ごと捨てていた**(添付の key が変わった / lid が衝突した回)。
+      // ⚠ パッチそのものは書き換えない(差分の行番号は書き出したときの本文に対するもの)
+      const encoded = ('encodedChains' in result ? result.encodedChains : []).map((c) => {
+        const tip = sourceTips.get(c.entryLid);
+        return tip === undefined ? c : { ...c, rewrite: { tip, remap } };
+      });
       if (encoded.length > 0) {
         stage = '履歴';
-        const remapped = [...keyMap].filter(([from, to]) => from !== to).length;
-        if (remapped > 0) {
-          // ⚠ `preWarnings` はこの時点で**既に result.warnings へ写し終えている** ──
-          // ここで push しても user に届かない(review M-2 で実測した dead code)
-          result.warnings.push(
-            `履歴の中の添付への参照 ${remapped} 件は元のままです(差分は書き換えられません)`,
-          );
-        }
         for (const batch of batchEncoded(encoded)) {
           const r = await deps.restoreRevisionChains(batch);
           revStats.added += r.added;

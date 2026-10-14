@@ -18,6 +18,7 @@
 import { errorText } from '@features/error-text';
 import { getFlavor } from '../flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
+import { replacePrefixed } from './body-remap';
 import {
   buildTextlogAnchorMap,
   buildFirstLogOfDay,
@@ -109,43 +110,8 @@ const RESERVED_LID = /^__.+__$/;
 //    種類を足したときに**取込だけ知らない**という非対称がまた生まれる
 const KNOWN_RELATION_KINDS: ReadonlySet<string> = new Set(RELATION_KINDS);
 
-/**
- * `<prefix><token>` を 1 パスで写す。
- *
- * ⚠ token は `[A-Za-z0-9_-]+` を**最長一致**で取る ── これが境界の実体である。
- * 貪欲でないと `asset:k10` の `k1` 部分だけが `k1` の写し先に化ける
- * (PKC2 の旧 key 3 系統は prefix 関係になりうるので実際に起きる)。
- * map に無い token はそのまま(missing key は壊れシグナルとして保存する)。
- */
-function replacePrefixed(
-  body: string,
-  prefix: string,
-  map: ReadonlyMap<string, string>,
-): string {
-  if (map.size === 0) return body;
-  return body.replace(
-    new RegExp(`${prefix}[A-Za-z0-9_-]+`, 'g'),
-    (m) => prefix + (map.get(m.slice(prefix.length)) ?? m.slice(prefix.length)),
-  );
-}
-
-/**
- * 暫定 asset key を最終 key(= 中身のハッシュ)へ写す。
- *
- * convert は純関数なので bytes を持たず、content key を決められない ──
- * adapter が復号後にこれを呼ぶ。body 中の出現箇所は 2 通りある:
- * ① markdown の `asset:<key>` ② frontmatter の `attachment.asset_key: <key>` /
- * `attachment.app_icon_asset_key: <key>`。②は素の値なので prefix 無しで消す。
- *
- * 暫定 key は**この取込で生成した token**であり、body 中では必ず `:` か空白の
- * 直後に現れる ── 前方境界を見なくても他の語の一部に当たらない。
- */
-export function remapAssetKeys(body: string, map: ReadonlyMap<string, string>): string {
-  if (map.size === 0) return body;
-  // 素の token を最長一致で拾って引く(map 全件ループをやめる ── review M-7)。
-  // 暫定 key は `ast-<ts36>-<rand6>` なので、`-` を含む 1 token として取れる
-  return body.replace(/[A-Za-z0-9_-]+/g, (t) => map.get(t) ?? t);
-}
+// `replacePrefixed` / `remapAssetKeys` の正本は `./body-remap`(履歴の復元と同じ規則を使うため)
+export { remapAssetKeys } from './body-remap';
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
