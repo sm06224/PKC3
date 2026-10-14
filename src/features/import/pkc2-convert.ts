@@ -369,12 +369,24 @@ export function convertPkc2Container(
     const from = finalLid(str(r.from));
     const to = finalLid(str(r.to));
     const kind = str(r.kind);
+    // 🔴 内部の ID ではなく、ノートの題名で言う(#1087)── user には直しようが無い字だった
+    const titleOf = (lid: string): string | null => {
+      const e = entries.find((x) => x.lid === lid);
+      return e ? noteLabel(e.title) : null;
+    };
     if (!lids.has(from) || !lids.has(to)) {
-      warnings.push(`つなぐ先のノートが無いつながりを除外: ${str(r.id)}`);
+      const there = titleOf(lids.has(from) ? from : to);
+      warnings.push(
+        there !== null
+          ? `${there}から、つなぐ先のノートが無いつながりを除きました`
+          : 'つなぐ先のノートが無いつながりを除きました',
+      );
       continue;
     }
     if (!KNOWN_RELATION_KINDS.has(kind)) {
-      warnings.push(`不明な種類のつながりを除外: ${str(r.id)} (${kind})`);
+      warnings.push(
+        `${titleOf(from) ?? 'ノート'}と${titleOf(to) ?? 'ノート'}の間の、種類の分からないつながり(${kind})を除きました`,
+      );
       continue;
     }
     let id = str(r.id);

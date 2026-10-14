@@ -620,7 +620,15 @@ export function restoreArchive(
     const to = lidMap.get(r.toLid);
     if (!from || !to) {
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
-      warn.add('dangling-relation', 'つなぐ先のノートが無いつながり', `つなぐ先のノートが無いつながりを除きました: ${r.id}`);
+      // 🔴 内部の ID ではなく、残っている側のノートの題名で言う(#1087)
+      const there = archive.entries.find((e) => e.lid === (from ? r.fromLid : r.toLid));
+      warn.add(
+        'dangling-relation',
+        'つなぐ先のノートが無いつながり',
+        there && (from || to)
+          ? `「${there.title || '(無題)'}」から、つなぐ先のノートが無いつながりを除きました`
+          : 'つなぐ先のノートが無いつながりを除きました',
+      );
       continue;
     }
     let id = r.id;

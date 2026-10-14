@@ -496,7 +496,8 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(await importPkc2File(d, deps, file)).toBe(1);
     expect(relations).toHaveLength(0);
     expect(notices.at(-1)).toMatch(/取り込み完了: 1 件\(注意 1 件\)/);
-    expect(reportedNotes()).toEqual(['つなぐ先のノートが無いつながりを除外: r1']);
+    // 🔴 内部の ID(r1)ではなく、残っている側のノートの題名で言う(#1087)
+    expect(reportedNotes()).toEqual(['「n」から、つなぐ先のノートが無いつながりを除きました']);
     // state.error に載せると status が「⚠ エラー:」で始まる ── 成功が失敗に見える
     expect(d.getState().error).toBeNull();
   });

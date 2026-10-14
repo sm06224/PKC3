@@ -226,3 +226,20 @@ describe('アーカイブの版 — 書き出しは新しい版で刻む', () =>
     expect(got.manifest.version).toBe(2);
   });
 });
+
+describe('つなぐ先の無いつながり(#1087)', () => {
+  it('🔴 内部の ID ではなく、残っている側のノートの題名で言う', () => {
+    const got = restoreArchive(
+      archive({
+        entries: [{ ...entry('a'), title: '議事録' }],
+        relations: [
+          { id: 'rel-secret-1', fromLid: 'a', toLid: 'gone', kind: 'structural', createdAt: null, updatedAt: null },
+        ],
+      }),
+      opts(),
+    );
+    expect(got.relations).toHaveLength(0);
+    expect(got.warnings).toContain('「議事録」から、つなぐ先のノートが無いつながりを除きました');
+    expect(got.warnings.join('\n'), '内部の ID が出ている').not.toContain('rel-secret-1');
+  });
+});
