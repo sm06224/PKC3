@@ -236,6 +236,21 @@ describe('履歴の配線(画面)', () => {
     expect(fwd(root)!.disabled).toBe(true);
   });
 
+  it('🔴 押せないあいだは、hover の説明に理由が付く。押せるようになったら理由は消える(#1087 L4)', () => {
+    const { d, root } = mounted();
+    expect(back(root)!.title).toContain('戻る先がありません');
+    expect(fwd(root)!.title).toContain('進む先がありません');
+    // 元の説明(何をするボタンか)は残る
+    expect(back(root)!.title).toContain('前に見ていたノートへ戻ります');
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(back(root)!.title, '押せるのに理由が残っている').not.toContain('戻る先がありません');
+    expect(back(root)!.title).toContain('前に見ていたノートへ戻ります');
+    expect(fwd(root)!.title, '進む側はまだ押せない').toContain('進む先がありません');
+    back(root)!.click();
+    expect(fwd(root)!.title, '押せるのに理由が残っている').not.toContain('進む先がありません');
+  });
+
   it('🔴 押すと実際に選択が戻り、進むが生き返る', () => {
     const { d, root } = mounted();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

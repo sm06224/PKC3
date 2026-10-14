@@ -36,6 +36,8 @@ import {
 } from '@features/filter/title-filter';
 import { kindCounts, type KindCount } from '@features/filter/kind-filter';
 import { commandQueryOf } from '@features/palette/command-query';
+import { filerRows } from '@features/relation/filer-list';
+import { filerRowOptions } from '@adapter/state/list-view-options';
 import { kindFilterApplies, type BrowseMode } from './browse-mode';
 import { buildPressedButton } from './choice-buttons';
 
@@ -57,27 +59,63 @@ export class KindBarRenderer {
     metas: AppState['entryMetas'];
     query: AppState['filterQuery'];
     hits: AppState['searchHits'];
+    /** 🔴 フォルダの表では「いまの場所」「つながり」「スマートフォルダの当たり」でも数が変わる(#1087 L1)。 */
+    mode: BrowseMode;
+    scope: AppState['scopeLid'];
+    relations: AppState['relations'];
+    smartHits: AppState['smartHits'];
     kinds: ReturnType<typeof kindCounts>;
   } | null = null;
 
-  private countKinds(state: AppState): ReturnType<typeof kindCounts> {
+  private countKinds(state: AppState, mode: BrowseMode): ReturnType<typeof kindCounts> {
     const m = this.kindMemo;
     if (
       m !== null &&
       m.order === state.order &&
       m.metas === state.entryMetas &&
       m.query === state.filterQuery &&
-      m.hits === state.searchHits
+      m.hits === state.searchHits &&
+      m.mode === mode &&
+      m.scope === state.scopeLid &&
+      m.relations === state.relations &&
+      m.smartHits === state.smartHits
     )
       return m.kinds;
-    const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
-    const present: FilterTarget[] = [];
-    for (const lid of state.order) {
-      const meta = state.entryMetas.get(lid);
-      if (meta !== undefined && matchesEntry(meta, counted)) present.push(meta);
+    let present: FilterTarget[];
+    if (mode === 'filer') {
+      /**
+       * 🔴 **フォルダの表は「いまの場所」の行だけを数える**(#1087 L1)。
+       * ⚠ 直す前は全ノート(`order`)を数えていたので、フォルダの中に入ると
+       *   「ノート 16」と出るのに押すと数件、になっていた(マニュアルは「押す前に分かります」と約束している)。
+       * 🔑 行を決めるのは表と同じ `filerRows` 1 本。種類の札を 1 つでも押すと表は
+       *   全階層を平らに出す(`filerFlattenNow`)ので、**押したあとに見える行**=
+       *   平らにした行(`flatten: true`)で数える。種類の絞りだけは外す(戻す口を残すため)。
+       */
+      present = filerRows(state.scopeLid, state.entryMetas, state.relations, {
+        ...filerRowOptions(state),
+        kinds: NO_KINDS,
+        flatten: true,
+      });
+    } else {
+      const counted = entryFilterOf(state.filterQuery, state.searchHits, NO_KINDS);
+      present = [];
+      for (const lid of state.order) {
+        const meta = state.entryMetas.get(lid);
+        if (meta !== undefined && matchesEntry(meta, counted)) present.push(meta);
+      }
     }
     const kinds = kindCounts(present);
-    this.kindMemo = { order: state.order, metas: state.entryMetas, query: state.filterQuery, hits: state.searchHits, kinds };
+    this.kindMemo = {
+      order: state.order,
+      metas: state.entryMetas,
+      query: state.filterQuery,
+      hits: state.searchHits,
+      mode,
+      scope: state.scopeLid,
+      relations: state.relations,
+      smartHits: state.smartHits,
+      kinds,
+    };
     return kinds;
   }
 
@@ -106,7 +144,7 @@ export class KindBarRenderer {
      *   のは `order` に居るものだけなので、`entryMetas` を数えると
      *   **画面に無いものまで札の数に入る**。
      */
-    const kinds = this.countKinds(state);
+    const kinds = this.countKinds(state, mode);
     /**
      * ⚠ **種類が 1 つしか無いなら札を出さない** ── 押しても何も変わらない札は
      *   dead click である(「絞れる」と言っておいて絞れない)。

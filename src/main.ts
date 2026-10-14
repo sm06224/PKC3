@@ -3607,7 +3607,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             );
             refs.push(formatAssetRef(name, `asset:${stored.assetKey}`, true));
           } catch (e) {
-            dispatcher.dispatch({ type: 'OP_FAILED', error: (e as Error).message });
+            // 🔴 英語の理由をそのまま出さない。どの画像か分かる形で(#1087)
+            dispatcher.dispatch({
+              type: 'OP_FAILED',
+              error: `添付の取り込みに失敗しました(「${name}」): ${errorText(e)}`,
+            });
           }
         }
       });

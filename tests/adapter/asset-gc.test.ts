@@ -152,6 +152,17 @@ describe('runExplicitPurge (P4b)', () => {
     expect(calls.filter((c) => c.startsWith('blob:'))).toHaveLength(0);
   });
 
+  it('🔴 確認の文に、消した添付は元に戻せないと書く(#1087 A6)', async () => {
+    const asked = vi.fn(async (...a: [string]) => a.length < 0);
+    const { deps } = flowDeps({ ask: asked });
+    await runExplicitPurge(deps);
+    expect(asked, '前提: 確認が出ている(消す物が在る台)').toHaveBeenCalledTimes(1);
+    const text = asked.mock.calls[0]![0];
+    expect(text).toContain('消した添付は元に戻せません');
+    // 問いは最後に ── 戻せないと読んでから「よろしいですか」を押せる
+    expect(text.indexOf('元に戻せません')).toBeLessThan(text.indexOf('よろしいですか'));
+  });
+
   it('confirm 拒否なら何も消さない(fail closed)', async () => {
     const { deps, calls } = flowDeps({ ask: () => Promise.resolve(false) });
     await runExplicitPurge(deps);

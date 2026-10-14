@@ -597,11 +597,17 @@ export class FilerRenderer {
 
     const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
     if (!moving) {
-      const hint = document.createElement('p');
-      hint.setAttribute('data-pkc-field', 'filer-move-empty');
-      // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
-      hint.textContent = '動かしたいものを選ぶと、ここで上下に並べ替えられます';
-      host.append(hint);
+      /**
+       * 🔴 **「中まで全部出す」の間は出さない**(#1087 L3)── 選んでも上へ / 下へは出ない
+       *   (下の `order-nudge`)ので、「選ぶと並べ替えられます」は偽になる。
+       */
+      if (!filerFlattenNow(state)) {
+        const hint = document.createElement('p');
+        hint.setAttribute('data-pkc-field', 'filer-move-empty');
+        // ⚠ 「操作が無い」ではなく「**何をすれば出るか**」を書く
+        hint.textContent = '動かしたいものを選ぶと、ここで上下に並べ替えられます';
+        host.append(hint);
+      }
     } else {
       /**
        * 🔴 **「居場所」のプルダウンは外した**(#813、2026-09-09。user 指示
@@ -860,6 +866,8 @@ export class FilerRenderer {
       name.append(chip, input);
     } else {
       name.append(chip, document.createTextNode(m.title));
+      // 🔴 長い題名は列で切れる ── 全文を hover で読める(#1087 L5)。「中まで全部出す」の行は下で親の名前を足す
+      name.title = m.title;
             if (parentName !== undefined) {
         /**
          * 🔴 **題名の右に、小さく薄く**(#813)。⚠ 色は**情報にだけ**(`--muted` 1 色・新色なし)。

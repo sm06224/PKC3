@@ -36,6 +36,7 @@ import { trimMarkText, trimNoteFirst } from '@features/audio/trim-text';
 import { humanBytes } from '@features/human-bytes';
 import type { AssetLender } from './detail';
 import { appVoiceBoostRouter } from './voice-boost';
+import { replaceOnMediaError, SAVE_HINT_OPEN_NOTE } from './media-error';
 import { ASR_TRANSCRIBE_LABEL, ASR_TRANSCRIBING_LABEL } from '@features/asr/asr-text';
 import { msToFrac, peakCountFor } from '@features/audio/waveform';
 import { appWaveSource, type WaveProvider } from '@adapter/platform/audio/wave-source';
@@ -82,6 +83,8 @@ export class CapturesRenderer {
   private playing: Playing | null = null;
   /** ⚠ 借りに行っている最中の lid(同じ行で二重に借りない)。 */
   private borrowing: string | null = null;
+  /** 🔴 借りに行って「中身が無い / 借りられない」だった行の lid(#1087 A2)。⚠ 同じ行を借り直し続けない。 */
+  private missingLid: string | null = null;
   /**
    * 🔴 **切り出しの印**(#683 段②a)。⚠ **state の写し**で、ここでは決めない
    *   ── 面は 2 つ生きうるので、判定を描画器に置くと片方だけ印が付く(§7)。
@@ -131,6 +134,7 @@ export class CapturesRenderer {
   dispose(): void {
     this.token += 1;
     this.borrowing = null;
+    this.missingLid = null;
     this.playing?.dispose();
     this.playing = null;
     this.dropWave();
@@ -163,6 +167,8 @@ export class CapturesRenderer {
       state.capturePlayingLid ?? '',
       // ⚠ **借り終えたか**も入れる ── 借りている間は器を作り直せない(URL がまだ無い)
       this.playing?.url ?? '',
+      // ⚠ 「見つからない」の行も入れる ── 入れないと、断り文の 1 行が描かれない
+      `m:${this.missingLid ?? ''}`,
       /**
        * 🔴 **印は指紋に入れない**(#683 段②a、着地前の実ブラウザ smoke で判明)。
        *
@@ -414,18 +420,28 @@ export class CapturesRenderer {
     const item = want === null ? undefined : shown.find((i) => i.lid === want);
     const key = item?.assetKey ?? null;
     if (key === null || this.assets === null) {
-      if (this.playing !== null || this.borrowing !== null) this.dispose();
+      if (this.playing !== null || this.borrowing !== null || this.missingLid !== null) this.dispose();
       return;
     }
     if (this.playing?.lid === want || this.borrowing === want) return;
+    // 🔴 借りられなかった行は、描き直しのたびに借りに行かない(別の行を押すか止めると、また借りられる)
+    if (this.missingLid === want) return;
+    this.missingLid = null;
     this.token += 1;
     const mine = this.token;
     this.playing?.dispose();
     this.playing = null;
     this.borrowing = want;
+    /** 🔴 借りられなかった回の後始末(#1087 A2)── 印を戻し、理由の 1 行を出す。 */
+    const failed = (): void => {
+      if (mine !== this.token) return;
+      this.borrowing = null;
+      this.missingLid = want;
+      this.onReady();
+    };
     void this.assets.lend(key).then((lent) => {
       if (lent === null) {
-        if (mine === this.token) this.borrowing = null;
+        failed();
         return;
       }
       if (mine !== this.token) {
@@ -435,7 +451,7 @@ export class CapturesRenderer {
       this.borrowing = null;
       this.playing = { lid: want!, url: lent.url, dispose: lent.dispose };
       this.onReady();
-    });
+    }, failed);
   }
 
   /**
@@ -655,6 +671,7 @@ export class CapturesRenderer {
         media.controls = true;
         media.autoplay = true;
         media.src = this.playing.url;
+        replaceOnMediaError(media, item.kind, item.mime, SAVE_HINT_OPEN_NOTE);
         li.append(media);
         /**
          * 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)。
@@ -683,6 +700,12 @@ export class CapturesRenderer {
             ? '聞くと、下に波形が出ます。波形をなぞると切り出す範囲を選べます。'
             : '聞くと、下に波形が出ます。';
         li.append(play);
+        if (this.missingLid === item.lid) {
+          const gone = document.createElement('p');
+          gone.setAttribute('data-pkc-asset-missing', '');
+          gone.textContent = '添付の中身が見つかりません';
+          li.append(gone);
+        }
       }
     }
     /**

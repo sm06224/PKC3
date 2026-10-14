@@ -5395,13 +5395,17 @@ export function runGlobalCommand(
    */
   if (btn instanceof HTMLButtonElement && btn.disabled) {
     const why = btn.getAttribute(HINT_BLOCKED);
-    if (why !== null && why !== '') notify(why);
+    // ⚠ 戻る / 進む は hover の理由(#1087 L4)を持つが、鍵では今までどおり黙る(上の注釈の連打)
+    if (why !== null && why !== '' && !QUIET_WHEN_BLOCKED.has(cmd)) notify(why);
     return true;
   }
   if (focusFieldFirst(cmd, btn, root, notify)) return true;
   btn.click();
   return true;
 }
+
+/** 押せないときに鍵で撃っても黙る操作(#761 の連打への配慮。理由はボタンの hover にだけ出す) */
+const QUIET_WHEN_BLOCKED: ReadonlySet<string> = new Set(['nav-back', 'nav-forward']);
 
 /**
  * 🔴 **お知らせの節を開く**(ヘルプの「お知らせを開く」と「操作を探す」の**唯一の実体**。§7)。
@@ -6371,7 +6375,7 @@ function markTrim(dispatcher: Dispatcher, target: HTMLElement, edge: 'start' | '
  *   先頭から鳴っているので、**そう言う**(「先頭から再生してください」は、もう鳴っている物を押させる字だった)。
  *   ⚠ この判定は metadata が届いた後にだけ当てる(届く前は `duration` も `seekable` も空で、必ず真になる)。
  */
-const SEEK_NO_PLAYER = '再生機がまだ出ていません。添付が読めていないか、読み込みの途中です';
+const SEEK_NO_PLAYER = 'プレーヤーがまだ出ていません。添付が読めていないか、読み込みの途中です';
 const SEEK_UNSUPPORTED = 'この添付は途中へ移れないので、先頭から再生しています';
 /** metadata が届いた後に位置を確かめ直すときの許容(秒)── seek は目標ぴったりには止まらない */
 const SEEK_RESEEK_TOLERANCE_S = 0.5;
@@ -10720,6 +10724,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 空にはしない(無題の添付を作らない)── 元の字へ戻す
     if (title === '') {
       target.value = before;
+      // 🔴 黙って戻さない(#1087)── 戻した理由を、題名の改名と同じ言い方で出す
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '題名を入れてください' });
       return;
     }
     /**

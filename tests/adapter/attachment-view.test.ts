@@ -120,6 +120,43 @@ describe('attachment view (P4a)', () => {
   });
 
   /**
+   * 🔴 **ブラウザが読めない形式は、壊れた画像・空の再生バーで終わらせない**(#1087 A1)。
+   * ⚠ `error` を撃つ前の姿(対照群)も同じ it で見る ── 読めたものは邪魔しない。
+   */
+  describe('読めない形式の理由(#1087 A1)', () => {
+    const lenderOf = (): AssetLender => ({
+      lend: async () => ({ url: 'blob:x', dispose: () => {} }),
+      getBlob: async () => null,
+    });
+    const cases = [
+      { kind: 'image', tag: 'img', name: 'p.heic', mime: 'image/heic', verb: '表示' },
+      { kind: 'audio', tag: 'audio', name: 'a.mka', mime: 'audio/x-matroska', verb: '再生' },
+      { kind: 'video', tag: 'video', name: 'v.mkv', mime: 'video/x-matroska', verb: '再生' },
+    ] as const;
+    for (const c of cases) {
+      it(`🔴 ${c.kind}: error が来たら、理由と形式と保存の道を 1 行出す`, async () => {
+        const body = attachmentBody({ name: c.name, mime: c.mime, size: 3, assetKey: 'ast-9' });
+        const { d, q } = setup({ a1: body, a2: '# text' }, lenderOf());
+        d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+        await tick(20);
+        const el = q<HTMLElement>(`[data-pkc-field="attachment-media"]`);
+        expect(el?.tagName.toLowerCase(), '前提: 器が出ている').toBe(c.tag);
+        // 対照群: 読めている間は理由を出さない
+        expect(q('[data-pkc-field="attachment-undecodable"]')).toBeNull();
+        el!.dispatchEvent(new Event('error'));
+        const note = q('[data-pkc-field="attachment-undecodable"]');
+        expect(note, '理由が出ていない').not.toBeNull();
+        expect(note!.textContent).toBe(
+          `このブラウザでは${c.verb}できません(形式: ${c.mime})。上の「添付をダウンロード」で保存して開いてください`,
+        );
+        expect(q('[data-pkc-field="attachment-media"]'), '壊れた器が残っている').toBeNull();
+        // 押させる字が画面に実在する(CLAUDE.md §1.6)
+        expect(q('[data-pkc-action="download-asset"]')?.textContent ?? '').toContain('添付をダウンロード');
+      });
+    }
+  });
+
+  /**
    * P8 段⑰: 🔴 **同じノートを開いたままの再描画で借り直さない**(レビュー H-4)。
    *
    * 🔴 直す前の実測: 添付を選んだまま履歴の開閉を 3 往復すると

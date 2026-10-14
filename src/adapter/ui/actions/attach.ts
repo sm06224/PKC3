@@ -266,7 +266,11 @@ export async function attachOne(
   try {
     stored = await storeAsset(deps, item, known, fromCapture);
   } catch (e) {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: (e as Error).message });
+    // 🔴 英語の理由をそのまま出さない。どの file か分かる形で(#1087)
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `添付の取り込みに失敗しました(「${item.name}」): ${errorText(e)}`,
+    });
     return null;
   }
   const { assetKey, mime, hash } = stored;

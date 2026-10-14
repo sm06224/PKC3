@@ -98,6 +98,24 @@ function setup(bodies: Record<string, string>, lender: AssetLender) {
 const MEDIA = `[data-pkc-field="${BODY_MEDIA_FIELD}"]`;
 
 describe('本文の音・動画は、その場で聞ける(#413 段②)', () => {
+  it('🔴 #1087 A1: 読めない形式は error で理由の 1 行になり、保存のリンクは残る', async () => {
+    const { lender } = lenderOf({ k1: 'audio/x-matroska' });
+    const { d, qa } = setup({ e1: '前 [録音.mka](asset:k1) 後ろ', e2: 'plain' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    const media = qa(MEDIA);
+    expect(media, '前提: プレーヤーが出ている').toHaveLength(1);
+    expect(qa('[data-pkc-field="attachment-undecodable"]'), '対照群: 読めている間は理由を出さない').toHaveLength(0);
+    media[0]!.dispatchEvent(new Event('error'));
+    const note = qa('[data-pkc-field="attachment-undecodable"]');
+    expect(note).toHaveLength(1);
+    expect(note[0]!.textContent).toBe(
+      'このブラウザでは再生できません(形式: audio/x-matroska)。上のリンクから保存して開いてください',
+    );
+    expect(qa(MEDIA), '壊れたプレーヤーが残っている').toHaveLength(0);
+    expect(qa('a[data-pkc-asset-key="k1"]'), '保存の道が消えた').toHaveLength(1);
+  });
+
   it('🔴 ① 音はリンクの隣に再生機が出て、リンクは残る', async () => {
     const { lender } = lenderOf({ k1: 'audio/webm;codecs=opus' });
     /**

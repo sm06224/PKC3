@@ -627,20 +627,27 @@ describe('編集中の「+ ノート」は理由を言う(#761)', () => {
     root.remove();
   });
 
-  it('⚠ 理由を持たない押せないボタンは、今までどおり黙っている(nav-back)', () => {
+  it('⚠ 戻る・進むは、押せないあいだ hover に理由を持つが、鍵で撃っても黙る(#761 の連打 / #1087 L4)', () => {
     /**
-     * 🔑 **対照群**(#761 の実装が「一律に何か言う」形になっていないこと)。
-     * ⚠ 履歴が無いときの `Alt+←` まで喋ると、連打で字が出続ける ──
-     *   `nav-back` は `disabled` だが**理由を持たない**ので黙るのが正しい。
+     * 🔑 #1087 L4 で、押せない理由(`keymap.ts` の `whyNot`)を hover に出すようにした。
+     * ⚠ ただし鍵では黙る(#761):履歴が無いときの `Alt+←` まで喋ると、連打で字が出続ける。
      */
-    const { root, d } = mount();
+    const { root, d } = mount([meta('n1', 'あ'), meta('n2', 'い')]);
     const back = root.querySelector<HTMLButtonElement>('button[data-pkc-action="nav-back"]');
     expect(back, '前提が崩れている: 戻るボタンが無い').not.toBeNull();
     expect(back!.disabled, '前提が崩れている: 履歴が無いのに押せる').toBe(true);
-    expect(back!.getAttribute('data-pkc-blocked'), '理由を持ってしまっている').toBeNull();
+    expect(back!.getAttribute('data-pkc-blocked')).toBe('戻る先がありません');
     const said: string[] = [];
     runGlobalCommand('nav-back', root, d, appKeymap, () => {}, (t) => said.push(t));
-    expect(said, '理由を持たないのに喋った').toEqual([]);
+    expect(back!.title, 'hover に理由が無い').toContain('戻る先がありません');
+    expect(said, '連打で字が出続ける形に戻った').toEqual([]);
+    // 対照群: 履歴ができたら理由は消え、鍵で撃っても何も言わない
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(back!.disabled).toBe(false);
+    expect(back!.getAttribute('data-pkc-blocked'), '押せるのに理由が残っている').toBeNull();
+    const said2: string[] = [];
+    runGlobalCommand('nav-back', root, d, appKeymap, () => {}, (t) => said2.push(t));
+    expect(said2).toEqual([]);
   });
 });
 

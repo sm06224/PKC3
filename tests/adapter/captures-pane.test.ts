@@ -723,3 +723,84 @@ describe('前後を削る ── 印の決まり(#683 段②a)', () => {
     expect(s.captureTrim).toBeNull();
   });
 });
+
+describe('借りられなかった行(#1087 A2)', () => {
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  };
+  const goneOf = (h: HTMLElement): HTMLElement | null =>
+    h.querySelector('[data-pkc-asset-missing]');
+
+  it('🔴 lend が null: 理由の 1 行を出し、借り中の印を戻し、描き直しで借り直し続けない', async () => {
+    const a = lender();
+    a.lend = async (k: string) => {
+      a.lent.push(k);
+      return null;
+    };
+    const ready = vi.fn();
+    const p = pane({ captureItems: ITEMS() }, a, ready);
+    expect(goneOf(p.host), '対照群: 押す前は出ていない').toBeNull();
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    expect(ready, '描き直しを頼んでいない').toHaveBeenCalled();
+    p.paint();
+    expect(goneOf(p.host)?.textContent).toBe('添付の中身が見つかりません');
+    expect(rows(p.host)[0]!.contains(goneOf(p.host)), '別の行に出ている').toBe(true);
+    expect(rows(p.host)[1]!.querySelector('[data-pkc-asset-missing]')).toBeNull();
+    // 描き直しのたびに借りに行かない
+    p.paint();
+    p.paint();
+    await flush();
+    expect(a.lent, '借りられない行を借り直し続けている').toEqual(['k-1']);
+    // 別の行を押せば、その行は借りに行ける(印が残っていない)
+    p.paint({ capturePlayingLid: 'b' });
+    await flush();
+    expect(a.lent).toEqual(['k-1', 'k-2']);
+    p.paint();
+    expect(goneOf(p.host)?.closest('[data-pkc-capture]')?.getAttribute('data-pkc-capture')).toBe('b');
+  });
+
+  it('🔴 lend が reject: 同じく理由を出し、止めてから押し直せる', async () => {
+    const a = lender();
+    let fail = true;
+    const good = a.lend;
+    a.lend = async (k: string) => {
+      if (fail) throw new Error('boom');
+      return good(k);
+    };
+    const p = pane({ captureItems: ITEMS() }, a);
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    p.paint();
+    expect(goneOf(p.host)?.textContent, '失敗しても何も出ない').toBe('添付の中身が見つかりません');
+    // 止める → もう一度押す(借りられる状態へ戻っている)
+    fail = false;
+    p.paint({ capturePlayingLid: null });
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    p.paint();
+    expect(goneOf(p.host), '借りられたのに理由が残っている').toBeNull();
+    expect(rows(p.host)[0]!.querySelector('[data-pkc-field="capture-media"]')).not.toBeNull();
+  });
+
+  it('🔴 読めない形式の音は、行の中で理由に替わる(ノートを開く案内つき)', async () => {
+    const a = lender();
+    const p = pane(
+      {
+        captureItems: captureItemsFrom([
+          { lid: 'a', title: 'a', body: body('録音.mka', 'audio/x-matroska') },
+        ]),
+      },
+      a,
+    );
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    p.paint();
+    const media = p.host.querySelector('[data-pkc-field="capture-media"]');
+    expect(media).not.toBeNull();
+    media!.dispatchEvent(new Event('error'));
+    expect(p.host.querySelector('[data-pkc-field="attachment-undecodable"]')?.textContent).toBe(
+      'このブラウザでは再生できません(形式: audio/x-matroska)。ノートを開き、「添付をダウンロード」で保存して開いてください',
+    );
+  });
+});

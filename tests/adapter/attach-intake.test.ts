@@ -1379,3 +1379,31 @@ describe('横に留めた枠へ落とした file は、その枠のノートへ�
     expect(h.d.getState().error ?? '', '断りが出ている(開いているノートには入れられる)').toBe('');
   });
 });
+
+describe('取り込めなかった理由は、日本語で file 名つき(#1087 A3)', () => {
+  it('🔴 attachOne: 保存が QuotaExceededError で落ちたら、英語の理由をそのまま出さない', async () => {
+    const h = harness();
+    h.deps.putBlob = async () => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    };
+    const r = await attachOne(h.d, h.deps, {
+      name: '大きい.png',
+      type: 'image/png',
+      size: 1,
+      blob: new Blob(['x']),
+    });
+    expect(r, '失敗したのに作れたことになっている').toBeNull();
+    const err = h.d.getState().error ?? '';
+    expect(err).toContain('添付の取り込みに失敗しました(「大きい.png」)');
+    expect(err, '空きが足りない案内が日本語になっていない').toContain('保存できる空き容量が足りません');
+  });
+
+  it('対照群: 英語のまま通すしかない理由は、そのまま出る(file 名は付く)', async () => {
+    const h = harness();
+    h.deps.putBlob = async () => {
+      throw new Error('disk exploded');
+    };
+    await attachOne(h.d, h.deps, { name: 'a.txt', type: 'text/plain', size: 1, blob: new Blob(['x']) });
+    expect(h.d.getState().error).toBe('添付の取り込みに失敗しました(「a.txt」): disk exploded');
+  });
+});
