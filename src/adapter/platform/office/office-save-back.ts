@@ -206,6 +206,45 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     return `${save.win}|${save.path}`;
   }
 
+  /**
+   * 🔴 **同じ文書の保存か**(#1087)。合言葉(`token`)が同じ、または `sameDoc` の鍵が同じ。
+   * ⚠ どちらも無い(古い meta)は**別扱い** ── 束ねて古い版を捨てる側へは倒さない。
+   */
+  function sameDocument(a: StagedSave, b: StagedSave): boolean {
+    // 合言葉を両方が持つなら**それだけ**で決める(別のノートが同じ窓・path を持ちうる)
+    if (a.token !== undefined && b.token !== undefined) return a.token === b.token;
+    const ga = sameDoc(a);
+    return ga !== null && ga === sameDoc(b);
+  }
+
+  /**
+   * 🔴 **新しい保存が届いたら、同じ文書の古い保存を棚から捨てる**(#1087、データ消失)。
+   * ⚠ 保留した古い版(書けなかった / 編集中)が棚に残ったまま新しい版が成功すると、
+   *   窓を閉じる掃除(`drainAll`)や撃ち直しが**古い bytes で新しい版を上書きする**
+   *   (手元のファイルでは履歴にも無く、戻せない)。
+   * ⚠ 「古い」は `listStaged` が返す順(`at` の昇順。同時刻は読み出し順)で、`save` より前にある物。
+   * @returns 捨てなかった物(`save` を含む)
+   */
+  async function dropOlder(dir: StageDir, all: StagedSave[], save: StagedSave): Promise<StagedSave[]> {
+    const idx = all.findIndex((s) => s.key === save.key);
+    if (idx < 0) return all;
+    const keep: StagedSave[] = [];
+    for (let i = 0; i < all.length; i += 1) {
+      const s = all[i]!;
+      if (i < idx && s.key !== save.key && sameDocument(s, save) && !inFlight.has(s.key)) {
+        await discardStaged(dir, s.key);
+      } else {
+        keep.push(s);
+      }
+    }
+    return keep;
+  }
+
+  /** 成功した `save` より古い同じ文書の保存を捨てる(棚を引き直して見る)。 */
+  async function supersedeOlder(dir: StageDir, save: StagedSave): Promise<void> {
+    await dropOlder(dir, await listStaged(dir), save);
+  }
+
   async function takeOne(dir: StageDir, save: StagedSave): Promise<IntakeResult> {
     const bytes = await readStaged(dir, save);
     if (bytes === null) {
@@ -239,6 +278,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         deferred = true;
         return 'deferred';
       }
+      // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
+      await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
       deps.notify(`元のファイルへ保存しました: 「${save.name}」`);
       return 'replaced';
@@ -270,6 +311,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
         return 'deferred';
       }
       if (!windowKnew) announce(save.key, token);
+      // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
+      await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
       deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
       return 'replaced';
@@ -285,6 +328,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // 🔴 **窓へも返す**(#217)。⚠ 返し忘れると次の**別の**引き取りでまた新規になる。
     //    ⚠ 窓が既に閉じていても放送は投げるだけ ── 誰も聞かなくても害は無い
     announce(save.key, lid);
+    // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
+    await supersedeOlder(dir, save);
     await discardStaged(dir, save.key);
     deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
     return 'created';
@@ -299,8 +344,12 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       const dir = await deps.stage();
       if (dir === null) return [];
       const all = await listStaged(dir);
+      // 🔴 同じ文書の保存が複数あるときは**一番新しい 1 件だけ**を処理する(#1087)。
+      //    古い版を後から書くと、新しい版を上書きして戻せない
+      let live = all;
+      for (const s of all) live = await dropOlder(dir, live, s);
       const out: IntakeResult[] = [];
-      for (const save of pick(all)) {
+      for (const save of pick(live)) {
         if (inFlight.has(save.key)) continue;
         inFlight.add(save.key);
         try {
