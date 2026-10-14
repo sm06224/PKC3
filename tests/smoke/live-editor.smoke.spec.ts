@@ -916,6 +916,22 @@ test('🔴 設定「編集の仕方」= 2 ペインで、次の編集から 2 �
     page.locator('[data-pkc-field="editor-body"]'),
     '2 列: 題名で Enter を押しても本文の欄へ焦点が移らない',
   ).toBeFocused();
+
+  // 🔴 #1087: 見出しだけの表で、見出しの最後のマスから Tab ── 新しい行は区切りの**下**に入る
+  //   (区切りは 2 行目のまま。区切りの上へ入ると表が表でなくなる)
+  const body = page.locator('[data-pkc-field="editor-body"]');
+  await body.fill('| a | b |\n| --- | --- |');
+  await body.evaluate((el) => {
+    const t = el as HTMLTextAreaElement;
+    t.focus();
+    t.setSelectionRange(6, 6); // 見出しの 2 つ目のマス(b)の中
+  });
+  await page.keyboard.press('Tab');
+  const lines = (await body.inputValue()).split('\n');
+  expect(lines, '見出し / 区切り / 新しい行 の 3 行になっていない').toHaveLength(3);
+  expect(lines[0], '見出しが動いた').toBe('| a | b |');
+  expect(lines[1], '区切りが 2 行目のままでない(新しい行が区切りの上に入った)').toBe('| --- | --- |');
+  expect(lines[2], '3 行目が新しい空の行でない').toMatch(/^\|\s+\|\s+\|$/);
 });
 
 /**

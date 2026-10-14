@@ -438,6 +438,34 @@ describe('隣の升へ移る(#750 I1)', () => {
     expect(neighborCell(at(b, 1), 'up'), 'その列の上は無いのに動いた').toBeNull();
   });
 
+  it('🔴 並べ替えた表では、上下は見えている並び(DOM の位置)で選ぶ(本文の行番号で選ばない)', () => {
+    // 並べ替えで DOM の行が 本文の 4 → 2 → 3 行目の順になっている
+    const b = block([
+      [4, 0, 'e'],
+      [4, 1, 'f'],
+      [2, 0, 'a'],
+      [2, 1, 'b'],
+      [3, 0, 'c'],
+      [3, 1, 'd'],
+    ]);
+    document.body.append(b);
+    // 見えている 1 行目(本文 4 行目)の下は、見えている 2 行目(本文 2 行目)── 3 行目ではない
+    expect(neighborCell(at(b, 1), 'down'), '見えている次の行へ移っていない').toEqual({
+      line: '2',
+      col: '1',
+    });
+    // 見えている 3 行目(本文 3 行目)の上は、見えている 2 行目(本文 2 行目)
+    expect(neighborCell(at(b, 5), 'up'), '見えている前の行へ戻っていない').toEqual({
+      line: '2',
+      col: '1',
+    });
+    // 端は動かない(本文の行番号なら 4 行目から下は無いが、見えている並びでは 1 行目の上も無い)
+    expect(neighborCell(at(b, 1), 'up'), '見えている先頭の上へ行けてしまう').toBeNull();
+    expect(neighborCell(at(b, 5), 'down'), '見えている末尾の下へ行けてしまう').toBeNull();
+    // 対照群: 左右は前から DOM の並び
+    expect(neighborCell(at(b, 1), 'right'), '前提が崩れている').toEqual({ line: '2', col: '0' });
+  });
+
   it('🔴 名指しした升を開ける ── 無ければ開かないと言う', () => {
     const b = block([
       [2, 0, 'a'],

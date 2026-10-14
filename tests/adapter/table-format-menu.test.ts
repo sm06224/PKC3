@@ -18,6 +18,7 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { initialState, type AppState, type DomainEvent } from '../../src/adapter/state/app-state';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { applyBodyRewrite, type BodyRewrite } from '../../src/features/markdown/body-rewrite';
+import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
 import { frontmatterLineCount, bodyBelowFrontmatter } from '../../src/features/markdown/frontmatter';
 
 const MENU = '[data-pkc-region="context-menu"]';
@@ -343,6 +344,38 @@ describe('右クリックで表の形を変える(#708 段②)', () => {
     free.press('table-to-csv');
     expect(free.events, '忙しくないのに書換が来ない ── 台が壊れている').toHaveLength(1);
     expect(free.d.getState().error, '忙しくないのに断られた').toBeNull();
+  });
+
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートの表は、形を変えない**(#1087。行・列を消す回と同じ門)。
+   * ⚠ 対照群(握られていない同じ台)を同じ it に置く ── 置かないと「別の理由で書換が来なかった」と区別できない。
+   */
+  it('🔴 別のタブが握っていたら、表の形を変えずに理由を出す(握られていなければ変える)', async () => {
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+    const asked: string[] = [];
+    const denied = setup(MD, 'ready', {
+      acquireEditLock: async (lid: string) => {
+        asked.push(lid);
+        return 'denied';
+      },
+      releaseEditLock: () => undefined,
+    });
+    denied.rightClickAt('table td');
+    denied.press('table-to-csv');
+    await tick();
+    expect(asked, '問い合わせていない').toEqual(['n1']);
+    expect(denied.events, '握られているのに書換を頼んだ').toEqual([]);
+    expect(denied.d.getState().error, '断りの理由が出ていない').toBe(EDIT_ELSEWHERE_ERROR);
+
+    const free = setup(MD, 'ready', {
+      acquireEditLock: async () => 'granted',
+      releaseEditLock: () => undefined,
+    });
+    free.rightClickAt('table td');
+    free.press('table-to-csv');
+    await tick();
+    expect(free.events, '握られていないのに書換が来ない ── 台が壊れている').toHaveLength(1);
+    expect(free.d.getState().error, '握られていないのに断られた').toBeNull();
   });
 
   /**

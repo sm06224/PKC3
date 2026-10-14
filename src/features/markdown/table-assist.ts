@@ -132,6 +132,25 @@ function getLineRange(value: string, pos: number): { start: number; end: number 
   return { start, end };
 }
 
+function rangeArgs(r: { start: number; end: number }): [number, number] {
+  return [r.start, r.end];
+}
+
+/**
+ * 🔴 **見出し行の直下の区切りの行か**(Tab の下り・Shift+Tab の上りが飛ばす行の判定は、ここ 1 つ)。
+ * 区切りは「表の先頭から数えて 2 行目」だけ。データ行の `| - | - |` は区切りではない。
+ */
+function isHeaderDelimiter(value: string, line: TableLineInfo): boolean {
+  if (!line.isDelimiter || line.lineStart === 0) return false;
+  const prevRange = getLineRange(value, line.lineStart - 1);
+  const header = parseTableLine(value, prevRange.start, prevRange.end);
+  if (header === null || header.cells.length === 0) return false;
+  if (prevRange.start === 0) return true;
+  const above = getLineRange(value, prevRange.start - 1);
+  const aboveLine = parseTableLine(value, above.start, above.end);
+  return aboveLine === null || aboveLine.cells.length === 0;
+}
+
 /**
  * 🔴 **caret が表の行の上に在るか**(#1451。編集の帯の「Tab で次のセル」を出す判定)。
  *
@@ -195,18 +214,15 @@ export function tableOnTab(
       const target = curLine.cells[col - 1]!;
       return { kind: 'navigate', start: target.contentStart, end: target.contentEnd };
     }
-    // 行の先頭セル: 前の行へ
+    // 行の先頭セル: 前の行へ(区切りの行は飛ばして見出し行へ)
     if (curLine.lineStart > 0) {
       const prevRange = getLineRange(value, curLine.lineStart - 1);
       let prevLine = parseTableLine(value, prevRange.start, prevRange.end);
-      if (prevLine !== null && prevLine.isDelimiter) {
-        // 区切り行ならさらに前の行(ヘッダー行)へ
-        if (prevRange.start > 0) {
-          const prevPrevRange = getLineRange(value, prevRange.start - 1);
-          prevLine = parseTableLine(value, prevPrevRange.start, prevPrevRange.end);
-        } else {
-          prevLine = null;
-        }
+      if (prevLine !== null && isHeaderDelimiter(value, prevLine)) {
+        prevLine =
+          prevRange.start > 0
+            ? parseTableLine(value, ...rangeArgs(getLineRange(value, prevRange.start - 1)))
+            : null;
       }
       if (prevLine !== null && prevLine.cells.length > 0) {
         const target = prevLine.cells[prevLine.cells.length - 1]!;
@@ -223,18 +239,18 @@ export function tableOnTab(
     return { kind: 'navigate', start: target.contentStart, end: target.contentEnd };
   }
 
-  // 行の末尾セル: 次の行へ
+  // 行の末尾セル: 次の行へ(区切りの行は飛ばして第1データ行へ)
+  // ⚠ 新しい行を差し込む位置も、飛ばした区切りの行の後ろ(区切りの上へ入れると表が壊れる)
+  let insertPos = curLine.lineEnd;
   if (curLine.lineEnd < value.length) {
     const nextRange = getLineRange(value, curLine.lineEnd + 1);
     let nextLine = parseTableLine(value, nextRange.start, nextRange.end);
-    if (nextLine !== null && nextLine.isDelimiter) {
-      // 区切り行ならさらに次の行(第1データ行)へ
-      if (nextRange.end < value.length) {
-        const nextNextRange = getLineRange(value, nextRange.end + 1);
-        nextLine = parseTableLine(value, nextNextRange.start, nextNextRange.end);
-      } else {
-        nextLine = null;
-      }
+    if (nextLine !== null && isHeaderDelimiter(value, nextLine)) {
+      insertPos = nextRange.end;
+      nextLine =
+        nextRange.end < value.length
+          ? parseTableLine(value, ...rangeArgs(getLineRange(value, nextRange.end + 1)))
+          : null;
     }
     if (nextLine !== null && nextLine.cells.length > 0) {
       const target = nextLine.cells[0]!;
@@ -247,7 +263,6 @@ export function tableOnTab(
   const cells = Array.from({ length: numCols }, () => ' ').join(' | ');
   const newRow = `${curLine.indent}| ${cells} |`;
   const insertText = `\n${newRow}`;
-  const insertPos = curLine.lineEnd;
   // 新しい行の第1セルの空白位置にキャレットを合わせる
   const firstCellOffset = curLine.indent.length + 2; // '| ' の直後
   const newCaret = insertPos + 1 + firstCellOffset;

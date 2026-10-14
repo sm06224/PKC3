@@ -362,6 +362,53 @@ describe('行・列の口を押す(#418 段①)', () => {
  *   ② 升には行・列のボタンが入るので **`＋` まで混ざる**
  *   どちらも「打ち直したら user の字が変わる」= 静かなデータ破壊である。
  */
+/**
+ * 🔴 **升の書換も、別のタブ・窓が編集中のノートへは撃たない**(#1087。行・列を消す回と同じ門)。
+ * 断るときは打った升の字を失わない(欄は閉じているので知らせに残す = `typedCellNote`)。
+ */
+describe('升の確定は別のタブの編集を確かめる(#1087)', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+  const run = async (grant: 'granted' | 'denied' | 'unreachable', value: string) => {
+    const { root, cell } = cellRoot();
+    const { dispatcher, dispatched } = fake();
+    const asked: string[] = [];
+    bindActions(root, dispatcher, {
+      acquireEditLock: async (lid: string) => {
+        asked.push(lid);
+        return grant;
+      },
+      releaseEditLock: () => undefined,
+    });
+    cell.click();
+    const input = cell.querySelector<HTMLInputElement>('[data-pkc-field="cell-input"]')!;
+    input.value = value;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    await tick();
+    return { dispatched, asked };
+  };
+
+  it('🔴 別のタブが握っていたら、書かずに理由を出し、打った字を残す', async () => {
+    const r = await run('denied', '品名');
+    expect(r.asked, '問い合わせていない').toEqual(['n1']);
+    expect(r.dispatched.filter((a) => a['type'] === 'SET_CSV_CELL'), '握られているのに書いた').toHaveLength(0);
+    expect(r.dispatched).toEqual([
+      { type: 'OP_FAILED', error: EDIT_ELSEWHERE_ERROR + '(入力した『品名』は反映されていません)' },
+    ]);
+  });
+
+  it('対照群: 握られていなければ書く', async () => {
+    const r = await run('granted', '品名');
+    expect(r.dispatched).toEqual([
+      { type: 'SET_CSV_CELL', lid: 'n1', line: 1, openLine: CSV_LINE, col: 0, value: '品名' },
+    ]);
+  });
+
+  it('字を消して確定した回は、失われる字が無いので知らせに足さない', async () => {
+    const r = await run('denied', '');
+    expect(r.dispatched).toEqual([{ type: 'OP_FAILED', error: EDIT_ELSEWHERE_ERROR }]);
+  });
+});
+
 describe('升の原文は、描いた側から受け取る(#418 段①)', () => {
   const input = (cell: HTMLElement): HTMLInputElement | null =>
     cell.querySelector('[data-pkc-field="cell-input"]');
