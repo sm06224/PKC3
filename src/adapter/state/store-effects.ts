@@ -676,6 +676,9 @@ export function connectStoreEffects(
 ): StoreEffects {
   let queue: Promise<void> = Promise.resolve();
   let disposed = false;
+  // 本文の全文検索の合流(REQUEST_SEARCH)── 飛んでいる 1 本と、その間に来た最新の語
+  let searchInFlight = false;
+  let searchPending: string | null = null;
   /**
    * 🔴 **調べる相手の中身を読む、たった 1 か所**(#854 段② / #682 段②)。
    *
@@ -1059,28 +1062,58 @@ export function connectStoreEffects(
        */
       case 'REQUEST_SEARCH': {
         const search = store.searchEntries;
-        if (ev.query.trim() === '') break;
+        if (ev.query.trim() === '') {
+          searchPending = null;
+          break;
+        }
         const q = ev.query;
         /**
          * ⚠ 検索の失敗でエラーの行を出さない ── 題名の絞り込みは効いたままで、user の操作は止まっていない。
          * 🔴 ただし**失敗したことは state に残す**(#1087)── 残さないと、左の一覧は「一致するものが
          *   ありません」と言い切るか、「本文を探しています…」のまま止まる。
          */
-        const failed = (): void => {
+        const failedFor = (query: string): void => {
           if (!disposed)
-            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids: [], truncated: false, failed: true });
+            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query, lids: [], truncated: false, failed: true });
         };
         if (!search) {
-          failed();
+          failedFor(q);
           break;
         }
-        void search(q).then(
-          ({ lids, truncated }) => {
-            if (disposed) return;
-            dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query: q, lids, truncated });
-          },
-          failed,
-        );
+        /**
+         * 🔴 **飛んでいる問い合わせは 1 本まで**(#1087)。worker は 1 本線なので、打鍵ごとに
+         * 投げると 1〜2 文字の検索(LIKE の全走査。5000 件・3KB で語が当たらないと約 50ms)が
+         * 列を作り、保存がその後ろで待つ(実測:5 連打のあとの保存が約 360ms 待った)。
+         * 飛んでいる間に来た問い合わせは**最新の 1 つだけ**取っておき、返ったら送る
+         * (途中の語は捨てる)。⚠ 待ち時間は足さない ── 空いていれば即座に送る。
+         * 古い結果は reducer が `query` で捨てる(従来どおり)。
+         */
+        if (searchInFlight) {
+          searchPending = q;
+          break;
+        }
+        const run = (query: string): void => {
+          searchInFlight = true;
+          const settle = (): void => {
+            searchInFlight = false;
+            const next = searchPending;
+            searchPending = null;
+            if (next !== null && next !== query && !disposed) run(next);
+          };
+          // 同期に投げられても飛行中の印を残さない(Promise の中で呼ぶ)
+          void new Promise<Awaited<ReturnType<typeof search>>>((r) => r(search(query))).then(
+            ({ lids, truncated }) => {
+              if (!disposed)
+                dispatcher.dispatch({ type: 'SET_SEARCH_HITS', query, lids, truncated });
+              settle();
+            },
+            () => {
+              failedFor(query);
+              settle();
+            },
+          );
+        };
+        run(q);
         break;
       }
       /**

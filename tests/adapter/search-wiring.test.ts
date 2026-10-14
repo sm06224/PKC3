@@ -119,6 +119,91 @@ describe('本文の結果がまだ / 失敗のとき「無い」と言い切ら�
   });
 });
 
+describe('打鍵ごとの検索は 1 本に合流する(#1087)', () => {
+  /** 手で返す stub ── 返すまで「飛んでいる」ままにできる */
+  function manual() {
+    const calls: string[] = [];
+    const resolvers: Array<(r: { lids: string[]; truncated: boolean }) => void> = [];
+    const rejecters: Array<(e: Error) => void> = [];
+    const searchEntries = (q: string) =>
+      new Promise<{ lids: string[]; truncated: boolean }>((res, rej) => {
+        calls.push(q);
+        resolvers.push(res);
+        rejecters.push(rej);
+      });
+    return { calls, resolvers, rejecters, searchEntries };
+  }
+  function boot(searchEntries: (q: string) => Promise<{ lids: string[]; truncated: boolean }>) {
+    const d = new Dispatcher();
+    connectStoreEffects(d, {
+      ...stubRevisionOps(),
+      getBody: async () => '',
+      deleteEntry: async () => {},
+      setEntryParent: async () => {},
+      renameEntry: async () => stubStamps(),
+      replaceAssetRefs: () => Promise.reject(new Error('unused')),
+      reorderEntry: async () => stubStamps(),
+      persistEntry: async () => stubStamps(),
+      searchEntries,
+    });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', '会議メモ')], relations: [] });
+    return d;
+  }
+
+  it('🔴 a, ab, abc と速く打つと、worker へは 2 本だけ(最初と最新)で、最後の結果が残る', async () => {
+    const m = manual();
+    const d = boot(m.searchEntries);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ab' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'abc' });
+    expect(m.calls, '飛んでいる間に 2 本目以降が出ている').toEqual(['a']);
+    m.resolvers[0]!({ lids: ['n1'], truncated: false });
+    await tick();
+    expect(m.calls, '途中の語 ab が送られている / 最新の abc が送られていない').toEqual(['a', 'abc']);
+    m.resolvers[1]!({ lids: ['n1'], truncated: true });
+    await tick();
+    expect(m.calls).toEqual(['a', 'abc']);
+    const s = d.getState();
+    expect(s.searchHitsQuery, '最後に表示される結果が最新の語のものでない').toBe('abc');
+    expect(s.searchHitsTruncated).toBe(true);
+  });
+
+  it('対照群 ── 返ってから打てば、毎回送る(合流は待ちを足さない)', async () => {
+    const m = manual();
+    const d = boot(m.searchEntries);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    m.resolvers[0]!({ lids: [], truncated: false });
+    await tick();
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ab' });
+    expect(m.calls).toEqual(['a', 'ab']);
+  });
+
+  it('飛んでいる間に打ち直して同じ語へ戻したら、同じ語は送り直さない', async () => {
+    const m = manual();
+    const d = boot(m.searchEntries);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ab' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    m.resolvers[0]!({ lids: [], truncated: false });
+    await tick();
+    expect(m.calls).toEqual(['a']);
+  });
+
+  it('🔴 先の 1 本が失敗しても、最新の語は送られる(止まらない)', async () => {
+    const m = manual();
+    const d = boot(m.searchEntries);
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'a' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: 'ab' });
+    m.rejecters[0]!(new Error('locked'));
+    await tick();
+    expect(m.calls).toEqual(['a', 'ab']);
+    m.resolvers[1]!({ lids: ['n1'], truncated: false });
+    await tick();
+    expect(d.getState().searchHitsQuery).toBe('ab');
+    expect(d.getState().searchHitsFailed).toBe(false);
+  });
+});
+
 describe('全文検索の配線(#181)', () => {
   it('🔴 絞り込みを打つと SQL へ問い合わせが飛ぶ', async () => {
     const { d, searchEntries } = setup();
