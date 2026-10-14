@@ -1,3 +1,4 @@
+import { WRITE_QUOTA_REFUSAL } from './storage/write-quota';
 /** 空きが足りないときの案内(ボタンの名前は画面の字〔`commands.ts`〕と揃える)。 */
 const QUOTA_JA = '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください';
 
@@ -51,7 +52,9 @@ export function errorText(e: unknown): string {
  */
 export function bodySaveErrorText(e: unknown): string {
   const text = errorText(e);
-  return text.includes(QUOTA_JA) ? `${text}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
+  // ⚠ worker の断り(`WRITE_QUOTA_REFUSAL`)は自分で「ノートを保存し直す」まで言うので、重ねて足さない(#1087 S1)
+  const short = text.includes(QUOTA_JA) && !text.includes(WRITE_QUOTA_REFUSAL);
+  return short ? `${text.replace(/。$/, '')}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
 }
 
 /**

@@ -22,6 +22,7 @@ import {
   isAsidePane,
   phaseBlockReason,
   SECTION_DRAFT_NOTE,
+  editRevokedNote,
   unsavedTypingLidOf,
   viewModeLabel,
   type ViewMode,
@@ -2374,9 +2375,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       if (unsavedTypingLidOf(st) !== lid) return;
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error:
-          '別のタブまたはウィンドウがこのノートの編集を引き継ぎました。⚠ ' +
-          'ここで保存するとそちらの編集を上書きします。必要な内容をコピーしてから「編集をやめる」を押してください',
+        error: editRevokedNote(st),
       });
     });
     let promotedHost: StoreProxyHost | null = null;

@@ -125,8 +125,12 @@ describe('測り直す間隔(#971 段②)', () => {
 });
 
 describe('断り文(#971 段②)', () => {
-  it('🔴 「消す操作は通る」と言い切る(詰みに見せない)', () => {
-    expect(WRITE_QUOTA_REFUSAL, '消せることを言っていない').toContain('消す操作は止めていません');
+  it('🔴 嘘を言わない: 「消す操作は止めていない」と言い切らず、先にタブの外で空きを作ることと保存し直しが先であることを言う', () => {
+    expect(WRITE_QUOTA_REFUSAL, '保存失敗の直後は整理が断られるのに、消せると言い切っている').not.toContain(
+      '消す操作は止めていません',
+    );
+    expect(WRITE_QUOTA_REFUSAL, 'タブの外で空きを作ることを言っていない').toContain('このタブの外');
+    expect(WRITE_QUOTA_REFUSAL, '保存し直しが先であることを言っていない').toContain('「ノートを保存し直す」を押してください(押すまでは');
     expect(WRITE_QUOTA_REFUSAL, '次の一手が無い').toMatch(/容量の内訳|添付を消す/);
   });
 

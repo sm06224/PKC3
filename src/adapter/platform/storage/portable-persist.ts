@@ -21,6 +21,7 @@
  * **閉じる直前に書くとまさにそこで落ちる**(`asset-blob-store.ts` の実測)。
  * ここは可搬バンドルの「閉じる直前の保存」そのものなので、`Blob` にしてはならない。
  */
+import { errorText } from '@features/error-text';
 
 /** 保存の見え方。⚠ **失敗だけは必ず user に出す**(黙ると編集が消える)。 */
 export type PersistState =
@@ -163,7 +164,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
         image = await deps.exportImage();
       } catch (e) {
         dirty = true; // ⚠ 出せなかったぶんは**溜めたまま**にする(捨てない)
-        setState({ kind: 'error', why: String(e) });
+        setState({ kind: 'error', why: errorText(e) });
         return;
       }
       /**
@@ -179,7 +180,7 @@ export function connectPortablePersist(deps: PortablePersistDeps): PortablePersi
         await deps.write({ savedAt: now(), image });
       } catch (e) {
         dirty = true;
-        setState({ kind: 'error', why: String(e) });
+        setState({ kind: 'error', why: errorText(e) });
         return;
       }
       if (!dirty) {
