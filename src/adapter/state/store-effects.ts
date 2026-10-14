@@ -43,6 +43,7 @@ import {
   colorRewriteNotice,
   attachmentNameRewriteNotice,
 } from '@features/markdown/body-rewrite';
+import { tableFormatDropsInfo } from '@features/markdown/table-convert';
 import { cutLines, insertLines } from '@features/markdown/line-move';
 import { clipPreview } from '@features/relation/dual-pane';
 import {
@@ -524,6 +525,23 @@ async function fetchSchemaGrids(
   // ⚠ 行数が採れなくても**構造は出す**(ここだけ握り潰してよい)
   const counts = sql === null ? null : await ask(sql, opts).catch(() => null);
   return { columns, fks, counts, csv };
+}
+
+/**
+ * 🔴 **表のセルの確定が失敗したとき、打った字を知らせに入れる**(#1087 の見直し 2026-10-14)。
+ *
+ * ⚠ セルの欄は確定した時点で閉じ(`binder.ts` の `commit` が `restore` する)、失敗しても開き直さない。
+ *   知らせに字が無いと、打った字は画面のどこにも残らない。
+ * 🔑 欄に開き直す道は取らない ── 表の塊は書換の往復で差し替わり、失敗した回は差し替わらないので
+ *   開き直す先の升が画面に残っている保証が無い。知らせなら本文の状態に依らず必ず届く。
+ * ⚠ 空にした回(消した)は、失われる字が無いので付けない。長い字は頭だけ。
+ */
+const CELL_NOTE_CHARS = 30;
+export function typedCellNote(rewrite: { kind: string; value?: string }): string {
+  if (rewrite.kind !== 'csv-cell' || rewrite.value === undefined || rewrite.value === '') return '';
+  const v = rewrite.value.replace(/\s+/g, ' ');
+  const head = v.length <= CELL_NOTE_CHARS ? v : `${v.slice(0, CELL_NOTE_CHARS)}…`;
+  return `(入力した『${head}』は反映されていません)`;
 }
 
 export function connectStoreEffects(
@@ -3686,7 +3704,7 @@ export function connectStoreEffects(
               // 行不在: 可視通知(非致命 ── アプリごと止めない)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: ENTRY_GONE_NOTE,
+                error: ENTRY_GONE_NOTE + typedCellNote(ev.rewrite),
               });
               return;
             }
@@ -3703,8 +3721,9 @@ export function connectStoreEffects(
                 type: 'OP_FAILED',
                 // 🔑 理由がはっきりしている断り(最後の 1 行 / 1 列)はその字で言う(#1087 の見直し 2026-10-13)
                 error:
-                  bodyRewriteRefusal(body, ev.rewrite) ??
-                  '本文が変わっているため反映できませんでした(開き直してください)',
+                  (bodyRewriteRefusal(body, ev.rewrite) ??
+                    '本文が変わっているため反映できませんでした(開き直してください)') +
+                  typedCellNote(ev.rewrite),
               });
               return;
             }
@@ -3768,7 +3787,13 @@ export function connectStoreEffects(
               {
                 expectHash: contentHash64Hex(body),
                 ...(ev.rewrite.kind === 'task-run' ||
-                (ev.rewrite.kind === 'csv-shape' && ev.rewrite.mode === 'remove')
+                (ev.rewrite.kind === 'csv-shape' && ev.rewrite.mode === 'remove') ||
+                /**
+                 * 🔴 **表の形変えで桁揃え・区切りの字が落ちる回も積む**(#1087 の見直し 2026-10-14)。
+                 * ⚠ 落ちない回は積まない(`tableFormatDropsInfo`)── 履歴を形変えの数だけ伸ばさない。
+                 */
+                (ev.rewrite.kind === 'table-format' &&
+                  tableFormatDropsInfo(body, ev.rewrite.line, ev.rewrite.to))
                   ? { checkpoint: true }
                   : {}),
               },
@@ -3780,7 +3805,8 @@ export function connectStoreEffects(
                 error:
                   ev.rewrite.kind === 'attachment-name'
                     ? 'ファイル名は変えられませんでした(別のタブまたはウィンドウがこのノートを書き換えました。もう一度変えてください)'
-                    : '別のタブまたはウィンドウがこのノートを書き換えたため、反映できませんでした(もう一度押してください)',
+                    : '別のタブまたはウィンドウがこのノートを書き換えたため、反映できませんでした(もう一度押してください)' +
+                      typedCellNote(ev.rewrite),
               });
               return;
             }
@@ -3839,7 +3865,7 @@ export function connectStoreEffects(
                 error:
                   ev.rewrite.kind === 'attachment-name'
                     ? `ファイル名は変えられませんでした(${errorText(e)})`
-                    : errorText(e),
+                    : errorText(e) + typedCellNote(ev.rewrite),
               });
           }
         });

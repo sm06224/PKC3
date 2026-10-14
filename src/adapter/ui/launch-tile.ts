@@ -317,7 +317,7 @@ export async function launchTile(
       const blob = await deps.readBlob(assetKey);
       if (!blob) {
         win.close();
-        deps.fail(`「${tile.title}」の中身が見つかりません(添付が整理された可能性)`);
+        deps.fail(`「${tile.title}」の中身が見つかりません(「使われていない添付を消す」で消えた可能性があります)`);
         return;
       }
       // ⚠ ここで初めて bytes を文字列にする ── 隔離のために `srcdoc` へ入れる

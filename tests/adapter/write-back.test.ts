@@ -291,7 +291,7 @@ describe('元のファイルへ書き戻す', () => {
     const { deps, written, said } = harness({ getBody: async () => null });
     await writeBackEntry(deps);
     expect(written).toEqual([]);
-    expect(said).toEqual(['fail:本文が見つかりません(整理された可能性)']);
+    expect(said).toEqual(['fail:ノートが見つかりません(ゴミ箱に入ったか、消えた可能性があります)']);
   });
 
   it('⚠ 書けなかったときは、ファイル名と理由を出す', async () => {

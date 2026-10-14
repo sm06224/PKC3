@@ -151,7 +151,7 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
     await deps.settle();
     const body = await deps.getBody();
     if (body === null) {
-      deps.fail('本文が見つかりません(整理された可能性)');
+      deps.fail('ノートが見つかりません(ゴミ箱に入ったか、消えた可能性があります)');
       return null;
     }
     if (isBlankBody(body)) {
