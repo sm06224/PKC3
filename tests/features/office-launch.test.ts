@@ -15,8 +15,16 @@ import {
   localFileId,
   localFileToken,
   localOpenNotice,
+  localSaveFailedNotice,
+  openingNotice,
+  stagedLaunchNotice,
 } from '../../src/features/office/office-launch';
-import { isOfficeAttachment } from '../../src/features/office/office-entry';
+import {
+  isOfficeAttachment,
+  isOfficeUsable,
+  officeEntry,
+  type OfficeCapability,
+} from '../../src/features/office/office-entry';
 import { sanitizeMessageText } from '../../src/features/message/message-log';
 
 describe('振り分け', () => {
@@ -148,5 +156,102 @@ describe('文言', () => {
     expect(s).toContain('報告書.docx');
     expect(sanitizeMessageText(s), 'ファイル名がメッセージに残る').not.toContain('報告書');
     expect(s).toContain('書き戻せません');
+  });
+});
+
+const CAP_OK: OfficeCapability = {
+  crossOriginIsolated: true,
+  sharedArrayBuffer: true,
+  jspi: true,
+  decompressionStream: true,
+};
+
+describe('Office を押した時点の知らせ(書き戻せるかで言い分ける)', () => {
+  it('🔴 書き込めないファイルに「書き戻します」と言わない。書けるなら言う', () => {
+    expect(openingNotice('a.docx', true)).toBe(localOpenNotice('a.docx'));
+    expect(openingNotice('a.docx', false)).toBe(cannotWriteBackNotice('a.docx'));
+    expect(openingNotice('a.docx', false), '書けないのに書き戻すと言っている').not.toContain('書き戻します');
+  });
+});
+
+describe('OS から Office のファイルを渡されたときの知らせ', () => {
+  const base = { fileName: '報告書.docx', writable: true, packInstalled: true, capability: CAP_OK };
+
+  it('動かせて一式が入っていれば、従来どおり「Office」を押させる(押す先にタイルが在る)', () => {
+    expect(stagedLaunchNotice(base)).toContain('アプリの「Office」を押してください');
+    expect(stagedLaunchNotice({ ...base, writable: false })).toBe(cannotWriteBackNotice('報告書.docx'));
+  });
+
+  it('🔴 一式が無い端末ではタイルが無いので押させず、取り込む道を案内する', () => {
+    const m = stagedLaunchNotice({ ...base, packInstalled: false });
+    expect(m).not.toContain('「Office」を押');
+    expect(m).toContain('システム → 保存領域 → Office 表示');
+    expect(m).toContain('約');
+  });
+
+  it('🔴 動かないブラウザでは、動くブラウザを案内する(一式の有無より先)', () => {
+    for (const lack of ['crossOriginIsolated', 'sharedArrayBuffer', 'jspi', 'decompressionStream'] as const) {
+      const m = stagedLaunchNotice({ ...base, packInstalled: false, capability: { ...CAP_OK, [lack]: false } });
+      expect(m, lack).toContain('Chrome か Edge');
+      expect(m, `${lack}: 動かない環境に取り込みを促している`).not.toContain('取り込んでください');
+    }
+  });
+
+  it('ファイル名は引用符で囲んである(メッセージへ積むとき名前が残らない)', () => {
+    for (const m of [
+      stagedLaunchNotice(base),
+      stagedLaunchNotice({ ...base, packInstalled: false }),
+      stagedLaunchNotice({ ...base, capability: { ...CAP_OK, jspi: false } }),
+    ]) {
+      expect(sanitizeMessageText(m), '名前が残る').not.toContain('報告書');
+    }
+  });
+});
+
+describe('タイルを出す規則は添付の入口と同じ', () => {
+  it('🔴 isOfficeUsable は、添付の入口が「押せる」になる条件と全数で一致する', () => {
+    let usable = 0;
+    for (let bits = 0; bits < 32; bits += 1) {
+      const capability: OfficeCapability = {
+        crossOriginIsolated: (bits & 1) !== 0,
+        sharedArrayBuffer: (bits & 2) !== 0,
+        jspi: (bits & 4) !== 0,
+        decompressionStream: (bits & 8) !== 0,
+      };
+      const packInstalled = (bits & 16) !== 0;
+      const open = officeEntry({ mime: '', fileName: 'a.docx', packInstalled, capability }).kind === 'open';
+      expect(isOfficeUsable(packInstalled, capability), `bits=${bits}`).toBe(open);
+      if (open) usable += 1;
+    }
+    expect(usable, '押せる組み合わせが 1 つに限られない/0 でない').toBe(1);
+  });
+});
+
+describe('元のファイルへ書き戻せなかった知らせ', () => {
+  it('🔴 理由ごとに言い分け、どの理由でも行方を 1 文で言う', () => {
+    const rows: [Parameters<typeof localSaveFailedNotice>[1], string][] = [
+      ['denied', '許可が得られなかった'],
+      ['reopen', '開き直す必要があります'],
+      ['unsupported', 'このブラウザでは元のファイルへ書き戻せません'],
+    ];
+    for (const [r, phrase] of rows) {
+      const m = localSaveFailedNotice('報告書.docx', r);
+      expect(m, String(r)).toContain(phrase);
+      expect(m, String(r)).toContain('編集した内容は PKC3 の中に残してあります');
+      expect(sanitizeMessageText(m)).not.toContain('報告書');
+    }
+    const none = localSaveFailedNotice('報告書.docx', null);
+    expect(none).toContain('編集した内容は PKC3 の中に残してあります');
+    expect(none, '理由が分からないのに理由を言っている').not.toMatch(/許可|開き直す|このブラウザ/);
+  });
+});
+
+describe('main.ts の配線(原文 pin。main.ts は実行されないので弱い)', () => {
+  const main = readFileSync('src/main.ts', 'utf8');
+  it('タイルは isOfficeUsable で出し分け、押した時点・受け取った時点の知らせは取り出した関数を通る', () => {
+    expect(main).toContain('officeInstalled: () => isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability())');
+    expect(main).toContain('openingNotice(staged.name, staged.writable)');
+    expect(main).toContain('stagedLaunchNotice({');
+    expect(main, '一式の有無を起動直後の控えから読んでいる').toContain('await officeInstaller.readMeta()');
   });
 });

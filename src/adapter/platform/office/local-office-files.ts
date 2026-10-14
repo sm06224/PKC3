@@ -22,13 +22,15 @@
  * ⚠ **押すのは user なので、遮断されない。**
  */
 import type { LaunchedHandle } from '@adapter/platform/launched-files';
-import { localFileToken } from '@features/office/office-launch';
+import { localFileToken, type LocalWriteFailure } from '@features/office/office-launch';
 
 /** 控えてあるファイル 1 件。 */
 export interface StagedLocalFile {
   readonly token: string;
   readonly name: string;
   readonly bytes: Uint8Array;
+  /** 元のファイルへ書き戻せるか(受け取った時点の handle で決まる)。知らせの言い分けに使う。 */
+  readonly writable: boolean;
 }
 
 interface Held {
@@ -42,6 +44,11 @@ export class LocalOfficeFiles {
   /** まだ Office へ渡していないもの。⚠ **1 件だけ持つ**(下の注記)。 */
   private pending: (StagedLocalFile & { readonly handle: LaunchedHandle }) | null = null;
   private seq = 0;
+  /**
+   * 🔴 **この読み込み固有の値**(合言葉に混ぜる)。連番だけだと読み込み直すたびに `local:1` へ戻り、
+   * 窓を残したまま読み込み直して別のファイルを開くと、**残った窓の保存が別のファイルへ書き込まれる**。
+   */
+  private readonly session = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
   /**
    * OS から来たファイルを控える。
@@ -52,9 +59,10 @@ export class LocalOfficeFiles {
    */
   stage(handle: LaunchedHandle, name: string, bytes: Uint8Array): StagedLocalFile {
     this.seq += 1;
-    const token = localFileToken(`${this.seq}`);
-    this.pending = { token, name, bytes, handle };
-    return { token, name, bytes };
+    const token = localFileToken(`${this.session}-${this.seq}`);
+    const writable = typeof handle.createWritable === 'function';
+    this.pending = { token, name, bytes, handle, writable };
+    return { token, name, bytes, writable };
   }
 
   /** 控えてあるものの名前(無ければ `null`)。⚠ 画面に出すためだけ。 */
@@ -73,7 +81,7 @@ export class LocalOfficeFiles {
     if (p === null) return null;
     this.pending = null;
     this.byToken.set(p.token, { handle: p.handle, name: p.name });
-    return { token: p.token, name: p.name, bytes: p.bytes };
+    return { token: p.token, name: p.name, bytes: p.bytes, writable: p.writable };
   }
 
   /** その合言葉のファイル名(無ければ `null`)。 */
@@ -84,14 +92,15 @@ export class LocalOfficeFiles {
   /**
    * 🔴 **元のファイルへ書き戻す**(#432 段②)。
    *
-   * @returns 書けたか。⚠ **`false` を黙らせない** ── 呼び手が user に伝える
+   * @returns 書けたら `true`。書けなかったら `false`、理由を区別できたときは理由。
+   *   ⚠ **失敗を黙らせない** ── 呼び手が user に伝える
    *   (書けなかったのに「保存しました」と出すのが、いちばん取り返しがつかない)。
    */
-  async writeBack(token: string, bytes: Uint8Array): Promise<boolean> {
+  async writeBack(token: string, bytes: Uint8Array): Promise<true | false | LocalWriteFailure> {
     const held = this.byToken.get(token);
     if (held === undefined) return false;
     const { handle } = held;
-    if (typeof handle.createWritable !== 'function') return false;
+    if (typeof handle.createWritable !== 'function') return 'unsupported';
     /**
      * ⚠ **権限を確かめ直す**(`launched-files.ts` と同じ作法)── OS 起動で来た
      *   handle も、書くときに改めて許可が要ることがある。
@@ -103,7 +112,7 @@ export class LocalOfficeFiles {
         const state = await handle.queryPermission({ mode: 'readwrite' });
         if (state !== 'granted' && typeof handle.requestPermission === 'function') {
           const asked = await handle.requestPermission({ mode: 'readwrite' });
-          if (asked !== 'granted') return false;
+          if (asked !== 'granted') return 'denied';
         }
       }
       const w = await handle.createWritable();
@@ -115,8 +124,12 @@ export class LocalOfficeFiles {
       await (w as unknown as { write(d: Uint8Array): Promise<void> }).write(bytes);
       await w.close();
       return true;
-    } catch {
-      // ⚠ 握り潰さない ── 呼び手が false を見て user に伝える
+    } catch (e) {
+      // ⚠ 握り潰さない ── 呼び手が失敗を見て user に伝える。
+      //   名前で言い分けられるものだけ区別する(それ以外は理由を作らず `false`)
+      const name = (e as { name?: unknown } | null)?.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError') return 'denied';
+      if (name === 'NotFoundError' || name === 'InvalidStateError') return 'reopen';
       return false;
     }
   }

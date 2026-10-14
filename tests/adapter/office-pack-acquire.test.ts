@@ -12,6 +12,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchPackFromBase,
+  fetchPackManifest,
+  packUrlFailureMessage,
   readPackFromZip,
 } from '../../src/adapter/platform/office/office-pack-acquire';
 import { REQUIRED_PACK_FILES } from '../../src/adapter/platform/office/office-pack';
@@ -145,5 +147,35 @@ describe('fetchPackFromBase', () => {
 
   it('フォントを 1 つも指定しない呼び出しは落とす', async () => {
     await expect(fetchPackFromBase('/office/', [])).rejects.toThrow(/フォント/);
+  });
+});
+
+describe('配布元に届かないときの字(user に見える)', () => {
+  it('🔴 案内の「ファイルから取り込む」は、設定の画面に実在するボタン名', async () => {
+    const { readFileSync } = await import('node:fs');
+    const panel = readFileSync('src/adapter/ui/render/office-pack-panel.ts', 'utf8');
+    const label = /button\('choose-office-pack', '([^']+)'/.exec(panel)?.[1];
+    expect(label, 'ボタンの字を採れていない').toBeDefined();
+    expect(packUrlFailureMessage(new Error('x'))).toContain(`「${label}」`);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('🔴 目録に届かない / 無いときの字は日本語で、入手先の URL を書かない', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const e1 = await fetchPackManifest('/office-pack/').catch((e: Error) => e.message);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nf', { status: 404 })));
+    const e2 = await fetchPackManifest('/office-pack/').catch((e: Error) => e.message);
+    expect(e1).toBe('配布元に届きません。');
+    expect(e2).toBe('配布元に一式が見つかりません(HTTP 404)。');
+    for (const m of [e1, e2]) expect(m, 'URL を書いている').not.toMatch(/https?:|pack\.json|\/office-pack/);
+  });
+
+  it('出口の案内は、画面のボタン名と同じ字で、素の英語の例外にも付く', () => {
+    expect(packUrlFailureMessage(new TypeError('Failed to fetch'))).toBe(
+      '配布元から取り込めませんでした。配布元に届かないときは「ファイルから取り込む」で一式の zip を選んでください。',
+    );
   });
 });

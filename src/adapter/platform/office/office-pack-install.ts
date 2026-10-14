@@ -27,6 +27,7 @@ import {
 import {
   fetchPackFromBase,
   fetchPackManifest,
+  packUrlFailureMessage,
   readPackFromZip,
   type PackFiles,
 } from './office-pack-acquire';
@@ -132,14 +133,20 @@ export class OfficePackInstaller {
     return this.run('取得', async (progress) => {
       const base = this.deps.base ?? DEFAULT_PACK_BASE;
       progress('取得元を調べています');
-      const manifest = await (this.deps.fetchManifest ?? fetchPackManifest)(base);
-      const files = await (this.deps.fetchFiles ?? fetchPackFromBase)(
-        base,
-        manifest.fonts,
-        (phase, done, total) => progress(`${phase}(${done}/${total})`),
-      );
-      // 🔴 ビルドの素性も持ち帰る(#155)── 版の文字列だけでは新旧を見分けられない
-      return { files, version: manifest.version, build: manifest.build, source: 'url' as const };
+      try {
+        const manifest = await (this.deps.fetchManifest ?? fetchPackManifest)(base);
+        const files = await (this.deps.fetchFiles ?? fetchPackFromBase)(
+          base,
+          manifest.fonts,
+          (phase, done, total) => progress(`${phase}(${done}/${total})`),
+        );
+        // 🔴 ビルドの素性も持ち帰る(#155)── 版の文字列だけでは新旧を見分けられない
+        return { files, version: manifest.version, build: manifest.build, source: 'url' as const };
+      } catch (e) {
+        // 🔴 取得で落ちたときだけ、日本語の理由 + 「ファイルから取り込む」への案内を付ける
+        //    (保管側の失敗 = quota などは、この外なので触らない)
+        throw new OfficePackError(packUrlFailureMessage(e));
+      }
     });
   }
 

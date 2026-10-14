@@ -403,7 +403,9 @@ describe('ファイル名・題名は引用符で囲む(原文 pin ── `main.
     expect(outside).toContain('から 1 件取り込みました:『${title}』');
     expect(outside).toContain('がノートを作りました:『${title}』');
     expect(code).toContain('`「${staged.name}」を開いています');
-    expect(code).toContain('`「${last.file.name}」を開けます');
+    // ⚠ 受け取った直後の知らせは取り出した関数(`stagedLaunchNotice`)へ移った ── 字はそちらで囲んでいる
+    expect(code).toContain('stagedLaunchNotice({');
+    expect(strip('src/features/office/office-launch.ts')).toContain('`「${name}」を開けます');
   });
 
   it('🔴 binder.ts: zip から取り出せなかったファイル名は囲んである', () => {

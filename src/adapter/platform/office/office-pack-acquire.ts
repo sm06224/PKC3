@@ -134,6 +134,19 @@ export function resolveBase(base: string, baseURI: string = document.baseURI): U
 }
 
 /**
+ * 🔴 **配布元から取り込めなかったときの出口**(user に押させる字は画面のボタン名と同じ)。
+ * ⚠ 入手先の URL は書かない(画面の字は URL を持たない)。
+ */
+export const PACK_URL_FAILURE_GUIDE =
+  '配布元に届かないときは「ファイルから取り込む」で一式の zip を選んでください。';
+
+/** 配布元からの取得で落ちた理由を、日本語 1 文 + 出口の案内にする。 */
+export function packUrlFailureMessage(e: unknown): string {
+  const lead = e instanceof OfficePackError ? e.message : '配布元から取り込めませんでした。';
+  return lead + PACK_URL_FAILURE_GUIDE;
+}
+
+/**
  * 取得元の**目録**(`pack.json`)を読む。
  *
  * 🔑 これが在るので、PKC3 側は**フォント名を 1 つも知らなくてよい** ──
@@ -146,10 +159,10 @@ export async function fetchPackManifest(base: string): Promise<PackManifest> {
     res = await fetch(url.href);
   } catch {
     // ⚠ 原因を名指しする ── 「失敗しました」では user が次に何をすべきか分からない
-    throw new OfficePackError(`取得元に届きません: ${url.href}`);
+    throw new OfficePackError('配布元に届きません。');
   }
   if (!res.ok) {
-    throw new OfficePackError(`取得元に一式がありません(HTTP ${res.status}): ${url.href}`);
+    throw new OfficePackError(`配布元に一式が見つかりません(HTTP ${res.status})。`);
   }
   // ⚠ **JSON として読めた**を「目録だった」と読まない ── 形は `parsePackManifest` が見る
   return parsePackManifest(await res.json().catch(() => null));
@@ -181,7 +194,7 @@ export async function fetchPackFromBase(
     const url = new URL(name, root);
     const res = await fetch(url.href);
     // ⚠ **沈黙を成功と読まない。** 404 の HTML を掴んで「入った」と言わない
-    if (!res.ok) throw new OfficePackError(`取得できません: ${name}(HTTP ${res.status})`);
+    if (!res.ok) throw new OfficePackError(`配布元から「${name}」を受け取れません(HTTP ${res.status})。`);
     out.set(name, await res.blob());
   }
   onProgress?.('検査中', names.length, names.length);

@@ -110,7 +110,7 @@ describe('書き戻す', () => {
     const f = fakeHandle({ createWritable: undefined });
     s.stage(f.handle, 'a.docx', bytes(1));
     const t = s.take()!.token;
-    expect(await s.writeBack(t, bytes(1))).toBe(false);
+    expect(await s.writeBack(t, bytes(1)), '理由を区別していない').toBe('unsupported');
   });
 
   it('🔴 許可が下りなければ false(勝手に書かない)', async () => {
@@ -121,7 +121,7 @@ describe('書き戻す', () => {
     });
     s.stage(f.handle, 'a.docx', bytes(1));
     const t = s.take()!.token;
-    expect(await s.writeBack(t, bytes(1))).toBe(false);
+    expect(await s.writeBack(t, bytes(1)), '許可が得られなかった理由を区別していない').toBe('denied');
     expect(f.written, '断られたのに書いた').toHaveLength(0);
   });
 
@@ -145,7 +145,36 @@ describe('書き戻す', () => {
     });
     s.stage(f.handle, 'a.docx', bytes(1));
     const t = s.take()!.token;
-    await expect(s.writeBack(t, bytes(1))).resolves.toBe(false);
+    await expect(s.writeBack(t, bytes(1)), '理由が分からない例外に理由を作った').resolves.toBe(false);
+  });
+
+  it('🔴 例外の名前で言い分ける:許可が無い → denied / 元のファイルが動いた・閉じた → reopen', async () => {
+    const cases: [string, string | false][] = [
+      ['NotAllowedError', 'denied'],
+      ['SecurityError', 'denied'],
+      ['NotFoundError', 'reopen'],
+      ['InvalidStateError', 'reopen'],
+      ['QuotaExceededError', false],
+    ];
+    for (const [name, want] of cases) {
+      const s = new LocalOfficeFiles();
+      const f = fakeHandle({
+        createWritable: async () => {
+          throw Object.assign(new Error('x'), { name });
+        },
+      });
+      s.stage(f.handle, 'a.docx', bytes(1));
+      const t = s.take()!.token;
+      expect(await s.writeBack(t, bytes(1)), name).toBe(want);
+    }
+  });
+
+  it('staged は書き戻せるかを持つ(押した時点の知らせの言い分けに使う)', () => {
+    const s = new LocalOfficeFiles();
+    expect(s.stage(fakeHandle().handle, 'a.docx', bytes(1)).writable).toBe(true);
+    expect(s.take()?.writable).toBe(true);
+    expect(s.stage(fakeHandle({ createWritable: undefined }).handle, 'b.docx', bytes(1)).writable).toBe(false);
+    expect(s.take()?.writable, '取り出した側で落ちている').toBe(false);
   });
 
   it('2 回保存すれば 2 回書く(開いている間ずっと使える)', async () => {
@@ -177,5 +206,25 @@ describe('寿命', () => {
     s.stage(fakeHandle().handle, 'a.docx', bytes(1));
     s.take();
     expect(new LocalOfficeFiles().nameOf('local:1'), '別の実体に前回の紐づけが残った').toBeNull();
+  });
+
+  it('🔴 読み込み直した側へ前回の合言葉を渡しても、別のファイルに当たらない(取り違えて書かない)', async () => {
+    // 窓を残したまま PKC3 を読み込み直す流れ。連番だけだと、どちらも 1 件目なので同じ合言葉になる
+    const first = new LocalOfficeFiles();
+    const a = fakeHandle();
+    first.stage(a.handle, 'A.docx', bytes(1));
+    const tokenA = first.take()!.token;
+
+    const second = new LocalOfficeFiles();
+    const b = fakeHandle();
+    second.stage(b.handle, 'B.docx', bytes(2));
+    const tokenB = second.take()!.token;
+
+    expect(tokenB, '読み込みをまたいで同じ合言葉になった').not.toBe(tokenA);
+    expect(isLocalFileToken(tokenA)).toBe(true);
+    expect(second.nameOf(tokenA), 'A の合言葉が B に当たった').toBeNull();
+    expect(await second.writeBack(tokenA, bytes(9)), 'A の窓の保存が B へ書かれた').toBe(false);
+    expect(b.written, 'B に書き込まれた').toHaveLength(0);
+    expect(a.written).toHaveLength(0);
   });
 });

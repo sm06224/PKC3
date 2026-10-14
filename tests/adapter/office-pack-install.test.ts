@@ -208,7 +208,31 @@ describe('OfficePackInstaller', () => {
     });
     const r = await installer.installFromUrl();
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.message, 'こちらが書いた文はそのまま出す').toBe('取得元に一式がありません');
+    expect(!r.ok && r.message, 'こちらが書いた文が先頭に残る').toMatch(/^取得元に一式がありません/);
+    expect(!r.ok && r.message, '出口(ファイルから取り込む)を案内していない').toContain(
+      '配布元に届かないときは「ファイルから取り込む」で一式の zip を選んでください。',
+    );
+  });
+
+  it('🔴 配布元への通信が素の英語で落ちても、日本語の 1 文と出口になる。入手先の URL は書かない', async () => {
+    const { installer } = make({
+      fetchManifest: async () => { throw new TypeError('Failed to fetch'); },
+    });
+    const r = await installer.installFromUrl();
+    const msg = !r.ok ? r.message : '';
+    expect(r.ok).toBe(false);
+    expect(msg, '英語の原文がそのまま出ている').not.toContain('Failed to fetch');
+    expect(msg).toMatch(/^配布元から取り込めませんでした。/);
+    expect(msg).toContain('「ファイルから取り込む」');
+    expect(msg, 'URL を書いている').not.toMatch(/https?:|\/office-pack/);
+  });
+
+  it('手元の zip からの失敗には、配布元の案内を付けない(対照群)', async () => {
+    const { installer } = make({
+      readZip: async () => { throw new OfficePackError('この zip に Office 一式が見つかりません。'); },
+    });
+    const r = await installer.installFromZip(new Blob(['x']), 'a.zip');
+    expect(!r.ok && r.message).toBe('この zip に Office 一式が見つかりません。');
   });
 
   it('🔴 容量不足は「次に何をすべきか」が分かる文にする', async () => {
