@@ -15198,7 +15198,11 @@ export function bindActions(
        * ⚠ ここは書式の近道だけを通す門なので、何も言わずに素通りすると
        *   「鍵を割り当てたのに何も起きない」になる ── 行き先を言う(`EDITOR_RUN` と同じ口)。
        */
-      if (rowCmd === 'align-table' || (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))) {
+      if (
+        rowCmd === 'align-table' ||
+        rowCmd === 'inline-calc' ||
+        (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))
+      ) {
         ke.preventDefault();
         EDITOR_RUN[rowCmd]!(ke.target as HTMLTextAreaElement, (t) => services.showStatus?.(t));
         return;

@@ -108,3 +108,23 @@ export function chooseTextScale(target: HTMLElement, scale: TextScale): void {
     // 保存できないだけ ── この session では効いている
   }
 }
+
+/**
+ * 🔴 **別のウィンドウで選んだ文字の大きさを、開いたままの自分にも当てる**(#1087 S2)。
+ *
+ * ⚠ 直す前は、読み込み直すまで古い大きさのままだった(`theme.ts` の `watchThemeFromOtherWindows` と同じ)。
+ * ⚠ 「標準」は鍵ごと消えるので、`removeItem`(`newValue === null`)も当て直す ── 既定へ戻る。
+ * ⚠ **返り値で外す**。
+ */
+export function watchTextScaleFromOtherWindows(
+  target: HTMLElement,
+  win: Pick<Window, 'addEventListener' | 'removeEventListener'>,
+): () => void {
+  const onStorage = (ev: Event): void => {
+    const key = (ev as StorageEvent).key;
+    if (key !== null && key !== TEXT_SCALE_STORAGE_KEY) return;
+    applyTextScale(target, initialTextScale());
+  };
+  win.addEventListener('storage', onStorage);
+  return () => win.removeEventListener('storage', onStorage);
+}

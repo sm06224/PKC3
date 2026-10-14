@@ -515,12 +515,12 @@ export class ScheduleRenderer {
     hiddenByNote: number,
   ): string {
     if (state.taskScanFailed)
-      return '予定を集められませんでした。タブを開き直すともう一度試します。';
+      return '予定を集められませんでした。開き直すともう一度試します。';
     if (state.taskScan === null) return '予定を集めています…';
     if (state.taskScan.truncated)
       return `多いので途中まで出しています(候補のノートは ${state.taskScan.totalNotes} 件)。`;
     if (total === 0)
-      return 'チェックの付いた行がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
+      return 'チェックリストの行(- [ ] やること)がまだありません。ノートに「- [ ] やること」と書くと、ここに出ます。';
     /**
      * 🔴 **「日付が無いから出ていない」を、はっきり書く。**
      * ⚠ 書かないと user は「チェックを書いたのに何も出ない」と読み、
@@ -529,6 +529,18 @@ export class ScheduleRenderer {
     // 🔴 ノートを隠したせいで 1 件も出ていないときは、そう言う(「日付を書いてください」と読ませない)
     if (groups === 0 && hiddenByNote > 0)
       return '「出すもの」でノートを外しているため、予定が出ていません。';
+    /**
+     * 🔴 **何も出ていない理由が「探す欄の語」「済みを隠している」なら、そう言う**(#1087 S5)。
+     * ⚠ 言わないと下の「日付を書いた予定がまだありません」と読めてしまい、**在る予定を「無い」と言う**。
+     */
+    if (groups === 0 && state.filterQuery.trim() !== '')
+      return '探す欄の語に合う予定がありません。';
+    if (
+      groups === 0 &&
+      !state.showDoneTasks &&
+      state.taskScan.cards.some((c) => c.done && (c.date !== null || state.showUndatedTasks))
+    )
+      return '済んだ予定は隠れています。「出すもの」で「済み」を出すと見えます。';
     if (dated === 0 && !state.showUndatedTasks)
       // ⚠ 書式バーは編集中にしか無い ── 予定の画面で使える入口(「予定を足す」)を言う(#1087)
       return '日付を書いた予定がまだありません。「- [ ] やること @2026-08-25」のように書くか、上の「予定を足す」で日付を選んで足してください。';
