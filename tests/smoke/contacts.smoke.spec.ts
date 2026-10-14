@@ -77,13 +77,13 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
    *   (集め直すのはタブを開いたときだけだった)。
    */
   await clickReal(page, '[data-pkc-action="start-edit"]');
-  await clickReal(page, '[data-pkc-region="editor-live"]');
-  await live
-    .locator('[data-pkc-field="row-source"]')
-    .fill(
-      '---\ntel: 090-9999-0000\nemail: taro@example.com\norg: 例の会社\n---\n\n# 山田太郎\n\n打ち合わせは水曜が空いているとのこと。',
-    );
-  await page.keyboard.press('Tab');
+  // ⚠ 番号は frontmatter(「この文書の情報」の札)に在り、行の原文(row-source)には出ない。
+  //   札の「情報を編集」から直す(1 稿目は row-source へ全文を fill し、末尾へ別の frontmatter を追記しただけだった)
+  await clickReal(page, '[data-pkc-field="fm-edit"]');
+  await page
+    .locator('[data-pkc-field="fm-source"]')
+    .fill('---\ntel: 090-9999-0000\nemail: taro@example.com\norg: 例の会社\n---');
+  await clickReal(page, '[data-pkc-field="fm-commit"]');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await expect(row, '保存したのに連絡先の一覧が古い番号のまま').toContainText('090-9999-0000', {
     timeout: 10_000,
