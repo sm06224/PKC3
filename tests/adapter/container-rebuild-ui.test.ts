@@ -66,6 +66,10 @@ const DONE: RebuildReport = {
     assetMissing: 0,
   },
   restored: 3,
+  relationsRestored: 2,
+  revisionsRestored: 5,
+  extrasPartial: false,
+  tagColorsRestored: 1,
   wiped: true,
   note: null,
   fallbackReason: null,
@@ -229,11 +233,13 @@ describe('窓の字(#1006)', () => {
     expect(m.body(), '数えられないのに数を言っている').toContain('数えられませんでした');
   });
 
-  it('🔴 戻らない物を、押す前に言い切る', async () => {
-    expect(REBUILD_LOST.length, '戻らない物の一覧が空').toBeGreaterThan(0);
+  it('🔴 戻らない物（いまは読めなかった分だけ）を、押す前に言い切る', async () => {
     const m = mount();
     m.run.click();
     await settle();
+    // 🔑 読めた分は戻ること / 読めない分は戻らないこと（#1087。一覧が空になっても窓は両方を言う）
+    expect(m.body(), '読めた分が戻ることを言っていない').toContain('読めた分');
+    expect(m.body(), '読めない分が戻らないことを言っていない').toContain('その分は戻りません');
     for (const lost of REBUILD_LOST) {
       expect(m.body(), `戻らない物「${lost}」を言っていない`).toContain(lost);
     }

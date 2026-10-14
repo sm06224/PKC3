@@ -665,13 +665,20 @@ export type StorageRequest =
    * ⚠ **落ちた区画は飛ばして先へ進む** ── 1 か所で諦めると、その先が全部捨たる。
    */
   | { op: 'rescueEntries'; afterRowid?: number; chunks?: number }
+  /**
+   * 🔴 **つながりと履歴も拾う**(#1087)。⚠ 同じ作法(`NOT INDEXED` / 落ちた区画は飛ばす)。
+   * 索引だけ壊れた DB では表走査で読める(2026-10-14 実測)。
+   */
+  | { op: 'rescueRelations'; afterRowid?: number; chunks?: number }
+  | { op: 'rescueRevisions'; afterRowid?: number; chunks?: number }
   | { op: 'close' };
 
 /** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */
 export interface AssetMetaPut {
   key: string;
-  mime: string;
-  size: number;
+  /** ⚠ `null` = 分からない（作り直しの組み直しで Blob の `type` が空のとき。#1087）。 */
+  mime: string | null;
+  size: number | null;
   hash?: string | null;
 }
 
@@ -993,6 +1000,41 @@ export interface RescuePage {
   done: boolean;
 }
 
+/** 拾い出しの 1 ページの共通部分(`rows` 以外)。 */
+export interface RescuePageBase {
+  lastRowid: number;
+  skipped: number;
+  empty: number;
+  maxRowid: number | null;
+  done: boolean;
+}
+
+export interface RescueRelationsPage extends RescuePageBase {
+  rows: Array<{
+    rowid: number;
+    cid: string;
+    id: string;
+    fromLid: string;
+    toLid: string;
+    kind: string;
+  }>;
+}
+
+export interface RescueRevisionsPage extends RescuePageBase {
+  rows: Array<{
+    rowid: number;
+    cid: string;
+    entryLid: string;
+    revOrder: number;
+    createdAt: string | null;
+    title: string | null;
+    archetype: string | null;
+    kind: string;
+    snapshot: string;
+    contentHash: string | null;
+  }>;
+}
+
 export type RequestFor<Op extends StorageRequest['op']> = Extract<
   StorageRequest,
   { op: Op }
@@ -1173,5 +1215,7 @@ export interface ResultMap {
   integrityPlan: IntegrityPlan;
   integrityStamp: null;
   rescueEntries: RescuePage;
+  rescueRelations: RescueRelationsPage;
+  rescueRevisions: RescueRevisionsPage;
   close: null;
 }

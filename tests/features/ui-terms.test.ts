@@ -521,7 +521,7 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
   ['src/adapter/platform/storage/portable-persist.ts', 1], // 保存できなかった(main.ts から出した。件数は動いていない)
   ['src/adapter/state/app-state.ts', 1], // 相手の編集を上書きする(main.ts から出した `editRevokedNote`。文は動いていない)
   ['src/adapter/ui/actions/binder.ts', 1], // 取り込みで長すぎる電話・メールを外した(データが減る)
-  ['src/adapter/ui/render/commands.ts', 2], // 作り直し・全消去の確認(戻せない)
+  ['src/adapter/ui/render/commands.ts', 1], // 全消去の確認(戻せない)。作り直しの説明の ⚠ は #1087 で外した(戻らない物が無くなった)
   ['src/adapter/ui/render/office-pack-panel.ts', 1], // Office で書いたマクロが消える
   ['src/features/asset/image-shrink.ts', 1], // 縮めると元の細かさは戻らない
   ['src/features/entry-actions.ts', 1], // CSV にすると桁揃えが落ちる

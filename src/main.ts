@@ -2677,6 +2677,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
     },
     listStoredBlobKeys: () => blobs.listKeys(cid),
+    // 🔴 bytes は在るが登録行が無い添付を埋めるため（#1087。作り直しで `assets` 表が消えた後の再付与）
+    listMetaKeys: async () =>
+      (await client.request({ op: 'listAssetMetas', cid })).map((m) => m.key),
     estimate: navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined,
     // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
@@ -3585,6 +3588,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       return rebuildContainer(target, CONTAINER_TITLE, {
         pick: async (afterRowid, chunks) =>
           client.request({ op: 'rescueEntries', afterRowid, chunks }),
+        // 🔑 つながりと履歴も拾う（#1087。索引だけ壊れた DB は表走査で読める）
+        pickRelations: async (afterRowid, chunks) =>
+          client.request({ op: 'rescueRelations', afterRowid, chunks }),
+        pickRevisions: async (afterRowid, chunks) =>
+          client.request({ op: 'rescueRevisions', afterRowid, chunks }),
+        // 🔴 色は sqlite の `settings` 表 ── 捨てる前の worker から読む（#1087）
+        readTagColors: async () => client.request({ op: 'listTagColors', cid: target }),
         // 🔑 添付は **IndexedDB を直に読む**（sqlite を 1 度も通らない）
         assets: {
           listKeys: (c: string) => blobs.listKeys(c),
@@ -3612,6 +3622,60 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         },
         writeEntries: async (c: string, entries) => {
           await reopened().request({ op: 'bulkUpsertEntries', cid: c, entries: [...entries] });
+        },
+        // 以下 4 つは #1087。⚠ 開き直した相手（`reopened()`）へ書く ── 旧 client は閉じてある
+        writeRelations: async (c: string, relations) => {
+          if (relations.length === 0) return;
+          await reopened().request({
+            op: 'bulkUpsertRelations',
+            cid: c,
+            relations: relations.map((r) => ({
+              id: r.id,
+              fromLid: r.fromLid,
+              toLid: r.toLid,
+              kind: r.kind,
+            })),
+          });
+        },
+        writeRevisions: async (c: string, chains) => {
+          if (chains.size === 0) return { added: 0, broken: 0 };
+          const out = await reopened().request({
+            op: 'restoreRevisionChains',
+            cid: c,
+            // ⚠ 取り込みと同じ `keepLatest` を明示で渡す（上の `importRevisionChains` の注記）
+            keepLatest: REVISION_KEEP_LATEST,
+            chains: [...chains].map(([entryLid, rows]) => ({
+              entryLid,
+              rows: rows.map((r) => ({
+                revOrder: r.revOrder,
+                createdAt: r.createdAt,
+                title: r.title,
+                archetype: r.archetype,
+                kind: r.kind,
+                snapshot: r.snapshot,
+                contentHash: r.contentHash,
+              })),
+            })),
+          });
+          return { added: out.added, broken: out.brokenChains.length };
+        },
+        writeAssetMetas: async (c: string, metas) => {
+          for (const m of metas) {
+            await reopened().request({ op: 'putAssetMeta', cid: c, meta: m });
+          }
+        },
+        writeTagColors: async (c: string, colors) => {
+          for (const e of colors) {
+            const key = tagColorKey(e.tag);
+            if (key === null) continue;
+            await reopened().request({
+              op: 'putTagColor',
+              cid: c,
+              key,
+              tag: e.tag,
+              color: e.color,
+            });
+          }
         },
         forgetLocal: () => {
           appCopyHistory.clear();

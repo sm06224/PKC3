@@ -353,7 +353,7 @@ function buildContainerRepair(): DocumentFragment {
   const rebuildNote = document.createElement('p');
   rebuildNote.setAttribute('data-pkc-field', 'container-rebuild-note');
   rebuildNote.textContent =
-    'ノートと添付を残したまま、ノートの保存データだけ作り直します。押すと、まず読めるノートをファイル(.pkc3-part.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。⚠ どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)は戻りません。';
+    'ノートと添付を残したまま、ノートの保存データだけ作り直します。押すと、まず読めるノートをファイル(.pkc3-part.zip)にして手元へダウンロードし、そのあと同じ中身で戻します。ダウンロードできなかったときは、何も消さずに止まります。どのフォルダに入っていたか・ノート同士のつながり・履歴(前の版)・タグの色も、読めた分は戻ります。';
   box.append(rebuildNote);
 
   const rebuild = document.createElement('button');

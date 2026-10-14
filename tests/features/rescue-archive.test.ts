@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/export/pkc3-archive';
 import { readAssetSource } from '../../src/features/import/zip-reader';
 import {
+  RESCUE_IDLE_PAGE_LIMIT,
   rescueArchiveSource,
   rescueArchiveSummary,
   type RescuePageLike,
@@ -413,5 +414,62 @@ describe('🔴 拾い出しが「戻せる形」で出る(#986)', () => {
     const got = await readArchive((await writeArchive(source, NOW)).blob);
     expect(got.entries).toHaveLength(3);
     expect(rescueArchiveSummary(stats())).toContain('3 件を取り出して');
+  });
+});
+
+/**
+ * 🔴 **最大の行番号が読めないほど壊れた DB でも、バックアップは終わる**（#1087）。
+ *
+ * ⚠ `maxRowid` が `null` のままだと `done` が立たず、位置だけが進み続けて
+ *   「壊れたときのバックアップ」が進捗の表示のまま固まっていた。
+ */
+describe('🔴 終わらない拾い出しを打ち切る（#1087）', () => {
+  const stuck = (calls: { n: number }, firstRows = false) =>
+    async (after: number): Promise<RescuePageLike> => {
+      calls.n += 1;
+      return {
+        rows:
+          firstRows && after === 0
+            ? [{ rowid: 1, lid: 'a1', title: '牛乳', archetype: 'text', body: '本文\n' }]
+            : [],
+        lastRowid: after + 4000,
+        skipped: 1,
+        empty: 19,
+        maxRowid: null,
+        done: false,
+      };
+    };
+
+  it('🔴 一覧を集める周（meta）が有限回で終わり、打ち切ったことが stats に出る', async () => {
+    const calls = { n: 0 };
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: stuck(calls) });
+    await source.listEntryMetas();
+    expect(calls.n, '打ち切っていない').toBe(RESCUE_IDLE_PAGE_LIMIT);
+    expect(stats().truncated).toBe(true);
+    expect(rescueArchiveSummary(stats()), '打ち切ったことを字にしていない').toContain(
+      '途中で打ち切りました',
+    );
+  });
+
+  it('🔴 本文を取る周（body）も有限回で終わり、拾えた件は書き出せる', async () => {
+    const calls = { n: 0 };
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: stuck(calls, true),
+    });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+    expect(got.entries.map((e) => e.lid)).toEqual(['a1']);
+    // meta の周 + body の周で、どちらも上限で止まる（無限なら test が終わらない）
+    expect(calls.n).toBeLessThanOrEqual(RESCUE_IDLE_PAGE_LIMIT * 2 + 2);
+    expect(stats().truncated).toBe(true);
+  });
+
+  it('⚠ 対照群 ── 読めている DB は打ち切らず、字にも出さない', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source, stats } = rescueArchiveSource({ cid: 'c1', title: 't', pick: f.pick });
+    await writeArchive(source, NOW);
+    expect(stats().truncated ?? false).toBe(false);
+    expect(rescueArchiveSummary(stats())).not.toContain('打ち切り');
   });
 });

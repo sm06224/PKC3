@@ -53,6 +53,14 @@ export interface AttachDeps {
    *   参照だけを作り、**開けない添付**ができる(取り込みの側は review H-1 で既に直してある)。
    */
   listStoredBlobKeys(): Promise<readonly string[]>;
+  /**
+   * 🔴 **登録行（`assets` 表）側に既に在る key**（#1087）── bytes が在るのに登録行が無い物を埋めるのに使う。
+   * ⚠ 作り直しは sqlite を捨てるので、bytes（IndexedDB）だけ残って登録行が無い添付が起きうる。
+   *   そこへ同じ添付をもう一度付けても、bytes が在ると `putMeta` を呼ばないので**登録行が戻らず**、
+   *   書き出し・容量の内訳に出ないままになっていた。
+   * ⚠ 省略可（無い環境は今までどおり、bytes が在れば登録行には触らない）。アプリは必ず渡す。
+   */
+  listMetaKeys?(): Promise<readonly string[]>;
   /** quota preflight(無い環境では省略可)。 */
   estimate?(): Promise<{ usage?: number; quota?: number }>;
   /**
@@ -237,6 +245,15 @@ export async function storeAsset(
     await deps.putBlob(assetKey, item.blob);
     await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
     known?.add(assetKey);
+  } else if (deps.listMetaKeys !== undefined) {
+    /**
+     * 🔴 **bytes は在るが登録行が無い**なら書く（#1087）。
+     * ⚠ 登録行が在るときは触らない ── 初回の mime を保つ（上の「初回 file のまま」）。
+     */
+    const metaKeys = await deps.listMetaKeys().catch((): readonly string[] => []);
+    if (!metaKeys.includes(assetKey)) {
+      await deps.putMeta({ key: assetKey, mime, size: item.size, hash });
+    }
   }
 
   return { assetKey, mime, hash };

@@ -103,6 +103,8 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'wipeStorage',
   // 中身を変えない保守(救出の読み出し / 詰め直し / 索引の作り直し / 検査の記録)
   'rescueEntries',
+  'rescueRelations',
+  'rescueRevisions',
   'vacuum',
   'optimizeIndexes',
   'integrityStamp',

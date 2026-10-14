@@ -5168,8 +5168,13 @@ describe('作り直しで戻らない物(#1006)', () => {
 
   it('🔴 マニュアルの「戻らないもの」と、実装の一覧が等値である', () => {
     const inManual = lostRowsInManual();
-    // ⚠ 空振り防止 ── 表そのものを引けていなければ、この検査は何も見ていない
-    expect(inManual.length, 'マニュアルから戻らない行を 1 つも引けていない').toBeGreaterThan(0);
+    // ⚠ 空振り防止 ── 表そのものを引けていなければ、この検査は何も見ていない。
+    //   （#1087 で「戻らない」行は 0 になった ── 表の存在は下の it が「戻ります」の行で見る）
+    const seg = MANUAL.slice(MANUAL.indexOf('### ノートの保存データを作り直す'));
+    expect(
+      seg.split('\n').filter((l) => l.startsWith('| ') && l.includes('戻ります')).length,
+      'マニュアルの表を引けていない（戻る行も 0 件）',
+    ).toBeGreaterThan(3);
     // 🔴 **等値**で見る ── 「含む」だと、コード側だけ縮めても素通りする
     expect([...inManual].sort()).toEqual([...REBUILD_LOST].sort());
   });
