@@ -6,7 +6,8 @@
  * ⚠ PDF 以外(画像)は、設定が入でも振らない。
  */
 import { describe, expect, it } from 'vitest';
-import { openInPdfReader } from '../../src/adapter/platform/pdf/open-in-reader';
+import { isProgressNotice } from '../../src/adapter/ui/render/status-notice';
+import { OPENING_NOTE, openInPdfReader } from '../../src/adapter/platform/pdf/open-in-reader';
 import { PdfReaderHost, type PdfLent } from '../../src/adapter/platform/pdf/pdf-window';
 
 function rig(enabled: boolean, lendable = true, delayed = false) {
@@ -18,6 +19,7 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
   const posted: unknown[] = [];
   let alive = false;
   const releases: Array<() => void> = [];
+  let channel: { onmessage: ((ev: MessageEvent) => void) | null } | null = null;
   const host = new PdfReaderHost({
     onQuote: () => Promise.resolve({ ok: true, message: '' }),
     onFellBack: () => undefined,
@@ -27,11 +29,15 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
     onEdited: () => Promise.resolve({ ok: true, message: "" }),
     listAttachments: () => Promise.resolve([]),
     lendAttachment: () => Promise.resolve(null),
-    makeChannel: () => ({
-      postMessage: (d) => posted.push(d),
-      close: () => undefined,
-      onmessage: null,
-    }),
+    makeChannel: () => {
+      const ch = {
+        postMessage: (d: unknown) => posted.push(d),
+        close: () => undefined,
+        onmessage: null as ((ev: MessageEvent) => void) | null,
+      };
+      channel = ch;
+      return ch;
+    },
     openWindow: (url) => opened.push(url),
     baseUrl: 'https://example.test/',
     newToken: () => 'tok',
@@ -50,7 +56,10 @@ function rig(enabled: boolean, lendable = true, delayed = false) {
     fail: (m: string) => fails.push(m),
     note: (t: string) => notes.push(t),
   };
-  return { deps, opened, lends, disposed, fails, notes, posted, host, releases, setAlive: (v: boolean) => (alive = v) };
+  // 窓が名乗った(`hello`)── 開けた窓の側の合図
+  const hello = (): void =>
+    channel?.onmessage?.({ data: { pkc3Pdf: 'hello', token: 'tok', payload: {} } } as MessageEvent);
+  return { hello, deps, opened, lends, disposed, fails, notes, posted, host, releases, setAlive: (v: boolean) => (alive = v) };
 }
 const pdf = { kind: 'pdf', assetKey: 'k1', name: 'a.pdf', lid: 'att1' };
 
@@ -86,6 +95,7 @@ describe('openInPdfReader', () => {
   it('入: 同じ添付の窓が生きていれば、2 枚目を開かず前へ出すよう頼む', async () => {
     const g = rig(true);
     await openInPdfReader(g.deps, pdf);
+    g.hello(); // 窓が名乗った = 本当に開いている
     g.setAlive(true);
     expect(await openInPdfReader(g.deps, pdf)).toBe(true);
     expect(g.opened).toHaveLength(1);
@@ -94,14 +104,30 @@ describe('openInPdfReader', () => {
     expect(JSON.stringify(g.posted)).toContain('focus-request');
   });
 
-  it('🔴 貸している最中の 2 回目の押しは、窓を 2 枚にしない(「もう開いています」で断る)', async () => {
+  it('🔴 窓が名乗る前(ポップアップを止めている人は窓が出ない)の 2 回目は、「もう開いています」と言わない', async () => {
+    const g = rig(true);
+    await openInPdfReader(g.deps, pdf);
+    g.setAlive(true); // 開いた直後は「生きている」側(2 枚目を開かないため)
+    expect(await openInPdfReader(g.deps, pdf)).toBe(true);
+    expect(g.opened, '窓が 2 枚開いた').toHaveLength(1);
+    expect(g.notes).toEqual(['「a.pdf」のウィンドウを開いています。数秒たっても出ないときは、ブラウザのポップアップを許可してください']);
+    expect(g.notes[0]).toBe(OPENING_NOTE('a.pdf'));
+    expect(isProgressNotice(g.notes[0]!), '進行中の字になると、窓が開いても欄に残る').toBe(false);
+    expect(JSON.stringify(g.posted), '名乗っていない窓へ前に出す頼みは届かない').not.toContain('focus-request');
+    // 名乗った後は、これまでどおり「もう開いています」
+    g.hello();
+    await openInPdfReader(g.deps, pdf);
+    expect(g.notes[1]).toBe('「a.pdf」はもう開いています');
+  });
+
+  it('🔴 貸している最中の 2 回目の押しは、窓を 2 枚にしない(「ウィンドウを開いています」と言う)', async () => {
     const g = rig(true, true, true);
     const first = openInPdfReader(g.deps, pdf);
     // 1 回目は貸している最中(まだ窓が無い)── 2 回目が来る
     const second = await openInPdfReader(g.deps, pdf);
     expect(second).toBe(true);
     expect(g.lends, '貸している最中に 2 回目が借りている').toEqual(['k1']);
-    expect(g.notes).toEqual(['「a.pdf」はもう開いています']);
+    expect(g.notes).toEqual([OPENING_NOTE('a.pdf')]);
     g.releases[0]?.();
     expect(await first).toBe(true);
     expect(g.opened, '窓が 2 枚開いた').toHaveLength(1);

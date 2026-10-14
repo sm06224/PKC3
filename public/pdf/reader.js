@@ -273,6 +273,13 @@ function fallBack() {
   obj.setAttribute('data-pkc-field', 'pdf-reader-fallback');
   obj.type = 'application/pdf';
   obj.data = ownUrl;
+  // 🔴 ブラウザも PDF を出せないときに、黒い空の窓を残さない ── `<object>` の fallback 検出はブラウザ差が大きいので、
+  //   中に断り文を置いてブラウザ自身に出させる(別窓 `asset-window.ts` と同じ字)
+  const none = document.createElement('p');
+  none.setAttribute('data-pkc-field', 'pdf-reader-fallback-note');
+  none.textContent =
+    'このブラウザでは PDF を表示できません。PKC3 のウィンドウに戻り、添付の「添付をダウンロード」から保存して開いてください';
+  obj.append(none);
   document.body.append(obj);
   send('fell-back', {});
 }
@@ -920,8 +927,8 @@ let dragEndedAt = 0;
 let keyPickedAt = 0;
 
 const PREPARING = 'ページの編集を準備しています…';
-const SAVED_NOTE = '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます';
-const EXTRACTED_NOTE = '選んだページを新しい PDF にしました。ノートの画面で「開く」を押すと開きます';
+const SAVED_NOTE = '保存しました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと新しい PDF が開きます';
+const EXTRACTED_NOTE = '選んだページを新しい PDF にしました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと開きます';
 const EDIT_MESSAGES = {
   encrypted: 'パスワードで守られた PDF は、編集できません(読むことはできます)',
   unreadable: 'この PDF はページを編集できない形です',
@@ -2006,7 +2013,16 @@ async function search(q) {
     }
   }
   if (hitList.length === 0) {
-    $('hits').textContent = '見つかりません';
+    // 🔴 字が 1 つも無い PDF(スキャンした画像だけ)では、探しても必ず「見つかりません」になる ──
+    //   「字が無い」と「その語が無い」を言い分ける(後者だけが探し直して意味のある話)
+    let anyText = false;
+    for (let i = 1; i <= total; i += 1) {
+      if ((texts[i] || '').trim() !== '') {
+        anyText = true;
+        break;
+      }
+    }
+    $('hits').textContent = anyText ? '見つかりません' : 'この PDF には探せる字がありません(スキャンした画像のようです)';
     return;
   }
   for (let i = 1; i <= total; i += 1) if (cache.has(i)) markHits(i);
@@ -2567,6 +2583,23 @@ noteBtn.addEventListener('click', () => {
 });
 penBtn.addEventListener('click', () => {
   if (ready && !saving) setTool('pen');
+});
+
+/**
+ * 🔴 **足したページを押したときの理由**。足したページには押さえの層(`tool-layer`)も字の層も作らない
+ * (`paintNotes` / `paintMarks` は元の PDF のページだけ)ので、付箋・ペンを選んで押しても
+ * **何も起きず、理由も出なかった**。窓の下に理由を言う。
+ * ⚠ ハイライトは字を選ぶ道具で、足したページには字の層が無く**選べない**(ボタンが押せないまま)── その押しは
+ *   ここでは捉えられないので、字は道具を選んでいる間の押しにだけ出す。
+ */
+const ADDED_PAGE_NO_TOOL = '足したページには付箋・ペン・ハイライトを付けられません(保存した PDF なら付けられます)';
+pagesEl.addEventListener('pointerdown', (ev) => {
+  if (!ready || saving || tool === null || ev.button !== 0) return;
+  const t = ev.target instanceof Element ? ev.target : null;
+  if (t === null || t.classList.contains('tool-layer')) return;
+  const box = t.closest('.page');
+  if (box === null || Number(box.getAttribute('data-page')) <= total) return;
+  setStatus(ADDED_PAGE_NO_TOOL);
 });
 
 // ── 付箋: 押した場所に字の欄を出す

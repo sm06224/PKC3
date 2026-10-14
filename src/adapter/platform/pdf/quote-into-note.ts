@@ -35,8 +35,12 @@ export async function quoteIntoNote(
   session: PdfSession,
   text: string,
   page: number,
-  /** 本体の状態の行へ出す口(**disk に着いたときだけ**呼ぶ)。 */
-  note: (text: string) => void,
+  /**
+   * 本体の状態の行へ出す口(**disk に着いたときだけ**呼ぶ)。
+   * 🔴 第 2 引数は**引いた先のノート**(本文の下の追記欄と同じく、知らせの隣に「そのノートを開く」と
+   *   「追記を元に戻す」を出す身元。`ENTRY_APPENDED` が `lastAppend` を置くので、戻す口は追記と同じもの)。
+   */
+  note: (text: string, openLid: string) => void,
   timers: QuoteTimers = REAL_APPEND_TIMERS,
   /** 🔴 別のタブが編集中のノートへは引かない(#529 W5-d)。口が無い環境は問い合わせない。 */
   lock: EditLockPort = {},
@@ -54,7 +58,7 @@ export async function quoteIntoNote(
   if (r.ok) {
     const message = `「${meta.title}」の末尾へ引用しました(${String(Math.floor(page))} ページ)`;
     // 🔑 言うのは、disk に着いてから(窓にも状態の行にも同じ字)
-    note(message);
+    note(message, target);
     return { ok: true, message };
   }
   switch (r.reason) {

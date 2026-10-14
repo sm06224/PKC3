@@ -499,6 +499,11 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
       timeout: 10_000,
     })
     .toContain('marker3 (p.3、見積.pdf)');
+  // 🔴 引いた先を戻せる ── 本文への追記と同じ「追記を元に戻す」が、知らせの隣に出る(押す前に機会が消えない)
+  await expect(
+    page.locator('[data-pkc-field="status-undo"]'),
+    '引用したのに「追記を元に戻す」が出ない(片道の操作)',
+  ).toHaveText('追記を元に戻す');
 
   // 🔴 ページの編集の対照群: 元にしおり・入力欄・電子署名が 1 つも無い PDF では、引き継がれない物の字を出さない
   await win.locator('.thumb-cell[data-thumb-cell="2"]').scrollIntoViewIfNeeded();
@@ -819,7 +824,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   const originalDetail = await page.locator('[data-pkc-region="detail"]').innerText();
   await clickReal(ed, '#edit-save');
   await expect(ed.locator('#status'), '保存の結果が窓に出ない').toContainText(
-    '保存しました。ノートの画面で「開く」を押すと新しい PDF が開きます',
+    '保存しました。PKC3 のウィンドウの下の知らせで「そのノートを開く」を押すと新しい PDF が開きます',
     { timeout: 20_000 },
   );
   await expect(entryNamed(ED_OUT), '新しい添付が増えていない').toHaveCount(1, { timeout: 10_000 });
@@ -1140,6 +1145,14 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   expect(
     await mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-thumb'))),
   ).toEqual(['1', '2', '3', '4', '5']);
+  // 🔴 足したページには付箋・ペンを付けられない ── 選んで押しても何も起きない代わりに、窓の下へ理由が出る
+  await clickReal(mg, '#note-tool');
+  // ⚠ 中心は窓の下の知らせ(#status)に覆われうる ── ページの左上寄りを押す(絵は押しを受けない。受けるのはページの箱)
+  await mg.locator('.page[data-page="4"]').click({ position: { x: 30, y: 30 } });
+  await expect(mg.locator('#status'), '足したページに付箋を付けようとしたのに理由が出ない').toContainText(
+    '足したページには付箋・ペン・ハイライトを付けられません(保存した PDF なら付けられます)',
+  );
+  await clickReal(mg, '#note-tool'); // 道具をやめる
   // 足したページも、元のページと同じに回せる(最後の 1 枚を右へ 90°)
   await clickReal(mg, '[data-pkc-field="pdf-page-rotate"][data-thumb-page="5"]');
   await clickReal(mg, '#edit-save');
@@ -1739,6 +1752,10 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
     '読めない PDF が内蔵の表示へ退避していない',
   ).toHaveCount(1, { timeout: 20_000 });
   expect(await bad.locator('[data-pkc-field="pdf-page-image"]').count()).toBe(0);
+  // ブラウザも PDF を出せない場合に黒い空の窓にならないよう、退避先の中に断り文を置いてある(別窓と同じ字)
+  expect(
+    await bad.locator('[data-pkc-field="pdf-reader-fallback"] [data-pkc-field="pdf-reader-fallback-note"]').textContent(),
+  ).toContain('添付の「添付をダウンロード」から保存して開いてください');
   // 断り文は出さない(窓の中に message は無い)── 退避したことは本体の状態の行に 1 行
   await expect(bad.locator('#msg'), '退避なのに断り文が出ている').toBeHidden();
   await expect(page.locator('[data-pkc-region="status"]')).toContainText(

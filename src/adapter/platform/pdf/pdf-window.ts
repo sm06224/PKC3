@@ -215,6 +215,19 @@ export class PdfReaderHost {
   }
 
   /**
+   * この添付の窓を**開いている最中**か(開いたが、まだ窓が名乗っていない ── `hello` 待ち)。
+   * 🔴 `openTokenFor` は開いた直後から「生きている」側に置くので、ポップアップが止められて窓が
+   *   **そもそも開いていない**間(最大 `HELLO_TIMEOUT_MS`)も、2 回目の押しは「もう開いています」と
+   *   読まれていた。名乗る前と後を呼び側が言い分けられるようにする。
+   */
+  isOpening(assetKey: string): boolean {
+    for (const l of this.lives.values()) {
+      if (l.session.assetKey === assetKey && l.helloTimer !== null) return true;
+    }
+    return false;
+  }
+
+  /**
    * 貸し始める印を付ける。@returns 付けられたら `true` / 既に貸している最中なら `false`
    * (呼び側は「もう開いています」で断る)。⚠ 付けたら**必ず** `unmarkLending` する。
    */

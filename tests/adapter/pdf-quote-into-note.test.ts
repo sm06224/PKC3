@@ -97,6 +97,28 @@ const appended = (events: DomainEvent[]) =>
   events.filter((e): e is Extract<DomainEvent, { type: 'REQUEST_APPEND' }> => e.type === 'REQUEST_APPEND');
 
 describe('quoteIntoNote', () => {
+  it('🔴 知らせに「引いた先のノート」を添える(そのノートを開く / 追記を元に戻す が出せる)', async () => {
+    const g = rig(
+      [meta('att', 'attachment'), meta('memo', 'text', 'メモ')],
+      [rel('r1', 'memo', 'att', 'semantic')],
+    );
+    const opens: string[] = [];
+    const p = quoteIntoNote(g.d, session('att'), '字', 2, (_t, open) => opens.push(open));
+    ackOk(g.d, 'memo', '> 字 (p.2、報告書.pdf)');
+    await p;
+    // 添える先は「引いた先」(添付ではない)
+    expect(opens).toEqual(['memo']);
+    // 戻す材料も追記と同じ口(`lastAppend`)に載る ── 状態の行の「追記を元に戻す」の出す条件
+    expect(g.d.getState().lastAppend?.lid).toBe('memo');
+    // 無ければ添付自身が行き先
+    const g2 = rig([meta('att', 'attachment', '添付題')], []);
+    const o2: string[] = [];
+    const p2 = quoteIntoNote(g2.d, session('att'), 'x', 1, (_t, open) => o2.push(open));
+    ackOk(g2.d, 'att');
+    await p2;
+    expect(o2).toEqual(['att']);
+  });
+
   it('結びついたノートの末尾へ、頁番号と添付名つきの引用として追記する', async () => {
     const g = rig(
       [meta('att', 'attachment'), meta('memo', 'text', 'メモ')],

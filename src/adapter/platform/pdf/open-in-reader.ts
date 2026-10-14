@@ -20,6 +20,14 @@ export interface OpenInPdfReaderDeps {
   readonly note: (text: string) => void;
 }
 
+/**
+ * 窓を開いている最中の知らせ。
+ * ⚠ 末尾を `…(…)` の形にしない ── `isProgressNotice`(`status-notice.ts`)が進行中の字と読み、
+ *   窓が開いても誰も空にしない欄に残る。
+ */
+export const OPENING_NOTE = (name: string): string =>
+  `「${name}」のウィンドウを開いています。数秒たっても出ないときは、ブラウザのポップアップを許可してください`;
+
 /** @returns 引き受けたら `true`(呼び側はもう何もしない)/ 選んでいなければ `false`。 */
 export async function openInPdfReader(
   deps: OpenInPdfReaderDeps,
@@ -27,6 +35,15 @@ export async function openInPdfReader(
 ): Promise<boolean> {
   if (args.kind !== 'pdf' || !deps.enabled()) return false;
   const host = deps.host();
+  /**
+   * 🔴 **窓が名乗る前の 2 回目の押し**は、「もう開いています」と言わない。ポップアップを止めている人は
+   *   窓が出ないまま数秒たつ(名乗らなければ断りが出る)── その間に「開いています」と言うと、
+   *   画面に無い窓を指す。前へ出すよう頼んでも、窓はまだ受け取れない。
+   */
+  if (host.isOpening(args.assetKey)) {
+    deps.note(OPENING_NOTE(args.name));
+    return true;
+  }
   const open = host.openTokenFor(args.assetKey);
   if (open !== null) {
     // ⚠ 同じ添付の窓が生きていれば、2 枚目を開かず前へ出すよう頼む
@@ -40,7 +57,8 @@ export async function openInPdfReader(
    *   続けて押した 2 回目も `null` を見て 2 枚目を借りて開いていた。貸す**前**に印を付ける。
    */
   if (!host.markLending(args.assetKey)) {
-    deps.note(`「${args.name}」はもう開いています`);
+    // 貸している最中 = まだ窓が無い(上と同じく「開いています」とは言えない)
+    deps.note(OPENING_NOTE(args.name));
     return true;
   }
   try {
