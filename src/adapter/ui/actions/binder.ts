@@ -712,6 +712,11 @@ import {
   sqlExportLabel,
   sqlExportMime,
 } from '@features/query/sql-export';
+import {
+  canPersistSettings,
+  defaultSettingsStorage,
+  SETTINGS_NOT_PERSISTED_TEXT,
+} from '../render/settings-persist-probe';
 import { sqlEngineOf } from '@features/query/sql-engine';
 import {
   alertInApp,
@@ -11284,9 +11289,16 @@ const ACTIONS: Record<string, ActionHandler> = {
     const file = buildSettingsFileData(readSetting);
     if (file.entries.length === 0) {
       // ⚠ **無言で空の file を落とさない** ── 押した user は「入った」と読む
+      // 🔴 「まだありません」が偽になる 2 つの道を先に分ける(#1087)── 保存できないブラウザでは
+      //    変えた設定がこのタブの中にしか無く、長すぎる設定は在るのに入らない
+      const tooLongOnly = settingsTooLongToExport(readSetting);
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: '持ち出せる設定がまだありません(見た目やショートカットキーの割当を変えると入ります)',
+        error: !canPersistSettings(defaultSettingsStorage)
+          ? `設定を書き出せません。${SETTINGS_NOT_PERSISTED_TEXT}`
+          : tooLongOnly.length > 0
+            ? `設定を書き出せません(${tooLongOnly.join('・')} は長すぎるので入りません)`
+            : '持ち出せる設定がまだありません(見た目やショートカットキーの割当を変えると入ります)',
       });
       return;
     }

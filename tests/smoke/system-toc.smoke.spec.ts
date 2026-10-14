@@ -18,6 +18,7 @@
  *  ⑤ ①〜④ の間、`location.hash` は 1 度も変わらない(hash はディープリンク専用)
  */
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { gotoApp, clickReal, dismissAnnounce, collectPageErrors } from './helpers';
 
 test('🔴 「システム」の目次: お知らせが読め、押すと移動し、目次へ戻るで戻り、hash は不変', async ({
@@ -348,8 +349,10 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
    * ⚠ 2026-10-14(#1087)に `2026-10-14-rebuild-assets` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-10-14(#1087)に `2026-10-14-message-names` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-10-14(#1087)に `2026-10-14-unsaved-notes` を先頭へ足したので、ここも 1 段新しい題名へ直した。
+   * ⚠ 2026-10-14(#1087)に `2026-10-14-settings-print` を先頭へ足したので、ここも 1 段新しい題名へ直した。
+   * ⚠ 2026-10-14(#1087)に `2026-10-14-rescue-links` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    */
-  ).toContain('保存できたか分からないときに、そう伝えるようにしました');
+  ).toContain('保存データに問題があるときのバックアップに、つながりと履歴も入れます');
   await dismissAnnounce(page);
 
   // 「システム」を開く
@@ -467,6 +470,61 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     await page.evaluate(() => localStorage.getItem('pkc3.copy.history')),
     '消したのに端末に残っている',
   ).toBeNull();
+
+  /**
+   * ⑦ 🔴 **設定ファイルを読み込む**(#1087)── 空の値の項目は**入れず**、下見で言う。
+   * ⚠ 直す前は空の値(`""`)をそのまま当てて、端末の設定を**空に上書き**していた。
+   *   観測点は 2 つ:下見の字(押す前に user へ告げる)と、押した後の `localStorage`
+   *   (`pkc3.theme` は入り、`pkc3.keymap` は元の値のまま)。
+   * ⚠ ファイルの種類の字は実装の定数から引かない(引くと、定数を書き換えた日に両方動いて緑)。
+   */
+  await page.evaluate(() => {
+    localStorage.removeItem('pkc3.theme');
+    localStorage.setItem('pkc3.keymap', '{"smoke":"keep"}');
+  });
+  await page.locator('[data-pkc-field="settings-file-input"]').setInputFiles({
+    name: 'settings.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        kind: 'pkc3-settings',
+        version: 1,
+        entries: [
+          { key: 'pkc3.theme', value: 'dark' },
+          { key: 'pkc3.keymap', value: '' },
+        ],
+      }),
+    ),
+  });
+  await expect(
+    page.locator('[data-pkc-field="settings-file-summary"]'),
+    '空の値の項目を入れないと、押す前に告げていない',
+  ).toContainText('1 件は中身が空か読めない形なので入れません');
+  await clickReal(page, '[data-pkc-field="settings-file-apply"]');
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('pkc3.theme')), {
+      message: '読み込んだ設定(見た目)が端末に入っていない',
+    })
+    .toBe('dark');
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.keymap')),
+    '空の値の項目が端末の設定を空に上書きした',
+  ).toBe('{"smoke":"keep"}');
+
+  // ⑧ 🔴 **設定を書き出す**(#1087)── 変えた設定(⑦で入れた見た目)が入った file が落ち、名前は PKC3-settings-
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    clickReal(page, '[data-pkc-action="export-settings"]'),
+  ]);
+  expect(download.suggestedFilename(), '設定の file の名前が PKC3-settings- で始まらない').toMatch(
+    /^PKC3-settings-/,
+  );
+  const saved = await download.path();
+  expect(saved, '書き出した file が落ちていない').not.toBeNull();
+  expect(
+    readFileSync(saved!, 'utf8'),
+    '書き出した file に、変えた設定(見た目)が入っていない',
+  ).toContain('"pkc3.theme"');
 
   // ⑤ 🔴 ここまでの一連の操作で hash は 1 度も変わっていない(ディープリンク専用)
   const hashAfter = await page.evaluate(() => location.hash);

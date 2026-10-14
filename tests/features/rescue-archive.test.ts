@@ -12,9 +12,14 @@ import { writeArchive, readArchive, ARCHIVE_FORMAT } from '../../src/features/ex
 import { readAssetSource } from '../../src/features/import/zip-reader';
 import {
   RESCUE_IDLE_PAGE_LIMIT,
+  rescueArchiveDetail,
   rescueArchiveSource,
   rescueArchiveSummary,
+  type RescuedRelation,
+  type RescuedRevision,
   type RescuePageLike,
+  type RescueRelationsPick,
+  type RescueRevisionsPick,
 } from '../../src/features/storage/rescue-archive';
 
 const NOW = '2026-09-16T00:00:00.000Z';
@@ -471,5 +476,176 @@ describe('🔴 終わらない拾い出しを打ち切る（#1087）', () => {
     await writeArchive(source, NOW);
     expect(stats().truncated ?? false).toBe(false);
     expect(rescueArchiveSummary(stats())).not.toContain('打ち切り');
+  });
+});
+
+
+/**
+ * 🔴 **つながりと履歴も、拾えた分は zip に入る**(#1087)。
+ *
+ * ⚠ 直す前は `listRelations` などが空固定で、字も「戻せません」だった。
+ * 🔑 往復して**入った中身**を見る(件数だけでは入れ替わりを見逃す)。
+ */
+describe('🔴 つながりと履歴も拾う(#1087)', () => {
+  const rel = (rowid: number, id: string, f: string, t: string, cid = 'c1'): RescuedRelation => ({
+    rowid,
+    cid,
+    id,
+    fromLid: f,
+    toLid: t,
+    kind: 'semantic',
+  });
+  const rev = (rowid: number, lid: string, order: number, cid = 'c1'): RescuedRevision => ({
+    rowid,
+    cid,
+    entryLid: lid,
+    revOrder: order,
+    createdAt: null,
+    title: `旧題${order}`,
+    archetype: 'text',
+    kind: 'full',
+    snapshot: `旧本文${order}`,
+    contentHash: null,
+  });
+  const pageOf =
+    <T,>(rows: T[]) =>
+    async () => ({ rows, lastRowid: 9, skipped: 0, empty: 0, maxRowid: 9, done: true });
+
+  it('🔴 拾えたつながり・履歴が往復して戻る。一覧に無いノートの分と、別の入れ物の分は入らない', async () => {
+    const f = fakePick({ rows: THREE });
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: f.pick,
+      pickRelations: pageOf([
+        rel(1, 'r1', 'a1', 'b2'),
+        rel(2, 'r2', 'a1', 'ghost'), // 宙に浮く
+        rel(3, 'r3', 'a1', 'c3', 'other'), // 別の入れ物
+        rel(4, 'r1', 'a1', 'b2'), // 同じ id は 1 件
+      ]),
+      pickRevisions: pageOf([
+        rev(1, 'a1', 1),
+        rev(2, 'a1', 2),
+        rev(3, 'ghost', 1),
+        rev(4, 'b2', 1, 'other'),
+      ]),
+    });
+    const got = await readArchive((await writeArchive(source, NOW)).blob);
+    expect(got.relations.map((r) => [r.id, r.fromLid, r.toLid])).toEqual([['r1', 'a1', 'b2']]);
+    expect(got.revisions.map((r) => [r.entryLid, r.revOrder, r.snapshot]).sort()).toEqual([
+      ['a1', 1, '旧本文1'],
+      ['a1', 2, '旧本文2'],
+    ]);
+    expect(stats().extras).toEqual({ relations: 1, revisions: 2, partial: false });
+    const line = rescueArchiveSummary(stats());
+    expect(line).toContain('つながり 1 件・履歴 2 版も入れました');
+    expect(line, '入れたのに「戻せません」と言っている').not.toContain('戻せません');
+    expect(rescueArchiveDetail(stats())).toContain('つながり 1 件・履歴 2 版を入れました');
+    expect(rescueArchiveDetail(stats())).not.toContain('入っていません');
+  });
+
+  it('🔴 読む口が投げたら「拾えなかった」と言い、本文と添付は止めずに書く', async () => {
+    const f = fakePick({ rows: THREE });
+    const boom: RescueRelationsPick = async () => {
+      throw new Error('rc 11');
+    };
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: f.pick,
+      pickRelations: boom,
+      pickRevisions: pageOf([rev(1, 'a1', 1)]),
+      assets: {
+        listKeys: async () => ['k1'],
+        get: async () => new Blob(['x'], { type: 'image/png' }),
+      },
+    });
+    const out = await writeArchive(source, NOW);
+    const got = await readArchive(out.blob);
+    expect(got.entries, '本文の書き出しが止まった').toHaveLength(3);
+    expect(got.relations).toEqual([]);
+    // 読めた片方(履歴)は入る
+    expect(got.revisions).toHaveLength(1);
+    expect(stats().assets, '添付の書き出しが止まった').toBe(1);
+    expect(stats().extras?.partial, '拾えなかったことを言っていない').toBe(true);
+    expect(rescueArchiveSummary(stats())).toContain('その分は入っていません');
+    expect(rescueArchiveDetail(stats())).toContain('その分は入っていません');
+  });
+
+  it('🔴 読めない区画(skipped)も黙らない。履歴の口が投げても同じ', async () => {
+    const skippedRel: RescueRelationsPick = async () => ({
+      rows: [],
+      lastRowid: 9,
+      skipped: 2,
+      empty: 0,
+      maxRowid: 9,
+      done: true,
+    });
+    const boomRev: RescueRevisionsPick = async () => {
+      throw new Error('x');
+    };
+    const a = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: fakePick({ rows: THREE }).pick,
+      pickRelations: skippedRel,
+      pickRevisions: pageOf([]),
+    });
+    await writeArchive(a.source, NOW);
+    expect(a.stats().extras?.partial).toBe(true);
+    const b = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: fakePick({ rows: THREE }).pick,
+      pickRelations: pageOf([]),
+      pickRevisions: boomRev,
+    });
+    await writeArchive(b.source, NOW);
+    expect(b.stats().extras?.partial).toBe(true);
+  });
+
+  it('⚠ 対照群 ── 全部読めて 0 件なら partial ではなく、「入っていません」とも言わない', async () => {
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: fakePick({ rows: THREE }).pick,
+      pickRelations: pageOf([]),
+      pickRevisions: pageOf([]),
+    });
+    await writeArchive(source, NOW);
+    expect(stats().extras).toEqual({ relations: 0, revisions: 0, partial: false });
+    expect(rescueArchiveDetail(stats())).not.toContain('入っていません');
+    expect(rescueArchiveSummary(stats())).not.toContain('戻せません');
+    expect(rescueArchiveSummary(stats())).not.toContain('その分は入っていません');
+  });
+
+  it('⚠ 口を渡さなければ拾いに行かず、今までどおり「入っていません」と言う', async () => {
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: fakePick({ rows: THREE }).pick,
+    });
+    await writeArchive(source, NOW);
+    expect(stats().extras).toBeUndefined();
+    expect(rescueArchiveDetail(stats())).toContain('つながりと履歴は入っていません');
+  });
+
+  it('🔴 つながりの拾い出しが打ち切られたら、truncated を立てて字にする', async () => {
+    let n = 0;
+    const stuckRel: RescueRelationsPick = async () => {
+      n += 1;
+      return { rows: [], lastRowid: n, skipped: 0, empty: 0, maxRowid: null, done: false };
+    };
+    const { source, stats } = rescueArchiveSource({
+      cid: 'c1',
+      title: 't',
+      pick: fakePick({ rows: THREE }).pick,
+      pickRelations: stuckRel,
+      pickRevisions: pageOf([]),
+    });
+    await writeArchive(source, NOW);
+    expect(stats().truncated).toBe(true);
+    expect(stats().extras?.partial).toBe(true);
+    expect(rescueArchiveSummary(stats())).toContain('途中で打ち切りました');
   });
 });
