@@ -166,6 +166,16 @@ describe('時刻つき ── 時刻帯', () => {
     for (const x of l.slice(l.indexOf('BEGIN:VEVENT')).filter((y) => y.startsWith('DTSTART')))
       expect(x).toMatch(/TZID=|VALUE=DATE|Z$/);
   });
+  it('🔴 終わりが 24:00(目盛りで下端まで引いた予定)は、翌日の 00:00 を DTEND にする(#1087)', () => {
+    // 直す前は 24 時を読めない時刻として DTEND を黙って落とし、長さ 0 の予定として渡していた
+    const l = lines([item({ date: '2026-08-31', time: '22:00', timeEnd: '24:00' })]);
+    expect(l).toContain('DTSTART;TZID=Asia/Tokyo:20260831T220000');
+    expect(l, '月末の翌日へ繰り上がっていない').toContain('DTEND;TZID=Asia/Tokyo:20260901T000000');
+    // UTC で書くときも同じ(+05:30 の 22:00 → 16:30Z、24:00 → 翌日 18:30Z)
+    const u = lines([item({ date: '2026-08-31', time: '22:00', timeEnd: '24:00' })], UTC_PLUS_530);
+    expect(u).toContain('DTEND:20260831T183000Z');
+  });
+
   it('時刻の幅が無ければ DTEND は書かない', () => {
     expect(lines([item({ time: '14:00' })]).some((x) => x.startsWith('DTEND'))).toBe(false);
   });

@@ -1054,6 +1054,13 @@ export function connectStoreEffects(
       updatedAt: s.updatedAt,
     });
     rescanColumnSmarts();
+    /**
+     * 🔴 **連絡先の一覧を開いていれば、集め直す**(#1087)。⚠ 直す前は、タブを開いたままノート側で
+     *   電話を直して保存しても一覧は古いままで、「vCard で書き出す」が**古い番号を書いていた**
+     *   (新しく `tel:` を足したノートも出ない)。ここは行を書いた唯一の口なので 1 か所で足りる。
+     * ⚠ 走査は `scanAfterWrites` が畳むので、まとめて書いても全件走査は 1 本にまとまる。
+     */
+    if (dispatcher.getState().contactScan !== null) dispatcher.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
   };
 
   const unsubscribe = dispatcher.onEvent((ev) => {

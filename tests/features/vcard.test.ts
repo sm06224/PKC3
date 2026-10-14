@@ -44,6 +44,35 @@ const CARD_ADR = [
   'END:VCARD',
 ].join('\r\n');
 
+describe('vCard 2.1 の素の種別(#1087)', () => {
+  it('🔴 `TEL;CELL:` のような TYPE= の無い種別も、取り込めないことを言う', () => {
+    const v21 = [
+      'BEGIN:VCARD',
+      'VERSION:2.1',
+      'FN:古い端末の人',
+      'TEL;CELL:090-1111-2222',
+      'END:VCARD',
+    ].join('\r\n');
+    const { cards, warnings } = parseVcf(v21);
+    expect(cards[0]?.tels).toEqual(['090-1111-2222']);
+    expect(warnings, '携帯の区別が黙って消えた').toEqual([
+      '1 枚目: 電話・メールの種別(携帯 / 自宅 / FAX など)は取り込めません',
+    ]);
+  });
+
+  it('対照群: 素の符号化(QUOTED-PRINTABLE)と、PKC 自身が書く VOICE / INTERNET では言わない', () => {
+    const v21 = [
+      'BEGIN:VCARD',
+      'VERSION:2.1',
+      'FN:符号化の人',
+      'TEL;VOICE;QUOTED-PRINTABLE:03-0000-0000',
+      'EMAIL;INTERNET:a@example.com',
+      'END:VCARD',
+    ].join('\r\n');
+    expect(parseVcf(v21).warnings).toEqual([]);
+  });
+});
+
 describe('parseVcf ── 読みは広く', () => {
   it('3.0 の 1 枚 ── FN / TEL×2 / EMAIL / ORG / BDAY / NOTE', () => {
     const { cards, warnings } = parseVcf(CARD_30);

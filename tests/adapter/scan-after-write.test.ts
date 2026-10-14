@@ -325,3 +325,29 @@ describe('面の走査は、飛んでいる書込を追い越さない', () => {
     ]);
   });
 });
+
+/**
+ * 🔴 **連絡先の一覧を開いているなら、行を書くたびに集め直す**(#1087)。
+ * ⚠ 直す前は、タブを開いたままノート側で電話を直して保存しても一覧は古いままで、
+ *   「vCard で書き出す」が古い番号を書いていた(集め直すのはタブを開いたときだけだった)。
+ */
+describe('連絡先を開いている間の書込(#1087)', () => {
+  const count = (order: string[]): number => order.filter((x) => x === 'contactScan').length;
+
+  it('🔴 連絡先を一度集めた後に保存すると、もう一度集める', async () => {
+    const s = await setup();
+    s.g.open();
+    await flush();
+    expect(count(s.order), '対照群: 連絡先を開く前の保存では集めない').toBe(0);
+    s.d.dispatch({ type: 'REFRESH_CONTACT_SCAN' });
+    await flush();
+    expect(count(s.order), '前提: 開いたときに 1 回集める').toBe(1);
+    expect(s.d.getState().contactScan, '前提: 集めた答えが届いていない').not.toBeNull();
+    s.d.dispatch({ type: 'START_EDIT' });
+    s.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '---\ntel: 090-9999-9999\n---\n' });
+    s.d.dispatch({ type: 'COMMIT_EDIT' });
+    await flush();
+    expect(count(s.order), '保存したのに連絡先を集め直さなかった ── 書き出しが古い番号になる').toBe(2);
+    expect(s.order.lastIndexOf('contactScan'), '書込より前に集めた').toBeGreaterThan(s.order.lastIndexOf('write'));
+  });
+});

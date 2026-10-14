@@ -211,7 +211,7 @@ import {
   findTodayNote,
   todayNoteTitle,
 } from '@features/schedule/today-note';
-import { formatLineDate } from '@features/schedule/line-date';
+import { formatLineDate, readLineDate } from '@features/schedule/line-date';
 import { isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
   adoptableUrls,
@@ -878,6 +878,25 @@ export function addScheduleItem(
   if (text === '') {
     // ⚠ **無言で終わらせない**(欄は出ているのに何も起きない dead click になる)
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'やることを入力してください' });
+    return false;
+  }
+  /**
+   * 🔴 **読めない日付は書かない**(#1087)── 日付の欄は年を 6 桁まで打てるので、打ち間違えると
+   *   `@20261-03-05` を書いていた。読み手はそれを日付と読まないので、**足した予定がどこにも出ず、理由も出ない**。
+   */
+  if (item.date !== '' && !isRealCalendarDate(item.date)) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `日付「${item.date}」を読めません。日付を選び直してください` });
+    return false;
+  }
+  /**
+   * 🔴 **本文にも日付を書いていたら、黙ってどちらかを捨てない**(#1087)── 直す前は両方を並べて書き、
+   *   読み手は**本文の日付**を採るので、欄で選んだ日の予定表には出なかった(「足しました」とは出る)。
+   */
+  if (item.date !== '' && readLineDate(text) !== null) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: 'やることの字に日付(@…)が入っています。日付は欄か字のどちらか一方にしてください',
+    });
     return false;
   }
   // 🔑 日付の書き方は `line-date.ts` の 1 本(`@2026-08-28 14:00..15:30`)── ここで綴らない

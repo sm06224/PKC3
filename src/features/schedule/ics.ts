@@ -296,7 +296,13 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
       continue;
     }
     const timed = it.time !== null;
-    const timeEnd = timed && validTime(it.timeEnd) && it.timeEnd >= it.time! ? it.timeEnd : null;
+    /**
+     * 🔴 **終わりの `24:00` も受ける**(#1087)── 予定表の目盛りで下端まで引くと `〜24:00` を書く
+     *   (`formatMinutes(1440)`)。直す前は `validTime` が 24 時を断るので、DTEND を黙って落とし、
+     *   「2 時間の予定」が長さ 0 として渡っていた。書くときは翌日の 00:00 にする(下の DTEND)。
+     */
+    const endOk = it.timeEnd === '24:00' || validTime(it.timeEnd);
+    const timeEnd = timed && endOk && it.timeEnd !== null && it.timeEnd >= it.time! ? it.timeEnd : null;
     let until: string | null = null;
     if (it.until !== null) {
       until = clampUntil(it.until);
@@ -341,7 +347,8 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
     if (timed) {
       const time = it.time!;
       ev.push(dt('DTSTART', start, time));
-      if (timeEnd !== null) ev.push(dt('DTEND', start, timeEnd));
+      if (timeEnd !== null)
+        ev.push(timeEnd === '24:00' ? dt('DTEND', addDays(start, 1)!, '00:00') : dt('DTEND', start, timeEnd));
       if (zone.kind === 'tokyo') usesTokyo = true;
       if (it.repeat !== null) {
         // 🔴 終わりは UTC(開始の時刻で数える ── 最終日の回を含める)
