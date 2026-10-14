@@ -88,6 +88,30 @@ export function refsInPendingTexts(
   return out;
 }
 
+/**
+ * 走査の口に「まだ保存していない字の中の参照」を合わせる(#1087、添付の見直し)。
+ * ⚠ 配線(`main.ts`)は test から実行されないので、合わせ方はここに置いて test する。
+ * ⚠ 字を読めなければ投げる(整理を止める側へ倒す ── 読めないまま消すと、字の中の画像を消しうる)。
+ */
+export function withPendingRefs(
+  scan: (candidates: string[]) => Promise<string[]>,
+  pendingTexts: () => Promise<readonly string[]>,
+): (candidates: string[]) => Promise<string[]> {
+  return async (candidates) => {
+    const fromStore = await scan(candidates);
+    const texts = await pendingTexts();
+    return [...new Set([...fromStore, ...refsInPendingTexts(texts, candidates)])];
+  };
+}
+
+/**
+ * 残骸の判定に使ってよい保存先か(`strayBlobKeys` の `durable`)。⚠ 判定はここ 1 つ ──
+ * 呼び手は「いまの保存先」(昇格・開き直しの後の値)を渡す。
+ */
+export function isDurableVfs(vfs: 'opfs-sahpool' | 'memory'): boolean {
+  return vfs !== 'memory';
+}
+
 export interface OrphanScan {
   keys: string[];
   /**

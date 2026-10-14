@@ -12,8 +12,10 @@
  * **「棚から消えたか」と「何を作ったか」**である。
  */
 import { describe, expect, it, vi } from 'vitest';
+import { serializeFrontmatter } from '../../src/features/markdown/frontmatter';
 import { readFileSync } from 'node:fs';
 import {
+  confirmSavedBack,
   createOfficeSaveBack,
   SAME_DOC_MAX,
   type SaveBackDeps,
@@ -728,5 +730,51 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     h.stage.put({ key: 'k1', name: 'a.odt' });
     await h.sb.receive('k1');
     expect(asked, '合言葉が無いのに書き戻しを引いた').toBe(0);
+  });
+});
+
+/**
+ * 🔴 **書き戻しが disk のノートに届いたかを確かめてから成功と言う**(#1087、添付の見直し)。
+ */
+describe('confirmSavedBack', () => {
+  const body = (key: string, history: string[] = []): string =>
+    serializeFrontmatter({ 'attachment.asset_key': key, 'attachment.history': history }) + '\n本文\n';
+  const settle = async () => {};
+
+  it('🔴 添付の key の欄が新しい key なら届いた', async () => {
+    expect(await confirmSavedBack({ settle, readBody: async () => body('k-new'), key: 'k-new' })).toBe(true);
+  });
+
+  it('🔴 書けなかった(欄が古い key のまま)なら届いていない', async () => {
+    expect(await confirmSavedBack({ settle, readBody: async () => body('k-old'), key: 'k-new' })).toBe(false);
+  });
+
+  it('🔴 新しい版が過去の版と同じ中身でも、版の台帳の字に救われない(着地前レビュー)', async () => {
+    // 台帳に k-new が既に在る(前に同じ中身で保存した)。欄は k-old のまま = 今回は書けていない
+    const b = body('k-old', ['2026-10-01T00:00:00.000Z|auto|k-new|10']);
+    expect(b, '前提: 本文に新しい key の字が在る').toContain('k-new');
+    expect(await confirmSavedBack({ settle, readBody: async () => b, key: 'k-new' })).toBe(false);
+  });
+
+  it('ノートが無い / 読めない / 待てないなら届いていない', async () => {
+    expect(await confirmSavedBack({ settle, readBody: async () => null, key: 'k' })).toBe(false);
+    expect(
+      await confirmSavedBack({
+        settle,
+        readBody: async () => {
+          throw new Error('読めない');
+        },
+        key: 'k',
+      }),
+    ).toBe(false);
+    expect(
+      await confirmSavedBack({
+        settle: async () => {
+          throw new Error('待てない');
+        },
+        readBody: async () => body('k'),
+        key: 'k',
+      }),
+    ).toBe(false);
   });
 });
