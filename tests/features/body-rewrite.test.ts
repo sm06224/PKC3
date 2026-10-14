@@ -1161,3 +1161,16 @@ describe('添付のファイル名の 1 行(#1220 穴②、裁定 A)', () => {
     }
   });
 });
+
+describe('🔴 行ごとの改行コードを保つ(#1087)', () => {
+  it('CRLF と LF が混ざったノートで 1 か所チェックしても、他の行の改行は変わらない', () => {
+    const body = '- [ ] a\r\n- [ ] b\n- [ ] c\r\n';
+    const out = applyBodyRewrite(body, { kind: 'task', line: 1 })!;
+    expect(out, '他の行の改行まで揃えた').toBe('- [ ] a\r\n- [x] b\n- [ ] c\r\n');
+  });
+
+  it('対照群: CRLF だけのノートは CRLF のまま', () => {
+    const out = applyBodyRewrite('- [ ] a\r\n- [ ] b', { kind: 'task', line: 0 })!;
+    expect(out).toBe('- [x] a\r\n- [ ] b');
+  });
+});
