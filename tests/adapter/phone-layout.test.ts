@@ -872,6 +872,18 @@ describe('探す・絞る・目次(隠れた面へ送らない)', () => {
     );
   });
 
+  it('🔴 名前を変えるを押すと、スマホでは先に一覧ページへ移る(隠れた一覧で欄を出さない)', () => {
+    const s = setup(true);
+    s.open('n1');
+    expect(s.page(), '前提:本文ページに居る').toBe('note');
+    const btn = s.root.ownerDocument.createElement('button');
+    btn.setAttribute('data-pkc-action', 'rename-entry-begin');
+    btn.setAttribute('data-pkc-lid', 'n1');
+    s.root.append(btn);
+    btn.click();
+    expect(s.page(), '本文ページのまま(隠れた一覧で改名を始めている)').toBe('list');
+  });
+
   it('🔴 探す鍵を押すと一覧ページへ移り、欄に焦点が入る', () => {
     const s = setup(true);
     s.open('n1');

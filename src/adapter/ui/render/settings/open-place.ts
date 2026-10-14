@@ -35,7 +35,7 @@ export function createOpenPlaceSection(region: HTMLElement): SettingsSection {
       });
       plRow.title =
         '別のウィンドウなら本文を見ながら確かめられます。ブラウザが別のウィンドウを止めている場合は' +
-        'この画面の上に出し、理由を画面の下に出します。電話の画面ではどちらでもこの' +
+        'この画面の上に出し、理由を画面の下に出します。スマホの画面ではどちらでもこの' +
         '画面に出ます。予定表や連絡先など、ほかのウィンドウの開き方はここでは変わりません。';
       pld.append(plRow);
       pld.append(

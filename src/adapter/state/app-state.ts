@@ -947,6 +947,20 @@ function partialDraftBlockedNote(kind: PartialDraftKind): string {
 /** ⚠ 既存の名前・値のまま(段2 で出荷済み ── #1044 段3 で 1 バイトも変えない)。 */
 export const SECTION_DRAFT_NOTE = partialDraftBlockedNote('section');
 export const CODE_DRAFT_NOTE = partialDraftBlockedNote('code');
+/**
+ * 🔴 **別のタブに編集を引き継がれたときの知らせ**(#1087 S3)。出口は**いま画面に在るボタンの字**で言う
+ *   ── 全文編集中は「編集をやめる」、章・コードの欄だけが開いているときは「章の編集をやめる」など。
+ */
+export function editRevokedNote(state: AppState): string {
+  const verb =
+    state.phase === 'editing'
+      ? '編集をやめる'
+      : PARTIAL_DRAFT_WORDS[state.sectionDraft === null ? 'section' : partialDraftKind(state.sectionDraft)].cancelVerb;
+  return (
+    '別のタブまたはウィンドウがこのノートの編集を引き継ぎました。⚠ ' +
+    `ここで保存するとそちらの編集を上書きします。必要な内容をコピーしてから「${verb}」を押してください`
+  );
+}
 /** どちらの種類の下書きが原因の断り文か(`bodyWriteBlockResult` が控えるかどうかに使う)。 */
 const PARTIAL_DRAFT_OWN_NOTES: ReadonlySet<string> = new Set([SECTION_DRAFT_NOTE, CODE_DRAFT_NOTE]);
 

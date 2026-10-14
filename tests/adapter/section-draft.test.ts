@@ -13,6 +13,7 @@ import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   blockedWithSuffix,
   bodyWriteBlockReason,
+  editRevokedNote,
   guardSectionDraftTransition,
   hasUnsavedTyping,
   initialState,
@@ -1181,5 +1182,21 @@ describe('blockedWithSuffix(#1087)', () => {
       expect(seenGate, `${f}: 前提が崩れた(門の呼び出しが見つからない)`).toBeGreaterThan(0);
       expect(bad, f).toEqual([]);
     }
+  });
+});
+
+describe('別のタブに編集を引き継がれた知らせ(#1087 S3)', () => {
+  it('🔴 章の欄だけが開いているときは、画面に在るボタン「章の編集をやめる」で言う', () => {
+    const s = reduce(booted(), { type: 'OPEN_SECTION_DRAFT', lid: 'n1', line: 4 }).state;
+    expect(s.sectionDraft, '前提: 章の欄が開いていない').not.toBeNull();
+    const t = editRevokedNote(s);
+    expect(t).toContain('「章の編集をやめる」を押してください');
+    expect(t).not.toContain('「編集をやめる」');
+  });
+
+  it('全文編集中は「編集をやめる」(対照群)', () => {
+    const s = reduce(booted(), { type: 'START_EDIT' }).state;
+    expect(s.phase, '前提: 編集中でない').toBe('editing');
+    expect(editRevokedNote(s)).toContain('「編集をやめる」を押してください');
   });
 });

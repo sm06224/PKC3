@@ -9632,6 +9632,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}名前を変えてください` });
       return;
     }
+    // スマホでは名前の欄が出る一覧が隠れている ── 先に一覧を見せてから始める(#1087 P1)。PC は素通り。
+    if (!phoneShowList(dispatcher)) return;
     dispatcher.dispatch({ type: 'ROW_RENAME_BEGIN', lid });
     const fieldShown = (): boolean =>
       root.querySelector('[data-pkc-field="row-rename"]') !== null;

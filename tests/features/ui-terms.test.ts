@@ -519,6 +519,7 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
    */
   const WARNING_MARKS: readonly [file: string, count: number][] = [
   ['src/adapter/platform/storage/portable-persist.ts', 1], // 保存できなかった(main.ts から出した。件数は動いていない)
+  ['src/adapter/state/app-state.ts', 1], // 相手の編集を上書きする(main.ts から出した `editRevokedNote`。文は動いていない)
   ['src/adapter/ui/actions/binder.ts', 1], // 取り込みで長すぎる電話・メールを外した(データが減る)
   ['src/adapter/ui/render/commands.ts', 2], // 作り直し・全消去の確認(戻せない)
   ['src/adapter/ui/render/office-pack-panel.ts', 1], // Office で書いたマクロが消える
@@ -532,7 +533,7 @@ describe('画面の字に使わない語(ui-terms.ts の BANNED_TERMS)', () => {
   ['src/features/storage/rescue-archive.ts', 2], // 本文を読めなかった・つながりと履歴は戻せない
   ['src/features/storage/storage-notice.ts', 1], // このタブを閉じると保存領域ごと消える
   ['src/features/structure/structure-text.ts', 1], // 件数が多くて一部だけ出している
-  ['src/main.ts', 3], // 添付が読めなかった・本体への切り替え失敗・相手の編集を上書きする
+  ['src/main.ts', 2], // 添付が読めなかった・本体への切り替え失敗
 ];
 
   it('「⚠」を使っている file と件数が、pin と一致する', () => {

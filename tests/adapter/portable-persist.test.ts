@@ -186,7 +186,7 @@ describe('#400 段③ ── 書いてはいけないもの / 失敗の扱い', 
     });
     h.p.touch();
     await h.p.flush();
-    expect(h.p.state()).toEqual({ kind: 'error', why: 'Error: 出せません' });
+    expect(h.p.state()).toEqual({ kind: 'error', why: '出せません' });
     expect(h.writes).toHaveLength(0);
     // 🔑 溜まっているので、直れば**次の flush で書ける**
     fail = false;
@@ -203,7 +203,20 @@ describe('#400 段③ ── 書いてはいけないもの / 失敗の扱い', 
     h.p.touch();
     await h.p.flush();
     expect(h.p.state().kind).toBe('error');
-    expect((h.p.state() as { why: string }).why).toContain('Quota');
+    expect((h.p.state() as { why: string }).why).toContain('保存できる空き容量が足りません');
+  });
+
+  it('🔴 英語の理由をそのまま出さない(DOMException の QuotaExceededError も日本語にする)', async () => {
+    const h = harness({
+      write: async () => {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+      },
+    });
+    h.p.touch();
+    await h.p.flush();
+    const why = (h.p.state() as { why: string }).why;
+    expect(why, '日本語の案内が付いていない').toContain('空き容量が足りません');
+    expect(why, '「Error: 」の前置きが付いている').not.toMatch(/^(Error|DOMException)/);
   });
 });
 

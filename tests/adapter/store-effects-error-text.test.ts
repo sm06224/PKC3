@@ -12,6 +12,7 @@ import type { StorePort } from '../../src/adapter/state/store-effects';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { connectStoreEffects } from '../../src/adapter/state/store-effects';
 import { bodySaveErrorText, errorText } from '../../src/features/error-text';
+import { WRITE_QUOTA_REFUSAL } from '../../src/features/storage/write-quota';
 
 const meta = (lid: string): EntryMeta => ({
   lid,
@@ -93,6 +94,17 @@ describe('bodySaveErrorText / errorText', () => {
     const q = new DOMException('The quota has been exceeded.', 'QuotaExceededError');
     expect(errorText(q)).not.toContain('ノートを保存し直す');
     expect(bodySaveErrorText(q)).toContain('ノートを保存し直す');
+  });
+});
+
+describe('bodySaveErrorText: worker の空き容量の断り(#1087 S1)', () => {
+  it('🔴 WRITE_QUOTA_REFUSAL にも、空きを作った後の一手を足す(二重の句点を作らない)', () => {
+    const t = bodySaveErrorText(new Error(WRITE_QUOTA_REFUSAL));
+    expect(t, '断りの本文が消えた').toContain('保存できる空き容量が足りません');
+    expect(t, '空きを作った後の一手が足されていない').toContain('。その後、本文の上の「ノートを保存し直す」を押してください');
+    expect(t).not.toContain('。。');
+    // 対照群: 関係ない失敗には足さない
+    expect(bodySaveErrorText(new Error('disk exploded'))).not.toContain('その後、本文の上の');
   });
 });
 
