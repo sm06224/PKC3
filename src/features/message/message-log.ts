@@ -146,10 +146,45 @@ export function formatMessageSection(input: MessageSectionInput): string {
  * ③ 80 字で切る ── 生の例外(`${e.message}` / `${String(e)}`)は無制限の長さを
  *    持ちうる。⚠ **切ったことは字で言う**(黙って切らない ── CLAUDE.md §1)。
  */
-const QUOTE_RE = /「[^」]*」|『[^』]*』/g;
+/**
+ * 🔴 **括弧の潰しは入れ子を数えて閉じる**(#1087)── 名前が `」` / `「` を含むと、最初の `」` で閉じると後半が残る
+ *   (「【重要】「A社との契約」について」→「について」)。目印(`markName`)を当てていない口(「${…}」の形は
+ *   260 か所を超える)も、これで後半を残さない。
+ * - 開きと閉じを数え、深さが 0 に戻った所で 1 つの名前とする(入れ子の 」 は名前の中)。
+ * - 深さ 0 で現れた余りの閉じは、直前の名前の続きとみなす(名前に 」 が 1 つだけ入った形:「a」b」)。
+ * - 閉じずに終わったら末尾まで潰す(中身を出さない側に倒す)。
+ * ⚠ 2 つの名前の間の字(「A」から「B」へ の「から」)は残す。
+ */
+function collapseBrackets(text: string, open: string, close: string): string {
+  const spans: Array<[number, number]> = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === open) {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === close) {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0) spans.push([start, i]);
+      } else if (spans.length > 0) {
+        spans[spans.length - 1]![1] = i;
+      }
+    }
+  }
+  if (depth > 0) spans.push([start, text.length - 1]);
+  let out = '';
+  let at = 0;
+  for (const [a, b] of spans) {
+    out += text.slice(at, a) + open + '…' + close;
+    at = b + 1;
+  }
+  return out + text.slice(at);
+}
 
 /**
- * 🔴 **名前の目印**(#1087)。題名・添付名が `」` を含むと、括弧の潰し(上の `QUOTE_RE`)は最初の `」` で閉じて
+ * 🔴 **名前の目印**(#1087)。題名・添付名が `」` を含むと、括弧の字だけでは
  * 後半が残る(「【重要】「A社との契約」について」→「について」が漏れる)。括弧の字では中身の終わりが決まらないので、
  * 名前の前後に**目に見えない字**を付け、`sanitizeMessageText` は目印の間を中身に関係なく潰す。
  * ⚠ 目印は表示から外さない(U+2060 / U+2061 は幅の無い字で、画面の見た目は変わらない ── 外す口を
@@ -175,7 +210,7 @@ export function sanitizeMessageText(text: string, fixedHead = ''): string {
     return fixedHead.replace(/\r?\n/g, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
   }
   const unmarked = text.replace(MARKED_NAME_RE, '…');
-  const collapsed = unmarked.replace(QUOTE_RE, (m) => (m.charAt(0) === '「' ? '「…」' : '『…』'));
+  const collapsed = collapseBrackets(collapseBrackets(unmarked, '「', '」'), '『', '』');
   const flattened = collapsed.replace(/\r?\n/g, ' ');
   return flattened.length > MAX_MESSAGE_TEXT_LENGTH
     ? `${flattened.slice(0, MAX_MESSAGE_TEXT_LENGTH)}…`
