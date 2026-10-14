@@ -18,7 +18,10 @@
  *    いない lid を落とすと、今度はそちらを上書きする)
  */
 import { describe, expect, it, vi } from 'vitest';
-import { collectExistingLids } from '../../src/features/import/existing-lids';
+import {
+  collectExistingLids,
+  collectExistingRelationIds,
+} from '../../src/features/import/existing-lids';
 
 describe('取込の衝突検査に渡す既存 lid(#328)', () => {
   it('🔴 DB の entry に居る lid を拾う(state が遅れていても)', async () => {
@@ -119,5 +122,30 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
     expect(fromState, 'state を読んでいない').toHaveBeenCalledTimes(1);
     expect(entryLids, 'DB の entry を読んでいない').toHaveBeenCalledTimes(1);
     expect(revisionLids, 'DB の revision を読んでいない').toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 🔴 **relation id も DB に問う**(#1087、2026-10-14)。
+ *
+ * 直す前:フォルダをゴミ箱へ入れた直後(再読込なし)に、そのフォルダを含むバックアップを
+ * 取り込むと、ゴミ箱のフォルダの辺の id が state に無いので「空き」と読まれ、取り込んだ辺が
+ * **ゴミ箱の辺を上書き**していた ── ゴミ箱から戻したフォルダが黙って空になる。
+ */
+describe('取込の衝突検査に渡す既存 relation id(#1087)', () => {
+  it('🔴 DB にだけ在る id(ゴミ箱のノートの辺)を拾う', async () => {
+    const got = await collectExistingRelationIds({
+      fromState: () => [],
+      dbIds: async () => ['rel-trash'],
+    });
+    expect(got.has('rel-trash'), 'ゴミ箱の辺を見落とした ── 取り込みが上書きする').toBe(true);
+  });
+
+  it('🔴 state にだけ在る id も落とさない(書込の返事がまだ来ていない辺)', async () => {
+    const got = await collectExistingRelationIds({
+      fromState: () => ['rel-fresh'],
+      dbIds: async () => [],
+    });
+    expect(got.has('rel-fresh')).toBe(true);
   });
 });

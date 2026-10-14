@@ -24,7 +24,7 @@
  * 判定が 2 か所に生える(2026-08-20 の「数えている対象が名前と違う」の型)。
  * ⚠ **押す前**の説明には件数を書いてよい(取り込んだ数は、こちらが知っている)。
  */
-import type { Dispatchable } from '@adapter/state/app-state';
+import { phaseBlockReason, type AppPhase, type Dispatchable } from '@adapter/state/app-state';
 
 /** 注意の面の頭に置く、1 つだけの操作。 */
 export interface NoticeAction {
@@ -41,6 +41,13 @@ export interface ImportUndoDeps {
   notify(message: string): void;
   /** 注意の面を畳む(戻した後に「取り消す」を残さない)。 */
   clear(): void;
+  /**
+   * 🔴 **いまの phase**(#1087)── `DELETE_ENTRIES` は `ready` 以外で**黙って捨てられる**ので、
+   *   撃つ前に見る。⚠ 必須にしてある(配線を落としたら tsc が落とす)。
+   */
+  phase(): AppPhase;
+  /** 断る理由を出す(`OP_FAILED`)。 */
+  fail(message: string): void;
 }
 
 export interface ImportUndo {
@@ -68,6 +75,16 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
     },
     undo() {
       if (lids.length === 0) return;
+      /**
+       * 🔴 **編集中は断り、記憶は手放さない**(#1087)── 直す前は `DELETE_ENTRIES` が
+       *   黙って捨てられたのに「ゴミ箱へ入れました」と言い、記憶も忘れて**戻り道ごと消えていた**。
+       */
+      // ⚠ 断りの前置きは `phaseBlockReason` 1 か所から引く(編集中 / 保存失敗 / 読み込み中で字が違う)
+      const blocked = phaseBlockReason(deps.phase());
+      if (blocked !== null) {
+        deps.fail(`${blocked}取り込みを取り消してください`);
+        return;
+      }
       deps.dispatch({ type: 'DELETE_ENTRIES', lids: [...lids] });
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];

@@ -86,8 +86,11 @@ export interface ImportDeps {
   existingHeads?(): readonly { lid: string; bodyChars: number | null }[];
   /** 🔴 絞った lid の本文だけ読む(#399 ②)。⚠ **省略可**。 */
   readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
-  /** 既存 relation id 集合(upsert が後勝ちで潰すため、衝突は再採番する)。 */
-  existingRelationIds(): ReadonlySet<string>;
+  /**
+   * 既存 relation id 集合(upsert が後勝ちで潰すため、衝突は再採番する)。
+   * ⚠ ゴミ箱のノートの辺も含める(DB に問う ── #1087)ので Promise を返してよい。
+   */
+  existingRelationIds(): ReadonlySet<string> | Promise<ReadonlySet<string>>;
   /** 既存 entryOrder の最大値。 */
   orderBase(): number;
   genLid(): string;
@@ -474,7 +477,7 @@ export async function importPkc2File(
         const archive = portable ?? (await readArchive(file));
         restored = restoreArchive(archive, {
           existingLids: await deps.existingLids(),
-          existingRelationIds: deps.existingRelationIds(),
+          existingRelationIds: await deps.existingRelationIds(),
           orderBase: deps.orderBase(),
           genLid: deps.genLid,
           genRelationId: deps.genRelationId,
@@ -560,7 +563,7 @@ export async function importPkc2File(
         ? { assetKeys: [...zipAssets.keys()] }
         : {}),
       existingLids: await deps.existingLids(),
-      existingRelationIds: deps.existingRelationIds(),
+      existingRelationIds: await deps.existingRelationIds(),
       orderBase: deps.orderBase(),
       genLid: deps.genLid,
       genAssetKey: deps.genAssetKey,

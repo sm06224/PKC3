@@ -2656,6 +2656,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'undo-trash',
   // 🔴 2 ペインで移した直後の「元に戻す」── 居場所を書き戻すので `move-to-folder` と同じ門
   'undo-dual-move',
+  // 🔴 取り込みの「取り消す」── ゴミ箱へ入れる `delete-entry` と同じ書込なので同じ門(#1087)
+  'undo-import',
   'purge-trash',
   /**
    * ⚠ 本文は書かないが **disk への書込**である(取込は relations を総入れ替えする
@@ -4777,7 +4779,7 @@ function deleteFrom(
     const after = dispatcher.getState();
     const moved = lids
       .filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l))
-      .map((l) => ({ lid: l, title: titleOf.get(l) ?? l }));
+      .map((l) => ({ lid: l, title: titleOf.get(l) ?? l, order: st.entryMetas.get(l)?.entryOrder }));
     offerTrashUndo(
       dispatcher,
       moved,
@@ -8230,7 +8232,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const before = dispatcher.getState();
     dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
     const after = dispatcher.getState();
-    if (!after.entryMetas.has(lid)) offerTrashUndo(dispatcher, [{ lid, title }], leftAtRoot(before, after), linkedFromText(before, after, lid));
+    if (!after.entryMetas.has(lid))
+      offerTrashUndo(
+        dispatcher,
+        [{ lid, title, order: before.entryMetas.get(lid)?.entryOrder }],
+        leftAtRoot(before, after),
+        linkedFromText(before, after, lid),
+      );
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
@@ -8666,14 +8674,15 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     if (dispatcher.getState().sectionDraft !== null) {
       const offer = currentTrashOffer();
-      if (offer !== null) dispatcher.dispatch({ type: 'UNDO_TRASH', lids: offer.lids });
+      if (offer !== null)
+        dispatcher.dispatch({ type: 'UNDO_TRASH', lids: offer.lids, orders: offer.orders });
       return;
     }
-    const lids = takeTrashUndo();
-    if (lids === null) return;
+    const taken = takeTrashUndo();
+    if (taken === null) return;
     // ⚠ 「戻しました」はここでは言わない ── 実際に戻ったとき(`ENTRY_RESTORED`)に reducer が言う
     //   (戻った先のフォルダの題名つき。ゴミ箱の一覧から戻したときと同じ字)
-    dispatcher.dispatch({ type: 'UNDO_TRASH', lids });
+    dispatcher.dispatch({ type: 'UNDO_TRASH', lids: taken.lids, orders: taken.orders });
   },
   /**
    * 🔴 **予定を動かした直後の「元に戻す」**(#855。Gemini 裁定 = #1163 のコメント 6104130726 の 6)。

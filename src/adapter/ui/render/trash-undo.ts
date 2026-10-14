@@ -27,6 +27,11 @@ export const TRASH_OFFER_MS = 7000;
 
 interface Pending {
   readonly lids: readonly string[];
+  /**
+   * 🔴 **移す前の並び**(#1087)── 戻すときにここへ挿す。⚠ ゴミ箱の履歴は並びを持たないので、
+   *   直す前は「元に戻す」でも一覧の末尾へ飛んでいた(まとめて戻すと順番も lid 順になった)。
+   */
+  readonly orders: Readonly<Record<string, number>>;
   readonly message: string;
   readonly dispatcher: Dispatcher;
   timer: ReturnType<typeof setTimeout> | null;
@@ -81,9 +86,12 @@ export function trashUndoShown(shownLine: string): boolean {
 /** 持っている物(test の観測点)。 */
 export function currentTrashOffer(): {
   readonly lids: readonly string[];
+  readonly orders: Readonly<Record<string, number>>;
   readonly message: string;
 } | null {
-  return pending === null ? null : { lids: pending.lids, message: pending.message };
+  return pending === null
+    ? null
+    : { lids: pending.lids, orders: pending.orders, message: pending.message };
 }
 
 /**
@@ -92,7 +100,7 @@ export function currentTrashOffer(): {
  */
 export function offerTrashUndo(
   dispatcher: Dispatcher,
-  moved: readonly { readonly lid: string; readonly title: string }[],
+  moved: readonly { readonly lid: string; readonly title: string; readonly order?: number }[],
   toRoot = 0,
   linkedFrom = '',
 ): void {
@@ -100,6 +108,9 @@ export function offerTrashUndo(
   clearTrashOffer();
   const p: Pending = {
     lids: moved.map((m) => m.lid),
+    orders: Object.fromEntries(
+      moved.flatMap((m) => (m.order === undefined ? [] : [[m.lid, m.order] as const])),
+    ),
     message: trashMessage(moved.map((m) => m.title), toRoot, linkedFrom),
     dispatcher,
     timer: null,
@@ -112,10 +123,13 @@ export function offerTrashUndo(
 }
 
 /** 「元に戻す」の本体。戻す対象を返し、持っている物を忘れる(撃つのは呼び側)。無ければ `null`。 */
-export function takeTrashUndo(): readonly string[] | null {
+export function takeTrashUndo(): {
+  readonly lids: readonly string[];
+  readonly orders: Readonly<Record<string, number>>;
+} | null {
   const p = pending;
   if (p === null) return null;
   pending = null;
   if (p.timer !== null) clearTimeout(p.timer);
-  return p.lids;
+  return { lids: p.lids, orders: p.orders };
 }

@@ -255,7 +255,7 @@ import { appDualPrefs } from '@adapter/ui/render/dual-prefs';
 import { appFilerFlatten } from '@adapter/ui/render/filer-flatten';
 import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile } from '@adapter/ui/launch-tile';
-import { collectExistingLids } from '@features/import/existing-lids';
+import { collectExistingLids, collectExistingRelationIds } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
 import { LocalOfficeFiles } from '@adapter/platform/office/local-office-files';
@@ -2864,6 +2864,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatch: (a) => dispatcher.dispatch(a),
     notify: (message) => showStatus(message),
     clear: () => clearNotices(regions.notices),
+    phase: () => dispatcher.getState().phase,
+    fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
   });
 
   const importDeps: ImportDeps = {
@@ -2900,8 +2902,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             (r) => [r.lid, r.body] as const,
           ),
         ),
+      /**
+       * 🔴 **relation id も DB に問う**(#1087)── ゴミ箱のノートの辺は disk に在るが
+       *   state には無い。判定と理由は `features/import/existing-lids.ts`。
+       */
       existingRelationIds: () =>
-        new Set(dispatcher.getState().relations.map((r) => r.id)),
+        collectExistingRelationIds({
+          fromState: () => dispatcher.getState().relations.map((r) => r.id),
+          dbIds: async () =>
+            (await client.request({ op: 'listRelations', cid })).map((r) => r.id),
+        }),
       orderBase: () => {
         let max = 0;
         for (const m of dispatcher.getState().entryMetas.values()) {
