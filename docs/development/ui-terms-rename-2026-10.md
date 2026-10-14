@@ -22,7 +22,7 @@ UPDATE_UI_TERMS_DOC=1 npx vitest run tests/features/ui-terms-doc.test.ts
 
 <!-- ui-terms:generated:start -->
 
-### 造語(128 語)
+### 造語(129 語)
 
 | 使わない語 | 言い換え先 | 除く語(実在の複合語) |
 |---|---|---|
@@ -78,6 +78,7 @@ UPDATE_UI_TERMS_DOC=1 npx vitest run tests/features/ui-terms-doc.test.ts
 | `当たる` | 一致する |  |
 | `当てて` | 適用して | `割り当てて` |
 | `当てる` | 適用する | `割り当てる` |
+| `落ちてき` | ダウンロードされ |  |
 | `落と` | ドロップする / ダウンロードする | `段落と` |
 | `組む` | 作る |  |
 | `組んで` | 作って |  |

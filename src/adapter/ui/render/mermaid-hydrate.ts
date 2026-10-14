@@ -13,7 +13,14 @@
  * - **同じ図は焼き直さない** ── 鍵(原文 + テーマ + 幅 + dpr)が一致すれば IDB から
  * - **ObjectURL は要素の寿命終端で revoke**(2026-07-27 の不可侵指示)
  */
-import { cacheKey, renderToPng, readPalette, type Raster, type RasterKey } from './mermaid-raster';
+import {
+  cacheKey,
+  DeviceRenderError,
+  renderToPng,
+  readPalette,
+  type Raster,
+  type RasterKey,
+} from './mermaid-raster';
 import { ACTION_ICONS, iconSpan } from './icons';
 import { markViewBig } from './view-big';
 import { watchDevicePixelRatio } from './dpr-watch';
@@ -362,6 +369,9 @@ export function hydrateDiagrams(
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
       // ⚠ 例外の前置き「Error:」を画面に出さない / 切るときは「…」で切ったと分かるようにする(#1087)
       const why = e instanceof Error ? e.message : String(e);
+      // 🔴 端末の都合で描けなかったときは別の印を付ける(画面の字を「書き方を確かめて」にしない)
+      if (e instanceof DeviceRenderError) p.host.setAttribute(`data-pkc-${kind.name}-device`, '');
+      else p.host.removeAttribute(`data-pkc-${kind.name}-device`);
       p.host.setAttribute(`data-pkc-${kind.name}-error`, why.length > 120 ? `${why.slice(0, 119)}…` : why);
     } finally {
       if (inFlightKey.get(p.host) === currentKey) inFlightKey.delete(p.host);

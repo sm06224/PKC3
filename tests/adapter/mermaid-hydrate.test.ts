@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
-import { renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
+import { DeviceRenderError, renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
 import {
   noteTyping,
   resetTyping,
@@ -27,6 +27,7 @@ vi.mock('../../src/adapter/ui/render/mermaid-raster', async (importOriginal) => 
   const real = await importOriginal<typeof import('../../src/adapter/ui/render/mermaid-raster')>();
   return {
     cacheKey: real.cacheKey,
+    DeviceRenderError: real.DeviceRenderError,
     renderToPng: vi.fn(async () => ({
       png: new Blob(['png'], { type: 'image/png' }),
       cssWidth: 320,
@@ -204,6 +205,38 @@ describe('配色を変えたときの焼き直し(P8 段⑬)', () => {
     await new Promise((r) => setTimeout(r, 0));
     for (let i = 0; i < 5; i++) await Promise.resolve();
   }
+
+  it('🔴 失敗の種類: 端末の都合なら device の印が付き、書き方の間違いには付かない', async () => {
+    const b = block('graph TD\n A-->B');
+    document.body.append(b);
+    const scope = hydrateMermaid(b);
+    const host = b.querySelector('[data-pkc-mermaid-src]')!;
+    // 書き方の間違い(mermaid が投げる普通の Error)
+    vi.mocked(renderToPng).mockImplementationOnce(async () => {
+      throw new Error('Parse error on line 1');
+    });
+    fire!([observed[0]!]);
+    await settle();
+    expect(host.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(host.hasAttribute('data-pkc-mermaid-device'), '書き方の間違いに端末の印が付いた').toBe(false);
+    scope.dispose();
+    b.remove();
+
+    // 端末の都合(画像にできない / 描く場所が作れない / PNG にできない)
+    const b2 = block('graph TD\n C-->D');
+    document.body.append(b2);
+    const scope2 = hydrateMermaid(b2);
+    const host2 = b2.querySelector('[data-pkc-mermaid-src]')!;
+    vi.mocked(renderToPng).mockImplementationOnce(async () => {
+      throw new DeviceRenderError('図を描く場所が作れません');
+    });
+    fire!([observed[observed.length - 1]!]);
+    await settle();
+    expect(host2.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(host2.hasAttribute('data-pkc-mermaid-device')).toBe(true);
+    scope2.dispose();
+    b2.remove();
+  });
 
   it('🔴 配色を変えると、**焼いた器だけ**焼き直る', async () => {
     const b = block('graph TD\n A-->B');

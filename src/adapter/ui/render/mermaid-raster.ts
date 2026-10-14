@@ -293,6 +293,14 @@ export async function withCache<T>(run: (d: IDBDatabase) => Promise<T>, fallback
   }
 }
 
+/**
+ * 🔴 **この端末の都合で描けなかった**失敗(画像にできない / 描く場所が作れない / PNG にできない)。
+ * 書き方の間違い(mermaid が投げる構文エラー)と画面の字を分けるための印 ── 後者は
+ * 「書き方を確かめてください」で正しいが、前者にそれを出すと user は無い間違いを探す。
+ * (キャッシュを開けない失敗は `withCache` が飲むので、ここには来ない。)
+ */
+export class DeviceRenderError extends Error {}
+
 /** mermaid 本体は**必要になるまで読まない**(初期ロードに載せない)。 */
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 async function mermaid(): Promise<typeof import('mermaid').default> {
@@ -568,7 +576,7 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
     img.decoding = 'sync';
     await new Promise<void>((resolve, reject) => {
       img.onload = () => resolve();
-      img.onerror = () => reject(new Error('図を画像にできません'));
+      img.onerror = () => reject(new DeviceRenderError('図を画像にできません'));
       img.src = url;
     });
     // viewBox が無い図(想定外)だけ、読めた自然比に落ちる
@@ -582,10 +590,10 @@ export async function rasterize(svg: string, width: number, dpr: number): Promis
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('図を描く場所が作れません');
+    if (!ctx) throw new DeviceRenderError('図を描く場所が作れません');
     ctx.drawImage(img, 0, 0, w, h);
     const png = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('図を PNG にできません'))), 'image/png');
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new DeviceRenderError('図を PNG にできません'))), 'image/png');
     });
     return { png, cssWidth };
   } finally {

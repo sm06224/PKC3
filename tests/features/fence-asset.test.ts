@@ -10,6 +10,7 @@
  * 4. 🔴 **描き方の規則は 1 本** ── 添付から取った字も、本文に書いた字と
  *    **同じ HTML** になる(parity)
  */
+import { isTextualMime, readFenceAssetText } from '../../src/features/asset/fence-asset-read';
 import { humanBytes } from '../../src/features/human-bytes';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -376,6 +377,50 @@ describe('添付を指すコードブロックの呼び名(#636)', () => {
       //    当たると、`:::` の話を書いただけで落ちる(§1 の範囲が広すぎる型)
       expect(src, `${name} に古い呼び名の文言が残っている`).not.toContain('この囲みの中身');
       expect(src, `${name} に古い呼び名の文言が残っている`).not.toContain('囲みが指している添付');
+    }
+  });
+});
+
+describe('添付を字として読む(#1087)', () => {
+  const blobOf = (bytes: number[] | string, type: string): Blob =>
+    new Blob([typeof bytes === 'string' ? bytes : new Uint8Array(bytes)], { type });
+
+  it('🔴 取り出しに失敗したときは「見つかりません」と言わない(無いと決まっていない)', async () => {
+    const thrown = await readFenceAssetText(async () => { throw new Error('x'); }, 'k');
+    const none = await readFenceAssetText(async () => null, 'k');
+    expect(thrown).toEqual({ ok: false, why: 'その添付を読み込めませんでした(もう一度開いてください)' });
+    // 対照群: 本当に無いときは今までどおり
+    expect(none).toEqual({ ok: false, why: 'その添付が見つかりません' });
+  });
+
+  it('🔴 画像・zip(字の種類でなく、NUL / 置換文字を含む)は「字として読めません」', async () => {
+    const png = blobOf([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0xff, 0xfe], 'image/png');
+    const zip = blobOf([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0xff], 'application/zip');
+    const noType = blobOf([0x00, 0x01, 0x02], '');
+    for (const b of [png, zip, noType]) {
+      expect(await readFenceAssetText(async () => b, 'k')).toEqual({ ok: false, why: '字として読めません' });
+    }
+  });
+
+  it('🔴 本物の字は読める(変わった種類名でも / 種類が空でも / 字の種類なら NUL があっても断らない)', async () => {
+    const ok = async (b: Blob) => readFenceAssetText(async () => b, 'k');
+    expect(await ok(blobOf('日本語の本文\nline2', 'text/plain'))).toEqual({ ok: true, text: '日本語の本文\nline2' });
+    expect(await ok(blobOf('a,b\n1,2', 'text/csv'))).toMatchObject({ ok: true });
+    expect(await ok(blobOf('{"a":1}', 'application/json'))).toMatchObject({ ok: true });
+    // 変わった種類名 / 空の種類でも、中身が字ならそのまま読める
+    expect(await ok(blobOf('key: value', 'application/x-something-odd'))).toMatchObject({ ok: true });
+    expect(await ok(blobOf('plain', ''))).toMatchObject({ ok: true });
+    // 字の種類と名乗る物は信じる(判定は種類が字でないときだけ)
+    expect(await ok(blobOf([0x61, 0x00, 0x62], 'text/plain'))).toMatchObject({ ok: true });
+  });
+
+  it('字の種類の判定', () => {
+    for (const m of ['text/plain; charset=utf-8', 'application/json', 'application/ld+json', 'application/xml',
+      'image/svg+xml', 'application/javascript', 'text/csv', 'application/x-yaml']) {
+      expect(isTextualMime(m), m).toBe(true);
+    }
+    for (const m of ['image/png', 'application/zip', 'application/octet-stream', '', 'application/pdf']) {
+      expect(isTextualMime(m), m).toBe(false);
     }
   });
 });

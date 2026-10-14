@@ -4,7 +4,8 @@
  * 守る主張:
  * 1. 🔴 `failed` の器に「図を描けません(書き方を確かめてください)」が出る(グラフと同じ置き方)
  * 2. 英語の理由(`data-pkc-mermaid-error`)は画面の字に入れない
- * 3. マニュアルが同じ字を書いている(画面と食い違わない)
+ * 3. 🔴 端末の都合(画像にできない等)は「この端末では図を描けませんでした」(書き方を疑わせない)
+ * 4. マニュアルが同じ字を書いている(画面と食い違わない)
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -34,6 +35,16 @@ describe('図が描けないときの 1 行', () => {
     expect(body!, '英語の理由は出さない').not.toContain('attr(');
     // 対照群: グラフの規則は今もある(同じ読み方で引けている)
     expect(ruleBody(css, ".pkc-md-rendered [data-pkc-chart-state='failed']::before")).not.toBeNull();
+  });
+
+  it('🔴 端末の都合で描けなかったときは別の字(書き方のせいにしない)', () => {
+    const body = ruleBody(
+      css,
+      ".pkc-md-rendered [data-pkc-mermaid-state='failed'][data-pkc-mermaid-device]::before",
+    );
+    expect(body, '端末の都合の規則が無い').not.toBeNull();
+    expect(body!).toContain("content: 'この端末では図を描けませんでした'");
+    expect(body!, '書き方の字が混ざっている').not.toContain('書き方');
   });
 
   it('🔴 グラフ: 理由は属性の字そのまま(前置きは adapter が付ける)/ 取りこぼしの 1 行は ready のときだけ', () => {

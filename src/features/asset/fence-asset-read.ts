@@ -31,14 +31,32 @@ export async function readFenceAssetText(
   try {
     blob = await getBlob(key);
   } catch {
-    blob = null;
+    // ⚠ 投げた = 無いと決まったわけではない(保存領域を開けなかった等)── 「見つかりません」と
+    //   言うと user は消えたと思う。読み直せば開くことがある
+    return { ok: false, why: 'その添付を読み込めませんでした(もう一度開いてください)' };
   }
   if (!blob) return { ok: false, why: 'その添付が見つかりません' };
   try {
-    return { ok: true, text: await blob.text() };
+    const text = await blob.text();
+    // 🔴 `Blob.text()` は binary でも投げない(壊れた字に化けるだけ)── 画像・zip を
+    //   字として並べないよう、字の種類でない物が NUL / 置換文字を含むときは断る
+    if (!isTextualMime(blob.type ?? '') && (text.includes('\u0000') || text.includes('\uFFFD'))) {
+      return { ok: false, why: '字として読めません' };
+    }
+    return { ok: true, text };
   } catch {
     return { ok: false, why: '字として読めません' };
   }
+}
+
+/**
+ * 字のファイルとして扱う種類。⚠ 種類が空・見慣れない物は「字ではない」とは決めない
+ * (中身の NUL / 置換文字で別に見る)── 変わった種類名の本物の字ファイルを断らないため。
+ */
+export function isTextualMime(mime: string): boolean {
+  const m = mime.toLowerCase().split(';')[0]!.trim();
+  if (m.startsWith('text/')) return true;
+  return /(^|[/+.-])(json|xml|csv|javascript|ecmascript|yaml|toml|sql|x-sh|ndjson|markdown|svg)($|[+.-])/.test(m);
 }
 
 /**

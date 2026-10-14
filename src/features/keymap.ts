@@ -428,7 +428,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['filer', 'dual'],
     // ⚠ `F8` は古典 4 実装が一致している鍵 ── 操作行にもそう書いてある
     defaults: ['Delete', 'F8'],
-    note: '選んでいるものを移します。ゴミ箱からいつでも戻せます(選択が無ければカーソルの行)',
+    note: '選んでいるものを移します。ゴミ箱を空にするまで戻せます(選択が無ければカーソルの行)',
   },
   {
     id: 'filer-select-all',
