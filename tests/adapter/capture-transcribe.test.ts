@@ -337,6 +337,21 @@ describe('④ 2 本同時に走らない', () => {
 });
 
 describe('⑤ 書けない間は預かる', () => {
+  it('🔴 文字にしている間にノートが消えたら、「足しました」と言わず、足していないと言う(#1087)', async () => {
+    const ref: { d: Dispatcher | null } = { d: null };
+    const h = harness({
+      transcribe: vi.fn(async (): Promise<AsrJobResult> => {
+        ref.d!.dispatch({ type: 'DELETE_ENTRY', lid: 'a' });
+        return { text: 'こんにちは', loadMs: 1, runMs: 2 };
+      }),
+    });
+    ref.d = h.dispatcher;
+    await h.tr.run('a');
+    expect(h.appends, '消えたノートへ足す依頼が出ている').toEqual([]);
+    expect(h.notes.some((t) => t.includes('文字起こしを足しました')), '足していないのに「足しました」').toBe(false);
+    expect(h.notes.at(-1)).toMatch(/ノートが見つからなかったので足していません/);
+  });
+
   it('🔴 書込中(錠が立っている)は捨てずに預かり、そう言い、解けたら足す', async () => {
     const h = harness({}, { writeLock: { lid: 'other' } } as Partial<AppState>);
     await h.tr.run('a');

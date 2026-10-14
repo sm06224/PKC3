@@ -33,6 +33,23 @@ export type AppendOutcome =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: 'refused' | 'failed' | 'timeout'; readonly error: string | null };
 
+/**
+ * 🔴 **追記を投げて、reducer が受けたかを返す**(#1087 の見直し)── 錠(`writeLock`)が動いたら受けた。
+ * ⚠ 断る経路は 2 つ:理由を `error` に立てる回(編集中・書込中)と、**理由を立てずに捨てる回**
+ *   (書き先のノートが消えていた)。後者は呼び手が言わないと**黙って「足しました」になる**。
+ * 🔑 戻り値 `'gone'` = ノートが見つからなかった(呼び手が字を出す)/ `'refused'` = reducer が理由を出した。
+ */
+export function dispatchAppend(
+  dispatcher: Dispatcher,
+  action: Extract<Parameters<Dispatcher['dispatch']>[0], { type: 'APPEND_TO_ENTRY' }>,
+): 'accepted' | 'refused' | 'gone' {
+  const lockBefore = dispatcher.getState().writeLock;
+  dispatcher.dispatch(action);
+  const after = dispatcher.getState();
+  if (after.writeLock !== lockBefore) return 'accepted';
+  return after.entryMetas.has(action.lid) ? 'refused' : 'gone';
+}
+
 export function appendAndSettle(
   dispatcher: Dispatcher,
   lid: string,
@@ -48,7 +65,6 @@ export function appendAndSettle(
   const gen = st.lockGen;
   // ⚠ 断られた理由は「この dispatch で立った」字だけを返す ── 前から残っている字を理由として返さない
   //   (ノートが消えていた回など、reducer が理由を付けずに断る経路がある)
-  const errorBefore = st.error;
   return new Promise<AppendOutcome>((resolve) => {
     let handle: unknown = null;
     let done = false;
@@ -75,7 +91,12 @@ export function appendAndSettle(
     if (done) return;
     const after = dispatcher.getState();
     if (after.writeLock === lockBefore) {
-      settle({ ok: false, reason: 'refused', error: after.error === errorBefore ? null : after.error });
+      /**
+       * ⚠ 理由は「字が変わったか」ではなく「**この dispatch で state が作り直されたか**」で見る ──
+       *   同じ理由で 2 度断られると字は前と同じなので、字の比較では 2 度目が理由なしになっていた。
+       *   理由を立てずに捨てる回(ノートが消えていた)は state をそのまま返す。
+       */
+      settle({ ok: false, reason: 'refused', error: after === st || after.error === null ? null : after.error });
       return;
     }
     handle = timers.setTimer(() => settle({ ok: false, reason: 'timeout', error: null }), timeoutMs);
