@@ -173,6 +173,44 @@ describe('LOAD_STACK ── 本文の並びを、いまのスタックの上に�
     expect(d.getState().notice).toBe('載せられるノートがありません(1 件は見つかりません)');
   });
 
+  it('🔴 フォルダの行は載せず、消えた物とは別に数えて言う(右クリックの 1 件載せと同じ門 ── #1087)', () => {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [...METAS, meta('f', '資料フォルダ', 'folder')] as never,
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 's' });
+    d.dispatch({
+      type: 'BODY_LOADED',
+      lid: 's',
+      body: stackBody([
+        { title: 'a', lid: 'a' },
+        { title: 'f', lid: 'f' },
+        { title: 'x', lid: 'gone' },
+      ]),
+    });
+    d.dispatch({ type: 'LOAD_STACK', lid: 's' });
+    expect(d.getState().splitLids, 'フォルダが載っている').toEqual(['a']);
+    expect(d.getState().notice).toBe('1 件を載せました(1 件は見つかりません / 1 件はフォルダなので載せられません)');
+  });
+
+  it('⚠ フォルダしか無ければ「載せられるノートがありません」(件数は数えて言う)', () => {
+    const d = new Dispatcher();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [...METAS, meta('f', '資料フォルダ', 'folder')] as never,
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 's' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 's', body: stackBody([{ title: 'f', lid: 'f' }]) });
+    d.dispatch({ type: 'LOAD_STACK', lid: 's' });
+    expect(d.getState().splitLids).toEqual([]);
+    expect(d.getState().notice).toBe('載せられるノートがありません(1 件はフォルダなので載せられません)');
+  });
+
   it('⚠ スタックの入れ物でないノートには効かない(押し所は when: stack で畳まれている)', () => {
     const d = booted();
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });

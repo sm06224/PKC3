@@ -326,16 +326,43 @@ function removeBlockAt(
 export function raisePlace(body: string, target: PlaceTarget): string | null {
   const at = placeLinesAt(body, target);
   if (at === null) return null;
-  const mask = fenceMask(at.lines, at.fm);
+  const { alreadyFront, maxOther } = frontState(at.lines, at.fm, target.line);
+  if (alreadyFront) return body;
+  return spliceOpenLine(body, target, { z: maxOther + 1 });
+}
+
+/**
+ * 他の板の z= の最大と、この板が既に独りでいちばん前か。
+ * ⚠ 「前へ出す」を書く側(`raisePlace`)と、メニューに出すかを決める側(`placeIsFrontmost`)が
+ *   **同じ 1 本**を通る(§7)── 押しても本文が変わらない口を、メニューに出さないため。
+ */
+function frontState(
+  lines: readonly string[],
+  fm: number,
+  at: number,
+): { alreadyFront: boolean; maxOther: number } {
+  const mask = fenceMask(lines, fm);
   let maxOther = 0;
-  for (let i = at.fm; i < at.lines.length; i += 1) {
-    if (i === target.line || mask[i] === true) continue;
-    const attrs = placeOpenAttrs(at.lines[i]!);
+  for (let i = fm; i < lines.length; i += 1) {
+    if (i === at || mask[i] === true) continue;
+    const attrs = placeOpenAttrs(lines[i]!);
     if (attrs !== null) maxOther = Math.max(maxOther, zOf(attrs));
   }
-  const self = placeOpenAttrs(at.lines[target.line]!);
-  if (self !== null && zOf(self) > maxOther) return body;
-  return spliceOpenLine(body, target, { z: maxOther + 1 });
+  const self = placeOpenAttrs(lines[at]!);
+  return { alreadyFront: self !== null && zOf(self) > maxOther, maxOther };
+}
+
+/**
+ * 🔴 **この付箋は既にいちばん前か**(#1087)── 真なら「前へ出す」を押しても本文は変わらない
+ *   (`raisePlace` が body をそのまま返す条件)。右クリックの一覧に出さない判定に使う。
+ * @param fmBody frontmatter を剥いだ本文(`directiveBlockAt` の座標系)
+ * @param line 付箋の開き行(fmBody の行番号)
+ */
+export function placeIsFrontmost(fmBody: string, line: number): boolean {
+  const lines = fmBody.split('\n');
+  if (!Number.isInteger(line) || line < 0 || line >= lines.length) return false;
+  if (!isPlaceOpen(lines[line]!)) return false;
+  return frontState(lines, 0, line).alreadyFront;
 }
 
 /**

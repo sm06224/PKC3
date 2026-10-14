@@ -9616,7 +9616,7 @@ function reduceCore(
        * ⚠ **フォルダは本文を持たない** ── 留めると枠が永久に空になる。
        * 🔑 断るときは**理由を言う**(黙って何も起きないのが dead click である)。
        */
-      if (meta.archetype === 'folder')
+      if (!canStack(meta))
         return {
           state: { ...state, notice: 'フォルダはスタックに載せられません(本文がありません)' },
           events: [],
@@ -10586,10 +10586,22 @@ function isPlaceCoord(n: number): boolean {
  *   上限(`STACK_MAX`)で入らなかった件数も別に言う(黙って落とさない)。
  * 🔑 載せた後の本文の読みは `REQUEST_SPLIT_BODY`(帯の札と同じ 1 本)── まだ持っていない物だけ。
  */
+/** スタックに載せられるノートか ── フォルダは本文が無いので載せない。載せる口は全部この 1 本を通る。 */
+function canStack(meta: { readonly archetype: string }): boolean {
+  return meta.archetype !== 'folder';
+}
+
 function loadStackFromBody(state: AppState, body: string): ReduceResult {
   const wanted = stackLids(body);
-  const present = wanted.filter((l) => state.entryMetas.has(l));
-  const missing = wanted.length - present.length;
+  const exist = wanted.filter((l) => state.entryMetas.has(l));
+  /**
+   * 🔴 **フォルダは載せない**(#1087)── 本文が無く、載せると枠が永久に空になる。右クリックで 1 件載せる口
+   *   (`PIN_SPLIT_ENTRY`)と**同じ門**(`canStack`)を通す。
+   * ⚠ 載せられない件数は、消えた物(「見つかりません」)とは**別に数えて**言う。
+   */
+  const present = exist.filter((l) => canStack(state.entryMetas.get(l)!));
+  const folders = exist.length - present.length;
+  const missing = wanted.length - exist.length;
   let lids = state.splitLids;
   for (let i = present.length - 1; i >= 0; i -= 1) lids = pinSplitLid(lids, present[i]!);
   const added = lids.filter((l) => !state.splitLids.includes(l));
@@ -10598,6 +10610,7 @@ function loadStackFromBody(state: AppState, body: string): ReduceResult {
   if (present.length === 0) parts.push('載せられるノートがありません');
   else parts.push(`${String(present.length - refused)} 件を載せました`);
   if (missing > 0) parts.push(`${String(missing)} 件は見つかりません`);
+  if (folders > 0) parts.push(`${String(folders)} 件はフォルダなので載せられません`);
   if (refused > 0) parts.push(`上限 ${String(STACK_MAX)} 件で ${String(refused)} 件は載せられませんでした`);
   const notice = parts.length === 1 ? parts[0]! : `${parts[0]!}(${parts.slice(1).join(' / ')})`;
   return {

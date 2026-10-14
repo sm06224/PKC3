@@ -331,7 +331,7 @@ describe('付箋の右クリック ── 塗りの色…', () => {
   });
 });
 
-const ARROW_LABELS = ['矢じりなし', '終わりに付ける', '両端に付ける'];
+const ARROW_LABELS = ['矢じりなし', '終わりに矢じりを付ける', '両端に矢じりを付ける'];
 
 describe('線の右クリック ── 色と太さ', () => {
   const lineHit = (host: Element): Element =>
@@ -537,8 +537,8 @@ describe('線の矢じり', () => {
 
   it.each([
     ['', '矢じりなし'],
-    ['end', '終わりに付ける'],
-    ['both', '両端に付ける'],
+    ['end', '終わりに矢じりを付ける'],
+    ['both', '両端に矢じりを付ける'],
   ])('🔴 arrow=%s の線は 3 つ並び、「%s」だけが選ばれている', (a, on) => {
     const { root, host } = rig(a === '' ? BOARD : withArrow(a));
     rightClick(lineHit(host));
@@ -554,10 +554,10 @@ describe('線の矢じり', () => {
     expect(root.querySelector('[data-pkc-field="place-line-note"]')?.textContent).toContain('矢じりに「ned」は使えません');
   });
 
-  it('🔴 終わりに付ける → arrow=end が書かれる。両端 → arrow=both(他の札・他の行は 1 字も動かない)', () => {
+  it('🔴 終わりに矢じりを付ける → arrow=end が書かれる。両端 → arrow=both(他の札・他の行は 1 字も動かない)', () => {
     const { root, host, asks } = rig(BOARD);
     rightClick(lineHit(host));
-    arrowItems(root).find((b) => b.textContent === '終わりに付ける')!.click();
+    arrowItems(root).find((b) => b.textContent === '終わりに矢じりを付ける')!.click();
     expect(rewriteOf(asks, 0)).toMatchObject({ kind: 'place-style', line: 8, style: { arrow: 'end' } });
     const end = applyBodyRewrite(BOARD, rewriteOf(asks, 0))!;
     expect(end.split('\n')[8]).toBe(':::format{.pkc-line from=a:right to=b:left arrow=end}');
@@ -565,7 +565,7 @@ describe('線の矢じり', () => {
 
     const again = rig(end);
     rightClick(lineHit(again.host));
-    arrowItems(again.root).find((b) => b.textContent === '両端に付ける')!.click();
+    arrowItems(again.root).find((b) => b.textContent === '両端に矢じりを付ける')!.click();
     const both = applyBodyRewrite(end, rewriteOf(again.asks, 0))!;
     // 札は 1 つだけ(重ならない)
     expect(both.split('\n')[8]).toBe(':::format{.pkc-line from=a:right to=b:left arrow=both}');
@@ -623,7 +623,7 @@ describe('線の矢じり', () => {
     const { root, host, d, asks } = rig(BOARD);
     rightClick(lineHit(host));
     d.dispatch({ type: 'START_EDIT' });
-    arrowItems(root).find((b) => b.textContent === '終わりに付ける')!.click();
+    arrowItems(root).find((b) => b.textContent === '終わりに矢じりを付ける')!.click();
     expect(asks).toHaveLength(0);
     expect(d.getState().error ?? '').toContain('矢じり');
   });
@@ -631,7 +631,7 @@ describe('線の矢じり', () => {
   it('⚠ 属性を書き換えられて読めない値になっても書かない', () => {
     const { root, host, asks } = rig(BOARD);
     rightClick(lineHit(host));
-    const btn = arrowItems(root).find((b) => b.textContent === '終わりに付ける')!;
+    const btn = arrowItems(root).find((b) => b.textContent === '終わりに矢じりを付ける')!;
     btn.setAttribute('data-pkc-style-arrow', 'ned');
     btn.click();
     expect(asks).toHaveLength(0);

@@ -1528,7 +1528,7 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await lineMenu.locator('button', { hasText: /^線の太さを標準に戻す$/ }).click();
   await expect.poll(async () => (await strokeOf()).width, { message: '太さを標準へ戻せない', timeout: 5000 }).toBe('2px');
   /**
-   * 🔴 **線の矢じり**(#530)── 右クリックで「終わりに付ける」→「両端に付ける」→「矢じりなし」。**新しい起動は増やさない**。
+   * 🔴 **線の矢じり**(#530)── 右クリックで「終わりに矢じりを付ける」→「両端に矢じりを付ける」→「矢じりなし」。**新しい起動は増やさない**。
    * ⚠ 見るのは**計算後の色**: 三角が線と同じ色(いま付けた青)で塗られていること。三角の規則が無ければ
    *   `fill` は `none` のまま(道の線は `fill: none`)── 属性だけ見る検査では気づけない。
    * ⚠ 選んだ物に ✓ が出ること(`::before` の content)も見る ── `aria-checked` を付けただけで受け皿の規則が無いと、
@@ -1547,8 +1547,8 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
     await lineMenu.locator('button[aria-checked="false"]').first().evaluate((el) => getComputedStyle(el, '::before').content),
     '選ばれていない項目に ✓ が出ている',
   ).not.toBe('"✓"');
-  await lineMenu.locator('button', { hasText: /^終わりに付ける$/ }).click();
-  await expect(heads, '「終わりに付ける」で三角が 1 つ出ない').toHaveCount(1, { timeout: 5000 });
+  await lineMenu.locator('button', { hasText: /^終わりに矢じりを付ける$/ }).click();
+  await expect(heads, '「終わりに矢じりを付ける」で三角が 1 つ出ない').toHaveCount(1, { timeout: 5000 });
   await expect(heads.first()).toHaveAttribute('data-pkc-line-head', 'end');
   const headPaint = await heads.first().evaluate((el) => {
     const cs = getComputedStyle(el);
@@ -1556,9 +1556,9 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   });
   expect(headPaint, '三角が線と同じ青で塗られていない').toEqual({ fill: 'rgb(37, 99, 235)', stroke: 'rgb(37, 99, 235)' });
   await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
-  await expect(lineMenu.locator('button[aria-checked="true"]'), '選び直したら選ばれている物が動く').toHaveText('終わりに付ける');
-  await lineMenu.locator('button', { hasText: /^両端に付ける$/ }).click();
-  await expect(heads, '「両端に付ける」で三角が 2 つにならない').toHaveCount(2, { timeout: 5000 });
+  await expect(lineMenu.locator('button[aria-checked="true"]'), '選び直したら選ばれている物が動く').toHaveText('終わりに矢じりを付ける');
+  await lineMenu.locator('button', { hasText: /^両端に矢じりを付ける$/ }).click();
+  await expect(heads, '「両端に矢じりを付ける」で三角が 2 つにならない').toHaveCount(2, { timeout: 5000 });
   await page.mouse.click(mid2.x, mid2.y, { button: 'right' });
   await lineMenu.locator('button', { hasText: /^矢じりなし$/ }).click();
   await expect(heads, '「矢じりなし」で三角が消えない').toHaveCount(0, { timeout: 5000 });
