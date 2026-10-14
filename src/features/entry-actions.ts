@@ -93,7 +93,7 @@ export interface EntryAction {
    */
   readonly attrs?: Readonly<Record<string, string>>;
   /**
-   * 🔴 **いま選ばれている物**(#530 矢じり)── 「矢じりなし / 終わりに付ける / 両端に付ける」のように
+   * 🔴 **いま選ばれている物**(#530 矢じり)── 「矢じりなし / 終わりに矢じりを付ける / 両端に矢じりを付ける」のように
    *   **同じ事柄の選択肢**を並べるとき、いまの物に ✓ を付ける(押しても何も変わらない口を、
    *   「出さない」のではなく「いまここ」と見せる ── 3 つ並んでいるから比べられる)。
    * ⚠ 空(`undefined`)なら**付けない**(選択肢ではない項目の属性を数える検査を汚さない)。
@@ -132,8 +132,8 @@ export const PLACE_ROTATE_CLEAR_LABEL = '回転を解く';
 /** 矢じりの選択肢の字(右クリックの並び)。⚠ 字の正本はここ 1 本 ── マニュアルもこの字で書く。 */
 export const PLACE_ARROW_LABELS: Readonly<Record<PlaceArrow, string>> = {
   none: '矢じりなし',
-  end: '終わりに付ける',
-  both: '両端に付ける',
+  end: '終わりに矢じりを付ける',
+  both: '両端に矢じりを付ける',
 };
 
 
@@ -958,18 +958,23 @@ export function blockMenuActions(ctx: {
   readonly rotate?: number;
   /** 🔴 `rotate=` の札が書かれているか(読めない値・`rotate=0` も真)。「回転を解く」を出す条件。 */
   readonly rotated?: boolean;
+  /**
+   * 🔴 既にいちばん前の付箋か(#1087)。真なら「前へ出す」を出さない ── 押しても本文が変わらない口を
+   * 作らない(形の項目が「いまの形は出さない」のと同じ作法)。省略 = 出す。
+   */
+  readonly front?: boolean;
 }): readonly EntryAction[] {
   if (!ctx.board) return [{ action: 'copy-block-md', label: 'このブロックをコピー' }];
   /**
    * 🔴 **板だけの物**(#676。user 裁定 2026-09-04)── 置けるなら消せる(user 指示
-   *   2026-08-23「片道の操作を作らない」)。⚠ 消すは取り消せないので**確認を挟む**
+   *   2026-08-23「片道の操作を作らない」)。⚠ 消すと中の字が本文から消える(履歴には積まれる)ので**確認を挟む**
    *   (受け手 `remove-place` が `confirmThen` で聞く)── 一覧の末尾に置く。
    */
   return [
     { action: 'copy-block-md', label: 'この付箋をコピー' },
     // 🔴 前へ出す(#676 段②)。⚠ 「後ろへ送る」は無い ── 負の z を描画が捨てるので、
     //    下げる向きは触っていない板の行まで書き換えることになる
-    { action: 'raise-place', label: '前へ出す' },
+    ...(ctx.front === true ? [] : [{ action: 'raise-place', label: '前へ出す' }]),
     // 🔴 数で入れる(#529 W2)。⚠ 窓を開くだけ ── 「やめる」で本文は 1 byte も変わらない
     { action: 'place-rect', label: '位置と大きさ…' },
     /**
@@ -1057,7 +1062,7 @@ export function blockMenuActions(ctx: {
  *
  * ⚠ 出るのは**線の上だけ**(板の上・本文の上には出ない)。消すのは**線の宣言 1 つ**で、
  *   繋がれていた付箋は 1 バイトも触らない(付けた名前も残る)。
- * 🔑 取り消せない物ではない(消した本文は履歴に残り、もう一度掴んで繋げる)ので、確認は挟まない
+ * 🔑 取り消せない物ではない(消す前の版が履歴に積まれ、もう一度掴んで繋げる)ので、確認は挟まない
  *   ── 板を消す(中の字が消える)とは重さが違う。
  */
 export const REMOVE_PLACE_LINE_ACTION: EntryAction = {

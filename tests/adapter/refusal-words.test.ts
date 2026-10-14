@@ -207,8 +207,8 @@ describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b
   const DEFINITION_FILE = 'src/adapter/state/app-state.ts';
   /** 寄せなかった 2 か所(理由は上のコメント)。ここだけ手書きの前置きが残ってよい。 */
   const KNOWN_KEPT: Record<string, string> = {
-    'src/adapter/ui/actions/capture.ts': '編集を終えてから',
-    'src/adapter/platform/view-window.ts': '編集を終えてから',
+    'src/adapter/ui/actions/capture.ts': '編集を保存するか、編集をやめてから',
+    'src/adapter/platform/view-window.ts': '編集を保存するか、編集をやめてから',
   };
 
   function walkTs(dir: string, out: string[] = []): string[] {

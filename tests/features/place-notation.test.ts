@@ -27,6 +27,7 @@ import {
   NEW_PLACE_H,
   NEW_PLACE_W,
   raisePlace,
+  placeIsFrontmost,
   removePlace,
   removePlaceLine,
   resizePlace,
@@ -396,6 +397,23 @@ describe('板を前へ出す(raisePlace)(#676 段②)', () => {
 
   it('🔑 既に独りでいちばん前なら body をそのまま返す(書く物が無い ≠ 競合)', () => {
     expect(raisePlace(BODY, { line: 8, openLine: C })).toBe(BODY);
+  });
+
+  it('🔴 placeIsFrontmost ── raisePlace が body をそのまま返す板だけが真(メニューから「前へ出す」を外す判定)', () => {
+    // C(z=5)は独りでいちばん前 / A(z=2)・B(z 無し)は前に出せる
+    expect(placeIsFrontmost(BODY, 8)).toBe(true);
+    expect(placeIsFrontmost(BODY, 0)).toBe(false);
+    expect(placeIsFrontmost(BODY, 3)).toBe(false);
+    // 対照群: 判定が真の板で raisePlace は何も書かず、偽の板では書く(2 つの口が同じ 1 本)
+    for (const [line, open] of [[8, C], [0, A], [3, B]] as const) {
+      const unchanged = raisePlace(BODY, { line, openLine: open }) === BODY;
+      expect(placeIsFrontmost(BODY, line), `行 ${String(line)}`).toBe(unchanged);
+    }
+    // 引き分けは前に出せる(偽)/ fence の中の z=99 は数えない / 板でない行・範囲外は偽
+    const tie = [C, ':::', '', C.replace('#c', '#d'), ':::'].join('\n');
+    expect(placeIsFrontmost(tie, 0)).toBe(false);
+    expect(placeIsFrontmost(BODY, 2)).toBe(false);
+    expect(placeIsFrontmost(BODY, 99)).toBe(false);
   });
 
   it('同じ z が並ぶ(引き分け)なら 1 つ上げる', () => {

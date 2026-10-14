@@ -47,6 +47,7 @@ import {
   placeGroupItems,
   placeRectOf,
   placeShapeAt,
+  placeIsFrontmost,
   placeStyleAt,
 } from '@features/markdown/place-notation';
 import { parsePlaceRotate } from '@features/markdown/place-rotate';
@@ -4196,6 +4197,7 @@ function directiveBlockAt(
   groupable: boolean;
   rotate: number;
   rotated: boolean;
+  front: boolean;
 } | null {
   let el: Element | null = target.closest('[data-pkc-source-line]');
   while (el !== null && el !== host && host.contains(el)) {
@@ -4213,6 +4215,8 @@ function directiveBlockAt(
         // 🔴 回転(#530 段⑤d)── これも原文から読む(描画・書き出しと同じ 1 本)
         rotate: placeStyleAt(open)?.rotate ?? 0,
         rotated: placeStyleAt(open)?.written.rotate === true,
+        // 🔴 既にいちばん前なら「前へ出す」を出さない(#1087)── `raisePlace` と同じ 1 本
+        front: placeIsFrontmost(fmBody, line),
         // 🔑 グループも**原文**から読む(#530 段⑤b)── 入っているか / まとめる相手が居るか(1 本: `placeGroupAt` / `placeGroupItems`)
         group: placeGroupAt(open),
         groupable:
@@ -10584,9 +10588,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     const ob = st.openBody;
     if (ob === null) return;
     const lid = ob.lid;
+    /**
+     * 🔴 履歴に積む回なので「戻せる」と言う(#1087)。置いたノートの付箋は、消えるのが付箋の枠だけで
+     * ノート自体は無傷 ── それも言う(開き行に `entry=` が在るかで分ける)。
+     */
+    const openLine = ob.body.split('\n')[line + frontmatterLineCount(ob.body)] ?? '';
+    const placesNote = /\bentry=/.test(openLine);
     confirmThen(
       root,
-      'この付箋を本文から消しますか?(中に書いた字も消えます。取り消せません)',
+      placesNote
+        ? 'この付箋を本文から消しますか?(置いたノート自体は消えません。履歴から戻せます)'
+        : 'この付箋を本文から消しますか?(中に書いた字も消えます。履歴から戻せます)',
       { okLabel: 'この付箋を消す', danger: true },
       dispatcher,
       () => {
@@ -17106,6 +17118,7 @@ export function bindActions(
           groupable: block.groupable,
           rotate: block.rotate,
           rotated: block.rotated,
+          front: block.front,
         })),
         /**
          * 🔴 **表の形を変える**(#708 段②)。⚠ 行番号は**この項目にだけ**載せる

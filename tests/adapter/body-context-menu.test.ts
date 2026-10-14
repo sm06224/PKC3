@@ -1692,6 +1692,11 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     const ok = document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]');
     expect(ok, '確認が出ていない').not.toBeNull();
     expect(ok!.textContent, '受ける側の字が起きることを言っていない').toBe('この付箋を消す');
+    // 🔴 履歴に積む回なので「取り消せません」と言わない(#1087)。ノートを置いた付箋は、ノート自体が消えないことも言う
+    const said = ok!.closest('dialog')?.textContent ?? '';
+    expect(said, '履歴から戻せることを言っていない').toContain('履歴から戻せます');
+    expect(said, 'ノートを置いた付箋なのに、置いたノートが消えないと言っていない').toContain('置いたノート自体は消えません');
+    expect(said, '戻せるのに「取り消せません」と言っている').not.toContain('取り消せません');
     expect(asks, '確認の前に書いた').toHaveLength(0);
     ok!.click();
     await settle();
@@ -1715,6 +1720,28 @@ describe('ブロック単位のコピー ── 章 / 囲み / 板 (#677)', () =
     // 対照群: 板でない囲みには出ない
     rightClick(r.q('p[data-pkc-source-line="5"]'));
     expect(r.acts()).not.toContain('raise-place');
+  });
+
+  it('🔴 既にいちばん前の付箋には「前へ出す」が出ない(押しても本文が変わらない口を作らない)。対照群: 前に出せる付箋には出る', () => {
+    const front = rig(FULL.replace('entry=n2}', 'entry=n2 z=3}'));
+    rightClick(front.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    expect(front.acts(), '付箋の右クリックが開いていない(前提)').toContain('remove-place');
+    expect(front.acts(), 'いちばん前なのに「前へ出す」が出ている').not.toContain('raise-place');
+    const other = rig();
+    rightClick(other.q('[data-pkc-field="place-card"][data-pkc-entry="n2"]'));
+    expect(other.acts()).toContain('raise-place');
+  });
+
+  it('🔴 ノートを置いていない付箋の確認は「中に書いた字も消えます」と言う', async () => {
+    resetAppDialogForTest();
+    const r = rig(FULL.replace(' entry=n2}', '}'));
+    rightClick(r.q('h3[id="買い出し"]'));
+    expect(r.acts(), '付箋の右クリックが開いていない(前提)').toContain('remove-place');
+    r.press('remove-place');
+    const said = document.querySelector('[data-pkc-field="dialog-ok"]')?.closest('dialog')?.textContent ?? '';
+    expect(said).toContain('中に書いた字も消えます');
+    expect(said).toContain('履歴から戻せます');
+    expect(said, '字を書いた付箋なのに「置いたノートは消えない」と言っている').not.toContain('置いたノート自体');
   });
 
   /**

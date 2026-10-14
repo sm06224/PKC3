@@ -3793,7 +3793,17 @@ export function connectStoreEffects(
                  * ⚠ 落ちない回は積まない(`tableFormatDropsInfo`)── 履歴を形変えの数だけ伸ばさない。
                  */
                 (ev.rewrite.kind === 'table-format' &&
-                  tableFormatDropsInfo(body, ev.rewrite.line, ev.rewrite.to))
+                  tableFormatDropsInfo(body, ev.rewrite.line, ev.rewrite.to)) ||
+                /**
+                 * 🔴 **付箋・線を消す回と、テンプレートでまとめて置く回も積む**(#1087 の見直し 2026-10-14)。
+                 * 付箋を消すと中の字、線を消すと色・太さ・矢じりの設定が本文から消え、確認の字は
+                 * 「取り消せません」だった。テンプレートは最大 8 枚 + 線を 1 回で置くので、取り消す道が
+                 * 版しか無い。⚠ 1 枚だけ置く回(`template` 無し)は積まない ── 置いた物は「この付箋を消す」
+                 * で戻せ、履歴を置いた数だけ伸ばさない。
+                 */
+                ev.rewrite.kind === 'place-remove' ||
+                ev.rewrite.kind === 'place-line-remove' ||
+                (ev.rewrite.kind === 'place-add' && ev.rewrite.template !== undefined)
                   ? { checkpoint: true }
                   : {}),
               },

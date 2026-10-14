@@ -421,7 +421,7 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
        * ⚠ 手で止められない回(上限 / 共有停止)は `hold` が受ける。
        */
       if (deps.dispatcher.getState().phase !== 'ready') {
-        fail('編集中は取り込めません。編集を終えてから止めてください(収録は続いています)');
+        fail('編集中は取り込めません。編集を保存するか、編集をやめてから止めてください(収録は続いています)');
         return;
       }
       void finish('stopped');
