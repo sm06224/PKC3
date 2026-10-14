@@ -19,6 +19,8 @@ import {
   settingsChangeText,
   settingsFileName,
   settingsPlanNote,
+  settingsAppliedNote,
+  settingsTooLongToExport,
   SKIPPED_KEYS,
 } from '../../src/features/settings/settings-file';
 
@@ -145,6 +147,16 @@ describe('書き出す(#414)', () => {
     expect(buildSettingsFile((k) => disk[k] ?? null).entries).toEqual([]);
   });
 
+  it('🔴 長すぎて落とした設定は、名前で言える(黙って落とさない。#1087)', () => {
+    const disk: Record<string, string> = {
+      'pkc3.theme': 'x'.repeat(MAX_SETTING_CHARS + 1),
+      'pkc3.keymap': 'y'.repeat(MAX_SETTING_CHARS), // ちょうど上限は入る
+    };
+    const read = (k: string): string | null => disk[k] ?? null;
+    expect(settingsTooLongToExport(read)).toEqual(['見た目']);
+    expect(buildSettingsFile(read).entries.map((e) => e.key)).toEqual(['pkc3.keymap']);
+  });
+
   it('名前に日付が入る(どちらが新しいか分かる)', () => {
     expect(settingsFileName('2026-08-26')).toBe('PKC3-settings-2026-08-26.json');
   });
@@ -153,6 +165,25 @@ describe('書き出す(#414)', () => {
 describe('読み込む前に、何が変わるか見せる(#414)', () => {
   const file = (entries: { key: string; value: string }[]): string =>
     JSON.stringify({ kind: SETTINGS_FILE_KIND, version: 1, entries });
+
+  it('🔴 長すぎて入れない設定は、件数を下見で言う(#1087)', () => {
+    const plan = planSettingsImport(
+      file([
+        { key: 'pkc3.theme', value: 'x'.repeat(MAX_SETTING_CHARS + 1) },
+        { key: 'pkc3.keymap', value: 'k' },
+      ]),
+      () => null,
+    );
+    expect(plan.tooLong).toEqual(['pkc3.theme']);
+    expect(plan.changes.map((c) => c.key)).toEqual(['pkc3.keymap']);
+    expect(settingsPlanNote(plan)).toContain('1 件は長すぎるので入れません');
+  });
+
+  it('🔴 当てた結果は、書けなかった件数も言う(全部書けなくても成功と同じ字にしない。#1087)', () => {
+    expect(settingsAppliedNote(3, 0)).not.toContain('保存できず');
+    expect(settingsAppliedNote(0, 2)).toContain('2 件はこの端末に保存できず');
+    expect(settingsAppliedNote(1, 1)).toContain('設定を 1 件入れました');
+  });
 
   it('🔴 変わるものと、いまと同じものを分ける', () => {
     const disk: Record<string, string> = { 'pkc3.theme': 'light' };

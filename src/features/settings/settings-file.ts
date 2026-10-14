@@ -290,6 +290,30 @@ export function buildSettingsFile(read: (key: string) => string | null): Setting
 }
 
 /**
+ * 🔴 **長すぎて書き出しに入らない設定の名前**(#1087)。
+ * ⚠ `buildSettingsFile` は 1 件 `MAX_SETTING_CHARS` 字を超える値を落とす ── 落としたことを言わないと、
+ *   user は「全部持ち出した」と思い、別の端末で入れたときに初めて気づく。呼び側がこの名前を知らせる。
+ */
+export function settingsTooLongToExport(read: (key: string) => string | null): string[] {
+  const out: string[] = [];
+  for (const { key, label } of PORTABLE_KEYS) {
+    const value = read(key);
+    if (value !== null && value.length > MAX_SETTING_CHARS) out.push(label);
+  }
+  return out;
+}
+
+/**
+ * 🔴 **当てた結果の 1 行**(#1087)。⚠ 書けなかった件数を言う ── 直す前は書けた件数だけを言い、
+ *   全部書けなかったとき(私用ウィンドウ・容量の上限)も「0 件入れました」と成功と同じ形だった。
+ */
+export function settingsAppliedNote(wrote: number, failed: number): string {
+  const head = `設定を ${String(wrote)} 件入れました(画面に出るのは再読み込みしてからです)`;
+  if (failed === 0) return head;
+  return `${head}。${String(failed)} 件はこの端末に保存できず、入っていません(ブラウザの保存領域がいっぱいか、保存を止める設定になっています)`;
+}
+
+/**
  * 落とす file の名前。⚠ **日付を入れる**(2 つ持っていてもどちらが新しいか分かる)。
  *
  * ⚠ **器の題名は入れない** ── `AppState` は器の題名を持っていない(`cid` だけ)。
@@ -321,6 +345,8 @@ export interface SettingsPlan {
   readonly refused: readonly string[];
   /** 🔴 **こちらが知らない鍵**(新しい版で書かれた)。 */
   readonly unknown: readonly string[];
+  /** 🔴 **長すぎて入れない鍵**(1 件 `MAX_SETTING_CHARS` 字を超える)。黙って捨てない(#1087)。 */
+  readonly tooLong: readonly string[];
   /** 読めなかった理由。`null` なら読めた。 */
   readonly error: string | null;
 }
@@ -330,6 +356,7 @@ const EMPTY_PLAN: SettingsPlan = {
   same: 0,
   refused: [],
   unknown: [],
+  tooLong: [],
   error: null,
 };
 
@@ -364,6 +391,7 @@ export function planSettingsImport(
   const changes: { key: string; label: string; from: string | null; to: string }[] = [];
   const refused: string[] = [];
   const unknown: string[] = [];
+  const tooLong: string[] = [];
   let same = 0;
   const seen = new Set<string>();
   for (const item of list) {
@@ -374,7 +402,10 @@ export function planSettingsImport(
     // ⚠ 同じ鍵が 2 度書いてあっても 1 度しか数えない(後勝ちにしない ── 先を採る)
     if (key === '' || seen.has(key)) continue;
     seen.add(key);
-    if (value.length > MAX_SETTING_CHARS) continue;
+    if (value.length > MAX_SETTING_CHARS) {
+      tooLong.push(key);
+      continue;
+    }
     if (skipped.has(key)) {
       refused.push(key);
       continue;
@@ -391,7 +422,7 @@ export function planSettingsImport(
     }
     changes.push({ key, label, from, to: value });
   }
-  return { changes, same, refused, unknown, error: null };
+  return { changes, same, refused, unknown, tooLong, error: null };
 }
 
 /**
@@ -415,9 +446,11 @@ export function settingsPlanNote(plan: SettingsPlan): string {
   if (plan.same > 0) parts.push(`${plan.same} 件はいまと同じです`);
   // 🔴 **黙って捨てない**(版が違う設定ファイルを読んだとき、全部入ったと思われる)
   if (plan.refused.length > 0)
-    parts.push(`${plan.refused.length} 件は運ばない決まりのもの(許可・フラグ・お知らせの既読)なので入れません`);
+    parts.push(`${plan.refused.length} 件はこの端末だけで使う記録(許可・フラグ・お知らせの既読・履歴など)なので入れません`);
   if (plan.unknown.length > 0)
     parts.push(`${plan.unknown.length} 件はこのバージョンが知らない設定なので入れません`);
+  if (plan.tooLong.length > 0)
+    parts.push(`${plan.tooLong.length} 件は長すぎるので入れません(1 件 ${MAX_SETTING_CHARS.toLocaleString('en-US')} 字まで)`);
   return `${parts.join('。')}。`;
 }
 
