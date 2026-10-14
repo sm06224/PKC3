@@ -33,6 +33,7 @@ import {
   type KeyContext,
 } from '@features/keymap';
 import { appKeymap, type KeymapStore } from './keymap';
+import { SETTINGS_NOT_PERSISTED_TEXT } from './settings-persist-probe';
 
 /**
  * ⚠ **実体は `@features/keymap`**(2026-08-26 に移した)── 操作を名前で探す面
@@ -88,10 +89,13 @@ export function buildKeymapPanel(
   resetAll.setAttribute('data-pkc-field', 'keymap-reset-all');
   resetAll.textContent = 'すべて既定に戻す';
   resetAll.title = '自分で割り当てたキーを消して、はじめの割り当てに戻します';
+  // 🔴 保存できなかったことを言う 1 行(#1087)── 戻した割当はこの session では効いているので、「戻せなかった」とは言わない
+  const resetAllNote = doc.createElement('span');
+  resetAllNote.setAttribute('data-pkc-field', 'keymap-reset-all-note');
   resetAll.addEventListener('click', () => {
-    store.resetAll();
+    resetAllNote.textContent = store.resetAll() ? '' : `既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
   });
-  root.append(resetAll);
+  root.append(resetAll, resetAllNote);
 
   const rows = new Map<string, Row>();
   /** いま捕まえている相手。`null` = 捕まえていない。 */
@@ -155,7 +159,8 @@ export function buildKeymapPanel(
         sync();
       });
       reset.addEventListener('click', () => {
-        store.resetCommand(cmd.id);
+        // ⚠ 保存の後で sync が note を戻すので、書くのは呼んだ後
+        if (!store.resetCommand(cmd.id)) note.textContent = `既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
       });
 
       dd.append(chords, assign, reset, note);
@@ -246,7 +251,8 @@ export function buildKeymapPanel(
         drop.textContent = '×';
         drop.title = `${chordLabel(chord)} の割当を外します`;
         drop.addEventListener('click', () => {
-          store.removeBinding(cmd.id, chord);
+          if (!store.removeBinding(cmd.id, chord))
+            row.note.textContent = `${chordLabel(chord)} を外しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
         });
         tag.append(kbd, drop);
         row.chords.append(tag);
