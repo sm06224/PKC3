@@ -28,7 +28,41 @@ function fold(s: string, caseSensitive: boolean): string {
 export function countMatches(body: string, find: string, opts: ReplaceOptions = {}): number {
   if (find === '') return 0;
   const cs = opts.caseSensitive === true;
-  return fold(body, cs).split(fold(find, cs)).length - 1;
+  if (cs) return body.split(find).length - 1;
+  // ⚠ 数える規則は置換と同じ 1 本(件数と置換が食い違うと「N 件を置き換えました」が嘘になる)
+  return foldedHits(body, find).length;
+}
+
+/**
+ * 🔴 **大小無視で当たった箇所を、原文の位置と長さで返す**(#1087、本文の書換の見直し)。
+ * ⚠ 小文字にすると長さが変わる字が在る(`İ` U+0130 は `i` + U+0307 の 2 字になる)── 写しの添字で原文を
+ *   切ると、その字より後ろの置換が全部ずれて本文を壊していた(`İstanbul ve Ankara` の `ankara` →
+ *   `İstanbul ve AX`)。長さが変わらない本文は写しで速く探し、変わる本文は原文の位置ごとに比べる。
+ */
+function foldedHits(body: string, find: string): Array<{ at: number; len: number }> {
+  const hay = fold(body, false);
+  const needle = fold(find, false);
+  const out: Array<{ at: number; len: number }> = [];
+  if (hay.length === body.length) {
+    // 写しと原文の添字が 1 対 1(いちばん多い場合)
+    let at = 0;
+    for (;;) {
+      const hit = hay.indexOf(needle, at);
+      if (hit < 0) break;
+      out.push({ at: hit, len: needle.length });
+      at = hit + needle.length;
+    }
+    return out;
+  }
+  // 長さが変わる字が在る ── 原文の位置ごとに、検索語と同じ長さを切って比べる
+  const len = find.length;
+  for (let at = 0; at + len <= body.length; ) {
+    if (fold(body.slice(at, at + len), false) === needle) {
+      out.push({ at, len });
+      at += len;
+    } else at += 1;
+  }
+  return out;
 }
 
 /**
@@ -49,18 +83,13 @@ export function replaceAll(
     const parts = body.split(find);
     return { body: parts.join(replace), count: parts.length - 1 };
   }
-  // 大小無視: 位置は写しで探し、切り出しは**原文**から行う
-  const hay = fold(body, false);
-  const needle = fold(find, false);
+  // 大小無視: 当たった箇所は**原文の位置と長さ**で受け取り、原文から切り出す(`foldedHits`)
   let out = '';
   let at = 0;
-  let count = 0;
-  for (;;) {
-    const hit = hay.indexOf(needle, at);
-    if (hit < 0) break;
-    out += body.slice(at, hit) + replace;
-    at = hit + needle.length;
-    count += 1;
+  const hits = foldedHits(body, find);
+  for (const h of hits) {
+    out += body.slice(at, h.at) + replace;
+    at = h.at + h.len;
   }
-  return { body: out + body.slice(at), count };
+  return { body: out + body.slice(at), count: hits.length };
 }

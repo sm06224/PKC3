@@ -319,6 +319,9 @@ describe('#402 ① 別の窓を踏まない', () => {
     expect(readTags(s.disk['e1']!), '踏み潰した').toEqual([]);
     expect(readTags(s.disk['e2']!), '巻き添えで止まった').toEqual(['請求済']);
     expect(s.d.getState().notice ?? '', '黙って落とした').toContain('1 件は書けませんでした');
+    // 🔴 書けなかった 1 件を「付けました」に数えない(#1087)── 直す前は 2 件に付けたと言っていた
+    expect(s.d.getState().notice ?? '', '書けなかったノートも「付けた」に数えた').toContain('1 件に付けました');
+    expect(s.d.getState().notice ?? '').not.toContain('2 件に付けました');
   });
 });
 

@@ -294,11 +294,22 @@ export function replaceSectionByHeading(
   const lines = body.split(/\r?\n/);
   const current = lines.slice(range.start, range.end).join('\n');
   if (current !== original) return { ok: false, reason: 'mismatch' };
-  const newBody = [
-    ...lines.slice(0, range.start),
-    ...text.split(/\r?\n/),
-    ...lines.slice(range.end),
-  ].join('\n');
+  /**
+   * 🔴 **触っていない章の改行は 1 バイトも変えない**(#1087、本文の書換の見直し)。
+   * ⚠ 直す前は全行を `\n` で繋ぎ直していたので、CRLF の本文は章を 1 つ保存しただけで**全部** LF になった。
+   * 🔑 行を**終わりの改行ごと**持ち回り、差し替える章の中だけを組み直す。章の中の改行は、
+   *   その章の 1 行目が使っていた改行に揃える(混在した本文でも、ほかの章には触らない)。
+   */
+  const parts = body.split(/(?<=\n)/);
+  const eolOf = (p: string | undefined): string => (p === undefined ? '' : p.endsWith('\r\n') ? '\r\n' : p.endsWith('\n') ? '\n' : '');
+  const eol = eolOf(parts[range.start]) || (body.includes('\r\n') ? '\r\n' : '\n');
+  // 章の最後の行に改行が在ったか(本文の終わりの章で、最後に改行が無ければ足さない)
+  const tail = range.end > range.start ? eolOf(parts[range.end - 1]) : '';
+  const newBody =
+    parts.slice(0, range.start).join('') +
+    text.split(/\r?\n/).join(eol) +
+    tail +
+    parts.slice(range.end).join('');
   return { ok: true, body: newBody };
 }
 

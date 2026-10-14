@@ -312,6 +312,26 @@ describe('replaceSectionByHeading(#1044 段2 3巡目の修理、S1)', () => {
     expect(r.body).toContain('来週。');
   });
 
+  it('🔴 CRLF の本文でも、触っていない章の改行は 1 バイトも変えない(#1087)', () => {
+    // 直す前は全行を \n で繋ぎ直し、章を 1 つ保存しただけで本文全体が LF になった
+    const crlf = '# A\r\n本文\r\n# B\r\n本文2\r\n';
+    const original = ['# B', '本文2', ''].join('\n');
+    const r = replaceSectionByHeading(crlf, 'B', original, '# B\n本文2 直した\n');
+    expect(r.ok, '前提: 一致しているのに断られた').toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.body.startsWith('# A\r\n本文\r\n'), '触っていない章の改行が変わった').toBe(true);
+    expect(r.body).toBe('# A\r\n本文\r\n# B\r\n本文2 直した\r\n');
+    expect(r.body.replace(/\r\n/g, ''), 'CRLF の中に LF だけの行が混ざった').not.toContain('\n');
+  });
+
+  it('混在した本文でも、ほかの章の改行はそのまま(章の中は、その章の改行に揃う)', () => {
+    const mixed = '# A\n本文\n# B\r\n本文2\r\n';
+    const r = replaceSectionByHeading(mixed, 'B', ['# B', '本文2', ''].join('\n'), '# B\nX\n');
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.body).toBe('# A\n本文\n# B\r\nX\r\n');
+  });
+
   it('🔴 見出しの字が本文の中に無ければ missing', () => {
     const remote = DOC.replace('## 決定事項', '## 決めたこと');
     const r = replaceSectionByHeading(remote, '決定事項', originalOf('決定事項'), 'x');
