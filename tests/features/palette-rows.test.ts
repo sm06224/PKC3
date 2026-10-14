@@ -5,7 +5,15 @@
  *   `tests/adapter/palette.test.ts` が見る(2 つの検査で役割を分ける)。
  */
 import { describe, expect, it } from 'vitest';
-import { KEY_COMMANDS, defaultBindings, findCommand } from '../../src/features/keymap';
+import {
+  CONTEXT_LABELS,
+  CONTEXT_WHEN,
+  KEY_COMMANDS,
+  defaultBindings,
+  findCommand,
+  onlyWhenSentence,
+  type KeyContext,
+} from '../../src/features/keymap';
 import { NOT_READY_PREFIX, paletteRows } from '../../src/features/palette/palette-rows';
 
 const BINDINGS = defaultBindings();
@@ -115,8 +123,9 @@ describe('操作を名前で探す(一覧)', () => {
        *   「いまは押せません」だけだと、user は**いつなら押せるのか分からない**。
        */
       const row = paletteRows('', BINDINGS, NONE).find((r) => r.id === 'commit-edit')!;
-      expect(row.why).toContain('2 ペインの編集');
-      expect(row.why).toContain('にいるときだけ効きます');
+      expect(row.why).toBe(
+        `${NOT_READY_PREFIX}2 ペインの編集で、原文か題名の欄にカーソルがあるときだけ効きます`,
+      );
     });
 
     it('🔴 全域の操作は、**その操作自身の説明**を理由にする(書き直さない)', () => {
@@ -166,8 +175,8 @@ describe('🔴 本文の欄が要る操作の理由(#1206 D3)', () => {
   it('🔴 判定を渡したときだけ、その操作の理由が「どこから呼べるか」になる(他の行は今までのまま)', () => {
     const plain = paletteRows('', BINDINGS, NONE);
     const hinted = paletteRows('', BINDINGS, NONE, false, () => null, editorOnly);
-    expect(whyOf('format-ruby', plain), '前提: 渡さないと今までの理由').toContain(
-      'にいるときだけ効きます',
+    expect(whyOf('format-ruby', plain), '前提: 渡さないと今までの理由').toBe(
+      `${NOT_READY_PREFIX}${onlyWhenSentence(findCommand('format-ruby')!.contexts)}`,
     );
     expect(whyOf('format-ruby', hinted)).toBe(
       `${NOT_READY_PREFIX}本文の欄で Ctrl + Shift + P の『操作を探す』から呼べます`,
@@ -215,5 +224,126 @@ describe('2 語以上で探す(#1087 の見直し 2026-10-13)', () => {
 
   it('⚠ どれか 1 語でも当たらない行は出さない(全部の語で絞る)', () => {
     expect(idsOf('字幕 ぬるぽ')).toEqual([]);
+  });
+});
+
+describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
+  const CONTEXTS = Object.keys(CONTEXT_LABELS) as KeyContext[];
+
+  it('🔴 全部の文脈について、文を**等値**で見る(見出しの末尾に関わらず自然な日本語になる)', () => {
+    // 期待値は literal で持つ ── 実装の表を回して作ると、表を壊したとき検査も一緒に縮む(§1.10)
+    const EXPECTED: Record<KeyContext, string> = {
+      global: 'どの画面でもだけ効きます',
+      editor: '2 ペインの編集で、原文か題名の欄にカーソルがあるときだけ効きます',
+      append: '追記の欄にカーソルがあるときだけ効きます',
+      row: '1 画面の編集で、開いている行の欄にカーソルがあるときだけ効きます',
+      live: '1 画面で編集していて、画面ぜんたいにフォーカスがあるときだけ効きます',
+      filer: 'フォルダの一覧か 2 ペインで、行を選んでいるときだけ効きます',
+      dual: '2 ペインで、そのペインにフォーカスがあるときだけ効きます',
+      reading: 'ノートを読んでいるときだけ効きます',
+      window: '集計・システム・ヘルプなどの画面を開いているときだけ効きます',
+    };
+    expect([...CONTEXTS].sort(), '文脈が増えた ── 文を足す').toEqual(Object.keys(EXPECTED).sort());
+    for (const c of CONTEXTS) {
+      // global は灰色の理由に出ない(全域の操作は別の分岐)ので、句の終わり方だけは全部見る
+      expect(CONTEXT_WHEN[c].length, c).toBeGreaterThan(0);
+      if (c === 'global') continue;
+      expect(onlyWhenSentence([c]), c).toBe(EXPECTED[c]);
+      expect(CONTEXT_WHEN[c].endsWith('とき'), `${c} は「…とき」で終わる句`).toBe(true);
+    }
+    expect(onlyWhenSentence(['editor', 'row'])).toBe(
+      `${EXPECTED.editor.replace('だけ効きます', '')}、または${EXPECTED.row}`,
+    );
+  });
+
+  it('🔴 灰色の行の理由に、「ときにいるとき」のような壊れた継ぎ目が 1 つも出ない', () => {
+    for (const fromField of [false, true]) {
+      const rows = paletteRows('', BINDINGS, NONE, false, () => null, undefined, fromField);
+      for (const r of rows) {
+        expect(r.why, r.id).not.toMatch(/とき\)?にいる/);
+        expect(r.why.startsWith(NOT_READY_PREFIX), r.id).toBe(true);
+      }
+    }
+  });
+
+  it('🔴 「ノートを閉じる」(reading)と「画面を閉じる」(window)は、実際の条件を言う', () => {
+    const rows = paletteRows('', BINDINGS, NONE);
+    const why = (id: string) => rows.find((r) => r.id === id)!.why;
+    expect(why('deselect-entry')).toBe(`${NOT_READY_PREFIX}ノートを読んでいるときだけ効きます`);
+    expect(why('close-pane')).toBe(
+      `${NOT_READY_PREFIX}集計・システム・ヘルプなどの画面を開いているときだけ効きます`,
+    );
+  });
+
+  it('🔴 P2: 欄の中で開いた一覧では、欄の中の操作は「その場で押すキー」を言う(居るのに居ろと言わない)', () => {
+    const fromField = paletteRows('', BINDINGS, NONE, false, () => null, undefined, true);
+    const why = (id: string) => fromField.find((r) => r.id === id)!.why;
+    expect(why('commit-edit')).toBe(
+      `${NOT_READY_PREFIX}2 ペインの編集で、原文か題名の欄にカーソルがあるときに、Ctrl + S か Ctrl + Enter を押して使う操作です`,
+    );
+    // 対照群: 欄の外から開いた(既定)なら、条件のまま。欄の中の操作でない行は変わらない
+    const plain = paletteRows('', BINDINGS, NONE);
+    expect(plain.find((r) => r.id === 'commit-edit')!.why).not.toContain('押して使う操作');
+    for (const r of plain) {
+      const c = findCommand(r.id)!;
+      if (c.contexts.every((x) => x === 'editor' || x === 'append' || x === 'row' || x === 'live')) continue;
+      expect(why(r.id), r.id).toBe(r.why);
+    }
+    // 鍵を全部外した人には、押すキーの案内を出さない(空のキーを挟まない)
+    const none = paletteRows('', { ...BINDINGS, 'commit-edit': [] }, NONE, false, () => null, undefined, true);
+    expect(none.find((r) => r.id === 'commit-edit')!.why).toBe(
+      `${NOT_READY_PREFIX}${onlyWhenSentence(['editor'])}`,
+    );
+  });
+
+  it('🔴 P3: 条件で押せなくなる操作は、説明(note)ではなく押せない理由(whyNot)を言う', () => {
+    const rows = paletteRows('', BINDINGS, NONE);
+    const why = (id: string) => rows.find((r) => r.id === id)!.why;
+    const EXPECTED: Record<string, string> = {
+      'nav-back': '戻る先がありません',
+      'nav-forward': '進む先がありません',
+      'open-note-window': 'ノートを選んでいるときだけ効きます',
+      'copy-entry-link': 'ノートを選んでいるときだけ効きます',
+      'view-detail': 'いま本文を開いています',
+      'export-note-markdown': 'ノートを開いているときだけ効きます',
+      'export-transcript-srt': 'ノートを開いていて、行頭に時刻のある行があるときだけ効きます',
+    };
+    for (const [id, text] of Object.entries(EXPECTED)) {
+      expect(why(id), id).toBe(`${NOT_READY_PREFIX}${text}`);
+      expect(why(id), `${id}: note をそのまま出している`).not.toContain(findCommand(id)!.note!);
+    }
+    // 押せる行は今までどおり note(whyNot は灰色のときだけ)
+    const ready = paletteRows('', BINDINGS, ALL);
+    expect(ready.find((r) => r.id === 'nav-back')!.why).toBe(findCommand('nav-back')!.note);
+    // blocked(ボタン自身の理由)は whyNot より先
+    const blocked = paletteRows('', BINDINGS, NONE, false, (id) => (id === 'nav-back' ? '編集中です' : null));
+    expect(blocked.find((r) => r.id === 'nav-back')!.why).toBe(`${NOT_READY_PREFIX}編集中です`);
+  });
+
+  it('🔴 P3: whyNot を持つ操作を名指しで pin する(増やすときは理由を 1 行添える)', () => {
+    const withWhyNot = KEY_COMMANDS.filter((c) => c.whyNot !== undefined).map((c) => c.id).sort();
+    expect(withWhyNot).toEqual(
+      [
+        'copy-entry-link',
+        'export-note-markdown',
+        'export-transcript-srt',
+        'nav-back',
+        'nav-forward',
+        'open-note-window',
+        'view-detail',
+      ].sort(),
+    );
+    for (const c of KEY_COMMANDS) {
+      if (c.whyNot !== undefined) expect(c.contexts, c.id).toContain('global');
+    }
+  });
+});
+
+describe('🔴 画面の名前を探し語にしても当たる(#1087 の見直し 2026-10-14)', () => {
+  it('🔴 「設定」で「システムへ移る」が、「マニュアル」で「ヘルプへ移る」が当たる', () => {
+    expect(idsOf('設定'), '「設定」で探してもシステムへ移る行が出ない').toContain('open-settings');
+    expect(idsOf('マニュアル'), '「マニュアル」で探してもヘルプへ移る行が出ない').toContain('open-help');
+    // 対照群: alias を持たない別の画面の行は、この語では当たらない(語が広すぎて何にでも当たっていない)
+    expect(idsOf('設定')).not.toContain('open-flags');
   });
 });

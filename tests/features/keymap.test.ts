@@ -414,3 +414,32 @@ describe('🔴 わきの面の鍵(user 目線レビュー U-8)', () => {
     );
   });
 });
+
+describe('🔴 割り当ての断り文に、相手の効く場所を添える(#1087 の見直し 2026-10-14)', () => {
+  it('🔴 同じ名前の操作が 2 か所にあっても、どちらにぶつかったか分かる', () => {
+    // 「ノートを作る」は全域(create-entry)と 2 ペイン(dual)の 2 つ
+    const same = KEY_COMMANDS.filter((c) => c.label === 'ノートを作る');
+    expect(same.length, '前提が崩れている(同じ名前の操作が 1 つになった)').toBe(2);
+    const msgs = same.map((other) => {
+      // other にだけ使われていない鍵を割り当て、重なる別の操作へ同じ鍵を割り当てようとする
+      const chord = 'Alt+Shift+F11';
+      const me = KEY_COMMANDS.find(
+        (c) => c.id !== other.id && c.label !== 'ノートを作る' && contextsOverlap(c.contexts, other.contexts),
+      )!;
+      const p = validateBinding(me.id, chord, { ...defaultBindings(), [other.id]: [chord] });
+      expect(p?.kind, `${other.id} にぶつからない`).toBe('conflict');
+      expect(p?.withCommandId).toBe(other.id);
+      return p!.message;
+    });
+    expect(msgs[0], '2 つのメッセージが同じ(どちらか分からない)').not.toBe(msgs[1]);
+    expect(msgs.join('\n')).toContain('効く場所: 画面のどこでも');
+    expect(msgs.join('\n')).toContain('効く場所: 2 ペインだけの操作');
+  });
+
+  it('🔴 同じ場所で効かない操作どうしは、同じ割当にできる(マニュアルの説明の裏取り)', () => {
+    // 行の欄だけ(row-cancel など)と、2 ペインの編集だけ(commit-edit)は重ならない
+    expect(contextsOverlap(['row'], ['editor'])).toBe(false);
+    // 全域は、どの場所とも重なる
+    expect(contextsOverlap(['global'], ['row'])).toBe(true);
+  });
+});

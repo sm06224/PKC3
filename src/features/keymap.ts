@@ -101,6 +101,36 @@ export const CONTEXT_LABELS: Readonly<Record<KeyContext, string>> = {
   window: '別のウィンドウ',
 };
 
+/**
+ * 🔴 **その文脈で効くのは「どういうとき」か**(#1087 の見直し 2026-10-14)。
+ *
+ * ⚠ 上の `CONTEXT_LABELS` は**見出し**(名詞句)で、「…とき」で終わる物と終わらない物が混ざっている。
+ *   「操作を探す」の灰色の理由が、見出しの末尾に `にいるときだけ効きます` を機械的に付けていたので、
+ *   「ノートを読んでいるときにいるときだけ効きます」のような壊れた文が出た。
+ * 🔑 **ここは「…とき」で終わる句だけ**を持つ ── 文は `onlyWhenSentence` 1 か所で組む。
+ *   `Record<KeyContext, …>` なので、文脈を足して書き忘れると tsc が落とす。
+ * ⚠ 見出しと食い違えないこと(同じ場所を指す。全数は test が見る)。
+ */
+export const CONTEXT_WHEN: Readonly<Record<KeyContext, string>> = {
+  global: 'どの画面でも',
+  editor: '2 ペインの編集で、原文か題名の欄にカーソルがあるとき',
+  append: '追記の欄にカーソルがあるとき',
+  row: '1 画面の編集で、開いている行の欄にカーソルがあるとき',
+  live: '1 画面で編集していて、画面ぜんたいにフォーカスがあるとき',
+  filer: 'フォルダの一覧か 2 ペインで、行を選んでいるとき',
+  dual: '2 ペインで、そのペインにフォーカスがあるとき',
+  reading: 'ノートを読んでいるとき',
+  window: '集計・システム・ヘルプなどの画面を開いているとき',
+};
+
+/** 欄の中で押す文脈(カーソルが本文などの欄に在るときだけ効く物)。 */
+export const IN_FIELD_CONTEXTS: ReadonlySet<KeyContext> = new Set<KeyContext>(['editor', 'append', 'row', 'live']);
+
+/** 「操作を探す」が押せない理由の 1 文(文脈が複数なら「または」でつなぐ)。⚠ 文を組む口はここ 1 つ。 */
+export function onlyWhenSentence(contexts: readonly KeyContext[]): string {
+  return `${contexts.map((c) => CONTEXT_WHEN[c]).join('、または')}だけ効きます`;
+}
+
 /** 並びの順。⚠ `KEY_COMMANDS` の並びを尊重しつつ、文脈ごとに固める。 */
 /**
  * ⚠ **`KeyContext` を 1 つ残らず並べる。** 抜けた文脈のコマンドは
@@ -171,6 +201,13 @@ export interface KeyCommand {
   readonly whileTyping?: boolean;
   /** ヘルプに出す 1 行の説明(無ければ label だけ出す)。 */
   readonly note?: string;
+  /**
+   * 🔴 **押せないときの理由**(#1087 の見直し 2026-10-14)。⚠ `note` は「何をする操作か」の説明で、
+   *   灰色の行に流用すると理由にならない(「前に見ていたノートへ戻ります」と言われて、なぜ押せないか分からない)。
+   * 🔑 `note` 自身が「…ときだけ効きます」と条件を言っている操作には要らない。
+   *   条件で押せなくなる操作のうち、`note` が条件を言っていない物だけが持つ(「操作を探す」の灰色の行が最初に引く)。
+   */
+  readonly whyNot?: string;
   /**
    * 🔑 **画面には出さない、探すためだけの呼び名の揺れ**(#690 I5)。
    * ⚠ 一覧の検索は `label` / `note` に加えてここも見るので、user がどの言葉で
@@ -558,6 +595,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+1', 'Mod+Alt+1'],
     whileTyping: true,
     note: '文字を打っている間に効くのは Ctrl+Alt+1(Mac は ⌘+Alt+1)のほうです(Alt+1 は文字が入るキーなので、打っている間は効きません)',
+    whyNot: 'いま本文を開いています',
   },
   {
     id: 'view-query',
@@ -604,6 +642,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
      */
     whileTyping: true,
     note: '文字を打っている間に効くのは Ctrl+,(Mac は ⌘+,)のほうです(Alt+3 は文字が入るキーなので、打っている間は効きません)',
+    // 🔴 画面の名前は「システム」だが、user は「設定」で探す(旧称。#1087 の見直し 2026-10-14)
+    alias: '設定 環境設定 オプション',
   },
   {
     id: 'open-flags',
@@ -667,6 +707,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['F1', 'Alt+5', 'Mod+Shift+Slash'],
     whileTyping: true,
     note: 'F1 は文字が入らないキーなので、文字を打っている間でも効きます',
+    // 🔴 マニュアルはヘルプの中に在る(「マニュアルを別のウィンドウで開く」とは別に、ここへ移る行も出す)
+    alias: 'マニュアル 使い方 説明書',
   },
   /**
    * 🔴 **メッセージを開く**(#1017 C5。🟣 Gemini 裁定 B、2026-10-03)。
@@ -702,6 +744,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: [],
     note: '開いているノートの、行頭に時刻のある行(文字起こし)を字幕ファイルにして保存します。時刻のある行が無いノートでは押せません',
+    whyNot: 'ノートを開いていて、行頭に時刻のある行があるときだけ効きます',
     alias: 'SRT 字幕 文字起こし 書き出し',
   },
   /**
@@ -717,6 +760,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: [],
     note: '開いているノートの本文を、そのまま .md ファイルで保存します。添付は入りません(バックアップなら入ります)',
+    whyNot: 'ノートを開いているときだけ効きます',
     alias: 'マークダウン md 書き出し エクスポート 保存',
   },
   /**
@@ -755,6 +799,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: [],
     note: 'ブラウザやメールに貼ると、この PKC のこのノートが開くリンクをコピーします(本文に貼る参照とは別です)',
+    whyNot: 'ノートを選んでいるときだけ効きます',
     alias: 'パーマリンク URL アドレス 共有 permalink',
   },
   /**
@@ -1232,6 +1277,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+Shift+W'],
     note: '開いているノートだけを別のウィンドウで開きます。付箋のように何枚でも並べられます',
+    whyNot: 'ノートを選んでいるときだけ効きます',
     alias: '小窓',
   },
   /**
@@ -1355,7 +1401,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['global'],
     defaults: ['Alt+Backslash'],
     whileTyping: true,
-    note: '本文の下の追記欄。折りたたんでもつまみは残る',
+    note: '本文の下の追記欄を、折りたたんだり戻したりします。折りたたんでも分割線は残ります',
   },
   {
     id: 'toggle-focus-mode',
@@ -1385,6 +1431,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+ArrowLeft'],
     whileTyping: true,
     note: '2 ペインでは、そのタブが 1 つ前に見ていた場所へ戻ります',
+    whyNot: '戻る先がありません',
   },
   {
     id: 'nav-forward',
@@ -1393,6 +1440,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Alt+ArrowRight'],
     whileTyping: true,
     note: '2 ペインでは、戻る前に見ていた場所へ進みます',
+    whyNot: '進む先がありません',
   },
   /**
    * 🔴 **下見(選んだ行の中身を、その場で見る)**(#273 残件)。
@@ -2022,7 +2070,8 @@ export function validateBinding(
       return {
         kind: 'conflict',
         // ⚠ どうすれば付くかまで言う(#1087 の見直し 2026-10-13)── 「同じ割当です」だけでは、先に向こうから外す、が分からない
-        message: `「${other.label}」に割り当て済みです。先にそちらの × で外してください`,
+        // ⚠ 同じ名前の操作が別の場所にも在る(「ノートを作る」は全域と 2 ペインの 2 つ)── どちらかを言う。字は `CONTEXT_LABELS` から(#1087 の見直し 2026-10-14)
+        message: `「${other.label}」(効く場所: ${other.contexts.map((x) => CONTEXT_LABELS[x]).join(' / ')})に割り当て済みです。先にそちらの × で外してください`,
         withCommandId: other.id,
       };
     }

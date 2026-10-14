@@ -23,9 +23,11 @@
  * 🔑 **pure module**。DOM も時計も持たない。「いま押せるか」は呼び側が渡す。
  */
 import {
-  CONTEXT_LABELS,
+  CONTEXT_WHEN,
+  IN_FIELD_CONTEXTS,
   KEY_COMMANDS,
   chordLabel,
+  onlyWhenSentence,
   type KeyCommand,
   type KeymapBindings,
 } from '@features/keymap';
@@ -122,6 +124,14 @@ function reasonOf(
   blocked: string | null,
   /** 🔴 本文の欄が要る操作への案内の字(#1206 D3)。⚠ 渡されたときだけ使う。 */
   editorHint: string | null = null,
+  /**
+   * 🔴 **本文の欄などに居るまま開いた「操作を探す」か**(#1087 の見直し 2026-10-14)。
+   * ⚠ 居るのに「2 ペインの編集にいるときだけ効きます」と言うと、**いまその場に居る user には嘘**になる。
+   *   欄の中の操作は一覧からは実行できず、欄の中でキーを押して使う ── だからその押し方を言う。
+   */
+  fromField = false,
+  /** その操作の、欄の中で押すキーの字(`chordLabel` 済み)。 */
+  keys: readonly string[] = [],
 ): string {
   /*
    * 🔴 **そのボタンが持っている理由を最優先で使う**(#791 ④)。
@@ -135,9 +145,14 @@ function reasonOf(
   if (blocked !== null && blocked !== '') return `${NOT_READY_PREFIX}${blocked}`;
   if (editorHint !== null) return `${NOT_READY_PREFIX}${editorHint}`;
   if (!cmd.contexts.includes('global')) {
-    const where = cmd.contexts.map((c) => CONTEXT_LABELS[c]).join(' / ');
-    return `${NOT_READY_PREFIX}${where}にいるときだけ効きます`;
+    if (fromField && keys.length > 0 && cmd.contexts.every((c) => IN_FIELD_CONTEXTS.has(c))) {
+      const where = cmd.contexts.map((c) => CONTEXT_WHEN[c]).join('、または');
+      return `${NOT_READY_PREFIX}${where}に、${keys.join(' か ')} を押して使う操作です`;
+    }
+    return `${NOT_READY_PREFIX}${onlyWhenSentence(cmd.contexts)}`;
   }
+  // 🔑 条件で押せなくなる操作は、`note`(何をする操作か)ではなく `whyNot`(なぜ今は押せないか)を言う
+  if (cmd.whyNot !== undefined) return `${NOT_READY_PREFIX}${cmd.whyNot}`;
   const note = cmd.note ?? '';
   return note === '' ? `${NOT_READY_PREFIX}${GENERIC_NOT_READY}` : `${NOT_READY_PREFIX}${note}`;
 }
@@ -170,6 +185,8 @@ export function paletteRows(
    *   **「どこから呼べるか」**で言う。渡さない(= 本文の欄から開いたパレット)ときは今までの理由。
    */
   needsEditorField?: (id: string) => boolean,
+  /** 🔴 本文の欄などに居るまま開いたか(#1087 の見直し 2026-10-14)。欄の中の操作の理由が「その場で押すキー」になる。 */
+  fromField = false,
 ): readonly PaletteRow[] {
   const q = fold(query.trim());
   const editorHintText = (): string => {
@@ -199,6 +216,8 @@ export function paletteRows(
               cmd,
               blockedReason(cmd.id),
               needsEditorField?.(cmd.id) === true ? editorHintText() : null,
+              fromField,
+              (bindings[cmd.id] ?? cmd.defaults).map((b) => chordLabel(b, mac)),
             ),
       },
     });
