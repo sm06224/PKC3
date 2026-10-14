@@ -155,6 +155,16 @@ describe('付箋の中のチェックを押す', () => {
     expect(u.rewrites()).toHaveLength(1);
   });
 
+  it('🔴 普通のチェック(付箋の外)も、別のタブが編集中なら書かずに理由を出す(#1087)', async () => {
+    const deny = vi.fn(async () => 'denied' as const);
+    const t = await rig('- [ ] a\n', { acquireEditLock: deny, releaseEditLock: vi.fn() });
+    t.ownBox().click();
+    await flush();
+    expect(deny, '門を通っていない').toHaveBeenCalledWith('n1');
+    expect(t.rewrites(), '断られたのに書いた(編集中のタブの保存で消える)').toHaveLength(0);
+    expect(t.d.getState().error).toBe(EDIT_ELSEWHERE_ERROR);
+  });
+
   it('🔴 行を原文へ引けない印(押せない形)は押せないまま、理由を title で言う。付箋の外の掃除では付けない', () => {
     const html = '<input type="checkbox" class="pkc-task-checkbox" disabled>';
     const box = document.createElement('div');

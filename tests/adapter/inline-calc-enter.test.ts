@@ -79,7 +79,7 @@ function setup(body: string) {
  * 本文の欄を開き、末尾にカーソルを置いて `Enter` を押す。
  * @returns 欄と、`preventDefault` が呼ばれたか(= 改行を止めたか)
  */
-async function pressEnter(body: string) {
+async function pressEnter(body: string, init: KeyboardEventInit = {}) {
   const { d, q } = setup(body);
   d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
   await tick();
@@ -88,7 +88,7 @@ async function pressEnter(body: string) {
   const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
   ta.value = body;
   ta.setSelectionRange(body.length, body.length);
-  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
   ta.dispatchEvent(ev);
   await tick();
   return { ta, d, prevented: ev.defaultPrevented };
@@ -177,6 +177,22 @@ describe('本文で Enter を押すと計算される(#764)', () => {
   beforeEach(() => {
     localStorage.setItem('pkc3.editor-mode', 'split');
   });
+
+  it('🔴 Safari の変換確定の Enter(keyCode 229)では答えを入れない(#1087)', async () => {
+    const calc = await pressEnter('2+3=', { keyCode: 229 } as KeyboardEventInit);
+    expect(calc.ta.value, '変換の確定で答えが入った').toBe('2+3=');
+  });
+
+  it('🔴 Safari の変換確定の Enter(keyCode 229)では引用を継ぎ足さない(#1087)', async () => {
+    const quote = await pressEnter('> 引用', { keyCode: 229 } as KeyboardEventInit);
+    expect(quote.ta.value, '変換の確定で > を継ぎ足した').toBe('> 引用');
+  });
+
+  it('対照群: 普通の Enter なら引用を継ぎ足す', async () => {
+    const quote = await pressEnter('> 引用');
+    expect(quote.ta.value).toContain('> 引用\n> ');
+  });
+
 
   it('🔴 欄と state の両方に答えが入る', async () => {
     const { ta, d } = await pressEnter('請求は 1200*1.1=');

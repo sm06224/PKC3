@@ -9333,15 +9333,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `チェックしてください`) });
       return;
     }
-    if (placedLid !== null) {
-      // 🔴 別のタブ・窓が**そのノートを編集中**なら断る(追記・題名と同じ門。押した印は動かさない)
-      void editedElsewhereReason(dispatcher, services, placedLid).then((why) => {
-        if (why !== null) {
-          dispatcher.dispatch({ type: 'OP_FAILED', error: why });
-          return;
-        }
-        dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line });
-      })
+    /**
+     * 🔴 別のタブ・窓が**そのノートを編集中**なら断る(追記・題名と同じ門。押した印は動かさない)。
+     * ⚠ 直す前は付箋の中のチェックだけがこの門を通り、普通のチェックと繰り返しの回は素通りだった ──
+     *   付けた印は、編集中のタブが保存したときに上書きされて消えていた(#1087)。
+     */
+    const guarded = (act: () => void, at: string): void => {
+      void editedElsewhereReason(dispatcher, services, at)
+        .then((why) => {
+          if (why !== null) {
+            dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+            return;
+          }
+          act();
+        })
         // 🔴 問い合わせが落ちても黙らない(追記と同じ作法 ── 押しても何も起きないボタンにしない。#1087)
         .catch(() => {
           dispatcher.dispatch({
@@ -9349,6 +9354,9 @@ const ACTIONS: Record<string, ActionHandler> = {
             error: 'チェックできませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
           });
         });
+    };
+    if (placedLid !== null) {
+      guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid: placedLid, line }), placedLid);
       return;
     }
     /**
@@ -9363,10 +9371,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     const rep = target.closest<HTMLElement>('[data-pkc-task-repeat]');
     const on = rep?.getAttribute('data-pkc-task-date') ?? '';
     if (rep !== null && on !== '') {
-      dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, date: on });
+      guarded(() => dispatcher.dispatch({ type: 'MATERIALIZE_REPEAT', lid, line, date: on }), lid);
       return;
     }
-    dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line });
+    guarded(() => dispatcher.dispatch({ type: 'TOGGLE_TASK', lid, line }), lid);
   },
   'toggle-show-archived': (dispatcher) =>
     dispatcher.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' }),
@@ -15027,6 +15035,8 @@ export function bindActions(
      */
     if (
       ke.key === 'Enter' &&
+      // ⚠ Safari は変換を確定した Enter が `isComposing: false` で届く(`keyCode` 229)── 確定の Enter で答えを挿さない(#1087)
+      ke.keyCode !== 229 &&
       !ke.shiftKey &&
       !ke.ctrlKey &&
       !ke.altKey &&
@@ -15102,6 +15112,8 @@ export function bindActions(
      */
     if (
       ke.key === 'Enter' &&
+      // ⚠ 上の計算と同じ理由(Safari の変換確定の Enter)── 確定で `> ` / `- ` を継ぎ足さない(#1087)
+      ke.keyCode !== 229 &&
       !ke.shiftKey &&
       !ke.ctrlKey &&
       !ke.altKey &&
