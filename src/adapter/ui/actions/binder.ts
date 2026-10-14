@@ -1244,6 +1244,48 @@ const moveEntries = (
 };
 
 /**
+ * 🔴 **移して、動いた物があれば「元に戻す」を出す ── 移す口 4 つ(F6 / ドラッグ / 「移す…」の選択窓 / 帯)の実体は 1 本**(#1087)。
+ *
+ * ⚠ 直す前は F6(`dual-move`)だけが「元に戻す」を出し、ドラッグで落としても「移す…」で選んでも出なかった ──
+ *   同じ「移す」なのに戻せる口が口によって違った(§7「片側にだけ作法が在る」)。
+ * 🔑 新しい仕組みは作らない: 動く前の親を控え、動いた物だけ `offerDualMoveUndo` に渡す。戻す条件
+ *   (いまの親が移した先の物だけ戻す)は `undo-dual-move` がそのまま持つ。
+ * 動いた回だけ `true` を返す(呼び側が「動いた回だけ印を外す」に使う)。
+ */
+const moveEntriesOfferingUndo = (
+  dispatcher: Dispatcher,
+  lids: readonly string[],
+  parentLid: string | null,
+  report?: (text: string) => void,
+): boolean => {
+  const st = dispatcher.getState();
+  const before = st.relations;
+  const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
+  let said = '';
+  moveEntries(dispatcher, lids, parentLid, (text) => {
+    said = text;
+  });
+  if (dispatcher.getState().relations === before) {
+    if (said !== '') report?.(said);
+    return false;
+  }
+  const parentsAfter = resolveCanonicalParents(
+    dispatcher.getState().entryMetas,
+    dispatcher.getState().relations,
+  );
+  const moves = lids
+    .filter((lid) => (parentsBefore.get(lid) ?? null) !== (parentsAfter.get(lid) ?? null))
+    .map((lid) => ({
+      lid,
+      from: parentsBefore.get(lid) ?? null,
+      to: parentsAfter.get(lid) ?? null,
+    }));
+  if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
+  else if (said !== '') report?.(said);
+  return true;
+};
+
+/**
  * 🔴 **作って、そのまま編集に入る ── 実体は 1 本**(#215)。
  *
  * ⚠ `create-entry`(左の列の「+ ノート」)と `create-in-folder`(行の右クリック)が
@@ -8127,7 +8169,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     // ⚠ 数えるのは**できあがる題名**(同じ場所へのコピーは「のコピー」が付くので、ぶつからない)
     const picked = new Set(lids);
     const sameTitle = steps.filter((x) => picked.has(x.sourceLid) && existing.has(x.title)).length;
-    void read(steps.map((s) => s.sourceLid)).then(
+    // 🔴 **読む前に、保存の書込が並んでいれば待つ**(#1087)。待たずに読むと、書込が disk に届く前の古い本文で
+    //    コピーが作られる(他の読み ── 本文を disk から読む口 ── は待っている。同じ作法に揃える)。
+    void Promise.resolve(services.settle?.() ?? null)
+      .then(() => read(steps.map((s) => s.sourceLid)))
+      .then(
       (bodies) => {
         let missing = 0;
         for (const step of steps) {
@@ -8143,6 +8189,23 @@ const ACTIONS: Record<string, ActionHandler> = {
             edit: false,
             ...(body === undefined ? {} : { body }),
           });
+        }
+        /**
+         * 🔴 **作れたかを見てから言う**(#1087)。編集中は `CREATE_ENTRY` が黙って捨てられる
+         *   (`app-state.ts`。コピーの読み待ちの間に編集へ入った場合)ので、dispatch の後に
+         *   実在を数える ── 作れていないのに「コピーしました」と言わない。
+         */
+        const madeCount = steps.filter((x) => dispatcher.getState().entryMetas.has(x.lid)).length;
+        if (madeCount < steps.length) {
+          const phase = dispatcher.getState().phase;
+          dispatcher.dispatch({
+            type: 'OP_FAILED',
+            error:
+              phase === 'ready'
+                ? 'コピーできませんでした(ノートを作れませんでした)'
+                : `${phaseBlockReason(phase)}コピーしてください`,
+          });
+          return;
         }
         /**
          * 🔴 **行き先を名乗る**(#671 の着地前の動線レビュー A、2026-09-04)。
@@ -8230,16 +8293,6 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
       return;
     }
-    const before = st.relations;
-    /**
-     * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)── 動く前の親を控えておき、動いた物だけ戻せるようにする。
-     * ⚠ 知らせの字は `moveEntries` が組む 1 本をそのまま使う(別の綴りを作らない)。動かなかった回は従来どおり `showStatus` に出す。
-     */
-    const parentsBefore = resolveCanonicalParents(st.entryMetas, st.relations);
-    let said = '';
-    moveEntries(dispatcher, lids, to, (text) => {
-      said = text;
-    });
     /**
      * 🔴 **動いた回だけ印を外す**(着地前レビュー R1)。
      * ⚠ `moveEntries` は編集中・全件拒否で**何もせず返る**ので、無条件に外すと
@@ -8247,23 +8300,10 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   保存してから戻り、**選び直し**になる(この面は編集中でも開ける設計なので
      *   必ず踏む筋である)。
      * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
+     * 🔴 「元に戻す」の出し入れは `moveEntriesOfferingUndo`(移す口 4 つで 1 本)。
      */
-    if (dispatcher.getState().relations !== before) {
+    if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus))
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
-      const parentsAfter = resolveCanonicalParents(
-        dispatcher.getState().entryMetas,
-        dispatcher.getState().relations,
-      );
-      const moves = lids
-        .filter((lid) => (parentsBefore.get(lid) ?? null) !== (parentsAfter.get(lid) ?? null))
-        .map((lid) => ({
-          lid,
-          from: parentsBefore.get(lid) ?? null,
-          to: parentsAfter.get(lid) ?? null,
-        }));
-      if (moves.length > 0 && said !== '') offerDualMoveUndo(dispatcher, moves, said);
-      else if (said !== '') services.showStatus?.(said);
-    } else if (said !== '') services.showStatus?.(said);
   },
   /**
    * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。口は `status-undo`(出し入れは `status-open.ts`)。
@@ -9902,7 +9942,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       { title },
     ).then((to) => {
       if (to === null) return;
-      moveEntries(dispatcher, lids, to === '' ? null : to, services.showStatus);
+      moveEntriesOfferingUndo(dispatcher, lids, to === '' ? null : to, services.showStatus);
     });
   },
   /**
@@ -16914,7 +16954,7 @@ export function bindActions(
    * フォルダを自分の子孫へ落とす等、reducer が黙って捨てる形が在る。
    */
   const moveDropped = (lids: readonly string[], parentLid: string | null): void =>
-    moveEntries(dispatcher, lids, parentLid, services.showStatus);
+    void moveEntriesOfferingUndo(dispatcher, lids, parentLid, services.showStatus);
   /**
    * 🔴 **落とした行の前 / 後へ並べ替える**(#215)。
    *

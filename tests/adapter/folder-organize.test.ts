@@ -457,7 +457,7 @@ describe('フォルダ整理の導線(画面)', () => {
   const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4)];
 
   it('🔴 選ぶ → 入れ先を選ぶ、で本当に入る(disk への要求まで届く)', async () => {
-    const { q, rows, startMove, pickChoose, parentCalls, enter, status } = setup(METAS, []);
+    const { q, rows, startMove, pickChoose, parentCalls, enter, d } = setup(METAS, []);
     expect(rows()).toEqual(['f1', 'f2', 'n1', 'n2']);
 
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -476,7 +476,8 @@ describe('フォルダ整理の導線(画面)', () => {
     expect(rows(), '入れた先へ勝手に移動した').toEqual(['f1', 'f2', 'n2']);
     expect(q('[data-pkc-region="filer-breadcrumb"]')!.textContent).not.toContain('t-f1');
     // ⚠ ただし**行き先は名乗る**(消えたのか入ったのか分からない、を作らない)
-    expect(status.at(-1), '行き先を言っていない').toBe('1 件を「t-f1」へ入れました');
+    // 🔴 知らせは「元に戻す」と同じ口(`OP_NOTICE`)に載る(#1087。移す口 4 つで同じ形にした)
+    expect(d.getState().notice, '行き先を言っていない').toBe('1 件を「t-f1」へ入れました');
     // ② disk へ届く
     expect(parentCalls).toEqual([
       { lid: 'n1', parentLid: 'f1', relationId: expect.any(String) },
@@ -488,7 +489,7 @@ describe('フォルダ整理の導線(画面)', () => {
   });
 
   it('🔴 ルートへ出せる(入れたら出せない、を作らない)', async () => {
-    const { q, rows, startMove, pickChoose, parentCalls, enter, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    const { q, rows, startMove, pickChoose, parentCalls, enter, d } = setup(METAS, [rel('r0', 'f1', 'n1')]);
     enter('f1'); // 2 クリックで入る(#240 段①)
     await tick();
     q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
@@ -504,7 +505,7 @@ describe('フォルダ整理の導線(画面)', () => {
     ]);
     // 🔴 出しても**中に居たまま**(OS ファイラと同じ)── f1 は空になる
     expect(rows(), '出した先へ勝手に移動した').toEqual([]);
-    expect(status.at(-1)).toBe('1 件を「ルート」へ入れました');
+    expect(d.getState().notice).toBe('1 件を「ルート」へ入れました');
     // ルートへ戻れば居る
     q<HTMLElement>('[data-pkc-region="filer-breadcrumb"] button')!.click();
     await tick();
@@ -979,13 +980,13 @@ describe('掴んで落とす(#240 段④)', () => {
     // ⚠ user は 2 件を掴んで落としている ── 「1 件」と言われると、もう 1 件が
     //   どうなったのか分からない(実際は両方そこに在る)
     // n1 は既に f1 の中 ── そこへ n1 と n2 の 2 件を落とす
-    const { q, d, status } = setup(METAS, [rel('r0', 'f1', 'n1')]);
+    const { q, d } = setup(METAS, [rel('r0', 'f1', 'n1')]);
     q('tbody [data-pkc-entry="f1"]')!.dispatchEvent(
       dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'n1 n2' })),
     );
     await tick();
     expect(d.getState().error ?? '', '断りが出ている').not.toContain('入れられません');
-    expect(status.at(-1), '押した数と合っていない').toBe('2 件を「t-f1」へ入れました');
+    expect(d.getState().notice, '押した数と合っていない').toBe('2 件を「t-f1」へ入れました');
   });
 
   it('🔴 全部すでにそこに居たら「入れました」と言わない(動いていないのに動いたと言わない)', async () => {
@@ -1007,7 +1008,7 @@ describe('掴んで落とす(#240 段④)', () => {
      * ⚠ フォルダは自分の中へは入れられないので、`f1` と `n1` を `f1` へ落とすと
      *   `f1` だけが断られる(= 掴んだ 2 件・入った 1 件)。
      */
-    const { q, d, status } = setup(METAS, []);
+    const { q, d } = setup(METAS, []);
     q('tbody [data-pkc-entry="f1"]')!.dispatchEvent(
       dragEvent('drop', dataTransfer({ [PKC_DRAG]: 'f1 n1' })),
     );
@@ -1016,7 +1017,7 @@ describe('掴んで落とす(#240 段④)', () => {
     expect(d.getState().error ?? '', '断られた 1 件が言われていない').toContain(
       '1 件は入れられませんでした',
     );
-    expect(status.at(-1), '断られた分まで「入れました」と数えた').toBe(
+    expect(d.getState().notice, '断られた分まで「入れました」と数えた').toBe(
       '1 件を「t-f1」へ入れました',
     );
   });

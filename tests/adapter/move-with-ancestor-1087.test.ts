@@ -163,7 +163,7 @@ describe('選んだ物のうち、祖先も選ばれている物は動かさな�
     expect(parentOf(r, 'f'), 'F が T に入っていない').toEqual(['t']);
     expect(parentOf(r, 'd'), 'D が F から外れた(行き先の直下へ出た)').toEqual(['f']);
     expect(r.parentCalls.map((c) => c.lid), 'D に disk への要求が出ている').toEqual(['f']);
-    expect(r.status.at(-1), '知らせが実際に動かした件数ではない').toBe('1 件を「t-t」へ入れました');
+    expect(r.d.getState().notice, '知らせが実際に動かした件数ではない').toBe('1 件を「t-t」へ入れました');
   });
 
   it('🔴 間に選ばれていない物が挟まっていても付いていく(F > M > D、F と D を選ぶ)', async () => {
@@ -182,6 +182,6 @@ describe('選んだ物のうち、祖先も選ばれている物は動かさな�
     await moveFlat(r, ['s1', 's2'], 't');
     expect(parentOf(r, 's1')).toEqual(['t']);
     expect(parentOf(r, 's2')).toEqual(['t']);
-    expect(r.status.at(-1)).toBe('2 件を「t-t」へ入れました');
+    expect(r.d.getState().notice).toBe('2 件を「t-t」へ入れました');
   });
 });

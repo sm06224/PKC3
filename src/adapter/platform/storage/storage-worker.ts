@@ -2010,6 +2010,32 @@ function writeParent(
   });
   if (parentLid === null) return;
   /**
+   * 🔴 **輪になる移動は断る ── 同じ tx の中で、新しい親から祖先を辿る**(#1087)。
+   *
+   * ## 何が起きていたか
+   * 2 つのタブで逆向きに移す(タブ A が X を Y の中へ、更新の届いていないタブ B が Y を X の中へ)と、
+   * 画面側の輪の検査(`app-state.ts`)は各タブの古い木しか見ないので両方通り、保存後に
+   * X・Y とその中身が**木のどこにも出なくなる**(最上位の判定は「親を持たない物」)。
+   * 🔑 だから最後の砦は**書く側の tx の中**に置く(読んでから書くまでの間に別のタブが書けない)。
+   * ⚠ 親が移す物自身のとき(自分の中へ)も、辿りの始点で当たるので同じ門で断る。
+   */
+  const seen = new Set<string>();
+  for (let cur: string | null = parentLid; cur !== null; ) {
+    if (cur === lid) {
+      throw new Error(
+        '移そうとした先が、移すフォルダの中に入っています(別のウィンドウで先に移されたかもしれません)。' +
+          '画面を読み込み直してから、もう一度お試しください。',
+      );
+    }
+    if (seen.has(cur)) break; // 既に輪が在るデータでも、ここで無限に回らない
+    seen.add(cur);
+    const up = database.selectValue(
+      `SELECT from_lid FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural' LIMIT 1`,
+      [cid, cur],
+    ) as string | null | undefined;
+    cur = up ?? null;
+  }
+  /**
    * 🔴 **ぶつかったら断る ── 黙って上書きしない**(#973)。
    *
    * ## 何が起きていたか
