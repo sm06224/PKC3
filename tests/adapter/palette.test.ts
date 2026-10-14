@@ -214,6 +214,30 @@ describe('操作を名前で探す(#425 段①)', () => {
       ).toBe(true);
     });
 
+    it('🔴 P9: 一覧を描いてから押せなくなった行を選んだら、黙らず「いま実行できません」と言う(対照群: 走った回は言わない)', async () => {
+      const said: { text: string; opts?: unknown }[] = [];
+      const { root } = setup({ showStatus: (text: string, opts?: unknown) => void said.push({ text, opts }) });
+      root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+      await tick();
+      // 対照群: 押せる行を選んで走った回は、断りを出さない
+      rowOf('view-query')!.click();
+      await tick();
+      await tick();
+      expect(said.map((x) => x.text), '走った回に断りが出ている').not.toContain('この操作はいま実行できません');
+      // 本命: 描いた後に、受け手のボタンが無くなった(状態が動いた)
+      root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
+      await tick();
+      const row = rowOf('view-query')!;
+      expect(row.disabled, '前提が崩れている(描いた時点で押せない)').toBe(false);
+      root.querySelector('[data-pkc-action="set-view"][data-pkc-view="query"]')!.remove();
+      row.click();
+      await tick();
+      await tick();
+      expect(said.filter((x) => x.text === 'この操作はいま実行できません')).toEqual([
+        { text: 'この操作はいま実行できません', opts: { kind: 'caution' } },
+      ]);
+    });
+
     it('🔴 やめれば何も起きない', async () => {
       const { root, sent } = setup();
       root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
@@ -1036,7 +1060,7 @@ describe('字幕ファイル(.srt)で書き出す(#1447)', () => {
       expect(row, '行が出ていない').toBeDefined();
       expect(row!.disabled, '時刻つきの行が無いのに押せることになっている').toBe(true);
       expect(whyOf('export-transcript-srt')).toContain(NOT_READY_PREFIX);
-      expect(whyOf('export-transcript-srt')).toContain('時刻のある行が無い');
+      expect(whyOf('export-transcript-srt')).toContain('行頭に時刻のある行があるときだけ効きます');
       expect(w.names).toHaveLength(0);
     } finally {
       w.restore();

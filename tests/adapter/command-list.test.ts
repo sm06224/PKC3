@@ -374,8 +374,13 @@ describe('#1206 `>` の一覧の動線', () => {
     expect(fromEditor.find((r) => r.id === 'format-ruby')!.why).not.toContain('操作を探す');
     // 対照群 2: 「本文の欄が要る」わけではない操作(2 ペインの編集の確定)は今までの理由のまま
     const commit = (rs: readonly { id: string; why: string }[]) => rs.find((r) => r.id === 'commit-edit')!.why;
-    expect(commit(commandRowsFor(root, d, appKeymap, '', null))).toContain('にいるときだけ効きます');
-    expect(commit(commandRowsFor(root, d, appKeymap, '', ta))).toContain('にいるときだけ効きます');
+    expect(commit(commandRowsFor(root, d, appKeymap, '', null))).toBe(
+      `${NOT_READY_PREFIX}2 ペインの編集で、原文か題名の欄にカーソルがあるときだけ効きます`,
+    );
+    // 🔴 P2: 欄に居るまま開いた一覧では「居るときだけ」と言わず、その場で押すキーを言う
+    expect(commit(commandRowsFor(root, d, appKeymap, '', ta))).toBe(
+      `${NOT_READY_PREFIX}2 ペインの編集で、原文か題名の欄にカーソルがあるときに、Ctrl + S か Ctrl + Enter を押して使う操作です`,
+    );
   });
 });
 

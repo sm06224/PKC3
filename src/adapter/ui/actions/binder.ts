@@ -5575,6 +5575,7 @@ export function commandRowsFor(
     isMac(),
     blockedReason,
     needsEditorField,
+    target !== null,
   ).filter((r) => r.id !== 'open-palette');
 }
 
@@ -5749,7 +5750,14 @@ export function openPaletteFor(
       appRecentCommands.push(picked);
       return;
     }
-    if (!editorCommand(picked)) return;
+    /**
+     * 🔴 **選んだ行が実行できなかったときは、黙らない**(#1087 の見直し 2026-10-14)。⚠ 直す前は何も言わずに閉じていた
+     *   (一覧を描いてから状態が動いて押せなくなった回)。左の `>` の一覧(`runCommandRow`)と同じ字を同じ 1 か所から出す。
+     */
+    if (!editorCommand(picked)) {
+      notify(COMMAND_NOT_READY_NOTE, CAUTION);
+      return;
+    }
     /**
      * 🔴 **記法を、開いたときの欄へ当てる**(#425 段②-b)。
      *
@@ -5758,7 +5766,10 @@ export function openPaletteFor(
      *   **user が選んでいない所に記法が入る**(本文が静かに壊れる向き)。
      * 🔑 「無言で捨てない」と「間違った所へ書かない」は両立する ── 断り文を出す。
      */
-    if (target === null) return;
+    if (target === null) {
+      notify(COMMAND_NOT_READY_NOTE, CAUTION);
+      return;
+    }
     if (!target.isConnected) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: FIELD_CHANGED });
       return;
@@ -5802,6 +5813,9 @@ export interface CommandEnv {
   readonly notify: (text: string, opts?: StatusOptions) => void;
 }
 
+/** 🔴 選んだ操作が、実行する時点で押せなくなっていたときの 1 行(左の `>` の一覧と「操作を探す」が同じ字を出す。1 か所)。 */
+export const COMMAND_NOT_READY_NOTE = 'この操作はいま実行できません';
+
 /** 相手のノートが決まったあとに走る実体。 */
 export type CommandWithEntry = (lid: string, env: CommandEnv) => void;
 
@@ -5836,7 +5850,7 @@ export function runCommandRow(
   if (cmd.needs === 'entry') {
     const exec = (opts.withEntry ?? COMMAND_WITH_ENTRY)[id];
     if (exec === undefined) {
-      env.notify('この操作はいま実行できません', CAUTION);
+      env.notify(COMMAND_NOT_READY_NOTE, CAUTION);
       return false;
     }
     void pickEntryInApp(
@@ -5859,7 +5873,7 @@ export function runCommandRow(
   }
   if (!runGlobalCommand(id, env.root, env.dispatcher, env.keymap, noop, env.notify)) {
     // ⚠ 描いてから状態が動いて押せなくなった回 ── 黙らない(dead click にしない)
-    env.notify('この操作はいま実行できません', CAUTION);
+    env.notify(COMMAND_NOT_READY_NOTE, CAUTION);
     return false;
   }
   opts.onDone?.();
