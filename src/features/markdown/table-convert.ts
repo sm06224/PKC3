@@ -692,6 +692,29 @@ export function tableConvertRefusal(at: TableAt, to: TableFormat): string | null
   return null;
 }
 
+/**
+ * 🔴 **この形変えで、戻せない情報が落ちるか**(#1087 の見直し 2026-10-14)。
+ *
+ * ⚠ 呼び側(`store-effects.ts`)は、落ちる回だけ**前の版を履歴に積む**(行・列を消す回と同じ扱い)。
+ *   落ちない回まで積むと、履歴が形変えの数だけ伸びる。
+ * 🔑 落ちるのは次の 2 つだけ(CSV の側にその情報を書く場所が無い ── マニュアル「表そのものを書き換える」):
+ *   - markdown → csv … **桁揃え**(`:---:` / `---:` / `:---`)が 1 列でも在る
+ *   - tsv / psv → markdown … **区切りの字**(戻すと `csv` の囲みになる)
+ * ⚠ 見るのは**原文**(`tableAt` が持たない区切りの行・囲みの見出し)── 本文が動いて表でなければ `false`。
+ */
+export function tableFormatDropsInfo(body: string, line: number, to: TableFormat): boolean {
+  const at = tableAt(body, line);
+  if (at === null || at.format === to) return false;
+  const lines = splitLines(body);
+  if (to === 'csv') {
+    const delim = lines[at.start + 1];
+    if (delim === undefined) return false;
+    return splitRow(delim).some((c) => c.includes(':'));
+  }
+  const open = (lines[at.start] ?? '').slice(at.quoteLead.length);
+  return /^\s*(?:`{3,}|~{3,})\s*(?:tsv|psv)\b/i.test(open);
+}
+
 /** 柵の長さ。⚠ 升の字が ``` で始まると囲みが**そこで閉じる**ので、必ず 1 本長くする。 */
 export function fenceMarkerFor(content: string): string {
   let longest = 0;
