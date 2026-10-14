@@ -36,7 +36,7 @@ export function createEditorModeSection(
       eselect.setAttribute('aria-label', '編集の仕方');
       // ⚠ **いつ効くか**を書く ── 書かないと「押したのに変わらない」に見える
       eselect.title =
-        '既定は「1 画面で編集(ライブ)」で、押した行だけがマークダウンの元の文になり、' +
+        '既定は「1 画面で編集(ライブ)」で、押した行だけが Markdown の元の文になり、' +
         'その場で書き換えられます。2 ペインは左に原文、右にプレビューが並びます。';
       for (const c of EDITOR_MODES) {
         const opt = document.createElement('option');

@@ -1633,7 +1633,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   // ── 1 面(ライブ)の行の欄
   {
     id: 'row-commit',
-    label: 'その行の編集を保存する',
+    label: 'その行の編集を確定する',
     contexts: ['row'],
     // ⚠ `Shift+Tab` を残す(着地前レビュー 9)── 直す前は `ke.key === 'Tab'` で
     //    **修飾を見ていなかった**ので `Shift+Tab` でも確定していた。和音一致に
