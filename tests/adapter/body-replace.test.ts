@@ -465,3 +465,23 @@ describe('🔴 置換の結果が編集欄へ映る(#1579)', () => {
     });
   });
 });
+
+/**
+ * 🔴 **小文字にすると長さが変わる字の後ろでも、正しい箇所を置き換える**(#1087、本文の書換の見直し)。
+ * 直す前は写しの添字で原文を切っていたので、`İ`(U+0130。小文字にすると 2 字)の後ろの置換が全部ずれた。
+ */
+describe('大小無視の置換と、長さが変わる字', () => {
+  it('🔴 `İ` の後ろの語を、ずれずに置き換える', () => {
+    expect(replaceAll('İstanbul ve Ankara', 'ankara', 'X')).toEqual({ body: 'İstanbul ve X', count: 1 });
+  });
+
+  it('🔴 `İ` が何個あっても、ずれが積み重ならない', () => {
+    const r = replaceAll('İİİ abc İ ABC', 'abc', 'x');
+    expect(r).toEqual({ body: 'İİİ x İ x', count: 2 });
+    expect(countMatches('İİİ abc İ ABC', 'abc'), '件数と置換が食い違う').toBe(2);
+  });
+
+  it('対照群: 長さが変わらない本文は今までどおり', () => {
+    expect(replaceAll('Ankara ankara', 'ANKARA', 'X')).toEqual({ body: 'X X', count: 2 });
+  });
+});

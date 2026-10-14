@@ -217,6 +217,11 @@ function splitUnescaped(v: string, sep: string): string[] {
  *   隠すと、そこだけ何の項目か分からなくなる(黙って失うのと同じ)。
  */
 const OTHER_LABELS: Readonly<Record<string, string>> = {
+  // 🔴 2 つ目の名前・会社・誕生日(1 つ目は本文の決まった欄へ入り、重ねた分だけここへ来る)
+  FN: '別の名前',
+  N: '別の名前',
+  ORG: '会社',
+  BDAY: '誕生日',
   ADR: '住所',
   LABEL: '住所(表記)',
   URL: 'ウェブ',
@@ -263,6 +268,9 @@ function otherLabel(name: string, params: readonly string[]): string {
  *   区切りとして割れてしまう(`ORG` が同じ作法で書かれている)。
  * ⚠ 空の欄は落とす ── vCard の住所は 7 欄あり、ふつう半分は空である。
  */
+/** 値が `;` で区切られた構造を持つ項目(写せない項目のうち、`readableParts` で読める字にする物)。 */
+const STRUCTURED: ReadonlySet<string> = new Set(['ADR', 'GENDER', 'CLIENTPIDMAP']);
+
 function readableParts(raw: string): string {
   return splitUnescaped(raw, ';')
     .map((x) => unescapeValue(x).trim())
@@ -396,19 +404,31 @@ export function parseVcf(text: string): VcfParseResult {
       case 'PRODID':
       case 'REV':
         break; // 中身ではなく書いた道具の情報 ── ノートに写す価値が無い
+      /**
+       * 🔴 **2 つ目以降は上書きしない ── 本文の行として残す**(#1087、取り込みの見直し)。
+       * ⚠ vCard 4.0 は ORG などを複数書ける(Apple の連絡先は `item1.ORG` / `item2.ORG` と書く)。
+       *   直す前は後の値で上書きしていたので、1 つ目の所属などが**黙って消えていた**。
+       */
       case 'FN':
-        cur.fn = decoded;
+        if (cur.fn !== '' && decoded !== '' && decoded !== cur.fn) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
+        else if (cur.fn === '') cur.fn = decoded;
         break;
-      case 'N':
-        cur.n = nameFromN(qpOut?.text ?? prop.value);
+      case 'N': {
+        const n = nameFromN(qpOut?.text ?? prop.value);
+        if (cur.n !== '' && n !== '' && n !== cur.n) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${n}`);
+        else if (cur.n === '') cur.n = n;
         break;
-      case 'ORG':
+      }
+      case 'ORG': {
         // 🔴 **繋がずに持つ**(#534 段②)── `;` は会社と部署の区切りなので、
         //    ここで空白に潰すと書き出しで部署が消える
-        cur.orgParts = splitUnescaped(qpOut?.text ?? prop.value, ';')
+        const parts = splitUnescaped(qpOut?.text ?? prop.value, ';')
           .map((x) => unescapeValue(x).trim())
           .filter(Boolean);
+        if (cur.orgParts.length > 0 && parts.length > 0) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${parts.join(' ')}`);
+        else if (cur.orgParts.length === 0) cur.orgParts = parts;
         break;
+      }
       case 'TEL':
       case 'EMAIL': {
         /**
@@ -437,7 +457,8 @@ export function parseVcf(text: string): VcfParseResult {
         break;
       }
       case 'BDAY':
-        cur.birthday = decoded;
+        if (cur.birthday !== '' && decoded !== '' && decoded !== cur.birthday) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${decoded}`);
+        else if (cur.birthday === '') cur.birthday = decoded;
         break;
       case 'NOTE':
         if (decoded !== '') cur.notes.push(decoded);
@@ -467,7 +488,10 @@ export function parseVcf(text: string): VcfParseResult {
         }
         // 🔴 写せない項目は本文の行として残す(黙って失わない)
         // ⚠ ただし**読める字**で ── 生の `;;東京都…;渋谷区;…` を出さない(#534 段③)
-        const shown = readableParts(qpOut?.text ?? prop.value);
+        // ⚠ `;` で割るのは**構造を持つ項目だけ**(住所など)── URL の `;jsessionid=…` を割ると、リンクが壊れる(#1087)
+        const shown = STRUCTURED.has(prop.name)
+          ? readableParts(qpOut?.text ?? prop.value)
+          : decoded;
         if (shown !== '') cur.others.push(`- ${label}: ${shown}`);
       }
     }

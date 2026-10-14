@@ -92,6 +92,16 @@ describe('importVcfFiles ── 実行部', () => {
     expect(h.notices.join('')).toContain('連絡先 1 件');
   });
 
+  it('🔴 Shift_JIS の .vcf も文字化けせずに取り込む(この口が文字コードを見分ける読み方を通る)', async () => {
+    const h = harness();
+    const enc = new TextEncoder();
+    const bytes = new Uint8Array([
+      ...enc.encode('BEGIN:VCARD\r\nVERSION:3.0\r\nFN:'), ...new Uint8Array([0x8e, 0x52, 0x93, 0x63, 0x20, 0x91, 0xbe, 0x98, 0x59]), ...enc.encode('\r\nEND:VCARD\r\n'),
+    ]);
+    await importVcfFiles(h.d, h.deps, [new File([bytes], 'a.vcf')]);
+    expect(h.written[0]!.title).toBe('山田 太郎');
+  });
+
   it('名前の無いカードには番号名を振り、注意で言う(黙って捨てない)', async () => {
     const h = harness();
     const noName = 'BEGIN:VCARD\r\nTEL:090\r\nEND:VCARD';

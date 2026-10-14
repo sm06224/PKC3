@@ -98,6 +98,18 @@ describe('importIcsFiles ── 実行部', () => {
     expect(h.notices.join('')).toBe('予定 2 件を取り込みました');
   });
 
+  it('🔴 Shift_JIS の .ics も文字化けせずに取り込む(この口が文字コードを見分ける読み方を通る)', async () => {
+    const h = harness();
+    const enc = new TextEncoder();
+    const bytes = new Uint8Array([
+      ...enc.encode('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260825\r\nSUMMARY:'),
+      ...new Uint8Array([0x8e, 0x52, 0x93, 0x63, 0x20, 0x91, 0xbe, 0x98, 0x59]),
+      ...enc.encode('\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'),
+    ]);
+    await importIcsFiles(h.d, h.deps, [new File([bytes], 'a.ics')]);
+    expect(h.written[0]!.body).toContain('山田 太郎');
+  });
+
   it('🔴 読めなかった物は種類ごとに数えて言う(予定は落とさない)', async () => {
     const h = harness();
     const ics = wrap(
@@ -182,9 +194,10 @@ describe('importIcsFiles ── 実行部', () => {
     h.d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '本文\n' });
     const f = icsFile(wrap(TRIP));
     // 読み込みの最中に user が編集を始めた、を作る
-    f.text = async () => {
+    // ⚠ 取り込みは文字コードを見分けるためにバイトで読む(`readImportText`)── 読む口は `arrayBuffer`
+    f.arrayBuffer = async () => {
       h.d.dispatch({ type: 'START_EDIT' });
-      return wrap(TRIP);
+      return new TextEncoder().encode(wrap(TRIP)).buffer as ArrayBuffer;
     };
     expect(await importIcsFiles(h.d, h.deps, [f])).toBeNull();
     expect(h.written, '編集中に書いた').toHaveLength(0);

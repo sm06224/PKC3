@@ -2822,18 +2822,23 @@ export function connectStoreEffects(
                *   「**既に付いていました**」という**事実と違う字**が出ていた。
                */
               const applied = applyTagsToBody(body, ev.tags, ev.mode);
-              for (const [tag, why] of applied.outcomes) {
-                if (why === 'wrote') bump(wroteBy, tag);
-                else if (why === 'limit') bump(limitBy, tag);
-                else bump(skippedBy, tag);
+              /**
+               * 🔴 **数えるのは書けた後**(#1087、本文の書換の見直し)。直す前は書く前に数えていたので、
+               *   別のタブと重なって書けなかったノートも「N 件に付けました」に入っていた
+               *   (同じ知らせに「3 件は書けませんでした」も出るので、合計が合わなかった)。
+               */
+              const tally = (): void => {
+                for (const [tag, why] of applied.outcomes) {
+                  if (why === 'wrote') bump(wroteBy, tag);
+                  else if (why === 'limit') bump(limitBy, tag);
+                  else bump(skippedBy, tag);
+                }
+              };
+              if (applied.body === null) {
+                tally(); // 書かない回(既に付いていた / 上限)はそのまま数える
+                continue;
               }
-              if (applied.body === null) continue;
               const newBody = applied.body;
-              // ⚠ 外した**後の本文**にまだ残っているか(= 本文の行に書いてある)
-              if (ev.mode === 'remove') {
-                const inBody = collectEntryTags(newBody).inBody;
-                if (ev.tags.some((tag) => inBody.some((t2) => sameTag(t2, tag)))) stillInBody++;
-              }
               const ext = extractMeta(t.archetype, newBody);
               const stamps = await store.persistEntry(
                 {
@@ -2851,6 +2856,12 @@ export function connectStoreEffects(
               if (stamps.conflict === true) {
                 failed++;
                 continue;
+              }
+              tally();
+              // ⚠ 外した**後の本文**にまだ残っているか(= 本文の行に書いてある)── これも書けた分だけ数える
+              if (ev.mode === 'remove') {
+                const inBody = collectEntryTags(newBody).inBody;
+                if (ev.tags.some((tag) => inBody.some((t2) => sameTag(t2, tag)))) stillInBody++;
               }
               stamp(t.lid, stamps);
               if (!disposed)

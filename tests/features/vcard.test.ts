@@ -490,3 +490,37 @@ describe('isVcfFileName', () => {
     expect(isVcfFileName('note.md')).toBe(false);
   });
 });
+
+/**
+ * 🔴 **同じ項目が 2 つ以上あっても、前の値を消さない / URL を割らない**(#1087、取り込みの見直し)。
+ * 直す前は後の ORG で前の ORG を上書きし(Apple の連絡先は `item1.ORG` / `item2.ORG` と書く)、
+ * URL の `;jsessionid=…` を空白に変えてリンクを壊していた。
+ */
+describe('parseVcf ── 重なった項目と URL', () => {
+  const card = (...lines: string[]): string => ['BEGIN:VCARD', 'VERSION:4.0', 'FN:二つの所属', ...lines, 'END:VCARD'].join('\r\n');
+
+  it('🔴 2 つ目の ORG は、1 つ目を消さずに本文の行として残る', () => {
+    const { cards } = parseVcf(card('item1.ORG:一つ目の会社;営業部', 'item2.ORG:二つ目の会社'));
+    expect(cards[0]!.orgParts).toEqual(['一つ目の会社', '営業部']);
+    expect(cards[0]!.others.join('\n'), '2 つ目の所属が消えた').toContain('二つ目の会社');
+    // 🔑 項目名は画面の字で出す(生の `ORG` を見せない)
+    expect(cards[0]!.others.join('\n')).toContain('- 会社: 二つ目の会社');
+  });
+
+  it('2 つ目の誕生日・名前も消さずに残す(同じ値なら重ねない)', () => {
+    const { cards } = parseVcf(card('BDAY:1990-01-02', 'BDAY:1991-03-04', 'FN:二つの所属'));
+    expect(cards[0]!.birthday).toBe('1990-01-02');
+    expect(cards[0]!.others.join('\n')).toContain('- 誕生日: 1991-03-04');
+    expect(cards[0]!.others.join('\n'), '同じ名前を重ねた').not.toContain('二つの所属');
+  });
+
+  it('🔴 URL の `;` を割らない(リンクを壊さない)', () => {
+    const { cards } = parseVcf(card('URL:https://x.example/p;jsessionid=abc'));
+    expect(cards[0]!.others.join('\n')).toContain('https://x.example/p;jsessionid=abc');
+  });
+
+  it('対照群: 住所は今までどおり欄を読める字にする', () => {
+    const { cards } = parseVcf(card('ADR;TYPE=HOME:;;渋谷1-2-3;渋谷区;東京都;150-0001;日本'));
+    expect(cards[0]!.others.join('\n')).toContain('渋谷1-2-3 渋谷区 東京都 150-0001 日本');
+  });
+});
