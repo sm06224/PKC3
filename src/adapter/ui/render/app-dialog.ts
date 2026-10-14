@@ -170,6 +170,22 @@ export function isAppDialogOpen(): boolean {
   return frame !== null && frame.dialog.open;
 }
 
+/**
+ * 🔴 **ダイアログが閉じてから `run` を呼ぶ**(開いていなければすぐ呼ぶ)。
+ *
+ * ⚠ `close` の聞き手は、器が `showModal` するときに登録した「焦点を返す」ものが先に走る
+ *   (`once` で後から足すので順番が決まっている)── 呼ばれた時点で焦点は元の欄に戻っている。
+ * 🔑 行の入力欄はダイアログが開いている間は確定を見送る(`row-swap.ts`)ので、その確定を
+ *   待ってから続きを撃ちたい呼び側が使う。
+ */
+export function whenAppDialogClosed(run: () => void): void {
+  if (frame === null || !frame.dialog.open) {
+    run();
+    return;
+  }
+  frame.dialog.addEventListener('close', run, { once: true });
+}
+
 function ensureFrame(host: HTMLElement): Frame {
   if (frame !== null && host.contains(frame.dialog)) return frame;
   const dialog = document.createElement('dialog');

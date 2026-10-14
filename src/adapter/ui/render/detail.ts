@@ -82,7 +82,7 @@ import { installSectionBox, syncSectionBoxSaving } from './section-box';
 import { installCodeBox, syncCodeBoxSaving } from './code-box';
 import { locateCodeFence } from '@features/markdown/code-fence-edit';
 import { listAppendTargets, sectionRange } from '@features/markdown/append-target';
-import { RowSwap } from './row-swap';
+import { RowSwap, replaceChanged } from './row-swap';
 import { takeBodyFocus } from './focus-request';
 import { isTouchOnly } from './touch-device';
 import { DIFF_FILE_TOO_LARGE_NOTE, diffSummary, shortStamp } from '@features/revision/diff-view';
@@ -2685,19 +2685,20 @@ export class DetailRenderer {
     /**
      * 🔴 **外から来た本文を欄へ映す**(#1579)。畳んだ設定の行は**畳み直す**
      * (置換の検索語が設定の行に当たっても、欄と属性が食い違わない)。
-     * ⚠ `input` を撃たない ── 撃つと binder が render の中から dispatch する。
-     *   プレビューは下の listener と同じ `follow` を直に押す。
+     * 🔴 **書くのは変わった範囲だけを `insertText`(= `execCommand`)で**(binder の `writeBack` と同じ口)。
+     *   `ta.value =` はブラウザの取り消し履歴(Ctrl+Z)を捨てるので、「すべて置換」の後に
+     *   Ctrl+Z を押しても戻らなかった。⚠ `insertText` は `input` を撃つ ── その `input` で
+     *   binder が同じ本文を state へ返す(すでに同じ字なので変わらない。`Dispatcher` は
+     *   処理中の dispatch を待ち行列に積むので、render の中から撃っても入れ子にならない)。
+     * ⚠ `execCommand` は焦点の在る欄にしか効かないので、欄へ焦点を入れる(`writeBack` と同じ)。
      */
     this.syncBody = (text) => {
       if (text === fullText()) return;
       foldedNow = isAttachment ? foldAttachmentHead(text) : null;
-      if (foldedNow === null) {
-        ta.removeAttribute(HIDDEN_HEAD_ATTR);
-        ta.value = text;
-      } else {
-        ta.setAttribute(HIDDEN_HEAD_ATTR, foldedNow.head);
-        ta.value = foldedNow.rest;
-      }
+      if (foldedNow === null) ta.removeAttribute(HIDDEN_HEAD_ATTR);
+      else ta.setAttribute(HIDDEN_HEAD_ATTR, foldedNow.head);
+      ta.focus();
+      replaceChanged(ta, foldedNow === null ? text : foldedNow.rest);
       follow.push(parseFrontmatter(text).body, previewOpts);
       follow.flush();
     };

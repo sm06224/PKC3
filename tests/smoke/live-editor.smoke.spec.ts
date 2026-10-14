@@ -1378,5 +1378,58 @@ test('🔴 インライン編集中に「雛形を入れる」を押すと、行
     '雛形の一覧が出ない(押しても何も起きない ── user 報告の形)',
   ).toBeVisible({ timeout: 5000 });
 
+  /**
+   * 🔴 **1 面の行の欄で、短縮語 + `Tab` → 雛形が入り、もう 1 回の `Tab` で `${…}` が選ばれる**(#1087)。
+   * 新しく起動せず、この道中に足す(binder の `onRowSnippetTab` は `capture` 段で行の確定より先に見る)。
+   * 対照群:当たらない字の後の `Tab` は今までどおり行の確定。
+   */
+  await page.keyboard.press('Escape');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  // 雛形そのものは 2 列で作る(snippet.smoke と同じ手順)。作ったら既定の 1 面へ戻す
+  await page.evaluate(() => localStorage.setItem('pkc3.editor-mode', 'split'));
+  await createEntry(page, 'snippet');
+  const snipBody = page.locator('[data-pkc-field="editor-body"]');
+  await expect(snipBody, '雛形が編集の形で開いていない').toBeVisible();
+  await snipBody.fill('---\nabbr: addr\n---\n〒100-0000 ${宛名} 様 ${電話}');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await page.evaluate(() => localStorage.removeItem('pkc3.editor-mode'));
+  await createEntry(page, 'text');
+  // 行を開いてから(行が無いと「雛形を入れる」は一覧を出さない)、雛形が索引に載るまで待つ
+  // (一覧は開いた時点の索引を握るので毎回開き直す)
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await expect(live.locator('[data-pkc-field="row-source"]'), '前提: 本文の行が開いていない').toBeVisible();
+  const pickRows = page.locator('[data-pkc-field="pick-snippet"]');
+  await expect(async () => {
+    await clickReal(page, '[data-pkc-action="insert-snippet"]');
+    await expect(pickRows.first()).toBeVisible();
+    const hit = await pickRows.filter({ hasText: 'addr' }).count();
+    await page.keyboard.press('Escape');
+    await expect(pickRows.first()).toBeHidden();
+    expect(hit, '雛形(addr)がまだ索引に載っていない').toBeGreaterThan(0);
+  }).toPass({ timeout: 15_000 });
+  const row2 = live.locator('[data-pkc-field="row-source"]');
+  await expect(row2, '前提: 一覧を閉じた後も行が開いている').toBeVisible();
+  // ① 短縮語 + Tab → 行の欄に雛形が入り、行は開いたまま
+  await row2.fill('addr');
+  await row2.press('End');
+  await row2.press('Tab');
+  await expect(row2, '短縮語 + Tab で行の欄に雛形が入っていない').toHaveValue('〒100-0000 ${宛名} 様 ${電話}');
+  await expect(row2, '雛形を入れたのに行が確定して閉じた').toBeVisible();
+  const picked = (): Promise<string> =>
+    row2.evaluate((el) => {
+      const t = el as HTMLTextAreaElement;
+      return t.value.slice(t.selectionStart, t.selectionEnd);
+    });
+  expect(await picked(), '最初の ${…} が選ばれていない').toBe('${宛名}');
+  // ② もう 1 回 Tab → 次の ${…} が選ばれ、行は開いたまま
+  await row2.press('Tab');
+  await expect(row2, '${…} 送りの Tab で行が閉じた').toBeVisible();
+  expect(await picked(), '2 回目の Tab で次の ${…} が選ばれていない').toBe('${電話}');
+  // ③ 対照群:当たらない字の後の Tab は、今までどおり行の確定(行が閉じる)
+  await row2.fill('zzz');
+  await row2.press('End');
+  await row2.press('Tab');
+  await expect(live.locator('[data-pkc-field="row-source"]'), '当たらない Tab で行が確定しない').toHaveCount(0);
+
   expect(errors, 'ページ例外が出ている').toEqual([]);
 });

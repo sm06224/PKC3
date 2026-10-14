@@ -108,6 +108,44 @@ describe('次の場所(Tab)', () => {
 });
 
 /**
+ * 🔴 **文中のコード(`` `${HOME}` ``)の印も、塊と同じ規則で絞る**(#1087)。
+ * 直す前は塊(```)だけが例外で、段落の中の `${HOME}` に `Tab` が毎回飛んだ。
+ */
+describe('文中コードの中の印', () => {
+  const FAR = `- 牛乳\n${'あ'.repeat(500)}\n環境変数は \`\${HOME}\` です\n`;
+
+  it('🔴 500 字先の文中コードの中の ${HOME} は、caret が外に居れば印にならない', () => {
+    expect(nextSnippetSlot(FAR, 0)).toBe(null);
+    expect(nextSnippetSlot(FAR, 4)).toBe(null);
+  });
+
+  it('🔴 対照群:同じ印が文中コードの外(離れていても)なら従来どおり飛ぶ', () => {
+    expect(nextSnippetSlot(`- 牛乳\n${'あ'.repeat(500)}\n環境変数は \${HOME} です\n`, 0)?.label).toBe('HOME');
+  });
+
+  it('対照群:caret が同じ文中コードの中に居れば、次の印へ飛べる', () => {
+    const t = `\`\${a}${'x'.repeat(10)}\${b}\``;
+    expect(nextSnippetSlot(t, 5)?.label).toBe('b');
+  });
+
+  it('対照群:近ければ(雛形が文中コードを含む形)文中コードの中の印へも飛べる', () => {
+    const t = '題 ${題} 例: `${コマンド}`';
+    expect(nextSnippetSlot(t, t.indexOf('${題}') + 4)?.label).toBe('コマンド');
+  });
+
+  it('閉じない ` は文中コードではない(以後を塊にしない)', () => {
+    const t = `` + '`' + 'あ'.repeat(300) + '\n${外}';
+    expect(nextSnippetSlot(t, 0)?.label).toBe('外');
+  });
+
+  it('長さの違う ` の並びは閉じにならない / 同じ長さなら閉じる', () => {
+    const far = 'あ'.repeat(300);
+    expect(nextSnippetSlot('x' + far + '``${a}` y', 0)?.label, '`` を ` で閉じた').toBe('a');
+    expect(nextSnippetSlot('x' + far + '``${a}``', 0), '`` … `` が文中コードにならない').toBe(null);
+  });
+});
+
+/**
  * 🔴 **コードの塊の中の `${HOME}` は、遠くから `Tab` を取らない**(#1166)。
  *
  * ⚠ 直す前は本文の全部を前へ向かって探したので、500 字先の ``` の中の `${HOME}`

@@ -1672,3 +1672,27 @@ export function insertText(ta: HTMLTextAreaElement, text: string): void {
   ta.selectionEnd = from + text.length;
   ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
+/**
+ * 欄の本文を `nextText` に揃える。**前後で同じ字は触らず、違う真ん中だけ** `insertText` で置き換える
+ * (Ctrl+Z の履歴に載る)。`insertText` が `input` を撃つので、ここでは撃たない。
+ * 何も変わらないときだけ、以前と同じく `input` を 1 回撃つ(書き込み口の約束を保つ)。
+ */
+export function replaceChanged(ta: HTMLTextAreaElement, nextText: string): void {
+  const cur = ta.value;
+  if (cur === nextText) {
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+  let head = 0;
+  const max = Math.min(cur.length, nextText.length);
+  while (head < max && cur[head] === nextText[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < max - head &&
+    cur[cur.length - 1 - tail] === nextText[nextText.length - 1 - tail]
+  )
+    tail += 1;
+  ta.setSelectionRange(head, cur.length - tail);
+  insertText(ta, nextText.slice(head, nextText.length - tail));
+}

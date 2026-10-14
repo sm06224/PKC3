@@ -162,22 +162,58 @@ function fenceRegions(text: string): Array<[number, number]> {
 }
 
 /**
+ * 文中のコード(`` `…` ``)の範囲(開く ` の位置 〜 閉じる ` の終わり)。
+ *
+ * ⚠ **行の中だけで閉じるものを数える**(閉じなければ文中コードではない ── 本文の ` 1 つで
+ *   以後の全部を塊にしない)。長さの違う ` の並びは閉じにならない(CommonMark と同じ)。
+ * ⚠ 柵の中の行も同じ走り方をしてよい ── 行の中で閉じる組は柵の範囲の内側に収まるので、
+ *   `nextSnippetSlot` が先に柵(`fenceRegions`)に当てて答えは変わらない。
+ */
+function inlineCodeRegions(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let at = 0;
+  for (const line of text.split('\n')) {
+    const lineStart = at;
+    at += line.length + 1;
+    if (!line.includes('`')) continue;
+    let open: { idx: number; len: number } | null = null;
+    for (const m of line.matchAll(/`+/g)) {
+      const idx = m.index!;
+      const len = m[0].length;
+      if (open === null) open = { idx, len };
+      else if (open.len === len) {
+        out.push([lineStart + open.idx, lineStart + idx + len]);
+        open = null;
+      } else if (open.len < len) {
+        // 長いほうの並びは、前の開きの閉じにならない ── その並びを新しい開きにする
+        open = { idx, len };
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * 🔴 **次に埋める場所**(`Tab` が呼ぶ)。
  *
  * ⚠ **そのつど走査する**(位置を覚えない)── 覚えると、間に打った 1 文字で全部ずれる。
  * ⚠ 見つからなければ `null` ── 呼び側は **`Tab` を素通しする**(既定の焦点移動が
  *   生きる)。⚠ ここで常に握ると、編集欄から `Tab` で出られなくなる。
  * ⚠ コードの塊の中の印は `FENCED_SLOT_REACH` の規則で絞る(上)。
+ * 🔑 **文中のコード(`` `${HOME}` ``)も同じ規則**で絞る ── シェルや JS の `${…}` は
+ *   段落の中にも普通に書くので、塊だけを例外にすると、文中の 1 語に `Tab` が毎回飛ぶ。
  *
  * @param from この位置**以降**で探す(`caret` を渡す)
  */
 export function nextSnippetSlot(text: string, from: number): SnippetSlot | null {
   const slots = snippetSlots(text);
-  let fences: Array<[number, number]> | null = null;
+  let regions: Array<[number, number]> | null = null;
   for (const s of slots) {
     if (s.start < from) continue;
-    fences ??= fenceRegions(text);
-    const r = fences.find(([a, b]) => s.start >= a && s.start <= b);
+    if (regions === null) {
+      regions = [...fenceRegions(text), ...inlineCodeRegions(text)];
+    }
+    const r = regions.find(([a, b]) => s.start >= a && s.start <= b);
     if (r === undefined) return s;
     if (from >= r[0] && from <= r[1]) return s;
     if (s.start - from <= FENCED_SLOT_REACH) return s;

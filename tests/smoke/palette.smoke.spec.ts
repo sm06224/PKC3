@@ -687,7 +687,30 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
     `hello:${leftColIconName}: world`,
   );
 
-  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+  /**
+   * 🔴 **2 列の編集で「すべて置換」(操作を探すから)→ Ctrl+Z で置き換える前に戻る**(#1087)。
+   * ⚠ `syncBody` が `ta.value =` で書くと、ブラウザの取り消し履歴が捨てられて Ctrl+Z が効かない
+   *   (unit の happy-dom では観測できない)。同じ起動の続きに足す(新しい起動は足さない)。
+   */
+  const before = 'りんごとみかんとりんご';
+  await ta.fill(before);
+  await clickReal(page, '[data-pkc-action="toggle-replace"]');
+  await page.locator('[data-pkc-field="replace-find"]').fill('りんご');
+  await page.locator('[data-pkc-field="replace-with"]').fill('もも');
+  await page.keyboard.press('Control+Shift+P');
+  await expect(dialog, '置換のためにパレットが開かない').toBeVisible();
+  await filter.fill('すべて置換');
+  await expect(
+    page.locator('[data-pkc-field="palette-row"][data-pkc-command="replace-all"]'),
+    '操作を探すの「すべて置換」が押せない',
+  ).toBeEnabled();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(ta, '「すべて置換」が 2 列の欄に映っていない').toHaveValue('ももとみかんともも');
+  await page.keyboard.press('Control+z');
+  await expect(ta, '置換の直後の Ctrl+Z で置き換える前に戻らない(取り消し履歴が捨てられている)').toHaveValue(before);
+
+  expect(errors,`page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
 /**
