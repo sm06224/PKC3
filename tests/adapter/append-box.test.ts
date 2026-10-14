@@ -110,6 +110,7 @@ function setup(metas: EntryMeta[], bodies: Record<string, string>) {
   return {
     root,
     d,
+    box,
     persisted,
     disk,
     q,
@@ -294,6 +295,21 @@ describe('追記(P8 段⑧)', () => {
       s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
       await tick();
       expect(inputOf(s.q).value, '通った追記の字が戻ってきた').toBe('');
+    });
+
+    it('🔴 まだ送っていない字は、預かった分も今打っている分も `pendingTexts` で全部出る(添付の整理が読む)', async () => {
+      const s = two();
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log' });
+      await tick();
+      type(s.q, '![](asset:k-a)');
+      s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'log2' });
+      await tick();
+      type(s.q, '![](asset:k-b)');
+      expect(s.box.pendingTexts().sort()).toEqual(['![](asset:k-a)', '![](asset:k-b)']);
+      // 送った分は出ない(ノートに書かれたので、整理の走査が拾う)
+      s.q('[data-pkc-action="append-entry"]')!.click();
+      await tick();
+      expect(s.box.pendingTexts()).toEqual(['![](asset:k-a)']);
     });
 
     it('打った字を消して離れたノートは、戻ると空のまま', async () => {

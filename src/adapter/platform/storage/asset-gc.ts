@@ -13,6 +13,7 @@
  * 無い dangling(meta だけ / bytes だけ)も同じ purge で回収される。
  */
 import { humanBytes } from '@features/human-bytes';
+import { assetRefsIn } from '@features/asset/asset-ref-scan';
 export interface AssetGcPorts {
   /** sqlite assets 表(meta)。 */
   listMetas(): Promise<Array<{ key: string; size: number | null }>>;
@@ -50,10 +51,65 @@ export interface AssetGcPorts {
 export function strayBlobKeys(
   all: readonly { storeKey: string; cid: string }[],
   knownCids: readonly string[],
+  /**
+   * 🔴 **いまの保存先が、器を全部知っている本物の保存先か**(#1087、添付の見直し)。
+   * ⚠ 保存先がメモリへ落ちた回(この端末の保存領域を開けなかった)は、DB が空で新しい器が 1 つだけ在る。
+   *   添付の bytes の置き場(IndexedDB)は別なので**本来の器の bytes がそのまま残っている** ──
+   *   ここで「一覧に無い器 = 残骸」と読むと、**user の添付を全部消す**。
+   * ⚠ 省けない引数にする(呼び手が書き忘れても tsc が黙らないように)。
+   */
+  durable: boolean,
 ): string[] {
-  if (knownCids.length === 0) return [];
+  if (!durable || knownCids.length === 0) return [];
   const known = new Set(knownCids);
   return all.filter((b) => !known.has(b.cid)).map((b) => b.storeKey);
+}
+
+/**
+ * 🔴 **ノートと履歴の外に在る「まだ保存していない字」の中の参照**(#1087、添付の見直し)。
+ * 追記欄に貼ってまだ送っていない画像・端末に残った編集の控え(閉じる前に保存しなかった下書き)は、
+ * bytes は置かれているのに参照が**その字の中にしか無い**。整理の走査(worker)はノートと履歴しか
+ * 見ないので、これを足さないと「使っていない」に見えて消していた。
+ * ⚠ 判定は走査と同じ 1 本(`assetRefsIn`)── 規則を増やさない。
+ */
+export function refsInPendingTexts(
+  texts: readonly string[],
+  candidates: readonly string[],
+): string[] {
+  const left = new Set(candidates);
+  const out: string[] = [];
+  for (const text of texts) {
+    if (left.size === 0) break;
+    for (const key of assetRefsIn(text, left)) {
+      left.delete(key);
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+/**
+ * 走査の口に「まだ保存していない字の中の参照」を合わせる(#1087、添付の見直し)。
+ * ⚠ 配線(`main.ts`)は test から実行されないので、合わせ方はここに置いて test する。
+ * ⚠ 字を読めなければ投げる(整理を止める側へ倒す ── 読めないまま消すと、字の中の画像を消しうる)。
+ */
+export function withPendingRefs(
+  scan: (candidates: string[]) => Promise<string[]>,
+  pendingTexts: () => Promise<readonly string[]>,
+): (candidates: string[]) => Promise<string[]> {
+  return async (candidates) => {
+    const fromStore = await scan(candidates);
+    const texts = await pendingTexts();
+    return [...new Set([...fromStore, ...refsInPendingTexts(texts, candidates)])];
+  };
+}
+
+/**
+ * 残骸の判定に使ってよい保存先か(`strayBlobKeys` の `durable`)。⚠ 判定はここ 1 つ ──
+ * 呼び手は「いまの保存先」(昇格・開き直しの後の値)を渡す。
+ */
+export function isDurableVfs(vfs: 'opfs-sahpool' | 'memory'): boolean {
+  return vfs !== 'memory';
 }
 
 export interface OrphanScan {

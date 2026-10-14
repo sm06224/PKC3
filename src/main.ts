@@ -191,7 +191,9 @@ import { countUnread, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
+  isDurableVfs,
   strayBlobKeys,
+  withPendingRefs,
 } from '@adapter/platform/storage/asset-gc';
 import {
   LEGACY_HOST_NOTICE,
@@ -360,7 +362,7 @@ import {
   type AttachDeps,
 } from '@adapter/ui/actions/attach';
 import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
-import { createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
+import { confirmSavedBack, createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
@@ -967,6 +969,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   let client: StoreClientLike;
   let init: InitResult;
+  /**
+   * 🔴 **いまの保存先**(#1087、添付の見直し)。`init` は起動の 1 回だけ決まるが、昇格(`conn.promote`)と
+   *   救出の開き直し(`reopenStorage`)は保存先を開き直す ── そこでメモリへ落ちることがある。
+   *   添付の整理(残骸の判定)はこちらを読む(起動のときの値で読むと、メモリへ落ちた回に本来の添付を消しうる)。
+   */
+  let liveVfs: InitResult['vfs'] | null = null;
   let sync: TabSync;
   let followerConn: ProxyStoreClient | null = null;
   /**
@@ -2383,6 +2391,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       try {
         await conn.promote(async () => {
           const r = await initStorage(portable);
+          liveVfs = r.init.vfs;
           // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
           armPersist(r.client);
           // 🔴 昇格したタブは自分の worker を開いた当事者 ── 起動のときの注意は通っていないのでここで 1 回
@@ -2722,10 +2731,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     replaceAsset: async (lid, save, bytes) => {
       if (dispatcher.getState().phase !== 'ready') return false;
       let ok = false;
+      let newKey = '';
       await withAssetGate.queued(async () => {
         const mime = resolveMime(save.name, '');
         const blob = new Blob([bytes]);
         const { key, hash } = assetKeyFromHash((await assets.hash(blob)).hash);
+        newKey = key;
         await blobs.put(cid, key, blob);
         await client.request({
           op: 'putAssetMeta',
@@ -2756,6 +2767,23 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         const after = dispatcher.getState();
         ok = after.phase === 'ready' && after.entryMetas.get(lid)?.archetype === 'attachment';
       });
+      /**
+       * 🔴 **本当に書けたかを、disk のノートで確かめてから「取り込みました」と言う**(#1087、添付の見直し)。
+       * ⚠ 書くのは非同期の効果(`REQUEST_ASSET_REPLACE`)で、容量の拒否・DB の破損で落ちうる。
+       *   直す前は撃った直後に成功と返していたので、棚(書きかけの控え)を捨ててから失敗が出て、
+       *   新しい版の bytes はどのノートからも指されないまま次の整理で消えていた。
+       * ⚠ 待つのは門の**外**(効果の列が門を待つ形になっても固まらないように)。
+       * ⚠ 確かめられなければ成功と言わない(棚は残り、次に引き取れる)。
+       */
+      if (ok) {
+        ok = await confirmSavedBack({
+          settle: async () => {
+            await storeEffects?.settled();
+          },
+          readBody: async () => (await client.request({ op: 'getBody', cid, lid })) ?? null,
+          key: newKey,
+        });
+      }
       return ok;
     },
     // 🔴 **作ったノートを窓へ教える**(#217)── 教えないと 2 回目の保存で
@@ -3553,6 +3581,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           // 🔴 **掴んでいる手を先に離す** ── これが無いと黙って memory へ落ちる
           client.terminate();
           const re = await initStorage(portable);
+          liveVfs = re.init.vfs;
           fresh = re.client;
           return { fallbackReason: re.init.fallbackReason };
         },
@@ -5011,17 +5040,28 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                   if (!isUnknownOpError(err)) throw err;
                   return [];
                 }
-                return strayBlobKeys(await blobs.listAll(), cids);
+                return strayBlobKeys(await blobs.listAll(), cids, isDurableVfs(liveVfs ?? init.vfs));
               },
               deleteStrayBlob: (storeKey: string) => blobs.deleteStoreKey(storeKey),
-              scanReferenced: async (candidates: string[]) =>
-                (
-                  await client.request({
-                    op: 'scanAssetRefs',
-                    cid,
-                    candidates,
-                  })
-                ).referenced,
+              /**
+               * 🔴 **まだ保存していない字の中の参照も「使っている」に数える**(#1087、添付の見直し。`withPendingRefs`)──
+               *   追記欄に貼って送っていない画像と、端末に残った編集の控え。
+               * ⚠ 控えを読めなければ整理を止める(投げる)── 読めないまま消すと、控えの中の画像を消しうる。
+               */
+              scanReferenced: withPendingRefs(
+                async (candidates: string[]) =>
+                  (
+                    await client.request({
+                      op: 'scanAssetRefs',
+                      cid,
+                      candidates,
+                    })
+                  ).referenced,
+                async () => [
+                  ...appendBox.pendingTexts(),
+                  ...(await draftStore.list(cid)).map((r) => r.body),
+                ],
+              ),
               deleteBlob: (key: string) => blobs.delete(cid, key),
               deleteMeta: async (key: string) => {
                 await client.request({ op: 'deleteAssetMeta', cid, key });

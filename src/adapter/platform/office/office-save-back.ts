@@ -27,6 +27,7 @@
  *    ②起動時(`drainAll`)③編集が終わったとき(`retryDeferred`)。
  *    どれも同じ `takeOne` を通るので、二重取りは棚の有無で自然に止まる
  */
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { errorText } from '@features/error-text';
 import { localSaveFailedNotice, type LocalWriteFailure } from '@features/office/office-launch';
 import {
@@ -345,4 +346,26 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       deps.fail(`Office で保存した内容を PKC3 へ渡せませんでした: ${reason}`);
     },
   };
+}
+
+/**
+ * 🔴 **書き戻しが本当に disk のノートへ届いたか**(#1087、添付の見直し)。
+ * ⚠ 書くのは非同期の効果で、容量の拒否・DB の破損で落ちうる。撃った直後に成功と言うと、棚を捨ててから
+ *   失敗が出て、新しい版の bytes はどのノートからも指されないまま次の整理で消えていた。
+ * ⚠ 比べるのは本文の**添付の key の欄**(`attachment.asset_key`)だけ ── 本文全体の部分一致にすると、
+ *   新しい版が過去の版と同じ中身のとき(版の台帳に同じ key が既に在る)に、書けていなくても真になる。
+ * ⚠ 確かめられなければ `false`(棚は残り、次に取り込み直す)。
+ */
+export async function confirmSavedBack(deps: {
+  readonly settle: () => Promise<void>;
+  readonly readBody: () => Promise<string | null>;
+  readonly key: string;
+}): Promise<boolean> {
+  try {
+    await deps.settle();
+    const body = await deps.readBody();
+    return body !== null && readAttachmentMeta(body).assetKey === deps.key;
+  } catch {
+    return false;
+  }
 }
