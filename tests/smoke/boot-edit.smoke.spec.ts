@@ -115,6 +115,12 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   await clickReal(page, '[data-pkc-action="restore-revision"]');
   await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('視覚検品');
   await expect(panel).toHaveCount(0); // 復元で panel は畳まれる
+  // 🔴 戻した直後の「元に戻す」(依頼 68-1)を実ブラウザで押す(#1087)── 戻す前の本文(二稿)へ帰る。
+  //   ⚠ この口は #1727 で「別のタブが編集中か」を問う形(非同期)になった ── 押して効くことをここで見る
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('前の版に戻しました');
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(page.locator('[data-pkc-field="detail-body"] h1')).toContainText('二稿');
+  await expect(page.locator('[data-pkc-region="status"]')).toContainText('戻す前の本文に戻しました');
 
   // ── P5b: 削除 → ゴミ箱 → 復元(sidebar に戻る)──
   // 確認は出さない(#1087 流れ 29)── 押したらそのまま移る
