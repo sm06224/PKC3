@@ -65,6 +65,14 @@ function setup(bodies: Record<string, string>, titles: Record<string, string> = 
   const guards: (string | null)[] = [];
   /** この lid の書込は「別の窓に先を越された」ことにする。 */
   const conflictOn = new Set<string>();
+  /** この lid の書込は例外で落ちる(値は投げる理由)。 */
+  const throwOn = new Map<string, string>();
+  /**
+   * 🔴 **disk 上の題名**(#1087)。worker の本物の意味論を写す ── `keepMeta: true` のときだけ、
+   *   既に在る行の題名は disk の値を保つ。⚠ fake が `keepMeta` を無視すると、守る test が空振りする。
+   */
+  const diskTitle: Record<string, string> = {};
+  for (const lid of Object.keys(bodies)) diskTitle[lid] = titles[lid] ?? 't-' + lid;
   connectStoreEffects(d, {
     ...stubRevisionOps(),
     getBody: async (lid) => disk[lid] ?? null,
@@ -85,7 +93,9 @@ function setup(bodies: Record<string, string>, titles: Record<string, string> = 
        */
       guards.push(opts?.expectHash ?? null);
       if (conflictOn.has(e.lid)) return { ...stubStamps(), conflict: true };
+      if (throwOn.has(e.lid)) throw new Error(throwOn.get(e.lid));
       disk[e.lid] = e.body;
+      diskTitle[e.lid] = opts?.keepMeta === true ? (diskTitle[e.lid] ?? e.title) : e.title;
       return stubStamps();
     },
   });
@@ -99,7 +109,7 @@ function setup(bodies: Record<string, string>, titles: Record<string, string> = 
     relations: [],
   });
   const q = <T extends HTMLElement>(s: string): T | null => root.querySelector<T>(s);
-  return { root, d, disk, q, guards, conflictOn, writes: (): number => writes };
+  return { root, d, disk, q, guards, conflictOn, throwOn, diskTitle, writes: (): number => writes };
 }
 
 /** 印を付ける(実 UI と同じ action を通す)。 */
@@ -324,6 +334,32 @@ describe('#402 ① 別の窓を踏まない', () => {
     expect(s.d.getState().notice ?? '').not.toContain('2 件に付けました');
   });
 
+  it('🔴 書けなかった理由を取り違えない: 書込が例外で落ちたら、その理由を言い、別のタブのせいにしない(#1087)', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n' });
+    s.throwOn.set('e1', 'QuotaExceededError');
+    mark(s, ['e1', 'e2']);
+    await tick();
+    press(s, '請求済', 'add');
+    await tick();
+    const msg = s.d.getState().notice ?? '';
+    expect(msg, '例外の理由を言っていない').toContain('1 件は書けませんでした(');
+    expect(msg, '空き不足の案内が出ていない').toContain('空き容量が足りません');
+    expect(msg, '空き不足を別のタブのせいにした').not.toContain('別のタブ');
+  });
+
+  it('🔴 理由は件数ごとに分ける: 衝突と例外が混ざっても、衝突の字に例外の理由を載せない(#1087)', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n', e3: 'う\n' });
+    s.conflictOn.add('e1');
+    s.throwOn.set('e2', 'QuotaExceededError');
+    mark(s, ['e1', 'e2', 'e3']);
+    await tick();
+    press(s, '請求済', 'add');
+    await tick();
+    const msg = s.d.getState().notice ?? '';
+    expect(msg).toContain('1 件は書けませんでした(別のタブまたはウィンドウが書き換えたためです)');
+    expect(msg).toContain('1 件は書けませんでした(保存できる空き容量が足りません');
+  });
+
   it('🔴 名前の変更の 2 回目は、1 回目の知らせ(外せなかった件数)を消さずに続けて言う(#1087)', async () => {
     const s = setup({ e1: '---\ntags: [旧]\n---\nあ\n', e2: '---\ntags: [旧]\n---\nい\n' });
     s.conflictOn.add('e1');
@@ -336,6 +372,20 @@ describe('#402 ① 別の窓を踏まない', () => {
     const msg = s.d.getState().notice ?? '';
     expect(msg, '前提: 2 回目は 2 件とも付いた').toContain('2 件に付けました');
     expect(msg, '1 回目の「書けなかった」が消えた').toContain('1 件は書けませんでした');
+  });
+});
+
+describe('#1087 本文だけの書込は、別のタブの改名を巻き戻さない', () => {
+  it('🔴 書く前に別のタブが題名を変えていても、タグ付けの書込は変えた題名を保つ', async () => {
+    const s = setup({ e1: 'あ\n', e2: 'い\n' });
+    mark(s, ['e1', 'e2']);
+    await tick();
+    // 押した時点(画面の写し)は 't-e1'。その後、別のタブが disk の題名を変えた
+    s.diskTitle['e1'] = '別のタブで付けた題名';
+    press(s, '請求済', 'add');
+    await tick();
+    expect(readTags(s.disk['e1']!), '前提: タグは付いた').toEqual(['請求済']);
+    expect(s.diskTitle['e1'], '別のタブの改名を古い題名へ戻した').toBe('別のタブで付けた題名');
   });
 });
 
