@@ -30,7 +30,7 @@ describe('放送する op / しない op の全数', () => {
     const both: string[] = [];
     for (const op of requestOps()) {
       const inMut = MUTATING_OPS.has(op as never);
-      const inNot = op in NOT_BROADCAST;
+      const inNot = NOT_BROADCAST.has(op as never);
       if (!inMut && !inNot) missing.push(op);
       if (inMut && inNot) both.push(op);
     }
@@ -44,6 +44,6 @@ describe('放送する op / しない op の全数', () => {
 
   it('NOT_BROADCAST に、もう無い op の名前が残っていない', () => {
     const ops = new Set(requestOps());
-    expect(Object.keys(NOT_BROADCAST).filter((op) => !ops.has(op))).toEqual([]);
+    expect([...NOT_BROADCAST].filter((op) => !ops.has(op))).toEqual([]);
   });
 });
