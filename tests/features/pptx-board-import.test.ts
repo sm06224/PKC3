@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildPptx, type ExportBlock } from '@features/export/pptx';
-import { pptxSlideNames, readPptxSlide, isPptxFileName } from '@features/import/pptx-board';
+import { pptxSlideNames, pptxSlideNamesInOrder, readPptxSlide, isPptxFileName } from '@features/import/pptx-board';
 import type { PlaceShape } from '@features/markdown/place-shape';
 
 const p = (text: string): ExportBlock => ({ kind: 'p', runs: [{ text }] });
@@ -267,5 +267,90 @@ describe('部品名と拡張子', () => {
     expect(isPptxFileName('a.PPTX')).toBe(true);
     expect(isPptxFileName('a.ppt')).toBe(false);
     expect(isPptxFileName('a.pptx.txt')).toBe(false);
+  });
+});
+
+describe('🔴 字頭の空白・タブがあっても、記法の頭は字として守る(#1087)', () => {
+  const wrap = (t: string): string =>
+    '<p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>'
+    + '<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'
+    + '<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1905000" cy="952500"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr>'
+    + `<p:txBody><a:p><a:r><a:t>${t}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+  // 描画側の判定と同じ規則で数える(閉じ = `^\s*:::\s*$` / 開き = trim して `:::format`)
+  const closes = (body: string): number => body.split('\n').filter((l) => /^\s*:::\s*$/.test(l)).length;
+  const opens = (body: string): string[] => body.split('\n').filter((l) => /^\s*:::format/.test(l));
+
+  for (const [name, raw] of [
+    ['半角の空白 + :::', ' :::'],
+    ['タブ + :::format{.pkc-place}', '\t:::format{.pkc-place x=500 y=500 w=10 h=10 fill=#ff0000}'],
+    ['空白 2 つ + 見出し', '  # x'],
+    ['空白 3 つ + 箇条書き', '   - x'],
+    ['空白 2 つ + 引用', '  > x'],
+  ] as const) {
+    it(`${name} は塊を閉じず、記法にもならない`, () => {
+      const got = readPptxSlide(wrap(raw));
+      expect(got.placed, '前提: 付箋は 1 つ').toBe(1);
+      expect(opens(got.body), '開きが 1 つだけ(差し込めない)').toHaveLength(1);
+      expect(closes(got.body), '閉じが 1 つだけ(塊を途中で閉じない)').toBe(1);
+      // 字は消えていない: 空白の後ろに \ を置いて残る
+      const body = got.body.split('\n');
+      expect(body.some((l) => l === raw.replace(/^(\s*)/, '$1\\')), '字が残っていない').toBe(true);
+    });
+  }
+
+  it('対照群: 記法でない字は、空白があっても書き換えない', () => {
+    const got = readPptxSlide(wrap(' ふつうの字'));
+    expect(got.body.split('\n')).toContain(' ふつうの字');
+  });
+});
+
+describe('🔴 スライドの順番は presentation.xml の sldIdLst で決める(#1087)', () => {
+  const NAMES = [
+    'ppt/presentation.xml',
+    'ppt/_rels/presentation.xml.rels',
+    'ppt/slides/slide1.xml',
+    'ppt/slides/slide2.xml',
+    'ppt/slides/slide3.xml',
+  ];
+  const pres = (ids: readonly string[]): string =>
+    '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst>'
+    + ids.map((r, i) => `<p:sldId id="${256 + i}" r:id="${r}"/>`).join('')
+    + '</p:sldIdLst></p:presentation>';
+  const rels = (m: Record<string, string>): string =>
+    '<Relationships xmlns="x">'
+    + Object.entries(m).map(([id, t]) => `<Relationship Id="${id}" Type="t/slide" Target="${t}"/>`).join('')
+    + '</Relationships>';
+  const R = { rId3: 'slides/slide1.xml', rId4: 'slides/slide2.xml', rId5: 'slides/slide3.xml' };
+
+  it('sldIdLst の順に並ぶ(PowerPoint で並べ替えた file は、番号の順と違う)', () => {
+    const got = pptxSlideNamesInOrder(NAMES, pres(['rId5', 'rId3', 'rId4']), rels(R));
+    expect(got).toEqual(['ppt/slides/slide3.xml', 'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml']);
+  });
+
+  it('絶対の Target(/ppt/slides/…)と ../ も引ける', () => {
+    const got = pptxSlideNamesInOrder(
+      NAMES,
+      pres(['a', 'b']),
+      rels({ a: '/ppt/slides/slide2.xml', b: '../ppt/slides/slide1.xml' }),
+    );
+    expect(got).toEqual(['ppt/slides/slide2.xml', 'ppt/slides/slide1.xml']);
+  });
+
+  it('sldIdLst に載っていないスライド(PowerPoint で見えない)は読まない', () => {
+    expect(pptxSlideNamesInOrder(NAMES, pres(['rId4']), rels(R))).toEqual(['ppt/slides/slide2.xml']);
+  });
+
+  it('presentation.xml / rels が無い・読めない・1 枚も引けないときだけ番号順', () => {
+    const byNumber = ['ppt/slides/slide1.xml', 'ppt/slides/slide2.xml', 'ppt/slides/slide3.xml'];
+    expect(pptxSlideNamesInOrder(NAMES, null, rels(R))).toEqual(byNumber);
+    expect(pptxSlideNamesInOrder(NAMES, pres(['rId5']), null)).toEqual(byNumber);
+    expect(pptxSlideNamesInOrder(NAMES, '壊れている', rels(R))).toEqual(byNumber);
+    expect(pptxSlideNamesInOrder(NAMES, pres(['rId5']), '壊れている')).toEqual(byNumber);
+    expect(pptxSlideNamesInOrder(NAMES, pres(['zzz']), rels(R))).toEqual(byNumber);
+    expect(pptxSlideNamesInOrder(NAMES, pres([]), rels(R))).toEqual(byNumber);
+  });
+
+  it('同じスライドを 2 度指しても 1 枚', () => {
+    expect(pptxSlideNamesInOrder(NAMES, pres(['rId3', 'rId3']), rels(R))).toEqual(['ppt/slides/slide1.xml']);
   });
 });

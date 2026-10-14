@@ -438,10 +438,19 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
   // 展開しながら CRC を取る(全量を Uint8Array に起こしてから測らない)
   let state = 0xffffffff;
   let size = 0;
+  let overrun: ZipReadError | null = null;
   const tap = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       state = crc32Update(state, chunk);
       size += chunk.byteLength;
+      // 🔴 **申告(中央ディレクトリのサイズ)を超えたらその場で止める**。展開しきってから断ると、
+      //   申告 1KB・実体数 GB の zip 爆弾が先にメモリを食う(最後の assertIntegrity では遅い)
+      if (size > entry.uncompressedSize) {
+        overrun = new ZipReadError(
+          `zip のファイルサイズが内容一覧(中央ディレクトリ)と違います(「${entry.name}」: 展開が ${entry.uncompressedSize} を超えました)`,
+        );
+        throw overrun;
+      }
       controller.enqueue(chunk);
     },
   });
@@ -451,6 +460,7 @@ export async function readZipEntry(zip: Blob, entry: ZipEntry): Promise<Blob> {
       slice.stream().pipeThrough(new DecompressionStream('deflate-raw')).pipeThrough(tap),
     ).blob();
   } catch (e) {
+    if (overrun !== null) throw overrun;
     const detail = e instanceof Error && e.message ? `: ${e.message}` : '';
     throw new ZipReadError(
       `zip の圧縮データを展開できませんでした(「${entry.name}」)${detail}`,

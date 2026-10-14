@@ -48,6 +48,7 @@ const JOB: OoxmlJob = {
   iso: '2026-08-17T00:00:00.000Z',
   pageFormat: 'a4-portrait',
   media: [],
+  inlineSkipped: [],
 };
 
 /** worker へ 1 件流して、返った応答を取る。 */
@@ -233,12 +234,14 @@ describe('宣言されて・実在して・指されて(bytes まで)', () => {
               iso: '2026-08-24T00:00:00.000Z',
               pageFormat: 'a4-portrait',
               media: [{ name: 'media/image1.png', blob: PNG }],
+              inlineSkipped: [],
             }
           : {
               kind: 'pptx',
               blocks: WITH_IMAGE,
               title: 'ノート',
               media: [{ name: 'media/image1.png', blob: PNG }],
+              inlineSkipped: [],
             };
       const { blob } = await assembleOoxml(job);
       const entries = await readZipDirectory(blob);
@@ -263,7 +266,7 @@ describe('宣言されて・実在して・指されて(bytes まで)', () => {
   }
 
   it('🔴 pptx も同じ道を通る(ワーカーの落とし所も同じ zip を返す)', async () => {
-    const job: OoxmlJob = { kind: 'pptx', blocks: BLOCKS, title: 'ノート', media: [] };
+    const job: OoxmlJob = { kind: 'pptx', blocks: BLOCKS, title: 'ノート', media: [], inlineSkipped: [] };
     const viaClient = await buildOoxmlFile(job);
     const direct = await assembleOoxml(job);
     expect(await viaClient.blob.text()).toBe(await direct.blob.text());

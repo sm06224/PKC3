@@ -1225,10 +1225,14 @@ const PRES_PROPS_XML = `${XML_HEAD}<p:presentationPr ${NS_P}/>`;
  */
 export function buildPptx(
   blocks: readonly ExportBlock[],
-  opts: { readonly title: string },
+  opts: {
+    readonly title: string;
+    /** 🔴 段落の中で入れられなかった物の呼び名(#1087)。塊の列に現れないので、渡さないと注意の件数から抜ける。 */
+    readonly inlineSkipped?: readonly string[];
+  },
 ): PptxResult {
   const slides = splitIntoSlides(blocks, opts.title);
-  const skipped = blocks.filter((b) => b.kind === 'skipped').length;
+  const skipped = blocks.filter((b) => b.kind === 'skipped').length + (opts.inlineSkipped?.length ?? 0);
   const parts: PptxPart[] = [];
 
   // ① 入口

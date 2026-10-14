@@ -220,6 +220,41 @@ describe('readZipEntry', () => {
     ).rejects.toThrow(/範囲外/);
   });
 
+  it('🔴 申告(中央ディレクトリ)より大きく展開されたら、展開しきる前にその場で止める(zip 爆弾)', async () => {
+    const BIG = 32 * 1024 * 1024;
+    const zip = await buildZip([{ name: 'bomb.xml', bytes: new Uint8Array(BIG), method: 8 }]);
+    const [e] = await readZipDirectory(zip);
+    expect(e!.uncompressedSize, '前提: 実体は申告どおり 32MB').toBe(BIG);
+    // 申告だけ 1KB に偽る(実体は 32MB のまま)
+    const liar = { ...e!, uncompressedSize: 1024 };
+    // 展開器の出口で、実際に流れた量を数える
+    let flowed = 0;
+    const RealDS = globalThis.DecompressionStream;
+    class CountingDS {
+      readonly writable: WritableStream<Uint8Array>;
+      readonly readable: ReadableStream<Uint8Array>;
+      constructor(fmt: CompressionFormat) {
+        const real = new RealDS(fmt);
+        const counter = new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, c) {
+            flowed += chunk.byteLength;
+            c.enqueue(chunk);
+          },
+        });
+        this.writable = real.writable as WritableStream<Uint8Array>;
+        this.readable = (real.readable as ReadableStream<Uint8Array>).pipeThrough(counter);
+      }
+    }
+    globalThis.DecompressionStream = CountingDS as unknown as typeof DecompressionStream;
+    try {
+      await expect(readZipEntry(zip, liar)).rejects.toThrow(/内容一覧\(中央ディレクトリ\)と違います.*1024 を超えました/);
+    } finally {
+      globalThis.DecompressionStream = RealDS;
+    }
+    expect(flowed, '止まった時点で、申告を超えた分は読み始めている').toBeGreaterThan(1024);
+    expect(flowed, '32MB を展開しきってから断っていない').toBeLessThan(BIG / 4);
+  });
+
   it('0 バイトのファイルも読める(空は「無い」ではない)', async () => {
     const zip = await buildZip([{ name: 'empty.txt', bytes: bytesOf('') }]);
     const [e] = await readZipDirectory(zip);

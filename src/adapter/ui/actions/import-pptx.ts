@@ -12,11 +12,12 @@
  *   {@link SLIDE_XML_MAX} を超えるスライドは読まずに件数へ数える。
  */
 import { errorText } from '@features/error-text';
+import { markName } from '@features/message/message-log';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { extractMeta } from '@features/flavor';
-import { readPptxSlide, pptxSlideNames } from '@features/import/pptx-board';
+import { readPptxSlide, pptxSlideNamesInOrder } from '@features/import/pptx-board';
 import { readZipDirectory, readZipText, ZipReadError } from '@features/import/zip-reader';
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
@@ -57,6 +58,8 @@ export async function importPptxFiles(
   const rows: EntryUpsert[] = [];
   const notes: string[] = [];
   let dropped = 0;
+  /** {@link SLIDES_MAX} を超えて読まなかったスライド(図形の取り込めなかった数とは分けて言う) */
+  let skippedSlides = 0;
   let rounded = 0;
   let simplified = 0;
   try {
@@ -68,20 +71,34 @@ export async function importPptxFiles(
       } catch (e) {
         if (e instanceof ZipReadError) {
           return fail(
-            `「${file.name}」を読めませんでした(PowerPoint のファイルではないか、中身を読み込めません。ノートは 1 件も追加されていません)`,
+            `「${markName(file.name)}」を読めませんでした(PowerPoint のファイルではないか、中身を読み込めません。ノートは 1 件も追加されていません)`,
           );
         }
         throw e;
       }
       const byName = new Map(dir.map((d) => [d.name, d]));
-      const slideNames = pptxSlideNames(dir.map((d) => d.name));
+      // 🔴 スライドの順番は `presentation.xml` が決める(読めなければ番号順)
+      const partText = async (name: string): Promise<string | null> => {
+        const d = byName.get(name);
+        if (d === undefined || d.uncompressedSize > SLIDE_XML_MAX) return null;
+        try {
+          return await readZipText(file, d);
+        } catch {
+          return null;
+        }
+      };
+      const slideNames = pptxSlideNamesInOrder(
+        dir.map((d) => d.name),
+        await partText('ppt/presentation.xml'),
+        await partText('ppt/_rels/presentation.xml.rels'),
+      );
       if (slideNames.length === 0) {
         return fail(
-          `「${file.name}」は PowerPoint のファイルではありません(スライドが見つかりません。ノートは 1 件も追加されていません)`,
+          `「${markName(file.name)}」は PowerPoint のファイルではありません(スライドが見つかりません。ノートは 1 件も追加されていません)`,
         );
       }
       const used = slideNames.slice(0, SLIDES_MAX);
-      dropped += slideNames.length - used.length;
+      skippedSlides += slideNames.length - used.length;
       let n = 0;
       for (const name of used) {
         n += 1;
@@ -153,6 +170,7 @@ export async function importPptxFiles(
   if (last) deps.focus?.(last.lid);
   deps.imported?.(rows.map((r) => r.lid));
   if (dropped > 0) notes.push(`取り込めなかったものが ${dropped} 件ありました`);
+  if (skippedSlides > 0) notes.push(`スライドが多いため、先頭の ${SLIDES_MAX} 枚だけ取り込みました(残り ${skippedSlides} 枚は取り込んでいません)`);
   // 🔴 文字の大きさを近い段へ丸めた付箋の数(#530 段⑤a)── 黙らない。丸めなかった付箋は数えない
   if (rounded > 0) notes.push(`文字の大きさを近い段(小 / 標準 / 大 / 特大)に丸めた付箋が ${rounded} 枚ありました`);
   // 🔴 入れ子のグループ(内側だけ残る)と反転(向きは失われる)を直した付箋の数(#530 段⑤c・⑤e)── 黙らない
@@ -161,6 +179,7 @@ export async function importPptxFiles(
   const head = `取り込み完了: 板 ${rows.length} 件`;
   const tails = [
     ...(dropped > 0 ? [`取り込めなかったもの ${dropped} 件`] : []),
+    ...(skippedSlides > 0 ? [`取り込まなかったスライド ${skippedSlides} 枚`] : []),
     ...(rounded > 0 ? [`文字の大きさを丸めた付箋 ${rounded} 枚`] : []),
     ...(simplified > 0 ? [`形を直した付箋 ${simplified} 枚`] : []),
   ];
