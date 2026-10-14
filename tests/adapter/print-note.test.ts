@@ -168,6 +168,36 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     expect(err?.error).toContain('PDF で書き出せませんでした');
   });
 
+  it('🔴 本文が来ずに諦めたときも、動かした画面を元へ戻す(戻してから知らせる。#1087)', async () => {
+    const h = harness({ viewMode: 'query', selectedLid: 'other', openBody: null as never });
+    let fire: (() => void) | null = null;
+    const deps = { ...h.deps, setTimer: (cb: () => void) => ((fire = cb), 0) };
+    const p = printNote(deps, 'a');
+    // 刷るために選び直した後の画面(本文はまだ来ない)
+    h.push({ viewMode: 'detail', selectedLid: 'a', openBody: null as never });
+    fire!();
+    expect(await p).toBe('timeout');
+    const tail = h.sent.slice(h.sent.findIndex((a) => a.type === 'SELECT_ENTRY') + 1);
+    expect(tail.map((a) => a.type), '戻していない / 知らせの後に戻して 1 行を消した').toEqual([
+      'SELECT_ENTRY',
+      'SET_VIEW_MODE',
+      'OP_FAILED',
+    ]);
+    expect(tail[0]).toEqual({ type: 'SELECT_ENTRY', lid: 'other' });
+  });
+
+  it('🔴 待っている間の 2 回目は受けない(戻した後の画面を刷らない。#1087)', async () => {
+    const h = harness({ selectedLid: 'other', openBody: { lid: 'other', body: 'x' } as never });
+    const p1 = printNote(h.deps, 'a');
+    expect(await printNote(h.deps, 'a'), '2 回目を受けた').toBe('busy');
+    h.push({ selectedLid: 'a', openBody: { lid: 'a', body: '本文' } as never });
+    expect(await p1).toBe('printed');
+    await flush();
+    expect(h.prints(), '2 回刷った').toBe(1);
+    // 対照群:終わった後はまた受ける
+    expect(await printNote(h.deps, 'a')).toBe('printed');
+  });
+
   it('🔴 編集中は刷らない(見えている 1 画面ぶんしか紙に出ない)', async () => {
     const h = harness({ phase: 'editing' });
     expect(await printNote(h.deps, 'a')).toBe('not-ready');

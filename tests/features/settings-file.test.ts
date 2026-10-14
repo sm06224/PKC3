@@ -179,6 +179,24 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     expect(settingsPlanNote(plan)).toContain('1 件は長すぎるので入れません');
   });
 
+  it('🔴 値が空・文字列でない項目は入れない(端末の設定を空の字で消さない。#1087)', () => {
+    const disk: Record<string, string> = { 'pkc3.keymap': '{"edit-entry":["Alt+9"]}', 'pkc3.theme': 'dark' };
+    const raw = JSON.stringify({
+      kind: SETTINGS_FILE_KIND,
+      version: 1,
+      entries: [
+        { key: 'pkc3.keymap', value: 123 },
+        { key: 'pkc3.theme', value: '' },
+        { key: 'pkc3.browse' },
+        { key: 'pkc3.text-scale', value: '1.1' },
+      ],
+    });
+    const plan = planSettingsImport(raw, (k) => disk[k] ?? null);
+    expect(plan.changes.map((c) => c.key), '空の字で入れ替える項目が出た').toEqual(['pkc3.text-scale']);
+    expect(plan.unreadable).toEqual(['pkc3.keymap', 'pkc3.theme', 'pkc3.browse']);
+    expect(settingsPlanNote(plan)).toContain('3 件は中身が空か読めない形なので入れません');
+  });
+
   it('🔴 当てた結果は、書けなかった件数も言う(全部書けなくても成功と同じ字にしない。#1087)', () => {
     expect(settingsAppliedNote(3, 0)).not.toContain('保存できず');
     expect(settingsAppliedNote(0, 2)).toContain('2 件はこの端末に保存できず');

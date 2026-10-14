@@ -349,6 +349,11 @@ export interface SettingsPlan {
   /** 🔴 **長すぎて入れない鍵**(1 件 `MAX_SETTING_CHARS` 字を超える)。黙って捨てない(#1087)。 */
   readonly tooLong: readonly string[];
   /**
+   * 🔴 **値が文字列でない / 空の鍵**(#1087)。書き出しは空の値を入れない(`exportSettings`)ので、
+   *   読み込み側で通すと、端末の設定を空の字で上書きして消していた(キーの割り当てが全部消える)。
+   */
+  readonly unreadable: readonly string[];
+  /**
    * 🔴 **読み込んでも使えないキーの割り当て**の件数(#1087)。割り当てるときと同じ検査(素のキー・
    * 再読込などブラウザの鍵・同じ場所で効く操作との重なり)を通らなかった物。入ることは入るが、使われない。
    */
@@ -363,6 +368,7 @@ const EMPTY_PLAN: SettingsPlan = {
   refused: [],
   unknown: [],
   tooLong: [],
+  unreadable: [],
   unusableBindings: 0,
   error: null,
 };
@@ -412,6 +418,7 @@ export function planSettingsImport(
   const refused: string[] = [];
   const unknown: string[] = [];
   const tooLong: string[] = [];
+  const unreadable: string[] = [];
   let same = 0;
   let unusableBindings = 0;
   const seen = new Set<string>();
@@ -423,6 +430,10 @@ export function planSettingsImport(
     // ⚠ 同じ鍵が 2 度書いてあっても 1 度しか数えない(後勝ちにしない ── 先を採る)
     if (key === '' || seen.has(key)) continue;
     seen.add(key);
+    if (value === '') {
+      unreadable.push(key);
+      continue;
+    }
     if (value.length > MAX_SETTING_CHARS) {
       tooLong.push(key);
       continue;
@@ -444,7 +455,7 @@ export function planSettingsImport(
     changes.push({ key, label, from, to: value });
     if (key === KEYMAP_KEY) unusableBindings += countUnusableBindings(value);
   }
-  return { changes, same, refused, unknown, tooLong, unusableBindings, error: null };
+  return { changes, same, refused, unknown, tooLong, unreadable, unusableBindings, error: null };
 }
 
 /**
@@ -471,6 +482,8 @@ export function settingsPlanNote(plan: SettingsPlan): string {
     parts.push(`${plan.refused.length} 件はこの端末だけで使う記録(許可・フラグ・お知らせの既読・履歴など)なので入れません`);
   if (plan.unknown.length > 0)
     parts.push(`${plan.unknown.length} 件はこのバージョンが知らない設定なので入れません`);
+  if (plan.unreadable.length > 0)
+    parts.push(`${plan.unreadable.length} 件は中身が空か読めない形なので入れません`);
   if (plan.tooLong.length > 0)
     parts.push(`${plan.tooLong.length} 件は長すぎるので入れません(1 件 ${MAX_SETTING_CHARS.toLocaleString('en-US')} 字まで)`);
   if (plan.unusableBindings > 0)

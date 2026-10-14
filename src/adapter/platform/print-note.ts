@@ -43,7 +43,7 @@ export interface PrintNoteDeps {
   clearTimer?: (h: unknown) => void;
 }
 
-export type PrintNoteResult = 'printed' | 'not-ready' | 'timeout';
+export type PrintNoteResult = 'printed' | 'not-ready' | 'timeout' | 'busy';
 
 /** 印刷できる状態か ── ここが唯一の判定(2 か所で数えない。CLAUDE.md §7)。 */
 function ready(s: AppState, lid: string): boolean {
@@ -63,6 +63,23 @@ function ready(s: AppState, lid: string): boolean {
  *   `timeout` = 本文が来なかった(**黙って白紙を刷らない**)
  */
 export async function printNote(deps: PrintNoteDeps, lid: string): Promise<PrintNoteResult> {
+  /**
+   * 🔴 **待っている間の 2 回目は受けない**(#1087)。2 回目は 1 回目が動かした後の画面を「元」として憶えるので、
+   *   本文が届くと 1 回目が刷って元へ戻し、続く 2 回目は**戻した後の画面(押していないノート)**を刷っていた。
+   */
+  if (printing) return 'busy';
+  printing = true;
+  try {
+    return await printNoteOnce(deps, lid);
+  } finally {
+    printing = false;
+  }
+}
+
+/** 印刷の画面を開いている途中か(`printNote` の 2 回目を受けないため)。 */
+let printing = false;
+
+async function printNoteOnce(deps: PrintNoteDeps, lid: string): Promise<PrintNoteResult> {
   /**
    * 🔴 **編集中は刷らない。** 編集の面は textarea なので、刷ると
    * **見えている 1 画面ぶんの箱**しか紙に出ない(本文が切れる)。
@@ -123,6 +140,9 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     });
     // 🔴 **来なかったら刷らない**(白紙を配らない)
     if (!waited) {
+      // 🔴 刷れなかったときも、動かした画面は元へ戻す(#1087)── 戻さないと、書き出せなかったうえに見ていたノートが外れる。
+      //    ⚠ 戻すのは知らせの**前**(選び直しは知らせの 1 行を消す)
+      restore();
       deps.dispatch({
         type: 'OP_FAILED',
         // ⚠ 押したボタンの名前で言う(画面に「印刷」というボタンは無い。#1087)
@@ -132,16 +152,20 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     }
   }
   deps.print();
+  // 🔴 **`print()` が返ったのは、印刷の画面が閉じた後**(ブラウザの `window.print()` は閉じるまで返らない。
+  //    閉じた後の `afterprint` と同じ時点)。ここで戻す。
+  restore();
+  return 'printed';
+
   /**
-   * 🔴 **`print()` が返ったのは、印刷の画面が閉じた後**(ブラウザの `window.print()` は閉じるまで返らない。
-   * 閉じた後の `afterprint` と同じ時点)。ここで戻す。
-   * ⚠ 戻すのは「まだ刷った画面のまま」のときだけ ── 待つ間に user が別の場所へ移っていたら動かさない。
+   * 動かした画面を元へ戻す。⚠ **刷れた道と刷れなかった道の 1 か所**(#1087 ── 刷れた道にしか無かった)。
+   * ⚠ 戻すのは「まだ刷るために動かした画面のまま」のときだけ ── 待つ間に user が別の場所へ移っていたら動かさない。
    */
-  const now = deps.getState();
-  if (now.phase === 'ready') {
+  function restore(): void {
+    const now = deps.getState();
+    if (now.phase !== 'ready') return;
     if (movedLid && prevLid !== null && now.selectedLid === lid && now.entryMetas.has(prevLid))
       deps.dispatch({ type: 'SELECT_ENTRY', lid: prevLid });
     if (movedMode && now.viewMode === 'detail') deps.dispatch({ type: 'SET_VIEW_MODE', mode: prevMode });
   }
-  return 'printed';
 }
