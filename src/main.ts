@@ -2864,7 +2864,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatch: (a) => dispatcher.dispatch(a),
     notify: (message) => showStatus(message),
     clear: () => clearNotices(regions.notices),
-    ready: () => dispatcher.getState().phase === 'ready',
+    phase: () => dispatcher.getState().phase,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
   });
 

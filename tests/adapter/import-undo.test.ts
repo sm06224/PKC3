@@ -9,11 +9,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { codeOnly } from '../helpers/code-only';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
-import type { Dispatchable } from '../../src/adapter/state/app-state';
+import type { AppPhase, Dispatchable } from '../../src/adapter/state/app-state';
 import { createImportUndo, importPanel } from '../../src/adapter/ui/actions/import-undo';
 import { showNotices } from '../../src/adapter/ui/render/notices';
 
-function make(opts: { ready?: boolean } = {}): {
+function make(opts: { phase?: AppPhase } = {}): {
   undo: ReturnType<typeof createImportUndo>;
   sent: Dispatchable[];
   said: string[];
@@ -30,7 +30,7 @@ function make(opts: { ready?: boolean } = {}): {
     clear: () => {
       cleared += 1;
     },
-    ready: () => opts.ready ?? true,
+    phase: () => opts.phase ?? 'ready',
     fail: (m) => failed.push(m),
   });
   return {
@@ -73,12 +73,12 @@ describe('取り込みの戻り道(#535 ②)', () => {
   it('🔴 編集中は断り、何も消さず、記憶も手放さない(#1087)', () => {
     // 直す前:`DELETE_ENTRIES` は編集中に黙って捨てられるのに「ゴミ箱へ入れました」と言い、
     // 記憶も忘れて、取り消しの手段ごと消えていた
-    const h = make({ ready: false });
+    const h = make({ phase: 'editing' });
     h.undo.remember(['a', 'b']);
     h.undo.undo();
     expect(h.sent, '編集中に消そうとした').toEqual([]);
     expect(h.said.join(''), '消していないのに「入れました」と言った').not.toContain('入れました');
-    expect(h.failed.join(''), '断る理由を言っていない').toContain('編集');
+    expect(h.failed.join(''), '断る理由を言っていない').toContain('編集を保存するか、編集をやめてから');
     expect(h.cleared, '面を畳んだ ── 押し直せない').toBe(0);
     expect(h.undo.pending()?.action, '記憶を手放した ── 戻り道が消えた').toBe('undo-import');
   });
