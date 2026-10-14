@@ -54,6 +54,8 @@ export const CHAPTER_NOTE_FIELD = 'chapter-window-note';
 
 /** 元のウィンドウが閉じたときに頭へ出す一文。 */
 export const CHAPTER_ORPHAN_FIELD = 'chapter-window-orphan';
+/** html の囲みが外の読み込みを止められたときの理由の行(本文の面と同じ字。窓の本文の下に出す)。 */
+export const CHAPTER_BLOCKED_FIELD = 'sandbox-blocked-note';
 
 /**
  * 🔴 **この窓は読むだけ、と頭の帯で言う字**(#1080。user 裁定 2026-09-27「推奨で」)。
@@ -145,6 +147,7 @@ body{background:var(--bg,Canvas);color:var(--fg,CanvasText)}
 [data-pkc-field="${CHAPTER_READONLY_FIELD}"]{white-space:nowrap}
 [data-pkc-field="${CHAPTER_ORPHAN_FIELD}"]{padding:6px 12px;font-size:12px;color:var(--fg,CanvasText);background:var(--muted-bg,rgba(128,128,128,.15))}
 [data-pkc-field="${CHAPTER_BODY_FIELD}"]{padding:12px 16px}
+[data-pkc-field="${CHAPTER_BLOCKED_FIELD}"]{margin:0;padding:8px 16px 16px;font-size:12px;color:var(--muted,GrayText)}
 [data-pkc-field="${CHAPTER_NOTE_FIELD}"]{padding:24px 16px;color:var(--muted,GrayText)}
 [data-pkc-field="${CHAPTER_BODY_FIELD}"] a:not([href]){color:inherit;text-decoration:none;cursor:default}
 `;
@@ -307,6 +310,25 @@ export function paintChapterWindow(
   prepareChapterBody(host);
   doc.body.append(host);
   return host;
+}
+
+/**
+ * html の囲みが外の物を止められたとき、窓の本文の下に**理由の行**を出す(本文の面と同じ字)。
+ * ⚠ 既に出ていれば字を差し替える(同じ囲みから何度も申告が来る)。窓に触れなければ何もしない。
+ */
+export function showChapterBlockedNote(win: Window, text: string): void {
+  try {
+    const body = win.document.body;
+    let line = body.querySelector<HTMLElement>(`[data-pkc-field="${CHAPTER_BLOCKED_FIELD}"]`);
+    if (line === null) {
+      line = document.createElement('p');
+      line.setAttribute('data-pkc-field', CHAPTER_BLOCKED_FIELD);
+      body.append(line);
+    }
+    line.textContent = text;
+  } catch {
+    // 触れない窓には出せない
+  }
 }
 
 function orphanLine(): HTMLElement {

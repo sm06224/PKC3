@@ -3539,7 +3539,15 @@ li[data-pkc-row-slot] {
 }
 /* ⚠ 読めなかったときは**理由を見せる**(黙って原文だけ出さない) */
 .pkc-md-rendered [data-pkc-chart-state='failed']::before {
-  content: 'グラフを描けません: ' attr(data-pkc-chart-error);
+  content: attr(data-pkc-chart-error);
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+/* 描けたが一部を描いていないとき(系列が多い・点が多い・数が読めない系列)は、絵の上に理由を 1 行 */
+.pkc-md-rendered [data-pkc-chart-state='ready'][data-pkc-chart-note]::before {
+  content: '一部を描いていません: ' attr(data-pkc-chart-note);
   display: block;
   color: var(--muted);
   font-size: 12px;

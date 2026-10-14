@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { HTML_SANDBOX_BLOCKED_MSG_TYPE } from '../../src/features/markdown/external-images';
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
   CHAPTER_BODY_FIELD,
@@ -95,7 +96,11 @@ function booted(body: string, updated: string | null = null): AppState {
 }
 
 /** 別の document を持つ偽の窓。⚠ `message` の受け手を付け外しできる(html の囲みの高さ合わせ)。 */
-function fakeWindow(): Window & { closed: boolean; listeners: () => number } {
+function fakeWindow(): Window & {
+  closed: boolean;
+  listeners: () => number;
+  emit: (data: unknown, source: unknown) => void;
+} {
   const target = new EventTarget();
   let n = 0;
   const win = {
@@ -114,8 +119,16 @@ function fakeWindow(): Window & { closed: boolean; listeners: () => number } {
       target.removeEventListener(type, fn);
     },
     listeners: (): number => n,
+    /** 箱(iframe)からの message を窓へ届ける。 */
+    emit(data: unknown, source: unknown): void {
+      target.dispatchEvent(Object.assign(new Event('message'), { data, source }));
+    },
   };
-  return win as unknown as Window & { closed: boolean; listeners: () => number };
+  return win as unknown as Window & {
+    closed: boolean;
+    listeners: () => number;
+    emit: (data: unknown, source: unknown) => void;
+  };
 }
 
 function setup(
@@ -347,12 +360,80 @@ describe('🔴 追従 ── 書き換わったら組み直す', () => {
   });
 });
 
+describe('🔴 html の囲みが外の物を止められたら、窓にも理由の行を出す(R7)', () => {
+  /** 窓の本文に html の囲み(iframe)を 1 つ置き、その送り主として使う偽の window を返す。 */
+  function addBox(r: ReturnType<typeof setup>): { source: object } {
+    const source = {};
+    const frame = r.win.document.createElement('iframe');
+    frame.setAttribute('data-pkc-html-render-id', 'box1');
+    Object.defineProperty(frame, 'contentWindow', { value: source });
+    r.win.document.body.append(frame);
+    return { source };
+  }
+  const noteOf = (r: ReturnType<typeof setup>): string | null =>
+    r.win.document.querySelector('[data-pkc-field="sandbox-blocked-note"]')?.textContent ?? null;
+  const BLOCKED = { type: HTML_SANDBOX_BLOCKED_MSG_TYPE, id: 'box1', blocked: 0, kinds: ['script-src-elem'] };
+
+  it('🔴 止められた種別が窓の本文の下に出る / 同じ申告を繰り返しても 1 行 / 画像だけなら出ない', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const { source } = addBox(r);
+    expect(noteOf(r), '申告の前から出ている').toBeNull();
+    // 画像だけが止まった申告は、同意の帯の話(窓には出さない)
+    r.win.emit({ ...BLOCKED, blocked: 2, kinds: ['img-src'] }, source);
+    expect(noteOf(r), '画像だけの申告で出た').toBeNull();
+    r.win.emit(BLOCKED, source);
+    expect(noteOf(r) ?? '').toContain('外部のプログラム');
+    expect(noteOf(r) ?? '').toContain('止めました');
+    r.win.emit(BLOCKED, source);
+    expect(r.win.document.querySelectorAll('[data-pkc-field="sandbox-blocked-note"]').length).toBe(1);
+    // 別の種類が増えたら同じ行の字が増える
+    r.win.emit({ ...BLOCKED, kinds: ['style-src-elem'] }, source);
+    expect(noteOf(r) ?? '').toContain('外部の見た目(CSS)');
+    expect(noteOf(r) ?? '').toContain('外部のプログラム');
+    // 本文より後ろ(本文の下)に置く
+    const body = r.win.document.body;
+    const kids = Array.from(body.children);
+    expect(kids.indexOf(body.querySelector('[data-pkc-field="sandbox-blocked-note"]')!)).toBeGreaterThan(
+      kids.indexOf(r.host()!),
+    );
+  });
+
+  it('🔴 送り主が囲みでない申告(なりすまし)では出ない', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    addBox(r);
+    r.win.emit(BLOCKED, {});
+    expect(noteOf(r)).toBeNull();
+  });
+
+  it('🔴 組み直したら前の申告は消える(囲みも作り直されて申告し直す)', async () => {
+    const r = setup();
+    r.cw.open('n1', LINE_TWO);
+    await flush();
+    const { source } = addBox(r);
+    r.win.emit(BLOCKED, source);
+    expect(noteOf(r)).not.toBeNull();
+    r.state = { ...r.state, openBody: { ...r.state.openBody!, body: BODY.replace('にの中身', 'にの新しい中身') } };
+    r.cw.onState(r.state);
+    await flush();
+    expect(noteOf(r), '古い申告の行が残っている').toBeNull();
+    // 新しい囲みが申告し直せば、また出る(種別の控えが空に戻っている)
+    const again = addBox(r);
+    r.win.emit(BLOCKED, again.source);
+    expect(noteOf(r)).not.toBeNull();
+  });
+});
+
 describe('🔴 寿命 ── 閉じる / F5 / 元のウィンドウが閉じる', () => {
   it('🔴 窓を閉じたら借りた添付・図・高さ合わせを返し、台帳から外し、見張りを止める', async () => {
     const r = setup();
     r.cw.open('n1', LINE_TWO);
     await flush();
-    expect(r.win.listeners(), '前提が崩れている(高さ合わせの受け手が付いていない)').toBe(1);
+    // 受け手は 2 つ: 高さ合わせ + html の囲みが止められた理由(R7)
+    expect(r.win.listeners(), '前提が崩れている(高さ合わせ / 止められた理由の受け手が付いていない)').toBe(2);
     r.win.closed = true;
     r.cw.tick();
     expect(r.disposed).toEqual(['ast-1']);

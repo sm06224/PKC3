@@ -51,7 +51,15 @@ import {
   extractDocumentGlobals,
 } from '@features/markdown/document-globals';
 import { readFenceAssetText } from '@features/asset/fence-asset-read';
-import { installHtmlSandboxResizer } from '@features/markdown/html-sandbox';
+import {
+  installHtmlSandboxBlockedReporter,
+  installHtmlSandboxResizer,
+} from '@features/markdown/html-sandbox';
+import {
+  sandboxBlockedKind,
+  sandboxBlockedNote,
+  type SandboxBlockedKind,
+} from '@features/markdown/external-images';
 import {
   chapterWindowBuilt,
   chapterWindowName,
@@ -60,6 +68,7 @@ import {
   markChapterWindowOrphaned,
   paintChapterWindow,
   prepareChapterBody,
+  showChapterBlockedNote,
   wireChapterWindow,
   CHAPTER_DIAGRAM_INDEX_ATTR,
   CHAPTER_LID_ATTR,
@@ -144,6 +153,8 @@ interface OpenChapter {
   disposers: Array<() => void>;
   /** html / svg の囲みの高さ合わせ(窓の document ごとに 1 本)。 */
   sandbox: { doc: Document; off: () => void } | null;
+  /** 囲みが止められたと申告してきた種別(組み直すたびに空へ戻す ── 囲みも作り直されて申告し直す)。 */
+  blocked: Set<SandboxBlockedKind>;
   pending: unknown;
 }
 
@@ -201,6 +212,7 @@ export class ChapterWindows {
         shown: '',
         disposers: [],
         sandbox: null,
+        blocked: new Set(),
         pending: null,
       };
       this.windows.set(name, o);
@@ -346,6 +358,8 @@ export class ChapterWindows {
       bodyAttrs: { [CHAPTER_LID_ATTR]: o.lid },
     });
     o.shown = shown;
+    // 本文の器が作り直された ── 前の申告は古い(新しい囲みが申告し直す)
+    o.blocked.clear();
     wireChapterWindow(o.win, this.deps.runAction);
     this.ensureSandbox(o);
     return host;
@@ -366,7 +380,28 @@ export class ChapterWindows {
     }
     if (o.sandbox?.doc === doc) return;
     o.sandbox?.off();
-    o.sandbox = { doc, off: installHtmlSandboxResizer(o.win) };
+    const offResize = installHtmlSandboxResizer(o.win);
+    /**
+     * 🔴 **止められた理由の行も、窓に出す**(本文の面は `main.ts` の受け口が出す ── 窓の document には
+     * 届かないので、ここで同じ字を同じ関数から作る)。出ないと CDN 前提の中身が窓では真っ白になる。
+     */
+    const offBlocked = installHtmlSandboxBlockedReporter((_iframe, _blocked, kinds) => {
+      let grew = false;
+      for (const raw of kinds) {
+        const k = sandboxBlockedKind(raw);
+        if (k === null || o.blocked.has(k)) continue;
+        o.blocked.add(k);
+        grew = true;
+      }
+      if (grew) showChapterBlockedNote(o.win, sandboxBlockedNote([...o.blocked]));
+    }, o.win);
+    o.sandbox = {
+      doc,
+      off: () => {
+        offResize();
+        offBlocked();
+      },
+    };
   }
 
   /**

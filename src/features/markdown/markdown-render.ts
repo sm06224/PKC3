@@ -35,6 +35,7 @@ import { allFences, splitLines } from './source-blocks';
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
 import { makeSlugCounter } from './markdown-toc';
+import { VAR_NAME_SOURCE } from './frontmatter';
 import { highlightCode, isHighlightable } from './code-highlight';
 import { cellEditButtonHtml, detectCsvLang, renderCsvFence } from './csv-table';
 import { isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
@@ -2315,7 +2316,7 @@ md.inline.ruler.before('html_inline', 'pkc_html_br', function htmlBrRule(state, 
 // 置換 してしまえば、後段の inline rule は展開済 text を見るので必ず効く。
 //
 // 構文:
-//   `{{vars.<key>}}` で展開、`<key>` は `[A-Za-z_][\w-]*`
+//   `{{vars.<key>}}` で展開、`<key>` は `VAR_NAME_SOURCE`(frontmatter.ts。日本語の名前も通る)
 //   `\{{vars.x}}` で literal 出力(escape)
 //   `{{macros.x}}` 等 vars 以外は Phase 2 では未対応 = literal で残置
 //   fenced code block(``` / ~~~)の中身では展開しない(fence-aware)
@@ -2329,6 +2330,10 @@ md.inline.ruler.before('html_inline', 'pkc_html_br', function htmlBrRule(state, 
 
 const VAR_OPEN = '\u{E140}';
 const VAR_SEP = '\u{E141}';
+// 名前の字の範囲は frontmatter の `VAR_NAME_SOURCE` 1 本(定義 `vars:` と展開で食い違わせない。日本語の名前も通る)
+const VAR_ESCAPED_RE = new RegExp(`\\\\\\{\\{(vars\\.${VAR_NAME_SOURCE})\\}\\}`, 'gu');
+const VAR_REF_RE = new RegExp(`\\{\\{\\s*vars\\.(${VAR_NAME_SOURCE})\\s*\\}\\}`, 'gu');
+const VAR_ESCAPE_BACK_RE = new RegExp(`\\u{E142}(vars\\.${VAR_NAME_SOURCE})\\u{E143}`, 'gu');
 
 function expandVarsInText(source: string, vars: Record<string, string>): string {
   if (!source) return source;
@@ -2346,8 +2351,8 @@ function expandVarsInText(source: string, vars: Record<string, string>): string 
     if (fence.inFence || t.isBoundary) return line;
     // escape(`\{{vars.x}}`)優先。先に escape を sentinel(U+E142)で隠して
     // 通常の置換を行い、最後に元に戻す。
-    let out = line.replace(/\\\{\{(vars\.[A-Za-z_][\w-]*)\}\}/g, '\u{E142}$1\u{E143}');
-    out = out.replace(/\{\{\s*vars\.([A-Za-z_][\w-]*)\s*\}\}/g, (_match, key: string) => {
+    let out = line.replace(VAR_ESCAPED_RE, '\u{E142}$1\u{E143}');
+    out = out.replace(VAR_REF_RE, (_match, key: string) => {
       if (Object.prototype.hasOwnProperty.call(vars, key)) {
         const v = vars[key]!;
         // escape sentinel char が値内にあれば剥がす(衝突対策)
@@ -2355,7 +2360,7 @@ function expandVarsInText(source: string, vars: Record<string, string>): string 
       }
       return `${VAR_OPEN}${key}${VAR_SEP}`;
     });
-    out = out.replace(/\u{E142}(vars\.[A-Za-z_][\w-]*)\u{E143}/gu, (_m, ref: string) => `{{${ref}}}`);
+    out = out.replace(VAR_ESCAPE_BACK_RE, (_m, ref: string) => `{{${ref}}}`);
     return out;
   }).join('\n');
 }
@@ -2364,7 +2369,7 @@ function postProcessVariableUndefined(html: string): string {
   // sentinel `U+E140 key U+E141` を `<span class="pkc-variable-undefined">` に変換。
   // markdown-it が text を escape した後の状態で sentinel を含む HTML を扱う。
   return html.replace(
-    new RegExp(`${VAR_OPEN}([A-Za-z_][\\w-]*)${VAR_SEP}`, 'g'),
+    new RegExp(`${VAR_OPEN}(${VAR_NAME_SOURCE})${VAR_SEP}`, 'gu'),
     (_match, key: string) =>
       `<span class="pkc-variable-undefined" title="未定義変数: vars.${key}">{{vars.${key}}}</span>`,
   );

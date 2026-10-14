@@ -141,8 +141,14 @@ export const CHART_KIND: DiagramKind = {
     const { spec, error } = parseChartFence(key.source);
     // ⚠ **読めない理由をそのまま投げる** ── hydrate が `…-error` 属性に載せ、
     //   原文は器に残る(黙って空の枠を出さない)
-    if (!spec) throw new Error(error ?? 'グラフを読めませんでした');
+    //   (書き方の理由には「グラフを描けません: 」を付ける。端末の都合で描けなかったときの字は
+    //    ワーカーが 1 文で返し、画面では前置きなしでそのまま出る)
+    if (!spec) throw new Error(`グラフを描けません: ${error ?? '読めませんでした'}`);
     return renderChartToPng(key.source, spec, key);
+  },
+  note: (source) => {
+    const { notes } = parseChartFence(source);
+    return notes.length === 0 ? null : notes.join('。');
   },
   savable: false,
 };

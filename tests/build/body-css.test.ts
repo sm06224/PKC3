@@ -42,7 +42,9 @@ describe('本文の CSS を抜く', () => {
     //   どれも `.pkc-md-rendered` で始まる本文の部品の規則で、器の規則ではない(混ざった数ではない)
     // ⚠ 2026-10-11(#530 段⑤a): 上限 225 → 230 ── 付箋の文字の大きさ(小 / 大 / 特大)の規則 3 本が本文の規則に入り、227 本になった。
     //   どれも `.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-size=…]` の本文の部品の規則で、器の規則ではない
-    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(230);
+    // ⚠ 2026-10-14(#1087): 上限 230 → 235 ── グラフの「一部を描いていません」の 1 行の規則 1 本が本文の規則に入り、230 本になった。
+    //   `.pkc-md-rendered [data-pkc-chart-state='ready'][data-pkc-chart-note]::before` の本文の部品の規則で、器の規則ではない
+    expect(OUT.ruleCount, `本文の規則が ${OUT.ruleCount} 本(器が混ざった?)`).toBeLessThan(235);
     expect(OUT.vars.length, `トークンが ${OUT.vars.length} 個`).toBeGreaterThanOrEqual(15);
     expect(OUT.css.length, '出力が短すぎる').toBeGreaterThan(8000);
   });
