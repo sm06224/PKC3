@@ -80,6 +80,12 @@ export interface ImageDrawWindowDeps {
   windowName: string;
   /** 窓が閉じたとき(保存・やめる・× のどれでも 1 度だけ)。 */
   onClosed?: () => void;
+  /**
+   * 🔴 **描きかけ(保存していない線・打ちかけの文字)の有る無し**が変わったとき(#1087)。
+   * 主ウィンドウの「離れますか」(`unload-guard`)へ繋ぐ ── 主ウィンドウが閉じる・読み直されると、この窓の保存は
+   * 効かなくなる(上の ⚠)ので、描きかけが在る間は主ウィンドウ側でも確認を出す。保存・やめる・閉じるで false に戻る。
+   */
+  onDirty?: (dirty: boolean) => void;
   open?: (url: string, target: string, features: string) => Window | null;
   waitClose?: (win: { closed: boolean }) => Promise<void>;
   /** 画像を復号する口(既定 `createImageBitmap`)。⚠ test が差せる。 */
@@ -150,6 +156,7 @@ async function build(
   save: (png: Blob) => Promise<ImageDrawSaveResult>,
   createBitmap: (b: Blob) => Promise<ImageDrawBitmap>,
   close: () => void,
+  onDirty: (dirty: boolean) => void,
 ): Promise<() => void> {
   const doc = win.document;
   doc.body.textContent = '';
@@ -231,6 +238,13 @@ async function build(
     say('', false);
   });
 
+  let dirtyReported = false;
+  const reportDirty = (dirty: boolean): void => {
+    if (dirty === dirtyReported) return;
+    dirtyReported = dirty;
+    onDirty(dirty);
+  };
+
   const sync = (): void => {
     for (const [t, b] of toolButtons) b.setAttribute('aria-pressed', String(t === tool));
     for (const [c, b] of colorButtons) b.setAttribute('aria-pressed', String(c === color));
@@ -247,6 +261,7 @@ async function build(
         : '';
     cancelBtn.disabled = saving;
     if (strokes.length === 0) confirmRow.hidden = true;
+    reportDirty(!released && (strokes.length > 0 || typing));
   };
 
   /** 打っている文字を確定する(空なら何も置かない)。入力欄は必ず外す。 */
@@ -338,6 +353,7 @@ async function build(
   const release = (): void => {
     if (released) return;
     released = true;
+    reportDirty(false);
     if (frame !== null) {
       try {
         win.cancelAnimationFrame(frame);
@@ -629,7 +645,7 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
     close,
     async start(blob, save): Promise<void> {
       try {
-        release = await build(win, blob, save, createBitmap, close);
+        release = await build(win, blob, save, createBitmap, close, deps.onDirty ?? (() => undefined));
       } catch (e) {
         close();
         throw e;

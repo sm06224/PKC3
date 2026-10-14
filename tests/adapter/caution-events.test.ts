@@ -288,7 +288,7 @@ describe('配線の原文 pin(main.ts / binder.ts)', () => {
   });
 
   it('main.ts: OP_FAILED の固定の断り文は、固定の頭を渡して積む(括弧と字数を潰さない。#1087)', () => {
-    expect(main).toMatch(/text:\s*state\.error,\s*fixedHead:\s*fixedHeadOfOpError\(state\.error\)/);
+    expect(main).toMatch(/text:\s*messageTextOfOpError\(state\.error\),\s*fixedHead:\s*fixedHeadOfOpError\(state\.error\)/);
   });
 
   it('main.ts: 空きが少ないとき、メッセージへ積み、画面下の 1 行も今までどおり出す', () => {

@@ -14,6 +14,7 @@
  * ⚠ 「問題」(操作が通らなかった)との境は **この 2 件だけ**を名指しする。
  *   他の `OP_FAILED` は今までどおり「問題」のまま。
  */
+import { DIAGRAM_EXPORT_FAIL_HEAD } from '../error-text';
 import { CORRUPT_REFUSAL } from '../storage/db-corruption';
 import { quotaBootNotice, type QuotaEstimate } from '../storage/quota-watch';
 import { WRITE_QUOTA_REFUSAL } from '../storage/write-quota';
@@ -44,10 +45,18 @@ export function messageKindForOpError(error: string): MessageKind {
  * ⚠ `CORRUPT_REFUSAL` は後ろに `(op で検出: 生の例外)` が続きうる ── 続きの側は潰す・切るが効く。
  */
 export function fixedHeadOfOpError(error: string): string {
-  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, CORRUPT_REFUSAL]) {
+  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, CORRUPT_REFUSAL, DIAGRAM_EXPORT_FAIL_HEAD]) {
     if (error.startsWith(head)) return head;
   }
   return '';
+}
+
+/**
+ * 🔴 **メッセージへ積む字**(#1087)。画面の 1 行(`state.error`)はそのままでよいが、集積地には
+ * 図の書き出しの失敗の**原文を積まない**(mermaid の構文エラーは図の原文の一部を引用する)── 固定の先頭だけにする。
+ */
+export function messageTextOfOpError(error: string): string {
+  return error.startsWith(DIAGRAM_EXPORT_FAIL_HEAD) ? DIAGRAM_EXPORT_FAIL_HEAD : error;
 }
 
 /** 積む 1 件(`MessagePost.post` へそのまま渡せる形)。 */

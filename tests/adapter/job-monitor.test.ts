@@ -128,3 +128,15 @@ describe('ジョブの記録 → メッセージ(種類「処理」)', () => {
     expect(posted[0]!.text).toBe('受付 1.2k 文字');
   });
 });
+
+describe('🔴 失敗の理由の字はメッセージへ積まない(#1087)', () => {
+  it('fail の note(worker が返した例外の字)に名前が入っていても、積む字には残らない', () => {
+    const posted: Array<{ text: string }> = [];
+    const m = new JobMonitor(() => 0, { post: (i) => posted.push(i) });
+    m.record('markdown', 'fail', { id: 1, ms: 12, note: '契約書_A社.docx を読めません' });
+    expect(posted[0]!.text).toBe('失敗 12ms');
+    expect(posted[0]!.text).not.toContain('契約書');
+    // 画面の処理一覧(recent)の記録は変えない
+    expect(m.recent(1)[0]!.note).toContain('契約書');
+  });
+});

@@ -60,9 +60,12 @@ export function bodySaveErrorText(e: unknown): string {
 /**
  * 図の書き出し(SVG)が失敗したときの字(#1087)。
  * 🔑 `String(e)` ではなく `errorText` を通す ── 「Error: …」の英語の前置きを付けず、分かる物は日本語にする。
+ * 🔴 **原文はメッセージに積まない**(`caution-events.ts` の `messageTextOfOpError`)── mermaid の構文エラーは
+ *   図の原文の一部を引用するので、画面の 1 行には出ても、バグ報告に貼る集積地には固定の先頭だけを積む。
  * 🔑 長さの上限は 200 字(mermaid の構文エラーは何行にもなる)。⚠ 日本語の案内は `errorText` が前に置くので、
  *   切れるのは末尾の原文のほうである。
  */
+export const DIAGRAM_EXPORT_FAIL_HEAD = '図を書き出せませんでした';
 export function diagramExportErrorText(e: unknown): string {
-  return `図を書き出せませんでした: ${errorText(e).slice(0, 200)}`;
+  return `${DIAGRAM_EXPORT_FAIL_HEAD}: ${errorText(e).slice(0, 200)}`;
 }

@@ -147,6 +147,21 @@ export function formatMessageSection(input: MessageSectionInput): string {
  *    持ちうる。⚠ **切ったことは字で言う**(黙って切らない ── CLAUDE.md §1)。
  */
 const QUOTE_RE = /「[^」]*」|『[^』]*』/g;
+
+/**
+ * 🔴 **名前の目印**(#1087)。題名・添付名が `」` を含むと、括弧の潰し(上の `QUOTE_RE`)は最初の `」` で閉じて
+ * 後半が残る(「【重要】「A社との契約」について」→「について」が漏れる)。括弧の字では中身の終わりが決まらないので、
+ * 名前の前後に**目に見えない字**を付け、`sanitizeMessageText` は目印の間を中身に関係なく潰す。
+ * ⚠ 目印は表示から外さない(U+2060 / U+2061 は幅の無い字で、画面の見た目は変わらない ── 外す口を
+ *   画面の字の全経路に置くより、残して無害にするほうが漏れない)。
+ * ⚠ 名前の中に目印の字が在っても終わりが早まらないよう、`markName` が名前から目印を取り除く。
+ */
+const NAME_OPEN = '\u2060';
+const NAME_CLOSE = '\u2061';
+const MARKED_NAME_RE = /\u2060[^\u2061]*(?:\u2061|$)/g;
+export function markName(name: string): string {
+  return `${NAME_OPEN}${name.replace(/[\u2060\u2061]/g, '')}${NAME_CLOSE}`;
+}
 const MAX_MESSAGE_TEXT_LENGTH = 80;
 
 export function sanitizeMessageText(text: string, fixedHead = ''): string {
@@ -159,7 +174,8 @@ export function sanitizeMessageText(text: string, fixedHead = ''): string {
     const rest = text.slice(fixedHead.length);
     return fixedHead.replace(/\r?\n/g, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
   }
-  const collapsed = text.replace(QUOTE_RE, (m) => (m.charAt(0) === '「' ? '「…」' : '『…』'));
+  const unmarked = text.replace(MARKED_NAME_RE, '…');
+  const collapsed = unmarked.replace(QUOTE_RE, (m) => (m.charAt(0) === '「' ? '「…」' : '『…』'));
   const flattened = collapsed.replace(/\r?\n/g, ' ');
   return flattened.length > MAX_MESSAGE_TEXT_LENGTH
     ? `${flattened.slice(0, MAX_MESSAGE_TEXT_LENGTH)}…`

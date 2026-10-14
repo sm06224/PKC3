@@ -158,7 +158,9 @@ export class JobMonitor {
      */
     if (this.messagePost) {
       const parts = [PHASE_LABEL[phase]];
-      if (opts.note) parts.push(opts.note);
+      // 🔴 失敗の `note` は worker が返した例外の字そのもの ── 名前・本文の一部が混ざりうる(#1087)。
+      //   集積地には積まず、段の名前(「失敗」)と所要時間だけにする。⚠ 画面の処理一覧(`recent()`)の記録は変えない。
+      if (opts.note && phase !== 'fail') parts.push(opts.note);
       if (typeof opts.ms === 'number') parts.push(`${opts.ms}ms`);
       this.messagePost.post({ kind: 'job', source: lane, text: parts.join(' ') });
     }

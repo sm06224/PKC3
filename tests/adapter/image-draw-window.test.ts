@@ -133,6 +133,7 @@ async function setup(
     save?: (png: Blob) => Promise<ImageDrawSaveResult>;
     bitmap?: { width: number; height: number };
     createBitmap?: (b: Blob) => Promise<ImageDrawBitmap>;
+    onDirty?: (dirty: boolean) => void;
   } = {},
 ): Promise<Setup> {
   const w = fakeWin();
@@ -144,6 +145,7 @@ async function setup(
     title: 'p.png',
     windowName: 'pkc3-draw-k',
     onClosed,
+    onDirty: opts.onDirty,
     open: () => w as unknown as Window,
     waitClose: () => waited,
     createBitmap: opts.createBitmap ?? (async () => bitmap),
@@ -699,5 +701,42 @@ describe('色と太さ', () => {
       expect(s.q(f).closest('[data-pkc-field="image-draw-bar"]'), f).not.toBeNull();
       expect(s.q(f).tagName).toBe('BUTTON');
     }
+  });
+});
+
+describe('🔴 描きかけの間は、主ウィンドウの「離れますか」へ知らせる(#1087)', () => {
+  it('線を引くと true、保存すると false(重ねて知らせない)', async () => {
+    const calls: boolean[] = [];
+    const s = await setup({ onDirty: (d) => calls.push(d) });
+    expect(calls).toEqual([]); // 開いただけでは立てない
+    stroke(s);
+    expect(calls).toEqual([true]);
+    stroke(s);
+    expect(calls).toEqual([true]); // 2 本目で重ねて知らせない
+    click(s.q('image-draw-save'));
+    await flush();
+    expect(calls).toEqual([true, false]);
+  });
+
+  it('取り消して線が 0 本に戻ると false / 窓を × で閉じても false', async () => {
+    const calls: boolean[] = [];
+    const s = await setup({ onDirty: (d) => calls.push(d) });
+    stroke(s);
+    click(s.q('image-draw-undo'));
+    expect(calls).toEqual([true, false]);
+    stroke(s);
+    s.w.closed = true;
+    s.closeWait();
+    await flush();
+    expect(calls).toEqual([true, false, true, false]);
+  });
+
+  it('保存を断られた(窓が開いたまま)間は true のまま', async () => {
+    const calls: boolean[] = [];
+    const s = await setup({ onDirty: (d) => calls.push(d), save: async () => ({ ok: false, message: 'だめ' }) });
+    stroke(s);
+    click(s.q('image-draw-save'));
+    await flush();
+    expect(calls).toEqual([true]);
   });
 });

@@ -15,6 +15,7 @@
  *   ── PKC2 は走査が 500MB データで boot OOM を誘発した)
  */
 import { errorText } from '@features/error-text';
+import { markName } from '@features/message/message-log';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
 import { dropCursor, noteToPutInto, putAssetIntoNote, type DroppedAt } from './asset-into-note';
@@ -290,7 +291,7 @@ export async function attachOne(
     // 🔴 英語の理由をそのまま出さない。どの file か分かる形で(#1087)
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `添付の取り込みに失敗しました(「${item.name}」): ${errorText(e)}`,
+      error: `添付の取り込みに失敗しました(「${markName(item.name)}」): ${errorText(e)}`,
     });
     return null;
   }
