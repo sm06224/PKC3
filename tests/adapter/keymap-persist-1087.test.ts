@@ -121,6 +121,65 @@ describe('2. 保存に書けない端末', () => {
   });
 });
 
+describe('2b. 外す・既定に戻すも、保存できなかったことを言う', () => {
+  const dead = () => ({
+    getItem: () => null,
+    setItem: () => {
+      throw new Error('private mode');
+    },
+    removeItem: () => {
+      throw new Error('private mode');
+    },
+  });
+  const noteOf = (root: Element, id: string) =>
+    root.querySelector(`[data-pkc-field="keymap-row"][data-pkc-command="${id}"] [data-pkc-field="settings-note"]`)!;
+
+  it('🔴 store は保存できたかを返す(書ける端末では true)', () => {
+    expect(new KeymapStore(fakeStorage()).removeBinding('create-entry', 'Mod+N')).toBe(true);
+    const ok = new KeymapStore(fakeStorage());
+    ok.addBinding('create-entry', 'Alt+M');
+    expect(ok.resetCommand('create-entry')).toBe(true);
+    expect(ok.resetAll()).toBe(true);
+    const s = new KeymapStore(dead());
+    expect(s.removeBinding('create-entry', 'Mod+N')).toBe(false);
+    s.addBinding('edit-entry', 'Alt+9');
+    expect(s.resetCommand('edit-entry')).toBe(false);
+    expect(s.resetAll()).toBe(false);
+  });
+
+  it('🔴 × で外す / 既定に戻す / すべて既定に戻す、の 3 つとも画面に出る(書ける端末では出ない)', () => {
+    for (const [storage, expectNote] of [
+      [dead(), true],
+      [fakeStorage(), false],
+    ] as const) {
+      document.body.textContent = '';
+      const s = new KeymapStore(storage);
+      const panel = buildKeymapPanel(s, document);
+      document.body.append(panel.root);
+      const root = panel.root;
+      root
+        .querySelector<HTMLButtonElement>(
+          '[data-pkc-field="keymap-drop"][data-pkc-command="create-entry"][data-pkc-chord="Mod+N"]',
+        )!
+        .click();
+      const dropNote = noteOf(root, 'create-entry').textContent ?? '';
+      expect(dropNote.includes(SETTINGS_NOT_PERSISTED_TEXT), `× の注: ${dropNote}`).toBe(expectNote);
+      if (expectNote) expect(dropNote).toContain('を外しました');
+      root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset"][data-pkc-command="create-entry"]')!.click();
+      const resetNote = noteOf(root, 'create-entry').textContent ?? '';
+      expect(resetNote.includes(SETTINGS_NOT_PERSISTED_TEXT), `既定に戻す の注: ${resetNote}`).toBe(expectNote);
+      // ⚠ 全部が既定のままだと押せない(押せないボタンの click は何も起こさない)── 1 つ割り当ててから押す
+      s.addBinding('edit-entry', 'Alt+9');
+      const all = root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
+      expect(all.disabled).toBe(false);
+      all.click();
+      const allNote = root.querySelector('[data-pkc-field="keymap-reset-all-note"]')!.textContent ?? '';
+      expect(allNote.includes(SETTINGS_NOT_PERSISTED_TEXT), `すべて既定に戻す の注: ${allNote}`).toBe(expectNote);
+      panel.dispose();
+    }
+  });
+});
+
 describe('3. 知らない id の割り当ては触らずに残す', () => {
   it('🔴 古い版でキーを 1 つ変えても、新しい版の割り当てが保存から消えない', () => {
     const st = fakeStorage();

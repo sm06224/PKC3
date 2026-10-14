@@ -149,30 +149,33 @@ export class KeymapStore {
    * 割当を 1 つ外す。⚠ **最後の 1 つも外せる**(「この近道は要らない」を尊重する)──
    * 戻し道は「既定に戻す」なので、行き止まりにはならない。
    */
-  removeBinding(commandId: string, chord: string): void {
+  removeBinding(commandId: string, chord: string): boolean {
     const cmd = findCommand(commandId);
-    if (cmd === null) return;
+    if (cmd === null) return true;
     const parsed = chordFromString(chord);
-    if (parsed === null) return;
+    if (parsed === null) return true;
     const norm = chordToString(parsed);
     this.refresh();
     const cur = (this.readOverrides()[commandId] ?? cmd.defaults).filter((c) => c !== norm);
-    this.write(commandId, cur);
+    return this.write(commandId, cur);
   }
 
-  /** そのコマンドを既定へ戻す。 */
-  resetCommand(commandId: string): void {
+  /**
+   * そのコマンドを既定へ戻す。
+   * @returns 保存できたか(#1087 ── 外す・戻すも、割り当てと同じく「この session だけ効いている」を言う)
+   */
+  resetCommand(commandId: string): boolean {
     this.refresh();
     const next = { ...this.readOverrides() };
-    if (next[commandId] === undefined) return;
+    if (next[commandId] === undefined) return true;
     delete next[commandId];
-    this.save(next);
+    return this.save(next);
   }
 
-  /** 全部を既定へ戻す。 */
-  resetAll(): void {
+  /** 全部を既定へ戻す。@returns 保存できたか。 */
+  resetAll(): boolean {
     this.refresh();
-    this.save({});
+    return this.save({});
   }
 
   /**

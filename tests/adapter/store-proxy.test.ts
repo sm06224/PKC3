@@ -159,6 +159,30 @@ describe('要求の往復', () => {
       vi.useRealTimers();
     }
   });
+
+  it('🔴 書き込みの応答が無いときは「保存されなかった」と言い切らない(後から実行されうる。#1087 J5)', async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = makeHub();
+      const real = makeFakeReal();
+      const host = new StoreProxyHost({ client: real.client, init: INIT, makeChannel: hub.make, tabId: 'holder' });
+      const p = ProxyStoreClient.connect({ makeChannel: hub.make, tabId: 'f1' });
+      await vi.advanceTimersByTimeAsync(10);
+      const follower = await p;
+      if (!follower) throw new Error('handshake failed');
+      host.close();
+      const write = follower.request({ op: 'renameEntry', cid: 'c1', lid: 'a', title: 't' });
+      const read = follower.request({ op: 'counts', cid: 'c1' });
+      const gw = expect(write).rejects.toThrow('あとから保存されることがあります');
+      // 対照群:読みは今までどおり(後から何も起きないので言い切ってよい)
+      const gr = expect(read).rejects.toThrow('メインのタブと通信できません(応答がありません)');
+      await vi.advanceTimersByTimeAsync(11_000);
+      await gw;
+      await gr;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("'changed' の放送", () => {

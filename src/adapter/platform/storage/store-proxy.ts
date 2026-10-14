@@ -39,6 +39,22 @@ export const STORE_PROXY_CHANNEL = 'pkc3-store-proxy';
 export const HANDSHAKE_TIMEOUT_MS = 1500;
 /** 要求→応答の上限。超えたら reject(永久 hang を作らない ── StoreClient と同じ規律)。 */
 export const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * 🔴 **応答が無かった要求の断り文**(#1087、複数タブの見直し J5)。
+ *
+ * ⚠ 応答が無いのは、たいてい**メインのタブが別の重い処理で塞がっている**ときである ──
+ *   要求そのものは届いて並んでおり、**塞がりが解けた後に実行される**(取り消す口は無い)。
+ *   書き込みに「通信できません」とだけ言うと、user は**保存されなかった**と読んで打ち直し、
+ *   後から両方が入る(追記が 2 回入る)。
+ * 🔑 だから書き込みのときは「**保存されたかどうか分からない**」と言い、確かめる手を添える。
+ *   読みだけの要求は今までどおり(後から何も起きない)。
+ */
+export function timeoutText(op: StorageRequest['op']): string {
+  return MUTATING_OPS.has(op)
+    ? 'メインのタブから応答がありません。この変更は、あとから保存されることがあります(ノートを開き直して確かめてから、もう一度操作してください)'
+    : 'メインのタブと通信できません(応答がありません)';
+}
 /**
  * 編集ロックの生存確認間隔(follower → holder)と、掃除の閾値。
  * ⚠ TTL は **crash した follower の置き土産**を掃除するためだけの物 ──
@@ -632,7 +648,7 @@ export class ProxyStoreClient implements StoreClientLike, TabSync {
       };
       p.timer = setT(() => {
         this.pending.delete(id);
-        reject(new Error('メインのタブと通信できません(応答がありません)'));
+        reject(new Error(timeoutText(req.op)));
       }, this.deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(id, p);
       this.ch.postMessage({ kind: 'req', from: this.id, id, req } satisfies ProxyWire);
