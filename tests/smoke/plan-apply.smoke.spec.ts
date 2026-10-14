@@ -1,5 +1,21 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
+import { readZipDirectory } from '../../src/features/import/zip-reader';
+import {
+  bootedHere,
+  clickReal,
+  collectPageErrors,
+  createEntry,
+  expectImageRendered,
+  gotoApp,
+  writesLanded,
+} from './helpers';
+
+// 1x1 PNG(67 bytes)
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 // ⚠ 手で書き写さない ── 字は `rescue-labels.ts` が正本(CLAUDE.md §1「期待値は
 //   実装の綴りの別の書き方ではなく別の観測から作る」)。改名した日に両方
 //   そのままで緑にならないよう、実装の定数を直に引く。
@@ -24,7 +40,8 @@ import {
  *
  * ⚠ **同じ設定の面に来た道中**で「入れ物ごと捨てる」導線(#986 段③)も見る
  * (smoke-budget: 新しい起動を足さず、既に在る道中に assert を足す)。
- * ⚠ **実際に消すところまでは回さない**(後続の assert が使う状態を壊す)──
+ * ⚠ **「捨てる」は実際に消すところまでは回さない**(後続の assert が使う状態を壊す。
+ *   「作り直す」は何も失わず戻るので、最後(⑨)に走らせている)──
  * 「まだ消えない」「元に戻せません」等の字・「やめる」で戻る・
  * 合言葉を打ち間違えたら消えない、までを見る。
  */
@@ -162,8 +179,9 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
    *   (CLAUDE.md「UI 導線のテストを、全量 smoke で誤魔化すな」)。
    * ⚠ unit(happy-dom)は `showModal()` の実 dialog を通らないので、
    *   **ここでしか見られない**。
-   * 🔴 **「始める」は押さない** ── 押すと本当に入れ物を作り直してしまう。
+   * 🔴 **ここでは「始める」を押さない** ── 押すと本当に入れ物を作り直してしまう。
    *   ここで確かめたいのは「**押しただけでは何も起きない**」ことである。
+   *   ⚠ 「始める」を押して最後まで走らせるのは、この test の最後(⑨)で見る。
    */
   const dialog = page.locator('[data-pkc-region="app-dialog"]');
   const dialogBody = page.locator('[data-pkc-field="dialog-body"]');
@@ -225,6 +243,129 @@ test('🔴 壊れの調べと、作り直す/捨てるの 2 段が押せる (#97
     page.locator('[data-pkc-field="status-text"]'),
     '断りの字が画面に出ていない',
   ).toContainText('何も消していません');
+
+  /**
+   * ⑨ 🔴 **作り直しを最後まで走らせる**(#1087)。同じ起動の続き(`gotoApp` を足さない)。
+   *
+   * 直す前は「やめる」までしか見ておらず、**「始める」を押した後に何が戻るか**を
+   * 実ブラウザで見る検査が 1 本も無かった ── 添付の登録行を組み直す段が抜けても緑だった。
+   * 用意するのは 5 つ:ノート / タグの色 / 添付(png)/ ノート間のつながり / 履歴 1 版。
+   */
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('台帳');
+  const ledgerLive = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await ledgerLive.locator('[data-pkc-field="row-source"]').fill('# 台帳\n\n#復元確認\n\n一版目');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-title"]').first()).toHaveText('台帳');
+  // 添付(開いたまま渡すと本文に絵が入る ── #666)
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: PNG_1X1,
+  });
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  // 本文をもう 1 回直す(履歴を 1 版作る)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\n\n二版目');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-field="detail-body"]')).toContainText('二版目');
+  // タグに色を付ける
+  const tagPick = page.locator(
+    '[data-pkc-region="inspector"] [data-pkc-field="inspector-body-tag"][data-pkc-tag="復元確認"] [data-pkc-action="tag-color-pick"]',
+  );
+  await clickReal(page, tagPick);
+  await page.evaluate((v) => {
+    const input = document.querySelector<HTMLInputElement>('input[data-pkc-field="color-pick"]')!;
+    input.value = v;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, '#ff8800');
+  await expect(
+    page.locator('[data-pkc-tagline] [data-pkc-tag="復元確認"]'),
+    '前提: タグに色が付いていない',
+  ).toHaveCSS('background-color', 'rgb(255, 136, 0)');
+  // つながりを作る(台帳 → 議事録)
+  await page.locator('[data-pkc-field="relation-target"]').fill('議事録');
+  await clickReal(page, '[data-pkc-action="add-relation"]');
+  await expect(
+    page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-relation"]'),
+    '前提: つながりが情報ペインに出ていない',
+  ).toHaveCount(1);
+  await writesLanded(page);
+
+  // 設定の面へ戻って、もう一度「作り直す」を開き、今度は「始める」を押す
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  if (!(await repairBox.isVisible())) await clickReal(page, '[data-pkc-action="toggle-container-repair"]');
+  await clickReal(page, '[data-pkc-field="container-rebuild-run"]');
+  await expect(dialog).toBeVisible();
+  const [rescued] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60_000 }),
+    clickReal(page, '[data-pkc-field="dialog-ok"]'),
+  ]);
+  // ① 拾えた分の zip が手元へ落ちる(中身は添付込み)
+  expect(rescued.suggestedFilename(), '拾った zip が落ちていない').toMatch(/\.zip$/);
+  const rescuedPath = await rescued.path();
+  expect(rescuedPath, '拾った zip の置き場が取れない').not.toBeNull();
+  const rescuedNames = (await readZipDirectory(new Blob([readFileSync(rescuedPath!)]))).map((e) => e.name);
+  expect(
+    rescuedNames.filter((n) => n.startsWith('assets/')),
+    '拾った zip に添付が入っていない',
+  ).toHaveLength(1);
+
+  // ② 終わった後の字: 戻した物と、戻らない物の名前
+  await expect(dialog, '作り直しの結果の窓が出ない').toBeVisible({ timeout: 60_000 });
+  await expect(dialogBody).toContainText('4 件を戻しました');
+  await expect(dialogBody, '添付の件数を言っていない').toContainText('添付 1 件');
+  await expect(dialogBody, 'つながりを戻したと言っていない').toContainText('つながり 1 件');
+  await expect(dialogBody, '履歴を戻したと言っていない').toContainText('履歴 1 版');
+  await expect(dialogBody, 'タグの色を戻したと言っていない').toContainText('タグの色 1 件');
+  // ⚠ 戻らない物の名前は手で書く(実装の配列から引くと、配列が縮んだとき検査も一緒に縮む)
+  await expect(dialogBody, '戻らない物(ゴミ箱のノート)を言っていない').toContainText('ゴミ箱のノート');
+  await expect(dialogBody, '戻らない物(システムのメッセージ)を言っていない').toContainText('システムのメッセージ');
+
+  // ③ 読み込み直しが走る
+  const navigated = page.waitForEvent('framenavigated');
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await navigated;
+  await bootedHere(page);
+
+  // ④ 読み込み直した後: ノートが戻っている
+  const rowsAfter = page.locator('[data-pkc-region="filer-table"] tbody tr');
+  await expect(rowsAfter, '読み込み直したらノートが戻っていない').toHaveCount(4);
+  await expect(rowsAfter.filter({ hasText: '台帳' }), '台帳が戻っていない').toHaveCount(1);
+  await expect(rowsAfter.filter({ hasText: '議事録' }), '議事録が戻っていない').toHaveCount(1);
+  await expect(rowsAfter.filter({ hasText: 'dot.png' }), '添付のノートが戻っていない').toHaveCount(1);
+
+  // ⑤ 添付が表示できる / タグの色 / つながり
+  await clickReal(page, '[data-pkc-region="filer-table"] [data-pkc-entry]:has-text("台帳")');
+  await expectImageRendered(page, '[data-pkc-region="detail"] img[data-pkc-asset-key]');
+  await expect(
+    page.locator('[data-pkc-tagline] [data-pkc-tag="復元確認"]'),
+    'タグの色が戻っていない',
+  ).toHaveCSS('background-color', 'rgb(255, 136, 0)');
+  await expect(
+    page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-relation"]'),
+    'つながりが情報ペインに戻っていない',
+  ).toHaveCount(1);
+
+  // ⑥ 🔴 本題: 作り直した後の「バックアップ」に添付が入っている(直す前は 0 件だった)
+  const [full] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30_000 }),
+    clickReal(page, '[data-pkc-region="collection-bar"] [data-pkc-action="export-archive"]'),
+  ]);
+  expect(full.suggestedFilename(), 'バックアップの末尾が .pkc3-full.zip ではない').toMatch(/\.pkc3-full\.zip$/);
+  const fullPath = await full.path();
+  expect(fullPath, 'バックアップの置き場が取れない').not.toBeNull();
+  const fullNames = (await readZipDirectory(new Blob([readFileSync(fullPath!)]))).map((e) => e.name);
+  expect(
+    fullNames.filter((n) => n.startsWith('assets/')),
+    '作り直した後のバックアップに添付の file が入っていない',
+  ).toHaveLength(1);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toHaveLength(0);
 });
