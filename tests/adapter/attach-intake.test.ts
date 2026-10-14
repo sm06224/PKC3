@@ -33,7 +33,7 @@ function harness(estimate?: AttachDeps['estimate'], over?: StoreOver) {
     putMeta: async (m) => {
       metas.push(m);
     },
-    listMetas: async () => [...metas], // 実装内部の push と共有しない(実 API 同様に copy)
+    listStoredBlobKeys: async () => putBlobs.map((b) => b.key), // 実装内部の push と共有しない(実 API 同様に copy)
     estimate,
   };
   const d = new Dispatcher();
@@ -1405,5 +1405,38 @@ describe('取り込めなかった理由は、日本語で file 名つき(#1087 
     };
     await attachOne(h.d, h.deps, { name: 'a.txt', type: 'text/plain', size: 1, blob: new Blob(['x']) });
     expect(h.d.getState().error).toBe('添付の取り込みに失敗しました(「a.txt」): disk exploded');
+  });
+});
+
+/**
+ * 🔴 **同じ物かどうかは bytes 側で見る**(#1087)。
+ *
+ * 整理(GC)は `deleteBlob` → `deleteMeta` の順なので、途中で落ちると **meta だけが残る**
+ * (設計上の想定内)。直す前は meta 行で「もう在る」と読み、同じファイルを添付し直しても
+ * bytes を書かずに参照だけを作っていた ── **開けない添付ができ、次の整理でも直らない**。
+ */
+describe('添付し直したとき、bytes が無ければ書く(#1087)', () => {
+  const file = () => new File(['same bytes'], 'a.pdf', { type: 'application/pdf' });
+
+  it('🔴 meta は残っているが bytes が消えた添付を、もう一度書く', async () => {
+    const h = harness();
+    await attachFiles(h.d, h.deps, [file()]);
+    await until(() => h.putBlobs.length === 1);
+    const key = h.putBlobs[0]!.key;
+    // 整理が bytes を消した後、meta を消す前に落ちた状態
+    h.putBlobs.length = 0;
+    expect(h.metas.some((m) => m.key === key), '前提: meta が残っていない').toBe(true);
+    await attachFiles(h.d, h.deps, [file()]);
+    await until(() => h.putBlobs.length === 1);
+    expect(h.putBlobs.map((b) => b.key), 'bytes を書かずに参照だけ作った').toEqual([key]);
+  });
+
+  it('対照群: bytes が在れば、同じ物は 2 度書かない', async () => {
+    const h = harness();
+    await attachFiles(h.d, h.deps, [file()]);
+    await until(() => h.putBlobs.length === 1);
+    await attachFiles(h.d, h.deps, [file()]);
+    await tick();
+    expect(h.putBlobs, '同じ bytes を 2 度書いた').toHaveLength(1);
   });
 });

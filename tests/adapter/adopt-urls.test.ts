@@ -30,7 +30,7 @@ function deps(over: Partial<AttachDeps> = {}) {
     gate: (run) => run(), // #724 ⑤: 単体では門を模さない(そのまま走らせる)
     putBlob: async (key) => void put.push(key),
     putMeta: async () => {},
-    listMetas: async () => [],
+    listStoredBlobKeys: async () => [],
     hashBlob: async (blob) => `h${blob.size}`,
     ...over,
   };

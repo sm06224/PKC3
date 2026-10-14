@@ -534,6 +534,17 @@ describe('書き出しの settle の配線', () => {
  * ⚠ `main.ts` は原文 pin しか持てない層なので**弱いと自覚して使う**
  *   (CLAUDE.md「取り出せないものは原文 pin で妥協するが、弱いと自覚して使う」)。
  */
+describe('添付の「もう在るか」は bytes の台帳から引く(#1087)', () => {
+  it('🔴 添付の口は blob の key 一覧を渡している(meta 行ではない)', () => {
+    const at = MAIN.indexOf('listStoredBlobKeys: () =>');
+    expect(at, '添付の口の配線が無い').toBeGreaterThan(-1);
+    const line = MAIN.slice(at, MAIN.indexOf('\n', at));
+    expect(line, 'meta 行で判定している ── GC の途中失敗で開けない添付ができる').toContain(
+      'blobs.listKeys(cid)',
+    );
+  });
+});
+
 describe('取込の relation id の配線(#1087)', () => {
   /** `existingRelationIds` の配線だけを切り出す。 */
   function wiring(): string {

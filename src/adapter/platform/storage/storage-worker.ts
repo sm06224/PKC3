@@ -3349,8 +3349,9 @@ const handlers: Handlers = {
    * - LIKE 側(3 字未満): 本文を読んで `excerptAround` で同じ顔の抜粋を作る。
    *   関連度は持たない(`rank: 0`)ので並びは entry_order
    *
-   * ⚠ **ゴミ箱の中は返さない**(`archived = 0`)── 行を押すと小窓で開くので、
-   *   一覧に無い物を開かせない(`findBacklinks` と同じ理由)。
+   * ⚠ **ゴミ箱の中は返さない** ── 捨てたノートは `entries` から行ごと消える(`deleteEntry`)ので、
+   *   ここは何もしなくてよい。🔴 `archived`(片付けた todo)で絞らない(#1087)── 片付けた todo は
+   *   一覧にも左の列の検索にも出るので、ここだけ外すと**左の列と結果が食い違う**。
    * ⚠ 印の綴りは `search-snippet.ts` の 1 か所 ── 描画器も同じ物を読む。
    * ⚠ 上限と「切った」の作法は `searchEntries` と同じ(`limit + 1`)。
    */
@@ -3372,7 +3373,7 @@ const handlers: Handlers = {
                 bm25(entries_fts) AS rank
            FROM entries_fts f
            JOIN entries e ON e.rowid = f.rowid
-          WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.archived = 0 AND e.${USER_REALM_SQL}
+          WHERE f.entries_fts MATCH ?1 AND e.cid = ?2 AND e.${USER_REALM_SQL}
           ORDER BY rank, e.entry_order, e.lid LIMIT ?7`,
         [
           plan.match,
@@ -3410,7 +3411,7 @@ const handlers: Handlers = {
     bind.push(limit + 1);
     const rows = need().selectObjects(
       `SELECT lid, title, body FROM entries
-        WHERE cid = ?1 AND archived = 0 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
+        WHERE cid = ?1 AND ${USER_REALM_SQL} AND ${conds.join(' AND ')}
         ORDER BY entry_order, lid LIMIT ?${bind.length}`,
       bind,
     ) as Array<{ lid: string; title: string; body: string }>;
@@ -3445,7 +3446,9 @@ const handlers: Handlers = {
    *
    * ⚠ **自分自身は外す** ── 本文に自分へのリンクを書けてしまうが、
    *   「自分が自分を参照している」を一覧に出しても user は何もできない。
-   * ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。
+   * ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)── 捨てたノートは `entries` に居ないので
+   *   何もしなくてよい。🔴 `archived`(片付けた todo)で絞らない(#1087)── 片付けた todo は一覧に居るのに、
+   *   参照元から黙って消え、ゴミ箱へ移すときの「リンクは開けません」の件数も足りなくなっていた。
    * ⚠ 並びは `entry_order`(一覧と同じ)/ 上限を置き、**切ったことを言う**。
    */
   findBacklinks: (req) => {
@@ -3471,7 +3474,7 @@ const handlers: Handlers = {
     // 🔴 backlink は system 領域のノートを出さない(設計 doc §1.1、段①)
     const rows = need().selectObjects(
       `SELECT lid, body FROM entries
-        WHERE cid = ?1 AND lid <> ?2 AND archived = 0 AND ${USER_REALM_SQL} AND (${where})
+        WHERE cid = ?1 AND lid <> ?2 AND ${USER_REALM_SQL} AND (${where})
         ORDER BY entry_order, lid`,
       [req.cid, req.lid, ...needles.map((n) => toLikePattern(n))],
     ) as Array<{ lid: string; body: string }>;
@@ -4283,8 +4286,26 @@ const handlers: Handlers = {
         });
       },
     });
+    /**
+     * 🔴 **履歴とゴミ箱が使っている添付は「使われていない」に数えない**(#1087)。
+     * ⚠ 整理(`scanAssetRefs`)は revisions も保持扱いにする ── ここが entries しか見ないと、
+     *   ゴミ箱のノートの添付を「消せます」と案内したのに、整理は「使われていない添付はありません」と言う。
+     *   判定は整理と同じ `scanAssetRefsInto`(規則を写さない)。
+     */
+    const unused = new Set(keys.filter((k) => (refCount.get(k) ?? 0) === 0));
+    if (unused.size > 0) {
+      need().exec({
+        sql: 'SELECT snapshot FROM revisions WHERE cid = ?',
+        bind: [req.cid],
+        rowMode: '$snapshot',
+        callback: (row: unknown): false | void => {
+          if (unused.size === 0) return false;
+          scanAssetRefsInto(typeof row === 'string' ? row : '', unused, () => {});
+        },
+      });
+    }
     let orphanBytes = 0;
-    for (const [k, n] of size) if ((refCount.get(k) ?? 0) === 0) orphanBytes += n;
+    for (const k of unused) orphanBytes += size.get(k) ?? 0;
     return {
       rows: rows.map((r) => ({
         lid: r.lid,

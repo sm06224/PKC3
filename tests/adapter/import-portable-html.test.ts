@@ -367,8 +367,12 @@ describe('PKC3 入り HTML の取り込み (#1416)', () => {
       const n3 = o.seen.entries.find((e) => e.body.includes('asset:'))!;
       expect(n3.body).toContain('asset:' + key);
       expect(n3.body).not.toContain(ASSET_KEY);
-      // 「重複排除の対象外」は注意として user に届く(黙って外さない)
-      expect(o.reported.some((n) => n.includes('重複排除の対象外') && n.includes(ASSET_KEY))).toBe(true);
+      // 「まとめる対象から外した」は注意として user に届く(黙って外さない)
+      // 🔴 どの添付かは**ノートの題名**で言う。内部の key は出さない(#1087)
+      const note = o.reported.find((n) => n.includes('同じ添付をまとめる対象から外しました'));
+      expect(note, '注意が届いていない').toBeDefined();
+      expect(note, 'どのノートの添付か言っていない').toContain(`「${n3.title}」の添付`);
+      expect(note, '内部の key が出ている').not.toContain(ASSET_KEY);
     });
 
     it('対照群: 閾値ちょうど(以下)・既定の閾値では、content key + hash で入り、注意は出ない', async () => {
@@ -381,7 +385,7 @@ describe('PKC3 入り HTML の取り込み (#1416)', () => {
         expect(o.metas, name).toEqual([
           { key, mime: 'application/octet-stream', size: ASSET_BYTES.length, hash: key!.slice('ast-'.length) },
         ]);
-        expect(o.reported.some((n) => n.includes('重複排除の対象外')), name).toBe(false);
+        expect(o.reported.some((n) => n.includes('同じ添付をまとめる対象から外しました')), name).toBe(false);
         expect(o.assetReads, name).toBe(1);
       }
     });

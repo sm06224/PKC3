@@ -1945,16 +1945,35 @@ describe('バックリンク (#348)', () => {
     expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-self' })).lids).toEqual([]);
   });
 
-  /** ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。 */
+  /**
+   * ⚠ **ゴミ箱の中は出さない**(押しても一覧に無いものへ飛ぶ)。
+   * 🔴 台は**本物のゴミ箱**(`deleteEntry`)で作る ── 直す前は `archived: true` をゴミ箱の代わりに使い、
+   *   片付けた todo を参照元から外す誤りを固定していた(#1087)。
+   */
   it('⚠ ゴミ箱の中からの参照は出さない', async () => {
     await write('bl-t2', '的\n');
+    await write('bl-trashed', link('bl-t2'));
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids,
+      '前提: ゴミ箱へ移す前は出る',
+    ).toEqual(['bl-trashed']);
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'bl-trashed' });
+    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids).toEqual([]);
+  });
+
+  /** 🔴 **片付けた todo からの参照は出す**(一覧にも左の列の検索にも居る。#1087)。 */
+  it('🔴 片付けた todo からの参照は出す(ゴミ箱とは別物)', async () => {
+    await write('bl-t4', '的\n');
     await request({
       op: 'upsertEntry',
       cid: 'c1',
-      entry: entry('bl-trashed', link('bl-t2'), { archived: true }),
+      entry: entry('bl-archived', link('bl-t4'), { archived: true }),
       checkpoint: false,
     });
-    expect((await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t2' })).lids).toEqual([]);
+    expect(
+      (await request({ op: 'findBacklinks', cid: 'c1', lid: 'bl-t4' })).lids,
+      '片付けた todo が参照元から黙って消えた',
+    ).toEqual(['bl-archived']);
   });
 
   /** ⚠ 別の器のノートは混ざらない。 */
@@ -2882,6 +2901,22 @@ describe('容量の内訳(#415)', () => {
     expect(p.totalAssetBytes, '総量にも入っている').toBe(5_250_000);
     // ⚠ 孤児はどの行にも付かない
     for (const r of p.rows) expect(r.assetBytes).not.toBe(250_000);
+  });
+
+  it('🔴 ゴミ箱のノートが使っている添付は「使われていない」に数えない(整理と同じ規則。#1087)', async () => {
+    /**
+     * ⚠ 直す前は entries だけを見ていたので、ゴミ箱のノートの添付を「消せます」と案内し、
+     *   整理(revisions も保持扱い)は「使われていない添付はありません」と言っていた。
+     */
+    const before = (await profile()).orphanBytes;
+    await put('ast-trashed', 700_000);
+    await note('t1', '![](asset:ast-trashed)');
+    await request({ op: 'deleteEntry', cid: CID, lid: 't1' });
+    const after = await profile();
+    expect(after.rows.some((r) => r.lid === 't1'), '前提: ゴミ箱へ移っていない').toBe(false);
+    expect(after.orphanBytes - before, 'ゴミ箱の添付を「消せます」に数えた').toBe(0);
+    const keep = await request({ op: 'scanAssetRefs', cid: CID, candidates: ['ast-trashed'] });
+    expect(keep.referenced, '前提: 整理がゴミ箱の添付を保持していない').toEqual(['ast-trashed']);
   });
 
   it('⚠ escape された参照も拾う(照合の正本と同じ規則)', async () => {

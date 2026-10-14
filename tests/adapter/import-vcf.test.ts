@@ -520,3 +520,26 @@ describe('書き出し ── 空の門', () => {
     expect(d.getState().error ?? '').toContain('書き出せる連絡先がありません');
   });
 });
+
+describe('読んでいる間に編集が始まった(#1087。ics / pptx と同じ)', () => {
+  it('🔴 書く直前にもう一度門を通し、書かずに断る', async () => {
+    const h = harness();
+    h.d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [{ lid: 'e1', title: 'a', archetype: 'text', entryOrder: 1, status: null, date: null, archived: false, bodyChars: null } as never],
+      relations: [],
+    });
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    h.d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '本文\n' });
+    const f = vcfFile(CARD);
+    // 読み込みの最中に user が編集を始めた、を作る(読む口は `arrayBuffer`)
+    f.arrayBuffer = async () => {
+      h.d.dispatch({ type: 'START_EDIT' });
+      return new TextEncoder().encode(CARD).buffer as ArrayBuffer;
+    };
+    expect(await importVcfFiles(h.d, h.deps, [f])).toBeNull();
+    expect(h.written, '編集中に書いた ── 反映が先送りされ「取り込み完了」と並ぶ').toHaveLength(0);
+    expect(h.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
+  });
+});

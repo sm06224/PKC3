@@ -584,6 +584,15 @@ export async function importPkc2File(
     // convert は純関数なので content key を決められない ── 暫定 key を配ってあり、
     // ここで本物へ写す(body の書換は下の remapAssetKeys)
     const keyMap = new Map<string, string>();
+    /**
+     * 🔴 **添付の注意は、どのノートの添付かで言う**(#1087)── 直す前は `ast-…` / PKC2 の key を
+     *   そのまま出しており、user にはどの添付のことか分からなかった。本文は暫定 key で
+     *   書き換え済みなので、それを含むノートの題名を引く(見つからなければ「添付」とだけ言う)。
+     */
+    const assetName = (key: string): string => {
+      const owner = result.entries.find((e) => e.body.includes(key));
+      return owner ? `「${owner.title || '(無題)'}」の添付` : '題名の分からないノートの添付';
+    };
     for (const a of result.assets) {
       try {
         // ⚠ gzip は **export 単位**の符号化なので、body 内蔵だった legacy data
@@ -626,7 +635,7 @@ export async function importPkc2File(
             (
               await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
                 result.warnings.push(
-                  `添付が読み込めなかったので ${n} 個目の複製から復元しました: ${a.oldKey}`,
+                  `${assetName(a.key)}が読み込めなかったので ${n} 個目の複製から復元しました`,
                 ),
               )
             ).blob,
@@ -638,7 +647,7 @@ export async function importPkc2File(
             hash: null,
           });
           result.warnings.push(
-            `大きすぎる添付は重複排除の対象外です(読めるかどうかは確かめました): ${a.oldKey}`,
+            `${assetName(a.key)}は大きいので、同じ添付をまとめる対象から外しました(読めるかどうかは確かめました)`,
           );
           continue;
         }
@@ -657,7 +666,7 @@ export async function importPkc2File(
         let deflated = false;
         if (src) {
           const got = await readWithFallback(src, zipAlternates?.get(a.oldKey!), (n) =>
-            result.warnings.push(`添付が読み込めなかったので ${n} 個目の複製から復元しました: ${a.oldKey}`),
+            result.warnings.push(`${assetName(a.key)}が読み込めなかったので ${n} 個目の複製から復元しました`),
           );
           raw = await bytesOfSource(got.blob, got.src);
         } else {
@@ -682,7 +691,7 @@ export async function importPkc2File(
       } catch (e) {
         // 1 件の添付が壊れていても取込全体は止めない(欠損は可視化する)
         a.base64 = '';
-        result.warnings.push(`添付を復元できませんでした(${a.key}): ${reason(e)}`);
+        result.warnings.push(`${assetName(a.key)}を復元できませんでした: ${reason(e)}`);
       }
     }
 

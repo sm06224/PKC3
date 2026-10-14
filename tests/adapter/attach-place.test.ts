@@ -43,7 +43,7 @@ function rig(): { dispatcher: Dispatcher; deps: AttachDeps } {
     putBlob: async () => undefined,
     gate: async (run) => run(),
     putMeta: async () => undefined,
-    listMetas: async () => [],
+    listStoredBlobKeys: async () => [],
     hashBlob: async () => 'a'.repeat(64),
   };
   return { dispatcher, deps };

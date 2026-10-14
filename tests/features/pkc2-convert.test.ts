@@ -119,8 +119,12 @@ describe('convertPkc2Container (P6a)', () => {
     expect(r.relations).toEqual([
       { id: 'r1', fromLid: 'b-note', toLid: 'a-todo', kind: 'structural' },
     ]);
-    expect(r.warnings.some((w) => w.includes('r2'))).toBe(true);
-    expect(r.warnings.some((w) => w.includes('r3'))).toBe(true);
+    // 🔴 内部の ID(r2 / r3)ではなく、ノートの題名で言う(#1087)
+    expect(r.warnings).toContain('「ノート」から、つなぐ先のノートが無いつながりを除きました');
+    expect(r.warnings).toContain(
+      '「ノート」と「やること」の間の、種類の分からないつながり(weird-kind)を除きました',
+    );
+    expect(r.warnings.join('\n'), '内部の ID が出ている').not.toMatch(/\br[23]\b/);
   });
 
   it('履歴は持ち込む ── 古い → 新しい の順に並べ、本文と同じ経路で変換する', () => {

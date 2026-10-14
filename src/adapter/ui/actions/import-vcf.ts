@@ -30,23 +30,24 @@ export async function importVcfFiles(
   const fail = (msg: string): null => {
     return failImport(dispatcher, deps, msg);
   };
-  const state = dispatcher.getState();
   /**
    * 🔴 **章の欄が開いている間も断る**(#1044 段2 4巡目の修理、T3)。
    * ⚠ `import-markdown.ts` の `importMarkdownFiles` と**同じ判定**
    *   (`hasUnsavedTyping`)に揃える(§7)── 直す前はここが `phase` しか見て
    *   おらず、md 経路と vcf 経路で断りの条件が食い違っていた。
    */
-  if (hasUnsavedTyping(state)) {
-    return fail(
-      state.phase === 'editing'
+  const gate = (): string | null => {
+    const state = dispatcher.getState();
+    if (hasUnsavedTyping(state)) {
+      return state.phase === 'editing'
         ? `${phaseBlockReason(state.phase)}取り込んでください`
-        : SECTION_DRAFT_NOTE,
-    );
-  }
-  if (state.phase !== 'ready') {
-    return fail(`${phaseBlockReason(state.phase)}取り込んでください`);
-  }
+        : SECTION_DRAFT_NOTE;
+    }
+    if (state.phase !== 'ready') return `${phaseBlockReason(state.phase)}取り込んでください`;
+    return null;
+  };
+  const blocked = gate();
+  if (blocked !== null) return fail(blocked);
   if (files.length === 0) return fail('取り込むファイルがありません');
 
   const notes: string[] = [];
@@ -110,6 +111,13 @@ export async function importVcfFiles(
   if (rows.length === 0) {
     return fail('vCard から連絡先を 1 枚も読めませんでした');
   }
+
+  /**
+   * 🔴 **読んでいる間に編集が始まったかもしれない ── 書く直前に門をもう一度通す**(#1087。ics / pptx と同じ)。
+   * ⚠ 直す前は書いてから反映を先送りし、「編集を終了すると反映されます」と「取り込み完了」が並んでいた。
+   */
+  const again = gate();
+  if (again !== null) return fail(again);
 
   try {
     await deps.bulkUpsertEntries(rows);

@@ -46,9 +46,13 @@ export interface AttachDeps {
     size: number;
     hash: string | null;
   }): Promise<void>;
-  listMetas(): Promise<
-    Array<{ key: string; size: number | null; hash: string | null }>
-  >;
+  /**
+   * 🔴 **bytes(blob)側に既に在る key**(#1087)── 「同じ物は書かない」の判定に使う。
+   * ⚠ meta 行で判定しない:整理(GC)は `deleteBlob` → `deleteMeta` の順なので、
+   *   途中で落ちると meta だけが残る(設計上の想定内)。meta で見ると bytes を書かずに
+   *   参照だけを作り、**開けない添付**ができる(取り込みの側は review H-1 で既に直してある)。
+   */
+  listStoredBlobKeys(): Promise<readonly string[]>;
   /** quota preflight(無い環境では省略可)。 */
   estimate?(): Promise<{ usage?: number; quota?: number }>;
   /**
@@ -484,9 +488,7 @@ export async function attachFiles(
   const run = async (): Promise<void> => {
     // content addressing なので**台帳を引かない**。同じ bytes は同じ key に落ちる
     // ので、既に持っているかは key の存在だけで決まる(batch 内の重複も自動で潰れる)
-    const known = new Set(
-      (await deps.listMetas().catch(() => [])).map((m) => m.key),
-    );
+    const known = new Set(await deps.listStoredBlobKeys().catch(() => []));
 
     for (const file of files) {
       try {

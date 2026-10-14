@@ -2672,7 +2672,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         meta: { key: m.key, mime: m.mime, size: m.size, hash: m.hash },
       });
     },
-    listMetas: () => client.request({ op: 'listAssetMetas', cid }),
+    listStoredBlobKeys: () => blobs.listKeys(cid),
     estimate: navigator.storage?.estimate ? () => navigator.storage.estimate() : undefined,
     // 🔴 ハッシュは**ワーカーで**取る(P8 段㉓)。渡さないと
     //    `blob.arrayBuffer()` が最大 64MB をメインの heap に載せる
@@ -3634,7 +3634,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ 断る側の口を使う(待たせる `queued` は「選び直せない経路」用)──
       //   貼付はクリップボードが残っているので**もう一度貼れる**。
       await withAssetGate(async () => {
-        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
+        const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
         for (const file of files) {
           const name = pastedImageName(file, new Date());
           try {
@@ -5656,7 +5656,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       let lid: string | null = null;
       // ⚠ 待つ側の gate(押した後に選び直せない ── `launchQueue` と同じ判断)
       await withAssetGate.queued(async () => {
-        const known = new Set((await attachDeps.listMetas().catch(() => [])).map((m) => m.key));
+        const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
         const attached = await attachOne(
           dispatcher,
           attachDeps,
