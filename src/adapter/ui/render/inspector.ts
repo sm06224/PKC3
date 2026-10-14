@@ -121,6 +121,9 @@ function withBlockedNote(base: string, note: string): string {
   return `${base}\n${note}`;
 }
 
+/** 編集中、打鍵が止まってからこの面の本文走査をやり直すまでの待ち(ms)。 */
+const SCAN_DEBOUNCE_MS = 250;
+
 export class InspectorRenderer {
   /** 「居場所」の祖先の題名(#1087)。鍵は選択 lid と `entryMetas` / `relations` の参照。 */
   private chainMemo: {
@@ -214,16 +217,56 @@ export class InspectorRenderer {
    */
   private assetScan: { body: string; uses: ReturnType<typeof listAssetUses> } | null = null;
 
-  private scanAssetUses(body: string): ReturnType<typeof listAssetUses> {
+  /**
+   * 🔴 **編集中の打鍵ごとに、本文を走査し直さない**(#1087)。
+   *
+   * 編集中は 1 打鍵ごとに `UPDATE_OPEN_BODY` が来てこの面も描き直されるが、本文の字が毎回変わるので
+   * 上の記憶(目次 / タグ / 添付 / チェック件数)が毎回外れ、400KB のノートで 1 打鍵あたり約 70ms
+   * (半分以上は `listAssetUses` が本文全体を markdown として読む分)を同期で使っていた。
+   * 🔑 編集中で、**同じノートの前回の結果が在る**ときは、前回の結果を出したまま、打鍵が止まって
+   *   `SCAN_DEBOUNCE_MS` 経ってから**最新の state で 1 回だけ**走査し直す(trailing debounce)。
+   * ⚠ 編集中以外(選択の切り替え / 保存後 / 初めて編集に入るノート)は今までどおり**同期**。
+   *   前回の結果が無いときに空で出す(ちらつき)ことはしない。
+   * ⚠ 遅れて描くのは必ず**最新の state**(`lastState`)で、ノートが替わった / 編集を抜けたなら捨てる
+   *   (`render` が通常の同期の道で描くので、飛ばしても取りこぼさない)。
+   */
+  private scanLid: string | null = null;
+  private lastState: AppState | null = null;
+  private scanTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 今回の `render` で前回の結果を出したまま通した走査が在るか。 */
+  private scanDeferred = false;
+
+  private clearScanTimer(): void {
+    if (this.scanTimer !== null) {
+      clearTimeout(this.scanTimer);
+      this.scanTimer = null;
+    }
+  }
+
+  /** タイマーを手放す(描画器を捨てるとき)。 */
+  dispose(): void {
+    this.clearScanTimer();
+    this.lastState = null;
+  }
+
+  private scanAssetUses(body: string, stale: boolean): ReturnType<typeof listAssetUses> {
     if (this.assetScan !== null && this.assetScan.body === body) return this.assetScan.uses;
+    if (stale && this.assetScan !== null) {
+      this.scanDeferred = true;
+      return this.assetScan.uses;
+    }
     const uses = listAssetUses(body);
     this.assetScan = { body, uses };
     return uses;
   }
 
   /** 本文の字が同じなら前回の走査を使い回す。`view.doc` は `readTags(body)` と同じ物。 */
-  private scanTags(body: string): NonNullable<InspectorRenderer['tagScan']> {
+  private scanTags(body: string, stale: boolean): NonNullable<InspectorRenderer['tagScan']> {
     if (this.tagScan !== null && this.tagScan.body === body) return this.tagScan;
+    if (stale && this.tagScan !== null) {
+      this.scanDeferred = true;
+      return this.tagScan;
+    }
     const scan = { body, view: collectEntryTags(body), problem: frontmatterProblem(body) };
     this.tagScan = scan;
     return scan;
@@ -294,6 +337,32 @@ export class InspectorRenderer {
   }
 
   render(state: AppState): void {
+    this.renderNow(state, false);
+  }
+
+  private renderNow(state: AppState, fresh: boolean): void {
+    this.lastState = state;
+    this.scanDeferred = false;
+    try {
+      this.paint(state, fresh);
+    } finally {
+      if (this.scanDeferred) {
+        // 打鍵のたびに待ち直す(止まってから 1 回)
+        this.clearScanTimer();
+        this.scanTimer = setTimeout(() => {
+          this.scanTimer = null;
+          const st = this.lastState;
+          // 編集を抜けた / ノートが替わったなら捨てる(その回の描画が同期で済ませている)
+          if (st === null || st.phase !== 'editing' || st.selectedLid !== this.scanLid) return;
+          this.renderNow(st, true);
+        }, SCAN_DEBOUNCE_MS);
+      } else {
+        this.clearScanTimer();
+      }
+    }
+  }
+
+  private paint(state: AppState, fresh: boolean): void {
     const meta = state.selectedLid ? state.entryMetas.get(state.selectedLid) : undefined;
     // 🔴 紐づけは**取込の後**に届く(`FILE_LINKED`)── 出す/出さないが形を決める
     const link = (state.selectedLid && state.linkedFiles.get(state.selectedLid)) || null;
@@ -315,6 +384,7 @@ export class InspectorRenderer {
     if (!meta) {
       this.updateCollectionInfo(state);
       this.shownLid = null;
+      this.scanLid = null;
       return;
     }
 
@@ -329,6 +399,8 @@ export class InspectorRenderer {
      * 判定はここ 1 か所で採り、塗る先それぞれへ配る(§7: 同じ問いに 2 つ答えない)。
      */
     const editing = state.phase !== 'ready';
+    // 🔴 前回の走査結果を出したまま通してよい回か(#1087 ── `scanLid` の注釈)
+    const stale = !fresh && state.phase === 'editing' && this.scanLid === lid;
     /**
      * 🔴 **理由は phase から導く**(#516)。
      * ⚠ 直す前は一律「編集中は使えません」だったので、`phase === 'error'`
@@ -422,7 +494,9 @@ export class InspectorRenderer {
        *   1 つ増えた回は `<div>` 1 個の挿入で済む。⚠ 途中に見出しが入ると後続の slug がずれるので、
        *   全属性を毎回 `setAttr` で比べる(押すと別の見出しへ飛ぶ、を作らない)。
        */
-      if (this.toc === null || this.toc.body !== body) {
+      if (stale && this.toc !== null && this.toc.body !== null && body !== null && this.toc.body !== body) {
+        this.scanDeferred = true;
+      } else if (this.toc === null || this.toc.body !== body) {
         const headings =
           body === null
             ? []
@@ -476,7 +550,7 @@ export class InspectorRenderer {
     if (assetBox) {
       const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
       if (body === null) this.assetScan = null;
-      const uses = body === null ? [] : this.scanAssetUses(body);
+      const uses = body === null ? [] : this.scanAssetUses(body, stale);
       assetBox.textContent = '';
       const dt = assetBox.previousElementSibling;
       const empty = uses.length === 0;
@@ -511,7 +585,7 @@ export class InspectorRenderer {
      * - **frontmatter が壊れていない** ── 閉じの `---` を失っている本文に
      *   書き足すと #284 系の実害を広げる(直してから触る)
      */
-    const tagScan = tagBody === null ? null : this.scanTags(tagBody);
+    const tagScan = tagBody === null ? null : this.scanTags(tagBody, stale);
     if (tagScan === null) this.tagScan = null;
     const canWriteTags =
       tagBody !== null &&
@@ -1044,7 +1118,9 @@ export class InspectorRenderer {
       if (taskBody === null) {
         this.taskCount = null;
       } else {
-        if (this.taskCount?.body !== taskBody) {
+        if (stale && this.taskCount !== null && this.taskCount.body !== taskBody) {
+          this.scanDeferred = true;
+        } else if (this.taskCount?.body !== taskBody) {
           const items = listTaskItems(taskBody);
           this.taskCount = {
             body: taskBody,
@@ -1052,12 +1128,13 @@ export class InspectorRenderer {
             done: items.filter((i) => i.done).length,
           };
         }
-        text = formatTaskProgress(this.taskCount.total, this.taskCount.done);
+        text = formatTaskProgress(this.taskCount!.total, this.taskCount!.done);
       }
       tasksDd.hidden = text === null;
       if (dt instanceof HTMLElement) dt.hidden = text === null;
       if (text !== null) setText(tasksDd, text);
     }
+    this.scanLid = state.openBody?.lid === meta.lid ? meta.lid : null;
     this.paintDate(meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが

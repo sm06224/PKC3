@@ -328,7 +328,15 @@ export class AppendBoxRenderer {
      * 🔑 すぐ上の「隠れている間は `lastLid` を動かさない」と**同じ作法**にする ──
      *   消す理由が無いものを、面や状態の切り替わりで捨てない。
      */
-    this.paintTargets(state.openBody?.lid === this.lastLid ? state.openBody.body : null);
+    /**
+     * 🔴 **編集中は拾わない**(#1087)── 追記欄は使えない(`editing`)ので、打鍵ごとに本文全体を
+     *   走査しても誰も見ない(400KB で約 2ms / 打鍵)。⚠ 一覧を捨てるのではなく**触らない**だけなので、
+     *   編集が終わって `ready` へ戻った回に、本文が違えば(`targetBody` と比べて)拾い直す。
+     *   「見出しを足しても一覧に出てこない」を、保存の後に起こさない。
+     */
+    if (mode.kind !== 'editing') {
+      this.paintTargets(state.openBody?.lid === this.lastLid ? state.openBody.body : null);
+    }
     /**
      * ⚠ **これも早期 return より前** ── 追記が通っても種類は `ready` のままなので、
      *   後ろに置くと「足したのに『元に戻す』が出てこない」(無言の穴)。
