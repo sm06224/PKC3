@@ -16,6 +16,7 @@
  * ⚠ 変換中(IME)の Enter で送らない ── `isComposing` を見る。
  */
 import type { AppState } from '@adapter/state/app-state';
+import type { EntryMeta } from '@core/model/entry-meta';
 import { bodyLockOf } from '@adapter/state/app-state';
 import { isAppendable } from '@features/flavor/append-spec';
 import { listAppendTargets } from '@features/markdown/append-target';
@@ -230,8 +231,8 @@ export class AppendBoxRenderer {
     if (Number(this.input.rows) < APPEND_ROWS_DEFAULT) this.input.rows = APPEND_ROWS_DEFAULT;
   }
 
-  /** 書込に入った時点の disk 内容。**成功したかどうかの唯一の判別材料**。 */
-  private persistedAtWrite: string | null = null;
+  /** 飛んでいる追記書込 ── 書いたノートと、書き始めの基準(**成功したかの判別材料**)。 */
+  private writing: { lid: string; persisted: string | null; meta: EntryMeta | null } | null = null;
 
   render(state: AppState): void {
     const mode = appendModeOf(state);
@@ -275,11 +276,40 @@ export class AppendBoxRenderer {
     // 「押したら消えたが保存されていない」は、この機構で一番やってはいけない負け方。
     // ⚠ 判別は `persisted`(disk で確認できた内容)の変化で見る ── `error` の
     // 有無で見ると、無関係な別の失敗に引きずられる
-    if (this.last === 'writing' && mode.kind !== 'writing') {
-      if (state.openBody?.persisted !== this.persistedAtWrite) this.clear();
-      this.persistedAtWrite = null;
-    } else if (mode.kind === 'writing' && this.last !== 'writing') {
-      this.persistedAtWrite = state.openBody?.persisted ?? null;
+    /**
+     * 🔴 **書込の結末は「書いたノート」の証拠だけで決める**(#1635 項 1 の続き)。
+     * ⚠ 直す前は `writing → それ以外` に変わった瞬間の `openBody` を見ていた ── 書込が飛んでいる間に
+     *   別のノート B を選ぶと、その瞬間に `appendModeOf` が `writing` を返さなくなり、`openBody` が
+     *   A のままか B のものかで **成功を取り違えた**(失敗・未了を成功と読んで A の字を消す / 通ったのを
+     *   見逃して A の字を預かり、戻ると出て二重に追記される)。
+     * 🔑 書き始めに「どのノートか」と「そのノートの基準」を覚え、**錠が解けてから**そのノートの証拠で
+     *   判定する。離れていて本文が読めていないときは `entryMetas` の入れ替わり
+     *   (`ENTRY_APPENDED` だけが新しい meta を作る。失敗・強制解放は触らない)を見る。
+     */
+    if (this.writing === null && mode.kind === 'writing') {
+      const own = state.openBody?.lid === mode.lid;
+      this.writing = {
+        lid: mode.lid,
+        persisted: own ? state.openBody!.persisted : null,
+        // 追記(`writeLock`)のときだけ meta で判定する。タイル設定の書込(`tileWrite`)は meta を使わない
+        meta: state.writeLock?.lid === mode.lid ? (state.entryMetas.get(mode.lid) ?? null) : null,
+      };
+    }
+    if (this.writing !== null) {
+      const lock = bodyLockOf(state);
+      const stillWriting = lock !== null && lock.lid === this.writing.lid && lock.holder === 'writing';
+      if (!stillWriting) {
+        const w = this.writing;
+        this.writing = null;
+        const landed =
+          state.openBody?.lid === w.lid && w.persisted !== null
+            ? state.openBody.persisted !== w.persisted
+            : w.meta !== null && state.entryMetas.get(w.lid) !== w.meta;
+        if (landed) {
+          if (w.lid === this.lastLid) this.clear();
+          else this.drafts.delete(w.lid);
+        }
+      }
     }
     /**
      * 🔴 **追記先の一覧は、下の早期 return より前で更新する**(#395 段①)。
