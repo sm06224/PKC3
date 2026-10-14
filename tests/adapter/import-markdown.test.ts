@@ -134,6 +134,14 @@ describe('取り込んだ lid を files の順で返す(2026-08-05)', () => {
 });
 
 describe('素の md を取り込む', () => {
+  it('🔴 Shift_JIS の file も文字化けせずに取り込む(この口が文字コードを見分ける読み方を通る)', async () => {
+    const h = harness();
+    const sjis = new Uint8Array([0x8e, 0x52, 0x93, 0x63, 0x20, 0x91, 0xbe, 0x98, 0x59]); // 山田 太郎
+    const bytes = new Uint8Array([0x23, 0x20, ...sjis, 0x0a]);
+    await importMarkdownFiles(h.d, h.deps, [new File([bytes], 'a.md')]);
+    expect(h.written[0]!.title).toBe('山田 太郎');
+  });
+
   it('1 件が state に現れる(題名は先頭見出し)', async () => {
     const h = harness();
     const count = await importMarkdownFiles(h.d, h.deps, [mdFile('# 買い物\n\n牛乳\n')]);

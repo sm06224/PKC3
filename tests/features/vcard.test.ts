@@ -503,12 +503,14 @@ describe('parseVcf ── 重なった項目と URL', () => {
     const { cards } = parseVcf(card('item1.ORG:一つ目の会社;営業部', 'item2.ORG:二つ目の会社'));
     expect(cards[0]!.orgParts).toEqual(['一つ目の会社', '営業部']);
     expect(cards[0]!.others.join('\n'), '2 つ目の所属が消えた').toContain('二つ目の会社');
+    // 🔑 項目名は画面の字で出す(生の `ORG` を見せない)
+    expect(cards[0]!.others.join('\n')).toContain('- 会社: 二つ目の会社');
   });
 
   it('2 つ目の誕生日・名前も消さずに残す(同じ値なら重ねない)', () => {
     const { cards } = parseVcf(card('BDAY:1990-01-02', 'BDAY:1991-03-04', 'FN:二つの所属'));
     expect(cards[0]!.birthday).toBe('1990-01-02');
-    expect(cards[0]!.others.join('\n')).toContain('1991-03-04');
+    expect(cards[0]!.others.join('\n')).toContain('- 誕生日: 1991-03-04');
     expect(cards[0]!.others.join('\n'), '同じ名前を重ねた').not.toContain('二つの所属');
   });
 

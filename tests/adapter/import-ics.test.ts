@@ -98,6 +98,18 @@ describe('importIcsFiles ── 実行部', () => {
     expect(h.notices.join('')).toBe('予定 2 件を取り込みました');
   });
 
+  it('🔴 Shift_JIS の .ics も文字化けせずに取り込む(この口が文字コードを見分ける読み方を通る)', async () => {
+    const h = harness();
+    const enc = new TextEncoder();
+    const bytes = new Uint8Array([
+      ...enc.encode('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20260825\r\nSUMMARY:'),
+      ...new Uint8Array([0x8e, 0x52, 0x93, 0x63, 0x20, 0x91, 0xbe, 0x98, 0x59]),
+      ...enc.encode('\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'),
+    ]);
+    await importIcsFiles(h.d, h.deps, [new File([bytes], 'a.ics')]);
+    expect(h.written[0]!.body).toContain('山田 太郎');
+  });
+
   it('🔴 読めなかった物は種類ごとに数えて言う(予定は落とさない)', async () => {
     const h = harness();
     const ics = wrap(

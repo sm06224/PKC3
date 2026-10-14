@@ -217,6 +217,11 @@ function splitUnescaped(v: string, sep: string): string[] {
  *   隠すと、そこだけ何の項目か分からなくなる(黙って失うのと同じ)。
  */
 const OTHER_LABELS: Readonly<Record<string, string>> = {
+  // 🔴 2 つ目の名前・会社・誕生日(1 つ目は本文の決まった欄へ入り、重ねた分だけここへ来る)
+  FN: '別の名前',
+  N: '別の名前',
+  ORG: '会社',
+  BDAY: '誕生日',
   ADR: '住所',
   LABEL: '住所(表記)',
   URL: 'ウェブ',

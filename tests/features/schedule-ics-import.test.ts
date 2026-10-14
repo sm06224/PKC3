@@ -300,6 +300,13 @@ describe('ノートの本文', () => {
     const long = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${'あ'.repeat(500)}`]);
     expect(long.counts.shortened).toBe(1);
     expect(icsCountNotes(long.counts).join('')).toContain('途中までを入れました');
+    // 題名・場所の枝も 1 つずつ(片方の枝を消すと、もう片方が救わないように別の予定で見る)
+    expect(one(['DTSTART;VALUE=DATE:20260825', `SUMMARY:${'い'.repeat(501)}`]).counts.shortened).toBe(1);
+    expect(one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `LOCATION:${'う'.repeat(501)}`]).counts.shortened).toBe(1);
+    // 境界:ちょうど上限は切らないので数えない
+    expect(one(['DTSTART;VALUE=DATE:20260825', `SUMMARY:${'い'.repeat(500)}`]).counts.shortened).toBe(0);
+    expect(one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${'え'.repeat(300)}`]).counts.shortened).toBe(0);
+    expect(one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${'え'.repeat(301)}`]).counts.shortened).toBe(1);
     // 対照群:短い説明は数えない
     const short = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', 'DESCRIPTION:短い']);
     expect(short.counts.shortened).toBe(0);
