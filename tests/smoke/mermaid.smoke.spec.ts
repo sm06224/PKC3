@@ -819,10 +819,15 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
     .locator('[data-pkc-field="editor-body"]')
     .fill(
       '```chart\n{"type":"bar","labels":["1月","2月","3月"],' +
-        '"datasets":[{"label":"売上","data":[10,20,30]}]}\n```\n',
+        '"datasets":[{"label":"売上","data":[10,20,30]}]}\n```\n\n' +
+        // 円グラフ(#1087): 既に在る道中に 1 枚足す(起動は増やさない)。区切りが 2 色以上で描かれることを下で見る
+        '```chart\n{"type":"pie","labels":["あ","い","う"],' +
+        '"datasets":[{"data":[30,30,30]}]}\n```\n',
     );
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  const host = page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src]');
+  const host = page
+    .locator('[data-pkc-field="detail-body"] [data-pkc-chart-src]')
+    .first();
   // ⚠ 状態属性は種類ごとに違う(`data-pkc-<name>-state`)── grafu は `chart`
   await expect(host).toHaveAttribute('data-pkc-chart-state', 'ready', { timeout: 30000 });
 
@@ -836,6 +841,42 @@ test('🔴 grafu を押して開く別窓は、画面より大きく焼き直さ
   expect(body, '前提が崩れている ── grafu の絵が置かれていない').not.toBeNull();
   const bodyPng = body!;
   expect(bodyPng.type, '前提が崩れている ── grafu が PNG ではない').toBe('image/png');
+
+  // 🔴 円グラフ(#1087): 区切りごとに色が違う ── 画素の色を数える。
+  //   1 色に潰れると、どの区切りがどれか見分けが付かない(以前の姿)。
+  //   凡例の小さい四角や縁のにじみは数えない(全体の 3% 以上を占める色だけ)。
+  const pieHost = page
+    .locator('[data-pkc-field="detail-body"] [data-pkc-chart-src]')
+    .nth(1);
+  await expect(pieHost, '前提が崩れている(円グラフが 2 枚目に描かれていない)').toHaveAttribute(
+    'data-pkc-chart-state',
+    'ready',
+    { timeout: 30000 },
+  );
+  const pieColors = await pieHost.evaluate(async (h) => {
+    const i = h.querySelector('img');
+    if (i === null) return -1;
+    if (!i.complete) await new Promise((ok) => i.addEventListener('load', ok, { once: true }));
+    const c = document.createElement('canvas');
+    c.width = i.naturalWidth;
+    c.height = i.naturalHeight;
+    const g = c.getContext('2d')!;
+    g.drawImage(i, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    const counts = new Map<string, number>();
+    let opaque = 0;
+    for (let k = 0; k < d.length; k += 4) {
+      if (d[k + 3]! < 200) continue;
+      opaque++;
+      const key = `${d[k]! >> 4},${d[k + 1]! >> 4},${d[k + 2]! >> 4}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let big = 0;
+    for (const n of counts.values()) if (n >= opaque * 0.03) big++;
+    return opaque === 0 ? -2 : big;
+  });
+  expect(pieColors, '前提が崩れている(円グラフの絵が読めない / 不透明な画素が無い)').toBeGreaterThan(0);
+  expect(pieColors, `円グラフの区切りが 1 色に潰れている(大きい色 ${pieColors} 種)`).toBeGreaterThanOrEqual(2);
 
   const win = await openBigWindowViaLightbox(page, context, host.locator('img'), false);
   await win.waitForSelector('[data-pkc-field="asset-window-image"]', { timeout: 20_000 });
