@@ -67,10 +67,15 @@ function stripMark(line: string): string {
   return line.replace(/^(?:#{1,6} |> |- \[[ xX]\] |[-*+] |\d+\. )/, '');
 }
 
-/** 選択が触れている行の範囲(行頭・行末まで広げる)。 */
+/**
+ * 選択が触れている行の範囲(行頭・行末まで広げる)。
+ * 🔴 **選択の終わりが行頭にあるとき、その行は含めない**(#1087)── `Shift`+`↓` や三連クリックで行を選ぶと、
+ *   終わりは次の行の頭に来る。直す前はその行まで広げていたので、選んでいない次の行にも印が付いていた。
+ */
 function lineRange(text: string, start: number, end: number): [number, number] {
   const from = lineStart(text, start);
-  const nl = text.indexOf('\n', end);
+  const last = end > start && text[end - 1] === '\n' ? end - 1 : end;
+  const nl = text.indexOf('\n', last);
   return [from, nl === -1 ? text.length : nl];
 }
 

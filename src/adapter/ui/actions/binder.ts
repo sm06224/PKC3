@@ -15027,6 +15027,8 @@ export function bindActions(
      */
     if (
       ke.key === 'Enter' &&
+      // ⚠ Safari は変換を確定した Enter が `isComposing: false` で届く(`keyCode` 229)── 確定の Enter で答えを挿さない(#1087)
+      ke.keyCode !== 229 &&
       !ke.shiftKey &&
       !ke.ctrlKey &&
       !ke.altKey &&
@@ -15102,6 +15104,8 @@ export function bindActions(
      */
     if (
       ke.key === 'Enter' &&
+      // ⚠ 上の計算と同じ理由(Safari の変換確定の Enter)── 確定で `> ` / `- ` を継ぎ足さない(#1087)
+      ke.keyCode !== 229 &&
       !ke.shiftKey &&
       !ke.ctrlKey &&
       !ke.altKey &&

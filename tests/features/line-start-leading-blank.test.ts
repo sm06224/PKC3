@@ -58,6 +58,13 @@ describe('🔴 行頭記号の付け外し(toggleLinePrefix)', () => {
     const r = toggleLinePrefix(sel('|あ|\nい'), 'h2');
     expect([r.text, r.start, r.end]).toEqual(['## あ\nい', 0, 4]);
   });
+
+  it('🔴 選択の終わりが次の行の頭にあるとき(Shift+↓ / 三連クリック)、その行には付けない(#1087)', () => {
+    const r = toggleLinePrefix(sel('|a\nb\n|c'), 'h1');
+    expect(r.text, '選んでいない c に付いた').toBe('# a\n# b\nc');
+    const one = toggleLinePrefix(sel('|a\n|b'), 'ul');
+    expect(one.text, '1 行だけ選んだのに次の行に付いた').toBe('- a\nb');
+  });
 });
 
 describe('🔴 コードブロックで囲む・外す(wrapAsBlock)', () => {
