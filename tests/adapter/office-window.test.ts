@@ -802,7 +802,7 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     // 🔴 「開く」は**変更を捨てる**操作 ── 字から読めること(#1264 欠陥 3)。説明に「先に保存する道」を添える
     expect(host).toContain('id="unsaved-open">変更を捨てて開く</button>');
     expect(host).toContain('id="unsaved-cancel">やめる</button>');
-    expect(host, '先に保存する道が説明に無い').toContain('id="unsaved-hint">先に保存するなら、やめてから Ctrl+S</div>');
+    expect(host, '先に保存する道が説明に無い').toContain('id="unsaved-hint">先に保存するなら、やめてから Ctrl+S(キーボードが無いときは、メニューの「保存」)</div>');
     // 🔴 確認を出した(`show`)ときに本体へ返す ── 確認の箱を出す経路の中で放送する
     const show = host.slice(host.indexOf('show: function ()'), host.indexOf('hide: function ()'));
     expect(show.length, 'show を抜き出せていない').toBeGreaterThan(50);

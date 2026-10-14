@@ -1653,7 +1653,7 @@ test('🔴 Office の保存が、棚に置かれて鍵が放送される(新規 
   await expect(unsaved, '未保存が在るのに確認が出ない').toBeVisible();
   await expect(unsaved).toContainText('保存していない変更があります。別の文書を開くと消えます。開きますか?');
   await expect(page.locator('#unsaved-open')).toHaveText('変更を捨てて開く');
-  await expect(page.locator('#unsaved-hint')).toHaveText('先に保存するなら、やめてから Ctrl+S');
+  await expect(page.locator('#unsaved-hint')).toHaveText('先に保存するなら、やめてから Ctrl+S(キーボードが無いときは、メニューの「保存」)');
   await expect(page.locator('#unsaved-cancel')).toHaveText('やめる');
   // 🔑 既定の焦点は「やめる」(うっかり Enter で消さない)
   expect(await page.evaluate(() => document.activeElement?.id), '既定の焦点が「やめる」でない').toBe('unsaved-cancel');

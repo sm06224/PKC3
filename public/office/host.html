@@ -113,7 +113,7 @@
 <div id="unsaved" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-text" hidden>
   <div class="box">
     <div id="unsaved-text">保存していない変更があります。別の文書を開くと消えます。開きますか?</div>
-    <div id="unsaved-hint">先に保存するなら、やめてから Ctrl+S</div>
+    <div id="unsaved-hint">先に保存するなら、やめてから Ctrl+S(キーボードが無いときは、メニューの「保存」)</div>
     <div class="row">
       <button type="button" id="unsaved-open">変更を捨てて開く</button>
       <button type="button" id="unsaved-cancel">やめる</button>
@@ -157,8 +157,15 @@
   window.__loShadowGate = shadowGate;
   /** 差し替えが当たった import の名前(空 = 当たっていない)。 */
   var shadowPatched = [];
-  function fail(s) {
+  // detail は原文(不具合を報告するときに要る)。先頭の日本語の 1 文のあとに小さく添える
+  function fail(s, detail) {
     msgEl.textContent = s;
+    if (detail) {
+      var raw = document.createElement('div');
+      raw.className = 'why';
+      raw.textContent = String(detail).slice(0, 300);
+      msgEl.appendChild(raw);
+    }
     msgEl.hidden = false;
     // ⚠ **版面を退ける。** `#screen` は `#msg` と同じ矩形なので、出したままだと
     //    理由が読めない(起動を諦めた後に版面は要らない)
@@ -299,6 +306,9 @@
     msgEl.textContent = '';
     var head = document.createElement('div');
     head.textContent = 'Office が停止しました';
+    // 先頭は日本語の 1 文。原文(英語のことが多い)は不具合を報告するときに要るので、小さく添えて残す
+    var lead = document.createElement('div');
+    lead.textContent = 'Office の内部でエラーが起きました。読み込み直すと直ることがあります。';
     var why = document.createElement('div');
     why.className = 'why';
     why.textContent = String(reason).slice(0, 300);
@@ -317,6 +327,7 @@
     fresh.title = 'Office の中で変えた設定と、書いたマクロを消して開き直します';
     fresh.addEventListener('click', resetProfileAndReload);
     msgEl.appendChild(head);
+    msgEl.appendChild(lead);
     msgEl.appendChild(why);
     msgEl.appendChild(again);
     msgEl.appendChild(fresh);
@@ -1714,7 +1725,7 @@
     var blobs = {};
     for (var i = 0; i < need.length; i += 1) {
       blobs[need[i]] = await idbGet(db, 'files', need[i]);
-      if (!blobs[need[i]]) { fail('一式を読めません: ' + need[i] + ' がありません'); return; }
+      if (!blobs[need[i]]) { fail('Office の一式の一部が足りません。システム → 保存領域 → Office 表示 で取り込み直してください。', need[i] + ' がありません'); return; }
     }
     /**
      * 🔴 **この一式は非 ODF を保存できるか**(#225)を、**一式そのものから採る**。
@@ -2073,7 +2084,7 @@
       inst.callMain(args);
     } catch (e) {
       console.error(e);
-      fail('起動に失敗しました: ' + String((e && e.message) || e).slice(0, 160));
+      fail('Office を起動できませんでした。読み込み直すと直ることがあります。', String((e && e.message) || e).slice(0, 160));
     }
   }
 

@@ -32,6 +32,8 @@
  *
  * ⚠ **pure module**。browser API を持たない。
  */
+import { missingCapabilities, type OfficeCapability } from './office-entry';
+import { OFFICE_PACK_APPROX } from './office-pack-size';
 
 /**
  * Office へ回す拡張子。⚠ **manifest と同じ集合**にする(上の 🔴)。
@@ -106,3 +108,61 @@ export const localOpenNotice = (fileName: string): string =>
  */
 export const cannotWriteBackNotice = (fileName: string): string =>
   `「${fileName}」は開けますが、元のファイルへは書き戻せません(この環境が対応していません)。`;
+
+/**
+ * 書き戻せなかった理由(区別できたものだけ)。
+ * `denied` = 書き込みの許可が得られなかった / `reopen` = 元のファイルが動かされたなどで開き直す必要がある /
+ * `unsupported` = このブラウザでは元のファイルへ書けない。
+ */
+export type LocalWriteFailure = 'denied' | 'reopen' | 'unsupported';
+
+/**
+ * 🔴 **元のファイルへ書き戻せなかったときの知らせ**(理由が分かれば理由を言う)。
+ *
+ * ⚠ 行方を 1 文で言う ── 保存に失敗したとき、user がいちばん知りたいのは「書いた内容はどこに在るか」。
+ *   書き戻せなかった保存は取り込み用の置き場から捨てない(`office-save-back.ts`)ので、PKC3 の中に残っている。
+ */
+export function localSaveFailedNotice(fileName: string, reason: LocalWriteFailure | null): string {
+  const why =
+    reason === 'denied'
+      ? '書き込みの許可が得られなかったためです。'
+      : reason === 'reopen'
+        ? '元のファイルが動かされたか閉じられたため、もう一度開き直す必要があります。'
+        : reason === 'unsupported'
+          ? 'このブラウザでは元のファイルへ書き戻せません。'
+          : '';
+  return `元のファイルへ保存できませんでした(「${fileName}」)。${why}編集した内容は PKC3 の中に残してあります。`;
+}
+
+/**
+ * 🔴 **Office を押した時点の知らせ**(書き戻せるかで言い分ける)。
+ *
+ * ⚠ 書き戻せないファイルに「元のファイルへ書き戻します」と言うと、保存した内容の行方を取り違える。
+ *   受け取ったときの断り(`cannotWriteBackNotice`)と同じ字にする。
+ */
+export const openingNotice = (fileName: string, writable: boolean): string =>
+  writable ? localOpenNotice(fileName) : cannotWriteBackNotice(fileName);
+
+/**
+ * 🔴 **OS から Office のファイルを渡されたときの知らせ**(受け取った直後)。
+ *
+ * ⚠ 一式が無い・動かないブラウザには Office のタイルが出ない(`isOfficeUsable`)ので、
+ *   「アプリの『Office』を押してください」と言うと行き止まりになる。取り込む道か、動くブラウザを案内する。
+ */
+export function stagedLaunchNotice(input: {
+  readonly fileName: string;
+  readonly writable: boolean;
+  readonly packInstalled: boolean;
+  readonly capability: OfficeCapability;
+}): string {
+  const { fileName: name } = input;
+  if (missingCapabilities(input.capability).length > 0) {
+    return `「${name}」は、このブラウザでは Office で開けません。Chrome か Edge で開いてください。`;
+  }
+  if (!input.packInstalled) {
+    return `「${name}」を開くには Office 表示の一式(${OFFICE_PACK_APPROX})が要ります。システム → 保存領域 → Office 表示 で取り込んでください。`;
+  }
+  return input.writable
+    ? `「${name}」を開けます。アプリの「Office」を押してください`
+    : cannotWriteBackNotice(name);
+}

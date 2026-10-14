@@ -28,6 +28,7 @@
  *    どれも同じ `takeOne` を通るので、二重取りは棚の有無で自然に止まる
  */
 import { errorText } from '@features/error-text';
+import { localSaveFailedNotice, type LocalWriteFailure } from '@features/office/office-launch';
 import {
   discardStaged,
   listStaged,
@@ -93,12 +94,15 @@ export interface SaveBackDeps {
    * 名前空間なら、PKC のノートではなく**元のファイル**が行き先である。
    *
    * @returns `null` = この保存は手元のファイルではない(いつもの取り込みへ) /
-   *   `true` = 書き戻した / `false` = 書き戻せなかった(**user に伝える**)
+   *   `true` = 書き戻した / `false` または理由 = 書き戻せなかった(**user に伝える**)
    * ⚠ **optional にしない** ── 配線を落としても tsc が黙ると、
    *   「手元のファイルを直したのに PKC のノートが増える」という、
    *   user がいちばん気づきにくい形で壊れる(CLAUDE.md §7 の待ちの口と同じ理由)。
    */
-  readonly writeLocal: (token: string, bytes: Uint8Array<ArrayBuffer>) => Promise<boolean | null>;
+  readonly writeLocal: (
+    token: string,
+    bytes: Uint8Array<ArrayBuffer>,
+  ) => Promise<boolean | LocalWriteFailure | null>;
   /** user への一言(「取り込みました」)。 */
   readonly notify: (message: string) => void;
   /** 異常の報告(取り込めなかった)。 */
@@ -229,8 +233,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
      */
     const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
-      if (!local) {
-        deps.fail(`元のファイルへ保存できませんでした(「${save.name}」)`);
+      if (local !== true) {
+        deps.fail(localSaveFailedNotice(save.name, local === false ? null : local));
         deferred = true;
         return 'deferred';
       }

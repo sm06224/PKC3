@@ -674,6 +674,28 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     expect(h.stage.keys(), '棚から片付いていない').toEqual([]);
   });
 
+  it('🔴 理由が分かれば理由を言い、行方(PKC3 の中に残してある)を 1 文で言う。棚は残る', async () => {
+    const want: [string, string][] = [
+      ['denied', '許可が得られなかった'],
+      ['reopen', '開き直す必要があります'],
+      ['unsupported', 'このブラウザでは元のファイルへ書き戻せません'],
+    ];
+    for (const [reason, phrase] of want) {
+      const h = harness({ writeLocal: async () => reason as 'denied' });
+      h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+      expect(await h.sb.receive('k1'), reason).toBe('deferred');
+      const msg = h.fails.join(' ');
+      expect(msg, `${reason} の理由を言っていない`).toContain(phrase);
+      expect(msg, '行方を言っていない').toContain('編集した内容は PKC3 の中に残してあります');
+      expect(h.stage.keys().length, `${reason}: 行方の主張が偽(棚が空)`).toBeGreaterThan(0);
+    }
+    // 対照群:理由が無い false には理由を作らない
+    const h2 = harness({ writeLocal: async () => false });
+    h2.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    await h2.sb.receive('k1');
+    expect(h2.fails.join(' ')).not.toMatch(/許可|開き直す|このブラウザ/);
+  });
+
   it('🔴 書けなかったら**棚に残す**(user の編集を捨てない)', async () => {
     const h = harness({ writeLocal: async () => false });
     h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });

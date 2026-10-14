@@ -245,10 +245,11 @@ import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
 import { LocalOfficeFiles } from '@adapter/platform/office/local-office-files';
 import {
-  cannotWriteBackNotice,
   isOfficeLaunchFile,
-  localOpenNotice,
+  openingNotice,
+  stagedLaunchNotice,
 } from '@features/office/office-launch';
+import { isOfficeUsable } from '@features/office/office-entry';
 import { attachmentSavedAt } from '@features/office/office-shadow';
 import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
@@ -2190,7 +2191,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       showStatus(
         r.kind === 'already-open'
           ? `「${staged.name}」を開いています(Office のタブをご覧ください)`
-          : localOpenNotice(staged.name),
+          : openingNotice(staged.name, staged.writable),
       );
       return;
     }
@@ -5126,7 +5127,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   storeEffects = connectStoreEffects(dispatcher, storePort, {
     // #148 組み込みタイル ── 一式が入っている端末にだけ Office のタイルを出す。
     // 控えは起動時と設置/削除の直後に setMeta で合っている(officeOpener と同じ値)
-    officeInstalled: () => appOfficePack.isInstalled(),
+    // 動かないブラウザには出さない(押しても行き止まり。添付の入口と同じ規則 = isOfficeUsable)
+    officeInstalled: () => isOfficeUsable(appOfficePack.isInstalled(), appOfficePack.capability()),
     /**
      * 🔴 **書いている間だけ印を付ける**(#828)。`data-pkc-boot` と同じ
      *   「**検査のための契約**」で、画面の見え方は 1px も変えない。
@@ -5474,10 +5476,19 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const last = office[office.length - 1]!;
       const writable = typeof last.handle.createWritable === 'function';
       await whenPhaseReady(dispatcher, () => {});
+      /**
+       * 🔴 一式の有無は**この場で IDB から読む**(`appOfficePack` の控えは起動時の非同期読みで、
+       *   OS 起動の直後は間に合わず「入っていない」と誤って言うことがある)。判断は
+       *   `stagedLaunchNotice`(一式が無い / 動かないブラウザにはタイルが出ないので、押させない)。
+       */
+      const packInstalled = (await officeInstaller.readMeta().catch(() => null)) !== null;
       showStatus(
-        writable
-          ? `「${last.file.name}」を開けます。アプリの「Office」を押してください`
-          : cannotWriteBackNotice(last.file.name),
+        stagedLaunchNotice({
+          fileName: last.file.name,
+          writable,
+          packInstalled,
+          capability: appOfficePack.capability(),
+        }),
       );
     }
     items = items.filter((i) => !isOfficeLaunchFile(i.file.name));

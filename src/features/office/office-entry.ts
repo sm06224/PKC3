@@ -93,6 +93,17 @@ export function missingCapabilities(cap: OfficeCapability): string[] {
 }
 
 /**
+ * 🔴 **Office を実際に開けるか**(一式が入っていて、このブラウザが動かせる)。
+ *
+ * ⚠ 組み込みのタイル(`launcher/tiles.ts`)と OS から渡されたファイルの知らせ(`office-launch.ts`)が
+ *   添付の入口(`officeEntry` の `open`)と**同じ規則**で出し分けるための 1 か所。
+ *   動かない環境にタイルを出すと、押しても行き止まりになる。
+ */
+export function isOfficeUsable(packInstalled: boolean, capability: OfficeCapability): boolean {
+  return packInstalled && missingCapabilities(capability).length === 0;
+}
+
+/**
  * 添付の器に何を出すかを決める。
  *
  * ⚠ **順序が意味を持つ。** 「使えない環境」を「未配備」より**先**に見る ──

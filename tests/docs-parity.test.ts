@@ -1554,6 +1554,9 @@ describe('導線の置き場所(P8 段⑱)', () => {
       '右クリック',
       // ⚠ ブラウザ既定のメニュー ── 奪っていないことを案内する行
       'ブラウザのメニュー',
+      // Office のウィンドウの中の LibreOffice のメニューバー(実在する。`public/office/host.html` が
+      // 「LO のメニューバー」を覆わない位置に帯を出す作りにしている)。キーボードの無い端末の保存の道
+      'Office のウィンドウのメニュー',
     ];
     const lines = MANUAL.split('\n')
       .filter((l) => l.includes('メニュー'))
@@ -2481,6 +2484,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-10-14(1087)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-10-13 の節に原本
+     */
+    'ノートのリンクとゴミ箱の知らせ',
     /**
      * ⚠ **2026-10-13(1087)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-10-13 の節に原本
