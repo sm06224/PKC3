@@ -114,6 +114,7 @@ import {
   ENTRY_GONE_NOTE,
   SECTION_SAVE_NOT_FOUND_NOTE,
   CODE_SAVE_NOT_FOUND_NOTE,
+  blockedActionNote,
 } from './app-state';
 import { baseLidOfKey } from '@features/markdown/section-embed';
 import { replaceSectionByHeading } from '@features/markdown/append-target';
@@ -1386,6 +1387,19 @@ export function connectStoreEffects(
             parentLid: null,
             relationId,
           });
+          /**
+           * 🔴 **作れたかを見てから「保存しました」と言う**(#1087)。構造を集める間(大きな表は数秒)に
+           *   user が編集を始めると、`CREATE_ENTRY` は黙って捨てられる ── 押した時点の確認は古くなっている。
+           *   `sql-to-note`(binder)と同じ作法。
+           */
+          if (!dispatcher.getState().entryMetas.has(lid)) {
+            const blocked = blockedActionNote(dispatcher.getState().phase);
+            dispatcher.dispatch({
+              type: 'SQL_SAVE_FAILED',
+              error: `構造をノートにできませんでした(${blocked ?? 'もう一度押してください'})`,
+            });
+            return;
+          }
           dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
         })().catch((e: unknown) => {
           if (disposed) return;
