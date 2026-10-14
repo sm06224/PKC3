@@ -3388,6 +3388,39 @@ export function startEditRestoring(
 }
 
 /**
+ * 🔴 **保存していない章 / コード枠の編集を戻して、その欄を開く**(#1728)。開く口は
+ * `OPEN_SECTION_DRAFT` / `OPEN_CODE_DRAFT` の 1 本のまま ── ロック・飛んでいる書込の待ち・開けたかの確認は
+ * 「この章を編集する」と同じ道を通る(`startSectionEditAt` と同じ形)。
+ * ⚠ 欄は開くだけで、書かない(保存を押すまで disk は動かない)。字を入れるのは呼び手(欄が描かれた後)。
+ *
+ * @param line 本文の行(frontmatter を剥がした側。`locateDraftPart` が返す物)
+ */
+export function startPartialRestoring(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  kind: 'section' | 'code',
+  line: number,
+): void {
+  const lid = dispatcher.getState().openBody?.lid ?? null;
+  if (lid === null) return;
+  const open = (): void => {
+    dispatcher.dispatch(
+      kind === 'code' ? { type: 'OPEN_CODE_DRAFT', lid, line } : { type: 'OPEN_SECTION_DRAFT', lid, line },
+    );
+  };
+  if (!services.acquireEditLock) {
+    const ready = services.settle?.() ?? null;
+    if (ready === null) open();
+    else void ready.then(open);
+    return;
+  }
+  acquireEditLockOrExplain(dispatcher, services, lid, () => {
+    open();
+    if (dispatcher.getState().sectionDraft?.lid !== lid) services.releaseEditLock?.(lid);
+  });
+}
+
+/**
  * 🔴 **「章の下書きを抱えたまま次へ進みたい」を受ける 1 本の関数**
  *   (#1044 段2 5巡目の修理、U1)。
  *

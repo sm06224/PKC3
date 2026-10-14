@@ -423,6 +423,10 @@ describe('draft-offer(起動のとき 1 行で聞く側)', () => {
           ? opts.enterEdit(d, body)
           : d.dispatch({ type: 'START_EDIT', restoreBody: body }),
       setTitle,
+      // 章の欄 / コード枠の欄の復元(#1728)は draft-recovery-part.test.ts が通す
+      enterPart: vi.fn(),
+      setPartText: vi.fn(),
+      copyText: async () => true,
       say,
       ...(opts.waitMs === undefined ? {} : { waitMs: opts.waitMs }),
     });

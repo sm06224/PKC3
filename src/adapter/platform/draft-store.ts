@@ -9,7 +9,7 @@
  * ⚠ 書けなかった(quota・私用ウィンドウ)ときは**黙って諦める** ── 控えは保険であって、
  *   書けないことで編集そのものを止めない。
  */
-import { DRAFT_COUNT_MAX, draftKey, type DraftRecord } from '@features/draft/draft-recovery';
+import { DRAFT_COUNT_MAX, draftKey, isDraftPart, type DraftRecord } from '@features/draft/draft-recovery';
 
 /** 置き場の口。test は {@link MemoryDraftStore} を渡す。 */
 export interface DraftStore {
@@ -37,7 +37,9 @@ function isRecord(v: unknown): v is DraftRecord {
     typeof r.title === 'string' &&
     typeof r.base === 'string' &&
     typeof r.at === 'number' &&
-    typeof r.tab === 'string'
+    typeof r.tab === 'string' &&
+    // 欄の控え(#1728)── 形が壊れた part は控えごと読まない(戻すとき別の欄を開かない)
+    (r.part === undefined || isDraftPart(r.part))
   );
 }
 

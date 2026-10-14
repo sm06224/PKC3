@@ -16,12 +16,14 @@
  *   `input` を document で拾い、控えるときに欄の値を読む。
  */
 import type { Dispatcher } from '../state/dispatcher';
-import type { AppState } from '../state/app-state';
+import { isCodeDraft, type AppState, type PartialDraft } from '../state/app-state';
 import {
   DraftThrottle,
   fingerprint,
   fitsDraft,
+  sameDraftPart,
   type DraftClock,
+  type DraftPart,
   type DraftRecord,
 } from '@features/draft/draft-recovery';
 import type { DraftStore } from './draft-store';
@@ -39,6 +41,18 @@ export interface DraftWriterDeps {
   isPending?(lid: string): boolean;
   /** 編集が終わった。`committed` = 保存で終えた(取り消しではない)。 */
   onEnded?(lid: string, committed: boolean): void;
+  /**
+   * 🔴 章の欄 / コード枠の欄に打っている字(#1728)。欄の字は state に写らない(`cell-input.ts` と同じ規律)ので、
+   * 欄そのものから読む。欄が無ければ `null`。省略 = 欄の控えは取らない。
+   */
+  readPartText?(): string | null;
+  /** `input` の対象が章の欄 / コード枠の欄か。 */
+  isPartInput?(el: Element): boolean;
+  /**
+   * 戻して入った欄か(#1728)。そうなら、やめる / 保存で**誰の控えでも**消す
+   * (戻した控えは死んだタブが書いた物 ── 自分の控えだけ消すと、やめても残る)。
+   */
+  isRestoring?(lid: string): boolean;
   /**
    * 🔴 **書込の列が済んだ後の、disk のそのノートの本文**(#1087、複数タブの見直し)。
    * ⚠ 保存の確認(`persisted`)は**開いているノート**でしか届かない ── 確認の前に別のノートへ移ると、
@@ -86,12 +100,31 @@ interface Session {
   lastTitle: string;
 }
 
+/** 開いている欄の身元(控えに書く物)。 */
+export function partOf(d: PartialDraft): DraftPart {
+  return isCodeDraft(d)
+    ? { kind: 'code', line: d.line, openLine: d.openLine, quote: d.quote, original: d.original }
+    : { kind: 'section', heading: d.heading, original: d.original };
+}
+
+interface PartSession {
+  readonly lid: string;
+  readonly part: DraftPart;
+  /** 開いたときの本文(保存で変わったかを見る)。 */
+  readonly startBody: string | null;
+  /** 最後に見た保存中の印。 */
+  saving: boolean;
+  /** 最後に読んだ欄の字。 */
+  lastText: string | null;
+}
+
 export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
   const { dispatcher, store, cid, tab } = deps;
   const doc = deps.doc ?? document;
   const win = deps.win ?? window;
   let session: Session | null = null;
   let lastBody: string | null = null;
+  let partSession: PartSession | null = null;
   /** 保存で終えて、disk に届くのを待っている控え(lid → 確定した本文)。 */
   const awaitingDisk = new Map<string, { body: string; adopted: boolean }>();
   let chain: Promise<void> = Promise.resolve();
@@ -100,7 +133,39 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     chain = chain.then(job).catch(() => {});
   };
 
+  /** 章の欄 / コード枠の欄の控えを書く(#1728)。 */
+  const writePart = (): void => {
+    const st = dispatcher.getState();
+    const ps = partSession;
+    if (ps === null || st.sectionDraft == null || st.sectionDraft.lid !== ps.lid) return;
+    // 🔴 答えていない控えが在るノートは触らない(全文編集と同じ)
+    if (deps.isPending?.(ps.lid) === true) return;
+    const text = deps.readPartText?.() ?? ps.lastText;
+    if (text === null) return;
+    ps.lastText = text;
+    if (text === ps.part.original || !fitsDraft(text, '')) {
+      // 打って消した / 大きすぎる ── 古い控えを残すと「戻す」で新しい字が失われて見える
+      enqueue(() => store.remove(cid, ps.lid, tab));
+      return;
+    }
+    const rec: DraftRecord = {
+      cid,
+      lid: ps.lid,
+      body: text,
+      title: '',
+      base: fingerprint(ps.part.original),
+      at: deps.clock.now(),
+      tab,
+      part: ps.part,
+    };
+    enqueue(() => store.put(rec));
+  };
+
   const write = (): void => {
+    if (partSession !== null) {
+      writePart();
+      return;
+    }
     const st = dispatcher.getState();
     if (session === null || st.phase !== 'editing' || !st.openBody) return;
     if (st.openBody.lid !== session.lid) return;
@@ -188,7 +253,44 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
     }
   };
 
+  /**
+   * 欄の控えの出入り(#1728)。⚠ 欄は全文編集と同時には開かない(`OPEN_*_DRAFT` は phase が ready のときだけ)。
+   * 欄が閉じたら控えを消す ── 保存は ack が disk に着いてから閉じる(`SECTION_SAVED`)ので「保存が着いた」と同じ、
+   * やめるも消す。🔴 ただし**別の場所の操作で閉じられた**(ノートが切り替わった / 消えた)ときは消さない
+   * (打った字が、知らせの後どこにも残らなくなる)。
+   */
+  const trackPart = (st: AppState): void => {
+    const d = st.sectionDraft;
+    if (d != null && st.phase !== 'editing') {
+      const part = partOf(d);
+      const ps = partSession;
+      if (ps !== null && ps.lid === d.lid && sameDraftPart(ps.part, part)) {
+        ps.saving = d.saving;
+        return;
+      }
+      endPart(st);
+      partSession = { lid: d.lid, part, startBody: st.openBody?.body ?? null, saving: d.saving, lastText: null };
+      return;
+    }
+    endPart(st);
+  };
+  const endPart = (st: AppState): void => {
+    const ps = partSession;
+    if (ps === null) return;
+    partSession = null;
+    throttle.cancel();
+    const closedBySystem = !(st.selectedLid === ps.lid && st.entryMetas.has(ps.lid));
+    const committed =
+      !closedBySystem && ps.saving && st.openBody?.lid === ps.lid && st.openBody.body !== ps.startBody;
+    if (!closedBySystem) {
+      const adopted = deps.isRestoring?.(ps.lid) === true;
+      enqueue(() => (adopted ? store.remove(cid, ps.lid) : store.remove(cid, ps.lid, tab)));
+    }
+    deps.onEnded?.(ps.lid, committed);
+  };
+
   const onState = (st: AppState): void => {
+    trackPart(st);
     if (st.phase === 'editing' && st.openBody) {
       const o = st.openBody;
       if (session === null || session.lid !== o.lid) {
@@ -224,6 +326,11 @@ export function connectDraftWriter(deps: DraftWriterDeps): DraftWriter {
 
   const onInput = (ev: Event): void => {
     const t = ev.target as HTMLElement | null;
+    if (partSession !== null && t !== null && deps.isPartInput?.(t) === true) {
+      partSession.lastText = deps.readPartText?.() ?? partSession.lastText;
+      throttle.touch();
+      return;
+    }
     if (session !== null && t?.getAttribute?.('data-pkc-field') === 'editor-title') {
       session.lastTitle = deps.readTitle() ?? session.lastTitle;
       throttle.touch();

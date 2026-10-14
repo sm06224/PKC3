@@ -35,6 +35,42 @@ export const DRAFT_MAX_WAIT_MS = 5000;
  */
 export const DRAFT_LIVE_FALLBACK_MS = 30_000;
 
+/**
+ * 章の欄 / コード枠の欄に打っていた字の控え(#1728)── どの欄を開き直すかの身元。
+ * ⚠ 身元は `SectionDraft` / `CodeDraft`(`app-state.ts`)が開いたときに持つ物と同じ(保存のとき探し直す物)。
+ *   `original` = 開いたときのその章 / 枠の原文。戻すとき、いまの本文のその場所と比べる。
+ */
+export type DraftPart =
+  | { readonly kind: 'section'; readonly heading: string; readonly original: string }
+  | {
+      readonly kind: 'code';
+      readonly line: number;
+      readonly openLine: string;
+      readonly quote: number;
+      readonly original: string;
+    };
+
+/** 身元が同じ欄か。 */
+export function sameDraftPart(a: DraftPart, b: DraftPart): boolean {
+  if (a.kind === 'section' && b.kind === 'section') return a.heading === b.heading;
+  if (a.kind === 'code' && b.kind === 'code') {
+    return a.line === b.line && a.openLine === b.openLine && a.quote === b.quote;
+  }
+  return false;
+}
+
+/** 置き場から読んだ値が {@link DraftPart} の形か。 */
+export function isDraftPart(v: unknown): v is DraftPart {
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as Record<string, unknown>;
+  if (typeof r.original !== 'string') return false;
+  if (r.kind === 'section') return typeof r.heading === 'string';
+  if (r.kind === 'code') {
+    return typeof r.line === 'number' && typeof r.openLine === 'string' && typeof r.quote === 'number';
+  }
+  return false;
+}
+
 /** 端末に置く 1 件。 */
 export interface DraftRecord {
   /** コレクション(`cid`)。 */
@@ -50,6 +86,11 @@ export interface DraftRecord {
   readonly at: number;
   /** 書いたタブ。 */
   readonly tab: string;
+  /**
+   * 🔴 章の欄 / コード枠の欄に打っていた字の控えのとき(#1728)。このとき `body` = **打っていた欄の字**
+   * (ノート全文ではない)、`title` = 空、`base` = 開いたときの欄の原文の指紋。無ければ全文編集の控え。
+   */
+  readonly part?: DraftPart;
 }
 
 /** 鍵。⚠ 置き場の鍵と、消すときの鍵はこの 1 本。 */
@@ -116,6 +157,23 @@ export function draftOfferLine(title: string, moved: boolean, rest: number): str
   const name = title.trim() === '' ? '無題' : title;
   const base = `保存していない編集が残っています(${name})`;
   const tail = moved ? MOVED_TAIL : '';
+  const more = rest > 0 ? `。ほか ${String(rest)} 件` : '';
+  return `${base}${tail}${more}`;
+}
+
+/** 欄の名前(画面の字。章 / コード)。 */
+export const DRAFT_PART_NOUN = { section: '章', code: 'コード' } as const;
+
+/** 欄の控えが戻せないときに添える。「戻す」を押すと何が起きるかを先に言う。 */
+export function partMovedTail(kind: DraftPart['kind']): string {
+  return `。ノートの${DRAFT_PART_NOUN[kind]}が変わっているため、そのままは戻せません。「戻す」を押すと打った字をコピーします`;
+}
+
+/** 起動時の 1 行(欄の控え)。題名は空のとき「無題」。 */
+export function draftPartOfferLine(title: string, kind: DraftPart['kind'], moved: boolean, rest: number): string {
+  const name = title.trim() === '' ? '無題' : title;
+  const base = `保存していない${DRAFT_PART_NOUN[kind]}の編集が残っています(${name})`;
+  const tail = moved ? partMovedTail(kind) : '';
   const more = rest > 0 ? `。ほか ${String(rest)} 件` : '';
   return `${base}${tail}${more}`;
 }
