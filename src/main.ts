@@ -1908,7 +1908,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const pdfReaderHost = (): PdfReaderHost => {
     pdfHost ??= new PdfReaderHost({
       onQuote: (session, text, page) =>
-        quoteIntoNote(dispatcher, session, text, page, showStatus, undefined, editLockPort),
+        quoteIntoNote(
+          dispatcher,
+          session,
+          text,
+          page,
+          // 🔴 開く先を添える(`OP_NOTICE` の `open`)── 追記欄の知らせと同じ口。戻す口は `lastAppend`
+          (message, openLid) => dispatcher.dispatch({ type: 'OP_NOTICE', message, open: openLid }),
+          undefined,
+          editLockPort,
+        ),
       onEdited: (session, key) => pdfSaveEdited.receive(session, key),
       listAttachments: listPdfAttachments,
       // 🔴 窓の鍵を信用しない ── 一覧(この collection の PDF の添付)に在る鍵だけ貸す

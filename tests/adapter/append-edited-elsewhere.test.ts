@@ -399,6 +399,6 @@ describe('main.ts の配線(起動できないので字で pin する)', () => {
     expect(src).toMatch(/const editLockPort: EditLockPort = makeEditLockPort\(\(\) => sync, cid\);/);
   });
   it('PDF の引用が同じ口(問い合わせつき)を通る', () => {
-    expect(src).toMatch(/quoteIntoNote\(dispatcher, session, text, page, showStatus, undefined, editLockPort\)/);
+    expect(src).toMatch(/quoteIntoNote\(\s*dispatcher,\s*session,\s*text,\s*page,\s*\(message, openLid\) => dispatcher\.dispatch\(\{ type: 'OP_NOTICE', message, open: openLid \}\),\s*undefined,\s*editLockPort,?\s*\)/);
   });
 });

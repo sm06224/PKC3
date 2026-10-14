@@ -55,9 +55,11 @@ describe('設定画面に在る(#275)', () => {
   it('🔴 画面の字(dt / label / hover)── 内部の部品名を出さない', () => {
     const { box } = setup();
     expect(box!.closest('dd')!.previousElementSibling!.textContent).toBe('PDF');
-    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の PDF ビューアで開く(字を選んでノートへ引用できる)');
+    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の PDF ビューアで開く(ページの並べ替え・ハイライト・付箋・ペン・引用)');
     const title = box!.parentElement!.title;
     expect(title).toContain('ノートへ引用する');
+    // 引用先の規則(結びついたノートがあればそちら、無ければ添付のノート ── `resolveQuoteTarget`)を言う
+    expect(title).toContain('つながっているノートがあればそのノートの末尾に、無ければ添付のノートの末尾');
     expect(title).toContain('オフにすると、ブラウザ内蔵の表示で開きます');
     for (const banned of ['pdf.js', 'pdfjs', 'worker', 'textLayer', '壊れ']) {
       expect(`${box!.parentElement!.textContent}${title}`.toLowerCase()).not.toContain(banned.toLowerCase());

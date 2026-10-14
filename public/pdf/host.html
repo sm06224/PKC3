@@ -224,9 +224,9 @@
   <button id="note-tool" type="button" disabled aria-pressed="false" title="ページのどこかを押して、そこに付箋を付けます(字の無いページにも付けられます)。もう一度押すと付箋をやめます">付箋</button>
   <button id="pen-tool" type="button" disabled aria-pressed="false" title="ページの上をなぞって線を書きます(色は右の丸いボタンで選びます)。もう一度押すとペンをやめます">ペン</button>
   <button id="hl-apply" type="button" disabled title="選んだ字にハイライトを付けます(色は右の丸いボタンで選びます)。付いたハイライトを押すと「ハイライトを外す」が出ます">ハイライト</button>
-  <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきでノートの末尾に引用します">ノートへ引用する</button>
+  <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきで引用します(この PDF につながっているノートがあればそちらの末尾、無ければ添付のノートの末尾)">ノートへ引用する</button>
 </div>
-<div id="edit-bar" hidden><span id="edit-note"></span><button id="edit-reset" type="button" title="まだ保存していない変更(並べ替え・回転・外したページ・ハイライト・付箋・ペンの線)を、すべて元に戻します">変更を元に戻す</button><button id="edit-unpick" type="button" title="一覧で選んだページの選びを、すべて外します(Esc でも外せます)">選びを外す</button><span id="edit-warn" hidden></span></div>
+<div id="edit-bar" hidden><span id="edit-note"></span><button id="edit-reset" type="button" title="まだ保存していない変更(並べ替え・回転・外したページ・ハイライト・付箋・ペンの線)を、すべて元に戻します">変更を元に戻す</button><button id="edit-unpick" type="button" title="一覧で選んだページの選びを、すべて外します(一覧の項目で Esc でも外せます)">選びを外す</button><span id="edit-warn" hidden></span></div>
 <div id="plist-hint">ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl(Mac は ⌘)+クリックで選ぶ</div>
 <nav id="plist" aria-label="ページの一覧"></nav>
 <div id="scroller"><div id="pages"></div></div>
