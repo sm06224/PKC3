@@ -714,6 +714,25 @@ describe('手元のファイルへの書き戻し(#432)', () => {
     expect(h.created, '書けなかったのにノートを作った').toEqual([]);
   });
 
+  it('🔴 書けないままの撃ち直しで、同じ赤い字を何度も出さない / 書けたら次の失敗はまた言う(#1087)', async () => {
+    let ok = false;
+    const h = harness({ writeLocal: async () => ok });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    expect(h.fails, '1 度目は言う').toHaveLength(1);
+    await h.sb.retryDeferred();
+    await h.sb.retryDeferred();
+    expect(h.fails, '撃ち直しのたびに同じ字を出している').toHaveLength(1);
+    expect(h.stage.keys(), '撃ち直しで棚から消した').toContain('k1.json');
+    ok = true;
+    await h.sb.retryDeferred();
+    expect(h.stage.keys(), '書けたのに棚に残っている').not.toContain('k1.json');
+    ok = false;
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:1' });
+    await h.sb.receive('k1');
+    expect(h.fails, '書けた後の新しい失敗を黙った').toHaveLength(2);
+  });
+
   /**
    * ⚠ **対照群**。手元のファイルでない保存は、これまでどおり PKC のノートへ入る
    *   ── 置かないと「全部書き戻しへ落ちている」と区別がつかない。

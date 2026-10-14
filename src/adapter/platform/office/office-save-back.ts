@@ -126,6 +126,12 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
   const inFlight = new Set<string>();
   /** 🔴 編集中で取り込めなかった ── **これが立っている間だけ**撃ち直す。 */
   let deferred = false;
+  /**
+   * 🔴 **元のファイルへ書けなかったと、もう言った保存**(#1087 の見直し)── 撃ち直しは編集を終えるたびに
+   *   走るので、書けないままだと**同じ赤い字が毎回出る**。⚠ 言うのはこの起動で 1 度だけ(書けたら外す)。
+   *   次の起動では空なので、もう一度言う。
+   */
+  const toldLocalFail = new Set<string>();
 
   /**
    * 窓へ「このノートになった」と返す。
@@ -274,13 +280,17 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
       if (local !== true) {
-        deps.fail(localSaveFailedNotice(save.name, local === false ? null : local));
+        if (!toldLocalFail.has(save.key)) {
+          toldLocalFail.add(save.key);
+          deps.fail(localSaveFailedNotice(save.name, local === false ? null : local));
+        }
         deferred = true;
         return 'deferred';
       }
       // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
       await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
+      toldLocalFail.delete(save.key);
       deps.notify(`元のファイルへ保存しました: 「${save.name}」`);
       return 'replaced';
     }
