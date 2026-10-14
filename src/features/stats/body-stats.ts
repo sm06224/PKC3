@@ -17,7 +17,7 @@
  * 4. 🔑 **本文が手元に無いとき(`body === null`)は分数を出さない** ── 分数の算出は本文の字を
  *    読む(日本語と英語で速さが違う)ので、字数だけからは出せない。2 本目の算出で埋めない。
  */
-import { estimateReadingTime } from '@features/markdown/reading-time';
+import { estimateReadingTime, type ReadingTimeEstimate } from '@features/markdown/reading-time';
 
 /**
  * 情報ペイン等に表示する文字数と読了目安の文字列を組み立てる。
@@ -32,12 +32,19 @@ import { estimateReadingTime } from '@features/markdown/reading-time';
  * - 実質 2,500 字の日本語 → `'2,500 文字 (読了 約 5 分)'`
  */
 export function formatBodyStats(chars: number | null, body: string | null = null): string {
+  return formatBodyStatsFor(chars, body === null ? null : estimateReadingTime(body));
+}
+
+/**
+ * `formatBodyStats` の字の組み立て(判定はここ 1 か所)。⚠ 分数の元(`estimateReadingTime`)は本文の
+ * 全文を読むので、**打つたびに描き直す面は前回の見積りを持ち回れる**ようにこの口を分けてある(#1087)。
+ * `estimate === null` は「本文が手元に無い」(分数を出さない)。
+ */
+export function formatBodyStatsFor(chars: number | null, estimate: ReadingTimeEstimate | null): string {
   if (chars === null) return '—';
   if (chars <= 0) return '0 文字';
   const formattedChars = chars.toLocaleString('ja-JP');
-  if (body === null) return `${formattedChars} 文字`;
-  const estimate = estimateReadingTime(body);
-  if (estimate.label === null) return `${formattedChars} 文字`;
+  if (estimate === null || estimate.label === null) return `${formattedChars} 文字`;
   return `${formattedChars} 文字 (読了 約 ${estimate.minutes} 分)`;
 }
 
