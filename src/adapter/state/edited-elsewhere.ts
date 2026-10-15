@@ -29,6 +29,12 @@ import { appendAndSettle, REAL_APPEND_TIMERS, type AppendOutcome, type AppendTim
 export interface EditLockPort {
   acquireEditLock?(lid: string): Promise<'granted' | 'denied' | 'unreachable'>;
   releaseEditLock?(lid: string): void;
+  /**
+   * 🔴 **確かめるだけの問い合わせ**(#1087)。取れても**このタブの別の呼び手が同じノートの錠を
+   * 必要としているなら、返してよいとは言わない**(`mayRelease: false`)。
+   * ⚠ 無い口(unit の fake)では従来どおり `acquireEditLock` + 自分で判断する。
+   */
+  probeEditLock?(lid: string): Promise<{ grant: 'granted' | 'denied' | 'unreachable'; mayRelease: boolean }>;
 }
 
 /** `TabSync` のうち錠の 2 つ(`store-proxy.ts`)。 */
@@ -42,10 +48,46 @@ export interface EditLockSync {
  * ⚠ `sync` は昇格で実体が替わるので**呼ぶたびに読む**(`getSync`)。
  */
 export function makeEditLockPort(getSync: () => EditLockSync, cid: string): Required<EditLockPort> {
+  /**
+   * 🔴 **同じタブの中で、同じノートの錠を取る呼び手が重なる**(#1087)。台帳はタブ単位で 1 件なので、
+   * 「確かめるだけ」の呼び手が返すと、同時に編集に入ろうとしている呼び手の錠まで落ちる。
+   * 🔑 だから**編集に入る側の取得**(`acquireEditLock`)の「始めた回数」と「返事待ちの数」を数え、
+   *   確かめるだけの側(`probeEditLock`)は、重なった回は返さない。
+   *   確かめる側どうしが重なる回は、最後に終わった 1 つだけが返す(全員が譲ると錠が残る)。
+   */
+  const seq = new Map<string, number>();
+  const inflight = new Map<string, number>();
+  const probing = new Map<string, number>();
+  const bump = (m: Map<string, number>, lid: string, d: number): number => {
+    const v = (m.get(lid) ?? 0) + d;
+    if (v <= 0) m.delete(lid);
+    else m.set(lid, v);
+    return v;
+  };
   return {
-    acquireEditLock: (lid) => getSync().acquireEdit(cid, lid),
+    acquireEditLock: (lid) => {
+      bump(seq, lid, 1);
+      bump(inflight, lid, 1);
+      return getSync()
+        .acquireEdit(cid, lid)
+        .finally(() => {
+          bump(inflight, lid, -1);
+        });
+    },
     releaseEditLock: (lid) => {
       getSync().releaseEdit(cid, lid);
+    },
+    probeEditLock: async (lid) => {
+      const seqAtStart = seq.get(lid) ?? 0;
+      const othersInFlight = (inflight.get(lid) ?? 0) > 0;
+      bump(probing, lid, 1);
+      try {
+        const grant = await getSync().acquireEdit(cid, lid);
+        const overlapped = othersInFlight || (seq.get(lid) ?? 0) !== seqAtStart;
+        return { grant, mayRelease: !overlapped && (probing.get(lid) ?? 0) === 1 };
+      } finally {
+        bump(probing, lid, -1);
+      }
     },
   };
 }
@@ -72,11 +114,14 @@ export async function editedElsewhereReason(
   lid: string,
 ): Promise<string | null> {
   if (elsewhereCheckNotNeeded(dispatcher, port, lid)) return null;
-  const grant = await port.acquireEditLock!(lid);
+  const { grant, mayRelease } = port.probeEditLock
+    ? await port.probeEditLock(lid)
+    : { grant: await port.acquireEditLock!(lid), mayRelease: true };
   if (grant === 'granted') {
     // ⚠ 待っている間に**このタブが同じノートの編集に入った**なら、いま握っている錠は
-    //   その編集の物(同じ錠の取り直し)── 返すと自分の編集の錠を手放す
-    if (!ownsLocally(dispatcher, lid)) port.releaseEditLock?.(lid);
+    //   その編集の物(同じ錠の取り直し)── 返すと自分の編集の錠を手放す。
+    //   🔴 編集に入ろうとしている途中(返事待ち)の呼び手が居る回も返さない(`mayRelease`。#1087)
+    if (mayRelease && !ownsLocally(dispatcher, lid)) port.releaseEditLock?.(lid);
     return null;
   }
   return grant === 'denied' ? EDIT_ELSEWHERE_ERROR : null;

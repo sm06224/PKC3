@@ -25,6 +25,7 @@ import {
   SECTION_DRAFT_NOTE,
   editRevokedNote,
   unsavedTypingLidOf,
+  hasUnreachedCommit,
   viewModeLabel,
   type ViewMode,
 } from '@adapter/state/app-state';
@@ -1078,6 +1079,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   );
   const cid = resolved.cid;
   /**
+   * 🔴 **編集の錠の口は、このタブで 1 つ**(#1087)。「別のタブが編集中か」の確かめと編集に入る側の取得が
+   * **別々の口**だと、同じノートで重なったとき確かめる側の返却が編集の錠まで落とす(`edited-elsewhere.ts`
+   * の `probeEditLock`)。別のタブ・窓が編集中のノートへ書き足さないための問い合わせ(#529 W5-d)も
+   * ここを通る。⚠ `sync` は昇格で実体が替わるので**呼ぶたびに読む**。
+   */
+  const editLockPort: EditLockPort = makeEditLockPort(() => sync, cid);
+  /**
    * 🔴 **採番した id を器に出す**(#260)。user 向けの表示ではなく、
    * `data-pkc-boot="ready"` と同じ**検査のための契約**である。
    *
@@ -1313,7 +1321,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **「日」「週」の目盛りの空いた所をドラッグして、予定を作る配線**(#855 段 B-2)。
    * ⚠ 札の上で始めたドラッグは受けない(上の `installScheduleGridDrag` の仕事)。外さない(アプリと同寿命)。
    */
-  installScheduleGridCreate(root, dispatcher, makeEditLockPort(() => sync, cid));
+  installScheduleGridCreate(root, dispatcher, editLockPort);
   /**
    * 🔴 **別のタブで変えたキー割当を、このタブにも効かせる**(#256)。
    * ⚠ これが無いと「2 枚目のタブで割り当て直したのに、1 枚目は再読込まで古いまま」に
@@ -1872,12 +1880,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   const showStatus = (text: string, opts?: StatusOptions): void => statusNotices!.show(text, opts);
   /**
-   * 🔴 別のタブ・窓が編集中のノートへ書き足さないための問い合わせ口(#529 W5-d)。本文の下の追記欄・PDF の窓・
-   * ブラウザの AI の書き足しが**同じ 1 本**を通る(`edited-elsewhere.ts`)。⚠ `sync` は昇格で実体が替わるので
-   * **呼ぶたびに読む**(binder に渡す同名の 2 つと同じ作法)。
-   */
-  const editLockPort: EditLockPort = makeEditLockPort(() => sync, cid);
-  /**
    * 🔴 **PDF を PKC の画面で読む窓**(#275 段①。設定で選んだ人だけ ── 呼ぶのは `viewAsset`)。
    * ⚠ **最初に使うときまで作らない**(放送の口を使わない人に開かない)。窓の合図は全部ここへ来る。
    * ⚠ ここは**配線だけ**である ── 開く / 渡す / 受ける作法は `PdfReaderHost`、引く先と形は
@@ -2016,6 +2018,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   let unloading = false;
   window.addEventListener('pagehide', () => {
     unloading = true;
+  });
+  // 🔴 戻るで復元されたとき(bfcache)は開いたままのタブなので、立てた印を下ろす(#1087)
+  window.addEventListener('pageshow', (ev) => {
+    if (ev.persisted) unloading = false;
   });
   /**
    * 🔴 **自分のパソコンで動かす一式を落とす**(#532 段 B)。
@@ -2345,7 +2351,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     void noteRemoteChange(lids, {
       editingLid: () => {
         const st = dispatcher.getState();
-        return st.phase === 'editing' ? (st.openBody?.lid ?? null) : null;
+        // 🔴 保存に失敗して止まっている間も、未達の字を持っている限り「編集中」(#1087)
+        return st.phase === 'editing' || hasUnreachedCommit(st) ? (st.openBody?.lid ?? null) : null;
       },
       getBody: async (lid) => (await client.request({ op: 'getBody', cid, lid })) ?? null,
       apply: (lid, body) => dispatcher.dispatch({ type: 'REMOTE_BODY_CHANGED', lid, body }),
@@ -2355,11 +2362,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   `changed` を放送する(`store-proxy.ts` の `MUTATING_OPS`)── 受け手が無いと、他タブの色は
      *   次の読み直しまで古いまま。1 件の小さな読みなので、どの `changed` でも読み直す。
      */
-    void reloadTagColors();
     if (syncReloadQueued) return;
     syncReloadQueued = true;
     setTimeout(() => {
       syncReloadQueued = false;
+      // ⚠ 色の読み直しも**同じ 300ms の束ね**に乗せる(#1087)── 書込のたびに 1 回ずつ読んでいた
+      void reloadTagColors();
       void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null });
     }, 300);
   };
@@ -4613,10 +4621,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * (StoreProxyHost / ProxyStoreClient)が持つ ── ここは渡すだけ。
      * `sync` は昇格で実体が替わるので、**呼ぶたびに読む**(closure に固定しない)。
      */
-    acquireEditLock: (lid) => sync.acquireEdit(cid, lid),
-    releaseEditLock: (lid) => {
-      sync.releaseEdit(cid, lid);
-    },
+    acquireEditLock: editLockPort.acquireEditLock,
+    releaseEditLock: editLockPort.releaseEditLock,
     /**
      * 🔗 添付の携帯参照 → **所有ノートへ飛ぶ**(#100 段②)。
      * 逆引きは storage worker(狭い判定 ── attachment の asset_key 等値)。

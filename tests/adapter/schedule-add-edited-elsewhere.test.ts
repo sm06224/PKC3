@@ -248,6 +248,7 @@ describe('② 目盛りの作成(ダブルクリック / ドラッグ)', () => {
 describe('③ 配線(main.ts は起動できないので字で pin)', () => {
   it('目盛りの作成へ、編集の錠の口(makeEditLockPort)を渡している', () => {
     const main = readFileSync('src/main.ts', 'utf8');
-    expect(main).toMatch(/installScheduleGridCreate\(root, dispatcher, makeEditLockPort\(\(\) => sync, cid\)\)/);
+    // #1087: 錠の口は main.ts で 1 つ(確かめる側と編集に入る側が同じ数え帳を見る)── 事実が動いたので字を直した
+    expect(main).toMatch(/installScheduleGridCreate\(root, dispatcher, editLockPort\)/);
   });
 });

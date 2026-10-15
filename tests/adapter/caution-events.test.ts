@@ -248,7 +248,7 @@ describe('別のタブが同じノートを編集中 → 「注意」(binder か
 
   it('対照群:本体と話せない断りは「問題」のまま(「注意」へ広げない)', async () => {
     const error = await pressEdit('unreachable');
-    expect(error).toContain('最初に開いた PKC3 のタブと通信できません');
+    expect(error).toContain('メインのタブと通信できません');
     expect(messageKindForOpError(error as string)).toBe('problem');
   });
 
