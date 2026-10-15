@@ -168,14 +168,18 @@ describe('差分で当てる', () => {
    */
   it('🔴 `:::format{overlay=1}` の本文でも差分のまま / 余分な子は隠れない(偽造の印)', () => {
     const forged = `${DOC}\n:::format{overlay=1}\n印を持つ塊。\n:::\n`;
-    const html = render(forged);
-    expect(html, '前提が崩れている(塊に data-pkc-overlay が焼かれていない)').toContain('data-pkc-overlay="1"');
+    // 🔴 本文からは、この印はもう焼けない(#1087 ── `:::format` の key を許可した物だけにした)
+    expect(render(forged), '本文の key から内部の印が焼けた').not.toContain('data-pkc-overlay="1"');
+    // ⚠ それでも描く側の守りは残す ── 印を後から差し込んだ HTML で、下流が取り違えないことを見る
+    const inject = (h: string): string => h.replace('data-pkc-format-block', 'data-pkc-format-block data-pkc-overlay="1"');
+    const html = inject(render(forged));
+    expect(html, '前提が崩れている(差し込んだ印が無い)').toContain('data-pkc-overlay="1"');
     const h = host();
     const first = applyBlocks(h, html, EMPTY_VIEW);
-    const r = applyBlocks(h, render(`${forged}\n足した段落。\n`), first.view);
+    const r = applyBlocks(h, inject(render(`${forged}\n足した段落。\n`)), first.view);
     expect(r.replaced, '偽造の印で intact が偽になった(毎回丸ごと)').toBe(1);
     h.append(document.createElement('span'));
-    const r2 = applyBlocks(h, render(forged), r.view);
+    const r2 = applyBlocks(h, inject(render(forged)), r.view);
     expect(r2.replaced, '偽造の印が、印なしの余分な子を隠した').toBe(r2.view.blocks.length);
   });
 
@@ -203,13 +207,17 @@ describe('差分で当てる', () => {
 
   it('🔴 `:::format{transient=1}` の本文の塊は消えない(偽造の印)', () => {
     const forged = `${DOC}\n:::format{transient=1}\n印を持つ塊。\n:::\n`;
-    const html = render(forged);
-    expect(html, '前提が崩れている(塊に data-pkc-transient が焼かれていない)').toContain('data-pkc-transient="1"');
+    // 🔴 本文からは、この印はもう焼けない(#1087 ── `:::format` の key を許可した物だけにした)
+    expect(render(forged), '本文の key から内部の印が焼けた').not.toContain('data-pkc-transient="1"');
+    // ⚠ それでも描く側の守りは残す ── 印を後から差し込んだ HTML で、下流が取り違えないことを見る
+    const inject = (h: string): string => h.replace('data-pkc-format-block', 'data-pkc-format-block data-pkc-transient="1"');
+    const html = inject(render(forged));
+    expect(html, '前提が崩れている(差し込んだ印が無い)').toContain('data-pkc-transient="1"');
     const h = host();
     const first = applyBlocks(h, html, EMPTY_VIEW);
     const block = h.querySelector('[data-pkc-transient]');
     expect(block, '前提が崩れている(印つきの塊が host に無い)').not.toBeNull();
-    const r = applyBlocks(h, render(`${forged}\n足した段落。\n`), first.view);
+    const r = applyBlocks(h, inject(render(`${forged}\n足した段落。\n`)), first.view);
     expect(block!.isConnected, '本文の塊を仮の層と取り違えて消した').toBe(true);
     expect(r.replaced, '偽造の印で差分が死んだ(毎回丸ごと)').toBe(1);
   });

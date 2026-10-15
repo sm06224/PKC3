@@ -258,17 +258,19 @@ describe('ログの日の行 × 差分描画 #1441', () => {
 
   it('🔴 偽造: 本文の `:::format{log-day=1}` は行ではない ── 塊は消えず、差分も生きる', () => {
     const forged = md([...E, ':::format{log-day=1}\n偽の塊。\n:::']);
-    const html = render(forged);
-    expect(html, '前提が崩れている(塊に data-pkc-log-day が焼かれていない)').toContain(
-      'data-pkc-log-day="1"',
-    );
+    // 🔴 本文からは、この印はもう焼けない(#1087 ── `:::format` の key を許可した物だけにした)
+    expect(render(forged), '本文の key から内部の印が焼けた').not.toContain('data-pkc-log-day="1"');
+    // ⚠ それでも描く側の守りは残す ── 印を後から差し込んだ HTML で、下流が取り違えないことを見る
+    const inject = (h: string): string => h.replace('data-pkc-format-block', 'data-pkc-format-block data-pkc-log-day="1"');
+    const html = inject(render(forged));
+    expect(html, '前提が崩れている(差し込んだ印が無い)').toContain('data-pkc-log-day="1"');
     const h = liveHost();
     const first = applyBlocks(h, html, EMPTY_VIEW);
     const block = h.querySelector('[data-pkc-log-day="1"]')!;
     applyHeadingFold(h);
     expect(block.isConnected, '偽造の塊が行として消された').toBe(true);
     expect(rows(h).filter((r) => r !== block)).toHaveLength(2);
-    const r = applyBlocks(h, render(md([...E, ':::format{log-day=1}\n偽の塊。\n:::', '足した段落'])), first.view);
+    const r = applyBlocks(h, inject(render(md([...E, ':::format{log-day=1}\n偽の塊。\n:::', '足した段落']))), first.view);
     applyHeadingFold(h);
     expect(r.replaced, '偽造の印で差分が死んだ').toBe(1);
     // 偽造の塊を「押しても」畳まれない(行ではない)
