@@ -228,9 +228,9 @@ describe('HTML(画面と同じもの)→ 塊', () => {
   it('🔴 入れ子の箇条書きは depth で平らになる(親の行に子の文字が混ざらない)', () => {
     const { blocks } = blocksOf('<ul><li>おや<ul><li>こ</li></ul></li><li>となり</li></ul>');
     expect(blocks).toEqual([
-      { kind: 'li', ordered: false, depth: 0, runs: [{ text: 'おや' }] },
-      { kind: 'li', ordered: false, depth: 1, runs: [{ text: 'こ' }] },
-      { kind: 'li', ordered: false, depth: 0, runs: [{ text: 'となり' }] },
+      { kind: 'li', ordered: false, depth: 0, list: 1, runs: [{ text: 'おや' }] },
+      { kind: 'li', ordered: false, depth: 1, list: 2, runs: [{ text: 'こ' }] },
+      { kind: 'li', ordered: false, depth: 0, list: 1, runs: [{ text: 'となり' }] },
     ]);
   });
 
@@ -875,5 +875,99 @@ describe('🔴 制御文字を、書き出しの全部品から落とす(#1430�
       const out = spawnSync('xmllint', ['--noout', '-'], { input: part(r, name), encoding: 'utf8', stdio: 'pipe' });
       expect(out.status, `${name}: ${out.stderr}`).toBe(0);
     }
+  });
+});
+
+describe('🔴 番号付きの一覧は、一覧ごとに 1 から数え直す(#1087)', () => {
+  const numIdsOf = (xml: string): string[] =>
+    [...xml.matchAll(/<w:numId w:val="(\d+)"\/>/g)].map((m) => m[1]!);
+  const build = (html: string): ReturnType<typeof buildDocx> =>
+    buildDocx(blocksOf(html).blocks, 't', ISO);
+
+  it('間に段落を挟んだ 2 つの番号付き一覧は、別の numId を指し、どちらも 1 からの上書きを持つ', () => {
+    const res = build('<ol><li>a</li><li>b</li></ol><p>間</p><ol><li>c</li><li>d</li></ol>');
+    const ids = numIdsOf(part(res, 'word/document.xml'));
+    expect(ids, '前提: 項目 4 つが numbering を指している').toHaveLength(4);
+    expect(ids[0]).toBe(ids[1]);
+    expect(ids[2]).toBe(ids[3]);
+    expect(ids[2], '2 つ目の一覧が前の一覧と同じ番号の列に乗っている').not.toBe(ids[0]);
+    const num = part(res, 'word/numbering.xml');
+    for (const id of [ids[0]!, ids[2]!]) {
+      expect(num).toContain(
+        `<w:num w:numId="${id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`,
+      );
+    }
+  });
+
+  it('間に何も挟まない 2 つの <ol> も別の一覧(続きの番号にならない)', () => {
+    const ids = numIdsOf(part(build('<ol><li>a</li></ol><ol><li>b</li></ol>'), 'word/document.xml'));
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it('対照群: 項目の間にコード枠が挟まっても、同じ一覧は 1 本の番号のまま', () => {
+    const ids = numIdsOf(
+      part(build('<ol><li>a<pre><code>x</code></pre></li><li>b</li></ol>'), 'word/document.xml'),
+    );
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
+  });
+
+  it('箇条書き(黒丸)は番号付きの numId を使わない', () => {
+    const ids = numIdsOf(
+      part(build('<ul><li>a</li></ul><ol><li>b</li></ol>'), 'word/document.xml'),
+    );
+    expect(ids[0], '黒丸の numId').toBe('1');
+    expect(ids[1], '番号付きは 2 以降').not.toBe('1');
+  });
+
+  it('list を持たない塊でも、離れた番号付きの並びは別の numId(塊の連なりで分ける)', () => {
+    const li = (t: string): DocxBlock => ({ kind: 'li', ordered: true, depth: 0, runs: [{ text: t }] });
+    const res = buildDocx([li('a'), li('b'), { kind: 'p', runs: [{ text: '間' }] }, li('c')], 't', ISO);
+    const ids = numIdsOf(part(res, 'word/document.xml'));
+    expect(ids[0]).toBe(ids[1]);
+    expect(ids[2]).not.toBe(ids[0]);
+  });
+
+  it('numbering.xml の w:num は使った numId をすべて宣言する(指す先が実在する)', () => {
+    const res = build('<ol><li>a</li></ol><p>x</p><ol><li>b</li></ol><p>y</p><ol><li>c</li></ol>');
+    const num = part(res, 'word/numbering.xml');
+    const declared = [...num.matchAll(/<w:num w:numId="(\d+)">/g)].map((m) => m[1]);
+    const used = new Set(numIdsOf(part(res, 'word/document.xml')));
+    expect(used.size, '前提: 3 つの別の列').toBe(3);
+    for (const id of used) expect(declared).toContain(id);
+  });
+});
+
+describe('🔴 段落の中の入れられなかった画像も、注意の件数に数える(#1087)', () => {
+  it('htmlToDocxBlocks は、段落の中で落とした物の呼び名を返す(塊の列には現れない)', () => {
+    const got = blocksOf('<p>前<img src="a.png" alt="図 1">後</p><p><svg></svg></p>');
+    expect(got.blocks.some((b) => b.kind === 'skipped'), '前提: 塊としては残らない').toBe(false);
+    expect(got.inlineSkipped).toEqual(['画像「図 1」', '図(ベクタ)']);
+  });
+
+  it('渡すと、Word の注意と件数に入る(塊の skipped と合算)', () => {
+    const got = blocksOf('<p>前<img src="a.png" alt="図 1">後</p>');
+    const res = buildDocx(
+      [...got.blocks, { kind: 'skipped', what: '画像「図 1」', why: 'x' }],
+      't',
+      ISO,
+      undefined,
+      got.inlineSkipped,
+    );
+    expect(res.counts.skipped).toBe(2);
+    expect(res.warnings.join(' ')).toContain('画像「図 1」 2 件');
+  });
+
+  it('段落の中だけの画像でも、注意が出る(0 件にならない)', () => {
+    const got = blocksOf('<p>前<img src="a.png" alt="図 1">後</p>');
+    const res = buildDocx(got.blocks, 't', ISO, undefined, got.inlineSkipped);
+    expect(res.counts.skipped).toBe(1);
+    expect(res.warnings.join(' ')).toContain('Word に入れられなかったものがあります');
+  });
+
+  it('渡さなければ注意は出ない(対照群: 数えているのは渡した分だけ)', () => {
+    const got = blocksOf('<p>前<img src="a.png" alt="図 1">後</p>');
+    expect(buildDocx(got.blocks, 't', ISO).warnings).toEqual([]);
   });
 });

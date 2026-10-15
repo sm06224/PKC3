@@ -1012,3 +1012,34 @@ describe('Office 書き出し ── 失敗したら進行中の字を消す(#10
     expect(r.said, '出していない進行中の字を消す字を撃った(別の知らせを巻き込む)').toEqual([]);
   });
 });
+
+/**
+ * 🔴 **段落の中の入れられなかった画像も、書き出しの注意(`report`)に数える**(#1087)。
+ * ⚠ 本文には理由が出るが、塊の列には現れない(字の走りになる)ので、組み立てへ渡し忘れると注意だけ黙って 0 件になる。
+ */
+describe('Office 書き出し ── 段落の中の入れられなかった画像が注意に出る(#1087)', () => {
+  const run = async (kind: 'docx' | 'pptx', body: string): Promise<string[]> => {
+    const notes: string[] = [];
+    const d = {
+      ...deps(source({ getBody: async () => body })),
+      report: (n: readonly string[]) => notes.push(...n),
+      renderBody: async (text: string, opts?: RenderMarkdownOptions) => renderMarkdown(text, opts),
+    } as unknown as ExportDeps;
+    const { dispatcher } = fakeDispatcher('ready');
+    const ok =
+      kind === 'docx'
+        ? await exportEntryDocx(dispatcher, d, 'n1')
+        : await exportEntryPptx(dispatcher, d, 'n1');
+    expect(ok, '前提: 書き出せた').toBe(true);
+    return notes;
+  };
+
+  it.each(['docx', 'pptx'] as const)('🔴 %s: 文の途中の外部画像は、注意に数えられる', async (kind) => {
+    const notes = await run(kind, '前 ![図](https://example.com/a.png) 後\n');
+    expect(notes.join(' '), '注意が 1 行も出ていない').toMatch(/入れ(られなかった|ていません)/);
+  });
+
+  it.each(['docx', 'pptx'] as const)('対照群: %s 画像が無ければ注意は出ない', async (kind) => {
+    expect(await run(kind, '前 後\n')).toEqual([]);
+  });
+});

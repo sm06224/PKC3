@@ -656,6 +656,8 @@ async function collectOfficeBlocks(
    *   user が見るのは「どの添付が欠けたか」が消えた形である)。
    */
   warnings: string[];
+  /** 🔴 段落の中で入れられなかった物の呼び名(#1087)。⚠ 組み立てへ渡さないと注意の件数から抜ける。 */
+  inlineSkipped: string[];
 } | null> {
   /**
    * 🔴 **直前の保存が disk に着いてから読む**(2026-08-17 実測)。
@@ -719,7 +721,7 @@ async function collectOfficeBlocks(
   const html = await bakeSqlEmbeds(rendered, deps.askSql);
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-  const { blocks, images, figures } = htmlToDocxBlocks(doc);
+  const { blocks, images, figures, inlineSkipped } = htmlToDocxBlocks(doc);
   /**
    * 🔴 **添付の画像を入れる**(#187 段②)。
    * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
@@ -822,7 +824,7 @@ async function collectOfficeBlocks(
     };
     media.push({ name, blob: drawn.blob });
   }
-  return { blocks, media, title, warnings };
+  return { blocks, media, title, warnings, inlineSkipped };
 }
 
 /**
@@ -947,8 +949,9 @@ async function exportEntryOffice(
             iso: now.toISOString(),
             pageFormat: deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
             media: got.media,
+            inlineSkipped: got.inlineSkipped,
           }
-        : { kind: 'pptx', blocks: got.blocks, title: got.title, media: got.media },
+        : { kind: 'pptx', blocks: got.blocks, title: got.title, media: got.media, inlineSkipped: got.inlineSkipped },
     );
     deps.download(`${safeName(got.title)}-${stamp(now)}.${target.ext}`, built.blob);
     // 🔴 **落としたものは件数で言う**(#213 の裁定 A と同じ向き)

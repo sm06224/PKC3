@@ -16,6 +16,7 @@ import type { ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
 import { buildPptx, type ExportBlock } from '../../src/features/export/pptx';
 import { ZipWriter } from '../../src/features/export/zip-writer';
+import { markName } from '../../src/features/message/message-log';
 
 const p = (text: string): ExportBlock => ({ kind: 'p', runs: [{ text }] });
 const place = (x: number, y: number, w: number, h: number, name: string | null = null): ExportBlock =>
@@ -233,5 +234,66 @@ describe('importFiles ── 振り分け', () => {
     expect(await importFiles(h.d, asDeps(h), [f, md])).toBeNull();
     expect(h.written).toHaveLength(0);
     expect(h.d.getState().error ?? '').toContain('PowerPoint');
+  });
+});
+
+describe('importPptxFiles ── 順番・上限・file 名の目印(#1087)', () => {
+  const titled = (): readonly { name: string; text: string }[] =>
+    exported([
+      { kind: 'h', level: 2, runs: [{ text: 'A' }] }, place(0, 0, 200, 100), p('a'),
+      { kind: 'pagebreak' } as ExportBlock,
+      { kind: 'h', level: 2, runs: [{ text: 'B' }] }, place(0, 0, 200, 100), p('b'),
+    ]);
+
+  it('🔴 スライドの順番は presentation.xml が決める(並べ替えた file は、番号の順と違う)', async () => {
+    const swapped = titled().map((x) => {
+      if (x.name !== 'ppt/presentation.xml') return x;
+      const ids = [...x.text.matchAll(/<p:sldId [^>]*\/>/g)].map((m) => m[0]);
+      expect(ids, '前提: スライドは 2 枚').toHaveLength(2);
+      return { ...x, text: x.text.replace(ids.join(''), [...ids].reverse().join('')) };
+    });
+    const h = harness();
+    expect(await importPptxFiles(h.d, h.deps, [await zipFile(swapped)])).toBe(2);
+    expect(h.written.map((r) => r.title)).toEqual(['B', 'A']);
+    // 対照群: 触らない file は番号の順のまま
+    const c = harness();
+    await importPptxFiles(c.d, c.deps, [await zipFile(titled())]);
+    expect(c.written.map((r) => r.title)).toEqual(['A', 'B']);
+  });
+
+  it('🔴 200 枚を超えたスライドは、図形の「取り込めなかったもの」と分けて言う', async () => {
+    const base = titled();
+    const slide1 = base.find((x) => x.name === 'ppt/slides/slide1.xml')!.text;
+    // presentation を外す(番号順に倒れる)── 201 枚を同じ中身で並べる
+    const parts = base.filter((x) => !/^ppt\/slides\/slide\d+\.xml$|presentation/.test(x.name));
+    for (let i = 1; i <= 201; i++) parts.push({ name: `ppt/slides/slide${i}.xml`, text: slide1 });
+    const h = harness();
+    expect(await importPptxFiles(h.d, h.deps, [await zipFile(parts)])).toBe(200);
+    expect(h.reported()).toEqual(['スライドが多いため、先頭の 200 枚だけ取り込みました(残り 1 枚は取り込んでいません)']);
+    const said = h.notices.join('');
+    expect(said).toContain('取り込まなかったスライド 1 枚');
+    expect(said, 'スライドの超過を「取り込めなかったもの」に混ぜない').not.toContain('取り込めなかったもの');
+  });
+
+  it('対照群: 図形が取り込めなかったときは従来の字(スライドの超過は言わない)', async () => {
+    const parts = titled().map((x) =>
+      x.name === 'ppt/slides/slide1.xml'
+        ? { ...x, text: x.text.replace('</p:spTree>', '<p:pic><p:nvPicPr/></p:pic></p:spTree>') }
+        : x,
+    );
+    const h = harness();
+    await importPptxFiles(h.d, h.deps, [await zipFile(parts)]);
+    expect(h.reported()).toEqual(['取り込めなかったものが 1 件ありました']);
+    expect(h.notices.join('')).not.toContain('取り込まなかったスライド');
+  });
+
+  it('🔴 断り文の file 名には目印を付ける(名前に」が入っても、後半が画面の字に残らない)', async () => {
+    const name = '【重要】「A社との契約」について.pptx';
+    const broken = harness();
+    await importPptxFiles(broken.d, broken.deps, [new File(['PK\u0003\u0004これは壊れている'.repeat(5)], name)]);
+    expect(broken.d.getState().error ?? '').toContain(markName(name));
+    const noSlides = harness();
+    await importPptxFiles(noSlides.d, noSlides.deps, [await zipFile([{ name: 'readme.txt', text: 'x' }], name)]);
+    expect(noSlides.d.getState().error ?? '').toContain(markName(name));
   });
 });

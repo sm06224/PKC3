@@ -62,12 +62,15 @@ export type OoxmlJob =
       iso: string;
       pageFormat: PageFormat;
       media: OoxmlMedia[];
+      /** 🔴 段落の中で入れられなかった物の呼び名(#1087)。⚠ 必須 ── 渡し忘れると注意の件数から黙って抜ける。 */
+      inlineSkipped: string[];
     }
   | {
       kind: 'pptx';
       blocks: DocxBlock[];
       title: string;
       media: OoxmlMedia[];
+      inlineSkipped: string[];
     };
 
 /** 返り。⚠ zip は Blob のまま返す(開かない)。 */
@@ -97,8 +100,8 @@ const MEDIA_ROOT = { docx: 'word', pptx: 'ppt' } as const;
 export async function assembleOoxml(req: OoxmlJob): Promise<OoxmlJobResult> {
   const built =
     req.kind === 'docx'
-      ? buildDocx(req.blocks, req.title, req.iso, req.pageFormat)
-      : buildPptx(req.blocks, { title: req.title });
+      ? buildDocx(req.blocks, req.title, req.iso, req.pageFormat, req.inlineSkipped)
+      : buildPptx(req.blocks, { title: req.title, inlineSkipped: req.inlineSkipped });
   const zip = new ZipWriter();
   for (const part of built.parts) await zip.add(part.name, [part.text]);
   for (const m of req.media) await zip.add(`${MEDIA_ROOT[req.kind]}/${m.name}`, [m.blob]);

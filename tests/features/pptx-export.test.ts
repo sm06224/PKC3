@@ -1232,3 +1232,19 @@ describe('🔴 制御文字を、書き出しの全部品から落とす(#1366 �
   });
 });
 
+
+describe('🔴 段落の中の入れられなかった画像も、注意の件数に数える(#1087)', () => {
+  it('inlineSkipped を渡すと、PowerPoint の注意と件数に入る', () => {
+    const blocks: ExportBlock[] = [p('あ'), { kind: 'skipped', what: '画像', why: 'x' }];
+    const base = buildPptx(blocks, { title: 'T' });
+    expect(base.counts.skipped).toBe(1);
+    const r = buildPptx(blocks, { title: 'T', inlineSkipped: ['画像「図 1」', '図(ベクタ)'] });
+    expect(r.counts.skipped).toBe(3);
+    expect(r.warnings.join(' ')).toContain('3 件は PowerPoint に入れていません');
+  });
+
+  it('段落の中だけの画像でも注意が出る', () => {
+    const r = buildPptx([p('あ')], { title: 'T', inlineSkipped: ['画像「図 1」'] });
+    expect(r.warnings.join(' ')).toContain('1 件は PowerPoint に入れていません');
+  });
+});

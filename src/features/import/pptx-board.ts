@@ -36,7 +36,7 @@ import {
   PPTX_ROT_UNIT,
   PRST_OF,
 } from '../export/pptx';
-import { parseXml, textOf, type XmlNode } from '../export/xml-lite';
+import { parseXml, textOf, walk, type XmlNode } from '../export/xml-lite';
 import {
   nearestPlaceSize,
   parsePlaceColor,
@@ -141,7 +141,11 @@ function solidOf(parent: XmlNode | undefined): string | null {
 
 /** 本文の塊の先頭に来て、塊の構造を壊す行(`:::` / 見出し / 箇条書き …)を字として扱う。 */
 function escapeLine(s: string): string {
-  return /^(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|:::|\x60{3}|~~~|-{3,}\s*$|\+{3,}\s*$)/.test(s) ? `\\${s}` : s;
+  // 🔴 行頭の空白・タブは**記法の頭を隠さない**(描画側の閉じ判定は `^\s*:::\s*$`、開きは `trim()` する)── 空白の後ろに守りを置く
+  const m = /^(\s*)([\s\S]*)$/.exec(s);
+  const ws = m?.[1] ?? '';
+  const rest = m?.[2] ?? s;
+  return /^(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|:::|\x60{3}|~~~|-{3,}\s*$|\+{3,}\s*$)/.test(rest) ? `${ws}\\${rest}` : s;
 }
 
 /** 改行の類(`\r \n` / NEL / 行区切り / 段落区切り / `\v \f`)を空白 1 つにする。 */
@@ -571,4 +575,47 @@ export function pptxSlideNames(names: readonly string[]): string[] {
     if (m !== null) out.push({ n: Number(m[1]), name });
   }
   return out.sort((a, b) => a.n - b.n).map((x) => x.name);
+}
+
+/**
+ * 🔴 **スライドの順番を `presentation.xml` の `sldIdLst` で決める**。`slideN.xml` の番号は作られた順で、
+ * PowerPoint でスライドを並べ替えると**番号と見える順がずれる**。`_rels/presentation.xml.rels` で `r:id` を部品名へ引く。
+ * - ⚠ どちらかが無い・読めない・1 枚も引けないときは**番号順に倒す**({@link pptxSlideNames})。
+ * - `sldIdLst` に載っていないスライド(PowerPoint では見えない)は読まない。
+ */
+export function pptxSlideNamesInOrder(
+  names: readonly string[],
+  presentationXml: string | null,
+  relsXml: string | null,
+): string[] {
+  const byNumber = pptxSlideNames(names);
+  if (presentationXml === null || relsXml === null) return byNumber;
+  try {
+    const targetOf = new Map<string, string>();
+    for (const { node } of walk(parseXml(relsXml))) {
+      if (node.tag === '#text' || local(node.tag) !== 'Relationship') continue;
+      const id = node.attrs.Id;
+      const target = node.attrs.Target;
+      if (id === undefined || target === undefined) continue;
+      // 相対は `ppt/` 起点(`slides/slide1.xml` / `../ppt/slides/slide1.xml`)、`/` 始まりは zip の根から
+      const parts = (target.startsWith('/') ? target.slice(1) : `ppt/${target}`).split('/');
+      const out: string[] = [];
+      for (const seg of parts) {
+        if (seg === '..') out.pop();
+        else if (seg !== '.' && seg !== '') out.push(seg);
+      }
+      targetOf.set(id, out.join('/'));
+    }
+    const known = new Set(byNumber);
+    const ordered: string[] = [];
+    for (const { node } of walk(parseXml(presentationXml))) {
+      if (node.tag === '#text' || local(node.tag) !== 'sldId') continue;
+      const key = Object.keys(node.attrs).find((k) => k.endsWith(':id'));
+      const name = key === undefined ? undefined : targetOf.get(node.attrs[key] ?? '');
+      if (name !== undefined && known.has(name) && !ordered.includes(name)) ordered.push(name);
+    }
+    return ordered.length > 0 ? ordered : byNumber;
+  } catch {
+    return byNumber;
+  }
 }

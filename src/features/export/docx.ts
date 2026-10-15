@@ -59,6 +59,12 @@ export type DocxBlock =
       readonly ordered: boolean;
       /** 0 起点。⚠ OOXML の `w:ilvl` と同じ数え方に揃える。 */
       readonly depth: number;
+      /**
+       * 🔴 **この項目が入っている一覧(`<ol>` / `<ul>`)の通し番号**(#1087)。番号付きの一覧ごとに
+       * 番号を 1 から振り直す印 ── 同じ値の項目は同じ番号の列に乗る。⚠ 省略したときは、**続く項目の
+       * 塊**(間に別の塊が挟まらない `li` の並び)を 1 つの一覧と読む。
+       */
+      readonly list?: number;
       readonly runs: readonly DocxRun[];
     }
   | { readonly kind: 'quote'; readonly runs: readonly DocxRun[] }
@@ -246,7 +252,35 @@ const FOOTER_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 export const DOCX_LIST_DEPTH_MAX = 8;
 /** 番号付きの numId。⚠ `numbering.xml` の宣言と**この 2 つだけ**で揃える。 */
 const NUM_BULLET = 1;
+/** 番号付きの 1 つ目の numId。2 つ目以降は +1 ずつ(一覧ごとに `w:num` を増やす)。 */
 const NUM_ORDERED = 2;
+
+/**
+ * 🔴 **番号付きの一覧ごとに numId を割る**(#1087)。1 本の numId を文書全体で使うと、離れた 2 つ目の一覧が
+ * 「1」から始まらず前の続きの番号になる(Word は同じ numId を 1 本の番号の列として数える)。
+ * @returns 塊の添字 → numId(番号付きの `li` だけ)と、使った numId の数
+ */
+function assignOrderedNums(blocks: readonly DocxBlock[]): { ids: Map<number, number>; count: number } {
+  const ids = new Map<number, number>();
+  const keyToNum = new Map<string, number>();
+  let runStart = -1;
+  blocks.forEach((b, i) => {
+    if (b.kind !== 'li') {
+      runStart = -1;
+      return;
+    }
+    if (runStart < 0) runStart = i;
+    if (!b.ordered) return;
+    const key = b.list !== undefined ? `L${b.list}` : `R${runStart}`;
+    let n = keyToNum.get(key);
+    if (n === undefined) {
+      n = NUM_ORDERED + keyToNum.size;
+      keyToNum.set(key, n);
+    }
+    ids.set(i, n);
+  });
+  return { ids, count: keyToNum.size };
+}
 
 /** XML の文字参照。⚠ 属性にも本文にも同じものを使う(`"` まで含める)。 */
 export function xmlEscape(s: string): string {
@@ -320,7 +354,7 @@ function paragraph(inner: string, styleId?: string, extraPr = ''): string {
 }
 
 /** 塊 1 つ → 段落(複数になることもある: 表・コード)。 */
-function blockXml(block: DocxBlock, rels: Map<string, string>): string {
+function blockXml(block: DocxBlock, rels: Map<string, string>, orderedNumId = NUM_ORDERED): string {
   switch (block.kind) {
     case 'p':
       return paragraph(runsXml(block.runs, rels));
@@ -330,7 +364,7 @@ function blockXml(block: DocxBlock, rels: Map<string, string>): string {
       return paragraph(runsXml(block.runs, rels), 'Quote');
     case 'li': {
       const ilvl = Math.min(Math.max(block.depth, 0), DOCX_LIST_DEPTH_MAX - 1);
-      const numId = block.ordered ? NUM_ORDERED : NUM_BULLET;
+      const numId = block.ordered ? orderedNumId : NUM_BULLET;
       const numPr = `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>`;
       return paragraph(runsXml(block.runs, rels), 'ListParagraph', numPr);
     }
@@ -468,7 +502,7 @@ function stylesXml(): string {
  * ⚠ PKC2 はこの part を 1 度も読み返さず、実装とマニュアルが 3 ヶ月食い違っていた。
  * ここでは **黒丸 / 番号の 2 本**を宣言し、深さは `DOCX_LIST_DEPTH_MAX` まで作る。
  */
-function numberingXml(): string {
+function numberingXml(orderedCount: number): string {
   /**
    * ⚠ **記号は escape で書く**(CLAUDE.md「制御文字をソースに生バイトで埋めない」の
    * 同じ向き ── 編集ツールが文字を落とすと `w:lvlText` が空になり、**黒丸が消えた
@@ -488,8 +522,15 @@ function numberingXml(): string {
   };
   const levels = (ordered: boolean): string =>
     Array.from({ length: DOCX_LIST_DEPTH_MAX }, (_, i) => lvl(i, ordered)).join('');
+  // 🔴 番号付きの一覧ごとに `w:num` を 1 本。⚠ 先頭の水準を 1 から数え直す(`startOverride`)── 同じ定義を
+  //    指す `w:num` どうしは、これが無いと番号を共有する
+  const orderedNums = Array.from(
+    { length: Math.max(1, orderedCount) },
+    (_, k) =>
+      `<w:num w:numId="${NUM_ORDERED + k}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`,
+  ).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${levels(false)}</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${levels(true)}</w:abstractNum><w:num w:numId="${NUM_BULLET}"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="${NUM_ORDERED}"><w:abstractNumId w:val="1"/></w:num></w:numbering>`;
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${levels(false)}</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${levels(true)}</w:abstractNum><w:num w:numId="${NUM_BULLET}"><w:abstractNumId w:val="0"/></w:num>${orderedNums}</w:numbering>`;
 }
 
 /**
@@ -508,9 +549,15 @@ export function buildDocx(
    * 「画面は A3 横なのに Word だけ A4 縦」になる。省略時は A4 縦。
    */
   pageFormat: PageFormat = DEFAULT_PAGE_FORMAT,
+  /**
+   * 🔴 **段落の中で入れられなかった物の呼び名**(#1087)。塊の列には現れない(字の走りになっている)ので、
+   * 渡さないと「入れられなかったもの」の注意と件数から抜ける。
+   */
+  inlineSkipped: readonly string[] = [],
 ): DocxResult {
   const rels = new Map<string, string>();
-  const body = blocks.map((b) => blockXml(b, rels)).join('');
+  const ordered = assignOrderedNums(blocks);
+  const body = blocks.map((b, i) => blockXml(b, rels, ordered.ids.get(i))).join('');
   /**
    * 🔴 **紙面は画面の設定から採る**(#187 段③)。⚠ 順番が決まっている ──
    * `footerReference` は `pgSz` より**前**でないと Word が読めない。
@@ -546,12 +593,15 @@ export function buildDocx(
   const app = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>PKC3</Application></Properties>`;
 
-  const skipped = blocks.filter((b) => b.kind === 'skipped');
+  const whats = [
+    ...blocks.flatMap((b) => (b.kind === 'skipped' ? [b.what] : [])),
+    ...inlineSkipped,
+  ];
   const warnings: string[] = [];
-  if (skipped.length > 0) {
+  if (whats.length > 0) {
     // 🔴 **件数で言う**(#213 の裁定 A と同じ向き ── 「片道です」だけでは損失量が測れない)
     const kinds = new Map<string, number>();
-    for (const s of skipped) kinds.set(s.what, (kinds.get(s.what) ?? 0) + 1);
+    for (const w of whats) kinds.set(w, (kinds.get(w) ?? 0) + 1);
     const detail = [...kinds].map(([what, n]) => `${what} ${n} 件`).join(' / ');
     warnings.push(`Word に入れられなかったものがあります(${detail})。本文にその場所を書きました`);
   }
@@ -563,7 +613,7 @@ export function buildDocx(
       { name: 'word/document.xml', text: document },
       { name: 'word/_rels/document.xml.rels', text: documentRels },
       { name: 'word/styles.xml', text: stylesXml() },
-      { name: 'word/numbering.xml', text: numberingXml() },
+      { name: 'word/numbering.xml', text: numberingXml(ordered.count) },
       { name: 'word/footer1.xml', text: FOOTER_XML },
       { name: 'docProps/core.xml', text: core },
       { name: 'docProps/app.xml', text: app },
@@ -575,7 +625,7 @@ export function buildDocx(
       tables: blocks.filter((b) => b.kind === 'table').length,
       links: [...rels.values()].filter((id) => id.startsWith('rIdL')).length,
       images: blocks.filter((b) => b.kind === 'image').length,
-      skipped: skipped.length,
+      skipped: whats.length,
     },
   };
 }

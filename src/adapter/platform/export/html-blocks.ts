@@ -174,11 +174,18 @@ export function htmlToDocxBlocks(doc: Document): {
    * (「図は原文が黙って等幅で出る」)を再演する。実際に段① はそうなっていた。
    */
   figures: { at: number; kind: string; source: string }[];
+  /**
+   * 🔴 **段落の中で入れられなかった物の呼び名**(`画像「x」` など。#1087)。⚠ 塊として残る `skipped` と違い、
+   * これは**字の走りになって**塊の列には現れない ── 呼び側が組み立てへ渡さないと、Word / PowerPoint の
+   * 「入れられなかったもの」の件数から**黙って抜ける**(本文には理由が出るが、注意には数えられない)。
+   */
+  inlineSkipped: string[];
 } {
   const blocks: DocxBlock[] = [];
   const images: { at: number; assetKey: string; alt: string }[] = [];
   const figures: { at: number; kind: string; source: string }[] = [];
   let skipped = 0;
+  const inlineSkipped: string[] = [];
 
   /** 直前の兄弟が段落を作る要素か(後ろへ続く字を別の行にする合図)。 */
   const afterBlock = (n: Node): boolean => {
@@ -258,6 +265,7 @@ export function htmlToDocxBlocks(doc: Document): {
       const gone = skippedName(el);
       if (gone !== null) {
         skipped += 1;
+        inlineSkipped.push(gone.what);
         // ⚠ 段落の**中**に在った画像も、理由を文字として残す(黙って消さない)
         pushRun(out, `［${gone.what} は入れられませんでした: ${gone.why}］`, { ...style, italic: true });
         continue;
@@ -298,7 +306,10 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   /** 箇条書き(入れ子は `depth` で平らにする)。 */
+  let listSeq = 0;
   const walkList = (list: Element, depth: number, ordered: boolean): void => {
+    // 🔴 一覧ごとの通し番号(Word の番号を一覧ごとに 1 から振り直す印。#1087)
+    const listId = ++listSeq;
     for (const li of Array.from(list.children)) {
       if (li.tagName.toLowerCase() !== 'li') continue;
       /**
@@ -319,7 +330,7 @@ export function htmlToDocxBlocks(doc: Document): {
       });
       const runs = runsOf(clone);
       if (runs.length > 0 || later.length === 0)
-        blocks.push({ kind: 'li', ordered, depth, runs });
+        blocks.push({ kind: 'li', ordered, depth, list: listId, runs });
       for (const sub of later) {
         const t = sub.tagName.toLowerCase();
         if (t === 'ul' || t === 'ol') walkList(sub, depth + 1, t === 'ol');
@@ -583,5 +594,5 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   walkBlocks(doc.body);
-  return { blocks, skipped, images, figures };
+  return { blocks, skipped, images, figures, inlineSkipped };
 }
