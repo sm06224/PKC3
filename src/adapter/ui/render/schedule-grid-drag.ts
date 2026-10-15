@@ -53,9 +53,11 @@ import {
 import { pickRepeatMoveInApp } from './app-dialog';
 import { slotOfCard } from '@features/schedule/move-undo';
 import { offerMoveUndo } from './schedule-undo';
+import { SCHEDULE_DROP_FAILED, gatedScheduleWrite } from './schedule-write-gate';
 import {
   GRID_LANE_SELECTOR,
   dropTaskCard,
+  rawLineOf,
   repeatMoveAction,
   dispatchRepeatMove,
   type GrabbedTask,
@@ -292,7 +294,14 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
     const g: Grab = {
       mode: target?.closest(RESIZE_SELECTOR) != null ? 'resize' : 'move',
       card,
-      task: { lid, line, from, repeat: card.getAttribute('data-pkc-task-repeat') ?? '' },
+      task: {
+        lid,
+        line,
+        from,
+        repeat: card.getAttribute('data-pkc-task-repeat') ?? '',
+        // 🔴 掴んだ時点の行の中身(#1087)── 落とした時点の走査から引き直さない
+        ...rawLineOf(dispatcher, lid, line),
+      },
       lane,
       laneHeight,
       from,
@@ -496,15 +505,17 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
         return;
       }
+      // 🔴 別のタブ・窓が編集中のノートへ / 書出し中は撃たない(#1087)
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
       dispatcher.dispatch({
         type: 'SET_TASK_DATE',
         lid: g.task.lid,
         line,
-        openLine: card.rawLine,
+        openLine: g.task.rawLine ?? card.rawLine,
         date,
         time,
         timeEnd,
-      });
+      }));
       // 🔴 動かしたら「元に戻す」(#855)。⚠ 断られた回・掴んだ日が取れなかった回は出さない
       if (!refused && g.from !== '' && card !== undefined) {
         const before = slotOfCard(card);
@@ -527,7 +538,9 @@ export function installScheduleGridDrag(root: HTMLElement, dispatcher: Dispatche
         time,
         timeEnd,
       });
-      dispatchRepeatMove(dispatcher, action, pick);
+      gatedScheduleWrite(dispatcher, [g.task.lid], SCHEDULE_DROP_FAILED, () =>
+        dispatchRepeatMove(dispatcher, action, pick),
+      );
     });
   };
 
