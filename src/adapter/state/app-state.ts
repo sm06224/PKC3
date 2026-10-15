@@ -1158,7 +1158,21 @@ export function hasUnsavedTyping(state: AppState): boolean {
  */
 export function unsavedTypingLidOf(state: AppState): string | null {
   if (state.phase === 'editing') return state.openBody?.lid ?? null;
+  // 🔴 **保存に失敗して止まっている間も、未達の字がある限り握る**(#1087)。
+  //   ここで錠を返すと別のタブが同じノートを取って保存でき、「再保存」(RETRY_PERSIST)が
+  //   それを黙って上書きする。
+  if (hasUnreachedCommit(state)) return state.openBody!.lid;
   return state.sectionDraft?.lid ?? null;
+}
+
+/**
+ * 🔴 **保存に失敗して止まっていて、最後に commit した字(`baseline`)がまだ disk(`persisted`)に
+ * 届いていないか**(#1087)。⚠ その字の唯一の写しがこのタブの `openBody` にある ──
+ * `RETRY_PERSIST` の「未達の証拠」と同じ式。
+ */
+export function hasUnreachedCommit(state: AppState): boolean {
+  const ob = state.openBody;
+  return state.phase === 'error' && ob !== null && ob.baseline !== ob.persisted;
 }
 
 /**
@@ -6917,19 +6931,24 @@ function reduceCore(
       // baseline ≠ persisted が「未達の証拠」── P3-5 で導入した分離の回収点
       if (state.phase !== 'error' || !state.openBody) return { state, events: [] };
       const { lid, baseline, persisted, diskAhead } = state.openBody;
-      if (baseline === persisted || diskAhead) return { state, events: [] };
+      // ⚠ `diskAhead` でも**止めない**(#1087)── 別のタブが先に書いた版がある状態で再保存を
+      //   黙って断ると、未達の字の出口が無くなる。通すが、履歴に残して知らせる(commit と同じ)
+      if (baseline === persisted) return { state, events: [] };
       const meta = state.entryMetas.get(lid);
       if (!meta) return { state, events: [] };
       const { entryMetas, entry, taskScan, smartHits } = buildPersist(state, meta, baseline);
       // 再送でも刻む意思は同じ(worker 側の hash skip が重複を防ぐので二重に
       // 積まれることはない ── 初回 persist が失敗していれば disk はまだ前の内容)
       const checkpoint =
-        state.freshLid !== lid && persisted !== seedBodyFor(meta.archetype);
+        diskAhead || (state.freshLid !== lid && persisted !== seedBodyFor(meta.archetype));
       return {
         state: {
           ...state,
           phase: 'ready',
-          error: null,
+          error: diskAhead
+            ? '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、' +
+              '別のタブまたはウィンドウの版は履歴に残してあります(履歴から戻せます)'
+            : null,
           entryMetas,
           taskScan,
           smartHits,
@@ -8684,7 +8703,9 @@ function reduceCore(
       const base = sameShownBodies(state, remoteShown) ? state : { ...state, ...remoteShown };
       // ⚠ 編集中だけ ── `ready` は `reloadSnapshot` が先送りなしで面倒を見る
       //   (両方で受けると、同じ問いに答える口が 2 つになる。CLAUDE.md §7)
-      if (state.phase !== 'editing') return { state: base, events: [] };
+      // 🔴 保存に失敗して止まっている間も受ける(#1087)── 未達の字(`baseline`)を持ったまま
+      //   別のタブが書いたら、再保存がそれを黙って上書きする
+      if (state.phase !== 'editing' && !hasUnreachedCommit(state)) return { state: base, events: [] };
       const ob = state.openBody;
       if (!ob || ob.lid !== action.lid) return { state: base, events: [] };
       // ⚠ 自分が書いた内容がそのまま返ってきた回は印を立てない(自分と衝突しない)

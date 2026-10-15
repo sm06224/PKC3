@@ -3458,7 +3458,7 @@ function acquireEditLockOrExplain(
         error:
           grant === 'denied'
             ? EDIT_ELSEWHERE_ERROR
-            : '最初に開いた PKC3 のタブと通信できません(少し待ってもう一度お試しください)',
+            : 'メインのタブと通信できません(少し待ってもう一度お試しください)',
       });
       return;
     }
