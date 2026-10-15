@@ -60,6 +60,7 @@ import {
 import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
 import { erSubjectOf } from '@features/query/er-connect';
+import { cappedCellsNote } from '@features/query/sql-cell';
 import {
   SQL_ENGINE_LABEL,
   SQL_ENGINES,
@@ -1068,7 +1069,7 @@ export class SqlRenderer {
          *   つまり**この PR で「読めなくなる」を作った**(CLAUDE.md §10)。
          * 🔑 だから升そのものに全文を持たせる(マウスを乗せると出る)。
          * ⚠ これでも触る端末では読めないので、**全部が要るなら
-         *   「ノートへ」/「ファイルへ」**(どちらも全行・全文)である。
+         *   「ノートへ」/「ファイルへ」**(どちらも全行。ただし 2000 字を超える値は、運ぶ時点で先頭だけに畳んである)である。
          */
         td.title = text;
         if (v === null) td.setAttribute('data-pkc-sql-null', 'yes');
@@ -1347,8 +1348,8 @@ function noteLineCore(p: AppState['sqlPage']): string {
   if (p.saved !== '')
     return p.savedKind === 'file'
       ? // ⚠ **落ちた先は言えない** ── ブラウザの設定(既定の保存先 / 毎回聞く)で変わる
-        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${where}`
-      : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${where}`;
+        `「${p.saved}」というファイルに書き出しました(ブラウザの保存先をご覧ください)${cappedTail(p.savedCapped)}${where}`
+      : `「${p.saved}」というノートに書き出しました(左の一覧に出ています)${cappedTail(p.savedCapped)}${where}`;
   /**
    * 🔴 **どちらを調べているかを、打つ前から言う**(#681 段③ の 2 つ目)。
    * ⚠ 言わないと「ノートを数えたつもりで、よその DB を数えていた」に気づけない。
@@ -1401,9 +1402,13 @@ function noteLineCore(p: AppState['sqlPage']): string {
  * ⚠ **代わりを同じ文に書く**(「ノートへ書き出す / ファイルへ書き出す」)── 落ちた動線を
  *   言いっぱなしにしない(CLAUDE.md「捨てるものの表には、代わりに何ができるかを書く」)。
  */
+function cappedTail(n: number): string {
+  return n > 0 ? `。${cappedCellsNote(n)}` : '';
+}
+
 function windowNote(rows: number): string {
   if (rows <= SQL_WINDOW_MIN) return '';
-  return '。見えている分だけ描いています(全部を探す・コピーするには ノートへ書き出す / ファイルへ書き出す)';
+  return '。見えている分だけ描いています(全部の行を探す・コピーするには ノートへ書き出す / ファイルへ書き出す。長い値は先頭だけです)';
 }
 
 /**

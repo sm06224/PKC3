@@ -31,7 +31,7 @@
  * | 先頭の語 | `FROM t SELECT x` / `PIVOT` / `DESCRIBE` / `SUMMARIZE` が**読むだけ**で書ける |
  * | 断る語 | 🔴 `INSTALL` / `LOAD`(拡張を外から取る)/ `SET`(上の門②を**打つ人が外せる**)/ `COPY`(file へ書く)/ `ATTACH` が要る |
  */
-import { checkReadOnlySql, normalizeOutsideMask, stripSqlNoise, type SqlCheck } from './sql-guard';
+import { checkReadOnlySql, normalizeOutsideMask, quoteHint, stripSqlNoise, type SqlCheck } from './sql-guard';
 
 /**
  * 🔴 **ドル引用符の中身を塗り潰す**(長さは保つ)。
@@ -152,7 +152,8 @@ export function checkDuckDbSql(input: string): SqlCheck {
         : hit === 'set' || hit === 'reset'
           ? `${hit.toUpperCase()} は打てません(外へ出ない設定を掛けてあるので、打ち直せません)`
           : `読み取り専用です: ${hit.toUpperCase()} は打てません(ここは読むだけです)`;
-    return { ok: false, why, sql };
+    // 🔴 列の名前かもしれない語には、引用符で囲む案内を添える(門は緩めない ── 囲んだ名前は語に数えない)
+    return { ok: false, why: `${why}${quoteHint(hit)}`, sql };
   }
 
   /**

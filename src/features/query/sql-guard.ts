@@ -204,6 +204,21 @@ const WRITE_WORDS = [
   'pragma',
 ] as const;
 
+/**
+ * 🔴 **断った語が、列の名前かもしれないときの案内**(#1087 の見直し)。
+ *
+ * ⚠ 門は**語で**見るので、`release` / `comment` / `set` のような**普通の列の名前**も、書き込みの語と同じに断る
+ *   (`updated_at` のように語の一部なら止まらない)。🔑 門は緩めない ── 引用符で囲んだ名前は
+ *   `stripSqlNoise` が塗り潰すので語に数えられず、**そのまま通る**。打った人がそれを知らないと行き止まりになる。
+ * ⚠ 断り文の末尾に足す(`duckdb-write.ts` の `rewriteRefusal` もこの字を残す ── 見つけ方は `QUOTE_HINT_RE`)。
+ */
+export function quoteHint(word: string): string {
+  return `。列の名前なら "${word.toLowerCase()}" のように二重引用符で囲んでください`;
+}
+
+/** `quoteHint` が付けた案内を見つける(断り文を組み直す側が、落とさず引き継ぐため)。 */
+export const QUOTE_HINT_RE = /。列の名前なら "[^"]+" のように二重引用符で囲んでください$/u;
+
 /** 読むだけと確信できる先頭の語(白名簿)。 */
 const READ_HEADS = ['select', 'with', 'values', 'explain'] as const;
 
@@ -292,7 +307,7 @@ export function checkReadOnlySql(input: string): SqlCheck {
   if (hit !== undefined) {
     return {
       ok: false,
-      why: `読み取り専用です: ${hit.toUpperCase()} は打てません(ここは読むだけです)`,
+      why: `読み取り専用です: ${hit.toUpperCase()} は打てません(ここは読むだけです)${quoteHint(hit)}`,
       sql,
     };
   }

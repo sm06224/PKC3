@@ -43,6 +43,8 @@ const PACK = JSON.stringify({
 /** 打たれた字を順番どおりに積む器。 */
 function fakeHandle(answer: DuckDbRaw) {
   const steps: string[] = [];
+  /** 打った字ごとの「JS の行にする上限」(#1087 の見直し)。 */
+  const limits = new Map<string, number | undefined>();
   const h: DuckDbHandle = {
     put: (name) => {
       steps.push('put:' + name);
@@ -52,8 +54,9 @@ function fakeHandle(answer: DuckDbRaw) {
       steps.push('drop:' + name);
       return Promise.resolve();
     },
-    query: (sql) => {
+    query: (sql, maxRows) => {
       steps.push(sql);
+      limits.set(sql, maxRows);
       return Promise.resolve(answer);
     },
     terminate: () => {
@@ -61,7 +64,7 @@ function fakeHandle(answer: DuckDbRaw) {
       return Promise.resolve();
     },
   };
-  return { h, steps };
+  return { h, steps, limits };
 }
 
 function make(
@@ -320,6 +323,17 @@ describe('🔴 DuckDB で引く(#682 段②)', () => {
   it('⚠ 相手の中身を読めなければ、名前を添えて断る', async () => {
     const { runner, readBytes } = make({ bytes: null });
     await expect(runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] })).rejects.toThrow('売上.csv');
+  });
+
+  /**
+   * 🔴 **JS の行にする前に切る**(#1087 の見直し)。上限ちょうどを「超えた」と言わないために 1 行だけ余分に頼む。
+   * ⚠ 答えを上限より多く返す fake は、頼まれた行数を守らない ── ここで見るのは**頼んだ数**である。
+   */
+  it('🔴 答えの行は「上限 + 1」までと頼む(全部を JS の物にしない)', async () => {
+    const { runner, readBytes, made } = make();
+    await runner.run({ sql: 'SELECT 1', sources: [{ source: SRC, readBytes }] });
+    expect(made).toHaveLength(1);
+    expect(made[0]!.limits.get('SELECT 1'), '答えの行数の上限を頼んでいない').toBe(DUCKDB_MAX_ROWS + 1);
   });
 
   it('上限で切ったら、切ったと言う', async () => {

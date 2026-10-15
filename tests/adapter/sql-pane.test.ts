@@ -865,6 +865,30 @@ describe('答えをノートへ書き出す(#681 段③ の 3 つ目)', () => {
     expect(wrote?.body, '行が本文に無い').toContain('あ,1');
   });
 
+  /**
+   * 🔴 **畳んだ値の数を、ノートの本文でも言う**(#1087 の見直し)。⚠ 本文は disk へ渡った物で見る
+   *   (配線 = 数えて `sqlNoteBody` へ渡す口を落とすと、ここでだけ落ちる)。対照群 = 畳んだ升が無い回。
+   */
+  it('🔴 ノートへ ── 畳んだ升の数を本文と画面で言う / 無ければ言わない', async () => {
+    const long = `${'あ'.repeat(2000)}…(全 3000 字)`;
+    for (const [cells, expected] of [[[long, 'short'], 1], [['short'], 0]] as const) {
+      const { d, type, runBtn, saveBtn, persisted, note } = setup(async () =>
+        answer(['本文'], cells.map((c) => [c])),
+      );
+      type('SELECT 1');
+      runBtn.click();
+      await settle();
+      saveBtn.click();
+      await settle();
+      const made = [...d.getState().entryMetas.values()].find((m) => m.title.startsWith('SQL の結果'));
+      const body = persisted.find((e) => e.lid === made?.lid)?.body ?? '';
+      expect(body, '本文が disk へ渡っていない').toContain('SELECT 1');
+      const said = '長い値 1 個は先頭 2000 字で切ってあります';
+      expect(body.includes(said), '本文の言い分が合っていない').toBe(expected === 1);
+      expect(note().includes(said), '画面の言い分が合っていない').toBe(expected === 1);
+    }
+  });
+
   it('🔴 書き出したことを画面が言う(別の窓なので、言わないと押せなかったように見える)', async () => {
     const { type, runBtn, saveBtn, note } = setup(async () => answer(['a'], [[1]]));
     type('SELECT 1 AS a');
@@ -2472,6 +2496,40 @@ describe('打つ所(#918 段②a)', () => {
       pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '',
       'file へ書き出したのに、ノートの話をしている',
     ).toContain('というファイルに書き出しました');
+    // 🔴 切った升が無い回は、切った話をしない(対照群)
+    expect(
+      pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '',
+      '切った升が無いのに、切った話をしている',
+    ).not.toContain('先頭 2000 字で切ってあります');
+  });
+
+  /**
+   * 🔴 **畳んだ値は、書き出した先でも畳んだままだと言う**(#1087 の見直し)。
+   * 🔑 worker が運ぶ時点で 2000 字に畳むので、「ファイルへ」は全文を書けない ── 言わないと「全文」と読まれる。
+   */
+  it('🔴 ファイルへ ── 畳んだ升の数を言う', async () => {
+    const long = `${'あ'.repeat(2000)}…(全 5000 字)`;
+    const { pane, root, type, runBtn } = setup(async () =>
+      answer(['名前', '本文'], [['りんご', long], ['みかん', long], ['ぶどう', 'short']]),
+    );
+    type('select 1');
+    runBtn.click();
+    await settle();
+    const btn = pane.querySelector<HTMLButtonElement>('[data-pkc-field="sql-to-file"]')!;
+    const make = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:fake');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      btn.click();
+      root.querySelectorAll<HTMLElement>('[data-pkc-region="context-menu"] button')[0]!.click();
+    } finally {
+      make.mockRestore();
+      revoke.mockRestore();
+      click.mockRestore();
+    }
+    const said = pane.querySelector('[data-pkc-field="sql-note"]')?.textContent ?? '';
+    expect(said).toContain('というファイルに書き出しました');
+    expect(said, '畳んだ升の数(2 個)を言っていない').toContain('長い値 2 個は先頭 2000 字で切ってあります');
   });
 
   it('⚠ 履歴が空なら、↑ を押しても何も起きない', () => {

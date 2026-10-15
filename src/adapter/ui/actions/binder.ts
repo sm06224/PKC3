@@ -697,6 +697,7 @@ const adoptingLinkIcons = new Set<string>();
 let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
+import { countCappedCells } from '@features/query/sql-cell';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
@@ -13428,7 +13429,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ この面は**別の窓**なので、落ちた file は窓の中に 1 ドットも出ない ──
      *   言わないと「押せなかった」に見える。
      */
-    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file' });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file', capped: countCappedCells(p.rows) });
   },
   'sql-history-pick': (dispatcher, target) => {
     const at = Number(target.getAttribute('data-pkc-sql-history-at') ?? '');
@@ -13492,6 +13493,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         rows: p.rows,
         truncated: p.truncated,
         where,
+        // 🔴 切ってある升の数(`sqlNoteBody` が末尾で言う)
+        capped: countCappedCells(p.rows),
       }),
       parentLid: null,
       relationId: generateLid(),
@@ -13509,7 +13512,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(p.rows) });
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。

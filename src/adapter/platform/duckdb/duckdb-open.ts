@@ -91,6 +91,33 @@ async function loadExtensions(
   }
 }
 
+/** `rowsOfTable` が読む Arrow の表の形(上流の型を呼び側へ漏らさず、偽物でも試せるように最小に絞る)。 */
+export interface ArrowTableLike {
+  readonly numRows: number;
+  slice(begin?: number, end?: number): { toArray(): Iterable<unknown> | ArrayLike<unknown> };
+  toArray(): ArrayLike<unknown>;
+}
+
+/**
+ * 🔴 **JS の行にするのは上限(+1 行)までにする**(#1087 の見直し)。
+ *
+ * ⚠ 直す前は `table.toArray().map(...)` で**全行**を JS の物にしてから、呼び側(`duckdb-runner.ts`)が
+ *   20 万行で切っていた ── 1000 万行の答えは、捨てる 980 万行も一度は heap に載った(不可侵指示 2026-07-27)。
+ * 🔑 Arrow の `slice` は行を作らず見る範囲を狭めるだけなので、**切ってから** `toArray` する。
+ *   `maxRows` は「上限 + 1」で渡される ── 呼び側が「上限を超えたか」(`truncated`)を行数で言えるように、1 行だけ余分に取る。
+ */
+export function rowsOfTable(
+  table: ArrowTableLike,
+  columns: readonly string[],
+  maxRows?: number,
+): unknown[][] {
+  const part = maxRows !== undefined && table.numRows > maxRows ? table.slice(0, maxRows) : table;
+  return Array.from(part.toArray() as ArrayLike<unknown>, (r) => {
+    const o = r as Record<string, unknown>;
+    return columns.map((c) => o[c]);
+  });
+}
+
 /**
  * 起こす。⚠ 返る取っ手は **`terminate()` で本当に畳める**もの ──
  * 畳めない取っ手を返すと、`DuckDbLease` の規律が丸ごと空振りする。
@@ -159,7 +186,7 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
        */
       return await db.copyFileToBuffer(name);
     },
-    query: async (sql: string) => {
+    query: async (sql: string, maxRows?: number) => {
       const table = await conn.query(sql);
       /**
        * 🔴 **列と型は schema から採る**(#682 段②)。
@@ -170,11 +197,7 @@ export async function openDuckDb(input: OpenDuckDbInput): Promise<DuckDbHandle> 
       const columns = table.schema.fields.map((f) => f.name);
       const types = table.schema.fields.map((f) => String(f.type));
       // ⚠ Arrow の表をそのまま返さない ── 上流の型が呼び側へ漏れる
-      const rows = table.toArray().map((r) => {
-        const o = r as unknown as Record<string, unknown>;
-        return columns.map((c) => o[c]);
-      });
-      return { columns, types, rows };
+      return { columns, types, rows: rowsOfTable(table, columns, maxRows) };
     },
     terminate: async () => {
       /**
