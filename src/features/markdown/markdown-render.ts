@@ -236,6 +236,38 @@ md.validateLink = function (url: string): boolean {
   return SAFE_URL_RE.test(trimmed);
 };
 
+// 🔴 `data:image/…` は `<img src>` でだけ通す。markdown-it は link と image で同じ
+// `validateLink` を引くので、link 側(押しても何も起きない `<a href="data:…">`)はここで外す:
+// `[a](data:image/png;base64,…)` は `<a>` を出さず、ラベルの字だけ残す。
+md.core.ruler.push('pkc_strip_data_links', (state) => {
+  for (const tok of state.tokens) {
+    if (tok.type !== 'inline' || !tok.children) continue;
+    const stack: Array<{ open: (typeof tok.children)[number] | null }> = [];
+    for (const child of tok.children) {
+      if (child.type === 'link_open') {
+        const href = String(child.attrGet('href') ?? '');
+        stack.push({ open: SAFE_DATA_IMG_RE.test(href.trim()) ? child : null });
+        if (SAFE_DATA_IMG_RE.test(href.trim())) {
+          child.type = 'text';
+          child.tag = '';
+          child.content = '';
+          child.attrs = null;
+          child.nesting = 0;
+        }
+      } else if (child.type === 'link_close') {
+        const top = stack.pop();
+        if (top?.open) {
+          child.type = 'text';
+          child.tag = '';
+          child.content = '';
+          child.nesting = 0;
+        }
+      }
+    }
+  }
+  return true;
+});
+
 // Add target="_blank" and rel="noopener noreferrer" to all links.
 // noreferrer prevents the destination from seeing the document URL,
 // which matters when the bundle is opened from a local file path.
@@ -1846,6 +1878,33 @@ const INLINE_ROLE_KNOWN = new Set([
 // span に許容する HTML attribute(id / class / data-* 以外)
 const SPAN_SAFE_ATTRS = new Set(['title', 'lang', 'dir']);
 
+/**
+ * 🔴 本文(author)が書いた class から、app 予約の `pkc-` 接頭辞を落とす。
+ * ⚠ `pkc-lightbox-overlay` のような app の class を本文から付けられると、
+ *   全画面を覆って押しを飲む箱を作れる。`allow` に挙げた物だけ通す
+ *   (`:::format` の板 / 線の記法 `.pkc-place` / `.pkc-line` がマニュアルで教えている綴り)。
+ */
+export function sanitizeAuthorClasses(
+  classes: readonly string[],
+  allow: ReadonlySet<string> = new Set(),
+): string[] {
+  return classes.filter((c) => c !== '' && (!/^pkc-/i.test(c) || allow.has(c)));
+}
+
+/** `:::format` の class で通す予約 class(マニュアル「板」「線」の章の綴り)。 */
+export const FORMAT_RESERVED_CLASS_ALLOW: ReadonlySet<string> = new Set(['pkc-place', 'pkc-line']);
+
+/**
+ * 🔴 `:::format{key=value}` が `data-pkc-<key>` として出してよい key。
+ * ⚠ 以前は任意の key を `data-pkc-${k}` に出していたので、`action=delete-entry lid=x` が
+ *   binder の `closest('[data-pkc-action]')` に拾われた。マニュアルの板 / 線の章が教える key と、
+ *   描画側(place-board / place-drag / place-connect)が `data-pkc-*` から読む key だけ通す。
+ */
+export const FORMAT_DATA_KEY_ALLOW: ReadonlySet<string> = new Set([
+  'x', 'y', 'w', 'h', 'z', 'shape', 'fill', 'stroke', 'width', 'arrow', 'size',
+  'rotate', 'group', 'entry', 'from', 'to', 'route', 'bend',
+]);
+
 // commonmark 等価 role → 出力 HTML tag
 const COMMONMARK_ROLE_TAG: Record<string, string> = {
   strong: 'strong',
@@ -1895,14 +1954,18 @@ function pushInlineRoleTokens(
   const open = state.push('pkc_inline_role_span_open', 'span', 1);
   if (match.attrs.id) open.attrSet('id', match.attrs.id);
   if (match.attrs.classes.length > 0) {
-    open.attrSet('class', match.attrs.classes.join(' '));
+    const cls = sanitizeAuthorClasses(match.attrs.classes);
+    if (cls.length > 0) open.attrSet('class', cls.join(' '));
   } else if (typeof match.attrs.kvs.class === 'string') {
-    open.attrSet('class', match.attrs.kvs.class);
+    const cls = sanitizeAuthorClasses(match.attrs.kvs.class.split(/\s+/));
+    if (cls.length > 0) open.attrSet('class', cls.join(' '));
   }
   for (const [k, v] of Object.entries(match.attrs.kvs)) {
     if (k === 'class') continue;
     if (typeof v !== 'string') continue;
     if (k.startsWith('data-')) {
+      // 本文由来の `data-pkc-*` は app の機能 selector(`data-pkc-action` 等)になりうるので通さない
+      if (/^data-pkc-/i.test(k)) continue;
       open.attrSet(k, v);
       continue;
     }
@@ -4128,7 +4191,7 @@ function postProcessRegionSentinels(
       const kind = entry.kind;
       const tag = kind === 'frontmatter' ? 'aside' : 'section';
       const attrs = entry.attrs;
-      const classes = [`pkc-region-${kind}`, ...attrs.classes].join(' ');
+      const classes = [`pkc-region-${kind}`, ...sanitizeAuthorClasses(attrs.classes)].join(' ');
       const idAttr = attrs.id ? ` id="${escapeAttrForHtml(attrs.id)}"` : '';
       const dataAttrs: string[] = [];
       for (const [k, v] of Object.entries(attrs.kvs)) {
@@ -4209,7 +4272,7 @@ function postProcessSectionSentinels(
       const knownClass = ` pkc-section-${safeRole}`;
       void SECTION_KNOWN_ROLES; // 8 known set は将来 callout 専用処理識別用に保持
       const attrs = entry.attrs;
-      const classes = ['pkc-section-callout' + knownClass, ...attrs.classes].join(' ');
+      const classes = ['pkc-section-callout' + knownClass, ...sanitizeAuthorClasses(attrs.classes)].join(' ');
       const idAttr = attrs.id ? ` id="${escapeAttrForHtml(attrs.id)}"` : '';
       // section の他 kv attrs を data-pkc-section-* に展開
       const dataAttrs: string[] = [];
@@ -4318,7 +4381,7 @@ function postProcessFormatBlockSentinels(
       if (!entry) return '';
       const attrs = entry.attrs;
       // classes: pkc-format-block + ABC sorted user classes
-      const sortedClasses = [...attrs.classes].sort((a, b) => a.localeCompare(b));
+      const sortedClasses = sanitizeAuthorClasses(attrs.classes, FORMAT_RESERVED_CLASS_ALLOW).sort((a, b) => a.localeCompare(b));
       const classStr = ['pkc-format-block', ...sortedClasses].join(' ');
       const idAttr = attrs.id ? ` id="${escapeAttrForHtml(attrs.id)}"` : '';
       const markerAttr = ' data-pkc-format-block';
@@ -4359,6 +4422,7 @@ function postProcessFormatBlockSentinels(
       for (const [k, v] of Object.entries(attrs.kvs)) {
         if (k === 'indent' || k === 'align') continue;
         if (!/^[A-Za-z_][\w-]*$/.test(k)) continue;
+        if (!FORMAT_DATA_KEY_ALLOW.has(k)) continue;
         otherKvs.push([k, v]);
       }
       otherKvs.sort(([a], [b]) => a.localeCompare(b));
@@ -4523,7 +4587,7 @@ function postProcessQuoteSentinels(
         }
       }
       // class 追加
-      const classes = ['pkc-quote-citation', ...attrs.classes].join(' ');
+      const classes = ['pkc-quote-citation', ...sanitizeAuthorClasses(attrs.classes)].join(' ');
       const idAttr = attrs.id ? ` id="${escapeAttrForHtml(attrs.id)}"` : '';
       const dataStr = dataAttrs.length > 0 ? ' ' + dataAttrs.join(' ') : '';
       return `<blockquote${idAttr} class="${classes}"${dataStr}${pAttrs}>`;
