@@ -18,7 +18,7 @@ import {
   confirmSavedBack,
   createOfficeSaveBack,
   LOCAL_ORPHAN_GRACE_MS,
-  LOCAL_SAVE_ORPHAN_NOTICE,
+  localOrphanImportedNotice,
   SAME_DOC_MAX,
   stagedSavedAt,
   type SaveBackDeps,
@@ -1020,12 +1020,37 @@ describe('手元のファイルの合言葉を知らないタブ(#1087)', () => 
     expect(h.stage.keys().length).toBe(4);
   });
 
-  it('🔴 古い保存を誰も書けないときは、1 度だけ言って棚に残す', async () => {
+  it('🔴 古い保存を誰も書けないときは、ノートを 1 件作り、正確な一言だけを言う', async () => {
+    let wrote = 0;
+    const h = harness({
+      knowsLocal: () => false,
+      readAttachment: async () => ({ assetKey: 'ast-x' }),
+      writeLocal: async () => { wrote += 1; return true; },
+    });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:s-1', at: Date.now() - LOCAL_ORPHAN_GRACE_MS - 1000 });
+    expect(await h.sb.receive('k1')).toBe('created');
+    expect(wrote, '知らない合言葉で元のファイルへ書こうとした').toBe(0);
+    expect(h.created).toEqual(['報告書.docx']);
+    expect(h.replaced, '手元の合言葉でノートを差し替えた').toEqual([]);
+    expect(h.notices).toEqual([localOrphanImportedNotice('報告書.docx')]);
+    expect(h.notices.join(' '), '一般の取り込み通知も出ている').not.toContain('Office で保存した内容を取り込みました');
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 猶予の間は、ノートを作らない', async () => {
     const h = harness({ knowsLocal: () => false });
-    h.stage.put({ key: 'k1', token: 'local:s-1', at: Date.now() - LOCAL_ORPHAN_GRACE_MS - 1000 });
-    await h.sb.receive('k1');
-    await h.sb.receive('k1');
-    expect(h.fails).toEqual([LOCAL_SAVE_ORPHAN_NOTICE]);
+    h.stage.put({ key: 'k1', token: 'local:s-1', at: Date.now() - LOCAL_ORPHAN_GRACE_MS + 5000 });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    expect(h.created).toEqual([]);
+    expect(h.notices).toEqual([]);
+    expect(h.stage.keys().length).toBeGreaterThan(0);
+  });
+
+  it('🔴 holder でないタブは、古くてもノートを作らない', async () => {
+    const h = harness({ isHolder: () => false, knowsLocal: () => false });
+    h.stage.put({ key: 'k1', token: 'local:s-1', at: 1 });
+    expect(await h.sb.receive('k1')).toBeNull();
+    expect(await h.sb.drainAll()).toBe(0);
     expect(h.created).toEqual([]);
     expect(h.stage.keys().length).toBeGreaterThan(0);
   });

@@ -118,11 +118,12 @@ export interface SaveBackDeps {
 }
 
 /**
- * 🔴 **手元のファイルの保存を、どのタブも書けないと分かったときの一言**(#1087)。
- * ⚠ 内容は棚に残してある(捨てない)── 字もそれを言う。
+ * 🔴 **手元のファイルの保存を、元のファイルへ書けず、添付のノートにしたときの一言**(#1087)。
+ * ⚠ 棚の中身は user から見えないので「残してあります」とは言わない ── 開けるノートにして、そう言う。
  */
-export const LOCAL_SAVE_ORPHAN_NOTICE =
-  '元のファイルを開いた画面が閉じられたので、Office で保存した内容は元のファイルへ書き戻せません。編集した内容は PKC3 の中に残してあります。';
+export function localOrphanImportedNotice(name: string): string {
+  return `元のファイルを開いた画面が閉じられたので、Office で保存した内容は元のファイルへ書き戻せませんでした。代わりに添付のノート「${name}」として取り込みました`;
+}
 
 /**
  * 🔴 **知らせるまでの猶予**(ms)。他のタブが知っているかは**こちらから見えない**ので、
@@ -162,8 +163,6 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
    *   次の起動では空なので、もう一度言う。
    */
   const toldLocalFail = new Set<string>();
-  /** 🔴 どのタブも書けない手元の保存を、もう言った鍵(この起動で 1 度だけ)。 */
-  const toldLocalOrphan = new Set<string>();
 
   /**
    * 窓へ「このノートになった」と返す。
@@ -311,15 +310,15 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
      */
     // 🔴 **知らないタブでは、手元の合言葉をノートにしない**(#1087)。合言葉は開いたタブの中にしか無いので、
     //   `writeLocal` が `null` を返して下の取り込みへ落ち、**元のファイルは古いまま添付ノートが増える**。
-    //   ⚠ 棚に残す(別のタブが知っている / 次の起動で拾える)。誰も書けないと読めるときだけ 1 度言う
+    //   ⚠ 猶予の間は棚に残す(別のタブが知っているかもしれない)。猶予を過ぎたら誰も書けないと読み、
+    //   holder が添付のノートにする(棚の中身は user から見えないので、開けるノートにして残す)。
+    //   ⚠ holder でないタブは、知らない合言葉の保存をここへ持ち込まない(`run` の絞り込みが唯一の門)
+    let orphan = false;
     if (save.token !== undefined && isLocalFileToken(save.token) && !deps.knowsLocal(save.token)) {
-      if (!toldLocalOrphan.has(save.key) && Date.now() - save.at > LOCAL_ORPHAN_GRACE_MS) {
-        toldLocalOrphan.add(save.key);
-        deps.fail(LOCAL_SAVE_ORPHAN_NOTICE);
-      }
-      return 'deferred';
+      if (Date.now() - save.at <= LOCAL_ORPHAN_GRACE_MS) return 'deferred';
+      orphan = true;
     }
-    const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
+    const local = save.token === undefined || orphan ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
       if (local !== true) {
         if (!toldLocalFail.has(save.key)) {
@@ -347,7 +346,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     //    ── 新規でも差し替えでも同じ(`adopt` の注記)
     const windowKnew = save.token !== undefined;
     const mine = group === null ? undefined : madeHere.get(group);
-    let token = save.token ?? mine;
+    // 🔴 孤児の保存は手元の合言葉でノートを引かない(添付ではない)。同じ文書で先に作ったノートがあればそれ
+    let token = orphan ? mine : (save.token ?? mine);
     let target = token === undefined ? null : await deps.readAttachment(token);
     // ⚠ **合言葉が「在るが死んでいる」ときも束ねへ倒す**(2 巡目レビュー)。
     //    倒さないと、開いていた添付を user が消した状態で編集中に 2 件溜まった場合、
@@ -383,7 +383,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
     await supersedeOlder(dir, save);
     await discardStaged(dir, save.key);
-    deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
+    deps.notify(
+      orphan ? localOrphanImportedNotice(save.name) : `Office で保存した内容を取り込みました: 「${save.name}」`,
+    );
     return 'created';
   }
 
