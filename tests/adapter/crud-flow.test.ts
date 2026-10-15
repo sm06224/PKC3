@@ -16,7 +16,9 @@ import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
-import { bindActions } from '../../src/adapter/ui/actions/binder';
+import { bindActions, runGlobalCommand } from '../../src/adapter/ui/actions/binder';
+import { KeymapStore } from '../../src/adapter/ui/render/keymap';
+import { KEY_COMMANDS } from '../../src/features/keymap';
 import { stubRevisionOps } from '../helpers/revision-stub';
 import { createByUi } from '../helpers/create-entry';
 
@@ -460,6 +462,62 @@ describe('delete (P3-7a)', () => {
     expect(d.getState().notice ?? '', 'ゴミ箱に残っているのに「戻しました」と言った').not.toContain('ゴミ箱から元に戻しました');
     expect(d.getState().error ?? '', '断った理由が出ていない').not.toBe('');
     expect(await undoOffer(), '断られたのに「元に戻す」を手放した').not.toBeNull();
+  });
+
+  /**
+   * 🔴 **鍵と「操作を探す」からも戻せる**(#1087)── Delete で確認なしにゴミ箱へ移すようにしたので、
+   * 戻す道が画面の下のボタン(数秒)だけだと、鍵だけで使う人には戻す道が無かった。
+   */
+  describe('命令「元に戻す(ゴミ箱へ移した直後)」', () => {
+    const run = (d: Dispatcher, dry: boolean, said: string[]): boolean =>
+      runGlobalCommand(
+        'undo-trash',
+        document.body.firstElementChild as HTMLElement,
+        d,
+        new KeymapStore(null),
+        () => undefined,
+        (text) => {
+          said.push(text);
+        },
+        dry,
+      );
+
+    it('🔴 移した直後に呼ぶと、画面の下のボタンと同じ戻り方をする(本文ごと)', async () => {
+      const { d, q, store } = setup([meta('a', 1), meta('b', 2)], { a: 'A', b: 'B' });
+      q<HTMLElement>('[data-pkc-entry="b"]')!.click();
+      await tick();
+      q<HTMLElement>('[data-pkc-action="delete-entry"]')!.click();
+      await tick(20);
+      expect(d.getState().entryMetas.has('b'), '前提: 消えている').toBe(false);
+      const said: string[] = [];
+      // ⚠ 対照群: 押せる行として答える(パレットの dry)
+      expect(run(d, true, said), '戻せる物があるのに押せないと答えた').toBe(true);
+      expect(d.getState().entryMetas.has('b'), 'dry で戻してしまった').toBe(false);
+      expect(run(d, false, said)).toBe(true);
+      await tick(40);
+      expect(d.getState().entryMetas.has('b'), '戻っていない').toBe(true);
+      expect(store['b']).toBe('B');
+      expect(d.getState().notice).toBe('ゴミ箱から元に戻しました');
+      expect(said, '戻せたのに断りを言った').toEqual([]);
+    });
+
+    it('🔴 戻せる物が無いときは、押せない行として答え、鍵で呼べば黙らずに言う', () => {
+      const { d } = setup([meta('a', 1)], { a: 'A' });
+      expect(currentTrashOffer(), '前提: 戻せる物を持っている').toBeNull();
+      const said: string[] = [];
+      expect(run(d, true, said), '戻せる物が無いのに押せると答えた').toBe(false);
+      expect(said, 'dry で字を出した').toEqual([]);
+      expect(run(d, false, said), '鍵で呼んだのに受けなかった').toBe(true);
+      expect(said).toEqual(['戻せるものがありません(ゴミ箱へ移した直後だけ戻せます)']);
+    });
+
+    it('🔴 名前で探せて、鍵は付いていない', () => {
+      const cmd = KEY_COMMANDS.find((c) => c.id === 'undo-trash');
+      expect(cmd, '命令が表に無い').toBeDefined();
+      expect(cmd!.defaults, '既定の鍵が付いている').toEqual([]);
+      // 画面の下のボタンの字(`status-open.ts` の「元に戻す」)と同じ語を含む
+      expect(cmd!.label).toContain('元に戻す');
+    });
   });
 
   it('⚠ 戻せる時間(7 秒)が過ぎたら知らせごと降ろす', async () => {

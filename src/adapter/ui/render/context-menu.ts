@@ -338,6 +338,20 @@ export function openContextMenu(
   scrollBase.set(root, snapshotScroll(restoreTo, root));
   restoreBase.set(root, restoreTo);
 
+  /**
+   * 🔴 **焦点がメニューの外へ出たら閉じる**(#1087)。Tab で最後の項目の次へ進むと、
+   * メニューが開いたまま焦点だけが背後へ抜け、**宙に浮いたメニュー**が残っていた。
+   * ⚠ 焦点は**返さない**(出ていった先が user の行き先である ── `closeContextMenu` は返すので使わない)。
+   * ⚠ 行き先が無い(`relatedTarget` が null: 空白を押した / 窓を離れた)ときは何もしない ──
+   *   外を押して閉じる道は binder が持つ。
+   */
+  el.addEventListener('focusout', (ev) => {
+    const to = (ev as FocusEvent).relatedTarget;
+    if (!(to instanceof Node) || el.contains(to)) return;
+    restoreBase.delete(root);
+    el.remove();
+  });
+
   const close = (): void => {
     el.remove();
     // 🔑 **焦点を返す**(開く前に居た所へ)── 返さないと、閉じた後に鍵が死ぬ

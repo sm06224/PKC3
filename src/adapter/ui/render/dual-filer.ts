@@ -337,6 +337,24 @@ interface PaneFrame {
 }
 
 /**
+ * 🔴 **表を組み直したあと、落ちた焦点を戻す**(#1087。左の列 `filer.ts` と同じ規則)。
+ * `focusedBefore` = 組み直す直前に表の中に焦点があったときの行の lid(行の外の欄なら `''`)、
+ * 表の外に焦点があったなら `null`(⚠ このときは**触らない** ── 絞り込み欄に打っている最中に奪わない)。
+ * 戻し先は ①同じ lid の行 ②カーソルの行 ③ペインの器(`tabindex=-1`)の順。
+ * ⚠ 名前の打ち替え欄など、組み直しの中で既に焦点を取り直した欄が表の中に在るなら、それを奪い返さない。
+ */
+function restoreTableFocus(frame: PaneFrame, focusedBefore: string | null, cursor: string): void {
+  if (focusedBefore === null) return;
+  const active = frame.table.ownerDocument.activeElement;
+  if (active instanceof Node && active !== frame.table.ownerDocument.body && frame.table.contains(active)) return;
+  const back =
+    (focusedBefore === '' ? undefined : frame.rows.get(focusedBefore)) ??
+    frame.rows.get(cursor) ??
+    frame.root;
+  back.focus({ preventScroll: true });
+}
+
+/**
  * 🔴 **操作行に出す鍵は、割当の表から引く**(2026-08-19。Krusader 方式)。
  *
  * ⚠ 直書きすると、user が設定画面で割当を変えた瞬間に**画面が嘘をつく**
@@ -1091,7 +1109,19 @@ export class DualFilerRenderer {
        *   **B が A の位置から出る**(入った先が途中から見える)。
        */
       // 🔑 位置は `ScrollMemory` が `scroll` イベントで覚えている(描き直しの中で `scrollTop` を読まない)
+      /**
+       * 🔴 **組み直しで焦点を落とさない**(#1087 の見直し)。`renderTable` は表を丸ごと作り直すので、
+       * 行に焦点があると `body` へ落ち、矢印・Delete・F 系の鍵が**マウスで押し直すまで**全部死ぬ。
+       * ⚠ 左の列(`filer.ts`)と同じ作法:組み直す直前に「表の中に焦点があったか」を採り、
+       *   後で**同じ行 → カーソルの行 → ペインの器**の順に戻す。外に焦点があるときは**触らない**。
+       */
+      const activeBefore = frame.table.ownerDocument.activeElement;
+      const focusedBefore =
+        activeBefore instanceof HTMLElement && frame.table.contains(activeBefore)
+          ? (activeBefore.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? '')
+          : null;
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
+      restoreTableFocus(frame, focusedBefore, pane.cursor ?? '');
       frame.scroll.use(`${paneScope(pane) ?? ''}${SEP}${filtered ? 'q' : ''}`);
     } else if (dates !== frame.dates) {
       /**

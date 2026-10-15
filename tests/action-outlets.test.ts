@@ -115,14 +115,9 @@ const UNRESOLVED: readonly string[] = [
   'sql-history-pick',
   'toggle-todo',
   /**
-   * ⚠ **2026-10-12(#1087 流れ 29)で 1 件増えた** ── ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)。
-   * 🔑 押し所は `status-open.ts` の `paintStatusUndo` が **`data-pkc-action` を実行時に書き換える**
-   *   (`undo-move` / `schedule-undo-move` と同じ器)ので、静的な字が `undo-trash` の形では source に無い。
-   */
-  'undo-trash',
-  /**
    * ⚠ **2026-10-13(#1163 依頼 62)で 1 件増えた** ── 2 ペインで移した直後の「元に戻す」(`undo-dual-move`)。
-   * 🔑 `undo-trash` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   * 🔑 `undo-move` と同じ器(`paintStatusUndo` が `data-pkc-action` を実行時に書き換える)ので、静的な字が source に無い。
+   * ⚠ 2026-10-15(#1087): 以前ここに居た `undo-trash` は、命令として登記して `runGlobalCommand` が字で受けるようになったので外した(静的に追えるようになった)。
    */
   'undo-dual-move',
   'view-big',

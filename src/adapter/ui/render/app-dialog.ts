@@ -325,7 +325,7 @@ export function promptInApp(
     label.append(input);
     f.body.append(label);
     input.addEventListener('keydown', (ev: KeyboardEvent) => {
-      if (ev.key !== 'Enter' || ev.isComposing) return;
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
       ev.preventDefault();
       f.ok.click();
     });
@@ -966,7 +966,7 @@ export function pickPlaceRectInApp(
       input.setAttribute('data-pkc-place-rect-key', key);
       input.value = initial[key];
       input.addEventListener('keydown', (ev: KeyboardEvent) => {
-        if (ev.key !== 'Enter' || ev.isComposing) return;
+        if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
         ev.preventDefault();
         f.ok.click();
       });
@@ -1053,7 +1053,7 @@ export function pickPlaceGroupInApp(
       box.setAttribute('data-pkc-place-group-line', String(it.line));
       box.checked = it.line === preLine;
       box.addEventListener('keydown', (ev: KeyboardEvent) => {
-        if (ev.key !== 'Enter' || ev.isComposing) return;
+        if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
         ev.preventDefault();
         f.ok.click();
       });
@@ -1504,7 +1504,7 @@ export function pickCommandInApp(
        *   移してから押させると、絞り込んで即実行という本来の速さが消える。
        * ⚠ `isComposing` の間は拾わない ── 変換確定の Enter で実行してしまう。
        */
-      if (ev.key !== 'Enter' || ev.isComposing) return;
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
       if (firstReady === null) {
         /**
          * 🔴 **並んでいる行が全部灰色のときも黙らない**(#1087 の見直し 2026-10-13)── Enter を押しても何も起きず、
@@ -1616,7 +1616,7 @@ export function pickEntryInApp(
     input.addEventListener('input', draw);
     input.addEventListener('keydown', (ev: KeyboardEvent) => {
       // ⚠ `isComposing` の間は拾わない ── 変換確定の Enter で選んでしまう
-      if (ev.key !== 'Enter' || ev.isComposing) return;
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
       if (firstRow === null) return;
       ev.preventDefault();
       firstRow.click();

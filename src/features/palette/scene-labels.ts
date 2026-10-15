@@ -181,6 +181,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   // ゴミ箱
   'show-trash': TRASH,
   'hide-trash': TRASH,
+  'undo-trash': TRASH,
   // 画面 ── 中央の切り替え・ペインの畳み・戻る/進む
   'close-pane': SCREEN,
   'view-detail': SCREEN,
