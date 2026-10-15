@@ -57,6 +57,24 @@ describe('LaunchedFiles', () => {
     expect(await l.findLid(fakeHandle('archive/メモ.md'))).toBeNull();
   });
 
+  it('🔴 前の lid が消えていても、同じ handle の居る lid を見つける(開くたびに増えない。#1087)', async () => {
+    const l = new LaunchedFiles();
+    // 開く → 取り消し → 開く で、同じ handle に lid が 2 つ結ばれる
+    l.remember('lid1', fakeHandle('a'), 'a.md');
+    l.remember('lid2', fakeHandle('a'), 'a.md');
+    const present = (lid: string): boolean => lid === 'lid2';
+    expect(await l.findLid(fakeHandle('a'), present), '先頭の消えた lid で止まっている').toBe('lid2');
+    // 3 回目の取り込み判定: 取り込み直さず lid2 を開く
+    const r = await splitAlreadyOpen([{ handle: fakeHandle('a') }], l, present);
+    expect(r.reopened).toEqual(['lid2']);
+    expect(r.fresh).toEqual([]);
+    // 対照群: どちらも消えていれば取り込み直す
+    const gone = await splitAlreadyOpen([{ handle: fakeHandle('a') }], l, () => false);
+    expect(gone.fresh).toHaveLength(1);
+    // 飛ばしただけで忘れない(ゴミ箱から戻したときに書き戻せる)
+    expect(l.handleOf('lid1')).not.toBeNull();
+  });
+
   it('🔴 `isSameEntry` の無いブラウザでは null(増えるほうへ倒す)', async () => {
     const l = new LaunchedFiles();
     l.remember('n1', fakeHandle('a'), 'a.md');
@@ -174,6 +192,15 @@ describe('取り込んだ後に外で変わったか', () => {
     expect(state.gets).toBe(2);
   });
 
+  it('🔴 readCurrent: Shift_JIS のファイルも取り込みと同じ読み方で読む(差分が文字化けしない。#1087)', async () => {
+    const l = new LaunchedFiles();
+    // 「日本語」を Shift_JIS で
+    const sjis = new Uint8Array([0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea]);
+    const file = new File([sjis], 'a.md', { lastModified: 1000 });
+    l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
+    expect((await l.readCurrent('n1'))?.text).toBe('日本語');
+  });
+
   it('🔴 readCurrent: 取り込み時の時刻が無い記憶は changed にしない(今の中身は返す)', async () => {
     const l = new LaunchedFiles();
     const { h } = movable('a', 1000);
@@ -203,9 +230,9 @@ describe('取り込んだ後に外で変わったか', () => {
     const file = {
       lastModified: 2000,
       size: DIFF_READ_LIMIT_BYTES + 1,
-      text: () => {
+      arrayBuffer: () => {
         texted += 1;
-        return Promise.resolve('x');
+        return Promise.resolve(new TextEncoder().encode('x').buffer);
       },
     } as unknown as File;
     l.remember('n1', fakeHandle('a', { getFile: () => Promise.resolve(file) }), 'a.md', 1000);
@@ -214,7 +241,7 @@ describe('取り込んだ後に外で変わったか', () => {
     expect(await l.readForCompare('n1'), '大きすぎるのに null(読めなかった)と同じ扱い').toEqual({ tooLarge: true });
     expect(texted, '上限を超えるのに中身を読んだ').toBe(0);
     // 対照群: ちょうど上限なら読む
-    const edge = { ...file, size: DIFF_READ_LIMIT_BYTES, text: () => Promise.resolve('y') } as unknown as File;
+    const edge = { ...file, size: DIFF_READ_LIMIT_BYTES, arrayBuffer: () => Promise.resolve(new TextEncoder().encode('y').buffer) } as unknown as File;
     l.remember('n2', fakeHandle('b', { getFile: () => Promise.resolve(edge) }), 'b.md', 1000);
     expect((await l.readCurrent('n2'))?.text).toBe('y');
     expect((await l.readCurrent('n2'))?.tooLarge, 'ちょうど上限なのに tooLarge').toBeUndefined();

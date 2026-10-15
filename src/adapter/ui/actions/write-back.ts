@@ -58,6 +58,14 @@ export function writeBackConfirmMessage(
  */
 export const WRITE_BACK_CHANGED_NOTE = '確認している間にノートが変わりました。もう一度押してください';
 
+/**
+ * 🔴 **確認している間にファイルがパソコン側で変わったときの断り文**(#1087)。⚠ 画面に出る字なので 1 か所に置く。
+ * 確認の小窓に出した差分は**確認の前に読んだファイル**との差で、書くと**差分に出ていない外での変更**が
+ * 取り消せないまま消える ── だから書かず、押し直してもらう(押し直せば、変わった後の差分が出る)。
+ */
+export const WRITE_BACK_FILE_CHANGED_NOTE =
+  '確認している間にファイルがパソコン側で変わりました。もう一度押してください';
+
 /** 差分を出す行数の上限(#1231 段②)。超えたぶんは「…ほか N 行」にする。 */
 export const WRITE_BACK_DIFF_MAX_ROWS = 500;
 
@@ -112,7 +120,7 @@ export interface WriteBackDeps {
    * 🔴 **書き戻す直前の、ファイルの今の姿**(#1264 §2 欠陥 1 / #1231 段②)。
    * `changed` = 取り込んだ後にパソコン側で変わったか / `text` = 今の中身(差分の相手)。
    * ⚠ **必須**(渡し忘れても tsc が黙る形にすると、外での直しを**黙って消す**元の欠陥が戻る)。
-   * 読めない・比べられないときは `{ changed: false, text: null }`。⚠ **1 回だけ**読む(押した 1 件の、書く直前)。
+   * 読めない・比べられないときは `{ changed: false, text: null }`。⚠ 確認の前に 1 回、**書く直前にもう 1 回**読む(#1087 ── 間に変わったら書かない)。
    */
   readonly inspectFile: () => Promise<{ changed: boolean; text: string | null }>;
   /** 済んだことを画面へ出す。 */
@@ -172,6 +180,13 @@ export async function writeBackEntry(deps: WriteBackDeps): Promise<void> {
   // 🔴 見せた差分と書く本文を**同じ物**に保つ ── 違えば書かない(差分に無い変更を取り消せない形で書かない)
   if (body !== first) {
     deps.fail(WRITE_BACK_CHANGED_NOTE);
+    return;
+  }
+  // 🔴 書く直前にファイルを**読み直す**(#1087)── 確認の間に別のエディタが保存していたら、見せた差分に無い変更を
+  //    黙って上書きする。⚠ 比べるのは「中身」と「取り込み後の変更の有無」(読めない同士は比べられない = 進める)
+  const again = await deps.inspectFile();
+  if (again.text !== file.text || again.changed !== file.changed) {
+    deps.fail(WRITE_BACK_FILE_CHANGED_NOTE);
     return;
   }
   const result = await deps.write(body);

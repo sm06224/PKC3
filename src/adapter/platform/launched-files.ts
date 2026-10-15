@@ -23,6 +23,7 @@
  * ブラウザ objects で、比較も複製もできない ── 純粋な reducer に混ぜない。
  */
 import { errorText } from '@features/error-text';
+import { decodeImportText } from '@features/import/text-decode';
 
 /**
  * 🔴 **取り込んだ後にパソコン側で変わっていたときの字**(#1264 §2 欠陥 1。🟣 Gemini 裁定 2026-10-02)。
@@ -151,7 +152,9 @@ export class LaunchedFiles {
       if (typeof file.size === 'number' && file.size > DIFF_READ_LIMIT_BYTES)
         return { changed, text, tooLarge: true };
       try {
-        text = await file.text();
+        // 🔴 取り込みと**同じ読み方**(UTF-8 / UTF-16 / Shift_JIS)── `file.text()`(UTF-8 固定)だと、
+        //    Shift_JIS のファイルの差分が `�` だらけになる(#1087)。⚠ 書く文字コードは変えない(別の裁定)
+        text = decodeImportText(new Uint8Array(await file.arrayBuffer()));
       } catch {
         /* 中身だけ読めなかった ── 差分なしで進める */
       }
@@ -191,10 +194,16 @@ export class LaunchedFiles {
    * 開いたはずのファイルではないノートを見せる(しかも書き戻すと**別のファイルを
    * 壊す**)。`isSameEntry` を持たないブラウザでは **null を返す**
    * (= 重複を許す)── 取り違えるより増えるほうが安全側である。
+   *
+   * 🔴 **`isPresent` を渡すと、一覧に居ない lid は飛ばして次の一致を探す**(#1087)。
+   * ⚠ 取り込み→取り消し(ゴミ箱)→もう一度開く、で同じ handle に lid が 2 つ結ばれる。
+   *   先頭の一致(消えた lid)だけで返すと、3 回目以降は毎回「居ない」と読んで**開くたびに増える**。
+   * ⚠ 飛ばすだけで `forget` はしない ── ゴミ箱から戻したノートが書き戻せなくなるため。
    */
-  async findLid(handle: LaunchedHandle): Promise<string | null> {
+  async findLid(handle: LaunchedHandle, isPresent?: (lid: string) => boolean): Promise<string | null> {
     if (typeof handle.isSameEntry !== 'function') return null;
     for (const [lid, link] of this.byLid) {
+      if (isPresent !== undefined && !isPresent(lid)) continue;
       try {
         if (await handle.isSameEntry(link.handle)) return lid;
       } catch {
@@ -228,10 +237,11 @@ export async function splitAlreadyOpen<T extends { handle: LaunchedHandle; file?
   /** 🔴 `reopened` のうち、**取り込んだ後に file の更新時刻が動いている**もの(#1264 §2 欠陥 1)。 */
   const changed: string[] = [];
   for (const item of items) {
-    const known = await launched.findLid(item.handle);
     // ⚠ 紐づけが残っていても **entry が消えていれば取り込み直す**
-    //    (ゴミ箱へ入れた後に同じ md を開いたら、また開けるべき)
-    if (known !== null && isPresent(known)) {
+    //    (ゴミ箱へ入れた後に同じ md を開いたら、また開けるべき)。
+    //    🔴 消えた lid は `findLid` の中で飛ばす ── 同じ handle に古い lid が残っていても、居る lid を見つける(#1087)
+    const known = await launched.findLid(item.handle, isPresent);
+    if (known !== null) {
       reopened.push(known);
       // ⚠ 押した 1 件の file は呼び側が読み済み(`getFile()` を足さない)。取り込み時の時刻が無ければ比べない
       const was = launched.modifiedOf(known);
