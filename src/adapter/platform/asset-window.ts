@@ -327,6 +327,12 @@ function fill(
 }
 
 /**
+ * 🔴 **窓の名前ごとに、いま貸している URL**(#1087)。同じ名前で開き直すと**同じ窓が使い回され**、
+ * 中身だけ新しい URL で組み直される ── 前の URL は窓が閉じるまで捨てられず、押した数だけ積もっていた。
+ */
+const currentLent = new Map<string, { dispose: () => void }>();
+
+/**
  * 添付を別窓で開く。
  * @returns 開けたら handle、開けなければ `null`(⚠ そのとき `lent` は**捨て済み**)
  */
@@ -393,9 +399,20 @@ export async function openAssetWindow(
    * 直す前は `fill()` が投げると `waitClose` の登録に**到達しない**ので、
    * 誰も revoke しないまま窓だけ残った(呼び側の `catch` も報告するだけ)。
    */
+  const name = deps.windowName;
   try {
+    /**
+     * 同じ名前の窓を使い回したときは、**組み直す直前に**前の貸出を返す(窓の中身が
+     * まだ前の URL を指している間は捨てない)。名前が無い(毎回新しい窓)ときは対象外。
+     */
+    if (name !== undefined) {
+      const prev = currentLent.get(name);
+      if (prev && prev !== lent) prev.dispose();
+      currentLent.set(name, lent);
+    }
     fill(win.document, lent.url, title, kind, fit);
   } catch (e) {
+    if (name !== undefined && currentLent.get(name) === lent) currentLent.delete(name);
     lent.dispose();
     try {
       win.close();
@@ -405,10 +422,11 @@ export async function openAssetWindow(
     throw e;
   }
   // ⚠ 待ちは投げっぱなしにしない(reject が unhandled にならないようにする)
-  void waitClose(win).then(
-    () => lent.dispose(),
-    () => lent.dispose(),
-  );
+  const release = (): void => {
+    if (name !== undefined && currentLent.get(name) === lent) currentLent.delete(name);
+    lent.dispose();
+  };
+  void waitClose(win).then(release, release);
   return {
     close: () => {
       try {

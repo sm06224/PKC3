@@ -517,3 +517,30 @@ describe('図の別窓(実寸 + 拡大縮小 ── #527 案 A)', () => {
     expect(pip2, '添付の窓が PiP を使わなくなった').toHaveBeenCalled();
   });
 });
+
+describe('同じ名前の窓を使い回したとき(#1087)', () => {
+  it('🔴 開き直したら前の貸出を返し、窓が閉じたら今の貸出を返す(二度返さない)', async () => {
+    const win = fakeWindow();
+    const first = { url: 'blob:1', dispose: vi.fn() };
+    const second = { url: 'blob:2', dispose: vi.fn() };
+    let closed: (() => void) | null = null;
+    const base = {
+      kind: 'image' as const,
+      title: 'a.png',
+      windowName: 'pkc3-asset-reuse-test',
+      open: () => win,
+      waitClose: () => new Promise<void>((r) => (closed = r)),
+    };
+    await openAssetWindow({ ...base, lent: first });
+    expect(first.dispose).not.toHaveBeenCalled();
+    await openAssetWindow({ ...base, lent: second });
+    expect(first.dispose, '開き直したのに前の URL を返していない').toHaveBeenCalledTimes(1);
+    expect(second.dispose, '今出している URL を捨てた').not.toHaveBeenCalled();
+    expect(win.document.querySelector<HTMLImageElement>('img')!.src).toContain('blob:2');
+    closed!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(second.dispose, '閉じたのに今の URL を返していない').toHaveBeenCalledTimes(1);
+    expect(first.dispose, '前の URL を二度返した').toHaveBeenCalledTimes(1);
+  });
+});
