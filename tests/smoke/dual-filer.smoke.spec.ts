@@ -666,13 +666,12 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
 
   // 消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
   const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
-  // ⚠ 消した直後はカーソルの行が消えていてよい ── 1 回目の ↓ でカーソルが現れ、2 回目で別の行へ動く
-  await page.keyboard.press('ArrowDown');
-  await expect(cursorRow, '消したあと ↓ でカーソルが現れない').toHaveCount(1);
+  // 🔴 消した直後からカーソルが在る(#1087。入れ替わりに来た行)── 1 回目の ↓ で別の行へ動く
+  await expect(cursorRow, '消した直後にカーソルが無い(↓ が先頭付近から始まる)').toHaveCount(1);
   const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
   await page.keyboard.press('ArrowDown');
   await expect
-    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと 2 回目の ↓ でカーソルが動かない')
+    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと ↓ でカーソルが動かない')
     .not.toBe(cursorBefore);
   await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
     'ゴミ箱へ移しました',
