@@ -334,7 +334,7 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
   const FILLER_LEN = 1500;
   await live
     .locator('[data-pkc-field="row-source"]')
-    .fill(`探す面の本文に書いた ${filler(FILLER_LEN)} けんさくご という語 ${filler(FILLER_LEN)} けんさくご の 2 つ目`);
+    .fill(`探す面の本文に書いた ${filler(FILLER_LEN)} けんさくご という語 ${filler(FILLER_LEN)} -けんさくご の 2 つ目`);
   await page.keyboard.press('Tab');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // ⚠ 追記の入り先(`append-target`)は見出しの無い本文では畳まれる ── 描けた印で待つ
@@ -543,6 +543,25 @@ test('🔴 #pkc?view=search で開くと、探す面が中央に出て本文の�
     .poll(async () => (await mainHits()).all, { message: '欄の語を消したのに、塗りが残っている' })
     .toBe(0);
   await expect(page.locator('[data-pkc-field="search-jump-count"]'), '欄の語を消したのに、帯が残っている').toBeHidden();
+  /**
+   * 🔴 **左の列の欄に `-` で始まる語を打っても、除外と読まれず、そのまま塗られる**(#1087)。
+   *
+   * ⚠ 直す前は塗る側が探すと同じ割り方(`-語` = 除外)で、一覧には当たっているのに本文は 0 件だった。
+   * 🔑 起動は足していない(上の道中の続き。本文の 2 つ目を `-けんさくご` と書いてある)。
+   */
+  await field.fill('-けんさくご');
+  await expect(sideRow, '`-` で始まる語で左の列が絞られていない').toHaveCount(1, { timeout: 10_000 });
+  await clickReal(page, '[data-pkc-region="sidebar"] [data-pkc-action="select-entry"][data-pkc-entry]');
+  await expect
+    .poll(async () => (await mainHits()).all, {
+      message: '`-` で始まる語を打ったのに、本文が塗られていない(除外の語と読まれている)',
+      timeout: 15_000,
+    })
+    .toBe(1);
+  await field.fill('');
+  await expect
+    .poll(async () => (await mainHits()).all, { message: '欄を空にしたのに塗りが残っている' })
+    .toBe(0);
 
   /**
    * 🔴 **同じ道中で SQL の面まで見る**(#681 段②)。
