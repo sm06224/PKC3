@@ -22,6 +22,16 @@ describe('動的値(4 つだけ)', () => {
     expect(fillSnippetVars('今日は ${date} です', NOW).text).toBe('今日は 2026-08-25 です');
   });
 
+  it('🔴 コードの中(囲み・文中コード)の ${date} ${cursor} は値にしない(#1087)', () => {
+    const body = '前 ${date}\n```js\nconsole.log(`${date}`)\n```\n`${time}` 後 ${cursor}';
+    const r = fillSnippetVars(body, NOW);
+    expect(r.text).toBe('前 2026-08-25\n```js\nconsole.log(`${date}`)\n```\n`${time}` 後 ');
+    expect(r.caret, 'コードの外の ${cursor} は位置になる').toBe(r.text.length);
+    const fenced = fillSnippetVars('```\n${cursor}\n```', NOW);
+    expect(fenced.caret, 'コードの中の ${cursor} は位置にしない').toBeNull();
+    expect(fenced.text).toBe('```\n${cursor}\n```');
+  });
+
   it('時刻と日時', () => {
     expect(fillSnippetVars('${time}', NOW).text).toBe('14:30');
     expect(fillSnippetVars('${datetime}', NOW).text).toBe('2026-08-25 14:30');

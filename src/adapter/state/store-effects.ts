@@ -1389,6 +1389,9 @@ export function connectStoreEffects(
             }),
             parentLid: null,
             relationId,
+            // 🔴 書き出したノートは**読む面で開く**(兄弟の `sql-to-note` と同じ ── #1087)。
+            //   既定(書く状態)だと編集権を取らないまま編集に入り、次の「作る」も断られる
+            edit: false,
           });
           /**
            * 🔴 **作れたかを見てから「保存しました」と言う**(#1087)。構造を集める間(大きな表は数秒)に
