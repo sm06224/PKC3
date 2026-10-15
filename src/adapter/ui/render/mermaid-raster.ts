@@ -25,6 +25,7 @@
  */
 
 import { MERMAID_VERSION } from '@runtime/mermaid-version';
+import { retryableImport } from '@adapter/platform/render/retryable-import';
 
 /** 焼いた PNG の置き場(添付とは別の DB ── 捨ててよいものを混ぜない)。 */
 const DB_NAME = 'pkc3-diagram-cache';
@@ -348,11 +349,15 @@ export async function withCache<T>(run: (d: IDBDatabase) => Promise<T>, fallback
 export class DeviceRenderError extends Error {}
 
 /** mermaid 本体は**必要になるまで読まない**(初期ロードに載せない)。 */
-let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
-async function mermaid(): Promise<typeof import('mermaid').default> {
-  mermaidPromise ??= import('mermaid').then((m) => m.default);
-  return mermaidPromise;
-}
+/**
+ * 🔴 読み込みに失敗(オフライン / 配り直しで古くなった chunk)したら**覚えない**(#1087)── 覚えると
+ *   そのタブの図が全部失敗する。しかも端末の事情なので `DeviceRenderError` で包む
+ *   (さもないと「書き方を確かめてください」と英語の生の例外が出て、無い間違いを探させる)。
+ */
+const mermaid = retryableImport(
+  () => import('mermaid').then((m) => m.default),
+  () => new DeviceRenderError('図を描くためのライブラリを読み込めませんでした(ページを再読み込みしてください)'),
+);
 
 /**
  * mermaid に渡す設定。**配色ごとに作り直す**(P8 段⑬)。

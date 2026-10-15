@@ -22,8 +22,22 @@
 import { appFlags, FlagStore, registeredFlags } from '@adapter/platform/flag-store';
 import { FLAG_BUDGET, findFlag } from '@features/flags';
 
+/**
+ * 再読み込みの前に「編集中の内容は失われる」を確かめる口(#1087)。
+ * 🔴 更新のカード(`update-prompt`)は打ちかけを守るのに、フラグの切り替えだけ
+ *   確かめずに読み込み直していた ── 打っている途中の文字が黙って消える。
+ * ⚠ renderer は state を持たないので、配線側(`main.ts`)が差す。
+ */
+export interface RestartGuard {
+  isEditing(): boolean;
+  confirmDiscard(): Promise<boolean>;
+  /** 断られたとき。⚠ 設定は保存済み ── それを user に伝える。 */
+  onDeclined(): void;
+}
+
 export class FlagsRenderer {
   private built = false;
+  private guard: RestartGuard | null = null;
   private readonly rows = new Map<string, HTMLInputElement>();
   private summary: HTMLElement | null = null;
 
@@ -218,9 +232,25 @@ export class FlagsRenderer {
     if (findFlag(name)?.needsRestart === true || overridden) this.restart();
   }
 
-  /** ⚠ test は差し替えられるよう、再読込は 1 か所に閉じる。 */
+  setRestartGuard(guard: RestartGuard): void {
+    this.guard = guard;
+  }
+
+  /**
+   * ⚠ test は差し替えられるよう、再読込は 1 か所に閉じる。
+   * 編集中は確かめてから(断られたら再読み込みしない ── 設定は保存済みで、次の読み込みで効く)。
+   */
   private restart(): void {
-    this.reload(this.store.restartUrl(this.href()));
+    const go = (): void => this.reload(this.store.restartUrl(this.href()));
+    const g = this.guard;
+    if (g === null || !g.isEditing()) {
+      go();
+      return;
+    }
+    void g.confirmDiscard().then((ok) => {
+      if (ok) go();
+      else g.onDeclined();
+    });
   }
 
   resetFlags(): void {

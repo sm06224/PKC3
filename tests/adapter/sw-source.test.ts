@@ -47,9 +47,13 @@ class FakeCache {
    * ここを「落ちるまで入れる」と書くと、**半端な cache が残る**形を test で
    * 作れてしまい、実装の半端さを stub が肩代わりする。
    */
-  addAll(urls: string[]): Promise<void> {
+  /** addAll に渡された要求の `cache` モード(#1087)。 */
+  readonly addAllModes: string[] = [];
+  addAll(reqs: Array<string | { url: string; cache?: string }>): Promise<void> {
     const staged = new Map<string, { body: string; varyOrigin: string | null }>();
-    for (const u of urls) {
+    for (const r of reqs) {
+      const u = typeof r === 'string' ? r : r.url;
+      this.addAllModes.push(typeof r === 'string' ? 'default' : (r.cache ?? 'default'));
       if (u.includes('missing')) return Promise.reject(new Error(`404: ${u}`));
       // addAll は Origin を送らない ── 応答は Vary: Origin つき(= 素の cache)
       staged.set(u, { body: `cached:${u}`, varyOrigin: null });
@@ -218,15 +222,27 @@ function runSw(
   // ⚠ `new Function` で**実物の文字列**を走らせる(写しを作らない)。
   //    `Response` / `Headers` は node の本物を渡す ── 偽物を作ると、
   //    「本体を持てない status に本体を渡すと投げる」等の意味論が消える
-  const run = new Function('self', 'caches', 'fetch', 'URL', 'Response', 'Headers', source) as (
+  // ⚠ `Request` の偽物は url を**そのまま**持つ(本物は SW の URL を基に絶対化する ── この fake cache は
+  //    './x' の綴りで鍵を持つので揃える)。見たいのは `cache` モードが渡ること(#1087)。
+  class FakeRequest {
+    constructor(
+      public url: string,
+      init?: { cache?: string },
+    ) {
+      this.cache = init?.cache ?? 'default';
+    }
+    cache: string;
+  }
+  const run = new Function('self', 'caches', 'fetch', 'URL', 'Response', 'Headers', 'Request', source) as (
     s: unknown,
     c: unknown,
     f: unknown,
     u: unknown,
     r: unknown,
     h: unknown,
+    q: unknown,
   ) => void;
-  run(self, caches, fetchImpl, URL, Response, Headers);
+  run(self, caches, fetchImpl, URL, Response, Headers, FakeRequest);
 
   const waits: Array<Promise<unknown>> = [];
   return {
@@ -395,6 +411,14 @@ describe('install ── 一覧を丸ごと入れる', () => {
       './manifest.webmanifest',
       './assets/index-AAAAAAAA.js',
     ]);
+  });
+
+  it('🔴 precache は HTTP キャッシュを通さず取り直す(全件 cache: reload。#1087)', async () => {
+    const h = runSw(SOURCE);
+    await h.fire('install');
+    const c = h.caches.get('pkc3:%2F:b1')!;
+    expect(c.addAllModes.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(c.addAllModes)).toEqual(new Set(['reload']));
   });
 
   /**

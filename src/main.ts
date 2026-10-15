@@ -155,7 +155,7 @@ import {
   relationFromRow,
   REVISION_KEEP_LATEST,
 } from '@adapter/platform/storage/store-port';
-import { acquireWriterLease } from '@adapter/platform/storage/writer-lease';
+import { acquireWriterLease, promoteOrReleaseLease } from '@adapter/platform/storage/writer-lease';
 import { AutoOptimizer } from '@adapter/platform/storage/auto-optimize';
 // 🔴 SQL の面で「手持ちのファイル」を開く(#854 段②)
 import {
@@ -2424,7 +2424,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     let promotedHost: StoreProxyHost | null = null;
     void lease.whenHeld.then(async () => {
       try {
-        await conn.promote(async () => {
+        // 🔴 失敗したら握った lock を手放す(#1087)── 動かないタブが握り続けると、
+        //    読み込み直したタブが書き手になれない
+        await promoteOrReleaseLease(lease, () => conn.promote(async () => {
           const r = await initStorage(portable);
           liveVfs = r.init.vfs;
           // ⚠ 昇格でも arm する(忘れると、続きを書いたぶんが丸ごと保存されない)
@@ -2443,7 +2445,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    使う ── localClient()(mutation を放送する包み)を返すことで、
           //    乗り換え直後の書込も残りの follower へ届く
           return { client: host.localClient(), init: r.init };
-        });
+        }));
         if (promotedHost) {
           unbindChanged();
           sync = promotedHost;
@@ -3164,6 +3166,21 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         okLabel: '新しいバージョンに切り替える',
         danger: true,
       }),
+  });
+
+  /**
+   * 🔴 フラグの切り替えが再読み込みを要するときも、打ちかけを守る(#1087。更新のカードと同じ確かめ方)。
+   * ⚠ 断られたら読み込み直さない ── 設定は保存済みなので、次に読み込んだときから効く。
+   */
+  center.setFlagRestartGuard({
+    isEditing: () => hasUnsavedTyping(dispatcher.getState()),
+    confirmDiscard: () =>
+      ask('編集中の内容は保存されません。フラグの変更を反映するためにページを再読み込みしますか?', {
+        okLabel: '再読み込みする',
+        danger: true,
+      }),
+    onDeclined: () =>
+      showStatus('フラグの変更は保存しました。ページを再読み込みすると反映されます'),
   });
 
   /**
