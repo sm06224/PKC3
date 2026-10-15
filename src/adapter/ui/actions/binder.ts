@@ -16784,7 +16784,14 @@ export function bindActions(
           .map((x) => formatEntryLink(metas.get(x)!.title, x));
         if (lines.length === 0) return;
         // 🔴 落とした所の目印を渡す(#1087)── 書く直前に disk 側と突き合わせ、別の窓が行を足していれば断る
-        dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines, anchor: at.anchor });
+        // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087。追記と同じ門)── 断ると赤い字で理由が出る
+        actUnlessEditedElsewhere(
+          dispatcher,
+          services,
+          [at.lid],
+          'リンクを入れられませんでした(別のタブの編集を確かめられませんでした)。もう一度ドロップしてください',
+          () => dispatcher.dispatch({ type: 'INSERT_LINES', lid: at.lid, toBefore: at.toBefore, lines, anchor: at.anchor }),
+        );
         return;
       }
       e.preventDefault();

@@ -641,6 +641,68 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
       'ノートを開いていない',
     );
   });
+
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートへは、添付を作っても本文に入れない**(#1087)。
+   * ⚠ 確かめるのは**回に 1 度**(3 枚落としても問い合わせは 1 回)、知らせも件数つきの 1 行。
+   *   対照群(錠が取れる)を同じ台で並べる。
+   */
+  const elsewhereNotice = (n: number): string =>
+    `${n} 件を添付にしました(別のタブまたはウィンドウで編集中なので、本文には入れていません)`;
+  const threePngs = (): File[] => [
+    new File(['1'], 'a.png', { type: 'image/png' }),
+    new File(['2'], 'b.png', { type: 'image/png' }),
+    new File(['3'], 'c.png', { type: 'image/png' }),
+  ];
+
+  it('🔴 別のタブで編集中: 添付は作り、本文には入れず、件数つきの知らせを 1 行だけ出す', async () => {
+    const h = withOpenNote();
+    const asked: string[] = [];
+    const deps: AttachDeps = {
+      ...h.deps,
+      lock: {
+        acquireEditLock: async (lid) => {
+          asked.push(lid);
+          return 'denied';
+        },
+      },
+    };
+    const notices: string[] = [];
+    h.d.onState(() => {
+      const n = h.d.getState().notice;
+      if (n !== null && notices[notices.length - 1] !== n) notices.push(n);
+    });
+    appendsSeen.length = 0;
+    await attachFiles(h.d, deps, threePngs());
+    await until(() => notices.includes(elsewhereNotice(3)));
+    await tick();
+    expect(asked, '問い合わせが回に 1 度ではない').toEqual(['n1']);
+    expect(appendsSeen, '別のタブが編集中なのに本文へ書いた').toEqual([]);
+    expect(
+      [...h.d.getState().entryMetas.values()].filter((m) => m.archetype === 'attachment'),
+      '添付が作られていない',
+    ).toHaveLength(3);
+    expect(h.d.getState().selectedLid, '選択が添付へ持っていかれた').toBe('n1');
+    expect(notices.filter((n) => n.includes('別のタブまたはウィンドウ')), '知らせが 1 行ではない').toEqual([
+      elsewhereNotice(3),
+    ]);
+    expect(notices.some((n) => n.includes('入れました')), '入れていないのに「入れました」').toBe(false);
+  });
+
+  it('⚠ 対照群 ── 別のタブが編集中でなければ、同じ台で本文に入る', async () => {
+    const h = withOpenNote();
+    const released: string[] = [];
+    const deps: AttachDeps = {
+      ...h.deps,
+      lock: { acquireEditLock: async () => 'granted', releaseEditLock: (lid) => void released.push(lid) },
+    };
+    appendsSeen.length = 0;
+    await attachFiles(h.d, deps, threePngs());
+    await waitForAppend('n1', 3);
+    expect(appended(h.d), '本文に 3 行入っていない').toHaveLength(3);
+    expect(h.d.getState().notice ?? '').not.toContain('別のタブまたはウィンドウ');
+    expect(released, '確かめるだけの錠を手放していない').toEqual(['n1']);
+  });
 });
 
 describe('attachFiles (P4a intake)', () => {
@@ -870,6 +932,23 @@ describe('落とした所へ入れる(#684 段④)', () => {
     expect(rows.indexOf('パン'), '「パン」の下(= 末尾寄り)へ落ちた').toBeGreaterThan(i);
     // ⚠ **どこに入ったかを字で言う**(押した場所と文言が対 ── 着地前レビュー G)
     expect(h.d.getState().notice ?? '', 'どこに入ったかを言っていない').toContain('ドロップした所');
+  });
+
+  /**
+   * 🔴 **落とした所へ入れる枝も、別のタブが編集中なら入れない**(#1087)── 末尾の枝だけ門があった。
+   */
+  it('🔴 別のタブで編集中なら、落とした所にも入れず、件数つきで言う', async () => {
+    const h = withBody();
+    const deps: AttachDeps = { ...h.deps, lock: { acquireEditLock: async () => 'denied' } };
+    appendsSeen.length = 0;
+    await attachFiles(h.d, deps, [png('猫.png', 'a'), png('犬.png', 'b')], '', AFTER_MILK);
+    await until(() => (h.d.getState().notice ?? '').includes('別のタブまたはウィンドウ'));
+    await tick();
+    expect(h.disk(), '本文が書き換わった').toBe(DOC);
+    expect(appendsSeen, '本文へ入れる依頼が出ている').toEqual([]);
+    expect(h.d.getState().notice).toBe(
+      '2 件を添付にしました(別のタブまたはウィンドウで編集中なので、本文には入れていません)',
+    );
   });
 
   /**

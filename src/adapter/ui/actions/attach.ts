@@ -18,7 +18,8 @@ import { errorText } from '@features/error-text';
 import { markName } from '@features/message/message-log';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { phaseBlockReason } from '@adapter/state/app-state';
-import { dropCursor, noteToPutInto, putAssetIntoNote, type DroppedAt } from './asset-into-note';
+import { attachedNotInBodyElsewhereText, dropCursor, noteToPutInto, putAssetIntoNote, type DroppedAt } from './asset-into-note';
+import { editedElsewhereReason, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { createWritableQueue } from './writable-queue';
 import { attachmentBody } from '@features/flavor/attachment-flavor';
 import { identifyAsset, assetKeyFromHash } from '@adapter/platform/storage/asset-key';
@@ -27,6 +28,11 @@ import { generateLid } from './binder';
 import { isAppendable } from '@features/flavor/append-spec';
 
 export interface AttachDeps {
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートへは、本文に入れない**(#1087。追記・収録と同じ門 = `editedElsewhereReason`)。
+   * ⚠ 省略 = 問い合わせない(口の無い環境。アプリは必ず渡す)。確かめるのは**取り込みの回に 1 度**。
+   */
+  lock?: EditLockPort;
   putBlob(assetKey: string, blob: Blob): Promise<void>;
   /**
    * 🔴 **預かった取込を、資産の門(`withAssetGate`)の中で走らせる口**(#724 ⑤)。
@@ -508,6 +514,21 @@ export async function attachFiles(
     // ので、既に持っているかは key の存在だけで決まる(batch 内の重複も自動で潰れる)
     const known = new Set(await deps.listStoredBlobKeys().catch(() => []));
 
+    /**
+     * 🔴 **入れ先が別のタブ・窓で編集中なら、この回は 1 枚も本文に入れない**(#1087)。
+     * ⚠ 確かめるのは回に 1 度 ── 添付は作る(残す)が、落とした所へも末尾へも書かず、知らせは最後に 1 行。
+     * ⚠ 問い合わせが落ちた回は断らない(`unreachable` と同じ ── 新しい断りを足さない)。
+     */
+    const heldElsewhere =
+      deps.lock !== undefined && into.lid !== null && isAppendable(into.archetype)
+        ? await editedElsewhereReason(dispatcher, deps.lock, into.lid).then(
+            (r) => r !== null,
+            () => false,
+          )
+        : false;
+    let heldCount = 0;
+    let heldLast = '';
+
     for (const file of files) {
       try {
         const item = await maybeShrink(deps, {
@@ -535,6 +556,7 @@ export async function attachFiles(
           batch,
           ...(place === undefined ? {} : { place }),
           ...(elsewhere ? { selectBack: opened.lid } : {}),
+          ...(heldElsewhere ? { skipBody: true } : {}),
           ...(namedTitle === undefined ? {} : { intoTitle: namedTitle }),
           onPut: (n) => {
             tally.put += 1;
@@ -544,7 +566,12 @@ export async function attachFiles(
         });
         // ⚠ 1 枚目は `onPut` が**この行より先に**同期で走ることがある ── だから
         //    `summarize` は `intakeDone` も見る(数え終わる前に締めない)
-        tally.expected += 1;
+        if (heldElsewhere) {
+          heldCount += 1;
+          heldLast = attached.lid;
+        } else {
+          tally.expected += 1;
+        }
       } catch (e) {
         dispatcher.dispatch({
           type: 'OP_FAILED',
@@ -554,6 +581,7 @@ export async function attachFiles(
     }
     intakeDone = true;
     summarize();
+    if (heldCount > 0) notify(attachedNotInBodyElsewhereText(why, heldCount), heldLast);
   };
 
   const phase = dispatcher.getState().phase;
