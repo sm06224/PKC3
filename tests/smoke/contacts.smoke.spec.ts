@@ -82,13 +82,18 @@ test('🔴 tel: を書いたノートが連絡先に並び、押せる宛先に�
   await clickReal(page, '[data-pkc-field="fm-edit"]');
   await page
     .locator('[data-pkc-field="fm-source"]')
-    .fill('---\ntel: 090-9999-0000\nemail: taro@example.com\norg: 例の会社\n---');
+    // 🔴 #1087: 手で書いた、記号の無い 0 始まりの番号(frontmatter では数として読まれ、先頭の 0 が落ちていた)
+    .fill('---\ntel: 09099990000\nemail: taro@example.com\norg: 例の会社\n---');
   await clickReal(page, '[data-pkc-field="fm-commit"]');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(row, '保存したのに連絡先の一覧が古い番号のまま').toContainText('090-9999-0000', {
+  await expect(row, '保存したのに連絡先の一覧が古い番号のまま').toContainText('09099990000', {
     timeout: 10_000,
   });
   await expect(row).not.toContainText('090-1234-5678');
+  await expect(
+    row.locator('[data-pkc-field="contact-tel"]'),
+    '先頭の 0 が落ちて別の番号へかかる',
+  ).toHaveAttribute('href', 'tel:09099990000');
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -307,6 +312,16 @@ test('🔴 「足す」で書いた人が一覧に並び、押せる宛先にな
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
+  // 🔴 #1087: 中央に開いているノートと、左の探す欄の字を用意する(足しても動かないこと)
+  await createEntry(page, 'text');
+  const live = page.locator('[data-pkc-region="editor-live"]');
+  await clickReal(page, '[data-pkc-region="editor-live"]');
+  await live.locator('[data-pkc-field="row-source"]').fill('# 開いたままのノート\n\n本文です。');
+  await page.keyboard.press('Tab');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(page.locator('[data-pkc-view-pane="detail"]')).toContainText('開いたままのノート');
+  await page.locator('[data-pkc-field="entry-filter"]').fill('鈴木');
+
   await clickReal(page, '[data-pkc-action="set-browse"][data-pkc-browse="contacts"]');
   const pane = page.locator('[data-pkc-browse-pane="contacts"]');
   await expect(pane, '連絡先のタブが開かない').toBeVisible();
@@ -335,6 +350,12 @@ test('🔴 「足す」で書いた人が一覧に並び、押せる宛先にな
   await expect(pane.locator('[data-pkc-field="contacts-quick-name"]')).toHaveValue('');
   // ⚠ 面は奪わない ── 中央は本文のまま、連絡先の面も消えない
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
+  // 🔴 #1087: 開いていたノートは新しい連絡先に置き換わらず、左の探す欄の字も残る
+  await expect(
+    page.locator('[data-pkc-view-pane="detail"]'),
+    '足したら中央のノートが新しい連絡先に替わった',
+  ).toContainText('開いたままのノート');
+  await expect(page.locator('[data-pkc-field="entry-filter"]'), '足したら左の探す欄が消えた').toHaveValue('鈴木');
   await expect(pane, '足したら連絡先の面が消えた').toBeVisible();
 
   expect(errors, 'ページ例外が出ている').toEqual([]);
