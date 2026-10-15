@@ -111,12 +111,27 @@ function harness(
 
 const png = (): Blob => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
 
+describe('同じ画像を 2 つのノートに持つ(#1087)', () => {
+  it('🔴 別のノートで押すと、別の窓を開く(前のノートの窓を出すだけにしない)', async () => {
+    const h = harness();
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img');
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img2');
+    expect(h.opened.map((o) => o.windowName)).toEqual(['pkc3-draw-k1-img', 'pkc3-draw-k1-img2']);
+  });
+  it('対照群: 同じノートで 2 度押すと、開いている窓を出すだけ', async () => {
+    const h = harness();
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img');
+    await h.drawer.run('k1', 'a.png', 'image/png', 'img');
+    expect(h.opened).toHaveLength(1);
+  });
+});
+
 describe('保存', () => {
   it('🔴 新しい添付が 1 件できる ── 名前は 元 + (描き込み).png、形は PNG', async () => {
     const h = harness();
     await h.drawer.run('k1', '写真.jpg', 'image/jpeg', 'img');
     expect(h.opened[0]!.title).toBe('写真.jpg');
-    expect(h.opened[0]!.windowName).toBe('pkc3-draw-k1');
+    expect(h.opened[0]!.windowName).toBe('pkc3-draw-k1-img');
     expect(h.attached).toHaveLength(0); // 窓を開いただけでは作らない(やめる = 何も作らない)
     expect(await h.save(png())).toEqual({ ok: true });
     expect(h.attached).toHaveLength(1);

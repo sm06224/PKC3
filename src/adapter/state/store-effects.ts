@@ -2166,7 +2166,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `フォルダへの所属を変えられませんでした: ${errorText(e)}`,
+                error: `フォルダへの所属を変えられませんでした(再読み込みすると元の場所に戻ります): ${errorText(e)}`,
               });
           }
         });

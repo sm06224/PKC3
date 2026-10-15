@@ -145,6 +145,25 @@ export interface GrabbedTask {
   readonly rawLine?: string;
 }
 
+/**
+ * 🔴 **マウスで掴んだ札の荷物**(HTML5 drag の文字列。#1087)── 組むのも読むのもこの 2 つだけ。
+ * ⚠ 掴んだ行の中身は空白を含むので 5 つ目に URI 符号化して載せる。壊れていたら省く(落とす側は従来の引き方に倒れる)。
+ */
+export function encodeTaskDrag(t: GrabbedTask): string {
+  return `${t.lid} ${t.line} ${t.from} ${t.repeat} ${encodeURIComponent(t.rawLine ?? '')}`;
+}
+export function decodeTaskDrag(payload: string): GrabbedTask | null {
+  const [lid, line, from, repeat, raw] = payload.split(' ');
+  if (lid === undefined || lid === '') return null;
+  let rawLine: string;
+  try {
+    rawLine = decodeURIComponent(raw ?? '');
+  } catch {
+    rawLine = '';
+  }
+  return { lid, line: line ?? '', from: from ?? '', repeat: repeat ?? '', ...(rawLine === '' ? {} : { rawLine }) };
+}
+
 /** 長押しが確定するまで(押さえている最中)。 */
 interface Pending {
   readonly card: HTMLElement;

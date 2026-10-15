@@ -22,7 +22,7 @@ import {
   elsewhereCheckNotNeeded,
   makeEditLockPort,
 } from '../../src/adapter/state/edited-elsewhere';
-import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
+import { bindActions, RESTORE_TARGET_MOVED_TEXT, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import { quoteIntoNote } from '../../src/adapter/platform/pdf/quote-into-note';
 import type { PdfSession } from '../../src/adapter/platform/pdf/pdf-window';
 import { EDIT_ELSEWHERE_ERROR } from '../../src/features/message/caution-events';
@@ -426,7 +426,7 @@ describe('④ 履歴の「この版に戻す」(restore-revision)', () => {
       return raw(a as never);
     }) as typeof d.dispatch;
     bindActions(root, d, { showStatus: () => {}, ...services });
-    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1'), meta('n2')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     sent.length = 0;
     return { d, sent, btn };
@@ -449,5 +449,23 @@ describe('④ 履歴の「この版に戻す」(restore-revision)', () => {
     await flush();
     expect(p.sent).toContain('RESTORE_REVISION');
     expect(release).toHaveBeenCalledWith('n1');
+  });
+
+  /**
+   * 🔴 確かめている間に別のノートを選んだら戻さない(#1087)。reducer は**いま選んでいる**ノートへ版を当てるので、
+   *   通すと n2 の本文と題名が n1 の古い版で上書きされていた。
+   */
+  it('🔴 確かめている間に別のノートを選んだら、戻さずに理由を出す', async () => {
+    let answer!: (v: 'granted') => void;
+    const p = restorePanel({
+      acquireEditLock: () => new Promise((r) => (answer = r)),
+      releaseEditLock: () => {},
+    });
+    p.btn.click();
+    p.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    answer('granted');
+    await flush();
+    expect(p.sent, '別のノートへ版を当てた').not.toContain('RESTORE_REVISION');
+    expect(p.d.getState().error).toBe(RESTORE_TARGET_MOVED_TEXT);
   });
 });

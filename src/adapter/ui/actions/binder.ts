@@ -213,7 +213,7 @@ import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
-import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
+import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
 import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import {
@@ -812,14 +812,6 @@ function randomSuffix(): string {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   }
   return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
-}
-/** 符号化した字を戻す。壊れていたら空(= 掴んだ行が取れなかった扱いで、落とす側が断る)。 */
-function safeDecode(s: string): string {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return '';
-  }
 }
 /**
  * 🔴 **別のタブ・窓が編集中のノートへは、消す書換を撃たない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
@@ -2837,6 +2829,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
  * ⚠ 右クリックの 2 つも同じ関数を通る ── 入口で書き分けると**片方だけ字が違う**
  *   ことになるので、こちらへ寄せて**断り文も 1 つ**にする(§7)。
  */
+/** 履歴の版を戻す確認の間に、別のノートを選んだとき(#1087)。 */
+export const RESTORE_TARGET_MOVED_TEXT = '別のノートを選んだので、前の版には戻していません。戻すノートを選び直して、もう一度押してください';
+
 const BODY_WRITE_DEFERRED: ReadonlySet<string> = new Set([
   'copy-md-block',
   'table-to-markdown',
@@ -14003,6 +13998,14 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({ type: 'OP_FAILED', error: reason });
         return;
       }
+      /**
+       * 🔴 **確かめている間に別のノートへ移ったら戻さない**(#1087)。reducer は版を**いま選んでいるノート**へ
+       *   当てるので、通すと別のノートの本文と題名が、押したノートの古い版で上書きされていた。
+       */
+      if (dispatcher.getState().selectedLid !== lid) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: RESTORE_TARGET_MOVED_TEXT });
+        return;
+      }
       restore();
     });
   },
@@ -16678,23 +16681,10 @@ export function bindActions(
       clearDropTarget();
       if (drop === null) return;
       e.preventDefault();
-      const [lid, rawLine, grabbedOn, every, grabbedRaw] = (
-        de.dataTransfer.getData(PKC_TASK_DRAG) || ''
-      ).split(' ');
-      if (lid === undefined || lid === '') return;
-      dropTaskCard(
-        dispatcher,
-        {
-          lid,
-          line: rawLine ?? '',
-          from: grabbedOn ?? '',
-          repeat: every ?? '',
-          // 🔴 掴んだ時点の行の中身(#1087)。空 = 取れなかった
-          ...(grabbedRaw === undefined || grabbedRaw === '' ? {} : { rawLine: safeDecode(grabbedRaw) }),
-        },
-        drop.date,
-        root,
-      );
+      // 🔴 荷物を読むのは `decodeTaskDrag` 1 つ(掴んだ時点の行の中身も、ここで戻る。#1087)
+      const grabbed = decodeTaskDrag(de.dataTransfer.getData(PKC_TASK_DRAG) || '');
+      if (grabbed === null) return;
+      dropTaskCard(dispatcher, grabbed, drop.date, root);
       return;
     }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
@@ -16907,7 +16897,10 @@ export function bindActions(
         dragFromSide = null;
         // 🔴 掴んだ時点の行の中身(#1087)。⚠ 空白を含むので 5 つ目に URI 符号化して載せる(取れなければ空 = 落とす側で断る)
         const grabbedRaw = line === '' ? '' : (shownCardLine(dispatcher.getState(), lid, Number(line)) ?? '');
-        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line} ${from} ${every} ${encodeURIComponent(grabbedRaw)}`);
+        de.dataTransfer.setData(
+          PKC_TASK_DRAG,
+          encodeTaskDrag({ lid, line, from, repeat: every, ...(grabbedRaw === '' ? {} : { rawLine: grabbedRaw }) }),
+        );
         de.dataTransfer.effectAllowed = 'move';
         return;
       }
