@@ -108,7 +108,7 @@ describe('予定を .ics で書き出す', () => {
     vi.restoreAllMocks();
     const cut = rig({ a: '- [ ] 見積 @2026-10-20\n' }, [meta()], true);
     await cut.press();
-    expect(cut.d.getState().notice).toContain('(多いので途中まで集めた分です)');
+    expect(cut.d.getState().notice).toContain('(いま一覧に出している分です。多いので途中まで集めた分です。日付のないものは入りません)');
     expect(cut.d.getState().notice).toContain('1 件');
   });
 
