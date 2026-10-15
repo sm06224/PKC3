@@ -60,6 +60,12 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 4)); // 「一\n二\n」= 3 行目の頭まで
   await clickReal(page, '[data-pkc-format="ul"]');
   await expect(ta, '選んでいない 3 行目にも付いた').toHaveValue('- 一\n- 二\n三');
+
+  // ④-c 🔴 #1087 ── 改行までを含めて選んで太字を押すと、`**` は字を囲む(次の行の頭へ落ちない)
+  await ta.fill('一\n二\n三');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 2)); // 「一\n」
+  await clickReal(page, '[data-pkc-format="bold"]');
+  await expect(ta, '改行まで選んだ太字が、次の行の頭へ落ちた').toHaveValue('**一**\n二\n三');
   await ta.fill('強調したい');
 
   // ④' 🔴 #950 ① ── 選んでいるあいだだけ、表 / 図 / コードブロック / 数式の説明が
