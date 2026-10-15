@@ -29,7 +29,7 @@
  */
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { errorText } from '@features/error-text';
-import { localSaveFailedNotice, type LocalWriteFailure } from '@features/office/office-launch';
+import { isLocalFileToken, localSaveFailedNotice, type LocalWriteFailure } from '@features/office/office-launch';
 import {
   discardStaged,
   listStaged,
@@ -104,10 +104,41 @@ export interface SaveBackDeps {
     token: string,
     bytes: Uint8Array<ArrayBuffer>,
   ) => Promise<boolean | LocalWriteFailure | null>;
+  /**
+   * 🔴 **この合言葉の元のファイルを、このタブが知っているか**(#1087)。手元のファイルの合言葉は
+   *   **開いたタブの中にしか無い**(`LocalOfficeFiles.byToken`)ので、知らないタブでは書けない。
+   *   ⚠ 書き戻しは DB に触れないので、**holder でなくても**知っているタブが引き取る。
+   * ⚠ **optional にしない**(配線を落とすと、知らないタブがノートを作る形に戻る)。
+   */
+  readonly knowsLocal: (token: string) => boolean;
   /** user への一言(「取り込みました」)。 */
   readonly notify: (message: string) => void;
   /** 異常の報告(取り込めなかった)。 */
   readonly fail: (message: string) => void;
+}
+
+/**
+ * 🔴 **手元のファイルの保存を、元のファイルへ書けず、添付のノートにしたときの一言**(#1087)。
+ * ⚠ 棚の中身は user から見えないので「残してあります」とは言わない ── 開けるノートにして、そう言う。
+ */
+export function localOrphanImportedNotice(name: string): string {
+  return `元のファイルを開いた画面が閉じられたので、Office で保存した内容は元のファイルへ書き戻せませんでした。代わりに添付のノート「${name}」として取り込みました`;
+}
+
+/**
+ * 🔴 **知らせるまでの猶予**(ms)。他のタブが知っているかは**こちらから見えない**ので、
+ *   保存の直後は黙って待つ(知っているタブが数百 ms で書く)。古い保存だけ「誰も書けない」と読む。
+ */
+export const LOCAL_ORPHAN_GRACE_MS = 10_000;
+
+/**
+ * 🔴 **差し替えに記録する「保存した時刻」**(#1087)。窓が保存した時刻(`StagedSave.at`)を使う。
+ * ⚠ 書き戻した**今**にすると、保留した保存のあとに打った控えが「古い」と読まれて見送られる
+ *   (`isShadowNewer`)。0 / 欠けは今に倒す。
+ */
+export function stagedSavedAt(at: number | undefined, now: number = Date.now()): string {
+  const t = typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : now;
+  return new Date(t).toISOString();
 }
 
 export interface OfficeSaveBack {
@@ -277,7 +308,17 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
      * ⚠ 書けなかったら**棚から捨てない** ── 捨てると user の編集が消える。
      *   残しておけば、次の起動でもう一度取り込みを試せる。
      */
-    const local = save.token === undefined ? null : await deps.writeLocal(save.token, bytes);
+    // 🔴 **知らないタブでは、手元の合言葉をノートにしない**(#1087)。合言葉は開いたタブの中にしか無いので、
+    //   `writeLocal` が `null` を返して下の取り込みへ落ち、**元のファイルは古いまま添付ノートが増える**。
+    //   ⚠ 猶予の間は棚に残す(別のタブが知っているかもしれない)。猶予を過ぎたら誰も書けないと読み、
+    //   holder が添付のノートにする(棚の中身は user から見えないので、開けるノートにして残す)。
+    //   ⚠ holder でないタブは、知らない合言葉の保存をここへ持ち込まない(`run` の絞り込みが唯一の門)
+    let orphan = false;
+    if (save.token !== undefined && isLocalFileToken(save.token) && !deps.knowsLocal(save.token)) {
+      if (Date.now() - save.at <= LOCAL_ORPHAN_GRACE_MS) return 'deferred';
+      orphan = true;
+    }
+    const local = save.token === undefined || orphan ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
       if (local !== true) {
         if (!toldLocalFail.has(save.key)) {
@@ -305,7 +346,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     //    ── 新規でも差し替えでも同じ(`adopt` の注記)
     const windowKnew = save.token !== undefined;
     const mine = group === null ? undefined : madeHere.get(group);
-    let token = save.token ?? mine;
+    // 🔴 孤児の保存は手元の合言葉でノートを引かない(添付ではない)。同じ文書で先に作ったノートがあればそれ
+    let token = orphan ? mine : (save.token ?? mine);
     let target = token === undefined ? null : await deps.readAttachment(token);
     // ⚠ **合言葉が「在るが死んでいる」ときも束ねへ倒す**(2 巡目レビュー)。
     //    倒さないと、開いていた添付を user が消した状態で編集中に 2 件溜まった場合、
@@ -341,7 +383,9 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
     await supersedeOlder(dir, save);
     await discardStaged(dir, save.key);
-    deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
+    deps.notify(
+      orphan ? localOrphanImportedNotice(save.name) : `Office で保存した内容を取り込みました: 「${save.name}」`,
+    );
     return 'created';
   }
 
@@ -349,11 +393,16 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // 🔴 **1 本ずつ**(上の `serial` の注記)── 並行に走ると、表がまだ空のまま
     //    同じ文書のノートを 2 件作る
     return serial(async () => {
-      // 🔴 **holder だけ**(放送は全タブに届く)
-      if (!deps.isHolder()) return [];
+      // 🔴 **holder だけ**(放送は全タブに届く)。⚠ 例外: 手元のファイルの書き戻しは DB に触れないので、
+      //    その合言葉を知っているタブが引き取る(#1087)
+      const holder = deps.isHolder();
       const dir = await deps.stage();
       if (dir === null) return [];
-      const all = await listStaged(dir);
+      const listed = await listStaged(dir);
+      const all = holder
+        ? listed
+        : listed.filter((s) => s.token !== undefined && isLocalFileToken(s.token) && deps.knowsLocal(s.token));
+      if (all.length === 0) return [];
       // 🔴 同じ文書の保存が複数あるときは**一番新しい 1 件だけ**を処理する(#1087)。
       //    古い版を後から書くと、新しい版を上書きして戻せない
       let live = all;
