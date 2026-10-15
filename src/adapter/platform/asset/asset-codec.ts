@@ -184,14 +184,14 @@ export interface ShrinkResult {
  */
 export async function shrinkImage(job: AssetShrinkJob): Promise<ShrinkResult> {
   const g = globalThis as unknown as {
-    createImageBitmap?: (b: Blob) => Promise<ImageBitmap>;
+    createImageBitmap?: (b: Blob, o?: ImageBitmapOptions) => Promise<ImageBitmap>;
     OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvas;
   };
   if (!g.createImageBitmap || !g.OffscreenCanvas)
     return { width: 0, height: 0, shrunk: null, why: 'no-api' };
   let bmp: ImageBitmap | null = null;
   try {
-    bmp = await g.createImageBitmap(job.blob);
+    bmp = await g.createImageBitmap(job.blob, { imageOrientation: 'from-image' });
     const { width, height } = bmp;
     const plan = shrinkPlan(job.mime, job.blob.size, width, height);
     if (plan === null) return { width, height, shrunk: null, why: 'no-plan' };

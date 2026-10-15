@@ -18,6 +18,20 @@ const EXT: Readonly<Record<string, string>> = {
   'image/bmp': 'bmp',
 };
 
+/**
+ * 🔴 **本物の名前を持つ file はその名前を使う**(#1087)。
+ * ⚠ 使わないのは、名前が空のとき と、ブラウザがクリップボードの画像に付ける既定の名前
+ *   (`image.png` / `image.jpg` など、`image` + 拡張子)のとき ── 後者は貼った日時の名前のほうが探せる。
+ */
+export function pastedFileName(
+  file: { readonly type: string; readonly name?: string },
+  at: Date,
+): string {
+  const real = (file.name ?? '').trim();
+  if (real === '' || /^image\.[A-Za-z0-9]{1,5}$/i.test(real)) return pastedImageName(file, at);
+  return real;
+}
+
 /** 2 桁に揃える(`1` → `01`)。 */
 const two = (n: number): string => String(n).padStart(2, '0');
 

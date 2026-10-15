@@ -97,6 +97,8 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'image/svg+xml': 'svg',
   'image/avif': 'avif',
   'image/bmp': 'bmp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
   'image/tiff': 'tiff',
   'application/pdf': 'pdf',
   'application/json': 'json',

@@ -601,7 +601,7 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
   if (!win) return null;
   const waitClose = deps.waitClose ?? ((w) => waitForWindowClose(w));
   const createBitmap =
-    deps.createBitmap ?? ((b: Blob) => createImageBitmap(b) as Promise<ImageDrawBitmap>);
+    deps.createBitmap ?? ((b: Blob) => createImageBitmap(b, { imageOrientation: 'from-image' }) as Promise<ImageDrawBitmap>);
   let release: (() => void) | null = null;
   let finished = false;
   const finish = (): void => {
