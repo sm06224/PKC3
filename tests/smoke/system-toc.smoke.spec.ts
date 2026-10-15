@@ -519,7 +519,15 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     page.locator('[data-pkc-field="settings-file-summary"]'),
     '空の値の項目を入れないと、押す前に告げていない',
   ).toContainText('1 件は中身が空か読めない形なので入れません');
+  const unreadBadge = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  const unreadBefore = await unreadBadge.textContent();
   await clickReal(page, '[data-pkc-field="settings-file-apply"]');
+  // 成功の知らせが出て、未読の数は増えない(成功は「結果」で、問題ではない)
+  await expect(
+    page.locator('[data-pkc-region="status"] [data-pkc-field="status-text"]'),
+    '取り込み成功の字が出ない',
+  ).toContainText('設定を 1 件入れました');
+  expect(await unreadBadge.textContent(), '設定の取り込み成功で未読が増えた').toBe(unreadBefore);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('pkc3.theme')), {
       message: '読み込んだ設定(見た目)が端末に入っていない',
