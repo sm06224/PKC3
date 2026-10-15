@@ -310,7 +310,7 @@ export interface StorePort {
    * ⚠ **relations は消さない**(2026-08-05)── 消すとゴミ箱から戻しても
    * 居場所が戻らない。本当の処分は `purgeTrash`。
    */
-  deleteEntry(lid: string): Promise<void>;
+  deleteEntry(lid: string, opts?: { untouched?: boolean }): Promise<void>;
   /**
    * 居場所を張り替える(フォルダ整理)。`parentLid: null` = ルートへ。
    * ⚠ 1 op = 1 tx ── 「落として張る」を割らない。
@@ -356,6 +356,8 @@ export interface StorePort {
     body: string;
     title: string | null;
     archetype: string | null;
+    /** 🔴 ゴミ箱へ移した版が控えた作成日時(#1087)。無ければ `null` / 省略(従来どおり「いま」)。 */
+    entryCreatedAt?: string | null;
   } | null>;
   listTrash(): Promise<
     Array<{
@@ -2152,7 +2154,7 @@ export function connectStoreEffects(
         enqueue(async () => {
           if (disposed) return;
           try {
-            await store.deleteEntry(ev.lid);
+            await store.deleteEntry(ev.lid, ev.untouched === true ? { untouched: true } : undefined);
           } catch (e) {
             // UI からは既に消えている(楽観)── 失敗は通知し、reload で再出現する
             // (非破壊側に倒れる)
@@ -3304,6 +3306,8 @@ export function connectStoreEffects(
               archetype,
               body: rev.body,
               entryOrder: ev.entryOrder,
+              // 🔴 作成日はゴミ箱へ移すときの控えを戻す(#1087)── 無い版(旧ビルドが積んだ行)は従来どおり「いま」
+              ...(rev.entryCreatedAt ? { createdAt: rev.entryCreatedAt } : {}),
               status: ext.status,
               date: ext.date,
               archived: ext.archived,

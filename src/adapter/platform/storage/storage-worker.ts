@@ -3864,10 +3864,24 @@ const handlers: Handlers = {
     database.exec('BEGIN IMMEDIATE');
     try {
       const row = database.selectObjects(
-        'SELECT title, archetype, body FROM entries WHERE cid = ? AND lid = ?',
+        'SELECT title, archetype, body, created_at FROM entries WHERE cid = ? AND lid = ?',
         [req.cid, req.lid],
-      )[0] as { title: string; archetype: string; body: string } | undefined;
-      if (row) {
+      )[0] as { title: string; archetype: string; body: string; created_at: string | null } | undefined;
+      if (row && req.untouched === true) {
+        /**
+         * 🔴 **何も書かれていない作りたてのノートは、ゴミ箱を経由せず行ごと消す**(#1087)。
+         * ⚠ 戻す先の無い物なので、履歴(作成時に積まれた版があれば)も居場所の辺も**同じ tx で**掃除する。
+         *   版を残すと「entries に居ない entry_lid の revisions」= ゴミ箱になり、空のノートが一覧に現れる。
+         */
+        database.exec({
+          sql: 'DELETE FROM revisions WHERE cid = ? AND entry_lid = ?',
+          bind: [req.cid, req.lid],
+        });
+        database.exec({
+          sql: 'DELETE FROM relations WHERE cid = ? AND (from_lid = ? OR to_lid = ?)',
+          bind: [req.cid, req.lid, req.lid],
+        });
+      } else if (row) {
         // 削除で tip(entries.body)が消えるので、鎖の base を**全文で確定**する。
         // 頭が既に同内容を記録していれば、その行を全文化するだけでよい
         // (行 id / content_hash は保つ ── change ID の安定)
@@ -3878,15 +3892,15 @@ const handlers: Handlers = {
           //   頭の版は**改名前の題名**のままで、ゴミ箱の一覧にも、戻したノートにもその題名が出ていた
           //   (戻すときの題名はこの行から読む)。改名は本文に触らない口(`renameEntry`)なので、ここで拾う
           database.exec({
-            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ? WHERE cid = ? AND id = ?`,
-            bind: [row.body, row.title, row.archetype, req.cid, head.id],
+            sql: `UPDATE revisions SET snapshot = ?, kind = 'full', title = ?, archetype = ?, entry_created_at = ? WHERE cid = ? AND id = ?`,
+            bind: [row.body, row.title, row.archetype, row.created_at, req.cid, head.id],
           });
         } else {
           database.exec({
             sql: `INSERT INTO revisions
                     (cid, id, entry_lid, created_at, rev_order, snapshot,
-                     title, archetype, content_hash, kind)
-                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full')`,
+                     title, archetype, content_hash, kind, entry_created_at)
+                  VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, 'full', ?)`,
             bind: [
               req.cid,
               `rev-${crypto.randomUUID()}`,
@@ -3896,6 +3910,7 @@ const handlers: Handlers = {
               row.title,
               row.archetype,
               hash,
+              row.created_at,
             ],
           });
         }
@@ -4238,7 +4253,7 @@ const handlers: Handlers = {
     // 「その entry の、目標以降の行」だけ(他 entry も古い側も触らない)
     const database = need();
     const target = database.selectObjects(
-      `SELECT entry_lid, rev_order, title, archetype, content_hash
+      `SELECT entry_lid, rev_order, title, archetype, content_hash, entry_created_at
          FROM revisions WHERE cid = ? AND id = ?`,
       [req.cid, req.id],
     )[0] as
@@ -4248,6 +4263,7 @@ const handlers: Handlers = {
           title: string | null;
           archetype: string | null;
           content_hash: string | null;
+          entry_created_at: string | null;
         }
       | undefined;
     if (!target) return null;
@@ -4326,7 +4342,12 @@ const handlers: Handlers = {
     if (target.content_hash && contentHash64Hex(state) !== target.content_hash) {
       throw new Error(`revision restore failed (integrity check): ${req.id}`);
     }
-    return { body: state, title: target.title, archetype: target.archetype };
+    return {
+      body: state,
+      title: target.title,
+      archetype: target.archetype,
+      entryCreatedAt: target.entry_created_at,
+    };
   },
   putAssetMeta: (req) => {
     const m = req.meta;

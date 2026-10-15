@@ -490,7 +490,16 @@ export type StorageRequest =
        * 一度も読まなかったのと同じ型 ── 在ると次に読む人が「効く」と思う)。
        */
     }
-  | { op: 'deleteEntry'; cid: string; lid: string }
+  | {
+      op: 'deleteEntry';
+      cid: string;
+      lid: string;
+      /**
+       * 🔴 **何も書かれていない作りたてのノート**(#1087)── 立てると、ゴミ箱にも履歴にも**何も残さず**
+       * 行ごと消す(「新規 → 何も打たず Esc」でゴミ箱に空のノートが溜まるのを防ぐ)。省略 = ゴミ箱へ移す。
+       */
+      untouched?: boolean;
+    }
   | { op: 'listRelations'; cid: string }
   | { op: 'bulkUpsertRelations'; cid: string; relations: RelationUpsert[] }
   /**
@@ -825,6 +834,11 @@ export interface RevisionBody {
   body: string;
   title: string | null;
   archetype: string | null;
+  /**
+   * 🔴 **ノートが作られた日時**(#1087)。ゴミ箱へ移すときに worker が控える(`entry_created_at`)── 戻すときに
+   * 作成日を「いま」へ作り直さないため。⚠ 控えが無い版(旧ビルドが積んだ・通常の履歴)は `null` / 省略。
+   */
+  entryCreatedAt?: string | null;
 }
 
 /** entry ごとの revision 件数(snapshot は読まない ── 常駐ゼロの根拠)。 */

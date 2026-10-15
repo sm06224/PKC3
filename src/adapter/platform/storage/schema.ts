@@ -139,6 +139,12 @@ export const REVISION_ADDED_COLUMNS: readonly string[] = [
   'archetype',
   'content_hash',
   'kind',
+  /**
+   * 🔴 **ノートの作成日時の控え**(#1087)。ゴミ箱へ移す版(`deleteEntry` が積む行)にだけ入れ、
+   * 戻すときに作成日を保つ。⚠ NOT NULL にしない / 既定値を入れない ── NULL = 「控えが無い」(旧ビルドが積んだ行・
+   * 通常の履歴)で、戻すときは従来どおり「いま」になる。旧ビルドはこの列を知らないので書かない(NULL のまま)。
+   */
+  'entry_created_at',
 ];
 
 /**
