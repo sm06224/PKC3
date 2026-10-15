@@ -131,8 +131,7 @@ export class WorkerLease {
     // アイドル kill の予約は**投函した時点で**畳む(飛んでいる間は殺さない)
     this.cancelIdle();
     if (this.worker && !this.starting) {
-      this.note('dispatch', { id });
-      this.worker.postMessage({ id, payload }, transfer);
+      this.post(this.worker, id, payload, transfer);
     } else {
       // 🔑 起動待ち ── **捨てずに溜める**。起動が済んだらまとめて流す
       this.buffer.push({ id, payload, transfer });
@@ -180,8 +179,28 @@ export class WorkerLease {
     const w = this.worker;
     if (!w) return;
     for (const job of this.buffer.splice(0)) {
-      this.note('dispatch', { id: job.id });
-      w.postMessage({ id: job.id, payload: job.payload }, job.transfer);
+      this.post(w, job.id, job.payload, job.transfer);
+    }
+  }
+
+  /**
+   * 1 件 worker へ流す。
+   * 🔴 `postMessage` は**同期で投げうる**(DataCloneError / 渡し済みの transfer)。
+   * 投げたまま抜けると `pending` に残った依頼が `busy` を永久に >0 にし、
+   * アイドル kill が二度と張られない ── 不可侵の「使われなければ kill」を破る。
+   * だから失敗したらその 1 件だけ落として(他の依頼は止めない)、アイドルを張り直す。
+   */
+  private post(w: Worker, id: number, payload: unknown, transfer: Transferable[]): void {
+    this.note('dispatch', { id });
+    try {
+      w.postMessage({ id, payload }, transfer);
+    } catch (e) {
+      const waiter = this.pending.get(id);
+      this.pending.delete(id);
+      const msg = e instanceof Error ? e.message : String(e);
+      this.note('fail', { id, note: msg.slice(0, 60) });
+      waiter?.reject(new Error(`${this.opts.name}: postMessage failed: ${msg}`));
+      this.armIdle();
     }
   }
 

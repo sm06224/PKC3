@@ -14,7 +14,7 @@
 import { WorkerLease } from '@adapter/platform/worker-lease';
 import { MAX_DATASETS, chartAltText, parseChartFence, type ChartSpec } from '@features/markdown/chart-fence';
 import { renderCachedPng, type DiagramPalette, type Raster, type RasterKey } from './mermaid-raster';
-import { hydrateDiagrams, type DiagramKind, type MermaidScope } from './mermaid-hydrate';
+import { hydrateDiagrams, type DiagramKind, type HydrateOptions, type MermaidScope } from './mermaid-hydrate';
 
 /** グラフの高さ(CSS px)。⚠ 幅から決める ── 本文に高さを書かせない。 */
 export function chartHeightFor(width: number): number {
@@ -96,6 +96,9 @@ function leaseOf(): WorkerLease {
   return lease;
 }
 
+/** chart の産出器の名前(鍵の `engine`)。 */
+export const CHART_ENGINE = 'chart.js';
+
 /**
  * 1 枚焼く(キャッシュがあればそれ)。
  * @param source 本文に書かれた原文(鍵になる ── これが変われば焼き直す)
@@ -105,7 +108,9 @@ export async function renderChartToPng(
   spec: ChartSpec,
   key: Omit<RasterKey, 'source'>,
 ): Promise<Raster> {
-  const full: RasterKey = { ...key, source, kind: 'chart' };
+  // 🔴 産出器の識別を鍵に渡す(`engine`)。chart.js の版は同梱の define が無いので、
+  //    版上げ・描画の変更は `RASTER_BAKE_VERSION` を上げて古い PNG を捨てる
+  const full: RasterKey = { ...key, source, kind: 'chart', engine: key.engine ?? CHART_ENGINE };
   return renderCachedPng(full, async () => {
     const height = chartHeightFor(key.width);
     const res = await leaseOf().run<{ png: ArrayBuffer; cssWidth: number }>({
@@ -153,6 +158,9 @@ export const CHART_KIND: DiagramKind = {
   savable: false,
 };
 
-export function hydrateChart(root: ParentNode | readonly ParentNode[]): MermaidScope {
-  return hydrateDiagrams(root, CHART_KIND);
+export function hydrateChart(
+  root: ParentNode | readonly ParentNode[],
+  opts?: HydrateOptions,
+): MermaidScope {
+  return hydrateDiagrams(root, CHART_KIND, opts);
 }

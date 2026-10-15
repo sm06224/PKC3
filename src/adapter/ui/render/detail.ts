@@ -23,7 +23,7 @@ import { LONG_NOTE_ATTR, syncLongNote } from './long-note';
 import { replaceOnMediaError } from './media-error';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { isZipAttachment } from '@features/archive/zip-browse';
-import { hydrateMermaid, pruneScopes, type MermaidScope } from './mermaid-hydrate';
+import { hydrateMermaid, pruneScopes, type HydrateOptions, type MermaidScope } from './mermaid-hydrate';
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
@@ -71,10 +71,13 @@ import { paintReadingTime } from './reading-time';
  * ⚠ 片方だけ呼ぶ面が生まれると、その面でだけグラフが空のままになる
  *   (2026-08 に mermaid で実際に起きた「器が空のまま残る」の再演)。
  */
-export function hydrateFigures(root: ParentNode | readonly ParentNode[]): MermaidScope[] {
+export function hydrateFigures(
+  root: ParentNode | readonly ParentNode[],
+  opts?: HydrateOptions,
+): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
-  return [hydrateMermaid(root), hydrateChart(root), hydrateMath(root)];
+  return [hydrateMermaid(root, opts), hydrateChart(root, opts), hydrateMath(root)];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';
@@ -3231,7 +3234,8 @@ export class DetailRenderer {
         if (r.inserted.length > 0) {
           // 🔴 添付の画像もここで差す(#250 ── 2 面側と同じ穴が在った)
           void this.hydrateAssetRefs(r.inserted, this.hydrateToken, previewOpts);
-          scopes.push(...hydrateFigures(r.inserted));
+          // 🔴 編集プレビューは途中の原文を焼く ── 最古扱いで置く(他のノートの図を押し出さない)
+          scopes.push(...hydrateFigures(r.inserted, { volatile: true }));
         }
         pruneScopes(scopes);
         // 🔴 **画面から消えた `<img>` のぶんを返す**(読む面と同じ規律)──

@@ -19,10 +19,12 @@ import { readFileSync } from 'node:fs';
 import {
   cacheKey,
   DIAGRAM_CACHE_MAX_BYTES,
+  RASTER_BAKE_VERSION,
   planEviction,
   svgViewBox,
   type DiagramPalette,
 } from '../../src/adapter/ui/render/mermaid-raster';
+import { CHART_ENGINE } from '../../src/adapter/ui/render/chart-raster';
 import { MERMAID_VERSION } from '../../src/runtime/mermaid-version';
 
 const PALETTE: DiagramPalette = {
@@ -50,8 +52,34 @@ describe('鍵の作り方', () => {
     expect(cacheKey({ ...base, theme: 'dark' })).not.toBe(k);
     expect(cacheKey({ ...base, width: 656 })).not.toBe(k);
     expect(cacheKey({ ...base, dpr: 2 })).not.toBe(k);
-    // ⚠ 同じ 4 次元なら同じ鍵(色の実体は鍵に混ぜない ── テーマ名で足りる)
-    expect(cacheKey({ ...base, palette: { ...PALETTE, fg: '#111' } })).toBe(k);
+    // ⚠ 同じ入力なら同じ鍵
+    expect(cacheKey({ ...base })).toBe(k);
+    expect(cacheKey({ ...base, palette: { ...PALETTE } })).toBe(k);
+  });
+
+  /**
+   * 🔴 配色の**実際の値**が鍵に入る。テーマ名だけだと、`tokens.css` の色を変えた版を配っても
+   * 同じテーマ名の古い色の PNG が IDB から返り続ける(6 色それぞれを 1 つだけ変えて見る)。
+   */
+  it('🔴 配色の値(bg / alt / fg / line / border / accent)のどれを変えても別の鍵になる', () => {
+    const k = cacheKey(base);
+    for (const f of ['bg', 'alt', 'fg', 'line', 'border', 'accent'] as const) {
+      expect(cacheKey({ ...base, palette: { ...PALETTE, [f]: '#123456' } }), `${f} が鍵に入っていない`).not.toBe(k);
+    }
+  });
+
+  it('🔴 焼き方の版(RASTER_BAKE_VERSION)が鍵に入り、上げると鍵が変わる', () => {
+    const k = cacheKey(base);
+    expect(k).toContain(`b${RASTER_BAKE_VERSION}`);
+    expect(k.replace(`b${RASTER_BAKE_VERSION}`, `b${RASTER_BAKE_VERSION + 1}`)).not.toBe(k);
+    expect(Number.isInteger(RASTER_BAKE_VERSION)).toBe(true);
+  });
+
+  it('🔴 chart の鍵は産出器(engine)を持つ(mermaid の版には引きずられない)', () => {
+    const chart = cacheKey({ ...base, kind: 'chart', engine: CHART_ENGINE });
+    expect(chart).toContain(CHART_ENGINE);
+    expect(chart).not.toBe(cacheKey({ ...base, kind: 'chart' }));
+    expect(chart).not.toContain(MERMAID_VERSION);
   });
 
   /**
