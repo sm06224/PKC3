@@ -1383,7 +1383,10 @@ describe('importPkc2File (P6b 実行部)', () => {
    * fixture には無いので、それらは確認を出さずに素通る ── 回帰無し)。
    */
   describe('取込前の確認(#1017 段④b 追補)', () => {
-    async function pkc3ArchiveFile(name: string): Promise<File> {
+    async function pkc3ArchiveFile(
+      name: string,
+      stamps: { created: string | null; updated: string | null } = { created: null, updated: null },
+    ): Promise<File> {
       const { writeArchive } = await import('../../src/features/export/pkc3-archive');
       const src = {
         cid: 'c1',
@@ -1393,8 +1396,8 @@ describe('importPkc2File (P6b 実行部)', () => {
             lid: 'n1',
             title: 'ノート',
             archetype: 'text',
-            created_at: null,
-            updated_at: null,
+            created_at: stamps.created,
+            updated_at: stamps.updated,
             entry_order: 1,
             status: null,
             date: null,
@@ -1411,6 +1414,18 @@ describe('importPkc2File (P6b 実行部)', () => {
       const blob = (await writeArchive(src, '2026-09-21T00:00:00.000Z')).blob;
       return new File([blob], name);
     }
+
+    it('🔴 バックアップのノートの作成・更新時刻が、書き込みへ運ばれる(取り込んだ時刻にならない) (#1087)', async () => {
+      const { d, deps, written } = harness();
+      const file = await pkc3ArchiveFile('a.pkc3-full.zip', {
+        created: '2020-01-02 03:04:05',
+        updated: '2021-02-03 04:05:06',
+      });
+      await importPkc2File(d, deps, file);
+      expect(written, '前提: 1 件書いている').toHaveLength(1);
+      expect(written[0]!.createdAt).toBe('2020-01-02 03:04:05');
+      expect(written[0]!.updatedAt).toBe('2021-02-03 04:05:06');
+    });
 
     it('🔴 `confirmArchiveImport` が `false` を返すと、1 件も書かずに終える(OP_FAILED も出さない)', async () => {
       const { d, deps, written, reloadCount, notices } = harness();

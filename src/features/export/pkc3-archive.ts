@@ -28,6 +28,7 @@ import {
   type ReadableAssetSource,
 } from '../import/zip-reader';
 import { createWarnCollector, type WarnCollector } from './warn-cap';
+import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
 export const ARCHIVE_FORMAT = 'pkc3-archive';
@@ -240,7 +241,12 @@ const j = (v: unknown): string => JSON.stringify(v);
  * アーカイブ ZIP を書く。
  * @throws 0 件のときは**断る** ── 「書き出したつもりで空」を作らない
  */
-export async function writeArchive(src: ArchiveSource, exportedAt: string): Promise<ArchiveResult> {
+export async function writeArchive(
+  src: ArchiveSource,
+  exportedAt: string,
+  /** 試験用: 取り込み直すときに読める `container.json` の字数の上限(既定 = 実際の上限)。 */
+  maxContainerChars: number = MAX_EMBED_TEXT_CHARS,
+): Promise<ArchiveResult> {
   const warnings: string[] = [];
   // 🔑 同種の注意は上限まで(規則は `warn-cap.ts` の 1 本 ── P8 段㉒)
   const warn = createWarnCollector(warnings);
@@ -253,6 +259,7 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
   // ── container.json を**部品として**積む(丸ごと文字列にしない)
   const parts: ZipPart[] = [`{"meta":${j({ cid: src.cid, title: src.title })},"entries":[`];
   let entryCount = 0;
+  let blobChars = 0;
   let after: { entryOrder: number; lid: string } | undefined;
   for (;;) {
     const { rows, done, next } = await src.listBodies(after, BODY_BATCH_BYTES);
@@ -273,6 +280,9 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;
     }
+    // 🔴 取り込み直す側は container.json を `Blob.text()` で 1 本の文字列にする ── 上限は**字数**で効く。
+    //   Blob にすると字数が見えなくなる(bytes は日本語で約 3 倍)ので、手放す前に数える
+    blobChars += chunk.length;
     if (chunk !== '') parts.push(new Blob([chunk]));
     if (done) break;
     if (!next) break; // 進めないなら止める(無限ループを作らない)
@@ -334,6 +344,12 @@ export async function writeArchive(src: ArchiveSource, exportedAt: string): Prom
       }),
     ],
   );
+  // 🔴 **取り込み直せない大きさの container.json を、黙って書かない**(#1087)。⚠ 断らない(警告だけ)──
+  //   書き出し自体は成功し、添付は別の entry なので影響しない。user は「バックアップを取った」と
+  //   思うので、必要になった日に初めて読めないと知る前に言う
+  let containerChars = blobChars;
+  for (const p of parts) if (typeof p === 'string') containerChars += p.length;
+  if (containerChars > maxContainerChars) warnings.push(notImportableArchiveMessage(containerChars));
   await w.add(CONTAINER, parts);
 
   let assetCount = 0;
@@ -547,6 +563,9 @@ export function restoreArchive(
     archetype: string;
     body: string;
     entryOrder: number;
+    /** 元の作成・更新時刻(#1087)。書き出しに無ければ null(= 取込時の今)。 */
+    createdAt: string | null;
+    updatedAt: string | null;
   }>;
   relations: Array<{ id: string; fromLid: string; toLid: string; kind: string }>;
   /** ⚠ **key だけでなく mime も返す**(review M-4)── 落とすと Blob の type と
@@ -610,6 +629,8 @@ export function restoreArchive(
       // ⚠ **変換しない**(既に PKC-Markdown)。付け替えた lid の写しは取込側(上の `lidRemap`)
       body: e.body,
       entryOrder: opts.orderBase + i + 1,
+      createdAt: e.createdAt,
+      updatedAt: e.updatedAt,
     };
   });
 

@@ -20,6 +20,7 @@ import {
   type Pkc3Archive,
 } from '../../src/features/export/pkc3-archive';
 import { ZipWriter } from '../../src/features/export/zip-writer';
+import { collectExistingLids } from '../../src/features/import/existing-lids';
 
 const opts = (over: Partial<Parameters<typeof restoreArchive>[1]> = {}) => {
   let n = 0;
@@ -241,5 +242,36 @@ describe('つなぐ先の無いつながり(#1087)', () => {
     expect(got.relations).toHaveLength(0);
     expect(got.warnings).toContain('「議事録」から、つなぐ先のノートが無いつながりを除きました');
     expect(got.warnings.join('\n'), '内部の ID が出ている').not.toContain('rel-secret-1');
+  });
+});
+
+describe('復元 — 作成・更新時刻と system 領域の lid (#1087)', () => {
+  it('🔴 作成・更新時刻を運ぶ(無ければ null)', () => {
+    const got = restoreArchive(
+      archive({
+        entries: [
+          { ...entry('n1'), createdAt: '2020-01-02 03:04:05', updatedAt: '2021-02-03 04:05:06' },
+          entry('n2'),
+        ],
+      }),
+      opts(),
+    );
+    expect(got.entries.map((e) => [e.createdAt, e.updatedAt])).toEqual([
+      ['2020-01-02 03:04:05', '2021-02-03 04:05:06'],
+      [null, null],
+    ]);
+  });
+
+  it('🔴 細工したバックアップの sys-messages / sys-jobs は、メッセージのノートを上書きせず付け替わる', async () => {
+    const existingLids = await collectExistingLids({
+      fromState: () => [],
+      entryLids: async () => [],
+      revisionLids: async () => [],
+    });
+    const got = restoreArchive(
+      archive({ entries: [entry('sys-messages'), entry('sys-jobs'), entry('n1')] }),
+      opts({ existingLids }),
+    );
+    expect(got.entries.map((e) => e.lid), 'system の lid のまま取り込まれる').toEqual(['new-1', 'new-2', 'n1']);
   });
 });

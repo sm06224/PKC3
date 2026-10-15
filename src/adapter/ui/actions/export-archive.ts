@@ -13,7 +13,7 @@ import type { Dispatcher } from '@adapter/state/dispatcher';
 import { exportBlockedNote } from '@adapter/state/app-state';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
 import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
-import { looksCorrupt } from '@features/storage/db-corruption';
+import { CORRUPT_REFUSAL, looksCorrupt } from '@features/storage/db-corruption';
 import {
   rescueArchiveDetail,
   rescueArchiveSource,
@@ -314,7 +314,19 @@ async function fallbackToRescueArchive(
     // 🔑 添付の bytes を一緒に入れる(#1005 と同じ実体)。⚠ 無ければ入れないだけ
     ...(deps.rescue.assets === undefined ? {} : { assets: deps.rescue.assets }),
   });
-  const out = await writeArchive(source, iso);
+  let out: ArchiveWriteOut;
+  try {
+    out = await writeArchive(source, iso);
+  } catch (e) {
+    /**
+     * 🔴 **拾い出しが 1 件も拾えなかった**(#1087)。⚠ そのまま投げると、壊れた保存領域の人が
+     *   「書き出せるノートが 1 件もありません」を読む ── ノートを作っていないかのような字で、
+     *   次の一手(保存領域の点検)に繋がらない。壊れの案内(`CORRUPT_REFUSAL`)を出す。
+     * ⚠ 0 件以外の失敗(書けなかった等)は、そのまま投げる。
+     */
+    if (stats().entries === 0) throw new Error(CORRUPT_REFUSAL, { cause: e });
+    throw e;
+  }
   const s = stats();
   /**
    * 🔴 **書き出せた枝でだけ記録する**(#986 段③と同じ規律)── 捨てる前の窓

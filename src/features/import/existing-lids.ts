@@ -34,6 +34,7 @@
  * 上書きは減る。⚠ 逆に「DB だけを見る」に**しない** ── state にしか居ない
  * (書込 ack がまだ返っていない)lid を落とすと、今度はそちらを上書きする。
  */
+import { SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID } from '../message/message-log';
 
 /** DB から引ける lid の口。⚠ 呼び側(`main.ts`)が store client を包んで渡す。 */
 export interface LidSources {
@@ -57,7 +58,20 @@ export interface LidSources {
  */
 export async function collectExistingLids(src: LidSources): Promise<Set<string>> {
   const [entryLids, revisionLids] = await Promise.all([src.entryLids(), src.revisionLids()]);
-  return new Set<string>([...src.fromState(), ...entryLids, ...revisionLids]);
+  /**
+   * 🔴 **system 領域のメッセージの 2 lid を必ず足す**(#1087)。⚠ `entryLids` は user 領域のノートだけで、
+   *   `state` にも載らない ── 足さないと、細工したバックアップが `sys-messages` / `sys-jobs` の lid を
+   *   持つノートを運んだとき、`ON CONFLICT DO UPDATE` で**メッセージのノートを上書きできる**
+   *   (上書き側は realm を動かさないので、user のノートの顔をした本文がメッセージの欄に入る)。
+   *   足せば他の衝突と同じく再採番される。
+   */
+  return new Set<string>([
+    ...src.fromState(),
+    ...entryLids,
+    ...revisionLids,
+    SYSTEM_MESSAGE_LID,
+    SYSTEM_JOB_LID,
+  ]);
 }
 
 /**

@@ -35,10 +35,13 @@ import {
 
 const NOW = '2026-09-18T00:00:00.000Z';
 
+/** 並び・時刻を読めなかった行(#1087)。 */
+const NOSTAMP = { entryOrder: null, createdAt: null, updatedAt: null } as const;
+
 const THREE: RescuedRow[] = [
-  { lid: 'a1', title: '牛乳を買う', archetype: 'text', body: '# 牛乳を買う\n\n近所で\n' },
-  { lid: 'b2', title: '会議のメモ', archetype: 'text', body: '# 会議のメモ\n\n- 決めたこと\n' },
-  { lid: 'c3', title: '日本語の題', archetype: 'text', body: '# 日本語の題\n\nあいうえお\n' },
+  { lid: 'a1', title: '牛乳を買う', archetype: 'text', body: '# 牛乳を買う\n\n近所で\n', ...NOSTAMP },
+  { lid: 'b2', title: '会議のメモ', archetype: 'text', body: '# 会議のメモ\n\n- 決めたこと\n', ...NOSTAMP },
+  { lid: 'c3', title: '日本語の題', archetype: 'text', body: '# 日本語の題\n\nあいうえお\n', ...NOSTAMP },
 ];
 
 /** 壊れた DB の代わり。⚠ 読めない区画は**例外ではなく `skipped`** で返る(本物と同じ)。 */
@@ -98,6 +101,7 @@ function harness(
   ports: RebuildPorts;
   calls: string[];
   written: () => readonly { lid: string }[];
+  writtenFull: () => readonly import('../../src/features/storage/container-rebuild').RebuiltEntry[];
   /** 書き戻した物（#1087）。 */
   wrote: {
     relations: RescuedRelation[];
@@ -124,6 +128,7 @@ function harness(
     });
   const calls: string[] = [];
   let written: readonly { lid: string }[] = [];
+  let writtenFull: readonly import('../../src/features/storage/container-rebuild').RebuiltEntry[] = [];
   const idb = over.assets;
   const ports: RebuildPorts = {
     pickRelations: onePage(over.relations ?? []),
@@ -189,6 +194,7 @@ function harness(
       calls.push(`writeEntries:${cid}:${entries.length}`);
       if (over.failWrite !== undefined) throw new Error(over.failWrite);
       written = entries.map((e) => ({ lid: e.lid }));
+      writtenFull = [...entries];
     },
     forgetLocal: () => {
       calls.push('forgetLocal');
@@ -204,7 +210,7 @@ function harness(
       calls.push('announceWiped');
     },
   };
-  return { ports, calls, written: () => written, wrote };
+  return { ports, calls, written: () => written, writtenFull: () => writtenFull, wrote };
 }
 
 describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
@@ -345,7 +351,7 @@ describe('🔴 拾った中身で、その場に建て直す(#1006)', () => {
    */
   it('🔑 チェックの状態と日付が、本文から戻る', () => {
     const rows: RescuedRow[] = [
-      { lid: 't1', title: '買い物', archetype: 'todo', body: '# 買い物\n\n- [x] 牛乳\n' },
+      { lid: 't1', title: '買い物', archetype: 'todo', body: '# 買い物\n\n- [x] 牛乳\n', ...NOSTAMP },
     ];
     const out = rebuiltEntries(rows);
     expect(out).toHaveLength(1);
@@ -667,6 +673,46 @@ describe('🔴 つながり・履歴・添付の登録行・色が戻る（#1087
     expect(r.tagColorsRestored).toBe(1);
     // 🔑 読むのは捨てる前
     expect(h.calls.indexOf('readTagColors')).toBeLessThan(h.calls.indexOf('wipeStorage'));
+  });
+
+  it('🔴 保険の zip にも色が入る（メモリ上のみ / 書き戻し失敗で終わっても色が残る）', async () => {
+    const colors = [{ tag: '仕事', color: '#ff0000' }];
+    let blob: Blob | null = null;
+    const h = harness({ tagColors: colors });
+    const ports: RebuildPorts = {
+      ...h.ports,
+      saveArchive: async (source) => {
+        blob = (await writeArchive(source, NOW)).blob;
+      },
+    };
+    await rebuildContainer('c-old', 't', ports);
+    const got = await readArchive(blob!);
+    expect(got.tagColors, '色が zip に入っていない').toEqual(colors);
+  });
+
+  it('🔴 読めた並びと時刻を書き戻す・zip にも入れる。読めない分は拾った順 / null', async () => {
+    const rows: RescuedRow[] = [
+      { ...THREE[0]!, entryOrder: 7, createdAt: '2020-01-02 03:04:05', updatedAt: '2021-02-03 04:05:06' },
+      { ...THREE[1]!, entryOrder: null, createdAt: null, updatedAt: null },
+    ];
+    const h = harness({ rows });
+    let blob: Blob | null = null;
+    const ports: RebuildPorts = {
+      ...h.ports,
+      saveArchive: async (source) => {
+        blob = (await writeArchive(source, NOW)).blob;
+      },
+    };
+    await rebuildContainer('c-old', 't', ports);
+    const w = h.writtenFull();
+    expect(w.map((e) => e.entryOrder), '並びを失っている').toEqual([7, 2]);
+    expect(w[0]!.createdAt).toBe('2020-01-02 03:04:05');
+    expect(w[0]!.updatedAt).toBe('2021-02-03 04:05:06');
+    expect(w[1]!.createdAt, '読めない時刻をでっち上げた').toBeNull();
+    const z = (await readArchive(blob!)).entries;
+    expect(z.map((e) => e.entryOrder)).toEqual([7, 2]);
+    expect(z[0]!.createdAt).toBe('2020-01-02 03:04:05');
+    expect(z[1]!.createdAt).toBeNull();
   });
 
   it('🔴 色が読めなくても、建て直しは止めない', async () => {

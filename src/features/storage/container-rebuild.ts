@@ -103,6 +103,10 @@ export interface RescuedRow {
   readonly title: string;
   readonly archetype: string;
   readonly body: string;
+  /** 🔑 読めた並び・時刻(#1087)。`null` = 読めなかった(でっち上げず、代わりは書き戻し側で決める)。 */
+  readonly entryOrder: number | null;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
 }
 
 /** 書き戻す 1 件。⚠ 形は storage の `EntryUpsert` に揃える(層をまたいで型を引かない)。 */
@@ -115,6 +119,9 @@ export interface RebuiltEntry {
   readonly status: string | null;
   readonly date: string | null;
   readonly archived: boolean;
+  /** 読めた時刻(#1087)。`null` = 取り込んだ今(DB が刻む)。 */
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
 }
 
 /** 進み具合を外へ出す(画面が「止まった」と読まれないように)。 */
@@ -144,7 +151,15 @@ export async function collectRescued(
         // ⚠ 同じ lid が 2 度来たら後を捨てる(壊れた DB では起こりうる)
         if (seen.has(r.lid)) continue;
         seen.add(r.lid);
-        rows.push({ lid: r.lid, title: r.title, archetype: r.archetype, body: r.body });
+        rows.push({
+          lid: r.lid,
+          title: r.title,
+          archetype: r.archetype,
+          body: r.body,
+          entryOrder: r.entryOrder ?? null,
+          createdAt: r.createdAt ?? null,
+          updatedAt: r.updatedAt ?? null,
+        });
       }
     },
     onProgress,
@@ -171,6 +186,11 @@ export function rebuildArchiveSource(opts: {
   readonly extras?: RescuedExtras;
   /** 🔴 ノートの拾い出しを途中で打ち切った(#1087)。 */
   readonly truncated?: boolean;
+  /**
+   * 🔴 **捨てる前に読んだタグの色**(#1087)。⚠ 安全のための zip にも入れる ── 入れないと、
+   * 建て直しが「メモリ上のみ / 書き戻し失敗 / 保存先を失った」で終わった日に、色が zip にも画面にも残らない。
+   */
+  readonly tagColors?: ReadonlyArray<{ tag: string; color: string }>;
 }): { readonly source: ArchiveSource; readonly stats: () => RescueStats } {
   const assetPorts = assetArchivePorts(opts.cid, opts.assets);
   const source: ArchiveSource = {
@@ -181,11 +201,10 @@ export function rebuildArchiveSource(opts: {
         lid: r.lid,
         title: r.title,
         archetype: r.archetype,
-        // ⚠ 拾い出しは時刻を持っていない ── **でっち上げない**(null で出す)
-        created_at: null,
-        updated_at: null,
-        // 🔑 並びは拾った順(壊れた DB で元の順番は読めない)
-        entry_order: i + 1,
+        // 🔑 読めた時刻・並びを運ぶ(#1087)。⚠ 読めなかった分は**でっち上げない**(時刻は null、並びは拾った順)
+        created_at: r.createdAt,
+        updated_at: r.updatedAt,
+        entry_order: r.entryOrder ?? i + 1,
         status: null,
         date: null,
         archived: 0,
@@ -199,6 +218,9 @@ export function rebuildArchiveSource(opts: {
     getAssetBlob: assetPorts.getAssetBlob,
     // 🔑 つながりと履歴(#1087)。⚠ 拾い出しの zip と**同じ口**(`extrasArchivePorts`)
     ...extrasArchivePorts(opts.extras),
+    ...(opts.tagColors === undefined
+      ? {}
+      : { listTagColors: async () => opts.tagColors!.map((c) => ({ tag: c.tag, color: c.color })) }),
   };
   return {
     source,
@@ -230,10 +252,13 @@ export function rebuiltEntries(rows: readonly RescuedRow[]): RebuiltEntry[] {
       title: r.title,
       archetype: r.archetype,
       body: r.body,
-      entryOrder: i + 1,
+      // 🔑 読めた並びを使う。読めなければ拾った順(#1087)
+      entryOrder: r.entryOrder ?? i + 1,
       status: ext.status,
       date: ext.date,
       archived: ext.archived,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
     };
   });
 }
@@ -376,6 +401,7 @@ export async function rebuildContainer(
     empty: got.empty,
     extras,
     truncated: got.truncated,
+    tagColors,
     ...(ports.assets === undefined ? {} : { assets: ports.assets }),
   });
   await ports.saveArchive(source);

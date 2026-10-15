@@ -75,6 +75,10 @@ export interface RescuePageLike {
     readonly title: string;
     readonly archetype: string;
     readonly body: string;
+    /** 読めた並び・時刻(#1087)。省略 / null = 読めなかった。 */
+    readonly entryOrder?: number | null;
+    readonly createdAt?: string | null;
+    readonly updatedAt?: string | null;
   }>;
   readonly lastRowid: number;
   readonly skipped: number;

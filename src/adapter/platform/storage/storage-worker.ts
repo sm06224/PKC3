@@ -1573,15 +1573,18 @@ const NEEDS_BACKFILL =
  *   「作られたとき」に決まる値で、**本文を保存し直すたびに再判定する物ではない**。
  *   `EntryUpsert.realm` を省いた呼び側(いまの全経路)は、既存行の領域を
  *   1 バイトも動かさずに済む。
+ * 🔴 **`updated_at` は ON CONFLICT で `datetime('now')` を直に打つ**(#1087)── INSERT の値は
+ *   取込が運んだ過去の時刻でありうるので、`excluded.updated_at` を使うと通常の保存が
+ *   過去の時刻を刻んでしまう。
  */
 const UPSERT_SQL = `INSERT INTO entries
     (cid, lid, title, archetype, created_at, updated_at,
      entry_order, status, date, archived, task_total, body_chars, body_tags, realm, body)
-  VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, datetime('now')), ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(cid, lid) DO UPDATE SET
     title = excluded.title,
     archetype = excluded.archetype,
-    updated_at = excluded.updated_at,
+    updated_at = datetime('now'),
     entry_order = excluded.entry_order,
     status = excluded.status,
     date = excluded.date,
@@ -1603,6 +1606,9 @@ function bindUpsert(cid: string, e: EntryUpsert): (string | number | null)[] {
     e.lid,
     e.title,
     e.archetype,
+    // 取込が運んできた時刻(省略 = 今)。⚠ INSERT の側にしか効かない(UPSERT_SQL の注記)
+    e.createdAt ?? null,
+    e.updatedAt ?? null,
     e.entryOrder,
     e.status,
     e.date,
@@ -4707,7 +4713,7 @@ const handlers: Handlers = {
      */
     const page = rescueScan(database, {
       table: 'entries',
-      columns: 'rowid, cid, lid, title, archetype, body, realm',
+      columns: 'rowid, cid, lid, title, archetype, body, realm, entry_order, created_at, updated_at',
       afterRowid: req.afterRowid,
       chunks: req.chunks,
       take: (r) => {
@@ -4719,6 +4725,9 @@ const handlers: Handlers = {
           title: String(r[3]),
           archetype: String(r[4]),
           body: String(r[5] ?? ''),
+          entryOrder: r[7] === null || r[7] === undefined || !Number.isFinite(Number(r[7])) ? null : Number(r[7]),
+          createdAt: r[8] === null || r[8] === undefined ? null : String(r[8]),
+          updatedAt: r[9] === null || r[9] === undefined ? null : String(r[9]),
         });
       },
     });
