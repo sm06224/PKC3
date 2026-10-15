@@ -12,12 +12,10 @@
  */
 import { parseFrontmatter } from '@features/markdown/frontmatter';
 import { scanLinks } from '@features/markdown/link-scan';
+import { importTitleOf } from './fold-breaks';
 
 /** `file_handlers` が宣言する拡張子。⚠ manifest と parity test で縛る。 */
 export const MARKDOWN_EXTENSIONS = ['.md', '.markdown'] as const;
-
-/** 題名の上限。1 行に 100 万字の「題名」を作らせない(本文は原文のまま残る)。 */
-const TITLE_MAX = 200;
 
 /**
  * frontmatter の `archetype` として受ける値。
@@ -177,8 +175,8 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
     heading ??
     (fromName !== '' ? fromName : null) ??
     '無題';
-  const title =
-    rawTitle.length > TITLE_MAX ? `${rawTitle.slice(0, TITLE_MAX - 1)}…` : rawTitle;
+  // 🔴 前書きの `title: "a\nb"` は `\n` が本当の改行になる ── 畳まないと題名が 2 行になり、外の字で新しい記法の行を差し込める(#1087)。上限も同じ口(200 字)
+  const title = importTitleOf(rawTitle);
 
   // archetype は**登録済みのものだけ**受ける。未知の値をそのまま入れると
   // 「flavor が text fallback で動くのに、entry には嘘の archetype が残る」

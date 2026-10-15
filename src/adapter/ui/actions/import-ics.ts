@@ -26,7 +26,7 @@ import {
 } from '@features/schedule/ics-import';
 import type { MarkdownImportDeps } from './import-markdown';
 import { failImport } from './import-failure';
-import { readImportText } from '@features/import/text-decode';
+import { readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 
 const ZERO: IcsCounts = {
   cancelled: 0,
@@ -76,7 +76,9 @@ export async function importIcsFiles(
           `「${file.name}」は大きすぎて取り込めません(${humanBytes(ICS_IMPORT_MAX_BYTES)} まで。ノートは 1 件も追加されていません)`,
         );
       }
-      const parsed = parseIcs(await readImportText(file));
+      const read = await readImportTextInfo(file);
+      const parsed = parseIcs(read.text);
+      if (read.used === 'sjis') notes.push(`「${file.name}」: ${SJIS_GUESS_NOTE}`);
       if (parsed.overLimit) {
         return fail(
           `「${file.name}」は予定が多すぎて取り込めません(${ICS_IMPORT_MAX_EVENTS} 件まで。ノートは 1 件も追加されていません)`,

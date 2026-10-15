@@ -102,6 +102,29 @@ describe('importVcfFiles ── 実行部', () => {
     expect(h.written[0]!.title).toBe('山田 太郎');
   });
 
+  it('🔴 Shift_JIS と判断して読んだことを、取り込み時の注意で言う(UTF-8 のときは言わない)(#1087)', async () => {
+    const h = harness();
+    const enc = new TextEncoder();
+    const sjis = new Uint8Array([
+      ...enc.encode('BEGIN:VCARD\r\nVERSION:3.0\r\nFN:'), ...new Uint8Array([0x8e, 0x52, 0x93, 0x63]), ...enc.encode('\r\nEND:VCARD\r\n'),
+    ]);
+    await importVcfFiles(h.d, h.deps, [new File([sjis], 'a.vcf')]);
+    expect(h.reported().join('\n')).toContain('「a.vcf」: 文字コードを Shift_JIS と判断して読みました(文字が崩れて見えるときは、UTF-8 で保存し直して取り込んでください)');
+    const h2 = harness();
+    await importVcfFiles(h2.d, h2.deps, [vcfFile(CARD)]);
+    expect(h2.reported().join('\n')).not.toContain('Shift_JIS');
+  });
+
+  it('🔴 大きすぎる .vcf は読まずに断る(書込なし。先の file の分も書かない)(#1087)', async () => {
+    const h = harness();
+    const big = new File(['x'], 'big.vcf');
+    Object.defineProperty(big, 'size', { value: 9 * 1024 * 1024 });
+    const got = await importVcfFiles(h.d, h.deps, [vcfFile(CARD), big]);
+    expect(got).toBeNull();
+    expect(h.written, '先の file だけ書いた(部分的な成功)').toHaveLength(0);
+    expect(h.d.getState().error ?? '').toContain('「big.vcf」は大きすぎて取り込めません(8.0 MB まで。ノートは 1 件も追加されていません)');
+  });
+
   it('名前の無いカードには番号名を振り、注意で言う(黙って捨てない)', async () => {
     const h = harness();
     const noName = 'BEGIN:VCARD\r\nTEL:090\r\nEND:VCARD';

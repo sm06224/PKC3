@@ -69,6 +69,7 @@ import { extractMeta } from '@features/flavor';
 import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
 import { portableHtmlToArchive, type ReadImageArchive } from './import-portable';
 import { NOT_PKC_ZIP_REFUSAL, isImportRefusal, unreadableZipMessage } from '@features/import/refusal-text';
+import { TOO_LARGE_TO_READ_REFUSAL, isTooLargeToRead } from '@features/import/too-large';
 
 export interface ImportDeps {
   /**
@@ -868,6 +869,11 @@ export async function importPkc2File(
         `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります。「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`,
         true,
       );
+    }
+    // 🔴 大きすぎて文字列にできなかった(`RangeError: Invalid string length`)── 英語の例外の字を出さず、平らな字で言う(#1087)
+    //   ⚠ 上限は決めない。読んでみて作れなかったときだけ。ノートは 1 件も書いていない(上の `entriesWritten > 0` で別に言う)
+    if (isTooLargeToRead(e)) {
+      return fail(`「${file.name}」: ${TOO_LARGE_TO_READ_REFUSAL}(ノートは 1 件も追加されていません)`);
     }
     // 🔑 対象外のファイルは壊れていない ── 「失敗しました」を前に付けず、断りとして出す(#1087)
     if (isImportRefusal(reason(e))) return fail(reason(e));

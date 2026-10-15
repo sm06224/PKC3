@@ -12,7 +12,7 @@
  *    経路を作らない ── PKC2 で実際にデータを壊した形)
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { importPkc2File, type ImportDeps } from '../../src/adapter/ui/actions/import-pkc2';
 import type { EntryUpsert } from '../../src/adapter/platform/storage/schema';
@@ -1877,5 +1877,67 @@ describe('取り込みで付け替えた lid を、本文と履歴へ当てる',
     await importPkc2File(d, deps, await archiveWithLink());
     expect(written.find((w) => w.lid === 'a1')!.body).toBe('[B へ](entry:b1)\n');
     expect(restoredChains.every((c) => c.rewrite === undefined)).toBe(true);
+  });
+});
+
+describe('大きすぎて読み込めないとき(#1087)', () => {
+  const TOO_LARGE = 'ファイルが大きすぎて読み込めませんでした';
+
+  it('🔴 PKC2 の HTML を文字列にできない(RangeError)── 英語の例外の字を出さず、平らな字で断る', async () => {
+    const { d, deps, written, failures } = harness({ captureFailure: true });
+    const file = htmlFile({ container: { meta: {}, entries: [] }, export_meta: {} }, 'big.html');
+    file.text = async () => {
+      throw new RangeError('Invalid string length');
+    };
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(written).toHaveLength(0);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.message).toBe(`「big.html」: ${TOO_LARGE}(ノートは 1 件も追加されていません)`);
+    expect(failures[0]!.message).not.toContain('Invalid string length');
+    expect(failures[0]!.message, '失敗の前置きが付いた').not.toContain('取り込みに失敗');
+  });
+
+  it('対照群: 大きさと関係の無い RangeError は「大きすぎる」と言わない', async () => {
+    const { d, deps, failures } = harness({ captureFailure: true });
+    const file = htmlFile({ container: { meta: {}, entries: [] }, export_meta: {} }, 'x.html');
+    file.text = async () => {
+      throw new RangeError('Maximum call stack size exceeded');
+    };
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(failures[0]!.message).not.toContain(TOO_LARGE);
+    expect(failures[0]!.message).toContain('Maximum call stack size exceeded');
+  });
+
+  it('🔴 バックアップの中身を文字列にできない(RangeError)── 「JSON として読めません」と言い換えず、同じ平らな字で断る', async () => {
+    const { writeArchive } = await import('../../src/features/export/pkc3-archive');
+    const src = {
+      cid: 'c-src',
+      title: 'T',
+      listEntryMetas: async () => [
+        { lid: 'a1', title: 'a1', archetype: 'text', created_at: null, updated_at: null, entry_order: 1, status: null, date: null, archived: 0 },
+      ],
+      listBodies: async () => ({ rows: [{ lid: 'a1', body: '本文\n' }], done: true }),
+      listRelations: async () => [],
+      listAssetMetas: async () => [],
+      getAssetBlob: async () => null,
+      listRevisionLids: async () => [],
+      getRevisionChain: async () => [],
+    };
+    const file = new File([(await writeArchive(src, '2026-10-14T00:00:00.000Z')).blob], 'b.pkc3-full.zip');
+    // ⚠ 形式の見分け(manifest)は通し、ノートのデータ(container)を読むところだけ落とす ── 全部落とすと別の断りに化ける
+    const realParse = JSON.parse.bind(JSON);
+    const spy = vi.spyOn(JSON, 'parse').mockImplementation((text: string, reviver?: (k: string, v: unknown) => unknown) => {
+      if (text.includes('"a1"') && !text.includes('"format"')) throw new RangeError('Invalid string length');
+      return realParse(text, reviver);
+    });
+    try {
+      const { d, deps, written, failures } = harness({ captureFailure: true });
+      expect(await importPkc2File(d, deps, file)).toBeNull();
+      expect(written).toHaveLength(0);
+      expect(failures.map((f) => f.message).join('\n')).toContain(TOO_LARGE);
+      expect(failures.map((f) => f.message).join('\n')).not.toContain('JSON として読めません');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

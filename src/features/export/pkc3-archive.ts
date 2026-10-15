@@ -28,6 +28,7 @@ import {
   type ReadableAssetSource,
 } from '../import/zip-reader';
 import { createWarnCollector, type WarnCollector } from './warn-cap';
+import { isTooLargeToRead } from '../import/too-large';
 import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
@@ -413,7 +414,8 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   try {
     manifest = JSON.parse(await readZipText(zip, only(MANIFEST))) as Pkc3Archive['manifest'];
   } catch (e) {
-    if (e instanceof ZipReadError) throw e;
+    // 🔴 大きすぎて文字列にできないのは「JSON として読めない」ではない ── そのまま上へ(取り込みの口が平らな字で言う。#1087)
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   checkArchiveManifest(manifest);
@@ -422,7 +424,8 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   try {
     c = JSON.parse(await readZipText(zip, only(CONTAINER))) as ArchiveContainerJson;
   } catch (e) {
-    if (e instanceof ZipReadError) throw e;
+    // 🔴 大きすぎて文字列にできないのは「JSON として読めない」ではない ── そのまま上へ(取り込みの口が平らな字で言う。#1087)
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     throw new ZipReadError(`バックアップの中のノートのデータ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   checkArchiveContainer(c); // ⚠ 添付の目録(下)より先に断る ── 断る順番は変えない

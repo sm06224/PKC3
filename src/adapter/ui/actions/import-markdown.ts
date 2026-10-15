@@ -15,7 +15,8 @@ import { phaseBlockReason, hasUnsavedTyping, SECTION_DRAFT_NOTE } from '@adapter
 import type { EntryUpsert } from '@adapter/platform/storage/schema';
 import { readPlainMarkdown } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
-import { readImportText } from '@features/import/text-decode';
+import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
+import { humanBytes } from '@features/human-bytes';
 
 /**
  * ⚠ `ImportDeps`(PKC2 経路)の**部分集合**として書く ── 呼び出し側が
@@ -97,7 +98,15 @@ export async function importMarkdownFiles(
   try {
     let order = deps.orderBase();
     for (const file of files) {
-      const parsed = readPlainMarkdown(await readImportText(file), file.name);
+      // 🔴 読む前に大きさで断る(ics と同じ形。#1087)── 手違いの巨大な file を全部文字列にしない
+      if (file.size > IMPORT_TEXT_MAX_BYTES) {
+        return fail(
+          `「${file.name}」は大きすぎて取り込めません(${humanBytes(IMPORT_TEXT_MAX_BYTES)} まで。ノートは 1 件も追加されていません)`,
+        );
+      }
+      const read = await readImportTextInfo(file);
+      const parsed = readPlainMarkdown(read.text, file.name);
+      if (read.used === 'sjis') notes.push(`「${file.name}」: ${SJIS_GUESS_NOTE}`);
       // 注意は**どのファイルのものか**を言う ── 複数選択で「参照 3 件」とだけ
       // 出ても、どれを直せばいいのか分からない
       for (const w of parsed.warnings) notes.push(`「${file.name}」: ${w}`);
