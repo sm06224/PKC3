@@ -50,7 +50,14 @@ function pkc2Html(): string {
   const container = {
     meta: { container_id: 'c-old', title: '旧コンテナ', entry_order: ['n1', 'a1'] },
     entries: [
-      { lid: 'n1', title: '旧ノート', archetype: 'text', body: '# 旧ノート\n本文\n' },
+      {
+        lid: 'n1',
+        title: '旧ノート',
+        archetype: 'text',
+        body: '# 旧ノート\n本文\n',
+        tags: ['社内'],
+        created_at: '2025-03-04T05:06:07.000Z',
+      },
       {
         lid: 'a1',
         title: 'dot.png',
@@ -111,6 +118,18 @@ test('PKC2 HTML 取込 → entry 出現 → gzip 添付が blob: で描画され
   const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText('旧ノート'); // meta.entry_order の順
+
+  // #1087: PKC2 のタグと作成日時が、取り込み後のノートに出る(情報ペインの中で見る)
+  await clickReal(page, '[data-pkc-entry="n1"]');
+  const inspector = page.locator('[data-pkc-region="inspector"]');
+  await expect(
+    inspector.locator('[data-pkc-field="inspector-tag-chips"]').getByRole('button', { name: '社内', exact: true }),
+    'PKC2 のタグ「社内」が取り込み後に出ない',
+  ).toBeVisible();
+  await expect(
+    inspector.locator('[data-pkc-field="inspector-created"]'),
+    'PKC2 の作成日時が取り込み後に出ない',
+  ).toContainText('2025');
 
   // 添付 entry を開くと、復号済み bytes が IDB から lend されて実描画される
   await clickReal(page, '[data-pkc-entry="a1"]'); // 衝突が無いので lid は保たれる
