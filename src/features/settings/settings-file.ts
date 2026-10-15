@@ -24,7 +24,16 @@
  *
  * ⚠ **pure module**。`localStorage` も DOM も知らない(読み書きは adapter の仕事)。
  */
+import { isEditorMode } from '@features/editor-mode';
 import { resolveUsableBindings } from '@features/keymap';
+import { isAppOpenTarget } from '@features/launcher/open-target';
+import { isPasteSource } from '@features/markdown/paste-source';
+import { parseMessageCap } from '@features/message/message-log';
+import { isOpenPlace } from '@features/open-place';
+import { isPageFormat } from '@features/page-format';
+import { isProseAlign } from '@features/prose-align';
+import { isTagBadge } from '@features/tag-badge';
+import { isTextScale } from '@features/text-scale';
 
 /** 1 件の設定。⚠ 値は保存されている**生の文字列**のまま運ぶ(解釈しない)。 */
 export interface SettingsEntry {
@@ -36,7 +45,18 @@ export interface SettingsEntry {
  * 🔴 **移す鍵**(#414)。⚠ **見た目と使い勝手で、端末に依らない物だけ**。
  * ⚠ ここへ足すときは「別の端末で**同じ意味になるか**」を問う。
  */
-export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: string }[] = [
+export interface PortableKey {
+  readonly key: string;
+  readonly label: string;
+  /**
+   * 🔴 **この値を端末の読み手が読めるか**(#1087)。⚠ **読み手と同じ判定を渡す**(別に書き写さない)。
+   *   無いと、読み手が既定へ丸める値(`pkc3.messages.cap` = `9999` など)も「入れました」と言ってしまう。
+   *   読み手が features に無い鍵は、呼び側(adapter)が `planSettingsImport` の第 3 引数で渡す。
+   */
+  readonly valid?: (value: string) => boolean;
+}
+
+export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.theme', label: '見た目' },
   { key: 'pkc3.panes', label: 'ペインの折りたたみ方' },
   /**
@@ -46,26 +66,26 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
    */
   { key: 'pkc3.pane-sizes', label: 'ペインの幅' },
-  { key: 'pkc3.editor-mode', label: '編集の仕方' },
+  { key: 'pkc3.editor-mode', label: '編集の仕方', valid: (v) => isEditorMode(v) },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
-  { key: 'pkc3.page-format', label: 'ページ設定' },
+  { key: 'pkc3.page-format', label: 'ページ設定', valid: (v) => isPageFormat(v) },
   /**
    * ⚠ **紙面と対**(#722、2026-09-08)── 片方だけ運ぶと「読み幅は移ったのに
    *   置き場所は既定」になる。⚠ 別の端末でも**同じ意味**になる
    *   (中央で読みたいか左端で読みたいかは**人に付く**)。
    */
-  { key: 'pkc3.prose-align', label: '本文の置き場所' },
+  { key: 'pkc3.prose-align', label: '本文の置き場所', valid: (v) => isProseAlign(v) },
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
-  { key: 'pkc3.text-scale', label: '文字の大きさ' },
+  { key: 'pkc3.text-scale', label: '文字の大きさ', valid: (v) => isTextScale(v) },
   { key: 'pkc3.read-columns', label: '本文の段組み' },
   // ⚠ 段組みと**対**(#525)── 片方だけ運ぶと「段組みは移ったのに線は既定」になる。
   //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)
   { key: 'pkc3.column-rule', label: '段の境界線' },
-  { key: 'pkc3.tag-badge', label: '本文のタグの見せ方' },
+  { key: 'pkc3.tag-badge', label: '本文のタグの見せ方', valid: (v) => isTagBadge(v) },
   { key: 'pkc3.keymap', label: 'ショートカットキーの割り当て' },
   { key: 'pkc3.browse', label: '探し方のタブ' },
   { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー' },
-  { key: 'pkc3.paste-source', label: '貼り付けの判定' },
+  { key: 'pkc3.paste-source', label: '貼り付けの判定', valid: (v) => isPasteSource(v) },
   { key: 'pkc3.query-key', label: '集計のグループ化' },
   { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },
   // ⚠ 予定の知らせの好み 2 つ(#855 20-C)。別の端末でも同じ意味になる(何分前に知らせたいかは人に付く)
@@ -83,7 +103,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は
    *   その場で理由を出すので、移して害が出ない。
    */
-  { key: 'pkc3.open-place', label: 'zip ファイルを開く場所' },
+  { key: 'pkc3.open-place', label: 'zip ファイルを開く場所', valid: (v) => isOpenPlace(v) },
   /**
    * ⚠ **人に付く好み**である(#884 段①)── 「アプリは別の窓で使いたい」かどうかは
    *   端末の事情ではない(`pkc3.open-place` と同じ考え方)。
@@ -91,7 +111,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    *   「別の窓」を選んでいてもブラウザがタブにする。🔑 それでも**運んで害が出ない**
    *   (元の挙動に落ちるだけで、user が何かを失わない)。
    */
-  { key: 'pkc3.app-open-target', label: 'アプリの開き方' },
+  { key: 'pkc3.app-open-target', label: 'アプリの開き方', valid: (v) => isAppOpenTarget(v) },
   /**
    * ⚠ **人に付く好み**である(#278 段②)── 「本文の番号から掛けたい」かどうかは
    *   端末の事情ではない。⚠ 掛けられるかは端末しだいだが、**押せる字にするか**は
@@ -146,7 +166,7 @@ export const PORTABLE_KEYS: readonly { readonly key: string; readonly label: str
    * ⚠ **人に付く好み**である(設計 doc §7、段②a)── 「何件保管したいか」は
    *   端末の事情ではない。運んでも害は出ない(既定へ丸めて読むだけ)。
    */
-  { key: 'pkc3.messages.cap', label: 'メッセージの保管件数' },
+  { key: 'pkc3.messages.cap', label: 'メッセージの保管件数', valid: (v) => parseMessageCap(v) !== null },
   /**
    * ⚠ **人に付く好み**である(#813 段②)── 「フォルダの面で下の階層まで平らに見たいか」は
    *   端末の事情ではない(`pkc3.dual-preview` と同じ考え方)。🔑 中身は `0` / `1` だけで、
@@ -396,6 +416,8 @@ function countUnusableBindings(value: string): number {
 export function planSettingsImport(
   text: string,
   read: (key: string) => string | null,
+  /** 🔴 読み手が adapter にある鍵の検査(`PortableKey.valid` と同じ働き。例:配色)。 */
+  extraValid: Readonly<Record<string, (value: string) => boolean>> = {},
 ): SettingsPlan {
   let raw: unknown;
   try {
@@ -413,6 +435,7 @@ export function planSettingsImport(
     };
   const list = Array.isArray(o['entries']) ? o['entries'] : [];
   const labelOf = new Map(PORTABLE_KEYS.map((p) => [p.key, p.label]));
+  const portable = new Map(PORTABLE_KEYS.map((p) => [p.key, p]));
   const skipped = new Set(SKIPPED_KEYS.map((s) => s.key));
   const changes: { key: string; label: string; from: string | null; to: string }[] = [];
   const refused: string[] = [];
@@ -445,6 +468,12 @@ export function planSettingsImport(
     const label = labelOf.get(key);
     if (label === undefined) {
       unknown.push(key);
+      continue;
+    }
+    // 🔴 端末の読み手が読めない値は入れない(読み手は既定へ丸めるので、「入れました」が偽になる。#1087)
+    const valid = portable.get(key)?.valid ?? extraValid[key];
+    if (valid !== undefined && !valid(value)) {
+      unreadable.push(key);
       continue;
     }
     const from = read(key);

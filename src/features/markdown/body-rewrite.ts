@@ -575,8 +575,14 @@ export type BodyRewrite =
 /**
  * 箇条書きの `entry:` リンクの行か(`- [題名](entry:<lid>)`)。
  * ⚠ 番号つき(`1.`)も受ける ── 読む側(`bodyLinkTargets`)は印を見ないので、記法を狭めない。
+ * 🔴 **題名の括弧は `escapeLinkLabel` が `\[` `\]` `\\` に直して書く**ので、題名の部分は
+ *   「`\` + 1 字」か「`]` と `\` 以外」の繰り返しで読む(`[^\]]*` だと `[重要] 議事録` の最初の `]` で切れて
+ *   リンク行と認められず、並べ替えが断られていた。#1087)。
  */
-const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]*\]\(entry:[A-Za-z0-9_-]+\)/;
+const LINK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[(?:\\.|[^\]\\])*\]\(entry:[A-Za-z0-9_-]+\)/;
+
+/** 並べ替えの探索が越えない行: 見出し / fence の記号 / 区切り線(#1087)。 */
+const LIST_BLOCK_END = /^\s{0,3}(?:#{1,6}(?:\s|$)|```|~~~|([-*_])(?:\s*\1){2,}\s*$)/;
 
 /** 🔴 本文の改行コード（CRLF or LF）を検知する(#1075, #1097)。 */
 function detectEol(text: string): '\r\n' | '\n' {
@@ -634,7 +640,8 @@ export function bodyLineAt(body: string, line: number): string | null {
  *
  * ⚠ 門は 4 つ:①行が原文の範囲に在る ②`openLine` と byte 一致 ③その行がリンク行
  *   ④fence の中ではない。1 つでも外れれば `null` = 断る(当てずっぽうで別の行を書かない)。
- * 🔑 端(相手が無い / 相手がリンク行でない)は **`body` をそのまま返す** ── 済んでいる。
+ * 🔑 端(同じ字下げの相手が、見出し・fence・並びの終わりまでに無い)は **`body` をそのまま返す** ── 済んでいる。
+ *   空行・メモの行・字下げした子の行は読み飛ばして次のリンク行と入れ替える(#1087)。
  */
 function moveLinkLine(
   body: string,
@@ -647,10 +654,25 @@ function moveLinkLine(
   if (cur === undefined || cur !== rw.openLine) return null;
   if (!LINK_LINE.test(cur)) return null;
   if (insideFence(lines, fm, rw.line)) return null;
-  const to = rw.dir === 'up' ? rw.line - 1 : rw.line + 1;
-  const other = lines[to];
-  if (to < fm || other === undefined) return body;
-  if (!LINK_LINE.test(other) || insideFence(lines, fm, to)) return body;
+  // 🔴 隣が空行・メモの行・字下げした子の行でも、次のリンク行(同じ字下げ)まで読み飛ばして入れ替える(#1087)。
+  //   ⚠ 見出し・fence・区切り線・より浅い字下げの行に当たったら、そこが並びの端 ── 何もしない。
+  const indentOf = (l: string): number => /^\s*/.exec(l)![0].length;
+  const curIndent = indentOf(cur);
+  const step = rw.dir === 'up' ? -1 : 1;
+  let to = -1;
+  for (let i = rw.line + step; i >= fm && i < lines.length; i += step) {
+    const l = lines[i]!;
+    if (insideFence(lines, fm, i) || LIST_BLOCK_END.test(l)) break;
+    if (l.trim() === '') continue;
+    const ind = indentOf(l);
+    if (ind < curIndent) break;
+    if (ind === curIndent && LINK_LINE.test(l)) {
+      to = i;
+      break;
+    }
+  }
+  if (to < 0) return body;
+  const other = lines[to]!;
   lines[rw.line] = other;
   lines[to] = cur;
   return rejoinLines(body, lines);
@@ -1272,7 +1294,14 @@ function rewriteMdCell(
   const next = gfmCellText(rewrite.value);
   // ⚠ 同じ字なら書かない(呼び側が「書かない」を選べる ── `csv-cell` と同じ)
   if (line.slice(span.start, span.end) === next) return null;
-  lines[rewrite.line] = line.slice(0, span.start) + next + line.slice(span.end);
+  /**
+   * 🔴 **升の末尾が `\` で、すぐ後ろが列の区切り `|` なら、間に空白を 1 つ挟む**(#1087)。
+   *   markdown-it は `\|` を「逃がした `|`」と読むので、余白なしの表(`|a|b|`)で `a\` を書くと
+   *   `|a\|b|` になり、**隣の升と 1 つに繋がる**。`\\|` も同じに読まれる(実測)── 末尾の `\` の数に依らない。
+   *   空白は升の字に入らない(読み手は両端を詰める。`x\ |` は `x\` と描かれる ── 実測)。
+   */
+  const tail = next.endsWith('\\') && line[span.end] === '|' ? ' ' : '';
+  lines[rewrite.line] = line.slice(0, span.start) + next + tail + line.slice(span.end);
   return lines.join(eol);
 }
 

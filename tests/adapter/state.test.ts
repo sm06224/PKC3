@@ -520,6 +520,26 @@ describe('reducer: lean aggregate', () => {
     expect(s.messagesUnread).toBe(0);
   });
 
+  /** 🔴 開いたままのメッセージは、新しい知らせが書かれたら読み直す。既読にはしない(#1087)。 */
+  it('🔴 MESSAGES_BODY_REFRESH: 開いているそのノートだけ読み直し、未読も error も触らない', () => {
+    let s = booted();
+    s = reduce(s, { type: 'MESSAGES_READ', lid: 'sys-messages' }).state;
+    s = reduce(s, { type: 'MESSAGES_UNREAD_SET', count: 2 }).state;
+    s = { ...s, error: 'x' };
+    const r = reduce(s, { type: 'MESSAGES_BODY_REFRESH', lid: 'sys-messages' });
+    expect(r.events).toEqual([{ type: 'REQUEST_MESSAGES_BODY', lid: 'sys-messages' }]);
+    expect(r.state.messagesUnread, '読み直しで既読にした').toBe(2);
+    expect(r.state.error, '読み直しで error を消した').toBe('x');
+    // 対照:開いていないノート / 別のノートを開いている間は何もしない
+    expect(reduce(s, { type: 'MESSAGES_BODY_REFRESH', lid: 'sys-jobs' }).events).toEqual([]);
+    const other = reduce(booted(), { type: 'SELECT_ENTRY', lid: 'a' }).state;
+    expect(reduce(other, { type: 'MESSAGES_BODY_REFRESH', lid: 'sys-messages' }).events).toEqual([]);
+    // 編集中は触らない
+    expect(
+      reduce({ ...s, phase: 'editing' }, { type: 'MESSAGES_BODY_REFRESH', lid: 'sys-messages' }).events,
+    ).toEqual([]);
+  });
+
   it('error phase の SELECT_ENTRY はブロック ── 未達 commit(唯一の写し)を無警告破棄しない', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;

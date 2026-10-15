@@ -57,6 +57,9 @@ class FakeSpool implements MessageSpool {
   async list(): Promise<ReadonlyArray<{ id: number; item: SpoolItem }>> {
     return [];
   }
+  async count(): Promise<number> {
+    return 0;
+  }
   async push(): Promise<void> {}
   async remove(): Promise<void> {}
 }

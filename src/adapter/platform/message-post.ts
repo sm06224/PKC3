@@ -23,6 +23,8 @@ import {
   lidForMessageKind,
   MESSAGE_CAP_DEFAULT,
   MESSAGE_CAP_OPTIONS,
+  parseMessageCap,
+  countUnread,
   sanitizeMessageText,
   titleForMessageLid,
   type MessageKind,
@@ -34,9 +36,7 @@ const READ_AT_KEY = 'pkc3.messages.read-at';
 /** 好みの上限。⚠ 壊れた値・古い版が書いた値は既定へ丸める(黙って落とさない)。 */
 export function currentMessageCap(): number {
   try {
-    const raw = localStorage.getItem(CAP_KEY);
-    const n = raw === null ? NaN : Number(raw);
-    return MESSAGE_CAP_OPTIONS.includes(n) ? n : MESSAGE_CAP_DEFAULT;
+    return parseMessageCap(localStorage.getItem(CAP_KEY)) ?? MESSAGE_CAP_DEFAULT;
   } catch {
     return MESSAGE_CAP_DEFAULT;
   }
@@ -85,9 +85,17 @@ export interface SpoolItem {
  */
 export interface MessageSpool {
   list(): Promise<ReadonlyArray<{ id: IDBValidKey; item: SpoolItem }>>;
+  /** 件数だけ。⚠ 毎回の `post` は、空かどうかをこれで見る(本文ごと全件を読まない)。 */
+  count(): Promise<number>;
   push(item: SpoolItem): Promise<void>;
   remove(id: IDBValidKey): Promise<void>;
 }
+
+/**
+ * 🔴 **控えの上限**(#1087)。⚠ 書けない状態が続くと控えは増える一方だったので、超えたら**古い順に**捨てる
+ *   (メッセージの上限と同じ向き ── 新しい知らせを残す)。
+ */
+export const SPOOL_CAP = 500;
 
 const SPOOL_DB_NAME = 'pkc3-messages';
 const SPOOL_STORE = 'spool';
@@ -145,6 +153,10 @@ class IdbMessageSpool implements MessageSpool {
     return keys.map((id, i) => ({ id, item: values[i] as SpoolItem }));
   }
 
+  async count(): Promise<number> {
+    return tx<number>(await this.need(), 'readonly', (s) => s.count());
+  }
+
   async push(item: SpoolItem): Promise<void> {
     await tx(await this.need(), 'readwrite', (s) => s.add(item));
   }
@@ -185,6 +197,12 @@ interface JobBatch {
 export class MessagePost {
   private deps: MessagePostDeps | null = null;
   private unread = 0;
+  /** 未読を増やした `post` の通算(`seedUnread` が「種を頼んだ後に増えた分」を足すための目盛り)。 */
+  private unreadPosts = 0;
+  /** `markRead` の通算(種を頼んだ後に既読にされたら、古い種は捨てる)。 */
+  private readCount = 0;
+  /** 書いている途中の `deliver`(種を頼む前に、これらが書き終わるのを待つ)。 */
+  private inflight = new Set<Promise<void>>();
   private listeners: Array<(n: number) => void> = [];
   /** ⚠ `job` だけ。他の種類は即座に `deliver()` する(束ねない)。 */
   private jobBatch: JobBatch | null = null;
@@ -206,20 +224,68 @@ export class MessagePost {
     };
   }
 
+  private writtenListeners: Array<(lid: string) => void> = [];
+
+  /**
+   * 🔴 **ノートへ節が書き込まれた**(#1087)。⚠ 開いているメッセージのノートを読み直す合図 ──
+   *   開いたまま新しい知らせが来ても、本文は読み込んだ時点のままだった。書けた後にだけ呼ぶ(控えへ積んだ分は呼ばない)。
+   */
+  onWritten(fn: (lid: string) => void): () => void {
+    this.writtenListeners.push(fn);
+    return () => {
+      this.writtenListeners = this.writtenListeners.filter((f) => f !== fn);
+    };
+  }
+
+  private notifyWritten(lid: string): void {
+    for (const f of this.writtenListeners) f(lid);
+  }
+
   private notify(): void {
     for (const f of this.listeners) f(this.unread);
   }
 
-  /** 起動直後、disk の本文から数え直した未読を種として渡す(main.ts の boot が呼ぶ)。 */
-  seedUnread(n: number): void {
-    this.unread = n;
+  /**
+   * 起動直後、disk の本文から数え直した未読を種として渡す。
+   * 🔴 **`postsAtRequest` を渡すと**、種を頼んだ後に増えた分(`unreadPosts` の差)を足す ── 直す前は
+   *   `unread = n` で上書きしたので、読み込みの間に積んだ注意が消えていた(#1087)。
+   */
+  seedUnread(n: number, postsAtRequest: number = this.unreadPosts): void {
+    this.unread = n + (this.unreadPosts - postsAtRequest);
     this.notify();
+  }
+
+  /**
+   * 🔴 **起動直後の未読を disk から数えて種にする**(main.ts の boot が呼ぶ)。
+   * ⚠ 順番が肝心:①**書きかけの分が書き終わるのを待つ** ②目盛りを控えて**同じ同期の中で**本文を頼む。
+   *   ①が無いと「頼む前に積んだが、まだ書けていない分」が種にも差分にも入らず落ちる。
+   *   ②の後に積んだ分は、本文の読みより後に書かれる(同じ経路の順番)ので、差分で足せば二重にならない。
+   * ⚠ 待っている間 / 読んでいる間に既読にされたら、古い種は捨てる(既読を巻き戻さない)。
+   */
+  async seedUnreadFromDisk(readBody: () => Promise<string | null | undefined>): Promise<void> {
+    await this.whenWritten();
+    const posts = this.unreadPosts;
+    const reads = this.readCount;
+    const body = await readBody();
+    if (reads !== this.readCount) return;
+    this.seedUnread(countUnread(body ?? '', messagesReadAt()), posts);
+  }
+
+  /** 書きかけの分(控えの流しも含む)がすべて終わるまで待つ。 */
+  async whenWritten(): Promise<void> {
+    for (;;) {
+      const pending: Array<Promise<unknown>> = [...this.inflight];
+      if (this.spoolRun !== null) pending.push(this.spoolRun);
+      if (pending.length === 0) return;
+      await Promise.allSettled(pending);
+    }
   }
 
   /** メッセージのノートを開いた ── 既読の時刻を進め、未読を 0 にする。 */
   markRead(): void {
     stampMessagesReadNow();
     this.unread = 0;
+    this.readCount += 1;
     this.notify();
   }
 
@@ -246,6 +312,7 @@ export class MessagePost {
     });
     if (input.kind === 'caution' || input.kind === 'problem') {
       this.unread += 1;
+      this.unreadPosts += 1;
       this.notify();
     }
     if (input.kind === 'job') {
@@ -260,10 +327,40 @@ export class MessagePost {
     const cid = this.deps?.cid;
     if (cid === undefined) {
       // ⚠ boot 前 ── 起きない想定だが、黙って捨てない(控えへ積む)
-      void this.spool.push({ cid: '', lid, title, section, cap }).catch(() => {});
+      void this.stash({ cid: '', lid, title, section, cap }).catch(() => {});
       return;
     }
-    void this.flushSpool().then(() => this.write({ cid, lid, title, section, cap }));
+    const req = { cid, lid, title, section, cap };
+    const run: Promise<void> = this.flushSpool()
+      .then((drained) =>
+        // 🔴 控えが流し切れていないときは、**新しい分も控えの後ろへ**(先に書くと節の日時が前後する。#1087)
+        drained ? this.write(req) : this.park(req),
+      )
+      .finally(() => {
+        this.inflight.delete(run);
+      });
+    this.inflight.add(run);
+  }
+
+  /** 控えへ積み、上限を超えた分を古い順に捨てる。⚠ 積めなかったら投げる(呼び側が決める)。 */
+  private async stash(item: SpoolItem): Promise<void> {
+    await this.spool.push(item);
+    try {
+      const all = await this.spool.list();
+      const over = all.length - SPOOL_CAP;
+      for (let i = 0; i < over; i += 1) await this.spool.remove((all[i] as { id: IDBValidKey }).id);
+    } catch {
+      /* 上限の整理に失敗しても、積めた事実は変わらない(次の積みで整理される) */
+    }
+  }
+
+  /** 控えの後ろへ積む。⚠ 控えそのものが使えないときは、順番より書くことを選ぶ(捨てない)。 */
+  private async park(req: SpoolItem): Promise<void> {
+    try {
+      await this.stash(req);
+    } catch {
+      await this.write(req);
+    }
   }
 
   /**
@@ -320,9 +417,10 @@ export class MessagePost {
     if (!this.deps) return;
     try {
       await this.deps.appendMessage(req);
+      this.notifyWritten(req.lid);
     } catch {
       // 🔴 書けなかった(壊れている / DB 未起動)── 控えへ積んで、次の機会に流す
-      await this.spool.push(req).catch(() => {});
+      await this.stash(req).catch(() => {});
     }
   }
 
@@ -332,9 +430,10 @@ export class MessagePost {
    *   `appendMessage`** していた(同じ節がメッセージに 2 件並ぶ)。いま走っているなら**その Promise を返す**
    *   (呼び側は完了を待つだけなので、同じものを待たせて困らない)。
    */
-  private spoolRun: Promise<void> | null = null;
-  private flushSpool(): Promise<void> {
-    if (!this.deps) return Promise.resolve();
+  private spoolRun: Promise<boolean> | null = null;
+  /** @returns 控えが空になったか(`false` なら、まだ残っている ── 新しい分は後ろへ回す)。 */
+  private flushSpool(): Promise<boolean> {
+    if (!this.deps) return Promise.resolve(true);
     // ⚠ `drainSpool` は必ず 1 度 await してから終わる ── 同期で終わると、下の代入が
     //   `finally` の `null` の後に走って「走っている」印が残りっぱなしになる
     this.spoolRun ??= this.drainSpool();
@@ -346,29 +445,46 @@ export class MessagePost {
    * (順序を守る。あとの節を先に書くと節の日時が前後する)。
    * ⚠ どの出口でも走っている印(`spoolRun`)を下ろす ── 下ろさないと以後の流しが全部止まる。
    */
-  private async drainSpool(): Promise<void> {
-    const deps = this.deps;
-    try {
-      if (!deps) return;
-      let items: ReadonlyArray<{ id: IDBValidKey; item: SpoolItem }>;
-      try {
-        items = await this.spool.list();
-      } catch {
-        return; // 控えそのものが読めない ── 諦める(次の post でまた試す)
-      }
-      for (const { id, item } of items) {
-        // ⚠ boot 前に積んだ分は cid が未確定(空文字)のまま控えている ── いまの cid で書き直す
-        const fixed = item.cid === '' ? { ...item, cid: deps.cid } : item;
-        try {
-          await deps.appendMessage(fixed);
-          await this.spool.remove(id).catch(() => {});
-        } catch {
-          return;
-        }
-      }
-    } finally {
+  private drainSpool(): Promise<boolean> {
+    // 🔴 別のタブと**同時に流さない**(同じ控えを両方が読むと、同じ節が二重に書かれる。#1087)。
+    //   ロックが無い環境は、これまでどおり(同じタブの中の重なりは `spoolRun` が防ぐ)。
+    const locks =
+      typeof navigator === 'undefined' ? null : (navigator.locks as LockManager | null | undefined);
+    const run =
+      locks === null || locks === undefined
+        ? this.drainBody()
+        : locks.request('pkc3-message-spool', () => this.drainBody());
+    // ⚠ 下ろす枝は**呼び側の `then` より先**に付ける(同じ tick で、印が先に消える)
+    const release = (): void => {
       this.spoolRun = null;
+    };
+    run.then(release, release);
+    return run;
+  }
+
+  private async drainBody(): Promise<boolean> {
+    const deps = this.deps;
+    if (!deps) return true;
+    let items: ReadonlyArray<{ id: IDBValidKey; item: SpoolItem }>;
+    try {
+      // ⚠ 毎回の `post` が全件を読まないよう、空かどうかは件数で見る
+      if ((await this.spool.count()) === 0) return true;
+      items = await this.spool.list();
+    } catch {
+      return false; // 控えそのものが読めない ── 諦める(次の post でまた試す)
     }
+    for (const { id, item } of items) {
+      // ⚠ boot 前に積んだ分は cid が未確定(空文字)のまま控えている ── いまの cid で書き直す
+      const fixed = item.cid === '' ? { ...item, cid: deps.cid } : item;
+      try {
+        await deps.appendMessage(fixed);
+        this.notifyWritten(fixed.lid);
+        await this.spool.remove(id).catch(() => {});
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
 }
 

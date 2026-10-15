@@ -475,6 +475,15 @@ test('🔴 板の塊が座標に置かれ、掴んで動かすと本文が書き
   await expect(blockMenu.locator('[data-pkc-action="place-color-clear"]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 
+  // 🔴 「前へ出す」を押すと、その付箋の z が他の最大より大きくなる(#1087: 本文の z= に書き戻る)
+  const zOf = async (loc: Locator): Promise<number> => Number((await loc.getAttribute('data-pkc-z')) ?? '0');
+  expect(await zOf(p1), '前提: p1 が既にいちばん前にいる').toBeLessThanOrEqual(await zOf(p2));
+  await p1.click({ button: 'right' });
+  await blockMenu.locator('[data-pkc-action="raise-place"]').click();
+  await expect
+    .poll(async () => (await zOf(p1)) > (await zOf(p2)), { message: '前へ出しても z が上がらない', timeout: 5000 })
+    .toBe(true);
+
   /**
    * 🔴 **付箋の文字の大きさ**(#530 段⑤a)── 右クリックで 小 / 大 / 特大 → 標準。**新しい起動は増やさない**。
    * ⚠ 見るのは**計算後の `font-size`** と**隣の付箋との比**(属性だけ見ると、受け皿の規則が無く画面が 1 ドットも

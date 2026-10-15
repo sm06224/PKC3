@@ -30,6 +30,7 @@ import {
   toggleHeadingFold,
   toggleLogDay,
 } from '../render/heading-fold';
+import { isThemeChoice, THEME_STORAGE_KEY } from '../render/theme';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
@@ -5073,6 +5074,14 @@ function paintPlan(root: HTMLElement, dispatcher: Dispatcher, text: string): voi
 }
 
 /**
+ * 🔴 **読み手が features に無い鍵の検査**(#1087)。⚠ 読み手と**同じ判定**を渡す(配色の読み手は
+ *   `isThemeChoice`)── 下見と当てるの 2 か所が同じ表を通る(§7)。
+ */
+const ADAPTER_SETTING_VALIDATORS: Readonly<Record<string, (value: string) => boolean>> = {
+  [THEME_STORAGE_KEY]: isThemeChoice,
+};
+
+/**
  * 🔴 **読み込んだ設定の下見を描く**(#414)。
  *
  * ⚠ **当てない。見せるだけ** ── 当てるのは user が「当てる」を押してからである。
@@ -5094,7 +5103,7 @@ function paintSettingsPlan(root: HTMLElement, text: string | null): void {
     apply.disabled = true;
     return;
   }
-  const plan = planSettingsImport(text, readSetting);
+  const plan = planSettingsImport(text, readSetting, ADAPTER_SETTING_VALIDATORS);
   summary.textContent = settingsPlanNote(plan);
   summary.hidden = false;
   list.textContent = '';
@@ -6577,6 +6586,32 @@ function placeStyleWrite(
   doWrite(ob.lid, line + frontmatterLineCount(ob.body));
 }
 
+/**
+ * 🔴 **板・付箋を書き換える受け手の、別のタブ・窓が編集中のノートを断る門**(#1087。追記と同じ門)。
+ *
+ * ⚠ 通すと、編集中のタブの保存で上書きされ、足した書換は履歴にだけ残る。**断って理由を出す**
+ *   (問い合わせが落ちたときも黙らない ── `failedWhat` に「〜できませんでした」を渡す)。
+ * 🔑 撃つのは {@link actUnlessEditedElsewhere} の 1 本 ── 板の受け手ごとに門を書かない(§7)。
+ *   窓を開く受け手(色 / 位置と大きさ / グループ / テンプレート)は、**選び終えて書く直前**にここを通す
+ *   (窓を開く前に確かめても、開いている間に別のタブが編集を始める)。
+ * ⚠ ドラッグ移動・付箋 / 線を消す口は通していない(`edited-elsewhere.ts` の注記: 見え方の判断待ち)。
+ */
+function placeEditedElsewhereGate(
+  dispatcher: Dispatcher,
+  services: EditLockPort,
+  lid: string,
+  failedWhat: string,
+  fire: () => void,
+): void {
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    `${failedWhat}(別のタブの編集を確かめられませんでした)。もう一度押してください`,
+    fire,
+  );
+}
+
 /** 運ばれた札の名前(`fill stroke`)。⚠ 知らない名前は捨てる(受け手が書く札を閉じておく)。 */
 function styleKeysOf(target: Element): Array<'fill' | 'stroke'> {
   const raw = target.getAttribute(PLACE_STYLE_KEYS_ATTR) ?? '';
@@ -6590,17 +6625,16 @@ function styleKeysOf(target: Element): Array<'fill' | 'stroke'> {
  * ⚠ 行の座標は `raise-place` と同じ(メニューが運んだ刻印 + frontmatter ぶん)。
  */
 function placeShapeHandler(shape: PlaceShape): ActionHandler {
-  return (dispatcher, target) => {
+  return (dispatcher, target, services) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
     if (ob === null) return;
-    dispatcher.dispatch({
-      type: 'SET_PLACE_SHAPE',
-      lid: ob.lid,
-      line: line + frontmatterLineCount(ob.body),
-      shape,
-    });
+    const lid = ob.lid;
+    const at = line + frontmatterLineCount(ob.body);
+    placeEditedElsewhereGate(dispatcher, services, lid, '形を変えられませんでした', () =>
+      dispatcher.dispatch({ type: 'SET_PLACE_SHAPE', lid, line: at, shape }),
+    );
   };
 }
 
@@ -9627,14 +9661,10 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, openLine, col, what, mode });
     };
     /**
-     * 🔴 **消す回は、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門)。
-     * ⚠ 通すと編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回は従来どおり。
+     * 🔴 **行・列を足す回も消す回も、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門。#1087)。
+     * ⚠ 通すと編集中のタブの保存で上書きされ、足した行・消した行は履歴にだけ残る(足す回は `append-entry` と同じ)。
      */
-    if (mode === 'remove') {
-      actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);
-      return;
-    }
-    fire();
+    actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);
   },
   /**
    * 🔴 **色の見本を押して、本文の色コードを選び直す**(#1224。Gemini 裁定 2026-10-01 Q2 = B)。
@@ -10713,7 +10743,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 座標が読めない形は画面からは起きない(運ぶのは同じ `onContextMenu`)が、
    *   黙って何も起きないを作らない ── 理由を出す。
    */
-  'add-place': (dispatcher, target) => {
+  'add-place': (dispatcher, target, services) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
     const x = menuCarriedAt(target, MENU_X_ATTR);
@@ -10722,14 +10752,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
     }
-    dispatcher.dispatch({ type: 'ADD_PLACE', lid: ob.lid, x, y });
+    const lid = ob.lid;
+    placeEditedElsewhereGate(dispatcher, services, lid, '板を置けませんでした', () =>
+      dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y }),
+    );
   },
   /**
    * 🔴 **テンプレートから板を置く**(#529 W4)── 窓で 1 つ選ぶと、`add-place` と同じ座標・同じ門
    * (`ADD_PLACE`)で書く。「やめる」/ `Escape` なら何もしない。
    * ⚠ 窓が開いている間に別のノートへ移ったら置かない(`ob.lid` を窓の前後で照らす)。
    */
-  'add-place-template': (dispatcher, target, _services, root) => {
+  'add-place-template': (dispatcher, target, services, root) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
     const x = menuCarriedAt(target, MENU_X_ATTR);
@@ -10745,7 +10778,9 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher.dispatch({ type: 'OP_NOTICE', message: '別のノートに切り替わったので、板は置いていません' });
         return;
       }
-      dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, template });
+      placeEditedElsewhereGate(dispatcher, services, lid, '板を置けませんでした', () =>
+        dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y, template }),
+      );
     });
   },
   /**
@@ -10755,7 +10790,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 窓が開いている間に本文が動いたら、開き行の byte 一致の門(`place-notation.ts`)が断る
    *   (別の枠に書かない)。
    */
-  'place-rect': (dispatcher, target, _services, root) => {
+  'place-rect': (dispatcher, target, services, root) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
@@ -10783,7 +10818,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       }
       // 全部の欄を空のまま決めたら、何も変えない(書換の依頼を出さない)
       if (Object.keys(rect).length === 0) return;
-      dispatcher.dispatch({ type: 'SET_PLACE_RECT', lid, line: at, rect });
+      placeEditedElsewhereGate(dispatcher, services, lid, '位置と大きさを変えられませんでした', () =>
+        dispatcher.dispatch({ type: 'SET_PLACE_RECT', lid, line: at, rect }),
+      );
     });
   },
   /**
@@ -10800,12 +10837,16 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 確認は要らない(重なりの順が変わるだけで、もう一度別の板を前へ出せば戻る)。
    * ⚠ 行の座標は `remove-place` と同じ(刻印 + frontmatter ぶん)。
    */
-  'raise-place': (dispatcher, target) => {
+  'raise-place': (dispatcher, target, services) => {
     const line = menuCarriedBlock(target);
     if (line === null || refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
     if (ob === null) return;
-    dispatcher.dispatch({ type: 'RAISE_PLACE', lid: ob.lid, line: line + frontmatterLineCount(ob.body) });
+    const lid = ob.lid;
+    const at = line + frontmatterLineCount(ob.body);
+    placeEditedElsewhereGate(dispatcher, services, lid, '板を前へ出せませんでした', () =>
+      dispatcher.dispatch({ type: 'RAISE_PLACE', lid, line: at }),
+    );
   },
   /**
    * 🔴 **右クリックした板の形を変える**(#530 案 A。user 裁定 2026-09-14)。
@@ -10847,7 +10888,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ どの札(`fill` / `stroke`)かは**項目が運ぶ**(`PLACE_STYLE_KEYS_ATTR`)── ちょうど 1 つ。
    *   窓の初期値は**いまの色**(無ければ地に近い無彩色)。⚠ 同じ色を選んだときは書かない。
    */
-  'place-color': (dispatcher, target) => {
+  'place-color': (dispatcher, target, services) => {
     const keys = styleKeysOf(target);
     if (keys.length !== 1) return;
     const key = keys[0]!;
@@ -10872,7 +10913,9 @@ const ACTIONS: Record<string, ActionHandler> = {
             dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、色は変えていません(もう一度開いてください)' });
             return;
           }
-          dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } });
+          placeEditedElsewhereGate(dispatcher, services, lid, '色を直せませんでした', () =>
+            dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { [key]: to } }),
+          );
         });
       },
       '色を直してください',
@@ -10882,7 +10925,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **色を外す**(#530 段④。置けるなら外せる)── 札を**消す**(`null`)。付箋は塗りと枠の両方、
    * 線は線の色。⚠ 太さは触らない(線の太さを標準に戻す口は別: `place-line-width`)。
    */
-  'place-color-clear': (dispatcher, target) => {
+  'place-color-clear': (dispatcher, target, services) => {
     const keys = styleKeysOf(target);
     if (keys.length === 0) return;
     const style: Record<string, null> = {};
@@ -10891,7 +10934,9 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       target,
       (lid, line) =>
-        dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: style as PlaceStyle }),
+        placeEditedElsewhereGate(dispatcher, services, lid, '色を直せませんでした', () =>
+          dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: style as PlaceStyle }),
+        ),
       '色を直してください',
     );
   },
@@ -10899,7 +10944,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **線の太さを選ぶ**(#530 段④)── 項目が運ぶ太さ(整数)を書く。空なら標準へ戻す(`width=` を消す)。
    * ⚠ 読めない太さは**書かない**(属性を書き換えられた形)。
    */
-  'place-line-width': (dispatcher, target) => {
+  'place-line-width': (dispatcher, target, services) => {
     const raw = target.getAttribute(PLACE_STYLE_WIDTH_ATTR);
     if (raw === null) return;
     const width = raw === '' ? null : parsePlaceWidth(raw);
@@ -10907,7 +10952,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     placeStyleWrite(
       dispatcher,
       target,
-      (lid, line) => dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { width } }),
+      (lid, line) =>
+        placeEditedElsewhereGate(dispatcher, services, lid, '線の太さを直せませんでした', () =>
+          dispatcher.dispatch({ type: 'SET_PLACE_STYLE', lid, line, style: { width } }),
+        ),
       '線の太さを直してください',
     );
   },
@@ -10916,7 +10964,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 `none` は札を**消す**(`arrow=none` と書き足さない ── `place-line-width` の標準へ戻すと同じ作法)。
    * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
    */
-  'place-line-arrow': (dispatcher, target) => {
+  'place-line-arrow': (dispatcher, target, services) => {
     const raw = target.getAttribute(PLACE_STYLE_ARROW_ATTR);
     if (raw === null) return;
     const read = parseArrowSpell(raw);
@@ -10925,12 +10973,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       target,
       (lid, line) =>
-        dispatcher.dispatch({
-          type: 'SET_PLACE_STYLE',
-          lid,
-          line,
-          style: { arrow: read.arrow === 'none' ? null : read.arrow },
-        }),
+        placeEditedElsewhereGate(dispatcher, services, lid, '矢じりを直せませんでした', () =>
+          dispatcher.dispatch({
+            type: 'SET_PLACE_STYLE',
+            lid,
+            line,
+            style: { arrow: read.arrow === 'none' ? null : read.arrow },
+          }),
+        ),
       '矢じりを直してください',
     );
   },
@@ -10939,7 +10989,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 `standard` は札を**消す**(`size=standard` と書き足さない ── `place-line-arrow` の `none` と同じ作法)。
    * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
    */
-  'place-size': (dispatcher, target) => {
+  'place-size': (dispatcher, target, services) => {
     const raw = target.getAttribute(PLACE_STYLE_SIZE_ATTR);
     if (raw === null) return;
     const read = parseSizeSpell(raw);
@@ -10948,12 +10998,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       target,
       (lid, line) =>
-        dispatcher.dispatch({
-          type: 'SET_PLACE_STYLE',
-          lid,
-          line,
-          style: { size: read.size === 'standard' ? null : read.size },
-        }),
+        placeEditedElsewhereGate(dispatcher, services, lid, '文字の大きさを直せませんでした', () =>
+          dispatcher.dispatch({
+            type: 'SET_PLACE_STYLE',
+            lid,
+            line,
+            style: { size: read.size === 'standard' ? null : read.size },
+          }),
+        ),
       '文字の大きさを直してください',
     );
   },
@@ -10964,7 +11016,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 窓に並べるのは**グループに入っていない付箋**だけ(入っている付箋を黙って別のグループへ移さない)。
    * ⚠ 窓が開いている間に本文が動いたら書かない(`place-rect` と同じ ── 同じ行番号に来た別の付箋へ書かない)。
    */
-  'place-group': (dispatcher, target, _services, root) => {
+  'place-group': (dispatcher, target, services, root) => {
     placeStyleWrite(
       dispatcher,
       target,
@@ -10992,7 +11044,9 @@ const ACTIONS: Record<string, ActionHandler> = {
             dispatcher.dispatch({ type: 'OP_NOTICE', message: '開いている間に本文が変わったので、グループにはしていません(もう一度開いてください)' });
             return;
           }
-          dispatcher.dispatch({ type: 'GROUP_PLACES', lid, lines });
+          placeEditedElsewhereGate(dispatcher, services, lid, 'グループにできませんでした', () =>
+            dispatcher.dispatch({ type: 'GROUP_PLACES', lid, lines }),
+          );
         });
       },
       'グループにしてください',
@@ -11002,11 +11056,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **グループを解く**(#530 段⑤b。置けるなら外せる)── 右クリックした付箋の**グループの全員**の
    * `group=` を消す(位置は動かさない)。確認は要らない(もう一度「グループにする…」で戻せる)。
    */
-  'place-ungroup': (dispatcher, target) => {
+  'place-ungroup': (dispatcher, target, services) => {
     placeStyleWrite(
       dispatcher,
       target,
-      (lid, line) => dispatcher.dispatch({ type: 'UNGROUP_PLACE', lid, line }),
+      (lid, line) =>
+        placeEditedElsewhereGate(dispatcher, services, lid, 'グループを解けませんでした', () =>
+          dispatcher.dispatch({ type: 'UNGROUP_PLACE', lid, line }),
+        ),
       'グループを解いてください',
     );
   },
@@ -11015,7 +11072,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔑 `0` は札を**消す**(`rotate=0` と書き足さない ── `place-size` の `standard` と同じ作法)。
    * ⚠ 読めない値は**書かない**(属性を書き換えられた形)。
    */
-  'place-rotate': (dispatcher, target) => {
+  'place-rotate': (dispatcher, target, services) => {
     const raw = target.getAttribute(PLACE_STYLE_ROTATE_ATTR);
     if (raw === null) return;
     const deg = parsePlaceRotate(raw);
@@ -11024,12 +11081,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher,
       target,
       (lid, line) =>
-        dispatcher.dispatch({
-          type: 'SET_PLACE_STYLE',
-          lid,
-          line,
-          style: { rotate: deg === 0 ? null : deg },
-        }),
+        placeEditedElsewhereGate(dispatcher, services, lid, '付箋を回せませんでした', () =>
+          dispatcher.dispatch({
+            type: 'SET_PLACE_STYLE',
+            lid,
+            line,
+            style: { rotate: deg === 0 ? null : deg },
+          }),
+        ),
       '付箋の回転を直してください',
     );
   },
@@ -11457,9 +11516,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 長すぎて入らなかった設定を言う(#1087)── 黙って落とすと「全部持ち出した」と読まれる
     const tooLong = settingsTooLongToExport(readSetting);
     if (tooLong.length > 0) {
+      // 🔴 書き出せた回なので「結果」(`OP_NOTICE`)── `OP_FAILED` だと「問題」の未読に数えられた
       dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
+        type: 'OP_NOTICE',
+        message: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
       });
     }
   },
@@ -11584,7 +11644,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'apply-settings': (dispatcher, _target, _services, root) => {
     if (settingsPlanText === null) return;
-    const plan = planSettingsImport(settingsPlanText, readSetting);
+    const plan = planSettingsImport(settingsPlanText, readSetting, ADAPTER_SETTING_VALIDATORS);
     /**
      * ⚠ **この行は「正しさ」を守っていない ── 二重の門である**(2026-08-26、
      *   変異試験 S9 が SURVIVED で教えた)。当てられないときボタンは
@@ -11612,10 +11672,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **読み直しが要ることを言う** ── 鍵の割当も紙面も**起動時に読む**ので、
      *   当てただけでは画面が変わらない。⚠ 言わないと「効かなかった」と読まれる。
      */
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: settingsAppliedNote(wrote, failed),
-    });
+    // 🔴 入った回は「結果」(`OP_NOTICE`)── `OP_FAILED` で言うと「問題」の未読に数えられた。
+    //   書けなかった分が在る回だけ問題として言う
+    const appliedNote = settingsAppliedNote(wrote, failed);
+    if (failed === 0) dispatcher.dispatch({ type: 'OP_NOTICE', message: appliedNote });
+    else dispatcher.dispatch({ type: 'OP_FAILED', error: appliedNote });
   },
   'apply-plan': (dispatcher, _target, services, root) => {
     const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]');

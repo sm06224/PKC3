@@ -3449,6 +3449,12 @@ export type SystemCommand =
    */
   | { type: 'MESSAGES_UNREAD_SET'; count: number }
   /**
+   * 🔴 **開いているメッセージのノートの本文を読み直す**(#1087)。⚠ `MESSAGES_READ` と違い**既読にしない**
+   *   (未読の数も `error` も触らない)── 新しい知らせが書かれたのに、開いたままの本文が古いままだった。
+   *   そのノートを開いていない / 編集中・error なら何もしない。発行元は `main.ts`(書き込みの合図を束ねて撃つ)。
+   */
+  | { type: 'MESSAGES_BODY_REFRESH'; lid: string }
+  /**
    * 探す面の結果が返った(#680)。⚠ `query` は**どの語の答えか**(遅れて返った古い
    * 結果を捨てる ── 打鍵は結果より速い)。
    */
@@ -4331,6 +4337,7 @@ const PARTIAL_DRAFT_OWN_ACTIONS: ReadonlySet<Dispatchable['type']> = new Set([
 const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   SYS_BOOTED: true,
   MESSAGES_UNREAD_SET: true,
+  MESSAGES_BODY_REFRESH: true,
   SET_SEARCH_DETAIL: true,
   SEARCH_DETAIL_FAILED: true,
   STACK_BODY_LOADED: true,
@@ -4814,6 +4821,11 @@ function reduceCore(
       // ⚠ 値を写すだけ ── 「注意 / 問題だけ数える」判定は countUnread(features 層)側
       if (state.messagesUnread === action.count) return { state, events: [] };
       return { state: { ...state, messagesUnread: action.count }, events: [] };
+    }
+    case 'MESSAGES_BODY_REFRESH': {
+      // ⚠ 開いているそのノートだけ。`BODY_LOADED` も編集中 / 別の選択なら捨てるので、ここで先に止める
+      if (state.selectedLid !== action.lid || state.phase !== 'ready') return { state, events: [] };
+      return { state, events: [{ type: 'REQUEST_MESSAGES_BODY', lid: action.lid }] };
     }
     case 'SELECT_ENTRY': {
       if (state.phase === 'editing') return { state, events: [] }; // 編集中は選択遷移しない

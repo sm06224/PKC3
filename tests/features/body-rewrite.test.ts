@@ -17,6 +17,7 @@ import {
   taskRunNotice,
 } from '../../src/features/markdown/body-rewrite';
 import { moveLinesWithInverse } from '../../src/features/markdown/line-move';
+import { formatMarkdownLink } from '../../src/features/markdown/link-format';
 // 🔴 押した時点の行の中身(`openLine`)は、省いたら「いまの本文のその行」で埋める(#1087)。
 //    行ずれの検査は実物に `openLine` を自分で渡して書く(`body-rewrite-open-line.test.ts`)
 import { applyOpened as applyBodyRewrite } from '../helpers/open-line';
@@ -820,6 +821,55 @@ describe('保存したスタックの並べ替え(link-move、#633 段④)', () 
     const src = '1. [a](entry:a)\n2. [b](entry:b)';
     expect(applyBodyRewrite(src, { kind: 'link-move', line: 0, openLine: '1. [a](entry:a)', dir: 'down' })).toBe(
       '2. [b](entry:b)\n1. [a](entry:a)',
+    );
+  });
+
+  /**
+   * 🔴 題名の括弧は `escapeLinkLabel` が `\[` `\]` `\\` に直して書く(#1087)。
+   * ⚠ 題名の部分を「最初の `]` まで」で読むと、`[重要] 議事録` はリンク行と認められず、↑↓ が
+   *   「本文が変わっているため反映できませんでした」(= `null`)になっていた。期待する行は実物の
+   *   `formatMarkdownLink` で組む(手で綴りを書かない)。
+   */
+  it.each(['[重要] 議事録', 'a]b', 'x[y', '末尾\\'])('🔴 題名が「%s」でも入れ替わる(括弧と \\ の逃がし)', (title) => {
+    const row = formatMarkdownLink(title, 'entry:t1');
+    expect(row, '逃がしが入っていない(この検査は空振り)').toContain('\\');
+    const src = `- ${row}\n- [次](entry:t2)`;
+    expect(applyBodyRewrite(src, { kind: 'link-move', line: 0, openLine: `- ${row}`, dir: 'down' })).toBe(
+      `- [次](entry:t2)\n- ${row}`,
+    );
+    expect(applyBodyRewrite(src, { kind: 'link-move', line: 1, openLine: '- [次](entry:t2)', dir: 'up' })).toBe(
+      `- [次](entry:t2)\n- ${row}`,
+    );
+  });
+
+  /**
+   * 🔴 隣が空行・メモ・字下げした子の行でも、次のリンク行まで読み飛ばして入れ替える(#1087)。
+   * ⚠ 直す前は「隣がリンク行でない」で何も起きず、押せるボタンが黙って空振りした。
+   */
+  it('🔴 隣が空行 / メモの行 / 子の行でも、次の同じ字下げのリンク行と入れ替わる', () => {
+    const src = ['- [a](entry:a)', '', '  メモ', '    - [子](entry:c)', '- [b](entry:b)', '- [c2](entry:c2)'].join('\n');
+    const down = applyBodyRewrite(src, { kind: 'link-move', line: 0, openLine: '- [a](entry:a)', dir: 'down' })!;
+    expect(down.split('\n')).toEqual(['- [b](entry:b)', '', '  メモ', '    - [子](entry:c)', '- [a](entry:a)', '- [c2](entry:c2)']);
+    const up = applyBodyRewrite(src, { kind: 'link-move', line: 4, openLine: '- [b](entry:b)', dir: 'up' })!;
+    expect(up.split('\n')).toEqual(['- [b](entry:b)', '', '  メモ', '    - [子](entry:c)', '- [a](entry:a)', '- [c2](entry:c2)']);
+  });
+
+  it('🔴 読み飛ばしは並びの端で止まる(見出し / fence / 浅い字下げを越えない・相手が無ければ何もしない)', () => {
+    const noop = (src: string, line: number, openLine: string, dir: 'up' | 'down') =>
+      applyBodyRewrite(src, { kind: 'link-move', line, openLine, dir });
+    // 見出しの向こうのリンク行とは入れ替えない
+    const head = '- [a](entry:a)\n\n## 次の節\n\n- [b](entry:b)';
+    expect(noop(head, 0, '- [a](entry:a)', 'down')).toBe(head);
+    // fence の向こう・中とは入れ替えない
+    const fence = '- [a](entry:a)\n```\n- [偽](entry:z)\n```';
+    expect(noop(fence, 0, '- [a](entry:a)', 'down')).toBe(fence);
+    // 浅い字下げの行(親)を越えない
+    const nest = '- [a](entry:a)\n  - [子1](entry:c1)\n  メモ\n- [b](entry:b)';
+    expect(noop(nest, 1, '  - [子1](entry:c1)', 'down')).toBe(nest);
+    // 対照群: 同じ字下げの兄弟が居る形では入れ替わる
+    const sib = '- [a](entry:a)\n  - [子1](entry:c1)\n  メモ\n  - [子2](entry:c2)';
+    expect(noop(sib, 1, '  - [子1](entry:c1)', 'down')).toBe(
+      '- [a](entry:a)\n  - [子2](entry:c2)\n  メモ\n  - [子1](entry:c1)',
     );
   });
 });

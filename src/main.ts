@@ -187,9 +187,9 @@ import { runStartupIntegrity } from '@adapter/platform/storage/startup-integrity
 import type { StartupIntegrityOutcome } from '@features/storage/integrity-schedule';
 import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
-import { appMessagePost, messagesReadAt } from '@adapter/platform/message-post';
+import { appMessagePost } from '@adapter/platform/message-post';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
-import { countUnread, markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
+import { markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -1144,6 +1144,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   appMessagePost.onUnreadChanged((count) =>
     dispatcher.dispatch({ type: 'MESSAGES_UNREAD_SET', count }),
   );
+  /**
+   * 🔴 **開いているメッセージのノートは、新しい知らせが書かれたら読み直す**(#1087)。
+   * ⚠ 既読にはしない(読み直すだけ。未読の数は上の写しが決める)。連続して書かれる分は 300ms で束ねる。
+   */
+  {
+    const pending = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    appMessagePost.onWritten((lid) => {
+      if (dispatcher.getState().selectedLid !== lid) return; // 開いていなければ要らない
+      pending.add(lid);
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        const lids = [...pending];
+        pending.clear();
+        for (const l of lids) dispatcher.dispatch({ type: 'MESSAGES_BODY_REFRESH', lid: l });
+      }, 300);
+    });
+  }
   /**
    * 🔴 **確認はアプリ自身のダイアログ**(#299 段③、2026-08-21。user 裁定
    *   「ブラウザの方のアラートはマウスの動線が多くてウザいから、自前の方が嬉しい」)。
@@ -5502,11 +5521,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ `state.messagesUnread` の既定は 0(app-state.ts)── ここで実際の値に
    *   上書きする(前回のセッションで読み切れなかった注意 / 問題が在れば拾う)。
    */
-  void client
-    .request({ op: 'getBody', cid, lid: SYSTEM_MESSAGE_LID })
-    .then((body) => {
-      appMessagePost.seedUnread(countUnread(body ?? '', messagesReadAt()));
-    })
+  // 🔴 数え直している間に積んだ注意 / 問題を消さない(`seedUnreadFromDisk` が差分を足す。#1087)
+  void appMessagePost
+    .seedUnreadFromDisk(() => client.request({ op: 'getBody', cid, lid: SYSTEM_MESSAGE_LID }))
     .catch(() => {
       /* 読めなかった ── 未読 0 のまま(次に post があれば増える) */
     });
