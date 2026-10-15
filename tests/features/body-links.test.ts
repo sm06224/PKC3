@@ -143,3 +143,33 @@ describe('pkc:// の自分あても同じリンクとして読む (#379)', () =>
     expect(bodyLinkNeedles('n2')).toEqual(['entry:n2']);
   });
 });
+
+describe('🔴 コードの中・左の境界は参照元ではない(#1087)', () => {
+  const CID = 'c1';
+  it('フェンスの中の `entry:` は拾わない(外のリンクは拾う)', () => {
+    const body = '```\n[x](entry:n2)\n```\n[y](entry:n3)';
+    expect(bodyLinkTargets(body)).toEqual(['n3']);
+    expect(bodyLinksTo(body, 'n2')).toBe(false);
+    expect(bodyLinksTo(body, 'n3')).toBe(true);
+  });
+  it('閉じていないフェンスは末尾まで全部コード', () => {
+    expect(bodyLinkTargets('本文\n```\nentry:n2')).toEqual([]);
+  });
+  it('行内コードの中は拾わない / 同じ行の外は拾う', () => {
+    expect(bodyLinkTargets('`entry:n2` と entry:n3')).toEqual(['n3']);
+  });
+  it('コードの中の pkc:// の形も拾わない', () => {
+    expect(bodyLinkTargets('`pkc://c1/entry/n2` と [a](pkc://c1/entry/n3)', CID)).toEqual(['n3']);
+  });
+  it('`xentry:n2` は `entry:` ではない / 区切りの後ろなら拾う', () => {
+    expect(bodyLinkTargets('xentry:n2 a-entry:n4')).toEqual([]);
+    expect(bodyLinkTargets('(entry:n2) <entry:n3>')).toEqual(['n2', 'n3']);
+  });
+  it('表・引用・箇条書きの中のリンクは参照元である', () => {
+    const body = '| a | b |\n|---|---|\n| [x](entry:n2) | y |\n\n> [q](entry:n3)\n\n- [l](entry:n4)';
+    expect(bodyLinkTargets(body)).toEqual(['n2', 'n3', 'n4']);
+  });
+  it('~~~ のフェンスも同じ', () => {
+    expect(bodyLinkTargets('~~~\nentry:n2\n~~~')).toEqual([]);
+  });
+});
