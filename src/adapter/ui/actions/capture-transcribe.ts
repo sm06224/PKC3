@@ -227,7 +227,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           if (!r.ok) {
             // 🔴 別のタブ・窓が編集中(#1087)── reducer の赤い字は出ていないので、ここで言う
             if (r.reason === 'refused' && r.error === EDIT_ELSEWHERE_ERROR) {
-              say(`「${item.name}」の文字起こしは、別のタブまたはウィンドウで編集中なので足していません。編集を終えてから、もう一度文字にしてください`);
+              say(`「${item.name}」の文字起こしは、別のタブまたはウィンドウで編集中なので足していません。そちらを保存するか閉じてから、もう一度文字にしてください`);
               return;
             }
             if (!deps.dispatcher.getState().entryMetas.has(lid)) {
