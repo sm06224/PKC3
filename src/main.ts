@@ -3176,7 +3176,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     isEditing: () => hasUnsavedTyping(dispatcher.getState()),
     confirmDiscard: () =>
       ask('編集中の内容は保存されません。フラグの変更を反映するためにページを再読み込みしますか?', {
-        okLabel: '再読み込みする',
+        okLabel: '再読み込みしてフラグを反映する',
         danger: true,
       }),
     onDeclined: () =>
