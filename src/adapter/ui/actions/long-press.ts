@@ -21,7 +21,7 @@
  * | `pointerdown`(**指 / ペン**、主ボタン) | 時計を掛ける | マウスは Ctrl クリック / 右クリックが在るので**受けない**(長押しは右クリックの慣習) |
  * | `pointermove` が **10px** を超えた | 取り消す | 指は震えるので 0px にしない / スクロールし始めたら長押しではない |
  * | `pointerup` / `pointercancel` | 取り消す | 500ms 前に離したら**ただのタップ**(`click` が `set` を撃つ) |
- * | 500ms 経った | 発火(`toggle`)+ 700ms の**消費窓** | 直後に来る `click` を捨てる ── 捨てないと `set` で印が 1 件に戻る |
+ * | 500ms 経った | 発火(`toggle`)+ **消費窓**(離すまで開けておき、離してから 700ms で閉じる) | 直後に来る `click` を捨てる ── 捨てないと `set` で印が 1 件に戻る |
  * | 次の `pointerdown` | 消費窓を**閉じる** | 捨てるのは**同じ押下**の `click` だけ ── 閉じないと、長押しの直後に別の行を素早くタップしたとき、そのタップが黙って消える |
  *
  * ⚠ **`touch-action` は書かない**(CSS 側の注意)── 書くと一覧のスクロールが死ぬ。
@@ -45,7 +45,8 @@ export const LONG_PRESS_SLOP_PX = 10;
 /**
  * 発火の後、`click` を捨てる時間。
  * ⚠ 離した瞬間に来る `click` だけを捨てたいが、指を離すまでの時間は user しだい
- *   なので、**発火からの窓**で見る(700ms 押し続けて離しても捨てる)。
+ *   なので、**窓は押している間は開けておき、離した時点から**数える
+ *   (発火から数えると、1.2 秒以上押し続けた user の離した click が、開いたばかりのメニューの先頭へ着地する)。
  */
 export const LONG_PRESS_CONSUME_MS = 700;
 /** 受ける行。⚠ 2 ペインの行だけ(左の列は印の面ではない ── #240 段② の規律)。 */
@@ -133,7 +134,7 @@ export function installLongPress(
 ): LongPress {
   let pending: Pending | null = null;
   /** 直近の発火(行と、`click` を捨てる期限)。 */
-  let fired: { readonly el: HTMLElement; readonly until: number } | null = null;
+  let fired: { readonly el: HTMLElement; until: number } | null = null;
 
   const cancel = (): void => {
     if (pending === null) return;
@@ -168,7 +169,8 @@ export function installLongPress(
       touch,
       timer: setTimeout(() => {
         pending = null;
-        fired = { el, until: Date.now() + LONG_PRESS_CONSUME_MS };
+        // 🔴 離すまで窓は開けておく(長く押し続けても、離したときの click を捨てる)。離したら閉じる時刻が入る
+        fired = { el, until: Infinity };
         /**
          * 🔑 **指に返事をする**(OS のファイラと同じ)── 画面の印は指の下に隠れて
          *   いることが多いので、震えが「入った」の合図になる。無い端末では何もしない。
@@ -182,7 +184,11 @@ export function installLongPress(
     if (pending === null) return;
     if (Math.hypot(ev.clientX - pending.x, ev.clientY - pending.y) > LONG_PRESS_SLOP_PX) cancel();
   };
-  const onUp = (): void => cancel();
+  const onUp = (): void => {
+    cancel();
+    // 発火済みなら、ここから `LONG_PRESS_CONSUME_MS` だけ click を捨てる
+    if (fired !== null && fired.until === Infinity) fired.until = Date.now() + LONG_PRESS_CONSUME_MS;
+  };
 
   root.addEventListener('pointerdown', onDown);
   root.addEventListener('pointermove', onMove);

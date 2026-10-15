@@ -105,9 +105,27 @@ export function installPaneResize(root: HTMLElement): () => void {
   let drag: Drag | null = null;
   /** 直後の `click` を捨てるか。⚠ 上の「⚠ 押すと掴むを取り違えない」を参照。 */
   let swallowClick = false;
+  let swallowTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * 捨てる窓は離した直後の 1 手だけ(`schedule-grid-drag.ts` の `armSwallow` と同じ)。
+   * `click` が来なかったとき、後から来る無関係な click(キーボードの Enter など)まで捨てない。
+   */
+  const armSwallow = (): void => {
+    swallowClick = true;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = setTimeout(() => {
+      swallowClick = false;
+      swallowTimer = null;
+    }, 0);
+  };
+  const disarmSwallow = (): void => {
+    swallowClick = false;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = null;
+  };
 
   const onPointerDown = (e: PointerEvent): void => {
-    swallowClick = false;
+    disarmSwallow();
     if (e.button !== 0) return;
     const grip = (e.target as Element | null)?.closest<HTMLElement>(
       '[data-pkc-region="pane-grip"]',
@@ -156,7 +174,7 @@ export function installPaneResize(root: HTMLElement): () => void {
     if (!d.moved) return; // 押しただけ ── `toggle-pane` に任せる
     // 🔴 **動かしたなら、続く `click` は捨てる** ── 測れなかった回も捨てる
     //    (捨てないと「掴んだのに畳まれた」になる。測れないのは user のせいではない)
-    swallowClick = true;
+    armSwallow();
     if (d.startPx === null) return;
     const spec = PANE_SIZE_SPECS[d.id];
     const delta = spec.axis === 'x' ? e.clientX - d.startX : e.clientY - d.startY;
@@ -169,7 +187,7 @@ export function installPaneResize(root: HTMLElement): () => void {
     drag = null;
     // ⚠ 途中で取り消されたら**元へ戻す**(中途半端な幅を保存しない)
     if (d.startPx !== null) setPaneSizeVar(root, d.id, appPaneSizes.get()[d.id] ?? null);
-    if (d.moved) swallowClick = true;
+    if (d.moved) armSwallow();
   };
 
   const onClick = (e: MouseEvent): void => {
@@ -220,6 +238,7 @@ export function installPaneResize(root: HTMLElement): () => void {
   root.addEventListener('keydown', onKeyDown);
 
   return () => {
+    disarmSwallow();
     root.removeEventListener('pointerdown', onPointerDown);
     doc.removeEventListener('pointermove', onPointerMove);
     doc.removeEventListener('pointerup', finish);

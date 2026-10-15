@@ -281,6 +281,43 @@ describe('押すと掴むを取り違えない(#497)', () => {
   });
 });
 
+describe('click が来なかった掴みの後始末', () => {
+  it('🔴 動かして離したのに click が来ないなら、次の click(キーボード)は捨てない', () => {
+    vi.useFakeTimers();
+    try {
+      const root = mounted();
+      measure(root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!, { width: 240 });
+      const g = grip(root, 'sidebar');
+      const opts = { bubbles: true, pointerId: 1, button: 0 };
+      g.dispatchEvent(new PointerEvent('pointerdown', { ...opts, clientX: 0, clientY: 0 }));
+      document.dispatchEvent(new PointerEvent('pointermove', { ...opts, clientX: 60, clientY: 0 }));
+      document.dispatchEvent(new PointerEvent('pointerup', { ...opts, clientX: 60, clientY: 0 }));
+      vi.advanceTimersByTime(1);
+      g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(shellOf(root).getAttribute('data-pkc-hidden-panes'), '古い掴みの click 捨てが残った').toBe('sidebar');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('🔴 pointercancel で終わった掴みでも同じ(動かしていた回)', () => {
+    vi.useFakeTimers();
+    try {
+      const root = mounted();
+      measure(root.querySelector<HTMLElement>('[data-pkc-region="sidebar"]')!, { width: 240 });
+      const g = grip(root, 'sidebar');
+      const opts = { bubbles: true, pointerId: 1, button: 0 };
+      g.dispatchEvent(new PointerEvent('pointerdown', { ...opts, clientX: 0, clientY: 0 }));
+      document.dispatchEvent(new PointerEvent('pointermove', { ...opts, clientX: 60, clientY: 0 }));
+      document.dispatchEvent(new PointerEvent('pointercancel', { ...opts }));
+      vi.advanceTimersByTime(1);
+      g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(shellOf(root).getAttribute('data-pkc-hidden-panes'), 'cancel の後の click 捨てが残った').toBe('sidebar');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('鍵でも動かせる(#497)', () => {
   function key(g: HTMLElement, k: string): boolean {
     const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
