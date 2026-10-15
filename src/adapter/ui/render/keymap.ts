@@ -270,6 +270,11 @@ export class KeymapStore {
           const norm = chordToString(chord);
           if (!list.includes(norm)) list.push(norm);
         }
+        // 🔑 1 件以上在るのに 1 件も読めない(将来の版の修飾名など)は上書きではない ── 生のまま残し、既定を効かせる
+        if (v.length > 0 && list.length === 0) {
+          extras[id] = v;
+          continue;
+        }
         known[id] = list;
       }
     }

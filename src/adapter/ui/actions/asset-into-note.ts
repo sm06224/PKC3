@@ -65,6 +65,20 @@ export function noteToPutInto(dispatcher: Dispatcher, pinned?: string | null): N
   };
 }
 
+/**
+ * 🔴 **別のタブ・窓が編集中のノートへは、本文に入れない**ときの断り文の後半(#1087)。
+ * ⚠ 1 本ずつ入る経路(収録)と、まとめて取り込む経路(添付・ドロップ)が**同じ言い方**を使う。
+ */
+export const NOT_IN_BODY_EDITED_ELSEWHERE = '別のタブまたはウィンドウで編集中なので、本文には入れていません';
+
+/**
+ * 🔴 **まとめて取り込んだ回の、本文に入れなかった知らせ**(#1087)。
+ * ⚠ 確かめるのは**回に 1 度**(ファイルごとに問い合わせない)── 知らせも 1 行で、件数を言う。
+ */
+export function attachedNotInBodyElsewhereText(why: string, count: number): string {
+  return `${why}${count} 件を添付にしました(${NOT_IN_BODY_EDITED_ELSEWHERE})`;
+}
+
 export interface PutAssetArgs {
   readonly dispatcher: Dispatcher;
   readonly queue: WritableQueue;
@@ -122,6 +136,11 @@ export interface PutAssetArgs {
    *   問い合わせの間に次の 1 本が先に走る形になるので、**1 本ずつ入る経路(収録)にだけ**渡す。
    */
   readonly lock?: EditLockPort;
+  /**
+   * 🔴 **本文には入れない**(呼び手が回に 1 度確かめて、別のタブ・窓が編集中だった。#1087)。
+   * ⚠ 選択は返す(添付が奪った選択を戻す)が、**知らせは言わない** ── 呼び手が件数つきで 1 行言う。
+   */
+  readonly skipBody?: boolean;
 }
 
 /**
@@ -277,6 +296,7 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
     );
     return;
   }
+  if (args.skipBody === true) return;
 
   /**
    * ⚠ **画像かどうかで綴りが変わる**(`![…]` か `[…]`)── 画像は本文で描かれる。
@@ -407,7 +427,7 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
       }
       void editedElsewhereReason(dispatcher, args.lock, lid).then((refusal) => {
         if (refusal !== null) {
-          notify(`${why}「${name}」を添付にしました(別のタブまたはウィンドウで編集中なので、本文には入れていません)`, attachedLid);
+          notify(`${why}「${name}」を添付にしました(${NOT_IN_BODY_EDITED_ELSEWHERE})`, attachedLid);
           return;
         }
         appendTail();

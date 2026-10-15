@@ -179,13 +179,21 @@ export function buildKeymapPanel(
     if (capturing === null) return;
     const ke = ev as KeyboardEvent;
     // ⚠ 変換中は IME のもの ── 割当の材料にしない
-    if (ke.isComposing) return;
+    // ⚠ Safari は変換を確定した打鍵が `isComposing: false` / `keyCode` 229 で届く
+    if (ke.isComposing || ke.keyCode === 229) return;
     const chord = chordOf(ke);
     if (chord === null) return; // 修飾キー単独 ── 押している途中
+    const s = chordToString(chord);
+    // 🔑 **素の Tab(Shift+Tab も)はやめる合図**(Esc と同じ)。割り当てると、入力欄の外の Tab が全部その操作になり、
+    //    フォーカス移動を奪う。⚠ 握らない(`preventDefault` しない)── 本来のフォーカス移動をそのまま通す
+    if (!chord.mod && !chord.alt && chord.key === 'Tab') {
+      stopCapture();
+      sync();
+      return;
+    }
     ev.preventDefault();
     ev.stopImmediatePropagation();
     const target = capturing;
-    const s = chordToString(chord);
     // 🔑 **素の Escape はやめる合図**(割当の材料にしない)── 一般的な作法に合わせる。
     //    ⚠ その代わり Escape そのものは割り当て直せない(既定では使われている)。
     if (s === 'Escape') {

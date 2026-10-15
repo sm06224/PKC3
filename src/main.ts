@@ -2687,6 +2687,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * `hashBlob` を渡し忘れて**メインでハッシュが回る**(実測 500/726ms)。
    */
   const attachDeps: AttachDeps = {
+    // 🔴 別のタブ・窓が編集中のノートへは本文に入れない(#1087。追記・収録と同じ 1 本)
+    lock: editLockPort,
     putBlob: (key, blob) => blobs.put(cid, key, blob),
     // 🔴 預かった取込は門の中で(#724 ⑤)。断らず待つ側 ── file は既に選ばれている
     gate: (run) => withAssetGate.queued(run),
