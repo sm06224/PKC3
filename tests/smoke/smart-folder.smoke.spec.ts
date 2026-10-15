@@ -146,6 +146,7 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
 
   await makeNote(page, '見積書', '---\ntags: [請求]\n---\n見積の中身\n');
   await makeNote(page, '請求書', '---\ntags: [請求]\n---\n請求の中身\n');
+  await makeNote(page, '請求の控え', '---\ntags: [請求]\n---\n控えの中身\n');
 
   await createEntry(page, 'smart');
   const title = page.locator('[data-pkc-field="editor-title"]');
@@ -155,7 +156,17 @@ test('🔴 中でタグを外すと、集め直しを待たずに行が消える
   await page.locator(SMART_ROW).first().dblclick();
   await page.locator('[data-pkc-field="smart-cond"]').fill('請求');
   await clickReal(page, '[data-pkc-action="smart-cond-add"]');
-  await expect(page.locator(ROWS), '2 件とも集まっていない').toHaveCount(2);
+  await expect(page.locator(ROWS), '3 件とも集まっていない').toHaveCount(3);
+  await expect(page.locator(WHY)).toContainText('3 件');
+
+  /**
+   * 🔴 **開いている入れ物の中でノートを消すと、帯の「N 件」が開き直さずに 1 つ減る**
+   *   (行だけ消えて数が古いままだと、帯が嘘になる)。
+   */
+  await page.locator(ROWS).first().click();
+  await clickReal(page, '[data-pkc-action="delete-entry"]');
+  await expect(page.locator(ROWS), '消したのに行が残っている').toHaveCount(2);
+  await expect(page.locator(WHY), '消したのに件数が減っていない').toContainText('2 件');
 
   // 2 件に印を付ける(実キーの修飾つきクリック)
   const rows = page.locator(ROWS);
