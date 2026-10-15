@@ -27,6 +27,7 @@ import { humanBytes } from '@features/human-bytes';
 import { captureBarLine, captureFileName, CAPTURE_LABEL } from '@features/asset/capture-text';
 import { elapsedText } from '@features/elapsed-text';
 import { noteToPutInto, putAssetIntoNote } from './asset-into-note';
+import type { EditLockPort } from '@adapter/state/edited-elsewhere';
 import {
   startCapture as startCaptureImpl,
   type CaptureDeps,
@@ -91,6 +92,8 @@ export interface CaptureServiceDeps {
    *   ブラウザの口(`beforeunload`)には触れない(この file を test から動かせるように)。
    */
   readonly onActive?: (active: boolean) => void;
+  /** 🔴 別のタブ・窓が編集中のノートへ入れないための問い合わせ口(#1087)。省略 = 問い合わせない。 */
+  readonly lock?: EditLockPort;
 }
 
 export interface CaptureService {
@@ -266,6 +269,8 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
       why,
       // 🔑 分かれた回だけ印を付ける(1 本なら「元に戻す」は元から 1 回である)
       ...(tag === null ? {} : { batch: tag }),
+      // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087)
+      ...(deps.lock === undefined ? {} : { lock: deps.lock }),
     });
     /**
      * 🔑 **録ったものの一覧を集め直す**(2026-10-13 の見直し)── 一覧はタブを開いたときに 1 度集めるだけなので、

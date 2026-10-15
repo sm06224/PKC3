@@ -201,3 +201,32 @@ describe('目次を見せて起動 (#195 / C-5 段①-b)', () => {
     expect(h.shells[0], '配線が無いのに中継が焼かれている').not.toContain(EXT_PORT_TAG);
   });
 });
+
+/**
+ * 🔴 **港を渡す手が投げても、作った ObjectURL を返す**(#1087)。
+ * ⚠ `connect` が `try` の外に在ると、投げた回は `finally`(`revokeUrl`)を通らず URL が漏れる
+ *   (user 指示 2026-07-27「寿命の終端で revoke」)。
+ */
+describe('港を渡す手が投げたとき(#1087)', () => {
+  it('🔴 URL を返し、窓を閉じ、理由を言う', async () => {
+    const h = harness({ granted: true });
+    const revoked: string[] = [];
+    const deps = {
+      ...h.deps,
+      revokeUrl: (u: string) => void revoked.push(u),
+      fail: (m: string) => void failures.push(m),
+      ext: {
+        ...h.deps.ext!,
+        connect: () => {
+          throw new Error('port-boom');
+        },
+      },
+    };
+    const failures: string[] = [];
+    await launchTile(appTile, deps, { extension: true });
+    await settle();
+    expect(revoked, '投げた回に ObjectURL を返していない').toEqual(['blob:fake-1']);
+    expect(h.win.closed, '空の窓が残っている').toBe(true);
+    expect(failures.join('\n')).toContain('port-boom');
+  });
+});

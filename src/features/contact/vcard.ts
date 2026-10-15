@@ -331,7 +331,8 @@ function isEmptyCard(cur: VcfDraft): boolean {
  */
 function finishCard(cur: VcfDraft): VcfCard {
   return {
-    name: cur.fn !== '' ? cur.fn : cur.n,
+    // 🔴 題名は 1 行(#1087)── FN に `\n` を書いた .vcf の改行がそのままノートの題名に入ると、一覧・書き出しの 1 行が割れる
+    name: (cur.fn !== '' ? cur.fn : cur.n).replace(/\s*[\r\n]+\s*/g, ' ').trim(),
     orgParts: cur.orgParts,
     tels: cur.tels,
     emails: cur.emails,
@@ -557,7 +558,7 @@ export function vcfNoteOf(card: VcfCard): { title: string; body: string } {
 
 /** 3.0 の値エスケープ(`\` `,` `;` と改行)。 */
 function escapeValue(v: string): string {
-  return v.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\r?\n/g, '\\n');
+  return v.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\r\n|\r|\n/g, '\\n'); // 🔴 単独の CR も(#1087。残すと vCard の行が割れる)
 }
 
 /**

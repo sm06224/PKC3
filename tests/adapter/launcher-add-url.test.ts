@@ -107,6 +107,41 @@ describe('① よく開くサイトをアプリ一覧に足す (#401)', () => {
     expect(q<HTMLInputElement>('launcher-add-url').value).toBe('');
   });
 
+  /**
+   * 🔴 **リンクを足しただけで、開いているノートも左の探す欄も動かさない**(#1087)。
+   * ⚠ 既定の `CREATE_ENTRY` は選択を新しい物へ動かし、絞りを外す ── 本文が中央から消える。
+   */
+  it('🔴 足しても、開いているノートと探す欄はそのまま', () => {
+    const { d, sent, q } = setup();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        {
+          lid: 'n1',
+          title: '読んでいるノート',
+          archetype: 'text',
+          createdAt: null,
+          updatedAt: null,
+          entryOrder: 1,
+          status: null,
+          date: null,
+          archived: false,
+          bodyChars: null,
+        },
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '読んで' });
+    expect(d.getState().selectedLid, '前提: n1 を選んでいる').toBe('n1');
+    q<HTMLInputElement>('launcher-add-url').value = 'https://example.com/keep';
+    q('launcher-add-go').click();
+    expect(sent.find((a) => a.type === 'CREATE_ENTRY'), '作られていない').toMatchObject({ keepSelection: true });
+    expect(d.getState().selectedLid, '開いているノートが退いた').toBe('n1');
+    expect(d.getState().filterQuery, '探す欄が消えた').toBe('読んで');
+  });
+
   /** ⚠ 名前を省いたら、アドレスをそのまま名前にする(無題のタイルを作らない)。 */
   it('名前を省くとアドレスが名前になる', () => {
     const { sent, q } = setup();

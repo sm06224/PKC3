@@ -553,3 +553,28 @@ describe('parseVcf ── 重なった項目と URL', () => {
     expect(cards[0]!.others.join('\n')).toContain('渋谷1-2-3 渋谷区 東京都 150-0001 日本');
   });
 });
+
+describe('題名と改行(#1087)', () => {
+  it('🔴 取り込み ── FN の改行は空白にして、題名を 1 行にする', () => {
+    const { cards } = parseVcf('BEGIN:VCARD\r\nFN:山田\\n太郎\r\nTEL:090\r\nEND:VCARD');
+    expect(cards[0]!.name, '題名に改行が残った').toBe('山田 太郎');
+    expect(cards[0]!.name).not.toMatch(/[\r\n]/);
+  });
+
+  it('🔴 書き出し ── 単独の CR も \\n に書き、vCard の行が割れない', () => {
+    const out = buildVcf([
+      {
+        lid: 'l1',
+        name: 'A\rB',
+        org: '',
+        orgParts: [],
+        tels: ['090'],
+        emails: [],
+        birthday: '',
+        overlong: false,
+      },
+    ]);
+    expect(out, '単独の CR が生のまま出た').not.toMatch(/\r(?!\n)/);
+    expect(out).toContain('FN:A\\nB\r\n');
+  });
+});

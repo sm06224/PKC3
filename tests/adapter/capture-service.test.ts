@@ -27,6 +27,7 @@ import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { DomainEvent } from '../../src/adapter/state/app-state';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
+import type { EditLockPort } from '../../src/adapter/state/edited-elsewhere';
 import {
   createCaptureService,
   type CaptureServiceDeps,
@@ -147,6 +148,8 @@ function bench(
      *   確かめられない(取り込む時刻で名乗っても同じ字が出る ── 変異試験 C6)。
      */
     clock?: { at: Date };
+    /** 🔴 別のタブ・窓が編集中かを聞く口(#1087)。省略 = 問い合わせない。 */
+    lock?: EditLockPort;
   } = {},
 ): Bench {
   const d = new Dispatcher();
@@ -236,6 +239,7 @@ function bench(
     onChange: (line) => lines.push(line),
     notify: (t) => notices.push(t),
     onActive: (a) => actives.push(a),
+    ...(opts.lock === undefined ? {} : { lock: opts.lock }),
     now: () => opts.clock?.at ?? new Date(2026, 7, 27, 3, 1, 2),
     tick: (fn) => {
       beats.push(fn);
@@ -868,5 +872,52 @@ describe('🔴 収録が disk に着くまで、離れる確認を残す(#1087)'
     await tick();
     expect(b.attached.length, '前提:2 本とも入った').toBe(2);
     expect(b.actives, '預かりの途中で外れた / 着いたのに残る').toEqual([true, false]);
+  });
+});
+
+/**
+ * 🔴 **別のタブ・窓が編集中のノートへは、録音を入れない**(#1087。追記・PDF の引用と同じ門)。
+ * ⚠ 添付は残す ── 入れなかったことを言う。断る場面と通す場面を**同じ台で**並べる(対照群)。
+ */
+describe('🔴 別のタブ・窓が編集中のノート(#1087)', () => {
+  it('🔴 断られたら、添付は残して本文には入れず、そう言う', async () => {
+    const asked: string[] = [];
+    const b = bench({
+      lock: {
+        acquireEditLock: async (lid) => {
+          asked.push(lid);
+          return 'denied';
+        },
+      },
+    });
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    await tick();
+    expect(asked, 'ノートの錠を聞いていない').toEqual(['a']);
+    expect(appends(b.events), '別の窓が編集中なのに書き足した').toEqual([]);
+    expect(b.attached, '添付は残す').toHaveLength(1);
+    expect(
+      b.notices.some((n) => n.includes('添付にしました(別のタブまたはウィンドウで編集中なので、本文には入れていません)')),
+      '入れなかったことを言っていない',
+    ).toBe(true);
+    expect(b.notices.some((n) => n.includes('入れました')), '入れていないのに「入れました」').toBe(false);
+  });
+
+  it('⚠ 対照群 ── 錠が取れたら、同じ台で本文へ入る(錠は手放す)', async () => {
+    const released: string[] = [];
+    const b = bench({
+      lock: {
+        acquireEditLock: async () => 'granted',
+        releaseEditLock: (lid) => released.push(lid),
+      },
+    });
+    await b.service.start('audio');
+    b.service.stop();
+    await tick();
+    await tick();
+    expect(appends(b.events).map((a) => a.lid), '錠が取れたのに入っていない').toEqual(['a']);
+    expect(b.notices.some((n) => n.includes('本文のいちばん下に入れました'))).toBe(true);
+    expect(released, '取った錠を手放していない').toEqual(['a']);
   });
 });

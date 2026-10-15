@@ -302,3 +302,39 @@ describe('渡る量の門(#536 ③)', () => {
   });
 });
 
+
+/**
+ * 🔴 **手で書いた電話番号の先頭の 0 を落とさない**(#1087)。
+ * ⚠ `tel: 09012345678` は frontmatter では数として読まれ `9012345678` になる ── `tel:` の先が別の番号になる。
+ */
+describe('手で書いた電話番号の先頭の 0(#1087)', () => {
+  it('🔴 引用符なしの 1 本 / 並べた複数 / 箇条書きで、書いたままの字が残る', () => {
+    expect(contactOf('a', '山田', fm('tel: 09012345678'))?.tels, '先頭の 0 が落ちた').toEqual(['09012345678']);
+    expect(contactOf('a', '山田', fm('tel: [09012345678, 0312345678]'))?.tels).toEqual(['09012345678', '0312345678']);
+    expect(contactOf('a', '山田', fm('tel:\n  - 09012345678\n  - "0312345678"'))?.tels).toEqual(['09012345678', '0312345678']);
+    // 押し先まで ── 落ちた 0 が `tel:` の先に出ない
+    expect(telHref(contactOf('a', '山田', fm('tel: 09012345678'))!.tels[0]!)).toBe('tel:09012345678');
+  });
+
+  it('⚠ 対照群 ── 引用符つきと、ハイフンつきは今までどおり', () => {
+    expect(contactOf('a', '山田', fm('tel: "09012345678"'))?.tels).toEqual(['09012345678']);
+    expect(contactOf('a', '山田', fm('tel: 090-1234-5678'))?.tels).toEqual(['090-1234-5678']);
+  });
+
+  it('⚠ 行末の注釈は番号に含めない', () => {
+    expect(contactOf('a', '山田', fm('tel: 09012345678 # 携帯'))?.tels).toEqual(['09012345678']);
+  });
+});
+
+describe('メールの宛先に ? & # があるとき(#1087)', () => {
+  it('🔴 件名・宛先の追加などのクエリになる字を含む宛先は、押せる形にしない', () => {
+    expect(mailHref('a@example.com?subject=x'), '? を通した').toBeNull();
+    expect(mailHref('a@example.com&cc=b@example.com'), '& を通した').toBeNull();
+    expect(mailHref('a@example.com#frag'), '# を通した').toBeNull();
+    expect(mailHref('a?b@example.com'), '@ の前の ? を通した').toBeNull();
+  });
+
+  it('⚠ 対照群 ── 普通の宛先は押せる', () => {
+    expect(mailHref('a@example.com')).toBe('mailto:a@example.com');
+  });
+});

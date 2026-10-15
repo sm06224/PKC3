@@ -347,11 +347,13 @@ export async function launchTile(
       //    「作る場所と返す場所」を 1 対にする(`download.ts` と同じ倒し方)
       // ⚠ 港を渡すのは**遷移の後**(外殻が印を立てるのを待つ形なので、順は問わないが
       //    「外殻を入れてから」のほうが読み手に自然である)
-      const link =
-        extNonce === null || deps.ext === undefined
-          ? null
-          : deps.ext.connect(win, extNonce, { appId: tile.lid, title: tile.title });
+      let link: ReturnType<NonNullable<typeof deps.ext>['connect']> | null = null;
       try {
+        // 🔴 **`connect` も `try` の中**(#1087)── 外で投げると `finally` を通らず、作った ObjectURL が漏れる
+        link =
+          extNonce === null || deps.ext === undefined
+            ? null
+            : deps.ext.connect(win, extNonce, { appId: tile.lid, title: tile.title });
         win.location.replace(url);
         // 🔑 **寿命の終端で捨てる**(user 指示 2026-07-27)。初版は 1 秒後に
         // revoke していたので、開いたアプリを再読込すると必ず死んでいた

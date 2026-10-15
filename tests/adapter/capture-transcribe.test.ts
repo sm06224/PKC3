@@ -501,3 +501,24 @@ describe('進行中の字の後始末(#1017 C5)', () => {
     expect(empty.notes).not.toContain('');
   });
 });
+
+/**
+ * 🔴 **別のタブ・窓が編集中のノートへは、文字起こしを足さない**(#1087。追記・PDF の引用と同じ門)。
+ * ⚠ reducer の赤い字は出ない経路なので、**ここで理由を言わないと黙って消える**。
+ */
+describe('別のタブ・窓が編集中のノート(#1087)', () => {
+  it('🔴 断られたら、足さず、「足しました」とも言わず、理由を言う', async () => {
+    const h = harness({ lock: { acquireEditLock: async () => 'denied' } });
+    await h.tr.run('a');
+    expect(h.appends, '別の窓が編集中なのに足した').toEqual([]);
+    expect(h.notes.some((t) => t.includes('文字起こしを足しました')), '足していないのに「足しました」').toBe(false);
+    expect(h.notes.at(-1)).toMatch(/別のタブまたはウィンドウで編集中なので足していません/);
+  });
+
+  it('⚠ 対照群 ── 錠が取れたら足す', async () => {
+    const h = harness({ lock: { acquireEditLock: async () => 'granted', releaseEditLock: () => {} } });
+    await h.tr.run('a');
+    expect(h.appends).toHaveLength(1);
+    expect(h.notes.at(-1)).toContain('文字起こしを足しました');
+  });
+});

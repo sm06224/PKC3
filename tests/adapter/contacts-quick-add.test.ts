@@ -228,13 +228,36 @@ describe('#278 段③ 連絡先の面から足す', () => {
     await tick(40);
     expect(s.persisted, '前提:ノートが作られていない').toHaveLength(1);
     expect(s.d.getState().notice ?? '', '一覧に出ないのに黙っている').toContain('一覧には出ていません');
-    // 対照群:当たる名前なら言わない
+    // 🔴 知らせは**実際の一覧**と食い違わない(#1087)── 探す欄は残り、足した人は本当に出ていない
+    expect(s.d.getState().filterQuery, '足しただけで探す欄が消えた').toBe('田中');
+    expect(s.host.querySelectorAll('[data-pkc-contact]'), '「出ていません」と言ったのに一覧に出ている').toHaveLength(0);
+    // 対照群:当たる名前なら言わない ── そして本当に一覧に出ている
     const t = setup();
     t.d.dispatch({ type: 'SET_ENTRY_FILTER', query: '田中' });
     type(t, { name: '田中', tel: '090-3333-4444' });
     t.q('[data-pkc-action="contacts-quick-add"]')!.click();
     await tick(40);
     expect(t.d.getState().notice ?? '').not.toContain('一覧には出ていません');
+    expect(t.d.getState().filterQuery).toBe('田中');
+    const rows = t.host.querySelectorAll('[data-pkc-contact]');
+    expect(rows, '当たる名前なのに一覧に出ていない').toHaveLength(1);
+    expect(rows[0]!.textContent).toContain('田中');
+  });
+
+  /**
+   * 🔴 **足しても、開いているノートが中央から退かない**(#1087)。
+   * ⚠ 既定の `CREATE_ENTRY` は選択を新しい物へ動かす ── 連絡先を眺めながら足したいだけなのに本文が消える。
+   */
+  it('🔴 足しても、開いているノートはそのまま', async () => {
+    const s = setup([meta('n1')], { n1: '本文\n' });
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect(s.d.getState().selectedLid, '前提: n1 を選んでいる').toBe('n1');
+    type(s, { name: '足す人', tel: '090-5555-6666' });
+    s.q('[data-pkc-action="contacts-quick-add"]')!.click();
+    await tick(40);
+    expect(s.persisted, '前提: 足されている').toHaveLength(1);
+    expect(s.d.getState().selectedLid, '開いているノートが退いた').toBe('n1');
   });
 
   /**

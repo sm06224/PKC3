@@ -3182,6 +3182,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ⚠ 保存領域への書込・可搬の未保存とは別の持ち主 ── `'capture'` の名前で数える。
      */
     onActive: (active) => unloadGuard.setWriting(active, 'capture'),
+    // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087。追記・PDF の引用と同じ 1 本)
+    lock: editLockPort,
   });
 
   /**
@@ -3265,6 +3267,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     ready: asrReadyFrom(asrStore),
     transcribe: (job) => asrClient.transcribe(job),
     notify: showStatus,
+    // 🔴 別のタブ・窓が編集中のノートへは足さない(#1087)
+    lock: editLockPort,
   });
   const finishAsrPack = (result: Parameters<typeof applyAsrResult>[1]): void =>
     applyAsrResult(appAsrPack, result, { notify: showStatus });
