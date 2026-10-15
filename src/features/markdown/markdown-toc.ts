@@ -115,11 +115,19 @@ export function slugifyHeading(text: string): string {
  */
 export function makeSlugCounter(): (text: string) => string {
   const counter = new Map<string, number>();
+  // 出した id の全部。⚠ `A, A, A-1` で 2 つ目が `a-1` を取ると、3 つ目の素の `a-1` とぶつかる
+  const issued = new Set<string>();
   return (text: string) => {
     const base = slugifyHeading(text) || 'heading';
-    const n = counter.get(base) ?? 0;
+    let n = counter.get(base) ?? 0;
+    let id = n === 0 ? base : `${base}-${n}`;
+    while (issued.has(id)) {
+      n += 1;
+      id = `${base}-${n}`;
+    }
     counter.set(base, n + 1);
-    return n === 0 ? base : `${base}-${n}`;
+    issued.add(id);
+    return id;
   };
 }
 

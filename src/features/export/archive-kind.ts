@@ -12,7 +12,7 @@
  * |---|---|---|
  * | `.pkc3-full.zip` | ノート × 添付 × つながり × 履歴(全部) | コレクション「バックアップ」 |
  * | `.pkc3-notes.zip` | ノート × 添付(1 件 / フォルダの中) | ノート・フォルダ「バックアップ(このノート / このフォルダ)」 |
- * | `.pkc3-part.zip` | ノート × 添付(保存領域に問題があるとき、読めた分だけ) | コレクション「バックアップ」/「Markdown」が自動で切り替える |
+ * | `.pkc3-part.zip` | ノート × 添付 × つながり × 履歴(保存領域に問題があるとき、**読めた分だけ**。つながり・履歴は拾えた分が入る) | コレクション「バックアップ」/「Markdown」が自動で切り替える |
  *
  * ⚠ **中身の形式(manifest / container.json の shape)は 3 つとも同一**である
  * (`pkc3-archive.ts` の `writeArchive` / `readArchive` を素通しする)。分けるのは
@@ -35,17 +35,18 @@ export type ArchiveKind = 'full' | 'notes' | 'part';
 interface ArchiveKindSpec {
   /** file 名の末尾(拡張子込み)。 */
   readonly suffix: string;
-  /** 「3 か所で言う」の 1 つ目(ボタンの下の 1 行 / 取込前の表)に使う短い説明。 */
-  readonly contains: string;
 }
 
+/**
+ * ⚠ 「何が入っているか」の説明はここに持たない ── 画面の字は呼び側が持つ
+ * (`commands.ts` の title / 自動で切り替えたときは `rescueArchiveDetail` が件数つきで言う)。
+ * 以前ここに在った `contains` は、`part` を「つながり・履歴は入りません」と書いたまま、
+ * 拾い出しがつながり・履歴を入れる(#1087)ようになって**嘘になり**、読み手も無かった。
+ */
 const SPEC: Readonly<Record<ArchiveKind, ArchiveKindSpec>> = {
-  full: { suffix: '.pkc3-full.zip', contains: 'ノート・添付・つながり・履歴 を全部' },
-  notes: { suffix: '.pkc3-notes.zip', contains: '本文・添付・履歴(過去の版)' },
-  part: {
-    suffix: '.pkc3-part.zip',
-    contains: '読めた分のノートと添付(つながり・履歴は入りません)',
-  },
+  full: { suffix: '.pkc3-full.zip' },
+  notes: { suffix: '.pkc3-notes.zip' },
+  part: { suffix: '.pkc3-part.zip' },
 };
 
 /** file 名の末尾(拡張子込み)。 */
@@ -56,11 +57,6 @@ export function archiveSuffix(kind: ArchiveKind): string {
 /** `<base>` に末尾を付けた file 名。⚠ `base` は既に `safeName()` 済みの前提。 */
 export function archiveFileName(base: string, kind: ArchiveKind): string {
   return `${base}${SPEC[kind].suffix}`;
-}
-
-/** 「何が入っているか」の短い説明(§5 の「3 か所で言う」の材料)。 */
-export function archiveKindContains(kind: ArchiveKind): string {
-  return SPEC[kind].contains;
 }
 
 /** 🔴 旧形式(#1017 より前)。⚠ 中身の形式は `full` と同一 ── 取込は両方受ける。 */

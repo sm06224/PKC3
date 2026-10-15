@@ -139,7 +139,7 @@ beforeAll(async () => {
   await request({
     op: 'bulkUpsertEntries',
     cid: CID,
-    entries: [entry('a1', '# A\n', 1), entry('b2', '# B 版1\n', 2), entry('c3', '# C\n', 3)],
+    entries: [entry('a1', '# A\n', 30), entry('b2', '# B 版1\n', 10), entry('c3', '# C\n', 20)],
   });
   await request({
     op: 'bulkUpsertRelations',
@@ -154,7 +154,7 @@ beforeAll(async () => {
     await request({
       op: 'upsertEntry',
       cid: CID,
-      entry: entry('b2', body, 2),
+      entry: entry('b2', body, 10),
       checkpoint: true,
     });
   }
@@ -210,6 +210,16 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     expect(rels.rows.map((r) => r.id).sort(), 'つながりを拾えていない').toEqual(['r-link', 'r-parent']);
     const revs = await request({ op: 'rescueRevisions', afterRowid: 0, chunks: 2 });
     expect(revs.rows.length, '履歴を拾えていない').toBeGreaterThan(1);
+    // 🔴 ノートの並びと時刻も拾えている(#1087)。⚠ 並びは 30/10/20 ── 拾った順(1/2/3)と別の値にしてある
+    const ents = await request({ op: 'rescueEntries', afterRowid: 0, chunks: 2 });
+    expect(
+      Object.fromEntries(ents.rows.map((r) => [r.lid, r.entryOrder])),
+      '並びを拾えていない',
+    ).toEqual({ a1: 30, b2: 10, c3: 20 });
+    for (const r of ents.rows) {
+      expect(r.createdAt, `${r.lid}: 作成時刻を拾えていない`).toMatch(/^\d{4}-\d{2}-\d{2} /);
+      expect(r.updatedAt, `${r.lid}: 更新時刻を拾えていない`).toMatch(/^\d{4}-\d{2}-\d{2} /);
+    }
 
     let archive: Blob | null = null;
     let fresh: ResultMap['init'] | null = null;

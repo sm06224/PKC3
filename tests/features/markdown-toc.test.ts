@@ -4,6 +4,7 @@ import {
   extractTocFromEntry,
   renderStaticTocHtml,
   makeLogLabel,
+  makeSlugCounter,
   slugifyHeading,
 } from '../../src/features/markdown/markdown-toc';
 
@@ -148,5 +149,20 @@ describe('markdown-toc', () => {
       expect(label).toContain('Actual preview line');
       expect(label).not.toContain('Heading to skip');
     });
+  });
+});
+
+describe('makeSlugCounter(衝突)', () => {
+  it('🔴 A, A, A-1 でも同じ id を 2 度出さない', () => {
+    const slug = makeSlugCounter();
+    const ids = ['A', 'A', 'A-1', 'A', 'A-1'].map((t) => slug(t));
+    expect(ids[0]).toBe('a');
+    expect(ids[1]).toBe('a-1');
+    expect(new Set(ids).size, ids.join()).toBe(ids.length);
+  });
+
+  it('衝突しない見出しは従来どおりの綴り(a, a-1, a-2)', () => {
+    const slug = makeSlugCounter();
+    expect(['A', 'A', 'A'].map((t) => slug(t))).toEqual(['a', 'a-1', 'a-2']);
   });
 });

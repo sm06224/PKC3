@@ -3644,8 +3644,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           get: (c: string, key: string) => blobs.get(c, key),
         },
         // ① ⚠ **保険が先**。ここで落ちたら 1 バイトも消さずに止まる
-        // 🔴 **末尾は `part`**(#1017 段④b)── つながり・履歴を持たない、
-        //   読めた分だけの形だと file 名で言う(中身の形式は `full` と同一)
+        // 🔴 **末尾は `part`**(#1017 段④b)── 読めた分だけの形だと file 名で言う
+        //   (つながり・履歴も拾えた分は入る(#1087)。中身の形式は `full` と同一)
         saveArchive: async (source) => {
           const out = await writeArchive(source, new Date().toISOString());
           downloadBlob(archiveFileName(`pkc-rescue-${dayStamp(new Date())}`, 'part'), out.blob);

@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   writeArchive,
   readArchive,
+  restoreArchive,
   ARCHIVE_FORMAT,
   type ArchiveSource,
 } from '../../src/features/export/pkc3-archive';
@@ -433,5 +434,67 @@ describe('readArchive: container.json の断り文(#1389)', () => {
     await expect(readArchive(zip)).rejects.toThrow(
       /^バックアップの中のノートのデータ\(container\.json\)に、ノート\(entries\)の記載がありません/,
     );
+  });
+});
+
+describe('取り込んだノートの時刻を運ぶ・取り込み直せない大きさを言う(#1087)', () => {
+  it('🔴 作成・更新時刻が、書く → 読む → 復元 を通っても残る(null は null のまま)', async () => {
+    const { blob } = await writeArchive(
+      source({
+        entries: [
+          { lid: 'a', body: 'A', created_at: '2020-01-02 03:04:05', updated_at: '2021-02-03 04:05:06' },
+          { lid: 'b', body: 'B' },
+        ],
+      }),
+      '2026-10-15T00:00:00Z',
+    );
+    const got = restoreArchive(await readArchive(blob), {
+      existingLids: new Set(),
+      existingRelationIds: new Set(),
+      orderBase: 0,
+      genLid: () => 'new',
+      genRelationId: () => 'rel',
+    });
+    const byLid = Object.fromEntries(got.entries.map((e) => [e.lid, e]));
+    expect(byLid['a']!.createdAt).toBe('2020-01-02 03:04:05');
+    expect(byLid['a']!.updatedAt).toBe('2021-02-03 04:05:06');
+    expect(byLid['b']!.createdAt, '無い時刻をでっち上げた').toBeNull();
+    expect(byLid['b']!.updatedAt).toBeNull();
+  });
+
+  it('🔴 付け替えた lid のノートでも時刻は残る', async () => {
+    const { blob } = await writeArchive(
+      source({ entries: [{ lid: 'a', body: 'A', created_at: '2020-01-02 03:04:05', updated_at: '2021-02-03 04:05:06' }] }),
+      '2026-10-15T00:00:00Z',
+    );
+    const got = restoreArchive(await readArchive(blob), {
+      existingLids: new Set(['a']),
+      existingRelationIds: new Set(),
+      orderBase: 0,
+      genLid: () => 'fresh',
+      genRelationId: () => 'rel',
+    });
+    expect(got.entries[0]!.lid).toBe('fresh');
+    expect(got.entries[0]!.createdAt).toBe('2020-01-02 03:04:05');
+  });
+
+  it('🔴 container.json が取り込み直せる字数を超えたら、書くが警告する(断らない)', async () => {
+    // 小さい上限を注入する。⚠ 日本語の本文: bytes ではなく字数で見ている(bytes なら約 3 倍に数える)
+    const f = { entries: [{ lid: 'a', body: 'あ'.repeat(200) }] };
+    const over = await writeArchive(source(f), '2026-10-15T00:00:00Z', 100);
+    expect(over.counts.entries, '警告だけで書くのをやめた').toBe(1);
+    expect(over.warnings.join('\n')).toContain('取り込み直せないことがあります');
+    // 対照群: 上限の内側なら出ない
+    const within = await writeArchive(source(f), '2026-10-15T00:00:00Z', 10_000);
+    expect(within.warnings.join('\n')).not.toContain('取り込み直せない');
+    // 字数の境目: container.json の字数ちょうどでは出ず、1 字足りなければ出る
+    const dir = await readZipDirectory(over.blob);
+    const container = await readZipEntry(over.blob, dir.find((e) => e.name === 'container.json')!);
+    const chars = (await container.text()).length;
+    expect(chars, '前提: 字数が bytes より小さい(日本語)').toBeLessThan(container.size);
+    const exact = await writeArchive(source(f), '2026-10-15T00:00:00Z', chars);
+    expect(exact.warnings.join('\n'), '上限ちょうどで警告した').not.toContain('取り込み直せない');
+    const short = await writeArchive(source(f), '2026-10-15T00:00:00Z', chars - 1);
+    expect(short.warnings.join('\n'), '1 字超えたのに警告しない').toContain('取り込み直せない');
   });
 });

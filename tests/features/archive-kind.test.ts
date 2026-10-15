@@ -11,9 +11,7 @@ import {
   ARCHIVE_SUFFIXES,
   LEGACY_ARCHIVE_SUFFIX,
   archiveFileName,
-  archiveKindContains,
   archiveSuffix,
-  type ArchiveKind,
 } from '../../src/features/export/archive-kind';
 
 describe('末尾の生成(#1017 段④b)', () => {
@@ -39,15 +37,5 @@ describe('末尾の生成(#1017 段④b)', () => {
     expect(ARCHIVE_SUFFIXES).toContain(LEGACY_ARCHIVE_SUFFIX);
     // ⚠ 空振り防止 ── ちょうど 4 件(3 種 + 旧形式)であること
     expect(ARCHIVE_SUFFIXES).toHaveLength(4);
-  });
-
-  it('🔑 「何が含まれるか」の短い説明が、種ごとに違う', () => {
-    const kinds: readonly ArchiveKind[] = ['full', 'notes', 'part'];
-    const seen = new Set(kinds.map((k) => archiveKindContains(k)));
-    expect(seen.size, '説明が使い回されている').toBe(3);
-    // 🔑 §5 の検算:`.pkc3-part.zip` の説明は「つながり・履歴」の欠落に触れる
-    expect(archiveKindContains('part')).toMatch(/つながり|履歴/);
-    // 🔴 .pkc3-notes.zip には履歴(過去の版)も入る(1 件・フォルダとも `getRevisionChain` を書く)── 説明が言う
-    expect(archiveKindContains('notes')).toContain('履歴');
   });
 });

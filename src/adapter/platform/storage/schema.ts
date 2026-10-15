@@ -362,6 +362,14 @@ export interface EntryUpsert {
    *   専用の口を作る。
    */
   realm?: Realm;
+  /**
+   * 🔴 **取り込んだノートの作成・更新時刻**(#1087)。省略(または null)なら INSERT は
+   *   従来どおり DB の `datetime('now')`。⚠ **INSERT の側にしか効かない** ──
+   *   ON CONFLICT(通常の保存)は渡っても無視して、必ず今で刻む。
+   * 形は `EntryStamps` と同じ(`YYYY-MM-DD HH:MM:SS`、UTC)。
+   */
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 /**

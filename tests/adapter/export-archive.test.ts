@@ -18,6 +18,7 @@ import {
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
 import type { ArchiveSource } from '../../src/features/export/pkc3-archive';
+import { CORRUPT_REFUSAL } from '../../src/features/storage/db-corruption';
 import {
   forgetRescueWritten,
   lastRescueWritten,
@@ -269,6 +270,28 @@ describe('保存領域に問題があるとき、自動で .pkc3-part.zip へ倒
     const n = await exportArchive(d, deps, 'archive');
     expect(n, '倒れずに失敗として返すべき').toBeNull();
     expect(d.getState().error, '失敗が画面に出ていない').toContain('書き出しに失敗しました');
+  });
+
+  it('🔴 拾い出しも 1 件も拾えなかったら、「ノートが 1 件もありません」ではなく壊れの案内を出す(#1087)', async () => {
+    const emptyPick = async () => ({
+      rows: [],
+      lastRowid: 1,
+      skipped: 3,
+      empty: 20,
+      maxRowid: 1,
+      done: true,
+    });
+    const { deps, downloaded } = baseDeps({
+      source: fakeSource({ fail: 'database disk image is malformed' }),
+      rescue: { pick: emptyPick, ...noExtraPicks },
+    });
+    const d = readyDispatcher();
+    const n = await exportArchive(d, deps, 'archive');
+    expect(n).toBeNull();
+    expect(downloaded, '空の zip を落とした').toHaveLength(0);
+    const err = d.getState().error ?? '';
+    expect(err, '壊れの案内を出していない').toContain(CORRUPT_REFUSAL);
+    expect(err, '壊れた保存領域の人に「ノートが無い」と言っている').not.toContain('1 件もありません');
   });
 
   it('⚠ rescue が渡っていなければ倒れない(deps.rescue 省略時)', async () => {

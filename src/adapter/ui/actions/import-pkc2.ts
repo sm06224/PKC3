@@ -725,6 +725,9 @@ export async function importPkc2File(
         status: ext.status,
         date: ext.date,
         archived: ext.archived,
+        // PKC3 のバックアップは書き出した時刻を運ぶ(#1087)。PKC2 の経路には無い = 取込時の今
+        createdAt: 'createdAt' in e ? e.createdAt : null,
+        updatedAt: 'updatedAt' in e ? e.updatedAt : null,
       };
     });
 

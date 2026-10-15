@@ -175,3 +175,19 @@ export function notImportableBackMessage(chars: number): string {
     'こちらは大きさで止まりません。'
   );
 }
+
+/**
+ * 書いたバックアップ(zip)の**ノート・つながり・履歴の部分**が、取り込み直すときに読める上限を
+ * 超えたときの字(#1087)。
+ *
+ * ⚠ 書き出し自体は成功している(添付は別のファイルなので影響しない)── 詰まるのは取り込み直しだけなので、
+ *   **書けたことを先に言い**、分けて書き出す道を添える。`notImportableBackMessage`(PKC3 入り HTML)と混ぜない。
+ * @param chars ノート・つながり・履歴の部分のおよその字数
+ */
+export function notImportableArchiveMessage(chars: number): string {
+  return (
+    `このバックアップのノート・つながり・履歴の部分(約 ${humanBytes(chars)})は、PKC3 に取り込み直せないことがあります` +
+    `(取り込み直すときに読める上限は、この部分で約 ${humanBytes(MAX_EMBED_TEXT_CHARS)}です)。` +
+    '書き出し自体はできています。フォルダごとなどに分けて書き出すと、取り込み直せます。'
+  );
+}

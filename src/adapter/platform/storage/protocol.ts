@@ -987,6 +987,10 @@ export interface RescuePage {
     title: string;
     archetype: string;
     body: string;
+    /** 読めた並び・時刻(#1087)。⚠ 列が NULL / 読めなければ `null`(呼び側が代わりを決める)。 */
+    entryOrder: number | null;
+    createdAt: string | null;
+    updatedAt: string | null;
   }>;
   /** 次に頼むときの `afterRowid`。 */
   lastRowid: number;

@@ -22,8 +22,36 @@ import {
   collectExistingLids,
   collectExistingRelationIds,
 } from '../../src/features/import/existing-lids';
+import {
+  isSystemMessageLid,
+  SYSTEM_JOB_LID,
+  SYSTEM_MESSAGE_LID,
+} from '../../src/features/message/message-log';
+
+/** system 領域の 2 lid(常に入る ── 下の専用 test が見る)を除いた、出所由来の lid。 */
+const userLids = (got: ReadonlySet<string>): string[] => [...got].filter((l) => !isSystemMessageLid(l));
 
 describe('取込の衝突検査に渡す既存 lid(#328)', () => {
+  /**
+   * 🔴 system 領域のメッセージの lid は、どの出所にも居なくても入る(#1087)。
+   * ⚠ 出所が空でも ── `entryLids` は user 領域だけ・`state` にも載らないので、出所に頼ると落ちる。
+   */
+  it('🔴 sys-messages / sys-jobs は出所が空でも入る(細工したバックアップに上書きさせない)', async () => {
+    const got = await collectExistingLids({
+      fromState: () => [],
+      entryLids: async () => [],
+      revisionLids: async () => [],
+    });
+    expect([...got].sort()).toEqual([SYSTEM_JOB_LID, SYSTEM_MESSAGE_LID].sort());
+    // 対照群: 空振り防止 ── 由来の lid も同じ集合に入る(置換ではない)
+    const both = await collectExistingLids({
+      fromState: () => ['n1'],
+      entryLids: async () => [],
+      revisionLids: async () => [],
+    });
+    expect(both.has('n1') && both.has(SYSTEM_MESSAGE_LID) && both.has(SYSTEM_JOB_LID)).toBe(true);
+  });
+
   it('🔴 DB の entry に居る lid を拾う(state が遅れていても)', async () => {
     // ⚠ **他タブが取り込んだ直後**の姿 ── DB には在るが、放送がまだ届いていない
     const got = await collectExistingLids({
@@ -32,7 +60,7 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
       revisionLids: async () => [],
     });
     expect(
-      [...got].sort(),
+      userLids(got).sort(),
       'DB に居る lid を見落とす(= 取り込んだ entry が既存を上書きする)',
     ).toEqual(['a1', 'a2']);
   });
@@ -43,7 +71,7 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
       entryLids: async () => [],
       revisionLids: async () => [],
     });
-    expect([...got], '書込 ack 待ちの lid を落とした').toEqual(['draft-1']);
+    expect(userLids(got), '書込 ack 待ちの lid を落とした').toEqual(['draft-1']);
   });
 
   /**
@@ -58,7 +86,7 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
       entryLids: async () => [],
       revisionLids: async () => ['trashed-1'],
     });
-    expect([...got], 'ゴミ箱の lid を見落とす(履歴を背負う)').toEqual(['trashed-1']);
+    expect(userLids(got), 'ゴミ箱の lid を見落とす(履歴を背負う)').toEqual(['trashed-1']);
   });
 
   it('🔴 3 つの出所の和集合になる(重複は畳む)', async () => {
@@ -67,7 +95,7 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
       entryLids: async () => ['y', 'shared'],
       revisionLids: async () => ['z', 'shared'],
     });
-    expect([...got].sort(), '出所のどれかが落ちている').toEqual(['shared', 'x', 'y', 'z']);
+    expect(userLids(got).sort(), '出所のどれかが落ちている').toEqual(['shared', 'x', 'y', 'z']);
   });
 
   /**
@@ -107,7 +135,7 @@ describe('取込の衝突検査に渡す既存 lid(#328)', () => {
     releaseEntry!();
     const got = await p;
     expect(revisionRanBeforeEntryResolved, '直列に投げている(往復が 2 倍になる)').toBe(true);
-    expect([...got].sort()).toEqual(['a', 'b']);
+    expect(userLids(got).sort()).toEqual(['a', 'b']);
   });
 
   /**

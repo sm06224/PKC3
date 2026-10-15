@@ -638,14 +638,37 @@ try{
    *    「目次にあるのに飛べない」行が出る)。
    */
   function headings(box,idp){
-    var out=[];
+    var out=[],renamed={};
+    var has=Object.prototype.hasOwnProperty;
     Array.prototype.forEach.call(box.querySelectorAll('h1,h2,h3'),function(h,i){
       var text=(h.textContent||'').trim();
       if(!text)return;
       // 全体印刷では必ず振り直す(書出し側の id が entry 間で衝突している)
-      if(idp||!h.id)h.id=(idp||'h')+'-'+i;
+      if(idp||!h.id){
+        if(idp&&h.id&&!has.call(renamed,h.id))renamed[h.id]=(idp||'h')+'-'+i;
+        h.id=(idp||'h')+'-'+i;
+      }
       out.push({el:h,text:text,level:+h.tagName.slice(1)});
     });
+    if(idp){
+      // 🔴 脚注の id(fn1 / fnref1)もノートごとに衝突する ── 見出しと同じく接頭辞を付ける
+      Array.prototype.forEach.call(box.querySelectorAll('[id^="fn"]'),function(el){
+        var old=el.id;
+        if(!has.call(renamed,old))renamed[old]=idp+'-'+old;
+        el.id=renamed[old];
+      });
+      // 🔴 ノート内の #slug リンク(本文のリンク・:::toc・脚注)を、振り直した id へ向け直す。
+      //    向け直さないと全体印刷で「別のノートの同名の見出し」や何も無い所へ飛ぶ。
+      //    ノート間リンク(data-pkc-entry-ref)は上で #pe-N へ向けた物なので触らない
+      Array.prototype.forEach.call(box.querySelectorAll('a[href^="#"]'),function(a){
+        if(a.hasAttribute('${NOTE_LINK_ATTR}'))return;
+        var f=(a.getAttribute('href')||'').slice(1);
+        var dec=f;
+        try{dec=decodeURIComponent(f)}catch(_x){}
+        var key=has.call(renamed,f)?f:(has.call(renamed,dec)?dec:null);
+        if(key!==null)a.setAttribute('href','#'+renamed[key]);
+      });
+    }
     return out;
   }
 
