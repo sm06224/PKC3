@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
-import { initialState, reduce, type AppState } from '../../src/adapter/state/app-state';
+import { APPEND_BUSY_NOTE, initialState, phaseBlockReason, reduce, type AppState } from '../../src/adapter/state/app-state';
 import { APP_GROUP_ARCHETYPE } from '../../src/features/launcher/app-group-spec';
 import { APP_GROUP_RESET_ACTION } from '../../src/features/entry-actions';
 import { withBuiltinTiles, type LauncherTile } from '../../src/features/launcher/tiles';
@@ -564,5 +564,79 @@ describe('🔴 古い読み直しに巻き戻されない(#857 段③)', () => {
         `${b.name} の読み直しが、進めた後の世代で飛んでいない(出た瞬間に捨てられる)`,
       ).toBe(b.r.state.appGroupGen);
     }
+  });
+});
+
+/**
+ * 🔴 **編集中・保存中に、グループの並べ替え・目印の変更を断るときは、理由を出す**(#1087)。
+ * ⚠ 直す前は 3 つの case が理由なしに返っていた ── 押したのに何も起きず、壊れて見える。
+ * 断る門は 2 枚(相が違う / 書込が飛んでいる)── 片方だけが鳴る場面を別々に作る。
+ */
+describe('グループの操作を断るときは、理由を出す(#1087)', () => {
+  const orderedState = (): AppState => move(st, '道具', -1).state;
+  const asEditing = (s: AppState): AppState => ({ ...s, phase: 'editing' }) as unknown as AppState;
+  const asLocked = (s: AppState): AppState => ({ ...s, writeLock: { kind: 'save' } }) as unknown as AppState;
+  const icon = (s: AppState): ReturnType<typeof reduce> =>
+    reduce(s, { type: 'SET_APP_GROUP_ICON', name: '道具', icon: 'tool', newLid: 'n9' });
+  const actions: Array<{ name: string; doing: string; run: (s: AppState) => ReturnType<typeof reduce> }> = [
+    { name: 'MOVE_APP_GROUP', doing: '並べ替えられます', run: (s) => move(s, '道具', -1) },
+    { name: 'RESET_APP_GROUP_ORDER', doing: '名前順に戻せます', run: (s) => reduce(s, { type: 'RESET_APP_GROUP_ORDER' }) },
+    { name: 'SET_APP_GROUP_ICON', doing: '目印を変えられます', run: icon },
+  ];
+
+  for (const a of actions) {
+    it(`🔴 ${a.name}: 編集中は「編集を保存するか…」と言って、何も書かない`, () => {
+      const base = asEditing(orderedState());
+      const r = a.run(base);
+      expect(r.state.error, '編集中に黙って返した').toBe(`${phaseBlockReason('editing')}${a.doing}`);
+      expect(r.events, '断ったのに書く指示が出た').toEqual([]);
+      expect(r.state.appGroupOrders, '断ったのに番号が動いた').toEqual(base.appGroupOrders);
+    });
+
+    it(`🔴 ${a.name}: 読み込み中は、編集中とは言わない(存在しない編集を探させない)`, () => {
+      const r = a.run({ ...orderedState(), phase: 'initializing' } as unknown as AppState);
+      expect(r.state.error).toBe(`${phaseBlockReason('initializing')}${a.doing}`);
+      expect(r.state.error).not.toContain('編集');
+    });
+
+    it(`🔴 ${a.name}: 保存中は「少し待ってから」と言う(相は ready のまま ── 2 枚目の門だけが鳴る)`, () => {
+      const r = a.run(asLocked(orderedState()));
+      expect(r.state.error, '保存中に黙って返した').toBe(APPEND_BUSY_NOTE);
+      expect(r.events).toEqual([]);
+    });
+
+    it(`⚠ ${a.name} 対照群: 普通の状態では断らない`, () => {
+      const r = a.run(orderedState());
+      expect(r.state.error ?? '').toBe('');
+      expect(r.events.length, '普通の状態でも書かない').toBeGreaterThan(0);
+    });
+  }
+
+  it('🔴 「上へ」は、ノートが増えることを聞く小窓を出す前に断る(編集中に聞いて、OK の後で断らない)', async () => {
+    const { bindActions } = await import('../../src/adapter/ui/actions/binder');
+    const { Dispatcher } = await import('../../src/adapter/state/dispatcher');
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    document.body.append(root);
+    const btn = document.createElement('button');
+    btn.setAttribute('data-pkc-action', 'move-app-group-up');
+    btn.setAttribute('data-pkc-group', '道具');
+    root.append(btn);
+    // ⚠ 本文を読み込む副作用の無い台なので、編集中の state を直に渡す(`beforeEach` で組んだ state の相だけ替える)
+    const d = new Dispatcher(asEditing(st));
+    expect(d.getState().phase, '前提: 編集中').toBe('editing');
+    const asked: Array<readonly string[]> = [];
+    const detach = bindActions(root, d, {
+      confirmAppGroupNotes: (names) => {
+        asked.push(names);
+        return Promise.resolve(true);
+      },
+    });
+    btn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(asked, '編集中なのに、断る前に聞いた').toEqual([]);
+    expect(d.getState().error, '断った理由が出ていない').toBe(`${phaseBlockReason('editing')}並べ替えられます`);
+    detach();
   });
 });

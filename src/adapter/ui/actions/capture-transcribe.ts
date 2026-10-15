@@ -39,7 +39,8 @@ import { looksOutOfMemory } from '@features/storage/image-export-limit';
 import { elapsedText } from '@features/elapsed-text';
 import { isNearSilent, pcmRms } from '@features/asr/asr-pcm';
 import { createWritableQueue } from './writable-queue';
-import { appendAndSettle } from '@adapter/state/append-settle';
+import { appendUnlessEditedElsewhere, type EditLockPort } from '@adapter/state/edited-elsewhere';
+import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';
 
 /** 書き足しの結末を待つ上限(ms)。ふつうは 1 秒かからない(待つのは保存の往復だけ)。 */
 const TRANSCRIBE_SETTLE_MS = 10_000;
@@ -71,6 +72,8 @@ export interface CaptureTranscribeDeps {
   /** 一時の知らせ(エラーの行とは別)。 */
   readonly notify: (text: string) => void;
   readonly now?: () => Date;
+  /** 🔴 別のタブ・窓が編集中のノートへ足さないための問い合わせ口(#1087)。省略 = 問い合わせない。 */
+  readonly lock?: EditLockPort;
 }
 
 export interface CaptureTranscriber {
@@ -213,8 +216,20 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
            *   (書込中など)は reducer の赤い字が出ているので、ここでは重ねない。
            *   受けた後に保存で落ちた回・結末が来なかった回も言う(黙って「足しました」にしない)。
            */
-          const r = await appendAndSettle(deps.dispatcher, lid, text, heading, TRANSCRIBE_SETTLE_MS);
+          const r = await appendUnlessEditedElsewhere(
+            deps.dispatcher,
+            deps.lock ?? {},
+            lid,
+            text,
+            heading,
+            TRANSCRIBE_SETTLE_MS,
+          );
           if (!r.ok) {
+            // 🔴 別のタブ・窓が編集中(#1087)── reducer の赤い字は出ていないので、ここで言う
+            if (r.reason === 'refused' && r.error === EDIT_ELSEWHERE_ERROR) {
+              say(`「${item.name}」の文字起こしは、別のタブまたはウィンドウで編集中なので足していません。編集を終えてから、もう一度文字にしてください`);
+              return;
+            }
             if (!deps.dispatcher.getState().entryMetas.has(lid)) {
               say(`「${item.name}」の文字起こしは、書き先のノートが見つからなかったので足していません`);
             } else if (r.reason === 'timeout') {

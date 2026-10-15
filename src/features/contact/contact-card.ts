@@ -23,7 +23,7 @@
  * browser API を使わない / 時計を読まない。⚠ **本文は持ち出さない** ──
  * 返すのは連絡の手段だけである(舐めるのは worker、渡るのは項目だけ)。
  */
-import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { frontmatterLineCount, parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く ──
@@ -154,6 +154,41 @@ function values(v: FrontmatterValue | undefined): string[] {
 }
 
 /**
+ * 🔴 **手で書いた電話番号の先頭の 0 を落とさない**(#1087)。
+ * ⚠ `tel: 09012345678` は frontmatter では**数**として読まれ、`9012345678` になる ──
+ *   そのまま `tel:` に使うと**別の番号**へかかる。数として読まれた値は、原文の行から
+ *   **書いたままの字**を引き直す(引用符で囲んだ値は文字のまま読まれるので、ここへ来ない)。
+ * ⚠ 原文に見つからなければ従来どおり数を文字へ戻す(捨てない)。
+ */
+function telValues(body: string, v: FrontmatterValue | undefined): string[] {
+  const raw = v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+  if (!raw.some((x) => typeof x === 'number')) return values(v);
+  const lines = body.split(/\r?\n/).slice(0, frontmatterLineCount(body));
+  const tokens: string[] = [];
+  const at = lines.findIndex((l) => new RegExp(`^${CONTACT_KEYS.tel}\\s*:`).test(l));
+  if (at >= 0) {
+    const inline = lines[at]!.replace(new RegExp(`^${CONTACT_KEYS.tel}\\s*:`), '').replace(/\s+#.*$/, '').trim();
+    if (inline !== '') {
+      tokens.push(...inline.replace(/^\[/, '').replace(/\]$/, '').split(',').map((t) => t.trim()));
+    } else {
+      for (let i = at + 1; i < lines.length; i++) {
+        const m = /^\s*-\s+(.*?)\s*(?:\s#.*)?$/.exec(lines[i]!);
+        if (m === null) break;
+        tokens.push(m[1]!.trim());
+      }
+    }
+  }
+  const out: string[] = [];
+  for (const x of raw) {
+    if (x === null || typeof x === 'boolean') continue;
+    const written = typeof x === 'number' ? tokens.find((t) => /^[+-]?\d+(?:\.\d+)?$/.test(t) && Number(t) === x) : undefined;
+    const s = (written ?? String(x)).trim();
+    if (s !== '') out.push(s);
+  }
+  return out;
+}
+
+/**
  * 画面に出す 1 つの宛先。
  * 🔴 **`text` は見せる字、`raw` は押し先を作る値。混ぜてはいけない**
  * (2 巡目の着地前レビュー 2026-08-28)。
@@ -205,7 +240,7 @@ export function displayWays(list: readonly string[]): {
  */
 export function contactOf(lid: string, title: string, body: string): ContactCard | null {
   const { meta } = parseFrontmatter(body);
-  const rawTels = values(meta[CONTACT_KEYS.tel]);
+  const rawTels = telValues(body, meta[CONTACT_KEYS.tel]);
   const rawEmails = values(meta[CONTACT_KEYS.email]);
   if (rawTels.length === 0 && rawEmails.length === 0) return null;
   /**
@@ -297,9 +332,11 @@ export function telHref(tel: string): string | null {
  * ⚠ `@` を挟んで前後があることだけを見る ── **厳密に検めない**。
  *   厳しくすると user が書いた宛先が黙って押せなくなる(`schedule-date.ts` の
  *   「広く拾う」と同じ向き)。
+ * 🔴 **`?` `&` `#` を含む宛先は押せる形にしない**(#1087)── `mailto:` の後ろに書くと
+ *   件名・宛先の追加・本文などの**クエリ**として読まれ、書いた宛先と別の相手へ宛てた下書きになる。
  */
 export function mailHref(email: string): string | null {
-  const m = /^[^\s@]+@[^\s@]+$/.exec(email.trim());
+  const m = /^[^\s@?&#]+@[^\s@?&#]+$/.exec(email.trim());
   return m === null ? null : `mailto:${email.trim()}`;
 }
 

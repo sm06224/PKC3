@@ -120,6 +120,10 @@ const SLICE_MS = 1000;
 /** 断りの理由を持つ失敗。⚠ **黙って no-op にしない**(#413 の要件)。 */
 export class CaptureRefused extends Error {}
 
+/** 器を作れない / 始められない(権限は通っている)ときの文言。 */
+export const CAPTURE_START_UNSUPPORTED =
+  '収録を始められませんでした(このブラウザは録音の形式に対応していません)';
+
 /**
  * 🔴 **`Duration` を探すための先頭の読み量**(#952 A3)。
  *
@@ -312,7 +316,20 @@ export async function startCapture(
    */
   let phase: 'recording' | 'rotating' | 'done' = 'recording';
 
-  let rec = newRecorder(Recorder, stream, kind);
+  /**
+   * 🔴 **器を作れなかったら、取ったマイクを返す**(#1087)── `getUserMedia` は通っているので、
+   *   ここで投げると **track が生きたまま**(マイクの表示が点いたまま)になる。
+   */
+  const releaseStream = (): void => {
+    for (const t of stream.getTracks()) t.stop();
+  };
+  let rec: MediaRecorder;
+  try {
+    rec = newRecorder(Recorder, stream, kind);
+  } catch {
+    releaseStream();
+    throw new CaptureRefused(CAPTURE_START_UNSUPPORTED);
+  }
 
   /**
    * いま積んでいる分を 1 本にして、**積み場を空ける**。
@@ -404,6 +421,16 @@ export async function startCapture(
     segBytes = 0;
     phase = 'recording';
     /**
+     * 🔴 **本数は、失敗しうる手(次の器)より前に数える**(#1087)── 後ろだと、次の器が
+     *   作れず `finish('failed')` した回に **`parts()` がまだ 0** で、保存済みの 1 本目があるのに
+     *   「1 バイトも録れていません」と言ってしまう。
+     */
+    let p = 0;
+    if (seg !== null) {
+      part += 1;
+      p = part; // ⚠ 非同期の間に `part` がまた進みうるので、値を控える
+    }
+    /**
      * 🔴 **次の器を先に起こす**(#952 A3)── `Duration` を書く仕事(次の段落)は
      *   非同期なので、そちらを待ってから起こすと**その間だけ録っていない隙間**
      *   ができる。⚠ 順番を変えると、録音そのものが欠ける側の欠陥になる。
@@ -418,8 +445,6 @@ export async function startCapture(
     }
     segStartedAt = now();
     if (seg !== null) {
-      part += 1;
-      const p = part; // ⚠ 非同期の間に `part` がまた進みうるので、値を控える
       void finalizeSegment(seg).then((blob) => opts.onPart?.(blob, p));
     }
   }
@@ -486,7 +511,12 @@ export async function startCapture(
 
   // ⚠ 1 秒ごとに切る ── 切らないと `ondataavailable` が最後に 1 回しか来ず、
   //    切り所の見張りも帯の大きさも**動かない**
-  rec.start(SLICE_MS);
+  try {
+    rec.start(SLICE_MS);
+  } catch {
+    releaseStream();
+    throw new CaptureRefused(CAPTURE_START_UNSUPPORTED);
+  }
 
   return {
     kind,

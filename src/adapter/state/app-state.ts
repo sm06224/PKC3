@@ -905,6 +905,19 @@ export const EMPTY_TITLE_NOTE = '題名が空なので、元の題名のまま�
 export const APPEND_BUSY_NOTE = 'いま保存しています。少し待ってから、もう一度押してください';
 
 /**
+ * 🔴 **グループの並べ替え・目印の変更を、いま断る理由**(無ければ `null`。#1087)。
+ * ⚠ 直す前は 3 つの case が `phase` / `writeLock` で**理由なしに** return していた ── 編集中に「上へ」を押しても
+ *   何も起きず、user には壊れて見える。断り文の出どころはここ 1 か所(reducer と binder の確認の前が同じ字を出す。§7)。
+ * `doing` = 断り文の後半(「並べ替えられます」など。前置きは `phaseBlockReason`)。
+ */
+export function appGroupWriteRefusal(state: Pick<AppState, 'phase' | 'writeLock'>, doing: string): string | null {
+  const blocked = phaseBlockReason(state.phase);
+  if (blocked !== null) return `${blocked}${doing}`;
+  if (state.writeLock) return APPEND_BUSY_NOTE;
+  return null;
+}
+
+/**
  * 🔴 **アプリの設定(登録 / グループ / アイコン)を、いま書けない理由**(無ければ `null`)。
  * ⚠ `SET_APP_TILE` の門と、binder が「欄を元の値へ戻すか」を決める判定の**共通の 1 本**
  *   (別々に書くと、断ったのに欄だけ新しい値のまま残る)。
@@ -6077,7 +6090,9 @@ function reduceCore(
      */
     case 'MOVE_APP_GROUP': {
       // ⚠ 門は `MOVE_APP_TILE` と同じ 2 つ(保存中は触らせない / 絞り込み中は動かさない)
-      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      // 🔴 断るときは理由を出す(#1087。黙って返すと、押したのに何も起きない)
+      const moveRefusal = appGroupWriteRefusal(state, '並べ替えられます');
+      if (moveRefusal !== null) return { state: { ...state, error: moveRefusal }, events: [] };
       if (normalizeQuery(state.filterQuery) !== '')
         return {
           state: {
@@ -6215,7 +6230,9 @@ function reduceCore(
      *   (目印や説明が同じノートに載っているので、丸ごと片付けない)。
      */
     case 'RESET_APP_GROUP_ORDER': {
-      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      // 🔴 断るときは理由を出す(#1087)
+      const resetRefusal = appGroupWriteRefusal(state, '名前順に戻せます');
+      if (resetRefusal !== null) return { state: { ...state, error: resetRefusal }, events: [] };
       const rows: Array<{
         name: string;
         order: number | null;
@@ -6268,7 +6285,9 @@ function reduceCore(
     case 'SET_APP_GROUP_ICON': {
       // ⚠ 書込が飛んでいる間は触らせない(`SET_APP_TILE` と同じ規律 ── 読んで
       //    書き戻す操作なので、途中に別の書込が挟まると片方が消える)
-      if (state.phase !== 'ready' || state.writeLock) return { state, events: [] };
+      // 🔴 断るときは理由を出す(#1087)
+      const iconRefusal = appGroupWriteRefusal(state, '目印を変えられます');
+      if (iconRefusal !== null) return { state: { ...state, error: iconRefusal }, events: [] };
       const name = appGroupName(action.name);
       // ⚠ 名前の無い群は見出しを持たない ── 目印を置く場所がそもそも無い
       if (name === '') return { state, events: [] };

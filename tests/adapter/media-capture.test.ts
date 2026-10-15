@@ -17,6 +17,7 @@ import {
   pickClock,
   CaptureRefused,
   captureStartFailedText,
+  CAPTURE_START_UNSUPPORTED,
   startCapture,
   type CaptureDeps,
   type CaptureEnd,
@@ -787,5 +788,114 @@ describe('🔴 画面収録のキーフレーム間隔(#683 段②b-3)', () => {
     expect(o.calls).toEqual([{ videoKeyFrameIntervalDuration: 2000 }, undefined]);
     o.last().push(9);
     expect((await h.stop())!.size, '作り直した器で録れていない').toBe(9);
+  });
+});
+
+/**
+ * 🔴 **権限は通ったのに器が作れない / 始められない**(#1087)。
+ * ⚠ マイクは取れている ── 投げるだけだと **track が生きたまま**(マイクの表示が点いたまま)になり、
+ *   しかも user には英語の生の例外が見える。
+ */
+describe('🔴 器を作れない・始められないとき(#1087)', () => {
+  /** `throwOn: 'new'` は n 回目の構築で、`'start'` は n 回目の開始で投げる器。 */
+  function brokenRecorder(throwOn: 'new' | 'start', nth: number): typeof MediaRecorder {
+    let news = 0;
+    let starts = 0;
+    class R {
+      state = 'inactive';
+      mimeType = 'audio/webm';
+      ondataavailable: ((e: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        news += 1;
+        if (throwOn === 'new' && news === nth) throw new Error('NotSupportedError: raw english');
+      }
+      start(): void {
+        starts += 1;
+        if (throwOn === 'start' && starts === nth) throw new Error('InvalidStateError: raw english');
+        this.state = 'recording';
+      }
+      stop(): void {
+        this.state = 'inactive';
+        this.onstop?.();
+      }
+    }
+    return R as unknown as typeof MediaRecorder;
+  }
+
+  for (const throwOn of ['new', 'start'] as const) {
+    it(`🔴 ${throwOn} で投げたら、track を止めて、日本語の理由で断る`, async () => {
+      const track = fakeTrack();
+      const err = await startCapture(
+        'audio',
+        {
+          getUserMedia: async () => fakeStream([track]),
+          Recorder: brokenRecorder(throwOn, 1),
+          now: () => 1_000,
+        },
+        { partBytes: 1_000_000, maxMs: HOURS12 },
+      ).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err, '断られていない').toBeInstanceOf(CaptureRefused);
+      expect((err as Error).message, '英語の生の例外が user に見える').toBe(CAPTURE_START_UNSUPPORTED);
+      expect((err as Error).message).toMatch(/収録を始められませんでした/);
+      expect(track.stopped(), 'マイクを掴んだままになる').toBe(true);
+    });
+  }
+});
+
+/**
+ * 🔴 **切った後に次の器が作れず終わった回も、保存済みの 1 本目は数える**(#1087)。
+ * ⚠ 本数を数えるのが `finish('failed')` の**後**だと、終わりの合図を受けた側が `parts()` を読んだとき 0 になり、
+ *   「1 バイトも録れていません」と言ってしまう(1 本目は保存済みなのに)。
+ */
+describe('🔴 切った後に次の器を作れなかった回(#1087)', () => {
+  it('🔴 終わりの合図の時点で、1 本目は数えてある', async () => {
+    const track = fakeTrack();
+    let made = 0;
+    const made1: Array<{ ondataavailable: ((e: BlobEvent) => void) | null }> = [];
+    class R {
+      state = 'inactive';
+      mimeType = 'audio/webm';
+      ondataavailable: ((e: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        made += 1;
+        // 2 つ目の器を作ろうとして投げる
+        if (made === 2) throw new Error('boom');
+        made1.push(this);
+      }
+      start(): void {
+        this.state = 'recording';
+      }
+      stop(): void {
+        this.state = 'inactive';
+        this.onstop?.();
+      }
+    }
+    const seenParts: number[] = [];
+    const ends: CaptureEnd[] = [];
+    let handle: Awaited<ReturnType<typeof startCapture>> | null = null;
+    handle = await startCapture(
+      'audio',
+      { getUserMedia: async () => fakeStream([track]), Recorder: R as unknown as typeof MediaRecorder, now: () => 1_000 },
+      {
+        partBytes: 25,
+        maxMs: HOURS12,
+        onEnd: (r) => {
+          ends.push(r);
+          seenParts.push(handle!.parts());
+        },
+      },
+    );
+    // 25 を超える → 切る → 次の器で投げる
+    made1[0]!.ondataavailable!({ data: new Blob(['x'.repeat(30)]) } as BlobEvent);
+    expect(ends, '次の器を作れなかったのに終わっていない').toEqual(['failed']);
+    expect(seenParts, '保存済みの 1 本目が数えられていない').toEqual([1]);
+    expect(track.stopped()).toBe(true);
   });
 });

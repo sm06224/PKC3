@@ -101,6 +101,7 @@ import {
   PLACE_LINE_REMOVE_OPEN_REFUSAL,
   PLACE_REMOVE_OPEN_REFUSAL,
   phaseBlockReason,
+  appGroupWriteRefusal,
   selectBlockReason,
   screenBodyOf,
   SECTION_DRAFT_NOTE,
@@ -6457,6 +6458,12 @@ function moveAppGroup(
   const name = target.getAttribute('data-pkc-group') ?? '';
   if (name === '') return;
   const st = dispatcher.getState();
+  // 🔴 **確認の小窓を出す前に断る**(#1087)── 編集中・保存中に「ノートが増えます」と聞いて、OK の後で reducer に断られない
+  const refusal = appGroupWriteRefusal(st, '並べ替えられます');
+  if (refusal !== null) {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: refusal });
+    return;
+  }
   const tiles = st.launcherTiles ?? [];
   const movable: string[] = [];
   for (const t of tiles)
@@ -7655,6 +7662,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       relationId: generateLid(),
       // ⚠ **編集に入らない**(連絡先を眺めたまま足したいので、面を奪わない)
       edit: false,
+      // 🔴 **開いているノートも左の探す欄も動かさない**(#1087)── 既定の `CREATE_ENTRY` は選択を新しい物へ動かし、絞りを外す
+      keepSelection: true,
     });
     // ⚠ 作れなかった回(lid 衝突 ── reducer が理由を立てる)は欄を消さない(打った字を失わせない)
     if (!dispatcher.getState().entryMetas.has(lid)) return;
@@ -7672,7 +7681,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     else if (
       !matchContact(
         { name: title, org, tels: tel === '' ? [] : [tel], emails: email === '' ? [] : [email] } as unknown as ContactCard,
-        st.filterQuery,
+        // ⚠ 撃った**後**の絞りで見る(撃つ前の値で見ると、絞りが動いた回に実際と逆の知らせが出る)
+        dispatcher.getState().filterQuery,
       )
     )
       dispatcher.dispatch({
@@ -11151,6 +11161,8 @@ const ACTIONS: Record<string, ActionHandler> = {
       archetype: 'attachment',
       body: `---\nattachment.launcher_url: ${url}\n---\n`,
       edit: false,
+      // 🔴 開いているノートも絞りも動かさない(#1087。リンクを足しただけで本文が中央から消えない)
+      keepSelection: true,
     });
     // ⚠ 作れなかった回(lid 衝突など ── reducer が理由を立てる)は「足しました」と言わず、欄も消さない(打った字を失わせない)
     if (!dispatcher.getState().entryMetas.has(lid)) return;

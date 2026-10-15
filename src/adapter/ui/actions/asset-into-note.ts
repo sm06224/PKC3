@@ -31,6 +31,7 @@ import {
 } from '@features/markdown/line-move';
 import { bodyWillChange, type WritableQueue } from './writable-queue';
 import { dispatchAppend } from '@adapter/state/append-settle';
+import { editedElsewhereReason, elsewhereCheckNotNeeded, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import { appendableKindsLabel, isAppendable } from '@features/flavor/append-spec';
 import { archetypeLabel } from '@features/flavor/archetype-label';
@@ -114,6 +115,13 @@ export interface PutAssetArgs {
    * ⚠ 省略 = これまでどおり**本文のいちばん下**(添付ボタン・貼付・録音の経路)。
    */
   readonly place?: DropCursor;
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートへは、末尾に書き足さない**(#1087。追記・PDF の引用と同じ門 = `editedElsewhereReason`)。
+   * ⚠ 省略 = 問い合わせない(口の無い環境と同じ。同期のまま書く)。
+   * ⚠ 問い合わせは**末尾へ足す枝だけ**に掛ける(落とした所へ入れる枝は、画面の中の同期の手)。
+   *   問い合わせの間に次の 1 本が先に走る形になるので、**1 本ずつ入る経路(収録)にだけ**渡す。
+   */
+  readonly lock?: EditLockPort;
 }
 
 /**
@@ -366,25 +374,45 @@ export function putAssetIntoNote(args: PutAssetArgs): void {
        *   ノートをゴミ箱へ移すと、reducer は理由を出さずに捨てる。⚠ 理由を出して断った回は
        *   reducer の赤い字が出ているので重ねない(添付そのものは残っている)。
        */
-      const r = dispatchAppend(dispatcher, {
-        type: 'APPEND_TO_ENTRY',
-        lid,
-        text: ref,
-        heading: null,
-        target: null,
-        ...(keep ? { batch } : {}),
-      });
-      if (r === 'gone') {
-        notify(`${why}「${name}」は添付にしましたが、入れる先のノートが見つからなかったので本文には入れていません`);
+      const appendTail = (): void => {
+        const r = dispatchAppend(dispatcher, {
+          type: 'APPEND_TO_ENTRY',
+          lid,
+          text: ref,
+          heading: null,
+          target: null,
+          ...(keep ? { batch } : {}),
+        });
+        if (r === 'gone') {
+          notify(`${why}「${name}」は添付にしましたが、入れる先のノートが見つからなかったので本文には入れていません`);
+          return;
+        }
+        if (r === 'refused') return;
+        notify(
+          intoTitle === undefined
+            ? `${why}「${name}」を本文のいちばん下に入れました`
+            : `${why}「${name}」を『${intoTitle}』の本文のいちばん下に入れました`,
+          ...openArg,
+        );
+        // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
+        onPut?.(name);
+      };
+      /**
+       * 🔴 **別のタブ・窓が編集中なら入れない**(#1087)── 添付は残し、入れていないことを言う。
+       * ⚠ 問い合わせが要らない回(口が無い / このタブが編集中)は**同期のまま**書く。
+       */
+      if (args.lock === undefined || elsewhereCheckNotNeeded(dispatcher, args.lock, lid)) {
+        appendTail();
         return;
       }
-      if (r === 'refused') return;
-      notify(
-        intoTitle === undefined
-          ? `${why}「${name}」を本文のいちばん下に入れました`
-          : `${why}「${name}」を『${intoTitle}』の本文のいちばん下に入れました`,
-        ...openArg,
-      );
+      void editedElsewhereReason(dispatcher, args.lock, lid).then((refusal) => {
+        if (refusal !== null) {
+          notify(`${why}「${name}」を添付にしました(別のタブまたはウィンドウで編集中なので、本文には入れていません)`, attachedLid);
+          return;
+        }
+        appendTail();
+      });
+      return;
     }
     // ⚠ 知らせの**後**に数える ── まとめた回の締め(件数)が、この 1 行を上書きする側
     onPut?.(name);
