@@ -4,7 +4,7 @@
  * あとから探せない ── クリップボードの画像は名前を持っていない。
  */
 import { describe, expect, it } from 'vitest';
-import { pastedImageName } from '../../src/features/asset/pasted-image-name';
+import { pastedFileName, pastedImageName } from '../../src/features/asset/pasted-image-name';
 
 const AT = new Date(2026, 7, 18, 4, 32, 9); // 2026-08-18 04:32:09(現地時刻)
 
@@ -28,5 +28,19 @@ describe('pastedImageName', () => {
     const a = pastedImageName({ type: 'image/png' }, new Date(2026, 7, 18, 4, 32, 9));
     const b = pastedImageName({ type: 'image/png' }, new Date(2026, 7, 18, 4, 32, 41));
     expect(a).not.toBe(b);
+  });
+
+  it('🔴 本物の名前を持つ file はその名前を使う(#1087)', () => {
+    expect(pastedFileName({ type: 'image/jpeg', name: '旅行の写真.jpg' }, AT)).toBe('旅行の写真.jpg');
+  });
+
+  it('🔴 名前が空 / ブラウザの既定名(image.png など)なら貼った日時の名前', () => {
+    const stamped = 'スクリーンショット-2026-08-18-043209';
+    expect(pastedFileName({ type: 'image/png', name: '' }, AT)).toBe(`${stamped}.png`);
+    expect(pastedFileName({ type: 'image/png', name: 'image.png' }, AT)).toBe(`${stamped}.png`);
+    expect(pastedFileName({ type: 'image/jpeg', name: 'Image.JPG' }, AT)).toBe(`${stamped}.jpg`);
+    expect(pastedFileName({ type: 'image/png' }, AT)).toBe(`${stamped}.png`);
+    // 対照群: image で始まるだけの本物の名前は残す
+    expect(pastedFileName({ type: 'image/png', name: 'image-01.png' }, AT)).toBe('image-01.png');
   });
 });

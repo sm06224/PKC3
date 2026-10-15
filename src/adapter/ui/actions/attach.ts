@@ -144,6 +144,11 @@ export const EXT_MIME: Record<string, string> = {
   gif: 'image/gif',
   webp: 'image/webp',
   svg: 'image/svg+xml',
+  // #1087: スマホの写真(heic / heif)と avif / bmp。書き出しの逆表(`EXT_BY_MIME`)にも同じ対応が要る
+  heic: 'image/heic',
+  heif: 'image/heif',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
   pdf: 'application/pdf',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',

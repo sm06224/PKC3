@@ -31,6 +31,15 @@ const OK = {
 } as const;
 
 describe('拡張子 ↔ MIME の往復', () => {
+  it('🔴 スマホの写真などの画像が、拡張子から画像と分かる(#1087)', () => {
+    expect(resolveMime('a.heic', '')).toBe('image/heic');
+    expect(resolveMime('a.HEIF', '')).toBe('image/heif');
+    expect(resolveMime('a.avif', '')).toBe('image/avif');
+    expect(resolveMime('a.bmp', '')).toBe('image/bmp');
+    expect(extForMime('image/heic')).toBe('heic');
+    expect(extForMime('image/heif')).toBe('heif');
+  });
+
   it('🔴 `EXT_MIME` の全項目が、書き出し側で同じ拡張子に戻る', () => {
     // ⚠ 空振り防止 ── 表が空 / 極端に小さいと、この全数検査は何も見ていない
     expect(Object.keys(EXT_MIME).length, '表が小さすぎる ── 全数検査になっていない')

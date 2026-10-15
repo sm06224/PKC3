@@ -293,7 +293,7 @@ import {
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
-import { pastedImageName } from '@features/asset/pasted-image-name';
+import { pastedFileName } from '@features/asset/pasted-image-name';
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
 import { waitForWindowClose } from '@adapter/platform/window-close';
@@ -3810,7 +3810,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       await withAssetGate(async () => {
         const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
         for (const file of files) {
-          const name = pastedImageName(file, new Date());
+          const name = pastedFileName(file, new Date());
           try {
             const stored = await storeAsset(
               attachDeps,

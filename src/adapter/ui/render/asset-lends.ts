@@ -25,6 +25,7 @@
  * 増えない。🔑 置き場を寄せるのは #880 の仕事。
  */
 import type { AssetLender } from './detail';
+import { replaceOnMediaError } from './media-error';
 
 export type { AssetLender };
 
@@ -130,7 +131,11 @@ export class AssetLends {
           return;
         }
         this.track({ key, url: lent.url, dispose: lent.dispose, els: imgs });
-        for (const img of imgs) img.src = lent.url;
+        for (const img of imgs) {
+          // 🔴 bytes が読めない絵は壊れた画像で終わらせず、理由を 1 行出す(#1087)
+          replaceOnMediaError(img, 'image', '', '元のファイルは添付から保存して開いてください');
+          img.src = lent.url;
+        }
       }),
     );
   }

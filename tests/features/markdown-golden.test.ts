@@ -91,6 +91,11 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      (コードの囲みの中なので markdown-it が先に code として tokenize する)。
  *      🔑 この「動かなかった 56 個」が、**前処理ではなく inline rule で足した**
  *      ことの実測の裏取りである。
+ *   8. **日本語の字に隣り合う約物を含む強調を、強調として描く**(2026-10-15、#1087)。
+ *      `**「圏点」**を` のように、約物が `**` の内側で外側が日本語の字だと、
+ *      CommonMark の判定は閉じられず `**` が画面に出ていた(PKC2 の golden はその出力)。
+ *      `markdown-it-cjk-friendly` で、日本語の字と隣り合うときだけ判定をゆるめる。
+ *      ASCII だけの本文は上流のまま。動いた golden は `manual-ch12` の **1 行だけ**。
  *
 
  * 🔴 **golden は「PKC2 と同じ」を守る道具であって、「正しい」を守る道具ではない。**

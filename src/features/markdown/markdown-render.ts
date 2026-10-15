@@ -34,6 +34,7 @@ import { allFences, splitLines } from './source-blocks';
 // PR-W18:HTML footnote plugin(`[^id]` → `<sup class="footnote-ref">`)。
 // CJS package だが exports map で `.mjs` を提供しているため ESM import OK。
 import footnotePlugin from 'markdown-it-footnote';
+import cjkFriendlyPlugin from 'markdown-it-cjk-friendly';
 import { makeSlugCounter } from './markdown-toc';
 import { VAR_NAME_SOURCE } from './frontmatter';
 import { highlightCode, isHighlightable } from './code-highlight';
@@ -186,6 +187,12 @@ const md = new MarkdownIt({
 // で `require is not defined` で boot 全体が死ぬ重大 regression(vitest
 // Node 環境では通っていたため気付かなかった)。ESM import に切替。
 md.use(footnotePlugin);
+
+// #1087: `彼は**「はい」**と答えた` / `日本語**（注）**です` の強調が、`**` のまま
+// 画面に出ていた。CommonMark の強調の判定は「約物の内側 × 文字の外側」を閉じられず、
+// 日本語は語の間に空白を置かないので必ず当たる。日本語の字と隣り合うときだけ判定を
+// ゆるめる plugin(CJK-friendly 仕様)。ASCII だけの本文は上流の判定のまま。
+md.use(cjkFriendlyPlugin);
 
 // ── Link hardening ────────────────────────────────────
 //
@@ -2179,6 +2186,9 @@ function scanContainerDirective<T>(
       if (top.mine) {
         emit('', inputIdx);
         emit(`${sentinelOpen}${top.id}${sentinelSep}CLOSE${sentinelOpen}`, inputIdx);
+        // ⚠ 閉じの直後に空行を置く ── 置かないと、直後に続く行が CLOSE の段落へ
+        //   合流して(`<p>⟦CLOSE⟧<br>後ろ</p>`)囲みが閉じず、印が画面に出る
+        emit('', inputIdx);
       } else {
         emit(line, inputIdx); // 他の directive の閉じ ── 後段へ渡す
       }

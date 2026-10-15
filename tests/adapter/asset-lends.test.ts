@@ -144,3 +144,18 @@ describe('使い回しと返却(#856 段②)', () => {
     expect(lends.size).toBe(0);
   });
 });
+
+describe('🔴 読めない絵は理由の 1 行になる(#1087)', () => {
+  it('借りた絵に error が来たら、壊れた画像ではなく理由の行に差し替わる', async () => {
+    const { lender } = fakeLender();
+    const box = host('k1');
+    document.body.append(box);
+    await new AssetLends().hydrate(box, lender);
+    const img = box.querySelector('img')!;
+    img.dispatchEvent(new Event('error'));
+    expect(box.querySelector('img')).toBeNull();
+    const p = box.querySelector('[data-pkc-field="attachment-undecodable"]');
+    expect(p?.textContent).toContain('表示できません');
+    box.remove();
+  });
+});
