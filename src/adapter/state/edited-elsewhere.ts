@@ -19,7 +19,9 @@
  * 板の付箋の操作(置く・前へ出す・形・色・線の太さ・矢じり・文字の大きさ・回す・グループ・位置と大きさ。
  *   `placeEditedElsewhereGate`、`binder.ts`。#1087)/
  * 表の升の書換(`edit-cell` の確定。断ったら打った字を知らせに残す)と、表の形変え(「表にする」`applyTableFormat`)(#1087)/
- * 拡張からの書き戻し(`applyExtWriteOps`、`ext-write-apply.ts`。書く lid ごと。#1087)。
+ * 拡張からの書き戻し(`applyExtWriteOps`、`ext-write-apply.ts`。書く lid ごと。#1087)/
+ * タグの付け外し(情報ペインの `add-tag` / `untag-entry`・フォルダの帯の `bulk-tag-add` / `bulk-tag-remove`・
+ * 集計の `query-tag-rename` / `query-tag-remove`・スマートフォルダの「外す」と落とし。実体は `BULK_TAG`。#1087)。
  * ⚠ 板の付箋のドラッグ移動・付箋を消す(`remove-place`)・線を消す(`remove-place-line`)には足していない
  *   (離した直後 / 確認の直後の体感が変わるので、見え方の判断待ち。3 つは同じ「判断待ち」の組)。
  * 通さない口(理由は設計 doc §6 W5-d): 計時の記録・文字起こし・添付のドロップ。

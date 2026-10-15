@@ -2528,16 +2528,46 @@ async function queryTagBulk(
     dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(now.phase)}タグを${verbWord}ください` });
     return;
   }
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
-  if (mode === 'rename') dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add', afterPrevious: true });
-  // 🔑 集計は書いた結果を映す ── 書込が着いてから数え直す
-  void Promise.resolve(services.settle?.() ?? null).then(() => {
-    dispatcher.dispatch({ type: 'REFRESH_QUERY' });
-  });
+  /**
+   * 🔴 **別のタブ・窓が編集中のノートが 1 つでもあれば、付け替えない**(#1087。追記と同じ門)。
+   * ⚠ 一部だけ書くと「全部変えた」と読めてしまうので、全部が通ったときだけ撃つ。
+   */
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    lids,
+    mode === 'rename'
+      ? 'タグを付け替えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください'
+      : 'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => {
+      dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [tag], mode: 'remove' });
+      if (mode === 'rename') {
+        dispatcher.dispatch({ type: 'BULK_TAG', lids, tags: [next], mode: 'add', afterPrevious: true });
+        /**
+         * 🔴 **名前を変えたら、色も付いてくる**(#1087)。⚠ 直す前は新しい名前が灰色になり、
+         *   古い色は**どのノートにも付かないまま残った**(外す口は「そのタグが付いたノート」にしか無く、
+         *   `MAX_TAG_COLORS` の枠だけ食う)。新しい名前に色が既に在るなら、そちらを尊重して動かさない。
+         * ⚠ 外す側(`remove`)の色は触らない ── 本文の行に `#タグ` と書いたノートが残りうるので、
+         *   「どのノートにも無い」と安く言い切れない(色は残る。ノートに付いていれば右のペインから外せる)。
+         */
+        const oldColor = currentTagColor(tag);
+        if (oldColor !== null && currentTagColor(next) === null) {
+          // 古い色を先に外す ── 付けてから外すと、枠が上限のとき付けられない
+          services.setTagColor?.(tag, null);
+          services.setTagColor?.(next, oldColor);
+        }
+      }
+      // 🔑 集計は書いた結果を映す ── 書込が着いてから数え直す
+      void Promise.resolve(services.settle?.() ?? null).then(() => {
+        dispatcher.dispatch({ type: 'REFRESH_QUERY' });
+      });
+    },
+  );
 }
 
 function runBulkTag(
   dispatcher: Dispatcher,
+  services: BinderServices,
   root: HTMLElement,
   mode: 'add' | 'remove',
 ): void {
@@ -2570,10 +2600,21 @@ function runBulkTag(
   //   知らせが 1 通ずつ出て**後の 1 通が前を塗り潰す**(12 件に「請求」が付いたのに
   //   「0 件に付けました」と出る)。並びのまま渡せば、答えも 1 通で全部を語れる。
   // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
-  dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
-  dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
-  // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
-  if (field) field.value = '';
+  // 🔴 別のタブ・窓が編集中のノートが 1 つでもあれば撃たない(#1087)。⚠ 断ったときは欄も残る(下の fire の中で空にする)
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    lids,
+    mode === 'add'
+      ? 'タグを付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください'
+      : 'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => {
+      dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'bulk-tag' });
+      dispatcher.dispatch({ type: 'BULK_TAG', lids, tags, mode, field: 'bulk-tag' });
+      // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+      if (field) field.value = '';
+    },
+  );
 }
 
 /**
@@ -7938,7 +7979,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **選んだものを、このスマートフォルダから外す**(user 指示 2026-08-23)。
    * ⚠ 実体は「条件のタグを本文から消す」── 入れ物から出すのではない。
    */
-  'smart-evict': (dispatcher, _target, _services, root) => {
+  'smart-evict': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     const smartLid = st.scopeLid;
     if (smartLid === null) return;
@@ -7950,10 +7991,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     void root;
-    dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'remove' });
+    // 🔴 実体は選んだノートのタグを外す書込 ── 別のタブ・窓が編集中のノートが在れば撃たない(#1087)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      lids,
+      'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'remove' }),
+    );
   },
-  'bulk-tag-add': (dispatcher, _target, _services, root) =>
-    runBulkTag(dispatcher, root, 'add'),
+  'bulk-tag-add': (dispatcher, _target, services, root) =>
+    runBulkTag(dispatcher, services, root, 'add'),
   /**
    * 🔴 **いま開いているノートにタグを打つ**(#494)。
    *
@@ -7966,7 +8014,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 相手は `scopeLid` ではなく **`selectedLid`**(情報ペインが出しているのは
    *   「いま選んでいる 1 件」である ── `filer` の帯とは別の面)。
    */
-  'add-tag': (dispatcher, _target, _services, root) => {
+  'add-tag': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     const lid = st.selectedLid;
     if (lid === null) return;
@@ -7999,9 +8047,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '足すタグを入力してください' });
       return;
     }
-    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags, mode: 'add' });
-    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
-    if (field) field.value = '';
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。追記と同じ門)── 断ったときは欄も残る
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      'タグを足せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => {
+        dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags, mode: 'add' });
+        // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す
+        if (field) field.value = '';
+      },
+    );
   },
   /**
    * 🔴 **その札を外す**(#494)。⚠ 裁定 2026-08-23「**片道の操作を作らない**」──
@@ -8009,7 +8066,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 相手のタグは**押した札が持つ**(`data-pkc-tag`)── 打つ欄の中身を読むと、
    *   打ちかけの別の語を消すことになる。
    */
-  'untag-entry': (dispatcher, target) => {
+  'untag-entry': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     const lid = st.selectedLid;
     const tag = target.getAttribute('data-pkc-tag') ?? '';
@@ -8018,10 +8075,17 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを外してください` });
       return;
     }
-    dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags: [tag], mode: 'remove' });
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。追記と同じ門)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      'タグを外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags: [tag], mode: 'remove' }),
+    );
   },
-  'bulk-tag-remove': (dispatcher, _target, _services, root) =>
-    runBulkTag(dispatcher, root, 'remove'),
+  'bulk-tag-remove': (dispatcher, _target, services, root) =>
+    runBulkTag(dispatcher, services, root, 'remove'),
   // 🔴 集計(タグ)の組の「名前を変える」「全部外す」(依頼 65-1)。実体は `queryTagBulk`
   // ⚠ 相手のタグは押した組が運ぶ(`data-pkc-tag`)── `untag-entry` と同じ置き場
   'query-tag-rename': (dispatcher, target, services, root) =>
@@ -16879,8 +16943,17 @@ export function bindActions(
        * ⚠ 条件は effect が本文から読む ── 憶えている値では書かない。
        */
       if (drop.el.getAttribute('data-pkc-drop') === 'smart' && drop.lid !== null) {
-        if (lids.length > 0)
-          dispatcher.dispatch({ type: 'SMART_TAGS', smartLid: drop.lid, lids, mode: 'add' });
+        if (lids.length > 0) {
+          const smartLid = drop.lid;
+          // 🔴 実体は落としたノートへタグを付ける書込 ── 別のタブ・窓が編集中のノートが在れば撃たない(#1087)
+          actUnlessEditedElsewhere(
+            dispatcher,
+            services,
+            lids,
+            'タグを付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度ドロップしてください',
+            () => dispatcher.dispatch({ type: 'SMART_TAGS', smartLid, lids, mode: 'add' }),
+          );
+        }
         return;
       }
       const before = dispatcher.getState().relations;

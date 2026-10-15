@@ -63,7 +63,12 @@ export interface FrontmatterResult {
   warnings: FrontmatterWarning[];
 }
 
-const OPEN_FENCE = /^---\s*\r?\n/;
+/**
+ * ⚠ 先頭の U+FEFF(BOM)は**あってもよい**(#1087)。メモ帳などで保存した本文は BOM つきで来る ──
+ *   受けないと「frontmatter が無い」と読んで、書く側が**2 つ目の囲みを前置**していた。
+ *   BOM は `open[0]` の先頭に含まれるので、書き戻しでも位置が動かない。
+ */
+const OPEN_FENCE = /^\uFEFF?---\s*\r?\n/;
 const CLOSE_FENCE_LINE = /^---\s*$/;
 
 /** UTF-8 byte length。cap enforcement の size 計測に使う。 */
@@ -1059,6 +1064,13 @@ export function setFrontmatter(
   return rest === '' ? fm : `${fm}\n${rest}`;
 }
 
+const BOM = '\uFEFF';
+
+/** 囲みを本文の前に置く。⚠ 本文が BOM で始まるなら **BOM は先頭のまま**(囲みの後ろへ押し出さない)。 */
+function prependFence(body: string, fence: string): string {
+  return body.startsWith(BOM) ? BOM + fence + body.slice(1) : fence + body;
+}
+
 /**
  * frontmatter の特定 key だけを**原文 splice**で書き換える(P3-6、かんばん
  * トグル等の構造化操作用)。本文・他 key・空行・コメントは byte 単位で無傷。
@@ -1087,7 +1099,7 @@ export function spliceFrontmatterKeys(
   if (!OPEN_FENCE.test(body)) {
     const lines = entries.map(lineFor).filter((l): l is string => l !== null);
     if (lines.length === 0) return body;
-    return `---${eol}${lines.join(eol)}${eol}---${eol}${body}`;
+    return prependFence(body, `---${eol}${lines.join(eol)}${eol}---${eol}`);
   }
 
   const open = body.match(OPEN_FENCE)![0];
@@ -1126,7 +1138,7 @@ export function spliceFrontmatterKeys(
     if (run === 0) {
       const lines = entries.map(lineFor).filter((l): l is string => l !== null);
       if (lines.length === 0) return body;
-      return `---${eol}${lines.join(eol)}${eol}---${eol}${body}`;
+      return prependFence(body, `---${eol}${lines.join(eol)}${eol}---${eol}`);
     }
     /**
      * 🔴 **書くものが何も無いなら、直さない**(着地前レビュー ②)。
@@ -1245,7 +1257,7 @@ export function spliceFrontmatterKeys(
    *   次に鍵を付けると前置の経路で `---\nkey: v\n---\n` + 元の本文へ戻る。
    */
   if (fmParts.length === 0 || fmParts.every((l) => l.trim() === '')) {
-    return parts.slice(closeAt + 1).join('');
+    return (open.startsWith(BOM) ? BOM : '') + parts.slice(closeAt + 1).join('');
   }
   return `${open}${fmParts.join('')}${rest}`;
 }
