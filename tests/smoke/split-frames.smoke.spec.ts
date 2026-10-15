@@ -519,6 +519,8 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await createEntry(page, 'text');
   await writeBody(page, '# 資料 A\n\n本文 A');
   await createEntry(page, 'text');
+  // 題名に括弧を含める(#1087: `[重要]` を含む題名のリンク行でも並べ替えが断られない)
+  await page.locator('[data-pkc-field="editor-title"]').fill('[重要] 資料 B');
   await writeBody(page, '# 資料 B\n\n本文 B');
 
   // ⚠ 帯の札は**ノートの題名**(本文の `#` ではない)。一覧は作った順なので
@@ -556,6 +558,17 @@ test('🔴 帯の「保存…」で星つきの入れ物ができ、載せ直す
   await expect(page.locator('[data-pkc-region="stack-bar"]')).toHaveCount(0);
   await row.click();
   await expect(page.locator('[data-pkc-field="detail-body"] a[href^="entry:"]')).toHaveCount(2);
+
+  // 🔴 保存したスタックの行の ↑/↓ で並びが変わる(#1087)── 題名が `[重要]` の行(2 行目)でも動く
+  const links = page.locator('[data-pkc-field="detail-body"] li a[href^="entry:"]');
+  const rowsLi = page.locator('[data-pkc-field="detail-body"] li', { has: page.locator('a[href^="entry:"]') });
+  expect(titleB, '前提: 題名に [重要] が入っていない').toContain('[重要]');
+  await expect(links.nth(1)).toContainText('[重要]');
+  await clickReal(page, rowsLi.nth(1).locator('[data-pkc-action="stack-link-up"]'));
+  await expect(links.nth(0), '↑ で [重要] の行が先頭に来ない').toContainText('[重要]');
+  await clickReal(page, rowsLi.nth(0).locator('[data-pkc-action="stack-link-down"]'));
+  await expect(links.nth(1), '↓ で [重要] の行が元に戻らない').toContainText('[重要]');
+
   await clickReal(page, '[data-pkc-field="inspector-actions"] [data-pkc-action="stack-load"]');
   await expect(cards).toHaveText([titleA, titleB]);
 
