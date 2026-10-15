@@ -20,6 +20,8 @@ import type { EncodedChainInput } from '../../src/adapter/platform/storage/proto
 import type { RevisionChain } from '../../src/features/import/pkc2-convert';
 import { readAttachmentMeta } from '../../src/features/flavor/attachment-flavor';
 import { buildZip, bytesOf } from '../features/zip-fixture';
+import { SECTION_DRAFT_NOTE } from '../../src/adapter/state/app-state';
+import { readTags } from '../../src/features/flavor/tags';
 
 /** PKC2 の export と同じ骨格(slot id と `<\/script` 退避)。 */
 function pkc2Html(payload: unknown): string {
@@ -92,6 +94,7 @@ function harness(opts: HarnessOptions = {}) {
   let reloads = 0;
   let n = 0;
   const importedCalls: string[][] = [];
+  const importedOpts: Array<{ readonly tagColors?: boolean } | undefined> = [];
   const failures: Array<{ message: string; undoable: boolean | undefined }> = [];
 
   const d = new Dispatcher();
@@ -191,7 +194,7 @@ function harness(opts: HarnessOptions = {}) {
     },
     notify: (m) => notices.push(m),
     report: (n) => { reported = n; },
-    imported: (lids) => void importedCalls.push([...lids]),
+    imported: (lids, o) => { importedCalls.push([...lids]); importedOpts.push(o); },
     ...(opts.captureFailure
       ? { reportFailure: (message: string, undoable?: boolean) => void failures.push({ message, undoable }) }
       : {}),
@@ -210,6 +213,7 @@ function harness(opts: HarnessOptions = {}) {
     restoredChains,
     reloadCount: () => reloads,
     importedCalls,
+    importedOpts,
     failures,
   };
 }
@@ -1337,6 +1341,18 @@ describe('importPkc2File (P6b 実行部)', () => {
       await importPkc2File(h2.d, h2.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
       expect(h2.reportedNotes().join('\n')).not.toContain('上限のため');
     });
+
+    it('🔴 色を 1 件でも足したら、取り消しにそれを伝える(取り消しは色を戻さない)。足さなければ伝えない', async () => {
+      const h = harness();
+      h.deps.importTagColors = async () => ({ added: 1, kept: 0, overLimit: 0 });
+      await importPkc2File(h.d, h.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
+      expect(h.importedOpts).toEqual([{ tagColors: true }]);
+      // 対照群: 色が既に付いていて 1 件も足さなかった / 口が無い配線
+      const kept = harness();
+      kept.deps.importTagColors = async () => ({ added: 0, kept: 1, overLimit: 0 });
+      await importPkc2File(kept.d, kept.deps, await archiveWith([{ tag: 'a', color: '#123456' }]));
+      expect(kept.importedOpts).toEqual([{ tagColors: false }]);
+    });
   });
 
   /**
@@ -1939,5 +1955,50 @@ describe('大きすぎて読み込めないとき(#1087)', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('PKC2 の取り込み: 入口の断りとタグ・日時(#1087)', () => {
+  it('🔴 章の欄が開いている間も断る(md / 連絡先 / 予定 / pptx と同じ判定・同じ字)', async () => {
+    const { d, deps, written } = harness();
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [
+        { lid: 'e1', title: 't', archetype: 'text', entryOrder: 1, status: null, date: null, archived: false, bodyChars: null, createdAt: null, updatedAt: null },
+      ],
+      relations: [],
+    });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'e1', body: '## 見出し\n\n中身\n' });
+    d.dispatch({ type: 'OPEN_SECTION_DRAFT', lid: 'e1', line: 0 });
+    expect(d.getState().phase, '前提が崩れている(phase が ready でない)').toBe('ready');
+    expect(d.getState().sectionDraft, '前提が崩れている(開けていない)').not.toBeNull();
+
+    const file = htmlFile({
+      container: { meta: {}, entries: [{ lid: 'a', title: 'n', archetype: 'text', body: 'x\n' }] },
+      export_meta: {},
+    });
+    expect(await importPkc2File(d, deps, file)).toBeNull();
+    expect(written, '章の欄が開いているのに書込が起きた').toHaveLength(0);
+    expect(d.getState().error).toBe(SECTION_DRAFT_NOTE);
+    expect(d.getState().sectionDraft, '断ったのに章の欄が消えた').not.toBeNull();
+  });
+
+  it('🔴 タグと作成・更新日時が、書込の行まで届く(PKC2 の書き出し)', async () => {
+    const { d, deps, written } = harness();
+    const file = htmlFile({
+      container: {
+        meta: {},
+        entries: [
+          { lid: 'a', title: 'n', archetype: 'text', body: '本文\n', tags: ['請求', '家事'], created_at: '2025-03-04T05:06:07.000Z', updated_at: '2025-03-05T00:00:00.000Z' },
+        ],
+      },
+      export_meta: {},
+    });
+    expect(await importPkc2File(d, deps, file)).toBe(1);
+    expect(written[0]!.createdAt).toBe('2025-03-04 05:06:07');
+    expect(written[0]!.updatedAt).toBe('2025-03-05 00:00:00');
+    expect(readTags(written[0]!.body)).toEqual(['請求', '家事']);
   });
 });

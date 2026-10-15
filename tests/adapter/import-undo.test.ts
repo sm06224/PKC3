@@ -100,6 +100,27 @@ describe('取り込みの戻り道(#535 ②)', () => {
     expect(h.sent).toEqual([{ type: 'DELETE_ENTRIES', lids: ['c'] }]);
   });
 
+  it('🔴 タグの色も足した取り込みは、取り消しで色が残ることを押す前にも後にも言う(#1087)', () => {
+    const h = make();
+    h.undo.remember(['a'], { tagColors: true });
+    expect(h.undo.pending()?.title).toContain('取り込んだタグの色は残ります');
+    h.undo.undo();
+    expect(h.said.join('')).toContain('取り込んだ分をゴミ箱へ入れました');
+    expect(h.said.join('')).toContain('取り込んだタグの色は残ります');
+  });
+
+  it('対照群: 色を足していない取り込みでは、色のことを言わない。憶え直すと前の回の色は引き継がない', () => {
+    const h = make();
+    h.undo.remember(['a']);
+    expect(h.undo.pending()?.title).not.toContain('色');
+    h.undo.undo();
+    expect(h.said.join('')).not.toContain('色');
+    const g = make();
+    g.undo.remember(['a'], { tagColors: true });
+    g.undo.remember(['b']);
+    expect(g.undo.pending()?.title, '前の回の色が残っている').not.toContain('色');
+  });
+
   it('⚠ 0 件を憶えたら、口は出さない', () => {
     const h = make();
     h.undo.remember([]);
@@ -162,7 +183,7 @@ describe('main.ts の配線(#535 ②)', () => {
 
   it('🔴 取り込んだ id を憶える口が繋がっている', () => {
     expect(main, 'imported が importUndo へ繋がっていない').toContain(
-      'imported: (lids) => importUndo.remember(lids)',
+      'imported: (lids, opts) => importUndo.remember(lids, opts),',
     );
   });
 

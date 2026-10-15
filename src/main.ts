@@ -3024,7 +3024,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         showNotices(regions.notices, panel.title, panel.notes, panel.action);
       },
       // 🔴 **取り込んだ id を憶える**(#535 ②)── 戻せるのは直前の 1 回だけ
-      imported: (lids) => importUndo.remember(lids),
+      imported: (lids, opts) => importUndo.remember(lids, opts),
       // 🔴 **取り込んだノートを開く**(2026-08-05、user 報告「開いたら何も起きずに終わる」)。
       //    ⚠ `reload()` が早く返る場合があるので、素朴な dispatch では
       //    reducer に弾かれて黙って終わる ── 「居たら選ぶ、まだなら待つ」は
