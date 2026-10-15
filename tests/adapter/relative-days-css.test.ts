@@ -40,7 +40,7 @@ describe('添え字の見た目(#1225)', () => {
 describe('日をまたぐ計算し直しの配線(#1225。main.ts は原文で pin)', () => {
   const main = codeOnly(readFileSync('src/main.ts', 'utf8'));
   it('🔴 画面に戻ってきたとき(visibilitychange)に計算し直す口を渡している', () => {
-    expect(main).toContain('watchRelativeDays(document, document)');
+    expect(main).toContain('watchRelativeDays(document, document, undefined, () => repaintPanes())');
   });
   it('🔴 設定を切り替えたら、描き直さずその場で付け直す / 外す', () => {
     const at = main.indexOf('setRelativeDays:');

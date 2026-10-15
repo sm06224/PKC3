@@ -115,10 +115,27 @@ export function syncRelativeDays(root: ParentNode, now: Date = new Date()): void
 /**
  * 画面に戻ってきたとき(`visible`)に計算し直す。⚠ **常駐タイマーは立てない**。
  * 返す関数で外せる。
+ *
+ * 🔴 `onDayChange`: **日付が、前に見たときから変わっていたら**呼ぶ(#1087)。予定の面は「今日」の強調と
+ *   期限切れの印を**描くときにしか**決めないので、開きっぱなしで日をまたぐと昨日のまま残る。
+ *   ここが `visible` を見る唯一の口なので、面の描き直しもここに乗せる(別の listener を足さない)。
  */
-export function watchRelativeDays(doc: Document, root: ParentNode, now: () => Date = () => new Date()): () => void {
+export function watchRelativeDays(
+  doc: Document,
+  root: ParentNode,
+  now: () => Date = () => new Date(),
+  onDayChange?: () => void,
+): () => void {
+  let lastDay = shortcutDate('today', now());
   const onVisible = (): void => {
-    if (doc.visibilityState === 'visible') syncRelativeDays(root, now());
+    if (doc.visibilityState !== 'visible') return;
+    const at = now();
+    syncRelativeDays(root, at);
+    const day = shortcutDate('today', at);
+    if (day !== lastDay) {
+      lastDay = day;
+      onDayChange?.();
+    }
   };
   doc.addEventListener('visibilitychange', onVisible);
   return () => doc.removeEventListener('visibilitychange', onVisible);

@@ -41,7 +41,7 @@ interface Rig {
   readonly press: () => Promise<{ names: string[]; blobs: Blob[] }>;
 }
 
-function rig(bodies: Record<string, string>, metas: EntryMeta[]): Rig {
+function rig(bodies: Record<string, string>, metas: EntryMeta[], truncated = false): Rig {
   document.body.innerHTML = '';
   const root = document.createElement('div');
   document.body.append(root);
@@ -59,7 +59,7 @@ function rig(bodies: Record<string, string>, metas: EntryMeta[]): Rig {
       cards: Object.entries(bodies).flatMap(([lid, body]) => taskCardsOf(lid, body)),
       totalNotes: metas.length,
       scannedNotes: metas.length,
-      truncated: false,
+      truncated,
     },
   });
   return {
@@ -99,6 +99,17 @@ describe('予定を .ics で書き出す', () => {
     expect(text).toContain('SUMMARY:見積を送る\r\n');
     expect(text).toContain('DESCRIPTION:ノート: 週次メモ\r\n');
     expect(r.d.getState().notice).toContain('1 件');
+  });
+
+  it('🔴 走査が上限で切れていたら、「多いので途中まで集めた分です」と言う / 切れていなければ言わない(#1087)', async () => {
+    const full = rig({ a: '- [ ] 見積 @2026-10-20\n' }, [meta()], false);
+    await full.press();
+    expect(full.d.getState().notice).not.toContain('途中まで');
+    vi.restoreAllMocks();
+    const cut = rig({ a: '- [ ] 見積 @2026-10-20\n' }, [meta()], true);
+    await cut.press();
+    expect(cut.d.getState().notice).toContain('(多いので途中まで集めた分です)');
+    expect(cut.d.getState().notice).toContain('1 件');
   });
 
   it('🔴 済んだ行は既定で隠れている ── 面と同じく書き出しにも入らず、「出すもの」で出すと入る', async () => {

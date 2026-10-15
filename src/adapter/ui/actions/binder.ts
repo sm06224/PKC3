@@ -11696,9 +11696,11 @@ const ACTIONS: Record<string, ActionHandler> = {
       new Blob([res.text], { type: 'text/calendar' }),
     );
     const bad = res.skipped > 0 ? `。日付や時刻が読めない ${res.skipped} 件は入っていません` : '';
+    // 🔴 走査は上限で切るので、ノートが多いと「出ている分」が全部ではない(連絡先の書き出しと同じ言い方)
+    const cut = st.taskScan?.truncated === true ? '(多いので途中まで集めた分です)' : '';
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `予定 ${res.count} 件を書き出しました(いま一覧に出している分です。日付のないものは入りません)${bad}`,
+      message: `予定 ${res.count} 件を書き出しました${cut}(いま一覧に出している分です。日付のないものは入りません)${bad}`,
     });
   },
   /**

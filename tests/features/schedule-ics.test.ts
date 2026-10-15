@@ -445,8 +445,12 @@ describe('月末の寄せ(29〜31 日の毎月 / 2/29 の毎年)', () => {
     expect(rule('2028-02-28', 'year')).toBe('RRULE:FREQ=YEARLY');
     expect(rule('2028-03-29', 'year')).toBe('RRULE:FREQ=YEARLY');
   });
-  it('UTC で日付が動く時刻のときは月末の寄せを書かない(素の毎月)', () => {
+  it('UTC で日付が動く時刻のとき(#1087 で変更)は、UTC の日で回さず浮動時刻で書き、月末の寄せも書く', () => {
+    // 動いた事実:直す前は UTC の DTSTART(前日 22:00Z)に素の `FREQ=MONTHLY` を付けていて、
+    //   「毎月 31 日」が「毎月 UTC の 30 日」になっていた
     const seoul: IcsZone = { kind: 'utc', offsetMinutes: () => 540 };
-    expect(rule('2026-01-31', 'month', seoul, '07:00')).toBe('RRULE:FREQ=MONTHLY');
+    expect(rule('2026-01-31', 'month', seoul, '07:00')).toBe('RRULE:FREQ=MONTHLY;BYMONTHDAY=28,29,30,31;BYSETPOS=-1');
+    const l = lines([item({ date: '2026-01-31', time: '07:00', repeat: 'month' })], seoul);
+    expect(l).toContain('DTSTART:20260131T070000');
   });
 });

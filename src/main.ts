@@ -2276,7 +2276,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 常駐タイマーは立てない(上の `watchOfficeHang` と同じ ── `visibilitychange` の 1 点だけ)。
    *   ⚠ ここは**渡すだけ** ── 何を差すか・設定を見るかは `relative-days.ts` が持つ。
    */
-  watchRelativeDays(document, document);
+  watchRelativeDays(document, document, undefined, () => repaintPanes());
   watchOfficeHang({
     onEvent: (fn) => officeWindow.onEvent(fn),
     doc: document,
