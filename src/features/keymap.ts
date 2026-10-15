@@ -2112,6 +2112,23 @@ export function defaultBindings(): KeymapBindings {
   return out;
 }
 
+function parseChordList(raw: readonly unknown[]): string[] {
+  const list: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const parsed = chordFromString(v);
+    if (parsed === null) continue;
+    const norm = chordToString(parsed);
+    if (!list.includes(norm)) list.push(norm);
+  }
+  return list;
+}
+
+/** 上書きとして効く保存か(配列で、空か、1 件以上読める)。読めない物だけの配列は上書きではない。 */
+export function isEffectiveOverride(raw: unknown): raw is readonly unknown[] {
+  return Array.isArray(raw) && (raw.length === 0 || parseChordList(raw).length > 0);
+}
+
 /**
  * 上書きを既定へ重ねる。
  * ⚠ **知らない id は捨てる**(古い保存が残っていても壊れない)。
@@ -2129,13 +2146,12 @@ export function resolveBindings(overrides: Readonly<Record<string, unknown>>): K
       out[c.id] = c.defaults;
       continue;
     }
-    const list: string[] = [];
-    for (const v of raw) {
-      if (typeof v !== 'string') continue;
-      const parsed = chordFromString(v);
-      if (parsed === null) continue;
-      const norm = chordToString(parsed);
-      if (!list.includes(norm)) list.push(norm);
+    const list = parseChordList(raw);
+    // 🔑 1 件以上在るのに**1 件も読めない**(将来の版の修飾名など)は「割当なし」の意思表示ではない ──
+    //    既定へ落とす(保存の生の値は呼び手が残す)。空配列だけが「割当なし」
+    if (raw.length > 0 && list.length === 0) {
+      out[c.id] = c.defaults;
+      continue;
     }
     // ⚠ **空配列は「割当なし」として尊重する**(既定へ戻さない)──
     //    「この近道は要らない」という意思表示を勝手に取り消さない
@@ -2167,21 +2183,30 @@ export function resolveUsableBindings(overrides: Readonly<Record<string, unknown
 } {
   const all = resolveBindings(overrides);
   const current: Record<string, readonly string[]> = {};
-  for (const c of KEY_COMMANDS) current[c.id] = Array.isArray(overrides[c.id]) ? [] : c.defaults;
+  for (const c of KEY_COMMANDS) current[c.id] = isEffectiveOverride(overrides[c.id]) ? [] : c.defaults;
   const unusable: UnusableBinding[] = [];
+  // 🔑 1 巡目:各コマンドの**自分の既定**を先に全部入れる。表の前のコマンドが、後ろのコマンドの既定を
+  //    先に取ってしまう(= 後ろの既定が重複して黙って効かない)のを防ぐ
   for (const c of KEY_COMMANDS) {
-    if (!Array.isArray(overrides[c.id])) continue;
+    if (!isEffectiveOverride(overrides[c.id])) continue;
+    current[c.id] = (all[c.id] ?? []).filter((chord) => c.defaults.some((d) => sameChord(d, chord)));
+  }
+  // 2 巡目:残り(既定でない割当)を検査する。並びは保存の並びのまま
+  for (const c of KEY_COMMANDS) {
+    if (!isEffectiveOverride(overrides[c.id])) continue;
     const kept: string[] = [];
-    current[c.id] = kept;
     for (const chord of all[c.id] ?? []) {
-      if (c.defaults.some((d) => sameChord(d, chord))) {
+      const isOwnDefault = c.defaults.some((d) => sameChord(d, chord));
+      const problem = isOwnDefault ? null : validateBinding(c.id, chord, current);
+      if (problem === null) {
         kept.push(chord);
-        continue;
+        // 通った割当は以降の検査から見えるようにする(自分の 2 件目どうしの重複も拾う)
+        if (!(current[c.id] ?? []).includes(chord)) current[c.id] = [...(current[c.id] ?? []), chord];
+      } else {
+        unusable.push({ commandId: c.id, chord, problem });
       }
-      const problem = validateBinding(c.id, chord, current);
-      if (problem === null) kept.push(chord);
-      else unusable.push({ commandId: c.id, chord, problem });
     }
+    current[c.id] = kept;
   }
   return { bindings: current, unusable };
 }

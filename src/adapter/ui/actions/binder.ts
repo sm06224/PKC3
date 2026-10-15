@@ -15467,7 +15467,7 @@ export function bindActions(
     // あって編集キャンセルではない。ガードが無いと draft 丸ごと破棄になる。
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
-    if (ke.isComposing) return;
+    if (ke.isComposing || ke.keyCode === 229) return;
     /**
      * 🔴 **板の付箋の上の欄**(#529 W5)── Enter で確定 / Esc でやめる。
      * ⚠ 追記は **Shift+Enter が改行**。題名は 1 行なので改行は入れない。
@@ -18463,7 +18463,7 @@ export function bindActions(
    */
   const onShortcut = (ev: Event) => {
     const ke = ev as KeyboardEvent;
-    if (ke.isComposing || !root.isConnected) return;
+    if (ke.isComposing || ke.keyCode === 229 || !root.isConnected) return;
     /**
      * 🔴 **確認が開いている間は近道を通さない**(#299 段⑤。着地前レビュー R6)。
      *
