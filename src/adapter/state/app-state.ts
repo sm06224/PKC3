@@ -6438,18 +6438,29 @@ function reduceCore(
     }
     case 'ENTRY_BODY_REFRESHED': {
       const ob = state.openBody;
-      if (ob?.lid !== action.lid) return { state, events: [] };
+      // 🔴 **留めた枠にも映す**(#1087)── 主の枠が別のノートを開いていても、留めた枠だけが
+      //    このノートを映していることがある。⚠ 直す前は丸ごと捨てていたので古い本文のままだった
+      //    (持っていない lid では `syncShownBodies` は何もしない)
+      if (ob?.lid !== action.lid) {
+        const shown = syncShownBodies(state, action.lid, action.body);
+        return { state: sameShownBodies(state, shown) ? state : { ...state, ...shown }, events: [] };
+      }
       // 🔴 **編集中の draft は触らない**(`APP_TILE_SAVED` と同じ ── 捨てると
       //    無変更 commit / cancel で旧本文が disk を上書きする)
       if (state.phase === 'editing') {
         return {
-          state: { ...state, openBody: { ...ob, persisted: action.body, diskAhead: true } },
+          state: {
+            ...state,
+            openBody: { ...ob, persisted: action.body, diskAhead: true },
+            ...syncShownBodies(state, action.lid, action.body),
+          },
           events: [],
         };
       }
       return {
         state: {
           ...state,
+          ...syncShownBodies(state, action.lid, action.body),
           openBody: {
             lid: action.lid,
             body: action.body,
@@ -9998,6 +10009,7 @@ function reduceCore(
               ...state,
               entryMetas: new Map(state.entryMetas).set(action.meta.lid, action.meta),
               openBody: { ...state.openBody, persisted: action.body, diskAhead: true },
+              ...syncShownBodies(state, action.meta.lid, action.body),
             },
             events: [],
           };
@@ -10025,6 +10037,7 @@ function reduceCore(
           state: {
             ...state,
             entryMetas,
+            ...syncShownBodies(state, action.meta.lid, action.body),
             taskScan: refreshTaskCards(state.taskScan, action.meta.lid, action.body),
             smartHits: refreshSmartHits(state.smartHits, action.meta.lid, action.body, state.entryMetas),
             notice:
@@ -10069,6 +10082,8 @@ function reduceCore(
           // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
           revisionPreview: null,
           selectedLid: action.meta.lid,
+          // 🔴 留めた枠・板の抜粋も新しい本文へ(#1087)── 主の枠だけ追随すると、同じノートを留めた枠が古い本文のまま残る
+          ...syncShownBodies(state, action.meta.lid, action.body),
           openBody: {
             lid: action.meta.lid,
             body: action.body,

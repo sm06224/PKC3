@@ -22,7 +22,7 @@
  *   (`clearHitHighlights`)。Range は節点を掴むので、握ったまま忘れると本文が常駐する
  *   (2026-07-27「速やかな破棄」)。
  */
-import { findHitSpans, findTerms } from '@features/filter/search-hits';
+import { findHitSpans, jumpTerms } from '@features/filter/search-hits';
 import { settleJump } from './long-note';
 
 /** 当たった語の塗り(全部)。⚠ `app.css` の `::highlight(pkc-search-hit)` と同じ字。 */
@@ -48,13 +48,20 @@ const SKIP_SELECTOR = [
   '.pkc-heading-anchor',
 ].join(',');
 
+/** 集める当たりの上限。⚠ 超えた分は塗らない・数えない(巨大な本文で Range を作り続けない)。 */
+export const HIT_RANGE_MAX = 50000;
+
 /**
  * 本文の text node から、語の出現ごとに Range を作る(文書順)。
  * ⚠ **本文の DOM は読むだけ** ── Range を作るのは節点を動かさない。
  * ⚠ 畳んだ章(`hidden`)の中も数える(送るときに開く)。
  */
-export function collectHitRanges(host: HTMLElement, query: string): Range[] {
-  const terms = findTerms(query);
+export function collectHitRanges(
+  host: HTMLElement,
+  query: string,
+  origin: 'find' | 'filter' = 'find',
+): Range[] {
+  const terms = jumpTerms(query, origin);
   if (terms.length === 0) return [];
   const doc = host.ownerDocument;
   const walker = doc.createTreeWalker(host, 4 /* NodeFilter.SHOW_TEXT */);
@@ -66,6 +73,7 @@ export function collectHitRanges(host: HTMLElement, query: string): Range[] {
     // 🔑 差し込んだ操作の字は、当たったときだけ確かめる(全部の節点で `closest` を引かない)
     if (node.parentElement?.closest(SKIP_SELECTOR) != null) continue;
     for (const sp of spans) {
+      if (out.length >= HIT_RANGE_MAX) return out;
       const range = doc.createRange();
       range.setStart(node, sp.start);
       range.setEnd(node, sp.end);
@@ -79,7 +87,7 @@ interface HighlightRegistry {
   set(name: string, value: unknown): unknown;
   delete(name: string): unknown;
 }
-type HighlightCtor = new (...ranges: Range[]) => { priority: number };
+type HighlightCtor = new (...ranges: Range[]) => { priority: number; add(range: Range): unknown };
 
 /** 塗りの表とコンストラクタ。⚠ どちらかが無い(古いブラウザ / happy-dom)なら `null`。 */
 function highlightApi(): { registry: HighlightRegistry; Highlight: HighlightCtor } | null {
@@ -102,7 +110,10 @@ export function paintHitRanges(ranges: readonly Range[], current: number): boole
     api.registry.delete(HIT_CURRENT_HIGHLIGHT);
     return true;
   }
-  api.registry.set(HIT_HIGHLIGHT, new api.Highlight(...ranges));
+  // ⚠ 展開(`new Highlight(...ranges)`)しない ── 引数が多すぎて RangeError になりうる
+  const all = new api.Highlight();
+  for (const r of ranges) all.add(r);
+  api.registry.set(HIT_HIGHLIGHT, all);
   const now = ranges[current];
   if (now === undefined) {
     api.registry.delete(HIT_CURRENT_HIGHLIGHT);

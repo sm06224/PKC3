@@ -851,6 +851,20 @@ function actUnlessEditedElsewhere(
 }
 
 /**
+ * 🔴 **予定を足す先の「今日のノート」は、追記できる種類だけ**(#1087)。
+ * ⚠ 直す前は `findTodayNote` の答えをそのまま使っていた ── 題名が今日の日付のフォルダ・添付・スタック・アプリがあると、
+ *   足した行がそこへ書かれ、**本文を持たない / 読まれない種類なので予定がどこにも出なかった**。
+ * 🔑 追記できない種類は「無い」ものとして飛ばし、新しいテキストのノートを作る(`isAppendable` ── 追記欄と同じ 1 本)。
+ *   ⚠ 予定の足し先だけの規則 ── 「今日」を開く側(`open-today`)は種類を問わない(`findTodayNote` の注記のとおり)。
+ */
+function findScheduleTargetNote(st: AppState, title: string): EntryMeta | null {
+  return findTodayNote(
+    [...st.entryMetas.values()].filter((m) => isAppendable(m.archetype)),
+    title,
+  );
+}
+
+/**
  * 🔴 **別のタブ・窓が今日のノートを編集中なら、予定を足さない**(#529 W5-d の続き。Gemini 裁定 Q5 = A)。
  * 予定の面の「足す」と目盛りの作成(`schedule-grid-create`)の**共通の入口**。
  *
@@ -870,7 +884,7 @@ export function addScheduleItemChecked(
   const st = dispatcher.getState();
   const noteLid =
     (st.phase === 'ready' || st.phase === 'editing') && item.text.trim() !== ''
-      ? (findTodayNote(st.entryMetas.values(), todayNoteTitle(new Date()))?.lid ?? null)
+      ? (findScheduleTargetNote(st, todayNoteTitle(new Date()))?.lid ?? null)
       : null;
   if (noteLid === null || elsewhereCheckNotNeeded(dispatcher, port, noteLid)) {
     return addScheduleItem(dispatcher, item);
@@ -966,7 +980,7 @@ export function addScheduleItem(
       : ` ${formatLineDate(item.date, item.time ?? null, null, null, null, item.timeEnd ?? null)}`
   }`;
   const title = todayNoteTitle(new Date());
-  let lid = findTodayNote(st.entryMetas.values(), title)?.lid ?? null;
+  let lid = findScheduleTargetNote(st, title)?.lid ?? null;
   if (lid === null) {
     /**
      * ⚠ **作るのは読む画面のときだけ** ── `CREATE_ENTRY` は編集中に通らない(通すと編集の
@@ -4238,14 +4252,26 @@ function refuseStaleMenu(dispatcher: Dispatcher, target: Element): boolean {
 }
 
 /** 「上へ / 下へ」の受け手の実体(向きだけが違う 2 つを 1 本にする ── §7)。 */
-function moveStackLink(dispatcher: Dispatcher, target: HTMLElement, dir: 'up' | 'down'): void {
+function moveStackLink(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  dir: 'up' | 'down',
+  services: BinderServices,
+): void {
   const raw = target.getAttribute('data-pkc-line');
   const line = Number(raw);
   if (raw === null || !Number.isInteger(line) || line < 0) return;
   const st = dispatcher.getState();
   const lid = lidOfNode(target, st.openBody?.lid ?? st.selectedLid);
   if (lid === null || lid === undefined) return;
-  dispatcher.dispatch({ type: 'MOVE_STACK_LINK', lid, line, dir });
+  // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門。押した瞬間の lid / 行を撃つ)
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    '並べ替えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => dispatcher.dispatch({ type: 'MOVE_STACK_LINK', lid, line, dir }),
+  );
 }
 
 /**
@@ -8900,8 +8926,23 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **直前の追記を外す**(#395 段①)。
    * ⚠ 独自の書込経路を持たない ── reducer が `REQUEST_BODY_REWRITE` を出す(§7)。
    */
-  'undo-append': (dispatcher) => {
-    dispatcher.dispatch({ type: 'UNDO_APPEND' });
+  'undo-append': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().lastAppend?.lid;
+    if (lid === undefined) {
+      dispatcher.dispatch({ type: 'UNDO_APPEND' });
+      return;
+    }
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門。外す先は押した瞬間の追記のノート)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '追記を元に戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      // ⚠ 待っている間に別の追記へ替わっていたら、押していない追記を外さない
+      () => {
+        if (dispatcher.getState().lastAppend?.lid === lid) dispatcher.dispatch({ type: 'UNDO_APPEND' });
+      },
+    );
   },
   /**
    * 🔴 **直前の塊の移動を元に戻す**(#684 段①。「片道の操作を作らない」)。
@@ -9773,7 +9814,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ 掴む札がまだ無いとき(日付を 1 度も付けていないノート)のための口である ──
    *   主の道は予定の面で掴んで落とすこと。
    */
-  'set-entry-date': (dispatcher, _target, _services, root) => {
+  'set-entry-date': (dispatcher, _target, services, root) => {
     /**
      * 🔴 **編集中は声に出して断る**(#513)── 直す前はピッカーの全手順
      * (開く → 選ぶ → 確定)を完走させてから reducer が黙って捨てていた。
@@ -9799,7 +9840,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       { withTime: false },
     ).then((picked) => {
       if (picked === null) return;
-      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date });
+      // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。選び終えた時点で確かめる。押した瞬間の lid を撃つ)
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '日付を付けられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: picked.date }),
+      );
     });
   },
   /**
@@ -9811,10 +9859,17 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   あちらは**ピッカーを開く前に止める**ためで、reducer では間に合わない
    *   (#513 の「全手順を完走させてから捨てる」を作り直さない)。
    */
-  'clear-entry-date': (dispatcher) => {
+  'clear-entry-date': (dispatcher, _target, services) => {
     const lid = dispatcher.getState().selectedLid;
     if (lid === null) return;
-    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`unschedule-task` の全体の分と同じ門)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '日付を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
+    );
   },
   /** 予定の面の「一覧 / 日」(#855 段 A-1)。値は押したボタンの `data-pkc-mode`。 */
   'schedule-mode': (dispatcher, target, services) => {
@@ -12427,8 +12482,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   主の枠なら開いているノート。`toggle-task` と同じ引き方)。行番号は押し所に焼いた
    *   **原文の行**(`data-pkc-line`)。門(編集中 / byte 一致)は reducer と `body-rewrite.ts` が持つ。
    */
-  'stack-link-up': (dispatcher, target) => moveStackLink(dispatcher, target, 'up'),
-  'stack-link-down': (dispatcher, target) => moveStackLink(dispatcher, target, 'down'),
+  'stack-link-up': (dispatcher, target, services) => moveStackLink(dispatcher, target, 'up', services),
+  'stack-link-down': (dispatcher, target, services) => moveStackLink(dispatcher, target, 'down', services),
   /** 🔴 **外す**(#505 段②)。⚠ 置けるなら外せる ── 枠の中の `× 外す` が押す。 */
   'unsplit-entry': (dispatcher, target) => {
     const lid = target.closest<HTMLElement>('[data-pkc-lid]')?.getAttribute('data-pkc-lid');

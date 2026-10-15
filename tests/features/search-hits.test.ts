@@ -15,6 +15,7 @@ import {
   findHitSpans,
   findTerms,
   foldCase,
+  jumpTerms,
   normalizeFindQuery,
   wrapHitIndex,
 } from '../../src/features/filter/search-hits';
@@ -31,6 +32,24 @@ describe('findTerms: 当たるべき語(探すと同じ割り方)', () => {
   it('除外だけ / 空は 0 語(何も塗らない)', () => {
     expect(findTerms('-中止')).toEqual([]);
     expect(findTerms('   ')).toEqual([]);
+  });
+});
+
+describe('jumpTerms: 塗る語は、始めた場所の割り方で決まる(#1087)', () => {
+  it.each(['-1', '-メモ', '"a b"', '会議 来週'])('🔴 欄の起点は、打った字を丸ごと 1 句にする: %s', (q) => {
+    expect(jumpTerms(q, 'filter')).toEqual([q]);
+  });
+
+  it('欄の起点は前後の空白だけ落とす / 空白だけなら 0 語', () => {
+    expect(jumpTerms('  -1  ', 'filter')).toEqual(['-1']);
+    expect(jumpTerms('   ', 'filter')).toEqual([]);
+  });
+
+  it('🔴 対照群: 「探す」の起点は今までどおり(除外は塗らない・引用符は解く・空白で AND)', () => {
+    expect(jumpTerms('-1', 'find')).toEqual([]);
+    expect(jumpTerms('"a b"', 'find')).toEqual(['a b']);
+    expect(jumpTerms('会議 来週', 'find')).toEqual(['会議', '来週']);
+    expect(jumpTerms('会議 -中止', 'find')).toEqual(findTerms('会議 -中止'));
   });
 });
 
