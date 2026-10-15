@@ -371,7 +371,7 @@ import {
   type AttachDeps,
 } from '@adapter/ui/actions/attach';
 import { assetKeyFromHash } from '@adapter/platform/storage/asset-key';
-import { confirmSavedBack, createOfficeSaveBack } from '@adapter/platform/office/office-save-back';
+import { confirmSavedBack, createOfficeSaveBack, stagedSavedAt } from '@adapter/platform/office/office-save-back';
 import { openStageDir } from '@adapter/platform/office/office-stage';
 import { importFiles } from '@adapter/ui/actions/import-file';
 import { windowFolderWritePicker, type WritableDirLike } from '@adapter/platform/md-folder-export';
@@ -2734,6 +2734,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       localOffice.nameOf(token) === null
         ? Promise.resolve(null)
         : localOffice.writeBack(token, bytes),
+    // 🔴 手元の合言葉はその窓を開いたタブしか知らない ── 知っているタブが holder でなくても引き取る(#1087)
+    knowsLocal: (token) => localOffice.nameOf(token) !== null,
     readAttachment: async (lid) => {
       const key = await currentAttachmentKey(lid);
       return key === null ? null : { assetKey: key };
@@ -2785,7 +2787,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
            */
           newName: save.name,
           newMime: mime,
-          savedAt: new Date().toISOString(),
+          // 🔴 窓が保存した時刻(保留した保存でも、あとに打った控えを「古い」にしない ── #1087)
+          savedAt: stagedSavedAt(save.at),
         });
         // ⚠ reducer は**門を 2 つ**持っている(`ready` か / いまも添付か)── 撃てたかを
         //    ここで確かめる。確かめないと棚から消えて文書が失われる。

@@ -17,10 +17,14 @@ import { readFileSync } from 'node:fs';
 import {
   confirmSavedBack,
   createOfficeSaveBack,
+  LOCAL_ORPHAN_GRACE_MS,
+  LOCAL_SAVE_ORPHAN_NOTICE,
   SAME_DOC_MAX,
+  stagedSavedAt,
   type SaveBackDeps,
 } from '@adapter/platform/office/office-save-back';
 import type { StageDir, StagedSave } from '@adapter/platform/office/office-stage';
+import { isShadowNewer } from '@features/office/office-shadow';
 import { sanitizeMessageText } from '@features/message/message-log';
 
 interface FakeStage {
@@ -107,6 +111,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
     // ⚠ 既定は「手元のファイルではない」── #432 の分岐を素通りさせる
     //   (手元のファイルの経路は `local-office-files.test.ts` と下の describe が見る)
     writeLocal: async () => null,
+    knowsLocal: () => true,
     createNote: async (save) => {
       created.push(save.name);
       return 'new-lid';
@@ -970,5 +975,87 @@ describe('同じ文書の古い保存を、新しい保存の後に書かない(
     expect(await h.sb.retryDeferred()).toBe(1);
     expect(file).toEqual([[1, 1, 1]]);
     expect(h.stage.keys()).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **手元のファイルの保存は、合言葉を知らないタブでノートにしない**(#1087)。
+ * ⚠ 合言葉は開いたタブの中にしか無い。知らないタブが `createNote` へ落ちると、
+ *   元のファイルは古いまま添付ノートが増える。
+ */
+describe('手元のファイルの合言葉を知らないタブ(#1087)', () => {
+  it('🔴 holder が合言葉を知らないとき、ノートを作らず棚に残す', async () => {
+    const h = harness({ knowsLocal: () => false, writeLocal: async () => null });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:s-1', at: Date.now() });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    expect(h.created, '🔴 知らないタブがノートを作った').toEqual([]);
+    expect(h.replaced).toEqual([]);
+    expect(h.notices, '取り込んだと言っている').toEqual([]);
+    expect(h.stage.keys().length, '棚から消えた').toBeGreaterThan(0);
+    expect(h.fails, '保存の直後は黙って待つ').toEqual([]);
+  });
+
+  it('🔴 holder でなくても、合言葉を知っているタブが元のファイルへ書く', async () => {
+    const wrote: string[] = [];
+    const h = harness({
+      isHolder: () => false,
+      knowsLocal: (t) => t === 'local:s-1',
+      writeLocal: async (t) => { wrote.push(t); return true; },
+    });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:s-1' });
+    expect(await h.sb.receive('k1')).toBe('replaced');
+    expect(wrote).toEqual(['local:s-1']);
+    expect(h.created).toEqual([]);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('🔴 holder でなく、知らないタブは何も触らない。PKC のノートの保存も引き取らない', async () => {
+    const h = harness({ isHolder: () => false, knowsLocal: () => false });
+    h.stage.put({ key: 'k1', token: 'local:s-1' });
+    h.stage.put({ key: 'k2', token: 'lid-7', win: 'w2' });
+    expect(await h.sb.receive('k1')).toBeNull();
+    expect(await h.sb.receive('k2'), 'holder でないのに DB へ書いた').toBeNull();
+    expect(h.created).toEqual([]);
+    expect(h.replaced).toEqual([]);
+    expect(h.stage.keys().length).toBe(4);
+  });
+
+  it('🔴 古い保存を誰も書けないときは、1 度だけ言って棚に残す', async () => {
+    const h = harness({ knowsLocal: () => false });
+    h.stage.put({ key: 'k1', token: 'local:s-1', at: Date.now() - LOCAL_ORPHAN_GRACE_MS - 1000 });
+    await h.sb.receive('k1');
+    await h.sb.receive('k1');
+    expect(h.fails).toEqual([LOCAL_SAVE_ORPHAN_NOTICE]);
+    expect(h.created).toEqual([]);
+    expect(h.stage.keys().length).toBeGreaterThan(0);
+  });
+
+  it('配線: knowsLocal が合言葉の台帳から引かれている', () => {
+    const main = readFileSync('src/main.ts', 'utf8');
+    expect(main).toContain('knowsLocal: (token) => localOffice.nameOf(token) !== null');
+  });
+});
+
+/** 🔴 差し替えに記録する時刻は窓が保存した時刻(#1087)。 */
+describe('保存した時刻(savedAt)', () => {
+  it('窓の保存時刻を使い、0 / 欠けは今に倒す', () => {
+    expect(stagedSavedAt(1_000_000, 9_000_000)).toBe(new Date(1_000_000).toISOString());
+    expect(stagedSavedAt(0, 9_000_000)).toBe(new Date(9_000_000).toISOString());
+    expect(stagedSavedAt(undefined, 9_000_000)).toBe(new Date(9_000_000).toISOString());
+  });
+
+  it('🔴 保留した保存のあとに打った控えは、書き戻しが後になっても見送られない', () => {
+    const savedAtWindow = 1_000_000;
+    const writeBackAt = 5_000_000; // 保留が明けて書いた時刻
+    const shadowAt = 2_000_000; // Ctrl+S のあとに打った控え
+    const recorded = Date.parse(stagedSavedAt(savedAtWindow, writeBackAt));
+    expect(isShadowNewer(shadowAt, recorded), '控えが隠れる').toBe(true);
+    // 対照: 書き戻した時刻を記録すると隠れる(直す前の挙動)
+    expect(isShadowNewer(shadowAt, writeBackAt)).toBe(false);
+  });
+
+  it('配線: replaceAsset が save.at を渡している', () => {
+    const main = readFileSync('src/main.ts', 'utf8');
+    expect(main).toContain('savedAt: stagedSavedAt(save.at)');
   });
 });
