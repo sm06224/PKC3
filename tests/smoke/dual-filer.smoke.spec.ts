@@ -225,6 +225,7 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await makeFolder(page, 'はこ');
+  await makeFolder(page, 'ふた');
   await openDual(page);
 
   await page.locator(ROWS('left')).first().click();
@@ -236,6 +237,14 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(input, '確定したのに入力欄が残っている').toHaveCount(0);
   await expect(page.locator(ROWS('left')).first()).toContainText('あたらしい名前');
+
+  // 確定のあとも**キーボードが生きている**(マウスを挟まず ↓ でカーソルが動く)
+  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
+  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '名前の確定のあと ↓ でカーソルが動かない')
+    .not.toBe(cursorBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -634,7 +643,7 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  for (const t of ['け', 'こ']) {
+  for (const t of ['け', 'こ', 'さ']) {
     await createEntry(page, 'text');
     const title = page.locator('[data-pkc-field="editor-title"]');
     if (await title.count()) await title.fill(t);
@@ -654,6 +663,17 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   await page.keyboard.press('Delete');
   await expect(page.locator('[data-pkc-region="app-dialog"][open]'), '確認が出ている').toHaveCount(0);
   await expect(rows, '押したのに消えていない').toHaveCount(before - 1);
+
+  // 消したあともキーボードが生きている(マウスを挟まず ↓ でカーソルが動く)
+  const cursorRow = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-cursor]`);
+  // ⚠ 消した直後はカーソルの行が消えていてよい ── 1 回目の ↓ でカーソルが現れ、2 回目で別の行へ動く
+  await page.keyboard.press('ArrowDown');
+  await expect(cursorRow, '消したあと ↓ でカーソルが現れない').toHaveCount(1);
+  const cursorBefore = await cursorRow.first().getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '消したあと 2 回目の ↓ でカーソルが動かない')
+    .not.toBe(cursorBefore);
   await expect(page.locator('[data-pkc-region="status"]'), '移したことを言っていない').toContainText(
     'ゴミ箱へ移しました',
   );
