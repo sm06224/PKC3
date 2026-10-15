@@ -1156,11 +1156,11 @@ function runSmartScan(
    *   🔑 時刻を持たない行(旧ビルド / 取り込みが作った行)は、この比較だけで落ちる。
    */
   if (q.updatedFrom !== null) {
-    conds.push('updated_at >= ?');
+    conds.push('datetime(updated_at) >= datetime(?)');
     args.push(q.updatedFrom);
   }
   if (q.createdFrom !== null) {
-    conds.push('created_at >= ?');
+    conds.push('datetime(created_at) >= datetime(?)');
     args.push(q.createdFrom);
   }
   if (q.dated !== null) conds.push(q.dated ? 'date IS NOT NULL' : 'date IS NULL');

@@ -10602,6 +10602,8 @@ function removeEntryFromState(
     state.snippetScan === null || snippetItems === state.snippetScan.items
       ? state.snippetScan
       : { ...state.snippetScan, items: snippetItems! };
+  const smart = withoutSmartHit(state.smartHits, lid);
+  events.push(...smart.rescans.map((l): DomainEvent => ({ type: 'REQUEST_SMART_SCAN', lid: l })));
 
   return {
     state: {
@@ -10649,6 +10651,8 @@ function removeEntryFromState(
       taskScan: scanTask,
       contactScan: scanContact,
       snippetScan: scanSnippet,
+      // 🔴 開いているスマートフォルダの当たり・件数からも落とす(#1087。下の `withoutSmartHit`)
+      smartHits: smart.hits,
       /**
        * 🔴 **録ったものの一覧からも落とす**(#1087 の見直し 2026-10-13)── 上の 3 つと同じ形の穴だった。
        *   「音/動画」タブを開いたまま録音のノートを消すと、行が残り、名前を押しても何も起きなかった。
@@ -10670,6 +10674,36 @@ function removeEntryFromState(
     },
     events,
   };
+}
+
+/**
+ * 🔴 **消したノートを、開いているスマートフォルダの当たりと件数から落とす**(#1087)。
+ *
+ * ⚠ 直す前は `taskScan` / `contactScan` だけ落として `smartHits` を落としていなかった ── 帯の件数
+ *   (`hit.total`)が消した後も古いまま残り、開き直すまで 1 件多く見えた。
+ * 🔑 当たりに居たら外して `total` を 1 減らす。⚠ **上限で切られている**(`total > lids.length`)入れ物は、
+ *   手元の一覧が全部ではない ── 消したものが一覧に居ない回は当たりだったか分からず、居た回も
+ *   外した穴を埋める行が手元に無い。だから**集め直しを頼む**(`rescans`)。上限で切れていなければ手で足りる。
+ * ⚠ 変化が無ければ**元の参照**のまま返す(`refreshSmartHits` と同じ作法)。
+ */
+function withoutSmartHit(
+  smartHits: ReadonlyMap<string, SmartHitState>,
+  lid: string,
+): { hits: ReadonlyMap<string, SmartHitState>; rescans: string[] } {
+  let next: Map<string, SmartHitState> | null = null;
+  const rescans: string[] = [];
+  for (const [smartLid, hit] of smartHits) {
+    if (hit.failed) continue;
+    const at = hit.lids.indexOf(lid);
+    const capped = hit.total > hit.lids.length;
+    if (at >= 0) {
+      const lids = [...hit.lids.slice(0, at), ...hit.lids.slice(at + 1)];
+      next ??= new Map(smartHits);
+      next.set(smartLid, { ...hit, lids, total: Math.max(0, hit.total - 1) });
+    }
+    if (capped) rescans.push(smartLid);
+  }
+  return { hits: next ?? smartHits, rescans };
 }
 
 /**
