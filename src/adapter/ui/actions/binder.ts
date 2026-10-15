@@ -697,6 +697,7 @@ const adoptingLinkIcons = new Set<string>();
 let rebuildingContainer = false;
 import { effectiveOpenPlace } from '@features/open-place';
 import { joinCopied, pickMarked } from '@features/clipboard/scrap';
+import { countCappedCells } from '@features/query/sql-cell';
 import { sqlAnswerTsv, sqlEmbedFence, sqlNoteBody, sqlNoteTitle } from '@features/query/sql-to-note';
 // 🔴 手持ちのファイルを開く選び所の印(#854 段②)
 import {
@@ -1101,6 +1102,33 @@ const dualPaneRows = (st: AppState, side: DualSide): EntryMeta[] => {
     // ⚠ 2 ペインは「中まで全部出す」(左の列の入り切り)を**持たない**(#813 段②)
     flatten: false,
   });
+};
+
+/**
+ * 🔴 **消した / 移した後も、カーソルを「その場所に来た行」に残す**(#1087。実ブラウザ smoke で判明)。
+ *
+ * ⚠ 直す前は `pruneDual` がカーソルを `null` に落とすだけで、消した直後は印が画面に 1 つも無く、
+ *   最初の ↓ が先頭付近に現れていた(続けて消す・続けて下りる動線が途切れる)。
+ * 🔑 規則は左の列と**同じ**: 消えた行が居た位置(同じ番号。末尾なら新しい末尾)の行を選ぶ
+ *   (`removeEntryFromState` の後継選び = `after[min(vIdx, after.length - 1)]`)。
+ * ⚠ カーソルの行が**まだ見えているなら何もしない**(印の行だけを消した場合)/ 行が 0 件なら立てる先が無い。
+ * 呼び側は操作の**前**の行とカーソルを渡す。立てた lid を返す(焦点を連れて行く呼び側用)。
+ */
+const keepDualCursorAfter = (
+  dispatcher: Dispatcher,
+  side: DualSide,
+  rowsBefore: readonly EntryMeta[],
+  cursorBefore: string | null,
+): string | null => {
+  if (cursorBefore === null) return null;
+  const i = rowsBefore.findIndex((m) => m.lid === cursorBefore);
+  if (i < 0) return null;
+  const rows = dualPaneRows(dispatcher.getState(), side);
+  if (rows.length === 0 || rows.some((m) => m.lid === cursorBefore)) return null;
+  const lid = rows[Math.min(i, rows.length - 1)]?.lid ?? null;
+  if (lid === null) return null;
+  dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
+  return lid;
 };
 
 /**
@@ -8501,14 +8529,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'dual-delete': (dispatcher, target, services, root) => {
     const side = dualSide(target) ?? dispatcher.getState().dual.focus;
     const st = dispatcher.getState();
-    deleteFrom(
-      dispatcher,
-      services,
-      root,
-      dualPaneRows(st, side),
-      paneOf(st.dual, side).selection,
-      paneOf(st.dual, side).cursor,
-    );
+    const rows = dualPaneRows(st, side);
+    const cursor = paneOf(st.dual, side).cursor;
+    deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor);
+    keepDualCursorAfter(dispatcher, side, rows, cursor);
   },
   /**
    * 🔴 **反対側の場所へ移す**(この面の主目的)。
@@ -8547,8 +8571,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔑 印は「移した結果」に付いていく物であって、**押した事実**に付く物ではない。
      * 🔴 「元に戻す」の出し入れは `moveEntriesOfferingUndo`(移す口 4 つで 1 本)。
      */
-    if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus))
+    if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus)) {
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+      // 移した行は元のペインから消える ── カーソルは入れ替わりに来た行へ(消した後と同じ規則)
+      keepDualCursorAfter(dispatcher, from, rows, pane.cursor);
+    }
   },
   /**
    * 🔴 **移した直後の「元に戻す」**(Gemini 裁定 = #1163 への依頼 62 の 4)。口は `status-undo`(出し入れは `status-open.ts`)。
@@ -13402,7 +13429,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ この面は**別の窓**なので、落ちた file は窓の中に 1 ドットも出ない ──
      *   言わないと「押せなかった」に見える。
      */
-    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file' });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title: name, kind: 'file', capped: countCappedCells(p.rows) });
   },
   'sql-history-pick': (dispatcher, target) => {
     const at = Number(target.getAttribute('data-pkc-sql-history-at') ?? '');
@@ -13466,6 +13493,8 @@ const ACTIONS: Record<string, ActionHandler> = {
         rows: p.rows,
         truncated: p.truncated,
         where,
+        // 🔴 切ってある升の数(`sqlNoteBody` が末尾で言う)
+        capped: countCappedCells(p.rows),
       }),
       parentLid: null,
       relationId: generateLid(),
@@ -13483,7 +13512,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       });
       return;
     }
-    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note' });
+    dispatcher.dispatch({ type: 'SQL_SAVED', title, kind: 'note', capped: countCappedCells(p.rows) });
   },
   /**
    * 🔴 **開く場所**(#826)。⚠ `set-prose-align` と同じ受け方(`<select>` でもボタンでも通す)。
@@ -19364,14 +19393,11 @@ export function bindActions(
      *   このペインのものにして渡す。
      */
     if (cmd === 'filer-trash') {
-      deleteFrom(
-        dispatcher,
-        services,
-        root,
-        dualRows(st, side),
-        paneOf(st.dual, side).selection,
-        paneOf(st.dual, side).cursor,
-      );
+      const rows = dualRows(st, side);
+      const cursor = paneOf(st.dual, side).cursor;
+      deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor);
+      // 焦点も連れて行く(表は組み直されるので、立てたカーソルの行へ)
+      if (keepDualCursorAfter(dispatcher, side, rows, cursor) !== null) carryDualFocus(side);
       return true;
     }
     return false;

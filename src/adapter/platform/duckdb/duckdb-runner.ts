@@ -579,6 +579,8 @@ export class DuckDbRunner {
     const raw = await this.lease.run({
       sql: input.sql,
       maxMs: DUCKDB_MAX_MS,
+      // 🔴 上限を超えたと言えるだけの 1 行を足して、JS の行にする前に切る(`rowsOfTable`)
+      maxRows: DUCKDB_MAX_ROWS + 1,
       loadMaxMs: DUCKDB_LOAD_MAX_MS,
       /**
        * 🔴 **書き込みが通ったら、アイドルで畳まない**(#918 段⑧)。

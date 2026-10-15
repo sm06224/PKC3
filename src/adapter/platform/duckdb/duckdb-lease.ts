@@ -35,7 +35,10 @@ export interface DuckDbHandle {
    * ⚠ 無い名前を渡しても落ちない。
    */
   drop(name: string): Promise<void>;
-  query(sql: string): Promise<DuckDbRaw>;
+  /**
+   * @param maxRows 🔴 JS の行にするのはこの行数まで(#1087 の見直し)。省けば全部。
+   */
+  query(sql: string, maxRows?: number): Promise<DuckDbRaw>;
   /**
    * 🔴 **器の中で書かれた file の中身を取り出す**(#918 段⑥。`COPY … TO` が書いた Parquet)。
    * ⚠ 取り出した後、`runFile` が**すぐ `drop` する**(書かれた file と取り出した bytes で 2 回持たない)。
@@ -73,6 +76,11 @@ export interface DuckDbJob {
    *   走らせないので、いまは起きない)。省くと**永久に待つ**形が作れてしまう。
    */
   readonly maxMs?: number;
+  /**
+   * 🔴 **答えの行を JS の物にする上限**(#1087 の見直し)。⚠ 呼び側が「超えたか」を言うなら **上限 + 1** を渡す。
+   * 省けば全部(書き込みの返事など、小さい物)。
+   */
+  readonly maxRows?: number;
   /**
    * 🔴 **器へ写す所(`data.load`)の時間の門(ms)**(#682 段④d の着地後レビュー R5)。
    *
@@ -166,7 +174,9 @@ export class DuckDbLease {
   async run(job: DuckDbJob): Promise<DuckDbRaw> {
     return this.exec(job, async (h) => {
       const answer =
-        job.maxMs === undefined ? await h.query(job.sql) : await this.raceQuery(h, job.sql, job.maxMs);
+        job.maxMs === undefined
+          ? await h.query(job.sql, job.maxRows)
+          : await this.raceQuery(h, job.sql, job.maxMs, job.maxRows);
       /**
        * ⚠ **通ってから立てる**(落ちた回は何も作っていない)。
        * ⚠ **取っ手が同じときだけ** ── 時間の門で畳まれた器は `forget` が `held` を下ろしている。
@@ -265,8 +275,8 @@ export class DuckDbLease {
    * 🔴 **時間で切る** ── 上流に中断の口が無いので、**畳むのが唯一の手**である。
    * ⚠ 畳んだ取っ手を**控えから外す**(外さないと、死んだ器へ次の問い合わせが飛ぶ)。
    */
-  private raceQuery(h: DuckDbHandle, sql: string, maxMs: number): Promise<DuckDbRaw> {
-    return this.race(h, h.query(sql), maxMs, DUCKDB_TOO_LONG);
+  private raceQuery(h: DuckDbHandle, sql: string, maxMs: number, maxRows?: number): Promise<DuckDbRaw> {
+    return this.race(h, h.query(sql, maxRows), maxMs, DUCKDB_TOO_LONG);
   }
 
   /**

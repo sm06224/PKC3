@@ -24,6 +24,7 @@
 import { csvEscapeField } from '@features/markdown/csv-table';
 import { sqlCellText } from '@features/markdown/sql-embed';
 import { tableToTsv } from '@features/markdown/table-copy';
+import { cappedCellsNote } from './sql-cell';
 
 /** 表に書き出す値(worker から来る形)。 */
 export type SqlCell = string | number | null;
@@ -82,6 +83,8 @@ export function sqlNoteBody(p: {
    *   (ノート)からその情報だけが落ちて**いた。
    */
   readonly where?: string | null;
+  /** 🔴 先頭 2000 字に切ってある升の数(#1087 の見直し)。0 / 省略なら何も言わない。 */
+  readonly capped?: number;
 }): string {
   const table = [p.columns.map((c) => csvEscapeField(c, ',')).join(','), ...p.rows.map((r) => r.map(cell).join(','))].join(
     '\n',
@@ -107,6 +110,10 @@ export function sqlNoteBody(p: {
   if (p.truncated) {
     lines.push('>');
     lines.push('> ⚠ 上限で切っています。全部を出すには、LIMIT や条件で絞ってから実行し直してください。');
+  }
+  if ((p.capped ?? 0) > 0) {
+    lines.push('>');
+    lines.push(`> ${cappedCellsNote(p.capped ?? 0)}。全文が要るときは、その列だけを SQL で選んで実行し直してください。`);
   }
   lines.push('>');
   lines.push(

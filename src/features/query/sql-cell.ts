@@ -22,3 +22,29 @@ export const MAX_CELL_CHARS = 2000;
 export function capCellText(s: string): string {
   return s.length > MAX_CELL_CHARS ? `${s.slice(0, MAX_CELL_CHARS)}…(全 ${String(s.length)} 字)` : s;
 }
+
+/**
+ * 🔴 **畳まれた升か**(#1087 の見直し)── `capCellText` が付けた `…(全 N 字)` の印で見分ける。
+ * ⚠ 「ファイルへ」「ノートへ」は worker が運んだ升をそのまま書くので、**畳まれた升は畳まれたまま**出る。
+ *   それを言うために数える(印の付け方はここ 1 か所 ── §7。書式を変えたらこの判定も変わる)。
+ * ⚠ 先頭が `MAX_CELL_CHARS` 字 + 印 + 印の字数が上限より大きい、までを見る
+ *   (たまたま `…(全 3 字)` で終わる字を畳まれた物と数えない)。
+ */
+const CAPPED_TAIL = /^…\(全 (\d+) 字\)$/;
+export function isCappedCellText(v: unknown): boolean {
+  if (typeof v !== 'string' || v.length <= MAX_CELL_CHARS) return false;
+  const m = CAPPED_TAIL.exec(v.slice(MAX_CELL_CHARS));
+  return m !== null && Number(m[1]) > MAX_CELL_CHARS;
+}
+
+/** 行の並びの中で、畳まれた升の数。 */
+export function countCappedCells(rows: readonly (readonly unknown[])[]): number {
+  let n = 0;
+  for (const r of rows) for (const v of r) if (isCappedCellText(v)) n += 1;
+  return n;
+}
+
+/** 畳んだ升の数を user に言う 1 文(0 のときは空)。⚠ 画面の字なので `ui-terms` の門を通る。 */
+export function cappedCellsNote(n: number): string {
+  return n > 0 ? `長い値 ${String(n)} 個は先頭 ${String(MAX_CELL_CHARS)} 字で切ってあります` : '';
+}

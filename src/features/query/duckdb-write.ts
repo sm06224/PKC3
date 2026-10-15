@@ -44,6 +44,7 @@
  */
 import {
   normalizeOutsideMask,
+  QUOTE_HINT_RE,
   type SqlCheck,
 } from './sql-guard';
 import { checkDuckDbSql, stripDuckDbNoise } from './duckdb-guard';
@@ -156,14 +157,18 @@ const ONE_STATEMENT_WHY = '1 度に打てるのは 1 文だけです(セミコ�
  */
 function rewriteRefusal(r: SqlCheck): SqlCheck {
   if (r.ok) return r;
+  // 🔴 列の名前かもしれない語への案内(`quoteHint`)は、組み直しても落とさない
+  const hint = QUOTE_HINT_RE.exec(r.why)?.[0] ?? '';
   const readonly = /^読み取り専用です: (\S+) は打てません/u.exec(r.why);
   if (readonly !== null) {
     const word = readonly[1] ?? '';
     return {
       ...r,
-      why: WRITE_HEADS.includes(word.toLowerCase() as DuckDbWriteKind)
-        ? `${word} は文の頭でだけ打てます(WITH や FROM の後ろには書けません)`
-        : `${word} は打てません(DuckDB で書き込めるのは ${DUCKDB_WRITE_FORMS} の形だけです)`,
+      why: `${
+        WRITE_HEADS.includes(word.toLowerCase() as DuckDbWriteKind)
+          ? `${word} は文の頭でだけ打てます(WITH や FROM の後ろには書けません)`
+          : `${word} は打てません(DuckDB で書き込めるのは ${DUCKDB_WRITE_FORMS} の形だけです)`
+      }${hint}`,
     };
   }
   // 「X では始められません(DuckDB では … のどれかで始めます)」── 書き込みの形も挙げる

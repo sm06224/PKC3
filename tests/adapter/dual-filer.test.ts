@@ -1547,6 +1547,52 @@ describe('2 ペインのキーボード操作(#273)', () => {
   });
 
   /**
+   * 🔴 **消したあとも、カーソルは入れ替わりに来た行に残る**(#1087。実ブラウザ smoke で判明)。
+   * ⚠ 直す前は `pruneDual` がカーソルを落とすだけで、消した直後はペインに印が無く、最初の ↓ が先頭付近に現れた。
+   * 🔑 左の列の後継選び(`removeEntryFromState` = `after[min(vIdx, after.length - 1)]`)と同じ規則。
+   * 根のペインの行は f1, f2, a, b, c(x・y は f1 の中)。
+   */
+  it('🔴 Delete のあと、カーソルは同じ位置に来た行に残る(途中の行)', () => {
+    d.dispatch({ type: 'DUAL_SET_CURSOR', side: 'right', lid: 'b' });
+    expect(cur('right'), '前提: b にカーソルが在る').toBe('b');
+    press('right', 'b', 'Delete');
+    expect(d.getState().entryMetas.has('b'), '前提: b が消えた').toBe(false);
+    expect(cur('right'), '消した行の位置に来た行(c)にカーソルが無い').toBe('c');
+    expect(row('right', 'c').hasAttribute('data-pkc-cursor'), 'カーソルの印が画面に出ていない').toBe(true);
+    // ↓ は残った行から続く(端なので動かないが、巻き戻って先頭へ飛ばない)
+    press('right', 'c', 'ArrowDown');
+    expect(cur('right'), '↓ で先頭へ飛んだ').toBe('c');
+  });
+
+  it('🔴 Delete のあと、末尾の行だったなら新しい末尾の行にカーソルが残る', () => {
+    d.dispatch({ type: 'DUAL_SET_CURSOR', side: 'right', lid: 'c' });
+    press('right', 'c', 'Delete');
+    expect(d.getState().entryMetas.has('c'), '前提: c が消えた').toBe(false);
+    expect(cur('right'), '新しい末尾(b)にカーソルが無い').toBe('b');
+    press('right', 'b', 'ArrowUp');
+    expect(cur('right'), '↑ が残った行から続いていない').toBe('a');
+  });
+
+  it('対照群: 印の行だけを消してカーソルの行が残るなら、カーソルは動かない', () => {
+    d.dispatch({ type: 'DUAL_SET_CURSOR', side: 'right', lid: 'a' });
+    d.dispatch({ type: 'DUAL_SELECT', side: 'right', lid: 'c', mode: 'set' });
+    press('right', 'a', 'Delete');
+    expect(d.getState().entryMetas.has('c'), '前提: 印の c が消えた').toBe(false);
+    expect(d.getState().entryMetas.has('a'), '前提: カーソルの a は残った').toBe(true);
+    expect(cur('right'), 'カーソルが動いた').toBe('a');
+  });
+
+  it('🔴 反対側へ移したあとも、カーソルは入れ替わりに来た行に残る(消した後と同じ規則)', () => {
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'left', lid: null });
+    d.dispatch({ type: 'DUAL_SET_SCOPE', side: 'right', lid: 'f2' });
+    d.dispatch({ type: 'DUAL_SET_CURSOR', side: 'left', lid: 'b' });
+    const btn = region.querySelector<HTMLElement>('[data-pkc-field="dual-move"]')!;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(d.getState().relations.some((x) => x.toLid === 'b' && x.fromLid === 'f2'), '前提: b が f2 へ移った').toBe(true);
+    expect(cur('left'), '移した行の位置に来た行(c)にカーソルが無い').toBe('c');
+  });
+
+  /**
    * 🔴 **押しボタンからも同じことができる**(#273 段②。user 指示 2026-08-03
    * 「マウスだけで完結し、キーボードは近道」)。
    */

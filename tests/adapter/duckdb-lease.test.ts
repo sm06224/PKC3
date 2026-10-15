@@ -60,6 +60,25 @@ function handle(): DuckDbHandle & { terminated: number; asked: string[]; put: Re
   return h;
 }
 
+describe('🔴 答えの行の上限を取っ手へ渡す(#1087 の見直し)', () => {
+  it('maxRows は時間の門の有無によらず query へ届く / 省けば undefined', async () => {
+    const asked: Array<number | undefined> = [];
+    const mk = (): DuckDbHandle => ({
+      ...handle(),
+      query: (_sql: string, maxRows?: number) => {
+        asked.push(maxRows);
+        return Promise.resolve(ANSWER);
+      },
+    });
+    const t = fakeTimers();
+    const lease = new DuckDbLease({ open: () => Promise.resolve(mk()), ...t });
+    await lease.run({ sql: 'select 1', maxRows: 11 });
+    await lease.run({ sql: 'select 1', maxMs: 10_000, maxRows: 22 });
+    await lease.run({ sql: 'select 1' });
+    expect(asked).toEqual([11, 22, undefined]);
+  });
+});
+
 describe('🔴 DuckDB は常駐しない(#682)', () => {
   it('🔑 呼ばれるまで起こさない ── 作っただけでは 0 回', () => {
     const open = vi.fn(() => Promise.resolve(handle()));
