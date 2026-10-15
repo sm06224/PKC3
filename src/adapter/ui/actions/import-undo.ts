@@ -51,8 +51,12 @@ export interface ImportUndoDeps {
 }
 
 export interface ImportUndo {
-  /** 取り込んだ直後に呼ぶ。⚠ 前の記憶は捨てる(戻せるのは**直前の 1 回**だけ)。 */
-  remember(lids: readonly string[]): void;
+  /**
+   * 取り込んだ直後に呼ぶ。⚠ 前の記憶は捨てる(戻せるのは**直前の 1 回**だけ)。
+   * 🔴 `tagColors` = この取り込みでタグの色も足したか(#1087)。取り消しが戻すのはノートだけで、
+   *   足した色は**残る** ── 「戻した」と言い切らず、残ることを言う。
+   */
+  remember(lids: readonly string[], opts?: { readonly tagColors?: boolean }): void;
   /** いま出せる操作(無ければ null)。 */
   pending(): NoticeAction | null;
   /** ごみ箱へ入れる。⚠ 2 度押しても 2 度は走らない。 */
@@ -61,16 +65,20 @@ export interface ImportUndo {
 
 export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
   let lids: readonly string[] = [];
+  let colorsKept = false;
   return {
-    remember(next) {
+    remember(next, opts) {
       lids = [...next];
+      colorsKept = opts?.tagColors === true;
     },
     pending() {
       if (lids.length === 0) return null;
       return {
         label: '取り込みを取り消す',
         action: 'undo-import',
-        title: `いま取り込んだ ${lids.length} 件をゴミ箱へ入れます(ゴミ箱から戻せます)`,
+        title:
+          `いま取り込んだ ${lids.length} 件をゴミ箱へ入れます(ゴミ箱から戻せます)` +
+          (colorsKept ? '。取り込んだタグの色は残ります' : ''),
       };
     },
     undo() {
@@ -89,7 +97,11 @@ export function createImportUndo(deps: ImportUndoDeps): ImportUndo {
       // ⚠ **先に忘れる** ── 帯や面の更新で例外が出ても、2 度目の取り消しを残さない
       lids = [];
       deps.clear();
-      deps.notify('取り込んだ分をゴミ箱へ入れました。ゴミ箱から戻せます');
+      deps.notify(
+        '取り込んだ分をゴミ箱へ入れました。ゴミ箱から戻せます' +
+          (colorsKept ? '(取り込んだタグの色は残ります)' : ''),
+      );
+      colorsKept = false;
     },
   };
 }

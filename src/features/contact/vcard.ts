@@ -28,6 +28,7 @@
  * 参照する(取込が書く鍵と、連絡先タブが読む鍵を 2 か所にしない ── §7)。
  */
 import { serializeFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { foldBreaks, importTitleOf } from '../import/fold-breaks';
 import { CONTACT_KEYS, type ContactCard } from './contact-card';
 
 /** 取込の振り分けが見る拡張子(`isMarkdownFileName` と同じ作法 ── 中身では決めない)。 */
@@ -78,7 +79,19 @@ interface QpResult {
   readonly broken: boolean;
 }
 
-function decodeQp(v: string): QpResult {
+/**
+ * パラメタから `CHARSET=` の値を取る(大文字化済みの params を受ける)。無ければ null。
+ * 🔴 古い日本の携帯電話の vCard は `FN;CHARSET=SHIFT_JIS;ENCODING=QUOTED-PRINTABLE:=8F=ED…` と書く ──
+ *   QP を解いたバイト列は Shift_JIS で、UTF-8 として読むと `�` になっていた(#1087)。
+ */
+function charsetOf(params: readonly string[]): string | null {
+  for (const p of params) {
+    if (p.startsWith('CHARSET=')) return p.slice('CHARSET='.length).replace(/^"|"$/g, '').trim() || null;
+  }
+  return null;
+}
+
+function decodeQp(v: string, charset: string | null = null): QpResult {
   /**
    * 行末の `=`(ソフト改行)は折り返しの名残 ── 落とす。
    * ⚠ かつてここに `.replace(/=\r?\n/g, '')` も置いていたが、**no-op だった**
@@ -102,7 +115,16 @@ function decodeQp(v: string): QpResult {
     }
   }
   try {
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
+    // ⚠ 知らない文字コードの名前は `TextDecoder` が RangeError を投げる ── UTF-8 のまま読み、壊れの判定(下)に任せる
+    let decoder: TextDecoder | null = null;
+    if (charset !== null) {
+      try {
+        decoder = new TextDecoder(charset, { fatal: false });
+      } catch {
+        decoder = null;
+      }
+    }
+    const text = (decoder ?? new TextDecoder('utf-8', { fatal: false })).decode(new Uint8Array(bytes));
     // ⚠ `fatal: false` は読めないバイトを U+FFFD にする ── **それも壊れの印**
     return { text, broken: broken || text.includes('\uFFFD') };
   } catch {
@@ -276,13 +298,13 @@ const STRUCTURED: ReadonlySet<string> = new Set(['ADR', 'GENDER', 'CLIENTPIDMAP'
 
 function readableParts(raw: string): string {
   return splitUnescaped(raw, ';')
-    .map((x) => unescapeValue(x).trim())
+    .map((x) => foldBreaks(unescapeValue(x)).trim())
     .filter(Boolean)
     .join(' ');
 }
 
 function nameFromN(value: string): string {
-  const comps = splitUnescaped(value, ';').map((c) => unescapeValue(c).trim());
+  const comps = splitUnescaped(value, ';').map((c) => foldBreaks(unescapeValue(c)).trim());
   return [comps[0] ?? '', comps[1] ?? ''].filter(Boolean).join(' ').trim();
 }
 
@@ -332,7 +354,8 @@ function isEmptyCard(cur: VcfDraft): boolean {
 function finishCard(cur: VcfDraft): VcfCard {
   return {
     // 🔴 題名は 1 行(#1087)── FN に `\n` を書いた .vcf の改行がそのままノートの題名に入ると、一覧・書き出しの 1 行が割れる
-    name: (cur.fn !== '' ? cur.fn : cur.n).replace(/\s*[\r\n]+\s*/g, ' ').trim(),
+    // 🔴 同じ口(`importTitleOf`)を md の題名と共有する ── 改行の類を畳み、200 字で切る(#1087)
+    name: importTitleOf(cur.fn !== '' ? cur.fn : cur.n),
     orgParts: cur.orgParts,
     tels: cur.tels,
     emails: cur.emails,
@@ -395,14 +418,19 @@ export function parseVcf(text: string): VcfParseResult {
     if (cur === null) continue;
 
     const qp = prop.params.some((p) => p === 'ENCODING=QUOTED-PRINTABLE' || p === 'QUOTED-PRINTABLE');
-    const qpOut = qp ? decodeQp(prop.value) : null;
+    const qpOut = qp ? decodeQp(prop.value, charsetOf(prop.params)) : null;
     if (qpOut?.broken === true && !cur.qpSaid) {
       cur.qpSaid = true;
       warnings.push(
         `${cardNo()} 枚目: 文字を正しく読み取れない所がありました(元の .vcf の書き方が古いのかもしれません)`,
       );
     }
-    const decoded = unescapeValue(qpOut?.text ?? prop.value).trim();
+    const rawDecoded = unescapeValue(qpOut?.text ?? prop.value).trim();
+    /**
+     * 🔴 **1 行の項目は改行を畳む**(#1087)── `\n` が本当の改行になると、外の file の字で本文に新しい行
+     *   (`:::format{…}` など)を差し込める。⚠ NOTE だけは本文の文章なので畳まない(`rawDecoded`)。
+     */
+    const decoded = foldBreaks(rawDecoded);
     switch (prop.name) {
       case 'VERSION':
       case 'PRODID':
@@ -427,7 +455,7 @@ export function parseVcf(text: string): VcfParseResult {
         // 🔴 **繋がずに持つ**(#534 段②)── `;` は会社と部署の区切りなので、
         //    ここで空白に潰すと書き出しで部署が消える
         const parts = splitUnescaped(qpOut?.text ?? prop.value, ';')
-          .map((x) => unescapeValue(x).trim())
+          .map((x) => foldBreaks(unescapeValue(x)).trim())
           .filter(Boolean);
         if (cur.orgParts.length > 0 && parts.length > 0) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${parts.join(' ')}`);
         else if (cur.orgParts.length === 0) cur.orgParts = parts;
@@ -475,7 +503,7 @@ export function parseVcf(text: string): VcfParseResult {
         else if (cur.birthday === '') cur.birthday = decoded;
         break;
       case 'NOTE':
-        if (decoded !== '') cur.notes.push(decoded);
+        if (rawDecoded !== '') cur.notes.push(rawDecoded);
         break;
       default: {
         const label = otherLabel(prop.name, prop.params);

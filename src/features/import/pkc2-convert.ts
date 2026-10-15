@@ -18,6 +18,8 @@
 import { errorText } from '@features/error-text';
 import { getFlavor } from '../flavor';
 import { RELATION_KINDS } from '@features/relation/kinds';
+import { spliceFrontmatterKeys } from '@features/markdown/frontmatter';
+import { MAX_TAGS, MAX_TAG_CHARS, normalizeTag, readTags, sameTag } from '@features/flavor/tags';
 import { replacePrefixed } from './body-remap';
 import {
   buildTextlogAnchorMap,
@@ -40,6 +42,12 @@ export interface ConvertedEntry {
   archetype: string;
   body: string;
   entryOrder: number;
+  /**
+   * PKC2 の作成・更新時刻(#1087)。形は DB の `datetime('now')` と同じ(`YYYY-MM-DD HH:MM:SS`、UTC)。
+   * 読めない / 無いときは null(= 取込時の今 ── 時刻は捏造しない)。
+   */
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 /**
@@ -128,6 +136,39 @@ function validTimestamp(raw: string): string {
   return raw !== '' && !Number.isNaN(Date.parse(raw)) ? raw : '';
 }
 
+/**
+ * PKC2 の ISO 時刻 → DB の刻み(`YYYY-MM-DD HH:MM:SS`、UTC)。読めなければ null。
+ * ⚠ 形を揃えるのは、画面の日付が `Z` 無しを UTC と読む規則(`datetime/stored-date.ts`)に乗るため。
+ */
+function toStoredStamp(v: unknown): string | null {
+  if (typeof v !== 'string' || v === '') return null;
+  const ms = Date.parse(v);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * PKC2 の `tags`(文字列の配列)を、PKC3 のタグの規則(frontmatter の `tags:`)に通す。
+ * 長すぎる・多すぎるぶんは落とし、その数を返す(黙って落とさない)。
+ */
+function pkc2Tags(raw: unknown, own: readonly string[]): { tags: string[]; dropped: number } {
+  const out = [...own];
+  let dropped = 0;
+  if (!Array.isArray(raw)) return { tags: out, dropped };
+  for (const v of raw) {
+    if (typeof v !== 'string') continue;
+    const t = normalizeTag(v);
+    if (t === '') continue;
+    if (out.some((x) => sameTag(x, t))) continue;
+    if ([...t].length > MAX_TAG_CHARS || out.length >= MAX_TAGS) {
+      dropped++;
+      continue;
+    }
+    out.push(t);
+  }
+  return { tags: out, dropped };
+}
+
 /** 注意の中で、ノートを指す字。ID ではなく題名で言う(題名が無ければ「題名の無いノート」)。 */
 function noteLabel(title: string): string {
   return title === '' ? '題名の無いノート' : `「${title}」`;
@@ -155,16 +196,39 @@ export function convertPkc2Container(
   const assetsIn = c.assets && typeof c.assets === 'object' ? c.assets : {};
 
   // ── ⑥ user entry の選別(system entries は変換しない)
-  const users: Array<{ lid: string; title: string; archetype: string; body: string }> =
-    [];
+  const users: Array<{
+    lid: string;
+    title: string;
+    archetype: string;
+    body: string;
+    tags: unknown;
+    createdAt: string | null;
+    updatedAt: string | null;
+  }> = [];
+  let noLid = 0;
+  let colored = 0;
   for (const raw of rawEntries) {
     const e = raw as Record<string, unknown>;
     const lid = str(e.lid);
     const archetype = str(e.archetype, 'text');
-    if (lid === '') continue;
     if (RESERVED_LID.test(lid) || archetype.startsWith('system-')) continue;
-    users.push({ lid, title: str(e.title), archetype, body: str(e.body) });
+    // 🔴 ID の無いノートは黙って捨てない(#1087)── 件数を言う
+    if (lid === '') {
+      noLid++;
+      continue;
+    }
+    if (typeof e.color_tag === 'string' && e.color_tag !== '') colored++;
+    users.push({
+      lid,
+      title: str(e.title),
+      archetype,
+      body: str(e.body),
+      tags: e.tags,
+      createdAt: toStoredStamp(e.created_at),
+      updatedAt: toStoredStamp(e.updated_at),
+    });
   }
+  if (noLid > 0) warnings.push(`${noLid} 件のノートは ID が無かったので取り込めませんでした`);
 
   // ── ① lid 衝突の再採番。
   // ⚠ 判定は **entry の出現ごと**に行う(review L-15)── lid を key にした Map
@@ -176,7 +240,10 @@ export function convertPkc2Container(
   for (const u of users) {
     if (taken.has(u.lid)) {
       const next = opts.genLid();
-      if (!lidMap.has(u.lid)) lidMap.set(u.lid, next);
+      // 🔴 本文の `entry:<lid>` を付け替えるのは **既存のノートと重なったとき**だけ(#1087)。
+      //   ファイルの中で同じ ID が 2 つ並んでいたら、最初の 1 件がその ID のまま残り、リンクもそれを指す
+      //   (2 件目へ向けると、最初のノートへのリンクが全部 2 件目に化ける)
+      if (opts.existingLids.has(u.lid) && !lidMap.has(u.lid)) lidMap.set(u.lid, next);
       taken.add(next);
       finalLidAt.push(next);
       relabeledLids++;
@@ -332,13 +399,29 @@ export function convertPkc2Container(
     return body;
   };
 
-  const entries: ConvertedEntry[] = users.map((u, i) => ({
-    lid: finalLidAt[i]!,
-    title: u.title,
-    archetype: u.archetype,
-    body: convertBody(u, finalLidAt[i]!, u.body, false),
-    entryOrder: 0, // 下で採番
-  }));
+  // ⚠ タグは **tip の本文だけ**に書く(履歴の版には書かない ── 古い版に今のタグを遡って付けない)
+  let tagsDropped = 0;
+  const entries: ConvertedEntry[] = users.map((u, i) => {
+    let body = convertBody(u, finalLidAt[i]!, u.body, false);
+    const { tags, dropped } = pkc2Tags(u.tags, readTags(body));
+    tagsDropped += dropped;
+    if (tags.length > readTags(body).length) body = spliceFrontmatterKeys(body, { tags });
+    return {
+      lid: finalLidAt[i]!,
+      title: u.title,
+      archetype: u.archetype,
+      body,
+      entryOrder: 0, // 下で採番
+      createdAt: u.createdAt,
+      updatedAt: u.updatedAt,
+    };
+  });
+  if (tagsDropped > 0) {
+    warnings.push(`長すぎる、または多すぎるタグ ${tagsDropped} 個は付けませんでした(1 つ ${MAX_TAG_CHARS} 字まで、1 ノート ${MAX_TAGS} 個まで)`);
+  }
+  if (colored > 0) {
+    warnings.push(`${colored} 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)`);
+  }
 
   // ── ⑥ entry_order: meta.entry_order(旧 lid 列)優先、無ければ配列順
   const orderSpec = Array.isArray(c.meta?.entry_order)
@@ -362,6 +445,10 @@ export function convertPkc2Container(
   // 同じファイルを 2 回取り込むと 1 回目の関連が disk から消え、PKC2 の relation に
   // id が無ければ全部 '' で衝突して 1 本しか残らない(どちらも実証済み)
   const takenRelIds = new Set(opts.existingRelationIds ?? []);
+  // 🔴 つながりの注意は 1 本ずつ並べない ── 理由ごとに件数の 1 行へまとめる(#1087)
+  const danglingRel: string[] = [];
+  const unknownKindRel: string[] = [];
+  const unknownKinds = new Set<string>();
   const genRelationId =
     opts.genRelationId ?? (() => `rel-${Math.random().toString(36).slice(2, 10)}`);
   for (const raw of Array.isArray(c.relations) ? c.relations : []) {
@@ -376,17 +463,12 @@ export function convertPkc2Container(
     };
     if (!lids.has(from) || !lids.has(to)) {
       const there = titleOf(lids.has(from) ? from : to);
-      warnings.push(
-        there !== null
-          ? `${there}から、つなぐ先のノートが無いつながりを除きました`
-          : 'つなぐ先のノートが無いつながりを除きました',
-      );
+      danglingRel.push(there ?? '');
       continue;
     }
     if (!KNOWN_RELATION_KINDS.has(kind)) {
-      warnings.push(
-        `${titleOf(from) ?? 'ノート'}と${titleOf(to) ?? 'ノート'}の間の、種類の分からないつながり(${kind})を除きました`,
-      );
+      unknownKindRel.push(`${titleOf(from) ?? 'ノート'}と${titleOf(to) ?? 'ノート'}`);
+      unknownKinds.add(kind);
       continue;
     }
     let id = str(r.id);
@@ -399,6 +481,23 @@ export function convertPkc2Container(
     }
     takenRelIds.add(id);
     relations.push({ id, fromLid: from, toLid: to, kind });
+  }
+
+  if (danglingRel.length > 0) {
+    const first = danglingRel.find((t) => t !== '');
+    warnings.push(
+      danglingRel.length === 1 && first !== undefined
+        ? `${first}から、つなぐ先のノートが無いつながりを除きました`
+        : `つなぐ先のノートが無いつながり ${danglingRel.length} 本を除きました`,
+    );
+  }
+  if (unknownKindRel.length > 0) {
+    const kinds = [...unknownKinds].join('、');
+    warnings.push(
+      unknownKindRel.length === 1
+        ? `${unknownKindRel[0]}の間の、種類の分からないつながり(${kinds})を除きました`
+        : `種類の分からないつながり ${unknownKindRel.length} 本(${kinds})を除きました`,
+    );
   }
 
   // ── 履歴(user 裁定 2026-08-01「revisions の考え方は持ち込む」)。

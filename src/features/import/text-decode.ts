@@ -10,27 +10,54 @@
  * ⚠ 純関数(`TextDecoder` だけを使う)。
  */
 export function decodeImportText(bytes: Uint8Array): string {
+  return decodeImportTextInfo(bytes).text;
+}
+
+/**
+ * どの文字コードで読んだか。
+ * 🔴 `'sjis'` は**推測**である ── UTF-8 として読めなかった file を Shift_JIS で**エラー無く**読めても、
+ *   Windows-1252 の `école` のような字が**別の漢字に化けて**読めることがある(黙っては気づけない)。
+ *   呼ぶ側は `'sjis'` のときだけ `SJIS_GUESS_NOTE` を user に言う。
+ */
+export type ImportTextEncoding = 'utf8' | 'utf16' | 'sjis';
+
+export interface ImportTextDecoded {
+  readonly text: string;
+  readonly used: ImportTextEncoding;
+}
+
+/**
+ * Markdown / vCard の取り込みで読む 1 file の上限(予定表 .ics の `ICS_IMPORT_MAX_BYTES` と同じ 8 MB)。
+ * 🔑 手違いで巨大な file を選んだとき、全部を文字列にしてからでは遅い ── 読む前に `file.size` で断る。
+ */
+export const IMPORT_TEXT_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Shift_JIS と**判断して**読んだときに user へ言う 1 行(取り込み時の注意の面へ出す)。 */
+export const SJIS_GUESS_NOTE =
+  '文字コードを Shift_JIS と判断して読みました(文字が崩れて見えるときは、UTF-8 で保存し直して取り込んでください)';
+
+export function decodeImportTextInfo(bytes: Uint8Array): ImportTextDecoded {
   if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return new TextDecoder('utf-8').decode(bytes.subarray(3));
+    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), used: 'utf8' };
   }
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+    return { text: new TextDecoder('utf-16le').decode(bytes.subarray(2)), used: 'utf16' };
   }
   if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+    return { text: new TextDecoder('utf-16be').decode(bytes.subarray(2)), used: 'utf16' };
   }
   const bomless = utf16WithoutBom(bytes);
-  if (bomless !== null) return new TextDecoder(bomless).decode(bytes);
+  if (bomless !== null) return { text: new TextDecoder(bomless).decode(bytes), used: 'utf16' };
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), used: 'utf8' };
   } catch {
     /* UTF-8 ではない ── 下で Shift_JIS を試す */
   }
   try {
-    return new TextDecoder('shift_jis', { fatal: true }).decode(bytes);
+    return { text: new TextDecoder('shift_jis', { fatal: true }).decode(bytes), used: 'sjis' };
   } catch {
     // どちらでも読み切れない ── 直す前と同じ読み(読めない字は `�`)にする
-    return new TextDecoder('utf-8').decode(bytes);
+    return { text: new TextDecoder('utf-8').decode(bytes), used: 'utf8' };
   }
 }
 
@@ -57,5 +84,10 @@ function utf16WithoutBom(bytes: Uint8Array): 'utf-16le' | 'utf-16be' | null {
 
 /** `File` / `Blob` から読む口(取り込みの 3 経路が通る 1 本)。 */
 export async function readImportText(file: Blob): Promise<string> {
-  return decodeImportText(new Uint8Array(await file.arrayBuffer()));
+  return (await readImportTextInfo(file)).text;
+}
+
+/** `readImportText` と同じ読み方で、使った文字コードも返す口(注意を出したい取り込みが使う)。 */
+export async function readImportTextInfo(file: Blob): Promise<ImportTextDecoded> {
+  return decodeImportTextInfo(new Uint8Array(await file.arrayBuffer()));
 }

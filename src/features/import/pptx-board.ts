@@ -37,6 +37,7 @@ import {
   PRST_OF,
 } from '../export/pptx';
 import { parseXml, textOf, walk, type XmlNode } from '../export/xml-lite';
+import { foldBreaks } from './fold-breaks';
 import {
   nearestPlaceSize,
   parsePlaceColor,
@@ -146,11 +147,6 @@ function escapeLine(s: string): string {
   const ws = m?.[1] ?? '';
   const rest = m?.[2] ?? s;
   return /^(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|:::|\x60{3}|~~~|-{3,}\s*$|\+{3,}\s*$)/.test(rest) ? `${ws}\\${rest}` : s;
-}
-
-/** 改行の類(`\r \n` / NEL / 行区切り / 段落区切り / `\v \f`)を空白 1 つにする。 */
-function foldBreaks(s: string): string {
-  return s.replace(/[\r\n\u0085\u2028\u2029\v\f]+/g, ' ');
 }
 
 /** `<a:p>` 1 つ → markdown の 1 行。 */

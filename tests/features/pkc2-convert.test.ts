@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { parseFrontmatter } from '../../src/features/markdown/frontmatter';
+import { readTags } from '../../src/features/flavor/tags';
 import {
   convertPkc2Container,
   remapAssetKeys,
@@ -380,5 +381,147 @@ describe('convertPkc2Container (P6a)', () => {
       opts(),
     );
     expect(r2.warnings.some((w) => w.includes('thumbnail_asset_key'))).toBe(true);
+  });
+});
+
+describe('タグ・日時・色の取り込み(#1087)', () => {
+  const one = (extra: Record<string, unknown>, body = '本文') => ({
+    entries: [{ lid: 'n1', title: '題', archetype: 'text', body, ...extra }],
+  });
+
+  it('🔴 tags は frontmatter の tags: に入り、PKC3 のタグとして読める(順序を保つ・重複と空は除く)', () => {
+    const r = convertPkc2Container(one({ tags: ['請求', ' 家事 ', '請求', '', '家事'] }), opts());
+    expect(readTags(r.entries[0]!.body)).toEqual(['請求', '家事']);
+    expect(r.entries[0]!.body.endsWith('本文')).toBe(true);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('本文に既に tags: があれば、そこへ足す(置き換えない)', () => {
+    const r = convertPkc2Container(one({ tags: ['b', 'A'] }, '---\ntags: [a]\n---\n本文'), opts());
+    expect(readTags(r.entries[0]!.body)).toEqual(['a', 'b']);
+  });
+
+  it('対照群: tags が無い・空のノートは本文を 1 字も変えない', () => {
+    const none = convertPkc2Container(one({}), opts());
+    const empty = convertPkc2Container(one({ tags: [] }), opts());
+    expect(none.entries[0]!.body).toBe('本文');
+    expect(empty.entries[0]!.body).toBe('本文');
+  });
+
+  it('長すぎる・多すぎるタグは付けず、数を 1 行で言う', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `t${i}`);
+    const r = convertPkc2Container(one({ tags: ['x'.repeat(41), ...many] }), opts());
+    expect(readTags(r.entries[0]!.body)).toHaveLength(32);
+    const line = r.warnings.filter((w) => w.includes('タグ'));
+    expect(line).toHaveLength(1);
+    expect(line[0]).toContain('9 個'); // 長い 1 + 溢れた 8(40 - 32)
+  });
+
+  it('🔴 created_at / updated_at は DB の刻み(UTC・秒)で運ぶ。読めない・無いなら null', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: '', created_at: '2026-01-02T03:04:05.678Z', updated_at: '2026-02-03T04:05:06+09:00' },
+          { lid: 'b', title: 'b', archetype: 'text', body: '', created_at: 'not a date' },
+          { lid: 'c', title: 'c', archetype: 'text', body: '' },
+        ],
+      },
+      opts(),
+    );
+    const by = (l: string) => r.entries.find((e) => e.lid === l)!;
+    expect([by('a').createdAt, by('a').updatedAt]).toEqual(['2026-01-02 03:04:05', '2026-02-02 19:05:06']);
+    expect([by('b').createdAt, by('b').updatedAt]).toEqual([null, null]);
+    expect([by('c').createdAt, by('c').updatedAt]).toEqual([null, null]);
+  });
+
+  it('color_tag は運べないので、件数を 1 行で言う(無いノートは数えない)', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'a', title: 'a', archetype: 'text', body: '', color_tag: 'red' },
+          { lid: 'b', title: 'b', archetype: 'text', body: '', color_tag: 'blue' },
+          { lid: 'c', title: 'c', archetype: 'text', body: '', color_tag: null },
+        ],
+      },
+      opts(),
+    );
+    expect(r.warnings.filter((w) => w.includes('カラータグ'))).toEqual([
+      '2 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)',
+    ]);
+  });
+});
+
+describe('ID の扱いと注意のまとめ(#1087)', () => {
+  it('🔴 ID の無いノートは黙って捨てず、件数を言う', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: '', title: 'a', archetype: 'text', body: '' },
+          { title: 'b', archetype: 'text', body: '' },
+          { lid: 'ok', title: 'c', archetype: 'text', body: '' },
+        ],
+      },
+      opts(),
+    );
+    expect(r.entries.map((e) => e.lid)).toEqual(['ok']);
+    expect(r.warnings).toContain('2 件のノートは ID が無かったので取り込めませんでした');
+  });
+
+  it('🔴 ファイルの中で ID が重なったら、最初の 1 件がその ID のまま残り、リンクも最初を指す', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'X', title: '一つ目', archetype: 'text', body: '' },
+          { lid: 'X', title: '二つ目', archetype: 'text', body: '' },
+          { lid: 'L', title: 'リンク', archetype: 'text', body: '[a](entry:X)' },
+        ],
+      },
+      opts(),
+    );
+    const by = (t: string) => r.entries.find((e) => e.title === t)!;
+    expect(by('一つ目').lid).toBe('X');
+    expect(by('二つ目').lid).toBe('new-1');
+    expect(by('リンク').body).toBe('[a](entry:X)');
+    expect(r.warnings).toContain('1 件のノートは ID が重なっていたので付け直しました');
+  });
+
+  it('対照群: 既存のノートと重なったときは、リンクを新しい ID へ付け替える(最初の出現へ)', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'X', title: '一つ目', archetype: 'text', body: '' },
+          { lid: 'X', title: '二つ目', archetype: 'text', body: '' },
+          { lid: 'L', title: 'リンク', archetype: 'text', body: '[a](entry:X)' },
+        ],
+      },
+      opts(['X']),
+    );
+    const by = (t: string) => r.entries.find((e) => e.title === t)!;
+    expect(by('一つ目').lid).toBe('new-1');
+    expect(by('二つ目').lid).toBe('new-2');
+    expect(by('リンク').body).toBe('[a](entry:new-1)');
+  });
+
+  it('🔴 つながりの注意は理由ごとに件数の 1 行(1 本ずつ並べない)', () => {
+    const r = convertPkc2Container(
+      {
+        entries: [
+          { lid: 'a', title: 'A', archetype: 'text', body: '' },
+          { lid: 'b', title: 'B', archetype: 'text', body: '' },
+        ],
+        relations: [
+          { id: '1', from: 'a', to: 'gone1', kind: 'structural' },
+          { id: '2', from: 'a', to: 'gone2', kind: 'structural' },
+          { id: '3', from: 'b', to: 'gone3', kind: 'structural' },
+          { id: '4', from: 'a', to: 'b', kind: 'weird' },
+          { id: '5', from: 'b', to: 'a', kind: 'odd' },
+        ],
+      },
+      opts(),
+    );
+    expect(r.warnings).toEqual([
+      'つなぐ先のノートが無いつながり 3 本を除きました',
+      '種類の分からないつながり 2 本(weird、odd)を除きました',
+    ]);
   });
 });

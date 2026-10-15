@@ -275,3 +275,32 @@ describe('復元 — 作成・更新時刻と system 領域の lid (#1087)', () 
     expect(got.entries.map((e) => e.lid), 'system の lid のまま取り込まれる').toEqual(['new-1', 'new-2', 'n1']);
   });
 });
+
+describe('注意のまとめ(#1087)', () => {
+  it('🔴 付け替えた ID は旧→新の対で並べず、件数の 1 行で言う(内部の ID を出さない)', () => {
+    const got = restoreArchive(
+      archive({ entries: [entry('s1'), entry('s2'), entry('s3')] }),
+      opts({ existingLids: new Set(['s1', 's2']) }),
+    );
+    expect(got.warnings.filter((w) => w.includes('付け直し'))).toEqual([
+      '2 件のノートは ID が重なっていたので付け直しました',
+    ]);
+    expect(got.warnings.join('\n')).not.toMatch(/s1|s2|new-/);
+  });
+
+  it('バックアップの中で ID が重なったノートも、同じ 1 行に数える。重ならなければ行は出ない', () => {
+    const dup = restoreArchive(archive({ entries: [entry('d'), entry('d')] }), opts());
+    expect(dup.warnings).toEqual(['1 件のノートは ID が重なっていたので付け直しました']);
+    const clean = restoreArchive(archive({ entries: [entry('p'), entry('q')] }), opts());
+    expect(clean.warnings).toEqual([]);
+  });
+
+  it('つなぐ先の無いつながりが複数なら件数の 1 行', () => {
+    const rel = (id: string, to: string) => ({ id, fromLid: 'a', toLid: to, kind: 'structural', createdAt: null, updatedAt: null });
+    const got = restoreArchive(
+      archive({ entries: [entry('a')], relations: [rel('1', 'x'), rel('2', 'y')] }),
+      opts(),
+    );
+    expect(got.warnings).toEqual(['つなぐ先のノートが無いつながり 2 本を除きました']);
+  });
+});

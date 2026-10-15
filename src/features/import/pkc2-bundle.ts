@@ -69,6 +69,15 @@ export interface BundleMain {
   title: string;
   archetype: string;
   body: string;
+  /**
+   * `.entry.zip` の entry.json にだけ在るメタ(#1087)。そのまま合成 container の entry に載せ、
+   * 取り込みの変換(`pkc2-convert.ts`)が container 取り込みと**同じ規則**で扱う
+   * (tags → frontmatter、日時 → 作成・更新時刻、color_tag → 件数の注意)。
+   */
+  tags?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+  color_tag?: unknown;
 }
 
 /** bundle 1 個ぶんの中身(batch はこれを集めて 1 個の container に畳む)。 */

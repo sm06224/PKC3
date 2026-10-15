@@ -28,6 +28,7 @@ import {
   type ReadableAssetSource,
 } from '../import/zip-reader';
 import { createWarnCollector, type WarnCollector } from './warn-cap';
+import { isTooLargeToRead } from '../import/too-large';
 import { MAX_EMBED_TEXT_CHARS, notImportableArchiveMessage } from '../storage/image-export-limit';
 import { parseTagColorList, type TagColorEntry } from '../tag-color';
 
@@ -413,7 +414,8 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   try {
     manifest = JSON.parse(await readZipText(zip, only(MANIFEST))) as Pkc3Archive['manifest'];
   } catch (e) {
-    if (e instanceof ZipReadError) throw e;
+    // 🔴 大きすぎて文字列にできないのは「JSON として読めない」ではない ── そのまま上へ(取り込みの口が平らな字で言う。#1087)
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     throw new ZipReadError(`構成定義(${MANIFEST})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   checkArchiveManifest(manifest);
@@ -422,7 +424,8 @@ export async function readArchive(zip: Blob): Promise<Pkc3Archive> {
   try {
     c = JSON.parse(await readZipText(zip, only(CONTAINER))) as ArchiveContainerJson;
   } catch (e) {
-    if (e instanceof ZipReadError) throw e;
+    // 🔴 大きすぎて文字列にできないのは「JSON として読めない」ではない ── そのまま上へ(取り込みの口が平らな字で言う。#1087)
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     throw new ZipReadError(`バックアップの中のノートのデータ(${CONTAINER})を読み取れません(JSON として読めません)。別のバックアップファイルを選んでください`);
   }
   checkArchiveContainer(c); // ⚠ 添付の目録(下)より先に断る ── 断る順番は変えない
@@ -596,26 +599,20 @@ export function restoreArchive(
   warnings: string[];
 } {
   const warnings = [...archive.warnings];
-  const warn = createWarnCollector(warnings);
   const taken = new Set(opts.existingLids);
+  // 🔴 ID の付け替えとつながりの除外は、1 件ずつ並べず**理由ごとの件数 1 行**にまとめる(#1087)。
+  //   ⚠ 旧 ID → 新 ID の対は出さない(内部の ID は user には直しようが無い)。
+  //   文は PKC2 の取込(`pkc2-convert.ts`)と同じ。
+  let relabeled = 0;
+  const danglingTitles: string[] = [];
   const lidMap = new Map<string, string>();
-  // 🔴 **アーカイブ内の lid 重複を先に言う**(review H-3)── 後勝ちで lidMap が
-  // 上書きされると、relation の端点が原本ではなく**複製**に付け替わる。
-  // 重複は本来 writer 側で起きない(H-1/H-2 を直した)が、手で組んだ / 壊れた
-  // アーカイブでは来る
-  const seenLid = new Set<string>();
-  for (const e of archive.entries) {
-    if (seenLid.has(e.lid)) {
-      warn.add('dup-lid', 'バックアップの中で重複した ID', `バックアップの中で ID が重複しています: ${e.lid}(別のノートとして取り込みます)`);
-    }
-    seenLid.add(e.lid);
-  }
-
+  // ⚠ アーカイブ内の lid 重複(review H-3)は writer 側では起きない(H-1/H-2 を直した)が、手で組んだ /
+  //   壊れたアーカイブでは来る。2 件目以降も下の付け替えで `relabeled` に数える。
   const entries = archive.entries.map((e, i) => {
     let lid = e.lid;
     if (lid === '' || taken.has(lid)) {
       const fresh = opts.genLid();
-      warn.add('lid-clash', '付け替えた ID', `ID が既存と衝突したので付け替えました: ${e.lid || '(空)'} → ${fresh}`);
+      relabeled++;
       lid = fresh;
     }
     taken.add(lid);
@@ -643,13 +640,7 @@ export function restoreArchive(
       // 端点が居ない = アーカイブが壊れている ── 黙って落とさない
       // 🔴 内部の ID ではなく、残っている側のノートの題名で言う(#1087)
       const there = archive.entries.find((e) => e.lid === (from ? r.fromLid : r.toLid));
-      warn.add(
-        'dangling-relation',
-        'つなぐ先のノートが無いつながり',
-        there && (from || to)
-          ? `「${there.title || '(無題)'}」から、つなぐ先のノートが無いつながりを除きました`
-          : 'つなぐ先のノートが無いつながりを除きました',
-      );
+      danglingTitles.push(there && (from || to) ? `「${there.title || '(無題)'}」` : '');
       continue;
     }
     let id = r.id;
@@ -701,7 +692,15 @@ export function restoreArchive(
     mime: mimeOf.get(key) ?? 'application/octet-stream',
   }));
 
-  warn.finish();
+  if (relabeled > 0) warnings.push(`${relabeled} 件のノートは ID が重なっていたので付け直しました`);
+  if (danglingTitles.length > 0) {
+    const only = danglingTitles[0]!;
+    warnings.push(
+      danglingTitles.length === 1 && only !== ''
+        ? `${only}から、つなぐ先のノートが無いつながりを除きました`
+        : `つなぐ先のノートが無いつながり ${danglingTitles.length} 本を除きました`,
+    );
+  }
   const lidRemap: Array<readonly [string, string]> = [];
   for (const [from, to] of lidMap) if (from !== to) lidRemap.push([from, to]);
   return { entries, relations, assets, revisionChains, tagColors: archive.tagColors, lidRemap, warnings };

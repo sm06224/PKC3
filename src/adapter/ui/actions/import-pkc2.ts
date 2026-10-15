@@ -13,7 +13,7 @@
 import { errorText } from '@features/error-text';
 import { failImport } from './import-failure';
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { phaseBlockReason } from '@adapter/state/app-state';
+import { hasUnsavedTyping, phaseBlockReason, SECTION_DRAFT_NOTE } from '@adapter/state/app-state';
 import {
   duplicateNote,
   findDuplicates,
@@ -69,6 +69,7 @@ import { extractMeta } from '@features/flavor';
 import { PORTABLE_SNIFF_BYTES } from '@features/import/portable-html';
 import { portableHtmlToArchive, type ReadImageArchive } from './import-portable';
 import { NOT_PKC_ZIP_REFUSAL, isImportRefusal, unreadableZipMessage } from '@features/import/refusal-text';
+import { TOO_LARGE_TO_READ_REFUSAL, isTooLargeToRead } from '@features/import/too-large';
 
 export interface ImportDeps {
   /**
@@ -178,7 +179,7 @@ export interface ImportDeps {
    * ⚠ `focus` と同じ理由で **md 経路だけ**が呼ぶ ── PKC2 の container 取込は
    *    ファイルと entry が 1:1 でないので、順で結べない。
    */
-  imported?(lids: readonly string[]): void;
+  imported?(lids: readonly string[], opts?: { readonly tagColors?: boolean }): void;
   /**
    * ハッシュを取る上限(既定 `HASH_MAX_BYTES` = 64MB)。
    *
@@ -393,11 +394,27 @@ export async function importPkc2File(
     return failImport(dispatcher, deps, msg, undoable);
   };
   const reason = (e: unknown): string => errorText(e);
-  const phase = dispatcher.getState().phase;
+  /**
+   * 🔴 **章の欄が開いている間も断る**(#1087)── md / 連絡先 / 予定 / pptx の取り込みと**同じ判定**
+   *   (`hasUnsavedTyping`、断りの字も同じ)に揃える(§7)。章の欄は `phase` を `ready` のまま保つので、
+   *   `phase` だけ見ていると素通りして、打ちかけた字と取り込みが同時に走る。
+   * ⚠ 書く直前の再確認は足さない(他の取り込みも持っていない)。
+   */
+  const startState = dispatcher.getState();
+  if (hasUnsavedTyping(startState)) {
+    return fail(
+      startState.phase === 'editing'
+        ? `${phaseBlockReason(startState.phase)}取り込んでください`
+        : SECTION_DRAFT_NOTE,
+    );
+  }
+  const phase = startState.phase;
   if (phase !== 'ready') {
     return fail(`${phaseBlockReason(phase)}取り込んでください`);
   }
 
+  /** この取り込みでタグの色を 1 件でも足したか(取り消しが色を戻さないことを言うため)。 */
+  let colorsAdded = false;
   // 書込の到達点。失敗時に「どこまで書けたか」を user に言うために持つ ──
   // 「失敗しました」とだけ言って disk に残すと、素直な再取込が二重取込になる
   let entriesWritten = 0;
@@ -804,6 +821,7 @@ export async function importPkc2File(
         try {
           // ⚠ 戻せたときは黙る(「注意」に数えない)。付いている色を残した分は仕様どおり。上限で落ちた分は言う
           const r = await deps.importTagColors(colors);
+          if (r.added > 0) colorsAdded = true;
           if (r.overLimit > 0) {
             result.warnings.push(`上限のため ${r.overLimit} 件の色を戻せませんでした(色を付けられるタグは 500 個までです)`);
           }
@@ -815,7 +833,7 @@ export async function importPkc2File(
       // 書けた分は必ず画面へ出す ── 「失敗」と言いながら disk に残すのが最悪
       await deps.reload().catch(() => {});
       // 🔴 書けた分は戻せるようにする(片道にしない)── `report` より先に憶える
-      if (entriesWritten > 0) deps.imported?.(writtenLids);
+      if (entriesWritten > 0) deps.imported?.(writtenLids, { tagColors: colorsAdded });
       return fail(
         entriesWritten > 0
           ? `${entriesWritten} 件のノートまで取り込みました。${stage}の取り込みで失敗しました。もう一度取り込むと同じノートが二重になります(「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`
@@ -847,7 +865,7 @@ export async function importPkc2File(
      *   残っていると、それが出る**(押すと前の取り込み分が消える)。⚠ `report` より先に呼ぶ ──
      *   面の操作は `report` の中で `pending()` から組む。
      */
-    deps.imported?.(rows.map((r) => r.lid));
+    deps.imported?.(rows.map((r) => r.lid), { tagColors: colorsAdded });
     // ⚠ **全件を出す**(review H-2)。1 行の status には件数だけを載せ、中身は
     // 閉じるまで残る面へ ── notes[0] だけ出して残りを捨てるのは「可視化」ではない
     deps.report?.(notes);
@@ -863,11 +881,16 @@ export async function importPkc2File(
   } catch (e) {
     if (entriesWritten > 0) {
       await deps.reload().catch(() => {});
-      deps.imported?.(writtenLids);
+      deps.imported?.(writtenLids, { tagColors: colorsAdded });
       return fail(
         `${entriesWritten} 件のノートまで取り込みましたが、その後で失敗しました(もう一度取り込むと同じノートが二重になります。「取り込みを取り消す」で、取り込んだ分をゴミ箱へ入れられます): ${reason(e)}`,
         true,
       );
+    }
+    // 🔴 大きすぎて文字列にできなかった(`RangeError: Invalid string length`)── 英語の例外の字を出さず、平らな字で言う(#1087)
+    //   ⚠ 上限は決めない。読んでみて作れなかったときだけ。ノートは 1 件も書いていない(上の `entriesWritten > 0` で別に言う)
+    if (isTooLargeToRead(e)) {
+      return fail(`「${file.name}」: ${TOO_LARGE_TO_READ_REFUSAL}(ノートは 1 件も追加されていません)`);
     }
     // 🔑 対象外のファイルは壊れていない ── 「失敗しました」を前に付けず、断りとして出す(#1087)
     if (isImportRefusal(reason(e))) return fail(reason(e));
