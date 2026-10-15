@@ -237,6 +237,92 @@ describe('installScheduleDrag(#855 決1)', () => {
     expect(fireClick(group27), '動いたのに click が素通った').toBe(false);
   });
 
+  /**
+   * 🔴 長押しで掴んだ後に `pointerup` も `pointercancel` も来ない(アプリの切り替え・着信)と、
+   *   `armed` が残って次の押下を全部無視し、`touchmove` を止め続ける。3 つの合図で捨て、次の押下で掴み直せること。
+   */
+  describe('終わりの合図が来なかった掴みを捨てる', () => {
+    const touchMoveBlocked = (): boolean => {
+      const ev = new Event('touchmove', { bubbles: true, cancelable: true });
+      document.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    const regrabs = (): void => {
+      pressUntilArmed(card);
+      pointer(group27, 'pointermove', 'touch', 200, 200);
+      pointer(group27, 'pointerup', 'touch', 200, 200);
+      expect(dispatched.length, '掴み直せない').toBe(1);
+    };
+    const cases: Array<[string, () => void]> = [
+      ['visibilitychange(hidden)', () => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      }],
+      ['window blur', () => { window.dispatchEvent(new Event('blur')); }],
+      ['lostpointercapture', () => {
+        card.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 1 }));
+      }],
+    ];
+    for (const [name, fire] of cases) {
+      it(`🔴 掴んだ後に ${name} が来たら、掴みと光りと touchmove の阻止を捨て、次の押下で掴み直せる`, () => {
+        pressUntilArmed(card);
+        pointer(group27, 'pointermove', 'touch', 200, 200);
+        expect(group27.hasAttribute('data-pkc-dropping')).toBe(true);
+        expect(touchMoveBlocked(), '前提: 掴んでいる間は touchmove を止める').toBe(true);
+        fire();
+        expect(group27.hasAttribute('data-pkc-dropping'), '光りが残った').toBe(false);
+        expect(touchMoveBlocked(), 'スクロールが止まったまま').toBe(false);
+        regrabs();
+      });
+    }
+    it('🔴 合図が何も来なくても、新しい主の pointerdown が取り残しを捨てる(2 本目の指は捨てない)', () => {
+      pressUntilArmed(card);
+      // 2 本目(isPrimary=false)は捨てない ── 掴みは残る
+      document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 2, isPrimary: false }));
+      expect(touchMoveBlocked(), '2 本目の指が掴みを捨てさせた').toBe(true);
+      card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'touch', button: 0, pointerId: 3, isPrimary: true, clientX: 0, clientY: 0 }));
+      vi.advanceTimersByTime(LONG_PRESS_MS);
+      // 新しい押下で掴み直している ── 古い pointerId=1 の合図は無視され、新しい 3 で落とせる
+      pointer(group27, 'pointermove', 'touch', 200, 200, 3);
+      pointer(group27, 'pointerup', 'touch', 200, 200, 3);
+      expect(dispatched.length, '取り残しのせいで掴み直せない').toBe(1);
+    });
+    it('配線を解いたら、blur でも何も起きない(leak を残さない)', () => {
+      pressUntilArmed(card);
+      const removed: string[] = [];
+      // ⚠ 本物の removeEventListener も通す(通さないと古い配線が残って後続の it に漏れる)
+      const origWin = window.removeEventListener.bind(window);
+      const origDoc = document.removeEventListener.bind(document);
+      const spyWin = vi.spyOn(window, 'removeEventListener').mockImplementation((t: string, ...r: unknown[]) => {
+        removed.push(t);
+        (origWin as (...a: unknown[]) => void)(t, ...r);
+      });
+      const spyDoc = vi.spyOn(document, 'removeEventListener').mockImplementation((t: string, ...r: unknown[]) => {
+        removed.push(t);
+        (origDoc as (...a: unknown[]) => void)(t, ...r);
+      });
+      detach();
+      spyWin.mockRestore();
+      spyDoc.mockRestore();
+      // 外し漏れを pin する(掴みは dispose で捨てるので、挙動からは外し漏れが見えない)
+      expect(removed, 'window blur を外していない').toContain('blur');
+      expect(removed, 'visibilitychange を外していない').toContain('visibilitychange');
+      expect(removed, 'lostpointercapture を外していない').toContain('lostpointercapture');
+      expect(touchMoveBlocked()).toBe(false);
+      detach = installScheduleDrag(root, dispatcher);
+    });
+  });
+
+  /** 🔴 離した後に click が来なかったとき、後から来る無関係な click(キーボード)を飲まない。 */
+  it('🔴 掴んで離したのに click が来ないなら、次の click(キーボード)は飲まない', () => {
+    pressUntilArmed(card);
+    pointer(group27, 'pointermove', 'touch', 200, 200);
+    pointer(group27, 'pointerup', 'touch', 200, 200);
+    vi.advanceTimersByTime(1); // 離した直後の 1 手が過ぎた
+    expect(fireClick(group27), '古い掴みの click 飲みが残った').toBe(true);
+  });
+
   it('🔴 印(checkbox)の上からは掴まない ── 押せば普通にチェックが切り替わる', () => {
     expect(checkbox, '台の空振り(印が無い)').not.toBeNull();
     pressUntilArmed(checkbox!);

@@ -155,6 +155,30 @@ describe('長押しで印を足す(#687 D-1)', () => {
     expect(marks('left'), '窓が閉じても click を捨て続けている').toEqual(['a']);
   });
 
+  /**
+   * 🔴 ②b 長く押し続けてから離しても、離した click は捨てる(窓は発火からではなく**離した時点から**数える)。
+   *   発火から 700ms で閉じる作りだと、1.2 秒押した user の離した click が、開いたばかりのメニューの先頭へ着地する。
+   */
+  it('🔴 ②b 700ms より長く押し続けて離しても、離した直後の click は捨てる / 窓は離してから閉じる', () => {
+    click(row('left', 'a'));
+    pressFor(row('left', 'b'), LONG_PRESS_MS + LONG_PRESS_CONSUME_MS + 500); // 発火から 1.7 秒
+    pointer(row('left', 'b'), 'pointerup', 'touch');
+    const ev = click(row('left', 'b'));
+    expect(ev.defaultPrevented, '長く押した後の離した click を捨てていない').toBe(true);
+    expect(marks('left')).toEqual(['a', 'b']);
+    // 窓は離した時点から LONG_PRESS_CONSUME_MS 後に閉じる(その手前ではまだ開いている)
+    vi.advanceTimersByTime(LONG_PRESS_CONSUME_MS - 1);
+    expect(click(row('left', 'b')).defaultPrevented, '窓が早く閉じた').toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(click(row('left', 'a')).defaultPrevented, '窓が閉じない').toBe(false);
+    expect(marks('left')).toEqual(['a']);
+  });
+
+  it('🔴 ②c 押している間(まだ離していない)は、click を捨てる窓が開いている', () => {
+    pressFor(row('left', 'b'), LONG_PRESS_MS + 5000);
+    expect(click(row('left', 'b')).defaultPrevented, '押している間に窓が閉じた').toBe(true);
+  });
+
   it('🔴 ③ 10px を超えて動いたら発火しない(スクロールし始めた指)', () => {
     click(row('left', 'a'));
     pointer(row('left', 'b'), 'pointerdown', 'touch', 0, 0);
@@ -190,6 +214,8 @@ describe('長押しで印を足す(#687 D-1)', () => {
   it('🔴 ⑤ 捨てた click は 2 回押しの 1 回目に数えない', () => {
     pressFor(row('left', 'f1'), LONG_PRESS_MS);
     expect(marks('left'), '前提が崩れている').toEqual(['f1']);
+    // 離してから窓が数え始まる(押しっぱなしのままでは窓は閉じない)
+    pointer(row('left', 'f1'), 'pointerup', 'touch');
     click(row('left', 'f1')); // 捨てられる click
     vi.advanceTimersByTime(100);
     click(row('left', 'f1')); // ⚠ 捨てた click が 1 回目に数えられていると、ここで入る

@@ -477,7 +477,27 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
   let pending: Pending | null = null;
   let armed: Armed | null = null;
   let swallowClick = false;
+  let swallowTimer: ReturnType<typeof setTimeout> | null = null;
   let dropMark: HTMLElement | null = null;
+
+  /**
+   * 離した直後の click を 1 回飲む。⚠ 次の 1 手で畳む(`schedule-grid-drag.ts` の `armSwallow` と同じ)──
+   * click は離した直後に同じ周で届く。届かなかった(離した先が別の物だった)とき、後から来る
+   * 無関係な click(キーボードの Enter など)まで飲まない。
+   */
+  const armSwallow = (): void => {
+    swallowClick = true;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = setTimeout(() => {
+      swallowClick = false;
+      swallowTimer = null;
+    }, 0);
+  };
+  const disarmSwallow = (): void => {
+    swallowClick = false;
+    if (swallowTimer !== null) clearTimeout(swallowTimer);
+    swallowTimer = null;
+  };
 
   const markDrop = (el: HTMLElement): void => {
     if (dropMark === el) return;
@@ -493,6 +513,16 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     if (pending === null) return;
     clearTimeout(pending.timer);
     pending = null;
+  };
+  /**
+   * 🔴 **掴みを丸ごと捨てる**。長押しで掴んだ後に `pointerup` も `pointercancel` も来ないことがある
+   * (アプリの切り替え・着信)。放っておくと `armed` が残り、次の押下を全部無視し、`touchmove` を
+   * 止め続けてページがスクロールできなくなる。
+   */
+  const resetGrab = (): void => {
+    cancelPending();
+    armed = null;
+    clearDrop();
   };
 
   /** 落とし先(日の升目 / 束の見出し)。`null` = 落とせない場所。 */
@@ -515,7 +545,9 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
   };
 
   const onPointerDown = (e: PointerEvent): void => {
-    swallowClick = false;
+    disarmSwallow();
+    // 🔴 新しい主の押下 = 前の掴みは終わっている(終わりの合図が届かなかった取り残しを捨てる)
+    if (e.isPrimary) resetGrab();
     // ⚠ マウスは受けない(既存の HTML5 drag が 1 本で答える。上のコメント参照)
     if (e.pointerType === 'mouse' || e.button !== 0) return;
     // ⚠ 2 本目の指では掴み直さない(`place-drag.ts` と同じ理由)
@@ -599,7 +631,7 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
     if (armed === null || e.pointerId !== armed.pointerId) return;
     const a = armed;
     armed = null;
-    swallowClick = true;
+    armSwallow();
     clearDrop();
     const drop = dateTargetOf(underPointer(e));
     if (drop === null) return;
@@ -647,11 +679,28 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
   doc.addEventListener('pointermove', onPointerMove);
   doc.addEventListener('pointerup', onPointerUp);
   doc.addEventListener('pointercancel', onPointerCancel);
+  /** 🔴 終わりの合図(`pointerup` / `pointercancel`)が来なかった掴みを捨てる(`schedule-grid-drag.ts` と同じ 3 つ)。 */
+  const onLostCapture = (e: Event): void => {
+    if (armed === null || (e as PointerEvent).pointerId !== armed.pointerId) return;
+    resetGrab();
+  };
+  const onVisibility = (): void => {
+    if (doc.visibilityState === 'hidden') resetGrab();
+  };
+  const onBlur = (): void => resetGrab();
+  const win = doc.defaultView;
+
+  doc.addEventListener('lostpointercapture', onLostCapture);
+  doc.addEventListener('visibilitychange', onVisibility);
+  win?.addEventListener('blur', onBlur);
   doc.addEventListener('touchmove', onTouchMove, { passive: false });
   doc.addEventListener('click', onClick, true);
   return () => {
-    cancelPending();
-    clearDrop();
+    resetGrab();
+    disarmSwallow();
+    doc.removeEventListener('lostpointercapture', onLostCapture);
+    doc.removeEventListener('visibilitychange', onVisibility);
+    win?.removeEventListener('blur', onBlur);
     doc.removeEventListener('pointerdown', onPointerDown);
     doc.removeEventListener('pointermove', onPointerMove);
     doc.removeEventListener('pointerup', onPointerUp);
