@@ -187,13 +187,26 @@ export function pruneScopes(scopes: MermaidScope[]): void {
   }
 }
 
-export function hydrateMermaid(root: ParentNode | readonly ParentNode[]): MermaidScope {
-  return hydrateDiagrams(root, MERMAID_KIND);
+/** 器を埋めるときの付帯の指定。 */
+export interface HydrateOptions {
+  /**
+   * 🔴 編集プレビューの図(途中の原文)。立てると焼いた絵を**最古扱いで**キャッシュへ置く
+   * (`RasterKey.volatile`)── 静穏 tick ごとに増える途中の絵が、他のノートの図を LRU で押し出さない。
+   */
+  readonly volatile?: boolean;
+}
+
+export function hydrateMermaid(
+  root: ParentNode | readonly ParentNode[],
+  opts?: HydrateOptions,
+): MermaidScope {
+  return hydrateDiagrams(root, MERMAID_KIND, opts);
 }
 
 export function hydrateDiagrams(
   root: ParentNode | readonly ParentNode[],
   kind: DiagramKind,
+  opts: HydrateOptions = {},
 ): MermaidScope {
   // ⚠ **複数の根をまとめて受ける**(P8 段⑪)── 差分反映は「新しく入った要素」を
   // 何個も渡してくるので、1 個ずつ呼ぶと **要素の数だけ観測器ができる**
@@ -302,6 +315,7 @@ export function hydrateDiagrams(
         palette: readPalette(),
         width: widthOf(p.host),
         dpr: window.devicePixelRatio || 1,
+        ...(opts.volatile === true ? { volatile: true } : {}),
       };
       currentKey = cacheKey(key);
       inFlightKey.set(p.host, currentKey);

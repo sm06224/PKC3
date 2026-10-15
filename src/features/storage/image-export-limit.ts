@@ -56,9 +56,15 @@ export function imageTooBigMessage(bytes: number | null): string {
  *   この字で覆うと、user は**在りもしない原因**を追うことになる。
  * 🔑 sqlite-wasm は確保の失敗を `WasmAllocError` と名乗り、JS 側の確保は
  *   `RangeError`(配列が大きすぎる)になる ── その 2 つだけを拾う。
+ * ⚠ `RangeError` は**何でも**確保の失敗ではない(再帰が深すぎる `Maximum call stack size exceeded` /
+ *   文字列が長すぎる `Invalid string length` / 桁あふれ …)。それらに「大きすぎます」と出すと
+ *   user は在りもしない原因(画像の大きさ)を追う ── 確保を言う文面のときだけ拾い、
+ *   他は呼び側の汎用の字に落とす。
  */
+const ALLOC_RANGE_ERROR = /array buffer|typed array length|allocation|out of memory/i;
+
 export function looksOutOfMemory(err: unknown): boolean {
-  if (err instanceof RangeError) return true;
+  if (err instanceof RangeError) return ALLOC_RANGE_ERROR.test(err.message);
   const name = err instanceof Error ? err.name : '';
   const text = err instanceof Error ? err.message : String(err);
   return (

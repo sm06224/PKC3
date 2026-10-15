@@ -123,9 +123,11 @@ export function openLightbox(
   root.append(overlay);
   restoreBase.set(root, prev instanceof HTMLElement ? prev : null);
   overlay.querySelector<HTMLElement>('.pkc-lightbox-close-btn')?.focus();
-  // ⚠ aria-modal の約束 ── Tab は中だけを巡る
-  overlay.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'Tab') return;
+  // ⚠ aria-modal の約束 ── Tab は中だけを巡る。
+  // 🔴 overlay ではなく **document の capture** に置く ── 焦点が <body> に落ちている
+  //    (外を押した直後など)と keydown は overlay を通らず、Tab が外へ抜ける。Escape と同じ置き方。
+  const onTab = (ev: KeyboardEvent): void => {
+    if (ev.key !== 'Tab' || !overlay.isConnected) return;
     const btns = [...overlay.querySelectorAll<HTMLElement>('button:not(:disabled)')];
     if (btns.length === 0) return;
     const first = btns[0]!;
@@ -138,13 +140,20 @@ export function openLightbox(
       ev.preventDefault();
       first.focus();
     }
-  });
+  };
+  doc2.addEventListener('keydown', onTab, true);
+  tabTrapOff.set(root, () => doc2.removeEventListener('keydown', onTab, true));
 }
+
+/** 開いている間だけ張る Tab の見張りの外し方(閉じるとき必ず呼ぶ)。 */
+const tabTrapOff = new WeakMap<HTMLElement, () => void>();
 
 const restoreBase = new WeakMap<HTMLElement, HTMLElement | null>();
 
 /** ライトボックスを閉じる */
 export function closeLightbox(root: HTMLElement): void {
+  tabTrapOff.get(root)?.();
+  tabTrapOff.delete(root);
   const el = root.querySelector(`[data-pkc-region="${LIGHTBOX_REGION}"]`);
   if (el === null) return;
   const doc = root.ownerDocument;

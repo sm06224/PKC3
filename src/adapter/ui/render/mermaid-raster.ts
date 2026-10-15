@@ -98,6 +98,13 @@ export interface RasterKey {
    * 引数で上書きできるのは、**版が変わると鍵が変わること**を test が見るためだけである。
    */
   engine?: string;
+  /**
+   * 🔴 **途中の原文の絵**(編集プレビューの静穏 tick ごとの焼き)。⚠ 鍵には入らない。
+   * 立てると、置くとき `at` を 0 にして**真っ先に追い出される側**へ回し(他のノートの
+   * 図を LRU で押し出さない)、hit しても `at` を新しくしない。
+   * 他の面で同じ原文が実際に表示されて hit したときは、通常どおり触れて昇格する。
+   */
+  volatile?: boolean;
 }
 
 /**
@@ -204,6 +211,18 @@ export function readPalette(el: HTMLElement = document.documentElement): Diagram
  */
 const SEP = '\u0000';
 
+/**
+ * 🔴 **焼き方の版**。鍵に入る。
+ *
+ * ⚠ **次のどれかを変えたら必ず上げる**(上げ忘れると、配った日から IDB `pkc3-diagram-cache` に残った
+ *   古い色・古い配置の PNG を返し続ける ── 鍵は原文・テーマ名・配色・幅・dpr だけで、焼き方は見ていない):
+ *   - `configFor`(mermaid の設定: フォント・配置・変数の対応)
+ *   - `rasterize`(SVG → PNG の寸法・背景・縮尺の決め方)
+ *   - chart の描画(`chart-worker.ts` / `chart-raster.ts` の見た目、chart.js の版上げ)
+ * 🔑 mermaid の版上げは `MERMAID_VERSION` が鍵に入っているので、ここは上げなくてよい。
+ */
+export const RASTER_BAKE_VERSION = 1;
+
 export function cacheKey(k: RasterKey): string {
   /**
    * 🔴 **種類を鍵に入れる**(#188 のレビューで判明)。
@@ -214,7 +233,20 @@ export function cacheKey(k: RasterKey): string {
    */
   const kind = k.kind ?? 'mermaid';
   const engine = k.engine ?? (kind === 'mermaid' ? MERMAID_VERSION : undefined);
-  return [kind, ...(engine === undefined ? [] : [engine]), k.theme, k.width, k.dpr, k.source].join(SEP);
+  // 🔴 配色の**実際の値**も鍵に入れる(テーマ名だけだと、`tokens.css` の色を変えた版を配っても
+  //    同じテーマ名の古い色の PNG が IDB から返る)。`dark` は `bg` から決まるので入れない
+  const p = k.palette;
+  const colors = [p.bg, p.alt, p.fg, p.line, p.border, p.accent].join(',');
+  return [
+    kind,
+    ...(engine === undefined ? [] : [engine]),
+    `b${RASTER_BAKE_VERSION}`,
+    k.theme,
+    colors,
+    k.width,
+    k.dpr,
+    k.source,
+  ].join(SEP);
 }
 
 /**
@@ -272,10 +304,24 @@ function tx<T>(
  */
 let dbPromise: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
-  dbPromise ??= openDb().catch((e: unknown) => {
-    dbPromise = null;
-    throw e;
-  });
+  dbPromise ??= openDb()
+    .then((d) => {
+      // 🔴 接続が閉じられた(ブラウザが落とした / 他タブが DB を消す・版を上げる)後も
+      //    閉じた接続を memo し続けると、以後の `transaction()` が全部投げて
+      //    キャッシュが黙って無効のままになる。捨てて、次の機会に開き直す
+      d.onclose = () => {
+        if (dbPromise !== null) dbPromise = null;
+      };
+      d.onversionchange = () => {
+        dbPromise = null;
+        d.close();
+      };
+      return d;
+    })
+    .catch((e: unknown) => {
+      dbPromise = null;
+      throw e;
+    });
   return dbPromise;
 }
 
@@ -638,7 +684,7 @@ export async function renderCachedPng(
     //    失敗しても描画は続ける。
     // 🔴 ただし**毎回は書かない**(段㉗)── `put` は行ごと書き直すので、
     //    時刻 1 個のために PNG 全体(平均 181KB)を書き戻すことになる
-    if (shouldTouch(row.at, Date.now())) {
+    if (key.volatile !== true && shouldTouch(row.at, Date.now())) {
       void withCache(
         (d) => tx(d, 'readwrite', (s) => s.put({ ...row, at: Date.now() } satisfies CacheRow, k)),
         undefined,
@@ -657,7 +703,10 @@ export async function renderCachedPng(
         s.put(
           {
             png: raster.png,
-            at: Date.now(),
+            // 🔴 途中の原文の絵は `at = 0`(最古)で置く ── 編集中は静穏 tick ごとに別鍵が増え、
+            //    `Date.now()` で置くと他のノートの有用な図から先に追い出される。
+            //    鍵を消す案は取らない(器は tick ごとに作り直され、前の鍵を指す安定した持ち主がいない)
+            at: key.volatile === true ? 0 : Date.now(),
             size: raster.png.size,
             cssWidth: raster.cssWidth,
           } satisfies CacheRow,

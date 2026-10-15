@@ -103,6 +103,59 @@ describe('lightbox', () => {
     });
   });
 
+  describe('Tab の見張り(焦点が <body> に落ちていても外へ抜けない)', () => {
+    const tab = (shiftKey = false): KeyboardEvent =>
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
+
+    it('🔴 焦点が body のとき Tab は中の最初のボタンへ、Shift+Tab は最後へ戻す', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      openLightbox(root, { src: 'pic.jpg', alt: '風景' });
+      const btns = [...root.querySelectorAll<HTMLElement>('button:not(:disabled)')];
+      expect(btns.length).toBeGreaterThan(0);
+
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.activeElement).toBe(document.body);
+      const ev = tab();
+      document.body.dispatchEvent(ev);
+      expect(ev.defaultPrevented, 'Tab が外へ抜ける').toBe(true);
+      expect(document.activeElement).toBe(btns[0]);
+
+      (document.activeElement as HTMLElement).blur();
+      const ev2 = tab(true);
+      document.body.dispatchEvent(ev2);
+      expect(ev2.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(btns[btns.length - 1]);
+      closeLightbox(root);
+    });
+
+    it('🔴 閉じたら見張りは外れる(Tab を奪わない)', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      openLightbox(root, { src: 'pic.jpg', alt: '風景' });
+      closeLightbox(root);
+      (document.activeElement as HTMLElement | null)?.blur();
+      const ev = tab();
+      document.body.dispatchEvent(ev);
+      expect(ev.defaultPrevented, '閉じたのに Tab を奪っている').toBe(false);
+    });
+
+    it('開き直しても見張りは 1 つ(二重に張らない)', () => {
+      const root = document.createElement('div');
+      document.body.append(root);
+      const spy = vi.spyOn(document, 'addEventListener');
+      const off = vi.spyOn(document, 'removeEventListener');
+      openLightbox(root, { src: 'a.jpg', alt: 'a' });
+      openLightbox(root, { src: 'b.jpg', alt: 'b' });
+      const added = spy.mock.calls.filter((c) => c[0] === 'keydown').length;
+      const removed = off.mock.calls.filter((c) => c[0] === 'keydown').length;
+      expect(added - removed).toBe(1);
+      closeLightbox(root);
+      spy.mockRestore();
+      off.mockRestore();
+    });
+  });
+
   describe('binder integration with view-big', () => {
     function createMockDispatcher(): Dispatcher {
       const defaultState = {

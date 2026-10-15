@@ -540,3 +540,62 @@ describe('ジョブログの量表記', () => {
     lease.dispose();
   });
 });
+
+describe('🔴 postMessage が同期で投げたとき(DataCloneError など)', () => {
+  /** 指定の payload だけ postMessage が投げる偽 worker。 */
+  function throwingLease(bad: string) {
+    FakeWorker.spawned = 0;
+    FakeWorker.live.clear();
+    const clock = fakeClock();
+    let last: FakeWorker | null = null;
+    const lease = new WorkerLease({
+      spawn: () => {
+        const w = new FakeWorker();
+        const orig = w.postMessage.bind(w);
+        w.postMessage = (msg, transfer) => {
+          if (msg.payload === bad) throw new Error('DataCloneError');
+          orig(msg, transfer);
+        };
+        last = w;
+        return w as unknown as Worker;
+      },
+      idleMs: 1000,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+      name: 'test worker',
+    });
+    return { lease, clock, worker: () => last! };
+  }
+
+  it('起動待ち(flush)で投げた 1 件は reject され、busy に残らず、idle kill が来る', async () => {
+    const { lease, clock, worker } = throwingLease('bad');
+    const p = lease.run('bad');
+    await expect(p).rejects.toThrow(/postMessage failed/);
+    expect(lease.busy, '落ちた依頼が busy に残っている').toBe(0);
+    clock.advance(1000);
+    expect(worker().terminated, 'idle kill が張られていない').toBe(true);
+    expect(lease.alive).toBe(false);
+  });
+
+  it('生きている worker への run で投げても同じ(他の依頼は巻き込まない)', async () => {
+    const { lease, clock, worker } = throwingLease('bad');
+    const ok = lease.run('good');
+    const bad = lease.run('bad');
+    await expect(bad).rejects.toThrow(/postMessage failed/);
+    // 'good' はまだ飛んでいる ── kill してはならない
+    clock.advance(5000);
+    expect(worker().terminated).toBe(false);
+    worker().respondAll(() => 'fine');
+    await expect(ok).resolves.toBe('fine');
+    clock.advance(1000);
+    expect(worker().terminated).toBe(true);
+  });
+
+  it('flush の途中で 1 件投げても、同じ束の残りは流れる', async () => {
+    const { lease, worker } = throwingLease('bad');
+    const ps = [lease.run('a'), lease.run('bad'), lease.run('c')];
+    await expect(ps[1]).rejects.toThrow(/postMessage failed/);
+    worker().respondAll(() => 'r');
+    await expect(Promise.all([ps[0], ps[2]])).resolves.toEqual(['r', 'r']);
+  });
+});

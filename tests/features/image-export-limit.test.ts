@@ -66,6 +66,21 @@ describe('確保の失敗かどうか(#971 段④)', () => {
    * ⚠ 壊れているのに「大きすぎます」と出ると、user は**整理して減らそうとする**
    *   ── 壊れた DB へ書き込む向きなので、**壊れ方を広げる**。
    */
+  it('🔴 RangeError でも確保の失敗でないものは拾わない(スタック超過 / 文字列長 など)', () => {
+    for (const other of [
+      'Maximum call stack size exceeded',
+      'Invalid string length',
+      'toFixed() digits argument must be between 0 and 100',
+      'Invalid count value: -1',
+    ]) {
+      expect(looksOutOfMemory(new RangeError(other)), `誤って拾った: ${other}`).toBe(false);
+    }
+    // 対照群: 確保を言う RangeError は拾う
+    for (const alloc of ['Array buffer allocation failed', 'Invalid typed array length: 4294967296', 'out of memory']) {
+      expect(looksOutOfMemory(new RangeError(alloc)), `拾えない: ${alloc}`).toBe(true);
+    }
+  });
+
   it('🔴 別の理由まで「大きすぎる」と言わない(対照群)', () => {
     for (const other of [
       'database disk image is malformed',
