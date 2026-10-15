@@ -104,10 +104,30 @@ describe('設定の持ち出しの配線(#414)', () => {
      * 🔴 **読み直しが要ることを言う** ── 鍵の割当も紙面も起動時に読むので、
      *   当てただけでは画面が変わらない。⚠ 言わないと「効かなかった」と読まれる。
      */
-    const said = sent.find((a) => a.type === 'OP_FAILED');
+    const said = sent.find((a) => a.type === 'OP_NOTICE');
     expect(said, '何も言わずに終えた').toBeDefined();
-    const msg = said?.type === 'OP_FAILED' ? said.error : '';
+    const msg = said?.type === 'OP_NOTICE' ? said.message : '';
     expect(msg, '読み直しが要ることを言っていない').toContain('再読み込み');
+    // 🔴 入った回を「問題」(`OP_FAILED` → 未読の問題)として言わない(#1087)
+    expect(
+      sent.some((a) => a.type === 'OP_FAILED'),
+      '成功を OP_FAILED で言った(問題の未読に数えられる)',
+    ).toBe(false);
+  });
+
+  /** 🔴 書き出せた回に「長すぎて入らなかった」を添えるのも結果である(問題の未読に数えない)。 */
+  it('🔴 一部だけ書き出せた回は、結果として言う', async () => {
+    const { root, sent } = setup();
+    localStorage.setItem('pkc3.theme', 'dark');
+    localStorage.setItem('pkc3.messages.cap', 'x'.repeat(MAX_SETTING_CHARS + 1));
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    sent.length = 0;
+    root.querySelector<HTMLElement>('[data-pkc-action="export-settings"]')!.click();
+    await tick();
+    vi.restoreAllMocks();
+    const said = sent.find((a) => a.type === 'OP_NOTICE');
+    expect(said?.type === 'OP_NOTICE' ? said.message : '').toContain('長すぎるので入っていません');
+    expect(sent.some((a) => a.type === 'OP_FAILED')).toBe(false);
   });
 
   /** 🔴 **書けなかった件数を言う**(#1087)── 全部書けなくても成功と同じ字にしない。 */
@@ -128,6 +148,17 @@ describe('設定の持ち出しの配線(#414)', () => {
     const msg = said?.type === 'OP_FAILED' ? said.error : '';
     expect(msg, '書けなかったことを言っていない').toContain('1 件はこの端末に保存できず');
     expect(localStorage.getItem('pkc3.theme'), '前提: 書けていない').toBeNull();
+  });
+
+  /** 🔴 配色の読み手が読めない値は、下見の時点で入れない(読み手は既定へ丸めるので「入れました」が偽になる)。 */
+  it('🔴 知らない配色の id は、入れない(下見で弾く)', async () => {
+    const { root } = setup();
+    await choose(root, fileText([{ key: 'pkc3.theme', value: 'no-such-theme' }]));
+    expect(apply(root).disabled, '読めない配色で押せる').toBe(true);
+    expect(summary(root).textContent ?? '').toContain('中身が空か読めない形なので入れません');
+    // 対照:選べる配色は押せる
+    await choose(root, fileText([{ key: 'pkc3.theme', value: 'dark' }]));
+    expect(apply(root).disabled, '読める配色が弾かれた').toBe(false);
   });
 
   /** 🔴 **運ばない鍵は、file に書いてあっても書き込まない**(許可・フラグ)。 */

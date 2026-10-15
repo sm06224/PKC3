@@ -166,6 +166,31 @@ describe('sanitizeMessageText(中身を漏らさない。#7)', () => {
   });
 });
 
+describe('改行の類は節を割らない(#1087)', () => {
+  /** 🔴 `\r` / U+2028 / U+2029 は、`## ` の前なら節の切れ目になる(`splitSections` の `^` が当たる)。 */
+  const breaks: ReadonlyArray<[string, string]> = [
+    ['CR', '\r'],
+    ['CRLF', '\r\n'],
+    ['LF', '\n'],
+    ['U+2028', '\u2028'],
+    ['U+2029', '\u2029'],
+  ];
+  for (const [name, br] of breaks) {
+    it(`${name} の後ろに ## を置いた字でも、節は 1 件のまま`, () => {
+      const text = sanitizeMessageText(`1 行目${br}## 偽の節${br}**問題** 偽`);
+      expect(text).not.toMatch(/[\r\n\u2028\u2029]/);
+      const section = formatMessageSection({ at: '2026-10-01T00:00:00Z', kind: 'problem', source: 'app', text });
+      // 対照:節を 2 つ並べて、数えるのは 2 件(割れていないから 2 件で止まる)
+      expect(countUnread(section + section, null)).toBe(2);
+      expect(trimToCap(section + section, 1)).toBe(section);
+    });
+    it(`${name} は固定の頭(fixedHead)の中でも空白になる`, () => {
+      const head = `頭${br}## 偽`;
+      expect(sanitizeMessageText(head, head)).toBe('頭 ## 偽');
+    });
+  }
+});
+
 describe('trimToCap(古い節から落とす)', () => {
   const sectionAt = (n: number): string =>
     formatMessageSection({

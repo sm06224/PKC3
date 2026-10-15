@@ -75,6 +75,16 @@ export function titleForMessageLid(lid: string): string {
  */
 export const MESSAGE_CAP_DEFAULT = 500;
 export const MESSAGE_CAP_OPTIONS: readonly number[] = [100, 500, 2000];
+
+/**
+ * 🔴 **保存された上限の読み方は 1 つ**(#1087)。⚠ 端末の読み手(`currentMessageCap`)と設定ファイルの下見
+ *   (`PORTABLE_KEYS` の検査)が**同じ関数**を通る ── 別々に書くと、下見は「入ります」と言うのに読み手は
+ *   既定へ丸める、がまた起きる。選べる値でなければ `null`。
+ */
+export function parseMessageCap(raw: string | null): number | null {
+  const n = raw === null ? NaN : Number(raw);
+  return MESSAGE_CAP_OPTIONS.includes(n) ? n : null;
+}
 export const JOB_CAP = 5000;
 
 /** そのノートに効く上限(`job` は configuredCap を無視する)。 */
@@ -199,6 +209,12 @@ export function markName(name: string): string {
 }
 const MAX_MESSAGE_TEXT_LENGTH = 80;
 
+/**
+ * 🔴 **改行の類は全部空白へ**(#1087)。⚠ `splitSections` の `^` は `\n` だけでなく `\r` / U+2028 / U+2029 の
+ *   直後にも当たる(`m` フラグ)── `\r?\n` だけを畳むと、単独の `\r` や U+2028 の後ろに `## ` を置いた字で節が割れた。
+ */
+const LINE_BREAKS_RE = /\r\n|[\r\n\u2028\u2029]/g;
+
 export function sanitizeMessageText(text: string, fixedHead = ''): string {
   /**
    * 🔴 **アプリが書いた固定の文は、そのまま通す**(#1087)。⚠ 括弧で潰すと、案内に出てくるボタンの名前
@@ -207,11 +223,11 @@ export function sanitizeMessageText(text: string, fixedHead = ''): string {
    */
   if (fixedHead !== '' && text.startsWith(fixedHead)) {
     const rest = text.slice(fixedHead.length);
-    return fixedHead.replace(/\r?\n/g, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
+    return fixedHead.replace(LINE_BREAKS_RE, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
   }
   const unmarked = text.replace(MARKED_NAME_RE, '…');
   const collapsed = collapseBrackets(collapseBrackets(unmarked, '「', '」'), '『', '』');
-  const flattened = collapsed.replace(/\r?\n/g, ' ');
+  const flattened = collapsed.replace(LINE_BREAKS_RE, ' ');
   return flattened.length > MAX_MESSAGE_TEXT_LENGTH
     ? `${flattened.slice(0, MAX_MESSAGE_TEXT_LENGTH)}…`
     : flattened;

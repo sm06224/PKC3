@@ -30,6 +30,7 @@ import {
   toggleHeadingFold,
   toggleLogDay,
 } from '../render/heading-fold';
+import { isThemeChoice, THEME_STORAGE_KEY } from '../render/theme';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
@@ -5073,6 +5074,14 @@ function paintPlan(root: HTMLElement, dispatcher: Dispatcher, text: string): voi
 }
 
 /**
+ * 🔴 **読み手が features に無い鍵の検査**(#1087)。⚠ 読み手と**同じ判定**を渡す(配色の読み手は
+ *   `isThemeChoice`)── 下見と当てるの 2 か所が同じ表を通る(§7)。
+ */
+const ADAPTER_SETTING_VALIDATORS: Readonly<Record<string, (value: string) => boolean>> = {
+  [THEME_STORAGE_KEY]: isThemeChoice,
+};
+
+/**
  * 🔴 **読み込んだ設定の下見を描く**(#414)。
  *
  * ⚠ **当てない。見せるだけ** ── 当てるのは user が「当てる」を押してからである。
@@ -5094,7 +5103,7 @@ function paintSettingsPlan(root: HTMLElement, text: string | null): void {
     apply.disabled = true;
     return;
   }
-  const plan = planSettingsImport(text, readSetting);
+  const plan = planSettingsImport(text, readSetting, ADAPTER_SETTING_VALIDATORS);
   summary.textContent = settingsPlanNote(plan);
   summary.hidden = false;
   list.textContent = '';
@@ -11507,9 +11516,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔴 長すぎて入らなかった設定を言う(#1087)── 黙って落とすと「全部持ち出した」と読まれる
     const tooLong = settingsTooLongToExport(readSetting);
     if (tooLong.length > 0) {
+      // 🔴 書き出せた回なので「結果」(`OP_NOTICE`)── `OP_FAILED` だと「問題」の未読に数えられた
       dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
+        type: 'OP_NOTICE',
+        message: `設定を書き出しました。${tooLong.join('・')} は長すぎるので入っていません`,
       });
     }
   },
@@ -11634,7 +11644,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'apply-settings': (dispatcher, _target, _services, root) => {
     if (settingsPlanText === null) return;
-    const plan = planSettingsImport(settingsPlanText, readSetting);
+    const plan = planSettingsImport(settingsPlanText, readSetting, ADAPTER_SETTING_VALIDATORS);
     /**
      * ⚠ **この行は「正しさ」を守っていない ── 二重の門である**(2026-08-26、
      *   変異試験 S9 が SURVIVED で教えた)。当てられないときボタンは
@@ -11662,10 +11672,11 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **読み直しが要ることを言う** ── 鍵の割当も紙面も**起動時に読む**ので、
      *   当てただけでは画面が変わらない。⚠ 言わないと「効かなかった」と読まれる。
      */
-    dispatcher.dispatch({
-      type: 'OP_FAILED',
-      error: settingsAppliedNote(wrote, failed),
-    });
+    // 🔴 入った回は「結果」(`OP_NOTICE`)── `OP_FAILED` で言うと「問題」の未読に数えられた。
+    //   書けなかった分が在る回だけ問題として言う
+    const appliedNote = settingsAppliedNote(wrote, failed);
+    if (failed === 0) dispatcher.dispatch({ type: 'OP_NOTICE', message: appliedNote });
+    else dispatcher.dispatch({ type: 'OP_FAILED', error: appliedNote });
   },
   'apply-plan': (dispatcher, _target, services, root) => {
     const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="plan-input"]');

@@ -23,6 +23,9 @@ import {
   settingsTooLongToExport,
   SKIPPED_KEYS,
 } from '../../src/features/settings/settings-file';
+import { parseMessageCap, MESSAGE_CAP_OPTIONS } from '../../src/features/message/message-log';
+import { PASTE_SOURCES } from '../../src/features/markdown/paste-source';
+import { OPEN_PLACES } from '../../src/features/open-place';
 
 /**
  * `src` の中の `'pkc3.…'` を全部拾う。
@@ -188,13 +191,71 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
         { key: 'pkc3.keymap', value: 123 },
         { key: 'pkc3.theme', value: '' },
         { key: 'pkc3.browse' },
-        { key: 'pkc3.text-scale', value: '1.1' },
+        { key: 'pkc3.text-scale', value: 'xlarge' },
       ],
     });
     const plan = planSettingsImport(raw, (k) => disk[k] ?? null);
     expect(plan.changes.map((c) => c.key), '空の字で入れ替える項目が出た').toEqual(['pkc3.text-scale']);
     expect(plan.unreadable).toEqual(['pkc3.keymap', 'pkc3.theme', 'pkc3.browse']);
     expect(settingsPlanNote(plan)).toContain('3 件は中身が空か読めない形なので入れません');
+  });
+
+  /**
+   * 🔴 **端末の読み手が既定へ丸める値は、「入れました」と言わない**(#1087)。
+   * ⚠ 検査の表は「読み手が使う判定」をそのまま持つ ── 別に書き写した許可リストではない。
+   *   だから**どの鍵に検査が付いているか**を名指しで pin する(付け忘れ・外し忘れが見える)。
+   */
+  describe('取り込む値の検査(読み手と同じ判定)', () => {
+    const GOOD: Record<string, string> = {
+      'pkc3.editor-mode': 'live',
+      'pkc3.page-format': 'a4-portrait',
+      'pkc3.prose-align': 'center',
+      'pkc3.text-scale': 'xlarge',
+      'pkc3.tag-badge': 'chip',
+      'pkc3.paste-source': PASTE_SOURCES[0]!.id,
+      'pkc3.open-place': OPEN_PLACES[0]!.id,
+      'pkc3.app-open-target': 'tab',
+      'pkc3.messages.cap': '500',
+    };
+    const plan1 = (key: string, value: string, extra?: Record<string, (v: string) => boolean>) =>
+      planSettingsImport(file([{ key, value }]), () => null, extra);
+
+    it('検査が付いている鍵は、この一覧のとおり(増減したら理由を添えて直す)', () => {
+      expect(
+        PORTABLE_KEYS.filter((p) => p.valid !== undefined).map((p) => p.key).sort(),
+      ).toEqual(Object.keys(GOOD).sort());
+    });
+
+    for (const [key, good] of Object.entries(GOOD)) {
+      it(`${key}: 読める値は入り、読めない値は「読めない形」に数える`, () => {
+        const ok = plan1(key, good);
+        expect(ok.changes.map((c) => c.key), `読める値 ${good} が弾かれた`).toEqual([key]);
+        expect(ok.unreadable).toEqual([]);
+        const bad = plan1(key, 'zzz-これは選べる値ではない');
+        expect(bad.changes, '読めない値が「入る」に数えられた').toEqual([]);
+        expect(bad.unreadable).toEqual([key]);
+        expect(settingsPlanNote(bad)).toContain('1 件は中身が空か読めない形なので入れません');
+      });
+    }
+
+    it('🔴 メッセージの保管件数: 選べる 3 つ以外(9999 など)は入れない。読み手と同じ判定', () => {
+      for (const n of MESSAGE_CAP_OPTIONS) expect(plan1('pkc3.messages.cap', String(n)).changes).toHaveLength(1);
+      for (const v of ['9999', '0', '-1', 'abc', '5e2x']) {
+        expect(plan1('pkc3.messages.cap', v).changes, v).toEqual([]);
+        // 読み手(`parseMessageCap`)も同じ答え ── 下見が「入る」と言うのに丸められる、を作らない
+        expect(parseMessageCap(v), v).toBeNull();
+      }
+    });
+
+    it('🔴 読み手が features に無い鍵(配色)は、呼び側が渡した検査で弾く', () => {
+      const themeOk = (v: string): boolean => v === 'dark';
+      expect(plan1('pkc3.theme', 'dark', { 'pkc3.theme': themeOk }).changes).toHaveLength(1);
+      const bad = plan1('pkc3.theme', 'no-such-theme', { 'pkc3.theme': themeOk });
+      expect(bad.changes).toEqual([]);
+      expect(bad.unreadable).toEqual(['pkc3.theme']);
+      // 対照:検査を渡さなければ通る(検査が効いているのは渡した検査である)
+      expect(plan1('pkc3.theme', 'no-such-theme').changes).toHaveLength(1);
+    });
   });
 
   it('🔴 当てた結果は、書けなかった件数も言う(全部書けなくても成功と同じ字にしない。#1087)', () => {
