@@ -141,6 +141,15 @@ describe('② 編集中は条件の欄を先に断る(打った字を消さな�
       if (action === 'smart-cond-add') expect(t.box.value, '打った字が消えた').toBe('請求');
     });
   }
+
+  it('🔴 「ここから外す」(smart-evict)も編集中は理由を出し、何も撃たない', async () => {
+    const t = rig({});
+    t.startEditing();
+    t.press('smart-evict');
+    await flush();
+    expect(t.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから外してください');
+    expect(t.events.filter((e) => e.type === 'REQUEST_SMART_TAGS')).toHaveLength(0);
+  });
 });
 
 describe('③ ノートを消したら、開いているスマートフォルダの当たりと件数も更新する', () => {

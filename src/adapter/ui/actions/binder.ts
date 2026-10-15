@@ -8055,6 +8055,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     const smartLid = st.scopeLid;
     if (smartLid === null) return;
+    // 🔴 reducer の `SMART_TAGS` は編集中に黙って捨てるので、押した所で理由を言う(条件の欄と同じ ── #1087)
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}外してください` });
+      return;
+    }
     // ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` / `bulk-tag` と同じ規則)
     const rows = new Set(visibleFilerRows(st).map((r) => r.lid));
     const lids = st.selection.filter((lid) => rows.has(lid));
