@@ -19,6 +19,26 @@ export interface WriterLease {
 
 export const WRITER_LOCK_NAME = 'pkc3-writer';
 
+/**
+ * 昇格(follower → holder)を走らせ、**失敗したら握った lease を手放す**(#1087)。
+ *
+ * 🔴 lease を取った時点で lock は握られているが、昇格(新しい storage worker の起動)が
+ *   失敗する場面がある(別のタブが先に更新して、古い worker の chunk が 404 になる等)。
+ *   そのまま放っておくと、動かないタブが lock を握り続け、**読み込み直したタブが
+ *   書き手になれない**。失敗したら返して、待っている他のタブに回す。
+ */
+export async function promoteOrReleaseLease<T>(
+  lease: Pick<WriterLease, 'release'>,
+  promote: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await promote();
+  } catch (e) {
+    lease.release();
+    throw e;
+  }
+}
+
 export function acquireWriterLease(name: string = WRITER_LOCK_NAME): WriterLease {
   let state: LeaseState = 'waiting';
   let releaseFn: (() => void) | null = null;

@@ -175,6 +175,11 @@ const CACHE = PREFIX + SCOPE + ':' + BUILD;
 const ACTIVE_PREFIX = ${JSON.stringify(ACTIVE_MARK_PREFIX)};
 const ACTIVE_MARK = ACTIVE_PREFIX + SCOPE + ':' + BUILD;
 const PRECACHE = ${list};
+/*
+ * 🔴 precache は HTTP キャッシュを通さず**取り直す**(#1087)。通すと(Pages は max-age=600)、
+ * 配った直後の SW が**10 分前の index.html** を cache に入れ、新旧の chunk が混ざる。
+ */
+const precacheRequests = () => PRECACHE.map((u) => new Request(u, { cache: 'reload' }));
 const HASHED = ${HASHED_ASSET.toString()};
 /*
  * 分離のヘッダ(#111)。GitHub Pages はヘッダを返せないので、本番の
@@ -242,7 +247,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(PRECACHE))
+      .then((c) => c.addAll(precacheRequests()))
       /*
        * 🔴 交代しない間に古い precache が積み上がるのを止める(review H-1)。
        * activate が走らないので掃除も走らず、deploy ごとに 1 本(実測 2.65MB)
@@ -322,7 +327,7 @@ self.addEventListener('activate', (event) => {
       .then((c) =>
         c
           .keys()
-          .then((entries) => (entries.length === PRECACHE.length ? undefined : c.addAll(PRECACHE)))
+          .then((entries) => (entries.length === PRECACHE.length ? undefined : c.addAll(precacheRequests())))
           .catch(() => {}),
       )
       .then(() => self.clients.claim()),

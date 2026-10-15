@@ -11,7 +11,7 @@ import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer, type AssetLender } from './detail';
 import { SplitView } from './split-view';
 import { SettingsRenderer } from './settings';
-import { FlagsRenderer } from './flags';
+import { FlagsRenderer, type RestartGuard } from './flags';
 import { HelpRenderer } from './help';
 import { QueryRenderer } from './query';
 import { installWheelCalm } from './wheel-calm';
@@ -379,6 +379,11 @@ export class CenterRouter {
 
   resetFlags(): void {
     this.flags.resetFlags();
+  }
+
+  /** フラグの再読み込みの前に編集中を確かめる口(#1087)。配線側が 1 度だけ差す。 */
+  setFlagRestartGuard(guard: RestartGuard): void {
+    this.flags.setRestartGuard(guard);
   }
 
   /**

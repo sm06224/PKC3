@@ -15,6 +15,7 @@
  *   (2026-07-27 の不可侵指示)。Blob を作るのは受け取った側の仕事。
  */
 import type { ChartSpec } from '@features/markdown/chart-fence';
+import { retryableImport } from './retryable-import';
 
 export interface ChartJobRequest {
   id: number;
@@ -102,11 +103,11 @@ function buildConfig(req: ChartJobRequest): Record<string, unknown> {
 }
 
 /** chart.js を 1 度だけ読む(遅延 import + 使い回し)。 */
-let chartMod: Promise<typeof import('chart.js/auto')> | null = null;
-function loadChart(): Promise<typeof import('chart.js/auto')> {
-  chartMod ??= import('chart.js/auto');
-  return chartMod;
-}
+// 🔴 読み込みに失敗したら覚えない(#1087)。端末の事情なので 1 文で返す(画面には前置きなしで出る)
+const loadChart = retryableImport(
+  () => import('chart.js/auto'),
+  () => new Error('グラフを描くためのライブラリを読み込めませんでした(ページを再読み込みしてください)'),
+);
 
 export async function renderChartPng(
   req: ChartJobRequest,

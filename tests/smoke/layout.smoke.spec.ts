@@ -1855,6 +1855,34 @@ test('🔴 ▼ の合成メニュー: 種類を選ぶとその場で作り、次
     '「フラグ」を押しても面が開かない',
   ).toBeVisible();
 
+  /**
+   * ⑦ 🔴 **編集中に「読み込み直しが要るフラグ」を切り替える**(#1087。起動は増やさない)。
+   * 確認が出て(「再読み込みしてフラグを反映する」)、やめると**ページはそのまま**で、
+   * 設定は保存済みであることを 1 行で伝える。
+   */
+  await createEntry(page, 'text');
+  await expect(
+    page.locator('[data-pkc-field="editor-body"]'),
+    '前提が崩れている: 編集に入っていない',
+  ).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __noReload?: number }).__noReload = 1;
+  });
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="flags"]');
+  await page
+    .locator('[data-pkc-action="set-flag"][data-pkc-flag="render.markdownInline"]')
+    .evaluate((el) => (el as HTMLInputElement).click());
+  const flagAsk = await answerAppDialog(page, 'cancel');
+  expect(flagAsk, '編集中の確認の文言が違う').toContain('フラグの変更を反映するためにページを再読み込みしますか');
+  await expect(
+    page.locator('body'),
+    'やめたのに「保存しました」の案内が出ない',
+  ).toContainText('フラグの変更は保存しました。ページを再読み込みすると反映されます');
+  expect(
+    await page.evaluate(() => (window as unknown as { __noReload?: number }).__noReload),
+    'やめたのにページが再読み込みされた',
+  ).toBe(1);
+
   expect(errors).toEqual([]);
 });
 

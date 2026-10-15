@@ -579,3 +579,97 @@ describe('Windows の時刻帯名', () => {
     expect(at('UTC')).toMatchObject({ date: '2026-08-25', time: '19:00' });
   });
 });
+
+describe('🔴 #1087 の往復の直し', () => {
+  it('24:00 まで ── 翌日 00:00 の DTEND は「日をまたぐ」ではなく timeEnd=24:00(往復しても幅が残る)', () => {
+    const r = one(['DTSTART;TZID=Asia/Tokyo:20260825T220000', 'DTEND;TZID=Asia/Tokyo:20260826T000000', 'SUMMARY:夜']);
+    expect(r.events[0]).toMatchObject({ date: '2026-08-25', time: '22:00', timeEnd: '24:00' });
+    expect(r.counts.spansDays, '24:00 までを日またぎに数えている').toBe(0);
+    expect(icsCountNotes(r.counts).join()).not.toContain('日をまたぐ');
+    // 対照群:翌日 00:30 までは本当に日をまたぐ
+    const over = one(['DTSTART;TZID=Asia/Tokyo:20260825T220000', 'DTEND;TZID=Asia/Tokyo:20260826T003000', 'SUMMARY:夜']);
+    expect(over.events[0]!.timeEnd).toBeNull();
+    expect(over.counts.spansDays).toBe(1);
+    // 本文に書くと札として読み戻せる
+    const cards = taskCardsOf('n', icsNoteBody(r.events));
+    expect(cards[0]).toMatchObject({ time: '22:00', timeEnd: '24:00' });
+  });
+
+  it('24:00 まで ── 書き出し(東京 / UTC)→ 取り込みで timeEnd が残る', () => {
+    const base: AgendaItem = {
+      key: 'k', lid: 'n1', line: 1, text: '予定', done: false,
+      date: '2026-08-31', time: '22:00', timeEnd: '24:00', until: null, repeat: null,
+    };
+    for (const [zone, tz] of [
+      [{ kind: 'tokyo' }, 'Asia/Tokyo'],
+      [{ kind: 'utc', offsetMinutes: () => 330 }, 'Asia/Kolkata'],
+    ] as [IcsZone, string][]) {
+      const out = buildIcs([base], { stamp: new Date(0), zone });
+      const p = parseIcs(out.text, { localZone: tz });
+      expect(p.events[0], tz).toMatchObject({ date: '2026-08-31', time: '22:00', timeEnd: '24:00' });
+      expect(p.counts.spansDays, tz).toBe(0);
+    }
+  });
+
+  it('説明文を切るとき、絵文字(サロゲートペア)の途中で割らない / 数える字も同じ', () => {
+    const emoji = '😀';
+    const ev = (d: string): IcsEvent => ({
+      date: '2026-08-25', time: null, timeEnd: null, until: null, repeat: null,
+      summary: 's', location: '', description: d,
+    });
+    const body = icsNoteBody([ev(emoji.repeat(301))]);
+    const memo = body.split('\n').find((l) => l.startsWith('  - メモ: '))!.slice('  - メモ: '.length);
+    expect(Array.from(memo).length, '300 字 + …').toBe(301);
+    expect(memo.endsWith(`${emoji}…`)).toBe(true);
+    expect(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(memo), '孤立したサロゲート').toBe(false);
+    // 数え方:300 字ちょうど(UTF-16 では 600)は切らず、「途中までを入れました」にも数えない
+    const exact = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${emoji.repeat(300)}`]);
+    expect(exact.counts.shortened).toBe(0);
+    expect(icsNoteBody(exact.events)).toContain(emoji.repeat(300));
+    expect(icsNoteBody(exact.events)).not.toContain('…');
+    const over = one(['DTSTART;VALUE=DATE:20260825', 'SUMMARY:A', `DESCRIPTION:${emoji.repeat(301)}`]);
+    expect(over.counts.shortened).toBe(1);
+  });
+
+  it('🔴 毎月・毎年で UTC に直すと日付が動くとき(ベルリン 毎月 1 日 00:30)は浮動時刻で書く ── 30 日の月を飛ばさない', () => {
+    // 1 月 = +01:00 / 夏 = +02:00。00:30 はどちらでも UTC では前日になる
+    const berlin: IcsZone = { kind: 'utc', offsetMinutes: (d) => (Number(d.slice(5, 7)) >= 4 && Number(d.slice(5, 7)) <= 10 ? 120 : 60) };
+    const mk = (over: Partial<AgendaItem>): AgendaItem => ({
+      key: 'k', lid: 'n1', line: 1, text: '家賃', done: false,
+      date: '2026-01-01', time: '00:30', timeEnd: '01:30', until: null, repeat: 'month', ...over,
+    });
+    const text = buildIcs([mk({})], { stamp: new Date(0), zone: berlin }).text;
+    const lines = text.split('\r\n');
+    expect(lines).toContain('DTSTART:20260101T003000');
+    expect(lines).toContain('DTEND:20260101T013000');
+    expect(lines).toContain('RRULE:FREQ=MONTHLY');
+    expect(text, 'UTC(Z)で書いている').not.toMatch(/DT(START|END):\d{8}T\d{6}Z/);
+    expect(text).not.toContain('TZID');
+    // 月末の寄せは shift 0 と同じ書き方になる
+    const eom = buildIcs([mk({ date: '2026-01-31' })], { stamp: new Date(0), zone: berlin }).text;
+    expect(eom).toContain('RRULE:FREQ=MONTHLY;BYMONTHDAY=28,29,30,31;BYSETPOS=-1');
+    // UNTIL も同じ浮動時刻
+    const un = buildIcs([mk({ until: '2026-06-01' })], { stamp: new Date(0), zone: berlin }).text;
+    expect(un).toContain('UNTIL=20260601T003000');
+    expect(un).not.toMatch(/UNTIL=\d{8}T\d{6}Z/);
+    // 毎年も同じ
+    const yr = buildIcs([mk({ repeat: 'year' })], { stamp: new Date(0), zone: berlin }).text;
+    expect(yr).toContain('DTSTART:20260101T003000');
+    // 往復:取り込むとベルリンの毎月 1 日 00:30 のまま
+    const back = parseIcs(text, { localZone: 'Europe/Berlin' });
+    expect(back.counts.repeatUnread).toBe(0);
+    expect(back.events[0]).toMatchObject({ date: '2026-01-01', time: '00:30', repeat: 'month' });
+  });
+
+  it('対照群:日付が動かない UTC / 週の繰り返し / 東京は今までの書き方のまま', () => {
+    const plus1: IcsZone = { kind: 'utc', offsetMinutes: () => 60 }; // 12:00 は同じ日
+    const mk = (over: Partial<AgendaItem>): AgendaItem => ({
+      key: 'k', lid: 'n1', line: 1, text: '家賃', done: false,
+      date: '2026-01-01', time: '12:00', timeEnd: null, until: null, repeat: 'month', ...over,
+    });
+    expect(buildIcs([mk({})], { stamp: new Date(0), zone: plus1 }).text).toContain('DTSTART:20260101T110000Z');
+    const wk = buildIcs([mk({ time: '00:30', repeat: 'week' })], { stamp: new Date(0), zone: { kind: 'utc', offsetMinutes: () => 60 } }).text;
+    expect(wk, '週は今までどおり UTC').toMatch(/DTSTART:20251231T233000Z/);
+    expect(wk).toContain('RRULE:FREQ=WEEKLY');
+  });
+});

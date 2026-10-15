@@ -192,7 +192,7 @@ function freqOf(unit: RepeatUnit, start: string, shift: number): string {
   const day = Number(p.day);
   // 🔴 月末の寄せ(app は 31 日の予定を 2 月の末日に出す = その月の min(日, 末日))。
   //   RFC の既定は「その日が無い月を飛ばす」。28..日 の中で**最も大きい実在の日**を選ぶと同じになる。
-  //   ⚠ UTC で日付が動くときは月末の寄せを書かない(動いた日で数え直すと意味が変わる)
+  //   ⚠ UTC で日付が動く毎月・毎年は、呼び側が浮動時刻で書いて `shift` を 0 で渡す(#1087)── 動いた日で数え直さない
   if (unit === 'month' && day >= 29 && shift === 0) {
     const set = Array.from({ length: day - 27 }, (_, i) => 28 + i).join(',');
     return `FREQ=MONTHLY;BYMONTHDAY=${set};BYSETPOS=-1`;
@@ -263,7 +263,10 @@ export interface IcsResult {
   readonly skipped: number;
 }
 
-/** UID。🔑 `lid` と行の位置(ノート丸ごとの予定は `note`)── 日付を直しても変わらない。 */
+/**
+ * UID。🔑 `lid` と行の位置(ノート丸ごとの予定は `note`)── 日付を直しても変わらない。
+ * ⚠ 同じ本文なら同じ UID。上に行を足すなどして**行がずれると変わる**(外の予定表では別の予定として入り直す)。
+ */
 export function icsUid(item: Pick<AgendaItem, 'lid' | 'line'>): string {
   const safe = item.lid.replace(/[^A-Za-z0-9_-]/g, '_');
   return `pkc3-${safe}-${item.line === null ? 'note' : `L${item.line}`}@pkc3`;
@@ -329,13 +332,23 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
     const off = timed ? offsetAt(start, it.time!) : 0;
     const startUtc = timed && zone.kind === 'utc' ? wallToUtcDate(start, it.time!, off) : start;
     const shift = timed && zone.kind === 'utc' ? daysBetween(start, startUtc) ?? 0 : 0;
+    /**
+     * 🔴 **毎月・毎年で UTC に直すと日付が動くときは、浮動時刻(Z も TZID も無し)で書く**(#1087)。
+     *   UTC の DTSTART から `FREQ=MONTHLY` を書くと、規則が **UTC の日**で回る ── ベルリンの
+     *   「毎月 1 日 00:30」が「毎月 UTC の 31 日」になり、30 日の月を飛ばす。浮動時刻なら
+     *   規則は**書いた日そのもの**で回り、月末の寄せ(BYMONTHDAY)も shift 0 と同じに書ける。
+     *   ⚠ 週・日の繰り返しは UTC のままでよい(曜日の列を `shift` だけずらして書く)。
+     */
+    const floating = shift !== 0 && (it.repeat === 'month' || it.repeat === 'year');
 
     const ev: string[] = ['BEGIN:VEVENT', `UID:${icsUid(it)}`, `DTSTAMP:${stamp}`];
     // 時刻つきの値(開始 / 終わり / 例外日)をゾーンに合わせて 1 か所で書く
     const dt = (name: string, date: string, time: string): string =>
       zone.kind === 'tokyo'
         ? `${name};TZID=${TOKYO_TZID}:${compactDate(date)}T${compactTime(time)}`
-        : `${name}:${wallToUtc(date, time, off)}`;
+        : floating
+          ? `${name}:${compactDate(date)}T${compactTime(time)}`
+          : `${name}:${wallToUtc(date, time, off)}`;
     const exdates: string[] = [];
     const skipSet = it.repeat === null ? undefined : opts.skip?.get(repeatMateKey(it.lid, it.text));
     if (skipSet !== undefined) {
@@ -352,8 +365,11 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
       if (zone.kind === 'tokyo') usesTokyo = true;
       if (it.repeat !== null) {
         // 🔴 終わりは UTC(開始の時刻で数える ── 最終日の回を含める)
-        const untilPart = until === null ? '' : `;UNTIL=${wallToUtc(until, time, off)}`;
-        ev.push(`RRULE:${freqOf(it.repeat, start, shift)}${untilPart}`);
+        const untilPart =
+          until === null
+            ? ''
+            : `;UNTIL=${floating ? `${compactDate(until)}T${compactTime(time)}` : wallToUtc(until, time, off)}`;
+        ev.push(`RRULE:${freqOf(it.repeat, start, floating ? 0 : shift)}${untilPart}`);
         if (exdates.length > 0) {
           const vals = exdates.map((d) => dt('EXDATE', d, time));
           // 同じ書き方の行を 1 本にまとめる(`EXDATE;TZID=…:a,b`)

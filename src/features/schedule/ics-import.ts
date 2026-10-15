@@ -552,6 +552,14 @@ export function parseIcs(text: string, opts: IcsParseOptions = {}): IcsParse {
       if (endLocal !== null && endLocal.date === date && isScheduleTimeRange(time, endLocal.time)) {
         // 開始と同じ時刻(長さ 0)は幅にしない
         if (endLocal.time !== time) timeEnd = endLocal.time;
+      } else if (
+        endLocal !== null &&
+        endLocal.date === addDays(date, 1) &&
+        endLocal.time === '00:00' &&
+        isScheduleTimeRange(time, '24:00')
+      ) {
+        // 🔴 翌日の 00:00 までは「24:00 まで」(書き出しが `〜24:00` をこう書く)── 日またぎではない(#1087)
+        if (time !== '24:00') timeEnd = '24:00';
       } else if (endLocal !== null && endLocal.date !== date) {
         c.spansDays += 1;
       }
@@ -587,7 +595,7 @@ export function parseIcs(text: string, opts: IcsParseOptions = {}): IcsParse {
     if (
       Array.from(rawSummary).length > TEXT_MAX ||
       Array.from(rawLocation).length > TEXT_MAX ||
-      rawDescription.length > DESCRIPTION_MAX
+      Array.from(rawDescription).length > DESCRIPTION_MAX
     )
       c.shortened += 1;
     const summary = cap(rawSummary);
@@ -690,8 +698,9 @@ export function icsNoteBody(events: readonly IcsEvent[]): string {
     out.push(lineOf(e));
     if (e.location !== '') out.push(`  - 場所: ${e.location}`);
     if (e.description !== '') {
-      const d =
-        e.description.length > DESCRIPTION_MAX ? `${e.description.slice(0, DESCRIPTION_MAX)}…` : e.description;
+      // 🔴 切るのは**字(コードポイント)**で ── UTF-16 で切ると絵文字の途中で割れて壊れた字が残る(#1087)
+      const cs = Array.from(e.description);
+      const d = cs.length > DESCRIPTION_MAX ? `${cs.slice(0, DESCRIPTION_MAX).join('')}…` : e.description;
       out.push(`  - メモ: ${d}`);
     }
   }

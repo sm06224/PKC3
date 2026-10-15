@@ -257,6 +257,30 @@ describe('画面に戻ってきたとき(visible)に計算し直す(常駐タイ
     expect(relOf(r, '2026-10-04'), '外したのに動いている').toBe('明日');
   });
 
+  it('🔴 日が変わっていたら、戻ってきたときに onDayChange を 1 回呼ぶ(予定の面の「今日」を描き直す。#1087)', () => {
+    const r = document.createElement('div');
+    document.body.append(r);
+    let now = new Date(2026, 9, 1, 23, 50);
+    const calls: string[] = [];
+    const stop = watchRelativeDays(document, r, () => now, () => calls.push('day'));
+
+    setVisibility('visible');
+    expect(calls, '同じ日なのに描き直している').toEqual([]);
+
+    now = new Date(2026, 9, 2, 0, 10); // 日をまたいだ
+    setVisibility('hidden');
+    expect(calls, '隠れた時に描き直している(visible の時だけ)').toEqual([]);
+    setVisibility('visible');
+    expect(calls, '日をまたいだのに描き直さない').toEqual(['day']);
+    setVisibility('visible');
+    expect(calls, '同じ日に 2 度呼んでいる').toEqual(['day']);
+
+    stop();
+    now = new Date(2026, 9, 3);
+    setVisibility('visible');
+    expect(calls, '外したのに動いている').toEqual(['day']);
+  });
+
   it('🔴 設定を切っていれば、戻ってきても差さない', () => {
     const r = document.createElement('div');
     r.innerHTML = '<p><span class="pkc-date-link" data-pkc-date="2026-10-04">@2026-10-04</span></p>';
