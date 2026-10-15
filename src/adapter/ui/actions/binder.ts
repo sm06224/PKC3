@@ -853,6 +853,10 @@ function actUnlessEditedElsewhere(
   });
 }
 
+/** スマートフォルダの条件を書き換える 3 つの口(足す / 選ぶ / 外す)が、別タブの確認に失敗したときの字(#1087)。 */
+const SMART_COND_ELSEWHERE_FAILED =
+  '条件を書き換えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
+
 /**
  * 🔴 **予定を足す先の「今日のノート」は、追記できる種類だけ**(#1087)。
  * ⚠ 直す前は `findTodayNote` の答えをそのまま使っていた ── 題名が今日の日付のフォルダ・添付・スタック・アプリがあると、
@@ -7969,10 +7973,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (端末の保存に置くと、書き出しにも別の端末にも乗らない)。
    * 🔑 書き換えは `REQUEST_SMART_COND` 1 本 ── 足すも外すも同じ口を通る(§7)。
    */
-  'smart-cond-add': (dispatcher, _target, _services, root) => {
+  'smart-cond-add': (dispatcher, _target, services, root) => {
     const st = dispatcher.getState();
     const lid = st.scopeLid;
     if (lid === null) return;
+    // 🔴 編集中は reducer が黙って捨てる(`SMART_COND`)── 打った字が欄から消えるだけになるので、先に理由を出して欄は残す(#1087)
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}条件を書き換えてください` });
+      return;
+    }
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="smart-cond"]');
     // 🔑 **打った字の読み方はどの欄でも同じ**(#637)── `#請求 #未払` で 2 条件
     const longMsg = overlongTagMessage(field?.value ?? '');
@@ -7986,13 +7995,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '集める条件にするタグを入力してください' });
       return;
     }
-    // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
-    dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'smart-cond' });
-    for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
-    // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す。
-    //    ⚠ 断りは後から来る ── 入らなかった名前は効果層が `TAGS_REFUSED` で返し、
-    //    描く側(`filer.ts`)が欄へ戻す(#640 案 A)
-    if (field) field.value = '';
+    // 🔴 実体は条件の入れ物(フォルダのノート)の本文を書く ── 別のタブ・窓が編集中なら撃たない(#1087)
+    actUnlessEditedElsewhere(dispatcher, services, [lid], SMART_COND_ELSEWHERE_FAILED, () => {
+      // 🔑 前の回に入らなかった名前は、この回の字に混ぜない(#640 案 A)
+      dispatcher.dispatch({ type: 'CLEAR_REFUSED_TAGS', field: 'smart-cond' });
+      for (const tag of tags) dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'add' });
+      // 🔑 通したら欄を空にする(次の 1 つを打てる)── ⚠ 断ったときは残す(撃つ前に断るので、ここへ来ない)。
+      //    ⚠ 断りは後から来る ── 入らなかった名前は効果層が `TAGS_REFUSED` で返し、
+      //    描く側(`filer.ts`)が欄へ戻す(#640 案 A)
+      if (field) field.value = '';
+    });
   },
   /**
    * 🔴 **列で引く条件を選ぶ**(#421 段②)。⚠ `<select>` なので **change** で来る
@@ -8000,9 +8012,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ **どの条件か**は要素が持つ(`data-pkc-smart-field`)── action を
    *   4 つに割ると、足すたびに 4 か所へ書くことになる(§7)。
    */
-  'smart-field': (dispatcher, target) => {
-    const lid = dispatcher.getState().scopeLid;
+  'smart-field': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = st.scopeLid;
     if (lid === null) return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}条件を書き換えてください` });
+      return;
+    }
     const field = target.getAttribute('data-pkc-smart-field') ?? '';
     if (!(SMART_FIELDS as readonly string[]).includes(field)) return;
     /**
@@ -8013,13 +8030,22 @@ const ACTIONS: Record<string, ActionHandler> = {
       target instanceof HTMLSelectElement || target instanceof HTMLInputElement
         ? target.value
         : '';
-    dispatcher.dispatch({ type: 'SMART_FIELD', lid, field: field as SmartField, value });
+    actUnlessEditedElsewhere(dispatcher, services, [lid], SMART_COND_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SMART_FIELD', lid, field: field as SmartField, value }),
+    );
   },
-  'smart-cond-remove': (dispatcher, target) => {
-    const lid = dispatcher.getState().scopeLid;
+  'smart-cond-remove': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = st.scopeLid;
     const tag = target.getAttribute('data-pkc-tag') ?? '';
     if (lid === null || tag === '') return;
-    dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'remove' });
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}条件を書き換えてください` });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, [lid], SMART_COND_ELSEWHERE_FAILED, () =>
+      dispatcher.dispatch({ type: 'SMART_COND', lid, tag, mode: 'remove' }),
+    );
   },
   /**
    * 🔴 **選んだものを、このスマートフォルダから外す**(user 指示 2026-08-23)。
@@ -8029,6 +8055,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     const smartLid = st.scopeLid;
     if (smartLid === null) return;
+    // 🔴 reducer の `SMART_TAGS` は編集中に黙って捨てるので、押した所で理由を言う(条件の欄と同じ ── #1087)
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}外してください` });
+      return;
+    }
     // ⚠ 相手は**いま表に出ている印**だけ(`delete-selected` / `bulk-tag` と同じ規則)
     const rows = new Set(visibleFilerRows(st).map((r) => r.lid));
     const lids = st.selection.filter((lid) => rows.has(lid));

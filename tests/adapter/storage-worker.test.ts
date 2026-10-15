@@ -2638,6 +2638,25 @@ describe('スマートフォルダの走査(#421 段②)', () => {
     expect((await scan({ createdFrom: past })).lids.length).toBeGreaterThan(0);
   });
 
+  /**
+   * 🔴 **境目の日に書いたノートが落ちない**(#1087)。列は `datetime('now')` の形
+   * (`2026-10-03 12:00:00`、空白)、境目は ISO(`…T06:00:00.000Z`)── 文字列のまま比べると
+   * 同じ日で ' ' < 'T' になり、境目より後の行が除かれる。取り込みが運んだ ISO の行も同じ物差しで比べる。
+   */
+  it('🔴 境目の日: 空白形・ISO 形のどちらの行も、時刻の前後で正しく分かれる', async () => {
+    const cutoff = '2026-10-03T06:00:00.000Z';
+    const stamp = (lid: string, at: string) =>
+      put(lid, { archetype: 'text', createdAt: at, updatedAt: at });
+    await stamp('edge-space-after', '2026-10-03 12:00:00');
+    await stamp('edge-space-before', '2026-10-03 03:00:00');
+    await stamp('edge-iso-after', '2026-10-03T07:00:00.000Z');
+    await stamp('edge-iso-before', '2026-10-03T05:00:00.000Z');
+    const edge = (lids: readonly string[]) => lids.filter((l) => l.startsWith('edge-')).sort();
+    const want = ['edge-iso-after', 'edge-space-after'];
+    expect(edge((await scan({ updatedFrom: cutoff })).lids), '更新の境目').toEqual(want);
+    expect(edge((await scan({ createdFrom: cutoff })).lids), '作成の境目').toEqual(want);
+  });
+
   it('🔴 列とタグは AND で効く', async () => {
     await put('n-notag', { archetype: 'attachment', entryOrder: 4 }, 'タグの無い本文\n');
     const got = await scan({ kind: 'attachment', tags: ['請求'] });
