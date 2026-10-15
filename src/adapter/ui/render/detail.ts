@@ -1329,7 +1329,7 @@ export class DetailRenderer {
       host.getAttribute(PAINTED_ATTR) !== jump.lid
     )
       return;
-    const ranges = collectHitRanges(host, jump.query);
+    const ranges = collectHitRanges(host, jump.query, jump.origin);
     const index = wrapHitIndex(jump.step, ranges.length);
     paintHitRanges(ranges, index);
     // 🔑 「目次」の隣へ置く ── 目次が出ているときだけ、その幅の分を右へ空ける

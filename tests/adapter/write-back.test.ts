@@ -21,6 +21,7 @@ import {
   writeBackEntry,
   WRITE_BACK_CHANGED_NOTE,
   WRITE_BACK_EMPTY_NOTE,
+  WRITE_BACK_FILE_CHANGED_NOTE,
   type WriteBackDeps,
 } from '../../src/adapter/ui/actions/write-back';
 import { CHANGED_OUTSIDE_WRITE_BACK_NOTE } from '../../src/adapter/platform/launched-files';
@@ -312,6 +313,44 @@ describe('元のファイルへ書き戻す', () => {
  * 🔑 台を「**書込が飛んでいる間は disk に載っていない**」形にする(`settle` が解けて初めて載る)。
  *   これなら、待たない側は**空 / 古い本文**を読み、観測点(書かれた中身・断り)が分かれる。
  */
+describe('確認している間にファイルが変わったら書かない(#1087)', () => {
+  it('🔴 書く直前の読み直しで中身が違えば、書かずに断る。押し直せば新しい差分で確認が出る', async () => {
+    let fileText = '古い';
+    const shown: (string | null)[] = [];
+    const { deps, written, said } = harness({
+      inspectFile: async () => ({ changed: false, text: fileText }),
+      confirm: async (_m, diff) => {
+        shown.push(diff?.rows.map((r) => ('text' in r ? r.text : '')).join('|') ?? null);
+        // 確認の窓が開いている間に別のエディタが保存した(1 回目だけ)
+        if (shown.length === 1) fileText = '外で直した';
+        return true;
+      },
+    });
+    await writeBackEntry(deps);
+    expect(written, '外での変更を黙って上書きした').toEqual([]);
+    expect(said).toEqual([`fail:${WRITE_BACK_FILE_CHANGED_NOTE}`]);
+    // 押し直し: 新しい差分(外で直した行)が出て、変わらなければ書ける
+    await writeBackEntry(deps);
+    expect(shown[1], '押し直しで新しい差分が出ていない').toContain('外で直した');
+    expect(written, '押し直しで書けない').toHaveLength(1);
+  });
+
+  it('対照群: 確認の間に変わらなければ書く', async () => {
+    const { deps, written } = harness({ inspectFile: async () => ({ changed: false, text: '同じ' }) });
+    await writeBackEntry(deps);
+    expect(written).toHaveLength(1);
+  });
+
+  it('🔴 取り込み後の変更の有無が確認の間に動いた場合も書かない(中身が読めない大きいファイル)', async () => {
+    let n = 0;
+    const { deps, written } = harness({
+      inspectFile: async () => ({ changed: n++ > 0, text: null }),
+    });
+    await writeBackEntry(deps);
+    expect(written).toEqual([]);
+  });
+});
+
 describe('settle は確認の前と後の両方で待つ', () => {
   /** 飛んでいる書込を持つ台。`settle()` が解けるまで、`post` した本文は `getBody` に見えない。 */
   function inFlight(initial: string) {

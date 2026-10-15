@@ -193,6 +193,37 @@ test('🔴 本文を右クリックして横に留めると、2 つの枠が並�
   await expect(pinnedBox, '編集をやめたら留めた枠のチェックが戻った').toBeChecked();
 
   /**
+   * 🔴 **留めたノートの古い版へ戻すと、留めた枠も戻した本文になる**(#1087)。
+   *
+   * ⚠ 直す前は、戻す(`ENTRY_RESTORED`)が主の枠だけを新しい本文にして、留めた枠は
+   *   戻す前の本文のまま残った。🔑 起動は足していない(この test の道中。資料 B を主に開いて
+   *   書き換え → 履歴から戻す。資料 B は留めたままなので、主と留めた枠が同じノートを映す)。
+   */
+  await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').nth(1).click();
+  await expect(
+    page.locator('[data-pkc-split-main] [data-pkc-field="detail-body"] h1').first(),
+    '前提が崩れている(主が資料 B になっていない)',
+  ).toContainText('資料 B');
+  await clickReal(page, '[data-pkc-split-main] [data-pkc-action="start-edit"]');
+  await page.locator('[data-pkc-field="editor-body"]').fill('# 資料 B 書き換え後\n\n本文');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(
+    page.locator('[data-pkc-split-lid] [data-pkc-field="split-body"] h1').first(),
+    '前提が崩れている(書き換えが留めた枠へ届いていない)',
+  ).toContainText('書き換え後');
+  await clickReal(page, '[data-pkc-action="show-history"]');
+  await expect(page.locator('[data-pkc-field="history-panel"]')).toBeVisible();
+  await clickReal(page, '[data-pkc-action="restore-revision"]');
+  await expect(
+    page.locator('[data-pkc-split-main] [data-pkc-field="detail-body"] h1').first(),
+    '前提が崩れている(主が戻っていない)',
+  ).not.toContainText('書き換え後');
+  await expect(
+    page.locator('[data-pkc-split-lid] [data-pkc-field="split-body"] h1').first(),
+    '履歴から戻したのに、留めた枠が戻す前の本文のまま',
+  ).not.toContainText('書き換え後');
+
+  /**
    * 🔴 **段組み(段①)と喧嘩しない** ── 段組みが効くかは**枠の幅**で決まる。
    *
    * ⚠ 器の幅で判定していると、並べて枠が狭くなっても「2 段置ける」と誤判定し、

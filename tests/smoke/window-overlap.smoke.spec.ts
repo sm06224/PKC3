@@ -29,7 +29,7 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, useSplitEditor } fr
  * `tests/adapter/storage-worker.test.ts` で見ている ── ここでは重ねない
  * (同じ主張を 2 か所で見ると、片方を壊しても気づけない)。
  */
-test('🔴 別窓が同じノートを書いたら、保存時に理由が出る (#178)', async ({ page, context }) => {
+test('🔴 本体が編集中のノートへ、別窓は日付を書かずに理由を出す (#178 / #1087)', async ({ page, context }) => {
   // ⚠ **PKC の boot を 2 回通す**(本体 + 2 枚目)ので、既定の 30 秒では足りない
   test.setTimeout(90_000);
   const errors = collectPageErrors(page);
@@ -80,31 +80,25 @@ test('🔴 別窓が同じノートを書いたら、保存時に理由が出る
     '書く先が無いのに時刻の欄が出た(打った字が黙って捨てられる)',
   ).toHaveCount(0);
   await clickReal(win, '[data-pkc-field="dialog-ok"]');
-  // ⚠ **入ったことを確かめてから先へ進む**(入っていなければ以降は判定不能)──
-  //    「外す」が押せる = frontmatter に `date:` が在る、である
-  await expect(
-    win.locator('[data-pkc-action="clear-entry-date"]'),
-    '別窓で日付が入っていない(この test の前提が崩れている)',
-  ).toBeVisible({ timeout: 15_000 });
-
   /**
-   * 🔴 **本体の窓で保存する** ── 打った字は残り、**理由が出る**。
-   * ⚠ 観測点は**状態の行**へ絞る(root 全体で探すと、お知らせのカードの文言に
-   *   満たされて常に真になる ── 2026-08-17 に踏んだ型)。
+   * 🔴 **本体の窓が編集中なので、別窓の日付付けは断る**(#1087、2026-10-15)。
+   * ⚠ 直す前は通していた ── 本体が保存すると「重なりました」は出るが、別窓で付けた日付は本文から消え、
+   *   履歴にだけ残っていた。いまは他の書き込み(チェック・追記・版を戻す)と同じく、押した窓で理由を出して止める。
+   * ⚠ 保存時の「重なりました」(diskAhead)は、錠を持たない経路のために reducer に残っている ── その字は
+   *   unit(`app-state` の COMMIT_EDIT)が見ている。
    */
+  await expect(
+    win.locator('[data-pkc-region="status"]'),
+    '本体が編集中なのに、別窓が日付を書いた',
+  ).toContainText('別のタブまたはウィンドウで編集中です', { timeout: 15_000 });
+  // ⚠ 「外す」は日付が無いときも要素は在り hidden で畳まれている ── 数ではなく見えるかで見る
+  await expect(win.locator('[data-pkc-action="clear-entry-date"]'), '断ったのに日付が入った').toBeHidden();
+
+  // 🔑 本体の窓は、何も重ならずに保存できる(打った字が残る)
   await page.bringToFront();
   await clickReal(page, '[data-pkc-action="commit-edit"]');
-  await expect(
-    page.locator('[data-pkc-region="status"]'),
-    '黙って上書きした(user は日付が消えたとしか見えない)',
-  ).toContainText('別のタブまたはウィンドウの変更と重なりました', { timeout: 15_000 });
-  await expect(
-    page.locator('[data-pkc-region="status"]'),
-    '戻し方が書いていない',
-  ).toContainText('履歴');
-
-  // 🔑 打った字は捨てられていない(user の作業を守るのが last-write-wins の理由)
   await expect(page.locator('[data-pkc-view-pane="detail"]')).toContainText('打鍵中の下書き');
+  await expect(page.locator('[data-pkc-region="status"]')).not.toContainText('変更と重なりました');
 
   await win.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

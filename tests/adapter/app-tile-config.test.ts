@@ -186,6 +186,24 @@ describe('タイル設定を書く(P8 段⑭)', () => {
   });
 
   /**
+   * 🔴 **disk が進んだまま保存したら、重なったことと戻し方を言う**(#178)。
+   * ⚠ 実ブラウザの smoke(`window-overlap`)は、別窓の書き込みを門で断るようになったので(#1087)この字を見ない ──
+   *   錠を持たない経路のために reducer に残っている字を、ここで見る。
+   */
+  it('🔴 disk が進んだまま保存すると、重なったことと履歴から戻せることを言う', async () => {
+    const h = setup();
+    h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(20);
+    h.d.dispatch({ type: 'START_EDIT' });
+    h.d.dispatch({ type: 'UPDATE_OPEN_BODY', body: '打ちかけ' });
+    h.d.dispatch({ type: 'APP_TILE_SAVED', lid: 'a1', gen: 0, body: 'よそから来た' });
+    h.d.dispatch({ type: 'COMMIT_EDIT' });
+    const err = h.d.getState().error ?? '';
+    expect(err).toContain('別のタブまたはウィンドウの変更と重なりました');
+    expect(err).toContain('履歴');
+  });
+
+  /**
    * 🔴 **disk を観測点にする**(P8 段⑯。レビュー H-1 が実測で再現させた欠陥)。
    *
    * 直す前の実測: 登録にチェック(SET_APP_TILE)→ ack が返る前に編集して保存

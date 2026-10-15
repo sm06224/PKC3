@@ -40,6 +40,21 @@ export function findTerms(query: string): string[] {
 }
 
 /**
+ * 🔴 **塗る語を、始めた場所の規則で割る**(#1087)。
+ * ⚠ 「探す」の行から来た塗りは `findTerms`(空白で AND / `"…"` / `-語` 除外)── 探すがそう引いたので。
+ * ⚠ **左の列の欄から来た塗りは、打った字を丸ごと 1 句**(欄が `planPlain` でそう引く)。
+ *   同じ割り方で塗ると、`-1` / `-メモ` は除外の語と読まれて 0 件、`"a b"` は引用符を剥がして外す
+ *   (一覧には当たっているのに「一致しませんでした」と出る)。
+ */
+export function jumpTerms(query: string, origin: 'find' | 'filter'): string[] {
+  if (origin === 'filter') {
+    const t = query.trim();
+    return t === '' ? [] : [t];
+  }
+  return findTerms(query);
+}
+
+/**
  * 大小を畳む。⚠ **長さを変えない** ── `'İ'.toLowerCase()` は 2 字になるので、そのまま使うと
  * 畳んだ字の添字が元の字の添字とずれ、塗る位置がずれる。長さが変わる字はそのまま残す。
  */

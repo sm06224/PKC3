@@ -26,7 +26,9 @@ import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import {
   HIT_CURRENT_HIGHLIGHT,
   HIT_HIGHLIGHT,
+  HIT_RANGE_MAX,
   collectHitRanges,
+  paintHitRanges,
   searchJumpLabel,
 } from '../../src/adapter/ui/render/search-jump';
 import { toggleHeadingFold } from '../../src/adapter/ui/render/heading-fold';
@@ -63,9 +65,16 @@ class FakeHighlight {
   readonly ranges: Range[];
   priority = 0;
   constructor(...ranges: Range[]) {
+    // ⚠ 本物の Highlight も、引数に大量の Range を展開されると(スタックの上限で)RangeError になりうる ── それを模す
+    if (ranges.length > SPREAD_LIMIT) throw new RangeError('Maximum call stack size exceeded');
     this.ranges = ranges;
   }
+  add(range: Range): this {
+    this.ranges.push(range);
+    return this;
+  }
 }
+const SPREAD_LIMIT = 10000;
 let registry: Map<string, FakeHighlight>;
 let scrolled: Element[];
 
@@ -159,6 +168,81 @@ describe('collectHitRanges: 本文の text node から当たりを数える', ()
     const before = host.innerHTML;
     collectHitRanges(host, '会議');
     expect(host.innerHTML).toBe(before);
+  });
+});
+
+/**
+ * 🔴 **左の列の欄から始めた塗りは、打った字を丸ごと 1 句で塗る**(#1087)。
+ * ⚠ 欄は打った字を 1 句として引く(`planPlain`)。「探す」と同じ割り方で塗ると、`-1` / `-メモ` は除外の語と読まれて
+ *   0 件、`"a b"` は引用符を剥がして外す ── 一覧には当たっているのに「一致しませんでした」と出ていた。
+ */
+describe('🔴 欄から始めた塗りは、字を丸ごと 1 句として数える', () => {
+  const host = (html: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.innerHTML = html;
+    document.body.append(h);
+    return h;
+  };
+
+  it.each([
+    ['-1', '<p>残り -1 と -1 です</p>', 2],
+    ['-メモ', '<p>-メモ を書いた</p>', 1],
+    ['"a b"', '<p>x "a b" y</p>', 1],
+  ])('欄の語 %s は、そのままの字で数える', (q, html, n) => {
+    expect(collectHitRanges(host(html), q, 'filter')).toHaveLength(n);
+  });
+
+  it('🔴 対照群: 「探す」から来た塗りは、今までどおり除外・引用符を解く(割り方を変えていない)', () => {
+    expect(collectHitRanges(host('<p>残り -1 です</p>'), '-1', 'find'), '除外の語を塗った').toEqual([]);
+    // 引用符は解かれる(塗るのは `a b` だけ)/ 欄の起点は引用符ごと塗る
+    expect(collectHitRanges(host('<p>x "a b" y</p>'), '"a b"', 'find').map((r) => r.toString())).toEqual(['a b']);
+    expect(collectHitRanges(host('<p>x "a b" y</p>'), '"a b"', 'filter').map((r) => r.toString())).toEqual(['"a b"']);
+    expect(collectHitRanges(host('<p>会議と中止</p>'), '会議 -中止')).toHaveLength(1); // 起点を省くと「探す」
+  });
+
+  it('🔴 画面で: 欄の `-メモ` で開いた本文に当たりが数えられ、「一致しませんでした」を出さない', async () => {
+    const { root, detail, s0 } = await open('# 題\n\n-メモ を残す。\n');
+    // ⚠ 欄が空だと欄の起点の塗りは孤児として消える ── 欄に語が入っている台にする
+    const typed = await apply(detail, s0, { type: 'SET_ENTRY_FILTER', query: '-メモ' });
+    const s = await apply(detail, typed, { type: 'SEARCH_JUMP_START', lid: 'a', query: '-メモ', origin: 'filter' });
+    expect(s.searchJump?.origin, '台の前提: 欄からの起点になっていない').toBe('filter');
+    expect(count(root)).toBe('1/1 件');
+    expect(registry.get(HIT_HIGHLIGHT)?.ranges.map((r) => r.toString())).toEqual(['-メモ']);
+  });
+
+  it('🔴 画面で・対照群: 同じ語でも「探す」の起点なら除外と読み、当たりは 0 件と言う', async () => {
+    const { root, detail, s0 } = await open('# 題\n\n-メモ を残す。\n');
+    await apply(detail, s0, { type: 'SEARCH_JUMP_START', lid: 'a', query: '-メモ' });
+    expect(count(root)).toContain('一致しませんでした');
+  });
+});
+
+describe('🔴 当たりが多すぎても壊れない(#1087)', () => {
+  it('集める当たりは HIT_RANGE_MAX で打ち切る', () => {
+    const host = document.createElement('div');
+    host.textContent = 'a'.repeat(HIT_RANGE_MAX + 100);
+    document.body.append(host);
+    const ranges = collectHitRanges(host, 'a');
+    expect(ranges, '打ち切らずに全部集めた').toHaveLength(HIT_RANGE_MAX);
+    expect(HIT_RANGE_MAX).toBe(50000);
+  });
+
+  it('対照群: 上限より少なければ全部集める', () => {
+    const host = document.createElement('div');
+    host.textContent = 'a'.repeat(30);
+    document.body.append(host);
+    expect(collectHitRanges(host, 'a')).toHaveLength(30);
+  });
+
+  it('🔴 塗るとき Range を引数に展開しない(多いと RangeError)── 全部が塗りに入る', () => {
+    // 台の前提: 展開する書き方は、この台の Highlight で実際に落ちる
+    expect(() => new (globalThis as { Highlight: new (...r: Range[]) => unknown }).Highlight(
+      ...(Array.from({ length: SPREAD_LIMIT + 1 }, () => document.createRange()) as Range[]),
+    )).toThrow(RangeError);
+    const many = Array.from({ length: SPREAD_LIMIT + 5 }, () => document.createRange());
+    expect(paintHitRanges(many, 0)).toBe(true);
+    expect(registry.get(HIT_HIGHLIGHT)!.ranges).toHaveLength(SPREAD_LIMIT + 5);
+    expect(registry.get(HIT_CURRENT_HIGHLIGHT)!.ranges).toHaveLength(1);
   });
 });
 

@@ -486,3 +486,95 @@ describe('開くときに入れ替える(#809-4)', () => {
     expect(d.getState().selectedLid).toBe('n1');
   });
 });
+
+/**
+ * 🔴 **履歴から戻したとき・ディスクから読み直したときも、留めた枠は追いつく**(#1087)。
+ *
+ * ⚠ `ENTRY_RESTORED` と `ENTRY_BODY_REFRESHED` は主の枠(`openBody`)だけを差し替え、留めた枠(`splitBodies`)を
+ *   通っていなかった ── 同じノートを横に留めていると、戻したのに横の枠だけ**古い本文のまま**だった。
+ *   `ENTRY_BODY_REFRESHED` は `openBody` が別のノートだと丸ごと捨てるので、**留めた枠にだけ映しているノート**は
+ *   読み直しが 1 度も届かなかった。
+ */
+describe('履歴の復元・読み直しでも、留めた枠が追いつく', () => {
+  /** n1 を選んで本文を載せ、n1 を横にも留めて古い本文を入れた台。 */
+  function pinnedOld(): Dispatcher {
+    const d = booted();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '古\n' });
+    d.dispatch({ type: 'PIN_SPLIT_ENTRY', lid: 'n1' });
+    d.dispatch({ type: 'SPLIT_BODY_LOADED', lid: 'n1', body: '古\n' });
+    expect(d.getState().splitBodies.get('n1'), '台の前提: 留めた本文が入っていない').toBe('古\n');
+    return d;
+  }
+  const restore = (d: Dispatcher, body: string) =>
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'revision',
+      meta: d.getState().entryMetas.get('n1')!,
+      body,
+    });
+
+  it('🔴 主の枠で開いているノートを戻すと、留めた枠も戻った本文になる', () => {
+    const d = pinnedOld();
+    restore(d, '戻した\n');
+    expect(d.getState().openBody?.body, '台の前提: 主の枠は戻っていない').toBe('戻した\n');
+    expect(d.getState().splitBodies.get('n1'), '留めた枠が古いまま').toBe('戻した\n');
+  });
+
+  it('🔴 戻す前に別のノートを選んでいても、留めた枠は戻った本文になる', () => {
+    const d = pinnedOld();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    expect(d.getState().selectedLid, '台の前提: 別のノートを選んでいない').toBe('n2');
+    restore(d, '戻した\n');
+    expect(d.getState().selectedLid, '選択を奪い返した').toBe('n2');
+    expect(d.getState().splitBodies.get('n1'), '留めた枠が古いまま').toBe('戻した\n');
+  });
+
+  it('🔴 同じノートを編集中に戻しても、留めた枠はディスクの姿(戻した本文)になる', () => {
+    const d = pinnedOld();
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '台の前提: 編集中でない').toBe('editing');
+    restore(d, '戻した\n');
+    expect(d.getState().splitBodies.get('n1'), '留めた枠が古いまま').toBe('戻した\n');
+  });
+
+  it('⚠ 対照群 ── 留めていないノートを戻しても、留めの入れ物を作り直さない', () => {
+    const d = pinnedOld();
+    const before = d.getState().splitBodies;
+    d.dispatch({
+      type: 'ENTRY_RESTORED',
+      mode: 'revision',
+      meta: d.getState().entryMetas.get('n2')!,
+      body: '別\n',
+    });
+    expect(d.getState().splitBodies, '同じ参照でない(断面指紋が毎回変わる)').toBe(before);
+  });
+
+  it('🔴 読み直しは、主の枠が別のノートを開いていても、留めた枠にだけ映しているノートへ届く', () => {
+    const d = pinnedOld();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n2', body: '二\n' });
+    expect(d.getState().openBody?.lid, '台の前提: 主の枠が n2 を開いていない').toBe('n2');
+    d.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: 'n1', body: '読み直した\n' });
+    expect(d.getState().splitBodies.get('n1'), '留めた枠に届いていない').toBe('読み直した\n');
+    expect(d.getState().openBody?.body, '主の枠(別のノート)を触った').toBe('二\n');
+  });
+
+  it('🔴 読み直しは、主の枠が同じノートのときも留めた枠に届く(読む画面 / 編集中)', () => {
+    const r = pinnedOld();
+    r.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: 'n1', body: '読み直した\n' });
+    expect(r.getState().splitBodies.get('n1'), '読む画面で届いていない').toBe('読み直した\n');
+    const e = pinnedOld();
+    e.dispatch({ type: 'START_EDIT' });
+    e.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: 'n1', body: '読み直した\n' });
+    expect(e.getState().phase, '台の前提: 編集中でない').toBe('editing');
+    expect(e.getState().splitBodies.get('n1'), '編集中で届いていない').toBe('読み直した\n');
+  });
+
+  it('⚠ 対照群 ── どこにも映していないノートの読み直しは、state を 1 ビットも動かさない', () => {
+    const d = pinnedOld();
+    const before = d.getState();
+    d.dispatch({ type: 'ENTRY_BODY_REFRESHED', lid: 'n3', body: '誰も見ていない\n' });
+    expect(d.getState(), 'state を差し替えた').toBe(before);
+  });
+});
