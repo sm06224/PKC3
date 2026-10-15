@@ -15,10 +15,13 @@
  * 予定タブの「足す」と目盛りの作成(`addScheduleItemChecked`、`binder.ts`)/
  * 履歴の「この版に戻す」(`restore-revision`、`binder.ts`。#1087)/
  * 塊を別のノートへ持っていく「⠿」(元と先の両方。`actUnlessEditedElsewhere`、#1087)/
- * 表の行・列を消す「×」(`shape-cell`。足す回は通さない。#1087)/
+ * 表の行・列を足す「＋」と消す「×」(`shape-cell`。#1087)/
+ * 板の付箋の操作(置く・前へ出す・形・色・線の太さ・矢じり・文字の大きさ・回す・グループ・位置と大きさ。
+ *   `placeEditedElsewhereGate`、`binder.ts`。#1087)/
  * 表の升の書換(`edit-cell` の確定。断ったら打った字を知らせに残す)と、表の形変え(「表にする」`applyTableFormat`)(#1087)/
  * 拡張からの書き戻し(`applyExtWriteOps`、`ext-write-apply.ts`。書く lid ごと。#1087)。
- * ⚠ 板の付箋のドラッグ移動・削除には足していない(離した直後の体感が変わるので、見え方の判断待ち)。
+ * ⚠ 板の付箋のドラッグ移動・付箋を消す(`remove-place`)・線を消す(`remove-place-line`)には足していない
+ *   (離した直後 / 確認の直後の体感が変わるので、見え方の判断待ち。3 つは同じ「判断待ち」の組)。
  * 通さない口(理由は設計 doc §6 W5-d): 計時の記録・文字起こし・添付のドロップ。
  */
 import { EDIT_ELSEWHERE_ERROR } from '@features/message/caution-events';

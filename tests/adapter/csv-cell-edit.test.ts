@@ -293,9 +293,9 @@ describe('行・列の口を押す(#418 段①)', () => {
 
   /**
    * 🔴 **消す回は、別のタブ・窓が編集中なら断る**(#1087。追記と同じ門 = `editedElsewhereReason`)。
-   * ⚠ 通すと、編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回は従来どおり(問い合わせない)。
+   * ⚠ 通すと、編集中のタブの保存で上書きされ、消した行・列は履歴にだけ残る。足す回も同じ門(#1087 の続き)。
    */
-  describe('消す回は別のタブの編集を確かめる', () => {
+  describe('消す回・足す回は別のタブの編集を確かめる', () => {
     const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
     const press = (mode: 'add' | 'remove', grant: 'granted' | 'denied' | 'unreachable') => {
       const { root, btn } = shapeRoot();
@@ -337,10 +337,19 @@ describe('行・列の口を押す(#418 段①)', () => {
       expect(r.dispatched.map((a) => a['type'])).toEqual(['SET_CSV_SHAPE']);
     });
 
-    it('⚠ 足す回は問い合わせない(消す回だけの門)', () => {
+    // 足す回も同じ門(#1087。別のタブが編集中のノートへ行・列を足すと、追記(`append-entry`)と同じく上書きされる)
+    it('🔴 足す回も、別のタブが握っていたら足さずに理由を出す', async () => {
       const r = press('add', 'denied');
-      expect(r.asked).toEqual([]);
+      await tick();
+      expect(r.asked, '足す回が問い合わせていない').toEqual(['n1']);
+      expect(r.dispatched).toEqual([{ type: 'OP_FAILED', error: EDIT_ELSEWHERE_ERROR }]);
+    });
+
+    it('対照群:足す回も、握られていなければ足す(錠は返す)', async () => {
+      const r = press('add', 'granted');
+      await tick();
       expect(r.dispatched.map((a) => a['type'])).toEqual(['SET_CSV_SHAPE']);
+      expect(r.released).toEqual(['n1']);
     });
   });
 
