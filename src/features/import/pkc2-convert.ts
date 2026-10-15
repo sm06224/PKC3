@@ -420,7 +420,7 @@ export function convertPkc2Container(
     warnings.push(`長すぎる、または多すぎるタグ ${tagsDropped} 個は付けませんでした(1 つ ${MAX_TAG_CHARS} 字まで、1 ノート ${MAX_TAGS} 個まで)`);
   }
   if (colored > 0) {
-    warnings.push(`${colored} 件のノートに付いていたカラーラベルは取り込めませんでした(PKC3 にはまだ対応する項目がありません)`);
+    warnings.push(`${colored} 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)`);
   }
 
   // ── ⑥ entry_order: meta.entry_order(旧 lid 列)優先、無ければ配列順

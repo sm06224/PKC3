@@ -445,8 +445,8 @@ describe('タグ・日時・色の取り込み(#1087)', () => {
       },
       opts(),
     );
-    expect(r.warnings.filter((w) => w.includes('カラーラベル'))).toEqual([
-      '2 件のノートに付いていたカラーラベルは取り込めませんでした(PKC3 にはまだ対応する項目がありません)',
+    expect(r.warnings.filter((w) => w.includes('カラータグ'))).toEqual([
+      '2 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)',
     ]);
   });
 });

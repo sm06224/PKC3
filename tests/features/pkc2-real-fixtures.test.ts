@@ -146,11 +146,8 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(t.get('n-1')).toBe('f-2026');
     expect(t.get('g-1')).toBe('f-2026');
     expect(t.get('n-2')).toBe('f-root');
-    // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
-    expect(got.warnings).toEqual([
-      '1 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 にはまだ対応する項目がありません',
-    ]);
+    // 実 PKC2 の entry は created_at / updated_at を必ず持つが、#1087 で変換へ渡して運ぶので注意は出ない
+    expect(got.warnings).toEqual([]);
   });
 
   it('🔑 v2 ── `.entry.zip` の todo まで取り込む(PKC2 は無言 skip していた)', async () => {
@@ -168,11 +165,8 @@ describe('🔴 実物: folder-export(段⑤)', () => {
     expect(t.get('n-2')).toBe('f-root');
     // 🔴 **添付が 1 件だけ**(H-2: assetsForSynthesis を通さないと幽霊が増える)
     expect(c.entries.filter((e) => e.archetype === 'attachment')).toHaveLength(1);
-    // 落ちる情報は件数つきで言う(todo と attachment の 2 件)
-    expect(got.warnings).toEqual([
-      '2 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 にはまだ対応する項目がありません',
-    ]);
+    // created_at / updated_at は変換へ渡して運ぶ(#1087)ので、ここでは注意が出ない
+    expect(got.warnings).toEqual([]);
   });
 
   it('🔴 実データ形: 画像を貼ったノートのフォルダを書き出しても全滅しない', async () => {

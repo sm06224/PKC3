@@ -48,8 +48,12 @@ export interface Pkc2EntryBundleManifest {
   missing_asset_count?: number;
 }
 
-/** PKC3 が受け皿を持たない field(取込時に「落ちた」と言うために数える)。 */
-const DROPPED_FIELDS = ['created_at', 'updated_at', 'tags', 'color_tag', 'display_profile'];
+/**
+ * PKC3 が受け皿を持たない field(取込時に「落ちた」と言うために数える)。
+ * 🔴 tags / created_at / updated_at は変換(`pkc2-convert.ts`)へ渡して運ぶ(#1087)。color_tag も渡す ──
+ *   変換が container 取り込みと**同じ文**で件数を言う(ここでも言うと同じ注意が 2 度出る)。
+ */
+const DROPPED_FIELDS = ['display_profile'];
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -158,6 +162,11 @@ export async function readEntryBundleParts(
       title: str(record.title) || str(manifest.title) || '(無題)',
       archetype,
       body: str(record.body),
+      // 無いものは足さない(`undefined` の key を container に残さない)
+      ...(record.tags !== undefined ? { tags: record.tags } : {}),
+      ...(record.created_at !== undefined ? { created_at: record.created_at } : {}),
+      ...(record.updated_at !== undefined ? { updated_at: record.updated_at } : {}),
+      ...(record.color_tag !== undefined ? { color_tag: record.color_tag } : {}),
     },
     assets,
     warnings,

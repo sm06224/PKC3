@@ -17,6 +17,8 @@ import {
   droppedFieldsWarning,
 } from '../../src/features/import/pkc2-entry-bundle';
 import { readAssetSource } from '../../src/features/import/zip-reader';
+import { convertPkc2Container, type Pkc2Container } from '../../src/features/import/pkc2-convert';
+import { readTags } from '../../src/features/flavor/tags';
 import { buildZip, bytesOf, type FixtureEntry } from './zip-fixture';
 
 const real = (name: string): Blob =>
@@ -62,11 +64,9 @@ describe('readEntryBundle — 実物', () => {
     expect(c.entries).toHaveLength(1);
     expect(c.entries[0]).toMatchObject({ lid: 't-1', title: 'やること', archetype: 'todo' });
     expect(JSON.parse(c.entries[0]!.body)).toMatchObject({ status: 'open', date: '2026-08-10' });
-    // ⚠ 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 受け皿が無いので言う
-    expect(got.warnings).toEqual([
-      '1 件のノートで、この形式にしか無い情報を取り込めませんでした(created_at / updated_at)' +
-        '。PKC3 にはまだ対応する項目がありません',
-    ]);
+    // 実 PKC2 の entry は created_at / updated_at を必ず持つ ── 変換へ渡して運ぶ(#1087)ので注意は出ない
+    expect(got.warnings).toEqual([]);
+    expect((c.entries[0] as { created_at?: unknown }).created_at).toEqual(expect.any(String));
   });
 
   it('🔑 `assets/<key>` の **base64 テキスト**を復号して扱う', async () => {
@@ -89,15 +89,26 @@ describe('readEntryBundle — 実物', () => {
     expect([...got.assetSources.keys()]).toEqual(['ast-shared']);
   });
 
-  it('🔴 PKC3 に受け皿が無い field は**落ちると言う**', async () => {
+  it('🔴 tags / 日時は変換まで運ばれ、color_tag だけが「取り込めない」と言われる(#1087)', async () => {
     // text-meta.entry.zip は created_at / tags / color_tag を持つ実物
     const got = await readEntryBundle(real('text-meta.entry.zip'));
-    expect(got.warnings.join('\n')).toMatch(
-      /1 件のノートで.*created_at.*updated_at.*tags.*color_tag/,
-    );
-    // ただし本文と添付は入る(落ちるのはメタだけ)
+    // 本文と添付は入る
     const c = got.container as Synth;
     expect(c.entries.find((e) => e.archetype === 'text')!.body).toContain('asset:ast-shared');
+    // 🔑 container 取り込みと同じ変換を通すと、タグは frontmatter・日時は作成時刻・色は件数の注意になる
+    const r = convertPkc2Container(c as Pkc2Container, {
+      existingLids: new Set(),
+      orderBase: 0,
+      genLid: () => 'x',
+      genAssetKey: () => 'k',
+    });
+    const text = r.entries.find((e) => e.archetype === 'text')!;
+    expect(readTags(text.body)).toEqual(['会議']);
+    expect(text.createdAt).toBe('2026-07-01 00:00:00');
+    expect(r.warnings).toContain(
+      '1 件のノートに付いていたカラータグは取り込めませんでした(PKC3 にはまだ対応する項目がありません)',
+    );
+    expect(r.warnings.join('\n'), 'tags / 日時を「取り込めない」と言っている').not.toMatch(/created_at|tags/);
   });
 });
 
