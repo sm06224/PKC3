@@ -36,6 +36,9 @@ const LIST_MARKER = /^(\s*)(?:[-*+]|\d+[.)])\s+/;
  */
 const TASK_MARKER = /^(\s*)(?:[-*+]|\d+[.)])\s+\[([ xX])\](?:\s+.*|$)/;
 
+/** 番号付き項目の頭(字下げ / 数 / 区切りと空白)。位置の番号を保つために使う。 */
+const NUMBERED = /^(\s*)(\d+)([.)]\s+)/;
+
 /**
  * コードブロック（fence）の開始/終了。字下げ 3 文字以内の ``` または ~~~。
  */
@@ -120,6 +123,20 @@ function sortListBlockLines(lines: readonly string[]): string[] {
     return [...lines];
   }
 
+  /**
+   * 🔴 **項目の後ろの空行は、並べ替えても元の位置に残す**(#1087)── ゆるいリスト(項目の間に空行)は
+   *   空行ごと項目に付いて動くと、末尾に余計な空行が出たり、間が詰まったりする。
+   *   「何番目の項目の後ろに空行が何行」を位置で持ち、並べ替えた後の同じ位置へ戻す。
+   */
+  const gaps: string[][] = [];
+  for (const chunk of chunks) {
+    const gap: string[] = [];
+    while (chunk.lines.length > 1 && chunk.lines[chunk.lines.length - 1]!.trim() === '') {
+      gap.unshift(chunk.lines.pop()!);
+    }
+    gaps.push(gap);
+  }
+
   // 各チャンク配下の子行について、子リストがあれば再帰的にソート
   for (const chunk of chunks) {
     if (chunk.lines.length > 1) {
@@ -137,9 +154,17 @@ function sortListBlockLines(lines: readonly string[]): string[] {
   const sortedChunks = [...uncompleted, ...completed];
 
   const resultLines: string[] = [...prefixLines];
-  for (const chunk of sortedChunks) {
-    resultLines.push(...chunk.lines);
-  }
+  sortedChunks.forEach((chunk, i) => {
+    // 🔴 番号付きは**位置の番号を保つ**(#1087)── `1. [x]` / `2. [ ]` を入れ替えて `2.` / `1.` にしない
+    const slot = NUMBERED.exec(chunks[i]!.lines[0]!);
+    const own = NUMBERED.exec(chunk.lines[0]!);
+    if (slot !== null && own !== null && slot[2] !== own[2]) {
+      resultLines.push(`${own[1]}${slot[2]}${own[3]}${chunk.lines[0]!.slice(own[0].length)}`, ...chunk.lines.slice(1));
+    } else {
+      resultLines.push(...chunk.lines);
+    }
+    resultLines.push(...gaps[i]!);
+  });
 
   return resultLines;
 }
@@ -194,6 +219,21 @@ export function sortTasksByStatus(body: string): string {
 
     // 2. 空行はリストブロックの終端
     if (line.trim() === '') {
+      /**
+       * 🔴 **空行のあとにまたリスト項目が続くなら、同じリスト(ゆるいリスト)**(#1087)── 空行で切ると
+       *   項目の間に空行を入れた書き方は 1 つも並べ替わらず、「揃っています」と偽を言っていた。
+       *   ⚠ 空行のあとが見出しや段落なら、これまでどおりそこで切る(別のリスト)。
+       */
+      if (currentListBlock.length > 0) {
+        let j = i;
+        while (j < lines.length && lines[j]!.trim() === '') j += 1;
+        const nextLine = lines[j];
+        if (nextLine !== undefined && LIST_MARKER.test(nextLine) && FENCE.exec(nextLine) === null) {
+          for (; i < j; i++) currentListBlock.push(lines[i]!);
+          i = j - 1;
+          continue;
+        }
+      }
       flushListBlock();
       out.push(line);
       continue;

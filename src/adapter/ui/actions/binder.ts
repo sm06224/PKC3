@@ -10337,8 +10337,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
     ta.focus();
+    // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('番号を振り直しました');
   },
   /**
@@ -10369,8 +10369,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
     ta.focus();
+    // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('完了したチェック項目を末尾へ移動しました');
   },
   /**
@@ -15575,7 +15575,9 @@ export function bindActions(
           ta.setSelectionRange(res.halfWidth.from, res.halfWidth.to);
           insertText(ta, res.halfWidth.text);
         }
-        insertText(ta, formatCalcResult(res.value));
+        // ⚠ 普通の数字にならない答え(`1e21` 以上など)は何も挿さない
+        const shown = formatCalcResult(res.value);
+        if (shown !== null) insertText(ta, shown);
       } else {
         /**
          * 🔴 **計算にならなかったら、理由を 1 行だけ出す**(#766 A-2、2026-09-08)。

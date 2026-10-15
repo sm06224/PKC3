@@ -282,6 +282,29 @@ describe('答えの字にする', () => {
     expect(formatCalcResult(0)).toBe('0');
   });
 
+  it('🔴 指数表記にしない。普通の数字にならない答えは null(#1087)', () => {
+    expect(formatCalcResult(1e-7)).toBe('0.0000001');
+    expect(formatCalcResult(-1.5e-7)).toBe('-0.00000015');
+    expect(formatCalcResult(1e20)).toBe('100000000000000000000');
+    expect(formatCalcResult(1e21)).toBeNull();
+    expect(formatCalcResult(-1e21)).toBeNull();
+    expect(formatCalcResult(Infinity)).toBeNull();
+    expect(formatCalcResult(NaN)).toBeNull();
+    // 12 桁で 0 に丸まる極小は `0` と偽らない
+    expect(formatCalcResult(1e-13)).toBeNull();
+    // どの答えにも `e` が入らない・桁区切りが入らない
+    for (const v of [1e-7, 123456.789, 2 ** 60, 1 / 3, 1234567.5, 5e-12]) {
+      expect(formatCalcResult(v)).toMatch(/^-?\d+(\.\d{1,12})?$/);
+    }
+    expect(formatCalcResult(1234567.5)).toBe('1234567.5');
+  });
+
+  it('🔴 1e21 以上になる行は何も挿さない(calcLineAction。#1087)', () => {
+    const big = '10000000000*10000000000*100=';
+    expect(calcLineAction(big, big.length)).toBeNull();
+    expect(calcLineAction('10*100=', 7)).toEqual({ kind: 'insert', at: 7, text: '1000' });
+  });
+
   it('⚠ 端数は 12 桁で丸める(見せるのは user が読める字である)', () => {
     expect(formatCalcResult(0.1 + 0.2)).toBe('0.3');
     expect(formatCalcResult(1 / 3)).toBe('0.333333333333');
@@ -525,6 +548,15 @@ describe('🔴 `合計=` で、上の塊の末尾の数を足す(#1230)', () => 
     // ⚠ `… = 25600` の答えの行も、末尾の数として足す
     expect(r('基本単価*8=25600\n追加 2+3=5\n合計=')).toBe('25605');
     expect(r('- りんご 300\n- みかん 450\n- 合計=')).toBe('750');
+  });
+
+  it('🔴 `:` `：` `#` `＃` の直後の数は足さない(時刻の分・番号。#1087)', () => {
+    expect(r('会議 12:30\n昼食 500\n合計=')).toBe('500');
+    expect(r('会議 12：30\n昼食 500\n合計=')).toBe('500');
+    expect(r('案件 #12\n昼食 500\n合計=')).toBe('500');
+    expect(r('案件 ＃12\n昼食 500\n合計=')).toBe('500');
+    // 対照群:`:` の後ろに空白があれば量である(`単価: 300`)
+    expect(r('単価: 300\n昼食 500\n合計=')).toBe('800');
   });
 
   it('🔴 前に出した合計の行は足さない(下に 1 行足して合計し直しても二重にならない。#1087)', () => {

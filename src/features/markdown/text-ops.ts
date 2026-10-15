@@ -20,6 +20,7 @@
 import { parseCsv } from './csv-table';
 import { formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
+import { TASK_LINE } from './task-line';
 import { tableToMarkdown } from './table-copy';
 
 export interface TextSelection {
@@ -56,7 +57,8 @@ const LINE_DETECT: Readonly<Record<LinePrefix, RegExp>> = {
   //   チェックの `[x]` は大文字の `[X]` も済みとして受ける(`body-rewrite.ts` の `TASK_LINE` と同じ読み方)
   ul: /^(\s*)- (?!\[[ xX]\](?:\s|$))/,
   ol: /^(\s*)\d+\. /,
-  task: /^(\s*)- \[[ xX]\] /,
+  // 🔴 チェック行の読み方は `body-rewrite.ts` と**同じ 1 本**(`task-line.ts`)── `* [ ]` / `1. [x]` / `- [ ]` だけの行も済みの行(#1087)
+  task: TASK_LINE,
 };
 
 /** 字下げを保って記号を剥がす対象。 */
@@ -64,7 +66,7 @@ const INDENT_KEPT: ReadonlySet<LinePrefix> = new Set<LinePrefix>(['ul', 'ol', 't
 
 /** 行頭の印を落とす(どの種類でも)。⚠ 番号付きは `12. ` のような形もある。 */
 function stripMark(line: string): string {
-  return line.replace(/^(?:#{1,6} |> |- \[[ xX]\] |[-*+] |\d+\. )/, '');
+  return line.replace(/^(?:#{1,6} |> |(?:[-*+]|\d+[.)])\s+\[[ xX]\](?:\s|$)|[-*+] |\d+[.)] )/, '');
 }
 
 /**
@@ -90,19 +92,36 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
   const [from, to] = lineRange(sel.text, sel.start, sel.end);
   const block = sel.text.slice(from, to);
   const lines = block.split('\n');
-  const allMarked = lines.every((l) => detect.test(l));
+  /**
+   * 🔴 **空行には印を付けない**(#1087)── 複数行を選んで箇条書き・番号・見出しを押すと、間の空行にも
+   *   `- ` が付いて、段落の区切りが空の項目になっていた。「全部付いているか」の数え方も空行を除く。
+   *   ⚠ 選んだのが空行だけ(空の行で押した)なら、これまでどおりその行に付ける。
+   */
+  const skipBlank = lines.some((l) => l.trim() !== '');
+  const isBlank = (l: string): boolean => skipBlank && l.trim() === '';
+  const allMarked = lines.every((l) => isBlank(l) || detect.test(l));
   const keep = INDENT_KEPT.has(kind);
+  let n = 0;
   const next = lines
-    .map((l, i) => {
-      if (allMarked) return keep ? l.replace(detect, '$1') : l.replace(detect, '');
+    .map((l) => {
+      if (isBlank(l)) return l;
+      if (allMarked) {
+        if (kind === 'task') {
+          const m = TASK_LINE.exec(l)!;
+          const lead = /^((?:\s*>)*\s*)/.exec(m[1]!)![1]!;
+          return lead + l.slice(m[0].length);
+        }
+        return keep ? l.replace(detect, '$1') : l.replace(detect, '');
+      }
+      n += 1;
       if (keep) {
         const indent = /^\s*/.exec(l)![0];
         const bare = stripMark(l.slice(indent.length));
-        return kind === 'ol' ? `${indent}${i + 1}. ${bare}` : `${indent}${mark}${bare}`;
+        return kind === 'ol' ? `${indent}${n}. ${bare}` : `${indent}${mark}${bare}`;
       }
       const bare = stripMark(l);
-      // 番号付きは行ごとに数える(全部 `1.` だと読みにくい)
-      return kind === 'ol' ? `${i + 1}. ${bare}` : `${mark}${bare}`;
+      // 番号付きは行ごとに数える(全部 `1.` だと読みにくい)。⚠ 空行は数えない
+      return kind === 'ol' ? `${n}. ${bare}` : `${mark}${bare}`;
     })
     .join('\n');
   const text = sel.text.slice(0, from) + next + sel.text.slice(to);
@@ -144,14 +163,14 @@ function wrapped(before: number, after: number, len: number): boolean {
 export function toggleWrap(sel: TextSelection, mark: string): TextSelection {
   const { text } = sel;
   /**
-   * 🔴 **選択の端の空白は囲まない**(#1087)── 英単語をダブルクリックすると後ろの空白まで選ばれる
+   * 🔴 **選択の端の空白・改行は囲まない**(#1087)── 三連クリックや `Shift`+`↓` は行末の改行まで選ぶので、そのまま囲むと `**hello\n**world` になる。英単語をダブルクリックすると後ろの空白まで選ばれる
    *   (Windows の Chrome)ので、そのまま囲むと `**world **` になり、閉じの前が空白なので
    *   太字にならず `**` が字のまま出ていた。⚠ 空白だけの選択はそのまま(縮めると選択が消える)。
    */
   let start = sel.start;
   let end = sel.end;
-  while (start < end && /[ \t\u3000]/u.test(text[start]!)) start++;
-  while (end > start && /[ \t\u3000]/u.test(text[end - 1]!)) end--;
+  while (start < end && /[ \t\u3000\r\n]/u.test(text[start]!)) start++;
+  while (end > start && /[ \t\u3000\r\n]/u.test(text[end - 1]!)) end--;
   if (start === end) {
     start = sel.start;
     end = sel.end;

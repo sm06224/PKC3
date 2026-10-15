@@ -71,6 +71,35 @@ describe('行頭の印', () => {
     expect(out.text).toBe('- あ\n- い');
   });
 
+  it('🔴 空行には印を付けない・番号に数えない(#1087)', () => {
+    expect(applyFormat(sel('|あ\n\nい|'), 'ul').text).toBe('- あ\n\n- い');
+    expect(applyFormat(sel('|あ\n\nい|'), 'h2').text).toBe('## あ\n\n## い');
+    expect(applyFormat(sel('|あ\n\nい\n\nう|'), 'ol').text).toBe('1. あ\n\n2. い\n\n3. う');
+    // 空白だけの行も空行
+    expect(applyFormat(sel('|あ\n  \n\u3000\nい|'), 'ul').text).toBe('- あ\n  \n\u3000\n- い');
+    // 「全部付いているか」も空行を除く ── 印のある行だけなら外れる
+    const once = applyFormat(sel('|あ\n\nい|'), 'ul');
+    expect(applyFormat(once, 'ul').text).toBe('あ\n\nい');
+    expect(applyFormat(applyFormat(sel('|あ\n\nい|'), 'ol'), 'ol').text).toBe('あ\n\nい');
+    // 対照群:空行だけの選択(空の行で押した)はこれまでどおり付く
+    expect(applyFormat({ text: '', start: 0, end: 0 }, 'ul').text).toBe('- ');
+  });
+
+  it('🔴 チェックの付け外しは `* [ ]` / `1. [x]` / 項目名の無い `- [ ]` も読む(body-rewrite と同じ読み方。#1087)', () => {
+    expect(applyFormat(sel('|* [ ] foo|'), 'task').text).toBe('foo');
+    expect(applyFormat(sel('|1. [x] foo|'), 'task').text).toBe('foo');
+    expect(applyFormat(sel('|+ [X] foo|'), 'task').text).toBe('foo');
+    expect(applyFormat(sel('|  * [ ] foo|'), 'task').text).toBe('  foo');
+    expect(applyFormat(sel('|- [ ]|'), 'task').text).toBe('');
+    // 付ける側:別の記号のチェックを二重にしない
+    expect(applyFormat(sel('|* [ ] foo\nbar|'), 'task').text).toBe('- [ ] foo\n- [ ] bar');
+    expect(applyFormat(sel('|- [x] 済\n日本語|'), 'task').text).toBe('- [ ] 済\n- [ ] 日本語');
+    // 箇条書きを押しても `[ ]` が出ない(`* [ ]` / `- [ ]` だけ)
+    expect(applyFormat(sel('|- [ ]|'), 'ul').text).toBe('- ');
+    // 対照群:`- [ ]foo`(空白なし)はチェックではない
+    expect(applyFormat(sel('|- [ ]foo|'), 'task').text).toBe('- [ ] [ ]foo');
+  });
+
   it('選択が行の途中でも行全体に効く', () => {
     expect(applyFormat(sel('見出|し|です'), 'h1').text).toBe('# 見出しです');
   });
@@ -93,6 +122,16 @@ describe('囲む印', () => {
     expect(applyFormat(applyFormat(sel('hello |world |today'), 'bold'), 'bold').text).toBe('hello world today');
     // 対照群:空白だけの選択は縮めない
     expect(applyFormat(sel('a|  |b'), 'bold').text).toBe('a**  **b');
+  });
+
+  it('🔴 選択の端の改行は囲まない(三連クリック・Shift+↓。#1087)', () => {
+    expect(show(applyFormat(sel('|hello\n|world'), 'bold'))).toBe('**|hello|**\nworld');
+    expect(show(applyFormat(sel('|hello\r\n|world'), 'bold'))).toBe('**|hello|**\r\nworld');
+    expect(show(applyFormat(sel('a|\n\n強調\n|b'), 'italic'))).toBe('a\n\n*|強調|*\nb');
+    // 押し直すと外れる
+    expect(applyFormat(applyFormat(sel('|hello\n|world'), 'bold'), 'bold').text).toBe('hello\nworld');
+    // 対照群:改行だけの選択は縮めない
+    expect(applyFormat(sel('a|\n|b'), 'bold').text).toBe('a**\n**b');
   });
 
   it('🔴 `**太字**` に斜体を掛けても太字が壊れない', () => {
