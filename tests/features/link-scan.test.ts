@@ -264,3 +264,16 @@ describe('画像として書かれているか(#264 段⓪)', () => {
     expect(ms, `走査が遅い(${String(ms)}ms)`).toBeLessThan(2_000);
   });
 });
+
+describe('コードの範囲(code)── 参照元の判定が使う(#1087)', () => {
+  it('フェンスと行内コードの範囲を返し、外は含まない', () => {
+    const t = 'a `x` b\n```\nq\n```\nc';
+    const { code } = scanLinks(t);
+    expect(code.map(([s, e]) => t.slice(s, e))).toEqual(['`x`', '```\nq\n```\n']);
+  });
+  it('閉じないフェンスは末尾まで', () => {
+    const t = 'a\n```\nq';
+    const { code } = scanLinks(t);
+    expect(code).toEqual([[2, t.length]]);
+  });
+});

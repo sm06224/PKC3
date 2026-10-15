@@ -627,3 +627,10 @@ describe('スクロールで閉じるとき、文書全体を探さない(#1467)
     root.remove();
   });
 });
+
+describe('formatBodyPreview ── 逃がした題名を戻す(#1087)', () => {
+  it('`\\]` `\\|` を含む題名のリンクは、題名のまま 1 つに読む', () => {
+    expect(formatBodyPreview('[a\\]b\\|c](entry:n1) の続き')).toBe('a]b|c の続き');
+    expect(formatBodyPreview('![x\\]y](asset:k)')).toBe('[画像: x]y]');
+  });
+});

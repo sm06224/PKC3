@@ -14,7 +14,7 @@
  *
  * ## 規則(移す前と 1 バイトも変えていない)
  *
- * - ラベルは `[` `]` `\` を escape し、改行は 1 行に潰す(`]` 1 個でリンクが死ぬ)
+ * - ラベルは `[` `]` `\` `|` を escape し(`|` は表の中に貼ったとき欄が割れるため。`\|` は表の外でも `|` と描かれる)、改行は 1 行に潰す(`]` 1 個でリンクが死ぬ)
  * - 宛先に空白 / 括弧 / `<` `>` が混じるなら `<…>` で囲む(裸だとリンクが切れる)
  *
  * ⚠ **pure module**。browser API を持たない。
@@ -23,7 +23,15 @@
 /** markdown のリンクラベルに入れて安全な形にする。 */
 export function escapeLinkLabel(s: string): string {
   // ⚠ 改行が入ると markdown-it が段落を割ってリンクが死ぬ ── 1 行に潰す
-  return s.replace(/\s*\n\s*/g, ' ').replace(/[[\]\\]/g, '\\$&');
+  return s.replace(/\s*\n\s*/g, ' ').replace(/[[\]\\|]/g, '\\$&');
+}
+
+/**
+ * `escapeLinkLabel` の逆(読む側が見出しを平文へ戻すのに使う)。
+ * ⚠ 逃がす字(`[` `]` `\` `|`)の前の `\` だけを外す ── 他の `\x` は本文の字なので触らない。
+ */
+export function unescapeLinkLabel(s: string): string {
+  return s.replace(/\\([[\]\\|])/g, '$1');
 }
 
 /**

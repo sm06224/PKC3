@@ -101,6 +101,11 @@ describe('本文が展開を求めている鍵(sectionEmbedKeys)', () => {
     expect(sectionEmbedKeys(body)).toEqual(['n1#h/plan', 'n5#h/todo', 'n6#h/見']);
   });
 
+  it('🔴 題名の `]` を逃がした画像形(escapeLinkLabel の出力)も拾う(#1087)', () => {
+    const body = '![a\\]b](entry:n1#h/plan) と ![c\\[d\\\\e\\|f](entry:n2#h/x)';
+    expect(sectionEmbedKeys(body)).toEqual(['n1#h/plan', 'n2#h/x']);
+  });
+
   it('fence の中は数えない', () => {
     expect(sectionEmbedKeys('```\n![a](entry:n1#h/plan)\n```\n![b](entry:n2#h/x)')).toEqual(['n2#h/x']);
   });

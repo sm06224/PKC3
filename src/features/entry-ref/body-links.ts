@@ -28,6 +28,7 @@
  * ⚠ そして**取り込んだ容れ物の lid は形が違う**(PKC2 由来)。
  * 「たぶん起きない」を検査の根拠にしない。
  */
+import { scanLinks } from '../markdown/link-scan';
 
 /**
  * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
@@ -49,8 +50,31 @@
  */
 const LID_CHARS = 'A-Za-z0-9_\\-';
 
-/** `entry:` の後ろの lid を、**次の文字が lid の文字でない**ところまで取る。 */
-const LINK_RE = new RegExp(`entry:([${LID_CHARS}]+)`, 'g');
+/**
+ * `entry:` の後ろの lid を、**次の文字が lid の文字でない**ところまで取る。
+ * 🔴 **左も留める**(#1087)── `xentry:n2` は `entry:` ではない(右を留めるのと対)。
+ */
+const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'g');
+
+/**
+ * 🔴 **コードの中に書いてあるだけの字は、リンクではない**(#1087)。
+ *
+ * フェンスと行内コードの範囲は `link-scan.ts` が持つ(第 2 の走査器を書かない)。
+ * 範囲を空白に置き換えて返す ── 長さが変わらないので、残りの文法はそのまま当てられる。
+ * ⚠ コードに触れていない本文(バッククォートも `~~~` も無い)は走査せず、そのまま返す。
+ */
+function withoutCode(body: string): string {
+  if (!body.includes('`') && !body.includes('~~~')) return body;
+  const { code } = scanLinks(body);
+  if (code.length === 0) return body;
+  let out = '';
+  let cursor = 0;
+  for (const [s, e] of code) {
+    out += body.slice(cursor, s) + body.slice(s, e).replace(/[^\r\n]/g, ' ');
+    cursor = e;
+  }
+  return out + body.slice(cursor);
+}
 
 /**
  * ⚠ **cid は正規表現に埋める**ので、lid の文字だけで組まれていることを確かめる
@@ -77,11 +101,12 @@ export function bodyLinkTargets(body: string, cid?: string | null): string[] {
     seen.add(lid);
     out.push(lid);
   };
+  const text = withoutCode(body);
   LINK_RE.lastIndex = 0;
-  for (let m = LINK_RE.exec(body); m !== null; m = LINK_RE.exec(body)) take(m[1]!);
+  for (let m = LINK_RE.exec(text); m !== null; m = LINK_RE.exec(text)) take(m[1]!);
   if (cid !== undefined && cid !== null && TOKEN_ONLY.test(cid)) {
     const portable = new RegExp(`pkc://${cid}/entry/([${LID_CHARS}]+)`, 'g');
-    for (let m = portable.exec(body); m !== null; m = portable.exec(body)) take(m[1]!);
+    for (let m = portable.exec(text); m !== null; m = portable.exec(text)) take(m[1]!);
   }
   return out;
 }

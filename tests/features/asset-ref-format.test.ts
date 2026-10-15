@@ -15,6 +15,11 @@ import {
   escapeAssetTarget,
   isImageAssetMime,
 } from '@features/asset/asset-ref-format';
+import {
+  escapeLinkLabel,
+  formatMarkdownLink,
+  unescapeLinkLabel,
+} from '@features/markdown/link-format';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 
 describe('asset-ref-format', () => {
@@ -35,6 +40,16 @@ describe('asset-ref-format', () => {
     expect(escapeAssetLabel('a]b')).toBe('a\\]b');
     expect(escapeAssetLabel('a\nb')).toBe('a b');
     expect(escapeAssetLabel('a[b\\c')).toBe('a\\[b\\\\c');
+  });
+
+  it('🔴 `|` も逃がす ── 表の欄の中に貼っても欄が割れない(#1087)', () => {
+    expect(escapeAssetLabel('A|B')).toBe('A\\|B');
+    const html = renderMarkdown(`| 題 |\n|---|\n| ${formatMarkdownLink('A|B', 'entry:n1')} |`);
+    expect(html.match(/<td/g)).toHaveLength(1);
+    expect(html).toContain('>A|B</a>');
+    // 表の外でも `\|` は `|` と描かれる
+    expect(renderMarkdown(formatMarkdownLink('A|B', 'entry:n1'))).toContain('>A|B</a>');
+    expect(unescapeLinkLabel(escapeLinkLabel('a[b]c\\d|e'))).toBe('a[b]c\\d|e');
   });
 
   it('名前が空なら宛先を見出しにする(無題のリンクを作らない)', () => {

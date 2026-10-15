@@ -63,8 +63,11 @@ export function sectionExcerptOf(body: string, id: string): PlaceExcerpt {
   return clipText(lines.join('\n'));
 }
 
-/** 画像形の参照 `![…](entry:…)` の `entry:…` の部分。 */
-const EMBED_RE = /!\[[^\]]*\]\((entry:[^)\s]+)(?:\s+"[^"]*")?\)/g;
+/**
+ * 画像形の参照 `![…](entry:…)` の `entry:…` の部分。
+ * ⚠ ラベルは `escapeLinkLabel` が `\]` へ逃がすので、`[^\]]*` では途中で切れる(#1087)。
+ */
+const EMBED_RE = /!\[(?:\\.|[^\]\\])*\]\((entry:[^)\s]+)(?:\s+"[^"]*")?\)/g;
 
 /**
  * 本文が展開を求めている見出しの鍵(`sectionKey`)。fence の中は数えない。

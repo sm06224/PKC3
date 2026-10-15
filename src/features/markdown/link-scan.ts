@@ -60,6 +60,11 @@ export interface LinkScan {
   sites: LinkSite[];
   /** 閉じていないコードフェンス(あれば開き記号)。書出し側が警告に使う。 */
   openFence: string | null;
+  /**
+   * コードとして読み飛ばした範囲 `[start, end)`(フェンス / 行内コード。出てきた順)。
+   * 「コードの中に書いてあるだけの字」を読み手が除くのに使う(参照元の判定 ── #1087)。
+   */
+  code: Array<[number, number]>;
 }
 
 /**
@@ -122,6 +127,7 @@ function at(re: RegExp, text: string, i: number): RegExpExecArray | null {
 export function scanLinks(text: string): LinkScan {
   const sites: LinkSite[] = [];
   let openFence: string | null = null;
+  const code: Array<[number, number]> = [];
   let i = 0;
   const n = text.length;
   // ⚠ **行末は `\n` だけではない**。CommonMark の line ending は `\n` / `\r` /
@@ -188,12 +194,14 @@ export function scanLinks(text: string): LinkScan {
         }
         closeRe.lastIndex = i + fence.length;
         const cm = closeRe.exec(text);
+        const fenceStart = i;
         if (cm) {
           i = cm.index + cm[0].length;
         } else {
           i = n; // 閉じない fence = ここから末尾まで全部コード
           openFence = fence;
         }
+        code.push([fenceStart, i]);
         continue;
       }
     }
@@ -205,6 +213,7 @@ export function scanLinks(text: string): LinkScan {
       const limit = nextBlankLine(i);
       const close = text.indexOf(run, i + run.length);
       if (close !== -1 && (limit === -1 || close < limit)) {
+        code.push([i, close + run.length]);
         i = close + run.length;
         continue;
       }
@@ -314,7 +323,7 @@ export function scanLinks(text: string): LinkScan {
 
     i++;
   }
-  return { sites, openFence };
+  return { sites, openFence, code };
 }
 
 /**

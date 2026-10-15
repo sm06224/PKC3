@@ -137,9 +137,18 @@ export function overlongTagNames(raw: string): string[] {
   return readTagInput(raw).tooLong;
 }
 
-function readTagInput(raw: string): { tags: string[]; tooLong: string[] } {
+/**
+ * 🔴 **読めた名前と、読めなかった名前を、書いた順のまま並べた 1 本**(#1087)。
+ * ⚠ 長すぎる名前(`MAX_TAG_CHARS` 超)と、上限(`MAX_TAGS`)を越えた分は**一覧には出ない**が、
+ *   本文には**書かれたまま残っている**。タグを 1 つ足す・外すとき `tags:` の行を作り直すので、
+ *   読めたものだけから作ると**読めなかった名前が黙って消える**(user のデータ欠損)。
+ *   だから書く側は `raw` の項も同じ位置に書き戻す(`applyTagsToBody`)。
+ */
+export type TagSlot = { readonly tag: string } | { readonly raw: string };
+
+function readTagInput(raw: string): { tags: string[]; tooLong: string[]; slots: TagSlot[] } {
   const s = raw.trim();
-  if (s === '') return { tags: [], tooLong: [] };
+  if (s === '') return { tags: [], tooLong: [], slots: [] };
   // 🔑 **井桁の並びかどうかは `hashRunWords` 1 か所**(#637 の着地前レビュー B)──
   //    ここに 2 本目の判定を書くと、同じ字が欄と `tags:` で別の個数になる
   const words = hashRunWords(s) ?? strandedHashWords(s);
@@ -165,6 +174,7 @@ function readTagInput(raw: string): { tags: string[]; tooLong: string[] } {
   const parts = (words ?? [bare]).flatMap((w) => w.split(','));
   const out: string[] = [];
   const tooLong: string[] = [];
+  const slots: TagSlot[] = [];
   for (const part of parts) {
     // ⚠ `#買い物, #家事` のように区切りを重ねて書かれることがある ── 末尾の
     //    区切りらしき字は落とす(落とさないと「買い物,」という別のタグになる)
@@ -177,13 +187,19 @@ function readTagInput(raw: string): { tags: string[]; tooLong: string[] } {
     if (t === '') continue;
     if ([...t].length > MAX_TAG_CHARS) {
       tooLong.push(t);
+      slots.push({ raw: t });
       continue;
     }
     if (out.some((x) => sameTag(x, t))) continue;
+    // 上限を越えた分は読まない(一覧に出さない)が、**書き戻しでは残す**
+    if (out.length >= MAX_TAGS) {
+      slots.push({ raw: t });
+      continue;
+    }
     out.push(t);
-    if (out.length >= MAX_TAGS) break;
+    slots.push({ tag: t });
   }
-  return { tags: out, tooLong };
+  return { tags: out, tooLong, slots };
 }
 
 /**
@@ -268,13 +284,18 @@ export function sameTag(a: string, b: string): boolean {
  * user が意味のある順に書いていることがある)。
  */
 export function readTags(body: string): string[] {
+  return readTagSlots(body).flatMap((x) => ('tag' in x ? [x.tag] : []));
+}
+
+/** `readTags` と同じ規則で読み、**読めなかった項も位置つきで返す**(#1087)。読む規則はこの 1 本。 */
+export function readTagSlots(body: string): TagSlot[] {
   const { meta } = parseFrontmatter(body);
   const raw = meta.tags;
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
     // ⚠ 文字列の形は **`splitTags` 1 か所**で読む(§7)── 打つ欄と規則を分けない。
     //    これで `tags: #買い物 #家事` も打った欄と同じに 2 個として読める。
-    return splitTags(String(raw));
+    return readTagInput(String(raw)).slots;
   }
   /**
    * 🔴 **配列の中身も割る**(#637 の着地前レビュー A。**これが元の不具合の本体**)。
@@ -294,14 +315,23 @@ export function readTags(body: string): string[] {
       return ((hashRunWords(s) ?? strandedHashWords(s) ?? [s]) as string[]);
     });
   const out: string[] = [];
+  const slots: TagSlot[] = [];
   for (const part of parts) {
     const t = normalize(part);
-    if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
+    if (t === '') continue;
+    if ([...t].length > MAX_TAG_CHARS) {
+      slots.push({ raw: t });
+      continue;
+    }
     if (out.some((x) => sameTag(x, t))) continue;
+    if (out.length >= MAX_TAGS) {
+      slots.push({ raw: t });
+      continue;
+    }
     out.push(t);
-    if (out.length >= MAX_TAGS) break;
+    slots.push({ tag: t });
   }
-  return out;
+  return slots;
 }
 
 /**

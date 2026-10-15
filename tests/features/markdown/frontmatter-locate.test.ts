@@ -12,7 +12,9 @@ import {
   extractVars,
 } from '@features/markdown/frontmatter';
 
-const OPEN_FENCE = /^---\s*\r?\n/;
+// ⚠ #1087 で先頭の BOM(U+FEFF)も囲みの開きとして受けるようにした(タグの編集が二重の frontmatter を作っていた)。
+// 規則そのものが変わったので、参照もそれに合わせる(「BOM つき」の行は、以前は frontmatter 無しと読んでいた)。
+const OPEN_FENCE = /^\uFEFF?---\s*\r?\n/;
 const CLOSE_FENCE_LINE = /^---\s*$/;
 
 interface Ref {

@@ -10,6 +10,7 @@ import type { BinderServices } from '../actions/binder';
 import { parseLinkTarget } from '../../../features/entry-ref/link-target';
 import { archetypeLabel } from '../../../features/flavor/archetype-label';
 import { parseFrontmatter } from '../../../features/markdown/frontmatter';
+import { unescapeLinkLabel as unescapeLabel } from '../../../features/markdown/link-format';
 import { MISSING_LINK_TITLE } from './link-missing';
 
 export const LINK_PREVIEW_REGION = 'link-preview';
@@ -40,9 +41,9 @@ export function formatBodyPreview(body: string, maxChars = BODY_PREVIEW_MAX_CHAR
     // 引用記号 >
     l = l.replace(/^>\s*/, '');
     // 画像記法 ![alt](url) -> [画像: alt] (リンク記法より先に置換する)
-    l = l.replace(/!\[([^\]]*)\]\([^)]+\)/g, (_m, alt) => (alt ? `[画像: ${alt}]` : '[画像]'));
+    l = l.replace(/!\[((?:\\.|[^\]\\])*)\]\([^)]+\)/g, (_m, alt: string) => (alt ? `[画像: ${unescapeLabel(alt)}]` : '[画像]'));
     // リンク記法 [text](url) -> text
-    l = l.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    l = l.replace(/\[((?:\\.|[^\]\\])+)\]\([^)]+\)/g, (_m, text: string) => unescapeLabel(text));
     // HTML タグ除去
     l = l.replace(/<[^>]+>/g, '');
     l = l.trim();

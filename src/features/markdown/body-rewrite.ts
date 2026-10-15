@@ -45,7 +45,7 @@ import type { PlaceStyle } from './place-color';
 import type { PlaceRectValue } from './place-rect';
 import type { PlaceShape } from './place-shape';
 import type { PlaceTemplateId } from './place-template';
-import { readTags, withTagResult } from '../flavor/tags';
+import { readTagSlots, sameTag, withTagResult } from '../flavor/tags';
 import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
@@ -832,7 +832,8 @@ export function applyTagsToBody(
   tags: readonly string[],
   mode: 'add' | 'remove',
 ): TagsApplied {
-  let cur = readTags(body);
+  const slots = readTagSlots(body);
+  let cur = slots.flatMap((x) => ('tag' in x ? [x.tag] : []));
   let moved = false;
   const outcomes = new Map<string, TagOutcome>();
   for (const tag of tags) {
@@ -846,10 +847,25 @@ export function applyTagsToBody(
     outcomes.set(tag, 'wrote');
   }
   if (!moved) return { body: null, outcomes };
+  /**
+   * 🔴 **読めなかった項(長すぎる名前 / 上限を越えた分)は、元の位置のまま書き戻す**(#1087)。
+   * ⚠ 読めたものだけで `tags:` を作り直すと、触っていない名前が**黙って消える**。
+   *   読めた項は今の `cur` に残っているものだけ、新しく足した名前は末尾へ。
+   */
+  const written: string[] = [];
+  const placed: string[] = [];
+  for (const x of slots) {
+    if ('raw' in x) written.push(x.raw);
+    else if (cur.some((c) => sameTag(c, x.tag))) {
+      written.push(cur.find((c) => sameTag(c, x.tag))!);
+      placed.push(x.tag);
+    }
+  }
+  for (const c of cur) if (!placed.some((p) => sameTag(p, c))) written.push(c);
   // ⚠ 空になったら **鍵ごと消す**(`tags: []` を残さない ── 読み手が
   //    「空のタグが 1 つ在る」と読む形を作らない)
   return {
-    body: spliceFrontmatterKeys(body, { tags: cur.length === 0 ? undefined : cur }),
+    body: spliceFrontmatterKeys(body, { tags: written.length === 0 ? undefined : written }),
     outcomes,
   };
 }
