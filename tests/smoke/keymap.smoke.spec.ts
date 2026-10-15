@@ -67,6 +67,15 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(row.locator('[data-pkc-field="keymap-chord"]')).toHaveCount(1);
   await expect(row).toContainText('Alt + G');
 
+  // 🔴 #1087: 素の Tab は「やめる合図」── 割当は増えず、捕まえる状態が終わる(Esc と同じ)
+  const assignBtn = page.locator('[data-pkc-field="keymap-assign"][data-pkc-command="toggle-sidebar"]');
+  await clickReal(page, '[data-pkc-field="keymap-assign"][data-pkc-command="toggle-sidebar"]');
+  await expect(assignBtn).toHaveAttribute('data-pkc-capturing', '1');
+  await page.keyboard.press('Tab');
+  await expect(assignBtn, 'Tab で捕まえる状態が終わっていない').not.toHaveAttribute('data-pkc-capturing', '1');
+  await expect(row.locator('[data-pkc-field="keymap-chord"]'), 'Tab が割り当てられた').toHaveCount(1);
+  await expect(row).not.toContainText('Tab');
+
   // ⑥ 🔴 入れ替わったことを**効き目**で見る(表示だけ変わって効かない、を落とす)
   await expect(shell).not.toHaveAttribute('data-pkc-hidden-panes', /sidebar/);
   await page.keyboard.press('Alt+BracketLeft');
