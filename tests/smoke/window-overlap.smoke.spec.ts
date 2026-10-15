@@ -91,7 +91,8 @@ test('🔴 本体が編集中のノートへ、別窓は日付を書かずに理
     win.locator('[data-pkc-region="status"]'),
     '本体が編集中なのに、別窓が日付を書いた',
   ).toContainText('別のタブまたはウィンドウで編集中です', { timeout: 15_000 });
-  await expect(win.locator('[data-pkc-action="clear-entry-date"]'), '断ったのに日付が入った').toHaveCount(0);
+  // ⚠ 「外す」は日付が無いときも要素は在り hidden で畳まれている ── 数ではなく見えるかで見る
+  await expect(win.locator('[data-pkc-action="clear-entry-date"]'), '断ったのに日付が入った').toBeHidden();
 
   // 🔑 本体の窓は、何も重ならずに保存できる(打った字が残る)
   await page.bringToFront();
