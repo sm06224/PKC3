@@ -380,7 +380,7 @@ const UNREGISTERED_NAMEABLE: readonly string[] = [
    * 🔑 どれも押し口は画面のボタン 1 か所にしか無く、鍵も持たない(`open-storage-check` と同じ置き場)。
    */
   'back-to-help', 'open-system-office', 'sql-copy',
-  'toggle-todo', 'undo-append', 'undo-dual-move', 'undo-import', 'undo-move', 'undo-trash', 'use-copied',
+  'toggle-todo', 'undo-append', 'undo-dual-move', 'undo-import', 'undo-move', 'use-copied',
   /**
    * ⚠ **2026-09-21(設計 doc §7、段②a)で 3 件増やした** ── メッセージを開く /
    *   保管件数を選ぶ / 書き出す。🔑 押し所は状態の行の 1 個所と「システム」の
@@ -841,10 +841,12 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は集計の面の中にしか無く、押した組のタグが要る。`untag-entry` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
       total: 432,
       receivers: 366,
-      registered: 167,
-      both: 101,
+      // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
+      //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
+      registered: 168,
+      both: 102,
       outsideActionsTable: 66,
-      unregistered: 265,
+      unregistered: 264,
     });
   });
 
@@ -901,8 +903,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-12(#582 段③ 第 3 群): 打っている場所に入れる 2 件(`insert-diagram` / `insert-icon`)を登記で `key` 128 → 130(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件(`stop-capture` / `capture-stop` / `capture-trim-*` / `search-jump-end`)を登記で `key` 130 → 137(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」を登記で `key` 137 → 138(鍵の既定は持たない)
+    // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 138,
+      key: 139,
       entry: 22,
       body: 3,
       collection: 2,

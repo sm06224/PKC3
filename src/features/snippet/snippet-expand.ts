@@ -97,9 +97,20 @@ export function fillSnippetVars(body: string, now: Date): { text: string; caret:
   let out = '';
   let caret: number | null = null;
   let at = 0;
+  /**
+   * 🔴 **コードの中(囲み・文中コード)の `${…}` は値にしない**(#1087)── user が書いたコードの
+   *   `${date}` を挿した日の字に焼き付けない。`nextSnippetSlot` と同じ範囲の決め方(`fenceRegions` /
+   *   `inlineCodeRegions`)を使う(§7 判定を 1 つに)。
+   */
+  let regions: Array<[number, number]> | null = null;
+  const inCode = (i: number): boolean => {
+    regions ??= [...fenceRegions(body), ...inlineCodeRegions(body)];
+    return regions.some(([a, b]) => i >= a && i <= b);
+  };
   SLOT_RE.lastIndex = 0;
   for (let m = SLOT_RE.exec(body); m !== null; m = SLOT_RE.exec(body)) {
     const name = m[1]!;
+    if (inCode(m.index)) continue;
     if (name === 'cursor') {
       out += body.slice(at, m.index);
       // ⚠ **最初の 1 つだけ**を採る(2 つ書かれたら後ろのものは印として残る)

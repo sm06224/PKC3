@@ -231,4 +231,33 @@ describe('本文の音・動画は、その場で聞ける(#413 段②)', () => 
     expect(qa(MEDIA), '描き直しで再生機が増えた').toHaveLength(1);
     expect(lends(), '描き直しで借り直した').toBe(1);
   });
+
+  /**
+   * 🔴 **種類は添付の登録情報で決める**(#1087)。Blob の `type` は取り込んだ File の物で、
+   * `.m4a` / `.mkv` / `.ogg` は空のことがある。添付ノートは登録の mime で再生するので、
+   * 本文の埋め込みだけリンクのままになっていた。
+   */
+  it('🔴 Blob の type が空でも、登録の mime が audio/mp4 なら再生機が出る', async () => {
+    const base = lenderOf({ k1: '' });
+    const lender: AssetLender = {
+      ...base.lender,
+      listMimes: async () => new Map([['k1', 'audio/mp4']]),
+    };
+    const { d, qa } = setup({ e1: '前 [録音.m4a](asset:k1) 後ろ', e2: 'plain' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    const media = qa(MEDIA);
+    expect(media, 'type が空の音に再生機が出ていない').toHaveLength(1);
+    expect(media[0]!.tagName).toBe('AUDIO');
+  });
+
+  it('対照群: 登録の mime が無い鍵は、Blob の type で見る(音でなければ何も置かない)', async () => {
+    const base = lenderOf({ k1: 'audio/webm', k2: 'application/pdf' });
+    const lender: AssetLender = { ...base.lender, listMimes: async () => new Map() };
+    const { d, qa } = setup({ e1: '[音](asset:k1) [紙](asset:k2)', e2: 'plain' }, lender);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    expect(qa(MEDIA), '登録が無いのに Blob の type へ落ちていない').toHaveLength(1);
+    expect(qa(MEDIA)[0]!.tagName).toBe('AUDIO');
+  });
 });

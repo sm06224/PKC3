@@ -1654,6 +1654,8 @@ describe('構造をノートへ(#918 段①)', () => {
     schemaBtn.click();
     await settleAll();
     expect(persisted.length, 'ノートが 1 枚も作られていない').toBe(1);
+    // 🔴 書き出したノートは読む面で開く(兄弟の `sql-to-note` と同じ ── #1087)
+    expect(d.getState().phase, '書く状態で開いた(編集権を取らずに編集に入る)').toBe('ready');
     const body = persisted[0]?.body ?? '';
     expect(body, '表が出ていない').toContain('## entries(表・7 行)');
     expect(body, '列が出ていない').toContain('| lid | TEXT | 不可 | 主キー |');
@@ -1735,8 +1737,8 @@ describe('構造をノートへ(#918 段①)', () => {
 
   /**
    * 🔴 **編集中は断って、理由を画面に出す**。
-   * 🔑 わざわざ作らなくても、**1 回押せばその状態になる** ── `CREATE_ENTRY` は
-   *   作ったノートを開くので、押した直後は `editing` である(`sql-to-note` と同じ)。
+   * 🔑 1 回押して作ったノートが選ばれた状態で編集に入る(#1087 から作った直後は読む面なので、
+   *   `START_EDIT` で編集中にする ── `sql-to-note` と同じ)。
    * ⚠ **黙って捨てない**ことがこの test の主張である(`CREATE_ENTRY` は
    *   `phase !== 'ready'` を無言で落とすので、断り文が無いと「壊れている」と読まれる)。
    */
@@ -1799,7 +1801,9 @@ describe('構造をノートへ(#918 段①)', () => {
     const { schemaBtn, persisted, d } = setup(reply);
     schemaBtn.click();
     await settleAll();
-    expect(d.getState().phase, '前提が崩れている(作った後は編集中のはず)').toBe('editing');
+    // ⚠ #1087 から書き出したノートは読む面で開く ── 編集中の状態は、作ったノートを開いてから作る
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提が崩れている(編集に入れていない)').toBe('editing');
     schemaBtn.click();
     await settleAll();
     expect(persisted.length, '編集中なのに 2 枚目を作った').toBe(1);

@@ -330,6 +330,8 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
         'nav-back',
         'nav-forward',
         'open-note-window',
+        // #1087: 元に戻す(ゴミ箱へ移した直後)── 戻せる物が無い間は note ではなく専用の理由を言う
+        'undo-trash',
         'view-detail',
       ].sort(),
     );

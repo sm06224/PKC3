@@ -1374,6 +1374,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const assetLender = {
     lend: (key: string) => blobs.lendObjectUrl(cid, key),
     getBlob: (key: string) => blobs.get(cid, key),
+    // 🔴 本文の音・動画の種類は登録の mime で決める(#1087。Blob の type は空のことがある)
+    listMimes: async (): Promise<ReadonlyMap<string, string>> =>
+      new Map(
+        (await client.request({ op: 'listAssetMetas', cid })).flatMap((m): Array<[string, string]> =>
+          m.mime ? [[m.key, m.mime]] : [],
+        ),
+      ),
   };
   /**
    * 🔴 **借り終えたら面を描き直す口**(#683 段①)。⚠ 借りは非同期なので、

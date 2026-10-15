@@ -5669,6 +5669,24 @@ export function runGlobalCommand(
    * ⚠ ここは**押せるか**だけ ── 受け手(`replace-all` の本文)には触れない。
    */
   if (cmd === 'replace-all' && dispatcher.getState().phase !== 'editing') return false;
+  /**
+   * 🔴 **ゴミ箱へ移した直後の「元に戻す」**(#1087)── 押しボタンは知らせの隣に出ている間しか無いので、
+   *   `SHORTCUT_BUTTON` ではなく特例で、ボタンの受け手(`ACTIONS['undo-trash']`)をそのまま呼ぶ(戻す実体を 2 つ作らない)。
+   * ⚠ 戻せる物が無いときは、`dry` では偽(= 一覧は「いまは押せません ── <理由>」と言う)、鍵では**黙らず**断る
+   *   (`undo-dual-move` の「戻せるものがありません」と同じ頭)。
+   */
+  if (cmd === 'undo-trash') {
+    if (currentTrashOffer() === null) {
+      if (dry) return false;
+      prevent();
+      notify('戻せるものがありません(ゴミ箱へ移した直後だけ戻せます)', CAUTION);
+      return true;
+    }
+    if (dry) return true;
+    prevent();
+    ACTIONS['undo-trash']!(dispatcher, root, ROOT_SERVICES.get(root) ?? ({} as BinderServices), root);
+    return true;
+  }
   const sel = SHORTCUT_BUTTON[cmd];
   if (sel === undefined) return false;
   const btn = root.querySelector<HTMLElement>(sel);

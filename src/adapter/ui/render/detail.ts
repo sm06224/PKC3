@@ -188,6 +188,12 @@ import {
 export interface AssetLender {
   lend(assetKey: string): Promise<{ url: string; dispose: () => void } | null>;
   getBlob(assetKey: string): Promise<Blob | null>;
+  /**
+   * 添付の登録情報の種類(mime)を**まとめて**引く(#1087)。⚠ Blob の `type` は取り込んだ
+   * File の物で、`.m4a` / `.mkv` / `.ogg` は**空**のことがある ── 登録の mime は拡張子から
+   * 補ってある(`resolveMime`)。無ければ渡さない(その場合は Blob の `type` で見る)。
+   */
+  listMimes?(): Promise<ReadonlyMap<string, string>>;
 }
 
 type Mode = 'empty' | 'view' | 'editor';
@@ -3825,6 +3831,17 @@ export class DetailRenderer {
       for (const a of r.querySelectorAll<HTMLAnchorElement>('a[data-pkc-asset-key]')) collect(a);
     }
     if (byKey.size === 0) return;
+    /**
+     * 🔴 **種類は添付の登録情報で決める**(#1087)── 添付ノートの再生機(`hydratePreview`)と
+     *   同じ source。Blob の `type` は空のことがあり、本文の埋め込みだけリンクのままになっていた。
+     *   ⚠ 引くのは 1 回だけ(鍵ごとに全件を読まない)。引けない / 載っていないときだけ Blob の `type`。
+     */
+    let mimesP: Promise<ReadonlyMap<string, string> | null> | null = null;
+    const mimeOf = async (key: string): Promise<string | undefined> => {
+      if (!assets.listMimes) return undefined;
+      mimesP ??= assets.listMimes().catch(() => null);
+      return (await mimesP)?.get(key);
+    };
     await Promise.all(
       [...byKey].map(async ([key, links]) => {
         try {
@@ -3834,7 +3851,10 @@ export class DetailRenderer {
            */
           const blob = await assets.getBlob(key);
           if (token !== this.hydrateToken) return;
-          const kind = assetPreviewKind(blob?.type);
+          const metaMime = await mimeOf(key);
+          if (token !== this.hydrateToken) return;
+          const mime = metaMime ?? blob?.type;
+          const kind = assetPreviewKind(mime);
           if (kind !== 'audio' && kind !== 'video') return;
           const lent = await assets.lend(key);
           if (!lent) return;
@@ -3864,7 +3884,7 @@ export class DetailRenderer {
             /** ⚠ **中身は開くまで読まない**(長い収録を開くたびに丸ごと運ばない)。 */
             el.preload = 'metadata';
             el.src = lent.url;
-            replaceOnMediaError(el, kind, blob?.type ?? '', '上のリンクから保存して開いてください');
+            replaceOnMediaError(el, kind, mime ?? '', '上のリンクから保存して開いてください');
             a.after(el);
             // 🔑 **設定が入なら、出口を整える鎖へ通す**(#772 段① B)
             appVoiceBoostRouter.watch(el);

@@ -6,7 +6,7 @@
  *   逆へ倒れると、user は**いちばん危ない環境で安心する**。
  */
 import { describe, expect, it } from 'vitest';
-import { buildSettingsCommands } from '../../src/adapter/ui/render/commands';
+import { COLLECTION_COMMANDS, buildSettingsCommands } from '../../src/adapter/ui/render/commands';
 import {
   QUOTA_ALARM_RATIO,
   QUOTA_WARN_RATIO,
@@ -75,6 +75,18 @@ describe('画面に出す字(#971 段②)', () => {
     expect(s).toContain('「使われていない添付を消す」');
     expect(s).toContain('「バックアップ」');
     noMarkup(s);
+  });
+
+  /**
+   * 🔴 **「左のペインのいちばん下」のボタンの字は、画面の登記から引く**(#1087)。
+   * 実体は左の列(`sidebar`)の最後の子の帯(`collection-bar`)で、`COLLECTION_COMMANDS` の
+   * `export-archive` がそこに並ぶ。字を手で書くと、改名した日に案内だけ古い字で残る。
+   */
+  it('🔴 案内の「バックアップ」は、左の列の下の帯のボタンの字と同じ', () => {
+    const hit = COLLECTION_COMMANDS.find((c) => c.action === 'export-archive');
+    expect(hit, '帯のバックアップのボタンが登記に無い(空振り)').toBeDefined();
+    const s = quotaText({ usage: 95 * GB, quota: 100 * GB });
+    expect(s).toContain(`左のペインのいちばん下の「${hit!.label}」`);
   });
 
   /**

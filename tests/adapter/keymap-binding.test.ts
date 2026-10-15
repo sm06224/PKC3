@@ -1064,6 +1064,11 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   「操作を探す」を開く前に控えた字(`paletteSelection`)を読む特例。
        */
       'copy-selection-md',
+      /**
+       * ⚠ 2026-10-15 に足した(#1087)── ゴミ箱へ移した直後の「元に戻す」。押しボタンは知らせの隣に出ている間しか無いので、
+       *   ボタンの受け手(`ACTIONS['undo-trash']`)を直に呼ぶ特例。
+       */
+      'undo-trash',
     ];
     for (const id of special) {
       expect(src, `${id} の特例が消えた`).toContain(`cmd === '${id}'`);

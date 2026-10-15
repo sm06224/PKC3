@@ -114,4 +114,17 @@ describe('拡張子 ↔ MIME の往復', () => {
     });
     expect(bad, '入れ直すと音とも動画とも読めない拡張子がある(その場で聞けない)').toEqual([]);
   });
+
+  /**
+   * 🔴 **文字のファイルは、種類が空でも字として出る**(#1087)。ブラウザが付けた種類は
+   * 拡張子の表より優先する(`.ts` が `video/mp2t` で来たら動画のまま)。
+   */
+  it('🔴 文字のファイルの拡張子は text/plain になり、ブラウザが付けた種類は上書きしない', () => {
+    const exts = ['log', 'yaml', 'yml', 'xml', 'py', 'js', 'ts', 'sh', 'toml', 'ini', 'c', 'h', 'go', 'rs', 'java'];
+    for (const e of exts) {
+      expect(resolveMime(`a.${e}`, ''), `${e}: 種類が空のとき字にならない`).toBe('text/plain');
+    }
+    expect(resolveMime('clip.ts', 'video/mp2t'), '.ts が動画なのに字にされた').toBe('video/mp2t');
+    expect(resolveMime('a.js', 'text/javascript')).toBe('text/javascript');
+  });
 });

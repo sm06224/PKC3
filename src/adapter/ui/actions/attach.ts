@@ -113,7 +113,30 @@ export const EXT_MIME: Record<string, string> = {
   md: 'text/markdown',
   txt: 'text/plain',
   csv: 'text/csv',
-  json: 'application/json',
+  /**
+   * 🔴 **文字のファイル**(#1087)。OS が種類を付けない拡張子は `application/octet-stream` に落ち、
+   * 添付のその場の表示(字として出す)が出なかった。
+   * ⚠ 全部 `text/plain` にする ── 書き出し側の逆表(`EXT_BY_MIME`)は `text/plain` → `txt` の 1 本で、
+   *   往復の検査(`ext-mime-parity`)がそれを求める。字として出すかは種類が `text/*` かで決まる。
+   * ⚠ これは**宣言が空のときだけ**効く(`resolveMime` は `File.type` を先に採る)── ブラウザが
+   *   `video/mp2t`(`.ts`)や `text/javascript`(`.js`)を付けたときは、そちらが勝つ。
+   */
+  log: 'text/plain',
+  yaml: 'text/plain',
+  yml: 'text/plain',
+  xml: 'text/plain',
+  py: 'text/plain',
+  js: 'text/plain',
+  ts: 'text/plain',
+  sh: 'text/plain',
+  toml: 'text/plain',
+  ini: 'text/plain',
+  c: 'text/plain',
+  h: 'text/plain',
+  go: 'text/plain',
+  rs: 'text/plain',
+  java: 'text/plain',
+  json:'application/json',
   html: 'text/html',
   png: 'image/png',
   jpg: 'image/jpeg',
