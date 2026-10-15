@@ -49,6 +49,7 @@
     "chart.js": "^4.5.1",
     "katex": "^0.19.0",
     "markdown-it": "15.0.2",
+    "markdown-it-cjk-friendly": "3.0.0",
     "markdown-it-footnote": "4.0.0",
     "mermaid": "^12.2.0",
     "pdf-lib": "^1.17.1",
