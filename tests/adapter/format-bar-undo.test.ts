@@ -136,6 +136,21 @@ describe('「完了項目を末尾へ」「番号を振り直す」', () => {
     expect(said).toEqual(['完了したチェック項目を末尾へ移動しました']);
   });
 
+  it('🔴 整理のあと、カーソルは本文の末尾へ飛ばない(#1087)', () => {
+    const a = setup();
+    a.ta.value = '- [x] 済\n- [ ] 未\n後ろの文';
+    a.action('sort-tasks');
+    expect(a.ta.value).toBe('- [ ] 未\n- [x] 済\n後ろの文');
+    expect(a.ta.selectionStart).toBeLessThan(a.ta.value.length);
+    expect(a.ta.selectionStart).toBe('- [ ] 未\n- [x] 済'.length);
+    const b = setup();
+    b.ta.value = '1. あ\n5. い\n後ろの文';
+    b.action('renumber-lists');
+    expect(b.ta.value).toBe('1. あ\n2. い\n後ろの文');
+    // 変わったのは `5` → `2` の 1 字だけ ── カーソルはその直後(`replaceChanged` が置いた所)
+    expect(b.ta.selectionStart).toBe('1. あ\n2'.length);
+  });
+
   it('🔴 番号を振り直す:変わった行の範囲だけ。fallback でも本文・input 1 回', () => {
     const a = setup();
     a.ta.value = '1. あ\n5. い\n9. う';

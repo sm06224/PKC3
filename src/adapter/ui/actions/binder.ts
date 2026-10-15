@@ -213,7 +213,8 @@ import { insertionForLineDate } from '@features/schedule/line-date';
 import { dayStamp } from '@features/datetime/date-math';
 import { safeName } from '@features/export/file-name';
 import { hasTranscriptCues, srtFromTranscript, transcriptCues } from '@features/asr/srt';
-import { dropTaskCard } from '@adapter/ui/render/schedule-drag';
+import { decodeTaskDrag, dropTaskCard, encodeTaskDrag } from '@adapter/ui/render/schedule-drag';
+import { setScheduleWriteGate } from '@adapter/ui/render/schedule-write-gate';
 import { undoScheduleMove } from '@adapter/ui/render/schedule-undo';
 import {
   DATE_SHORTCUTS,
@@ -2828,6 +2829,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
  * ⚠ 右クリックの 2 つも同じ関数を通る ── 入口で書き分けると**片方だけ字が違う**
  *   ことになるので、こちらへ寄せて**断り文も 1 つ**にする(§7)。
  */
+/** 履歴の版を戻す確認の間に、別のノートを選んだとき(#1087)。 */
+export const RESTORE_TARGET_MOVED_TEXT = '別のノートを選んだので、前の版には戻していません。戻すノートを選び直して、もう一度押してください';
+
 const BODY_WRITE_DEFERRED: ReadonlySet<string> = new Set([
   'copy-md-block',
   'table-to-markdown',
@@ -4360,7 +4364,12 @@ function applyTableFormat(
  * ⚠ 何をするかの判断は `body-rewrite.ts`(`applyTaskRun`)── ここは**運ばれた行を渡す**だけ。
  *   断りは reducer(`SET_TASK_RUN`)が lid で言う(`toggle-task` と同じ)。
  */
-function setTaskRun(dispatcher: Dispatcher, target: HTMLElement, to: 'done' | 'open'): void {
+function setTaskRun(
+  dispatcher: Dispatcher,
+  target: HTMLElement,
+  to: 'done' | 'open',
+  services: BinderServices,
+): void {
   if (refuseStaleMenu(dispatcher, target)) return;
   const raw = target.getAttribute(MENU_TASK_LINES_ATTR) ?? '';
   const lines = raw
@@ -4385,7 +4394,14 @@ function setTaskRun(dispatcher: Dispatcher, target: HTMLElement, to: 'done' | 'o
     }
     openLines.push(text);
   }
-  dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, openLines, to });
+  // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門)
+  actUnlessEditedElsewhere(
+    dispatcher,
+    services,
+    [lid],
+    'チェックできませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+    () => dispatcher.dispatch({ type: 'SET_TASK_RUN', lid, lines, openLines, to }),
+  );
 }
 
 function menuCarriedLine(target: Element): number | null {
@@ -7885,6 +7901,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     if (lid === null) return;
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
+    // 🔴 打っている間に編集が始まったら、黙って欄を空にしない(reducer は捨てるので字だけ消える。#1087)
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを足してください` });
+      return;
+    }
     /**
      * 🔴 **`#買い物 #家事` と打てば 2 つ付く**(#637。user 裁定 2026-08-31)。
      *
@@ -7923,6 +7944,10 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = st.selectedLid;
     const tag = target.getAttribute('data-pkc-tag') ?? '';
     if (lid === null || tag === '') return;
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを外してください` });
+      return;
+    }
     dispatcher.dispatch({ type: 'BULK_TAG', lids: [lid], tags: [tag], mode: 'remove' });
   },
   'bulk-tag-remove': (dispatcher, _target, _services, root) =>
@@ -8919,14 +8944,23 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   動かした後に本文が変わっていたら戻さず、理由を言う(行番号の違う別の行を書き換えない)。
    *   口は画面の下の知らせの隣(`shell.ts` の `status-undo`。出し入れは `status-open.ts`)── `UNDO_MOVE`(塊の移動)とは別物。
    */
-  'schedule-undo-move': (dispatcher) => {
+  'schedule-undo-move': (dispatcher, _target, services) => {
     const result = undoScheduleMove(dispatcher.getState());
     if (result === null) return;
     if ('refusal' in result) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: result.refusal });
       return;
     }
-    dispatcher.dispatch(result.action);
+    // 🔴 別のタブ・窓が編集中のノートへは戻さない(#1087。落とす書込と同じ門)。戻す相手は押した瞬間に捕えてある
+    const action = result.action;
+    const lid = 'lid' in action && typeof action.lid === 'string' ? action.lid : '';
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      lid === '' ? [] : [lid],
+      '予定を戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch(action),
+    );
   },
   /**
    * 🔴 **最近開いた記録を消す**(#215 残り①)。口は設定の中。
@@ -9566,7 +9600,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   押したとき、開いているノートの同じ行を書き換えない)。
    * 🔑 選ぶ窓(`<input type="color">`)は画面の外の使い捨て 1 つ ── 開くたびに前の物を外して作り直す。
    */
-  'pick-color': (dispatcher, target) => {
+  'pick-color': (dispatcher, target, services) => {
     const line = Number(target.getAttribute('data-pkc-color-line'));
     const nth = Number(target.getAttribute('data-pkc-color-nth'));
     const from = target.getAttribute('data-pkc-color-value') ?? '';
@@ -9583,7 +9617,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     openColorPicker(target, from, (to) => {
       if (!isEditableColor(to) || to === from) return;
-      dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to });
+      // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門。選び終えた時点で確かめる)
+      actUnlessEditedElsewhere(
+        dispatcher,
+        services,
+        [lid],
+        '色を直せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        () => dispatcher.dispatch({ type: 'SET_COLOR_CODE', lid, line, nth, from, to }),
+      );
     });
   },
   'toggle-task': (dispatcher, target, services) => {
@@ -10291,8 +10332,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
     ta.focus();
+    // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('番号を振り直しました');
   },
   /**
@@ -10323,8 +10364,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     }
     // ⚠ 書くのは `insertText`(取り消しに載る)── 変わった範囲だけを置き換える
     ta.focus();
+    // 🔴 カーソルは `replaceChanged` が置いた所(変えた範囲の終わり)のまま ── 末尾へ飛ばさない(#1087)
     replaceChanged(ta, next);
-    ta.setSelectionRange(ta.value.length, ta.value.length);
     services.showStatus?.('完了したチェック項目を末尾へ移動しました');
   },
   /**
@@ -10731,8 +10772,8 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **右クリックしたチェックリストを丸ごとそろえる**(#1173)。
    * 🔑 向きだけが違う 2 つを 1 本にする(`table-to-*` と同じ作法 ── §7)。
    */
-  'task-run-open': (dispatcher, target) => setTaskRun(dispatcher, target, 'open'),
-  'task-run-done': (dispatcher, target) => setTaskRun(dispatcher, target, 'done'),
+  'task-run-open': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'open', services),
+  'task-run-done': (dispatcher, target, services) => setTaskRun(dispatcher, target, 'done', services),
   /**
    * 🔴 **付箋・線の色を選ぶ**(#530 段④。Gemini 裁定 A)── 右クリックの「塗りの色…」「枠の色…」(線は「色…」)。
    *
@@ -13601,13 +13642,18 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   (`patchTaskCard` が焼いている)。⚠ 行番号は**札ではなく中の印**に在る
    *   (札にも置くと `[data-pkc-task-line]` を押す既存の経路に当たる、2026-08-23 の罠)。
    */
-  'unschedule-task': (dispatcher, target) => {
+  'unschedule-task': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     const card = target.closest<HTMLElement>('[data-pkc-entry]');
     const lid = card?.getAttribute('data-pkc-entry') ?? '';
     if (card === null || lid === '') return;
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門。押した瞬間の値は捕えてある)
+    const failed =
+      '予定を外せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
     if (card.hasAttribute('data-pkc-whole-note')) {
-      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null });
+      actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
+        dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid, date: null }),
+      );
       return;
     }
     const raw = card
@@ -13626,7 +13672,9 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ **`until` も外す** ── 記法まるごと消えるので、期間だけ残すと
      *   「頼んでいない指示」になる(落とす経路と同じ渡し方)。
      */
-    dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null });
+    actUnlessEditedElsewhere(dispatcher, services, [lid], failed, () =>
+      dispatcher.dispatch({ type: 'SET_TASK_DATE', lid, line, openLine, date: null, until: null }),
+    );
   },
   /**
    * 🔴 **札の「繰り返す…」を押した ── 刻みの一覧を出す**(#855 段 0 の 3 つ目。
@@ -13664,7 +13712,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   `rewriteLineDate` が持つ。
    * ⚠ 知らない綴りなら**何もしない**(当てずっぽうで本文を書き換えない)。
    */
-  'set-task-repeat': (dispatcher, target) => {
+  'set-task-repeat': (dispatcher, target, services) => {
     const lid = target.getAttribute('data-pkc-entry') ?? '';
     const raw = target.getAttribute('data-pkc-task-line');
     const line = Number(raw);
@@ -13679,13 +13727,21 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
       return;
     }
-    dispatcher.dispatch({
-      type: 'SET_TASK_REPEAT',
-      lid,
-      line,
-      openLine,
-      repeat: key === '' ? null : key,
-    });
+    // 🔴 別のタブ・窓が編集中のノートへは撃たない(#1087。`toggle-task` と同じ門)
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      '繰り返しを変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () =>
+        dispatcher.dispatch({
+          type: 'SET_TASK_REPEAT',
+          lid,
+          line,
+          openLine,
+          repeat: key === '' ? null : key,
+        }),
+    );
   },
   'export-entry-html': (dispatcher, target, services) => {
     // 🔴 解決規則は隣の `export-entry` / `delete-entry` と**同じ**(#877)── 揃えないと
@@ -13940,6 +13996,14 @@ const ACTIONS: Record<string, ActionHandler> = {
     void editedElsewhereReason(dispatcher, services, lid).then((reason) => {
       if (reason !== null) {
         dispatcher.dispatch({ type: 'OP_FAILED', error: reason });
+        return;
+      }
+      /**
+       * 🔴 **確かめている間に別のノートへ移ったら戻さない**(#1087)。reducer は版を**いま選んでいるノート**へ
+       *   当てるので、通すと別のノートの本文と題名が、押したノートの古い版で上書きされていた。
+       */
+      if (dispatcher.getState().selectedLid !== lid) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: RESTORE_TARGET_MOVED_TEXT });
         return;
       }
       restore();
@@ -14654,6 +14718,20 @@ export function bindActions(
 ): () => void {
   // 🔑 押しボタンを持たない命令が services を引く口(#1452 案 1。`runGlobalCommand` の特例)
   ROOT_SERVICES.set(root, services);
+  /**
+   * 🔴 **予定の札を落として動かす書込の門**(#1087)── 落とす経路は下の `run()` を通らないので、
+   *   書出し / 取込の実行中の断り(`refuseWhileBusy` と同じ字)と、別のタブの編集の断りをここで掛ける。
+   */
+  setScheduleWriteGate(dispatcher, (lids, failed, act) => {
+    if (services.busy?.() === true) {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: '書き出し / 取り込みが実行中です。完了してから操作してください',
+      });
+      return;
+    }
+    actUnlessEditedElsewhere(dispatcher, services, lids, failed, act);
+  });
   /**
    * 🔴 **画面へ 1 行出す口**(#522)。⚠ **エラーの欄ではない** ──
    * `main.ts` が優先順位(エラー > 一時の知らせ > 常設)を持っているので、
@@ -15500,7 +15578,9 @@ export function bindActions(
           ta.setSelectionRange(res.halfWidth.from, res.halfWidth.to);
           insertText(ta, res.halfWidth.text);
         }
-        insertText(ta, formatCalcResult(res.value));
+        // ⚠ 普通の数字にならない答え(`1e21` 以上など)は何も挿さない
+        const shown = formatCalcResult(res.value);
+        if (shown !== null) insertText(ta, shown);
       } else {
         /**
          * 🔴 **計算にならなかったら、理由を 1 行だけ出す**(#766 A-2、2026-09-08)。
@@ -16601,16 +16681,10 @@ export function bindActions(
       clearDropTarget();
       if (drop === null) return;
       e.preventDefault();
-      const [lid, rawLine, grabbedOn, every] = (
-        de.dataTransfer.getData(PKC_TASK_DRAG) || ''
-      ).split(' ');
-      if (lid === undefined || lid === '') return;
-      dropTaskCard(
-        dispatcher,
-        { lid, line: rawLine ?? '', from: grabbedOn ?? '', repeat: every ?? '' },
-        drop.date,
-        root,
-      );
+      // 🔴 荷物を読むのは `decodeTaskDrag` 1 つ(掴んだ時点の行の中身も、ここで戻る。#1087)
+      const grabbed = decodeTaskDrag(de.dataTransfer.getData(PKC_TASK_DRAG) || '');
+      if (grabbed === null) return;
+      dropTaskCard(dispatcher, grabbed, drop.date, root);
       return;
     }
     if (de.dataTransfer?.types?.includes(PKC_DRAG) === true) {
@@ -16821,7 +16895,12 @@ export function bindActions(
       const every = taskCard.getAttribute('data-pkc-task-repeat') ?? '';
       if (lid !== null && line !== null && line !== undefined) {
         dragFromSide = null;
-        de.dataTransfer.setData(PKC_TASK_DRAG, `${lid} ${line} ${from} ${every}`);
+        // 🔴 掴んだ時点の行の中身(#1087)。⚠ 空白を含むので 5 つ目に URI 符号化して載せる(取れなければ空 = 落とす側で断る)
+        const grabbedRaw = line === '' ? '' : (shownCardLine(dispatcher.getState(), lid, Number(line)) ?? '');
+        de.dataTransfer.setData(
+          PKC_TASK_DRAG,
+          encodeTaskDrag({ lid, line, from, repeat: every, ...(grabbedRaw === '' ? {} : { rawLine: grabbedRaw }) }),
+        );
         de.dataTransfer.effectAllowed = 'move';
         return;
       }
@@ -19311,6 +19390,7 @@ export function bindActions(
   return () => {
     // ⚠ 自分が結んだ物だけ外す ── 同じ root に 2 度結んだとき、1 回目の後始末が 2 回目の登録を消さない
     if (ROOT_SERVICES.get(root) === services) ROOT_SERVICES.delete(root);
+    setScheduleWriteGate(dispatcher, null);
     /**
      * 🔑 **張った順に、張った物だけを外す**(#876)── 手で並べ直さない。
      * ⚠ かつてここは 19 行の `removeEventListener` で、**7 件足りなかった**。

@@ -170,4 +170,32 @@ describe('sortTasksByStatus #1108', () => {
     expect(sortTasksByStatus('')).toBe('');
     expect(sortTasksByStatus('通常の段落のみの本文')).toBe('通常の段落のみの本文');
   });
+
+  it('🔴 ゆるいリスト(項目の間に空行)も 1 つのリストとして整列する・空行の位置は変えない(#1087)', () => {
+    const input = ['- [x] 済み', '', '- [ ] 未1', '', '- [ ] 未2'].join('\n');
+    const expected = ['- [ ] 未1', '', '- [ ] 未2', '', '- [x] 済み'].join('\n');
+    expect(sortTasksByStatus(input)).toBe(expected);
+    // 末尾に空行が増えない・先頭にも付かない
+    expect(sortTasksByStatus(input).endsWith('\n')).toBe(false);
+    // 揃っているゆるいリストは同一のまま
+    expect(sortTasksByStatus(expected)).toBe(expected);
+    // 見出しをまたぐ空行は、これまでどおり別のリスト
+    const two = ['- [x] a', '', '## 次', '- [ ] b', '- [x] c'].join('\n');
+    expect(sortTasksByStatus(two)).toBe(two);
+    // 子の項目の間の空行
+    const nested = ['- [ ] 親', '  - [x] 子1', '', '  - [ ] 子2'].join('\n');
+    expect(sortTasksByStatus(nested)).toBe(['- [ ] 親', '  - [ ] 子2', '', '  - [x] 子1'].join('\n'));
+  });
+
+  it('🔴 番号付きは並べ替えても番号が 1, 2, 3 の順のまま(#1087)', () => {
+    const input = ['1. [x] 済み', '2. [ ] 未1', '3. [ ] 未2'].join('\n');
+    expect(sortTasksByStatus(input)).toBe(['1. [ ] 未1', '2. [ ] 未2', '3. [x] 済み'].join('\n'));
+    // `)` の区切りと字下げ、番号が 1 から始まらない列
+    const paren = ['5) [x] a', '6) [ ] b'].join('\n');
+    expect(sortTasksByStatus(paren)).toBe(['5) [ ] b', '6) [x] a'].join('\n'));
+    const nested = ['- [ ] 親', '  1. [x] 子1', '  2. [ ] 子2'].join('\n');
+    expect(sortTasksByStatus(nested)).toBe(['- [ ] 親', '  1. [ ] 子2', '  2. [x] 子1'].join('\n'));
+    // 箇条書きは番号を持たないので変わらない(対照群)
+    expect(sortTasksByStatus('- [x] a\n- [ ] b')).toBe('- [ ] b\n- [x] a');
+  });
 });

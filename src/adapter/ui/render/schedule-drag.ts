@@ -95,6 +95,7 @@
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { bodyWriteBlockReason, type AppState, type UserAction } from '@adapter/state/app-state';
 import { SHOWN_LINE_LOST, shownCardLine } from '@adapter/state/shown-line';
+import { SCHEDULE_DROP_FAILED, gatedScheduleWrite } from './schedule-write-gate';
 import { addDays, daysBetween } from '@features/datetime/date-math';
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX } from '@adapter/ui/actions/long-press';
 import { pickRepeatMoveInApp } from './app-dialog';
@@ -136,6 +137,31 @@ export interface GrabbedTask {
   readonly from: string;
   /** 空文字 = 繰り返しでない。それ以外は `RepeatKind`。 */
   readonly repeat: string;
+  /**
+   * 🔴 **掴んだ時点の、その行の中身**(`taskScan` の `rawLine`。#1087)。落とした時点の走査から引き直さない ──
+   * 掴んでいる間に別のタブが上へ行を足すと、同じ `(lid, line)` が**別の札**を指す。書換の `openLine` にこれを渡せば、
+   * 食い違いは書換が `SHOWN_LINE_LOST` で断る。省略(古い荷物 / 取れなかった)= 従来どおり落とした時点の走査から引く。
+   */
+  readonly rawLine?: string;
+}
+
+/**
+ * 🔴 **マウスで掴んだ札の荷物**(HTML5 drag の文字列。#1087)── 組むのも読むのもこの 2 つだけ。
+ * ⚠ 掴んだ行の中身は空白を含むので 5 つ目に URI 符号化して載せる。壊れていたら省く(落とす側は従来の引き方に倒れる)。
+ */
+export function encodeTaskDrag(t: GrabbedTask): string {
+  return `${t.lid} ${t.line} ${t.from} ${t.repeat} ${encodeURIComponent(t.rawLine ?? '')}`;
+}
+export function decodeTaskDrag(payload: string): GrabbedTask | null {
+  const [lid, line, from, repeat, raw] = payload.split(' ');
+  if (lid === undefined || lid === '') return null;
+  let rawLine: string;
+  try {
+    rawLine = decodeURIComponent(raw ?? '');
+  } catch {
+    rawLine = '';
+  }
+  return { lid, line: line ?? '', from: from ?? '', repeat: repeat ?? '', ...(rawLine === '' ? {} : { rawLine }) };
 }
 
 /** 長押しが確定するまで(押さえている最中)。 */
@@ -211,7 +237,10 @@ function moveRepeat(
   if (days === null || days === 0) return;
   void pickRepeatMoveInApp(host, days).then((pick) => {
     const action = repeatMoveAction(dispatcher.getState(), grabbed, line, from, dropDate, days, pick);
-    dispatchRepeatMove(dispatcher, action, pick);
+    // 🔴 小窓で答えを待った後に撃つので、門は答えの後に掛ける(#1087)
+    gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () =>
+      dispatchRepeatMove(dispatcher, action, pick),
+    );
   });
 }
 
@@ -263,7 +292,8 @@ export function repeatMoveAction(
   if (pick === null) return null; // やめる
   // 🔴 掴んだ時点(札が焼かれた時点)の規則の行の中身を添える(#1087)。引けなければ手を作らない
   //    (呼び側が `REPEAT_MOVE_LOST_TEXT` で断る)
-  const openLine = shownCardLine(state, grabbed.lid, line);
+  // 🔴 掴んだ時点の物があればそれを使う(落とした時点の走査から引くと、別の札の行が当たる)
+  const openLine = grabbed.rawLine ?? shownCardLine(state, grabbed.lid, line);
   if (openLine === null) return null;
   if (pick === 'one')
     return {
@@ -296,6 +326,18 @@ export function repeatMoveAction(
     // ⚠ `until` は**繰り返しの終わり**である ── 同じ差だけ動かす(期間と同じ作法)
     until: card?.until == null ? null : (addDays(card.until, days) ?? card.until),
   };
+}
+
+/** 掴んだ時点の札の行の中身を荷物の形で返す(取れなければ空の物)。 */
+export function rawLineOf(
+  dispatcher: Dispatcher,
+  lid: string,
+  line: string,
+): { readonly rawLine?: string } {
+  const n = Number(line);
+  if (!Number.isInteger(n)) return {};
+  const raw = shownCardLine(dispatcher.getState(), lid, n);
+  return raw === null ? {} : { rawLine: raw };
 }
 
 export function dropTaskCard(
@@ -333,18 +375,21 @@ export function dropTaskCard(
    *   ここで分ける(面ごとに 2 つの落とし先を作らない)。
    */
   if (grabbed.line === '') {
-    const entryState = dispatcher.getState();
-    const was = entryState.entryMetas.get(grabbed.lid)?.date ?? null;
-    const refused = bodyWriteBlockReason(entryState, grabbed.lid) !== null;
-    dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date });
-    // 🔴 動かしたら「元に戻す」の 1 行(#855)。⚠ 断られた回(編集中など)・日が変わらない回は出さない
-    if (!refused && entryState.entryMetas.has(grabbed.lid))
-      offerMoveUndo(host, dispatcher, {
-        target: { kind: 'entry', lid: grabbed.lid },
-        before: { date: was, time: null, timeEnd: null, until: null, text: '' },
-        after: { date, time: null, timeEnd: null, until: null, text: '' },
-        verb: 'moved',
-      });
+    // 🔴 門は書く直前に通す(#1087)── 待った後の状態から `was` / `refused` を読む
+    gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () => {
+      const entryState = dispatcher.getState();
+      const was = entryState.entryMetas.get(grabbed.lid)?.date ?? null;
+      const refused = bodyWriteBlockReason(entryState, grabbed.lid) !== null;
+      dispatcher.dispatch({ type: 'SET_ENTRY_DATE', lid: grabbed.lid, date });
+      // 🔴 動かしたら「元に戻す」の 1 行(#855)。⚠ 断られた回(編集中など)・日が変わらない回は出さない
+      if (!refused && entryState.entryMetas.has(grabbed.lid))
+        offerMoveUndo(host, dispatcher, {
+          target: { kind: 'entry', lid: grabbed.lid },
+          before: { date: was, time: null, timeEnd: null, until: null, text: '' },
+          after: { date, time: null, timeEnd: null, until: null, text: '' },
+          verb: 'moved',
+        });
+    });
     return;
   }
   const line = Number(grabbed.line);
@@ -391,12 +436,14 @@ export function dropTaskCard(
     dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
     return;
   }
+  gatedScheduleWrite(dispatcher, [grabbed.lid], SCHEDULE_DROP_FAILED, () => {
   const refused = bodyWriteBlockReason(dispatcher.getState(), grabbed.lid) !== null;
   dispatcher.dispatch({
     type: 'SET_TASK_DATE',
     lid: grabbed.lid,
     line,
-    openLine: card.rawLine,
+    // 🔴 掴んだ時点の行の中身(#1087)。無ければ(古い荷物)落とした時点の走査の物
+    openLine: grabbed.rawLine ?? card.rawLine,
     date: start,
     // ⚠ 外すときは時刻も一緒に落ちる(記法ごと剥がすため)
     time: card?.time ?? null,
@@ -418,6 +465,7 @@ export function dropTaskCard(
       verb: 'moved',
     });
   }
+  });
 }
 
 /**
@@ -496,6 +544,8 @@ export function installScheduleDrag(root: HTMLElement, dispatcher: Dispatcher): 
       line,
       from: dateTargetOf(card)?.date ?? '',
       repeat: card.getAttribute('data-pkc-task-repeat') ?? '',
+      // 🔴 掴んだ時点の行の中身(#1087)。取れなければ付けない(落とす側が従来の引き方に倒れる)
+      ...(whole ? {} : rawLineOf(dispatcher, lid, line)),
     };
     const pointerId = e.pointerId;
     pending = {

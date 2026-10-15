@@ -461,6 +461,8 @@ function trailingNumber(line: string): number | null {
   let negative = false;
   if (before !== undefined) {
     if (/[0-9A-Za-z_,.+*/%]/u.test(before)) return null;
+    // 🔴 `:` `：` `#` `＃` の直後の数は合計に入れない(#1087)── `会議 12:30` の `30` は分、`#12` は番号であって量ではない
+    if (/[:：#＃]/u.test(before)) return null;
     if (before === '-') {
       const beforeSign = m.index > 1 ? t[m.index - 2]! : undefined;
       if (beforeSign !== undefined && /[0-9A-Za-z_)]/u.test(beforeSign)) return null;
@@ -739,7 +741,10 @@ export function calcLineAction(fullText: string, caretPos: number): CalcLineActi
   const v = resolveInlineCalc(probe, at)?.value ?? null;
   if (v !== null) {
     // ⚠ `=` を足す回は、答えの前に `=` も入れる(1 回の挿入にまとめる)
-    return { kind: 'insert', at: end, text: `${hasEq ? '' : '='}${formatCalcResult(v)}` };
+    // ⚠ 普通の数字にならない答え(`1e21` 以上など)は何も挿さない(他の「計算にならなかった」と同じ)
+    const shown = formatCalcResult(v);
+    if (shown === null) return null;
+    return { kind: 'insert', at: end, text: `${hasEq ? '' : '='}${shown}` };
   }
   const why = explainCalcMiss(probe, at);
   if (why === null) return null;
@@ -757,11 +762,18 @@ export function calcLineAction(fullText: string, caretPos: number): CalcLineActi
 /**
  * 答えを字にする。
  * ⚠ **浮動小数のゴミを落とす**(`0.1+0.2` を `0.30000000000000004` と出さない)。
+ * 🔴 **指数表記にしない**(#1087)── `1e-7` や `1e+21` を本文へ挿すと、読めない字になる。
+ *   小数は 12 桁まで・桁区切り無しの**普通の数字**で出す。大きすぎて(1e21 以上)普通の数字にならない答えと、
+ *   数にならない答え(`Infinity` / `NaN`)は `null` ── 呼び側は何も挿さない(他の「計算にならなかった」と同じ)。
+ *   ⚠ 12 桁までで 0 に丸まる極小(`1e-13`)は `0` と挿すと嘘なので、これも `null`。
  */
-export function formatCalcResult(value: number): string {
-  if (!Number.isFinite(value)) return '';
+export function formatCalcResult(value: number): string | null {
+  if (!Number.isFinite(value) || Math.abs(value) >= 1e21) return null;
   // ⚠ `0` を別扱いしない ── `Number.isInteger(-0)` は true、`String(-0)` は `'0'`
   //    なので、次の行が同じ答えを返す(no-op だった)
   if (Number.isInteger(value)) return String(value);
-  return Number(value.toPrecision(12)).toString();
+  const rounded = Number(value.toPrecision(12));
+  // `toFixed` は 1e21 未満なら指数にならない。末尾の 0 は落とす
+  const fixed = rounded.toFixed(12).replace(/\.?0+$/u, '');
+  return fixed === '0' || fixed === '-0' || fixed === '' ? null : fixed;
 }

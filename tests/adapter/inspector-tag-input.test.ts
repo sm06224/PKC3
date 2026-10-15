@@ -237,6 +237,36 @@ describe('タグをその場で打つ(#494)', () => {
  * 🔑 3 つとも **1 か所の判定**(`canWriteTags`)で決める ── 札の × と欄で
  *   別々に数えると、片方だけ出る形が生まれる(§7)。
  */
+describe('打っている間に編集が始まった(#1087)', () => {
+  /**
+   * 🔴 欄は描画したときの phase で出ている。打っている間に別の経路で編集が始まると、
+   *   reducer は捨てるのに欄だけ空になり、打った字が黙って消えていた。
+   * ⚠ 描画を止めた状態で phase だけ動かす(実画面で「欄が残っている一瞬」を作る)。
+   */
+  function freezeAndEdit(s: ReturnType<typeof setup>): void {
+    s.d.dispatch({ type: 'START_EDIT' });
+    expect(s.d.getState().phase, '前提: 編集が始まっていない').toBe('editing');
+  }
+  it('🔴 足す: 理由が出て、打った字が欄に残る', async () => {
+    const s = setup('本文\n');
+    freezeAndEdit(s);
+    type(s, '買い物');
+    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('タグを足して');
+    expect(s.q<HTMLInputElement>('[data-pkc-field="tag-add-input"]')!.value, '打った字が消えた').toBe('買い物');
+    await tick();
+    expect(readTags(s.disk['n1']!)).toEqual([]);
+  });
+  it('🔴 外す: 理由が出る(黙って何も起きない形にしない)', async () => {
+    const s = setup('---\ntags: [買い物]\n---\n本文\n');
+    // ⚠ 札は描き直しで消えるので、描いたときの札を握って押す(描画と押下の間に phase が動いた形)
+    const off = s.root.querySelector<HTMLElement>('[data-pkc-field="inspector-tag-off"]')!;
+    freezeAndEdit(s);
+    if (!s.root.contains(off)) s.root.append(off);
+    off.click();
+    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('タグを外して');
+  });
+});
+
 describe('打てない状況(#494)', () => {
   const formShown = (s: ReturnType<typeof setup>): boolean =>
     s.q<HTMLElement>('[data-pkc-field="tag-add"]')!.hidden === false;

@@ -435,9 +435,14 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
 
   function bootWithFolder(port: Partial<StorePort> = {}) {
     const d = new Dispatcher();
+    // ⚠ 本物と同じく、消したノートの本文は無い(ゴミ箱から戻す側が「もう戻っているか」を本文の有無で見る。#1087)
+    const gone = new Set<string>();
     connectStoreEffects(d, {
       ...stubRevisionOps(),
-      getBody: async () => '',
+      getBody: async (lid: string) => (gone.has(lid) ? null : ''),
+      deleteEntry: async (lid: string) => {
+        gone.add(lid);
+      },
       /**
        * ⚠ **題名だけの口**(#178)── 本物は本文に触らない。
        *   だから fake も本文を持たない(触らないものは持たない)。
@@ -447,7 +452,6 @@ describe('ゴミ箱からの復元: 居場所と並びが戻る', () => {
         Promise.reject(new Error('この test では添付の差し替えを使わない')),
       reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
-      deleteEntry: async () => {},
       setEntryParent: async () => {},
       ...port,
     });
@@ -645,15 +649,19 @@ describe('ゴミ箱から戻すとき、居場所の輪を作らない', () => {
 
   it('🔴 輪を作る辺は戻さず、disk からも消す。親の辺は戻る', async () => {
     const removed: string[] = [];
+    const gone = new Set<string>();
     const d = new Dispatcher();
     connectStoreEffects(d, {
       ...stubRevisionOps(),
-      getBody: async () => '',
+      // ⚠ 本物と同じく、消したノートの本文は無い(#1087)
+      getBody: async (lid: string) => (gone.has(lid) ? null : ''),
       renameEntry: async () => stubStamps(),
       replaceAssetRefs: () => Promise.reject(new Error('使わない')),
       reorderEntry: async () => stubStamps(),
       persistEntry: async () => stubStamps(),
-      deleteEntry: async () => {},
+      deleteEntry: async (lid: string) => {
+        gone.add(lid);
+      },
       setEntryParent: async () => {},
       deleteRelation: async (id: string) => {
         removed.push(id);

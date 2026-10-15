@@ -84,7 +84,12 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
         return;
       }
       // 開いている窓があれば、開き直さず手前に出す(2 枚目の復号も待ちも作らない)
-      const existing = windows.get(assetKey);
+      /**
+       * 🔴 窓の鍵は「どのノートの、どの画像か」(#1087)。⚠ 画像の鍵は中身で決まるので、同じ写真を 2 つのノートに
+       *   入れていると、片方の窓が開いている間にもう片方で押しても前の窓が出るだけで、絵は前のノートの隣へ入っていた。
+       */
+      const key = lid === undefined ? assetKey : `${assetKey}-${lid}`;
+      const existing = windows.get(key);
       if (existing !== undefined && !existing.closed) {
         existing.focus();
         return;
@@ -92,16 +97,16 @@ export function createImageDrawer(deps: ImageDrawDeps): ImageDrawer {
       // ⚠ 押した瞬間のうちに開く(`await` の前)── 後ろへ回すとポップアップが止められる
       const win = deps.openWindow({
         title: name,
-        windowName: `pkc3-draw-${assetKey}`,
+        windowName: `pkc3-draw-${key}`,
         onClosed: () => {
-          if (windows.get(assetKey) === win) windows.delete(assetKey);
+          if (windows.get(key) === win) windows.delete(key);
         },
       });
       if (win === null) {
         fail(IMAGE_DRAW_POPUP_BLOCKED_TEXT);
         return;
       }
-      windows.set(assetKey, win);
+      windows.set(key, win);
       // 置き場は押した瞬間に採る(読んでいる間に選択が動いても、元の隣へ入る)
       const parentLid = lid === undefined ? null : deps.parentOf(lid);
       let blob: Blob | null;

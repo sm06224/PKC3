@@ -50,7 +50,8 @@ describe('🔴 行頭記号の付け外し(toggleLinePrefix)', () => {
 
   it('先頭の空行から複数行を選ぶと、選んだ行ぜんぶに付く(頭の空行が選びから落ちない)', () => {
     const r = toggleLinePrefix(sel('|\nあ|'), 'ul');
-    expect(r.text).toBe('- \n- あ');
+    // 🔴 空行そのものには印を付けない(#1087)。このテストが守るのは**選びの頭が空行から始まること**(`start` が 0)
+    expect(r.text).toBe('\n- あ');
     expect(r.start, '選びの頭がずれた').toBe(0);
   });
 

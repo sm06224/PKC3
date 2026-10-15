@@ -127,6 +127,9 @@ import { replaceCodeFenceContent } from '@features/markdown/code-fence-edit';
  * 届く(review K の解消)。effect 層は実行時に state を参照しない
  * (時間差窓 C-1 の解消 ── 発火時に確定した行をそのまま書く)。
  */
+/** ゴミ箱から戻そうとしたノートが、もう戻っていたとき(別のタブで先に戻した。#1087)。 */
+export const TRASH_ALREADY_RESTORED_TEXT = 'このノートはもうゴミ箱から戻っています(別のタブで戻したかもしれません)。上書きしていません';
+
 export interface StorePort {
   getBody(lid: string): Promise<string | null>;
   /**
@@ -2166,7 +2169,7 @@ export function connectStoreEffects(
             if (!disposed)
               dispatcher.dispatch({
                 type: 'OP_FAILED',
-                error: `フォルダへの所属を変えられませんでした: ${errorText(e)}`,
+                error: `フォルダへの所属を変えられませんでした(再読み込みすると元の場所に戻ります): ${errorText(e)}`,
               });
           }
         });
@@ -3278,6 +3281,16 @@ export function connectStoreEffects(
               });
               return;
             }
+            /**
+             * 🔴 **もう戻っているノートへは書かない**(#1087)。⚠ ゴミ箱の画面を古いまま開いていた別のタブで
+             *   「戻す」を押すと、戻した後に書き足した本文が、ゴミ箱へ入れたときの版で上書きされていた。
+             */
+            if ((await store.getBody(ev.entryLid)) !== null) {
+              if (disposed) return;
+              dispatcher.dispatch({ type: 'OP_FAILED', error: TRASH_ALREADY_RESTORED_TEXT });
+              return;
+            }
+            if (disposed) return;
             // bulk import 由来の行は title / archetype が NULL になりうる(P5a F5)
             const archetype = rev.archetype ?? 'text';
             const title = rev.title ?? '(無題)';
