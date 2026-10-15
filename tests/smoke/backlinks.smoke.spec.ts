@@ -77,6 +77,23 @@ test('🔴 本文のリンクが「参照元」に出て、押すと移れる', 
   const rowA = page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${lidA}"]`);
   await expect(rowA, '前提: 参照元の行が一覧に無い').toHaveCount(1);
 
+  /**
+   * 🔴 **コードの囲み(```)の中に書いた `entry:<lid>` は、参照元に数えない**(#1087)。
+   * ⚠ 上の道中の続きに載せる(新しく起動しない)。
+   */
+  await createEntry(page, 'text');
+  const taC = page.locator('[data-pkc-field="editor-body"]');
+  await taC.click();
+  await taC.fill('書き方の例\n```\n[的](entry:' + lid + ')\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, `[data-pkc-entry="${lid}"]`);
+  await expect(link, '前提: 的を選び直しても参照元が出ない').toHaveCount(1);
+  await expect(
+    box.locator('[data-pkc-field="inspector-backlink"]'),
+    'コードの囲みの中の entry: が参照元に出ている',
+  ).toHaveCount(1);
+  await expect(box, 'コードの囲みだけのノートが参照元に出ている').not.toContainText('書き方の例');
+
   // ① 改名 ── 的を選んだまま、参照元の行の名前が新しくなる
   //    (Ctrl+クリックは印だけ付けて選択を動かさない。F2 は印の付いた行の名前を打ち替える)
   await modClickReal(page, rowA);

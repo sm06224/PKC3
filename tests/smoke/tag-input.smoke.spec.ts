@@ -91,6 +91,22 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   const body = await page.inputValue('[data-pkc-field="editor-body"]');
   expect(body, '本文から消えていない').not.toContain('買い物');
   expect(body, 'もう片方まで消えた').toContain('家事');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  /**
+   * 🔴 **41 字以上のタグを持つノートへ別のタグを足しても、長いタグが消えない**(#1087)。
+   * ⚠ 上の道中の続きに載せる(新しく起動しない)。
+   */
+  const LONG = 'あ'.repeat(45);
+  await makeNote(page, '長いタグ', `---\ntags: [${LONG}]\n---\n本文\n`);
+  await page.fill(INPUT, '追加');
+  await page.locator(INPUT).press('Enter');
+  await expect(page.locator(CHIPS).filter({ hasText: '追加' }), '足したタグが札に出ない').toHaveCount(1);
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const body2 = await page.inputValue('[data-pkc-field="editor-body"]');
+  expect(body2, '長いタグが本文から消えた').toContain(LONG);
+  expect(body2, '足したタグが本文に無い').toContain('追加');
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });
