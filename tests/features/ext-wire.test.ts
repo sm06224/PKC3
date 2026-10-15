@@ -51,7 +51,7 @@ describe('拡張と話す封筒(#195 / C-5)', () => {
     expect(pull.ok).toBe(false);
     if (pull.ok) return;
     expect(pull.why).toContain('意図的');
-    expect(pull.why, '代わりにどうすればよいかが書かれていない').toContain('このアプリへ送る');
+    expect(pull.why, '代わりにどうすればよいかが書かれていない').toContain('送り先のアプリ');
 
     // ⚠ 対照群 ── 知らないだけの語は、普通の断り文のまま
     const unknown = parseExtRequest({ t: 'zzz-未知' });

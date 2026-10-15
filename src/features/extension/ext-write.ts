@@ -110,7 +110,7 @@ export function parseExtWrite(data: unknown, delivered: ReadonlySet<string>): Ex
     if (!delivered.has(o.lid))
       return {
         ok: false,
-        why: `${at}: このノートは渡されていません(「このアプリへ送る」で渡したノートだけ書き戻せます)`,
+        why: `${at}: このノートは渡されていません(情報ペインの「送り先のアプリ」でアプリの名前を押して渡したノートだけ書き戻せます)`,
       };
     seen.add(o.lid);
     ops.push({ op: 'setBody', lid: o.lid, body: o.body });
