@@ -1550,6 +1550,11 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(note, 'sqlite で CREATE TABLE が断られていない').toContainText('読み取り専用です');
   await expect(note, '断り文が「作れた」と読める').not.toContainText('消えます');
 
+  // 🔴 書き込みの語と同じに断られる普通の列名(`release`)には、二重引用符で囲む手がかりが付く(#1087)
+  await page.fill('[data-pkc-field="sql-input"]', 'SELECT release FROM entries');
+  await clickReal(page, '[data-pkc-action="run-sql"]');
+  await expect(note, '`release` の断りに、二重引用符で囲む手がかりが無い').toContainText('二重引用符で囲んでください');
+
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
 
   /**
