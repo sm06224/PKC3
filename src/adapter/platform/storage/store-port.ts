@@ -206,8 +206,14 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
      * 家計簿アプリに数か月ぶん貯めた入力が、警告 1 行も無く消える。
      * 後始末は**唯一の不可逆点**(ゴミ箱を空にする)へ移した。
      */
-    deleteEntry: async (lid) => {
-      await client.request({ op: 'deleteEntry', cid, lid });
+    deleteEntry: async (lid, opts) => {
+      await client.request({
+        op: 'deleteEntry',
+        cid,
+        lid,
+        // 🔴 何も書かれていない作りたてのノートはゴミ箱へ移さず消す(#1087)── 省略時はゴミ箱へ
+        ...(opts?.untouched === true ? { untouched: true } : {}),
+      });
     },
     setEntryParent: async (lid, parentLid, relationId) => {
       await client.request({ op: 'setEntryParent', cid, lid, parentLid, relationId });

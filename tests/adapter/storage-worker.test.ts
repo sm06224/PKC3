@@ -4166,3 +4166,79 @@ describe('#1087 書いた行の刻印と getBodies の 1 文化', () => {
     expect(got.length, '前提: 実在が空').toBeGreaterThan(0);
   });
 });
+
+describe('ゴミ箱の見直し(#1087)── 作成日の控えと、手付かずのノートの掃除', () => {
+  const createdOf = async (lid: string): Promise<string | null> => {
+    const rows = (await request({ op: 'listEntryMetas', cid: 'c1' })) as unknown as Array<{
+      lid: string;
+      created_at: string | null;
+    }>;
+    return rows.find((r) => r.lid === lid)?.created_at ?? null;
+  };
+  const upsertAt = (lid: string, body: string, createdAt?: string) =>
+    request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: entry(lid, body, createdAt ? { createdAt } : {}),
+      checkpoint: false,
+    });
+
+  it('🔴 ゴミ箱へ移した版が作成日を控え、その値で書き戻すと作成日が変わらない', async () => {
+    await upsertAt('ca1', '本文\n', '2020-01-01 00:00:00');
+    expect(await createdOf('ca1'), '前提: 作成日が過去で入っている').toBe('2020-01-01 00:00:00');
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'ca1' });
+    const row = (await request({ op: 'listTrash', cid: 'c1' })).find((t) => t.entry_lid === 'ca1')!;
+    const rev = (await request({ op: 'getRevision', cid: 'c1', id: row.id }))!;
+    expect(rev.entryCreatedAt).toBe('2020-01-01 00:00:00');
+    // 戻す側(store-effects の REQUEST_TRASH_RESTORE)が渡す形
+    await upsertAt('ca1', rev.body, rev.entryCreatedAt ?? undefined);
+    expect(await createdOf('ca1')).toBe('2020-01-01 00:00:00');
+    // 対照群: 控えを渡さない書き戻しは「いま」になる(= 直す前の挙動。控えが効いている証拠)
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'ca1' });
+    await upsertAt('ca1', rev.body);
+    expect(await createdOf('ca1')).not.toBe('2020-01-01 00:00:00');
+  });
+
+  it('復元 → 再削除でも(頭の版を全文化する枝でも)作成日を控える', async () => {
+    await upsertAt('ca2', '同一\n', '2021-02-03 04:05:06');
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'ca2' });
+    await upsertAt('ca2', '同一\n', '2021-02-03 04:05:06'); // 復元相当
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'ca2' });
+    const metas = await metasOf('ca2');
+    expect(metas, '前提: 版を積み増していない(全文化の枝)').toHaveLength(1);
+    expect((await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))!.entryCreatedAt).toBe(
+      '2021-02-03 04:05:06',
+    );
+  });
+
+  it('通常の履歴の版は作成日の控えを持たない(null = 従来どおり「いま」)', async () => {
+    await write('ca3', 'a\n');
+    await write('ca3', 'b\n', { checkpoint: true });
+    const metas = await metasOf('ca3');
+    const rev = (await request({ op: 'getRevision', cid: 'c1', id: metas[0]!.id }))!;
+    expect(rev.entryCreatedAt ?? null).toBeNull();
+  });
+
+  it('🔴 untouched: ゴミ箱にも履歴にも居場所の辺にも何も残さず行ごと消える', async () => {
+    await write('un1', '');
+    await write('un1', 'z\n', { checkpoint: true }); // 版を 1 件積む(untouched はこれも残さない)
+    await request({
+      op: 'bulkUpsertRelations',
+      cid: 'c1',
+      relations: [{ id: 'rel-un1', fromLid: 'un-folder', toLid: 'un1', kind: 'structural' }],
+    });
+    expect((await metasOf('un1')).length, '前提: 履歴が在る').toBeGreaterThan(0);
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'un1', untouched: true });
+    expect(await request({ op: 'getBody', cid: 'c1', lid: 'un1' })).toBeNull();
+    expect((await request({ op: 'listTrash', cid: 'c1' })).filter((t) => t.entry_lid === 'un1')).toEqual([]);
+    expect(await metasOf('un1')).toEqual([]);
+    const rels = await request({ op: 'listRelations', cid: 'c1' });
+    expect(rels.filter((r) => r.id === 'rel-un1')).toEqual([]);
+  });
+
+  it('対照群: untouched を立てない削除は従来どおりゴミ箱へ入る', async () => {
+    await write('un2', '', { checkpoint: true });
+    await request({ op: 'deleteEntry', cid: 'c1', lid: 'un2' });
+    expect((await request({ op: 'listTrash', cid: 'c1' })).filter((t) => t.entry_lid === 'un2')).toHaveLength(1);
+  });
+});

@@ -4182,7 +4182,12 @@ export type DomainEvent =
       /** 箱に打たれていた新しい中身(引用の前置き・開き・閉じの行は含まない)。 */
       text: string;
     }
-  | { type: 'REQUEST_DELETE'; lid: string }
+  | {
+      type: 'REQUEST_DELETE';
+      lid: string;
+      /** 🔴 何も書かれていない作りたてのノートだけ立てる ── ゴミ箱を経由せず消す(#1087) */
+      untouched?: boolean;
+    }
   | {
       /** title 書換の永続化要求(body は effect が disk から読む)。snapshot は
        *  発火時捕獲(C-1 規律)。title は新値。 */
@@ -6985,7 +6990,17 @@ function reduceCore(
       // 「作成 → Esc」で既定 title の空 entry が堆積した(P3-7a)。draft を
       // 打ち込んでからの cancel は PKC2 同様 entry を残す(誤 Esc で消さない)
       if (state.freshLid === lid && body === baseline) {
-        return removeEntryFromState(state, lid, [{ type: 'REQUEST_DELETE', lid }]);
+        /**
+         * 🔴 **何も書かれていないノートは、ゴミ箱へ移さず消す**(#1087)。直す前は「新規 → 何も打たず Esc」の
+         *   たびに空のノートがゴミ箱へ溜まった。⚠ 消してよいのは**本当に手付かず**の物だけ ──
+         *   本文が種のまま(`seedBodyFor`)で、題名も作ったときのまま(改名は `freshLid` を外す)。
+         *   取り込み・貼り付けなどで中身を持って作った物は `seedBodyFor` と違うので、ゴミ箱を通る。
+         */
+        const meta = state.entryMetas.get(lid);
+        const untouched = meta !== undefined && baseline === seedBodyFor(meta.archetype);
+        return removeEntryFromState(state, lid, [
+          untouched ? { type: 'REQUEST_DELETE', lid, untouched: true } : { type: 'REQUEST_DELETE', lid },
+        ]);
       }
       // draft 破棄。disk 先行(diskAhead)なら disk を採用(review #4)。
       // 自 commit の ack 待ちで persisted が遅れているだけなら baseline が正。

@@ -5099,19 +5099,61 @@ function deleteFrom(
      * ⚠ 居ない分は `DELETE_ENTRIES` が黙って落とす ── 知らせの件数・戻す対象は**実際に消えた分**で数える。
      */
     const titleOf = new Map(lids.map((l) => [l, st.entryMetas.get(l)?.title ?? l]));
-    dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
-    const after = dispatcher.getState();
-    const moved = lids
-      .filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l))
-      .map((l) => ({ lid: l, title: titleOf.get(l) ?? l, order: st.entryMetas.get(l)?.entryOrder }));
-    offerTrashUndo(
-      dispatcher,
-      moved,
-      leftAtRoot(st, after),
-      // 🔴 2 件以上のときは一般形を言う(参照元は選んでいる 1 件の分しか引けていないので、件数では言えない。#1087)
-      // 🔴 1 件のときは `delete-entry` と同じ字(引けていれば件数)── 直す前は 1 件だと何も言わなかった(#1087)
-      moved.length > 1 ? LINKED_FROM_SOME : moved.length === 1 ? linkedFromText(st, after, moved[0]!.lid) : '',
-    );
+    /**
+     * 🔴 **別のタブ・窓が編集中のノートが 1 件でも混じっていれば、全体を移さない**(#1087。`delete-entry` と同じ門)。
+     * ⚠ 一部だけ移すと「何が移って何が残ったか」を user が読み解くことになる ── 断って選び直してもらう。
+     */
+    refuseTrashEditedElsewhere(dispatcher, services, lids, () => {
+      const st = dispatcher.getState();
+      dispatcher.dispatch({ type: 'DELETE_ENTRIES', lids });
+      const after = dispatcher.getState();
+      const moved = lids
+        .filter((l) => st.entryMetas.has(l) && !after.entryMetas.has(l))
+        .map((l) => ({ lid: l, title: titleOf.get(l) ?? l, order: st.entryMetas.get(l)?.entryOrder }));
+      offerTrashUndo(
+        dispatcher,
+        moved,
+        leftAtRoot(st, after),
+        // 🔴 2 件以上のときは一般形を言う(参照元は選んでいる 1 件の分しか引けていないので、件数では言えない。#1087)
+        // 🔴 1 件のときは `delete-entry` と同じ字(引けていれば件数)── 直す前は 1 件だと何も言わなかった(#1087)
+        moved.length > 1 ? LINKED_FROM_SOME : moved.length === 1 ? linkedFromText(st, after, moved[0]!.lid) : '',
+      );
+    });
+}
+
+/**
+ * 🔴 **ゴミ箱へ移す口の共通の門**(#1087)── 別のタブ・窓が編集中のノートが混じるなら断って `go` を撃たない。
+ * ⚠ 問い合わせが要らない回(口が無い環境 / このタブが自分で編集中)は**同期のまま** `go` を撃つ
+ *   (追記と同じ作法 ── 口の無い環境の操作を 1 手遅らせない)。
+ * 🔑 問い合わせは追記の口と**同じ 1 本**(`editedElsewhereReason`)。口を足すときは必ずここを通す。
+ */
+function refuseTrashEditedElsewhere(
+  dispatcher: Dispatcher,
+  services: BinderServices,
+  lids: readonly string[],
+  go: () => void,
+): void {
+  const ask = lids.filter((l) => !elsewhereCheckNotNeeded(dispatcher, services, l));
+  if (ask.length === 0) {
+    go();
+    return;
+  }
+  void Promise.all(ask.map((l) => editedElsewhereReason(dispatcher, services, l)))
+    .then((whys) => {
+      const why = whys.find((w) => w !== null) ?? null;
+      if (why !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+        return;
+      }
+      go();
+    })
+    // 🔴 問い合わせが落ちても黙って捨てない(何も移していない)
+    .catch((e: unknown) => {
+      dispatcher.dispatch({
+        type: 'OP_FAILED',
+        error: `ゴミ箱へ移せませんでした(別のタブの編集を確かめられませんでした: ${errorText(e)})。もう一度押してください`,
+      });
+    });
 }
 
 /** 何もしない口。⚠ 打鍵ではないので「既定を止める」相手がいない。 */
@@ -8642,7 +8684,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           : '戻せるものがありません(移した後に、別の場所へ動かしています)',
     });
   },
-  'delete-entry': (dispatcher, target) => {
+  'delete-entry': (dispatcher, target, services) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
@@ -8683,16 +8725,22 @@ const ACTIONS: Record<string, ActionHandler> = {
      * ⚠ 上の `phase` の断りは、確認より前ではなく**実行より前**に残している(無言の拒否を作らない)。
      */
     if (!dispatcher.getState().entryMetas.has(lid)) return;
-    const before = dispatcher.getState();
-    dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
-    const after = dispatcher.getState();
-    if (!after.entryMetas.has(lid))
-      offerTrashUndo(
-        dispatcher,
-        [{ lid, title, order: before.entryMetas.get(lid)?.entryOrder }],
-        leftAtRoot(before, after),
-        linkedFromText(before, after, lid),
-      );
+    /**
+     * 🔴 **別のタブ・窓が編集中のノートは、ゴミ箱へ移さない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
+     * ⚠ 通すと、編集中のタブが保存したときに行が作り直され、ゴミ箱から消えて一覧に戻る(移したつもりで残る)。
+     */
+    refuseTrashEditedElsewhere(dispatcher, services, [lid], () => {
+      const before = dispatcher.getState();
+      dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
+      const after = dispatcher.getState();
+      if (!after.entryMetas.has(lid))
+        offerTrashUndo(
+          dispatcher,
+          [{ lid, title, order: before.entryMetas.get(lid)?.entryOrder }],
+          leftAtRoot(before, after),
+          linkedFromText(before, after, lid),
+        );
+    });
   },
   /**
    * 🔴 **囲みのコピー ── ⧉ は 1 押し、▾ は形を選ぶ**(#708 段①)。
