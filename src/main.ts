@@ -405,7 +405,7 @@ import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
-import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
+import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -5103,6 +5103,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           dispatch: (a) => dispatcher.dispatch(a),
           onState: (cb) => dispatcher.onState(cb),
           print: () => window.print(),
+          // 🔴 画面の外の図は見えるまで描かれない ── 刷る前に本文の図を描き切る(#1087)
+          //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
+          //    ── 1 コマずつ 3 回、器を引き直して描く
+          prepare: async () => {
+            for (let i = 0; i < 3; i++) {
+              await new Promise<void>((r) =>
+                typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16),
+              );
+              const body = document.querySelector('[data-pkc-field="detail-body"]');
+              if (body) await hydrateAllNow(body);
+            }
+          },
         },
         lid,
       ),

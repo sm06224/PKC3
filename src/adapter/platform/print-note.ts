@@ -36,6 +36,11 @@ export interface PrintNoteDeps {
   onState(cb: (s: AppState) => void): () => void;
   /** ブラウザの印刷を開く(既定は `window.print`)。 */
   print(): void;
+  /**
+   * 刷る直前の用意(画面の外の図を描き切る)。#1087 ── 図は見えたときにしか描かないので、
+   * 待たずに刷ると下の図が原文のまま紙に出る。⚠ 失敗しても刷る(`PREPARE_TIMEOUT_MS` で打ち切る)。
+   */
+  prepare?(): Promise<void>;
   /** 待ちの上限(ms)。既定 5000。 */
   timeoutMs?: number;
   /** 待ちの時計(test から差せる)。 */
@@ -73,6 +78,26 @@ export async function printNote(deps: PrintNoteDeps, lid: string): Promise<Print
     return await printNoteOnce(deps, lid);
   } finally {
     printing = false;
+  }
+}
+
+/** 図を描き切るのを待つ上限(ms)。過ぎたら**刷る**(固まらない)。 */
+const PREPARE_TIMEOUT_MS = 10000;
+
+async function prepareForPrint(deps: PrintNoteDeps): Promise<void> {
+  if (!deps.prepare) return;
+  const setTimer = deps.setTimer ?? ((cb, ms) => setTimeout(cb, ms));
+  const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  let timer: unknown = null;
+  try {
+    await Promise.race([
+      deps.prepare().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimer(resolve, PREPARE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== null) clearTimer(timer);
   }
 }
 
@@ -151,6 +176,7 @@ async function printNoteOnce(deps: PrintNoteDeps, lid: string): Promise<PrintNot
       return 'timeout';
     }
   }
+  await prepareForPrint(deps);
   deps.print();
   // 🔴 **`print()` が返ったのは、印刷の画面が閉じた後**(ブラウザの `window.print()` は閉じるまで返らない。
   //    閉じた後の `afterprint` と同じ時点)。ここで戻す。
