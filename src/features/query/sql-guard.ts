@@ -335,6 +335,10 @@ export function sqlRunFailureText(raw: string): string {
   const column = /no such column:\s*(\S+)/i.exec(raw);
   if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
   if (/syntax error/i.test(raw)) return `SQL の書き方に誤りがあります。綴りや区切りの記号を確かめてください(${raw})`;
+  // 大文字小文字だけが違う列(`ID` と `id`)も sqlite では同じ名前 ── 4 つ目によく出る
+  if (/string or blob too big/i.test(raw)) return `1 つの値が大きすぎます(16 MB まで)。取り出す長さを SUBSTR などで絞ってください(${raw})`;
+  const dup = /duplicate column name:\s*(\S+)/i.exec(raw);
+  if (dup) return `「${dup[1]}」という列の名前が重なっています。AS で別の名前を付けてください(${raw})`;
   return raw;
 }
 

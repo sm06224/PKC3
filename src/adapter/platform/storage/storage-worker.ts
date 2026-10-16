@@ -93,6 +93,7 @@ import {
 } from '@features/contact/contact-card';
 import { createQueryScan, FRONTMATTER_SCAN_CHARS } from '@features/query/group-by';
 import { capCellText } from '@features/query/sql-cell';
+import { decodeImportTextInfo } from '@features/import/text-decode';
 import {
   FTS_VIRTUAL_NAMES_SQL,
   NOT_FTS_BACKSTAGE,
@@ -1526,6 +1527,20 @@ type Handlers = {
  */
 const PROGRESS_EVERY = 1000;
 
+/** `sqlite3_limit` の id(`SQLITE_LIMIT_LENGTH`)。 */
+const SQLITE_LIMIT_LENGTH = 0;
+
+/**
+ * 🔴 **SQL の答えとして運ぶ字の合計の天井**(升の数ぶん数える)── 常駐 worker の heap を守る。
+ * 🔑 2,000 万字 = JS の文字列で約 40 MB(`postMessage` の複製を含めても 100 MB 台)。
+ *   通常の表(8 列 × 20 万行 × 平均 10 字 ≒ 1,600 万)は収まり、長い字の表(2,000 字の升)は
+ *   1 万行で切れる。⚠ 切ったら `truncated` を返す(画面は「多すぎるので途中まで」と言う)。
+ */
+const SQL_MAX_TOTAL_CHARS = 20_000_000;
+
+/** 1 つの値の大きさの天井(バイト)。`sqlite3_limit(SQLITE_LIMIT_LENGTH)` で engine に掛ける。 */
+const SQL_MAX_VALUE_BYTES = 16 * 1024 * 1024;
+
 // 🔴 1 つの升に運ぶ字数の上限は `@features/query/sql-cell`(DuckDB の答えと**同じ 1 本**。#682 段④d)
 
 /**
@@ -2875,6 +2890,17 @@ const handlers: Handlers = {
     const started = Date.now();
     let steps = 0;
     /**
+     * 🔴 **1 つの値の大きさに天井を置く**(`SQLITE_LIMIT_LENGTH` = 0)── `zeroblob(300000000)` や
+     *   `printf('%.*c', 200000000, 'a')` のような 1 つの巨大な値は、engine が先に全部を確保してしまい、
+     *   升ごとの字数の天井(`MAX_CELL_CHARS`)は**取り出した後**にしか効かない。
+     * ⚠ この接続は**保存にも使う**ので、**終わったら必ず元の値へ戻す**(`finally`)。
+     * ⚠ `sqlite3_limit` が無い版では天井なしで走る(機能が減るだけ ── 止めない)。
+     */
+    const setLimit = api.capi['sqlite3_limit'] as unknown as
+      | ((db: unknown, id: number, v: number) => number)
+      | undefined;
+    let oldLength: number | null = null;
+    /**
      * 🔑 **0 以外を返した瞬間に `SQLITE_INTERRUPT`** になる(実測済み)。
      *
      * 🔴 **歩数と実時間の 2 つで切る**(2026-09-09 の着地前レビュー、実測で判明)。
@@ -2924,8 +2950,18 @@ const handlers: Handlers = {
       if (!guest) buildCsvTables(database, req.sql, made);
       database.exec({ sql: 'PRAGMA query_only = 1' });
       setProgress(pointer, PROGRESS_EVERY, fn, 0);
+      if (setLimit !== undefined) oldLength = setLimit(pointer, SQLITE_LIMIT_LENGTH, SQL_MAX_VALUE_BYTES);
       const columns: string[] = [];
       const rows: Array<Array<string | number | null>> = [];
+      /**
+       * 🔴 **運んだ字の合計に天井を置く**(1 行ずつ積みながら数える)。
+       * ⚠ 行数(`maxRows`)と升ごとの字数(`MAX_CELL_CHARS`)の**積**は桁違いに大きい ──
+       *   2000 字 × 6 列 × 9 万行で、timeout の前に常駐 worker が約 900 MB に膨らんだ(実測)。
+       *   行数の天井は「短い升の表」のための値で、長い字の表には効かない。
+       * 🔑 数えるのは字数(`length`)── 数や NULL も 1 と数える(列が千もある表の行数ぶんの重さ)。
+       */
+      let chars = 0;
+      let overBudget = false;
       /**
        * ⚠ **1 件多く取って切れたか判る**(`searchEntries` と同じ作法)。
        * ⚠ 値は `postMessage` に載る形だけにする ── BLOB(`Uint8Array`)は
@@ -2947,11 +2983,20 @@ const handlers: Handlers = {
            *   worker が止まる時間もメモリも 1 つも守っていなかった。
            */
           if (rows.length > req.maxRows) return false;
-          rows.push(row.map((v) => cellForWire(v)));
+          const wire = row.map((v) => cellForWire(v));
+          let cost = 0;
+          for (const v of wire) cost += typeof v === 'string' ? Math.max(1, v.length) : 1;
+          // ⚠ 超えた行は積まない(持つのは天井以内だけ)。⚠ 止めるのは `return false`(上の註記)
+          if (chars + cost > SQL_MAX_TOTAL_CHARS) {
+            overBudget = true;
+            return false;
+          }
+          chars += cost;
+          rows.push(wire);
           return undefined;
         },
       } as unknown as Parameters<Database['exec']>[0]);
-      const truncated = rows.length > req.maxRows;
+      const truncated = rows.length > req.maxRows || overBudget;
       return {
         columns,
         rows: truncated ? rows.slice(0, req.maxRows) : rows,
@@ -2970,8 +3015,15 @@ const handlers: Handlers = {
        *   最後尾に置かない**」と書いておく。
        */
       try {
-        setProgress(pointer, 0, 0, 0);
-        uninstall?.(fn);
+        try {
+          setProgress(pointer, 0, 0, 0);
+          uninstall?.(fn);
+        } finally {
+          // 🔴 値の天井は**元へ戻す**(この接続は保存にも使う ── 戻し損ねるとノートが書けなくなる)
+          if (setLimit !== undefined && oldLength !== null) {
+            setLimit(pointer, SQLITE_LIMIT_LENGTH, oldLength);
+          }
+        }
       } finally {
         try {
           database.exec({ sql: 'PRAGMA query_only = 0' });
@@ -3041,13 +3093,14 @@ const handlers: Handlers = {
          * ⚠ **`switch` で網羅する** ── 種類を足した人が枝を書き忘れたら
          *   `never` の代入で **tsc が落ちる**(`if` を並べると黙って素通りする)。
          */
-        let built: { tables: readonly GuestTable[]; truncated: boolean };
+        let built: { tables: readonly GuestTable[]; truncated: boolean; sjis?: boolean };
         switch (src.kind) {
           case 'csv': {
-            const text = new TextDecoder('utf-8', { fatal: false }).decode(req.image);
-            const one = buildCsvAttachmentTable(text, src.lang, note, CSV_TABLE_CELLS_MAX);
+            // 🔴 文字コードを見分ける(UTF-8 固定だと Shift_JIS / UTF-16 が黙って文字化けする)
+            const decoded = decodeImportTextInfo(req.image);
+            const one = buildCsvAttachmentTable(decoded.text, src.lang, note, CSV_TABLE_CELLS_MAX);
             if (one === null) throw new Error('空か、区切りの見つかる行が 1 つもありません');
-            built = { tables: [one], truncated: one.truncated };
+            built = { tables: [one], truncated: one.truncated, sjis: decoded.used === 'sjis' };
             break;
           }
           case 'xlsx': {
@@ -3066,6 +3119,8 @@ const handlers: Handlers = {
           tables: built.tables.map((t) => t.name),
           bytes: req.image.byteLength,
           truncated: built.truncated,
+          // 🔴 Shift_JIS と**推測**して読んだ回だけ(省略 = そうではない)
+          ...(built.sjis === true ? { sjis: true } : {}),
         };
       } catch (e) {
         // ⚠ **読めなかった器も閉じる**(下の sqlite 側と同じ理由)

@@ -62,6 +62,7 @@ import { duckDbWriteKind, duckDbWriteNote } from '@features/query/duckdb-write';
 import { copyBandNote, refusedLine } from '@features/query/duckdb-copy-report';
 import { erSubjectOf } from '@features/query/er-connect';
 import { cappedCellsNote } from '@features/query/sql-cell';
+import { SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import {
   SQL_ENGINE_LABEL,
   SQL_ENGINES,
@@ -1326,13 +1327,15 @@ function noteLineCore(p: AppState['sqlPage']): string {
    */
   const truncNote =
     p.guest !== null && p.guest.truncated ? '(行が多いので、先頭だけを表にしています)' : '';
+  // 🔴 Shift_JIS は推測 ── 化けて見えたときに手がかりが要る(取り込みの注意と同じ字)
+  const sjisNote = p.guest !== null && p.guest.sjis === true ? `。${SJIS_GUESS_NOTE}` : '';
   /**
    * 🔴 **並べているときは、全部の名前を言う**(#918 段⑦)。⚠ 1 件目だけを言うと、
    *   2 つ並べたのに「売上.csv を調べています」と読める(いちばん気づけない外し方)。
    */
   const everyName =
     p.guest === null ? '' : [p.guest.name, ...p.extraGuests.map((g) => g.name)].join(' / ');
-  const where = p.guest === null ? '' : `(${everyName} を調べています${truncNote})`;
+  const where = p.guest === null ? '' : `(${everyName} を調べています${truncNote}${sjisNote})`;
   /**
    * 🔴 **開けなかったことを、いちばん上で言う**(#681 段③ の 2 つ目)。
    * ⚠ 黙って「この PKC」へ戻ると、選んだ人には**選べなかった**ようにしか見えない。
@@ -1373,7 +1376,7 @@ function noteLineCore(p: AppState['sqlPage']): string {
               ? ''
               : `(表 ${String(1 + p.extraGuests.length)} 個)`
           }${truncNote}`
-        : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}`;
+        : `${p.guest.name} を調べています(表 ${String(p.guest.tables.length)} 個 / ${humanBytes(p.guest.bytes)})${truncNote}${sjisNote}`;
 
   const took = `(${String(p.ms)} ミリ秒)`;
   /**

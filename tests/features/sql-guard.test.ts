@@ -277,6 +277,15 @@ describe('DuckDB の失敗も日本語で言う(#1087)', () => {
     expect(s).toContain('(Parser Error: syntax error at or near "FORM")');
   });
 
+  it('🔴 列の名前の重なりと大きすぎる値は、日本語で言い、次の手を添える(#1087)', () => {
+    const dup = sqlRunFailureText('duplicate column name: id');
+    expect(dup).toContain('「id」という列の名前が重なっています');
+    expect(dup, '元の英語は手がかりとして残す').toContain('duplicate column name: id');
+    const big = sqlRunFailureText('string or blob too big');
+    expect(big).toContain('1 つの値が大きすぎます');
+    expect(big).toContain('string or blob too big');
+  });
+
   it('⚠ 知らない文面は推測で直さず、そのまま出す', () => {
     expect(duckRunFailureText('IO Error: Could not open file')).toBe('IO Error: Could not open file');
   });

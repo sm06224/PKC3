@@ -168,3 +168,19 @@ describe('答えを file へ(#918 段④)', () => {
     );
   });
 });
+
+describe('json の書き出しは列を落とさない(#1087)', () => {
+  it('🔴 同じ名前の列は `_2` で逃がし、後ろの列が前の列を上書きして消えない', () => {
+    const out = JSON.parse(sqlExportFileText(['id', 'id', 'ID'], [[1, 2, 3]], 'json')) as Array<
+      Record<string, unknown>
+    >;
+    expect(out[0]).toEqual({ id: 1, id_2: 2, ID_3: 3 });
+  });
+
+  it('🔴 `__proto__` という名前の列も file に残る(プロトタイプの付け替えにならない)', () => {
+    const text = sqlExportFileText(['a', '__proto__'], [[1, 'x']], 'json');
+    expect(text, '`__proto__` の列が file から消えている').toContain('"__proto__": "x"');
+    const parsed = JSON.parse(text) as Array<Record<string, unknown>>;
+    expect(Object.keys(parsed[0] ?? {})).toEqual(['a', '__proto__']);
+  });
+});

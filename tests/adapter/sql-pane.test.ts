@@ -26,6 +26,7 @@ import {
   SQL_MAX_ROWS,
   SQL_MAX_STEPS,
 } from '../../src/adapter/state/store-effects';
+import { SJIS_GUESS_NOTE } from '../../src/features/import/text-decode';
 import { REQUEST_TIMEOUT_MS } from '../../src/adapter/platform/storage/store-proxy';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
@@ -101,6 +102,9 @@ function meta(lid: string, title: string): EntryMeta {
  * 面 + binder + effect を**実物で**繋ぐ。⚠ fake は worker の口 1 つだけ ──
  * ここを stub にしないと、渡す字と上限が正しいかを見る場所が無くなる。
  */
+/** 🔑 true の間、`setup` の fake は csv / tsv を「Shift_JIS と推測して読んだ」ことにする(#1087)。 */
+let sjisGuess = false;
+
 function setup(
   reply: (sql: string) => Promise<SqlAnswer> = async () => answer(['a'], [[1]]),
   opts: {
@@ -225,7 +229,12 @@ function setup(
       // 🔑 「大きい.tsv」だけ打ち切ったことにする(#854 段①ノート行の test 用)
       // ⚠ `.xlsx` は**枚ごとに表が増える**ので、名前も枚の数だけ返す(#854 段③)
       const tables = source.kind === 'xlsx' ? ['sheet1', 'sheet2'] : ['csv'];
-      return { tables, bytes: image.byteLength, truncated: source.lid === 'db6' };
+      return {
+        tables,
+        bytes: image.byteLength,
+        truncated: source.lid === 'db6',
+        ...(sjisGuess ? { sjis: true } : {}),
+      };
     }
     return { tables: ['売上', '客'], bytes: image.byteLength, truncated: false };
   });
@@ -1192,6 +1201,23 @@ describe('添付の csv / tsv を調べる(#854 段①)', () => {
       lid: 'db4',
       name: '売上.csv',
     });
+  });
+
+  it('🔴 Shift_JIS と推測して読んだ csv は、選んでいる間ずっと「崩れて見えるとき」の手がかりを言う(#1087)', async () => {
+    sjisGuess = true;
+    try {
+      const { pick, note } = setup();
+      pick('db4'); // 売上.csv(fake が sjis: true を返す)
+      await settle();
+      expect(note(), 'Shift_JIS と推測したことを言っていない').toContain(SJIS_GUESS_NOTE);
+    } finally {
+      sjisGuess = false;
+    }
+    // 対照群:推測していない回は言わない(言い続ける実装を殺す)
+    const ctl = setup();
+    ctl.pick('db4');
+    await settle();
+    expect(ctl.note(), '推測していないのに Shift_JIS と言っている').not.toContain('Shift_JIS');
   });
 
   it('⚠ .tsv も同様に見分けられる(対照群)', async () => {
