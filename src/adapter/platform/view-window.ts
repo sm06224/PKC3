@@ -185,6 +185,13 @@ export interface ViewWindowDeps {
    * 「この画面で開きました」と言うと**嘘になる**(着地前レビュー 6)。
    */
   readonly openInPane: (view: ViewMode) => boolean;
+  /**
+   * 🔴 **その面に、中央を奪わない退避先(左の列のタブ / 左の欄)が在るか**(#1087)。
+   * ⚠ 無いなら**中央の面へ退避しない**(`fallback`)── 本文が消える。理由だけ出す。
+   *   判定は `browse-mode.ts` の `hasPaneHome` の 1 か所(ここは呼ぶだけ)。
+   * ⚠ 省略できない ── 省略できるようにすると、渡し忘れた配線だけ「塞がれたら中央を奪う」に戻る。
+   */
+  readonly hasPaneHome: (view: ViewMode) => boolean;
   /** 理由を画面へ出す。 */
   readonly fail: (message: string) => void;
   /**
@@ -309,6 +316,16 @@ function fallback(view: ViewMode | null, deps: ViewWindowDeps, why: string): voi
    */
   if (view === null) {
     deps.fail(`${why}。別のウィンドウで開くには、${POPUP_ALLOW_STEP}`);
+    return;
+  }
+  /**
+   * 🔴 **左に居場所が無い面(2 ペイン / SQL …)は、中央へ落とさない**(#1087。CLAUDE.md の裁定
+   *   「別窓が塞がれたときの退避先を、中央にしない」)。⚠ 中央に開くと、読んでいた本文が消える。
+   *   「ポップアップを止めている user だけ本文が消える」という、いちばん再現しない形の実害になる。
+   * 🔑 理由と許可の出し方だけ出す(付箋・週と同じ形)。「この画面で開きました」とは言わない(開いていない)。
+   */
+  if (!deps.hasPaneHome(view)) {
+    deps.fail(`${why}。別のウィンドウで使うには、${POPUP_ALLOW_STEP}`);
     return;
   }
   const landed = deps.openInPane(view);

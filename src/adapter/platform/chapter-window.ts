@@ -186,6 +186,32 @@ function copyTokens(to: HTMLElement): void {
   }
 }
 
+/**
+ * 開いた側でいま効いている配色・書体・字の大きさの指紋。
+ * 🔑 窓を開いた後に本体で配色や字の大きさを替えても窓へ届くよう、見張りが前回の指紋と比べて
+ *   違えば `syncChapterWindowTokens` で写し直す(本文が同じだと組み直しが走らないため)。
+ */
+export function chapterTokenSignature(): string {
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const body = getComputedStyle(document.body);
+    const parts = tokenNames().map((n) => `${n}:${cs.getPropertyValue(n).trim()}`);
+    parts.push(`ff:${body.fontFamily}`, `fs:${body.fontSize}`);
+    return parts.join(';');
+  } catch {
+    return '';
+  }
+}
+
+/** 窓の `:root` へ、いまの配色・書体・字の大きさを写し直す(窓に触れなければ何もしない)。 */
+export function syncChapterWindowTokens(win: Window): void {
+  try {
+    copyTokens(win.document.documentElement);
+  } catch {
+    // 触れない窓 ── 見張りが台帳から外す
+  }
+}
+
 /** 窓に出す物。 */
 export type ChapterWindowContent =
   | { readonly kind: 'loading' }

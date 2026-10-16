@@ -462,6 +462,7 @@ describe('窓が塞がれたとき', () => {
         panes.push(v);
         return true;
       },
+      hasPaneHome: () => true,
       fail: (m) => void fails.push(m),
       schedule: { mode: 'week', day: '2026-09-02' },
     };

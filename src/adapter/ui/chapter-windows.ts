@@ -61,6 +61,7 @@ import {
   type SandboxBlockedKind,
 } from '@features/markdown/external-images';
 import {
+  chapterTokenSignature,
   chapterWindowBuilt,
   chapterWindowName,
   chapterWindowTouchable,
@@ -69,6 +70,7 @@ import {
   paintChapterWindow,
   prepareChapterBody,
   showChapterBlockedNote,
+  syncChapterWindowTokens,
   wireChapterWindow,
   CHAPTER_DIAGRAM_INDEX_ATTR,
   CHAPTER_LID_ATTR,
@@ -131,13 +133,13 @@ const DEBOUNCE_MS = 150;
 interface OpenChapter {
   readonly win: Window;
   readonly lid: string;
-  readonly ref: HeadingRef;
+  ref: HeadingRef;
   /**
    * 開いた時の「同じ字の見出しの数」(`chapterLinesOf` の `sameCount`)。
    * ⚠ 数が変わったら見失ったと扱う ── 前に同じ字の見出しを足されると、同じ「何番目」に
    *   別の章が来るため(着地前レビュー、実測で再現)。
    */
-  readonly sameCount: number;
+  sameCount: number;
   readonly name: string;
   /** 組み直しの世代(遅れて返った描画を当てない)。 */
   gen: number;
@@ -149,6 +151,8 @@ interface OpenChapter {
    *   (「書きながら横に置いて読む」の使い方そのもので起きる ── 着地前レビュー)。
    */
   shown: string;
+  /** 最後に写した配色・字の大きさの指紋(`chapterTokenSignature`)。見張りが比べて、替わっていたら写し直す。 */
+  tokens: string;
   /** 借りた添付・図の後始末。 */
   disposers: Array<() => void>;
   /** html / svg の囲みの高さ合わせ(窓の document ごとに 1 本)。 */
@@ -210,6 +214,7 @@ export class ChapterWindows {
         gen: 0,
         sig: '',
         shown: '',
+        tokens: chapterTokenSignature(),
         disposers: [],
         sandbox: null,
         blocked: new Set(),
@@ -218,6 +223,14 @@ export class ChapterWindows {
       this.windows.set(name, o);
       // ⚠ 開いた瞬間に「待っている」と分かる形にする(白紙を見せない)
       this.paintLoading(o, st);
+    } else {
+      /**
+       * 🔴 **同じ窓をもう一度押したら、押した見出しで控えを取り直す**。⚠ 控えたままだと、
+       *   同じ名前の見出しが増えて「見つかりません」になった窓が、案内どおり見出しから
+       *   開き直しても**古い数のまま**で、二度と章に戻らない。
+       */
+      o.ref = ref;
+      o.sameCount = sameHeadingCount(body, ref.text);
     }
     try {
       win.focus();
@@ -536,6 +549,15 @@ export class ChapterWindows {
       if (closed || !chapterWindowTouchable(o.win)) {
         this.dispose(o);
         continue;
+      }
+      /**
+       * 🔑 **配色・字の大きさの追従**。⚠ 本文が同じだと組み直しは走らない(`paint` の指紋)ので、
+       *   開いた時に写した値のまま、本体で替えた設定が窓へ届かなかった。
+       */
+      const tokens = chapterTokenSignature();
+      if (tokens !== o.tokens) {
+        o.tokens = tokens;
+        syncChapterWindowTokens(o.win);
       }
       if (!this.orphaned && !chapterWindowBuilt(o.win)) {
         // 🔑 白い窓に「待っている」を先に出す(組み直しは非同期)

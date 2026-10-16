@@ -559,3 +559,43 @@ describe('脚注', () => {
     expect(box.textContent).not.toContain('一つ目');
   });
 });
+
+describe('🔴 開き直しと配色の追従(#1087)', () => {
+  const B1 = ['# 計画', '', '## メモ', '', 'ひとつめ', '', '# 後'].join('\n');
+  const B2 = ['# 計画', '', '## メモ', '', 'ひとつめ', '', '## メモ', '', 'ふたつめ', '', '# 後'].join('\n');
+
+  it('🔴 同じ名前の見出しが増えて「見つかりません」になった窓は、見出しを押し直すと章に戻る', async () => {
+    const r = setup({ body: B1 });
+    expect(r.cw.open('n1', 2)).toBe(true);
+    await flush();
+    expect(r.host()?.textContent ?? '').toContain('ひとつめ');
+    r.state = { ...r.state, openBody: { ...r.state.openBody!, body: B2 } };
+    r.cw.onState(r.state);
+    await flush();
+    // 前提: 画面の案内どおり「見つかりません」になっている(これが無いと空振り)
+    expect(r.note(), '前提が崩れている(見つかりません が出ていない)').toBe(CHAPTER_WINDOW_TEXT.missing);
+    // 案内: 「元のウィンドウの見出しから開き直してください」
+    expect(r.cw.open('n1', 2)).toBe(true);
+    await flush();
+    expect(r.note(), '押し直しても見つかりませんのまま').toBeNull();
+    expect(r.host()?.textContent ?? '').toContain('ひとつめ');
+    expect(r.host()?.textContent ?? '', '2 つ目の章が混ざった').not.toContain('ふたつめ');
+  });
+
+  it('🔴 本体で配色を替えたら、本文が同じでも開いている章の窓へ届く(見張りの 1 回で)', async () => {
+    document.documentElement.style.setProperty('--bg', '#ffffff');
+    const r = setup({ body: B1 });
+    expect(r.cw.open('n1', 2)).toBe(true);
+    await flush();
+    const bg = (): string => r.win.document.documentElement.style.getPropertyValue('--bg');
+    expect(bg(), '前提: 開いた時の値が写っている').toBe('#ffffff');
+    document.documentElement.style.setProperty('--bg', '#000000');
+    r.cw.tick();
+    expect(bg()).toBe('#000000');
+    // 対照群: 替わっていなければ写し直さない(窓側の値を触らない)
+    r.win.document.documentElement.style.setProperty('--bg', '#123456');
+    r.cw.tick();
+    expect(bg(), '替わっていないのに写し直した').toBe('#123456');
+    document.documentElement.style.removeProperty('--bg');
+  });
+});

@@ -47,6 +47,7 @@ import {
 } from '../../src/adapter/platform/view-window';
 import type { Broadcaster } from '../../src/adapter/platform/storage/store-proxy';
 import { isViewMode, type ViewMode } from '../../src/adapter/state/app-state';
+import { hasPaneHome } from '../../src/adapter/ui/render/browse-mode';
 import { withBuiltinTiles } from '../../src/features/launcher/tiles';
 
 interface BenchOpts {
@@ -94,6 +95,8 @@ function bench(opts: BenchOpts = {}) {
       mode = v;
       return true;
     },
+    // ⚠ 本物の判定をそのまま使う(甘い stub にすると、中央へ落ちる欠陥が緑のまま通る)
+    hasPaneHome,
     fail: (m) => fails.push(m),
     notify: (m) => notices.push(m),
   };
@@ -191,11 +194,11 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    * ⚠ `noopener` は戻り値が常に `null` なので、**合図が返ったかどうか**でしか
    *   見分けられない ── だから返らなかったときが「塞がれた」である。
    */
-  it('🔴 窓が塞がれたら中央の面へ退避し、理由を出す', async () => {
+  it('🔴 窓が塞がれたら左に居場所のある面(予定表)は退避し、理由を出す', async () => {
     const b = bench({ answered: false });
-    expect(await openViewInWindow('dual', b.deps)).toBe('pane');
+    expect(await openViewInWindow('schedule', b.deps)).toBe('pane');
     expect(b.opened, '開こうとすらしていない').toHaveLength(1);
-    expect(b.panes, '退避していない(押しても何も起きない)').toEqual(['dual']);
+    expect(b.panes, '退避していない(押しても何も起きない)').toEqual(['schedule']);
     expect(b.fails, '黙って退避した(user は窓が出ない理由を知れない)').toHaveLength(1);
     // 🔑 **次に何をすればよいか**が書いてある(外部リンクの案内 `POPUP_HINT_TEXT` と同じ許可の出し方)
     expect(b.fails[0]).toContain(POPUP_ALLOW_STEP);
@@ -211,20 +214,20 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 塞がれた回に 2 回押しても、面は開いたままになる', async () => {
     const b = bench({ answered: false });
-    await openViewInWindow('dual', b.deps);
-    await openViewInWindow('dual', b.deps);
+    await openViewInWindow('schedule', b.deps);
+    await openViewInWindow('schedule', b.deps);
     expect(b.panes, '2 回目で閉じた(退避がトグルになっている)').toEqual([
-      'dual',
-      'dual',
+      'schedule',
+      'schedule',
     ]);
-    expect(b.mode(), '2 回押したら本文へ戻ってしまった').toBe('dual');
+    expect(b.mode(), '2 回押したら本文へ戻ってしまった').toBe('schedule');
   });
 
   /** ⚠ 既にその面を開いている(`Alt+6` 等)ときも、退避で閉じない。 */
   it('🔴 既にその面を開いていても、退避で閉じない', async () => {
-    const b = bench({ answered: false, startMode: 'dual' });
-    await openViewInWindow('dual', b.deps);
-    expect(b.mode(), '開いていた 2 ペインが閉じた').toBe('dual');
+    const b = bench({ answered: false, startMode: 'schedule' });
+    await openViewInWindow('schedule', b.deps);
+    expect(b.mode(), '開いていた 2 ペインが閉じた').toBe('schedule');
   });
 
   /**
@@ -234,7 +237,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('🔴 編集中で面が開けなかったら、文言もそう言う', async () => {
     const b = bench({ answered: false, editing: true });
-    await openViewInWindow('dual', b.deps);
+    await openViewInWindow('schedule', b.deps);
     expect(b.fails, '理由を出していない').toHaveLength(1);
     expect(b.fails[0], '開いていないのに「開きました」と言った').not.toContain(
       'この画面で開きました',
@@ -242,6 +245,22 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
     expect(b.fails[0], '次に何をすればよいか書いていない').toContain('編集を保存するか、編集をやめてから');
     // 🔴 許可の話も同じ回に言う(2026-10-13)── 言われたとおり編集を終えて押し直すと、また塞がれて中央に開く
     expect(b.fails[0], 'ポップアップの許可を言っていない').toContain(POPUP_ALLOW_STEP);
+  });
+
+  /**
+   * 🔴 **左に居場所が無い面は、塞がれても中央へ落とさない**(#1087。CLAUDE.md の裁定
+   * 「別窓が塞がれたときの退避先を、中央にしない」)。2 ペイン / SQL は左のタブも欄も無く、
+   * 直す前は中央の面へ開いて**読んでいた本文が消えた**。理由と許可の出し方だけを出す。
+   * 対照群は上の test(予定表 = 左のタブが在る面は、今までどおり退避する)。
+   */
+  it.each(['dual', 'sql'] as const)('🔴 %s は塞がれても中央の面へ退避せず、理由だけ出す', async (view) => {
+    const b = bench({ answered: false });
+    expect(await openViewInWindow(view, b.deps)).toBe('pane');
+    expect(b.panes, `${view} が中央の面を奪った(本文が消える)`).toEqual([]);
+    expect(b.mode(), '中央の面が動いた').toBe('detail');
+    expect(b.fails, '黙って終わった(user は窓が出ない理由を知れない)').toHaveLength(1);
+    expect(b.fails[0]).toContain(POPUP_ALLOW_STEP);
+    expect(b.fails[0], '開いていないのに「開きました」と言った').not.toContain('この画面で開きました');
   });
 
   /**
@@ -285,9 +304,9 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
    */
   it('⚠ アドレスが組めないときも、理由を出してから退避する', async () => {
     const b = bench({ base: 'https://xn--r8j.test/pkc/#some-heading' });
-    expect(await openViewInWindow('dual', b.deps)).toBe('pane');
+    expect(await openViewInWindow('schedule', b.deps)).toBe('pane');
     expect(b.opened, '組めていないのに開こうとした').toEqual([]);
-    expect(b.panes).toEqual(['dual']);
+    expect(b.panes).toEqual(['schedule']);
     expect(b.fails, '黙って退避した').toHaveLength(1);
   });
 
@@ -313,6 +332,7 @@ describe('組み込みアプリを別窓で開く(#300 段③)', () => {
       newToken: () => 'tok',
       waitForOpen: async () => true,
       openInPane,
+      hasPaneHome,
       fail,
     });
     expect(openInPane).not.toHaveBeenCalled();
@@ -497,9 +517,9 @@ describe('付箋の窓(view を指さない)', () => {
    */
   it('⚠ 面のときは、塞がれたら中央の面で開く', async () => {
     const b = bench({ answered: false });
-    const where = await openViewInWindow('dual', b.deps);
+    const where = await openViewInWindow('schedule', b.deps);
     expect(where).toBe('pane');
-    expect(b.panes, '面へ退避していない').toEqual(['dual']);
+    expect(b.panes, '面へ退避していない').toEqual(['schedule']);
     expect(b.fails[0], '「この画面で開きました」と言っていない').toContain('この画面で開きました');
   });
 });

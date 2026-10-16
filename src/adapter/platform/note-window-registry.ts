@@ -35,6 +35,7 @@
  * 「別のウィンドウで開いています」までである(実機で user が見て裁定する)。
  */
 import type { Broadcaster } from './storage/store-proxy';
+import { createRepeatPressGate } from './repeat-press';
 
 /** 放送路。⚠ store の protocol とも面の窓の合図とも**別にする**(混ぜない)。 */
 export const NOTE_REGISTRY_CHANNEL = 'pkc3-note-window';
@@ -277,4 +278,33 @@ export function createNoteRegistry(raw: NoteRegistryDeps): NoteRegistry {
       deps.channel?.close();
     },
   };
+}
+
+/** ノート → 「前に出て」と頼んだ時刻。⚠ この窓(押す側)の中の記憶。判定は週・月の窓と同じ 1 本(`repeat-press.ts`)。 */
+const noteRaiseGate = createRepeatPressGate();
+/** test が記憶を空にする口。 */
+export function resetNoteRaiseMemory(): void {
+  noteRaiseGate.reset();
+}
+
+/**
+ * 🔴 **付箋を開く押下を、どう扱うか**(#1087)。`main.ts` の `openNoteWindow` は答えに従うだけ。
+ *
+ * - `'open'` = 新しく開く(どこにも無い / 直前に頼んだのに見つからず、もう一度押された)
+ * - `'raise'` = 別の窓へ「前に出て」と頼む
+ * - `'here'` = この窓が出している(前に出す相手が居ない)
+ *
+ * ⚠ 直す前は、台帳が「別の窓に在る」と答え続けるかぎり**何度押しても開かなかった**
+ *   (最小化 / 別のモニタで探せない窓を前にして、画面の「もう一度押すと開きます」が偽だった)。
+ *   週・月の窓(`schedule-deep-link.ts`)と同じく、頼んだ直後(`REPEAT_PRESS_MS` 以内)の
+ *   2 度目は新しく開く。
+ */
+export function decideNoteOpen(
+  where: 'self' | 'other' | null,
+  lid: string,
+  now: number,
+): 'open' | 'raise' | 'here' {
+  if (where === null) return 'open';
+  if (where === 'self') return 'here';
+  return noteRaiseGate.press(lid, now) === 'first' ? 'raise' : 'open';
 }

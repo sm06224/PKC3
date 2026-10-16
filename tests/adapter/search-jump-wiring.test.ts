@@ -148,6 +148,7 @@ describe('view-window: 新しい窓の URL に語が載る', () => {
         newToken: () => 'tok',
         waitForOpen: async () => true,
         openInPane: () => false,
+        hasPaneHome: () => false,
         fail: () => {},
         ...(find === undefined ? {} : { find }),
       },

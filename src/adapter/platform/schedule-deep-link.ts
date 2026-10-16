@@ -7,6 +7,7 @@
  *   左の列の見せ方(`scheduleNarrowMode`)は動かさない。
  */
 import { weekOf } from '@features/schedule/day-layout';
+import { REPEAT_PRESS_MS, createRepeatPressGate } from './repeat-press';
 
 export interface ScheduleDispatch {
   readonly dispatch: (
@@ -70,7 +71,7 @@ export const WEEK_WINDOW_ALREADY =
  * 🔴 **開いている窓を探せないとき、もう一度押せば新しく開く**(#855 の動線レビュー)。
  * 「前に出る」は保証できない(最小化 / 別のモニタ)ので、**この秒数のうちの 2 度目の押下**は開く。
  */
-export const WEEK_REPEAT_PRESS_MS = 10_000;
+export const WEEK_REPEAT_PRESS_MS = REPEAT_PRESS_MS;
 
 /**
  * 🔴 **この窓が「週」で出している週の鍵**(台帳へ名乗る値)。予定の窓で、広い面が「週」のときだけ名乗る。
@@ -103,11 +104,11 @@ export interface WeekWindowDeps {
   readonly now: () => number;
 }
 
-/** 鍵 → 「前に出て」と頼んだ時刻。⚠ この窓(押す側)の中の記憶。 */
-const raisedAt = new Map<string, number>();
+/** 鍵 → 「前に出て」と頼んだ時刻。⚠ この窓(押す側)の中の記憶。判定はノートの窓と同じ 1 本(`repeat-press.ts`)。 */
+const raiseGate = createRepeatPressGate(WEEK_REPEAT_PRESS_MS);
 /** test が記憶を空にする口。 */
 export function resetWeekRaiseMemory(): void {
-  raisedAt.clear();
+  raiseGate.reset();
 }
 
 /** 「すでに開いています」の字。⚠ 鍵の頭(`week ` / `month `)で週と月を言い分ける。 */
@@ -123,16 +124,12 @@ export function openOrRaiseWeekWindow(deps: WeekWindowDeps): 'raised' | 'opened'
     if (where !== null) {
       // ⚠ 自分が出している週なら、前に出す相手が居ない(いま見ているのがそれ)
       if (where === 'other') {
-        const at = raisedAt.get(key);
-        const again = at !== undefined && deps.now() - at <= WEEK_REPEAT_PRESS_MS;
-        if (!again) {
-          raisedAt.set(key, deps.now());
+        if (raiseGate.press(key, deps.now()) === 'first') {
           deps.raise(key);
           deps.notice(alreadyText(key));
           return 'raised';
         }
-        // 2 度目(探しても見つからなかった)── 新しく開く。記憶は捨てる(3 度目は、また最初から)
-        raisedAt.delete(key);
+        // 2 度目(探しても見つからなかった)── 新しく開く。記憶は捨てた(3 度目は、また最初から)
       } else {
         deps.notice(alreadyText(key));
         return 'raised';

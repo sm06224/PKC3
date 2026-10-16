@@ -14,8 +14,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createNoteRegistry,
+  decideNoteOpen,
+  resetNoteRaiseMemory,
   type NoteRegistry,
 } from '../../src/adapter/platform/note-window-registry';
+import { REPEAT_PRESS_MS } from '../../src/adapter/platform/repeat-press';
 import type { Broadcaster } from '../../src/adapter/platform/storage/store-proxy';
 
 /**
@@ -342,5 +345,57 @@ describe('付箋の台帳(#685、user 裁定 2026-09-04)', () => {
       clock += 5000;
       expect(a.reg.whereIs('e1'), '生きている窓の行を捨てた(2 枚目が開く)').toBe('other');
     });
+  });
+});
+
+/**
+ * 🔴 **探しても見つからない窓には、もう一度押すと新しく開く**(#1087)。
+ * 台帳は窓が生きているかぎり 'other' と答え続けるので、押下の判断に「頼んだ直後の 2 度目は開く」が無いと
+ * 画面の「見つからないときは、もう一度押すと開きます」が偽になる(週・月の窓は #855 から持っている規則)。
+ * `main.ts` の `openNoteWindow` は `decideNoteOpen` の答えに従うだけ。
+ */
+describe('付箋を開く押下の判断(#1087)', () => {
+  /** 台帳に聞いて判断する。⚠ 本物と同じ道(`whereIs` → `decideNoteOpen`)を通す。 */
+  function press(reg: NoteRegistry, lid: string, now: number): 'open' | 'raise' | 'here' {
+    return decideNoteOpen(reg.whereIs(lid), lid, now);
+  }
+
+  it('🔴 生きているが見つけられない窓: 1 度目は前に出して頼み、頼んだ直後の 2 度目は開く', () => {
+    resetNoteRaiseMemory();
+    const make = bus();
+    let t = 0;
+    const a = win(make, 'A', { now: () => t });
+    const b = win(make, 'B', { now: () => t });
+    a.reg.announce('e1');
+    // 前提: 台帳は 'other' と答え続ける(これが無いと、2 度目が開くのは台帳が空になったからかもしれない)
+    expect(b.reg.whereIs('e1')).toBe('other');
+    expect(press(b.reg, 'e1', t)).toBe('raise');
+    t += 5_000;
+    expect(b.reg.whereIs('e1'), '前提が崩れている(窓が生きているのに台帳が空)').toBe('other');
+    expect(press(b.reg, 'e1', t), '頼んだ直後の 2 度目が開かない').toBe('open');
+    // 3 度目はまた最初から(頼む)
+    expect(press(b.reg, 'e1', t)).toBe('raise');
+  });
+
+  it('対照群: 頼んでから時間が空いた 2 度目は、また頼むだけ(開かない)', () => {
+    resetNoteRaiseMemory();
+    const make = bus();
+    let t = 0;
+    const a = win(make, 'A', { now: () => t });
+    const b = win(make, 'B', { now: () => t });
+    a.reg.announce('e1');
+    expect(press(b.reg, 'e1', t)).toBe('raise');
+    t += REPEAT_PRESS_MS + 1;
+    expect(press(b.reg, 'e1', t)).toBe('raise');
+  });
+
+  it('対照群: どこにも無ければ開く / この窓が出していれば前に出す相手が居ない', () => {
+    resetNoteRaiseMemory();
+    const make = bus();
+    const a = win(make, 'A');
+    expect(press(a.reg, 'e1', 0)).toBe('open');
+    a.reg.announce('e1');
+    expect(press(a.reg, 'e1', 1)).toBe('here');
+    expect(press(a.reg, 'e1', 2), '自分の窓では何度押しても開かない').toBe('here');
   });
 });

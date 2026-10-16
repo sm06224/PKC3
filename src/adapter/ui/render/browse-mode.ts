@@ -92,6 +92,16 @@ export function homeTabOf(view: ViewMode): BrowseMode | null {
 }
 
 /**
+ * 🔴 **別窓が塞がれたとき、中央を奪わずに退避できる面か**(#1087)。
+ * 左の列のタブ(`homeTabOf`)か、探す面の「左の欄へ焦点」(#680)の 2 つだけ。
+ * ⚠ それ以外(2 ペイン / SQL …)は**中央へ落とさない** ── 本文が消える。判定はここの 1 か所
+ *   (`open-view.ts` の退避と `view-window.ts` の断り文が同じ答えを引く)。
+ */
+export function hasPaneHome(view: ViewMode): boolean {
+  return view === 'search' || homeTabOf(view) !== null;
+}
+
+/**
  * 🔴 **タブを開いたときに集め直す頼み**(2026-09-09。**起動直後に止まっていた**)。
  *
  * ## 直す前、画面で何が起きていたか
