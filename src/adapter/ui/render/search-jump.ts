@@ -52,7 +52,27 @@ const SKIP_SELECTOR = [
 export const HIT_RANGE_MAX = 50000;
 
 /**
+ * 語の途中で切れ目にならない入れ物。⚠ 一覧にある物の**外側**(段落・見出し・表のセル・コードの塊…)で
+ * text node をつなげて引く ── 太字・リンク・コードの色分けの `<span>` は切れ目にしない。
+ */
+const BLOCK_TAGS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DETAILS', 'DIV', 'DL', 'DT', 'FIELDSET',
+  'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR',
+  'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'SUMMARY', 'TABLE', 'TBODY', 'TD', 'TFOOT',
+  'TH', 'THEAD', 'TR', 'UL',
+]);
+
+interface Seg {
+  readonly node: Text;
+  /** つないだ字の中での、この節点の始まり。 */
+  readonly at: number;
+}
+
+/**
  * 本文の text node から、語の出現ごとに Range を作る(文書順)。
+ * 🔑 **同じブロックの中の text node はつなげて引く** ── 太字・リンク・コードの色分けをまたぐ語も当たる
+ *   (Range の始まりと終わりが別の節点にあってよい)。
+ * ⚠ 切れ目:ブロックが変わる所 / `<br>` / 数えない所(`SKIP_SELECTOR`)── そこをまたいで語をつなげない。
  * ⚠ **本文の DOM は読むだけ** ── Range を作るのは節点を動かさない。
  * ⚠ 畳んだ章(`hidden`)の中も数える(送るときに開く)。
  */
@@ -64,22 +84,93 @@ export function collectHitRanges(
   const terms = jumpTerms(query, origin);
   if (terms.length === 0) return [];
   const doc = host.ownerDocument;
-  const walker = doc.createTreeWalker(host, 4 /* NodeFilter.SHOW_TEXT */);
+  // SHOW_ELEMENT | SHOW_TEXT ── `<br>` を切れ目として拾うため要素も歩く
+  const walker = doc.createTreeWalker(host, 1 | 4);
   const out: Range[] = [];
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const text = node.nodeValue ?? '';
+
+  // 親の要素ごとに引いた結果(同じ段落の節点で `closest` を引き直さない)
+  const skipCache = new WeakMap<Element, boolean>();
+  const blockCache = new WeakMap<Element, Element>();
+  const skipped = (el: Element): boolean => {
+    let v = skipCache.get(el);
+    if (v === undefined) {
+      v = el.closest(SKIP_SELECTOR) !== null;
+      skipCache.set(el, v);
+    }
+    return v;
+  };
+  const blockOf = (el: Element): Element => {
+    let v = blockCache.get(el);
+    if (v === undefined) {
+      let cur: Element = el;
+      while (cur !== host && !BLOCK_TAGS.has(cur.tagName.toUpperCase()) && cur.parentElement !== null)
+        cur = cur.parentElement;
+      v = cur;
+      blockCache.set(el, v);
+    }
+    return v;
+  };
+
+  let segs: Seg[] = [];
+  let joined = '';
+  let block: Element | null = null;
+
+  /** @returns 上限に達したか */
+  const flush = (): boolean => {
+    const cur = segs;
+    const text = joined;
+    segs = [];
+    joined = '';
+    block = null;
+    if (cur.length === 0) return false;
     const spans = findHitSpans(text, terms);
-    if (spans.length === 0) continue;
-    // 🔑 差し込んだ操作の字は、当たったときだけ確かめる(全部の節点で `closest` を引かない)
-    if (node.parentElement?.closest(SKIP_SELECTOR) != null) continue;
+    // 節点の添字を二分探索する(当たりが多い長い段落で線形に舐めない)
+    const locate = (pos: number, endSide: boolean): { node: Text; offset: number } => {
+      let lo = 0;
+      let hi = cur.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        const seg = cur[mid]!;
+        // 終わりは「その節点の終端」に置く(次の節点の 0 ではなく)── 始まりは次の節点の頭へ
+        if (endSide ? seg.at < pos : seg.at <= pos) lo = mid;
+        else hi = mid - 1;
+      }
+      const seg = cur[lo]!;
+      return { node: seg.node, offset: pos - seg.at };
+    };
     for (const sp of spans) {
-      if (out.length >= HIT_RANGE_MAX) return out;
+      if (out.length >= HIT_RANGE_MAX) return true;
+      const st = locate(sp.start, false);
+      const en = locate(sp.end, true);
       const range = doc.createRange();
-      range.setStart(node, sp.start);
-      range.setEnd(node, sp.end);
+      range.setStart(st.node, st.offset);
+      range.setEnd(en.node, en.offset);
       out.push(range);
     }
+    return false;
+  };
+
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (node.nodeType === 1) {
+      if ((node as Element).tagName.toUpperCase() === 'BR' && flush()) return out;
+      continue;
+    }
+    const parent = node.parentElement;
+    if (parent === null) continue;
+    // 🔑 差し込んだ操作の字は切れ目にする(混ぜると、user が書いていない字と語がつながる)
+    if (skipped(parent)) {
+      if (flush()) return out;
+      continue;
+    }
+    const b = blockOf(parent);
+    if (block !== null && b !== block && flush()) return out;
+    block = b;
+    const text = node.nodeValue ?? '';
+    if (text === '') continue;
+    segs.push({ node: node as Text, at: joined.length });
+    joined += text;
   }
+  flush();
   return out;
 }
 
@@ -204,11 +295,11 @@ export interface SearchJumpBarHandle {
 /**
  * 帯の字。⚠ 当たりが 1 件も無いときは、その事実を言う(数字の 0 で黙らない)。
  * 🔴 0 件の字は**数えない範囲まで言う**(#1206 D6)── 抜粋に語が見えているのに「当たった所は
- *   ありません」と断定すると嘘になる(太字・リンクをまたぐ語 / 図や html の囲みの中は数えない
- *   ── `search-hits.ts`、設計 doc §3)。
+ *   ありません」と断定すると嘘になる(図や html の囲みの中は数えない ── 設計 doc §3)。
+ *   太字・リンクをまたぐ語は、同じブロックの中ならつなげて数える。
  */
 export function searchJumpLabel(total: number, index: number): string {
-  return total <= 0 ? '本文の字には一致しませんでした(太字やリンクをまたぐ語、図の中は数えません)' : `${index + 1}/${total} 件`;
+  return total <= 0 ? '本文の字には一致しませんでした(図の中は数えません)' : `${index + 1}/${total} 件`;
 }
 
 /**
