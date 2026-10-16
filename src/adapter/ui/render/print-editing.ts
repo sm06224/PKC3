@@ -29,10 +29,39 @@ export function clearEditorPrint(doc: Document): void {
   for (const el of doc.querySelectorAll(`[data-pkc-field="${EDITOR_PRINT_FIELD}"]`)) el.remove();
 }
 
+/**
+ * 🔴 **畳んだ折りたたみ(`:::details`)も紙に出す**(#1087)。書き出した HTML(`pkc3-html.ts`)は
+ * 刷る直前に開いて刷り終えたら戻すが、アプリで刷ると畳んだ中身が紙から消えていた。
+ * ⚠ CSS では `<details>` をこじ開けられない。⚠ 畳んでいた人の状態は壊さない(開けた物だけ覚えて戻す)。
+ */
+let reclose: HTMLDetailsElement[] = [];
+
+/** 刷る直前: 畳んである折りたたみを開く。開けた数を返す。 */
+export function openDetailsForPrint(doc: Document): number {
+  restoreDetailsAfterPrint();
+  for (const d of doc.querySelectorAll<HTMLDetailsElement>('details.pkc-details:not([open])')) {
+    d.open = true;
+    reclose.push(d);
+  }
+  return reclose.length;
+}
+
+/** 刷り終えたら: 開けた物だけ畳み直す。 */
+export function restoreDetailsAfterPrint(): void {
+  for (const d of reclose) d.open = false;
+  reclose = [];
+}
+
 /** 窓に張る。外す関数を返す。 */
 export function installEditorPrint(win: Window): () => void {
-  const before = (): void => void prepareEditorPrint(win.document);
-  const after = (): void => clearEditorPrint(win.document);
+  const before = (): void => {
+    void prepareEditorPrint(win.document);
+    openDetailsForPrint(win.document);
+  };
+  const after = (): void => {
+    clearEditorPrint(win.document);
+    restoreDetailsAfterPrint();
+  };
   win.addEventListener('beforeprint', before);
   win.addEventListener('afterprint', after);
   return () => {

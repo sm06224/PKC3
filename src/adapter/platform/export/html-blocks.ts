@@ -228,8 +228,19 @@ export function htmlToDocxBlocks(doc: Document): {
        * 🔴 **画面の道具は文書ではない**(`walkBlocks` と同じ)。コードの ⧉ と切替の ‹/› は
        * 箇条書きの項目の中の fence にも付くので、ここで落とさないと項目の字に混ざる。
        */
+      /**
+       * 🔑 **タスクの印は文書の字にする**(#1087)── 画面の ☑ / ☐ を Word / PowerPoint でも残す。
+       * 直後の字が空白で始まるなら足さない(markdown-render が印の後ろに空白を 1 つ置く)。
+       */
+      if (tag === 'input' && el.classList.contains('pkc-task-checkbox')) {
+        const nextText = el.nextSibling?.nodeType === 3 ? (el.nextSibling.textContent ?? '') : '';
+        pushRun(out, (el.hasAttribute('checked') ? '☑' : '☐') + (/^\s/.test(nextText) ? '' : ' '), style);
+        continue;
+      }
       if (tag === 'button' || tag === 'input' || tag === 'label') continue;
       if (el.classList.contains('pkc-md-copy-btn')) continue;
+      // 🔑 脚注の戻りリンク(↩︎)は文書では要らない(各脚注の行末に付いてしまう)
+      if (el.classList.contains('footnote-backref')) continue;
       if (RUN_BREAK_TAGS.has(tag)) breakRun(out, style);
       const assetKey = el.tagName.toLowerCase() === 'img' ? el.getAttribute('data-pkc-asset-key') : null;
       if (assetKey !== null && assetKey !== '') {

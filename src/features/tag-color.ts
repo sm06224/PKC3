@@ -229,3 +229,18 @@ export function tagColorCss(list: readonly TagColorEntry[]): string {
   }
   return out.join('\n');
 }
+
+/**
+ * 部分の書き出し(1 ノート / フォルダ)に持たせる色 ── **書き出すノートが使っているタグの色だけ**を残す(#1087)。
+ * 関係の無いタグの名前と色は混ぜない。突き合わせは `tagColorOf` と同じ鍵(大小は無視)。
+ * @param usedKeys `tagColorKey` で作った、使われているタグの集合
+ */
+export function tagColorsUsedBy(
+  all: readonly TagColorEntry[],
+  usedKeys: ReadonlySet<string>,
+): TagColorEntry[] {
+  return all.filter((e) => {
+    const k = tagColorKey(e.tag);
+    return k !== null && usedKeys.has(k);
+  });
+}
