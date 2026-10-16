@@ -426,7 +426,9 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   const body = '[data-pkc-field="detail-body"]';
-  const link = page.locator(`${body} [data-pkc-action="navigate-entry-ref"]`);
+  // ⚠ 別の PKC あても押すと断り文が出る形(#1087)なので、自分あてだけを札の無い物で絞る
+  const selfLink = `${body} [data-pkc-action="navigate-entry-ref"]:not(.pkc-portable-reference-placeholder)`;
+  const link = page.locator(selfLink);
   await expect(link, '自分あての pkc:// が焼かれていない(cid が届いていない)').toHaveCount(1);
   await expect(
     page.locator(`${body} .pkc-portable-reference-placeholder`),
@@ -442,7 +444,7 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
   ).toHaveCount(1);
 
   const urlBefore = page.url();
-  await clickReal(page, `${body} [data-pkc-action="navigate-entry-ref"]`);
+  await clickReal(page, selfLink);
   await expect(page.locator(body)).toContainText('携帯参照で着いた本文');
   expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
 

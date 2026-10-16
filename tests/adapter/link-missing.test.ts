@@ -44,7 +44,9 @@ function marked(host: HTMLElement): string[] {
 describe('applyMissingLinks', () => {
   it('🔴 前提: 実物の描画が 3 種の内部リンクを焼いている(空振り防止)', () => {
     const host = hostOf(BODY);
-    expect(host.querySelectorAll('a[data-pkc-entry-ref]').length).toBe(3); // entry: ×2 + pkc://自分 ×1
+    // entry: ×2 + pkc://自分 ×1 + pkc://別 ×1(#1087 で別の PKC 宛ても押すと断り文が出る形になった)
+    expect(host.querySelectorAll('a[data-pkc-entry-ref]').length).toBe(4);
+    expect(host.querySelector('a[data-pkc-entry-ref="pkc://other-cid/entry/far"]')).not.toBeNull();
     expect(host.querySelectorAll('[data-pkc-card-target]').length).toBe(1);
   });
 
