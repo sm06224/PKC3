@@ -57,6 +57,14 @@ export function encodeHidden(hidden: readonly PaneId[]): string {
   return PANES.filter((p) => hidden.includes(p)).join(' ');
 }
 
+/**
+ * 保存の字が畳み方として読めるか(設定ファイルの下見用 ── `decodeHidden` と同じ読み方)。
+ * ⚠ 知らない名前が 1 つでも混じる字は読めない扱い(`decodeHidden` は黙って捨てるので、入れたつもりで効かない)。
+ */
+export function isHiddenPanes(raw: string): boolean {
+  return raw.split(/\s+/).every((t) => t === '' || isPaneId(t));
+}
+
 export function decodeHidden(raw: string | null | undefined): PaneId[] {
   if (!raw) return [];
   const seen = new Set(raw.split(/\s+/).filter(isPaneId));

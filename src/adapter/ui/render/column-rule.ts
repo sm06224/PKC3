@@ -13,7 +13,8 @@ import {
   type ColumnRule,
 } from '@features/column-rule';
 
-const KEY = 'pkc3.column-rule';
+export const COLUMN_RULE_STORAGE_KEY = 'pkc3.column-rule';
+const KEY = COLUMN_RULE_STORAGE_KEY;
 
 /** 当てる先の印。⚠ CSS 変数だけだと「いま何が当たっているか」を DOM から読めない。 */
 export const COLUMN_RULE_ATTR = 'data-pkc-column-rule';

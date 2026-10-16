@@ -311,6 +311,40 @@ describe('焼いたマニュアル — 配色', () => {
       expect(MANUAL_CHROME_CSS).toContain('font-size:var(--pkc-text-size,');
       expect(bake().html).toContain(JSON.stringify(TEXT_SCALE_STORAGE_KEY));
     });
+
+    /**
+     * 🔴 開いたままのマニュアルが、別のウィンドウで選んだ配色・文字の大きさに付いていく(#1087)。
+     * ⚠ 素の `addEventListener` は window に積み上がるので、この it で登録した分だけ外す。
+     */
+    it('🔴 storage event で配色と大きさを当て直す / 関係ない鍵では動かない / 「標準」(鍵が消える)で大きさを外す', () => {
+      const added: Array<[string, EventListenerOrEventListenerObject]> = [];
+      vi.stubGlobal('addEventListener', (t: string, l: EventListenerOrEventListenerObject) => {
+        if (t === 'storage') added.push([t, l]);
+      });
+      localStorage.setItem(THEME_STORAGE_KEY, 'light');
+      expect(run()).toBe('');
+      expect(added.length, 'storage の listener が登録されていない').toBe(1);
+      const html = document.documentElement;
+      const fire = (key: string | null): void => {
+        (added[0]![1] as (ev: unknown) => void)({ key });
+      };
+      expect(html.getAttribute('data-pkc-theme')).toBe('light');
+      localStorage.setItem(THEME_STORAGE_KEY, 'dracula');
+      fire('pkc3.something-else');
+      expect(html.getAttribute('data-pkc-theme'), '関係ない鍵で当て直した').toBe('light');
+      fire(THEME_STORAGE_KEY);
+      expect(html.getAttribute('data-pkc-theme'), '配色に付いていかない').toBe('dracula');
+      localStorage.setItem(TEXT_SCALE_STORAGE_KEY, 'large');
+      fire(TEXT_SCALE_STORAGE_KEY);
+      expect(html.style.getPropertyValue('--pkc-text-size'), '大きさに付いていかない').toBe(
+        textScaleSpec('large').size,
+      );
+      localStorage.removeItem(TEXT_SCALE_STORAGE_KEY);
+      fire(TEXT_SCALE_STORAGE_KEY);
+      expect(html.style.getPropertyValue('--pkc-text-size'), '標準へ戻らない').toBe('');
+      // 起動時(storage 無し)は焼かれた値を消さない ── 既存の「選んでいなければ触らない」が守る
+
+    });
   });
 });
 
@@ -330,7 +364,9 @@ describe('焼いたマニュアル — 断片へ送る script(D4)', () => {
     // ⚠ 素の `addEventListener` は window に積み上がる(前の it の listener も鳴る)──
     //    script が登録した handler を**掴んで直に呼ぶ**(1 本だけ登録されることも見る)
     const handlers: Array<() => void> = [];
-    vi.stubGlobal('addEventListener', (_type: string, fn: () => void) => handlers.push(fn));
+    vi.stubGlobal('addEventListener', (type: string, fn: () => void) => {
+      if (type === 'DOMContentLoaded') handlers.push(fn);
+    });
     const landed: string[] = [];
     for (const id of ['4-4-ヘルプ', 'm-3']) {
       const h = document.createElement('h2');

@@ -10,7 +10,7 @@
  * mermaid の読み込みが要るので、ここでは配線だけを見る。
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
+import { hydrateAllNow, hydrateMermaid, type MermaidScope } from '../../src/adapter/ui/render/mermaid-hydrate';
 import { DeviceRenderError, renderToPng } from '../../src/adapter/ui/render/mermaid-raster';
 import {
   noteTyping,
@@ -1137,6 +1137,70 @@ describe('打っている間は、画面の外の図の先読みを始めない(
     await flush();
     expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(8);
     scope.dispose();
+    root.remove();
+  });
+});
+
+describe('🔴 hydrateAllNow(印刷の前 ── 見えるのを待たずに全部描く。#1087)', () => {
+  it('観測も先読みも動いていなくても、根の中の未描画の図を全部描いて、描き終えてから解決する', async () => {
+    // ⚠ 空き時間の先読みに救われないよう、取れない環境にする(救われるとこの test は何も見ていない)
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const root = document.createElement('div');
+    root.append(block('graph TD\n A-->B'), block('graph TD\n C-->D'), block('graph TD\n E-->F'));
+    document.body.append(root);
+    const scope = hydrateMermaid([...root.children]);
+    const hosts = [...root.querySelectorAll<HTMLElement>('[data-pkc-mermaid-src]')];
+    expect(hosts).toHaveLength(3);
+    // 対照群:放っておくと誰も描いていない(IntersectionObserver は鳴らさない)
+    expect(vi.mocked(renderToPng)).not.toHaveBeenCalled();
+
+    await hydrateAllNow(root);
+
+    expect(vi.mocked(renderToPng), '3 枚とも焼いていない').toHaveBeenCalledTimes(3);
+    for (const h of hosts) {
+      expect(h.getAttribute('data-pkc-mermaid-state'), '解決した時点で載っていない').toBe('ready');
+      expect(h.querySelector('img[data-pkc-field="mermaid-image"]')).not.toBeNull();
+    }
+    scope.dispose();
+    root.remove();
+  });
+
+  it('根の外の図には触らない / 失敗した図も「終わり」に数える', async () => {
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const inside = document.createElement('div');
+    const outside = document.createElement('div');
+    inside.append(block('in'));
+    outside.append(block('out'));
+    document.body.append(inside, outside);
+    const sIn = hydrateMermaid([...inside.children]);
+    const sOut = hydrateMermaid([...outside.children]);
+    vi.mocked(renderToPng).mockRejectedValueOnce(new Error('bad'));
+
+    await hydrateAllNow(inside);
+
+    expect(inside.querySelector('[data-pkc-mermaid-src]')!.getAttribute('data-pkc-mermaid-state')).toBe('failed');
+    expect(outside.querySelector('[data-pkc-mermaid-src]')!.getAttribute('data-pkc-mermaid-state')).toBeNull();
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+    sIn.dispose();
+    sOut.dispose();
+    inside.remove();
+    outside.remove();
+  });
+
+  it('描き終えた図は焼き直さず、畳んだ塊には頼まない', async () => {
+    vi.stubGlobal('requestIdleCallback', undefined);
+    const root = document.createElement('div');
+    root.append(block('x'));
+    document.body.append(root);
+    const scope = hydrateMermaid([...root.children]);
+    await hydrateAllNow(root);
+    await hydrateAllNow(root);
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
+    scope.dispose();
+    const root2 = document.createElement('div');
+    root2.append(block('y'));
+    await hydrateAllNow(root2);
+    expect(vi.mocked(renderToPng)).toHaveBeenCalledTimes(1);
     root.remove();
   });
 });

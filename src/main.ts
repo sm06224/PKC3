@@ -46,6 +46,7 @@ import {
 import { textScaleSpec } from '@features/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
+import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-follow';
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
 import {
   MAX_TAG_COLORS,
@@ -405,7 +406,7 @@ import { dayStamp } from '@features/datetime/date-math';
 import { APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { diagramFileName } from '@features/export/file-name';
 import { renderToSvg, readPalette, svgWithIntrinsicSize } from '@adapter/ui/render/mermaid-raster';
-import { MERMAID_KIND } from '@adapter/ui/render/mermaid-hydrate';
+import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
 import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
@@ -1244,6 +1245,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   印を 1 つ当てるだけで、描き直しは要らない(骨組みは markdown が常に出す)。
    */
   applyTagBadge(document.documentElement, initialTagBadge());
+  // 🔴 紙面・置き場所・段数・段の境界線・タグの見せ方も、別のウィンドウの変更に付いていく(#1087)
+  watchAppearanceFromOtherWindows(document.documentElement, window);
   /**
    * 🔴 **タグの色を読んで当てる**(#1457)。色は器のデータ(`settings` 表)── 端末の好みではない。
    * ⚠ 起動を待たせない(読めなくても札は灰色で出るだけ)。
@@ -5103,6 +5106,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           dispatch: (a) => dispatcher.dispatch(a),
           onState: (cb) => dispatcher.onState(cb),
           print: () => window.print(),
+          // 🔴 画面の外の図は見えるまで描かれない ── 刷る前に本文の図を描き切る(#1087)
+          //    ⚠ 本文が state に届いた直後は、図の器がまだ DOM に無いことがある(実測: 押してすぐだと器 0 個で刷った)
+          //    ── 1 コマずつ 3 回、器を引き直して描く
+          prepare: async () => {
+            for (let i = 0; i < 3; i++) {
+              await new Promise<void>((r) =>
+                typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16),
+              );
+              const body = document.querySelector('[data-pkc-field="detail-body"]');
+              if (body) await hydrateAllNow(body);
+            }
+          },
         },
         lid,
       ),

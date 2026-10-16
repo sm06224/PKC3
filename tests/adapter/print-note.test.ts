@@ -218,6 +218,56 @@ describe('printNote(#187 ── 紙に出す口)', () => {
     expect(h.prints(), '購読が残っていて二度刷った').toBe(1);
   });
 
+  it('🔴 刷る前に図の用意(prepare)を待つ ── 用意が終わるまで print を呼ばない(#1087)', async () => {
+    const h = harness({});
+    let release: () => void = () => {};
+    const order: string[] = [];
+    h.deps.prepare = () =>
+      new Promise<void>((resolve) => {
+        order.push('prepare-start');
+        release = () => {
+          order.push('prepare-done');
+          resolve();
+        };
+      });
+    const base = h.deps.print;
+    h.deps.print = () => {
+      order.push('print');
+      base();
+    };
+    const p = printNote(h.deps, 'a');
+    await flush();
+    expect(order, '用意の途中で刷った').toEqual(['prepare-start']);
+    expect(h.prints()).toBe(0);
+    release();
+    expect(await p).toBe('printed');
+    expect(order).toEqual(['prepare-start', 'prepare-done', 'print']);
+  });
+
+  it('用意が失敗しても刷る / 上限を過ぎたら待たずに刷る(固まらない)', async () => {
+    const failing = harness({});
+    failing.deps.prepare = () => Promise.reject(new Error('x'));
+    expect(await printNote(failing.deps, 'a')).toBe('printed');
+    expect(failing.prints()).toBe(1);
+
+    const stuck = harness({});
+    stuck.deps.prepare = () => new Promise<void>(() => {});
+    let fire: (() => void) | null = null;
+    let ms = 0;
+    stuck.deps.setTimer = (cb, t) => {
+      fire = cb;
+      ms = t;
+      return 1;
+    };
+    const p = printNote(stuck.deps, 'a');
+    await flush();
+    expect(stuck.prints(), '上限の前に刷った').toBe(0);
+    expect(ms).toBe(10000);
+    fire!();
+    expect(await p).toBe('printed');
+    expect(stuck.prints()).toBe(1);
+  });
+
   it('🔴 画面専用の操作子（Back to Top、読書進捗バー、見出しアンカー）が紙では display: none になる (#1129)', () => {
     const css = readFileSync('src/styles/app.css', 'utf8');
     const printSection = css.slice(css.indexOf('@media print'));

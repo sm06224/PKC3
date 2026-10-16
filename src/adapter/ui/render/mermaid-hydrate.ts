@@ -137,6 +137,25 @@ export interface MermaidScope {
    * 4 本生きたままだった。
    */
   prune(): number;
+  /**
+   * `root` の中の、まだ描けていない器を**いますぐ**描いて、終わるまで待つ(#1087)。
+   * 失敗も「終わり」に数える。⚠ 観測や先読みを待たない(印刷は画面の外の図も刷る)。
+   */
+  flush?(root: ParentNode): Promise<void>;
+}
+
+/**
+ * 生きている塊。⚠ `hydrateAllNow` が**描いた本人**に頼むための名簿 ──
+ * 別の塊を作って描くと、同じ器を 2 度焼き、片方の ObjectURL が寿命終端まで残る。
+ */
+const liveScopes = new Set<MermaidScope>();
+
+/**
+ * `root` の中の図(mermaid / chart)を、見えているかに関わらず全部描いて待つ(#1087 ── 印刷用)。
+ * ⚠ 描くのは各塊が持つ既存の道(キャッシュ鍵・直列の焼き・差し替え)をそのまま使う。
+ */
+export async function hydrateAllNow(root: ParentNode): Promise<void> {
+  await Promise.all([...liveScopes].map((s) => s.flush?.(root)));
 }
 
 /**
@@ -220,7 +239,7 @@ export function hydrateDiagrams(
     if (r instanceof Element && r.matches(`[${kind.attr}]`)) hosts.push(r as HTMLElement);
     hosts.push(...r.querySelectorAll<HTMLElement>(`[${kind.attr}]`));
   }
-  if (hosts.length === 0) return { dispose: () => undefined, prune: () => 0 };
+  if (hosts.length === 0) return { dispose: () => undefined, prune: () => 0, flush: () => Promise.resolve() };
 
   /** 器 → いま貸している ObjectURL。**焼き直したら前のを返す**。 */
   const urlOf = new Map<HTMLElement, string>();
@@ -296,7 +315,17 @@ export function hydrateDiagrams(
       if (cancelCommit === null) cancelCommit = scheduleCommit();
     });
 
-  const paint = async (p: Pending, force = false): Promise<void> => {
+  /** 焼いている最中の器 → その完了(`flush` が待つ。同じ器を 2 度焼かない)。 */
+  const running = new Map<HTMLElement, Promise<void>>();
+  const paint = (p: Pending, force = false): Promise<void> => {
+    const run = paintOnce(p, force);
+    running.set(p.host, run);
+    void run.finally(() => {
+      if (running.get(p.host) === run) running.delete(p.host);
+    });
+    return run;
+  };
+  const paintOnce = async (p: Pending, force: boolean): Promise<void> => {
     if (disposed) return;
     // ⚠ **画面から外れた器には描かない**(差し替え済みの器を先読み列が
     //    焼き続けていた ── 配色経路 と規則を 1 つに寄せる)
@@ -547,8 +576,20 @@ export function hydrateDiagrams(
   };
   if (ric) idle = ric(step, { timeout: 2000 });
 
-  return {
+  const scope: MermaidScope = {
+    flush: async (flushRoot) => {
+      const jobs: Promise<void>[] = [];
+      for (const host of hosts) {
+        if (disposed || !flushRoot.contains(host)) continue;
+        const inFlight = running.get(host);
+        if (inFlight) jobs.push(inFlight);
+        else if (!done.has(host))
+          jobs.push(paint({ host, source: host.getAttribute(kind.attr) ?? '' }));
+      }
+      await Promise.all(jobs);
+    },
     dispose: () => {
+      liveScopes.delete(scope);
       disposed = true;
       cancelCommit?.();
       flushCommits(); // ⚠ 待っている呼び手を解決させる(中身は disposed を見て何もしない)
@@ -586,4 +627,6 @@ export function hydrateDiagrams(
       return live;
     },
   };
+  liveScopes.add(scope);
+  return scope;
 }
