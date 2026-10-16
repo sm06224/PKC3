@@ -284,7 +284,11 @@ export function matchContact(card: ContactCard, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (q === '') return true;
   const hay = [card.name, card.org, ...card.tels, ...card.emails].join(' ').toLowerCase();
-  return hay.includes(q);
+  if (hay.includes(q)) return true;
+  // 🔴 電話は区切りと全角を無視して探す(#1087)── `09011112222` でも `090-1111` でも `０９０` でも当たる
+  const qd = q.normalize('NFKC').replace(/[^\d]/g, '');
+  if (qd.length < 3) return false;
+  return card.tels.some((t) => t.normalize('NFKC').replace(/[^\d]/g, '').includes(qd));
 }
 
 /**
@@ -322,9 +326,30 @@ export function telHref(tel: string): string | null {
    * ⚠ 全角の数字も番号として読む(`\d` は半角しか当たらない ── 押せない字のままだった)。
    */
   const half = tel.normalize('NFKC');
-  // ⚠ 頭の飾り(`TEL:` など)は今までどおり読み飛ばす ── 最初の数字か `+` から、番号に使う字が続く所まで
-  const head = /[+\d][\d+\-\s()‐−―]*/.exec(half)?.[0] ?? '';
-  const digits = head.replace(/[^\d+]/g, '');
+  // ⚠ 頭の飾り(`TEL:` など)は今までどおり読み飛ばす ── 最初の数字か `+` から読み始める
+  const first = half.search(/[+\d]/);
+  if (first < 0) return null;
+  const start = half[first - 1] === '(' ? first - 1 : first; // `(03) …` の括弧から読む
+  /**
+   * 🔴 番号の続きとして読むのは、数字・`+`(頭だけ)・区切り・**閉じた数字だけの括弧**(`(03)`)まで(#1087)。
+   * ⚠ 閉じない括弧・数字以外の入った括弧・空白のあとに独りで立つ `-123` は、番号の外の字なのでそこで止める
+   *   (`03-1234-5678 (9-18時)` の 9-18 を番号に混ぜない)。`+81 (0) 90…` の `(0)` は国番号の直後なので落とす。
+   */
+  let digits = '';
+  for (let i = start; i < half.length; i++) {
+    const c = half[i]!;
+    if (/\d/.test(c) || (c === '+' && digits === '')) digits += c;
+    else if (/\s/.test(c)) continue;
+    else if (/[-‐−―]/.test(c)) {
+      if (/\s/.test(half[i - 1] ?? '')) break;
+    } else if (c === '(') {
+      const close = half.indexOf(')', i);
+      const inner = close < 0 ? '' : half.slice(i + 1, close);
+      if (!/^\d+$/.test(inner)) break;
+      if (!(inner === '0' && /^\+\d{1,3}$/.test(digits))) digits += inner;
+      i = close;
+    } else break;
+  }
   return /\d/.test(digits) ? `tel:${digits}` : null;
 }
 

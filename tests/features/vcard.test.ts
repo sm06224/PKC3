@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { frontmatterLineCount } from '../../src/features/markdown/frontmatter';
 import { contactOf, type ContactCard } from '../../src/features/contact/contact-card';
-import { buildVcf, isVcfFileName, parseVcf, vcfNoteOf } from '../../src/features/contact/vcard';
+import { buildVcf, countUnwritableBirthdays, isVcfFileName, parseVcf, vcfBirthday, vcfNoteOf } from '../../src/features/contact/vcard';
 
 const CARD_30 = [
   'BEGIN:VCARD',
@@ -576,5 +576,63 @@ describe('題名と改行(#1087)', () => {
     ]);
     expect(out, '単独の CR が生のまま出た').not.toMatch(/\r(?!\n)/);
     expect(out).toContain('FN:A\\nB\r\n');
+  });
+});
+
+describe('#1087 の取り込み・書き出しの見直し', () => {
+  const card = (over: Partial<ContactCard> = {}): ContactCard => ({
+    lid: 'l1', name: '山田', org: '', orgParts: [], tels: [], emails: [], birthday: '', overlong: false, ...over,
+  });
+
+  it('🔴 vCard 4.0 の TEL の `tel:` を落とし、往復で二重にならない', () => {
+    const { cards } = parseVcf('BEGIN:VCARD\r\nVERSION:4.0\r\nFN:A\r\nTEL;VALUE=uri:tel:+81-90-1111-2222\r\nTEL;VALUE=uri:TEL:03-0000-0000\r\nEND:VCARD');
+    expect(cards[0]!.tels).toEqual(['+81-90-1111-2222', '03-0000-0000']);
+    const out = buildVcf([card({ tels: cards[0]!.tels })]);
+    expect(out).toContain('TEL;TYPE=voice:+81-90-1111-2222\r\n');
+    expect(out).not.toMatch(/TEL;TYPE=voice:tel:/i);
+  });
+
+  it('🔴 誕生日を yyyy-mm-dd に揃える / 決まった形はそのまま / 読めない物は書かない', () => {
+    const table: Array<[string, string | null]> = [
+      ['1990/3/5', '1990-03-05'],
+      ['1990.12.25', '1990-12-25'],
+      ['1990-3-5', '1990-03-05'],
+      ['1990年3月5日', '1990-03-05'],
+      ['１９９０年３月５日', '1990-03-05'],
+      ['--03-05', '--03-05'],
+      ['19900305', '19900305'],
+      ['1990-03-05', '1990-03-05'],
+      ['三月五日', null],
+      ['1990/13/40', null],
+    ];
+    for (const [raw, want] of table) expect(vcfBirthday(raw), raw).toBe(want);
+    const out = buildVcf([card({ birthday: '1990/3/5' }), card({ lid: 'l2', birthday: 'いつか' })]);
+    expect(out).toContain('BDAY:1990-03-05\r\n');
+    expect(out.match(/BDAY:/g)).toHaveLength(1);
+    expect(countUnwritableBirthdays([card({ birthday: '1990/3/5' }), card({ birthday: 'いつか' }), card()])).toBe(1);
+  });
+
+  it('🔴 題名が空の連絡先は、FN に最初の電話 / メールを書く(N は空のまま)', () => {
+    const t = buildVcf([card({ name: '', tels: ['090-1'], emails: ['a@x.jp'] })]);
+    expect(t).toContain('FN:090-1\r\n');
+    expect(t).toContain('N:;;;;\r\n');
+    expect(buildVcf([card({ name: '', emails: ['a@x.jp'] })])).toContain('FN:a@x.jp\r\n');
+    expect(buildVcf([card({ name: '山田' })]), '題名が在るなら題名').toContain('FN:山田\r\n');
+  });
+
+  it('🔴 Apple の X-ABLABEL / X-ABADR は本文に写さず、種別の警告に数える(他の X-* は残す)', () => {
+    const text = [
+      'BEGIN:VCARD', 'VERSION:3.0', 'FN:A',
+      'item1.TEL:090-1111-2222', 'item1.X-ABLABEL:_$!<Mobile>!$_',
+      'item2.ADR:;;東京;;;;', 'item2.X-ABADR:jp',
+      'X-FOO:keep', 'END:VCARD',
+    ].join('\r\n');
+    const { cards, warnings } = parseVcf(text);
+    const body = vcfNoteOf(cards[0]!).body;
+    expect(body).not.toContain('X-ABLABEL');
+    expect(body).not.toContain('X-ABADR');
+    expect(body).not.toContain('Mobile');
+    expect(body, '他の X-* は今までどおり残る').toContain('X-FOO');
+    expect(warnings.filter((w) => w.includes('種別'))).toHaveLength(1);
   });
 });

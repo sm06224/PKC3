@@ -20,7 +20,7 @@ import { lidOfNode } from './lid-of-node';
 import { isEditableColor } from '@features/markdown/color-code';
 import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
-import { isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
+import { BUILTIN_KINDS, isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
 import {
   chapterSpanOf,
   headingAtSourceLine,
@@ -153,7 +153,7 @@ import {
   CHAPTER_WINDOW_ACTIONS,
 } from '@adapter/platform/chapter-window';
 import { matchContact, visibleContacts, type ContactCard } from '@features/contact/contact-card';
-import { buildVcf, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
+import { buildVcf, countUnwritableBirthdays, isVcfFileName, vcfNoteOf } from '@features/contact/vcard';
 import { isIcsFileName } from '@features/schedule/ics-import';
 import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { ARCHETYPE_ICONS, BAR_TILE_ATTR, setActionIcon } from '@adapter/ui/render/icons';
@@ -11753,9 +11753,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       dropped > 0
         ? `。⚠ ${dropped} 件で、長すぎる電話・メール(1,000 字超)を外しました`
         : '';
+    // 🔴 読めない誕生日は書かない(#1087)── 書かなかった件数を言う
+    const noBday = countUnwritableBirthdays(cards);
+    const bdayBad = noBday > 0 ? `。${noBday} 件は誕生日の書き方が読めないので、誕生日を書いていません` : '';
     dispatcher.dispatch({
       type: 'OP_NOTICE',
-      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)${bad}`,
+      message: `連絡先 ${cards.length} 件を書き出しました${cut}(名前・所属・電話・メール・誕生日だけです)${bad}${bdayBad}`,
     });
   },
   /**
@@ -17763,8 +17766,14 @@ export function bindActions(
       }
     }
 
-    const tileHit = target.closest('[data-pkc-tile][draggable="true"]');
-    if (tileHit !== null) {
+    /**
+     * 🔴 **タイルかどうかは `draggable` で決めない**(#1087)。左の絞り込み中は掴ませない(`draggable` を付けない)ので、
+     *   `draggable` で探すと**絞り込み中だけブラウザの右クリックが出た**。開き方の 2 項目は絞り込みに関係なく出し、
+     *   並べ替えの項目は掴めるとき(= 絞り込み中でない)だけ足す。
+     */
+    const tileHit = target.closest('[data-pkc-tile][data-pkc-tile-kind]');
+    const tileKind = tileHit?.getAttribute('data-pkc-tile-kind') ?? '';
+    if (tileHit !== null && ![...BUILTIN_KINDS].some((k) => k === tileKind)) {
       const tileLid = tileHit.getAttribute('data-pkc-tile') ?? '';
       if (tileLid !== '') {
         ev.preventDefault();
@@ -17773,7 +17782,9 @@ export function bindActions(
           { x: ev.clientX, y: ev.clientY },
           // ⚠ 出口も同じメニューに置く(#857 段①b-2)── 入口だけ作らない
           // 🔴 その 1 回だけの開き方(#884 段②)── いまの設定を先頭 2 項目に足す
-          tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget()),
+          tileHit.getAttribute('draggable') === 'true'
+            ? tileMenuActions(dispatcher.getState().launcherReorder, currentAppOpenTarget())
+            : tileOpenTargetMenuActions(currentAppOpenTarget()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );

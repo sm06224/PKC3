@@ -230,7 +230,8 @@ export class ContactsRenderer {
     open.setAttribute('data-pkc-action', 'select-entry');
     open.setAttribute('data-pkc-entry', card.lid);
     open.setAttribute('data-pkc-field', 'contact-name');
-    open.textContent = contactLine(card);
+    // 🔴 題名が空でも押せる字にする(#1087)── 空だと見えないボタンになる。他の面と同じ字
+    open.textContent = contactLine(card) || '(無題)';
     li.append(open);
 
     /**
