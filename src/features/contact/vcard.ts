@@ -494,7 +494,8 @@ export function parseVcf(text: string): VcfParseResult {
           );
         }
         if (decoded === '') break;
-        if (prop.name === 'TEL') cur.tels.push(decoded);
+        // 🔴 vCard 4.0 の `TEL;VALUE=uri:tel:+81…` は頭の `tel:` を落とす(#1087)── 残すと書き出しが `TEL:tel:+81…` になる
+        if (prop.name === 'TEL') cur.tels.push(decoded.replace(/^tel:/i, '').trim());
         else cur.emails.push(decoded);
         break;
       }
@@ -504,6 +505,20 @@ export function parseVcf(text: string): VcfParseResult {
         break;
       case 'NOTE':
         if (rawDecoded !== '') cur.notes.push(rawDecoded);
+        break;
+      case 'X-ABLABEL':
+      case 'X-ABADR':
+        /**
+         * 🔴 Apple の連絡先が書く「項目の名札」(`_$!<Mobile>!$_` など)と住所の国コード(#1087)。
+         *   本文に写すと意味の無い行になる。⚠ 名札は携帯 / 自宅の区別そのものなので、
+         *   種別が取り込めない警告(上の TEL / EMAIL と同じ 1 本)に数える。
+         */
+        if (!cur.typeSaid) {
+          cur.typeSaid = true;
+          warnings.push(
+            `${cardNo()} 枚目: 電話・メールの種別(携帯 / 自宅 / FAX など)は取り込めません`,
+          );
+        }
         break;
       default: {
         const label = otherLabel(prop.name, prop.params);
@@ -584,6 +599,28 @@ export function vcfNoteOf(card: VcfCard): { title: string; body: string } {
   return { title: card.name, body: parts.length === 0 ? '' : `${parts.join('\n')}\n` };
 }
 
+/**
+ * 🔴 誕生日を vCard の書き方(`yyyy-mm-dd`)に揃える(#1087)。
+ * 年月日の区切りが `/` `.` や `年月日` のものは直す。`--mm-dd` / `yyyymmdd` / `yyyy-mm-dd` はそのまま。
+ * 読めない字は `null`(書かない ── 相手の端末が壊れた日付を保存しない)。
+ */
+export function vcfBirthday(raw: string): string | null {
+  const s = raw.normalize('NFKC').trim();
+  if (s === '') return null;
+  if (/^--\d{2}-?\d{2}$/.test(s) || /^\d{8}$/.test(s) || /^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = /^(\d{4})\s*(?:[-/.]|年)\s*(\d{1,2})\s*(?:[-/.]|月)\s*(\d{1,2})\s*日?$/.exec(s);
+  if (m === null) return null;
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${m[1]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** 書き出しで誕生日を書けない(読めない)人の数 ── 書き出しの知らせが言う。 */
+export function countUnwritableBirthdays(cards: readonly ContactCard[]): number {
+  return cards.filter((c) => c.birthday !== '' && vcfBirthday(c.birthday) === null).length;
+}
+
 /** 3.0 の値エスケープ(`\` `,` `;` と改行)。 */
 function escapeValue(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\r\n|\r|\n/g, '\\n'); // 🔴 単独の CR も(#1087。残すと vCard の行が割れる)
@@ -600,13 +637,15 @@ export function buildVcf(cards: readonly ContactCard[]): string {
   for (const c of cards) {
     lines.push('BEGIN:VCARD', 'VERSION:3.0');
     lines.push(`N:${escapeValue(c.name)};;;;`);
-    lines.push(`FN:${escapeValue(c.name)}`);
+    // 🔴 題名が空なら FN は最初の電話 / メール(FN が空の vCard は受け手が捨てる)。N は空のまま(#1087)
+    lines.push(`FN:${escapeValue(c.name !== '' ? c.name : (c.tels[0] ?? c.emails[0] ?? ''))}`);
     // 🔴 内訳を `;` で繋ぎ直す(#534 段②)── 会社と部署の区切りを相手へ渡す
     if (c.orgParts.length > 0)
       lines.push(`ORG:${c.orgParts.map(escapeValue).join(';')}`);
     // 🔑 取込が `birthday:` を書くので、**書き出しも書く**(往復を閉じる ──
     //    無いと「取り込んで書き出したら誕生日が消えた」になる)
-    if (c.birthday !== '') lines.push(`BDAY:${escapeValue(c.birthday)}`);
+    const bday = c.birthday === '' ? null : vcfBirthday(c.birthday);
+    if (bday !== null) lines.push(`BDAY:${escapeValue(bday)}`);
     /**
      * ⚠ **ここに門は置かない**(#536 ③、2026-08-28)。
      *

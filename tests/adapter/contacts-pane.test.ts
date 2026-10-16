@@ -429,3 +429,13 @@ describe('🔴 絞り込みで 0 件のとき、外す道を出す(#536 ②)', (
     expect(clear(host), '当たっているのに「絞りを外す」が出た').toBeNull();
   });
 });
+
+describe('題名の無い連絡先(#1087)', () => {
+  it('🔴 題名が空でも、押せる字(他の面と同じ「(無題)」)で一覧に出る', () => {
+    const host = paint({ contactScan: scanOf([card('c1', '', ['090-1234-5678']), card('c2', '山田')]) } as Partial<AppState>);
+    const names = [...host.querySelectorAll('[data-pkc-field="contact-name"]')].map((e) => e.textContent);
+    expect(names).toContain('(無題)');
+    expect(names, '題名が在る人は今までどおり').toContain('山田');
+  });
+});
+

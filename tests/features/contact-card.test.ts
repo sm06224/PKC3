@@ -132,6 +132,20 @@ describe('押せる宛先にする(#278)', () => {
     expect(telHref('TEL: 03-1234-5678'), '頭の飾りは今までどおり読み飛ばす').toBe('tel:0312345678');
   });
 
+  it('🔴 閉じない括弧・番号の後ろの数字を番号に混ぜない(#1087)', () => {
+    const table: Array<[string, string]> = [
+      ['03-1234-5678 (9-18時)', 'tel:0312345678'],
+      ['0120-123-456 (24時間)', 'tel:0120123456'],
+      ['+81 (0) 90-1234-5678', 'tel:+819012345678'],
+      ['03-1234-5678 -123', 'tel:0312345678'],
+      ['(03) 1234-5678', 'tel:0312345678'],
+      ['03-1234-5678 (9-18', 'tel:0312345678'],
+      ['03-1234-5678(内線 123)', 'tel:0312345678'],
+      ['03-1234-5678 (携帯)', 'tel:0312345678'],
+    ];
+    for (const [raw, want] of table) expect(telHref(raw), raw).toBe(want);
+  });
+
   it('🔴 数字が 1 桁も無ければ押せない(押しても何も起きない口を作らない)', () => {
     expect(telHref('あとで聞く')).toBeNull();
     expect(telHref('')).toBeNull();
@@ -336,5 +350,24 @@ describe('メールの宛先に ? & # があるとき(#1087)', () => {
 
   it('⚠ 対照群 ── 普通の宛先は押せる', () => {
     expect(mailHref('a@example.com')).toBe('mailto:a@example.com');
+  });
+});
+
+describe('matchContact ── 電話は区切りと全角を無視して探す(#1087)', () => {
+  const c = (tels: string[]) => ({
+    lid: 'l', name: '山田', org: '', orgParts: [], tels, emails: [], birthday: '', overlong: false,
+  });
+  it('🔴 ハイフン無しの検索が、ハイフン付きの番号に当たる', () => {
+    expect(matchContact(c(['090-1111-2222']), '09011112222')).toBe(true);
+  });
+  it('🔴 ハイフン付きの検索が、ハイフン無しの番号に当たる', () => {
+    expect(matchContact(c(['09011112222']), '090-1111')).toBe(true);
+  });
+  it('🔴 全角の数字でも当たる', () => {
+    expect(matchContact(c(['09011112222']), '０９０')).toBe(true);
+  });
+  it('対照群 ── 無関係な数字は当たらない / 2 桁以下は数字だけの比較をしない', () => {
+    expect(matchContact(c(['090-1111-2222']), '080-3333')).toBe(false);
+    expect(matchContact(c(['090-1111-2222']), '8-9')).toBe(false);
   });
 });

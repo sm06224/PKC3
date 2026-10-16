@@ -3647,6 +3647,8 @@ export class DetailRenderer {
          *   押せる字にしない(押しても何も起きない dead click になる)。
          */
         interactiveSeek: playable,
+        // 🔴 読む面と同じ設定(#1087)── 添付の説明だけ電話番号が押せない字のままにしない
+        phoneLinks: appPhoneLinks.enabled(),
       });
       /**
        * 🔴 文書 globals(書字方向・既定の寄せ)を説明の器にも当てる(#106 /

@@ -208,4 +208,34 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     // 対照群:ほかの組み込みタイルには、この説明が付いていない
     expect(region.querySelector<HTMLElement>('[data-pkc-tile="builtin:manual"]')!.title).not.toContain('zip');
   });
+
+  /**
+   * 🔴 **左の絞り込み中も、PKC の右クリックメニューが出る**(#1087)。
+   * ⚠ 絞り込み中は掴ませない(`draggable` を付けない)ので、以前は `[draggable]` で探す右クリックの枝が外れ、
+   *   ブラウザのメニューが出ていた。開き方の 2 項目は出し、並べ替えの項目は(掴めないので)出さない。
+   */
+  it('🔴 絞り込み中でも、アプリのタイルに開き方の 2 項目が出る(並べ替えは出ない)', () => {
+    // 前提(対照群): 絞り込んでいないときは掴めて、並べ替えの項目も出る
+    expect(tileEl('a1').getAttribute('draggable')).toBe('true');
+    rightClick('a1');
+    expect(
+      root.querySelector('[data-pkc-region="context-menu"] [data-pkc-action="start-tile-reorder"]'),
+      '前提が崩れている(絞り込み前に並べ替えの項目が無い)',
+    ).not.toBeNull();
+    root.querySelector('[data-pkc-region="context-menu"]')?.remove();
+
+    d.dispatch({ type: 'SET_ENTRY_FILTER', query: '電卓' });
+    expect(tileEl('a1').hasAttribute('draggable'), '前提が崩れている(絞り込み中も掴める)').toBe(false);
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1, clientY: 1 });
+    tileEl('a1').dispatchEvent(ev);
+    expect(ev.defaultPrevented, 'ブラウザのメニューが出る(PKC のメニューに差し替わっていない)').toBe(true);
+    expect(menuItem('tab'), 'タブの項目が出ていない').not.toBeNull();
+    expect(menuItem('window'), '窓の項目が出ていない').not.toBeNull();
+    expect(
+      root.querySelectorAll('[data-pkc-region="context-menu"] [data-pkc-action]').length,
+      '開き方の 2 項目以外(並べ替え)が絞り込み中に出ている',
+    ).toBe(2);
+    menuItem('window')!.click();
+    expect(openTileAsCalls).toEqual([{ lid: 'a1', target: 'window' }]);
+  });
 });
