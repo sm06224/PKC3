@@ -140,6 +140,13 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
 
   if (q === null) return { kind: 'none' };
 
+  // ⚠ 引用の外で開いたコードの中の `> ` 行は引用ではない(`> echo` に `> ` を足さず、`>` だけの行も消さない)。
+  //   ⚠ 引用の中で開いたコード(`> ```` `)の中は、外側の引用を続ける ── 引用の行を伏せて、
+  //   それでもコードの中にいるか(= コードの開きが引用の外か)で見分ける
+  if (insideBlockCode(value, start) && insideBlockCode(unquotedPrefix(value, start), start)) {
+    return { kind: 'none' };
+  }
+
   // ⚠ 空の `> ` で Enter ── **抜ける**(記号を消して、普通の改行にする)
   if (q.rest.trim() === '') return { kind: 'exit', from: start, to: end, text: '' };
 
@@ -147,4 +154,13 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
   if (caret < start + q.marks.length) return { kind: 'none' };
 
   return { kind: 'continue', insert: `\n${q.marks}` };
+}
+
+/** `start` より前の、`>` で始まる行を空行にした写し(長さは変えない ── 位置をそのまま使える)。 */
+function unquotedPrefix(value: string, start: number): string {
+  return value
+    .slice(0, start)
+    .split('\n')
+    .map((l) => (/^\s*>/.test(l) ? ' '.repeat(l.length) : l))
+    .join('\n');
 }
