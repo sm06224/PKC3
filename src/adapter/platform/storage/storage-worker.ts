@@ -71,8 +71,9 @@ import { planSearch, toLikePattern } from '@features/filter/search-query';
 import {
   excerptAround,
   SNIPPET_ELLIPSIS,
-  SNIPPET_MARK_CLOSE,
-  SNIPPET_MARK_OPEN,
+  FTS_TMP_CLOSE,
+  FTS_TMP_OPEN,
+  sealFtsSnippet,
   SNIPPET_TOKENS,
 } from '@features/filter/search-snippet';
 import { countTaskCandidates } from '@features/markdown/task-count';
@@ -3498,14 +3499,18 @@ const handlers: Handlers = {
         [
           plan.match,
           req.cid,
-          SNIPPET_MARK_OPEN,
-          SNIPPET_MARK_CLOSE,
+          FTS_TMP_OPEN,
+          FTS_TMP_CLOSE,
           SNIPPET_ELLIPSIS,
           SNIPPET_TOKENS,
           limit + 1,
         ],
       ) as Array<{ lid: string; title: string; snippet: string; rank: number }>;
-      return { rows: rows.slice(0, limit), truncated: rows.length > limit };
+      // 🔴 本文の中の U+E000 / U+E001 を偽の当たりにしない(#1087)── 仮の印 → 本物の印
+      return {
+        rows: rows.slice(0, limit).map((r) => ({ ...r, snippet: sealFtsSnippet(r.snippet) })),
+        truncated: rows.length > limit,
+      };
     }
     /**
      * LIKE 側 ── 項ごとに `(title LIKE ? OR body LIKE ?)` を AND で並べ、除外は `NOT (…)`。

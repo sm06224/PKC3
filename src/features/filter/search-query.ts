@@ -158,3 +158,15 @@ export function planSearch(
   }
   return { kind: 'like-terms', include: terms.include, exclude: terms.exclude };
 }
+
+/**
+ * 探す面の結果が**関連の高い順**に並ぶか(#1087)。
+ *
+ * 🔑 並びを決めるのは worker の `searchDetail` で、**引き方(`planSearch`)が `fts` のときだけ**
+ * 関連度(bm25)で並べる。3 字未満の語が**除く語を含めて 1 つでも**混じれば全項を LIKE で引き、
+ * 関連度を持たない(ノートの並び順)。⚠ 描画器の見出しは**この 1 本**から言う ──
+ * 規則を描画器に書き写すと、worker の規則が変わったとき見出しが嘘になる。
+ */
+export function isRelevanceOrdered(query: string): boolean {
+  return planSearch(query, { syntax: 'query' }).kind === 'fts';
+}

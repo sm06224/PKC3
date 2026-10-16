@@ -23,6 +23,7 @@ import { isMarkdownFileName } from '@features/import/plain-markdown';
 import { isVcfFileName } from '@features/contact/vcard';
 import { isOfficeLaunchFile } from '@features/office/office-launch';
 import { humanBytes } from '@features/human-bytes';
+import { compareTitles } from '@features/filter/title-compare';
 import { formatDate } from '@features/datetime/datetime-format';
 import type { IconName } from '@features/icon/symbols';
 
@@ -106,10 +107,9 @@ export interface FolderEntry {
  * ⚠ 元の配列は触らない。⚠ 照合は大小を区別しない(`a.md` と `B.md` は a → B の順)。
  */
 export function sortFolderEntries<T extends FolderEntry>(entries: readonly T[]): T[] {
-  const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
   return [...entries].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
-    return collator.compare(a.name, b.name);
+    return compareTitles(a.name, b.name);
   });
 }
 

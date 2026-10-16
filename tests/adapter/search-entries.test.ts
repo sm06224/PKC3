@@ -17,6 +17,7 @@ import { createStorePort } from '../../src/adapter/platform/storage/store-port';
 import {
   SNIPPET_MARK_CLOSE,
   SNIPPET_MARK_OPEN,
+  splitSnippet,
   type SearchDetailRow,
 } from '../../src/features/filter/search-snippet';
 
@@ -323,6 +324,24 @@ describe('探す面の検索 searchDetail(#680)', () => {
     expect(rows.map((r) => r.lid), 'LIKE 側の並びが entry_order でない').toEqual(['b', 'a']);
     expect(rows[0]!.snippet, 'LIKE 側の抜粋に印が無い').toContain(marked('晴れ'));
     expect(rows[0]!.rank, 'LIKE 側は関連度を持たない').toBe(0);
+  });
+
+  /**
+   * 🔴 本文に印と同じ字(U+E000 / U+E001)が在っても、偽の当たりにしない(#1087)。
+   * 検索語は 3 字(FTS)と 2 字(LIKE)の両方の経路で見る。
+   */
+  it.each([
+    ['検索語ほげ', '検索語ほげ'],
+    ['ほげ', 'ほげ'],
+  ])('🔴 本文の私用領域の字は当たりに見えない(%s)', async (q, hit) => {
+    const lid = 'p' + q.length;
+    await putIn(lid, 'PUA' + q.length, `前 ${SNIPPET_MARK_OPEN}中${SNIPPET_MARK_CLOSE} 後 ${hit}の話`);
+    const { rows } = await detail(q);
+    const r = rows.find((x) => x.lid === lid);
+    expect(r, '前提: 行が出ない').toBeDefined();
+    const parts = splitSnippet(r!.snippet);
+    expect(parts.filter((p) => p.hit).map((p) => p.text), '「中」が偽の当たりになった').toEqual([q]);
+    expect(r!.snippet.split(SNIPPET_MARK_OPEN).length - 1, '印が本文の分だけ増えている').toBe(1);
   });
 
   it('🔴 ゴミ箱の中は返さない(行を押すと開くので、一覧に無い物を出さない)', async () => {
