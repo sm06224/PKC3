@@ -34,6 +34,9 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 export class PaneVisibilityStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: PaneId[] = [];
+
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
   /** 🔴 この窓の畳みを端末の記録から切り離したか(下の `sessionOnly`)。 */
   private detached = false;
   /**
@@ -78,7 +81,7 @@ export class PaneVisibilityStore {
      *   を返すので、`catch` の控えへ 1 度も入らなかった ── 私用ウィンドウでは
      *   **畳んでも次の描画で戻る**(無言の dead click)。
      */
-    if (this.storage === null) return this.fallback;
+    if (this.storage === null || this.saveFailed) return this.fallback;
     try {
       return decodeHidden(this.storage.getItem(KEY));
     } catch {
@@ -118,9 +121,12 @@ export class PaneVisibilityStore {
     const next = decodeHidden(encodeHidden(record));
     this.fallback = next;
     if (!this.detached) {
+      this.saveFailed = false;
       try {
         this.storage?.setItem(KEY, encodeHidden(next));
       } catch {
+        // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+        this.saveFailed = true;
         // 保存できないだけ ── この session では効いている
       }
     }

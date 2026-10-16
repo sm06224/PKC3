@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decodePaneSizes,
+  isPaneSizes,
   encodePaneSizes,
   nudgeOutcome,
   PANE_SIZE_SPECS,
@@ -109,6 +110,20 @@ describe('保存の形(#497)', () => {
     expect(decodePaneSizes('')).toEqual({});
     expect(decodePaneSizes(null)).toEqual({});
     expect(decodePaneSizes('sidebar')).toEqual({});
+  });
+
+  it('🔴 下限を割った保存は捨てる(5px の左の列・0px の右の列にならない)・下限ちょうどは受ける(#1087 D7)', () => {
+    for (const id of SIZED_PANES) {
+      const min = PANE_SIZE_SPECS[id].min;
+      expect(decodePaneSizes(`${id}:${min - 1}`), `${id}: 下限未満を受けている`).toEqual({});
+      expect(decodePaneSizes(`${id}:${min}`), `${id}: 下限ちょうどを捨てている`).toEqual({ [id]: min });
+      expect(isPaneSizes(`${id}:${min - 1}`), `${id}: 設定ファイルの下見が下限未満を通す`).toBe(false);
+      expect(isPaneSizes(`${id}:${min}`)).toBe(true);
+    }
+    expect(decodePaneSizes('sidebar:5')).toEqual({});
+    expect(decodePaneSizes('inspector:0.4')).toEqual({});
+    // 対照群: 1 面が下限未満でも、ほかの面は生きる
+    expect(decodePaneSizes('sidebar:5 inspector:300')).toEqual({ inspector: 300 });
   });
 
   it('上限を超えた保存は丸める(手で書き換えた file でも壊れない)', () => {

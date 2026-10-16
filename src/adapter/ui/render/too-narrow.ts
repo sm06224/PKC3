@@ -96,6 +96,9 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 export class TooNarrowOkStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback = true;
+
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
   private subs: Array<() => void> = [];
 
   constructor(
@@ -109,7 +112,7 @@ export class TooNarrowOkStore {
    */
   enabled(): boolean {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       const raw = this.storage.getItem(KEY);
       return raw === null ? this.fallback : raw !== '1';
     } catch {
@@ -119,9 +122,12 @@ export class TooNarrowOkStore {
 
   setEnabled(on: boolean): void {
     this.fallback = on;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, on ? '0' : '1');
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている(控えが持つ)
     }
     for (const fn of [...this.subs]) fn();

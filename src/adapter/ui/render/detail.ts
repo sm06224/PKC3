@@ -2248,7 +2248,15 @@ export class DetailRenderer {
           retry.setAttribute('data-pkc-action', 'retry-persist');
           retry.textContent = 'ノートを保存し直す';
           this.barButton = retry;
-          bar.append(this.barButton);
+          // 🔴 **保存できなかった本文を、外へ持ち出す道を残す**(#1087 D3)── 容量不足で保存し直しが
+          //   通らない間も、開いている本文(未保存の commit 済み)をコピーできる。
+          //   ボタンは「edit」の帯と同じ口(`copy-note-md` / `copy-note-rich`)で、受け手も同じ。
+          const md = iconButton('copy-note-md', 'Markdown をコピー');
+          md.title = '本文の原文(Markdown)をそのままコピーします';
+          const rich = iconButton('copy-note-rich', '書式付きでコピー');
+          rich.title = '見た目(HTML 書式)ごとコピーします。Word などに貼れます';
+          this.barCopy = null;
+          bar.append(this.barButton, md, rich);
         }
         slot.append(bar);
       }

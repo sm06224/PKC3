@@ -36,6 +36,9 @@ export class QueryKeyStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: string | null = null;
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<
       Storage,
@@ -45,7 +48,7 @@ export class QueryKeyStore {
 
   get(): string | null {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       const raw = this.storage.getItem(KEY);
       if (raw === null || !isQueryKeyValue(raw)) return null;
       return raw;
@@ -57,10 +60,13 @@ export class QueryKeyStore {
   /** ⚠ `null` は**消す**(空文字を書いて「空という選択」を作らない)。 */
   set(key: string | null): void {
     this.fallback = key !== null && key.length <= MAX_CHARS ? key : null;
+    this.saveFailed = false;
     try {
       if (this.fallback === null) this.storage?.removeItem(KEY);
       else this.storage?.setItem(KEY, this.fallback);
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       /* 保存できない環境 ── この session の控えだけで動く */
     }
   }

@@ -16,6 +16,7 @@ import {
   QUOTA_RECHECK_WRITES,
   WRITE_FLOOR_BYTES,
   WRITE_QUOTA_REFUSAL,
+  WRITE_QUOTA_REFUSAL_BODY_SAVE,
   refuseWrite,
   shouldRecheck,
 } from '../../src/features/storage/write-quota';
@@ -125,13 +126,27 @@ describe('測り直す間隔(#971 段②)', () => {
 });
 
 describe('断り文(#971 段②)', () => {
-  it('🔴 嘘を言わない: 「消す操作は止めていない」と言い切らず、先にタブの外で空きを作ることと保存し直しが先であることを言う', () => {
-    expect(WRITE_QUOTA_REFUSAL, '保存失敗の直後は整理が断られるのに、消せると言い切っている').not.toContain(
-      '消す操作は止めていません',
-    );
-    expect(WRITE_QUOTA_REFUSAL, 'タブの外で空きを作ることを言っていない').toContain('このタブの外');
-    expect(WRITE_QUOTA_REFUSAL, '保存し直しが先であることを言っていない').toContain('「ノートを保存し直す」を押してください(押すまでは');
-    expect(WRITE_QUOTA_REFUSAL, '次の一手が無い').toMatch(/容量の内訳|添付を消す/);
+  it('🔴 嘘を言わない: 「消す操作は止めていない」と言い切らず、先にタブの外で空きを作ることを言う', () => {
+    for (const t of [WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE]) {
+      expect(t, '保存失敗の直後は整理が断られるのに、消せると言い切っている').not.toContain('消す操作は止めていません');
+      expect(t, 'タブの外で空きを作ることを言っていない').toContain('このタブの外');
+      expect(t, '次の一手が無い').toMatch(/容量の内訳|添付を消す/);
+    }
+  });
+
+  it('🔴 順番(#1087 D4): 本文の保存の失敗では 空きを作る → 保存し直す → 整理 の順に言う', () => {
+    const t = WRITE_QUOTA_REFUSAL_BODY_SAVE;
+    const outside = t.indexOf('このタブの外');
+    const retry = t.indexOf('「ノートを保存し直す」を押してください');
+    const tidy = t.indexOf('「使われていない添付を消す」');
+    expect(outside, '空きを作る先が無い').toBeGreaterThanOrEqual(0);
+    expect(retry, '保存し直しが無い').toBeGreaterThan(outside);
+    expect(tidy, '整理が保存し直しより先 / 無い(押すまで整理は始められない)').toBeGreaterThan(retry);
+  });
+
+  it('🔴 どの op でも同じ字(worker の断り)は、本文の保存にしか無いボタンを案内しない(#1087 D4)', () => {
+    expect(WRITE_QUOTA_REFUSAL, '添付などの失敗にも出る字が、無いボタンを押させている').not.toContain('ノートを保存し直す');
+    expect(WRITE_QUOTA_REFUSAL).toContain('使われていない添付を消す');
   });
 
   it('⚠ 記法を書かない(素のテキストとして出る面がある)', () => {

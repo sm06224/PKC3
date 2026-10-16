@@ -112,6 +112,16 @@ export function encodePaneSizes(sizes: PaneSizes): string {
 }
 
 /**
+ * 🔴 **保存の値として受ける大きさか**(#1087 D7)── 有限で、**その面の下限以上**。
+ * ⚠ 下限を割った値は捨てる(`sidebar:5` が 5px の左の列に、`inspector:0.4` が 0px になるのを防ぐ)。
+ *   下限を割った操作は「畳む」で、大きさは**書かずに**前の値を覚えたまま(`resizeOutcome`)── 保存に来ない値である。
+ * 🔑 下限は `PANE_SIZE_SPECS` の `min`(掴み・鍵と同じ定数)── 2 つ目の表を持たない。
+ */
+function isStoredPaneSize(id: SizedPaneId, px: number): boolean {
+  return Number.isFinite(px) && px >= PANE_SIZE_SPECS[id].min;
+}
+
+/**
  * 保存の字がペインの幅として読めるか(設定ファイルの下見用 ── `decodePaneSizes` と同じ読み方)。
  * ⚠ 1 つでも `名前:正の数` に読めない部分が在る字は読めない扱い(`decodePaneSizes` は黙って捨てる)。
  */
@@ -121,13 +131,12 @@ export function isPaneSizes(raw: string): boolean {
   return parts.every((part) => {
     const at = part.indexOf(':');
     if (at < 0 || !isSizedPaneId(part.slice(0, at))) return false;
-    const px = Number(part.slice(at + 1));
-    return Number.isFinite(px) && px > 0;
+    return isStoredPaneSize(part.slice(0, at) as SizedPaneId, Number(part.slice(at + 1)));
   });
 }
 
 /**
- * ⚠ 知らない名前・数でない値・0 以下は**捨てる** ── 面の名前が変わった後の
+ * ⚠ 知らない名前・数でない値・下限を割る値(0 以下を含む)は**捨てる** ── 面の名前が変わった後の
  * 古い保存で画面が壊れない(`decodeHidden` と同じ向き)。
  */
 export function decodePaneSizes(raw: string | null | undefined): PaneSizes {
@@ -139,7 +148,7 @@ export function decodePaneSizes(raw: string | null | undefined): PaneSizes {
     const id = part.slice(0, at);
     if (!isSizedPaneId(id)) continue;
     const px = Number(part.slice(at + 1));
-    if (!Number.isFinite(px) || px <= 0) continue;
+    if (!isStoredPaneSize(id, px)) continue;
     out[id] = roundPaneSize(id, px);
   }
   return out;

@@ -21,6 +21,9 @@ export class EditorModeStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: EditorMode = DEFAULT_EDITOR_MODE;
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
@@ -33,7 +36,7 @@ export class EditorModeStore {
    */
   getMode(): EditorMode {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       const v = this.storage.getItem(KEY);
       if (v !== null && v !== undefined && isEditorMode(v)) return v;
       return DEFAULT_EDITOR_MODE;
@@ -46,9 +49,12 @@ export class EditorModeStore {
   setMode(mode: string): boolean {
     if (!isEditorMode(mode) || mode === this.getMode()) return false;
     this.fallback = mode;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, mode);
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている(fallback が持つ)
     }
     return true;

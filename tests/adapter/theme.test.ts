@@ -115,6 +115,30 @@ describe('🔴 「OS に合わせる」(#1386)', () => {
     expect(html()).toBe('dracula');
   });
 
+  it('🔴 保存が容量不足で書けなくても、選んだ配色のまま OS の切り替えに上書きされない(#1087 D2)', () => {
+    const os = fakeMatchMedia(false);
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    try {
+      // 前提: 保存が本当に落ちる(落ちなければ、この test は何も見ていない)
+      expect(() => localStorage.setItem(KEY, 'x'), '前提が崩れている(setItem が落ちない)').toThrow();
+      chooseTheme(document.documentElement, 'dracula');
+      expect(localStorage.getItem(KEY), '前提が崩れている(保存されている)').toBeNull();
+      expect(html()).toBe('dracula');
+      // 選び方は選んだ値のまま(設定画面の選択欄もここを読む)── 保存を読み直して auto に戻らない
+      expect(readThemeChoice()).toBe('dracula');
+      expect(os.listeners.size).toBe(0);
+      os.setOs(true);
+      expect(html()).toBe('dracula');
+    } finally {
+      spy.mockRestore();
+      // 次に保存できたら保存が正本へ戻る(module の控えを残さない)
+      chooseTheme(document.documentElement, 'auto');
+    }
+    expect(readThemeChoice()).toBe('auto');
+  });
+
   it('auto を繰り返し選んでも listener は 1 つしか増えない / 起動時の syncThemeFollow も同じ', () => {
     const os = fakeMatchMedia(false);
     chooseTheme(document.documentElement, 'auto');

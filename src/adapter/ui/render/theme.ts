@@ -99,18 +99,25 @@ function readStored(): ThemeChoice | null {
  * 追従する**ことだけである(選んでいない人の見え方は、起動時点では 1 バイトも変わらない)。
  */
 export function readThemeChoice(): ThemeChoice {
-  return readStored() ?? THEME_AUTO;
+  // 🔴 保存に失敗した選択(容量不足など)は、次に保存できるまで**選んだ値のまま**返す(#1087 D2)。
+  //   保存を読み直すと「OS に合わせる」へ戻り、OS の明暗の切り替えが選んだ配色を上書きする
+  return unsavedChoice ?? readStored() ?? THEME_AUTO;
 }
 
 function osPrefersDark(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
+/** 保存に失敗した選択(この session では効いている)。保存できたら null。 */
+let unsavedChoice: ThemeChoice | null = null;
+
 function write(theme: ThemeChoice): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
+    unsavedChoice = null;
   } catch {
-    // 保存できないだけ。この session では効いている
+    // 保存できないだけ。この session では効いている ── 読みは選んだ値を返す
+    unsavedChoice = theme;
   }
 }
 
@@ -216,6 +223,8 @@ export function watchThemeFromOtherWindows(
     const key = (ev as StorageEvent).key;
     // ⚠ `key === null` は「全消し」(`localStorage.clear()`)── 既定へ戻るので、これも当て直す
     if (key !== null && key !== THEME_STORAGE_KEY) return;
+    // 別の窓が保存できた ── 保存が正本に戻る
+    unsavedChoice = null;
     applyTheme(target, resolveTheme(readThemeChoice(), osPrefersDark()));
     syncThemeFollow(target);
   };

@@ -29,6 +29,9 @@ export class GroupFoldStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: FoldedGroups = [];
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
@@ -36,7 +39,7 @@ export class GroupFoldStore {
   /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
   get(): FoldedGroups {
     // 🔴 `null` は例外にならない ── 先に見る(上の docstring)
-    if (this.storage === null) return this.fallback;
+    if (this.storage === null || this.saveFailed) return this.fallback;
     try {
       return decodeFolded(this.storage.getItem(KEY));
     } catch {
@@ -56,9 +59,12 @@ export class GroupFoldStore {
   /** ⚠ 書く口は 1 つ ── 控えの更新を書き手ごとに繰り返さない(片方だけ忘れる形を作らない)。 */
   private write(next: FoldedGroups): FoldedGroups {
     this.fallback = next;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, encodeFolded(next));
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている
     }
     return next;

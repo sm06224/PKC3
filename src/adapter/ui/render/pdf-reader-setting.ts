@@ -25,6 +25,9 @@ export class PdfReaderStore {
   /** 保存が読めない環境の控え(この session では効いている)。既定は「切」。 */
   private fallback = false;
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
@@ -32,7 +35,7 @@ export class PdfReaderStore {
   /** ⚠ **読むたびに保存を見る**(別のタブの変更に追随する。他の入切と同じ理由)。 */
   enabled(): boolean {
     // 🔴 保存が無い環境では控えを読む(`?.` では `catch` に入らない)
-    if (this.storage === null) return this.fallback;
+    if (this.storage === null || this.saveFailed) return this.fallback;
     try {
       return this.storage.getItem(KEY) === '1';
     } catch {
@@ -42,9 +45,12 @@ export class PdfReaderStore {
 
   setEnabled(on: boolean): void {
     this.fallback = on;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, on ? '1' : '0');
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている(控えが持つ)
     }
   }

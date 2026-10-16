@@ -31,6 +31,9 @@ export class PaneSizeStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: PaneSizes = {};
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
@@ -38,7 +41,7 @@ export class PaneSizeStore {
   /** ⚠ 読むたびに保存を見る(書き手が複数 ── UI と smoke の仕込み)。 */
   get(): PaneSizes {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       return decodePaneSizes(this.storage.getItem(KEY));
     } catch {
       return this.fallback;
@@ -48,9 +51,12 @@ export class PaneSizeStore {
   set(id: SizedPaneId, px: number): PaneSizes {
     const next: PaneSizes = { ...this.get(), [id]: roundPaneSize(id, px) };
     this.fallback = next;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, encodePaneSizes(next));
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている
     }
     return next;
