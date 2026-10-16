@@ -66,9 +66,12 @@ export const SQL_EMBED_FETCH_ROWS = 1000;
 export const SQL_EMBED_TRUNCATED_HINT = '。全部は SQL で調べる画面か、ノートへ書き出すと見られます';
 /**
  * 引けなかったときの案内(画面だけ。Gemini 依頼 63-4)。
- * ⚠ `Alt + 7` は `keymap.ts` の `view-sql` の既定割当(`Alt+7`)。割当を変えた人には外れるが、既定を言う。
+ * 🔴 キーの綴りは**呼び手が渡す**(#1087 K5)── 固定の `Alt + 7` は、割当を変えた人にも Mac(⌥)にも外れる。
+ *   `view-sql` のいまの割当は描く側(`sql-embed-hydrate.ts`)が `chordHint` で引く。渡されなければキーは言わない。
  */
-export const SQL_EMBED_FAILED_HINT = '。SQL で調べる画面(Alt + 7)で試せます';
+export function sqlEmbedFailedHint(keyHint: string | null = null): string {
+  return keyHint === null ? '。SQL で調べる画面で試せます' : `。SQL で調べる画面(${keyHint})で試せます`;
+}
 /**
  * 時間の天井(ms)。⚠ 別窓(follower)は本体タブへの依頼を 10 秒で諦める
  * (`SQL_MAX_MS` の注記)── それより**ずっと手前**で止める。
@@ -195,8 +198,8 @@ export function sqlEmbedPendingHtml(): string {
  * 引けなかったときの 1 行(原文のコード枠はそのまま残る)。
  * @param interactive 画面のとき `true`(試せる場所を添える)。書き出しは `false`(その画面が無い)
  */
-export function sqlEmbedFailureHtml(why: string, interactive = false): string {
-  const hint = interactive ? SQL_EMBED_FAILED_HINT : '';
+export function sqlEmbedFailureHtml(why: string, interactive = false, viewKeyHint: string | null = null): string {
+  const hint = interactive ? sqlEmbedFailedHint(viewKeyHint) : '';
   return `<p data-pkc-field="${SQL_EMBED_NOTE_FIELD}">${escapeSqlEmbedHtml(`SQL を実行できませんでした: ${why}${hint}`)}</p>`;
 }
 

@@ -508,7 +508,10 @@ export class HelpRenderer {
     });
     find.addEventListener('keydown', (ev) => {
       // ⚠ 面の鍵へ漏らさない ── ここは字を打つ欄である
-      if ((ev as KeyboardEvent).key !== 'Escape') return;
+      const ke = ev as KeyboardEvent;
+      if (ke.key !== 'Escape') return;
+      // 🔴 変換中の Esc は IME のもの(変換を取り消す)── 打った字を消さない(#1087 K7。Safari は確定の打鍵が keyCode 229 で届く)
+      if (ke.isComposing || ke.keyCode === 229) return;
       find.value = '';
       this.syncFind('');
     });

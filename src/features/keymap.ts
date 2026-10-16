@@ -341,8 +341,8 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    *   横に長く、これ以上ボタンを増やせない(#766 D-3 を退けた理由)。
    * ⚠ 既定の鍵は**空にできない**(この表の規則)── `Alt+Shift+C`(Calc)は
    *   他のどの既定とも重ならず、ブラウザも取らない。
-   * ⚠ `note` に**打ち方**を書く ── 一覧は `label` と `note` の両方を見るので、
-   *   「けいさん」でも「2+3=」でも当たる。
+   * ⚠ `note` に**打ち方**を書き、`alias`(画面に出ない)に「けいさん」を置く ── 一覧は
+   *   `label` / `note` / `alias` を見るので、「けいさん」でも「2+3=」でも当たる(かな・カナの揺れは一覧側で均す)。
    */
   {
     id: 'inline-calc',
@@ -350,6 +350,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     contexts: ['editor', 'row'],
     defaults: ['Alt+Shift+C'],
     whileTyping: true,
+    alias: 'けいさん',
     note: 'いまカーソルのある行を計算して、行の終わりに計算結果を入れます(本文では 2+3= のように = を最後に打って Enter でも計算します)',
   },
   /**

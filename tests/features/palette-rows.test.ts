@@ -349,3 +349,22 @@ describe('🔴 画面の名前を探し語にしても当たる(#1087 の見直�
     expect(idsOf('設定')).not.toContain('open-flags');
   });
 });
+
+describe('🔴 かな・カナ・全角半角の揺れでも当たる(#1087 K2)', () => {
+  it('🔴 「のーと」「ﾉｰﾄ」は「ノート」と、「ＳＱＬ」は「sql」と同じ行を出す', () => {
+    const noto = idsOf('ノート');
+    expect(noto.length, '前提: 「ノート」で 1 行も出ない').toBeGreaterThan(0);
+    expect(idsOf('のーと'), 'ひらがなで探すと違う行になる').toEqual(noto);
+    expect(idsOf('ﾉｰﾄ'), '半角カナで探すと違う行になる').toEqual(noto);
+    const sql = idsOf('sql');
+    expect(sql.length, '前提: 「sql」で 1 行も出ない').toBeGreaterThan(0);
+    expect(idsOf('ＳＱＬ'), '全角英字で探すと違う行になる').toEqual(sql);
+    // 対照群: 揺れを均しても、何にでも当たってはいない
+    expect(noto.length).toBeLessThan(KEY_COMMANDS.length);
+  });
+
+  it('🔴 「けいさん」で「この行を計算する」が当たる(keymap の注釈が言っていること)', () => {
+    expect(idsOf('けいさん')).toContain('inline-calc');
+    expect(idsOf('ｹｲｻﾝ')).toContain('inline-calc');
+  });
+});

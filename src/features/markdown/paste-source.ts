@@ -36,7 +36,7 @@
  * (CLAUDE.md §7)。
  */
 
-
+import { chordLabel, isMac } from '../keymap';
 
 /**
  * 設定の 4 択。⚠ **flag ではない**(flag 枠 15 とは別)── これは user の判断である。
@@ -137,8 +137,10 @@ export function describePaste(a: PasteAttempt): string {
  *   「コピーした物」より先にブラウザが受ける ── マニュアルの近道の表)。
  * ⚠ メッセージは 80 字で切られる(`sanitizeMessageText`)── 超えない長さに保つ(test が見る)。
  */
-export const PASTE_CONVERTED_MESSAGE =
-  'Web などの書式つきの字を Markdown に直して貼りました(戻す: Ctrl+Z / 書式なしで貼る: Ctrl+Shift+V)';
+export function pasteConvertedMessage(mac: boolean = isMac()): string {
+  // 🔴 綴りは `chordLabel`(#1087 K5)── 固定の `Ctrl+Z` は Mac で効かないキーを案内する。どちらもブラウザ自身のキーで割当を変えられない
+  return `Web などの書式つきの字を Markdown に直して貼りました(戻す: ${chordLabel('Mod+Z', mac)} / 書式なしで貼る: ${chordLabel('Mod+Shift+V', mac)})`;
+}
 
 /** 続けて貼ったとき、この間隔(ミリ秒)以内は 1 件に束ねる。 */
 export const PASTE_MESSAGE_COALESCE_MS = 5000;

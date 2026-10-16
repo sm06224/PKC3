@@ -44,6 +44,7 @@ import {
 } from '@features/markdown/sql-embed';
 import { copyButtonHtml } from '@features/markdown/markdown-render';
 import { watchVisible, type VisibleWatch } from './visible-watch';
+import { chordHint } from './shortcut-hint';
 
 /** 引く口(`runReadOnlySql` と同じ形)。⚠ `guest` は無い ── 相手はこの PKC だけ。 */
 export type SqlEmbedRunner = (
@@ -235,7 +236,7 @@ export class SqlEmbedHydrator {
           return;
         }
         this.pendingLine.delete(host);
-        host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e), true);
+        host.innerHTML = sqlEmbedFailureHtml(e instanceof Error ? e.message : String(e), true, chordHint('view-sql'));
         host.setAttribute('data-pkc-sql-embed-state', 'failed');
       },
     );

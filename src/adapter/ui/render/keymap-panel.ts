@@ -56,6 +56,8 @@ interface Row {
   readonly chords: HTMLElement;
   /** 断り文・案内。 */
   readonly note: HTMLElement;
+  /** 🔴 保存されているのに使っていない鍵の 1 行(#1087 K3)。無ければ空。 */
+  readonly unusable: HTMLElement;
   /** 「既定に戻す」。⚠ 既定のままなら押せない(押しても何も起きないボタンを出さない)。 */
   readonly reset: HTMLButtonElement;
   readonly assign: HTMLButtonElement;
@@ -139,6 +141,8 @@ export function buildKeymapPanel(
       const note = doc.createElement('p');
       note.setAttribute('data-pkc-field', 'settings-note');
       note.textContent = cmd.note ?? '';
+      const unusable = doc.createElement('p');
+      unusable.setAttribute('data-pkc-field', 'keymap-unusable');
 
       assign.addEventListener('click', () => {
         startCapture(cmd.id);
@@ -159,13 +163,24 @@ export function buildKeymapPanel(
         sync();
       });
       reset.addEventListener('click', () => {
+        // 🔴 戻せない鍵(別の操作が使っている)を言う(#1087 K4)── 黙って向こうの割当を奪わない
+        const held = store.resetConflicts(cmd.id);
+        const saved = store.resetCommand(cmd.id);
         // ⚠ 保存の後で sync が note を戻すので、書くのは呼んだ後
-        if (!store.resetCommand(cmd.id)) note.textContent = `既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`;
+        const lines: string[] = [];
+        for (const h of held) {
+          const other = KEY_COMMANDS.find((c) => c.id === h.withCommandId);
+          lines.push(
+            `${chordLabel(h.chord)} は戻していません: 「${other?.label ?? h.withCommandId}」に割り当て済みです。先にそちらの × で外してください`,
+          );
+        }
+        if (!saved) lines.push(`既定に戻しました。${SETTINGS_NOT_PERSISTED_TEXT}`);
+        if (lines.length > 0) note.textContent = lines.join(' ');
       });
 
-      dd.append(chords, assign, reset, note);
+      dd.append(chords, assign, reset, note, unusable);
       dl.append(dt, dd);
-      rows.set(cmd.id, { commandId: cmd.id, chords, note, reset, assign });
+      rows.set(cmd.id, { commandId: cmd.id, chords, note, unusable, reset, assign });
     }
   }
   root.append(dl);
@@ -231,6 +246,7 @@ export function buildKeymapPanel(
 
   function sync(): void {
     const bindings = store.getBindings();
+    const unusableAll = store.getUnusable();
     // ⚠ 1 つも変えていなければ「すべて既定に戻す」も押せない(行ごとの「既定に戻す」と同じ。#1087 の見直し 2026-10-13)
     const untouched = Object.keys(store.getOverrides()).length === 0;
     if (resetAll.disabled !== untouched) resetAll.disabled = untouched;
@@ -274,6 +290,13 @@ export function buildKeymapPanel(
       else row.assign.removeAttribute('data-pkc-capturing');
       // ⚠ 捕まえていない行は、コマンドの説明へ戻す(前の断り文を残さない)
       if (!active) row.note.textContent = cmd.note ?? '';
+      // 🔴 保存されているのに使っていない鍵を、その操作の行で言う(#1087 K3)── 言わないと「割当なし」とだけ見えて理由が分からない。
+      //    理由の字は割り当てるときの断り文(`validateBinding`)と同じ
+      row.unusable.textContent = unusableAll
+        .filter((u) => u.commandId === cmd.id)
+        .map((u) => `保存されている ${chordLabel(u.chord)} は使っていません: ${u.problem.message}`)
+        .join(' ');
+      row.unusable.hidden = row.unusable.textContent === '';
     }
   }
 

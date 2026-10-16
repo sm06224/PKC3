@@ -593,6 +593,18 @@ describe('SQL を調べる面(#681 段②)', () => {
     expect(runReadOnlySql, 'mac の Command+Enter で走らない').toHaveBeenCalledTimes(2);
   });
 
+  it('🔴 実行ボタンの説明は OS のキーの綴りで言う(Mac で Ctrl を案内しない。#1087 K5)', () => {
+    const spy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    try {
+      const { runBtn } = setup();
+      expect(runBtn.title).toContain('⌘ + Enter');
+      expect(runBtn.title, 'Mac で効かない Ctrl を案内している').not.toContain('Ctrl');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(setup().runBtn.title).toContain('Ctrl + Enter');
+  });
+
   it('🔴 答えは表になる ── null は印つき、HTML は注入しない', async () => {
     const { type, runBtn, heads, cells, note, pane } = setup(async () =>
       answer(['title', 'n'], [['<b>太字</b>', null]], { ms: 7 }),

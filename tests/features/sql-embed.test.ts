@@ -233,9 +233,14 @@ describe('答えの表(sqlEmbedAnswerHtml)', () => {
     expect(d.textContent, '書き出した HTML に無い画面を指している').not.toContain('SQL で調べる画面');
   });
 
-  it('引けなかった 1 行は、画面のときだけ「SQL で調べる画面(Alt + 7)」を添える', () => {
-    expect(parse(sqlEmbedFailureHtml('boom', true)).textContent).toBe(
+  it('引けなかった 1 行は、画面のときだけ「SQL で調べる画面」を、いまの割当のキーつきで添える', () => {
+    expect(parse(sqlEmbedFailureHtml('boom', true, 'Alt + 7')).textContent).toBe(
       'SQL を実行できませんでした: boom。SQL で調べる画面(Alt + 7)で試せます',
+    );
+    // 🔴 キーは固定の字ではなく渡された物(割当を変えた人・Mac に外れない。#1087 K5)
+    expect(parse(sqlEmbedFailureHtml('boom', true, '⌥ + 9')).textContent).toContain('(⌥ + 9)');
+    expect(parse(sqlEmbedFailureHtml('boom', true)).textContent, '割当が無いときは括弧ごと出さない').toBe(
+      'SQL を実行できませんでした: boom。SQL で調べる画面で試せます',
     );
     expect(parse(sqlEmbedFailureHtml('boom')).textContent, '書き出しには画面が無い').toBe(
       'SQL を実行できませんでした: boom',

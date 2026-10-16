@@ -26,6 +26,7 @@ import { schemaRouteOf, type AppState, type SqlPageState } from '@adapter/state/
 import { DEFAULT_IDLE_SEC } from '@adapter/platform/duckdb/duckdb-lease';
 import { sqlSourcesOf } from '@features/query/sqlite-attachment';
 import { sqlLineHtml } from '@features/query/sql-lines';
+import { chordLabel } from '@features/keymap';
 import { erArrowTarget, paintSqlEr, type ErSizeMemory } from './sql-er';
 import {
   duckDbOnlySourcesOf,
@@ -258,7 +259,8 @@ export class SqlRenderer {
     run.setAttribute('data-pkc-field', 'sql-run');
     run.textContent = 'SQL を実行';
     // 🔑 近道も出す(打ち終わって手を動かさずに走らせられる)
-    run.title = 'Ctrl+Enter でも実行できます';
+    // ⚠ 綴りは `chordLabel` ── Mac では ⌘ と言う(固定の字だと Mac で効かない Ctrl を案内する。#1087 K5)
+    run.title = `${chordLabel('Mod+Enter')} でも実行できます`;
     /**
      * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
      * ⚠ 窓を閉じれば答えは消えるので、**残す道が要る** ── 無いと

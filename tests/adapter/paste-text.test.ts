@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/binder';
 import {
-  PASTE_CONVERTED_MESSAGE,
+  pasteConvertedMessage,
   PASTE_MESSAGE_COALESCE_MS,
 } from '../../src/features/markdown/paste-source';
 
@@ -683,12 +683,16 @@ describe('貼付の変換をメッセージに残す', () => {
     });
     ta.dispatchEvent(pasteEvent(html));
     expect(ta.value, '変換が走っていない').toBe('## 秘密の見出し\n\n秘密の本文');
-    expect(left).toEqual([{ kind: 'result', source: '貼り付け', text: PASTE_CONVERTED_MESSAGE }]);
+    expect(left).toEqual([{ kind: 'result', source: '貼り付け', text: pasteConvertedMessage() }]);
     expect(JSON.stringify(left), '貼った中身が漏れている').not.toContain('秘密');
     expect(notices, '画面下の 1 行に出している(割り込む)').toEqual([]);
-    expect(PASTE_CONVERTED_MESSAGE).toContain('Ctrl+Z');
-    expect(PASTE_CONVERTED_MESSAGE).toContain('Ctrl+Shift+V');
-    expect(PASTE_CONVERTED_MESSAGE.length, '80 字で切られると戻し方が欠ける').toBeLessThanOrEqual(80);
+    // 🔴 キーの綴りは OS で変わる(#1087 K5)── Mac では Ctrl を案内しない
+    expect(pasteConvertedMessage(false)).toContain('Ctrl + Z');
+    expect(pasteConvertedMessage(false)).toContain('Ctrl + Shift + V');
+    expect(pasteConvertedMessage(true), 'Mac で Ctrl を案内している').not.toContain('Ctrl');
+    expect(pasteConvertedMessage(true)).toContain('⌘ + Z');
+    expect(pasteConvertedMessage(false).length, '80 字で切られると戻し方が欠ける').toBeLessThanOrEqual(80);
+    expect(pasteConvertedMessage(true).length, '80 字で切られると戻し方が欠ける').toBeLessThanOrEqual(80);
   });
 
   it('🔴 リッチテキスト(RTF)から直したときも 1 件', () => {
