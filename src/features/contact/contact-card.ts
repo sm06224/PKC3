@@ -24,6 +24,7 @@
  * 返すのは連絡の手段だけである(舐めるのは worker、渡るのは項目だけ)。
  */
 import { frontmatterLineCount, parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
+import { compareTitles } from '../filter/title-compare';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く ──
@@ -302,10 +303,10 @@ export function matchContact(card: ContactCard, query: string): boolean {
  *   🔑 揃っていることのほうが、どちらが「正しい順」かより効く。
  */
 export function sortContacts(cards: readonly ContactCard[]): ContactCard[] {
+  // 🔑 一覧の題名順と同じ比べ方(`compareTitles`)── 面によって順が違わない(#1087)
   return [...cards].sort((a, b) => {
-    const ka = a.name.toLowerCase();
-    const kb = b.name.toLowerCase();
-    if (ka !== kb) return ka < kb ? -1 : 1;
+    const byName = compareTitles(a.name, b.name);
+    if (byName !== 0) return byName;
     return a.lid < b.lid ? -1 : a.lid > b.lid ? 1 : 0;
   });
 }
