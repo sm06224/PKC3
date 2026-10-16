@@ -1,5 +1,6 @@
 import { lineStart } from './line-start';
-import { LIST_LEAD, THEMATIC_BREAK, advanceFence } from './list-renumber';
+import { insideBlockCode } from './code-context';
+import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 
 /**
  * 🔴 **引用(`>`)を書き続けられるようにする**(#396、PKC2 領域 6 の移植)。
@@ -112,13 +113,6 @@ function readListMarker(rest: string): ListMarker | null {
   return { next: `${indent}${next}${gap}${box}`, width, empty: body.trim() === '' };
 }
 
-/** `lineStart` より前が fenced code の中か(行ごとに開閉を追う)。 */
-function insideFence(value: string, lineStart: number): boolean {
-  let fence = '';
-  for (const l of value.slice(0, lineStart).split('\n')) fence = advanceFence(fence, l);
-  return fence !== '';
-}
-
 /**
  * Enter を押したときにどうするかを決める(引用 + リスト)。
  *
@@ -135,7 +129,7 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
 
   // 🔴 リスト(#1167)── 引用の記号を除いた残りで読む。⚠ コードの中は読まない
   const list = readListMarker(q === null ? line : q.rest);
-  if (list !== null && !insideFence(value, start)) {
+  if (list !== null && !insideBlockCode(value, start)) {
     // ⚠ 空の記号で Enter ── **抜ける**(記号を消す。引用の中なら `> ` は残す)
     if (list.empty) return { kind: 'exit', from: start + marks.length, to: end, text: '' };
     // ⚠ 記号より手前で押したら続けない(`- - 牛乳` になる)。引用なら引用の規則へ
@@ -148,6 +142,9 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
 
   // ⚠ 空の `> ` で Enter ── **抜ける**(記号を消して、普通の改行にする)
   if (q.rest.trim() === '') return { kind: 'exit', from: start, to: end, text: '' };
+
+  // 🔴 引用の記号より手前(`> x` の行頭や `>` と空白の間)で Enter ── 続けると `> > x` になる(#1087)
+  if (caret < start + q.marks.length) return { kind: 'none' };
 
   return { kind: 'continue', insert: `\n${q.marks}` };
 }

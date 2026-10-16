@@ -1261,7 +1261,8 @@ export class RowSwap {
     ta.addEventListener('keydown', (ev) => {
       const ke = ev as KeyboardEvent;
       // ⚠ 変換中のキーは**全部** IME のもの(実測: Enter / Tab / Escape すべて isComposing)
-      if (ke.isComposing) return;
+      // 🔴 Chrome は確定の直後の keydown を `isComposing: false` + `keyCode 229` で送る(binder と同じ見方。#1087)
+      if (ke.isComposing || ke.keyCode === 229) return;
       const cmd = this.keymap.match(ke, 'row');
       if (cmd === 'row-cancel') {
         ev.preventDefault();
