@@ -442,8 +442,18 @@ async function drawPage(pdf, local, i, myGen, owner) {
   layer.className = 'textLayer';
   box.append(layer);
   try {
+    // 🔑 行末(`hasEOL`)を span の並びと同じ数え方で控える(検索の一致が、行をまたぐ語を拾い、強調がずれない)
+    const eols = [];
+    const source = page.streamTextContent().pipeThrough(
+      new TransformStream({
+        transform(chunk, controller) {
+          for (const it of chunk.items) if (it.str !== undefined) eols.push(it.hasEOL === true);
+          controller.enqueue(chunk);
+        },
+      }),
+    );
     const tl = new pdfjs.TextLayer({
-      textContentSource: page.streamTextContent(),
+      textContentSource: source,
       container: layer,
       viewport: vp,
     });
@@ -451,7 +461,9 @@ async function drawPage(pdf, local, i, myGen, owner) {
     // 🔑 span ごとの字を持っておく(検索の強調が、またがる一致を span ごとの範囲へ割り付ける)。
     //    ⚠ 描いている間に箱が作り直された(拡大縮小 / 外れた)なら、持たない
     if (layer.isConnected) {
-      layers[i] = { divs: tl.textDivs, strs: tl.textContentItemsStr, marked: new Set() };
+      // ⚠ 数が合わないときは行末を使わない(ずれた行末で別の span を光らせるより、連結のままのほうがよい)
+      const strs = tl.textContentItemsStr;
+      layers[i] = { divs: tl.textDivs, strs, eols: eols.length === strs.length ? eols : undefined, marked: new Set() };
       markHits(i);
     }
   } catch {
@@ -1922,6 +1934,9 @@ let textsPromise = null;
 let hitList = [];
 let hitIndex = -1;
 let hitQuery = '';
+/** 一致の数を上限で止めたか(止めたなら件数の字は「N 件以上」)。 */
+let hitsCapped = false;
+const HIT_CAP = 5000;
 
 function loadTexts() {
   if (textsPromise === null) {
@@ -1932,7 +1947,16 @@ function loadTexts() {
         for (let i = 1; i <= total; i += 1) {
           const p = await pdf.getPage(i);
           const tc = await p.getTextContent();
-          out[i] = tc.items.map((it) => (typeof it.str === 'string' ? it.str : '')).join('');
+          // 🔑 字と「行末か」を span ごとに持つ(文字の層の span と同じ数え方 = `str` を持つ項目だけ)。
+          //    行末は欧文では空白・日本語どうしの間では無しとして突き合わせる(`text-hits.js`)
+          const strs = [];
+          const eols = [];
+          for (const it of tc.items) {
+            if (typeof it.str !== 'string') continue;
+            strs.push(it.str);
+            eols.push(it.hasEOL === true);
+          }
+          out[i] = { strs, eols };
           p.cleanup();
         }
         return out;
@@ -1956,7 +1980,7 @@ function markHits(i) {
   if (!L) return;
   unmarkLayer(L);
   if (hitQuery === '') return;
-  for (const [k, list] of textHits.rangesBySpan(L.strs, hitQuery)) {
+  for (const [k, list] of textHits.rangesBySpan(L.strs, hitQuery, L.eols)) {
     const div = L.divs[k];
     const str = L.strs[k];
     div.textContent = '';
@@ -1990,6 +2014,8 @@ async function search(q) {
   hitQuery = q.trim().toLowerCase();
   hitList = [];
   hitIndex = -1;
+  hitsCapped = false;
+  let capped = false;
   if (hitQuery === '') {
     $('hits').textContent = '';
     return;
@@ -2005,19 +2031,20 @@ async function search(q) {
     return;
   }
   for (let i = 1; i <= total; i += 1) {
-    const t = (texts[i] || '').toLowerCase();
-    let at = t.indexOf(hitQuery);
-    while (at !== -1 && hitList.length < 5000) {
-      hitList.push(i);
-      at = t.indexOf(hitQuery, at + hitQuery.length);
-    }
+    const pg = texts[i];
+    if (!pg) continue;
+    const room = HIT_CAP - hitList.length;
+    const n = textHits.countHits(pg.strs, hitQuery, pg.eols, room + 1);
+    if (n > room) capped = true;
+    for (let c = 0; c < Math.min(n, room); c += 1) hitList.push(i);
   }
+  hitsCapped = capped;
   if (hitList.length === 0) {
     // 🔴 字が 1 つも無い PDF(スキャンした画像だけ)では、探しても必ず「見つかりません」になる ──
     //   「字が無い」と「その語が無い」を言い分ける(後者だけが探し直して意味のある話)
     let anyText = false;
     for (let i = 1; i <= total; i += 1) {
-      if ((texts[i] || '').trim() !== '') {
+      if (texts[i] && texts[i].strs.some((t) => t.trim() !== '')) {
         anyText = true;
         break;
       }
@@ -2033,7 +2060,7 @@ function stepHit(delta) {
   if (hitList.length === 0) return;
   hitIndex = (hitIndex + delta + hitList.length) % hitList.length;
   const page = hitList[hitIndex];
-  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件(${String(page)} ページ)`;
+  $('hits').textContent = `${String(hitIndex + 1)} / ${String(hitList.length)} 件${hitsCapped ? '以上' : ''}(${String(page)} ページ)`;
   goPage(page);
   /*
    * 🔴 一致した字そのものが見える所まで送る(#1087 の見直し 2026-10-13)。直す前はページの先頭へ送るだけで、

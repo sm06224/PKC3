@@ -857,6 +857,9 @@ describe('attachFiles (P4a intake)', () => {
     expect(resolveMime('img.PNG', '')).toBe('image/png');
     expect(resolveMime('unknown.zzz', '')).toBe('application/octet-stream');
     expect(resolveMime('x.md', 'text/plain')).toBe('text/plain'); // 宣言優先
+    // 🔴 octet-stream の宣言は「種類不明」── 拡張子から引く(a.pdf が PDF として扱われる)
+    expect(resolveMime('a.pdf', 'application/octet-stream')).toBe('application/pdf');
+    expect(resolveMime('unknown.zzz', 'application/octet-stream')).toBe('application/octet-stream');
   });
 });
 

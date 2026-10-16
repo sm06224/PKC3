@@ -69,7 +69,8 @@ export const ATTACHMENT_NAME_ATTR = 'data-pkc-attachment-name';
  *   ③ **別の拡張子で終わっていても変えない** ── 元の拡張子を付け直す
  *   (元 `scan.pdf` に `請求書.txt` → `請求書.txt.pdf`。`.txt` に見せかけた pdf を作らない)。
  * ⚠ 元が拡張子を持たない(`README` / `.gitignore` のように先頭だけが `.`)なら、打った字のまま。
- * ⚠ 拡張子は**最後の `.` から後ろ**だけ(`a.tar.gz` なら `.gz`)。大文字小文字は区別せず比べる
+ * ⚠ 拡張子は**最後の `.` から後ろ**だけ(`a.v2.pdf` なら `.pdf`)。ただし圧縮した書庫の二重拡張子
+ *   (`.tar.gz` / `.tar.bz2` / `.tar.xz` / `.tar.zst`)は**ひとまとまり**で 1 つの拡張子(`backup.tar.gz` を `月次` に改名 → `月次.tar.gz`)。大文字小文字は区別せず比べる
  *   (`.PDF` と `.pdf` は同じ拡張子)。空白を含む後ろ(`報告 v1.2 最終`)は拡張子と見なさない。
  * ⚠ ファイル名に使えない字(`/ \ : * ? " < > |` と制御文字)は `_` に置き換える。
  *   ⚠ 書き出しの名前の規則(`export/file-name.ts` の `safeName`)は**別物**:あちらは `-` に
@@ -89,7 +90,8 @@ export function attachmentFileName(typed: string, original: string): string {
     })
     .join('');
   if (cleaned === '') return original;
-  const dot = original.lastIndexOf('.');
+  const compound = /\.tar\.(?:gz|bz2|xz|zst)$/i.exec(original);
+  const dot = compound !== null && compound.index > 0 ? compound.index : original.lastIndexOf('.');
   // 先頭だけの `.`(隠しファイル名)と、末尾の `.`(拡張子が空)は拡張子と見なさない
   if (dot <= 0 || dot === original.length - 1) return cleaned;
   const ext = original.slice(dot);

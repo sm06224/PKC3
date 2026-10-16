@@ -857,8 +857,8 @@ describe('🔴 text/* と登録された添付の中身を見る(#1220)', () => 
     ['zip(docx)', Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00])],
     ['NUL を含む', Uint8Array.from([0x61, 0x62, 0x00, 0x63, 0x64])],
     [
-      'UTF-8 として壊れている(Shift_JIS)',
-      Uint8Array.from([0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x58, 0x83, 0x67]),
+      'UTF-8 として壊れていて、Shift_JIS としても字でない(制御文字まじり)',
+      Uint8Array.from([0x93, 0xfa, 0x01, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x58, 0x01]),
     ],
   ])('字でない(%s)は <pre> に出さず、既存の断り文へ落ちる', async (_name, bytes) => {
     const { d, q } = setup(
@@ -875,6 +875,18 @@ describe('🔴 text/* と登録された添付の中身を見る(#1220)', () => 
       'この種類は画面に出せません。上の「添付をダウンロード」で保存して開いてください',
     );
     expect(made, '回せない物で URL を作った').toHaveLength(0);
+  });
+
+  it('🔴 Shift_JIS の .txt は字として <pre> に出る(読めない扱いにしない)。元の bytes は変えない', async () => {
+    const sjis = Uint8Array.from([0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x4c, 0x83, 0x58, 0x83, 0x67]);
+    const blob = new Blob([sjis], { type: 'text/plain' });
+    const { d, q } = setup({ a1: bodyOf('text/plain', 'x.txt') }, lenderOf(blob));
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a1' });
+    await tick(30);
+    expect(q('[data-pkc-field="attachment-text"]')?.textContent).toBe('日本語のテキスト');
+    expect(q('[data-pkc-field="attachment-no-preview"]')).toBeNull();
+    // 表示のためだけの読み替え ── 添付そのものは元の bytes のまま
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(sjis);
   });
 
   it('対照群:本物のテキスト(日本語・BOM・CRLF)は今までどおり <pre> に出る', async () => {
