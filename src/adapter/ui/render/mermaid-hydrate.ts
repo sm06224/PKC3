@@ -21,6 +21,7 @@ import {
   type Raster,
   type RasterKey,
 } from './mermaid-raster';
+import { errorMessageJa } from '@features/error-text';
 import { ACTION_ICONS, iconSpan } from './icons';
 import { markViewBig } from './view-big';
 import { watchDevicePixelRatio } from './dpr-watch';
@@ -411,7 +412,9 @@ export function hydrateDiagrams(
       // ⚠ 失敗しても**原文は残す**(器の中の `<pre>` を消すのは成功したときだけ)
       p.host.setAttribute(`data-pkc-${kind.name}-state`, 'failed');
       // ⚠ 例外の前置き「Error:」を画面に出さない / 切るときは「…」で切ったと分かるようにする(#1087)
-      const why = e instanceof Error ? e.message : String(e);
+      // 🔴 裏の処理が起動できなかった等の英語(`chart: load failed`)は、画面に出る手前で日本語にする
+      //    (日本語の理由・書き方の間違いの理由は表に当たらず、そのまま通る)
+      const why = errorMessageJa(e instanceof Error ? e.message : String(e));
       // 🔴 端末の都合で描けなかったときは別の印を付ける(画面の字を「書き方を確かめて」にしない)
       if (e instanceof DeviceRenderError) p.host.setAttribute(`data-pkc-${kind.name}-device`, '');
       else p.host.removeAttribute(`data-pkc-${kind.name}-device`);

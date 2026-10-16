@@ -194,7 +194,12 @@ export function htmlToDocxBlocks(doc: Document): {
   };
 
   /** 要素の中の文字を走りへ(木を辿って装飾を受け継ぐ)。 */
-  const collectRuns = (node: Node, style: RunStyle, out: DocxRun[]): void => {
+  const collectRuns = (
+    node: Node,
+    style: RunStyle,
+    out: DocxRun[],
+    onImage?: (assetKey: string, alt: string) => void,
+  ): void => {
     for (const child of Array.from(node.childNodes)) {
       /**
        * 🔴 **段落を作る要素の境目で改行を入れる**(セルや項目の中の `ul` / `p`)。
@@ -251,8 +256,17 @@ export function htmlToDocxBlocks(doc: Document): {
          * (解けなければ `skipped` のまま出るので、黙って消えない)。
          */
         const alt = el.getAttribute('alt') || el.getAttribute('data-pkc-asset-name') || '画像';
-        images.push({ at: blocks.length, assetKey, alt });
-        blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+        /**
+         * 🔴 **画像は、置かれた位置の順で出す**。かつては囲む塊(段落・項目・引用・見出し)を
+         * 組み立てる**途中**でここから塊を積んでいたので、画像が**囲む塊の前**へ出ていた
+         * (`前 IMG 後` が [画像, 前後] になる)。呼び側が `onImage` を渡したときは、
+         * 呼び側が「ここまでの字を塊にして → 画像 → 続き」を組む。
+         */
+        if (onImage !== undefined) {
+          onImage(assetKey, alt);
+          continue;
+        }
+        reserveImage(assetKey, alt);
         continue;
       }
       /**
@@ -299,7 +313,7 @@ export function htmlToDocxBlocks(doc: Document): {
         //    書き出し先(docx / pptx)はどちらも `TargetMode="External"` の rel を張るだけなので宛先の綴りは問わない
         if (/^(?:https?:\/\/|mailto:|tel:)/i.test(href)) next.href = href;
       }
-      collectRuns(el, next, out);
+      collectRuns(el, next, out, onImage);
     }
   };
 
@@ -307,6 +321,59 @@ export function htmlToDocxBlocks(doc: Document): {
     const out: DocxRun[] = [];
     collectRuns(el, {}, out);
     return out;
+  };
+
+  /** 添付の画像の場所を予約する(bytes と実寸は呼び側が解いて `blocks[at]` を差し替える)。 */
+  function reserveImage(assetKey: string, alt: string): void {
+    images.push({ at: blocks.length, assetKey, alt });
+    blocks.push({ kind: 'skipped', what: `画像「${alt}」`, why: '取り出せませんでした' });
+  }
+
+  /**
+   * 字を持つ塊(段落・項目・見出し・引用)を、**中の添付画像で割って**積む。
+   * `前 IMG 後` → [塊(前), 画像, 塊(後)]。後ろの塊は同じ種類(項目なら同じ階層・同じ一覧)で続ける。
+   *
+   * @param bulletFirst 項目用 ── 画像で始まる項目も、先に(字の無い)項目を 1 つ積んでから画像を出す
+   * @param keepEmpty 字も画像も無いときに空の塊を残すか(見出し・引用・字の無い項目は残す)
+   */
+  const pushSplitByImages = (
+    el: Element,
+    make: (runs: DocxRun[]) => DocxBlock,
+    opts: { bulletFirst?: boolean; keepEmpty: boolean },
+  ): void => {
+    const out: DocxRun[] = [];
+    let emitted = false;
+    let afterImage = false;
+    const flush = (): void => {
+      const seg = out.splice(0);
+      // 画像の前後の空白は塊の端に残さない
+      const lastAt = seg.length - 1;
+      const kept = seg
+        .map((r, i) => {
+          let t = r.text;
+          if (i === lastAt) t = t.replace(/\s+$/, '');
+          if (i === 0 && afterImage) t = t.replace(/^\s+/, '');
+          return t === r.text ? r : { ...r, text: t };
+        })
+        .filter((r) => r.text !== '');
+      if (kept.length > 0) {
+        blocks.push(make(kept));
+        emitted = true;
+      }
+    };
+    collectRuns(el, {}, out, (assetKey, alt) => {
+      const hadText = out.length > 0;
+      flush();
+      if (!hadText && !emitted && opts.bulletFirst === true) {
+        blocks.push(make([]));
+        emitted = true;
+      }
+      reserveImage(assetKey, alt);
+      emitted = true;
+      afterImage = true;
+    });
+    flush();
+    if (!emitted && opts.keepEmpty) blocks.push(make([]));
   };
 
   /** 項目の中で「字」ではなく独立した塊として出す子(コード枠・表・引用・見出し・図の器 …)。 */
@@ -342,9 +409,10 @@ export function htmlToDocxBlocks(doc: Document): {
           cloneKids[i]?.remove();
         }
       });
-      const runs = runsOf(clone);
-      if (runs.length > 0 || later.length === 0)
-        blocks.push({ kind: 'li', ordered, depth, list: listId, runs });
+      pushSplitByImages(clone, (runs) => ({ kind: 'li', ordered, depth, list: listId, runs }), {
+        bulletFirst: true,
+        keepEmpty: later.length === 0,
+      });
       for (const sub of later) {
         const t = sub.tagName.toLowerCase();
         if (t === 'ul' || t === 'ol') walkList(sub, depth + 1, t === 'ol');
@@ -383,13 +451,12 @@ export function htmlToDocxBlocks(doc: Document): {
       if (el.classList.contains('pkc-render-source')) continue;
       const level = headingLevel(tag);
       if (level !== null) {
-        blocks.push({ kind: 'h', level, runs: runsOf(el) });
+        pushSplitByImages(el, (runs) => ({ kind: 'h', level, runs }), { keepEmpty: true });
         continue;
       }
       if (tag === 'p') {
-        const runs = runsOf(el);
-        // ⚠ 空段落は捨てる(画像だけの段落は上で `skipped` の文字になっている)
-        if (runs.length > 0) blocks.push({ kind: 'p', runs });
+        // ⚠ 空段落は捨てる(画像だけの段落は画像の塊だけになる)
+        pushSplitByImages(el, (runs) => ({ kind: 'p', runs }), { keepEmpty: false });
         continue;
       }
       if (tag === 'ul' || tag === 'ol') {
@@ -404,7 +471,7 @@ export function htmlToDocxBlocks(doc: Document): {
          * (添字が狂わないよう、その場で差し替える)。箇条書き・コード・表は元の塊のまま、引用の中の順に並ぶ。
          */
         if (el.children.length === 0) {
-          blocks.push({ kind: 'quote', runs: runsOf(el) });
+          pushSplitByImages(el, (runs) => ({ kind: 'quote', runs }), { keepEmpty: true });
           continue;
         }
         const from = blocks.length;
@@ -439,15 +506,20 @@ export function htmlToDocxBlocks(doc: Document): {
       }
       if (tag === 'table') {
         const rows: DocxCell[][] = [];
+        // 🔴 セルの中の画像は、表の**後ろ**へ出す(表の前へ出ていた。セルに画像は置けない)
+        const cellImages: { assetKey: string; alt: string }[] = [];
         for (const tr of Array.from(el.querySelectorAll('tr'))) {
           const cells: DocxCell[] = [];
           for (const cell of Array.from(tr.children)) {
             const isTh = cell.tagName.toLowerCase() === 'th';
-            cells.push({ runs: runsOf(cell), ...(isTh ? { header: true } : {}) });
+            const cellRuns: DocxRun[] = [];
+            collectRuns(cell, {}, cellRuns, (assetKey, alt) => cellImages.push({ assetKey, alt }));
+            cells.push({ runs: cellRuns, ...(isTh ? { header: true } : {}) });
           }
           if (cells.length > 0) rows.push(cells);
         }
         if (rows.length > 0) blocks.push({ kind: 'table', rows });
+        for (const im of cellImages) reserveImage(im.assetKey, im.alt);
         continue;
       }
       /**

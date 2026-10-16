@@ -160,6 +160,32 @@ describe('chart の器を埋める(adapter 層)', () => {
     expect(jobs.length, '読めないのにワーカーを起こした').toBe(0);
   });
 
+  it('🔴 ワーカーが起動できなかったときの理由は日本語で出る(英語の生の字を出さない)', async () => {
+    const { setChartWorkerSpawn } = await import('../../src/adapter/ui/render/chart-raster');
+    const { hydrateChart } = await import('../../src/adapter/ui/render/chart-raster');
+    class DeadWorker {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: ErrorEvent) => void) | null = null;
+      onmessageerror: (() => void) | null = null;
+      postMessage(): void {
+        queueMicrotask(() => this.onerror?.({ message: '' } as ErrorEvent));
+      }
+      terminate(): void {}
+    }
+    setChartWorkerSpawn(() => new DeadWorker() as unknown as Worker);
+    const host = document.createElement('div');
+    host.className = 'pkc-chart-placeholder';
+    const src = '{"type":"bar","labels":["a"],"datasets":[{"label":"x","data":[1]}]}';
+    host.setAttribute('data-pkc-chart-src', src);
+    document.body.append(host);
+    scope = hydrateChart([host]);
+    for (let i = 0; i < 30; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(host.getAttribute('data-pkc-chart-state')).toBe('failed');
+    const msg = host.getAttribute('data-pkc-chart-error') ?? '';
+    expect(msg).toContain('裏で動く処理を起動できませんでした');
+    expect(msg).not.toMatch(/^chart: /);
+  });
+
   it('🔴 取りこぼしがあれば器に note が付き、無ければ付かない(R8)', async () => {
     const many = JSON.stringify({
       type: 'bar',

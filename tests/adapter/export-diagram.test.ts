@@ -34,6 +34,47 @@ function withDiagrams(sources: string[]): { root: HTMLElement; d: Dispatcher } {
   return { root, d: new Dispatcher() };
 }
 
+describe('図の番号は、押した図を載せているノートの本文の中で数える', () => {
+  function bodies(attr: string | null): { root: HTMLElement; btns: HTMLElement[] } {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-region', 'detail');
+    const btns: HTMLElement[] = [];
+    ['A', 'B'].forEach((lid, n) => {
+      const body = document.createElement('div');
+      body.className = 'pkc-md-rendered';
+      if (attr !== null) body.setAttribute(attr, lid);
+      // 各ノートに 2 枚ずつ
+      for (let i = 0; i < 2; i++) {
+        const host = document.createElement('div');
+        host.setAttribute('data-pkc-mermaid-src', `graph TD\n ${lid}${n}${i}-->X`);
+        const btn = document.createElement('button');
+        btn.setAttribute('data-pkc-action', 'export-diagram');
+        host.append(btn);
+        body.append(host);
+        btns.push(btn);
+      }
+      root.append(body);
+    });
+    document.body.append(root);
+    return { root, btns };
+  }
+
+  for (const attr of [null, 'data-pkc-split-lid']) {
+    it(`🔴 2 つ目の本文の 1 枚目は 0 番目(印: ${attr ?? '本文の器だけ'})`, () => {
+      const { root, btns } = bodies(attr);
+      const exportDiagram = vi.fn();
+      bindActions(root, new Dispatcher(), { exportDiagram } satisfies BinderServices);
+      btns[2]!.click(); // 2 つ目の本文の 1 枚目
+      expect(exportDiagram.mock.calls[0]![1]).toBe(0);
+      btns[3]!.click(); // 2 つ目の本文の 2 枚目
+      expect(exportDiagram.mock.calls[1]![1]).toBe(1);
+      btns[0]!.click(); // 対照群: 1 つ目の本文の 1 枚目
+      expect(exportDiagram.mock.calls[2]![1]).toBe(0);
+      root.remove();
+    });
+  }
+});
+
 describe('図の書き出し(P8 段⑦)', () => {
   it('🔴 押した図の**原文**と**何枚目か**が渡る', () => {
     const { root, d } = withDiagrams(['graph TD\n A-->B', 'pie\n "x": 1']);

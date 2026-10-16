@@ -1471,10 +1471,47 @@ test('🔴 本文に読み幅の上限が効き、表と図は対象外である
     '  A["始め"] --> B["終わり"]',
     '```',
     '',
+    // 🔴 書き方を間違えた図(構文エラー)も同じ本文に置く ── mermaid が失敗のたびに
+    //    body 直下へ残す作業用要素(`div#dpkc3-mmd-…`、約 190px)を見る。
+    //    ⚠ 正しい図の「後ろ」に置く(下の ③ は最初の `[data-pkc-mermaid-src]` を読む)
+    '```mermaid',
+    'graph TD',
+    '  A --> (',
+    '```',
+    '',
   ].join('\n');
   await page.fill('[data-pkc-field="editor-body"]', body);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
+
+  // 🔴 構文エラーの図: 作業用要素が body 直下に残らない / こちらの日本語の断りが出る
+  const okHost = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]').first();
+  const badHost = page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]').nth(1);
+  await expect(okHost).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30000 });
+  await expect(badHost).toHaveAttribute('data-pkc-mermaid-state', 'failed', { timeout: 30000 });
+  const strays = (): Promise<number> =>
+    page.evaluate(
+      () =>
+        document.querySelectorAll('body > [id^="dpkc3-mmd-"], body > [id^="pkc3-mmd-"]').length,
+    );
+  expect(await strays(), 'mermaid の作業用要素(構文エラー表示)が body 直下に残っている').toBe(0);
+  const failedText = await badHost.evaluate((h) => getComputedStyle(h, '::before').content);
+  expect(failedText, '失敗した図に、日本語の断りが出ていない').toContain('図を描けません');
+  expect(failedText, 'mermaid の英語の断り文が画面に出ている').not.toContain('Syntax error');
+
+  // 🔴 配色を替えるたびに焼き直される ── 作業用要素が増えない(直す前は替えるたびに 1 つ増えた)
+  for (const theme of ['dark', 'nord']) {
+    const before = await okHost.locator('img').getAttribute('src');
+    await page.evaluate((t) => document.documentElement.setAttribute('data-pkc-theme', t), theme);
+    await expect
+      .poll(() => okHost.locator('img').getAttribute('src'), {
+        message: `配色 ${theme} で図が焼き直されていない(観測にならない)`,
+        timeout: 30000,
+      })
+      .not.toBe(before);
+    await expect(badHost).toHaveAttribute('data-pkc-mermaid-state', 'failed', { timeout: 30000 });
+    expect(await strays(), `配色 ${theme} の後に作業用要素が残っている`).toBe(0);
+  }
 
   const m = await page.evaluate(() => {
     const host = document.querySelector('[data-pkc-field="detail-body"]');
