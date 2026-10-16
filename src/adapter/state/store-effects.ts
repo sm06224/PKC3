@@ -32,6 +32,7 @@ import {
 import {
   appendIntoSection,
   insertedLines,
+  insertedRun,
   resolveAppendAt,
 } from '@features/markdown/append-target';
 import {
@@ -3523,6 +3524,7 @@ export function connectStoreEffects(
                *   起きた回は読み直した側で、そこから導かないと取り消しが空振りする。
                */
               inserted: insertedLines(base, newBody),
+              insertedAt: insertedRun(base, newBody)?.at ?? null,
               // 🔑 取り込みの回の印(#668 C)── ここで読まず、reducer へそのまま返す
               ...(ev.batch === undefined ? {} : { batch: ev.batch }),
             });
@@ -4011,7 +4013,10 @@ export function connectStoreEffects(
                  * ⚠ 差し込み以外では渡さない(`lastAppend` を触るのはこの書換だけ)。
                  */
                 ...(ev.rewrite.kind === 'insert-lines'
-                  ? { inserted: insertedLines(body, newBody) }
+                  ? {
+                      inserted: insertedLines(body, newBody),
+                      insertedAt: insertedRun(body, newBody)?.at ?? null,
+                    }
                   : {}),
                 status: ext.status,
                 date: ext.date,

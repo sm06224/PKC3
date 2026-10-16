@@ -104,6 +104,8 @@ export type BodyRewrite =
        */
       kind: 'undo-append';
       lines: readonly string[];
+      /** 足した位置(行、0 起点)。⚠ 在ればそこを先に見る(#1087)。無ければ従来どおり後ろの一致。 */
+      at?: number;
     }
   | {
       kind: 'frontmatter';
@@ -890,7 +892,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
     return next === body ? null : next;
   }
   if (rewrite.kind === 'line-date') return rewriteLineDate(body, rewrite);
-  if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines);
+  if (rewrite.kind === 'undo-append') return removeInsertedLines(body, rewrite.lines, rewrite.at);
   if (rewrite.kind === 'tag') {
     /**
      * ⚠ **読む規則も書く規則も既存の 1 本**(`readTags` / `withTag` /

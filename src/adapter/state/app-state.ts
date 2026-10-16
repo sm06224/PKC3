@@ -584,7 +584,7 @@ function erAfterDuckWrite(
  */
 function nextLastAppend(
   prev: AppState['lastAppend'],
-  next: { lid: string; inserted: readonly string[] | null; batch?: string },
+  next: { lid: string; inserted: readonly string[] | null; insertedAt?: number | null; batch?: string },
 ): AppState['lastAppend'] {
   if (next.inserted === null) return null;
   const joined =
@@ -592,6 +592,8 @@ function nextLastAppend(
   return {
     lid: next.lid,
     lines: joined ? [...prev.lines, ...next.inserted] : next.inserted,
+    // 🔴 足した位置(#1087)。同じ回の続きは最初の位置を保つ(行は連続している前提)
+    ...((joined ? prev.at : next.insertedAt) == null ? {} : { at: (joined ? prev.at : next.insertedAt)! }),
     ...(next.batch === undefined ? {} : { batch: next.batch }),
   };
 }
@@ -2082,7 +2084,7 @@ export interface AppState {
    *   ⚠ 直す前は最後の 1 枚しか戻らず、残り 2 枚は本文を開いて消すしかなかった。
    *   `batch` は取り込みの回の印(`APPEND_TO_ENTRY.batch`)。手で足した追記には無い。
    */
-  lastAppend: { lid: string; lines: readonly string[]; batch?: string } | null;
+  lastAppend: { lid: string; lines: readonly string[]; at?: number; batch?: string } | null;
   /**
    * 🔴 **履歴から戻した直後の「元に戻す」の材料**(依頼 68-1)── 戻す前の本文の版 id。
    * ⚠ `lid` を持つ: 別のノートを選んだら出さない(他のノートの版を、いま開いているノートへ書かない)。
@@ -3547,6 +3549,8 @@ export type SystemCommand =
        * ⚠ 差し込み(`insert-lines`)以外では**渡らない**(`undefined`)。
        */
       inserted?: readonly string[] | null;
+      /** 足した位置(行、0 起点)。`inserted` と同じ口から出る(#1087)。 */
+      insertedAt?: number | null;
       status: string | null;
       date: string | null;
       archived: boolean;
@@ -3609,6 +3613,8 @@ export type SystemCommand =
        *   番号はずれる。⚠ 純粋な挿入でなければ `null`(取り消しを出さない)。
        */
       inserted: readonly string[] | null;
+      /** 足した位置(行、0 起点)。取り消しが先に見る所(#1087)。 */
+      insertedAt?: number | null;
       /** 取り込みの回の印(#668 C)。`REQUEST_APPEND.batch` がそのまま返る。 */
       batch?: string;
     }
@@ -7697,7 +7703,7 @@ function reduceCore(
             title: meta.title,
             archetype: meta.archetype,
             entryOrder: meta.entryOrder,
-            rewrite: { kind: 'undo-append', lines: last.lines },
+            rewrite: { kind: 'undo-append', lines: last.lines, ...(last.at === undefined ? {} : { at: last.at }) },
           },
         ],
       };
@@ -8593,6 +8599,7 @@ function reduceCore(
         lastAppend = nextLastAppend(lastAppend, {
           lid: action.lid,
           inserted: action.inserted ?? null,
+          insertedAt: action.insertedAt ?? null,
           ...(action.rewrite.batch === undefined ? {} : { batch: action.rewrite.batch }),
         });
       }

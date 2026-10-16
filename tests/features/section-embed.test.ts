@@ -131,13 +131,16 @@ describe('行頭の # 以外で書いた見出し(setext / 引用・箇条書き
     host.innerHTML = renderMarkdown(md);
     return [...host.querySelectorAll('h1,h2,h3')].map((h) => h.getAttribute('id') ?? '');
   };
-  it('setext(下線)の見出しは節として引けない(見つかりませんになる)', () => {
+  it('setext(下線)の見出しも節として引ける(追記の入り先と目次に揃えた。#1087)', () => {
     const md = 'Title\n=====\n本文\n\n## Real\n中身';
     const ids = idsOf(md);
     expect(ids).toContain('real');
+    // 深い見出し(## Real)は Title の節の中身なので、Real の節は自分の範囲だけ
     expect(sectionExcerptOf(md, 'real').text).toBe('## Real\n中身');
     const setext = ids.find((i) => i !== 'real')!;
-    expect(sectionExcerptOf(md, setext).missing, 'setext が引けるようになった(マニュアルの注記を直す)').toBe(true);
+    const hit = sectionExcerptOf(md, setext);
+    expect(hit.missing, 'setext が引けない').not.toBe(true);
+    expect(hit.text.startsWith('Title\n=====')).toBe(true);
   });
   it('引用・箇条書きの中の # は引けない / 別の節を取り違えない', () => {
     const md = '> ## Quoted\n> 引用\n\n- ## Listed\n\n## Real\n中身';
