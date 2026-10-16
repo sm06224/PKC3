@@ -159,6 +159,30 @@ test('🔴 .vcf を取り込むと連絡先に並び、「vCard で書き出す�
   expect(body).toContain('FN:山田太郎');
   expect(body).toContain('TEL;TYPE=voice:090-1234-5678');
 
+  /**
+   * ④ 「名前 番号」の混在検索(#1087)── 番号だけで全員に当たらない。
+   * 同じ番号の頭(090-1234)を持つ連絡先を 2 人足し、「山田 090」で山田だけが残ることを見る。
+   * 対照群:番号だけ「090」なら 3 人とも残る(絞りが効いていないのではない)。
+   */
+  const more = [
+    ['佐藤花子', '090-1234-0000'],
+    ['鈴木一郎', '090-1234-9999'],
+  ]
+    .map(([fn, tel]) => ['BEGIN:VCARD', 'VERSION:3.0', `FN:${fn}`, `TEL;TYPE=CELL:${tel}`, 'END:VCARD', ''].join('\r\n'))
+    .join('');
+  await page.setInputFiles('[data-pkc-field="import-input"]', {
+    name: '追加.vcf',
+    mimeType: '',
+    buffer: Buffer.from(more, 'utf8'),
+  });
+  await expect(row, '台の前提:足した 2 人が並ばない').toHaveCount(3, { timeout: 10_000 });
+  const filter = page.locator('[data-pkc-field="entry-filter"]');
+  await filter.fill('090');
+  await expect(row, '対照群:番号だけの絞りで 3 人残らない').toHaveCount(3);
+  await filter.fill('山田 090');
+  await expect(row, '「山田 090」で山田以外にも当たっている').toHaveCount(1, { timeout: 5000 });
+  await expect(row.locator('[data-pkc-field="contact-name"]')).toContainText('山田太郎');
+
   expect(errors, '例外が出ている').toEqual([]);
 });
 

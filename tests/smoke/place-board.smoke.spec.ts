@@ -1740,6 +1740,33 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await expect(refusal, '「テンプレートから板を置く」が理由を言っていない').toBeVisible({ timeout: 5000 });
   await expect(page.locator('[data-pkc-field="detail-body"] .pkc-place')).toHaveCount(0);
 
+  /**
+   * ⑤ コードブロックの中に `:::` だけの行を持つ付箋を消す(#1087)── 付箋の終わりを取り違えると、
+   * 消す範囲が柵の途中で切れ、本文に柵の片割れが残って後ろの文が全部コードブロックになる。
+   * ⚠ 観測点は**保存された本文**(開いて読む)。対照群:付箋の外の「KEEP ME」は残り、柵の数は偶数のまま。
+   */
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '柵の中のコロンの付箋');
+  await page.fill(
+    '[data-pkc-field="editor-body"]',
+    ':::format{#fz .pkc-place x=10 y=10 w=240 h=120}\nS付箋\n```\n:::\n```\n:::\n\nKEEP ME\n',
+  );
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const fz = page.locator('[data-pkc-region="detail"] #fz');
+  await expect(fz, '台の前提:柵の中に ::: を持つ付箋が板として描かれていない').toHaveCount(1, { timeout: 15_000 });
+  const fzBox = (await fz.boundingBox())!;
+  await page.mouse.click(Math.floor(fzBox.x) + 20, Math.floor(fzBox.y) + 20, { button: 'right' });
+  await menu.locator('[data-pkc-action="remove-place"]').click();
+  await dlg.locator('[data-pkc-field="dialog-ok"]').click();
+  await expect(page.locator('[data-pkc-region="detail"] #fz'), '付箋が消えていない').toHaveCount(0, { timeout: 5000 });
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const savedBody = await page.inputValue('[data-pkc-field="editor-body"]');
+  expect(savedBody, '消した付箋の字が本文に残っている').not.toContain('S付箋');
+  expect(savedBody.trimEnd(), '付箋の外の文が消えた').toMatch(/KEEP ME$/);
+  expect(savedBody.split('\n').filter((l) => l.startsWith('```')).length % 2, '柵の片割れが本文に残った').toBe(0);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+
   expect(errors, 'pageerror が出た').toEqual([]);
 });
 
