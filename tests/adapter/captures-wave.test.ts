@@ -119,6 +119,27 @@ describe('一覧の波形(#1232)', () => {
     expect(p.host.querySelectorAll('[data-pkc-field="capture-wave-tick"]')).toHaveLength(2);
   });
 
+  it('🔴 目盛りの数が同じでも、時刻が変わったら置き直す(数だけで見ない)', async () => {
+    const p = pane(wave());
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    p.paint();
+    const ticks = (): string[] =>
+      [...p.host.querySelectorAll<HTMLElement>('[data-pkc-field="capture-wave-tick"]')].map((t) => t.style.left);
+    expect(ticks()).toEqual(['25.000%', '50.000%']);
+    // 本文の時刻を書き換えた(0:30 → 0:12 / 1:00 → 1:30)── 数は 2 のまま
+    // ⚠ 行は 3 件のまま(他の行が消えると一覧ごと作り直されて、帯も新しくなり、この経路を通らない)
+    const moved = captureItemsFrom([
+      { lid: 'a', title: 'a', body: `${fm('録音-2026-09-09-030102.webm', 'audio/webm', 'k-a')}\n0:12 はい\n1:30 ええ\n` },
+      { lid: 'b', title: 'b', body: fm('録音-2026-09-09-040102.webm', 'audio/webm', 'k-b') },
+      { lid: 'v', title: 'v', body: fm('画面収録-2026-09-09-030102.webm', 'video/webm', 'k-v') },
+    ]);
+    const strip = strips(p.host)[0]!;
+    p.paint({ captureItems: moved });
+    expect(strips(p.host)[0], '前提: 帯が作り直されている(この経路を通っていない)').toBe(strip);
+    expect(ticks(), '数が同じなので古い位置のまま残った').toEqual(['10.000%', '75.000%']);
+  });
+
   it('文字起こしの無い録音には目盛りが無い', async () => {
     const p = pane(wave());
     p.paint({ capturePlayingLid: 'b' });

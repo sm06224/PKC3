@@ -471,6 +471,25 @@ describe('アラート(#280)', () => {
     expect(b.service.ringing(), '入にした直後の予定を取りこぼした').toHaveLength(1);
   });
 
+  it('🔴 数え直しの最中(taskScan が null)に刻みが来ても、その間の予定を取りこぼさない', () => {
+    const b = bench();
+    b.service.start(); // 13:00
+    b.advanceTo(13, 59);
+    b.beat();
+    // 別のタブが保存 → 札が null に戻る窓で、14:00 をまたぐ刻みが来る
+    b.d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+    expect(b.d.getState().taskScan, '前提: 札が null になっていない').toBeNull();
+    b.advanceTo(14, 0);
+    b.beat();
+    expect(b.service.ringing(), '数え直し中は鳴らさない').toHaveLength(0);
+    // 札が戻った次の刻み ── 見た位置を進めていなければ、ここで 14:00 を拾う
+    b.d.dispatch({ type: 'SET_TASK_SCAN', scan: { cards: [card()], totalNotes: 1, scannedNotes: 1, truncated: false } });
+    b.advanceTo(14, 1);
+    b.beat();
+    expect(b.service.ringing(), '数え直し中の刻みで見た位置を進めて、予定が消えた').toHaveLength(1);
+    expect(b.chimes()).toBe(1);
+  });
+
   /** ⚠ main.ts はどの test からも走らない ── 配線は原文で pin する(弱いと自覚して使う)。 */
   it('🔴 ⑧ main.ts は、予定の知らせと見逃しの知らせの両方に「本体のタブだけ」を渡し、入にした直後に見る', () => {
     const main = readFileSync('src/main.ts', 'utf-8');

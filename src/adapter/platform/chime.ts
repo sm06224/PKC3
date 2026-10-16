@@ -46,6 +46,9 @@ const NOTES: readonly { hz: number; at: number; len: number }[] = [
   { hz: 1320, at: 0.16, len: 0.14 },
 ];
 
+/** `resume()` を待つ上限(ms)。 */
+export const CHIME_RESUME_TIMEOUT_MS = 1500;
+
 export function createChime(ctor: Ctor | null = audioCtor()): Chime {
   return {
     async play(): Promise<boolean> {
@@ -54,7 +57,18 @@ export function createChime(ctor: Ctor | null = audioCtor()): Chime {
       try {
         ctx = new ctor();
         // ⚠ **止められていたら起こす** ── user が触った後なら通る
-        if (ctx.state === 'suspended') await ctx.resume();
+        if (ctx.state === 'suspended') {
+          // ⚠ 自動再生の制限下では resume() が決着しないことがある ── 待ち続けると context が開いたまま残り、
+          //   後から来た知らせの音が束になって鳴る。短く待って、間に合わなければ閉じて諦める
+          const resumed = await Promise.race([
+            ctx.resume().then(() => true),
+            new Promise<false>((resolve) => setTimeout(() => resolve(false), CHIME_RESUME_TIMEOUT_MS)),
+          ]);
+          if (!resumed) {
+            await ctx.close();
+            return false;
+          }
+        }
         if (ctx.state !== 'running') {
           await ctx.close();
           return false;

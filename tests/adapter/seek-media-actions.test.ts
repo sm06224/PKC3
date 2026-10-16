@@ -148,6 +148,27 @@ describe('時刻を押す(seek-media)', () => {
     expect(m.time(), '2 度目の metadata でも書き直した').toBe(40);
   });
 
+  it('🔴 metadata が届く前に 2 度押したら、届いた後は最後に押した位置になる(古い押しが後から書かない)', () => {
+    const { detail } = setup();
+    const m = fakeAudio({ readyState: 0, duration: Number.NaN, seekable: 0 });
+    detail('15000', m).click();
+    detail('40000', m).click();
+    // ブラウザが最後の押し(40 秒)を既定の開始位置として守った → metadata が届く
+    const writes: number[] = [];
+    let t = 40;
+    Object.defineProperty(m.el, 'currentTime', {
+      get: () => t,
+      set: (v: number) => {
+        writes.push(v);
+        t = v;
+      },
+      configurable: true,
+    });
+    m.el.dispatchEvent(new Event('loadedmetadata'));
+    expect(writes, '古い押し(15 秒)の聞き手が位置を書いた').toEqual([]);
+    expect(t).toBe(40);
+  });
+
   it('⚠ 読み込み済み(readyState 1 以上)なら metadata の確かめ直しは掛けない', () => {
     const { detail } = setup();
     const m = fakeAudio();

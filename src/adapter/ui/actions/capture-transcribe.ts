@@ -74,6 +74,8 @@ export interface CaptureTranscribeDeps {
   readonly now?: () => Date;
   /** 🔴 別のタブ・窓が編集中のノートへ足さないための問い合わせ口(#1087)。省略 = 問い合わせない。 */
   readonly lock?: EditLockPort;
+  /** 文字にしている最中かが変わった合図(タブを閉じる前の確認に数える)。 */
+  readonly onActive?: (active: boolean) => void;
 }
 
 export interface CaptureTranscriber {
@@ -136,6 +138,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         return;
       }
       running = true;
+      deps.onActive?.(true);
       mark(lid);
       /**
        * 🔴 **進行中の字を出している間だけ true**(#1017 C5)。⚠ 直す前は、音を読めなかった・
@@ -265,6 +268,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         if (progressShown) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
+        deps.onActive?.(false);
         mark(null);
       }
     },
