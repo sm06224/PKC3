@@ -28,7 +28,7 @@ import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } fr
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
 import { errorText } from '@features/error-text';
 import { wouldMakeCycle } from '@features/relation/tree';
-import { trimToCap } from '@features/message/message-log';
+import { messageTrimSlack, trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
 import { INTEGRITY_STAMP_KEY, INTEGRITY_STAMP_SCOPE } from '@features/storage/integrity-schedule';
@@ -3339,7 +3339,7 @@ const handlers: Handlers = {
         [req.cid, req.lid],
       ) as Array<{ body: string }>;
       const existing = rows[0]?.body ?? '';
-      const next = trimToCap(`${existing}${req.section}`, req.cap);
+      const next = trimToCap(`${existing}${req.section}`, req.cap, messageTrimSlack(req.cap));
       if (rows.length === 0) {
         database.exec({
           sql: `INSERT INTO entries

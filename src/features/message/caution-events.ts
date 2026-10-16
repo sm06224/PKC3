@@ -39,13 +39,25 @@ export function messageKindForOpError(error: string): MessageKind {
 }
 
 /**
+ * 🔴 **アプリが書いた断り文の全文**(#1087 M6)── ボタン名の「…」が潰れないよう、頭として通す。
+ * ⚠ 正本は各所の `OP_FAILED` の字(`binder.ts` の並べ替え / `app-state.ts` の「すべて置換」 / `main.ts` の添付)。
+ *   同じ字を `tests/features/caution-events.test.ts` が各 file の中身と突き合わせる。
+ * ⚠ user の入力は入れない(固定の字だけ)。
+ */
+export const APP_REFUSAL_LITERALS: readonly string[] = [
+  '並べ替えは「自分で並べた順」のときだけ効きます(探す欄の隣の「一覧の並び順」を「自分で並べた順」にしてください)',
+  '「すべて置換」は編集中のノートでだけ使えます(「ノートを編集する」を押してから)',
+  '添付が見つかりません(「使われていない添付を消す」で消えた可能性があります)',
+];
+
+/**
  * 🔴 **アプリが書いた固定の文の頭**(#1087)── `sanitizeMessageText` の `fixedHead` へ渡す。
  * 先頭が一致するあいだは括弧の潰しも 80 字の切りも掛けない(案内のボタン名と「次にすること」を残す)。
  * ⚠ 一致しない文(生の例外が前に付く・他の断り)は今までどおり潰して切る。
  * ⚠ `CORRUPT_REFUSAL` は後ろに `(op で検出: 生の例外)` が続きうる ── 続きの側は潰す・切るが効く。
  */
 export function fixedHeadOfOpError(error: string): string {
-  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE, CORRUPT_REFUSAL, DIAGRAM_EXPORT_FAIL_HEAD]) {
+  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE, CORRUPT_REFUSAL, DIAGRAM_EXPORT_FAIL_HEAD, ...APP_REFUSAL_LITERALS]) {
     if (error.startsWith(head)) return head;
   }
   return '';

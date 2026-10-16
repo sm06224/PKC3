@@ -331,16 +331,27 @@ export class MessagePost {
       return;
     }
     const req = { cid, lid, title, section, cap };
-    const run: Promise<void> = this.flushSpool()
+    // 🔴 **書きは 1 本の鎖で順に**(#1087 M9)。⚠ 直す前は、控えが空のあいだ 2 件が同時に書きへ進み、
+    //   1 件目が一時的に失敗して控えへ回ると 2 件目が先に書かれた(二件目 → 一件目)。前の 1 件が
+    //   書けた / 控えへ回った後で次が控えを流す(失敗した分が新しい分より先に書き直される)。
+    //   ⚠ 前に走っている書きが無いときは鎖を挟まず直に流す(待ちの tick を増やさない)。
+    this.pendingWrites += 1;
+    const head = this.pendingWrites === 1 ? this.flushSpool() : this.chain.then(() => this.flushSpool());
+    const run: Promise<void> = head
       .then((drained) =>
         // 🔴 控えが流し切れていないときは、**新しい分も控えの後ろへ**(先に書くと節の日時が前後する。#1087)
         drained ? this.write(req) : this.park(req),
       )
       .finally(() => {
         this.inflight.delete(run);
+        this.pendingWrites -= 1;
       });
     this.inflight.add(run);
+    this.chain = run.catch(() => {});
   }
+  /** 書きの鎖(`deliver` の順番を守る)。⚠ 決して reject しない。 */
+  private chain: Promise<void> = Promise.resolve();
+  private pendingWrites = 0;
 
   /** 控えへ積み、上限を超えた分を古い順に捨てる。⚠ 積めなかったら投げる(呼び側が決める)。 */
   private async stash(item: SpoolItem): Promise<void> {

@@ -1973,7 +1973,8 @@ export class DetailRenderer {
          *   **毎回付け外す**(ログでないノートへ移った描画で、前のログの行を残さない)。
          *   行そのものは `applyHeadingFold` が置く(畳みの数え方を 1 本にするため)。
          */
-        if (meta?.archetype === 'textlog') host.setAttribute(LOG_DAYS_HOST_ATTR, '');
+        // 🔴 メッセージのノートは `entryMetas` に無い(システム用)── `isSystemMessageLid` でも付ける(#1087 M11)
+        if (meta?.archetype === 'textlog' || isSystemMessageLid(lid)) host.setAttribute(LOG_DAYS_HOST_ATTR, '');
         else host.removeAttribute(LOG_DAYS_HOST_ATTR);
         applyHeadingFold(host);
         /**
