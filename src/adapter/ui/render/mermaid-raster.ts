@@ -377,6 +377,13 @@ export function configFor(p: DiagramPalette): Parameters<
     startOnLoad: false,
     securityLevel: 'strict',
     /**
+     * 🔴 **構文エラーのとき mermaid 自身の「爆弾」の絵を画面に足させない**。
+     * 既定だと失敗のたびに `div#d<id>`(約 190px)が `document.body` へ残り、
+     * ページ全体にスクロールバーが出る(テーマを替えるたびに増える)。
+     * 失敗の文言は呼び出し側が平易な字で出す。
+     */
+    suppressErrorRendering: true,
+    /**
      * 🔴 **`htmlLabels` を切る**(実測で踏んだ)。既定の mermaid はラベルを
      * `<foreignObject>` で描くが、**`foreignObject` を含む SVG を canvas に
      * 描くと canvas が汚染され**、`toBlob` が
@@ -458,8 +465,21 @@ function serialized<T>(run: () => Promise<T>): Promise<T> {
 async function renderWith(id: string, source: string, p: DiagramPalette): Promise<string> {
   const m = await mermaid();
   m.initialize(configFor(p));
-  const { svg } = await m.render(id, source);
-  return svg;
+  try {
+    const { svg } = await m.render(id, source);
+    return svg;
+  } catch (e) {
+    // 🔴 失敗した描画の作業用要素(`d<id>`)は mermaid が片付けない版がある ── 念のため自分で消す
+    removeTempElements(id);
+    throw e;
+  }
+}
+
+/** mermaid が描画中に `document.body` へ置く作業用要素(`d<id>` と `<id>` 自身)を消す。 */
+export function removeTempElements(id: string): void {
+  if (typeof document === 'undefined') return;
+  document.getElementById(`d${id}`)?.remove();
+  document.getElementById(id)?.remove();
 }
 
 /**

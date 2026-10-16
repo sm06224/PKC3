@@ -10628,7 +10628,16 @@ const ACTIONS: Record<string, ActionHandler> = {
      *   焼いていない面(本体)はこれまでどおり画面の並びで数える。
      */
     const burned = Number(host.getAttribute(CHAPTER_DIAGRAM_INDEX_ATTR) ?? NaN);
-    const all = [...root.querySelectorAll('[data-pkc-mermaid-src]')];
+    /**
+     * 🔴 **数えるのは、その図を載せているノートの本文の中だけ**。かつては `root`(画面全体)で数えていたので、
+     *   横に留めた枠など**本文が 2 つ画面に在る**と、2 つ目のノートの 1 枚目が「2 枚目」の名前で落ちた。
+     *   持ち主の印が無い面は、描いた本文の器(`.pkc-md-rendered`)、それも無ければ従来どおり画面全体。
+     */
+    const scope =
+      host.closest<HTMLElement>('[data-pkc-entry],[data-pkc-split-lid]') ??
+      host.closest<HTMLElement>('.pkc-md-rendered') ??
+      root;
+    const all = [...scope.querySelectorAll('[data-pkc-mermaid-src]')];
     const index = Number.isInteger(burned) && burned >= 0 ? burned : Math.max(0, all.indexOf(host));
     // ⚠ 引けなければ `undefined` ── 本体のノートへ落とすのは受け手(`exportDiagram`)の仕事
     //    (この受け手は選択を読まない ── 押した図の持ち主だけを運ぶ)
