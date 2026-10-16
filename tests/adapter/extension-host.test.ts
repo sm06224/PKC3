@@ -10,6 +10,7 @@
  * 5. ⚠ 印が立たないまま時間切れなら**そう言う**
  */
 import { describe, expect, it, vi } from 'vitest';
+import { contentHash64Hex } from '../../src/adapter/platform/storage/content-hash';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import { connectExtension, type ExtHostDeps } from '../../src/adapter/platform/extension-host';
 import { EXT_PORT_TAG, EXT_READY_FLAG } from '../../src/features/extension/ext-wire';
@@ -292,9 +293,9 @@ describe('拡張からの書き戻し (#195 / C-5 段③)', () => {
       win: win as unknown as Window,
       metas: () => [meta('a')],
       nonce: NONCE,
-      onWrite: async (ops) => {
+      onWrite: async (ops, handedOff) => {
         calls.push([...ops]);
-        return opts?.onWrite ? opts.onWrite(ops) : { ok: true as const, wrote: ops.length };
+        return opts?.onWrite ? opts.onWrite(ops, handedOff) : { ok: true as const, wrote: ops.length };
       },
       pollMs: 0,
     });
@@ -414,6 +415,65 @@ describe('拡張からの書き戻し (#195 / C-5 段③)', () => {
       assetRefsApprox: 0,
     });
     expect([...r.link.delivered()]).toEqual(['a']);
+  });
+
+  const entryOf = (body: string) => ({
+    lid: 'a',
+    title: 't',
+    archetype: 'text' as const,
+    date: null,
+    status: null,
+    archived: false,
+    createdAt: null,
+    updatedAt: null,
+    body,
+    assetRefsApprox: 0,
+  });
+
+  it('🔴 送った時点の本文の指紋を、書き戻しの係へ渡す(M1)', async () => {
+    const seen: ReadonlyMap<string, string>[] = [];
+    const r = await linked({
+      onWrite: async (ops, handedOff) => {
+        seen.push(handedOff);
+        return { ok: true as const, wrote: ops.length };
+      },
+    });
+    r.link.deliver(entryOf('送った本文'));
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: 'なおした本文' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(seen[0]?.get('a'), '送った本文の指紋が渡っていない').toBe(contentHash64Hex('送った本文'));
+  });
+
+  it('🔑 書き戻しが通ったら基準が新しい本文に変わり、2 回目の書き戻しも通る(M1)', async () => {
+    const seen: (string | undefined)[] = [];
+    const r = await linked({
+      onWrite: async (ops, handedOff) => {
+        seen.push(handedOff.get('a'));
+        return { ok: true as const, wrote: ops.length };
+      },
+    });
+    r.link.deliver(entryOf('送った本文'));
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: '1 回目の版' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: '2 回目の版' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(seen).toEqual([contentHash64Hex('送った本文'), contentHash64Hex('1 回目の版')]);
+  });
+
+  it('断られた書き戻しでは基準を動かさない(M1)', async () => {
+    const seen: (string | undefined)[] = [];
+    const r = await linked({
+      onWrite: async (_ops, handedOff) => {
+        seen.push(handedOff.get('a'));
+        return { ok: false as const, why: 'no' };
+      },
+    });
+    r.link.deliver(entryOf('送った本文'));
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: '版' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    r.say({ t: 'write', ops: [{ op: 'setBody', lid: 'a', body: '版 2' }] });
+    for (let i = 0; i < 20; i += 1) await tick();
+    expect(seen).toEqual([contentHash64Hex('送った本文'), contentHash64Hex('送った本文')]);
   });
 
   it('⚠ 書き戻しは見取り図を押し直さない(`hello` とは別の口)', async () => {

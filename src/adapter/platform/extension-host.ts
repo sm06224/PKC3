@@ -43,6 +43,7 @@ import { parseExtWrite, type ExtWriteOp } from '@features/extension/ext-write';
 import { buildProjection } from '@features/extension/ext-projection';
 import type { ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import type { EntryMeta } from '@core/model/entry-meta';
+import { contentHash64Hex } from '@adapter/platform/storage/content-hash';
 
 export interface ExtHostDeps {
   /** 相手の窓(`launch-tile.ts` が握っている handle)。 */
@@ -74,6 +75,13 @@ export interface ExtHostDeps {
    */
   readonly onWrite: (
     ops: readonly ExtWriteOp[],
+    /**
+     * 🔴 **送った時点の本文の指紋**(lid → `contentHash64Hex`)。
+     * ⚠ 当てる側が「いまの本文」と突き合わせ、**違えば書かずに断る**
+     *   (送ったあとに user が書いた分を、アプリの書き戻しで黙って消さない)。
+     * ⚠ 必須 ── 渡し忘れると「送ったあとの編集を上書きする」穴に戻る。
+     */
+    handedOff: ReadonlyMap<string, string>,
   ) => Promise<{ ok: true; wrote: number } | { ok: false; why: string }>;
   /** 断ったこと・諦めたことを数えるため。 */
   readonly onReject?: (why: string) => void;
@@ -135,6 +143,12 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
    *   user はもう一度渡すことになる。それが正しい(ジェスチャが許可である)。
    */
   const delivered = new Set<string>();
+  /**
+   * 🔴 **送った時点の本文の指紋**(M1)。⚠ lid だけ憶えると、送ったあとに user が
+   *   書き足した分を、アプリの書き戻しが**黙って上書き**する。
+   * ⚠ 書き戻しが通ったら**新しい本文の指紋へ更新**する(同じアプリが 2 回目を書けるように)。
+   */
+  const handedOffHash = new Map<string, string>();
 
   const send = (): void => {
     if (port === null) return;
@@ -182,9 +196,12 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
           port?.postMessage(writeResultMessage({ ok: false, why: checked.why }));
           return;
         }
-        void deps.onWrite(checked.ops).then(
+        const ops = checked.ops;
+        void deps.onWrite(ops, new Map(handedOffHash)).then(
           (r) => {
             if (!r.ok) deps.onReject?.(r.why);
+            // 🔑 通った分は、アプリが書いた本文が新しい基準になる
+            else for (const op of ops) handedOffHash.set(op.lid, contentHash64Hex(op.body));
             // ⚠ 返事の途中で窓が閉じることがある ── 落とさない
             try {
               port?.postMessage(writeResultMessage(r));
@@ -241,6 +258,8 @@ export function connectExtension(deps: ExtHostDeps): ExtHostLink {
         port.postMessage(deliveredMessage(entry));
         // 🔑 **渡せた分だけ**書き戻せるようになる(渡す前に増やさない)
         delivered.add(entry.lid);
+        // 🔴 送った本文の指紋を、lid と一緒に憶える(M1)
+        handedOffHash.set(entry.lid, contentHash64Hex(entry.body));
         return true;
       } catch {
         // 港が既に閉じている ── 渡せなかったことを呼び側に返す(黙らない)

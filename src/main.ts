@@ -35,7 +35,7 @@ import { DuckDbRunner } from '@adapter/platform/duckdb/duckdb-runner';
 import { openDuckDb } from '@adapter/platform/duckdb/duckdb-open';
 import { DuckDbPackStore } from '@adapter/platform/duckdb/duckdb-pack-store';
 import { connectOpenedEffects } from '@adapter/platform/opened-effects';
-import { tileSelectsEntry } from '@features/launcher/tiles';
+import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import {
   applyTextScale,
@@ -412,7 +412,7 @@ import { askSqlEmbed, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hyd
 import { SameOriginGate } from '@adapter/platform/same-origin-grants';
 import { appExtensionGrants } from '@adapter/platform/extension-grants';
 import { appExtLinks } from '@adapter/platform/extension-links';
-import { connectExtension } from '@adapter/platform/extension-host';
+import { buildLaunchExt } from '@adapter/platform/launch-ext';
 import {
   NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
@@ -2535,6 +2535,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   const applyExtWrite = (
     ops: readonly ExtWriteOp[],
+    handedOff: ReadonlyMap<string, string>,
   ): Promise<{ ok: true; wrote: number } | { ok: false; why: string }> =>
     applyExtWriteOps(ops, {
       // 🔑 chain に載せる(2 本目の待ち口を作らない)
@@ -2557,7 +2558,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           keepMeta,
         }),
       refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() }),
-    });
+    }, handedOff);
 
   const runExport = (
     kind:
@@ -3440,6 +3441,24 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * @param openTargetOverride **その 1 回だけ**の出し先(#884 段②)。
    *   渡さなければ `currentAppOpenTarget()`(= 設定どおり)。
    */
+  /**
+   * 🔴 **拡張の口を組む ── 入口 2 つ(詳細 / 一覧のタイル)で同じ物**(L2)。
+   * ⚠ 判断と配線は `launch-ext.ts` に在る(この file はどの test からも実行されない)。
+   */
+  const buildExtDeps = (o: {
+    confirm: (title: string) => Promise<boolean>;
+    afterGrant?: () => void;
+  }): ReturnType<typeof buildLaunchExt> =>
+    buildLaunchExt({
+      grants: appExtensionGrants,
+      links: appExtLinks,
+      metas: () => dispatcher.getState().entryMetas.values(),
+      onWrite: (ops, handedOff) => applyExtWrite(ops, handedOff),
+      nonce: () => crypto.randomUUID(),
+      confirm: o.confirm,
+      ...(o.afterGrant === undefined ? {} : { afterGrant: o.afterGrant }),
+    });
+
   const launchLauncherTile = (lid: string, openTargetOverride?: AppOpenTarget): void => {
     const tile = dispatcher.getState().launcherTiles?.find((t) => t.lid === lid);
     if (!tile) return;
@@ -3490,6 +3509,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         // ⚠ **聞かない。憶えているものを確かめるだけ**(上の granted と同じ判定を
         //    通す ── ここで別の式を書くと、片方だけ直した日に食い違う)
         confirmSameOrigin: async () => granted,
+        // 🔴 **憶えた許可は、一覧のタイルから開いても効く**(L2)。⚠ 聞かない ──
+        //    許可を新しく出す入口は添付の詳細だけ(`confirm` は常に断る)
+        ext: buildExtDeps({ confirm: async () => false }),
       },
       {
         sameOrigin: granted,
@@ -4440,12 +4462,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
             confirmSameOrigin: async (title) => {
               /**
                * 🔴 **「アプリとして登録済みか」で憶え方が変わる**(#301。user 裁定 2026-08-21)。
-               * ⚠ 登録の判定は**タイルの一覧**から引く ── frontmatter を自分で読み直すと、
-               *   「登録済みとは何か」の規則が 2 か所に生える(`tiles.ts` が正本)。
+               * ⚠ 登録の判定は**この添付の本文**から引く(`isRegisteredApp` ── 規則は `tiles.ts` が正本)。
+               *   一覧のタイル(`launcherTiles`)から引くと、「アプリ」の画面を開くまで `null` で、
+               *   登録済み・許可済みでも毎回聞かれた(L3)。
                */
-              const registered =
-                dispatcher.getState().launcherTiles?.some((t) => t.lid === lid && t.kind === 'app') ===
-                true;
+              const registered = isRegisteredApp({ lid, title: meta.title, body });
               const seen = { lid, assetKey: att.assetKey, registered };
               if (sameOriginGate.allows(seen)) return true;
               // ⚠ 何が起きるかを**具体**で書く(「安全でない」では判断できない)
@@ -4470,27 +4491,25 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               return true;
             },
             /**
-             * 🔴 **拡張の口**(#195 / C-5 段①)。⚠ 台帳と港の機構は
-             *   `extension-grants.ts` / `extension-host.ts` に在る ── ここは配線だけ。
+             * 🔴 **拡張の口**(#195 / C-5 段①)。⚠ 配線は `buildLaunchExt` の 1 か所
+             *   (一覧のタイルの入口と同じ物 ── L2)。ここが足すのは**聞く UI** と
+             *   **憶えた後の描き直し**だけ。
              * ⚠ 見取り図は**呼ばれるたびに常駐の集約から読む**(写しを抱えない)。
              */
-            ext: {
-              granted: (assetKey) => appExtensionGrants.isGranted(assetKey ?? null),
+            ext: buildExtDeps({
               /**
                * 🔴 **憶えたら、その場で描き直す**(`revokeExtension` と同じ倒し方)。
                * ⚠ 許可は state に持たないので、描き直さないと
                *   **「目次を見せて起動」のボタンが残ったまま**になる ── user から見ると
                *   「押したのに何も変わらない / まだ許していないのか?」である
                *   (取り消し側では踏まずに、こちらだけ落としていた)。
+               * 🔴 **指紋を崩してから描く**(外部画像の同意と同じ倒し方)。
+               *    ⚠ 詳細の指紋は state しか見ていないので、`render` を呼ぶだけでは
+               *      **早期 return で何も起きない**(CLAUDE.md §2)。
                */
-              grant: (assetKey) => {
-                const ok = appExtensionGrants.grant(assetKey ?? null);
-                // 🔴 **指紋を崩してから描く**(外部画像の同意と同じ倒し方)。
-                //    ⚠ 詳細の指紋は state しか見ていないので、`render` を呼ぶだけでは
-                //      **早期 return で何も起きない**(CLAUDE.md §2)。
+              afterGrant: () => {
                 center.invalidateDetail();
                 center.render(dispatcher.getState());
-                return ok;
               },
               confirm: async (title) =>
                 // ⚠ 何が見えるかを**具体**で書く(「連携します」では判断できない)
@@ -4502,28 +4521,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
                     'システムでいつでも取り消せます)。\n\n開きますか?',
                   { okLabel: 'ノート一覧を見せて開く' },
                 ),
-              /**
-               * 🔴 **繋いだら台帳に載せる**(#195 / C-5 段②)。⚠ 段① まで、港は
-               *   `launchTile` のローカル変数で足りていた ── 段② は**外から**
-               *   (情報ペインの「このアプリへ送る」)起こすので、
-               *   「いまどの窓が開いているか」を引ける場所が要る。
-               * 🔑 `track()` は**外すことまで込みの link** を返すので、
-               *   `launchTile` は今までどおり `close()` を呼ぶだけでよい
-               *   (外し忘れようがない = 幽霊が残らない)。
-               */
-              connect: (win, nonce, app) =>
-                appExtLinks.track(
-                  app,
-                  connectExtension({
-                    win,
-                    // 🔴 外殻に焼いたものと**同じ合図**(別々に作ると外殻が港を捨てる)
-                    nonce,
-                    metas: () => dispatcher.getState().entryMetas.values(),
-                    onWrite: (ops) => applyExtWrite(ops),
-                  }),
-                ),
-              nonce: () => crypto.randomUUID(),
-            },
+            }),
           },
           { sameOrigin: launchOpts.sameOrigin, extension: launchOpts.extension },
         );
