@@ -106,6 +106,15 @@ describe('① worker が刻んだ時刻を返す', () => {
     expect(stamps.updatedAt).toBe(row!.updated_at);
   });
 
+  it('🔴 書いた本文の字数も返し、DB の body_chars 列と一致する(#1087)', async () => {
+    const body = 'あ'.repeat(123) + '😀';
+    const stamps = await upsert('w4', body);
+    const rows = await request({ op: 'listEntryMetas', cid: 'c1' });
+    const row = rows.find((r) => r.lid === 'w4');
+    expect(row?.body_chars, '前提: 列が書かれている').toBe(body.length);
+    expect(stamps.bodyChars).toBe(row!.body_chars);
+  });
+
   it('🔴 更新しても作成は潰れない(ON CONFLICT に created_at を入れない)', async () => {
     const first = await upsert('w3', '# c1');
     // 🔴 **1 秒以上待つ**。`datetime('now')` は**秒精度**なので、続けて 2 回書くと
@@ -223,7 +232,12 @@ function stampingStore(bodies: Record<string, string>): {
       state.writes += 1;
       store[e.lid] = e.body;
       const n = String(state.writes).padStart(2, '0');
-      return { createdAt: '2026-03-04 05:06:07', updatedAt: `2026-03-04 05:06:${n}` };
+      // 本物の worker は書いた本文の字数も返す(`writeEntryRow`)── 真似る
+      return {
+        createdAt: '2026-03-04 05:06:07',
+        updatedAt: `2026-03-04 05:06:${n}`,
+        bodyChars: e.body.length,
+      };
     },
     deleteEntry: async (lid: string) => {
       delete store[lid];
@@ -282,6 +296,39 @@ describe('② 書込のたびに state の meta が更新される', () => {
 
     expect(s.writes, '追記が書込に到達していない(前提が崩れている)').toBeGreaterThan(0);
     expect(d.getState().entryMetas.get('a')!.updatedAt).toBe('2026-03-04 05:06:01');
+  });
+
+  it('🔴 追記(APPEND_TO_ENTRY)の ack で meta.bodyChars が新しい本文の字数になる(#1087)', async () => {
+    const d = new Dispatcher();
+    const s = stampingStore({ a: '# A' });
+    connectStoreEffects(d, s.port);
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    expect(d.getState().entryMetas.get('a')!.bodyChars, '前提: 追記前は数えていない').toBeNull();
+    d.dispatch({ type: 'APPEND_TO_ENTRY', lid: 'a', text: 'あ'.repeat(300), heading: null, target: null });
+    await tick();
+
+    const written = (await s.port.getBody('a')) as string;
+    expect(written.length, '前提: 追記で本文が伸びた').toBeGreaterThan(300);
+    expect(d.getState().entryMetas.get('a')!.bodyChars).toBe(written.length);
+  });
+
+  it('🔴 刻みが同じでも、字数が違えば ENTRY_STAMPED は meta.bodyChars を更新する。名乗らない ack は動かさない', () => {
+    const d = new Dispatcher();
+    const s = stampingStore({});
+    connectStoreEffects(d, s.port);
+    const T = '2026-01-01 00:00:00';
+    d.dispatch({
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a', 1, { createdAt: T, updatedAt: T, bodyChars: 10 })],
+      relations: [],
+    });
+    d.dispatch({ type: 'ENTRY_STAMPED', lid: 'a', createdAt: T, updatedAt: T });
+    expect(d.getState().entryMetas.get('a')!.bodyChars, '字数を名乗らない ack で動いた').toBe(10);
+    d.dispatch({ type: 'ENTRY_STAMPED', lid: 'a', createdAt: T, updatedAt: T, bodyChars: 77 });
+    expect(d.getState().entryMetas.get('a')!.bodyChars).toBe(77);
   });
 
   it('🔴 題名の変更(RENAME)でも更新が進む', async () => {

@@ -3514,7 +3514,14 @@ export type SystemCommand =
    * 各経路の action へ相乗りさせず**1 つの action に寄せる** ── 相乗りだと
    * 経路を足した人が時刻を落とし、そこだけ「—」に戻る
    */
-  | { type: 'ENTRY_STAMPED'; lid: string; createdAt: string | null; updatedAt: string | null }
+  | {
+      type: 'ENTRY_STAMPED';
+      lid: string;
+      createdAt: string | null;
+      updatedAt: string | null;
+      /** 書いた本文の字数(本文を書かない口は付けない = meta を動かさない)。 */
+      bodyChars?: number;
+    }
   /**
    * 🔴 保存が「消えない扱い」かの ack(#347)。⚠ **`unknown` は届かない** ──
    * 分からないままのときは撃たない(state の初期値がそれである)。
@@ -8821,7 +8828,12 @@ function reduceCore(
       const meta = state.entryMetas.get(action.lid);
       // 消えた entry の ack は捨てる(削除と書込の競合)
       if (!meta) return { state, events: [] };
-      if (meta.createdAt === action.createdAt && meta.updatedAt === action.updatedAt)
+      const charsChanged = action.bodyChars !== undefined && meta.bodyChars !== action.bodyChars;
+      if (
+        meta.createdAt === action.createdAt &&
+        meta.updatedAt === action.updatedAt &&
+        !charsChanged
+      )
         return { state, events: [] };
       const entryMetas = new Map(state.entryMetas);
       entryMetas.set(action.lid, {
@@ -8829,6 +8841,8 @@ function reduceCore(
         // ⚠ 既にある createdAt を null で塗り潰さない(行が消えていた場合に null が来る)
         createdAt: action.createdAt ?? meta.createdAt,
         updatedAt: action.updatedAt ?? meta.updatedAt,
+        // 🔴 刻みが同じでも字数が違えば追従する(#1087)。⚠ 名乗らない口では動かさない
+        ...(action.bodyChars === undefined ? {} : { bodyChars: action.bodyChars }),
       });
       return { state: { ...state, entryMetas }, events: [] };
     }

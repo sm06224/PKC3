@@ -2202,6 +2202,8 @@ function writeEntryRow(
     stamps: {
       createdAt: stamped?.created_at ?? null,
       updatedAt: stamped?.updated_at ?? null,
+      // 🔑 `bindUpsert` が `body_chars` に書いた値と同じ(UTF-16 の長さ)
+      bodyChars: entry.body.length,
       // ⚠ **書いたときだけ名乗る**(旧 worker は名乗らない = 呼び側が 2 手へ落ちる)
       ...(opts.parent ? { parentWritten: true } : {}),
     },
