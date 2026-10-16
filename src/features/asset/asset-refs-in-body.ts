@@ -22,7 +22,8 @@
  * ⚠ **pure module**。
  */
 import { FENCE_ASSET_PREFIX } from '../markdown/fence-asset';
-import { fenceAssetOfInfo, parseMarkdownTokens } from '../markdown/markdown-render';
+import { fenceAssetOfInfo, parseMarkdownTokens, stripComments } from '../markdown/markdown-render';
+import { stripMismatchedIfBlocks } from '../markdown/markdown-toc';
 
 export type AssetUseKind = 'image' | 'link' | 'fence';
 
@@ -60,8 +61,15 @@ export function listAssetUses(body: string): AssetUse[] {
     byKey.set(key, { label, line, kind, count: 1 });
     order.push(key);
   };
-  for (const token of parseMarkdownTokens(body)) {
-    const line = (token.map?.[0] ?? 0) + 1;
+  /**
+   * 🔴 **描かれない部分は数えない**(`%%…%%` / `%%%` / `:::comment` / 合わない `:::if`)── 目次と同じ前処理。
+   * 捨てた行は `lineMap` で原文の行へ戻す(返す `line` は原文のまま)。
+   */
+  const stripped = stripComments(body);
+  const visible = stripMismatchedIfBlocks(stripped.transformed, 'html', true);
+  for (const token of parseMarkdownTokens(visible)) {
+    const at = token.map?.[0] ?? 0;
+    const line = (stripped.lineMap[at] ?? at) + 1;
     if (token.type === 'fence') {
       const { parse } = fenceAssetOfInfo((token.info ?? '').trim());
       if (parse.kind === 'one') note(parse.key, parse.rest, line, 'fence');

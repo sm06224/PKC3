@@ -183,8 +183,8 @@ export function extractHeadingsFromMarkdown(
   // setext の本文候補(直前まで続く、記法を持たない行)
   let para: string[] = [];
   const headRe = blockForms
-    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+)\s*)*(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/
-    : /^ {0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/;
+    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)[ \t]*)*(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/
+    : /^ {0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
   for (const line of lines) {
     // 閉じは開きと同じ記号で同じ長さ以上(#1087、`advanceFence` が正本)
     const wasIn = fence !== '';
@@ -219,11 +219,16 @@ export function extractHeadingsFromMarkdown(
 
 /**
  * `:::if{format=X}` で format が targetFormat と一致しない block の content を
- * strip(空行で置換、line count は維持)。fenced code 内 marker は無視。nested
+ * strip(空行で置換、中の行数は維持。開き・閉じの行は keepLines のときだけ空行で残す)。fenced code 内 marker は無視。nested
  * directive は depth tracking で handle。markdown-render.ts processIfBlocks の
  * 軽量版(TOC 抽出専用、lineMap 不要)。
  */
-function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
+export function stripMismatchedIfBlocks(
+  source: string,
+  targetFormat: string,
+  /** 🔑 `true` なら開き・閉じの行も空行で残す(行数が変わらない。添付の「行」を原文のまま返す側が使う) */
+  keepLines = false,
+): string {
   if (!source.includes(':::if')) return source;
   const lines = source.split(/\r?\n/);
   const out: string[] = [];
@@ -248,6 +253,7 @@ function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
       i++;
       continue;
     }
+    if (keepLines) out.push('');
     const attrs = m[1] ?? '';
     const fmtMatch = /\bformat\s*=\s*"?([\w-]+)"?/.exec(attrs);
     const fmt = fmtMatch?.[1];
@@ -268,6 +274,7 @@ function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
       if (closeRe.test(inner)) {
         depth--;
         if (depth === 0) {
+          if (keepLines) out.push('');
           i++;
           break;
         }

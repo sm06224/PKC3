@@ -11312,9 +11312,10 @@ function buildPersist(
   const changed =
     meta.status !== ext.status ||
     meta.date !== ext.date ||
-    meta.archived !== ext.archived;
+    meta.archived !== ext.archived ||
+    meta.bodyChars !== body.length;
   const entryMetas = changed
-    ? new Map(state.entryMetas).set(meta.lid, { ...meta, ...ext })
+    ? new Map(state.entryMetas).set(meta.lid, { ...meta, ...ext, bodyChars: body.length })
     : state.entryMetas;
   return {
     entryMetas,

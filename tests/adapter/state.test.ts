@@ -267,6 +267,18 @@ describe('reducer: lean aggregate', () => {
     expect(reduce(s, { type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '新題名' }).state.notice).toBeNull();
   });
 
+  it('COMMIT_EDIT は meta.bodyChars を保存した本文の字数に追従させる(#1087)', () => {
+    let s = loadedA();
+    expect(s.entryMetas.get('a')?.bodyChars, '前提: 保存前は数えていない').toBeNull();
+    s = reduce(s, { type: 'START_EDIT' }).state;
+    s = reduce(s, { type: 'UPDATE_OPEN_BODY', body: 'あ'.repeat(5000) }).state;
+    const c = reduce(s, { type: 'COMMIT_EDIT' });
+    expect(c.events.map((e) => e.type), '前提: 保存が走った').toContain('PERSIST_ENTRY');
+    expect(c.state.entryMetas.get('a')?.bodyChars).toBe(5000);
+    // 対照群: 他のノートの meta は動かない
+    expect(c.state.entryMetas.get('b')?.bodyChars).toBeNull();
+  });
+
   it('COMMIT_EDIT emits PERSIST_ENTRY with the full row, and skips when unchanged', () => {
     let s = loadedA();
     s = reduce(s, { type: 'START_EDIT' }).state;
@@ -298,9 +310,15 @@ describe('reducer: lean aggregate', () => {
       },
     ]);
     expect(committed.state.openBody?.baseline).toBe('# A2');
-    // text フレーバーの commit は抽出値が変わらない ── entryMetas の参照を壊さない
-    // (sidebar は参照 fingerprint で差分検出するため)
-    expect(committed.state.entryMetas).toBe(s.entryMetas);
+    // text フレーバーの commit は抽出値(status / date / archived)が変わらない。変わるのは字数(bodyChars)だけ。
+    // 🔑 sidebar は参照 fingerprint で差分検出するので、**何も変わらない commit** は参照を壊さない
+    //    (#1087 で bodyChars を追従させたため、字数が変わる最初の commit は新しい Map になる)
+    expect(committed.state.entryMetas.get('a')?.bodyChars).toBe(4);
+    let t = reduce(committed.state, { type: 'START_EDIT' }).state;
+    t = reduce(t, { type: 'UPDATE_OPEN_BODY', body: '# A3' }).state; // 同じ字数
+    const again = reduce(t, { type: 'COMMIT_EDIT' });
+    expect(again.events.map((e) => e.type), '前提: 保存は走る').toContain('PERSIST_ENTRY');
+    expect(again.state.entryMetas).toBe(t.entryMetas);
   });
 
   it('COMMIT_EDIT extracts flavor columns at reduce time (roundtrip pin, review K/C-1)', () => {
