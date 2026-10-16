@@ -63,13 +63,15 @@ export interface PaletteRow {
 /**
  * 探し語を突き合わせる形へ均す。
  *
- * ⚠ **大文字小文字だけ**を潰す ── 日本語には大小が無いので、これで
- * 「Mod+E」「mod+e」の両方が当たり、`ノート` はそのまま当たる。
- * ⚠ かなカナや全角半角までは潰さない(#425 段①の範囲外 ── 潰すなら
- * **その正規化を 1 か所に置いてから**でないと、探す欄と食い違う)。
+ * 🔴 **大文字小文字・全角半角・ひらがなカタカナを潰す**(#1087 K2)── 日本語入力のまま「のーと」「ﾉｰﾄ」「ＳＱＬ」と
+ * 打っても、「ノート」「sql」と同じ操作が当たる。NFKC で全角英数・半角カナを均し、カタカナはひらがなへ寄せる。
+ * ⚠ **探される側(label / note / alias / id)と探す語の両方**を同じ関数で均す ── 片方だけだと食い違う。
  */
 function fold(s: string): string {
-  return s.toLowerCase();
+  return s
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
 }
 
 /**

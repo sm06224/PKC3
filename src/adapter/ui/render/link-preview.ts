@@ -515,6 +515,8 @@ export function setupLinkPreview(
 
   const onKeyDown = (ev: KeyboardEvent): void => {
     if (ev.key === 'Escape') {
+      // 🔴 カードが出ているときだけ止める(開いているノートまで閉じない)
+      if (linkPreviewOpen(root)) ev.stopImmediatePropagation();
       close();
     }
   };

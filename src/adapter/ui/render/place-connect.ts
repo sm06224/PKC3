@@ -319,6 +319,7 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape' || drag === null) return;
     e.preventDefault();
+    e.stopImmediatePropagation(); // 🔴 つなぎ中だけ止める(開いているノートまで閉じない)
     endDrag();
     clearHandles();
   };
@@ -342,7 +343,7 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
   doc.addEventListener('pointercancel', onPointerCancel);
   doc.addEventListener('pointerout', onPointerOut);
   doc.addEventListener('click', onClick, true);
-  doc.addEventListener('keydown', onKeyDown);
+  doc.addEventListener('keydown', onKeyDown, true);
   return () => {
     endDrag(); // ⚠ 外した後に仮の線・印・予告を残さない
     clearHandles();
@@ -352,6 +353,6 @@ export function installPlaceConnect(root: HTMLElement, dispatcher: Dispatcher): 
     doc.removeEventListener('pointercancel', onPointerCancel);
     doc.removeEventListener('pointerout', onPointerOut);
     doc.removeEventListener('click', onClick, true);
-    doc.removeEventListener('keydown', onKeyDown);
+    doc.removeEventListener('keydown', onKeyDown, true);
   };
 }

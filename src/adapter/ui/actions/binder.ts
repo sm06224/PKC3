@@ -248,7 +248,7 @@ import {
   choosePaste,
   describePaste,
   DEFAULT_PASTE_SOURCE,
-  PASTE_CONVERTED_MESSAGE,
+  pasteConvertedMessage,
   PASTE_MESSAGE_COALESCE_MS,
   type PasteSource,
 } from '@features/markdown/paste-source';
@@ -16580,7 +16580,7 @@ export function bindActions(
       const now = Date.now();
       if (lastPasteMessageAt !== null && now - lastPasteMessageAt < PASTE_MESSAGE_COALESCE_MS) return;
       lastPasteMessageAt = now;
-      services.leaveMessage?.({ kind: 'result', source: '貼り付け', text: PASTE_CONVERTED_MESSAGE });
+      services.leaveMessage?.({ kind: 'result', source: '貼り付け', text: pasteConvertedMessage() });
     };
 
     const adopt = services.adoptUrls;

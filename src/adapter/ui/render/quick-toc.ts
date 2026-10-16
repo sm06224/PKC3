@@ -251,7 +251,10 @@ export function installQuickToc(
   };
 
   const onKeyDown = (ev: KeyboardEvent): void => {
-    if (ev.key === 'Escape') {
+    // 🔴 開いている間だけ捕捉段で止める(開いているノートまで閉じない)。閉じているときの `Esc` は通す。
+    if (ev.key === 'Escape' && !popover.hidden) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
       closePopover();
     }
   };
@@ -262,7 +265,7 @@ export function installQuickToc(
     closePopover();
   });
   doc.addEventListener('click', onDocClick);
-  doc.addEventListener('keydown', onKeyDown);
+  doc.addEventListener('keydown', onKeyDown, true);
 
   const update = (): void => {
     const headings = bodyHost.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]');
@@ -345,7 +348,7 @@ export function installQuickToc(
     stopTracking();
     button.removeEventListener('click', togglePopover);
     doc.removeEventListener('click', onDocClick);
-    doc.removeEventListener('keydown', onKeyDown);
+    doc.removeEventListener('keydown', onKeyDown, true);
     wrapper.remove();
   };
 

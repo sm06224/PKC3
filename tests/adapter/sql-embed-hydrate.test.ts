@@ -246,6 +246,27 @@ describe('見えたときに引いて、表にする(実 worker)', () => {
     hydrator.release();
   });
 
+  it('🔴 試せる場所のキーは、いまの割当から引く(固定の字ではない。#1087 K5)', async () => {
+    const { appKeymap } = await import('../../src/adapter/ui/render/keymap');
+    appKeymap.removeBinding('view-sql', 'Alt+7');
+    try {
+      const { run } = realRunner();
+      setSqlEmbedRunner(run);
+      const body = embedBody('SELECT * FROM no_such_table');
+      mount(body);
+      const hydrator = new SqlEmbedHydrator();
+      hydrator.sync(root, body);
+      seeAll();
+      const host = hostsOf()[0]!;
+      await vi.waitFor(() => expect(host.getAttribute('data-pkc-sql-embed-state')).toBe('failed'));
+      expect(noteOf(host), '外した Alt + 7 をまだ案内している').not.toContain('(Alt + 7)');
+      expect(noteOf(host)).toContain('SQL で調べる画面(Ctrl + Alt + 7)で試せます');
+      hydrator.release();
+    } finally {
+      appKeymap.resetCommand('view-sql');
+    }
+  });
+
   it('0 行の答えは「該当する行はありません」', async () => {
     const { run } = realRunner();
     setSqlEmbedRunner(run);

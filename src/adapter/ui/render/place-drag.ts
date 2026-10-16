@@ -577,6 +577,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     if (e.key === 'Escape') {
       if (nudge === null) return;
       e.preventDefault();
+      e.stopImmediatePropagation(); // 🔴 動かしている最中だけ止める(開いているノートまで閉じない)
       cancelNudge();
       return;
     }
@@ -623,7 +624,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
   doc.addEventListener('pointerup', onPointerUp);
   doc.addEventListener('pointercancel', onPointerCancel);
   doc.addEventListener('click', onClick, true);
-  doc.addEventListener('keydown', onKeyDown);
+  doc.addEventListener('keydown', onKeyDown, true);
   return () => {
     cancelNudge(); // ⚠ 外した後に timer が dispatch しない
     if (pendingCleanup !== null) {
@@ -635,6 +636,6 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     doc.removeEventListener('pointerup', onPointerUp);
     doc.removeEventListener('pointercancel', onPointerCancel);
     doc.removeEventListener('click', onClick, true);
-    doc.removeEventListener('keydown', onKeyDown);
+    doc.removeEventListener('keydown', onKeyDown, true);
   };
 }

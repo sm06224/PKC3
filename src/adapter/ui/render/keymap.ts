@@ -24,6 +24,7 @@ import {
   KEY_COMMANDS,
   matchCommand,
   resolveUsableBindings,
+  sameChord,
   validateBinding,
   type BindingProblem,
   type UnusableBinding,
@@ -34,6 +35,11 @@ import {
 import { SETTINGS_NOT_PERSISTED_TEXT } from './settings-persist-probe';
 
 const KEY = 'pkc3.keymap';
+
+/** 同じ鍵の集合か(並び・書き方の揺れは見ない)。 */
+function sameChordSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((x) => b.some((y) => sameChord(x, y))) && b.every((y) => a.some((x) => sameChord(x, y)));
+}
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   try {
@@ -114,7 +120,12 @@ export class KeymapStore {
 
   /** そのコマンドが既定のままか。 */
   isDefault(commandId: string): boolean {
-    return this.readOverrides()[commandId] === undefined;
+    const o = this.readOverrides()[commandId];
+    if (o === undefined) return true;
+    const cmd = findCommand(commandId);
+    if (cmd === null) return false;
+    // 🔴 並びではなく**集合**で比べる(#1087 K6)── 外した既定を別の並びで足し直しても「既定のまま」
+    return sameChordSet(o, cmd.defaults);
   }
 
   /**
@@ -168,8 +179,36 @@ export class KeymapStore {
     this.refresh();
     const next = { ...this.readOverrides() };
     if (next[commandId] === undefined) return true;
+    // 🔴 既定の鍵を**いま別の操作が使っている**なら、それは戻さない(#1087 K4)── 戻すと向こうの割当が黙って使えなくなる。
+    //    向こうの割当を残し、こちらは残りの既定だけに戻す(戻せなかった鍵は `resetConflicts` で呼び手が言う)
+    const held = this.resetConflicts(commandId);
+    const cmd = findCommand(commandId);
+    if (held.length > 0 && cmd !== null) {
+      return this.write(
+        commandId,
+        cmd.defaults.filter((d) => !held.some((h) => sameChord(h.chord, d))),
+      );
+    }
     delete next[commandId];
     return this.save(next);
+  }
+
+  /**
+   * 「既定に戻す」で戻せない既定の鍵(#1087 K4)── 別の操作が割り当て済みのもの。
+   * @returns 鍵と、持っている操作の id(戻せないものが無ければ空)
+   */
+  resetConflicts(commandId: string): readonly { readonly chord: string; readonly withCommandId: string }[] {
+    const cmd = findCommand(commandId);
+    if (cmd === null) return [];
+    const bindings = this.getBindings();
+    const out: { chord: string; withCommandId: string }[] = [];
+    for (const d of cmd.defaults) {
+      const p = validateBinding(commandId, d, bindings);
+      if (p !== null && p.kind === 'conflict' && p.withCommandId !== undefined) {
+        out.push({ chord: d, withCommandId: p.withCommandId });
+      }
+    }
+    return out;
   }
 
   /** 全部を既定へ戻す。@returns 保存できたか。 */
@@ -208,9 +247,9 @@ export class KeymapStore {
     const cmd = findCommand(commandId);
     if (cmd === null) return true;
     const next = { ...this.readOverrides() };
-    const same =
-      chords.length === cmd.defaults.length && chords.every((c, i) => c === cmd.defaults[i]);
-    // 既定と同じ並びに戻ったなら**上書きを消す**(保存に無駄な行を残さない)
+    // 🔴 並びは見ない(#1087 K6)── 同じ鍵の集合に戻ったなら既定の並びへ戻る(説明に出る第 1 割当も既定の並びで選ぶ)
+    const same = sameChordSet(chords, cmd.defaults);
+    // 既定と同じ鍵の集合に戻ったなら**上書きを消す**(保存に無駄な行を残さない)
     if (same) delete next[commandId];
     else next[commandId] = [...chords];
     return this.save(next);

@@ -952,6 +952,18 @@ describe('マニュアルの中を探す(#636)', () => {
     expect(rows().length, '結果まで消えている').toBe(hits);
   });
 
+  it('🔴 変換中の Esc(isComposing / keyCode 229)では打った字を消さない(#1087 K7)', () => {
+    new HelpRenderer(region).render();
+    type('予定');
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }));
+    expect(box().value, 'isComposing の Esc で消えた').toBe('予定');
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true }));
+    expect(box().value, 'keyCode 229 の Esc で消えた').toBe('予定');
+    // 対照群: 変換中でない Esc は従来どおり消す
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(box().value).toBe('');
+  });
+
   it('⚠ Esc で打った字を消す(結果も消える)', () => {
     new HelpRenderer(region).render();
     type('予定');

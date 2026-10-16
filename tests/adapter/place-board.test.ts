@@ -1466,12 +1466,14 @@ describe('掴んで動かす(place-drag)', () => {
     }
 
     it('持ち手が板ごとに 1 つ出る(2 回当てても増えない・字は入れない)', () => {
-      const { host } = mounted();
+      const { host, off } = mounted();
       applyPlaceLayout(host, () => null, 0);
       const handles = host.querySelectorAll('[data-pkc-field="place-size"]');
       expect(handles).toHaveLength(2);
       expect(handles[0]!.textContent).toBe('');
       expect(handles[0]!.getAttribute('aria-label') ?? '', '何が起きるかを言っていない').toContain('大きさ');
+      // ⚠ 外す ── 残すと後ろの test の Esc を、この回の聞き手が先に止める(#1087 K1 で Esc を捕捉段にしたため)
+      off();
     });
 
     it('🔴 掴んでいる間は見た目の大きさだけ動き、離すと RESIZE_PLACE → place-size が 1 回飛ぶ', () => {
