@@ -119,6 +119,18 @@ describe('#1087 ── 畳む口(pptx の取り込みと同じ 1 本)', () => {
     expect(foldBreaks(`a\r\nb\nc\rd${NEL}e${LS}f${PS}g\vh\fi`)).toBe('a b c d e f g h i');
     expect(importTitleOf('  a\nb  ')).toBe('a b');
   });
+
+  it('🔴 長い題名は code point で切る(絵文字の対を半分で切らない)', () => {
+    const raw = `${'a'.repeat(198)}${'😀'.repeat(5)}`;
+    const t = importTitleOf(raw);
+    expect(t).toBe(`${'a'.repeat(198)}😀…`);
+    expect(Array.from(t)).toHaveLength(IMPORT_TITLE_MAX);
+    // 対を失った半端な字(lone surrogate)が無い
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(t)).toBe(false);
+    // 対照群: 200 code point ちょうど(UTF-16 では 200 を超える)は切らない
+    const exact = `${'a'.repeat(100)}${'😀'.repeat(100)}`;
+    expect(importTitleOf(exact)).toBe(exact);
+  });
 });
 
 describe('#1087 ── 文字コードの判定の申告', () => {

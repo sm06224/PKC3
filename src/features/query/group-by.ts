@@ -163,14 +163,19 @@ export interface QueryScan {
 
 export function createQueryScan(key: string | null): QueryScan {
   const count = new Map<string, number>();
-  const buckets = new Map<string, { total: number; lids: string[] }>();
+  const buckets = new Map<string, { value: string; total: number; lids: string[] }>();
   let scanned = 0;
+  // 🔴 タグは大小無視で同じ組にする(`sameTag` / 検索 / スマートフォルダと同じ。#1087)。
+  //   表示は最初に見えた綴り。⚠ 他の key の値は綴りどおりに分ける。
+  const bucketKey = (value: string): string =>
+    key === TAGS_KEY && value !== UNSET ? value.toLowerCase() : value;
 
   const take = (value: string, lid: string): void => {
-    let b = buckets.get(value);
+    const bk = bucketKey(value);
+    let b = buckets.get(bk);
     if (b === undefined) {
-      b = { total: 0, lids: [] };
-      buckets.set(value, b);
+      b = { value, total: 0, lids: [] };
+      buckets.set(bk, b);
     }
     b.total += 1;
     // ⚠ 上限を超えたぶんは lid を持たないが、**数は数え続ける**
@@ -218,7 +223,13 @@ export function createQueryScan(key: string | null): QueryScan {
           continue;
         }
         // ⚠ 同じ値が 2 回書いてあっても 1 件として数える(`tags: [a, a]`)
-        for (const value of [...new Set(values)]) take(value, row.lid);
+        const seen = new Set<string>();
+        for (const value of values) {
+          const bk = bucketKey(value);
+          if (seen.has(bk)) continue;
+          seen.add(bk);
+          take(value, row.lid);
+        }
       }
     },
     finish() {
@@ -227,8 +238,8 @@ export function createQueryScan(key: string | null): QueryScan {
         // 並びは **件数の多い順 → key の字順**。⚠ 件数だけで並べると、同数の key の順が
         // 走査順(= entry_order)で揺れて、開くたびに目録の並びが変わる
         .sort((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-      const groups = [...buckets.entries()]
-        .map(([value, b]) => ({ value, total: b.total, lids: b.lids }))
+      const groups = [...buckets.values()]
+        .map((b) => ({ value: b.value, total: b.total, lids: b.lids }))
         // 並びは **件数の多い順 → 値の字順**、ただし**未設定は必ず最後**
         // (「持っていないもの」が先頭に来ると表が読めない)
         .sort((a, b) => {

@@ -186,6 +186,27 @@ describe('名前を変える', () => {
     expect(bulks(s.sent).map((b) => (b as { afterPrevious?: boolean }).afterPrevious === true)).toEqual([false, true]);
   });
 
+  it('🔴 大小だけ違う名前への付け替えは断らない(Work → work。外す → 付ける で綴りが変わる。#1087)', async () => {
+    const s = make({
+      queryGroups: {
+        groups: [{ value: 'Work', total: 2, lids: ['a', 'b'] }],
+        omittedGroups: 0,
+        scanned: 2,
+      },
+    });
+    s.btn('query-tag-rename', 'Work')!.click();
+    await tick();
+    await type('work');
+    expect(dialogBody()).toBe('タグ「Work」を 2 件のノートで「work」に変えます');
+    dialogOk().click();
+    await tick();
+    expect(bulks(s.sent).map((b) => [b.mode, b.tags])).toEqual([
+      ['remove', ['Work']],
+      ['add', ['work']],
+    ]);
+    expect(s.d.getState().notice ?? '').not.toContain('変わりませんでした');
+  });
+
   it('同じ名前・名前が 2 つ以上・やめる、では撃たない', async () => {
     const same = make();
     same.btn('query-tag-rename')!.click();

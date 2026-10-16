@@ -16,5 +16,8 @@ export const IMPORT_TITLE_MAX = 200;
 /** 題名にする字を **1 行に畳み、上限で切る**(md の前書きの題名と vCard の名前が同じ口を通る)。 */
 export function importTitleOf(raw: string): string {
   const t = foldBreaks(raw).trim();
-  return t.length > IMPORT_TITLE_MAX ? `${t.slice(0, IMPORT_TITLE_MAX - 1)}…` : t;
+  // ⚠ 字数は code point で数えて切る(`slice` は UTF-16 単位で、絵文字などの対を半分で切って壊れた字を残す)
+  if (t.length <= IMPORT_TITLE_MAX) return t;
+  const cps = Array.from(t);
+  return cps.length > IMPORT_TITLE_MAX ? `${cps.slice(0, IMPORT_TITLE_MAX - 1).join('')}…` : t;
 }

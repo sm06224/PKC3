@@ -13,7 +13,7 @@
  * 「1 ノート用の書出しだけ壊れている」が起きようがない。
  */
 import { scanAssetRefsInto } from '../asset/asset-ref-scan';
-import { readTags } from '../flavor/tags';
+import { collectEntryTags } from '../flavor/entry-tags';
 import { tagColorKey, tagColorsUsedBy } from '../tag-color';
 import type { ArchiveSource } from './pkc3-archive';
 
@@ -93,7 +93,7 @@ export async function singleEntrySource(
 
   // 🔑 タグの色は、このノートが使っているタグの分だけ持たせる(全部持たせると関係の無いタグの名前が混ざる)
   const usedTagKeys = new Set(
-    readTags(body).flatMap((t) => {
+    collectEntryTags(body).all.flatMap((t) => {
       const k = tagColorKey(t);
       return k === null ? [] : [k];
     }),
