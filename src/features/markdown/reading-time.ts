@@ -50,28 +50,51 @@ function isWhitespace(c: number): boolean {
   );
 }
 
-/** 旧 `CJK_REGEX` と同じ範囲: ひらがな・カタカナ / 拡張 A / 統合漢字 / 互換漢字 */
+/**
+ * 字数で数える字(1 字 = 1/500 分): ひらがな・カタカナ / 拡張 A / 統合漢字 / 互換漢字(旧 `CJK_REGEX` と同じ)に、
+ * 々〆〇・半角カタカナ・ハングル(音節 1 字が 1 語に近いので漢字と同じ速さで数える)を足した。
+ * ⚠ 足した物は、以前は「語」にも「CJK」にも数えられず 0 分だった(ハングル)か、語として過大に数えられる物(々 など)。
+ */
 function isCjk(c: number): boolean {
   return (
     (c >= 0x3040 && c <= 0x30ff) ||
     (c >= 0x3400 && c <= 0x4dbf) ||
     (c >= 0x4e00 && c <= 0x9fff) ||
-    (c >= 0xf900 && c <= 0xfaff)
+    (c >= 0xf900 && c <= 0xfaff) ||
+    (c >= 0x3005 && c <= 0x3007) ||
+    (c >= 0xff66 && c <= 0xff9f) ||
+    (c >= 0x1100 && c <= 0x11ff) ||
+    (c >= 0x3131 && c <= 0x318e) ||
+    (c >= 0xa960 && c <= 0xa97c) ||
+    (c >= 0xac00 && c <= 0xd7a3) ||
+    (c >= 0xd7b0 && c <= 0xd7c6) ||
+    (c >= 0xd7cb && c <= 0xd7fb)
   );
 }
 
-/** `[a-zA-Z0-9_]`(正規表現の `\w`) */
+const LETTER_OR_NUMBER = /^[\p{L}\p{N}]$/u;
+const MARK = /^\p{M}$/u;
+
+/** 語を作る字: ASCII の `\w`(`[a-zA-Z0-9_]`)と、それ以外の文字・数(アクセント付きラテン / キリル / ギリシャ …) */
 function isWordChar(c: number): boolean {
-  return (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c === 0x5f;
+  if (c < 0x80) {
+    return (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c === 0x5f;
+  }
+  return LETTER_OR_NUMBER.test(String.fromCharCode(c));
+}
+
+/** 語の途中に挟まる結合記号(分解形の é = e + U+0301)。それだけでは語にならない。 */
+function isJoiner(c: number): boolean {
+  return c === 0x2d || (c >= 0x300 && MARK.test(String.fromCharCode(c)));
 }
 
 /** 1 走査で数えた 3 つ(test が旧 regex の数え方と突き合わせる単位) */
 export interface ReadingUnits {
   /** 空白(`\s`)を除いた UTF-16 単位の数 */
   readonly charCount: number;
-  /** CJK の字数 */
+  /** 字数で数える字(漢字・かな・ハングル)の数 */
   readonly cjkCount: number;
-  /** `[a-zA-Z0-9_-]` の連なりのうち `\w` を 1 字でも含む物の数 */
+  /** 文字・数・`_`・`-`・結合記号の連なりのうち、文字・数・`_` を 1 字でも含む物の数 */
   readonly wordCount: number;
 }
 
@@ -92,9 +115,13 @@ export function countReadingUnits(content: string): ReadingUnits {
       runHasWord = false;
       continue;
     }
-    if (isWordChar(c) || c === 0x2d) {
+    if (isWordChar(c)) {
       inRun = true;
-      if (c !== 0x2d) runHasWord = true;
+      runHasWord = true;
+      continue;
+    }
+    if (isJoiner(c)) {
+      inRun = true;
       continue;
     }
     if (inRun && runHasWord) wordCount += 1;
@@ -108,9 +135,9 @@ export function countReadingUnits(content: string): ReadingUnits {
 /**
  * Markdown 本文から実質文字数と読了目安時間を算出する。
  *
- * 単語の数え方は旧 `\b[a-zA-Z0-9_-]+\b`(CJK を空白に置いた後)と同じ ──
- * `[a-zA-Z0-9_-]` の連なり 1 つを、その中に `\w` が 1 字でも在れば 1 語と数える
- * (`-` だけの連なりは 0 語。`foo--bar` も `foo--` も 1 語)。
+ * 単語の数え方: ASCII だけの本文では旧 `\b[a-zA-Z0-9_-]+\b`(CJK を空白に置いた後)と同じ ──
+ * 連なり 1 つを、その中に語の字が 1 字でも在れば 1 語と数える(`-` だけの連なりは 0 語。`foo--bar` も `foo--` も 1 語)。
+ * 🔑 語の字は ASCII の `\w` に限らず `[\p{L}\p{N}]`(café / привет / naïve も 1 語。以前は `caf` で切れて é が落ちていた)。
  */
 export function estimateReadingTime(markdown: string): ReadingTimeEstimate {
   const { charCount, cjkCount, wordCount } = countReadingUnits(bodyBelowFrontmatter(markdown));

@@ -72,6 +72,7 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
     const minutes = Math.max(1, Math.ceil(cjkCount / 500 + wordCount / 200));
     return { minutes, charCount, label: `読了 約 ${minutes} 分 (${charCount.toLocaleString('ja-JP')} 文字)` };
   };
+  const OLD_CJK = /^[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]$/;
   const pad = (s: string) => `${s}\n${'日'.repeat(200)}`; // 閾値を越えさせて minutes / label まで比べる
 
   it.each([
@@ -84,8 +85,6 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
     '-_',
     '___',
     '---',
-    'café résumé',
-    'naïve-approach',
     '漢字とenglishが混ざるtext',
     'カタカナ、ひらがな。english!',
     'word\u00a0word\u3000word\ufeffword',
@@ -116,8 +115,8 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
       '\u00a0',
       '\u3000',
       ...'あいう漢字カナ',
-      ...'éß。、!?.',
-      ...'/:@[{`AzＡ',
+      ...'。、!?.',
+      ...'/:@[{`Az',
       '\u00a0',
       '\u1680',
       '\u2000',
@@ -129,10 +128,8 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
       '\u200b',
       '\u180e',
       '\ufaff',
-      '\ufb00',
       '\u33ff',
       '\u3400',
-      '\ua000',
       '😀',
       '䶿',
       '一',
@@ -175,6 +172,9 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
     for (let c = 0; c <= 0xffff; c++) {
       const ch = String.fromCharCode(c);
       for (const s of contexts(ch)) {
+        // 🔑 意図して変えた字(ASCII 外の文字・数・結合記号のうち旧 CJK 範囲の外)は旧 regex と比べない
+        //    ── 下の「ASCII の外の語」の describe が新しい規則で見る
+        if (c > 0x7f && /^[\p{L}\p{N}\p{M}]$/u.test(ch) && !OLD_CJK.test(ch)) continue;
         const a = countReadingUnits(s);
         const b = referenceUnits(s);
         if (a.charCount !== b.charCount || a.cjkCount !== b.cjkCount || a.wordCount !== b.wordCount) {
@@ -185,5 +185,45 @@ describe('estimateReadingTime ── 1 走査は旧 regex と同じ答え(#1467 
       if (bad.length > 20) break;
     }
     expect(bad).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 ASCII の外の語と、ハングル(2026-10)。以前は語を `[a-zA-Z0-9_-]` だけで数えたので、
+ * café は `caf`、привет は 0 語、ハングルは数えられず(0 分)、全角の英数字も 0 語だった。
+ * 純粋な日本語・純粋な ASCII の本文は上の describe が旧 regex と突き合わせて同じ答えを保証する。
+ */
+describe('countReadingUnits ── ASCII の外の語とハングル', () => {
+  it.each([
+    ['café', 1],
+    ['café résumé naïve', 3],
+    ['привет мир', 2],
+    ['Ελληνικά', 1],
+    ['naïve-approach', 1],
+    ['cafe\u0301 e\u0301cole', 2], // 分解形の é(結合記号)で語が割れない
+    ['\u0301-', 0], // 結合記号と - だけの連なりは語にならない
+  ])('語: %j は %i 語', (s, words) => {
+    const u = countReadingUnits(s);
+    expect(u.wordCount).toBe(words);
+    expect(u.cjkCount).toBe(0);
+  });
+
+  it('ハングルは漢字・かなと同じく 1 字ずつ数え、語には数えない', () => {
+    expect(countReadingUnits('안녕하세요')).toMatchObject({ cjkCount: 5, wordCount: 0 });
+    expect(countReadingUnits('한글 abc')).toMatchObject({ cjkCount: 2, wordCount: 1 });
+    // 日本語の 々 / 半角カタカナを 1 語に数えない
+    expect(countReadingUnits('人々')).toMatchObject({ cjkCount: 2, wordCount: 0 });
+    expect(countReadingUnits('ｱｲｳ')).toMatchObject({ cjkCount: 3, wordCount: 0 });
+  });
+
+  it('ハングルだけの長文は 0 分ではなく、字数から分数が出る', () => {
+    const r = estimateReadingTime('가'.repeat(1200));
+    expect(r.minutes).toBe(3); // 1200 / 500 = 2.4 → 3
+    expect(r.label).not.toBeNull();
+  });
+
+  it('アクセント付きラテンの長文は、語数から分数が出る(以前は caf で切れて過少)', () => {
+    const r = estimateReadingTime('café '.repeat(1000)); // 1000 語 = 5 分
+    expect(r.minutes).toBe(5);
   });
 });

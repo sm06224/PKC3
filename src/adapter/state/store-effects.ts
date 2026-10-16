@@ -1062,6 +1062,8 @@ export function connectStoreEffects(
       lid,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
+      // 🔑 worker が書いた本文の字数(名乗らない口では付けない)
+      ...(s.bodyChars === undefined ? {} : { bodyChars: s.bodyChars }),
     });
     rescanColumnSmarts();
     /**

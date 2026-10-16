@@ -130,7 +130,7 @@ function scanHeadings(body: string): HeadingAt[] {
       para.push(line.trim());
     }
     // 閉じの `#` は前に空白が要る(`## C#` の `#` は見出しの字)
-    const m = /^ {0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
+    const m = /^ {0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     if (!m) continue;
     const text = m[2]!.trim();
     if (text === '') continue;

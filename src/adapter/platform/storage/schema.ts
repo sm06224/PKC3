@@ -389,6 +389,13 @@ export interface EntryStamps {
   createdAt: string | null;
   updatedAt: string | null;
   /**
+   * 🔴 **書いた本文の字数**(`entries.body_chars` と同じ値 = UTF-16 の長さ。#1087)。
+   * ⚠ 主スレッドの `meta.bodyChars` を ack で追従させる ── 無いと、追記・タグ付けなど
+   *   画面の本文を経由しない書込のあと、一覧の「大きさ」が次の boot まで古いままになる。
+   * ⚠ **optional** ── 本文を書かない口(改名・並べ替え)と旧 worker は名乗らない(= meta を動かさない)。
+   */
+  bodyChars?: number;
+  /**
    * 🔴 **同じ tx で居場所も書いたか**(#258 の着地前レビュー ⚠-2)。
    *
    * ⚠ **旧ビルドのタブが本体(holder)のことがある** ── 版が配られても、押した
