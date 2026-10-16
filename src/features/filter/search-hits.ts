@@ -13,8 +13,10 @@
  * ⚠ **全角と半角は同じ字として扱わない** ── 探す自身(FTS5 trigram / LIKE)が同じ字として
  *   引かないので、探すで当たっていない本文の位置を、ここだけ「当たり」と数えない。
  * ⚠ **除外の語(`-語`)は塗らない** ── 当たりの条件であって、探している物ではない。
- * ⚠ **text node をまたぐ語は数えない**(語の途中に太字・リンクが入る形)── 塗りは節点ごとに
- *   引くので、またぐ位置は指せない。当たりが 0 件のときは、そう言う(黙らない)。
+ * 🔑 **text node をまたぐ語も数える**(語の途中に太字・リンク・コードの色分けが入る形)── 同じ
+ *   段落(ブロック)の中の text node はつなげて引く(つなぎ方は `search-jump.ts`)。
+ * 🔑 **整形された字と打った字の差を吸う**(#1087)── 本文は表示のときに `'` → `’` / `...` → `…` /
+ *   `--` → `–` / `(c)` → `©` などへ整形されるので、画面の字をそのまま探すと打った字が当たらない。
  */
 import { parseSearchTerms } from './search-query';
 
@@ -67,6 +69,31 @@ export function foldCase(s: string): string {
   return out;
 }
 
+/**
+ * 表示で曲がった引用符を、まっすぐな字へ戻す(**長さを変えない**ので添字がずれない)。
+ * 🔑 本文を描く規則(typographer)が `'` `"` を曲げる。
+ */
+export function straightenQuotes(s: string): string {
+  return s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+}
+
+/**
+ * 語を、本文を描く規則(typographer)が字を置き換える**のと同じ向き**に置き換える。
+ * 🔑 描いた後の本文には `…` `–` `—` `©` `®` `™` `±` が居て、打った `...` `--` `---` `(c)` `(r)` `(tm)` `+-`
+ *   とは長さも字も違う ── 語の側も同じに替えた物を、もう 1 つの探し物にする。
+ * ⚠ 規則は markdown-it の replacements に合わせた小さな対応表(大小は畳み済みの語を受ける)。
+ */
+export function typographed(term: string): string {
+  return term
+    .replace(/\+-/g, '\u00B1')
+    .replace(/\.{2,}/g, '\u2026')
+    .replace(/---/g, '\u2014')
+    .replace(/--/g, '\u2013')
+    .replace(/\(c\)/gi, '\u00A9')
+    .replace(/\(r\)/gi, '\u00AE')
+    .replace(/\(tm\)/gi, '\u2122');
+}
+
 export interface HitSpan {
   /** UTF-16 の添字(`Range.setStart` が受ける物差し)。 */
   readonly start: number;
@@ -79,17 +106,21 @@ export interface HitSpan {
  */
 export function findHitSpans(text: string, terms: readonly string[]): HitSpan[] {
   if (text === '' || terms.length === 0) return [];
-  const hay = foldCase(text);
+  const hay = straightenQuotes(foldCase(text));
   const spans: HitSpan[] = [];
   for (const term of terms) {
-    const needle = foldCase(term);
-    if (needle === '') continue;
-    let from = 0;
-    for (;;) {
-      const at = hay.indexOf(needle, from);
-      if (at < 0) break;
-      spans.push({ start: at, end: at + needle.length });
-      from = at + needle.length;
+    const base = straightenQuotes(foldCase(term));
+    if (base === '') continue;
+    const alt = typographed(base);
+    // 🔑 打った字のまま / 整形された字へ替えた物、の 2 通りで引く(同じなら 1 通り)
+    for (const needle of alt === base ? [base] : [base, alt]) {
+      let from = 0;
+      for (;;) {
+        const at = hay.indexOf(needle, from);
+        if (at < 0) break;
+        spans.push({ start: at, end: at + needle.length });
+        from = at + needle.length;
+      }
     }
   }
   if (spans.length === 0) return [];

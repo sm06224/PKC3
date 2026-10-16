@@ -93,6 +93,32 @@ describe('findHitSpans: 1 つの字の並びの中の位置', () => {
   });
 });
 
+describe('🔴 #1087: 整形された字(typographer)と打った字の差を吸う', () => {
+  it('曲がった引用符は、まっすぐな語で当たる(長さは同じ)', () => {
+    expect(findHitSpans('don’t', ["don't"])).toEqual([{ start: 0, end: 5 }]);
+    expect(findHitSpans('“hi”', ['"hi"'])).toEqual([{ start: 0, end: 4 }]);
+  });
+
+  it.each([
+    ['Wait…', 'Wait...'],
+    ['a – b', 'a -- b'],
+    ['a — b', 'a --- b'],
+    ['©', '(c)'],
+    ['®', '(r)'],
+    ['™', '(TM)'],
+    ['±', '+-'],
+  ])('整形後 %s は 打った %s で当たる', (shown, typed) => {
+    expect(findHitSpans(shown, [typed])).toEqual([{ start: 0, end: shown.length }]);
+  });
+
+  it('対照群: 整形されない字は 1 件 / 無関係は 0 件', () => {
+    expect(findHitSpans('A&B', ['A&B'])).toHaveLength(1);
+    expect(findHitSpans('a<b', ['a<b'])).toHaveLength(1);
+    expect(findHitSpans('example.com', ['example.com'])).toHaveLength(1);
+    expect(findHitSpans('Wait…', ['Hold...'])).toEqual([]);
+  });
+});
+
 describe('wrapHitIndex: 送りは端で回る', () => {
   it('進む / 戻る / 端で回る', () => {
     expect([0, 1, 2, 3, 4].map((s) => wrapHitIndex(s, 4))).toEqual([0, 1, 2, 3, 0]);

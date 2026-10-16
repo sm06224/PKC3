@@ -32,6 +32,7 @@ import {
   searchJumpLabel,
 } from '../../src/adapter/ui/render/search-jump';
 import { toggleHeadingFold } from '../../src/adapter/ui/render/heading-fold';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 const meta = (lid: string): EntryMeta => ({
   lid,
@@ -171,6 +172,67 @@ describe('collectHitRanges: 本文の text node から当たりを数える', ()
   });
 });
 
+describe('🔴 #1087: 整形された字と、節点をまたぐ語', () => {
+  const hostOf = (md: string): HTMLElement => {
+    const host = document.createElement('div');
+    host.innerHTML = renderMarkdown(md);
+    document.body.append(host);
+    return host;
+  };
+  const hits = (md: string, q: string): string[] =>
+    collectHitRanges(hostOf(md), q, 'filter').map((r) => r.toString());
+
+  it('前提: 描画は字を整形する(崩れたら以下は空振りになる)', () => {
+    const t = hostOf('don\'t "hi" Wait... a -- b (c) (tm) +-').textContent ?? '';
+    for (const ch of ['’', '“', '…', '–', '©', '™', '±'])
+      expect(t, `整形後の本文に ${ch} が居る`).toContain(ch);
+  });
+
+  it.each(["don't", '"hi"', 'Wait...', 'a -- b', '(c)', '(tm)', '+-'])(
+    '打った字 %s が、整形された本文で 1 件当たる',
+    (typed) => {
+      const got = hits(`before ${typed} after`, typed);
+      expect(got).toHaveLength(1);
+      expect(got[0]!.length).toBeLessThanOrEqual(typed.length);
+    },
+  );
+
+  it('対照群: 整形されない字は今までどおり 1 件 / 別の語は 0 件', () => {
+    expect(hits('A&B here', 'A&B')).toHaveLength(1);
+    expect(hits('a<b here', 'a<b')).toHaveLength(1);
+    expect(hits('see example.com now', 'example.com')).toHaveLength(1);
+    expect(hits("don't stop", 'dont')).toHaveLength(0);
+  });
+
+  it('🔴 色分けされたコードの `const foo`(節点をまたぐ)が 1 件当たる', () => {
+    const host = hostOf('```js\nconst foo = 1;\n```');
+    expect(host.querySelector('.pkc-tok-keyword'), '前提: 色分けの <span> が居る').not.toBeNull();
+    const r = collectHitRanges(host, 'const foo', 'filter');
+    expect(r.map((x) => x.toString())).toEqual(['const foo']);
+    expect(r[0]!.startContainer, '始まりと終わりは別の節点').not.toBe(r[0]!.endContainer);
+  });
+
+  it('🔴 太字・リンクをまたぐ語が当たる', () => {
+    expect(hits('**bo**ld word', 'bold')).toEqual(['bold']);
+    expect(hits('go [lin](https://example.org/x)k now', 'link')).toEqual(['link']);
+    expect(hits('a **b** c', 'a b c')).toEqual(['a b c']);
+  });
+
+  it('切れ目: 段落・改行・ボタンをまたいでは当たらない / 無関係な語は 0 件', () => {
+    expect(hits('foo\n\nbar', 'foobar')).toEqual([]);
+    expect(hits('foo  \nbar', 'foobar')).toEqual([]);
+    const host = document.createElement('div');
+    host.innerHTML = '<p>fo<button type="button">ZZ</button>o</p>';
+    document.body.append(host);
+    expect(collectHitRanges(host, 'foZZo')).toEqual([]);
+    expect(hits('hello **world**', 'unrelated')).toEqual([]);
+  });
+
+  it('隣り合う 2 件は別々に数える', () => {
+    expect(hits('**ab**ab', 'ab')).toEqual(['ab', 'ab']);
+  });
+});
+
 /**
  * 🔴 **左の列の欄から始めた塗りは、打った字を丸ごと 1 句で塗る**(#1087)。
  * ⚠ 欄は打った字を 1 句として引く(`planPlain`)。「探す」と同じ割り方で塗ると、`-1` / `-メモ` は除外の語と読まれて
@@ -250,7 +312,7 @@ describe('帯の字', () => {
   it('n/m 件 / 当たりが無いときはその事実を言う', () => {
     expect(searchJumpLabel(4, 0)).toBe('1/4 件');
     expect(searchJumpLabel(4, 3)).toBe('4/4 件');
-    expect(searchJumpLabel(0, 0)).toBe('本文の字には一致しませんでした(太字やリンクをまたぐ語、図の中は数えません)');
+    expect(searchJumpLabel(0, 0)).toBe('本文の字には一致しませんでした(図の中は数えません)');
     // 🔴 #1206 D6: 数えない範囲まで言う(断定にしない)/ 帯に収まる長さ
     expect(searchJumpLabel(0, 0)).toContain('数えません');
     expect(searchJumpLabel(0, 0).length, '帯に収まらない長さ').toBeLessThanOrEqual(120);
@@ -337,7 +399,7 @@ describe('detail: 「探す」からの塗りと帯', () => {
     const { root, detail, s0 } = await open();
     await apply(detail, s0, { type: 'SEARCH_JUMP_START', lid: 'a', query: 'ありえない語' });
     expect(bar(root).hidden).toBe(false);
-    expect(count(root)).toBe('本文の字には一致しませんでした(太字やリンクをまたぐ語、図の中は数えません)');
+    expect(count(root)).toBe('本文の字には一致しませんでした(図の中は数えません)');
     const btn = (a: string) => root.querySelector<HTMLButtonElement>(`[data-pkc-action="${a}"]`)!;
     expect(btn('search-jump-prev').disabled).toBe(true);
     expect(btn('search-jump-next').disabled).toBe(true);
