@@ -52,6 +52,7 @@ import { currentTagColors } from './tag-color';
 import { noteColorVar } from '@features/schedule/item-color';
 import { leadLabel, SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { appScheduleNotify } from './schedule-notify';
+import { compareTitles } from '@features/filter/title-compare';
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'] as const;
 
@@ -589,7 +590,7 @@ export class ScheduleRenderer {
     const hidden = new Set(state.scheduleHiddenNotes);
     // 隠したが予定が 0 件になったノート(検索の絞りで外れた等)は、隠したままなので載せる
     const rows = byNote.map((n) => ({ ...n, title: state.entryMetas.get(n.lid)?.title ?? '' }));
-    rows.sort((a, b) => a.title.localeCompare(b.title, 'ja') || (a.lid < b.lid ? -1 : 1));
+    rows.sort((a, b) => compareTitles(a.title, b.title) || (a.lid < b.lid ? -1 : 1));
     const sig = rows
       .map((r) => `${r.lid}\t${r.title}\t${r.count}\t${hidden.has(r.lid) ? 1 : 0}`)
       .join('\n');

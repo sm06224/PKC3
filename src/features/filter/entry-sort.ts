@@ -9,6 +9,7 @@
  * 既定は手動の順(`entry_order`)で、これはその上に載る「見え方」である。
  */
 import type { EntryMeta } from '@core/model/entry-meta';
+import { compareTitles } from './title-compare';
 
 /**
  * ⚠ **`opened`(最近開いた順)だけは `EntryMeta` から引けない**(#215 残り①)──
@@ -82,14 +83,18 @@ export function sortOrder(
       return m?.bodyChars ?? -1;
     }
     if (!m) return '￿'; // 未知は末尾
-    if (sort === 'title') return m.title.toLowerCase();
+    if (sort === 'title') return m.title;
     if (sort === 'archetype') return m.archetype;
     return m.updatedAt ?? ''; // updated: 時刻文字列(ISO なので辞書順 = 時刻順)
   };
   return [...order].sort((a, b) => {
     const ka = key(a);
     const kb = key(b);
-    if (ka !== kb) return desc ? (ka < kb ? 1 : -1) : ka < kb ? -1 : 1;
+    // ⚠ 題名だけは照合順(数は数として・かなの種類は問わない)── 他は字の順 / 数の順
+    if (sort === 'title' && typeof ka === 'string' && typeof kb === 'string') {
+      const c = ka === '\uFFFF' || kb === '\uFFFF' ? (ka === kb ? 0 : ka === '\uFFFF' ? 1 : -1) : compareTitles(ka, kb);
+      if (c !== 0) return desc ? -c : c;
+    } else if (ka !== kb) return desc ? (ka < kb ? 1 : -1) : ka < kb ? -1 : 1;
     return a.localeCompare(b); // 同点は lid で割る(並びを決定的にする)
   });
 }

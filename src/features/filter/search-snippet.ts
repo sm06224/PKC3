@@ -31,6 +31,33 @@ export const SNIPPET_ELLIPSIS = '…';
 /** `snippet()` に渡すトークン数(≒ 文字数)。 */
 export const SNIPPET_TOKENS = 40;
 
+/**
+ * 抜粋を作る前に、本文の中の**印と同じ字**を潰す(#1087)。
+ * 🔴 本文に U+E000 / U+E001 が在ると、`snippet()` / `excerptAround` が付けた印と見分けがつかず、
+ * 当たっていない所が当たりとして光る。私用領域の字は表示に使われないので U+FFFD へ置く。
+ */
+export function neutralizeSnippetMarks(text: string): string {
+  return text.replace(/[\uE000\uE001]/g, '\uFFFD');
+}
+
+/**
+ * FTS の `snippet()` に渡す**仮の印**(3 字の並び)。
+ * 🔑 FTS 側は索引に入った生の本文から切り出すので、本文の U+E000 / U+E001 を先に潰せない。
+ * 仮の印で囲ませ、出てきた抜粋の中の本物の U+E000 / U+E001(= 本文の字)を潰してから
+ * 本物の印へ置き換える(`sealFtsSnippet`)。
+ */
+export const FTS_TMP_OPEN = '\uE002\uE000\uE002';
+export const FTS_TMP_CLOSE = '\uE003\uE001\uE003';
+
+/** FTS の抜粋(仮の印つき)を、本物の印だけが残る抜粋へ。 */
+export function sealFtsSnippet(raw: string): string {
+  return neutralizeSnippetMarks(raw.split(FTS_TMP_OPEN).join('\u0000').split(FTS_TMP_CLOSE).join('\u0001'))
+    .split('\u0000')
+    .join(SNIPPET_MARK_OPEN)
+    .split('\u0001')
+    .join(SNIPPET_MARK_CLOSE);
+}
+
 /** 探す面の 1 行。⚠ `snippet` には上の印が混ざる ── 描画器が `splitSnippet` で割る。 */
 export interface SearchDetailRow {
   lid: string;
@@ -70,7 +97,7 @@ export function splitSnippet(snippet: string): Array<{ text: string; hit: boolea
  * ⚠ 改行は空白へ潰す(1 行に出す)。
  */
 export function excerptAround(body: string, needle: string, width = SNIPPET_TOKENS): string {
-  const flat = body.replace(/\s+/g, ' ');
+  const flat = neutralizeSnippetMarks(body).replace(/\s+/g, ' ');
   const n = needle.trim();
   const at = n === '' ? -1 : flat.toLowerCase().indexOf(n.toLowerCase());
   if (at < 0) {

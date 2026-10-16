@@ -160,7 +160,7 @@ describe('探す面(#680)', () => {
       rows: [row('n1', '会議メモ', `来週の${O}会議${C}の <b>予定</b>`)],
       truncated: false,
     }));
-    type('会議');
+    type('会議の予定'); // ⚠ 3 字以上 = FTS = 関連度順(2 字だとノートの並び順で見出しが変わる)
     await settle();
     expect(rows(), '行が出ない').toHaveLength(1);
     const r = rows()[0]!;
@@ -256,6 +256,30 @@ describe('探す面(#680)', () => {
     type('会議');
     await settle();
     expect(note(), '切ったのに黙っている').toContain('200 件より多く');
+  });
+
+  /**
+   * 🔴 見出しは worker の並びに合わせて言う(#1087)。3 字未満の語が 1 つでも混じる
+   * (除く語を含む)と worker は関連度を持たず、ノートの並び順で返す。
+   */
+  it.each([
+    ['会議の予定', true],
+    ['会議', false],
+    ['会議の予定 メモ', false],
+    ['会議の予定 -ab', false],
+  ])('🔴 「%s」の見出しは関連度順か(%s)を正しく言う', async (q, byRelevance) => {
+    const mk = (truncated: boolean) =>
+      setup(() => ({ rows: [row('n1', '会議メモ', 'x')], truncated }));
+    const a = mk(false);
+    a.type(q);
+    await settle();
+    expect(a.note()).toBe(byRelevance ? '1 件(関連の高い順)' : '1 件(並びはノートの並び順)');
+    document.body.innerHTML = '';
+    const b = mk(true);
+    b.type(q);
+    await settle();
+    expect(b.note().includes('関連の高い 200 件'), '切った案内が並びと食い違う').toBe(byRelevance);
+    expect(b.note()).toContain(byRelevance ? '関連の高い 200 件' : '先頭の 200 件');
   });
 
   it('🔴 worker が失敗したら「探せません」── 「探しています…」で止まらない', async () => {

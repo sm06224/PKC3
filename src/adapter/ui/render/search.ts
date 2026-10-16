@@ -20,7 +20,7 @@
  */
 import type { AppState, SearchPageState } from '@adapter/state/app-state';
 import { splitSnippet } from '@features/filter/search-snippet';
-import { parseSearchTerms } from '@features/filter/search-query';
+import { isRelevanceOrdered, parseSearchTerms } from '@features/filter/search-query';
 
 /**
  * 🔴 **行のボタンが持つ、探した語**(#1102 段①)。受け手(`binder.ts` の `open-note-window`)が
@@ -159,8 +159,12 @@ export class SearchRenderer {
     if (terms.include.length === 0 && terms.exclude.length > 0) return '除く語だけでは探せません。探す語も打ってください';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) return `「${page.query}」に一致するノートはありません`;
+    // 🔴 並びは worker の引き方で決まる(3 字未満の語が混じるとノートの並び順)── 見出しはその 1 本から言う
+    const byRelevance = isRelevanceOrdered(page.rowsQuery);
     if (page.truncated)
-      return `200 件より多く一致しました(関連の高い 200 件を出しています)。語を足して絞ってください`;
-    return `${page.rows.length} 件(関連の高い順)`;
+      return byRelevance
+        ? `200 件より多く一致しました(関連の高い 200 件を出しています)。語を足して絞ってください`
+        : `200 件より多く一致しました(先頭の 200 件を出しています)。語を足して絞ってください`;
+    return `${page.rows.length} 件(${byRelevance ? '関連の高い順' : '並びはノートの並び順'})`;
   }
 }
