@@ -27,7 +27,7 @@ describe('見出しの `#` の後ろは半角の空白・タブだけ(全角空�
     expect(listAppendTargets(BODY).map((t) => t.slug)).toEqual(rendered);
   });
   it('NBSP も同じ。対照群: 半角空白・タブは見出し', () => {
-    const nb = '# nb\n\n## 次';
+    const nb = '#\u00a0nb\n\n## 次';
     expect(extractHeadingsFromMarkdown(nb, { blockForms: true }).map((h) => h.slug)).toEqual(renderedIds(nb));
     expect(listAppendTargets(nb).map((t) => t.slug)).toEqual(renderedIds(nb));
     const ok = '# a\n\n#\tb\n';
