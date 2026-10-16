@@ -17,7 +17,7 @@
 import { DIAGRAM_EXPORT_FAIL_HEAD } from '../error-text';
 import { CORRUPT_REFUSAL } from '../storage/db-corruption';
 import { quotaBootNotice, type QuotaEstimate } from '../storage/quota-watch';
-import { WRITE_QUOTA_REFUSAL } from '../storage/write-quota';
+import { WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE } from '../storage/write-quota';
 import type { MessageKind } from './message-log';
 
 /**
@@ -45,7 +45,7 @@ export function messageKindForOpError(error: string): MessageKind {
  * ⚠ `CORRUPT_REFUSAL` は後ろに `(op で検出: 生の例外)` が続きうる ── 続きの側は潰す・切るが効く。
  */
 export function fixedHeadOfOpError(error: string): string {
-  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, CORRUPT_REFUSAL, DIAGRAM_EXPORT_FAIL_HEAD]) {
+  for (const head of [EDIT_ELSEWHERE_ERROR, WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE, CORRUPT_REFUSAL, DIAGRAM_EXPORT_FAIL_HEAD]) {
     if (error.startsWith(head)) return head;
   }
   return '';

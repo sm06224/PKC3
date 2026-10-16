@@ -148,6 +148,9 @@ function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 export class BrowseModeStore {
   private fallback: BrowseMode = DEFAULT_BROWSE_MODE;
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null = readStorage(),
   ) {}
@@ -160,7 +163,7 @@ export class BrowseModeStore {
    */
   get(): BrowseMode {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       const v = this.storage.getItem(KEY);
       return v !== null && v !== undefined && isBrowseMode(v) ? v : DEFAULT_BROWSE_MODE;
     } catch {
@@ -170,9 +173,12 @@ export class BrowseModeStore {
 
   set(mode: BrowseMode): void {
     this.fallback = mode;
+    this.saveFailed = false;
     try {
       this.storage?.setItem(KEY, mode);
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       // 保存できないだけ ── この session では効いている
     }
   }

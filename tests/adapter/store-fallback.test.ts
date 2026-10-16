@@ -53,20 +53,44 @@ import { CreateKindStore } from '@adapter/ui/render/create-kind';
 import { FilerFlattenStore } from '@adapter/ui/render/filer-flatten';
 import { PopupHintStore } from '@adapter/ui/render/popup-hint';
 
+type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+/**
+ * 🔴 **読めるが、書くと容量不足で落ちる**保存(#1087 D1)。
+ * `fail` を false にすると以後は普通に書ける(「あとの書き込みが成功したら保存に戻る」の対照)。
+ */
+function quotaStorage(): StorageLike & { fail: boolean; data: Map<string, string> } {
+  const data = new Map<string, string>();
+  const s = {
+    fail: true,
+    data,
+    getItem: (k: string) => data.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      if (s.fail) throw new DOMException('quota', 'QuotaExceededError');
+      data.set(k, v);
+    },
+    removeItem: (k: string) => {
+      if (s.fail) throw new DOMException('quota', 'QuotaExceededError');
+      data.delete(k);
+    },
+  };
+  return s;
+}
+
 /**
  * 「保存が無い状態で書いて、読み直したら同じ値が返る」を 1 組で見る。
  * ⚠ 型がばらばらなので、**書く / 読む / 別の値**を呼び側が渡す。
  */
 const CASES: readonly {
   name: string;
-  make: () => { write: (v: unknown) => void; read: () => unknown };
+  make: (st?: StorageLike | null) => { write: (v: unknown) => void; read: () => unknown };
   a: unknown;
   b: unknown;
 }[] = [
   {
     name: 'OpenInEditStore',
-    make: () => {
-      const s = new OpenInEditStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new OpenInEditStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -74,8 +98,8 @@ const CASES: readonly {
   },
   {
     name: 'AlarmEnabledStore',
-    make: () => {
-      const s = new AlarmEnabledStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new AlarmEnabledStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -83,8 +107,8 @@ const CASES: readonly {
   },
   {
     name: 'VoiceBoostStore',
-    make: () => {
-      const s = new VoiceBoostStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new VoiceBoostStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -92,8 +116,8 @@ const CASES: readonly {
   },
   {
     name: 'PhoneLinksStore',
-    make: () => {
-      const s = new PhoneLinksStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new PhoneLinksStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -101,8 +125,8 @@ const CASES: readonly {
   },
   {
     name: 'DateLinksStore',
-    make: () => {
-      const s = new DateLinksStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new DateLinksStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする ── 入から書くと、控えが死んでいて
@@ -112,8 +136,8 @@ const CASES: readonly {
   },
   {
     name: 'RelativeDaysStore',
-    make: () => {
-      const s = new RelativeDaysStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new RelativeDaysStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)
@@ -122,8 +146,8 @@ const CASES: readonly {
   },
   {
     name: 'ColorSwatchStore',
-    make: () => {
-      const s = new ColorSwatchStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new ColorSwatchStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     // ⚠ **既定が入**なので、最初に書くのは**切**にする(`DateLinksStore` と同じ理由)
@@ -134,8 +158,8 @@ const CASES: readonly {
     // ⚠ 既定が「入」の store ── a を切(false)にしておくと、控えが死んでいて
     //   既定へ戻る実装(読みが常に true)を 1 回目の読みで捕まえられる
     name: 'MissingLinksStore',
-    make: () => {
-      const s = new MissingLinksStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new MissingLinksStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,
@@ -144,8 +168,8 @@ const CASES: readonly {
   {
     // ⚠ 既定が「入」の store(#1087)── a を切(false)にして、控えが死んでいて既定へ戻る実装を捕まえる
     name: 'CodeCollapseStore',
-    make: () => {
-      const s = new CodeCollapseStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new CodeCollapseStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,
@@ -153,8 +177,8 @@ const CASES: readonly {
   },
   {
     name: 'InlineCodeCopyStore',
-    make: () => {
-      const s = new InlineCodeCopyStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new InlineCodeCopyStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,
@@ -163,8 +187,8 @@ const CASES: readonly {
   {
     // ⚠ 既定が「切」の store(#275)── a を入(true)にして、控えが死んで既定(切)へ戻る実装を捕まえる
     name: 'PdfReaderStore',
-    make: () => {
-      const s = new PdfReaderStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new PdfReaderStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -172,8 +196,8 @@ const CASES: readonly {
   },
   {
     name: 'TooNarrowOkStore',
-    make: () => {
-      const s = new TooNarrowOkStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new TooNarrowOkStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: false,
@@ -181,8 +205,8 @@ const CASES: readonly {
   },
   {
     name: 'EditorModeStore',
-    make: () => {
-      const s = new EditorModeStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new EditorModeStore(st);
       return { write: (v) => void s.setMode(v as string), read: () => s.getMode() };
     },
     a: 'split',
@@ -190,8 +214,8 @@ const CASES: readonly {
   },
   {
     name: 'PaneSizeStore',
-    make: () => {
-      const s = new PaneSizeStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new PaneSizeStore(st);
       // ⚠ **1 枚ずつ**渡す口である(`set(id, px)`)── 1 稿目は object を渡して
       //   `[object Object]` を鍵にしていた(台の側の誤りで、製品は無傷)
       return {
@@ -204,8 +228,8 @@ const CASES: readonly {
   },
   {
     name: 'QueryKeyStore',
-    make: () => {
-      const s = new QueryKeyStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new QueryKeyStore(st);
       return { write: (v) => s.set(v as string | null), read: () => s.get() };
     },
     a: 'tags',
@@ -213,8 +237,8 @@ const CASES: readonly {
   },
   {
     name: 'CreateKindStore',
-    make: () => {
-      const s = new CreateKindStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new CreateKindStore(st);
       return { write: (v) => s.set(v as string | null), read: () => s.get() };
     },
     a: 'textlog',
@@ -222,8 +246,8 @@ const CASES: readonly {
   },
   {
     name: 'BrowseModeStore',
-    make: () => {
-      const s = new BrowseModeStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new BrowseModeStore(st);
       return { write: (v) => s.set(v as Parameters<typeof s.set>[0]), read: () => s.get() };
     },
     a: 'apps',
@@ -231,8 +255,8 @@ const CASES: readonly {
   },
   {
     name: 'GroupFoldStore',
-    make: () => {
-      const s = new GroupFoldStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new GroupFoldStore(st);
       /**
        * ⚠ この store の口は**押すたびに裏返る**(`set` ではない)ので、
        *   台が渡す「あるべき集合」へ**差分だけ**押す。
@@ -252,8 +276,8 @@ const CASES: readonly {
     // ⚠ 既定が「切」の store(#813 段②)── a を入(true)にして、控えが死んでいて
     //   既定(切)のまま読まれる実装を 1 回目の読みで捕まえる
     name: 'FilerFlattenStore',
-    make: () => {
-      const s = new FilerFlattenStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new FilerFlattenStore(st);
       return { write: (v) => s.setEnabled(v as boolean), read: () => s.enabled() };
     },
     a: true,
@@ -263,8 +287,8 @@ const CASES: readonly {
     // ⚠ 既定が「まだ言っていない」の store ── a を true(言った)にして、控えが死んでいて
     //   既定のまま読まれる実装を 1 回目の読みで捕まえる
     name: 'PopupHintStore',
-    make: () => {
-      const s = new PopupHintStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new PopupHintStore(st);
       return { write: (v) => s.setShown(v as boolean), read: () => s.shown() };
     },
     a: true,
@@ -272,8 +296,8 @@ const CASES: readonly {
   },
   {
     name: 'PaneVisibilityStore',
-    make: () => {
-      const s = new PaneVisibilityStore(null);
+    make: (st: StorageLike | null = null) => {
+      const s = new PaneVisibilityStore(st);
       return {
         write: (v) => void s.setHidden(v as Parameters<typeof s.setHidden>[0]),
         read: () => s.getHidden(),
@@ -293,6 +317,36 @@ describe('保存が使えない端末でも、設定はこの session で効く'
       // ⚠ 対照群 ── もう一方へ書き換えても追いつくこと(1 回目だけ効く形ではない)
       s.write(c.b);
       expect(s.read(), '2 回目の書き換えが効いていない').toEqual(c.b);
+    });
+  }
+
+  for (const c of CASES) {
+    it(`🔴 ${c.name}: 保存が容量不足で書けなくても、書いた値が読める(#1087 D1)`, () => {
+      const st = quotaStorage();
+      const s = c.make(st);
+      s.write(c.a);
+      expect(s.read(), '書けなかったとき、押した設定が元へ戻る').toEqual(c.a);
+      s.write(c.b);
+      expect(s.read(), '2 回目の書き換えが効いていない').toEqual(c.b);
+    });
+
+    it(`🔴 ${c.name}: あとの書き込みが成功したら、保存の値を読む(#1087 D1)`, () => {
+      const st = quotaStorage();
+      const s = c.make(st);
+      s.write(c.a);
+      st.fail = false;
+      s.write(c.b);
+      expect(s.read()).toEqual(c.b);
+      // 書けた後は保存が正本 ── 控えのまま固まっていないこと。
+      // b を書いた時点の保存を控え、a を書いたあとで保存だけを b の姿へ戻す(外の書き手)。
+      // 読みが保存を見ていれば b、控え(a)に固まっていれば a が返る。
+      const snapshotB = new Map(st.data);
+      s.write(c.a);
+      st.data.clear();
+      for (const [k, v] of snapshotB) st.data.set(k, v);
+      // ⚠ PopupHintStore は「一度言ったら戻らない」片道の store(読みが `保存 || 控え`)なので除く
+      if (c.name !== 'PopupHintStore')
+        expect(s.read(), '書けた後も控えに固まっている(保存の値を読んでいない)').toEqual(c.b);
     });
   }
 

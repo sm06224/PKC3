@@ -35,7 +35,7 @@ async function tick(ms = 10): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-function setup(bodies: Record<string, string>) {
+function setup(bodies: Record<string, string>, failPersist = false) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -58,6 +58,7 @@ function setup(bodies: Record<string, string>) {
       Promise.reject(new Error('この test では添付の差し替えを使わない')),
     reorderEntry: async () => stubStamps(),
     persistEntry: async (e) => {
+      if (failPersist) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
       persisted.push(e);
       return stubStamps();
     },
@@ -228,6 +229,34 @@ describe('editor flow (P3-5)', () => {
     // 復帰後は通常の編集導線に戻る
     expect(root.querySelector('[data-pkc-action="start-edit"]')).not.toBeNull();
     expect(root.querySelector('[data-pkc-action="retry-persist"]')).toBeNull();
+  });
+
+  it('🔴 保存失敗の帯でも、未保存の本文をコピーで持ち出せる(#1087 D3)', async () => {
+    const plain = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(true);
+    const rich = vi.spyOn(clipboard, 'copyMarkdownAndHtml').mockResolvedValue(true);
+    const { d, q } = setup({ a: '# A' }, true);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    await tick();
+    q('[data-pkc-action="start-edit"]')!.click();
+    const ta = q<HTMLTextAreaElement>('[data-pkc-field="editor-body"]')!;
+    ta.value = 'v2 未保存';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    q('[data-pkc-action="commit-edit"]')!.click();
+    await tick(20);
+    expect(d.getState().phase, '前提が崩れている(保存が失敗していない)').toBe('error');
+    expect(q('[data-pkc-action="retry-persist"]'), '前提が崩れている(保存し直しの帯ではない)').not.toBeNull();
+
+    const md = q<HTMLButtonElement>('[data-pkc-action="copy-note-md"]');
+    const rc = q<HTMLButtonElement>('[data-pkc-action="copy-note-rich"]');
+    expect(md, '保存し直しの帯に Markdown をコピーが無い').not.toBeNull();
+    expect(rc, '保存し直しの帯に書式付きでコピーが無い').not.toBeNull();
+    md!.click();
+    rc!.click();
+    await tick(0);
+    expect(plain.mock.calls.map((c) => c[0])).toEqual(['v2 未保存']);
+    expect(rich.mock.calls.map((c) => c[0])).toEqual(['v2 未保存']);
+    plain.mockRestore();
+    rich.mockRestore();
   });
 
   it('copy-md-block は実 delegation 経路(rendered ⧉ ボタンのクリック)で動く', async () => {

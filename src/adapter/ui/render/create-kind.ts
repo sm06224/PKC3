@@ -36,6 +36,9 @@ export class CreateKindStore {
   /** 保存が読めない環境の控え(この session では効いている)。 */
   private fallback: string | null = null;
 
+  /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
+  private saveFailed = false;
+
   constructor(
     private readonly storage: Pick<
       Storage,
@@ -46,7 +49,7 @@ export class CreateKindStore {
   /** ⚠ 壊れた値(空・長すぎ)は `null`。有効な archetype かは呼び側が見る。 */
   get(): string | null {
     try {
-      if (this.storage === null) return this.fallback;
+      if (this.storage === null || this.saveFailed) return this.fallback;
       const raw = this.storage.getItem(KEY);
       if (raw === null || raw === '' || raw.length > MAX_CHARS) return null;
       return raw;
@@ -61,10 +64,13 @@ export class CreateKindStore {
       archetype !== null && archetype.length > 0 && archetype.length <= MAX_CHARS
         ? archetype
         : null;
+    this.saveFailed = false;
     try {
       if (this.fallback === null) this.storage?.removeItem(KEY);
       else this.storage?.setItem(KEY, this.fallback);
     } catch {
+      // 🔴 書けなかった ── 次に書けるまで、読みは控え(書いた値)を返す(戻らない)
+      this.saveFailed = true;
       /* 保存できない環境 ── この session の控えだけで動く */
     }
   }

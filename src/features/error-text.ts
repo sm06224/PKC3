@@ -1,6 +1,14 @@
-import { WRITE_QUOTA_REFUSAL } from './storage/write-quota';
+import { WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE } from './storage/write-quota';
 /** 空きが足りないときの案内(ボタンの名前は画面の字〔`commands.ts`〕と揃える)。 */
 const QUOTA_JA = '保存できる空き容量が足りません。システムの「使われていない添付を消す」で空きを作ってから、もう一度お試しください';
+
+/** ブラウザ / SQLite の「空きが無い」の綴り(起動の失敗の字〔`boot-failure-text.ts`〕も同じ判定を使う)。 */
+export const QUOTA_MESSAGE = /QuotaExceededError|SQLITE_FULL|disk is full|quota (has been )?exceeded/i;
+
+/** 本文の保存が空きで落ちたとき(順番: 空きを作る → 「ノートを保存し直す」→ 整理)。 */
+const QUOTA_JA_BODY_SAVE =
+  '保存できる空き容量が足りません。まず、このタブの外で空きを作ってください。' +
+  '空きができたら、本文の上の「ノートを保存し直す」を押してください。そのあと、システムの「使われていない添付を消す」で整理できます';
 
 /**
  * 🔴 **例外を画面の字に添えるときの 1 か所**(#1087)。
@@ -29,7 +37,7 @@ const ERROR_JA: readonly (readonly [RegExp, string])[] = [
    * ブラウザ / SQLite が出す「空きが無い」── PKC3 が投げる物ではないが、出たときに次の手が要る。
    * ⚠ ボタンの名前は画面の字(`commands.ts` の「使われていない添付を消す」)と揃える。
    */
-  [/QuotaExceededError|SQLITE_FULL|disk is full|quota (has been )?exceeded/i, QUOTA_JA],
+  [QUOTA_MESSAGE, QUOTA_JA],
 ];
 
 /** 英語の理由を、分かる物だけ日本語にする(分からない物はそのまま)。 */
@@ -52,9 +60,12 @@ export function errorText(e: unknown): string {
  */
 export function bodySaveErrorText(e: unknown): string {
   const text = errorText(e);
-  // ⚠ worker の断り(`WRITE_QUOTA_REFUSAL`)は自分で「ノートを保存し直す」まで言うので、重ねて足さない(#1087 S1)
-  const short = text.includes(QUOTA_JA) && !text.includes(WRITE_QUOTA_REFUSAL);
-  return short ? `${text.replace(/。$/, '')}。その後、本文の上の「ノートを保存し直す」を押してください` : text;
+  // ⚠ worker の断り(`WRITE_QUOTA_REFUSAL`)は「ノートを保存し直す」を言わない(添付などにも出る字)ので、
+  //   本文の保存の失敗では順番つきの版(空きを作る → 保存し直す → 整理)へ差し替える(#1087 D4)
+  if (text.includes(WRITE_QUOTA_REFUSAL)) return text.replace(WRITE_QUOTA_REFUSAL, WRITE_QUOTA_REFUSAL_BODY_SAVE);
+  // ブラウザ / SQLite の「空きが無い」── 整理(使われていない添付を消す)は保存し直しの後でないと始められない
+  if (text.includes(QUOTA_JA)) return text.replace(QUOTA_JA, QUOTA_JA_BODY_SAVE);
+  return text;
 }
 
 /**
