@@ -642,12 +642,10 @@ export class ScheduleRenderer {
     filter: EntryFilter,
     doneNotes: number,
   ): number {
-    const hiddenNotes = new Set(state.scheduleHiddenNotes);
     // ⚠ 数えるのは**この面に出る条件を満たしたうえで済んでいる**もの
-    // (「出すもの」で隠したノートの分は、そちらの数に入るのでここでは数えない)
+    // (隠したノートの済んだ札もここで 1 回数える ── 依頼 12-C「隠れている分の合計」。数え方の見直しは #1163 の依頼 247)
     const hidden = doneNotes + all.filter((c) => {
       if (!c.done) return false;
-      if (hiddenNotes.has(c.lid)) return false;
       const m = state.entryMetas.get(c.lid);
       if (m === undefined) return false;
       if (m.archived && !state.showArchived) return false;

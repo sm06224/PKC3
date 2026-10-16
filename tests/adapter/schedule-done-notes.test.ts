@@ -1,9 +1,8 @@
 /** @vitest-environment happy-dom */
 /**
- * 予定の面の「済んだ」の扱い(K1 / K2)。
+ * 予定の面の「済んだ」の扱い(K1)。
  * K1: 取り込んだ ToDo(frontmatter `status: done`)の日付つきノートは、済みとして扱う
  *     (赤い期限切れにしない / 「済み」を畳めば隠れる / 件数に入る)。
- * K2: 「出すもの」で隠したノートの分は、「済み(N)」に入れない。
  */
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -72,23 +71,5 @@ describe('K1: 済んだ ToDo のノート', () => {
     new ScheduleRenderer(host, () => TODAY).render(stateOf(metas, { showDoneTasks: false }));
     const text = host.querySelector('[data-pkc-field="schedule-done"]')?.closest('label')?.textContent ?? '';
     expect(text).toContain('済み(1)');
-  });
-});
-
-describe('K2: 隠したノートは「済み(N)」に入れない', () => {
-  it('scheduleHiddenNotes のノートの済んだ札は数えない', () => {
-    const metas = [meta('e1'), meta('e2')];
-    const host = document.createElement('div');
-    document.body.append(host);
-    const view = new ScheduleRenderer(host, () => TODAY);
-    const st = stateOf(metas, { showUndatedTasks: true }, ['e1', '- [x] 済み @2026-08-20\n- [ ] 未 @2026-08-21\n']);
-    const doneText = (): string =>
-      host.querySelector('[data-pkc-field="schedule-done"]')?.closest('label')?.textContent ?? '';
-    view.render(st);
-    expect(doneText()).toContain('済み(1)');
-    view.render({ ...st, scheduleHiddenNotes: ['e1'] });
-    // 数が 0 になった切替は行ごと畳まれる(畳まれた行の字は古いまま残るので、行の hidden で見る)
-    const row = host.querySelector('[data-pkc-field="schedule-done"]')!.closest('label')!;
-    expect(row.hidden).toBe(true);
   });
 });
