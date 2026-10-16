@@ -853,7 +853,11 @@ test('🔴 表・コードの行を押しても編集欄が縮まず、左端も
   ).toBeLessThanOrEqual(2);
 
   // コード fence も同じ
+  // 🔴 打っていない行の Esc は、確認を出さずに閉じる(#1087 E5 の対照群)
+  const escDialog = page.locator('[data-pkc-region="app-dialog"]');
   await page.keyboard.press('Escape');
+  await expect(live.locator('[data-pkc-field="row-source"]'), '打っていない行の Esc で行が閉じていない').toBeHidden();
+  expect(await escDialog.isVisible(), '打っていない行の Esc で確認が出た').toBe(false);
   await live.locator('pre').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), 'コードの編集欄が散文の幅へ縮んだ').toBeGreaterThan(proseW + 100);
@@ -863,8 +867,17 @@ test('🔴 表・コードの行を押しても編集欄が縮まず、左端も
   ).toBeLessThanOrEqual(2);
   expect(codeW, 'コードが散文より広くない').toBeGreaterThan(proseW + 100);
 
-  // 段落は散文の幅のまま(= 押した行だけ全幅へ跳ねない)
+  // 🔴 打った後の Esc は「打った内容を捨てますか」と聞く(2 列の編集と同じ)。「編集をやめる」で捨てる
+  await live.locator('[data-pkc-field="row-source"]').press('End');
+  await page.keyboard.type('x');
   await page.keyboard.press('Escape');
+  await expect(escDialog, '打った後の Esc で確認が出ない').toBeVisible();
+  await expect(escDialog, '確認に「打った内容を捨てますか」が無い').toContainText('打った内容を捨てますか');
+  await expect(escDialog.getByRole('button', { name: '編集を続ける' })).toBeVisible();
+  await escDialog.getByRole('button', { name: '編集をやめる' }).click();
+  await expect(escDialog, '「編集をやめる」で確認が閉じていない').toBeHidden();
+
+  // 段落は散文の幅のまま(= 押した行だけ全幅へ跳ねない)
   await live.locator('p').first().click({ modifiers: ['ControlOrMeta'] });
   await expect(live.locator('[data-pkc-field="row-source"]')).toBeVisible();
   expect(await box(), '段落の編集欄が全幅へ跳ねた').toBeLessThan(proseW + 20);
