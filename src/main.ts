@@ -264,7 +264,7 @@ import { isPasteSource } from '@features/markdown/paste-source';
 import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids, collectExistingRelationIds } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
-import { applyPackResult } from '@adapter/ui/render/office-pack-panel';
+import { applyPackResult, syncPackStateFromStore } from '@adapter/ui/render/office-pack-panel';
 import { LocalOfficeFiles } from '@adapter/platform/office/local-office-files';
 import {
   isOfficeLaunchFile,
@@ -2470,6 +2470,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           //    店(store)が使えるようになる瞬間がずれる**からである(`promote` の
           //    中で新しい worker を建てている)── 早すぎると書きに行って失敗する
           writerHolder = true;
+          // 🔴 昇格の間に届いた Office の保存を拾う(#1087)── 届いたときは本体でなく黙って見送られ、棚に残っている
+          void officeSaveBack.drainAll().catch(() => 0);
           // 🔴 メインになったので、ブラウザの AI へ道具を渡す(flag がオンのときだけ。#1407)
           agentRegistration.sync(true);
           /**
@@ -2761,6 +2763,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ **呼ぶたびに読む** ── 昇格でこのタブが本体になることがある(#177)
     isHolder: () => writerHolder,
     canWrite: () => dispatcher.getState().phase === 'ready',
+    // 🔴 新しい添付のノートを足すだけなら編集中でも通す(PDF の保存と同じ ── `keepSelection` で選択も編集も動かさない。#1087)
+    canCreate: () => {
+      const phase = dispatcher.getState().phase;
+      return phase === 'ready' || phase === 'editing';
+    },
     // 🔴 #432 段②: 手元のファイルから開いた回は、元のファイルへ戻す
     //    ⚠ 判断(合言葉が手元のものか / 書けたか)は `local-office-files.ts` が持つ
     writeLocal: (token, bytes) =>
@@ -2786,7 +2793,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           // ⚠ **Blob へ写すのはここだけ。** OPFS の `File` をそのまま IDB へ入れると、
           //    棚を消した瞬間に中身が読めなくなる(実測 `ERR_SOURCE_DIED_IN_TRANSIT`)
           blob: new Blob([bytes]),
-        });
+        },
+        undefined,
+        // 🔴 読んでいるノートを退かさない(#1087)── 新しい添付のノートへは知らせの「開く」で行く(PDF の保存と同じ作法)
+        { parentLid: null, keepSelection: true });
         lid = attached?.lid ?? null;
       });
       return lid;
@@ -2853,7 +2863,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 **作ったノートを窓へ教える**(#217)── 教えないと 2 回目の保存で
     //    ノートが増える。判断は `office-save-back.ts`、ここは運ぶだけ
     adopt: (key, lid) => { officeWindow.adoptSave(key, lid); },
-    notify: showStatus,
+    notify: (text, openLid) =>
+      openLid === undefined ? showStatus(text) : dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
   });
   // 🔴 控えの「在るかもしれない」を窓の放送で保つ(#1228 段 2)。⚠ 偽陰性は控えを黙って見逃す ──
@@ -2865,6 +2876,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     if (ev.type === 'saved') void officeSaveBack.receive(ev.key);
     else if (ev.type === 'save-failed') officeSaveBack.reportWindowFailure(ev.reason);
     else if (ev.type === 'closed') void officeSaveBack.drainAll();
+    else if (ev.type === 'not-installed') {
+      // 🔴 窓が「一式が入っていない」と言った ── 本体の控えを実物に合わせる(#1087。判断は `syncPackStateFromStore`)
+      void syncPackStateFromStore(appOfficePack, () => officeInstaller.readMeta(), () => {
+        center.invalidateDetail();
+        center.render(dispatcher.getState());
+      });
+    }
     else if (ev.type === 'reload-declined') {
       // 🔴 **窓の中に保存していない変更が在り、user が「やめる」を選んだ**(#1228 穴②)。
       //    ⚠ 本体は「開いている Office のウィンドウに表示します」と先に言っているので、**取り消す一言**を出す

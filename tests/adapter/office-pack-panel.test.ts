@@ -21,6 +21,7 @@ import { bindActions, type BinderServices } from '../../src/adapter/ui/actions/b
 import { OfficePackState } from '../../src/adapter/ui/render/office-entry-view';
 import {
   applyPackResult,
+  syncPackStateFromStore,
   buildOfficePackPanel,
   packBuildText,
   packStatusText,
@@ -232,7 +233,52 @@ describe('applyPackResult(設置 / 削除の後始末)', () => {
     const state = new OfficePackState();
     const u = ui();
     applyPackResult(state, { ok: false, message: '取得できません' }, u);
-    expect(u.notify).toHaveBeenCalledWith('取得できません');
+    expect(u.notify).toHaveBeenCalledWith('取得できません', { kind: 'problem' });
+  });
+
+  it('🔴 失敗は「問題」で渡す / 成功は種類を付けない(結果のまま。#1087)', () => {
+    const state = new OfficePackState();
+    const bad = ui();
+    applyPackResult(state, { ok: false, message: 'だめ' }, bad);
+    expect(bad.notify.mock.calls[0]?.[1]).toEqual({ kind: 'problem' });
+    const good = ui();
+    applyPackResult(state, { ok: true, meta: META, message: '配備しました' }, good);
+    expect(good.notify.mock.calls[0]).toEqual(['配備しました']);
+  });
+});
+
+describe('syncPackStateFromStore(窓が「入っていない」と言ったとき。#1087)', () => {
+  it('🔴 控えが「入っている」のまま実物が無ければ、控えを空にして描き直す', async () => {
+    const state = new OfficePackState();
+    state.setMeta(META);
+    const redraw = vi.fn();
+    await syncPackStateFromStore(state, async () => null, redraw);
+    expect(state.isInstalled(), '控えが古いまま').toBe(false);
+    expect(redraw, '中央を描き直していない(入口が開けると見せ続ける)').toHaveBeenCalledTimes(1);
+  });
+
+  it('実物が控えと同じなら描き直さない(対照群)', async () => {
+    const state = new OfficePackState();
+    state.setMeta(META);
+    const redraw = vi.fn();
+    await syncPackStateFromStore(state, async () => ({ ...META }), redraw);
+    expect(state.getMeta()).toBe(META);
+    expect(redraw).not.toHaveBeenCalled();
+  });
+
+  it('控えが空で実物が在れば入れる(別のタブで入れた)', async () => {
+    const state = new OfficePackState();
+    const redraw = vi.fn();
+    await syncPackStateFromStore(state, async () => META, redraw);
+    expect(state.getMeta()).toBe(META);
+    expect(redraw).toHaveBeenCalledTimes(1);
+  });
+
+  it('読めずに落ちても投げず、入っていない側へ倒す', async () => {
+    const state = new OfficePackState();
+    state.setMeta(META);
+    await syncPackStateFromStore(state, async () => { throw new Error('idb'); }, vi.fn());
+    expect(state.isInstalled()).toBe(false);
   });
 });
 

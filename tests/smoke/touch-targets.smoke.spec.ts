@@ -148,6 +148,83 @@ test.describe('指で触る端末(#706)', () => {
     const ratio = await contrastOf(page, '[data-pkc-action="nav-back"]');
     expect(ratio, `‹ の字が薄い(${ratio.toFixed(2)}:1 < 4.5)`).toBeGreaterThanOrEqual(4.5);
 
+    /**
+     * 🔴 **左右の取っ手は、本文の側へ 8px 当たりが広がる**(#1087)── 追加の起動はせず、同じ頁で窓を広げて見る。
+     * ⚠ 取っ手は `overflow-x: clip` を指の端末で外している(当たりが切られるため)── 代わりに印を帯の幅へ
+     *   収めたので、**横スクロールが戻っていない**ことを 2 つの幅で見る。
+     */
+    const noHScroll = (): Promise<{ sw: number; cw: number }> =>
+      page.evaluate(() => ({
+        sw: document.scrollingElement!.scrollWidth,
+        cw: document.scrollingElement!.clientWidth,
+      }));
+    const phone = await noHScroll();
+    expect(phone.sw, `390 幅で横にはみ出す(${phone.sw} > ${phone.cw})`).toBeLessThanOrEqual(phone.cw);
+
+    await page.setViewportSize({ width: 900, height: 800 });
+    const SIDE = '[data-pkc-region="pane-grip"][data-pkc-pane="sidebar"]';
+    const INSP = '[data-pkc-region="pane-grip"][data-pkc-pane="inspector"]';
+    await expect(page.locator(SIDE), '900 幅で左の取っ手が出ない').toBeVisible();
+    const sideW = (): Promise<number> =>
+      page.locator('[data-pkc-region="sidebar"]').evaluate((el) => el.getBoundingClientRect().width);
+    expect(await sideW(), '畳む前の一覧が出ていない').toBeGreaterThan(100);
+    await page.locator(SIDE).click();
+    expect(await sideW(), '押しても畳めない').toBe(0);
+    await expect(page.locator('[data-pkc-region="collapsed-edge"]')).toBeVisible();
+
+    // 取っ手の右 6px は取っ手(本文ではない)/ 左 4px は畳んだ縁(奪っていない)
+    const hit = await page.evaluate(
+      ([side]) => {
+        const g = document.querySelector<HTMLElement>(side!)!.getBoundingClientRect();
+        const y = Math.round(g.top + g.height / 2);
+        const at = (x: number, yy = y): { grip: string | null; tile: boolean } => {
+          const e = document.elementFromPoint(x, yy);
+          const gr = e?.closest('[data-pkc-region="pane-grip"]') ?? null;
+          return {
+            grip: gr?.getAttribute('data-pkc-pane') ?? null,
+            tile: e?.closest('[data-pkc-region="collapsed-edge"] button') != null,
+          };
+        };
+        const t = document
+          .querySelector<HTMLElement>('[data-pkc-region="collapsed-edge"] button')!
+          .getBoundingClientRect();
+        return {
+          gRight: g.right,
+          sideRight6: at(g.right + 6),
+          sideLeft4: at(g.left - 4, t.top + t.height / 2),
+          tileCenter: at(t.left + t.width / 2, t.top + t.height / 2),
+          y,
+        };
+      },
+      [SIDE],
+    );
+    const info = JSON.stringify(hit);
+    expect(hit.sideRight6.grip, `左の取っ手の右 6px が取っ手でない ${info}`).toBe('sidebar');
+    expect(hit.tileCenter.tile, `畳んだ縁のタイルが取れない ${info}`).toBe(true);
+    expect(hit.sideLeft4.grip, `左の取っ手の左 4px を奪っている ${info}`).toBeNull();
+
+    const wide = await noHScroll();
+    expect(wide.sw, `900 幅で横にはみ出す(${wide.sw} > ${wide.cw})`).toBeLessThanOrEqual(wide.cw);
+
+    // 広げた当たりを指で触ると戻る
+    await page.touchscreen.tap(hit.gRight + 6, hit.y);
+    await expect.poll(sideW, { message: '広げた当たりを触っても一覧が戻らない' }).toBeGreaterThan(100);
+
+    // 右の取っ手は 1100px を超える幅でだけ出る(それ以下は情報が下へ寝る)
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.locator(INSP), '1280 幅で右の取っ手が出ない').toBeVisible();
+    const inspHit = await page.evaluate((insp) => {
+      const i = document.querySelector<HTMLElement>(insp)!.getBoundingClientRect();
+      const y = Math.round(i.top + i.height / 2);
+      const pane = (x: number): string | null =>
+        document.elementFromPoint(x, y)?.closest('[data-pkc-region="pane-grip"]')?.getAttribute('data-pkc-pane') ?? null;
+      return { left6: pane(i.left - 6), self: pane(i.left + i.width / 2), right4: pane(i.right + 4) };
+    }, INSP);
+    expect(inspHit.self, `右の取っ手の中心が取っ手でない ${JSON.stringify(inspHit)}`).toBe('inspector');
+    expect(inspHit.left6, `右の取っ手の左 6px が取っ手でない ${JSON.stringify(inspHit)}`).toBe('inspector');
+    const wide2 = await noHScroll();
+    expect(wide2.sw, `1280 幅で横にはみ出す(${wide2.sw} > ${wide2.cw})`).toBeLessThanOrEqual(wide2.cw);
+
     expect(errors, 'pageerror が出た').toEqual([]);
   });
 

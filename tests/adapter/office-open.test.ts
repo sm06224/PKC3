@@ -287,6 +287,19 @@ describe('main.ts の配線(#1228 原文 pin)', () => {
     const sb = main.indexOf('createOfficeSaveBack({');
     expect(main.slice(sb, sb + 6000)).toContain('await currentAttachmentKey(lid)');
   });
+
+  it('🔴 Office の保存の配線(#1087)── 新規は読んでいるノートを動かさず「開く」を渡し、編集中でも足せる', () => {
+    const sb = main.indexOf('createOfficeSaveBack({');
+    const body = main.slice(sb, main.indexOf('\n  });\n', sb));
+    expect(body).toMatch(/canCreate: \(\) => \{[^}]*'editing'/);
+    expect(body).toContain('keepSelection: true');
+    expect(body).toContain("type: 'OP_NOTICE', message: text, open: openLid");
+  });
+
+  it('🔴 窓の「入っていない」で控えを合わせ、昇格した直後に棚を拾う(#1087)', () => {
+    expect(main).toMatch(/ev\.type === 'not-installed'\) \{[^}]*syncPackStateFromStore\(/);
+    expect(main).toMatch(/writerHolder = true;\s*\/\/[^\n]*\n\s*void officeSaveBack\.drainAll\(\)/);
+  });
 });
 
 /**

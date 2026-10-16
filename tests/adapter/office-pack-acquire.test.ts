@@ -10,6 +10,7 @@
  *  ⑤ 404 を**沈黙で通さない**
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { OfficePackInstaller } from '../../src/adapter/platform/office/office-pack-install';
 import {
   fetchPackFromBase,
   fetchPackManifest,
@@ -177,5 +178,81 @@ describe('配布元に届かないときの字(user に見える)', () => {
     expect(packUrlFailureMessage(new TypeError('Failed to fetch'))).toBe(
       '配布元から取り込めませんでした。配布元に届かないときは「ファイルから取り込む」で一式の zip を選んでください。',
     );
+  });
+});
+
+describe('🔴 応答が止まったまま終わらない(#1087)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /** 開始したきり応答が来ない fetch。⚠ signal を無視する実装でも先へ進めることを見るため、abort には反応しない */
+  const stalledFetch = (): ReturnType<typeof vi.fn> => vi.fn(() => new Promise<Response>(() => undefined));
+
+  it('1 file の応答が 60 秒止まれば、その file 名を指して落ちる(abort も送る)', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_u: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>(() => undefined);
+    }));
+    const p = fetchPackFromBase('/office/', ['BIZUDGothic-Regular.ttf']).catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(signal?.aborted, '60 秒前に切っている').toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const e = await p;
+    expect(e).toBeInstanceOf(Error);
+    expect((e as Error).message).toMatch(/soffice\.js.*60 秒/);
+    expect(signal?.aborted, 'fetch を止めていない').toBe(true);
+  });
+
+  it('進みがある間は切らない(1 file が 60 秒を超えても、塊が来るたびに時計が戻る)', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      let n = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          await new Promise((r) => setTimeout(r, 40_000));
+          n += 1;
+          if (n > 3) c.close(); else c.enqueue(new Uint8Array([n]));
+        },
+      });
+      return new Response(body, { status: 200 });
+    }));
+    const p = fetchPackFromBase('/office/', ['a.ttf']);
+    const settled = p.then(() => 'ok', (e: Error) => e.message);
+    // 1 file あたり 160 秒(> 60 秒)かかるが 40 秒ごとに進んでいる。6 file 分を流す
+    await vi.advanceTimersByTimeAsync(170_000 * 7);
+    expect(await settled).toBe('ok');
+  });
+
+  it('目録の応答が止まっても終わる', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', stalledFetch());
+    const p = fetchPackManifest('/office-pack/').catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(await p).toMatch(/60 秒止まりました/);
+  });
+
+  it('設置は止まった取得で「失敗」を返し、出口の案内が付き、二重起動の錠も戻る', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (String(u).endsWith('pack.json')) {
+        return new Response(JSON.stringify({ version: 'v', files: ['soffice.js'], fonts: ['fonts/A.ttf'] }), { status: 200 });
+      }
+      return new Promise<Response>(() => undefined);
+    }));
+    const installer = new OfficePackInstaller({
+      store: { install: vi.fn(), remove: vi.fn(), readMeta: vi.fn(async () => null) } as never,
+      persist: async () => true,
+    });
+    const p = installer.installFromUrl();
+    await vi.advanceTimersByTimeAsync(61_000);
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain('配布元に届かないときは「ファイルから取り込む」');
+    expect(!r.ok && r.message).toMatch(/60 秒/);
+    expect(installer.isRunning(), 'ボタンが戻らない').toBe(false);
   });
 });

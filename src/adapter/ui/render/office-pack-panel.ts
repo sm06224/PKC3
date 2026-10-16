@@ -28,6 +28,7 @@ import {
   packUpdateText,
 } from '@adapter/platform/office/office-pack-update';
 import { appOfficePack, type OfficePackState } from './office-entry-view';
+import type { StatusOptions } from './status-notice';
 import { readOfficeCapability, missingCapabilities } from '@features/office/office-entry';
 import { humanBytes } from '@features/human-bytes';
 
@@ -91,7 +92,8 @@ export function packCapabilityText(): string {
 export interface PackResultUi {
   /** 添付の面を描き直す(**中央は別経路**なので、設定の面だけ直すと古い値が残る)。 */
   redrawDetail: () => void;
-  notify: (message: string) => void;
+  /** 🔴 失敗は `kind: 'problem'` で渡す(結果として数秒で消さない)。 */
+  notify: (message: string, opts?: StatusOptions) => void;
 }
 
 /**
@@ -113,7 +115,29 @@ export function applyPackResult(
     state.setMeta(result.meta);
     ui.redrawDetail();
   }
-  ui.notify(result.message);
+  // 🔴 失敗(取り込めなかった / 消せなかった)は結果ではなく問題 ── 数秒で消えると理由を読む前に無くなる(#1087)
+  if (result.ok) ui.notify(result.message);
+  else ui.notify(result.message, { kind: 'problem' });
+}
+
+/**
+ * 🔴 **窓が「一式が入っていない」と言ってきたとき、本体の控えを実物に合わせる**(#1087)。
+ * ⚠ 本体の控え(`OfficePackState`)は起動時と設置 / 削除の直後にしか読まないので、別のタブで削除された・
+ *   容量逼迫で消された後は「入っている」のまま ── 添付の入口は開けると見せるのに窓は「入っていません」と言う。
+ *   `main.ts` に書くとどの test からも実行されないので、ここに置く。
+ * ⚠ 読めなければ「入っていない」側へ倒す(`readMeta` がそうする)。変わったときだけ描き直す。
+ */
+export async function syncPackStateFromStore(
+  state: OfficePackState,
+  readMeta: () => Promise<OfficePackMeta | null>,
+  redrawDetail: () => void,
+): Promise<void> {
+  const meta = await readMeta().catch(() => null);
+  const before = state.getMeta();
+  const same = before === null ? meta === null : meta !== null && before.installedAt === meta.installedAt && before.version === meta.version;
+  if (same) return;
+  state.setMeta(meta);
+  redrawDetail();
 }
 
 function button(action: string, label: string, field: string): HTMLButtonElement {

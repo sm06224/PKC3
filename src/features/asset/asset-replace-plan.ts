@@ -32,6 +32,7 @@ import {
   type AttachmentVersion,
   type EvictLimits,
 } from '@features/flavor/attachment-versions';
+import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import type { FrontmatterValue } from '@features/markdown/frontmatter';
 
 /** 1 ノートぶんの書き換え指示。⚠ 本文の全文ではなく**差し替える key** で渡す。 */
@@ -107,6 +108,24 @@ function hasMissedRef(text: string, oldKey: string): boolean {
   return rewriteAssetRefs(norm, oldKey, `${oldKey}-probe`).count > 0;
 }
 
+/** 末尾の拡張子（小文字。無ければ空）。 */
+function extOf(name: string): string {
+  const base = name.slice(name.lastIndexOf('/') + 1);
+  const i = base.lastIndexOf('.');
+  return i <= 0 ? '' : base.slice(i).toLowerCase();
+}
+
+/**
+ * 🔴 **保存した後の添付の名前**(#1087)。Office で開いている間に user が添付の名前を変えていると、
+ *   窓が持っている名前(開いた時点のもの)で上書きして**改名が元へ戻って**いた(題名だけが新しいまま)。
+ * ⚠ 綴り(拡張子)が同じなら**いまの名前を残す**。違うときだけ保存した名前にする(#214 ── `.odt` を
+ *   `.docx` で保存したら、開くときに渡す綴りも変える)。
+ */
+export function nameAfterSaveBack(currentName: string, savedName: string): string {
+  if (currentName === '') return savedName;
+  return extOf(currentName) === extOf(savedName) ? currentName : savedName;
+}
+
 /**
  * 差し替えの計画を立てる。
  *
@@ -155,7 +174,7 @@ export function planSaveBack(input: SaveBackInput): SaveBackPlan {
             'attachment.asset_key': newKey,
             'attachment.size': input.newBytes,
             // 🔴 綴りと中身の種類(#214)── 5 面がここを読む
-            'attachment.name': input.newName,
+            'attachment.name': nameAfterSaveBack(readAttachmentMeta(targetBody).name, input.newName),
             'attachment.mime': input.newMime,
             // ⚠ hash が無い環境では **key を消さずに** 値だけ落とす…のではなく
             //    key ごと消す(嘘の hash を残さない)

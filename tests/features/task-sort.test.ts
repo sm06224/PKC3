@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sortTasksByStatus } from '../../src/features/markdown/task-sort';
+import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '../../src/features/markdown/task-sort';
 
 describe('sortTasksByStatus #1108', () => {
   it('未完了項目と完了項目が混在するリストで、完了項目が末尾へ移動する', () => {
@@ -197,5 +197,23 @@ describe('sortTasksByStatus #1108', () => {
     expect(sortTasksByStatus(nested)).toBe(['- [ ] 親', '  1. [ ] 子2', '  2. [x] 子1'].join('\n'));
     // 箇条書きは番号を持たないので変わらない(対照群)
     expect(sortTasksByStatus('- [x] a\n- [ ] b')).toBe('- [ ] b\n- [x] a');
+  });
+});
+
+describe('触らない塊 / 引用 (#1087 sweep)', () => {
+  it('字下げ 4 の fence の中は項目として並べ替えない', () => {
+    const body = '- [ ] a\n    ```\n    - [x] c\n    - [ ] d\n    ```\n- [x] b\n- [ ] e\n';
+    expect(sortTasksByStatus(body)).toBe('- [ ] a\n    ```\n    - [x] c\n    - [ ] d\n    ```\n- [ ] e\n- [x] b\n');
+  });
+  it('$$ の数式の塊の中は触らず、項目と一緒に動く', () => {
+    const body = '- [x] a\n  $$\n  - [x] m\n  - [ ] n\n  $$\n- [ ] b\n';
+    expect(sortTasksByStatus(body)).toBe('- [ ] b\n- [x] a\n  $$\n  - [x] m\n  - [ ] n\n  $$\n');
+  });
+  it('hasTaskItems は fence の中を数えず、引用の中は hasQuotedTaskItems が言い分ける', () => {
+    expect(hasTaskItems('    ```\n- [ ] a\n```')).toBe(false);
+    expect(hasTaskItems('> - [ ] a')).toBe(false);
+    expect(hasQuotedTaskItems('> - [ ] a')).toBe(true);
+    expect(hasQuotedTaskItems('- [ ] a')).toBe(false);
+    expect(sortTasksByStatus('> - [x] a\n> - [ ] b')).toBe('> - [x] a\n> - [ ] b');
   });
 });

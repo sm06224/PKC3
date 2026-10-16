@@ -8,7 +8,7 @@
  * 秒まで含めるのは PKC2 の textlog-readability-hardening の教訓
  * (高頻度ログの弁別に秒が要る)── 設計メモ §3 の `HH:mm` 表記はこの精度に更新。
  */
-import { parseTextlogBody } from '../textlog/textlog-body';
+import { readTextlogEntries } from '../textlog/textlog-body';
 import { type FlavorSpec } from './flavor-spec';
 import { extractSchedule } from '../schedule/schedule-keys';
 
@@ -76,7 +76,10 @@ export const textlogFlavor: FlavorSpec = {
     // しない)。P8 段⑥ の追記は**末尾に足すだけ**で節を再解釈しない
     // (`appendAt` は既存本文を読まない ── 見出しの形を後から変えられない代わりに、
     //  本文が壊れる経路も無い。PKC2 は保存形が JSON で見出しは描画時生成だった)
-    const log = parseTextlogBody(body);
+    const log = readTextlogEntries(body);
+    // 🔴 ログの JSON として読めない本文は**捨てずに本文として残す**(#1087。`flavor-spec.ts` の契約
+    //   「不正 JSON を落とさない」/ todo の `parsePkc2Todo` と同じ向き)
+    if (log === null) return body;
     return log.entries
       .map((e) => {
         const star = e.flags.includes('important') ? ' ★' : '';

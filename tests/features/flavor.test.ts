@@ -159,9 +159,10 @@ describe('textlog flavor', () => {
     expect(textlogFlavor.fromPkc2(body)).toBe('## garbage\n\nt');
   });
 
-  it('empty / invalid log converts to empty markdown; no extracted columns', () => {
+  it('empty log converts to empty markdown; no extracted columns', () => {
     expect(textlogFlavor.fromPkc2('')).toBe('');
-    expect(textlogFlavor.fromPkc2('not json')).toBe('');
+    // #1087: 不正 JSON は捨てず本文として残す(flavor-spec の契約。以前は '' だった)
+    expect(textlogFlavor.fromPkc2('not json')).toBe('not json');
     expect(textlogFlavor.extract('## 2026-07-30 14:03:22\n\nx')).toEqual(NO_EXTRACT);
   });
 });
@@ -443,5 +444,22 @@ describe('frontmatter の日付は、アーキタイプによらず効く(2026-0
     for (const a of ARCHETYPES) {
       expect(extractMeta(a, body).archived, `${a} の archived の扱いが違う`).toBe(a === 'todo');
     }
+  });
+});
+
+describe('textlog fromPkc2 の寛容 parse (#1087)', () => {
+  it('null の項目があっても、有効な項目は残る', () => {
+    const md = textlogFlavor.fromPkc2('{"entries":[null,{"text":"x","createdAt":"2026-01-01T00:00:00Z"}]}');
+    expect(md).toMatch(/^## 2026-01-01 \d{2}:\d{2}:\d{2}\n\nx$/);
+  });
+  it('JSON でない古い本文は本文として残す', () => {
+    expect(textlogFlavor.fromPkc2('some old text')).toBe('some old text');
+  });
+  it('裸の配列は項目の並びとして読む', () => {
+    const md = textlogFlavor.fromPkc2('[{"text":"y","createdAt":"2026-01-01T00:00:00Z"}]');
+    expect(md).toMatch(/^## 2026-01-01 \d{2}:\d{2}:\d{2}\n\ny$/);
+  });
+  it('entries の無い JSON も捨てずに残す', () => {
+    expect(textlogFlavor.fromPkc2('{"a":1}')).toBe('{"a":1}');
   });
 });

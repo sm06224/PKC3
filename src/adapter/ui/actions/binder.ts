@@ -83,7 +83,7 @@ import { swapLines } from '@features/markdown/line-swap';
 import { TIDY_NOTES, tidySelection, type TidyOp } from '@features/markdown/text-tidy';
 import { tableOnTab } from '@features/markdown/table-assist';
 import { hasNumberedItems, renumberLists } from '@features/markdown/list-renumber';
-import { hasTaskItems, sortTasksByStatus } from '@features/markdown/task-sort';
+import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '@features/markdown/task-sort';
 import { stripDialect } from '@features/markdown/strip-dialect';
 import {
   blockedActionNote,
@@ -10640,7 +10640,11 @@ const ACTIONS: Record<string, ActionHandler> = {
     const next = sortTasksByStatus(ta.value);
     if (next === ta.value) {
       services.showStatus?.(
-        hasTaskItems(ta.value) ? '完了項目は既に末尾に揃っています' : 'このノートにチェック項目はありません',
+        hasTaskItems(ta.value)
+          ? '完了項目は既に末尾に揃っています'
+          : hasQuotedTaskItems(ta.value)
+            ? '引用の中のチェック項目は並べ替えません'
+            : 'このノートにチェック項目はありません',
       );
       return;
     }

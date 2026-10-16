@@ -82,10 +82,19 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
   const lines = isCrlf ? body.split('\r\n') : body.split('\n');
   const out: string[] = [];
   /** 字下げの幅 → 次に振る番号。⚠ 深い段から抜けたら捨てる。 */
-  let counters = new Map<number, number>();
+  const counters = new Map<number, number>();
   let fence = '';
+  const indentOf = (l: string): number => /^\s*/.exec(l)![0].length;
+  /** 字下げが `w` 以上の段の数えを捨てる(その行は、それらの項目の中身ではない)。 */
+  const dropFrom = (w: number): void => {
+    for (const d of [...counters.keys()]) if (d >= w) counters.delete(d);
+  };
 
+  /** 直前の行が、リストの項目か、その項目に続く段落の行だったか(遅延継続の判定に使う)。 */
+  let inItemParagraph = false;
   for (const line of lines) {
+    const prevInItem = inItemParagraph;
+    inItemParagraph = false;
     const nextFence = advanceFence(fence, line);
     if (fence !== '') {
       out.push(line);
@@ -95,8 +104,9 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     if (nextFence !== '') {
       fence = nextFence;
       out.push(line);
-      // ⚠ コードの塊はリストを**切る**(前後は別のリストである)
-      counters = new Map();
+      // ⚠ 字下げの無いコードの塊はリストを**切る**(前後は別のリストである)。
+      //   🔴 項目より深く字下げした塊は**その項目の一部**なので切らない(#1087)
+      dropFrom(indentOf(line));
       continue;
     }
 
@@ -104,7 +114,16 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     if (item === null) {
       // ⚠ 空行**だけ**では切らない(段落を挟んだ 1 つのリストが在る)が、
       //    実のある別の行が来たら切る
-      if (line.trim() !== '') counters = new Map();
+      //    🔴 ただし**項目より深く字下げした行**(入れ子の箇条書き・段落・画像)はその項目の中身で、
+      //    項目の列を切らない(#1087)── 切るのは、その字下げ以下の段だけ
+      // 🔴 **遅延継続**(CommonMark):項目の段落のすぐ下に字下げ無しで続けた行は、その項目の段落の続き(#1087)。
+      //    ⚠ 見出し・引用・区切り線・箇条書きの記号で始まる行は段落を切るので、続きにしない
+      const lazy =
+        prevInItem &&
+        line.trim() !== '' &&
+        !/^\s*(?:#{1,6}(?:\s|$)|>|[-*+](?:\s|$)|(?:[-*_]\s*){3,}$)/.test(line);
+      if (lazy) inItemParagraph = true;
+      else if (line.trim() !== '') dropFrom(indentOf(line));
       out.push(line);
       continue;
     }
@@ -115,6 +134,7 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     const n = mode === 'uniform' ? 1 : (counters.get(depth) ?? 0) + 1;
     counters.set(depth, (counters.get(depth) ?? 0) + 1);
     out.push(`${item.indent}${n}${item.sep}${item.rest}`);
+    inItemParagraph = true;
   }
   return out.join(eol);
 }

@@ -9886,8 +9886,18 @@ h3[data-pkc-section] {
     pointer-events: auto;
   }
   .pkc-md-rendered .pkc-md-copy-btn,
-  .pkc-md-rendered .pkc-render-toggle {
+  .pkc-md-rendered .pkc-render-toggle,
+  .pkc-md-rendered .pkc-code-collapse-top-btn {
     opacity: 1;
+  }
+  /* 🔴 付箋の持ち手と大きさを変える角(#1087)── 指の端末では押し所を 24px 以上にする(他の押し所と同じ規律) */
+  .pkc-place > [data-pkc-field='place-grip'],
+  .pkc-place > [data-pkc-field='place-size'] {
+    width: 24px;
+    height: 24px;
+  }
+  .pkc-place > [data-pkc-field='place-size']::before {
+    line-height: 24px;
   }
   /**
    * 🔴 **押せる升に、常に見える印を出す**(#750 I2。user 裁定 2026-09-06)。
@@ -10049,6 +10059,42 @@ h3[data-pkc-section] {
     content: '';
     position: absolute;
     inset: -8px 0;
+  }
+  /* 🔴 左右の取っ手も同じ(#1087)── 畳んだ一覧を戻す入口が幅 8px の帯 1 本だけになるので、本文の側へ 8px 当たりを足す。
+   * ⚠ 反対側へは足さない ── 左の取っ手の左には畳んだ縁のタイルが並ぶので、そこを奪わない。
+   * 🔑 素の規則の `overflow-x: clip` は当たりも切る(`overflow-clip-margin` は描画しか広げない ── 実ブラウザで測った)。
+   *   だから指の端末では `visible` に戻し、横スクロールの原因だった `⋮` の送り幅(9px)は、印の側(`::after`)を
+   *   帯の幅に収めて切る。 */
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar'],
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
+    position: relative;
+    z-index: 1;
+    overflow-x: visible;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::after,
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::after {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before,
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+  }
+  /* 🔑 取っ手 8px + 本文側 16px = 24px(指の押し所の下限 #706)。幅は左右の位置で決める */
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before {
+    left: 100%;
+    right: -16px;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
+    right: 100%;
+    left: -16px;
   }
   /**
    * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
