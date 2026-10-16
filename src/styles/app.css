@@ -10066,6 +10066,8 @@ h3[data-pkc-section] {
   [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
     position: relative;
     z-index: 1;
+    /* ⚠ 取っ手は `overflow-x: clip` を持つ(素の規則の注釈)── 外へ出した当たりが切られて押せないので、その分だけ切り口を外へ広げる */
+    overflow-clip-margin: 8px;
   }
   [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before,
   [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
