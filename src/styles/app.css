@@ -9886,8 +9886,18 @@ h3[data-pkc-section] {
     pointer-events: auto;
   }
   .pkc-md-rendered .pkc-md-copy-btn,
-  .pkc-md-rendered .pkc-render-toggle {
+  .pkc-md-rendered .pkc-render-toggle,
+  .pkc-md-rendered .pkc-code-collapse-top-btn {
     opacity: 1;
+  }
+  /* 🔴 付箋の持ち手と大きさを変える角(#1087)── 指の端末では押し所を 24px 以上にする(他の押し所と同じ規律) */
+  .pkc-place > [data-pkc-field='place-grip'],
+  .pkc-place > [data-pkc-field='place-size'] {
+    width: 24px;
+    height: 24px;
+  }
+  .pkc-place > [data-pkc-field='place-size']::before {
+    line-height: 24px;
   }
   /**
    * 🔴 **押せる升に、常に見える印を出す**(#750 I2。user 裁定 2026-09-06)。
@@ -10049,6 +10059,25 @@ h3[data-pkc-section] {
     content: '';
     position: absolute;
     inset: -8px 0;
+  }
+  /* 🔴 左右の取っ手も同じ(#1087)── 畳んだ一覧を戻す入口が幅 8px の帯 1 本だけになるので、本文の側へ 8px 当たりを足す。
+   * ⚠ 反対側へは足さない ── 左の取っ手の左には畳んだ縁のタイルが並ぶので、そこを奪わない。 */
+  [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
+    position: relative;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before,
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before {
+    left: 100%;
+  }
+  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
+    right: 100%;
   }
   /**
    * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
