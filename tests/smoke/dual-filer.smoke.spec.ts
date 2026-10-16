@@ -246,6 +246,33 @@ test('🔴 F2 で名前を打ち替えられる (#273)', async ({ page }) => {
     .poll(() => cursorRow.first().getAttribute('data-pkc-entry'), '名前の確定のあと ↓ でカーソルが動かない')
     .not.toBe(cursorBefore);
 
+  /**
+   * 🔴 #1087 D7 / D2: 印が 2 件のとき、F2 は名前を打たせず「1 件だけ」と断る。
+   *   右クリックしても印は崩れない(押した行が印の中なら印を保つ)。
+   */
+  const marks = page.locator(`${PANE('left')} [data-pkc-entry][data-pkc-marked]`);
+  // 行が足りなければ、この場にノートを作って 2 行以上にする(Shift + F4。起動は増やさない)
+  await page.locator(ROWS('left')).first().click();
+  while ((await page.locator(ROWS('left')).count()) < 2) {
+    const n = await page.locator(ROWS('left')).count();
+    await page.keyboard.press('Shift+F4');
+    await expect(page.locator(ROWS('left')), '前提が崩れている(ノートが作れない)').toHaveCount(n + 1);
+  }
+  await page.locator(ROWS('left')).first().click();
+  await page.locator(ROWS('left')).nth(1).click({ modifiers: ['Control'] });
+  await expect(marks, '前提が崩れている(印が 2 件にならない)').toHaveCount(2);
+  await page.keyboard.press('F2');
+  await expect(input, '印が複数なのに名前の入力欄が出た').toHaveCount(0);
+  await expect(page.locator('[data-pkc-region="status"]'), '断りの字が出ていない').toContainText(
+    '1 件だけ',
+  );
+  await page.locator(ROWS('left')).nth(1).click({ button: 'right' });
+  await expect(
+    page.locator('[data-pkc-region="context-menu"]'),
+    '空振り防止(右クリックのメニューが出ていない)',
+  ).toBeVisible();
+  await expect(marks, '右クリックで印が 1 件に崩れた').toHaveCount(2);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -683,6 +710,27 @@ test('🔴 2 ペインの Delete は確認なしで移り、元に戻せる (#29
   await rows.first().click();
   await page.keyboard.press('Delete');
   await expect(rows, 'もう一度消えていない').toHaveCount(before - 1);
+
+  /**
+   * ── ③ 右クリックの「ゴミ箱へ移す」でも、消した後にカーソルが立ち、焦点が行にある(#1087 D1)。
+   * 行が 2 件以上残る形に戻してから押す(↓ で動けるように)。
+   */
+  await clickReal(page, '[data-pkc-field="status-undo"]');
+  await expect(rows, '前提が崩れている(戻していない)').toHaveCount(before);
+  await rows.first().click({ button: 'right' });
+  await page
+    .locator('[data-pkc-region="context-menu"] [data-pkc-action="delete-entry"]')
+    .click();
+  await expect(rows, '右クリックの「ゴミ箱へ移す」で消えていない').toHaveCount(before - 1);
+  await expect(cursorRow, '右クリックで消した後にカーソルが無い').toHaveCount(1);
+  const rcBefore = await cursorRow.first().getAttribute('data-pkc-entry');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(
+      () => cursorRow.first().getAttribute('data-pkc-entry'),
+      '右クリックで消した後、焦点が行に無く ↓ が効かない',
+    )
+    .not.toBe(rcBefore);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
