@@ -182,11 +182,14 @@ describe('form flavor', () => {
     expect(readFormFields(md)).toEqual({ name, checked: false });
   });
 
-  it('tolerant parse: invalid JSON becomes an empty form (PKC2 semantics)', () => {
-    expect(readFormFields(formFlavor.fromPkc2('oops'))).toEqual({
+  it('tolerant parse: invalid JSON becomes an empty form, and the original text stays in the body (#1087)', () => {
+    const md = formFlavor.fromPkc2('oops');
+    expect(readFormFields(md)).toEqual({
       name: '',
       checked: false,
     });
+    // 取り込みで元の文を消さない(todo と同じ作法)
+    expect(parseFrontmatter(md).body).toBe('oops');
   });
 });
 

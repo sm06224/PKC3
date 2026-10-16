@@ -227,7 +227,7 @@ function banned(
  *   (`.claude/skills/notice-writing/notice_check.py` が行の形で読む)。
  */
 export const BANNED_TERMS: readonly BannedTerm[] = [
-  banned('面', '画面', '造語', ['画面', '紙面']),
+  banned('面', '画面', '造語', ['画面', '紙面', '場面', '文面', '面積']),
   banned('口', '使わない', '造語', ['入口', '出口', '窓口', '口座']),
   banned('札', '使わない', '造語', ['札幌']),
   banned('検め', '使わない', '造語'),

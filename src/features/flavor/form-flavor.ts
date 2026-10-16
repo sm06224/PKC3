@@ -21,7 +21,8 @@ function parsePkc2Form(body: string): { name: string; note: string; checked: boo
       checked: p.checked === true,
     };
   } catch {
-    return { name: '', note: '', checked: false };
+    // JSON として読めない本文は、元の文を note に残す(todo と同じ作法 ── 取り込みで文を消さない)
+    return { name: '', note: body, checked: false };
   }
 }
 
