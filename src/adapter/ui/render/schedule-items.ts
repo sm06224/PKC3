@@ -27,6 +27,8 @@ export interface ScheduleItems {
   readonly byNote: readonly { readonly lid: string; readonly count: number }[];
   /** ノートを隠したせいで出ていない予定の数(「出すもの(N)」に足す)。他の絞りで出ない分は数えない。 */
   readonly hiddenByNote: number;
+  /** 済んでいるノートの予定の数(「済み(N)」に足す)。他の絞りを通り、ノートで隠していない分。 */
+  readonly doneNotes: number;
 }
 
 export function scheduleItemsOf(state: AppState): ScheduleItems {
@@ -45,12 +47,20 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
   const visible = unhidden.filter((c) => !hiddenNotes.has(c.lid));
   const notes: AgendaItem[] = [];
   const noteItems: AgendaItem[] = [];
+  let doneNotes = 0;
   for (const lid of state.order) {
     const m = state.entryMetas.get(lid);
     if (m === undefined || m.date === null) continue;
     if (m.archived && !state.showArchived) continue;
     if (!matchesEntry(m, filter)) continue;
-    noteItems.push(itemOfNote(m));
+    const item = itemOfNote(m);
+    // ⚠ 済んだノートは行の札と同じ旗で畳む(`showDoneTasks`)。畳んだ分は数だけ持つ
+    if (item.done && !state.showDoneTasks) {
+      if (!hiddenNotes.has(m.lid)) doneNotes++;
+      continue;
+    }
+    if (item.done && !hiddenNotes.has(m.lid)) doneNotes++;
+    noteItems.push(item);
   }
   for (const n of noteItems) if (!hiddenNotes.has(n.lid)) notes.push(n);
   // 🔑 日付の無い札は「日付のないもの」を出しているときだけ数える(出ていない物を「隠した」とは言わない)
@@ -66,5 +76,5 @@ export function scheduleItemsOf(state: AppState): ScheduleItems {
     if (hiddenNotes.has(n.lid)) hiddenByNote++;
   }
   const byNote = [...counts].map(([lid, count]) => ({ lid, count }));
-  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes], byNote, hiddenByNote };
+  return { all, visible, notes, items: [...visible.map(itemOfCard), ...notes], byNote, hiddenByNote, doneNotes };
 }

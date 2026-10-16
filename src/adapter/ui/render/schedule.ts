@@ -286,7 +286,7 @@ export class ScheduleRenderer {
      * 🔑 **何を出すかは `scheduleItemsOf` 1 か所**(`.ics` の書き出しも同じ口を呼ぶ ── §7)。
      * 絞り込み・片付けた・済んだ行の規則と、ノート 1 件が丸ごと予定のもの(frontmatter の `date:`、段④)もそこにある。
      */
-    const { all, visible, notes, items, byNote, hiddenByNote } = scheduleItemsOf(state);
+    const { all, visible, notes, items, byNote, hiddenByNote, doneNotes } = scheduleItemsOf(state);
     const dated = visible.filter((c) => c.date !== null);
     /**
      * 🔴 **済んだ回は「絞り込む前」の札から拾う**(#344 段②)。
@@ -319,7 +319,7 @@ export class ScheduleRenderer {
       hiddenByNote,
     );
     const undatedCount = this.paintUndatedToggle(frame.undated, state, visible.length - dated.length);
-    const doneCount = this.paintDoneToggle(frame.done, state, all, filter);
+    const doneCount = this.paintDoneToggle(frame.done, state, all, filter, doneNotes);
     const archivedCount = this.paintArchivedToggle(frame.archived, state, all);
     /**
      * 🔴 **「出すもの(N)」= いま隠れている分の合計**(#855。Gemini 裁定 = #1163 の依頼 12-C)。
@@ -640,9 +640,11 @@ export class ScheduleRenderer {
     state: AppState,
     all: readonly TaskCard[],
     filter: EntryFilter,
+    doneNotes: number,
   ): number {
     // ⚠ 数えるのは**この面に出る条件を満たしたうえで済んでいる**もの
-    const hidden = all.filter((c) => {
+    // (隠したノートの済んだ札もここで 1 回数える ── 依頼 12-C「隠れている分の合計」。数え方の見直しは #1163 の依頼 247)
+    const hidden = doneNotes + all.filter((c) => {
       if (!c.done) return false;
       const m = state.entryMetas.get(c.lid);
       if (m === undefined) return false;

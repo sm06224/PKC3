@@ -4,6 +4,7 @@
  * 長文ノート閲覧時、本文を一定量（既定 300px）スクロールした際に右下に現れ、
  * ワンクリックで先頭までスムーズに戻れるフローティングボタン。
  */
+import { preferredScrollBehavior } from './scroll-behavior';
 
 export const BACK_TO_TOP_SCROLL_THRESHOLD = 300;
 
@@ -23,7 +24,7 @@ export function installBackToTop(
   },
 ): BackToTopHandle {
   const threshold = options?.threshold ?? BACK_TO_TOP_SCROLL_THRESHOLD;
-  const behavior = options?.behavior ?? 'smooth';
+  const behavior = options?.behavior ?? preferredScrollBehavior();
   const doc = container.ownerDocument;
 
   const wrapper = doc.createElement('div');

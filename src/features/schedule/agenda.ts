@@ -111,8 +111,9 @@ export function itemOfNote(meta: EntryMeta): AgendaItem {
     key: `${meta.lid} note`,
     lid: meta.lid,
     line: null,
+    // 🔑 取り込んだ ToDo(frontmatter `status: done`)は済み ── 情報ペインの「完了」と揃える
     text: meta.title,
-    done: false,
+    done: meta.status === 'done',
     date: meta.date,
     time: null,
     // ⚠ 時刻が無いので幅も無い
