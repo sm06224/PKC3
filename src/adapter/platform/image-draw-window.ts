@@ -625,6 +625,11 @@ export function openImageDrawWindow(deps: ImageDrawWindowDeps): ImageDrawWindow 
   doc.title = `${deps.title} に描き込む`;
   const style = doc.createElement('style');
   style.textContent = CSS;
+  // 🔑 viewport を宣言する ── 無いと電話は 980px の幅で描いて縮める(読めない小ささになる)
+  const viewport = doc.createElement('meta');
+  viewport.name = 'viewport';
+  viewport.content = 'width=device-width, initial-scale=1';
+  doc.head.append(viewport);
   doc.head.append(style);
   const loading = doc.createElement('p');
   loading.setAttribute('data-pkc-field', 'image-draw-loading');

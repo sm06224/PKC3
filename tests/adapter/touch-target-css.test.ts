@@ -60,6 +60,26 @@ describe('指の端末の押し所は 24px 以上(#706)', () => {
     ).toEqual([]);
   });
 
+  it('🔴 24px 未満だった押し所(月送り・2 ペインの ◀ ▶ ☆・割り当ての ×・目次の行・全文を開く)を下限へ上げている', () => {
+    const list = rules(touch());
+    const sels = [
+      "[data-pkc-action='schedule-nav']",
+      "[data-pkc-action='dual-back']",
+      "[data-pkc-action='dual-forward']",
+      "[data-pkc-action='dual-bookmark']",
+      "[data-pkc-field='keymap-drop']",
+      "[data-pkc-region='help-toc'] [data-pkc-field='help-toc-row']",
+      '[data-pkc-oss] summary',
+    ];
+    for (const sel of sels) {
+      const bodies = list.filter((r) => r.sel === sel).map((r) => r.body);
+      const px = (prop: string): number =>
+        Math.max(0, ...bodies.map((b) => Number(new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*(\\d+)px`).exec(b)?.[1] ?? 0)));
+      expect(px('min-width'), `${sel} の min-width が 24px 未満`).toBeGreaterThanOrEqual(FLOOR_PX);
+      expect(px('min-height'), `${sel} の min-height が 24px 未満`).toBeGreaterThanOrEqual(FLOOR_PX);
+    }
+  });
+
   it('🔴 行の高さ(--row-h)は、指の端末で 24px 以上へ上げてある', () => {
     const body = touch();
     const m = /--row-h:\s*(\d+)px/.exec(body);

@@ -319,6 +319,9 @@ export function openContextMenu(
   const view = root.ownerDocument.defaultView;
   const vw = view?.innerWidth ?? 0;
   const vh = view?.innerHeight ?? 0;
+  // 🔑 背の低い画面(横向きの電話など)では全項目が入らない ── 画面の高さまでに抑え、
+  //   あふれた分はメニューの中で送る(CSS の `overflow-y: auto`)。採寸は抑えた後に行う。
+  if (vh > 0) el.style.maxHeight = `${Math.max(0, vh - 16)}px`;
   const box = el.getBoundingClientRect();
   const x = vw > 0 ? Math.max(0, Math.min(at.x, vw - box.width)) : at.x;
   const y = vh > 0 ? Math.max(0, Math.min(at.y, vh - box.height)) : at.y;
@@ -390,6 +393,12 @@ export function closeContextMenu(root: HTMLElement): void {
   restoreBase.delete(root);
   menu.remove();
   if (mine && back instanceof HTMLElement && back.isConnected) back.focus();
+}
+
+/** その `scroll` の発生源が、出ているメニューの中か(中で送っているだけなら閉じない)。 */
+export function scrollInsideMenu(root: HTMLElement, target: EventTarget | null): boolean {
+  const menu = menuOf(root);
+  return menu !== null && target instanceof Node && menu.contains(target);
 }
 
 /** 出ているか。⚠ test と binder が同じ問いに 2 つの答えを持たないため。 */
