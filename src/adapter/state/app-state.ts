@@ -4769,11 +4769,43 @@ function reduceCore(
            * ⚠ 落とさないと、**消したノートの行が残って押しても何も起きない**。
            */
           captureItems: keepCaptures(state, sameCid, metas),
+          /**
+           * 🔴 **履歴・ごみ箱の開いた面は、同じ container なら保って取り直す / 別なら畳む**(#1087)。
+           * ⚠ 別タブの書込はここを通るが、今まで `...state` で素通りだった ── 履歴の面は
+           *   **別タブが保存した版が増えない**。ノートが消えていれば畳む(居ない lid の履歴を出さない)。
+           * ⚠ 前の答えは取り直しが届くまで保つ(ちらつかせない)。
+           */
+          revisionPanel:
+            sameCid && state.revisionPanel !== null && metas.has(state.revisionPanel.lid)
+              ? state.revisionPanel
+              : null,
+          trashPanel: sameCid ? state.trashPanel : null,
         },
         events: [
           ...(keepLid === null
             ? []
             : [{ type: 'REQUEST_BODY' as const, lid: keepLid }]),
+          // 🔴 参照元・履歴・ごみ箱・横に留めた枠・板の抜粋も、別タブの書込で古くなる(#1087)。
+          //    題名 / 件数が同じだと `entryListChanged` では取り直されないので、ここで頼む。
+          ...(keepLid !== null && state.backlinks !== null
+            ? [{ type: 'REQUEST_BACKLINKS' as const, lid: keepLid }]
+            : []),
+          ...(sameCid && state.revisionPanel !== null && metas.has(state.revisionPanel.lid)
+            ? [{ type: 'REQUEST_REVISION_LIST' as const, lid: state.revisionPanel.lid }]
+            : []),
+          ...(sameCid && state.trashPanel !== null ? [{ type: 'REQUEST_TRASH_LIST' as const }] : []),
+          // ⚠ 本文は捨てない(返事が届くまで今の字を映す)。留めた枠は読むだけの面なので、
+          //    編集中の打鍵を上書きしない(編集の入れ物は `openBody` / 編集 draft で別)
+          ...(sameCid
+            ? state.splitLids
+                .filter((l) => metas.has(l))
+                .map((l) => ({ type: 'REQUEST_SPLIT_BODY' as const, lid: l }))
+            : []),
+          ...(sameCid
+            ? [...placeBodiesOf(state).keys()]
+                .filter((k) => metas.has(baseLidOfKey(k)))
+                .map((k) => ({ type: 'REQUEST_PLACE_BODY' as const, lid: k }))
+            : []),
           // 🔴 取込・別タブの変更で本文が変わっている ── 絞っている語で撃ち直す(#1087)
           ...searchRefreshEvents(state),
           ...(state.viewMode === 'query'
