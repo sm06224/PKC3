@@ -2327,7 +2327,10 @@ function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
   if (s.phase === 'editing' && lid && s.openBody !== null && !cancelAsking) {
     const input = editorTitle(root);
     const titleChanged =
-      s.freshLid !== lid && input !== null && input.value !== (s.entryMetas.get(lid)?.title ?? '');
+      s.freshLid !== lid &&
+      input !== null &&
+      // ⚠ 比べる先は「編集を始めたときの題名」── 他のタブが改名した後の題名(entryMetas)と比べると、触っていないのに「変えた」になる(保存の側と同じ)
+      input.value !== (input.getAttribute('data-pkc-title-base') ?? input.value);
     if (s.openBody.body !== s.openBody.baseline || titleChanged) {
       cancelAsking = true;
       void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
@@ -9859,7 +9862,7 @@ const ACTIONS: Record<string, ActionHandler> = {
        * ⚠ 日本語で表を埋める人は**升 1 つにつき最低 1 回**変換を確定するので、
        *   これは**毎升踏む**。しかも壊れるのは**まだ見ていない隣の升**である。
        */
-      if (ev.isComposing) return;
+      if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.key === 'Enter') {
         ev.preventDefault();
         /**
@@ -15983,7 +15986,8 @@ export function bindActions(
        * 引く式と `合計=` も、今までの `2+3=` と同じ口を通る(別の判定を作ると、
        * `Enter` で計算できる行とパレットで計算できる行が食い違う ── §7)。
        */
-      const res = resolveInlineCalc(ta.value, ta.selectionStart);
+      // ⚠ コード・数式の中の `2+3=` は user の字そのもの ── 貼付(`pasteText`)と同じく計算しない
+      const res = insideCodeOrMath(ta.value, ta.selectionStart) ? null : resolveInlineCalc(ta.value, ta.selectionStart);
       if (res !== null) {
         /**
          * 🔴 **`insertText` で挿す**(= `execCommand('insertText')`)。
@@ -16752,7 +16756,14 @@ export function bindActions(
   const onPaste = (e: Event): void => {
     const ce = e as ClipboardEvent;
     const files = filesOf(ce.clipboardData).filter(isImageFile);
-    if (routeFiles(files, ce.target)) {
+    /**
+     * 🔴 **文字も一緒に来ていたら、画像にしない**(Excel の範囲は表の HTML・文字・表の絵が同時に来る)。
+     *   画像だけを拾うと表が消える。画像だけのクリップボード(スクショ)は今までどおり画像へ。
+     */
+    const hasText =
+      (ce.clipboardData?.getData('text/html') ?? '').trim() !== '' ||
+      (ce.clipboardData?.getData('text/plain') ?? '').trim() !== '';
+    if (!hasText && routeFiles(files, ce.target)) {
       ce.preventDefault();
       return;
     }

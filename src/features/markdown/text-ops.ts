@@ -1131,6 +1131,21 @@ export interface AutoPair {
  */
 const CLOSERS: ReadonlySet<string> = new Set(Object.values(INLINE_PAIRS));
 
+
+/**
+ * 🔴 **補った開きの直後の Backspace** ── 開きと、すぐ右の対の閉じを一緒に消す範囲を返す。
+ * カーソルの前が開き・後ろがその閉じ(`(|)` など)のときだけ。それ以外は `null`(普通の Backspace)。
+ * 規則の正本は `INLINE_PAIRS` 1 つ(補う側と同じ表)。
+ */
+export function pairedBackspaceRange(
+  text: string,
+  caret: number,
+): { from: number; to: number } | null {
+  if (caret < 1 || caret > text.length) return null;
+  const close = INLINE_PAIRS[text[caret - 1]!];
+  if (close === undefined || text[caret] !== close) return null;
+  return { from: caret - 1, to: caret + 1 };
+}
 /**
  * その打鍵で補うものを返す。補わないなら `null`(= ブラウザにそのまま打たせる)。
  *

@@ -32,7 +32,7 @@
  * `AppState.openBody.body` で、こちらは「窓」に過ぎない。
  */
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
-import { isAppDialogOpen } from '@adapter/ui/render/app-dialog';
+import { confirmInApp, isAppDialogOpen } from '@adapter/ui/render/app-dialog';
 import { splitTopLevelBlocks } from '@features/markdown/html-blocks';
 import {
   buildBlockPartition,
@@ -40,7 +40,7 @@ import {
   type SourceRange,
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
-import { autoPairFor } from '@features/markdown/text-ops';
+import { autoPairFor, pairedBackspaceRange } from '@features/markdown/text-ops';
 import {
   NO_BOUNDARY_STEP,
   stepAtBoundary,
@@ -1313,6 +1313,7 @@ export class RowSwap {
        *   字なので除く ── 外すと、その配列で括弧が補われなくなる。
        */
       if ((ke.ctrlKey || ke.metaKey) && !ke.altKey) return;
+      if (this.backspacePair(ke)) return;
       this.autoPair(ke);
     });
     /**
@@ -1445,6 +1446,27 @@ export class RowSwap {
     //    端に居たので何も動かしていない)
     if (next === null) this.appendRow();
     else this.activateLine(next, down ? 'start' : 'end');
+  }
+
+  /**
+   * 🔴 **補った開きの直後の Backspace は、閉じも一緒に消す**(`()` の `(` を消すと `)` だけ残っていた)。
+   *   カーソルの前が開き・後ろがその閉じのときだけ。消すのは `insertText` の道 ── undo に載る。
+   * @returns 受け持ったら `true`
+   */
+  private backspacePair(ke: KeyboardEvent): boolean {
+    if (ke.key !== 'Backspace' || ke.altKey || ke.shiftKey) return false;
+    const a = this.active;
+    if (!a) return false;
+    const ta = a.textarea;
+    const at = ta.selectionStart;
+    if (at !== ta.selectionEnd) return false;
+    const range = pairedBackspaceRange(ta.value, at);
+    if (range === null) return false;
+    ke.preventDefault();
+    ta.setSelectionRange(range.from, range.to);
+    insertText(ta, '');
+    this.syncActiveBox();
+    return true;
   }
 
   /**
@@ -1583,8 +1605,30 @@ export class RowSwap {
       // ⚠ 変換中の取り消しは IME のものなので、こちらは何もしない
       return;
     }
+    /**
+     * 🔴 **打った字があるときは、捨てる前に聞く**(2 列の編集の Esc と同じ問い・同じ字)。
+     *   変えていなければ今までどおり聞かずに閉じる。聞いている間の Esc 連打は 1 回にまとめる。
+     */
+    if (a.textarea.value !== a.source) {
+      if (this.cancelAsking) return;
+      this.cancelAsking = true;
+      void confirmInApp(this.host, '打った内容を捨てますか', {
+        okLabel: '編集をやめる',
+        cancelLabel: '編集を続ける',
+      }).then((answer) => {
+        this.cancelAsking = false;
+        // 待つ間に確定・差し替えなどで別の行になっていたら何もしない
+        if (this.active !== a) return;
+        if (answer === 'ok') this.restoreActive();
+        else a.textarea.focus();
+      });
+      return;
+    }
     this.restoreActive();
   }
+
+  /** 捨てる確認を出している間(Esc の連打を 1 回にする)。 */
+  private cancelAsking = false;
 
   /**
    * 活性を畳んで、**差し替える前の描画へ戻す**。

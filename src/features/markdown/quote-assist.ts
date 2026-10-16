@@ -140,6 +140,9 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
 
   if (q === null) return { kind: 'none' };
 
+  // ⚠ コードの中の `> ` 行は引用ではない(`> echo` に `> ` を足さず、`>` だけの行も消さない)
+  if (insideBlockCode(value, start)) return { kind: 'none' };
+
   // ⚠ 空の `> ` で Enter ── **抜ける**(記号を消して、普通の改行にする)
   if (q.rest.trim() === '') return { kind: 'exit', from: start, to: end, text: '' };
 

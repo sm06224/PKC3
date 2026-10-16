@@ -15,7 +15,7 @@
  *    **触っていない塊が入力欄に化ける**
  * ⑤ **導出物は開かない** ── 原文の行が無いので、差し替えると本文が壊れる
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * 🔴 アプリのダイアログが開いているか(`dispose` が確定を見送らないことの検査用)。
@@ -32,6 +32,7 @@ import {
   blockWithSubSlot,
   type RowReopenDetail,
 } from '../../src/adapter/ui/render/row-swap';
+import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { KEY_COMMANDS } from '../../src/features/keymap';
 
@@ -195,6 +196,18 @@ function shiftDown(el: Element): boolean {
   });
   el.dispatchEvent(ev);
   return ev.defaultPrevented;
+}
+
+afterEach(() => {
+  resetAppDialogForTest();
+});
+
+const dialogEl = (): HTMLElement | null => document.querySelector('[data-pkc-region="app-dialog"][open]');
+/** 確認の窓に答える(窓が出るのは microtask の後なので 1 拍待つ)。 */
+async function answerDialog(field: 'dialog-ok' | 'dialog-cancel'): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0));
+  document.querySelector<HTMLElement>(`[data-pkc-field="${field}"]`)!.click();
+  await new Promise((r) => setTimeout(r, 0));
 }
 
 function box(host: HTMLElement): HTMLTextAreaElement | null {
@@ -572,12 +585,13 @@ describe('RowSwap — 確定と取り消し', () => {
     expect(findByText(r.host, 'p', '書き換えた段落。')).toBeTruthy();
   });
 
-  it('② Escape は確定せず、**描画が戻る**(穴が残らない)', () => {
+  it('② Escape は確定せず、**描画が戻る**(穴が残らない。打っていたら聞いて、捨てる答えのとき)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
     ta.value = '捨てられる文字';
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await answerDialog('dialog-ok');
     expect(r.commits).toEqual([]);
     expect(box(r.host)).toBeNull();
     expect(r.host.querySelector('[data-pkc-row-slot]')).toBeNull();
@@ -1123,7 +1137,7 @@ describe('RowSwap — 日本語入力の契約', () => {
     expect(r.swap.isComposing).toBe(true);
   });
 
-  it('③ keyCode 229(isComposing が false の確定直後の keydown)でも奪わない(#1087)', () => {
+  it('③ keyCode 229(isComposing が false の確定直後の keydown)でも奪わない(#1087)', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
@@ -1145,6 +1159,8 @@ describe('RowSwap — 日本語入力の契約', () => {
     const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     ta.dispatchEvent(esc);
     expect(esc.defaultPrevented).toBe(true);
+    // 打った字(ここでは原文を空にした)があるので、捨てる答えをして初めて閉じる(E5)
+    await answerDialog('dialog-ok');
     expect(r.swap.isActive).toBe(false);
   });
 
@@ -2107,5 +2123,104 @@ describe('RowSwap — 項目・表の行の開き直し(#582)', () => {
     expect(done).toHaveBeenCalledWith(false);
     expect(box(r.host)).toBeNull();
     expect(r.commits).toEqual([]);
+  });
+});
+
+describe('ライブの行で Esc ── 打った字があれば聞く(E5)', () => {
+  const press = (ta: HTMLTextAreaElement): void => {
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  };
+
+  it('対照群: 打っていなければ聞かずに閉じる', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    press(box(r.host)!);
+    expect(dialogEl(), '打っていないのに聞いた').toBeNull();
+    expect(box(r.host)).toBeNull();
+  });
+
+  it('🔴 打っていたら「打った内容を捨てますか」と聞き、答えるまで開いたまま', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '打った字';
+    press(ta);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(dialogEl(), '聞いていない').not.toBeNull();
+    expect(document.querySelector('[data-pkc-field="dialog-body"]')?.textContent).toBe('打った内容を捨てますか');
+    expect(box(r.host), '答える前に閉じた').toBe(ta);
+    expect(ta.value, '打った字が消えた').toBe('打った字');
+    await answerDialog('dialog-cancel');
+  });
+
+  it('🔴 「編集を続ける」なら打った字が残ったまま開いている', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '打った字';
+    press(ta);
+    await answerDialog('dialog-cancel');
+    expect(box(r.host)).toBe(ta);
+    expect(ta.value).toBe('打った字');
+    expect(r.commits).toEqual([]);
+  });
+
+  it('「編集をやめる」なら原文は変えずに閉じる', async () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '打った字';
+    press(ta);
+    await answerDialog('dialog-ok');
+    expect(box(r.host)).toBeNull();
+    expect(r.commits).toEqual([]);
+    expect(findByText(r.host, 'p', '最初の段落。')).toBeTruthy();
+  });
+});
+
+describe('補った開きの直後の Backspace ── 閉じも一緒に消える(E8)', () => {
+  const backspace = (ta: HTMLTextAreaElement): KeyboardEvent => {
+    const ev = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+    ta.dispatchEvent(ev);
+    return ev;
+  };
+  const open = () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    return box(r.host)!;
+  };
+
+  it('🔴 `(|)` で Backspace すると `()` ごと消える', () => {
+    const ta = open();
+    ta.value = 'あ()い';
+    ta.setSelectionRange(2, 2);
+    const ev = backspace(ta);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(ta.value).toBe('あい');
+    expect(ta.selectionStart).toBe(1);
+  });
+
+  it('`「|」` のような全角の対も消える', () => {
+    const ta = open();
+    ta.value = '「」';
+    ta.setSelectionRange(1, 1);
+    backspace(ta);
+    expect(ta.value).toBe('');
+  });
+
+  it('対照群: 後ろが閉じでなければ普通の Backspace(奪わない)', () => {
+    const ta = open();
+    ta.value = '(あ)';
+    ta.setSelectionRange(1, 1);
+    const ev = backspace(ta);
+    expect(ev.defaultPrevented, '奪った').toBe(false);
+    expect(ta.value).toBe('(あ)');
+  });
+
+  it('対照群: 範囲を選んでいるときは奪わない', () => {
+    const ta = open();
+    ta.value = '()';
+    ta.setSelectionRange(0, 2);
+    expect(backspace(ta).defaultPrevented).toBe(false);
   });
 });

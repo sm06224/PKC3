@@ -154,3 +154,30 @@ describe('編集をやめる前の確認(依頼 71-1)', () => {
     press('dialog-cancel');
   });
 });
+
+describe('題名の「変えた」は編集を始めたときの題名と比べる(E9)', () => {
+  const titleInput = (h: { q: <T extends HTMLElement>(s: string) => T | null }) =>
+    h.q<HTMLInputElement>('[data-pkc-field="editor-title"]')!;
+
+  it('🔴 触っていない題名は、他のタブが改名した後でも「変えた」にならない(聞かずにやめる)', async () => {
+    const h = await startEditing(null);
+    const input = titleInput(h);
+    expect(input.getAttribute('data-pkc-title-base'), '前提:始めたときの題名が欄に残っていない').toBe('t-a');
+    // 編集中に、別のタブが同じノートを改名した(entryMetas だけが動く)
+    h.d.dispatch({ type: 'RENAME_ENTRY_TITLE', lid: 'a', title: '他のタブの題名' });
+    await tick();
+    expect(input.value, '前提:欄の字が動いていない').toBe('t-a');
+    esc(h.ta);
+    await tick();
+    expect(dialog(), '触っていない題名で「打った内容を捨てますか」と聞いた').toBeNull();
+    expect(h.d.getState().phase).toBe('ready');
+  });
+
+  it('対照群: 題名を打ち替えたら聞く', async () => {
+    const h = await startEditing(null);
+    titleInput(h).value = '打ち替えた';
+    esc(h.ta);
+    await tick();
+    expect(dialog(), '題名を変えたのに聞かない').not.toBeNull();
+  });
+});
