@@ -244,6 +244,32 @@ describe('🔴 別のウィンドウ・面を Escape で閉じる(#1042 C3)', ()
     expect(m2.d.getState().selectedLid, "'not-a-window' を返したのにノートが閉じていない").toBeNull();
   });
 
+  /**
+   * 🔴 **編集中の付箋は、Escape で窓ごと閉じない**(#1087)。本体の `deselect-entry` は
+   * `phase === 'ready'` のときだけ効く。付箋の窓だけこの門を通らず、欄に焦点が無いとき
+   * 確認も無く閉じて打ちかけが消えていた。対照群は「読んでいる間は閉じる」(上の test)。
+   */
+  it('🔴 付箋のウィンドウで編集中は、Escape が窓を閉じない(対照:読んでいる間は閉じる)', () => {
+    let closed = 0;
+    const m = mount(
+      () => 'not-a-window',
+      new KeymapStore(null),
+      () => {
+        closed++;
+        return 'closed';
+      },
+    );
+    m.d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    m.d.dispatch({ type: 'BODY_LOADED', lid: 'a', body: 'hello' });
+    m.d.dispatch({ type: 'START_EDIT' });
+    // 前提: 本当に編集中で、欄に焦点が無い(焦点があれば別の門が握って、この test は空振りする)
+    expect(m.d.getState().phase, '前提が崩れている(編集中でない)').toBe('editing');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    pressEscape();
+    expect(closed, '編集中なのに付箋の窓が閉じた').toBe(0);
+    expect(m.d.getState().phase, 'Escape で編集が終わった').toBe('editing');
+  });
+
   it('⚠ 打っている欄では、Escape で面が閉じない', () => {
     const m = mount();
     m.d.dispatch({ type: 'SET_VIEW_MODE', mode: 'query' });

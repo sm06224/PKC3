@@ -136,7 +136,7 @@ import {
   FLAG_WEBMCP,
   registeredFlags,
 } from '@features/flags';
-import { appBrowseMode, browseScanOf, isBrowseMode } from '@adapter/ui/render/browse-mode';
+import { appBrowseMode, browseScanOf, hasPaneHome, isBrowseMode } from '@adapter/ui/render/browse-mode';
 import { SavingIndicator } from '@features/status/saving-line';
 import { StoreClient } from '@adapter/platform/storage/store-client';
 import { openAssetWindow } from '@adapter/platform/asset-window';
@@ -440,6 +440,7 @@ import { noteRemoteChange } from '@adapter/state/remote-change';
 import {
   NOTE_REGISTRY_CHANNEL,
   createNoteRegistry,
+  decideNoteOpen,
 } from '@adapter/platform/note-window-registry';
 import {
   closeViewWindow,
@@ -672,6 +673,8 @@ function openViewTile(
     // 🔴 **予定表は左の列の「予定」タブへ退避する**(#673 段②)── 中央に開くと
     //    本文が消える(#292 段⑤ の理由)。振り分けは `openViewHere` の 1 か所
     openInPane: (v) => openViewHere(dispatcher, v, openBrowse, focusSearch),
+    // 🔴 左に居場所が無い面(2 ペイン / SQL)は、塞がれても中央へ落とさず理由だけ出す(#1087)
+    hasPaneHome,
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
     // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 塞がれた回は
     //    2.5 秒まるごと無反応で、user は「効いていない」と読んでもう一度押す
@@ -5048,9 +5051,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
        * ⚠ 字で「前に出しました」とは**言わない** ── 前に出るかは実測できていない。
        */
       const where = noteRegistry.whereIs(lid);
-      if (where !== null) {
+      // 🔴 頼んだ直後の 2 度目は新しく開く(#1087)── 判断は `decideNoteOpen`(週・月の窓と同じ規則)
+      const decision = decideNoteOpen(where, lid, Date.now());
+      if (decision !== 'open') {
         // ⚠ **この窓が出している**なら、前に出す相手が居ない(いま見ているのがそれ)
-        if (where === 'other') noteRegistry.raise(lid, find);
+        if (decision === 'raise') noteRegistry.raise(lid, find);
         // 🔑 この窓が出しているなら、前に出す相手が居ない ── ここで塗って送る(#1102 段①)
         else if (find !== undefined) jumpFromRaise?.(find);
         // 🔑 字は `deep-link.ts`(#690 I3 ── 別の窓なら**その窓の題名**を添える。
@@ -5058,7 +5063,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         dispatcher.dispatch({
           type: 'OP_NOTICE',
           message:
-            where === 'self'
+            decision === 'here'
               ? NOTE_OPEN_HERE_MESSAGE
               : noteOpenElsewhereMessage(
                   CONTAINER_TITLE,
@@ -5083,6 +5088,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         waitForOpen: waitForViewWindow,
         // ⚠ 付箋に退避先は無い ── `view === null` のとき呼ばれない
         openInPane: () => false,
+        hasPaneHome: () => false,
         fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
         // 🔴 押した瞬間に返事をする(#685 動線レビュー 欠陥 7)── 付箋には
         //    退避先が無いので、塞がれた回は**無反応 2.5 秒だけ**が残る

@@ -9,6 +9,8 @@
 import { describe, expect, it } from 'vitest';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { openView, openViewHere } from '../../src/adapter/ui/render/open-view';
+import { hasPaneHome } from '../../src/adapter/ui/render/browse-mode';
+import { POPUP_ALLOW_STEP, openViewInWindow } from '../../src/adapter/platform/view-window';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 
 function meta(lid: string): EntryMeta {
@@ -148,13 +150,46 @@ describe('openViewHere ── 塞がれたときの退避先', () => {
     expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
   });
 
-  /** ⚠ 対照群 ── 左に無い面は中央の面へ(この振り分けが「全部左へ」になっていないこと)。 */
-  it('⚠ 対照群: 2 ペインは中央の面へ(左のタブは開かない)', () => {
+  /**
+   * 🔴 左に居場所の無い面(2 ペイン / SQL)は、中央へも落とさない(#1087。CLAUDE.md の裁定
+   * 「別窓が塞がれたときの退避先を、中央にしない」)── 直す前は中央の面で開き、本文が消えた。
+   * ⚠ 左のタブも送らない(そんなタブは無い)。
+   */
+  it.each(['dual', 'sql'] as const)('🔴 %s は中央の面にも左のタブにも落とさない', (view) => {
     const d = booted();
     const tabs: string[] = [];
-    expect(openViewHere(d, 'dual', (t) => tabs.push(t), noFocus)).toBe(true);
+    expect(openViewHere(d, view, (t) => tabs.push(t), noFocus)).toBe(false);
     expect(tabs, '左に無い面まで左へ送った').toEqual([]);
-    expect(d.getState().viewMode).toBe('dual');
+    expect(d.getState().viewMode, '中央の面を占有した(本文が消える)').toBe('detail');
+  });
+
+  /**
+   * 🔴 **本物どうしを繋ぐ**(#1087)── 塞がれた(合図が返らない)回に、本物の `openViewInWindow` が
+   * 本物の `openViewHere` と `hasPaneHome` を通ると、2 ペイン / SQL では中央が動かず理由が出る。
+   * 対照群は予定表(左のタブへ送る)。
+   */
+  it.each([
+    ['dual', false],
+    ['sql', false],
+    ['schedule', true],
+  ] as const)('🔴 %s: 窓が塞がれたとき(本物の道で)中央は動かず、理由が出る', async (view, hasHome) => {
+    const d = booted();
+    const tabs: string[] = [];
+    const fails: string[] = [];
+    await openViewInWindow(view, {
+      open: () => {},
+      baseUrl: () => 'https://pkc.test/app/',
+      selected: () => null,
+      newToken: () => 'tok',
+      waitForOpen: async () => false,
+      openInPane: (v) => openViewHere(d, v, (t) => tabs.push(t), noFocus),
+      hasPaneHome,
+      fail: (m) => void fails.push(m),
+    });
+    expect(d.getState().viewMode, '塞がれた回に中央の面が動いた(本文が消える)').toBe('detail');
+    expect(fails, '理由を出していない').toHaveLength(1);
+    expect(fails[0]).toContain(POPUP_ALLOW_STEP);
+    expect(tabs, hasHome ? '左のタブへ送っていない' : '居場所の無い面を左へ送った').toEqual(hasHome ? ['schedule'] : []);
   });
 
   /**

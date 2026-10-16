@@ -64,6 +64,8 @@ export function openView(dispatcher: Dispatcher, mode: ViewMode): boolean {
  * 🔑 「同じものが左に在るか」の判定は `browse-mode.ts` の `homeTabOf` 1 か所 ──
  *   ここは**呼ぶだけ**。左に無い面(2 ペイン)は今までどおり中央の面へ。
  * ⚠ 探す面(#680)だけは表に無い 3 つ目の退避 ── 左の**欄**へ焦点(下の引数)。
+ * 🔴 **左に居場所が無い面(2 ペイン / SQL …)は中央へ落とさない**(#1087)── 本文が消える。
+ *   `false` を返すだけで何も開かない(理由は `view-window.ts` の `fallback` が先に出す)。
  * @returns 開けたか(左のタブは編集中でも開けるので、送れたら `true`)。
  */
 export function openViewHere(
@@ -85,5 +87,8 @@ export function openViewHere(
     openBrowse(tab);
     return true;
   }
-  return openView(dispatcher, mode);
+  // ⚠ ここへ来るのは居場所の無い面だけ(`hasPaneHome` が偽)── 呼び側(`view-window.ts`)が先に断る。
+  //    念のためここでも中央を奪わない(`dispatcher` は左のタブが無い面では使わない)
+  void dispatcher;
+  return false;
 }

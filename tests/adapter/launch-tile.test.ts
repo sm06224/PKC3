@@ -529,6 +529,12 @@ describe('main.ts の配線(原文 pin ── #174)', () => {
       MAIN.includes('openInPane: (v) => openViewHere(dispatcher, v, openBrowse, focusSearch)'),
       '退避が「開く」になっていない',
     ).toBe(true);
+    // 🔴 #1087: 左に居場所の無い面を中央へ落とさない判定が、本物(`hasPaneHome`)で配線されている
+    //   (原文 pin ── 振る舞いは `open-view.test.ts` の「本物の道」が見ている)
+    expect(
+      /openInPane: \(v\) => openViewHere\([^)]*\),\s*(?:\/\/[^\n]*\n\s*)*hasPaneHome,/.test(MAIN),
+      '退避の判定が本物の hasPaneHome でない(塞がれた回に中央の本文が消える)',
+    ).toBe(true);
     expect(
       MAIN.includes('openInPane: (v) => openView(dispatcher, nextViewMode('),
       '退避がトグルに戻っている(2 回押すと開いた面が閉じる)',

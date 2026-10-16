@@ -19159,7 +19159,15 @@ export function bindActions(
          *   名指しで戒めている、まさにその症状)。
          * 🔑 `close-pane` と同じ理由を出す(`CLOSE_VIEW_WINDOW_REFUSED`)。
          */
-        const closed = services.closeNoteWindow?.() ?? 'not-a-window';
+        /**
+         * 🔴 **編集中は閉じない**(#1087)── 本体の `deselect-entry` は `phase === 'ready'` のときだけ
+         *   効く(`runGlobalCommand`)。付箋の窓だけこの門を通らず、**書いている最中に `Esc` で
+         *   確認も無く窓ごと閉じて**打ちかけが消えていた。
+         */
+        const closed =
+          dispatcher.getState().phase === 'ready'
+            ? (services.closeNoteWindow?.() ?? 'not-a-window')
+            : 'not-a-window';
         if (rcmd === 'deselect-entry' && closed !== 'not-a-window') {
           ke.preventDefault();
           if (closed === 'refused')
