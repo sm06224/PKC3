@@ -30,7 +30,7 @@ import {
   toggleHeadingFold,
   toggleLogDay,
 } from '../render/heading-fold';
-import { isThemeChoice, THEME_STORAGE_KEY } from '../render/theme';
+import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
@@ -5187,14 +5187,6 @@ function paintPlan(root: HTMLElement, dispatcher: Dispatcher, text: string): voi
   prev.hidden = plan.ops.length === 0;
   apply.disabled = !canApplyPlan(plan);
 }
-
-/**
- * 🔴 **読み手が features に無い鍵の検査**(#1087)。⚠ 読み手と**同じ判定**を渡す(配色の読み手は
- *   `isThemeChoice`)── 下見と当てるの 2 か所が同じ表を通る(§7)。
- */
-const ADAPTER_SETTING_VALIDATORS: Readonly<Record<string, (value: string) => boolean>> = {
-  [THEME_STORAGE_KEY]: isThemeChoice,
-};
 
 /**
  * 🔴 **読み込んだ設定の下見を描く**(#414)。

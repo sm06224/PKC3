@@ -27,7 +27,8 @@ import { sayFolded } from './fold-notify';
 import { appPhone } from './phone-layout';
 import { watchDevicePixelRatio } from './dpr-watch';
 
-const KEY = 'pkc3.read-columns';
+export const READ_COLUMNS_STORAGE_KEY = 'pkc3.read-columns';
+const KEY = READ_COLUMNS_STORAGE_KEY;
 
 /** 🔴 **当たっている段数の印**。CSS が読み、smoke と設定画面が同じ物を見る。 */
 export const READ_COLUMNS_ATTR = 'data-pkc-read-columns';

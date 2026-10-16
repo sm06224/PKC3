@@ -9,7 +9,8 @@
  */
 import { DEFAULT_TAG_BADGE, isTagBadge, type TagBadge } from '@features/tag-badge';
 
-const KEY = 'pkc3.tag-badge';
+export const TAG_BADGE_STORAGE_KEY = 'pkc3.tag-badge';
+const KEY = TAG_BADGE_STORAGE_KEY;
 
 /** 当てる先の印。⚠ これが `app.css` の `[data-pkc-tag-badge='…']` と 1 対 1。 */
 export const TAG_BADGE_ATTR = 'data-pkc-tag-badge';

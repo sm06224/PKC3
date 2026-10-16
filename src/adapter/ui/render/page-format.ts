@@ -22,7 +22,8 @@ import {
 } from '@features/page-format';
 
 /** ⚠ 1 鍵だけ(`pkc3.theme` / `pkc3.external-images` と同じ作法)。 */
-const KEY = 'pkc3.page-format';
+export const PAGE_FORMAT_STORAGE_KEY = 'pkc3.page-format';
+const KEY = PAGE_FORMAT_STORAGE_KEY;
 
 /**
  * 紙の指定を載せる `<style>` の印。

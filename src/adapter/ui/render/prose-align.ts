@@ -20,7 +20,8 @@ import {
 } from '@features/prose-align';
 
 /** ⚠ 1 鍵だけ(`pkc3.page-format` と同じ作法)。 */
-const KEY = 'pkc3.prose-align';
+export const PROSE_ALIGN_STORAGE_KEY = 'pkc3.prose-align';
+const KEY = PROSE_ALIGN_STORAGE_KEY;
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {

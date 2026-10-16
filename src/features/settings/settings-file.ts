@@ -24,6 +24,7 @@
  *
  * ⚠ **pure module**。`localStorage` も DOM も知らない(読み書きは adapter の仕事)。
  */
+import { isColumnRule } from '@features/column-rule';
 import { isEditorMode } from '@features/editor-mode';
 import { resolveUsableBindings } from '@features/keymap';
 import { isAppOpenTarget } from '@features/launcher/open-target';
@@ -31,7 +32,11 @@ import { isPasteSource } from '@features/markdown/paste-source';
 import { parseMessageCap } from '@features/message/message-log';
 import { isOpenPlace } from '@features/open-place';
 import { isPageFormat } from '@features/page-format';
+import { isPaneSizes } from '@features/pane-size';
+import { isHiddenPanes } from '@features/pane-visibility';
 import { isProseAlign } from '@features/prose-align';
+import { isReadColumns } from '@features/read-columns';
+import { SCHEDULE_LEAD_OPTIONS } from '@features/schedule/schedule-notify';
 import { isTagBadge } from '@features/tag-badge';
 import { isTextScale } from '@features/text-scale';
 
@@ -56,18 +61,44 @@ export interface PortableKey {
   readonly valid?: (value: string) => boolean;
 }
 
+/**
+ * 🔴 **入 / 切の鍵の検査**(#1087)。⚠ 書き手は `'1'` / `'0'` しか書かない。読み手は `=== '1'` か `!== '0'` で
+ *   読むので、それ以外の字は「入れたのに別の意味に化ける」(`!== '0'` の読み手では `banana` が入になる)。
+ */
+const isOnOff = (v: string): boolean => v === '1' || v === '0';
+
+function parsedJson(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 鍵の割当の保存形(`KeymapStore.load` が読む形)── JSON のオブジェクト。 */
+const isKeymapJson = (v: string): boolean => {
+  const o = parsedJson(v);
+  return typeof o === 'object' && o !== null && !Array.isArray(o);
+};
+
+/** 畳んでいるグループの名前の並び(`decodeFolded` が読む形)── 文字列の JSON 配列。 */
+const isFoldedGroupsJson = (v: string): boolean => {
+  const o = parsedJson(v);
+  return Array.isArray(o) && o.every((x) => typeof x === 'string');
+};
+
 export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.theme', label: '見た目' },
-  { key: 'pkc3.panes', label: 'ペインの折りたたみ方' },
+  { key: 'pkc3.panes', label: 'ペインの折りたたみ方', valid: isHiddenPanes },
   /**
    * ⚠ **畳み方と対**(#497)── 片方だけ運ぶと「畳んだのは移ったのに幅は既定」に
    * なる。⚠ px なので端末で意味が変わりそうに見えるが、値は
    * `clamp(0px, Npx, 45vw)` として当たるので**狭い端末では自分で縮む**
    * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
    */
-  { key: 'pkc3.pane-sizes', label: 'ペインの幅' },
+  { key: 'pkc3.pane-sizes', label: 'ペインの幅', valid: isPaneSizes },
   { key: 'pkc3.editor-mode', label: '編集の仕方', valid: (v) => isEditorMode(v) },
-  { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか' },
+  { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか', valid: isOnOff },
   { key: 'pkc3.page-format', label: 'ページ設定', valid: (v) => isPageFormat(v) },
   /**
    * ⚠ **紙面と対**(#722、2026-09-08)── 片方だけ運ぶと「読み幅は移ったのに
@@ -77,27 +108,27 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.prose-align', label: '本文の置き場所', valid: (v) => isProseAlign(v) },
   // ⚠ 別の端末でも**同じ意味**になる(見づらいと感じる大きさは人に付く)── 移す
   { key: 'pkc3.text-scale', label: '文字の大きさ', valid: (v) => isTextScale(v) },
-  { key: 'pkc3.read-columns', label: '本文の段組み' },
+  { key: 'pkc3.read-columns', label: '本文の段組み', valid: (v) => isReadColumns(v) },
   // ⚠ 段組みと**対**(#525)── 片方だけ運ぶと「段組みは移ったのに線は既定」になる。
   //    見分けにくいと感じる濃さは**人に付く**(文字の大きさと同じ考え方)
-  { key: 'pkc3.column-rule', label: '段の境界線' },
+  { key: 'pkc3.column-rule', label: '段の境界線', valid: (v) => isColumnRule(v) },
   { key: 'pkc3.tag-badge', label: '本文のタグの見せ方', valid: (v) => isTagBadge(v) },
-  { key: 'pkc3.keymap', label: 'ショートカットキーの割り当て' },
+  { key: 'pkc3.keymap', label: 'ショートカットキーの割り当て', valid: isKeymapJson },
   { key: 'pkc3.browse', label: '探し方のタブ' },
-  { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー' },
+  { key: 'pkc3.dual-preview', label: '2 ペインのプレビュー', valid: isOnOff },
   { key: 'pkc3.paste-source', label: '貼り付けの判定', valid: (v) => isPasteSource(v) },
   { key: 'pkc3.query-key', label: '集計のグループ化' },
-  { key: 'pkc3.alarm', label: '予定の時刻に知らせるか' },
+  { key: 'pkc3.alarm', label: '予定の時刻に知らせるか', valid: isOnOff },
   // ⚠ 予定の知らせの好み 2 つ(#855 20-C)。別の端末でも同じ意味になる(何分前に知らせたいかは人に付く)
-  { key: 'pkc3.schedule-lead', label: '予定表を書き出すときの知らせる時間' },
-  { key: 'pkc3.schedule-missed', label: '次に開いたとき見逃した予定を知らせるか' },
+  { key: 'pkc3.schedule-lead', label: '予定表を書き出すときの知らせる時間', valid: (v) => v.trim() !== '' && SCHEDULE_LEAD_OPTIONS.includes(Number(v)) },
+  { key: 'pkc3.schedule-missed', label: '次に開いたとき見逃した予定を知らせるか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**である(#772 段① B)── 「声を聞き取りやすくしたい」かどうかは
    *   端末の事情ではなく、**聞く人の耳**に付く(`pkc3.alarm` と同じ考え方)。
    * ⚠ 運んだ先に音を整える仕組みが無くても**害が出ない** ── 整わずにそのまま鳴る
    *   だけで、鳴らなくなることはない。
    */
-  { key: 'pkc3.voice-boost', label: '音を聞きやすくするか' },
+  { key: 'pkc3.voice-boost', label: '音を聞きやすくするか', valid: isOnOff },
   /**
    * ⚠ 別の端末でも**同じ意味**になる(#826)── 「本文を見ながら選びたい」かどうかは
    *   **人に付く**好みである。⚠ 端末側の事情(ポップアップを止めている)で効かない回は
@@ -117,42 +148,42 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   端末の事情ではない。⚠ 掛けられるかは端末しだいだが、**押せる字にするか**は
    *   読み方の好みなので運ぶ(`pkc3.alarm` と同じ考え方)。
    */
-  { key: 'pkc3.phone-links', label: '本文の電話番号を押せるようにするか' },
+  { key: 'pkc3.phone-links', label: '本文の電話番号を押せるようにするか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**である(#1169)── 「本文の `@日付` を押してその日のノートを開きたい」
    *   かどうかは端末の事情ではない(`pkc3.phone-links` と同じ考え方)。
    * ⚠ 既定は**入**(`phone-links` と逆)なので、運ばれるのは**切にした人の `0`** が主になる。
    */
-  { key: 'pkc3.date-links', label: '本文の日付を押せるようにするか' },
+  { key: 'pkc3.date-links', label: '本文の日付を押せるようにするか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**である(#1225)── 日付の右に日数を見たいかは端末の事情ではない。
    *   既定は**入**なので、運ばれるのは**切にした人の `0`** が主になる。
    */
-  { key: 'pkc3.relative-days', label: '本文の日付の右に今日からの日数を添えるか' },
+  { key: 'pkc3.relative-days', label: '本文の日付の右に今日からの日数を添えるか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**である(#1224)── 色コードの隣に見本を見たいかは端末の事情ではない。
    *   既定は**入**なので、運ばれるのは**切にした人の `0`** が主になる。
    */
-  { key: 'pkc3.color-swatch', label: '本文の色コードの左に色の見本を出すか' },
+  { key: 'pkc3.color-swatch', label: '本文の色コードの左に色の見本を出すか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**である(#1174 段①)── 「無いノートへのリンクに点線を見たいか」は
    *   端末の事情ではない。運んだ先に点線の仕組みが無くても**害が出ない**
    *   (印が出ないだけ)。
    */
-  { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを薄い字と点線で見せるか' },
+  { key: 'pkc3.missing-links', label: 'リンク先が無いリンクを薄い字と点線で見せるか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**(#1087)── 「長いコード枠を最初から畳みたいか」は端末の事情ではない。
    *   運んだ先に仕組みが無くても害は出ない(畳まれないだけ)。
    */
-  { key: 'pkc3.code-collapse', label: '長いコードブロックを最初から折りたたむか' },
+  { key: 'pkc3.code-collapse', label: '長いコードブロックを最初から折りたたむか', valid: isOnOff },
   /** ⚠ **人に付く好み**(#1087)── 手が滑りやすいので切りたいかは端末ではなく人で決まる。 */
-  { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか' },
+  { key: 'pkc3.inline-code-copy', label: '文中の短いコードを押すとコピーするか', valid: isOnOff },
   /**
    * ⚠ **人に付く好み**(#275 段①)── PDF を PKC の画面で読みたいかは端末の事情ではない。
    *   既定は**切**なので、運ばれるのは**入にした人の `1`** が主になる。運んだ先に窓の仕組みが無くても
    *   **害が出ない**(ブラウザ内蔵の表示のままになるだけ)。
    */
-  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の PDF ビューアで開くか' },
+  { key: 'pkc3.pdf-reader', label: 'PDF を PKC3 の PDF ビューアで開くか', valid: isOnOff },
   /**
    * ⚠ **`pkc3.panes`(列の畳み方)と同じ扱い**(#857 段④)── 「畳んでおきたい」は
    *   **人に付く**好みである。
@@ -161,7 +192,7 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   (居ないノートを指す枠が復活する、が起きない)。`pkc3.query-key`
    *   (集計の束ね方 = 本文の鍵の名前)と同じ型である。
    */
-  { key: 'pkc3.app-group-folded', label: 'アプリのグループの折りたたみ方' },
+  { key: 'pkc3.app-group-folded', label: 'アプリのグループの折りたたみ方', valid: isFoldedGroupsJson },
   /**
    * ⚠ **人に付く好み**である(設計 doc §7、段②a)── 「何件保管したいか」は
    *   端末の事情ではない。運んでも害は出ない(既定へ丸めて読むだけ)。
@@ -172,7 +203,7 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    *   端末の事情ではない(`pkc3.dual-preview` と同じ考え方)。🔑 中身は `0` / `1` だけで、
    *   lid を持たない ── 別の container へ運んでも「居ないノートを指す」が起きない。
    */
-  { key: 'pkc3.filer-flatten', label: 'フォルダのタブで下の階層まで全部出すか' },
+  { key: 'pkc3.filer-flatten', label: 'フォルダのタブで下の階層まで全部出すか', valid: isOnOff },
 ];
 
 /**

@@ -112,6 +112,21 @@ export function encodePaneSizes(sizes: PaneSizes): string {
 }
 
 /**
+ * 保存の字がペインの幅として読めるか(設定ファイルの下見用 ── `decodePaneSizes` と同じ読み方)。
+ * ⚠ 1 つでも `名前:正の数` に読めない部分が在る字は読めない扱い(`decodePaneSizes` は黙って捨てる)。
+ */
+export function isPaneSizes(raw: string): boolean {
+  const parts = raw.split(/\s+/).filter((t) => t !== '');
+  if (parts.length === 0) return false;
+  return parts.every((part) => {
+    const at = part.indexOf(':');
+    if (at < 0 || !isSizedPaneId(part.slice(0, at))) return false;
+    const px = Number(part.slice(at + 1));
+    return Number.isFinite(px) && px > 0;
+  });
+}
+
+/**
  * ⚠ 知らない名前・数でない値・0 以下は**捨てる** ── 面の名前が変わった後の
  * 古い保存で画面が壊れない(`decodeHidden` と同じ向き)。
  */

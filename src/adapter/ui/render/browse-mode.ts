@@ -134,7 +134,8 @@ export function browseScanOf(mode: BrowseMode): BrowseScan | null {
   return OPEN_SCAN[mode] ?? null;
 }
 
-const KEY = 'pkc3.browse';
+export const BROWSE_STORAGE_KEY = 'pkc3.browse';
+const KEY = BROWSE_STORAGE_KEY;
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {

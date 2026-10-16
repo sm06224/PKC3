@@ -10,13 +10,19 @@
  * (覚えられないより、開けないほうが害が大きい)。
  */
 
-const KEY = 'pkc3.query-key';
+export const QUERY_KEY_STORAGE_KEY = 'pkc3.query-key';
+const KEY = QUERY_KEY_STORAGE_KEY;
 
 /**
  * 覚える値の上限。⚠ frontmatter の key 名は短い ── 長い値が入っていたら
  * 壊れた保存なので**捨てる**(画面へ流さない)。
  */
 const MAX_CHARS = 200;
+
+/** 保存の字が読める値か(`get` と同じ判定 ── 設定ファイルの下見もここを通す)。 */
+export function isQueryKeyValue(raw: string): boolean {
+  return raw !== '' && raw.length <= MAX_CHARS;
+}
 
 function readStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
   try {
@@ -41,7 +47,7 @@ export class QueryKeyStore {
     try {
       if (this.storage === null) return this.fallback;
       const raw = this.storage.getItem(KEY);
-      if (raw === null || raw === '' || raw.length > MAX_CHARS) return null;
+      if (raw === null || !isQueryKeyValue(raw)) return null;
       return raw;
     } catch {
       return this.fallback;

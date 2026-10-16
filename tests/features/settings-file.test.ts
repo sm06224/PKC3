@@ -26,6 +26,8 @@ import {
 import { parseMessageCap, MESSAGE_CAP_OPTIONS } from '../../src/features/message/message-log';
 import { PASTE_SOURCES } from '../../src/features/markdown/paste-source';
 import { OPEN_PLACES } from '../../src/features/open-place';
+import { PANES } from '../../src/features/pane-visibility';
+import { SIZED_PANES } from '../../src/features/pane-size';
 
 /**
  * `src` の中の `'pkc3.…'` を全部拾う。
@@ -173,7 +175,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     const plan = planSettingsImport(
       file([
         { key: 'pkc3.theme', value: 'x'.repeat(MAX_SETTING_CHARS + 1) },
-        { key: 'pkc3.keymap', value: 'k' },
+        { key: 'pkc3.keymap', value: '{}' },
       ]),
       () => null,
     );
@@ -216,6 +218,28 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       'pkc3.open-place': OPEN_PLACES[0]!.id,
       'pkc3.app-open-target': 'tab',
       'pkc3.messages.cap': '500',
+      // 🔴 #1087: 残りの鍵にも検査を付けた(見本の網羅は tests/adapter/settings-file-valid.test.ts が store から引く)
+      'pkc3.panes': PANES[0]!,
+      'pkc3.pane-sizes': `${SIZED_PANES[0]!}:300`,
+      'pkc3.open-in-edit': '1',
+      'pkc3.read-columns': '2',
+      'pkc3.column-rule': 'none',
+      'pkc3.keymap': '{}',
+      'pkc3.dual-preview': '0',
+      'pkc3.alarm': '1',
+      'pkc3.schedule-lead': '30',
+      'pkc3.schedule-missed': '0',
+      'pkc3.voice-boost': '1',
+      'pkc3.phone-links': '1',
+      'pkc3.date-links': '0',
+      'pkc3.relative-days': '0',
+      'pkc3.color-swatch': '0',
+      'pkc3.missing-links': '0',
+      'pkc3.code-collapse': '0',
+      'pkc3.inline-code-copy': '0',
+      'pkc3.pdf-reader': '1',
+      'pkc3.app-group-folded': '["仕事"]',
+      'pkc3.filer-flatten': '1',
     };
     const plan1 = (key: string, value: string, extra?: Record<string, (v: string) => boolean>) =>
       planSettingsImport(file([{ key, value }]), () => null, extra);
@@ -224,6 +248,10 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       expect(
         PORTABLE_KEYS.filter((p) => p.valid !== undefined).map((p) => p.key).sort(),
       ).toEqual(Object.keys(GOOD).sort());
+      // 🔑 検査を持たない鍵は、読み手が adapter にある 3 つだけ(配色・探し方のタブ・集計のグループ化)
+      expect(
+        PORTABLE_KEYS.filter((p) => p.valid === undefined).map((p) => p.key).sort(),
+      ).toEqual(['pkc3.browse', 'pkc3.query-key', 'pkc3.theme']);
     });
 
     for (const [key, good] of Object.entries(GOOD)) {

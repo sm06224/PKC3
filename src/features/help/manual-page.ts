@@ -264,7 +264,10 @@ export function themeBootScript(
       JSON.stringify(textScale.storageKey) +
       ')}catch(e){}var m=' +
       JSON.stringify(textScale.sizes) +
-      ';if(s!==null&&Object.prototype.hasOwnProperty.call(m,s))document.documentElement.style.setProperty("--pkc-text-size",m[s]);'
+      ';if(s!==null&&Object.prototype.hasOwnProperty.call(m,s))document.documentElement.style.setProperty("--pkc-text-size",m[s]);' +
+      // 🔴 別のウィンドウで「標準」へ戻した(鍵が消えた)回は、立てていた大きさを外す。
+      //   起動時(w=0)は触らない ── 焼かれた値(blob: の opaque origin)をそのまま残すため
+      'else if(w)document.documentElement.style.removeProperty("--pkc-text-size");'
     : '';
   /**
    * 🔑 **保存が読めなければ、`<html>` に焼かれている配色を採る**(#648 段③)。
@@ -279,12 +282,22 @@ export function themeBootScript(
   return (
     '(function(){var ok=' +
     JSON.stringify([...themeIds]) +
-    ',t=null;try{t=localStorage.getItem(' +
+    ';function ap(w){var t=null;try{t=localStorage.getItem(' +
     JSON.stringify(storageKey) +
     ')}catch(e){}if(ok.indexOf(t)<0){t=document.documentElement.getAttribute("data-pkc-theme");' +
     'if(ok.indexOf(t)<0){t="light";try{if(matchMedia("(prefers-color-scheme: dark)").matches)t="dark"}catch(e){}}}' +
     'document.documentElement.setAttribute("data-pkc-theme",t);' +
     size +
+    '}ap(0);' +
+    /**
+     * 🔴 **開いたままのマニュアルも、別のウィンドウで選んだ配色・文字の大きさに付いていく**(#1087)。
+     * ⚠ `storage` event は書いた側以外にだけ届く。`key === null` は全消し ── 既定へ戻るので当て直す。
+     *   `localStorage` に触れない origin(blob: の opaque)では event 自体が来ないだけで、害は無い。
+     */
+    'addEventListener("storage",function(ev){var k=ev.key;if(k===null||k===' +
+    JSON.stringify(storageKey) +
+    (textScale ? '||k===' + JSON.stringify(textScale.storageKey) : '') +
+    ')ap(1)});' +
     /**
      * 🔑 **URL の節の印(`#見出しの字`)へ、読み込みの後に自分で送る**(2026-09-02 実測)。
      * ⚠ 再読み込み(F5)では、ブラウザは断片へ送らない ── 印は URL に残るのに見出しが

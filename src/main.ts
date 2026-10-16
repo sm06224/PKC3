@@ -46,6 +46,7 @@ import {
 import { textScaleSpec } from '@features/text-scale';
 import { applyColumnRule, initialColumnRule } from '@adapter/ui/render/column-rule';
 import { applyTagBadge, initialTagBadge } from '@adapter/ui/render/tag-badge';
+import { watchAppearanceFromOtherWindows } from '@adapter/ui/render/appearance-follow';
 import { applyTagColors, currentTagColors } from '@adapter/ui/render/tag-color';
 import {
   MAX_TAG_COLORS,
@@ -1244,6 +1245,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   印を 1 つ当てるだけで、描き直しは要らない(骨組みは markdown が常に出す)。
    */
   applyTagBadge(document.documentElement, initialTagBadge());
+  // 🔴 紙面・置き場所・段数・段の境界線・タグの見せ方も、別のウィンドウの変更に付いていく(#1087)
+  watchAppearanceFromOtherWindows(document.documentElement, window);
   /**
    * 🔴 **タグの色を読んで当てる**(#1457)。色は器のデータ(`settings` 表)── 端末の好みではない。
    * ⚠ 起動を待たせない(読めなくても札は灰色で出るだけ)。
