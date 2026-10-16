@@ -2607,6 +2607,17 @@ function runBulkTag(
   mode: 'add' | 'remove',
 ): void {
   const field = root.querySelector<HTMLInputElement>('[data-pkc-field="bulk-tag"]');
+  // 🔴 編集中などは reducer(BULK_TAG)が黙って捨てるので、ここで断る(#1087)。
+  //   ⚠ 欄は触らない ── 打った字を残す(断っておいて消すと打ち直しになる)
+  const phaseNow = dispatcher.getState().phase;
+  const blockedBy = phaseBlockReason(phaseNow);
+  if (blockedBy !== null) {
+    dispatcher.dispatch({
+      type: 'OP_FAILED',
+      error: `${blockedBy}タグを${mode === 'add' ? '付けて' : '外して'}ください`,
+    });
+    return;
+  }
   // 🔑 **打った字を何個と読むかは `splitTags` 1 か所**(#637)──
   //   `#請求 #未払` と打てば 2 つ付く(本文のタグの行と同じ字である)
   const longMsg = overlongTagMessage(field?.value ?? '');

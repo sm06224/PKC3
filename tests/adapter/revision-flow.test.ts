@@ -252,7 +252,7 @@ describe('revision flow (P5b)', () => {
     expect(log).toContain('persist:e1:# 復元先:cp'); // disk には復元が済んでいる
   });
 
-  it('編集中の着弾・別 lid(trash 復元): 破棄 ── 選択も editor も動かない', async () => {
+  it('編集中の着弾・別 lid(trash 復元): 一覧にだけ足す ── 選択も editor も動かない', async () => {
     let release: (v: { body: string; title: string | null; archetype: string | null }) => void =
       () => {};
     const { d } = setup(
@@ -281,8 +281,9 @@ describe('revision flow (P5b)', () => {
     const s = d.getState();
     expect(s.selectedLid).toBe('e1'); // 乗っ取りなし
     expect(s.openBody?.body).toBe('draft'); // draft 無傷
-    expect(s.entryMetas.has('gone1')).toBe(false); // 着弾は破棄(disk には居る ──
-    // 前進変異なので再操作(reload / 再復元)で回収できる)
+    // #1087: 着弾は一覧にだけ足す(破棄すると、戻したノートが再読み込みまで画面に出ない)
+    expect(s.entryMetas.has('gone1')).toBe(true);
+    expect(s.order).toContain('gone1');
   });
 
   it('復元発行 → 即削除: 後着の ENTRY_RESTORED は破棄(幽霊 entry を作らない)', async () => {

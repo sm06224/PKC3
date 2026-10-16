@@ -2161,8 +2161,12 @@ export function connectStoreEffects(
           } catch (e) {
             // UI からは既に消えている(楽観)── 失敗は通知し、reload で再出現する
             // (非破壊側に倒れる)
+            // 🔴 何が起きたかを前置きする(#1087)── 理由だけ(`disk I/O error`)では何の失敗か分からない
             if (!disposed)
-              dispatcher.dispatch({ type: 'OP_FAILED', error: errorText(e) });
+              dispatcher.dispatch({
+                type: 'OP_FAILED',
+                error: `ゴミ箱へ移せませんでした(再読み込みすると元に戻ります): ${errorText(e)}`,
+              });
           }
         });
         break;

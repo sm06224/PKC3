@@ -9130,13 +9130,46 @@ function reduceCore(
        */
       let next = state;
       const events: DomainEvent[] = [];
+      /**
+       * 🔴 **後継は最後に 1 回だけ選ぶ**(#1087)。1 件ずつ選ぶと、消す途中の後継ごとに本文の読み出し
+       *   (`REQUEST_BODY`)が積まれ、3000 件で 2999 回読んでいた(しかも毎回 `visibleOrder` を作り直す)。
+       * 🔑 規則は 1 件ずつ消したときと同じ:消す位置の次(居なければ手前の最後)── 消す物を除いた
+       *   見えている並びで、位置は「選んでいた物より前に残る数」。
+       */
+      let successor: string | null = null;
+      const removesSelected = state.selectedLid !== null && targets.includes(state.selectedLid);
+      if (removesSelected) {
+        const gone = new Set(targets);
+        const before = visibleOrder(
+          state.order,
+          (l) => state.entryMetas.get(l),
+          entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
+        );
+        const vIdx = before.indexOf(state.selectedLid!);
+        if (vIdx >= 0) {
+          const kept = before.filter((l) => !gone.has(l));
+          const pos = before.slice(0, vIdx).filter((l) => !gone.has(l)).length;
+          successor = kept[Math.min(pos, kept.length - 1)] ?? null;
+        }
+      }
       for (const lid of targets) {
-        const r = removeEntryFromState(next, lid, [{ type: 'REQUEST_DELETE', lid }]);
+        const r = removeEntryFromState(next, lid, [{ type: 'REQUEST_DELETE', lid }], {
+          pickSuccessor: false,
+        });
         next = r.state;
         events.push(...r.events);
       }
+      if (removesSelected && successor !== null) events.push({ type: 'REQUEST_BODY', lid: successor });
       // ⚠ 消したものが印に残らない(`removeEntryFromState` が 1 件ずつ外している)
-      return { state: { ...next, selection: [], selectionAnchor: null }, events };
+      return {
+        state: {
+          ...next,
+          selectedLid: removesSelected ? successor : next.selectedLid,
+          selection: [],
+          selectionAnchor: null,
+        },
+        events,
+      };
     }
     case 'RENAME_ENTRY_TITLE': {
       if (state.phase !== 'ready' && state.phase !== 'editing')
@@ -10127,7 +10160,7 @@ function reduceCore(
       // - 同一 lid: disk 先行の印だけ付ける(TODO_TOGGLED の editing 分岐と同じ
       //   意味論 ── 変更あり commit は draft が勝ち、無変更 commit / cancel は
       //   disk = 復元内容が勝つ)
-      // - 別 lid: 破棄(復元は disk 側で完了済み ── 前進変異なので再操作で回収可)
+      // - 別 lid: ゴミ箱からの復元は一覧にだけ足す(下)/ 履歴復元は破棄(復元は disk 側で完了済み)
       if (state.phase === 'editing') {
         if (state.openBody?.lid === action.meta.lid) {
           return {
@@ -10136,6 +10169,29 @@ function reduceCore(
               entryMetas: new Map(state.entryMetas).set(action.meta.lid, action.meta),
               openBody: { ...state.openBody, persisted: action.body, diskAhead: true },
               ...syncShownBodies(state, action.meta.lid, action.body),
+            },
+            events: [],
+          };
+        }
+        /**
+         * 🔴 **別のノートをゴミ箱から戻した着弾は、一覧にだけ足す**(#1087)。
+         * ⚠ 直す前は破棄していた ── 「元に戻す」の途中で編集に入ると、戻したノートが画面の一覧に出ず
+         *   (再読み込みまで見えない)、「元に戻す」だけが使われた扱いになっていた。
+         * 🔑 選択と開いている本文には触らない(編集を乗っ取らない)。居る物の二重復元は従来どおり捨てる。
+         */
+        if (action.mode === 'trash' && !state.entryMetas.has(action.meta.lid)) {
+          const metasE = new Map(state.entryMetas).set(action.meta.lid, action.meta);
+          return {
+            state: {
+              ...state,
+              entryMetas: metasE,
+              order: state.order.includes(action.meta.lid)
+                ? state.order
+                : insertByOrder(state.order, action.meta.lid, metasE),
+              relations: mergeRelations(state.relations, action.relations ?? []),
+              trashPanel: state.trashPanel
+                ? { items: state.trashPanel.items.filter((t) => t.entryLid !== action.meta.lid) }
+                : null,
             },
             events: [],
           };
@@ -10616,6 +10672,8 @@ function removeEntryFromState(
   state: AppState,
   lid: string,
   extraEvents: DomainEvent[],
+  // 🔴 `false` のとき後継を選ばない(選んでいた物なら `selectedLid` は null になる)── まとめて消す側が最後に 1 回選ぶ(#1087)
+  opts: { pickSuccessor: boolean } = { pickSuccessor: true },
 ): ReduceResult {
   const entryMetas = new Map(state.entryMetas);
   entryMetas.delete(lid);
@@ -10633,7 +10691,9 @@ function removeEntryFromState(
     : state.relations;
   let selectedLid = state.selectedLid;
   const events = [...extraEvents];
-  if (state.selectedLid === lid) {
+  if (state.selectedLid === lid && !opts.pickSuccessor) {
+    selectedLid = null;
+  } else if (state.selectedLid === lid) {
     // 🔴 後継は「**見えている中**」から選ぶ(review M-1)。初版は絞り込み前の
     // `state.order` から取っていたので、絞り込み中に削除を続けると
     // **一覧に出ていない entry** が次々に選ばれて消えていった(実証済み)。
