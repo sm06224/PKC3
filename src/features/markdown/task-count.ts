@@ -30,6 +30,8 @@
  *   ここを呼ぶので、worker の束に markdown-it を引き込みたくない。
  */
 
+import { hiddenTaskMask } from './task-hidden';
+
 /** 行頭の引用記号(`>` の連なり)を剥がす。⚠ markdown-it は引用の中の task も拾う。 */
 const QUOTE = /^(\s*>)+\s?/;
 
@@ -38,21 +40,6 @@ const QUOTE = /^(\s*>)+\s?/;
  * (書き換える側と数える側で「何が項目か」が割れないように)。
  */
 const TASK = /^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\](\s|$)/;
-
-/**
- * fence の開き。⚠ ``` と ~~~ の両方(閉じは同じ文字で同じ数以上)。
- *
- * 🔴 **字下げは 3 まで**(2026-08-19 のレビューで判明)。CommonMark では
- * **字下げ 4 以上はコードブロックの中身**であって fence ではない。
- * ⚠ 直す前は `^\s*` だったので、`    ``` ` のような**説明のための例示**を
- * fence の開きと読み、**そこから後ろの項目を全部落としていた** ──
- * つまり「行頭に ``` と書きます」と字下げで例示したノートは、
- * `task_total = 0` で保存されて**候補に入らず、盤面に二度と出ない**。
- * 🔑 これは docstring が「**少なく数えるのは害**」と名指しで禁じた向きである。
- * ⚠ 逆に、この形を fence と見なさなくなると中の `- [ ]` を拾う = **多め側**に倒れる
- *   ── 宣言した誤差の向きと一致する。
- */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 export interface TaskCandidates {
   /** チェック項目**らしい**行の数(多め)。0 なら「このノートに項目は無い」。 */
@@ -80,20 +67,14 @@ function walkTaskLines(
   visit: (index: number, done: boolean, rest: string, raw: string) => void,
 ): void {
   if (body === '' || !body.includes('[')) return;
-  /** 開いている fence の文字と長さ。`null` = fence の外。 */
-  let fence: { readonly ch: string; readonly len: number } | null = null;
   const lines = body.split('\n');
+  // 🔴 隠れる行(隠しメモ・コード・数式・引用の中の fence)は読まない ── 書き換える側
+  //   (`body-rewrite.ts`)も**同じ `hiddenTaskMask`** を引く(#1087)。
+  //   ⚠ 行の割り方は `\r?\n`(`splitLines` と同じ)で、`\n` で割った `lines` と本数は同じ。
+  const hidden = hiddenTaskMask(body.split(/\r?\n/));
   for (let i = 0; i < lines.length; i++) {
+    if (hidden[i] === true) continue;
     const raw = lines[i]!;
-    const f = FENCE.exec(raw);
-    if (f !== null) {
-      const mark = f[1]!;
-      if (fence === null) fence = { ch: mark[0]!, len: mark.length };
-      // ⚠ 閉じは**同じ文字で同じ数以上**(短い ``` では ```` は閉じない)
-      else if (mark[0] === fence.ch && mark.length >= fence.len) fence = null;
-      continue;
-    }
-    if (fence !== null) continue;
     const line = raw.replace(QUOTE, '');
     const m = TASK.exec(line);
     if (m === null) continue;

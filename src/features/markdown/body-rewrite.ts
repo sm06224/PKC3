@@ -52,6 +52,7 @@ import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-ta
 import { parseRenderableFence } from './markdown-render';
 import { containerAtLine, quoteLead, splitLines } from './source-blocks';
 import { TASK_LINE } from './task-line';
+import { hiddenTaskMask } from './task-hidden';
 import { cutLines, insertLines, moveLines, type InsertAnchor } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import {
@@ -716,7 +717,10 @@ export function applyTaskRun(
 ): TaskRunApplied {
   const lines = splitLines(body);
   const fm = frontmatterLineCount(body);
-  const mask = fenceMask(lines, fm);
+  // 🔴 fence に加えて、読む側(`task-count.ts`)が読まない行(隠しメモ・字下げコード・数式)も書かない(#1087)
+  const fenced = fenceMask(lines, fm);
+  const hiddenMask = hiddenTaskMask(lines);
+  const mask = fenced.map((f, i) => f || hiddenMask[i] === true);
   let changed = 0;
   let repeat = 0;
   let invalid = 0;
@@ -976,6 +980,8 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (line !== rewrite.openLine) return null;
   const m = TASK_LINE.exec(line);
   if (m === null) return null;
+  // 🔴 読む側が読まない行(隠しメモ・コード・数式)は書かない(#1087。`hiddenTaskMask` は読む側と共通)
+  if (hiddenTaskMask(lines)[rewrite.line] === true) return null;
   const checked = m[2]!.toLowerCase() === 'x';
   /**
    * ⚠ **書き換えるのは印の 1 文字だけ** ── 行を組み直すと、
@@ -1043,6 +1049,7 @@ function rewriteLineDate(
   // 🔴 押した時点の中身と違う行は書かない(`task` と同じ。#1087)
   if (line !== rewrite.openLine) return null;
   if (!TASK_LINE.test(line)) return null;
+  if (hiddenTaskMask(lines)[rewrite.line] === true) return null; // 読む側が読まない行(#1087)
   const found = readLineDate(line);
   let next: string;
   if (rewrite.date === undefined) {
@@ -1182,6 +1189,7 @@ function repeatDoneLine(
   if (line !== rewrite.openLine) return null;
   const m = TASK_LINE.exec(line);
   if (m === null) return null;
+  if (hiddenTaskMask(lines)[rewrite.line] === true) return null; // 読む側が読まない行(#1087)
   const found = readLineDate(line);
   // ⚠ 繰り返しの行でなければ**何もしない** ── 普通の項目は `kind: 'task'` の仕事
   if (found === null || found.repeat === null) return null;
@@ -1239,6 +1247,7 @@ function moveRepeatOccurrence(
   // 🔴 掴んだ時点の中身と違う行は書かない(`task` と同じ。#1087)
   if (line !== rewrite.openLine) return null;
   if (!TASK_LINE.test(line)) return null;
+  if (hiddenTaskMask(lines)[rewrite.line] === true) return null; // 読む側が読まない行(#1087)
   const found = readLineDate(line);
   // ⚠ 繰り返しの行でなければ**何もしない**(普通の項目は `kind: 'line-date'` の仕事)
   if (found === null || found.repeat === null) return null;
@@ -1267,7 +1276,9 @@ function moveRepeatOccurrence(
 /** その行がチェック項目か(呼び側の事前判定用)。 */
 export function isTaskLine(body: string, line: number): boolean {
   const lineText = getLine(body, line);
-  return lineText !== undefined && TASK_LINE.test(lineText);
+  if (lineText === undefined || !TASK_LINE.test(lineText)) return false;
+  // 🔴 読む側が読まない行は項目ではない(#1087)
+  return hiddenTaskMask(splitLines(body))[line] !== true;
 }
 
 

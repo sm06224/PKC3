@@ -117,11 +117,14 @@ describe('チェック項目の候補を数える(#277 段②)', () => {
     expect(countTaskCandidates('> > - [x] 二重\n')).toEqual({ total: 1, done: 1 });
   });
 
-  /** ⚠ **多めに数えるのは許す**(字下げ 4 = 描く側はコード扱い)。 */
-  it('多めに数えるのは許す(字下げ 4 のコード)', () => {
+  /**
+   * 🔴 字下げ 4 のコードは数えない(#1087。以前は「多めに数えるのは許す」として 2 件と置いていた)。
+   * 事実が動いた理由:描く側が隠す行を読む側と書く側が同じ `hiddenTaskMask` で除くようになった。
+   */
+  it('字下げ 4 のコード(空行の後)は数えない', () => {
     const body = '    - [ ] コード扱い\n\n- [ ] 本物\n';
     expect(drawn(body), '描く側はコードとして数えない').toBe(1);
-    expect(countTaskCandidates(body).total, '多め側に倒れていない').toBe(2);
+    expect(countTaskCandidates(body).total).toBe(1);
   });
 
   it('fence の中は数えない(閉じ忘れも含む)', () => {
