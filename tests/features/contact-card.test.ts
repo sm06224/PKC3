@@ -371,3 +371,18 @@ describe('matchContact ── 電話は区切りと全角を無視して探す(#
     expect(matchContact(c(['090-1111-2222']), '8-9')).toBe(false);
   });
 });
+
+describe('matchContact ── 名前と番号を混ぜた探し方(山田 090)', () => {
+  const c = (name: string, tels: string[]) => ({
+    lid: 'l', name, org: '', orgParts: [], tels, emails: [], birthday: '', overlong: false,
+  });
+  it('🔴 「山田 090」は、090 の別人に当たらない', () => {
+    expect(matchContact(c('鈴木', ['090-1111-2222']), '山田 090')).toBe(false);
+  });
+  it('対照群 ── 名前も番号も合う人には当たる / 番号だけの探し方は従来どおり', () => {
+    expect(matchContact(c('山田', ['090-1111-2222']), '山田 090')).toBe(true);
+    expect(matchContact(c('山田', ['090-1111-2222']), '山田 0901')).toBe(true);
+    expect(matchContact(c('鈴木', ['090-1111-2222']), '090 1111')).toBe(true);
+    expect(matchContact(c('鈴木', ['090-1111-2222']), '(090)-1111')).toBe(true);
+  });
+});

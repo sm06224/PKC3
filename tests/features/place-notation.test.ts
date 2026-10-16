@@ -160,6 +160,18 @@ describe('位置だけの書き換え(movePlace)', () => {
     expect(lines.slice(1)).toEqual(BOARD.split('\n').slice(1));
   });
 
+  it('🔴 引用つきの値の中の `x=` は札ではない(B2)', () => {
+    const open = ':::format{.pkc-place note="left x=5" x=1 y=2}';
+    const next = movePlace(`${open}\n:::`, { line: 0, openLine: open, x: 30, y: 40 });
+    expect(next!.split('\n')[0]).toBe(':::format{.pkc-place note="left x=5" x=30 y=40}');
+  });
+
+  it('🔴 重なった札(x=1 x=2)は 1 つにして書く(B2)', () => {
+    const open = ':::format{.pkc-place x=1 y=2 x=2}';
+    const next = movePlace(`${open}\n:::`, { line: 0, openLine: open, x: 30, y: 40 });
+    expect(next!.split('\n')[0]).toBe(':::format{.pkc-place x=30 y=40}');
+  });
+
   it('x= / y= が無い塊には足す', () => {
     const body = ':::format{.pkc-place}\n:::';
     const next = movePlace(body, { line: 0, openLine: ':::format{.pkc-place}', x: 5, y: 6 });
@@ -300,6 +312,12 @@ describe('板の塊を消す(removePlace)(#676)', () => {
     // 対照群 ── 閉じを足せば消せる(門が閉じの有無を見ていることを見る)
     const closed = [open, 'まだ書いている', ':::', '', '## 次の章', '本文'].join('\n');
     expect(removePlace(closed, { line: 0, openLine: open })).toBe('## 次の章\n本文');
+  });
+
+  it('🔴 付箋の中のコードブロックに裸の `:::` が在っても、付箋は全部消える(B1)', () => {
+    const open = ':::format{.pkc-place x=1 y=1}';
+    const body = [open, 'S', '```', ':::', '```', ':::', '', 'KEEP ME'].join('\n');
+    expect(removePlace(body, { line: 0, openLine: open })).toBe('KEEP ME');
   });
 
   it('入れ子の内側の板は、内側だけ消える(外側の囲みは残る)', () => {

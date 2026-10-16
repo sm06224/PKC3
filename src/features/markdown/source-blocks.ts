@@ -175,7 +175,23 @@ export function scanContainers(text: string): ContainerSpan[] {
       let closed = false;
       while (j < lines.length) {
         const l = lines[j]!;
-        if (DIRECTIVE_CLOSE.test(l)) {
+        // 🔴 囲いの中の **閉じたコードブロックの中身は数えない**(中の `:::` は本文の字で、囲いの閉じではない)。
+        // ⚠ 閉じの無いコードブロックは**囲いの閉じで終わる**(描画側と同じ ── 下の `:::` はここで閉じに数える)
+        const innerFence = FENCE_OPEN.exec(l);
+        let fenceEnd = -1;
+        if (innerFence) {
+          const fm = innerFence[2]!;
+          for (let k = j + 1; k < lines.length; k += 1) {
+            const m = FENCE_OPEN.exec(lines[k]!);
+            if (m && m[2]!.startsWith(fm[0]!) && m[2]!.length >= fm.length && (m[3] ?? '').trim() === '') {
+              fenceEnd = k;
+              break;
+            }
+          }
+        }
+        if (fenceEnd >= 0) {
+          j = fenceEnd;
+        } else if (DIRECTIVE_CLOSE.test(l)) {
           depth -= 1;
           if (depth === 0) {
             closed = true;

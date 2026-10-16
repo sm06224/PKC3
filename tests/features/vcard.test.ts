@@ -636,3 +636,38 @@ describe('#1087 の取り込み・書き出しの見直し', () => {
     expect(warnings.filter((w) => w.includes('種別'))).toHaveLength(1);
   });
 });
+
+describe('vCard 取込の直し(C1〜C4)', () => {
+  const card = (lines: string[]) => parseVcf(['BEGIN:VCARD', 'VERSION:2.1', ...lines, 'END:VCARD'].join('\r\n'));
+
+  it('🔴 C1: 素の `;QUOTED-PRINTABLE` でも行末 `=` で継ぐ', () => {
+    const { cards } = card(['FN;QUOTED-PRINTABLE:=E5=B1=B1=E7=94=B0=E5=A4=AA=', '=E9=83=8E']);
+    expect(cards[0]!.name).toBe('山田太郎');
+  });
+
+  it('🔴 C2: QP の行末 `=` の次が空白で始まっても、空白は本文の字として残る', () => {
+    const { cards } = card(['NOTE;ENCODING=QUOTED-PRINTABLE:hello=', ' world']);
+    expect(cards[0]!.notes).toEqual(['hello world']);
+  });
+
+  it('対照群 C2: QP でない行の空白継続は従来どおり(空白 1 字を落として継ぐ)', () => {
+    const { cards } = card(['NOTE:hello', ' world']);
+    expect(cards[0]!.notes).toEqual(['helloworld']);
+  });
+
+  it('🔴 C3: QP の `=0D=0A` は CRLF でなく `\\n` になる', () => {
+    const { cards } = card(['NOTE;ENCODING=QUOTED-PRINTABLE:a=0D=0Ab=0Dc']);
+    expect(cards[0]!.notes).toEqual(['a\nb\nc']);
+  });
+
+  it('🔴 C4: FN が無く N に敬称が在れば、名前に入れなかったと言う', () => {
+    const { cards, warnings } = card(['N:山田;太郎;;様;']);
+    expect(cards[0]!.name).toBe('山田 太郎');
+    expect(warnings).toEqual(['1 枚目: 名前の敬称など(様)は名前に入れていません']);
+  });
+
+  it('対照群 C4: FN が在れば言わない / 敬称が無ければ言わない', () => {
+    expect(card(['N:山田;太郎;;様;', 'FN:山田太郎']).warnings).toEqual([]);
+    expect(card(['N:山田;太郎;;;']).warnings).toEqual([]);
+  });
+});
