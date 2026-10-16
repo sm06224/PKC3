@@ -721,6 +721,9 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 10rem;
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 2px;
   gap: 1px;
   background: var(--surface);
@@ -5941,8 +5944,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='sql-bar'] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
+  row-gap: var(--s1);
 }
 /**
  * 🔴 **足した相手の行**(#918 段⑦)。⚠ 足していなければ `hidden`(UA の `[hidden]` が畳む ──
@@ -10172,6 +10177,18 @@ h3[data-pkc-section] {
     display: inline-block;
     min-height: 24px;
     line-height: 24px;
+  }
+  /* ⑦ **月送り ‹ › / 2 ペインの ◀ ▶ ☆ / 割り当ての × / ヘルプの目次の行 / 「全文を開く」**
+   *    (#1087 の実機確認)。素の寸法が 24px 未満だった押し所を 24px の下限へ。 */
+  [data-pkc-action='schedule-nav'],
+  [data-pkc-action='dual-back'],
+  [data-pkc-action='dual-forward'],
+  [data-pkc-action='dual-bookmark'],
+  [data-pkc-field='keymap-drop'],
+  [data-pkc-region='help-toc'] [data-pkc-field='help-toc-row'],
+  [data-pkc-oss] summary {
+    min-width: 24px;
+    min-height: 24px;
   }
 }
 

@@ -292,6 +292,11 @@ function fill(
         'html,body{margin:0;height:100%;background:#1b1b1b}' +
         'object{display:block;width:100%;height:100%;border:0}' +
         'p{margin:0;padding:1rem;color:#ddd;font:14px system-ui,sans-serif}';
+  // 🔑 viewport を宣言する ── 無いと電話は 980px の幅で描いて縮める(読めない小ささになる)
+  const viewport = doc.createElement('meta');
+  viewport.name = 'viewport';
+  viewport.content = 'width=device-width, initial-scale=1';
+  doc.head.append(viewport);
   doc.head.append(style);
   doc.body.textContent = '';
   if (kind === 'image') {

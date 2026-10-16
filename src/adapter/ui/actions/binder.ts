@@ -368,6 +368,7 @@ import { currentAppOpenTarget } from '@adapter/ui/render/app-open-target';
 import {
   type MenuItem,
   closeContextMenu,
+  scrollInsideMenu,
   scrollUnchangedSinceOpen,
   contextMenuOpen,
   openContextMenu,
@@ -18789,6 +18790,8 @@ export function bindActions(
    *   (見出しのときだけ焦点を止める形にすると、**タイル側が残る** ── §7)。
    */
   const onScrollCloseMenu = (ev: Event): void => {
+    // 🔑 メニューの中で送っているだけ(背の低い画面で下の項目へ届かせる)なら閉じない
+    if (scrollInsideMenu(root, ev.target)) return;
     if (scrollUnchangedSinceOpen(root, ev.target)) return;
     closeContextMenu(root);
   };
