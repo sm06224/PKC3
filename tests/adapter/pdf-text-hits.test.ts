@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 
 type Ranges = Map<number, Array<[number, number]>>;
 interface Api {
-  rangesBySpan(strs: string[], query: string): Ranges;
+  rangesBySpan(strs: string[], query: string, eols?: boolean[]): Ranges;
+  countHits(strs: string[], query: string, eols: boolean[] | undefined, limit: number): number;
 }
 
 function load(): Api {
@@ -78,5 +79,43 @@ describe('rangesBySpan ── 一致の範囲を span ごとの範囲にする',
     let covered = 0;
     for (const list of rangesBySpan(strs, query).values()) for (const [a, b] of list) covered += b - a;
     expect(covered).toBe(counted * query.length);
+  });
+});
+
+describe('行末(hasEOL)── 欧文では空白・日本語どうしの間では無し', () => {
+  const { rangesBySpan, countHits } = load();
+  const latin = ['The quick brown fox jumps over the', 'lazy dog'];
+  const eol = [true, false];
+
+  it('🔴 行をまたぐ語句が見つかる(「the lazy」)/ 行末を空白にしないと見つからなかった', () => {
+    expect(countHits(latin, 'the lazy', eol, 100)).toBe(1);
+    expect(obj(rangesBySpan(latin, 'the lazy', eol))).toEqual({ 0: [[31, 34]], 1: [[0, 4]] });
+  });
+
+  it('🔴 行末は空白であって「無し」ではない: 「thelazy」は見つからない(偽の結合を作らない)', () => {
+    expect(countHits(latin, 'thelazy', eol, 100)).toBe(0);
+    expect(rangesBySpan(latin, 'thelazy', eol).size).toBe(0);
+  });
+
+  it('🔴 日本語どうしの行末は何も無し: 「文章」が見つかる / 「文 章」は見つからない', () => {
+    const ja = ['日本語の文', '章です'];
+    expect(countHits(ja, '文章', [true, false], 100)).toBe(1);
+    expect(obj(rangesBySpan(ja, '文章', [true, false]))).toEqual({ 0: [[4, 5]], 1: [[0, 1]] });
+    expect(countHits(ja, '文 章', [true, false], 100)).toBe(0);
+  });
+
+  it('検索語の連続する空白は 1 つに畳む / 本文の連続する空白も(「a  b」= 「a b」)', () => {
+    expect(countHits(['a   b'], 'a  b', undefined, 100)).toBe(1);
+  });
+
+  it('行末の情報が無ければ従来どおり連結(対照群)/ 数は上限で止まる', () => {
+    expect(countHits(latin, 'thelazy', undefined, 100)).toBe(1);
+    expect(countHits(['aaaa'], 'a', undefined, 3)).toBe(3);
+  });
+
+  it('reader.js は 5000 件で止めたとき「件以上」と言う(黙って切らない)', () => {
+    const src = readFileSync('public/pdf/reader.js', 'utf-8');
+    expect(src).toContain("hitsCapped ? '以上' : ''");
+    expect(src).toContain('const HIT_CAP = 5000;');
   });
 });

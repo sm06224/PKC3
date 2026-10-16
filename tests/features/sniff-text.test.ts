@@ -28,12 +28,10 @@ describe('sniffText ── 字として出す前に中身を見る(#1220)', () =
       expect(r).toEqual({ kind: 'binary', guess: null });
     });
 
-    it('UTF-8 として読めない割合が高ければ binary(Shift_JIS の日本語)', () => {
-      // 「日本語のテキスト」の Shift_JIS(UTF-8 としては大半が不正)
-      const sjis = bytes(
-        0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x4c, 0x83, 0x58, 0x83, 0x67,
-      );
-      expect(sniffText(sjis, false)).toEqual({ kind: 'binary', guess: null });
+    it('UTF-8 として読めない割合が高く、Shift_JIS としても読めなければ binary(制御文字まじり)', () => {
+      // 0x01 を含む = 字の文書ではない(Shift_JIS として読めてしまう圧縮物を字にしない)
+      const blob = bytes(0x93, 0xfa, 0x01, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x4c, 0x01);
+      expect(sniffText(blob, false)).toEqual({ kind: 'binary', guess: null });
     });
 
     it('先頭が印に当たらなくても、中身が圧縮物のように読めなければ binary', () => {
@@ -72,6 +70,18 @@ describe('sniffText ── 字として出す前に中身を見る(#1220)', () =
       expect(r.kind).toBe('text');
     });
 
+    it('🔴 Shift_JIS の日本語(.txt / .csv)は字として読んで出す(読めない扱いにしない)', () => {
+      // 「日本語のテキスト」の Shift_JIS(UTF-8 としては大半が不正)
+      const sjis = bytes(
+        0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x65, 0x83, 0x4c, 0x83, 0x58, 0x83, 0x67,
+      );
+      expect(sniffText(sjis, false)).toEqual({ kind: 'text', text: '日本語のテキスト' });
+      // 先頭だけ読んだ塊が 2 byte の字の途中で切れても、字のまま(最後の 1 byte を外して読み直す)
+      expect(sniffText(sjis.slice(0, 15), true)).toEqual({ kind: 'text', text: '日本語のテキス' });
+      // 全体が入っているのに末尾が途切れていれば読めない(字にしない)
+      expect(sniffText(sjis.slice(0, 15), false)).toEqual({ kind: 'binary', guess: null });
+    });
+
     it('先頭だけ読んだ塊の末尾で多 byte の字が途切れていても、字のまま(切っただけ)', () => {
       const full = enc.encode('あ'.repeat(10));
       // 「あ」は 3 byte ── 途中で切る
@@ -86,8 +96,8 @@ describe('sniffText ── 字として出す前に中身を見る(#1220)', () =
   });
 
   it('全体が入っているのに末尾が途切れていれば、壊れとして数える(truncated の旗が効く)', () => {
-    // 3 byte の字の 2 byte 目までで終わる短い入力 = 全体がこれ ── 壊れた字
-    const input = Uint8Array.from([0xe3, 0x81]);
+    // 3 byte の字の 1 byte 目だけで終わる短い入力 = 全体がこれ ── 壊れた字
+    const input = Uint8Array.from([0xe3]);
     expect(sniffText(input, false)).toEqual({ kind: 'binary', guess: null });
     // 同じ bytes でも「先頭だけ」なら、続きがあるので壊れではない
     expect(sniffText(input, true)).toEqual({ kind: 'text', text: '' });

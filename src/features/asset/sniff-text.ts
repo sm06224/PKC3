@@ -16,6 +16,8 @@
  * 層も使っている)。bytes を受けて答えを返すだけで、DOM も Blob も触らない。
  */
 
+import { decodeImportTextInfo } from '@features/import/text-decode';
+
 /** 印で言い当てた中身の種類。`null` = 印には当たらなかったが、字でもない。 */
 export type SniffedKind = 'pdf' | 'png' | 'jpeg' | 'gif' | 'zip';
 
@@ -64,9 +66,32 @@ export function sniffText(head: Uint8Array, truncated: boolean): TextSniff {
   if (text.length === 0) return { kind: 'text', text };
   let broken = 0;
   for (let i = text.indexOf('�'); i !== -1; i = text.indexOf('�', i + 1)) broken++;
-  return broken / text.length > BROKEN_RATIO
-    ? { kind: 'binary', guess: null }
-    : { kind: 'text', text };
+  if (broken / text.length <= BROKEN_RATIO) return { kind: 'text', text };
+  // 🔑 UTF-8 では読めなかった ── Shift_JIS の文書かもしれない(日本の .txt / .csv に多い)。
+  //   取り込みと同じ見分け(`decodeImportTextInfo`)で厳密に読み、読み切れて字らしければ字として出す。
+  //   ⚠ **表示のためだけの decode** ── 添付の bytes は変えない(ダウンロードは元のまま)
+  const sjis = decodeSjisText(head, truncated);
+  return sjis === null ? { kind: 'binary', guess: null } : { kind: 'text', text: sjis };
+}
+
+/**
+ * Shift_JIS として最後まで読め、かつ字らしい(制御文字が紛れていない)ときだけ字を返す。
+ * ⚠ 切っただけの塊は末尾が多 byte の途中で切れていることがある ── 最後の 1 byte を外して読み直す。
+ */
+function decodeSjisText(head: Uint8Array, truncated: boolean): string | null {
+  const tries = truncated ? [head, head.subarray(0, head.length - 1)] : [head];
+  for (const bytes of tries) {
+    const got = decodeImportTextInfo(bytes);
+    if (got.used !== 'sjis') continue;
+    // 読めてしまう圧縮物・画像を字にしない: 字の文書は \t \n \r 以外の制御文字を持たない
+    let control = 0;
+    for (let i = 0; i < got.text.length; i++) {
+      const c = got.text.charCodeAt(i);
+      if ((c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) || c === 0x7f) control++;
+    }
+    if (control === 0) return got.text;
+  }
+  return null;
 }
 
 /**

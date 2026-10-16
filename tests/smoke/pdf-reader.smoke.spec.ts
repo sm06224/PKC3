@@ -77,7 +77,9 @@ function buildPdf(
     // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を足す:「split」+「match」。
     //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
-    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} ${opts.prefix ?? 'marker'}${String(i + 1)}) Tj${split} ET`;
+    // 🔑 2 頁目だけ、別々の行に 2 つの Tj を足す(1 行目の行末で pdf.js が `hasEOL` を立てる)── 行をまたぐ語「the lazy」の観測用
+    const lines = i === 1 ? ' 0 -60 Td (over the) Tj 0 -40 Td (lazy dog) Tj' : '';
+    const stream = `BT /F1 24 Tf 40 300 Td (Hello page ${String(i + 1)} ${opts.prefix ?? 'marker'}${String(i + 1)}) Tj${split}${lines} ET`;
     const annots = opts.highlight && i === 0 ? ` /Annots [${String(annotObj)} 0 R]` : '';
     objs[pageObj] =
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${String(bw)} ${String(bh)}] /Resources << /Font << /F1 3 0 R /F2 ${String(boldObj)} 0 R >> >> /Contents ${String(pageObj + 1)} 0 R${annots} >>`;
@@ -472,6 +474,20 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await win.press('#query', 'Enter');
   await expect(win.locator('.page[data-page="3"] .textLayer mark.hit')).toHaveText(['marker3'], { timeout: 15_000 });
   expect(await win.locator('.page[data-page="3"] .textLayer span', { hasText: 'split' }).first().innerHTML()).toBe('split');
+
+  // ── ④‴ 行をまたぐ語 ── 2 頁目の「over the」(行末)+「lazy dog」(次の行)。行末は空白として数える
+  await win.fill('#query', 'the lazy');
+  await win.press('#query', 'Enter');
+  await expect(win.locator('#hits'), '行をまたぐ語が 1 件として数えられていない').toContainText('1 / 1 件(2 ページ)', { timeout: 15_000 });
+  const eolMarks = win.locator('.page[data-page="2"] .textLayer mark.hit');
+  await expect(eolMarks, '行をまたぐ一致が、両方の行の span に付いていない').toHaveText(['the', 'lazy'], { timeout: 15_000 });
+  const eolOwners = await eolMarks.evaluateAll((els) => els.map((e) => e.parentElement?.textContent ?? ''));
+  expect(eolOwners, '強調が別々の行の span に割り付いていない').toEqual(['over the', 'lazy dog']);
+  // 対照群:行末の空白が無い綴り(「thelazy」)は、行をまたいでも一致しない
+  await win.fill('#query', 'thelazy');
+  await win.press('#query', 'Enter');
+  await expect(win.locator('#hits'), '空白の無い綴りが行をまたいで一致した').toContainText('見つかりません', { timeout: 15_000 });
+  await expect(win.locator('.page[data-page="2"] .textLayer mark.hit')).toHaveCount(0);
 
   // ── ⑤ 3 頁目の字を選ぶ → 「ノートへ引く」──
   const quote = win.locator('#quote');

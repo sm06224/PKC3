@@ -188,7 +188,9 @@ export const EXT_MIME: Record<string, string> = {
 };
 
 export function resolveMime(name: string, declared: string): string {
-  if (declared) return declared;
+  // ⚠ `application/octet-stream` は「種類不明」の宣言(ブラウザは拡張子を知らない型に付ける)── 宣言なしと同じに扱い、
+  //   拡張子から引く(`a.pdf` が octet-stream のまま PDF として開けない、を作らない)
+  if (declared && declared !== 'application/octet-stream') return declared;
   if (!name.includes('.')) return 'application/octet-stream'; // 拡張子なし
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
   return EXT_MIME[ext] ?? 'application/octet-stream';

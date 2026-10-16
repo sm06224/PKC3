@@ -26,8 +26,22 @@ describe('拡張子の扱い(元の拡張子を偽らせない)', () => {
   });
 
   it('拡張子は最後の . から後ろだけ', () => {
-    expect(attachmentFileName('バックアップ', 'data.tar.gz')).toBe('バックアップ.gz');
-    expect(attachmentFileName('バックアップ.gz', 'data.tar.gz')).toBe('バックアップ.gz');
+    expect(attachmentFileName('報告', 'a.v2.pdf')).toBe('報告.pdf');
+  });
+
+  it('🔴 .tar.gz / .tar.bz2 / .tar.xz / .tar.zst はひとまとまりの拡張子(改名で .tar が落ちない)', () => {
+    expect(attachmentFileName('月次', 'backup.tar.gz')).toBe('月次.tar.gz');
+    expect(attachmentFileName('月次', 'backup.tar.bz2')).toBe('月次.tar.bz2');
+    expect(attachmentFileName('月次', 'backup.tar.xz')).toBe('月次.tar.xz');
+    expect(attachmentFileName('月次', 'backup.tar.zst')).toBe('月次.tar.zst');
+    // 大文字小文字は区別しない / 打った字が同じ拡張子で終えていれば二重に付けない
+    expect(attachmentFileName('月次', 'BACKUP.TAR.GZ')).toBe('月次.TAR.GZ');
+    expect(attachmentFileName('月次.tar.gz', 'backup.tar.gz')).toBe('月次.tar.gz');
+    // 対照群: .tar だけ・.gz だけは、これまでどおり最後の拡張子
+    expect(attachmentFileName('月次', 'backup.tar')).toBe('月次.tar');
+    expect(attachmentFileName('月次', 'backup.gz')).toBe('月次.gz');
+    // 名前が無い(先頭が .tar.gz だけ)は拡張子と見なさない
+    expect(attachmentFileName('月次', '.tar.gz')).toBe('月次.gz');
   });
 
   it('元が拡張子を持たない(README / 隠しファイル名 / 末尾が .)なら、打った字のまま', () => {
