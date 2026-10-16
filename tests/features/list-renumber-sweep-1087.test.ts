@@ -20,3 +20,16 @@ describe('renumberLists: 項目の中身(字下げ行)で数えを切らない (
     expect(renumberLists('1. a\n```\ncode\n```\n4. b\n')).toBe('1. a\n```\ncode\n```\n1. b\n');
   });
 });
+
+describe('遅延継続(字下げ無しで項目の段落に続けた行)', () => {
+  it('🔴 項目のすぐ下の字下げ無しの行は、その項目の続きとして数えを切らない', () => {
+    expect(renumberLists('1. a\nfoo\n5. b\n')).toBe('1. a\nfoo\n2. b\n');
+  });
+  it('対照群:空行を挟んだ字下げ無しの段落は、リストを切る', () => {
+    expect(renumberLists('1. a\n\nfoo\n5. b\n')).toBe('1. a\n\nfoo\n1. b\n');
+  });
+  it('対照群:見出しや箇条書きの記号で始まる行は段落を切る', () => {
+    expect(renumberLists('1. a\n# h\n5. b\n')).toBe('1. a\n# h\n1. b\n');
+    expect(renumberLists('1. a\n- x\n5. b\n')).toBe('1. a\n- x\n1. b\n');
+  });
+});

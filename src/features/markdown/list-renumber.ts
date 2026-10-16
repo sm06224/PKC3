@@ -90,7 +90,11 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     for (const d of [...counters.keys()]) if (d >= w) counters.delete(d);
   };
 
+  /** 直前の行が、リストの項目か、その項目に続く段落の行だったか(遅延継続の判定に使う)。 */
+  let inItemParagraph = false;
   for (const line of lines) {
+    const prevInItem = inItemParagraph;
+    inItemParagraph = false;
     const nextFence = advanceFence(fence, line);
     if (fence !== '') {
       out.push(line);
@@ -112,7 +116,14 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
       //    実のある別の行が来たら切る
       //    🔴 ただし**項目より深く字下げした行**(入れ子の箇条書き・段落・画像)はその項目の中身で、
       //    項目の列を切らない(#1087)── 切るのは、その字下げ以下の段だけ
-      if (line.trim() !== '') dropFrom(indentOf(line));
+      // 🔴 **遅延継続**(CommonMark):項目の段落のすぐ下に字下げ無しで続けた行は、その項目の段落の続き(#1087)。
+      //    ⚠ 見出し・引用・区切り線・箇条書きの記号で始まる行は段落を切るので、続きにしない
+      const lazy =
+        prevInItem &&
+        line.trim() !== '' &&
+        !/^\s*(?:#{1,6}(?:\s|$)|>|[-*+](?:\s|$)|(?:[-*_]\s*){3,}$)/.test(line);
+      if (lazy) inItemParagraph = true;
+      else if (line.trim() !== '') dropFrom(indentOf(line));
       out.push(line);
       continue;
     }
@@ -123,6 +134,7 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     const n = mode === 'uniform' ? 1 : (counters.get(depth) ?? 0) + 1;
     counters.set(depth, (counters.get(depth) ?? 0) + 1);
     out.push(`${item.indent}${n}${item.sep}${item.rest}`);
+    inItemParagraph = true;
   }
   return out.join(eol);
 }
