@@ -20,9 +20,12 @@
  * 読取りは adapter が 1 件ずつ行って即 `putBlob` する(base64 を一切経由しない)。
  */
 import { OFFICE_DOC_REFUSAL } from './refusal-text';
+import { ARCHIVE_FORMAT } from '../export/pkc3-archive';
+import { isTooLargeToRead } from './too-large';
 import {
   readZipDirectory,
   readZipText,
+  unwrapSingleTopDir,
   ZipReadError,
   type AssetSource,
 } from './zip-reader';
@@ -60,18 +63,28 @@ const VALID_KEY = /^[A-Za-z0-9_.-]+$/;
  * manifest が無い / 読めない場合は null(呼び出し側が可視で断る)。
  */
 export async function peekZipFormat(zip: Blob): Promise<string | null> {
-  const dir = await readZipDirectory(zip);
-  if (dir.some((e) => e.name === '[Content_Types].xml')) {
+  const raw = await readZipDirectory(zip);
+  if (raw.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
-  const hits = dir.filter((e) => e.name === MANIFEST);
+  // 🔑 フォルダごと zip にし直したバックアップ(`X/manifest.json`)も見つける。⚠ 読めるのは
+  //   下の 2 形式だけ(他の形式の読み手は最上位の manifest しか探さない)── 他は従来どおり「見つからない」
+  const unwrapped = unwrapSingleTopDir(raw);
+  const hits = unwrapped.entries.filter((e) => e.name === MANIFEST);
   if (hits.length !== 1) return null;
+  let m: { format?: unknown };
   try {
-    const m = JSON.parse(await readZipText(zip, hits[0]!)) as { format?: unknown };
-    return typeof m.format === 'string' ? m.format : null;
-  } catch {
+    m = JSON.parse(await readZipText(zip, hits[0]!)) as { format?: unknown };
+  } catch (e) {
+    // 🔴 **壊れた zip(CRC 不一致・途中で切れた)と大きすぎる物は、「PKC の zip ではない」にしない**
+    //   ── そのまま上へ。user に「別のファイルを選べ」と言うと、ダウンロードし直せば直る物を捨てさせる。
+    //   null にするのは JSON として読めないときだけ
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     return null;
   }
+  const format = typeof m.format === 'string' ? m.format : null;
+  if (unwrapped.prefix !== '' && format !== 'pkc2-package' && format !== ARCHIVE_FORMAT) return null;
+  return format;
 }
 
 /**
@@ -79,12 +92,13 @@ export async function peekZipFormat(zip: Blob): Promise<string | null> {
  * **形が違えば必ず throw**(部分的に読めた気にさせない ── P6b で確立した規律)。
  */
 export async function readPkc2Package(zip: Blob): Promise<Pkc2Package> {
-  const dir = await readZipDirectory(zip);
+  const rawDir = await readZipDirectory(zip);
+  const dir = unwrapSingleTopDir(rawDir).entries;
   const warnings: string[] = [];
 
   // 同じ入口に落ちてくる PKC2 由来でない ZIP を**名指しで**断る。
   // 「manifest.json が無い = 不明」に混ぜると user は原因を誤解する
-  if (dir.some((e) => e.name === '[Content_Types].xml')) {
+  if (rawDir.some((e) => e.name === '[Content_Types].xml')) {
     throw new ZipReadError(OFFICE_DOC_REFUSAL);
   }
 

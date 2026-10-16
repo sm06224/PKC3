@@ -53,6 +53,7 @@ import { folderSource } from '@features/export/folder-source';
 import { parseFrontmatter, extractVars } from '@features/markdown/frontmatter';
 import { extractHeadingNumberConfig } from '@features/markdown/document-globals';
 import { safeName } from '@features/export/file-name';
+import { createProgressThrottle } from './progress-throttle';
 import { dayStamp } from '@features/datetime/date-math';
 import { assetRefsIn } from '@features/asset/asset-ref-scan';
 
@@ -341,6 +342,31 @@ async function fallbackToRescueArchive(
 }
 
 /**
+ * 添付 bytes を読むたびに進み具合を知らせる包み。⚠ 元の `source` は変えない(prototype で委譲する)。
+ * 総数は `listAssetMetas` が返した件数。同じ添付を 2 度読む書き出しがあっても総数を超えない。
+ */
+function withAssetProgress(
+  source: ArchiveSource,
+  report: (done: number, total: number) => void,
+): ArchiveSource {
+  let total = 0;
+  let done = 0;
+  return Object.assign(Object.create(source) as ArchiveSource, {
+    listAssetMetas: async () => {
+      const metas = await source.listAssetMetas();
+      total = metas.length;
+      return metas;
+    },
+    getAssetBlob: async (key: string) => {
+      const blob = await source.getAssetBlob(key);
+      done = Math.min(done + 1, total);
+      report(done, total);
+      return blob;
+    },
+  });
+}
+
+/**
  * 書き出してダウンロードさせる。
  * @returns 書き出した entry 数(失敗時は null)
  */
@@ -381,13 +407,22 @@ export async function exportArchive(
     const now = deps.now?.() ?? new Date();
     const base = `${safeName(deps.source.title)}-${stamp(now)}`;
     const iso = now.toISOString();
+    /**
+     * 🔑 添付を 1 件ずつ読むたびに「(添付 N / M)」を出す(間引きつき)。添付が数百件あると、
+     *   最初の「書き出しています…」が最後まで残って、止まって見えた。数えるのは `getAssetBlob` の呼び出し。
+     */
+    const startingText = EXPORT_STARTING[kind].replace(/…$/, '');
+    const src = withAssetProgress(
+      deps.source,
+      createProgressThrottle((n, m) => deps.notify?.(`${startingText}(添付 ${n} / ${m})`)),
+    );
 
     let out: ArchiveWriteOut;
     let name: string;
     let detail: string;
     if (kind === 'html') {
       out = await writePortableHtml(
-        deps.source,
+        src,
         iso,
         deps.renderBody,
         deps.allowExternalImages === true,
@@ -408,12 +443,12 @@ export async function exportArchive(
        */
       try {
         if (kind === 'markdown') {
-          const md = await writeMarkdownZip(deps.source, iso);
+          const md = await writeMarkdownZip(src, iso);
           out = md;
           name = `${base}.md.zip`;
           detail = `${md.counts.entries} 件(${describeMarkdownExport(md).assets})${describeMarkdownExport(md).tail}`;
         } else {
-          out = await writeArchive(deps.source, iso);
+          out = await writeArchive(src, iso);
           name = archiveFileName(base, archiveScope);
           const c = out.counts;
           detail = `${c.entries} 件(つながり ${c.relations} / 履歴 ${c.revisions} / 添付 ${c.assets})`;

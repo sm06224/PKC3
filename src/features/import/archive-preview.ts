@@ -10,7 +10,7 @@
  * `manifest.json` を JSON.parse するだけ(`container.json` は読まない)。
  * ノート件数・つながり有無・履歴有無は `writeArchive`(`pkc3-archive.ts`)が
  * 書いた `manifest.counts` から取る ── 中身と食い違えば `readArchive` の
- * 照合(「manifest の N 件数が中身と違います」)が警告として出るので、ここで
+ * 照合(「記録された数と実際の数が合いません」)が警告として出るので、ここで
  * 二重に数え直す必要はない。⚠ **添付だけは目録(zip の中央ディレクトリ)から
  * 実数える** ── `manifest.counts.assets` は「meta の数」で、bytes が
  * 欠けている(GC の途中失敗)場合と食い違いうるため、user に見せる数は
@@ -24,7 +24,8 @@
  *
  * ⚠ pure module。browser API は持たない(`Blob` は zip-reader.ts と同じ扱い)。
  */
-import { readZipDirectory, readZipText } from './zip-reader';
+import { readZipDirectory, readZipText, unwrapSingleTopDir, ZipReadError } from './zip-reader';
+import { isTooLargeToRead } from './too-large';
 import { ARCHIVE_FORMAT, type Pkc3Archive } from '../export/pkc3-archive';
 
 export interface ArchivePreview {
@@ -40,7 +41,7 @@ export interface ArchivePreview {
  *   旧形式 ── いずれも `null`(呼び出し側は確認を出さずに素通しする)
  */
 export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | null> {
-  const dir = await readZipDirectory(zip);
+  const dir = unwrapSingleTopDir(await readZipDirectory(zip)).entries;
   const hits = dir.filter((e) => e.name === 'manifest.json');
   if (hits.length !== 1) return null;
   let manifest: {
@@ -49,7 +50,9 @@ export async function peekArchivePreview(zip: Blob): Promise<ArchivePreview | nu
   };
   try {
     manifest = JSON.parse(await readZipText(zip, hits[0]!)) as typeof manifest;
-  } catch {
+  } catch (e) {
+    // 🔴 壊れた zip・大きすぎる物は「中身が分からない」ではなく、そのまま上へ(確認なしで素通しすると、後で失敗する)
+    if (e instanceof ZipReadError || isTooLargeToRead(e)) throw e;
     return null;
   }
   if (manifest.format !== ARCHIVE_FORMAT) return null;

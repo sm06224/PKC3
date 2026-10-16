@@ -439,3 +439,41 @@ describe('exportArchive ── 失敗したら進行中の字を消す(#1017 C5)
     expect(notices, '出していない進行中の字を消す字を撃った').toEqual([]);
   });
 });
+
+describe('exportArchive ── 添付が多いときは進み具合(添付 N / M)を出す', () => {
+  const PROGRESS = /^書き出しています\(添付 (\d+) \/ (\d+)\)$/;
+
+  function sourceWithAssets(n: number): ArchiveSource {
+    const metas = Array.from({ length: n }, (_, i) => ({
+      key: `ast-${String(i).padStart(4, '0')}`,
+      mime: 'image/png',
+      size: 1,
+      hash: null,
+    }));
+    return {
+      ...fakeSource(),
+      listAssetMetas: async () => metas,
+      getAssetBlob: async () => new Blob(['x']),
+    };
+  }
+
+  it('45 件の添付: 20 件ごとに出る / 最後の 1 件は出さない / 書き出しは成功する', async () => {
+    const { deps, notices, downloaded } = baseDeps({ source: sourceWithAssets(45) });
+    expect(await exportArchive(readyDispatcher(), deps)).toBe(1);
+    const progress = notices.filter((m) => PROGRESS.test(m));
+    // 時間の間引き(250ms)は環境で揺れるので、20 件ごとの 2 回は必ず在ることだけを見る
+    expect(progress).toContain('書き出しています(添付 20 / 45)');
+    expect(progress).toContain('書き出しています(添付 40 / 45)');
+    expect(progress).not.toContain('書き出しています(添付 45 / 45)');
+    for (const m of progress) expect(Number(PROGRESS.exec(m)![1])).toBeLessThan(45);
+    // 結果の知らせが最後(進み具合で上書きされたまま残らない)
+    expect(notices.at(-1)).toMatch(/^書き出しました: /);
+    expect(downloaded).toHaveLength(1);
+  });
+
+  it('対照群: 添付が 3 件なら進み具合は出さない(20 件にも 250ms にも届かない小さい書き出しを騒がせない)', async () => {
+    const { deps, notices } = baseDeps({ source: sourceWithAssets(3) });
+    await exportArchive(readyDispatcher(), deps);
+    expect(notices.filter((m) => PROGRESS.test(m))).toEqual([]);
+  });
+});

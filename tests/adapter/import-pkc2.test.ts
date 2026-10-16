@@ -1627,6 +1627,23 @@ describe('importPkc2File (P6b 実行部)', () => {
     expect(d.getState().error).not.toMatch(/manifest/);
   });
 
+  it('[B3] 途中で切れた(CRC が合わない)zip は「PKC の書き出しではない」と言わず、ダウンロードし直しを案内する', async () => {
+    const { d, deps, written } = harness();
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc3-archive', version: 2, counts: { entries: 1 } })),
+        corruptCrc: true,
+      },
+      { name: 'container.json', bytes: bytesOf('{"entries":[]}') },
+    ]);
+    expect(await importPkc2File(d, deps, new File([zip], 'broken.pkc3-full.zip'))).toBeNull();
+    expect(written).toHaveLength(0);
+    const err = d.getState().error ?? '';
+    expect(err).toMatch(/ダウンロードが途中で切れた可能性/);
+    expect(err).not.toMatch(/PKC の書き出しではない/);
+  });
+
   it('[P6c 段③] .text.zip を取り込む ── 合成 container が本経路に合流する', async () => {
     const { d, deps, written, blobs } = harness();
     const zip = await buildZip([
@@ -2000,5 +2017,41 @@ describe('PKC2 の取り込み: 入口の断りとタグ・日時(#1087)', () =>
     expect(written[0]!.createdAt).toBe('2025-03-04 05:06:07');
     expect(written[0]!.updatedAt).toBe('2025-03-05 00:00:00');
     expect(readTags(written[0]!.body)).toEqual(['請求', '家事']);
+  });
+});
+
+describe('[B6] 添付が多いバックアップの取り込みは、進み具合(N / M)を出す', () => {
+  it('45 件の添付: 20 件ごとに「添付を書き込んでいます N / M」が出て、最後は完了の知らせになる', async () => {
+    const { d, deps, notices } = harness();
+    const keys = Array.from({ length: 45 }, (_, i) => `ast-${String(i).padStart(4, '0')}`);
+    const zip = await buildZip([
+      {
+        name: 'manifest.json',
+        bytes: bytesOf(JSON.stringify({ format: 'pkc3-archive', version: 2, counts: { entries: 1 } })),
+      },
+      {
+        name: 'container.json',
+        bytes: bytesOf(
+          JSON.stringify({
+            entries: [
+              {
+                lid: 'n1', title: 'ノート', archetype: 'text', createdAt: null, updatedAt: null,
+                entryOrder: 1, status: null, date: null, archived: false, body: '本文',
+              },
+            ],
+            relations: [],
+            revisions: [],
+            assets: keys.map((k) => ({ key: k, mime: 'image/png', size: 1, hash: null })),
+          }),
+        ),
+      },
+      ...keys.map((k, i) => ({ name: `assets/${k}`, bytes: bytesOf(`bytes-${i}`) })),
+    ]);
+    expect(await importPkc2File(d, deps, new File([zip], 'a.pkc3-full.zip'))).toBe(1);
+    const progress = notices.filter((m) => /添付を書き込んでいます \d+ \/ \d+/.test(m));
+    expect(progress).toContain('取り込み中…(添付を書き込んでいます 20 / 45)');
+    expect(progress).toContain('取り込み中…(添付を書き込んでいます 40 / 45)');
+    expect(progress.some((m) => m.includes('45 / 45'))).toBe(false);
+    expect(notices.at(-1)).toMatch(/^取り込み完了: 1 件/);
   });
 });

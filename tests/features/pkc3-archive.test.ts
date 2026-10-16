@@ -299,7 +299,7 @@ describe('アーカイブ ZIP — 黙って落とさない', () => {
     expect(out.warnings).toEqual(['添付の中身が見つかりませんでした: gone']);
     // meta は残るので、読み側も「入っていない」と言える
     const got = await readArchive(out.blob);
-    expect(got.warnings).toEqual(['添付の中身がバックアップに入っていません: gone']);
+    expect(got.warnings).toEqual(['バックアップに入っていない添付があります: 題名の分からないノートの添付']);
   });
 
   it('PKC2 の ZIP を渡されたら名指しで断る', async () => {
@@ -332,7 +332,7 @@ describe('アーカイブ ZIP — 黙って落とさない', () => {
     ]);
     await w.add('container.json', [container]);
     expect((await readArchive(w.finish())).warnings).toContain(
-      'manifest の entries 件数が中身と違います(9 ≠ 1)',
+      'バックアップに記録されたノートの数と、実際に入っている数が合いません(記録 9 件 / 実際 1 件)',
     );
   });
 });
