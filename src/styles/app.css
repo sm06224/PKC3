@@ -10060,29 +10060,6 @@ h3[data-pkc-section] {
     position: absolute;
     inset: -8px 0;
   }
-  /* 🔴 左右の取っ手も同じ(#1087)── 畳んだ一覧を戻す入口が幅 8px の帯 1 本だけになるので、本文の側へ 8px 当たりを足す。
-   * ⚠ 反対側へは足さない ── 左の取っ手の左には畳んだ縁のタイルが並ぶので、そこを奪わない。 */
-  /* ⚠ `z-index` が無いと、後ろに在る本文のペイン(`position: relative`)が当たりの上に描かれて取れない(実ブラウザで測った) */
-  [data-pkc-region='pane-grip']:not([data-pkc-axis='y']) {
-    position: relative;
-    z-index: 1;
-    /* ⚠ 取っ手は `overflow-x: clip` を持つ(素の規則の注釈)── 外へ出した当たりが切られて押せないので、その分だけ切り口を外へ広げる */
-    overflow-clip-margin: 8px;
-  }
-  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before,
-  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 8px;
-  }
-  [data-pkc-region='pane-grip'][data-pkc-pane='sidebar']::before {
-    left: 100%;
-  }
-  [data-pkc-region='pane-grip'][data-pkc-pane='inspector']::before {
-    right: 100%;
-  }
   /**
    * ⑦ **行の高さを 34px に**。素の `button` / `input` / 一覧の行は `--row-h` から
    *    丈を取るので、この 1 本で 26 → 34 に揃う(⋯ / ▾ / ‹ › / タブ / 札の全部)。
