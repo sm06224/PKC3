@@ -169,6 +169,42 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
   ).toContainText('ふたつめ');
 
   /**
+   * ⑦-0 🔴 **編集中は Escape で窓ごと閉じない**(#1087)。
+   * 直す前は、書いている最中に入力欄の外で Escape を押すと、確認も無く窓ごと閉じて打ちかけが消えた。
+   * ⚠ **起動を足さない** ── 既に立ち上がっている 2 枚目 `win2` で見る
+   *   (1 枚目 `win` は、下の「開いた直後の 1 回目の Escape」を無傷で測るために触らない)。
+   * ⚠ 焦点を入力欄の外へ置く(入力欄に焦点が在る間は別の門が Escape を止めるので、
+   *   それでは今回の門を見たことにならない)。
+   */
+  await clickReal(win2, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  await expect(
+    win2.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
+    '前提が崩れた(付箋の窓で編集に入れていない)',
+  ).toBeVisible();
+  await win2.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  expect(
+    await win2.evaluate(() => {
+      const a = document.activeElement;
+      return a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement;
+    }),
+    '前提が崩れた(焦点がまだ入力欄に在る)',
+  ).toBe(false);
+  await win2.keyboard.press('Escape');
+  // 閉じる処理は keydown の中で同期に走る ── 少し置いて、それでも開いていることを見る
+  await win2.waitForTimeout(500);
+  expect(win2.isClosed(), '編集中に Escape で付箋の窓が閉じた(打ちかけが消える)').toBe(false);
+  // 編集を抜ける(取り消し)── 以降の後始末は変えない
+  if (await win2.locator('[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]').count()) {
+    await clickReal(win2, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+  }
+  await expect(
+    win2.locator('[data-pkc-region="detail"] [data-pkc-action="commit-edit"]'),
+    '編集から抜けられていない',
+  ).toHaveCount(0);
+
+  /**
    * ⑦ 🔴 **付箋のウィンドウは Escape で閉じる**(#1042 followup 指摘 A。
    * 裁定:`docs/development/touch-and-unity-design-2026-09.md` §5 Q3
    * 「付箋のウィンドウも Escape で閉じます」)。
