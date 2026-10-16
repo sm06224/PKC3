@@ -1145,6 +1145,11 @@ export interface ResultMap {
      *   黙って切ると user は「これで全部」と読む。
      */
     truncated: boolean;
+    /**
+     * 🔴 **Shift_JIS と推測して読んだか**(csv / tsv のみ。省略 = そうではない)。⚠ 推測なので、画面は
+     *   「文字が崩れて見えるときは UTF-8 で保存し直してください」と添える(取り込みの注意と同じ字)。
+     */
+    sjis?: boolean;
   };
   closeSqlGuest: null;
   /**

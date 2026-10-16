@@ -134,6 +134,12 @@ export function parseCsv(
   out?: CsvPositions,
 ): string[][] | null {
   if (src.trim() === '') return null;
+  /**
+   * 🔴 先頭の BOM は字ではない(#1087)── Excel が書いた csv は U+FEFF から始まり、
+   *   残すと**最初の見出しの名前**に混ざる。⚠ 位置(`cellSpans` / `rowLines`)は
+   *   原文の添字なので、捨てずに**読み始めを 1 つ進める**(原文の添字をずらさない)。
+   */
+  const start = src.charCodeAt(0) === 0xfeff ? 1 : 0;
 
   const rows: string[][] = [];
   let row: string[] = [];
@@ -142,10 +148,10 @@ export function parseCsv(
   // ⚠ **行とセルの入り口**を覚えておく(引用符も含めた外側の位置)
   let rowStartLine = 0;
   let line = 0;
-  let cellStart = 0;
+  let cellStart = start;
   const spans: Array<Array<{ start: number; end: number }>> = [];
   let rowSpans: Array<{ start: number; end: number }> = [];
-  for (let i = 0; i < src.length; i++) {
+  for (let i = start; i < src.length; i++) {
     const ch = src[i];
     if (inQuotes) {
       if (ch === '"') {
@@ -170,7 +176,9 @@ export function parseCsv(
       }
       continue;
     }
-    if (ch === '"') {
+    if (ch === '"' && i === cellStart) {
+      // 🔴 引用が始まるのは**升の先頭の `"` だけ**(RFC 4180 / Excel)。
+      //   途中の `"`(`5"x`)は字そのもの ── 開くと残りの行を全部飲み込む(#1087)。
       inQuotes = true;
       continue;
     }

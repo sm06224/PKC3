@@ -730,6 +730,38 @@ test('🔴 取り込んだタイルが同じ順で見えて、押すと開く', 
     if (w.__pkcRealOpen) window.open = w.__pkcRealOpen;
   });
   // ⚠ 対照群 ── 戻した後は本当に開く(戻し忘れをここで捕まえる)
+  //
+  // 🔴 **組み込みの 2 ペイン / SQL で調べるも、塞がれたら中央に落ちない**(#1087)。
+  //   直す前は塞がれると中央の面へ落ち、読んでいたノートが消えていた。
+  //   いまは中央に開いていたノートが残り、理由の行だけが出る。
+  //   ⚠ 起動は足していない ── 上で開いている道中に、同じ差し替えをもう一度当てる。
+  //   ⚠ 理由の行は直前の「アプリ」の押下で既に出ている(古い字)ので、
+  //     組み込みを押す前に一度 status を別の字へ変えられない。見るのは「中央に落ちない」が主で、
+  //     理由の字は「消えていない」の確認に留まる(押した直後に出し直されたかは言えない)。
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcRealOpen?: typeof window.open };
+    w.__pkcRealOpen = window.open.bind(window);
+    window.open = (() => null) as typeof window.open;
+  });
+  for (const id of ['dual', 'sql'] as const) {
+    await openTile(page, builtinTile(id));
+    await expect(
+      page.locator(`[data-pkc-region="center"] [data-pkc-view-pane="${id}"], [data-pkc-view-pane="${id}"]`).first(),
+      `塞がれた ${id} が中央の面に落ちた(読んでいたノートが消える)`,
+    ).toBeHidden();
+    await expect(
+      page.locator('[data-pkc-view-pane="detail"]'),
+      `塞がれた ${id} のあと、中央のノートが残っていない`,
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-pkc-region="status"]'),
+      `塞がれた ${id} の理由が出ていない`,
+    ).toContainText('ポップアップ');
+  }
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcRealOpen?: typeof window.open };
+    if (w.__pkcRealOpen) window.open = w.__pkcRealOpen;
+  });
 
   // ⑤ 🔴 **アプリのタイルは中身が開く**(blob。添付の bytes に届いている)
   const [appTab] = await Promise.all([

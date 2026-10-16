@@ -376,6 +376,8 @@ export interface SqlPageState {
      *   (打ち切りうるのは csv / tsv だけ)。黙って切ると user は「これで全部」と読む。
      */
     readonly truncated: boolean;
+    /** 🔴 **Shift_JIS と推測して読んだか**(csv / tsv のみ)。⚠ 推測なので、画面で一言添える。 */
+    readonly sjis?: boolean;
   } | null;
   /**
    * 🔴 **足した相手**(2 件目以降。#918 段⑦。Gemini 裁定 2026-10-01)。
@@ -2582,6 +2584,8 @@ export type UserAction =
       bytes: number;
       /** 🔴 csv / tsv を上限で打ち切ったか(#854 段①)。`.sqlite` は常に `false`。 */
       truncated: boolean;
+      /** 🔴 Shift_JIS と推測して読んだか(csv / tsv のみ。省略 = そうではない)。 */
+      sjis?: boolean;
     }
   | { type: 'SQL_GUEST_FAILED'; lid: string; error: string }
   | {
@@ -5870,6 +5874,7 @@ function reduceCore(
               tables: action.tables,
               bytes: action.bytes,
               truncated: action.truncated,
+              ...(action.sjis === true ? { sjis: true } : {}),
             },
             guestError: '',
             guestPending: '',

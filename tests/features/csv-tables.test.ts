@@ -96,6 +96,12 @@ describe('列の名前を直す', () => {
    */
   it('🔴 _note / _lid と同じ見出しでも重ならない', () => {
     expect(csvColumnNames(['_note', '_lid'], CSV_SOURCE_COLUMNS)).toEqual(['_note_2', '_lid_2']);
+    // 🔴 大文字小文字だけが違う列は sqlite では同じ名前(#1087)── 区別すると `duplicate column name` で落ちる
+    expect(csvColumnNames(['ID', 'id', 'Id'], CSV_SOURCE_COLUMNS)).toEqual(['ID', 'id_2', 'Id_3']);
+    // 先取りの列(`_NOTE` と書いた見出し)も同じ
+    expect(csvColumnNames(['_NOTE'], CSV_SOURCE_COLUMNS)).toEqual(['_NOTE_2']);
+    // ⚠ 畳むのは ASCII だけ(sqlite の照合と同じ)── 非 ASCII は別の名前のまま
+    expect(csvColumnNames(['É', 'é'], CSV_SOURCE_COLUMNS)).toEqual(['É', 'é']);
   });
 
   it('⚠ 記号は _ に直し、頭の _ は落とす(打てる字にする)', () => {

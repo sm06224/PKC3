@@ -17,6 +17,7 @@
  * 🔑 だから file では `csv` / `tsv` は**空**、`json` は **`null`** にする。
  */
 import { csvEscapeField } from '../markdown/csv-table';
+import { dedupeColumnNames } from './csv-tables';
 import { canExportParquet } from './duckdb-export';
 import type { SqlEngine } from './sql-engine';
 
@@ -121,10 +122,14 @@ export function sqlExportFileText(
 ): string {
   const bom = BOM_BY_KIND[kind];
   if (kind === 'json') {
+    // 🔴 同じ名前の列は `_2` で逃がす ── 逃がさないと後ろの列が前の列を上書きして、**黙って列が消える**
+    const keys = dedupeColumnNames(columns);
     const out = rows.map((r) => {
-      const o: Record<string, Cell> = {};
+      // 🔴 `Object.create(null)` ── 通常の `{}` に `__proto__` を代入すると、列ではなく
+      //   プロトタイプの付け替えになり、その列が file から黙って消える
+      const o: Record<string, Cell> = Object.create(null) as Record<string, Cell>;
       // ⚠ **列の名前で組む** ── 添字で組むと、列の並びが変わった日に静かにずれる
-      columns.forEach((c, i) => {
+      keys.forEach((c, i) => {
         o[c] = r[i] ?? null;
       });
       return o;

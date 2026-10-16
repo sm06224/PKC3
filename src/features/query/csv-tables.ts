@@ -207,19 +207,41 @@ export function csvColumnNames(
   reserved: readonly string[],
 ): string[] {
   const out: string[] = [];
-  const seen = new Set<string>(reserved);
+  // 🔴 大文字小文字を区別せずに重なりを見る(`ID` と `id` は sqlite では同じ列名 ── 区別すると
+  //   `duplicate column name` で落ちる)。⚠ 畳むのは ASCII だけ(sqlite の照合と同じ。`É` と `é` は別の名前)
+  const fold = (s: string): string => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const seen = new Set<string>(reserved.map(fold));
   header.forEach((raw, i) => {
     const base = raw.trim().replace(/[^\p{L}\p{N}_]/gu, '_') || `col${String(i + 1)}`;
     let name = base;
     let n = 2;
-    while (seen.has(name)) {
+    while (seen.has(fold(name))) {
       name = `${base}_${String(n)}`;
       n += 1;
     }
-    seen.add(name);
+    seen.add(fold(name));
     out.push(name);
   });
   return out;
+}
+
+/**
+ * 列の名前の重なりを `_2` `_3` で逃がす(大文字小文字は区別しない)。
+ * 🔑 `csvColumnNames` は見出しを整える所までやる ── 整えずに重なりだけを直したい面
+ *   (JSON の書き出し)はこちら。
+ */
+export function dedupeColumnNames(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return names.map((base) => {
+    let name = base;
+    let n = 2;
+    while (seen.has(name.replace(/[A-Z]/g, (c) => c.toLowerCase()))) {
+      name = `${base}_${String(n)}`;
+      n += 1;
+    }
+    seen.add(name.replace(/[A-Z]/g, (c) => c.toLowerCase()));
+    return name;
+  });
 }
 
 /** 囲みの中身(引用の前置きを剥がした字)。⚠ 剥がせない行は**この囲みの中身ではない**。 */

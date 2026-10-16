@@ -173,7 +173,7 @@ export interface StorePort {
   openSqlGuest?(
     image: Uint8Array,
     source?: SqliteConvertGuestSource,
-  ): Promise<{ tables: string[]; bytes: number; truncated: boolean }>;
+  ): Promise<{ tables: string[]; bytes: number; truncated: boolean; sjis?: boolean }>;
   closeSqlGuest?(): Promise<null>;
   /**
    * 🔴 **`.sqlite` を DuckDB 用の NDJSON の写しにする 3 つの口**(#682 段④d。開く / 表を 1 つ写す / 閉じる)。
@@ -1263,6 +1263,7 @@ export function connectStoreEffects(
               tables: opened.tables,
               bytes: opened.bytes,
               truncated: opened.truncated,
+              ...(opened.sjis === true ? { sjis: true } : {}),
             });
           } catch (e) {
             if (disposed) return;

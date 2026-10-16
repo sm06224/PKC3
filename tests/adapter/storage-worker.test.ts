@@ -4263,3 +4263,129 @@ describe('ゴミ箱の見直し(#1087)── 作成日の控えと、手付か�
     expect((await request({ op: 'listTrash', cid: 'c1' })).filter((t) => t.entry_lid === 'un2')).toHaveLength(1);
   });
 });
+
+describe('SQL で調べる画面の直し(#1087)── 運ぶ量の天井と文字コード', () => {
+  const W = 'w-1087';
+  const runMain = (sql: string, maxRows = 200_000) =>
+    request({ op: 'runReadOnlySql', sql, maxRows, maxSteps: 50_000_000, maxMs: 60_000 });
+
+  it('🔴 長い字の表は、行数の天井より先に「字の合計」で切れる(常駐 worker を膨らませない)', async () => {
+    // 2000 字 × 12,000 行 = 2,400 万字(天井 2,000 万字を超える)。行数の天井(20 万)には遠く届かない
+    const r = await runMain(
+      "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 12000) SELECT printf('%.*c', 2000, 'a') AS t FROM c",
+    );
+    expect(r.truncated, '字の合計で切ったことを truncated で言っていない').toBe(true);
+    expect(r.rows.length, '切っていない(全部運んでいる)').toBeLessThan(12_000);
+    expect(r.rows.length, '少なすぎる ── 天井までは運ぶ').toBeGreaterThan(9_000);
+  }, 60_000);
+
+  it('⚠ 対照群:天井に収まる表は全部運ぶ(truncated にしない)', async () => {
+    const r = await runMain(
+      "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 3000) SELECT printf('%.*c', 2000, 'a') AS t FROM c",
+    );
+    expect(r.rows.length).toBe(3000);
+    expect(r.truncated).toBe(false);
+  }, 60_000);
+
+  it('🔴 1 つの巨大な値は engine が断り、断った後も接続の天井は元へ戻っている', async () => {
+    await expect(runMain('SELECT length(zeroblob(20000000))')).rejects.toThrow(/too big/i);
+    // 文字列を作る関数は NULL を返す(engine の作法)── 20,000,000 字のまま返ってきたら天井が効いていない
+    expect((await runMain("SELECT length(printf('%.*c', 20000000, 'a'))")).rows).toEqual([[null]]);
+    // 戻していないと、保存(同じ接続)が 16 MB までの値しか書けなくなる ── 17 MB の本文が書けること
+    const big = 'x'.repeat(17 * 1024 * 1024);
+    await request({
+      op: 'upsertEntry',
+      cid: 'c1',
+      entry: {
+        lid: 'big-1087',
+        title: 't',
+        archetype: 'text',
+        body: big,
+        entryOrder: 1,
+        status: null,
+        date: null,
+        archived: false,
+      },
+      checkpoint: false,
+    });
+    const back = await request({ op: 'getBody', cid: 'c1', lid: 'big-1087' } as never);
+    expect(String(back ?? '').length, '17 MB の本文が保存できていない(天井を戻し損ねている)').toBe(
+      big.length,
+    );
+  }, 60_000);
+
+  it('🔴 csv の文字コードを見分ける:Shift_JIS は崩れず、推測したことを返す', async () => {
+    // 「名前,年齢\n太郎,20」の Shift_JIS
+    const sjis = new Uint8Array([
+      0x96, 0xbc, 0x91, 0x4f, 0x2c, 0x94, 0x4e, 0x97, 0xee, 0x0a, 0x91, 0xbe, 0x98, 0x59, 0x2c, 0x32, 0x30, 0x0a,
+    ]);
+    const opened = await request({
+      op: 'openSqlGuest',
+      image: sjis,
+      guest: W,
+      source: { kind: 'csv', lang: 'csv', lid: 'sj-1', name: '旧.csv' },
+    });
+    expect(opened.sjis, 'Shift_JIS と推測したことを返していない').toBe(true);
+    const r = await request({
+      op: 'runReadOnlySql',
+      sql: 'SELECT 名前, 年齢 FROM csv',
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      guest: W,
+    });
+    expect(r.rows, '文字化けしている').toEqual([['太郎', '20']]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('🔴 UTF-16(BOM 付き)も読め、推測の印は付かない。UTF-8 も付かない(対照群)', async () => {
+    const text = 'a,b\n太郎,1\n';
+    const u16 = new Uint8Array(2 + text.length * 2);
+    u16[0] = 0xff;
+    u16[1] = 0xfe;
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      u16[2 + i * 2] = c & 0xff;
+      u16[3 + i * 2] = c >> 8;
+    }
+    const src = { kind: 'csv', lang: 'csv', lid: 'u16', name: '十六.csv' } as const;
+    const a = await request({ op: 'openSqlGuest', image: u16, guest: W, source: src });
+    expect(a.sjis, 'UTF-16 を Shift_JIS と言っている').toBeUndefined();
+    const r = await request({
+      op: 'runReadOnlySql',
+      sql: 'SELECT a FROM csv',
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      guest: W,
+    });
+    expect(r.rows).toEqual([['太郎']]);
+    const b = await request({
+      op: 'openSqlGuest',
+      image: new TextEncoder().encode('a\n1\n'),
+      guest: W,
+      source: src,
+    });
+    expect(b.sjis, 'UTF-8 を Shift_JIS と言っている').toBeUndefined();
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+
+  it('🔴 大文字小文字だけが違う見出し(ID,id)でも開け、引ける', async () => {
+    await request({
+      op: 'openSqlGuest',
+      image: new TextEncoder().encode('ID,id\n1,2\n'),
+      guest: W,
+      source: { kind: 'csv', lang: 'csv', lid: 'dup', name: '重.csv' },
+    });
+    const r = await request({
+      op: 'runReadOnlySql',
+      sql: 'SELECT ID, id_2 FROM csv',
+      maxRows: 10,
+      maxSteps: 1_000_000,
+      maxMs: 60_000,
+      guest: W,
+    });
+    expect(r.rows).toEqual([['1', '2']]);
+    await request({ op: 'closeSqlGuest', guest: W });
+  });
+});
