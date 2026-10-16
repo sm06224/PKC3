@@ -37,9 +37,6 @@ export const FORMULA_FUNCTIONS = [
 /** 升に出すエラー。⚠ **黙って 0 にしない**(何が起きたかを升で読ませる)。 */
 export type FormulaError = '#ERR!' | '#REF!' | '#NAME?' | '#DIV/0!' | '#CYCLE!';
 
-/** ⚠ 深さの上限。⚠ 循環は**必ず**ここで止まる(無限ループを作らない)。 */
-const MAX_DEPTH = 64;
-
 /** 升の字が式か。⚠ **`'` で始まる字は式ではない**(字のまま出す)。 */
 export function isFormula(cell: string): boolean {
   return cell.startsWith('=');
@@ -173,18 +170,111 @@ function tokenize(src: string): Token[] {
   return out;
 }
 
+/** 升 1 つの評価結果(値か、失敗か)。⚠ 失敗も覚える ── 同じ升を何度も評価し直さない。 */
+type Memo = { readonly v: Value } | { readonly fail: Fail };
+
 interface Ctx {
   readonly rows: readonly (readonly string[])[];
   /**
-   * ⚠ **深さだけで止める**(#418 段②)。
+   * 🔴 **1 回の評価の間、升ごとの答えを覚える**(#1087)。
    *
-   * 🔴 1 稿目は「いま辿っている升」の集合も持っていたが、**外して実測したら
-   *   同じ結果が同じ速さで出た**(`=SUM(A1:B2)` の中で自分を指す形で **2ms**)──
-   *   深さ優先なので、breadth が広がる前に深さの上限へ届いて throw が抜ける。
-   * 🔑 CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」。
-   *   **見たら壊れなかったので外した**(no-op の門を残さない)。
+   * 1 稿目は深さ 64 で打ち切るだけだった ── ⚠ ①**循環していない 70 行の累計が
+   *   `#CYCLE!` になった**(深いだけで循環と読んでいた)②覚えていないので、
+   *   前の 2 つの升を足す形(フィボナッチ)は**升の数に対して指数**で遅かった
+   *   (30 行で 0.8 秒、描くたびに)。
+   * 🔑 循環は「いま辿っている升」の集合で見分け、深さでは打ち切らない。
    */
-  readonly depth: number;
+  readonly memo: Map<string, Memo>;
+}
+
+function memoKey(row: number, col: number): string {
+  return `${row},${col}`;
+}
+
+/** 式の字が参照している升(範囲は全部ばらす)。 */
+function refsOf(toks: readonly Token[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < toks.length; i += 1) {
+    const t = toks[i]!;
+    if (t.t !== 'ref') continue;
+    const colon = toks[i + 1];
+    const end = toks[i + 2];
+    if (colon?.t === 'colon' && end?.t === 'ref') {
+      for (let r = Math.min(t.row, end.row); r <= Math.max(t.row, end.row); r += 1) {
+        for (let c = Math.min(t.col, end.col); c <= Math.max(t.col, end.col); c += 1) out.push([r, c]);
+      }
+      i += 2;
+    } else {
+      out.push([t.row, t.col]);
+    }
+  }
+  return out;
+}
+
+function formulaAt(ctx: Ctx, row: number, col: number): string | null {
+  const raw = ctx.rows[row]?.[col];
+  return raw !== undefined && isFormula(raw) ? raw : null;
+}
+
+interface Frame {
+  readonly key: string | null;
+  readonly raw: string;
+  readonly toks: readonly Token[];
+  readonly deps: ReadonlyArray<[number, number]>;
+  i: number;
+  cyclic: boolean;
+}
+
+function frameFor(key: string | null, raw: string, toks: readonly Token[]): Frame {
+  return { key, raw, toks, deps: refsOf(toks), i: 0, cyclic: false };
+}
+
+/**
+ * 🔴 **参照先の升を、深い順に評価して覚える**(自前の stack で。関数の再帰にしない)。
+ *
+ * 🔑 再帰にすると、累計が数千行続く表で呼び出しの深さが尽きる。ここは順番に
+ *   積むだけなので**何行つながっていても**落ちない。
+ * ⚠ 循環は「積んでいる最中の升をもう一度指した」ことで見分ける(深さでは見ない)。
+ */
+function warm(ctx: Ctx, root: Frame): void {
+  const stack: Frame[] = [root];
+  const inProgress = new Set<string>();
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]!;
+    if (top.i < top.deps.length) {
+      const [r, c] = top.deps[top.i++]!;
+      const raw = formulaAt(ctx, r, c);
+      if (raw === null) continue;
+      const key = memoKey(r, c);
+      if (ctx.memo.has(key)) continue;
+      if (inProgress.has(key)) { top.cyclic = true; continue; }
+      let toks: Token[];
+      try {
+        toks = tokenize(raw.slice(1));
+      } catch (e) {
+        if (e instanceof Fail) { ctx.memo.set(key, { fail: e }); continue; }
+        throw e;
+      }
+      inProgress.add(key);
+      stack.push(frameFor(key, raw, toks));
+      continue;
+    }
+    stack.pop();
+    if (top.key === null) continue;
+    inProgress.delete(top.key);
+    if (top.cyclic) {
+      ctx.memo.set(top.key, {
+        fail: new Fail('#CYCLE!', 'セルどうしがぐるぐる参照しています'),
+      });
+      continue;
+    }
+    try {
+      ctx.memo.set(top.key, { v: new Parser(top.toks, ctx).parse() });
+    } catch (e) {
+      if (e instanceof Fail) ctx.memo.set(top.key, { fail: e });
+      else throw e;
+    }
+  }
 }
 
 class Parser {
@@ -377,14 +467,27 @@ function callFn(fn: string, args: readonly Arg[]): Value {
     case 'ABS': return Math.abs(toNum(flat[0] ?? 0));
     case 'ROUND': {
       const digits = flat.length > 1 ? Math.trunc(toNum(flat[1]!)) : 0;
-      const f = 10 ** digits;
-      return Math.round(toNum(flat[0] ?? 0) * f) / f;
+      return roundHalfAway(toNum(flat[0] ?? 0), digits);
     }
     case 'CONCAT': return flat.map((v) => fmt(v)).join('');
     case 'LEN': return fmt(flat[0] ?? '').length;
     default:
       throw new Fail('#NAME?', `${fn} は使えません(使えるのは ${FORMULA_FUNCTIONS.join(' / ')})`);
   }
+}
+
+/**
+ * 🔴 **表計算と同じ丸め**(#1087)── 0.5 は**0 から遠ざかる側**へ(`-2.5` → `-3`)。
+ * ⚠ `Math.round` は 0.5 を**常に上**へ寄せるので負の数で食い違う。
+ * ⚠ 2 進数の刻みで `1.005 * 100` が `100.49999…` になるため、15 桁で整えてから丸める
+ *   (`1.005` → `1.01`)。
+ */
+function roundHalfAway(x: number, digits: number): number {
+  if (!Number.isFinite(x)) return x;
+  const f = 10 ** digits;
+  const scaled = Number((Math.abs(x) * f).toPrecision(15));
+  const r = Math.floor(scaled + 0.5) / f;
+  return x < 0 ? -r : r;
 }
 
 /** 数として読めるか。⚠ 空文字は**数ではない**(0 として数えない)。 */
@@ -417,11 +520,14 @@ function cellValue(ctx: Ctx, row: number, col: number): Value {
   if (raw === undefined) return '';
   if (raw.startsWith("'")) return raw.slice(1);
   if (!isFormula(raw)) return raw;
-  // 🔴 **循環は黙って 0 にしない**(升に `#CYCLE!` を出す)
-  if (ctx.depth >= MAX_DEPTH) {
-    throw new Fail('#CYCLE!', `セルどうしがぐるぐる参照しているか、${MAX_DEPTH} 段より深く辿っています`);
+  const key = memoKey(row, col);
+  if (!ctx.memo.has(key)) {
+    // 通常は `warm` が先に覚えてある。ここへ来るのは、覚える前に直接呼ばれたときだけ。
+    warm(ctx, frameFor(null, '', [{ t: 'ref', row, col }]));
   }
-  return new Parser(tokenize(raw.slice(1)), { rows: ctx.rows, depth: ctx.depth + 1 }).parse();
+  const m = ctx.memo.get(key)!;
+  if ('fail' in m) throw m.fail;
+  return m.v;
 }
 
 /** 式の答え。⚠ `why` は**誤ったときだけ**入る(画面では升の `title` に出る)。 */
@@ -443,7 +549,10 @@ export function evaluateFormula(
   rows: readonly (readonly string[])[],
 ): FormulaResult {
   try {
-    return { text: fmt(new Parser(tokenize(formula.slice(1)), { rows, depth: 0 }).parse()) };
+    const toks = tokenize(formula.slice(1));
+    const ctx: Ctx = { rows, memo: new Map() };
+    warm(ctx, frameFor(null, formula, toks));
+    return { text: fmt(new Parser(toks, ctx).parse()) };
   } catch (e) {
     if (e instanceof Fail) return { text: e.code, why: e.why };
     return { text: '#ERR!', why: '式として読めません' };
