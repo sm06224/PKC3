@@ -60,8 +60,14 @@ export interface SaveBackDeps {
    * ⚠ 昇格で変わるので**呼ぶたびに読む**(値を closure に固定しない)。
    */
   readonly isHolder: () => boolean;
-  /** いま取り込めるか(`phase === 'ready'`)。⚠ 偽なら**棚に残す**。 */
+  /** いま取り込めるか(`phase === 'ready'`)。⚠ 偽なら**棚に残す**。差し替えと手元のファイルへの書き戻しはこちら。 */
   readonly canWrite: () => boolean;
+  /**
+   * 🔴 **新しい添付のノートを足せるか**(#1087)。読む画面か、編集中(足すだけで選択も編集も動かさない ──
+   *   PDF の保存・画像の描き込みと同じ。`CREATE_ENTRY` は `keepSelection` なら編集中を受ける)。
+   * ⚠ **optional にしない**(配線を落とすと、編集中の保存が新規でも終わるまで止まる形に戻る)。
+   */
+  readonly canCreate: () => boolean;
   /**
    * 合言葉のノートが**いまも添付か**を確かめる。
    * `null` = 消えた / 添付でなくなった → **新規の添付ノート**として取り込む。
@@ -111,8 +117,8 @@ export interface SaveBackDeps {
    * ⚠ **optional にしない**(配線を落とすと、知らないタブがノートを作る形に戻る)。
    */
   readonly knowsLocal: (token: string) => boolean;
-  /** user への一言(「取り込みました」)。 */
-  readonly notify: (message: string) => void;
+  /** user への一言(「取り込みました」)。`openLid` があれば、知らせの「開く」でそのノートへ行ける。 */
+  readonly notify: (message: string, openLid?: string) => void;
   /** 異常の報告(取り込めなかった)。 */
   readonly fail: (message: string) => void;
 }
@@ -123,6 +129,22 @@ export interface SaveBackDeps {
  */
 export function localOrphanImportedNotice(name: string): string {
   return `元のファイルを開いた画面が閉じられたので、Office で保存した内容は元のファイルへ書き戻せませんでした。代わりに添付のノート「${name}」として取り込みました`;
+}
+
+/**
+ * 🔴 **元の添付が見つからず、新しい添付のノートにしたときの一言**(#1087)。
+ * ⚠ 「取り込みました」だけだと、差し替えたつもりの user は**元のノートが更新された**と読む。
+ */
+export function originGoneImportedNotice(name: string): string {
+  return `元の添付が見つからなかったので、新しい添付のノートとして取り込みました: 「${name}」`;
+}
+
+/**
+ * 🔴 **編集中なので、保存を預かっているときの一言**(#1087)。預かっている間は何も言わないと、
+ *   user は「保存したのにノートが変わらない」と読む。書き言葉は他の「編集中なのでまだ入れていません」に揃える。
+ */
+export function savedHeldNotice(name: string): string {
+  return `Office で保存した「${name}」は、編集中なのでまだ入れていません。編集を終えると入れます`;
 }
 
 /**
@@ -163,6 +185,16 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
    *   次の起動では空なので、もう一度言う。
    */
   const toldLocalFail = new Set<string>();
+  /** 🔴 編集中なので預かっていると、もう言った保存(#1087)── 撃ち直しのたびに同じ字を出さない。取り込めたら外す。 */
+  const toldHeld = new Set<string>();
+  function hold(save: StagedSave): IntakeResult {
+    deferred = true;
+    if (!toldHeld.has(save.key)) {
+      toldHeld.add(save.key);
+      deps.notify(savedHeldNotice(save.name));
+    }
+    return 'deferred';
+  }
 
   /**
    * 窓へ「このノートになった」と返す。
@@ -293,10 +325,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     }
     // ⚠ **`ready` を先に見る。** 見ないと reducer に黙って捨てられ、
     //    「取り込んだ」ことにして棚から消す = 文書が消える
-    if (!deps.canWrite()) {
-      deferred = true;
-      return 'deferred';
-    }
+    //    ⚠ 新しい添付のノートを足すだけなら編集中でも通す(下の `createNote` の前で、もう一度 `canCreate` を見る)
+    if (!deps.canWrite() && !deps.canCreate()) return hold(save);
 
     /**
      * 🔴 **手元のファイルから開いた回は、元のファイルへ戻す**(#432 段②)。
@@ -318,6 +348,8 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       if (Date.now() - save.at <= LOCAL_ORPHAN_GRACE_MS) return 'deferred';
       orphan = true;
     }
+    // ⚠ 手元のファイルへの書き戻しは**書ける画面**でだけ(編集中に通すのは新しい添付を足すことだけ)
+    if (save.token !== undefined && !orphan && isLocalFileToken(save.token) && !deps.canWrite()) return hold(save);
     const local = save.token === undefined || orphan ? null : await deps.writeLocal(save.token, bytes);
     if (local !== null) {
       if (local !== true) {
@@ -332,6 +364,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
       toldLocalFail.delete(save.key);
+      toldHeld.delete(save.key);
       deps.notify(`元のファイルへ保存しました: 「${save.name}」`);
       return 'replaced';
     }
@@ -357,6 +390,7 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       target = await deps.readAttachment(mine);
     }
     if (token !== undefined && target !== null) {
+      if (!deps.canWrite()) return hold(save);
       const ok = await deps.replaceAsset(token, save, bytes);
       if (!ok) {
         deferred = true;
@@ -366,9 +400,13 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
       // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
       await supersedeOlder(dir, save);
       await discardStaged(dir, save.key);
+      toldHeld.delete(save.key);
       deps.notify(`Office で保存した内容を取り込みました: 「${save.name}」`);
       return 'replaced';
     }
+    // 🔴 元の添付が無い回(合言葉も、先に作ったノートも死んでいる)は、そう言う(#1087)
+    const originGone = !orphan && (save.token !== undefined || mine !== undefined);
+    if (!deps.canCreate()) return hold(save);
     const lid = await deps.createNote(save, bytes);
     if (lid === null) {
       deferred = true;
@@ -383,8 +421,14 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     // ⚠ 自分を捨てる**前**に呼ぶ(棚の順の中で自分の位置を引くため)
     await supersedeOlder(dir, save);
     await discardStaged(dir, save.key);
+    toldHeld.delete(save.key);
     deps.notify(
-      orphan ? localOrphanImportedNotice(save.name) : `Office で保存した内容を取り込みました: 「${save.name}」`,
+      orphan
+        ? localOrphanImportedNotice(save.name)
+        : originGone
+          ? originGoneImportedNotice(save.name)
+          : `Office で保存した内容を取り込みました: 「${save.name}」`,
+      lid,
     );
     return 'created';
   }

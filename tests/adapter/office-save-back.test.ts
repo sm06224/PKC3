@@ -19,6 +19,7 @@ import {
   createOfficeSaveBack,
   LOCAL_ORPHAN_GRACE_MS,
   localOrphanImportedNotice,
+  originGoneImportedNotice,
   SAME_DOC_MAX,
   stagedSavedAt,
   type SaveBackDeps,
@@ -95,6 +96,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   adopted: string[];
   notices: string[];
   fails: string[];
+  opened: string[];
   sb: ReturnType<typeof createOfficeSaveBack>;
 } {
   const stage = fakeStage();
@@ -103,10 +105,13 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   const adopted: string[] = [];
   const notices: string[] = [];
   const fails: string[] = [];
+  const opened: string[] = [];
   const deps: SaveBackDeps = {
     stage: async () => stage.dir,
     isHolder: () => true,
     canWrite: () => true,
+    // ⚠ 既定は「書けるときだけ足せる」── 編集中でも足せる場合は各 it が `canCreate` を渡す(#1087)
+    canCreate: over.canWrite ?? (() => true),
     readAttachment: async () => ({ assetKey: 'ast-old' }),
     // ⚠ 既定は「手元のファイルではない」── #432 の分岐を素通りさせる
     //   (手元のファイルの経路は `local-office-files.test.ts` と下の describe が見る)
@@ -121,12 +126,15 @@ function harness(over: Partial<SaveBackDeps> = {}): {
       return true;
     },
     adopt: (key, lid) => adopted.push(`${key}=${lid}`),
-    notify: (m) => notices.push(m),
+    notify: (m, open) => {
+      notices.push(m);
+      if (open !== undefined) opened.push(open);
+    },
     fail: (m) => fails.push(m),
     ...over,
   };
   return {
-    stage, deps, created, replaced, adopted, notices, fails,
+    stage, deps, created, replaced, adopted, notices, fails, opened,
     sb: createOfficeSaveBack(deps),
   };
 }
@@ -407,7 +415,8 @@ describe('🔴 取り込めていないのに棚から消さない(文書が消�
     expect(await h.sb.receive('o1')).toBe('deferred');
     expect(h.created, '編集中なのに作りに行った').toEqual([]);
     expect(h.stage.keys().sort(), '保留したのに棚から消えた').toEqual(['o1.bin', 'o1.json']);
-    expect(h.notices, '取り込んでいないのに「取り込みました」と言った').toEqual([]);
+    expect(h.notices.filter((m) => m.includes('取り込みました')), '取り込んでいないのに「取り込みました」と言った').toEqual([]);
+    expect(h.notices, '預かっているのに何も言わない(#1087)').toHaveLength(1);
   });
 
   it('作成が撃てなかったら保留する ── 棚に残す', async () => {
@@ -1082,5 +1091,83 @@ describe('保存した時刻(savedAt)', () => {
   it('配線: replaceAsset が save.at を渡している', () => {
     const main = readFileSync('src/main.ts', 'utf8');
     expect(main).toContain('savedAt: stagedSavedAt(save.at)');
+  });
+});
+
+describe('編集中の保存 ── 新しい添付は通し、差し替えは預かって、そう言う(#1087)', () => {
+  const editing = { canWrite: () => false, canCreate: () => true };
+
+  it('🔴 編集中でも、新しい添付のノートは作れる(棚から消え、作ったノートへ「開く」を渡す)', async () => {
+    const h = harness(editing);
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.created).toEqual(['無題 1.odt']);
+    expect(h.stage.keys()).toEqual([]);
+    expect(h.opened, '知らせの「開く」が作ったノートを指していない').toEqual(['new-lid']);
+    expect(h.notices.some((m) => /編集中なのでまだ/.test(m)), '作れたのに預かったと言っている').toBe(false);
+  });
+
+  it('🔴 編集中は、差し替えを預かる(撃たない・棚に残す)── 一度だけそう言う', async () => {
+    const h = harness(editing);
+    h.stage.put({ key: 'o1', name: '報告.docx', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(await h.sb.retryDeferred()).toBe(0);
+    expect(h.replaced, '編集中に差し替えを撃った').toEqual([]);
+    expect(h.stage.keys().sort(), '預かったのに棚から消えた').toEqual(['o1.bin', 'o1.json']);
+    const held = h.notices.filter((m) => m.includes('編集中なのでまだ入れていません'));
+    expect(held, '預かっているのに何も言わない / 毎回言う').toHaveLength(1);
+    expect(held[0]).toContain('報告.docx');
+  });
+
+  it('🔴 編集中は、手元のファイルへの書き戻しも預かる', async () => {
+    const writeLocal = vi.fn(async () => true as const);
+    const h = harness({ ...editing, writeLocal });
+    h.stage.put({ key: 'o1', token: 'local:1' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(writeLocal).not.toHaveBeenCalled();
+    expect(h.notices.filter((m) => m.includes('編集中なのでまだ入れていません'))).toHaveLength(1);
+  });
+
+  it('書けない(新規も足せない)ときも預かって、一度だけ言う。編集を終えて取り込めたら、また預かったときにもう一度言う', async () => {
+    let busy = true;
+    const h = harness({ canWrite: () => !busy, canCreate: () => !busy });
+    h.stage.put({ key: 'o1', name: 'a.odt' });
+    expect(await h.sb.receive('o1')).toBe('deferred');
+    expect(await h.sb.retryDeferred()).toBe(0);
+    expect(h.notices.filter((m) => m.includes('編集中なのでまだ'))).toHaveLength(1);
+    busy = false;
+    expect(await h.sb.retryDeferred()).toBe(1);
+    expect(h.stage.keys()).toEqual([]);
+    // 取り込めたら「言った」記録も外れる(同じ鍵は再び来ないが、別の保存は別に言う)
+    busy = true;
+    h.stage.put({ key: 'o2', name: 'b.odt', path: '/work/b.odt' });
+    expect(await h.sb.receive('o2')).toBe('deferred');
+    expect(h.notices.filter((m) => m.includes('編集中なのでまだ'))).toHaveLength(2);
+  });
+});
+
+describe('元の添付が見つからない保存(#1087)', () => {
+  it('🔴 合言葉のノートが消えていたら、そう言う(「取り込みました」だけにしない)', async () => {
+    const h = harness({ readAttachment: async () => null });
+    h.stage.put({ key: 'o1', name: '報告.docx', token: 'lid-gone' });
+    expect(await h.sb.receive('o1')).toBe('created');
+    expect(h.notices[0]).toBe(originGoneImportedNotice('報告.docx'));
+    expect(h.notices[0]).toContain('元の添付が見つからなかったので、新しい添付のノートとして取り込みました');
+    expect(h.opened).toEqual(['new-lid']);
+  });
+
+  it('対照群: 合言葉の無い新規は、いつもの一言のまま', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt' });
+    await h.sb.receive('o1');
+    expect(h.notices[0]).toBe('Office で保存した内容を取り込みました: 「無題 1.odt」');
+  });
+
+  it('対照群: 差し替えられたときも、いつもの一言', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '報告.docx', token: 'lid-7' });
+    await h.sb.receive('o1');
+    expect(h.notices[0]).toBe('Office で保存した内容を取り込みました: 「報告.docx」');
+    expect(h.opened, '差し替えには「開く」を付けない').toEqual([]);
   });
 });

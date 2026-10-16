@@ -9,7 +9,7 @@
  *  ⑤ 触る必要のないノートは edits に入らない(無駄な保存をしない)
  */
 import { describe, expect, it } from 'vitest';
-import { planSaveBack } from '../../src/features/asset/asset-replace-plan';
+import { nameAfterSaveBack, planSaveBack } from '../../src/features/asset/asset-replace-plan';
 import {
   readVersions,
   serializeVersion,
@@ -169,5 +169,38 @@ describe('planSaveBack', () => {
     expect(applied, '古い key は frontmatter から消える').not.toContain(`asset_key: ${OLD}`);
     // 台帳は旧 key を持ったまま(bytes を生かすため)
     expect(readVersions(applied).map((v) => v.assetKey)).toEqual([OLD]);
+  });
+});
+
+describe('🔴 保存した名前と、いまの名前(#1087)', () => {
+  const nameOf = (p: ReturnType<typeof plan>): unknown =>
+    p.edits.find((e) => e.lid === 'a1')!.frontmatter!['attachment.name'];
+
+  it('開いている間に改名していたら、同じ綴りの保存では改名を残す', () => {
+    // 窓が持っていた名前は開いた時点の「報告書.docx」── 改名後は「議事録.docx」
+    const p = plan(
+      { a1: attachBody({ 'attachment.name': '議事録.docx' }) },
+      { newName: '報告書.docx', newMime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    );
+    expect(nameOf(p)).toBe('議事録.docx');
+  });
+
+  it('綴りの大文字小文字だけ違っても同じ綴りと読む', () => {
+    const p = plan({ a1: attachBody({ 'attachment.name': '議事録.DOCX' }) }, { newName: '報告書.docx' });
+    expect(nameOf(p)).toBe('議事録.DOCX');
+  });
+
+  it('対照群: 綴りが変わる保存は、保存した名前に更新する(#214)', () => {
+    const p = plan({ a1: attachBody({ 'attachment.name': '議事録.docx' }) }, { newName: '報告書.odt' });
+    expect(nameOf(p)).toBe('報告書.odt');
+  });
+
+  it('対照群: 改名していなければ、保存した名前のまま(従来どおり)', () => {
+    const p = plan({ a1: attachBody() }, { newName: '報告書.docx' });
+    expect(nameOf(p)).toBe('報告書.docx');
+  });
+
+  it('いまの名前が空なら保存した名前を入れる', () => {
+    expect(nameAfterSaveBack('', 'a.docx')).toBe('a.docx');
   });
 });

@@ -152,20 +152,78 @@ export function packUrlFailureMessage(e: unknown): string {
  * 🔑 これが在るので、PKC3 側は**フォント名を 1 つも知らなくてよい** ──
  * 「一式とは何か」を配る側と取る側の 2 か所に持たない(`office-pack.ts` 冒頭の教訓)。
  */
-export async function fetchPackManifest(base: string): Promise<PackManifest> {
+export async function fetchPackManifest(base: string, stallMs: number = PACK_STALL_MS): Promise<PackManifest> {
   const url = new URL('pack.json', resolveBase(base));
-  let res: Response;
-  try {
-    res = await fetch(url.href);
-  } catch {
+  const got = await guardedFetch(url.href, stallMs, async (res) => {
+    if (!res.ok) return { status: res.status, json: null as unknown };
+    // ⚠ **JSON として読めた**を「目録だった」と読まない ── 形は `parsePackManifest` が見る
+    return { status: 0, json: (await res.json().catch(() => null)) as unknown };
+  }).catch((e: unknown) => {
+    if (e instanceof PackStalledError) throw new OfficePackError(`配布元からの応答が ${Math.round(stallMs / 1000)} 秒止まりました。`);
     // ⚠ 原因を名指しする ── 「失敗しました」では user が次に何をすべきか分からない
     throw new OfficePackError('配布元に届きません。');
+  });
+  if (got.status !== 0) {
+    throw new OfficePackError(`配布元に一式が見つかりません(HTTP ${got.status})。`);
   }
-  if (!res.ok) {
-    throw new OfficePackError(`配布元に一式が見つかりません(HTTP ${res.status})。`);
+  return parsePackManifest(got.json);
+}
+
+/**
+ * 🔴 **応答が止まったままにしない**(#1087)。一式の取得は 1 file ごとに最大 数十MB を取るので、
+ *   通信が途中で止まると「取得中: …」のまま永久に終わらず、ボタンも戻らなかった。
+ * ⚠ 見るのは**進み具合**(受け取った塊が来るたびに時計を戻す)── 遅い回線で大きい file を取る人を切らない。
+ *   `AbortController` で fetch を止め、止まらない実装でも先へ進めるよう競わせる。
+ */
+export const PACK_STALL_MS = 60_000;
+
+class PackStalledError extends Error {}
+
+async function guardedFetch<T>(
+  href: string,
+  stallMs: number,
+  read: (res: Response, touch: () => void) => Promise<T>,
+): Promise<T> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stall: (e: Error) => void = () => undefined;
+  const stalled = new Promise<never>((_, reject) => {
+    stall = reject;
+  });
+  const touch = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      ac.abort();
+      stall(new PackStalledError('stalled'));
+    }, stallMs);
+  };
+  touch();
+  const work = (async (): Promise<T> => {
+    const res = await fetch(href, { signal: ac.signal });
+    touch();
+    return read(res, touch);
+  })();
+  // 競り負けた側の拒否が unhandled にならないように
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, stalled]);
+  } finally {
+    clearTimeout(timer);
   }
-  // ⚠ **JSON として読めた**を「目録だった」と読まない ── 形は `parsePackManifest` が見る
-  return parsePackManifest(await res.json().catch(() => null));
+}
+
+/** 本体を、塊が来るたびに `touch` しながら Blob にする(`body` を持たない応答は丸ごと待つ)。 */
+async function readBlobWithProgress(res: Response, touch: () => void): Promise<Blob> {
+  const reader = res.body?.getReader?.();
+  if (reader === undefined) return res.blob();
+  const parts: Uint8Array[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    touch();
+  }
+  return new Blob(parts as BlobPart[], { type: res.headers?.get('content-type') ?? '' });
 }
 
 /**
@@ -178,6 +236,7 @@ export async function fetchPackFromBase(
   base: string,
   fonts: readonly string[],
   onProgress?: AcquireProgress,
+  stallMs: number = PACK_STALL_MS,
 ): Promise<PackFiles> {
   const root = resolveBase(base);
   if (fonts.length === 0) {
@@ -192,10 +251,18 @@ export async function fetchPackFromBase(
   for (const [i, name] of names.entries()) {
     onProgress?.(`取得中: ${name}`, i, names.length);
     const url = new URL(name, root);
-    const res = await fetch(url.href);
+    // ⚠ 1 file ごとに「進みが止まった」を見る(#1087)── 止まったら理由つきで落ち、呼び側が出口の案内を足す
+    const got = await guardedFetch(url.href, stallMs, async (res, touch) => (
+      res.ok ? { status: 0, blob: await readBlobWithProgress(res, touch) } : { status: res.status, blob: null }
+    )).catch((e: unknown) => {
+      if (e instanceof PackStalledError) {
+        throw new OfficePackError(`配布元から「${name}」を受け取る途中で、${Math.round(stallMs / 1000)} 秒間応答が止まりました。`);
+      }
+      throw e;
+    });
     // ⚠ **沈黙を成功と読まない。** 404 の HTML を掴んで「入った」と言わない
-    if (!res.ok) throw new OfficePackError(`配布元から「${name}」を受け取れません(HTTP ${res.status})。`);
-    out.set(name, await res.blob());
+    if (got.blob === null) throw new OfficePackError(`配布元から「${name}」を受け取れません(HTTP ${got.status})。`);
+    out.set(name, got.blob);
   }
   onProgress?.('検査中', names.length, names.length);
   assertPackComplete(out.keys());
