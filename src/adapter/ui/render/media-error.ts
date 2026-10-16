@@ -39,6 +39,8 @@ export function replaceOnMediaError(
   kind: MediaErrorKind,
   mime: string,
   howToSave?: string,
+  /** 差し替えた直後に呼ぶ(その player に付いていた押し所の後始末など)。 */
+  onReplaced?: () => void,
 ): void {
   el.addEventListener(
     'error',
@@ -48,6 +50,7 @@ export function replaceOnMediaError(
       p.setAttribute('data-pkc-field', 'attachment-undecodable');
       p.textContent = undecodableText(kind, mime, howToSave);
       el.replaceWith(p);
+      onReplaced?.();
     },
     { once: true },
   );

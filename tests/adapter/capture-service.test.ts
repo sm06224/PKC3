@@ -473,16 +473,22 @@ describe('🔴 編集中に終わっても、収録を失わない(#413)', () =>
     expect(b.d.getState().phase, '編集に入っていない(前提が崩れている)').toBe('editing');
   }
 
-  it('🔴 「止める」は断る ── 収録は続いている(押させて失わせない)', async () => {
+  // 理由(#1087): 断るとマイクが点いたままで、止めたい人が止められない。止めて、取り込みだけを編集後へ回す。
+  it('🔴 編集中に「止める」を押しても必ず止まり、取り込みは編集を終えてから', async () => {
     const b = bench();
     await b.service.start('audio');
     edit(b);
     b.service.stop();
     await tick();
-    expect(b.d.getState().error, '断らずに黙って止めた').toMatch(/編集中は取り込めません/);
+    expect(b.d.getState().error, '断っている').toBeNull();
+    expect(b.service.line(), '押したのに収録が続いている(マイクが点いたまま)').toBeNull();
     expect(b.attached, '編集中なのに取り込もうとした').toEqual([]);
-    // 🔴 **まだ録っている**(押しても失われない)
-    expect(b.service.line(), '断ったのに収録が止まっている').toMatch(/^録音中/);
+    expect(b.notices.join(''), '預かったことを言っていない').toMatch(/まだ入れていません/);
+
+    b.d.dispatch({ type: 'CANCEL_EDIT' });
+    await tick();
+    expect(b.attached.length, '編集を終えても取り込まれない').toBe(1);
+    expect(appends(b.events).length, '本文へ入っていない').toBe(1);
   });
 
   it('🔴 上限や共有停止で強制的に終わったら、預かって、編集を終えたら入れる', async () => {

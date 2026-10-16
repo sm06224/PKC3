@@ -479,15 +479,11 @@ export function createCaptureService(deps: CaptureServiceDeps): CaptureService {
     stop: () => {
       if (handle === null) return;
       /**
-       * 🔴 **編集中は止めない** ── 止めても添付が作れず、預かるしかない。
-       * ⚠ user は「止めれば入る」と思って押すので、**入らないなら押させない**
-       *   ほうが良い(収録は続いているので、何も失われない)。
-       * ⚠ 手で止められない回(上限 / 共有停止)は `hold` が受ける。
+       * 🔴 **編集中でも、止める押下は必ず止める**(#1087)。
+       * ⚠ 直す前は編集中だけ断っていた ── 断ると**マイクが点いたまま**で、止めたい人が止められない。
+       *   取り込みだけを待たせる ── 上限 / 共有停止と同じ道(`finish` → `deliver` → `hold`)を通り、
+       *   編集が終わったら開いているノートへ入る。
        */
-      if (deps.dispatcher.getState().phase !== 'ready') {
-        fail('編集中は取り込めません。編集を保存するか、編集をやめてから止めてください(収録は続いています)');
-        return;
-      }
       void finish('stopped');
     },
     discard: () => {
