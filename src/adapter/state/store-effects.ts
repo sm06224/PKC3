@@ -2237,6 +2237,8 @@ export function connectStoreEffects(
           try {
             await upsert({ id: ev.id, fromLid: ev.fromLid, toLid: ev.toLid, kind: ev.kind });
           } catch (e) {
+            // 🔴 画面を disk に合わせる(足したままだと、再読み込みで消えて見える)
+            if (!disposed) dispatcher.dispatch({ type: 'ROLLBACK_RELATION', change: 'added', id: ev.id });
             dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを保存できません: ${errorText(e)}` });
           }
         });
@@ -2250,6 +2252,9 @@ export function connectStoreEffects(
           try {
             await remove(ev.id);
           } catch (e) {
+            // 🔴 画面を disk に合わせる(消えたままだと、再読み込みで戻って見える)
+            if (!disposed && ev.relation !== undefined)
+              dispatcher.dispatch({ type: 'ROLLBACK_RELATION', change: 'removed', relation: ev.relation });
             dispatcher.dispatch({ type: 'OP_FAILED', error: `つながりを消せません: ${errorText(e)}` });
           }
         });
@@ -3179,7 +3184,21 @@ export function connectStoreEffects(
              * ── 古い別の版へ「戻す」口を出さない。
              */
             const newestAfter = await newestRev();
-            const undoRevId = newestAfter !== undefined && newestAfter !== newestBefore ? newestAfter : undefined;
+            let undoRevId = newestAfter !== undefined && newestAfter !== newestBefore ? newestAfter : undefined;
+            /**
+             * 🔴 **積まれなかったのは「既に同じ本文が一番上に在った」からかもしれない**
+             * (ゴミ箱から戻した直後 ── worker は最新の版と同じ内容なら積まない)。
+             * そのとき一番上の版の本文が戻す前の本文と同じなら、それが「元に戻す」の行き先。
+             * ⚠ 違う本文なら渡さない(古い別の版へ戻す口を出さない)。
+             */
+            if (undoRevId === undefined && newestAfter !== undefined) {
+              try {
+                const top = await store.getRevision(newestAfter);
+                if (top !== null && top.body === current) undoRevId = newestAfter;
+              } catch {
+                // 読めなければ口を出さない(従来どおり)
+              }
+            }
             if (!disposed)
               dispatcher.dispatch({
                 type: 'ENTRY_RESTORED',

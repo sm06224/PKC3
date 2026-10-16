@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 /** 復元で履歴が 1 件増える fake。`grows: false` なら増えない(同じ本文を書いた回)。 */
-function setup(grows: boolean) {
+function setup(grows: boolean, topIsPre = false) {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -40,7 +40,7 @@ function setup(grows: boolean) {
   const log: string[] = [];
   let persisted = false;
   const metasNow = () => [
-    ...(persisted && grows
+    ...((persisted && grows) || topIsPre
       ? [{ id: 'r-10', rev_order: 10, created_at: '2026-08-02', title: '戻す前', archetype: 'text' }]
       : []),
     { id: 'r-9', rev_order: 9, created_at: '2026-08-01', title: '旧題', archetype: 'text' },
@@ -75,8 +75,8 @@ const paint = (root: HTMLElement, d: Dispatcher): HTMLElement => {
   paintStatusUndo(btn, d.getState(), d.getState().notice ?? '');
   return btn;
 };
-async function restored(grows: boolean) {
-  const h = setup(grows);
+async function restored(grows: boolean, topIsPre = false) {
+  const h = setup(grows, topIsPre);
   h.d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
   await tick();
   h.d.dispatch({ type: 'RESTORE_REVISION', revId: 'r-9' });
@@ -122,6 +122,17 @@ describe('履歴から戻した直後の「元に戻す」(依頼 68-1)', () => 
     expect(h.d.getState().openBody?.body, '前提:復元は通っている').toBe('# 復元先');
     expect(h.d.getState().restoreUndo ?? null).toBeNull();
     expect(paint(h.root, h.d).hidden, '戻す先が無いのに口が出ている').toBe(true);
+  });
+
+  it('🔴 戻す前の本文が既に一番上の版に在って積まれなかった回(ゴミ箱から戻した直後)も、その版へ戻せる', async () => {
+    const h = await restored(false, true);
+    expect(h.d.getState().openBody?.body, '前提:復元は通っている').toBe('# 復元先');
+    expect(h.d.getState().restoreUndo, '一番上の版が戻す前の本文なのに口が出ない').toMatchObject({ lid: 'e1', revId: 'r-10' });
+    const btn = paint(h.root, h.d);
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    await tick();
+    expect(h.d.getState().openBody?.body).toBe('# 戻す前');
   });
 
   it('🔴 「元に戻す」で戻した後は、知らせを言い換え、「元に戻す」を重ねて出さない(行ったり来たりしない)', async () => {

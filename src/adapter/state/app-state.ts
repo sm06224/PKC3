@@ -3451,6 +3451,9 @@ export type UserAction =
 
 export type SystemCommand =
   | { type: 'SYS_BOOTED'; cid: string; metas: EntryMeta[]; relations: Relation[] }
+  /** 関係の保存に失敗したとき、画面を disk に合わせる(足した物を外す / 消した物を戻す) */
+  | { type: 'ROLLBACK_RELATION'; change: 'added'; id: string }
+  | { type: 'ROLLBACK_RELATION'; change: 'removed'; relation: Relation }
   /**
    * 🔴 **未読のメッセージの数が変わった**(設計 doc §7、段②a)。
    *
@@ -4225,7 +4228,7 @@ export type DomainEvent =
     }
   /** 関係の永続化(#185)。⚠ 1 件ずつ ── 作る操作も消す操作も 1 度に 1 つである。 */
   | { type: 'REQUEST_RELATION_UPSERT'; id: string; fromLid: string; toLid: string; kind: string }
-  | { type: 'REQUEST_RELATION_DELETE'; id: string }
+  | { type: 'REQUEST_RELATION_DELETE'; id: string; relation?: Relation }
   | {
       /**
        * 🔴 **選んだ全部にタグを 1 つ足す / 外す**(#402 ①)。
@@ -4394,6 +4397,7 @@ const SYSTEM_COMMAND_TYPES: Record<SystemCommand['type'], true> = {
   SECTION_SAVE_FAILED: true,
   CODE_SAVED: true,
   CODE_SAVE_FAILED: true,
+  ROLLBACK_RELATION: true,
 };
 
 function isSystemCommand(action: Dispatchable): boolean {
@@ -9338,6 +9342,18 @@ function reduceCore(
         events: [{ type: 'REQUEST_RELATION_UPSERT', id: action.id, fromLid, toLid, kind }],
       };
     }
+    /**
+     * 🔴 **保存に失敗した関係を画面から巻き戻す**。⚠ 画面が先に動くので、disk が断ったら
+     * 画面だけに残る(再読み込みで逆に見える)。足した物は外し、消した物は戻す。冪等。
+     */
+    case 'ROLLBACK_RELATION': {
+      if (action.change === 'added') {
+        if (!state.relations.some((r) => r.id === action.id)) return { state, events: [] };
+        return { state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) }, events: [] };
+      }
+      if (state.relations.some((r) => r.id === action.relation.id)) return { state, events: [] };
+      return { state: { ...state, relations: [...state.relations, action.relation] }, events: [] };
+    }
     /** 関係を消す。⚠ 居ない id でも**黙って成功**(冪等 ── 2 回押しても壊れない)。 */
     case 'REMOVE_RELATION': {
       if (state.phase !== 'ready') return { state, events: [] };
@@ -9347,7 +9363,7 @@ function reduceCore(
       if (target.kind === STRUCTURAL) return { state, events: [] };
       return {
         state: { ...state, relations: state.relations.filter((r) => r.id !== action.id) },
-        events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id }],
+        events: [{ type: 'REQUEST_RELATION_DELETE', id: action.id, relation: target }],
       };
     }
     /**
@@ -9425,6 +9441,9 @@ function reduceCore(
     case 'REVISION_PREVIEW_LOADED': {
       // ⚠ 遅れて着いた分が別のノートのものなら捨てる(`BODY_LOADED` と同型)
       if (state.selectedLid !== action.lid) return { state, events: [] };
+      // 🔴 履歴を閉じた後・別の版を待っている間に着いた分は捨てる(次に開いたとき、押していない版が選ばれて見える)
+      if (state.revisionPanel === null || state.revisionPanel.lid !== action.lid) return { state, events: [] };
+      if (!state.revisionPanel.items.some((it) => it.id === action.revId)) return { state, events: [] };
       return {
         state: {
           ...state,
