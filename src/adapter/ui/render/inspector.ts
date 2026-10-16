@@ -312,6 +312,13 @@ export class InspectorRenderer {
   private assetNameResolver: ((key: string) => Promise<string | null>) | null = null;
   private readonly assetNames = new Map<string, string | null>();
   private readonly assetNamesAsked = new Set<string>();
+  /**
+   * 名前を憶えたときの `entryMetas`(参照)と世代。添付の改名は meta を**新しい参照**で差し替える
+   * (`app-state.ts`)ので、参照が替われば憶えた名前を捨てて引き直す。世代は、捨てる前に飛んだ問いの返事が
+   * 古い名前を書き戻すのを防ぐ。
+   */
+  private assetNamesMetas: AppState['entryMetas'] | null = null;
+  private assetNamesGen = 0;
   /** いま出している添付の行(key → 使われ方)。届いた名前を当てるときに引く。 */
   private assetUses = new Map<string, AssetUse>();
 
@@ -342,8 +349,10 @@ export class InspectorRenderer {
     const resolve = this.assetNameResolver;
     if (!resolve || u.label !== '' || this.assetNamesAsked.has(u.key)) return;
     this.assetNamesAsked.add(u.key);
+    const gen = this.assetNamesGen;
     void resolve(u.key).then(
       (name) => {
+        if (gen !== this.assetNamesGen) return;
         this.assetNames.set(u.key, name);
         if (!name) return;
         const use = this.assetUses.get(u.key);
@@ -355,6 +364,7 @@ export class InspectorRenderer {
         if (go) this.paintAssetButton(go, use);
       },
       () => {
+        if (gen !== this.assetNamesGen) return;
         // 引けなかったら、また聞けるようにする(今の字 = key の短縮のまま)
         this.assetNamesAsked.delete(u.key);
       },
@@ -580,7 +590,13 @@ export class InspectorRenderer {
     if (assetBody === null) this.assetScan = null;
     const assetUses = assetBody === null ? [] : this.scanAssetUses(assetBody, stale);
     // 同じ走査結果(参照)なら行は同じ見た目 ── 作り直さない(本文が無い回は `null` で鍵を揃える)
-    const assetDeps = [assetBody === null ? null : assetUses];
+    if (this.assetNamesMetas !== state.entryMetas) {
+      this.assetNamesMetas = state.entryMetas;
+      this.assetNames.clear();
+      this.assetNamesAsked.clear();
+      this.assetNamesGen++;
+    }
+    const assetDeps = [assetBody === null ? null : assetUses, state.entryMetas];
     if (assetBox && !this.rowSame('assets', assetDeps)) {
       this.rowDeps.set('assets', assetDeps);
       const uses = assetUses;

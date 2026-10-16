@@ -39,6 +39,7 @@
 import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta';
 import { formatBuildStamp } from '@features/datetime/datetime-format';
 import { NOTICES, type Notice } from '@features/notice/notice-log';
+import { preferredScrollBehavior } from './scroll-behavior';
 import {
   OSS_SCOPE_NOTE,
   OSS_SOURCE_URL,
@@ -693,16 +694,16 @@ export class HelpRenderer {
 
   /** 🔴 ショートカットキーの一覧までスクロールする(#1145)。 */
   scrollToKeys(): void {
-    this.keys?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    this.keys?.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
   }
 
   /** 🔴 ヘルプ面(マニュアル)の先頭へスクロールする(#1145)。 */
   scrollToTop(): void {
     const outer = this.region.closest<HTMLElement>('[data-pkc-region="detail"]');
     if (outer !== null && outer !== undefined) {
-      outer.scrollTo({ top: 0, behavior: 'smooth' });
+      outer.scrollTo({ top: 0, behavior: preferredScrollBehavior() });
     } else {
-      this.region.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      this.region.scrollIntoView({ behavior: preferredScrollBehavior(), block: 'start' });
     }
   }
 
