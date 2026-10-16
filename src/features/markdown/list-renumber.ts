@@ -82,8 +82,13 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
   const lines = isCrlf ? body.split('\r\n') : body.split('\n');
   const out: string[] = [];
   /** 字下げの幅 → 次に振る番号。⚠ 深い段から抜けたら捨てる。 */
-  let counters = new Map<number, number>();
+  const counters = new Map<number, number>();
   let fence = '';
+  const indentOf = (l: string): number => /^\s*/.exec(l)![0].length;
+  /** 字下げが `w` 以上の段の数えを捨てる(その行は、それらの項目の中身ではない)。 */
+  const dropFrom = (w: number): void => {
+    for (const d of [...counters.keys()]) if (d >= w) counters.delete(d);
+  };
 
   for (const line of lines) {
     const nextFence = advanceFence(fence, line);
@@ -95,8 +100,9 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     if (nextFence !== '') {
       fence = nextFence;
       out.push(line);
-      // ⚠ コードの塊はリストを**切る**(前後は別のリストである)
-      counters = new Map();
+      // ⚠ 字下げの無いコードの塊はリストを**切る**(前後は別のリストである)。
+      //   🔴 項目より深く字下げした塊は**その項目の一部**なので切らない(#1087)
+      dropFrom(indentOf(line));
       continue;
     }
 
@@ -104,7 +110,9 @@ export function renumberLists(body: string, mode: ListNumberMode = 'sequential')
     if (item === null) {
       // ⚠ 空行**だけ**では切らない(段落を挟んだ 1 つのリストが在る)が、
       //    実のある別の行が来たら切る
-      if (line.trim() !== '') counters = new Map();
+      //    🔴 ただし**項目より深く字下げした行**(入れ子の箇条書き・段落・画像)はその項目の中身で、
+      //    項目の列を切らない(#1087)── 切るのは、その字下げ以下の段だけ
+      if (line.trim() !== '') dropFrom(indentOf(line));
       out.push(line);
       continue;
     }

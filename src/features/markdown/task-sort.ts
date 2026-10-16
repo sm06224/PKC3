@@ -39,10 +39,40 @@ const TASK_MARKER = /^(\s*)(?:[-*+]|\d+[.)])\s+\[([ xX])\](?:\s+.*|$)/;
 /** 番号付き項目の頭(字下げ / 数 / 区切りと空白)。位置の番号を保つために使う。 */
 const NUMBERED = /^(\s*)(\d+)([.)]\s+)/;
 
+import { advanceFence } from './list-renumber';
+import { TASK_LINE } from './task-line';
+
 /**
- * コードブロック（fence）の開始/終了。字下げ 3 文字以内の ``` または ~~~。
+ * 🔴 **「触らない行」の地図**(#1087)。fence(字下げ付きも含む。判定の正本は `advanceFence`)と、
+ *   `$$` だけの行で開いて `$$` だけの行で閉じる数式の塊(`markdown-render.ts` の `pkc_math_block` と同じ読み方。
+ *   閉じが無ければ段落なので opaque にしない)の行に、塊ごとの番号(1 から)を振る。他の行は 0。
+ *   ⚠ HTML の `<pre>` は対象外 ── 描画が `html: false` なので、ただの段落である。
  */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+function opaqueRegions(lines: readonly string[]): number[] {
+  const ids: number[] = new Array<number>(lines.length).fill(0);
+  let fence = '';
+  let id = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const next = advanceFence(fence, line);
+    if (fence !== '' || next !== '') {
+      if (fence === '') id += 1;
+      ids[i] = id;
+      fence = next;
+      continue;
+    }
+    if (line.trim() === '$$') {
+      let j = i + 1;
+      while (j < lines.length && lines[j]!.trim() !== '$$') j++;
+      if (j < lines.length) {
+        id += 1;
+        for (let k = i; k <= j; k++) ids[k] = id;
+        i = j;
+      }
+    }
+  }
+  return ids;
+}
 
 /**
  * 1 つのリスト項目とその配下行。
@@ -74,10 +104,13 @@ function leadingIndentWidth(s: string): number {
 function sortListBlockLines(lines: readonly string[]): string[] {
   if (lines.length === 0) return [];
 
+  const opaque = opaqueRegions(lines);
+
   // このブロック内で最も浅いリスト項目のインデント幅を探す
   let minIndent = Infinity;
-  for (const line of lines) {
-    if (LIST_MARKER.test(line)) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (opaque[i] === 0 && LIST_MARKER.test(line)) {
       const w = leadingIndentWidth(line);
       if (w < minIndent) minIndent = w;
     }
@@ -93,8 +126,9 @@ function sortListBlockLines(lines: readonly string[]): string[] {
   let currentChunk: ItemChunk | null = null;
   const prefixLines: string[] = []; // 最初のリスト項目より前にある行（通常は無いはずだが安全策）
 
-  for (const line of lines) {
-    const isItemHeader = LIST_MARKER.test(line) && leadingIndentWidth(line) === minIndent;
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]!;
+    const isItemHeader = opaque[li] === 0 && LIST_MARKER.test(line) && leadingIndentWidth(line) === minIndent;
     if (isItemHeader) {
       if (currentChunk !== null) {
         chunks.push(currentChunk);
@@ -184,7 +218,9 @@ export function sortTasksByStatus(body: string): string {
   const lines = body.split('\n');
   const out: string[] = [];
 
-  let fence: { readonly ch: string; readonly len: number } | null = null;
+  const opaque = opaqueRegions(lines);
+  /** 触らない塊が、いま開いているリスト項目の配下(字下げ付き)に在るか。在れば塊ごと項目に付いて動く。 */
+  let opaqueInBlock = false;
   let currentListBlock: string[] = [];
 
   const flushListBlock = (): void => {
@@ -197,23 +233,14 @@ export function sortTasksByStatus(body: string): string {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
 
-    // 1. コードブロック (fence) の判定
-    const f = FENCE.exec(line);
-    if (f !== null) {
-      flushListBlock();
-      const mark = f[1]!;
-      if (fence === null) {
-        fence = { ch: mark[0]!, len: mark.length };
-      } else if (mark[0] === fence.ch && mark.length >= fence.len) {
-        fence = null;
+    // 1. 触らない塊(fence / `$$`)。字下げ付きでリスト項目の配下なら項目の一部、そうでなければ素通し
+    if (opaque[i] !== 0) {
+      if (i === 0 || opaque[i - 1] !== opaque[i]) {
+        opaqueInBlock = currentListBlock.length > 0 && /^\s+/.test(line);
+        if (!opaqueInBlock) flushListBlock();
       }
-      out.push(line);
-      continue;
-    }
-
-    if (fence !== null) {
-      // fence の中は一切触らない
-      out.push(line);
+      if (opaqueInBlock) currentListBlock.push(line);
+      else out.push(line);
       continue;
     }
 
@@ -228,7 +255,7 @@ export function sortTasksByStatus(body: string): string {
         let j = i;
         while (j < lines.length && lines[j]!.trim() === '') j += 1;
         const nextLine = lines[j];
-        if (nextLine !== undefined && LIST_MARKER.test(nextLine) && FENCE.exec(nextLine) === null) {
+        if (nextLine !== undefined && opaque[j] === 0 && LIST_MARKER.test(nextLine)) {
           for (; i < j; i++) currentListBlock.push(lines[i]!);
           i = j - 1;
           continue;
@@ -267,17 +294,22 @@ export function sortTasksByStatus(body: string): string {
  */
 export function hasTaskItems(body: string): boolean {
   if (body === '' || !body.includes('[')) return false;
-  let fence: { readonly ch: string; readonly len: number } | null = null;
-  for (const line of body.split('\n')) {
-    const f = FENCE.exec(line);
-    if (f !== null) {
-      const mark = f[1]!;
-      if (fence === null) fence = { ch: mark[0]!, len: mark.length };
-      else if (mark[0] === fence.ch && mark.length >= fence.len) fence = null;
-      continue;
-    }
-    if (fence !== null) continue;
-    if (TASK_MARKER.test(line)) return true;
-  }
-  return false;
+  const lines = body.split('\n');
+  const opaque = opaqueRegions(lines);
+  return lines.some((line, i) => opaque[i] === 0 && TASK_MARKER.test(line));
+}
+
+/**
+ * 本文に**引用の中の**チェック項目(`> - [ ] a`)が在るか。⚠ 画面ではチェックを押せる(`TASK_LINE` と同じ読み)が、
+ * `sortTasksByStatus` は引用の中を並べ替えない ── 「チェック項目はありません」と偽を言わず、断りを言い分けるために持つ。
+ */
+export function hasQuotedTaskItems(body: string): boolean {
+  if (body === '' || !body.includes('[')) return false;
+  const lines = body.split('\n');
+  const opaque = opaqueRegions(lines);
+  return lines.some((line, i) => {
+    if (opaque[i] !== 0) return false;
+    const m = TASK_LINE.exec(line);
+    return m !== null && m[1]!.includes('>');
+  });
 }

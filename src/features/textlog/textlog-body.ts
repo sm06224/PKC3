@@ -23,27 +23,43 @@ export interface TextlogBody {
 }
 
 /**
+ * Read a textlog body as `{ entries: [...] }` or a bare array of entries.
+ * Returns `null` when the string is not such JSON (so callers can tell
+ * "no log" apart from "not a log"). Non-object items (`null` etc.) are skipped
+ * — one bad item must not drop the valid ones (#1087).
+ */
+export function readTextlogEntries(body: string): TextlogBody | null {
+  if (!body) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null; // not valid JSON
+  }
+  const list: unknown = Array.isArray(parsed)
+    ? parsed
+    : parsed !== null && typeof parsed === 'object'
+      ? (parsed as { entries?: unknown }).entries
+      : undefined;
+  if (!Array.isArray(list)) return null;
+  return {
+    entries: list
+      .filter((e: unknown): e is Record<string, unknown> => e !== null && typeof e === 'object')
+      .map((e) => ({
+        id: typeof e.id === 'string' ? e.id : generateLogId(),
+        text: typeof e.text === 'string' ? e.text : '',
+        createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString(),
+        flags: Array.isArray(e.flags) ? (e.flags.filter((f: unknown) => typeof f === 'string') as TextlogFlag[]) : [],
+      })),
+  };
+}
+
+/**
  * Parse a textlog body string into a TextlogBody.
  * Returns an empty body for invalid/empty input.
  */
 export function parseTextlogBody(body: string): TextlogBody {
-  if (!body) return { entries: [] };
-  try {
-    const parsed = JSON.parse(body);
-    if (parsed && Array.isArray(parsed.entries)) {
-      return {
-        entries: parsed.entries.map((e: Record<string, unknown>) => ({
-          id: typeof e.id === 'string' ? e.id : generateLogId(),
-          text: typeof e.text === 'string' ? e.text : '',
-          createdAt: typeof e.createdAt === 'string' ? e.createdAt : new Date().toISOString(),
-          flags: Array.isArray(e.flags) ? e.flags.filter((f: unknown) => typeof f === 'string') : [],
-        })),
-      };
-    }
-  } catch {
-    // not valid JSON
-  }
-  return { entries: [] };
+  return readTextlogEntries(body) ?? { entries: [] };
 }
 
 // Slice 4-B (TEXTLOG Viewer & Linkability Redesign): the legacy
