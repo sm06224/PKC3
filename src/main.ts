@@ -2400,7 +2400,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       syncReloadQueued = false;
       // ⚠ 色の読み直しも**同じ 300ms の束ね**に乗せる(#1087)── 書込のたびに 1 回ずつ読んでいた
       void reloadTagColors();
-      void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null });
+      void reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() });
     }, 300);
   };
   /**
@@ -2556,7 +2556,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           expectHash,
           keepMeta,
         }),
-      refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null }),
+      refresh: () => reloadSnapshot(dispatcher, cid, loadSnapshot, { deferNotice: null, settled: () => storeEffects?.settled() }),
     });
 
   const runExport = (

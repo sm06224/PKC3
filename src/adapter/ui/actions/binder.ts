@@ -1138,6 +1138,49 @@ const keepDualCursorAfter = (
 };
 
 /**
+ * 🔴 **消した後の「カーソルを立てる」を、操作を押した後に動いた分を踏まない形にする**(#1087 D10)。
+ *
+ * ⚠ ゴミ箱へ移すのは**非同期になりうる**(別のタブの編集を確かめる間)。押した時点のカーソルを
+ *   そのまま基準にすると、待っている間に user が `↑↓` で動かした先を**上書き**する。
+ * 🔑 いまのカーソルが押した時点と違い、かつ**まだ画面に居る行**なら、user が動かした先なので触らない。
+ *   戻り値は `keepDualCursorAfter` と同じ(立てた lid / 立てなかったら `null`)。
+ */
+const keepDualCursorUnlessMoved = (
+  dispatcher: Dispatcher,
+  side: DualSide,
+  rowsBefore: readonly EntryMeta[],
+  cursorBefore: string | null,
+): string | null => {
+  const now = paneOf(dispatcher.getState().dual, side).cursor;
+  if (
+    now !== null &&
+    now !== cursorBefore &&
+    dualPaneRows(dispatcher.getState(), side).some((m) => m.lid === now)
+  )
+    return null;
+  return keepDualCursorAfter(dispatcher, side, rowsBefore, cursorBefore);
+};
+
+/**
+ * 🔴 **名前を打ち替える相手 ── 鍵(`F2`)と「名前」ボタンで決め方を分けない**(#1087 D7)。
+ *
+ * ⚠ 直す前は `F2` がカーソルの行を、ボタンが印を先に見ていた。印を 3 件付けてカーソルが印の外に
+ *   ある状態で `F2` を押すと、**印の無い行**の名前が打てた(ボタンは「1 件だけ」と断る)。
+ * 🔑 印が優先(印があればカーソルは見ない)。印が無ければカーソルの行。1 件に決まらなければ理由を返す。
+ */
+const dualRenameTarget = (
+  st: AppState,
+  side: DualSide,
+): { lid: string } | { error: string } => {
+  const pane = paneOf(st.dual, side);
+  const marked = pane.selection.length > 0 ? pane.selection : pane.cursor !== null ? [pane.cursor] : [];
+  // ⚠ **1 件のときだけ** ── まとめて改名は「同じ名前が並ぶ」だけで意味が無い
+  if (marked.length === 0) return { error: '名前を変えるものを選んでください(行を押すと選べます)' };
+  if (marked.length > 1) return { error: '名前を変えられるのは 1 件だけです' };
+  return { lid: marked[0]! };
+};
+
+/**
  * 🔴 **そのペインに出ている行を全部選ぶ ── Ctrl+A と列見出しのチェックの実体は 1 本**(Gemini 裁定 = #1163 への依頼 62)。
  * ⚠ 範囲は「見えている並び」の先頭から末尾(絞り込みで消えた行は入らない)。行が 0 件なら何も起きないので `false`。
  */
@@ -8305,25 +8348,21 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     /**
-     * 🔴 **印が無ければカーソルの行**(#1087 の見直し 2026-10-13)── F2(下の `dual-rename`)とマニュアル
-     *   (「チェックが無いときはカーソルの行が対象」)はそうなのに、ボタンだけ印しか見ず、キーボードで行を下りてから押すと
-     *   「名前を変えるものを選んでください」と断っていた。
+     * 🔴 **右クリックのメニューからは、押した行**(#1087 D2)。メニューを開いた行が複数の印の中の 1 つのとき、
+     *   印は崩さずに開くので、印の件数では決めない(`MENU_LID_ATTR` が運ぶ)。
+     * 🔴 それ以外は **印が優先、無ければカーソルの行**(#1087 の見直し 2026-10-13)── F2 と同じ 1 本(`dualRenameTarget`)。
      */
-    const selected = paneOf(st.dual, side).selection;
-    const cursorLid = selected.length === 0 ? paneOf(st.dual, side).cursor : null;
-    const marked = cursorLid !== null ? [cursorLid] : selected;
-    // ⚠ **1 件のときだけ** ── まとめて改名は「同じ名前が並ぶ」だけで意味が無い
-    if (marked.length !== 1) {
-      dispatcher.dispatch({
-        type: 'OP_FAILED',
-        error:
-          marked.length === 0
-            ? '名前を変えるものを選んでください(行を押すと選べます)'
-            : '名前を変えられるのは 1 件だけです',
-      });
+    const menuLid = target.getAttribute(MENU_LID_ATTR);
+    if (menuLid) {
+      dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: menuLid });
       return;
     }
-    dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: marked[0]! });
+    const picked = dualRenameTarget(st, side);
+    if ('error' in picked) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: picked.error });
+      return;
+    }
+    dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: picked.lid });
   },
   /**
    * 🔴 **列見出しを押すと並べ替える**(2026-08-19 の作り直し)。
@@ -8622,7 +8661,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const rows = dualPaneRows(st, side);
     const cursor = paneOf(st.dual, side).cursor;
     deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor, () => {
-      keepDualCursorAfter(dispatcher, side, rows, cursor);
+      keepDualCursorUnlessMoved(dispatcher, side, rows, cursor);
     });
   },
   /**
@@ -8702,7 +8741,7 @@ const ACTIONS: Record<string, ActionHandler> = {
           : '戻せるものがありません(移した後に、別の場所へ動かしています)',
     });
   },
-  'delete-entry': (dispatcher, target, services) => {
+  'delete-entry': (dispatcher, target, services, root) => {
     // ⚠ 実行中(書出し / 取込)のガードは `refuseWhileBusy` が 1 本で持つ
     // 🔴 **無言で断らない**(P8 段⑲)。`DELETE_ENTRY` は `phase !== 'ready'` で
     //    何も返さないので、直す前は**確認ダイアログまで出してから黙って捨てて**いた
@@ -8747,6 +8786,12 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 **別のタブ・窓が編集中のノートは、ゴミ箱へ移さない**(#1087。追記と同じ門 = `editedElsewhereReason`)。
      * ⚠ 通すと、編集中のタブが保存したときに行が作り直され、ゴミ箱から消えて一覧に戻る(移したつもりで残る)。
      */
+    // 🔴 2 ペインの行のメニューから来たとき(側を運んでいる)は、消した後にカーソルと焦点を隣の行へ立てる(#1087 D1)。
+    //   立てないと印が 1 つも無いまま焦点が body へ落ち、続けて ↓ / Delete が効かない(鍵の Delete と同じ後始末)。
+    const dualSideOfRow = dualSide(target);
+    const dualRowsBefore = dualSideOfRow !== null ? dualPaneRows(dispatcher.getState(), dualSideOfRow) : [];
+    const dualCursorBefore =
+      dualSideOfRow !== null ? paneOf(dispatcher.getState().dual, dualSideOfRow).cursor : null;
     refuseTrashEditedElsewhere(dispatcher, services, [lid], () => {
       const before = dispatcher.getState();
       dispatcher.dispatch({ type: 'DELETE_ENTRY', lid });
@@ -8758,6 +8803,15 @@ const ACTIONS: Record<string, ActionHandler> = {
           leftAtRoot(before, after),
           linkedFromText(before, after, lid),
         );
+      if (dualSideOfRow !== null) {
+        const next = keepDualCursorUnlessMoved(dispatcher, dualSideOfRow, dualRowsBefore, dualCursorBefore);
+        if (next !== null)
+          root
+            .querySelector<HTMLElement>(
+              `[data-pkc-region="dual-pane"][data-pkc-side="${dualSideOfRow}"] [data-pkc-action="dual-row"][data-pkc-entry="${next}"]`,
+            )
+            ?.focus();
+      }
     });
   },
   /**
@@ -17131,9 +17185,13 @@ export function bindActions(
       }
       const before = dispatcher.getState().relations;
       const from = dragFromSide;
+      // 🔴 落とす前の行とカーソルを控える(#1087 D3)── 立て直しは F6 と同じ規則(消えた行が居た位置の行へ)
+      const rowsBefore = from !== null ? dualPaneRows(dispatcher.getState(), from) : [];
+      const cursorBefore = from !== null ? paneOf(dispatcher.getState().dual, from).cursor : null;
       moveDropped(lids, drop.lid);
       if (from !== null && dispatcher.getState().relations !== before) {
         dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
+        keepDualCursorAfter(dispatcher, from, rowsBefore, cursorBefore);
         carryDualFocus(from);
       }
       return;
@@ -18174,7 +18232,14 @@ export function bindActions(
        *   撃つ(`mode: 'set'`)── reducer 自身が知らない lid を no-op で捨てるので、
        *   下の「見つからない」チェックより先に撃っても安全(順序に意味を持たせない)。
        */
-      dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
+      /**
+       * 🔴 **複数の印の中の行を右クリックしたら、印は崩さない**(#1087 D2)。印をまとめて操作したい
+       *   user が右クリックで 1 件に絞られると、メニューの「ゴミ箱へ移す」が 1 件にしか効かない。
+       *   カーソルだけ押した行へ動かす(印の外の行なら従来どおり、その 1 件を選ぶ)。
+       */
+      if (paneOf(dispatcher.getState().dual, side).selection.includes(lid))
+        dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid });
+      else dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
       const st = dispatcher.getState();
       if (!st.entryMetas.has(lid)) {
         // ⚠ 無言で終わらせない(`selectEntryOrExplain` と同じ字)
@@ -18253,7 +18318,10 @@ export function bindActions(
         .map((a): MenuItem =>
           a.action === 'rename-entry-begin'
             ? { ...a, action: 'dual-rename-begin', attrs: { 'data-pkc-side': side } }
-            : DUAL_MENU_SELECT_FIRST.has(a.action)
+            : a.action === 'delete-entry'
+              ? // 🔴 側を運ぶ(#1087 D1)── 消した後にカーソルを立てる先のペインを知るため
+                { ...a, attrs: { ...a.attrs, 'data-pkc-side': side } }
+              : DUAL_MENU_SELECT_FIRST.has(a.action)
               ? { ...a, attrs: { [MENU_SELECT_FIRST_ATTR]: '' } }
               : a,
         );
@@ -19501,9 +19569,14 @@ export function bindActions(
       return true;
     }
     if (cmd === 'dual-rename') {
-      const lid = dualCursor(st, side) ?? paneOf(st.dual, side).selection[0] ?? null;
-      if (lid === null) return false;
-      dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid });
+      const picked = dualRenameTarget(st, side);
+      if ('error' in picked) {
+        // 何も無いときは従来どおり鍵を譲る(`false`)/ 複数のときはボタンと同じ断り
+        if (paneOf(st.dual, side).selection.length === 0) return false;
+        dispatcher.dispatch({ type: 'OP_FAILED', error: picked.error });
+        return true;
+      }
+      dispatcher.dispatch({ type: 'DUAL_RENAME_BEGIN', side, lid: picked.lid });
       return true;
     }
     if (cmd === 'dual-other-pane') {
@@ -19518,6 +19591,9 @@ export function bindActions(
       if (scope === null) return false; // ルートで押しても何も起きない
       const up = getAncestorFolders(scope, st.entryMetas, st.relations)[0] ?? null;
       dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: up?.lid ?? null });
+      // 🔴 出てきたフォルダにカーソルを立てる(#1087 D4)── 立てないと先頭の行へ飛ぶ。見えていなければ従来どおり。
+      if (dualRows(dispatcher.getState(), side).some((m) => m.lid === scope))
+        dispatcher.dispatch({ type: 'DUAL_SET_CURSOR', side, lid: scope });
       carryDualFocus(side);
       return true;
     }
@@ -19550,7 +19626,7 @@ export function bindActions(
       const cursor = paneOf(st.dual, side).cursor;
       deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor, () => {
         // 焦点も連れて行く(表は組み直されるので、立てたカーソルの行へ)
-        if (keepDualCursorAfter(dispatcher, side, rows, cursor) !== null) carryDualFocus(side);
+        if (keepDualCursorUnlessMoved(dispatcher, side, rows, cursor) !== null) carryDualFocus(side);
       });
       return true;
     }
