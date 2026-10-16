@@ -714,13 +714,29 @@ export function convertPastedPermalink(
    *   parse 側が落とす形しか見ておらず、**この行が守っている当の形を見ていなかった**。
    */
   if (raw === '' || /\s/.test(raw)) return null;
-  const ref = parsePortablePkcReference(raw);
-  if (ref === null || ref.kind !== 'entry') return null;
-  if (ref.containerId !== ctx.containerId) return null;
-  const title = ctx.titleOf(ref.targetId);
+  /**
+   * 🔴 **「リンクをコピー」が渡す URL(`<アドレス>#pkc?container=…&entry=…`)も同じ扱い**。
+   *   ⚠ 以前は `pkc://` だけを見ていたので、**この PKC 自身が渡した URL を本文へ貼り戻すと**
+   *   ただの文字になっていた。外の形は断片に `#` を持たないので、ここで `#` を付けて揃える。
+   *   別の入れ物宛は下の同じ門で触らない。
+   */
+  let target: { kind: string; containerId: string; targetId: string; fragment: string } | null = null;
+  const portable = parsePortablePkcReference(raw);
+  if (portable !== null) {
+    target = { ...portable, fragment: portable.fragment ?? '' };
+  } else {
+    const external = parseExternalPermalink(raw);
+    if (external !== null) {
+      // ⚠ 外の形の断片は decode 済み ── 空白が混じる字は宛先に置けないので触らない
+      if (external.fragment !== undefined && /\s/.test(external.fragment)) return null;
+      target = { ...external, fragment: external.fragment === undefined || external.fragment === '' ? '' : `#${external.fragment}` };
+    }
+  }
+  if (target === null || target.kind !== 'entry') return null;
+  if (target.containerId !== ctx.containerId) return null;
+  const title = ctx.titleOf(target.targetId);
   if (title === null || title === '') return null;
-  const fragment = ref.fragment ?? '';
-  return `[${escapeLinkText(title)}](entry:${ref.targetId}${fragment})`;
+  return `[${escapeLinkText(title)}](entry:${target.targetId}${target.fragment})`;
 }
 
 /**

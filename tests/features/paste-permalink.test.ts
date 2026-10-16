@@ -8,7 +8,7 @@
  * 「たぶんこれだろう」で書き換えない。
  */
 import { describe, expect, it } from 'vitest';
-import { convertPastedPermalink } from '@features/link/permalink';
+import { convertPastedPermalink, formatExternalPermalink } from '@features/link/permalink';
 
 const CTX = {
   containerId: 'c1',
@@ -89,5 +89,35 @@ describe('触らない形(⚠ 迷ったら触らない)', () => {
 
   it('入れ物がまだ決まっていないときは触らない', () => {
     expect(convertPastedPermalink('pkc://c1/entry/n1', { ...CTX, containerId: null })).toBeNull();
+  });
+
+  describe('🔴 「リンクをコピー」が渡す URL(`#pkc?container=…&entry=…`)', () => {
+    const url = (base: string, containerId: string, targetId: string, fragment?: string) =>
+      formatExternalPermalink({ baseUrl: base, kind: 'entry', containerId, targetId, fragment })!;
+
+    it('同じ入れ物のノートなら内部リンクにする(http / file の両方)', () => {
+      for (const base of ['https://example.com/pkc/', 'file:///C:/Users/me/pkc3.html']) {
+        const u = url(base, 'c1', 'n1');
+        expect(u).toContain('#pkc?container=c1&entry=n1');
+        expect(convertPastedPermalink(u, CTX), u).toBe('[会議のメモ](entry:n1)');
+      }
+    });
+
+    it('見出しへの断片(`fragment=h/…`)は `#h/…` として持ち越す', () => {
+      const u = url('https://example.com/', 'c1', 'n1', 'h/見出し');
+      expect(convertPastedPermalink(u, CTX)).toBe('[会議のメモ](entry:n1#h/見出し)');
+    });
+
+    it('別の入れ物宛・題名を引けない lid・添付は触らない', () => {
+      expect(convertPastedPermalink(url('https://example.com/', 'other', 'n1'), CTX)).toBeNull();
+      expect(convertPastedPermalink(url('https://example.com/', 'c1', 'zz'), CTX)).toBeNull();
+      const asset = formatExternalPermalink({
+        baseUrl: 'https://example.com/',
+        kind: 'asset',
+        containerId: 'c1',
+        targetId: 'n1',
+      })!;
+      expect(convertPastedPermalink(asset, CTX)).toBeNull();
+    });
   });
 });

@@ -72,6 +72,13 @@ const NOTE_LINK_ATTR = 'data-pkc-entry-ref';
 /** 描いた本文の中のノート間リンク(閲覧側の `a[${NOTE_LINK_ATTR}]` と同じ物)。1 つ目の組がリンク先の lid。 */
 const NOTE_LINK_IN_HTML = /<a\b[^>]*\bdata-pkc-entry-ref="entry:([^"#]+)/g;
 const NOTE_ID_KEY = 'lid';
+/**
+ * 🔴 **`@[card](entry:…)` の札**(#1087)も、ノート間リンクと同じに数え、同じに効かせる。
+ * 描いた本文の中の `<span data-pkc-card-target="entry:<lid>…">`。⚠ `pkc://<自分>/…` 宛の札は読まない
+ * (閲覧側は入れ物の id を持たない ── 押せないままで、数にも入れない = 以前と同じ)。
+ */
+const NOTE_CARD_ATTR = 'data-pkc-card-target';
+const NOTE_CARD_IN_HTML = /<span\b[^>]*\bdata-pkc-card-target="entry:([^"#]+)/g;
 
 
 /**
@@ -592,6 +599,26 @@ try{
       var hid=hi<0?'':ref.slice(hi+3);
       a.onclick=function(ev){ev.preventDefault();show(d.entries[at],btns[at],hid)};
     });
+    // 🔴 @[card](entry:…) の札も同じ ── 入っているノートなら押して開く / 入っていなければ字だけ。
+    //    (⚠ この節は template literal の中 ── 注記に逆引用符を書かない)
+    //    全体印刷では飛ばす先の見出しが無い(札は紙の上の字のまま)。
+    Array.prototype.forEach.call(box.querySelectorAll('span[${NOTE_CARD_ATTR}^="entry:"]'),function(c){
+      var ref=c.getAttribute('${NOTE_CARD_ATTR}')||'';
+      var nid=ref.slice(6).split('#')[0];
+      var at=Object.prototype.hasOwnProperty.call(noteAt,nid)?noteAt[nid]:-1;
+      if(at<0){
+        c.setAttribute('data-pkc-outside-note','');
+        c.title='このファイルには入っていないノートです';
+        c.removeAttribute('role');c.removeAttribute('tabindex');
+        return;
+      }
+      if(idp)return;
+      var hi=ref.indexOf('#h/');
+      var hid=hi<0?'':ref.slice(hi+3);
+      var go=function(){show(d.entries[at],btns[at],hid)};
+      c.onclick=function(ev){ev.preventDefault();go()};
+      c.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();go()}};
+    });
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
@@ -992,6 +1019,12 @@ export async function writePortableHtml(
           ),
       );
       const rendered = await render(r.body.slice(skip), {
+        /**
+         * 🔴 **この入れ物の id を渡す**。渡さないと自分宛の `pkc://<自分>/entry/…` が
+         *   「別の PKC のノート」の札に降りて、押せず、欠けたノートの警告にも数えられなかった
+         *   (描く側は id が空だと全部を外の参照として扱う ── 安全側の既定)。
+         */
+        currentContainerId: src.cid,
         vars: extractVars(r.body),
         headingNumber: extractHeadingNumberConfig(r.body),
         allowExternalImages,
@@ -1023,6 +1056,7 @@ export async function writePortableHtml(
       entryCount++;
       exportedLids.add(m.lid);
       for (const hit of html.matchAll(NOTE_LINK_IN_HTML)) linkTargets.push(hit[1]!);
+      for (const hit of html.matchAll(NOTE_CARD_IN_HTML)) linkTargets.push(hit[1]!);
       const found = countContainers(html);
       for (const k of Object.keys(found) as CountKind[]) opened[k] += found[k];
     }

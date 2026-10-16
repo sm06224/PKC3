@@ -1305,9 +1305,12 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
     token.attrSet('data-pkc-action', 'download-asset');
     token.attrSet('data-pkc-asset-key', key);
     token.attrSet('data-pkc-asset-name', label || key);
-  } else if (href.startsWith('entry:')) {
+  } else if (/^entry:/i.test(href)) {
+    // 🔑 **綴りの大小は問わない**(`[a](Entry:n1)` も内部リンク)。安全な scheme の検めは大小を問わず通す
+    //    (`SAFE_URL_RE` の `i`)ので、ここだけ大小を見ると**外のリンク**(別タブで開く・何も起きない)に落ちていた。
+    //    ⚠ 読む側(`parseEntryRef`)は小文字の `entry:` だけを受けるので、焼く値は**小文字へ揃える**。
     token.attrSet('data-pkc-action', 'navigate-entry-ref');
-    token.attrSet('data-pkc-entry-ref', href);
+    token.attrSet('data-pkc-entry-ref', `entry:${href.slice('entry:'.length)}`);
   } else if (href.startsWith('pkc:')) {
     // Portable PKC Reference — spec/pkc-link-unification-v0.md §5.5
     // (post-correction). Despite the historical name, `pkc://` is
@@ -1390,9 +1393,20 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
       if (parsed.fragment !== undefined) {
         token.attrSet('data-pkc-portable-fragment', parsed.fragment);
       }
+      /**
+       * 🔴 **別の PKC3 を指すリンクは、押したら理由を言う**(`@[card](pkc://<外>/entry/…)` と同じ受け手)。
+       *   以前は札だけで何も起きず、押しても無言だった。受け手(`navigateToLink`)は `foreign` で断る。
+       * ⚠ 自分の入れ物の id が分からないとき(`currentContainerId` が空)は付けない ── 受け手は
+       *   自分の id が無いと「外」と判定できず、**同じ lid の別のノート**を開いてしまう。
+       * ⚠ 受け手が読めるのは entry だけ(添付の携帯参照は「書き方が読めません」と言ってしまう)。
+       */
+      if (currentContainerId !== '' && parsed.kind === 'entry') {
+        token.attrSet('data-pkc-action', 'navigate-entry-ref');
+        token.attrSet('data-pkc-entry-ref', href);
+      }
       token.attrSet(
         'title',
-        `Portable PKC ${parsed.kind} · container ${parsed.containerId} · target ${parsed.targetId}`,
+        parsed.kind === 'entry' ? '別の PKC3 のノートを指しています(ここでは開けません)' : '別の PKC3 の添付を指しています',
       );
       token.attrSet('rel', 'noopener noreferrer');
     } else {

@@ -30,6 +30,14 @@ describe('link-preview', () => {
       expect(formatBodyPreview('')).toBe('');
     });
 
+    it('🔴 隠したコメント(%%…%% / %%%…%%% / :::comment)は下見に出さない。コードの中の %% は字として残す', () => {
+      expect(formatBodyPreview('本文です %%秘密のメモ%% 続き')).toBe('本文です 続き');
+      expect(formatBodyPreview('本文\n\n%%%\n秘密のメモ\n%%%\n\n続き')).toBe('本文 続き');
+      expect(formatBodyPreview('本文\n\n:::comment\n秘密のメモ\n:::\n\n続き')).toBe('本文 続き');
+      // 対照群: コードの中は字(描画もコメントにしない)
+      expect(formatBodyPreview('`a %%b%% c` 本文')).toContain('%%b%%');
+    });
+
     it('strips frontmatter from preview', () => {
       const body = ['---', 'title: Foo', '---', 'This is content.'].join('\n');
       expect(formatBodyPreview(body)).toBe('This is content.');

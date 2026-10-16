@@ -20,6 +20,7 @@
  *   tabindex="0"` なのに、Enter が効かなかった
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { MISSING_LINK_TITLE } from '../../src/adapter/ui/render/link-missing';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { PAINTED_ATTR } from '../../src/adapter/ui/render/detail';
@@ -182,6 +183,35 @@ describe('🔴 断るときは理由を出す', () => {
     cardRef('pkc://other/entry/b').click();
     expect(dispatcher.getState().selectedLid, '別の PKC のリンクで同じ lid のノートが開いた').toBeNull();
     expect(lastError()).toBe('このリンクは別の PKC3 のノートを指しています');
+  });
+
+  /**
+   * 🔴 **`[x](pkc://<外>/entry/…)` も card と同じ断り方をする**(#1087)。以前は札だけで、押しても無言だった。
+   * ⚠ 描画した HTML をそのまま置く(焼く側と受け手を本物どうしで繋ぐ)。lid は居る `b`。
+   */
+  it('🔴 別の PKC あての通常リンクを押すと、card と同じ理由を言い、同じ lid のノートは開かない', () => {
+    const { dispatcher, lastError } = makeDispatcher();
+    stop = bindActions(root, dispatcher);
+    root.innerHTML = renderMarkdown('[外](pkc://other/entry/b)', { currentContainerId: 'default' });
+    const a = root.querySelector<HTMLElement>('a.pkc-portable-reference-placeholder')!;
+    expect(a, '前提:札が描かれていない').not.toBeNull();
+    expect(a.getAttribute('title'), '札の説明が英語のまま').toBe('別の PKC3 のノートを指しています(ここでは開けません)');
+    a.click();
+    expect(dispatcher.getState().selectedLid, '別の PKC のリンクで同じ lid のノートが開いた').toBeNull();
+    expect(lastError()).toBe('このリンクは別の PKC3 のノートを指しています');
+  });
+
+  /** 🔴 `Entry:` / `ENTRY:` も内部リンク(以前は外のリンクの扱いで、押しても開かなかった)。 */
+  it('🔴 綴りの大小が違う `Entry:b` でも、押すとそのノートが開く', () => {
+    for (const href of ['Entry:b', 'ENTRY:b']) {
+      const { dispatcher, lastError } = makeDispatcher();
+      stop?.();
+      root.innerHTML = renderMarkdown(`[a](${href})`, { currentContainerId: 'default' });
+      stop = bindActions(root, dispatcher);
+      root.querySelector<HTMLElement>('a')!.click();
+      expect(dispatcher.getState().selectedLid, `${href} が開かない`).toBe('b');
+      expect(lastError()).toBeNull();
+    }
   });
 
   it('対照群: 自分の id の card は今までどおり開き、断りは出ない', () => {
