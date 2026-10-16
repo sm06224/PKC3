@@ -37,7 +37,10 @@ export function safeName(title: string): string {
   const cut = [...s].slice(0, 60).join('') || 'pkc3';
   // ⚠ 予約名は**切り詰めた後**に見る ── 61 文字目以降を落として初めて `CON` に
   //    なることがある。逃がし方は接尾辞 1 つ(中身は変えない)
-  return RESERVED.has(cut.toLowerCase()) ? `${cut}-file` : cut;
+  // ⚠ Windows は**最初の `.` より前**を装置名として見る(`CON.memo` も不可)── 接尾辞もそこへ入れる
+  const dot = cut.indexOf('.');
+  const base = dot < 0 ? cut : cut.slice(0, dot);
+  return RESERVED.has(base.toLowerCase()) ? `${base}-file${cut.slice(base.length)}` : cut;
 }
 
 /**

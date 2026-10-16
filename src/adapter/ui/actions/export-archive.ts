@@ -714,6 +714,9 @@ async function collectOfficeBlocks(
     (k, why) =>
       warnings.push(`コードブロックが指している添付を埋め込めませんでした(${k}): ${why}`),
   );
+  // 🔑 ノートへのリンクは Word / PowerPoint の先では開けない ── zip・HTML と同じ数え方・同じ文面(#1087)
+  const linkNotice = noteLinkNotice(countNoteLinks(body));
+  if (linkNotice !== null) warnings.push(linkNotice);
   const rendered = await renderBody(body.slice(skip), {
     vars: extractVars(body),
     headingNumber: extractHeadingNumberConfig(body),

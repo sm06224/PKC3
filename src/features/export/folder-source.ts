@@ -31,6 +31,8 @@
  */
 import { scanAssetRefsInto } from '../asset/asset-ref-scan';
 import { collectSubtreeLids } from '../relation/tree';
+import { readTags } from '../flavor/tags';
+import { tagColorKey, tagColorsUsedBy } from '../tag-color';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { ArchiveSource } from './pkc3-archive';
 
@@ -125,16 +127,26 @@ export async function folderSource(
   const found = (k: string): void => void used.add(k);
   const revisionLids = (await base.listRevisionLids()).filter((l) => lids.has(l));
   let more = remaining.size > 0;
+  // 🔑 タグの色は、部分木のノートが使っているタグの分だけ持たせる。色が 1 つも無ければ本文を読む理由も無い
+  const allColors = (await base.listTagColors?.()) ?? [];
+  const usedTagKeys = new Set<string>();
   for (const m of ordered) {
-    if (!more) break;
+    if (!more && allColors.length === 0) break;
     const body = await readBody(base, m.lid);
     if (body === null) {
       // ⚠ 黙って落とさない ── 本文が読めない entry が在ったことは言う
       warnings.push(`本文を読めなかったノートがあります: ${m.title || m.lid}`);
       continue;
     }
-    more = scanAssetRefsInto(body, remaining, found);
+    if (more) more = scanAssetRefsInto(body, remaining, found);
+    if (allColors.length > 0) {
+      for (const t of readTags(body)) {
+        const k = tagColorKey(t);
+        if (k !== null) usedTagKeys.add(k);
+      }
+    }
   }
+  const tagColors = tagColorsUsedBy(allColors, usedTagKeys);
   for (const l of revisionLids) {
     if (!more) break;
     for (const r of await base.getRevisionChain(l)) {
@@ -209,6 +221,7 @@ export async function folderSource(
       listRelations: async () => kept,
       listAssetMetas: async () => assets,
       getAssetBlob: (key) => base.getAssetBlob(key),
+      ...(tagColors.length > 0 ? { listTagColors: async () => tagColors } : {}),
       listRevisionLids: async () => revisionLids,
       getRevisionChain: (lid) => base.getRevisionChain(lid),
     },
