@@ -122,6 +122,16 @@ export const MESSAGE_SOURCE_LABEL: Readonly<Record<string, string>> = {
   'storage-vacuum': '保存領域を縮める',
   'storage-optimize': '索引の整理',
   'force-release': '書き込みの強制終了',
+  // 🔴 ワーカーの記録の lane 名(#1087 M7)── 内部の名前を英語のまま見せない
+  math: '数式',
+  chart: 'グラフ',
+  asr: '文字起こし',
+  asset: '添付',
+  wave: '波形',
+  audio: '音声',
+  ooxml: 'Office の書き出し',
+  markdown: 'Markdown の表示',
+  video: '動画',
 };
 
 export function messageSourceLabel(source: string): string {
@@ -228,8 +238,11 @@ export function sanitizeMessageText(text: string, fixedHead = ''): string {
   const unmarked = text.replace(MARKED_NAME_RE, '…');
   const collapsed = collapseBrackets(collapseBrackets(unmarked, '「', '」'), '『', '』');
   const flattened = collapsed.replace(LINE_BREAKS_RE, ' ');
-  return flattened.length > MAX_MESSAGE_TEXT_LENGTH
-    ? `${flattened.slice(0, MAX_MESSAGE_TEXT_LENGTH)}…`
+  // 🔴 字数は**コードポイント**で数えて切る(#1087 M10)。⚠ `slice` は UTF-16 の単位で切るので、
+  //   絵文字などの代用対の途中で切れて、保存で U+FFFD になった。
+  const points = Array.from(flattened);
+  return points.length > MAX_MESSAGE_TEXT_LENGTH
+    ? `${points.slice(0, MAX_MESSAGE_TEXT_LENGTH).join('')}…`
     : flattened;
 }
 
@@ -247,10 +260,19 @@ function splitSections(body: string): string[] {
  * 古い節から落として上限に収める(設計 doc §7「種類ごと・古い節から落とす」)。
  * ⚠ **節の単位で切る** ── 途中で切ると壊れた markdown を残す。
  */
-export function trimToCap(body: string, cap: number): string {
+export function trimToCap(body: string, cap: number, slack = 0): string {
   const sections = splitSections(body);
   if (sections.length <= cap) return body;
-  return sections.slice(sections.length - cap).join('');
+  // 🔴 上限を超えたときは**余裕の分まで多めに落とす**(#1087 M8)。⚠ ちょうど上限で切ると、満杯の後は
+  //   追記のたびに古い 1 件を落として本文全体を書き直す(5000 件で約 440KB)。余裕を持てば、落とすのは
+  //   `slack` 件に 1 回で済む。落とすのは古い順のまま。
+  const keep = Math.max(1, cap - Math.max(0, Math.min(slack, cap - 1)));
+  return sections.slice(sections.length - keep).join('');
+}
+
+/** 上限を超えたとき、上限よりどれだけ少なく残すか(上限の 5 分の 1 まで、最大 200 件)。 */
+export function messageTrimSlack(cap: number): number {
+  return Math.min(200, Math.floor(cap / 5));
 }
 
 /**

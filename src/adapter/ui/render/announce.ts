@@ -57,7 +57,7 @@ function readDelivered(): Set<string> {
 function deliverOnce(n: Notice): void {
   const delivered = readDelivered();
   if (delivered.has(n.id)) return;
-  appMessagePost.post({ kind: 'delivery', source: 'notice', text: n.title });
+  appMessagePost.post({ kind: 'delivery', source: 'notice', text: n.title, fixedHead: n.title });
   delivered.add(n.id);
   try {
     localStorage.setItem(DELIVERED_KEY, JSON.stringify([...delivered].slice(-DELIVERED_CAP)));
