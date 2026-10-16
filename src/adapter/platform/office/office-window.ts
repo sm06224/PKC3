@@ -84,6 +84,19 @@ export function shadowFailedNotice(reason: string): string {
 /** 窓が生きていると見なす猶予。heartbeat はこれより短い間隔で来る。 */
 export const ALIVE_TTL_MS = 4000;
 /**
+ * 🔴 窓を開く指示を出してから、この間は「開いている途中」と見て 2 つ目を開かない(O2)。
+ * ⚠ 生存通知は窓の起動が済んでからでないと届かない ── その間に 2 回押されると 2 つ立つ(1 窓 約 750MB)。
+ */
+export const OPENING_GRACE_MS = 5000;
+/**
+ * 🔴 窓を開く指示を出してから、この間に生存通知が 1 つも無ければ「窓が止められたかも」と知らせる(O1)。
+ * ⚠ `noopener` では `window.open` が必ず null を返し、止められたかを直接は見られない。
+ */
+export const OPEN_UNREACHED_MS = 8000;
+/** 窓から何の応答も無かったときに出す知らせ。⚠ 断定しない(遅いだけのこともある)。 */
+export const OFFICE_NOT_REACHED_NOTICE =
+  'Office のウィンドウが開いていないようです。ブラウザがウィンドウを止めたかもしれません。ポップアップを許可してから、もう一度押してください';
+/**
  * 🔴 **窓が「閉じた」と言ってから、送った文書を覚えておく間**(#1228 穴①)。
  *
  * ⚠ 「読み込み直す」(`location.reload()`)でも窓は `pagehide` → `closed` を放送する ──
@@ -94,6 +107,11 @@ export const ALIVE_TTL_MS = 4000;
 export const RESEND_GRACE_MS = 30_000;
 
 export type OfficeWindowEvent =
+  /**
+   * 🔴 窓を開く指示から `OPEN_UNREACHED_MS` のあいだ、窓から何も届かなかった(O1)。
+   * ⚠ 窓が止められた可能性が高いが、断定はできない。本体が内部で出す(窓からは来ない)。
+   */
+  | { readonly type: 'not-reached' }
   /**
    * 生存通知。`visible` は**窓のタブがそのとき表に居たか**(#135)。
    *
@@ -259,6 +277,10 @@ export class OfficeWindow {
   private readonly baseUrl: string;
   private readonly inputLog: () => boolean;
   private lastAliveAt = 0;
+  /** 窓を開く指示を出した時刻(O2)。無ければ `null`。 */
+  private openedAt: number | null = null;
+  /** 「窓から何も届かない」を知らせる見張り(O1)。 */
+  private unreachedTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * 🔴 **窓が最後に編集の控え(影)を書き終えた時刻**(#1228 段 1)。⚠ 窓が閉じても**捨てない** ──
    * 棚の影は窓が閉じた後も残り、「次に開くとき訊く」(段 2)がこれを材料に使う。無ければ `null`。
@@ -364,7 +386,9 @@ export class OfficeWindow {
       this.heldSent = keep;
     }
 
-    if (this.isProbablyOpen()) {
+    // 🔴 開く指示を出した直後は生存通知が未着 ── 「開いている途中」として扱い、2 つ目を開かない(O2)
+    const opening = this.openedAt !== null && this.now() - this.openedAt < OPENING_GRACE_MS;
+    if (this.isProbablyOpen() || opening) {
       // ⚠ 2 つ立てると常駐が倍になる(1 窓 約 750MB 実測)。開かずに頼む
       this.ch.postMessage({ pkc3Office: 'focus-request', payload: {} });
       if (wantsDoc) {
@@ -377,7 +401,24 @@ export class OfficeWindow {
     }
 
     this.openWindow(this.hostUrl(opts));
+    this.openedAt = this.now();
+    this.armUnreached();
     return { kind: 'opened' };
+  }
+
+  /** 開いた後 `OPEN_UNREACHED_MS` 経っても生存通知が無ければ `not-reached` を流す(O1)。 */
+  private armUnreached(): void {
+    this.clearUnreached();
+    this.unreachedTimer = setTimeout(() => {
+      this.unreachedTimer = null;
+      if (this.isProbablyOpen()) return;
+      for (const fn of this.listeners) fn({ type: 'not-reached' });
+    }, OPEN_UNREACHED_MS);
+  }
+
+  private clearUnreached(): void {
+    if (this.unreachedTimer !== null) clearTimeout(this.unreachedTimer);
+    this.unreachedTimer = null;
   }
 
   /**
@@ -446,6 +487,7 @@ export class OfficeWindow {
   }
 
   dispose(): void {
+    this.clearUnreached();
     this.dropLastSent();
     this.heldSent = null;
     this.listeners.clear();
@@ -481,10 +523,15 @@ export class OfficeWindow {
   private receive(data: unknown): void {
     const ev = parseEvent(data);
     if (!ev) return;
-    if (ev.type === 'alive') this.lastAliveAt = this.now();
+    if (ev.type === 'alive') {
+      this.lastAliveAt = this.now();
+      this.clearUnreached();
+    }
     if (ev.type === 'shadow-written') this.lastShadowAt = ev.at;
     if (ev.type === 'closed') {
       this.lastAliveAt = 0;
+      this.openedAt = null;
+      this.clearUnreached();
       // ⚠ 読み直しでも `closed` は来る(上の `RESEND_GRACE_MS`)── すぐには捨てず、戻らなければ捨てる
       this.armGrace();
     }

@@ -273,7 +273,7 @@ import {
 } from '@features/office/office-launch';
 import { isOfficeUsable } from '@features/office/office-entry';
 import { attachmentSavedAt } from '@features/office/office-shadow';
-import { OFFICE_CONFIRMING_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
+import { OFFICE_CONFIRMING_NOTICE, OFFICE_NOT_REACHED_NOTICE, OFFICE_DECLINED_NOTICE, OfficeWindow, shadowFailedNotice } from '@adapter/platform/office/office-window';
 import { listNoteImages } from '@adapter/platform/office/office-note-images';
 import { createOfficeOpener, type OpenOfficeResult } from '@adapter/platform/office/office-open';
 import { createOfficeShadows } from '@adapter/platform/office/office-shadow-shelf';
@@ -2893,6 +2893,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ **種類は結果のまま**(`caution` にしない)── user 自身が確認で「やめる」を選んだ**結果**で、
       //    こちらが断ったのでも失敗したのでもない(未読に数えると、自分で選んだ結果が「要確認」に化ける)
       showStatus(OFFICE_DECLINED_NOTICE);
+    }
+    else if (ev.type === 'not-reached') {
+      // 🔴 窓を開く指示から応答が無い ── ブラウザが止めたかもしれない(O1)。押しても無言、を作らない
+      dispatcher.dispatch({ type: 'OP_FAILED', error: OFFICE_NOT_REACHED_NOTICE });
     }
     else if (ev.type === 'reload-confirming') {
       // 🔴 **窓が「開く / やめる」の確認を出した**(#1264 欠陥 3)。確認は**裏の窓にだけ**出るので、

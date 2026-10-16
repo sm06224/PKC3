@@ -24,6 +24,9 @@ import {
   OFFICE_CHANNEL,
   OFFICE_CONFIRMING_NOTICE,
   OFFICE_DECLINED_NOTICE,
+  OFFICE_NOT_REACHED_NOTICE,
+  OPENING_GRACE_MS,
+  OPEN_UNREACHED_MS,
   OfficeWindow,
   RESEND_GRACE_MS,
   type OfficeWindowEvent,
@@ -822,5 +825,55 @@ describe('窓が「替えない」と言ったとき(#1228 穴②)', () => {
     const j = main.indexOf("ev.type === 'reload-confirming'");
     expect(j, '本体が「確認が出た」を受けていない').toBeGreaterThan(0);
     expect(main.slice(j, j + 700)).toContain('showStatus(OFFICE_CONFIRMING_NOTICE)');
+  });
+});
+
+describe('O1/O2: 開く指示の直後', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('🔴 O1: 開く指示から OPEN_UNREACHED_MS 何も届かなければ not-reached を流す', () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    vi.advanceTimersByTime(OPEN_UNREACHED_MS - 1);
+    expect(h.seen.filter((e) => e.type === 'not-reached')).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(h.seen.filter((e) => e.type === 'not-reached')).toHaveLength(1);
+    // 知らせの字は、ポップアップの許可を案内する
+    expect(OFFICE_NOT_REACHED_NOTICE).toContain('ポップアップを許可');
+  });
+
+  it('O1: 生存通知が届けば not-reached は流さない', () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    vi.advanceTimersByTime(2000);
+    h.ch.deliver('alive');
+    vi.advanceTimersByTime(OPEN_UNREACHED_MS * 2);
+    expect(h.seen.filter((e) => e.type === 'not-reached')).toHaveLength(0);
+  });
+
+  it('🔴 O2: 開いた直後(生存通知の前)の 2 回目は、2 つ目の窓を開かない', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    h.tick(1000);
+    const out = h.ow.open({ name: 'a.docx' });
+    expect(out.kind).toBe('already-open');
+    expect(h.opened).toHaveLength(1);
+  });
+
+  it('O1 配線: 本体が not-reached を受けて赤い帯(OP_FAILED)に出している', () => {
+    const main = readFileSync('src/main.ts', 'utf8');
+    const j = main.indexOf("ev.type === 'not-reached'");
+    expect(j, '本体が not-reached を受けていない').toBeGreaterThan(0);
+    expect(main.slice(j, j + 400)).toContain("error: OFFICE_NOT_REACHED_NOTICE");
+  });
+
+  it('O2: OPENING_GRACE_MS を過ぎても窓が現れなければ、開き直せる', () => {
+    const h = harness();
+    h.ow.open({ name: 'a.docx' });
+    h.tick(OPENING_GRACE_MS + 1);
+    expect(h.ow.open({ name: 'a.docx' }).kind).toBe('opened');
+    expect(h.opened).toHaveLength(2);
   });
 });

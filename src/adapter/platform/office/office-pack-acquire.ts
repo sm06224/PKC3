@@ -22,8 +22,10 @@ import {
   FONT_PREFIX,
   GZIPPED_PACK_FILES,
   OfficePackError,
+  parsePackBuild,
   parsePackManifest,
   REQUIRED_PACK_FILES,
+  type PackBuild,
   type PackManifest,
 } from './office-pack';
 
@@ -106,6 +108,31 @@ export async function readPackFromZip(zip: Blob, onProgress?: AcquireProgress): 
   // ⚠ 保管側でも数え直すが、**ここで落とすほうが user に近い**
   assertPackComplete(out.keys());
   return out;
+}
+
+/**
+ * 🔴 **手元の zip の中の `pack.json` から、版とビルドの素性を読む**(O7)。
+ *
+ * ⚠ 読めなければ `null`(zip に目録が無い / 壊れている)。呼び側は file 名へ倒す。
+ *   一式の取り込みそのものは目録に依らないので、**ここで落とさない**。
+ * ⚠ 目録の他の欄(`files` / `fonts`)は見ない ── 一式の中身は `readPackFromZip` が見る。
+ */
+export async function readPackInfoFromZip(
+  zip: Blob,
+): Promise<{ readonly version: string | null; readonly build: PackBuild | null } | null> {
+  const entries = await readZipDirectory(zip);
+  // 一番浅い `pack.json` を採る(1 段深い zip でも拾う。深い所の別物より外側を優先)
+  const hit = entries
+    .filter((e) => e.name.slice(e.name.lastIndexOf('/') + 1) === 'pack.json')
+    .sort((a, b) => a.name.split('/').length - b.name.split('/').length)[0];
+  if (hit === undefined) return null;
+  const json = JSON.parse(await (await readZipEntry(zip, hit)).text()) as unknown;
+  if (typeof json !== 'object' || json === null) return null;
+  const v = (json as { version?: unknown }).version;
+  return {
+    version: typeof v === 'string' && v !== '' ? v : null,
+    build: parsePackBuild((json as { build?: unknown }).build),
+  };
 }
 
 /**
@@ -199,7 +226,9 @@ async function guardedFetch<T>(
   };
   touch();
   const work = (async (): Promise<T> => {
-    const res = await fetch(href, { signal: ac.signal });
+    // 🔴 既定の cache に任せない(O6)── 古い目録 / 古い一式が残ると、配り直した版が取れない。
+    //    `no-cache` は毎回検証だけは取りに行く(変わっていなければ 304 で済む)。
+    const res = await fetch(href, { signal: ac.signal, cache: 'no-cache' });
     touch();
     return read(res, touch);
   })();

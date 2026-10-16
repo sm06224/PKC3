@@ -41,3 +41,25 @@ describe('起動できなかったとき', () => {
     expect(fn).toContain('msgEl.textContent = s;');
   });
 });
+
+describe('O3/O4: 窓の起動と見張り', () => {
+  it('🔴 O3: main() の呼び出しは catch で fail に落とす(await が try の外で落ちても「展開中…」で止まらない)', () => {
+    // 呼び出しの行そのもの(注釈ではなく)を探す
+    const call = html.indexOf('\n  main().catch(function (e) {');
+    expect(call, 'main() に catch が無い').toBeGreaterThan(0);
+    const body = html.slice(call, call + 400);
+    expect(body).toContain("fail('Office を起動できませんでした。読み込み直すと直ることがあります。'");
+    expect(html.includes('\n  main();'), '裸の main(); が残っている').toBe(false);
+  });
+
+  it('🔴 O4: 36 秒で諦めた後も粗い間隔で確かめ続け、開いたら watchTitle を始める', () => {
+    const at = html.indexOf("setStatus('この文書は開けませんでした (36 秒)');");
+    expect(at, '36 秒の枝が無い').toBeGreaterThan(0);
+    const branch = html.slice(at, at + 1800);
+    expect(branch, '粗い間隔の見張りが無い').toContain('}, 5000);');
+    expect(branch, '開いたかを確かめていない').toContain('docOpened(docLeaf)');
+    expect(branch, '開いたら失敗の表示を表示中へ戻す').toContain("setStatus('表示中 (");
+    expect(branch, '開いてもタイトルの見張りが始まらない').toContain('watchTitle(docLeaf');
+    expect(branch, '上限(180 秒)が無い').toContain('lateTries >= 29');
+  });
+});

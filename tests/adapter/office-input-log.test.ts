@@ -8,19 +8,21 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { OfficeWindow } from '../../src/adapter/platform/office/office-window';
+import { OfficeWindow, OPENING_GRACE_MS } from '../../src/adapter/platform/office/office-window';
 
 function harness(inputLog: () => boolean) {
   const opened: string[] = [];
+  const clock = { t: 100_000 };
   return {
     opened,
+    tick: (ms: number) => { clock.t += ms; },
     ow: new OfficeWindow({
       openWindow: (url) => { opened.push(url); },
       makeChannel: () => ({ postMessage: () => {}, close: () => {}, onmessage: null }) as never,
       // ⚠ **大きな値にする** ── `lastAliveAt` の初期値は 0 なので、`now` が小さいと
       //   「たったいま生きていた」と読まれて `already-open` になり、窓が開かない
       //   (既存の harness が `100_000` を使っているのは同じ理由である)
-      now: () => 100_000,
+      now: () => clock.t,
       baseUrl: 'https://app.example/pkc3/',
       inputLog,
     }),
@@ -62,9 +64,11 @@ describe('flag が立っているとき', () => {
    */
   it('🔴 途中で切り替えると、次に開く窓から効く', () => {
     let on = false;
-    const { ow, opened } = harness(() => on);
+    const { ow, opened, tick } = harness(() => on);
     ow.open({});
     on = true;
+    // 開いた直後は「開いている途中」で 2 つ目を開かない(O2)── 窓が現れないまま猶予を過ぎた回で見る
+    tick(OPENING_GRACE_MS + 1);
     ow.open({});
     expect(opened[0], '1 枚目は切れていた').not.toContain('input-log');
     expect(opened[1], '2 枚目に効いていない ── 構築時に固めている').toContain('input-log=1');

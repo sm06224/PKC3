@@ -345,7 +345,11 @@ export function createOfficeSaveBack(deps: SaveBackDeps): OfficeSaveBack {
     //   ⚠ holder でないタブは、知らない合言葉の保存をここへ持ち込まない(`run` の絞り込みが唯一の門)
     let orphan = false;
     if (save.token !== undefined && isLocalFileToken(save.token) && !deps.knowsLocal(save.token)) {
-      if (Date.now() - save.at <= LOCAL_ORPHAN_GRACE_MS) return 'deferred';
+      if (Date.now() - save.at <= LOCAL_ORPHAN_GRACE_MS) {
+        // 🔴 `deferred` を立てる(O8)── 立てないと `retryDeferred` が空振りし、猶予が明けても撃ち直されない
+        deferred = true;
+        return 'deferred';
+      }
       orphan = true;
     }
     // ⚠ 手元のファイルへの書き戻しは**書ける画面**でだけ(編集中に通すのは新しい添付を足すことだけ)

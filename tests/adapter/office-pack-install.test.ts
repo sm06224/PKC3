@@ -48,6 +48,7 @@ function make(over: {
   fetchManifest?: (base: string) => Promise<PackManifest>;
   fetchFiles?: (base: string, fonts: readonly string[]) => Promise<Map<string, Blob>>;
   readZip?: (zip: Blob) => Promise<Map<string, Blob>>;
+  readZipInfo?: (zip: Blob) => Promise<{ version: string | null; build: PackBuild | null } | null>;
   persist?: () => Promise<boolean>;
 } = {}) {
   const progress: string[] = [];
@@ -78,6 +79,7 @@ function make(over: {
       ?? (async () => new Map([['soffice.js', new Blob(['x'])]]))) as never,
     readZip: (over.readZip
       ?? (async () => new Map([['soffice.js', new Blob(['x'])]]))) as never,
+    readZipInfo: (over.readZipInfo ?? (async () => null)) as never,
     onProgress: (t) => progress.push(t),
   });
   return { installer, progress, order, setStored: (m: OfficePackMeta | null) => { stored = m; } };
@@ -200,6 +202,22 @@ describe('OfficePackInstaller', () => {
     const r = await installer.installFromZip(new Blob(['zip']), 'lo-wasm-qt6.zip');
     expect(r.ok && r.meta?.source).toBe('file');
     expect(r.ok && r.meta?.version, '選んだ file 名を残す').toBe('lo-wasm-qt6.zip');
+  });
+
+  it('🔴 O7: zip に pack.json が在れば、版はその version(file 名ではない)。素性も残る', async () => {
+    const build: PackBuild = {
+      loSha: 'a', builtAt: 'b', runId: 'c', qtRef: 'd', emsdk: 'e', pkc3Commit: 'f',
+    };
+    const { installer } = make({ readZipInfo: async () => ({ version: 'lo-wasm-dev', build }) });
+    const r = await installer.installFromZip(new Blob(['zip']), 'lo-wasm-qt6.zip');
+    expect(r.ok && r.meta?.version, '配布元の版と食い違う file 名を版にしている').toBe('lo-wasm-dev');
+    expect(r.ok && r.meta?.build).toEqual(build);
+  });
+
+  it('O7: pack.json の読み取りが落ちても取り込みは続け、file 名へ倒す', async () => {
+    const { installer } = make({ readZipInfo: async () => { throw new Error('broken'); } });
+    const r = await installer.installFromZip(new Blob(['zip']), 'x.zip');
+    expect(r.ok && r.meta?.version).toBe('x.zip');
   });
 
   it('🔴 投げない ── 失敗はそのまま出せる文で返る', async () => {

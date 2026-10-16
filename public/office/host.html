@@ -2076,6 +2076,28 @@
           if (launched && wantDoc) {
             say('doc-slow', { ms: Date.now() - t0, docSeen: docSeen });
             setStatus('この文書は開けませんでした (36 秒)');
+            /**
+             * 🔴 **36 秒で見張りを止めっぱなしにしない**(O4)。遅い端末・大きい文書では、
+             *   諦めた表示のまま**後から開く**ことがある。その時に「開けませんでした」が
+             *   残り続け、タイトルの見張り(`watchTitle`)も始まらない ── ので、
+             *   間隔を粗く(5 秒)して 180 秒まで確かめ続け、開いたら失敗の表示を畳む。
+             */
+            if (!docSeen) {
+              var lateTries = 0;
+              var lateTick = setInterval(function () {
+                lateTries += 1;
+                if (docOpened(docLeaf)) {
+                  clearInterval(lateTick);
+                  docSeen = true;
+                  say('doc-open', { ms: Date.now() - t0 });
+                  setStatus('表示中 (' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒)');
+                  if (docFromShadow) markOpenedFromShadow();
+                  watchTitle(docLeaf, nameEl.textContent || '');
+                } else if (lateTries >= 29) {   // 36 秒 + 5 秒 × 29 ≒ 181 秒
+                  clearInterval(lateTick);
+                }
+              }, 5000);
+            }
           } else {
             setStatus('起動に時間がかかっています');
           }
@@ -2099,7 +2121,12 @@
     stopShadow();
     say('closed');
   });
-  main();
+  // 🔴 `main()` の await は try の外にもある(O3)── 落ちると「展開中…」のまま永久に止まる。
+  //    ⚠ ここで拾って、失敗の表示(日本語の 1 文 + 原文)へ落とす
+  main().catch(function (e) {
+    console.error(e);
+    fail('Office を起動できませんでした。読み込み直すと直ることがあります。', String((e && e.message) || e).slice(0, 160));
+  });
 })();
 </script>
 </body>
