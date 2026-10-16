@@ -255,6 +255,32 @@ test('🔴 ⋯ から「時間を計る」が押せて、止める帯が出る',
   await gotoApp(page);
   await dismissAnnounce(page);
   await createEntry(page, 'text');
+  // 背の低い画面(横向きの電話相当)でも、メニューが画面に収まり、中で送れて、送っても閉じない
+  await page.setViewportSize({ width: 393, height: 260 });
+  await clickReal(page, '[data-pkc-field="phone-menu"]');
+  const shortMenu = page.locator('[data-pkc-region="context-menu"]');
+  await expect(shortMenu, '背の低い画面で ⋯ のメニューが開かない').toBeVisible();
+  const shortInfo = await shortMenu.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { bottom: r.bottom, scrollable: el.scrollHeight > el.clientHeight, vh: window.innerHeight };
+  });
+  expect(shortInfo.bottom, 'メニューが画面の下へはみ出している').toBeLessThanOrEqual(shortInfo.vh);
+  expect(shortInfo.scrollable, '背の低い画面なのにメニューが送れる形になっていない(項目が切れる)').toBe(true);
+  await shortMenu.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    el.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(150);
+  await expect(shortMenu, 'メニューの中で送ったら閉じてしまった').toBeVisible();
+  const lastInView = await shortMenu.evaluate((el) => {
+    const items = el.querySelectorAll('[data-pkc-action]');
+    const r = items[items.length - 1]!.getBoundingClientRect();
+    return r.bottom <= window.innerHeight && r.top >= 0;
+  });
+  expect(lastInView, '送った後も最後の項目が画面に入らない').toBe(true);
+  await page.setViewportSize({ width: 393, height: 727 });
+  await page.keyboard.press('Escape');
+  await expect(shortMenu).toBeHidden();
   await clickReal(page, '[data-pkc-field="phone-menu"]');
   await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="start-timer"]');
   const bar = page.locator(REGION('timer-bar'));
