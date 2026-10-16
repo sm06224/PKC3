@@ -79,10 +79,10 @@ test('🔴 編集中の本文に貼ると、確定後に画像として出る', 
 
   const row = page.locator('[data-pkc-region="editor-live"] [data-pkc-field="row-source"]');
   await sendFiles(page, '[data-pkc-region="editor-live"] [data-pkc-field="row-source"]', 'paste', [
-    { name: 'clip.png', type: 'image/png', b64: PNG_1X1_B64 },
+    { name: 'image.png', type: 'image/png', b64: PNG_1X1_B64 },
   ]);
 
-  // ① 参照が**カーソルの位置に**入った(名前は貼った日時から作る)
+  // ① 参照が**カーソルの位置に**入った(ブラウザの既定名 image.png は貼った日時の名前になる)
   await expect(row, '貼った参照が本文に入っていない').toHaveValue(
     /!\[スクリーンショット-\d{4}-\d{2}-\d{2}-\d{6}\.png\]\(asset:[^)]+\)/,
     { timeout: 15_000 },
@@ -188,7 +188,7 @@ test('🔴 貼ったあとに焦点が移っても、本文の欄に入る(2 列
   await expect(page.locator(sel), '前提: 編集欄が閉じてしまった').toBeVisible();
 
   await expect(page.locator(sel), '本文の欄に入っていない(焦点を戻していない)').toHaveValue(
-    /!\[スクリーンショット-[\d-]+\.png\]\(asset:[^)]+\)/,
+    /!\[clip\.png\]\(asset:[^)]+\)/,
     { timeout: 15_000 },
   );
   // ⚠ **絞り込み欄に入っていない**(入ると検索語が壊れる ── 静かな事故)
@@ -338,7 +338,7 @@ test('🔴 編集中の本文へ落とした画像も、そのまま入る', asy
   ]);
 
   await expect(page.locator(sel), '落とした画像が本文に入っていない').toHaveValue(
-    /!\[スクリーンショット-[\d-]+\.png\]\(asset:[^)]+\)/,
+    /!\[drop\.png\]\(asset:[^)]+\)/,
     { timeout: 15_000 },
   );
   // ⚠ **画面がその file へ遷移していない**(既定を止めていないと本文ごと消える)

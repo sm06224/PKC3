@@ -1412,12 +1412,22 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     await source.locator('optgroup').evaluateAll((gs) => gs.map((g) => (g as HTMLOptGroupElement).label)),
     '調べる相手の仕切りが「この PKC3 / 添付 / 手持ちの file」の順でない',
   ).toEqual(['この PKC3', '添付', '手持ちのファイル']);
-  const xOf = async (field: string): Promise<number> =>
-    (await page.locator(`[data-pkc-field="${field}"]`).first().boundingBox())!.x;
-  const sourceX = await xOf('sql-source');
-  expect(await xOf('sql-engine'), 'エンジンの選び所が相手の選び所より左にある').toBeGreaterThan(sourceX);
+  const boxOf = async (field: string) =>
+    (await page.locator(`[data-pkc-field="${field}"]`).first().boundingBox())!;
+  const sourceBox = await boxOf('sql-source');
+  const sourceX = sourceBox.x;
+  expect((await boxOf('sql-engine')).x, 'エンジンの選び所が相手の選び所より左にある').toBeGreaterThan(sourceX);
+  /**
+   * 🔴 **帯は幅に収まらなければ折り返す**(#1087。狭い画面でも押せるように)── だから
+   *   「右にある」ではなく、**読む順(上の行 → 同じ行なら右)で後ろ**であることを見る。
+   *   ⚠ 折り返した行の先頭は x が同じになる(256)ので、x だけで見ると正しい並びが落ちる。
+   */
   for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-schema-to-note', 'sql-er-toggle', 'sql-history']) {
-    expect(await xOf(f), `${f} が「調べる相手」より先(左)に出ている`).toBeGreaterThan(sourceX);
+    const b = await boxOf(f);
+    expect(
+      b.y > sourceBox.y + 2 || b.x > sourceX,
+      `${f} が「調べる相手」より先(上か左)に出ている`,
+    ).toBe(true);
   }
   await source.selectOption({ label: 'uriage.csv' });
   // ⚠ 開くのは非同期(worker が bytes を読んで表を作る)── 開き終わるまで待つ。
