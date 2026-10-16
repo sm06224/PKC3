@@ -425,3 +425,45 @@ export function splitRestoredEdges(
   }
   return { kept, dropped };
 }
+
+/**
+ * 🔴 **`lid` を `newParent` の中へ移すと輪になるか**(#1087)── 居場所の辺を**すべて**辿って見る。
+ *
+ * ⚠ なぜ正準親だけでは足りないか:親が複数在る(PKC2 から取り込むと在りうる)と、正準親の鎖には
+ *   `lid` が出てこなくても、**別の親の鎖**には出てくる。通すと、片方の親をゴミ箱へ移した途端に
+ *   `lid` とその中身が木のどこにも出なくなる(最上位の判定は「親を持たない物」)。
+ * 🔑 画面側(`app-state.ts`)と書く側(worker の tx)が**この 1 本**を通す ── 規則を 2 本にしない。
+ *   親の引き方だけを呼び側が渡す(画面は `relations`、worker は SQL)。
+ * ⚠ `newParent` が `lid` 自身のときも、始点で当たるので同じ門で断る。訪問済みで止める
+ *   (disk に輪が残っていても回り続けない)。
+ */
+export function wouldMakeCycle(
+  lid: string,
+  newParent: string,
+  parentsOf: (child: string) => Iterable<string>,
+): boolean {
+  const seen = new Set<string>();
+  const stack = [newParent];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (cur === lid) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const p of parentsOf(cur)) stack.push(p);
+  }
+  return false;
+}
+
+/** 居場所の辺すべてから「子 → 親たち」を引く関数を作る(`wouldMakeCycle` の画面側の引き方)。 */
+export function structuralParentsLookup(
+  relations: readonly Relation[],
+): (child: string) => Iterable<string> {
+  const parents = new Map<string, string[]>();
+  for (const r of relations) {
+    if (r.kind !== STRUCTURAL || r.fromLid === r.toLid) continue;
+    const list = parents.get(r.toLid);
+    if (list) list.push(r.fromLid);
+    else parents.set(r.toLid, [r.fromLid]);
+  }
+  return (child) => parents.get(child) ?? [];
+}

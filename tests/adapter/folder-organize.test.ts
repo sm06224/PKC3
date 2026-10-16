@@ -1300,3 +1300,145 @@ describe('作成の居場所が worker まで届く(#258)', () => {
   });
 });
 
+
+/**
+ * 🔴 **#1087 の見直し(フォルダの整理)** ── 並べ替えの断り / 上へ・下へを出す条件 /
+ * 落としたときの件数 / 光らせない落とし先 / 多重親の輪。
+ */
+describe('フォルダの整理の見直し(#1087)', () => {
+  const METAS = [meta('f1', 1, 'folder'), meta('f2', 2, 'folder'), meta('n1', 3), meta('n2', 4), meta('n3', 5)];
+
+  beforeEach(() => {
+    document.body.textContent = '';
+  });
+
+  it('🔴 編集中に「下へ動かす」を押すと、理由つきで断る(無音にしない)', async () => {
+    const { q, d, nudge, reordered } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '' });
+    d.dispatch({ type: 'START_EDIT' });
+    expect(d.getState().phase, '前提: 編集中').toBe('editing');
+    const down = nudge('down');
+    expect(down, '編集中に押せる口が消えた(この test が何も見ていない)').not.toBeNull();
+    expect(down!.disabled).toBe(false);
+    down!.click();
+    await tick();
+    expect(d.getState().error ?? '', '編集中に黙って捨てた').toContain('並べ替えてください');
+    expect(d.getState().error ?? '').toContain('編集を保存するか');
+    expect(reordered).toEqual([]);
+  });
+
+  it('対照群: 編集中でなければ「下へ動かす」は効く', async () => {
+    const { q, rows, nudge } = setup(METAS, []);
+    q<HTMLElement>('tbody [data-pkc-entry="n1"]')!.click();
+    nudge('down')!.click();
+    await tick();
+    expect(rows()).toEqual(['f1', 'f2', 'n2', 'n1', 'n3']);
+  });
+
+  it('🔴 表に出ていないノートを選んでいる間は、上へ / 下へを出さない', async () => {
+    const { q, d, enter, nudge } = setup(METAS, [rel('r1', 'f1', 'n1')]);
+    enter('f1'); // 表には n1 だけ
+    await tick();
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' }); // ルートのノート(いまの表には無い)
+    await tick();
+    expect(q('[data-pkc-field="order-nudge"]'), '表に無いノートの「上へ / 下へ」が出ている').toBeNull();
+    expect(nudge('down')).toBeNull();
+    // 対照群: 表に出ているノートを選べば出る
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect(q('[data-pkc-field="order-nudge"]'), '表のノートを選んでも出ない(上の null が空振り)').not.toBeNull();
+  });
+
+  /** 行に大きさを持たせて、上半分(clientY 102)に落とす。 */
+  function dropAbove(row: HTMLElement, dt: ReturnType<typeof dataTransfer>): void {
+    Object.defineProperty(row, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 100, bottom: 120, height: 20, left: 0, right: 200, width: 200, x: 0, y: 100 }),
+    });
+    const e = dragEvent('drop', dt);
+    Object.defineProperty(e, 'clientY', { value: 102 });
+    row.dispatchEvent(e);
+  }
+
+  it('🔴 もう収まっている位置へ落としたら「並べ替えました」と言わない', async () => {
+    const { q, status, reordered } = setup(METAS, []);
+    // n1 は n2 の直前に居る ── n2 の上半分へ落としても動かない
+    dropAbove(q('tbody [data-pkc-entry="n2"]')!, dataTransfer({ [PKC_DRAG]: 'n1' }));
+    await tick();
+    expect(reordered, '動かないはずが書込が出た(前提が崩れている)').toEqual([]);
+    expect(status.filter((t) => t.includes('並べ替えました')), '動いていないのに知らせた').toEqual([]);
+  });
+
+  it('🔴 一部だけ動いたら、動いた件数だけ言う', async () => {
+    const { q, status, rows } = setup(METAS, []);
+    // n1 はもう n2 の直前 / n3 は動く
+    dropAbove(q('tbody [data-pkc-entry="n2"]')!, dataTransfer({ [PKC_DRAG]: 'n1 n3' }));
+    await tick();
+    expect(rows()).toEqual(['f1', 'f2', 'n1', 'n3', 'n2']);
+    expect(status.at(-1)).toBe('1 件を並べ替えました');
+  });
+
+  describe('掴んだ物の上を通るとき', () => {
+    function grab(q: ReturnType<typeof setup>['q'], lid: string) {
+      const dt = dataTransfer();
+      q<HTMLElement>(`tbody [data-pkc-entry="${lid}"]`)!.dispatchEvent(dragEvent('dragstart', dt));
+      return dt;
+    }
+    const over = (row: HTMLElement, dt: ReturnType<typeof dataTransfer>): Event => {
+      const e = dragEvent('dragover', dt);
+      row.dispatchEvent(e);
+      return e;
+    };
+
+    it('🔴 フォルダを自分の上へ持ってきても、落とし先を光らせない', () => {
+      const { q } = setup(METAS, []);
+      const dt = grab(q, 'f1');
+      expect(dt.getData(PKC_DRAG), '前提: f1 を掴んだ').toBe('f1');
+      const f1 = q<HTMLElement>('tbody [data-pkc-entry="f1"]')!;
+      const e = over(f1, dt);
+      expect(f1.hasAttribute('data-pkc-dropping'), '自分の上が光っている').toBe(false);
+      expect(e.defaultPrevented, '落とせる顔(preventDefault)をしている').toBe(false);
+      // 対照群: 別のフォルダは光る
+      const f2 = q<HTMLElement>('tbody [data-pkc-entry="f2"]')!;
+      const e2 = over(f2, dt);
+      expect(f2.hasAttribute('data-pkc-dropping'), '別のフォルダが光らない(上が空振り)').toBe(true);
+      expect(e2.defaultPrevented).toBe(true);
+    });
+
+    it('🔴 フォルダを自分の配下の上へ持ってきても光らせない(平らに出している間)', async () => {
+      const { q, d } = setup(METAS, [rel('r1', 'f1', 'f2')]);
+      d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-' });
+      await tick();
+      const f2 = q<HTMLElement>('tbody [data-pkc-entry="f2"]');
+      expect(f2, '前提: 語で絞ると入れ子の f2 が平らに出る').not.toBeNull();
+      const dt = grab(q, 'f1');
+      const e = over(f2!, dt);
+      expect(f2!.hasAttribute('data-pkc-dropping'), '配下の上が光っている').toBe(false);
+      expect(e.defaultPrevented).toBe(false);
+    });
+
+    it('対照群: 掴んだ物が配下でなければ、同じ場面でも光る(ノートを f2 の上へ)', async () => {
+      const { q, d } = setup(METAS, [rel('r1', 'f1', 'f2')]);
+      d.dispatch({ type: 'SET_ENTRY_FILTER', query: 't-' });
+      await tick();
+      const dt = grab(q, 'n1');
+      const f2 = q<HTMLElement>('tbody [data-pkc-entry="f2"]')!;
+      over(f2, dt);
+      expect(f2.hasAttribute('data-pkc-dropping')).toBe(true);
+    });
+  });
+
+  it('🔴 多重親でも輪になる移動は断る(別の親の鎖に自分が居る)', () => {
+    // X の親は A と B(正準親は entryOrder 最小の A)。B を X の中へ入れると B → X → B の輪
+    const metas = [meta('a', 1, 'folder'), meta('b', 2, 'folder'), meta('x', 3, 'folder')];
+    const s0 = READY(metas, [rel('r1', 'a', 'x'), rel('r2', 'b', 'x')]);
+    const r = reduce(s0, { type: 'SET_ENTRY_PARENT', lid: 'b', parentLid: 'x', relationId: 'n' });
+    expect(r.state, '多重親の別の鎖を辿らずに通った').toBe(s0);
+    expect(r.events).toEqual([]);
+    // 対照群: 輪にならない移動(無関係なフォルダ z を x の中へ)は通る
+    const s1 = READY([...metas, meta('z', 4, 'folder')], [rel('r1', 'a', 'x'), rel('r2', 'b', 'x')]);
+    const ok = reduce(s1, { type: 'SET_ENTRY_PARENT', lid: 'z', parentLid: 'x', relationId: 'n' });
+    expect(ok.events.length, '輪にならない移動まで断っている').toBeGreaterThan(0);
+  });
+});

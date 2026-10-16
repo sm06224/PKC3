@@ -115,7 +115,7 @@ function withSqlSourceSet(
 }
 import { pickErConnection, type ErPendingFrom } from '@features/query/er-connect';
 import { filerRowOptions, listViewOptions } from './list-view-options';
-import { resolveCanonicalParents, reorderSibling } from '@features/relation/tree';
+import { reorderSibling, structuralParentsLookup, wouldMakeCycle } from '@features/relation/tree';
 import { extractMeta, seedBodyFor } from '@features/flavor';
 import { isAppendable } from '@features/flavor/append-spec';
 import { applyBodyRewrite, type BodyRewrite } from '@features/markdown/body-rewrite';
@@ -9170,12 +9170,11 @@ function reduceCore(
         if (parentLid === action.lid) return { state, events: [] }; // 自分の中へは入れない
         // 🔴 **自分の子孫の中へは入れない**(輪ができて木でなくなる)。
         //    ⚠ 判定はここでやる ── worker は metas を持たないので木を知らない
-        const parentOf = resolveCanonicalParents(state.entryMetas, state.relations);
-        // ⚠ 訪問済みで止める ── disk に輪が残った器を開いたとき(#1087 ゴミ箱の見直し)に、ここで回り続けない
-        const walked = new Set<string>();
-        for (let cur: string | undefined = parentLid; cur !== undefined && !walked.has(cur); cur = parentOf.get(cur)) {
-          if (cur === action.lid) return { state, events: [] };
-          walked.add(cur);
+        // 🔴 辿るのは正準親だけではなく**居場所の辺すべて**(多重親の別の鎖に自分が居ても輪になる)。
+        //    ⚠ 訪問済みで止める ── disk に輪が残った器を開いたとき(#1087 ゴミ箱の見直し)に回り続けない。
+        //    判定は `wouldMakeCycle` 1 本(worker の tx の門と同じ)
+        if (wouldMakeCycle(action.lid, parentLid, structuralParentsLookup(state.relations))) {
+          return { state, events: [] };
         }
       }
       // 楽観更新 ── 画面(ファイラ)は state.relations から描くので、
