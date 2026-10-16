@@ -163,7 +163,6 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
     const st = deps.dispatcher.getState();
     const scan = st.taskScan;
     const from = seenTo;
-    seenTo = t;
     /**
      * 🔴 **数えられていないことを黙らない**(#1087)── 失敗が立っている間は時間になっても鳴らない。
      *   user は「鳴る前提で予定を任せて失う」ので、立っている間に 1 回だけ集積地へ言う。
@@ -176,7 +175,12 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
     } else {
       failedTold = false;
     }
+    /**
+     * 🔴 **数え直し中(scan が null)の回は、見た位置を進めない** ── 進めると、その区間の予定が
+     *   二度と走査されず、鳴らないまま消える(別タブの保存で数え直しが入る窓)。
+     */
     if (scan === null) return;
+    seenTo = t;
     /**
      * 🔴 **長く空いたら鳴らさず、見逃した予定として 1 件積む**(#1087)── 眠っていた端末の復帰で、
      *   過ぎた予定がまとめて鳴るのを防ぐ。字と口は次に開いたときの見逃しの知らせと同じ。

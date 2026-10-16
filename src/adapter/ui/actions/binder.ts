@@ -6868,6 +6868,12 @@ const SEEK_NO_PLAYER = 'プレーヤーがまだ出ていません。添付が�
 const SEEK_UNSUPPORTED = 'この添付は途中へ移れないので、先頭から再生しています';
 /** metadata が届いた後に位置を確かめ直すときの許容(秒)── seek は目標ぴったりには止まらない */
 const SEEK_RESEEK_TOLERANCE_S = 0.5;
+/**
+ * metadata 待ちの再生機ごとの「最後に押された位置(秒)」。
+ * ⚠ 押すたびに once の聞き手を積むと、届いた回に**古い押しの聞き手が後から位置を書く**
+ *   (2 度押したのに最初の位置へ飛ぶ)。聞き手は 1 本にして、**最新の位置**を読ませる。
+ */
+const pendingSeek = new WeakMap<HTMLMediaElement, number>();
 function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   const raw = target.getAttribute('data-pkc-seek-ms');
   const ms = Number(raw);
@@ -6889,13 +6895,21 @@ function seekMedia(dispatcher: Dispatcher, target: HTMLElement): void {
   // ⚠ 位置は `play()` の**前**に書く ── 後に書くと、先頭から鳴り始めた直後に飛ぶ(1 瞬だけ先頭の音が出る)
   media.currentTime = at;
   if (!loaded) {
-    media.addEventListener(
-      'loadedmetadata',
-      () => {
-        if (Math.abs(media.currentTime - at) > SEEK_RESEEK_TOLERANCE_S) media.currentTime = at;
-      },
-      { once: true },
-    );
+    const listening = pendingSeek.has(media);
+    pendingSeek.set(media, at);
+    if (!listening) {
+      media.addEventListener(
+        'loadedmetadata',
+        () => {
+          const latest = pendingSeek.get(media);
+          pendingSeek.delete(media);
+          if (latest !== undefined && Math.abs(media.currentTime - latest) > SEEK_RESEEK_TOLERANCE_S) {
+            media.currentTime = latest;
+          }
+        },
+        { once: true },
+      );
+    }
   }
   const played = media.play();
   if (played !== undefined && typeof played.catch === 'function') {

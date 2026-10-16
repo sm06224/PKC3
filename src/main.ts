@@ -3347,6 +3347,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     ready: asrReadyFrom(asrStore),
     transcribe: (job) => asrClient.transcribe(job),
     notify: showStatus,
+    // 🔴 文字にしている間にタブを閉じる・読み直すと「離れますか」(結果はまだどこにも書かれていない)
+    onActive: (active) => unloadGuard.setWriting(active, 'transcribe'),
     // 🔴 別のタブ・窓が編集中のノートへは足さない(#1087)
     lock: editLockPort,
   });
@@ -3367,6 +3369,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     dispatcher,
     onChange: (runs) => paintTimerBar(root, runs, Date.now()),
     notify: showStatus,
+    // 🔴 計っている間にタブを閉じる・読み直すと「離れますか」(計測はメモリ上にだけ在る。録音・預かりと同じ数え方)
+    onActive: (active) => unloadGuard.setWriting(active, 'timer'),
   });
 
   /**

@@ -305,9 +305,11 @@ export class CapturesRenderer {
         label.hidden = true;
         strip.append(label);
       }
-      // 文字起こしの目盛り(本文の時刻の行ごとに 1 本)。⚠ 数が同じなら触らない
+      // 文字起こしの目盛り(本文の時刻の行ごとに 1 本)。⚠ 位置の並びが同じなら触らない
+      //   (数だけで見ると、本文の時刻を書き換えて数が同じとき古い位置のまま残る)
       const times = item.transcriptMs ?? [];
-      if (strip.getAttribute('data-pkc-ticks') !== String(times.length)) {
+      const ticksKey = times.join(',');
+      if (strip.getAttribute('data-pkc-ticks') !== ticksKey) {
         for (const old of strip.querySelectorAll('[data-pkc-field="capture-wave-tick"]')) old.remove();
         for (const ms of times) {
           if (ms > wave.durationMs) continue;
@@ -316,7 +318,7 @@ export class CapturesRenderer {
           t.style.left = `${(msToFrac(ms, wave.durationMs) * 100).toFixed(3)}%`;
           strip.append(t);
         }
-        strip.setAttribute('data-pkc-ticks', String(times.length));
+        strip.setAttribute('data-pkc-ticks', ticksKey);
       }
       const mark = this.trim !== null && this.trim.lid === lid ? this.trim : null;
       placeRange(strip, mark?.startMs ?? null, mark?.endMs ?? null, wave.durationMs);

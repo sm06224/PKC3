@@ -354,6 +354,39 @@ describe('③ 黙って終わらない', () => {
   });
 });
 
+describe('走っている間はタブを閉じる確認に数える(onActive)', () => {
+  it('🔴 走り出しで true、終わりで false(失敗でも閉じる / 断られた 2 本目では動かない)', async () => {
+    const seen: boolean[] = [];
+    let release: (r: AsrJobResult) => void = () => {};
+    const h = harness({
+      onActive: (a: boolean) => void seen.push(a),
+      transcribe: vi.fn(
+        () =>
+          new Promise<AsrJobResult>((res) => {
+            release = res;
+          }),
+      ),
+    });
+    const first = h.tr.run('a');
+    await vi.waitFor(() => expect(h.deps.transcribe).toHaveBeenCalled());
+    expect(seen, '走っているのに true が来ていない').toEqual([true]);
+    await h.tr.run('a'); // 2 本目は断られる
+    expect(seen, '断られた 2 本目が通知を動かした').toEqual([true]);
+    release({ text: 'あ', loadMs: 0, runMs: 0 });
+    await first;
+    expect(seen).toEqual([true, false]);
+    const seen2: boolean[] = [];
+    const h2 = harness({
+      onActive: (a: boolean) => void seen2.push(a),
+      transcribe: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+    await h2.tr.run('a');
+    expect(seen2).toEqual([true, false]);
+  });
+});
+
 describe('④ 2 本同時に走らない', () => {
   it('🔴 走っている間の 2 本目は断る(1.65〜3.6GB を重ねない)', async () => {
     let release: (r: AsrJobResult) => void = () => {};

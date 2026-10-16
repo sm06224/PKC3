@@ -41,6 +41,11 @@ export interface TimerServiceDeps {
   readonly now?: () => number;
   /** 1 秒ごとの合図。返り値は**外す関数**。⚠ test は手で撃つ。 */
   readonly tick?: (fn: () => void) => () => void;
+  /**
+   * 計っている本があるかが変わった合図(タブを閉じる前の確認に数える)。
+   * ⚠ 計測はこのタブのメモリにだけ在り、閉じると黙って消える。
+   */
+  readonly onActive?: (active: boolean) => void;
 }
 
 export interface TimerService {
@@ -73,7 +78,15 @@ export function createTimerService(deps: TimerServiceDeps): TimerService {
   let untick: (() => void) | null = null;
 
   const fail = (error: string): void => deps.dispatcher.dispatch({ type: 'OP_FAILED', error });
-  const paint = (): void => deps.onChange([...running.values()]);
+  let reportedActive = false;
+  const paint = (): void => {
+    const active = running.size > 0;
+    if (active !== reportedActive) {
+      reportedActive = active;
+      deps.onActive?.(active);
+    }
+    deps.onChange([...running.values()]);
+  };
 
   /**
    * 刻みを走っている本数に合わせる。

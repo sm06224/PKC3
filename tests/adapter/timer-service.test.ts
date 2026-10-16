@@ -161,6 +161,31 @@ describe('タイマー(#279)', () => {
    * ⚠ ここで守るのは**残りの半分** ── 門を素通りしても
    *   **計り始めない**(時間の行き先が無いまま数え始めない)。
    */
+  it('🔴 計っている間は onActive(true)、全部止めたら false(タブを閉じる確認に数える)', async () => {
+    const active: boolean[] = [];
+    const d = new Dispatcher();
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 'text', '資料'), meta('b', 'text', '別')], relations: [] });
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
+    const svc = createTimerService({
+      dispatcher: d,
+      onChange: () => undefined,
+      notify: () => undefined,
+      now: () => T0,
+      tick: () => () => undefined,
+      onActive: (a) => active.push(a),
+    });
+    expect(active, '何も計っていないのに通知').toEqual([]);
+    svc.start();
+    expect(active).toEqual([true]);
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'b' });
+    svc.start(); // 2 本目
+    expect(active, '2 本目で重ねて通知').toEqual([true]);
+    svc.discard('a');
+    expect(active, '1 本残っているのに false').toEqual([true]);
+    svc.discard('b');
+    expect(active).toEqual([true, false]);
+  });
+
   it('🔴 ② ノートが読めないときは計り始めない', () => {
     const b = bench({ select: false });
     b.service.start();
