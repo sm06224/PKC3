@@ -444,8 +444,9 @@ describe('markModified ── 控えの版で開いた窓を「保存してい�
     const fn = host.indexOf('function markOpenedFromShadow() {');
     expect(fn, '控えの版で開いたときの関数が無い').toBeGreaterThan(0);
     expect(host.slice(fn, fn + 900)).toContain('window.PKC3OfficeUnsaved.markModified(window.__lo)');
-    // 呼ぶのは控えの版のときだけ(定義 + 呼び 1 か所)
+    // 呼ぶのは控えの版のときだけ(定義 + 呼び 2 か所)。⚠ 2 か所目は 36 秒より後に開いた回の経路(O4)
     expect(host).toContain('if (docFromShadow) markOpenedFromShadow();');
-    expect(host.split('markOpenedFromShadow()').length - 1, '呼び元が 1 か所でない').toBe(2);
+    expect(host.split('if (docFromShadow) markOpenedFromShadow();').length - 1, '呼び元が 2 か所でない').toBe(2);
+    expect(host.split('markOpenedFromShadow()').length - 1, '条件なしの呼びが混ざっている').toBe(3);
   });
 });

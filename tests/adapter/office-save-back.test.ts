@@ -1055,6 +1055,21 @@ describe('手元のファイルの合言葉を知らないタブ(#1087)', () => 
     expect(h.stage.keys().length).toBeGreaterThan(0);
   });
 
+  it('🔴 O8: 猶予の間に保留した保存は、retryDeferred で撃ち直され、手元のファイルへ書かれる', async () => {
+    let known = false;
+    const wrote: string[] = [];
+    const h = harness({
+      knowsLocal: () => known,
+      writeLocal: async (t) => { wrote.push(t); return true; },
+    });
+    h.stage.put({ key: 'k1', name: '報告書.docx', token: 'local:s-1', at: Date.now() });
+    expect(await h.sb.receive('k1')).toBe('deferred');
+    known = true;   // 合言葉を知っているタブが現れた(開いたタブの台帳が揃った)
+    expect(await h.sb.retryDeferred(), '保留の印が立たず、撃ち直しが空振りしている').toBe(1);
+    expect(wrote).toEqual(['local:s-1']);
+    expect(h.created).toEqual([]);
+  });
+
   it('🔴 holder でないタブは、古くてもノートを作らない', async () => {
     const h = harness({ isHolder: () => false, knowsLocal: () => false });
     h.stage.put({ key: 'k1', token: 'local:s-1', at: 1 });

@@ -16,8 +16,10 @@ import {
   fetchPackManifest,
   packUrlFailureMessage,
   readPackFromZip,
+  readPackInfoFromZip,
 } from '../../src/adapter/platform/office/office-pack-acquire';
 import { REQUIRED_PACK_FILES } from '../../src/adapter/platform/office/office-pack';
+import * as zipReader from '../../src/features/import/zip-reader';
 
 vi.mock('../../src/features/import/zip-reader', () => ({
   readZipDirectory: vi.fn(async () => (globalThis as { __zipNames?: string[] }).__zipNames!.map(
@@ -108,6 +110,24 @@ describe('readPackFromZip', () => {
   });
 });
 
+describe('O7: readPackInfoFromZip', () => {
+  it('🔴 zip の中の pack.json から版とビルドの素性を読む(1 段深くても)', async () => {
+    setZip(['lo-wasm-qt6/pack.json', 'lo-wasm-qt6/soffice.js']);
+    vi.mocked(zipReader.readZipEntry).mockImplementationOnce(async () => new Blob([JSON.stringify({
+      version: 'lo-wasm-dev',
+      build: { lo_sha: 'abc', built_at: '2026-10-01', run_id: '1', qt_ref: '6.9', emsdk: '4', pkc3_commit: 'z' },
+    })]));
+    const info = await readPackInfoFromZip(new Blob(['zip']));
+    expect(info?.version).toBe('lo-wasm-dev');
+    expect(info?.build?.loSha).toBe('abc');
+  });
+
+  it('pack.json が無い zip は null(呼び側が file 名へ倒す)', async () => {
+    setZip(['soffice.js']);
+    expect(await readPackInfoFromZip(new Blob(['zip']))).toBeNull();
+  });
+});
+
 describe('fetchPackFromBase', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -126,6 +146,18 @@ describe('fetchPackFromBase', () => {
     )));
     await expect(fetchPackFromBase('/office/', ['BIZUDGothic-Regular.ttf']))
       .rejects.toThrow(/qtloader\.js.*404/);
+  });
+
+  it('🔴 O6: 目録も一式の各 file も cache: no-cache で取る(既定の cache に古い版を握らせない)', async () => {
+    const inits: (RequestInit | undefined)[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init?: RequestInit) => {
+      inits.push(init);
+      return new Response('{}', { status: 200 });
+    }));
+    await fetchPackManifest('/office-pack/').catch(() => undefined);
+    await fetchPackFromBase('/office/', ['a.ttf']).catch(() => undefined);
+    expect(inits.length, '目録 1 + 一式 6').toBeGreaterThanOrEqual(7);
+    for (const init of inits) expect(init?.cache).toBe('no-cache');
   });
 
   it('必須 5 つ + 指定フォントを、同一 origin のサブパスから取る', async () => {

@@ -29,6 +29,7 @@ import {
   fetchPackManifest,
   packUrlFailureMessage,
   readPackFromZip,
+  readPackInfoFromZip,
   type PackFiles,
 } from './office-pack-acquire';
 import type { PackBuild } from './office-pack';
@@ -46,6 +47,8 @@ export interface PackInstallDeps {
   readonly fetchManifest?: typeof fetchPackManifest;
   readonly fetchFiles?: typeof fetchPackFromBase;
   readonly readZip?: typeof readPackFromZip;
+  /** zip の中の `pack.json` から版と素性を読む口(O7)。 */
+  readonly readZipInfo?: typeof readPackInfoFromZip;
   /** 取得元。⚠ 既定は同一 origin の隣(`office-pack.ts` の定数)。 */
   readonly base?: string;
   /** 進捗の 1 行。⚠ **必ず呼ぶ** ── 93MB の間、無反応にしない。 */
@@ -157,8 +160,16 @@ export class OfficePackInstaller {
         zip,
         (phase, done, total) => progress(`${phase}(${done}/${total})`),
       );
-      // ⚠ 版は file 名から推測しない(嘘の版を記録しない)── 選んだ file 名をそのまま残す
-      return { files, version: name || 'unknown', source: 'file' as const };
+      // 🔴 版は zip の中の `pack.json` から読む(O7)。⚠ file 名を版にすると、配布元の版
+      //    (`lo-wasm-dev` など)と必ず食い違い、起動のたびに「配布元の版と違います」と言い続ける。
+      //    目録が無い / 読めない zip だけ、選んだ file 名をそのまま残す(版を推測で作らない)
+      const info = await (this.deps.readZipInfo ?? readPackInfoFromZip)(zip).catch(() => null);
+      return {
+        files,
+        version: info?.version ?? (name || 'unknown'),
+        build: info?.build ?? null,
+        source: 'file' as const,
+      };
     });
   }
 
