@@ -101,7 +101,61 @@ import {
  *   (時刻 1 点も受けないので揃える)── 受けない字は札にそのまま残る。
  */
 const AT_DATE =
-  /@([\d-]+)(?:(?:\.\.|[〜～])([\d-]*))?(?:[ T]([\d:]+)(?:(?:\.\.|[〜～-])([\d:]*))?)?/g;
+  /@([\d-]+)(?:(?:\.\.|[〜～~])([\d-]*))?(?:[ T]([\d:]+)(?:(?:\.\.|[〜～~-])([\d:]*))?)?/g;
+
+/**
+ * 🔴 **空白を挟んだ期間・時間の幅**(`@2026-10-20 〜 2026-10-22` / `14:00 - 15:00`。#1087)。
+ *
+ * ⚠ 網(`AT_DATE`)には**足さない** ── 空白つきを網に入れると、`@2026-10-20 〜 会議` のような
+ *   今まで日付だけ読めていた行まで「期間の書きかけ」として丸ごと落ちる。だから**網が読んだ直後**から
+ *   別に見て、**期間・幅として成り立つときだけ**広げる(成り立たなければ今までどおり日付 / 時刻だけ)。
+ * ⚠ 区切りの前後のどちらかに空白が在ること(空白が無い形は網が読む)。終わりは**空でないこと**
+ *   (`14:00 - 会議` の `-` は区切りではない)。
+ */
+const SPACED_DATE_RANGE = /^(?:[ \t]+(?:\.\.|[〜～~])[ \t]*|(?:\.\.|[〜～~])[ \t]+)([\d-]+)/;
+const SPACED_TIME_RANGE = /^(?:[ \t]+(?:\.\.|[〜～~-])[ \t]*|(?:\.\.|[〜～~-])[ \t]+)([\d:]+)/;
+
+const MASK = '\uE000';
+const INLINE_CODE = /`+[^`\n]*?`+/g;
+const INLINE_COMMENT = /%%[^\n]*?%%/g;
+const LINK_DEST = /(?<=\])\([^)\n]*\)/g;
+
+/**
+ * 🔴 **画面に日付として見えない所を、同じ長さの別の字に置き換えた写し**(#1087)。
+ *
+ * ⚠ インラインコード・`%%…%%`(隠しメモ)・リンクの宛先は、ノートには日付として出ない。
+ *   そこの `@2026-10-20` を読むと、**見えていない日付で予定が立ち**、動かすと
+ *   バッククォートの中の字を書き換える。⚠ **長さを変えない** ── 位置(`start` / `end`)は
+ *   原文へ splice するのに使うので、ずれたら別の字を壊す。
+ */
+function maskHidden(line: string): string {
+  if (!/[`%\]]/.test(line)) return line;
+  const fill = (m: string): string => MASK.repeat(m.length);
+  return line.replace(INLINE_CODE, fill).replace(INLINE_COMMENT, fill).replace(LINK_DEST, fill);
+}
+
+/**
+ * 日付の直後の期間を読む。`null` = 期間ではない / `'bad'` = 区切りは在るが成り立たない(落とす)。
+ * 空白つきの形(`SPACED_DATE_RANGE`)は、**成り立つときだけ**期間にする。
+ */
+function readDateRange(
+  masked: string,
+  m: RegExpExecArray,
+  date: string,
+  afterDate: number,
+): { until: string; end: number } | 'bad' | null {
+  const adjacent = m[2];
+  if (adjacent !== undefined && adjacent !== '') {
+    if (!isScheduleRange(date, adjacent)) return 'bad';
+    const sepLen = masked.startsWith('..', afterDate) ? 2 : 1;
+    return { until: adjacent, end: afterDate + sepLen + adjacent.length };
+  }
+  const sp = SPACED_DATE_RANGE.exec(masked.slice(afterDate));
+  if (sp !== null && isScheduleRange(date, sp[1]!)) {
+    return { until: sp[1]!, end: afterDate + sp[0].length };
+  }
+  return adjacent === '' ? 'bad' : null;
+}
 
 /** 行に書かれた 1 つの日付。 */
 export interface LineDate {
@@ -179,11 +233,15 @@ export interface LineDate {
 export function readLineDate(line: string): LineDate | null {
   AT_DATE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = AT_DATE.exec(line)) !== null) {
+  // 🔴 走査は写し(`maskHidden`)に当てる。位置は原文と同じ(#1087)
+  const masked = maskHidden(line);
+  while ((m = AT_DATE.exec(masked)) !== null) {
     const date = m[1]!;
     if (!isScheduleDate(date)) continue;
     const start = m.index;
-    const rawUntil = m[2];
+    const range = readDateRange(masked, m, date, start + 1 + date.length);
+    if (range === 'bad') continue;
+    const rawUntil = range === null ? undefined : range.until;
     /**
      * 🔴 **区切りが在ったなら、期間として成立しなければ丸ごと捨てる**(#344 段①)。
      * ⚠ 「開始だけ活かす」に**倒さない** ── `@2026-08-28..2026-08-25`(逆順)や
@@ -192,16 +250,8 @@ export function readLineDate(line: string): LineDate | null {
      *   (この file の頭「わざと取りすぎている」の続きである)。
      */
     if (rawUntil !== undefined) {
-      if (!isScheduleRange(date, rawUntil)) continue;
-      /**
-       * ⚠ 区切りは 1 文字(`〜` / `～`)か 2 文字(`..`)── **原文で数える**。
-       * ⚠ **`indexOf` で探さない**(1 稿目はそうしていた)── 見つからなければ
-       *   `-1` が返り、**範囲が 1 文字ずれた記法**として本文を splice する形になる。
-       *   位置は計算で決まるのだから、探す必要が無い(探すと失敗しうる口が増える)。
-       */
-      const sepAt = start + 1 + date.length;
-      const sepLen = line.startsWith('..', sepAt) ? 2 : 1;
-      const base = sepAt + sepLen + rawUntil.length;
+      // ⚠ 終わりの位置は `readDateRange` が原文の長さで数える(`indexOf` で探さない ── 失敗しうる口が増える)
+      const base = range!.end;
       const tail = readRepeatTail(line.slice(base));
       return {
         date,
@@ -226,7 +276,7 @@ export function readLineDate(line: string): LineDate | null {
      * ⚠ 1 つでも欠ければ `null` ── 時刻 1 点としていまと同じに読み、`..…` は字として残る。
      */
     const rawTimeEnd = m[4];
-    const timeEnd =
+    const adjacentEnd =
       time !== null && rawTimeEnd !== undefined && isScheduleTimeRange(time, rawTimeEnd)
         ? rawTimeEnd
         : null;
@@ -239,12 +289,24 @@ export function readLineDate(line: string): LineDate | null {
      *   繰り返しにすると、user が書いていない予定が毎週立つ)。
      */
     const afterTime = time === null ? afterDate : afterDate + 1 + time.length;
+    // 🔴 空白を挟んだ幅(`14:00 - 15:00`)── 成り立つときだけ広げる(`SPACED_TIME_RANGE`)
+    const spacedEnd =
+      time !== null && adjacentEnd === null && (rawTimeEnd === undefined || rawTimeEnd === '')
+        ? SPACED_TIME_RANGE.exec(masked.slice(afterTime))
+        : null;
+    const spaced = spacedEnd !== null && isScheduleTimeRange(time!, spacedEnd[1]!) ? spacedEnd : null;
+    const timeEnd = spaced !== null ? spaced[1]! : adjacentEnd;
     /**
      * ⚠ 区切りは 1 文字(`〜` / `～` / `-`)か 2 文字(`..`)── 日付の期間と同じく**原文で数える**
      *   (`indexOf` で探さない)。
      */
     const timeSepLen = line.startsWith('..', afterTime) ? 2 : 1;
-    const base = timeEnd === null ? afterTime : afterTime + timeSepLen + timeEnd.length;
+    const base =
+      timeEnd === null
+        ? afterTime
+        : spaced !== null
+          ? afterTime + spaced[0].length
+          : afterTime + timeSepLen + timeEnd.length;
     const tail = readRepeatTail(line.slice(base));
     /**
      * 🔴 **振替は「刻みが無いとき」だけ読む**(#855 決4)。
@@ -309,11 +371,11 @@ export function allDateTokens(line: string): DateToken[] {
   const out: DateToken[] = [];
   AT_DATE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = AT_DATE.exec(line)) !== null) {
+  const masked = maskHidden(line);
+  while ((m = AT_DATE.exec(masked)) !== null) {
     const date = m[1]!;
     if (!isScheduleDate(date)) continue;
-    const rawUntil = m[2];
-    if (rawUntil !== undefined && !isScheduleRange(date, rawUntil)) continue;
+    if (readDateRange(masked, m, date, m.index + 1 + date.length) === 'bad') continue;
     if (!isRealCalendarDate(date)) continue;
     out.push({ date, start: m.index, end: m.index + 1 + date.length });
   }
@@ -330,8 +392,21 @@ export function allDateTokens(line: string): DateToken[] {
 export function stripLineDate(line: string): string {
   const found = readLineDate(line);
   if (found === null) return line;
-  const before = line.slice(0, found.start).replace(/[ \t]+$/, '');
-  const after = line.slice(found.end).replace(/^[ \t]+/, '');
+  // 🔴 隠しメモ(`%%…%%`)は札の字に出さない(ノートでも見えない。#1087)。⚠ コードの中の `%%` は残す
+  const codeMasked = line.replace(INLINE_CODE, (c) => MASK.repeat(c.length));
+  const comments = [...codeMasked.matchAll(INLINE_COMMENT)].map((c) => [c.index!, c.index! + c[0].length] as const);
+  const dropComment = (from: number, to: number): string => {
+    let out = '';
+    let at = from;
+    for (const [a, b] of comments) {
+      if (a < from || b > to) continue; // 日付は隠れた所に無いので、範囲をまたぐ物は無い
+      out += line.slice(at, a);
+      at = b;
+    }
+    return out + line.slice(at, to);
+  };
+  const before = dropComment(0, found.start).replace(/[ \t]+$/, '');
+  const after = dropComment(found.end, line.length).replace(/^[ \t]+/, '');
   return (before === '' || after === '' ? before + after : `${before} ${after}`).trim();
 }
 

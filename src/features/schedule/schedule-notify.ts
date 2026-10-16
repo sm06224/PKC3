@@ -9,7 +9,7 @@
  *
  * - 🔴 **時刻のある予定だけ**。終日(日付だけ)の予定は**数えない** ── 「いつ始まったか」の
  *   瞬間が無く、`.ics` でも鳴らさない(①と②で同じ向き)。`dueAlarms`(開いている間の知らせ)と同じ。
- * - **済んだ項目は数えない**。
+ * - **済んだ項目は数えない**。**片付けたノートの予定も数えない**(#1087)。
  * - 区間は `(前に開いていた時刻, いま]`(`dueAlarms` と同じ左開・右閉)。
  * - 🔑 **遡るのは最大 31 日まで** ── 久しぶりに開いた日に、繰り返しの予定で何百件も出さない。
  * - 繰り返しは**回ごとに 1 件**(規則の行 1 つを 1 件と数えると、毎日の予定を 3 週間空けても 1 件に見える)。
@@ -62,6 +62,7 @@ export function missedItems(
   cards: readonly TaskCard[],
   fromMs: number | null,
   toMs: number,
+  archived: ReadonlySet<string> = new Set(),
 ): MissedItem[] {
   if (fromMs === null || fromMs >= toMs) return [];
   const lo = Math.max(fromMs, toMs - MISSED_LOOKBACK_DAYS * DAY_MS);
@@ -70,7 +71,7 @@ export function missedItems(
   const mates = materializedDates(cards);
   const out: MissedItem[] = [];
   for (const c of cards) {
-    if (c.done) continue;
+    if (c.done || archived.has(c.lid)) continue;
     // ⚠ この行は型を絞っているだけで、門ではない(`alarm-due.ts` と同じ)── 形の判定は `alarmAtMs` が 1 本で持つ。
     //   終日(`time` が null)を外すのも、そちらが null を返すから(変異試験で確かめた)
     if (c.date === null || c.time === null) continue;

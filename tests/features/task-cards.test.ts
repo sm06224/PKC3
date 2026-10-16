@@ -117,10 +117,10 @@ describe('task-cards(札 = 本文のチェック項目)', () => {
       expect(replaceTaskCards(board, 'a', bodyA)).toBe(board);
     });
 
-    it('差し替えた札の字も丸める(生の本文をそのまま出さない)', () => {
+    it('🔴 差し替えた札の字も丸めない(丸めは見せる所 ── `.ics` の SUMMARY を切らない。#1087)', () => {
       const long = 'う'.repeat(TASK_LIMITS.textChars + 5);
       const next = replaceTaskCards(board, 'b', `- [ ] ${long}\n`);
-      expect(next[next.length - 1]?.text.endsWith('…')).toBe(true);
+      expect(next[next.length - 1]?.text).toBe(long);
     });
 
     /**
@@ -304,14 +304,11 @@ describe('replaceTaskCards は、変わっていないなら据え置く(2026-08
     ).not.toBe(dated);
   });
 
-  /**
-   * ⚠ **丸めた後で突き合わせる** ── 上限(200 字)を超える字は `clipTaskText` が
-   *   切るので、切る前の字で比べると「変わっていない」を取り逃がす。
-   */
-  it('長い字は丸めた形で突き合わせる', () => {
+  it('長い字も同じ本文なら据え置く(丸めない字で突き合わせる。#1087)', () => {
     const long = 'あ'.repeat(300);
-    const clipped = replaceTaskCards([card('a', 0, 'x')], 'a', `- [ ] ${long}\n`);
-    const again = replaceTaskCards(clipped, 'a', `- [ ] ${long}\n`);
-    expect(again, '丸めた後の字で比べていない').toBe(clipped);
+    const first = replaceTaskCards([card('a', 0, 'x')], 'a', `- [ ] ${long}\n`);
+    expect(first[0]?.text).toBe(long);
+    const again = replaceTaskCards(first, 'a', `- [ ] ${long}\n`);
+    expect(again, '同じ本文なのに据え置かなかった').toBe(first);
   });
 });

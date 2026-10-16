@@ -150,6 +150,28 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     expect(t.painted).toEqual([2]);
   });
 
+  it('🔴 片付けたノートの予定は見逃しに数えない(#1087)。対照群: 片付けていなければ数える', () => {
+    const run = (archived: boolean): { painted: number[]; posted: string[] } => {
+      const store = new ScheduleNotifyStore(fakeStorage());
+      store.stampOpen('c1', ms(12, 8, 0));
+      const d = new Dispatcher();
+      d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [{ ...meta(), archived }], relations: [] });
+      const painted: number[] = [];
+      const posted: string[] = [];
+      startMissedWatch({
+        dispatcher: d, store, cid: 'c1', now: () => ms(12, 13, 0),
+        paint: (n) => painted.push(n), post: (t) => posted.push(t), tick: () => () => undefined,
+      });
+      d.dispatch({
+        type: 'SET_TASK_SCAN',
+        scan: { cards: taskCardsOf('a', BODY), totalNotes: 1, scannedNotes: 1, truncated: false },
+      });
+      return { painted, posted };
+    };
+    expect(run(false).painted).toEqual([2]);
+    expect(run(true)).toEqual({ painted: [], posted: [] });
+  });
+
   it('🔴 時刻は走査より前に読んで、そのあと進める(進めた後に読むと常に 0 件)', () => {
     const st = fakeStorage();
     const store = new ScheduleNotifyStore(st);

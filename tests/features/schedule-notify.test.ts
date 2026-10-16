@@ -30,6 +30,16 @@ function item(over: Partial<AgendaItem> = {}): AgendaItem {
 const lines = (items: AgendaItem[], alarmMinutes?: number, zone: IcsZone = TOKYO): string[] =>
   unfold(buildIcs(items, { stamp: STAMP, zone, ...(alarmMinutes === undefined ? {} : { alarmMinutes }) }).text);
 
+describe('見逃した予定 ── 片付けたノート(#1087)', () => {
+  it('🔴 片付けたノートの予定は数えない。対照群: 渡さなければ数える', () => {
+    const c = { lid: 'arch', line: 1, text: 'x', done: false, date: '2026-08-27', time: '14:00', until: null, repeat: null } as unknown as TaskCard;
+    const from = new Date(2026, 7, 27, 13, 0).getTime();
+    const to = new Date(2026, 7, 27, 15, 0).getTime();
+    expect(missedItems([c], from, to)).toHaveLength(1);
+    expect(missedItems([c], from, to, new Set(['arch']))).toHaveLength(0);
+  });
+});
+
 describe('.ics のアラーム(VALARM)', () => {
   it.each([
     [5, '-PT5M'],

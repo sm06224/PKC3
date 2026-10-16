@@ -195,12 +195,22 @@ export interface RepeatTail {
   readonly length: number;
 }
 
+/** `毎月` の直後に付く、対応していない言い方(第N◯曜・月末)。 */
+const UNSUPPORTED_MONTH_TAIL = /^[ \t]*(?:第[\d０-９一二三四五]|末)/;
+
 export function readRepeatTail(rest: string): RepeatTail | null {
   const m = REPEAT_TAIL.exec(rest);
   if (m === null) return null;
   const unit = repeatUnitOf(m[1]!);
   // ⚠ 網に当たったのに表に無い語は**読まない**(表が正本 ── §7)
   if (unit === null) return null;
+  /**
+   * 🔴 **「第N◯曜」「月末」は刻みとして読まない**(#1087)。⚠ この記法は対応していない ──
+   *   `毎月第2火曜` を `毎月`(開始日の日)として読むと、**20 日の予定が毎月立ち**、
+   *   `第2火曜` が札の字に残る(書いた意味と違う予定が静かに立つ)。読まなければ
+   *   全体が字のまま残り、見て直せる。
+   */
+  if (unit === 'month' && UNSUPPORTED_MONTH_TAIL.test(rest.slice(m[0].length))) return null;
   if (unit === 'week') {
     const after = rest.slice(m[0].length);
     const w = WEEKDAY_TAIL.exec(after);

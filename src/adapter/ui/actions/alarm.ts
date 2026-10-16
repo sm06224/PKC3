@@ -26,7 +26,7 @@
  * (`features/alarm/alarm-due.ts`)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { dueAlarms, type AlarmDue } from '@features/alarm/alarm-due';
+import { archivedLidsOf, dueAlarms, type AlarmDue } from '@features/alarm/alarm-due';
 import type { Chime } from '@adapter/platform/chime';
 import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
 
@@ -182,11 +182,11 @@ export function createAlarmService(deps: AlarmServiceDeps): AlarmService {
      *   過ぎた予定がまとめて鳴るのを防ぐ。字と口は次に開いたときの見逃しの知らせと同じ。
      */
     if (t - from > ALARM_MAX_GAP_MS) {
-      const n = missedItems(scan.cards, from, t).length;
+      const n = missedItems(scan.cards, from, t, archivedLidsOf(st.entryMetas)).length;
       if (n > 0) deps.post?.(missedLabel(n));
       return;
     }
-    const due = dueAlarms(scan.cards, from, t).filter((d) => !rang.has(d.key));
+    const due = dueAlarms(scan.cards, from, t, archivedLidsOf(st.entryMetas)).filter((d) => !rang.has(d.key));
     if (due.length === 0) return;
     for (const d of due) {
       rang.add(d.key);

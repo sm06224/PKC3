@@ -35,6 +35,7 @@
 import { addDays, daysBetween } from '../datetime/date-math';
 import { storedDateParts } from '../datetime/stored-date';
 import { isRealCalendarDate } from './schedule-date';
+import { plainTaskTitle } from './task-title';
 import {
   repeatMateKey,
   weekdaysOf,
@@ -390,7 +391,9 @@ export function buildIcs(items: readonly AgendaItem[], opts: IcsOptions): IcsRes
       }
     }
 
-    const summary = it.text.trim() === '' ? '(題名なし)' : it.text;
+    /** 🔴 題名は素の字にして出す(外の予定表では `**` も `entry:abc` も意味を持たない)。⚠ 切らない(#1087)。 */
+    const plain = plainTaskTitle(it.text);
+    const summary = plain.trim() === '' ? '(題名なし)' : plain;
     ev.push(`SUMMARY:${escapeText(summary)}`);
     const title = it.line === null ? undefined : opts.noteTitle?.(it.lid);
     if (title !== undefined && title !== '') ev.push(`DESCRIPTION:${escapeText(`ノート: ${title}`)}`);

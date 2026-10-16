@@ -19,9 +19,10 @@
  * ⚠ **pure module**。⚠ 時計を読まない(呼び側が渡す)。
  */
 import type { TaskCard } from '../schedule/task-cards';
-import { isScheduleDate, isScheduleTime } from '../schedule/schedule-date';
+import { isRealCalendarDate, isScheduleTime } from '../schedule/schedule-date';
 import { storedDateParts } from '../datetime/stored-date';
 import { pad2 } from '../datetime/datetime-format';
+import { plainTaskTitle } from '../schedule/task-title';
 import { expandRepeat, materializedDates, repeatMateKey } from '../schedule/repeat';
 
 /** 鳴る 1 件。⚠ `TaskCard` そのものは運ばない(必要なのはこの 4 つだけ)。 */
@@ -39,8 +40,9 @@ export interface AlarmDue {
  *
  * ⚠ **その端末の地方時**で読む(`new Date(y, m, d, hh, mm)`)── user が書いた
  *   `14:00` は**手元の 14 時**であって UTC ではない。
- * ⚠ **実在しない日は通す**(`2026-02-30`)── `schedule-date.ts` の裁定と同じ向きで、
- *   `Date` が寄せた日に鳴るだけである(黙って消すよりよい)。
+ * 🔴 **実在しない日・時刻は鳴らさない**(`2026-02-30` / `25:30`)── 直す前は `Date` が
+ *   寄せた日(3/2)・翌日(01:30)に鳴り、**書いた覚えのない時刻に知らせが出ていた**。
+ *   ⚠ 予定の並びには出る(`schedule-date.ts` の裁定。打ち間違いを見て直せる)── 鳴らさないだけ。
  */
 export function alarmAtMs(date: string, time: string): number | null {
   /**
@@ -49,7 +51,7 @@ export function alarmAtMs(date: string, time: string): number | null {
    * ⚠ 1 稿目はここに正規表現を 2 つ書いており、`tests/features/stored-date.test.ts`
    *   の全数検査が落として教えた ── **検査のほうが正しい**。
    */
-  if (!isScheduleDate(date) || !isScheduleTime(time)) return null;
+  if (!isRealCalendarDate(date) || !isRealClockTime(time)) return null;
   const d = storedDateParts(date);
   if (d === null) return null;
   const ms = new Date(
@@ -62,6 +64,23 @@ export function alarmAtMs(date: string, time: string): number | null {
     0,
   ).getTime();
   return Number.isNaN(ms) ? null : ms;
+}
+
+/** 時刻として実在するか(`00:00`〜`23:59`)。⚠ 形は `isScheduleTime` の 1 本に任せ、ここは範囲だけ足す。 */
+function isRealClockTime(time: string): boolean {
+  return isScheduleTime(time) && Number(time.slice(0, 2)) <= 23 && Number(time.slice(3, 5)) <= 59;
+}
+
+/**
+ * 🔴 **片付けた(archived)ノートの lid の集合**(#1087)。知らせ(鳴る / 見逃し)は、
+ * 予定表が既定で隠している片付けたノートの予定を**数えない**(隠した物が鳴るのは不意打ち)。
+ */
+export function archivedLidsOf(
+  metas: ReadonlyMap<string, { readonly archived: boolean }>,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const [lid, m] of metas) if (m.archived) out.add(lid);
+  return out;
 }
 
 /** 鳴らす 1 件の鍵。⚠ **行だけでは足りない**(繰り返しは同じ行が何度も来る)。 */
@@ -124,6 +143,7 @@ export function dueAlarms(
   cards: readonly TaskCard[],
   fromMs: number,
   toMs: number,
+  archived: ReadonlySet<string> = new Set(),
 ): AlarmDue[] {
   const out: AlarmDue[] = [];
   /**
@@ -140,7 +160,7 @@ export function dueAlarms(
     (d, i, a) => a.indexOf(d) === i,
   );
   for (const c of cards) {
-    if (c.done) continue;
+    if (c.done || archived.has(c.lid)) continue;
     /**
      * ⚠ **この行は型を絞っているだけで、門ではない** ── 形の判定は
      *   `alarmAtMs`(`isScheduleDate` / `isScheduleTime`)が 1 本で持つ。
@@ -164,7 +184,8 @@ export function dueAlarms(
 
 /** 帯に出す 1 行(`14:00 打ち合わせ`)。⚠ 時刻を先に出す ── 探すのは時刻である。 */
 export function alarmEntryText(due: AlarmDue): string {
-  return `${due.time} ${due.text}`;
+  // 🔴 記号は落として出す(帯に `**` や `entry:abc` が見えない。#1087)
+  return `${due.time} ${plainTaskTitle(due.text)}`;
 }
 
 /** 帯の見出し。⚠ 本数を出す(1 件しか見えていないのか分かる)。 */
