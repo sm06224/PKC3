@@ -151,6 +151,29 @@ describe('revision flow (P5b)', () => {
     expect(q('[data-pkc-field="history-panel"]')).toBeNull();
   });
 
+  it('🔴 履歴を閉じた後に着いた版の本文は捨てる(次に開いたとき、押していない版が選ばれて見えない)', async () => {
+    const { d } = setup(
+      { e1: '# 現在' },
+      {
+        listRevisionMetas: async () => [
+          { id: 'r-9', rev_order: 9, created_at: '2026-08-01', title: '旧題', archetype: 'text' },
+        ],
+      },
+    );
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'SHOW_HISTORY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'HIDE_HISTORY' });
+    d.dispatch({ type: 'REVISION_PREVIEW_LOADED', lid: 'e1', revId: 'r-9', body: '# 遅れて着いた' });
+    expect(d.getState().revisionPreview, '閉じた後に着いた分を受けた').toBeNull();
+    // 対照群:開いている間は受ける
+    d.dispatch({ type: 'SHOW_HISTORY', lid: 'e1' });
+    await tick();
+    d.dispatch({ type: 'REVISION_PREVIEW_LOADED', lid: 'e1', revId: 'r-9', body: '# 開いている間' });
+    expect(d.getState().revisionPreview?.body).toBe('# 開いている間');
+  });
+
   it('🔴 ゴミ箱の行の日時は端末の時刻で出る(DB の字は UTC ── JST では 9 時間進む)', async () => {
     const before = process.env.TZ;
     process.env.TZ = 'Asia/Tokyo';

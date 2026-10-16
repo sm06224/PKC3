@@ -171,6 +171,36 @@ describe('🔴 disk まで届く(常駐だけ動いて保存されない、を�
     off();
   });
 
+  it('🔴 作る保存に失敗したら、画面からも外す(再読み込みで消えて見える状態を残さない)', async () => {
+    const d = booted();
+    const p = port();
+    (p as unknown as { upsertRelation: () => Promise<void> }).upsertRelation = () =>
+      Promise.reject(new Error('disk full'));
+    const off = connectStoreEffects(d, p);
+    d.dispatch({ type: 'ADD_RELATION', id: 'r1', fromLid: 'n1', toLid: 'n2', kind: 'semantic' });
+    expect(d.getState().relations.map((r) => r.id), '前提:先に画面へ乗る').toEqual(['r1']);
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(d.getState().relations, '保存できなかった関係が画面に残っている').toEqual([]);
+    expect(d.getState().error).toContain('つながりを保存できません');
+    off();
+  });
+
+  it('🔴 消す保存に失敗したら、画面へ戻す(消えたまま見えて、再読み込みで戻る、を残さない)', async () => {
+    const d = booted();
+    const p = port();
+    const off = connectStoreEffects(d, p);
+    d.dispatch({ type: 'ADD_RELATION', id: 'r1', fromLid: 'n1', toLid: 'n2', kind: 'semantic' });
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    (p as unknown as { deleteRelation: () => Promise<void> }).deleteRelation = () =>
+      Promise.reject(new Error('disk full'));
+    d.dispatch({ type: 'REMOVE_RELATION', id: 'r1' });
+    expect(d.getState().relations, '前提:先に画面から消える').toEqual([]);
+    for (let i = 0; i < 20; i += 1) await Promise.resolve();
+    expect(d.getState().relations.map((r) => r.id), '消せなかった関係が画面から消えたまま').toEqual(['r1']);
+    expect(d.getState().error).toContain('つながりを消せません');
+    off();
+  });
+
   it('関係の書き込み口を持たない配線でも落ちない(機能が減るだけ)', async () => {
     const d = booted();
     const p = port();
