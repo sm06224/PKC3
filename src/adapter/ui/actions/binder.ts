@@ -16760,9 +16760,13 @@ export function bindActions(
      * 🔴 **文字も一緒に来ていたら、画像にしない**(Excel の範囲は表の HTML・文字・表の絵が同時に来る)。
      *   画像だけを拾うと表が消える。画像だけのクリップボード(スクショ)は今までどおり画像へ。
      */
-    const hasText =
-      (ce.clipboardData?.getData('text/html') ?? '').trim() !== '' ||
-      (ce.clipboardData?.getData('text/plain') ?? '').trim() !== '';
+    // ⚠ ウェブの画像 1 枚のコピーは file と `<img>` だけの HTML が来る ── それは画像として扱う
+    //   (字の無い HTML を「文字」と数えると、同じ絵が 2 回入る道に戻る)
+    const html = ce.clipboardData?.getData('text/html') ?? '';
+    const htmlHasText =
+      /<table[\s>]/i.test(html) ||
+      html.replace(/<[^>]*>/g, '').replace(/&nbsp;|\s/g, '').trim() !== '';
+    const hasText = htmlHasText || (ce.clipboardData?.getData('text/plain') ?? '').trim() !== '';
     if (!hasText && routeFiles(files, ce.target)) {
       ce.preventDefault();
       return;
