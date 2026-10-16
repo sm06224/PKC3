@@ -1120,7 +1120,20 @@ export class DualFilerRenderer {
         activeBefore instanceof HTMLElement && frame.table.contains(activeBefore)
           ? (activeBefore.closest('[data-pkc-entry]')?.getAttribute('data-pkc-entry') ?? '')
           : null;
+      /**
+       * 🔴 **打ち替え中に表が組み直されても、打った字を失わない**(#1087 D5)。
+       * ⚠ 別のタブの保存・再読み込み(`SYS_BOOTED`)・他の行の題名や大きさの変化でも指紋は動き、
+       *   入力欄は古い題名で作り直される。組み直す直前に、同じ行の入力欄の字とキャレットを採り、後で戻す。
+       */
+      const typed = this.readRenameInput(frame, renaming);
       this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc);
+      if (typed !== null) {
+        const input = frame.table.querySelector<HTMLInputElement>('[data-pkc-field="dual-rename"]');
+        if (input !== null) {
+          input.value = typed.value;
+          input.setSelectionRange(typed.start, typed.end);
+        }
+      }
       restoreTableFocus(frame, focusedBefore, pane.cursor ?? '');
       frame.scroll.use(`${paneScope(pane) ?? ''}${SEP}${filtered ? 'q' : ''}`);
     } else if (dates !== frame.dates) {
@@ -1342,6 +1355,21 @@ export class DualFilerRenderer {
     };
     host.append(crumb(null, 'ルート'));
     for (const m of chain) host.append(crumb(m.lid, m.title));
+  }
+
+  /** 打ち替え中の入力欄の「いまの字とキャレット」(同じ行の入力欄が無ければ `null`)。 */
+  private readRenameInput(
+    frame: PaneFrame,
+    renaming: string,
+  ): { value: string; start: number; end: number } | null {
+    if (renaming === '') return null;
+    const input = frame.table.querySelector<HTMLInputElement>('[data-pkc-field="dual-rename"]');
+    if (input === null || input.getAttribute('data-pkc-entry') !== renaming) return null;
+    return {
+      value: input.value,
+      start: input.selectionStart ?? input.value.length,
+      end: input.selectionEnd ?? input.value.length,
+    };
   }
 
   private renderTable(

@@ -51,6 +51,13 @@ export function reloadSnapshot(
      * 「取込は完了しました」と出すのは嘘になるし、編集の邪魔でしかない)。
      */
     deferNotice?: string | null;
+    /**
+     * 🔴 **自分の書込が disk に着くまで待つ口**(`connectStoreEffects().settled()`。#1087 D9)。
+     * ⚠ 待たずに読むと、並んでいる自分の書込(並べ替え・移動・改名)を**追い越して**古い一覧を取り、
+     *   他のタブの変更を知らせる再読み込みが**画面の木を巻き戻す**。一覧は読む**直前**に待つ
+     *   (編集が終わるのを待った後の取り直しでも同じ)。省略 = 待たない(取込の経路。書込を持たない)。
+     */
+    settled?: () => Promise<void> | undefined;
   },
 ): Promise<void> {
   const defer = (): void => {
@@ -64,6 +71,8 @@ export function reloadSnapshot(
   const boot = async (): Promise<void> => {
     let snap: Snapshot;
     try {
+      // ⚠ 待つ口が無いときは `await` しない ── 1 手遅れると、読込中に編集へ入る既存の順番が変わる
+      if (opts?.settled !== undefined) await opts.settled();
       snap = await loadSnapshot();
     } catch (e) {
       // ⚠ 黙って落とさない(レビュー L-2)── #177 の follower は本体タブの死で

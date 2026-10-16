@@ -280,3 +280,63 @@ describe('章の欄が開いている間(#1044 段2 3巡目の修理、S1)', () 
     expect([...d.getState().entryMetas.keys()]).toEqual(['a']);
   });
 });
+
+describe('自分の書込を待ってから読む(#1087 D9)', () => {
+  /**
+   * 🔴 待たずに読むと、並んでいる自分の書込(並べ替え・移動)を追い越して古い一覧を取り、
+   *   他のタブの変更を知らせる再読み込みが画面の木を巻き戻す。
+   * 🔑 観測点は「読みが始まった時点で、書込は済んでいたか」── 順番の記録で見る。
+   */
+  it('🔴 settled が済むまで一覧を読まない(読みは書込の後ろに並ぶ)', async () => {
+    const d = booted();
+    const log: string[] = [];
+    let release!: () => void;
+    const settled = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          release = () => {
+            log.push('write-done');
+            r();
+          };
+        }),
+    );
+    const load = vi.fn(async () => {
+      log.push('load');
+      return { metas: [meta('a')], relations: [] };
+    });
+    const p = reloadSnapshot(d, 'c1', load, { deferNotice: null, settled });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled, '待つ口を呼んでいない').toHaveBeenCalledTimes(1);
+    expect(load, '書込が済む前に一覧を読んだ(追い越した)').not.toHaveBeenCalled();
+    release();
+    await p;
+    expect(log, '読みが書込より先に走った').toEqual(['write-done', 'load']);
+    expect([...d.getState().entryMetas.keys()], '読んだ一覧が入っていない').toEqual(['a']);
+  });
+
+  it('対照群: 待つ口が無ければ(取込の経路)従来どおりその場で読む', async () => {
+    const d = booted();
+    const load = vi.fn(async () => ({ metas: [meta('a')], relations: [] }));
+    await reloadSnapshot(d, 'c1', load, { deferNotice: null });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('編集を終えるのを待った後の取り直しでも、書込を待ってから読む', async () => {
+    const d = booted();
+    d.dispatch({ type: 'CREATE_ENTRY', archetype: 'text', lid: 'draft', title: 'd' });
+    d.dispatch({ type: 'UPDATE_OPEN_BODY', body: 'x\n' });
+    const order: string[] = [];
+    const settled = vi.fn(async () => {
+      order.push('settled');
+    });
+    const load = vi.fn(async () => {
+      order.push('load');
+      return { metas: [meta('a')], relations: [] };
+    });
+    await reloadSnapshot(d, 'c1', load, { deferNotice: null, settled });
+    expect(load, '編集中に読んだ').not.toHaveBeenCalled();
+    d.dispatch({ type: 'CANCEL_EDIT' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual(['settled', 'load']);
+  });
+});
