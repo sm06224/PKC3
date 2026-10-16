@@ -1123,6 +1123,31 @@ describe('RowSwap — 日本語入力の契約', () => {
     expect(r.swap.isComposing).toBe(true);
   });
 
+  it('③ keyCode 229(isComposing が false の確定直後の keydown)でも奪わない(#1087)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落。'));
+    const ta = box(r.host)!;
+    ta.value = '';
+    for (const key of ['Escape', 'Tab', '(']) {
+      const ev = new KeyboardEvent('keydown', {
+        key,
+        keyCode: 229,
+        bubbles: true,
+        cancelable: true,
+        isComposing: false,
+      });
+      ta.dispatchEvent(ev);
+      expect(ev.defaultPrevented, `${key} を奪っている`).toBe(false);
+    }
+    expect(ta.value, '括弧が補われている').toBe('');
+    expect(r.swap.isActive, 'Escape で行が閉じている').toBe(true);
+    // 対照群: keyCode 229 でなければ Escape は行を閉じる(上の assert が空振りでないこと)
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    ta.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(r.swap.isActive).toBe(false);
+  });
+
   it('③ 変換中に auto pair の記号を打っても、IME から奪わない', () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));

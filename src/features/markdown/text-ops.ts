@@ -17,8 +17,9 @@
  * その間にカーソルを置く(打ち始められる)。
  */
 
+import { codeContextAt, insideCodeOrMath } from './code-context';
 import { parseCsv } from './csv-table';
-import { formatMarkdownLink } from './link-format';
+import { escapeLinkLabel, formatMarkdownLink } from './link-format';
 import { lineStart } from './line-start';
 import { TASK_LINE } from './task-line';
 import { tableToMarkdown } from './table-copy';
@@ -64,9 +65,24 @@ const LINE_DETECT: Readonly<Record<LinePrefix, RegExp>> = {
 /** 字下げを保って記号を剥がす対象。 */
 const INDENT_KEPT: ReadonlySet<LinePrefix> = new Set<LinePrefix>(['ul', 'ol', 'task']);
 
-/** 行頭の印を落とす(どの種類でも)。⚠ 番号付きは `12. ` のような形もある。 */
+/** 行頭の印を落とす(どの種類でも)。⚠ 番号付きは `12. ` のような形もある。引用 `> ` も落とす(引用の印を付けるときだけ使う)。 */
 function stripMark(line: string): string {
   return line.replace(/^(?:#{1,6} |> |(?:[-*+]|\d+[.)])\s+\[[ xX]\](?:\s|$)|[-*+] |\d+[.)] )/, '');
+}
+
+/**
+ * 🔴 **引用の印を除いた、行頭の印**(見出し・リスト・番号・チェック)を落とす(#1087)。
+ * ⚠ 引用 `> ` は**落とさない**(`splitQuote` が先に切り離している)── 直す前は `> - a` に箇条書きを押すと
+ *   `- - a`、番号を押すと `1. - a`、見出しを押すと `# - a` になっていた。
+ */
+function stripListHead(rest: string): string {
+  return rest.replace(/^(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])\s+\[[ xX]\](?:\s|$)|[-*+][ \t]+|\d+[.)][ \t]+)/, '');
+}
+
+/** 行頭の引用の連なり(`> ` / `> > `。字下げ付きも)と、その残り。 */
+function splitQuote(line: string): [string, string] {
+  const q = /^(?:[ \t]*>[ \t]?)*/.exec(line)![0];
+  return [q, line.slice(q.length)];
 }
 
 /**
@@ -99,7 +115,10 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
    */
   const skipBlank = lines.some((l) => l.trim() !== '');
   const isBlank = (l: string): boolean => skipBlank && l.trim() === '';
-  const allMarked = lines.every((l) => isBlank(l) || detect.test(l));
+  // 🔴 引用の中の行は、引用の印を除いた残りで判定する(#1087)。引用・チェックは行ぜんたいで読む
+  const wholeLine = kind === 'quote' || kind === 'task';
+  const target = (l: string): string => (wholeLine ? l : splitQuote(l)[1]);
+  const allMarked = lines.every((l) => isBlank(l) || detect.test(target(l)));
   const keep = INDENT_KEPT.has(kind);
   let n = 0;
   const next = lines
@@ -111,17 +130,23 @@ export function toggleLinePrefix(sel: TextSelection, kind: LinePrefix): TextSele
           const lead = /^((?:\s*>)*\s*)/.exec(m[1]!)![1]!;
           return lead + l.slice(m[0].length);
         }
-        return keep ? l.replace(detect, '$1') : l.replace(detect, '');
+        if (kind === 'quote') return l.replace(detect, '');
+        const [q, rest] = splitQuote(l);
+        return q + (keep ? rest.replace(detect, '$1') : rest.replace(detect, ''));
       }
       n += 1;
+      if (kind === 'quote') return `${mark}${stripMark(l)}`;
+      // 🔴 引用の印は残し、その内側で印を差し替える。見出しは字下げを落とし、リスト類は字下げを保つ
+      const [q, rest] = splitQuote(l);
       if (keep) {
-        const indent = /^\s*/.exec(l)![0];
-        const bare = stripMark(l.slice(indent.length));
-        return kind === 'ol' ? `${indent}${n}. ${bare}` : `${indent}${mark}${bare}`;
+        const indent = /^\s*/.exec(rest)![0];
+        const bare = stripListHead(rest.slice(indent.length));
+        return kind === 'ol' ? `${q}${indent}${n}. ${bare}` : `${q}${indent}${mark}${bare}`;
       }
-      const bare = stripMark(l);
-      // 番号付きは行ごとに数える(全部 `1.` だと読みにくい)。⚠ 空行は数えない
-      return kind === 'ol' ? `${n}. ${bare}` : `${mark}${bare}`;
+      // 字下げした `# ` は見出しではない(従来どおり)。字下げした**リスト**の印は、字下げごと落として見出しにする
+      const t = rest.replace(/^\s+/, '');
+      const indentedHead = t !== rest && /^#{1,6}[ \t]+/.test(t);
+      return `${q}${mark}${indentedHead ? rest : stripListHead(t)}`;
     })
     .join('\n');
   const text = sel.text.slice(0, from) + next + sel.text.slice(to);
@@ -155,12 +180,137 @@ function wrapped(before: number, after: number, len: number): boolean {
   return len > 1 || (before % 2 === 1 && after % 2 === 1);
 }
 
+/** 1 区間(1 行の中)の囲み状態。`inner` = 選択が印ごと / `outer` = 選択の外側に印。囲まれていなければ `null`。 */
+function wrapState(text: string, start: number, end: number, mark: string): 'inner' | 'outer' | null {
+  const ch = mark[0]!;
+  const len = mark.length;
+  const inner = text.slice(start, end);
+  if (
+    inner.length >= len * 2 &&
+    wrapped(markRun(inner, 0, ch, 1), markRun(inner, inner.length, ch, -1), len)
+  ) {
+    return 'inner';
+  }
+  if (wrapped(markRun(text, start, ch, -1), markRun(text, end, ch, 1), len)) return 'outer';
+  return null;
+}
+
+/** 1 区間を囲む / 外す。`state` が `null` なら囲む。戻りは新しい本文と、区間の新しい範囲。 */
+function wrapSpan(
+  text: string,
+  start: number,
+  end: number,
+  mark: string,
+  state: 'inner' | 'outer' | null,
+): TextSelection {
+  const len = mark.length;
+  const inner = text.slice(start, end);
+  // ① 選択が印ごと囲んでいる(`**太字**` を丸ごと選んで押した)
+  if (state === 'inner') {
+    const bare = inner.slice(len, inner.length - len);
+    return { text: text.slice(0, start) + bare + text.slice(end), start, end: start + bare.length };
+  }
+  // ② 選択の外側に印がある(`**太字**` の `太字` だけ選んで押した)
+  if (state === 'outer') {
+    return {
+      text: text.slice(0, start - len) + inner + text.slice(end + len),
+      start: start - len,
+      end: end - len + inner.length,
+    };
+  }
+  // ③ 付ける
+  const out = `${mark}${inner}${mark}`;
+  return {
+    text: text.slice(0, start) + out + text.slice(end),
+    start: start + len,
+    end: start + len + inner.length,
+  };
+}
+
+/**
+ * 行頭の印(引用 `> ` / 見出し `#` / リスト `-` `*` `+` `1.` / チェック)。
+ * 🔴 囲みの印は**この後ろ**から付ける(#1087)── 直す前は `**## 見出し**` / `**- 牛乳**` になり、
+ *   見出しもリストも壊れて字のまま出ていた。
+ */
+const LINE_HEAD = /^(?:[ \t]*>[ \t]?)*[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/;
+
 /**
  * 前後を囲む印(`**` / `` ` `` など)をトグルする。
  * ⚠ 選択が無いときは印だけ入れて**間にカーソルを置く**(すぐ打ち始められる)。
  * ⚠ 印は**同じ文字の繰り返し**であること(`**` / `*` / `` ` ``)を前提にしている。
+ *
+ * 🔴 **複数行の選択は行ごとに囲む**(#1087)── 1 つの印で行をまたぐと、段落をまたいだ `**一つ目\n\n二つ目**` は
+ *   字のまま出て、`==a\nb==` は強調にならなかった。行ごとなら**どの行も 1 行の中で閉じる**。
+ *   - 行頭の印(見出し・リスト・引用・チェック)は**囲みの外**に置く(`## **見出し**` / `- **牛乳**`)
+ *   - 空行は触らない。全部の行が囲まれていれば外す、そうでなければ囲まれていない行だけ囲む
+ *     (もう一度押すと全部外れる ── トグルの対称)
+ *   - 🔴 **表の行を含む選択は何もしない**(`**| a | b |**` は表を壊し、セルごとに囲む形は
+ *     「選んだ範囲」より広く手を入れる ── 断るほうが単純で安全。セルの中だけを選べば囲める)
  */
 export function toggleWrap(sel: TextSelection, mark: string): TextSelection {
+  const { text } = sel;
+  if (sel.start >= sel.end) return wrapWhole(sel, mark);
+  // 行ごとの区間を集める
+  const spans: { start: number; end: number }[] = [];
+  let table = false;
+  let at = lineStart(text, sel.start);
+  while (at <= sel.end && at <= text.length) {
+    const nl = text.indexOf('\n', at);
+    const lineEnd = nl === -1 ? text.length : nl;
+    const line = text.slice(at, lineEnd);
+    let s0 = Math.max(at, sel.start);
+    const e0 = Math.min(lineEnd, sel.end);
+    if (s0 < e0) {
+      // 表の行(行頭の `|` から選んでいる)── 断る
+      const bar = line.search(/\S/);
+      if (bar !== -1 && line[bar] === '|' && s0 <= at + bar) table = true;
+      // 行頭の印の中から選んでいたら、印の後ろへ寄せる
+      s0 = Math.max(s0, at + LINE_HEAD.exec(line)![0].length);
+      let s1 = s0;
+      let e1 = e0;
+      while (s1 < e1 && /[ \t\u3000\r]/u.test(text[s1]!)) s1++;
+      while (e1 > s1 && /[ \t\u3000\r]/u.test(text[e1 - 1]!)) e1--;
+      if (s1 < e1) spans.push({ start: s1, end: e1 });
+    }
+    if (nl === -1) break;
+    at = nl + 1;
+  }
+  if (table) return sel;
+  // 囲む中身が 1 つも無い(空白・改行だけの選択)── 選んだまま、これまでの扱い
+  if (spans.length === 0) return wrapWhole(sel, mark);
+  const states = spans.map((sp) => wrapState(text, sp.start, sp.end, mark));
+  // 1 行だけなら、これまでどおり**印の内側**を選んだまま返す(続けて打てる / 続けて外せる)
+  if (spans.length === 1) return wrapSpan(text, spans[0]!.start, spans[0]!.end, mark, states[0]!);
+  const allWrapped = states.every((st) => st !== null);
+  let out = text;
+  const outer: { start: number; end: number }[] = new Array<{ start: number; end: number }>(spans.length);
+  const deltas: number[] = new Array<number>(spans.length).fill(0);
+  const len = mark.length;
+  // 後ろの行から書き換える(前の行の位置がずれない)
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const sp = spans[i]!;
+    const st = states[i]!;
+    if (!allWrapped && st !== null) {
+      // 囲み済みの行はそのまま ── 印を含めた範囲を控える
+      outer[i] = st === 'outer' ? { start: sp.start - len, end: sp.end + len } : sp;
+      continue;
+    }
+    const r = wrapSpan(out, sp.start, sp.end, mark, allWrapped ? st : null);
+    deltas[i] = r.text.length - out.length;
+    out = r.text;
+    outer[i] = allWrapped ? { start: r.start, end: r.end } : { start: r.start - len, end: r.end + len };
+  }
+  let shift = 0;
+  for (let i = 0; i < spans.length - 1; i++) shift += deltas[i]!;
+  /**
+   * 🔴 戻す選択は**印を含めた全体**(もう一度押すと全部外れる ── トグルの対称)。
+   * ⚠ 1 行の選択が「印の内側」を返すのとは違う ── 複数行で内側を返すと、1 行目の頭が印の途中になる。
+   */
+  return { text: out, start: outer[0]!.start, end: outer[spans.length - 1]!.end + shift };
+}
+
+/** 選択を 1 つの塊として囲む(選択が無い / 空白だけのとき)。 */
+function wrapWhole(sel: TextSelection, mark: string): TextSelection {
   const { text } = sel;
   /**
    * 🔴 **選択の端の空白・改行は囲まない**(#1087)── 三連クリックや `Shift`+`↓` は行末の改行まで選ぶので、そのまま囲むと `**hello\n**world` になる。英単語をダブルクリックすると後ろの空白まで選ばれる
@@ -175,32 +325,7 @@ export function toggleWrap(sel: TextSelection, mark: string): TextSelection {
     start = sel.start;
     end = sel.end;
   }
-  const ch = mark[0]!;
-  const len = mark.length;
-  const inner = text.slice(start, end);
-  // ① 選択が印ごと囲んでいる(`**太字**` を丸ごと選んで押した)
-  if (
-    inner.length >= len * 2 &&
-    wrapped(markRun(inner, 0, ch, 1), markRun(inner, inner.length, ch, -1), len)
-  ) {
-    const bare = inner.slice(len, inner.length - len);
-    return { text: text.slice(0, start) + bare + text.slice(end), start, end: start + bare.length };
-  }
-  // ② 選択の外側に印がある(`**太字**` の `太字` だけ選んで押した)
-  if (wrapped(markRun(text, start, ch, -1), markRun(text, end, ch, 1), len)) {
-    return {
-      text: text.slice(0, start - len) + inner + text.slice(end + len),
-      start: start - len,
-      end: end - len + inner.length,
-    };
-  }
-  // ③ 付ける
-  const out = `${mark}${inner}${mark}`;
-  return {
-    text: text.slice(0, start) + out + text.slice(end),
-    start: start + len,
-    end: start + len + inner.length,
-  };
+  return wrapSpan(text, start, end, mark, wrapState(text, start, end, mark));
 }
 
 /** カーソルを置きたい所の目印(雛形の定義にだけ現れ、挿入時に取り除かれる)。 */
@@ -653,13 +778,23 @@ function pickCsvDelimiter(text: string): string {
   return text.includes('\t') ? '\t' : ',';
 }
 
-/** リンク。選択があればそれを文字列に、無ければ雛形。 */
+/**
+ * リンク。選択があればそれを文字列に、無ければ雛形。
+ * 🔴 **ラベルの端の空白は外に出す**(#1087)── `[ 語 ](url)` はリンクにならない。
+ * 🔴 **ラベルの `[` `]` `\` などは escape する**(`linkifyPastedUrl` と同じ `escapeLinkLabel`)── `]` 1 個でリンクが切れた。
+ * 🔴 **段落をまたぐ選択は断る**(空行をまたいだ 1 つのリンクは描けない。そのまま返す)。
+ */
 export function insertLink(sel: TextSelection): TextSelection {
-  const label = sel.text.slice(sel.start, sel.end) || 'リンク';
-  const out = `[${label}](url)`;
+  const picked = sel.text.slice(sel.start, sel.end);
+  if (/\n[ \t]*\n/.test(picked)) return sel;
+  const trimmed = picked.trim();
+  const lead = trimmed === '' ? '' : picked.slice(0, picked.indexOf(trimmed));
+  const tail = trimmed === '' ? '' : picked.slice(lead.length + trimmed.length);
+  const label = escapeLinkLabel(trimmed === '' ? 'リンク' : trimmed);
+  const out = `${lead}[${label}](url)${tail}`;
   const text = sel.text.slice(0, sel.start) + out + sel.text.slice(sel.end);
   // url を選択状態にする(すぐ貼り付けられる)
-  const at = sel.start + label.length + 3;
+  const at = sel.start + lead.length + label.length + 3;
   return { text, start: at, end: at + 3 };
 }
 
@@ -686,6 +821,8 @@ export function linkifyPastedUrl(
 ): TextSelection | null {
   if (!allowed) return null;
   if (sel.start >= sel.end) return null;
+  // 🔴 コード・数式の中ではリンクにしない(#1087)── `[字](URL)` がコードの字として入る
+  if (insideCodeOrMath(sel.text, sel.start)) return null;
   const label = sel.text.slice(sel.start, sel.end);
   if (label.trim() === '' || /[\r\n]/.test(label)) return null;
   const url = pasted.trim();
@@ -1017,7 +1154,8 @@ export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
     prefix === key.repeat(prefix.length)
   ) {
     // 3 つ目で閉じを次の行に置く。caret は**開き記号の直後**(言語 / 名前を打つ所)
-    if (prefix.length === 2) {
+    // 🔴 すでに開いている fence の中で打つ 3 つ目は**閉じ**である ── 対を足すと fence が 1 本余る(#1087)
+    if (prefix.length === 2 && !(key === '`' && codeContextAt(text, start) === 'fence')) {
       return { kind: 'insert', insert: key + '\n' + block, start: start + 1, end: start + 1 };
     }
     return null;
@@ -1037,6 +1175,11 @@ export function autoPairFor(sel: TextSelection, key: string): AutoPair | null {
   }
   const close = INLINE_PAIRS[key];
   if (close === undefined) return null;
+  // 🔴 同じ行の caret より前に開きの「`」が残っているなら、いま打つのは**閉じ**(対を足すと 2 つ余る。#1087)
+  if (key === '`' && start === end) {
+    // ⚠ 数えるのは**字の数**(「``」を打っている途中は対にする ── 行内の空のコード)
+    if (((prefix.match(/`/g) ?? []).length) % 2 === 1) return null;
+  }
   // 選択があるときは**囲む**(選んだ文字を消さない)
   if (start !== end) {
     const inner = text.slice(start, end);

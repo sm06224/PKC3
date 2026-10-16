@@ -34,6 +34,7 @@ import { ADAPTER_SETTING_VALIDATORS } from '../render/settings-validators';
 import { toggleCodeCollapse } from '../render/code-collapse';
 import { SEARCH_FIND_ATTR } from '../render/search';
 import { settleJump } from '../render/long-note';
+import { insideCodeOrMath } from '@features/markdown/code-context';
 import { lineStart } from '@features/markdown/line-start';
 import { blockSpanAt, sliceLines } from '@features/markdown/source-blocks';
 import {
@@ -16484,6 +16485,12 @@ export function bindActions(
   const pasteText = (ce: ClipboardEvent): boolean => {
     const target = ce.target;
     if (!isBodyInput(target)) return false;
+    /**
+     * 🔴 **コード・数式の中では何も変換しない**(#1087)── fence の中へ表を貼ると fence が入れ子に、
+     *   HTML を貼ると `**` やリンクの形が入り、選んだ字へ URL を貼ると `[字](URL)` になっていた。
+     *   コードの中の字は user の字そのものなので、素の貼付に任せる(判定は `code-context.ts` の 1 本)。
+     */
+    if (insideCodeOrMath(target.value, target.selectionStart ?? 0)) return false;
     const html = ce.clipboardData?.getData('text/html') ?? '';
     const plain = ce.clipboardData?.getData('text/plain') ?? '';
     /**

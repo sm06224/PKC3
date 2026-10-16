@@ -66,6 +66,19 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 2)); // 「一\n」
   await clickReal(page, '[data-pkc-format="bold"]');
   await expect(ta, '改行まで選んだ太字が、次の行の頭へ落ちた').toHaveValue('**一**\n二\n三');
+
+  // ④-d 🔴 #1087 ── 見出しの行を丸ごと選んで太字を押しても、見出しのまま(記号の後ろから囲む)
+  await ta.fill('## 見出し');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(0, 6));
+  await clickReal(page, '[data-pkc-format="bold"]');
+  await expect(ta, '見出しの記号まで太字の中に入った').toHaveValue('## **見出し**');
+  await expect(preview.locator('h2 strong')).toHaveText('見出し');
+
+  // ④-e 🔴 #1087 ── 引用の中の箇条書きで「箇条書き」を押すと、記号を重ねずに外す
+  await ta.fill('> - a');
+  await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
+  await clickReal(page, '[data-pkc-format="ul"]');
+  await expect(ta, '引用の中の箇条書きに記号が重なった').toHaveValue('> a');
   await ta.fill('強調したい');
 
   // ④' 🔴 #950 ① ── 選んでいるあいだだけ、表 / 図 / コードブロック / 数式の説明が
