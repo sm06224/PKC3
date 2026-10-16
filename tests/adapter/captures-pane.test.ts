@@ -804,3 +804,102 @@ describe('借りられなかった行(#1087 A2)', () => {
     );
   });
 });
+
+/**
+ * 🔴 **一覧が変わっても、鳴っている音は頭へ戻らない**(#1087)。
+ * ⚠ 切り出しで 1 件増える / 絞り込み / 名前の変更で指紋が変わり、`<audio>` が作り直される。
+ *   作り直した器は `autoplay` で頭から鳴り直す(止めていたものまで鳴り出す)。
+ */
+describe('一覧が変わったときの再生位置(#1087)', () => {
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  };
+  const mediaOf = (h: HTMLElement): HTMLMediaElement =>
+    h.querySelector<HTMLMediaElement>('[data-pkc-capture="a"] [data-pkc-field="capture-media"]')!;
+  /** happy-dom は再生しないので、鳴っている / 止めたの値を器に直接置く。 */
+  function setPlayback(m: HTMLMediaElement, time: number, paused: boolean): void {
+    Object.defineProperty(m, 'currentTime', { value: time, configurable: true, writable: true });
+    Object.defineProperty(m, 'paused', { value: paused, configurable: true });
+    Object.defineProperty(m, 'readyState', { value: 4, configurable: true });
+  }
+  async function playingPane(): Promise<ReturnType<typeof pane>> {
+    const p = pane({ captureItems: ITEMS() }, lender());
+    p.paint({ capturePlayingLid: 'a' });
+    await flush();
+    p.paint();
+    return p;
+  }
+  const three = (): CaptureItem[] => [
+    ...ITEMS(),
+    ...captureItemsFrom([{ lid: 'c', title: 'c', body: body('録音-切り出し.webm', 'audio/webm', 'k-3') }]),
+  ];
+
+  it('🔴 鳴らしている最中に 1 件増えても、同じ位置から鳴らし続ける', async () => {
+    const p = await playingPane();
+    const before = mediaOf(p.host);
+    setPlayback(before, 37.5, false);
+    p.paint({ captureItems: three() });
+    const after = mediaOf(p.host);
+    expect(after, '前提が崩れている(器が作り直されていない)').not.toBe(before);
+    expect(after.currentTime, '頭へ戻った').toBe(37.5);
+    expect(after.autoplay, '鳴り直さない').toBe(true);
+  });
+
+  it('🔴 止めていた音は、一覧が変わっても止まったまま(位置は残る)', async () => {
+    const p = await playingPane();
+    setPlayback(mediaOf(p.host), 12, true);
+    p.paint({ captureItems: three() });
+    expect(mediaOf(p.host).autoplay, '止めていたのに鳴り出す').toBe(false);
+    expect(mediaOf(p.host).currentTime).toBe(12);
+  });
+
+  it('🔴 絞り込みを変えても同じ(鳴っている行が残るとき)', async () => {
+    const p = await playingPane();
+    setPlayback(mediaOf(p.host), 8, false);
+    p.paint({ filterQuery: '録音' });
+    expect(rows(p.host)).toHaveLength(1);
+    expect(mediaOf(p.host).currentTime).toBe(8);
+    expect(mediaOf(p.host).autoplay).toBe(true);
+    const q = await playingPane();
+    setPlayback(mediaOf(q.host), 8, true);
+    q.paint({ filterQuery: '録音' });
+    expect(mediaOf(q.host).autoplay).toBe(false);
+  });
+
+  it('⚠ 読み込み前(readyState 0)の器は「止めた」に数えない(初めて開くとき鳴らす)', async () => {
+    const p = await playingPane();
+    Object.defineProperty(mediaOf(p.host), 'paused', { value: true, configurable: true });
+    p.paint({ captureItems: three() });
+    expect(mediaOf(p.host).autoplay).toBe(true);
+  });
+
+  it('⚠ 別の行を押したときは控えを持ち越さない(初めて開く器は鳴らす)', async () => {
+    const p = await playingPane();
+    setPlayback(mediaOf(p.host), 50, true);
+    p.paint({ capturePlayingLid: 'b' });
+    await flush();
+    p.paint();
+    const b = p.host.querySelector<HTMLMediaElement>('[data-pkc-capture="b"] [data-pkc-field="capture-media"]')!;
+    expect(b.autoplay).toBe(true);
+    expect(b.currentTime).toBe(0);
+  });
+});
+
+describe('読めない音の行から押し所を外す(#1087)', () => {
+  it('🔴 再生器が理由に替わったら、始まり・終わりの帯と波形も消える', async () => {
+    const p = pane({ captureItems: ITEMS() }, lender());
+    p.paint({ capturePlayingLid: 'a' });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    p.paint();
+    const li = rows(p.host)[0]!;
+    expect(li.querySelector('[data-pkc-region="capture-trim-bar"] [data-pkc-field="capture-trim-start"]'), '前提').not.toBeNull();
+    expect(li.querySelector('[data-pkc-region="capture-wave"]'), '前提(波形)').not.toBeNull();
+    li.querySelector('[data-pkc-field="capture-media"]')!.dispatchEvent(new Event('error'));
+    expect(li.querySelector('[data-pkc-field="attachment-undecodable"]')).not.toBeNull();
+    expect(li.querySelector('[data-pkc-field="capture-trim-start"]'), '押しても効かない始まりが残る').toBeNull();
+    expect(li.querySelector('[data-pkc-field="capture-trim-end"]')).toBeNull();
+    expect(li.querySelector('[data-pkc-region="capture-wave"]'), '波形が残る').toBeNull();
+    // 帰り道(再生をやめる)は残す
+    expect(li.querySelector('[data-pkc-field="capture-stop"]')).not.toBeNull();
+  });
+});

@@ -194,10 +194,8 @@ describe('🔴 「確定」「取り消し」で出口を言う断り文が src 
  * (編集していない)にも「編集を保存するか、編集をやめてから」と言っていた**(#516 と同じ
  * 「存在しない編集を探させる」誤り)。
  *
- * 🔑 寄せなかったのは 2 か所だけ ── **等値で pin する**(直したら消さないと
+ * 🔑 寄せなかったのは 1 か所だけ(もう 1 か所の capture.ts は #1087 で断り文ごと無くなった) ── **等値で pin する**(直したら消さないと
  * 落ちる形)。理由はそれぞれの file に書いてある:
- * - `capture.ts` ── 「編集中は取り込めません。」という**別の一文**が先に在り、
- *   前置きだけ差し替えても文全体の一致は保てない(状態を 2 重に語る文)
  * - `view-window.ts` ── ここには `phase` が届いていない(`landed: boolean`
  *   しか無く、`SET_VIEW_MODE` の条件を辿ってようやく `'editing'` だと分かる)
  */
@@ -205,9 +203,8 @@ describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b
   const PHRASES = ['編集を保存するか、編集をやめてから', '編集を終えてから'] as const;
   /** `phaseBlockReason` 自身の定義(ここが「1 か所」の本体。除外してよい)。 */
   const DEFINITION_FILE = 'src/adapter/state/app-state.ts';
-  /** 寄せなかった 2 か所(理由は上のコメント)。ここだけ手書きの前置きが残ってよい。 */
+  /** 寄せなかった 1 か所(理由は上のコメント)。ここだけ手書きの前置きが残ってよい。 */
   const KNOWN_KEPT: Record<string, string> = {
-    'src/adapter/ui/actions/capture.ts': '編集を保存するか、編集をやめてから',
     'src/adapter/platform/view-window.ts': '編集を保存するか、編集をやめてから',
   };
 
@@ -227,7 +224,7 @@ describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b
     expect(files.length).toBeGreaterThan(100);
   });
 
-  it('この 1 か所(定義)と既知の 2 か所を除いて、src のコードに残っていない', () => {
+  it('この 1 か所(定義)と既知の 1 か所を除いて、src のコードに残っていない', () => {
     const hits: string[] = [];
     for (const f of files) {
       const rel = relOf(f);
@@ -242,7 +239,7 @@ describe('🔴 手書きの前置きは phaseBlockReason へ寄せてある(C11b
     expect(hits).toEqual([]);
   });
 
-  it('既知リストの 2 か所は、いまも実在する(消えたら KNOWN_KEPT を更新する合図)', () => {
+  it('既知リストの 1 か所は、いまも実在する(消えたら KNOWN_KEPT を更新する合図)', () => {
     for (const [rel, phrase] of Object.entries(KNOWN_KEPT)) {
       const code = codeOnly(readFileSync(join(__dirname, '../..', rel), 'utf8'));
       expect(code.includes(phrase), `${rel} に「${phrase}」が見つからない`).toBe(true);

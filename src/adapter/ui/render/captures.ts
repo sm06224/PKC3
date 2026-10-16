@@ -81,6 +81,8 @@ export class CapturesRenderer {
   private last = ' ';
   /** いま借りている 1 件。⚠ 借り換え・面を閉じるときに返す。 */
   private playing: Playing | null = null;
+  /** 組み直す直前に控えた再生位置(`render` が書き、`row` が読む)。 */
+  private resume: { url: string; time: number; paused: boolean } | null = null;
   /** ⚠ 借りに行っている最中の lid(同じ行で二重に借りない)。 */
   private borrowing: string | null = null;
   /** 🔴 借りに行って「中身が無い / 借りられない」だった行の lid(#1087 A2)。⚠ 同じ行を借り直し続けない。 */
@@ -190,6 +192,14 @@ export class CapturesRenderer {
       return;
     }
     this.last = print;
+
+    /**
+     * 🔴 **組み直す前に、鳴っている位置と「鳴っていたか」を控える**(#1087)。
+     * ⚠ 一覧が変わる(切り出しで 1 件増える / 絞り込み / 名前)たびに `<audio>` が作り直され、
+     *   `autoplay` で**頭から鳴り直す**(止めていたものまで鳴り出す)。
+     * ⚠ 古い要素をそのまま付け替えることはできない(外すと再生が止まる)── 値を控えて新しい要素へ移す。
+     */
+    this.resume = this.takeResume();
 
     this.host.textContent = '';
     const note = document.createElement('p');
@@ -475,6 +485,19 @@ export class CapturesRenderer {
    *   印は「聞きながら」押すものなので、それでは動線が成り立たない。
    * 🔑 だから**その 1 か所の中身だけ**を捨てて組み直す(器は触らない)。
    */
+  private takeResume(): { url: string; time: number; paused: boolean } | null {
+    const url = this.playing?.url ?? '';
+    const lid = this.playing?.lid ?? null;
+    if (url === '' || lid === null) return null;
+    for (const m of this.host.querySelectorAll<HTMLMediaElement>('[data-pkc-field="capture-media"]')) {
+      if (m.closest('[data-pkc-capture]')?.getAttribute('data-pkc-capture') !== lid) continue;
+      if (m.getAttribute('src') !== url) continue;
+      // ⚠ 読み込み前(`readyState` 0)の `paused` は「まだ鳴り出していない」だけなので、止めた印に数えない
+      return { url, time: m.currentTime, paused: m.paused && m.readyState > 0 };
+    }
+    return null;
+  }
+
   private syncTrimBar(): void {
     const lid = this.playing?.lid ?? null;
     for (const bar of this.host.querySelectorAll<HTMLElement>('[data-pkc-region="capture-trim-bar"]')) {
@@ -669,9 +692,16 @@ export class CapturesRenderer {
         const media = document.createElement(item.kind);
         media.setAttribute('data-pkc-field', 'capture-media');
         media.controls = true;
-        media.autoplay = true;
+        // 🔑 組み直しなら、控えた位置へ戻し、止めていたなら鳴らさない(初めて開くときは鳴らす)
+        const resume = this.resume !== null && this.resume.url === this.playing.url ? this.resume : null;
+        media.autoplay = resume === null ? true : !resume.paused;
         media.src = this.playing.url;
-        replaceOnMediaError(media, item.kind, item.mime, SAVE_HINT_OPEN_NOTE);
+        if (resume !== null && resume.time > 0) media.currentTime = resume.time;
+        // 🔴 読めなかったら、押しても効かない帯と波形も一緒に外す(#1087)
+        replaceOnMediaError(media, item.kind, item.mime, SAVE_HINT_OPEN_NOTE, () => {
+          for (const e of li.querySelectorAll('[data-pkc-region="capture-trim-bar"], [data-pkc-region="capture-wave"]'))
+            e.remove();
+        });
         li.append(media);
         /**
          * 🔑 **本文の再生機と同じ扱いにする**(#772 段① B)。
