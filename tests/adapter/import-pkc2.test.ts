@@ -2049,8 +2049,8 @@ describe('[B6] 添付が多いバックアップの取り込みは、進み具�
     ]);
     expect(await importPkc2File(d, deps, new File([zip], 'a.pkc3-full.zip'))).toBe(1);
     const progress = notices.filter((m) => /添付を書き込んでいます \d+ \/ \d+/.test(m));
-    expect(progress).toContain('取り込み中…(添付を書き込んでいます 20 / 45)');
-    expect(progress).toContain('取り込み中…(添付を書き込んでいます 40 / 45)');
+    expect(progress).toContain('取り込み中(添付を書き込んでいます 20 / 45)');
+    expect(progress).toContain('取り込み中(添付を書き込んでいます 40 / 45)');
     expect(progress.some((m) => m.includes('45 / 45'))).toBe(false);
     expect(notices.at(-1)).toMatch(/^取り込み完了: 1 件/);
   });

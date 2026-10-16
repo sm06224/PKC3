@@ -612,8 +612,10 @@ export async function importPkc2File(
       return owner ? `「${owner.title || '(無題)'}」の添付` : '題名の分からないノートの添付';
     };
     // 🔑 添付が数百件あると「取り込み中…」が止まって見える ── 間引いて (N / M) を出す
+    //   ⚠ 字に「…」を付けない ── これは新しく始まる知らせではなく、上の「取り込み中…」の途中経過
+    //   (「…」は始まりの印として status-lifetime の門が数え、終わりの知らせとの対を見ている)
     const assetProgress = createProgressThrottle((n, m) =>
-      deps.notify?.(`取り込み中…(添付を書き込んでいます ${n} / ${m})`),
+      deps.notify?.(`取り込み中(添付を書き込んでいます ${n} / ${m})`),
     );
     let assetsDone = 0;
     for (const a of result.assets) {
