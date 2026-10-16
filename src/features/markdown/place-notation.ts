@@ -882,8 +882,17 @@ function spliceTokens(line: string, tokens: PlaceTokens): string | null {
  *   描画は属性を数として読むだけなので、引用なしの整数へ揃えて同じに描ける)。
  */
 function setToken(attrs: string, key: PlaceKey, value: number | string): string {
-  const re = new RegExp(`(^|\\s)${key}=(?:"[^"]*"|\\S*)`);
-  if (re.test(attrs)) return attrs.replace(re, `$1${key}=${value}`);
+  // ⚠ 札は**頭から順に**読む ── 引用つきの値の中の `x=5`(`note="left x=5"`)は値の一部で、札ではない。
+  //   重なっている札(`x=1 x=2`)は描画が**最後**を採るので、**全部**を 1 つにして最初の位置へ書く
+  const re = /(^|\s)([^\s=]+)=(?:"[^"]*"|'[^']*'|\S*)/g;
+  let seen = false;
+  const out = attrs.replace(re, (whole: string, lead: string, name: string) => {
+    if (name !== key) return whole;
+    if (seen) return '';
+    seen = true;
+    return `${lead}${key}=${value}`;
+  });
+  if (seen) return out;
   return attrs === '' ? `${key}=${value}` : `${attrs} ${key}=${value}`;
 }
 

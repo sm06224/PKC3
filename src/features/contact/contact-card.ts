@@ -287,9 +287,21 @@ export function matchContact(card: ContactCard, query: string): boolean {
   const hay = [card.name, card.org, ...card.tels, ...card.emails].join(' ').toLowerCase();
   if (hay.includes(q)) return true;
   // 🔴 電話は区切りと全角を無視して探す(#1087)── `09011112222` でも `090-1111` でも `０９０` でも当たる
-  const qd = q.normalize('NFKC').replace(/[^\d]/g, '');
-  if (qd.length < 3) return false;
-  return card.tels.some((t) => t.normalize('NFKC').replace(/[^\d]/g, '').includes(qd));
+  // ⚠ 数字の比べ方は、**探す字が数字と区切りだけのとき**に使う。名前と混ぜた「山田 090」で
+  //   数字だけを取り出すと、090 の人が全員当たる(名前の絞りが効かない)
+  const telDigits = card.tels.map((t) => t.normalize('NFKC').replace(/[^\d]/g, ''));
+  const phoneLike = (s: string): boolean => /^[\d\s+()-]+$/.test(s) && /\d/.test(s);
+  const digitHit = (s: string): boolean => {
+    const qd = s.replace(/[^\d]/g, '');
+    return qd.length >= 3 && telDigits.some((t) => t.includes(qd));
+  };
+  const qn = q.normalize('NFKC');
+  if (phoneLike(qn)) return digitHit(qn);
+  // 名前と番号が混ざった探し方は、語ごとに**全部**当たること
+  const terms = qn.split(/\s+/).filter(Boolean);
+  if (terms.length < 2) return false;
+  const hayN = hay.normalize('NFKC');
+  return terms.every((w) => hayN.includes(w) || (phoneLike(w) && digitHit(w)));
 }
 
 /**

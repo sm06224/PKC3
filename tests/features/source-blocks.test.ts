@@ -484,3 +484,23 @@ describe('同じ本文に何度も聞く口(blockSpanLookup)#1467', () => {
     expect(blockSpanAt(CORPUS, 5)).toEqual({ start: 5, end: 9, open: false });
   });
 });
+
+describe('囲いの中のコードブロックの `:::`(B1)', () => {
+  it('🔴 コードブロックの中の裸の `:::` は囲いの閉じに数えない', () => {
+    const t = ':::note\nS\n```\n:::\n```\n:::\n\nKEEP ME';
+    const spans = scanContainers(t);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({ start: 0, end: 5, kind: 'directive', open: false });
+    expect(blockSpanAt(t, 0)).toEqual({ start: 0, end: 5, open: false });
+  });
+
+  it('コードブロックの中の `:::note` は深さを増やさない', () => {
+    const t = ':::note\n```\n:::note\n```\n:::\n後';
+    expect(blockSpanAt(t, 0)).toEqual({ start: 0, end: 4, open: false });
+  });
+
+  it('対照群 ── 閉じの無いコードブロックは、従来どおり囲いの閉じで終わる', () => {
+    const t = ':::note\n```\n:::\n本文';
+    expect(blockSpanAt(t, 0)).toEqual({ start: 0, end: 2, open: false });
+  });
+});

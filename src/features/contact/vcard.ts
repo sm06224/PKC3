@@ -143,7 +143,7 @@ interface VcfProp {
  * その行が **QUOTED-PRINTABLE と名乗っているか**(パラメタ部だけを見る)。
  * ⚠ `[^:]*` は `:` を越えないので、**値の中の同じ字**には当たらない。
  */
-const QP_HEAD = /^[^:]*;[^:]*ENCODING=QUOTED-PRINTABLE/i;
+const QP_HEAD = /^[^:]*;[^:]*QUOTED-PRINTABLE/i; // 2.1 の素の綴り(`FN;QUOTED-PRINTABLE:`)も 受ける
 
 /** 折り返し(行頭の空白 / タブは前の行の続き、または行末 `=`)を解いて、性質の行に割る。 */
 function unfoldLines(text: string): string[] {
@@ -151,9 +151,8 @@ function unfoldLines(text: string): string[] {
   const out: string[] = [];
   for (const line of raw) {
     const prev = out.length > 0 ? out[out.length - 1]! : null;
-    if ((line.startsWith(' ') || line.startsWith('\t')) && prev !== null) {
-      out[out.length - 1] = prev + line.slice(1);
-    } else if (prev !== null && prev.endsWith('=') && QP_HEAD.test(prev)) {
+    // ⚠ QP の行末 `=` を**先に**見る ── 空白で始まる継続行(`hello=` + ` world`)の空白は本文の字で、折り返しの印ではない
+    if (prev !== null && prev.endsWith('=') && QP_HEAD.test(prev)) {
       /**
        * 🔴 **2.1 の QUOTED-PRINTABLE は「行末 `=`」で折る**(2 巡目の着地前
        * レビュー 2026-08-28)── 継続行は**空白で始まらない**ので、上の枝では
@@ -169,6 +168,8 @@ function unfoldLines(text: string): string[] {
        *   詰め物(`…QUJD=`)の次の行まで巻き込む。
        */
       out[out.length - 1] = prev.slice(0, -1) + line;
+    } else if ((line.startsWith(' ') || line.startsWith('\t')) && prev !== null) {
+      out[out.length - 1] = prev + line.slice(1);
     } else if (line !== '') {
       out.push(line);
     }
@@ -308,6 +309,14 @@ function nameFromN(value: string): string {
   return [comps[0] ?? '', comps[1] ?? ''].filter(Boolean).join(' ').trim();
 }
 
+/** N の 3 番目以降(ミドルネーム・敬称・肩書き)。⚠ 名前には入れない(FN が在れば FN が題名になる)。 */
+function extraNameParts(value: string): string[] {
+  return splitUnescaped(value, ';')
+    .slice(2)
+    .map((c) => foldBreaks(unescapeValue(c)).trim())
+    .filter(Boolean);
+}
+
 /** 読みかけの 1 枚。⚠ 型を書き出しておく(`finishCard` と 2 か所で組み立てない)。 */
 interface VcfDraft {
   fn: string;
@@ -322,6 +331,8 @@ interface VcfDraft {
   typeSaid: boolean;
   /** 文字の壊れを**このカードで既に言ったか**(同じ理由で 1 枚 1 行)。 */
   qpSaid: boolean;
+  /** N の敬称などで、名前に入れなかった字(FN が無いカードだけ警告に使う)。 */
+  nExtra: string[];
 }
 
 /**
@@ -365,6 +376,12 @@ function finishCard(cur: VcfDraft): VcfCard {
   };
 }
 
+/** FN が無く N から名前を作ったとき、名前に入れなかった字(敬称など)を言う。無ければ null。 */
+function droppedNameWarning(cur: VcfDraft, no: number): string | null {
+  if (cur.fn !== '' || cur.nExtra.length === 0) return null;
+  return `${no} 枚目: 名前の敬称など(${cur.nExtra.join(' ')})は名前に入れていません`;
+}
+
 /**
  * .vcf の中身を読む。⚠ **壊れた行は黙って捨てず warnings に積む**。
  */
@@ -375,6 +392,11 @@ export function parseVcf(text: string): VcfParseResult {
 
   let cur: VcfDraft | null = null;
   const cardNo = (): number => cards.length + 1;
+  const takeCard = (c: VcfDraft): void => {
+    const w = droppedNameWarning(c, cardNo());
+    if (w !== null) warnings.push(w);
+    cards.push(finishCard(c));
+  };
 
   for (const line of lines) {
     const prop = parseProp(line);
@@ -400,17 +422,17 @@ export function parseVcf(text: string): VcfParseResult {
           warnings.push(
             `${cardNo()} 枚目: END:VCARD が無いまま次が始まりました(読めた分は取り込みました)`,
           );
-          cards.push(finishCard(cur));
+          takeCard(cur);
         }
       }
-      cur = { fn: '', n: '', orgParts: [], tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false };
+      cur = { fn: '', n: '', orgParts: [], tels: [], emails: [], birthday: '', notes: [], others: [], typeSaid: false, qpSaid: false, nExtra: [] };
       continue;
     }
     if (prop.name === 'END' && prop.value.trim().toUpperCase() === 'VCARD') {
       if (cur !== null) {
         // 🔴 中身の無いカードはノートを作らない(#534 ④)── ただし黙らない
         if (isEmptyCard(cur)) warnings.push(`${cardNo()} 枚目: 中身が無いので飛ばしました`);
-        else cards.push(finishCard(cur));
+        else takeCard(cur);
       }
       cur = null;
       continue;
@@ -447,6 +469,7 @@ export function parseVcf(text: string): VcfParseResult {
         break;
       case 'N': {
         const n = nameFromN(qpOut?.text ?? prop.value);
+        if (cur.nExtra.length === 0) cur.nExtra = extraNameParts(qpOut?.text ?? prop.value);
         if (cur.n !== '' && n !== '' && n !== cur.n) cur.others.push(`- ${otherLabel(prop.name, prop.params)}: ${n}`);
         else if (cur.n === '') cur.n = n;
         break;
@@ -504,7 +527,8 @@ export function parseVcf(text: string): VcfParseResult {
         else if (cur.birthday === '') cur.birthday = decoded;
         break;
       case 'NOTE':
-        if (rawDecoded !== '') cur.notes.push(rawDecoded);
+        // 🔴 QP の `=0D=0A` は CRLF で戻る ── 本文は `\n` に揃える(単独の CR も)
+        if (rawDecoded !== '') cur.notes.push(rawDecoded.replace(/\r\n?/g, '\n'));
         break;
       case 'X-ABLABEL':
       case 'X-ABADR':
@@ -560,7 +584,7 @@ export function parseVcf(text: string): VcfParseResult {
       warnings.push(
         `${cardNo()} 枚目: END:VCARD が無いまま終わりました(読めた分は取り込みました)`,
       );
-      cards.push(finishCard(cur));
+      takeCard(cur);
     }
   }
   return { cards, warnings };
