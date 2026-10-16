@@ -221,8 +221,10 @@ describe('積む / 積まないの判断(createStatusPoster)', () => {
 });
 
 describe('本物の MessagePost につなぐ', () => {
+  // ⚠ 書きは 1 本の鎖で順に流れる(#1087)ので、2 件目は 1 件目が書き終わってから走る ──
+  //   決まった数の microtask では足りない。macrotask を挟んで、鎖が流れ切るまで待つ。
   const settle = async (): Promise<void> => {
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    for (let i = 0; i < 3; i += 1) await new Promise((r) => setTimeout(r, 0));
   };
   function wire() {
     const post = new MessagePost(new FakeSpool());
