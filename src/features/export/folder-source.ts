@@ -31,7 +31,7 @@
  */
 import { scanAssetRefsInto } from '../asset/asset-ref-scan';
 import { collectSubtreeLids } from '../relation/tree';
-import { readTags } from '../flavor/tags';
+import { collectEntryTags } from '../flavor/entry-tags';
 import { tagColorKey, tagColorsUsedBy } from '../tag-color';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import type { ArchiveSource } from './pkc3-archive';
@@ -140,7 +140,7 @@ export async function folderSource(
     }
     if (more) more = scanAssetRefsInto(body, remaining, found);
     if (allColors.length > 0) {
-      for (const t of readTags(body)) {
+      for (const t of collectEntryTags(body).all) {
         const k = tagColorKey(t);
         if (k !== null) usedTagKeys.add(k);
       }

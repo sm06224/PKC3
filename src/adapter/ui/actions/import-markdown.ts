@@ -17,6 +17,7 @@ import { readPlainMarkdown } from '@features/import/plain-markdown';
 import { extractMeta } from '@features/flavor';
 import { IMPORT_TEXT_MAX_BYTES, readImportTextInfo, SJIS_GUESS_NOTE } from '@features/import/text-decode';
 import { humanBytes } from '@features/human-bytes';
+import { duplicateNote, findDuplicates, narrowByLength } from '@features/import/duplicate-scan';
 
 /**
  * ⚠ `ImportDeps`(PKC2 経路)の**部分集合**として書く ── 呼び出し側が
@@ -54,6 +55,10 @@ export interface MarkdownImportDeps {
    * だけを返す。紐づけは呼び出し側(`main.ts`)が持つ。
    */
   imported?(lids: readonly string[]): void;
+  /** 🔴 既に在るノートの頭(#1087。PKC2 経路と同じ。省略可 ── 無い配線では重なりを数えないだけ)。 */
+  existingHeads?(): readonly { lid: string; bodyChars: number | null }[];
+  /** 🔴 絞った lid の本文だけ読む(#1087。省略可)。 */
+  readBodies?(lids: readonly string[]): Promise<ReadonlyMap<string, string>>;
 }
 
 /**
@@ -128,6 +133,23 @@ export async function importMarkdownFiles(
     return fail(
       `Markdown を読めませんでした(ノートは 1 件も追加されていません): ${errorText(e)}`,
     );
+  }
+
+  /**
+   * 🔴 **同じ .md を 2 回取り込んだことに気づけるようにする**(#1087。PKC2 経路の #399 ② と同じ検出・同じ文)。
+   * ⚠ **取り込みは止めない** ── 言うだけ。数えられなくても取り込みは続ける。
+   */
+  if (deps.existingHeads !== undefined && deps.readBodies !== undefined) {
+    try {
+      const incoming = rows.map((r) => ({ lid: r.lid, title: r.title, body: r.body }));
+      const lids = narrowByLength(incoming, deps.existingHeads());
+      if (lids.length > 0) {
+        const note = duplicateNote(findDuplicates(incoming, await deps.readBodies(lids)));
+        if (note !== null) notes.push(note);
+      }
+    } catch {
+      // ⚠ 数えられなかっただけ ── 取り込みを止める理由にはならない
+    }
   }
 
   /**

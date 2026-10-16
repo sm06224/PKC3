@@ -184,6 +184,44 @@ describe('query: タグは本文の中も数える(#550 段④)', () => {
     expect(out.keys.find((k) => k.key === 'tags')?.count).toBe(1);
   });
 
+  it('🔴 タグは大小無視で 1 組にする: 最初に見えた綴りを見せ、件数と lid が合算される(#1087)', () => {
+    const out = groupByKey(
+      [
+        { lid: 'a', head: fm(['tags: [Work]']) },
+        { lid: 'b', head: fm(['tags: [work]']) },
+        { lid: 'c', head: fm(['tags: [WORK, work]']) }, // 同じ行内の綴り違いは 1 件
+        { lid: 'd', head: '本文', bodyTags: ['work'] },
+        { lid: 'e', head: fm(['tags: [他]']) },
+      ],
+      'tags',
+    );
+    expect(out.groups.map((g) => [g.value, g.total, g.lids])).toEqual([
+      ['Work', 4, ['a', 'b', 'c', 'd']],
+      ['他', 1, ['e']],
+    ]);
+    // 目録の件数(行単位)は元から 1 行 1 件
+    expect(collectKeys([{ lid: 'c', head: fm(['tags: [WORK, work]']) }]).keys.find((k) => k.key === 'tags')?.count).toBe(1);
+  });
+
+  it('⚠ 対照群: タグ以外の key の値は綴りどおりに分ける', () => {
+    const out = groupByKey(
+      rows(['a', fm(['author: Smith'])], ['b', fm(['author: smith'])]),
+      'author',
+    );
+    expect(out.groups.map((g) => g.value).sort()).toEqual(['Smith', 'smith']);
+  });
+
+  it('⚠ 合算した組の lid は上限(lidsPerGroup)で切れ、total は数え続ける', () => {
+    const n = QUERY_LIMITS.lidsPerGroup + 3;
+    const many = Array.from({ length: n }, (_, i) => ({
+      lid: `l${i}`,
+      head: fm([i % 2 === 0 ? 'tags: [Work]' : 'tags: [work]']),
+    }));
+    const g = groupByKey(many, 'tags').groups[0]!;
+    expect(g.total).toBe(n);
+    expect(g.lids).toHaveLength(QUERY_LIMITS.lidsPerGroup);
+  });
+
   it('🔑 綴りは 1 か所(TAGS_KEY)── 直書きが 2 か所目を作らないように', () => {
     expect(TAGS_KEY).toBe('tags');
   });

@@ -136,3 +136,55 @@ describe('タグの色 ── バックアップの往復', () => {
     expect(await containerJson(full.blob)).toContain('秘密のタグ');
   });
 });
+
+describe('タグの色 ── 本文中のタグ(#買い物)も部分の書き出しで色が残る(#1087)', () => {
+  const rel = (id: string, to: string) => ({
+    id,
+    from_lid: 'f',
+    to_lid: to,
+    kind: 'structural',
+    created_at: null,
+    updated_at: null,
+  });
+  const m = (lid: string, archetype: string, order: number) => ({
+    lid,
+    title: lid,
+    archetype,
+    created_at: null,
+    updated_at: null,
+    entry_order: order,
+    status: null,
+    date: null,
+    archived: 0,
+  });
+  function base(bodies: Record<string, string>): ArchiveSource {
+    return {
+      ...source([
+        { tag: '買い物', color: '#ff8800' },
+        { tag: '家事', color: '#0044cc' },
+      ]),
+      listEntryMetas: async () => [m('f', 'folder', 1), m('n1', 'text', 2), m('n2', 'text', 3)],
+      listBodies: async () => ({
+        rows: Object.entries(bodies).map(([lid, body]) => ({ lid, body })),
+        done: true,
+      }),
+      getBody: async (lid: string) => bodies[lid] ?? null,
+      listRelations: async () => [rel('r1', 'n1'), rel('r2', 'n2')] as never,
+    } as ArchiveSource;
+  }
+  const bodies = { f: '', n1: '# 題\n\n#買い物\n', n2: '---\ntags: [家事]\n---\n' };
+
+  it('1 ノートの書き出し: 本文中の #タグ の色が付いてくる(文書タグの色は対照群)', async () => {
+    const body = await singleEntrySource(base(bodies), 'n1');
+    expect(await body.source.listTagColors?.()).toEqual([{ tag: '買い物', color: '#ff8800' }]);
+    const fm = await singleEntrySource(base(bodies), 'n2');
+    expect(await fm.source.listTagColors?.()).toEqual([{ tag: '家事', color: '#0044cc' }]);
+  });
+
+  it('フォルダの書き出し: 本文中のタグの色も、文書タグの色も付いてくる', async () => {
+    const { folderSource } = await import('../../src/features/export/folder-source');
+    const f = await folderSource(base(bodies), 'f');
+    const colors = (await f.source.listTagColors?.()) ?? [];
+    expect(colors.map((c) => c.tag).sort()).toEqual(['家事', '買い物']);
+  });
+});

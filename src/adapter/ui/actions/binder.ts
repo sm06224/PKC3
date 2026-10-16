@@ -283,7 +283,7 @@ import {
   placeInlineText,
   showPlaceInlineNote,
 } from '../render/place-inline';
-import { MAX_TAG_CHARS, overlongTagNames, sameTag, splitTags } from '@features/flavor/tags';
+import { MAX_TAG_CHARS, overlongTagNames, splitTags } from '@features/flavor/tags';
 import { TAGS_KEY } from '@features/query/group-by';
 import { isEntrySort, NATURAL_DESC } from '@features/filter/entry-sort';
 import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
@@ -2539,8 +2539,9 @@ async function queryTagBulk(
       return;
     }
     next = names[0]!;
-    // 同じ名前なら何も変わらない(押した手応えは言う)
-    if (sameTag(next, tag)) {
+    // 同じ名前なら何も変わらない(押した手応えは言う)。
+    // ⚠ 大小だけの違いは「変える」である(外す → 付けるで綴りが変わる。#1087)
+    if (next === tag) {
       dispatcher.dispatch({ type: 'OP_NOTICE', message: `タグ「${tag}」の名前は変わりませんでした` });
       return;
     }

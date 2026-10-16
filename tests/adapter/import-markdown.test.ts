@@ -368,3 +368,41 @@ describe('読んでいる間に編集が始まった(#1087。ics / pptx と同�
     expect(h.d.getState().error ?? '').toContain('編集を保存するか、編集をやめてから');
   });
 });
+
+describe('同じ .md をもう一度取り込んだら、重なりを言う(#1087。PKC2 経路の #399 ② と同じ検出)', () => {
+  /** 書いた分から「既存の頭」と「本文」を返す配線(main.ts と同じ形)。 */
+  function withDup(h: ReturnType<typeof harness>) {
+    h.deps.existingHeads = () =>
+      [...h.d.getState().entryMetas.values()].map((m) => ({
+        lid: m.lid,
+        bodyChars: h.written.find((w) => w.lid === m.lid)!.body.length,
+      }));
+    h.deps.readBodies = async (lids) =>
+      new Map(h.written.filter((w) => lids.includes(w.lid)).map((w) => [w.lid, w.body] as const));
+  }
+  const same = () => mdFile('# 同じ題\n本文\n', 'same.md');
+
+  it('🔴 同じ内容をもう一度取り込むと、注意に「同じ内容のノートが 1 件」が出る(取り込みは止めない)', async () => {
+    const h = harness();
+    withDup(h);
+    expect(await importMarkdownFiles(h.d, h.deps, [same()])).toBe(1);
+    expect(h.reported().join('\n')).not.toContain('同じ内容のノート');
+    expect(await importMarkdownFiles(h.d, h.deps, [same()])).toBe(1);
+    expect(h.written, '警告だけで、取り込みは止めない').toHaveLength(2);
+    expect(h.reported().some((n) => n.includes('同じ内容のノートが 1 件ありました(「同じ題」'))).toBe(true);
+    expect(h.notices.at(-1)).toContain('注意 1 件');
+  });
+
+  it('対照群: 内容が違えば言わない / 配線が無ければ今までどおり黙る', async () => {
+    const h = harness();
+    withDup(h);
+    await importMarkdownFiles(h.d, h.deps, [same()]);
+    await importMarkdownFiles(h.d, h.deps, [mdFile('# 別\nちがう本文\n', 'other.md')]);
+    expect(h.reported().join('\n')).not.toContain('同じ内容のノート');
+
+    const bare = harness();
+    await importMarkdownFiles(bare.d, bare.deps, [same()]);
+    await importMarkdownFiles(bare.d, bare.deps, [same()]);
+    expect(bare.reported()).toEqual([]);
+  });
+});
