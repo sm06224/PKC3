@@ -18,6 +18,7 @@
  *   チェック項目を持つノートだけに絞られる(`task-cards.ts`)。**予定表を使ったことが無い端末・設定が切の端末では頼まない**。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { archivedLidsOf } from '@features/alarm/alarm-due';
 import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
 import type { ScheduleNotifyStore } from '../render/schedule-notify';
 
@@ -106,7 +107,7 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
           return true;
         }
         if (st.taskScan === null) return false;
-        const n = missedItems(st.taskScan.cards, lastOpen, startedAt).length;
+        const n = missedItems(st.taskScan.cards, lastOpen, startedAt, archivedLidsOf(st.entryMetas)).length;
         if (n > 0) {
           deps.paint(n);
           deps.post(missedLabel(n));

@@ -9,6 +9,7 @@ import {
   alarmBarLabel,
   alarmEntryText,
   alarmKey,
+  archivedLidsOf,
   dueAlarms,
 } from '../../src/features/alarm/alarm-due';
 import type { TaskCard } from '../../src/features/schedule/task-cards';
@@ -40,9 +41,40 @@ describe('予定の時刻(#280)', () => {
     expect(alarmAtMs('', '14:00')).toBeNull();
   });
 
-  it('⚠ 実在しない日は通す(黙って消さない)', () => {
-    // ⚠ `schedule-date.ts` の裁定と同じ向き ── 通せば画面に出て、user が直せる
-    expect(alarmAtMs('2026-02-30', '09:00')).not.toBeNull();
+  it('🔴 実在しない日・時刻は鳴らさない(#1087。寄せた日に鳴ると書いた覚えのない時刻になる)', () => {
+    // 直す前: 2026-02-30 09:00 は 3/2 09:00、25:30 は翌日 01:30 に鳴った
+    expect(alarmAtMs('2026-02-30', '09:00')).toBeNull();
+    expect(alarmAtMs('2026-13-01', '09:00')).toBeNull();
+    expect(alarmAtMs('2026-08-27', '25:30')).toBeNull();
+    expect(alarmAtMs('2026-08-27', '14:60')).toBeNull();
+    expect(alarmAtMs('2026-08-27', '24:00')).toBeNull();
+    // 対照群: 端の実在する値は通る(閏日・23:59・00:00)
+    expect(alarmAtMs('2028-02-29', '23:59')).toBe(new Date(2028, 1, 29, 23, 59).getTime());
+    expect(alarmAtMs('2026-08-27', '00:00')).toBe(new Date(2026, 7, 27, 0, 0).getTime());
+  });
+
+  it('🔴 実在しない日の予定は、寄せた日の窓でも鳴らない', () => {
+    const bad = card({ date: '2026-02-30', time: '09:00' });
+    const m = (d: number, h: number, mi: number): number => new Date(2026, 2, d, h, mi).getTime();
+    expect(dueAlarms([bad], m(2, 8, 59), m(2, 9, 0))).toEqual([]);
+    const late = card({ date: '2026-08-27', time: '25:30' });
+    const n = (d: number, h: number, mi: number): number => new Date(2026, 7, d, h, mi).getTime();
+    expect(dueAlarms([late], n(28, 1, 29), n(28, 1, 30))).toEqual([]);
+  });
+
+  it('🔴 片付けたノートの予定は鳴らさない(#1087)。対照群: 渡さなければ鳴る', () => {
+    const c = card({ lid: 'arch' });
+    expect(dueAlarms([c], at(13, 59), at(14, 0))).toHaveLength(1);
+    expect(dueAlarms([c], at(13, 59), at(14, 0), new Set(['arch']))).toEqual([]);
+    expect(dueAlarms([c], at(13, 59), at(14, 0), new Set(['other']))).toHaveLength(1);
+  });
+
+  it('archivedLidsOf は片付けたノートの lid だけを集める', () => {
+    const metas = new Map([
+      ['a', { archived: true }],
+      ['b', { archived: false }],
+    ]);
+    expect([...archivedLidsOf(metas)]).toEqual(['a']);
   });
 });
 

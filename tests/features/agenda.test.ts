@@ -267,16 +267,32 @@ describe('期間(#344 段①)', () => {
    * 🔴 **今日をまたぐ期間は、過ぎた日だけが「期限切れ」**。
    * ⚠ 期間ごと期限切れにすると、**まだ続いている出張が赤くなる**。
    */
-  it('今日をまたぐ期間は、過ぎた日の束だけ期限切れになる', () => {
+  it('🔴 今日をまたぐ期間は、終わるまで期限切れにならない(#1087)', () => {
+    // 直す前: 過ぎた日(8/21・8/22)が赤くなり、まだ続いている出張が期限切れに見えた
     const g = buildAgenda([card('t', 0, '2026-08-21', null, '出張', '2026-08-25')], TODAY);
-    const flags = g.map((x) => [x.date, x.overdue]);
-    expect(flags).toEqual([
-      ['2026-08-21', true],
-      ['2026-08-22', true],
+    expect(g.map((x) => [x.date, x.overdue])).toEqual([
+      ['2026-08-21', false],
+      ['2026-08-22', false],
       ['2026-08-23', false], // 今日
       ['2026-08-24', false],
       ['2026-08-25', false],
     ]);
+    // 対照群: 終わった期間は全部の日が期限切れ
+    const ended = buildAgenda([card('t', 0, '2026-08-18', null, '出張', '2026-08-20')], TODAY);
+    expect(ended.map((x) => x.overdue)).toEqual([true, true, true]);
+  });
+
+  it('🔴 過ぎた日でも、済んだ項目しか無ければ期限切れにしない(#1087)', () => {
+    const done = { ...card('d', 0, '2026-08-20', null, '済み'), done: true };
+    const open = card('o', 0, '2026-08-21', null, '未完');
+    const g = buildAgenda([done, open], TODAY);
+    expect(g.map((x) => [x.date, x.overdue])).toEqual([
+      ['2026-08-20', false],
+      ['2026-08-21', true],
+    ]);
+    // 同じ日に済んだのと未完が混ざれば、未完があるので期限切れ
+    const mixed = buildAgenda([done, { ...open, date: '2026-08-20', key: 'z' }], TODAY);
+    expect(mixed[0]?.overdue).toBe(true);
   });
 });
 

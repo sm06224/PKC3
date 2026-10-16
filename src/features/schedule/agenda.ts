@@ -277,8 +277,17 @@ export function buildAgenda(
     .map((date) => ({
       date,
       label: labelOf(date, today, tomorrow),
-      // ⚠ 文字列で比べる(`YYYY-MM-DD` は辞書順 = 日付順)
-      overdue: date < today,
+      /**
+       * 🔴 **期限切れ = その日に「済んでいなくて、終わりが今日より前」の予定が在る**(#1087)。
+       * ⚠ 直す前は `date < today` だけだった ── ① 済んだ項目しかない過去の日(「済み」を出したとき)
+       *   ② **続いている期間の途中の日**(8/21〜8/25 を 8/23 に見ると 8/21・8/22 が赤い)が、
+       *   どちらも期限を過ぎていないのに赤くなった。
+       * 🔑 期間の札は全部の日に同じ `until` で載る ── 終わりが今日以降なら、過ぎた日も赤くしない。
+       * ⚠ 文字列で比べる(`YYYY-MM-DD` は辞書順 = 日付順)。
+       */
+      overdue:
+        date < today &&
+        byDate.get(date)!.some((c) => !c.done && (c.until ?? c.date ?? date) < today),
       cards: sortByTime(byDate.get(date)!),
     }));
   if (withUndated && undated.length > 0)

@@ -30,7 +30,7 @@ import {
 } from '../../src/adapter/ui/actions/alarm';
 import { missedLabel } from '../../src/features/schedule/schedule-notify';
 
-function meta(lid: string): EntryMeta {
+function meta(lid: string, archived = false): EntryMeta {
   return {
     lid,
     title: 't-' + lid,
@@ -40,7 +40,7 @@ function meta(lid: string): EntryMeta {
     entryOrder: 1,
     status: null,
     date: null,
-    archived: false,
+    archived,
     bodyChars: null,
   };
 }
@@ -61,7 +61,13 @@ const card = (over: Partial<TaskCard> = {}): TaskCard =>
 const at = (h: number, m: number): number => new Date(2026, 7, 27, h, m, 0, 0).getTime();
 
 function bench(
-  opts: { cards?: TaskCard[]; enabled?: boolean; scan?: boolean; ringer?: () => boolean } = {},
+  opts: {
+    cards?: TaskCard[];
+    enabled?: boolean;
+    scan?: boolean;
+    ringer?: () => boolean;
+    archived?: boolean;
+  } = {},
 ) {
   const d = new Dispatcher();
   let subs = 0;
@@ -74,7 +80,7 @@ function bench(
       off();
     };
   };
-  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a')], relations: [] });
+  d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', opts.archived ?? false)], relations: [] });
   if (opts.scan !== false) {
     const scan: TaskScan = {
       cards: opts.cards ?? [card()],
@@ -159,6 +165,20 @@ describe('アラート(#280)', () => {
     expect(b.service.ringing(), '時間になったのに鳴らない').toHaveLength(1);
     expect(b.chimes(), '音が鳴っていない').toBe(1);
     expect(b.painted.at(-1), '帯を描き直していない').toBe(1);
+  });
+
+  it('🔴 片付けたノートの予定は鳴らない(#1087)。対照群: 同じ予定でも片付けていなければ鳴る', () => {
+    const arch = bench({ archived: true });
+    arch.service.start();
+    arch.advanceTo(14, 0);
+    arch.beat();
+    expect(arch.service.ringing(), '片付けたノートの予定が鳴った').toHaveLength(0);
+    expect(arch.chimes()).toBe(0);
+    const live = bench();
+    live.service.start();
+    live.advanceTo(14, 0);
+    live.beat();
+    expect(live.service.ringing(), '対照群が鳴っていない').toHaveLength(1);
   });
 
   it('🔴 ② 起動した時点で過ぎている予定は鳴らさない', () => {
@@ -366,6 +386,14 @@ describe('アラート(#280)', () => {
     b.advanceMs(30_000);
     b.beat();
     expect(b.posts, '同じ区間をもう一度積んだ').toHaveLength(1);
+  });
+
+  it('🔴 長い空きの「見逃した予定」にも、片付けたノートの予定は数えない(#1087)', () => {
+    const b = bench({ archived: true });
+    b.service.start();
+    b.advanceTo(16, 0);
+    b.jump();
+    expect(b.posts, '片付けたノートの予定を見逃しに積んだ').toEqual([]);
   });
 
   it('対照群:ふつうの間引き(1 分強の空き)なら、遅れても鳴る', () => {

@@ -38,6 +38,7 @@ import { getMonthGrid, dateKey, viewedMarks } from '@features/schedule/month-gri
 import type { TaskCard } from '@features/schedule/task-cards';
 import { holidayName } from '@features/schedule/jp-holidays';
 import { materializedDates } from '@features/schedule/repeat';
+import { isRealCalendarDate } from '@features/schedule/schedule-date';
 import { entryFilterOf, matchesEntry, type EntryFilter } from '@features/filter/title-filter';
 import { scheduleItemsOf } from './schedule-items';
 import { buildPressedButton } from './choice-buttons';
@@ -418,9 +419,17 @@ export class ScheduleRenderer {
         settled: state.taskScan !== null,
       });
     } else this.day.leave();
+    /**
+     * 🔴 **「日 / 週 / 月」でも、暦に無い日付(`@2026-02-30`)の束は一覧の器に残す**(#1087)。
+     * ⚠ 直す前は日付なしの束だけを残したので、暦に無い日の予定は**一覧には出るのに、
+     *   日・週・月では黙って消えた**(どの日の目盛りにも載らず、理由も出ない)。
+     * 🔑 日付なしの束と同じ場所に出す ── 目盛りに置けない予定の置き場は 1 つにする。
+     */
     this.paintGroups(
       frame.groups,
-      dayMode || weekMode || monthMode ? groups.filter((g) => g.date === null) : groups,
+      dayMode || weekMode || monthMode
+        ? groups.filter((g) => g.date === null || !isRealCalendarDate(g.date))
+        : groups,
       state,
     );
   }
@@ -541,6 +550,22 @@ export class ScheduleRenderer {
       state.taskScan.cards.some((c) => c.done && (c.date !== null || state.showUndatedTasks))
     )
       return '済んだ予定は隠れています。「出すもの」で「済み」を出すと見えます。';
+    /**
+     * 🔴 **日付を書いた予定が「片付けたノート」にだけ在るなら、そう言う**(#1087)。
+     * ⚠ 言わないと下の「日付を書いた予定がまだありません」になり、**在る予定を「無い」と言う**。
+     *   ボタンの字は「出すもの」の中の「片付けたもの(N)」(`paintArchivedToggle`)。
+     */
+    if (
+      groups === 0 &&
+      !state.showArchived &&
+      (state.taskScan.cards.some(
+        (c) =>
+          state.entryMetas.get(c.lid)?.archived === true &&
+          (c.date !== null || state.showUndatedTasks),
+      ) ||
+        [...state.entryMetas.values()].some((m) => m.archived && m.date !== null))
+    )
+      return '片付けたノートの予定は隠れています。「出すもの」で「片付けたもの」を出すと見えます。';
     if (dated === 0 && !state.showUndatedTasks)
       // ⚠ 書式バーは編集中にしか無い ── 予定の画面で使える入口(「予定を足す」)を言う(#1087)
       return '日付を書いた予定がまだありません。「- [ ] やること @2026-08-25」のように書くか、上の「予定を足す」で日付を選んで足してください。';

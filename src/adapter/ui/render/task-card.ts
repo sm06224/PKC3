@@ -22,6 +22,8 @@ import { formatListDate } from '@features/datetime/stored-date';
 import { repeatWord } from '@features/schedule/repeat';
 import { formatTimeSpan } from '@features/schedule/schedule-date';
 import { resolveItemColor } from '@features/schedule/item-color';
+import { clipTaskText } from '@features/schedule/task-cards';
+import { plainTaskTitle } from '@features/schedule/task-title';
 import { currentTagColors } from './tag-color';
 
 /**
@@ -283,7 +285,13 @@ export function patchTaskCard(
   }
   const text = card.querySelector('[data-pkc-field="text"]');
   // ⚠ 中身が空の項目もある(`- [ ]` だけの行)── 札は出すが、字は出ない
-  if (text && text.textContent !== data.text) text.textContent = data.text;
+  /**
+   * 🔴 **見せる字は素の字にして、長ければここで丸める**(#1087)。⚠ 直す前は行の字をそのまま出していた
+   *   (`**重要** [資料](entry:abc)` の記号が札に見えた)。丸めも走査の側(`taskCardsOf`)から
+   *   ここへ移した ── 札の字は `.ics` の `SUMMARY` も運ぶので、書き出しを切らないため。
+   */
+  const shown = clipTaskText(plainTaskTitle(data.text));
+  if (text && text.textContent !== shown) text.textContent = shown;
   const note = card.querySelector('[data-pkc-field="note"]');
   if (note && note.textContent !== title) note.textContent = title;
   // 🔑 題名は指紋にも使う(ノートを改名したら札の字も直る)

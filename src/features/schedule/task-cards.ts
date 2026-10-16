@@ -104,7 +104,7 @@ export const TASK_LIMITS = {
    * ⚠ ここが埋まっても、上の `items` は 1 枚も減らない。
    */
   undated: 1000,
-  /** 札に出す字数。⚠ 長い項目は**丸める**が、丸めたことが判る形にする。 */
+  /** 札に出す字数(見せる所で丸める ── `clipTaskText`)。⚠ 丸めたことが判る形にする。札の字そのものは丸めない(#1087)。 */
   textChars: 200,
 } as const;
 
@@ -158,7 +158,11 @@ export function taskCardsOf(lid: string, body: string): TaskCard[] {
       rawLine: item.rawLine,
       // 🔑 記法そのものは**札の字から外す** ── 日付は札の日付欄に出るので、
       //    残すと同じ日付が 1 枚の札に 2 回出る
-      text: clipTaskText(when === null ? item.text : stripLineDate(item.text)),
+      /**
+       * 🔴 **字は丸めない**(#1087)。丸めは見せる所(`task-card.ts`)でやる ── 直す前はここで 200 字に切ったので、
+       *   `.ics` の `SUMMARY` まで「…」で終わった(外の予定表で題名が欠ける)。
+       */
+      text: when === null ? item.text : stripLineDate(item.text),
       done: item.done,
       date: when === null ? null : when.date,
       time: when === null ? null : when.time,

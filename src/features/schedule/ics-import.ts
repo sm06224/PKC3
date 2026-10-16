@@ -684,7 +684,9 @@ function lineOf(e: IcsEvent): string {
       r.time === e.time &&
       r.timeEnd === e.timeEnd &&
       r.until === e.until &&
-      r.repeat === e.repeat
+      r.repeat === e.repeat &&
+      // 🔴 題名の中の「振替2026-01-01」を行の振替と読んで題名から外す形も食い違い(#1087)── 取り込みは振替を作らない
+      r.substitutes === null
     );
   };
   const plain = attempt(e.summary);

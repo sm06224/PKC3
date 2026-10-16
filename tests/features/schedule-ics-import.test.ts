@@ -327,6 +327,17 @@ describe('ノートの本文', () => {
     expect(taskCardsOf('n', b)[0]).toMatchObject({ repeat: 'week' });
   });
 
+  it('🔴 題名の中の「振替2026-01-01」を行の振替と読んで題名から外さない(#1087)', () => {
+    // 直す前: 読み戻しの突き合わせが振替を見ず、題名の「振替2026-01-01」が消えて「 の件」だけが残った
+    const body = icsNoteBody([ev({ summary: '振替2026-01-01 の件' })]);
+    expect(body).toBe('- [ ] @2026-08-25 「振替2026-01-01 の件」\n');
+    const c = taskCardsOf('n', body)[0]!;
+    expect(c.substitutes).toBeNull();
+    expect(c.text).toContain('振替2026-01-01 の件');
+    // 対照群: 振替でない題名は囲まない
+    expect(icsNoteBody([ev({ summary: '振替の件' })])).toBe('- [ ] @2026-08-25 振替の件\n');
+  });
+
   it('題名・拡張子', () => {
     expect(icsNoteTitle('work.ics')).toBe('取り込んだ予定 work.ics');
     for (const n of ['a.ics', 'A.ICS', 'a.ical', 'x.icalendar']) expect(isIcsFileName(n), n).toBe(true);
