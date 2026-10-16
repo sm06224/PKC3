@@ -444,6 +444,18 @@ test('🔴 pkc:// の自分あては押せて、別コンテナあては押せ�
   ).toHaveCount(1);
 
   const urlBefore = page.url();
+  /**
+   * 🔴 **別の PKC あてを押すと、理由が画面に出る**(#1087)── 以前は押しても無言だった。
+   * ⚠ 押した後もノートは動かない(同じ lid の別ノートを開いていない)ことも見る。
+   */
+  await clickReal(page, `${body} a.pkc-portable-reference-placeholder[data-pkc-portable-container="not-mine"]`);
+  await expect(
+    page.locator('[data-pkc-region="status"]'),
+    '別の PKC あてを押しても何も言わない',
+  ).toContainText('別の PKC3 のノートを指しています');
+  await expect(page.locator(body), '別の PKC あてで同じ lid のノートを開いた').not.toContainText(
+    '携帯参照で着いた本文',
+  );
   await clickReal(page, selfLink);
   await expect(page.locator(body)).toContainText('携帯参照で着いた本文');
   expect(page.url(), 'ブラウザが未知スキームへ遷移した').toBe(urlBefore);
