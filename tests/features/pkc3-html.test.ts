@@ -784,6 +784,31 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     expect(outside?.textContent).toBe('外');
   });
 
+  it('🔴 @[card](entry:…) の札も、書き出すときの注意に数え、入っているノートなら押して開く / 入っていなければ字だけ(#1087)', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'n1', title: '一つ目', body: '@[card](entry:n2)\n\n@[card](entry:zz)\n' },
+          { lid: 'n2', title: '二つ目', body: '二つ目の本文\n' },
+        ],
+      }),
+      NOW,
+      (t) => Promise.resolve(renderMarkdown(t)),
+    );
+    expect(out.warnings, '入っていないノートへの札が数えられていない').toContain(
+      'このファイルに入っていないノートへのリンク 1 件は、押せない字だけになります',
+    );
+    await run(out.blob);
+    const card = document.querySelector<HTMLElement>('#body [data-pkc-card-target="entry:n2"]');
+    expect(card, '前提:札が描かれていない').not.toBeNull();
+    card!.click();
+    expect(document.getElementById('title')!.textContent, '札を押しても開かない').toBe('二つ目');
+    document.querySelector<HTMLButtonElement>('#list button')!.click();
+    const outside = document.querySelector('#body [data-pkc-card-target="entry:zz"]');
+    expect(outside?.hasAttribute('data-pkc-outside-note'), '入っていないノートの札が押せる顔で残った').toBe(true);
+    expect(outside?.hasAttribute('role')).toBe(false);
+  });
+
   it('🔴 別のノートへ移ると、読み位置は先頭に戻る(前のノートの途中から始まらない)(#1087)', async () => {
     await run(
       (

@@ -294,7 +294,10 @@ export function htmlToDocxBlocks(doc: Document): {
         const href = el.getAttribute('href') ?? '';
         // ⚠ **外向きのリンクだけ** rel を張る。`#slug` や `pkc://` は Word で
         //    行き先が無いので、素の文字として残す(壊れたリンクを作らない)
-        if (/^https?:\/\//.test(href)) next.href = href;
+        // 🔑 `mailto:` / `tel:` も外向き(メールや電話を起こす宛先)── 以前は https? だけで、
+        //    画面で押せるメールのリンクが Word / PowerPoint では素の文字に落ちていた。
+        //    書き出し先(docx / pptx)はどちらも `TargetMode="External"` の rel を張るだけなので宛先の綴りは問わない
+        if (/^(?:https?:\/\/|mailto:|tel:)/i.test(href)) next.href = href;
       }
       collectRuns(el, next, out);
     }

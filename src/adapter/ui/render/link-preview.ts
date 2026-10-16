@@ -10,6 +10,7 @@ import type { BinderServices } from '../actions/binder';
 import { parseLinkTarget } from '../../../features/entry-ref/link-target';
 import { archetypeLabel } from '../../../features/flavor/archetype-label';
 import { parseFrontmatter } from '../../../features/markdown/frontmatter';
+import { stripComments } from '../../../features/markdown/markdown-render';
 import { unescapeLinkLabel as unescapeLabel } from '../../../features/markdown/link-format';
 import { MISSING_LINK_TITLE } from './link-missing';
 
@@ -24,7 +25,10 @@ export const BODY_PREVIEW_MAX_CHARS = 160;
 export function formatBodyPreview(body: string, maxChars = BODY_PREVIEW_MAX_CHARS): string {
   if (!body) return '';
   // frontmatter を除去
-  const content = parseFrontmatter(body).body;
+  const frontless = parseFrontmatter(body).body;
+  // 🔴 コメント(`%%…%%` / `%%%…%%%` / `:::comment`)は画面に出ない字 ── 下見に出すと隠したはずのメモが読める。
+  //    本文を描くのと同じ `stripComments` を先に通す(コードブロックの中の `%%` は字なので残る)
+  const content = stripComments(frontless).transformed;
   // コードブロック除去
   const noCode = content.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, ' ');
   // 行ごとに見出し記号・リスト記号・引用記号・HTMLタグ等を除去
@@ -46,7 +50,8 @@ export function formatBodyPreview(body: string, maxChars = BODY_PREVIEW_MAX_CHAR
     l = l.replace(/\[((?:\\.|[^\]\\])+)\]\([^)]+\)/g, (_m, text: string) => unescapeLabel(text));
     // HTML タグ除去
     l = l.replace(/<[^>]+>/g, '');
-    l = l.trim();
+    // コメントを抜いた跡の連続した空白を 1 つにする
+    l = l.replace(/ {2,}/g, ' ').trim();
     if (l) cleanedLines.push(l);
   }
 

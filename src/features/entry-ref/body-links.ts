@@ -28,7 +28,7 @@
  * ⚠ そして**取り込んだ容れ物の lid は形が違う**(PKC2 由来)。
  * 「たぶん起きない」を検査の根拠にしない。
  */
-import { scanLinks } from '../markdown/link-scan';
+import { indentedCodeRanges, scanLinks } from '../markdown/link-scan';
 
 /**
  * 🔴 **同じ容れ物のノートを指す形は 2 つある**(#379)。
@@ -54,7 +54,9 @@ const LID_CHARS = 'A-Za-z0-9_\\-';
  * `entry:` の後ろの lid を、**次の文字が lid の文字でない**ところまで取る。
  * 🔴 **左も留める**(#1087)── `xentry:n2` は `entry:` ではない(右を留めるのと対)。
  */
-const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'g');
+// ⚠ `i` ── 描画は `Entry:n1` も内部リンクとして焼く(綴りの大小は問わない)ので、読む側も同じにする。
+//    lid の文字(大小の別)は `[A-Za-z]` で既に区別して取る。
+const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'gi');
 
 /**
  * 🔴 **コードの中に書いてあるだけの字は、リンクではない**(#1087)。
@@ -64,13 +66,18 @@ const LINK_RE = new RegExp(`(?<![${LID_CHARS}])entry:([${LID_CHARS}]+)`, 'g');
  * ⚠ コードに触れていない本文(バッククォートも `~~~` も無い)は走査せず、そのまま返す。
  */
 function withoutCode(body: string): string {
-  if (!body.includes('`') && !body.includes('~~~')) return body;
-  const { code } = scanLinks(body);
-  if (code.length === 0) return body;
+  const ranges: Array<[number, number]> = [];
+  if (body.includes('`') || body.includes('~~~')) ranges.push(...scanLinks(body).code);
+  // 字下げのコード(4 スペース / タブ)── markdown-it もコードとして描く(リンクにならない)。範囲は `link-scan.ts`
+  if (body.includes('    ') || body.includes('\t')) ranges.push(...indentedCodeRanges(body));
+  if (ranges.length === 0) return body;
+  ranges.sort((a, b) => a[0] - b[0]);
   let out = '';
   let cursor = 0;
-  for (const [s, e] of code) {
-    out += body.slice(cursor, s) + body.slice(s, e).replace(/[^\r\n]/g, ' ');
+  for (const [s, e] of ranges) {
+    if (e <= cursor) continue; // 先に空白へ置き換えた範囲の内側(フェンスの中の字下げなど)
+    const from = Math.max(s, cursor);
+    out += body.slice(cursor, from) + body.slice(from, e).replace(/[^\r\n]/g, ' ');
     cursor = e;
   }
   return out + body.slice(cursor);

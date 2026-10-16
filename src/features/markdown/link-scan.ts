@@ -345,3 +345,50 @@ export function rewriteLinkDests(
   }
   return out + text.slice(cursor);
 }
+
+/**
+ * 🔴 **字下げのコードブロック(4 スペース / タブ)の行の範囲**(#1087)。
+ *
+ * markdown-it はこれをコードとして描くので、中に `entry:<lid>` と書いてあってもリンクにならない。
+ * `scanLinks` の `code`(フェンス・行内コード)には含まれないので、参照元を数える側が別に引く。
+ *
+ * ## CommonMark のうち見るもの(⚠ 迷ったらコードとして**除かない** ── 参照元は広く拾う向き)
+ * - 字下げの行は、**直前が空行(か文書の先頭)**のときだけコードを始める
+ *   ── 段落の続きの字下げ行(`段落\n    続き`)はコードではない
+ * - 一度始まったコードは、空行をはさんで字下げの行が続く間つづく
+ * - **箇条書きの中**(直近の非空行が箇条書きの項目 / その続き)の字下げ行は、項目の続きの段落であってコードではない
+ *   ── 空行のあとに字下げで書いた段落が、リンクとして描かれる
+ * - 引用(`>`)の中・見出しの直後は見ない(= 除かない)
+ *
+ * @returns 除く行の `[start, end)`(行末の改行は含まない。長さが変わらないよう呼び側が空白へ置き換える)
+ */
+export function indentedCodeRanges(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let prevBlank = true;
+  let inCode = false;
+  let inList = false;
+  let pos = 0;
+  const n = text.length;
+  while (pos < n) {
+    let end = pos;
+    while (end < n && text[end] !== '\n' && text[end] !== '\r') end++;
+    const line = text.slice(pos, end);
+    const next = text[end] === '\r' && text[end + 1] === '\n' ? end + 2 : end + 1;
+    if (/^[ \t]*$/.test(line)) {
+      prevBlank = true;
+    } else if (/^(?: {4}|\t)/.test(line)) {
+      if (inCode || (prevBlank && !inList)) {
+        out.push([pos, end]);
+        inCode = true;
+      }
+      prevBlank = false;
+    } else {
+      inCode = false;
+      if (/^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) inList = true;
+      else if (prevBlank) inList = false;
+      prevBlank = false;
+    }
+    pos = next;
+  }
+  return out;
+}

@@ -5,6 +5,7 @@
  * **出ていく側と入ってくる側が、同じ答えを出すこと**である(CLAUDE.md §7)。
  */
 import { describe, expect, it } from 'vitest';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import {
   bodyLinkNeedles,
   bodyLinkTargets,
@@ -171,5 +172,53 @@ describe('🔴 コードの中・左の境界は参照元ではない(#1087)', (
   });
   it('~~~ のフェンスも同じ', () => {
     expect(bodyLinkTargets('~~~\nentry:n2\n~~~')).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **字下げ(4 スペース / タブ)のコードブロックの中は、リンクではない**(#1087)。
+ * ⚠ 期待値は**描画が実際に何をリンクにしたか**から引く(本文の字面から組まない ── 実装と同じ盲点を共有する)。
+ */
+describe('字下げのコードブロック', () => {
+  const rendered = (body: string): string[] =>
+    [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]!);
+
+  const CASES: Array<[string, string]> = [
+    ['空行のあとの 4 スペースのコード', '段落\n\n    entry:n2\n\n[a](entry:n3)'],
+    ['空行のあとのタブのコード', '段落\n\n\t[a](entry:n2)\n\n[a](entry:n3)'],
+    ['文書の先頭からのコード', '    entry:n2\n\n[a](entry:n3)'],
+    ['空行をはさんで続くコード', '段落\n\n    one\n\n    entry:n2\n\n[a](entry:n3)'],
+  ];
+
+  it.each(CASES)('🔴 %s は拾わない(描画もリンクにしない)', (_name, body) => {
+    expect(rendered(body), '前提:描画はコード内をリンクにしない').toEqual(['n3']);
+    expect(bodyLinkTargets(body)).toEqual(['n3']);
+  });
+
+  it('🔑 対照群: 段落の続きの字下げ行は、コードではなくリンクである', () => {
+    const body = '段落\n    [a](entry:n2)\n';
+    expect(rendered(body), '前提:描画はリンクにする').toEqual(['n2']);
+    expect(bodyLinkTargets(body)).toEqual(['n2']);
+  });
+
+  it('🔑 対照群: 箇条書きの項目の続きの字下げ段落は、コードではなくリンクである', () => {
+    const body = '- 項目\n\n    [a](entry:n2)\n';
+    expect(rendered(body), '前提:描画はリンクにする').toEqual(['n2']);
+    expect(bodyLinkTargets(body)).toEqual(['n2']);
+  });
+
+  it('箇条書きが終わったあとの字下げはコードに戻る', () => {
+    const body = '- 項目\n\n本文\n\n    entry:n2\n';
+    expect(rendered(body)).toEqual([]);
+    expect(bodyLinkTargets(body)).toEqual([]);
+  });
+});
+
+describe('綴りの大小(#1087)', () => {
+  it('🔴 `Entry:n2` / `ENTRY:n3` も描画がリンクにするので、参照元に数える', () => {
+    const body = '[a](Entry:n2) [b](ENTRY:n3)';
+    const rendered = [...renderMarkdown(body).matchAll(/data-pkc-entry-ref="entry:([^"#]+)/g)].map((m) => m[1]);
+    expect(rendered, '前提:描画が内部リンクにしていない').toEqual(['n2', 'n3']);
+    expect(bodyLinkTargets(body)).toEqual(['n2', 'n3']);
   });
 });

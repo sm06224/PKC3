@@ -263,6 +263,22 @@ describe('HTML(画面と同じもの)→ 塊', () => {
     expect(p.runs[1]).toEqual({ text: 'なか添付' });
   });
 
+  it('🔴 mailto: / tel: も外向きのリンクとして rel を張る(Word で素の文字に落ちない)', () => {
+    const { blocks } = blocksOf(
+      '<p><a href="mailto:a@example.com">メール</a>|<a href="tel:+81312345678">電話</a>|<a href="javascript:alert(1)">悪</a></p>',
+    );
+    const p = blocks[0] as Extract<DocxBlock, { kind: 'p' }>;
+    expect(p.runs.filter((r) => r.href !== undefined).map((r) => r.href)).toEqual([
+      'mailto:a@example.com',
+      'tel:+81312345678',
+    ]);
+    const res = buildDocx(blocks, 't', ISO);
+    const rels = part(res, 'word/_rels/document.xml.rels');
+    expect(rels).toContain('Target="mailto:a@example.com"');
+    expect(rels).toContain('Target="tel:+81312345678"');
+    expect(rels).not.toContain('javascript:');
+  });
+
   it('🔴 画像はその場に理由が残る(黙って消えない)', () => {
     const { blocks, skipped } = blocksOf('<p><img src="a.png" alt="図 1"></p>');
     expect(skipped).toBe(1);

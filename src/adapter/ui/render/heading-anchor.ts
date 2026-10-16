@@ -2,12 +2,18 @@
  * 見出しのアンカーリンク（章・見出し参照リンク）ワンクリックコピー (Issue #1124).
  *
  * 各見出し（h1〜h6）に控えめなアンカーボタン（#）を添え、
- * クリック時にその見出しへの内部リンク記法（[見出し名](entry:<lid>#<slug>)）を
+ * クリック時にその見出しへの内部リンク記法（[見出し名](entry:<lid>#h/<見出しの id>)）を
  * クリップボードにコピーする。
+ *
+ * ⚠ 書く形は右クリックの「章の参照をコピー」(`copy-section-ref`)と同じ `formatSectionLink` 1 本。
+ *   以前は `entry:<lid>#<slug>` を書いていたが、読む側(`parseEntryRef`)が受けるのは `#h/<id>` で、
+ *   日本語の見出しは「解けないリンク」になっていた。
+ * ⚠ 描画が id を刻むのは h1〜h3 だけ(`markdown-render.ts` の heading_open)── id の無い見出しには
+ *   ボタンを付けない(貼っても飛べないリンクを渡さない。右クリックの章の参照も同じ理由で出さない)。
  */
 import { copyPlainText } from '@adapter/platform/clipboard';
 import { flashCopied } from '../actions/copy-md-block';
-import { slugifyHeading } from '@features/markdown/markdown-toc';
+import { formatSectionLink } from '@features/entry-ref/entry-ref-format';
 
 export const HEADING_ANCHOR_FIELD = 'heading-anchor';
 /** コピーに失敗したとき、ボタンから上へ伝える合図(binder が画面下に言う。`inline-code-copy.ts` と同じ作り)。 */
@@ -28,11 +34,10 @@ export function extractHeadingText(heading: Element): string {
 
 /**
  * 見出しのアンカーリンク記法を生成する。
- * 例: `[概要](entry:abc123#summary)`
+ * 例: `[概要](entry:abc123#h/概要)`(ラベルの `]` などは escape される)
  */
-export function buildHeadingLink(lid: string, slug: string, text: string): string {
-  const label = text || slug;
-  return `[${label}](entry:${lid}#${slug})`;
+export function buildHeadingLink(lid: string, id: string, text: string): string {
+  return formatSectionLink(text || id, lid, id);
 }
 
 /**
@@ -47,7 +52,8 @@ export function applyHeadingAnchors(root: Element, lid: string | null): void {
     if (heading.querySelector(`[data-pkc-field="${HEADING_ANCHOR_FIELD}"]`)) continue;
 
     const text = extractHeadingText(heading);
-    const slug = heading.getAttribute('id') || slugifyHeading(text);
+    // 描画が刻んだ id をそのまま使う(計算し直さない。同名見出しの連番がずれる)。無ければ付けない
+    const slug = heading.getAttribute('id');
     if (!slug) continue;
 
     const btn = heading.ownerDocument.createElement('button');

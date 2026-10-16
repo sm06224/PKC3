@@ -141,10 +141,12 @@ function expectSelfLinkAndForeignBadge(scope: Element, face: string): void {
     foreign!.getAttribute('data-pkc-portable-container'),
     `${face}: 外あての参照が別のものにすり替わっている`,
   ).toBe('c-other');
+  // 外あてには「押したら理由を言う」受け手が付く。⚠ 焼く値は**元の `pkc://<外>/…` のまま**
+  //   (`entry:b` に降ろすと、受け手が外と見分けられず同じ lid の別のノートを開く)
   expect(
-    foreign!.hasAttribute('data-pkc-action'),
-    `${face}: 外あてに受け手を付けている(押すと別コンテナの lid を開く)`,
-  ).toBe(false);
+    foreign!.getAttribute('data-pkc-entry-ref'),
+    `${face}: 外あての飛び先が元の pkc://<外>/ でない(押すと別コンテナの lid を開く)`,
+  ).toBe('pkc://c-other/entry/b');
 }
 
 describe('① 読む面', () => {

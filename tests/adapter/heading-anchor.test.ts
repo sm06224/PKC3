@@ -8,6 +8,9 @@ import {
   HEADING_ANCHOR_FIELD,
   HEADING_ANCHOR_COPY_FAILED_EVENT,
 } from '../../src/adapter/ui/render/heading-anchor';
+import { formatSectionLink } from '../../src/features/entry-ref/entry-ref-format';
+import { parseEntryRef } from '../../src/features/entry-ref/entry-ref';
+import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 
 describe('heading-anchor link copy (Issue #1124)', () => {
   let root: HTMLElement;
@@ -41,12 +44,27 @@ describe('heading-anchor link copy (Issue #1124)', () => {
   });
 
   describe('buildHeadingLink', () => {
-    it('builds standard PKC markdown internal link with slug fragment', () => {
-      expect(buildHeadingLink('note-1', 'section-1', '第一章')).toBe('[第一章](entry:note-1#section-1)');
+    it('builds the canonical section link (#h/<id>), same formatter as copy-section-ref', () => {
+      expect(buildHeadingLink('note-1', 'section-1', '第一章')).toBe('[第一章](entry:note-1#h/section-1)');
+      expect(buildHeadingLink('note-1', '概要', '概要')).toBe(formatSectionLink('概要', 'note-1', '概要'));
     });
 
-    it('falls back to slug when text is empty', () => {
-      expect(buildHeadingLink('note-1', 'section-1', '')).toBe('[section-1](entry:note-1#section-1)');
+    it('falls back to the id when text is empty', () => {
+      expect(buildHeadingLink('note-1', 'section-1', '')).toBe('[section-1](entry:note-1#h/section-1)');
+    });
+
+    it('escapes a label containing ] so the link does not break, and the result resolves', () => {
+      const link = buildHeadingLink('n1', 'a-b-c', 'A [b] c');
+      expect(link).toBe('[A \\[b\\] c](entry:n1#h/a-b-c)');
+      const html = renderMarkdown(link, { currentContainerId: 'c' } as never);
+      expect(html).toContain('data-pkc-entry-ref="entry:n1#h/a-b-c"');
+      expect(html).toContain('>A [b] c</a>');
+    });
+
+    it('a Japanese heading link parses as a section ref (the old #slug form was invalid)', () => {
+      const link = buildHeadingLink('n1', '概要', '概要');
+      const target = /\((entry:[^)]*)\)/.exec(link)![1]!;
+      expect(parseEntryRef(target)).toEqual({ kind: 'section', lid: 'n1', id: '概要' });
     });
   });
 
@@ -87,6 +105,14 @@ describe('heading-anchor link copy (Issue #1124)', () => {
       expect(btn2?.textContent).toBe('');
     });
 
+    it('does not attach a button to headings without an id (h4-h6 get no id from rendering)', () => {
+      const h4 = document.createElement('h4');
+      h4.textContent = '小見出し';
+      root.append(h4);
+      applyHeadingAnchors(root, 'n1');
+      expect(h4.querySelector(`[data-pkc-field="${HEADING_ANCHOR_FIELD}"]`)).toBeNull();
+    });
+
     it('is idempotent across multiple calls', () => {
       const h2 = document.createElement('h2');
       h2.id = 'topic';
@@ -119,7 +145,7 @@ describe('heading-anchor link copy (Issue #1124)', () => {
       // Wait for promise resolution
       await Promise.resolve();
 
-      expect(copiedText).toBe('[インストール手順](entry:n1#install)');
+      expect(copiedText).toBe('[インストール手順](entry:n1#h/install)');
       expect(btn.classList.contains('pkc-copied')).toBe(true);
       expect(btn.getAttribute('title')).toBe('参照をコピーしました');
 
