@@ -27,6 +27,7 @@
  *
  * 🔑 **pure module**。DOM も窓も知らない。
  */
+import { advanceFence } from './list-renumber';
 import { parseBlockDirectiveOpen, isBlockDirectiveClose } from './block-directive-attrs';
 
 /**
@@ -81,23 +82,17 @@ function stripInline(line: string): string {
 export function stripDialect(markdown: string): string {
   const lines = markdown.split('\n');
   const out: string[] = [];
-  /** fence の記号(`` ` `` か `~`)。空 = fence の外。 */
+  /** 開いている fence の記号の並び(`advanceFence`)。空 = fence の外。 */
   let fence = '';
   let inComment = false;
   /** `:::comment` / `:::toc` ── **中身ごと**落とす。 */
   let dropping = false;
 
   for (const line of lines) {
-    const fenceM = /^\s*([`~]{3,})/.exec(line);
-
-    // ── fence の中は 1 バイトも触らない ──
-    if (fence !== '') {
-      out.push(line);
-      if (fenceM && fenceM[1]![0] === fence && /^\s*[`~]{3,}\s*$/.test(line)) fence = '';
-      continue;
-    }
-    if (fenceM) {
-      fence = fenceM[1]![0]!;
+    // ── fence の中は 1 バイトも触らない ── 開閉は `advanceFence`(種類 + 長さ。#1087)
+    const wasIn = fence !== '';
+    fence = advanceFence(fence, line);
+    if (wasIn || fence !== '') {
       out.push(line);
       continue;
     }

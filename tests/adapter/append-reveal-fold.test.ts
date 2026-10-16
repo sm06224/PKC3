@@ -208,10 +208,12 @@ describe('畳んだ章への追記(#596 B)', () => {
       '決定事項',
       '決定事項-1',
     ]);
-    expect(r.slugs, '入り先は ATX の 1 件だけのはず').toEqual(['決定事項']);
+    // #1087: 入り先にも setext が載るようになり、印は描画側の id と**同じ綴り**になった
+    //   (直す前は ATX の 1 件だけで、ずれていた)。それでも**綴りでなく位置で**開く作りは同じ
+    expect(r.slugs, '入り先の印が描画の id と食い違っている').toEqual(['決定事項', '決定事項-1']);
 
     r.foldAll();
-    r.append('ここへ', r.slugs[0]!);
+    r.append('ここへ', r.slugs[1]!);
     // 🔑 開くべきは **h2 の章**(入り先)── h1 のほうではない
     expect(r.lastBlockOfSectionHidden(1), '入り先(h2)の章が開いていない').toBe(false);
   });

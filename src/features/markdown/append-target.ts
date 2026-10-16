@@ -27,6 +27,8 @@
  */
 import { makeSlugCounter } from './markdown-toc';
 import { frontmatterLineCount, parseFrontmatter } from './frontmatter';
+import { advanceFence } from './list-renumber';
+import { stripComments } from './markdown-render';
 
 /** 追記の入り先 1 つ。 */
 export interface AppendTarget {
@@ -50,29 +52,89 @@ interface HeadingAt extends AppendTarget {
  * ⚠ `extractHeadingsFromMarkdown` は使えない ── あちらは frontmatter を剥がし
  *   `{{vars}}` を展開してから拾うので、**行番号が原文とずれる**(目次には要らないが、
  *   ここでは行を切るので致命的である)。🔑 代わりに**印の作り方だけ**を借りる。
- * ⚠ fence の中は見ない(コードの中の `# x` は見出しではない)。
+ * ⚠ fence の中は見ない(コードの中の `# x` は見出しではない)。閉じは開きと同じ記号で同じ長さ以上
+ *   (`advanceFence` が正本 ── 目次と同じ判定。#1087)。
  * ⚠ frontmatter の中も見ない(`title: # x` を見出しに数えない)。
+ * 🔴 **目次・描画と同じ見出しの集合にする**(#1087)── 食い違うと、目次で見えている節の
+ *   名前が追記で選べない / 見えない節が選べて、字が思わぬ節へ入る:
+ *   ① 下線の見出し(`題` + `===` / `---`)も拾う ② 描画が捨てる部分(`:::comment` / `%%%`)の
+ *   中の `# x` は拾わない(目次と同じ `stripComments`。捨てた行は `lineMap` で原文の行へ戻す)
+ *   ③ `$$` の塊と `<pre>` 等の HTML の塊の中は、描画が見出しにしない(markdown-it の規則)ので拾わない。
+ * ⚠ 引用・リストの中の `> # x` は拾わない(目次は拾うが、そこへ平文を挟むと引用が切れる)。
  */
 function scanHeadings(body: string): HeadingAt[] {
-  const lines = body.split(/\r?\n/);
+  const stripped = stripComments(body);
+  const lines = stripped.transformed.split(/\r?\n/);
+  const origin = (i: number): number => stripped.lineMap[i] ?? i;
   // 🔑 frontmatter の**行数**だけ借りて、その先から見る(剥がした本文は使わない)
-  const fm = parseFrontmatter(body);
+  const fm = parseFrontmatter(stripped.transformed);
   const skip = fm.found ? lines.length - fm.body.split(/\r?\n/).length : 0;
   const slugOf = makeSlugCounter();
   const out: HeadingAt[] = [];
-  let inFence = false;
+  let fence = '';
+  // 下線の見出しの本文候補(記法を持たない素の行の並び)と、その最初の行(原文)
+  let para: string[] = [];
+  let paraAt = 0;
   for (let i = skip; i < lines.length; i++) {
     const line = lines[i]!;
-    if (/^\s{0,3}(?:```|~~~)/.test(line)) {
-      inFence = !inFence;
+    const wasIn = fence !== '';
+    fence = advanceFence(fence, line);
+    if (wasIn || fence !== '') {
+      if (wasIn !== (fence !== '')) para = [];
       continue;
     }
-    if (inFence) continue;
-    const m = /^ {0,3}(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    // `$$` だけの行で開き、`$$` だけの行で閉じる塊(閉じが無ければ塊ではない)
+    if (line.trim() === '$$') {
+      let close = -1;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j]!.trim() === '$$') {
+          close = j;
+          break;
+        }
+      }
+      if (close >= 0) {
+        i = close;
+        para = [];
+        continue;
+      }
+    }
+    // HTML の塊(`<pre>` など)は閉じタグの行まで(閉じが無ければ末尾まで)
+    const html = /^ {0,3}<(pre|script|style|textarea)(?:[\s>]|$)/i.exec(line);
+    if (html) {
+      const closeTag = `</${html[1]!.toLowerCase()}>`;
+      let j = i;
+      while (j < lines.length && !lines[j]!.toLowerCase().includes(closeTag)) j++;
+      i = Math.min(j, lines.length - 1);
+      para = [];
+      continue;
+    }
+    const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
+    if (u && para.length > 0) {
+      const text = para.join(' ').trim();
+      const at = paraAt;
+      para = [];
+      if (text !== '') {
+        out.push({ slug: slugOf(text), text, level: u[1]![0] === '=' ? 1 : 2, line: at });
+      }
+      continue;
+    }
+    // 見出しにならなかった `---` / `===`(水平線)は段落ではない
+    if (u) {
+      para = [];
+      continue;
+    }
+    // 段落の素の行だけを溜める(記法の行・空行で切る)
+    if (line.trim() === '' || /^\s{0,3}(?:#|>|[-*+][ \t]|\d+[.)][ \t]|\||:::|%%|<)/.test(line)) para = [];
+    else {
+      if (para.length === 0) paraAt = origin(i);
+      para.push(line.trim());
+    }
+    // 閉じの `#` は前に空白が要る(`## C#` の `#` は見出しの字)
+    const m = /^ {0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
     if (!m) continue;
     const text = m[2]!.trim();
     if (text === '') continue;
-    out.push({ slug: slugOf(text), text, level: m[1]!.length as 1 | 2 | 3, line: i });
+    out.push({ slug: slugOf(text), text, level: m[1]!.length as 1 | 2 | 3, line: origin(i) });
   }
   return out;
 }
@@ -159,15 +221,28 @@ export function appendIntoSection(
   const at = resolveAppendAt(base, slug);
   if (at === null) return null;
   const lines = base.split('\n');
-  const block = heading === null ? [body] : [heading, '', body];
+  /**
+   * 🔴 **CRLF の本文へは CRLF で挟む**(#1087)。直す前は LF の行を挟み、改行が混ざった
+   *   (`replaceSectionByHeading` は元の改行を守る ── 同じ作法)。`split('\n')` は行末の `\r` を残すので、
+   *   挟む行にも `\r` を足す。本文の最後の行(改行なし)の後ろへ挟むときだけ、前の行に `\r` を足し、
+   *   最後の行には足さない(終わりの改行の有無を変えない)。
+   */
+  const crlf = base.includes('\r\n');
+  const cr = crlf ? '\r' : '';
+  const inner = crlf ? (s: string): string => s.replace(/\r?\n/g, '\r\n') : (s: string): string => s;
+  const block = (heading === null ? [inner(body)] : [inner(heading), '', inner(body)]).map((l) => l + cr);
+  if (crlf && at >= lines.length && at > 0) {
+    lines[at - 1] = lines[at - 1]!.endsWith('\r') ? lines[at - 1]! : lines[at - 1]! + '\r';
+    block[block.length - 1] = block[block.length - 1]!.slice(0, -1);
+  }
   /**
    * ⚠ **前に 1 行空ける**(直前が空行でなければ)。空けないと、直前の段落と
    *   繋がって**1 つの段落として描かれる**(user から見て「くっついた」)。
    * ⚠ **後ろにも 1 行空ける**(次が在って空行でなければ)── 次の見出しと
    *   くっつかないように。
    */
-  const before = at > 0 && lines[at - 1]!.trim() !== '' ? [''] : [];
-  const after = at < lines.length && lines[at]!.trim() !== '' ? [''] : [];
+  const before = at > 0 && lines[at - 1]!.trim() !== '' ? [cr] : [];
+  const after = at < lines.length && lines[at]!.trim() !== '' ? [cr] : [];
   return [...lines.slice(0, at), ...before, ...block, ...after, ...lines.slice(at)].join('\n');
 }
 
@@ -184,6 +259,18 @@ export function appendIntoSection(
  *   (置換・削除が混ざっていたら、取り消しの材料にしてはいけない)
  */
 export function insertedLines(base: string, next: string): readonly string[] | null {
+  return insertedRun(base, next)?.lines ?? null;
+}
+
+/**
+ * 🔴 **足した行と、足した位置**(#1087)。位置は `next` の行番号(0 起点)で、`lines` の先頭が居る所。
+ * ⚠ 取り消しが「いちばん後ろの一致」を消すと、同じ字を別の節にも足していたとき**別の節の行**が消える
+ *   (B に「済」→ A に「済」→ 取り消し、で B の「済」が消えた)。🔑 足した所を覚えて、そこを先に見る。
+ */
+export function insertedRun(
+  base: string,
+  next: string,
+): { readonly at: number; readonly lines: readonly string[] } | null {
   const a = base.split('\n');
   const b = next.split('\n');
   if (b.length <= a.length) return null;
@@ -194,7 +281,7 @@ export function insertedLines(base: string, next: string): readonly string[] | n
   // ⚠ 前後を削って **`a` 側が空になる**ときだけ「純粋な挿入」である
   if (head + tail !== a.length) return null;
   const run = b.slice(head, b.length - tail);
-  return run.length > 0 ? run : null;
+  return run.length > 0 ? { at: head, lines: run } : null;
 }
 
 /**
@@ -205,20 +292,26 @@ export function insertedLines(base: string, next: string): readonly string[] | n
  * ⚠ **いちばん後ろの一致**を消す ── 同じ字を 2 回足したとき、消えるのは
  *   **さっき足したほう**であってほしい(user が押した「元に戻す」は直前の 1 手である)。
  *
+ * 🔴 **`at`(足した位置)が在れば、まずそこを見る**(#1087)。そこが `run` と一致しなくなっていたとき
+ *   (別の窓が上へ足した等)だけ、上の「いちばん後ろの一致」へ落ちる。
+ *
  * @returns 消したあとの本文。⚠ **見つからなければ `null`**(黙って別の所を消さない)
  */
-export function removeInsertedLines(body: string, run: readonly string[]): string | null {
+export function removeInsertedLines(body: string, run: readonly string[], at?: number): string | null {
   if (run.length === 0) return null;
   const lines = body.split('\n');
-  for (let at = lines.length - run.length; at >= 0; at--) {
+  if (at !== undefined && at >= 0 && at + run.length <= lines.length && run.every((l, i) => lines[at + i] === l)) {
+    return [...lines.slice(0, at), ...lines.slice(at + run.length)].join('\n');
+  }
+  for (let from = lines.length - run.length; from >= 0; from--) {
     let hit = true;
     for (let i = 0; i < run.length; i++) {
-      if (lines[at + i] !== run[i]) {
+      if (lines[from + i] !== run[i]) {
         hit = false;
         break;
       }
     }
-    if (hit) return [...lines.slice(0, at), ...lines.slice(at + run.length)].join('\n');
+    if (hit) return [...lines.slice(0, from), ...lines.slice(from + run.length)].join('\n');
   }
   return null;
 }

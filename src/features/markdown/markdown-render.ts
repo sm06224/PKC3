@@ -22,6 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
+import { advanceFence } from './list-renumber';
 import MarkdownIt from 'markdown-it';
 import { parseTagLine } from '../flavor/body-tags';
 import { MAX_TAGS, sameTag } from '../flavor/tags';
@@ -3577,16 +3578,14 @@ interface FenceState {
 }
 
 function fenceTransition(line: string, state: FenceState): { state: FenceState; isBoundary: boolean } {
-  const m = /^\s{0,3}(```+|~~~+)/.exec(line);
-  if (!m) return { state, isBoundary: false };
-  const lineMarker = m[1]!.startsWith('```') ? '```' : '~~~';
-  if (!state.inFence) {
-    return { state: { inFence: true, marker: lineMarker }, isBoundary: true };
-  }
-  if (lineMarker === state.marker) {
-    return { state: { inFence: false, marker: '' }, isBoundary: true };
-  }
-  return { state, isBoundary: false };
+  // 🔑 開閉の規則の正本は `advanceFence`(記号の種類 + 長さ。#1087)。
+  //   かつては種類しか見ず、4 つの ``` の中の ``` で閉じたことになり、中の `%%%` / `:::` が生きた。
+  const cur = state.inFence ? state.marker : '';
+  const next = advanceFence(cur, line);
+  if (next === cur) return { state, isBoundary: false };
+  return next === ''
+    ? { state: { inFence: false, marker: '' }, isBoundary: true }
+    : { state: { inFence: true, marker: next }, isBoundary: true };
 }
 
 function processFigureBlocks(source: string, lineMapIn: number[]): {
@@ -5664,7 +5663,7 @@ function processTolerantInlineAliases(
   const fenceRegions: string[] = [];
   const FENCE_HOLDER = (idx: number) =>
     `${HALLUCINATION_FENCE_OPEN}${idx}${HALLUCINATION_FENCE_SEP}`;
-  let masked = source.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, (m) => {
+  let masked = source.replace(/(`{3,})[\s\S]*?\1`*|(~{3,})[\s\S]*?\2~*/g, (m) => {
     fenceRegions.push(m);
     return FENCE_HOLDER(fenceRegions.length - 1);
   });
@@ -5846,7 +5845,7 @@ function processHallucinatedDirectives(
   const fenceRegions: string[] = [];
   const FENCE_HOLDER = (idx: number) =>
     `${HALLUCINATION_FENCE_OPEN}${idx}${HALLUCINATION_FENCE_SEP}`;
-  const masked = source.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, (m) => {
+  const masked = source.replace(/(`{3,})[\s\S]*?\1`*|(~{3,})[\s\S]*?\2~*/g, (m) => {
     fenceRegions.push(m);
     return FENCE_HOLDER(fenceRegions.length - 1);
   });
@@ -6138,18 +6137,12 @@ function preprocessHeadingNumbers(text: string, start: number): string {
   const lines = splitLines(text);
   const out: string[] = [];
   const counters = [0, 0, 0];
-  let fenceChar = '';
+  let fence = '';
   for (const line of lines) {
-    const fenceM = /^\s*([`~]{3,})/.exec(line);
-    if (fenceChar !== '') {
-      out.push(line);
-      if (fenceM && fenceM[1]![0] === fenceChar && /^\s*[`~]{3,}\s*$/.test(line)) {
-        fenceChar = '';
-      }
-      continue;
-    }
-    if (fenceM) {
-      fenceChar = fenceM[1]![0]!;
+    // 開閉は `advanceFence`(種類 + 長さ。#1087)
+    const wasIn = fence !== '';
+    fence = advanceFence(fence, line);
+    if (wasIn || fence !== '') {
       out.push(line);
       continue;
     }

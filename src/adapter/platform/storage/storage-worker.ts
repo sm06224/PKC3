@@ -27,6 +27,7 @@ import { contentHash64Hex } from './content-hash';
 import { fixReservedLock, type ReservedLockOutcome, type ReservedLockSqlite } from './reserved-lock';
 // 🔑 メッセージの本文の形は features 層が持つ(判断を 1 か所に。設計 doc §7、段②a)
 import { errorText } from '@features/error-text';
+import { wouldMakeCycle } from '@features/relation/tree';
 import { trimToCap } from '@features/message/message-log';
 // 🔑 数だけをここから取る ── 読み解き(日本語)は features 層に置く(#971 段③)
 import { QUICK_CHECK_MAX_ERRORS, RESCUE_CHUNK } from '@features/storage/db-rescue';
@@ -2025,21 +2026,21 @@ function writeParent(
    * 🔑 だから最後の砦は**書く側の tx の中**に置く(読んでから書くまでの間に別のタブが書けない)。
    * ⚠ 親が移す物自身のとき(自分の中へ)も、辿りの始点で当たるので同じ門で断る。
    */
-  const seen = new Set<string>();
-  for (let cur: string | null = parentLid; cur !== null; ) {
-    if (cur === lid) {
-      throw new Error(
-        '移そうとした先が、移すフォルダの中に入っています(別のウィンドウで先に移されたかもしれません)。' +
-          '画面を読み込み直してから、もう一度お試しください。',
-      );
-    }
-    if (seen.has(cur)) break; // 既に輪が在るデータでも、ここで無限に回らない
-    seen.add(cur);
-    const up = database.selectValue(
-      `SELECT from_lid FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural' LIMIT 1`,
-      [cid, cur],
-    ) as string | null | undefined;
-    cur = up ?? null;
+  // 🔴 辿るのは**親の辺すべて**(多重親の別の鎖に自分が居ても輪)── 判定は画面側と同じ `wouldMakeCycle`
+  if (
+    wouldMakeCycle(lid, parentLid, (child) =>
+      (
+        database.selectObjects(
+          `SELECT from_lid FROM relations WHERE cid = ? AND to_lid = ? AND kind = 'structural'`,
+          [cid, child],
+        ) as Array<{ from_lid: string }>
+      ).map((r) => r.from_lid),
+    )
+  ) {
+    throw new Error(
+      '移そうとした先が、移すフォルダの中に入っています(別のウィンドウで先に移されたかもしれません)。' +
+        '画面を読み込み直してから、もう一度お試しください。',
+    );
   }
   /**
    * 🔴 **ぶつかったら断る ── 黙って上書きしない**(#973)。

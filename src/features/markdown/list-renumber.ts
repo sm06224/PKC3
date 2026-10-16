@@ -30,19 +30,26 @@
 export type ListNumberMode = 'sequential' | 'uniform';
 
 /**
- * fenced code の開閉を 1 行ぶん進める。`fence` は開いている間だけ記号(`` ` `` か `~`)、
- * 閉じていれば `''`。
+ * fenced code の開閉を 1 行ぶん進める。`fence` は開いている間だけ**開いた記号の並び**
+ * (`` ``` `` / `` ```` `` / `~~~` …)、閉じていれば `''`。呼び側は「空か空でないか」だけ見ればよい。
  *
- * 🔑 **fence 追跡の正本はここ 1 か所**(§7)── 番号の振り直しと、Enter でリストを
- *   続ける規則(`quote-assist.ts`)が**同じ判定**で「コードの中か」を決める。
- *   ⚠ 閉じは**開いた記号と同じ種類で、記号だけの行**(中身のある行は閉じではない)。
+ * 🔑 **fence 追跡の正本はここ 1 か所**(§7)── 番号の振り直し・Enter でリストを続ける規則
+ *   (`quote-assist.ts`)・追記の入り先と目次(`append-target.ts` / `markdown-toc.ts`)が
+ *   **同じ判定**で「コードの中か」を決める。
+ *   ⚠ 閉じは CommonMark どおり、**開いた記号と同じ種類で、同じ長さ以上の、記号だけの行**
+ *   (中身のある行・短い記号・別の種類は閉じではない)。直す前は種類しか見ず、
+ *   ```` ```` ````(4 つ)の中の ``` や、``` の中の `~~~` で閉じたことになり、後ろの見出しが消えた(#1087)。
+ *   ⚠ 開きの行に ` ` ` が 2 つ目から混ざる(`` ```x``` ``)形は fence ではない(行内のコード)。
  */
 export function advanceFence(fence: string, line: string): string {
-  const m = /^\s*([`~]{3,})/.exec(line);
   if (fence !== '') {
-    return m && m[1]![0] === fence && /^\s*[`~]{3,}\s*$/.test(line) ? '' : fence;
+    const c = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
+    return c !== null && c[1]![0] === fence[0] && c[1]!.length >= fence.length ? '' : fence;
   }
-  return m ? m[1]![0]! : '';
+  const o = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+  if (o === null) return '';
+  if (o[1]![0] === '`' && o[2]!.includes('`')) return '';
+  return o[1]!;
 }
 
 /**

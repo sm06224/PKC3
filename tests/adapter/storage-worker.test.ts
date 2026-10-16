@@ -1302,6 +1302,27 @@ describe('🔴 居場所の張り替え(2026-08-05。フォルダ整理)', () =>
       expect(await relsOf('cs-a')).toHaveLength(0);
     });
 
+    it('🔴 親が 2 つ在る物の「もう一方の親の鎖」に自分が居ても断る(多重親)', async () => {
+      // X の親は A と B。B を X の中へ入れると B → X → B の輪(A をゴミ箱へ移すと X・B が木から消える)
+      await write('cm-a', '# A\n');
+      await write('cm-b', '# B\n');
+      await write('cm-x', '# X\n');
+      await request({
+        op: 'bulkUpsertRelations',
+        cid: 'c1',
+        relations: [
+          { id: 'cm-r1', fromLid: 'cm-a', toLid: 'cm-x', kind: 'structural' },
+          { id: 'cm-r2', fromLid: 'cm-b', toLid: 'cm-x', kind: 'structural' },
+        ],
+      });
+      await expect(move('cm-b', 'cm-x', 'cm-3'), '多重親の別の鎖を辿らず通った').rejects.toThrow(/移そうとした先/);
+      expect(await parentOf('cm-b'), 'B が X の中に入った(輪)').toBeNull();
+      // 対照群: 輪にならない移動(A を X の中へ入れるのは A→X→A で輪)ではなく、無関係な Z は通る
+      await write('cm-z', '# Z\n');
+      await move('cm-z', 'cm-x', 'cm-4');
+      expect(await parentOf('cm-z')).toBe('cm-x');
+    });
+
     it('対照群: 輪にならない移動は通る(兄弟の中へ / 外へ / 別の枝へ)', async () => {
       await write('ck-p', '# P\n');
       await write('ck-q', '# Q\n');

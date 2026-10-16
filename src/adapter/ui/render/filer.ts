@@ -596,7 +596,12 @@ export class FilerRenderer {
     // ⚠ 組み直した直後にも当てる ── 断りが届いた回に欄が無かった(帯が出る前)形を拾う
     this.paintRefusedTags(state);
 
-    const moving = state.selectedLid ? (state.entryMetas.get(state.selectedLid) ?? null) : null;
+    // 🔴 **いま表に出ている物だけ**(別のフォルダ / 絞りで外れた物を選んだままだと、押すと見えない所が動く。
+    //    印の判定 `marks` と同じく `this.rows` で見る)
+    const moving =
+      state.selectedLid && this.rows.has(state.selectedLid)
+        ? (state.entryMetas.get(state.selectedLid) ?? null)
+        : null;
     if (!moving) {
       /**
        * 🔴 **「中まで全部出す」の間は出さない**(#1087 L3)── 選んでも上へ / 下へは出ない

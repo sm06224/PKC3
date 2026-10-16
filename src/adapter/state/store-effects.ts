@@ -32,6 +32,7 @@ import {
 import {
   appendIntoSection,
   insertedLines,
+  insertedRun,
   resolveAppendAt,
 } from '@features/markdown/append-target';
 import {
@@ -2252,13 +2253,14 @@ export function connectStoreEffects(
          * 🔴 **並べ替えを disk へ**(2026-08-06。user 報告 2-10)。
          *
          * ⚠ 形は `REQUEST_RENAME` と同じ read→write(本文は disk が正)。
-         * ⚠ **1 件ずつ enqueue する** ── 2 件を 1 つの async にまとめると、
-         *   片方が落ちたときにもう片方だけ disk へ通り、**並びが壊れた形**で残る
-         *   (交換なので片側だけでは順序が表現できない)。直列 queue なので
-         *   順番は保たれる。
+         * ⚠ **2 行を 1 つの async で順に書く**。交換は 2 行 1 組で、片側だけ disk に載ると
+         *   順序が表現できない(同値の `entryOrder` が残る)。行ごとに enqueue すると、
+         *   **1 行目が落ちても 2 行目は書かれる**(以前の注釈は逆を書いていた)ので、
+         *   1 つの step にして **1 行目が落ちた / 見つからなかったら 2 行目は試さない**。
+         *   直列 queue なので、他の書込との順番は保たれる。
          */
-        for (const row of ev.entries) {
-          enqueue(async () => {
+        enqueue(async () => {
+          for (const row of ev.entries) {
             if (disposed) return;
             try {
               /**
@@ -2279,7 +2281,7 @@ export function connectStoreEffects(
                   type: 'OP_FAILED',
                   error: `並べ替え: ノートが見つかりません(${row.lid})`,
                 });
-                return;
+                return; // 残りの行は試さない(片側だけ載せない)
               }
               stamp(row.lid, stamps);
             } catch (e) {
@@ -2289,9 +2291,10 @@ export function connectStoreEffects(
                   type: 'OP_FAILED',
                   error: `並べ替えを保存できませんでした: ${errorText(e)}`,
                 });
+              return; // 残りの行は試さない(片側だけ載せない)
             }
-          });
-        }
+          }
+        });
         break;
       case 'REQUEST_TILE_UPDATE':
         enqueue(async () => {
@@ -3523,6 +3526,7 @@ export function connectStoreEffects(
                *   起きた回は読み直した側で、そこから導かないと取り消しが空振りする。
                */
               inserted: insertedLines(base, newBody),
+              insertedAt: insertedRun(base, newBody)?.at ?? null,
               // 🔑 取り込みの回の印(#668 C)── ここで読まず、reducer へそのまま返す
               ...(ev.batch === undefined ? {} : { batch: ev.batch }),
             });
@@ -4011,7 +4015,10 @@ export function connectStoreEffects(
                  * ⚠ 差し込み以外では渡さない(`lastAppend` を触るのはこの書換だけ)。
                  */
                 ...(ev.rewrite.kind === 'insert-lines'
-                  ? { inserted: insertedLines(body, newBody) }
+                  ? {
+                      inserted: insertedLines(body, newBody),
+                      insertedAt: insertedRun(body, newBody)?.at ?? null,
+                    }
                   : {}),
                 status: ext.status,
                 date: ext.date,

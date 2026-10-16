@@ -96,6 +96,14 @@ export class AppendBoxRenderer {
   private lastLid: string | null = null;
   /** 別のノートへ移るとき預かった打ちかけ(lid → 字)。⚠ 空の字は持たない。 */
   private readonly drafts = new Map<string, string>();
+  /**
+   * 🔴 **打ちかけと一緒に、選んでいた追記先も預かる**(lid → 節の印。#1087)。⚠ 直す前は字だけ戻り、
+   *   追記先は前のノートで選んでいた物のまま(または「末尾」)で、戻ったノートの字が**別の場所へ**入りえた。
+   *   ⚠ 「末尾」(空)は持たない。
+   */
+  private readonly targets = new Map<string, string>();
+  /** ノートを移った直後、本文が届いて一覧を組み直すとき選び直す印(1 回で使い切る)。 */
+  private desiredTarget: string | null = null;
   /** 🔴 次に打てる状態で描いたとき、1 回だけ打つ欄へ焦点を入れる(下の `focusInputOnceReady`)。 */
   private focusPending = false;
 
@@ -282,6 +290,14 @@ export class AppendBoxRenderer {
       if (this.lastLid !== null) this.keepDraft(this.lastLid, this.input.value);
       this.input.value = this.drafts.get(mode.lid) ?? '';
       this.fitToContent();
+      if (this.lastLid !== null) {
+        if (this.target.value === '') this.targets.delete(this.lastLid);
+        else this.targets.set(this.lastLid, this.target.value);
+      }
+      // 一覧は移った先の本文から組み直す(前のノートの一覧に、預かった印を当てない)
+      this.desiredTarget = this.targets.get(mode.lid) ?? '';
+      this.targetBody = null;
+      this.targetSig = null;
       this.lastLid = mode.lid;
     }
     // 🔑 **通ったときだけ欄を空にする**。失敗・強制解放では打った内容を残す ──
@@ -461,7 +477,8 @@ export class AppendBoxRenderer {
     if (sig === this.targetSig) return;
     this.targetSig = sig;
     // 🔑 選んでいた物を覚えておいて、まだ在れば戻す
-    const keep = this.target.value;
+    const keep = this.desiredTarget ?? this.target.value;
+    this.desiredTarget = null;
     this.target.textContent = '';
     const end = document.createElement('option');
     end.value = '';

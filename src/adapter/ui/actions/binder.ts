@@ -290,6 +290,7 @@ import { COLUMN_PANES, isPaneId, type PaneId } from '@features/pane-visibility';
 import { STRUCTURAL, isRelationKind } from '@features/relation/kinds';
 import {
   canEnterScope,
+  collectSubtreeLids,
   getAncestorFolders,
   getRootEntries,
   getStructuralChildren,
@@ -3071,6 +3072,12 @@ function moveOrder(
 ): void {
   const lid = target.getAttribute('data-pkc-entry');
   if (!lid) return;
+  // 🔴 編集中などは reducer が黙って捨てる ── 押して無音にしない(`reorderDropped` と同じ前置き)
+  const st = dispatcher.getState();
+  if (st.phase !== 'ready') {
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}並べ替えてください` });
+    return;
+  }
   // 🔴 手動の順でないときは、見えない並びを黙って動かさない(押せない理由と同じ字を出す)
   if (dispatcher.getState().entrySort !== 'manual') {
     dispatcher.dispatch({ type: 'OP_FAILED', error: ORDER_ONLY_MANUAL });
@@ -16811,6 +16818,19 @@ export function bindActions(
         clearDropTarget();
         return; // 落とせない場所 ── 既定(受け取らない)のまま
       }
+      /**
+       * 🔴 **掴んだ物すべてにとって「自分 / 自分の配下」の行き先は光らせない**(落としてから断らない)。
+       * ⚠ 一部の物だけがそうなら、残りは動くので光らせる(落とせば動かない物だけ断る)。
+       */
+      if (
+        drop.lid !== null &&
+        noteDragSubtrees !== null &&
+        noteDragSubtrees.length > 0 &&
+        noteDragSubtrees.every((sub) => sub.has(drop.lid!))
+      ) {
+        clearDropTarget();
+        return;
+      }
       e.preventDefault();
       de.dataTransfer.dropEffect = 'move';
       markDropTarget(drop.el);
@@ -17168,6 +17188,7 @@ export function bindActions(
       `[data-pkc-field="${BLOCK_GRIP_FIELD}"]`,
     );
     blockDrag = null;
+    noteDragSubtrees = null;
     if (grip !== null && grip !== undefined && de.dataTransfer) {
       const lid = grip.getAttribute(BLOCK_LID_ATTR);
       const start = Number(grip.getAttribute(BLOCK_START_ATTR));
@@ -17262,6 +17283,7 @@ export function bindActions(
           );
     const lids = marked.includes(lid) ? marked : [lid];
     de.dataTransfer.setData(PKC_DRAG, lids.join(' '));
+    noteDragSubtrees = lids.map((l) => collectSubtreeLids(l, st.entryMetas, st.relations));
     /**
      * 🔴 **`copyMove`**(#684 段②。実ブラウザの smoke が拾った)。
      *
@@ -17279,6 +17301,7 @@ export function bindActions(
     cancelTabHover();
     clearDropTarget();
     blockDrag = null;
+    noteDragSubtrees = null;
   };
   /**
    * 🔴 **窓の外へ抜けたら印を消す**(#684 段④、着地前レビュー C)。
@@ -17425,6 +17448,12 @@ export function bindActions(
   };
   /** 掴んでいる本文の塊(`dragstart` で決め、`dragend` で捨てる)。`null` = 塊は掴んでいない。 */
   let blockDrag: { lid: string; start: number; end: number } | null = null;
+  /**
+   * 掴んでいるノート / フォルダごとの「自分と配下ぜんぶ」(`dragstart` で決め、`dragend` で捨てる)。
+   * ⚠ `getData` は dragover で読めない(ブラウザの保護)── 「自分の中へ」を光らせないために持つ。
+   * `null` = ノートは掴んでいない。
+   */
+  let noteDragSubtrees: ReadonlySet<string>[] | null = null;
   /**
    * 落とし先の印。⚠ **属性名と値まで**持つ(#684)── 塊の前 / 後は同じ要素に別の値で出る
    * (`data-pkc-drop-edge="before"|"after"`)ので、要素だけ見て早期 return すると
@@ -17579,7 +17608,9 @@ export function bindActions(
       return;
     }
     const seq = edge === 'before' ? movable : [...movable].reverse();
-    for (const lid of seq) stepTo(lid, targetLid, edge);
+    // 🔴 動いた件だけ数える(もう収まっている物を「並べ替えました」と言わない)
+    let moved = 0;
+    for (const lid of seq) if (stepTo(lid, targetLid, edge)) moved += 1;
     const skipped = lids.filter((l) => l !== targetLid && !movable.includes(l)).length;
     if (skipped > 0) {
       dispatcher.dispatch({
@@ -17587,22 +17618,25 @@ export function bindActions(
         error: `${skipped} 件は別のフォルダの物なので並べ替えていません`,
       });
     }
-    services.showStatus?.(`${movable.length} 件を並べ替えました`);
+    if (moved > 0) services.showStatus?.(`${moved} 件を並べ替えました`);
   };
   /** 1 件を `targetLid` の直前 / 直後まで、隣との入れ替えで運ぶ。 */
-  const stepTo = (lid: string, targetLid: string, edge: 'before' | 'after'): void => {
+  const stepTo = (lid: string, targetLid: string, edge: 'before' | 'after'): boolean => {
+    let moved = false;
     // ⚠ 上限は兄弟の数 ── 端で動かなくなった回は state が変わらないので抜ける
     for (let guard = 0; guard < 100000; guard += 1) {
       const now = dispatcher.getState();
       const sib = listSiblings(lid, now.entryMetas, now.relations).map((m) => m.lid);
       const i = sib.indexOf(lid);
       const j = sib.indexOf(targetLid);
-      if (i < 0 || j < 0) return;
+      if (i < 0 || j < 0) return moved;
       const want = edge === 'before' ? (i < j ? j - 1 : j) : i < j ? j : j + 1;
-      if (i === want) return;
+      if (i === want) return moved;
       dispatcher.dispatch({ type: 'MOVE_ENTRY_ORDER', lid, direction: i < want ? 'down' : 'up' });
-      if (dispatcher.getState().entryMetas === now.entryMetas) return;
+      if (dispatcher.getState().entryMetas === now.entryMetas) return moved;
+      moved = true;
     }
+    return moved;
   };
   /**
    * 🔴 **フォルダは 2 クリックで開き、ノートは 2 クリックで別のウィンドウへ**

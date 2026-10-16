@@ -58,7 +58,7 @@ beforeEach(() => {
   document.body.textContent = '';
 });
 
-function setup(body = DOC) {
+function setup(body = DOC, body2 = 'べつのノート\n') {
   const root = document.createElement('div');
   document.body.append(root);
   const d = new Dispatcher();
@@ -66,7 +66,7 @@ function setup(body = DOC) {
   d.onState((s) => box.render(s));
   bindActions(root, d);
   const persisted: EntryUpsert[] = [];
-  const disk: Record<string, string> = { n1: body, n2: 'べつのノート\n' };
+  const disk: Record<string, string> = { n1: body, n2: body2 };
   const failures: string[] = [];
   d.onState((s) => {
     if (s.error !== null && !failures.includes(s.error)) failures.push(s.error);
@@ -272,6 +272,31 @@ describe('#395 段① 足したものを外せる(片道の操作を作らない
     expect(s.disk['n1'], '2 度目で、もとから在った行まで消えた').toBe('x\n\nB\n');
   });
 
+  /**
+   * 🔴 **同じ字を別の節にも足していたとき、取り消しは「さっき足した」ほうを消す**(#1087)。
+   * ⚠ 直す前は本文の中で**いちばん後ろの一致**を消したので、B → A の順に「済」を足して取り消すと
+   *   B の「済」が消え、A の「済」が残った。
+   */
+  it('🔴 B に「済」→ A に「済」→ 元に戻す、で消えるのは A の「済」', async () => {
+    const BASE = '# A\nx\n\n# B\ny\n';
+    const s = setup(BASE);
+    await open(s);
+    const optOf = (t: string): string => [...sel(s).options].find((o) => o.textContent?.trim() === t)!.value;
+    sel(s).value = optOf('B');
+    send(s, '済');
+    await tick();
+    sel(s).value = optOf('A');
+    send(s, '済');
+    await tick();
+    const both = s.disk['n1']!;
+    expect(both.split('\n').filter((l) => l === '済'), '前提: 2 つ足さっている').toHaveLength(2);
+    s.q<HTMLButtonElement>('[data-pkc-action="undo-append"]')!.click();
+    await tick();
+    const left = s.disk['n1']!.split('\n');
+    expect(left.filter((l) => l === '済')).toHaveLength(1);
+    expect(left.indexOf('済'), '残ったのが A の「済」(B の見出しより前)').toBeGreaterThan(left.indexOf('# B'));
+  });
+
   it('⚠ 別のノートを選んでいる間は出さない(いま見ている物が戻ると読まれる)', async () => {
     const s = setup();
     await open(s);
@@ -283,5 +308,45 @@ describe('#395 段① 足したものを外せる(片道の操作を作らない
     s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
     await tick();
     expect(s.q('[data-pkc-action="undo-append"]')!.hidden).toBe(true);
+  });
+});
+
+describe('#1087 打ちかけと一緒に、選んでいた追記先も戻る', () => {
+  const TWO = '# 甲\n\nk\n\n# 乙\n\no\n';
+  const optOf = (s: ReturnType<typeof setup>, t: string): string =>
+    [...sel(s).options].find((o) => o.textContent?.trim() === t)!.value;
+
+  it('🔴 A で「乙」を選んで離れ、B で別の節を選んでから戻ると、A は「乙」のまま・B は選び直した物', async () => {
+    const s = setup(TWO, '# 甲\n\nk\n\n# 乙\n\no\n');
+    await open(s);
+    sel(s).value = optOf(s, '乙');
+    const slugOtsu = sel(s).value;
+    expect(slugOtsu, '前提: 乙を選べている').not.toBe('');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    await tick();
+    // 見出しが同じ B でも、A の選択は持ち越されない(既定の末尾)
+    expect(sel(s).value, 'A の追記先が B へ持ち越されている').toBe('');
+    sel(s).value = optOf(s, '甲');
+    const slugKou = sel(s).value;
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect(sel(s).value, 'A へ戻っても追記先が戻らない').toBe(slugOtsu);
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    await tick();
+    expect(sel(s).value, 'B の追記先が戻らない').toBe(slugKou);
+  });
+
+  it('戻ったノートにその節がもう無ければ、既定(末尾)に落ちる', async () => {
+    const s = setup(TWO);
+    await open(s);
+    sel(s).value = optOf(s, '乙');
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n2' });
+    await tick();
+    // 離れている間に、別の窓が「乙」の節を消す
+    s.disk['n1'] = '# 甲\n\nk\n';
+    s.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await tick();
+    expect([...sel(s).options].map((o) => o.textContent?.trim()), '前提: 乙が消えている').not.toContain('乙');
+    expect(sel(s).value).toBe('');
   });
 });

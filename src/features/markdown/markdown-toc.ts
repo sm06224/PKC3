@@ -33,6 +33,7 @@ export interface TocEntryLike {
 type Entry = TocEntryLike;
 import { buildTextlogDoc, type TextlogOrder } from '../textlog/textlog-doc';
 import { parseFrontmatter, extractVars, VAR_NAME_SOURCE } from './frontmatter';
+import { advanceFence } from './list-renumber';
 
 export type TocLevel = 1 | 2 | 3;
 
@@ -177,20 +178,21 @@ export function extractHeadingsFromMarkdown(
   body = stripMismatchedIfBlocks(body, 'html');
 
   const lines = body.split(/\r?\n/);
-  let inFence = false;
+  let fence = '';
   const blockForms = opts?.blockForms === true;
   // setext の本文候補(直前まで続く、記法を持たない行)
   let para: string[] = [];
   const headRe = blockForms
-    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+)\s*)*(#{1,3})\s+(.+?)\s*#*\s*$/
-    : /^ {0,3}(#{1,3})\s+(.+?)\s*#*\s*$/;
+    ? /^ {0,3}(?:(?:>[ \t]?|[-*+][ \t]+)\s*)*(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/
+    : /^ {0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/;
   for (const line of lines) {
-    if (/^\s{0,3}(?:```|~~~)/.test(line)) {
-      inFence = !inFence;
-      para = [];
+    // 閉じは開きと同じ記号で同じ長さ以上(#1087、`advanceFence` が正本)
+    const wasIn = fence !== '';
+    fence = advanceFence(fence, line);
+    if (wasIn || fence !== '') {
+      if (wasIn !== (fence !== '')) para = [];
       continue;
     }
-    if (inFence) continue;
     if (blockForms) {
       const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
       if (u && para.length > 0) {
@@ -226,20 +228,16 @@ function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
   const lines = source.split(/\r?\n/);
   const out: string[] = [];
   let i = 0;
-  let inFence = false;
-  const fenceRe = /^\s{0,3}(?:```|~~~)/;
+  let fence = '';
   const ifOpenRe = /^:::if(?:\{([^}]*)\})?\s*$/;
   const closeRe = /^\s*:::\s*$/;
   const directiveOpenRe = /^:::([A-Za-z_][\w-]*)(?:\{[^}]*\})?\s*$/;
   while (i < lines.length) {
     const line = lines[i]!;
-    if (fenceRe.test(line)) {
-      inFence = !inFence;
-      out.push(line);
-      i++;
-      continue;
-    }
-    if (inFence) {
+    // 開閉の判定は `advanceFence`(記号の種類と長さ。#1087)
+    const outerWasIn = fence !== '';
+    fence = advanceFence(fence, line);
+    if (outerWasIn || fence !== '') {
       out.push(line);
       i++;
       continue;
@@ -256,17 +254,12 @@ function stripMismatchedIfBlocks(source: string, targetFormat: string): string {
     const match = fmt ? fmt === targetFormat : true;
     i++;
     let depth = 1;
-    let innerFence = false;
+    let innerFence = '';
     while (i < lines.length && depth > 0) {
       const inner = lines[i]!;
-      if (fenceRe.test(inner)) {
-        innerFence = !innerFence;
-        if (match) out.push(inner);
-        else out.push('');
-        i++;
-        continue;
-      }
-      if (innerFence) {
+      const innerWasIn = innerFence !== '';
+      innerFence = advanceFence(innerFence, inner);
+      if (innerWasIn || innerFence !== '') {
         if (match) out.push(inner);
         else out.push('');
         i++;

@@ -449,6 +449,10 @@ describe('🔴 平らに出している間の、掴んで落とす・右クリ�
     // 対照群 ── 切に戻せば出る(「選んでいない」で出ないのではない)
     toggle()!.click();
     await tick();
+    // ⚠ 'a' は f1 の中なので、切に戻した表(直下だけ)には無い ── 表に無いノートには出さない(#1087)ため、
+    //   対照群は表に出ている 'x' を選ぶ
+    d.dispatch({ type: 'SELECT_ENTRY', lid: 'x' });
+    await tick();
     expect(q('[data-pkc-field="order-nudge"]'), '切に戻しても出ない').not.toBeNull();
   });
 
