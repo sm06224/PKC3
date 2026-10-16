@@ -113,6 +113,47 @@ describe('門が開く条件', () => {
   });
 });
 
+describe('同じタブでの再読み込み (M2)', () => {
+  const memStore = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+
+  it('🔴 1 件受けたタブでは、読み込み直しても新しい合図を出さない', () => {
+    const store = memStore();
+    const o = fakeOpener();
+    const first = startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => 'n-1', storage: store })!;
+    first.burn(); // 受けると決めた
+    const again = startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => 'n-2', storage: store });
+    expect(again, '受けた後の再読み込みで門が開いた').toBe(null);
+    expect(o.sent, '受けた後に新しい合図を放送した').toEqual([{ pkc3: 'capture-ready', grant: 'n-1' }]);
+  });
+
+  it('対照群: 受ける前の再読み込みは新しい合図が出る / 別のタブ(別の保存場所)は受けられる', () => {
+    const store = memStore();
+    const o = fakeOpener();
+    startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => 'n-1', storage: store });
+    const again = startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => 'n-2', storage: store });
+    expect(again?.grant()?.nonce).toBe('n-2');
+    const other = startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => 'n-3', storage: memStore() });
+    expect(other).not.toBe(null);
+  });
+
+  it('保存場所が使えない箱でも、取り込みは止まらない', () => {
+    const broken = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+    };
+    const c = startCapture({ hash: '#pkc?capture=1', opener: fakeOpener().win, uuid: () => 'n-1', storage: broken });
+    expect(c).not.toBe(null);
+    expect(() => c!.burn()).not.toThrow();
+  });
+});
+
 interface Harness {
   sent: Array<Record<string, unknown>>;
   made: Array<{ title: string; via: string }>;
@@ -122,7 +163,14 @@ interface Harness {
 
 function harness(nonce = 'n-9'): Harness {
   const o = fakeOpener();
-  const capture = startCapture({ hash: '#pkc?capture=1', opener: o.win, uuid: () => nonce })!;
+  // ⚠ 台ごとに新しい保存場所を渡す(既定の sessionStorage は test をまたいで「受けた」印が残る)
+  const store = new Map<string, string>();
+  const capture = startCapture({
+    hash: '#pkc?capture=1',
+    opener: o.win,
+    uuid: () => nonce,
+    storage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => void store.set(k, v) },
+  })!;
   const sent: Array<Record<string, unknown>> = [];
   const made: Array<{ title: string; via: string }> = [];
   const source = {

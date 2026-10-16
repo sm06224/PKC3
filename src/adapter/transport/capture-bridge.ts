@@ -37,6 +37,23 @@ export interface CaptureDeps {
   /** 合図の元。⚠ 無い箱では**門を開かない**(弱い乱数で代用しない)。 */
   uuid?: () => string;
   now?: () => number;
+  /**
+   * 「このタブで 1 件受けた」を憶える場所(M2)。⚠ 既定は `sessionStorage`(**タブごと**)。
+   * 使えない箱(私用ウィンドウなど)では憶えられないだけで、今までどおり動く。
+   */
+  storage?: Pick<Storage, 'getItem' | 'setItem'> | null;
+}
+
+/** タブごとの「受けた」印の鍵。 */
+export const CAPTURE_ACCEPTED_KEY = 'pkc3.capture-accepted';
+
+function tabStorage(deps: CaptureDeps): Pick<Storage, 'getItem' | 'setItem'> | null {
+  if (deps.storage !== undefined) return deps.storage;
+  try {
+    return typeof sessionStorage === 'object' ? sessionStorage : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -51,6 +68,18 @@ export function startCapture(deps: CaptureDeps): {
   burn: () => void;
 } | null {
   if (!isCaptureDeepLink(deps.hash)) return null;
+  /**
+   * 🔴 **このタブが 1 件受けたら、再読み込みで新しい合図を出さない**(M2)。
+   * ⚠ 開いた相手が何度もこの窓を読み込み直す(`location.reload()` を繰り返す)と、
+   *   読み込みのたびに合図が出て**同じ取り込みがノートを増やし続ける**。
+   * ⚠ 憶えられない箱では防げない(読めなければ「受けていない」と見なす)。
+   */
+  const store = tabStorage(deps);
+  try {
+    if (store?.getItem(CAPTURE_ACCEPTED_KEY) === '1') return null;
+  } catch {
+    // 読めない ── 受けていない側に倒す(取り込みそのものを止めない)
+  }
   const opener = deps.opener;
   // ⚠ **開いた相手が居なければ受けない** ── 断片だけ手で打っても門は開かない
   if (opener === null || typeof opener.postMessage !== 'function') return null;
@@ -78,6 +107,12 @@ export function startCapture(deps: CaptureDeps): {
     grant: () => grant,
     burn: () => {
       grant = null;
+      // 🔑 焼いた = 受けると決めた。この印はタブが閉じるまで残る
+      try {
+        store?.setItem(CAPTURE_ACCEPTED_KEY, '1');
+      } catch {
+        // 書けない箱 ── 印が残らないだけ
+      }
     },
   };
 }

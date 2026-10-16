@@ -71,18 +71,24 @@ export const SAME_ORIGIN_GRANTS_KEY = KEY;
  */
 export class SameOriginGate {
   /**
-   * 登録していない添付の記憶(lid)。
-   * ⚠ **保存しない** ── closure と同じ寿命でよい。読み込み直せば消えるので、
-   *   「lid を保ったまま中身が入れ替わる」より先に記憶のほうが消える。
+   * 登録していない添付の記憶(lid + 中身の鍵)。
+   * ⚠ **保存しない** ── closure と同じ寿命でよい。
+   * 🔴 **鍵に中身(`assetKey`)を含める**(L1)── lid だけだと、このタブを開いている間に
+   *   履歴の復元・取り込みで**同じ lid のまま中身が入れ替わった**とき、聞いた覚えのない
+   *   中身が同じ origin で黙って走る(「読み込み直せば消える」は、直す前の話ではない)。
    */
   private readonly session = new Set<string>();
+
+  private static sessionKey(lid: string, assetKey: string | null | undefined): string {
+    return `${lid}\u0000${assetKey ?? ''}`;
+  }
 
   constructor(private readonly grants: SameOriginGrants = new SameOriginGrants()) {}
 
   /** もう聞かなくてよいか。⚠ 登録済みは**中身のハッシュ**、それ以外は lid で見る。 */
   allows(opts: { lid: string; assetKey: string | null | undefined; registered: boolean }): boolean {
     if (opts.registered && this.grants.isGranted(opts.assetKey)) return true;
-    return this.session.has(opts.lid);
+    return this.session.has(SameOriginGate.sessionKey(opts.lid, opts.assetKey));
   }
 
   /**
@@ -97,7 +103,7 @@ export class SameOriginGate {
     registered: boolean;
   }): 'hash' | 'session' {
     if (opts.registered && this.grants.grant(opts.assetKey)) return 'hash';
-    this.session.add(opts.lid);
+    this.session.add(SameOriginGate.sessionKey(opts.lid, opts.assetKey));
     return 'session';
   }
 

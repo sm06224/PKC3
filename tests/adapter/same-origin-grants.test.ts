@@ -158,6 +158,21 @@ describe('聞くか / 憶えるかの判断(SameOriginGate)', () => {
     ).toBe(false);
   });
 
+  it('🔴 同じ画面の中で、同じ lid の中身が入れ替わったら、また聞く(L1)', () => {
+    const g = gate();
+    // 登録していない添付 / 登録済みでも採番 key ── どちらも「この画面の間だけ」の記憶
+    for (const registered of [false, true]) {
+      const keyA = registered ? NUMBERED : KEY_A;
+      const keyB = registered ? 'ast-n-000999' : KEY_B;
+      g.remember({ lid: 'e1', assetKey: keyA, registered });
+      expect(g.allows({ lid: 'e1', assetKey: keyA, registered }), '対照群: 同じ中身は聞かない').toBe(true);
+      expect(
+        g.allows({ lid: 'e1', assetKey: keyB, registered }),
+        '同じ lid で中身が変わったのに、聞かずに通った(lid だけで憶えている)',
+      ).toBe(false);
+    }
+  });
+
   it('🔴 登録を外したら、憶えていても効かない', () => {
     gate().remember({ lid: 'e1', assetKey: KEY_A, registered: true });
     expect(

@@ -112,6 +112,17 @@ function str(v: unknown): string | undefined {
 }
 
 /**
+ * 🔴 **この添付は「アプリとして登録済み」か**(L3)── **本文の frontmatter から**引く。
+ *
+ * ⚠ 一覧のタイル(`launcherTiles`)から引いてはいけない: タイルは「アプリ」の画面を開くまで
+ *   `null` のままなので、**登録済みで許可も済んでいるアプリが、添付の詳細からは毎回聞かれた**。
+ * 🔑 規則の正本は `tileFrom` の 1 本(ここは呼ぶだけ ── 2 つ目の判定を書かない)。
+ */
+export function isRegisteredApp(src: TileSource): boolean {
+  return tileFrom(src)?.kind === 'app';
+}
+
+/**
  * 1 件を読む。タイルにならないものは `null`。
  *
  * ⚠ **`registered_as_app` が真** か **`launcher_url` を持つ** もののみ。

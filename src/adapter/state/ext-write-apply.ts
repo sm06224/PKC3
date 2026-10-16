@@ -83,11 +83,21 @@ export interface ExtWriteApplyDeps {
   refresh(): Promise<void>;
 }
 
+/** 送ったあとにノートが書き換わっていたときの断り文(アプリの作者にも user にも読まれる)。 */
+export const STALE_AFTER_HANDOFF =
+  '送ったあとにノートが書き換わっているので、アプリからの書き戻しを止めました';
+
 export type ExtWriteApplied = { ok: true; wrote: number } | { ok: false; why: string };
 
 export async function applyExtWriteOps(
   ops: readonly ExtWriteOp[],
   deps: ExtWriteApplyDeps,
+  /**
+   * 🔴 **アプリへ送った時点の本文の指紋**(lid → `contentHash64Hex`)。
+   * ⚠ 必須 ── 無いと「送ったあとに user が書いた分を、アプリが黙って上書きする」穴に戻る。
+   *   指紋が無い lid も**断る**(送った覚えが無いのと同じ)。
+   */
+  handedOff: ReadonlyMap<string, string>,
 ): Promise<ExtWriteApplied> {
   return deps.run(async () => {
     /*
@@ -126,6 +136,14 @@ export async function applyExtWriteOps(
         return { ok: false as const, why: `ノートが見つかりません: ${op.lid}` };
       const body = await deps.getBody(op.lid);
       if (body === null) return { ok: false as const, why: `本文を読めませんでした: ${op.lid}` };
+      /*
+       * 🔴 **送ったあとに本文が変わっていたら、書かずに断る**(M1)。
+       *   `expectHash` は「いま読んだ本文」と書く直前を比べるだけで、
+       *   **送った時点との差**は見ない ── 送ったあとの user の編集がここで消える。
+       * ⚠ 全部読み終えてから書くので、1 件でも違えば**1 バイトも書かない**。
+       */
+      if (handedOff.get(op.lid) !== contentHash64Hex(body))
+        return { ok: false as const, why: `${STALE_AFTER_HANDOFF}: ${op.lid}` };
       bases.set(op.lid, body);
     }
     // ── ② 当てる。⚠ 先を越されたらそこで止めて、件数つきで断る

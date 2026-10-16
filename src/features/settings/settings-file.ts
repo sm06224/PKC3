@@ -215,6 +215,10 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
  */
 export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string }[] = [
   {
+    key: 'pkc3.capture-accepted',
+    why: '設定ではない(#1087)。取り込みのブックマークで開いたそのタブが、もう 1 件受け取ったという記録(sessionStorage)。タブを閉じれば消える一時の事実で、運ぶ物は無い',
+  },
+  {
     key: 'pkc3.settings-probe',
     why: '設定ではない(#1087)。この端末が設定を保存できるかを確かめるために書いて、すぐ消す値。残ることは無く、運ぶ物も無い',
   },

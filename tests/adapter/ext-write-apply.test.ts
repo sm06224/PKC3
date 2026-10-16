@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import {
   applyExtWriteOps,
+  STALE_AFTER_HANDOFF,
   type ExtWriteApplyDeps,
   type ExtWriteEntry,
 } from '../../src/adapter/state/ext-write-apply';
@@ -61,7 +62,9 @@ function rig(
       Object.entries(over).filter(([k]) => k !== 'conflictOn' && k !== 'gone'),
     ),
   };
-  return { deps, wrote, disk, refreshed: (): number => refreshed };
+  // 🔑 送った時点の指紋 = 台の最初の本文(書かれて disk が動いても、ここは動かない)
+  const handed = new Map(Object.entries(disk).map(([k, v]) => [k, contentHash64Hex(v)]));
+  return { deps, wrote, disk, handed, refreshed: (): number => refreshed };
 }
 
 const setBody = (lid: string, body: string) => ({ op: 'setBody' as const, lid, body });
@@ -69,20 +72,20 @@ const setBody = (lid: string, body: string) => ({ op: 'setBody' as const, lid, b
 describe('通る形', () => {
   it('渡された分だけ書いて、件数を返す', async () => {
     const r = rig({ a: 'ふるい', b: 'ふるい' });
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out).toEqual({ ok: true, wrote: 2 });
     expect(r.disk).toEqual({ a: '新 A', b: '新 B' });
   });
 
   it('🔴 読んだ本文の指紋を添えて書く(別の窓を黙って上書きしない)', async () => {
     const r = rig({ a: 'ふるい' });
-    await applyExtWriteOps([setBody('a', '新')], r.deps);
+    await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
     expect(r.wrote[0]!.expectHash, '指紋を添えていない').toBe(contentHash64Hex('ふるい'));
   });
 
   it('⚠ 題名・並び順・種類は触らない(語彙は setBody だけ)', async () => {
     const r = rig({ a: 'ふるい' });
-    await applyExtWriteOps([setBody('a', '新')], r.deps);
+    await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
     expect(r.wrote[0]!.entry.title).toBe('t-a');
     expect(r.wrote[0]!.entry.entryOrder).toBe(7);
     expect(r.wrote[0]!.entry.archetype).toBe('text');
@@ -90,13 +93,13 @@ describe('通る形', () => {
 
   it('🔑 frontmatter の抽出列は当て直す(印や日付が本文と食い違わない)', async () => {
     const r = rig({ a: 'ふるい' });
-    await applyExtWriteOps([setBody('a', '---\nstatus: done\n---\n本文\n')], r.deps);
+    await applyExtWriteOps([setBody('a', '---\nstatus: done\n---\n本文\n')], r.deps, r.handed);
     expect(r.wrote[0]!.entry.status, '本文の印が列に入っていない').toBe('done');
   });
 
   it('書いたら画面を取り直す', async () => {
     const r = rig({ a: 'ふるい' });
-    await applyExtWriteOps([setBody('a', '新')], r.deps);
+    await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
     expect(r.refreshed()).toBe(1);
   });
 });
@@ -104,7 +107,7 @@ describe('通る形', () => {
 describe('🔴 断る形', () => {
   it('⚠ 編集中は 1 バイトも書かない', async () => {
     const r = rig({ a: 'ふるい' }, { phase: () => 'editing' });
-    const out = await applyExtWriteOps([setBody('a', '新')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why).toContain('編集を保存するか、編集をやめてから');
     expect(r.disk['a'], '編集中なのに書いた').toBe('ふるい');
@@ -113,7 +116,7 @@ describe('🔴 断る形', () => {
 
   it('🔴 居ない 1 件が混ざれば全体を断る(半分だけ書かない)', async () => {
     const r = rig({ a: 'ふるい' });
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out.ok).toBe(false);
     expect(r.disk['a'], '居ない 1 件が混ざっているのに書いた').toBe('ふるい');
     expect(r.wrote, '1 バイトも書かないはずが書いた').toEqual([]);
@@ -129,7 +132,7 @@ describe('🔴 断る形', () => {
    */
   it('🔴 行は在るのに本文が読めない 1 件でも、全体を断る', async () => {
     const r = rig({ a: 'ふるい', b: 'ふるい' }, { getBody: async (lid) => (lid === 'b' ? null : 'ふるい') });
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out.ok, '読めない 1 件を空として通した').toBe(false);
     expect(!out.ok && out.why).toContain('本文を読めませんでした');
     expect(r.wrote, '1 バイトも書かないはずが書いた').toEqual([]);
@@ -137,7 +140,7 @@ describe('🔴 断る形', () => {
 
   it('🔴 先を越されたら止めて、そこまでの件数を言う', async () => {
     const r = rig({ a: 'ふるい', b: 'ふるい' }, { conflictOn: new Set(['b']) });
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why, '件数を言っていない').toContain('1 件まで書いて止めました');
     expect(r.disk['a'], '先に書いた分まで巻き戻った').toBe('新 A');
@@ -146,7 +149,7 @@ describe('🔴 断る形', () => {
 
   it('⚠ 途中まで書いたなら、断っても画面は取り直す(古いまま残さない)', async () => {
     const r = rig({ a: 'ふるい', b: 'ふるい' }, { conflictOn: new Set(['b']) });
-    await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(r.refreshed(), '1 件書いたのに取り直していない').toBe(1);
   });
 
@@ -163,7 +166,7 @@ describe('🔴 断る形', () => {
         },
       },
     );
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why).toContain('消えました');
   });
@@ -192,15 +195,51 @@ describe('🔴 chain に載せる(2 本目の待ち口を作らない)', () => {
         return r.disk[lid] ?? null;
       },
     };
-    await applyExtWriteOps([setBody('a', '新')], deps);
+    await applyExtWriteOps([setBody('a', '新')], deps, r.handed);
     expect(seen, 'chain の外で読んでいる').toBe(1);
+  });
+});
+
+describe('🔴 送ったあとに書き換わったノートは、アプリからの書き戻しで上書きしない(M1)', () => {
+  it('送ったあとに本文が変わっていたら、1 バイトも書かずに断る', async () => {
+    const r = rig({ a: '送った本文' });
+    const handed = new Map(r.handed);
+    r.disk['a'] = '送ったあとに user が足した本文';
+    const out = await applyExtWriteOps([setBody('a', 'アプリの版')], r.deps, handed);
+    expect(out.ok).toBe(false);
+    expect(!out.ok && out.why).toContain(STALE_AFTER_HANDOFF);
+    expect(r.wrote, '書いてしまった').toEqual([]);
+    expect(r.disk['a'], 'user の編集が消えた').toBe('送ったあとに user が足した本文');
+    expect(r.refreshed()).toBe(0);
+  });
+
+  it('対照群: 送ったあとに変わっていなければ書ける', async () => {
+    const r = rig({ a: '送った本文' });
+    const out = await applyExtWriteOps([setBody('a', 'アプリの版')], r.deps, r.handed);
+    expect(out).toEqual({ ok: true, wrote: 1 });
+  });
+
+  it('2 件のうち 1 件でも変わっていたら、もう 1 件も書かない(半分だけ書かない)', async () => {
+    const r = rig({ a: 'A', b: 'B' });
+    const handed = new Map(r.handed);
+    r.disk['b'] = 'B を user が変えた';
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, handed);
+    expect(out.ok).toBe(false);
+    expect(r.wrote).toEqual([]);
+  });
+
+  it('指紋が無い lid(送った覚えが無い)は断る', async () => {
+    const r = rig({ a: 'A' });
+    const out = await applyExtWriteOps([setBody('a', '新')], r.deps, new Map());
+    expect(out.ok).toBe(false);
+    expect(r.wrote).toEqual([]);
   });
 });
 
 describe('🔴 書く lid ごとの門(編集中のノートを書かない)', () => {
   it('対照群: どちらの門も通せば書く', async () => {
     const r = rig({ a: 'ふるい' });
-    const out = await applyExtWriteOps([setBody('a', '新')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新')], r.deps, r.handed);
     expect(out).toEqual({ ok: true, wrote: 1 });
     expect(r.disk['a']).toBe('新');
   });
@@ -210,7 +249,7 @@ describe('🔴 書く lid ごとの門(編集中のノートを書かない)', (
       { a: 'ふるい', b: 'ふるい' },
       { editedElsewhere: async (lid) => (lid === 'b' ? EDIT_ELSEWHERE_ERROR : null) },
     );
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out).toEqual({ ok: false, why: EDIT_ELSEWHERE_ERROR });
     expect(r.wrote, '編集中のタブが居るのに書いた').toEqual([]);
     expect(r.disk['a']).toBe('ふるい');
@@ -224,7 +263,7 @@ describe('🔴 書く lid ごとの門(編集中のノートを書かない)', (
       { a: 'ふるい', b: 'ふるい' },
       { bodyBlockReason: (lid) => (lid === 'b' ? note : null) },
     );
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(out).toEqual({ ok: false, why: `PKC3 側で${note}` });
     expect(r.wrote).toEqual([]);
     expect(r.disk['a']).toBe('ふるい');
@@ -241,7 +280,7 @@ describe('🔴 書く lid ごとの門(編集中のノートを書かない)', (
         },
       },
     );
-    await applyExtWriteOps([setBody('a', '1'), setBody('a', '2'), setBody('c', '3')], r.deps);
+    await applyExtWriteOps([setBody('a', '1'), setBody('a', '2'), setBody('c', '3')], r.deps, r.handed);
     expect(asked.sort(), '書かないノートに聞いたか、重複して聞いた').toEqual(['a', 'c']);
   });
 });
@@ -249,7 +288,7 @@ describe('🔴 書く lid ごとの門(編集中のノートを書かない)', (
 describe('🔑 本文だけを書く / 途中で投げたら件数を言う', () => {
   it('🔴 題名・並びは disk の値を保つ指定(keepMeta: true)で書く(古い写しで書き戻さない)', async () => {
     const r = rig({ a: 'ふるい', b: 'ふるい' });
-    await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps);
+    await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], r.deps, r.handed);
     expect(r.wrote.map((w) => w.keepMeta), '全件に付く').toEqual([true, true]);
   });
 
@@ -263,7 +302,7 @@ describe('🔑 本文だけを書く / 途中で投げたら件数を言う', ()
         return inner(entry, h);
       },
     };
-    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], deps);
+    const out = await applyExtWriteOps([setBody('a', '新 A'), setBody('b', '新 B')], deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why).toContain('1 件まで書いて止めました');
     expect(r.refreshed(), '書けた分の画面を読み直していない').toBe(1);
@@ -277,7 +316,7 @@ describe('🔑 本文だけを書く / 途中で投げたら件数を言う', ()
         throw new Error('boom');
       },
     };
-    await expect(applyExtWriteOps([setBody('a', '新')], deps)).rejects.toThrow('boom');
+    await expect(applyExtWriteOps([setBody('a', '新')], deps, r.handed)).rejects.toThrow('boom');
     expect(r.refreshed()).toBe(0);
   });
 
@@ -289,7 +328,7 @@ describe('🔑 本文だけを書く / 途中で投げたら件数を言う', ()
         throw new Error('boom');
       },
     };
-    const out = await applyExtWriteOps([setBody('a', '新')], deps);
+    const out = await applyExtWriteOps([setBody('a', '新')], deps, r.handed);
     expect(out.ok).toBe(false);
     expect(!out.ok && out.why).toContain('1 件は書きました');
   });
