@@ -5069,6 +5069,9 @@ export function selectEntryOrExplain(
  * @param cursor カーソルの行(`null` = その面はカーソルを持たない)。
  *   ⚠ **省略可にしない** ── 渡し忘れた経路だけ「印が無いと断られる」に戻り、
  *   同じ操作が面によって違う答えを返す(CLAUDE.md §7)。
+ * @param afterMoved 🔴 **ゴミ箱へ移し終えた直後**に撃つ後始末(2 ペインのカーソルを隣の行へ立てる等)。
+ *   ⚠ 別のタブの編集を確かめる間は移すのが**非同期**になる(#1766)── 呼び側が `deleteFrom` の直後に
+ *   同期で後始末すると、行がまだ居て空振りする。**必ずこの口で渡す**(省略可にしない)。
  */
 function deleteFrom(
   dispatcher: Dispatcher,
@@ -5077,6 +5080,7 @@ function deleteFrom(
   rows: readonly EntryMeta[],
   selection: readonly string[],
   cursor: string | null,
+  afterMoved: () => void,
 ): void {
 
     const st = dispatcher.getState();
@@ -5138,6 +5142,7 @@ function deleteFrom(
         // 🔴 1 件のときは `delete-entry` と同じ字(引けていれば件数)── 直す前は 1 件だと何も言わなかった(#1087)
         moved.length > 1 ? LINKED_FROM_SOME : moved.length === 1 ? linkedFromText(st, after, moved[0]!.lid) : '',
       );
+      afterMoved();
     });
 }
 
@@ -8227,7 +8232,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     // ⚠ 押した場所は**左の列**なので、相手も左の列の集合(2 ペインの印を巻き込まない)
     // ⚠ 左の列は**カーソルを持たない**(印だけの面)── だから `null`
-    deleteFrom(dispatcher, services, root, visibleFilerRows(st), st.selection, null);
+    deleteFrom(dispatcher, services, root, visibleFilerRows(st), st.selection, null, () => {});
   },
   /** 印を全部外す(#240 段②)。 */
   'clear-selection': (dispatcher) => dispatcher.dispatch({ type: 'CLEAR_SELECTION' }),
@@ -8616,8 +8621,9 @@ const ACTIONS: Record<string, ActionHandler> = {
     const st = dispatcher.getState();
     const rows = dualPaneRows(st, side);
     const cursor = paneOf(st.dual, side).cursor;
-    deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor);
-    keepDualCursorAfter(dispatcher, side, rows, cursor);
+    deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor, () => {
+      keepDualCursorAfter(dispatcher, side, rows, cursor);
+    });
   },
   /**
    * 🔴 **反対側の場所へ移す**(この面の主目的)。
@@ -19542,9 +19548,10 @@ export function bindActions(
     if (cmd === 'filer-trash') {
       const rows = dualRows(st, side);
       const cursor = paneOf(st.dual, side).cursor;
-      deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor);
-      // 焦点も連れて行く(表は組み直されるので、立てたカーソルの行へ)
-      if (keepDualCursorAfter(dispatcher, side, rows, cursor) !== null) carryDualFocus(side);
+      deleteFrom(dispatcher, services, root, rows, paneOf(st.dual, side).selection, cursor, () => {
+        // 焦点も連れて行く(表は組み直されるので、立てたカーソルの行へ)
+        if (keepDualCursorAfter(dispatcher, side, rows, cursor) !== null) carryDualFocus(side);
+      });
       return true;
     }
     return false;
