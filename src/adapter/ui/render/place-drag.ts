@@ -32,6 +32,7 @@
  * 器の印(`PLACE_FOCUS_ATTR`)を見て同じ開き行の口へ返す。`Esc` で取りやめ(見た目を戻す)。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
+import { screenBodyOf } from '@adapter/state/app-state';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
 import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
@@ -391,7 +392,17 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     //   非同期(worker 競合など)で断られた場合は state.error の変化で戻す。
     //   なお、非同期の断り文が直前と同一の場合は文字列比較で拾えないため、タイムアウト(2000ms)で戻る。
     const startError = dispatcher.getState().error;
+    // 🔴 書込が着いた印 ── 画面の本文が書く前から変わったら、書込は着いている(`BODY_REWRITTEN` が本文を差し替える)。
+    //   着いた後は戻さない: 遅れて立った別の理由のエラーや 2000ms の期限で、書けた位置から跳び戻らせない。
+    const startBody = screenBodyOf(dispatcher.getState(), action.lid);
     const unbindState = dispatcher.onState((state) => {
+      if (startBody !== null) {
+        const shown = screenBodyOf(state, action.lid);
+        if (shown !== null && shown !== startBody) {
+          cleanup();
+          return;
+        }
+      }
       if (state.error && state.error !== startError) {
         rollback();
         return;
@@ -404,7 +415,7 @@ export function installPlaceDrag(root: HTMLElement, dispatcher: Dispatcher): () 
     });
     unsubs.push(unbindState);
 
-    // 3. タイムアウト上限(2000ms: 1秒以上。別の理由で描き直しが来ないときに戻す)
+    // 3. タイムアウト上限(2000ms: 1秒以上。書込の着いた印も描き直しも来ないときだけ戻す ── 上の印が来れば監視ごと外れる)
     // 期限が来たとき、すでに要素が外れていれば(再描画済み)何もしない(#1481 6)
     timer = setTimeout(() => {
       if (!block.isConnected) {

@@ -708,19 +708,28 @@ export function placeStyleAt(line: string): PlaceStyleRead | null {
   };
 }
 
-/** `key=値`(引用符つきも)を全部拾う正規表現。⚠ 前の空白ごと拾う(消したとき隙間を残さない)。 */
-const styleTokenRe = (key: string): RegExp =>
-  new RegExp(`(^|\\s)${key}=(?:"[^"]*"|'[^']*'|\\S*)`, 'g');
+/**
+ * `key=値`(引用符つきも)を全部拾う正規表現。⚠ 前の空白ごと拾う(消したとき隙間を残さない)。
+ * ⚠ 札は**頭から順に**読み、名前が一致した物だけ扱う(`setToken` と同じ走査)── 引用つきの値の中の
+ *   `fill=red`(`note="q x=5 fill=red"`)は値の一部で札ではない。キーで絞った正規表現は引用の中にも当たり、行を壊す。
+ */
+const anyTokenRe = (): RegExp => /(^|\s)([^\s=]+)=(?:"[^"]*"|'[^']*'|\S*)/g;
 
 /** 札を全部消す。 */
 function removeToken(attrs: string, key: string): string {
-  return attrs.replace(styleTokenRe(key), '').replace(/^\s+/, '');
+  return attrs
+    .replace(anyTokenRe(), (whole: string, _lead: string, name: string) => (name === key ? '' : whole))
+    .replace(/^\s+/, '');
 }
 
 /** 札を 1 つだけにして書く(無ければ足す / 1 つなら**その場で**差し替える / 重なっていれば全部消して末尾へ)。 */
 function setStyleToken(attrs: string, key: string, value: string): string {
-  const count = attrs.match(styleTokenRe(key))?.length ?? 0;
-  if (count === 1) return attrs.replace(styleTokenRe(key), `$1${key}=${value}`);
+  let count = 0;
+  for (const m of attrs.matchAll(anyTokenRe())) if (m[2] === key) count += 1;
+  if (count === 1)
+    return attrs.replace(anyTokenRe(), (whole: string, lead: string, name: string) =>
+      name === key ? `${lead}${key}=${value}` : whole,
+    );
   const rest = count === 0 ? attrs : removeToken(attrs, key);
   return rest === '' ? `${key}=${value}` : `${rest} ${key}=${value}`;
 }

@@ -7626,6 +7626,13 @@ function reduceCore(
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       if (action.text.trim() === '') return { state, events: [] }; // 空の追記は作らない
+      // 🔴 末尾へ足す回で、画面の本文の末尾が閉じていないブロックの中なら、押した時点で理由を言う
+      //   (`ADD_PLACE` と同じ関数。画面に無いノートは書込側 = effect が同じ条件で断る)
+      if (action.target === null) {
+        const shown = screenBodyOf(state, action.lid);
+        if (shown !== null && endsInsideOpenBlock(shown))
+          return { state: { ...state, error: APPEND_OPEN_BLOCK_REFUSAL }, events: [] };
+      }
       return {
         state: { ...state, writeLock: { lid: action.lid }, revisionPanel: null, revisionPreview: null },
         events: [
@@ -11208,6 +11215,13 @@ export const PLACE_LINE_REMOVE_OPEN_REFUSAL =
 /** 末尾が閉じていないブロックの中へは線を足せない ── 押した時点で言う断り(#1087。`ADD_PLACE` と同じ作法)。 */
 export const PLACE_CONNECT_OPEN_REFUSAL =
   '本文の最後のブロックが閉じていないため、線でつなげません(ブロックを閉じてからつないでください)';
+
+/**
+ * 末尾が閉じていないコードブロック・囲いの中へは、ノートの末尾に足せない ── 押した時点で言う断り。
+ * ⚠ 言わずに足すと、足した行がコードの字になって画面に出ない(「書きました」と言いながら見えない)。
+ */
+export const APPEND_OPEN_BLOCK_REFUSAL =
+  'ノートの末尾が閉じていないコードブロック(または囲い)の中なので、末尾に足せませんでした(ブロックを閉じてから足してください)';
 
 /** 末尾が閉じていないブロックの中へは板を置けない ── 押した時点で言う断り(#529)。 */
 export const PLACE_OPEN_BLOCK_REFUSAL =
