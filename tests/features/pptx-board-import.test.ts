@@ -239,6 +239,21 @@ describe('扉の副題と原点・知らない図形', () => {
     expect(Math.abs(ps[1]!.x - 300)).toBeLessThanOrEqual(TOL);
   });
 
+  // 🔴 #1087 B1: 他のアプリの扉の副題(ph subTitle)は板に戻せない ── 字があるものは「取り込めなかった」に数える
+  const foreignCover = (subText: string): string =>
+    '<p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>'
+    + '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr/><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr>'
+    + '<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1905000" cy="952500"/></a:xfrm></p:spPr>'
+    + '<p:txBody><a:p><a:r><a:t>題名</a:t></a:r></a:p></p:txBody></p:sp>'
+    + '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Subtitle 2"/><p:cNvSpPr/><p:nvPr><p:ph type="subTitle"/></p:nvPr></p:nvSpPr>'
+    + '<p:spPr><a:xfrm><a:off x="0" y="1000000"/><a:ext cx="1905000" cy="952500"/></a:xfrm></p:spPr>'
+    + `<p:txBody><a:p><a:r><a:t>${subText}</a:t></a:r></a:p></p:txBody></p:sp>`
+    + '</p:spTree></p:cSld></p:sld>';
+  it('🔴 #1087 B1: 扉の副題(字あり)は黙って消えず、件数に足す。空の置き場は足さない', () => {
+    expect(readPptxSlide(foreignCover('サブ')).dropped).toBe(1);
+    expect(readPptxSlide(foreignCover('')).dropped, '空の置き場は言うことがない').toBe(0);
+  });
+
   const odd = (geom: string): string =>
     '<p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>'
     + '<p:sp><p:nvSpPr><p:cNvPr id="2" name="s"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>'

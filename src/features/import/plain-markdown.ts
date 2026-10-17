@@ -146,12 +146,45 @@ function scanUnresolvedRefs(text: string): string[] {
     const dest = site.dest.trim();
     if (dest === '') continue;
     // 外部 URL / 内部 anchor / 既に解決済みの添付参照は「未解決」ではない
-    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(dest) || dest.startsWith('#') || dest.startsWith('//')) {
+    // 🔴 `file:` と Windows のドライブ(`C:\x` / `C:/x`)は外部 URL ではない ── 手元の PC の path なので、持ってこられない参照として数える。
+    //    ⚠ scheme は 2 字以上(1 字は drive 文字)
+    const local = /^file:/i.test(dest) || /^[a-zA-Z]:[\\/]/.test(dest);
+    if (
+      !local &&
+      (/^[a-zA-Z][a-zA-Z0-9+.-]+:/.test(dest) || dest.startsWith('#') || dest.startsWith('//'))
+    ) {
       continue;
     }
     found.add(dest);
   }
   return [...found];
+}
+
+/**
+ * Obsidian 形式のリンク(`[[Note]]` / `[[Note#h|alias]]` / `![[pic.png]]`)を数える。⚠ 数えるだけ(解決しない・書き換えない)。
+ *
+ * ⚠ PKC 自身の `[[ruby:…]]` `[[em:…]]` など `[[語:` で始まる記法は別物なので数えない。
+ * ⚠ コードフェンスと行内コードの中は記法ではない(`scanLinks` と同じ向き)。
+ */
+export function countObsidianLinks(text: string): number {
+  let n = 0;
+  let fence: { char: string; len: number } | null = null;
+  for (const line of text.split(/\r\n|[\r\n]/)) {
+    const mark = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (mark) {
+      const m = mark[1]!;
+      if (fence === null) fence = { char: m[0]!, len: m.length };
+      else if (m[0] === fence.char && m.length >= fence.len) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const plain = line.replace(/(`+)[\s\S]*?\1/g, '');
+    for (const m of plain.matchAll(/\[\[([^[\]\n]+)\]\]/g)) {
+      if (/^[A-Za-z][A-Za-z0-9_-]*:/.test(m[1]!)) continue;
+      n += 1;
+    }
+  }
+  return n;
 }
 
 /**
@@ -170,8 +203,16 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
   const metaTitle = parsed.meta['title'];
   const heading = firstHeading(parsed.body);
   const fromName = titleFromFileName(fileName);
+  // 🔴 数・真偽の `title: 2024` / `title: true` も題名にする(#1087)。⚠ block scalar の印(`|` `>-` など)は
+  //    `parseFlatYaml` が字のまま返す ── 中身ではないので題名にしない(見出し → file 名へ)
+  const metaTitleText =
+    typeof metaTitle === 'number' || typeof metaTitle === 'boolean'
+      ? String(metaTitle)
+      : typeof metaTitle === 'string' && !/^[|>][+-]?\d?$/.test(metaTitle.trim())
+        ? metaTitle.trim()
+        : '';
   const rawTitle =
-    (typeof metaTitle === 'string' && metaTitle.trim() !== '' ? metaTitle.trim() : null) ??
+    (metaTitleText !== '' ? metaTitleText : null) ??
     heading ??
     (fromName !== '' ? fromName : null) ??
     '無題';
@@ -198,6 +239,14 @@ export function readPlainMarkdown(text: string, fileName: string): PlainMarkdown
     // まま残る ── 黙って残すと「画像が出ない」だけが user に見える
     warnings.push(
       `画像・ファイルへの参照 ${unresolvedRefs.length} 件は解決していません(単一 md は添付を含みません): ${unresolvedRefs.slice(0, 5).join(', ')}${unresolvedRefs.length > 5 ? ' …' : ''}`,
+    );
+  }
+
+  // 🔴 Obsidian のリンクは解決しない(字のまま残る)── 黙らない。件数だけ言う
+  const obsidian = countObsidianLinks(text);
+  if (obsidian > 0) {
+    warnings.push(
+      `Obsidian 形式のリンク(「[[…]]」「![[…]]」)${obsidian} 件は解決していません(記号のまま残ります)`,
     );
   }
 

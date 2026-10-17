@@ -14,6 +14,7 @@ import {
   MARKDOWN_EXTENSIONS,
   firstHeading,
   isMarkdownFileName,
+  countObsidianLinks,
   readPlainMarkdown,
   titleFromFileName,
 } from '../../src/features/import/plain-markdown';
@@ -408,5 +409,36 @@ describe('ファイル名 → 題名', () => {
     ['  spaced .md', 'spaced'],
   ])('%s → %s', (name, expected) => {
     expect(titleFromFileName(name)).toBe(expected);
+  });
+});
+
+describe('🔴 #1087 取り込みの取りこぼし(B2〜B5)', () => {
+  it('B2: file: と Windows のドライブ path は外部 URL ではなく、未解決として数える', () => {
+    const r = readPlainMarkdown(
+      '![a](file:///C:/x/a.png) ![b](C:\\x\\b.png) ![c](C:/x/c.png)\n![ok](https://e.com/a.png) [m](mailto:a@b.c) [h](#top)',
+      'n.md',
+    );
+    expect(r.unresolvedRefs).toEqual(['file:///C:/x/a.png', 'C:\\x\\b.png', 'C:/x/c.png']);
+  });
+
+  it('B3: Obsidian の [[…]] / ![[…]] を数えて注意に出す(PKC の [[ruby:]] [[em:]] とコードの中は数えない)', () => {
+    const r = readPlainMarkdown('# N\n[[Note#h|alias]] ![[pic.png]] [[Other]]', 'n.md');
+    expect(r.warnings.some((w) => w.includes('3 件'))).toBe(true);
+    expect(r.body).toContain('![[pic.png]]'); // 本文は原文のまま
+    expect(countObsidianLinks('[[ruby:漢|かん]] [[em:点]]')).toBe(0);
+    expect(countObsidianLinks('`[[a]]` と\n```\n[[b]]\n```\n')).toBe(0);
+    expect(countObsidianLinks('[[a]]\n```\n[[b]]\n```\n[[c]]')).toBe(2);
+    expect(readPlainMarkdown('[[ruby:漢|かん]]', 'n.md').warnings).toEqual([]);
+  });
+
+  it.each([['|'], ['>-'], ['|+'], ['>2']])('B4: title が block scalar の印(%s)なら題名にせず見出しへ', (mark) => {
+    const r = readPlainMarkdown(`---\ntitle: ${mark}\n  長い題\n---\n# 見出し\n`, 'f.md');
+    expect(r.title).toBe('見出し');
+    expect(readPlainMarkdown(`---\ntitle: ${mark}\n  x\n---\n本文`, 'f.md').title).toBe('f');
+  });
+
+  it('B5: title が数・真偽でも題名にする', () => {
+    expect(readPlainMarkdown('---\ntitle: 2024\n---\n# 見出し', 'f.md').title).toBe('2024');
+    expect(readPlainMarkdown('---\ntitle: true\n---\n# 見出し', 'f.md').title).toBe('true');
   });
 });
