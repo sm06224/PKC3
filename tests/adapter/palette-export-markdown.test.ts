@@ -41,23 +41,23 @@ const rowOf = (id: string): HTMLButtonElement | undefined =>
 const whyOf = (id: string): string =>
   rowOf(id)?.querySelector('[data-pkc-field="palette-why"]')?.textContent ?? '';
 
-function boot(calls: string[], withService = true) {
+function boot(calls: string[], withService = true, pdfCalls: string[] = []) {
   document.body.innerHTML = '';
   resetAppDialogForTest();
   const root = document.createElement('div');
   document.body.append(root);
   buildShell(root);
   const d = new Dispatcher();
-  bindActions(root, d, withService ? { exportEntryMarkdown: (lid) => calls.push(lid) } : {});
+  bindActions(root, d, withService ? { exportEntryMarkdown: (lid) => calls.push(lid), printNote: (lid) => pdfCalls.push(lid) } : {});
   d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1', 'めも')], relations: [] });
   return { root, d };
 }
 
-async function openPalette(root: HTMLElement): Promise<void> {
+async function openPalette(root: HTMLElement, word = 'Markdown'): Promise<void> {
   root.querySelector<HTMLElement>('[data-pkc-action="open-palette"]')!.click();
   await tick();
   const f = document.querySelector<HTMLInputElement>('[data-pkc-field="palette-filter"]')!;
-  f.value = 'Markdown';
+  f.value = word;
   f.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
@@ -107,5 +107,36 @@ describe('このノートを Markdown で書き出す(#1440)', () => {
     root.append(b);
     b.click();
     expect(calls).toEqual(['n1']);
+  });
+});
+
+describe('このノートを PDF で書き出す(#1660 依頼 47-1)', () => {
+  it('🔴 「PDF」「印刷」と打つと一覧に出て、選ぶと右の列の「PDF で書き出す」と同じ口(printNote)へ lid で届く', async () => {
+    for (const word of ['PDF', '印刷']) {
+      const md: string[] = [];
+      const pdf: string[] = [];
+      const { root, d } = boot(md, true, pdf);
+      d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+      await openPalette(root, word);
+      const row = rowOf('export-note-pdf');
+      expect(row, `「${word}」で見つからない`).toBeDefined();
+      expect(row!.disabled).toBe(false);
+      row!.click();
+      await tick();
+      expect(pdf, word).toEqual(['n1']);
+      expect(md, 'Markdown の口へ届いた').toEqual([]);
+      dialog()?.close();
+    }
+  });
+
+  it('🔴 ノートを開いていない / 配線が無い版では押せない', async () => {
+    const { root } = boot([], true);
+    await openPalette(root, 'PDF');
+    expect(rowOf('export-note-pdf')!.disabled, 'ノートを開いていないのに押せる').toBe(true);
+    dialog()?.close();
+    const stale = boot([], false);
+    stale.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
+    await openPalette(stale.root, 'PDF');
+    expect(rowOf('export-note-pdf')!.disabled, '配線の無い版で押せる').toBe(true);
   });
 });

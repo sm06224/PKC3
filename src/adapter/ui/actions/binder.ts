@@ -5748,7 +5748,7 @@ export function runGlobalCommand(
    * ⚠ 断りは 3 段で、どれも `dry` では偽(= 一覧は「いまは押せません ── <理由>」で押せるふりをしない):
    *   ①編集中 / 保護中(理由は `blockedActionNote` の 1 か所)②ノートを開いていない ③配線が無い版。
    */
-  if (cmd === 'export-note-markdown') {
+  if (cmd === 'export-note-markdown' || cmd === 'export-note-pdf') {
     const st = dispatcher.getState();
     const why = blockedActionNote(st.phase);
     if (why !== null) {
@@ -5764,7 +5764,9 @@ export function runGlobalCommand(
       notify('書き出すノートがありません(先にノートを開いてください)', CAUTION);
       return true;
     }
-    const run = ROOT_SERVICES.get(root)?.exportEntryMarkdown;
+    // 🔴 PDF(#1660)は右の列の「PDF で書き出す」(`export-entry-pdf`)と同じ `services.printNote`
+    const svc = ROOT_SERVICES.get(root);
+    const run = cmd === 'export-note-pdf' ? svc?.printNote : svc?.exportEntryMarkdown;
     if (run === undefined) {
       if (dry) return false;
       prevent();
@@ -6121,7 +6123,7 @@ export function commandRowsFor(
     // ⚠ 「メッセージを開く」は押しボタンを持たない(左の列の同名は別の口)── 理由は
     //   `runGlobalCommand` の断りと同じ `blockedActionNote` から引く(出口まで言う。UX レビュー 2026-10-03)
     //   「字幕ファイル(.srt)で書き出す」(#1447)も同じ(押しボタンを持たない)── 時刻つきの行が無い理由は `note` が言う
-    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown') return blockedActionNote(dispatcher.getState().phase);
+    if (id === 'open-messages' || id === 'export-transcript-srt' || id === 'export-note-markdown' || id === 'export-note-pdf') return blockedActionNote(dispatcher.getState().phase);
     // 「選択範囲をコピー」── 控えが無いときの理由(押しボタンを持たない)。左の `>` の一覧では選択が残らないので、呼べる道を言う
     if (id === 'copy-selection-md')
       return inPalette ? SELECTION_FIRST : `${SELECTION_FIRST}(選択してから「操作を探す」を開いてください)`;

@@ -92,6 +92,8 @@ const UNBRIDGED: readonly string[] = [
   'export-transcript-srt',
   // 🔴 #1440: このノートを Markdown で書き出す ── 受け手を持たない特例(`runGlobalCommand`)。「操作を探す」から呼ぶ
   'export-note-markdown',
+  // 🔴 #1660: このノートを PDF で書き出す ── 受け手を持たない特例(`runGlobalCommand`)。「操作を探す」から呼ぶ
+  'export-note-pdf',
   'append-send',
   /**
    * 🔴 #1032「ノートを閉じる」── **押し所を作らないのが、この直しの中身**である。
@@ -841,13 +843,14 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   (押し口は集計の面の中にしか無く、押した組のタグが要る。`untag-entry` と同じ置き場)。`receivers` +2 / `total` +2 / `unregistered` +2。
       // ⚠ 2026-10-17(#1163 依頼 45 の 2、#1657): 題名を変えた直後の「元に戻す」(`undo-rename`)で受け手 +1 ── 登記は増えない
       //   (押し口は画面の下の知らせの隣の 1 か所にしか無く、鍵も持たない。`undo-dual-move` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
-      total: 433,
+      // ⚠ 2026-10-17(#1660 依頼 47-1): 「操作を探す」の `export-note-pdf` で登記 +1 / `outsideActionsTable` +1(受け手を持たない特例 ── `export-note-markdown` と同じ置き場)。
+      total: 434,
       receivers: 367,
       // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)1 件を登記 ── 受け手は前から在った(知らせの隣のボタン)ので
       //   `registered` +1 / `both` +1 / `unregistered` −1(`total` / `receivers` は動かない)。`copy-selection-md` と同じ仕分け。
-      registered: 168,
+      registered: 169,
       both: 102,
-      outsideActionsTable: 66,
+      outsideActionsTable: 67,
       unregistered: 265,
     });
   });
@@ -906,8 +909,9 @@ describe('操作の全数台帳(#582 段①)', () => {
     // ⚠ 2026-10-12(#582 段③ 第 4 群): 録音・録画の最中と切り出し 6 件 + 検索の帯を閉じる 1 件(`stop-capture` / `capture-stop` / `capture-trim-*` / `search-jump-end`)を登記で `key` 130 → 137(鍵の既定は持たない)
     // ⚠ 2026-10-12(#582 段③ 依頼 22 の Q3 = A): 「選択範囲をコピー」を登記で `key` 137 → 138(鍵の既定は持たない)
     // ⚠ 2026-10-15(#1087): ゴミ箱へ移した直後の「元に戻す」(`undo-trash`)を登記で `key` 138 → 139(鍵の既定は持たない)
+    // ⚠ 2026-10-17(#1660): 「このノートを PDF で書き出す」(`export-note-pdf`)を登記で `key` 139 → 140(鍵の既定は持たない)
     expect(s().perBook).toEqual({
-      key: 139,
+      key: 140,
       entry: 22,
       body: 3,
       collection: 2,

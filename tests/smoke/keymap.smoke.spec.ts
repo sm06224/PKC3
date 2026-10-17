@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, collectPageErrors, useSplitEditor, answerAppDialog } from './helpers';
 
 /**
  * ショートカットキーと、その割り当て直し(#256。user 指示 2026-08-18)。
@@ -105,6 +105,8 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   // ⑧ すべて既定に戻す → 既定が戻り、割り当てた鍵は効かなくなる
   await page.keyboard.press('Alt+3');
   await clickReal(page, '[data-pkc-field="keymap-reset-all"]');
+  // 🔴 #1660: 消える数を見せてから聞く
+  expect(await answerAppDialog(page, 'ok')).toMatch(/自分で変えた割り当て \d+ 件を、全部はじめに戻します/);
   await page.keyboard.press('Alt+g');
   await expect(shell, '戻したのに割り当てた鍵が生きている').not.toHaveAttribute(
     'data-pkc-hidden-panes',

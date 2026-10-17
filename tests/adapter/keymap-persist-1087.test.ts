@@ -147,7 +147,7 @@ describe('2b. 外す・既定に戻すも、保存できなかったことを言
     expect(s.resetAll()).toBe(false);
   });
 
-  it('🔴 × で外す / 既定に戻す / すべて既定に戻す、の 3 つとも画面に出る(書ける端末では出ない)', () => {
+  it('🔴 × で外す / 既定に戻す / すべて既定に戻す、の 3 つとも画面に出る(書ける端末では出ない)', async () => {
     for (const [storage, expectNote] of [
       [dead(), true],
       [fakeStorage(), false],
@@ -173,6 +173,9 @@ describe('2b. 外す・既定に戻すも、保存できなかったことを言
       const all = root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
       expect(all.disabled).toBe(false);
       all.click();
+      await new Promise((r) => setTimeout(r, 0));
+      document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
       const allNote = root.querySelector('[data-pkc-field="keymap-reset-all-note"]')!.textContent ?? '';
       expect(allNote.includes(SETTINGS_NOT_PERSISTED_TEXT), `すべて既定に戻す の注: ${allNote}`).toBe(expectNote);
       panel.dispose();

@@ -53,6 +53,15 @@ if (typeof globalThis.localStorage === 'undefined' || typeof window.localStorage
   }
 }
 
+/** 🔴 #1660: 「すべて既定に戻す」の確認に答える(確認の器は次の tick で出る)。 */
+const answerDialog = async (answer: 'ok' | 'cancel'): Promise<string> => {
+  await new Promise((r) => setTimeout(r, 0));
+  const body = document.querySelector('[data-pkc-field="dialog-body"]')?.textContent ?? '';
+  document.querySelector<HTMLButtonElement>(`[data-pkc-field="dialog-${answer}"]`)!.click();
+  await new Promise((r) => setTimeout(r, 0));
+  return body;
+};
+
 describe('割当の保存', () => {
   it('上書きしたものだけ保存する(既定は書かない)', () => {
     const st = fakeStorage();
@@ -784,7 +793,7 @@ describe('設定の面(割り当て直す口)', () => {
     panel.dispose();
   });
 
-  it('🔴 1 つも変えていなければ「すべて既定に戻す」は押せない / 変えたら押せる(2026-10-13)', () => {
+  it('🔴 1 つも変えていなければ「すべて既定に戻す」は押せない / 変えたら押せる(2026-10-13)', async () => {
     const store = new KeymapStore(fakeStorage());
     const panel = buildKeymapPanel(store, document);
     document.body.append(panel.root);
@@ -793,7 +802,28 @@ describe('設定の面(割り当て直す口)', () => {
     store.removeBinding('create-entry', 'Mod+N');
     expect(all.disabled, '変えたのに押せない').toBe(false);
     all.click();
+    await answerDialog('ok');
     expect(all.disabled, '戻した後も押せる').toBe(true);
+    panel.dispose();
+  });
+
+  it('🔴 「すべて既定に戻す」は消える数を見せて聞き、「やめる」なら何も消えない(#1660)', async () => {
+    resetAppDialogForTest();
+    const store = new KeymapStore(fakeStorage());
+    const panel = buildKeymapPanel(store, document);
+    document.body.append(panel.root);
+    store.addBinding('create-entry', 'Alt+M');
+    store.addBinding('edit-entry', 'Alt+9');
+    const all = panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
+    all.click();
+    expect(store.getBindings()['create-entry'], '聞く前に消えた').toContain('Alt+M');
+    expect(await answerDialog('cancel')).toBe('自分で変えた割り当て 2 件を、全部はじめに戻します');
+    expect(store.getBindings()['create-entry'], 'やめたのに消えた').toContain('Alt+M');
+    expect(store.getBindings()['edit-entry'], 'やめたのに消えた').toContain('Alt+9');
+    all.click();
+    await answerDialog('ok');
+    expect(store.getBindings()['create-entry']).toEqual(['Mod+N']);
+    expect(store.getBindings()['edit-entry']).not.toContain('Alt+9');
     panel.dispose();
   });
 
@@ -941,7 +971,7 @@ describe('設定の面(割り当て直す口)', () => {
     panel.dispose();
   });
 
-  it('× で 1 つ外せる / すべて既定に戻せる', () => {
+  it('× で 1 つ外せる / すべて既定に戻せる', async () => {
     const store = new KeymapStore(fakeStorage());
     const panel = buildKeymapPanel(store, document);
     document.body.append(panel.root);
@@ -952,6 +982,7 @@ describe('設定の面(割り当て直す口)', () => {
       .click();
     expect(store.getBindings()['open-help']).toEqual(['Alt+5', 'Mod+Shift+Slash']);
     panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!.click();
+    await answerDialog('ok');
     expect(store.getBindings()['open-help']).toEqual(['F1', 'Alt+5', 'Mod+Shift+Slash']);
     panel.dispose();
   });
@@ -1061,6 +1092,7 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
        *   root に結んだ services(右クリックの `export-entry-markdown` と同じ口)から直に呼ぶ特例。
        */
       'export-note-markdown',
+      'export-note-pdf',
       /**
        * ⚠ 2026-10-08 に足した(#1452 案 1)── マニュアルを別のウィンドウで開く。押しボタンはヘルプの面の
        *   中にしか無く、面は開くまで組まれないので、root に結んだ services から直に呼ぶ特例。

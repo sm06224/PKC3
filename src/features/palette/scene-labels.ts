@@ -77,6 +77,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'copy-note-rich': NOTE,
   'copy-selection-md': NOTE,
   'export-note-markdown': NOTE,
+  'export-note-pdf': NOTE,
   'export-transcript-srt': NOTE,
   'append-send': NOTE,
   // 編集 ── 本文の欄の中の操作

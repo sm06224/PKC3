@@ -770,6 +770,22 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: 'マークダウン md 書き出し エクスポート 保存',
   },
   /**
+   * 🔴 **このノートを PDF で書き出す**(#1660 依頼 47-1 = A)。
+   *
+   * 🔑 書き出しの仲間で PDF だけ「操作を探す」に無かった。入口は右クリック・右の列の「PDF で書き出す」と同じ実体
+   *   (`services.printNote`)── 口を 2 つ作らない。
+   * ⚠ 鍵は付けない(`defaults: []`。`KEYLESS` に足すこと)。
+   */
+  {
+    id: 'export-note-pdf',
+    label: 'このノートを PDF で書き出す',
+    contexts: ['global'],
+    defaults: [],
+    note: '開いているノートを、印刷の画面から PDF にして保存します',
+    whyNot: 'ノートを開いているときだけ効きます',
+    alias: 'PDF 印刷 プリント 書き出し エクスポート 保存',
+  },
+  /**
    * 🔴 **マニュアルを別のウィンドウで開く**(#1452 案 1。🟣 Gemini 提案「編集中にショートカットと記法を
    *   確かめたい」の核)。
    *
