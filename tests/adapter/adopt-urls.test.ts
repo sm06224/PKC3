@@ -132,6 +132,14 @@ describe('貼り付けた URL を資産にする', () => {
     expect(failures[0]!.fixable).toBe(true);
   });
 
+  it('🔴 同じ秒に取り込んだ複数枚は別の名前になる(名前の出口は断り文だけなので、置けない回で読む)', async () => {
+    const h = harness({ estimate: async () => ({ usage: 100, quota: 100 }) });
+    const { failures } = await h.run(['blob:a', 'blob:b'], async () => png());
+    expect(failures, '前提: 2 件とも断られている').toHaveLength(2);
+    expect(failures[0]!.why, '2 枚目が 1 枚目と同じ名前').not.toBe(failures[1]!.why);
+    expect(failures[1]!.why).toContain('-2');
+  });
+
   it('🔴 名乗りは経路ごとに変える(どちらの操作で失敗したかが読める)', async () => {
     const h = harness({ estimate: async () => ({ usage: 100, quota: 100 }) });
     const { failures } = await h.run(

@@ -65,3 +65,21 @@ export function pastedImageName(
   const ext = EXT[file.type.toLowerCase()] ?? 'png';
   return `${prefix}-${assetStamp(at)}.${ext}`;
 }
+
+/**
+ * 1 回の貼り付け・取り込みの中で、**名前が重ならないようにする**(同じ秒に貼った複数枚は
+ * 時刻の名前が同じになる)。重なったら拡張子の前に `-2`、`-3` を付ける。
+ * ⚠ 呼び側は**1 回の貼り付けごとに作る**(別の回と名前を揃える必要は無い)。
+ */
+export function createNameDeduper(): (name: string) => string {
+  const used = new Set<string>();
+  return (name) => {
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    let out = name;
+    for (let n = 2; used.has(out); n++) out = `${stem}-${n}${ext}`;
+    used.add(out);
+    return out;
+  };
+}

@@ -4,7 +4,7 @@
  * あとから探せない ── クリップボードの画像は名前を持っていない。
  */
 import { describe, expect, it } from 'vitest';
-import { pastedFileName, pastedImageName } from '../../src/features/asset/pasted-image-name';
+import { createNameDeduper, pastedFileName, pastedImageName } from '../../src/features/asset/pasted-image-name';
 
 const AT = new Date(2026, 7, 18, 4, 32, 9); // 2026-08-18 04:32:09(現地時刻)
 
@@ -42,5 +42,30 @@ describe('pastedImageName', () => {
     expect(pastedFileName({ type: 'image/png' }, AT)).toBe(`${stamped}.png`);
     // 対照群: image で始まるだけの本物の名前は残す
     expect(pastedFileName({ type: 'image/png', name: 'image-01.png' }, AT)).toBe('image-01.png');
+  });
+});
+
+describe('createNameDeduper(同じ秒に貼った複数枚)', () => {
+  it('🔴 重なった名前は拡張子の前に -2、-3 を付ける(最初の 1 枚はそのまま)', () => {
+    const u = createNameDeduper();
+    const n = pastedImageName({ type: 'image/png' }, AT);
+    expect([u(n), u(n), u(n)]).toEqual([
+      'スクリーンショット-2026-08-18-043209.png',
+      'スクリーンショット-2026-08-18-043209-2.png',
+      'スクリーンショット-2026-08-18-043209-3.png',
+    ]);
+  });
+
+  it('別の名前は触らない / 先に在る -2 とも重ならない / 回ごとに独立', () => {
+    const u = createNameDeduper();
+    expect(u('a.png')).toBe('a.png');
+    expect(u('b.png')).toBe('b.png');
+    expect(u('a-2.png')).toBe('a-2.png');
+    expect(u('a.png'), '先に使われた a-2.png と重なった').toBe('a-3.png');
+    expect(createNameDeduper()('a.png'), '別の回に前の回が混ざった').toBe('a.png');
+    expect(createNameDeduper()('noext')).toBe('noext');
+    const v = createNameDeduper();
+    v('noext');
+    expect(v('noext')).toBe('noext-2');
   });
 });

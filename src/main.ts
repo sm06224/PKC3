@@ -295,7 +295,7 @@ import {
 import { readAppStorage } from '@adapter/platform/app-storage';
 import { readAttachmentMeta } from '@features/flavor/attachment-flavor';
 import { formatAssetRef } from '@features/asset/asset-ref-format';
-import { pastedFileName } from '@features/asset/pasted-image-name';
+import { createNameDeduper, pastedFileName } from '@features/asset/pasted-image-name';
 import { adoptUrls, fetchImageBlob, HttpStatusError } from '@adapter/ui/actions/adopt-urls';
 import { adoptLinkIcon } from '@adapter/ui/actions/adopt-favicon';
 import { waitForWindowClose } from '@adapter/platform/window-close';
@@ -3902,8 +3902,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //   貼付はクリップボードが残っているので**もう一度貼れる**。
       await withAssetGate(async () => {
         const known = new Set(await attachDeps.listStoredBlobKeys().catch(() => []));
+        // 同じ秒に貼った複数枚が同じ名前にならないようにする
+        const uniqueName = createNameDeduper();
         for (const file of files) {
-          const name = pastedFileName(file, new Date());
+          const name = uniqueName(pastedFileName(file, new Date()));
           try {
             const stored = await storeAsset(
               attachDeps,

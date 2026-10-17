@@ -139,6 +139,17 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
       }
       running = true;
       deps.onActive?.(true);
+      /**
+       * 🔴 **預かった結果が書かれるまで「動いている」を解かない**(タブを閉じる前の確認に数える。`capture.ts` の
+       *   `unsettled` と同じ向き)。⚠ 解くのは**ちょうど 1 回**(預かった回は write の終わり、それ以外は finally)。
+       */
+      let holdsActive = false;
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        deps.onActive?.(false);
+      };
       mark(lid);
       /**
        * 🔴 **進行中の字を出している間だけ true**(#1017 C5)。⚠ 直す前は、音を読めなかった・
@@ -186,6 +197,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
           fail('この録音には音が入っていませんでした(ほぼ無音で、字にできる音がありません)。');
           return;
         }
+        // 🔴 **音の大きさは渡す前に測る**(transcribe がワーカーへ transfer すると pcm は長さ 0 になり、RMS が 0 に化ける)
+        const rms = pcmRms(pcm);
         const out = await deps.transcribe({
           files: [...ready.files],
           modelId: ready.part.modelId,
@@ -202,7 +215,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          * 🔴 **小さな雑音に出る同じ語のくり返しは、出力ごと捨てる**(#1446)── 入力が小さく、かつ少ない語彙の
          *   くり返しだけなら幻覚(`you you you`)。⚠ 直さず全部捨てる。普通の声(RMS 1e-2 以上)は触らない。
          */
-        if (isQuietRepetition(out.text, pcmRms(pcm))) {
+        if (isQuietRepetition(out.text, rms)) {
           say(`「${item.name}」からは字になりませんでした(小さな雑音だけで、同じ語のくり返ししか聞き取れませんでした)。ノートは変えていません`);
           return;
         }
@@ -213,6 +226,13 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          */
         const heading = transcriptHeading(now());
         const write = async (): Promise<void> => {
+          try {
+            await writeInner();
+          } finally {
+            if (holdsActive) release();
+          }
+        };
+        const writeInner = async (): Promise<void> => {
           /**
            * 🔴 **「足しました」は、disk に着いてから言う**(#1087 の見直し)── 文字にしている間に
            *   ノートをゴミ箱へ移すと、reducer は理由を出さずに捨てる。⚠ 理由を出して断った回
@@ -252,6 +272,8 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
          */
         let writing: Promise<void> = Promise.resolve();
         const held = queue.push(() => (writing = write()), lid);
+        // ⚠ 預かった回は、まだ書けていない ── write が終わるまで解かない(その場で書いた回は finally が解く)
+        holdsActive = held;
         await writing;
         if (held) {
           say(`「${item.name}」の文字起こしは、編集中なのでまだ足していません。編集を終えると、ノートの末尾に足します`);
@@ -268,7 +290,7 @@ export function createCaptureTranscriber(deps: CaptureTranscribeDeps): CaptureTr
         if (progressShown) deps.notify('');
         // ⚠ **必ず解く** ── 解かないと、1 度失敗しただけで以後ずっと断るようになる
         running = false;
-        deps.onActive?.(false);
+        if (!holdsActive) release();
         mark(null);
       }
     },
