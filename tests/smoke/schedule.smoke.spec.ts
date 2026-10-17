@@ -473,6 +473,43 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
   await expect(cardsOfDay(THU, '定例'), '「全部動かす」のあと木曜に回が出ない').toHaveCount(1);
   await expect(cardsOfDay(WED, '定例'), '「全部動かす」のあと水曜に回が残っている').toHaveCount(0);
 
+  /**
+   * ⑭ 🔴 **日付の読み方(台帳 #1852 束 E1。起動は増やさない ── この道中の続き)**。
+   *   全角の日付・曜日の括弧・全角の時刻 / スラッシュ区切りと 1 桁の時 / `毎週火曜`(始まりの月曜ではなく火曜に出る)/
+   *   `毎日新聞を読む`(語の一部は繰り返しではない)/ 読めない `@2026-1-5x`(本文の画面に理由が出る)。
+   *   ⚠ 札の印(時刻・刻み)で見る ── 読まれないと字は題名に残るだけで、字だけでは満たされてしまう。
+   */
+  // 区切りは全角ハイフン `－`(U+FF0D)、曜日の括弧の前に空白 ── 依頼の形 `@２０２６－１０－２０ （火） ９：００`
+  const fw = (ymd: string): string =>
+    [...ymd].map((c) => (c === '-' ? '\uFF0D' : String.fromCharCode(c.charCodeAt(0) + 0xfee0))).join('');
+  const SLASH = THU.replaceAll('-', '/');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await ta.fill(
+    [
+      `- [ ] 全角会議 @${fw(WED)} （水） ９：００`,
+      `- [ ] 斜め会議 @${SLASH} 9:00`,
+      `- [ ] 火曜定例 @${MON} 毎週火曜`,
+      `- [ ] 毎日新聞を読む @${THU}`,
+      `- [ ] 読めない日付 @2026-1-5x`,
+    ].join('\n'),
+  );
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await expect(cardsOfDay(WED, '全角会議'), '全角の日付・曜日の括弧・全角の時刻が読まれず、水曜に札が出ない').toHaveCount(1);
+  await expect(cardsOfDay(WED, '全角会議'), '全角の「９：００」が時刻の印になっていない').toHaveAttribute('data-pkc-task-time', '09:00');
+  await expect(cardsOfDay(THU, '斜め会議'), 'スラッシュ区切りの日付が読まれず、木曜に札が出ない').toHaveCount(1);
+  await expect(cardsOfDay(THU, '斜め会議'), '1 桁の「9:00」が時刻の印になっていない').toHaveAttribute('data-pkc-task-time', '09:00');
+  await expect(cardsOfDay(TUE, '火曜定例'), '「毎週火曜」が火曜に出ない').toHaveCount(1);
+  await expect(cardsOfDay(dayKey(toMon + 8), '火曜定例'), '「毎週火曜」が翌週の火曜に出ない(繰り返しとして読まれていない)').toHaveCount(1);
+  await expect(cardsOfDay(THU, '毎日新聞'), '「毎日新聞を読む」の木曜の札が無い').toHaveCount(1);
+  await expect(cardsOfDay(dayKey(toMon + 4), '毎日新聞'), '「毎日新聞を読む」が毎日の繰り返しとして読まれた(翌日に出る)').toHaveCount(0);
+  await expect(cardsOfDay(THU, '毎日新聞'), '「毎日新聞を読む」に刻みの印が付いた').not.toHaveAttribute('data-pkc-task-repeat', /.+/);
+  // 読めない日付: 本文を読む画面で理由が出る(読める日付には出ない)
+  await expect(
+    page.locator('.pkc-date-warn'),
+    '読めない `@2026-1-5x` に「日付として読めません」が 1 つだけ出ない',
+  ).toHaveCount(1);
+  await expect(page.locator('.pkc-date-warn')).toHaveText('日付として読めません(2026-10-17 の形で書きます)');
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -936,6 +973,13 @@ test('🔴 毎週の予定が先の日にも出て、押すとその日ぶんの
   await clickReal(page, '[data-pkc-action="open-missed-schedule"]');
   await expect(missedLine, '「予定表を開く」を押しても 1 行が残る').toBeHidden();
   await expect(page.locator('[data-pkc-browse-pane="schedule"]'), '左の予定のタブが開かない').toBeVisible();
+  // 🔴 起動時に「今日の予定 N 件」も言う(台帳 #1852 束 E1。今日の 散歩 / ゴミ出し は済んでいない)。置き場は状態の行ではなくメッセージのノート
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  await clickReal(page, '[data-pkc-region="settings-messages"] [data-pkc-action="open-messages"][data-pkc-message-lid="sys-messages"]');
+  await expect(
+    page.locator('[data-pkc-region="detail"]'),
+    '起動時に「今日の予定 N 件」がメッセージに積まれていない',
+  ).toContainText(/今日の予定 [1-9]\d* 件/);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });

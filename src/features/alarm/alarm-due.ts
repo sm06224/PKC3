@@ -83,6 +83,22 @@ export function archivedLidsOf(
   return out;
 }
 
+/**
+ * 🔴 **知らせを出さないノートの lid の集合**(台帳 #1852 束 E1。Gemini 裁定 = #1163 の依頼 187)。
+ *
+ * 片付けたノート(`archivedLidsOf`)に、**予定表の「出すもの」で外したノート**を足す。外したノートは
+ * 予定表に出ていないので、そのノートの予定の時刻に鳴ると「画面に無い予定が鳴る」不意打ちになる。
+ * ⚠ 呼び側は鳴らす(`dueAlarms`)と見逃した予定(`missedItems`)の**両方**でこの 1 本を使う(§7)。
+ */
+export function silencedLidsOf(
+  metas: ReadonlyMap<string, { readonly archived: boolean }>,
+  hiddenNotes: readonly string[],
+): ReadonlySet<string> {
+  const out = new Set<string>(archivedLidsOf(metas));
+  for (const lid of hiddenNotes) out.add(lid);
+  return out;
+}
+
 /** 鳴らす 1 件の鍵。⚠ **行だけでは足りない**(繰り返しは同じ行が何度も来る)。 */
 export function alarmKey(card: { lid: string; line: number }, date: string, time: string): string {
   return `${card.lid} ${card.line} ${date} ${time}`;

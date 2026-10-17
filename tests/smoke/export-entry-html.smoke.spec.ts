@@ -60,7 +60,7 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
   await page.fill('[data-pkc-field="editor-title"]', '配る資料');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '', `[入っていない先](entry:${otherLid})`].join('\n'),
+    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '', '読めない日付 @2026-1-5x の件', '', `[入っていない先](entry:${otherLid})`].join('\n'),
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -85,6 +85,9 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
   expect(text, '題名が入っていない').toContain('配る資料');
   expect(text, '見出しが入っていない').toContain('配る見出し');
   expect(text, '本文が入っていない').toContain('ふつうの段落と');
+  // 🔴 読めない日付の案内は本文を読む画面だけ ── 配る file には入らない(台帳 #1852 束 E1)。字そのものは本文として残る
+  expect(text, '読めない日付の字が本文から消えた').toContain('2026-1-5x');
+  expect(text, '画面用の「日付として読めません」が配る HTML に入った').not.toContain('日付として読めません');
 
   /**
    * 🔴 **1 件だけであること**(#491 の「このノートを渡す」)。

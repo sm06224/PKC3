@@ -115,3 +115,59 @@ export function isScheduleTimeRange(start: string, end: string): boolean {
 export function formatTimeSpan(time: string, timeEnd: string | null): string {
   return timeEnd === null ? time : `${time}〜${timeEnd}`;
 }
+
+/**
+ * 🔴 **日付の区切りとして読む全角のハイフン**(`２０２６－１０－２０` の `－` U+FF0D。台帳 #1852 束 E1 の取りこぼし)。
+ *
+ * ⚠ 受けるのは **U+FF0D(全角ハイフンマイナス)と U+2010 / U+2011(ハイフン / 改行しないハイフン)だけ**。
+ *   `ー`(長音記号)・`―`(ダッシュ)・`−`(U+2212)は**入れない** ── 長音記号は日本語の語に出る
+ *   (`ミーティング` など)ので、日付の隣の語を日付の一部と読み違える元になる。
+ * ⚠ **位置も縛る** ── 「4 桁の直後」か「4 桁・区切り・2 桁の直後」で、しかも**次が数字**のときだけ。
+ *   `@2026-10-20－会議` のように日付の後ろへ付いた `－` を `-` に倒すと、今まで日付だけ読めていた行が
+ *   `2026-10-20-` になって日付ごと落ちる(今読めている形を読めなくしない)。時刻の幅(`14:00－15:00`)にも触れない。
+ */
+const WIDE_DATE_HYPHEN =
+  /(?<=[0-9０-９]{4}|[0-9０-９]{4}[-－‐‑][0-9０-９]{2})[－‐‑](?=[0-9０-９])/g;
+
+/**
+ * 🔴 **全角の数字・コロン・スラッシュを半角に揃える**(台帳 #1852 束 E1。Gemini 裁定 = #1163 の依頼 188)。
+ *
+ * ⚠ **字の数を変えない**(1 字を 1 字に写す)── 呼び側は原文の位置(`start` / `end`)を
+ *   この写しの上で数えて、原文へ splice するので、ずれたら別の字を壊す。
+ * ⚠ 受けるのは**数字・`：`・`／`と、日付の区切りの全角ハイフン**(`WIDE_DATE_HYPHEN`)だけ(`＠` は受けない ──
+ *   「無理のない範囲」。283 の裁定:読めない形は読まずに「日付として読めません」と言う)。
+ */
+export function foldWideDateChars(text: string): string {
+  if (!/[０-９：／－‐‑]/.test(text)) return text;
+  return text
+    .replace(/[０-９：／]/g, (c) =>
+      c === '：' ? ':' : c === '／' ? '/' : String.fromCharCode(c.charCodeAt(0) - 0xfee0),
+    )
+    .replace(WIDE_DATE_HYPHEN, '-');
+}
+
+/**
+ * 🔴 **1 桁の時(`9:00`)を `09:00` に直す**(依頼 189)。読めない形はそのまま返す。
+ * ⚠ 呼び側は「日付の直後に書いた時刻」にだけ使う(`3:00の予算` のような文中の数字を
+ *   時刻と読み違えないため ── `isScheduleTime` が厳密な `HH:MM` のままなのも同じ理由)。
+ */
+export function padClockHour(raw: string): string {
+  return /^\d:\d{2}$/.test(raw) ? `0${raw}` : raw;
+}
+
+/**
+ * 🔴 **frontmatter の `date:` の値から、日付の部分を取り出す**(依頼 188 / 192 / 284)。
+ *
+ * `2026-10-20` はもちろん、`2026-10-20 14:00` / `2026-10-20T10:00` / `２０２６/１０/２０` も
+ * 日付 `2026-10-20` として読む。⚠ **時刻は捨てる**(ノート 1 件が丸ごとその日の予定で、
+ * 抽出列に時刻の置き場が無い ── 時刻つきで出すのは別の段)。読めなければ `null`。
+ * 🔑 形の判定は `isScheduleDate` 1 本に通す(ここで 2 本目の形を書かない)。
+ */
+export function dateOfFrontmatterText(raw: string): string | null {
+  const m = /^(\S+?)(?:[ T\u3000](\S+))?$/.exec(foldWideDateChars(raw.trim()));
+  if (m === null) return null;
+  const date = m[1]!.replace(/\//g, '-');
+  if (!isScheduleDate(date)) return null;
+  if (m[2] !== undefined && !/^\d{1,2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(m[2])) return null;
+  return date;
+}

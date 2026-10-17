@@ -15,9 +15,10 @@
  * そこに刻みが付くだけである。⚠ 刻みの語が無ければこれまでどおり
  * 「その期間ずっと」の意味で、**既存の本文の意味は 1 つも変わらない**。
  *
- * 🔑 **曜日は書かなくてよい**(開始日から取る)。`毎週月曜` のような語は解かない
+ * 🔑 **曜日は書かなくてよい**(開始日から取る)。書くなら `毎週火曜` と 1 つ(依頼 186。書いたとおりの曜日に出る ──
+ * 始まりの日の曜日と違ってもよい)。それ以外の言い方(英語・略記)は解かない
  * (日本語・英語・略記の表が要る)。複数の曜日だけ、`毎週 月水金` と 1 字ずつ書ける
- * (#855。⚠ 直後が字のとき ── `毎週 日報` / `毎週 月曜` ── は曜日として読まない)。
+ * (#855。⚠ 直後が字のとき ── `毎週 日報` ── は曜日として読まない)。
  *
  * ## 🔴 pure module ── 時計も DOM も持たない
  *
@@ -69,7 +70,8 @@ const WEEKDAYS_PREFIX = 'days:';
 export function weekdaysOf(unit: RepeatUnit): readonly number[] | null {
   if (!unit.startsWith(WEEKDAYS_PREFIX)) return null;
   const digits = unit.slice(WEEKDAYS_PREFIX.length);
-  return /^[1-7]{2,7}$/.test(digits) ? [...digits].map(Number) : null;
+  // 🔴 1 つでもよい(`毎週火曜` ── 台帳 #1852 束 E1、依頼 186)。⚠ 表に無い綴り(`days:` だけ・8 など)は列ではない
+  return /^[1-7]{1,7}$/.test(digits) ? [...digits].map(Number) : null;
 }
 
 /**
@@ -79,6 +81,8 @@ export function weekdaysOf(unit: RepeatUnit): readonly number[] | null {
 export function repeatWord(unit: RepeatUnit): string {
   const days = weekdaysOf(unit);
   if (days === null) return REPEAT_WORDS[unit as BaseRepeatUnit];
+  // 🔑 1 つだけのときは `曜` を付ける ── 読む側(`readRepeatTail`)が `毎週 火` の 1 字は読まないので、往復で消えない形にする
+  if (days.length === 1) return `${REPEAT_WORDS.week} ${WEEKDAY_CHARS[days[0]! - 1]}曜`;
   return `${REPEAT_WORDS.week} ${days.map((d) => WEEKDAY_CHARS[d - 1]).join('')}`;
 }
 
@@ -150,7 +154,15 @@ const REPEAT_TAIL = /^[ \t\u3000]*(毎[日週月年]|隔週)/;
  *   `隔週の定例` のように「隔週」で始まる字も、今回から隔週の繰り返しとして読む。
  */
 const WEEKDAY_TAIL =
-  /^[ \t\u3000]*([月火水木金土日](?:[ \t\u3000]*[,、，・､･][ \t\u3000]*[月火水木金土日]|[ \t\u3000]*[月火水木金土日])+)(?![ \t\u3000]*[,、，・､･]?[ \t\u3000]*[月火水木金土日])(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【])/;
+  /^[ \t\u3000]*([月火水木金土日](?:[ \t\u3000]*[,、，・､･][ \t\u3000]*[月火水木金土日]|[ \t\u3000]*[月火水木金土日])+)(?:曜日?)?(?![ \t\u3000]*[,、，・､･]?[ \t\u3000]*[月火水木金土日])(?=$|[\s。、，,.．:：;；!！?？)）\]」』】］(（[［「『【])/;
+
+/**
+ * 🔴 **`毎週` の直後の曜日 1 つ**(`毎週火曜` / `毎週 火曜日`。台帳 #1852 束 E1、Gemini 裁定 = #1163 の依頼 186 の A)。
+ *
+ * 書いたとおりに出す:`@2026-10-19 毎週火曜`(10/19 は月曜)は**火曜**に出る(始まりの日の曜日に引きずられない)。
+ * ⚠ **`曜` を書いたときだけ**読む ── `毎週 日報` `毎週 月` の 1 字は、これまでどおり「毎週 + 字」(題名に残る)。
+ */
+const SINGLE_WEEKDAY_TAIL = /^[ \t\u3000]*([月火水木金土日])曜日?/;
 
 /**
  * 🔴 **振替の記法**(#855 決4。user 裁定 2026-09-13「1 回か全部か選択する」)。
@@ -225,6 +237,17 @@ export function readRepeatTail(rest: string): RepeatTail | null {
    *   全体が字のまま残り、見て直せる。
    */
   if (unit === 'month' && UNSUPPORTED_MONTH_TAIL.test(rest.slice(m[0].length))) return null;
+  /**
+   * 🔴 **語の一部なら刻みではない**(台帳 #1852 束 E1、依頼 130 の A)。`毎日新聞を読む` `毎年恒例の行事` `毎月勤労統計` の
+   *   「毎日」「毎年」「毎月」は普通の言葉で、1 回きりの予定が毎日・毎年立っていた。
+   * 🔑 読むのは、直後が**空白・句読点・括弧・行の終わり**(= 字でも数字でもない)のときと、`毎週` の直後の**曜日**(`毎週木曜に`)。
+   * ⚠ `隔週` は今までどおり(`隔週の定例` を読めなくしない ── 動線を減らさない)。
+   */
+  if (unit !== 'biweek') {
+    const next = rest.slice(m[0].length)[0];
+    const isWordChar = next !== undefined && /^[\p{L}\p{N}]/u.test(next);
+    if (isWordChar && !(unit === 'week' && WEEKDAY_CHARS.includes(next))) return null;
+  }
   if (unit === 'week') {
     const after = rest.slice(m[0].length);
     const w = WEEKDAY_TAIL.exec(after);
@@ -238,6 +261,11 @@ export function readRepeatTail(rest: string): RepeatTail | null {
         const digits = [...set].sort((a, b) => a - b).join('');
         return { unit: `${WEEKDAYS_PREFIX}${digits}` as WeekdaysUnit, length: m[0].length + w[0].length };
       }
+    }
+    const one = SINGLE_WEEKDAY_TAIL.exec(after);
+    if (one !== null) {
+      const at = WEEKDAY_CHARS.indexOf(one[1]!) + 1;
+      return { unit: `${WEEKDAYS_PREFIX}${at}` as WeekdaysUnit, length: m[0].length + one[0].length };
     }
   }
   return { unit, length: m[0].length };

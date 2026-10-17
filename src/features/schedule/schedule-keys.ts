@@ -30,7 +30,7 @@
  *     全ノートが「未完了」としてカンバンに出る。
  */
 import { parseFrontmatter, type FrontmatterValue } from '../markdown/frontmatter';
-import { isScheduleDate } from './schedule-date';
+import { dateOfFrontmatterText } from './schedule-date';
 
 /**
  * frontmatter に書く鍵。⚠ **文字列を直接書かない**(綴り間違いが静かに効く)。
@@ -57,7 +57,8 @@ export const SCHEDULE_KEYS = {
  */
 export function readScheduleDate(meta: Record<string, FrontmatterValue>): string | null {
   const v = meta[SCHEDULE_KEYS.date];
-  return typeof v === 'string' && isScheduleDate(v) ? v : null;
+  // 🔴 時刻つき・全角・`/` 区切りも日付の部分だけ読む(台帳 #1852 束 E1 ── 依頼 188 / 192 / 284)
+  return typeof v === 'string' ? dateOfFrontmatterText(v) : null;
 }
 
 /**

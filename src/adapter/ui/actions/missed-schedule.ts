@@ -18,8 +18,14 @@
  *   チェック項目を持つノートだけに絞られる(`task-cards.ts`)。**予定表を使ったことが無い端末・設定が切の端末では頼まない**。
  */
 import type { Dispatcher } from '@adapter/state/dispatcher';
-import { archivedLidsOf } from '@features/alarm/alarm-due';
-import { missedItems, missedLabel } from '@features/schedule/schedule-notify';
+import { silencedLidsOf } from '@features/alarm/alarm-due';
+import {
+  localDateOfMs,
+  missedItems,
+  missedLabel,
+  upcomingCounts,
+  upcomingLabel,
+} from '@features/schedule/schedule-notify';
 import type { ScheduleNotifyStore } from '../render/schedule-notify';
 
 /** 開いている間、時刻を進める間隔。⚠ 短いほど「閉じた時刻」に近い(閉じる直前の予定を見逃しに数えない)。 */
@@ -107,11 +113,18 @@ export function startMissedWatch(deps: MissedWatchDeps): MissedWatch {
           return true;
         }
         if (st.taskScan === null) return false;
-        const n = missedItems(st.taskScan.cards, lastOpen, startedAt, archivedLidsOf(st.entryMetas)).length;
+        const silenced = silencedLidsOf(st.entryMetas, st.scheduleHiddenNotes);
+        const n = missedItems(st.taskScan.cards, lastOpen, startedAt, silenced).length;
         if (n > 0) {
           deps.paint(n);
           deps.post(missedLabel(n));
         }
+        /**
+         * 🔴 **今日と明日の予定を 1 行で言う**(台帳 #1852 束 E1、依頼 57 の 1)── 日付だけの予定は音も見逃しも出ないので、
+         *   開いたとき 1 度だけ件数を言う。⚠ 見逃しと同じ口・同じ設定(「見逃した予定をお知らせする」)に乗せる。
+         */
+        const next = upcomingLabel(upcomingCounts(st.taskScan.cards, localDateOfMs(startedAt), silenced));
+        if (next !== null) deps.post(next);
         return true;
       };
       unsub = deps.dispatcher.onState(() => {

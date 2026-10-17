@@ -111,9 +111,9 @@ describe('A-3: 区切りの空白が全角でも読まれる', () => {
     expect(readLineDate(`会議 @2026-10-17${SP}毎週${SP}月水金`)?.repeat).toBe('days:135');
     expect(readRepeatTail(`${SP}毎週${SP}月${SP}水${SP}金`)?.unit).toBe('days:135');
   });
-  it('対照群: 全角の数字は今までどおり読まない', () => {
-    expect(readLineDate('会議 @２０２６-10-17')).toBeNull();
-    expect(readLineDate(`会議 @2026-10-17${SP}１４：００`)?.time).toBeNull();
+  it('全角の数字・コロンも読む(台帳 #1852 束 E1、依頼 188。以前は「今までどおり読まない」を pin していた)', () => {
+    expect(readLineDate('会議 @２０２６-10-17')).toMatchObject({ date: '2026-10-17' });
+    expect(readLineDate(`会議 @2026-10-17${SP}１４：００`)?.time).toBe('14:00');
   });
   it('本文の書換: 全角空白で書かれた行でも壊さず書き換える', () => {
     const body = `- [ ] 会議 @2026-10-17${SP}14:00${SP}毎週${SP}月水金 です\n`;

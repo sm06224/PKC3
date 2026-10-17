@@ -80,8 +80,10 @@ describe('行の日付(@2026-08-25)', () => {
     expect('見積 @2026-08-25 10:000円'.slice(found!.start, found!.end)).toBe('@2026-08-25');
   });
 
-  it('1 桁の時刻は時刻ではない(本文の数字を拾わない)', () => {
-    expect(readLineDate('@2026-08-25 3:00 の予算')).toMatchObject({ time: null });
+  it('1 桁の時刻は、日付の直後に書いたときだけ時刻(離れた本文の数字は拾わない。依頼 189)', () => {
+    expect(readLineDate('@2026-08-25 3:00 の予算')).toMatchObject({ time: '03:00' });
+    // 対照群: 日付と離れていれば、今までどおり時刻ではない
+    expect(readLineDate('@2026-08-25 の 3:00 の予算')).toMatchObject({ time: null });
   });
 
   /**
