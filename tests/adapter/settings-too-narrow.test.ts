@@ -106,7 +106,7 @@ describe('押せる', () => {
   it('🔴 checkbox を押すと setTooNarrowEnabled に押した後の値が届く', () => {
     const { host, box } = setup();
     const calls: boolean[] = [];
-    const stop = bindActions(host, {} as unknown as Dispatcher, {
+    const stop = bindActions(host, { onState: () => () => {} } as unknown as Dispatcher, {
       setTooNarrowEnabled: (on) => calls.push(on),
     });
     box!.checked = true;
