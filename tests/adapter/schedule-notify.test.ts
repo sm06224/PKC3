@@ -144,7 +144,8 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     t.setScan();
     // 朝会・昼会 = 2(済み・終日は数えない)
     expect(t.painted).toEqual([2]);
-    expect(t.posted).toEqual(['見逃した予定が 2 件あります']);
+    // 台帳 #1852 束 E1(依頼 57 の 1)で、見逃しの次に「今日の予定」の件数を 1 行足した(済み以外の 10/12 の予定 3 件)
+    expect(t.posted).toEqual(['見逃した予定が 2 件あります', '今日の予定 3 件']);
     // 二度目の state 変化では言い直さない
     t.setScan();
     expect(t.painted).toEqual([2]);
@@ -170,6 +171,37 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     };
     expect(run(false).painted).toEqual([2]);
     expect(run(true)).toEqual({ painted: [], posted: [] });
+  });
+
+  it('🔴 「出すもの」で外したノートの予定は、見逃しにも「今日の予定」にも数えない(台帳 #1852 束 E1、依頼 187)。対照群: 外さなければ数える', () => {
+    const run = (hide: boolean): { painted: number[]; posted: string[] } => {
+      const store = new ScheduleNotifyStore(fakeStorage());
+      store.stampOpen('c1', ms(12, 8, 0));
+      const t = watch({ store, now: ms(12, 13, 0) });
+      if (hide) t.d.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid: 'a' });
+      t.setScan();
+      return { painted: t.painted, posted: t.posted };
+    };
+    expect(run(false).painted).toEqual([2]);
+    expect(run(true)).toEqual({ painted: [], posted: [] });
+  });
+
+  it('🔴 日付だけの予定にも、起動したとき「今日の予定」「明日の予定」を 1 行で言う。見逃しが 0 件でも言う(台帳 #1852 束 E1、依頼 57 の 1)', () => {
+    const store = new ScheduleNotifyStore(fakeStorage());
+    store.stampOpen('c1', ms(12, 12, 30));
+    const body = '- [ ] 日付だけ @2026-10-12\n- [ ] 明日 @2026-10-13\n- [ ] 明日その 2 @2026-10-13\n';
+    // 12:30 → 13:00 の間に始まる時刻つきの予定が無い = 見逃し 0 件
+    const t = watch({ store, now: ms(12, 13, 0), body });
+    t.setScan();
+    expect(t.painted).toEqual([]);
+    expect(t.posted).toEqual(['今日の予定 1 件 / 明日の予定 2 件']);
+    // 設定が切(見逃しをお知らせしない)なら、これも言わない
+    const off = new ScheduleNotifyStore(fakeStorage());
+    off.stampOpen('c1', ms(12, 12, 30));
+    off.setMissedOn(false);
+    const u = watch({ store: off, now: ms(12, 13, 0), body });
+    u.setScan();
+    expect(u.posted).toEqual([]);
   });
 
   it('🔴 時刻は走査より前に読んで、そのあと進める(進めた後に読むと常に 0 件)', () => {
@@ -293,7 +325,7 @@ describe('次に開いたとき、見逃した予定を知らせる', () => {
     holder.setScan();
     expect(follower.posted, '本体でないタブが言った').toEqual([]);
     expect(follower.painted).toEqual([]);
-    expect(holder.posted, '本体のタブが言っていない').toEqual(['見逃した予定が 2 件あります']);
+    expect(holder.posted, '本体のタブが言っていない').toEqual(['見逃した予定が 2 件あります', '今日の予定 3 件']);
   });
 
   it('⚠ 本体でないタブも、刻みでは時刻を進める(本体が閉じたあとの起動で、開いていた間を見逃しに数えない)', () => {

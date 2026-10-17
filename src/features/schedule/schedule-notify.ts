@@ -20,6 +20,7 @@ import type { TaskCard } from './task-cards';
 import { alarmAtMs, alarmKey } from '../alarm/alarm-due';
 import { expandRepeat, materializedDates, repeatMateKey } from './repeat';
 import { pad2 } from '../datetime/datetime-format';
+import { addDays } from '../datetime/date-math';
 
 /** 「知らせる時間」の選べる値(分)。`0` = なし。 */
 export const SCHEDULE_LEAD_OPTIONS: readonly number[] = [0, 5, 15, 30, 60];
@@ -102,4 +103,61 @@ export function missedItems(
 /** 帯の 1 行。 */
 export function missedLabel(count: number): string {
   return `見逃した予定が ${count} 件あります`;
+}
+
+/**
+ * 🔴 **起動したときの「今日と明日の予定」の件数**(台帳 #1852 束 E1。Gemini 裁定 = #1163 の依頼 57 の 1 = A)。
+ *
+ * 日付だけの予定(時刻が無い)は、音も「見逃した予定」も出ない ── 気づけるのは予定表を開いたときだけだった。
+ * 開いたとき 1 行で「今日の予定 2 件 / 明日の予定 1 件」と言う。
+ * - 数えるのは**済んでいない予定**(時刻つきも含める ── 字が「今日の予定」なので、日付だけに絞ると偽になる)。
+ *   片付けたノート・予定表の「出すもの」で外したノートは数えない(`archived` に入れて渡す)。
+ * - 繰り返しは、その日に出る回だけ。期間は、その日が期間の内なら数える。
+ * - 🔑 件数が 0 の日は言わない。両方 0 なら `null`(何も言わない)。
+ */
+export function upcomingCounts(
+  cards: readonly TaskCard[],
+  today: string,
+  archived: ReadonlySet<string> = new Set(),
+): { readonly today: number; readonly tomorrow: number } {
+  const tomorrow = addDays(today, 1);
+  const mates = materializedDates(cards);
+  const hit = (c: TaskCard, day: string): boolean => {
+    if (c.date === null) return false;
+    if (c.repeat !== null) {
+      const skip = mates.get(repeatMateKey(c.lid, c.text));
+      return (
+        expandRepeat({
+          anchor: c.date,
+          unit: c.repeat,
+          until: c.until,
+          from: day,
+          to: day,
+          ...(skip === undefined ? {} : { skip }),
+        }).days.length > 0
+      );
+    }
+    return c.date <= day && day <= (c.until ?? c.date);
+  };
+  let t = 0;
+  let n = 0;
+  for (const c of cards) {
+    if (c.done || archived.has(c.lid)) continue;
+    if (hit(c, today)) t += 1;
+    if (tomorrow !== null && hit(c, tomorrow)) n += 1;
+  }
+  return { today: t, tomorrow: n };
+}
+
+/** 起動したときの 1 行(`今日の予定 2 件 / 明日の予定 1 件`)。両方 0 なら `null`。 */
+export function upcomingLabel(counts: { readonly today: number; readonly tomorrow: number }): string | null {
+  const parts: string[] = [];
+  if (counts.today > 0) parts.push(`今日の予定 ${counts.today} 件`);
+  if (counts.tomorrow > 0) parts.push(`明日の予定 ${counts.tomorrow} 件`);
+  return parts.length === 0 ? null : parts.join(' / ');
+}
+
+/** その瞬間の「その端末の日付」(`YYYY-MM-DD`)。 */
+export function localDateOfMs(ms: number): string {
+  return localDateOf(ms);
 }

@@ -81,7 +81,7 @@ import {
   parseCardPresentation,
 } from '../link/card-presentation';
 import { findPhones } from '../contact/phone-link';
-import { allDateTokens, readLineDate } from '../schedule/line-date';
+import { allDateTokens, readLineDate, unreadableDateTokens } from '../schedule/line-date';
 import { ELAPSED_LINE_HEAD, parseElapsed } from '../elapsed-text';
 import { tagColorKey } from '../tag-color';
 import { confirmColorSpan, isColorCode, isEditableColor } from './color-code';
@@ -3032,6 +3032,8 @@ md.core.ruler.after('inline', 'pkc-phone', function (state) {
  * ⚠ 字は**打ったまま**(`@2026-10-15`)── 勝手に書き換えたように見せない。
  *   期間(`@a..b`)は開始の日だけを押せる字にし、`..b` は字のまま後ろに残る。
  */
+/** 日付に見えるのに読めない `@…` の横に添える字(台帳 #1852 束 E1 ── 依頼 283 の B。Gemini 裁定の字)。 */
+export const DATE_UNREADABLE_TEXT = '日付として読めません(2026-10-17 の形で書きます)';
 md.core.ruler.after('inline', 'pkc-date-link', function (state) {
   if ((state.env as { interactiveDates?: boolean }).interactiveDates !== true) return true;
   for (const token of state.tokens) {
@@ -3049,12 +3051,31 @@ md.core.ruler.after('inline', 'pkc-date-link', function (state) {
         continue;
       }
       const hits = allDateTokens(t.content);
-      if (hits.length === 0) {
+      // 🔴 日付に見えるのに読めない `@…` には、読めないことを横に添える(台帳 #1852 束 E1 ── 依頼 283 の B)
+      const bads = unreadableDateTokens(t.content);
+      if (hits.length === 0 && bads.length === 0) {
         out.push(t);
         continue;
       }
       let at = 0;
-      for (const h of hits) {
+      // ⚠ 読める日付と重ならない(読まれた `@` は `unreadableDateTokens` が除く)ので、開始位置で並べるだけ
+      const marks: { start: number; end: number; hit: (typeof hits)[number] | null }[] = [
+        ...hits.map((h) => ({ start: h.start, end: h.end, hit: h })),
+        ...bads.map((b) => ({ start: b.start, end: b.end, hit: null })),
+      ].sort((a, b) => a.start - b.start);
+      for (const mark of marks) {
+        const h = mark.hit;
+        if (h === null) {
+          const head = new state.Token('text', '', 0);
+          head.content = t.content.slice(at, mark.end);
+          out.push(head);
+          const warn = new state.Token('html_inline', '', 0);
+          warn.content = `<span class="pkc-date-warn">${md.utils.escapeHtml(DATE_UNREADABLE_TEXT)}</span>`;
+          out.push(warn);
+          at = mark.end;
+          changed = true;
+          continue;
+        }
         if (h.start > at) {
           const head = new state.Token('text', '', 0);
           head.content = t.content.slice(at, h.start);

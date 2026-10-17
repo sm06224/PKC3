@@ -389,6 +389,32 @@ describe('アラート(#280)', () => {
     expect(b.posts, '同じ区間をもう一度積んだ').toHaveLength(1);
   });
 
+  it('🔴 予定表の「出すもの」で外したノートの予定は鳴らない・長い空きの見逃しにも数えない(台帳 #1852 束 E1、依頼 187)。対照群: 外す前は鳴る', () => {
+    const b = bench();
+    b.service.start();
+    b.d.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid: 'a' });
+    expect(b.d.getState().scheduleHiddenNotes, '外せていない').toEqual(['a']);
+    b.advanceTo(14, 0);
+    b.beat();
+    expect(b.service.ringing(), '外したノートの予定が鳴った').toHaveLength(0);
+    expect(b.chimes()).toBe(0);
+    // 長い空き(眠っていた端末の復帰)でも見逃しに積まない
+    const c = bench();
+    c.service.start();
+    c.d.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid: 'a' });
+    c.advanceTo(16, 0);
+    c.jump();
+    expect(c.posts, '外したノートの予定を見逃しに積んだ').toEqual([]);
+    // 外し直せば、また鳴る(外した状態が残り続けない)
+    const live = bench();
+    live.service.start();
+    live.d.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid: 'a' });
+    live.d.dispatch({ type: 'TOGGLE_SCHEDULE_NOTE', lid: 'a' });
+    live.advanceTo(14, 0);
+    live.beat();
+    expect(live.service.ringing(), '対照群が鳴っていない').toHaveLength(1);
+  });
+
   it('🔴 長い空きの「見逃した予定」にも、片付けたノートの予定は数えない(#1087)', () => {
     const b = bench({ archived: true });
     b.service.start();

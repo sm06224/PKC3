@@ -115,3 +115,44 @@ export function isScheduleTimeRange(start: string, end: string): boolean {
 export function formatTimeSpan(time: string, timeEnd: string | null): string {
   return timeEnd === null ? time : `${time}〜${timeEnd}`;
 }
+
+/**
+ * 🔴 **全角の数字・コロン・スラッシュを半角に揃える**(台帳 #1852 束 E1。Gemini 裁定 = #1163 の依頼 188)。
+ *
+ * ⚠ **字の数を変えない**(1 字を 1 字に写す)── 呼び側は原文の位置(`start` / `end`)を
+ *   この写しの上で数えて、原文へ splice するので、ずれたら別の字を壊す。
+ * ⚠ 受けるのは**数字・`：`・`／`だけ**(`－` や `＠` は受けない ── 「無理のない範囲」。
+ *   283 の裁定:読めない形は読まずに「日付として読めません」と言う)。
+ */
+export function foldWideDateChars(text: string): string {
+  if (!/[０-９：／]/.test(text)) return text;
+  return text.replace(/[０-９：／]/g, (c) =>
+    c === '：' ? ':' : c === '／' ? '/' : String.fromCharCode(c.charCodeAt(0) - 0xfee0),
+  );
+}
+
+/**
+ * 🔴 **1 桁の時(`9:00`)を `09:00` に直す**(依頼 189)。読めない形はそのまま返す。
+ * ⚠ 呼び側は「日付の直後に書いた時刻」にだけ使う(`3:00の予算` のような文中の数字を
+ *   時刻と読み違えないため ── `isScheduleTime` が厳密な `HH:MM` のままなのも同じ理由)。
+ */
+export function padClockHour(raw: string): string {
+  return /^\d:\d{2}$/.test(raw) ? `0${raw}` : raw;
+}
+
+/**
+ * 🔴 **frontmatter の `date:` の値から、日付の部分を取り出す**(依頼 188 / 192 / 284)。
+ *
+ * `2026-10-20` はもちろん、`2026-10-20 14:00` / `2026-10-20T10:00` / `２０２６/１０/２０` も
+ * 日付 `2026-10-20` として読む。⚠ **時刻は捨てる**(ノート 1 件が丸ごとその日の予定で、
+ * 抽出列に時刻の置き場が無い ── 時刻つきで出すのは別の段)。読めなければ `null`。
+ * 🔑 形の判定は `isScheduleDate` 1 本に通す(ここで 2 本目の形を書かない)。
+ */
+export function dateOfFrontmatterText(raw: string): string | null {
+  const m = /^(\S+?)(?:[ T\u3000](\S+))?$/.exec(foldWideDateChars(raw.trim()));
+  if (m === null) return null;
+  const date = m[1]!.replace(/\//g, '-');
+  if (!isScheduleDate(date)) return null;
+  if (m[2] !== undefined && !/^\d{1,2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(m[2])) return null;
+  return date;
+}

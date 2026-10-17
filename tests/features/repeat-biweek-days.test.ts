@@ -128,8 +128,12 @@ describe('曜日の列', () => {
    * 直後が字なら列にしない(月水へ縮めて金を黙って落とさない)。
    */
   it('🔴 読点で区切った列は途中で切らない', () => {
-    for (const rest of [' 毎週 月、水、金曜に', ' 毎週 月,水,金曜', ' 毎週 月，水，金曜', ' 毎週 月 水 金曜'])
+    // ⚠ 列の直後に字が続くなら列は読まない(縮めて金を黙って落とさない)
+    for (const rest of [' 毎週 月、水、金曜に'])
       expect(readRepeatTail(rest), rest).toEqual({ unit: 'week', length: ' 毎週'.length });
+    // 🔴 列の後ろの `曜` は列の一部として食べる(台帳 #1852 束 E1。以前は `曜` が字に残るので列として読めなかった)
+    for (const rest of [' 毎週 月,水,金曜', ' 毎週 月，水，金曜', ' 毎週 月 水 金曜'])
+      expect(readRepeatTail(rest), rest).toEqual({ unit: 'days:135', length: rest.length });
     for (const rest of [' 毎週 月、水、金 会議', ' 毎週 月、水、金。', ' 毎週 月,水,金,'])
       expect(readRepeatTail(rest), rest).toMatchObject({ unit: 'days:135' });
     // 末尾の読点は区切りではなく句読点 ── 今の判断どおり月水
@@ -158,19 +162,65 @@ describe('曜日の列', () => {
   it('🔴 既存の読みを変えない(曜日の字で始まる文は曜日にしない)', () => {
     for (const rest of [
       ' 毎週 日報を書く',
-      ' 毎週 月曜',
-      ' 毎週 月曜日に実施',
-      ' 毎週 月水金曜',
       ' 毎週 月',
       ' 毎週 月月',
       ' 毎週 月、日報',
       ' 毎週 土日出勤',
       ' 毎週 金額の確認',
-      ' 毎週 火曜と木曜',
     ]) {
       expect(readRepeatTail(rest), rest).toEqual({ unit: 'week', length: ' 毎週'.length });
     }
     expect(readRepeatTail('')).toBe(null);
+  });
+
+  /**
+   * 🔴 **曜日を 1 つだけ書いた形**(台帳 #1852 束 E1。Gemini 裁定 = #1163 の依頼 186 の A)── 書いたとおりの曜日に出る。
+   * 対照群は上の「曜日の字で始まる文は曜日にしない」(`曜` が付かない 1 字・別の字が続く文は今までどおり)。
+   */
+  it('🔴 毎週火曜 ── 曜日を 1 つ書いたら、始まりの日の曜日ではなく書いた曜日に出る(依頼 186)', () => {
+    expect(readRepeatTail(' 毎週 月曜')).toEqual({ unit: 'days:1', length: ' 毎週 月曜'.length });
+    expect(readRepeatTail('毎週火曜日に実施')).toEqual({ unit: 'days:2', length: '毎週火曜日'.length });
+    expect(readRepeatTail(' 毎週 火曜と木曜')).toEqual({ unit: 'days:2', length: ' 毎週 火曜'.length });
+    // 往復 ── 書く語が、読める形になっている(消えない)
+    expect(repeatWord('days:2')).toBe('毎週 火曜');
+    expect(readRepeatTail(` ${repeatWord('days:2')}`)).toMatchObject({ unit: 'days:2' });
+    // 月曜始まりの 10/19 に「毎週火曜」と書くと、火曜の 10/20 に出る(月曜の 10/19 には出ない)
+    const d = readLineDate('- [ ] 定例 @2026-10-19 毎週火曜')!;
+    expect(d.repeat).toBe('days:2');
+    expect(
+      expandRepeat({ anchor: d.date, unit: d.repeat!, until: null, from: '2026-10-19', to: '2026-11-03' }).days,
+    ).toEqual(['2026-10-20', '2026-10-27', '2026-11-03']);
+    // 対照群: 書かなければ、始まりの日の曜日(月曜)
+    expect(
+      expandRepeat({ anchor: '2026-10-19', unit: 'week', until: null, from: '2026-10-19', to: '2026-11-03' }).days,
+    ).toEqual(['2026-10-19', '2026-10-26', '2026-11-02']);
+  });
+
+  /**
+   * 🔴 **語の一部の「毎日」「毎年」「毎月」は刻みではない**(依頼 130 の A)。
+   * 読むのは直後が空白・句読点・括弧・行末のとき(と、`毎週` の直後の曜日)。
+   */
+  it('🔴 毎日新聞 / 毎年恒例 / 毎月勤労統計 は繰り返しにならない(依頼 130)', () => {
+    for (const rest of ['毎日新聞を読む', ' 毎年恒例の行事', '毎月勤労統計の確認', ' 毎週ミーティング'])
+      expect(readRepeatTail(rest), rest).toBeNull();
+    // 対照群: 空白・句読点・括弧・行末・曜日が続けば刻み
+    for (const [rest, unit] of [
+      [' 毎日', 'day'],
+      [' 毎日 新聞', 'day'],
+      ['毎日、新聞を読む', 'day'],
+      [' 毎月)', 'month'],
+      [' 毎年。', 'year'],
+    ] as const)
+      expect(readRepeatTail(rest), rest).toMatchObject({ unit });
+    expect(readRepeatTail(' 毎週木曜に')).toMatchObject({ unit: 'days:4' });
+    // 毎日の直後が曜日の字でも刻み扱いにしない(曜日を受けるのは `毎週` だけ)
+    expect(readRepeatTail(' 毎日曜')).toBeNull();
+    // 隔週は今までどおり(`隔週の定例` を読めなくしない)
+    expect(readRepeatTail(' 隔週の定例')).toMatchObject({ unit: 'biweek' });
+    // 行の上でも: 日付の直後の「毎日新聞」は 1 回きりの予定で、題名に残る
+    const d = readLineDate('- [ ] 読む @2026-08-25 毎日新聞');
+    expect(d?.repeat).toBeNull();
+    expect(stripLineDate('- [ ] 読む @2026-08-25 毎日新聞')).toBe('- [ ] 読む 毎日新聞');
   });
 
   it('🔴 既存の全形(毎日 / 毎週 / 毎月 / 毎年 × 時刻 × 期間)の解釈が変わらない', () => {
@@ -184,12 +234,13 @@ describe('曜日の列', () => {
       ['x @2026-08-31 09:30..10:30 毎週', { repeat: 'week', timeEnd: '10:30' }],
       ['x @2026-08-31..2026-12-31 毎週', { repeat: 'week', until: '2026-12-31' }],
       ['x @2026-08-31 毎週 日報', { repeat: 'week' }],
-      ['x @2026-08-31 毎週 月曜の朝会', { repeat: 'week' }],
+      // 🔴 曜日を 1 つ書いたら、その曜日(依頼 186)
+      ['x @2026-08-31 毎週 月曜の朝会', { repeat: 'days:1' }],
     ];
     for (const [line, want] of cases) expect(readLineDate(line), line).toMatchObject(want);
     // 記法の範囲(end)も同じ ── 後ろの字が記法に食われない
     expect(readLineDate('x @2026-08-31 毎週 日報')?.end).toBe('x @2026-08-31 毎週'.length);
-    expect(stripLineDate('x @2026-08-31 毎週 月曜の朝会')).toBe('x 月曜の朝会');
+    expect(stripLineDate('x @2026-08-31 毎週 月曜の朝会')).toBe('x の朝会');
     // 展開結果も毎週のまま
     expect(
       expandRepeat({ anchor: '2026-08-31', unit: 'week', until: null, ...win }).days.slice(0, 3),

@@ -244,6 +244,8 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
    *   (`app.css` の注記)── だから `markdown-css-parity` の「書き出しに載る」検査の外である。
    */
   'pkc-date-link': 'src/features/markdown/markdown-render.ts',
+  // 🔴 日付に見えるのに読めない `@…` の横の字(台帳 #1852 束 E1)。`pkc-date-link` と同じ ── `interactiveDates` の面だけに出る
+  'pkc-date-warn': 'src/features/markdown/markdown-render.ts',
   // 🔴 文字起こしの行頭の時刻(#1232 段 b)。`pkc-date-link` と同じ ── `interactiveSeek` を渡した面だけに出る
   'pkc-seek-link': 'src/features/markdown/markdown-render.ts',
   /**
