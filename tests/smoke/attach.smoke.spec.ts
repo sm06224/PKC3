@@ -1195,6 +1195,10 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
   const body = page.locator('[data-pkc-field="dialog-body"]');
   await expect(body, '元の画素数が出ていない').toContainText('3000×2200');
   await expect(body, '戻せないことを言っていない').toContainText('戻りません');
+  // 🔴 #1652: ファイル名が出る。1 枚だけなら「何枚目」も「残りも同じにする」も出ない
+  await expect(body, '写真のファイル名が出ていない').toContainText('おおきな写真.jpg');
+  await expect(body, '1 枚なのに「枚目」が出ている').not.toContainText('枚目');
+  await expect(page.locator('[data-pkc-field="dialog-check"]'), '1 枚なのに「残りも同じにする」が出ている').toHaveCount(0);
 
   /**
    * ② **断る → 原寸のまま入る**。
@@ -1256,6 +1260,24 @@ test('🔴 大きな画像は縮めるか聞き、断れば原寸のまま入る
   expect(shrunkSize, '縮み方が足りない(採らないはずのものを採っている)').toBeLessThan(
     keptSize * 0.85,
   );
+
+  /**
+   * 🔴 #1652: 2 枚まとめて入れる → 1 枚目に「(2 枚中 1 枚目)」と「残りも同じにする」が出る。
+   * 選んで「そのまま」と答えると、2 枚目では聞かれずに両方入る(縮める処理は走らせない)。
+   */
+  await page.setInputFiles('[data-pkc-field="attach-input"]', [
+    { name: 'まとめ1.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big.bytes) },
+    { name: 'まとめ2.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(big.bytes) },
+  ]);
+  await expect(dialog, '2 枚まとめて入れたのに聞かれない').toBeVisible({ timeout: 30_000 });
+  await expect(body).toContainText('「まとめ1.jpg」(2 枚中 1 枚目)');
+  const remember = page.locator('[data-pkc-field="dialog-check"]');
+  await expect(remember, '「残りも同じにする」が出ていない').toBeVisible();
+  await expect(page.locator('[data-pkc-field="dialog-check-label"]')).toContainText('残りも同じにする');
+  await remember.check();
+  await clickReal(page, '[data-pkc-field="dialog-cancel"]');
+  await expect(rows, '2 枚とも入っていない').toHaveCount(4, { timeout: 30_000 });
+  await expect(dialog, '「残りも同じにする」を選んだのに 2 枚目でまた聞かれた').toBeHidden();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
