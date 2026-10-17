@@ -1308,6 +1308,28 @@ describe('設定の画面の節とマニュアルの突合(#697)', () => {
     expect(MANUAL, '節の数が実装と違う').toContain(`画面は ${h3s.length} つに分かれています`);
   });
 
+  it('🔴 「設定」の小見出し(h4)が、システムの節の説明に画面の順で全部書かれている(#1087)', () => {
+    const h4s = [...host.querySelectorAll('[data-pkc-region="settings-config"] h4')].map((h) => h.textContent ?? '');
+    expect(h4s.length, '小見出しを読めていない(空振り)').toBeGreaterThan(3);
+    const line = MANUAL.split('\n').find((l) => l.startsWith('「設定」の中は'));
+    expect(line, 'マニュアルに「設定」の中の説明が無い').toBeDefined();
+    expect(line).toContain(`**${h4s.join(' / ')}**の ${h4s.length} 節です`);
+  });
+
+  it('🔴 マニュアルが引用する競合の知らせ 2 文が、app-state.ts の文と一字違わない(#1087)', () => {
+    const src = readFileSync('src/adapter/state/app-state.ts', 'utf-8');
+    // 実装側は文字列の連結で書かれているので、継ぎ目(引用符 + 改行)を除いてから探す
+    const joined = src.replace(/['`]\s*\+\s*\n\s*['`]/gu, '');
+    const overlap = '別のタブまたはウィンドウの変更と重なりました。こちらの内容で保存し、';
+    const revoked =
+      '別のタブまたはウィンドウがこのノートの編集を引き継ぎました。⚠ ここで保存するとそちらの編集を上書きします。必要な内容をコピーしてから「';
+    expect(joined, 'app-state.ts に重なりの文が無い').toContain(overlap);
+    expect(joined, 'app-state.ts に引き継ぎの文が無い').toContain(`${revoked}\${verb}」を押してください`);
+    expect(MANUAL, 'マニュアルの重なりの引用が画面の文と違う').toContain(`「${overlap}…」`);
+    expect(MANUAL, 'マニュアルの引き継ぎの引用が画面の文と違う').toContain(`${revoked}編集をやめる」を押してください`);
+    expect(src).toContain("? '編集をやめる'");
+  });
+
   it('🔴 「表示」の項目(dt)が全部マニュアルに太字で在り、個数も一致する', () => {
     const dts = [...host.querySelectorAll('[data-pkc-region="settings-user"] dt')].map(
       (d) => d.textContent ?? '',

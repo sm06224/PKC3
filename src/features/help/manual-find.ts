@@ -96,13 +96,16 @@ export function manualSections(text: string): readonly ManualSection[] {
  * 打った字が何節に何か所あるかを返す(源文の並び順)。
  *
  * ⚠ **大小は無視する**(英語の語を打つ人が居る)。日本語に大小は無いので副作用は無い。
+ * ⚠ **全角と半角、`+` の前後の空白は区別しない**(`foldForFind`)。マニュアルは
+ *   「Ctrl+S」と「Ctrl + S」を両方書いているので、どちらを打っても同じ節が出る。
+ *   ⚠ ひらがなとカタカナは畳まない(別の判断待ち)。
  * ⚠ **見出しの行も数える** ── 節の題名に当たったのに 0 件と出ると、user は
  *   「無い」と読む。
  * ⚠ **フェンスの中も数える** ── user はコードの例も探す。
  *   (見出しの割り出しだけがフェンスを避ける。)
  */
 export function findInManual(text: string, query: string): readonly ManualHit[] {
-  const q = query.trim().toLowerCase();
+  const q = foldForFind(query.trim()).text;
   if (q === '') return [];
   const hits: ManualHit[] = [];
   let cur: ManualSection = PREAMBLE;
@@ -137,7 +140,7 @@ export function findInManual(text: string, query: string): readonly ManualHit[] 
       if (fence === null) fence = mark;
       else if (mark === fence) fence = null;
     }
-    const n = occurrences(line.toLowerCase(), q);
+    const n = occurrences(foldForFind(line).text, q);
     if (n > 0) {
       if (HEADING.test(line) && fence === null && f === null) headLine ??= line;
       else bodyLine ??= line;
@@ -152,18 +155,67 @@ export function findInManual(text: string, query: string): readonly ManualHit[] 
 export const MANUAL_EXCERPT_SIDE = 14;
 
 /**
+ * 探すための正規化。⚠ 全角→半角など(NFKC)・大小・**`+` の前後の空白**を畳む。
+ * 返す `start[i]` / `end[i]` は、畳んだ後の i 字目が**元の字列のどこ**に当たるか
+ * (抜き出しが元の字の上で切れるように)。ひらがな・カタカナは畳まない。
+ */
+function foldForFind(src: string): { text: string; start: number[]; end: number[] } {
+  let text = '';
+  const start: number[] = [];
+  const end: number[] = [];
+  let at = 0;
+  for (const ch of src) {
+    const folded = ch.normalize('NFKC').toLowerCase();
+    for (const f of folded) {
+      for (let k = 0; k < f.length; k++) {
+        text += f[k];
+        start.push(at);
+        end.push(at + ch.length);
+      }
+    }
+    at += ch.length;
+  }
+  // `+` に隣り合う空白を落とす(位置の対応も一緒に落とす)。
+  let outText = '';
+  const outStart: number[] = [];
+  const outEnd: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (/\s/u.test(c)) {
+      let j = i;
+      while (j < text.length && /\s/u.test(text[j]!)) j++;
+      const before = outText.endsWith('+');
+      const after = text[j] === '+';
+      if (before || after) {
+        i = j - 1;
+        continue;
+      }
+    }
+    outText += c;
+    outStart.push(start[i]!);
+    outEnd.push(end[i]!);
+  }
+  return { text: outText, start: outStart, end: outEnd };
+}
+
+/**
  * 当たりを含む 1 行を、当たりの前後で切って返す(切れた側に「…」)。
  * ⚠ 記法の頭(見出しの `#` / 箇条書き / 引用)は落とす ── 星や記号が見えたまま出ない。
+ * ⚠ 当たりの位置は畳んだ字列で探し、**元の字の位置へ戻して**切る(`Ctrl + S` の空白も含めて残る)。
  */
 export function excerptOf(line: string, q: string): string {
   const text = line
     .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+\.\s+)/u, '')
     .replace(/[*`_]/gu, '')
     .trim();
-  const at = text.toLowerCase().indexOf(q.trim().toLowerCase());
-  if (at < 0) return text.length > MANUAL_EXCERPT_SIDE * 2 ? `${text.slice(0, MANUAL_EXCERPT_SIDE * 2)}…` : text;
-  const from = Math.max(0, at - MANUAL_EXCERPT_SIDE);
-  const to = Math.min(text.length, at + q.trim().length + MANUAL_EXCERPT_SIDE);
+  const needle = foldForFind(q.trim()).text;
+  const folded = foldForFind(text);
+  const idx = needle === '' ? -1 : folded.text.indexOf(needle);
+  if (idx < 0) return text.length > MANUAL_EXCERPT_SIDE * 2 ? `${text.slice(0, MANUAL_EXCERPT_SIDE * 2)}…` : text;
+  const hitFrom = folded.start[idx]!;
+  const hitTo = folded.end[idx + needle.length - 1]!;
+  const from = Math.max(0, hitFrom - MANUAL_EXCERPT_SIDE);
+  const to = Math.min(text.length, hitTo + MANUAL_EXCERPT_SIDE);
   return `${from > 0 ? '…' : ''}${text.slice(from, to)}${to < text.length ? '…' : ''}`;
 }
 
