@@ -9166,7 +9166,11 @@ function reduceCore(
           entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
         );
         const vIdx = before.indexOf(state.selectedLid!);
-        if (vIdx >= 0) {
+        // 🔴 まず左の列に出ている行から選ぶ(#1087。1 件ずつ消す側と同じ規則)。居なければ従来どおり
+        const shown = successorInShownRows(state, state.selectedLid!, gone);
+        if (shown !== undefined) {
+          successor = shown;
+        } else if (vIdx >= 0) {
           const kept = before.filter((l) => !gone.has(l));
           const pos = before.slice(0, vIdx).filter((l) => !gone.has(l)).length;
           successor = kept[Math.min(pos, kept.length - 1)] ?? null;
@@ -10703,6 +10707,31 @@ function mergeRelations(
   return [...byId.values()];
 }
 
+/**
+ * 🔴 **消した後の後継を、左の列に「いま見えている行」から選ぶ**(#1087)。
+ *
+ * ⚠ 直す前は手で並べた順(`state.order`)の全体から選んでいたので、現在のフォルダや並び順(題名順など)と
+ *   無関係なノートが中央に開いた。規則は描く側と同じ `filerRows` + `filerRowOptions` 1 本。
+ * 🔑 消す位置の次の行(居なければ手前の最後)。消す物は `gone` で除く。
+ * ⚠ 開いているノートが見えている行に居ない / 残りが 0 件のときは `undefined` ── 呼び側は従来の選び方へ倒す
+ *   (見えている物が無くても、中央を空にしない)。reducer なので state だけから導く。
+ */
+function successorInShownRows(
+  state: AppState,
+  selected: string,
+  gone: ReadonlySet<string>,
+): string | undefined {
+  const rows = filerRows(state.scopeLid, state.entryMetas, state.relations, filerRowOptions(state)).map(
+    (m) => m.lid,
+  );
+  const vIdx = rows.indexOf(selected);
+  if (vIdx < 0) return undefined;
+  const kept = rows.filter((l) => !gone.has(l));
+  if (kept.length === 0) return undefined;
+  const pos = rows.slice(0, vIdx).filter((l) => !gone.has(l)).length;
+  return kept[Math.min(pos, kept.length - 1)];
+}
+
 function removeEntryFromState(
   state: AppState,
   lid: string,
@@ -10737,15 +10766,21 @@ function removeEntryFromState(
     //    ノートを消したとき `indexOf` が -1 になり、選択が黙って null へ飛ぶ
     // ⚠ **種類の絞りも渡す**(#411)── 渡さないと、添付だけを出しているときに
     //    ノートを消すと**画面に出ていないノート**が次に選ばれる(同じ事故の軸違い)
-    const before = visibleOrder(
-      state.order,
-      (l) => state.entryMetas.get(l),
-      entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
-    );
-    const vIdx = before.indexOf(lid);
-    const after = before.filter((l) => l !== lid);
-    // ⚠ 絞り込みで残りが居なくなったら **null**(見えないものを選ばない)
-    selectedLid = vIdx < 0 ? null : (after[Math.min(vIdx, after.length - 1)] ?? null);
+    // 🔴 まず左の列に出ている行から選ぶ(#1087)。居なければ従来どおり(下)
+    const shown = successorInShownRows(state, lid, new Set([lid]));
+    if (shown !== undefined) {
+      selectedLid = shown;
+    } else {
+      const before = visibleOrder(
+        state.order,
+        (l) => state.entryMetas.get(l),
+        entryFilterOf(state.filterQuery, state.searchHits, state.kindFilter),
+      );
+      const vIdx = before.indexOf(lid);
+      const after = before.filter((l) => l !== lid);
+      // ⚠ 絞り込みで残りが居なくなったら **null**(見えないものを選ばない)
+      selectedLid = vIdx < 0 ? null : (after[Math.min(vIdx, after.length - 1)] ?? null);
+    }
     if (selectedLid) events.push({ type: 'REQUEST_BODY', lid: selectedLid });
   }
   // ⚠ 変化が無ければ**元の参照**のまま(下の docstring)

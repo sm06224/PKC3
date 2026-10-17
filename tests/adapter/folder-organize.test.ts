@@ -1147,15 +1147,18 @@ describe('行の上半分 / 下半分に落とすと並べ替え(#215)', () => {
     expect(folder.getAttribute('data-pkc-drop-edge')).toBe('before');
   });
 
-  it('🔴 手動の順で見ていないときは断る(画面が 1 ドットも変わらない操作にしない)', async () => {
+  it('🔴 手動の順で見ていないときは、線を出さず受けもしない(光るのに断られる操作にしない。#1087)', async () => {
     const { q, rows, d, reordered } = setup(METAS, []);
     d.dispatch({ type: 'SET_ENTRY_SORT', sort: 'title' });
     const before = rows();
-    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), q('tbody [data-pkc-entry="n1"]')!, 102);
+    const note = q<HTMLElement>('tbody [data-pkc-entry="n1"]')!;
+    const over = dragEvent('dragover', dataTransfer({ [PKC_DRAG]: 'n3' }));
+    Object.defineProperty(over, 'clientY', { value: 102 });
+    note.dispatchEvent(over);
+    expect(over.defaultPrevented, '受けないはずの落とし先を受けた').toBe(false);
+    expect(note.hasAttribute('data-pkc-drop-edge'), '効かないのに線が光った').toBe(false);
+    edgeDrag('drop', dataTransfer({ [PKC_DRAG]: 'n3' }), note, 102);
     await tick();
-    expect(d.getState().error ?? '', '無言で捨てた').toContain('自分で並べた順');
-    // 指す先は、画面にある欄の名前(aria-label)で言う
-    expect(d.getState().error ?? '').toContain('「一覧の並び順」');
     expect(reordered).toEqual([]);
     expect(rows()).toEqual(before);
   });
