@@ -268,7 +268,7 @@ import { launchTile } from '@adapter/ui/launch-tile';
 import { collectExistingLids, collectExistingRelationIds } from '@features/import/existing-lids';
 import { appOfficePack } from '@adapter/ui/render/office-entry-view';
 import { applyPackResult, syncPackStateFromStore } from '@adapter/ui/render/office-pack-panel';
-import { LocalOfficeFiles } from '@adapter/platform/office/local-office-files';
+import { LocalOfficeFiles, provideStagedLocal } from '@adapter/platform/office/local-office-files';
 import {
   isOfficeLaunchFile,
   openingNotice,
@@ -1623,6 +1623,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     shadow: { ...officeShadows, ask: (offer) => pickOfficeShadowInApp(root, offer.at) },
     // 🔴 窓を「読み込み直す」とき、保存済みの最新を渡す(#1228 穴①)
     currentAssetKey: currentAttachmentKey,
+    // 🔴 窓を開く / 読み直す前に、預かってある保存を先に取り込む(O-7)。判断は `office-save-back.ts` の `adoptFor`
+    adoptHeld: (lid) => officeSaveBack.adoptFor(lid),
     isPackInstalled: () => appOfficePack.isInstalled(),
     readAsset: async (assetKey) => {
       const blob = await blobs.get(cid, assetKey);
@@ -2360,7 +2362,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const staged = localOffice.take();
     if (staged !== null) {
       const r = officeWindow.open({ name: staged.name, expectDocument: true });
-      officeWindow.provideDocument(staged.name, staged.bytes, staged.token);
+      provideStagedLocal(officeWindow, localOffice, staged);
       showStatus(
         r.kind === 'already-open'
           ? `「${staged.name}」を開いています(Office のタブをご覧ください)`
@@ -2951,6 +2953,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     notify: (text, openLid) =>
       openLid === undefined ? showStatus(text) : dispatcher.dispatch({ type: 'OP_NOTICE', message: text, open: openLid }),
     fail: (error) => dispatcher.dispatch({ type: 'OP_FAILED', error }),
+    // 🔴 預かった理由を画面の状態で言い分ける(O-10)
+    phase: () => dispatcher.getState().phase,
+    // 🔴 窓を開いたのが別のタブでも結果が届く(O-8)。⚠ 受けた側は下の `save-result`
+    relay: (r) => { officeWindow.relaySaveResult(r); },
   });
   // 🔴 控えの「在るかもしれない」を窓の放送で保つ(#1228 段 2)。⚠ 偽陰性は控えを黙って見逃す ──
   //    書かれた / 保存された / 閉じた のたびに棚を読み直す(棚の読み取りは数件の meta だけ)
@@ -2959,6 +2965,12 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   officeWindow.onEvent((ev) => {
     if (ev.type === 'saved') void officeSaveBack.receive(ev.key);
+    else if (ev.type === 'save-result') {
+      // 🔴 別のタブが引き取った保存の結果(O-8)── このタブが窓を開いたときだけ届く。出し口は引き取ったタブと同じ
+      if (ev.kind === 'fail') dispatcher.dispatch({ type: 'OP_FAILED', error: ev.text });
+      else if (ev.openLid === undefined) showStatus(ev.text);
+      else dispatcher.dispatch({ type: 'OP_NOTICE', message: ev.text, open: ev.openLid });
+    }
     else if (ev.type === 'save-failed') officeSaveBack.reportWindowFailure(ev.reason);
     else if (ev.type === 'closed') void officeSaveBack.drainAll();
     else if (ev.type === 'not-installed') {

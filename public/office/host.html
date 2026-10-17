@@ -1798,6 +1798,13 @@
         if (d && d.pkc3Office === 'document') {
           clearTimeout(timer);
           ch.onmessage = prev;
+          // 🔴 **名前は受け取った文書の名前に従う**(O-4 / O-5)。URL の `name` は窓を開いた時の依頼のもので、
+          //    起動の途中で別の文書に替わる / 別のタブの依頼が先に着くと、**中身は B なのに名前は A** になる。
+          //    ⚠ 名前が無ければ URL の名前のまま(古い本体)
+          if (d.payload && typeof d.payload.name === 'string' && d.payload.name !== '') {
+            docName = d.payload.name;
+            nameEl.textContent = docName;
+          }
           docToken = String((d.payload && d.payload.token) || '');
           docFromShadow = !!(d.payload && d.payload.fromShadow === true);
           docImages = (d.payload && d.payload.images) || null;

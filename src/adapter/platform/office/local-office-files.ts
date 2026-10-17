@@ -23,6 +23,7 @@
  */
 import type { LaunchedHandle } from '@adapter/platform/launched-files';
 import { localFileToken, type LocalWriteFailure } from '@features/office/office-launch';
+import type { OfficeDocumentSource, OfficeWindow } from './office-window';
 
 /** 控えてあるファイル 1 件。 */
 export interface StagedLocalFile {
@@ -90,6 +91,25 @@ export class LocalOfficeFiles {
   }
 
   /**
+   * 🔴 **元のファイルの「いま」の中身を読み直す**(O-1)。窓が作り直されて文書を求め直したとき(停止の帯の「読み込み直す」)に
+   * 呼ぶ ── 窓の中で保存すると元のファイルは新しい中身に書き換わっているので、**開いた時の bytes を送り直すと古い版が出て、
+   * その上で保存すると新しい版を古い版で上書きする**。
+   * ⚠ 読めなければ `null`(動かされた / 許可が切れた)── 呼び手は何も送らない(古い版を出さない)。
+   * ⚠ 開いた時の bytes は覚えない(読み直しの口を持つ文書は `OfficeWindow` も bytes を抱えない ── ゼロコピー)。
+   */
+  async reread(token: string): Promise<OfficeDocumentSource | null> {
+    const held = this.byToken.get(token);
+    if (held === undefined || typeof held.handle.getFile !== 'function') return null;
+    try {
+      const file = await held.handle.getFile();
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      return bytes.byteLength === 0 ? null : { bytes };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * 🔴 **元のファイルへ書き戻す**(#432 段②)。
    *
    * @returns 書けたら `true`。書けなかったら `false`、理由を区別できたときは理由。
@@ -133,4 +153,18 @@ export class LocalOfficeFiles {
       return false;
     }
   }
+}
+
+/**
+ * 🔴 **控えてあった手元のファイルを、Office の窓へ渡す**(#432 / O-1)。
+ *
+ * ⚠ **読み直しの口を必ず添える** ── 添えないと、窓が作り直されたとき**開いた時の bytes**を送り直し、
+ *   保存で元のファイルを古い版へ巻き戻す(`main.ts` に書くと、どの test からも実行されない)。
+ */
+export function provideStagedLocal(
+  win: Pick<OfficeWindow, 'provideDocument'>,
+  files: Pick<LocalOfficeFiles, 'reread'>,
+  staged: StagedLocalFile,
+): void {
+  win.provideDocument(staged.name, staged.bytes, staged.token, [], () => files.reread(staged.token));
 }

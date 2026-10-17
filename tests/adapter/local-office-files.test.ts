@@ -7,7 +7,8 @@
  * ④**session 限り**(handle をどこにも保存しない)。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { LocalOfficeFiles } from '../../src/adapter/platform/office/local-office-files';
+import { LocalOfficeFiles, provideStagedLocal } from '../../src/adapter/platform/office/local-office-files';
+import { OfficeWindow } from '../../src/adapter/platform/office/office-window';
 import { isLocalFileToken } from '../../src/features/office/office-launch';
 import type { LaunchedHandle } from '../../src/adapter/platform/launched-files';
 
@@ -226,5 +227,108 @@ describe('寿命', () => {
     expect(await second.writeBack(tokenA, bytes(9)), 'A の窓の保存が B へ書かれた').toBe(false);
     expect(b.written, 'B に書き込まれた').toHaveLength(0);
     expect(a.written).toHaveLength(0);
+  });
+});
+
+/**
+ * 🔴 **窓を作り直したとき、元のファイルの「いま」を送り直す**(O-1)。
+ *
+ * ⚠ 手元のファイルから開いた窓で保存すると、元のファイルは新しい中身に書き換わる。窓が止まって「読み込み直す」を押すと、
+ *   開いた時の bytes を送り直す作りでは**古い版が開き、その上で保存すると新しい版を古い版で上書きする**。
+ * 🔑 観測点は「読み直しの口が在るか」でなく、**作り直された窓に実際に届いた bytes**(本物の `OfficeWindow` を通す)。
+ */
+describe('窓の読み直しで、元のファイルの現在の中身が届く(O-1)', () => {
+  /** 中身を差し替えられる偽の元ファイル。 */
+  function fileHandle(initial: number[]) {
+    let content = initial;
+    let fail = false;
+    const base = fakeHandle().handle;
+    const handle: LaunchedHandle = {
+      ...base,
+      getFile: async () => {
+        if (fail) throw new Error('NotFoundError');
+        return { arrayBuffer: async () => new Uint8Array(content).buffer } as unknown as File;
+      },
+    };
+    return { handle, set: (c: number[]) => { content = c; }, breakIt: () => { fail = true; } };
+  }
+
+  function bus() {
+    interface Ch { onmessage: ((ev: MessageEvent) => void) | null; postMessage(d: unknown): void; close(): void }
+    const chans: Ch[] = [];
+    return {
+      make: (): Ch => {
+        const c: Ch = {
+          onmessage: null,
+          postMessage(d) {
+            for (const o of chans) if (o !== c) queueMicrotask(() => o.onmessage?.({ data: structuredClone(d) } as MessageEvent));
+          },
+          close() {},
+        };
+        chans.push(c);
+        return c;
+      },
+    };
+  }
+  const settle = async (): Promise<void> => { for (let i = 0; i < 4; i += 1) await new Promise((r) => setTimeout(r, 0)); };
+
+  async function openAndCrash(f: ReturnType<typeof fileHandle>, afterOpen: () => void) {
+    const b = bus();
+    const files = new LocalOfficeFiles();
+    files.stage(f.handle, 'F.docx', new Uint8Array([1, 1, 1]));
+    const staged = files.take()!;
+    const win = new OfficeWindow({ makeChannel: b.make, openWindow: () => {}, now: () => 100_000, baseUrl: 'http://x/' });
+    const host = b.make();
+    const got: number[][] = [];
+    host.onmessage = (ev) => {
+      const d = ev.data as { pkc3Office: string; payload: { bytes?: Uint8Array } };
+      if (d.pkc3Office === 'document') got.push([...d.payload.bytes!]);
+    };
+    win.open({ name: staged.name, expectDocument: true });
+    provideStagedLocal(win, files, staged);
+    host.postMessage({ pkc3Office: 'ready-for-document', payload: {} });
+    await settle();
+    expect(got, '前提: 最初に開いた中身が届いている').toEqual([[1, 1, 1]]);
+    // 窓の中で保存した → 元のファイルが新しい中身になった(or 読めなくなった)→ 窓が止まって読み込み直す
+    afterOpen();
+    host.postMessage({ pkc3Office: 'ready-for-document', payload: {} });
+    await settle();
+    return got;
+  }
+
+  it('🔴 作り直された窓には、開いた時ではなく「いま」の中身が届く', async () => {
+    const f = fileHandle([1, 1, 1]);
+    const got = await openAndCrash(f, () => f.set([2, 2, 2]));
+    expect(got, '古い版を送り直した ── その上で保存すると新しい版を巻き戻す').toEqual([[1, 1, 1], [2, 2, 2]]);
+  });
+
+  it('🔴 読み直せなければ何も送らない(古い版を出さない)', async () => {
+    const f = fileHandle([1, 1, 1]);
+    const got = await openAndCrash(f, () => f.breakIt());
+    expect(got).toEqual([[1, 1, 1]]);
+  });
+
+  it('reread: 控えのない合言葉 / getFile の無い handle / 空のファイルは null', async () => {
+    const files = new LocalOfficeFiles();
+    expect(await files.reread('local:none')).toBeNull();
+    files.stage(fakeHandle().handle, 'a.docx', bytes(1));
+    const st = files.take()!;
+    expect(await files.reread(st.token), 'getFile が無い handle').toBeNull();
+    const f = fileHandle([]);
+    files.stage(f.handle, 'b.docx', bytes(1));
+    const st2 = files.take()!;
+    expect(await files.reread(st2.token), '空は送らない').toBeNull();
+  });
+
+  it('🔴 読み直しの口を添えて渡す(口が無いと窓が開いた時の bytes を抱える)', () => {
+    const sent: unknown[][] = [];
+    const spy = { provideDocument: (...a: unknown[]) => { sent.push(a); } };
+    const files = new LocalOfficeFiles();
+    const f = fileHandle([1]);
+    files.stage(f.handle, 'a.docx', bytes(1));
+    provideStagedLocal(spy as never, files, files.take()!);
+    const args = sent[0]!;
+    expect(typeof args[4], '読み直しの口が渡っていない').toBe('function');
+    expect(args[3], '画像は渡さない(手元のファイルには無い)').toEqual([]);
   });
 });

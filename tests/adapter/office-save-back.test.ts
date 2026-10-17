@@ -31,7 +31,7 @@ import { sanitizeMessageText } from '@features/message/message-log';
 interface FakeStage {
   dir: StageDir;
   keys(): string[];
-  put(save: Partial<StagedSave> & { key: string }, bytes?: Uint8Array): void;
+  put(save: Partial<StagedSave> & { key: string; omitWin?: boolean }, bytes?: Uint8Array): void;
 }
 
 /** 偽の棚。⚠ `.bin` の中身と `.json` の meta を**別々に**持つ(本物と同じ形)。 */
@@ -80,7 +80,7 @@ function fakeStage(): FakeStage {
         // ⚠ 既定で窓の id を入れる ── 本物の窓は必ず入れる。入れないと
         //    「同じ文書を束ねる」経路が**この fixture では一度も走らない**
         //    (= 測っていない次元になる)
-        ...(save.win !== undefined ? { win: save.win } : { win: 'win-1' }),
+        ...(save.omitWin === true ? {} : save.win !== undefined ? { win: save.win } : { win: 'win-1' }),
       };
       files.set(`${save.key}.json`, { text: JSON.stringify(meta) });
       files.set(`${save.key}.bin`, { bytes });
@@ -97,6 +97,8 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   notices: string[];
   fails: string[];
   opened: string[];
+  /** 窓を開いたタブへ運んだ結果(O-8)。 */
+  relayed: { token: string; kind: string; text: string; openLid?: string }[];
   sb: ReturnType<typeof createOfficeSaveBack>;
 } {
   const stage = fakeStage();
@@ -106,6 +108,7 @@ function harness(over: Partial<SaveBackDeps> = {}): {
   const notices: string[] = [];
   const fails: string[] = [];
   const opened: string[] = [];
+  const relayed: { token: string; kind: string; text: string; openLid?: string }[] = [];
   const deps: SaveBackDeps = {
     stage: async () => stage.dir,
     isHolder: () => true,
@@ -131,10 +134,13 @@ function harness(over: Partial<SaveBackDeps> = {}): {
       if (open !== undefined) opened.push(open);
     },
     fail: (m) => fails.push(m),
+    // ⚠ 既定は「編集中」── `canWrite` を偽にする各 it が預かる理由はこれ(他の phase は O-10 の it が渡す)
+    phase: () => 'editing',
+    relay: (r) => relayed.push(r),
     ...over,
   };
   return {
-    stage, deps, created, replaced, adopted, notices, fails, opened,
+    stage, deps, created, replaced, adopted, notices, fails, opened, relayed,
     sb: createOfficeSaveBack(deps),
   };
 }
@@ -633,7 +639,8 @@ describe('holder の門(main.ts の配線)', () => {
     const tile = code.slice(code.indexOf('const openOfficeTile'));
     const body = tile.slice(0, tile.indexOf('watchOfficeHang'));
     expect(body, '控えを取り出していない').toContain('localOffice.take()');
-    expect(body, '控えを渡していない').toContain('provideDocument(staged.name, staged.bytes, staged.token)');
+    // 渡す口は `provideStagedLocal`(読み直しの口を添える ── 中身は local-office-files.test.ts が本物の窓で見る)
+    expect(body, '控えを渡していない').toContain('provideStagedLocal(officeWindow, localOffice, staged)');
   });
 
   it('🔴 boot で取れたとき・待った末に取れたとき・昇格したとき、の**3 経路とも**で真になる', () => {
@@ -1184,5 +1191,253 @@ describe('元の添付が見つからない保存(#1087)', () => {
     await h.sb.receive('o1');
     expect(h.notices[0]).toBe('Office で保存した内容を取り込みました: 「報告.docx」');
     expect(h.opened, '差し替えには「開く」を付けない').toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **預かった古い保存を、別の窓の保存が来ても黙って捨てない**(O-7)。
+ *
+ * ⚠ 窓を開き直す(= 別の窓の session)と、窓はノートの**古い版**から始まる ── 預かってある保存を取り込まないまま開くと、
+ *   次の保存は預かった編集を含まない。同じ合言葉だからと古い側を捨てると、預かった編集がどこにも残らない。
+ *   (同じ session なら新しい側が古い側を含む ── 上の「古い保存を新しい保存の後に書かない」の describe が守る。)
+ * 🔑 観測点は**書かれた bytes の順**と**棚の残り** ── 「捨てなかった」だけでは、古い bytes が新しい版を上書きしても緑になる。
+ */
+describe('別の窓の session の古い保存は、先に取り込む(O-7)', () => {
+  const K1 = new Uint8Array([1, 1, 1]);
+  const K2 = new Uint8Array([2, 2, 2]);
+
+  function writer(over: Partial<SaveBackDeps> = {}) {
+    const written: number[][] = [];
+    // ⚠ 拒むのは**古い側(K1)の bytes のときだけ** ── 両方を拒むと、新しい側が書かれなくても同じ結果になり、順番の門が見えない
+    let failingOld = false;
+    const h = harness({
+      replaceAsset: async (_lid, _save, bytes) => {
+        if (failingOld && bytes[0] === 1) return false;
+        written.push([...bytes]);
+        return true;
+      },
+      ...over,
+    });
+    return { h, written, setFailing: (v: boolean) => { failingOld = v; } };
+  }
+
+  it('🔴 預かった K1(窓 A)があるうちに K2(窓 B)が来ても、K1 を捨てずに K1 → K2 の順で取り込む', async () => {
+    let busy = true;
+    const { h, written } = writer({ canWrite: () => !busy, canCreate: () => !busy });
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1, win: 'win-A' }, K1);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    // 窓を開き直した(K1 を取り込まないまま)→ 古い版から始まった窓が K2 を保存した
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2, win: 'win-B' }, K2);
+    busy = false;
+    expect(await h.sb.receive('s2')).toBe('replaced');
+    expect(written, '預かった K1 が取り込まれずに消えた / 順番が逆').toEqual([[1, 1, 1], [2, 2, 2]]);
+    expect(h.stage.keys(), '取り込んだのに棚に残っている').toEqual([]);
+  });
+
+  it('🔴 再起動の後(預かった記録が空)でも、別の session の古い保存を drainAll が捨てない', async () => {
+    const { h, written } = writer();
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1, win: 'win-A' }, K1);
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2, win: 'win-B' }, K2);
+    await h.sb.drainAll();
+    expect(written).toEqual([[1, 1, 1], [2, 2, 2]]);
+  });
+
+  it('🔴 古い側が取り込めないあいだは、新しい側も預かる(新しい版を先に書いて、古い版に上書きされない)', async () => {
+    const { h, written, setFailing } = writer();
+    setFailing(true);
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1, win: 'win-A' }, K1);
+    expect(await h.sb.receive('s1')).toBe('deferred');
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2, win: 'win-B' }, K2);
+    expect(await h.sb.receive('s2'), '古い側が残っているのに新しい側を書いた').toBe('deferred');
+    expect(written).toEqual([]);
+    expect(h.stage.keys().filter((k) => k.endsWith('.json')).sort()).toEqual(['s1.json', 's2.json']);
+    setFailing(false);
+    expect(await h.sb.retryDeferred()).toBe(2);
+    expect(written).toEqual([[1, 1, 1], [2, 2, 2]]);
+  });
+
+  it('対照群: 同じ session の古い保存は、新しい側が含むので捨てる(従来どおり)', async () => {
+    const { h, written } = writer();
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1, win: 'win-A' }, K1);
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2, win: 'win-A' }, K2);
+    await h.sb.drainAll();
+    expect(written).toEqual([[2, 2, 2]]);
+  });
+
+  it('対照群: 窓の id が分からない古い meta は、捨てる側へ倒さない', async () => {
+    const { h, written } = writer();
+    h.stage.put({ key: 's1', token: 'lid-7', at: 1, omitWin: true }, K1);
+    h.stage.put({ key: 's2', token: 'lid-7', at: 2, omitWin: true }, K2);
+    await h.sb.drainAll();
+    expect(written, '同じ session と確かめられない古い側を捨てた').toEqual([[1, 1, 1], [2, 2, 2]]);
+  });
+});
+
+describe('adoptFor ── 窓を開く前に、そのノートの預かりを取り込む(O-7)', () => {
+  it('🔴 その合言葉の保存だけを取り込み、取り込めたら true', async () => {
+    const h = harness();
+    h.stage.put({ key: 'a', token: 'lid-7', at: 1 });
+    h.stage.put({ key: 'b', token: 'lid-8', at: 2, path: '/work/other.odt' });
+    expect(await h.sb.adoptFor('lid-7')).toBe(true);
+    expect(h.replaced).toEqual(['lid-7']);
+    expect(h.stage.keys().filter((k) => k.endsWith('.json')), '別のノートの保存まで取り込んだ').toEqual(['b.json']);
+  });
+
+  it('まだ入れられない(編集中)/ 預かりが無い / 合言葉が空 は false。預かりは残る', async () => {
+    const h = harness({ canWrite: () => false, canCreate: () => false });
+    h.stage.put({ key: 'a', token: 'lid-7', at: 1 });
+    expect(await h.sb.adoptFor('lid-7')).toBe(false);
+    expect(h.stage.keys().filter((k) => k.endsWith('.json'))).toEqual(['a.json']);
+    expect(await h.sb.adoptFor('lid-none')).toBe(false);
+    expect(await h.sb.adoptFor('')).toBe(false);
+  });
+
+  it('holder でないタブでは何もしない', async () => {
+    const h = harness({ isHolder: () => false });
+    h.stage.put({ key: 'a', token: 'lid-7', at: 1 });
+    expect(await h.sb.adoptFor('lid-7')).toBe(false);
+    expect(h.replaced).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **取り込みの結果を、窓を開いたタブへも運ぶ**(O-8)。
+ * ⚠ 引き取るのは writer のタブ 1 つ。窓を開いたのが follower だと、「取り込みました / まだ入れていません / 失敗」を見られない。
+ * 🔑 観測点は、運ばれた**字そのもの**が、引き取ったタブで出した字と同じであること(別の字を作らない)。
+ */
+describe('結果を窓を開いたタブへ運ぶ(O-8)', () => {
+  it('🔴 差し替えた結果が、合言葉つきで運ばれる(出した字と同じ)', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', token: 'lid-7', name: '報告.docx' });
+    await h.sb.receive('o1');
+    expect(h.relayed).toEqual([{ token: 'lid-7', kind: 'notice', text: h.notices[0] }]);
+  });
+
+  it('🔴 新しいノートにしたとき、「開く」の行き先ごと運ぶ', async () => {
+    const h = harness({ readAttachment: async () => null });
+    h.stage.put({ key: 'o1', token: 'lid-gone', name: '報告.docx' });
+    await h.sb.receive('o1');
+    expect(h.relayed).toHaveLength(1);
+    expect(h.relayed[0]).toMatchObject({ token: 'lid-gone', kind: 'notice', openLid: 'new-lid', text: h.notices[0] });
+  });
+
+  it('🔴 預かった一言と、失敗(元のファイルへ書けない)も運ぶ', async () => {
+    const hold = harness({ canWrite: () => false, canCreate: () => false });
+    hold.stage.put({ key: 'o1', token: 'lid-7', name: '報告.docx' });
+    await hold.sb.receive('o1');
+    expect(hold.relayed).toEqual([{ token: 'lid-7', kind: 'notice', text: hold.notices[0] }]);
+
+    const fail = harness({ writeLocal: async () => 'denied' });
+    fail.stage.put({ key: 'o2', token: 'local:1', name: 'a.docx' });
+    await fail.sb.receive('o2');
+    expect(fail.relayed).toEqual([{ token: 'local:1', kind: 'fail', text: fail.fails[0] }]);
+  });
+
+  it('同じ一言は撃ち直しのたびに運ばない(預かった一言は 1 度だけ)', async () => {
+    const h = harness({ canWrite: () => false, canCreate: () => false });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    await h.sb.receive('o1');
+    await h.sb.retryDeferred();
+    await h.sb.retryDeferred();
+    expect(h.relayed).toHaveLength(1);
+  });
+
+  it('合言葉の無い保存(窓の中で新規に作った文書)は運ばない ── 頼んだタブが居ない', async () => {
+    const h = harness();
+    h.stage.put({ key: 'o1', name: '無題 1.odt' }); // token 無し
+    await h.sb.receive('o1');
+    expect(h.notices).toHaveLength(1);
+    expect(h.relayed).toEqual([]);
+  });
+
+  it('運ぶのが落ちても、取り込みは成立して棚から消える', async () => {
+    const h = harness({ relay: () => { throw new Error('closed'); } });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    expect(await h.sb.receive('o1')).toBe('replaced');
+    expect(h.stage.keys()).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **例外で落ちた保存も、あとで取り込み直す**(O-9)。
+ * ⚠ 容量の拒否などで `takeOne` が投げると、撃ち直しの旗が立たず**次の起動まで眠っていた**。しかも一言は「取り込めませんでした」
+ *   だけで、user は「失敗して無くなった」と読む。
+ */
+describe('例外で落ちた保存(O-9)', () => {
+  it('🔴 あとで撃ち直され、取り込める。一言は「あとで取り込み直す」と言う', async () => {
+    let boom = true;
+    const h = harness({
+      createNote: async (save) => {
+        if (boom) throw new Error('QuotaExceededError');
+        h.created.push(save.name);
+        return 'new-lid';
+      },
+    });
+    h.stage.put({ key: 'o1', name: 'a.odt' });
+    expect(await h.sb.receive('o1')).toBe('failed');
+    expect(h.stage.keys().length, '落ちたのに棚から消えた').toBeGreaterThan(0);
+    expect(h.fails).toHaveLength(1);
+    expect(h.fails[0]).toContain('QuotaExceededError');
+    expect(h.fails[0], 'あとで取り込み直すと言っていない').toContain('あとで取り込み直します');
+    boom = false;
+    expect(await h.sb.retryDeferred(), '例外で落ちた保存が撃ち直されない').toBe(1);
+    expect(h.created).toEqual(['a.odt']);
+    expect(h.stage.keys()).toEqual([]);
+  });
+
+  it('撃ち直しでまた落ちても、同じ赤い字を何度も出さない', async () => {
+    const h = harness({ createNote: async () => { throw new Error('QuotaExceededError'); } });
+    h.stage.put({ key: 'o1', name: 'a.odt' });
+    await h.sb.receive('o1');
+    await h.sb.retryDeferred();
+    await h.sb.retryDeferred();
+    expect(h.fails).toHaveLength(1);
+  });
+
+  it('一言は窓を開いたタブへも運ぶ(合言葉があるとき)', async () => {
+    const h = harness({ replaceAsset: async () => { throw new Error('QuotaExceededError'); } });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    await h.sb.receive('o1');
+    expect(h.relayed).toEqual([{ token: 'lid-7', kind: 'fail', text: h.fails[0] }]);
+  });
+});
+
+/**
+ * 🔴 **預かる理由は、画面の状態で言い分ける**(O-10)。
+ * ⚠ `canWrite` が偽なのは編集中だけではない。保存に失敗して止まっているとき「編集中なので」と言うと、
+ *   編集を終えようとしても入らず、出口(ノートを保存し直す)も案内されない。
+ */
+describe('預かった理由の言い分け(O-10)', () => {
+  const held = (phase: 'editing' | 'error' | 'initializing' | 'ready') => async (): Promise<string> => {
+    const h = harness({ canWrite: () => false, canCreate: () => false, phase: () => phase });
+    h.stage.put({ key: 'o1', token: 'lid-7', name: '報告.docx' });
+    await h.sb.receive('o1');
+    return h.notices[0]!;
+  };
+
+  it('🔴 編集中は従来どおり', async () => {
+    const m = await held('editing')();
+    expect(m).toBe('Office で保存した「報告.docx」は、編集中なのでまだ入れていません。編集を終えると入れます');
+  });
+
+  it('🔴 保存に失敗して止まっているときは、編集中と言わず、押すボタンを言う', async () => {
+    const m = await held('error')();
+    expect(m).not.toContain('編集中');
+    expect(m).toContain('ノートの保存に失敗している');
+    expect(m).toContain('「ノートを保存し直す」');
+  });
+
+  it('🔴 読み込み中は、読み込みが終わると入れると言う', async () => {
+    const m = await held('initializing')();
+    expect(m).not.toContain('編集中');
+    expect(m).toContain('読み込み中');
+    expect(m).toContain('読み込みが終わると入れます');
+  });
+
+  it('言い分けた字が、運ぶ字と同じ(follower でも同じ理由が見える)', async () => {
+    const h = harness({ canWrite: () => false, canCreate: () => false, phase: () => 'error' });
+    h.stage.put({ key: 'o1', token: 'lid-7' });
+    await h.sb.receive('o1');
+    expect(h.relayed[0]!.text).toBe(h.notices[0]);
   });
 });
