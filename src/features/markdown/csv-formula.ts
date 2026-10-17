@@ -504,13 +504,23 @@ function truthy(v: Value | undefined): boolean {
   return v.trim() !== '' && v.toUpperCase() !== 'FALSE';
 }
 
+/**
+ * 数を字にする。⚠ **inline-calc の答えと同じ 1 本**(`formatCalcResult` の丸めの核)。
+ * 🔴 安全整数の整数は**丸めない**(#1087)── `=F1+1`(F1=1234567890123)が 1234567890120 になっていた。
+ *   小数と、安全整数を超える大きな数だけ 12 桁で丸める(浮動小数の刻みを見せない)。
+ */
+export function formatNumber(v: number): string {
+  if (Number.isSafeInteger(v)) return String(v);
+  return String(Number(v.toPrecision(12)));
+}
+
 /** 画面に出す形。⚠ **丸めない**(勝手に桁を落とさない)。 */
 function fmt(v: Value): string {
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
   if (typeof v === 'number') {
     if (!Number.isFinite(v)) throw new Fail('#ERR!', '数になりません');
     // ⚠ 浮動小数の刻みが見えないよう、意味のある桁で丸めてから落とす
-    return String(Number(v.toPrecision(12)));
+    return formatNumber(v);
   }
   return v;
 }

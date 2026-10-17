@@ -88,6 +88,39 @@ describe('query: frontmatter で束ねる(#184)', () => {
     expect(v.endsWith('…')).toBe(true);
   });
 
+  it('🔴 先頭 80 字が同じ長い値は別の組のまま(丸めるのは表示名だけ。#1087)', () => {
+    const head = 'あ'.repeat(QUERY_LIMITS.valueChars);
+    const out = groupByKey(
+      rows(
+        ['a', fm([`k: ${head}いち`])],
+        ['b', fm([`k: ${head}にい`])],
+        ['c', fm([`k: ${head}にい`])],
+      ),
+      'k',
+    );
+    expect(out.groups).toHaveLength(2);
+    expect(out.groups.map((g) => g.total).sort()).toEqual([1, 2]);
+    // 見分けられる(同じ名前の組が 2 つ並ばない)
+    const names = out.groups.map((g) => g.value);
+    expect(new Set(names).size).toBe(2);
+    expect(names.every((n) => n.startsWith(head))).toBe(true);
+    // 2 つ目以降は末尾の字で見分けられる
+    expect(names.some((n) => n.endsWith('にい'))).toBe(true);
+    // 末尾まで同じ長さの違いでも、組の lid は混ざらない
+    expect(out.groups.find((g) => g.total === 2)!.lids.slice().sort()).toEqual(['b', 'c']);
+  });
+
+  it('末尾まで同じ字でも見分ける(` (2)` を添える。#1087)', () => {
+    const head = 'あ'.repeat(QUERY_LIMITS.valueChars);
+    const tail = 'x'.repeat(10);
+    const out = groupByKey(
+      rows(['a', fm([`k: ${head}A${tail}`])], ['b', fm([`k: ${head}B${tail}`])], ['c', fm([`k: ${head}C${tail}`])]),
+      'k',
+    );
+    expect(out.groups).toHaveLength(3);
+    expect(new Set(out.groups.map((g) => g.value)).size).toBe(3);
+  });
+
   it('🔴 組の上限を超えたら、捨てた数を返す(黙って切らない)', () => {
     const many = Array.from({ length: QUERY_LIMITS.groups + 7 }, (_, i): [string, string] => [
       `l${i}`,

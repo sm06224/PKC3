@@ -1886,6 +1886,24 @@ test('🔴 ▼ の合成メニュー: 種類を選ぶとその場で作り、次
     page.locator('[data-pkc-region="query-bar"]'),
     '「集計」を押しても面が開かない',
   ).toBeVisible();
+  /**
+   * 🔴 **先頭 80 字が同じ長い値 2 つは、別の組として出る**(#1087。起動は増やさない)。
+   * 直す前: 80 字で丸めた名前を鍵にしていたので、2 つの組が 1 つに併合され、片方が消えて見えた。
+   */
+  const LONG = 'あ'.repeat(85);
+  for (const tail of ['ア', 'イ']) {
+    await createEntry(page, 'text');
+    await page.locator('[data-pkc-field="editor-body"]').fill(`---\nkind: ${LONG}${tail}\n---\n本文\n`);
+    await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  }
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="query"]');
+  await clickReal(page, '[data-pkc-action="refresh-query"]');
+  await page.locator('[data-pkc-field="query-key"]').selectOption('kind');
+  await expect(
+    // ⚠ 未設定の組も出る ── 長い値の組(先頭が `あ`)だけを数える
+    page.locator(`[data-pkc-region="query-group"][data-pkc-group^="${'あ'.repeat(40)}"]`),
+    '長い値 2 つが 1 つの組に併合された(組が 2 つ出ない)',
+  ).toHaveCount(2, { timeout: 15_000 });
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="flags"]');
   await expect(
     page.locator('[data-pkc-region="flags-body"]'),

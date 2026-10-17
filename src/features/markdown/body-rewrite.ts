@@ -50,7 +50,7 @@ import { attachmentFileName } from '../flavor/attachment-flavor';
 import { acceptsExternalImage, rewriteAdopted } from '../asset/inline-url-adopt';
 import { DELIMITER, csvEscapeField, parseCsv, type CsvPositions } from './csv-table';
 import { parseRenderableFence } from './markdown-render';
-import { containerAtLine, quoteLead, splitLines } from './source-blocks';
+import { containerAtLine, quoteLead, quotePrefix, splitLines } from './source-blocks';
 import { TASK_LINE } from './task-line';
 import { hiddenTaskMask } from './task-hidden';
 import { cutLines, insertLines, moveLines, type InsertAnchor } from './line-move';
@@ -59,7 +59,9 @@ import {
   convertTable,
   fencesBelowFrontmatter,
   mdCellGate,
+  mdCellSpan,
   mdCellSpanAt,
+  mdTableAt,
   tableAt,
   tableConvertRefusal,
   type TableFormat,
@@ -1330,8 +1332,42 @@ function rewriteMdCell(
    *   空白は升の字に入らない(読み手は両端を詰める。`x\ |` は `x\` と描かれる ── 実測)。
    */
   const tail = next.endsWith('\\') && line[span.end] === '|' ? ' ' : '';
-  lines[rewrite.line] = line.slice(0, span.start) + next + tail + line.slice(span.end);
+  const written = line.slice(0, span.start) + next + tail + line.slice(span.end);
+  /**
+   * 🔴 **先頭の `|` を省いた行の 1 列目は、書いた字が行の頭になる**(#1087 B-1)。
+   *   `x | y` の `x` に `- x` / `# 見出し` / `1. x` / `::: ` / 囲みの柵 / 4 字下げ / 空白だけ / 空を書くと、
+   *   その行が箇条書き・見出し・囲み・空行になり、**表がそこで切れて下の行が表から外れる**
+   *   (先頭の `|` がある行では起きない ── 頭は `|` で、書いた字は行の頭にならない)。
+   * 🔑 だから**書いた後も同じ表の同じ升の数か**を引き直して見て、崩れるときだけ行の頭に `| ` を足す
+   *   (画面の表の見た目は変わらない)。⚠ それ以外の行・升は今どおり 1 字も変えない。
+   */
+  if (rewrite.col === 0 && !keepsTable(lines, rewrite.line, written)) {
+    const q = quotePrefix(line).length;
+    const piped = written.slice(0, q) + '| ' + written.slice(q);
+    if (keepsTable(lines, rewrite.line, piped)) {
+      lines[rewrite.line] = piped;
+      return lines.join(eol);
+    }
+  }
+  lines[rewrite.line] = written;
   return lines.join(eol);
+}
+
+/** その行の升の数(`mdCellSpan` が返す数 ── 書き戻しが見る升と同じ数え方)。 */
+function mdCellCount(line: string): number {
+  let n = 0;
+  while (mdCellSpan(line, n) !== null) n += 1;
+  return n;
+}
+
+/** 行を `replacement` に替えた後も、その行が**同じ表の、同じ升の数の行**のままか(B-1 の門)。 */
+function keepsTable(lines: readonly string[], at: number, replacement: string): boolean {
+  const after = lines.slice();
+  after[at] = replacement;
+  const b = mdTableAt(lines.join('\n'), at);
+  const a = mdTableAt(after.join('\n'), at);
+  if (b === null || a === null) return false;
+  return mdCellCount(replacement) === mdCellCount(lines[at] ?? '');
 }
 
 function rewriteCsvCell(
@@ -1698,8 +1734,33 @@ function cellsOf(
   line: string,
   delimiter: string,
 ): Array<{ start: number; end: number }> | null {
+  /**
+   * 🔴 **空白だけの行(tsv の `\t` / `\t\t`)は、区切りで割って升を返す**(#1087 A-3)。
+   *   `parseCsv` は**ブロック全体が空白だけ**のとき `null` を返す(表を 0 行に畳む用途)ので、
+   *   1 行だけ渡す `cellsOf` では「読めない行」に化け、**押せる印が出ているのに打てず、
+   *   列の ＋ × も行の ＋ も全部断られていた**。空白だけの行に引用符は在りえないので、割るだけで足りる。
+   */
+  if (line.trim() === '') {
+    const spans: Array<{ start: number; end: number }> = [];
+    let from = 0;
+    for (;;) {
+      const at = line.indexOf(delimiter, from);
+      if (at === -1) break;
+      spans.push({ start: from, end: at });
+      from = at + delimiter.length;
+    }
+    spans.push({ start: from, end: line.length });
+    return spans;
+  }
   const out: CsvPositions = { cellSpans: [] };
   const rows = parseCsv(line, delimiter, out);
+  /**
+   * 🔴 **`""` だけの行は、空の升 1 つ**(#1087 A-3)。`parseCsv` は末尾の `['']` の行を捨てる
+   *   (表を 0 行に畳む用途 ── 変えない)ので、1 列の表の空の行が `null` になっていた。
+   */
+  if (rows === null && out.unterminated !== true && /^\s*""\s*$/.test(line)) {
+    return [{ start: 0, end: line.length }];
+  }
   if (rows === null || rows.length !== 1 || out.unterminated === true) return null;
   const spans = out.cellSpans?.[0];
   if (spans === undefined || spans.length !== rows[0]!.length) return null;

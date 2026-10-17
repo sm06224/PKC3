@@ -105,6 +105,8 @@ export interface CsvPositions {
   unterminated?: boolean;
 }
 
+const FENCE_LOOKALIKE = /^\s{0,3}(?:`{3,}|~{3,})/;
+
 /**
  * 🔴 **セル 1 つを CSV の字へ戻す**(#418 段①)。
  *
@@ -115,6 +117,12 @@ export interface CsvPositions {
  */
 export function csvEscapeField(field: string, delimiter: string): string {
   if (field === '') return '';
+  /**
+   * 🔴 **囲みの柵に見える升は包む**(#1087 A-4)。行の頭に ``` が出ると csv の囲みが**そこで閉じ**、
+   *   残りの表が本文になり、元の閉じが新しい囲みを開いて**下の本文を飲み込む**。
+   *   柵の行は 0〜3 字の字下げ + ``` か ~~~ が 3 つ以上(後ろは何でも)。
+   */
+  if (FENCE_LOOKALIKE.test(field)) return `"${field.replace(/"/g, '""')}"`;
   if (field.includes('"') || field.includes(delimiter) || /[\n\r]/.test(field)) {
     return `"${field.replace(/"/g, '""')}"`;
   }
@@ -149,6 +157,9 @@ export function parseCsv(
   let rowStartLine = 0;
   let line = 0;
   let cellStart = start;
+  // 🔴 いまの升が `""`(引用で開いた)か ── 末尾の空の行を捨てるとき、`""` と書いた行は**わざと空**なので残す(#1087 B-5)
+  let cellQuoted = false;
+  const quotedEmpty: boolean[] = [];
   const spans: Array<Array<{ start: number; end: number }>> = [];
   let rowSpans: Array<{ start: number; end: number }> = [];
   for (let i = start; i < src.length; i++) {
@@ -180,6 +191,7 @@ export function parseCsv(
       // 🔴 引用が始まるのは**升の先頭の `"` だけ**(RFC 4180 / Excel)。
       //   途中の `"`(`5"x`)は字そのもの ── 開くと残りの行を全部飲み込む(#1087)。
       inQuotes = true;
+      cellQuoted = true;
       continue;
     }
     if (ch === delimiter) {
@@ -187,6 +199,7 @@ export function parseCsv(
       rowSpans.push({ start: cellStart, end: i });
       cell = '';
       cellStart = i + 1;
+      cellQuoted = false;
       continue;
     }
     if (ch === '\r' || ch === '\n') {
@@ -195,6 +208,8 @@ export function parseCsv(
       rowSpans.push({ start: cellStart, end: i });
       rows.push(row);
       spans.push(rowSpans);
+      quotedEmpty.push(row.length === 1 && cellQuoted && cell === '');
+      cellQuoted = false;
       if (out) out.rowLines?.push({ start: rowStartLine, end: line });
       row = [];
       rowSpans = [];
@@ -208,11 +223,12 @@ export function parseCsv(
     cell += ch;
   }
   // Flush the final cell / row (when input doesn't end with \n).
-  if (cell !== '' || row.length > 0) {
+  if (cell !== '' || row.length > 0 || cellQuoted) {
     row.push(cell);
     rowSpans.push({ start: cellStart, end: src.length });
     rows.push(row);
     spans.push(rowSpans);
+    quotedEmpty.push(row.length === 1 && cellQuoted && cell === '');
     if (out) out.rowLines?.push({ start: rowStartLine, end: line });
   }
 
@@ -220,8 +236,10 @@ export function parseCsv(
   // produced. A row of `['']` (single empty cell) counts as empty.
   while (rows.length > 0) {
     const last = rows[rows.length - 1]!;
-    if (last.length === 1 && last[0] === '') {
+    // ⚠ 1 行目の `""` は残さない(表ぜんたいが `""` だけのとき `null` のまま ── 0 行に畳む用途を変えない)
+    if (last.length === 1 && last[0] === '' && !(quotedEmpty[rows.length - 1] === true && rows.length > 1)) {
       rows.pop();
+      quotedEmpty.pop();
       // ⚠ **位置の表も同じだけ短くする** ── さもないと行番号が 1 つずらして
       //   **別の行を書き換える**(いちばん静かなデータ破壊)
       spans.pop();

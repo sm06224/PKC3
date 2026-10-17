@@ -29,6 +29,7 @@
  *   書き方は日本語の user の普通である。門②が「切れ端」だけを落とす。
  */
 
+import { formatNumber } from './csv-formula';
 import { lineStart } from './line-start';
 
 /**
@@ -282,6 +283,28 @@ function startsMidToken(before: string | undefined, expr: string): boolean {
   return false;
 }
 
+const DATE_YMD = /(?<!\d)\d{4}\s*[/-]\s*(?:0?[1-9]|1[0-2])\s*[/-]\s*(?:0?[1-9]|[12]\d|3[01])(?!\d)/u;
+const DATE_MDY = /(?<!\d)(?:0?[1-9]|[12]\d|3[01])\s*[/-]\s*(?:0?[1-9]|[12]\d|3[01])\s*[/-]\s*\d{4}(?!\d)/u;
+
+/**
+ * 🔴 **日付と時刻は計算しない**(#1087)。`2026-10-17=` が `1999`、`2026-10-17-2026-10-01=` が `-38`、
+ *   `12:30+45=` が `75`(`30+45` だけ読んでいた)になっていた ── 打った覚えのない答えである。
+ *
+ * ## どこで線を引いたか
+ * - **日付** = 式の中に、年 4 桁・月 1〜12・日 1〜31 の「年 ○ 月 ○ 日」(`2026-10-17` / `2026/10/17`)、
+ *   または年が最後の「月 日 年」(`10/17/2026`。1〜31 の 2 数 + 4 桁)が在るとき。区切りは `-` か `/`(どちらを混ぜてもよい)。
+ * - **時刻** = 式の直前の字が `:` / `：`(`12:30+45=` は `30+45` を読んでいたので、その手前を見る)。
+ * - ⚠ 日付ではない引き算・割り算は今までどおり計算する:`10-3=` / `8/2=` / `1-2-3=`(年が 4 桁でない)/
+ *   `2026-13-45=`(月が範囲外)/ `2026-10=`(区切りが 1 つ)。
+ *
+ * @param before 式の直前の 1 字(行頭なら `undefined`)
+ * @param expr   前後の空白を落とした式(半角)
+ */
+export function isDateOrTime(before: string | undefined, expr: string): boolean {
+  if (before === ':' || before === '：') return true;
+  return DATE_YMD.test(expr) || DATE_MDY.test(expr);
+}
+
 /**
  * 🔴 **数を 1 つ書いただけのものは式ではない**(2026-09-07、同じレビュー)。
  *
@@ -350,6 +373,7 @@ export function detectInlineCalcRequest(
   const beforeRaw = start + lead > 0 ? fullText[start + lead - 1] : undefined;
   const before = beforeRaw === undefined ? undefined : toHalf(beforeRaw);
   if (startsMidToken(before, expression)) return null;
+  if (isDateOrTime(before, expression)) return null;
   if (hasNoOperation(expression)) return null;
 
   /**
@@ -582,6 +606,7 @@ function resolveWithVariables(fullText: string, caretPos: number): InlineCalcRes
   const lead = raw.length - raw.trimStart().length;
   const before = start + lead > 0 ? head[start + lead - 1] : undefined;
   if (startsMidToken(before, expression)) return null;
+  if (isDateOrTime(before, expression)) return null;
   if (hasNoOperation(expression)) return null;
 
   // 名前を数へ(長い名前から合わせる)
@@ -692,6 +717,8 @@ export function explainCalcMiss(fullText: string, caretPos: number): string | nu
     return '計算できませんでした(桁区切りの , は 3 桁ごとのときだけ数として読みます)';
   // ③ `%` は余り(百分率ではない)── 末尾の `%` は必ずここに来る
   if (/%\s*$/u.test(body)) return '計算できませんでした(% は「余り」です。百分率ではありません)';
+  // ③' 日付や時刻(`2026-10-17=` / `12:30+45=`)
+  if (isDateOrTime(undefined, body)) return '計算できませんでした(日付や時刻は計算できません)';
   // ④ 計算する所が無い(`1200=` / `(1)=`)
   if (hasNoOperation(body)) return '計算できませんでした(足し算や掛け算がありません)';
   // ⑤ 0 で割った(`1/0=` / `1%0=`)
@@ -773,7 +800,10 @@ export function formatCalcResult(value: number): string | null {
   //    なので、次の行が同じ答えを返す(no-op だった)
   if (Number.isInteger(value)) return String(value);
   const rounded = Number(value.toPrecision(12));
-  // `toFixed` は 1e21 未満なら指数にならない。末尾の 0 は落とす
-  const fixed = rounded.toFixed(12).replace(/\.?0+$/u, '');
+  // 🔴 12 桁で丸めた後は `String()`(#1087)── `toFixed(12)` を通すと、約 8000 以上の小数で
+  //   `13605.870000000001` のような端数が戻っていた。表の升の式と**同じ 1 関数**(`formatNumber`)。
+  //   指数表記になる極小(1e-7 未満)のときだけ `toFixed` で普通の数字にする。
+  const plain = formatNumber(rounded);
+  const fixed = /e/u.test(plain) ? rounded.toFixed(12).replace(/\.?0+$/u, '') : plain;
   return fixed === '0' || fixed === '-0' || fixed === '' ? null : fixed;
 }

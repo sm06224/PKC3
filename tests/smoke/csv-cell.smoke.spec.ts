@@ -11,7 +11,12 @@
  * 3. **確定した字が disk まで届き、開き直しても残るか**
  */
 import { test, expect } from '@playwright/test';
-import { gotoApp, collectPageErrors, createEntry } from './helpers';
+import { gotoApp, collectPageErrors, createEntry, clickReal, useSplitEditor } from './helpers';
+
+// 🔑 下の「#1087 A-3 / A-4」は本文を原文の欄で書く ── 既存の道中に足すので、split を使う(読む面で開く spec には影響しない)
+test.beforeEach(async ({ page }) => {
+  await useSplitEditor(page);
+});
 
 /** 表の升(押せる口を持つもの)。 */
 const CELL = '[data-pkc-field="detail-body"] [data-pkc-action="edit-cell"]';
@@ -124,6 +129,48 @@ test('🔴 行と列を足せて、消せる ── 5 列で足りなくなっ�
     .first()
     .click({ force: true });
   await expect(cells, '行を消せていない').toHaveCount(18, { timeout: 10_000 });
+
+  /**
+   * 🔴 **`""` だけの行の升も打て、列の ＋ も効く / 柵に見える字を打っても下の本文が飲まれない**
+   *   (#1087 A-3 / A-4)。⚠ 新しい起動は足さない ── 同じ道中で別のノートを作る。
+   * - 直す前: `""` だけの行は `cellsOf` が読めず、押せる印が出ているのに打てず、列の ＋ も断られた。
+   * - 直す前: 升に ``` と打つと csv の囲みがそこで閉じ、元の閉じが新しい囲みを開いて下の本文を飲み込んだ。
+   */
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('空の行');
+  await page.locator('[data-pkc-field="editor-body"]').fill('```csv\n名\nりんご\n""\n```\n\n以上です。\n');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await expect(cells, '1 列 × 3 行の升が出ていない').toHaveCount(3, { timeout: 15_000 });
+
+  // ── A-3: `""` の行(3 つ目)を押して打つ
+  await cells.nth(2).click();
+  await expect(page.locator('[data-pkc-field="cell-input"]'), '`""` の行の升が欄にならない').toBeVisible();
+  await page.keyboard.type('ぶどう');
+  await page.keyboard.press('Enter');
+  await expect(cells.nth(2), '`""` の行に打った字が入っていない').toHaveText('ぶどう', {
+    timeout: 10_000,
+  });
+
+  // ── A-4: 別の升へ ``` と打つ。囲みの下の本文が本文のまま
+  await cells.nth(1).click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.type('```');
+  await page.keyboard.press('Enter');
+  await expect(cells.nth(1), '``` が升に入っていない').toHaveText('```', { timeout: 10_000 });
+  await expect(cells, '囲みが壊れて升の数が変わった').toHaveCount(3);
+  const bodyView = page.locator('[data-pkc-field="detail-body"]');
+  await expect(bodyView.locator('p', { hasText: '以上です。' }), '下の本文が本文でなくなった').toBeVisible();
+  await expect(
+    bodyView.locator('pre', { hasText: '以上です。' }),
+    '下の本文がコードブロックに飲まれた',
+  ).toHaveCount(0);
+
+  // ── A-3: 列の ＋ が効く(1 列 → 2 列 = 6 升)
+  await page
+    .locator('[data-pkc-action="shape-cell"][data-pkc-cell-what="col"][data-pkc-cell-mode="add"]')
+    .first()
+    .click({ force: true });
+  await expect(cells, '`""` の行があると列を足せない').toHaveCount(6, { timeout: 10_000 });
 
   expect(errors).toEqual([]);
 });
