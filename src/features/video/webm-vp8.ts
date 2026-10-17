@@ -921,3 +921,139 @@ export async function planVideoTrim(
     },
   };
 }
+
+/** 絵だけにした結果。⚠ `parts` の `slice` は元の file の範囲(**コピーしない**)。 */
+export interface PictureOnlyPlan {
+  readonly parts: readonly OutputPart[];
+  readonly byteLength: number;
+  /** 書いた `Duration`(ミリ秒)。⚠ 元の録画と同じ長さ(音の分は無音ではなく、トラックごと無い)。 */
+  readonly durationMs: number;
+  readonly keptVideo: number;
+  /** 落とした音のブロックの数(観測点)。 */
+  readonly droppedAudio: number;
+}
+
+export type PictureOnlyResult =
+  | { readonly ok: true; readonly plan: PictureOnlyPlan }
+  | { readonly ok: false; readonly reason: VideoTrimRefusal };
+
+/** `Tracks` の中の `TrackEntry` のうち、映像のトラック番号を持つ 1 つの bytes(見出しごと)。無ければ `null`。 */
+function videoTrackEntry(tracks: Uint8Array, videoTrack: number): Uint8Array | null {
+  const head = readId(tracks, 0);
+  if (head === null || head.id !== ID_TRACKS) return null;
+  const size = readSizeAt(tracks, head.length);
+  if (size === null) return null;
+  let pos = head.length + size.length;
+  while (pos < tracks.length) {
+    const id = readId(tracks, pos);
+    if (id === null) return null;
+    const sz = readSizeAt(tracks, pos + id.length);
+    if (sz === null || sz.value === null) return null;
+    const body = pos + id.length + sz.length;
+    const end = body + sz.value;
+    if (end > tracks.length) return null;
+    if (id.id === ID_TRACK_ENTRY) {
+      let q = body;
+      while (q < end) {
+        const cid = readId(tracks, q);
+        if (cid === null) return null;
+        const csz = readSizeAt(tracks, q + cid.length);
+        if (csz === null || csz.value === null) return null;
+        const cbody = q + cid.length + csz.length;
+        if (cid.id === ID_TRACK_NUMBER && readUint(tracks.subarray(cbody, cbody + csz.value)) === videoTrack) {
+          return tracks.subarray(pos, end);
+        }
+        q = cbody + csz.value;
+      }
+    }
+    pos = end;
+  }
+  return null;
+}
+
+/**
+ * 🔴 **音のトラックを落として、映像だけの WebM にする**(#952 A1「動画から絵だけ取り出す」)。
+ *
+ * 範囲を切る道(`planVideoTrim`)と違い、**全区間をそのまま**残す ── 映像のブロックの時刻は 1 つも変えない
+ * (`Cluster` の `Timecode` は走査が 0 起点に直した値を書き、ブロックの相対時刻は元のまま)。
+ * - `Tracks` は**映像の `TrackEntry` だけ**で組み直す(音の宣言が残ると、再生器が「音のトラックがある」と読む)
+ * - 各 `Cluster` は見出し + `Timecode` を新しく書き、中の**映像のブロックだけ**を元のバイトの範囲で繋ぐ
+ *   (隣り合う映像のブロックは 1 つの `slice` にまとめる ── 音が間に挟まる所だけ切れる)
+ * - 🔑 音のブロックだけの `Cluster` は出さない
+ *
+ * ⚠ `scan` は**終わりまで読んだもの**(`scanWebmVideo(src, Infinity)`)でなければならない。
+ */
+export async function planPictureOnly(src: ByteSource, scan: VideoScan): Promise<PictureOnlyResult> {
+  const trackBytes = await src.read(scan.tracksStart, scan.tracksEnd);
+  const entry = videoTrackEntry(trackBytes, scan.videoTrack);
+  if (entry === null) return { ok: false, reason: 'broken' };
+  const tracks = element(ID_TRACKS, entry);
+
+  const byCluster: VideoBlock[][] = scan.clusters.map(() => []);
+  for (const b of scan.blocks) byCluster[b.cluster]!.push(b);
+
+  const clusterParts: OutputPart[] = [];
+  let keptVideo = 0;
+  let droppedAudio = 0;
+  for (let ci = 0; ci < scan.clusters.length; ci += 1) {
+    const c = scan.clusters[ci]!;
+    const video = byCluster[ci]!.filter((b) => b.track === scan.videoTrack);
+    droppedAudio += byCluster[ci]!.length - video.length;
+    if (video.length === 0) continue;
+    keptVideo += video.length;
+    clusterParts.push({ kind: 'bytes', bytes: CLUSTER_HEAD });
+    clusterParts.push({ kind: 'bytes', bytes: timecodeElement(c.tcMs) });
+    let runStart = video[0]!.elStart;
+    let runEnd = video[0]!.elEnd;
+    for (let i = 1; i < video.length; i += 1) {
+      const b = video[i]!;
+      if (b.elStart === runEnd) {
+        runEnd = b.elEnd;
+        continue;
+      }
+      clusterParts.push({ kind: 'slice', start: runStart, end: runEnd });
+      runStart = b.elStart;
+      runEnd = b.elEnd;
+    }
+    clusterParts.push({ kind: 'slice', start: runStart, end: runEnd });
+  }
+  if (keptVideo === 0) return { ok: false, reason: 'no-video' };
+
+  const durationMs = scan.sourceEndMs;
+  const header = element(
+    ID_EBML_HEAD,
+    concatBytes([
+      element('4286', uintBytes(1)), // EBMLVersion
+      element('42f7', uintBytes(1)), // EBMLReadVersion
+      element('42f2', uintBytes(4)), // EBMLMaxIDLength
+      element('42f3', uintBytes(8)), // EBMLMaxSizeLength
+      element('4282', asciiBytes('webm')), // DocType
+      element('4287', uintBytes(4)), // DocTypeVersion
+      element('4285', uintBytes(2)), // DocTypeReadVersion
+    ]),
+  );
+  const info = element(
+    ID_INFO,
+    concatBytes([
+      element(ID_TIMESTAMP_SCALE, uintBytes(1_000_000)),
+      element('4d80', asciiBytes('pkc3')), // MuxingApp
+      element('5741', asciiBytes('pkc3')), // WritingApp
+      element('4489', float64Bytes(durationMs)), // Duration(1ms 刻み)
+    ]),
+  );
+  const body: OutputPart[] = [{ kind: 'bytes', bytes: info }, { kind: 'bytes', bytes: tracks }, ...clusterParts];
+  const lengthOf = (p: OutputPart): number => (p.kind === 'bytes' ? p.bytes.length : p.end - p.start);
+  let bodyLen = 0;
+  for (const p of body) bodyLen += lengthOf(p);
+  const segmentHead = concatBytes([hexBytes(ID_SEGMENT), writeSize(bodyLen)]);
+  return {
+    ok: true,
+    plan: {
+      parts: [{ kind: 'bytes', bytes: concatBytes([header, segmentHead]) }, ...body],
+      byteLength: header.length + segmentHead.length + bodyLen,
+      durationMs,
+      keptVideo,
+      droppedAudio,
+    },
+  };
+}

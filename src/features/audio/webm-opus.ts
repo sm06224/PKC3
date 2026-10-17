@@ -412,8 +412,25 @@ const CLUSTER_SPAN_MS = 30000;
 export function trimWebmOpus(bytes: Uint8Array, startMs: number, endMs: number): TrimOutcome {
   const demuxed = demuxWebmOpus(bytes);
   if (!demuxed.ok) return demuxed;
-  const src = demuxed.source;
+  return trimDemuxed(demuxed.source, startMs, endMs);
+}
 
+/**
+ * 🔴 **音のトラックを丸ごと、新しい音だけの WebM にする**(#952 A1「動画から音だけ取り出す」)。
+ *
+ * 🔑 範囲を切る道(`trimWebmOpus`)の**全区間**である ── 2 本目の書き出し口を作らず、同じ関数へ通す。
+ * 映像など opus 以外のトラックは `demuxWebmOpus` が読み飛ばすので、出力には入らない。
+ * ⚠ 終わりは「鳴らしたときの長さ」(`durationMs` から頭の `CodecDelay` を引いた値)で渡す
+ *   (`trimDemuxed` が頼まれた時刻に札のぶんを足すので、足した結果が録音の終わりに届く)。
+ */
+export function extractWebmOpusAudio(bytes: Uint8Array): TrimOutcome {
+  const demuxed = demuxWebmOpus(bytes);
+  if (!demuxed.ok) return demuxed;
+  const src = demuxed.source;
+  return trimDemuxed(src, 0, src.durationMs - src.codecDelayMs);
+}
+
+function trimDemuxed(src: WebmOpusSource, startMs: number, endMs: number): TrimOutcome {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return { ok: false, reason: 'empty-range' };
   }

@@ -413,7 +413,8 @@ const UNREGISTERED_POINT: readonly string[] = [
   // ⚠ 2026-10-13(依頼 65-1): `query-tag-rename` / `query-tag-remove`(集計をタグで分けたときの各組の「名前を変える」「全部外す」── 押した組のタグが要る。`untag-entry` と同じ)
   'query-tag-rename', 'query-tag-remove',
   // ⚠ 2026-10-02(#772 段②): `capture-transcribe`(「音/動画」の行の「文字にする」── 押した行が要る。`capture-play` と同じ)
-  'append-at-heading', 'browse-archive', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
+  // ⚠ 2026-10-17(#952 A1): `capture-extract`(動画の行の「音だけ取り出す」「絵だけ取り出す」── 押した行が要る。`capture-transcribe` と同じ)
+  'append-at-heading', 'browse-archive', 'capture-extract', 'capture-play', 'capture-transcribe', 'copy-asset-ref', 'copy-md-block',
   'deliver-to-extension', 'discard-timer', 'dismiss-alarm', 'download-asset', 'draw-on-image',
   'dual-bookmark-open', 'dual-bookmark-remove', 'dual-crumb', 'dual-tab-activate', 'edit-cell',
   // ⚠ 2026-10-02(#1240): `edit-header-cell`(見出しの ✎ ── 押した見出しが要る。`edit-cell` と同じ)
@@ -863,6 +864,9 @@ describe('操作の全数台帳(#582 段①)', () => {
       //   `open-today` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1662 2): 右クリックの「ノートを置く…」(`add-place-note`)で受け手 +1 ── 登記は増えない
       //   (押し口は本文の右クリックにしか無く、座標はメニューが運ぶ。`add-place` / `add-place-template` と同じ置き場)。`receivers` +1 / `total` +1 / `unregistered` +1。
+      // ⚠ 2026-10-17(#952 A1): 動画の行の「音だけ取り出す」「絵だけ取り出す」(`capture-extract`)で受け手 +1 ── 登記は増えない
+      //   (押し口は動画の行の中にしか無く、押した行が対象を、押したボタンが取り出す物を運ぶ。`capture-transcribe` と同じ置き場)。
+      //   `receivers` +1 / `total` +1 / `unregistered` +1。
       // ⚠ 2026-10-17(#1621): 左のペインの「⋯」(`open-bar-more`)で受け手 +1 ── 登記は増えない(鍵を持たない画面のボタン)。`receivers` +1 / `total` +1 / `unregistered` +1。
       total: 445,
       receivers: 376,

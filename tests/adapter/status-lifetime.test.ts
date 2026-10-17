@@ -440,6 +440,12 @@ describe('全体の処理の出す側の全数', () => {
       end: /deps\.notify\(''\)/,
     },
     {
+      // ⚠ #952 A1: 動画から音だけ / 絵だけを取り出している間。失敗の枝は `finally` の `notify('')`、成功は結果の字で置き換わる
+      file: 'src/adapter/ui/actions/capture-extract.ts',
+      starts: ["deps.notify('取り出しています…');"],
+      end: /deps\.notify\(''\)/,
+    },
+    {
       file: 'src/adapter/ui/actions/capture-transcribe.ts',
       starts: ['deps.notify(`「${item.name}」を文字にしています…(${ready.part.label}の一式)`);'],
       end: /deps\.notify\(''\)/,
@@ -492,8 +498,8 @@ describe('全体の処理の出す側の全数', () => {
     expect(Object.fromEntries([...perFile].sort()), '表に無い出す側が増えた / 減った(表と終わりの合図を直す)').toEqual(
       Object.fromEntries([...expected].sort()),
     );
-    // 空振り防止:合計が 12(表の始まりの数。#1455 (b) で +1、#1652 4 で +1)。⚠ 0 件なら走査が何も見ていない
-    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(12);
+    // 空振り防止:合計が 13(表の始まりの数。#1455 (b) で +1、#1652 4 で +1、#952 A1 で +1)。⚠ 0 件なら走査が何も見ていない
+    expect([...perFile.values()].reduce((a, b) => a + b, 0)).toBe(13);
   });
 });
 

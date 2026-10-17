@@ -1717,6 +1717,11 @@ export interface BinderServices {
    */
   transcribeCapture?(lid: string): void;
   /**
+   * 🔴 **動画から音だけ / 絵だけを取り出す**(#952 A1。裁定済み = 元の添付は残す)。
+   * ⚠ **省略可**(無い配線では「このタブの PKC3 が古いままのため…」と断る)。段取りは `capture-extract.ts` が持つ。
+   */
+  extractCapture?(lid: string, part: 'audio' | 'picture'): void;
+  /**
    * 🔴 **音声認識の部品を入れる / 途中でやめる / 消す**(#772 段②)。
    * ⚠ **勝手に取りに行かない** ── 押した人にだけ取らせる(Office 一式と同じ作法)。
    * ⚠ 判断も文言も `AsrPackInstaller` が持つ(投げてこない)。
@@ -7457,6 +7462,20 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     services.transcribeCapture(lid);
+  },
+  /**
+   * 🔴 **動画から音だけ / 絵だけを取り出す**(#952 A1)。⚠ **対象は押した行が持つ**(`data-pkc-entry`)──
+   *   選択中のノートから採らない(`capture-transcribe` と同じ)。取り出す物は押したボタン自身が運ぶ(`data-pkc-part`)。
+   */
+  'capture-extract': (dispatcher, target, services) => {
+    const lid = target.getAttribute('data-pkc-entry');
+    const part = target.getAttribute('data-pkc-part');
+    if (!lid || (part !== 'audio' && part !== 'picture')) return;
+    if (!services.extractCapture) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'このタブの PKC3 が古いままのため、取り出せません。再読み込みしてください' });
+      return;
+    }
+    services.extractCapture(lid, part);
   },
   /**
    * ✏️ 編集に入る。#177: 多重タブでは**先に編集権を取ってから**入る。

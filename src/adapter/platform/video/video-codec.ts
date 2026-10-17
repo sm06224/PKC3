@@ -27,6 +27,7 @@
  *   確認つきの道へ倒さない。通らなければ環境の失敗として「使えない」に倒す
  */
 import {
+  planPictureOnly,
   planVideoTrim,
   precisePlanSpec,
   preciseEncodeParams,
@@ -66,6 +67,11 @@ export type VideoJob =
       readonly mode: 'precise' | 'snap';
       /** 作り直しを呼び側(メインスレッド)で済ませたとき、その結果。 */
       readonly head?: readonly HeadFrame[];
+    }
+  | {
+      /** 🔴 音のトラックを落として映像だけにする(#952 A1)。範囲を持たない。 */
+      readonly op: 'picture-only';
+      readonly blob: Blob;
     };
 
 /**
@@ -111,7 +117,18 @@ export type VideoCutResult =
       readonly environmentBroken: boolean;
     };
 
-export type VideoJobResult = VideoScanResult | VideoCutResult;
+/** 絵だけにした結果(#952 A1)。⚠ 出力の `Blob` は**元の部品を指す**(コピーしていない)。 */
+export type VideoPictureResult =
+  | {
+      readonly ok: true;
+      readonly blob: Blob;
+      readonly durationMs: number;
+      readonly keptVideo: number;
+      readonly droppedAudio: number;
+    }
+  | { readonly ok: false; readonly reason: VideoTrimRefusal };
+
+export type VideoJobResult = VideoScanResult | VideoCutResult | VideoPictureResult;
 
 /** `Blob` を窓で読む口。 */
 export function blobSource(blob: Blob): ByteSource {
@@ -571,7 +588,28 @@ export async function cutVideo(
   };
 }
 
+/**
+ * 🔴 **音のトラックを落として、映像だけの動画にする**(#952 A1)。終わりまで窓で読み、元の部品を繋ぐ。
+ * ⚠ 例外を投げない(壊れた file は断る理由を値で返す)。
+ */
+export async function pictureOnlyVideo(job: { blob: Blob }): Promise<VideoPictureResult> {
+  const src = blobSource(job.blob);
+  const scanned = await scanWebmVideo(src, Number.POSITIVE_INFINITY);
+  if (!scanned.ok) return scanned;
+  const planned = await planPictureOnly(src, scanned.scan);
+  if (!planned.ok) return planned;
+  const p = planned.plan;
+  const blob = new Blob(
+    p.parts.map((part) =>
+      part.kind === 'bytes' ? (part.bytes as Uint8Array<ArrayBuffer>) : job.blob.slice(part.start, part.end),
+    ),
+    { type: 'video/webm' },
+  );
+  return { ok: true, blob, durationMs: p.durationMs, keptVideo: p.keptVideo, droppedAudio: p.droppedAudio };
+}
+
 /** ワーカー / その場の両方が通る 1 本の入口。 */
 export function runVideoJob(job: VideoJob, api?: CodecApi | null): Promise<VideoJobResult> {
+  if (job.op === 'picture-only') return pictureOnlyVideo(job);
   return job.op === 'scan' ? scanVideo(job, api) : cutVideo(job, api);
 }

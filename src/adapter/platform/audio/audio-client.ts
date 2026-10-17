@@ -17,7 +17,7 @@
  */
 import { WorkerLease } from '../worker-lease';
 import { appJobMonitor, type JobMonitor } from '../job-monitor';
-import { trimAudio, type AudioTrimJob, type AudioTrimResult } from './audio-codec';
+import { runAudioJob, trimAudio, type AudioJob, type AudioTrimJob, type AudioTrimResult } from './audio-codec';
 
 /**
  * アイドルで畳むまで。⚠ 切り出しは**続けて押されうる**(頭を切って、次に尻を切る)
@@ -61,6 +61,16 @@ export class AudioClient {
   trim(blob: Blob, startMs: number, endMs: number): Promise<AudioTrimResult> {
     const job: AudioTrimJob = { blob, startMs, endMs };
     if (!this.lease) return trimAudio(job);
+    return this.lease.run<AudioTrimResult>(job);
+  }
+
+  /**
+   * 🔴 動画(または音)から、音のトラックを丸ごと取り出す(#952 A1)。⚠ 同じワーカー・同じ結果の形。
+   * 断る理由は**値で返る**(例外にしない)。
+   */
+  extract(blob: Blob): Promise<AudioTrimResult> {
+    const job: AudioJob = { blob, whole: true };
+    if (!this.lease) return runAudioJob(job);
     return this.lease.run<AudioTrimResult>(job);
   }
 

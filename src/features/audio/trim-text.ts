@@ -49,6 +49,19 @@ export function trimmedCaptureName(name: string, startMs: number, endMs: number)
 }
 
 /**
+ * 🔴 **動画から取り出したものの名前**(#952 A1)。`録画.webm` + 音だけ → `録画 (音だけ).webm`。
+ *
+ * 🔑 範囲を切った名前(`trimmedCaptureName`)と同じ作り ── **拡張子の前に入れる**
+ *   (後ろに付けると書き出したとき OS が種類を見失う)。拡張子が無い名前もそのまま扱える。
+ */
+export function extractedCaptureName(name: string, part: 'audio' | 'picture'): string {
+  const tag = part === 'audio' ? '(音だけ)' : '(絵だけ)';
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return `${name} ${tag}`;
+  return `${name.slice(0, dot)} ${tag}${name.slice(dot)}`;
+}
+
+/**
  * 🔴 **説明文をボタンより前に出すか**(#683 の裁定 C。2026-10-01)。
  *
  * 🔑 **最初に読む物が前、作業が始まったら操作が前**:
