@@ -219,7 +219,20 @@ test('🔴 タブレットの縦(768px)でも、3 本ぶんの止める口が押
   for (let i = 0; i < 3; i += 1) {
     await createEntry(page, 'text');
     await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
-    await clickReal(page, '[data-pkc-field="start-timer"]');
+    /**
+     * 🔴 768px では左の列が細く、「時間を計る」は作る帯の「⋯」の下へ畳まれる(#1621)。
+     *   その道(⋯ → 時間を計る)で押す ── 畳んだ物が実際に押せることの確認も兼ねる。
+     */
+    const folded = await page
+      .locator('[data-pkc-field="start-timer"]')
+      .first()
+      .evaluate((el) => el.hasAttribute('data-pkc-overflow'));
+    if (folded) {
+      await clickReal(page, '[data-pkc-region="create-bar"] [data-pkc-field="bar-more"]');
+      await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="start-timer"]');
+    } else {
+      await clickReal(page, '[data-pkc-field="start-timer"]');
+    }
   }
   const seen = await page
     .locator('[data-pkc-action="stop-timer"]')

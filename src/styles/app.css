@@ -992,6 +992,43 @@ select:focus-visible {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/**
+ * 🔴 **左の列の 3 本の帯は、細くなっても 1 段に収める**(#1621。🟣 Gemini 裁定 = 推薦 A)。
+ *
+ * 直す前は、窓が 1080px 以下になると左の列が 180〜238px に細くなり、タブの帯・作る帯・
+ * 下の帯が**それぞれ別の割れ方で 2 段**になっていた(下の段に 1〜2 枚だけ残る・タブの
+ * 下の段だけ横いっぱいに伸びる)。入りきらない物は後ろから畳み、「⋯」で名前つきに出す
+ * (畳む判断は `render/bar-overflow.ts`)。⚠ 本文の幅は変えない。
+ * 🔑 畳むのは**見た目だけ**(DOM には残る ── 長押しのメニューと「⋯」の中身がそこから読む)。
+ */
+[data-pkc-overflow] {
+  display: none !important;
+}
+[data-pkc-field='bar-more'] {
+  flex: 0 0 auto;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--s2);
+  border: none;
+  border-radius: 0;
+  justify-content: center;
+}
+[data-pkc-region='browse-tabs'] [data-pkc-field='bar-more'] {
+  height: auto;
+  min-width: 0;
+  padding: 0 var(--s2);
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='bar-more'] {
+  min-width: 44px;
+  height: 44px;
+}
+/* 🔑 タブは細い列では**字を詰める**(6 枚の語は 13px で約 240px 要る。裁定 A「タブは字を詰め」)。
+ *   1079px 以下 = 左の列が 238px 未満になる幅。それ以上は 13px のまま 1 段に収まる(実測)。 */
+@media (max-width: 1079px) {
+  [data-pkc-region='browse-tabs'] button {
+    font-size: 11px;
+  }
+}
 /* 左の列の下端: **コレクション**に対する操作 */
 [data-pkc-region='collection-bar'] {
   display: flex;
