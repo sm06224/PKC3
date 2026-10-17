@@ -34,7 +34,7 @@
  * - `PKC2: docs/development/notation-redesign-2026-05/11-canonicalization-spec.md`
  */
 
-import { advanceFence } from './list-renumber';
+import { advanceFence, advanceIndent, INDENT_START } from './list-renumber';
 
 /**
  * `:::` block directive 前後 blank line 正規化(LineMap thread 版)。
@@ -81,6 +81,7 @@ export function ensureBlankAroundColonBlocksWithLineMap(
   //   `:::` 行へ空行を挿すと、表示もコピーも空行が増える。判定の正本は `advanceFence`。
   const stage1Skip: boolean[] = [];
   let fenceMarker = '';
+  let indentState = INDENT_START;
   const malformedOpenerRe = /^([ \t\u3000]*:::[a-zA-Z0-9_-]+)\{[^}\n]*$/;
   const colonStartRe = /^[ \t\u3000]*:::/;
   const openerRe = /^[ \t\u3000]*:::[a-zA-Z0-9_-]+(?:\{[^}\n]{0,200}\})?[ \t]*$/;
@@ -88,7 +89,15 @@ export function ensureBlankAroundColonBlocksWithLineMap(
     const line = inLines[i]!;
     const inputIdx = lineMapIn[i] ?? i;
     const nextMarker = advanceFence(fenceMarker, line);
-    const skip = fenceMarker !== '' || nextMarker !== '';
+    let skip = fenceMarker !== '' || nextMarker !== '';
+    // 字下げのコード(4 SP。#1087 M9)も触らない。fence の外の行だけ追う
+    if (!skip) {
+      const r = advanceIndent(indentState, line);
+      indentState = r.state;
+      skip = r.code;
+    } else {
+      indentState = { blank: false, list: indentState.list, code: false };
+    }
     fenceMarker = nextMarker;
     stage1Skip.push(skip);
     const m = skip ? null : malformedOpenerRe.exec(line);

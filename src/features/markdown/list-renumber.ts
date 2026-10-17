@@ -43,13 +43,73 @@ export type ListNumberMode = 'sequential' | 'uniform';
  */
 export function advanceFence(fence: string, line: string): string {
   if (fence !== '') {
-    const c = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
-    return c !== null && c[1]![0] === fence[0] && c[1]!.length >= fence.length ? '' : fence;
+    // 🔑 引用の中で開いた fence は、返す記号の頭に `>` を深さぶん付けて覚える(`>>```` )。
+    //   閉じは同じ深さの引用の中だけ。深さが浅い行(`>` が無い行 = 引用が終わった)は、
+    //   fence ごと終わったものとして閉じる(閉じ忘れが文書の残りを飲まない)。
+    let depth = 0;
+    while (fence[depth] === '>') depth += 1;
+    const mark = fence.slice(depth);
+    const q = depth === 0 ? { depth: 0, rest: line } : unquoteLine(line);
+    if (q.depth < depth) return '';
+    if (q.depth > depth) return fence;
+    const c = /^\s*(`{3,}|~{3,})\s*$/.exec(q.rest);
+    return c !== null && c[1]![0] === mark[0] && c[1]!.length >= mark.length ? '' : fence;
   }
-  const o = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+  // 開き。⚠ 引用(`> ````)・リストの項目(`- ````)の中の fence も fence である(#1087 M9)。
+  //   これを見落とすと、中身の `%%…%%` `||` `__` `+++` が記法として食われる。
+  const q = unquoteLine(line);
+  let rest = q.rest;
+  for (;;) {
+    const l = LIST_LEAD.exec(rest);
+    if (l === null) break;
+    rest = rest.slice(l[0].length);
+  }
+  const o = /^\s*(`{3,}|~{3,})(.*)$/.exec(rest);
   if (o === null) return '';
   if (o[1]![0] === '`' && o[2]!.includes('`')) return '';
-  return o[1]!;
+  return '>'.repeat(q.depth) + o[1]!;
+}
+
+/**
+ * 字下げのコード(行頭 4 SP / タブ)を 1 行ぶん進める(#1087 M9)。fence の外の行だけを渡す。
+ *
+ * 🔑 CommonMark どおり、**空行の後(または文書の頭)で始まり、リストの中ではない**ものだけをコードとする。
+ *   ⚠ 段落の続き(空行なしの 4 SP)・リストの項目の続き(`- a` + 空行 + 4 SP は項目の段落)は
+ *   コードではない。リストの中かどうかは**迷ったらコードにしない側**へ倒す(誤って守るより、
+ *   守らないほうが従来どおりで害が小さい)。
+ */
+export interface IndentState {
+  /** 直前の行が空行(文書の頭も空行扱い) */
+  blank: boolean;
+  /** 直前までの塊がリストの項目(その続きの字下げはコードではない) */
+  list: boolean;
+  /** いま字下げのコードの続きの中 */
+  code: boolean;
+}
+
+export const INDENT_START: IndentState = { blank: true, list: false, code: false };
+
+export function advanceIndent(s: IndentState, line: string): { state: IndentState; code: boolean } {
+  if (line.trim() === '') {
+    // 空行はコードの続きを切らない(コードの中の空行)。空行そのものは「コードの行」に数えない
+    return { state: { blank: true, list: s.list, code: s.code }, code: false };
+  }
+  if (/^(?: {4}|\t)/.test(line)) {
+    const isCode = s.code || (s.blank && !s.list);
+    return { state: { blank: false, list: s.list, code: isCode }, code: isCode };
+  }
+  // 字下げのない(または浅い)行 ── コードはここで終わる
+  const item = LIST_LEAD.test(line);
+  const shallow = /^\s/.test(line);
+  const list = item ? true : s.blank && !shallow ? false : s.list;
+  return { state: { blank: false, list, code: false }, code: false };
+}
+
+/** 行頭の `>` の連なりを剥がす(引用の深さと残り)。 */
+function unquoteLine(line: string): { depth: number; rest: string } {
+  const m = /^((?:\s*>)+ ?)(.*)$/.exec(line);
+  if (m === null) return { depth: 0, rest: line };
+  return { depth: (m[1]!.match(/>/g) ?? []).length, rest: m[2]! };
 }
 
 /**
