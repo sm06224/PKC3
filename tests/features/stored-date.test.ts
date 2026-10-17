@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * DB の時刻文字列 → 表示(P9 段②。#709 で向きを直した)。
  *

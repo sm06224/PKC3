@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1087: findOpenEnds の「行 → 囲い」を 1 回の表にした。
  * 🔑 期待値は直す前の探し方(行ごとに containerAtLine)をここへ書き写したもの ── 全数で突き合わせる。

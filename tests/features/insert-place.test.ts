@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **差し込む所を解く**(#684 段④、`resolveInsertPlace` / `insertLines` の錨)。
  *

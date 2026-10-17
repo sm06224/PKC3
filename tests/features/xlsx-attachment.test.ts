@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **添付した `.xlsx` を、SQL で調べられるようにする**(#854 段③)。
  *

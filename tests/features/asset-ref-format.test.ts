@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P8 段⑱: 添付を**本文へ書く形**の組み立て(`features/asset/asset-ref-format.ts`)。
  *

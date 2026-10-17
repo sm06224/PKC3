@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **使っている OSS の表記(#948)**。
  *

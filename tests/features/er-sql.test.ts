@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **図で押した所から `SELECT` を組む**(#918 段⑤c)。
  *

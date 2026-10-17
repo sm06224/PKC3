@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 引用符つきの値の中の `fill=` / `stroke=` は札ではない(`setPlaceStyle` の走査。`setToken` と同じ読み方)。
  *

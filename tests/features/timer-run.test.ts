@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **タイマーが出す字**(#279)。
  *

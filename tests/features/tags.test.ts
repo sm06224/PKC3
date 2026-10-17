@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * タグ(#182 / 台帳 #180 の A-2)。
  *

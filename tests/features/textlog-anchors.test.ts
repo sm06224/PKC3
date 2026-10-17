@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6: textlog permalink 書換(fromPkc2 より前段)の pin。
  * 対応先 = 変換後見出しの slug(時刻精度を落とさない)。未知 id は broken のまま。

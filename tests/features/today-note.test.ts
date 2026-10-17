@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **今日のノート**(#348、user 裁定 2026-08-23「推奨で OK」)。
  *

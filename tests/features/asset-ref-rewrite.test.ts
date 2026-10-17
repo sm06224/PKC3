@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * O4: 添付参照の**書き換え**(#88)。
  *

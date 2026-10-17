@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **file の名前から表の名前を作る**(#918 段⑦の下地)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **配った DuckDB の目録を、信じずに検める**(#682 段①b)。
  *

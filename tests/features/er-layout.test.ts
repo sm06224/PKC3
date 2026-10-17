@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **ER の四角をどこに置くか**(#918 段⑤b)。
  *

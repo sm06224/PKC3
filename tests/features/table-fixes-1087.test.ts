@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **表と式の直し**(#1087)── 式の連鎖 / csv の引用符 / 並べ替えの数 / ROUND。
  *

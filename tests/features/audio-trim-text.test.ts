@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **切り出しの字**(#683 段②a。user 裁定 2026-09-14 の A)。
  *

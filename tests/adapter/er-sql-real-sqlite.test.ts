@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **図から組んだ字が、本物の sqlite で本当に動くか**(#918 段⑤b/⑤c)。
  *

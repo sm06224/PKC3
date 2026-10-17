@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **構造 1 枚**(#918 段①)。
  *

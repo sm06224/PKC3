@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **触った物から smoke を引く規則**(#820)。
  *

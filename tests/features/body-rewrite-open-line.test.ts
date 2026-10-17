@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **押した時点の行の中身(`openLine`)が違えば、書換は書かない**(#1087)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **ログの日の束ね**(#1441 案 b)── 規則(pure)。器への当て方は `tests/adapter/log-days.test.ts`。
  */

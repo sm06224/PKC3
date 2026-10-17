@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6c 段⑥: `pkc2-entry-bundle`(`.entry.zip`)── **P6c の最後の形式**。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **板の形を選ぶ動線**(#530 案 A。user 裁定 2026-09-14)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * バックアップ zip の読み取りの穴(B3 / B4 / B8)。
  *

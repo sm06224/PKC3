@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **smoke の「起動の数」に置いた予算を守る**(#820)。
  *

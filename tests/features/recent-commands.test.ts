@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **「最近使った操作」の規則**(#274。🟣 Gemini 裁定 A)。**pure** な部分だけ。
  *

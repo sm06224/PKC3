@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **Parquet の書き出しの SQL を組む門**(#918 段⑥)。
  *

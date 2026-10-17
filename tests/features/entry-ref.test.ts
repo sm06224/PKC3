@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **章を指す参照 `entry:<lid>#h/<見出しの id>`**(#579。user 裁定 2026-09-04)。
  *

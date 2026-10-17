@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **GitHub Flavored Markdown (GFM) Alerts**(#1144)。
  *

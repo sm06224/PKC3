@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **打たれた SQL が「読むだけ」か**(#681 段①)。
  *

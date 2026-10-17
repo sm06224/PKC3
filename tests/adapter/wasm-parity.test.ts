@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * Rust core(wasm)と TS 参照実装の **等価性**(R1/R2。rust-wasm-strategy §7)。
  *

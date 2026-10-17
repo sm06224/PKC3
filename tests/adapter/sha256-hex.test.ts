@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **「SHA-256 → 小文字 hex」の実装は 1 つ**(#1087)。
  *

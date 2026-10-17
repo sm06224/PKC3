@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * PKC2 の `textlog.csv` → TextlogBody の逆写像。
  *

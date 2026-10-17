@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1381 ── frontmatter の位置決めを「閉じの行まで読む」形にした。出力は 1 バイトも変えない。
  *

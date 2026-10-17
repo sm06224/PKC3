@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **書き出しの選び所に Parquet が並ぶ条件**(#918 段⑥)。
  *

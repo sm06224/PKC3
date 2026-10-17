@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 `.ics` 書き出しの落とし穴(#855 段 D。設計 `schedule-outlook-2026-09.md` §4)を 1 つずつ pin する。
  *

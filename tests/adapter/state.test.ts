@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { stubStamps } from '../helpers/store-stamps';
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';

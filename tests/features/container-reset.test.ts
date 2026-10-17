@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **入れ物ごと捨てる**(#986 段③)。
  *

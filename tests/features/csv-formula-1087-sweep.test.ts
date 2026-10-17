@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **表の式の直し 4 件**(#1087 F-1〜F-4)。
  *

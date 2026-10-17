@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **予定表の不具合 3 件**(#1087)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **留めた場所**(#273 残件)。
  *

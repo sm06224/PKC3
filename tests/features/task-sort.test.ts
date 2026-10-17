@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import { hasQuotedTaskItems, hasTaskItems, sortTasksByStatus } from '../../src/features/markdown/task-sort';
 

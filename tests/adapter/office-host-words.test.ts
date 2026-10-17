@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * Office の窓(`public/office/host.html`)が止まったときの字。
  *

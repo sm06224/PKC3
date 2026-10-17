@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **添付した CSV / TSV を、SQL で調べられるようにする**(#854 段①)。
  *

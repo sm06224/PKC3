@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **太り方の probe の「読んでよいか」の判定**(#999 段①)。
  *

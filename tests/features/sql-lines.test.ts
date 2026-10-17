@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **打つ SQL を行ごとの色付き HTML に割る**(#918 段②c/②d)。
  *

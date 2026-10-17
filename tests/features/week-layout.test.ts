@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **予定の「週」── 7 日の決め方と見出し**(#855 段 A-2)。純関数。
  * 繋がり(描画・押す・窓)は `tests/adapter/schedule-week.test.ts`。

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1170: 本文が使っている添付を、本文の順に数え上げる(`features/asset/asset-refs-in-body.ts`)。
  *

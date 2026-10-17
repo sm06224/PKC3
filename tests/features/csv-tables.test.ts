@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **本文の csv を SQL から引ける形にする判断**(#681 段③)。
  *

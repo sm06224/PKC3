@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **DuckDB を「自分で配る」ための門**(#682。裁定 2026-09-15 = 案 A)。
  *

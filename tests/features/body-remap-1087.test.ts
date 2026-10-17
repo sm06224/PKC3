@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **取り込みの lid の付け替えは、読む側(`body-links.ts`)と同じ文法で当てる**(#1087 N14)。
  *

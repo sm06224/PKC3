@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1218 F1: `xCheckReservedLock` の差し替え(`reserved-lock.ts`)の分岐を、node で見る。
  *

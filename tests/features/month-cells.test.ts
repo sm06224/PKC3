@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import { MONTH_CELL_LIMIT, moreLabel, pickCellItems } from '../../src/features/schedule/month-cells';
 

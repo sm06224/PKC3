@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * user 報告(2026-08-05)「**開いたら何も起きずに終わる**」の pin。
  * 調査 doc: `docs/development/user-reports-2026-08-05.md` §1-6

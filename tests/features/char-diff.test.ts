@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * #1231 段①: 入れ替わった行の中で、**変わった字だけ**を見つける(`charDiff`)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 復元チェーンの **TS 参照実装**(= 現在の本番経路)の pin。
  *

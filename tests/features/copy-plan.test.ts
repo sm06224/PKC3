@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 写す(コピー)の段取り(#273 段③)。
  *

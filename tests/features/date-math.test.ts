@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, it, expect } from 'vitest';
 import { addDays, dayStamp, daysBetween } from '../../src/features/datetime/date-math';
 

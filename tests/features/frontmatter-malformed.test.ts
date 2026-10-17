@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **閉じの `---` が無い frontmatter を、黙って通さない**(#284)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **窓ごとの合言葉**(#836。`src/adapter/platform/storage/store-port.ts`)。
  *

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * flag の予算(**最大 15 個**)を CI で止める。
  *

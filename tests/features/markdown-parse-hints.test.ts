@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **描くたびに console へ書かない**(#710、2026-09-05)。
  *

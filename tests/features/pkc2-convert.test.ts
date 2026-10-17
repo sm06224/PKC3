@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * P6a: PKC2 → PKC3 純変換 core の pin。
  * variant を必ず持つ(ゼロ件次元を作らない): legacy data 直埋め / legacy log id /

@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 /**
  * 🔴 **種類で絞る**(#411)。
  *
