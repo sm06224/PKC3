@@ -611,7 +611,11 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
     expect(ta.value).toBe('**強調**したい');
   });
 
-  it('🔴 row-source の Ctrl+S は行の確定で、編集の面は閉じない(COMMIT_EDIT に化けない)', async () => {
+  /**
+   * 🔴 #1632(#1163 依頼 35 Q1 = A): row-source の Ctrl+S は、行を確定したうえでノートも保存して編集を終える。
+   *   ⚠ 直す前は「行の確定だけで、編集の面は閉じない」を pin していた ── 裁定で向きが変わった。
+   */
+  it('🔴 row-source の Ctrl+S は行を確定し、ノートも保存して編集を終える(#1632)', async () => {
     setLive(true);
     const { d, q, root, persisted } = setup([meta('a')], { a: 'もとの文。' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
@@ -626,10 +630,11 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
     });
     ta.dispatchEvent(ev);
     expect(ev.defaultPrevented, 'ブラウザの保存ダイアログが開く').toBe(true);
-    // 行は確定して state に入るが、**編集の面は続いている**
-    expect(d.getState().openBody?.body).toBe('直した文。');
-    expect(d.getState().phase).toBe('editing');
-    expect(persisted, 'COMMIT_EDIT に化けて保存まで走った').toHaveLength(0);
+    await tick();
+    // 行は確定し、編集の面は閉じて、直した本文が保存へ回る
+    expect(d.getState().phase).not.toBe('editing');
+    await tick();
+    expect(persisted.at(-1)?.body, '直した本文が保存されていない').toBe('直した文。');
   });
 });
 
