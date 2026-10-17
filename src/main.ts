@@ -67,6 +67,7 @@ import { setFoldNotify } from '@adapter/ui/render/fold-notify';
 import { appTooNarrowOk, installTooNarrow } from '@adapter/ui/render/too-narrow';
 import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
+  paintStatusCopyRef,
   paintStatusCreate,
   paintStatusMessages,
   paintStatusOpen,
@@ -1988,6 +1989,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const paintOpen = (): boolean => {
     const shown = noticeLine();
     const open = paintStatusOpen(regions.statusOpen, dispatcher.getState(), shown);
+    // 🔴 PDF を新しい添付にした知らせの隣の「参照をコピー」(#1626)── 出す条件は「開く」と同じ身元 + 保存の知らせの字
+    const copyRef = paintStatusCopyRef(regions.statusCopyRef, dispatcher.getState(), shown);
     // 🔴 塊を動かした直後の「元に戻す」も同じ口で出し入れする(#684 段①)
     const undo = paintStatusUndo(regions.statusUndo, dispatcher.getState(), shown);
     // 🔴 日付のノートが無かった直後の「○○のノートを作る」も同じ口で出し入れする(#1169)
@@ -1999,7 +2002,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // ⚠ 字の組み方は `status-open.ts`(test が届く所)── ここは渡すだけ
     paintStatusMessages(regions.statusMessages, dispatcher.getState().messagesUnread);
     // 🔴 いま押す口を持つ知らせか(持つなら自動で消さない ── `status-lifetime.ts`)
-    return open || undo || create;
+    return open || undo || create || copyRef;
   };
   /**
    * 🔴 **画面下の知らせを、メッセージにも残す**(#1017 C5 段 b1)。判断は `status-notice.ts`。

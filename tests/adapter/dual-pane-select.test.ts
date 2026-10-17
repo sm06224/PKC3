@@ -208,6 +208,28 @@ describe('配線(binder)', () => {
     };
     const none = { lastMove: null, lastAppend: null, noticeOpen: null };
 
+    it('🔴 移すと、移した先で動いてきた行が選ばれたままになる(#1626)。元の側の印は外れ、焦点は元の側のまま', () => {
+      moveAToBox();
+      expect(parentsOf('a'), '前提: 移せていない').toEqual(['f1']);
+      const st = d.getState();
+      expect([...paneOf(st.dual, 'right').selection].sort(), '移した先で動いてきた行が選ばれていない').toEqual(['a', 'b']);
+      expect(paneOf(st.dual, 'left').selection, '元の側の印が残っている').toEqual([]);
+      expect(st.dual.focus, '焦点が移した先へ動いた').toBe('left');
+      // 画面にも選びが映る(行の選択の印)
+      const rightRows = region.querySelectorAll(
+        '[data-pkc-region="dual-pane"][data-pkc-side="right"] [data-pkc-marked]',
+      );
+      expect(rightRows.length, '移した先の表に選びが出ていない').toBeGreaterThanOrEqual(2);
+    });
+
+    it('⚠ 対照群 ── 断られて 1 件も動かなかった回は、移した先に何も選ばない', () => {
+      // 右はルートのまま(左と同じ場所へ移す = 動く物が無い)
+      d.dispatch({ type: 'DUAL_SELECT', side: 'left', lid: 'a', mode: 'set' });
+      click(region.querySelector('[data-pkc-field="dual-move"]')!);
+      expect(parentsOf('a'), '前提: 動いてしまった').toEqual([]);
+      expect(paneOf(d.getState().dual, 'right').selection).toEqual([]);
+    });
+
     it('🔴 移すと知らせの隣に「元に戻す」が出て、押すと元の場所へ戻る', () => {
       expect(parentsOf('a')).toEqual([]);
       moveAToBox();

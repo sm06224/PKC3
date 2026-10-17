@@ -4,6 +4,7 @@ import {
   buildAgenda,
   itemOfCard,
   itemOfNote,
+  withTodayGroup,
 } from '../../src/features/schedule/agenda';
 import { materializedDates } from '../../src/features/schedule/repeat';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -497,5 +498,32 @@ describe('繰り返し(#344 段②)', () => {
       );
       expect(got).toContain('2026-09-01');
     });
+  });
+});
+
+describe('「今日」の見出しは 0 件でも出す(#1626)', () => {
+  const labels = (g: readonly { label: string }[]): string[] => g.map((x) => x.label);
+
+  it('🔴 今日の項目が無い朝は、今日の見出し(0 件)が日付の順の位置に入る', () => {
+    const g = buildAgenda([card('a', 0, '2026-08-20'), card('b', 0, '2026-08-24')], TODAY);
+    expect(labels(g), '前提: 素の束に今日が居る').toEqual(['8/20(木)', '明日']);
+    const w = withTodayGroup(g, TODAY);
+    expect(labels(w)).toEqual(['8/20(木)', '今日', '明日']);
+    const today = w.find((x) => x.date === TODAY)!;
+    expect(today.cards).toEqual([]);
+    expect(today.overdue, '空の今日が期限切れになっている').toBe(false);
+  });
+
+  it('予定がまったく無くても今日だけ出る / 日付なしの束は最後のまま', () => {
+    expect(labels(withTodayGroup([], TODAY))).toEqual(['今日']);
+    const g = buildAgenda([card('a', 0, '2026-08-20'), card('u', 0, null)], TODAY, true);
+    expect(labels(withTodayGroup(g, TODAY))).toEqual(['8/20(木)', '今日', '日付なし']);
+  });
+
+  it('⚠ 対照群 ── 今日の項目が在れば、束は増えも入れ替わりもしない', () => {
+    const g = buildAgenda([card('a', 0, TODAY)], TODAY);
+    const w = withTodayGroup(g, TODAY);
+    expect(w).toEqual(g);
+    expect(w[0]?.cards).toHaveLength(1);
   });
 });

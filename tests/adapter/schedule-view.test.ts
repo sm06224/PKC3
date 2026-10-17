@@ -221,7 +221,8 @@ describe('予定の面(#292 段③)', () => {
       '- [ ] 見積を送る\n- [ ] 体裁\n',
     );
     // ⚠ 画面でも「日付なし」へ移っている(本文だけ直って画面が古い、を作らない)
-    expect(groups(qa)).toEqual(['日付なし(2)']);
+    // 🔴 今日の項目が 0 件でも「今日」の見出しは出る(#1626)
+    expect(groups(qa)).toEqual(['今日(0)', '日付なし(2)']);
   });
 
   it('🔴 日付のない項目を日へ落とすと、予定になる', async () => {
@@ -524,7 +525,7 @@ describe('ノート 1 件の予定(段④)', () => {
 
   it('🔴 片付けたノートの予定は既定で出ない(見せる設定なら出る)', async () => {
     const { d, qa } = setup({}, { e1: '2026-08-23' }, new Set(['e1']));
-    expect(groups(qa), '片付けたノートの予定が出ている').toEqual([]);
+    expect(groups(qa), '片付けたノートの予定が出ている').toEqual(['今日(0)']);
     d.dispatch({ type: 'TOGGLE_SHOW_ARCHIVED' });
     await tick();
     expect(groups(qa), '見せる設定でも出ない').toEqual(['今日(1)']);
@@ -676,7 +677,7 @@ describe('期間(#344 段①)', () => {
 
   it('🔴 期間の札は、日数ぶんの札として画面に出る', () => {
     const { root, qa } = setup({ [TRIP]: body });
-    expect(groups(qa)).toEqual(['8/25(火)(1)', '8/26(水)(1)', '8/27(木)(1)', '8/28(金)(1)']);
+    expect(groups(qa)).toEqual(['今日(0)', '8/25(火)(1)', '8/26(水)(1)', '8/27(木)(1)', '8/28(金)(1)']);
     for (const day of ['2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28'])
       expect(cardsOf(root, day), `${day} に札が無い`).toHaveLength(1);
   });
@@ -684,7 +685,7 @@ describe('期間(#344 段①)', () => {
   /** ⚠ 対照群 ── 単日は 1 枚のまま(何でも増える実装でも上が緑にならないように)。 */
   it('⚠ 対照群 ── 単日の札は 1 枚だけ', () => {
     const { root, qa } = setup({ [TRIP]: '- [ ] 見積 @2026-08-25\n' });
-    expect(groups(qa)).toEqual(['8/25(火)(1)']);
+    expect(groups(qa)).toEqual(['今日(0)', '8/25(火)(1)']);
     expect(cardsOf(root, '2026-08-25')).toHaveLength(1);
   });
 
@@ -784,6 +785,32 @@ describe('期間(#344 段①)', () => {
     await tick(20);
     // 🔑 開始だけ消えて `..2026-08-28` が残る、にならないこと
     expect(store[TRIP]).toBe('- [ ] 出張\n- [ ] 体裁\n');
+  });
+});
+
+describe('まっさらな朝でも「今日」の見出しが出る(#1626)', () => {
+  it('🔴 今日の項目が 1 件も無くても「今日(0)」が出て、昨日の項目をそこへ落とすと今日になる', async () => {
+    const { root, q, qa, store } = setup({ e1: '- [ ] 昨日の残り @2026-08-22\n' });
+    expect(groups(qa), '今日の見出しが出ていない').toEqual(['8/22(土)(1)', '今日(0)']);
+    dragTo(
+      cardsOf(root, '2026-08-22')[0]!,
+      q('[data-pkc-region="schedule-group"][data-pkc-drop-date="2026-08-23"]')!,
+    );
+    await tick(20);
+    expect(store['e1'], '落としても今日にならない').toBe('- [ ] 昨日の残り @2026-08-23\n');
+    expect(groups(qa)).toEqual(['今日(1)']);
+  });
+
+  it('⚠ 対照群 ── 空の今日は、小さな月の「予定のある日」の点を付けない', () => {
+    const { q } = setup({ e1: '- [ ] 昨日の残り @2026-08-22\n' });
+    expect(
+      q('[data-pkc-action="schedule-pick-day"][data-pkc-drop-date="2026-08-22"][data-pkc-has]'),
+      '前提: 予定のある日に点が無い',
+    ).not.toBeNull();
+    expect(
+      q('[data-pkc-action="schedule-pick-day"][data-pkc-drop-date="2026-08-23"][data-pkc-has]'),
+      '空の今日に点が付いた',
+    ).toBeNull();
   });
 });
 
@@ -1243,7 +1270,10 @@ describe('予定表を中央の面に描く(#673 段②)', () => {
   it('🔴 束の「+」も、押した面の欄に日付を入れる', async () => {
     const s = twoFaces({ t1: '- [ ] さきの予定 @2026-09-10\n' });
     await tick(50);
-    const plus = s.centerPane.querySelector<HTMLElement>('[data-pkc-action="schedule-quick-here"]');
+    // ⚠ 先頭は 0 件でも出る「今日」の束(#1626)── さきの予定の束(2026-09-10)の「+」を押す
+    const plus = s.centerPane.querySelector<HTMLElement>(
+      '[data-pkc-action="schedule-quick-here"][data-pkc-quick-date="2026-09-10"]',
+    );
     expect(plus, '前提が崩れた(中央の束に「+」が無い)').not.toBeNull();
     plus!.click();
     expect(
@@ -1513,7 +1543,7 @@ describe('予定の縦線の色とノートごとの出し入れ(#855 20-A)', ()
     await tick();
     expect(d.getState().scheduleHiddenNotes).toEqual(['e1']);
     // e1 の 2 件が消え、e2 だけが残る
-    expect(groups(qa)).toEqual(['明日(1)']);
+    expect(groups(qa)).toEqual(['今日(0)', '明日(1)']);
     expect(noteBox(q, 'e1').checked, 'チェックが外れていない').toBe(false);
     expect(noteBox(q, 'e2').checked, '関係ないノートまで外れた').toBe(true);
     // 隠した 2 件が「出すもの(N)」に入る
@@ -1573,7 +1603,7 @@ describe('予定の縦線の色とノートごとの出し入れ(#855 20-A)', ()
     expect(groups(qa), '前提:ノート 1 件の予定と行の予定が両方出ている').toEqual(['今日(1)', '明日(1)']);
     noteBox(q, 'e1').click();
     await tick();
-    expect(groups(qa), '外したノートの前書きの予定が残っている').toEqual(['明日(1)']);
+    expect(groups(qa), '外したノートの前書きの予定が残っている').toEqual(['今日(0)', '明日(1)']);
     expect(foldText(q)).toBe('出すもの(1)');
   });
 

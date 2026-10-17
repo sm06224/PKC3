@@ -9177,6 +9177,20 @@ const ACTIONS: Record<string, ActionHandler> = {
      * 🔴 「元に戻す」の出し入れは `moveEntriesOfferingUndo`(移す口 4 つで 1 本)。
      */
     if (moveEntriesOfferingUndo(dispatcher, lids, to, services.showStatus)) {
+      /**
+       * 🔴 **移した先で、動いてきた行を選んだままにする**(Gemini 裁定 = #1163 の依頼 34 の Q5、#1626)。
+       * ⚠ 直す前は元の側の印を外すだけで、移した先には何も選ばれておらず、どの行が動いてきたか分からなかった。
+       * 🔑 選ぶのは**いま行き先の親になった物だけ**(断られた・付いていっただけの行は選ばない)。
+       *   `DUAL_SELECT` は焦点を行き先へ動かすので、下で元の側へ戻す。
+       */
+      const after = dispatcher.getState();
+      const parentsNow = resolveCanonicalParents(after.entryMetas, after.relations);
+      const arrived = lids.filter((lid) => (parentsNow.get(lid) ?? null) === to);
+      arrived.forEach((lid, i) =>
+        dispatcher.dispatch({ type: 'DUAL_SELECT', side: otherSide(from), lid, mode: i === 0 ? 'set' : 'toggle' }),
+      );
+      // 🔑 焦点は元の側のまま(F6 を続けて押せる)── `DUAL_SELECT` が動かした分を戻す
+      if (arrived.length > 0) dispatcher.dispatch({ type: 'DUAL_FOCUS', side: from });
       dispatcher.dispatch({ type: 'DUAL_CLEAR_SELECTION', side: from });
       // 移した行は元のペインから消える ── カーソルは入れ替わりに来た行へ(消した後と同じ規則)
       keepDualCursorAfter(dispatcher, from, rows, pane.cursor);

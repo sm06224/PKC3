@@ -251,7 +251,8 @@ describe('広い面の「週」', () => {
     press('[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');
     press('[data-pkc-action="schedule-mode"][data-pkc-mode="list"]');
     expect(q('[data-pkc-region="schedule-weekview"]')!.hidden).toBe(true);
-    expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(1);
+    // 🔴 0 件でも出る「今日」の束 + 8/25 の束(#1626)
+    expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(2);
   });
 
   it('押している見せ方は「週」だけが true(広い面は「月」も並ぶ)', () => {
@@ -278,7 +279,7 @@ describe('左の列の「週」', () => {
     expect(d.getState().scheduleMode, '左の列の見せ方が変わった').toBe('list');
     expect(q('[data-pkc-region="schedule-weekview"]')!.hidden).toBe(true);
     expect(lanes(qa).flatMap((l) => [...l.children])).toHaveLength(0);
-    expect(qa('[data-pkc-region="schedule-group"]'), '一覧が消えた').toHaveLength(1);
+    expect(qa('[data-pkc-region="schedule-group"]'), '一覧が消えた').toHaveLength(2);
   });
 
   it('見ている日を連れて行く / 「週」ボタンの title が別のウィンドウで開くと言う', () => {
@@ -321,7 +322,8 @@ describe('左の列の「週」', () => {
     const { q, qa, d } = setup({ e1: '- [ ] 会議 @2026-08-25 14:00\n' }, { wide: false });
     d.dispatch({ type: 'SET_SCHEDULE_MODE', mode: 'week' });
     expect(q('[data-pkc-region="schedule-weekview"]')!.hidden).toBe(true);
-    expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(1);
+    // 🔴 0 件でも出る「今日」の束 + 8/25 の束(#1626)
+    expect(qa('[data-pkc-region="schedule-group"]')).toHaveLength(2);
     expect(
       qa('[data-pkc-action="schedule-mode"]').map((b) => b.getAttribute('aria-pressed')),
     ).toEqual(['true', 'false', 'false', 'false']);

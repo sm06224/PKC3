@@ -21,7 +21,7 @@ export function createPdfReaderSection(
         term: 'PDF',
         action: 'set-pdf-reader',
         field: 'pdf-reader',
-        label: ' PDF を PKC3 の PDF ビューアで開く(ページの並べ替え・ハイライト・付箋・ペン・引用)',
+        label: ' PDF を PKC3 の PDF ビューアで開く(ページの並べ替え・抜き出し・PDF を足す・ハイライト・付箋・ペン・引用)',
         title:
           '添付の PDF の「別のウィンドウで見る」を、PKC3 の PDF ビューア(別ウィンドウ)で開きます。' +
           '字を選んで「ノートへ引用する」を押すと、ページ番号つきの引用を、つながっているノートがあればそのノートの末尾に、無ければ添付のノートの末尾に足せます。' +

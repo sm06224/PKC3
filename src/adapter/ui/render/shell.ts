@@ -80,6 +80,11 @@ export interface ShellRegions {
    */
   statusTrash: HTMLElement;
   /**
+   * 🔴 **PDF を新しい添付にした知らせの隣の「参照をコピー」**(#1626)。押した先は `copy-entry-ref` の受け手
+   *   (`binder.ts`)。出し入れは `status-open.ts` の `paintStatusCopyRef`。
+   */
+  statusCopyRef: HTMLElement;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
    *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
    */
@@ -1125,6 +1130,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusTrash.textContent = 'ゴミ箱を開く';
   statusTrash.hidden = true;
   /**
+   * 🔴 **PDF を新しい添付にした知らせの隣の「参照をコピー」**(#1626)。「そのノートを開く」と並べ、貼りたいノートで貼るだけにする。
+   *   ⚠ 常設で置いて要るときだけ出す(`status-open.ts` が `hidden` と `data-pkc-entry` を書く)。実行の口は `copy-entry-ref` の受け手 1 つ。
+   */
+  const statusCopyRef = document.createElement('button');
+  statusCopyRef.type = 'button';
+  statusCopyRef.setAttribute('data-pkc-field', 'status-copy-ref');
+  statusCopyRef.setAttribute('data-pkc-action', 'copy-entry-ref');
+  statusCopyRef.textContent = '参照をコピー';
+  statusCopyRef.hidden = true;
+  /**
    * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
    *
    * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
@@ -1167,7 +1182,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusUndo, statusCreate, statusRescue, statusTrash, statusMessages, tooNarrow);
+  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, statusMessages, tooNarrow);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1338,6 +1353,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusCreate,
     statusRescue,
     statusTrash,
+    statusCopyRef,
     statusMessages,
     tooNarrow,
     tooNarrowText,

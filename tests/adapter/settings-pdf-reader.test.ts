@@ -55,7 +55,7 @@ describe('設定画面に在る(#275)', () => {
   it('🔴 画面の字(dt / label / hover)── 内部の部品名を出さない', () => {
     const { box } = setup();
     expect(box!.closest('dd')!.previousElementSibling!.textContent).toBe('PDF');
-    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の PDF ビューアで開く(ページの並べ替え・ハイライト・付箋・ペン・引用)');
+    expect(box!.parentElement!.textContent).toBe(' PDF を PKC3 の PDF ビューアで開く(ページの並べ替え・抜き出し・PDF を足す・ハイライト・付箋・ペン・引用)');
     const title = box!.parentElement!.title;
     expect(title).toContain('ノートへ引用する');
     // 引用先の規則(結びついたノートがあればそちら、無ければ添付のノート ── `resolveQuoteTarget`)を言う

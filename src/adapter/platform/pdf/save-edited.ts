@@ -23,6 +23,7 @@
  *    ⚠ 断った回も棚は捨てる ── 窓は編集の状態を持ち続けるので、user はもう一度押せる(棚に残すと、押し直すたびに溜まる)。
  * 5. 棚の掃除: 書きかけの残骸と、引き取られないまま 1 時間を過ぎた置き物を消す(落ちた回の残り)。
  */
+import { PDF_SAVED_NOTICE_TAIL } from '@features/pdf/pdf-attachments';
 import {
   discardStaged,
   listStaged,
@@ -119,7 +120,7 @@ export function createSaveEdited(deps: SaveEditedDeps): SaveEdited {
       const parentLid = session.lid === null ? null : deps.parentOf(session.lid);
       const lid = await deps.createAttachment({ name, bytes, parentLid });
       if (lid === null) return { ok: false, message: '保存できませんでした。もう一度押してください' };
-      const message = `「${name}」を元の PDF と同じフォルダの添付に加えました`;
+      const message = `「${name}」${PDF_SAVED_NOTICE_TAIL}`;
       deps.notify(message, lid);
       return { ok: true, message };
     } catch {
