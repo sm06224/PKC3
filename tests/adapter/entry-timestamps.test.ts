@@ -399,7 +399,9 @@ describe('② 書込のたびに state の meta が更新される', () => {
        * ⚠ ここへ足し忘れると「経路が 1 つ消えた」ように見えて、**刻みの側が
        * 余っているのか、書込が減ったのか区別が付かない**。
        */
-      [...src.matchAll(/await store\.replaceAssetRefs\(/g)].length;
+      [...src.matchAll(/await store\.replaceAssetRefs\(/g)].length +
+      // ⚠ 改名のときのリンクの字の書き換えも、ほかのノートの行を 1 往復で N 件書く(#1648 / 依頼 177)── 刻みは同じく 1 か所
+      [...src.matchAll(/await store\.renameLinkTexts\(/g)].length;
     const stamps = [...src.matchAll(/^\s*stamp\(/gm)].length;
     expect(writes, '書込経路が 1 つも見つからない(scan が壊れている)').toBeGreaterThanOrEqual(7);
     expect(

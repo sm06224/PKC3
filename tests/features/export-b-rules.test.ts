@@ -53,6 +53,7 @@ const ALLOWED: Readonly<Record<string, string>> = {
   '.b>*': '器の直下を溢れさせない。焼いた側に対応物なし',
   '.b a.f': '添付のボタン。閲覧側だけの操作子(焼いた分より後ろに置く)',
   '.b .pkc-render-toggle': '切替の位置。閲覧側はコピーボタンを外す(焼いた分より後ろ)',
+  '.b [data-pkc-figure-baked] img': '図とグラフを絵にした img を器の幅に収める。閲覧側だけが作る要素(#1648 の 4。アプリは絵をキャッシュの img で別に描く)',
 };
 
 /** 印刷(`@media print`)で在ってよいもの。 */

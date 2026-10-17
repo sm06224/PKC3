@@ -114,7 +114,6 @@ function backSetup(blocked: string | null = null) {
     },
     win: h.win,
     hist: h.hist,
-    href: () => 'http://x/#a',
   });
   offs.push(off);
   return { h, calls, setPage, page: () => page };

@@ -7,7 +7,7 @@
  *   同じ戻り先へ移す。
  * 🔴 **スマホ用画面のときだけ**。PC の幅・タブレットでは 1 バイトも触らない(約束
  *   「アドレスが変わっても履歴は増えない」は PC で守る)。住所の文字は変えない
- *   (`pushState` の URL は今の `location.href` のまま ── `F5` / 栞に影響しない)。
+ *   (`pushState` に URL を渡さない = 今のアドレスのまま ── `F5` / 栞に影響しない。アドレスは読まない)。
  * ⚠ 履歴の項目に印を付けても、`deep-link.ts` の `replaceState(null, …)` が消す ── だから
  *   「足したか」はこの file の変数(`armed`)で持つ。
  * ⚠ 編集中は戻らない(画面上の「← 一覧へ戻る」と同じ断り)。そのとき消費された項目は
@@ -29,7 +29,6 @@ export interface PhoneBackDeps {
   /** 差し替え口(unit)。既定は本物。 */
   readonly win?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'setTimeout'>;
   readonly hist?: Pick<History, 'pushState' | 'back'>;
-  readonly href?: () => string;
 }
 
 /** 断り文の結び。⚠ 画面上のボタンの断り(`phone-page`)と同じ字。 */
@@ -39,7 +38,6 @@ export const PHONE_BACK_BLOCKED_TAIL = '戻ってください';
 export function installPhoneBack(d: PhoneBackDeps): () => void {
   const win = d.win ?? window;
   const hist = d.hist ?? history;
-  const href = d.href ?? ((): string => location.href);
   /** 履歴に足した項目が、まだ消費されずに残っているか。 */
   let armed = false;
   /** 自分で `back()` した直後の popstate は無視する。 */
@@ -48,7 +46,7 @@ export function installPhoneBack(d: PhoneBackDeps): () => void {
 
   const want = (p: PhonePage | null): boolean => p === 'note' || p === 'info';
   const arm = (): void => {
-    hist.pushState({ pkcPhoneBack: 1 }, '', href());
+    hist.pushState({ pkcPhoneBack: 1 }, '');
     armed = true;
   };
 
