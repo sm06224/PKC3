@@ -894,6 +894,26 @@ test('🔴 P7 段②: 素の md を取り込む ── 宣言(file_handlers)と�
   expect(focusedLid, '↑ を押しても別の行へ焦点が動かない').not.toBe(lastLid);
   expect(focusedLid, '↑ の先が行ではない').not.toBeNull();
 
+  /**
+   * 🔴 #1852 束 B1: 他のアプリが書く `Tags:`(大文字始まり)で書いたタグも、取り込むとタグとして読める。
+   * ⚠ 起動を足さず、この道中へ載せた。
+   */
+  await page.locator('[data-pkc-field="import-input"]').setInputFiles([
+    {
+      name: 'tags-upper.md',
+      mimeType: '',
+      buffer: Buffer.from('---\nTags: [取込タグ]\n---\n# 取込タグの本\n', 'utf-8'),
+    },
+  ]);
+  await expect(page.locator('[data-pkc-field="detail-title"]'), '台の前提:取り込んだノートが開かない').toHaveText(
+    '取込タグの本',
+    { timeout: 10_000 },
+  );
+  await expect(
+    page.locator('[data-pkc-region="inspector"] [data-pkc-field="inspector-tag"]'),
+    '`Tags:` で書いたタグがタグとして読まれていない',
+  ).toHaveText(/取込タグ/);
+
   expect(errors).toEqual([]);
 });
 
