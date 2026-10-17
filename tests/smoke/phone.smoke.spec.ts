@@ -175,12 +175,15 @@ test('🔴 本文ページでは、本文が画面の 3 割以上を取る', asy
  * 🔴 **どのページからも戻れる**(#609 の行き止まりを作らない)。
  * ⚠ 3 ページ全部で「戻る口が画面に在って、押せる」ことを見る。
  */
-test('🔴 3 ページのどこからでも戻れる(行き止まりが無い)', async ({ page }) => {
+test('🔴 3 ページのどこからでも戻れる(行き止まりが無い)', async ({ page, context }) => {
   await gotoApp(page);
   await dismissAnnounce(page);
   await createEntry(page, 'text');
   // ⚠ 作った直後は**編集中**なので、そのままでは ← も 情報 も断られる(それは正しい)
   await clickReal(page, `${REGION('detail')} [data-pkc-action="commit-edit"]`);
+  const baseUrl = page.url();
+  const histLen = (): Promise<number> => page.evaluate(() => history.length);
+  const len0 = await histLen();
 
   const pressable = async (sel: string): Promise<string | null> =>
     page.locator(sel).evaluate((el) => {
@@ -221,6 +224,41 @@ test('🔴 3 ページのどこからでも戻れる(行き止まりが無い)',
   await expect(page.locator(REGION('center'))).toBeVisible();
   await clickReal(page, '[data-pkc-field="phone-back"]');
   await expect(page.locator(REGION('sidebar'))).toBeVisible();
+
+  /**
+   * 🔴 **端末の「戻る」(#1659 ①)**。画面上の ← で一覧へ出入りしても履歴は積み上がらず、
+   * 本文で「戻る」= 一覧(PKC3 の外へ出ない)、情報で「戻る」= 本文 → もう一度 = 一覧。
+   */
+  await clickReal(page, '[data-pkc-field="phone-return"]');
+  await expect(page.locator(REGION('center'))).toBeVisible();
+  await expect
+    .poll(histLen, { message: '← 一覧へ戻る を往復したら履歴が積み上がった' })
+    .toBeLessThanOrEqual(len0);
+  await page.goBack();
+  await expect(page.locator(REGION('sidebar')), '本文で端末の「戻る」を押しても一覧に出ない').toBeVisible();
+  expect(page.url(), '端末の「戻る」で PKC3 の外へ出た').toBe(baseUrl);
+  await clickReal(page, '[data-pkc-field="phone-return"]');
+  await expect(page.locator(REGION('center'))).toBeVisible();
+  await clickReal(page, '[data-pkc-field="phone-info"]');
+  await expect(page.locator(REGION('inspector'))).toBeVisible();
+  await page.goBack();
+  await expect(page.locator(REGION('center')), '情報で端末の「戻る」を押しても本文に戻らない').toBeVisible();
+  expect(page.url()).toBe(baseUrl);
+  await page.goBack();
+  await expect(page.locator(REGION('sidebar')), '2 回目の「戻る」で一覧に出ない').toBeVisible();
+  expect(page.url()).toBe(baseUrl);
+
+  /** 🔴 スマホでは「別のウィンドウで開く」を押したとき、何が起きるかを言う(#1659 ②) */
+  await clickReal(page, '[data-pkc-field="phone-return"]');
+  await clickReal(page, '[data-pkc-field="phone-info"]');
+  const popup = context.waitForEvent('page');
+  await clickReal(page, '[data-pkc-action="open-note-window"]');
+  const win = await popup;
+  await expect(
+    page.locator(REGION('status')),
+    'スマホで別のウィンドウで開くとき、何が起きるかの 1 行が出ない',
+  ).toContainText('この端末では、新しいタブで PKC3 がもう 1 つ開きます');
+  await win.close();
 });
 
 /**
@@ -304,6 +342,15 @@ test('🔴 編集中に ← を押すと理由が出る(黙って何も起きな
   ).toContainText('編集を保存するか、編集をやめてから');
   // 🔑 ページは動いていない(戻ったふりをしない)
   await expect(page.locator(REGION('center'))).toBeVisible();
+
+  // 🔴 端末の「戻る」(#1659 ①)も編集中は一覧へ出ず、理由が出て、PKC3 に留まる(2 度押しても)
+  const editUrl = page.url();
+  await page.goBack();
+  await expect(page.locator(REGION('status'))).toContainText('編集を保存するか、編集をやめてから');
+  await expect(page.locator(REGION('center')), '編集中に端末の「戻る」で本文を離れた').toBeVisible();
+  await page.goBack();
+  await expect(page.locator(REGION('center'))).toBeVisible();
+  expect(page.url(), '編集中の「戻る」で PKC3 の外へ出た').toBe(editUrl);
 });
 
 /**

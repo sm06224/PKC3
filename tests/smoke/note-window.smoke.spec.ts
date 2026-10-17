@@ -604,7 +604,31 @@ test('🔴 付箋を開いた直後、カーソルは追記欄に在る (#690 I4
     '本体の窓でも追記欄へ焦点が入った(付箋だけの挙動のはず)',
   ).not.toBeFocused();
 
-  await win.close();
+  // 🔴 「× 閉じる」(#1659 ③)── ふつうのタブには出ず、付箋には出る
+  await expect(
+    page.locator('[data-pkc-region="note-window-bar"]'),
+    'ふつうのタブに「× 閉じる」の帯が出ている',
+  ).toBeHidden();
+  const bar = win.locator('[data-pkc-region="note-window-bar"]');
+  await expect(bar, '付箋に「× 閉じる」の帯が出ていない').toBeVisible();
+  await expect(bar.locator('[data-pkc-action="close-note-window"]')).toHaveText('× 閉じる');
+  // 追記欄に字が在るときは、理由を言って閉じない
+  await win.locator('[data-pkc-field="append-input"]').fill('打ちかけ');
+  await clickReal(win, '[data-pkc-action="close-note-window"]');
+  await expect(
+    win.locator('[data-pkc-region="status"]'),
+    '打ちかけが在るのに理由が出ない',
+  ).toContainText('打ちかけの字が残っています');
+  expect(win.isClosed(), '打ちかけが在るのに付箋が閉じた').toBe(false);
+  // 空にすれば閉じる
+  await win.locator('[data-pkc-field="append-input"]').fill('');
+  await Promise.all([
+    win.waitForEvent('close', { timeout: 5_000 }),
+    clickReal(win, '[data-pkc-action="close-note-window"]').catch((e: unknown) => {
+      if (!/closed/i.test(String(e))) throw e;
+    }),
+  ]);
+  expect(win.isClosed(), '「× 閉じる」で付箋が閉じない').toBe(true);
   expect(winErrors, `付箋で page error: ${winErrors.join(' / ')}`).toEqual([]);
   expect(errors, `元の窓で page error: ${errors.join(' / ')}`).toEqual([]);
 });
