@@ -949,7 +949,9 @@ select:focus-visible {
   font-weight: 600;
 }
 /* 🔴 掴んだまま止めているタブ(依頼 79-4)── 0.6 秒後に切り替わることを先に見せる薄い枠。 */
-[data-pkc-region='browse-tabs'] [data-pkc-tab-hover] {
+/* ⚠ 輪の規則(下の `button:not(:focus-visible)`、(0,2,1))より強くしないと、実ブラウザでは実線の輪のまま
+   破線にならない(smoke で観測)── 同じ強さにして `:not(:focus-visible)` を足す。 */
+[data-pkc-region='browse-tabs'] button[data-pkc-tab-hover]:not(:focus-visible) {
   outline: 2px dashed var(--accent);
   outline-offset: -3px;
 }

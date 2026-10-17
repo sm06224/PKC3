@@ -16,6 +16,8 @@
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   gotoApp,
   clickReal,
@@ -46,13 +48,19 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
   await page.fill('[data-pkc-field="editor-body"]', OTHER_BODY);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
+  // 渡さないほうの住所(渡すノートの本文から指して「入っていない先」を作る)
+  const otherLid = await page
+    .locator('[data-pkc-action="copy-entry-ref"][data-pkc-entry]')
+    .first()
+    .getAttribute('data-pkc-entry');
+  expect(otherLid, '渡さないノートの住所が取れない(前提が崩れた)').toBeTruthy();
 
   // ── 渡すノート
   await createEntry(page, 'text');
   await page.fill('[data-pkc-field="editor-title"]', '配る資料');
   await page.fill(
     '[data-pkc-field="editor-body"]',
-    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き'].join('\n'),
+    ['# 配る見出し', '', 'ふつうの段落と **太字**。', '', '- 箇条書き', '', `[入っていない先](entry:${otherLid})`].join('\n'),
   );
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
@@ -85,6 +93,28 @@ test('🔴 情報ペインの「閲覧用 HTML」で、そのノートだけの 
    */
   expect(text, '渡さないはずのノートが入っている').not.toContain(OTHER_TITLE);
   expect(text, '渡さないはずの本文が入っている').not.toContain(OTHER_BODY);
+
+  /**
+   * 🔴 **入っていないノートへのリンクは、薄い字と点線で「押せない」を見せる**(依頼 77-3)。
+   * ⚠ 見るのは配った file を実際に開いた姿(`app.css` ではなく焼いた CSS)── 閲覧側が作る要素なので
+   *   アプリには対応物が無い。
+   */
+  const viewer = await page.context().newPage();
+  // 拡張子が .html でないと、ブラウザは字のまま見せる ── 開ける名前で保存し直す
+  const viewFile = join(tmpdir(), `pkc3-entry-html-${process.pid}.html`);
+  await download.saveAs(viewFile);
+  await viewer.goto(`file://${viewFile}`);
+  const outside = viewer.locator('[data-pkc-outside-note]');
+  await expect(outside, '入っていないノートへのリンクが「押せない印」になっていない').toHaveCount(1);
+  await expect(outside).toHaveText('入っていない先');
+  expect(
+    await outside.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { opacity: cs.opacity, line: cs.textDecorationLine, style: cs.textDecorationStyle };
+    }),
+    '薄い字・点線の下線になっていない',
+  ).toEqual({ opacity: '0.6', line: 'underline', style: 'dotted' });
+  await viewer.close();
 
   expect(errors, 'pageerror が出た').toEqual([]);
 });

@@ -433,6 +433,8 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
    *   空にした瞬間、字の span も押す口も DOM から消えた)。
    */
   const statusText = page.locator('[data-pkc-field="status-text"]');
+  // 🔴 下のボタンの字は「ゴミ箱へ」(動詞を言う。移す / コピーと並ぶ)
+  await expect(page.locator('[data-pkc-field="dual-delete"]'), 'ゴミ箱へ入れるボタンの字').toContainText('ゴミ箱へ');
   for (const field of ['dual-move', 'dual-copy', 'dual-rename-begin', 'dual-delete']) {
     await statusText.evaluate((el) => (el.textContent = ''));
     await clickReal(page, `[data-pkc-field="${field}"]`);

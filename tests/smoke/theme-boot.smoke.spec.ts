@@ -43,8 +43,28 @@ test('🔴 OS がダークなら、body が生える前に配色が当たって�
         obs.disconnect();
       });
       obs.observe(document, { childList: true, subtree: true });
+      // 🔴 起動の間の 1 行(依頼 73-1)が**一度でも出たか**を見張る(出る時期は起動の速さ次第なので、
+      //   gotoApp の後に探しても間に合わない)
+      w['__pkcBootProgress'] = null;
+      const obs2 = new MutationObserver(() => {
+        const el = document.querySelector('[data-pkc-boot-progress]');
+        if (el === null) return;
+        w['__pkcBootProgress'] = el.textContent;
+        obs2.disconnect();
+      });
+      obs2.observe(document, { childList: true, subtree: true });
     });
     await gotoApp(page);
+
+    // 🔴 起動中に「データを開いています…」が出て、起動し終わると消えている
+    expect(
+      await page.evaluate(() => (window as unknown as Record<string, unknown>)['__pkcBootProgress']),
+      '起動の間に 1 行が出ていない(真っ白のまま)',
+    ).toContain('データを開いています…');
+    await expect(
+      page.locator('[data-pkc-boot-progress]'),
+      '起動し終わったのに「データを開いています…」が残っている',
+    ).toHaveCount(0);
 
     // 🔴 本題 ── 枠より先に配色が当たっている
     expect(
