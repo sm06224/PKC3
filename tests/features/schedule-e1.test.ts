@@ -36,6 +36,10 @@ describe('全角・スラッシュ・曜日の括弧・1 桁の時 ── 入力
     ['２０２６-１０-２０', '2026-10-20'],
     ['2026/10/20', '2026-10-20'],
     ['２０２６／１０／２０', '2026-10-20'],
+    // 区切りが全角ハイフン(U+FF0D)/ 半角と全角が混じる / U+2010
+    ['２０２６－１０－２０', '2026-10-20'],
+    ['２０２６-１０－２０', '2026-10-20'],
+    ['2026\u201010\u201020', '2026-10-20'],
   ];
   const TIMES: readonly [string, string | null][] = [
     ['', null],
@@ -46,29 +50,52 @@ describe('全角・スラッシュ・曜日の括弧・1 桁の時 ── 入力
     ['９：００', '09:00'],
   ];
   const PARENS = ['', '(火)', '（火）', '(火曜)', '（火曜日）'] as const;
+  // 日付と括弧の間の空白(なし / 半角 1 つ / 全角 1 つ)。括弧が無いときは軸にしない
+  const BEFORE_PAREN = ['', ' ', '\u3000'] as const;
 
   it('日付 × 時刻 × 曜日の括弧の全組み合わせで、値が揃い、記法の範囲が原文どおり', () => {
     let n = 0;
     for (const [rawDate, date] of DATES) {
       for (const [rawTime, time] of TIMES) {
         for (const paren of PARENS) {
-          const notation = `@${rawDate}${paren}${rawTime === '' ? '' : ' ' + rawTime}`;
-          const line = `- [ ] 会議 ${notation} です`;
-          const d = readLineDate(line);
-          expect(d, line).not.toBeNull();
-          expect(d!.date, line).toBe(date);
-          expect(d!.time, line).toBe(time);
-          // 括弧は時刻が続くときだけ記法の一部。時刻が無ければ題名に残る(今までと同じ)
-          const eaten = rawTime === '' ? `@${rawDate}` : notation;
-          expect(line.slice(d!.start, d!.end), line).toBe(eaten);
-          const stripped = rawTime !== '' || paren === '' ? '- [ ] 会議 です' : `- [ ] 会議 ${paren} です`;
-          expect(stripLineDate(line), line).toBe(stripped);
-          n += 1;
+          for (const gap of paren === '' ? [''] : BEFORE_PAREN) {
+            const notation = `@${rawDate}${gap}${paren}${rawTime === '' ? '' : ' ' + rawTime}`;
+            const line = `- [ ] 会議 ${notation} です`;
+            const d = readLineDate(line);
+            expect(d, line).not.toBeNull();
+            expect(d!.date, line).toBe(date);
+            expect(d!.time, line).toBe(time);
+            // 括弧は時刻が続くときだけ記法の一部。時刻が無ければ題名に残る(今までと同じ)
+            const eaten = rawTime === '' ? `@${rawDate}` : notation;
+            expect(line.slice(d!.start, d!.end), line).toBe(eaten);
+            const stripped =
+              rawTime !== '' || paren === '' ? '- [ ] 会議 です' : `- [ ] 会議 ${gap === '\u3000' ? gap : ''}${paren} です`;
+            expect(stripLineDate(line), line).toBe(stripped);
+            n += 1;
+          }
         }
       }
     }
-    // 空振り防止 ── 4 × 6 × 5 の全部を実際に通った
-    expect(n).toBe(120);
+    // 空振り防止 ── 7 日付 × 6 時刻 × (括弧なし 1 + 括弧 4 種 × 括弧の前 3 通り = 13) の全部を実際に通った
+    expect(n).toBe(546);
+  });
+
+  it('🔴 依頼の形(全角ハイフン・括弧の前に空白・全角の時刻)が日付も時刻も読まれる', () => {
+    const line = '- [ ] 会議 @２０２６－１０－２０ （火） ９：００';
+    expect(readLineDate(line)).toMatchObject({ date: '2026-10-20', time: '09:00' });
+    expect(readLineDate('@２０２６-１０-２０ （火） ９：００')).toMatchObject({ date: '2026-10-20', time: '09:00' });
+  });
+
+  it('🔴 全角ハイフンは日付の区切りの位置でだけ効く(今読めている形を読めなくしない)', () => {
+    // 日付の後ろの `－` / 長音記号は、今までどおり日付の外(日付だけ読める)
+    expect(readLineDate('x @2026-10-20－会議')).toMatchObject({ date: '2026-10-20', time: null });
+    expect(readLineDate('x @2026-10-20ー会議')).toMatchObject({ date: '2026-10-20' });
+    // 長音記号を区切りとは読まない
+    expect(readLineDate('x @２０２６ー１０ー２０')).toBeNull();
+    // 時刻の幅の `－` は触らない(半角の `-` だけが幅)
+    expect(readLineDate('x @2026-10-20 14:00－15:00')).toMatchObject({ time: '14:00', timeEnd: null });
+    expect(foldWideDateChars('２０２６－１０－２０')).toBe('2026-10-20');
+    expect(foldWideDateChars('会議－１０')).toBe('会議－10');
   });
 
   it('書き換えると半角の整った形になり、前後の字は動かない(全角・括弧・1 桁の時の原文を差し替える)', () => {

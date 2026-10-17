@@ -479,14 +479,14 @@ test('🔴 予定のタブで札を掴んで日へ落とすと、本文の日付
    *   `毎日新聞を読む`(語の一部は繰り返しではない)/ 読めない `@2026-1-5x`(本文の画面に理由が出る)。
    *   ⚠ 札の印(時刻・刻み)で見る ── 読まれないと字は題名に残るだけで、字だけでは満たされてしまう。
    */
-  // ⚠ 区切りは半角の `-`(全角の `－` U+FF0D は、いまの読み方では日付として読まれない ── 報告に書いた)
+  // 区切りは全角ハイフン `－`(U+FF0D)、曜日の括弧の前に空白 ── 依頼の形 `@２０２６－１０－２０ （火） ９：００`
   const fw = (ymd: string): string =>
-    [...ymd].map((c) => (c === '-' ? '-' : String.fromCharCode(c.charCodeAt(0) + 0xfee0))).join('');
+    [...ymd].map((c) => (c === '-' ? '\uFF0D' : String.fromCharCode(c.charCodeAt(0) + 0xfee0))).join('');
   const SLASH = THU.replaceAll('-', '/');
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await ta.fill(
     [
-      `- [ ] 全角会議 @${fw(WED)}（水） ９：００`,
+      `- [ ] 全角会議 @${fw(WED)} （水） ９：００`,
       `- [ ] 斜め会議 @${SLASH} 9:00`,
       `- [ ] 火曜定例 @${MON} 毎週火曜`,
       `- [ ] 毎日新聞を読む @${THU}`,
