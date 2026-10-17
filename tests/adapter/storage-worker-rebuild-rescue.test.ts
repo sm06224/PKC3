@@ -224,6 +224,7 @@ describe('🔴 索引だけ壊れた DB を作り直す（#1087）', () => {
     let archive: Blob | null = null;
     let fresh: ResultMap['init'] | null = null;
     const report = await rebuildContainer(CID, 'わたしの PKC', {
+      holdsWriterLease: () => true,
       pick: (afterRowid, chunks) => request({ op: 'rescueEntries', afterRowid, chunks }),
       pickRelations: (afterRowid, chunks) => request({ op: 'rescueRelations', afterRowid, chunks }),
       pickRevisions: (afterRowid, chunks) => request({ op: 'rescueRevisions', afterRowid, chunks }),

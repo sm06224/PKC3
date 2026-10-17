@@ -538,6 +538,36 @@ describe('reducer: lean aggregate', () => {
     expect(s.messagesUnread).toBe(0);
   });
 
+  /**
+   * 🔴 #1087: システムのノートは `entryMetas` に居ないので、別タブの書込による再読込(SYS_BOOTED)で
+   * 閉じて「何も選んでいない」へ戻っていた。保って、メッセージ用の口(REQUEST_BODY ではない)で取り直す。
+   */
+  it.each(['sys-messages', 'sys-jobs'])('🔴 SYS_BOOTED: %s を開いたままなら保って読み直す', (lid) => {
+    let s = booted();
+    s = reduce(s, { type: 'MESSAGES_READ', lid }).state;
+    s = reduce(s, { type: 'BODY_LOADED', lid, body: '本文' }).state;
+    expect(s.selectedLid, '前提が崩れている').toBe(lid);
+    const r = reduce(s, {
+      type: 'SYS_BOOTED',
+      cid: 'c1',
+      metas: [meta('a', 2), meta('b', 1)],
+      relations: [],
+    });
+    expect(r.state.selectedLid, '別タブの書込で閉じた').toBe(lid);
+    expect(r.state.selection).toEqual([lid]);
+    expect(r.events.filter((e) => e.type === 'REQUEST_BODY'), 'ノート用の口で頼んだ').toEqual([]);
+    expect(r.events).toContainEqual({ type: 'REQUEST_MESSAGES_BODY', lid });
+  });
+
+  it('SYS_BOOTED: 対照群 ─ 別の入れ物なら持ち越さない / 普通のノートは従来どおり REQUEST_BODY', () => {
+    let s = booted();
+    s = reduce(s, { type: 'MESSAGES_READ', lid: 'sys-messages' }).state;
+    const other = reduce(s, { type: 'SYS_BOOTED', cid: 'c2', metas: [meta('a', 1)], relations: [] });
+    expect(other.state.selectedLid).toBeNull();
+    const n = reduce(loadedA(), { type: 'SYS_BOOTED', cid: 'c1', metas: [meta('a', 1)], relations: [] });
+    expect(n.events).toContainEqual({ type: 'REQUEST_BODY', lid: 'a' });
+  });
+
   /** 🔴 開いたままのメッセージは、新しい知らせが書かれたら読み直す。既読にはしない(#1087)。 */
   it('🔴 MESSAGES_BODY_REFRESH: 開いているそのノートだけ読み直し、未読も error も触らない', () => {
     let s = booted();
