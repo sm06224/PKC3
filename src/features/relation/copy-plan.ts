@@ -50,7 +50,8 @@ export function collectSubtree(
   relations: readonly Relation[],
 ): string[] {
   const childrenOf = new Map<string, string[]>();
-  for (const [child, parent] of resolveCanonicalParents(metas, relations)) {
+  const parents = resolveCanonicalParents(metas, relations);
+  for (const [child, parent] of parents) {
     if (parent === null) continue;
     const list = childrenOf.get(parent);
     if (list) list.push(child);
@@ -68,6 +69,24 @@ export function collectSubtree(
     );
     for (const k of kids) walk(k);
   };
+  /**
+   * 🔴 **選んだ物の中に祖先が居る物は、祖先の配下として拾う**(#1087)。フォルダ F と F の中の x を
+   *   「x → F」の順で選ぶと、x を先に拾って `out` の x が F より前に来て、**親が必ず先**が崩れる
+   *   (呼び側が上から作ると、x の写しの親が決まっていない)。祖先を先に歩けば x は F の配下で拾われる。
+   * ⚠ 輪の中の物は祖先が選ばれ続けて根が無くなるので、最後に残りを選んだ順で歩く(取りこぼさない)。
+   */
+  const chosen = new Set(lids);
+  const hasChosenAncestor = (lid: string): boolean => {
+    const trail = new Set<string>([lid]);
+    let cur = parents.get(lid) ?? null;
+    while (cur !== null && !trail.has(cur)) {
+      if (chosen.has(cur)) return true;
+      trail.add(cur);
+      cur = parents.get(cur) ?? null;
+    }
+    return false;
+  };
+  for (const lid of lids) if (!hasChosenAncestor(lid)) walk(lid);
   for (const lid of lids) walk(lid);
   return out;
 }
@@ -92,11 +111,15 @@ export function planCopy(
   const inSet = new Set(all);
   const mapped = new Map<string, string>();
   const steps: CopyStep[] = [];
+  /**
+   * 🔴 **先に全件へ新しい lid を割り当てる**(#1087)。反復の途中で親の写しの lid を引くと、
+   *   親が子より後ろに居たとき引けず、子の写しがルート(入れ先)に出て親の写しが空になる。
+   */
+  for (const src of all) if (metas.has(src)) mapped.set(src, mintLid());
   for (const src of all) {
     const meta = metas.get(src);
     if (!meta) continue;
-    const lid = mintLid();
-    mapped.set(src, lid);
+    const lid = mapped.get(src) as string;
     const origParent = parentOf.get(src) ?? null;
     /**
      * ⚠ **親が同じ組に居るなら、その親の写しの下へ**。居ないなら入れ先へ ──

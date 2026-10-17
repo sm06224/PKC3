@@ -267,6 +267,19 @@ const normalizeText = (raw: string): string | null => {
 };
 
 function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
+  return collectSmartTags(raw, MAX_SMART_TAGS);
+}
+
+/**
+ * 🔴 **条件として読めなかった(上限を超えた)タグ**(#1087 B10)。
+ * ⚠ 読むときは `MAX_SMART_TAGS` 個で切る(条件は今どおり 8 個で集める)が、**本文の字は user の物**なので、
+ *   書き戻すときに消してはいけない。同じ規則(空・長すぎ・重複を落とす)で全部読み、9 個目以降だけ返す。
+ */
+function unreadSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
+  return collectSmartTags(raw, Number.POSITIVE_INFINITY).slice(MAX_SMART_TAGS);
+}
+
+function collectSmartTags(raw: FrontmatterValue | undefined, limit: number): readonly string[] {
   if (raw === undefined || raw === null) return [];
   /**
    * ⚠ **空の要素は `null` で来る**(frontmatter の parser がそう返す)── そのまま
@@ -297,7 +310,7 @@ function readSmartTags(raw: FrontmatterValue | undefined): readonly string[] {
     if (t === '' || [...t].length > MAX_TAG_CHARS) continue;
     if (out.some((x) => sameTag(x, t))) continue;
     out.push(t);
-    if (out.length >= MAX_SMART_TAGS) break;
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -560,8 +573,17 @@ export function smartWriteError(spec: SmartSpec, mode: 'add' | 'remove'): string
  *   「条件が在るのに当たらない」に見える)。
  */
 export function writeSmartSpec(body: string, spec: SmartSpec): string {
+  /**
+   * 🔴 **読めなかったタグを消さない**(#1087 B10)。手で 9 個以上書いたノートで別の条件(種類など)を直すと、
+   *   読んだ 8 個だけで上書きして 9 個目以降が消えていた。⚠ 並びは「読めたもの → 読めなかったもの」で、
+   *   読めたものに同じタグが在れば重ねて書かない。
+   */
+  const unread = unreadSmartTags(parseFrontmatter(body).meta[SMART_TAGS_KEY]).filter(
+    (t) => !spec.tags.some((x) => sameTag(x, t)),
+  );
+  const tags = [...spec.tags, ...unread];
   return spliceFrontmatterKeys(body, {
-    [SMART_TAGS_KEY]: spec.tags.length === 0 ? undefined : [...spec.tags],
+    [SMART_TAGS_KEY]: tags.length === 0 ? undefined : tags,
     [SMART_KIND_KEY]: spec.kind ?? undefined,
     // ⚠ 書き戻す形は **`30d`** に揃える(読むほうは `30` も受ける)
     [SMART_UPDATED_KEY]: spec.updatedDays === null ? undefined : `${String(spec.updatedDays)}d`,

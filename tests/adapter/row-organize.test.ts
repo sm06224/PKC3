@@ -512,6 +512,25 @@ describe('フォルダの表の行の鍵(#215)', () => {
     expect(getStructuralChildren('f1', st.entryMetas, st.relations).map((m) => m.lid)).toEqual([st.freshLid]);
   });
 
+  /** 🔴 #1087 A6: 押しっぱなし(キーリピート)では撃たない。1 回目は効く(対照群)。 */
+  it('🔴 F2 / Shift+F4 / F6 は、キーリピートでは何もしない', async () => {
+    const r = setup();
+    press(r.row('n1'), 'F2', { repeat: true });
+    expect(r.renameInput(), 'リピートで名前の欄が開いた').toBeNull();
+    press(r.row('f1'), 'F4', { shiftKey: true, repeat: true });
+    await tick();
+    expect(r.d.getState().phase, 'リピートで新しいノートの編集に入った').toBe('ready');
+    press(r.row('n2'), 'F6', { repeat: true });
+    await tick();
+    expect(
+      [...document.querySelectorAll<HTMLDialogElement>('dialog')].some((x) => x.open),
+      'リピートで入れ先を選ぶ画面が出た',
+    ).toBe(false);
+    // 対照群: リピートでない 1 回は効く
+    press(r.row('n1'), 'F2');
+    expect(r.renameInput(), '前提が崩れている(リピートでない F2 で欄が出ない)').not.toBeNull();
+  });
+
   it('⚠ 対照群 ── 表の外(地)で F2 を押しても欄は出ない(面をまたいで効かない)', () => {
     const r = setup();
     r.d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });

@@ -136,3 +136,73 @@ describe('写す段取り', () => {
     expect(planCopy(['nope'], null, METAS, RELS, counter())).toEqual([]);
   });
 });
+
+/**
+ * 🔴 #1087 A2: フォルダ F と F の中の x の**両方**を選び、x を先に選んだときの組み直し。
+ * 直す前は x の写しがルートに出て、F の写しが空だった(反復の途中で親の写しの lid を引いていた)。
+ */
+describe('子を親より先に選んだときも、子の写しは親の写しの中', () => {
+  it('🔴 x → f1 の順で選んでも x の写しは f1 の写しの下', () => {
+    const steps = planCopy(['x', 'f1'], null, METAS, RELS, counter());
+    const byId = new Map(steps.map((s) => [s.sourceLid, s]));
+    expect(byId.get('x')!.parentLid, 'x の写しがルートに出た').toBe(byId.get('f1')!.lid);
+    // 呼び側は上から作る ── 親の写しが子の写しより前に来ていること
+    expect(steps.findIndex((s) => s.sourceLid === 'f1')).toBeLessThan(
+      steps.findIndex((s) => s.sourceLid === 'x'),
+    );
+    expect(collectSubtree(['x', 'f1'], METAS, RELS)).toEqual(['f1', 'x', 'f2', 'y']);
+  });
+
+  /**
+   * 輪の中(取込で入りうる)は祖先を先に歩けず、親の写しが子より後ろに来る ── 先に全件へ lid を割り当てていれば、
+   * どの写しも**他の写しの中**を指す(ルートへ平らに散らばらない)。
+   */
+  it('🔴 輪の中の 2 件を両方選んでも、写しは互いの中を指す(入れ先へ散らばらない)', () => {
+    const metas = new Map(
+      [meta('p', 1, 'p', 'folder'), meta('q', 2, 'q', 'folder')].map((m) => [m.lid, m]),
+    );
+    const rels = [rel('a', 'p', 'q'), rel('b', 'q', 'p')];
+    const steps = planCopy(['p', 'q'], 'target', metas, rels, counter());
+    expect(steps).toHaveLength(2);
+    const lids = new Set(steps.map((s) => s.lid));
+    for (const s of steps) {
+      expect(s.parentLid !== null && lids.has(s.parentLid), `${s.sourceLid} の写しの親が写しの中に無い`).toBe(true);
+    }
+  });
+
+  it('🔴 選び順を混ぜた多数の組で「子の写しは親の写しの中」「親が先」(seed 固定)', () => {
+    let seed = 20261017;
+    const rnd = (): number => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const all = ['f1', 'x', 'f2', 'y', 'a'];
+    const origParent = new Map<string, string>([
+      ['x', 'f1'],
+      ['f2', 'f1'],
+      ['y', 'f2'],
+    ]);
+    let withBoth = 0;
+    for (let i = 0; i < 200; i += 1) {
+      const pick = all.filter(() => rnd() < 0.6);
+      for (let j = pick.length - 1; j > 0; j -= 1) {
+        const k = Math.floor(rnd() * (j + 1));
+        [pick[j], pick[k]] = [pick[k]!, pick[j]!];
+      }
+      if (pick.includes('x') && pick.includes('f1')) withBoth += 1;
+      const steps = planCopy(pick, null, METAS, RELS, counter());
+      const byId = new Map(steps.map((s) => [s.sourceLid, s]));
+      const index = new Map(steps.map((s, n) => [s.sourceLid, n]));
+      for (const s of steps) {
+        const op = origParent.get(s.sourceLid);
+        if (op === undefined || !byId.has(op)) continue;
+        expect(s.parentLid, `${s.sourceLid} の写しが ${op} の写しの中に無い(選び順 ${pick.join(',')})`).toBe(
+          byId.get(op)!.lid,
+        );
+        expect(index.get(op)!, '親の写しが子より後に来た').toBeLessThan(index.get(s.sourceLid)!);
+      }
+    }
+    // 空振り防止: 親子を両方選ぶ組が実際に多数在ること
+    expect(withBoth).toBeGreaterThan(20);
+  });
+});

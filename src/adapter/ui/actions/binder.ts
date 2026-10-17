@@ -1233,6 +1233,12 @@ const dualCreate = (
     dispatcher.dispatch({ type: 'OP_FAILED', error: refusedPlace });
     return;
   }
+  /**
+   * 🔴 **そのペインの名前の絞りを先に解く**(#1087)。`CREATE_ENTRY` が解くのは左の列の絞りだけで、
+   *   ペイン自身の「名前で絞る」に語が入っていると、作った物は既定の題名が語に当たらず**そのペインに出ない**
+   *   (何も言われない)。解くのは `dual-bookmark-open` と同じ 1 本(`DUAL_SET_FILTER ''`)。
+   */
+  dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: '' });
   dispatcher.dispatch({
     type: 'CREATE_ENTRY',
     archetype,
@@ -2493,6 +2499,24 @@ const FILER_KEY_ACTION: Readonly<Record<string, string>> = {
   'filer-move': 'move-to-folder',
   'filer-new-in-folder': 'create-in-folder',
 };
+
+/**
+ * 🔴 **押しっぱなし(キーリピート)で撃たない鍵**(#1087)。作る・写す・移す・消す・名前を変える。
+ * ⚠ 直す前は F5 を押し続けると、リピートのたびに同じ行が何件もコピーされた(F7 は空のフォルダが並び、F8 は次々消える)。
+ * ⚠ 矢印などの**移動の鍵は入れない**(押しっぱなしで下り続けられるのが作法)。
+ * 🔑 判定は鍵のコマンド id で 1 本 ── `onShortcut` の 2 か所(左の列 / 2 ペイン)が同じ表を引く。
+ */
+const REPEAT_IGNORED_KEYS: ReadonlySet<string> = new Set([
+  'filer-rename',
+  'filer-move',
+  'filer-new-in-folder',
+  'filer-trash',
+  'dual-rename',
+  'dual-copy-to-other',
+  'dual-move-to-other',
+  'dual-new-folder',
+  'dual-new-note',
+]);
 
 const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
   'dual-copy-to-other': 'dual-copy',
@@ -8495,6 +8519,13 @@ const ACTIONS: Record<string, ActionHandler> = {
        *   (ペインの「名前で絞る」欄と同じ 1 本)。場所へ移る枝は今までどおり触らない。
        */
       dispatcher.dispatch({ type: 'DUAL_SET_FILTER', side, filter: '' });
+      /**
+       * 🔴 **アプリ共通の探す語と種類の札も解く**(#1087)。ペインの絞りは `paneFilterOptions` が
+       *   「ペインが空なら共通の語に従う」ので、共通の語・札が残っていると行が表に出ない。
+       *   左の列の「作る」(`CREATE_ENTRY`)と同じ作法で、同じ 2 本(`SET_ENTRY_FILTER` / `CLEAR_KIND_FILTER`)を使う。
+       */
+      dispatcher.dispatch({ type: 'SET_ENTRY_FILTER', query: '' });
+      dispatcher.dispatch({ type: 'CLEAR_KIND_FILTER' });
       dispatcher.dispatch({ type: 'DUAL_SET_SCOPE', side, lid: parent });
       dispatcher.dispatch({ type: 'DUAL_SELECT', side, lid, mode: 'set' });
       return;
@@ -8726,9 +8757,10 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   動く(#240 の着地前レビュー 2)。
    * ⚠ **黙って断らない** ── 何も選んでいないときは、その理由を出す。
    */
-  'dual-move': (dispatcher, _target, services) => {
+  'dual-move': (dispatcher, target, services) => {
     const st = dispatcher.getState();
-    const from = st.dual.focus;
+    // 🔴 押した所のペインを先に見る(#1087)── `dual-copy` と同じ。焦点だけだと、右のボタンに Tab で焦点を置いて押したとき F5 と F6 で向きが逆になる
+    const from = dualSide(target) ?? st.dual.focus;
     const pane = paneOf(st.dual, from);
     const rows = dualPaneRows(st, from);
     const lids = operationTargets(rows, pane.selection, pane.cursor);
@@ -19131,6 +19163,11 @@ export function bindActions(
     }
     if (!typing && el?.closest('[data-pkc-region="filer-table"]')) {
       const fcmd = keymap.match(ke, 'filer');
+      // 🔴 押しっぱなしでは撃たない(#1087)。⚠ 鍵は食う ── 通すと global の同じ鍵(Delete など)へ落ちる
+      if (fcmd !== null && ke.repeat && REPEAT_IGNORED_KEYS.has(fcmd)) {
+        ke.preventDefault();
+        return;
+      }
       if (fcmd !== null && runFilerKey(fcmd)) {
         ke.preventDefault();
         return;
@@ -19217,6 +19254,11 @@ export function bindActions(
        */
       if (dside === 'left' || dside === 'right') {
         const dcmd = keymap.match(ke, 'dual') ?? keymap.match(ke, 'filer');
+        // 🔴 押しっぱなしでは撃たない(#1087)。左の列の鍵と同じ表を引く
+        if (dcmd !== null && ke.repeat && REPEAT_IGNORED_KEYS.has(dcmd)) {
+          ke.preventDefault();
+          return;
+        }
         if (dcmd !== null && runDualKey(dcmd, dside)) {
           ke.preventDefault();
           return;

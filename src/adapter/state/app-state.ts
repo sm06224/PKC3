@@ -4890,6 +4890,18 @@ function reduceCore(
            */
           ...(state.taskScan === null ? [] : [{ type: 'REQUEST_TASK_SCAN' as const }]),
           /**
+           * 🔴 **開いているスマートフォルダも集め直す**(#1087。予定・連絡先・録ったものと同じ作法)。
+           * ⚠ `smartHits` は持ち越されるので、別タブがタグを足す・外す / 取り込みで `SYS_BOOTED` が来ても
+           *   撃ち直さないと**中身が古いまま追随しない**。「一度でも集めた」= `smartHits` に居る物だけ撃つ
+           *   (一度も開いていないスマートフォルダには走査を負わせない)。
+           * ⚠ 消えたノート・別のコレクションの lid には撃たない。
+           */
+          ...(sameCid
+            ? [...state.smartHits.keys()]
+                .filter((l) => metas.get(l)?.archetype === SMART_ARCHETYPE)
+                .map((l) => ({ type: 'REQUEST_SMART_SCAN' as const, lid: l }))
+            : []),
+          /**
            * 🔴 **連絡先も頼み直す**(上の `contactScan` と対)。
            * ⚠ 落とすだけでは、**取り込んだ 200 件が 1 件も現れない** ──
            *   集め直しの合図は「左のタブを連絡先へ切り替えたとき」1 か所しか
