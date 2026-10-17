@@ -136,12 +136,65 @@ export interface MathSpan {
 }
 
 /**
+ * 走査の結果の覚え(#1087 M11)。
+ *
+ * 🔴 閉じが無い行で、開きの `$` ごとに行末まで走ると 2 乗になる(`$a ` x 20000 で約 9.6 秒)。
+ * 「最初の事件(改行 / 逆引用符 / 閉じの候補)の位置」は**走査の開始位置に依らない**ので、
+ * 前回の開始位置 `from` から事件 `event` までの間に次の開始位置が入るなら、同じ答えを使い回す。
+ * ⚠ 覚えは `src` / `posMax` / 種類(`$` か `$$`)が同じときだけ使う。
+ */
+export interface MathScanMemo {
+  src?: string;
+  posMax?: number;
+  display?: boolean;
+  from?: number;
+  /** 最初の事件の添字。`-1` = 無し(`posMax` まで走った)。 */
+  event?: number;
+}
+
+/**
+ * `from` 以降で最初の事件(改行 / 逆引用符 / 閉じの候補)の添字。無ければ -1。
+ * 閉じの候補 = `$` で、逃がされておらず、`$$` なら次も `$`、`$` なら `closesMath`。
+ */
+function findScanEvent(src: string, from: number, posMax: number, display: boolean, memo: MathScanMemo | undefined): number {
+  if (
+    memo !== undefined && memo.src === src && memo.posMax === posMax && memo.display === display &&
+    memo.from !== undefined && memo.event !== undefined &&
+    from >= memo.from && (memo.event < 0 || from <= memo.event)
+  ) {
+    return memo.event;
+  }
+  let found = -1;
+  for (let i = from; i < posMax; i++) {
+    const ch = src[i];
+    if (ch === '\n' || ch === '`') { found = i; break; }
+    if (ch !== '$') continue;
+    if (isEscaped(src, i)) continue;
+    if (display) {
+      if (src[i + 1] !== '$') continue;
+    } else if (!closesMath(src, i)) {
+      continue;
+    }
+    found = i;
+    break;
+  }
+  if (memo !== undefined) {
+    memo.src = src;
+    memo.posMax = posMax;
+    memo.display = display;
+    memo.from = from;
+    memo.event = found;
+  }
+  return found;
+}
+
+/**
  * `start` から始まる数式を 1 つ読む。読めなければ `null`。
  *
  * ⚠ **改行を跨がない**(`markdown-render.ts` の inline rule 全部の作法)。
  * ⚠ `posMax` は markdown-it の inline state のもの ── そこを超えて読まない。
  */
-export function readMathAt(src: string, start: number, posMax: number): MathSpan | null {
+export function readMathAt(src: string, start: number, posMax: number, memo?: MathScanMemo): MathSpan | null {
   if (src[start] !== '$') return null;
   if (isEscaped(src, start)) return null;
   const display = src[start + 1] === '$';
@@ -155,31 +208,23 @@ export function readMathAt(src: string, start: number, posMax: number): MathSpan
   } else if (!opensMath(src, start)) {
     return null;
   }
-  for (let i = from; i < posMax; i++) {
-    const ch = src[i];
-    if (ch === '\n') return null; // 改行を跨がない
-    /**
-     * 🔴 **逆引用符を跨がない**(着地前レビュー 2026-09-06・欠陥 1)。
-     *
-     * ⚠ 1 稿目は「コードの中は markdown-it が先に tokenize するので守られる」と
-     *   書いていたが、**それは開きが code span の外に在る場合を見ていなかった** ──
-     *   ``変数 $x と `$y` を比べる`` は、外の `$x` が **code span の中の `$`** を
-     *   閉じに使い、``x と ` `` を数式にしていた(実測)。
-     * ⚠ しかも マニュアルは「逆引用符で囲めば数式にならない」と**約束している** ──
-     *   その約束が守れていなかった。
-     * 🔑 走査を `` ` `` で止めれば、開きがどちら側に在っても跨げない。
-     */
-    if (ch === '`') return null;
-    if (ch !== '$') continue;
-    if (isEscaped(src, i)) continue;
-    if (display) {
-      if (src[i + 1] !== '$') continue;
-      if (i === from) return null; // 中身が空
-      return { from, to: i, end: i + 2, display: true };
-    }
-    if (!closesMath(src, i)) continue;
-    if (i === from) return null; // 中身が空
-    return { from, to: i, end: i + 1, display: false };
-  }
-  return null;
+  const e = findScanEvent(src, from, posMax, display, memo);
+  if (e < 0) return null;
+  const ch = src[e];
+  if (ch === '\n') return null; // 改行を跨がない
+  /**
+   * 🔴 **逆引用符を跨がない**(着地前レビュー 2026-09-06・欠陥 1)。
+   *
+   * ⚠ 1 稿目は「コードの中は markdown-it が先に tokenize するので守られる」と
+   *   書いていたが、**それは開きが code span の外に在る場合を見ていなかった** ──
+   *   ``変数 $x と `$y` を比べる`` は、外の `$x` が **code span の中の `$`** を
+   *   閉じに使い、``x と ` `` を数式にしていた(実測)。
+   * ⚠ しかも マニュアルは「逆引用符で囲めば数式にならない」と**約束している** ──
+   *   その約束が守れていなかった。
+   * 🔑 走査を `` ` `` で止めれば、開きがどちら側に在っても跨げない。
+   */
+  if (ch === '`') return null;
+  if (e === from) return null; // 中身が空
+  if (display) return { from, to: e, end: e + 2, display: true };
+  return { from, to: e, end: e + 1, display: false };
 }

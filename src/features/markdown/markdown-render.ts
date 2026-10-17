@@ -72,7 +72,7 @@ import {
 } from './directive-open';
 import { parseInlineRoleAt, type InlineRoleMatch } from './inline-role-parser';
 import { iconShortcodeAt } from '../icon/icon-shortcode';
-import { readMathAt } from './math-delims';
+import { readMathAt, type MathScanMemo } from './math-delims';
 import {
   isCardPresentationLabel,
   parseCardPresentation,
@@ -1600,8 +1600,17 @@ function buildMathHtml(
   return `<${tag} class="${cls}" data-pkc-math-src="${src}" data-pkc-math-display="${display ? '1' : '0'}"${kind}${sourceLineAttrs}>${raw}</${tag}>`;
 }
 
+// 🔴 #1087 M11: 閉じの無い長い行で 2 乗にならないよう、走査の結果を inline state ごとに覚える
+//   (`math-delims.ts` の `MathScanMemo`。state は 1 段落の parse ごとに作られ、終われば捨てられる)
+const mathScanMemos = new WeakMap<object, { inline: MathScanMemo; block: MathScanMemo }>();
+
 md.inline.ruler.before('escape', 'pkc_math_inline', function mathInlineRule(state, silent) {
-  const span = readMathAt(state.src, state.pos, state.posMax);
+  let memos = mathScanMemos.get(state);
+  if (memos === undefined) {
+    memos = { inline: {}, block: {} };
+    mathScanMemos.set(state, memos);
+  }
+  const span = readMathAt(state.src, state.pos, state.posMax, state.src[state.pos + 1] === '$' ? memos.block : memos.inline);
   if (span === null) return false;
   const tex = state.src.slice(span.from, span.to);
   if (!silent) {
@@ -1761,17 +1770,37 @@ md.inline.ruler.after('emphasis', 'pkc_highlight', function highlightRule(state,
   return true;
 });
 
+// 🔴 #1087 M11: `indexOf` を開きごとに最後まで走らせると、閉じの無い行で 2 乗になる
+//   (`[[ruby:a|` x 5000 で約 1 秒)。「`from` 以降で最初の `needle` の添字」は、
+//   前回の `from` から答えまでの間なら同じなので、直前の答えを使い回す。出力は `indexOf` と同じ。
+const nextIndexMemos = new WeakMap<object, Map<string, { src: string; from: number; idx: number }>>();
+function nextIndexOf(state: { src: string }, needle: string, from: number): number {
+  let m = nextIndexMemos.get(state);
+  if (m === undefined) {
+    m = new Map();
+    nextIndexMemos.set(state, m);
+  }
+  const c = m.get(needle);
+  if (c !== undefined && c.src === state.src && from >= c.from && (c.idx < 0 || from <= c.idx)) return c.idx;
+  const idx = state.src.indexOf(needle, from);
+  m.set(needle, { src: state.src, from, idx });
+  return idx;
+}
+
 md.inline.ruler.after('emphasis', 'pkc_ruby', function rubyRule(state, silent) {
   if (silent) return false;
   const src = state.src;
   const start = state.pos;
   if (!src.startsWith('[[ruby:', start)) return false;
-  const closeIdx = src.indexOf(']]', start + 7);
+  const closeIdx = nextIndexOf(state, ']]', start + 7);
   if (closeIdx < 0) return false;
+  const nl = nextIndexOf(state, '\n', start + 7);
+  if (nl >= 0 && nl < closeIdx) return false;
+  const sepAbs = nextIndexOf(state, '|', start + 7);
+  if (sepAbs < 0 || sepAbs >= closeIdx) return false;
+  const sepIdx = sepAbs - (start + 7);
+  if (sepIdx <= 0 || sepIdx >= closeIdx - (start + 7) - 1) return false;
   const content = src.slice(start + 7, closeIdx);
-  if (content.includes('\n')) return false;
-  const sepIdx = content.indexOf('|');
-  if (sepIdx <= 0 || sepIdx >= content.length - 1) return false;
   const base = content.slice(0, sepIdx);
   const reading = content.slice(sepIdx + 1);
   if (!base || !reading) return false;
@@ -1792,10 +1821,12 @@ md.inline.ruler.after('emphasis', 'pkc_em_dot', function emDotRule(state, silent
   const src = state.src;
   const start = state.pos;
   if (!src.startsWith('[[em:', start)) return false;
-  const closeIdx = src.indexOf(']]', start + 5);
+  const closeIdx = nextIndexOf(state, ']]', start + 5);
   if (closeIdx < 0) return false;
+  if (closeIdx === start + 5) return false;
+  const nl = nextIndexOf(state, '\n', start + 5);
+  if (nl >= 0 && nl < closeIdx) return false;
   const content = src.slice(start + 5, closeIdx);
-  if (!content || content.includes('\n')) return false;
   const tokenOpen = state.push('em_dot_open', 'em', 1);
   tokenOpen.attrSet('class', 'pkc-em-dot');
   const tokenText = state.push('text', '', 0);
@@ -2271,32 +2302,95 @@ function findSimpleInline(
   src: string,
   start: number,
   posMax: number,
+  memo?: SimpleBoundaryMemo,
 ): { content: string; inlineStyle: string; end: number } | null {
   if (src.charCodeAt(start) !== 0x3A /* : */) return null;
   // Scan forward to find a `:<attrs>:` boundary。
-  for (let i = start + 1; i < posMax; i++) {
+  let from = start + 1;
+  for (;;) {
+    const b = nextSimpleBoundary(src, from, posMax, memo);
+    if (b === null || b.newline) return null;
+    const content = src.slice(start + 1, b.idx);
+    if (!content) {
+      from = b.idx + 1;
+      continue;
+    }
+    return { content, inlineStyle: b.inlineStyle, end: b.end };
+  }
+}
+
+/**
+ * 🔴 #1087 M11: `:` が並ぶ長い行で 2 乗になっていた(`ruby:a|` x 5000 で約 1 秒)。
+ * 「`from` 以降で最初の事件(改行 / 属性として読める `:attrs:` の境界)」は**走査の開始位置に依らない**
+ * (空の content を弾くのは呼び側)ので、前回の `from` から事件までの間なら答えを使い回す。
+ */
+interface SimpleBoundary {
+  idx: number;
+  newline: boolean;
+  inlineStyle: string;
+  end: number;
+}
+interface SimpleBoundaryMemo {
+  src?: string;
+  posMax?: number;
+  from?: number;
+  result?: SimpleBoundary | null;
+}
+const simpleBoundaryMemos = new WeakMap<object, SimpleBoundaryMemo>();
+
+function nextSimpleBoundary(
+  src: string,
+  from: number,
+  posMax: number,
+  memo: SimpleBoundaryMemo | undefined,
+): SimpleBoundary | null {
+  if (
+    memo !== undefined && memo.src === src && memo.posMax === posMax &&
+    memo.from !== undefined && memo.result !== undefined &&
+    from >= memo.from && (memo.result === null || from <= memo.result.idx)
+  ) {
+    return memo.result;
+  }
+  let found: SimpleBoundary | null = null;
+  for (let i = from; i < posMax; i++) {
     const ch = src.charCodeAt(i);
-    if (ch === 0x0A /* newline */) return null;
+    if (ch === 0x0A /* newline */) {
+      found = { idx: i, newline: true, inlineStyle: '', end: i };
+      break;
+    }
     if (ch !== 0x3A /* : */) continue;
     // 候補境界。i から `:<attrs>:` を試行。
     // `:` 以後 attrs 部分を抽出。
-    const restAfter = src.slice(i + 1);
-    const closeIdx = restAfter.indexOf(':');
-    if (closeIdx < 0) continue;
-    const attrsCandidate = restAfter.slice(0, closeIdx);
+    const closeAbs = src.indexOf(':', i + 1);
+    if (closeAbs < 0) continue;
+    const attrsCandidate = src.slice(i + 1, closeAbs);
     if (!attrsCandidate || !ATTRS_INNER_RE.test(attrsCandidate)) continue;
     const parsed = parseSimpleInlineAttrs(attrsCandidate);
     if (!parsed.valid) continue;
-    const content = src.slice(start + 1, i);
-    if (!content) continue;
-    return { content, inlineStyle: parsed.inlineStyle, end: i + 1 + closeIdx + 1 };
+    found = { idx: i, newline: false, inlineStyle: parsed.inlineStyle, end: closeAbs + 1 };
+    break;
   }
-  return null;
+  if (memo !== undefined) {
+    memo.src = src;
+    memo.posMax = posMax;
+    memo.from = from;
+    memo.result = found;
+  }
+  return found;
+}
+
+function simpleMemoOf(state: object): SimpleBoundaryMemo {
+  let m = simpleBoundaryMemos.get(state);
+  if (m === undefined) {
+    m = {};
+    simpleBoundaryMemos.set(state, m);
+  }
+  return m;
 }
 
 md.inline.ruler.after('emphasis', 'pkc_simple_inline', function simpleInlineRule(state, silent) {
   if (silent) return false;
-  const hit = findSimpleInline(state.src, state.pos, state.posMax);
+  const hit = findSimpleInline(state.src, state.pos, state.posMax, simpleMemoOf(state));
   if (hit === null) return false;
   // Match found:`<span style="...">content</span>` を出力。
   // inner content は inline markup を保持したいので state.md.inline.parse で
@@ -2340,7 +2434,7 @@ md.inline.ruler.before('emphasis', 'pkc_icon', function iconRule(state, silent) 
    * 🔑 判定は `findSimpleInline` の 1 本を呼ぶ ── 自前で綴りを写さない(§7)。
    * ⚠ 図案の字が当たった**後**に問う ── `:` の位置ごとに L-6 の走査を回さない。
    */
-  if (findSimpleInline(state.src, state.pos, state.posMax) !== null) return false;
+  if (findSimpleInline(state.src, state.pos, state.posMax, simpleMemoOf(state)) !== null) return false;
   // ⚠ `silent` は「試すだけ」── 位置だけ進めて token を積まない(markdown-it の作法)
   if (!silent) {
     const token = state.push('pkc_icon', 'span', 0);
