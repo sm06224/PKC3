@@ -230,8 +230,9 @@ describe('割当の検め', () => {
   'stop-capture', 'capture-stop', 'capture-trim-start', 'capture-trim-end', 'capture-trim-run', 'capture-trim-clear', 'search-jump-end',
   // 🔴 #582 段③(Gemini の回答 = #1163 の依頼 22 の Q3 = A): 選択範囲をコピー ── 「操作を探す」を開く前の読む面の選択をコピーする。鍵は user が設定で割り当てる
   'copy-selection-md',
-  // 🔴 #1087: ゴミ箱へ移した直後の「元に戻す」 ── 「操作を探す」から呼ぶ。鍵は user が設定で割り当てる
-  'undo-trash'];
+  // 🔴 #1163 依頼 153(Gemini 回答 = 推薦どおり ②): ノートの並べ替え ── 「操作を探す」から呼ぶ。`Alt+↑/↓` は本文の行の入れ替えなので既定は置かない
+  // ⚠ `undo-trash`(ゴミ箱へ移した直後の元に戻す)は依頼 132 で既定 `Ctrl+Z`(フォルダの表)を持つようになったので、この一覧から外した
+  'move-order-up', 'move-order-down'];
 
   it('🔴 鍵を持たない操作の一覧は、身元で持つ', () => {
     const ids = new Set(KEY_COMMANDS.map((c) => c.id));

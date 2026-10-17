@@ -146,7 +146,8 @@ function reasonOf(
    */
   if (blocked !== null && blocked !== '') return `${NOT_READY_PREFIX}${blocked}`;
   if (editorHint !== null) return `${NOT_READY_PREFIX}${editorHint}`;
-  if (!cmd.contexts.includes('global')) {
+  // 🔴 `whyNot` を持つ操作は、鍵の文脈が全域でなくても(`undo-trash` はフォルダの表の鍵)一覧からはどこからでも呼べる ── 理由は `whyNot`
+  if (!cmd.contexts.includes('global') && cmd.whyNot === undefined) {
     if (fromField && keys.length > 0 && cmd.contexts.every((c) => IN_FIELD_CONTEXTS.has(c))) {
       const where = cmd.contexts.map((c) => CONTEXT_WHEN[c]).join('、または');
       return `${NOT_READY_PREFIX}${where}に、${keys.join(' か ')} を押して使う操作です`;

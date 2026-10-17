@@ -332,6 +332,9 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
         // #1640 ②: 日付のノートを開いていて、その向きに日付のノートがあるときだけ効く
         'open-next-day-note',
         'open-prev-day-note',
+        // #1163 依頼 153: ノートの並べ替え ── 端・並び順が「自分で並べた順」でないときは note ではなく専用の理由を言う
+        'move-order-down',
+        'move-order-up',
         'nav-back',
         'nav-forward',
         'open-note-window',
@@ -341,7 +344,8 @@ describe('🔴 押せない理由の文(#1087 の見直し 2026-10-14)', () => {
       ].sort(),
     );
     for (const c of KEY_COMMANDS) {
-      if (c.whyNot !== undefined) expect(c.contexts, c.id).toContain('global');
+      // ⚠ 例外は `undo-trash` だけ ── 鍵はフォルダの表(`filer` / `dual`)の `Ctrl+Z` だが、一覧からはどこからでも呼ぶ(#1163 依頼 132)
+      if (c.whyNot !== undefined && c.id !== 'undo-trash') expect(c.contexts, c.id).toContain('global');
     }
   });
 });

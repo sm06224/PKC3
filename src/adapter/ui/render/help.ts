@@ -648,8 +648,10 @@ export class HelpRenderer {
   /**
    * ショートカットの一覧を描く。⚠ **表(`KEY_COMMANDS`)が正本**。
    * 🔴 **文脈ごとにグループ化して整理されたチートシートにする**(#1145)。
-   * ⚠ 割当が空のコマンドも**行ごと出す** ── 「割当なし」が見えないと、
-   *   user は「そんな操作は無い」と読む(外した本人が戻せなくなる)。
+   * 🔴 **キーが付いている操作だけを出す**(#1163 依頼 96-2 = A)。直す前は、キーの無い操作 58 行(「SQL を実行」のように
+   *   その画面でしか効かない物も)が「割り当てなし」で並び、キーを見に来た人が探しにくかった。
+   * ⚠ 「そんな操作は無い」と読まれないよう、キーの無い操作は設定のショートカットキーで割り当てられること(と「操作を探す」で
+   *   呼べること)を 1 行で案内する。外した本人は設定の画面から戻せる(そちらは全部の行を出す)。
    */
   private syncKeys(): void {
     const host = this.keys;
@@ -670,11 +672,18 @@ export class HelpRenderer {
     topBar.append(jumpTopBtn);
     host.append(topBar);
 
+    const guide = document.createElement('p');
+    guide.setAttribute('data-pkc-field', 'help-key-guide');
+    guide.textContent =
+      'ここにはキーが付いている操作だけを並べています。キーの付いていない操作は、システム → 設定 → ショートカットキー で好きなキーを割り当てられます(「操作を探す」からは、キーが無くても呼べます)。';
+    host.append(guide);
+
     const dl = document.createElement('dl');
     let shown: KeyContext | null = null;
     for (const c of CONTEXT_ORDER) {
       for (const cmd of KEY_COMMANDS) {
         if (primaryContext(cmd) !== c) continue;
+        if ((bindings[cmd.id] ?? cmd.defaults).length === 0) continue;
         if (shown !== c) {
           const head = document.createElement('dt');
           head.setAttribute('data-pkc-field', 'help-key-group');
@@ -692,7 +701,7 @@ export class HelpRenderer {
         dd.setAttribute('data-pkc-field', 'help-key-chords');
         dd.setAttribute('data-pkc-command', cmd.id);
         const list = bindings[cmd.id] ?? cmd.defaults;
-        dd.textContent = list.length === 0 ? '割り当てなし' : list.map((c) => chordLabel(c)).join(' / ');
+        dd.textContent = list.map((c) => chordLabel(c)).join(' / ');
         dl.append(dt, dd);
       }
     }

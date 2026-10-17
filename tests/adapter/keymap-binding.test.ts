@@ -1160,7 +1160,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
     const byId = new Map(KEY_COMMANDS.map((c) => [c.id, c]));
     const notGlobal = [...byButton, ...special].filter((id) => {
       const contexts = byId.get(id)?.contexts ?? [];
-      return !contexts.includes('global') && !contexts.includes('window');
+      // ⚠ 例外は `undo-trash` も ── 鍵はフォルダの表(`filer` / `dual`)の `Ctrl+Z` だが、一覧からはどこからでも呼ぶ(#1163 依頼 132)
+      return !contexts.includes('global') && !contexts.includes('window') && id !== 'undo-trash';
     });
     expect(
       notGlobal,
@@ -1227,8 +1228,8 @@ describe('近道の受け手と、打鍵中の免除(等値で pin する)', () 
       // ⚠ 2026-08-30 に足した(#609 ── 畳める 3 面のうち追記欄だけ鍵が無かった)
       'toggle-append',
       'toggle-focus-mode',
-      'nav-back',
-      'nav-forward',
+      // ⚠ 'nav-back' / 'nav-forward' は 2026-10-17 に外した(#1163 依頼 180)── 文字を打っている間の `Alt+←/→` は
+      //   カーソルの移動(mac の `Option+←/→` は単語ごと)に任せる。止め方は下の「文字を打っている間の戻る / 進む」で見る
     ]);
   });
 });
@@ -1253,15 +1254,26 @@ describe('ヘルプの一覧', () => {
     expect(cell(), 'ヘルプが古い割当のまま').toBe(chordLabel('Alt+M', false));
   });
 
-  it('割当を全部外したら「割当なし」と出す(操作が消えたと読ませない)', () => {
+  it('🔴 キーの無い操作は一覧に出さず、割り当てる場所を 1 行で案内する(#1163 依頼 96-2 = A)', () => {
     const store = new KeymapStore(fakeStorage());
     const region = document.createElement('div');
     document.body.append(region);
     new HelpRenderer(region, null, [], store).render();
+    const row = (id: string) =>
+      region.querySelector(`[data-pkc-field="help-key-chords"][data-pkc-command="${id}"]`);
+    // 前提(空振り防止): キーの付いた操作は出ている / 初めからキーの無い操作は 1 つ以上在る
+    expect(row('toggle-replace')).not.toBeNull();
+    const keyless = KEY_COMMANDS.filter((c) => c.defaults.length === 0);
+    expect(keyless.length).toBeGreaterThan(0);
+    for (const c of keyless) expect(row(c.id), `${c.id} はキーが無いのに一覧に出ている`).toBeNull();
+    expect(region.textContent ?? '', '「割り当てなし」の行が残っている').not.toContain('割り当てなし');
+    // 外したら、その行は一覧から消える。割り当て直したら戻る
     store.removeBinding('toggle-replace', 'Mod+H');
-    expect(
-      region.querySelector('[data-pkc-field="help-key-chords"][data-pkc-command="toggle-replace"]')
-        ?.textContent,
-    ).toBe('割り当てなし');
+    expect(row('toggle-replace')).toBeNull();
+    store.addBinding('toggle-replace', 'Alt+M');
+    expect(row('toggle-replace')?.textContent).toBe(chordLabel('Alt+M', false));
+    // 案内は設定の場所を実在の字で言う
+    const guide = region.querySelector('[data-pkc-field="help-key-guide"]')?.textContent ?? '';
+    expect(guide).toContain('システム → 設定 → ショートカットキー');
   });
 });
