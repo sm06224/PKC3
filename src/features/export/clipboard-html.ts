@@ -71,6 +71,12 @@ export const COPY_JUNK_CLASSES = [
   'pkc-chart-source',
   'pkc-render-source',
   'pkc-md-block-actions',
+  // 画面だけの飾り(#1087): 表の「押すと打てます」/ 原文⇄表示の切替 / コードの言語バッジ / 折りたたみ帯
+  'pkc-cell-tap-hint',
+  'pkc-render-toggle-input',
+  'pkc-render-toggle',
+  'pkc-code-lang',
+  'pkc-code-collapse-bar',
 ];
 
 /**
@@ -88,6 +94,14 @@ export function cleanForClipboard(
   let removed = 0;
   let droppedImages = 0;
 
+  /**
+   * 🔑 **タスクの印は字にして残す**(#1087)。下の ① は `input` を全部消すので、先に ☑ / ☐ へ替える
+   * (Word 書き出しと同じ字。消すと貼った先でチェックリストの済 / 未が読めない)。
+   */
+  for (const box of [...root.querySelectorAll('input.pkc-task-checkbox')]) {
+    const mark = root.ownerDocument.createTextNode(box.hasAttribute('checked') || (box as HTMLInputElement).checked ? '☑' : '☐');
+    box.replaceWith(mark);
+  }
   // ① 操作子を落とす(押せないボタンを本文に混ぜない)。⚠ 綴りは上の 1 か所
   //    🔴 **押す器だけ**を消す ── 中身を持つ要素(csv の升)は残す(上の註記)
   for (const el of [...root.querySelectorAll(COPY_CHROME_SELECTOR)]) {

@@ -30,7 +30,7 @@ import {
   placeLineAnchorOf,
   placeLineTargetId,
 } from '@features/markdown/place-line';
-import type { DocxBlock, DocxCell, DocxRun } from '@features/export/docx';
+import { DOCX_LIST_DEPTH_MAX, type DocxBlock, type DocxCell, type DocxRun } from '@features/export/docx';
 
 /** 走りに掛かる装飾(親から受け継ぐ)。 */
 interface RunStyle {
@@ -242,6 +242,16 @@ export function htmlToDocxBlocks(doc: Document): {
         pushRun(out, (el.hasAttribute('checked') ? '☑' : '☐') + (/^\s/.test(nextText) ? '' : ' '), style);
         continue;
       }
+      /**
+       * 🔑 **ルビは「親字（よみ）」にする**(#1087)。Word / PowerPoint のルビは組まないので、
+       * 素通しすると `漢字かんじ` とつながって読めない。`rp`(括弧の代用)は落とす ── 残すと括弧が二重になる。
+       */
+      if (tag === 'rp') continue;
+      if (tag === 'rt') {
+        const reading = (el.textContent ?? '').trim();
+        if (reading !== '') pushRun(out, `（${reading}）`, style);
+        continue;
+      }
       if (tag === 'button' || tag === 'input' || tag === 'label') continue;
       if (el.classList.contains('pkc-md-copy-btn')) continue;
       // 🔑 脚注の戻りリンク(↩︎)は文書では要らない(各脚注の行末に付いてしまう)
@@ -391,8 +401,19 @@ export function htmlToDocxBlocks(doc: Document): {
   const walkList = (list: Element, depth: number, ordered: boolean): void => {
     // 🔴 一覧ごとの通し番号(Word の番号を一覧ごとに 1 から振り直す印。#1087)
     const listId = ++listSeq;
+    /**
+     * 🔑 **目次の段は項目の字ではなく `data-pkc-toc-level` が持つ**(#1087)。目次は入れ子ではなく
+     * 平らな一覧なので、そのままだと見出しの段が全部同じ深さに並ぶ。一番浅い段を 0 として段を深さにする。
+     */
+    const tocLevels = Array.from(list.children).map((c) => Number(c.getAttribute('data-pkc-toc-level')));
+    const tocMin = Math.min(...tocLevels.filter((n) => Number.isFinite(n) && n > 0));
     for (const li of Array.from(list.children)) {
       if (li.tagName.toLowerCase() !== 'li') continue;
+      const lv = Number(li.getAttribute('data-pkc-toc-level'));
+      const itemDepth =
+        Number.isFinite(lv) && lv > 0 && Number.isFinite(tocMin)
+          ? Math.min(depth + lv - tocMin, DOCX_LIST_DEPTH_MAX - 1)
+          : depth;
       /**
        * 🔴 **項目の中の入れ子の箇条書きと、コード枠・表などの塊は、項目の字から外す**。
        * 外さないと親の行に子の文字が混ざる / コードや表が 1 行に潰れる。
@@ -409,7 +430,7 @@ export function htmlToDocxBlocks(doc: Document): {
           cloneKids[i]?.remove();
         }
       });
-      pushSplitByImages(clone, (runs) => ({ kind: 'li', ordered, depth, list: listId, runs }), {
+      pushSplitByImages(clone, (runs) => ({ kind: 'li', ordered, depth: itemDepth, list: listId, runs }), {
         bulletFirst: true,
         keepEmpty: later.length === 0,
       });

@@ -168,11 +168,11 @@ test('🔴 画面から印刷すると全文が紙に乗り、+++ で改頁す�
 
   const viewer = await page.context().newPage();
   await viewer.goto(`file://${file}`);
-  await expect(viewer.locator('#body')).toBeVisible();
+  await expect(viewer.locator('#pkc-body')).toBeVisible();
   await viewer.setViewportSize(A4);
   await viewer.emulateMedia({ media: 'print' });
   const exported = await viewer.evaluate(() => {
-    const hrs = [...document.querySelectorAll('#body hr')].map((h) => ({
+    const hrs = [...document.querySelectorAll('#pkc-body hr')].map((h) => ({
       isBreak: h.classList.contains('pkc-section-break'),
       breakAfter: getComputedStyle(h).breakAfter,
       boxes: h.getClientRects().length,

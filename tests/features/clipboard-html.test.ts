@@ -172,4 +172,32 @@ describe('数式(#707)', () => {
     expect(katexish, '前提が崩れている: MathML が無い').toContain('katex-mathml');
     expect(katexish, '前提が崩れている: 見た目の span が無い').toContain('mord');
   });
+
+  it('🔴 タスクの印は ☑ / ☐ の字で残る(#1087 E1)', () => {
+    const r = cleanForClipboard(
+      host(
+        '<ul><li><input type="checkbox" class="pkc-task-checkbox" data-pkc-action="toggle-task" checked> 済</li>' +
+          '<li><input type="checkbox" class="pkc-task-checkbox" data-pkc-action="toggle-task"> 未</li></ul>',
+      ),
+    );
+    expect(r.html).toContain('☑ 済');
+    expect(r.html).toContain('☐ 未');
+    expect(r.html).not.toContain('<input');
+  });
+
+  it('🔴 画面だけの飾り(押すと打てます / 切替 ‹/› / 言語バッジ / 折りたたみ帯)は貼らない(#1087 E2)', () => {
+    const r = cleanForClipboard(
+      host(
+        '<div><span class="pkc-cell-tap-hint">押すと打てます</span>' +
+          '<input type="checkbox" class="pkc-render-toggle-input"><label class="pkc-render-toggle">‹/›</label>' +
+          '<span class="pkc-code-lang">typescript</span><pre><code>x</code></pre>' +
+          '<div class="pkc-code-collapse-bar">すべて表示</div></div>',
+      ),
+    );
+    expect(r.html).not.toContain('押すと打てます');
+    expect(r.html).not.toContain('‹/›');
+    expect(r.html).not.toContain('typescript');
+    expect(r.html).not.toContain('すべて表示');
+    expect(r.html).toContain('<code>x</code>');
+  });
 });

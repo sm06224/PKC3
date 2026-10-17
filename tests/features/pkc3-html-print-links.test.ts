@@ -67,13 +67,13 @@ async function printAll(): Promise<void> {
     { lid: 'n2', title: '二つ目', body: BODY('B') },
   ]);
   await open((await writePortableHtml(src, NOW, (t) => Promise.resolve(renderMarkdown(t)))).blob);
-  document.getElementById('printall')!.click();
+  document.getElementById('pkc-printall')!.click();
 }
 
 describe('可搬 HTML — 全体印刷のノート内リンク(#1087)', () => {
   it('🔴 #slug リンク(本文・:::toc)が、振り直した自分のノートの見出しを指す', async () => {
     await printAll();
-    const boxes = Array.from(document.querySelectorAll<HTMLElement>('#all .b'));
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>('#pkc-all .b'));
     expect(boxes, '前提:2 件のノートが組まれていない').toHaveLength(2);
     let checked = 0;
     for (const box of boxes) {
@@ -94,9 +94,9 @@ describe('可搬 HTML — 全体印刷のノート内リンク(#1087)', () => {
 
   it('🔴 脚注の id がノートごとに別になり、脚注リンクが自分のノートの脚注を指す', async () => {
     await printAll();
-    const ids = Array.from(document.querySelectorAll('#all [id]')).map((el) => el.id);
+    const ids = Array.from(document.querySelectorAll('#pkc-all [id]')).map((el) => el.id);
     expect(new Set(ids).size, `id が重複: ${ids.join()}`).toBe(ids.length);
-    const boxes = Array.from(document.querySelectorAll<HTMLElement>('#all .b'));
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>('#pkc-all .b'));
     for (const box of boxes) {
       const fnLinks = Array.from(box.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')).filter((a) =>
         /fn/.test(a.getAttribute('href')!),

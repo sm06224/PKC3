@@ -106,7 +106,7 @@ const POINTS: readonly Point[] = [
  * 押した**後**に測る書き方は、同梱 `chromium` では通るのに CI の
  * `chromium_headless_shell` で落ちる ── 後者は `window.print()` で
  * **`beforeprint` + `afterprint` を同期発火**し、`afterprint` の `dropAll()` が
- * 組んだ `#all` を**その場で捨てる**。だから「押した直後」には箱がもう無い
+ * 組んだ `#pkc-all` を**その場で捨てる**。だから「押した直後」には箱がもう無い
  * (実際にこの spec で踏んだ)。`beforeprint` はどちらのビルドでも成立する。
  */
 async function measure(page: Page, host: string, viaPrint = false): Promise<Record<string, string>> {
@@ -133,7 +133,7 @@ async function measure(page: Page, host: string, viaPrint = false): Promise<Reco
       if (!viaPrint) return read();
       return new Promise<Record<string, string>>((resolve, reject) => {
         addEventListener('beforeprint', () => resolve(read()), { once: true });
-        const btn = document.getElementById('printall');
+        const btn = document.getElementById('pkc-printall');
         if (!btn) {
           reject(new Error('「全体を印刷」のボタンが無い'));
           return;
@@ -223,8 +223,8 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
   const viewer = await page.context().newPage();
   await viewer.emulateMedia({ colorScheme: 'light' });
   await viewer.goto(`file://${file}`);
-  await expect(viewer.locator('#body')).toBeVisible();
-  const exported = await measure(viewer, '#body');
+  await expect(viewer.locator('#pkc-body')).toBeVisible();
+  const exported = await measure(viewer, '#pkc-body');
 
   // 🔴 全観測点を**一度に**比べる(1 個ずつ見ると、最初の 1 件で止まって全体像が出ない)
   expect(exported, '配った HTML の見た目がアプリと違う').toEqual(app);
@@ -234,7 +234,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
    * ものは経路ごとに pin する」)。押して組ませてから、同じ観測点をもう一度測る ──
    * class を片方だけに足すと、ここだけ素のまま出る。
    */
-  const printed = await measure(viewer, '#all section:nth-child(2) > div', true);
+  const printed = await measure(viewer, '#pkc-all section:nth-child(2) > div', true);
   expect(printed, '「全体を印刷」の本文だけ素の見た目で出る').toEqual(app);
 
   /**
@@ -247,7 +247,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
    */
   await viewer.setViewportSize({ width: 794, height: 1123 });
   await viewer.emulateMedia({ media: 'print', colorScheme: 'light' });
-  const onPaper = await measure(viewer, '#body');
+  const onPaper = await measure(viewer, '#pkc-body');
   expect(onPaper, '紙にすると本文の見た目が変わる').toEqual(app);
   await viewer.emulateMedia({ media: 'screen', colorScheme: 'light' });
 
@@ -256,7 +256,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
    * どちらも「焼いたら app.css が勝ってしまった」型の退行で、**実測で見つけた**。
    */
   const own = await viewer.evaluate(() => {
-    const host = document.querySelector('#body')!;
+    const host = document.querySelector('#pkc-body')!;
     const tg = host.querySelector('.pkc-render-toggle');
     // ⚠ 添付のボタンは本文に無いので、同じ形の要素を器に置いて**継承だけ**を見る
     const f = document.createElement('a');
@@ -294,7 +294,7 @@ test('🔴 配った HTML の本文が、アプリと同じ見た目で出る', 
   const paperProbe = (): Promise<{ text: string; link: string; scheme: string }> =>
     viewer.evaluate(() => ({
       text: getComputedStyle(document.body).color,
-      link: getComputedStyle(document.querySelector('#body a[href^="https"]')!).color,
+      link: getComputedStyle(document.querySelector('#pkc-body a[href^="https"]')!).color,
       scheme: getComputedStyle(document.documentElement).colorScheme,
     }));
   const lumOf = (c: string): number => {

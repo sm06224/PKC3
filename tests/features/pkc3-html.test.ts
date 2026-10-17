@@ -428,7 +428,7 @@ describe('可搬 HTML', () => {
   it('閲覧 UI が入っている(データだけの HTML を出さない)', async () => {
     const out = await writePortableHtml(source({ entries: [{ lid: 'n1', body: 'x' }] }), NOW);
     const html = await out.blob.text();
-    expect(html).toContain('id="list"');
+    expect(html).toContain('id="pkc-list"');
     expect(html).toContain('createObjectURL'); // 添付を見せる経路
   });
 });
@@ -745,11 +745,11 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     await run(
       (await writePortableHtml(source({ entries: [{ lid: 'a1', title: 'dot.png', body }], assets: [png] }), NOW)).blob,
     );
-    const imgs = document.querySelectorAll('#body img');
+    const imgs = document.querySelectorAll('#pkc-body img');
     expect(imgs).toHaveLength(1);
     expect(imgs[0]!.getAttribute('src')).toMatch(/^blob:/);
     // frontmatter は本文として垂れ流さない(メタであって読み物ではない)
-    expect(document.getElementById('body')!.textContent).not.toContain('attachment.asset_key');
+    expect(document.getElementById('pkc-body')!.textContent).not.toContain('attachment.asset_key');
   });
 
   it('🔴 ノート間リンクは、このファイルの中のノートを開く / 入っていないノートへのリンクは字だけにする', async () => {
@@ -767,20 +767,20 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    expect(document.getElementById('title')!.textContent, '前提:先頭のノートが開いていない').toBe('一つ目');
-    const go = document.querySelector<HTMLAnchorElement>('#body a[data-pkc-entry-ref="entry:n2"]');
+    expect(document.getElementById('pkc-title')!.textContent, '前提:先頭のノートが開いていない').toBe('一つ目');
+    const go = document.querySelector<HTMLAnchorElement>('#pkc-body a[data-pkc-entry-ref="entry:n2"]');
     expect(go, '前提:ノート間リンクが描かれていない').not.toBeNull();
     expect(go!.getAttribute('href'), 'entry: のまま残った(押しても何も起きない)').not.toMatch(/^entry:/);
     go!.click();
-    expect(document.getElementById('title')!.textContent, '押しても開かない').toBe('二つ目');
-    expect(document.getElementById('body')!.textContent).toContain('二つ目の本文');
+    expect(document.getElementById('pkc-title')!.textContent, '押しても開かない').toBe('二つ目');
+    expect(document.getElementById('pkc-body')!.textContent).toContain('二つ目の本文');
     // 一覧の印も移る(押したノートが「いま見ている」になる)
-    const current = document.querySelector('#list [aria-current="true"]');
+    const current = document.querySelector('#pkc-list [aria-current="true"]');
     expect(current?.textContent).toBe('二つ目');
     // 入っていないノート ── 押せる顔で残さない
-    document.querySelector<HTMLButtonElement>('#list button')!.click();
-    expect(document.querySelector('#body a[data-pkc-entry-ref="entry:zz"]'), '入っていないノートへのリンクが押せる顔で残った').toBeNull();
-    const outside = document.querySelector('#body [data-pkc-outside-note]');
+    document.querySelector<HTMLButtonElement>('#pkc-list button')!.click();
+    expect(document.querySelector('#pkc-body a[data-pkc-entry-ref="entry:zz"]'), '入っていないノートへのリンクが押せる顔で残った').toBeNull();
+    const outside = document.querySelector('#pkc-body [data-pkc-outside-note]');
     expect(outside?.textContent).toBe('外');
   });
 
@@ -799,12 +799,12 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       'このファイルに入っていないノートへのリンク 1 件は、押せない字だけになります',
     );
     await run(out.blob);
-    const card = document.querySelector<HTMLElement>('#body [data-pkc-card-target="entry:n2"]');
+    const card = document.querySelector<HTMLElement>('#pkc-body [data-pkc-card-target="entry:n2"]');
     expect(card, '前提:札が描かれていない').not.toBeNull();
     card!.click();
-    expect(document.getElementById('title')!.textContent, '札を押しても開かない').toBe('二つ目');
-    document.querySelector<HTMLButtonElement>('#list button')!.click();
-    const outside = document.querySelector('#body [data-pkc-card-target="entry:zz"]');
+    expect(document.getElementById('pkc-title')!.textContent, '札を押しても開かない').toBe('二つ目');
+    document.querySelector<HTMLButtonElement>('#pkc-list button')!.click();
+    const outside = document.querySelector('#pkc-body [data-pkc-card-target="entry:zz"]');
     expect(outside?.hasAttribute('data-pkc-outside-note'), '入っていないノートの札が押せる顔で残った').toBe(true);
     expect(outside?.hasAttribute('role')).toBe(false);
   });
@@ -827,8 +827,8 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     const main = document.querySelector('main')!;
     main.scrollTop = 400;
     expect(main.scrollTop, '前提:happy-dom が scrollTop を保持しない').toBe(400);
-    document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
-    expect(document.getElementById('title')!.textContent, '前提:移れていない').toBe('二つ目');
+    document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[1]!.click();
+    expect(document.getElementById('pkc-title')!.textContent, '前提:移れていない').toBe('二つ目');
     expect(main.scrollTop).toBe(0);
   });
 
@@ -857,18 +857,18 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     ) {
       calls.push(this.id);
     };
-    const links = document.querySelectorAll<HTMLAnchorElement>('#body a[data-pkc-entry-ref]');
+    const links = document.querySelectorAll<HTMLAnchorElement>('#pkc-body a[data-pkc-entry-ref]');
     expect(links, '前提:リンクが描かれていない').toHaveLength(2);
     links[0]!.click();
-    expect(document.getElementById('title')!.textContent).toBe('二つ目');
-    const h = [...document.querySelectorAll('#body h2')].find((x) => x.textContent === '節だ')!;
+    expect(document.getElementById('pkc-title')!.textContent).toBe('二つ目');
+    const h = [...document.querySelectorAll('#pkc-body h2')].find((x) => x.textContent === '節だ')!;
     expect(h.id, '前提:見出しに id が無い').not.toBe('');
     expect(calls).toEqual([h.id]);
     // 見つからない見出し ── 移るだけで、飛ばない
-    document.querySelector<HTMLButtonElement>('#list button')!.click();
+    document.querySelector<HTMLButtonElement>('#pkc-list button')!.click();
     calls.length = 0;
-    document.querySelectorAll<HTMLAnchorElement>('#body a[data-pkc-entry-ref]')[1]!.click();
-    expect(document.getElementById('title')!.textContent).toBe('二つ目');
+    document.querySelectorAll<HTMLAnchorElement>('#pkc-body a[data-pkc-entry-ref]')[1]!.click();
+    expect(document.getElementById('pkc-title')!.textContent).toBe('二つ目');
     expect(calls).toEqual([]);
   });
 
@@ -882,7 +882,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const miss = document.querySelector<HTMLElement>('#body [data-pkc-asset-missing]');
+    const miss = document.querySelector<HTMLElement>('#pkc-body [data-pkc-asset-missing]');
     expect(miss, '前提:欠けた添付の印が出ていない').not.toBeNull();
     expect(miss!.textContent).toBe('添付ファイルが、このファイルに入っていません');
     expect(miss!.title).toBe('asset:ast-gone');
@@ -901,10 +901,63 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    expect(document.querySelectorAll('#body img')).toHaveLength(0);
-    const a = document.querySelector('#body a') as HTMLAnchorElement;
+    expect(document.querySelectorAll('#pkc-body img')).toHaveLength(0);
+    const a = document.querySelector('#pkc-body a') as HTMLAnchorElement;
     expect(a.getAttribute('download')).toBe('memo.bin');
     expect(a.getAttribute('href')).toMatch(/^blob:/);
+  });
+
+  it('🔴 自分宛の添付リンク(pkc://自分/asset/…)は、入っていれば保存でき、入っていなければ字だけ (#1087 E7)', async () => {
+    const body = '[資料](pkc://c1/asset/ast-b) と [無い物](pkc://c1/asset/ast-zz)\n';
+    await run(
+      (
+        await writePortableHtml(
+          source({
+            entries: [{ lid: 'a1', title: 'メモ', body }],
+            assets: [{ key: 'ast-b', mime: 'application/octet-stream', bytes: enc.encode('BIN') }],
+          }),
+          NOW,
+          (t, o) => Promise.resolve(renderMarkdown(t, o)),
+        )
+      ).blob,
+    );
+    const a = document.querySelector('#pkc-body a[download]') as HTMLAnchorElement;
+    expect(a, '入っている添付のリンクが保存できる形になっていない').not.toBeNull();
+    expect(a.getAttribute('href')).toMatch(/^blob:/);
+    expect(a.textContent).toBe('資料');
+    expect(document.querySelector('#pkc-body [data-pkc-asset-ref]'), '押せる顔で動かない物が残った').toBeNull();
+    expect(document.getElementById('pkc-body')!.textContent).toContain('無い物');
+    expect(document.querySelectorAll('#pkc-body a')).toHaveLength(1);
+  });
+
+  it('🔴 見出しが Title / List でも、閲覧側の枠の id とぶつからない (#1087 E8)', async () => {
+    await run(
+      (
+        await writePortableHtml(
+          source({ entries: [{ lid: 'a1', title: 'メモ', body: '# Title\n\n## List\n\n## Body\n\n## Toc\n\n本文\n' }] }),
+          NOW,
+          (t, o) => Promise.resolve(renderMarkdown(t, o)),
+        )
+      ).blob,
+    );
+    const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);
+    expect(new Set(ids).size, '同じ id が 2 つ以上ある').toBe(ids.length);
+    expect(document.getElementById('pkc-title')!.textContent).toBe('メモ');
+    expect(document.querySelector('#pkc-body h1')!.textContent).toBe('Title');
+  });
+
+  it('🔴 別のノートの内容の埋め込みは、説明の字だけになることを言う (#1087 E6)', async () => {
+    const r = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'a1', title: '親', body: '![説明](entry:a2#h/x)\n\n![もう一つ](entry:a2#h/y)\n' },
+          { lid: 'a2', title: '子', body: '## x\n\n中\n' },
+        ],
+      }),
+      NOW,
+      (t, o) => Promise.resolve(renderMarkdown(t, o)),
+    );
+    expect(r.warnings).toContain('別のノートの内容の埋め込み 2 件は、開いた先では説明の字だけで出ます');
   });
 
   /**
@@ -928,14 +981,14 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const med = document.querySelectorAll('#body [data-pkc-field="body-media"]');
+    const med = document.querySelectorAll('#pkc-body [data-pkc-field="body-media"]');
     expect(med, '配った HTML で再生機が出ていない').toHaveLength(1);
     expect(med[0]!.tagName, '音なのに音の器ではない').toBe('AUDIO');
     expect(med[0]!.getAttribute('src'), '中身を差していない').toMatch(/^blob:/);
     // ⚠ **飾りの印**(本文 CSS は class で当たる ── 器の印では焼かれない)
     expect(med[0]!.className, '飾りの印が付いていない').toBe('pkc-body-media');
     // 🔴 **保存の道を消していない**(器で置き換えない)
-    const a = document.querySelector('#body a') as HTMLAnchorElement;
+    const a = document.querySelector('#pkc-body a') as HTMLAnchorElement;
     expect(a.getAttribute('download'), '保存の導線が消えた').toBe('rec.webm');
     // ⚠ **URL は 1 本**(PDF と同じ規律 ── 1 つの添付に 2 本作らない)
     expect(a.getAttribute('href'), '再生機と別の URL を作っている').toBe(
@@ -952,7 +1005,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const link = document.querySelector('#body a[data-pkc-asset-key]') as HTMLAnchorElement;
+    const link = document.querySelector('#pkc-body a[data-pkc-asset-key]') as HTMLAnchorElement;
     expect(link, 'リンクが消えた').not.toBeNull();
     const med = link.nextElementSibling;
     expect(med?.getAttribute('data-pkc-field'), 'リンクの隣に再生機が無い').toBe('body-media');
@@ -972,10 +1025,10 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       ).blob,
     );
     expect(
-      document.querySelectorAll('#body [data-pkc-field="body-media"]'),
+      document.querySelectorAll('#pkc-body [data-pkc-field="body-media"]'),
       '音でも動画でもないものに再生機を置いた',
     ).toHaveLength(0);
-    expect(document.querySelector('#body a[download]'), '保存の導線まで消えた').not.toBeNull();
+    expect(document.querySelector('#pkc-body a[download]'), '保存の導線まで消えた').not.toBeNull();
   });
 
   it('本文中の `![](asset:key)` も画像になる(markdown 経由の参照)', async () => {
@@ -987,16 +1040,16 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    expect(document.querySelectorAll('#body img')).toHaveLength(1);
-    expect(document.getElementById('body')!.textContent).toContain('以上');
+    expect(document.querySelectorAll('#pkc-body img')).toHaveLength(1);
+    expect(document.getElementById('pkc-body')!.textContent).toContain('以上');
   });
 
   it('🔴 中身の無い参照は黙って消さず、「入っていない」と言う(id は title へ。#1087 で字を改めた)', async () => {
     await run(
       (await writePortableHtml(source({ entries: [{ lid: 'n1', body: 'x![](asset:ast-none)y' }] }), NOW)).blob,
     );
-    expect(document.getElementById('body')!.textContent).toContain('添付ファイルが、このファイルに入っていません');
-    expect(document.getElementById('body')!.textContent).not.toContain('asset:');
+    expect(document.getElementById('pkc-body')!.textContent).toContain('添付ファイルが、このファイルに入っていません');
+    expect(document.getElementById('pkc-body')!.textContent).not.toContain('asset:');
   });
 
   it('同じ添付を本文と frontmatter の両方が指しても 2 回描かない', async () => {
@@ -1004,7 +1057,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     await run(
       (await writePortableHtml(source({ entries: [{ lid: 'a1', body }], assets: [png] }), NOW)).blob,
     );
-    expect(document.querySelectorAll('#body img')).toHaveLength(1);
+    expect(document.querySelectorAll('#pkc-body img')).toHaveLength(1);
   });
 
   /**
@@ -1031,7 +1084,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const box = document.getElementById('body')!;
+    const box = document.getElementById('pkc-body')!;
     expect(box.querySelector('h2'), '見出しが出ていない').not.toBeNull();
     expect(box.querySelectorAll('li'), '箇条書きが出ていない').toHaveLength(2);
     expect(box.querySelectorAll('table td'), '表が出ていない').toHaveLength(2);
@@ -1053,7 +1106,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const box = document.getElementById('body')!;
+    const box = document.getElementById('pkc-body')!;
     expect(box.textContent, '図の原文が読めない').toContain('graph TD');
     expect(box.querySelector('[data-pkc-mermaid-src] pre'), '図の器が空のまま').not.toBeNull();
   });
@@ -1074,7 +1127,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const box = document.getElementById('body')!;
+    const box = document.getElementById('pkc-body')!;
     /**
      * 🔴 **打った字(区切りごと)が出る**(着地前レビュー 2026-09-06・欠陥 2)。
      * ⚠ 1 稿目は図と同じ `<pre>` に入れており、`$` が付かなかった ──
@@ -1108,12 +1161,12 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         )
       ).blob,
     );
-    const btns = document.querySelectorAll<HTMLButtonElement>('#list button');
+    const btns = document.querySelectorAll<HTMLButtonElement>('#pkc-list button');
     expect(btns).toHaveLength(2);
-    expect(document.getElementById('body')!.textContent!.trim()).toBe('AAA');
+    expect(document.getElementById('pkc-body')!.textContent!.trim()).toBe('AAA');
     btns[1]!.click();
-    expect(document.getElementById('title')!.textContent).toBe('二つ目');
-    expect(document.getElementById('body')!.textContent!.trim()).toBe('BBB');
+    expect(document.getElementById('pkc-title')!.textContent).toBe('二つ目');
+    expect(document.getElementById('pkc-body')!.textContent!.trim()).toBe('BBB');
     expect(btns[1]!.getAttribute('aria-current')).toBe('true');
     expect(btns[0]!.getAttribute('aria-current')).toBe('false');
   });
@@ -1124,7 +1177,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
     await run(
       (await writePortableHtml(source({ entries: [{ lid: 'a1', body }], assets: [png] }), NOW)).blob,
     );
-    const text = document.getElementById('body')!.textContent!;
+    const text = document.getElementById('pkc-body')!.textContent!;
     expect(text).toContain('読める本文');
     expect(text).not.toContain('attachment.asset_key');
   });
@@ -1144,7 +1197,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       ).blob,
     );
     // 題名を使うと、1 ノートに 2 添付あるとき同名・拡張子なしで落ちてくる
-    expect(document.querySelector<HTMLAnchorElement>('#body a')!.getAttribute('download')).toBe(
+    expect(document.querySelector<HTMLAnchorElement>('#pkc-body a')!.getAttribute('download')).toBe(
       '見積A.pdf',
     );
   });
@@ -1179,10 +1232,10 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       expect(create).toHaveBeenCalledTimes(1);
       expect(revoke).not.toHaveBeenCalled();
 
-      document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
+      document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[1]!.click();
       expect(create).toHaveBeenCalledTimes(2);
       expect(revoke).toHaveBeenCalledTimes(1); // 離れた 1 件目は捨てる
-      expect(document.querySelectorAll('#body img')).toHaveLength(1);
+      expect(document.querySelectorAll('#pkc-body img')).toHaveLength(1);
     } finally {
       create.mockRestore();
       revoke.mockRestore();
@@ -1220,7 +1273,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
         ).blob,
       );
       // 前提: PDF が object で出ている(空振り防止 ── 出ていなければ 1 本なのは当然)
-      const obj = document.querySelector('#body object[type="application/pdf"]');
+      const obj = document.querySelector('#pkc-body object[type="application/pdf"]');
       expect(obj, '前提: PDF が object で出ていない').not.toBeNull();
       expect(obj!.querySelector('a[download]'), '前提: fallback の導線が無い').not.toBeNull();
       expect(create.mock.calls.length, 'PDF 1 件で ObjectURL を 2 本作っている').toBe(1);
@@ -1235,7 +1288,7 @@ describe('可搬 HTML — 閲覧側を実行する', () => {
       (await writePortableHtml(source({ entries: [{ lid: 'n1', body: 'x' }] }), NOW)).blob,
       (json) => json.slice(0, Math.floor(json.length / 2)),
     );
-    const fail = document.getElementById('fail');
+    const fail = document.getElementById('pkc-fail');
     expect(fail?.textContent).toContain('このファイルを表示できませんでした');
     expect(fail?.textContent).toContain('ダウンロードが途中で終わっている');
   });
@@ -1288,15 +1341,15 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
     expect(ds).toHaveLength(2);
     // 既定は開いている(畳めることが要件で、畳んだ状態が既定ではない)
     expect(Array.from(ds).every((d) => (d as HTMLDetailsElement).open)).toBe(true);
-    expect(document.querySelector('#dnotes summary')?.textContent).toBe('ノート');
-    expect(document.querySelector('#dtoc summary')?.textContent).toBe('この文書の目次');
+    expect(document.querySelector('#pkc-dnotes summary')?.textContent).toBe('ノート');
+    expect(document.querySelector('#pkc-dtoc summary')?.textContent).toBe('この文書の目次');
     // ノート一覧は畳める器の中に入った(以前は nav 直下)
-    expect(document.querySelector('#dnotes #list')).not.toBeNull();
+    expect(document.querySelector('#pkc-dnotes #pkc-list')).not.toBeNull();
   });
 
   it('🔴 目次は h1〜h3 を深さつきで並べる(h4 は入れない)', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
-    const items = Array.from(document.querySelectorAll('#toc li')).map((li) => [
+    const items = Array.from(document.querySelectorAll('#pkc-toc li')).map((li) => [
       li.getAttribute('data-l'),
       li.textContent,
     ]);
@@ -1306,63 +1359,63 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       ['3', '器'],
     ]);
     // ⚠ h4 を入れない理由は「飛べないから」── 描画側が id を振るのは h1〜h3
-    expect(document.querySelector('#body h4')?.id ?? '').toBe('');
-    expect(document.getElementById('tocempty')!.hidden).toBe(true);
+    expect(document.querySelector('#pkc-body h4')?.id ?? '').toBe('');
+    expect(document.getElementById('pkc-tocempty')!.hidden).toBe(true);
   });
 
   it('目次の行を押すと、その見出しへ移る', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
-    const h = document.querySelector<HTMLElement>('#body h2')!;
+    const h = document.querySelector<HTMLElement>('#pkc-body h2')!;
     const spy = vi.fn();
     (h as unknown as { scrollIntoView: () => void }).scrollIntoView = spy;
-    document.querySelectorAll<HTMLButtonElement>('#toc li button')[1]!.click();
+    document.querySelectorAll<HTMLButtonElement>('#pkc-toc li button')[1]!.click();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it('見出しが無いノートは「見出しがありません」と言う(空の器を残さない)', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
-    document.querySelectorAll<HTMLButtonElement>('#list button')[2]!.click();
-    expect(document.querySelectorAll('#toc li')).toHaveLength(0);
-    expect(document.getElementById('tocempty')!.hidden).toBe(false);
+    document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[2]!.click();
+    expect(document.querySelectorAll('#pkc-toc li')).toHaveLength(0);
+    expect(document.getElementById('pkc-tocempty')!.hidden).toBe(false);
   });
 
   it('🔴 紙の目次は「実在する id」を指す(飛べないリンクを作らない)', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
-    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#ptoc a'));
+    const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#pkc-ptoc a'));
     expect(links).toHaveLength(3);
     for (const a of links) {
       const id = a.getAttribute('href')!.slice(1);
       expect(id, '空の href').not.toBe('');
-      expect(document.querySelector(`#body [id="${id}"]`), `${id} が本文に無い`).not.toBeNull();
+      expect(document.querySelector(`#pkc-body [id="${id}"]`), `${id} が本文に無い`).not.toBeNull();
     }
     // 画面の目次と紙の目次は**同じ見出し列**から作る(2 か所で別に拾わない)
     expect(links.map((a) => a.textContent)).toEqual(
-      Array.from(document.querySelectorAll('#toc li button')).map((b) => b.textContent),
+      Array.from(document.querySelectorAll('#pkc-toc li button')).map((b) => b.textContent),
     );
   });
 
   describe('全体を印刷', () => {
     it('全件を 1 つの document に組む(目次の節 + ノートごとの節)', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
-      expect(document.getElementById('printall')!.textContent).toBe('全体を印刷(3 件)');
-      document.getElementById('printall')!.click();
-      const secs = document.querySelectorAll('#all section');
+      expect(document.getElementById('pkc-printall')!.textContent).toBe('全体を印刷(3 件)');
+      document.getElementById('pkc-printall')!.click();
+      const secs = document.querySelectorAll('#pkc-all section');
       expect(secs).toHaveLength(4); // 目次 + 3 件
       expect(document.body.getAttribute('data-print')).toBe('all');
       // 本文の体裁は class で当てる(id を 2 個作らない)
-      expect(document.querySelectorAll('#all .b')).toHaveLength(3);
-      expect(document.querySelectorAll('#all [id="body"]'), 'id が重複している').toHaveLength(0);
-      expect(document.querySelector('#all section:nth-child(3) h2')?.textContent).toBe('同名');
+      expect(document.querySelectorAll('#pkc-all .b')).toHaveLength(3);
+      expect(document.querySelectorAll('#pkc-all [id="pkc-body"]'), 'id が重複している').toHaveLength(0);
+      expect(document.querySelector('#pkc-all section:nth-child(3) h2')?.textContent).toBe('同名');
     });
 
     it('🔴 別ノートの同名見出しが同じ id にならない(目次が全部 1 件目へ飛ぶのを防ぐ)', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
-      document.getElementById('printall')!.click();
-      const ids = Array.from(document.querySelectorAll('#all [id]')).map((el) => el.id);
+      document.getElementById('pkc-printall')!.click();
+      const ids = Array.from(document.querySelectorAll('#pkc-all [id]')).map((el) => el.id);
       expect(ids.length).toBeGreaterThan(4);
       expect(new Set(ids).size, `id が重複: ${ids.join()}`).toBe(ids.length);
       // ⚠ 「全体」という見出しは 2 件のノートに在る ── 書出し側の slug は同じになる
-      const zentai = Array.from(document.querySelectorAll('#all h1')).filter(
+      const zentai = Array.from(document.querySelectorAll('#pkc-all h1')).filter(
         (h) => h.textContent === '全体',
       );
       expect(zentai).toHaveLength(2);
@@ -1371,9 +1424,9 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
 
     it('🔴 ノート名が 1 段目、その見出しは 1 段下げる(同じ段に並べない)', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
-      document.getElementById('printall')!.click();
+      document.getElementById('pkc-printall')!.click();
       const rows = Array.from(
-        document.querySelectorAll('#all section:first-child li'),
+        document.querySelectorAll('#pkc-all section:first-child li'),
       ).map((li) => [li.getAttribute('data-l'), li.className, li.textContent]);
       // ノート名(class n・1 段目)→ その h1 は 2 段目、h2 は 3 段目、h3 は 4 段目
       expect(rows).toEqual([
@@ -1385,15 +1438,15 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
         ['2', '', '全体'],
         ['1', 'n', '見出し無し'],
       ]);
-      // ⚠ 体裁は #ptoc だけでなく **ol.x にも当てる**(実機で全体印刷の目次が
+      // ⚠ 体裁は #pkc-ptoc だけでなく **ol.x にも当てる**(実機で全体印刷の目次が
       //    既定の連番つき青リンクのまま出た)
-      expect(document.querySelector('#all section:first-child ol')?.className).toBe('x');
+      expect(document.querySelector('#pkc-all section:first-child ol')?.className).toBe('x');
     });
 
     it('🔴 目次のリンクは、その節の実在 id を指す', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
-      document.getElementById('printall')!.click();
-      const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#all section:first-child a'));
+      document.getElementById('pkc-printall')!.click();
+      const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('#pkc-all section:first-child a'));
       // ノート 3 件 + 見出し 4 件(1 件目に h1/h2/h3、2 件目に h1、3 件目は無し)
       expect(links.length).toBe(7);
       // ⚠ ノートの行は必ず全件ある(見出しの数に埋もれていない)
@@ -1402,7 +1455,7 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
       ).toBe(3);
       for (const a of links) {
         const id = a.getAttribute('href')!.slice(1);
-        expect(document.querySelector(`#all [id="${id}"]`), `${id} が無い`).not.toBeNull();
+        expect(document.querySelector(`#pkc-all [id="${id}"]`), `${id} が無い`).not.toBeNull();
       }
     });
 
@@ -1424,16 +1477,16 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
           ).blob,
         );
         revoke.mockClear();
-        document.getElementById('printall')!.click();
-        expect(document.querySelectorAll('#all img').length).toBe(2);
+        document.getElementById('pkc-printall')!.click();
+        expect(document.querySelectorAll('#pkc-all img').length).toBe(2);
         expect(revoke, '組む前に画面のぶんを捨ててはいけない').not.toHaveBeenCalled();
 
         window.dispatchEvent(new Event('afterprint'));
-        expect(document.getElementById('all')!.childNodes.length).toBe(0);
+        expect(document.getElementById('pkc-all')!.childNodes.length).toBe(0);
         expect(document.body.hasAttribute('data-print')).toBe(false);
         expect(revoke.mock.calls.length, '紙用の object URL を捨てていない').toBe(2);
         // ⚠ 画面のぶんは**生きている**(寿命が混ざっていない)
-        expect(document.querySelector('#body img')?.getAttribute('src')).toMatch(/^blob:/);
+        expect(document.querySelector('#pkc-body img')?.getAttribute('src')).toMatch(/^blob:/);
       } finally {
         revoke.mockRestore();
       }
@@ -1441,18 +1494,18 @@ describe('可搬 HTML — 目次と印刷(F-1)', () => {
 
     it('読みに戻った時点でも捨てる(afterprint が来ない環境でも残さない)', async () => {
       await open((await writePortableHtml(DOC, NOW)).blob);
-      document.getElementById('printall')!.click();
-      expect(document.querySelectorAll('#all section').length).toBe(4);
-      document.querySelectorAll<HTMLButtonElement>('#list button')[1]!.click();
-      expect(document.getElementById('all')!.childNodes.length).toBe(0);
+      document.getElementById('pkc-printall')!.click();
+      expect(document.querySelectorAll('#pkc-all section').length).toBe(4);
+      document.querySelectorAll<HTMLButtonElement>('#pkc-list button')[1]!.click();
+      expect(document.getElementById('pkc-all')!.childNodes.length).toBe(0);
       expect(document.body.hasAttribute('data-print')).toBe(false);
     });
   });
 
   it('🔴 紙では折りたたみを開き、印刷後に元へ戻す(畳んでいた状態を壊さない)', async () => {
     await open((await writePortableHtml(DOC, NOW)).blob);
-    const dtoc = document.getElementById('dtoc') as HTMLDetailsElement;
-    const dnotes = document.getElementById('dnotes') as HTMLDetailsElement;
+    const dtoc = document.getElementById('pkc-dtoc') as HTMLDetailsElement;
+    const dnotes = document.getElementById('pkc-dnotes') as HTMLDetailsElement;
     dtoc.open = false; // user が畳んだ状態
     window.dispatchEvent(new Event('beforeprint'));
     expect(dtoc.open, '紙で畳んだままになっている').toBe(true);
@@ -1515,24 +1568,24 @@ describe('可搬 HTML — 沈黙する操作子を残さない', () => {
     ).toBe(1);
 
     await openDoc(out.blob);
-    expect(document.querySelectorAll('#body [data-pkc-action]')).toHaveLength(0);
-    expect(document.getElementById('body')!.textContent).not.toContain('⧉');
+    expect(document.querySelectorAll('#pkc-body [data-pkc-action]')).toHaveLength(0);
+    expect(document.getElementById('pkc-body')!.textContent).not.toContain('⧉');
     // 🔴 **形を選ぶ ▾ も残らない**(片方だけ落とすと、閲覧側に無言の口が残る)
-    expect(document.getElementById('body')!.textContent, '▾ が紙にも画面にも残った').not.toContain(
+    expect(document.getElementById('pkc-body')!.textContent, '▾ が紙にも画面にも残った').not.toContain(
       '▾',
     );
     // 中身は消えていない(ボタンだけ取る ── 表とコードは残る)
-    expect(document.querySelectorAll('#body table')).toHaveLength(1);
-    expect(document.querySelectorAll('#body pre')).toHaveLength(1);
-    expect(document.getElementById('body')!.textContent).toContain('const x = 1;');
+    expect(document.querySelectorAll('#pkc-body table')).toHaveLength(1);
+    expect(document.querySelectorAll('#pkc-body pre')).toHaveLength(1);
+    expect(document.getElementById('pkc-body')!.textContent).toContain('const x = 1;');
   });
 
   it('🔴 全体印刷で組んだぶんにも残らない(紙に ⧉ を出さない)', async () => {
     await openDoc((await writePortableHtml(WITH_BLOCKS, NOW)).blob);
-    document.getElementById('printall')!.click();
-    expect(document.querySelectorAll('#all [data-pkc-action]')).toHaveLength(0);
-    expect(document.getElementById('all')!.textContent).not.toContain('⧉');
-    expect(document.querySelectorAll('#all table')).toHaveLength(1);
+    document.getElementById('pkc-printall')!.click();
+    expect(document.querySelectorAll('#pkc-all [data-pkc-action]')).toHaveLength(0);
+    expect(document.getElementById('pkc-all')!.textContent).not.toContain('⧉');
+    expect(document.querySelectorAll('#pkc-all table')).toHaveLength(1);
   });
 });
 
@@ -1676,7 +1729,7 @@ describe('可搬 HTML — 画面と同じ材料で描く', () => {
   });
 
   /**
-   * 🔴 **閲覧側が前のノートの書字方向を消す**(2026-08-06)。本文の器(`#body`)は
+   * 🔴 **閲覧側が前のノートの書字方向を消す**(2026-08-06)。本文の器(`#pkc-body`)は
    * 使い回しなので、`setAttribute` だけだと `align: right` / `writing: vertical` /
    * `dir="rtl"` のノートを見た後、宣言の無いノートが**前の文書の見え方で描かれる**。
    * 直す前は `removeAttribute` が `data-print` の 1 か所にしか無かった。
@@ -1862,7 +1915,7 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
      *
      * 直す前は `/^\.b[ .[>{,:][^{]*\{/gm` で数えていた。実測で**5 つの変異が全部緑**:
      * 2 字下げ(`@media print` の中は元からこの書き方)/ 同一行の 2 本目 / `.b~*` /
-     * **`#body{…}`**(id 詳細度で焼いた分に全勝)/ タブ区切り。とくに 1 番目は
+     * **`#pkc-body{…}`**(id 詳細度で焼いた分に全勝)/ タブ区切り。とくに 1 番目は
      * 「a8c4144 が `@media print` から削除したばかりの `color:inherit` を、
      * 勝つ位置に置き直す編集」そのものである。
      *
@@ -1916,13 +1969,13 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
 
   /**
    * 🔴 **本文の器は 2 か所ある**(CLAUDE.md「同じ値を複数の描画経路へ渡すものは
-   * 経路ごとに pin する」)── 1 件表示の `#body` と、「全体を印刷」が組む箱。
+   * 経路ごとに pin する」)── 1 件表示の `#pkc-body` と、「全体を印刷」が組む箱。
    * 片方だけに class を足すと、**紙だけ素の見た目**で出る(誰も見ていない経路)。
    */
   it('🔴 1 件表示の器に pkc-md-rendered が付いている', async () => {
     const html = await (await writePortableHtml(DOC, NOW)).blob.text();
     document.body.innerHTML = /<main>[\s\S]*?<\/main>/.exec(html)![0]!;
-    const box = document.getElementById('body')!;
+    const box = document.getElementById('pkc-body')!;
     expect([...box.classList].sort(), '器の class が足りない').toEqual(['b', 'pkc-md-rendered']);
     // 🔴 読み幅(2026-08-08 の統一)は **data-pkc-prose 起点**で焼かれてくる
     //    ── 印が落ちると、この面だけ本文が全幅に伸びる。
@@ -1948,8 +2001,8 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
     document.body.appendChild(data);
     new Function(viewer)();
     await new Promise((r) => setTimeout(r, 0));
-    document.getElementById('printall')!.click();
-    const boxes = [...document.querySelectorAll('#all > section > div')];
+    document.getElementById('pkc-printall')!.click();
+    const boxes = [...document.querySelectorAll('#pkc-all > section > div')];
     expect(boxes.length, '全体印刷の本文の箱が無い(この検査は空振り)').toBe(2);
     for (const box of boxes) {
       expect([...box.classList].sort(), '紙の本文の器の class が足りない').toEqual([

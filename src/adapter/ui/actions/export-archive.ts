@@ -28,7 +28,7 @@ import {
   type RenderMarkdownOptions,
 } from '@features/markdown/markdown-render';
 import { readFenceAssets } from '@features/asset/fence-asset-read';
-import { writePortableHtml } from '@features/export/pkc3-html';
+import { mathSourceNotice, writePortableHtml } from '@features/export/pkc3-html';
 import { buildOoxmlFile } from '@adapter/platform/export/ooxml-client';
 import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
 import type { DocxBlock } from '@features/export/docx';
@@ -772,6 +772,9 @@ async function collectOfficeBlocks(
   // ⚠ `<body>` で包む ── 包まないと happy-dom / 実ブラウザで木の形が揃わない
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
   const { blocks, images, figures, inlineSkipped } = htmlToDocxBlocks(doc);
+  // 🔑 数式は Word / PowerPoint では打った字のまま入る ── 閲覧用 HTML と同じ文面で言う(#1087)
+  const mathNotice = mathSourceNotice(doc.querySelectorAll('[data-pkc-math-src]').length);
+  if (mathNotice !== null) warnings.push(mathNotice);
   /**
    * 🔴 **添付の画像を入れる**(#187 段②)。
    * ⚠ **縦横比を保つ**ため、実寸を取ってから渡す(PKC2 は全画像を 480×360 px に
