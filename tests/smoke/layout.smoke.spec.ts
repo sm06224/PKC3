@@ -1199,10 +1199,16 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
     await page.locator('[data-pkc-region="filer-table"] [data-probe-kept="1"]').count(),
     '1 件足しただけで既存の行を作り直した',
   ).toBe(1);
-  expect(
-    Math.abs((await host.evaluate((el) => el.scrollTop)) - parked2),
-    '1 件足したら、見ていた位置が動いた',
-  ).toBeLessThan(30);
+  /**
+   * 🔴 旧い期待(1 件足しても位置が動かない)は、台帳 #1852 束 C2 で**意図して変わった**:
+   * 足した 1 件は開いて(選んで)いるノートで、行が画面の外(一覧の下)にあるので、見える所まで送る(依頼 277)。
+   * 観測点は①足した行が一覧の画面の中に見えている ②既存の行は作り直されていない(上の目印)。
+   * ⚠ 位置が「動かない」ことそのものを守りたかったのではなく、**全行の作り直し**を止めたかった(#1087)。
+   */
+  await expect(
+    page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '足した 1 件' }),
+    '足した行(開いているノート)が一覧の画面の中に見えていない',
+  ).toBeInViewport();
 
   // ⑤ 🔴 題名を変えた直後の「元に戻す」(#1657)と、検索欄の Esc(#1650)── 起動を増やさず同じ道中で
   const added = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]', { hasText: '足した 1 件' });
@@ -1229,6 +1235,82 @@ test('🔴 左の列のスクロール: 絞り込みを戻しても、タブを�
   await filter.press('Escape');
   await expect(filter, '検索欄で Esc を押しても打った字が消えない').toHaveValue('');
   await expect(rows, 'Esc で字を消したのに一覧が絞られたまま').toHaveCount(33);
+
+  /**
+   * ⑥ 🔴 **数十件の一覧の途中で 2 件に印を付けると、選択のバーが一覧の下端に貼り付いて見えている**
+   * (台帳 #1852 束 C2 / 依頼 82-1)。直す前は、バーは最後の行の下にあるので、途中で選ぶと画面の外だった。
+   * ⚠ 起動を増やさず、33 件ある この道中に足す。観測点は①バーの下端が一覧の画面の下端に接している
+   * ②**その位置は一番下まで送った位置ではない**(前提 ── 最後の行の下に居るだけなら貼り付いていなくても通る)
+   * ③ 2 件の間は上下ボタンが出ず、1 件に戻すと出る(依頼 82-2)。
+   * ⚠ 面の中を押すと計器が自分でスクロールするので、画面に見えている上寄りの行を選んで押す。
+   */
+  await host.evaluate((el) => (el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2)));
+  const pick = await host.evaluate((el) => {
+    const hb = el.getBoundingClientRect();
+    const all = [
+      ...el.querySelectorAll<HTMLElement>('[data-pkc-region="filer-table"] [data-pkc-entry]'),
+    ];
+    // 上から 1/3 以内に全体が見えている行(下のバーの下に隠れない行)
+    return all
+      .map((r, i) => ({ i, b: r.getBoundingClientRect() }))
+      .filter(({ b }) => b.top > hb.top + 4 && b.bottom < hb.top + hb.height / 3)
+      .map(({ i }) => i);
+  });
+  expect(pick.length, '上寄りに見えている行が 2 つ無い(観測の前提が崩れている)').toBeGreaterThanOrEqual(2);
+  await rows.nth(pick[0]!).click();
+  await rows.nth(pick[1]!).click({ modifiers: ['ControlOrMeta'] });
+  const bar = page.locator('[data-pkc-region="filer-move"]');
+  await expect(bar, '選んだのにバーが貼り付く印を持たない').toHaveAttribute('data-pkc-bulk', '');
+  await expect(page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]')).toHaveCount(2);
+  const stick = await page.evaluate(() => {
+    const h = document.querySelector<HTMLElement>('[data-pkc-region="browse-host"]')!;
+    const b = document.querySelector<HTMLElement>('[data-pkc-region="filer-move"]')!;
+    return {
+      gap: Math.round((h.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom) * 10) / 10,
+      barH: b.getBoundingClientRect().height,
+      toEnd: h.scrollHeight - h.clientHeight - h.scrollTop,
+    };
+  });
+  expect(stick.toEnd, '一番下まで送った位置にいる(貼り付いていなくても見える ── 観測の前提が崩れている)').toBeGreaterThan(
+    stick.barH + 20,
+  );
+  expect(Math.abs(stick.gap), `バーが一覧の下端に貼り付いていない(下端との差 ${stick.gap}px)`).toBeLessThanOrEqual(2);
+  await expect(bar, 'バーが画面の中に見えていない').toBeInViewport();
+  await expect(
+    page.locator('[data-pkc-field="order-nudge"]'),
+    '2 件選んでいるのに上下ボタンが出ている',
+  ).toHaveCount(0);
+  await rows.nth(pick[1]!).click({ modifiers: ['ControlOrMeta'] });
+  await expect(page.locator('[data-pkc-region="filer-table"] tbody tr[data-pkc-marked]')).toHaveCount(1);
+  await expect(
+    page.locator('[data-pkc-field="order-nudge"]'),
+    '1 件に戻したのに上下ボタンが出ない(対照群)',
+  ).toHaveCount(1);
+
+  /**
+   * ⑦ 🔴 **一覧で Home / End / PageDown / PageUp を押すと、見えている順で選ぶ行が動く**(依頼 337)。
+   * 観測点は印の付いた行の**並びの番号**(上から何番目か)── 印の付く行が変わったことで見る。
+   * PageDown は 1 画面ぶん(行の数ぶん ─ 1)なので、2 行目以降・最後の行の手前で、端では止まる。
+   */
+  const markedIndex = (): Promise<number> =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[data-pkc-region="filer-table"] tbody tr')].findIndex((r) =>
+        r.hasAttribute('data-pkc-marked'),
+      ),
+    );
+  await rows.nth(pick[0]!).click();
+  await page.keyboard.press('Home');
+  await expect.poll(markedIndex, 'Home で先頭の行を選べていない').toBe(0);
+  await page.keyboard.press('PageDown');
+  await expect.poll(markedIndex, 'PageDown で 1 画面ぶん進んでいない').toBeGreaterThanOrEqual(3);
+  const afterPage = await markedIndex();
+  expect(afterPage, 'PageDown が最後の行まで飛んでいる(1 画面ぶんではない)').toBeLessThan(32);
+  await page.keyboard.press('End');
+  await expect.poll(markedIndex, 'End で最後の行を選べていない').toBe(32);
+  await page.keyboard.press('PageDown');
+  await expect.poll(markedIndex, '最後の行で PageDown を押すと巻き戻る(端で止まらない)').toBe(32);
+  await page.keyboard.press('PageUp');
+  await expect.poll(markedIndex, 'PageUp で 1 画面ぶん戻っていない').toBeLessThanOrEqual(29);
 
   expect(errors).toEqual([]);
 });
@@ -2390,12 +2472,24 @@ test('🔴 フォルダに入れる → 読み込み直しても中に居る', a
   ).not.toHaveText('');
   await gotoApp(page);
   await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-browse="filer"]');
+  /**
+   * 🔴 **読み込み直しても、開いていたフォルダの中から始まる**(台帳 #1852 束 C2 / 依頼 277)。
+   * 直す前は読み込み直すとルートから始まり、ここで「ルートに入れたノートが居ない → 2 クリックで入る」を見ていた。
+   * 開いていたフォルダを覚えるようにしたので、観測点は「最初から中に居て、居場所が disk から読み戻っている」。
+   * ⚠ 旧い期待(ルートから始まる)は成り立たない ── ルートへ出て、入れたノートが居ないこと(対照群)と、
+   *   2 クリックで入り直せること(入り口の動線)は残す。
+   */
+  expect(await lidsOf(), '読み込み直したら、開いていたフォルダの中に居ない(居場所が失われた)').toEqual([
+    noteLid,
+    createdLid,
+  ]);
+  await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   // ルートには**入れたノートが居ない**
   expect(await lidsOf(), 'ルートに残っている').not.toContain(noteLid);
   // ⚠ 入るのは**2 クリック**(#240 段①)。`locator.dblclick()` は安定するまで待つ ──
   //    座標を先に採ると、採ってから押すまでの再描画で 2 回が別ノードに落ちる
   await page.locator(`[data-pkc-region="filer-table"] [data-pkc-entry="${folderLid}"]`).dblclick();
-  expect(await lidsOf(), '読み込み直したら居場所が失われた').toEqual([noteLid, createdLid]);
+  expect(await lidsOf(), '入り直したら居場所が失われた').toEqual([noteLid, createdLid]);
 
   expect(errors).toEqual([]);
 });

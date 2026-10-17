@@ -131,17 +131,14 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   /**
    * 🔴 **フォルダの中で絞り込むと、探している範囲を言い、全体から探す道がある**(台帳 #1852 束 C2 / 依頼 336・115-3)。
    * 「ノート」は題名に在る語で、フォルダ「はこ」は空 ── 中では 0 件、全体では 1 件(ルートのノート)。
-   * 観測点は①絞りの行が「「はこ」の中を探しています」と言う ②「すべてのフォルダから探す」が出る
+   * 観測点は①「すべてのフォルダから探す」が出る(「「はこ」の中を探しています」の行は 1 件以上当たったときの
+   * 絞りの行なので、1 件入っている下の 最近開いたノートの道中で見る)
    * ③0 件の字が「このフォルダの中には見つかりません」(従来の「絞り込みに一致するものがありません」ではない)
    * ④ボタンを押すと語はそのままルートから探し直す(場所がルートへ戻り、行が 1 件出る)。
    * ⚠ 新しく起動せず、いまフォルダの中に居るこの道中に足す。
    */
   const filterBox = page.locator('[data-pkc-field="entry-filter"]');
   await filterBox.fill('ノート');
-  const filterLine = page.locator('[data-pkc-field="filer-filter-line"]');
-  await expect(filterLine, '絞りの行が「○○の中を探しています」と言っていない').toContainText(
-    '「はこ」の中を探しています',
-  );
   await expect(
     page.locator('[data-pkc-field="filer-search-all"]'),
     '「すべてのフォルダから探す」が出ていない',
@@ -154,16 +151,8 @@ test('🔴 最初はフォルダの面で開き、2 クリックで中へ入る'
   await filterBox.fill('');
   await expect(page.locator('[data-pkc-field="filer-search-all"]'), '絞りを消したのにボタンが残る').toHaveCount(0);
 
-  /**
-   * 🔴 **開いていたフォルダを、読み込み直しても覚えている**(依頼 277)。
-   * 直す前は読み込み直すとルートから始まり、フォルダへ入り直す手が要った。
-   */
-  await page.reload();
-  await expect(
-    page.locator('[data-pkc-region="filer-breadcrumb"]'),
-    '読み込み直したら、開いていたフォルダを忘れてルートに戻っている',
-  ).toContainText('はこ');
-  await expect(rows, '読み込み直したら、フォルダの中の行が違う').toHaveCount(0);
+  // 🔴 開いていたフォルダを読み込み直しても覚えていること(依頼 277)は、起動を増やさないよう
+  //    既に読み込み直している smart-folder.smoke(スマートフォルダの中)と layout.smoke(ふつうのフォルダの中)で見る。
 
   // ④ パンくずのルートで戻る(⚠ 開いているノートは閉じない)
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
@@ -581,6 +570,14 @@ test('🔴 掴んでフォルダに落とすと入り、パンくずに落とす
   const followed = page.locator(`${noteRow}[data-pkc-selected]`);
   await expect(followed, '移った先のノートの行が一覧に出ていない').toHaveCount(1);
   await expect(followed, '移った先のノートの行が画面の中に見えていない').toBeInViewport();
+  // 🔴 フォルダの中で探すと、絞りの行が探している範囲を言う(依頼 336)。ルートでは言わない(対照群は上の全体から探す)
+  await page.locator('[data-pkc-field="entry-filter"]').fill('ノート');
+  await expect(
+    page.locator('[data-pkc-field="filer-filter-line"]'),
+    '絞りの行が「○○の中を探しています」と言っていない',
+  ).toContainText('「はこ」の中を探しています');
+  await expect(page.locator('[data-pkc-field="filer-filter-line"] [data-pkc-field="filer-search-all"]')).toBeVisible();
+  await page.locator('[data-pkc-field="entry-filter"]').fill('');
   await clickReal(page, '[data-pkc-region="filer-breadcrumb"] button');
   await expect(rows).toHaveCount(1);
 
